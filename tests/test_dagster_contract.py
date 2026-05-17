@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -60,7 +60,7 @@ def test_json_ready_converts_common_result_values() -> None:
     assert json_ready(
         Result(
             amount=Decimal("1.20"),
-            when=datetime(2026, 5, 17, 0, 0, tzinfo=timezone.utc),
+            when=datetime(2026, 5, 17, 0, 0, tzinfo=UTC),
             path=Path("x/y"),
         )
     ) == {

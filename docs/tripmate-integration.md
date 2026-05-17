@@ -7,7 +7,7 @@ TripMate는 feature DB를 별도로 만들지 않는다. 지도 feature, source 
 TripMate가 맡는 책임:
 
 - FastAPI endpoint와 앱 응답 조립
-- 사용자, 여행 일정, 권한, 알림 같은 TripMate 제품 DB
+- 사용자, 여행계획, POI, 권한, 알림 같은 TripMate 제품 DB
 - Dagster job/schedule과 운영 runbook
 - Admin UI와 검수 workflow
 
@@ -22,12 +22,14 @@ TripMate가 맡는 책임:
 
 TripMate 문서에는 TripMate 제품 DB, API, Admin, 운영 결정을 남기고, feature DB column/table 세부 정의는 이 라이브러리 문서를 canonical로 링크한다.
 
+TripMate의 feature 중심 문서는 [Feature model](feature-model.md)과 [TripMate feature docs migration](tripmate-feature-docs-migration.md)으로 이관한다. TripMate 쪽에는 사용자, 여행계획, POI 제품 문서와 이 라이브러리로 향하는 링크만 남긴다.
+
 ## 구현 순서
 
 1. TripMate ETL loader에서 provider public client를 직접 호출한다.
 2. provider typed model 또는 raw row를 `python-krtour-map` DTO로 정규화한다.
 3. feature/source/weather/price 저장은 `krtour_map.db` schema와 row 변환 함수를 사용한다.
-4. TripMate API는 feature DB에서 필요한 값을 읽어 사용자/여행 일정 응답에 조립한다.
+4. TripMate API는 feature DB에서 필요한 값을 읽어 사용자/여행계획/POI 응답에 조립한다.
 5. 의미 있는 provider 응답은 `save_fixture`로 저장하고 pytest replay를 추가한다.
 
 ## Weather 예시

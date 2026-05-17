@@ -29,6 +29,6 @@ finally:
 ## 책임 경계
 
 - `python-krtour-map`: `FeatureDbSettings`, `FeatureDbContext`, engine/session factory 생성, feature schema 초기화
-- TripMate: settings 생성, 운영 DB URL 관리, 실행 시점 결정
+- TripMate: settings 생성, 운영 DB URL 관리, 실행 시점 결정, 사용자/여행계획/POI 제품 테이블 관리
 
 TripMate 쪽 wrapper/adapter를 만들지 않는다. TripMate는 `database_url` 설정을 이 라이브러리에 넘기고, 이후 feature/source/weather 저장은 `krtour_map.db` table과 row helper를 사용한다.

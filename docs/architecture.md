@@ -19,7 +19,9 @@ python-*-api provider libraries
 
 TripMate 전용 provider adapter는 만들지 않습니다. provider public client와 typed model이 부족하면 해당 `python-*-api` 라이브러리에 endpoint/model/cursor/helper를 upstream합니다.
 
-`python-krtour-map`은 DTO만 제공하는 보조 계층이 아니라 feature/source/weather/price 저장소 schema의 소유자입니다. TripMate는 별도 feature DB를 만들지 않고 `krtour_map.db`의 schema와 함수를 사용해 앱 API와 화면 조립만 담당합니다.
+`python-krtour-map`은 DTO만 제공하는 보조 계층이 아니라 feature/source/weather/price 저장소 schema의 소유자입니다. TripMate는 별도 feature DB를 만들지 않고 `krtour_map.db`의 schema와 함수를 사용해 앱 API와 화면 조립만 담당합니다. 사용자, 여행계획, POI는 TripMate 제품 도메인에 남기고, 필요한 경우 `feature_id`로 이 라이브러리의 feature를 참조합니다.
+
+TripMate의 기존 feature 설계 문서는 [Feature model](feature-model.md)로 이관했습니다. TripMate 문서에는 제품 DB, API, Admin, 운영 runbook만 남기고 feature DTO/source/weather/price 저장 계약은 이 저장소를 canonical로 둡니다.
 
 ## 핵심 모델
 
@@ -72,7 +74,7 @@ TripMate 전용 provider adapter는 만들지 않습니다. provider public clie
 - pytest fixture replay
 - `python-krtour-map` DB 함수가 따라야 할 CRUD 의미 검증
 
-운영 저장소는 TripMate의 SQLAlchemy/PostGIS repository가 맡고, 이 라이브러리의 모델과 ID/정규화 함수를 사용합니다.
+운영 feature 저장소는 `python-krtour-map`의 DB schema를 기준으로 초기화하고, TripMate의 SQLAlchemy/PostGIS 코드는 사용자, 여행계획, POI 같은 제품 도메인과 API 조립을 맡습니다.
 
 ## 테스트 전략
 

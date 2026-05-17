@@ -12,6 +12,8 @@
 - download/log directory resolution helper
 - feature/source/weather/price DTO와 DB row 변환
 - provider typed model을 feature 계약으로 정규화하는 순수 함수
+- PostGIS blocking과 scoring 기준, dedup review payload, data integrity violation payload
+- provider sync cursor와 retry 가능한 checkpoint row helper
 
 `python-krtour-map`은 Dagster package를 필수 dependency로 두지 않는다. 이 라이브러리의 ETL 계약은 Dagster 없이도 테스트 가능해야 하며, Dagster-specific decorator와 `Definitions`는 TripMate에 둔다.
 
@@ -22,6 +24,7 @@
 - DB session/resource 주입
 - `etl_run_logs`, 관리자 알림, Telegram outbox 같은 운영 실행 로그
 - retry 소진 판단과 실패 알림
+- Odroid 단일 worker 환경의 concurrency=1 실행 설정
 - TripMate 제품 DB와 API serving 조립
 
 ## 구현 규칙
@@ -30,3 +33,4 @@
 - TripMate의 `app.dagster_etl`은 `krtour_map.dagster` 계약을 import해서 job/schedule을 생성하고 실행 로그를 남기는 얇은 shell이어야 한다.
 - provider별 wrapper/adapter/gateway를 만들지 않는다. 안정된 provider public client와 typed model을 직접 사용한다.
 - Dagster 실행 편의를 위해 TripMate에 임시 정규화 함수를 만들지 않는다. 필요한 변환 함수는 `python-krtour-map`에 둔다.
+- 중복 판단과 검수 queue 저장은 이 라이브러리의 `dedup_review_queue` 계약을 사용한다.

@@ -9,11 +9,15 @@ from kraddr.base import (
     PlaceCategory,
     PlaceCategoryCode,
     PlaceCoordinate,
-    category_label as kraddr_category_label,
-    category_path as kraddr_category_path,
     get_category,
     is_known_category_code,
     mapbox_maki_icon_or_none,
+)
+from kraddr.base import (
+    category_label as kraddr_category_label,
+)
+from kraddr.base import (
+    category_path as kraddr_category_path,
 )
 from pydantic import AnyUrl, BaseModel, ConfigDict, Field, field_validator
 

@@ -12,6 +12,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     MetaData,
     Numeric,
     Table,
@@ -20,12 +21,32 @@ from sqlalchemy import (
     create_engine,
 )
 from sqlalchemy.engine import Engine
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.types import UserDefinedType
 
 from krtour_map.ids import make_payload_hash
-from krtour_map.models import WeatherValue
+from krtour_map.models import PricePoint, PriceValue, ProviderSyncState, WeatherValue
 
 metadata = MetaData()
+
+
+class PostgisGeometry(UserDefinedType[str]):
+    """Minimal PostGIS geometry type without adding GeoAlchemy as a hard dependency."""
+
+    cache_ok = True
+
+    def __init__(self, geometry_type: str = "GEOMETRY", srid: int = 4326) -> None:
+        self.geometry_type = geometry_type
+        self.srid = srid
+
+    def get_col_spec(self, **_: Any) -> str:
+        return f"GEOMETRY({self.geometry_type}, {self.srid})"
+
+
+@compiles(PostgisGeometry, "sqlite")
+def _compile_postgis_geometry_sqlite(type_: PostgisGeometry, compiler: Any, **kw: Any) -> str:
+    return "TEXT"
 
 
 @dataclass(frozen=True)
@@ -63,12 +84,54 @@ features = Table(
     Column("category", Text, nullable=False),
     Column("longitude", Numeric(12, 8)),
     Column("latitude", Numeric(12, 8)),
+    Column("geom", PostgisGeometry()),
     Column("address", JSON, nullable=False, default=dict),
+    Column("legal_dong_code", Text),
+    Column("road_name_code", Text),
+    Column("road_address_management_no", Text),
+    Column("admin_dong_code", Text),
+    Column("sido_code", Text),
+    Column("sigungu_code", Text),
+    Column("urls", JSON, nullable=False, default=dict),
+    Column("marker_icon", Text),
+    Column("marker_color", Text),
+    Column("parent_feature_id", Text, ForeignKey("features.feature_id", ondelete="SET NULL")),
+    Column("sibling_group_id", Text),
     Column("detail", JSON, nullable=False, default=dict),
+    Column("raw_refs", JSON, nullable=False, default=list),
     Column("status", Text, nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
+    Column("deleted_at", DateTime(timezone=True)),
+    CheckConstraint(
+        "kind IN ('place', 'event', 'notice', 'price', 'weather', 'route', 'area')",
+        name="ck_features_kind",
+    ),
+    CheckConstraint(
+        "status IN ('draft', 'active', 'inactive', 'hidden', 'broken', 'deleted')",
+        name="ck_features_status",
+    ),
+    CheckConstraint(
+        "(longitude IS NULL AND latitude IS NULL) OR "
+        "(longitude IS NOT NULL AND latitude IS NOT NULL)",
+        name="ck_features_coordinate_pair",
+    ),
+    CheckConstraint(
+        "longitude IS NULL OR (longitude >= 124 AND longitude <= 132)",
+        name="ck_features_korea_longitude",
+    ),
+    CheckConstraint(
+        "latitude IS NULL OR (latitude >= 33 AND latitude <= 39.5)",
+        name="ck_features_korea_latitude",
+    ),
 )
+
+Index("ix_features_kind_category", features.c.kind, features.c.category)
+Index("ix_features_status", features.c.status)
+Index("ix_features_legal_dong_code", features.c.legal_dong_code)
+Index("ix_features_parent_feature_id", features.c.parent_feature_id)
+Index("ix_features_sibling_group_id", features.c.sibling_group_id)
+Index("ix_features_lon_lat", features.c.longitude, features.c.latitude)
 
 source_records = Table(
     "source_records",
@@ -101,7 +164,12 @@ source_records = Table(
 source_links = Table(
     "source_links",
     metadata,
-    Column("feature_id", Text, ForeignKey("features.feature_id", ondelete="CASCADE"), primary_key=True),
+    Column(
+        "feature_id",
+        Text,
+        ForeignKey("features.feature_id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
     Column(
         "source_record_key",
         Text,
@@ -113,6 +181,14 @@ source_links = Table(
     Column("confidence", Numeric(5, 2), nullable=False),
     Column("is_primary_source", Boolean, nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
+    CheckConstraint("confidence >= 0 AND confidence <= 100", name="ck_source_links_confidence"),
+    CheckConstraint(
+        "source_role IN ("
+        "'base_address', 'base_coordinate', 'primary', 'enrichment', 'correction', "
+        "'duplicate_candidate', 'media', 'weather_context'"
+        ")",
+        name="ck_source_links_source_role",
+    ),
 )
 
 feature_weather_values = Table(
@@ -185,6 +261,180 @@ Index(
 )
 Index("ix_feature_weather_values_valid_at", feature_weather_values.c.valid_at)
 Index("ix_feature_weather_values_observed_at", feature_weather_values.c.observed_at)
+
+price_points = Table(
+    "price_points",
+    metadata,
+    Column(
+        "feature_id",
+        Text,
+        ForeignKey("features.feature_id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("price_category", Text, nullable=False),
+    Column("retention_days", Integer, nullable=False),
+    CheckConstraint("retention_days >= 1", name="ck_price_points_retention_days"),
+)
+
+Index("ix_price_points_category", price_points.c.price_category)
+
+price_values = Table(
+    "price_values",
+    metadata,
+    Column(
+        "feature_id",
+        Text,
+        ForeignKey("price_points.feature_id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("item_key", Text, primary_key=True),
+    Column("observed_at", DateTime(timezone=True), primary_key=True),
+    Column("value", Numeric(12, 2), nullable=False),
+    Column("currency", Text, nullable=False, default="KRW"),
+    Column("payload_hash", Text),
+    Column("payload", JSON, nullable=False, default=dict),
+    CheckConstraint("length(currency) = 3", name="ck_price_values_currency_length"),
+)
+
+Index("ix_price_values_observed_at", price_values.c.observed_at)
+Index("ix_price_values_feature_observed", price_values.c.feature_id, price_values.c.observed_at)
+
+provider_sync_state = Table(
+    "provider_sync_state",
+    metadata,
+    Column("provider", Text, primary_key=True),
+    Column("dataset_key", Text, primary_key=True),
+    Column("sync_scope", Text, primary_key=True, default="global"),
+    Column("status", Text, nullable=False, default="active"),
+    Column("cursor", JSON),
+    Column("last_success_at", DateTime(timezone=True)),
+    Column("last_attempt_at", DateTime(timezone=True)),
+    Column("next_run_after", DateTime(timezone=True)),
+    Column("last_error", Text),
+    Column("last_error_at", DateTime(timezone=True)),
+    Column("extra", JSON, nullable=False, default=dict),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
+Index(
+    "ix_provider_sync_state_next_run",
+    provider_sync_state.c.status,
+    provider_sync_state.c.next_run_after,
+)
+
+feature_overrides = Table(
+    "feature_overrides",
+    metadata,
+    Column("override_key", Text, primary_key=True),
+    Column("feature_id", Text, ForeignKey("features.feature_id", ondelete="SET NULL")),
+    Column(
+        "source_record_key",
+        Text,
+        ForeignKey("source_records.source_record_key", ondelete="SET NULL"),
+    ),
+    Column("provider", Text),
+    Column("dataset_key", Text),
+    Column("field_path", Text, nullable=False),
+    Column("source_value", JSON),
+    Column("override_value", JSON),
+    Column("status", Text, nullable=False, default="active"),
+    Column("reason", Text),
+    Column("created_by", Text),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    CheckConstraint(
+        "status IN ('active', 'inactive', 'superseded')",
+        name="ck_feature_overrides_status",
+    ),
+)
+
+Index(
+    "ix_feature_overrides_feature_status",
+    feature_overrides.c.feature_id,
+    feature_overrides.c.status,
+)
+Index(
+    "ix_feature_overrides_provider_dataset",
+    feature_overrides.c.provider,
+    feature_overrides.c.dataset_key,
+)
+
+dedup_review_queue = Table(
+    "dedup_review_queue",
+    metadata,
+    Column("review_key", Text, primary_key=True),
+    Column(
+        "feature_id_a",
+        Text,
+        ForeignKey("features.feature_id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column(
+        "feature_id_b",
+        Text,
+        ForeignKey("features.feature_id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("score", Numeric(5, 2), nullable=False),
+    Column("name_score", Numeric(5, 2)),
+    Column("spatial_score", Numeric(5, 2)),
+    Column("category_score", Numeric(5, 2)),
+    Column("status", Text, nullable=False, default="pending"),
+    Column("decision_reason", Text),
+    Column("reviewed_by", Text),
+    Column("reviewed_at", DateTime(timezone=True)),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    UniqueConstraint("feature_id_a", "feature_id_b", name="uq_dedup_review_queue_pair"),
+    CheckConstraint("feature_id_a <> feature_id_b", name="ck_dedup_review_queue_distinct_pair"),
+    CheckConstraint("score >= 0 AND score <= 100", name="ck_dedup_review_queue_score"),
+    CheckConstraint(
+        "status IN ('pending', 'accepted', 'rejected', 'merged', 'ignored')",
+        name="ck_dedup_review_queue_status",
+    ),
+)
+
+Index("ix_dedup_review_queue_status_score", dedup_review_queue.c.status, dedup_review_queue.c.score)
+
+data_integrity_violations = Table(
+    "data_integrity_violations",
+    metadata,
+    Column("violation_key", Text, primary_key=True),
+    Column("provider", Text, nullable=False),
+    Column("dataset_key", Text, nullable=False),
+    Column(
+        "source_record_key",
+        Text,
+        ForeignKey("source_records.source_record_key", ondelete="SET NULL"),
+    ),
+    Column("feature_id", Text, ForeignKey("features.feature_id", ondelete="SET NULL")),
+    Column("violation_type", Text, nullable=False),
+    Column("severity", Text, nullable=False, default="warning"),
+    Column("message", Text, nullable=False),
+    Column("payload", JSON, nullable=False, default=dict),
+    Column("status", Text, nullable=False, default="open"),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("resolved_at", DateTime(timezone=True)),
+    CheckConstraint(
+        "severity IN ('info', 'warning', 'error', 'critical')",
+        name="ck_data_integrity_violations_severity",
+    ),
+    CheckConstraint(
+        "status IN ('open', 'acknowledged', 'resolved', 'ignored')",
+        name="ck_data_integrity_violations_status",
+    ),
+)
+
+Index(
+    "ix_data_integrity_violations_status_severity",
+    data_integrity_violations.c.status,
+    data_integrity_violations.c.severity,
+)
+Index(
+    "ix_data_integrity_violations_provider_dataset",
+    data_integrity_violations.c.provider,
+    data_integrity_violations.c.dataset_key,
+)
 
 
 def create_feature_schema(bind: Any) -> None:
@@ -352,3 +602,144 @@ def make_weather_value_key(value: WeatherValue) -> str:
         length=20,
     )
     return f"wv_{digest}"
+
+
+def price_point_to_row(point: PricePoint) -> dict[str, Any]:
+    """Convert a `PricePoint` DTO into a `price_points` row payload."""
+
+    return {
+        "feature_id": point.feature_id,
+        "price_category": point.price_category,
+        "retention_days": point.retention_days,
+    }
+
+
+def price_point_from_row(row: Mapping[str, Any]) -> PricePoint:
+    """Convert a `price_points` row mapping into a `PricePoint` DTO."""
+
+    return PricePoint(
+        feature_id=str(row["feature_id"]),
+        price_category=str(row["price_category"]),
+        retention_days=int(row["retention_days"]),
+    )
+
+
+def price_value_to_row(value: PriceValue) -> dict[str, Any]:
+    """Convert a `PriceValue` DTO into a `price_values` row payload."""
+
+    return {
+        "feature_id": value.feature_id,
+        "item_key": value.item_key,
+        "observed_at": value.observed_at,
+        "value": value.value,
+        "currency": value.currency,
+        "payload_hash": value.payload_hash,
+        "payload": {},
+    }
+
+
+def price_value_from_row(row: Mapping[str, Any]) -> PriceValue:
+    """Convert a `price_values` row mapping into a `PriceValue` DTO."""
+
+    return PriceValue(
+        feature_id=str(row["feature_id"]),
+        item_key=str(row["item_key"]),
+        observed_at=row["observed_at"],
+        value=row["value"],
+        currency=str(row["currency"]),
+        payload_hash=row.get("payload_hash"),
+    )
+
+
+def provider_sync_state_to_row(state: ProviderSyncState) -> dict[str, Any]:
+    """Convert a `ProviderSyncState` DTO into a `provider_sync_state` row payload."""
+
+    return {
+        "provider": state.provider,
+        "dataset_key": state.dataset_key,
+        "sync_scope": state.sync_scope,
+        "status": state.status,
+        "cursor": state.cursor,
+        "last_success_at": state.last_success_at,
+        "last_attempt_at": state.last_attempt_at,
+        "next_run_after": state.next_run_after,
+        "last_error": state.last_error,
+        "last_error_at": state.last_error_at,
+        "extra": state.extra,
+        "updated_at": state.updated_at,
+    }
+
+
+def provider_sync_state_from_row(row: Mapping[str, Any]) -> ProviderSyncState:
+    """Convert a `provider_sync_state` row mapping into a `ProviderSyncState` DTO."""
+
+    return ProviderSyncState(
+        provider=str(row["provider"]),
+        dataset_key=str(row["dataset_key"]),
+        sync_scope=str(row["sync_scope"]),
+        status=str(row["status"]),
+        cursor=dict(row["cursor"]) if row.get("cursor") is not None else None,
+        last_success_at=row.get("last_success_at"),
+        last_attempt_at=row.get("last_attempt_at"),
+        next_run_after=row.get("next_run_after"),
+        last_error=row.get("last_error"),
+        last_error_at=row.get("last_error_at"),
+        extra=dict(row.get("extra") or {}),
+        updated_at=row["updated_at"],
+    )
+
+
+def make_feature_override_key(
+    *,
+    feature_id: str | None,
+    source_record_key: str | None,
+    field_path: str,
+    source_value: Any = None,
+    override_value: Any = None,
+) -> str:
+    """Return a deterministic key for a feature override row."""
+
+    digest = make_payload_hash(
+        {
+            "feature_id": feature_id,
+            "source_record_key": source_record_key,
+            "field_path": field_path,
+            "source_value": source_value,
+            "override_value": override_value,
+        },
+        length=20,
+    )
+    return f"fo_{digest}"
+
+
+def make_dedup_review_key(feature_id_a: str, feature_id_b: str) -> str:
+    """Return a deterministic key for a dedup review pair."""
+
+    pair = sorted((feature_id_a, feature_id_b))
+    digest = make_payload_hash({"feature_id_a": pair[0], "feature_id_b": pair[1]}, length=20)
+    return f"dr_{digest}"
+
+
+def make_data_integrity_violation_key(
+    *,
+    provider: str,
+    dataset_key: str,
+    violation_type: str,
+    source_record_key: str | None = None,
+    feature_id: str | None = None,
+    payload: Any = None,
+) -> str:
+    """Return a deterministic key for a data integrity violation row."""
+
+    digest = make_payload_hash(
+        {
+            "provider": provider,
+            "dataset_key": dataset_key,
+            "violation_type": violation_type,
+            "source_record_key": source_record_key,
+            "feature_id": feature_id,
+            "payload": payload,
+        },
+        length=20,
+    )
+    return f"dv_{digest}"

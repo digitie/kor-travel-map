@@ -24,6 +24,7 @@
 - 외부 API 관련 작업은 이 원칙을 먼저 반영한 뒤 feature 계약, 저장, 문서화를 진행합니다.
 - Streamlit에 의존하지 않습니다. 디버그 Web UI는 별도 프로젝트에서 이 라이브러리를 import합니다.
 - TripMate의 FastAPI 라우터, Admin UI, Alembic migration을 직접 소유하지 않습니다. 이 라이브러리는 그 구현들이 공유할 계약과 순수 함수를 제공합니다.
+- 사용자, 여행계획, POI를 관리하지 않습니다. 이들은 TripMate 제품 도메인이고, 필요한 경우 `feature_id`로 이 라이브러리의 feature를 참조합니다.
 - TripMate가 별도 feature DB를 복제하지 않습니다. TripMate는 `python-krtour-map`의 DB schema와 함수를 import해 feature/weather/source 저장소를 사용합니다.
 - 외부 API를 테스트 기본 경로에서 직접 호출하지 않습니다. fixture replay와 integration test를 분리합니다.
 
@@ -95,8 +96,10 @@ python -m pytest
 - [아키텍처](docs/architecture.md)
 - [Provider 계약](docs/provider-contract.md)
 - [python-kraddr-base 자료형 사용 기준](docs/kraddr-base-types.md)
+- [Feature model](docs/feature-model.md)
 - [Weather feature normalization](docs/weather-feature-normalization.md)
 - [Dagster 경계](docs/dagster-boundary.md)
 - [Postgres 스키마 기준](docs/postgres-schema.md)
 - [Debug fixture workflow](docs/debug-fixture-workflow.md)
 - [TripMate 통합 가이드](docs/tripmate-integration.md)
+- [TripMate feature docs migration](docs/tripmate-feature-docs-migration.md)
