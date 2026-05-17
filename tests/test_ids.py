@@ -18,7 +18,7 @@ def test_feature_id_normalizes_provider_alias_and_whitespace() -> None:
         source_natural_key=" NX=60 NY=127 ",
         kind=FeatureKind.WEATHER,
         category="weather",
-        bjd_code="1111010100",
+        legal_dong_code="1111010100",
         content_hash="same",
     )
     second = make_feature_id(
@@ -27,7 +27,7 @@ def test_feature_id_normalizes_provider_alias_and_whitespace() -> None:
         source_natural_key="nx=60 ny=127",
         kind="weather",
         category="weather",
-        bjd_code="1111010100",
+        legal_dong_code="1111010100",
         content_hash="same",
     )
 

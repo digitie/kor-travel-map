@@ -43,6 +43,12 @@ class ForecastStyle(StrEnum):
     ADVISORY = "advisory"
 
 
+class TimelineBucket(StrEnum):
+    ULTRA_SHORT = "ultra_short"
+    SHORT = "short"
+    MID = "mid"
+
+
 class WeatherDomain(StrEnum):
     KMA_ULTRA_SHORT_NOWCAST = "kma_ultra_short_nowcast"
     KMA_ULTRA_SHORT_FORECAST = "kma_ultra_short_forecast"
@@ -53,3 +59,8 @@ class WeatherDomain(StrEnum):
     TOURIST_SPOT_WEATHER = "tourist_spot_weather"
     AIR_QUALITY = "air_quality"
     BEACH_MARINE = "beach_marine"
+    FOREST_MOUNTAIN_WEATHER = "forest_mountain_weather"
+    FOREST_FIRE_RISK = "forest_fire_risk"
+    FOREST_LANDSLIDE_RISK = "forest_landslide_risk"
+    AGRI_WEATHER = "agri_weather"
+    HYDRO_WEATHER = "hydro_weather"

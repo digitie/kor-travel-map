@@ -1,10 +1,35 @@
 from __future__ import annotations
 
+from kraddr.base import (
+    AddressRegion,
+    PlaceCategory,
+    PlaceCategoryCode,
+    category_label,
+    category_path,
+    get_category,
+    is_known_category_code,
+    iter_categories,
+    mapbox_maki_icon_for_category,
+    mapbox_maki_icon_or_none,
+)
+from krtour_map.db import (
+    create_feature_schema,
+    drop_feature_schema,
+    feature_weather_values,
+    features,
+    make_weather_value_key,
+    metadata as feature_metadata,
+    source_links,
+    source_records,
+    weather_value_from_row,
+    weather_value_to_row,
+)
 from krtour_map.enums import (
     FeatureKind,
     FeatureStatus,
     ForecastStyle,
     SourceRole,
+    TimelineBucket,
     WeatherDomain,
 )
 from krtour_map.ids import make_feature_id, make_payload_hash, make_source_record_key
@@ -28,8 +53,15 @@ from krtour_map.store import InMemoryFeatureStore
 
 __all__ = [
     "Address",
+    "AddressRegion",
     "CANONICAL_PROVIDER_NAMES",
     "Coordinate",
+    "PlaceCategory",
+    "PlaceCategoryCode",
+    "category_label",
+    "category_path",
+    "create_feature_schema",
+    "drop_feature_schema",
     "Feature",
     "FeatureKind",
     "FeaturePatch",
@@ -38,6 +70,12 @@ __all__ = [
     "FeatureUrls",
     "ForecastStyle",
     "InMemoryFeatureStore",
+    "is_known_category_code",
+    "iter_categories",
+    "feature_metadata",
+    "feature_weather_values",
+    "features",
+    "get_category",
     "PricePoint",
     "PriceValue",
     "ProviderSyncState",
@@ -45,10 +83,18 @@ __all__ = [
     "SourceLink",
     "SourceRecord",
     "SourceRole",
+    "source_links",
+    "source_records",
+    "TimelineBucket",
     "WeatherDomain",
     "WeatherValue",
     "make_feature_id",
     "make_payload_hash",
     "make_source_record_key",
+    "make_weather_value_key",
+    "mapbox_maki_icon_for_category",
+    "mapbox_maki_icon_or_none",
     "normalize_provider_name",
+    "weather_value_from_row",
+    "weather_value_to_row",
 ]

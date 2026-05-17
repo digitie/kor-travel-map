@@ -1,54 +1,39 @@
 # TripMate 통합 가이드
 
-## 새 경계
+## 경계
 
-TripMate의 feature 관련 Pydantic 계약, deterministic ID, provider 명칭 정책, source trace, fixture replay 기준은 `python-krtour-map`으로 이동합니다.
+TripMate는 feature DB를 별도로 만들지 않는다. 지도 feature, source trace, weather/price 값, provider sync state는 `python-krtour-map`의 DTO, DB schema, helper 함수를 기준으로 저장하고 조회한다.
 
-TripMate에 남는 책임:
+TripMate가 맡는 책임:
 
-- FastAPI endpoint
-- SQLAlchemy/PostGIS 모델과 Alembic migration
-- Dagster job/schedule
-- Admin UI와 운영 workflow
-- 사용자/여행/POI 권한 규칙
+- FastAPI endpoint와 앱 응답 조립
+- 사용자, 여행 일정, 권한, 알림 같은 TripMate 제품 DB
+- Dagster job/schedule과 운영 runbook
+- Admin UI와 검수 workflow
 
-`python-krtour-map`으로 옮기는 책임:
+`python-krtour-map`이 맡는 책임:
 
 - `Feature`, `SourceRecord`, `SourceLink`, `WeatherValue`, `PricePoint`, `ProviderSyncState` DTO
+- `krtour_map.db`의 feature/source/weather/price DB schema
 - provider canonical name과 alias 정규화
 - feature/source ID 생성
-- provider 결과를 feature 저장 계약으로 바꾸는 순수 함수
+- provider typed model을 feature 계약으로 바꾸는 순수 함수
 - debug fixture 저장과 pytest replay helper
 
-## TripMate 문서 수정 기준
-
-TripMate 문서에서 아래 내용은 `python-krtour-map` 문서를 canonical 기준으로 링크합니다.
-
-- feature 공통 DTO
-- provider canonical name
-- source role
-- weather domain/style
-- fixture replay workflow
-
-TripMate 문서에 계속 남길 내용:
-
-- 실제 DB migration 파일명
-- API endpoint
-- Admin 화면
-- Dagster schedule과 운영 runbook
-- PostGIS 인덱스, retention, RBAC 같은 앱 운영 결정
+TripMate 문서에는 TripMate 제품 DB, API, Admin, 운영 결정을 남기고, feature DB column/table 세부 정의는 이 라이브러리 문서를 canonical로 링크한다.
 
 ## 구현 순서
 
-1. TripMate ETL loader에서 provider public client를 직접 호출합니다.
-2. provider typed model 또는 raw row를 `SourceRecord`로 만듭니다.
-3. feature/price/weather 정규화 함수가 `Feature`, `PriceValue`, `WeatherValue`를 만듭니다.
-4. TripMate repository가 SQLAlchemy model로 저장합니다.
-5. 의미 있는 provider 응답은 `save_fixture`로 저장하고 pytest replay에 추가합니다.
+1. TripMate ETL loader에서 provider public client를 직접 호출한다.
+2. provider typed model 또는 raw row를 `python-krtour-map` DTO로 정규화한다.
+3. feature/source/weather/price 저장은 `krtour_map.db` schema와 row 변환 함수를 사용한다.
+4. TripMate API는 feature DB에서 필요한 값을 읽어 사용자/여행 일정 응답에 조립한다.
+5. 의미 있는 provider 응답은 `save_fixture`로 저장하고 pytest replay를 추가한다.
 
 ## Weather 예시
 
 ```python
+from krtour_map.db import feature_weather_values, weather_value_to_row
 from krtour_map.models import WeatherValue
 
 value = WeatherValue(
@@ -56,19 +41,23 @@ value = WeatherValue(
     provider="python-kma-api",
     weather_domain="kma_short_forecast",
     forecast_style="short",
-    metric_key="temp_c",
+    timeline_bucket="short",
+    metric_key="TMP",
+    source_metric_key="TMP",
     valid_at=valid_at,
     value_number=temperature,
     unit="deg_c",
     payload=raw_item,
 )
+
+session.execute(feature_weather_values.insert().values(weather_value_to_row(value)))
 ```
 
-다른 provider의 날씨성 데이터도 `weather_domain`만 다르게 두고 같은 `WeatherValue`로 저장합니다.
+다른 provider의 날씨성 데이터도 같은 `WeatherValue`로 저장한다. 관측값은 `forecast_style="observed"`를 유지하고, KMA식 조회 카테고리는 `timeline_bucket="ultra_short"`처럼 별도로 채운다.
 
-## 삭제 또는 축소할 TripMate 문서 내용
+## TripMate 문서에서 제거할 내용
 
-- provider별 adapter/wrapper 생성 지침은 삭제합니다.
-- `py*` alias를 DB/provider 응답 표기명으로 쓰는 예시는 canonical provider name으로 바꿉니다.
-- fixture testcase를 개별 pytest 코드 생성 방식으로 설명한 내용은 공통 runner 방식으로 바꿉니다.
-- feature DTO를 TripMate 문서와 라이브러리 문서에 중복 상세 정의하지 않습니다. TripMate 문서는 앱 DB와 API 차이만 설명합니다.
+- TripMate 전용 provider adapter/wrapper 생성 지침
+- `py*` alias를 DB/provider 표기명으로 쓰는 예시
+- feature DB table/column을 TripMate 문서에 중복 정의하는 내용
+- TripMate ORM row를 feature DTO로 다시 내보내는 것을 전제로 한 설명

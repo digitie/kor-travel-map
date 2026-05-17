@@ -2,11 +2,29 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, TypeAlias
 
+from kraddr.base import (
+    Address,
+    PlaceCategory,
+    PlaceCategoryCode,
+    PlaceCoordinate,
+    category_label as kraddr_category_label,
+    category_path as kraddr_category_path,
+    get_category,
+    is_known_category_code,
+    mapbox_maki_icon_or_none,
+)
 from pydantic import AnyUrl, BaseModel, ConfigDict, Field, field_validator
 
-from krtour_map.enums import FeatureKind, FeatureStatus, ForecastStyle, SourceRole, WeatherDomain
+from krtour_map.enums import (
+    FeatureKind,
+    FeatureStatus,
+    ForecastStyle,
+    SourceRole,
+    TimelineBucket,
+    WeatherDomain,
+)
 from krtour_map.ids import make_source_record_key
 from krtour_map.providers import normalize_provider_name
 
@@ -21,26 +39,7 @@ class KrtourModel(BaseModel):
     model_config = ConfigDict(extra="forbid", use_enum_values=True)
 
 
-class Coordinate(KrtourModel):
-    longitude: float = Field(..., ge=124.0, le=132.0)
-    latitude: float = Field(..., ge=33.0, le=39.5)
-
-
-class Address(KrtourModel):
-    road_address: str | None = None
-    jibun_address: str | None = None
-    bjd_code: str | None = None
-    sido_code: str | None = None
-    sigungu_code: str | None = None
-    road_name_code: str | None = None
-    road_address_management_no: str | None = None
-
-    @field_validator("bjd_code")
-    @classmethod
-    def validate_bjd_code(cls, value: str | None) -> str | None:
-        if value is not None and (len(value) != 10 or not value.isdigit()):
-            raise ValueError("bjd_code must be a 10 digit legal-dong code")
-        return value
+Coordinate: TypeAlias = PlaceCoordinate
 
 
 class FeatureUrls(KrtourModel):
@@ -84,6 +83,44 @@ class Feature(KrtourModel):
     created_at: datetime = Field(default_factory=kst_now)
     updated_at: datetime = Field(default_factory=kst_now)
     deleted_at: datetime | None = None
+
+    @field_validator("coord")
+    @classmethod
+    def validate_korean_coordinate(cls, value: Coordinate) -> Coordinate:
+        if not 124.0 <= value.longitude <= 132.0:
+            raise ValueError("coord.longitude must be within the Korean map bounds")
+        if not 33.0 <= value.latitude <= 39.5:
+            raise ValueError("coord.latitude must be within the Korean map bounds")
+        return value
+
+    @field_validator("category", mode="before")
+    @classmethod
+    def normalize_category(cls, value: Any) -> str:
+        if isinstance(value, PlaceCategoryCode):
+            return value.value
+        return str(value)
+
+    @property
+    def category_info(self) -> PlaceCategory | None:
+        if not is_known_category_code(self.category):
+            return None
+        return get_category(self.category)
+
+    @property
+    def category_path(self) -> tuple[str, ...]:
+        if not is_known_category_code(self.category):
+            return ()
+        return kraddr_category_path(self.category)
+
+    @property
+    def category_label(self) -> str:
+        if not is_known_category_code(self.category):
+            return self.category
+        return kraddr_category_label(self.category)
+
+    @property
+    def mapbox_maki_icon(self) -> str | None:
+        return mapbox_maki_icon_or_none(self.category)
 
 
 class FeaturePatch(KrtourModel):
@@ -148,15 +185,21 @@ class WeatherValue(KrtourModel):
     provider: str
     weather_domain: WeatherDomain | str
     forecast_style: ForecastStyle | str
+    timeline_bucket: TimelineBucket | str | None = None
     metric_key: str = Field(..., min_length=1)
     issued_at: datetime | None = None
     valid_at: datetime | None = None
+    valid_from: datetime | None = None
+    valid_until: datetime | None = None
     observed_at: datetime | None = None
+    source_metric_key: str | None = None
+    source_metric_name: str | None = None
     metric_name: str | None = None
     value_number: Decimal | None = None
     value_text: str | None = None
     unit: str | None = None
     severity: str | None = None
+    normalization_version: str | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
     collected_at: datetime = Field(default_factory=kst_now)
     source_record_key: str | None = None

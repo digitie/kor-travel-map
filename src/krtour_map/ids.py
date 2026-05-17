@@ -31,12 +31,12 @@ def make_feature_id(
     source_natural_key: str,
     kind: FeatureKind | str,
     category: str,
-    bjd_code: str | None = None,
+    legal_dong_code: str | None = None,
     content_hash: str | None = None,
 ) -> str:
     provider_name = normalize_provider_name(provider)
     kind_value = kind.value if isinstance(kind, FeatureKind) else str(kind)
-    bjd_part = bjd_code if bjd_code else "global"
+    region_part = legal_dong_code if legal_dong_code else "global"
     content_part = content_hash or ""
     raw = "|".join(
         [
@@ -45,12 +45,12 @@ def make_feature_id(
             normalize_key_part(source_natural_key),
             normalize_key_part(kind_value),
             normalize_key_part(category),
-            bjd_part,
+            region_part,
             content_part,
         ]
     )
     digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
-    return f"f_{bjd_part}_{kind_value[:1]}_{digest}"
+    return f"f_{region_part}_{kind_value[:1]}_{digest}"
 
 
 def make_source_record_key(

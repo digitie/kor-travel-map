@@ -1,5 +1,7 @@
 # Postgres 스키마 기준
 
+이 schema는 `python-krtour-map`이 소유한다. TripMate는 별도 feature DB나 `map_feature_*` 복제 table을 정의하지 않고, `krtour_map.db`의 SQLAlchemy Core schema와 row 변환 함수를 import해 사용한다.
+
 이 문서는 TripMate DB 구현이 따라야 할 최소 계약입니다. 실제 Alembic migration은 TripMate 저장소에서 관리합니다.
 
 ## `features`
@@ -11,7 +13,7 @@
 - `feature_id text primary key`
 - `kind text not null`
 - `name text not null`
-- `bjd_code text null`
+- `legal_dong_code text null`
 - `coord geometry(point, 4326) not null`
 - `geom geometry(geometry, 4326) null`
 - `address_road text null`
@@ -34,7 +36,7 @@
 - `gist(coord)`
 - `gist(geom)`
 - `(kind, category)`
-- `(bjd_code)`
+- `(legal_dong_code)`
 - `(parent_feature_id)`
 - `gin(name gin_trgm_ops)`
 
@@ -104,20 +106,26 @@ unique 기준:
 
 필수 컬럼:
 
-- `id uuid primary key`
+- `weather_value_key text primary key`
 - `feature_id text references features(feature_id) on delete cascade`
 - `provider text not null`
 - `weather_domain text not null`
 - `forecast_style text not null`
+- `timeline_bucket text null`
 - `metric_key text not null`
 - `issued_at timestamptz null`
 - `valid_at timestamptz null`
+- `valid_from timestamptz null`
+- `valid_until timestamptz null`
 - `observed_at timestamptz null`
+- `source_metric_key text null`
+- `source_metric_name text null`
 - `metric_name text null`
 - `value_number numeric(14, 4) null`
 - `value_text text null`
 - `unit text null`
 - `severity text null`
+- `normalization_version text null`
 - `payload jsonb not null default '{}'`
 - `source_record_key text null references source_records(source_record_key) on delete set null`
 - `collected_at timestamptz not null`
@@ -125,9 +133,14 @@ unique 기준:
 권장 인덱스:
 
 - `(feature_id, valid_at)`
+- `(feature_id, timeline_bucket, valid_at)`
 - `(provider, weather_domain)`
 - `brin(valid_at)`
+- `brin(valid_from)`
+- `brin(valid_until)`
 - `brin(observed_at)`
+
+`forecast_style`은 `observed`, `index`, `advisory` 같은 원천 성격을 포함한다. KMA식 초단기/단기/중기 카테고리는 `timeline_bucket in ('ultra_short', 'short', 'mid')`로 분리한다. 관측값을 초단기 화면에 보여야 하는 경우에도 `forecast_style='observed'`, `timeline_bucket='ultra_short'`처럼 둘을 함께 남긴다.
 
 ## `price_points`, `price_values`
 

@@ -16,21 +16,52 @@
       "content-type": "application/json"
     },
     "body": {
-      "feature_id": "f_1111010100_p_5d240ca84cdb5bd6",
+      "feature_id": "f_1111010100_p_74ee9aa05a3a5a80",
       "kind": "price",
       "name": "Sample Fuel Station",
       "coord": {
-        "longitude": 127.0001,
-        "latitude": 37.5001
+        "lon": 127.0001,
+        "lat": 37.5001,
+        "altitude_m": null,
+        "accuracy_m": null,
+        "srid": 4326
       },
       "address": {
-        "road_address": "Seoul sample road 1",
-        "jibun_address": null,
-        "bjd_code": "1111010100",
-        "sido_code": "11",
-        "sigungu_code": "11110",
-        "road_name_code": null,
-        "road_address_management_no": null
+        "address": null,
+        "region": {
+          "sigungu_code": {
+            "code": "11110"
+          },
+          "legal_dong_code": {
+            "code": "1111010100"
+          },
+          "sido_name": null,
+          "sigungu_name": null,
+          "eup_myeon_dong_name": null,
+          "ri_name": null
+        },
+        "jibun": null,
+        "road_name": {
+          "address": "Seoul sample road 1",
+          "region": null,
+          "legal_dong_code": {
+            "code": "1111010100"
+          },
+          "road_name_code": null,
+          "road_name_address_code": null,
+          "building_management_number": null,
+          "sido_name": null,
+          "sigungu_name": null,
+          "eup_myeon_dong_name": null,
+          "road_name": null,
+          "is_underground": null,
+          "building_main_number": null,
+          "building_sub_number": null,
+          "building_name": null,
+          "postal_code": null
+        },
+        "postal_code": null,
+        "detail_address": null
       },
       "category": "fuel",
       "urls": {
@@ -66,7 +97,7 @@
   },
   "parsed": {},
   "processed": {
-    "feature_id": "f_1111010100_p_5d240ca84cdb5bd6",
+    "feature_id": "f_1111010100_p_74ee9aa05a3a5a80",
     "kind": "price",
     "name": "Sample Fuel Station",
     "category": "fuel",

@@ -4,6 +4,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import pytest
+from kraddr.base import AddressRegion
 
 from krtour_map.enums import FeatureKind
 from krtour_map.ids import make_feature_id
@@ -23,7 +24,7 @@ def sample_feature(fixed_time: datetime) -> Feature:
         source_natural_key="A0010207",
         kind=FeatureKind.PRICE,
         category="fuel",
-        bjd_code="1111010100",
+        legal_dong_code="1111010100",
         content_hash="abc123",
     )
     return Feature(
@@ -32,10 +33,11 @@ def sample_feature(fixed_time: datetime) -> Feature:
         name="Sample Fuel Station",
         coord=Coordinate(longitude=127.0001, latitude=37.5001),
         address=Address(
-            road_address="Seoul sample road 1",
-            bjd_code="1111010100",
-            sigungu_code="11110",
-            sido_code="11",
+            region=AddressRegion.from_legal_dong_code("1111010100"),
+            road_name={
+                "address": "Seoul sample road 1",
+                "legal_dong_code": "1111010100",
+            },
         ),
         category="fuel",
         marker_icon="fuel",

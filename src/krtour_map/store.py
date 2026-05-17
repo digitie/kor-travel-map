@@ -85,7 +85,7 @@ class InMemoryFeatureStore:
         *,
         kind: str | None = None,
         status: str | None = None,
-        bjd_code: str | None = None,
+        legal_dong_code: str | None = None,
         category: str | None = None,
         provider: str | None = None,
         source_role: str | None = None,
@@ -95,8 +95,12 @@ class InMemoryFeatureStore:
             values = [feature for feature in values if str(feature.kind) == kind]
         if status is not None:
             values = [feature for feature in values if str(feature.status) == status]
-        if bjd_code is not None:
-            values = [feature for feature in values if feature.address.bjd_code == bjd_code]
+        if legal_dong_code is not None:
+            values = [
+                feature
+                for feature in values
+                if feature.address.legal_dong_code == legal_dong_code
+            ]
         if category is not None:
             values = [feature for feature in values if feature.category == category]
         if provider is not None:
