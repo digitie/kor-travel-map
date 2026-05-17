@@ -1,0 +1,85 @@
+{
+  "name": "opinet_station_price_feature",
+  "function": "feature_summary",
+  "description": "OpiNet fuel station price feature fixture replay",
+  "input": {
+    "provider": "python-opinet-api",
+    "source_entity_id": "A0010207"
+  },
+  "request": {
+    "method": "fixture",
+    "url": "memory://feature"
+  },
+  "response": {
+    "status_code": 200,
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body": {
+      "feature_id": "f_1111010100_p_5d240ca84cdb5bd6",
+      "kind": "price",
+      "name": "Sample Fuel Station",
+      "coord": {
+        "longitude": 127.0001,
+        "latitude": 37.5001
+      },
+      "address": {
+        "road_address": "Seoul sample road 1",
+        "jibun_address": null,
+        "bjd_code": "1111010100",
+        "sido_code": "11",
+        "sigungu_code": "11110",
+        "road_name_code": null,
+        "road_address_management_no": null
+      },
+      "category": "fuel",
+      "urls": {
+        "homepage": null,
+        "sns1": null,
+        "sns2": null,
+        "review_naver": null,
+        "review_kakao": null,
+        "review_google": null
+      },
+      "marker_icon": "fuel",
+      "marker_color": "P-04",
+      "parent_feature_id": null,
+      "sibling_group_id": null,
+      "detail": {
+        "price_category": "fuel"
+      },
+      "raw_refs": [
+        {
+          "provider": "python-opinet-api",
+          "dataset_key": "fuel_lowest_station",
+          "source_entity_id": "A0010207",
+          "source_role": "primary",
+          "fetched_at": "2026-05-17T09:00:00+09:00",
+          "payload_hash": "abc123"
+        }
+      ],
+      "status": "active",
+      "created_at": "2026-05-17T09:00:00+09:00",
+      "updated_at": "2026-05-17T09:00:00+09:00",
+      "deleted_at": null
+    }
+  },
+  "parsed": {},
+  "processed": {
+    "feature_id": "f_1111010100_p_5d240ca84cdb5bd6",
+    "kind": "price",
+    "name": "Sample Fuel Station",
+    "category": "fuel",
+    "provider_count": 1,
+    "status": "active"
+  },
+  "assertion": {
+    "mode": "snapshot",
+    "exclude_fields": []
+  },
+  "meta": {
+    "created_at": "2026-05-17T09:00:00+09:00",
+    "library_version": "0.1.0",
+    "source": "debug_ui"
+  }
+}

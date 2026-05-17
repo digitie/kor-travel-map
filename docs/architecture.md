@@ -1,0 +1,85 @@
+# python-krtour-map 아키텍처
+
+## 목적
+
+TripMate에는 지도 위에 올라가는 데이터가 여러 출처에서 들어옵니다. OpiNet 유가, KMA 날씨, KREX 휴게소, KHOA 해양지수, AirKorea 대기질, KTO 관광지, KRMOIS 인허가 데이터는 생김새가 다르지만 앱에서는 결국 지도 feature, feature weather, feature price, source trace로 써야 합니다.
+
+`python-krtour-map`은 이 수렴 지점을 TripMate 밖의 작은 라이브러리로 분리합니다. provider SDK는 그대로 직접 사용하고, 반복되는 정규화와 저장 계약만 이 라이브러리가 맡습니다.
+
+## 레이어
+
+```text
+python-*-api provider libraries
+  -> provider typed model
+  -> krtour_map parser/normalizer pure function
+  -> Feature / SourceRecord / WeatherValue / PriceValue
+  -> TripMate DB repository or InMemoryFeatureStore
+  -> TripMate API/Admin/UI
+```
+
+TripMate 전용 provider adapter는 만들지 않습니다. provider public client와 typed model이 부족하면 해당 `python-*-api` 라이브러리에 endpoint/model/cursor/helper를 upstream합니다.
+
+## 핵심 모델
+
+| 모델 | 용도 |
+| --- | --- |
+| `Feature` | 지도에 올릴 공통 객체. `place`, `event`, `notice`, `price`, `weather`, `route`, `area`를 표현 |
+| `SourceRecord` | provider 원천 row와 payload hash 보존 |
+| `SourceLink` | feature와 source record의 관계. `primary`, `enrichment`, `weather_context` 등 역할 포함 |
+| `WeatherValue` | feature 기준 날씨/대기질/해양 값을 provider, domain, forecast style, time axis로 저장 |
+| `PricePoint`, `PriceValue` | 가격이 붙는 지점과 시계열 가격값 분리 |
+| `ProviderSyncState` | provider+dataset+scope별 cursor, 성공/실패 상태 |
+
+## Feature ID
+
+`feature_id`는 멱등 upsert를 위해 deterministic하게 생성합니다.
+
+구성 요소:
+
+- canonical provider name
+- source type
+- source natural key
+- feature kind
+- category
+- bjd code 또는 `global`
+- content/payload hash
+
+같은 원천 row가 반복 수집되어도 같은 feature ID가 만들어져야 합니다. payload가 달라졌지만 같은 장소/지점이면 source record hash는 바뀌어도 feature ID는 유지되도록 `source_natural_key`를 신중하게 잡습니다.
+
+## Weather 병합
+
+날씨 표시는 KMA timeline을 기준으로 합니다.
+
+| provider | domain | 기준 |
+| --- | --- | --- |
+| `python-kma-api` | `kma_ultra_short_nowcast`, `kma_ultra_short_forecast`, `kma_short_forecast`, `kma_mid_forecast` | 전체 시간축 기준 |
+| `python-krex-api` | `rest_area_weather` | 휴게소 feature의 관측/단기 context |
+| `python-krairport-api` | `airport_weather` | 공항 feature context |
+| `python-visitkorea-api` | `tourist_spot_weather` | 관광지 상세 날씨 보강 |
+| `python-airkorea-api` | `air_quality` | 측정소/시도 단위 대기질 |
+| `python-khoa-api` | `beach_marine` | 해수욕장/해양 지수 |
+
+동일 `feature_id + provider + domain + forecast_style + metric_key + issued_at + valid_at + observed_at` 조합은 하나의 weather value로 upsert합니다.
+
+## CRUD 경계
+
+현재 구현된 `InMemoryFeatureStore`는 다음 목적입니다.
+
+- provider debug UI에서 API 응답을 feature로 바꾸는 dry-run
+- pytest fixture replay
+- TripMate DB repository가 따라야 할 CRUD 의미 검증
+
+운영 저장소는 TripMate의 SQLAlchemy/PostGIS repository가 맡고, 이 라이브러리의 모델과 ID/정규화 함수를 사용합니다.
+
+## 테스트 전략
+
+- 기본 테스트는 외부 API를 호출하지 않습니다.
+- meaningful response는 JSON fixture로 저장합니다.
+- pytest 공통 runner가 fixture를 읽어 parser, processor, assertion을 실행합니다.
+- live/integration test는 별도 marker로 분리합니다.
+
+## 후속 확장
+
+- SQLAlchemy repository adapter는 TripMate DB 계약이 안정된 뒤 별도 모듈로 추가합니다.
+- route/area geometry는 Shapely/PostGIS 경계가 필요하므로 현재 Pydantic DTO에서는 geometry payload를 강제하지 않습니다.
+- Debug Web UI는 별도 패키지에서 `DebugRun`과 `save_fixture`를 사용합니다.
