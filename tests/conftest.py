@@ -31,7 +31,7 @@ def sample_feature(fixed_time: datetime) -> Feature:
         feature_id=feature_id,
         kind=FeatureKind.PRICE,
         name="Sample Fuel Station",
-        coord=Coordinate(longitude=127.0001, latitude=37.5001),
+        coord=Coordinate(lat=37.5001, lon=127.0001),
         address=Address(
             region=AddressRegion.from_legal_dong_code("1111010100"),
             road_name={

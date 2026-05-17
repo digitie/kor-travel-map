@@ -25,7 +25,7 @@ classifiers = [
 ]
 dependencies = [
   "pydantic>=2.7",
-  "python-kraddr-base @ git+https://github.com/digitie/python-kraddr-base.git@fada7569b5f077a26b5a491111baf028e36d5e08",
+  "python-kraddr-base @ git+https://github.com/digitie/python-kraddr-base.git@1f3d2ac6c727ae6ad6bc32f8f88fd3f599c6bef6",
   "sqlalchemy>=2.0",
 ]
 
