@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 from typing import Any
 
 from sqlalchemy import (
@@ -16,12 +17,42 @@ from sqlalchemy import (
     Table,
     Text,
     UniqueConstraint,
+    create_engine,
 )
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker
 
 from krtour_map.ids import make_payload_hash
 from krtour_map.models import WeatherValue
 
 metadata = MetaData()
+
+
+@dataclass(frozen=True)
+class FeatureDbSettings:
+    """Database settings supplied by the host application."""
+
+    database_url: str
+    pool_pre_ping: bool = True
+    engine_options: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class FeatureDbContext:
+    """Initialized feature DB engine/session bundle."""
+
+    settings: FeatureDbSettings
+    engine: Engine
+    session_factory: sessionmaker[Session]
+
+    def create_schema(self) -> None:
+        create_feature_schema(self.engine)
+
+    def drop_schema(self) -> None:
+        drop_feature_schema(self.engine)
+
+    def dispose(self) -> None:
+        self.engine.dispose()
 
 features = Table(
     "features",
@@ -166,6 +197,83 @@ def drop_feature_schema(bind: Any) -> None:
     """Drop the python-krtour-map owned feature schema on a SQLAlchemy bind."""
 
     metadata.drop_all(bind)
+
+
+def feature_db_settings_from_object(
+    settings: FeatureDbSettings | str | Mapping[str, Any] | object,
+    *,
+    database_url_key: str = "database_url",
+    pool_pre_ping: bool | None = None,
+    engine_options: Mapping[str, Any] | None = None,
+) -> FeatureDbSettings:
+    """Build feature DB settings from TripMate settings, a mapping, or a URL."""
+
+    if isinstance(settings, FeatureDbSettings):
+        base = settings
+    elif isinstance(settings, str):
+        base = FeatureDbSettings(database_url=settings)
+    elif isinstance(settings, Mapping):
+        database_url = settings.get(database_url_key)
+        if not isinstance(database_url, str) or not database_url:
+            raise ValueError(f"{database_url_key} must be a non-empty database URL")
+        base = FeatureDbSettings(database_url=database_url)
+    else:
+        database_url = getattr(settings, database_url_key, None)
+        if not isinstance(database_url, str) or not database_url:
+            raise ValueError(f"{database_url_key} must be a non-empty database URL")
+        base = FeatureDbSettings(database_url=database_url)
+
+    return FeatureDbSettings(
+        database_url=base.database_url,
+        pool_pre_ping=base.pool_pre_ping if pool_pre_ping is None else pool_pre_ping,
+        engine_options={**dict(base.engine_options), **dict(engine_options or {})},
+    )
+
+
+def create_feature_engine(
+    settings: FeatureDbSettings | str | Mapping[str, Any] | object,
+    **engine_options: Any,
+) -> Engine:
+    """Create an SQLAlchemy engine from host application DB settings."""
+
+    feature_settings = feature_db_settings_from_object(
+        settings,
+        engine_options=engine_options,
+    )
+    return create_engine(
+        feature_settings.database_url,
+        pool_pre_ping=feature_settings.pool_pre_ping,
+        **dict(feature_settings.engine_options),
+    )
+
+
+def create_feature_session_factory(engine: Engine) -> sessionmaker[Session]:
+    """Create the standard session factory for feature DB writes."""
+
+    return sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+
+def initialize_feature_db(
+    settings: FeatureDbSettings | str | Mapping[str, Any] | object,
+    *,
+    create_schema: bool = True,
+    **engine_options: Any,
+) -> FeatureDbContext:
+    """Initialize feature DB access from TripMate-provided DB settings."""
+
+    feature_settings = feature_db_settings_from_object(
+        settings,
+        engine_options=engine_options,
+    )
+    engine = create_feature_engine(feature_settings)
+    context = FeatureDbContext(
+        settings=feature_settings,
+        engine=engine,
+        session_factory=create_feature_session_factory(engine),
+    )
+    if create_schema:
+        context.create_schema()
+    return context
 
 
 def weather_value_to_row(value: WeatherValue) -> dict[str, Any]:

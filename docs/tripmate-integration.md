@@ -32,6 +32,10 @@ TripMate 문서에는 TripMate 제품 DB, API, Admin, 운영 결정을 남기고
 
 ## Weather 예시
 
+## Dagster boundary
+
+API 수집 후 feature/source/weather/price로 가공하는 run context, job spec, logical time/config helper는 `krtour_map.dagster`를 사용한다. TripMate는 실제 Dagster process, `Definitions`, schedule 실행, DB session 주입, 실행 로그와 알림만 담당한다.
+
 ```python
 from krtour_map.db import feature_weather_values, weather_value_to_row
 from krtour_map.models import WeatherValue

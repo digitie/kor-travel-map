@@ -5,7 +5,9 @@ from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from krtour_map.db import (
+    feature_db_settings_from_object,
     feature_weather_values,
+    initialize_feature_db,
     metadata,
     weather_value_from_row,
     weather_value_to_row,
@@ -51,3 +53,18 @@ def test_weather_value_db_row_round_trip() -> None:
     assert restored.provider == "python-kma-api"
     assert restored.timeline_bucket == "short"
     assert restored.normalization_version == "weather-feature-v1"
+
+
+def test_feature_db_initializes_from_host_settings_object() -> None:
+    class Settings:
+        database_url = "sqlite+pysqlite:///:memory:"
+
+    settings = feature_db_settings_from_object(Settings())
+    context = initialize_feature_db(settings)
+    try:
+        assert settings.database_url == "sqlite+pysqlite:///:memory:"
+        assert "feature_weather_values" in metadata.tables
+        assert context.session_factory.kw["autoflush"] is False
+        assert context.engine.dialect.name == "sqlite"
+    finally:
+        context.dispose()

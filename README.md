@@ -96,6 +96,7 @@ python -m pytest
 - [Provider 계약](docs/provider-contract.md)
 - [python-kraddr-base 자료형 사용 기준](docs/kraddr-base-types.md)
 - [Weather feature normalization](docs/weather-feature-normalization.md)
+- [Dagster 경계](docs/dagster-boundary.md)
 - [Postgres 스키마 기준](docs/postgres-schema.md)
 - [Debug fixture workflow](docs/debug-fixture-workflow.md)
 - [TripMate 통합 가이드](docs/tripmate-integration.md)
