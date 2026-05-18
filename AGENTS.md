@@ -21,6 +21,13 @@
 - 단순 전달용 `KmaWrapper`, `VWorldAdapter`, `OpiNetGateway` 같은 계층을 만들지 않습니다.
 - 필요한 경계는 provider model을 `Feature`, `SourceRecord`, `WeatherValue`, `PriceValue`로 바꾸는 순수 함수와 저장소 repository까지입니다.
 
+## 파일/이미지 저장 원칙
+
+- 이미지, 문서, provider 첨부파일 같은 바이너리 데이터는 DB에 직접 저장하지 않고 RustFS에 저장합니다.
+- feature와 파일은 1:N 관계를 허용합니다. 파일 메타데이터는 `feature_files` 계약에 저장하고, 실제 객체는 RustFS bucket/object key로 참조합니다.
+- provider가 이미지 URL만 제공하는 경우 ETL에서 URL을 내려받아 RustFS에 적재한 뒤 `FeatureFile` 메타데이터를 생성합니다.
+- TripMate는 RustFS client/resource와 transaction commit/rollback을 주입하고, 적재 세부 로직은 이 라이브러리에 둡니다.
+
 ## WSL/ext4 작업 원칙
 
 - Git, 테스트, 패키지 설치, lint, compile 검증은 WSL2 내부 ext4 작업공간에서 실행합니다.

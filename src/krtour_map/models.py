@@ -348,6 +348,54 @@ class NoticeDetail(KrtourModel):
         return self
 
 
+class FeatureFile(KrtourModel):
+    file_id: str
+    feature_id: str
+    file_type: str = "image"
+    storage_backend: str = "rustfs"
+    bucket: str
+    object_key: str
+    source_url: str | None = None
+    public_url: str | None = None
+    content_type: str | None = None
+    byte_size: int | None = Field(default=None, ge=0)
+    checksum_sha256: str | None = None
+    width: int | None = Field(default=None, ge=1)
+    height: int | None = Field(default=None, ge=1)
+    role: str = "gallery"
+    display_order: int = Field(default=0, ge=0)
+    alt_text: str | None = None
+    provider: str | None = None
+    dataset_key: str | None = None
+    source_record_key: str | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=kst_now)
+    updated_at: datetime = Field(default_factory=kst_now)
+
+    @field_validator("storage_backend")
+    @classmethod
+    def normalize_storage_backend(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized != "rustfs":
+            raise ValueError("feature files must be stored in rustfs")
+        return normalized
+
+    @field_validator("file_type")
+    @classmethod
+    def normalize_file_type(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {"image", "file"}:
+            raise ValueError("file_type must be 'image' or 'file'")
+        return normalized
+
+    @field_validator("provider")
+    @classmethod
+    def normalize_optional_provider(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return normalize_provider_name(value)
+
+
 class WeatherValue(KrtourModel):
     feature_id: str
     provider: str

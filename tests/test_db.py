@@ -13,6 +13,9 @@ from krtour_map.db import (
     event_detail_to_row,
     feature_db_settings_from_object,
     feature_event_details,
+    feature_file_from_row,
+    feature_file_to_row,
+    feature_files,
     feature_from_row,
     feature_notice_details,
     feature_opening_periods,
@@ -49,6 +52,7 @@ from krtour_map.db import (
 from krtour_map.enums import ForecastStyle, TimelineBucket, WeatherDomain
 from krtour_map.models import (
     EventDetail,
+    FeatureFile,
     FeatureOpeningHours,
     NoticeDetail,
     OpeningPeriod,
@@ -70,6 +74,7 @@ def test_feature_db_schema_is_owned_by_krtour_map() -> None:
     assert "price_values" in metadata.tables
     assert "provider_sync_state" in metadata.tables
     assert "feature_event_details" in metadata.tables
+    assert "feature_files" in metadata.tables
     assert "feature_place_details" in metadata.tables
     assert "feature_notice_details" in metadata.tables
     assert "feature_opening_periods" in metadata.tables
@@ -99,6 +104,7 @@ def test_feature_db_schema_is_owned_by_krtour_map() -> None:
     assert columns.normalization_version.name == "normalization_version"
 
     assert feature_event_details.c.starts_on.name == "starts_on"
+    assert feature_files.c.storage_backend.name == "storage_backend"
     assert feature_place_details.c.biz_number.name == "biz_number"
     assert feature_notice_details.c.notice_type.name == "notice_type"
     assert feature_opening_periods.c.duration_minutes.name == "duration_minutes"
@@ -183,6 +189,42 @@ def test_place_and_notice_detail_db_rows_round_trip() -> None:
     assert notice_detail_from_row(notice_row) == notice
 
 
+def test_feature_file_db_row_round_trip() -> None:
+    created_at = datetime(2026, 5, 18, 12, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+    feature_file = FeatureFile(
+        file_id="ff_1",
+        feature_id="f_event_1",
+        file_type="image",
+        storage_backend="rustfs",
+        bucket="tripmate-feature-files",
+        object_key="feature-files/f_event_1/000-primary-deadbeef.jpg",
+        source_url="https://cdn.example.com/festival.jpg",
+        public_url="https://media.example.com/feature-files/f_event_1/000-primary-deadbeef.jpg",
+        content_type="image/jpeg",
+        byte_size=1234,
+        checksum_sha256="deadbeef",
+        width=1280,
+        height=720,
+        role="primary",
+        display_order=0,
+        alt_text="축제 이미지",
+        provider="visitkorea",
+        dataset_key="visitkorea_festival_events",
+        source_record_key="sr_1",
+        payload={"field": "firstimage"},
+        created_at=created_at,
+        updated_at=created_at,
+    )
+
+    row = feature_file_to_row(feature_file)
+    restored = feature_file_from_row(row)
+
+    assert feature_files.name == "feature_files"
+    assert row["storage_backend"] == "rustfs"
+    assert row["bucket"] == "tripmate-feature-files"
+    assert restored == feature_file
+
+
 def test_load_feature_rows_writes_feature_db_tables(sample_feature) -> None:
     context = initialize_feature_db("sqlite+pysqlite:///:memory:")
     try:
@@ -196,6 +238,13 @@ def test_load_feature_rows_writes_feature_db_tables(sample_feature) -> None:
             price_category="fuel",
             retention_days=3650,
         )
+        feature_file = FeatureFile(
+            file_id="ff_sample",
+            feature_id=sample_feature.feature_id,
+            bucket="tripmate-feature-files",
+            object_key="feature-files/sample/000-primary.jpg",
+            role="primary",
+        )
 
         with context.session_factory() as session:
             result = load_feature_rows(
@@ -203,6 +252,7 @@ def test_load_feature_rows_writes_feature_db_tables(sample_feature) -> None:
                 feature_items=[sample_feature],
                 place_detail_items=[place],
                 price_point_items=[point],
+                feature_file_items=[feature_file],
             )
             session.commit()
 
@@ -210,13 +260,16 @@ def test_load_feature_rows_writes_feature_db_tables(sample_feature) -> None:
             feature_count = session.scalar(select(func.count()).select_from(features))
             place_count = session.scalar(select(func.count()).select_from(feature_place_details))
             point_count = session.scalar(select(func.count()).select_from(price_points))
+            file_count = session.scalar(select(func.count()).select_from(feature_files))
 
         assert result.features == 1
         assert result.place_details == 1
         assert result.price_points == 1
+        assert result.feature_files == 1
         assert feature_count == 1
         assert place_count == 1
         assert point_count == 1
+        assert file_count == 1
     finally:
         context.dispose()
 

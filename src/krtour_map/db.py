@@ -32,6 +32,7 @@ from krtour_map.models import (
     Coordinate,
     EventDetail,
     Feature,
+    FeatureFile,
     FeatureOpeningHours,
     NoticeDetail,
     OpeningPeriod,
@@ -109,6 +110,7 @@ class FeatureDbLoadResult:
     weather_values: int = 0
     price_points: int = 0
     price_values: int = 0
+    feature_files: int = 0
     provider_sync_states: int = 0
 
 
@@ -227,6 +229,59 @@ source_links = Table(
         name="ck_source_links_source_role",
     ),
 )
+
+feature_files = Table(
+    "feature_files",
+    metadata,
+    Column("file_id", Text, primary_key=True),
+    Column(
+        "feature_id",
+        Text,
+        ForeignKey("features.feature_id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("file_type", Text, nullable=False, default="image"),
+    Column("storage_backend", Text, nullable=False, default="rustfs"),
+    Column("bucket", Text, nullable=False),
+    Column("object_key", Text, nullable=False),
+    Column("source_url", Text),
+    Column("public_url", Text),
+    Column("content_type", Text),
+    Column("byte_size", Integer),
+    Column("checksum_sha256", Text),
+    Column("width", Integer),
+    Column("height", Integer),
+    Column("role", Text, nullable=False, default="gallery"),
+    Column("display_order", Integer, nullable=False, default=0),
+    Column("alt_text", Text),
+    Column("provider", Text),
+    Column("dataset_key", Text),
+    Column(
+        "source_record_key",
+        Text,
+        ForeignKey("source_records.source_record_key", ondelete="SET NULL"),
+    ),
+    Column("payload", JSON, nullable=False, default=dict),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    UniqueConstraint(
+        "storage_backend",
+        "bucket",
+        "object_key",
+        name="uq_feature_files_storage_object",
+    ),
+    CheckConstraint("storage_backend = 'rustfs'", name="ck_feature_files_storage_backend"),
+    CheckConstraint("file_type IN ('image', 'file')", name="ck_feature_files_file_type"),
+    CheckConstraint("display_order >= 0", name="ck_feature_files_display_order"),
+    CheckConstraint("byte_size IS NULL OR byte_size >= 0", name="ck_feature_files_byte_size"),
+    CheckConstraint("width IS NULL OR width > 0", name="ck_feature_files_width"),
+    CheckConstraint("height IS NULL OR height > 0", name="ck_feature_files_height"),
+)
+
+Index("ix_feature_files_feature_type", feature_files.c.feature_id, feature_files.c.file_type)
+Index("ix_feature_files_feature_order", feature_files.c.feature_id, feature_files.c.display_order)
+Index("ix_feature_files_storage_object", feature_files.c.bucket, feature_files.c.object_key)
+Index("ix_feature_files_provider_dataset", feature_files.c.provider, feature_files.c.dataset_key)
 
 feature_place_details = Table(
     "feature_place_details",
@@ -708,6 +763,7 @@ def load_feature_rows(
     place_detail_items: Iterable[PlaceDetail] = (),
     event_detail_items: Iterable[EventDetail] = (),
     notice_detail_items: Iterable[NoticeDetail] = (),
+    feature_file_items: Iterable[FeatureFile] = (),
     opening_hours_by_feature_id: Mapping[str, FeatureOpeningHours] | None = None,
     weather_value_items: Iterable[WeatherValue] = (),
     price_point_items: Iterable[PricePoint] = (),
@@ -727,6 +783,7 @@ def load_feature_rows(
     place_detail_rows = list(place_detail_items)
     event_detail_rows = list(event_detail_items)
     notice_detail_rows = list(notice_detail_items)
+    feature_file_rows = list(feature_file_items)
     weather_value_rows = list(weather_value_items)
     price_point_rows = list(price_point_items)
     price_value_rows = list(price_value_items)
@@ -771,6 +828,14 @@ def load_feature_rows(
             feature_notice_details,
             {"feature_id": detail.feature_id},
             notice_detail_to_row(detail),
+        )
+
+    for feature_file in feature_file_rows:
+        _upsert_row(
+            session,
+            feature_files,
+            {"file_id": feature_file.file_id},
+            feature_file_to_row(feature_file),
         )
 
     opening_period_count = 0
@@ -860,6 +925,7 @@ def load_feature_rows(
         weather_values=len(weather_value_rows),
         price_points=len(price_point_rows),
         price_values=len(price_value_rows),
+        feature_files=len(feature_file_rows),
         provider_sync_states=len(provider_sync_state_rows),
     )
 
@@ -1008,6 +1074,64 @@ def source_link_from_row(row: Mapping[str, Any]) -> SourceLink:
         confidence=int(row["confidence"]),
         is_primary_source=bool(row["is_primary_source"]),
         created_at=row["created_at"],
+    )
+
+
+def feature_file_to_row(feature_file: FeatureFile) -> dict[str, Any]:
+    """Convert a `FeatureFile` DTO into a `feature_files` row payload."""
+
+    return {
+        "file_id": feature_file.file_id,
+        "feature_id": feature_file.feature_id,
+        "file_type": feature_file.file_type,
+        "storage_backend": feature_file.storage_backend,
+        "bucket": feature_file.bucket,
+        "object_key": feature_file.object_key,
+        "source_url": feature_file.source_url,
+        "public_url": feature_file.public_url,
+        "content_type": feature_file.content_type,
+        "byte_size": feature_file.byte_size,
+        "checksum_sha256": feature_file.checksum_sha256,
+        "width": feature_file.width,
+        "height": feature_file.height,
+        "role": feature_file.role,
+        "display_order": feature_file.display_order,
+        "alt_text": feature_file.alt_text,
+        "provider": feature_file.provider,
+        "dataset_key": feature_file.dataset_key,
+        "source_record_key": feature_file.source_record_key,
+        "payload": dict(feature_file.payload),
+        "created_at": feature_file.created_at,
+        "updated_at": feature_file.updated_at,
+    }
+
+
+def feature_file_from_row(row: Mapping[str, Any]) -> FeatureFile:
+    """Convert a `feature_files` row mapping into a `FeatureFile` DTO."""
+
+    return FeatureFile(
+        file_id=str(row["file_id"]),
+        feature_id=str(row["feature_id"]),
+        file_type=str(row["file_type"]),
+        storage_backend=str(row["storage_backend"]),
+        bucket=str(row["bucket"]),
+        object_key=str(row["object_key"]),
+        source_url=row.get("source_url"),
+        public_url=row.get("public_url"),
+        content_type=row.get("content_type"),
+        byte_size=row.get("byte_size"),
+        checksum_sha256=row.get("checksum_sha256"),
+        width=row.get("width"),
+        height=row.get("height"),
+        role=str(row.get("role") or "gallery"),
+        display_order=int(row.get("display_order") or 0),
+        alt_text=row.get("alt_text"),
+        provider=row.get("provider"),
+        dataset_key=row.get("dataset_key"),
+        source_record_key=row.get("source_record_key"),
+        payload=dict(row.get("payload") or {}),
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
     )
 
 

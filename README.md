@@ -13,6 +13,7 @@
 - kind별 detail: `PlaceDetail`, `EventDetail`, `NoticeDetail`로 장소/행사/공지 공통 필드 구조화
 - common address/coordinate/category: `python-kraddr-base`의 `Address`, `AddressRegion`, `PlaceCoordinate`, `PlaceCategoryCode`를 직접 사용
 - feature DB: `krtour_map.db`의 SQLAlchemy Core schema, row 변환 함수, staged load helper가 canonical 저장소 계약
+- feature files: 이미지/파일 바이너리는 RustFS에 저장하고 `FeatureFile`/`feature_files`에 1:N 메타데이터 저장
 - feature CRUD: 테스트/디버그용 `InMemoryFeatureStore`
 - weather 병합: KMA timeline을 기준으로 provider별 weather context를 latest view로 합침
 - weather 분류: `forecast_style`은 관측/예보/지수 성격을 보존하고 `timeline_bucket`은 KMA식 `ultra_short`, `short`, `mid` 조회 축을 담당
@@ -38,6 +39,7 @@ src/krtour_map/
   ids.py         # deterministic feature/source ID
   providers.py   # canonical provider name policy
   store.py       # in-memory CRUD repository
+  files.py       # RustFS feature file metadata/upload helper
   weather.py     # weather latest merge helper
   events.py      # VisitKorea festival/event ETL normalization and DB load helper
   opinet.py      # OpiNet station place/price normalization and DB load helper
@@ -100,6 +102,7 @@ python -m pytest
 - [Provider 계약](docs/provider-contract.md)
 - [python-kraddr-base 자료형 사용 기준](docs/kraddr-base-types.md)
 - [Feature model](docs/feature-model.md)
+- [Feature files and RustFS](docs/feature-files-rustfs.md)
 - [Feature opening hours](docs/feature-opening-hours.md)
 - [Event feature ETL](docs/event-feature-etl.md)
 - [OpiNet place and price ETL](docs/opinet-place-price-etl.md)

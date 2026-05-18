@@ -12,7 +12,9 @@
 - `EventDetail`
 - `SourceRecord`
 - `SourceLink`
+- `FeatureFileSource` / `FeatureFile`
 - `feature_event_details`
+- `feature_files`
 
 사용자, 여행계획, POI는 TripMate 제품 도메인이며 이 라이브러리에서 관리하지 않는다.
 TripMate는 필요할 때 `feature_id`를 참조한다.
@@ -68,23 +70,36 @@ VisitKorea `content_id`는 source natural key로 사용한다. 좌표가 없는 
 행사 운영시간이 별도로 구조화되는 provider가 있으면 `FeatureOpeningHours`,
 `feature_opening_periods`, `feature_special_days` 계약을 함께 사용한다.
 
+## 이미지 적재
+
+VisitKorea 축제 응답의 `first_image`, `first_image2`는 provider URL을 그대로 앱에서 사용하지
+않고 RustFS에 적재한다.
+
+- `first_image`: `FeatureFileSource(role="primary", display_order=0)`
+- `first_image2`: `FeatureFileSource(role="thumbnail", display_order=1)`
+- 중복 URL은 한 번만 적재한다.
+- RustFS object key는 feature id, 표시 순서, role, checksum으로 결정한다.
+- `feature_files`에는 RustFS `bucket`, `object_key`, `content_type`, `byte_size`,
+  `checksum_sha256`, `role`, `display_order`, source trace를 저장한다.
+
 ## DB 적재
 
 수집과 적재는 같은 라이브러리 안에 있지만 transaction ownership은 TripMate가 가진다.
 
 - `collect_visitkorea_festival_events(client, ...)`: provider client를 직접 호출하고 DTO 묶음을 반환한다.
-- `load_visitkorea_festival_result(session, result)`: 수집 결과를 열린 feature DB session에 staged write한다.
-- `collect_and_load_visitkorea_festival_events(session, client, ...)`: 수집과 staged write를 한 번에 수행한다.
-- `load_visitkorea_festival_events(resource, run)`: Dagster job spec loader. `resource`가 provider client만이면 수집 결과를, `client`와 `session`을 함께 가진 resource면 수집+DB 적재 결과를 반환한다.
+- `load_visitkorea_festival_result(session, result, rustfs_store=...)`: 수집 결과와 RustFS 이미지 metadata를 열린 feature DB session에 staged write한다.
+- `collect_and_load_visitkorea_festival_events(session, client, rustfs_store=...)`: 수집과 staged write를 한 번에 수행한다.
+- `load_visitkorea_festival_events(resource, run)`: Dagster job spec loader. `resource`가 provider client만이면 수집 결과를, `client`, `session`, `rustfs_store`를 함께 가진 resource면 수집+RustFS 업로드+DB 적재 결과를 반환한다.
 
 `load_feature_rows`는 update-or-insert 방식으로 아래 순서를 보장한다.
 
 1. `source_records`
 2. `features`
 3. kind별 detail table
-4. opening hours, price, weather values
-5. `source_links`
-6. `provider_sync_state`
+4. `feature_files`
+5. opening hours, price, weather values
+6. `source_links`
+7. `provider_sync_state`
 
 호출자는 성공 시 commit, 실패 시 rollback한다. 이 라이브러리는 Dagster daemon이나 schedule을
 직접 실행하지 않으며, TripMate가 resource 주입과 운영 정책을 담당한다.

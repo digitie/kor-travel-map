@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 from krtour_map.dagster import DagsterEtlExecution, DagsterEtlRun
 from krtour_map.db import (
     feature_event_details,
+    feature_files,
     features,
     initialize_feature_db,
     source_links,
@@ -29,6 +30,7 @@ from krtour_map.events import (
     visitkorea_festival_full_scan_job_spec,
     visitkorea_festival_item_to_feature_bundle,
 )
+from krtour_map.files import DownloadedFile, RustfsFileStore
 from krtour_map.models import Coordinate
 
 
@@ -74,6 +76,21 @@ class FakeVisitKoreaClient:
         return iter(self.pages)
 
 
+class FakeRustfsClient:
+    def __init__(self) -> None:
+        self.objects: list[dict[str, object]] = []
+
+    def put_object(self, *, Bucket: str, Key: str, Body: bytes, ContentType: str) -> None:
+        self.objects.append(
+            {
+                "bucket": Bucket,
+                "key": Key,
+                "body": Body,
+                "content_type": ContentType,
+            }
+        )
+
+
 def test_collect_visitkorea_festival_events_uses_provider_pagination() -> None:
     collected_at = datetime(2026, 5, 18, 9, 0, tzinfo=ZoneInfo("Asia/Seoul"))
     client = FakeVisitKoreaClient(
@@ -85,6 +102,8 @@ def test_collect_visitkorea_festival_events_uses_provider_pagination() -> None:
                         title="봄 축제",
                         coordinate=Coordinate(lat=37.5796, lon=126.9769),
                         addr1="서울 종로구 세종대로 1",
+                        first_image="https://cdn.example.com/festival.jpg",
+                        first_image2="https://cdn.example.com/festival-thumb.jpg",
                         raw={"contentid": "100", "eventstartdate": "20260501"},
                     ),
                     FakeFestivalItem(
@@ -136,6 +155,9 @@ def test_collect_visitkorea_festival_events_uses_provider_pagination() -> None:
     assert result.event_details[2].starts_on == date(2026, 7, 1)
     assert result.event_details[2].ends_on == date(2026, 7, 7)
     assert result.source_links[0].source_record_key == result.source_records[0].key()
+    assert len(result.feature_file_sources) == 2
+    assert result.feature_file_sources[0].role == "primary"
+    assert result.feature_file_sources[1].role == "thumbnail"
 
 
 def test_visitkorea_festival_job_spec_is_daily_full_scan() -> None:
@@ -273,6 +295,67 @@ def test_load_visitkorea_festival_events_loads_when_session_resource_is_provided
         assert result.collection.scanned_pages == 1
         assert result.load.features == 1
         assert feature_count == 1
+    finally:
+        context.dispose()
+
+
+def test_load_visitkorea_festival_events_uploads_images_to_rustfs() -> None:
+    collected_at = datetime(2026, 5, 18, 9, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+    client = FakeVisitKoreaClient(
+        (
+            FakePage(
+                items=(
+                    FakeFestivalItem(
+                        content_id="302",
+                        title="이미지 축제",
+                        raw={"contentid": "302", "eventstartdate": "20260501"},
+                        first_image="https://cdn.example.com/festival.jpg",
+                        first_image2="https://cdn.example.com/festival-thumb.jpg",
+                    ),
+                ),
+                total_count=1,
+                page_no=1,
+                num_of_rows=1,
+                collected_at=collected_at,
+            ),
+        )
+    )
+    rustfs_client = FakeRustfsClient()
+    rustfs_store = RustfsFileStore(
+        client=rustfs_client,
+        bucket="tripmate-feature-files",
+        public_base_url="https://media.example.com",
+    )
+    run = DagsterEtlRun(
+        dataset_key=VISITKOREA_FESTIVAL_DATASET_KEY,
+        run_key="20260518-full-scan",
+        run_type="scheduled",
+        trigger_date=date(2026, 5, 18),
+        logical_datetime=collected_at,
+        op_config={},
+    )
+    context = initialize_feature_db("sqlite+pysqlite:///:memory:")
+    try:
+        with context.session_factory() as session:
+            resources = VisitKoreaFestivalLoadResources(
+                client=client,
+                session=session,
+                rustfs_store=rustfs_store,
+                file_fetcher=lambda _url: DownloadedFile(
+                    data=b"image-bytes",
+                    content_type="image/jpeg",
+                ),
+            )
+            result = load_visitkorea_festival_events(resources, run)
+            session.commit()
+
+        with context.session_factory() as session:
+            file_count = session.scalar(select(func.count()).select_from(feature_files))
+
+        assert isinstance(result, VisitKoreaFestivalDbEtlResult)
+        assert result.load.feature_files == 2
+        assert len(rustfs_client.objects) == 2
+        assert file_count == 2
     finally:
         context.dispose()
 

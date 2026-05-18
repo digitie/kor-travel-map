@@ -17,6 +17,12 @@ from krtour_map.dagster import (
 )
 from krtour_map.db import FeatureDbLoadResult, load_feature_rows
 from krtour_map.enums import FeatureKind, SourceRole
+from krtour_map.files import (
+    FeatureFileSource,
+    FileFetcher,
+    RustfsFileStore,
+    upload_feature_file_sources_to_rustfs,
+)
 from krtour_map.ids import make_feature_id, make_payload_hash
 from krtour_map.models import Coordinate, EventDetail, Feature, RawDataRef, SourceLink, SourceRecord
 
@@ -47,6 +53,7 @@ class VisitKoreaFestivalEtlResult:
     event_details: tuple[EventDetail, ...]
     source_records: tuple[SourceRecord, ...]
     source_links: tuple[SourceLink, ...]
+    feature_file_sources: tuple[FeatureFileSource, ...] = ()
     skipped_items: tuple[SkippedFestivalItem, ...] = ()
 
     @property
@@ -68,6 +75,8 @@ class VisitKoreaFestivalDbEtlResult:
 class VisitKoreaFestivalLoadResources:
     client: Any
     session: Any
+    rustfs_store: RustfsFileStore | None = None
+    file_fetcher: FileFetcher | None = None
 
 
 def collect_visitkorea_festival_events(
@@ -95,6 +104,7 @@ def collect_visitkorea_festival_events(
     event_details: list[EventDetail] = []
     source_records: list[SourceRecord] = []
     source_links: list[SourceLink] = []
+    feature_file_sources: list[FeatureFileSource] = []
     skipped_items: list[SkippedFestivalItem] = []
     scanned_pages = 0
 
@@ -125,6 +135,14 @@ def collect_visitkorea_festival_events(
             event_details.append(event_detail)
             source_records.append(source_record)
             source_links.append(source_link)
+            feature_file_sources.extend(
+                visitkorea_festival_item_to_file_sources(
+                    item,
+                    feature=feature,
+                    source_record_key=source_record.key(),
+                    raw=_raw_mapping(item),
+                )
+            )
 
     return VisitKoreaFestivalEtlResult(
         dataset_key=VISITKOREA_FESTIVAL_DATASET_KEY,
@@ -133,6 +151,7 @@ def collect_visitkorea_festival_events(
         event_details=tuple(event_details),
         source_records=tuple(source_records),
         source_links=tuple(source_links),
+        feature_file_sources=tuple(feature_file_sources),
         skipped_items=tuple(skipped_items),
     )
 
@@ -140,8 +159,21 @@ def collect_visitkorea_festival_events(
 def load_visitkorea_festival_result(
     session: Any,
     result: VisitKoreaFestivalEtlResult,
+    *,
+    rustfs_store: RustfsFileStore | None = None,
+    file_fetcher: FileFetcher | None = None,
+    collected_at: datetime | None = None,
 ) -> FeatureDbLoadResult:
     """Load a collected VisitKorea festival result into the feature DB session."""
+
+    feature_files = ()
+    if rustfs_store is not None:
+        feature_files = upload_feature_file_sources_to_rustfs(
+            rustfs_store,
+            result.feature_file_sources,
+            fetch_url=file_fetcher,
+            collected_at=collected_at,
+        )
 
     return load_feature_rows(
         session,
@@ -149,6 +181,7 @@ def load_visitkorea_festival_result(
         source_record_items=result.source_records,
         source_link_items=result.source_links,
         event_detail_items=result.event_details,
+        feature_file_items=feature_files,
     )
 
 
@@ -163,6 +196,8 @@ def collect_and_load_visitkorea_festival_events(
     page_size: int = VISITKOREA_FESTIVAL_DEFAULT_PAGE_SIZE,
     max_pages: int | None = None,
     collected_at: datetime | None = None,
+    rustfs_store: RustfsFileStore | None = None,
+    file_fetcher: FileFetcher | None = None,
 ) -> VisitKoreaFestivalDbEtlResult:
     """Collect every VisitKorea festival page and stage the normalized rows in DB."""
 
@@ -178,7 +213,13 @@ def collect_and_load_visitkorea_festival_events(
     )
     return VisitKoreaFestivalDbEtlResult(
         collection=collection,
-        load=load_visitkorea_festival_result(session, collection),
+        load=load_visitkorea_festival_result(
+            session,
+            collection,
+            rustfs_store=rustfs_store,
+            file_fetcher=file_fetcher,
+            collected_at=collected_at,
+        ),
     )
 
 
@@ -281,6 +322,59 @@ def visitkorea_festival_item_to_feature_bundle(
     return feature, event_detail, source_record, source_link
 
 
+def visitkorea_festival_item_to_file_sources(
+    item: Any,
+    *,
+    feature: Feature,
+    source_record_key: str,
+    raw: Mapping[str, Any] | None = None,
+) -> tuple[FeatureFileSource, ...]:
+    """Return VisitKorea festival image sources that should be mirrored to RustFS."""
+
+    raw_mapping = raw or _raw_mapping(item)
+    content_id = _text(item, "content_id", raw_keys=("contentid", "contentId", "content_id"))
+    fields = (
+        (
+            "first_image",
+            ("firstimage", "firstImage", "first_image"),
+            "primary",
+            0,
+        ),
+        (
+            "first_image2",
+            ("firstimage2", "firstImage2", "first_image2"),
+            "thumbnail",
+            1,
+        ),
+    )
+    sources: list[FeatureFileSource] = []
+    seen_urls: set[str] = set()
+    for attr, raw_keys, role, display_order in fields:
+        source_url = _text(item, attr, raw_keys=raw_keys)
+        if source_url is None or source_url in seen_urls:
+            continue
+        seen_urls.add(source_url)
+        sources.append(
+            FeatureFileSource(
+                feature_id=feature.feature_id,
+                source_url=source_url,
+                file_type="image",
+                role=role,
+                display_order=display_order,
+                alt_text=feature.name,
+                provider=VISITKOREA_PROVIDER,
+                dataset_key=VISITKOREA_FESTIVAL_DATASET_KEY,
+                source_record_key=source_record_key,
+                payload={
+                    "content_id": content_id,
+                    "visitkorea_field": attr,
+                    "raw_value": _first(raw_mapping, *raw_keys),
+                },
+            )
+        )
+    return tuple(sources)
+
+
 def load_visitkorea_festival_events(
     resource: Any,
     run: DagsterEtlRun,
@@ -288,7 +382,7 @@ def load_visitkorea_festival_events(
     """Dagster-side loader body for TripMate to call from its execution graph."""
 
     config = run.op_config
-    client, session = _resolve_visitkorea_resources(resource)
+    client, session, rustfs_store, file_fetcher = _resolve_visitkorea_resources(resource)
     kwargs = {
         "event_start_date": _date_config(config, "event_start_date")
         or VISITKOREA_FESTIVAL_FULL_SCAN_START_DATE,
@@ -305,6 +399,8 @@ def load_visitkorea_festival_events(
             session,
             client,
             **kwargs,
+            rustfs_store=rustfs_store,
+            file_fetcher=file_fetcher,
         )
     return collect_visitkorea_festival_events(
         client,
@@ -440,18 +536,28 @@ def _date_config(config: Mapping[str, object], key: str) -> str | date | datetim
     raise TypeError(f"{key} must be a date, datetime, or ISO date string")
 
 
-def _resolve_visitkorea_resources(resource: Any) -> tuple[Any, Any | None]:
+def _resolve_visitkorea_resources(
+    resource: Any,
+) -> tuple[Any, Any | None, RustfsFileStore | None, FileFetcher | None]:
     if isinstance(resource, Mapping):
         client = resource.get("client") or resource.get("visitkorea_client")
         session = resource.get("session") or resource.get("feature_session")
+        rustfs_store = resource.get("rustfs_store") or resource.get("feature_file_store")
+        file_fetcher = resource.get("file_fetcher")
     else:
         client = getattr(resource, "client", None) or getattr(resource, "visitkorea_client", None)
         session = getattr(resource, "session", None) or getattr(resource, "feature_session", None)
+        rustfs_store = getattr(resource, "rustfs_store", None) or getattr(
+            resource,
+            "feature_file_store",
+            None,
+        )
+        file_fetcher = getattr(resource, "file_fetcher", None)
         if client is None:
             client = resource
     if client is None:
         raise ValueError("VisitKorea ETL resource must provide a public provider client")
-    return client, session
+    return client, session, rustfs_store, file_fetcher
 
 
 def _first(raw: Mapping[str, Any], *keys: str) -> Any:
