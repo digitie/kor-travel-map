@@ -21,6 +21,17 @@
 - 단순 전달용 `KmaWrapper`, `VWorldAdapter`, `OpiNetGateway` 같은 계층을 만들지 않습니다.
 - 필요한 경계는 provider model을 `Feature`, `SourceRecord`, `WeatherValue`, `PriceValue`로 바꾸는 순수 함수와 저장소 repository까지입니다.
 
+## WSL/ext4 작업 원칙
+
+- Git, 테스트, 패키지 설치, lint, compile 검증은 WSL2 내부 ext4 작업공간에서 실행합니다.
+- NTFS 경로(`/mnt/f`, `F:\dev`)의 repository에서 직접 `git status`, `git diff`, `git commit`, `pytest` 같은 반복 작업을 하지 않습니다. NTFS는 git metadata 접근이 느리므로 작업 기준 저장소가 아닙니다.
+- 표준 WSL 작업공간은 `/home/digitie/dev/python-krtour-map`입니다.
+- `F:\dev\python-krtour-map`은 Windows 도구와 파일 확인을 위한 export/sync 대상입니다. ext4 작업공간에서 검증과 커밋을 끝낸 뒤 결과만 동기화합니다.
+- 짧은 명령마다 `wsl.exe`를 새로 호출하지 않습니다. 가능하면 WSL 내부 shell 세션을 유지하거나, 하나의 `bash -lc` 안에서 여러 명령을 묶어 실행합니다.
+- Windows 도구가 반복적으로 명령을 보내야 할 때는 WSL `sshd`에 localhost SSH로 접속하고 `ControlMaster`/`ControlPersist`를 사용해 연결을 재사용합니다.
+- 동기화는 `rsync` 또는 동등한 파일 복사 도구를 사용하되 `.git`, `.venv`, cache, build 산출물은 NTFS export에서 제외합니다.
+- 앞으로 이 저장소 작업은 이 방식을 기본값으로 유지합니다. 예외가 필요하면 먼저 사용자에게 이유와 범위를 설명합니다.
+
 ## 검증
 
 ```bash

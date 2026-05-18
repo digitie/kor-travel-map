@@ -104,5 +104,6 @@ python -m pytest
 - [Dagster 경계](docs/dagster-boundary.md)
 - [Postgres 스키마 기준](docs/postgres-schema.md)
 - [Debug fixture workflow](docs/debug-fixture-workflow.md)
+- [WSL ext4 workflow](docs/wsl-ext4-workflow.md)
 - [TripMate 통합 가이드](docs/tripmate-integration.md)
 - [TripMate feature docs migration](docs/tripmate-feature-docs-migration.md)
