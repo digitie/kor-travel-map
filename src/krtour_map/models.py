@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime, time
 from decimal import Decimal
 from typing import Any, TypeAlias
 
@@ -19,7 +19,15 @@ from kraddr.base import (
 from kraddr.base import (
     category_path as kraddr_category_path,
 )
-from pydantic import AnyUrl, BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    AnyUrl,
+    BaseModel,
+    ConfigDict,
+    Field,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 
 from krtour_map.enums import (
     FeatureKind,
@@ -73,7 +81,7 @@ class Feature(KrtourModel):
     feature_id: str
     kind: FeatureKind | str
     name: str = Field(..., min_length=1)
-    coord: Coordinate
+    coord: Coordinate | None = None
     address: Address = Field(default_factory=Address)
     category: str = Field(..., min_length=1)
     urls: FeatureUrls = Field(default_factory=FeatureUrls)
@@ -90,7 +98,9 @@ class Feature(KrtourModel):
 
     @field_validator("coord")
     @classmethod
-    def validate_korean_coordinate(cls, value: Coordinate) -> Coordinate:
+    def validate_korean_coordinate(cls, value: Coordinate | None) -> Coordinate | None:
+        if value is None:
+            return None
         if not 124.0 <= value.longitude <= 132.0:
             raise ValueError("coord.longitude must be within the Korean map bounds")
         if not 33.0 <= value.latitude <= 39.5:
@@ -224,6 +234,116 @@ class WeatherValue(KrtourModel):
             self.valid_at,
             self.observed_at,
         )
+
+
+def _minute_of_week(day: int, hhmm: str) -> int:
+    return day * 24 * 60 + int(hhmm[:2]) * 60 + int(hhmm[2:])
+
+
+class OpeningTime(KrtourModel):
+    """Google Places-style local opening time point."""
+
+    day: int = Field(..., ge=0, le=6, description="0=Sunday, 6=Saturday")
+    time_str: str = Field(
+        ...,
+        alias="time",
+        pattern=r"^(?:[01]\d|2[0-3])[0-5]\d$",
+        description="Local time in HHMM format.",
+    )
+
+    @computed_field
+    @property
+    def parsed_time(self) -> time:
+        return time(int(self.time_str[:2]), int(self.time_str[2:]))
+
+
+class OpeningPeriod(KrtourModel):
+    """One continuous local opening period.
+
+    A missing close value follows Google Places' 24/7 signature and is valid only
+    for Sunday 00:00.
+    """
+
+    open: OpeningTime
+    close: OpeningTime | None = None
+
+    @model_validator(mode="after")
+    def validate_period(self) -> OpeningPeriod:
+        if self.close is None:
+            if self.open.day != 0 or self.open.time_str != "0000":
+                raise ValueError("24/7 periods must open on day 0 at 0000")
+            return self
+        if self.open.day == self.close.day and self.open.time_str >= self.close.time_str:
+            raise ValueError("close time must be after open time on the same day")
+        return self
+
+    @property
+    def is_24_hours(self) -> bool:
+        return self.close is None
+
+    @computed_field
+    @property
+    def duration_minutes(self) -> int:
+        if self.close is None:
+            return 7 * 24 * 60
+        start = _minute_of_week(self.open.day, self.open.time_str)
+        end = _minute_of_week(self.close.day, self.close.time_str)
+        if end <= start:
+            end += 7 * 24 * 60
+        return end - start
+
+
+class SpecialOpeningDay(KrtourModel):
+    """Date-specific opening-hours override."""
+
+    date: date
+    is_closed: bool = False
+    periods: list[OpeningPeriod] | None = None
+    exceptional_hours: bool = True
+
+    @model_validator(mode="after")
+    def validate_override(self) -> SpecialOpeningDay:
+        if self.is_closed and self.periods:
+            raise ValueError("closed special days cannot include opening periods")
+        if not self.is_closed and not self.periods:
+            raise ValueError("open special days must include at least one opening period")
+        return self
+
+
+class FeatureOpeningHours(KrtourModel):
+    """Reusable feature opening-hours payload.
+
+    The shape mirrors Google Places enough for UI/API interchange while DB tables
+    can keep regular periods normalized for querying.
+    """
+
+    timezone: str = "Asia/Seoul"
+    open_now: bool | None = None
+    periods: list[OpeningPeriod] = Field(default_factory=list)
+    special_days: list[SpecialOpeningDay] = Field(default_factory=list)
+    weekday_text: list[str] | None = None
+
+
+class EventDetail(KrtourModel):
+    feature_id: str
+    event_kind: str = "festival"
+    starts_on: date | None = None
+    ends_on: date | None = None
+    timezone: str = "Asia/Seoul"
+    opening_hours: FeatureOpeningHours | None = None
+    venue_name: str | None = None
+    tel: str | None = None
+    content_id: str | None = None
+    content_type_id: str | None = None
+    area_code: str | None = None
+    sigungu_code: str | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_date_range(self) -> EventDetail:
+        if self.starts_on is not None and self.ends_on is not None and self.ends_on < self.starts_on:
+            raise ValueError("ends_on must be on or after starts_on")
+        return self
 
 
 class PricePoint(KrtourModel):
