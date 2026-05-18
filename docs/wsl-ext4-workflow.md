@@ -86,6 +86,22 @@ ssh -t wsl-ubuntu 'cd /home/digitie/dev/python-krtour-map && exec bash -l'
 - password login은 끄고 SSH key만 사용한다.
 - 22번 포트는 Windows OpenSSH server와 충돌할 수 있으므로 2222 같은 별도 포트를 쓴다.
 
+### GitHub 인증
+
+GitHub push까지 WSL ext4에서 끝내려면 WSL 안에 별도 인증을 둔다. 권장 순서는 SSH key다.
+
+```bash
+ssh-keygen -t ed25519 -C "digitie@gmail.com"
+cat ~/.ssh/id_ed25519.pub
+git remote set-url origin git@github.com:digitie/python-krtour-map.git
+ssh -T git@github.com
+```
+
+Windows Git Credential Manager를 WSL에서 재사용하는 방법도 있지만, WSL interop이 꺼져 있으면
+Windows `.exe`를 실행할 수 없어 실패한다. 이 경우에는 WSL용 SSH key 또는 WSL 안의 GitHub CLI
+로그인을 사용한다. Windows Git으로 `\\wsl.localhost\...` repository를 push하는 것은 인증
+우회용 fallback으로만 사용하고, 반복 git 작업 경로로 삼지 않는다.
+
 ### 대안: VS Code Remote WSL
 
 VS Code를 쓰는 경우에는 WSL extension으로 `/home/digitie/dev/python-krtour-map` 폴더를 직접 연다.
