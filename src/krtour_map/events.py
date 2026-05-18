@@ -15,6 +15,7 @@ from krtour_map.dagster import (
     EtlRunIdentity,
     schedule_requires_any_env,
 )
+from krtour_map.db import FeatureDbLoadResult, load_feature_rows
 from krtour_map.enums import FeatureKind, SourceRole
 from krtour_map.ids import make_feature_id, make_payload_hash
 from krtour_map.models import Coordinate, EventDetail, Feature, RawDataRef, SourceLink, SourceRecord
@@ -51,6 +52,22 @@ class VisitKoreaFestivalEtlResult:
     @property
     def item_count(self) -> int:
         return len(self.features)
+
+
+@dataclass(frozen=True)
+class VisitKoreaFestivalDbEtlResult:
+    collection: VisitKoreaFestivalEtlResult
+    load: FeatureDbLoadResult
+
+    @property
+    def item_count(self) -> int:
+        return self.collection.item_count
+
+
+@dataclass(frozen=True)
+class VisitKoreaFestivalLoadResources:
+    client: Any
+    session: Any
 
 
 def collect_visitkorea_festival_events(
@@ -117,6 +134,51 @@ def collect_visitkorea_festival_events(
         source_records=tuple(source_records),
         source_links=tuple(source_links),
         skipped_items=tuple(skipped_items),
+    )
+
+
+def load_visitkorea_festival_result(
+    session: Any,
+    result: VisitKoreaFestivalEtlResult,
+) -> FeatureDbLoadResult:
+    """Load a collected VisitKorea festival result into the feature DB session."""
+
+    return load_feature_rows(
+        session,
+        feature_items=result.features,
+        source_record_items=result.source_records,
+        source_link_items=result.source_links,
+        event_detail_items=result.event_details,
+    )
+
+
+def collect_and_load_visitkorea_festival_events(
+    session: Any,
+    client: Any,
+    *,
+    event_start_date: str | date | datetime,
+    event_end_date: str | date | datetime | None = None,
+    area_code: str | None = None,
+    sigungu_code: str | None = None,
+    page_size: int = VISITKOREA_FESTIVAL_DEFAULT_PAGE_SIZE,
+    max_pages: int | None = None,
+    collected_at: datetime | None = None,
+) -> VisitKoreaFestivalDbEtlResult:
+    """Collect every VisitKorea festival page and stage the normalized rows in DB."""
+
+    collection = collect_visitkorea_festival_events(
+        client,
+        event_start_date=event_start_date,
+        event_end_date=event_end_date,
+        area_code=area_code,
+        sigungu_code=sigungu_code,
+        page_size=page_size,
+        max_pages=max_pages,
+        collected_at=collected_at,
+    )
+    return VisitKoreaFestivalDbEtlResult(
+        collection=collection,
+        load=load_visitkorea_festival_result(session, collection),
     )
 
 
@@ -220,22 +282,33 @@ def visitkorea_festival_item_to_feature_bundle(
 
 
 def load_visitkorea_festival_events(
-    client: Any,
+    resource: Any,
     run: DagsterEtlRun,
-) -> VisitKoreaFestivalEtlResult:
+) -> VisitKoreaFestivalEtlResult | VisitKoreaFestivalDbEtlResult:
     """Dagster-side loader body for TripMate to call from its execution graph."""
 
     config = run.op_config
+    client, session = _resolve_visitkorea_resources(resource)
+    kwargs = {
+        "event_start_date": _date_config(config, "event_start_date")
+        or VISITKOREA_FESTIVAL_FULL_SCAN_START_DATE,
+        "event_end_date": _date_config(config, "event_end_date"),
+        "area_code": _optional_str(config.get("area_code")),
+        "sigungu_code": _optional_str(config.get("sigungu_code")),
+        "page_size": _optional_int(config.get("page_size"))
+        or VISITKOREA_FESTIVAL_DEFAULT_PAGE_SIZE,
+        "max_pages": _optional_int(config.get("max_pages")),
+        "collected_at": run.collected_at,
+    }
+    if session is not None:
+        return collect_and_load_visitkorea_festival_events(
+            session,
+            client,
+            **kwargs,
+        )
     return collect_visitkorea_festival_events(
         client,
-        event_start_date=_date_config(config, "event_start_date")
-        or VISITKOREA_FESTIVAL_FULL_SCAN_START_DATE,
-        event_end_date=_date_config(config, "event_end_date"),
-        area_code=_optional_str(config.get("area_code")),
-        sigungu_code=_optional_str(config.get("sigungu_code")),
-        page_size=_optional_int(config.get("page_size")) or VISITKOREA_FESTIVAL_DEFAULT_PAGE_SIZE,
-        max_pages=_optional_int(config.get("max_pages")),
-        collected_at=run.collected_at,
+        **kwargs,
     )
 
 
@@ -365,6 +438,20 @@ def _date_config(config: Mapping[str, object], key: str) -> str | date | datetim
     if isinstance(value, str | date | datetime):
         return value
     raise TypeError(f"{key} must be a date, datetime, or ISO date string")
+
+
+def _resolve_visitkorea_resources(resource: Any) -> tuple[Any, Any | None]:
+    if isinstance(resource, Mapping):
+        client = resource.get("client") or resource.get("visitkorea_client")
+        session = resource.get("session") or resource.get("feature_session")
+    else:
+        client = getattr(resource, "client", None) or getattr(resource, "visitkorea_client", None)
+        session = getattr(resource, "session", None) or getattr(resource, "feature_session", None)
+        if client is None:
+            client = resource
+    if client is None:
+        raise ValueError("VisitKorea ETL resource must provide a public provider client")
+    return client, session
 
 
 def _first(raw: Mapping[str, Any], *keys: str) -> Any:

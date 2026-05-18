@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -19,6 +19,7 @@ from sqlalchemy import (
     Table,
     Text,
     UniqueConstraint,
+    and_,
     create_engine,
 )
 from sqlalchemy.engine import Engine
@@ -32,8 +33,10 @@ from krtour_map.models import (
     EventDetail,
     Feature,
     FeatureOpeningHours,
+    NoticeDetail,
     OpeningPeriod,
     OpeningTime,
+    PlaceDetail,
     PricePoint,
     PriceValue,
     ProviderSyncState,
@@ -89,6 +92,25 @@ class FeatureDbContext:
 
     def dispose(self) -> None:
         self.engine.dispose()
+
+
+@dataclass(frozen=True)
+class FeatureDbLoadResult:
+    """Row counts written by a feature DB load operation."""
+
+    features: int = 0
+    source_records: int = 0
+    source_links: int = 0
+    place_details: int = 0
+    event_details: int = 0
+    notice_details: int = 0
+    opening_periods: int = 0
+    special_days: int = 0
+    weather_values: int = 0
+    price_points: int = 0
+    price_values: int = 0
+    provider_sync_states: int = 0
+
 
 features = Table(
     "features",
@@ -206,6 +228,28 @@ source_links = Table(
     ),
 )
 
+feature_place_details = Table(
+    "feature_place_details",
+    metadata,
+    Column(
+        "feature_id",
+        Text,
+        ForeignKey("features.feature_id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("place_kind", Text, nullable=False, default="place"),
+    Column("phones", JSON, nullable=False, default=list),
+    Column("reviews_link", JSON, nullable=False, default=dict),
+    Column("business_hours", JSON),
+    Column("facility_info", JSON, nullable=False, default=dict),
+    Column("license_date", Date),
+    Column("biz_number", Text),
+    Column("payload", JSON, nullable=False, default=dict),
+)
+
+Index("ix_feature_place_details_place_kind", feature_place_details.c.place_kind)
+Index("ix_feature_place_details_biz_number", feature_place_details.c.biz_number)
+
 feature_event_details = Table(
     "feature_event_details",
     metadata,
@@ -239,6 +283,37 @@ Index(
 )
 Index("ix_feature_event_details_event_kind", feature_event_details.c.event_kind)
 Index("ix_feature_event_details_content_id", feature_event_details.c.content_id)
+
+feature_notice_details = Table(
+    "feature_notice_details",
+    metadata,
+    Column(
+        "feature_id",
+        Text,
+        ForeignKey("features.feature_id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("notice_type", Text, nullable=False),
+    Column("severity", Integer),
+    Column("valid_start_time", DateTime(timezone=True)),
+    Column("valid_end_time", DateTime(timezone=True)),
+    Column("source_agency", Text),
+    Column("officer_name", Text),
+    Column("payload", JSON, nullable=False, default=dict),
+    CheckConstraint(
+        "severity IS NULL OR (severity >= 0 AND severity <= 5)",
+        name="ck_feature_notice_details_severity",
+    ),
+    CheckConstraint(
+        "valid_start_time IS NULL OR valid_end_time IS NULL OR "
+        "valid_end_time >= valid_start_time",
+        name="ck_feature_notice_details_valid_time_range",
+    ),
+)
+
+Index("ix_feature_notice_details_notice_type", feature_notice_details.c.notice_type)
+Index("ix_feature_notice_details_valid_time", feature_notice_details.c.valid_start_time)
+Index("ix_feature_notice_details_source_agency", feature_notice_details.c.source_agency)
 
 feature_opening_periods = Table(
     "feature_opening_periods",
@@ -624,6 +699,183 @@ def initialize_feature_db(
     return context
 
 
+def load_feature_rows(
+    session: Session,
+    *,
+    feature_items: Iterable[Feature] = (),
+    source_record_items: Iterable[SourceRecord] = (),
+    source_link_items: Iterable[SourceLink] = (),
+    place_detail_items: Iterable[PlaceDetail] = (),
+    event_detail_items: Iterable[EventDetail] = (),
+    notice_detail_items: Iterable[NoticeDetail] = (),
+    opening_hours_by_feature_id: Mapping[str, FeatureOpeningHours] | None = None,
+    weather_value_items: Iterable[WeatherValue] = (),
+    price_point_items: Iterable[PricePoint] = (),
+    price_value_items: Iterable[PriceValue] = (),
+    provider_sync_state_items: Iterable[ProviderSyncState] = (),
+) -> FeatureDbLoadResult:
+    """Update-or-insert normalized feature rows into an open SQLAlchemy session.
+
+    Callers own the transaction boundary. TripMate's Dagster op can pass its feature DB
+    session here, inspect the returned counts, and commit or roll back with its own
+    resource policy.
+    """
+
+    source_record_rows = list(source_record_items)
+    feature_rows = list(feature_items)
+    source_link_rows = list(source_link_items)
+    place_detail_rows = list(place_detail_items)
+    event_detail_rows = list(event_detail_items)
+    notice_detail_rows = list(notice_detail_items)
+    weather_value_rows = list(weather_value_items)
+    price_point_rows = list(price_point_items)
+    price_value_rows = list(price_value_items)
+    provider_sync_state_rows = list(provider_sync_state_items)
+    opening_hours = dict(opening_hours_by_feature_id or {})
+
+    for source_record in source_record_rows:
+        _upsert_row(
+            session,
+            source_records,
+            {"source_record_key": source_record.key()},
+            source_record_to_row(source_record),
+        )
+
+    for feature in feature_rows:
+        _upsert_row(
+            session,
+            features,
+            {"feature_id": feature.feature_id},
+            feature_to_row(feature),
+        )
+
+    for detail in place_detail_rows:
+        _upsert_row(
+            session,
+            feature_place_details,
+            {"feature_id": detail.feature_id},
+            place_detail_to_row(detail),
+        )
+
+    for detail in event_detail_rows:
+        _upsert_row(
+            session,
+            feature_event_details,
+            {"feature_id": detail.feature_id},
+            event_detail_to_row(detail),
+        )
+
+    for detail in notice_detail_rows:
+        _upsert_row(
+            session,
+            feature_notice_details,
+            {"feature_id": detail.feature_id},
+            notice_detail_to_row(detail),
+        )
+
+    opening_period_count = 0
+    special_day_count = 0
+    for feature_id, hours in opening_hours.items():
+        session.execute(
+            feature_opening_periods.delete().where(
+                feature_opening_periods.c.feature_id == feature_id
+            )
+        )
+        session.execute(
+            feature_special_days.delete().where(feature_special_days.c.feature_id == feature_id)
+        )
+        period_rows = opening_hours_to_period_rows(feature_id, hours)
+        if period_rows:
+            session.execute(feature_opening_periods.insert(), period_rows)
+        special_rows = [
+            special_opening_day_to_row(feature_id, special_day)
+            for special_day in hours.special_days
+        ]
+        if special_rows:
+            session.execute(feature_special_days.insert(), special_rows)
+        opening_period_count += len(period_rows)
+        special_day_count += len(special_rows)
+
+    for point in price_point_rows:
+        _upsert_row(
+            session,
+            price_points,
+            {"feature_id": point.feature_id},
+            price_point_to_row(point),
+        )
+
+    for value in price_value_rows:
+        _upsert_row(
+            session,
+            price_values,
+            {
+                "feature_id": value.feature_id,
+                "item_key": value.item_key,
+                "observed_at": value.observed_at,
+            },
+            price_value_to_row(value),
+        )
+
+    for value in weather_value_rows:
+        row = weather_value_to_row(value)
+        _upsert_row(
+            session,
+            feature_weather_values,
+            {"weather_value_key": row["weather_value_key"]},
+            row,
+        )
+
+    for source_link in source_link_rows:
+        _upsert_row(
+            session,
+            source_links,
+            {
+                "feature_id": source_link.feature_id,
+                "source_record_key": source_link.source_record_key,
+            },
+            source_link_to_row(source_link),
+        )
+
+    for state in provider_sync_state_rows:
+        _upsert_row(
+            session,
+            provider_sync_state,
+            {
+                "provider": state.provider,
+                "dataset_key": state.dataset_key,
+                "sync_scope": state.sync_scope,
+            },
+            provider_sync_state_to_row(state),
+        )
+
+    return FeatureDbLoadResult(
+        features=len(feature_rows),
+        source_records=len(source_record_rows),
+        source_links=len(source_link_rows),
+        place_details=len(place_detail_rows),
+        event_details=len(event_detail_rows),
+        notice_details=len(notice_detail_rows),
+        opening_periods=opening_period_count,
+        special_days=special_day_count,
+        weather_values=len(weather_value_rows),
+        price_points=len(price_point_rows),
+        price_values=len(price_value_rows),
+        provider_sync_states=len(provider_sync_state_rows),
+    )
+
+
+def _upsert_row(
+    session: Session,
+    table: Table,
+    key_values: Mapping[str, Any],
+    values: Mapping[str, Any],
+) -> None:
+    condition = and_(*(table.c[column_name] == value for column_name, value in key_values.items()))
+    result = session.execute(table.update().where(condition).values(dict(values)))
+    if result.rowcount == 0:
+        session.execute(table.insert().values(dict(values)))
+
+
 def feature_to_row(feature: Feature) -> dict[str, Any]:
     """Convert a `Feature` DTO into a `features` row payload."""
 
@@ -759,6 +1011,47 @@ def source_link_from_row(row: Mapping[str, Any]) -> SourceLink:
     )
 
 
+def place_detail_to_row(detail: PlaceDetail) -> dict[str, Any]:
+    """Convert a `PlaceDetail` DTO into a `feature_place_details` row payload."""
+
+    return {
+        "feature_id": detail.feature_id,
+        "place_kind": detail.place_kind,
+        "phones": list(detail.phones),
+        "reviews_link": dict(detail.reviews_link),
+        "business_hours": (
+            _opening_hours_payload(detail.business_hours)
+            if detail.business_hours is not None
+            else None
+        ),
+        "facility_info": dict(detail.facility_info),
+        "license_date": detail.license_date,
+        "biz_number": detail.biz_number,
+        "payload": dict(detail.payload),
+    }
+
+
+def place_detail_from_row(row: Mapping[str, Any]) -> PlaceDetail:
+    """Convert a `feature_place_details` row mapping into a `PlaceDetail` DTO."""
+
+    business_hours = row.get("business_hours")
+    return PlaceDetail(
+        feature_id=str(row["feature_id"]),
+        place_kind=str(row.get("place_kind") or "place"),
+        phones=list(row.get("phones") or []),
+        reviews_link=dict(row.get("reviews_link") or {}),
+        business_hours=(
+            FeatureOpeningHours.model_validate(business_hours)
+            if business_hours is not None
+            else None
+        ),
+        facility_info=dict(row.get("facility_info") or {}),
+        license_date=row.get("license_date"),
+        biz_number=row.get("biz_number"),
+        payload=dict(row.get("payload") or {}),
+    )
+
+
 def event_detail_to_row(detail: EventDetail) -> dict[str, Any]:
     """Convert an `EventDetail` DTO into a `feature_event_details` row payload."""
 
@@ -805,6 +1098,36 @@ def event_detail_from_row(row: Mapping[str, Any]) -> EventDetail:
         area_code=row.get("area_code"),
         sigungu_code=row.get("sigungu_code"),
         payload=payload,
+    )
+
+
+def notice_detail_to_row(detail: NoticeDetail) -> dict[str, Any]:
+    """Convert a `NoticeDetail` DTO into a `feature_notice_details` row payload."""
+
+    return {
+        "feature_id": detail.feature_id,
+        "notice_type": detail.notice_type,
+        "severity": detail.severity,
+        "valid_start_time": detail.valid_start_time,
+        "valid_end_time": detail.valid_end_time,
+        "source_agency": detail.source_agency,
+        "officer_name": detail.officer_name,
+        "payload": dict(detail.payload),
+    }
+
+
+def notice_detail_from_row(row: Mapping[str, Any]) -> NoticeDetail:
+    """Convert a `feature_notice_details` row mapping into a `NoticeDetail` DTO."""
+
+    return NoticeDetail(
+        feature_id=str(row["feature_id"]),
+        notice_type=str(row["notice_type"]),
+        severity=row.get("severity"),
+        valid_start_time=row.get("valid_start_time"),
+        valid_end_time=row.get("valid_end_time"),
+        source_agency=row.get("source_agency"),
+        officer_name=row.get("officer_name"),
+        payload=dict(row.get("payload") or {}),
     )
 
 

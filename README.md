@@ -10,8 +10,9 @@
 - deterministic ID: provider, source type, source natural key, kind, category, legal dong code, payload hash 기반
 - provider 명칭 표준화: `pykma`, `kma`, `opinet` 같은 짧은 alias를 canonical provider name으로 정규화
 - source trace: `SourceRecord`, `SourceLink`, `SourceRole`로 원천 row와 feature 연결
+- kind별 detail: `PlaceDetail`, `EventDetail`, `NoticeDetail`로 장소/행사/공지 공통 필드 구조화
 - common address/coordinate/category: `python-kraddr-base`의 `Address`, `AddressRegion`, `PlaceCoordinate`, `PlaceCategoryCode`를 직접 사용
-- feature DB: `krtour_map.db`의 SQLAlchemy Core schema와 row 변환 함수가 canonical 저장소 계약
+- feature DB: `krtour_map.db`의 SQLAlchemy Core schema, row 변환 함수, staged load helper가 canonical 저장소 계약
 - feature CRUD: 테스트/디버그용 `InMemoryFeatureStore`
 - weather 병합: KMA timeline을 기준으로 provider별 weather context를 latest view로 합침
 - weather 분류: `forecast_style`은 관측/예보/지수 성격을 보존하고 `timeline_bucket`은 KMA식 `ultra_short`, `short`, `mid` 조회 축을 담당
@@ -38,7 +39,8 @@ src/krtour_map/
   providers.py   # canonical provider name policy
   store.py       # in-memory CRUD repository
   weather.py     # weather latest merge helper
-  events.py      # VisitKorea festival/event ETL normalization
+  events.py      # VisitKorea festival/event ETL normalization and DB load helper
+  opinet.py      # OpiNet station place/price normalization and DB load helper
   parser.py      # fixture replay parser boundary
   processor.py   # fixture replay processor boundary
   debug.py       # DebugRun
@@ -100,6 +102,7 @@ python -m pytest
 - [Feature model](docs/feature-model.md)
 - [Feature opening hours](docs/feature-opening-hours.md)
 - [Event feature ETL](docs/event-feature-etl.md)
+- [OpiNet place and price ETL](docs/opinet-place-price-etl.md)
 - [Weather feature normalization](docs/weather-feature-normalization.md)
 - [Dagster 경계](docs/dagster-boundary.md)
 - [Postgres 스키마 기준](docs/postgres-schema.md)

@@ -270,6 +270,37 @@ class FeatureOpeningHours(KrtourModel):
     weekday_text: list[str] = Field(default_factory=list)
 
 
+class PlaceDetail(KrtourModel):
+    feature_id: str
+    place_kind: str = "place"
+    phones: list[str] = Field(default_factory=list, max_length=3)
+    reviews_link: dict[str, str] = Field(default_factory=dict)
+    business_hours: FeatureOpeningHours | None = None
+    facility_info: dict[str, Any] = Field(default_factory=dict)
+    license_date: date | None = None
+    biz_number: str | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("phones", mode="before")
+    @classmethod
+    def normalize_phones(cls, value: Any) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            values = [value]
+        else:
+            try:
+                values = list(value)
+            except TypeError:
+                values = [value]
+        normalized: list[str] = []
+        for phone in values:
+            text = str(phone).strip()
+            if text:
+                normalized.append(text)
+        return normalized
+
+
 class EventDetail(KrtourModel):
     feature_id: str
     event_kind: str = "festival"
@@ -293,6 +324,27 @@ class EventDetail(KrtourModel):
             and self.ends_on < self.starts_on
         ):
             raise ValueError("ends_on must be greater than or equal to starts_on")
+        return self
+
+
+class NoticeDetail(KrtourModel):
+    feature_id: str
+    notice_type: str
+    severity: int | None = Field(default=None, ge=0, le=5)
+    valid_start_time: datetime | None = None
+    valid_end_time: datetime | None = None
+    source_agency: str | None = None
+    officer_name: str | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_valid_time_range(self) -> NoticeDetail:
+        if (
+            self.valid_start_time is not None
+            and self.valid_end_time is not None
+            and self.valid_end_time < self.valid_start_time
+        ):
+            raise ValueError("valid_end_time must be greater than or equal to valid_start_time")
         return self
 
 

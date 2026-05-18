@@ -4,6 +4,8 @@ from datetime import date, datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import func, select
+
 from krtour_map.db import (
     data_integrity_violations,
     dedup_review_queue,
@@ -12,17 +14,24 @@ from krtour_map.db import (
     feature_db_settings_from_object,
     feature_event_details,
     feature_from_row,
+    feature_notice_details,
     feature_opening_periods,
     feature_overrides,
+    feature_place_details,
     feature_special_days,
     feature_to_row,
     feature_weather_values,
     features,
     initialize_feature_db,
+    load_feature_rows,
     make_dedup_review_key,
     metadata,
+    notice_detail_from_row,
+    notice_detail_to_row,
     opening_period_from_row,
     opening_period_to_row,
+    place_detail_from_row,
+    place_detail_to_row,
     price_point_from_row,
     price_point_to_row,
     price_points,
@@ -41,8 +50,10 @@ from krtour_map.enums import ForecastStyle, TimelineBucket, WeatherDomain
 from krtour_map.models import (
     EventDetail,
     FeatureOpeningHours,
+    NoticeDetail,
     OpeningPeriod,
     OpeningTime,
+    PlaceDetail,
     PricePoint,
     PriceValue,
     ProviderSyncState,
@@ -59,6 +70,8 @@ def test_feature_db_schema_is_owned_by_krtour_map() -> None:
     assert "price_values" in metadata.tables
     assert "provider_sync_state" in metadata.tables
     assert "feature_event_details" in metadata.tables
+    assert "feature_place_details" in metadata.tables
+    assert "feature_notice_details" in metadata.tables
     assert "feature_opening_periods" in metadata.tables
     assert "feature_special_days" in metadata.tables
     assert "feature_overrides" in metadata.tables
@@ -86,6 +99,8 @@ def test_feature_db_schema_is_owned_by_krtour_map() -> None:
     assert columns.normalization_version.name == "normalization_version"
 
     assert feature_event_details.c.starts_on.name == "starts_on"
+    assert feature_place_details.c.biz_number.name == "biz_number"
+    assert feature_notice_details.c.notice_type.name == "notice_type"
     assert feature_opening_periods.c.duration_minutes.name == "duration_minutes"
     assert feature_special_days.c.special_date.name == "special_date"
 
@@ -128,6 +143,82 @@ def test_event_detail_and_opening_hours_db_rows_round_trip() -> None:
     assert event_detail_from_row(detail_row) == detail
     assert opening_period_from_row(period_row) == period
     assert special_opening_day_from_row(special_row) == special_day
+
+
+def test_place_and_notice_detail_db_rows_round_trip() -> None:
+    period = OpeningPeriod(
+        open=OpeningTime(day=0, time="0900"),
+        close=OpeningTime(day=0, time="1800"),
+    )
+    place = PlaceDetail(
+        feature_id="f_place_1",
+        place_kind="fuel_station",
+        phones=[" 02-123-4567 ", ""],
+        reviews_link={"naver": "https://example.com/reviews"},
+        business_hours=FeatureOpeningHours(periods=[period]),
+        facility_info={"car_wash": True},
+        license_date=date(2020, 1, 2),
+        biz_number="123-45-67890",
+        payload={"source": "opinet"},
+    )
+    valid_start = datetime(2026, 5, 18, 10, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+    notice = NoticeDetail(
+        feature_id="f_notice_1",
+        notice_type="landslide_warning",
+        severity=4,
+        valid_start_time=valid_start,
+        valid_end_time=valid_start.replace(hour=18),
+        source_agency="산림청",
+        officer_name="홍길동",
+        payload={"area": "서울"},
+    )
+
+    place_row = place_detail_to_row(place)
+    notice_row = notice_detail_to_row(notice)
+
+    assert place_row["phones"] == ["02-123-4567"]
+    assert place_row["business_hours"]["periods"][0]["open"]["time"] == "0900"
+    assert notice_row["severity"] == 4
+    assert place_detail_from_row(place_row) == place
+    assert notice_detail_from_row(notice_row) == notice
+
+
+def test_load_feature_rows_writes_feature_db_tables(sample_feature) -> None:
+    context = initialize_feature_db("sqlite+pysqlite:///:memory:")
+    try:
+        place = PlaceDetail(
+            feature_id=sample_feature.feature_id,
+            place_kind="fuel_station",
+            phones=["02-123-4567"],
+        )
+        point = PricePoint(
+            feature_id=sample_feature.feature_id,
+            price_category="fuel",
+            retention_days=3650,
+        )
+
+        with context.session_factory() as session:
+            result = load_feature_rows(
+                session,
+                feature_items=[sample_feature],
+                place_detail_items=[place],
+                price_point_items=[point],
+            )
+            session.commit()
+
+        with context.session_factory() as session:
+            feature_count = session.scalar(select(func.count()).select_from(features))
+            place_count = session.scalar(select(func.count()).select_from(feature_place_details))
+            point_count = session.scalar(select(func.count()).select_from(price_points))
+
+        assert result.features == 1
+        assert result.place_details == 1
+        assert result.price_points == 1
+        assert feature_count == 1
+        assert place_count == 1
+        assert point_count == 1
+    finally:
+        context.dispose()
 
 
 def test_weather_value_db_row_round_trip() -> None:

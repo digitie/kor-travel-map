@@ -68,6 +68,27 @@ VisitKorea `content_id`는 source natural key로 사용한다. 좌표가 없는 
 행사 운영시간이 별도로 구조화되는 provider가 있으면 `FeatureOpeningHours`,
 `feature_opening_periods`, `feature_special_days` 계약을 함께 사용한다.
 
+## DB 적재
+
+수집과 적재는 같은 라이브러리 안에 있지만 transaction ownership은 TripMate가 가진다.
+
+- `collect_visitkorea_festival_events(client, ...)`: provider client를 직접 호출하고 DTO 묶음을 반환한다.
+- `load_visitkorea_festival_result(session, result)`: 수집 결과를 열린 feature DB session에 staged write한다.
+- `collect_and_load_visitkorea_festival_events(session, client, ...)`: 수집과 staged write를 한 번에 수행한다.
+- `load_visitkorea_festival_events(resource, run)`: Dagster job spec loader. `resource`가 provider client만이면 수집 결과를, `client`와 `session`을 함께 가진 resource면 수집+DB 적재 결과를 반환한다.
+
+`load_feature_rows`는 update-or-insert 방식으로 아래 순서를 보장한다.
+
+1. `source_records`
+2. `features`
+3. kind별 detail table
+4. opening hours, price, weather values
+5. `source_links`
+6. `provider_sync_state`
+
+호출자는 성공 시 commit, 실패 시 rollback한다. 이 라이브러리는 Dagster daemon이나 schedule을
+직접 실행하지 않으며, TripMate가 resource 주입과 운영 정책을 담당한다.
+
 ## TripMate boundary
 
 이 라이브러리는 ETL의 세부 수집/정규화 로직과 job spec을 제공한다. 실제 Dagster

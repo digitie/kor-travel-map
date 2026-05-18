@@ -32,3 +32,20 @@ finally:
 - TripMate: settings 생성, 운영 DB URL 관리, 실행 시점 결정, 사용자/여행계획/POI 제품 테이블 관리
 
 TripMate 쪽 wrapper/adapter를 만들지 않는다. TripMate는 `database_url` 설정을 이 라이브러리에 넘기고, 이후 feature/source/weather 저장은 `krtour_map.db` table과 row helper를 사용한다.
+
+## ETL 적재
+
+ETL 정규화 결과를 저장할 때는 TripMate가 만든 feature DB session을 이 라이브러리의 적재 helper에
+넘긴다.
+
+```python
+from krtour_map.events import VisitKoreaFestivalLoadResources, load_visitkorea_festival_events
+
+with context.session_factory() as session:
+    resources = VisitKoreaFestivalLoadResources(client=visitkorea_client, session=session)
+    result = load_visitkorea_festival_events(resources, run)
+    session.commit()
+```
+
+TripMate는 transaction boundary와 운영 로그를 담당하고, `python-krtour-map`은 어떤 table에 어떤
+순서로 staged write할지 담당한다.

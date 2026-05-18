@@ -4,15 +4,27 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import func, select
+
 from krtour_map.dagster import DagsterEtlExecution, DagsterEtlRun
+from krtour_map.db import (
+    feature_event_details,
+    features,
+    initialize_feature_db,
+    source_links,
+    source_records,
+)
 from krtour_map.enums import FeatureKind
 from krtour_map.events import (
     VISITKOREA_FESTIVAL_DATASET_KEY,
     VISITKOREA_FESTIVAL_DEFAULT_PAGE_SIZE,
     VISITKOREA_FESTIVAL_FULL_SCAN_INTERVAL_DAYS,
     VISITKOREA_FESTIVAL_FULL_SCAN_START_DATE,
+    VisitKoreaFestivalDbEtlResult,
+    VisitKoreaFestivalLoadResources,
     collect_visitkorea_festival_events,
     load_visitkorea_festival_events,
+    load_visitkorea_festival_result,
     visitkorea_festival_full_scan_identity,
     visitkorea_festival_full_scan_job_spec,
     visitkorea_festival_item_to_feature_bundle,
@@ -162,6 +174,107 @@ def test_load_visitkorea_festival_events_defaults_to_uncapped_full_scan() -> Non
     assert client.calls[0]["args"] == (VISITKOREA_FESTIVAL_FULL_SCAN_START_DATE,)
     assert client.calls[0]["num_of_rows"] == VISITKOREA_FESTIVAL_DEFAULT_PAGE_SIZE
     assert client.calls[0]["max_pages"] is None
+
+
+def test_load_visitkorea_festival_result_writes_feature_rows() -> None:
+    collected_at = datetime(2026, 5, 18, 9, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+    client = FakeVisitKoreaClient(
+        (
+            FakePage(
+                items=(
+                    FakeFestivalItem(
+                        content_id="300",
+                        title="DB 적재 축제",
+                        coordinate=Coordinate(lat=37.5796, lon=126.9769),
+                        addr1="서울 종로구 세종대로 1",
+                        raw={
+                            "contentid": "300",
+                            "eventstartdate": "20260501",
+                            "eventenddate": "20260505",
+                        },
+                    ),
+                ),
+                total_count=1,
+                page_no=1,
+                num_of_rows=1,
+                collected_at=collected_at,
+            ),
+        )
+    )
+    result = collect_visitkorea_festival_events(
+        client,
+        event_start_date=date(2026, 5, 18),
+        page_size=1,
+    )
+    context = initialize_feature_db("sqlite+pysqlite:///:memory:")
+    try:
+        with context.session_factory() as session:
+            load_result = load_visitkorea_festival_result(session, result)
+            session.commit()
+
+        with context.session_factory() as session:
+            feature_count = session.scalar(select(func.count()).select_from(features))
+            source_record_count = session.scalar(select(func.count()).select_from(source_records))
+            source_link_count = session.scalar(select(func.count()).select_from(source_links))
+            event_detail_count = session.scalar(
+                select(func.count()).select_from(feature_event_details)
+            )
+
+        assert load_result.features == 1
+        assert load_result.source_records == 1
+        assert load_result.source_links == 1
+        assert load_result.event_details == 1
+        assert feature_count == 1
+        assert source_record_count == 1
+        assert source_link_count == 1
+        assert event_detail_count == 1
+    finally:
+        context.dispose()
+
+
+def test_load_visitkorea_festival_events_loads_when_session_resource_is_provided() -> None:
+    collected_at = datetime(2026, 5, 18, 9, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+    client = FakeVisitKoreaClient(
+        (
+            FakePage(
+                items=(
+                    FakeFestivalItem(
+                        content_id="301",
+                        title="리소스 적재 축제",
+                        raw={"contentid": "301", "eventstartdate": "20260501"},
+                    ),
+                ),
+                total_count=1,
+                page_no=1,
+                num_of_rows=1,
+                collected_at=collected_at,
+            ),
+        )
+    )
+    run = DagsterEtlRun(
+        dataset_key=VISITKOREA_FESTIVAL_DATASET_KEY,
+        run_key="20260518-full-scan",
+        run_type="scheduled",
+        trigger_date=date(2026, 5, 18),
+        logical_datetime=collected_at,
+        op_config={},
+    )
+    context = initialize_feature_db("sqlite+pysqlite:///:memory:")
+    try:
+        with context.session_factory() as session:
+            resources = VisitKoreaFestivalLoadResources(client=client, session=session)
+            result = load_visitkorea_festival_events(resources, run)
+            session.commit()
+
+        with context.session_factory() as session:
+            feature_count = session.scalar(select(func.count()).select_from(features))
+
+        assert isinstance(result, VisitKoreaFestivalDbEtlResult)
+        assert result.collection.scanned_pages == 1
+        assert result.load.features == 1
+        assert feature_count == 1
+    finally:
+        context.dispose()
 
 
 def test_visitkorea_festival_feature_id_is_stable_across_payload_changes() -> None:
