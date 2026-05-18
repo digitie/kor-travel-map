@@ -13,6 +13,16 @@ from kraddr.base import (
     mapbox_maki_icon_or_none,
 )
 
+from krtour_map.addressing import (
+    AddressEnrichment,
+    AddressMatchReport,
+    ReverseGeocoder,
+    address_code_set_from_raw,
+    address_with_code_set,
+    enrich_address_from_coordinate,
+    merge_address_enrichment,
+    provider_address_code,
+)
 from krtour_map.dagster import (
     DEFAULT_DAGSTER_DOWNLOAD_DIR,
     DEFAULT_DAGSTER_LOG_DIR,
@@ -174,6 +184,8 @@ from krtour_map.store import InMemoryFeatureStore
 
 __all__ = [
     "Address",
+    "AddressEnrichment",
+    "AddressMatchReport",
     "AddressRegion",
     "CANONICAL_PROVIDER_NAMES",
     "Coordinate",
@@ -258,6 +270,7 @@ __all__ = [
     "PriceValue",
     "ProviderSyncState",
     "RawDataRef",
+    "ReverseGeocoder",
     "RustfsFileStore",
     "SkippedFestivalItem",
     "SourceLink",
@@ -271,8 +284,11 @@ __all__ = [
     "VisitKoreaFestivalEtlResult",
     "VisitKoreaFestivalDbEtlResult",
     "VisitKoreaFestivalLoadResources",
+    "address_code_set_from_raw",
+    "address_with_code_set",
     "collect_and_load_visitkorea_festival_events",
     "collect_visitkorea_festival_events",
+    "enrich_address_from_coordinate",
     "event_detail_from_row",
     "event_detail_to_row",
     "load_visitkorea_festival_events",
@@ -282,6 +298,7 @@ __all__ = [
     "price_value_from_row",
     "price_value_to_row",
     "price_values",
+    "provider_address_code",
     "provider_sync_state",
     "provider_sync_state_from_row",
     "provider_sync_state_to_row",
@@ -312,6 +329,7 @@ __all__ = [
     "load_visitkorea_festival_result",
     "mapbox_maki_icon_for_category",
     "mapbox_maki_icon_or_none",
+    "merge_address_enrichment",
     "normalize_provider_name",
     "opinet_station_detail_to_feature_bundle",
     "parse_logical_datetime",

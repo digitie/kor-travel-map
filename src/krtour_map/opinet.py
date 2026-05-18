@@ -8,12 +8,18 @@ from typing import Any
 
 from kraddr.base import Address
 
+from krtour_map.addressing import (
+    AddressMatchReport,
+    ReverseGeocoder,
+    enrich_address_from_coordinate,
+)
 from krtour_map.db import FeatureDbLoadResult, load_feature_rows
 from krtour_map.enums import FeatureKind, SourceRole
 from krtour_map.ids import make_feature_id, make_payload_hash
 from krtour_map.models import (
     Coordinate,
     Feature,
+    FeatureOpeningHours,
     PlaceDetail,
     PricePoint,
     PriceValue,
@@ -40,12 +46,14 @@ class OpinetStationFeatureBundle:
     price_values: tuple[PriceValue, ...]
     source_record: SourceRecord
     source_link: SourceLink
+    address_match_report: AddressMatchReport
 
 
 def opinet_station_detail_to_feature_bundle(
     detail: Any,
     *,
     collected_at: datetime | None = None,
+    reverse_geocoder: ReverseGeocoder | None = None,
 ) -> OpinetStationFeatureBundle:
     """Normalize a stable `python-opinet-api` station detail model into feature rows."""
 
@@ -54,7 +62,15 @@ def opinet_station_detail_to_feature_bundle(
     station_id = _required_text(normalized, "provider_station_id")
     station_name = _required_text(normalized, "provider_station_name")
     coordinate = _coordinate_from_station(normalized)
-    address = _address_from_station(normalized)
+    address_enrichment = enrich_address_from_coordinate(
+        address=_address_from_station(normalized),
+        coordinate=coordinate,
+        raw=raw,
+        reverse_geocoder=reverse_geocoder,
+        source_label=OPINET_STATION_DETAIL_DATASET_KEY,
+        source_entity_id=station_id,
+    )
+    address = address_enrichment.address
     raw_payload_hash = make_payload_hash(raw, length=32)
     feature_id = make_feature_id(
         provider=OPINET_PROVIDER,
@@ -104,6 +120,7 @@ def opinet_station_detail_to_feature_bundle(
         feature_id=feature_id,
         place_kind=_place_kind(normalized),
         phones=[tel] if (tel := _optional_text(getattr(normalized, "tel", None))) else [],
+        business_hours=_opening_hours_from_station(normalized),
         facility_info=_facility_info(normalized),
         payload=_station_detail_payload(normalized),
     )
@@ -131,6 +148,7 @@ def opinet_station_detail_to_feature_bundle(
         price_values=price_values,
         source_record=source_record,
         source_link=source_link,
+        address_match_report=address_enrichment.report,
     )
 
 
@@ -139,10 +157,15 @@ def load_opinet_station_detail(
     detail: Any,
     *,
     collected_at: datetime | None = None,
+    reverse_geocoder: ReverseGeocoder | None = None,
 ) -> FeatureDbLoadResult:
     """Stage a normalized OpiNet station detail bundle in the feature DB session."""
 
-    bundle = opinet_station_detail_to_feature_bundle(detail, collected_at=collected_at)
+    bundle = opinet_station_detail_to_feature_bundle(
+        detail,
+        collected_at=collected_at,
+        reverse_geocoder=reverse_geocoder,
+    )
     return load_feature_rows(
         session,
         feature_items=[bundle.feature],
@@ -174,7 +197,24 @@ def _coordinate_from_station(station: Any) -> Coordinate:
 def _address_from_station(station: Any) -> Address:
     road = _optional_text(getattr(station, "address_road", None))
     jibun = _optional_text(getattr(station, "address_jibun", None))
-    return Address(address=road or jibun)
+    return Address.from_mapping({"road_address": road, "jibun_address": jibun}) or Address(
+        address=road or jibun
+    )
+
+
+def _opening_hours_from_station(station: Any) -> FeatureOpeningHours | None:
+    value = getattr(station, "business_hours", None)
+    if value is None:
+        value = getattr(station, "opening_hours", None)
+    if value is None:
+        return None
+    if isinstance(value, FeatureOpeningHours):
+        return value
+    if isinstance(value, Mapping):
+        return FeatureOpeningHours.model_validate(value)
+    if hasattr(value, "model_dump"):
+        return FeatureOpeningHours.model_validate(value.model_dump(mode="json"))
+    return None
 
 
 def _station_detail_payload(station: Any) -> dict[str, Any]:

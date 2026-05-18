@@ -946,6 +946,7 @@ def feature_to_row(feature: Feature) -> dict[str, Any]:
     """Convert a `Feature` DTO into a `features` row payload."""
 
     coord = feature.coord
+    address_values = feature.address.to_orm_dict()
     return {
         "feature_id": feature.feature_id,
         "kind": str(feature.kind),
@@ -955,12 +956,12 @@ def feature_to_row(feature: Feature) -> dict[str, Any]:
         "latitude": coord.latitude if coord is not None else None,
         "geom": None,
         "address": feature.address.model_dump(mode="json"),
-        "legal_dong_code": getattr(feature.address, "legal_dong_code", None),
-        "road_name_code": getattr(feature.address, "road_name_code", None),
-        "road_address_management_no": getattr(feature.address, "road_address_management_no", None),
+        "legal_dong_code": address_values.get("legal_dong_code"),
+        "road_name_code": address_values.get("road_name_code"),
+        "road_address_management_no": address_values.get("road_name_address_code"),
         "admin_dong_code": getattr(feature.address, "admin_dong_code", None),
-        "sido_code": getattr(feature.address, "sido_code", None),
-        "sigungu_code": getattr(feature.address, "sigungu_code", None),
+        "sido_code": address_values.get("sido_code"),
+        "sigungu_code": address_values.get("sigungu_code"),
         "urls": feature.urls.model_dump(mode="json"),
         "marker_icon": feature.marker_icon,
         "marker_color": feature.marker_color,

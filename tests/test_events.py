@@ -31,7 +31,7 @@ from krtour_map.events import (
     visitkorea_festival_item_to_feature_bundle,
 )
 from krtour_map.files import DownloadedFile, RustfsFileStore
-from krtour_map.models import Coordinate
+from krtour_map.models import Coordinate, FeatureOpeningHours
 
 
 @dataclass(frozen=True)
@@ -52,6 +52,7 @@ class FakeFestivalItem:
     first_image: str | None = None
     first_image2: str | None = None
     tel: str | None = None
+    opening_hours: FeatureOpeningHours | dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -176,6 +177,53 @@ def test_visitkorea_festival_job_spec_is_daily_full_scan() -> None:
     assert visitkorea_festival_full_scan_job_spec.dataset_key == VISITKOREA_FESTIVAL_DATASET_KEY
     assert "schedule:daily" in visitkorea_festival_full_scan_job_spec.tags
     assert identity.run_key == "20260518-full-scan"
+
+
+def test_collect_visitkorea_festival_events_enriches_address_from_coordinate() -> None:
+    collected_at = datetime(2026, 5, 18, 9, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+    client = FakeVisitKoreaClient(
+        (
+            FakePage(
+                items=(
+                    FakeFestivalItem(
+                        content_id="200",
+                        title="주소 보강 축제",
+                        coordinate=Coordinate(lat=37.5796, lon=126.9769),
+                        addr1="서울 종로구 세종대로 1",
+                        opening_hours={
+                            "periods": [
+                                {
+                                    "open": {"day": 1, "time": "0900"},
+                                    "close": {"day": 1, "time": "1800"},
+                                }
+                            ]
+                        },
+                        raw={"contentid": "200", "eventstartdate": "20260501"},
+                    ),
+                ),
+                total_count=1,
+                page_no=1,
+                num_of_rows=1,
+                collected_at=collected_at,
+            ),
+        )
+    )
+
+    result = collect_visitkorea_festival_events(
+        client,
+        event_start_date=date(2026, 5, 18),
+        page_size=1,
+        reverse_geocoder=lambda _coord: {
+            "road_address": "서울 종로구 세종대로 1",
+            "legal_dong_code": "1111011900",
+        },
+    )
+
+    assert result.features[0].address.legal_dong_code == "1111011900"
+    assert result.address_match_reports[0].match_level == "coordinate_legal_dong"
+    assert result.address_match_reports[0].confidence == 90
+    assert result.event_details[0].opening_hours is not None
+    assert result.event_details[0].opening_hours.periods[0].duration_minutes == 540
 
 
 def test_load_visitkorea_festival_events_defaults_to_uncapped_full_scan() -> None:

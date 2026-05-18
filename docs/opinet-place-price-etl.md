@@ -18,17 +18,30 @@ provider 호출 wrapper를 만들지 않고, `python-opinet-api`의 안정된 `S
 좌표는 `python-opinet-api`가 제공하는 `kraddr.base.PlaceCoordinate(lat, lon)`를 그대로 사용한다.
 가격 관측 시각은 provider price row의 `trade_datetime()` 또는 `trade_date + trade_time`을 사용한다.
 
+주소는 도로명주소(`address_road`)와 지번주소(`address_jibun`)를 `kraddr.base.Address`의
+road/jibun DTO에 보존한다. OpiNet `sigun_code`는 OpiNet provider 지역 코드이므로 법정동코드로
+저장하지 않는다. TripMate가 `reverse_geocoder` callable을 넘기면 좌표에서 법정동코드를
+확정하고 `AddressMatchReport`로 매칭 수준을 반환한다.
+
+영업시간을 provider typed model이 `business_hours` 또는 `opening_hours`로 구조화해 제공하면
+`PlaceDetail.business_hours: FeatureOpeningHours`로 저장한다. 단순 원문 문자열이나
+provider별 보조 정보는 `PlaceDetail.payload`에 남긴다.
+
 ## DB 적재
 
-`load_opinet_station_detail(session, detail, collected_at=...)`는 열린 feature DB session에 staged
-write한다. Transaction commit/rollback은 TripMate가 담당한다.
+`load_opinet_station_detail(session, detail, collected_at=..., reverse_geocoder=...)`는 열린
+feature DB session에 staged write한다. Transaction commit/rollback은 TripMate가 담당한다.
 
 ```python
 from krtour_map.opinet import load_opinet_station_detail
 
 with feature_context.session_factory() as session:
     detail = opinet_client.get_station_detail("A0010207")
-    result = load_opinet_station_detail(session, detail)
+    result = load_opinet_station_detail(
+        session,
+        detail,
+        reverse_geocoder=tripmate_reverse_geocoder,
+    )
     session.commit()
 ```
 

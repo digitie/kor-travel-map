@@ -51,6 +51,7 @@ from krtour_map.db import (
 )
 from krtour_map.enums import ForecastStyle, TimelineBucket, WeatherDomain
 from krtour_map.models import (
+    Address,
     EventDetail,
     FeatureFile,
     FeatureOpeningHours,
@@ -120,6 +121,28 @@ def test_feature_db_row_round_trip_allows_missing_coordinate(sample_feature) -> 
     assert row["latitude"] is None
     assert restored.coord is None
     assert restored.feature_id == feature.feature_id
+
+
+def test_feature_to_row_flattens_kraddr_address_codes(sample_feature) -> None:
+    address = Address.from_mapping(
+        {
+            "address": "서울 종로구 세종대로 1",
+            "admCd": "1111011900",
+            "rnMgtSn": "111104100001",
+            "udrtYn": "0",
+            "buldMnnm": "1",
+            "buldSlno": "0",
+        }
+    )
+    assert address is not None
+    feature = sample_feature.model_copy(update={"address": address})
+    row = feature_to_row(feature)
+
+    assert row["legal_dong_code"] == "1111011900"
+    assert row["sido_code"] == "11"
+    assert row["sigungu_code"] == "11110"
+    assert row["road_name_code"] == "111104100001"
+    assert row["road_address_management_no"] is not None
 
 
 def test_event_detail_and_opening_hours_db_rows_round_trip() -> None:

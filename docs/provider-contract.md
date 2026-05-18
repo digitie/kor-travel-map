@@ -81,6 +81,13 @@ VisitKorea 축제 source는 `python-visitkorea-api` public client의
 
 Weather source는 provider public client를 직접 호출한 뒤 `WeatherValue`로 정규화한다. `forecast_style`에는 관측/예보/지수/특보 성격을 남기고, KMA식 초단기/단기/중기 분류는 `timeline_bucket`에 둔다. 세부 mapping은 `docs/weather-feature-normalization.md`를 따른다.
 
+Address/geocoding source도 같은 원칙을 따른다. `python-krtour-map`은 VWorld/Juso/주소점 호출
+wrapper가 아니며, TripMate가 `python-kraddr-geo` 또는 `python-vworld-api` public client를
+직접 사용하는 reverse geocoder callable을 resource로 넘긴다. 이 라이브러리는 그 결과를
+`kraddr.base.Address`와 `AddressCodeSet`으로 정규화하고, provider별 지역 코드는 원문에 보존하되
+feature 저장 컬럼에는 검증된 법정동코드만 반영한다. 세부 기준은
+`docs/address-geocoding.md`를 따른다.
+
 Feature/source/weather/price 저장소는 `python-krtour-map`의 DB 계약이다. TripMate는 별도 feature DB를 정의하지 않고 `krtour_map.db` schema와 함수를 import해 사용한다.
 
 provider cursor와 실패 상태는 `ProviderSyncState(provider, dataset_key, sync_scope)` 단위로 저장합니다.

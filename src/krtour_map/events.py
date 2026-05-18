@@ -8,6 +8,11 @@ from typing import Any
 
 from kraddr.base import Address, PlaceCategoryCode
 
+from krtour_map.addressing import (
+    AddressMatchReport,
+    ReverseGeocoder,
+    enrich_address_from_coordinate,
+)
 from krtour_map.dagster import (
     DagsterEtlExecution,
     DagsterEtlRun,
@@ -54,6 +59,7 @@ class VisitKoreaFestivalEtlResult:
     source_records: tuple[SourceRecord, ...]
     source_links: tuple[SourceLink, ...]
     feature_file_sources: tuple[FeatureFileSource, ...] = ()
+    address_match_reports: tuple[AddressMatchReport, ...] = ()
     skipped_items: tuple[SkippedFestivalItem, ...] = ()
 
     @property
@@ -77,6 +83,7 @@ class VisitKoreaFestivalLoadResources:
     session: Any
     rustfs_store: RustfsFileStore | None = None
     file_fetcher: FileFetcher | None = None
+    reverse_geocoder: ReverseGeocoder | None = None
 
 
 def collect_visitkorea_festival_events(
@@ -89,6 +96,7 @@ def collect_visitkorea_festival_events(
     page_size: int = VISITKOREA_FESTIVAL_DEFAULT_PAGE_SIZE,
     max_pages: int | None = None,
     collected_at: datetime | None = None,
+    reverse_geocoder: ReverseGeocoder | None = None,
 ) -> VisitKoreaFestivalEtlResult:
     """Collect every festival page through the public `python-visitkorea-api` client.
 
@@ -105,6 +113,7 @@ def collect_visitkorea_festival_events(
     source_records: list[SourceRecord] = []
     source_links: list[SourceLink] = []
     feature_file_sources: list[FeatureFileSource] = []
+    address_match_reports: list[AddressMatchReport] = []
     skipped_items: list[SkippedFestivalItem] = []
     scanned_pages = 0
 
@@ -126,15 +135,17 @@ def collect_visitkorea_festival_events(
             bundle = visitkorea_festival_item_to_feature_bundle(
                 item,
                 collected_at=page_collected_at,
+                reverse_geocoder=reverse_geocoder,
             )
             if isinstance(bundle, SkippedFestivalItem):
                 skipped_items.append(bundle)
                 continue
-            feature, event_detail, source_record, source_link = bundle
+            feature, event_detail, source_record, source_link, address_match_report = bundle
             features.append(feature)
             event_details.append(event_detail)
             source_records.append(source_record)
             source_links.append(source_link)
+            address_match_reports.append(address_match_report)
             feature_file_sources.extend(
                 visitkorea_festival_item_to_file_sources(
                     item,
@@ -152,6 +163,7 @@ def collect_visitkorea_festival_events(
         source_records=tuple(source_records),
         source_links=tuple(source_links),
         feature_file_sources=tuple(feature_file_sources),
+        address_match_reports=tuple(address_match_reports),
         skipped_items=tuple(skipped_items),
     )
 
@@ -198,6 +210,7 @@ def collect_and_load_visitkorea_festival_events(
     collected_at: datetime | None = None,
     rustfs_store: RustfsFileStore | None = None,
     file_fetcher: FileFetcher | None = None,
+    reverse_geocoder: ReverseGeocoder | None = None,
 ) -> VisitKoreaFestivalDbEtlResult:
     """Collect every VisitKorea festival page and stage the normalized rows in DB."""
 
@@ -210,6 +223,7 @@ def collect_and_load_visitkorea_festival_events(
         page_size=page_size,
         max_pages=max_pages,
         collected_at=collected_at,
+        reverse_geocoder=reverse_geocoder,
     )
     return VisitKoreaFestivalDbEtlResult(
         collection=collection,
@@ -227,7 +241,11 @@ def visitkorea_festival_item_to_feature_bundle(
     item: Any,
     *,
     collected_at: datetime | None = None,
-) -> tuple[Feature, EventDetail, SourceRecord, SourceLink] | SkippedFestivalItem:
+    reverse_geocoder: ReverseGeocoder | None = None,
+) -> (
+    tuple[Feature, EventDetail, SourceRecord, SourceLink, AddressMatchReport]
+    | SkippedFestivalItem
+):
     raw = _raw_mapping(item)
     content_id = _text(item, "content_id", raw_keys=("contentid", "contentId", "content_id"))
     title = _text(item, "title", raw_keys=("title",))
@@ -238,7 +256,15 @@ def visitkorea_festival_item_to_feature_bundle(
         return SkippedFestivalItem(content_id, "missing title", raw)
 
     coordinate = _coordinate_from_item(item)
-    address = _address_from_item(item)
+    address_enrichment = enrich_address_from_coordinate(
+        address=_address_from_item(item),
+        coordinate=coordinate,
+        raw=raw,
+        reverse_geocoder=reverse_geocoder,
+        source_label=VISITKOREA_FESTIVAL_DATASET_KEY,
+        source_entity_id=content_id,
+    )
+    address = address_enrichment.address
     raw_payload_hash = make_payload_hash(raw, length=32)
     content_type_id = _text(
         item,
@@ -299,6 +325,7 @@ def visitkorea_festival_item_to_feature_bundle(
         event_kind=VISITKOREA_FESTIVAL_EVENT_KIND,
         starts_on=starts_on,
         ends_on=ends_on,
+        opening_hours=_opening_hours_from_item(item),
         venue_name=address.display_address,
         tel=_text(item, "tel", raw_keys=("tel",)),
         content_id=content_id,
@@ -319,7 +346,7 @@ def visitkorea_festival_item_to_feature_bundle(
         confidence=100,
         is_primary_source=True,
     )
-    return feature, event_detail, source_record, source_link
+    return feature, event_detail, source_record, source_link, address_enrichment.report
 
 
 def visitkorea_festival_item_to_file_sources(
@@ -382,7 +409,9 @@ def load_visitkorea_festival_events(
     """Dagster-side loader body for TripMate to call from its execution graph."""
 
     config = run.op_config
-    client, session, rustfs_store, file_fetcher = _resolve_visitkorea_resources(resource)
+    client, session, rustfs_store, file_fetcher, reverse_geocoder = _resolve_visitkorea_resources(
+        resource
+    )
     kwargs = {
         "event_start_date": _date_config(config, "event_start_date")
         or VISITKOREA_FESTIVAL_FULL_SCAN_START_DATE,
@@ -401,10 +430,12 @@ def load_visitkorea_festival_events(
             **kwargs,
             rustfs_store=rustfs_store,
             file_fetcher=file_fetcher,
+            reverse_geocoder=reverse_geocoder,
         )
     return collect_visitkorea_festival_events(
         client,
         **kwargs,
+        reverse_geocoder=reverse_geocoder,
     )
 
 
@@ -475,6 +506,14 @@ def _address_from_item(item: Any) -> Address:
     return Address(address=address or None, postal_code=zipcode)
 
 
+def _opening_hours_from_item(item: Any) -> Any:
+    opening_hours = getattr(item, "opening_hours", None)
+    if opening_hours is not None:
+        return opening_hours
+    raw = _raw_mapping(item)
+    return _first(raw, "opening_hours", "business_hours", "operating_hours")
+
+
 def _event_detail_payload(item: Any, raw: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "event_start_date": _first(raw, "eventstartdate", "eventStartDate", "event_start_date"),
@@ -538,12 +577,13 @@ def _date_config(config: Mapping[str, object], key: str) -> str | date | datetim
 
 def _resolve_visitkorea_resources(
     resource: Any,
-) -> tuple[Any, Any | None, RustfsFileStore | None, FileFetcher | None]:
+) -> tuple[Any, Any | None, RustfsFileStore | None, FileFetcher | None, ReverseGeocoder | None]:
     if isinstance(resource, Mapping):
         client = resource.get("client") or resource.get("visitkorea_client")
         session = resource.get("session") or resource.get("feature_session")
         rustfs_store = resource.get("rustfs_store") or resource.get("feature_file_store")
         file_fetcher = resource.get("file_fetcher")
+        reverse_geocoder = resource.get("reverse_geocoder")
     else:
         client = getattr(resource, "client", None) or getattr(resource, "visitkorea_client", None)
         session = getattr(resource, "session", None) or getattr(resource, "feature_session", None)
@@ -553,11 +593,12 @@ def _resolve_visitkorea_resources(
             None,
         )
         file_fetcher = getattr(resource, "file_fetcher", None)
+        reverse_geocoder = getattr(resource, "reverse_geocoder", None)
         if client is None:
             client = resource
     if client is None:
         raise ValueError("VisitKorea ETL resource must provide a public provider client")
-    return client, session, rustfs_store, file_fetcher
+    return client, session, rustfs_store, file_fetcher, reverse_geocoder
 
 
 def _first(raw: Mapping[str, Any], *keys: str) -> Any:

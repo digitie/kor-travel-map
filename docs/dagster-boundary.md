@@ -36,6 +36,9 @@
 - TripMate의 `app.dagster_etl`은 `krtour_map.dagster` 계약을 import해서 job/schedule을 생성하고 실행 로그를 남기는 얇은 shell이어야 한다.
 - TripMate는 provider client와 feature DB session을 resource로 넘기고, commit/rollback, schedule, daemon, 알림 정책을 담당한다.
 - TripMate는 RustFS client/resource도 함께 넘긴다. 바이너리 저장은 RustFS, metadata 저장은 `feature_files`를 사용한다.
+- TripMate는 좌표 기반 주소 보강이 필요한 ETL에 `reverse_geocoder` callable을 resource로 넘긴다.
+  callable 내부는 `python-kraddr-geo` 또는 `python-vworld-api` public client를 직접 사용하고,
+  이 라이브러리는 반환된 `Address`/mapping만 feature 주소로 병합한다.
 - provider별 wrapper/adapter/gateway를 만들지 않는다. 안정된 provider public client와 typed model을 직접 사용한다.
 - Dagster 실행 편의를 위해 TripMate에 임시 정규화 함수를 만들지 않는다. 필요한 변환 함수는 `python-krtour-map`에 둔다.
 - 중복 판단과 검수 queue 저장은 이 라이브러리의 `dedup_review_queue` 계약을 사용한다.

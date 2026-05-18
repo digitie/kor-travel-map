@@ -14,7 +14,7 @@ from krtour_map.db import (
     price_values,
 )
 from krtour_map.enums import FeatureKind
-from krtour_map.models import Coordinate
+from krtour_map.models import Coordinate, FeatureOpeningHours
 from krtour_map.opinet import (
     OPINET_PRICE_CATEGORY,
     load_opinet_station_detail,
@@ -60,6 +60,7 @@ class FakeOpinetStationDetail:
     is_kpetro: bool
     prices: tuple[FakeOpinetPrice, ...]
     raw: dict[str, object]
+    business_hours: FeatureOpeningHours | dict[str, object] | None = None
 
 
 def test_opinet_station_detail_to_feature_bundle() -> None:
@@ -77,6 +78,33 @@ def test_opinet_station_detail_to_feature_bundle() -> None:
     assert len(bundle.price_values) == 2
     assert bundle.price_values[0].item_key == "gasoline"
     assert bundle.source_link.source_record_key == bundle.source_record.key()
+
+
+def test_opinet_station_detail_enriches_address_from_coordinate() -> None:
+    detail = _fake_station_detail(
+        business_hours={
+            "periods": [
+                {
+                    "open": {"day": 1, "time": "0000"},
+                    "close": {"day": 2, "time": "0000"},
+                }
+            ],
+            "weekday_text": ["월 24시간"],
+        }
+    )
+
+    bundle = opinet_station_detail_to_feature_bundle(
+        detail,
+        reverse_geocoder=lambda _coord: {
+            "road_address": "서울 강남구 테헤란로 1",
+            "legal_dong_code": "1168010100",
+        },
+    )
+
+    assert bundle.feature.address.legal_dong_code == "1168010100"
+    assert bundle.address_match_report.match_level == "coordinate_legal_dong"
+    assert bundle.place_detail.business_hours is not None
+    assert bundle.place_detail.business_hours.weekday_text == ["월 24시간"]
 
 
 def test_load_opinet_station_detail_writes_place_and_price_rows() -> None:
@@ -104,7 +132,10 @@ def test_load_opinet_station_detail_writes_place_and_price_rows() -> None:
         context.dispose()
 
 
-def _fake_station_detail() -> FakeOpinetStationDetail:
+def _fake_station_detail(
+    *,
+    business_hours: FeatureOpeningHours | dict[str, object] | None = None,
+) -> FakeOpinetStationDetail:
     return FakeOpinetStationDetail(
         provider_station_id="A0010207",
         provider_station_name="샘플주유소",
@@ -142,4 +173,5 @@ def _fake_station_detail() -> FakeOpinetStationDetail:
             ),
         ),
         raw={"UNI_ID": "A0010207", "OS_NM": "샘플주유소"},
+        business_hours=business_hours,
     )
