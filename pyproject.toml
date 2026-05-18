@@ -30,6 +30,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+visitkorea = [
+  "python-visitkorea-api @ git+https://github.com/digitie/python-visitkorea-api.git@716ca303cf28ba599c3a2838ae48f2dd1a43b98d",
+]
 dev = [
   "pytest>=8",
   "ruff>=0.5",
