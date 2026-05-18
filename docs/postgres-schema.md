@@ -99,6 +99,65 @@ feature와 provider source record의 관계를 저장한다.
 - `confidence between 0 and 100`
 - `source_role in ('base_address', 'base_coordinate', 'primary', 'enrichment', 'correction', 'duplicate_candidate', 'media', 'weather_context')`
 
+## `feature_event_details`
+
+행사/축제처럼 기간성이 있는 event feature의 세부 정보를 저장한다. VisitKorea 축제 ETL은
+`python-visitkorea-api`의 `content_id`를 source natural key로 사용하고 이 테이블에 기간과
+provider 식별자를 둔다.
+
+필수/옵션 컬럼:
+
+- `feature_id text primary key references features(feature_id) on delete cascade`
+- `event_kind text not null`
+- `starts_on date null`
+- `ends_on date null`
+- `timezone text not null default 'Asia/Seoul'`
+- `venue_name text null`
+- `tel text null`
+- `content_id text null`
+- `content_type_id text null`
+- `area_code text null`
+- `sigungu_code text null`
+- `payload json/jsonb not null default '{}'`
+
+제약:
+
+- `ends_on >= starts_on` when both values exist
+
+권장 인덱스:
+
+- `(starts_on, ends_on)`
+- `(event_kind)`
+- `(content_id)`
+
+## `feature_opening_periods`, `feature_special_days`
+
+영업시간과 행사 운영시간은 Google Places-style DTO를 공통 자료로 삼는다. 정규 영업 구간은
+`feature_opening_periods`, 날짜별 예외는 `feature_special_days`에 둔다.
+
+`feature_opening_periods`:
+
+- `feature_id text references features(feature_id) on delete cascade`
+- `period_index integer`
+- `start_weekday integer`: `0=Sunday`부터 `6=Saturday`
+- `start_time text`: `HHMM`
+- `duration_minutes integer`
+- `timezone text not null default 'Asia/Seoul'`
+- `payload json/jsonb not null default '{}'`
+- `primary key(feature_id, period_index)`
+
+`feature_special_days`:
+
+- `feature_id text references features(feature_id) on delete cascade`
+- `special_date date`
+- `is_closed boolean not null`
+- `periods json/jsonb null`
+- `payload json/jsonb not null default '{}'`
+- `primary key(feature_id, special_date)`
+
+Portable schema는 `duration_minutes`를 기본으로 사용한다. 운영 PostgreSQL에서는 필요할 때
+`btree_gist`와 `tsrange`/interval 기반 겹침 방지 제약을 추가한다.
+
 ## `feature_weather_values`
 
 feature 기준 weather context 저장소다. 다른 provider의 관측/지수/특보 데이터도 KMA식 초단기/단기/중기 축에 맞출 수 있도록 `timeline_bucket`과 `forecast_style`을 분리한다.

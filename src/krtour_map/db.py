@@ -9,6 +9,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Column,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -26,7 +27,21 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.types import UserDefinedType
 
 from krtour_map.ids import make_payload_hash
-from krtour_map.models import PricePoint, PriceValue, ProviderSyncState, WeatherValue
+from krtour_map.models import (
+    Coordinate,
+    EventDetail,
+    Feature,
+    FeatureOpeningHours,
+    OpeningPeriod,
+    OpeningTime,
+    PricePoint,
+    PriceValue,
+    ProviderSyncState,
+    SourceLink,
+    SourceRecord,
+    SpecialOpeningDay,
+    WeatherValue,
+)
 
 metadata = MetaData()
 
@@ -190,6 +205,89 @@ source_links = Table(
         name="ck_source_links_source_role",
     ),
 )
+
+feature_event_details = Table(
+    "feature_event_details",
+    metadata,
+    Column(
+        "feature_id",
+        Text,
+        ForeignKey("features.feature_id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("event_kind", Text, nullable=False),
+    Column("starts_on", Date),
+    Column("ends_on", Date),
+    Column("timezone", Text, nullable=False, default="Asia/Seoul"),
+    Column("venue_name", Text),
+    Column("tel", Text),
+    Column("content_id", Text),
+    Column("content_type_id", Text),
+    Column("area_code", Text),
+    Column("sigungu_code", Text),
+    Column("payload", JSON, nullable=False, default=dict),
+    CheckConstraint(
+        "starts_on IS NULL OR ends_on IS NULL OR ends_on >= starts_on",
+        name="ck_feature_event_details_date_range",
+    ),
+)
+
+Index(
+    "ix_feature_event_details_dates",
+    feature_event_details.c.starts_on,
+    feature_event_details.c.ends_on,
+)
+Index("ix_feature_event_details_event_kind", feature_event_details.c.event_kind)
+Index("ix_feature_event_details_content_id", feature_event_details.c.content_id)
+
+feature_opening_periods = Table(
+    "feature_opening_periods",
+    metadata,
+    Column(
+        "feature_id",
+        Text,
+        ForeignKey("features.feature_id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("period_index", Integer, primary_key=True),
+    Column("start_weekday", Integer, nullable=False),
+    Column("start_time", Text, nullable=False),
+    Column("duration_minutes", Integer, nullable=False),
+    Column("timezone", Text, nullable=False, default="Asia/Seoul"),
+    Column("payload", JSON, nullable=False, default=dict),
+    CheckConstraint(
+        "start_weekday >= 0 AND start_weekday <= 6",
+        name="ck_feature_opening_periods_start_weekday",
+    ),
+    CheckConstraint("length(start_time) = 4", name="ck_feature_opening_periods_start_time"),
+    CheckConstraint(
+        "duration_minutes > 0 AND duration_minutes <= 10080",
+        name="ck_feature_opening_periods_duration",
+    ),
+)
+
+Index(
+    "ix_feature_opening_periods_start",
+    feature_opening_periods.c.start_weekday,
+    feature_opening_periods.c.start_time,
+)
+
+feature_special_days = Table(
+    "feature_special_days",
+    metadata,
+    Column(
+        "feature_id",
+        Text,
+        ForeignKey("features.feature_id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("special_date", Date, primary_key=True),
+    Column("is_closed", Boolean, nullable=False),
+    Column("periods", JSON),
+    Column("payload", JSON, nullable=False, default=dict),
+)
+
+Index("ix_feature_special_days_date", feature_special_days.c.special_date)
 
 feature_weather_values = Table(
     "feature_weather_values",
@@ -524,6 +622,327 @@ def initialize_feature_db(
     if create_schema:
         context.create_schema()
     return context
+
+
+def feature_to_row(feature: Feature) -> dict[str, Any]:
+    """Convert a `Feature` DTO into a `features` row payload."""
+
+    coord = feature.coord
+    return {
+        "feature_id": feature.feature_id,
+        "kind": str(feature.kind),
+        "name": feature.name,
+        "category": feature.category,
+        "longitude": coord.longitude if coord is not None else None,
+        "latitude": coord.latitude if coord is not None else None,
+        "geom": None,
+        "address": feature.address.model_dump(mode="json"),
+        "legal_dong_code": getattr(feature.address, "legal_dong_code", None),
+        "road_name_code": getattr(feature.address, "road_name_code", None),
+        "road_address_management_no": getattr(feature.address, "road_address_management_no", None),
+        "admin_dong_code": getattr(feature.address, "admin_dong_code", None),
+        "sido_code": getattr(feature.address, "sido_code", None),
+        "sigungu_code": getattr(feature.address, "sigungu_code", None),
+        "urls": feature.urls.model_dump(mode="json"),
+        "marker_icon": feature.marker_icon,
+        "marker_color": feature.marker_color,
+        "parent_feature_id": feature.parent_feature_id,
+        "sibling_group_id": feature.sibling_group_id,
+        "detail": dict(feature.detail or {}),
+        "raw_refs": [ref.model_dump(mode="json") for ref in feature.raw_refs],
+        "status": str(feature.status),
+        "created_at": feature.created_at,
+        "updated_at": feature.updated_at,
+        "deleted_at": feature.deleted_at,
+    }
+
+
+def feature_from_row(row: Mapping[str, Any]) -> Feature:
+    """Convert a `features` row mapping into a `Feature` DTO."""
+
+    longitude = row.get("longitude")
+    latitude = row.get("latitude")
+    coord = None
+    if longitude is not None and latitude is not None:
+        coord = Coordinate(lat=latitude, lon=longitude)
+
+    return Feature(
+        feature_id=str(row["feature_id"]),
+        kind=str(row["kind"]),
+        name=str(row["name"]),
+        coord=coord,
+        address=row.get("address") or {},
+        category=str(row["category"]),
+        urls=row.get("urls") or {},
+        marker_icon=str(row["marker_icon"]),
+        marker_color=str(row["marker_color"]),
+        parent_feature_id=row.get("parent_feature_id"),
+        sibling_group_id=row.get("sibling_group_id"),
+        detail=dict(row.get("detail") or {}),
+        raw_refs=list(row.get("raw_refs") or []),
+        status=str(row["status"]),
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+        deleted_at=row.get("deleted_at"),
+    )
+
+
+def source_record_to_row(source_record: SourceRecord) -> dict[str, Any]:
+    """Convert a `SourceRecord` DTO into a `source_records` row payload."""
+
+    return {
+        "source_record_key": source_record.key(),
+        "provider": source_record.provider,
+        "dataset_key": source_record.dataset_key,
+        "source_entity_type": source_record.source_entity_type,
+        "source_entity_id": source_record.source_entity_id,
+        "source_version": source_record.source_version,
+        "raw_name": source_record.raw_name,
+        "raw_address": source_record.raw_address,
+        "raw_longitude": source_record.raw_longitude,
+        "raw_latitude": source_record.raw_latitude,
+        "raw_data": dict(source_record.raw_data or {}),
+        "raw_payload_hash": source_record.raw_payload_hash,
+        "fetched_at": source_record.fetched_at or source_record.imported_at,
+        "imported_at": source_record.imported_at,
+        "expires_at": source_record.expires_at,
+    }
+
+
+def source_record_from_row(row: Mapping[str, Any]) -> SourceRecord:
+    """Convert a `source_records` row mapping into a `SourceRecord` DTO."""
+
+    return SourceRecord(
+        provider=str(row["provider"]),
+        dataset_key=str(row["dataset_key"]),
+        source_entity_type=str(row["source_entity_type"]),
+        source_entity_id=str(row["source_entity_id"]),
+        source_version=row.get("source_version"),
+        raw_name=row.get("raw_name"),
+        raw_address=row.get("raw_address"),
+        raw_longitude=row.get("raw_longitude"),
+        raw_latitude=row.get("raw_latitude"),
+        raw_data=dict(row.get("raw_data") or {}),
+        raw_payload_hash=str(row["raw_payload_hash"]),
+        fetched_at=row.get("fetched_at"),
+        imported_at=row["imported_at"],
+        expires_at=row.get("expires_at"),
+        source_record_key=str(row["source_record_key"]),
+    )
+
+
+def source_link_to_row(source_link: SourceLink) -> dict[str, Any]:
+    """Convert a `SourceLink` DTO into a `source_links` row payload."""
+
+    return {
+        "feature_id": source_link.feature_id,
+        "source_record_key": source_link.source_record_key,
+        "source_role": str(source_link.source_role),
+        "match_method": source_link.match_method,
+        "confidence": source_link.confidence,
+        "is_primary_source": source_link.is_primary_source,
+        "created_at": source_link.created_at,
+    }
+
+
+def source_link_from_row(row: Mapping[str, Any]) -> SourceLink:
+    """Convert a `source_links` row mapping into a `SourceLink` DTO."""
+
+    return SourceLink(
+        feature_id=str(row["feature_id"]),
+        source_record_key=str(row["source_record_key"]),
+        source_role=str(row["source_role"]),
+        match_method=str(row["match_method"]),
+        confidence=int(row["confidence"]),
+        is_primary_source=bool(row["is_primary_source"]),
+        created_at=row["created_at"],
+    )
+
+
+def event_detail_to_row(detail: EventDetail) -> dict[str, Any]:
+    """Convert an `EventDetail` DTO into a `feature_event_details` row payload."""
+
+    payload = dict(detail.payload)
+    if detail.opening_hours is not None:
+        payload["opening_hours"] = _opening_hours_payload(detail.opening_hours)
+
+    return {
+        "feature_id": detail.feature_id,
+        "event_kind": detail.event_kind,
+        "starts_on": detail.starts_on,
+        "ends_on": detail.ends_on,
+        "timezone": detail.timezone,
+        "venue_name": detail.venue_name,
+        "tel": detail.tel,
+        "content_id": detail.content_id,
+        "content_type_id": detail.content_type_id,
+        "area_code": detail.area_code,
+        "sigungu_code": detail.sigungu_code,
+        "payload": payload,
+    }
+
+
+def event_detail_from_row(row: Mapping[str, Any]) -> EventDetail:
+    """Convert a `feature_event_details` row mapping into an `EventDetail` DTO."""
+
+    payload = dict(row.get("payload") or {})
+    opening_hours_data = payload.pop("opening_hours", None)
+    return EventDetail(
+        feature_id=str(row["feature_id"]),
+        event_kind=str(row["event_kind"]),
+        starts_on=row.get("starts_on"),
+        ends_on=row.get("ends_on"),
+        timezone=str(row.get("timezone") or "Asia/Seoul"),
+        opening_hours=(
+            FeatureOpeningHours.model_validate(opening_hours_data)
+            if opening_hours_data is not None
+            else None
+        ),
+        venue_name=row.get("venue_name"),
+        tel=row.get("tel"),
+        content_id=row.get("content_id"),
+        content_type_id=row.get("content_type_id"),
+        area_code=row.get("area_code"),
+        sigungu_code=row.get("sigungu_code"),
+        payload=payload,
+    )
+
+
+def opening_period_to_row(
+    feature_id: str,
+    period: OpeningPeriod,
+    *,
+    period_index: int,
+    timezone: str = "Asia/Seoul",
+) -> dict[str, Any]:
+    """Convert an `OpeningPeriod` into a `feature_opening_periods` row payload."""
+
+    return {
+        "feature_id": feature_id,
+        "period_index": period_index,
+        "start_weekday": period.open.day,
+        "start_time": period.open.time,
+        "duration_minutes": period.duration_minutes,
+        "timezone": timezone,
+        "payload": _opening_period_payload(period),
+    }
+
+
+def opening_period_from_row(row: Mapping[str, Any]) -> OpeningPeriod:
+    """Convert a `feature_opening_periods` row mapping into an `OpeningPeriod` DTO."""
+
+    payload = dict(row.get("payload") or {})
+    if payload.get("open"):
+        return OpeningPeriod.model_validate(payload)
+
+    start = OpeningTime(day=int(row["start_weekday"]), time=str(row["start_time"]))
+    duration = int(row["duration_minutes"])
+    if duration == 7 * 24 * 60 and start.day == 0 and start.time == "0000":
+        return OpeningPeriod(open=start)
+
+    end_minute = (_minute_of_week(start.day, start.time) + duration) % (7 * 24 * 60)
+    return OpeningPeriod(open=start, close=_opening_time_from_minute(end_minute))
+
+
+def opening_hours_to_period_rows(
+    feature_id: str,
+    hours: FeatureOpeningHours,
+) -> list[dict[str, Any]]:
+    """Convert opening-hours periods into ordered DB row payloads."""
+
+    return [
+        opening_period_to_row(
+            feature_id,
+            period,
+            period_index=index,
+            timezone=hours.timezone,
+        )
+        for index, period in enumerate(hours.periods)
+    ]
+
+
+def special_opening_day_to_row(
+    feature_id: str,
+    special_day: SpecialOpeningDay,
+) -> dict[str, Any]:
+    """Convert a `SpecialOpeningDay` into a `feature_special_days` row payload."""
+
+    periods = None
+    if special_day.periods is not None:
+        periods = [_opening_period_payload(period) for period in special_day.periods]
+
+    return {
+        "feature_id": feature_id,
+        "special_date": special_day.date,
+        "is_closed": special_day.is_closed,
+        "periods": periods,
+        "payload": {
+            "exceptional_hours": special_day.exceptional_hours,
+        },
+    }
+
+
+def special_opening_day_from_row(row: Mapping[str, Any]) -> SpecialOpeningDay:
+    """Convert a `feature_special_days` row mapping into a `SpecialOpeningDay` DTO."""
+
+    periods_data = row.get("periods")
+    periods = None
+    if periods_data is not None:
+        periods = [OpeningPeriod.model_validate(period) for period in periods_data]
+    payload = dict(row.get("payload") or {})
+    return SpecialOpeningDay(
+        date=row["special_date"],
+        is_closed=bool(row["is_closed"]),
+        periods=periods,
+        exceptional_hours=bool(payload.get("exceptional_hours", True)),
+    )
+
+
+def _opening_period_payload(period: OpeningPeriod) -> dict[str, Any]:
+    return {
+        "open": {"day": period.open.day, "time": period.open.time},
+        "close": (
+            {"day": period.close.day, "time": period.close.time}
+            if period.close is not None
+            else None
+        ),
+    }
+
+
+def _opening_hours_payload(hours: FeatureOpeningHours) -> dict[str, Any]:
+    return {
+        "timezone": hours.timezone,
+        "open_now": hours.open_now,
+        "periods": [_opening_period_payload(period) for period in hours.periods],
+        "special_days": [
+            {
+                "date": special_day.date.isoformat(),
+                "is_closed": special_day.is_closed,
+                "periods": (
+                    [_opening_period_payload(period) for period in special_day.periods]
+                    if special_day.periods is not None
+                    else None
+                ),
+                "exceptional_hours": special_day.exceptional_hours,
+            }
+            for special_day in hours.special_days
+        ],
+        "weekday_text": list(hours.weekday_text),
+    }
+
+
+def _minute_of_week(day: int, time_value: str) -> int:
+    return day * 24 * 60 + _hhmm_to_minutes(time_value)
+
+
+def _hhmm_to_minutes(time_value: str) -> int:
+    return int(time_value[:2]) * 60 + int(time_value[2:])
+
+
+def _opening_time_from_minute(minute_of_week: int) -> OpeningTime:
+    day, minute_of_day = divmod(minute_of_week, 24 * 60)
+    hour, minute = divmod(minute_of_day, 60)
+    return OpeningTime(day=day, time=f"{hour:02d}{minute:02d}")
 
 
 def weather_value_to_row(value: WeatherValue) -> dict[str, Any]:

@@ -35,6 +35,9 @@ dev = [
   "ruff>=0.5",
   "mypy>=1.10",
 ]
+visitkorea = [
+  "python-visitkorea-api @ git+https://github.com/digitie/python-visitkorea-api.git@716ca303cf28ba599c3a2838ae48f2dd1a43b98d",
+]
 
 [tool.setuptools]
 package-dir = { "" = "src" }

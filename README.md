@@ -38,6 +38,7 @@ src/krtour_map/
   providers.py   # canonical provider name policy
   store.py       # in-memory CRUD repository
   weather.py     # weather latest merge helper
+  events.py      # VisitKorea festival/event ETL normalization
   parser.py      # fixture replay parser boundary
   processor.py   # fixture replay processor boundary
   debug.py       # DebugRun
@@ -97,6 +98,8 @@ python -m pytest
 - [Provider 계약](docs/provider-contract.md)
 - [python-kraddr-base 자료형 사용 기준](docs/kraddr-base-types.md)
 - [Feature model](docs/feature-model.md)
+- [Feature opening hours](docs/feature-opening-hours.md)
+- [Event feature ETL](docs/event-feature-etl.md)
 - [Weather feature normalization](docs/weather-feature-normalization.md)
 - [Dagster 경계](docs/dagster-boundary.md)
 - [Postgres 스키마 기준](docs/postgres-schema.md)

@@ -1,0 +1,186 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
+
+from krtour_map.dagster import DagsterEtlExecution, DagsterEtlRun
+from krtour_map.enums import FeatureKind
+from krtour_map.events import (
+    VISITKOREA_FESTIVAL_DATASET_KEY,
+    VISITKOREA_FESTIVAL_DEFAULT_PAGE_SIZE,
+    VISITKOREA_FESTIVAL_FULL_SCAN_INTERVAL_DAYS,
+    VISITKOREA_FESTIVAL_FULL_SCAN_START_DATE,
+    collect_visitkorea_festival_events,
+    load_visitkorea_festival_events,
+    visitkorea_festival_full_scan_identity,
+    visitkorea_festival_full_scan_job_spec,
+    visitkorea_festival_item_to_feature_bundle,
+)
+from krtour_map.models import Coordinate
+
+
+@dataclass(frozen=True)
+class FakeFestivalItem:
+    content_id: str | None
+    title: str | None
+    raw: dict[str, object]
+    coordinate: Coordinate | None = None
+    addr1: str | None = None
+    addr2: str | None = None
+    zipcode: str | None = None
+    content_type_id: str | None = "15"
+    area_code: str | None = "1"
+    sigungu_code: str | None = "1"
+    cat1: str | None = "A02"
+    cat2: str | None = "A0207"
+    cat3: str | None = "A02070200"
+    first_image: str | None = None
+    first_image2: str | None = None
+    tel: str | None = None
+
+
+@dataclass(frozen=True)
+class FakePage:
+    items: tuple[FakeFestivalItem, ...]
+    total_count: int
+    page_no: int
+    num_of_rows: int
+    collected_at: datetime
+
+
+class FakeVisitKoreaClient:
+    def __init__(self, pages: tuple[FakePage, ...]) -> None:
+        self.pages = pages
+        self.calls: list[dict[str, object]] = []
+
+    def search_festival(self, *_args: object, **_kwargs: object) -> None:
+        raise AssertionError("iter_pages should own pagination")
+
+    def iter_pages(self, fetch_page: object, *args: object, **kwargs: object):
+        self.calls.append({"fetch_page": fetch_page, "args": args, **kwargs})
+        return iter(self.pages)
+
+
+def test_collect_visitkorea_festival_events_uses_provider_pagination() -> None:
+    collected_at = datetime(2026, 5, 18, 9, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+    client = FakeVisitKoreaClient(
+        (
+            FakePage(
+                items=(
+                    FakeFestivalItem(
+                        content_id="100",
+                        title="봄 축제",
+                        coordinate=Coordinate(lat=37.5796, lon=126.9769),
+                        addr1="서울 종로구 세종대로 1",
+                        raw={"contentid": "100", "eventstartdate": "20260501"},
+                    ),
+                    FakeFestivalItem(
+                        content_id="101",
+                        title="좌표 없는 축제",
+                        raw={"contentid": "101", "eventstartdate": "20260601"},
+                    ),
+                ),
+                total_count=3,
+                page_no=1,
+                num_of_rows=2,
+                collected_at=collected_at,
+            ),
+            FakePage(
+                items=(
+                    FakeFestivalItem(
+                        content_id="102",
+                        title="여름 축제",
+                        coordinate=Coordinate(lat=35.1796, lon=129.0756),
+                        raw={
+                            "contentid": "102",
+                            "eventstartdate": "20260701",
+                            "eventenddate": "20260707",
+                        },
+                    ),
+                ),
+                total_count=3,
+                page_no=2,
+                num_of_rows=2,
+                collected_at=collected_at,
+            ),
+        )
+    )
+
+    result = collect_visitkorea_festival_events(
+        client,
+        event_start_date=date(2026, 5, 18),
+        page_size=2,
+    )
+
+    assert client.calls[0]["fetch_page"] == client.search_festival
+    assert client.calls[0]["num_of_rows"] == 2
+    assert client.calls[0]["max_pages"] is None
+    assert result.dataset_key == VISITKOREA_FESTIVAL_DATASET_KEY
+    assert result.scanned_pages == 2
+    assert len(result.features) == 3
+    assert result.features[0].kind == FeatureKind.EVENT
+    assert result.features[1].coord is None
+    assert result.event_details[2].starts_on == date(2026, 7, 1)
+    assert result.event_details[2].ends_on == date(2026, 7, 7)
+    assert result.source_links[0].source_record_key == result.source_records[0].key()
+
+
+def test_visitkorea_festival_job_spec_is_daily_full_scan() -> None:
+    execution = DagsterEtlExecution(
+        logical_datetime=datetime(2026, 5, 18, 0, 0, tzinfo=ZoneInfo("Asia/Seoul")),
+        run_type="scheduled",
+        op_config={},
+    )
+    identity = visitkorea_festival_full_scan_identity(
+        None,
+        VISITKOREA_FESTIVAL_DATASET_KEY,
+        execution,
+    )
+
+    assert VISITKOREA_FESTIVAL_FULL_SCAN_INTERVAL_DAYS == 1
+    assert visitkorea_festival_full_scan_job_spec.dataset_key == VISITKOREA_FESTIVAL_DATASET_KEY
+    assert "schedule:daily" in visitkorea_festival_full_scan_job_spec.tags
+    assert identity.run_key == "20260518-full-scan"
+
+
+def test_load_visitkorea_festival_events_defaults_to_uncapped_full_scan() -> None:
+    logical_datetime = datetime(2026, 5, 18, 0, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+    client = FakeVisitKoreaClient(())
+    run = DagsterEtlRun(
+        dataset_key=VISITKOREA_FESTIVAL_DATASET_KEY,
+        run_key="20260518-full-scan",
+        run_type="scheduled",
+        trigger_date=date(2026, 5, 18),
+        logical_datetime=logical_datetime,
+        op_config={},
+    )
+
+    result = load_visitkorea_festival_events(client, run)
+
+    assert result.scanned_pages == 0
+    assert client.calls[0]["args"] == (VISITKOREA_FESTIVAL_FULL_SCAN_START_DATE,)
+    assert client.calls[0]["num_of_rows"] == VISITKOREA_FESTIVAL_DEFAULT_PAGE_SIZE
+    assert client.calls[0]["max_pages"] is None
+
+
+def test_visitkorea_festival_feature_id_is_stable_across_payload_changes() -> None:
+    first = visitkorea_festival_item_to_feature_bundle(
+        FakeFestivalItem(
+            content_id="200",
+            title="First Festival Name",
+            raw={"contentid": "200", "eventstartdate": "20260501"},
+        )
+    )
+    second = visitkorea_festival_item_to_feature_bundle(
+        FakeFestivalItem(
+            content_id="200",
+            title="Renamed Festival",
+            raw={"contentid": "200", "eventstartdate": "20260501", "tel": "02-123-4567"},
+        )
+    )
+
+    assert isinstance(first, tuple)
+    assert isinstance(second, tuple)
+    assert first[0].feature_id == second[0].feature_id
+    assert first[2].key() != second[2].key()

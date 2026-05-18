@@ -73,6 +73,11 @@ TripMate 내부와 `python-krtour-map` 내부에 provider별 adapter/gateway/wra
 - `forest_landslide_risk`
 - `air_quality_sido_measurement`
 - `beach_marine_index`
+- `visitkorea_festival_events`
+
+VisitKorea 축제 source는 `python-visitkorea-api` public client의
+`iter_pages(client.search_festival, ...)`를 직접 사용한다. 일일 full scan은 기본적으로
+`max_pages`를 두지 않고 provider pagination이 끝날 때까지 순회한다.
 
 Weather source는 provider public client를 직접 호출한 뒤 `WeatherValue`로 정규화한다. `forecast_style`에는 관측/예보/지수/특보 성격을 남기고, KMA식 초단기/단기/중기 분류는 `timeline_bucket`에 둔다. 세부 mapping은 `docs/weather-feature-normalization.md`를 따른다.
 

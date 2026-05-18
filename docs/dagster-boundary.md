@@ -34,3 +34,18 @@
 - provider별 wrapper/adapter/gateway를 만들지 않는다. 안정된 provider public client와 typed model을 직접 사용한다.
 - Dagster 실행 편의를 위해 TripMate에 임시 정규화 함수를 만들지 않는다. 필요한 변환 함수는 `python-krtour-map`에 둔다.
 - 중복 판단과 검수 queue 저장은 이 라이브러리의 `dedup_review_queue` 계약을 사용한다.
+
+## VisitKorea festival full scan
+
+축제/행사 수집은 `visitkorea_festival_full_scan_job_spec`로 노출한다. 이 job spec은
+TripMate가 실제 Dagster `ScheduleDefinition`을 만들 때 사용할 메타데이터이며, 라이브러리
+자체가 Dagster daemon을 실행하지 않는다.
+
+- 실행 주기: 1일 1회
+- dataset key: `visitkorea_festival_events`
+- provider: `python-visitkorea-api`
+- pagination: `iter_pages(client.search_festival, ...)`로 마지막 페이지까지 순회
+- 기본 `max_pages`: 없음
+
+TripMate 운영 config에서 `max_pages`를 넘기면 긴급 제한용으로만 사용한다. 기본 full scan은
+모든 축제자료를 가져오는 것을 우선한다.

@@ -1,19 +1,28 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from krtour_map.db import (
     data_integrity_violations,
     dedup_review_queue,
+    event_detail_from_row,
+    event_detail_to_row,
     feature_db_settings_from_object,
+    feature_event_details,
+    feature_from_row,
+    feature_opening_periods,
     feature_overrides,
+    feature_special_days,
+    feature_to_row,
     feature_weather_values,
     features,
     initialize_feature_db,
     make_dedup_review_key,
     metadata,
+    opening_period_from_row,
+    opening_period_to_row,
     price_point_from_row,
     price_point_to_row,
     price_points,
@@ -23,11 +32,23 @@ from krtour_map.db import (
     provider_sync_state,
     provider_sync_state_from_row,
     provider_sync_state_to_row,
+    special_opening_day_from_row,
+    special_opening_day_to_row,
     weather_value_from_row,
     weather_value_to_row,
 )
 from krtour_map.enums import ForecastStyle, TimelineBucket, WeatherDomain
-from krtour_map.models import PricePoint, PriceValue, ProviderSyncState, WeatherValue
+from krtour_map.models import (
+    EventDetail,
+    FeatureOpeningHours,
+    OpeningPeriod,
+    OpeningTime,
+    PricePoint,
+    PriceValue,
+    ProviderSyncState,
+    SpecialOpeningDay,
+    WeatherValue,
+)
 
 
 def test_feature_db_schema_is_owned_by_krtour_map() -> None:
@@ -37,6 +58,9 @@ def test_feature_db_schema_is_owned_by_krtour_map() -> None:
     assert "price_points" in metadata.tables
     assert "price_values" in metadata.tables
     assert "provider_sync_state" in metadata.tables
+    assert "feature_event_details" in metadata.tables
+    assert "feature_opening_periods" in metadata.tables
+    assert "feature_special_days" in metadata.tables
     assert "feature_overrides" in metadata.tables
     assert "dedup_review_queue" in metadata.tables
     assert "data_integrity_violations" in metadata.tables
@@ -60,6 +84,50 @@ def test_feature_db_schema_is_owned_by_krtour_map() -> None:
     assert columns.valid_until.name == "valid_until"
     assert columns.source_metric_key.name == "source_metric_key"
     assert columns.normalization_version.name == "normalization_version"
+
+    assert feature_event_details.c.starts_on.name == "starts_on"
+    assert feature_opening_periods.c.duration_minutes.name == "duration_minutes"
+    assert feature_special_days.c.special_date.name == "special_date"
+
+
+def test_feature_db_row_round_trip_allows_missing_coordinate(sample_feature) -> None:
+    feature = sample_feature.model_copy(update={"coord": None})
+    row = feature_to_row(feature)
+    restored = feature_from_row(row)
+
+    assert row["longitude"] is None
+    assert row["latitude"] is None
+    assert restored.coord is None
+    assert restored.feature_id == feature.feature_id
+
+
+def test_event_detail_and_opening_hours_db_rows_round_trip() -> None:
+    period = OpeningPeriod(
+        open=OpeningTime(day=5, time="2000"),
+        close=OpeningTime(day=6, time="0200"),
+    )
+    detail = EventDetail(
+        feature_id="f_event_1",
+        event_kind="festival",
+        starts_on=date(2026, 5, 1),
+        ends_on=date(2026, 5, 5),
+        content_id="123",
+        content_type_id="15",
+        opening_hours=FeatureOpeningHours(periods=[period]),
+        payload={"event_start_date": "20260501"},
+    )
+    special_day = SpecialOpeningDay(date=date(2026, 5, 5), is_closed=True)
+
+    detail_row = event_detail_to_row(detail)
+    period_row = opening_period_to_row("f_event_1", period, period_index=0)
+    special_row = special_opening_day_to_row("f_event_1", special_day)
+
+    assert detail_row["starts_on"] == date(2026, 5, 1)
+    assert period_row["duration_minutes"] == 360
+    assert special_row["is_closed"] is True
+    assert event_detail_from_row(detail_row) == detail
+    assert opening_period_from_row(period_row) == period
+    assert special_opening_day_from_row(special_row) == special_day
 
 
 def test_weather_value_db_row_round_trip() -> None:

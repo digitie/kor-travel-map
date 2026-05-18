@@ -32,6 +32,20 @@ TripMate의 feature 중심 문서는 [Feature model](feature-model.md)과 [TripM
 4. TripMate API는 feature DB에서 필요한 값을 읽어 사용자/여행계획/POI 응답에 조립한다.
 5. 의미 있는 provider 응답은 `save_fixture`로 저장하고 pytest replay를 추가한다.
 
+## Event ETL 예시
+
+VisitKorea 축제 ETL은 TripMate가 provider client와 Dagster 실행 자원을 주입하고,
+`python-krtour-map`의 loader/job spec을 호출하는 방식으로 연결한다.
+
+```python
+from krtour_map.events import visitkorea_festival_full_scan_job_spec
+
+result = visitkorea_festival_full_scan_job_spec.loader(visitkorea_client, run)
+```
+
+loader 내부에서는 `iter_pages(client.search_festival, ...)`를 사용해 모든 페이지를 순회한다.
+TripMate schedule은 이 job spec을 기준으로 1일 1회 실행한다.
+
 ## Weather 예시
 
 ## Dagster boundary
