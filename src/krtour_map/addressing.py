@@ -286,7 +286,41 @@ def _address_from_geocoder_result(result: Any) -> Address | None:
         dumped = result.model_dump(mode="json")
         if isinstance(dumped, Mapping):
             return _address_from_mapping(dumped)
+    mapping = _geocoder_attr_mapping(result)
+    if mapping:
+        return _address_from_mapping(mapping)
     return None
+
+
+def _geocoder_attr_mapping(result: Any) -> dict[str, Any]:
+    mapping: dict[str, Any] = {}
+    for attr in (
+        "postal_code",
+        "legal_dong_code",
+        "sigungu_code",
+        "road_name_code",
+        "road_name_address_code",
+        "building_management_number",
+    ):
+        value = getattr(result, attr, None)
+        if value not in (None, ""):
+            mapping[attr] = value
+
+    road_address = getattr(result, "road_address", None)
+    if road_address not in (None, ""):
+        mapping["road_address"] = road_address
+        mapping.setdefault("address", road_address)
+
+    parcel_address = getattr(result, "parcel_address", None)
+    if parcel_address not in (None, ""):
+        mapping["jibun_address"] = parcel_address
+        mapping.setdefault("address", parcel_address)
+
+    formatted_address = getattr(result, "formatted_address", None)
+    if formatted_address not in (None, ""):
+        mapping.setdefault("address", formatted_address)
+
+    return mapping
 
 
 def _address_from_mapping(row: Mapping[str, Any]) -> Address | None:
