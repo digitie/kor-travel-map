@@ -38,6 +38,9 @@ dev = [
 visitkorea = [
   "python-visitkorea-api @ git+https://github.com/digitie/python-visitkorea-api.git@716ca303cf28ba599c3a2838ae48f2dd1a43b98d",
 ]
+kasi = [
+  "python-kasi-api @ git+https://github.com/digitie/python-kasi-api.git@a8940f78e804646fdadb377ad035dbcdce45a034",
+]
 
 [tool.setuptools]
 package-dir = { "" = "src" }
