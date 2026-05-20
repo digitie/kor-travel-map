@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from krtour_map.files import (
@@ -10,6 +11,14 @@ from krtour_map.files import (
     make_feature_file_id,
     make_rustfs_object_key,
     upload_feature_file_sources_to_rustfs,
+)
+from krtour_map.rustfs import (
+    RustfsS3Client,
+    RustfsSettings,
+    RustfsStorage,
+    load_rustfs_settings,
+    redacted_rustfs_settings,
+    save_rustfs_settings,
 )
 
 
@@ -100,3 +109,88 @@ def test_feature_file_ids_are_stable_for_rustfs_objects() -> None:
     assert object_key == "feature-files/f_event_1/001-thumbnail-aaaaaaaaaaaaaaaa.png"
     assert first == second
     assert first.startswith("ff_")
+
+
+def test_rustfs_settings_save_load_and_redact(tmp_path) -> None:
+    path = tmp_path / "rustfs.toml"
+    settings = RustfsSettings(
+        endpoint_url="http://127.0.0.1:19000",
+        console_url="http://127.0.0.1:19001",
+        bucket="tripmate-media",
+        access_key_id="tripmate-dev-access",
+        secret_access_key="tripmate-dev-secret",
+        allowed_content_types=("image/jpeg", "video/mp4", "application/pdf"),
+    )
+
+    saved_path = save_rustfs_settings(settings, path)
+    restored = load_rustfs_settings(saved_path)
+    redacted = redacted_rustfs_settings(restored)
+
+    assert restored.bucket == "tripmate-media"
+    assert restored.allowed_content_types == ("image/jpeg", "video/mp4", "application/pdf")
+    assert redacted["access_key_id"] == "<configured>"
+    assert redacted["secret_access_key"] == "<configured>"
+
+
+def test_rustfs_storage_presigns_upload_for_feature_files() -> None:
+    storage = RustfsStorage(
+        RustfsSettings(
+            bucket="tripmate-feature-files",
+            access_key_id="access",
+            secret_access_key="secret",
+            allowed_content_types=("image/jpeg", "video/mp4"),
+        )
+    )
+
+    upload = storage.create_presigned_upload(
+        user_id=UUID("00000000-0000-0000-0000-000000000001"),
+        filename="heritage.jpg",
+        content_type="image/jpeg",
+        content_length=128,
+    )
+
+    assert upload.bucket == "tripmate-feature-files"
+    assert upload.storage_key.startswith(
+        "user-uploads/feature_file/00000000-0000-0000-0000-000000000001/"
+    )
+    assert upload.storage_key.endswith(".jpg")
+    assert "X-Amz-Signature=" in upload.upload_url
+    assert upload.headers == {"Content-Type": "image/jpeg"}
+
+
+def test_rustfs_s3_client_lists_objects_with_signed_request() -> None:
+    captured = {}
+
+    def requester(request):
+        captured["url"] = request.full_url
+        captured["authorization"] = request.headers.get("Authorization")
+        return b"""<?xml version="1.0" encoding="UTF-8"?>
+<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+  <Name>tripmate-feature-files</Name>
+  <Prefix>feature-files/</Prefix>
+  <IsTruncated>false</IsTruncated>
+  <Contents>
+    <Key>feature-files/f1/000-primary.jpg</Key>
+    <LastModified>2026-05-20T00:00:00.000Z</LastModified>
+    <ETag>&quot;etag&quot;</ETag>
+    <Size>12</Size>
+    <StorageClass>STANDARD</StorageClass>
+  </Contents>
+</ListBucketResult>"""
+
+    client = RustfsS3Client(
+        RustfsSettings(
+            bucket="tripmate-feature-files",
+            access_key_id="access",
+            secret_access_key="secret",
+        ),
+        requester=requester,
+    )
+
+    listing = client.list_objects(prefix="feature-files/", max_keys=10)
+
+    assert "list-type=2" in captured["url"]
+    assert captured["authorization"].startswith("AWS4-HMAC-SHA256")
+    assert listing.bucket == "tripmate-feature-files"
+    assert listing.objects[0].key == "feature-files/f1/000-primary.jpg"
+    assert listing.objects[0].size == 12

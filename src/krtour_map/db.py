@@ -29,6 +29,7 @@ from sqlalchemy.types import UserDefinedType
 
 from krtour_map.ids import make_payload_hash
 from krtour_map.models import (
+    AreaDetail,
     Coordinate,
     EventDetail,
     Feature,
@@ -41,6 +42,7 @@ from krtour_map.models import (
     PricePoint,
     PriceValue,
     ProviderSyncState,
+    RouteDetail,
     SourceLink,
     SourceRecord,
     SpecialOpeningDay,
@@ -104,6 +106,8 @@ class FeatureDbLoadResult:
     source_links: int = 0
     place_details: int = 0
     event_details: int = 0
+    area_details: int = 0
+    route_details: int = 0
     notice_details: int = 0
     opening_periods: int = 0
     special_days: int = 0
@@ -166,7 +170,9 @@ features = Table(
 )
 
 Index("ix_features_kind_category", features.c.kind, features.c.category)
+Index("ix_features_kind_status_updated", features.c.kind, features.c.status, features.c.updated_at)
 Index("ix_features_status", features.c.status)
+Index("ix_features_updated_at", features.c.updated_at)
 Index("ix_features_legal_dong_code", features.c.legal_dong_code)
 Index("ix_features_parent_feature_id", features.c.parent_feature_id)
 Index("ix_features_sibling_group_id", features.c.sibling_group_id)
@@ -199,6 +205,15 @@ source_records = Table(
         name="uq_source_records_provider_entity_hash",
     ),
 )
+
+Index(
+    "ix_source_records_provider_dataset_entity",
+    source_records.c.provider,
+    source_records.c.dataset_key,
+    source_records.c.source_entity_type,
+    source_records.c.source_entity_id,
+)
+Index("ix_source_records_imported_at", source_records.c.imported_at)
 
 source_links = Table(
     "source_links",
@@ -271,7 +286,10 @@ feature_files = Table(
         name="uq_feature_files_storage_object",
     ),
     CheckConstraint("storage_backend = 'rustfs'", name="ck_feature_files_storage_backend"),
-    CheckConstraint("file_type IN ('image', 'file')", name="ck_feature_files_file_type"),
+    CheckConstraint(
+        "file_type IN ('image', 'video', 'audio', 'document', 'file')",
+        name="ck_feature_files_file_type",
+    ),
     CheckConstraint("display_order >= 0", name="ck_feature_files_display_order"),
     CheckConstraint("byte_size IS NULL OR byte_size >= 0", name="ck_feature_files_byte_size"),
     CheckConstraint("width IS NULL OR width > 0", name="ck_feature_files_width"),
@@ -367,8 +385,71 @@ feature_notice_details = Table(
 )
 
 Index("ix_feature_notice_details_notice_type", feature_notice_details.c.notice_type)
+Index(
+    "ix_feature_notice_details_type_valid_time",
+    feature_notice_details.c.notice_type,
+    feature_notice_details.c.valid_start_time,
+    feature_notice_details.c.valid_end_time,
+)
 Index("ix_feature_notice_details_valid_time", feature_notice_details.c.valid_start_time)
 Index("ix_feature_notice_details_source_agency", feature_notice_details.c.source_agency)
+
+feature_area_details = Table(
+    "feature_area_details",
+    metadata,
+    Column(
+        "feature_id",
+        Text,
+        ForeignKey("features.feature_id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("area_kind", Text, nullable=False, default="area"),
+    Column("boundary_source", Text),
+    Column("area_square_meters", Numeric(18, 4)),
+    Column("regulation_scope", Text),
+    Column("administrative_office", Text),
+    Column("description", Text),
+    Column("geometry", JSON),
+    Column("payload", JSON, nullable=False, default=dict),
+)
+
+Index("ix_feature_area_details_area_kind", feature_area_details.c.area_kind)
+Index("ix_feature_area_details_boundary_source", feature_area_details.c.boundary_source)
+
+feature_route_details = Table(
+    "feature_route_details",
+    metadata,
+    Column(
+        "feature_id",
+        Text,
+        ForeignKey("features.feature_id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("route_type", Text, nullable=False, default="route"),
+    Column("geometry_source", Text),
+    Column("geometry_status", Text),
+    Column("total_distance_meters", Numeric(14, 2)),
+    Column("expected_duration_minutes", Integer),
+    Column("difficulty", Text),
+    Column("begin_name", Text),
+    Column("begin_address", Text),
+    Column("end_name", Text),
+    Column("end_address", Text),
+    Column("geometry", JSON),
+    Column("payload", JSON, nullable=False, default=dict),
+    CheckConstraint(
+        "total_distance_meters IS NULL OR total_distance_meters >= 0",
+        name="ck_feature_route_details_distance",
+    ),
+    CheckConstraint(
+        "expected_duration_minutes IS NULL OR expected_duration_minutes > 0",
+        name="ck_feature_route_details_duration",
+    ),
+)
+
+Index("ix_feature_route_details_route_type", feature_route_details.c.route_type)
+Index("ix_feature_route_details_geometry_status", feature_route_details.c.geometry_status)
+Index("ix_feature_route_details_geometry_source", feature_route_details.c.geometry_source)
 
 feature_opening_periods = Table(
     "feature_opening_periods",
@@ -535,8 +616,11 @@ provider_sync_state = Table(
     Column("sync_scope", Text, primary_key=True, default="global"),
     Column("status", Text, nullable=False, default="active"),
     Column("cursor", JSON),
+    Column("metadata_hash", Text),
+    Column("last_observed_source_version", Text),
     Column("last_success_at", DateTime(timezone=True)),
     Column("last_attempt_at", DateTime(timezone=True)),
+    Column("last_full_scan_at", DateTime(timezone=True)),
     Column("next_run_after", DateTime(timezone=True)),
     Column("last_error", Text),
     Column("last_error_at", DateTime(timezone=True)),
@@ -762,6 +846,8 @@ def load_feature_rows(
     source_link_items: Iterable[SourceLink] = (),
     place_detail_items: Iterable[PlaceDetail] = (),
     event_detail_items: Iterable[EventDetail] = (),
+    area_detail_items: Iterable[AreaDetail] = (),
+    route_detail_items: Iterable[RouteDetail] = (),
     notice_detail_items: Iterable[NoticeDetail] = (),
     feature_file_items: Iterable[FeatureFile] = (),
     opening_hours_by_feature_id: Mapping[str, FeatureOpeningHours] | None = None,
@@ -782,6 +868,8 @@ def load_feature_rows(
     source_link_rows = list(source_link_items)
     place_detail_rows = list(place_detail_items)
     event_detail_rows = list(event_detail_items)
+    area_detail_rows = list(area_detail_items)
+    route_detail_rows = list(route_detail_items)
     notice_detail_rows = list(notice_detail_items)
     feature_file_rows = list(feature_file_items)
     weather_value_rows = list(weather_value_items)
@@ -820,6 +908,22 @@ def load_feature_rows(
             feature_event_details,
             {"feature_id": detail.feature_id},
             event_detail_to_row(detail),
+        )
+
+    for detail in area_detail_rows:
+        _upsert_row(
+            session,
+            feature_area_details,
+            {"feature_id": detail.feature_id},
+            area_detail_to_row(detail),
+        )
+
+    for detail in route_detail_rows:
+        _upsert_row(
+            session,
+            feature_route_details,
+            {"feature_id": detail.feature_id},
+            route_detail_to_row(detail),
         )
 
     for detail in notice_detail_rows:
@@ -919,6 +1023,8 @@ def load_feature_rows(
         source_links=len(source_link_rows),
         place_details=len(place_detail_rows),
         event_details=len(event_detail_rows),
+        area_details=len(area_detail_rows),
+        route_details=len(route_detail_rows),
         notice_details=len(notice_detail_rows),
         opening_periods=opening_period_count,
         special_days=special_day_count,
@@ -1226,6 +1332,78 @@ def event_detail_from_row(row: Mapping[str, Any]) -> EventDetail:
     )
 
 
+def area_detail_to_row(detail: AreaDetail) -> dict[str, Any]:
+    """Convert an `AreaDetail` DTO into a `feature_area_details` row payload."""
+
+    return {
+        "feature_id": detail.feature_id,
+        "area_kind": detail.area_kind,
+        "boundary_source": detail.boundary_source,
+        "area_square_meters": detail.area_square_meters,
+        "regulation_scope": detail.regulation_scope,
+        "administrative_office": detail.administrative_office,
+        "description": detail.description,
+        "geometry": detail.geometry,
+        "payload": dict(detail.payload),
+    }
+
+
+def area_detail_from_row(row: Mapping[str, Any]) -> AreaDetail:
+    """Convert a `feature_area_details` row mapping into an `AreaDetail` DTO."""
+
+    return AreaDetail(
+        feature_id=str(row["feature_id"]),
+        area_kind=str(row.get("area_kind") or "area"),
+        boundary_source=row.get("boundary_source"),
+        area_square_meters=row.get("area_square_meters"),
+        regulation_scope=row.get("regulation_scope"),
+        administrative_office=row.get("administrative_office"),
+        description=row.get("description"),
+        geometry=dict(row["geometry"]) if row.get("geometry") is not None else None,
+        payload=dict(row.get("payload") or {}),
+    )
+
+
+def route_detail_to_row(detail: RouteDetail) -> dict[str, Any]:
+    """Convert a `RouteDetail` DTO into a `feature_route_details` row payload."""
+
+    return {
+        "feature_id": detail.feature_id,
+        "route_type": detail.route_type,
+        "geometry_source": detail.geometry_source,
+        "geometry_status": detail.geometry_status,
+        "total_distance_meters": detail.total_distance_meters,
+        "expected_duration_minutes": detail.expected_duration_minutes,
+        "difficulty": detail.difficulty,
+        "begin_name": detail.begin_name,
+        "begin_address": detail.begin_address,
+        "end_name": detail.end_name,
+        "end_address": detail.end_address,
+        "geometry": detail.geometry,
+        "payload": dict(detail.payload),
+    }
+
+
+def route_detail_from_row(row: Mapping[str, Any]) -> RouteDetail:
+    """Convert a `feature_route_details` row mapping into a `RouteDetail` DTO."""
+
+    return RouteDetail(
+        feature_id=str(row["feature_id"]),
+        route_type=str(row.get("route_type") or row.get("route_kind") or "route"),
+        geometry_source=row.get("geometry_source"),
+        geometry_status=row.get("geometry_status"),
+        total_distance_meters=row.get("total_distance_meters"),
+        expected_duration_minutes=row.get("expected_duration_minutes"),
+        difficulty=row.get("difficulty"),
+        begin_name=row.get("begin_name"),
+        begin_address=row.get("begin_address"),
+        end_name=row.get("end_name"),
+        end_address=row.get("end_address"),
+        geometry=dict(row["geometry"]) if row.get("geometry") is not None else None,
+        payload=dict(row.get("payload") or {}),
+    )
+
+
 def notice_detail_to_row(detail: NoticeDetail) -> dict[str, Any]:
     """Convert a `NoticeDetail` DTO into a `feature_notice_details` row payload."""
 
@@ -1527,8 +1705,11 @@ def provider_sync_state_to_row(state: ProviderSyncState) -> dict[str, Any]:
         "sync_scope": state.sync_scope,
         "status": state.status,
         "cursor": state.cursor,
+        "metadata_hash": state.metadata_hash,
+        "last_observed_source_version": state.last_observed_source_version,
         "last_success_at": state.last_success_at,
         "last_attempt_at": state.last_attempt_at,
+        "last_full_scan_at": state.last_full_scan_at,
         "next_run_after": state.next_run_after,
         "last_error": state.last_error,
         "last_error_at": state.last_error_at,
@@ -1546,8 +1727,11 @@ def provider_sync_state_from_row(row: Mapping[str, Any]) -> ProviderSyncState:
         sync_scope=str(row["sync_scope"]),
         status=str(row["status"]),
         cursor=dict(row["cursor"]) if row.get("cursor") is not None else None,
+        metadata_hash=row.get("metadata_hash"),
+        last_observed_source_version=row.get("last_observed_source_version"),
         last_success_at=row.get("last_success_at"),
         last_attempt_at=row.get("last_attempt_at"),
+        last_full_scan_at=row.get("last_full_scan_at"),
         next_run_after=row.get("next_run_after"),
         last_error=row.get("last_error"),
         last_error_at=row.get("last_error_at"),

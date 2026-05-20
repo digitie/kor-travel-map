@@ -19,6 +19,8 @@
 | `python-airkorea-api` | PM10, PM25, CAI, 예보/경보 |
 | `python-mcst-api` | 문화/여가/숙박/도서관 위치 데이터 |
 | `python-krforest-api` | 휴양림, 숲길, 국립공원, 산림 안전 |
+| `python-krheritage-api` | Korea Heritage Administration heritage, GIS area, media, and event public models |
+| `data.go.kr-standard` | `python-krtour-map` 내부 bounded client가 직접 처리하는 공공데이터포털 표준데이터 5건 |
 
 `pykma`, `kma`, `opinet`, `krex` 같은 alias는 입력 편의로만 받아들이고 저장 전에 canonical name으로 바꿉니다.
 
@@ -74,6 +76,13 @@ TripMate 내부와 `python-krtour-map` 내부에 provider별 adapter/gateway/wra
 - `air_quality_sido_measurement`
 - `beach_marine_index`
 - `visitkorea_festival_events`
+- `krmois_license_features`
+- `search_list`
+- `gis_spca`
+- `gis_3070426`
+- `event_list`
+- `15145324`
+- `15041861`
 
 VisitKorea 축제 source는 `python-visitkorea-api` public client의
 `iter_pages(client.search_festival, ...)`를 직접 사용한다. 일일 full scan은 기본적으로
@@ -108,4 +117,52 @@ sync state, and does not create an `McstWrapper`, adapter, or gateway. Missing
 dataset methods, async pagination, raw payload preservation, or provider-specific
 errors must be added to `python-mcst-api` first.
 
+KRMOIS 인허가 raw/localdata row는 `python-krmois-api` source DB가 보존한다. 이 라이브러리는
+`python-krmois-api` public `PlaceRecord`를 직접 읽어 여행자에게 의미 있는 영업중 row만
+`Feature`/`PlaceDetail`로 승격하고, KRMOIS raw row를 `source_records`에 중복 저장하지 않는다.
+폐업/취소 row는 feature로 남기지 않으며, 필요 시 `python-krmois-api.iter_closed_place_records()`
+결과를 이용해 feature 삭제 작업을 실행한다. 세부 기준은
+`docs/krmois-license-feature-etl.md`를 따른다.
+
+Korea Heritage source uses canonical provider `python-krheritage-api`, even if a
+local workspace folder is named `python-kheritage-api`. Heritage natural keys use
+`ccbaKdcd-ccbaAsno-ccbaCtcd`. `search_list` rows create `place` or `area`
+features, `gis_spca` and `gis_3070426` enrich coordinates/boundaries, and
+`event_list` rows create `event` features. The provider package owns public
+clients, typed models, endpoint pagination, exceptions, and raw payload
+preservation; `python-krtour-map` consumes those public models directly and does
+not add a provider wrapper/adapter/gateway.
+
+The direct provider methods used by ETL are
+`HeritageClient.search.iter_all_details(...)`,
+`HeritageClient.heritage.iter_all_details(...)`,
+`HeritageClient.event.iter_months(...)`, and `HeritageClient.gis.spca(...)`.
+TripMate passes the client/session/resources to `python-krtour-map`; this
+library performs normalize/load work but does not own Dagster execution.
+Provider media models such as image, video, narration/audio, and document URLs are
+converted to `FeatureFileSource` here; RustFS upload/config/list logic is not kept
+in `python-krheritage-api`.
+
 provider cursor와 실패 상태는 `ProviderSyncState(provider, dataset_key, sync_scope)` 단위로 저장합니다.
+
+## data.go.kr standard-data exception
+
+공공데이터포털 표준데이터 중 다음 5건은 별도 `python-*-api` 라이브러리로 분리하지 않고
+`krtour_map.standard_data` 내부의 bounded asyncio client와 ETL에서 처리합니다.
+이는 범용 data.go.kr gateway가 아니라 명시된 dataset만 다루는 예외입니다.
+
+| dataset_key | data.go.kr id | Feature |
+| --- | --- | --- |
+| `standard_tourism_roads` | `15017321` 전국길관광정보표준데이터 | `route` |
+| `standard_museums` | `15017323` 전국박물관미술관정보표준데이터 | `place` |
+| `standard_parking_lots` | `15012896` 전국주차장정보표준데이터 | `place` |
+| `standard_tourist_sites` | `15021141` 전국관광지정보표준데이터 | `place` 우선, 경계 확인 후 `area` 승격 후보 |
+| `standard_cultural_festivals` | `15013104` 전국문화축제표준데이터 | `event` |
+
+내장 client는 `StandardDataClient.aio()`로 생성하고, `config`, `catalog`, `client`, `etl`,
+`exceptions` 경계를 둡니다. Web debug UI는 `krtour_map.debug_ui`에 포함하되 stdlib 기반
+로컬 도구로 제한합니다. raw item은 `source_records.raw_data`에 보존하고, feature id는
+provider=`data.go.kr-standard`, dataset key, source entity id, kind, category,
+legal dong code 조합으로 생성합니다.
+`standard_tourism_roads`는 `feature_route_details.route_type`에 `hiking_trail`,
+`accessible_walk`, `trekking`, `tourism_road` 같은 세부 타입을 저장합니다.

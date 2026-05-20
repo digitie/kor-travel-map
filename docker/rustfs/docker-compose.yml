@@ -1,0 +1,38 @@
+services:
+  rustfs:
+    image: rustfs/rustfs:latest
+    container_name: krtour-map-rustfs
+    environment:
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:-tripmate-dev-access}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY:-tripmate-dev-secret-change-me}
+      RUSTFS_CONSOLE_ENABLE: "true"
+    command: ["--address", ":9000", "--console-enable", "/data"]
+    ports:
+      - "${KRTOUR_MAP_RUSTFS_PORT:-19000}:9000"
+      - "${KRTOUR_MAP_RUSTFS_CONSOLE_PORT:-19001}:9001"
+    volumes:
+      - krtour_map_rustfs_data:/data
+    restart: unless-stopped
+
+  rustfs-init:
+    image: minio/mc:latest
+    environment:
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:-tripmate-dev-access}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY:-tripmate-dev-secret-change-me}
+      KRTOUR_MAP_RUSTFS_BUCKET: ${KRTOUR_MAP_RUSTFS_BUCKET:-tripmate-media}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        for i in $$(seq 1 30); do
+          if mc alias set rustfs http://rustfs:9000 "$$RUSTFS_ACCESS_KEY" "$$RUSTFS_SECRET_KEY"; then
+            mc mb -p "rustfs/$$KRTOUR_MAP_RUSTFS_BUCKET" || true
+            exit 0
+          fi
+          sleep 2
+        done
+        exit 1
+    depends_on:
+      - rustfs
+
+volumes:
+  krtour_map_rustfs_data:

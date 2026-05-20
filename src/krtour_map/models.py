@@ -327,6 +327,84 @@ class EventDetail(KrtourModel):
         return self
 
 
+NOTICE_TYPE_TRAFFIC = "traffic"
+NOTICE_TYPE_TRAFFIC_ACCIDENT = "traffic_accident"
+NOTICE_TYPE_ROAD_CLOSURE = "road_closure"
+NOTICE_TYPE_ROADWORK = "roadwork"
+NOTICE_TYPE_WEATHER_ALERT = "weather_alert"
+NOTICE_TYPE_HEAVY_RAIN = "heavy_rain_warning"
+NOTICE_TYPE_HEAVY_SNOW = "heavy_snow_warning"
+NOTICE_TYPE_HEAT_WAVE = "heat_wave_warning"
+NOTICE_TYPE_SAFETY = "safety"
+NOTICE_TYPE_EARTHQUAKE = "earthquake"
+NOTICE_TYPE_LANDSLIDE = "landslide_warning"
+NOTICE_TYPE_COASTAL_ISOLATION = "coastal_isolation"
+NOTICE_TYPES = (
+    NOTICE_TYPE_TRAFFIC,
+    NOTICE_TYPE_TRAFFIC_ACCIDENT,
+    NOTICE_TYPE_ROAD_CLOSURE,
+    NOTICE_TYPE_ROADWORK,
+    NOTICE_TYPE_WEATHER_ALERT,
+    NOTICE_TYPE_HEAVY_RAIN,
+    NOTICE_TYPE_HEAVY_SNOW,
+    NOTICE_TYPE_HEAT_WAVE,
+    NOTICE_TYPE_SAFETY,
+    NOTICE_TYPE_EARTHQUAKE,
+    NOTICE_TYPE_LANDSLIDE,
+    NOTICE_TYPE_COASTAL_ISOLATION,
+)
+NOTICE_TYPE_ALIASES = {
+    "교통": NOTICE_TYPE_TRAFFIC,
+    "traffic": NOTICE_TYPE_TRAFFIC,
+    "사고": NOTICE_TYPE_TRAFFIC_ACCIDENT,
+    "교통사고": NOTICE_TYPE_TRAFFIC_ACCIDENT,
+    "traffic_accident": NOTICE_TYPE_TRAFFIC_ACCIDENT,
+    "accident": NOTICE_TYPE_TRAFFIC_ACCIDENT,
+    "통제": NOTICE_TYPE_ROAD_CLOSURE,
+    "도로통제": NOTICE_TYPE_ROAD_CLOSURE,
+    "road_closure": NOTICE_TYPE_ROAD_CLOSURE,
+    "closure": NOTICE_TYPE_ROAD_CLOSURE,
+    "공사": NOTICE_TYPE_ROADWORK,
+    "도로공사": NOTICE_TYPE_ROADWORK,
+    "roadwork": NOTICE_TYPE_ROADWORK,
+    "weather": NOTICE_TYPE_WEATHER_ALERT,
+    "weather_alert": NOTICE_TYPE_WEATHER_ALERT,
+    "기상특보": NOTICE_TYPE_WEATHER_ALERT,
+    "날씨경고": NOTICE_TYPE_WEATHER_ALERT,
+    "호우": NOTICE_TYPE_HEAVY_RAIN,
+    "호우주의보": NOTICE_TYPE_HEAVY_RAIN,
+    "호우경보": NOTICE_TYPE_HEAVY_RAIN,
+    "heavy_rain": NOTICE_TYPE_HEAVY_RAIN,
+    "heavy_rain_warning": NOTICE_TYPE_HEAVY_RAIN,
+    "대설": NOTICE_TYPE_HEAVY_SNOW,
+    "폭설": NOTICE_TYPE_HEAVY_SNOW,
+    "대설주의보": NOTICE_TYPE_HEAVY_SNOW,
+    "heavy_snow": NOTICE_TYPE_HEAVY_SNOW,
+    "heavy_snow_warning": NOTICE_TYPE_HEAVY_SNOW,
+    "폭염": NOTICE_TYPE_HEAT_WAVE,
+    "폭염주의보": NOTICE_TYPE_HEAT_WAVE,
+    "heat": NOTICE_TYPE_HEAT_WAVE,
+    "heat_wave": NOTICE_TYPE_HEAT_WAVE,
+    "heat_wave_warning": NOTICE_TYPE_HEAT_WAVE,
+    "안전": NOTICE_TYPE_SAFETY,
+    "safety": NOTICE_TYPE_SAFETY,
+    "지진": NOTICE_TYPE_EARTHQUAKE,
+    "earthquake": NOTICE_TYPE_EARTHQUAKE,
+    "산사태": NOTICE_TYPE_LANDSLIDE,
+    "landslide": NOTICE_TYPE_LANDSLIDE,
+    "landslide_warning": NOTICE_TYPE_LANDSLIDE,
+    "갈라짐": NOTICE_TYPE_COASTAL_ISOLATION,
+    "바다갈라짐": NOTICE_TYPE_COASTAL_ISOLATION,
+    "coastal_isolation": NOTICE_TYPE_COASTAL_ISOLATION,
+}
+
+
+def normalize_notice_type(value: str) -> str:
+    raw = value.strip()
+    normalized = raw.lower().replace("-", "_").replace(" ", "_")
+    return NOTICE_TYPE_ALIASES.get(raw) or NOTICE_TYPE_ALIASES.get(normalized) or normalized
+
+
 class NoticeDetail(KrtourModel):
     feature_id: str
     notice_type: str
@@ -337,6 +415,11 @@ class NoticeDetail(KrtourModel):
     officer_name: str | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
 
+    @field_validator("notice_type")
+    @classmethod
+    def normalize_notice_type_value(cls, value: str) -> str:
+        return normalize_notice_type(value)
+
     @model_validator(mode="after")
     def validate_valid_time_range(self) -> NoticeDetail:
         if (
@@ -346,6 +429,96 @@ class NoticeDetail(KrtourModel):
         ):
             raise ValueError("valid_end_time must be greater than or equal to valid_start_time")
         return self
+
+
+class AreaDetail(KrtourModel):
+    feature_id: str
+    area_kind: str = "area"
+    boundary_source: str | None = None
+    area_square_meters: Decimal | None = None
+    regulation_scope: str | None = None
+    administrative_office: str | None = None
+    description: str | None = None
+    geometry: dict[str, Any] | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+ROUTE_TYPE_ROUTE = "route"
+ROUTE_TYPE_HIKING_TRAIL = "hiking_trail"
+ROUTE_TYPE_ACCESSIBLE_WALK = "accessible_walk"
+ROUTE_TYPE_TREKKING = "trekking"
+ROUTE_TYPE_FOREST_TRAIL = "forest_trail"
+ROUTE_TYPE_TOURISM_ROAD = "tourism_road"
+ROUTE_TYPE_WALKING_COURSE = "walking_course"
+ROUTE_TYPE_CYCLING = "cycling"
+ROUTE_TYPE_DRIVE_COURSE = "drive_course"
+ROUTE_TYPES = (
+    ROUTE_TYPE_ROUTE,
+    ROUTE_TYPE_HIKING_TRAIL,
+    ROUTE_TYPE_ACCESSIBLE_WALK,
+    ROUTE_TYPE_TREKKING,
+    ROUTE_TYPE_FOREST_TRAIL,
+    ROUTE_TYPE_TOURISM_ROAD,
+    ROUTE_TYPE_WALKING_COURSE,
+    ROUTE_TYPE_CYCLING,
+    ROUTE_TYPE_DRIVE_COURSE,
+)
+ROUTE_TYPE_ALIASES = {
+    "등산로": ROUTE_TYPE_HIKING_TRAIL,
+    "등산": ROUTE_TYPE_HIKING_TRAIL,
+    "산행": ROUTE_TYPE_HIKING_TRAIL,
+    "탐방로": ROUTE_TYPE_HIKING_TRAIL,
+    "hiking": ROUTE_TYPE_HIKING_TRAIL,
+    "mountain_trail": ROUTE_TYPE_HIKING_TRAIL,
+    "무장애산책길": ROUTE_TYPE_ACCESSIBLE_WALK,
+    "무장애": ROUTE_TYPE_ACCESSIBLE_WALK,
+    "무장애_산책길": ROUTE_TYPE_ACCESSIBLE_WALK,
+    "장애물없는길": ROUTE_TYPE_ACCESSIBLE_WALK,
+    "barrier_free_walk": ROUTE_TYPE_ACCESSIBLE_WALK,
+    "accessible": ROUTE_TYPE_ACCESSIBLE_WALK,
+    "트레킹": ROUTE_TYPE_TREKKING,
+    "트래킹": ROUTE_TYPE_TREKKING,
+    "trek": ROUTE_TYPE_TREKKING,
+    "trekking": ROUTE_TYPE_TREKKING,
+    "숲길": ROUTE_TYPE_FOREST_TRAIL,
+    "forest": ROUTE_TYPE_FOREST_TRAIL,
+    "forest_trail": ROUTE_TYPE_FOREST_TRAIL,
+    "관광길": ROUTE_TYPE_TOURISM_ROAD,
+    "관광도로": ROUTE_TYPE_TOURISM_ROAD,
+    "tourism_road": ROUTE_TYPE_TOURISM_ROAD,
+    "산책길": ROUTE_TYPE_WALKING_COURSE,
+    "산책로": ROUTE_TYPE_WALKING_COURSE,
+    "walking": ROUTE_TYPE_WALKING_COURSE,
+    "walking_course": ROUTE_TYPE_WALKING_COURSE,
+    "자전거길": ROUTE_TYPE_CYCLING,
+    "cycling": ROUTE_TYPE_CYCLING,
+    "bike": ROUTE_TYPE_CYCLING,
+    "드라이브": ROUTE_TYPE_DRIVE_COURSE,
+    "drive": ROUTE_TYPE_DRIVE_COURSE,
+}
+
+
+class RouteDetail(KrtourModel):
+    feature_id: str
+    route_type: str = ROUTE_TYPE_ROUTE
+    geometry_source: str | None = None
+    geometry_status: str | None = None
+    total_distance_meters: Decimal | None = Field(default=None, ge=0)
+    expected_duration_minutes: int | None = Field(default=None, ge=1)
+    difficulty: str | None = None
+    begin_name: str | None = None
+    begin_address: str | None = None
+    end_name: str | None = None
+    end_address: str | None = None
+    geometry: dict[str, Any] | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("route_type")
+    @classmethod
+    def normalize_route_type(cls, value: str) -> str:
+        raw = value.strip()
+        normalized = raw.lower().replace("-", "_").replace(" ", "_")
+        return ROUTE_TYPE_ALIASES.get(raw) or ROUTE_TYPE_ALIASES.get(normalized) or normalized
 
 
 class FeatureFile(KrtourModel):
@@ -384,8 +557,8 @@ class FeatureFile(KrtourModel):
     @classmethod
     def normalize_file_type(cls, value: str) -> str:
         normalized = value.strip().lower()
-        if normalized not in {"image", "file"}:
-            raise ValueError("file_type must be 'image' or 'file'")
+        if normalized not in {"image", "video", "audio", "document", "file"}:
+            raise ValueError("file_type must be image, video, audio, document, or file")
         return normalized
 
     @field_validator("provider")
@@ -459,8 +632,11 @@ class ProviderSyncState(KrtourModel):
     sync_scope: str = "global"
     status: str = "active"
     cursor: dict[str, Any] | None = None
+    metadata_hash: str | None = None
+    last_observed_source_version: str | None = None
     last_success_at: datetime | None = None
     last_attempt_at: datetime | None = None
+    last_full_scan_at: datetime | None = None
     next_run_after: datetime | None = None
     last_error: str | None = None
     last_error_at: datetime | None = None

@@ -46,6 +46,26 @@ result = visitkorea_festival_full_scan_job_spec.loader(visitkorea_client, run)
 loader 내부에서는 `iter_pages(client.search_festival, ...)`를 사용해 모든 페이지를 순회한다.
 TripMate schedule은 이 job spec을 기준으로 1일 1회 실행한다.
 
+## Korea Heritage ETL 예시
+
+TripMate는 `python-krheritage-api` public client/model을 resource로 넘기고,
+`python-krtour-map`의 loader가 `place`, `area`, `event` feature로 정리한다.
+provider wrapper/adapter/gateway는 만들지 않는다.
+
+```python
+from krtour_map.heritage import (
+    krheritage_event_full_scan_job_spec,
+    krheritage_heritage_full_scan_job_spec,
+)
+
+heritage_result = krheritage_heritage_full_scan_job_spec.loader(resources, run)
+event_result = krheritage_event_full_scan_job_spec.loader(resources, run)
+```
+
+TripMate는 feature DB session, RustFS store, file fetcher, reverse geocoder를 resource로
+주입하고 commit/rollback과 schedule을 관리한다. heritage place/area full scan은 1주일 1회,
+heritage event full scan은 1일 1회 실행한다.
+
 ## Weather 예시
 
 ## Dagster boundary
