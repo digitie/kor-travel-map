@@ -9,6 +9,7 @@ build/
 dist/
 htmlcov/
 .coverage
+artifacts/
 .env
 .env.*
 !.env.example

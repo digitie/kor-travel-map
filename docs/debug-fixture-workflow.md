@@ -20,14 +20,14 @@ python-krtour-map/
     runners.py
     test_generated_fixtures.py
 
-krtour-map-debug-ui/
-  app.py
-  fixture_writer.py
-  preset_store.py
-  history_store.py
+python-krtour-map/
+  src/krtour_map/debug_ui.py  # stdlib local Web UI
 ```
 
-`python-krtour-map`은 Streamlit에 의존하지 않습니다. Debug UI는 wheel 또는 editable install된 라이브러리를 import해서 사용합니다.
+`python-krtour-map`은 Streamlit에 의존하지 않습니다. 포함된 Debug UI는 stdlib HTTP server로
+프론트엔드 `http://localhost:8600`, 백엔드 `http://localhost:8601/api/debug`를 띄우며
+`debug_api.handle()`을 호출하는 로컬 개발 도구입니다. Kakao map marker, Dagster 계약 기반 ETL
+수동 실행, RustFS 설정/목록 확인을 포함합니다.
 
 ## DebugRun
 
