@@ -41,6 +41,9 @@ visitkorea = [
 kasi = [
   "python-kasi-api @ git+https://github.com/digitie/python-kasi-api.git@a8940f78e804646fdadb377ad035dbcdce45a034",
 ]
+datagokr = [
+  "python-datagokr-api @ git+https://github.com/digitie/python-datagokr-api.git@a37457db7941ce67e82a84ca13fd61e7cc4748c9",
+]
 
 [tool.setuptools]
 package-dir = { "" = "src" }
@@ -66,7 +69,7 @@ warn_unused_ignores = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = [".", "src"]
 addopts = "-ra"
 markers = [
   "integration: tests that touch an external database or provider",
