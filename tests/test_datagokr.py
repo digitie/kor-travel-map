@@ -8,16 +8,20 @@ from sqlalchemy import func, select
 
 from krtour_map.dagster import DagsterEtlExecution, DagsterEtlRun
 from krtour_map.datagokr import (
+    DATAGOKR_AGRI_WEATHER_STATION_DATASET_KEY,
     DATAGOKR_CULTURAL_FESTIVAL_DATASET_KEY,
+    DATAGOKR_KWATER_SLUICE_HOUR_DATASET_KEY,
     DATAGOKR_MUSEUM_ART_GALLERY_DATASET_KEY,
     DATAGOKR_PARKING_LOT_DATASET_KEY,
     DATAGOKR_PROVIDER,
     DATAGOKR_TOURIST_ATTRACTION_DATASET_KEY,
     DataGoKrStandardDbEtlResult,
+    collect_datagokr_agri_weather_stations,
     collect_datagokr_public_cultural_festivals,
     collect_datagokr_public_museum_art_galleries,
     datagokr_museum_art_gallery_full_scan_job_spec,
     datagokr_standard_full_scan_identity,
+    kwater_sluice_record_to_weather_values,
     load_datagokr_standard_features,
 )
 from krtour_map.db import (
@@ -27,7 +31,7 @@ from krtour_map.db import (
     initialize_feature_db,
     source_records,
 )
-from krtour_map.enums import FeatureKind
+from krtour_map.enums import FeatureKind, ForecastStyle, WeatherDomain
 
 
 @dataclass(frozen=True)
@@ -49,8 +53,30 @@ class FakeService:
         return self.pages
 
 
+class FakeAgriWeatherFacade:
+    def __init__(self) -> None:
+        self.observation_stations = FakeService(
+            (
+                FakePage(
+                    items=(
+                        {
+                            "Obsr_Spot_Code": "542805A001",
+                            "Obsr_Spot_Nm": "구례군 구례읍",
+                            "Instl_La": "35.1973055576348",
+                            "Instl_Lo": "127.4609219654052",
+                            "Instl_Al": "38",
+                            "Instl_Adres": "전라남도 구례군 구례읍 동산1길 32",
+                            "Obsr_Begin_Datetm": "2016-05-04",
+                        },
+                    ),
+                ),
+            )
+        )
+
+
 class FakeDataGoKrClient:
     def __init__(self) -> None:
+        self.agri_weather = FakeAgriWeatherFacade()
         self.museum_art = FakeService(
             (
                 FakePage(
@@ -155,6 +181,59 @@ def test_collect_datagokr_festival_maps_event_detail() -> None:
     assert result.event_details[0].venue_name == "광화문광장"
 
 
+def test_collect_datagokr_agri_weather_station_maps_weather_feature() -> None:
+    client = FakeDataGoKrClient()
+
+    result = collect_datagokr_agri_weather_stations(
+        client,
+        page_size=20,
+        reverse_geocoder=lambda _coord: {
+            "road_address": "전라남도 구례군 구례읍 동산1길 32",
+            "legal_dong_code": "4673025021",
+        },
+    )
+
+    assert client.agri_weather.observation_stations.calls[0]["num_of_rows"] == 20
+    assert result.dataset_key == DATAGOKR_AGRI_WEATHER_STATION_DATASET_KEY
+    assert result.features[0].kind == FeatureKind.WEATHER
+    assert result.features[0].category == "agri_weather_station"
+    assert result.features[0].coord is not None
+    assert result.features[0].coord.latitude == 35.1973055576348
+    assert result.features[0].address.legal_dong_code == "4673025021"
+    assert result.source_records[0].source_entity_id == "542805A001"
+
+
+def test_kwater_sluice_record_maps_hydro_weather_values() -> None:
+    values = kwater_sluice_record_to_weather_values(
+        "feature_dam_1",
+        {
+            "damcode": "2022510",
+            "obsrdt": "10-01 01시",
+            "lowlevel": "0.74",
+            "rf": "0.000",
+            "inflowqy": "236.038",
+            "totdcwtrqy": "108.649",
+            "rsvwtqy": "296.377",
+            "rsvwtrt": "96.5",
+        },
+        observed_year=2018,
+    )
+
+    by_metric = {value.metric_key: value for value in values}
+
+    assert len(values) == 6
+    assert by_metric["dam_water_level"].provider == DATAGOKR_PROVIDER
+    assert by_metric["dam_water_level"].weather_domain == WeatherDomain.HYDRO_WEATHER
+    assert by_metric["dam_water_level"].forecast_style == ForecastStyle.OBSERVED
+    assert by_metric["dam_water_level"].observed_at is not None
+    assert by_metric["dam_water_level"].observed_at.isoformat() == "2018-10-01T01:00:00"
+    assert by_metric["dam_water_level"].value_number is not None
+    assert str(by_metric["dam_water_level"].value_number) == "0.74"
+    assert by_metric["reservoir_rate"].payload["dataset_key"] == (
+        DATAGOKR_KWATER_SLUICE_HOUR_DATASET_KEY
+    )
+
+
 def test_datagokr_job_spec_identity_and_dataset_tags() -> None:
     execution = DagsterEtlExecution(
         logical_datetime=datetime(2026, 5, 20, 0, 0, tzinfo=ZoneInfo("Asia/Seoul")),
@@ -230,4 +309,6 @@ def test_all_requested_dataset_keys_are_available() -> None:
         DATAGOKR_PARKING_LOT_DATASET_KEY,
         DATAGOKR_TOURIST_ATTRACTION_DATASET_KEY,
         DATAGOKR_CULTURAL_FESTIVAL_DATASET_KEY,
+        DATAGOKR_AGRI_WEATHER_STATION_DATASET_KEY,
+        DATAGOKR_KWATER_SLUICE_HOUR_DATASET_KEY,
     }

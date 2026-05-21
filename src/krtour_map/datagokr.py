@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, time
 from decimal import Decimal
 from typing import Any
 
@@ -23,7 +23,7 @@ from krtour_map.dagster import (
     schedule_requires_any_env,
 )
 from krtour_map.db import FeatureDbLoadResult, load_feature_rows
-from krtour_map.enums import FeatureKind, SourceRole
+from krtour_map.enums import FeatureKind, ForecastStyle, SourceRole, WeatherDomain
 from krtour_map.ids import make_feature_id, make_payload_hash
 from krtour_map.models import (
     Coordinate,
@@ -34,6 +34,7 @@ from krtour_map.models import (
     RawDataRef,
     SourceLink,
     SourceRecord,
+    WeatherValue,
 )
 
 DATAGOKR_PROVIDER = "python-datagokr-api"
@@ -44,6 +45,11 @@ DATAGOKR_MUSEUM_ART_GALLERY_DATASET_KEY = "datagokr_public_museum_art_galleries"
 DATAGOKR_PARKING_LOT_DATASET_KEY = "datagokr_public_parking_lots"
 DATAGOKR_TOURIST_ATTRACTION_DATASET_KEY = "datagokr_public_tourist_attractions"
 DATAGOKR_CULTURAL_FESTIVAL_DATASET_KEY = "datagokr_public_cultural_festivals"
+DATAGOKR_AGRI_WEATHER_STATION_DATASET_KEY = "datagokr_agri_weather_stations"
+DATAGOKR_KWATER_SLUICE_HOUR_DATASET_KEY = "datagokr_kwater_sluice_hourly"
+
+DATAGOKR_AGRI_WEATHER_STATION_CATEGORY = "agri_weather_station"
+DATAGOKR_KWATER_SLUICE_NORMALIZATION_VERSION = "datagokr-kwater-sluice-v1"
 
 DATAGOKR_STANDARD_DATASET_KEYS = (
     DATAGOKR_MUSEUM_ART_GALLERY_DATASET_KEY,
@@ -51,6 +57,15 @@ DATAGOKR_STANDARD_DATASET_KEYS = (
     DATAGOKR_TOURIST_ATTRACTION_DATASET_KEY,
     DATAGOKR_CULTURAL_FESTIVAL_DATASET_KEY,
 )
+
+KWATER_SLUICE_METRICS: dict[str, tuple[str, str, str]] = {
+    "lowlevel": ("dam_water_level", "댐수위", "EL.m"),
+    "rf": ("rainfall", "강우량", "mm"),
+    "inflowqy": ("inflow", "유입량", "m3/sec"),
+    "totdcwtrqy": ("total_discharge", "총방류량", "m3/sec"),
+    "rsvwtqy": ("reservoir_storage", "저수량", "million_m3"),
+    "rsvwtrt": ("reservoir_rate", "저수율", "%"),
+}
 
 
 @dataclass(frozen=True)
@@ -486,6 +501,231 @@ def load_datagokr_standard_features(
     )
 
 
+def collect_datagokr_agri_weather_stations(
+    client: Any,
+    *,
+    page_size: int = 100,
+    max_pages: int | None = None,
+    collected_at: datetime | None = None,
+    reverse_geocoder: ReverseGeocoder | None = None,
+    filters: Mapping[str, Any] | None = None,
+) -> DataGoKrStandardEtlResult:
+    """Collect agricultural weather stations and convert them into weather features."""
+
+    service = getattr(getattr(client, "agri_weather", None), "observation_stations", None)
+    if service is None:
+        raise ValueError("DataGoKr client must provide agri_weather.observation_stations")
+    iter_pages = getattr(service, "iter_pages", None)
+    if not callable(iter_pages):
+        raise ValueError("DataGoKr agri_weather.observation_stations must provide iter_pages")
+
+    page_kwargs: dict[str, Any] = {"num_of_rows": page_size, "max_pages": max_pages}
+    if filters:
+        page_kwargs.update(filters)
+
+    features_result: list[Feature] = []
+    source_records_result: list[SourceRecord] = []
+    source_links_result: list[SourceLink] = []
+    address_match_reports: list[AddressMatchReport] = []
+    skipped_items: list[SkippedDataGoKrItem] = []
+    scanned_pages = 0
+    for page in _collect_provider_pages(iter_pages(**page_kwargs)):
+        scanned_pages += 1
+        page_collected_at = collected_at or _page_collected_at(page)
+        for item in getattr(page, "items", ()):
+            bundle = datagokr_agri_weather_station_to_feature_bundle(
+                item,
+                collected_at=page_collected_at,
+                reverse_geocoder=reverse_geocoder,
+            )
+            if isinstance(bundle, SkippedDataGoKrItem):
+                skipped_items.append(bundle)
+                continue
+            features_result.append(bundle.feature)
+            source_records_result.append(bundle.source_record)
+            source_links_result.append(bundle.source_link)
+            address_match_reports.append(bundle.address_match_report)
+
+    return DataGoKrStandardEtlResult(
+        dataset_key=DATAGOKR_AGRI_WEATHER_STATION_DATASET_KEY,
+        scanned_pages=scanned_pages,
+        features=tuple(features_result),
+        source_records=tuple(source_records_result),
+        source_links=tuple(source_links_result),
+        address_match_reports=tuple(address_match_reports),
+        skipped_items=tuple(skipped_items),
+    )
+
+
+def datagokr_agri_weather_station_to_feature_bundle(
+    item: Any,
+    *,
+    collected_at: datetime | None = None,
+    reverse_geocoder: ReverseGeocoder | None = None,
+) -> DataGoKrFeatureBundle | SkippedDataGoKrItem:
+    raw = _raw_mapping(item)
+    source_key = _text(item, "obsr_spot_code", raw_keys=("Obsr_Spot_Code",))
+    if source_key is None:
+        return SkippedDataGoKrItem(
+            DATAGOKR_AGRI_WEATHER_STATION_DATASET_KEY,
+            None,
+            "missing observation station code",
+            raw,
+        )
+    name = _text(item, "obsr_spot_nm", raw_keys=("Obsr_Spot_Nm",))
+    if name is None:
+        return SkippedDataGoKrItem(
+            DATAGOKR_AGRI_WEATHER_STATION_DATASET_KEY,
+            source_key,
+            "missing observation station name",
+            raw,
+        )
+
+    coordinate = _coordinate_from_agri_station(item, raw)
+    address_enrichment = enrich_address_from_coordinate(
+        address=Address.from_text(
+            _text(item, "instl_adres", raw_keys=("Instl_Adres",))
+        )
+        or Address(),
+        coordinate=coordinate,
+        raw=raw,
+        reverse_geocoder=reverse_geocoder,
+        source_label=DATAGOKR_AGRI_WEATHER_STATION_DATASET_KEY,
+        source_entity_id=source_key,
+    )
+    address = address_enrichment.address
+    collected = collected_at or _now_kst()
+    raw_payload_hash = make_payload_hash(raw, length=32)
+    feature_id = make_feature_id(
+        provider=DATAGOKR_PROVIDER,
+        source_type="agri_weather_station",
+        source_natural_key=source_key,
+        kind=FeatureKind.WEATHER,
+        category=DATAGOKR_AGRI_WEATHER_STATION_CATEGORY,
+        legal_dong_code=address.legal_dong_code,
+    )
+    source_record = SourceRecord(
+        provider=DATAGOKR_PROVIDER,
+        dataset_key=DATAGOKR_AGRI_WEATHER_STATION_DATASET_KEY,
+        source_entity_type="agri_weather_station",
+        source_entity_id=source_key,
+        raw_payload_hash=raw_payload_hash,
+        raw_name=name,
+        raw_address=address.display_address,
+        raw_longitude=Decimal(str(coordinate.longitude)) if coordinate is not None else None,
+        raw_latitude=Decimal(str(coordinate.latitude)) if coordinate is not None else None,
+        raw_data=dict(raw),
+        fetched_at=collected,
+        imported_at=collected,
+    )
+    detail_payload = {
+        "provider": DATAGOKR_PROVIDER,
+        "dataset_key": DATAGOKR_AGRI_WEATHER_STATION_DATASET_KEY,
+        "standard_id": "15073274",
+        "endpoint": "1390802/AgriWeather/getObsrSpotList",
+        "observation_station_code": source_key,
+        "do_se_code": _text(item, "do_se_code", raw_keys=("Do_Se_Code",)),
+        "mgc_code": _text(item, "mgc_code", raw_keys=("Mgc_Code",)),
+        "climate_zone_code": _text(item, "clmt_zone_code", raw_keys=("Clmt_Zone_Code",)),
+        "communication_method_code": _text(
+            item,
+            "comm_mthd_code",
+            raw_keys=("Comm_Mthd_Code",),
+        ),
+        "altitude_m": _optional_float(getattr(item, "instl_al", None) or _first(raw, "Instl_Al")),
+        "observation_begin_date": _text(
+            item,
+            "obsr_begin_datetm",
+            raw_keys=("Obsr_Begin_Datetm",),
+        ),
+    }
+    feature = Feature(
+        feature_id=feature_id,
+        kind=FeatureKind.WEATHER,
+        name=name,
+        coord=coordinate,
+        address=address,
+        category=DATAGOKR_AGRI_WEATHER_STATION_CATEGORY,
+        marker_icon="weather",
+        marker_color="#0E7490",
+        detail={key: value for key, value in detail_payload.items() if value not in (None, "")},
+        raw_refs=[
+            RawDataRef(
+                provider=DATAGOKR_PROVIDER,
+                dataset_key=DATAGOKR_AGRI_WEATHER_STATION_DATASET_KEY,
+                source_entity_id=source_key,
+                source_role=SourceRole.PRIMARY,
+                fetched_at=collected,
+                payload_hash=raw_payload_hash,
+            )
+        ],
+    )
+    source_link = SourceLink(
+        feature_id=feature_id,
+        source_record_key=source_record.key(),
+        source_role=SourceRole.PRIMARY,
+        match_method="agri_weather_station_code",
+        confidence=100,
+        is_primary_source=True,
+    )
+    return DataGoKrFeatureBundle(
+        feature=feature,
+        source_record=source_record,
+        source_link=source_link,
+        address_match_report=address_enrichment.report,
+    )
+
+
+def kwater_sluice_record_to_weather_values(
+    feature_id: str,
+    item: Any,
+    *,
+    observed_year: int,
+    collected_at: datetime | None = None,
+    source_record_key: str | None = None,
+) -> tuple[WeatherValue, ...]:
+    """Normalize one K-water sluice operation row into WeatherValue metrics."""
+
+    raw = _raw_mapping(item)
+    observed_at = _kwater_observed_at(
+        _text(item, "obsrdt", raw_keys=("obsrdt",)),
+        observed_year=observed_year,
+    )
+    values: list[WeatherValue] = []
+    for source_key, (metric_key, metric_name, unit) in KWATER_SLUICE_METRICS.items():
+        value = getattr(item, source_key, None)
+        if value in (None, ""):
+            value = _first(raw, source_key)
+        value_number = _decimal_or_none(value)
+        if value_number is None:
+            continue
+        values.append(
+            WeatherValue(
+                feature_id=feature_id,
+                provider=DATAGOKR_PROVIDER,
+                weather_domain=WeatherDomain.HYDRO_WEATHER,
+                forecast_style=ForecastStyle.OBSERVED,
+                metric_key=metric_key,
+                observed_at=observed_at,
+                source_metric_key=source_key,
+                source_metric_name=metric_name,
+                metric_name=metric_name,
+                value_number=value_number,
+                unit=unit,
+                normalization_version=DATAGOKR_KWATER_SLUICE_NORMALIZATION_VERSION,
+                payload={
+                    "dataset_key": DATAGOKR_KWATER_SLUICE_HOUR_DATASET_KEY,
+                    "damcode": _text(item, "damcode", raw_keys=("damcode",)),
+                    "obsrdt": _text(item, "obsrdt", raw_keys=("obsrdt",)),
+                    "raw": dict(raw),
+                },
+                collected_at=collected_at or _now_kst(),
+                source_record_key=source_record_key,
+            )
+        )
+    return tuple(values)
+
+
 def datagokr_standard_full_scan_identity(
     _session: Any,
     _dataset_key: str,
@@ -537,12 +777,7 @@ def _job_spec(spec: DataGoKrDatasetSpec) -> EtlJobSpec:
         success_message=f"{spec.dataset_key} full scan completed.",
         failure_message=f"{spec.dataset_key} full scan failed.",
         identity_resolver=datagokr_standard_full_scan_identity,
-        schedule_enabled=schedule_requires_any_env(
-            "DATAGOKR_API_KEY",
-            "DATA_GO_KR_SERVICE_KEY",
-            "PUBLIC_DATA_SERVICE_KEY",
-            "SERVICE_KEY",
-        ),
+        schedule_enabled=schedule_requires_any_env("DATA_GO_KR_SERVICE_KEY"),
     )
 
 
@@ -632,6 +867,14 @@ def _address_text(item: Any, raw: Mapping[str, Any]) -> str | None:
 def _coordinate_from_item(item: Any, raw: Mapping[str, Any]) -> Coordinate | None:
     lat = _optional_float(getattr(item, "latitude", None) or _first(raw, "latitude"))
     lon = _optional_float(getattr(item, "longitude", None) or _first(raw, "longitude"))
+    if lat is None or lon is None:
+        return None
+    return Coordinate(lat=lat, lon=lon)
+
+
+def _coordinate_from_agri_station(item: Any, raw: Mapping[str, Any]) -> Coordinate | None:
+    lat = _optional_float(getattr(item, "instl_la", None) or _first(raw, "Instl_La"))
+    lon = _optional_float(getattr(item, "instl_lo", None) or _first(raw, "Instl_Lo"))
     if lat is None or lon is None:
         return None
     return Coordinate(lat=lat, lon=lon)
@@ -891,6 +1134,15 @@ def _optional_float(value: Any) -> float | None:
     return float(value)
 
 
+def _decimal_or_none(value: Any) -> Decimal | None:
+    if value is None or value == "":
+        return None
+    try:
+        return Decimal(str(value))
+    except Exception:
+        return None
+
+
 def _url_or_none(value: Any) -> str | None:
     text = _optional_str(value)
     if text is None:
@@ -911,6 +1163,21 @@ def _date_or_none(value: Any) -> date | None:
     if len(text) == 8 and text.isdigit():
         return date(int(text[:4]), int(text[4:6]), int(text[6:8]))
     return date.fromisoformat(text)
+
+
+def _kwater_observed_at(value: str | None, *, observed_year: int) -> datetime | None:
+    if value is None:
+        return None
+    normalized = value.replace("시", "").strip()
+    try:
+        month_day, hour_text = normalized.split()
+        month_text, day_text = month_day.split("-")
+        return datetime.combine(
+            date(observed_year, int(month_text), int(day_text)),
+            time(hour=int(hour_text)),
+        )
+    except (TypeError, ValueError):
+        return None
 
 
 def _now_kst() -> datetime:

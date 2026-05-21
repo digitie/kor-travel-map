@@ -472,13 +472,7 @@ visitkorea_festival_full_scan_job_spec = EtlJobSpec(
     success_message="VisitKorea festival full scan completed.",
     failure_message="VisitKorea festival full scan failed.",
     identity_resolver=visitkorea_festival_full_scan_identity,
-    schedule_enabled=schedule_requires_any_env(
-        "KTO_DATA_GO_KR_SERVICE_KEY",
-        "DATA_GO_KR_SERVICE_KEY",
-        "KTO_SERVICE_KEY",
-        "KRTOURAPI_SERVICE_KEY",
-        "TOURAPI_SERVICE_KEY",
-    ),
+    schedule_enabled=schedule_requires_any_env("DATA_GO_KR_SERVICE_KEY"),
 )
 
 

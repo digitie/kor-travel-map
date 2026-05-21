@@ -42,7 +42,7 @@ kasi = [
   "python-kasi-api @ git+https://github.com/digitie/python-kasi-api.git@a8940f78e804646fdadb377ad035dbcdce45a034",
 ]
 datagokr = [
-  "python-datagokr-api @ git+https://github.com/digitie/python-datagokr-api.git@a37457db7941ce67e82a84ca13fd61e7cc4748c9",
+  "python-datagokr-api @ git+https://github.com/digitie/python-datagokr-api.git@ef7d3ab6961d851777023e344feecf869a8c8635",
 ]
 
 [tool.setuptools]
