@@ -4,23 +4,41 @@
 
 ## 진행 중
 
-- (없음 — PR#2 검토 대기)
+- (없음 — PR#6 검토 대기)
 
 ## 다음 (우선순위 순)
 
 - [ ] T-012 — ADR-020+ 후속 결정 (필요 시)
-  - 캐시 전략 (라이브러리 레벨 cache 도입 여부)
-  - OpenAPI export 정책 (디버그 패키지 라우터 노출 시점)
-  - 단위 테스트 coverage 단계적 상향 계획
+  - **ADR-030 후보** — 라이브러리 캐시 전략 (in-memory 안 두기 vs 두기)
+  - **ADR-031 후보** — OpenAPI export 정책 (디버그 패키지 라우터 노출 시점)
+  - **ADR-032 후보** — Coverage 단계적 상향 일정 (Sprint 1 → Sprint 5)
+  - **ADR-033 후보** — `ops.feature_consistency_reports` 도입 시점
 - [ ] T-013 — `CHANGELOG.md` 초기 엔트리 정리 (현 v2 design 완료 시점)
 - [ ] T-014 — 코드 작성 단계 진입 검토
   - 모든 문서 검토 완료
   - 사용자 승인
   - Sprint 계획 (`SPRINT-1.md` 또는 `docs/sprints/`)
+- [ ] T-017 — **공통 maki marker / category 매핑 npm 패키지 추출** (ADR-026
+      후속, ADR-029 후보)
+  - 본 라이브러리 디버그 UI frontend + TripMate `apps/web` 사용자 UI 공통화
+  - `@krtour/map-marker-react` (가칭) — `krtour.map.category` Tier 1~4 →
+    maki icon(55종) dispatch + `MakiMarker` 공통 컴포넌트
+  - 의존: `maplibre-vworld`, `maplibre-gl`
+  - 라이선스: GPL-3.0-or-later 또는 MIT (TripMate proprietary와 호환되도록
+    별도 ADR로 결정)
+- [ ] T-018 — **`python-knps-api` provider 등록** (ADR-027 카테고리 확장 +
+      ADR-028 provider 등록 후보)
+  - `digitie/python-knps-api` 저장소 신설 — `python-mois-api` 패턴 미러
+  - `krtour.map.providers.knps` 모듈 신설
+  - `docs/forest-feature-etl.md` §11 KNPS 통합 실행
+- [ ] T-019 — **TripMate 측 후속 작업 추적** (ADR-026 후속, 본 저장소 외)
+  - TripMate `apps/web` Kakao Maps → maplibre-vworld 교체 PR (TripMate 저장소)
+  - SPEC V8 v8_3 Kakao Maps 섹션에 "superseded by python-krtour-map ADR-026"
+    표기 (SPEC 저장소)
+  - 본 저장소는 ADR-026 reference만 책임. 작업 자체는 미트래킹.
 
 ## 보류 (v2 1차 범위 외)
 
-- [ ] T-100 — 디버그 UI 별도 Next.js 패키지 분리 (`krtour-map-debug-ui`)
 - [ ] T-101 — Materialized View 도입 검토 (feature + detail flatten)
 - [ ] T-102 — pg_prewarm 부팅 후 warm-up
 - [ ] T-103 — 별도 streaming ETL (Kafka/Redpanda) 대응
@@ -51,35 +69,65 @@
 ## 완료
 
 - [x] T-000 — git v1 보존 + main orphan 재시작 (완료: 2026-05-24)
-- [x] T-001b — ADR-020 + 디버그 UI 별도 패키지로 분리 (완료: 2026-05-24)
-  - decisions(ADR-020), architecture, backend-package, debug-ui-package(신규),
-    AGENTS, SKILL, CLAUDE, README, pyproject(`[api]` 제거 + forbidden 계약 추가),
-    .env.example, test-strategy 갱신
-  - `packages/krtour-map-debug-ui/` pyproject + README skeleton
-- [x] T-016 — `python-mois-api` 활용 feature 적재 4단계 lifecycle docs
-      (완료: 2026-05-24, PR#3) + ADR-024 canonical name 정정 + 일괄 krmois→mois rename
-- [x] T-002 ~ T-011 — v1 docs를 v2 기준으로 일괄 이전 (완료: 2026-05-24, PR#2)
-  - 14개 신규 docs (weather/files-rustfs/opening-hours/kraddr-base-types/
-    address-geocoding/dagster-boundary/postgres-schema/debug-fixture-workflow/
-    feature-db-initialization/tripmate-integration + provider ETL 10건)
 - [x] T-001 — v2 핵심 docs 작성 (완료: 2026-05-24)
   - AGENTS.md, README.md, SKILL.md, CLAUDE.md
   - .env.example, pyproject.toml, .gitignore, .gitattributes, LICENSE
   - docs/architecture.md
   - docs/decisions.md (ADR-001 ~ ADR-019)
-  - docs/data-model.md
-  - docs/performance.md
-  - docs/test-strategy.md
-  - docs/backend-package.md
-  - docs/agent-guide.md
-  - docs/dev-environment.md
+  - docs/data-model.md, performance.md, test-strategy.md
+  - docs/backend-package.md, agent-guide.md, dev-environment.md
   - docs/windows-reinstall-recovery.md
-  - docs/feature-model.md
-  - docs/provider-contract.md
-  - docs/external-apis.md
+  - docs/feature-model.md, provider-contract.md, external-apis.md
+- [x] T-001b — ADR-020 + 디버그 UI 별도 패키지로 분리 (완료: 2026-05-24)
+  - decisions(ADR-020), architecture, backend-package, debug-ui-package(신규),
+    AGENTS, SKILL, CLAUDE, README, pyproject(`[api]` 제거 + forbidden 계약 추가),
+    .env.example, test-strategy 갱신
+  - `packages/krtour-map-debug-ui/` pyproject + README skeleton
+- [x] T-002 ~ T-011 — v1 docs를 v2 기준으로 일괄 이전 (완료: 2026-05-24, PR#2)
+  - 14개 신규 docs (weather/files-rustfs/opening-hours/kraddr-base-types/
+    address-geocoding/dagster-boundary/postgres-schema/debug-fixture-workflow/
+    feature-db-initialization/tripmate-integration + provider ETL 10건)
+- [x] T-001c — ADR-021/022/023 + PR-only workflow + `krtour.map` namespace +
+      kraddr-base category 이전 (완료: 2026-05-24, PR#1)
+  - AGENTS/SKILL/CLAUDE/architecture/agent-guide 일괄 갱신
+  - `docs/category.md` 신설
+  - import-linter 계약 placeholder
+- [x] T-016 — `python-mois-api` 활용 feature 적재 4단계 lifecycle docs +
+      ADR-024 canonical name 정정 (완료: 2026-05-24, PR#3)
+  - `docs/mois-feature-etl.md` 신설 + 195 슬러그 카탈로그
+  - 일괄 krmois→mois rename (`mois-license-feature-etl.md` 등)
+- [x] T-015 — forest rename + category Tier 1~4 catalog + KNPS data.go.kr
+      카탈로그 + 모든 ETL doc category 정보 audit (완료: 2026-05-25, PR#5)
+  - `outdoor-feature-etl.md` → `forest-feature-etl.md` (git mv)
+  - `docs/category.md` Tier 1~4 상세 테이블 (141건)
+  - KNPS dataset 7건 카탈로그 + 옵션 A/B 비교 (옵션 B 권고)
+- [x] T-017a — ADR-025 디버그 UI frontend = `maplibre-vworld-js` + ADR-025
+      사용자 보강 (key 공유 + upstream 직접 PR) + ADR-026 TripMate 사용자 UI도
+      maplibre-vworld 통일 (완료: 2026-05-25, PR#6 검토 대기)
+  - `docs/decisions.md` ADR-025 + ADR-026
+  - `docs/debug-ui-package.md` §14 frontend 사양
+  - `packages/krtour-map-debug-ui/frontend/` skeleton
+    (package.json / .env.example / .gitignore / README)
+  - `docs/tripmate-integration.md` §14.5 사용자 UI 지도 stack
+  - `docs/external-apis.md` Kakao Maps SDK 미사용 처리
+  - `docs/forest-feature-etl.md` §11.6 ADR-026 → ADR-027 후보 재번호
+
+## 폐기
+
+- ~~T-100~~ — "디버그 UI 별도 Next.js 패키지 분리" — **폐기**:
+  Python 패키지로 분리 (T-001b, ADR-020) + frontend는 React+Vite (ADR-025)로
+  결정. Next.js 미채택.
 
 ## 우선순위 가이드
 
-- **즉시** — v2 코드 작성 단계 진입 전 필수: T-002 ~ T-011
-- **이후** — 코드 작성 단계 진입 후 점진적 도입: T-012 ~ T-014
-- **장기** — v2 1차 안정화 후: T-100 ~ T-103
+- **즉시** — PR#6 검토 + merge
+- **다음** — T-012 (ADR-020+ 후속 결정) 또는 T-014 (코드 작성 단계 진입 검토,
+  사용자 승인 필요)
+- **장기** — Sprint 5 (T-200~T-204), provider 확장 (T-017, T-018)
+
+## ADR 번호 가이드 (현재)
+
+- **accepted**: ADR-001 ~ ADR-026
+- **다음 후보**: ADR-027 (forest 카테고리 확장) / ADR-028 (`python-knps-api`
+  provider 등록) / ADR-029 (공통 maki npm 패키지) / ADR-030+ (캐시/OpenAPI/
+  Coverage/정합성 등 T-012 항목)
