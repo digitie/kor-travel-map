@@ -654,67 +654,162 @@
   - 모든 신규/기존 docs의 `krmois.*` import 예시 → `mois.*`로 정정
   - PR description에 변경 요약
 
----
+## ADR-025: 디버그 UI frontend는 `maplibre-vworld-js` 채택
 
 - **상태**: accepted
-- **날짜**: 2026-05-24
+- **날짜**: 2026-05-25
 - **결정자**: 사용자
-- **컨텍스트**: v1까지는 `python-kraddr-base`의 `kraddr.base.categories`
-  (`PlaceCategory`, `PlaceCategoryCode`, `get_category`, `iter_categories`,
-  `mapbox_maki_icon_for_category` 등 ~2,072 줄)를 의존성으로 import해 사용했다.
-  사용자가 본 category 코드/문서를 `python-krtour-map`으로 이전하라고 지시.
-  근거:
-  - category 데이터(141 enum + maki icon 매핑)는 TripMate 지도 도메인에 직접
-    종속 — `python-krtour-map`이 1차 소비자.
-  - 다른 라이브러리(`python-kraddr-geo` 등)는 category에 의존하지 않음 — 분리
-    시 영향 없음.
-  - kraddr-base는 주소/좌표/CRS 핵심에 집중되는 게 자연스럽다.
+- **컨텍스트**: ADR-020으로 디버그 UI를 별도 패키지 `krtour-map-debug-ui`로
+  분리. FastAPI backend는 결정되었지만 frontend 기술 선택이 미정이었다.
+  v1은 Kakao Maps JS SDK 사용. v2 후보:
+  - Kakao Maps JS SDK (Canvas, JS key 필요, 일 호출 한도, 오프라인 캐싱 금지)
+  - MapLibre GL JS + raster tile (OpenStreetMap 또는 VWorld raster 직접)
+  - **MapLibre GL JS + `maplibre-vworld-js`** (`digitie/maplibre-vworld-js`,
+    npm `maplibre-vworld` v1.0.0, React/TS, WebGL 60fps, `MakiMarker` +
+    `MarkerClusterer` 내장, `zod` 좌표 검증, Next.js/Vite SSR 지원)
+
+  사용자가 maplibre-vworld-js 채택을 지시.
+
 - **결정**:
-  - `kraddr.base.categories` 모듈 전체를 본 저장소로 이전 → `krtour.map.category`
-    (top-level subpackage, 다른 `dto`/`core`/`infra`와 sibling).
-  - 공개 식별자 (전부 그대로 유지):
-    - `PlaceCategory`, `PlaceCategoryCode`, `PlaceCategoryTier1Code`
-    - `PLACE_CATEGORY_DEFINITIONS`, `PLACE_CATEGORY_BY_CODE`,
-      `PLACE_CATEGORY_CODES`, `PLACE_CATEGORY_TIER1_NAMES`,
-      `PLACE_CATEGORY_TIER2_NAMES_BY_TIER1`,
-      `PLACE_CATEGORY_MAPBOX_MAKI_ICONS`, `PLACE_CATEGORY_MAPBOX_MAKI_ICON_VALUES`
-    - `get_category`, `is_known_category_code`, `iter_categories`,
-      `category_path`, `category_label`,
-      `mapbox_maki_icon_for_category`, `mapbox_maki_icon_or_none`,
-      `format_category_tree`, `print_category_tree`
-  - `dto/feature.py`의 `Feature.category` 검증·정규화는 `krtour.map.category`를
-    import해서 사용.
-  - 의존 계층(`import-linter`)에 `krtour.map.category`를 `dto`보다 낮은 계층
-    으로 추가 (`category → dto → core → infra → providers → client → cli`).
-  - `python-kraddr-base`는 `Address`, `PlaceCoordinate`, `AddressRegion`,
-    `Wgs84Point`, CRS 상수 등 **주소/좌표/CRS만** 제공 (그쪽에서 category 모듈은
-    별도 deprecation cycle을 두든 그대로 두든 그쪽 결정 — 본 저장소는 자체
-    구현).
-  - 라이선스: kraddr-base와 본 저장소 모두 GPL-3.0-or-later → 호환. 이전 시
-    파일 상단에 derivation 주석 + LICENSE에 origin 표기.
-  - 단위 테스트(141 seed 검증)도 함께 이전 (`tests/unit/test_category.py`).
+  - 디버그 UI frontend: **React + Vite + TypeScript + `maplibre-vworld` +
+    `maplibre-gl` + `zod`**.
+  - VWorld 지도 (국토교통부) — **Kakao Maps SDK 사용 안 함**.
+    `NEXT_PUBLIC_KAKAO_JS_KEY` 같은 변수 미사용.
+  - 마커: `MakiMarker` (kraddr-base / `krtour.map.category` maki icon 55종과
+    정합) + `MarkerClusterer` (10만+ feature viewport culling + KDBush).
+  - 라이선스: `maplibre-vworld` ISC license + `maplibre-gl` BSD-3 + 본 라이브러리
+    GPL-3.0 호환.
+  - 디렉토리: `packages/krtour-map-debug-ui/frontend/` (`python-kraddr-geo`의
+    `kraddr-geo-ui` 패턴 미러).
+  - 빌드: Vite. 개발 `npm run dev` (포트 `8610`, kraddr-geo-ui와 동일). 빌드
+    산출물(`dist/`)은 FastAPI가 static serve하거나 별도 dev 서버.
+  - 백엔드 API 경유: 환경변수 `KRTOUR_MAP_DEBUG_UI_API_INTERNAL_URL` (Vite
+    proxy 또는 fetch base URL).
+  - SPA로 충분 — SSR 불필요 (디버그 UI는 내부망 전용).
+  - 인증 없음 (ADR-005 + ADR-020 그대로). VWorld API key만 frontend에 안전하게
+    전달 (key restriction by HTTP referrer).
 - **근거**:
-  - 단일 소비자 패턴 — 코드/데이터를 사용자 위치에 두는 게 응집도 높음.
-  - kraddr-base의 책임 축소 (주소/좌표만).
-  - 본 라이브러리의 의존 그래프에서 외부 dep 1개 제거 (kraddr-base는 여전히
-    필요하지만 category 모듈은 자체 보유).
+  - **VWorld 우선**: 국토교통부 공식 지도. 한국 행정구역 경계·도로명주소
+    레이어와 정합. `python-kraddr-geo`와 동일한 source.
+  - **WebGL 렌더링**: 10만+ feature (MOIS 인허가, krheritage, opinet 주유소
+    등)을 Canvas 기반보다 부드럽게 60fps 렌더링.
+  - **선언형 React**: `map.panTo()` 같은 명령형 API 없음 → Props 조작만으로
+    상태 동기 (디버그 콘솔에서 feature 클릭 → 지도 이동 단순).
+  - **MakiMarker 내장**: 본 라이브러리의 `krtour.map.category` maki icon
+    매핑(55종)을 그대로 활용.
+  - **클러스터링 내장**: viewport culling + KDBush로 zoom-level별 마커 자동
+    합치기 — 본 라이브러리의 `cluster_unit` (`sido`/`sigungu`/`eupmyeondong`)
+    개념과 정합.
+  - **TypeScript**: openapi-typescript로 본 라이브러리 디버그 REST와 타입 동기
+    가능.
+  - **kraddr-geo-ui 패턴 일관**: 운영자/에이전트 학습 비용 절감.
 - **결과 (긍정)**:
-  - category 변경이 본 저장소 PR 단위로 통제.
-  - 추가 dep 제거 (kraddr-base의 category-only path 끊김).
+  - 한국 운영 환경(VWorld, 행정구역, 도로명주소)에 정합.
+  - kraddr-geo-ui와 같은 frontend stack (React + Vite + TS) → 형제 라이브러리
+    운영 일관성.
+  - Kakao 호출 한도 / JS key 발급 부담 없음.
+  - 대용량 feature 렌더링 성능 우수.
+  - maki icon이 본 라이브러리 category 체계와 자동 정합.
 - **결과 (부정)**:
-  - 코드 중복(전환 기간) — kraddr-base가 이전 즉시 본 모듈을 폐기하지 않으면
-    잠시 두 copy 존재. 본 저장소는 자체 copy를 정본으로 본다.
-  - kraddr-base release 변경 시 본 저장소도 동기 release 검토.
+  - VWorld API key 필요 — `python-kraddr-geo` ADR-019의
+    `KRADDR_GEO_VWORLD_API_KEY` **공유** (별도 발급 X, 사용자 결정 2026-05-25).
+  - 디버그 UI 운영자는 React/Vite/TypeScript 기본 지식 필요 (운영자는 한 명
+    이상이라 학습 부담 있음).
+- **사용자 보강 (2026-05-25)**:
+  1. **VWorld API key 공유 정책 확정**: 디버그 UI는 `python-kraddr-geo`의
+     `KRADDR_GEO_VWORLD_API_KEY`를 **공유 사용**. 별도 발급 / 별도 환경변수
+     금지. frontend는 backend가 주입한 값을 `VITE_VWORLD_API_KEY`로 노출
+     (이름은 Vite 규약, 값은 동일 출처). HTTP referrer 제한은 backend가
+     서빙하는 호스트(`127.0.0.1` + 내부망 운영 호스트)로 통일.
+  2. **maplibre-vworld-js 유지보수 정책**: provider 라이브러리에서 문제
+     발생 시 `digitie/maplibre-vworld-js` 저장소에 **직접 PR로 적극 수정**.
+     본 사용자가 직접 운영하는 저장소이므로 stability 우려는 "외부 의존"이
+     아닌 "관리 부담"으로 분류 — wrapper 도입(ADR-006 위배) 대신 upstream
+     수정으로 해소. 이로써 `maplibre-vworld` v1.0.0 채택의 부정적 결과
+     "stability 모니터링 필요" 항목은 **해소됨**.
 - **후속**:
-  - 실제 코드 이전은 **코드 작성 단계 진입 시** 수행 (현 단계는 docs/계약만).
-    별도 PR로 `krtour.map.category` 모듈 + 테스트 추가.
-  - `docs/category.md` 신설 — 모듈 사양 + 라이선스/derivation 명기.
-  - `docs/feature-model.md`, `docs/provider-contract.md`의 category 참조를
-    `krtour.map.category`로 갱신.
-  - `pyproject.toml`의 `dependencies`에서 kraddr-base는 유지 (주소/좌표 사용
-    중) — 단, category submodule은 본 저장소가 정본.
-  - `python-kraddr-base`에 대한 category 폐기/유지 결정은 그쪽 저장소 ADR로
-    분리.
+  - `docs/debug-ui-package.md` 갱신 — frontend 디렉토리/기동/Env/마커 매핑
+    + key 공유 정책 §14.2.
+  - `packages/krtour-map-debug-ui/README.md` 갱신.
+  - `packages/krtour-map-debug-ui/frontend/` skeleton (package.json, vite.config.ts,
+    src/App.tsx, .gitignore) — 코드 작성 단계 진입 직전 별도 PR (사용자
+    결정 2026-05-25 확인).
+  - 환경변수 `KRTOUR_MAP_DEBUG_UI_FRONTEND_*` prefix 도입.
+  - VWorld API key 발급 절차는 `docs/external-apis.md` 갱신 (공유 정책 명기).
+  - `docs/forest-feature-etl.md` §11.6의 "ADR-025 후보" 카테고리 확장은 번호
+    충돌 회피로 **ADR-027 후보**로 변경 (ADR-026은 TripMate UI 통일 ADR이
+    선점).
+
+## ADR-026: TripMate 사용자 UI도 `maplibre-vworld` 채택 (SPEC V8 v8_3 supersede)
+
+- **상태**: accepted
+- **날짜**: 2026-05-25
+- **결정자**: 사용자
+- **컨텍스트**: ADR-025로 본 라이브러리의 **디버그 UI** frontend는
+  `maplibre-vworld` 채택. 그러나 상위 app TripMate의 **사용자 가시 지도 UI**
+  (SPEC V8 v8_3 spec)는 Kakao Maps JS SDK를 사용하도록 명시되어 있었다.
+  두 개의 다른 지도 stack을 유지하면:
+  - frontend 운영 비용 2배 (Kakao + VWorld 양쪽 학습/디버깅).
+  - category maki icon 매핑 코드가 두 곳에 산재.
+  - 좌표 변환·proj4·KAKAO_ID vs VWorld coord 정합 부담.
+  - Kakao JS key 호출 한도와 모니터링 분리.
+
+  사용자가 "둘 다 바꿈"으로 지시 — TripMate 사용자 UI도 `maplibre-vworld`
+  통일.
+
+- **결정**:
+  - **TripMate `apps/web` 사용자 가시 지도 UI도 `maplibre-vworld` 채택**.
+  - SPEC V8 v8_3의 "Kakao Maps JS SDK" 섹션은 **superseded** — TripMate 측
+    spec에 본 ADR 링크 박음.
+  - 두 UI(본 라이브러리 디버그 UI + TripMate 사용자 UI)는 동일 frontend
+    stack (React + Vite + TS + `maplibre-vworld` + `maplibre-gl` + `zod`).
+  - 마커 / category maki icon 매핑 로직은 npm 패키지로 추출 후보
+    (`@krtour/map-marker-react`, 추후 ADR로 결정) — 두 UI에서 import.
+  - VWorld API key는 TripMate 사용자 UI도 동일하게 `KRADDR_GEO_VWORLD_API_KEY`
+    공유 (또는 TripMate 사용자 환경의 동일 출처 키). 운영자 키와 사용자
+    프런트 키는 referrer 제한으로 분리 권장.
+  - Kakao Maps JS SDK 의존 / `NEXT_PUBLIC_KAKAO_JS_KEY` 등 관련 변수 일괄
+    제거 (TripMate 측 후속 PR).
+
+- **근거**:
+  - **단일 stack 운영**: 한 frontend stack(React + Vite + TS +
+    maplibre-vworld)으로 디버그 UI와 사용자 UI 양쪽 운영 — 학습/디버깅 비용
+    절감.
+  - **VWorld 일관성**: 본 라이브러리·`python-kraddr-geo`·디버그 UI·TripMate
+    UI 모두 VWorld 단일 source — 좌표·행정구역·도로명주소 시각화 정합.
+  - **호출 한도 일원화**: Kakao JS SDK 일 호출 한도 모니터링 불필요. VWorld
+    referrer 제한만 관리.
+  - **maki icon 단일 매핑**: `krtour.map.category` Tier 1~4 → maki icon
+    매핑 1회로 두 UI 공통 (추후 npm 패키지 추출).
+  - **WebGL 성능**: 10만+ feature 렌더링은 디버그 UI뿐 아니라 사용자 UI에서도
+    이점 (예: "주변 100km 내 모든 옵셈 주유소" 같은 시나리오).
+  - **사용자 직접 지시 + 본 사용자가 maplibre-vworld-js를 직접 관리** — 결정
+    번복 리스크 낮음.
+
+- **결과 (긍정)**:
+  - frontend stack 일원화 (React + Vite + TS + maplibre-vworld).
+  - category maki icon 매핑 단일화 가능.
+  - VWorld key 일원화 (Kakao key 발급/회전/모니터링 제거).
+  - 본 라이브러리의 디버그 UI 학습이 TripMate 운영 학습으로 직결.
+
+- **결과 (부정)**:
+  - TripMate `apps/web`의 기존 Kakao Maps 코드 제거/대체 PR 필요 (TripMate
+    저장소 측 작업, 본 저장소 외).
+  - SPEC V8 v8_3의 Kakao Maps 의존 섹션 supersede 표기/링크 필요.
+  - 본 라이브러리는 wrapper 도입하지 않음(ADR-006) — TripMate 측이 본 라이브러리
+    debug-ui frontend의 컴포넌트를 직접 import할 수 없으므로, 공통 마커 패키지를
+    별도 npm 패키지로 추출하는 ADR이 추가 필요 (후속).
+
+- **후속**:
+  - TripMate 저장소에 본 ADR 링크하는 supersede 표기 PR (TripMate 측 작업).
+  - SPEC V8 v8_3 문서에 "superseded by python-krtour-map ADR-026" 추가
+    (SPEC 저장소 측 작업).
+  - `docs/tripmate-integration.md` 갱신 — 사용자 UI도 maplibre-vworld
+    사용 명기, Kakao 의존 제거.
+  - 공통 마커/카테고리 매핑 npm 패키지 추출 ADR (후속, ADR-028~ 후보).
+  - `docs/external-apis.md` §8 비용 관리에서 Kakao Maps JS SDK 항목 제거
+    또는 "TripMate UI 통일 이후 미사용"으로 표기.
+  - `docs/category.md` §4 maki icon 매핑은 두 UI 공통 reference 명기.
 
 ---
 

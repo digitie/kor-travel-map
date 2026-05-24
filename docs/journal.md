@@ -2,6 +2,120 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-25 02:00 (claude)
+
+**작업**: 사용자의 4건 의사결정 반영 — (1) VWorld key 공유, (2) TripMate
+사용자 UI도 maplibre-vworld 통일, (3) frontend 코드는 별도 PR, (4)
+maplibre-vworld-js upstream 적극 수정.
+
+**컨텍스트**: PR#6 (ADR-025)의 결과(부정) 두 항목 — "VWorld key 별도 발급
+vs 공유 미정" + "provider 라이브러리 stability 모니터링 필요" — 에 사용자가
+명시 결정을 내림.
+
+**변경 파일**:
+- `docs/decisions.md`:
+  - ADR-025 §결과(부정) 정리 — 공유 정책 확정으로 부정 항목 1개 흡수.
+  - ADR-025 §사용자 보강(2026-05-25) 신규 — 1. key 공유 / 2. upstream 직접 PR.
+  - ADR-025 §후속 — forest §11.6 후보 번호 ADR-026 → ADR-027 (ADR-026이
+    TripMate UI 통일에 선점).
+  - **ADR-026 신규**: TripMate 사용자 UI도 `maplibre-vworld` 채택 (SPEC V8
+    v8_3 supersede). 두 UI 단일 stack, Kakao Maps JS SDK 제거. 공통 maki
+    npm 패키지 추출은 후속 ADR.
+- `docs/external-apis.md`:
+  - 환경변수 카탈로그에 `KRADDR_GEO_VWORLD_API_KEY` 항목 추가 (공유 키 명기).
+  - §8 비용 관리에서 Kakao Maps JS SDK 항목 → "미사용 (ADR-026)" 처리.
+  - VWorld 항목에 ADR-025 보강 + ADR-026 사용처 추가.
+- `docs/debug-ui-package.md`:
+  - §14.2 환경변수 — VITE_VWORLD_API_KEY 설명을 "공유 키" 명기, 운영자
+    주입 절차 박음. TripMate UI 공유 명기.
+  - §14.8 외부 노출 안전 — referrer 화이트리스트에 backend + TripMate 호스트.
+  - §15 핵심 메시지 — 공유 정책 + upstream 적극 수정 정책 박음.
+- `docs/tripmate-integration.md`:
+  - §14.5 신설 — TripMate 사용자 UI 지도 stack (ADR-026), Kakao 제거, 공유 키.
+- `docs/forest-feature-etl.md`:
+  - §11.6 heading + 본문 2곳: "ADR-026 후보" → "ADR-027 후보".
+  - §11.8 후속 ADR-026/027 → ADR-027/028.
+- `docs/resume.md`:
+  - 진척도에 ADR-025 보강 + ADR-026 추가 (둘 다 [x] 완료).
+  - "다음 ADR 후보" 정리 — 이미 accepted된 ADR-021~024 항목 제거, 후보 번호
+    ADR-027부터 재배열 (027 카테고리 확장, 028 KNPS provider, 029 공통 maki
+    npm 패키지, 030 캐시, 031 OpenAPI, 032 coverage, 033 정합성).
+- `packages/krtour-map-debug-ui/frontend/.env.example`:
+  - VITE_VWORLD_API_KEY 주석 — "= $KRADDR_GEO_VWORLD_API_KEY 값과 동일" 박음.
+- `packages/krtour-map-debug-ui/frontend/README.md`:
+  - 환경변수 표 — 공유 정책 명기 + TripMate UI 공유 박음.
+
+**커밋 메시지 후보**: `ADR-025 보강 + ADR-026: VWorld key 공유 + TripMate UI 통일`
+
+**다음**: PR#6에 본 커밋 추가 push → 사용자 검토 → merge. 머지 후 ADR-029
+(공통 maki npm 패키지 추출) 검토 시점에 다시 결정.
+
+---
+
+## 2026-05-25 01:00 (claude)
+
+**작업**: 디버그 UI frontend 기술 결정 — `maplibre-vworld-js` 채택 (ADR-025).
+
+**변경 파일**:
+- `docs/decisions.md`:
+  - **ADR-025 신설** — 디버그 UI frontend는 React + Vite + TS + `maplibre-vworld`
+    + `maplibre-gl` + `zod`. Kakao Maps SDK 사용 안 함. VWorld 1차.
+  - ADR-023 orphan duplicate (line 657~717) 정리 (이전 편집 사고 잔재).
+- `docs/debug-ui-package.md` §2 디렉토리 + §14 신설 (~120 lines):
+  - frontend 디렉토리 추가 (Vite, src/components/api/lib)
+  - §14.1 기술 스택 (maplibre-vworld v1.0.0, ISC license, React 19, Vite,
+    포트 8610)
+  - §14.2 환경변수 (`VITE_VWORLD_API_KEY`, `VITE_KRTOUR_MAP_DEBUG_UI_API`)
+  - §14.3 기동 (backend uvicorn 8600 + frontend Vite 8610)
+  - §14.4 핵심 컴포넌트 매핑 (`<VWorldMap>`, `<MakiMarker>`, `<MarkerClusterer>`, etc.)
+  - §14.5 category → maki icon 매핑 (`categoryMaki.ts`)
+  - §14.6 OpenAPI → TypeScript 동기 (kraddr-geo ADR-015 미러)
+  - §14.7~14.8 e2e + 외부 노출 안전
+- `packages/krtour-map-debug-ui/README.md` — Frontend 절 추가 + env 표 분리
+  (Backend / Frontend)
+- **NEW**: `packages/krtour-map-debug-ui/frontend/`:
+  - `package.json` (의존성 placeholder)
+  - `.env.example` (VITE_VWORLD_API_KEY)
+  - `.gitignore`
+  - `README.md`
+- `docs/external-apis.md` — VWorld API key 항목 추가 (디버그 UI용).
+- `docs/forest-feature-etl.md` §11.6 — ADR-025 후보 → ADR-026 후보 renumber
+  (카테고리 확장은 향후 ADR-026, knps provider 등록은 ADR-027).
+- `docs/resume.md` — 후보 ADR 번호 재정렬 (ADR-026/027/028+).
+
+**결정**:
+- **ADR-025** — 디버그 UI frontend는 `maplibre-vworld-js` 채택.
+  - VWorld 지도 (국토교통부 공식) — 한국 행정구역/도로명주소와 정합.
+  - WebGL 60fps + MakiMarker + MarkerClusterer 내장 → 10만+ feature 처리.
+  - 선언형 React → 상태 동기 단순.
+  - `kraddr-geo-ui`와 동일 stack (React + Vite + TS) → 운영 일관.
+  - Kakao Maps SDK 사용 안 함 (디버그 UI 측만).
+  - 디렉토리: `packages/krtour-map-debug-ui/frontend/`.
+  - 의존: `maplibre-vworld` v1.0.0 (ISC), `maplibre-gl` (BSD-3), `zod`, React 19.
+  - VWorld API key는 `python-kraddr-geo`의 `KRADDR_GEO_VWORLD_API_KEY` 공유
+    또는 별도 `VITE_VWORLD_API_KEY`.
+
+**의사결정 (사용자 위임 — 검토 부탁)**:
+- VWorld API key 발급 정책: `python-kraddr-geo`와 공유 vs 디버그 UI 전용 별도
+  발급 (운영자 결정).
+- TripMate 사용자 UI는 SPEC V8 v8_3 그대로 Kakao Maps SDK 유지 — 본 ADR은
+  디버그 UI에만 해당.
+- frontend 코드 작성은 별도 PR (코드 작성 단계 진입 시).
+
+**발견**:
+- `maplibre-vworld-js` (`digitie/maplibre-vworld-js`)는 npm `maplibre-vworld`
+  v1.0.0, React/TypeScript, ISC license. 본 사용자 운영 저장소라 의존성 리스크
+  낮음.
+- 라이선스 호환성: ISC + BSD-3 + GPL-3.0 모두 호환 (GPL-3.0이 가장 strict이라
+  배포 시 GPL 준수).
+- `kraddr-geo-ui` Next.js 패턴과 비교했을 때 디버그 UI는 SPA로 충분 (Vite 만
+  사용, Next.js SSR 불필요).
+
+**다음**: PR push + 사용자 검토. PR merge 후 backlog T-200/T-201 + ADR-026/027
+(카테고리 확장 + KNPS provider).
+
+---
+
 ## 2026-05-25 00:30 (claude)
 
 **작업**: outdoor → forest rename + 모든 feature에 category 명시 + KNPS

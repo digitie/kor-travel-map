@@ -44,11 +44,34 @@ packages/krtour-map-debug-ui/
 │   │   ├── integrity.py
 │   │   ├── debug.py           — /debug/explain, /debug/fixtures
 │   │   └── fixtures.py        — /debug/fixtures (저장/replay)
-│   └── views/                 — (옵션) 정적 HTML/JS 또는 Next.js bridge
-│       └── (Sprint 5 이후 결정)
+│   └── static/                — Vite build output (frontend/dist 복사) 또는 dev FastAPI mount
+├── frontend/                  — React + Vite + TS + maplibre-vworld (ADR-025)
+│   ├── package.json
+│   ├── vite.config.ts
+│   ├── tsconfig.json
+│   ├── index.html
+│   ├── .env.example           — VITE_VWORLD_API_KEY, VITE_KRTOUR_MAP_DEBUG_UI_API
+│   └── src/
+│       ├── main.tsx
+│       ├── App.tsx
+│       ├── api/               — openapi-typescript 생성 + 수동 zod mirror
+│       ├── pages/
+│       │   ├── FeatureMap.tsx       — VWorld 지도 + MakiMarker + Clusterer
+│       │   ├── FeatureDetail.tsx
+│       │   ├── ImportJobsPage.tsx
+│       │   ├── DedupReviewPage.tsx
+│       │   ├── IntegrityViolations.tsx
+│       │   └── DebugExplain.tsx     — SQL EXPLAIN viewer
+│       ├── components/
+│       │   ├── VWorldMap.tsx        — maplibre-vworld 래핑
+│       │   ├── FeatureMakiMarker.tsx
+│       │   └── ProviderSyncBadge.tsx
+│       └── lib/
+│           ├── categoryMaki.ts      — krtour.map.category → maki icon
+│           └── markerColor.ts       — P-01~P-16 팔레트
 └── tests/
-    ├── unit/                 — Fake repo + httpx ASGITransport
-    ├── e2e/                  — testcontainers PostGIS + 실제 메인 라이브러리
+    ├── unit/                  — Fake repo + httpx ASGITransport
+    ├── e2e/                   — testcontainers PostGIS + 실제 메인 라이브러리
     └── conftest.py
 ```
 
@@ -231,11 +254,146 @@ python packages/krtour-map-debug-ui/scripts/export_openapi.py \
 - TripMate 운영 노드에서는 git checkout → editable install로 충분.
 - PyPI 배포가 필요해지면 메인 라이브러리와 동일 version으로 lockstep release.
 
-## 14. 핵심 메시지
+## 14. Frontend — `maplibre-vworld-js` (ADR-025)
+
+### 14.1 기술 스택
+
+| 항목 | 값 |
+|------|----|
+| 라이브러리 | `maplibre-vworld` (npm v1.0.0, `github:digitie/maplibre-vworld-js`) |
+| 의존 | `maplibre-gl` (BSD-3), `zod` (좌표 검증), React 19 |
+| 빌드 도구 | Vite |
+| 언어 | TypeScript |
+| 라이선스 | ISC (`maplibre-vworld`) + BSD-3 (`maplibre-gl`) + GPL-3.0 (본 저장소) — 호환 |
+| 디렉토리 | `packages/krtour-map-debug-ui/frontend/` |
+| 개발 포트 | `8610` (`kraddr-geo-ui`와 동일 패턴) |
+| 배포 모드 | Vite build → FastAPI `static/` mount (또는 별도 dev 서버) |
+| SPA / SSR | SPA only (디버그 UI는 내부망 전용, SSR 불필요) |
+
+**Kakao Maps SDK 사용 안 함** (ADR-025). VWorld 지도가 1차 + 유일.
+
+### 14.2 환경변수
+
+| 변수 | 의미 |
+|------|------|
+| `VITE_VWORLD_API_KEY` | VWorld API key. **`KRADDR_GEO_VWORLD_API_KEY`와 동일 값 공유** (ADR-025 사용자 보강 2026-05-25). frontend 빌드/런타임 주입. |
+| `VITE_KRTOUR_MAP_DEBUG_UI_API` | 백엔드 API base URL (개발: `http://127.0.0.1:8600`) |
+| `KRTOUR_MAP_DEBUG_UI_FRONTEND_DIST` | (FastAPI 측) `frontend/dist/` 경로 — static mount |
+
+**VWorld API key 공유 정책 (확정, ADR-025 보강 2026-05-25)**:
+`python-kraddr-geo` ADR-019의 `KRADDR_GEO_VWORLD_API_KEY`를 **공유 사용**한다.
+별도 발급 / 별도 환경변수 / 디버그 UI 전용 키 금지. 운영 시 backend가 `.env`
+또는 vault에서 `KRADDR_GEO_VWORLD_API_KEY`를 읽어, frontend 빌드 시 Vite 규약상
+`VITE_VWORLD_API_KEY`로 동일 값을 주입한다 (CI/CD 또는 운영 셸 스크립트 책임).
+**TripMate 사용자 UI** (ADR-026)도 동일 키를 공유한다. HTTP referrer 제한은
+backend 호스트(`127.0.0.1` + 내부망 호스트) + TripMate frontend 호스트로 통일.
+
+### 14.3 기동
+
+```bash
+# 1. 본 라이브러리 install (이미 됨)
+cd ~/dev/python-krtour-map
+uv pip install -e ".[dev]"
+uv pip install -e packages/krtour-map-debug-ui
+
+# 2. backend (FastAPI) 기동
+uvicorn krtour.map_debug_ui.app:app --host 127.0.0.1 --port 8600
+
+# 3. frontend (Vite dev) 기동
+cd packages/krtour-map-debug-ui/frontend
+npm ci
+cp .env.example .env.local
+$EDITOR .env.local           # VWorld API key
+npm run dev                  # http://localhost:8610
+```
+
+운영 배포 시:
+```bash
+cd packages/krtour-map-debug-ui/frontend
+npm run build                # → dist/
+# FastAPI가 dist/를 static mount (settings.frontend_dist_dir)
+uvicorn krtour.map_debug_ui.app:app --host 127.0.0.1 --port 8600
+# → http://127.0.0.1:8600/ 에서 frontend + API 모두 서비스
+```
+
+### 14.4 핵심 컴포넌트 매핑
+
+| 컴포넌트 | 역할 | 본 라이브러리 연계 |
+|---------|------|------------------|
+| `<VWorldMap>` | MapLibre + VWorld raster/vector tile 기본 지도 | viewport bbox → `/features/in-bounds` API |
+| `<MakiMarker>` | feature 1건 마커 | `krtour.map.category` Tier 4 → maki icon 55종 |
+| `<MarkerClusterer>` | viewport culling + KDBush | 10만+ feature 동시 표시 (MOIS 인허가 등) |
+| `<FeatureMakiMarker>` (custom) | maki + 카테고리 color (P-01~P-16) | category code → maki + 색상 dispatch |
+| `<DetailPanel>` | feature 클릭 시 상세 | `GET /features/{id}` |
+| `<ProviderSyncBadge>` | provider sync 상태 | `GET /providers/{name}/sync-state` |
+| `<DebugExplain>` | SQL EXPLAIN viewer | `POST /debug/explain` (read-only) |
+
+### 14.5 카테고리 → maki icon 매핑
+
+`packages/krtour-map-debug-ui/frontend/src/lib/categoryMaki.ts`:
+
+```typescript
+// krtour.map.category와 동기. openapi-typescript로 자동 생성 후 수동 보강.
+export const CATEGORY_MAKI: Record<string, string> = {
+  "01050100": "beach",        // TOURISM_NATURE_BEACH (KHOA)
+  "01070100": "religious-buddhist",   // 전통사찰
+  "01070300": "monument",     // 사적·기념물
+  "03030101": "park",         // 휴양림 (산림청)
+  "06020000": "fuel",         // 주유소 (OpiNet)
+  "06040101": "highway-rest-area",    // 휴게소 (KREX)
+  // ... (전체 141건은 docs/category.md §4)
+};
+
+export const CATEGORY_COLOR: Record<string, string> = {
+  // marker_color 필드는 features 테이블에 직접 저장됨 (P-01 ~ P-16)
+  // 본 dict는 fallback only
+  "01000000": "P-11",         // 관광 fallback (자홍)
+  "02000000": "P-01",         // 식음 fallback (빨강)
+  "03000000": "P-10",         // 숙박 fallback (보라)
+  // ...
+};
+```
+
+자세한 카테고리 트리는 `docs/category.md` §4.
+
+### 14.6 OpenAPI → TypeScript 동기
+
+```bash
+# 백엔드에서 OpenAPI export
+python scripts/export_openapi.py --output frontend/openapi.json
+
+# frontend에서 타입 생성
+cd packages/krtour-map-debug-ui/frontend
+npm run gen:types            # openapi-typescript openapi.json -o src/api/types.ts
+```
+
+CI에서 drift 검증 (kraddr-geo ADR-015 패턴 미러). 자세한 절차는 §8 OpenAPI export.
+
+### 14.7 e2e 테스트
+
+- backend는 testcontainers PostGIS (Python 측, §9).
+- frontend는 Playwright 또는 Vitest로 컴포넌트 단위 테스트 (코드 작성 단계).
+- 통합 e2e (frontend + backend + PostGIS)는 Sprint 5 진입 직전 (T-200 계열).
+
+### 14.8 외부 노출 안전
+
+- frontend는 `127.0.0.1:8610` (Vite) 또는 `127.0.0.1:8600` (FastAPI static mount) 만.
+- VWorld API key는 frontend에 노출되지만 HTTP referrer 제한으로 보호.
+  공유 키(`KRADDR_GEO_VWORLD_API_KEY`)이므로 referrer 화이트리스트에 backend
+  호스트 + TripMate frontend 호스트(ADR-026) 모두 포함.
+- 운영자 외부 접근은 SSH 터널 / Cloudflare Tunnel (ADR-005).
+
+## 15. 핵심 메시지
 
 본 패키지의 존재 이유는 **메인 라이브러리(`python-krtour-map`)의 의존성 축소**다.
-TripMate가 본 라이브러리를 import할 때 FastAPI/Uvicorn이 딸려 들어오면 안 된다.
-디버그 UI를 쓰고 싶으면 별도로 `pip install -e packages/krtour-map-debug-ui`.
+TripMate가 본 라이브러리를 import할 때 FastAPI/Uvicorn/React가 딸려 들어오면 안
+된다. 디버그 UI를 쓰고 싶으면 별도로 `pip install -e packages/krtour-map-debug-ui`
++ `cd frontend && npm ci && npm run build`.
 
 이 분리는 ADR-020에 박혀 있고, `import-linter` 계약(`pyproject.toml`)이 메인
-패키지의 FastAPI import를 차단한다.
+패키지의 FastAPI import를 차단한다. 지도 frontend는 ADR-025로 `maplibre-vworld-js`
+가 박혔다 (VWorld 지도, Kakao Maps SDK 미사용). VWorld API key는
+`KRADDR_GEO_VWORLD_API_KEY` 공유 정책으로 일원화되며 (ADR-025 사용자 보강
+2026-05-25), TripMate 사용자 UI 측 지도 stack도 동일하게 통일된다 (ADR-026).
+`maplibre-vworld-js` 자체에서 문제가 발생하면 wrapper 도입(ADR-006 위배) 대신
+upstream 저장소(`digitie/maplibre-vworld-js`)에 직접 PR로 적극 수정한다.

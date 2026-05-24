@@ -1,0 +1,38 @@
+{
+  "name": "krtour-map-debug-ui-frontend",
+  "version": "0.2.0-dev",
+  "description": "Debug UI frontend for python-krtour-map (React + Vite + maplibre-vworld, ADR-025).",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 8610 --host 127.0.0.1",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --port 8610",
+    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "type-check": "tsc --noEmit",
+    "gen:types": "openapi-typescript openapi.json -o src/api/types.ts",
+    "test": "vitest run"
+  },
+  "_comment_dependencies": "코드 작성 단계 진입 시 채울 것. 본 단계는 ADR-025 결정만 박음. 아래는 placeholder.",
+  "dependencies": {
+    "maplibre-vworld": "^1.0.0",
+    "maplibre-gl": "^5.24.0",
+    "zod": "^3.23.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "@tanstack/react-query": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "typescript": "^5.5.0",
+    "vite": "^5.4.0",
+    "vitest": "^2.0.0",
+    "eslint": "^9.0.0",
+    "openapi-typescript": "^7.0.0"
+  },
+  "engines": {
+    "node": ">=18.18"
+  }
+}

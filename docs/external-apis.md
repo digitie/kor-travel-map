@@ -36,6 +36,7 @@
 | `NAVER_SEARCH_CLIENT_SECRET` | 동일 | 동일 | 헤더 `X-Naver-Client-Secret` |
 | `GOOGLE_PLACES_API_KEY` | google-places-api-new | Google Cloud Console (Places API New) | field mask 필수 |
 | `KRADDR_GEO_*` | python-kraddr-geo | (로컬 DB 위주, vworld 폴백 키는 kraddr-geo가 관리) | 본 라이브러리는 kraddr-geo client만 사용 |
+| `KRADDR_GEO_VWORLD_API_KEY` | python-kraddr-geo (reverse geocoding), 디버그 UI frontend (maplibre-vworld), TripMate 사용자 UI (ADR-026) | VWorld (vworld.kr) | **공유 키**. 별도 발급 X. ADR-025 + ADR-026 |
 
 ## 3. provider별 발급 절차 (요약)
 
@@ -172,7 +173,15 @@ provider API spec이 변경되면:
 
 - **Google Places API (New)**: 호출당 비용. Place phone enrichment는 candidate
   3개 미만으로 제한 (`PLACE_PHONE_MAX_CANDIDATES=3`).
-- **Kakao Maps JS SDK** (frontend, TripMate 측): 일 호출 한도. 모니터링 필요.
+- **VWorld API** (`maplibre-vworld-js` 의 raster/vector tile): 본 라이브러리
+  디버그 UI frontend **및 TripMate 사용자 UI** (ADR-026)가 사용. 키는
+  `python-kraddr-geo` ADR-019의 `KRADDR_GEO_VWORLD_API_KEY`를 **공유 사용**
+  (ADR-025 사용자 보강 2026-05-25). 별도 발급 금지. frontend는 Vite 규약상
+  `VITE_VWORLD_API_KEY`로 노출 — 값은 동일 출처. HTTP referrer 제한 권장
+  (backend 호스트 + TripMate frontend 호스트).
+- **Kakao Maps JS SDK**: **미사용** (ADR-026 — TripMate 사용자 UI도
+  maplibre-vworld로 통일, SPEC V8 v8_3 supersede). 본 항목은 reference로
+  유지하되 비용/한도 모니터링 대상이 아니다.
 - **OpiNet**: 분당 한도 — token bucket으로 보호.
 
 ## 9. 운영 모니터링

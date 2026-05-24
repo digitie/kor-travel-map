@@ -435,6 +435,33 @@ uvicorn krtour.map_debug_ui.app:app --host 127.0.0.1 --port 8600
 
 TripMate UI에서 사용자에게 노출되지 않음. 운영자 SSH 터널/내부망 전용.
 
+## 14.5 TripMate 사용자 UI 지도 stack (ADR-026)
+
+**TripMate `apps/web` 사용자 가시 지도 UI는 본 라이브러리 디버그 UI와 동일한
+지도 stack을 사용한다** — ADR-026 (2026-05-25).
+
+| 항목 | 값 |
+|------|-----|
+| 지도 엔진 | `maplibre-gl` (BSD-3) |
+| VWorld 컴포넌트 | `maplibre-vworld` v1.0.0 (`digitie/maplibre-vworld-js`, ISC) |
+| 좌표 검증 | `zod` |
+| VWorld API key | `KRADDR_GEO_VWORLD_API_KEY` **공유** (ADR-025 보강) |
+| 마커 / category maki | 본 라이브러리의 `krtour.map.category` Tier 1~4 → maki icon 매핑 reference (공통 npm 패키지 추출 후보, 후속 ADR) |
+
+**Kakao Maps JS SDK는 제거 대상** — SPEC V8 v8_3의 Kakao Maps 섹션은
+ADR-026으로 superseded. 관련 환경변수(`NEXT_PUBLIC_KAKAO_JS_KEY` 등) 일괄
+제거 (TripMate 측 후속 PR).
+
+**작업 분담**:
+- 본 라이브러리: ADR-026 박음 + 공통 maki icon 매핑 reference 제공.
+- TripMate 저장소: `apps/web` 지도 코드 Kakao → maplibre-vworld 교체 PR.
+- SPEC V8 저장소: v8_3 Kakao Maps 섹션에 "superseded by python-krtour-map
+  ADR-026" 표기.
+
+**provider 안정성**: `maplibre-vworld-js`는 본 사용자가 직접 운영하는 저장소.
+문제 발생 시 wrapper 도입(ADR-006 위배) 대신 upstream에 직접 PR로 적극 수정
+(ADR-025 보강 2026-05-25).
+
 ## 15. v1 → v2 마이그레이션 가이드
 
 v1을 import한 TripMate 코드 → v2로 옮길 때:
