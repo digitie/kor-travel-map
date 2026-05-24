@@ -2,6 +2,88 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-25 05:00 (claude)
+
+**작업**: PR#10 — T-012~T-018 진행 + ADR-029 (proposed) + T-101~103 상세
+분석 + 명명 일치화 + 코딩 (`pyproject.toml` 강제 + scripts skeleton).
+
+**컨텍스트**: 사용자 지시 5건 동시 진행:
+1. PR#9 rebase → 다시 PR (완료).
+2. T-101~103 상세 의견을 문서에 반영.
+3. T-012~T-018 진행 + ADR-029 작성 + tasks.md 갱신.
+4. 필요한 코딩 (사용자가 "필요한 코딩도 할 것"으로 명시 허용 — 제한된
+   scope, scaffolding/policy 강제 위주).
+5. `python-krmois-api` → `python-mois-api` 일괄 + 비슷한 명명 일치화.
+6. `digitie/python-knps-api` 모니터링 (외부에서 1시간 내 개발 완료 예정) →
+   반영. 현 시점 repo 상태: empty, size=0. 백그라운드 agent 모니터링 시도
+   했으나 권한 거부 — 본 세션에서 주기 체크 후 후속 PR로 반영 예정.
+
+**결정 / 신규 ADR**:
+- **ADR-029 (proposed)**: `@krtour/map-marker-react` npm 패키지 추출. MIT
+  라이선스 (TripMate proprietary 호환). monorepo `packages/map-marker-react/`.
+  본 라이브러리 PR에서 Python 카테고리/notice 변경과 동시에 TypeScript
+  매핑 변경 → drift 0. 게시는 공개 npm.
+
+**상세 분석 문서화 (T-101~103)**:
+- `docs/performance.md §9.3` (T-101 MV): 도입 장점 (7-way JOIN → single
+  table scan), 조건 (read >> write, REFRESH lag 허용, 디스크 ×2, 정합성
+  게이트 선행), 부작용 (DDL 무거움, stale 혼동), 절차 (시범 → 1주 운영
+  → ADR 신설).
+- `docs/performance.md §9.4` (T-103 streaming): 시나리오 (산불경보/특보
+  초 단위), 라이브러리 위치 (consumer는 TripMate, 본 라이브러리는 함수
+  만). `pyproject.toml`에 `kafka`/`aiokafka`/`confluent_kafka`/`faust`
+  import 차단 계약 추가.
+- `docs/performance.md §9.5` (T-102 pg_prewarm): 장점 (cold-start cliff
+  제거), 조건 (P99 SLO + 재배포 빈도 + shared_buffers fit), 절차
+  (`autoprewarm = on` background + `/health` 표시).
+
+**명명 일치화 (잔존 krmois 정리)**:
+- `docs/forest-feature-etl.md:173` 컨벤션 예시: `python-krmois-api` →
+  `python-mois-api`.
+- `docs/mois-license-feature-etl.md:115` 예시 payload: `krmois_admin_address`
+  → `mois_admin_address`.
+- `docs/journal.md:151` 컨벤션 예시: `krmois/krheritage/krforest` →
+  `mois/krheritage/krforest`.
+- `docs/journal.md:475` 옛 provider 목록: `krmois` → `mois (구 krmois)`.
+- ADR-024 migration 본문 / journal ADR-024 narrative / mois-feature-etl.md
+  v1→v2 마이그레이션 표 등 *역사 기록* 컨텍스트의 krmois 표기는 유지
+  (rename 사건 자체를 기록).
+
+**코딩 (사용자 명시 허용)**:
+- `CHANGELOG.md` 확장 — [Unreleased] §결정 (PR#6~PR#10 시기) + 문서 확장
+  + 명명 일치화 + 코드 변경 모두 inline.
+- `pyproject.toml`:
+  - `[tool.coverage.report]` ADR-032 Sprint 1~5 schedule 주석 inline.
+  - `[[tool.importlinter.contracts]]` `cachetools`/`async_lru`/`aiocache`/
+    `diskcache` 차단 (ADR-030).
+  - `[[tool.importlinter.contracts]]` `kafka`/`aiokafka`/`confluent_kafka`/
+    `faust` 차단 (T-103/ADR-103 후보).
+- `packages/krtour-map-debug-ui/scripts/export_openapi.py` 신설 — ADR-031
+  CLI skeleton. `--check` drift gate. 코드 작성 단계 진입 전에는 module
+  not found 가이드 출력.
+- `packages/map-marker-react/` skeleton 신설 (`package.json` / `README.md`
+  / `vite.config.ts` / `.gitignore`) — ADR-029 placeholder.
+- `docs/sprints/` 신설 — `README.md` (Sprint 1~5 표) + `SPRINT-1.md` 초안
+  (진입 조건 + 산출물 + DoD + Sprint 2 진입 조건).
+
+**문서 갱신**:
+- `docs/tasks.md` — T-012/013/017/018 상태 갱신, T-013 [x], T-101~103 상세
+  내용 inline + 도입 조건/절차, "ADR 번호 가이드" proposed/후보 분류.
+- `docs/resume.md` — "코드 작성 단계 진입 전" + "다음 ADR" 갱신.
+
+**python-knps-api 모니터링 상태**:
+- 현재 (2026-05-25 05:00 시점) `digitie/python-knps-api` repo는 size=0
+  empty.
+- 백그라운드 agent 실행 실패 (Bash/PowerShell/WebFetch 권한 거부).
+- 본 세션에서 주기 체크 (~30분마다) → 콘텐츠 발견 시 후속 PR로 반영.
+  반영 대상: ADR-028 본문 초안, `docs/forest-feature-etl.md §11` 갱신,
+  새 `docs/knps-feature-etl.md` (필요 시).
+
+**다음**: PR#10 commit + push + open. 사용자 review → merge → T-014 PR로
+Sprint 1 진입.
+
+---
+
 ## 2026-05-25 04:00 (claude)
 
 **작업**: ADR-027 (proposed) — forest 카테고리/notice_type 확장 결정. 사용자
@@ -250,7 +332,7 @@ vs 공유 미정" + "provider 라이브러리 stability 모니터링 필요" —
 
 **의사결정 (사용자 위임, 검토 부탁)**:
 - **KNPS provider 옵션 B 권고** — 별도 `python-knps-api` 신설.
-  - 이유: 1기관 1라이브러리 컨벤션 (krmois/krheritage/krforest 등과 동일).
+  - 이유: 1기관 1라이브러리 컨벤션 (mois/krheritage/krforest 등과 동일).
     KNPS는 환경부 산하, 산림청은 농림식품부 — 별도 기관. file dataset(SHP/
     GeoJSON) 처리 모듈 응집.
   - dataset_key prefix: `knps_*` (13개 + 추가 후보).
@@ -574,7 +656,7 @@ v2 기준으로 정리해 옮긴다.
 docs, spec docx)을 `v1` 브랜치로 commit하고 origin/v1로 push.
 
 **변경 파일**: 56 files changed, 2858 insertions(+), 490 deletions(-)
-- providers: visitkorea, krmois, krheritage, opinet, krex, krforest, khoa,
+- providers: visitkorea, mois (구 krmois), krheritage, opinet, krex, krforest, khoa,
   datagokr (standard 5 + extras), notices
 - DB 스키마, RustFS file 메타, 전화번호 보강
 - Debug UI 패키지 (packages/krtour-map-debug-ui)

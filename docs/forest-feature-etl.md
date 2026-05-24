@@ -170,7 +170,7 @@ ConcurrencyConfig: `krforest_api: max_concurrent=1`.
 | 옵션 | 평가 |
 |------|------|
 | **A. `python-krforest-api` 확장** | 산림청·KNPS 모두 산/등산 도메인이라 사용자 인지에 가깝지만, **두 기관 별도(KFS=농림식품부, KNPS=환경부)**라 라이브러리 컨벤션(1기관 1라이브러리) 위반. 비추천. |
-| **B. 별도 `python-knps-api` 신설** | 컨벤션 일관 (`python-krmois-api`, `python-krheritage-api`, `python-khoa-api`, `python-krforest-api`와 동일 패턴). auth/rate limit/exception 독립. KNPS는 file dataset(SHP/GeoJSON) 비중이 큼 → file dataset 처리 모듈 응집. **권고**. |
+| **B. 별도 `python-knps-api` 신설** | 컨벤션 일관 (`python-mois-api`, `python-krheritage-api`, `python-khoa-api`, `python-krforest-api`와 동일 패턴). auth/rate limit/exception 독립. KNPS는 file dataset(SHP/GeoJSON) 비중이 큼 → file dataset 처리 모듈 응집. **권고**. |
 | C. 본 라이브러리 internal client | ADR-006 (wrapper 금지) + 1기관 1라이브러리 컨벤션 위반. 비추천. |
 
 **결정 (사용자 검토 필요)**: 옵션 B — `python-knps-api` 신설.

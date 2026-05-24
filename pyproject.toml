@@ -127,7 +127,15 @@ exclude_lines = [
   "if TYPE_CHECKING:",
   "@overload",
 ]
-fail_under = 0   # 코드 작성 단계에서 단계적으로 상향 (target: core 90+, infra 80+, 전체 80+)
+fail_under = 0   # 코드 작성 단계 진입 전. Sprint 1 진입 시 50%로 상향 (ADR-032).
+# ADR-032 Sprint별 fail_under schedule:
+#   Sprint 1 (scaffolding):  fail_under = 50  (전체 branch)
+#   Sprint 2 (core + 4 provider): 65
+#   Sprint 3 (provider 절반 + infra): 75
+#   Sprint 4 (integrity + edge cases): 80  ← 목표 도달
+#   Sprint 5 (operational entry): 80 유지 + 회귀 방지
+# 단계 상향 PR은 반드시 coverage gap 해소 PR과 묶음 (red main 0회).
+# dto/는 Sprint 2부터 100% branch 항상 강제 (별도 [tool.coverage.report.partial_branches]).
 
 # =============================================================================
 # import-linter (의존 계층 강제) — 코드 작성 단계 시작 시 활성화
@@ -161,4 +169,35 @@ forbidden_modules = [
   "fastapi",
   "uvicorn",
   "starlette",
+]
+
+# ADR-030: 라이브러리 in-memory 캐시 금지. functools.cache 한정 narrow 예외만 허용.
+# 외부 캐시 라이브러리 의존 금지 — invalidation 책임 호출자(TripMate)에 위임.
+# 예외: PlaceCategoryCode 카탈로그 (krtour.map.category), pyproj.Transformer singleton.
+[[tool.importlinter.contracts]]
+name = "main package must not depend on cache libraries"
+type = "forbidden"
+source_modules = [
+  "krtour.map",
+]
+forbidden_modules = [
+  "cachetools",
+  "async_lru",
+  "aiocache",
+  "diskcache",
+]
+
+# ADR-103 (T-103 보류): 본 라이브러리는 Kafka/streaming consumer 의존 금지.
+# streaming 도입 시 consumer는 TripMate apps/etl가 담당. 본 라이브러리는 함수만.
+[[tool.importlinter.contracts]]
+name = "main package must not depend on kafka/streaming libraries"
+type = "forbidden"
+source_modules = [
+  "krtour.map",
+]
+forbidden_modules = [
+  "kafka",
+  "aiokafka",
+  "confluent_kafka",
+  "faust",
 ]

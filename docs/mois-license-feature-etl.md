@@ -112,7 +112,7 @@ service slug → `PlaceDetail.place_kind` + category:
     "selected_coordinate": {
         "lat": 37.50, "lon": 127.02,
         "epsg5174_x": ..., "epsg5174_y": ...,
-        "source": "krmois_admin_address"
+        "source": "mois_admin_address"
     },
     "category_confidence": "high",               # high/medium/low
     "match_level": "legal_dong_exact",           # AddressMatchReport

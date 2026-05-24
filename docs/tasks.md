@@ -4,43 +4,47 @@
 
 ## 진행 중
 
-- (없음 — PR#6 검토 대기)
+- (없음 — PR#9 + PR#10 검토 대기)
 
 ## 다음 (우선순위 순)
 
-- [ ] T-012 — ADR-020+ 후속 결정 작성 (일부 완료 → proposed)
-  - **ADR-030 (proposed)** — 라이브러리 in-memory 캐시 금지 (`functools.cache`
-    한정 예외) + `import-linter` 계약. 사용자 검토 → accepted 전환.
-  - **ADR-031 (proposed)** — 디버그 패키지 OpenAPI export 정책 (첫 라우터부터
-    활성화). 사용자 검토 → accepted 전환.
-  - **ADR-032 (proposed, 시기 의존)** — Coverage 단계적 상향 일정 (Sprint 1
-    → Sprint 5). T-014에 묶어 Sprint 일정 확정 후 accepted 전환.
+- [ ] T-012 — ADR-020+ 후속 결정 작성 (PR#8/#10에서 proposed → accepted 대기)
+  - **ADR-030 (proposed, PR#8 merged)** — 라이브러리 in-memory 캐시 금지
+    (`functools.cache` 한정 예외) + `import-linter` 계약. 본 PR#10에서
+    `pyproject.toml`에 forbidden 계약 박힘 → 사용자 검토 후 accepted 전환.
+  - **ADR-031 (proposed, PR#8 merged)** — 디버그 패키지 OpenAPI export
+    정책 (첫 라우터부터 활성화). 본 PR#10에서 `scripts/export_openapi.py`
+    skeleton 박힘 → 사용자 검토 후 accepted 전환.
+  - **ADR-032 (proposed, 시기 의존)** — Coverage 단계적 상향 일정. 본 PR#10
+    에서 `pyproject.toml` `fail_under=0` + 주석으로 Sprint 1~5 schedule 박음.
+    T-014 PR에서 Sprint 1 진입 시 `fail_under=50`으로 상향 + accepted 전환.
   - **ADR-033 (proposed, 시기 의존)** — `feature_consistency_reports` 단계적
-    도입 (Phase 1 = Sprint 3~4 F1~F3, Phase 2 = Sprint 5 F4~F8 + 게이트).
-    T-014에 묶어 accepted 전환.
-- [ ] T-013 — `CHANGELOG.md` 초기 엔트리 정리 (현 v2 design 완료 시점)
-- [ ] T-014 — 코드 작성 단계 진입 검토
+    도입. T-014 + Sprint 3 진입 PR에서 Phase 1 (F1~F3) accepted 전환.
+- [x] T-013 — `CHANGELOG.md` 초기 엔트리 정리 (완료: 2026-05-25, 본 PR#10).
+      ADR-024~033 + T-101~103 + 명명 일치화 + 코드 변경 모두 inline.
+- [ ] T-014 — 코드 작성 단계 진입 검토 (사용자 승인 + Sprint 1 PR)
   - 모든 문서 검토 완료
   - 사용자 승인
-  - Sprint 계획 (`SPRINT-1.md` 또는 `docs/sprints/`)
-- [ ] T-017 — **공통 maki marker / category 매핑 npm 패키지 추출** (ADR-026
-      후속, ADR-029 후보)
-  - 본 라이브러리 디버그 UI frontend + TripMate `apps/web` 사용자 UI 공통화
-  - `@krtour/map-marker-react` (가칭) — `krtour.map.category` Tier 1~4 →
-    maki icon(55종) dispatch + `MakiMarker` 공통 컴포넌트
-  - 의존: `maplibre-vworld`, `maplibre-gl`
-  - 라이선스: GPL-3.0-or-later 또는 MIT (TripMate proprietary와 호환되도록
-    별도 ADR로 결정)
-- [ ] T-018 — **`python-knps-api` provider 등록** (ADR-027 proposed →
-      accepted 전환 + ADR-028 provider 등록 후보)
-  - **ADR-027 (proposed)** — forest 카테고리/notice_type 확장 결정 완료:
-    `LODGING_MOUNTAIN_SHELTER` Tier 2 신설 + `area_kind=hazard_zone` +
-    generic `notice_type=access_restriction`/`fire_alert`. T-018 시점에
-    accepted 전환 + 코드 적용 (PlaceCategory enum + NOTICE_TYPES + AreaDetail
-    Literal 확장).
-  - `digitie/python-knps-api` 저장소 신설 — `python-mois-api` 패턴 미러
-  - `krtour.map.providers.knps` 모듈 신설
-  - `docs/forest-feature-etl.md` §11 KNPS 통합 실행
+  - **`docs/sprints/SPRINT-1.md` 작성됨 (본 PR#10)** — 진입 조건 + 산출물 +
+    DoD + Sprint 2 진입 조건까지.
+  - Sprint 1 진입 시 ADR-032/033을 accepted 전환 (시기 의존)
+- [ ] T-017 — **공통 maki marker / category 매핑 npm 패키지 추출** (ADR-029
+      proposed, 본 PR#10)
+  - **ADR-029 (proposed, 본 PR#10)** — `@krtour/map-marker-react` (MIT
+    license, monorepo `packages/map-marker-react/`).
+  - 본 PR#10에서 `packages/map-marker-react/` skeleton (`package.json` /
+    `README.md` / `vite.config.ts` / `.gitignore`) 박힘.
+  - 실제 코드 (`src/categoryMaki.ts`, `<MakiMarker>` 등)는 Sprint 2 PR.
+  - drift gate: `tests/unit/test_category_maki_consistency.py` (Python ↔ TS
+    1:1 검증, Sprint 2 코드 작성).
+- [ ] T-018 — **`python-knps-api` provider 등록** (ADR-027 + ADR-028)
+  - ADR-027 (proposed, PR#9) — forest 카테고리/notice_type 확장 결정 박힘.
+    T-018 시점에 accepted 전환 + 코드 적용 (`PLACE_CATEGORY_DEFINITIONS`
+    144건 + `NOTICE_TYPES` 14건 + `AreaDetail.area_kind` Literal).
+  - **외부에서 개발 중**: `digitie/python-knps-api` 저장소가
+    `docs/forest-feature-etl.md` §11을 참고해서 개발됨 (`python-mois-api` 패턴
+    미러). 본 저장소는 해당 repo 모니터링 후 결과를 반영 (ADR-028 + `docs/
+    knps-feature-etl.md` 신설 + `krtour.map.providers.knps` 모듈).
 - [ ] T-019 — **TripMate 측 후속 작업 추적** (ADR-026 후속, 본 저장소 외)
   - TripMate `apps/web` Kakao Maps → maplibre-vworld 교체 PR (TripMate 저장소)
   - SPEC V8 v8_3 Kakao Maps 섹션에 "superseded by python-krtour-map ADR-026"
@@ -49,9 +53,29 @@
 
 ## 보류 (v2 1차 범위 외)
 
-- [ ] T-101 — Materialized View 도입 검토 (feature + detail flatten)
-- [ ] T-102 — pg_prewarm 부팅 후 warm-up
-- [ ] T-103 — 별도 streaming ETL (Kafka/Redpanda) 대응
+- [ ] T-101 — **Materialized View 도입 검토** (feature + 7 detail flatten)
+  - 상세 분석: `docs/performance.md §9.3` (도입 조건, 부작용, ROI).
+  - 도입 조건: read >> write 비율 실측 (Sprint 5 이후 24h 로그) + Phase 2
+    정합성 게이트(ADR-033)가 이미 작동 + 디스크 ×2 수용.
+  - 도입 절차: 하나의 hot path 시범 (예: `mv_features_place_with_detail`) →
+    1주 운영 + EXPLAIN diff → 확장 판단 → ADR 신설.
+- [ ] T-102 — **pg_prewarm 부팅 후 warm-up**
+  - 상세 분석: `docs/performance.md §9.5` (장점, 조건, 부작용, ROI).
+  - 도입 조건: 명시적 P99 SLO + 재배포 빈도 높음 + `shared_buffers`가 핫
+    데이터 fit (Odroid 기본 512MB는 일부만 가능).
+  - 도입 절차: `CREATE EXTENSION pg_prewarm SCHEMA x_extension;` (ADR-008)
+    + `autoprewarm = on` background 모드 + `/health` `prewarm_completed:bool`
+    노출.
+- [ ] T-103 — **streaming ETL (Kafka/Redpanda) 대응** — 본 라이브러리는
+      consumer 미보유 (ADR-003)
+  - 상세 분석: `docs/performance.md §9.4` (시나리오, 비용, 라이브러리 위치).
+  - consumer는 TripMate `apps/etl`이 담당. 본 라이브러리는 받은 message →
+    DTO 변환 → `load_feature_bundles()` 호출의 *함수만* 제공.
+  - 본 PR#10에서 `pyproject.toml` `import-linter` forbidden 계약에
+    `kafka`/`aiokafka`/`confluent_kafka`/`faust` 추가 → 본 라이브러리 의존
+    차단.
+  - 도입 조건: 특정 provider가 진짜 초 단위 latency를 요구하는 증거.
+    추측만으로 도입 금지.
 
 ## Sprint 5 운영 진입 직전 (kraddr-geo 패턴 미러)
 
@@ -130,16 +154,19 @@
 
 ## 우선순위 가이드
 
-- **즉시** — PR#6 검토 + merge
-- **다음** — T-012 (ADR-020+ 후속 결정) 또는 T-014 (코드 작성 단계 진입 검토,
-  사용자 승인 필요)
-- **장기** — Sprint 5 (T-200~T-204), provider 확장 (T-017, T-018)
+- **즉시** — PR#9 (ADR-027) + PR#10 (T-012~T-017 진행 + ADR-029 + 코딩) 검토
+  + merge
+- **다음** — T-014 (코드 작성 단계 진입 검토, 사용자 승인 필요) → Sprint 1
+  진입 PR (ADR-032/033 accepted 전환 + scaffolding)
+- **백그라운드** — T-018 (`python-knps-api` 모니터링 후 본 라이브러리 반영)
+- **장기** — Sprint 5 (T-200~T-204), 보류 (T-101~T-103, ADR 신설과 함께)
 
 ## ADR 번호 가이드 (현재)
 
 - **accepted**: ADR-001 ~ ADR-026
-- **proposed (사용자 검토)**: ADR-027 (forest 카테고리/notice_type 확장) /
-  ADR-030 (캐시 금지) / ADR-031 (OpenAPI export) / ADR-032 (Coverage 일정,
-  시기 의존) / ADR-033 (`feature_consistency_reports`, 시기 의존)
-- **다음 후보**: ADR-028 (`python-knps-api` provider 등록) / ADR-029 (공통
-  maki npm 패키지) / ADR-034+ (신규 provider 추가 절차 표준)
+- **proposed (사용자 검토)**: ADR-027 (forest 카테고리/notice_type 확장, PR#9
+  merged) / ADR-029 (공통 maki npm 패키지, **본 PR#10**) / ADR-030 (캐시
+  금지) / ADR-031 (OpenAPI export) / ADR-032 (Coverage 일정, 시기 의존) /
+  ADR-033 (`feature_consistency_reports`, 시기 의존)
+- **다음 후보**: ADR-028 (`python-knps-api` provider 등록 — PR#12에서 proposed
+  로 박힘) / ADR-034+ (신규 provider 추가 절차 표준)
