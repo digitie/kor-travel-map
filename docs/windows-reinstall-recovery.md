@@ -17,7 +17,7 @@
 ## 2. Git에 안 들어가는 자료 (백업 대상)
 
 - 원천 데이터 (NTFS `data/`):
-  - KRMOIS localdata zip / SQLite
+  - MOIS localdata zip / SQLite
   - 국가유산청 GIS SHP/SHX/DBF
   - 산림청 SHP
   - 표준데이터 캐시

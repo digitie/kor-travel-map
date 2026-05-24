@@ -35,7 +35,7 @@ facade를 만들지 않는다.
 python-kraddr-base
 python-kraddr-geo
 python-visitkorea-api
-python-krmois-api
+python-mois-api
 python-opinet-api
 python-krex-api
 python-kma-api
@@ -66,7 +66,10 @@ system
 |------------|----------|------|
 | `visitkorea_festival_events` | python-visitkorea-api | 축제/행사 검색 |
 | `visitkorea_tourist_attractions` | python-visitkorea-api | 관광지 |
-| `krmois_license_features` | python-krmois-api | 인허가 영업중 (place 승격) |
+| `mois_license_features_bulk` | python-mois-api | 인허가 영업중 snapshot (place 승격) |
+| `mois_license_features_history` | python-mois-api | 이력조회 기반 incremental |
+| `mois_license_features_closed` | python-mois-api | 폐업/취소 처리 |
+| `mois_license_detail` | python-mois-api | on-demand detail (캐시만) |
 | `opinet_fuel_station_details` | python-opinet-api | 주유소 detail + 가격 |
 | `krex_rest_areas` | python-krex-api | 고속도로 휴게소 |
 | `krex_rest_area_prices` | python-krex-api | 휴게소 유가 시계열 |
@@ -101,7 +104,7 @@ system
 | provider | FeatureKind | source_role | 갱신 주기 | 비고 |
 |----------|-------------|-------------|----------|------|
 | python-visitkorea-api | event, place | primary | 일 1회 | 축제는 좌표 nullable 허용 |
-| python-krmois-api | place | primary | 주 1회 (full update) | 영업중만 승격, 제외 업종 룰 |
+| python-mois-api | place | primary | 주 1회 (full update) + 일 1회 incremental + on-demand | 영업중 + PROMOTED_SERVICE_SLUGS (42종) 승격, EXCLUDED 제외 — 자세히는 `docs/mois-feature-etl.md` |
 | python-opinet-api | place + price | primary | hours (가격), 일 (상세) | PriceValue 시계열 |
 | python-krex-api | place + price + weather + notice | primary | 시간/분 단위 | 휴게소 + 교통 공지 |
 | python-kma-api | weather | weather_context | 분/시간 | nowcast/short/mid + 특보 |
@@ -112,7 +115,7 @@ system
 | python-krheritage-api | place, area, event | primary | 주 (place/area), 일 (event) | media → RustFS |
 | python-kasi-api | (calendar) | (system) | 주 1회 | 공휴일/달력 (TripMate utility) |
 | data.go.kr-standard (내부 client) | place, route, event | primary | 표준데이터별 | 5종 dataset bounded |
-| python-mcst-api | place | enrichment | 일 | 독립서점/북카페/도서관 — KRMOIS에 enrichment |
+| python-mcst-api | place | enrichment | 일 | 독립서점/북카페/도서관 — MOIS에 enrichment |
 | kakao-local-api | place | enrichment | on-demand | 전화번호 보강 |
 | naver-search-api | place | enrichment | on-demand | 전화번호 보강 |
 | google-places-api-new | place | enrichment | on-demand | 전화번호 보강 (Text Search New) |

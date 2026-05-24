@@ -94,7 +94,7 @@ uvicorn krtour.map_debug_ui.app:app --host 127.0.0.1 --port 8600
 | HTTP client | httpx + tenacity |
 | 마이그레이션 | Alembic |
 | 주소/좌표 | `python-kraddr-base`, `python-kraddr-geo` |
-| Provider client | `python-{visitkorea,krmois,opinet,krex,kma,khoa,airkorea,krforest,krheritage,kasi,datagokr,mcst,krairport}-api` |
+| Provider client | `python-{visitkorea,mois,opinet,krex,kma,khoa,airkorea,krforest,krheritage,kasi,datagokr,mcst,krairport}-api` |
 | 객체 저장소 | S3 호환 (RustFS 우선) |
 | Orchestration | Dagster (TripMate가 wiring; 라이브러리는 collect/load 순수 함수만 제공) |
 | Lint/Type | ruff, mypy --strict, import-linter |
@@ -193,7 +193,8 @@ lint-imports
 - [`docs/feature-db-initialization.md`](docs/feature-db-initialization.md) — DB 부트스트랩
 - [`docs/tripmate-integration.md`](docs/tripmate-integration.md) — TripMate가 본 라이브러리 사용하는 법
 - [`docs/event-feature-etl.md`](docs/event-feature-etl.md) — VisitKorea 축제 ETL
-- [`docs/krmois-license-feature-etl.md`](docs/krmois-license-feature-etl.md) — KRMOIS 인허가 ETL
+- [`docs/mois-feature-etl.md`](docs/mois-feature-etl.md) — `python-mois-api` 활용 feature 적재 full lifecycle (Step A/B/C/D)
+- [`docs/mois-license-feature-etl.md`](docs/mois-license-feature-etl.md) — MOIS 인허가 → place 승격 (Step B 좁은 가이드)
 - [`docs/opinet-place-price-etl.md`](docs/opinet-place-price-etl.md) — OpiNet 주유소+유가 ETL
 - [`docs/khoa-beach-info-etl.md`](docs/khoa-beach-info-etl.md) — KHOA 해수욕장 ETL
 - [`docs/krheritage-feature-etl.md`](docs/krheritage-feature-etl.md) — 국가유산청 ETL
@@ -222,5 +223,5 @@ lint-imports
 GPL-3.0-or-later. 자세한 내용은 [`LICENSE`](LICENSE).
 
 저장소에 포함된 소스 코드/문서에만 적용된다. provider 원천 데이터·API 응답은
-각 기관 이용약관·저작권을 따른다(KMA, VisitKorea, KRMOIS, OpiNet, KREX, KHOA,
+각 기관 이용약관·저작권을 따른다(KMA, VisitKorea, MOIS, OpiNet, KREX, KHOA,
 국가유산청, 산림청, AirKorea 등).

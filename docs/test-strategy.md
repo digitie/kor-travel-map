@@ -336,7 +336,7 @@ tests/fixtures/
     festival_full_scan_seoul_2026.json
     festival_full_scan_empty_response.json
     festival_full_scan_missing_image.json
-  krmois/
+  mois/
     license_promoted_restaurant.json
     license_excluded_billiards.json
     license_closed.json
@@ -430,8 +430,8 @@ def mask_sensitive(obj):
 | 엣지 — UTF-8 | 특수문자, 한글-한자 혼합, 이모지 |
 | 실패 — 잘못된 payload | 필수 필드 누락 → ValidationError |
 | 실패 — schema drift | 새 필드 발견 → payload에 저장 후 raw_payload_hash 변경 |
-| 폐업/취소 | KRMOIS: 영업중 X |
-| 제외 업종 | KRMOIS: 미용실, PC방 등 |
+| 폐업/취소 | MOIS: 영업중 X |
+| 제외 업종 | MOIS: 미용실, PC방 등 |
 
 ### 7.1 검증 차원
 

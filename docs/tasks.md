@@ -56,6 +56,8 @@
     AGENTS, SKILL, CLAUDE, README, pyproject(`[api]` 제거 + forbidden 계약 추가),
     .env.example, test-strategy 갱신
   - `packages/krtour-map-debug-ui/` pyproject + README skeleton
+- [x] T-016 — `python-mois-api` 활용 feature 적재 4단계 lifecycle docs
+      (완료: 2026-05-24, PR#3) + ADR-024 canonical name 정정 + 일괄 krmois→mois rename
 - [x] T-002 ~ T-011 — v1 docs를 v2 기준으로 일괄 이전 (완료: 2026-05-24, PR#2)
   - 14개 신규 docs (weather/files-rustfs/opening-hours/kraddr-base-types/
     address-geocoding/dagster-boundary/postgres-schema/debug-fixture-workflow/

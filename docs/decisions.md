@@ -592,6 +592,130 @@
   - `python-kraddr-base`에 대한 category 폐기/유지 결정은 그쪽 저장소 ADR로
     분리.
 
+## ADR-024: canonical provider name 정정 — `python-krmois-api` → `python-mois-api`
+
+- **상태**: accepted (ADR-022의 식별자 표 및 provider-contract.md의 canonical name
+  세부 정정. ADR-006/ADR-022의 큰 결정은 그대로 유지)
+- **날짜**: 2026-05-24
+- **결정자**: Claude (사용자 위임)
+- **컨텍스트**: v1 산출물을 바탕으로 v2 docs를 작성하면서 행정안전부(MOIS)
+  지방행정 인허가 OpenAPI 라이브러리를 `python-krmois-api` (`import krmois`)로
+  표기했다. 실제 라이브러리 확인 결과:
+  - PyPI distribution 이름: `python-mois-api`
+  - Python import 이름: `mois`
+  - GitHub: `digitie/python-mois-api`
+  - pyproject.toml `project.name`: `python-mois-api`
+  - README 명시: "설치 패키지 이름은 `python-mois-api`, import 패키지 이름은
+    `mois`입니다"
+  
+  `krmois`는 본 라이브러리(v1) 내부에서만 쓰던 alias였고 실제 라이브러리에는
+  존재하지 않음.
+
+- **결정**:
+  - canonical provider name: **`python-mois-api`** (변경)
+  - Python import: `from mois import MoisClient` (변경)
+  - `CANONICAL_PROVIDER_NAMES`에 `python-mois-api` 등록
+  - `LEGACY_PROVIDER_ALIASES`에 다음 추가 (호환):
+    - `"krmois"` → `"python-mois-api"`
+    - `"mois"` → `"python-mois-api"`
+    - `"pykrmois"` → `"python-mois-api"`
+    - `"python-krmois-api"` → `"python-mois-api"` (이미 작성된 docs 호환)
+  - 본 라이브러리에서 import path: `krtour.map.providers.mois` (ADR-022 namespace)
+  - loader 모듈: `krtour.map.mois`
+  - dataset_key prefix: `mois_*` (예: `mois_license_features`,
+    `mois_license_features_bulk`, `mois_license_features_history`)
+  - source_entity_type: `license_place` (변경 없음)
+
+- **근거**:
+  - 외부 라이브러리의 실제 이름과 일치 → 사용자/에이전트 혼동 방지
+  - PyPI distribution 이름을 canonical로 사용하는 v2 표준(ADR-022)과 정합
+  - `LEGACY_PROVIDER_ALIASES`로 v1 호환 유지 — 갑작스러운 BREAKING 회피
+
+- **결과 (긍정)**:
+  - import path와 PyPI 이름이 일치
+  - 신규 에이전트가 `python-mois-api` GitHub repo를 바로 찾을 수 있음
+  - alias로 점진 마이그레이션 가능
+
+- **결과 (부정)**:
+  - 기존 v2 docs (`docs/krmois-license-feature-etl.md`, `docs/provider-contract.md`,
+    이전 ADR text 등)에 `python-krmois-api` 표기 남아 있음 → 본 ADR PR에서 일괄
+    rename.
+  - `docs/krmois-license-feature-etl.md` 파일명도 `docs/mois-license-feature-etl.md`로
+    변경 또는 alias 유지 결정 필요 (본 ADR에서는 **파일명도 변경** — git mv).
+
+- **후속**:
+  - `docs/provider-contract.md` §2 (canonical names) + §3 (dataset_key) + §4
+    (카탈로그) 갱신
+  - `docs/krmois-license-feature-etl.md` → `docs/mois-license-feature-etl.md`
+    (git mv) + 내용 정정
+  - 새 `docs/mois-feature-etl.md`로 full lifecycle 통합 또는 license 전용 +
+    full lifecycle 두 docs 유지 — 본 PR에서 후자 채택 (`mois-license-feature-etl.md`
+    유지 + `mois-feature-etl.md` 신규 = 상위 개요 + 4단계 lifecycle).
+  - 모든 신규/기존 docs의 `krmois.*` import 예시 → `mois.*`로 정정
+  - PR description에 변경 요약
+
+---
+
+- **상태**: accepted
+- **날짜**: 2026-05-24
+- **결정자**: 사용자
+- **컨텍스트**: v1까지는 `python-kraddr-base`의 `kraddr.base.categories`
+  (`PlaceCategory`, `PlaceCategoryCode`, `get_category`, `iter_categories`,
+  `mapbox_maki_icon_for_category` 등 ~2,072 줄)를 의존성으로 import해 사용했다.
+  사용자가 본 category 코드/문서를 `python-krtour-map`으로 이전하라고 지시.
+  근거:
+  - category 데이터(141 enum + maki icon 매핑)는 TripMate 지도 도메인에 직접
+    종속 — `python-krtour-map`이 1차 소비자.
+  - 다른 라이브러리(`python-kraddr-geo` 등)는 category에 의존하지 않음 — 분리
+    시 영향 없음.
+  - kraddr-base는 주소/좌표/CRS 핵심에 집중되는 게 자연스럽다.
+- **결정**:
+  - `kraddr.base.categories` 모듈 전체를 본 저장소로 이전 → `krtour.map.category`
+    (top-level subpackage, 다른 `dto`/`core`/`infra`와 sibling).
+  - 공개 식별자 (전부 그대로 유지):
+    - `PlaceCategory`, `PlaceCategoryCode`, `PlaceCategoryTier1Code`
+    - `PLACE_CATEGORY_DEFINITIONS`, `PLACE_CATEGORY_BY_CODE`,
+      `PLACE_CATEGORY_CODES`, `PLACE_CATEGORY_TIER1_NAMES`,
+      `PLACE_CATEGORY_TIER2_NAMES_BY_TIER1`,
+      `PLACE_CATEGORY_MAPBOX_MAKI_ICONS`, `PLACE_CATEGORY_MAPBOX_MAKI_ICON_VALUES`
+    - `get_category`, `is_known_category_code`, `iter_categories`,
+      `category_path`, `category_label`,
+      `mapbox_maki_icon_for_category`, `mapbox_maki_icon_or_none`,
+      `format_category_tree`, `print_category_tree`
+  - `dto/feature.py`의 `Feature.category` 검증·정규화는 `krtour.map.category`를
+    import해서 사용.
+  - 의존 계층(`import-linter`)에 `krtour.map.category`를 `dto`보다 낮은 계층
+    으로 추가 (`category → dto → core → infra → providers → client → cli`).
+  - `python-kraddr-base`는 `Address`, `PlaceCoordinate`, `AddressRegion`,
+    `Wgs84Point`, CRS 상수 등 **주소/좌표/CRS만** 제공 (그쪽에서 category 모듈은
+    별도 deprecation cycle을 두든 그대로 두든 그쪽 결정 — 본 저장소는 자체
+    구현).
+  - 라이선스: kraddr-base와 본 저장소 모두 GPL-3.0-or-later → 호환. 이전 시
+    파일 상단에 derivation 주석 + LICENSE에 origin 표기.
+  - 단위 테스트(141 seed 검증)도 함께 이전 (`tests/unit/test_category.py`).
+- **근거**:
+  - 단일 소비자 패턴 — 코드/데이터를 사용자 위치에 두는 게 응집도 높음.
+  - kraddr-base의 책임 축소 (주소/좌표만).
+  - 본 라이브러리의 의존 그래프에서 외부 dep 1개 제거 (kraddr-base는 여전히
+    필요하지만 category 모듈은 자체 보유).
+- **결과 (긍정)**:
+  - category 변경이 본 저장소 PR 단위로 통제.
+  - 추가 dep 제거 (kraddr-base의 category-only path 끊김).
+- **결과 (부정)**:
+  - 코드 중복(전환 기간) — kraddr-base가 이전 즉시 본 모듈을 폐기하지 않으면
+    잠시 두 copy 존재. 본 저장소는 자체 copy를 정본으로 본다.
+  - kraddr-base release 변경 시 본 저장소도 동기 release 검토.
+- **후속**:
+  - 실제 코드 이전은 **코드 작성 단계 진입 시** 수행 (현 단계는 docs/계약만).
+    별도 PR로 `krtour.map.category` 모듈 + 테스트 추가.
+  - `docs/category.md` 신설 — 모듈 사양 + 라이선스/derivation 명기.
+  - `docs/feature-model.md`, `docs/provider-contract.md`의 category 참조를
+    `krtour.map.category`로 갱신.
+  - `pyproject.toml`의 `dependencies`에서 kraddr-base는 유지 (주소/좌표 사용
+    중) — 단, category submodule은 본 저장소가 정본.
+  - `python-kraddr-base`에 대한 category 폐기/유지 결정은 그쪽 저장소 ADR로
+    분리.
+
 ---
 
 > 새 ADR을 추가할 때는 위 포맷을 따른다:

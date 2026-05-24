@@ -94,10 +94,10 @@ async def run_khoa_beach_full_scan(client, async_session, rustfs_store, reverse_
 전국 시도 (`SIDO_NM` 17종)를 순회하며 각 시도별 page 끝까지. 페이지당
 기본 `numOfRows` 1000.
 
-## 8. KRMOIS 충돌 정책
+## 8. MOIS 충돌 정책
 
-KRMOIS 인허가에 같은 위치 / 명칭 해수욕장이 있는 경우:
-- KRMOIS: 영업/시설 정보 우선
+MOIS 인허가에 같은 위치 / 명칭 해수욕장이 있는 경우:
+- MOIS: 영업/시설 정보 우선
 - KHOA: 공식 위치/특성/이미지 우선
 - 두 feature를 `sibling_group_id`로 묶고 dedup_review_queue에 후보로.
 

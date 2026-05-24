@@ -64,7 +64,7 @@ helper는 내부적으로 `AsyncAddressClient`를 lazy 생성. caller는 dispose
 | `sggCd` (5자리), 시군구 코드 | 시군구 레벨 법정동 표현 `1111000000` 형태. match_level=`sigungu_code_only` |
 | VisitKorea `areaCode`/`sigunguCode` | provider 코드 — `raw_data`/`payload`에만 보존. 법정동코드로 저장 X. 좌표 reverse geocoding으로 확정 |
 | OpiNet `sigun_code` | 동일 — `raw_data`/`payload`에만. 좌표 reverse geocoding으로 확정 |
-| KRMOIS 관할기관 코드 | `payload`에만 |
+| MOIS 관할기관 코드 | `payload`에만 |
 
 **철칙**: 주소 문자열만으로 `legal_dong_code` 추정 금지. reverse geocoder 없이는
 `null`로 둔다.
@@ -184,7 +184,7 @@ await load_feature_rows(
 | provider | 좌표 출처 | reverse geocoder 권장 |
 |----------|---------|---------------------|
 | VisitKorea | mapx/mapy (WGS84) | 권장 — areaCode가 표준 코드 아님 |
-| KRMOIS | EPSG:5174 → WGS84 변환 | **필수** — sigun_code가 관할기관 코드 |
+| MOIS | EPSG:5174 → WGS84 변환 | **필수** — sigun_code가 관할기관 코드 |
 | OpiNet | KATEC EPSG:5181 → WGS84 변환 | **필수** — sigun_code가 OpiNet 코드 |
 | KHOA beach | lat/lon (WGS84) | 권장 — sidoNm/gugunNm 한글 |
 | krheritage | longitude/latitude (WGS84, GIS에서) | 권장 |
@@ -274,7 +274,7 @@ API 키/한도/재시도는 `python-kraddr-geo` 책임.
 
 - [ ] `python-kraddr-geo` git sha 핀
 - [ ] `KRTOUR_MAP_KRADDR_GEO_PG_DSN` 또는 SQLite path 환경변수
-- [ ] reverse geocoder가 KRMOIS/OpiNet ETL에 주입되어 있는가
+- [ ] reverse geocoder가 MOIS/OpiNet ETL에 주입되어 있는가
 - [ ] `legal_dong_conflict` / `sigungu_code_only` / `not_geocoded` 비율
       모니터링 (Grafana panel)
 - [ ] VWorld API 키 회전 시 `python-kraddr-geo` store 재설정

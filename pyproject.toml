@@ -56,7 +56,7 @@ providers = [
   # "python-kraddr-geo  @ git+https://github.com/digitie/python-kraddr-geo.git@<sha>",
   # "python-visitkorea-api @ git+...",
   # "python-kasi-api     @ git+...",
-  # "python-krmois-api   @ git+...",
+  # "python-mois-api     @ git+...",
   # "python-opinet-api   @ git+...",
   # "python-krex-api     @ git+...",
   # "python-kma-api      @ git+...",

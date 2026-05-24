@@ -44,7 +44,7 @@
 │ + PostGIS 3.5  │    │ (RustFS / MinIO)   │    │ provider clients │
 │ + pg_trgm      │    │                    │    │                  │
 │ + pgcrypto     │    │                    │    │ KMA, VisitKorea, │
-│                │    │                    │    │ KRMOIS, OpiNet,  │
+│                │    │                    │    │ MOIS, OpiNet,    │
 │ schema:        │    │                    │    │ KREX, KHOA,      │
 │ - feature      │    │                    │    │ 국가유산, 산림청, │
 │ - provider_sync│    │                    │    │ AirKorea, KASI,  │
