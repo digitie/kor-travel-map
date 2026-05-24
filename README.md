@@ -5,10 +5,12 @@
 **TripMate 하부 라이브러리**다. PostgreSQL + PostGIS + SQLAlchemy 2 async +
 GeoAlchemy2 + GeoPandas 위에서 동작한다.
 
-> **현재 상태 (v2 설계 단계)**: master/main 브랜치는 v2 사양으로 새로 시작했다.
-> 이전(v1) 구현은 `v1` 브랜치에 보존되어 있다. 본 단계는 **문서/설계 전용**이며
-> 별도 요청 전에는 코드를 작성하지 않는다. v1 산출물 요약은
-> `python-krtour-map-spec.docx`(저장소 루트, 약 80쪽) 참고.
+> **현재 상태 (v2 설계 단계 — Sprint 1 진입 직전)**: master/main 브랜치는
+> v2 사양으로 새로 시작했다. 이전(v1) 구현은 `v1` 브랜치에 보존되어 있다.
+> 본 단계는 **문서/설계 전용**이며 별도 요청 전에는 코드를 작성하지 않는다.
+> ADR 현황: accepted 001~026, proposed 027~034 (사용자 review 후 Sprint 1
+> 진입 PR에 일괄 accepted 전환 예정). Sprint 계획은 `docs/sprints/` 참조.
+> v1 산출물 요약은 `python-krtour-map-spec.docx`(저장소 루트, 약 80쪽) 참고.
 
 ## 정체성
 
@@ -80,6 +82,11 @@ uv pip install -e packages/krtour-map-debug-ui
 
 # (디버그) REST API 기동 — 인증 없음, localhost 전용
 uvicorn krtour.map_debug_ui.app:app --host 127.0.0.1 --port 8600
+
+# (옵션) 디버그 UI frontend (Next.js + maplibre-vworld, ADR-025 2차 보강)
+cd packages/krtour-map-debug-ui/frontend
+cp .env.example .env.local  # NEXT_PUBLIC_VWORLD_API_KEY 설정
+npm ci && npm run dev        # http://127.0.0.1:8610
 ```
 
 ## 의존 스택 (v2 확정)
@@ -176,8 +183,15 @@ lint-imports
 - [`AGENTS.md`](AGENTS.md) — 에이전트 지시 우선순위, DO NOT 룰, TripMate 경계
 - [`SKILL.md`](SKILL.md) — 작업 매뉴얼 (DO NOT, 자주 묻는 작업, 도메인 어휘)
 - [`CLAUDE.md`](CLAUDE.md) — Claude(Code/Agent SDK)용 1쪽 진입 요약
+- [`CHANGELOG.md`](CHANGELOG.md) — Keep a Changelog 형식 (Unreleased + ADR-024~034)
 - [`docs/architecture.md`](docs/architecture.md) — 의존 방향, 계층, 데이터 흐름
-- [`docs/decisions.md`](docs/decisions.md) — ADR 누적 (ADR-001~)
+- [`docs/decisions.md`](docs/decisions.md) — ADR 누적 (ADR-001~034)
+- [`docs/sprints/README.md`](docs/sprints/README.md) — Sprint 1~5 계획 + ADR-034 9단계 구현 순서
+  - [`docs/sprints/SPRINT-1.md`](docs/sprints/SPRINT-1.md) — 코드 작성 단계 진입 + scaffolding (provider 없음)
+  - [`docs/sprints/SPRINT-2.md`](docs/sprints/SPRINT-2.md) — MOIS-독립 4 provider (축제/날씨/유가/휴게소) + 디버그 UI 첫 라우터
+  - [`docs/sprints/SPRINT-3.md`](docs/sprints/SPRINT-3.md) — KNPS/krheritage + 정합성 Phase 1 (F1~F3)
+  - [`docs/sprints/SPRINT-4.md`](docs/sprints/SPRINT-4.md) — MOIS bulk 4단계 + dedup queue + Coverage 80% 도달
+  - [`docs/sprints/SPRINT-5.md`](docs/sprints/SPRINT-5.md) — MOIS-sibling (휴양림/박물관) + Phase 2 + 운영 진입
 - [`docs/data-model.md`](docs/data-model.md) — Postgres 테이블·인덱스 reference
 - [`docs/backend-package.md`](docs/backend-package.md) — 메인 라이브러리 사양
 - [`docs/debug-ui-package.md`](docs/debug-ui-package.md) — `krtour-map-debug-ui` 별도 패키지 사양 (ADR-020)
@@ -198,7 +212,8 @@ lint-imports
 - [`docs/opinet-place-price-etl.md`](docs/opinet-place-price-etl.md) — OpiNet 주유소+유가 ETL
 - [`docs/khoa-beach-info-etl.md`](docs/khoa-beach-info-etl.md) — KHOA 해수욕장 ETL
 - [`docs/krheritage-feature-etl.md`](docs/krheritage-feature-etl.md) — 국가유산청 ETL
-- [`docs/forest-feature-etl.md`](docs/forest-feature-etl.md) — 산림청 + 국립공원공단(KNPS) ETL
+- [`docs/forest-feature-etl.md`](docs/forest-feature-etl.md) — 산림청 + 국립공원공단(KNPS) 통합 계획 (§11 = KNPS scaffold 반영)
+- [`docs/knps-feature-etl.md`](docs/knps-feature-etl.md) — `python-knps-api` (`digitie/python-knps-api`) feature 적재 계약 (14 dataset, ADR-028)
 - [`docs/krex-rest-area-feature-etl.md`](docs/krex-rest-area-feature-etl.md) — 도로공사 휴게소 ETL
 - [`docs/standard-data-feature-etl.md`](docs/standard-data-feature-etl.md) — data.go.kr 표준데이터 5종 ETL
 - [`docs/notice-feature-etl.md`](docs/notice-feature-etl.md) — 통합 notice ETL (4 provider)

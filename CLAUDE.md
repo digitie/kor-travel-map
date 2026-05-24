@@ -19,8 +19,18 @@ FastAPI 의존이 없다.
 
 ## 2. 현 단계
 
-**v2 설계 단계**. v1은 `v1` 브랜치 보존, main은 orphan으로 새로 시작.
-**별도 요청 전까지 코드 작성 금지**. 본 단계 산출물은 문서/계약/결정뿐이다.
+**v2 설계 단계 (Sprint 1 진입 직전)**. v1은 `v1` 브랜치 보존, main은
+orphan으로 새로 시작. **별도 요청 전까지 코드 작성 금지** — 사용자가 T-014
+(코드 작성 단계 진입) 승인 시 Sprint 1 PR로 해제. 본 단계 산출물은 문서/
+계약/결정 + skeleton placeholder뿐이다.
+
+ADR 현황: **accepted 001~026**, **proposed 027~034** (사용자 review 대기 →
+T-014 Sprint 1 진입 PR에 일괄 accepted 전환).
+
+Sprint 1~5 plan은 `docs/sprints/` 참조. **provider 9단계 구현 순서**
+(ADR-034): 축제 → 날씨 → 유가 → 휴게소 → 국립공원/트래킹 → 국가유산 →
+**MOIS 인허가** → 휴양림/수목원 → 박물관/미술관. MOIS-독립 먼저, dedup 룰
+검증 후 MOIS bulk, 마지막에 MOIS-sibling.
 
 v1 산출물 요약: 저장소 루트 `python-krtour-map-spec.docx` (약 80쪽).
 
@@ -28,10 +38,11 @@ v1 산출물 요약: 저장소 루트 `python-krtour-map-spec.docx` (약 80쪽).
 
 1. `AGENTS.md` — 지시 우선순위, DO NOT 룰
 2. `SKILL.md` — 도메인 어휘, 자주 묻는 작업
-3. `docs/architecture.md` — 의존 방향
-4. `docs/resume.md` — 다음 한 작업
-5. `docs/journal.md` 최신 3건
-6. 관련 ADR (`docs/decisions.md`)
+3. `docs/sprints/README.md` — Sprint 1~5 계획 + ADR-034 9단계 순서
+4. `docs/architecture.md` — 의존 방향
+5. `docs/resume.md` — 다음 한 작업
+6. `docs/journal.md` 최신 3건
+7. 관련 ADR (`docs/decisions.md`)
 
 ## 4. 의존 스택 (v2 확정)
 
@@ -42,8 +53,8 @@ SQLAlchemy 2 async + GeoAlchemy2 + asyncpg + psycopg[binary,pool]>=3.2 / GeoPand
 ## 5. 절대 금지 (가장 중요한 5개)
 
 1. **main에 직접 push 금지** — 모든 변경은 feature branch + PR (ADR-021).
-2. **`from krtour.map import ...` 사용 금지** — 항상 `from krtour.map import ...`
-   (ADR-022, PEP 420 implicit namespace).
+2. **`from krtour_map import ...` (flat) 사용 금지** — 항상 `from krtour.map
+   import ...` (ADR-022, PEP 420 implicit namespace).
 3. provider adapter/wrapper 신규 생성 금지 (public client 직접 사용, ADR-006).
 4. 의존 방향 역행 금지 — `category → dto → core → infra → providers → client → cli`.
    `krtour.map.api` 없음 (ADR-020).

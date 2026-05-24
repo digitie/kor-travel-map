@@ -2,6 +2,64 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-25 09:00 (claude)
+
+**작업**: PR#15 — governance 문서 sweep. CLAUDE.md / AGENTS.md / SKILL.md
+/ docs/agent-guide.md / README.md 갱신: ADR-027~034 + Sprint 1~5 + 9단계
+순서 + 신설 docs 반영. 중대 bug fix 3건 (DO NOT 룰의 self-contradicting
+"from krtour.map import ... 사용 금지 — 항상 from krtour.map import ...").
+
+**컨텍스트**: PR#9~#14 머지 후 신규 ADR 8건 (027~034) + Sprint 2~5 plan 4건
++ knps-feature-etl.md + map-marker-react skeleton + frontend Next.js 전환
+등이 일괄 들어왔는데, governance 문서 (1쪽 진입 reference)는 이를 반영 못함.
+새 에이전트가 진입 시 핵심 정보가 누락. PR#15로 sweep.
+
+**중대 bug fix** (DO NOT 룰의 self-contradiction 3건):
+- `CLAUDE.md §5 #2`: "`from krtour.map import ...` 사용 금지 — 항상
+  `from krtour.map import ...`" → "`from krtour_map import ...` (flat) 사용
+  금지 — 항상 `from krtour.map import ...`".
+- `AGENTS.md §"DO NOT" #18`: 동일 패턴 + "src/krtour/map/ 디렉토리 만들지
+  말 것 — src/krtour/map/" → "src/krtour_map/ 디렉토리 만들지 말 것 —
+  src/krtour/map/".
+- `SKILL.md §4 #20`: 동일 패턴.
+- 원인 추정: PR#1 (ADR-022) 적용 시 rename script가 두 string을 같은
+  치환으로 처리한 사고. 사용자가 ADR-022 본문은 정확히 박혀 있어 인지 안
+  됐던 잔재.
+
+**변경 파일** (5):
+- `CLAUDE.md`:
+  - §2 현 단계 — "Sprint 1 진입 직전" 명기 + ADR accepted/proposed 분류
+    + 9단계 순서 한 줄 inline.
+  - §3 진입 순서 — `docs/sprints/README.md` 추가 (3번째).
+  - §5 #2 — bug fix.
+- `AGENTS.md`:
+  - §"식별자" 표 — ADR accepted/proposed 분류 + Sprint plan + 9단계 순서
+    행 추가.
+  - §"작업 전 반드시 읽는" — sprints/README 추가.
+  - §"테스트 정책" — ADR-032 Sprint 1~5 schedule + dto 100% branch 명기.
+  - §"DO NOT" #18 — bug fix.
+  - §"코드 작성 금지" — Sprint 1 진입 해제 시점 + 현재 허용된 예외 5건
+    (pyproject 강제, export_openapi skeleton, map-marker-react skeleton,
+    frontend Next.js skeleton, sprints/) 명기.
+- `SKILL.md`:
+  - §4 #20 — bug fix.
+  - §8 첫 5분 프로토콜 — sprints/README 추가 (3번째) + ADR 027~034 명기.
+  - §9 코드 작성 금지 — Sprint 1 진입 해제 + 현재 허용된 예외 5건.
+- `docs/agent-guide.md`:
+  - §1 첫 5분 — sprints/README 추가.
+  - §2 결정·기록 → 4종 → **5종** (sprints/SPRINT-N.md 추가).
+  - §3 ADR 작성 규약 — "현재 다음 번호 = ADR-035" 명기.
+- `README.md`:
+  - 상단 상태 — "Sprint 1 진입 직전" + ADR 027~034 proposed 명기.
+  - §"빠른 시작" — Next.js frontend dev 명령 추가 (ADR-025 2차 보강 반영).
+  - §"문서 지도" — `CHANGELOG.md` + `docs/sprints/SPRINT-N.md` 5건 +
+    `docs/knps-feature-etl.md` 추가.
+
+**다음**: PR#15 commit + push + open. 사용자 review 후 머지 → 다음 단계는
+T-014 (Sprint 1 진입) 사용자 승인 대기.
+
+---
+
 ## 2026-05-25 08:00 (claude)
 
 **작업**: ADR-034 (proposed) — Provider 구현 9단계 순서 + `docs/sprints/
