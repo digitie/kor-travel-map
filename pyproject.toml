@@ -74,10 +74,13 @@ package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["krtour_map*"]
+# PEP 420 implicit namespace `krtour` + 메인 패키지 `krtour.map` (ADR-022).
+# src/krtour/__init__.py은 생성 금지 (ADR-022 §결과/부정 + SKILL.md DO NOT #21).
+include = ["krtour.map*"]
+namespaces = true
 
 [tool.setuptools.package-data]
-krtour_map = ["py.typed"]
+"krtour.map" = ["py.typed"]
 
 # =============================================================================
 # Lint / Type / Test
@@ -114,7 +117,7 @@ filterwarnings = [
 ]
 
 [tool.coverage.run]
-source = ["src/krtour_map"]
+source = ["src/krtour/map"]
 branch = true
 
 [tool.coverage.report]
@@ -131,27 +134,28 @@ fail_under = 0   # 코드 작성 단계에서 단계적으로 상향 (target: co
 # =============================================================================
 
 [tool.importlinter]
-root_package = "krtour_map"
+root_package = "krtour.map"
 
 [[tool.importlinter.contracts]]
 name = "layered architecture"
 type = "layers"
 layers = [
-  "krtour_map.cli",
-  "krtour_map.client",
-  "krtour_map.providers",
-  "krtour_map.infra",
-  "krtour_map.core",
-  "krtour_map.dto",
+  "krtour.map.cli",
+  "krtour.map.client",
+  "krtour.map.providers",
+  "krtour.map.infra",
+  "krtour.map.core",
+  "krtour.map.dto",
+  "krtour.map.category",
 ]
 
-# 메인 패키지(krtour_map)는 FastAPI/Uvicorn 의존을 가져선 안 된다 (ADR-020).
-# 디버그 REST는 packages/krtour-map-debug-ui/에 있다.
+# 메인 패키지(krtour.map)는 FastAPI/Uvicorn 의존을 가져선 안 된다 (ADR-020).
+# 디버그 REST는 packages/krtour-map-debug-ui/(import: `krtour.map_debug_ui`)에 있다.
 [[tool.importlinter.contracts]]
 name = "main package must not import fastapi/uvicorn"
 type = "forbidden"
 source_modules = [
-  "krtour_map",
+  "krtour.map",
 ]
 forbidden_modules = [
   "fastapi",

@@ -9,6 +9,9 @@
 한국 공공 API (`python-*-api`) 결과를 `Feature`(place/event/notice/price/weather/
 route/area) 계약으로 정규화하고 PostgreSQL + PostGIS에 저장한다.
 
+**Python import**: `from krtour.map import ...` (PEP 420 implicit namespace
+`krtour`, ADR-022). PyPI distribution은 `python-krtour-map`.
+
 TripMate ↔ 라이브러리는 **함수 직접 호출**. HTTP가 아니다. 디버그 REST/UI는
 **별도 Python 패키지** `krtour-map-debug-ui` (`packages/krtour-map-debug-ui/`,
 ADR-020)로 분리되어 있고, 인증 없이 내부망에서만 사용한다. 메인 라이브러리는
@@ -36,17 +39,17 @@ v1 산출물 요약: 저장소 루트 `python-krtour-map-spec.docx` (약 80쪽).
 SQLAlchemy 2 async + GeoAlchemy2 + asyncpg + psycopg[binary,pool]>=3.2 / GeoPandas
 + Shapely 2 + GDAL / Pydantic v2 / FastAPI + Uvicorn / httpx + tenacity / Alembic.
 
-## 5. 절대 금지 (5개만 다시)
+## 5. 절대 금지 (가장 중요한 5개)
 
-1. provider adapter/wrapper 신규 생성 금지 (public client 직접 사용)
-2. 의존 방향 역행 금지 — 메인 패키지 `dto → core → infra → providers → client → cli`.
-   `krtour_map.api` 없음 (ADR-020)
-3. ORM에 비즈니스 로직 금지 (raw SQL `text()`만)
-4. 공간 쿼리 술어에서 `ST_Transform` 금지 (인덱스 무효화)
-5. 디버그 API/UI 패키지에 인증 추가 금지 (내부망 전제) + 메인 라이브러리에
-   FastAPI import 금지 (ADR-020)
+1. **main에 직접 push 금지** — 모든 변경은 feature branch + PR (ADR-021).
+2. **`from krtour.map import ...` 사용 금지** — 항상 `from krtour.map import ...`
+   (ADR-022, PEP 420 implicit namespace).
+3. provider adapter/wrapper 신규 생성 금지 (public client 직접 사용, ADR-006).
+4. 의존 방향 역행 금지 — `category → dto → core → infra → providers → client → cli`.
+   `krtour.map.api` 없음 (ADR-020).
+5. 공간 쿼리 술어에서 `ST_Transform` 금지 (인덱스 무효화, ADR-012).
 
-전체 19개 룰은 `SKILL.md` §4.
+전체 22개 룰은 `SKILL.md` §4.
 
 ## 6. 작업 후 체크리스트 (1줄)
 

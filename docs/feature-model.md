@@ -48,7 +48,7 @@ class Feature(BaseModel):
     name: str = Field(min_length=1)
     coord: Coordinate | None = None      # PlaceCoordinate(lat, lon) — Korean bounds 검증
     address: Address = Field(default_factory=Address)
-    category: str = Field(min_length=1)  # PlaceCategoryCode value
+    category: str = Field(min_length=1)  # krtour.map.category.PlaceCategoryCode value (ADR-023)
     urls: FeatureUrls = Field(default_factory=FeatureUrls)
     marker_icon: str                     # maki id
     marker_color: str                    # 'P-01' ~ 'P-16'
@@ -76,7 +76,7 @@ class Feature(BaseModel):
   - kind=area → AreaDetail
   - kind=price/weather → None 가능 (별도 테이블에 시계열 저장)
 - `marker_color`: regex `^P-(0[1-9]|1[0-6])$`.
-- `category`: PlaceCategoryCode value로 정규화.
+- `category`: `krtour.map.category.PlaceCategoryCode` value로 정규화 (ADR-023).
 
 ### 4.2 `FeatureUrls`
 

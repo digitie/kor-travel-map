@@ -8,7 +8,7 @@
 
 본 저장소는 **monorepo**다. 두 개의 Python 패키지가 들어 있다:
 
-- `python-krtour-map` (메인) — `src/krtour_map/`. 함수 라이브러리. FastAPI/Uvicorn
+- `python-krtour-map` (메인) — `src/krtour/map/`. 함수 라이브러리. FastAPI/Uvicorn
   의존 없음.
 - `krtour-map-debug-ui` (별도, 옵션, ADR-020) — `packages/krtour-map-debug-ui/`.
   디버그 REST API + UI. 메인 라이브러리를 import해서 함수 호출. 인증 없음, 내부망
@@ -17,7 +17,7 @@
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
 │ TripMate (FastAPI + Admin UI + Dagster)                              │
-│   └── from krtour_map import AsyncKrtourMapClient                    │
+│   └── from krtour.map import AsyncKrtourMapClient                    │
 │         └── 함수 직접 호출 (HTTP 없음)                                  │
 └──────────────────────────────────────────────────────────────────────┘
                               │ 동일 process / 동일 venv
@@ -70,15 +70,15 @@
 ## 2. 의존 방향 (한 방향 강제)
 
 ```
-메인 패키지 (krtour_map):
-  dto → core → infra → providers → client → cli
+메인 패키지 (krtour.map):
+  category → dto → core → infra → providers → client → cli
 
-별도 패키지 (krtour_map_debug_ui):
-  krtour_map_debug_ui.api → krtour_map.client → ... (메인 패키지 import만)
+별도 패키지 (krtour.map_debug_ui):
+  krtour.map_debug_ui.api → krtour.map.client → ... (메인 패키지 import만)
 ```
 
 - 메인 패키지 내 화살표를 거스르는 import는 `import-linter`로 CI에서 차단
-  (ADR-002 / 7). `krtour_map.api`는 존재하지 않는다 (ADR-020).
+  (ADR-002 / 7). `krtour.map.api`는 존재하지 않는다 (ADR-020).
 - `core/`는 Protocol(`FeatureRepo`, `DedupRepo`, `ProviderSyncRepo`,
   `WeatherValuesRepo`, `FileStore`, ...)에만 의존한다. `infra/`/`providers/`는
   이 Protocol의 구체 구현이다.
@@ -88,14 +88,14 @@
   **순수 함수**의 집합이다. 새 wrapper class를 만들지 않는다 (ADR-002).
 - `client.py`는 `providers/`와 `infra/` repository를 합쳐 외부에 노출하는
   단일 진입점 `AsyncKrtourMapClient`다.
-- `krtour_map_debug_ui`는 별도 패키지로, `krtour_map.client`만 import해서
+- `krtour.map_debug_ui`는 별도 패키지로, `krtour.map.client`만 import해서
   함수 호출한다. 메인 패키지의 `infra/`/`providers/`를 직접 부르지 않는다.
 
 ## 3. TripMate와의 연계 (함수 직접 호출)
 
 ```python
 # TripMate apps/api/app/etl/festival_asset.py (예시)
-from krtour_map import AsyncKrtourMapClient
+from krtour.map import AsyncKrtourMapClient
 
 @asset(...)
 async def feature_event_festivals(ctx, visitkorea_client):
@@ -123,9 +123,9 @@ async def feature_event_festivals(ctx, visitkorea_client):
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │ krtour-map-debug-ui (별도 패키지)                                  │
-│ packages/krtour-map-debug-ui/src/krtour_map_debug_ui/            │
+│ packages/krtour-map-debug-ui/src/krtour/map_debug_ui/            │
 │                                                                  │
-│  uvicorn krtour_map_debug_ui.app:app --host 127.0.0.1 --port 8600│
+│  uvicorn krtour.map_debug_ui.app:app --host 127.0.0.1 --port 8600│
 │                                                                  │
 │   ├── /features/{id}                                             │
 │   ├── /features/in-bounds                                        │
@@ -140,7 +140,7 @@ async def feature_event_festivals(ctx, visitkorea_client):
         │  authentication: 없음 (내부망 / localhost 전제)
         │  HTTP 아님 — 함수 호출
         ▼
-   from krtour_map import AsyncKrtourMapClient
+   from krtour.map import AsyncKrtourMapClient
         ▼
    AsyncKrtourMapClient (메인 패키지 client.py)
 ```
@@ -225,7 +225,7 @@ schema 분리로 TripMate 도메인 테이블(`users`, `trips`, `trip_pois`, ...
 | `client.py` | `AsyncKrtourMapClient` |
 | `cli/main.py` | `krtour-map` CLI |
 
-**별도 패키지** `packages/krtour-map-debug-ui/src/krtour_map_debug_ui/` (ADR-020):
+**별도 패키지** `packages/krtour-map-debug-ui/src/krtour/map_debug_ui/` (ADR-020):
 
 | 모듈 | 역할 |
 |------|------|

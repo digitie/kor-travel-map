@@ -6,6 +6,11 @@
 **코드 작성 금지** — 사용자의 별도 요청이 있을 때까지 본 저장소는 문서/계약/결정의
 저장소다.
 
+**중요 신규 룰 (ADR-021~023, 2026-05-24)**:
+- main 직접 push 금지 — feature branch + PR만 (ADR-021).
+- Python import는 `from krtour.map import ...` (`krtour_map` flat 금지, ADR-022).
+- Category 모듈은 `krtour.map.category` (kraddr-base에서 이전, ADR-023).
+
 스택 확정 (ADR-007):
 - PostgreSQL 16 + PostGIS 3.5 + pg_trgm + pgcrypto
 - SQLAlchemy 2.x async + GeoAlchemy2 + asyncpg + psycopg[binary,pool]>=3.2
@@ -56,6 +61,9 @@ Python 패키지 `krtour-map-debug-ui` (ADR-020, `packages/krtour-map-debug-ui/`
 - [x] `docs/journal.md` (작업 일지)
 - [x] `docs/debug-ui-package.md` (ADR-020에 따른 별도 패키지 사양)
 - [x] `packages/krtour-map-debug-ui/` (별도 패키지 skeleton — pyproject + README)
+- [x] ADR-021 (PR-only) + `docs/agent-guide.md` §7.5 (PR 워크플로 + commit format)
+- [x] ADR-022 (`krtour` implicit namespace) + 전 docs/pyproject 일괄 rename
+- [x] ADR-023 (kraddr-base category 이전) + `docs/category.md` 신설
 
 ### v1 → v2 도큐먼트 이관 (다음 작업들)
 
@@ -94,7 +102,7 @@ Python 패키지 `krtour-map-debug-ui` (ADR-020, `packages/krtour-map-debug-ui/`
 
 ```bash
 git checkout v1                          # v1 브랜치로
-ls src/krtour_map/                       # 기존 모듈 구조
+ls src/krtour/map/                       # 기존 모듈 구조
 cat docs/event-feature-etl.md            # provider 문서 예시
 git checkout main                        # 복귀
 ```

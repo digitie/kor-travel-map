@@ -78,6 +78,29 @@
 - [ ] T-102 — pg_prewarm 부팅 후 warm-up
 - [ ] T-103 — 별도 streaming ETL (Kafka/Redpanda) 대응
 
+## Sprint 5 운영 진입 직전 (kraddr-geo 패턴 미러)
+
+- [ ] T-200 — **Batch DAG + 정합성 게이트** (kraddr-geo ADR-017 미러)
+  - `ops.import_jobs`에 `load_batch_id UUID`, `parent_job_id UUID` 컬럼 추가
+  - root job → child source loads → consistency_check gate → severity!=ERROR →
+    mv_refresh (`strategy='swap'`)
+  - phase별 중단/재개 (`PLAN_ONLY=1` preflight 포함)
+- [ ] T-201 — **`ops.feature_consistency_reports` 도입**
+  - 컬럼: `report_id UUID PK, batch_id UUID, started_at, finished_at,
+    severity_max TEXT, cases JSONB, summary JSONB`
+  - 케이스 F1~F8 (`python-krtour-map-spec.docx` B.18 참고)
+  - Dagster 일 1회 검사 + admin `/admin/integrity` 페이지 연동
+- [ ] T-202 — **pre-commit hook 정착**
+  - `src/` 또는 `tests/` 수정 시 `docs/journal.md` 갱신 강제 (`BYPASS=1` 일회 우회)
+  - `lint-imports` / `ruff format --check` / `mypy --strict`
+- [ ] T-203 — **PR CI 워크플로**
+  - `.github/workflows/ci.yml` — unit / integration / fixture_replay 분리 jobs
+  - `.github/workflows/openapi.yml` — `--check` drift 검증 (디버그 UI 패키지)
+  - `.github/workflows/lint.yml` — ruff/mypy/lint-imports
+- [ ] T-204 — **GitHub branch protection 설정 가이드** (운영자용)
+  - main: require PR + 1 approval + status checks + restrict force-push
+  - ADR-021 §결정의 운영 정책을 별도 매뉴얼로
+
 ## 완료
 
 - [x] T-000 — git v1 보존 + main orphan 재시작 (완료: 2026-05-24)

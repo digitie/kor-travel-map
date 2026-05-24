@@ -9,7 +9,7 @@ ADR-005(인증 없음, 내부망 전용) + ADR-020(별도 패키지 분리).
 | 항목 | 값 |
 |------|----|
 | 패키지명 (PyPI 형식) | `krtour-map-debug-ui` |
-| Python import | `from krtour_map_debug_ui import ...` |
+| Python import | `from krtour.map_debug_ui import ...` |
 | 위치 | `packages/krtour-map-debug-ui/` (monorepo) |
 | 별도 `pyproject.toml` | 예 |
 | 의존성 | `python-krtour-map`, FastAPI, Uvicorn, Pydantic v2, pydantic-settings |
@@ -23,7 +23,7 @@ ADR-005(인증 없음, 내부망 전용) + ADR-020(별도 패키지 분리).
 packages/krtour-map-debug-ui/
 ├── pyproject.toml
 ├── README.md
-├── src/krtour_map_debug_ui/
+├── src/krtour/map_debug_ui/
 │   ├── __init__.py
 │   ├── py.typed
 │   ├── app.py           — FastAPI app factory + uvicorn entrypoint
@@ -55,17 +55,17 @@ packages/krtour-map-debug-ui/
 ## 3. 의존 방향
 
 ```
-krtour_map_debug_ui.app
+krtour.map_debug_ui.app
    ↓
-krtour_map_debug_ui.routers.*
+krtour.map_debug_ui.routers.*
    ↓
-krtour_map_debug_ui.deps   ──→   krtour_map.client (AsyncKrtourMapClient)
+krtour.map_debug_ui.deps   ──→   krtour.map.client (AsyncKrtourMapClient)
                                        ↓
                               메인 패키지 (dto/core/infra/providers)
 ```
 
-- 본 패키지는 `krtour_map.client`만 import한다.
-- `krtour_map.infra`, `krtour_map.providers` 직접 import 금지 — 본 패키지의
+- 본 패키지는 `krtour.map.client`만 import한다.
+- `krtour.map.infra`, `krtour.map.providers` 직접 import 금지 — 본 패키지의
   존재 이유는 디버깅 UI이지 비즈니스 로직 우회가 아니다.
 - 본 패키지는 자체 settings 외에 메인 라이브러리의 `KrtourMapSettings`를
   상속/병합한다.
@@ -98,13 +98,13 @@ uv pip install -e .
 uv pip install -e packages/krtour-map-debug-ui
 
 # 기동 (인증 없음, localhost 전용)
-uvicorn krtour_map_debug_ui.app:app --host 127.0.0.1 --port 8600
+uvicorn krtour.map_debug_ui.app:app --host 127.0.0.1 --port 8600
 
 # 환경변수로 override
 KRTOUR_MAP_DEBUG_UI_HOST=127.0.0.1 \
 KRTOUR_MAP_DEBUG_UI_PORT=8600 \
 KRTOUR_MAP_PG_DSN=postgresql+asyncpg://... \
-uvicorn krtour_map_debug_ui.app:app
+uvicorn krtour.map_debug_ui.app:app
 
 # 또는 CLI (옵션)
 krtour-map-debug-ui run --host 127.0.0.1 --port 8600

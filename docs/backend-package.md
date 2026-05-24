@@ -12,7 +12,7 @@
 ### 1.1 `AsyncKrtourMapClient`
 
 ```python
-from krtour_map import AsyncKrtourMapClient, KrtourMapSettings
+from krtour.map import AsyncKrtourMapClient, KrtourMapSettings
 from sqlalchemy.ext.asyncio import create_async_engine
 
 settings = KrtourMapSettings()  # KRTOUR_MAP_* 환경변수 자동 로드
@@ -127,7 +127,7 @@ class AsyncKrtourMapClient:
 ### 1.4 ID/normalization 함수
 
 ```python
-from krtour_map import (
+from krtour.map import (
     make_feature_id, make_source_record_key, make_payload_hash,
     normalize_provider_name, CANONICAL_PROVIDER_NAMES,
     normalize_kr_place_name, score_feature_pair,
@@ -195,7 +195,7 @@ settings는 라이브러리 내부 정적 정책만 다룬다. provider API 키�
 ### 3.1 TripMate Dagster asset (적재)
 
 ```python
-from krtour_map import AsyncKrtourMapClient
+from krtour.map import AsyncKrtourMapClient
 
 @asset(group_name="features", retry_policy=...)
 async def feature_event_visitkorea_festivals(ctx, visitkorea, krtour_map_client):
@@ -209,7 +209,7 @@ async def feature_event_visitkorea_festivals(ctx, visitkorea, krtour_map_client)
 ### 3.2 TripMate FastAPI 라우터 (조회)
 
 ```python
-from krtour_map import AsyncKrtourMapClient
+from krtour.map import AsyncKrtourMapClient
 
 @router.get("/features/in-bounds")
 async def list_features_in_bounds(

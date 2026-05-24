@@ -8,7 +8,7 @@
 
 ## 역할
 
-이 저장소(GitHub 이름 `python-krtour-map`, Python 패키지 `krtour_map`)는 여러 한국
+이 저장소(GitHub 이름 `python-krtour-map`, Python 패키지 `krtour.map` — ADR-022)는 여러 한국
 공공 API 라이브러리(`python-*-api`)에서 올라오는 여행 지도 데이터를 단일 `Feature`
 계약으로 정규화·저장·조회·수정·삭제할 수 있게 하는 **TripMate 하부 라이브러리**다.
 
@@ -28,13 +28,16 @@ TripMate ↔ krtour-map 사이에는 REST API가 없다.
 | 항목 | 값 |
 |------|----|
 | GitHub 저장소 이름 | `python-krtour-map` |
-| Python import | `from krtour_map import ...` |
+| PyPI distribution | `python-krtour-map` |
+| Python import (메인) | `from krtour.map import ...` (ADR-022, PEP 420 implicit namespace `krtour`) |
+| Python import (디버그 UI) | `from krtour.map_debug_ui import ...` (별도 distribution, 같은 `krtour` namespace) |
 | CLI 명령 (있다면) | `krtour-map ...` |
-| 환경변수 prefix | `KRTOUR_MAP_*` |
+| 환경변수 prefix | `KRTOUR_MAP_*` (env는 underscore 표준 유지) |
 | PostgreSQL DB 이름 (개발) | `krtour_map` (운영은 TripMate가 호스팅하는 공유 DB) |
 | Postgres schema | `feature`, `provider_sync`, `ops` (TripMate 도메인 테이블과 분리) |
 | PostGIS extension schema | `x_extension` (ADR-008) |
 | 디버그 UI 패키지 | `krtour-map-debug-ui` (별도 **Python** 패키지, monorepo 내 `packages/krtour-map-debug-ui/`, ADR-020) |
+| Category 모듈 출처 | `krtour.map.category` (구 `kraddr.base.categories`에서 이전, ADR-023) |
 
 ## 개발 환경 정책 (PC, WSL)
 
@@ -90,7 +93,7 @@ PC 개발은 **WSL ext4** 위에서 수행한다. NTFS 마운트에서 직접 `g
 디버그 REST는 **별도 패키지** `krtour-map-debug-ui`에 둔다. 메인 라이브러리
 `python-krtour-map`은 FastAPI/Uvicorn 의존이 없다.
 
-- **위치**: `packages/krtour-map-debug-ui/src/krtour_map_debug_ui/` (본 monorepo
+- **위치**: `packages/krtour-map-debug-ui/src/krtour/map_debug_ui/` (본 monorepo
   내, 별도 `pyproject.toml`).
 - **목적**: 디버그 UI 백엔드 + 향후 내부 도구 활용.
 - **인증**: 별도 키 없음. 내부망(localhost / WSL / 사내망) 전제. 외부 노출 금지.
@@ -155,7 +158,7 @@ PC 개발은 **WSL ext4** 위에서 수행한다. NTFS 마운트에서 직접 `g
 `SKILL.md` §4가 최신본이지만 핵심은 다음과 같다:
 
 1. **의존 방향 역행 금지** — 메인 패키지: `dto → core → infra → providers →
-   client → cli` 한 방향. `import-linter`가 CI에서 강제. `krtour_map.api`는
+   client → cli` 한 방향. `import-linter`가 CI에서 강제. `krtour.map.api`는
    존재하지 않는다 (ADR-020 — 디버그 REST는 별도 패키지).
 2. **동기 인터페이스 추가 금지** — `AsyncKrtourMapClient`만. 동기는 호출자가
    `asyncio.run`으로 감싼다 (ADR-002).
@@ -178,9 +181,19 @@ PC 개발은 **WSL ext4** 위에서 수행한다. NTFS 마운트에서 직접 `g
 14. **디버그 API/UI 패키지에 인증 추가 금지** — 내부망 전제. 외부 노출이
     필요해지면 네트워크 계층(SSO 게이트웨이/IP allowlist/Cloudflare Tunnel)에서
     보호. 코드/응답에 인증 로직 침투 X.
-15. **메인 라이브러리(`krtour_map`)에 FastAPI/Uvicorn import 금지** — ADR-020.
+15. **메인 라이브러리(`krtour.map`)에 FastAPI/Uvicorn import 금지** — ADR-020.
     HTTP 서버 코드는 `packages/krtour-map-debug-ui/`에만.
 16. **데이터/원천 파일을 git에 커밋 금지** — `data/`는 `.gitignore`. NTFS에 보관.
+17. **main에 직접 push 금지** — 모든 변경은 feature branch + PR (ADR-021).
+    `git push origin main` 절대 금지. 핫픽스도 단명 branch를 통해. 브랜치 명명:
+    `feat/<topic>` / `fix/<topic>` / `chore/<topic>` / `docs/<topic>` /
+    `refactor/<topic>` / `adr/<short>`.
+18. **`from krtour.map import ...` (flat) 사용 금지** — 항상 `from krtour.map
+    import ...` (ADR-022). `src/krtour/map/` 디렉토리 만들지 말 것 —
+    `src/krtour/map/`.
+19. **`src/krtour/__init__.py` 만들지 금지** — PEP 420 implicit namespace.
+    파일이 생기는 순간 `krtour-map-debug-ui` 같은 자매 distribution과 충돌.
+    CI에서 차단 체크.
 
 ## 작업 후 체크리스트
 
@@ -199,7 +212,7 @@ PC 개발은 **WSL ext4** 위에서 수행한다. NTFS 마운트에서 직접 `g
 # 단위 + lint
 python -m pytest tests/unit -q
 python -m ruff check .
-python -m mypy src/krtour_map
+python -m mypy src/krtour/map
 lint-imports
 
 # 통합 (PostGIS testcontainers 필요)
