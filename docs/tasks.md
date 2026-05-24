@@ -4,8 +4,9 @@
 
 ## 진행 중 (open PR)
 
-- **본 PR#13** (chore/tasks-md-pr12-merged-update): tasks.md 백로그 갱신 —
-  PR#12 머지 후 늦은 push로 분리됨.
+- **본 PR#14** (docs/pr14-impl-order-sprint-plans): ADR-034 (proposed,
+  provider 구현 9단계 순서) + `docs/sprints/SPRINT-2.md` ~ `SPRINT-5.md`
+  신설 (4건) + SPRINT-1.md §5 갱신 + sprints/README.md 갱신.
 - **upstream knps-api PR#1**
   (https://github.com/digitie/python-knps-api/pull/1):
   `docs/knps-feature-etl.md §4` maki icon 정정 (shelter / barrier) — 검토 +
@@ -224,15 +225,23 @@
 
 ## 우선순위 가이드
 
-- **즉시 (검토 + merge)**: 본 PR#13 (tasks.md 백로그 갱신) + upstream
-  knps-api PR#1 (maki icon 정정)
+- **즉시 (검토 + merge)**: 본 PR#14 (구현 순서 ADR-034 + Sprint 2~5 plan)
+  + upstream knps-api PR#1 (maki icon 정정)
 - **다음**: T-014 (코드 작성 단계 진입 검토 — 사용자 승인 필요) → Sprint 1
-  진입 PR (ADR-027/028/029/030/031/032/033 일괄 accepted 전환 + scaffolding
-  + `PLACE_CATEGORY_DEFINITIONS`/`NOTICE_TYPES`/`AreaDetail.area_kind`
-  코드 적용)
-- **백그라운드**: T-018 (`krtour.map.providers.knps` 모듈 구현, Sprint 2) +
-  T-019 (TripMate `apps/web` 측 Kakao → maplibre-vworld 교체 모니터링)
-- **장기**: Sprint 5 (T-200~T-204), 보류 (T-101~T-103, ADR 신설과 함께)
+  진입 PR (ADR-027/028/029/030/031/032/033/**034** 일괄 accepted 전환 +
+  scaffolding + `PLACE_CATEGORY_DEFINITIONS`/`NOTICE_TYPES`/`AreaDetail.
+  area_kind` 코드 적용)
+- **Sprint 진행 순서** (ADR-034):
+  - Sprint 2 = ① 축제 → ② 날씨 → ③ 유가 → ④ 휴게소 (`docs/sprints/SPRINT-2.md`)
+  - Sprint 3 = ⑤ 국립공원/트래킹 → ⑥ 국가유산 + 정합성 Phase 1 (F1~F3)
+    (`SPRINT-3.md`)
+  - Sprint 4 = ⑦ MOIS bulk 4단계 + dedup queue 운영 (`SPRINT-4.md`)
+  - Sprint 5 = ⑧ 휴양림/수목원 → ⑨ 박물관/미술관 + Phase 2 F4~F8 + Dagster
+    게이트 + 운영 진입 (`SPRINT-5.md`)
+- **백그라운드**: T-019 (TripMate `apps/web` 측 Kakao → maplibre-vworld
+  교체 모니터링)
+- **장기**: 운영 진입 후 v2.1 검토 (T-101 MV / T-102 pg_prewarm / T-103
+  streaming / ADR-035+ 신규 provider)
 
 ## ADR 번호 가이드 (현재)
 
@@ -247,12 +256,15 @@
   - **ADR-033** (`feature_consistency_reports` 단계적 도입, 시기 의존, PR#8
     merged) — T-014 + Sprint 3 진입에 묶어 accepted
   - **ADR-028** (`python-knps-api` provider 등록, PR#12 merged)
+  - **ADR-034** (provider 구현 9단계 순서, **본 PR#14**)
 - **다음 후보 (미작성)**:
-  - **ADR-034+** — 신규 provider 추가 절차 표준 (체크리스트)
+  - **ADR-035+** — 신규 provider 추가 절차 표준 (체크리스트)
   - 후속 `@krtour/map-marker-react` npm 게시 자동화 ADR
   - (필요 시) ADR — `core.feature_consistency_reports` Phase 2 알림 sink
   - (필요 시) ADR — Sprint 2 SHP/GeoJSON parsing 위치 결정 (`krtour.map.
     providers.knps` vs upstream `[geo]` extra)
+  - (필요 시) ADR — MV 도입 (T-101 Sprint 5 시범 결과 후)
+  - (필요 시) ADR — pg_prewarm 운영 정책 (T-102)
 
 ## 머지 history (참조)
 
@@ -270,5 +282,6 @@
 | #10 | `docs/pr10-t012-t018-codify` | 2026-05-25 | ADR-029 + T-013/14a/17c/12a/12b + 명명 sweep + 코딩 |
 | #11 | `docs/pr11-debug-ui-nextjs` | 2026-05-25 | ADR-025 2차 보강 (Vite → Next.js) |
 | #12 | `docs/pr12-knps-api-integration` | 2026-05-25 | ADR-028 + knps-feature-etl.md |
-| **#13** | `chore/tasks-md-pr12-merged-update` | **open** | tasks.md 백로그 갱신 (PR#12 머지 후) |
+| #13 | `chore/tasks-md-pr12-merged-update` | 2026-05-25 | tasks.md 백로그 갱신 (PR#12 머지 후) |
+| **#14** | `docs/pr14-impl-order-sprint-plans` | **open** | ADR-034 provider 9단계 + Sprint 2~5 plan |
 | knps-api #1 | `docs/knps-feature-maki-icons` | **open** | maki icon 정정 (shelter / barrier) |

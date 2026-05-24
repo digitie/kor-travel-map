@@ -2,6 +2,43 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-25 08:00 (claude)
+
+**작업**: ADR-034 (proposed) — Provider 구현 9단계 순서 + `docs/sprints/
+SPRINT-2.md` ~ `SPRINT-5.md` 신설. PR#14.
+
+**컨텍스트**: 사용자가 구현 순서 명시:
+> 축제 → 날씨 → 유가 → 휴게소 → 국립공원/트래킹코스 (인허가와 무관한 정보들)
+> → 국가유산 → MOIS 인허가 → 수목원/휴양림 → 박물관/미술관
+
+핵심 통찰: MOIS-독립 provider를 먼저 적재해 dedup 룰을 작은 dataset에서
+검증 → MOIS bulk 진입 시점에 정합성 게이트가 안정 → MOIS-sibling provider
+(휴양림/수목원/박물관 — MOIS와 중복 가능)는 검증된 룰로 진입.
+
+**ADR-034 결정 — Sprint 매핑**:
+- Sprint 2: ① 축제 → ② 날씨 → ③ 유가 → ④ 휴게소 (MOIS-독립 작은 dataset)
+- Sprint 3: ⑤ 국립공원/트래킹 → ⑥ 국가유산 + ADR-033 Phase 1 (F1~F3)
+- Sprint 4: ⑦ MOIS bulk 4단계 + dedup queue 운영 + Coverage 80% 도달
+- Sprint 5: ⑧ 휴양림/수목원 → ⑨ 박물관/미술관 + Phase 2 + T-200~204 + 운영
+  진입
+
+**변경 파일** (8):
+- `docs/decisions.md`: ADR-034 (proposed) ~150줄 신설.
+- `docs/sprints/README.md`: Sprint 1~5 표 + 9단계 inline + ADR 목록 갱신.
+- `docs/sprints/SPRINT-1.md` §5: provider 호출 Sprint 2부터 명확화.
+- `docs/sprints/SPRINT-2.md` 신설 (~180줄): MOIS-독립 4 provider.
+- `docs/sprints/SPRINT-3.md` 신설 (~150줄): KNPS + krheritage + Phase 1.
+- `docs/sprints/SPRINT-4.md` 신설 (~140줄): MOIS 4단계 + queue + 분할 옵션.
+- `docs/sprints/SPRINT-5.md` 신설 (~200줄): sibling + Phase 2 + 운영 진입.
+- `docs/tasks.md`: §"진행 중" PR#14 추가, ADR-034 ADR 가이드 추가, 머지
+  history 갱신.
+- `docs/resume.md`: 완료 task 명시 + ADR-034 추가.
+
+**다음**: PR#14 commit + push + open. 사용자 review → ADR-034 accepted
+전환 후 T-014 (Sprint 1 진입) 가능.
+
+---
+
 ## 2026-05-25 07:00 (claude)
 
 **작업**: PR#12 — `python-knps-api` (외부 repo scaffold 완료) 통합 반영 +

@@ -156,13 +156,20 @@ def transformer_4326_to_5179() -> Transformer:
 | `infra/`/`client/`/`api/` | 50% |
 | `dto/` | (Sprint 2부터 100% branch) |
 
-## 5. 비목표 (Sprint 1)
+## 5. 비목표 (Sprint 1) — ADR-034 9단계 순서
 
-- provider 호출 (Sprint 2)
-- 디버그 UI backend 라우터 (Sprint 2)
-- bulk insert / advisory lock (Sprint 2)
-- Record Linkage scoring 실 구현 (Sprint 2)
-- Materialized View 도입 (T-101, v2 1차 범위 밖)
+**provider 호출은 Sprint 2부터**. ADR-034로 박힌 9단계:
+- Sprint 2: ① 축제 → ② 날씨 → ③ 유가 → ④ 휴게소 (MOIS-독립 작은 dataset)
+- Sprint 3: ⑤ 국립공원/트래킹 → ⑥ 국가유산 (MOIS-독립 중간 dataset)
+- Sprint 4: ⑦ MOIS 인허가 (가장 큰 bulk)
+- Sprint 5: ⑧ 휴양림/수목원 → ⑨ 박물관/미술관 (MOIS-sibling)
+
+Sprint 1 비목표 (위 9단계 외에도):
+- 디버그 UI backend 라우터 (Sprint 2 첫 라우터부터 ADR-031 활성화)
+- bulk insert / advisory lock 실제 운영 (Sprint 4 MOIS bulk 시점)
+- Record Linkage scoring 실 검증 (Sprint 2 첫 dedup 후보부터 / Sprint 4
+  bulk에서 본격 검증)
+- Materialized View 도입 (T-101, Sprint 5 운영 진입 이후 검토)
 - streaming ETL (T-103, v2 1차 범위 밖)
 - pg_prewarm 운영 정책 (T-102, 운영 진입 후)
 
