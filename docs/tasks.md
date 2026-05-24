@@ -31,8 +31,13 @@
   - 의존: `maplibre-vworld`, `maplibre-gl`
   - 라이선스: GPL-3.0-or-later 또는 MIT (TripMate proprietary와 호환되도록
     별도 ADR로 결정)
-- [ ] T-018 — **`python-knps-api` provider 등록** (ADR-027 카테고리 확장 +
-      ADR-028 provider 등록 후보)
+- [ ] T-018 — **`python-knps-api` provider 등록** (ADR-027 proposed →
+      accepted 전환 + ADR-028 provider 등록 후보)
+  - **ADR-027 (proposed)** — forest 카테고리/notice_type 확장 결정 완료:
+    `LODGING_MOUNTAIN_SHELTER` Tier 2 신설 + `area_kind=hazard_zone` +
+    generic `notice_type=access_restriction`/`fire_alert`. T-018 시점에
+    accepted 전환 + 코드 적용 (PlaceCategory enum + NOTICE_TYPES + AreaDetail
+    Literal 확장).
   - `digitie/python-knps-api` 저장소 신설 — `python-mois-api` 패턴 미러
   - `krtour.map.providers.knps` 모듈 신설
   - `docs/forest-feature-etl.md` §11 KNPS 통합 실행
@@ -133,9 +138,8 @@
 ## ADR 번호 가이드 (현재)
 
 - **accepted**: ADR-001 ~ ADR-026
-- **proposed (검토 대기)**: ADR-030 (캐시 금지) / ADR-031 (OpenAPI export) /
-  ADR-032 (Coverage 일정, 시기 의존) / ADR-033 (`feature_consistency_reports`,
-  시기 의존)
-- **후보 (미작성)**: ADR-027 (forest 카테고리 확장) / ADR-028 (`python-knps-api`
-  provider 등록) / ADR-029 (공통 maki npm 패키지) / ADR-034+ (신규 provider
-  추가 절차 표준)
+- **proposed (사용자 검토)**: ADR-027 (forest 카테고리/notice_type 확장) /
+  ADR-030 (캐시 금지) / ADR-031 (OpenAPI export) / ADR-032 (Coverage 일정,
+  시기 의존) / ADR-033 (`feature_consistency_reports`, 시기 의존)
+- **다음 후보**: ADR-028 (`python-knps-api` provider 등록) / ADR-029 (공통
+  maki npm 패키지) / ADR-034+ (신규 provider 추가 절차 표준)

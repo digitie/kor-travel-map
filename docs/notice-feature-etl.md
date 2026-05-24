@@ -48,6 +48,8 @@ NOTICE_TYPE_SAFETY             = "safety"
 NOTICE_TYPE_EARTHQUAKE         = "earthquake"
 NOTICE_TYPE_LANDSLIDE          = "landslide_warning"
 NOTICE_TYPE_COASTAL_ISOLATION  = "coastal_isolation"
+NOTICE_TYPE_ACCESS_RESTRICTION = "access_restriction"   # ADR-027 (generic: 입산통제/해수욕장폐장/공원폐쇄/등산로통제 등)
+NOTICE_TYPE_FIRE_ALERT         = "fire_alert"           # ADR-027 (generic: 산불경보 + 향후 화재 일반)
 
 NOTICE_TYPES = (
     NOTICE_TYPE_TRAFFIC, NOTICE_TYPE_TRAFFIC_ACCIDENT, NOTICE_TYPE_ROAD_CLOSURE,
@@ -56,8 +58,14 @@ NOTICE_TYPES = (
     NOTICE_TYPE_HEAT_WAVE,
     NOTICE_TYPE_SAFETY, NOTICE_TYPE_EARTHQUAKE, NOTICE_TYPE_LANDSLIDE,
     NOTICE_TYPE_COASTAL_ISOLATION,
+    NOTICE_TYPE_ACCESS_RESTRICTION, NOTICE_TYPE_FIRE_ALERT,
 )
 ```
+
+> **ADR-027 결정**: `access_restriction` / `fire_alert`는 forest/beach/urban
+> 등 모든 도메인에서 재사용. provider별 출처는 `NoticeDetail.payload.domain`
+> 으로 구분 (예: `'forest'`, `'beach'`, `'urban'`). `road_closure`(도로)는
+> 별도 유지 — *도로 통제*와 *지역/시설 출입 제한*은 의미 분리.
 
 `normalize_notice_type(value)`가 한/영 alias 정규화:
 
@@ -72,6 +80,9 @@ NOTICE_TYPES = (
 | `"교통사고"`, `"accident"` | `traffic_accident` |
 | `"통제"`, `"도로통제"`, `"road_closure"` | `road_closure` |
 | `"공사"`, `"도로공사"`, `"roadwork"` | `roadwork` |
+| `"입산통제"`, `"입산제한"`, `"forest_access"`, `"hiking_closure"` | `access_restriction` (ADR-027) |
+| `"해수욕장폐장"`, `"beach_closure"`, `"공원폐쇄"`, `"park_closure"` | `access_restriction` (ADR-027) |
+| `"산불경보"`, `"forest_fire"`, `"fire"`, `"화재경보"` | `fire_alert` (ADR-027) |
 
 provider 원문 등급/문구는 `NoticeDetail.payload`에 보존.
 
@@ -217,6 +228,8 @@ def notice_job_specs() -> list[EtlJobSpec]:
 | `earthquake` | `alert` | `P-14` |
 | `landslide_warning` | `alert` | `P-12` (갈색) |
 | `coastal_isolation` | `alert` | `P-13` (회색) |
+| `access_restriction` (ADR-027) | `barrier` | `P-13` (회색) |
+| `fire_alert` (ADR-027) | `fire-station` | `P-15` (주홍) |
 | 기타 `safety` | `alert` | `P-14` |
 
 `notice_marker_style(notice_type, severity)` helper 제공.

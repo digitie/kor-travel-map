@@ -247,6 +247,9 @@ dict가 한국어 라벨 제공.
   03.07 게스트하우스 (LODGING_GUESTHOUSE) [maki: lodging]
     03.07.01 게스트하우스 (..._GENERAL) [maki: lodging]    ← MOIS foreigner_city_homestays
     03.07.02 한옥체험업 (..._HANOK) [maki: lodging]    ← MOIS hanok_experience
+  03.08 대피소·산장 (LODGING_MOUNTAIN_SHELTER) [maki: shelter]   ← ADR-027 신설
+    03.08.01 국립공원 대피소 (..._KNPS) [maki: shelter]    ← KNPS knps_shelters
+    03.08.02 산림청 산장 (..._KFS) [maki: shelter]
 
 04 온천·스파 (HOT_SPRING_SPA) [maki: hot-spring]
   04.01 온천 (HOT_SPRING_SPA_HOT_SPRING) [maki: hot-spring]
@@ -291,14 +294,14 @@ dict가 한국어 라벨 제공.
 전체 표는 `python-kraddr-base/src/kraddr/base/categories.py`의 `PLACE_CATEGORY_DEFINITIONS`
 tuple에서 자동 생성된다. depth별 통계:
 
-| depth | 건수 |
-|-------|----:|
-| 0 (sentinel) | 1 |
-| 1 (Tier 1 대분류) | 7 |
-| 2 (Tier 2 중분류) | 29 |
-| 3 (Tier 3 소분류) | 71 |
-| 4 (Tier 4 세분류) | 33 |
-| **합계** | **141** |
+| depth | 건수 | 비고 |
+|-------|----:|-----|
+| 0 (sentinel) | 1 | |
+| 1 (Tier 1 대분류) | 7 | ADR-027에서 신설 없음 (Tier 1은 8개 유지) |
+| 2 (Tier 2 중분류) | 30 | +1 `03.08 LODGING_MOUNTAIN_SHELTER` (ADR-027) |
+| 3 (Tier 3 소분류) | 73 | +2 `03.08.01/02` (ADR-027) |
+| 4 (Tier 4 세분류) | 33 | |
+| **합계** | **144** | ADR-027 적용 후 (현행 141 + 3) |
 
 자세한 행별 표는 코드(`format_category_tree()` 출력) 또는 `tests/unit/test_category.py`
 의 snapshot에 박는다 (코드 작성 단계 진입 시).
@@ -311,6 +314,7 @@ tuple에서 자동 생성된다. depth별 통계:
 |-----------|------------:|-----------------|
 | `park` | 11 | 휴양림 전체, 공원·광장, 트레킹 |
 | `lodging` | 11 | 호텔/리조트/모텔/게스트하우스 |
+| `shelter` | 3 | 대피소·산장 전체 (ADR-027, `03.08.*`) |
 | `garden` | 7 | 수목원·식물원 전체 |
 | `hot-spring` | 7 | 온천·스파 전체 |
 | `campsite` | 7 | 캠핑장 전체 |

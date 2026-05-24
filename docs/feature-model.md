@@ -223,13 +223,14 @@ RouteDetail에는 메타만.
 ```python
 class AreaDetail(BaseModel):
     feature_id: str
-    area_kind: str = "area"              # national_park / provincial_park / recreation_forest / tourism_district / beach / campsite / heritage_area / natural_heritage_area / buried_heritage_area / other
+    area_kind: str = "area"              # national_park / provincial_park / recreation_forest / tourism_district / beach / campsite / heritage_area / natural_heritage_area / buried_heritage_area / hazard_zone / other
     boundary_source: str | None = None   # 'gis_3070426', 'gis_spca', 'krforest', ...
     area_square_meters: Decimal | None = None
     regulation_scope: str | None = None
     administrative_office: str | None = None
     description: str | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
+    # hazard_zone일 때 payload 예: {"hazard_type": "rockfall" | "flash_flood" | "wildlife" | ..., "domain": "forest" | "coastal" | ...}
 ```
 
 geometry는 `features.geom` (MULTIPOLYGON).

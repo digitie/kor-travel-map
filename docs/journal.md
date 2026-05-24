@@ -2,6 +2,66 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-25 04:00 (claude)
+
+**작업**: ADR-027 (proposed) — forest 카테고리/notice_type 확장 결정. 사용자
+가 forest §11.6 candidates에 대한 의견 요청 + 입산통제/산불경보를 generic
+notice_type으로 일반화 지시.
+
+**컨텍스트**: forest §11.6에 7건 candidates가 있었고, 사용자가 그 중
+입산통제/산불경보를 `forest_*` prefix 없이 generic 이름으로 일반화 결정.
+나머지(대피소 / hazard_zone / 거부 항목)는 claude 제안 그대로 채택.
+
+**결정 요약** (decisions.md ADR-027):
+- ✅ `LODGING_MOUNTAIN_SHELTER` (Tier 2 `03.08` + Tier 3 `03.08.01` KNPS /
+     `03.08.02` KFS, maki=`shelter`)
+- ✅ `AreaDetail.area_kind='hazard_zone'` 신설 (PlaceCategory 미신설)
+- ✅ `notice_type='access_restriction'` (generic, 입산통제/해수욕장폐장/
+     공원폐쇄 등 통칭, payload.domain으로 출처 구분)
+- ✅ `notice_type='fire_alert'` (generic, 산불경보 + 화재 일반)
+- ❌ `WEATHER_MOUNTAIN_STATION` PlaceCategory (kind=weather 자체로 충분)
+- ❌ `NATURE_ECOLOGY` PlaceCategory (v2 1차 범위 밖)
+- ❌ `SAFETY_*` PlaceCategory / Tier 1 `08 SAFETY` (area_kind으로 대체,
+     Tier 1 enum 변경 회피)
+
+**변경 파일**:
+- `docs/decisions.md`: ADR-027 (proposed) 추가 (~120줄).
+- `docs/category.md`:
+  - §4.2 트리 — `03.08` Tier 2 + Tier 3 두 행 추가.
+  - §4.3 depth 통계 — Tier 2 29→30, Tier 3 71→73, 합계 141→144.
+  - §4.4 maki icon 분포 — `shelter` 3건 추가.
+- `docs/notice-feature-etl.md`:
+  - §3 NOTICE_TYPES — `access_restriction` / `fire_alert` 추가.
+  - §3 normalize_notice_type alias 표 — 입산통제/해수욕장폐장/산불경보 등
+    한/영 alias 추가.
+  - §7 마커 스타일 표 — 두 신규 type 매핑 추가 (maki `barrier`/`fire-station`).
+- `docs/feature-model.md` §9: AreaDetail.area_kind에 `hazard_zone` 추가
+  + payload 예시 주석.
+- `docs/data-model.md` §6.3: `feature_area_details.area_kind` 컬럼 주석에
+  `hazard_zone` 명기 + payload 주석.
+- `docs/forest-feature-etl.md`:
+  - §11.4 추가 발굴 후보 표 — `knps_shelters` (LODGING_MOUNTAIN_SHELTER_KNPS),
+    `knps_access_restrictions` (generic notice_type), `knps_fire_alerts`
+    (generic notice_type), 식생/서식지 (v2 범위 밖) 명기.
+  - §11.6 후보 표 → ADR-027 결정 요약 표로 대체 (✅/❌ 분류).
+  - §11.8 후속 작업 — ADR-027 proposed → accepted 전환 명기.
+- `docs/resume.md`: "다음 ADR 후보"의 ADR-027 항목을 proposed로 명기 +
+  사용자 결정 내용 inline.
+- `docs/tasks.md`:
+  - T-018 — ADR-027 proposed 결정 완료 명기 + accepted 전환 시점 = T-018
+    실행 시점.
+  - §"ADR 번호 가이드" — proposed 섹션 신설 (ADR-027).
+
+**작성 시기 의도**: T-018 (`python-knps-api` provider 등록) 시점에 코드와
+함께 accepted 전환. 지금 proposed로 박는 이유는 KNPS dataset이 확정되기
+전이라도 *분류 정책*은 명확히 박혀 있어 작업 협상 비용 0.
+
+**다음**: 사용자 review → accepted 전환 또는 추가 조정. PR#8 (ADR-030~033
+proposed)과 텍스트 충돌 가능 (resume.md/tasks.md) — 머지 순서에 따라 한
+쪽이 rebase 필요.
+
+---
+
 ## 2026-05-25 03:00 (claude)
 
 **작업**: ADR-030/031/032/033 `proposed` 작성 — 사용자가 의견 요청한 4건을
