@@ -34,6 +34,21 @@ feature로 적재하는 ETL이다.
 - place / area: `ccbaKdcd-ccbaAsno-ccbaCtcd` (3 코드 조합)
 - event: provider event id `sn`
 
+## 4-pre. 카테고리 매핑 (`docs/category.md` §4)
+
+| 유산 유형 | 권장 category code | Tier path |
+|----------|-------------------|-----------|
+| 전통사찰 | **`01070100`** `TOURISM_HERITAGE_TEMPLE` | 관광 > 국가유산 > 전통사찰 |
+| 궁궐·왕릉 | **`01070200`** `TOURISM_HERITAGE_PALACE_ROYAL_TOMB` | 관광 > 국가유산 > 궁궐·왕릉 |
+| 사적·기념물 | **`01070300`** `TOURISM_HERITAGE_HISTORIC_SITE` | 관광 > 국가유산 > 사적·기념물 |
+| 한옥·민속마을 | **`01070400`** `TOURISM_HERITAGE_HANOK_FOLK_VILLAGE` | 관광 > 국가유산 > 한옥·민속마을 |
+| 미분류 유산 (대분류만) | **`01070000`** `TOURISM_HERITAGE` | 관광 > 국가유산 |
+| 천연기념물 (자연) | **`01020400`** `TOURISM_NATURAL_LANDSCAPE_WATERFALL_CAVE` 또는 보존지 area_kind | 자연경관 계열 |
+| 무형유산 행사 | event는 카테고리 외 — `EventDetail.event_kind="intangible_heritage"` | n/a |
+
+marker_icon: `monument` / `religious-buddhist` / `castle` / `village` (유형별).
+marker_color: `P-07` (자홍 / 보라 계열).
+
 ## 4. kind 판정 룰
 
 | 유산 유형 | FeatureKind | 비고 |

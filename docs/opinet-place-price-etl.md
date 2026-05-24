@@ -13,6 +13,10 @@
 | source_entity_type | `fuel_station` |
 | 상세 테이블 | `feature_place_details`, `price_points`, `price_values` |
 | 코드 entrypoint | `krtour.map.providers.opinet`, `krtour.map.opinet` |
+| category | **`06020000`** `TRANSPORT_FUEL` (`docs/category.md` §4) — Tier path: 교통 > 주유소 |
+| place_kind | `fuel_station` |
+| marker_icon | `fuel` (maki) |
+| marker_color | `P-02` (주황) |
 | place 갱신 주기 | 월 1회 또는 OpiNet 분기 갱신 |
 | price 갱신 주기 | 일 3회 (`0 6,14,22 * * *`) |
 

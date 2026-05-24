@@ -288,50 +288,60 @@ PlaceDetail(
 
 ### 6.1 `PROMOTED_PLACE_KIND_BY_SLUG`
 
-| slug | place_kind | category prefix |
-|------|-----------|----------------|
-| `general_restaurants` | `restaurant` | `FOOD_RESTAURANT_*` |
-| `rest_cafes` | `cafe` | `FOOD_CAFE` |
-| `tourist_restaurants` | `restaurant_tourist` | `FOOD_RESTAURANT_TOURIST` |
-| `tourist_entertainment_restaurants` | `restaurant_entertainment_tourist` | `FOOD_ENTERTAINMENT` |
-| `foreigners_entertainment_restaurants` | `restaurant_entertainment_foreigner` | `FOOD_ENTERTAINMENT_FOREIGN` |
-| `bakeries` | `bakery` | `FOOD_BAKERY` |
-| `tourist_accommodations` | `lodging_tourist_hotel` | `LODGING_HOTEL_TOURIST` |
-| `lodgings` | `lodging_general` | `LODGING_GENERAL` |
-| `tourist_pensions` | `lodging_pension` | `LODGING_PENSION` |
-| `rural_homestays` | `lodging_rural_homestay` | `LODGING_RURAL_HOMESTAY` |
-| `foreigner_city_homestays` | `lodging_city_homestay_foreigner` | `LODGING_CITY_HOMESTAY` |
-| `general_campgrounds` | `lodging_campground_general` | `LODGING_CAMPGROUND` |
-| `auto_campgrounds` | `lodging_campground_auto` | `LODGING_CAMPGROUND_AUTO` |
-| `hanok_experience` | `lodging_hanok` | `LODGING_HANOK` |
-| `tourism_businesses` | `tourism_business_office` | `TOURISM_BUSINESS_OFFICE` |
-| `tourist_cruises` | `tourism_cruise` | `TOURISM_CRUISE` |
-| `city_tour_businesses` | `tourism_city_tour` | `TOURISM_CITY_TOUR` |
-| `tourist_railways` | `tourism_railway` | `TOURISM_RAILWAY` |
-| `museums_and_art_galleries` | `museum_art_gallery` | `CULTURE_MUSEUM` |
-| `performance_halls` | `performance_hall` | `CULTURE_PERFORMANCE_HALL` |
-| `tourist_performance_halls` | `performance_hall_tourist` | `CULTURE_PERFORMANCE_TOURIST` |
-| `tourist_theater_entertainment` | `theater_tourist_entertainment` | `CULTURE_THEATER_TOURIST` |
-| `traditional_temples` | `temple_traditional` | `CULTURE_TEMPLE` |
-| `amusement_facilities_other` | `theme_park_other` | `LEISURE_THEME_PARK_OTHER` |
-| `general_amusement_facilities` | `theme_park_general` | `LEISURE_THEME_PARK_GENERAL` |
-| `comprehensive_amusement_facilities` | `theme_park_comprehensive` | `LEISURE_THEME_PARK_COMPREHENSIVE` |
-| `special_resorts` | `resort_special` | `LEISURE_RESORT_SPECIAL` |
-| `comprehensive_resorts` | `resort_comprehensive` | `LEISURE_RESORT_COMPREHENSIVE` |
-| `international_convention_facilities` | `mice_convention_facility` | `MICE_CONVENTION_FACILITY` |
-| `international_convention_planners` | `mice_convention_planner` | `MICE_CONVENTION_PLANNER` |
-| `golf_courses` | `golf_course` | `LEISURE_GOLF_COURSE` |
-| `ski_resorts` | `ski_resort` | `LEISURE_SKI` |
-| `yacht_marinas` | `yacht_marina` | `LEISURE_YACHT` |
-| `horse_riding` | `horse_riding` | `LEISURE_HORSE_RIDING` |
-| `sledding` | `sledding` | `LEISURE_SLEDDING` |
-| `swimming_pools` | `swimming_pool` | `LEISURE_SWIMMING` |
-| `ice_rinks` | `ice_rink` | `LEISURE_ICE_RINK` |
-| `comprehensive_sports_facilities` | `sports_facility_comprehensive` | `LEISURE_SPORTS_COMPREHENSIVE` |
-| `registered_sports_facilities` | `sports_facility_registered` | `LEISURE_SPORTS_REGISTERED` |
-| `large_scale_retail_stores` | `retail_large_scale` | `SHOPPING_LARGE_SCALE` |
-| `movie_theaters` | `movie_theater` | `CULTURE_MOVIE_THEATER` |
-| `public_baths` | `public_bath` | `LEISURE_PUBLIC_BATH` |
+category 코드는 `docs/category.md` §4 표 참조. **본 라이브러리는 음식점 세부
+업태 분류가 없는 카테고리 체계라서 식음은 대부분 `FOOD_RESTAURANT` 부모(`02010000`)
+또는 베이커리 / 카페 leaf에 매핑된다.** 한식/양식 등 세부 매핑은 추가 ADR
+없이는 자동 결정 어려움.
+
+| slug | place_kind | category 코드 (권고) | Tier path |
+|------|-----------|---------------------|-----------|
+| `general_restaurants` | `restaurant` | `02010100` `FOOD_RESTAURANT_KOREAN` (기본) 또는 `02010000` 부모 | 식음 > 음식점 > (한식) |
+| `rest_cafes` | `cafe` | `02020100` `FOOD_CAFE_COFFEE` 또는 `02020000` 부모 | 식음 > 카페 |
+| `tourist_restaurants` | `restaurant_tourist` | `02010000` `FOOD_RESTAURANT` 부모 (관광식당 전용 코드 없음) | 식음 > 음식점 |
+| `tourist_entertainment_restaurants` | `restaurant_entertainment_tourist` | `02010800` `FOOD_RESTAURANT_BAR` (주점 trees) | 식음 > 음식점 > 주점 |
+| `foreigners_entertainment_restaurants` | `restaurant_entertainment_foreigner` | `02010800` `FOOD_RESTAURANT_BAR` | 동일 |
+| `bakeries` | `bakery` | `02011000` `FOOD_RESTAURANT_BAKERY` | 식음 > 음식점 > 베이커리 |
+| `tourist_accommodations` | `lodging_tourist_hotel` | `03010100` `LODGING_HOTEL_TOURIST` | 숙박 > 호텔 > 관광호텔 |
+| `lodgings` | `lodging_general` | `03040100` `LODGING_MOTEL_GENERAL` (또는 `03010000` 부모) | 숙박 > 모텔 > 일반 |
+| `tourist_pensions` | `lodging_pension` | `03050100` `LODGING_PENSION_TOURISM` | 숙박 > 펜션 > 관광펜션 |
+| `rural_homestays` | `lodging_rural_homestay` | `03050200` `LODGING_PENSION_RURAL` | 숙박 > 펜션 > 농어촌민박 |
+| `foreigner_city_homestays` | `lodging_city_homestay_foreigner` | `03070100` `LODGING_GUESTHOUSE_GENERAL` | 숙박 > 게스트하우스 |
+| `general_campgrounds` | `lodging_campground_general` | `03060000` `LODGING_CAMPGROUND` (부모) | 숙박 > 캠핑장 |
+| `auto_campgrounds` | `lodging_campground_auto` | `03060100` `LODGING_CAMPGROUND_AUTO` | 숙박 > 캠핑장 > 오토캠핑장 |
+| `hanok_experience` | `lodging_hanok` | `03070200` `LODGING_GUESTHOUSE_HANOK` | 숙박 > 게스트하우스 > 한옥체험 |
+| `tourism_businesses` | `tourism_business_office` | `01000000` `TOURISM` (대분류 — 전용 코드 없음, 후속 ADR로 신설 검토) | 관광 |
+| `tourist_cruises` | `tourism_cruise` | `01080300` `TOURISM_ACTIVITY_CRUISE` | 관광 > 액티비티 > 관광유람선 |
+| `city_tour_businesses` | `tourism_city_tour` | `01080000` `TOURISM_ACTIVITY` (부모) | 관광 > 액티비티 |
+| `tourist_railways` | `tourism_railway` | `01080200` `TOURISM_ACTIVITY_RAIL_CABLE` | 관광 > 액티비티 > 관광궤도 |
+| `museums_and_art_galleries` | `museum_art_gallery` | `01040000` `TOURISM_CULTURAL_FACILITY` (부모) — 박물관/미술관 추정 시 `01040100`/`01040200` 분기 | 관광 > 문화시설 |
+| `performance_halls` | `performance_hall` | `01040301` `TOURISM_CULTURAL_FACILITY_PERFORMANCE_HALL_GENERAL` | 관광 > 문화시설 > 공연장 > 일반 |
+| `tourist_performance_halls` | `performance_hall_tourist` | `01040302` `TOURISM_CULTURAL_FACILITY_PERFORMANCE_HALL_TOURISM` | 동일 > 관광공연장 |
+| `tourist_theater_entertainment` | `theater_tourist_entertainment` | `01040302` `TOURISM_CULTURAL_FACILITY_PERFORMANCE_HALL_TOURISM` (공유) | 동일 |
+| `traditional_temples` | `temple_traditional` | `01070100` `TOURISM_HERITAGE_TEMPLE` | 관광 > 국가유산 > 전통사찰 |
+| `amusement_facilities_other` | `theme_park_other` | `01010400` `TOURISM_THEME_PARK_EXPERIENCE` 또는 `01010000` 부모 | 관광 > 테마파크 |
+| `general_amusement_facilities` | `theme_park_general` | `01010102` `TOURISM_THEME_PARK_AMUSEMENT_SMALL` | 관광 > 테마파크 > 놀이공원 > 중소형 |
+| `comprehensive_amusement_facilities` | `theme_park_comprehensive` | `01010101` `TOURISM_THEME_PARK_AMUSEMENT_LARGE` | 동일 > 대형 |
+| `special_resorts` | `resort_special` | `03020100` `LODGING_RESORT_CONDO` 또는 `03020000` 부모 | 숙박 > 리조트 |
+| `comprehensive_resorts` | `resort_comprehensive` | `03020200` `LODGING_RESORT_COMPLEX` | 숙박 > 리조트 > 종합휴양업 |
+| `international_convention_facilities` | `mice_convention_facility` | `01000000` `TOURISM` (대분류) — MICE 전용 코드 없음 (후속 ADR) | 관광 |
+| `international_convention_planners` | `mice_convention_planner` | 동일 | 동일 |
+| `golf_courses` | `golf_course` | `01080100` `TOURISM_ACTIVITY_GOLF` | 관광 > 액티비티 > 골프장 |
+| `ski_resorts` | `ski_resort` | `01080400` `TOURISM_ACTIVITY_LEISURE_SPORTS` (스키 전용 코드 없음) | 관광 > 액티비티 > 레저스포츠 |
+| `yacht_marinas` | `yacht_marina` | `01080400` `TOURISM_ACTIVITY_LEISURE_SPORTS` | 동일 |
+| `horse_riding` | `horse_riding` | `01080400` | 동일 |
+| `sledding` | `sledding` | `01080400` | 동일 |
+| `swimming_pools` | `swimming_pool` | `01080400` | 동일 (또는 워터파크 카테고리 `01010200`) |
+| `ice_rinks` | `ice_rink` | `01080400` | 동일 |
+| `comprehensive_sports_facilities` | `sports_facility_comprehensive` | `01080400` | 동일 |
+| `registered_sports_facilities` | `sports_facility_registered` | `01080400` | 동일 |
+| `large_scale_retail_stores` | `retail_large_scale` | `05050000` `CONVENIENCE_DEPARTMENT_STORE` (백화점) 또는 `05030000` 마트 | 편의 > 백화점 / 마트 |
+| `movie_theaters` | `movie_theater` | `01040400` `TOURISM_CULTURAL_FACILITY_CINEMA` | 관광 > 문화시설 > 영화관 |
+| `public_baths` | `public_bath` | `04020100` `HOT_SPRING_SPA_SAUNA_BATHHOUSE` | 온천·스파 > 찜질방·사우나 > 목욕장업 |
+
+> 참고: 본 라이브러리 카테고리 체계는 음식점 세부 업태(한식/양식/일식/중식)
+> 자동 분류 데이터를 제공하지 않는다. 식음 슬러그는 부모 `02010000` 또는
+> 첫 leaf `02010100`(한식)을 기본으로 두고, 향후 자동 분류 데이터가 생기면
+> ADR로 매핑 정밀화. **사용자 결정 위임 항목 (검토 부탁)**.
 
 상수는 `krtour.map.providers.mois.PROMOTED_PLACE_KIND_BY_SLUG: Mapping[str, str]`.
 

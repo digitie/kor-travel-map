@@ -111,7 +111,261 @@ class PlaceCategory:
 | `format_category_tree(root_code=None, include_codes=True, active_only=True) -> str` | 트리 문자열 |
 | `print_category_tree(...)` | 위 결과 print |
 
-## 4. 의존 계층 위치
+## 4. Tier 1~4 카탈로그 (141건 전체)
+
+> 소스: `python-kraddr-base/src/kraddr/base/categories.py` (sync date
+> `2026-05-12`, ADR-023으로 본 저장소 이전 예정). 총 141건 = sentinel 1 +
+> Tier 1 7개 + Tier 2 29개 + Tier 3 71개 + Tier 4 33개.
+
+### 4.1 Tier 1 (대분류, 8개)
+
+| Tier 1 코드 | enum name | 한국어 | 본 라이브러리 주 적재 source |
+|------------|-----------|--------|---------------------------|
+| `00` | `UNCLASSIFIED` | 미분류 | sentinel — 모든 provider의 fallback |
+| `01` | `TOURISM` | 관광 | VisitKorea TourAPI, 국가유산, KHOA, 산림청, KNPS, 표준데이터 |
+| `02` | `FOOD` | 식음 | MOIS 인허가 (식음 슬러그), 표준데이터, place-phone 보강 |
+| `03` | `LODGING` | 숙박 | MOIS 인허가 (숙박 슬러그), 산림청 휴양림, 표준데이터 |
+| `04` | `HOT_SPRING_SPA` | 온천·스파 | MOIS 인허가 (목욕장업) |
+| `05` | `CONVENIENCE` | 편의 | 표준데이터 (주차장은 교통에), 공중화장실 |
+| `06` | `TRANSPORT` | 교통 | OpiNet (주유소), KREX (휴게소), 표준데이터 (주차장), 공항 |
+| `07` | `MEDICAL` | 의료 | MOIS 인허가 (의료 슬러그, 후속 검토) |
+
+`PlaceCategoryTier1Code` enum이 위 8개 코드를 정의. `PLACE_CATEGORY_TIER1_NAMES`
+dict가 한국어 라벨 제공.
+
+### 4.2 전체 카테고리 트리 (들여쓰기 뷰)
+
+```
+00 미분류 (UNCLASSIFIED) [maki: marker]
+
+01 관광 (TOURISM) [maki: attraction]
+  01.01 테마파크 (TOURISM_THEME_PARK) [maki: amusement-park]
+    01.01.01 놀이공원 (TOURISM_THEME_PARK_AMUSEMENT) [maki: amusement-park]
+      01.01.01.01 대형 테마파크 (..._LARGE) [maki: amusement-park]
+      01.01.01.02 중소형 놀이공원 (..._SMALL) [maki: amusement-park]
+    01.01.02 워터파크 (TOURISM_THEME_PARK_WATER) [maki: swimming]
+    01.01.03 동물원·수족관 (TOURISM_THEME_PARK_ZOO_AQUARIUM) [maki: zoo]
+      01.01.03.01 동물원 (..._ZOO) [maki: zoo]
+      01.01.03.02 수족관 (..._AQUARIUM) [maki: aquarium]
+    01.01.04 체험형 테마파크 (TOURISM_THEME_PARK_EXPERIENCE) [maki: attraction]
+  01.02 자연경관 (TOURISM_NATURAL_LANDSCAPE) [maki: natural]
+    01.02.01 산·계곡 (..._MOUNTAIN_VALLEY) [maki: mountain]
+      01.02.01.01 국립공원 (..._NATIONAL_PARK) [maki: park]
+      01.02.01.02 도립·군립공원 (..._LOCAL_PARK) [maki: park]
+      01.02.01.03 산림욕장 (..._FOREST_TRAIL) [maki: park]
+    01.02.02 강·호수 (..._RIVER_LAKE) [maki: water]
+    01.02.03 해안·섬 (..._COAST_ISLAND) [maki: beach]
+    01.02.04 폭포·동굴 (..._WATERFALL_CAVE) [maki: natural]
+  01.03 수목원·식물원 (TOURISM_BOTANICAL) [maki: garden]
+    01.03.01 수목원 (..._GARDEN) [maki: garden]
+      01.03.01.01 국립수목원 (..._NATIONAL) [maki: garden]
+      01.03.01.02 공립수목원 (..._PUBLIC) [maki: garden]
+      01.03.01.03 사립수목원 (..._PRIVATE) [maki: garden]
+    01.03.02 식물원 (..._PLANT_GARDEN) [maki: garden]
+    01.03.03 정원 (..._THEME_GARDEN) [maki: garden]
+  01.04 문화시설 (TOURISM_CULTURAL_FACILITY) [maki: museum]
+    01.04.01 박물관 (..._MUSEUM) [maki: museum]
+      01.04.01.01 국공립 박물관 (..._PUBLIC) [maki: museum]
+      01.04.01.02 사립 박물관 (..._PRIVATE) [maki: museum]
+      01.04.01.03 테마 박물관 (..._THEMED) [maki: museum]
+    01.04.02 미술관·갤러리 (..._ART) [maki: art-gallery]
+      01.04.02.01 미술관 (..._MUSEUM) [maki: art-gallery]
+      01.04.02.02 갤러리 (..._GALLERY) [maki: art-gallery]
+    01.04.03 공연장 (..._PERFORMANCE_HALL) [maki: theatre]
+      01.04.03.01 일반 공연장 (..._GENERAL) [maki: theatre]
+      01.04.03.02 관광공연장 (..._TOURISM) [maki: theatre]
+    01.04.04 영화관 (..._CINEMA) [maki: cinema]
+    01.04.05 도서관 (..._LIBRARY) [maki: library]
+    01.04.06 지방문화원 (..._CULTURE_CENTER) [maki: town-hall]
+  01.05 자연명소 (TOURISM_NATURE) [maki: natural]
+    01.05.01 해수욕장 (TOURISM_NATURE_BEACH) [maki: beach]    ← KHOA 해수욕장
+    01.05.02 공원·광장 (TOURISM_NATURE_PARK) [maki: park]
+    01.05.03 전망대 (TOURISM_NATURE_OBSERVATORY) [maki: viewpoint]
+  01.06 관광안내 (TOURISM_INFORMATION) [maki: information]
+    01.06.01 관광안내소 (..._CENTER) [maki: information]
+      01.06.01.01 공공 관광안내소 (..._PUBLIC) [maki: information]
+      01.06.01.02 민간 관광안내소 (..._PRIVATE) [maki: information]
+  01.07 국가유산 (TOURISM_HERITAGE) [maki: monument]    ← krheritage
+    01.07.01 전통사찰 (..._TEMPLE) [maki: religious-buddhist]
+    01.07.02 궁궐·왕릉 (..._PALACE_ROYAL_TOMB) [maki: castle]
+    01.07.03 사적·기념물 (..._HISTORIC_SITE) [maki: monument]
+    01.07.04 한옥·민속마을 (..._HANOK_FOLK_VILLAGE) [maki: village]
+  01.08 액티비티 (TOURISM_ACTIVITY) [maki: attraction]
+    01.08.01 골프장 (..._GOLF) [maki: golf]
+    01.08.02 관광궤도 (..._RAIL_CABLE) [maki: rail]
+    01.08.03 관광유람선 (..._CRUISE) [maki: ferry]
+    01.08.04 레저스포츠 (..._LEISURE_SPORTS) [maki: pitch]
+    01.08.05 트레킹·둘레길 (..._TREKKING) [maki: park]
+
+02 식음 (FOOD) [maki: restaurant]
+  02.01 음식점 (FOOD_RESTAURANT) [maki: restaurant]
+    02.01.01 한식 (..._KOREAN) [maki: restaurant]
+    02.01.02 양식 (..._WESTERN) [maki: restaurant]
+    02.01.03 일식 (..._JAPANESE) [maki: restaurant-sushi]
+    02.01.04 중식 (..._CHINESE) [maki: restaurant]
+    02.01.05 아시안 (..._ASIAN) [maki: restaurant]
+    02.01.06 패스트푸드 (..._FAST_FOOD) [maki: fast-food]
+    02.01.07 뷔페 (..._BUFFET) [maki: restaurant]
+    02.01.08 주점 (..._BAR) [maki: bar]
+    02.01.09 분식 (..._SNACK) [maki: fast-food]
+    02.01.10 베이커리 (..._BAKERY) [maki: bakery]
+  02.02 카페 (FOOD_CAFE) [maki: cafe]
+    02.02.01 커피전문점 (..._COFFEE) [maki: cafe]
+      02.02.01.01 프랜차이즈 카페 (..._FRANCHISE) [maki: cafe]
+      02.02.01.02 개인 카페 (..._INDEPENDENT) [maki: cafe]
+    02.02.02 디저트 카페 (..._DESSERT) [maki: cafe]
+    02.02.03 베이커리 카페 (..._BAKERY) [maki: bakery]
+
+03 숙박 (LODGING) [maki: lodging]
+  03.01 호텔 (LODGING_HOTEL) [maki: lodging]
+    03.01.01 관광호텔 (..._TOURIST) [maki: lodging]    ← MOIS tourist_accommodations
+    03.01.02 비즈니스호텔 (..._BUSINESS) [maki: lodging]
+    03.01.03 한옥호텔 (..._HANOK) [maki: lodging]
+  03.02 리조트 (LODGING_RESORT) [maki: lodging]
+    03.02.01 휴양콘도미니엄 (..._CONDO) [maki: lodging]
+    03.02.02 종합휴양업 (..._COMPLEX) [maki: lodging]
+  03.03 휴양림 (LODGING_RECREATION_FOREST) [maki: park]   ← 산림청 휴양림
+    03.03.01 국립휴양림 (..._NATIONAL) [maki: park]
+      03.03.01.01 산림청 운영 (..._KFS) [maki: park]
+    03.03.02 공립휴양림 (..._PUBLIC) [maki: park]
+      03.03.02.01 지자체 운영 (..._LOCAL) [maki: park]
+    03.03.03 사립휴양림 (..._PRIVATE) [maki: park]
+      03.03.03.01 민간 운영 (..._OPERATOR) [maki: park]
+  03.04 모텔 (LODGING_MOTEL) [maki: lodging]
+    03.04.01 일반 모텔 (..._GENERAL) [maki: lodging]
+  03.05 펜션 (LODGING_PENSION) [maki: home]
+    03.05.01 관광펜션 (..._TOURISM) [maki: home]    ← MOIS tourist_pensions
+    03.05.02 농어촌민박 (..._RURAL) [maki: home]    ← MOIS rural_homestays
+    03.05.03 민박 (..._PRIVATE_STAY) [maki: home]
+  03.06 캠핑장 (LODGING_CAMPGROUND) [maki: campsite]
+    03.06.01 오토캠핑장 (..._AUTO) [maki: campsite]    ← MOIS auto_campgrounds
+      03.06.01.01 일반 사이트 (..._GENERAL_SITE) [maki: campsite]
+      03.06.01.02 카라반·캠핑카 사이트 (..._CARAVAN_SITE) [maki: campsite]
+    03.06.02 글램핑·카라반 (..._GLAMPING_CARAVAN) [maki: campsite]
+      03.06.02.01 글램핑 (..._GLAMPING) [maki: campsite]
+      03.06.02.02 카라반 대여 (..._RENTAL) [maki: campsite]
+  03.07 게스트하우스 (LODGING_GUESTHOUSE) [maki: lodging]
+    03.07.01 게스트하우스 (..._GENERAL) [maki: lodging]    ← MOIS foreigner_city_homestays
+    03.07.02 한옥체험업 (..._HANOK) [maki: lodging]    ← MOIS hanok_experience
+
+04 온천·스파 (HOT_SPRING_SPA) [maki: hot-spring]
+  04.01 온천 (HOT_SPRING_SPA_HOT_SPRING) [maki: hot-spring]
+    04.01.01 온천시설 (..._FACILITY) [maki: hot-spring]
+  04.02 찜질방·사우나 (HOT_SPRING_SPA_SAUNA) [maki: hot-spring]
+    04.02.01 목욕장업 (..._BATHHOUSE) [maki: hot-spring]    ← MOIS public_baths
+  04.03 스파·테라피 (HOT_SPRING_SPA_THERAPY) [maki: hot-spring]
+    04.03.01 스파 (..._SPA) [maki: hot-spring]
+
+05 편의 (CONVENIENCE) [maki: convenience]
+  05.01 편의점 (..._STORE) [maki: convenience]
+  05.02 은행 (..._BANK) [maki: bank]
+  05.03 마트 (..._MART) [maki: grocery]
+  05.04 슈퍼마켓 (..._SUPERMARKET) [maki: shop]
+  05.05 백화점 (..._DEPARTMENT_STORE) [maki: clothing-store]
+  05.06 공중화장실 (..._TOILET) [maki: toilet]
+
+06 교통 (TRANSPORT) [maki: car]
+  06.01 주차장 (TRANSPORT_PARKING) [maki: parking]    ← 표준데이터 parking_lots
+  06.02 주유소 (TRANSPORT_FUEL) [maki: fuel]    ← OpiNet
+  06.03 정류장 (TRANSPORT_STOP) [maki: bus]
+    06.03.01 버스정류장 (..._BUS) [maki: bus]
+    06.03.02 지하철역 (..._SUBWAY) [maki: rail-metro]
+    06.03.03 기차역 (..._TRAIN) [maki: rail]
+    06.03.04 택시승강장 (..._TAXI) [maki: taxi]
+  06.04 휴게소 (TRANSPORT_REST_AREA) [maki: highway-rest-area]
+    06.04.01 고속도로휴게소 (..._HIGHWAY) [maki: highway-rest-area]
+      06.04.01.01 한국도로공사 휴게소 (..._EX) [maki: highway-rest-area]    ← KREX
+  06.05 공항 (TRANSPORT_AIRPORT) [maki: airport]
+
+07 의료 (MEDICAL) [maki: hospital]
+  07.01 병원 (MEDICAL_HOSPITAL) [maki: hospital]
+    07.01.01 종합병원 (..._GENERAL) [maki: hospital]
+    07.01.02 의원 (..._CLINIC) [maki: doctor]
+    07.01.03 치과 (..._DENTAL) [maki: dentist]
+  07.02 약국 (MEDICAL_PHARMACY) [maki: pharmacy]
+    07.02.01 일반 약국 (..._GENERAL) [maki: pharmacy]
+```
+
+### 4.3 표 형식 (전체 141 rows)
+
+전체 표는 `python-kraddr-base/src/kraddr/base/categories.py`의 `PLACE_CATEGORY_DEFINITIONS`
+tuple에서 자동 생성된다. depth별 통계:
+
+| depth | 건수 |
+|-------|----:|
+| 0 (sentinel) | 1 |
+| 1 (Tier 1 대분류) | 7 |
+| 2 (Tier 2 중분류) | 29 |
+| 3 (Tier 3 소분류) | 71 |
+| 4 (Tier 4 세분류) | 33 |
+| **합계** | **141** |
+
+자세한 행별 표는 코드(`format_category_tree()` 출력) 또는 `tests/unit/test_category.py`
+의 snapshot에 박는다 (코드 작성 단계 진입 시).
+
+### 4.4 maki icon 분포
+
+`PLACE_CATEGORY_MAPBOX_MAKI_ICONS` (55 unique icons → 141 rows):
+
+| maki icon | 사용 코드 수 | 주 사용 카테고리 |
+|-----------|------------:|-----------------|
+| `park` | 11 | 휴양림 전체, 공원·광장, 트레킹 |
+| `lodging` | 11 | 호텔/리조트/모텔/게스트하우스 |
+| `garden` | 7 | 수목원·식물원 전체 |
+| `hot-spring` | 7 | 온천·스파 전체 |
+| `campsite` | 7 | 캠핑장 전체 |
+| `restaurant` | 6 | 한식/양식/중식/아시안/뷔페/parent |
+| `museum` | 5 | 박물관 전체 + 문화시설 부모 |
+| `cafe` | 5 | 카페 부모/커피전문점/디저트 등 |
+| `information` | 4 | 관광안내 전체 |
+| `home` | 4 | 펜션 전체 |
+| `attraction` | 4 | TOURISM 부모, 체험형, 액티비티 부모 |
+| `amusement-park` | 4 | 테마파크/놀이공원 |
+| `highway-rest-area` | 3 | 휴게소 전체 |
+| `natural` | 3 | 자연경관/폭포·동굴/자연명소 부모 |
+| `art-gallery` | 3 | 미술관·갤러리 전체 |
+| `theatre` | 3 | 공연장 전체 |
+| `hospital` | 3 | 의료 부모, 병원 부모, 종합병원 |
+| `pharmacy` | 2 | 약국 부모, 일반 약국 |
+| `beach` | 2 | 해수욕장, 해안·섬 |
+| `fast-food` | 2 | 패스트푸드, 분식 |
+| `bakery` | 2 | 음식점 베이커리, 카페 베이커리 |
+| `zoo` | 2 | 동물원·수족관 부모, 동물원 |
+| `bus` | 2 | 정류장 부모, 버스정류장 |
+| `rail` | 2 | 관광궤도, 기차역 |
+| `monument` | 2 | 국가유산 부모, 사적·기념물 |
+| `convenience` | 2 | 편의 부모, 편의점 |
+| 기타 (1씩) | 29 | swimming, aquarium, mountain, water, viewpoint, cinema, library, town-hall, religious-buddhist, castle, village, golf, ferry, pitch, restaurant-sushi, bar, bank, grocery, shop, clothing-store, toilet, car, parking, fuel, rail-metro, taxi, airport, doctor, dentist, marker |
+
+`PLACE_CATEGORY_MAPBOX_MAKI_ICON_VALUES`는 정렬된 unique icon name tuple
+(`("airport", "amusement-park", "aquarium", ...)` 형태).
+
+### 4.5 본 라이브러리 provider별 주된 카테고리
+
+| Provider / dataset | 매핑되는 카테고리 (대표) | docs reference |
+|--------------------|-------------------------|----------------|
+| `python-visitkorea-api` (축제) | (이벤트는 카테고리 외 — `EventDetail.event_kind`) | event-feature-etl.md |
+| `python-mois-api` (식음 슬러그) | `02010100` ~ `02011000`, `02020100` (카페) | mois-feature-etl.md §6.1 |
+| `python-mois-api` (숙박 슬러그) | `03010100`, `03050100`, `03050200`, `03060100`, `03060200`, `03070200` 등 | mois-feature-etl.md §6.1 |
+| `python-mois-api` (관광 슬러그) | `01070100` 전통사찰, `01080300` 관광유람선, `01040100` 박물관 등 | mois-feature-etl.md §6.1 |
+| `python-mois-api` (목욕장업) | `04020100` HOT_SPRING_SPA_SAUNA_BATHHOUSE | mois-feature-etl.md §6.1 |
+| `python-opinet-api` | `06020000` TRANSPORT_FUEL | opinet-place-price-etl.md |
+| `python-krex-api` (휴게소) | `06040101` TRANSPORT_REST_AREA_HIGHWAY_EX | krex-rest-area-feature-etl.md |
+| `python-khoa-api` (해수욕장) | `01050100` TOURISM_NATURE_BEACH | khoa-beach-info-etl.md |
+| `python-krheritage-api` | `01070100` ~ `01070400` (사찰/궁궐/사적/한옥) | krheritage-feature-etl.md |
+| `python-krforest-api` (휴양림) | `03030101` LODGING_RECREATION_FOREST_NATIONAL_KFS | forest-feature-etl.md |
+| `python-krforest-api` (수목원) | `01030101` ~ `01030103` 수목원 | forest-feature-etl.md |
+| `python-krforest-api` (숲길/탐방로) | `01020103` 산림욕장, `01080500` 트레킹 | forest-feature-etl.md |
+| KNPS (data.go.kr, 후속) | `01020101` 국립공원 + 보조 (안내소/위험지역/화장실 등) | forest-feature-etl.md §11 |
+| `data.go.kr-standard` (박물관) | `01040101` ~ `01040103` | standard-data-feature-etl.md |
+| `data.go.kr-standard` (주차장) | `06010000` TRANSPORT_PARKING | standard-data-feature-etl.md |
+| `data.go.kr-standard` (관광지) | `01000000` 트리 다양 (provider 매핑별) | standard-data-feature-etl.md |
+| `data.go.kr-standard` (관광길) | route — `RouteDetail.route_type`으로 분류, category는 보조 | standard-data-feature-etl.md |
+| 공중화장실 (후속) | `05060000` CONVENIENCE_TOILET | (별도 dataset) |
+
+위 매핑은 v2 1차 기준. 새 provider 추가 시 본 표 갱신 + ADR.
+
+## 5. 의존 계층 위치
 
 본 모듈은 의존 계층의 **최하단**이다 (다른 어떤 내부 모듈도 import 안 함):
 

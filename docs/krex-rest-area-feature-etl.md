@@ -23,9 +23,9 @@
 | natural key | 휴게소 ID (provider 제공) |
 | FeatureKind | `place` |
 | place_kind | `rest_area` |
-| category | `TRANSPORT_REST_AREA` |
-| marker_icon | `car` |
-| marker_color | `P-15` |
+| category | **`06040101`** `TRANSPORT_REST_AREA_HIGHWAY_EX` (`docs/category.md` §4) — Tier path: 교통 > 휴게소 > 고속도로휴게소 > 한국도로공사 휴게소 |
+| marker_icon | `highway-rest-area` (maki) |
+| marker_color | `P-15` (주홍) |
 | 갱신 주기 | 월 1회 |
 | `KREX_REST_AREA_FULL_SCAN_INTERVAL_DAYS` | 30 |
 

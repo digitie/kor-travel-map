@@ -36,10 +36,10 @@ ETL이다.
 | natural key | `content_id` (VisitKorea PK) |
 | FeatureKind | `event` |
 | detail table | `feature_event_details` |
-| category | `EVENT_FESTIVAL` 또는 `EVENT_*` (`krtour.map.category`) |
+| category | event는 `EventDetail.event_kind`(`festival`/`concert`/`exhibition` 등)로 1차 분류. `features.category` 컬럼에는 `01000000` `TOURISM` (대분류) 또는 행사 성격에 맞는 `01040*` (문화시설) 카테고리 — 공식 카테고리 트리는 `docs/category.md` §4 |
 | source_role | `primary` |
 | marker_icon | `star` |
-| marker_color | `P-11` |
+| marker_color | `P-11` (자홍) |
 
 ## 5. 주소·좌표
 

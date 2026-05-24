@@ -13,6 +13,7 @@
 | Feature.kind | (weather → `WeatherValue` 적재) / (alert → `notice` 적재) |
 | 코드 entrypoint | `krtour.map.providers.kma` |
 | 갱신 주기 | endpoint별 (10분~12시간) |
+| category | weather-only anchor (`kind=weather`)는 `features.category` 일반적으로 비움. 기존 place feature에 `WeatherValue`를 붙이는 경우 그 feature의 category 유지 (`docs/category.md` §4). 산악 관측소 anchor는 `WEATHER_MOUNTAIN_STATION` 신설 후보 (forest-feature-etl.md §11.6) |
 
 ## 2. 4종 weather endpoint
 

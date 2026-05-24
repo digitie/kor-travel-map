@@ -13,15 +13,17 @@
 | 코드 구조 | `catalog.py` / `client.py` / `etl.py` / `exceptions.py` |
 | 갱신 주기 | dataset별 (월 / 반기 / 연 / 주) |
 
-## 2. 5종 dataset
+## 2. 5종 dataset (카테고리 매핑 포함)
 
-| dataset_key | data.go.kr id | Feature.kind | 권장 갱신 |
-|-------------|--------------|--------------|-----------|
-| `standard_tourism_roads` | `15017321` | `route` | 연 1회 full + 월 1회 metadata probe |
-| `standard_museums` | `15017323` | `place` | 연 1회 |
-| `standard_parking_lots` | `15012896` | `place` | 반기 1회 |
-| `standard_tourist_sites` | `15021141` | `place` (경계 source 확인 후 `area` 후보) | 연 1회 |
-| `standard_cultural_festivals` | `15013104` | `event` | 주 1회 metadata + 월 1회 changed full scan |
+| dataset_key | data.go.kr id | Feature.kind | category | 권장 갱신 |
+|-------------|--------------|--------------|----------|-----------|
+| `standard_tourism_roads` | `15017321` | `route` | **`01020103`** `TOURISM_NATURAL_LANDSCAPE_MOUNTAIN_VALLEY_FOREST_TRAIL` 또는 `01080500` `TOURISM_ACTIVITY_TREKKING` (route_type별 분기) | 연 1회 full + 월 1회 metadata probe |
+| `standard_museums` | `15017323` | `place` | **`01040101`** `TOURISM_CULTURAL_FACILITY_MUSEUM_PUBLIC` 또는 `01040102` `_PRIVATE` (소속별 분기) | 연 1회 |
+| `standard_parking_lots` | `15012896` | `place` | **`06010000`** `TRANSPORT_PARKING` | 반기 1회 |
+| `standard_tourist_sites` | `15021141` | `place` (경계 source 확인 후 `area` 후보) | **`01050200`** `TOURISM_NATURE_PARK` 또는 `01000000` `TOURISM` (대분류) | 연 1회 |
+| `standard_cultural_festivals` | `15013104` | `event` | event는 카테고리 외 — `EventDetail.event_kind="cultural_festival"`. `features.category`는 `01000000` `TOURISM` (대분류) | 주 1회 metadata + 월 1회 changed full scan |
+
+자세한 Tier 1~4 트리는 `docs/category.md` §4.
 
 ## 3. 모듈 구조
 

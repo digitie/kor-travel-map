@@ -29,7 +29,7 @@
 |------|----|
 | natural key | `시도\|구군\|정점명` 조합 |
 | FeatureKind | `place` |
-| category | `TOURISM_NATURE_BEACH` (`01050100`) — `krtour.map.category` |
+| category | **`01050100`** `TOURISM_NATURE_BEACH` (`docs/category.md` §4) — Tier path: 관광 > 자연명소 > 해수욕장 |
 | place_kind | `beach` |
 | marker_icon | `swimming` |
 | marker_color | `P-07` (하늘색) |
