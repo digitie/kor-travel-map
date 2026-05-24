@@ -1,0 +1,230 @@
+# architecture.md
+
+`python-krtour-map`의 아키텍처는 **계층(layered) + 함수 라이브러리** 모델이다.
+`python-kraddr-geo`의 계층과 동일하지만, 상위 앱(TripMate)에는 REST가 아니라 함수
+호출로 직접 연결된다.
+
+## 1. 큰 그림
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│ TripMate (FastAPI + Admin UI + Dagster)                              │
+│   └── from krtour_map import AsyncKrtourMapClient                    │
+│         └── 함수 직접 호출 (HTTP 없음)                                  │
+└──────────────────────────────────────────────────────────────────────┘
+                              │ 동일 process / 동일 venv
+                              ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│ python-krtour-map (이 저장소)                                          │
+│                                                                      │
+│  api/          FastAPI 라우터 (옵션, 디버그 UI 전용, 인증 없음)            │
+│   ▲                                                                  │
+│  cli/          typer CLI (옵션)                                       │
+│   ▲                                                                  │
+│  client.py     AsyncKrtourMapClient (라이브러리 진입점)                  │
+│   ▲                                                                  │
+│  providers/    provider별 raw → DTO 변환 (wrapper 신규 생성 금지)         │
+│   ▲                                                                  │
+│  infra/        DB 어댑터 (SQLAlchemy 2 async, raw SQL, Alembic)        │
+│   ▲                                                                  │
+│  core/         비즈니스 로직 (Protocol에만 의존)                          │
+│   ▲                                                                  │
+│  dto/          Pydantic v2 입출력 (DB/FastAPI 의존 없음)                 │
+└──────────────────────────────────────────────────────────────────────┘
+        │                       │                       │
+        ▼                       ▼                       ▼
+┌────────────────┐    ┌───────────────────┐    ┌──────────────────┐
+│ PostgreSQL 16  │    │ S3 호환 객체 저장소  │    │ python-*-api     │
+│ + PostGIS 3.5  │    │ (RustFS / MinIO)   │    │ provider clients │
+│ + pg_trgm      │    │                    │    │                  │
+│ + pgcrypto     │    │                    │    │ KMA, VisitKorea, │
+│                │    │                    │    │ KRMOIS, OpiNet,  │
+│ schema:        │    │                    │    │ KREX, KHOA,      │
+│ - feature      │    │                    │    │ 국가유산, 산림청, │
+│ - provider_sync│    │                    │    │ AirKorea, KASI,  │
+│ - ops          │    │                    │    │ data.go.kr, ...  │
+│ - x_extension  │    │                    │    │                  │
+└────────────────┘    └───────────────────┘    └──────────────────┘
+```
+
+## 2. 의존 방향 (한 방향 강제)
+
+```
+dto → core → infra → providers → client → api/cli
+```
+
+- 위 화살표를 거스르는 import는 `import-linter`로 CI에서 차단한다 (ADR-002 / 7).
+- `core/`는 Protocol(`FeatureRepo`, `DedupRepo`, `ProviderSyncRepo`,
+  `WeatherValuesRepo`, `FileStore`, ...)에만 의존한다. `infra/`/`providers/`는
+  이 Protocol의 구체 구현이다.
+- `core/`는 **순수**해야 한다 — DB, FastAPI, 파일시스템, 외부 네트워크 의존 없음.
+  단위 테스트는 Fake repo로 100% 가능해야 한다.
+- `providers/`는 `python-*-api`의 typed model을 받아 `dto/`의 모델로 정규화하는
+  **순수 함수**의 집합이다. 새 wrapper class를 만들지 않는다 (ADR-002).
+- `client.py`는 `providers/`와 `infra/` repository를 합쳐 외부에 노출하는
+  단일 진입점 `AsyncKrtourMapClient`다.
+- `api/`는 `client.py`를 호출하는 얇은 라우터다. 직접 `infra/`/`providers/`를
+  부르지 않는다.
+
+## 3. TripMate와의 연계 (함수 직접 호출)
+
+```python
+# TripMate apps/api/app/etl/festival_asset.py (예시)
+from krtour_map import AsyncKrtourMapClient
+
+@asset(...)
+async def feature_event_festivals(ctx, visitkorea_client):
+    async with AsyncKrtourMapClient(
+        engine=tripmate_async_engine,
+        file_store=tripmate_rustfs_store,
+        kraddr_geo_client=tripmate_kraddr_client,
+    ) as client:
+        items = visitkorea_client.search_festival(...)        # provider 직접
+        bundles = client.providers.visitkorea.festival_to_bundles(items)
+        result = await client.load_festivals(bundles)
+        ctx.log.info("loaded", extra=result.as_metadata())
+```
+
+- TripMate는 SQLAlchemy 2 async engine, 객체 저장소 client, kraddr-geo client
+  등을 라이브러리에 주입한다.
+- 라이브러리는 어떤 resource도 스스로 생성하지 않는다.
+- TripMate ↔ 라이브러리 사이에 HTTP는 없다.
+
+## 4. 디버그 REST API (옵션)
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│ krtour_map.api  (uvicorn krtour_map.api.app:app --port 8600)     │
+│   ├── /features/{id}                                             │
+│   ├── /features/in-bounds                                        │
+│   ├── /features/nearby                                           │
+│   ├── /features/{id}/weather                                     │
+│   ├── /features/{id}/sources                                     │
+│   ├── /providers/{name}/sync-state                               │
+│   ├── /debug/explain   (raw SQL EXPLAIN viewer)                  │
+│   ├── /debug/fixtures  (fixture 저장/replay)                      │
+│   └── /admin/dedup-review, /admin/integrity                      │
+└──────────────────────────────────────────────────────────────────┘
+        │  authentication: 없음 (내부망 / localhost 전제)
+        ▼
+   AsyncKrtourMapClient (client.py)
+```
+
+- **인증 키 없음**. 내부망 / localhost / 사내망 전제 (ADR-005).
+- 외부 노출이 필요해지면 네트워크 계층(SSO 게이트웨이, IP allowlist,
+  Cloudflare Tunnel)에서 보호한다. 라이브러리 코드/응답에 인증 로직이 들어가지
+  않는다.
+- TripMate는 이 API에 의존하지 않는다 (함수 직접 호출).
+- 향후 내부 도구(데이터 큐레이터 콘솔, ETL 검증 자동화 등)가 추가될 때 본 API를
+  활용한다.
+
+## 5. 데이터 흐름 (적재 → 조회)
+
+### 5.1 적재 (provider → DB)
+
+```
+[provider API] → python-*-api client (raw + typed model)
+              → providers/<name>.py (순수 변환)
+              → dto.FeatureBundle (Feature + Detail + SourceRecord + SourceLink
+                + FeatureFileSource + (optional) WeatherValue / PriceValue)
+              → core.load_pipeline (validation, dedup blocking, FeatureFileSource
+                업로드)
+              → infra.repos (raw SQL upsert; bulk는 COPY)
+              → Postgres + 객체 저장소
+              → infra.provider_sync_repo (cursor 업데이트)
+              → infra.import_jobs_repo (state='done' + progress)
+```
+
+### 5.2 조회 (TripMate → 사용자)
+
+```
+[TripMate 사용자] → TripMate API/Admin UI
+                  → AsyncKrtourMapClient.<query>(...)
+                  → infra.repos (raw SQL EXPLAIN-검증된 쿼리)
+                  → DTO 반환 → TripMate가 HTTP 응답으로 래핑
+```
+
+## 6. 4 schema
+
+- `feature` — `features`, `feature_*_details`, `feature_files`,
+  `feature_opening_periods`, `feature_special_days`,
+  `feature_weather_values`, `price_points`, `price_values`,
+  `feature_merge_history`, `feature_overrides`.
+- `provider_sync` — `source_records`, `source_links`, `provider_sync_state`.
+- `ops` — `import_jobs`, `dedup_review_queue`, `data_integrity_violations`,
+  `api_call_log` (구독 옵션).
+- `x_extension` — `postgis`, `postgis_topology`, `pg_trgm`, `pgcrypto`
+  (ADR-008, search_path에 추가).
+
+schema 분리로 TripMate 도메인 테이블(`users`, `trips`, `trip_pois`, ...)과
+명확히 격리한다. 테이블별 ddl은 `data-model.md`.
+
+## 7. 모듈 책임 1줄 요약
+
+| 모듈 | 역할 |
+|------|------|
+| `dto/feature.py` | `FeatureBase`, `FeatureKind`, `FeatureStatus`, `FeatureUrls` |
+| `dto/details.py` | `PlaceDetail`, `EventDetail`, `NoticeDetail`, `RouteDetail`, `AreaDetail` |
+| `dto/weather.py` | `WeatherValue`, `ForecastStyle`, `TimelineBucket`, `WeatherDomain` |
+| `dto/price.py` | `PricePoint`, `PriceValue` |
+| `dto/source.py` | `SourceRecord`, `SourceLink`, `SourceRole`, `RawDataRef` |
+| `dto/files.py` | `FeatureFile`, `FeatureFileSource` |
+| `dto/opening_hours.py` | `OpeningTime`, `OpeningPeriod`, `SpecialOpeningDay`, `FeatureOpeningHours` |
+| `dto/sync.py` | `ProviderSyncState` |
+| `dto/jobs.py` | `ImportJob`, `ImportJobState` |
+| `core/ids.py` | `make_feature_id`, `make_source_record_key`, `make_payload_hash` |
+| `core/providers.py` | `CANONICAL_PROVIDER_NAMES`, `normalize_provider_name` |
+| `core/scoring.py` | Record Linkage scoring + `normalize_kr_place_name` |
+| `core/weather.py` | `build_weather_card`, `latest_weather_values` |
+| `core/protocols.py` | Repository Protocol 정의 |
+| `core/exceptions.py` | 도메인 예외 |
+| `core/settings.py` | Pydantic settings (`KRTOUR_MAP_*`, `SecretStr`) |
+| `infra/models.py` | SQLAlchemy ORM 매핑 (read-only mapping) |
+| `infra/features_repo.py` | raw SQL repository (`_SQL` 상수 + `text()`) |
+| `infra/source_repo.py`, `infra/sync_repo.py`, `infra/jobs_repo.py`, ... | 각 도메인 repository |
+| `infra/file_store.py` | S3 호환 객체 저장소 (RustFS) |
+| `providers/<name>.py` | provider raw → DTO 변환 + dataset_key 상수 |
+| `client.py` | `AsyncKrtourMapClient` |
+| `api/app.py`, `api/routers/*.py` | 디버그 FastAPI |
+| `cli/main.py` | `krtour-map` CLI |
+
+## 8. 핵심 결정 요약 (전체는 `decisions.md`)
+
+| ADR | 결정 |
+|-----|------|
+| ADR-001 | v1은 `v1` 브랜치 보존, main은 orphan v2로 재시작 |
+| ADR-002 | 의존 계층 + import-linter 강제 / async-only API |
+| ADR-003 | TripMate ↔ 라이브러리는 함수 호출 (REST 없음) |
+| ADR-004 | ORM은 매핑만, 쿼리는 raw SQL `text()` |
+| ADR-005 | 디버그 REST API는 인증 없음, 내부망 전용 |
+| ADR-006 | provider adapter/wrapper 신규 생성 금지 |
+| ADR-007 | Postgres + PostGIS + SQLAlchemy 2 async + GeoAlchemy2 + GeoPandas 채택 |
+| ADR-008 | PostGIS extension은 `x_extension` schema 격리 |
+| ADR-009 | `feature_id` 결정적 생성 (`make_feature_id`) |
+| ADR-010 | weather: `forecast_style` + `timeline_bucket` 분리 |
+| ADR-011 | 작업 큐는 `import_jobs` 영속화, advisory lock + SKIP LOCKED |
+| ADR-012 | 공간 쿼리는 입력 좌표 1회 변환, 반경은 `coord_5179`(meter) |
+| ADR-013 | bulk insert는 `psycopg.copy_*` 우선, 안전 마진 30k |
+| ADR-014 | 테스트 4단계 (unit/integration/e2e/fixture) + Coverage 목표 |
+| ADR-015 | 객체 저장소는 S3 호환만 가정, RustFS 1차, MinIO/Ceph/R2 swap |
+| ADR-016 | Record Linkage: blocking(`ST_DWithin 100m + bjd_code + kind`) → scoring(0.45/0.35/0.20) → 임계값 0.85/0.65 |
+| ADR-017 | 보관 정책: place 무기한, event +20y, notice +1y, weather +30d, price 카테고리별 |
+| ADR-018 | `Feature.detail`은 자유 dict 금지 (`DETAIL_MODELS` 분기 강제) |
+| ADR-019 | KST aware datetime만 허용 (`kst_now()`) |
+
+## 9. v1 대비 변경 요약
+
+| 항목 | v1 | v2 |
+|------|----|-----|
+| 의존 계층 | 명시되지 않음 | dto/core/infra/providers/client/api 5층 + import-linter |
+| TripMate 연계 | 일부 함수 + 일부 라우터 | 함수 호출 전용 |
+| 디버그 UI | stdlib HTTP server (별도 package) | FastAPI 라우터 (옵션, 인증 없음) |
+| ORM | 일부 SQLAlchemy ORM 사용 | ORM은 매핑만, 쿼리는 raw SQL `text()` |
+| 시간 | 일부 naive datetime 혼재 | KST aware 일원화 |
+| 공간 쿼리 | 좌표 자유 변환 | `coord_5179`(meter) 기준, CTE 1회 변환 강제 |
+| bulk insert | SQLAlchemy `values()` | `psycopg.copy_*` 우선 |
+| 작업 큐 | 없음 / 메모리 | `import_jobs` 영속화 |
+| 객체 저장소 | RustFS hard-coded | S3 호환만 가정, swap 가능 |
+| 테스트 | replay fixture 중심 | unit/integration/e2e/fixture 4단계 |
+| 디버그 API 인증 | 없음 (v1과 동일) | 없음 (명시적 결정 ADR-005) |
+| v1 동기 인터페이스 | 일부 동기 path | 동기 신규 추가 금지 (async-only) |

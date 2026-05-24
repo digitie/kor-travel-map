@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+.installed.cfg
+
+# venv
+.venv/
+venv/
+env/
+
+# caches
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.import_linter_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Office / Word lock files
+~$*
+*.tmp
+
+# env / secrets
+.env
+.env.*
+!.env.example
+
+# data / artifacts (kept on NTFS, not in git per AGENTS.md §dev-environment)
+data/
+artifacts/
+*.log
+
+# alembic generated migrations cache (none yet, kept for future)
+alembic/__pycache__/
+
+# Codex / Claude / agent local state
+.claude/
+.codex_tmp/
+
+# Local tool state
+.dagster/

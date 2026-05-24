@@ -1,0 +1,149 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "python-krtour-map"
+version = "0.2.0-dev"
+description = "TripMate map feature aggregation and CRUD contracts (v2 design stage)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "GPL-3.0-or-later" }
+authors = [{ name = "digitie" }]
+keywords = ["tripmate", "map", "features", "korea", "travel", "postgis"]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Typing :: Typed",
+]
+# v2 설계 단계 — dependencies는 코드 작성 단계에서 ADR과 함께 확정.
+# 아래는 ADR-007/008/...에서 합의된 1차 스택의 placeholder.
+dependencies = [
+  "pydantic>=2.7",
+  "sqlalchemy>=2.0",
+  "geoalchemy2>=0.15",
+  "asyncpg>=0.29",
+  "psycopg[binary,pool]>=3.2",
+  "shapely>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "pytest-asyncio>=0.23",
+  "hypothesis>=6.100",
+  "ruff>=0.5",
+  "mypy>=1.10",
+  "import-linter>=2.0",
+  "testcontainers[postgres]>=4",
+  "vcrpy>=6",
+  "coverage>=7",
+]
+api = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+]
+geo = [
+  "geopandas>=1.0",
+  "gdal>=3.8",      # 시스템 GDAL 버전과 맞춤
+]
+providers = [
+  # provider 라이브러리는 git URL + commit sha 핀 (코드 작성 단계에서 ADR과 함께 확정)
+  # "python-kraddr-base @ git+https://github.com/digitie/python-kraddr-base.git@<sha>",
+  # "python-kraddr-geo  @ git+https://github.com/digitie/python-kraddr-geo.git@<sha>",
+  # "python-visitkorea-api @ git+...",
+  # "python-kasi-api     @ git+...",
+  # "python-krmois-api   @ git+...",
+  # "python-opinet-api   @ git+...",
+  # "python-krex-api     @ git+...",
+  # "python-kma-api      @ git+...",
+  # "python-krairport-api @ git+...",
+  # "python-khoa-api     @ git+...",
+  # "python-airkorea-api @ git+...",
+  # "python-mcst-api     @ git+...",
+  # "python-krforest-api @ git+...",
+  # "python-krheritage-api @ git+...",
+  # "python-datagokr-api @ git+...",
+]
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["krtour_map*"]
+
+[tool.setuptools.package-data]
+krtour_map = ["py.typed"]
+
+# =============================================================================
+# Lint / Type / Test
+# =============================================================================
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC", "PIE", "PT", "RET", "SIM", "TID"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_ignores = true
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "src"]
+asyncio_mode = "auto"
+addopts = "-ra --strict-markers --strict-config"
+markers = [
+  "unit: 단위 테스트 — DB 없이 Fake repo만",
+  "integration: 통합 테스트 — testcontainers PostGIS 필요",
+  "e2e: 디버그 API + integration DB",
+  "slow: 느린 테스트 (CI nightly only)",
+  "fixture_replay: replay fixture 회귀",
+]
+filterwarnings = [
+  "error",
+  "ignore::DeprecationWarning:pkg_resources.*",
+]
+
+[tool.coverage.run]
+source = ["src/krtour_map"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+  "pragma: no cover",
+  "raise NotImplementedError",
+  "if TYPE_CHECKING:",
+  "@overload",
+]
+fail_under = 0   # 코드 작성 단계에서 단계적으로 상향 (target: core 90+, infra 80+, 전체 80+)
+
+# =============================================================================
+# import-linter (의존 계층 강제) — 코드 작성 단계 시작 시 활성화
+# =============================================================================
+
+[tool.importlinter]
+root_package = "krtour_map"
+
+[[tool.importlinter.contracts]]
+name = "layered architecture"
+type = "layers"
+layers = [
+  "krtour_map.api",
+  "krtour_map.cli",
+  "krtour_map.client",
+  "krtour_map.providers",
+  "krtour_map.infra",
+  "krtour_map.core",
+  "krtour_map.dto",
+]

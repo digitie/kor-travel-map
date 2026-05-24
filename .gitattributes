@@ -1,0 +1,20 @@
+* text=auto eol=lf
+
+# Binary
+*.docx binary
+*.xlsx binary
+*.pdf binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.zip binary
+*.gz binary
+*.tar binary
+*.sqlite binary
+*.db binary
+
+# Force LF for shell/sql
+*.sh text eol=lf
+*.sql text eol=lf
+*.py text eol=lf
