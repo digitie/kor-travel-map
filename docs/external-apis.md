@@ -172,7 +172,13 @@ provider API spec이 변경되면:
 
 - **Google Places API (New)**: 호출당 비용. Place phone enrichment는 candidate
   3개 미만으로 제한 (`PLACE_PHONE_MAX_CANDIDATES=3`).
-- **Kakao Maps JS SDK** (frontend, TripMate 측): 일 호출 한도. 모니터링 필요.
+- **Kakao Maps JS SDK** (frontend, TripMate 사용자 UI 측): 일 호출 한도. 모니터링
+  필요. *(본 라이브러리의 디버그 UI는 Kakao 미사용 — `maplibre-vworld-js` +
+  VWorld 사용, ADR-025)*
+- **VWorld API** (`maplibre-vworld-js` 의 raster/vector tile): 본 라이브러리
+  디버그 UI frontend가 사용. 키는 `python-kraddr-geo`의
+  `KRADDR_GEO_VWORLD_API_KEY` 공유 또는 디버그 UI 전용 `VITE_VWORLD_API_KEY`
+  별도 발급. HTTP referrer 제한 권장.
 - **OpiNet**: 분당 한도 — token bucket으로 보호.
 
 ## 9. 운영 모니터링

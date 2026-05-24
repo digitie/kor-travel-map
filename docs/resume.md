@@ -71,6 +71,9 @@ Python 패키지 `krtour-map-debug-ui` (ADR-020, `packages/krtour-map-debug-ui/`
 - [x] **ADR-024** + `docs/mois-feature-etl.md` 신설 — `python-mois-api` full lifecycle
       (Step A/B/C/D), 195 슬러그 카탈로그, PROMOTED 42종 + EXCLUDED 분류
 - [x] 일괄 rename `krmois` → `mois` (canonical name 정정, ADR-024)
+- [x] **ADR-025** — 디버그 UI frontend `maplibre-vworld-js` 채택
+- [x] `docs/debug-ui-package.md` §14 frontend 사양 + `packages/krtour-map-debug-ui/frontend/`
+      skeleton (package.json / .env.example / .gitignore / README)
 - [x] T-007 `docs/dagster-boundary.md`
 - [x] T-008 `docs/postgres-schema.md`
 - [x] T-009 `docs/debug-fixture-workflow.md`
@@ -89,7 +92,9 @@ Python 패키지 `krtour-map-debug-ui` (ADR-020, `packages/krtour-map-debug-ui/`
 - **ADR-022** — OpenAPI export 정책 (디버그 패키지 노출 시점부터 활성화)
 - **ADR-023** — Coverage 단계적 상향 일정 (Sprint 1 → Sprint 5)
 - **ADR-024** — 정합성 검증 (`feature_consistency_reports`) 도입 시점
-- **ADR-025** — 신규 provider 추가 절차 표준 (체크리스트)
+- **ADR-026** — 카테고리 확장 (KNPS 위험지역/대피소/관측소 등)
+- **ADR-027** — `python-knps-api` provider 등록
+- **ADR-028+** — 신규 provider 추가 절차 표준 (체크리스트)
 
 ## 차단 사유 / 결정 대기
 
