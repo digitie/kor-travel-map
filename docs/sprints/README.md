@@ -5,11 +5,11 @@
 
 | Sprint | 파일 | 상태 | 목표 |
 |--------|------|------|------|
-| Sprint 1 | [SPRINT-1.md](./SPRINT-1.md) | proposed | 코드 작성 단계 진입 + scaffolding + category 코드 이전 (provider 없음) |
-| Sprint 2 | [SPRINT-2.md](./SPRINT-2.md) | proposed | MOIS-독립 작은 provider 4건 (축제·날씨·유가·휴게소) + 디버그 UI backend 첫 라우터 (ADR-031) |
-| Sprint 3 | [SPRINT-3.md](./SPRINT-3.md) | proposed | 국립공원/트래킹 (KNPS+krforest_trails) + 국가유산 (krheritage) + 정합성 Phase 1 (F1~F3, ADR-033) |
-| Sprint 4 | [SPRINT-4.md](./SPRINT-4.md) | proposed | **MOIS 인허가** bulk (4단계 lifecycle) + dedup queue 운영 시작 (Coverage 80% 도달, ADR-032) |
-| Sprint 5 | [SPRINT-5.md](./SPRINT-5.md) | proposed | MOIS-sibling (휴양림/수목원/박물관/표준데이터) + 정합성 Phase 2 (F4~F8 + Dagster 게이트) + 운영 직전 T-200~T-204 |
+| Sprint 1 | [SPRINT-1.md](./SPRINT-1.md) | **active** (T-014 진입, 2026-05-25) | 코드 작성 단계 진입 + scaffolding + category 코드 이전 (provider 없음) |
+| Sprint 2 | [SPRINT-2.md](./SPRINT-2.md) | accepted (시기 대기) | MOIS-독립 작은 provider 4건 (축제·날씨·유가·휴게소) + 디버그 UI backend 첫 라우터 (ADR-031) |
+| Sprint 3 | [SPRINT-3.md](./SPRINT-3.md) | accepted (시기 대기) | 국립공원/트래킹 (KNPS+krforest_trails) + 국가유산 (krheritage) + 정합성 Phase 1 (F1~F3, ADR-033) |
+| Sprint 4 | [SPRINT-4.md](./SPRINT-4.md) | accepted (시기 대기) | **MOIS 인허가** bulk (4단계 lifecycle) + dedup queue 운영 시작 (Coverage 80% 도달, ADR-032) |
+| Sprint 5 | [SPRINT-5.md](./SPRINT-5.md) | accepted (시기 대기) | MOIS-sibling (휴양림/수목원/박물관/표준데이터) + 정합성 Phase 2 (F4~F8 + Dagster 게이트) + 운영 직전 T-200~T-204 |
 
 ## 9단계 구현 순서 (ADR-034)
 

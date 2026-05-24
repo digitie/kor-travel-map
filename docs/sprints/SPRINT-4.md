@@ -1,6 +1,6 @@
 # SPRINT-4.md — MOIS 인허가 bulk + dedup queue 운영
 
-> **상태**: proposed (Sprint 3 종료 후 Sprint 4 진입 PR로 accepted 전환)
+> **상태**: accepted (시기 대기 — Sprint 3 종료 후 Sprint 4 진입 PR)
 >
 > **목적**: ADR-034 9단계의 ⑦ — `python-mois-api` 인허가 4단계 lifecycle
 > 적재. 가장 큰 bulk + 195 슬러그 + PROMOTED 42 분류 + dedup_review_queue

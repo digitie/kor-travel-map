@@ -1,6 +1,6 @@
 # SPRINT-2.md — MOIS-독립 작은 provider 4건 + 디버그 UI 첫 라우터
 
-> **상태**: proposed (Sprint 1 종료 후 Sprint 2 진입 PR로 accepted 전환)
+> **상태**: accepted (시기 대기 — Sprint 1 종료 후 Sprint 2 진입 PR)
 >
 > **목적**: ADR-034 9단계의 ①~④ — 축제 / 날씨 / 유가 / 휴게소. MOIS와 dedup
 > 가능성 없는 작은 dataset부터 적재해 Record Linkage 룰을 검증한다. 디버그

@@ -2,6 +2,54 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-25 10:00 (claude)
+
+**작업**: **T-014 Sprint 1 진입** — ADR 027~034 일괄 proposed → accepted 전환
++ `pyproject.toml` `fail_under=0→50` 상향. PR#16.
+
+**컨텍스트**: 사용자가 PR#15 머지 후 "ㄱㄱ" (= 다음 단계 진행)으로 T-014
+승인. CLAUDE.md / SKILL.md / AGENTS.md / SPRINT-1.md 모두 "T-014 사용자
+승인 시 Sprint 1 진입 + ADR 일괄 accepted 전환"으로 합의되어 있던 시점.
+
+**ADR 8건 전환** (text only, decisions.md):
+- ADR-027 (forest 카테고리/notice_type 확장): accepted
+- ADR-028 (`python-knps-api` provider 등록): accepted
+- ADR-029 (`@krtour/map-marker-react` npm 패키지): accepted
+- ADR-030 (라이브러리 in-memory 캐시 금지): accepted
+- ADR-031 (디버그 패키지 OpenAPI export): accepted
+- ADR-032 (Coverage 단계적 상향 일정): accepted (시기 의존 → 확정)
+- ADR-033 (`feature_consistency_reports` 단계적 도입): accepted
+  (Phase 1은 Sprint 3, Phase 2는 Sprint 5에 코드 적용)
+- ADR-034 (Provider 9단계 구현 순서): accepted
+
+**Coverage bar 상향**: `pyproject.toml [tool.coverage.report] fail_under
+= 0 → 50` (ADR-032 Sprint 1 bar). 주석의 Sprint 1~5 schedule 그대로.
+
+**Sprint status**:
+- `docs/sprints/README.md`: Sprint 1 = **active**, Sprint 2~5 = accepted
+  (시기 대기)
+- `docs/sprints/SPRINT-1.md`: 상태 → **active**
+- `docs/sprints/SPRINT-{2,3,4,5}.md`: 상태 → accepted (시기 대기)
+
+**변경 파일** (9):
+- `docs/decisions.md` — ADR-027~034 §"상태" 8건 정정
+- `pyproject.toml` — `fail_under=50`
+- `docs/sprints/README.md` — 5건 sprint 상태
+- `docs/sprints/SPRINT-1.md` — 상단 상태
+- `docs/sprints/SPRINT-{2,3,4,5}.md` — 4건 상단 상태
+- `docs/tasks.md` — T-014 완료 [x] + 후속 PR sequence (PR#17~#23) +
+  머지 history + ADR 가이드 단순화 (전부 accepted)
+- `docs/resume.md` — 현재 상태 = "Sprint 1 active" + 다음 = PR#17~#23
+- `docs/journal.md` — 본 entry
+
+**비목표 (본 PR#16)**: 실제 `src/krtour/map/` 코드 작성 / testcontainers
+infra / CI workflows — 모두 PR#17~ 후속.
+
+**다음**: PR#16 commit + push + open. 사용자 review/merge → PR#17 (`src/
+krtour/map/` PEP 420 scaffolding) 시작.
+
+---
+
 ## 2026-05-25 09:00 (claude)
 
 **작업**: PR#15 — governance 문서 sweep. CLAUDE.md / AGENTS.md / SKILL.md

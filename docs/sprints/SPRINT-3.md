@@ -1,6 +1,6 @@
 # SPRINT-3.md — KNPS/트래킹 + 국가유산 + 정합성 Phase 1
 
-> **상태**: proposed (Sprint 2 종료 후 Sprint 3 진입 PR로 accepted 전환)
+> **상태**: accepted (시기 대기 — Sprint 2 종료 후 Sprint 3 진입 PR)
 >
 > **목적**: ADR-034 9단계의 ⑤~⑥ — 국립공원/트래킹 (`python-knps-api` +
 > `python-krforest-api` trails) + 국가유산 (`python-krheritage-api`). area/

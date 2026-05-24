@@ -2,9 +2,10 @@
 
 ## 현재 상태
 
-**v2 설계 단계**. main은 orphan으로 새로 시작. v1은 `v1` 브랜치에 보존.
-**코드 작성 금지** — 사용자의 별도 요청이 있을 때까지 본 저장소는 문서/계약/결정의
-저장소다.
+**v2 Sprint 1 active** (T-014 사용자 승인 2026-05-25, PR#16). main은 orphan
+으로 v2 사양 새로 시작. v1은 `v1` 브랜치에 보존. **코드 작성 단계 진입 완료** —
+ADR 027~034 일괄 accepted, `pyproject.toml` `fail_under=50`. 후속 PR#17+로
+`src/krtour/map/` scaffolding 시작.
 
 **중요 신규 룰 (ADR-021~023, 2026-05-24)**:
 - main 직접 push 금지 — feature branch + PR만 (ADR-021).
@@ -23,10 +24,20 @@ Python 패키지 `krtour-map-debug-ui` (ADR-020, `packages/krtour-map-debug-ui/`
 
 ## 다음 한 작업
 
-**PR#2 검토 + merge 후 다음 backlog**:
-- T-200/T-201 (Sprint 5 운영 진입 직전 — batch DAG + consistency_reports)
-- ADR-020~024 후속 (캐시 전략, OpenAPI 정책 등)
-- **코드 작성 단계 진입 결정** — 사용자 승인 후 별도 PR로 시작.
+**본 PR#16 (Sprint 1 진입) 머지 후 Sprint 1 scaffolding PR sequence**:
+- PR#17 `src/krtour/map/` PEP 420 scaffolding (`__init__.py`, `settings.py`,
+  `py.typed`)
+- PR#18 `src/krtour/map/category/` 144건 (kraddr-base에서 코드 이전, ADR-023
+  + ADR-027 LODGING_MOUNTAIN_SHELTER 3행 포함)
+- PR#19 `src/krtour/map/dto/` (Feature + 7 detail kinds + NOTICE_TYPES 14건
+  + AreaDetail.area_kind='hazard_zone' 적용)
+- PR#20 `src/krtour/map/core/` (exceptions, scoring stub, ADR-030 narrow
+  cache, make_feature_id)
+- PR#21 `src/krtour/map/infra/` skeleton + testcontainers PostGIS 통합
+  테스트 베이스
+- PR#22 CI workflows (`.github/workflows/{ci,lint,openapi}.yml`)
+- PR#23 첫 통합 테스트 (`tests/unit/test_category.py` +
+  `tests/lint/test_import_linter.py`)
 
 ## 진척도
 
@@ -101,34 +112,16 @@ Python 패키지 `krtour-map-debug-ui` (ADR-020, `packages/krtour-map-debug-ui/`
       `docs/knps-feature-etl.md`). 외부 repo scaffold `6e36990` 반영.
 - [ ] T-018 본체 — `krtour.map.providers.knps` 모듈 신설 + 적재 (Sprint 3)
 
-## 다음 ADR (proposed / 후보)
+## 다음 ADR
 
-**proposed (사용자 검토 대기)**:
-- **ADR-027** (PR#9, merged) — forest 카테고리/notice_type 확장
-  (`LODGING_MOUNTAIN_SHELTER` + `area_kind=hazard_zone` + generic
-  `notice_type=access_restriction`/`fire_alert`). WEATHER_MOUNTAIN_STATION /
-  NATURE_ECOLOGY / SAFETY Tier 1은 거부.
-- **ADR-028** (PR#12 merged) — `python-knps-api` provider 등록. 외부 repo
-  scaffold 완료 (`6e36990`). 본 라이브러리 통합 모듈 + ADR-027 코드 적용은
-  Sprint 3.
-- **ADR-034** (본 PR#14) — Provider 구현 9단계 순서 (축제→날씨→유가→휴게소
-  →국립공원/트래킹→국가유산→**MOIS**→휴양림/수목원→박물관/미술관). MOIS
-  bulk 전에 dedup 룰을 작은 dataset에서 검증. Sprint 2~5 매핑.
-- **ADR-029** (PR#10) — `@krtour/map-marker-react` npm 패키지 추출 (MIT,
-  monorepo). skeleton 박힘.
-- **ADR-030** (PR#8) — 라이브러리 in-memory 캐시 금지. **본 PR#10에서
-  `import-linter` forbidden 계약 코드 박힘**.
-- **ADR-031** (PR#8) — 디버그 패키지 OpenAPI export 정책. **본 PR#10에서
-  `packages/krtour-map-debug-ui/scripts/export_openapi.py` skeleton 박힘**.
-- **ADR-032** (PR#8, 시기 의존) — Coverage 단계적 상향 일정. T-014에
-  묶어 accepted 전환. 본 PR#10에서 `pyproject.toml` 주석에 Sprint별 schedule
-  명기.
-- **ADR-033** (PR#8, 시기 의존) — `feature_consistency_reports` 단계적
-  도입. T-014에 묶어 accepted 전환.
+**accepted (text on main)**: ADR-001 ~ ADR-034 — 본 PR#16에서 027~034 일괄
+proposed → accepted 전환 (T-014 Sprint 1 진입과 동시).
 
 **후보 (미작성)**:
-- **ADR-034+** — 신규 provider 추가 절차 표준 (체크리스트)
+- **ADR-035+** — 신규 provider 추가 절차 표준 (체크리스트)
 - 후속 maki npm 게시 자동화 ADR
+- (필요 시) Sprint 2 SHP/GeoJSON parser 위치 결정 ADR
+- (필요 시) Sprint 5 MV / pg_prewarm 도입 ADR (T-101/102 후속)
 
 ## 차단 사유 / 결정 대기
 
