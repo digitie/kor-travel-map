@@ -276,12 +276,17 @@ python packages/krtour-map-debug-ui/scripts/export_openapi.py \
 
 | 변수 | 의미 |
 |------|------|
-| `VITE_VWORLD_API_KEY` | VWorld API key (frontend, HTTP referrer 제한 권장) |
+| `VITE_VWORLD_API_KEY` | VWorld API key. **`KRADDR_GEO_VWORLD_API_KEY`와 동일 값 공유** (ADR-025 사용자 보강 2026-05-25). frontend 빌드/런타임 주입. |
 | `VITE_KRTOUR_MAP_DEBUG_UI_API` | 백엔드 API base URL (개발: `http://127.0.0.1:8600`) |
 | `KRTOUR_MAP_DEBUG_UI_FRONTEND_DIST` | (FastAPI 측) `frontend/dist/` 경로 — static mount |
 
-VWorld API key는 `python-kraddr-geo` ADR-019의 `KRADDR_GEO_VWORLD_API_KEY`와
-공유하거나 디버그 UI 전용 키 별도 발급. 운영자가 결정.
+**VWorld API key 공유 정책 (확정, ADR-025 보강 2026-05-25)**:
+`python-kraddr-geo` ADR-019의 `KRADDR_GEO_VWORLD_API_KEY`를 **공유 사용**한다.
+별도 발급 / 별도 환경변수 / 디버그 UI 전용 키 금지. 운영 시 backend가 `.env`
+또는 vault에서 `KRADDR_GEO_VWORLD_API_KEY`를 읽어, frontend 빌드 시 Vite 규약상
+`VITE_VWORLD_API_KEY`로 동일 값을 주입한다 (CI/CD 또는 운영 셸 스크립트 책임).
+**TripMate 사용자 UI** (ADR-026)도 동일 키를 공유한다. HTTP referrer 제한은
+backend 호스트(`127.0.0.1` + 내부망 호스트) + TripMate frontend 호스트로 통일.
 
 ### 14.3 기동
 
@@ -374,6 +379,8 @@ CI에서 drift 검증 (kraddr-geo ADR-015 패턴 미러). 자세한 절차는 §
 
 - frontend는 `127.0.0.1:8610` (Vite) 또는 `127.0.0.1:8600` (FastAPI static mount) 만.
 - VWorld API key는 frontend에 노출되지만 HTTP referrer 제한으로 보호.
+  공유 키(`KRADDR_GEO_VWORLD_API_KEY`)이므로 referrer 화이트리스트에 backend
+  호스트 + TripMate frontend 호스트(ADR-026) 모두 포함.
 - 운영자 외부 접근은 SSH 터널 / Cloudflare Tunnel (ADR-005).
 
 ## 15. 핵심 메시지
@@ -385,4 +392,8 @@ TripMate가 본 라이브러리를 import할 때 FastAPI/Uvicorn/React가 딸려
 
 이 분리는 ADR-020에 박혀 있고, `import-linter` 계약(`pyproject.toml`)이 메인
 패키지의 FastAPI import를 차단한다. 지도 frontend는 ADR-025로 `maplibre-vworld-js`
-가 박혔다 (VWorld 지도, Kakao Maps SDK 미사용).
+가 박혔다 (VWorld 지도, Kakao Maps SDK 미사용). VWorld API key는
+`KRADDR_GEO_VWORLD_API_KEY` 공유 정책으로 일원화되며 (ADR-025 사용자 보강
+2026-05-25), TripMate 사용자 UI 측 지도 stack도 동일하게 통일된다 (ADR-026).
+`maplibre-vworld-js` 자체에서 문제가 발생하면 wrapper 도입(ADR-006 위배) 대신
+upstream 저장소(`digitie/maplibre-vworld-js`)에 직접 PR로 적극 수정한다.

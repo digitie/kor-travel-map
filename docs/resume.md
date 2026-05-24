@@ -74,6 +74,11 @@ Python 패키지 `krtour-map-debug-ui` (ADR-020, `packages/krtour-map-debug-ui/`
 - [x] **ADR-025** — 디버그 UI frontend `maplibre-vworld-js` 채택
 - [x] `docs/debug-ui-package.md` §14 frontend 사양 + `packages/krtour-map-debug-ui/frontend/`
       skeleton (package.json / .env.example / .gitignore / README)
+- [x] **ADR-025 사용자 보강 (2026-05-25)** — VWorld key는
+      `KRADDR_GEO_VWORLD_API_KEY` 공유 / 별도 발급 금지 / maplibre-vworld-js
+      upstream에 직접 PR로 적극 수정
+- [x] **ADR-026** — TripMate 사용자 UI도 `maplibre-vworld` 채택 (SPEC V8 v8_3
+      supersede), Kakao Maps JS SDK 제거
 - [x] T-007 `docs/dagster-boundary.md`
 - [x] T-008 `docs/postgres-schema.md`
 - [x] T-009 `docs/debug-fixture-workflow.md`
@@ -88,13 +93,16 @@ Python 패키지 `krtour-map-debug-ui` (ADR-020, `packages/krtour-map-debug-ui/`
 
 ## 다음 ADR 후보
 
-- **ADR-021** — 라이브러리 캐시 전략 (in-memory 안 두기 vs 두기)
-- **ADR-022** — OpenAPI export 정책 (디버그 패키지 노출 시점부터 활성화)
-- **ADR-023** — Coverage 단계적 상향 일정 (Sprint 1 → Sprint 5)
-- **ADR-024** — 정합성 검증 (`feature_consistency_reports`) 도입 시점
-- **ADR-026** — 카테고리 확장 (KNPS 위험지역/대피소/관측소 등)
-- **ADR-027** — `python-knps-api` provider 등록
-- **ADR-028+** — 신규 provider 추가 절차 표준 (체크리스트)
+- **ADR-027** — 카테고리 확장 (KNPS 위험지역/대피소/관측소 등)
+- **ADR-028** — `python-knps-api` provider 등록
+- **ADR-029** — 공통 maki marker / category 매핑 npm 패키지 추출
+  (`@krtour/map-marker-react`) — 본 라이브러리 디버그 UI + TripMate 사용자
+  UI 공통화 (ADR-026 후속)
+- **ADR-030** — 라이브러리 캐시 전략 (in-memory 안 두기 vs 두기)
+- **ADR-031** — OpenAPI export 정책 (디버그 패키지 노출 시점부터 활성화)
+- **ADR-032** — Coverage 단계적 상향 일정 (Sprint 1 → Sprint 5)
+- **ADR-033** — 정합성 검증 (`feature_consistency_reports`) 도입 시점
+- **ADR-034+** — 신규 provider 추가 절차 표준 (체크리스트)
 
 ## 차단 사유 / 결정 대기
 
