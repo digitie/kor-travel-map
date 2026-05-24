@@ -38,6 +38,10 @@ TripMate ↔ krtour-map 사이에는 REST API가 없다.
 | PostGIS extension schema | `x_extension` (ADR-008) |
 | 디버그 UI 패키지 | `krtour-map-debug-ui` (별도 **Python** 패키지, monorepo 내 `packages/krtour-map-debug-ui/`, ADR-020) |
 | Category 모듈 출처 | `krtour.map.category` (구 `kraddr.base.categories`에서 이전, ADR-023) |
+| ADR accepted | 001~026 (text on main) |
+| ADR proposed | 027 (forest 카테고리/notice_type) / 028 (`python-knps-api` 등록) / 029 (`@krtour/map-marker-react` npm) / 030 (캐시 금지) / 031 (OpenAPI export) / 032 (Coverage schedule, 시기 의존) / 033 (`feature_consistency_reports`, 시기 의존) / 034 (provider 9단계 구현 순서) — 사용자 review → T-014 Sprint 1 진입 PR에 일괄 accepted 전환 예정 |
+| Sprint plan | `docs/sprints/SPRINT-1.md` ~ `SPRINT-5.md` |
+| Provider 구현 순서 (ADR-034) | 축제→날씨→유가→휴게소→국립공원/트래킹→국가유산→**MOIS**→휴양림/수목원→박물관/미술관 |
 
 ## 개발 환경 정책 (PC, WSL)
 
@@ -59,10 +63,12 @@ PC 개발은 **WSL ext4** 위에서 수행한다. NTFS 마운트에서 직접 `g
 
 1. `README.md` — 프로젝트 개요와 빠른 시작
 2. `SKILL.md` — DO NOT 룰, 자주 묻는 작업, 도메인 어휘
-3. `docs/architecture.md` — 의존 방향, 계층, 데이터 흐름
-4. `docs/resume.md` — 현재 진척도와 "다음 한 작업"
-5. `docs/decisions.md` — 관련 ADR
-6. 이번 작업과 직결된 docs 항목 (provider 추가면 `docs/provider-contract.md` 등)
+3. `docs/sprints/README.md` — Sprint 1~5 계획 + ADR-034 9단계 순서
+4. `docs/architecture.md` — 의존 방향, 계층, 데이터 흐름
+5. `docs/resume.md` — 현재 진척도와 "다음 한 작업"
+6. `docs/decisions.md` — 관련 ADR (특히 027~034 proposed)
+7. 이번 작업과 직결된 docs 항목 (provider 추가면 `docs/provider-contract.md`,
+   현재 sprint면 해당 `docs/sprints/SPRINT-N.md` 등)
 
 ## 지시 우선순위
 
@@ -147,7 +153,9 @@ PC 개발은 **WSL ext4** 위에서 수행한다. NTFS 마운트에서 직접 `g
 - 테스트는 `tests/unit/` (Fake repo) + `tests/integration/` (testcontainers
   PostGIS) + `tests/e2e/` (디버그 API + integration DB) + `tests/fixtures/`
   (replay) 4단계.
-- Coverage 목표: **`core/` 90%+, `infra/` 80%+, `providers/` 70%+, 전체 80%+**.
+- Coverage 목표 (최종): **`core/` 90%+, `infra/` 80%+, `providers/` 70%+,
+  `dto/` 100% branch, 전체 80%+**. 단계적 상향 schedule은 **ADR-032**
+  (Sprint 1 50% → Sprint 4 80% 도달, `docs/test-strategy.md §2`).
 - 모든 ETL provider 변환 함수는 fixture 기반 회귀 테스트 ≥3개 (정상/엣지/실패).
 - 모든 raw SQL은 통합 테스트에서 EXPLAIN 결과로 `Index Scan` 또는 `Bitmap Heap
   Scan` 사용을 확인한다. 풀스캔 발견 시 PR block.
@@ -188,8 +196,8 @@ PC 개발은 **WSL ext4** 위에서 수행한다. NTFS 마운트에서 직접 `g
     `git push origin main` 절대 금지. 핫픽스도 단명 branch를 통해. 브랜치 명명:
     `feat/<topic>` / `fix/<topic>` / `chore/<topic>` / `docs/<topic>` /
     `refactor/<topic>` / `adr/<short>`.
-18. **`from krtour.map import ...` (flat) 사용 금지** — 항상 `from krtour.map
-    import ...` (ADR-022). `src/krtour/map/` 디렉토리 만들지 말 것 —
+18. **`from krtour_map import ...` (flat) 사용 금지** — 항상 `from krtour.map
+    import ...` (ADR-022). `src/krtour_map/` 디렉토리 만들지 말 것 —
     `src/krtour/map/`.
 19. **`src/krtour/__init__.py` 만들지 금지** — PEP 420 implicit namespace.
     파일이 생기는 순간 `krtour-map-debug-ui` 같은 자매 distribution과 충돌.
@@ -226,5 +234,20 @@ python -m pytest -q
 
 설계·문서화 단계 동안에는 `src/`, `tests/`, `alembic/`, `scripts/`에 코드를
 작성하지 않는다. 별도의 코드 작성 요청이 있을 때까지 본 저장소는 문서·계약·결정의
-저장소다. 단, 빈 패키지 마커(`pyproject.toml`, `py.typed`)는 패키지 구조를 잡기
-위해 허용한다.
+저장소다.
+
+**해제 시점**: 사용자가 **T-014 (Sprint 1 진입)** 승인 → Sprint 1 PR로 모든
+proposed ADR (027/028/029/030/031/032/033/034) 일괄 accepted 전환 + `src/
+krtour/map/` scaffolding 시작. 자세히는 `docs/sprints/SPRINT-1.md`.
+
+**현재 허용된 예외** (코드 작성 단계 진입 전):
+- 빈 패키지 마커 (`pyproject.toml`, `py.typed`)
+- `pyproject.toml` policy enforcement (import-linter 차단 계약, coverage
+  schedule 주석 — ADR-030/032 등)
+- `packages/krtour-map-debug-ui/scripts/export_openapi.py` skeleton —
+  실행은 Sprint 2 첫 라우터부터 (ADR-031)
+- `packages/map-marker-react/` skeleton — `package.json`/`README.md`/
+  `vite.config.ts`/`.gitignore` (ADR-029, 실 코드는 Sprint 2)
+- `packages/krtour-map-debug-ui/frontend/` Next.js skeleton (ADR-025 2차
+  보강, 실 코드는 Sprint 2)
+- `docs/sprints/SPRINT-N.md` (Sprint 계획)

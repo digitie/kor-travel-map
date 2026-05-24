@@ -9,28 +9,32 @@
 
 1. `README.md` — 정체성, 빠른 시작, 문서 지도
 2. `SKILL.md` — DO NOT 룰, 도메인 어휘
-3. `docs/architecture.md` 목차 — 의존 방향, 데이터 흐름
-4. `docs/resume.md` — "다음 한 작업"
-5. `docs/journal.md` 최신 3건 — 직전 컨텍스트
-6. 관련 ADR (`docs/decisions.md`)
-7. 직결 docs (provider 추가면 `docs/provider-contract.md` 등)
+3. `docs/sprints/README.md` — Sprint 1~5 + ADR-034 9단계 순서
+4. `docs/architecture.md` 목차 — 의존 방향, 데이터 흐름
+5. `docs/resume.md` — "다음 한 작업"
+6. `docs/journal.md` 최신 3건 — 직전 컨텍스트
+7. 관련 ADR (`docs/decisions.md` 특히 027~034 proposed)
+8. 직결 docs (provider 추가면 `docs/provider-contract.md`, 현재 sprint면
+   `docs/sprints/SPRINT-N.md` 등)
 
-5~10분 안에 위 7개를 훑으면 거의 모든 작업의 정합성 판단이 가능하다.
+5~10분 안에 위 8개를 훑으면 거의 모든 작업의 정합성 판단이 가능하다.
 
-## 2. 결정·기록 4종 (필수 유지)
+## 2. 결정·기록 5종 (필수 유지)
 
 | 파일 | 역할 | 갱신 시점 |
 |------|------|----------|
 | `docs/decisions.md` | ADR 누적 | 결정이 발생할 때마다 |
 | `docs/resume.md` | 진척도 + "다음 한 작업" | 작업 마무리마다 |
 | `docs/journal.md` | 작업 로그 (역시간순 append) | 작업 끝낼 때마다 |
-| `docs/tasks.md` | 백로그 | 작업 추가/완료/포기 시 |
+| `docs/tasks.md` | 백로그 + 머지 history 표 | 작업 추가/완료/포기 시 + PR 머지 시 |
+| `docs/sprints/SPRINT-N.md` | Sprint별 진입/산출물/DoD | Sprint 진입/종료 PR마다 |
 
-코드/문서를 바꿨는데 위 4개 중 하나도 갱신되지 않았다면 그 PR은 불완전하다.
+코드/문서를 바꿨는데 위 5개 중 관련된 것이 하나도 갱신되지 않았다면 그
+PR은 불완전하다.
 
 ## 3. ADR 작성 규약
 
-번호: `ADR-NNN` 연번.
+번호: `ADR-NNN` 연번. **현재 다음 번호 = ADR-035** (ADR-034까지 박힘).
 
 ```markdown
 ## ADR-NNN: <결정 요약>
