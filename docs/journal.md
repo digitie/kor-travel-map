@@ -2,6 +2,62 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-24 22:00 (claude)
+
+**작업**: T-002 ~ T-011 — v1 docs를 v2 기준으로 일괄 이전. 총 14개 신규 docs.
+
+**변경 파일** (모두 신규):
+- `docs/weather-feature-normalization.md` (T-002) — forecast_style + timeline_bucket
+  + 표준 metric_key 30종 + provider 매핑 + build_weather_card helper.
+- `docs/feature-files-rustfs.md` (T-003) — S3 호환 객체저장소 + FeatureFileSource
+  → FeatureFile 흐름 + boto3 backend swap (ADR-015).
+- `docs/feature-opening-hours.md` (T-004) — Google Places 호환 DTO + DB tables
+  + 24/7 표기 + 자정 넘는 period.
+- `docs/kraddr-base-types.md` (T-005a) — `python-kraddr-base` 주소/좌표/CRS 사용
+  기준. category는 ADR-023으로 본 저장소 이전 명시.
+- `docs/address-geocoding.md` (T-005b) — reverse geocoder callable + AddressMatchReport
+  match_level 13종.
+- `docs/dagster-boundary.md` (T-007) — 라이브러리 vs TripMate 책임 매트릭스 +
+  표준 asset 패턴 + Dagster 없이도 호출 가능 (단위 테스트).
+- `docs/postgres-schema.md` (T-008) — 4 schema × 20 table reference 카탈로그 +
+  CHECK + FK CASCADE + 보관 정책 SQL + Alembic 가이드.
+- `docs/debug-fixture-workflow.md` (T-009) — fixture JSON 스키마 + 민감정보 자동
+  마스킹 + payload_hash drift 감지 + provider별 ≥3 케이스.
+- `docs/feature-db-initialization.md` (T-010) — schema 부트스트랩 + Alembic +
+  KrtourMapSettings + AsyncKrtourMapClient 생성 + healthz.
+- `docs/tripmate-integration.md` (T-011) — TripMate가 본 라이브러리 import해서
+  쓰는 패턴 + Dagster asset + FastAPI router + Admin + 권한/인증 경계.
+- `docs/event-feature-etl.md` (T-006a, VisitKorea 축제)
+- `docs/krmois-license-feature-etl.md` (T-006b, KRMOIS 인허가)
+- `docs/opinet-place-price-etl.md` (T-006c, OpiNet 주유소+유가)
+- `docs/khoa-beach-info-etl.md` (T-006d, KHOA 해수욕장)
+- `docs/krheritage-feature-etl.md` (T-006e, 국가유산청 place/area/event)
+- `docs/outdoor-feature-etl.md` (T-006f, 산림청 outdoor)
+- `docs/krex-rest-area-feature-etl.md` (T-006g, 도로공사 휴게소+유가+기상)
+- `docs/standard-data-feature-etl.md` (T-006h, data.go.kr 표준데이터 5종)
+- `docs/notice-feature-etl.md` (T-006i, 4 provider 통합 notice)
+- `docs/kma-weather-etl.md` (T-006j, KMA 4종 weather endpoint)
+- `docs/place-phone-enrichment.md` (T-006k, Kakao/Naver/Google 전화번호 보강)
+- `README.md` — 새 docs 14개 링크 추가.
+
+**결정**: 14개 docs는 v1 패턴을 v2 기준 (krtour.map namespace, async-only, 함수
+라이브러리, FastAPI 없음, kraddr-base category 이전)으로 일관 재작성. v1
+원문 식별자(`*_DATASET_KEY`, `*_full_scan_job_spec`, `load_*`)는 그대로 유지해
+TripMate import 변경 비용 최소화.
+
+**발견**:
+- 모든 provider ETL이 같은 패턴: collect → upload → load → sync_state.
+  Dagster asset이 동일 5단계 (`docs/dagster-boundary.md` §2).
+- v1 산출물은 충실히 검증되어 있고 v2는 namespace + async + 함수 라이브러리
+  3 요소만 일관 적용하면 자동으로 정합.
+- `notice-feature-etl.md`는 4 provider 통합 단일 doc — provider별 분리 안 함
+  (notice_type 정규화가 공통).
+
+**다음**: feature branch `docs/v1-to-v2-feature-ports` push + PR 작성 (PR#1 위
+stacked). 사용자 검토 후 squash merge.
+
+---
+
 ## 2026-05-24 20:30 (claude)
 
 **작업**: PR-only 룰 추가 + namespace 재명명 (`krtour_map` → `krtour.map`) +
