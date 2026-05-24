@@ -341,6 +341,13 @@ import 책임).
 - severity != ERROR이면 `mv_refresh`로 swap
 - ERROR이면 `feature_consistency_reports`에 기록 + 알림
 
+**도입 시점은 ADR-033** (proposed, T-014에 묶어 accepted 전환) — 두 단계로 분할:
+
+- **Phase 1 (Sprint 3~4, T-201a)**: 스키마 + F1~F3 critical 케이스 (orphan
+  source / detail 누락 / CRS drift). Dagster 게이트 **미적용** — 검증만.
+- **Phase 2 (Sprint 5 운영 진입 직전, T-201b)**: F4~F8 + Dagster 게이트 +
+  swap 차단. dry-run report 첨부 후 점진 enable.
+
 자세한 구현은 T-200/T-201에서.
 
 ## 13. 운영 알림 (TripMate)

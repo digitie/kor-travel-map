@@ -55,7 +55,19 @@ def test_visitkorea_festival_fixture_replay(fixture_path): ...
 | **전체** | **80%+ branch** | CI 강제 |
 
 `pyproject.toml`의 `[tool.coverage.run]`에 source = `src/krtour/map`, `branch =
-true`. 단계적으로 상향 (코드 작성 초기는 lower bar로 시작 → ADR로 상향).
+true`. 단계적 상향 schedule은 **ADR-032** (proposed, T-014 코드 작성 단계
+진입 결정 시 accepted 전환):
+
+| Sprint | 전체 (branch) | `core/` | `providers/` | `infra/client/api/` |
+|--------|---------------|---------|--------------|---------------------|
+| Sprint 1 (scaffolding) | 50% | 60% | 50% | 50% |
+| Sprint 2 (core + 첫 provider 4건) | 65% | 75% | 55% | 60% |
+| Sprint 3 (provider 절반 + infra) | 75% | 85% | 65% | 70% |
+| Sprint 4 (integrity + edge cases) | **80%** | **90%** | **70%** | **80%** |
+| Sprint 5 (operational entry) | 유지 + 회귀 방지 | 유지 | 유지 | 유지 |
+
+`dto/`는 Sprint 2부터 항상 100% branch 강제 (Pydantic validator는 line 수
+적고 critical).
 
 ## 3. 단위 테스트 (`tests/unit/`)
 
