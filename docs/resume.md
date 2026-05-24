@@ -87,29 +87,41 @@ Python 패키지 `krtour-map-debug-ui` (ADR-020, `packages/krtour-map-debug-ui/`
 
 ### 코드 작성 단계 진입 전
 
-- [ ] T-012 ADR-020+ 후속 결정 (캐시, OpenAPI 정책 등)
-- [ ] T-013 `CHANGELOG.md` 초기 엔트리
-- [ ] T-014 코드 작성 단계 진입 검토 (사용자 승인 후)
+- [ ] T-012 ADR-020+ 후속 결정 (proposed 4건 — 본 PR#10에서 코드 박힘 + 사용자
+      review 후 accepted 전환)
+- [x] T-013 `CHANGELOG.md` 초기 엔트리 정리 — PR#10에서 완료
+- [ ] T-014 코드 작성 단계 진입 검토 (사용자 승인 후, Sprint 1 PR로 진입).
+      `docs/sprints/SPRINT-1.md` 초안 박혀 있음 (PR#10).
+- [ ] T-017 ADR-029 npm 패키지 추출 — PR#10에서 skeleton 박힘, Sprint 2에
+      실코드.
+- [ ] T-018 `python-knps-api` provider — 외부 repo `digitie/python-knps-api`
+      가 docs/forest-feature-etl.md §11 참고해서 개발 중. 모니터링 후 본
+      라이브러리 반영 (ADR-028 + `docs/knps-feature-etl.md`).
 
 ## 다음 ADR (proposed / 후보)
 
 **proposed (사용자 검토 대기)**:
-- **ADR-027** (forest 카테고리/notice_type 확장) — `LODGING_MOUNTAIN_SHELTER`
-  (Tier 2 신설) + `area_kind=hazard_zone` + generic `notice_type=access_restriction`
-  / `fire_alert`. WEATHER_MOUNTAIN_STATION / NATURE_ECOLOGY / SAFETY Tier 1은 거부.
-- **ADR-030** — 라이브러리 in-memory 캐시 금지 (`functools.cache` 한정 예외)
-- **ADR-031** — 디버그 패키지 OpenAPI export 정책 (첫 라우터부터 활성화)
-- **ADR-032** — Coverage 단계적 상향 일정 (Sprint 1 → Sprint 5) — T-014에
-  묶어 accepted 전환
-- **ADR-033** — `feature_consistency_reports` 단계적 도입 (Sprint 3~4: F1~F3,
-  Sprint 5: F4~F8 + Dagster 게이트) — T-014에 묶어 accepted 전환
+- **ADR-027** (PR#9, merged) — forest 카테고리/notice_type 확장
+  (`LODGING_MOUNTAIN_SHELTER` + `area_kind=hazard_zone` + generic
+  `notice_type=access_restriction`/`fire_alert`). WEATHER_MOUNTAIN_STATION /
+  NATURE_ECOLOGY / SAFETY Tier 1은 거부.
+- **ADR-029** (본 PR#10) — `@krtour/map-marker-react` npm 패키지 추출 (MIT,
+  monorepo). skeleton 박힘.
+- **ADR-030** (PR#8) — 라이브러리 in-memory 캐시 금지. **본 PR#10에서
+  `import-linter` forbidden 계약 코드 박힘**.
+- **ADR-031** (PR#8) — 디버그 패키지 OpenAPI export 정책. **본 PR#10에서
+  `packages/krtour-map-debug-ui/scripts/export_openapi.py` skeleton 박힘**.
+- **ADR-032** (PR#8, 시기 의존) — Coverage 단계적 상향 일정. T-014에
+  묶어 accepted 전환. 본 PR#10에서 `pyproject.toml` 주석에 Sprint별 schedule
+  명기.
+- **ADR-033** (PR#8, 시기 의존) — `feature_consistency_reports` 단계적
+  도입. T-014에 묶어 accepted 전환.
 
 **후보 (미작성)**:
-- **ADR-028** — `python-knps-api` provider 등록
-- **ADR-029** — 공통 maki marker / category 매핑 npm 패키지 추출
-  (`@krtour/map-marker-react`) — 본 라이브러리 디버그 UI + TripMate 사용자
-  UI 공통화 (ADR-026 후속)
+- **ADR-028** — `python-knps-api` provider 등록 (PR#12에서 proposed로 박힘,
+  T-018 시점에 accepted 전환)
 - **ADR-034+** — 신규 provider 추가 절차 표준 (체크리스트)
+- 후속 maki npm 게시 자동화 ADR
 
 ## 차단 사유 / 결정 대기
 

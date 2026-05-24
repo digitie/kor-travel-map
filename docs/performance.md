@@ -350,13 +350,121 @@ LIMIT 1;
 
 - `effective_cache_size = 2GB` (Odroid 기본) — SPEC V8 v8_0 참고.
 - 자주 쓰는 인덱스는 OS cache에 상주.
-- `pg_prewarm` extension으로 부팅 후 warm-up 고려 (운영 결정).
+- `pg_prewarm` extension으로 부팅 후 warm-up 고려 (운영 결정 — **T-102**,
+  §9.5).
 
-### 9.3 PostGIS MV (Materialized View)
+### 9.3 PostGIS MV (Materialized View, T-101)
 
-- 자주 쓰는 join 결과(예: feature + place_detail + opening_hours flatten)는
-  MV로. `REFRESH MATERIALIZED VIEW CONCURRENTLY`로 lock 없이 갱신.
-- v2 1차 범위에서는 미사용 — 실 부하 보고 결정.
+자주 쓰는 join 결과(예: `feature + place_detail + opening_hours` 또는 7개
+detail kind union)는 MV로. `REFRESH MATERIALIZED VIEW CONCURRENTLY`로 lock
+없이 갱신.
+
+**v2 1차 범위에서는 미사용** — 실 부하 보고 결정 (T-101 보류 항목).
+
+**도입 시 장점**:
+- viewport/`features_in_bounds` 쿼리에서 7-way JOIN이 단일 table scan으로
+  단순화 → P99 latency 감소 + EXPLAIN plan 안정화 (JOIN order optimizer
+  의존 제거).
+- GiST(`coord_5179`) + detail 컬럼 필터를 단일 plan으로 묶을 수 있어 zoom
+  레벨 클러스터 응답 시간 단축 (디버그 UI + TripMate 사용자 UI 모두 이득).
+- detail kind별 partial MV (`mv_features_place`, `mv_features_event` 등)로
+  cold path 격리 가능. zoom 8 미만에서 자주 쓰는 컬럼만 추출하면 메모리도
+  절약.
+
+**도입 조건 (모두 충족 시)**:
+- read >> write 비율이 실측으로 확인 (Sprint 5 이후 24h 운영 로그 기준).
+- `REFRESH CONCURRENTLY` lag (수십 초~수 분) 허용 가능.
+- 디스크 사용량 ×2 수용 (Odroid SSD 여유 확인).
+- 일관성 게이트 (ADR-033 Phase 2)가 이미 swap 직전에 적용되어 있을 것 —
+  비정상 데이터가 MV로 새는 것을 차단해야 함.
+
+**도입 시 부작용**:
+- `REFRESH CONCURRENTLY`는 UNIQUE 인덱스 필수 → MV 정의에 `feature_id`
+  UNIQUE 보장 필요.
+- DDL 변경(컬럼 추가/타입 변경)이 무거워짐 — alembic revision에 MV `DROP +
+  CREATE` 동반.
+- MV가 stale인 상태에서 디버그 UI/TripMate가 조회하면 "유저는 갱신했는데
+  지도엔 안 보임" 혼동 — `mv_last_refreshed_at` 컬럼 노출 + `/health`에
+  포함 권장.
+
+**도입 절차 (예상)**:
+1. 하나의 hot path만 시범 도입 (예: `mv_features_place_with_detail`).
+2. 1주일 운영 + EXPLAIN diff 비교 → 회귀 추적.
+3. 다른 kind 확장 여부 판단.
+4. ADR 신설 — `feature_*` MV 카탈로그 + refresh schedule + DDL 정책.
+
+### 9.4 별도 streaming ETL (Kafka/Redpanda) — T-103
+
+**v2 1차 범위에서는 미사용** — 본 라이브러리 자체가 streaming consumer를
+의존할 가치 없음 (함수 라이브러리, ADR-003).
+
+**도입이 의미 있는 시나리오**:
+- KNPS 산불경보 / 도로공사 사고 / KMA 특보처럼 *초 단위 latency*가 필요한
+  notice 도메인.
+- 멀티 컨슈머 fan-out (ETL + TripMate 알림 + 분석)이 분 단위 cron으로 처리
+  불가한 경우.
+- Provider가 webhook/push를 지원해서 폴링 → push 전환이 가능한 경우.
+
+**도입 시 장점**:
+- 분 단위 cron보다 빠른 응답 (수 초 이내).
+- offset 기반 replay/backpressure — 다운스트림 일시 중단 시 재처리 안전.
+- 다중 컨슈머가 동일 stream을 공유 (notice가 ETL 적재 + TripMate 알림 +
+  분석으로 동시에 분기).
+
+**도입 시 부작용 / 진입 비용**:
+- Kafka/Redpanda 클러스터 운영 (broker, ZK or KRaft, monitoring) — Odroid
+  단일 노드에서 비현실적, TripMate가 별도 인프라로 운영해야 함.
+- exactly-once vs at-least-once trade-off, idempotency 키 설계.
+- 디버깅이 Dagster batch보다 어려움 (consumer lag, offset 추적).
+
+**본 라이브러리 위치**:
+- consumer 자체는 **TripMate `apps/etl`이 담당**. 본 라이브러리는 받은
+  message → DTO 변환 → `load_feature_bundles()` 호출의 *함수만* 제공.
+- 본 라이브러리에 Kafka client 의존 추가 금지 (`pyproject.toml` import-linter
+  계약).
+- 단, schema (Avro/Protobuf if used)는 본 라이브러리의 `dto/` Pydantic 모델
+  과 동기 유지 — TripMate 측 producer가 본 라이브러리의 DTO를 직접 사용.
+
+**판단 권고**: 특정 provider가 진짜 초 단위 latency를 요구한다는 증거가
+잡힐 때만 ADR 작성 + TripMate 측 인프라 추가. 추측만으로 도입 금지.
+
+### 9.5 pg_prewarm 부팅 후 warm-up — T-102
+
+**v2 1차 범위에서는 미사용** — 운영 결정 (T-102 보류 항목).
+
+**도입 시 장점**:
+- 컨테이너 재시작/장애 복구 직후 cold-start cliff 제거. 첫 1~2분 P99
+  outlier 사라짐 → TripMate가 부팅 직후 호출해도 정상 SLO.
+- `feature_coord_5179_gist`, `feature_kind_idx`, `ops.import_jobs`,
+  `feature_place_details` 같은 핫 path 인덱스/테이블을 부팅 시
+  `shared_buffers`에 강제 로드.
+- `pg_prewarm` extension은 PostgreSQL 표준 (contrib), 추가 클러스터 인프라
+  불필요.
+
+**도입 조건 (모두 충족 시)**:
+- 운영 환경에 명시적 SLO가 있을 것 (예: P99 < 100ms for `features_in_bounds`).
+- 재배포/재시작 빈도가 높을 것 (CI/CD 일/주 단위).
+- dataset이 RAM에 충분히 fit (`shared_buffers` 충분 — Odroid 기본 512MB는
+  핫 데이터 일부만 가능).
+
+**도입 시 부작용**:
+- 부팅 시간 늘어남 (10만 row 인덱스 1개당 1~5초 + 인덱스 수 만큼). 헬스
+  체크 그레이스 기간 확장 필요.
+- `shared_buffers`가 작으면 evict 압력 → 의미 없음. `shared_buffers` 산정
+  먼저 (RAM의 25% 권장).
+- prewarm 자체가 I/O 폭주를 유발 — Odroid 단일 SSD에서는 부팅 직후 다른
+  서비스에 영향. `pg_prewarm.autoprewarm = on`으로 background 모드 권장.
+
+**도입 절차 (예상)**:
+1. `CREATE EXTENSION IF NOT EXISTS pg_prewarm SCHEMA x_extension;` (ADR-008
+   schema 정책).
+2. `shared_buffers`를 RAM의 25%로 조정 + `effective_cache_size` 75%.
+3. `autoprewarm_dump_dir` 설정 → 종료 시점에 핫 buffer 목록 dump.
+4. 부팅 시 dump 자동 read → 동일 buffer 채움.
+5. `/health` 엔드포인트에 `prewarm_completed: bool` 포함.
+
+**ROI 평가**: 단순 운영(monthly restart)에서는 ROI 낮음. CI/CD 일 단위
+배포 + SLO 운영 환경에서만 가치.
 
 ## 10. 통합 테스트로 인덱스 사용 검증
 
