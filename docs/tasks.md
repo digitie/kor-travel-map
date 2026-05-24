@@ -4,13 +4,14 @@
 
 ## 진행 중 (open PR)
 
-- **본 PR#14** (docs/pr14-impl-order-sprint-plans): ADR-034 (proposed,
-  provider 구현 9단계 순서) + `docs/sprints/SPRINT-2.md` ~ `SPRINT-5.md`
-  신설 (4건) + SPRINT-1.md §5 갱신 + sprints/README.md 갱신.
+- **본 PR#16** (feat/sprint1-entry-adr-accepted): **T-014 Sprint 1 진입** —
+  ADR 027~034 일괄 accepted 전환 (text only, decisions.md) + `pyproject.
+  toml` `fail_under=0→50` 상향 (ADR-032 Sprint 1 bar) + sprints/README +
+  SPRINT-1~5 상태 갱신. 실 scaffolding (`src/krtour/map/`)은 후속 PR.
 - **upstream knps-api PR#1**
   (https://github.com/digitie/python-knps-api/pull/1):
   `docs/knps-feature-etl.md §4` maki icon 정정 (shelter / barrier) — 검토 +
-  merge 대기. 본 라이브러리 ADR-027 정합.
+  merge 대기.
 
 ## 다음 (우선순위 순)
 
@@ -26,12 +27,19 @@
     T-014 + Sprint 1 진입 PR에서 `fail_under=50`으로 상향 + accepted.
   - **ADR-033 (proposed, 시기 의존)** — `feature_consistency_reports` 단계적
     도입. T-014 + Sprint 3 진입 PR에서 Phase 1 (F1~F3) accepted.
-- [ ] T-014 — 코드 작성 단계 진입 검토 (사용자 승인 + Sprint 1 PR)
-  - 모든 문서 검토 완료
-  - 사용자 승인
-  - **`docs/sprints/SPRINT-1.md` 작성됨 (PR#10 merged)** — 진입 조건 + 산출물
-    + DoD + Sprint 2 진입 조건까지.
-  - Sprint 1 진입 시 ADR-032/033을 accepted 전환 (시기 의존)
+- [x] **T-014 — 코드 작성 단계 진입** (사용자 승인 2026-05-25, 본 PR#16)
+  - ADR 027/028/029/030/031/032/033/034 일괄 accepted 전환
+  - `pyproject.toml` `fail_under=0→50` 상향 (ADR-032 Sprint 1 bar)
+  - Sprint 1 = **active** (`docs/sprints/SPRINT-1.md` 상태 → active)
+  - 후속 Sprint 1 scaffolding PR로 실제 코드 작성:
+    - PR#17+ `src/krtour/map/` PEP 420 scaffolding
+    - PR#18+ `category/` 144건 코드 이전 (kraddr-base → krtour.map.category)
+    - PR#19+ `dto/` (Feature + 7 detail kinds + ADR-027 적용:
+      `NOTICE_TYPES` 14건 + `AreaDetail.area_kind='hazard_zone'`)
+    - PR#20+ `core/` (exceptions + scoring stub + ADR-030 narrow cache)
+    - PR#21+ `infra/` + testcontainers 통합 테스트 베이스
+    - PR#22+ CI workflows (`.github/workflows/ci.yml` + `lint.yml` +
+      `openapi.yml`)
 - [ ] T-017 — **공통 maki marker / category 매핑 npm 패키지 추출** (ADR-029
       proposed, PR#10 merged) — 실 코드는 Sprint 2
   - **ADR-029 (proposed, PR#10 merged)** — `@krtour/map-marker-react` (MIT
@@ -225,12 +233,22 @@
 
 ## 우선순위 가이드
 
-- **즉시 (검토 + merge)**: 본 PR#14 (구현 순서 ADR-034 + Sprint 2~5 plan)
-  + upstream knps-api PR#1 (maki icon 정정)
-- **다음**: T-014 (코드 작성 단계 진입 검토 — 사용자 승인 필요) → Sprint 1
-  진입 PR (ADR-027/028/029/030/031/032/033/**034** 일괄 accepted 전환 +
-  scaffolding + `PLACE_CATEGORY_DEFINITIONS`/`NOTICE_TYPES`/`AreaDetail.
-  area_kind` 코드 적용)
+- **즉시 (검토 + merge)**: 본 PR#16 (T-014 Sprint 1 진입) + upstream
+  knps-api PR#1 (maki icon 정정)
+- **다음 (Sprint 1 scaffolding 연속 PR)**:
+  - PR#17 — `src/krtour/map/` PEP 420 scaffolding + `__init__.py` +
+    `settings.py`
+  - PR#18 — `src/krtour/map/category/` 144건 (kraddr-base 코드 이전,
+    ADR-023 + ADR-027 `LODGING_MOUNTAIN_SHELTER` 3행 포함)
+  - PR#19 — `src/krtour/map/dto/` (Feature + 7 detail kinds + NOTICE_TYPES
+    14건 + AreaDetail.area_kind='hazard_zone', ADR-027 적용)
+  - PR#20 — `src/krtour/map/core/` (exceptions + scoring stub + ADR-030
+    narrow cache)
+  - PR#21 — `src/krtour/map/infra/` skeleton + testcontainers PostGIS
+    통합 테스트 베이스
+  - PR#22 — CI workflows (`.github/workflows/{ci,lint,openapi}.yml`)
+  - PR#23 — `tests/unit/test_category.py` + `tests/lint/
+    test_import_linter.py` (Sprint 1 DoD)
 - **Sprint 진행 순서** (ADR-034):
   - Sprint 2 = ① 축제 → ② 날씨 → ③ 유가 → ④ 휴게소 (`docs/sprints/SPRINT-2.md`)
   - Sprint 3 = ⑤ 국립공원/트래킹 → ⑥ 국가유산 + 정합성 Phase 1 (F1~F3)
@@ -245,18 +263,8 @@
 
 ## ADR 번호 가이드 (현재)
 
-- **accepted (text on main)**: ADR-001 ~ ADR-026
-- **proposed (text on main, 사용자 review → accepted PR 대기)**:
-  - **ADR-027** (forest 카테고리/notice_type 확장, PR#9 merged)
-  - **ADR-029** (공통 maki npm 패키지, PR#10 merged)
-  - **ADR-030** (라이브러리 캐시 금지, PR#8 merged)
-  - **ADR-031** (디버그 패키지 OpenAPI export, PR#8 merged)
-  - **ADR-032** (Coverage 단계적 상향 일정, 시기 의존, PR#8 merged) — T-014
-    에 묶어 accepted
-  - **ADR-033** (`feature_consistency_reports` 단계적 도입, 시기 의존, PR#8
-    merged) — T-014 + Sprint 3 진입에 묶어 accepted
-  - **ADR-028** (`python-knps-api` provider 등록, PR#12 merged)
-  - **ADR-034** (provider 구현 9단계 순서, **본 PR#14**)
+- **accepted (text on main)**: ADR-001 ~ ADR-034 (전부, 본 PR#16에서
+  027~034 일괄 accepted 전환)
 - **다음 후보 (미작성)**:
   - **ADR-035+** — 신규 provider 추가 절차 표준 (체크리스트)
   - 후속 `@krtour/map-marker-react` npm 게시 자동화 ADR
@@ -283,5 +291,7 @@
 | #11 | `docs/pr11-debug-ui-nextjs` | 2026-05-25 | ADR-025 2차 보강 (Vite → Next.js) |
 | #12 | `docs/pr12-knps-api-integration` | 2026-05-25 | ADR-028 + knps-feature-etl.md |
 | #13 | `chore/tasks-md-pr12-merged-update` | 2026-05-25 | tasks.md 백로그 갱신 (PR#12 머지 후) |
-| **#14** | `docs/pr14-impl-order-sprint-plans` | **open** | ADR-034 provider 9단계 + Sprint 2~5 plan |
+| #14 | `docs/pr14-impl-order-sprint-plans` | 2026-05-25 | ADR-034 provider 9단계 + Sprint 2~5 plan |
+| #15 | `docs/pr15-governance-sweep` | 2026-05-25 | governance docs sweep + DO NOT bug fix 3건 |
+| **#16** | `feat/sprint1-entry-adr-accepted` | **open** | T-014 Sprint 1 진입 — ADR 027~034 일괄 accepted + fail_under=50 |
 | knps-api #1 | `docs/knps-feature-maki-icons` | **open** | maki icon 정정 (shelter / barrier) |

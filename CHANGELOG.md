@@ -5,6 +5,20 @@
 
 ## [Unreleased]
 
+### Sprint 1 진입 (2026-05-25, PR#16)
+
+- **T-014 — 코드 작성 단계 진입**: 사용자 승인. Sprint 1 = **active**.
+- **ADR 8건 일괄 proposed → accepted 전환** (ADR-027/028/029/030/031/032/
+  033/034). 모두 main에 text on accepted 상태.
+- `pyproject.toml` `[tool.coverage.report] fail_under` 0 → **50** (ADR-032
+  Sprint 1 bar).
+- `docs/sprints/SPRINT-1.md` 상태 → active. SPRINT-2~5.md 상태 → accepted
+  (시기 대기).
+- 후속 Sprint 1 scaffolding PR sequence (PR#17~#23): `src/krtour/map/`
+  PEP 420 + `category/` 144건 + `dto/` (NOTICE_TYPES 14건 + AreaDetail.
+  area_kind hazard_zone) + `core/` + `infra/` + CI workflows + 첫 통합
+  테스트.
+
 ### 결정 (2026-05-25 — PR#6 ~ PR#10 시기)
 
 - **NEW (accepted)**: ADR-024 — canonical provider name `python-krmois-api`

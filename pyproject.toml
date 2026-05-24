@@ -128,9 +128,9 @@ exclude_lines = [
   "if TYPE_CHECKING:",
   "@overload",
 ]
-fail_under = 0   # 코드 작성 단계 진입 전. Sprint 1 진입 시 50%로 상향 (ADR-032).
+fail_under = 50  # ADR-032 Sprint 1 bar (T-014 Sprint 1 진입과 함께 0→50 상향, 2026-05-25).
 # ADR-032 Sprint별 fail_under schedule:
-#   Sprint 1 (scaffolding):  fail_under = 50  (전체 branch)
+#   Sprint 1 (scaffolding):  fail_under = 50   ← 현재
 #   Sprint 2 (core + 4 provider): 65
 #   Sprint 3 (provider 절반 + infra): 75
 #   Sprint 4 (integrity + edge cases): 80  ← 목표 도달

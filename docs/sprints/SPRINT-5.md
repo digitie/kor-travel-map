@@ -1,6 +1,6 @@
 # SPRINT-5.md — MOIS-sibling provider + 정합성 Phase 2 + 운영 진입
 
-> **상태**: proposed (Sprint 4 종료 후 Sprint 5 진입 PR로 accepted 전환)
+> **상태**: accepted (시기 대기 — Sprint 4 종료 후 Sprint 5 진입 PR)
 >
 > **목적**: ADR-034 9단계의 ⑧⑨ — 휴양림/수목원 (`python-krforest-api`) +
 > 박물관/미술관 (`data.go.kr-standard`). MOIS와 sibling 가능한 provider를

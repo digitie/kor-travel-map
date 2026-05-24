@@ -840,7 +840,7 @@
 
 ## ADR-027: forest 카테고리 확장 (대피소 PlaceCategory, hazard_zone area, 일반화된 notice_type)
 
-- **상태**: proposed
+- **상태**: accepted (T-014 Sprint 1 진입 시 전환, 2026-05-25)
 - **날짜**: 2026-05-25
 - **결정자**: claude 제안 + 사용자 결정 (notice_type 일반화)
 - **컨텍스트**: `docs/forest-feature-etl.md §11` (KNPS data.go.kr 통합)에서
@@ -975,7 +975,7 @@
 
 ## ADR-030: 라이브러리 in-memory 캐시 금지 (immutable 카탈로그 예외)
 
-- **상태**: proposed
+- **상태**: accepted (T-014 Sprint 1 진입 시 전환, 2026-05-25)
 - **날짜**: 2026-05-25
 - **결정자**: claude 제안, 사용자 검토 대기
 - **컨텍스트**: `docs/performance.md §9.1`에 이미 "in-memory 캐시 두지 않는다"
@@ -1031,7 +1031,7 @@
 
 ## ADR-031: 디버그 패키지 OpenAPI export 정책 (첫 라우터부터 활성화)
 
-- **상태**: proposed
+- **상태**: accepted (T-014 Sprint 1 진입 시 전환, 2026-05-25)
 - **날짜**: 2026-05-25
 - **결정자**: claude 제안, 사용자 검토 대기
 - **컨텍스트**: `packages/krtour-map-debug-ui`가 FastAPI 라우터를 노출하면
@@ -1087,7 +1087,7 @@
 
 ## ADR-032: Coverage 단계적 상향 일정 (Sprint 1 → Sprint 5)
 
-- **상태**: proposed (시기 의존 — T-014 코드 작성 단계 진입 결정 시 확정)
+- **상태**: accepted (T-014 Sprint 1 진입과 동시 확정, 2026-05-25)
 - **날짜**: 2026-05-25
 - **결정자**: claude 제안, 사용자 검토 대기
 - **컨텍스트**: `docs/test-strategy.md §2`에 최종 coverage 목표(core 90% /
@@ -1141,7 +1141,7 @@
 
 ## ADR-033: `feature_consistency_reports` 단계적 도입 (Sprint 3~4: F1~F3, Sprint 5: F4~F8 + 게이트)
 
-- **상태**: proposed (시기 의존 — T-014 코드 작성 단계 진입 결정 시 확정)
+- **상태**: accepted (T-014 Sprint 1 진입과 동시 확정 — Phase 1은 Sprint 3, Phase 2는 Sprint 5에 코드 적용, 2026-05-25)
 - **날짜**: 2026-05-25
 - **결정자**: claude 제안, 사용자 검토 대기
 - **컨텍스트**: `kraddr-geo` ADR-017 미러로 `ops.feature_consistency_reports`
@@ -1225,7 +1225,7 @@
 
 ## ADR-028: `python-knps-api` provider 라이브러리 등록
 
-- **상태**: proposed
+- **상태**: accepted (T-014 Sprint 1 진입 시 전환, 2026-05-25)
 - **날짜**: 2026-05-25
 - **결정자**: claude 제안 + 사용자 (외부 repo 작성 + downstream 반영)
 - **컨텍스트**: `docs/forest-feature-etl.md §11`에서 KNPS dataset 14건 통합
@@ -1347,7 +1347,7 @@
 
 ## ADR-029: 공통 maki marker / category 매핑 npm 패키지 추출 (`@krtour/map-marker-react`)
 
-- **상태**: proposed
+- **상태**: accepted (T-014 Sprint 1 진입 시 전환, 2026-05-25)
 - **날짜**: 2026-05-25
 - **결정자**: claude 제안, 사용자 검토 대기
 - **컨텍스트**: ADR-025 (디버그 UI = maplibre-vworld) + ADR-026 (TripMate 사용자
@@ -1459,7 +1459,7 @@
 
 ## ADR-034: Provider 구현 순서 — MOIS-독립 먼저, MOIS bulk, MOIS-sibling 후
 
-- **상태**: proposed
+- **상태**: accepted (T-014 Sprint 1 진입 시 전환, 2026-05-25)
 - **날짜**: 2026-05-25
 - **결정자**: 사용자 (구현 순서 명시) + claude (Sprint 매핑)
 - **컨텍스트**: 본 라이브러리는 14+ provider를 적재한다. provider별 구현

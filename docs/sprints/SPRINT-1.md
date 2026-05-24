@@ -1,6 +1,7 @@
 # SPRINT-1.md — 코드 작성 단계 진입 + scaffolding
 
-> **상태**: proposed (T-014 코드 작성 단계 진입 결정 PR로 accepted 전환)
+> **상태**: **active** (T-014 사용자 승인 2026-05-25, PR#16에서 ADR 027~034
+> 일괄 accepted 전환 + `pyproject.toml` `fail_under=50` 상향)
 >
 > **목적**: v2 설계 단계 종료 → 실제 코드 작성 단계 진입. 의존 계층 +
 > 디렉토리 구조 + dto + category + 첫 통합 테스트 인프라까지.
