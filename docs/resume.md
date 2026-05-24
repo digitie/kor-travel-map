@@ -105,7 +105,10 @@ Python 패키지 `krtour-map-debug-ui` (ADR-020, `packages/krtour-map-debug-ui/`
   (`LODGING_MOUNTAIN_SHELTER` + `area_kind=hazard_zone` + generic
   `notice_type=access_restriction`/`fire_alert`). WEATHER_MOUNTAIN_STATION /
   NATURE_ECOLOGY / SAFETY Tier 1은 거부.
-- **ADR-029** (본 PR#10) — `@krtour/map-marker-react` npm 패키지 추출 (MIT,
+- **ADR-028** (본 PR#12) — `python-knps-api` provider 등록. 외부 repo
+  scaffold 완료 (`6e36990`). 본 라이브러리 통합 모듈 + ADR-027 코드 적용은
+  T-018 시점.
+- **ADR-029** (PR#10) — `@krtour/map-marker-react` npm 패키지 추출 (MIT,
   monorepo). skeleton 박힘.
 - **ADR-030** (PR#8) — 라이브러리 in-memory 캐시 금지. **본 PR#10에서
   `import-linter` forbidden 계약 코드 박힘**.
@@ -118,8 +121,6 @@ Python 패키지 `krtour-map-debug-ui` (ADR-020, `packages/krtour-map-debug-ui/`
   도입. T-014에 묶어 accepted 전환.
 
 **후보 (미작성)**:
-- **ADR-028** — `python-knps-api` provider 등록 (PR#12에서 proposed로 박힘,
-  T-018 시점에 accepted 전환)
 - **ADR-034+** — 신규 provider 추가 절차 표준 (체크리스트)
 - 후속 maki npm 게시 자동화 ADR
 

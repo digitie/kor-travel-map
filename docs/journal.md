@@ -2,6 +2,83 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-25 07:00 (claude)
+
+**작업**: PR#12 — `python-knps-api` (외부 repo scaffold 완료) 통합 반영 +
+ADR-028 (proposed). knps-api 측 PR#1 (maki icon 정정) 동시 진행.
+
+**컨텍스트**: 사용자가 `digitie/python-knps-api` 저장소를 push 완료
+(`6e36990 Initial KNPS API client scaffold`). 본 라이브러리 통합 작업
++ knps-api 측 발견 이슈는 upstream PR로 직접 수정 정책 (ADR-025 사용자
+보강 2차 패턴 미러).
+
+**upstream knps-api repo 상태 (`6e36990`)**:
+- 공개 API: `KnpsClient`, `KnpsConfig`, `ApiEndpoint`, `FileDataset`,
+  `CatalogEntry`, `Page`, `PROVIDER_NAME="python-knps-api"`, 예외 7종
+  (`KnpsApiError`/`KnpsAuthError`/...), helper 5종 (`api_endpoint`,
+  `api_endpoints`, `catalog_entries`, `file_dataset`, `file_datasets`).
+- catalog: API 3건 (`knps_visitor_statistics`, `knps_access_restrictions`,
+  `knps_fire_alerts`) + 파일 11건 (forest §11.3 7건 + §11.4 4건 추가:
+  campgrounds/shelters/recommended_courses/park_photos/visitor_statistics).
+- 인증: `KNPS_SERVICE_KEY` 우선, `DATA_GO_KR_SERVICE_KEY` 폴백
+  (`knps.config.KnpsConfig.from_env`).
+- HTTP: `KnpsHttp` (httpx async + token bucket 5 RPS + `_decode_payload` +
+  `_normalize_payload` data.go.kr envelope 자동 정규화 + service_key
+  auto-redact in `CallContext.request_params`).
+- 파일: `client.files.download(key)` — `download_url` 검증된 dataset만.
+- SHP/GeoJSON parser: `[geo]` extra (`pyproj`, `pyshp`) — placeholder, 본
+  라이브러리 측에서 처리 권고 (ADR-006 정신).
+
+**knps-api 측 PR#1 (https://github.com/digitie/python-knps-api/pull/1)**:
+- `docs/knps-feature-etl.md §4` maki icon 2건 정정:
+  - 대피소: `lodging` → `shelter` (본 라이브러리 ADR-027의
+    `PLACE_CATEGORY_MAPBOX_MAKI_ICONS[LODGING_MOUNTAIN_SHELTER]` 정합)
+  - 위험지역: `danger` → `barrier` (Maki 표준에 `danger` 없음)
+- 표 아래 downstream 정합 명기.
+
+**본 라이브러리 PR#12 변경 파일**:
+- `docs/decisions.md` — **ADR-028 (proposed)** 신설 (~110줄):
+  - provider 등록 6항목 (canonical name / import / module / dataset prefix
+    / 인증 env / pyproject extras).
+  - SHP/GeoJSON 파싱 책임 분리 (본 라이브러리 권고).
+  - ADR-027 코드 적용 시기 정렬 (T-018 동시).
+  - 양방향 PR 워크플로 (D, maplibre-vworld-js 패턴 미러).
+  - 본 라이브러리 신설 `docs/knps-feature-etl.md`.
+  - 14 dataset_key 카탈로그 (API 3 + 파일 11).
+- `docs/forest-feature-etl.md §11`:
+  - "데이터 통합 계획" → "데이터 통합" (현재형, scaffold 완료 반영).
+  - §11.1 옵션 B "권고" → "채택 ✅".
+  - §11.1.1 신설 — 외부 라이브러리 공개 API 표면 + 특이사항 (현 구현 상태).
+- `docs/knps-feature-etl.md` 신설 (~220줄):
+  - feature 적재 계약 (upstream knps-feature-etl.md와 정합).
+  - dataset 매핑 14건 (API 3 + 파일 11).
+  - cultural_resources RESOURCE_TYPE 분기.
+  - 매핑 룰 (area / route / place / weather / notice / timeseries+media).
+  - category 매핑 검증 표 (shelter / barrier 정합).
+  - 핵심 함수 시그니처 후보 (Sprint 2).
+  - Dagster asset 12종.
+  - 검증 (fixture / EXPLAIN / 정합성 / upstream verification).
+- `docs/provider-contract.md`:
+  - §2 `CANONICAL_PROVIDER_NAMES`에 `python-knps-api` 추가.
+  - §3 dataset_key 표에 14건 추가.
+  - §4 책임 매트릭스에 한 줄 추가.
+- `docs/external-apis.md`:
+  - §2 환경변수 카탈로그에 `KNPS_SERVICE_KEY` 추가.
+  - §3.8.1 신설 — KNPS API key 발급 절차.
+- `pyproject.toml` — `providers` extras에 `python-knps-api` git URL 주석.
+
+**SHP/GeoJSON parsing 위치 결정 (잠정)**:
+- 본 라이브러리 `krtour.map.providers.knps`에서 파싱 권고 — provider
+  라이브러리는 raw bytes/page만, 변환은 본 라이브러리 책임 (ADR-006 정신).
+- Sprint 2 진입 시 cost/benefit 재평가 후 최종 결정. knps-api `[geo]` extra
+  가 이미 있으므로 양쪽 모두 가능.
+
+**다음**: PR#12 commit + push + open. PR#10/PR#11과 forest-feature-etl.md /
+journal.md / resume.md / tasks.md 충돌 가능 — append 위주라 resolvable.
+knps-api PR#1 merge 후 본 라이브러리 `docs/knps-feature-etl.md` 동기.
+
+---
+
 ## 2026-05-25 06:00 (claude)
 
 **작업**: ADR-025 2차 사용자 보강 — frontend 빌드 도구 **Vite → Next.js**
