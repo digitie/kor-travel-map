@@ -182,6 +182,27 @@ lint-imports
 - [`docs/backend-package.md`](docs/backend-package.md) — 메인 라이브러리 사양
 - [`docs/debug-ui-package.md`](docs/debug-ui-package.md) — `krtour-map-debug-ui` 별도 패키지 사양 (ADR-020)
 - [`docs/category.md`](docs/category.md) — `krtour.map.category` 모듈 사양 (kraddr-base에서 이전, ADR-023)
+- [`docs/postgres-schema.md`](docs/postgres-schema.md) — PostgreSQL 스키마 reference 카탈로그 (data-model의 빠른 참조)
+- [`docs/feature-files-rustfs.md`](docs/feature-files-rustfs.md) — S3 호환 객체 저장소 + 파일 메타
+- [`docs/feature-opening-hours.md`](docs/feature-opening-hours.md) — 영업시간 DTO + DB
+- [`docs/kraddr-base-types.md`](docs/kraddr-base-types.md) — `python-kraddr-base` 사용 기준
+- [`docs/address-geocoding.md`](docs/address-geocoding.md) — 주소·좌표 보강 + match level
+- [`docs/weather-feature-normalization.md`](docs/weather-feature-normalization.md) — weather 정규화 (forecast_style + timeline_bucket)
+- [`docs/dagster-boundary.md`](docs/dagster-boundary.md) — Dagster 책임 경계
+- [`docs/debug-fixture-workflow.md`](docs/debug-fixture-workflow.md) — fixture 저장/replay
+- [`docs/feature-db-initialization.md`](docs/feature-db-initialization.md) — DB 부트스트랩
+- [`docs/tripmate-integration.md`](docs/tripmate-integration.md) — TripMate가 본 라이브러리 사용하는 법
+- [`docs/event-feature-etl.md`](docs/event-feature-etl.md) — VisitKorea 축제 ETL
+- [`docs/krmois-license-feature-etl.md`](docs/krmois-license-feature-etl.md) — KRMOIS 인허가 ETL
+- [`docs/opinet-place-price-etl.md`](docs/opinet-place-price-etl.md) — OpiNet 주유소+유가 ETL
+- [`docs/khoa-beach-info-etl.md`](docs/khoa-beach-info-etl.md) — KHOA 해수욕장 ETL
+- [`docs/krheritage-feature-etl.md`](docs/krheritage-feature-etl.md) — 국가유산청 ETL
+- [`docs/outdoor-feature-etl.md`](docs/outdoor-feature-etl.md) — 산림청 outdoor ETL
+- [`docs/krex-rest-area-feature-etl.md`](docs/krex-rest-area-feature-etl.md) — 도로공사 휴게소 ETL
+- [`docs/standard-data-feature-etl.md`](docs/standard-data-feature-etl.md) — data.go.kr 표준데이터 5종 ETL
+- [`docs/notice-feature-etl.md`](docs/notice-feature-etl.md) — 통합 notice ETL (4 provider)
+- [`docs/kma-weather-etl.md`](docs/kma-weather-etl.md) — KMA weather ETL
+- [`docs/place-phone-enrichment.md`](docs/place-phone-enrichment.md) — 장소 전화번호 보강
 - [`docs/performance.md`](docs/performance.md) — 인덱스 설계 + 공간 쿼리 가이드 +
   bulk insert 룰
 - [`docs/test-strategy.md`](docs/test-strategy.md) — 4단계 테스트 + 커버리지 목표
