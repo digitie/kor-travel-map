@@ -93,7 +93,10 @@ Python 패키지 `krtour-map-debug-ui` (ADR-020, `packages/krtour-map-debug-ui/`
 
 ## 다음 ADR (proposed / 후보)
 
-**proposed (본 PR — 사용자 검토 대기)**:
+**proposed (사용자 검토 대기)**:
+- **ADR-027** (forest 카테고리/notice_type 확장) — `LODGING_MOUNTAIN_SHELTER`
+  (Tier 2 신설) + `area_kind=hazard_zone` + generic `notice_type=access_restriction`
+  / `fire_alert`. WEATHER_MOUNTAIN_STATION / NATURE_ECOLOGY / SAFETY Tier 1은 거부.
 - **ADR-030** — 라이브러리 in-memory 캐시 금지 (`functools.cache` 한정 예외)
 - **ADR-031** — 디버그 패키지 OpenAPI export 정책 (첫 라우터부터 활성화)
 - **ADR-032** — Coverage 단계적 상향 일정 (Sprint 1 → Sprint 5) — T-014에
@@ -102,7 +105,6 @@ Python 패키지 `krtour-map-debug-ui` (ADR-020, `packages/krtour-map-debug-ui/`
   Sprint 5: F4~F8 + Dagster 게이트) — T-014에 묶어 accepted 전환
 
 **후보 (미작성)**:
-- **ADR-027** — 카테고리 확장 (KNPS 위험지역/대피소/관측소 등)
 - **ADR-028** — `python-knps-api` provider 등록
 - **ADR-029** — 공통 maki marker / category 매핑 npm 패키지 추출
   (`@krtour/map-marker-react`) — 본 라이브러리 디버그 UI + TripMate 사용자

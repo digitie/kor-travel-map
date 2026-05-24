@@ -286,14 +286,14 @@ CREATE INDEX idx_event_content_id  ON feature.feature_event_details (content_id)
 ```sql
 CREATE TABLE feature.feature_area_details (
   feature_id              TEXT PRIMARY KEY REFERENCES feature.features(feature_id) ON DELETE CASCADE,
-  area_kind               TEXT NOT NULL DEFAULT 'area',
+  area_kind               TEXT NOT NULL DEFAULT 'area',  -- 'area' | 'national_park' | 'provincial_park' | 'recreation_forest' | 'tourism_district' | 'beach' | 'campsite' | 'heritage_area' | 'natural_heritage_area' | 'buried_heritage_area' | 'hazard_zone' (ADR-027) | 'other'
   boundary_source         TEXT,
   area_square_meters      NUMERIC(18,4),
   regulation_scope        TEXT,
   administrative_office   TEXT,
   description             TEXT,
   geometry                JSONB,                      -- geom 컬럼은 features.geom; 본 컬럼은 부가
-  payload                 JSONB NOT NULL DEFAULT '{}'::jsonb
+  payload                 JSONB NOT NULL DEFAULT '{}'::jsonb  -- hazard_zone일 때 {"hazard_type": "rockfall|flash_flood|wildlife|...", "domain": "forest|coastal|..."} (ADR-027)
 );
 
 CREATE INDEX idx_area_kind            ON feature.feature_area_details (area_kind);
