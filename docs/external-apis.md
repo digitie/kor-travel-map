@@ -110,7 +110,7 @@
 
 ### 3.12 data.go.kr 표준데이터
 
-표준데이터 5종은 별도 provider 라이브러리 없이 `krtour_map.standard_data`의
+표준데이터 5종은 별도 provider 라이브러리 없이 `krtour.map.standard_data`의
 내부 bounded asyncio client에서 처리한다. (코드 작성 단계에서 v1과 동일 패턴
 재구현)
 

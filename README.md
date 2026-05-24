@@ -13,7 +13,7 @@ GeoAlchemy2 + GeoPandas 위에서 동작한다.
 ## 정체성
 
 - **GitHub 저장소**: `python-krtour-map`
-- **Python import**: `from krtour_map import ...`
+- **Python import**: `from krtour.map import ...` (ADR-022, PEP 420 implicit namespace `krtour`)
 - **환경변수 prefix**: `KRTOUR_MAP_*`
 - **PostgreSQL DB 이름 (개발)**: `krtour_map`
 - **스키마 분리**: `feature`, `provider_sync`, `ops`, `x_extension`
@@ -24,7 +24,7 @@ GeoAlchemy2 + GeoPandas 위에서 동작한다.
 HTTP/REST가 아니다.
 
 ```python
-from krtour_map import AsyncKrtourMapClient
+from krtour.map import AsyncKrtourMapClient
 
 async with AsyncKrtourMapClient(engine=tripmate_engine, providers=...) as client:
     features = await client.features_in_bounds(bbox, kinds=["place", "event"])
@@ -79,7 +79,7 @@ alembic upgrade head
 uv pip install -e packages/krtour-map-debug-ui
 
 # (디버그) REST API 기동 — 인증 없음, localhost 전용
-uvicorn krtour_map_debug_ui.app:app --host 127.0.0.1 --port 8600
+uvicorn krtour.map_debug_ui.app:app --host 127.0.0.1 --port 8600
 ```
 
 ## 의존 스택 (v2 확정)
@@ -108,22 +108,27 @@ ADR-007/008 참조).
 본 저장소는 **monorepo**다. Python 패키지 2개:
 
 ```
-src/krtour_map/                    ← 메인 패키지 (FastAPI 의존 없음)
-  dto/         — pydantic v2 입력/출력 (DB/FastAPI 의존 없음)
-  core/        — 비즈니스 로직 (Protocol에만 의존; make_feature_id, scoring, merge)
-  infra/       — DB 어댑터 (SQLAlchemy 2 async + raw SQL + Alembic)
-  providers/   — provider별 raw → DTO 변환 모듈 (wrapper 신규 생성 금지)
-  client.py    — AsyncKrtourMapClient (라이브러리 진입점)
-  cli/         — typer CLI (옵션)
+src/krtour/                        ← PEP 420 implicit namespace (NO __init__.py)
+  map/                             ← 메인 패키지 (FastAPI 의존 없음)
+    __init__.py
+    category/    — kraddr-base에서 이전 (ADR-023)
+    dto/         — pydantic v2 입력/출력 (DB/FastAPI 의존 없음)
+    core/        — 비즈니스 로직 (Protocol에만 의존; make_feature_id, scoring, merge)
+    infra/       — DB 어댑터 (SQLAlchemy 2 async + raw SQL + Alembic)
+    providers/   — provider별 raw → DTO 변환 모듈 (wrapper 신규 생성 금지)
+    client.py    — AsyncKrtourMapClient (라이브러리 진입점)
+    cli/         — typer CLI (옵션)
 
 packages/krtour-map-debug-ui/      ← 별도 패키지 (ADR-020)
   pyproject.toml
-  src/krtour_map_debug_ui/
-    app.py     — FastAPI app factory + uvicorn entrypoint
-    routers/   — 디버그 엔드포인트
-    deps.py    — AsyncKrtourMapClient 주입
-    settings.py
-    views/     — (옵션) 정적 UI
+  src/krtour/                      ← 같은 namespace 공유 (NO __init__.py)
+    map_debug_ui/
+      __init__.py
+      app.py     — FastAPI app factory + uvicorn entrypoint
+      routers/   — 디버그 엔드포인트
+      deps.py    — AsyncKrtourMapClient 주입
+      settings.py
+      views/     — (옵션) 정적 UI
 
 alembic/, sql/ — 스키마 마이그레이션과 DDL
 tests/
@@ -135,12 +140,12 @@ docs/          — 사양·결정·작업 기록 (한국어)
 data/          — 원천/픽스처 대용량 (NTFS, .gitignore)
 ```
 
-메인 패키지 의존 방향: **dto → core → infra → providers → client → cli** 한
-방향. `import-linter`가 CI에서 강제 (ADR-002, `docs/architecture.md`).
-`krtour_map.api`는 존재하지 않는다 (ADR-020).
+메인 패키지 의존 방향: **category → dto → core → infra → providers → client →
+cli** 한 방향. `import-linter`가 CI에서 강제 (ADR-002, `docs/architecture.md`).
+`krtour.map.api`는 존재하지 않는다 (ADR-020).
 
-별도 패키지 `krtour_map_debug_ui`는 `krtour_map.client`만 import해서 함수
-호출한다 (ADR-020, `docs/debug-ui-package.md`).
+별도 패키지 `krtour.map_debug_ui`는 `krtour.map.client`만 import해서 함수
+호출한다 (ADR-020 + ADR-022, `docs/debug-ui-package.md`).
 
 ## 설계 원칙
 
@@ -159,7 +164,7 @@ data/          — 원천/픽스처 대용량 (NTFS, .gitignore)
 ```bash
 python -m pytest -q               # 코드 작성 단계 이후
 python -m ruff check .
-python -m mypy src/krtour_map
+python -m mypy src/krtour/map
 lint-imports
 ```
 
@@ -176,6 +181,7 @@ lint-imports
 - [`docs/data-model.md`](docs/data-model.md) — Postgres 테이블·인덱스 reference
 - [`docs/backend-package.md`](docs/backend-package.md) — 메인 라이브러리 사양
 - [`docs/debug-ui-package.md`](docs/debug-ui-package.md) — `krtour-map-debug-ui` 별도 패키지 사양 (ADR-020)
+- [`docs/category.md`](docs/category.md) — `krtour.map.category` 모듈 사양 (kraddr-base에서 이전, ADR-023)
 - [`docs/performance.md`](docs/performance.md) — 인덱스 설계 + 공간 쿼리 가이드 +
   bulk insert 룰
 - [`docs/test-strategy.md`](docs/test-strategy.md) — 4단계 테스트 + 커버리지 목표

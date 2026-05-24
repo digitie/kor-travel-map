@@ -178,6 +178,115 @@ ADR-006 후속 — `docs/provider-contract.md`에 wrapper 금지 예시 보강.
 - [ ] `pyproject.toml`의 provider extra에 git URL+sha 핀
 - [ ] journal + resume
 
+## 7.5 PR 워크플로 (ADR-021, 필수)
+
+main에 직접 push 금지. 모든 변경은 feature branch + PR.
+
+### 7.5.1 시작
+
+```bash
+cd ~/dev/python-krtour-map
+git checkout main
+git pull origin main
+git checkout -b feat/<topic>      # 또는 fix/, chore/, docs/, refactor/, adr/
+```
+
+### 7.5.2 작업
+
+- 짧은 commit + 명확한 메시지. 첫 줄 70자 이내. 형식 권장 (kraddr-geo 패턴 미러):
+  ```
+  <scope>: <verb> <object> (#T-NNN 또는 ADR-NNN 또는 issue)
+
+  본문 — "왜" 위주. 변경 내용은 diff가 알려준다.
+
+  Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+  ```
+  - `<scope>`: `dto` / `core` / `infra` / `providers/<name>` / `client` / `cli` /
+    `docs` / `chore` / `category` / `debug-ui`
+  - `<verb>`: `add` / `fix` / `refactor` / `move` / `remove` / `tighten` / `rename` / `document`
+- 작업 단위로 `docs/journal.md`, `docs/resume.md`, (필요 시) `docs/decisions.md`,
+  `CHANGELOG.md` 갱신.
+- 단위 테스트 + lint + mypy + lint-imports 통과 확인 (코드 작성 단계).
+
+### 7.5.3 PR 작성
+
+표준 PR 본문 (kraddr-geo `docs/agent-guide.md` 패턴 미러):
+
+```bash
+git push -u origin feat/<topic>
+gh pr create --title "<scope>: <imperative summary (≤70자)>" --body "$(cat <<'EOF'
+## 동기 (Motivation)
+- 무엇을 바꾸는지 + 왜 바꾸는지 (한 문단)
+
+## 변경 (Changes)
+- 파일/모듈별 핵심 변경
+- 새 DTO/엔드포인트/스키마/ADR 있으면 명시
+
+## 영향 (Impact)
+- BREAKING 여부 (DTO 시그니처, DB schema, OpenAPI)
+- TripMate / 디버그 UI / provider 어느 쪽에 변경 필요한지
+
+## 검증 (Verification)
+- [ ] pytest tests/unit -q
+- [ ] ruff check . / mypy --strict / lint-imports
+- [ ] (해당 시) pytest tests/integration -q
+- [ ] (해당 시) EXPLAIN 통합 테스트로 인덱스 사용 검증
+- [ ] (해당 시) OpenAPI export check
+
+## 문서 (Docs)
+- [ ] docs/journal.md 엔트리
+- [ ] docs/resume.md 진척도 갱신
+- [ ] ADR 추가 시 docs/decisions.md
+- [ ] 사용자 가시 변경 시 CHANGELOG.md
+- [ ] DTO/스키마 변경 시 docs/{data-model,feature-model}.md
+- [ ] provider 추가 시 docs/<provider>-feature-etl.md
+
+## 관련 (Related)
+- ADR-XXX
+- T-NNN
+- (외부 issue/spec 링크)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+EOF
+)"
+```
+
+### 7.5.4 브랜치 명명 규약
+
+| prefix | 용도 |
+|--------|------|
+| `feat/` | 새 기능 (DTO, repository, provider, route 추가 등) |
+| `fix/` | 버그 수정 |
+| `chore/` | 의존성, 설정, CI, 빌드 등 |
+| `docs/` | 문서만 |
+| `refactor/` | 동작 변경 없는 재구조화 |
+| `adr/` | 결정 단독 PR |
+| `agent/<id>/<topic>` | 다중 에이전트가 병행 작업할 때 |
+
+### 7.5.5 리뷰 / merge
+
+- 단일 작성자/검토자라도 PR 페이지에서 변경 한 번 더 확인 후 merge.
+- merge 방식: **Squash and merge** 권장 (main 히스토리 깔끔).
+- 또는 의미 있는 단위로 commit이 정렬되어 있으면 rebase + merge.
+- merge commit 제목: PR 제목과 동일하게.
+- merge 후 feature branch는 `gh` UI 또는 `git push origin --delete <branch>`로 삭제.
+
+### 7.5.6 main 직접 push 차단
+
+GitHub branch protection (운영자 수동 설정):
+- Require pull request before merging
+- Require at least 1 approval (자체 PR은 self-approve 허용 운영 모델)
+- Require status checks to pass (lint, test, lint-imports, openapi drift)
+- Restrict force-push
+
+운영자가 위를 설정해 두면 `git push origin main`은 서버에서 거부된다.
+
+### 7.5.7 핸드오프
+
+세션이 중단되면 PR 코멘트에 handoff 노트
+(`docs/windows-reinstall-recovery.md` §4 포맷). 다음 에이전트/사람은 PR URL과
+`docs/resume.md`만 보면 바로 인수받을 수 있다.
+
 ## 8. 코드 작성 금지 단계 (현재)
 
 본 단계에서는 `src/`, `tests/`, `alembic/`, `scripts/`, `sql/`에 코드를 작성하지

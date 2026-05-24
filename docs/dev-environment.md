@@ -215,7 +215,7 @@ pytest -m slow -q
 ```bash
 ruff check .                    # 코드 스타일 + 일부 오류
 ruff format .                   # 포매팅
-mypy --strict src/krtour_map    # 타입
+mypy --strict src/krtour/map    # 타입
 lint-imports                    # 의존 계층 검증
 ```
 

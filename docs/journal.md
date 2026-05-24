@@ -2,6 +2,57 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-24 20:30 (claude)
+
+**작업**: PR-only 룰 추가 + namespace 재명명 (`krtour_map` → `krtour.map`) +
+kraddr-base category 모듈 이전 결정 + kraddr-geo 패턴 보강.
+
+**변경 파일**:
+- `docs/decisions.md` — ADR-021 (PR-only), ADR-022 (`krtour` namespace),
+  ADR-023 (category 이전) 3건 추가.
+- `AGENTS.md` — 식별자 표 (Python import → `krtour.map`, category 모듈 출처
+  추가), DO NOT #17/#18/#19 추가 (PR-only, flat import 금지, `src/krtour/
+  __init__.py` 금지) → 19개 룰.
+- `SKILL.md` — 식별자 표, 디렉토리 지도, DO NOT #19/#20/#21 추가 → 22개 룰.
+- `CLAUDE.md` — 5 절대금지를 가장 중요한 5개로 재구성 (PR-only, namespace 1·2위).
+- `README.md` — Python import 경로, 디렉토리(`src/krtour/map/` + namespace
+  설명), 문서 지도에 `docs/category.md` 추가.
+- `pyproject.toml` — `packages.find` (`krtour.map*` + `namespaces=true`),
+  `package-data`, `import-linter` root_package + layers + forbidden 계약 갱신,
+  coverage source.
+- `packages/krtour-map-debug-ui/pyproject.toml` + `README.md` — namespace 정합.
+- 일괄 docs 갱신 (rename script): `architecture`, `backend-package`, `decisions`,
+  `test-strategy`, `windows-reinstall-recovery`, `dev-environment`, `external-apis`,
+  `provider-contract`, `debug-ui-package`, `feature-model`, `resume`, `journal`,
+  `CHANGELOG`.
+- `docs/category.md` (신규) — `krtour.map.category` 모듈 사양서 11절.
+- `docs/agent-guide.md` — §7.5 PR 워크플로 신설 (브랜치 명명, commit format,
+  PR 본문 표준 포맷, branch protection, 핸드오프).
+- `docs/tasks.md` — Sprint 5 진입 직전 항목 5개 추가 (T-200~T-204: batch DAG,
+  consistency_reports, pre-commit hook, CI 워크플로, branch protection 가이드).
+
+**결정**:
+- **ADR-021** main 직접 push 금지 — 모든 변경은 feature branch + PR. main에 직접
+  들어간 `fc8145f`/`304f2a9`는 ex post facto 인정, 본 ADR 이후 모든 변경은 PR.
+- **ADR-022** `krtour` PEP 420 implicit namespace 채택 — `python-krtour-map`은
+  `krtour.map`으로 import, `krtour-map-debug-ui`는 `krtour.map_debug_ui`로
+  import. 같은 namespace를 share. `src/krtour/__init__.py` 금지.
+- **ADR-023** kraddr-base의 category 모듈 (`kraddr.base.categories`, ~2072줄,
+  141 enum)을 `krtour.map.category`로 이전. 코드 이전은 코드 작성 단계 진입 시
+  별도 PR. 라이선스 호환 (둘 다 GPL-3.0-or-later).
+
+**발견**:
+- kraddr-geo ADR-015도 `kraddr` implicit namespace 채택 → 패턴 정합.
+- kraddr-geo의 batch DAG + consistency_reports 패턴(ADR-017)이 본 라이브러리의
+  Sprint 5 운영에 유용 → T-200/T-201로 백로그 추가.
+- 변수 이름 `krtour_map_client`(snake_case)는 변경 안 함 — Python 식별자 명명
+  규약과 import path는 별개.
+
+**다음**: feature branch `chore/pr-workflow-namespace-rename-category-migration`
+push → PR 작성 (ADR-021 첫 적용 사례). 사용자 리뷰 후 squash merge.
+
+---
+
 ## 2026-05-24 19:30 (claude)
 
 **작업**: 디버그 UI를 별도 Python 패키지로 분리 — ADR-020 추가 + 관련 문서/구조
@@ -29,14 +80,14 @@
   번째 계약 추가 (`krtour_map`에서 fastapi/uvicorn/starlette import 금지).
 - `.env.example` — `KRTOUR_MAP_DEBUG_API_*` → `KRTOUR_MAP_DEBUG_UI_*` 갱신 +
   주석.
-- `docs/test-strategy.md` — e2e 코드 예시의 `from krtour_map.api.app import ...`
-  → `from krtour_map_debug_ui.app import ...`.
+- `docs/test-strategy.md` — e2e 코드 예시의 `from krtour.map.api.app import ...`
+  → `from krtour.map_debug_ui.app import ...`.
 - `packages/krtour-map-debug-ui/pyproject.toml` (신규) — 별도 패키지 pyproject.
 - `packages/krtour-map-debug-ui/README.md` (신규) — 패키지 README.
 
 **결정**: **ADR-020** — 디버그 UI는 별도 Python 패키지 `krtour-map-debug-ui`로
 분리. monorepo 안 `packages/krtour-map-debug-ui/`에 위치. 메인 라이브러리에서
-FastAPI/Uvicorn 의존성 제거. ADR-005의 위치 부분(`krtour_map.api`)은 본 ADR로
+FastAPI/Uvicorn 의존성 제거. ADR-005의 위치 부분(`krtour.map.api`)은 본 ADR로
 superseded; 인증 없음 + 내부망 전용 정책은 그대로 유지.
 
 **발견**:

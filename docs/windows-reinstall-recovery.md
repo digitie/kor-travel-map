@@ -111,10 +111,10 @@ if [ "$PLAN_ONLY" = "1" ]; then
 fi
 
 echo "[4/5] 적재 실행"
-python -m krtour_map.cli import enqueue --kind visitkorea_festival_full_scan
+python -m krtour.map.cli import enqueue --kind visitkorea_festival_full_scan
 
 echo "[5/5] 검증"
-python -m krtour_map.cli healthz
+python -m krtour.map.cli healthz
 ```
 
 새 세션이 인수받았을 때는 항상 `PLAN_ONLY=1` 먼저 실행해서 환경 점검.

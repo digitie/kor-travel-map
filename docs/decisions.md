@@ -96,7 +96,7 @@
   패키지 `krtour-map-debug-ui`에 둠. 인증 없음 + 내부망 전용 정책은 그대로)
 - **날짜**: 2026-05-24
 - **결정자**: 사용자
-- **컨텍스트**: 라이브러리는 자체 FastAPI 라우터(`krtour_map.api`)를 옵션으로
+- **컨텍스트**: 라이브러리는 자체 FastAPI 라우터(`krtour.map.api`)를 옵션으로
   노출한다. 목적은 디버그 UI 백엔드 + 향후 내부 활용. TripMate는 이 API에
   의존하지 않는다 (ADR-003).
 - **결정**: 디버그 API에 인증 키, JWT, OAuth 등 어떤 인증 로직도 추가하지
@@ -399,7 +399,7 @@
 - **상태**: accepted (ADR-005의 위치 부분을 supersede)
 - **날짜**: 2026-05-24
 - **결정자**: 사용자
-- **컨텍스트**: ADR-005에서 디버그 REST API를 본 라이브러리(`krtour_map.api`)
+- **컨텍스트**: ADR-005에서 디버그 REST API를 본 라이브러리(`krtour.map.api`)
   안에 옵션으로 두는 것으로 설계했다. 하지만 다음 문제가 있다:
   - 본 라이브러리(`python-krtour-map`)가 FastAPI/Uvicorn 의존을 짊어진다.
     TripMate는 이미 자체 FastAPI를 가지고 있어 본 라이브러리에서 FastAPI를
@@ -416,7 +416,7 @@
   - 본 저장소 내 `packages/krtour-map-debug-ui/` 디렉토리에 패키지 소스를 둔다
     (monorepo 레이아웃, v1 동일).
   - 본 라이브러리(`python-krtour-map`)에서는 FastAPI/Uvicorn 의존성 제거.
-    `[api]` extra 폐기. `src/krtour_map/`에 `api/` 폴더 두지 않음.
+    `[api]` extra 폐기. `src/krtour/map/`에 `api/` 폴더 두지 않음.
   - `krtour-map-debug-ui` 패키지가 `python-krtour-map`을 의존하고
     `AsyncKrtourMapClient`를 함수 호출로 사용한다.
   - 디버그 REST는 인증 없음, 내부망 전용 (ADR-005 인증 정책 그대로 유지).
@@ -438,7 +438,159 @@
   - `packages/krtour-map-debug-ui/pyproject.toml` 신규.
   - `docs/architecture.md`, `docs/backend-package.md`, `docs/debug-ui-package.md`
     갱신/신규.
-  - `import-linter` 계약에서 `krtour_map.api` 제거.
+  - `import-linter` 계약에서 `krtour.map.api` 제거.
+
+## ADR-021: main에 직접 push 금지 — 모든 변경은 PR (branch + review)
+
+- **상태**: accepted
+- **날짜**: 2026-05-24
+- **결정자**: 사용자
+- **컨텍스트**: v2 진입 초기에 main 브랜치에 직접 commit + push가 두 번 발생했다
+  (`fc8145f`, `304f2a9`). 작업이 빠르고 사용자 승인을 직접 받는 상황이라
+  마찰이 적었지만, 다음 문제가 있다:
+  - 검토 이력이 PR로 남지 않음 — 결정의 근거/대안/회신이 분산.
+  - 다중 에이전트/사람이 동시 작업할 때 main 충돌 가능.
+  - CI(검증, lint-imports, OpenAPI drift 등)가 main에 들어가기 전에 돌지 않음.
+  - force-push 사고 가능성.
+- **결정**:
+  - main 브랜치에 직접 push 금지. `git push origin main` 차단.
+  - 모든 변경은 feature branch에서 commit → push → `gh pr create` → 검토 →
+    merge.
+  - 브랜치 명명: `feat/<topic>` / `fix/<topic>` / `chore/<topic>` / `docs/<topic>` /
+    `refactor/<topic>` / `adr/<short>`.
+  - PR 제목 70자 이내. 본문은 PR 표준 포맷 (Summary, Test plan).
+  - GitHub branch protection: main에 require PR review (1) + status checks
+    (lint, test, lint-imports, openapi drift)이 통과해야 merge 가능. 운영 정책
+    설정은 사용자/관리자 권한.
+  - **예외 없음**. 핫픽스도 단명 branch를 통해.
+  - 본 ADR 이전의 commit (`fc8145f`, `304f2a9`)은 ex post facto 인정 — main
+    히스토리 보존. 본 ADR 이후 모든 변경은 PR.
+- **근거**:
+  - `python-kraddr-geo`의 실제 운영 관습과 정합 (그쪽도 PR 기반).
+  - main을 always-deployable 상태로 유지.
+  - 다중 에이전트(`agent/<id>`) 작업 시 main 손상 회피.
+- **결과 (긍정)**:
+  - 모든 결정이 PR 단위로 추적 — `gh pr view <num>`으로 한 번에 확인.
+  - CI 검증이 main 진입 전에 발생.
+  - 사용자 검토가 한 번에 묶임.
+- **결과 (부정)**:
+  - 작은 docs 한 줄 수정도 branch + PR 필요 (마찰 증가).
+  - 단 1명의 PR 작성자/검토자가 같을 수 있어 self-approve 가능 — 의도된 운영
+    모델 (실수 차단 목적이지 강제 4-eyes 아님).
+- **후속**:
+  - `AGENTS.md` DO NOT에 추가.
+  - `SKILL.md` DO NOT에 추가.
+  - `docs/agent-guide.md`에 PR 워크플로 절 추가.
+  - `docs/windows-reinstall-recovery.md`의 handoff 노트에 PR 링크 필수화.
+  - GitHub branch protection 설정은 운영자 수동 작업 — 이 ADR로 가이드만 박음.
+
+## ADR-022: `krtour` implicit namespace + Python import path `krtour.map`
+
+- **상태**: accepted
+- **날짜**: 2026-05-24
+- **결정자**: 사용자
+- **컨텍스트**: 초기 v2 설계에서 Python import 이름을 `krtour_map`(flat)으로
+  잡았다. 사용자가 `krtour.map`(namespace)로 변경을 지시. 근거:
+  - `python-kraddr-geo`의 ADR-015가 `kraddr` implicit namespace(PEP 420)를
+    채택. 동일 도메인의 다른 라이브러리(`kraddr-base`, `kraddr-geo`,
+    `kraddr-...`)가 같은 namespace를 공유 → `kraddr.base`, `kraddr.geo`.
+  - `krtour` namespace를 동일 패턴으로 채택하면 향후 `krtour.weather`,
+    `krtour.poi` 같은 자매 라이브러리 추가 시 일관된 import 경로 확보.
+- **결정**:
+  - PyPI distribution 이름은 `python-krtour-map` (그대로 유지).
+  - **Python import 이름**은 `krtour.map` (PEP 420 implicit namespace).
+  - 디렉토리 layout: `src/krtour/map/__init__.py` (있음), `src/krtour/__init__.py`
+    (**없음** — implicit namespace).
+  - `pyproject.toml` `[tool.setuptools.packages.find]`에 `namespaces = true`,
+    `include = ["krtour.map*"]`.
+  - import-linter 계약의 모든 module 경로를 `krtour_map.*` → `krtour.map.*`로
+    교체.
+  - 환경변수 prefix는 `KRTOUR_MAP_*` 유지 (이름 일관성 — env는 underscore 표준).
+  - CLI 명령 이름은 `krtour-map` 유지.
+  - 별도 패키지 `krtour-map-debug-ui`(ADR-020)의 Python import는
+    `krtour.map_debug_ui` (sibling under `krtour` namespace, 별도 distribution이
+    같은 namespace를 공유). 디렉토리 layout: `packages/krtour-map-debug-ui/src/
+    krtour/map_debug_ui/__init__.py`, `src/krtour/__init__.py` **없음**.
+- **근거**:
+  - kraddr 라이브러리 군과 패턴 정합.
+  - 향후 자매 패키지 확장 자유.
+  - PEP 420은 표준이며 setuptools/poetry/uv 모두 지원.
+- **결과 (긍정)**:
+  - 도메인 패키지 군이 통일된 namespace 사용.
+  - 별도 distribution이 같은 namespace를 공유해도 충돌 없음.
+- **결과 (부정)**:
+  - 일부 IDE/타입체커가 implicit namespace에 약함 → mypy/pyright 명시적 path
+    설정 필요할 수 있음.
+  - `src/krtour/__init__.py`를 실수로 만들면 namespace가 깨짐 → CI에서 차단
+    체크 (`tests/unit/test_no_namespace_init.py`).
+- **후속**:
+  - 모든 docs/code 예시 import path 갱신.
+  - `pyproject.toml` `package-dir` / `packages.find` / `package_data` 갱신.
+  - import-linter 계약 갱신.
+  - 디렉토리 layout 가이드 (`docs/architecture.md`, `docs/dev-environment.md`).
+  - 별도 패키지 `krtour-map-debug-ui`의 pyproject + README도 동일 패턴 적용.
+
+## ADR-023: `python-kraddr-base`의 category 모듈을 `krtour.map.category`로 이전
+
+- **상태**: accepted
+- **날짜**: 2026-05-24
+- **결정자**: 사용자
+- **컨텍스트**: v1까지는 `python-kraddr-base`의 `kraddr.base.categories`
+  (`PlaceCategory`, `PlaceCategoryCode`, `get_category`, `iter_categories`,
+  `mapbox_maki_icon_for_category` 등 ~2,072 줄)를 의존성으로 import해 사용했다.
+  사용자가 본 category 코드/문서를 `python-krtour-map`으로 이전하라고 지시.
+  근거:
+  - category 데이터(141 enum + maki icon 매핑)는 TripMate 지도 도메인에 직접
+    종속 — `python-krtour-map`이 1차 소비자.
+  - 다른 라이브러리(`python-kraddr-geo` 등)는 category에 의존하지 않음 — 분리
+    시 영향 없음.
+  - kraddr-base는 주소/좌표/CRS 핵심에 집중되는 게 자연스럽다.
+- **결정**:
+  - `kraddr.base.categories` 모듈 전체를 본 저장소로 이전 → `krtour.map.category`
+    (top-level subpackage, 다른 `dto`/`core`/`infra`와 sibling).
+  - 공개 식별자 (전부 그대로 유지):
+    - `PlaceCategory`, `PlaceCategoryCode`, `PlaceCategoryTier1Code`
+    - `PLACE_CATEGORY_DEFINITIONS`, `PLACE_CATEGORY_BY_CODE`,
+      `PLACE_CATEGORY_CODES`, `PLACE_CATEGORY_TIER1_NAMES`,
+      `PLACE_CATEGORY_TIER2_NAMES_BY_TIER1`,
+      `PLACE_CATEGORY_MAPBOX_MAKI_ICONS`, `PLACE_CATEGORY_MAPBOX_MAKI_ICON_VALUES`
+    - `get_category`, `is_known_category_code`, `iter_categories`,
+      `category_path`, `category_label`,
+      `mapbox_maki_icon_for_category`, `mapbox_maki_icon_or_none`,
+      `format_category_tree`, `print_category_tree`
+  - `dto/feature.py`의 `Feature.category` 검증·정규화는 `krtour.map.category`를
+    import해서 사용.
+  - 의존 계층(`import-linter`)에 `krtour.map.category`를 `dto`보다 낮은 계층
+    으로 추가 (`category → dto → core → infra → providers → client → cli`).
+  - `python-kraddr-base`는 `Address`, `PlaceCoordinate`, `AddressRegion`,
+    `Wgs84Point`, CRS 상수 등 **주소/좌표/CRS만** 제공 (그쪽에서 category 모듈은
+    별도 deprecation cycle을 두든 그대로 두든 그쪽 결정 — 본 저장소는 자체
+    구현).
+  - 라이선스: kraddr-base와 본 저장소 모두 GPL-3.0-or-later → 호환. 이전 시
+    파일 상단에 derivation 주석 + LICENSE에 origin 표기.
+  - 단위 테스트(141 seed 검증)도 함께 이전 (`tests/unit/test_category.py`).
+- **근거**:
+  - 단일 소비자 패턴 — 코드/데이터를 사용자 위치에 두는 게 응집도 높음.
+  - kraddr-base의 책임 축소 (주소/좌표만).
+  - 본 라이브러리의 의존 그래프에서 외부 dep 1개 제거 (kraddr-base는 여전히
+    필요하지만 category 모듈은 자체 보유).
+- **결과 (긍정)**:
+  - category 변경이 본 저장소 PR 단위로 통제.
+  - 추가 dep 제거 (kraddr-base의 category-only path 끊김).
+- **결과 (부정)**:
+  - 코드 중복(전환 기간) — kraddr-base가 이전 즉시 본 모듈을 폐기하지 않으면
+    잠시 두 copy 존재. 본 저장소는 자체 copy를 정본으로 본다.
+  - kraddr-base release 변경 시 본 저장소도 동기 release 검토.
+- **후속**:
+  - 실제 코드 이전은 **코드 작성 단계 진입 시** 수행 (현 단계는 docs/계약만).
+    별도 PR로 `krtour.map.category` 모듈 + 테스트 추가.
+  - `docs/category.md` 신설 — 모듈 사양 + 라이선스/derivation 명기.
+  - `docs/feature-model.md`, `docs/provider-contract.md`의 category 참조를
+    `krtour.map.category`로 갱신.
+  - `pyproject.toml`의 `dependencies`에서 kraddr-base는 유지 (주소/좌표 사용
+    중) — 단, category submodule은 본 저장소가 정본.
+  - `python-kraddr-base`에 대한 category 폐기/유지 결정은 그쪽 저장소 ADR로
+    분리.
 
 ---
 

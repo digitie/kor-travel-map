@@ -9,7 +9,7 @@
 
 ## 정체성
 
-- **패키지명**: `krtour-map-debug-ui` (PyPI 형식) / `krtour_map_debug_ui` (Python import)
+- **패키지명**: `krtour-map-debug-ui` (PyPI distribution) / `krtour.map_debug_ui` (Python import, ADR-022)
 - **위치**: `python-krtour-map` 저장소 내 `packages/krtour-map-debug-ui/`
   (monorepo)
 - **목적**: 디버그 UI 백엔드 + 향후 내부 도구 활용
@@ -32,7 +32,7 @@ uv pip install -e ".[dev,geo,providers]"
 uv pip install -e packages/krtour-map-debug-ui
 
 # 실행 — 인증 없음, localhost 전용
-uvicorn krtour_map_debug_ui.app:app --host 127.0.0.1 --port 8600 --reload
+uvicorn krtour.map_debug_ui.app:app --host 127.0.0.1 --port 8600 --reload
 ```
 
 기본 host `127.0.0.1` (외부 노출 금지 default). `0.0.0.0` 바인드 시 경고

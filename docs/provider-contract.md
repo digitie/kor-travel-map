@@ -120,7 +120,7 @@ system
 
 ## 5. provider 모듈 표준 구조
 
-`src/krtour_map/providers/<name>.py`:
+`src/krtour/map/providers/<name>.py`:
 
 ```python
 """<provider> 변환 모듈.
@@ -130,14 +130,14 @@ system
 """
 from __future__ import annotations
 
-from krtour_map.dto import (
+from krtour.map.dto import (
     Feature, FeatureKind, FeatureStatus,
     PlaceDetail,  # or EventDetail / ...
     SourceRecord, SourceLink, SourceRole,
     RawDataRef, FeatureBundle, FeatureFileSource,
 )
-from krtour_map.core.ids import make_feature_id, make_source_record_key, make_payload_hash
-from krtour_map.core.providers import normalize_provider_name
+from krtour.map.core.ids import make_feature_id, make_source_record_key, make_payload_hash
+from krtour.map.core.providers import normalize_provider_name
 
 PROVIDER: Final[str] = "python-<NAME>-api"
 DATASET_KEY: Final[str] = "<short>_<dataset>"
@@ -318,7 +318,8 @@ WeatherValue로 일관 적재.
 2. 범위: 책임 분리 (provider 라이브러리 vs 본 라이브러리 vs TripMate)
 3. Provider 경계: public client/typed model 직접 사용, wrapper 금지 재확인
 4. Dataset 매핑: natural key, FeatureKind, detail table, source_role
-5. 주소/좌표: kraddr-base DTO, geocoding, match report
+5. 주소/좌표: kraddr-base DTO (`Address`, `PlaceCoordinate` 등 — category는 본
+   저장소의 `krtour.map.category`, ADR-023), geocoding, match report
 6. 파일: RustFS 적재 대상, FeatureFileSource 매핑
 7. DB 적재: collect/load 함수, transaction owner, prune 정책
 8. Dagster: TripMate가 정의하는 asset 이름, schedule
@@ -340,7 +341,7 @@ def test_no_provider_wrapper_classes():
         # *Wrapper, *Gateway, *Adapter, *Facade(except top facade)
         re.compile(r".*(Wrapper|Gateway|Adapter)$"),
     )
-    for path in Path("src/krtour_map/providers").rglob("*.py"):
+    for path in Path("src/krtour/map/providers").rglob("*.py"):
         tree = ast.parse(path.read_text())
         for node in ast.walk(tree):
             if isinstance(node, ast.ClassDef):

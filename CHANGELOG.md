@@ -7,12 +7,36 @@
 
 ### 변경 / 재설계 (v2 design)
 
+- **NEW**: ADR-021 — main에 직접 push 금지. 모든 변경은 feature branch + PR
+  (`gh pr create`). 운영 GitHub branch protection으로 강제.
+  `docs/agent-guide.md` §7.5에 PR 워크플로/commit format/PR 본문 표준 박힘.
+
+- **BREAKING**: ADR-022 — Python import 경로 변경.
+  - `from krtour_map import ...` → `from krtour.map import ...`
+  - `from krtour_map_debug_ui import ...` → `from krtour.map_debug_ui import ...`
+  - `src/krtour_map/` → `src/krtour/map/`
+  - `src/krtour_map_debug_ui/` → `src/krtour/map_debug_ui/` (디버그 UI 패키지)
+  - `krtour` PEP 420 implicit namespace (no `src/krtour/__init__.py`).
+  - PyPI distribution 이름(`python-krtour-map`), CLI(`krtour-map`),
+    env prefix(`KRTOUR_MAP_*`), DB 이름(`krtour_map`)는 모두 유지.
+  - `pyproject.toml` `packages.find` + `namespaces=true` + `import-linter`
+    layers 갱신.
+
+- **NEW**: ADR-023 — `python-kraddr-base`의 category 모듈
+  (`kraddr.base.categories`, ~2,072줄, 141 enum)을 본 저장소
+  `krtour.map.category`로 이전.
+  - 공개 식별자 전부 유지 (`PlaceCategory`, `PlaceCategoryCode`, `get_category`,
+    `iter_categories`, `mapbox_maki_icon_for_category` 등).
+  - 의존 계층 최하단 (`category → dto → core → infra → providers → client → cli`).
+  - 라이선스 GPL-3.0-or-later 호환. 실제 코드 이전은 코드 작성 단계에서 별도 PR.
+  - 사양: `docs/category.md`.
+
 - **BREAKING**: 디버그 REST API/UI를 별도 Python 패키지 `krtour-map-debug-ui`
   (`packages/krtour-map-debug-ui/`)로 분리 (ADR-020). 메인 라이브러리
   `python-krtour-map`에서 FastAPI/Uvicorn 의존성 제거. `[api]` extra 폐기.
-  `krtour_map.api` 모듈 없음. ADR-005의 위치 부분은 ADR-020으로 superseded
+  `krtour.map.api` 모듈 없음. ADR-005의 위치 부분은 ADR-020으로 superseded
   (인증 없음 + 내부망 전용 정책은 유지).
-  - 디버그 UI 실행: `uvicorn krtour_map_debug_ui.app:app --host 127.0.0.1 --port 8600`
+  - 디버그 UI 실행: `uvicorn krtour.map_debug_ui.app:app --host 127.0.0.1 --port 8600`
   - 환경변수 prefix: `KRTOUR_MAP_DEBUG_UI_*`
   - `import-linter`에 `메인 패키지는 fastapi/uvicorn/starlette import 금지`
     계약 추가.
