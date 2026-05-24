@@ -1,9 +1,13 @@
 node_modules/
-dist/
 .env
 .env.local
 .env.*.local
 !.env.example
+
+# Next.js
+.next/
+out/
+next-env.d.ts
 
 # editor
 .vscode/
@@ -19,5 +23,5 @@ pnpm-debug.log*
 # typegen drift snapshot
 src/api/types.ts.bak
 
-# Vite cache
-.vite/
+# turbo / build cache
+.turbo/

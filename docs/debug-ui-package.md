@@ -44,31 +44,31 @@ packages/krtour-map-debug-ui/
 │   │   ├── integrity.py
 │   │   ├── debug.py           — /debug/explain, /debug/fixtures
 │   │   └── fixtures.py        — /debug/fixtures (저장/replay)
-│   └── static/                — Vite build output (frontend/dist 복사) 또는 dev FastAPI mount
-├── frontend/                  — React + Vite + TS + maplibre-vworld (ADR-025)
+│   └── static/                — Next.js static export 산출물 mount 시 (옵션 C, frontend/out/ 복사)
+├── frontend/                  — Next.js 15 + React 19 + TS + maplibre-vworld (ADR-025 2차 보강)
 │   ├── package.json
-│   ├── vite.config.ts
+│   ├── next.config.js
 │   ├── tsconfig.json
-│   ├── index.html
-│   ├── .env.example           — VITE_VWORLD_API_KEY, VITE_KRTOUR_MAP_DEBUG_UI_API
+│   ├── .env.example           — NEXT_PUBLIC_VWORLD_API_KEY, NEXT_PUBLIC_KRTOUR_MAP_DEBUG_UI_API
 │   └── src/
-│       ├── main.tsx
-│       ├── App.tsx
+│       ├── app/                     — Next.js App Router
+│       │   ├── layout.tsx
+│       │   ├── page.tsx             — / (FeatureMap)
+│       │   ├── features/[id]/page.tsx
+│       │   ├── import-jobs/page.tsx
+│       │   ├── dedup-review/page.tsx
+│       │   ├── integrity/page.tsx
+│       │   └── debug/
+│       │       ├── explain/page.tsx — SQL EXPLAIN viewer
+│       │       └── fixtures/page.tsx
 │       ├── api/               — openapi-typescript 생성 + 수동 zod mirror
-│       ├── pages/
-│       │   ├── FeatureMap.tsx       — VWorld 지도 + MakiMarker + Clusterer
-│       │   ├── FeatureDetail.tsx
-│       │   ├── ImportJobsPage.tsx
-│       │   ├── DedupReviewPage.tsx
-│       │   ├── IntegrityViolations.tsx
-│       │   └── DebugExplain.tsx     — SQL EXPLAIN viewer
 │       ├── components/
 │       │   ├── VWorldMap.tsx        — maplibre-vworld 래핑
-│       │   ├── FeatureMakiMarker.tsx
+│       │   ├── FeatureMakiMarker.tsx — @krtour/map-marker-react 사용 (ADR-029)
 │       │   └── ProviderSyncBadge.tsx
 │       └── lib/
-│           ├── categoryMaki.ts      — krtour.map.category → maki icon
-│           └── markerColor.ts       — P-01~P-16 팔레트
+│           └── queryClient.ts       — @tanstack/react-query setup
+│           # (categoryMaki / markerColor는 @krtour/map-marker-react에서 import — ADR-029)
 └── tests/
     ├── unit/                  — Fake repo + httpx ASGITransport
     ├── e2e/                   — testcontainers PostGIS + 실제 메인 라이브러리
@@ -256,42 +256,46 @@ type drift 부채 0).
 - TripMate 운영 노드에서는 git checkout → editable install로 충분.
 - PyPI 배포가 필요해지면 메인 라이브러리와 동일 version으로 lockstep release.
 
-## 14. Frontend — `maplibre-vworld-js` (ADR-025)
+## 14. Frontend — `maplibre-vworld-js` on Next.js (ADR-025, 2차 보강)
 
 ### 14.1 기술 스택
 
 | 항목 | 값 |
 |------|----|
+| Framework | **Next.js 15 (App Router)** — `kraddr-geo-ui` / TripMate `apps/web`와 동일 stack (ADR-025 2차 보강 2026-05-25) |
 | 라이브러리 | `maplibre-vworld` (npm v1.0.0, `github:digitie/maplibre-vworld-js`) |
-| 의존 | `maplibre-gl` (BSD-3), `zod` (좌표 검증), React 19 |
-| 빌드 도구 | Vite |
+| 의존 | `maplibre-gl` (BSD-3), `zod` (좌표 검증), React 19, `@tanstack/react-query` |
+| 공통 마커 | `@krtour/map-marker-react` (workspace, ADR-029) |
 | 언어 | TypeScript |
-| 라이선스 | ISC (`maplibre-vworld`) + BSD-3 (`maplibre-gl`) + GPL-3.0 (본 저장소) — 호환 |
+| 라이선스 | MIT (`next`) + ISC (`maplibre-vworld`) + BSD-3 (`maplibre-gl`) + GPL-3.0 (본 저장소) — 호환 |
 | 디렉토리 | `packages/krtour-map-debug-ui/frontend/` |
-| 개발 포트 | `8610` (`kraddr-geo-ui`와 동일 패턴) |
-| 배포 모드 | Vite build → FastAPI `static/` mount (또는 별도 dev 서버) |
-| SPA / SSR | SPA only (디버그 UI는 내부망 전용, SSR 불필요) |
+| 개발 포트 | `8610` (`next dev --port 8610`, TripMate `apps/web` dev 3000 충돌 회피) |
 
-**Kakao Maps SDK 사용 안 함** (ADR-025). VWorld 지도가 1차 + 유일.
+**Kakao Maps SDK 사용 안 함** (ADR-025/026). VWorld 지도가 1차 + 유일.
 
 ### 14.2 환경변수
 
 | 변수 | 의미 |
 |------|------|
-| `VITE_VWORLD_API_KEY` | VWorld API key. **`KRADDR_GEO_VWORLD_API_KEY`와 동일 값 공유** (ADR-025 사용자 보강 2026-05-25). frontend 빌드/런타임 주입. |
-| `VITE_KRTOUR_MAP_DEBUG_UI_API` | 백엔드 API base URL (개발: `http://127.0.0.1:8600`) |
-| `KRTOUR_MAP_DEBUG_UI_FRONTEND_DIST` | (FastAPI 측) `frontend/dist/` 경로 — static mount |
+| `NEXT_PUBLIC_VWORLD_API_KEY` | VWorld API key. **`KRADDR_GEO_VWORLD_API_KEY`와 동일 값 공유** (ADR-025 사용자 보강 1차 + 2차 2026-05-25). frontend 빌드/런타임 주입. |
+| `NEXT_PUBLIC_KRTOUR_MAP_DEBUG_UI_API` | 백엔드 API base URL (개발: `http://127.0.0.1:8600`) |
+| `KRTOUR_MAP_DEBUG_UI_FRONTEND_DIST` | (FastAPI 측) Next.js build 산출물 경로 — static export 모드 시에만 사용 (`.next/` 또는 `out/`) |
 
 **VWorld API key 공유 정책 (확정, ADR-025 보강 2026-05-25)**:
 `python-kraddr-geo` ADR-019의 `KRADDR_GEO_VWORLD_API_KEY`를 **공유 사용**한다.
 별도 발급 / 별도 환경변수 / 디버그 UI 전용 키 금지. 운영 시 backend가 `.env`
-또는 vault에서 `KRADDR_GEO_VWORLD_API_KEY`를 읽어, frontend 빌드 시 Vite 규약상
-`VITE_VWORLD_API_KEY`로 동일 값을 주입한다 (CI/CD 또는 운영 셸 스크립트 책임).
-**TripMate 사용자 UI** (ADR-026)도 동일 키를 공유한다. HTTP referrer 제한은
-backend 호스트(`127.0.0.1` + 내부망 호스트) + TripMate frontend 호스트로 통일.
+또는 vault에서 `KRADDR_GEO_VWORLD_API_KEY`를 읽어, frontend 빌드 시 Next.js
+규약상 `NEXT_PUBLIC_VWORLD_API_KEY`로 동일 값을 주입한다 (CI/CD 또는 운영 셸
+스크립트 책임). **TripMate 사용자 UI** (ADR-026)도 동일 키를 공유한다. HTTP
+referrer 제한은 backend 호스트(`127.0.0.1` + 내부망 호스트) + TripMate frontend
+호스트로 통일.
 
-### 14.3 기동
+Next.js env 규약: `NEXT_PUBLIC_*` 만 브라우저로 노출. server-only 키는
+prefix 없이 박는다 (본 디버그 UI는 read-mostly이라 server-only 키는 없음).
 
+### 14.3 기동 / 운영 옵션
+
+**개발**:
 ```bash
 # 1. 본 라이브러리 install (이미 됨)
 cd ~/dev/python-krtour-map
@@ -301,22 +305,32 @@ uv pip install -e packages/krtour-map-debug-ui
 # 2. backend (FastAPI) 기동
 uvicorn krtour.map_debug_ui.app:app --host 127.0.0.1 --port 8600
 
-# 3. frontend (Vite dev) 기동
+# 3. frontend (Next.js dev) 기동
 cd packages/krtour-map-debug-ui/frontend
 npm ci
 cp .env.example .env.local
 $EDITOR .env.local           # VWorld API key
-npm run dev                  # http://localhost:8610
+npm run dev                  # http://127.0.0.1:8610
 ```
 
-운영 배포 시:
-```bash
-cd packages/krtour-map-debug-ui/frontend
-npm run build                # → dist/
-# FastAPI가 dist/를 static mount (settings.frontend_dist_dir)
-uvicorn krtour.map_debug_ui.app:app --host 127.0.0.1 --port 8600
-# → http://127.0.0.1:8600/ 에서 frontend + API 모두 서비스
-```
+**운영 옵션 3가지** (운영자 결정):
+
+- **A. standalone (default 권고)**: `next build` + `next start` — frontend는
+  8610 포트, backend는 8600 포트로 동일 호스트에서 별도 프로세스. CORS
+  미필요 (Next.js rewrites로 same-origin fetch).
+  ```bash
+  cd packages/krtour-map-debug-ui/frontend
+  npm run build                # .next/
+  npm run start                # next start --port 8610 --hostname 127.0.0.1
+  ```
+- **B. FastAPI reverse proxy**: backend의 `/ui/*` 경로가 Next.js로 proxy.
+  Next.js는 `basePath: '/ui'` 설정. 단일 포트 운영 (8600).
+- **C. static export**: `next build` + `next export` → `out/` HTML/JS.
+  FastAPI가 `out/`을 static mount. SSR 미사용 (App Router의 client-only
+  페이지만 가능). 본 디버그 UI는 read-mostly이라 가능하지만 server actions
+  추가 시 disable됨.
+
+운영자가 옵션을 정한 후 `next.config.js`의 주석 처리된 `output` 설정 활성화.
 
 ### 14.4 핵심 컴포넌트 매핑
 
@@ -374,12 +388,14 @@ CI에서 drift 검증 (kraddr-geo ADR-015 패턴 미러). 자세한 절차는 §
 ### 14.7 e2e 테스트
 
 - backend는 testcontainers PostGIS (Python 측, §9).
-- frontend는 Playwright 또는 Vitest로 컴포넌트 단위 테스트 (코드 작성 단계).
+- frontend는 Playwright (e2e) + Vitest (단위) 로 테스트 (코드 작성 단계,
+  Next.js 공식 가이드 미러).
 - 통합 e2e (frontend + backend + PostGIS)는 Sprint 5 진입 직전 (T-200 계열).
 
 ### 14.8 외부 노출 안전
 
-- frontend는 `127.0.0.1:8610` (Vite) 또는 `127.0.0.1:8600` (FastAPI static mount) 만.
+- frontend는 `127.0.0.1:8610` (Next.js dev/standalone) 또는 `127.0.0.1:8600`
+  (FastAPI proxy/static mount, §14.3 옵션 B/C) 만.
 - VWorld API key는 frontend에 노출되지만 HTTP referrer 제한으로 보호.
   공유 키(`KRADDR_GEO_VWORLD_API_KEY`)이므로 referrer 화이트리스트에 backend
   호스트 + TripMate frontend 호스트(ADR-026) 모두 포함.

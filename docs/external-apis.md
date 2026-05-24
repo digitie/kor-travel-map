@@ -176,9 +176,10 @@ provider API spec이 변경되면:
 - **VWorld API** (`maplibre-vworld-js` 의 raster/vector tile): 본 라이브러리
   디버그 UI frontend **및 TripMate 사용자 UI** (ADR-026)가 사용. 키는
   `python-kraddr-geo` ADR-019의 `KRADDR_GEO_VWORLD_API_KEY`를 **공유 사용**
-  (ADR-025 사용자 보강 2026-05-25). 별도 발급 금지. frontend는 Vite 규약상
-  `VITE_VWORLD_API_KEY`로 노출 — 값은 동일 출처. HTTP referrer 제한 권장
-  (backend 호스트 + TripMate frontend 호스트).
+  (ADR-025 사용자 보강 2026-05-25). 별도 발급 금지. frontend는 **Next.js**
+  (ADR-025 2차 보강) 규약상 `NEXT_PUBLIC_VWORLD_API_KEY`로 노출 — 값은
+  동일 출처. HTTP referrer 제한 권장 (backend 호스트 + TripMate frontend
+  호스트).
 - **Kakao Maps JS SDK**: **미사용** (ADR-026 — TripMate 사용자 UI도
   maplibre-vworld로 통일, SPEC V8 v8_3 supersede). 본 항목은 reference로
   유지하되 비용/한도 모니터링 대상이 아니다.

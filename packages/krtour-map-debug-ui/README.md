@@ -40,25 +40,26 @@ uvicorn krtour.map_debug_ui.app:app --host 127.0.0.1 --port 8600 --reload
 기본 host `127.0.0.1` (외부 노출 금지 default). `0.0.0.0` 바인드 시 경고
 로그 (ADR-005 후속).
 
-### Frontend (React + Vite + maplibre-vworld, ADR-025)
+### Frontend (Next.js + React 19 + maplibre-vworld, ADR-025 2차 보강)
 
 ```bash
 cd packages/krtour-map-debug-ui/frontend
 cp .env.example .env.local
-$EDITOR .env.local           # VITE_VWORLD_API_KEY 설정
+$EDITOR .env.local           # NEXT_PUBLIC_VWORLD_API_KEY 설정
 npm ci
-npm run dev                  # http://localhost:8610
+npm run dev                  # http://127.0.0.1:8610 (next dev)
 ```
 
-VWorld 지도 (Kakao Maps SDK 미사용). `maplibre-gl` + `maplibre-vworld` +
-`zod` + `MakiMarker`/`MarkerClusterer` 내장. 자세한 사양: `../../docs/debug-ui-package.md` §14.
+VWorld 지도 (Kakao Maps SDK 미사용). Next.js App Router + `maplibre-gl` +
+`maplibre-vworld` + `zod` + `@krtour/map-marker-react` (ADR-029). 자세한
+사양: `../../docs/debug-ui-package.md` §14.
 
-운영 배포:
-```bash
-cd packages/krtour-map-debug-ui/frontend
-npm run build                # → dist/
-# FastAPI가 dist/를 static mount
-```
+운영 배포 (옵션 3가지 — `docs/debug-ui-package.md §14.3` 참조):
+- **A. standalone (default)**: `npm run build` + `npm run start` → 8610.
+- **B. FastAPI reverse proxy**: backend `/ui/*` → Next.js. `next.config.js`
+  `basePath: '/ui'` + `output: 'standalone'`.
+- **C. static export**: `next build` + `next export` → `out/` static, FastAPI
+  mount.
 
 ## 환경변수
 
@@ -69,15 +70,15 @@ npm run build                # → dist/
 | `KRTOUR_MAP_DEBUG_UI_HOST` | `127.0.0.1` | uvicorn 바인드 host (외부 노출 금지) |
 | `KRTOUR_MAP_DEBUG_UI_PORT` | `8600` | uvicorn 포트 |
 | `KRTOUR_MAP_DEBUG_UI_RELOAD` | `false` | dev 모드 hot-reload |
-| `KRTOUR_MAP_DEBUG_UI_CORS_ALLOW_ORIGINS` | `http://localhost:8610` | Vite dev 서버 |
-| `KRTOUR_MAP_DEBUG_UI_FRONTEND_DIST` | (auto) | `frontend/dist/` 경로 — static mount |
+| `KRTOUR_MAP_DEBUG_UI_CORS_ALLOW_ORIGINS` | `http://localhost:8610` | Next.js dev 서버 |
+| `KRTOUR_MAP_DEBUG_UI_FRONTEND_DIST` | (auto) | static export 모드 시 `frontend/out/` 경로 |
 
-### Frontend (`VITE_*`)
+### Frontend (`NEXT_PUBLIC_*` — Next.js 규약)
 
 | 변수 | 기본값 | 설명 |
 |------|--------|------|
-| `VITE_VWORLD_API_KEY` | (필수) | VWorld API key (HTTP referrer 제한 권장) |
-| `VITE_KRTOUR_MAP_DEBUG_UI_API` | `http://127.0.0.1:8600` | 백엔드 base URL |
+| `NEXT_PUBLIC_VWORLD_API_KEY` | (필수) | VWorld API key. `KRADDR_GEO_VWORLD_API_KEY` 공유 (ADR-025 보강). |
+| `NEXT_PUBLIC_KRTOUR_MAP_DEBUG_UI_API` | `http://127.0.0.1:8600` | 백엔드 base URL |
 
 메인 라이브러리 환경변수(`KRTOUR_MAP_PG_DSN`, `KRTOUR_MAP_OBJECT_STORE_*` 등)는
 그대로 사용한다. 디버그 UI는 메인 라이브러리의 settings를 상속한다.
