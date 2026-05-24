@@ -467,7 +467,7 @@ DESC` (특정 종목 최신 가격 조회).
 ```sql
 CREATE TABLE ops.import_jobs (
   job_id            UUID PRIMARY KEY DEFAULT x_extension.gen_random_uuid(),
-  kind              TEXT NOT NULL,                    -- 'visitkorea_festival_full_scan', 'krmois_license_full_update', ...
+  kind              TEXT NOT NULL,                    -- 'visitkorea_festival_full_scan', 'mois_license_full_update', ...
   payload           JSONB NOT NULL DEFAULT '{}'::jsonb,
   state             TEXT NOT NULL DEFAULT 'queued',   -- queued, running, done, failed, cancelled
   progress          INTEGER NOT NULL DEFAULT 0,       -- 0~100

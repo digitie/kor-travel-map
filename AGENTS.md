@@ -46,7 +46,7 @@ PC 개발은 **WSL ext4** 위에서 수행한다. NTFS 마운트에서 직접 `g
 
 - **코드/가상환경**: ext4 (`~/dev/python-krtour-map/`).
 - **데이터(`data/`)**: NTFS의 프로젝트 디렉토리 (예: `/mnt/f/dev/python-krtour-map/data/`).
-  KRMOIS localdata zip, krheritage SHP, fixture 대용량은 모두 NTFS. ext4 작업
+  MOIS localdata zip, krheritage SHP, fixture 대용량은 모두 NTFS. ext4 작업
   디렉토리에는 심볼릭 링크(`ln -s /mnt/f/dev/python-krtour-map/data data`).
 - **테스트**: 단위 테스트 픽스처는 소량을 ext4의 `tests/fixtures/`에. 통합/e2e와
   전수 검증은 NTFS의 `data/`를 reference.

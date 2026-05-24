@@ -93,7 +93,7 @@ features/visitkorea/f_1111000000_e/f_1111000000_e_abc123/primary-0-d2a4f1e7.jpg
 ```
 
 - `prefix`: `features` (settings.object_store_prefix)
-- `provider_short`: provider canonical name 단축형 (visitkorea, krmois, ...)
+- `provider_short`: provider canonical name 단축형 (visitkorea, mois, ...)
 - `feature_id_prefix`: feature_id의 앞 12자 (디렉토리 분산)
 - `feature_id`: 전체 feature_id
 - `role`-`display_order`: 동일 feature의 여러 파일 구분

@@ -19,7 +19,7 @@ tests/fixtures/
     festival_full_scan_seoul_2026_05.json
     festival_full_scan_empty_response.json
     festival_full_scan_missing_image.json
-  krmois/
+  mois/
     license_promoted_restaurant.json
     license_excluded_billiards.json
     license_closed_status.json
@@ -284,7 +284,7 @@ def test_fixture_replay(fixture_path):
 # krtour.map.fixtures
 RUNNERS = {
     "visitkorea.festival_to_bundles": _run_visitkorea_festival,
-    "krmois.license_record_to_bundle": _run_krmois_license,
+    "mois.license_record_to_bundle": _run_mois_license,
     "opinet.station_detail_to_bundle": _run_opinet_station,
     # ...
 }
@@ -358,8 +358,8 @@ drift 발견 시:
 | 엣지 — UTF-8 | 특수문자, 한글-한자 혼합 (특히 행사 제목) |
 | 실패 — 필수 필드 누락 | ValidationError 발생 |
 | 실패 — schema drift | raw_payload_hash 변경 → 새 source_record |
-| 폐업/취소 | KRMOIS: 영업중 아님 (excluded) |
-| 제외 업종 | KRMOIS: 미용실 / PC방 / 동물병원 |
+| 폐업/취소 | MOIS: 영업중 아님 (excluded) |
+| 제외 업종 | MOIS: 미용실 / PC방 / 동물병원 |
 
 테스트 marker:
 ```python
@@ -408,7 +408,7 @@ POST /debug/fixtures
 | provider | 최초 fixture 작성자 | 갱신 책임 |
 |----------|------------------|----------|
 | visitkorea | 본 라이브러리 PR | 본 라이브러리 PR |
-| krmois | 본 라이브러리 PR | 본 라이브러리 PR |
+| mois | 본 라이브러리 PR | 본 라이브러리 PR |
 | (모든 provider) | 본 라이브러리 PR | 본 라이브러리 PR |
 
 provider 라이브러리(`python-*-api`)는 자체적으로 typed model 테스트만 갖는다.

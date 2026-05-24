@@ -2,6 +2,76 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-24 23:30 (claude)
+
+**작업**: `python-mois-api` 활용 feature 적재 full lifecycle 문서화 + canonical
+name 정정 (`python-krmois-api` → `python-mois-api`, ADR-024) + 일괄 rename.
+
+**변경 파일**:
+- **신규**:
+  - `docs/mois-feature-etl.md` — 4 step lifecycle (A: source DB sync,
+    B: 영업중 승격, C: 이력조회 incremental, D: on-demand detail) +
+    195 슬러그 카탈로그 + PROMOTED 42종 (식음/숙박/관광/문화/MICE/스포츠/레저) +
+    EXCLUDED 분류 + dataset_key 4종 (`mois_license_features_bulk` /
+    `_history` / `_closed` / `mois_license_detail`) + PROMOTED_PLACE_KIND_BY_SLUG
+    매핑 + Dagster asset 5종.
+- **갱신**:
+  - `docs/decisions.md` — **ADR-024** 신설 (canonical name 정정 +
+    `LEGACY_PROVIDER_ALIASES` `krmois`/`pykrmois`/`python-krmois-api` 추가).
+    중간 편집 사고로 일시 삭제된 ADR-023 복원.
+  - `docs/krmois-license-feature-etl.md` → `docs/mois-license-feature-etl.md`
+    (git mv) + 내용 정정 (Step B 좁은 가이드로 재포지셔닝, KRMOIS → MOIS).
+  - `docs/provider-contract.md` — canonical name list + dataset_key 표
+    (`mois_license_features_bulk/_history/_closed/detail` 4종) + 카탈로그 표.
+  - `docs/dagster-boundary.md` — asset 이름 (`feature_place_mois_licenses`) +
+    cron 표 (MOIS bulk + incremental 분리).
+  - `docs/architecture.md`, `docs/backend-package.md`, `docs/data-model.md`,
+    `docs/feature-files-rustfs.md`, `docs/feature-opening-hours.md`,
+    `docs/address-geocoding.md`, `docs/debug-fixture-workflow.md`,
+    `docs/khoa-beach-info-etl.md`, `docs/test-strategy.md`,
+    `docs/windows-reinstall-recovery.md` — `krmois`/`KRMOIS` → `mois`/`MOIS`
+    targeted 갱신.
+  - `README.md` — 의존 스택 표, 문서 지도 (`mois-feature-etl.md` + `-license-`
+    두 항목 별도 링크).
+  - `AGENTS.md` — dev 데이터 경로 `KRMOIS localdata zip` → `MOIS`.
+  - `pyproject.toml` — provider extras 주석 `python-krmois-api` → `python-mois-api`.
+  - `docs/resume.md`, `docs/tasks.md` — 진척도/완료 항목 갱신.
+
+**결정** (ADR-024):
+- 외부 라이브러리 실제 이름 검증: PyPI `python-mois-api`, import `mois`,
+  GitHub `digitie/python-mois-api`. `python-krmois-api`는 v1 내부 alias였을 뿐
+  실제 라이브러리에는 존재하지 않음.
+- canonical provider name을 `python-mois-api`로 정정.
+- legacy aliases (`krmois`, `mois`, `pykrmois`, `python-krmois-api`)는
+  `LEGACY_PROVIDER_ALIASES`에 추가 — v1 호환.
+- import 경로 `krtour.map.providers.mois`, loader `krtour.map.mois`, dataset_key
+  prefix `mois_*`.
+
+**의사결정 (사용자 위임 사항, 검토 부탁)**:
+- **PROMOTED slug 42종** — 식음 6 + 숙박 8 + 관광/문화 9 + 테마파크 5 + MICE 2
+  + 스포츠/레저 9 + 쇼핑/도시여가 3. 보수적으로 선정 (TripMate 1차 범위).
+- **dataset_key 4분리** — bulk + history + closed + detail. Step별 분리로
+  Dagster asset 매핑 명확.
+- **mois-license-feature-etl.md 유지** — Step B 좁은 가이드로 재포지셔닝.
+  `mois-feature-etl.md`가 full lifecycle (상위 doc). 둘이 충돌하면 full이
+  정답이라고 mois-feature-etl.md §1에 명시.
+- **legacy alias `python-krmois-api`도 통과** — 본 라이브러리 적재된 기존 feature의
+  `provider` 컬럼 마이그레이션은 별도 작업으로 분리.
+- **org 이름**: `KRMOIS` → `MOIS`로 일괄. 라이브러리 import 이름과 일치.
+
+**발견**:
+- `mois-api` README/AGENTS는 PyPI distribution을 `python-mois-api`라고 명시.
+- mois-api 195 업종 카탈로그가 `OPENAPI_SERVICES`/`FILE_DOWNLOADS`/
+  `INCREMENTAL_OPENAPI_ENDPOINTS`/`RESPONSE_FIELDS` 정적 dict로 박혀있어
+  본 라이브러리에서 그대로 import 가능.
+- mois-api의 `mois.db` 모듈이 SQLite/SpatiaLite source DB 적재 + 영업중/폐업
+  iterator를 완비 → 본 라이브러리는 reconcile만.
+
+**다음**: PR#3 push + 사용자 검토. PR#1/2/3 모두 merge 후 backlog T-200/T-201
+(Sprint 5 운영 진입 전 batch DAG + consistency_reports).
+
+---
+
 ## 2026-05-24 22:00 (claude)
 
 **작업**: T-002 ~ T-011 — v1 docs를 v2 기준으로 일괄 이전. 총 14개 신규 docs.
@@ -28,7 +98,7 @@
 - `docs/tripmate-integration.md` (T-011) — TripMate가 본 라이브러리 import해서
   쓰는 패턴 + Dagster asset + FastAPI router + Admin + 권한/인증 경계.
 - `docs/event-feature-etl.md` (T-006a, VisitKorea 축제)
-- `docs/krmois-license-feature-etl.md` (T-006b, KRMOIS 인허가)
+- `docs/mois-license-feature-etl.md` (T-006b, KRMOIS 인허가)
 - `docs/opinet-place-price-etl.md` (T-006c, OpiNet 주유소+유가)
 - `docs/khoa-beach-info-etl.md` (T-006d, KHOA 해수욕장)
 - `docs/krheritage-feature-etl.md` (T-006e, 국가유산청 place/area/event)

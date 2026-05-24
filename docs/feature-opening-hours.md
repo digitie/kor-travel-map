@@ -202,9 +202,9 @@ def is_open_at(hours: FeatureOpeningHours, dt: datetime) -> bool:
 
 ## 8. provider별 매핑
 
-### 8.1 KRMOIS (영업시간 X)
+### 8.1 MOIS (영업시간 X)
 
-KRMOIS API는 영업시간 제공 안 함. `business_hours=None`.
+MOIS API는 영업시간 제공 안 함. `business_hours=None`.
 
 ### 8.2 OpiNet
 

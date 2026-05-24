@@ -24,7 +24,7 @@ async with AsyncKrtourMapClient(
     kraddr_geo_client=tripmate_kraddr_client,   # 선택, 주소 보강용
     providers={                                  # provider별 client 주입
         "visitkorea": visitkorea_async_client,
-        "krmois": krmois_async_client,
+        "mois": mois_async_client,
         "kma": kma_async_client,
         # ...
     },
@@ -101,7 +101,7 @@ class AsyncKrtourMapClient:
 
         Examples:
             client.providers.visitkorea.festival_to_bundles(items)
-            client.providers.krmois.license_record_to_bundle(record, mapping)
+            client.providers.mois.license_record_to_bundle(record, mapping)
             client.providers.kma.short_forecast_to_weather_values(records, feature_id, coord)
         """
         ...

@@ -133,7 +133,7 @@ TripMate의 asset 이름 표준 (참고용 — TripMate 결정):
 | asset 이름 | dataset_key | group |
 |-----------|-------------|-------|
 | `feature_event_visitkorea_festivals` | `visitkorea_festival_events` | `features_event` |
-| `feature_place_krmois_licenses` | `krmois_license_features` | `features_place` |
+| `feature_place_mois_licenses` | `mois_license_features_bulk` | `features_place` |
 | `feature_place_opinet_stations` | `opinet_fuel_station_details` | `features_place` |
 | `feature_place_khoa_beaches` | `khoa_oceans_beach_info` | `features_place` |
 | `feature_place_krheritage_heritage` | `krheritage_heritage_features` | `features_place` |
@@ -281,7 +281,8 @@ TripMate는 위 spec을 참고해 asset/schedule을 정의 (직접 의존성은 
 | KHOA coastal notices | `0 * * * *` | 시간 |
 | KHOA marine index | `0 * * * *` | 시간 |
 | VisitKorea festivals | `0 3 * * *` | 일 1회 |
-| KRMOIS license (full) | `0 2 5 * *` | 월 1회 (주간 운영 시 0 2 * * 1) |
+| MOIS license bulk (full) | `0 2 5 * *` | 월 1회 (주간 운영 시 0 2 * * 1) |
+| MOIS license incremental | `0 3 * * *` | 일 1회 (이력조회 기반) |
 | OpiNet stations | `0 3 1 * *` | 월 1회 |
 | OpiNet prices | `0 6,14,22 * * *` | 일 3회 |
 | KRforest recreation forests | `0 2 1 * *` | 월 1회 |
@@ -327,7 +328,7 @@ import 책임).
 ```
 [root job: load_batch_id=UUID, parent_job_id=NULL]
   ├── child: feature_event_visitkorea_festivals (parent_job_id=root)
-  ├── child: feature_place_krmois_licenses (parent_job_id=root)
+  ├── child: feature_place_mois_licenses (parent_job_id=root)
   ├── child: ... (병렬)
   └── 모두 완료 후:
       [gate: consistency_check (parent_job_id=root)]
