@@ -23,15 +23,10 @@ Python 패키지 `krtour-map-debug-ui` (ADR-020, `packages/krtour-map-debug-ui/`
 
 ## 다음 한 작업
 
-**T-002** — `docs/weather-feature-normalization.md` 작성.
-
-- v1 docs (`v1` 브랜치의 `docs/weather-feature-normalization.md`)를 v2 기준으로
-  옮긴다.
-- ADR-010 (`forecast_style + timeline_bucket` 분리)과 정합.
-- provider별 weather_domain ↔ forecast_style ↔ timeline_bucket 매핑 표 완성.
-- 표준 metric_key 표 (T1H, TMP, REH, WSD, RN1, PTY, SKY, FIRE_RISK, ...).
-
-작업 후 `docs/journal.md` + 이 문서 갱신.
+**PR#2 검토 + merge 후 다음 backlog**:
+- T-200/T-201 (Sprint 5 운영 진입 직전 — batch DAG + consistency_reports)
+- ADR-020~024 후속 (캐시 전략, OpenAPI 정책 등)
+- **코드 작성 단계 진입 결정** — 사용자 승인 후 별도 PR로 시작.
 
 ## 진척도
 
@@ -65,18 +60,19 @@ Python 패키지 `krtour-map-debug-ui` (ADR-020, `packages/krtour-map-debug-ui/`
 - [x] ADR-022 (`krtour` implicit namespace) + 전 docs/pyproject 일괄 rename
 - [x] ADR-023 (kraddr-base category 이전) + `docs/category.md` 신설
 
-### v1 → v2 도큐먼트 이관 (다음 작업들)
+### v1 → v2 도큐먼트 이관 (2026-05-24 완료)
 
-- [ ] T-002 `docs/weather-feature-normalization.md`
-- [ ] T-003 `docs/feature-files-rustfs.md`
-- [ ] T-004 `docs/feature-opening-hours.md`
-- [ ] T-005 `docs/kraddr-base-types.md` + `docs/address-geocoding.md`
-- [ ] T-006 provider별 ETL 문서 (10개 정도)
-- [ ] T-007 `docs/dagster-boundary.md`
-- [ ] T-008 `docs/postgres-schema.md` (data-model의 표 형식 reference)
-- [ ] T-009 `docs/debug-fixture-workflow.md`
-- [ ] T-010 `docs/feature-db-initialization.md`
-- [ ] T-011 `docs/tripmate-integration.md`
+- [x] T-002 `docs/weather-feature-normalization.md`
+- [x] T-003 `docs/feature-files-rustfs.md`
+- [x] T-004 `docs/feature-opening-hours.md`
+- [x] T-005 `docs/kraddr-base-types.md` + `docs/address-geocoding.md`
+- [x] T-006 provider별 ETL 문서 10건 (event/krmois/opinet/khoa/krheritage/outdoor/
+      krex-rest-area/standard-data/notice/kma-weather/place-phone-enrichment)
+- [x] T-007 `docs/dagster-boundary.md`
+- [x] T-008 `docs/postgres-schema.md`
+- [x] T-009 `docs/debug-fixture-workflow.md`
+- [x] T-010 `docs/feature-db-initialization.md`
+- [x] T-011 `docs/tripmate-integration.md`
 
 ### 코드 작성 단계 진입 전
 
