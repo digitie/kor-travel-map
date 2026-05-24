@@ -146,11 +146,15 @@
   - `docs/external-apis.md` Kakao Maps SDK 미사용 처리
   - `docs/forest-feature-etl.md` §11.6 ADR-026 → ADR-027 후보 재번호
 
-## 폐기
+## 폐기 / 재해석
 
-- ~~T-100~~ — "디버그 UI 별도 Next.js 패키지 분리" — **폐기**:
-  Python 패키지로 분리 (T-001b, ADR-020) + frontend는 React+Vite (ADR-025)로
-  결정. Next.js 미채택.
+- ~~T-100~~ — "디버그 UI 별도 Next.js 패키지 분리" — **부분 재해석** (PR#11
+  2026-05-25):
+  - 원래 의도 = Next.js로 별도 패키지화. 실제 구현 = Python 패키지로 분리
+    (T-001b, ADR-020) + frontend는 그 안의 `frontend/` 하위에 **Next.js**
+    (ADR-025 2차 보강).
+  - 즉 "Next.js 미채택"이라고 한 PR#7의 기록은 잘못됨 — ADR-025 2차 보강
+    으로 Next.js 채택 확정.
 
 ## 우선순위 가이드
 

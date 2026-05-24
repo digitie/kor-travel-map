@@ -2,6 +2,85 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-25 06:00 (claude)
+
+**작업**: ADR-025 2차 사용자 보강 — frontend 빌드 도구 **Vite → Next.js**
+정정. PR#11.
+
+**컨텍스트**: 사용자 한 줄 지시 "디버그 ui는 next.js 기반임." 1차 결정 시
+"React + Vite"로 박았던 것이 잠정 가설이었고, `kraddr-geo-ui`와 TripMate
+`apps/web` 모두 Next.js이므로 stack 통일을 위해 Next.js로 정정.
+
+**변경 파일**:
+- `docs/decisions.md`:
+  - ADR-025 §컨텍스트 후보 옵션 — "Next.js/Vite SSR 지원" → "Next.js App
+    Router 지원" 정정.
+  - ADR-025 §결정 — "React + Vite + TypeScript" → "Next.js 15 (App Router)
+    + React 19 + TypeScript".
+  - ADR-025 §결정 — 빌드/개발/env 설명 Next.js로 변경.
+  - ADR-025 §근거 — kraddr-geo-ui 일관 + TripMate `apps/web` 동일 stack
+    명기.
+  - ADR-025 §결과(긍정/부정) — Vite → Next.js로 정정.
+  - **ADR-025 §사용자 보강 (2026-05-25, 2차) — 빌드 도구 정정** 신설:
+    `next dev --port 8610`, App Router, `NEXT_PUBLIC_*` env, `@krtour/
+    map-marker-react` transpilePackages, 운영 옵션 3가지 (standalone /
+    proxy / export).
+  - §후속 — Vite skeleton → Next.js로 본 PR#11에서 전환 명기.
+- `docs/debug-ui-package.md` §14 전체 갱신:
+  - §14.1 기술 스택 — Framework Next.js 15 (App Router) 추가, 빌드 도구
+    Vite 행 삭제, 공통 마커 `@krtour/map-marker-react` (ADR-029) 추가.
+  - §14.2 환경변수 — `VITE_*` → `NEXT_PUBLIC_*` 일괄 정정.
+  - §14.3 기동 — Next.js dev 명령 + 운영 옵션 3가지 (standalone / FastAPI
+    reverse proxy / static export).
+  - §2 디렉토리 트리 — `vite.config.ts`/`index.html`/`src/main.tsx`/`pages/`
+    삭제, `next.config.js`/`src/app/` (App Router) 추가, categoryMaki/
+    markerColor는 `@krtour/map-marker-react`로 이전 명기.
+  - §9 테스트 — Playwright + Vitest (Next.js 공식 가이드 미러).
+  - §10 외부 노출 — `Vite` → `Next.js dev/standalone` 정정.
+- `docs/external-apis.md` — VWorld 항목 `VITE_VWORLD_API_KEY` →
+  `NEXT_PUBLIC_VWORLD_API_KEY` 정정.
+- `docs/tripmate-integration.md` §14.5:
+  - Next.js 명기 (두 UI 동일 stack).
+  - `@krtour/map-marker-react` 사용 명기.
+  - 작업 분담에 "Next.js 그대로 유지, 마커 import만 교체" 명기.
+- `packages/krtour-map-debug-ui/README.md`:
+  - "React + Vite + maplibre-vworld" → "Next.js + React 19 + maplibre-vworld"
+  - 운영 배포 옵션 3가지 명기.
+  - Backend env 표의 "Vite dev 서버" → "Next.js dev 서버".
+  - Frontend env 표 `VITE_*` → `NEXT_PUBLIC_*`.
+- `packages/krtour-map-debug-ui/frontend/package.json` — 전체 교체:
+  - `vite`/`@vitejs/plugin-react`/`vitest` → `next`/`eslint-config-next`/
+    `@types/node`.
+  - scripts: `vite` → `next dev/build/start/lint`.
+  - dependencies: `next`/`@krtour/map-marker-react` (workspace) 추가.
+- `packages/krtour-map-debug-ui/frontend/.env.example`:
+  - `VITE_*` → `NEXT_PUBLIC_*`.
+  - 주석에 Next.js env 규약 (NEXT_PUBLIC_ vs server-only) 명기.
+- `packages/krtour-map-debug-ui/frontend/.gitignore`:
+  - `dist/` 삭제, `.next/`/`out/`/`next-env.d.ts` 추가, `.vite/` 삭제.
+- `packages/krtour-map-debug-ui/frontend/README.md`:
+  - 기술 스택 표 Next.js 행 추가, Vite 삭제, env `NEXT_PUBLIC_*`.
+  - 개발 명령 `next dev --port 8610`.
+  - 빌드 / 운영 옵션 3가지 추가.
+  - 페이지 표를 App Router route (`/features/[id]` 등)로 변경.
+  - categoryMaki 매핑은 `@krtour/map-marker-react` 사용 (ADR-029) 명기.
+- `packages/krtour-map-debug-ui/frontend/next.config.js` 신설:
+  - reactStrictMode + transpilePackages (`@krtour/map-marker-react`)
+  - 운영 옵션(`output: 'standalone'/'export'`, `basePath`, `rewrites`)은
+    주석 처리 — 운영자 결정 후 활성화.
+- `docs/tasks.md` — §폐기/재해석 — T-100 "Next.js 미채택" 기록은 잘못됨
+  명기, ADR-025 2차 보강으로 채택 확정.
+
+**핵심 인사이트**: kraddr-geo-ui = Next.js이고 TripMate `apps/web` = Next.js
+이므로 디버그 UI도 Next.js가 자연. 1차에서 Vite로 박았던 것은 SPA의 단순함
+가정에서 비롯됐으나, 운영 일관성 (학습 곡선 통일 + `@krtour/map-marker-react`
+transpilePackages 단일 설정) 가치가 더 큼.
+
+**다음**: PR#11 commit + push + open. PR#10과 충돌 가능 (양쪽이 frontend
+README/package.json 일부 영역 수정) — 작은 충돌, resolvable.
+
+---
+
 ## 2026-05-25 05:00 (claude)
 
 **작업**: PR#10 — T-012~T-018 진행 + ADR-029 (proposed) + T-101~103 상세
