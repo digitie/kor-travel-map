@@ -8,11 +8,16 @@
 
 ## 다음 (우선순위 순)
 
-- [ ] T-012 — ADR-020+ 후속 결정 (필요 시)
-  - **ADR-030 후보** — 라이브러리 캐시 전략 (in-memory 안 두기 vs 두기)
-  - **ADR-031 후보** — OpenAPI export 정책 (디버그 패키지 라우터 노출 시점)
-  - **ADR-032 후보** — Coverage 단계적 상향 일정 (Sprint 1 → Sprint 5)
-  - **ADR-033 후보** — `ops.feature_consistency_reports` 도입 시점
+- [ ] T-012 — ADR-020+ 후속 결정 작성 (일부 완료 → proposed)
+  - **ADR-030 (proposed)** — 라이브러리 in-memory 캐시 금지 (`functools.cache`
+    한정 예외) + `import-linter` 계약. 사용자 검토 → accepted 전환.
+  - **ADR-031 (proposed)** — 디버그 패키지 OpenAPI export 정책 (첫 라우터부터
+    활성화). 사용자 검토 → accepted 전환.
+  - **ADR-032 (proposed, 시기 의존)** — Coverage 단계적 상향 일정 (Sprint 1
+    → Sprint 5). T-014에 묶어 Sprint 일정 확정 후 accepted 전환.
+  - **ADR-033 (proposed, 시기 의존)** — `feature_consistency_reports` 단계적
+    도입 (Phase 1 = Sprint 3~4 F1~F3, Phase 2 = Sprint 5 F4~F8 + 게이트).
+    T-014에 묶어 accepted 전환.
 - [ ] T-013 — `CHANGELOG.md` 초기 엔트리 정리 (현 v2 design 완료 시점)
 - [ ] T-014 — 코드 작성 단계 진입 검토
   - 모든 문서 검토 완료
@@ -128,6 +133,9 @@
 ## ADR 번호 가이드 (현재)
 
 - **accepted**: ADR-001 ~ ADR-026
-- **다음 후보**: ADR-027 (forest 카테고리 확장) / ADR-028 (`python-knps-api`
-  provider 등록) / ADR-029 (공통 maki npm 패키지) / ADR-030+ (캐시/OpenAPI/
-  Coverage/정합성 등 T-012 항목)
+- **proposed (검토 대기)**: ADR-030 (캐시 금지) / ADR-031 (OpenAPI export) /
+  ADR-032 (Coverage 일정, 시기 의존) / ADR-033 (`feature_consistency_reports`,
+  시기 의존)
+- **후보 (미작성)**: ADR-027 (forest 카테고리 확장) / ADR-028 (`python-knps-api`
+  provider 등록) / ADR-029 (공통 maki npm 패키지) / ADR-034+ (신규 provider
+  추가 절차 표준)

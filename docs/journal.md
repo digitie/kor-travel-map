@@ -2,6 +2,48 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-25 03:00 (claude)
+
+**작업**: ADR-030/031/032/033 `proposed` 작성 — 사용자가 의견 요청한 4건을
+공식 ADR로 박음 + 관련 docs 교차 링크.
+
+**컨텍스트**: 사용자가 ADR-030/033 → ADR-031/032 순으로 의견 요청. 의견을
+지속 기록으로 남기지 않으면 다음 conversation에서 다시 협상해야 함 →
+`proposed` ADR로 정식 박음. T-014(코드 작성 단계 진입 결정)에서 시기 의존
+ADR(032/033)은 Sprint 일정 확정과 함께 accepted 전환.
+
+**변경 파일**:
+- `docs/decisions.md`:
+  - **ADR-030 (proposed)**: 라이브러리 in-memory 캐시 금지. `functools.cache`
+    한정 narrow 예외 (PlaceCategoryCode 카탈로그, `pyproj.Transformer`
+    singleton). `import-linter` 계약으로 `cachetools`/`async_lru`/`aiocache`/
+    `diskcache` 의존 차단.
+  - **ADR-031 (proposed)**: 디버그 패키지 OpenAPI export 첫 FastAPI 라우터
+    등장 PR부터 즉시 활성화. `openapi.json` 저장소 커밋 + CI `--check` gate.
+    frontend 도입 전부터 drift gate 가동 → type drift 부채 0.
+  - **ADR-032 (proposed, 시기 의존)**: Coverage 단계적 상향 일정 (Sprint 1
+    50% → Sprint 4 80%). `dto/`는 Sprint 2부터 100% branch 항상 강제.
+    T-014에 묶어 accepted 전환.
+  - **ADR-033 (proposed, 시기 의존)**: `feature_consistency_reports` 두 단계
+    분할 도입. Phase 1 (Sprint 3~4) = 스키마 + F1~F3 (orphan source / detail
+    누락 / CRS drift, severity=ERROR, 게이트 미적용). Phase 2 (Sprint 5) =
+    F4~F8 + Dagster 게이트 + swap 차단. T-014에 묶어 accepted 전환.
+- `docs/resume.md`: "다음 ADR 후보" → "다음 ADR (proposed / 후보)" 재분류.
+  ADR-030/031/032/033을 proposed로 명기.
+- `docs/tasks.md`: T-012 항목을 `proposed` 4건으로 갱신. §"ADR 번호 가이드"에
+  proposed 섹션 추가.
+- `docs/performance.md §9.1`: ADR-030 링크 + narrow 예외 + import-linter
+  계약 명기.
+- `docs/test-strategy.md §2`: ADR-032 link + Sprint별 coverage schedule 표
+  inline.
+- `docs/dagster-boundary.md §12`: ADR-033 link + Phase 1/Phase 2 분할 명기.
+- `docs/debug-ui-package.md §8`: ADR-031 link + 활성화 시점 명기.
+
+**다음**: 사용자 review → ADR-030/031은 accepted 전환 가능 (코드 작성 단계
+독립). ADR-032/033은 T-014 시점에 Sprint 일정 확정 후 accepted 전환.
+
+---
+
 ## 2026-05-25 02:00 (claude)
 
 **작업**: 사용자의 4건 의사결정 반영 — (1) VWorld key 공유, (2) TripMate

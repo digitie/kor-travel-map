@@ -811,6 +811,256 @@
     또는 "TripMate UI 통일 이후 미사용"으로 표기.
   - `docs/category.md` §4 maki icon 매핑은 두 UI 공통 reference 명기.
 
+## ADR-030: 라이브러리 in-memory 캐시 금지 (immutable 카탈로그 예외)
+
+- **상태**: proposed
+- **날짜**: 2026-05-25
+- **결정자**: claude 제안, 사용자 검토 대기
+- **컨텍스트**: `docs/performance.md §9.1`에 이미 "in-memory 캐시 두지 않는다"
+  방침이 박혀 있으나, 정식 ADR로 격상되지 않았다. 코드 작성 단계에서 누군가
+  "이 hot path는 캐시하면 빠르지 않나"라고 시작하면 매번 review에서 같은 논쟁
+  반복. 정식 ADR + `import-linter` 계약으로 차단해 두는 게 협상 비용을
+  영구히 제거한다.
+- **결정**:
+  - **본 라이브러리(`krtour.map`)는 in-memory 캐시를 두지 않는다**. `core/`
+    / `infra/` / `providers/` / `client/` 어디에도 `cachetools` /
+    `async-lru` / `aiocache` / 수동 `dict` 캐시 금지.
+  - **Narrow 예외 (모듈 레벨 `functools.cache` 한정 허용)**:
+    1. `krtour.map.category` Tier 1~4 PlaceCategoryCode 카탈로그 (141건,
+       릴리스 단위 immutable).
+    2. `pyproj.Transformer` CRS 변환 인스턴스 — `Transformer.from_crs(...)`
+       는 본질적으로 immutable + thread-safe, 모듈 레벨 singleton 보관.
+    3. 위 두 예외는 모두 **데이터 mutability 0** 이어야 한다 — feature/
+       place_detail/file_object 등 mutable 데이터는 절대 금지.
+  - **`import-linter` 계약 추가** (`pyproject.toml`):
+    ```toml
+    [[tool.importlinter.contracts]]
+    name = "main package must not depend on cache libraries"
+    type = "forbidden"
+    source_modules = ["krtour.map"]
+    forbidden_modules = ["cachetools", "async_lru", "aiocache", "diskcache"]
+    ```
+- **근거**:
+  - **stateless function library (ADR-003)**: 호출자(TripMate)는 multi-worker
+    uvicorn으로 동작. 워커별 캐시 일관성 깨짐 → silent stale data.
+  - **invalidation 책임 분리**: 캐시 무효화는 비즈니스 lifecycle (요청/세션)
+    에 종속. 라이브러리가 책임지면 invalidation API가 library → caller로
+    역전 → ADR-001 의존 방향 위배.
+  - **EXPLAIN 기반 latency 측정 정직성**: 캐시 layer가 있으면 첫 호출과 N번째
+    호출 latency가 다름 → P99 SLO 측정 무의미 + 회귀 추적 어려움.
+  - **호출자(TripMate) 측 캐시는 자유**: Redis/in-process LRU를 TripMate가
+    `apps/api`에 두는 건 ADR 범위 밖. 캐시 키 설계와 무효화 책임은 TripMate가
+    가져간다.
+- **결과 (긍정)**:
+  - 모든 hot path latency가 DB query latency = EXPLAIN 검증 통합 테스트
+    (`docs/performance.md §10`)가 곧 SLO 보증.
+  - multi-worker / 컨테이너 재시작 시 cache warm-up 비용 0.
+  - 새 코드 작성 시 "이거 캐시할까" 협상 0회.
+- **결과 (부정)**:
+  - PlaceCategoryCode 같은 hot lookup이 모든 호출마다 모듈 로드 시 한 번
+    채워진 카탈로그를 참조 — `functools.cache`로 충분히 빠르지만, 위 narrow
+    예외가 늘어나려는 압력이 발생할 수 있음. ADR을 명시적으로 좁게 박아
+    예외 확장을 차단.
+- **후속**:
+  - `docs/performance.md §9.1`에 본 ADR 링크 + narrow 예외 명기.
+  - `pyproject.toml`에 import-linter 계약 추가 (코드 작성 단계 진입 시).
+  - `tests/lint/test_import_linter.py` — 본 계약 회귀 테스트 (코드 작성
+    단계).
+
+## ADR-031: 디버그 패키지 OpenAPI export 정책 (첫 라우터부터 활성화)
+
+- **상태**: proposed
+- **날짜**: 2026-05-25
+- **결정자**: claude 제안, 사용자 검토 대기
+- **컨텍스트**: `packages/krtour-map-debug-ui`가 FastAPI 라우터를 노출하면
+  OpenAPI spec (`openapi.json`)이 자동 생성된다. 이를 저장소에 커밋하고
+  drift gate를 두는 정책은 `kraddr-geo` ADR-015 패턴이 있으나, 본 저장소는
+  *언제* 활성화할지 미정. 활용 측은 (1) 디버그 UI frontend `openapi-typescript`
+  → `src/api/types.ts` 생성, (2) 운영자/에이전트 API spec 참조, (3) 외부
+  도구(curl/postman) 검증.
+
+- **결정**:
+  - **첫 FastAPI 라우터 등장 PR부터 즉시 활성화** (Sprint 1, 메인 라이브러리
+    코어 ETL이 아직 부분 구현이어도 무관).
+  - `packages/krtour-map-debug-ui/openapi.json`을 저장소에 커밋.
+  - `packages/krtour-map-debug-ui/scripts/export_openapi.py` 신설 (이미
+    `docs/debug-ui-package.md §8`에 사양 박힘).
+  - `.github/workflows/openapi.yml` — `--check` drift 게이트:
+    ```yaml
+    - run: python packages/krtour-map-debug-ui/scripts/export_openapi.py \
+             --check --output packages/krtour-map-debug-ui/openapi.json
+    ```
+  - 라우터/DTO/디버그 패키지 의존성 변경 PR은 반드시 `openapi.json` diff
+    동반 — 누락 시 CI fail.
+  - 메인 라이브러리(`krtour.map`)는 FastAPI 미의존(ADR-020)이라 본 ADR
+    범위에 들어오지 않음. **항상 디버그 패키지 한정**.
+
+- **근거**:
+  - **활성화 비용 cheap**: 스크립트 ~30줄 + workflow ~10줄.
+  - **frontend 도입 시점 부채 회피**: frontend가 도입되기 전부터 drift gate가
+    돌고 있으면, frontend 첫 PR에서 `npm run gen:types`가 깨끗하게 동작 →
+    type drift 회귀 0회.
+  - **운영자/에이전트 진입 비용 절감**: 저장소에 `openapi.json`이 박혀 있으면
+    backend 미기동 상태에서도 API 표면 확인 가능 (Swagger Viewer 등).
+  - **kraddr-geo 패턴 일관**: 형제 라이브러리 운영 일관성.
+
+- **결과 (긍정)**:
+  - 라우터 변경의 외부 효과(frontend type / 외부 도구)가 PR diff에서 즉시
+    가시화.
+  - 디버그 UI frontend 도입 시 type drift 부담 0.
+  - 외부 운영자가 spec을 PR diff로 review 가능 (코드 + spec이 한 PR에).
+
+- **결과 (부정)**:
+  - 라우터 PR마다 `openapi.json` 갱신 강제 — 운영자가 잊을 수 있음. CI 게이트
+    + agent-guide 체크리스트에 명기로 완화.
+
+- **후속**:
+  - `packages/krtour-map-debug-ui/scripts/export_openapi.py` 작성 (코드 작성
+    단계).
+  - `.github/workflows/openapi.yml` 신설 (T-203 일부).
+  - `docs/agent-guide.md` §체크리스트에 "라우터 변경 시 `openapi.json` 갱신"
+    추가.
+  - `docs/debug-ui-package.md §8` + `§14.6`에 본 ADR 링크 + drift gate 명기
+    (현재 "kraddr-geo ADR-015 패턴 미러"로만 표기됨).
+
+## ADR-032: Coverage 단계적 상향 일정 (Sprint 1 → Sprint 5)
+
+- **상태**: proposed (시기 의존 — T-014 코드 작성 단계 진입 결정 시 확정)
+- **날짜**: 2026-05-25
+- **결정자**: claude 제안, 사용자 검토 대기
+- **컨텍스트**: `docs/test-strategy.md §2`에 최종 coverage 목표(core 90% /
+  infra 80% / providers 70% / client 80% / api 70% / dto 100% / 전체 80%
+  branch)가 박혀 있고 "단계적으로 상향"이라고만 표기. 실제 schedule이 박혀
+  있지 않으면 매 PR마다 "이번엔 얼마?" 협상 → CI fail 빈도와 PR 사이클 시간
+  늘어남.
+
+- **결정 (Sprint별 `fail_under` schedule)**:
+
+  | Sprint | 전체 (branch) | `core/` | `providers/` | `infra/client/api/` | 비고 |
+  |--------|---------------|---------|--------------|---------------------|------|
+  | Sprint 1 (scaffolding) | 50% | 60% | 50% | 50% | 코드 자체가 적음 — bar 형식적 |
+  | Sprint 2 (core + 첫 provider 4건) | 65% | 75% | 55% | 60% | core 우선 |
+  | Sprint 3 (provider 절반 + infra) | 75% | 85% | 65% | 70% | provider 확장 |
+  | Sprint 4 (integrity + edge cases) | **80%** | **90%** | **70%** | **80%** | 목표치 도달 |
+  | Sprint 5 (operational entry) | 유지 + 회귀 방지 | 유지 | 유지 | 유지 | 신규 코드만 incremental check |
+
+  - `pyproject.toml`의 `[tool.coverage.report] fail_under`를 Sprint별 PR로
+    상향 (한 줄 변경 + journal 엔트리).
+  - 단계 상향 PR은 항상 **coverage gap 해소 PR과 묶음** — gap을 먼저 채운
+    후 bar를 올린다 (반대 순서는 PR이 red로 시작).
+  - `dto/` 100% branch는 **Sprint 2부터 항상 강제** (Pydantic validator는
+    line 수 적고 critical).
+
+- **근거**:
+  - **초기 강제는 prototype iteration 방해**: 첫 PR이 80% 강제면 5줄 추가에
+    mock 30줄 — 의미 없는 snapshot 남발.
+  - **마지막 spurt는 실효성 없음**: 마지막 Sprint에 몰아 채우면 happy path
+    snapshot만 늘고 edge case 누락.
+  - **bar가 박혀 있으면 협상 0회**: 매 PR이 "이번 sprint의 bar를 넘었나"만
+    확인.
+  - **dto는 예외**: line이 적고 validator branch가 곧 비즈니스 룰 — 처음부터
+    100% 강제가 합리적.
+
+- **결과 (긍정)**:
+  - 단계별 quality gate가 명시적 → PR review 협상 비용 0.
+  - Sprint 4에 목표 도달 → Sprint 5는 운영 진입 + 회귀 방지에 집중 가능.
+  - 단계 상향 PR이 항상 gap 해소 PR과 묶이므로 red main 0회.
+
+- **결과 (부정)**:
+  - Sprint 일정이 변동되면 schedule도 변동 — 본 ADR을 update하는 부담.
+  - Sprint 1의 50% bar는 형식적이라 "왜 있는가" 비판 가능 → 본 ADR이 "초기
+    bar는 형식이지만 단계 상향의 anchor 역할"이라고 명기.
+
+- **후속**:
+  - `docs/test-strategy.md §2`에 본 ADR 링크 + Sprint별 표 그대로 옮김.
+  - 코드 작성 단계 진입 결정(T-014) PR에 본 ADR을 묶어 `proposed` →
+    `accepted` 전환 + Sprint 일정 확정.
+  - 단계 상향 PR template: "Sprint N coverage bar 상향 + gap 해소".
+
+## ADR-033: `feature_consistency_reports` 단계적 도입 (Sprint 3~4: F1~F3, Sprint 5: F4~F8 + 게이트)
+
+- **상태**: proposed (시기 의존 — T-014 코드 작성 단계 진입 결정 시 확정)
+- **날짜**: 2026-05-25
+- **결정자**: claude 제안, 사용자 검토 대기
+- **컨텍스트**: `kraddr-geo` ADR-017 미러로 `ops.feature_consistency_reports`
+  + batch DAG 게이트가 T-201로 잡혀 있음 (`docs/dagster-boundary.md §12`).
+  F1~F8 케이스는 `python-krtour-map-spec.docx` B.18에 정의. 도입 시점이
+  미정 — Sprint 5 운영 진입 직전에 몰아넣으면 게이트 자체가 Sprint 5 일정
+  리스크, 너무 일찍 도입하면 schema가 미성숙 상태에서 굳어짐. 그러나
+  정합성 검증 없이 Sprint 5 운영 진입은 silent data corruption 후 발견 비용
+  폭증.
+
+- **결정 (두 단계로 분할)**:
+
+  **Phase 1 (Sprint 3~4, T-201a)** — 스키마 + critical 3건:
+  - `ops.feature_consistency_reports` 테이블 마이그레이션:
+    ```sql
+    CREATE TABLE ops.feature_consistency_reports (
+      report_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      batch_id UUID NOT NULL,
+      started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      finished_at TIMESTAMPTZ,
+      severity_max TEXT NOT NULL CHECK (severity_max IN ('OK','WARN','ERROR')),
+      cases JSONB NOT NULL,         -- case별 결과 array
+      summary JSONB NOT NULL        -- 집계: total/by_severity/by_kind
+    );
+    CREATE INDEX idx_reports_batch ON ops.feature_consistency_reports (batch_id);
+    CREATE INDEX idx_reports_started ON ops.feature_consistency_reports (started_at DESC);
+    ```
+  - **F1**: `SourceRecord`가 있는데 `Feature`가 없음 (orphan source — ETL
+    transform 실패 누수). severity=ERROR.
+  - **F2**: `Feature.kind='place'` 인데 `PlaceDetail` 행 없음 (detail 누락 —
+    ADR-018 위배). severity=ERROR. 다른 kind도 동일 패턴.
+  - **F3**: `Feature.coord_5179 ≠ ST_Transform(coord, 5179)` (CRS drift —
+    ADR-012 위배 / generated column 신뢰 손상). severity=ERROR.
+  - Dagster 게이트는 **미적용** — 검증만 하고 mv_refresh swap은 차단 안 함.
+    Phase 1은 "보이게 만들기" 목적.
+
+  **Phase 2 (Sprint 5 운영 진입 직전, T-201b)** — 나머지 + Dagster 게이트:
+  - **F4**: `dedup_review_queue` 미해소 N건 초과. severity=WARN.
+  - **F5**: provider별 `last_success`가 SLA(예: 24h) 초과. severity=WARN.
+  - **F6**: `opening_hours` 모순 (start > end, ADR-019 위배). severity=ERROR.
+  - **F7**: cross-provider dedup mismatch (record linkage 점수 회귀 — Sprint
+    별 baseline 대비 N% 이상 하락). severity=WARN.
+  - **F8**: `file_object` orphan (RustFS object 존재 + DB feature 없음 / 그
+    반대). severity=WARN.
+  - **Dagster 게이트 적용** (`dagster-boundary.md §12`): root → child 적재 →
+    `consistency_check` 실행 → `severity_max != ERROR` 시 `mv_refresh
+    strategy='swap'`. ERROR 시 알림 + swap 차단.
+
+- **근거**:
+  - **스키마 비용 cheap**: 테이블 정의 + 인덱스 2개 → 초기 마이그레이션에
+    함께 박는 게 alembic revision 비용 절감.
+  - **F1~F3는 cheap + critical**: 단순 SQL이고 high-value. 첫 부트스트랩에서
+    잡힘 — 누락 시 며칠 후 dedup 검토 큐에서 발견 = too late.
+  - **F4~F8은 비용 더 큼**: cross-provider dedup score baseline 필요 (F7),
+    file_object orphan 검사는 RustFS 스캔 비용 (F8) — Sprint 5에 묶는 게
+    구현 비용 정직.
+  - **Dagster 게이트는 Phase 2로**: Phase 1에서 게이트까지 박으면 첫 ERROR가
+    swap 차단 → 운영 학습 곡선이 너무 가파름. Phase 1은 "관측", Phase 2는
+    "차단".
+
+- **결과 (긍정)**:
+  - Sprint 5 운영 진입 시점에는 F1~F8 + 게이트 완성 → silent corruption 0.
+  - F1~F3을 Sprint 3~4에 박아 두면 코드 작성 단계 내내 회귀 감지.
+  - 스키마는 Sprint 3 초기에 박혀 있으므로 F4~F8 추가는 행 추가만 — alembic
+    revision 1개로 끝.
+
+- **결과 (부정)**:
+  - Phase 1 시점에는 게이트 미적용 → 검증 결과를 운영자가 직접 확인해야
+    함 (디버그 UI `/integrity` 페이지 또는 `feature_consistency_reports`
+    direct SQL).
+  - Phase 2에서 게이트 켤 때 첫 운영 batch가 F4~F8 위반으로 일제히 fail
+    가능 — Phase 2 도입 PR은 반드시 dry-run report 첨부 후 점진 enable.
+
+- **후속**:
+  - `docs/test-strategy.md`에 F1~F8 케이스별 통합 테스트 매트릭스 추가.
+  - `docs/dagster-boundary.md §12`에 본 ADR 링크 + Phase 1/Phase 2 분할 명기.
+  - `docs/postgres-schema.md`에 `ops.feature_consistency_reports` 테이블
+    정의 추가 (Phase 1 마이그레이션 시점).
+  - 코드 작성 단계 진입 결정(T-014) PR에 본 ADR을 묶어 `proposed` →
+    `accepted` 전환 + T-201을 T-201a (Phase 1) / T-201b (Phase 2)로 분할.
+
 ---
 
 > 새 ADR을 추가할 때는 위 포맷을 따른다:
