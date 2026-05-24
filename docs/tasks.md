@@ -81,6 +81,11 @@
 ## 완료
 
 - [x] T-000 — git v1 보존 + main orphan 재시작 (완료: 2026-05-24)
+- [x] T-001b — ADR-020 + 디버그 UI 별도 패키지로 분리 (완료: 2026-05-24)
+  - decisions(ADR-020), architecture, backend-package, debug-ui-package(신규),
+    AGENTS, SKILL, CLAUDE, README, pyproject(`[api]` 제거 + forbidden 계약 추가),
+    .env.example, test-strategy 갱신
+  - `packages/krtour-map-debug-ui/` pyproject + README skeleton
 - [x] T-001 — v2 핵심 docs 작성 (완료: 2026-05-24)
   - AGENTS.md, README.md, SKILL.md, CLAUDE.md
   - .env.example, pyproject.toml, .gitignore, .gitattributes, LICENSE

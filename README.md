@@ -31,9 +31,10 @@ async with AsyncKrtourMapClient(engine=tripmate_engine, providers=...) as client
     weather = await client.build_weather_card(feature_id, asof=datetime.utcnow())
 ```
 
-라이브러리가 자체적으로 노출하는 FastAPI 라우터(`krtour_map.api`)는 **디버그 UI
-백엔드 + 향후 내부 활용 전용**이며 인증 키를 요구하지 않는다(내부망 전제).
-TripMate ↔ 라이브러리 통신에는 사용하지 않는다.
+디버그 REST/UI는 **별도 Python 패키지** `krtour-map-debug-ui`
+(`packages/krtour-map-debug-ui/`, ADR-020)로 분리되어 있고 **디버그 UI 백엔드 +
+향후 내부 활용 전용**이며 인증 키를 요구하지 않는다(내부망 전제). TripMate ↔
+라이브러리 통신에는 사용하지 않는다. 메인 라이브러리는 FastAPI 의존이 없다.
 
 ## 책임 / 비책임 요약
 
@@ -65,8 +66,8 @@ TripMate ↔ 라이브러리 통신에는 사용하지 않는다.
 # WSL ext4 작업 디렉토리에서
 cd ~/dev/python-krtour-map
 
-# 의존성 (v2 코드 작성 단계 이후)
-uv venv && uv pip install -e ".[dev,api,providers]"
+# 메인 라이브러리 (FastAPI 의존 없음)
+uv venv && uv pip install -e ".[dev,geo,providers]"
 
 # PostgreSQL + PostGIS (Docker)
 docker compose up -d postgres
@@ -74,8 +75,11 @@ docker compose up -d postgres
 # 스키마 적용
 alembic upgrade head
 
-# (디버그) REST API 기동 — 인증 없음
-uvicorn krtour_map.api.app:app --reload --port 8600
+# (옵션) 디버그 UI 별도 패키지 설치
+uv pip install -e packages/krtour-map-debug-ui
+
+# (디버그) REST API 기동 — 인증 없음, localhost 전용
+uvicorn krtour_map_debug_ui.app:app --host 127.0.0.1 --port 8600
 ```
 
 ## 의존 스택 (v2 확정)
@@ -86,7 +90,7 @@ uvicorn krtour_map.api.app:app --reload --port 8600
 | ORM/SQL | SQLAlchemy 2.x async + GeoAlchemy2 + asyncpg + psycopg[binary,pool]>=3.2 |
 | 공간 처리 | GeoPandas, Shapely 2, GDAL Python binding |
 | 모델 | Pydantic v2 |
-| HTTP (디버그 API) | FastAPI + Uvicorn |
+| HTTP (디버그 API, 별도 패키지) | FastAPI + Uvicorn — `krtour-map-debug-ui`만 |
 | HTTP client | httpx + tenacity |
 | 마이그레이션 | Alembic |
 | 주소/좌표 | `python-kraddr-base`, `python-kraddr-geo` |
@@ -101,27 +105,42 @@ ADR-007/008 참조).
 
 ## 디렉토리 (계획)
 
+본 저장소는 **monorepo**다. Python 패키지 2개:
+
 ```
-src/krtour_map/
+src/krtour_map/                    ← 메인 패키지 (FastAPI 의존 없음)
   dto/         — pydantic v2 입력/출력 (DB/FastAPI 의존 없음)
   core/        — 비즈니스 로직 (Protocol에만 의존; make_feature_id, scoring, merge)
   infra/       — DB 어댑터 (SQLAlchemy 2 async + raw SQL + Alembic)
   providers/   — provider별 raw → DTO 변환 모듈 (wrapper 신규 생성 금지)
   client.py    — AsyncKrtourMapClient (라이브러리 진입점)
-  api/         — FastAPI 라우터 (옵션, 디버그 UI 전용, 인증 없음)
   cli/         — typer CLI (옵션)
+
+packages/krtour-map-debug-ui/      ← 별도 패키지 (ADR-020)
+  pyproject.toml
+  src/krtour_map_debug_ui/
+    app.py     — FastAPI app factory + uvicorn entrypoint
+    routers/   — 디버그 엔드포인트
+    deps.py    — AsyncKrtourMapClient 주입
+    settings.py
+    views/     — (옵션) 정적 UI
+
 alembic/, sql/ — 스키마 마이그레이션과 DDL
 tests/
   unit/        — Fake repo 기반
   integration/ — testcontainers PostGIS
-  e2e/         — 디버그 API + integration DB
+  e2e/         — 디버그 패키지 + integration DB
   fixtures/    — replay 회귀
 docs/          — 사양·결정·작업 기록 (한국어)
 data/          — 원천/픽스처 대용량 (NTFS, .gitignore)
 ```
 
-의존 방향: **dto → core → infra → providers → client → api/cli** 한 방향.
-`import-linter`가 CI에서 강제 (ADR-002, `docs/architecture.md`).
+메인 패키지 의존 방향: **dto → core → infra → providers → client → cli** 한
+방향. `import-linter`가 CI에서 강제 (ADR-002, `docs/architecture.md`).
+`krtour_map.api`는 존재하지 않는다 (ADR-020).
+
+별도 패키지 `krtour_map_debug_ui`는 `krtour_map.client`만 import해서 함수
+호출한다 (ADR-020, `docs/debug-ui-package.md`).
 
 ## 설계 원칙
 
@@ -155,7 +174,8 @@ lint-imports
 - [`docs/architecture.md`](docs/architecture.md) — 의존 방향, 계층, 데이터 흐름
 - [`docs/decisions.md`](docs/decisions.md) — ADR 누적 (ADR-001~)
 - [`docs/data-model.md`](docs/data-model.md) — Postgres 테이블·인덱스 reference
-- [`docs/backend-package.md`](docs/backend-package.md) — 라이브러리 사양 + 디버그 API
+- [`docs/backend-package.md`](docs/backend-package.md) — 메인 라이브러리 사양
+- [`docs/debug-ui-package.md`](docs/debug-ui-package.md) — `krtour-map-debug-ui` 별도 패키지 사양 (ADR-020)
 - [`docs/performance.md`](docs/performance.md) — 인덱스 설계 + 공간 쿼리 가이드 +
   bulk insert 룰
 - [`docs/test-strategy.md`](docs/test-strategy.md) — 4단계 테스트 + 커버리지 목표

@@ -7,6 +7,17 @@
 
 ### 변경 / 재설계 (v2 design)
 
+- **BREAKING**: 디버그 REST API/UI를 별도 Python 패키지 `krtour-map-debug-ui`
+  (`packages/krtour-map-debug-ui/`)로 분리 (ADR-020). 메인 라이브러리
+  `python-krtour-map`에서 FastAPI/Uvicorn 의존성 제거. `[api]` extra 폐기.
+  `krtour_map.api` 모듈 없음. ADR-005의 위치 부분은 ADR-020으로 superseded
+  (인증 없음 + 내부망 전용 정책은 유지).
+  - 디버그 UI 실행: `uvicorn krtour_map_debug_ui.app:app --host 127.0.0.1 --port 8600`
+  - 환경변수 prefix: `KRTOUR_MAP_DEBUG_UI_*`
+  - `import-linter`에 `메인 패키지는 fastapi/uvicorn/starlette import 금지`
+    계약 추가.
+
+
 - **BREAKING**: v1 코드는 `v1` 브랜치로 이동. main은 orphan으로 v2 사양 시작.
   v1 산출물은 `git checkout v1` 또는 `python-krtour-map-spec.docx` (저장소 루트
   약 80쪽) 참고.

@@ -9,9 +9,10 @@
 한국 공공 API (`python-*-api`) 결과를 `Feature`(place/event/notice/price/weather/
 route/area) 계약으로 정규화하고 PostgreSQL + PostGIS에 저장한다.
 
-TripMate ↔ 라이브러리는 **함수 직접 호출**. HTTP가 아니다. 라이브러리가 노출하는
-FastAPI 라우터(`krtour_map.api`)는 **디버그 UI 전용 + 향후 내부 활용**으로
-인증 없이 내부망에서만 사용한다.
+TripMate ↔ 라이브러리는 **함수 직접 호출**. HTTP가 아니다. 디버그 REST/UI는
+**별도 Python 패키지** `krtour-map-debug-ui` (`packages/krtour-map-debug-ui/`,
+ADR-020)로 분리되어 있고, 인증 없이 내부망에서만 사용한다. 메인 라이브러리는
+FastAPI 의존이 없다.
 
 ## 2. 현 단계
 
@@ -38,12 +39,14 @@ SQLAlchemy 2 async + GeoAlchemy2 + asyncpg + psycopg[binary,pool]>=3.2 / GeoPand
 ## 5. 절대 금지 (5개만 다시)
 
 1. provider adapter/wrapper 신규 생성 금지 (public client 직접 사용)
-2. 의존 방향 역행 금지 (`dto → core → infra → providers → client → api/cli`)
+2. 의존 방향 역행 금지 — 메인 패키지 `dto → core → infra → providers → client → cli`.
+   `krtour_map.api` 없음 (ADR-020)
 3. ORM에 비즈니스 로직 금지 (raw SQL `text()`만)
 4. 공간 쿼리 술어에서 `ST_Transform` 금지 (인덱스 무효화)
-5. 디버그 API에 인증 추가 금지 (내부망 전제)
+5. 디버그 API/UI 패키지에 인증 추가 금지 (내부망 전제) + 메인 라이브러리에
+   FastAPI import 금지 (ADR-020)
 
-전체 18개 룰은 `SKILL.md` §4.
+전체 19개 룰은 `SKILL.md` §4.
 
 ## 6. 작업 후 체크리스트 (1줄)
 

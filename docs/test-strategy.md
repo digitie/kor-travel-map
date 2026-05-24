@@ -271,12 +271,17 @@ async def test_bulk_price_values_copy_handles_100k_rows(pg_engine, generate_pric
 
 ## 5. e2e 테스트 (`tests/e2e/`)
 
+e2e 테스트는 **별도 패키지** `krtour-map-debug-ui`의 FastAPI app을 띄워
+검증한다 (ADR-020). 따라서 e2e 환경은 메인 패키지 + 디버그 UI 패키지 둘 다
+설치된 venv에서 실행한다 (`uv pip install -e . -e packages/krtour-map-debug-ui`).
+
 ### 5.1 디버그 FastAPI app 테스트
 
 ```python
 @pytest.fixture
 async def debug_client(pg_engine, file_store):
-    from krtour_map.api.app import build_app
+    # ↓ 메인 라이브러리 X, 별도 패키지 import
+    from krtour_map_debug_ui.app import build_app
     app = build_app(engine=pg_engine, file_store=file_store)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as c:
         yield c
@@ -315,7 +320,7 @@ async def test_debug_api_requires_no_auth(debug_client):
 ```python
 @pytest.mark.e2e
 def test_warns_when_binding_to_all_interfaces(caplog):
-    from krtour_map.api.app import warn_if_external_bind
+    from krtour_map_debug_ui.app import warn_if_external_bind
     with caplog.at_level("WARNING"):
         warn_if_external_bind("0.0.0.0")
     assert any("internal-only" in r.message.lower() for r in caplog.records)

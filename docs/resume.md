@@ -12,8 +12,9 @@
 - GeoPandas + Shapely 2 + GDAL
 - Pydantic v2 / FastAPI + Uvicorn / httpx + tenacity / Alembic
 
-TripMate 연계 (ADR-003): 함수 직접 호출. REST 없음. 라이브러리가 노출하는
-디버그 REST는 내부망 전용 + 인증 없음 (ADR-005).
+TripMate 연계 (ADR-003): 함수 직접 호출. REST 없음. 디버그 REST/UI는 별도
+Python 패키지 `krtour-map-debug-ui` (ADR-020, `packages/krtour-map-debug-ui/`,
+인증 없음 + 내부망 전용 ADR-005).
 
 ## 다음 한 작업
 
@@ -52,7 +53,9 @@ TripMate 연계 (ADR-003): 함수 직접 호출. REST 없음. 라이브러리가
 - [x] `docs/external-apis.md` (API 키 발급/호출)
 - [x] `docs/tasks.md` (백로그)
 - [x] `docs/resume.md` (본 문서)
-- [x] `docs/journal.md` (작업 일지 초기 엔트리)
+- [x] `docs/journal.md` (작업 일지)
+- [x] `docs/debug-ui-package.md` (ADR-020에 따른 별도 패키지 사양)
+- [x] `packages/krtour-map-debug-ui/` (별도 패키지 skeleton — pyproject + README)
 
 ### v1 → v2 도큐먼트 이관 (다음 작업들)
 
@@ -75,11 +78,11 @@ TripMate 연계 (ADR-003): 함수 직접 호출. REST 없음. 라이브러리가
 
 ## 다음 ADR 후보
 
-- **ADR-020** — 라이브러리 캐시 전략 (in-memory 안 두기 vs 두기)
-- **ADR-021** — OpenAPI export 정책 (디버그 API 노출 시점부터 활성화)
-- **ADR-022** — Coverage 단계적 상향 일정 (Sprint 1 → Sprint 5)
-- **ADR-023** — 정합성 검증 (`feature_consistency_reports`) 도입 시점
-- **ADR-024** — 신규 provider 추가 절차 표준 (체크리스트)
+- **ADR-021** — 라이브러리 캐시 전략 (in-memory 안 두기 vs 두기)
+- **ADR-022** — OpenAPI export 정책 (디버그 패키지 노출 시점부터 활성화)
+- **ADR-023** — Coverage 단계적 상향 일정 (Sprint 1 → Sprint 5)
+- **ADR-024** — 정합성 검증 (`feature_consistency_reports`) 도입 시점
+- **ADR-025** — 신규 provider 추가 절차 표준 (체크리스트)
 
 ## 차단 사유 / 결정 대기
 

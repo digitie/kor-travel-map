@@ -1,7 +1,11 @@
-# backend-package.md — 라이브러리 사양 + 디버그 API
+# backend-package.md — 메인 라이브러리 사양
 
-본 문서는 `python-krtour-map` 라이브러리의 외부 표면(public API)과 디버그 REST의
-사양 reference다. 사용자 시나리오와 함수 시그니처 중심이다.
+본 문서는 `python-krtour-map` (메인 패키지)의 외부 표면(public API) reference다.
+사용자 시나리오와 함수 시그니처 중심이다.
+
+디버그 REST API/UI는 **별도 Python 패키지** `krtour-map-debug-ui` (ADR-020)에
+있고, 사양은 `docs/debug-ui-package.md`를 따른다. 메인 라이브러리는 FastAPI
+의존이 없다.
 
 ## 1. 라이브러리 진입점
 
@@ -176,69 +180,15 @@ class KrtourMapSettings(BaseSettings):
 settings는 라이브러리 내부 정적 정책만 다룬다. provider API 키는 provider
 라이브러리가 직접 자기 env에서 읽는다 (예: `KMA_API_KEY`는 python-kma-api).
 
-## 2. 디버그 REST API (옵션, 인증 없음)
+## 2. 디버그 REST API (별도 패키지)
 
-### 2.1 기동
+`docs/debug-ui-package.md` 참조. 본 문서에서는 다루지 않는다.
 
-```bash
-uvicorn krtour_map.api.app:app --host 127.0.0.1 --port 8600 --reload
-```
-
-- 환경변수 `KRTOUR_MAP_DEBUG_API_HOST=127.0.0.1` 기본 (외부 노출 금지).
-- 0.0.0.0 바인드 시 경고 로그 (ADR-005 후속).
-- 인증 없음.
-
-### 2.2 엔드포인트
-
-| Path | 메서드 | 설명 |
-|------|--------|------|
-| `/health` | GET | 헬스체크 (engine ping) |
-| `/version` | GET | 라이브러리 version + git sha |
-| `/features` | GET | 검색 + 필터 + paging (admin용) |
-| `/features/{feature_id}` | GET | full detail + sources + files |
-| `/features/in-bounds` | GET | bbox 검색 + zoom 클러스터링 |
-| `/features/nearby` | GET | 반경 검색 (`lon, lat, radius_m`) |
-| `/features/{feature_id}/weather` | GET | WeatherCard |
-| `/features/{feature_id}/sources` | GET | source_links |
-| `/features/{feature_id}/files` | GET | feature_files |
-| `/providers/{name}/sync-state` | GET | provider sync state |
-| `/import-jobs` | GET, POST | 작업 큐 조회/등록 |
-| `/import-jobs/{job_id}` | GET, PATCH | 상태 변경 |
-| `/dedup-review` | GET | pending 큐 |
-| `/dedup-review/{review_key}` | PATCH | accept/reject/merged |
-| `/integrity-violations` | GET | data_integrity_violations |
-| `/debug/explain` | POST | raw SQL EXPLAIN viewer (body에 SQL) |
-| `/debug/fixtures` | GET, POST | fixture 저장/replay |
-| `/debug/route-validation` | POST | 디버그용 임의 좌표 변환/검증 |
-
-### 2.3 응답 셰입
-
-라이브러리 DTO는 그대로 반환한다. `data/meta/error` 래핑은 호출자(TripMate)
-책임이지만, 디버그 API는 편의상 다음을 사용한다:
-
-```json
-{
-  "data": ... ,
-  "meta": {"count": 50, "duration_ms": 23}
-}
-```
-
-에러:
-```json
-{
-  "error": {"code": "VALIDATION_ERROR", "message": "...", "details": {...}}
-}
-```
-
-### 2.4 OpenAPI 자동 생성
-
-`uvicorn` 실행 시 `/openapi.json`, `/docs` (Swagger UI) 자동 제공.
-
-`scripts/export_openapi.py` (코드 작성 단계):
-```bash
-python scripts/export_openapi.py --output openapi.json
-python scripts/export_openapi.py --check --output openapi.json    # CI drift
-```
+요약:
+- 별도 Python 패키지 `krtour-map-debug-ui` (`packages/krtour-map-debug-ui/`).
+- 메인 라이브러리를 import해서 `AsyncKrtourMapClient` 함수 호출.
+- 인증 없음, 내부망 전용 (ADR-005 + ADR-020).
+- 엔드포인트, 응답 셰입, OpenAPI 생성은 `docs/debug-ui-package.md`.
 
 ## 3. 사용 시나리오
 
@@ -277,15 +227,9 @@ async def list_features_in_bounds(
     return {"data": features, "meta": {"count": len(features)}}
 ```
 
-### 3.3 디버그 UI (인증 없음, localhost)
+### 3.3 디버그 UI (별도 패키지, 인증 없음, localhost)
 
-```bash
-curl http://127.0.0.1:8600/features/in-bounds?min_lon=126.5\&min_lat=37.4\&max_lon=127.2\&max_lat=37.7
-curl http://127.0.0.1:8600/features/f_1111010100_p_abc123/weather
-curl -X POST http://127.0.0.1:8600/debug/explain \
-     -H 'content-type: application/json' \
-     -d '{"sql": "SELECT * FROM feature.features LIMIT 1"}'
-```
+`docs/debug-ui-package.md` 참조. 호출 예시는 거기 박혀 있다.
 
 ## 4. 의존성/주입 계약
 

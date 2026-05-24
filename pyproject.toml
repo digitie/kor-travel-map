@@ -44,10 +44,8 @@ dev = [
   "vcrpy>=6",
   "coverage>=7",
 ]
-api = [
-  "fastapi>=0.115",
-  "uvicorn[standard]>=0.30",
-]
+# 디버그 REST API/UI는 별도 패키지로 분리 (ADR-020):
+#   `packages/krtour-map-debug-ui/`. FastAPI/Uvicorn 의존성은 거기 있다.
 geo = [
   "geopandas>=1.0",
   "gdal>=3.8",      # 시스템 GDAL 버전과 맞춤
@@ -139,11 +137,24 @@ root_package = "krtour_map"
 name = "layered architecture"
 type = "layers"
 layers = [
-  "krtour_map.api",
   "krtour_map.cli",
   "krtour_map.client",
   "krtour_map.providers",
   "krtour_map.infra",
   "krtour_map.core",
   "krtour_map.dto",
+]
+
+# 메인 패키지(krtour_map)는 FastAPI/Uvicorn 의존을 가져선 안 된다 (ADR-020).
+# 디버그 REST는 packages/krtour-map-debug-ui/에 있다.
+[[tool.importlinter.contracts]]
+name = "main package must not import fastapi/uvicorn"
+type = "forbidden"
+source_modules = [
+  "krtour_map",
+]
+forbidden_modules = [
+  "fastapi",
+  "uvicorn",
+  "starlette",
 ]
