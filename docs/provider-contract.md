@@ -46,6 +46,7 @@ python-airkorea-api
 python-mcst-api
 python-krforest-api
 python-krheritage-api
+python-knps-api
 python-kasi-api
 data.go.kr-standard
 google-places-api-new
@@ -90,6 +91,20 @@ system
 | `krheritage_gis_spca` | python-krheritage-api | 사적/명승 boundary |
 | `krheritage_gis_3070426` | python-krheritage-api | 천연기념물 boundary |
 | `krheritage_event_list` | python-krheritage-api | 국가유산 행사 |
+| `knps_park_boundaries` | python-knps-api | 국립공원 경계 (area, MultiPolygon) |
+| `knps_trails` | python-knps-api | 국립공원 탐방로 (route, LineString) |
+| `knps_visitor_centers` | python-knps-api | 탐방안내소 (place) |
+| `knps_hazard_zones` | python-knps-api | 위험지역 (area, `area_kind='hazard_zone'`, ADR-027) |
+| `knps_weather_stations` | python-knps-api | 산악 기상관측시설 (weather anchor) |
+| `knps_restrooms` | python-knps-api | 국립공원 화장실 (place) |
+| `knps_cultural_resources` | python-knps-api | 국립공원 문화자원 (place, RESOURCE_TYPE 분기) |
+| `knps_campgrounds` | python-knps-api | 야영장 (place) |
+| `knps_shelters` | python-knps-api | 대피소·산장 (place, `LODGING_MOUNTAIN_SHELTER_KNPS`, ADR-027) |
+| `knps_recommended_courses` | python-knps-api | 추천 탐방코스 (route, LineString, difficulty) |
+| `knps_park_photos` | python-knps-api | 명소 사진/VR (feature 본문 X, `feature_files`/source_links) |
+| `knps_visitor_statistics` | python-knps-api | 월별 탐방객 통계 (feature 본문 X, timeseries) |
+| `knps_access_restrictions` | python-knps-api | 입산통제 (notice, `notice_type='access_restriction'`, ADR-027) |
+| `knps_fire_alerts` | python-knps-api | 산불경보 (notice, `notice_type='fire_alert'`, ADR-027) |
 | `standard_tourism_roads` | data.go.kr-standard | 관광길 표준데이터 |
 | `standard_museums` | data.go.kr-standard | 박물관·미술관 표준 |
 | `standard_parking_lots` | data.go.kr-standard | 주차장 표준 |
@@ -112,6 +127,7 @@ system
 | python-khoa-api | place, notice, weather | primary, primary, weather_context | 일 / 시간 | 해수욕장, 해양 공지 |
 | python-airkorea-api | weather | weather_context | 시간 | PM10/PM2.5/CAI |
 | python-krforest-api | place, route, area, weather, notice | primary | 일/시간 | 휴양림/숲길/산악기상/안전공지 |
+| python-knps-api | place, route, area, notice, weather | primary | 일/분기/연 (notice: 30분~일) | 국립공원 경계·탐방로·시설·위험지역·문화자원·대피소·안전공지 (`docs/knps-feature-etl.md`, ADR-028) |
 | python-krheritage-api | place, area, event | primary | 주 (place/area), 일 (event) | media → RustFS |
 | python-kasi-api | (calendar) | (system) | 주 1회 | 공휴일/달력 (TripMate utility) |
 | data.go.kr-standard (내부 client) | place, route, event | primary | 표준데이터별 | 5종 dataset bounded |

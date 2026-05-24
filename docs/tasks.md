@@ -25,26 +25,37 @@
 - [ ] T-014 — 코드 작성 단계 진입 검토 (사용자 승인 + Sprint 1 PR)
   - 모든 문서 검토 완료
   - 사용자 승인
-  - **`docs/sprints/SPRINT-1.md` 작성됨 (본 PR#10)** — 진입 조건 + 산출물 +
-    DoD + Sprint 2 진입 조건까지.
+  - **`docs/sprints/SPRINT-1.md` 작성됨 (PR#10 merged)** — 진입 조건 + 산출물
+    + DoD + Sprint 2 진입 조건까지.
   - Sprint 1 진입 시 ADR-032/033을 accepted 전환 (시기 의존)
 - [ ] T-017 — **공통 maki marker / category 매핑 npm 패키지 추출** (ADR-029
-      proposed, 본 PR#10)
-  - **ADR-029 (proposed, 본 PR#10)** — `@krtour/map-marker-react` (MIT
+      proposed, PR#10 merged)
+  - **ADR-029 (proposed, PR#10 merged)** — `@krtour/map-marker-react` (MIT
     license, monorepo `packages/map-marker-react/`).
-  - 본 PR#10에서 `packages/map-marker-react/` skeleton (`package.json` /
+  - PR#10에서 `packages/map-marker-react/` skeleton (`package.json` /
     `README.md` / `vite.config.ts` / `.gitignore`) 박힘.
   - 실제 코드 (`src/categoryMaki.ts`, `<MakiMarker>` 등)는 Sprint 2 PR.
   - drift gate: `tests/unit/test_category_maki_consistency.py` (Python ↔ TS
     1:1 검증, Sprint 2 코드 작성).
-- [ ] T-018 — **`python-knps-api` provider 등록** (ADR-027 + ADR-028)
-  - ADR-027 (proposed, PR#9) — forest 카테고리/notice_type 확장 결정 박힘.
+- [ ] T-018 — **`python-knps-api` provider 등록** (ADR-027 + ADR-028 모두
+      proposed, T-018 시점에 accepted 전환)
+  - **외부 repo scaffold 완료** (2026-05-25): `digitie/python-knps-api`
+    `6e36990 Initial KNPS API client scaffold`. 공개 API: `KnpsClient`,
+    `KnpsConfig`, `ApiEndpoint`, `FileDataset`, `CatalogEntry`, `Page` +
+    예외 7종 + helper 5종. catalog: API 3 + 파일 11. 인증
+    `KNPS_SERVICE_KEY`/`DATA_GO_KR_SERVICE_KEY`.
+  - **ADR-028 (proposed, 본 PR#12)** — provider 등록 (canonical name /
+    import / dataset prefix / 인증 env / SHP 파싱 책임 분리 / 양방향 PR
+    워크플로).
+  - **ADR-027 (PR#9 merged)** — forest 카테고리/notice_type 확장 결정 박힘.
     T-018 시점에 accepted 전환 + 코드 적용 (`PLACE_CATEGORY_DEFINITIONS`
     144건 + `NOTICE_TYPES` 14건 + `AreaDetail.area_kind` Literal).
-  - **외부에서 개발 중**: `digitie/python-knps-api` 저장소가
-    `docs/forest-feature-etl.md` §11을 참고해서 개발됨 (`python-mois-api` 패턴
-    미러). 본 저장소는 해당 repo 모니터링 후 결과를 반영 (ADR-028 + `docs/
-    knps-feature-etl.md` 신설 + `krtour.map.providers.knps` 모듈).
+  - `krtour.map.providers.knps` 모듈 신설 (Sprint 2). SHP/GeoJSON parsing
+    위치 (본 라이브러리 vs knps-api `[geo]` extra) Sprint 2 진입 시 결정.
+  - `docs/forest-feature-etl.md §11` + `docs/knps-feature-etl.md` (본 PR#12
+    에 신설) KNPS 통합 실행.
+  - upstream knps-api와 양방향 PR (예: knps-api PR#1 `docs/knps-feature-
+    maki-icons` — `shelter`/`barrier` maki icon 정정).
 - [ ] T-019 — **TripMate 측 후속 작업 추적** (ADR-026 후속, 본 저장소 외)
   - TripMate `apps/web` Kakao Maps → maplibre-vworld 교체 PR (TripMate 저장소)
   - SPEC V8 v8_3 Kakao Maps 섹션에 "superseded by python-krtour-map ADR-026"
@@ -169,8 +180,8 @@
 
 - **accepted**: ADR-001 ~ ADR-026
 - **proposed (사용자 검토)**: ADR-027 (forest 카테고리/notice_type 확장, PR#9
-  merged) / ADR-029 (공통 maki npm 패키지, **본 PR#10**) / ADR-030 (캐시
-  금지) / ADR-031 (OpenAPI export) / ADR-032 (Coverage 일정, 시기 의존) /
-  ADR-033 (`feature_consistency_reports`, 시기 의존)
-- **다음 후보**: ADR-028 (`python-knps-api` provider 등록 — PR#12에서 proposed
-  로 박힘) / ADR-034+ (신규 provider 추가 절차 표준)
+  merged) / ADR-028 (`python-knps-api` provider 등록, **본 PR#12**) /
+  ADR-029 (공통 maki npm 패키지, PR#10 merged) / ADR-030 (캐시 금지) /
+  ADR-031 (OpenAPI export) / ADR-032 (Coverage 일정, 시기 의존) / ADR-033
+  (`feature_consistency_reports`, 시기 의존)
+- **다음 후보**: ADR-034+ (신규 provider 추가 절차 표준)

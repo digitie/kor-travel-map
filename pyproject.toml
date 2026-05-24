@@ -66,6 +66,7 @@ providers = [
   # "python-mcst-api     @ git+...",
   # "python-krforest-api @ git+...",
   # "python-krheritage-api @ git+...",
+  # "python-knps-api @ git+https://github.com/digitie/python-knps-api.git@<sha>",  # ADR-028
   # "python-datagokr-api @ git+...",
 ]
 

@@ -1223,6 +1223,128 @@
   - 코드 작성 단계 진입 결정(T-014) PR에 본 ADR을 묶어 `proposed` →
     `accepted` 전환 + T-201을 T-201a (Phase 1) / T-201b (Phase 2)로 분할.
 
+## ADR-028: `python-knps-api` provider 라이브러리 등록
+
+- **상태**: proposed
+- **날짜**: 2026-05-25
+- **결정자**: claude 제안 + 사용자 (외부 repo 작성 + downstream 반영)
+- **컨텍스트**: `docs/forest-feature-etl.md §11`에서 KNPS dataset 14건 통합
+  plan 결정 (옵션 B = 별도 `python-knps-api`, ADR-027 기반 카테고리/notice_type
+  적용). 외부에서 `digitie/python-knps-api` 저장소가 사용자 주도로 scaffold
+  완료 (`6e36990 Initial KNPS API client scaffold`, public client + catalog
+  + Pydantic models + exceptions + httpx async + token bucket). 본 라이브러리
+  에서는 이 provider를 정식 등록하고 `krtour.map.providers.knps` 변환 모듈을
+  후속 sprint에서 작성한다.
+
+- **결정**:
+
+  **A. provider 등록**:
+  - canonical provider name: `python-knps-api`
+  - import: `from knps import KnpsClient, KnpsConfig, ApiEndpoint, FileDataset,
+    CatalogEntry, Page, PROVIDER_NAME, KnpsApiError, KnpsAuthError,
+    KnpsNoDataError, KnpsParseError, KnpsRateLimitError, KnpsRequestError,
+    KnpsServerError, api_endpoint, api_endpoints, catalog_entries,
+    file_dataset, file_datasets`
+  - 본 라이브러리 변환 모듈: `krtour.map.providers.knps` (Sprint 2 작성)
+  - dataset_key prefix: `knps_*`
+  - 라이선스: GPL-3.0-or-later (본 라이브러리와 동일).
+  - 인증 env (`knps.config.KnpsConfig.from_env`):
+    1. `KNPS_SERVICE_KEY` (우선)
+    2. `DATA_GO_KR_SERVICE_KEY` (폴백)
+  - `pyproject.toml` `providers` extras에 git URL 주석 추가:
+    ```toml
+    # "python-knps-api @ git+https://github.com/digitie/python-knps-api.git@<sha>"
+    ```
+
+  **B. SHP/GeoJSON 파싱 책임 분리**:
+  - knps-api는 원본 bytes (`client.files.download(key)`)와 normalized API
+    page (`client.raw_endpoint(...)`)를 안정 제공.
+  - **SHP/GeoJSON 파싱은 본 라이브러리 `krtour.map.providers.knps`에서**
+    수행 (ADR-006 정신: provider 라이브러리는 raw, 본 라이브러리는 변환).
+  - 단, knps-api 측에 `[geo]` extra가 이미 있으므로 (placeholder 상태),
+    향후 knps-api 측에 parser PR 추가하는 옵션도 열림 — Sprint 2 진입 시
+    재검토.
+
+  **C. ADR-027 코드 적용 시기 정렬**:
+  - T-018 시점에 ADR-027 (forest 카테고리/notice_type 확장) + ADR-028 (본
+    ADR) 모두 accepted 전환.
+  - `PLACE_CATEGORY_DEFINITIONS`에 3행 (`03.08` Tier 2 + 2 Tier 3),
+    `NOTICE_TYPES` tuple에 `access_restriction`/`fire_alert`,
+    `AreaDetail.area_kind` Literal에 `hazard_zone` 일괄 추가.
+
+  **D. 양방향 PR 워크플로** (사용자 결정 2026-05-25):
+  - 본 라이브러리 작업 중 knps-api에서 발견한 maki/카테고리/명명/dataset
+    정합 이슈는 **upstream PR로 적극 수정** (ADR-025 사용자 보강 2차
+    `maplibre-vworld-js` 패턴 미러). 본 라이브러리에 wrapper/패치 도입
+    금지 (ADR-006 위배 회피).
+  - 예: knps-api PR#1 (`docs/knps-feature-maki-icons`) — `shelter`/`barrier`
+    maki icon 정정 (본 라이브러리 ADR-027/ADR-029 매핑 정합).
+
+  **E. 본 라이브러리 신설 docs**:
+  - `docs/knps-feature-etl.md` (본 PR#12) — feature 적재 계약. upstream
+    knps-api `docs/knps-feature-etl.md`와 정합 유지 (양방향 PR로).
+
+  **F. 14 dataset_key 카탈로그** (provider-contract.md §3에 추가):
+  - **API endpoints** (3): `knps_visitor_statistics`,
+    `knps_access_restrictions`, `knps_fire_alerts`
+  - **File datasets** (11): `knps_park_boundaries`, `knps_trails`,
+    `knps_visitor_centers`, `knps_hazard_zones`, `knps_weather_stations`,
+    `knps_restrooms`, `knps_cultural_resources`, `knps_campgrounds`,
+    `knps_shelters`, `knps_recommended_courses`, `knps_park_photos`
+  - knps-api `verification_status` (`verified` / `needs_verification` /
+    `planned`) 그대로 존중.
+
+- **근거**:
+  - **1기관 1라이브러리 컨벤션 (옵션 B)**: KNPS = 환경부, KFS = 농림식품부 —
+    별도 기관. `python-mois-api`, `python-krheritage-api`, `python-khoa-api`,
+    `python-krforest-api`와 동일 패턴.
+  - **외부 scaffold 완료**: 사용자가 작성한 repo의 공개 API/catalog를
+    *그대로 채택*. 본 라이브러리에서 wrapper 만들지 않음 (ADR-006).
+  - **PR 양방향 (D)**: maplibre-vworld-js 패턴 (ADR-025 2차 보강) 미러 —
+    "본 사용자가 직접 운영하는 저장소 = 외부 의존이 아닌 관리 부담".
+  - **knps-api 측 catalog는 source of truth**: 본 라이브러리 docs는
+    *downstream 입장*의 ETL 계약만. 카탈로그 자체는 knps-api에 있고 본
+    라이브러리는 `from knps import file_datasets` 등으로 직접 사용.
+
+- **결과 (긍정)**:
+  - 본 라이브러리 통합 비용 낮음 (Sprint 2 한 PR로 `krtour.map.providers.knps`
+    모듈 작성 + Dagster asset 11종).
+  - knps-api의 SHP/GeoJSON parser placeholder는 본 라이브러리에서 처리
+    가능 — Sprint 2 진입 시 양쪽 어디에 둘지 cost/benefit 평가 후 결정.
+  - ADR-027 정합 (LODGING_MOUNTAIN_SHELTER + area_kind=hazard_zone + generic
+    notice_type) — knps-api 측에서 이미 정확히 반영 (PR#1로 maki icon 마저
+    정정).
+  - 양방향 PR 워크플로로 명명/매핑 drift 0.
+
+- **결과 (부정)**:
+  - 외부 repo 의존 — knps-api에 breaking change가 생기면 본 라이브러리도
+    영향. 단, 본 사용자 직접 운영 저장소이므로 통제 가능. fragile 시
+    `pyproject.toml` git URL을 commit sha로 핀.
+  - SHP/GeoJSON parsing 위치 결정이 Sprint 2로 연기 — 본 라이브러리에서
+    하면 `pyproj`/`pyshp` 의존 추가, knps-api에서 하면 본 라이브러리는
+    `FeatureBundle` 입력만 받음. 양쪽 모두 가능, Sprint 2에서 결정.
+
+- **후속**:
+  - `docs/forest-feature-etl.md §11` 갱신 (본 PR#12) — knps-api scaffold
+    완료 명기 + 공개 API 표면 (`KnpsClient` 등) 명기.
+  - `docs/knps-feature-etl.md` 신설 (본 PR#12) — feature 적재 계약.
+  - `docs/provider-contract.md` 갱신 (본 PR#12):
+    - §2 `CANONICAL_PROVIDER_NAMES`에 `python-knps-api` 추가.
+    - §3 dataset_key 표에 14건 추가.
+    - §4 책임 매트릭스에 한 줄 추가.
+  - `docs/external-apis.md` §2 환경변수 카탈로그 (본 PR#12):
+    - `KNPS_SERVICE_KEY` 추가 (`python-knps-api` 우선)
+    - `DATA_GO_KR_SERVICE_KEY` 비고에 KNPS 폴백 명기.
+  - `docs/external-apis.md` §3 provider별 발급 절차 (본 PR#12):
+    - §3.13 KNPS 신설 — data.go.kr "국립공원공단" 검색 → API 활용 신청
+      → `KNPS_SERVICE_KEY` 환경변수.
+  - `pyproject.toml` `providers` extras에 git URL 주석 (본 PR#12).
+  - upstream knps-api PR#1 (`docs/knps-feature-maki-icons`) merge 후 본
+    라이브러리 동기.
+  - T-018 시점에 ADR-027/ADR-028 모두 `accepted` 전환 + 코드 적용 PR.
+  - Sprint 2에서 SHP/GeoJSON parsing 책임 위치 결정 (`krtour.map.providers.
+    knps` vs knps-api `[geo]` extra).
+
 ## ADR-029: 공통 maki marker / category 매핑 npm 패키지 추출 (`@krtour/map-marker-react`)
 
 - **상태**: proposed

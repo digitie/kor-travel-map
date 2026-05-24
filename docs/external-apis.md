@@ -23,6 +23,7 @@
 | `VISITKOREA_SERVICE_KEY` | python-visitkorea-api | data.go.kr (TourAPI) | URL-encoded |
 | `KRHERITAGE_API_KEY` | python-krheritage-api | 국가유산청 OpenAPI | |
 | `KRFOREST_API_KEY` | python-krforest-api | 산림청 / 산림청 산악기상 | |
+| `KNPS_SERVICE_KEY` | python-knps-api | data.go.kr "국립공원공단" | 우선. `DATA_GO_KR_SERVICE_KEY` 폴백 (ADR-028) |
 | `KREX_API_KEY` | python-krex-api | 한국도로공사 API | |
 | `KHOA_API_KEY` | python-khoa-api | 국립해양조사원 | 해수욕장/해양지수 |
 | `AIRKOREA_API_KEY` | python-airkorea-api | 한국환경공단 AirKorea | 대기질 |
@@ -85,6 +86,19 @@
 
 1. data.go.kr "산림청" 검색 — 여러 dataset (휴양림, 산악기상 등)
 2. `KRFOREST_API_KEY` 환경변수
+
+### 3.8.1 국립공원공단 (KNPS, `python-knps-api`)
+
+1. https://www.data.go.kr 에서 "국립공원공단" 검색 → 사용할 API/파일데이터별
+   "활용 신청" → 자동 승인.
+2. 발급된 ServiceKey는 `KNPS_SERVICE_KEY` 환경변수에 저장
+   (`python-knps-api`가 우선 사용). 미설정 시 `DATA_GO_KR_SERVICE_KEY` 폴백
+   (`knps.config.KnpsConfig.from_env` 순서).
+3. 사용 dataset: 공원경계/탐방로/탐방안내소/위험지역/기상관측시설/화장실/
+   문화자원/야영장/대피소/추천코스 (파일 11) + 입산통제/산불경보/탐방객통계
+   (API 3). 자세히는 `docs/knps-feature-etl.md` (ADR-028).
+4. 호출 한도 — knps-api `KnpsHttp`의 token bucket 기본 5 RPS.
+   `KnpsConfig.from_env(max_rps=...)` 또는 `KnpsClient(max_rps=...)`로 조정.
 
 ### 3.9 Kakao Local
 

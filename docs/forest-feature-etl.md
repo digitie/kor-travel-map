@@ -159,31 +159,98 @@ ConcurrencyConfig: `krforest_api: max_concurrent=1`.
 - 산림 안전 공지 — `docs/notice-feature-etl.md`의 `forest_safety_notices`.
 - 추가 산악기상 dataset (산불위험, 산사태위험): `weather_domain ∈ {forest_fire_risk, forest_landslide_risk}` — `docs/weather-feature-normalization.md` §3.
 
-## 11. KNPS (국립공원공단) 데이터 통합 계획
+## 11. KNPS (국립공원공단) 데이터 통합
 
 본 라이브러리는 산림청(KFS) 데이터 외에 국립공원공단(KNPS, 환경부 산하)
-데이터를 통합 적재할 계획이다. **현재 단계는 docs/계약만**이며, 실제 client
-라이브러리/적재 코드는 후속 PR.
+데이터를 통합 적재한다. **외부 provider 라이브러리는 이미 scaffold 단계까지
+완료**되었고 (`digitie/python-knps-api`, `6e36990 Initial KNPS API client
+scaffold`), 본 라이브러리에서는 ADR-027 (proposed, PR#9) + **ADR-028
+(proposed, 본 PR#12)** 로 통합 계약을 박는다. 실제 적재 코드 (`krtour.map.
+providers.knps`)는 Sprint 2 진입 후.
 
-### 11.1 provider 분리 결정 (권고)
+### 11.1 provider 분리 결정 — 옵션 B 채택 (구현 완료)
 
 | 옵션 | 평가 |
 |------|------|
 | **A. `python-krforest-api` 확장** | 산림청·KNPS 모두 산/등산 도메인이라 사용자 인지에 가깝지만, **두 기관 별도(KFS=농림식품부, KNPS=환경부)**라 라이브러리 컨벤션(1기관 1라이브러리) 위반. 비추천. |
-| **B. 별도 `python-knps-api` 신설** | 컨벤션 일관 (`python-mois-api`, `python-krheritage-api`, `python-khoa-api`, `python-krforest-api`와 동일 패턴). auth/rate limit/exception 독립. KNPS는 file dataset(SHP/GeoJSON) 비중이 큼 → file dataset 처리 모듈 응집. **권고**. |
+| **B. 별도 `python-knps-api` 신설** ✅ | 컨벤션 일관 (`python-mois-api`, `python-krheritage-api`, `python-khoa-api`, `python-krforest-api`와 동일 패턴). auth/rate limit/exception 독립. KNPS는 file dataset(SHP/GeoJSON) 비중이 큼 → file dataset 처리 모듈 응집. **채택 (2026-05-25, ADR-028 후보)**. |
 | C. 본 라이브러리 internal client | ADR-006 (wrapper 금지) + 1기관 1라이브러리 컨벤션 위반. 비추천. |
 
-**결정 (사용자 검토 필요)**: 옵션 B — `python-knps-api` 신설.
+**채택**: 옵션 B — `python-knps-api` 신설. **외부 repo scaffold 완료**.
 
-- canonical provider name: `python-knps-api`
-- import: `from knps import KnpsClient`
-- 본 라이브러리 변환: `krtour.map.providers.knps`
-- 본 라이브러리 loader: `krtour.map.knps`
-- dataset_key prefix: `knps_*`
-- `provider-contract.md` §2 `CANONICAL_PROVIDER_NAMES`에 추가
-- `provider-contract.md` §3 dataset_key 표에 아래 §11.3 13건 추가
+| 항목 | 값 |
+|------|----|
+| GitHub | `digitie/python-knps-api` (`6e36990` 시점 = `Initial KNPS API client scaffold`) |
+| canonical provider name | `python-knps-api` |
+| import | `from knps import KnpsClient` |
+| 본 라이브러리 변환 | `krtour.map.providers.knps` (Sprint 2 작성) |
+| 본 라이브러리 loader | `krtour.map.knps` (Sprint 2 작성) |
+| dataset_key prefix | `knps_*` |
+| 인증 env | `KNPS_SERVICE_KEY` 우선, `DATA_GO_KR_SERVICE_KEY` 폴백 (`knps.config.KnpsConfig.from_env`) |
+| Python | `>=3.11` |
+| 의존 | `httpx>=0.27`, `pydantic>=2.7`; `pyproj>=3.6`/`pyshp>=2.3`는 `[geo]` extra |
+| 라이선스 | GPL-3.0-or-later (본 라이브러리와 동일) |
+
+후속:
+- `provider-contract.md` §2 `CANONICAL_PROVIDER_NAMES`에 추가 (본 PR#12).
+- `provider-contract.md` §3 dataset_key 표에 §11.3 14건 (API 3 + 파일 11)
+  추가 (본 PR#12).
 - `provider-contract.md` §4 책임 매트릭스에 한 줄 추가:
-  `| python-knps-api | place, route, area, notice, weather | primary | 일/분기/연 | 국립공원 경계·탐방로·시설·위험지역·문화자원 |`
+  `| python-knps-api | place, route, area, notice, weather | primary |
+  일/분기/연 | 국립공원 경계·탐방로·시설·위험지역·문화자원 |` (본 PR#12).
+- `external-apis.md` §2 환경변수 카탈로그에 `KNPS_SERVICE_KEY` 추가
+  (본 PR#12).
+- `pyproject.toml` `providers` extras에 git URL 주석 (본 PR#12).
+- 본 라이브러리에 `docs/knps-feature-etl.md` 신설 — feature 변환 계약
+  (knps-api 측 `docs/knps-feature-etl.md`와 정합, 본 PR#12).
+
+### 11.1.1 외부 provider 라이브러리 공개 API (현 구현, `6e36990`)
+
+```python
+from knps import (
+    KnpsClient,            # 비동기 facade
+    KnpsConfig,            # api_key / timeout / max_rps 설정
+    ApiEndpoint,           # data.go.kr OpenAPI endpoint 메타
+    FileDataset,           # data.go.kr 파일데이터 메타
+    CatalogEntry,          # API + 파일을 합친 human-readable
+    Page,                  # 페이지네이션 응답
+    PROVIDER_NAME,         # "python-knps-api"
+    # 예외 계층 (KNPS 전용, 다른 provider 예외 import 안 함)
+    KnpsApiError, KnpsAuthError, KnpsNoDataError, KnpsParseError,
+    KnpsRateLimitError, KnpsRequestError, KnpsServerError,
+    # catalog helper
+    api_endpoint, api_endpoints, catalog_entries, file_dataset, file_datasets,
+)
+
+async with KnpsClient.from_env() as client:
+    for endpoint in client.endpoints():
+        print(endpoint.key, endpoint.title, endpoint.verification_status)
+    for dataset in client.file_datasets("spatial"):
+        print(dataset.key, dataset.data_go_id, dataset.formats)
+    page = await client.raw_endpoint(
+        "knps_visitor_statistics", {"baseYm": "202501"}, num_of_rows=10,
+    )
+    # page.context.request_params 에서 service_key는 자동 redact
+    raw_bytes = await client.files.download("knps_park_boundaries")
+```
+
+특이사항 (구현 상태 2026-05-25):
+- `raw_endpoint`는 data.go.kr JSON/XML envelope를 자동 정규화 (KnpsHttp +
+  `_decode_payload` + `_normalize_payload` in `knps._http`).
+- API key는 query param (`serviceKey`)로 전달되며 `CallContext.request_params`
+  에서 자동 redact (`mask_params` / `public_params`).
+- 파일 다운로드 (`client.files.download(key)`)는 `download_url` 검증된 dataset
+  만 가능. 검증 전 dataset은 `KnpsRequestError(failure_kind='catalog')`.
+- `Page.has_next_page` / `next_page_no` 헬퍼 제공.
+- **SHP/GeoJSON parser는 `[geo]` extra (`pyproj`, `pyshp`) — 현재 placeholder**
+  (knps-api docs/knps-api.md §"구현 상태" = planned). **본 라이브러리
+  `krtour.map.providers.knps`에서 파싱** 권고 (provider 라이브러리는 원본
+  bytes만 안정 제공, 파싱은 본 라이브러리 책임 — ADR-006 정신).
+- 좌표계: 원본 EPSG:5179 또는 5186 가능성 → WGS84 변환은 본 라이브러리
+  `krtour.map.providers.knps`에서 수행 (`pyproj.Transformer` ADR-030 narrow
+  예외로 singleton).
+- SHP 한글 인코딩 CP949 가능성 (knps-api docs/knps-api.md §"공간데이터
+  처리 원칙" 참조, kraddr-geo ADR-005 패턴).
 
 ### 11.2 v1 단서
 
