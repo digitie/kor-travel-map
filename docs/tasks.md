@@ -2,26 +2,30 @@
 
 이 문서는 작업 백로그다. 우선순위 순. 각 작업은 `T-NNN` 번호로 식별한다.
 
-## 진행 중
+## 진행 중 (open PR)
 
-- (없음 — PR#9 + PR#10 검토 대기)
+- **본 PR#12** (docs/pr12-knps-api-integration): ADR-028 (proposed) +
+  `docs/knps-feature-etl.md` 신설 + provider-contract 갱신 — 검토 + merge
+  대기. (`python-knps-api` upstream `6e36990` scaffold 반영).
+- **upstream knps-api PR#1**
+  (https://github.com/digitie/python-knps-api/pull/1):
+  `docs/knps-feature-etl.md §4` maki icon 정정 (shelter / barrier) — 검토 +
+  merge 대기. 본 라이브러리 ADR-027 정합.
 
 ## 다음 (우선순위 순)
 
-- [ ] T-012 — ADR-020+ 후속 결정 작성 (PR#8/#10에서 proposed → accepted 대기)
+- [ ] T-012 — ADR-020+ 후속 결정 작성 (proposed → accepted 사용자 검토 대기)
   - **ADR-030 (proposed, PR#8 merged)** — 라이브러리 in-memory 캐시 금지
-    (`functools.cache` 한정 예외) + `import-linter` 계약. 본 PR#10에서
-    `pyproject.toml`에 forbidden 계약 박힘 → 사용자 검토 후 accepted 전환.
-  - **ADR-031 (proposed, PR#8 merged)** — 디버그 패키지 OpenAPI export
-    정책 (첫 라우터부터 활성화). 본 PR#10에서 `scripts/export_openapi.py`
-    skeleton 박힘 → 사용자 검토 후 accepted 전환.
-  - **ADR-032 (proposed, 시기 의존)** — Coverage 단계적 상향 일정. 본 PR#10
-    에서 `pyproject.toml` `fail_under=0` + 주석으로 Sprint 1~5 schedule 박음.
-    T-014 PR에서 Sprint 1 진입 시 `fail_under=50`으로 상향 + accepted 전환.
+    (`functools.cache` 한정 예외) + `import-linter` 계약. PR#10에서
+    `pyproject.toml`에 forbidden 계약 박힘 → 사용자 review 후 accepted PR.
+  - **ADR-031 (proposed, PR#8 merged)** — 디버그 패키지 OpenAPI export 정책
+    (첫 라우터부터 활성화). PR#10에서 `scripts/export_openapi.py` skeleton
+    박힘 → 사용자 review 후 accepted PR.
+  - **ADR-032 (proposed, 시기 의존)** — Coverage 단계적 상향 일정. PR#10에서
+    `pyproject.toml` `fail_under=0` + 주석으로 Sprint 1~5 schedule 박음.
+    T-014 + Sprint 1 진입 PR에서 `fail_under=50`으로 상향 + accepted.
   - **ADR-033 (proposed, 시기 의존)** — `feature_consistency_reports` 단계적
-    도입. T-014 + Sprint 3 진입 PR에서 Phase 1 (F1~F3) accepted 전환.
-- [x] T-013 — `CHANGELOG.md` 초기 엔트리 정리 (완료: 2026-05-25, 본 PR#10).
-      ADR-024~033 + T-101~103 + 명명 일치화 + 코드 변경 모두 inline.
+    도입. T-014 + Sprint 3 진입 PR에서 Phase 1 (F1~F3) accepted.
 - [ ] T-014 — 코드 작성 단계 진입 검토 (사용자 승인 + Sprint 1 PR)
   - 모든 문서 검토 완료
   - 사용자 승인
@@ -29,11 +33,11 @@
     + DoD + Sprint 2 진입 조건까지.
   - Sprint 1 진입 시 ADR-032/033을 accepted 전환 (시기 의존)
 - [ ] T-017 — **공통 maki marker / category 매핑 npm 패키지 추출** (ADR-029
-      proposed, PR#10 merged)
+      proposed, PR#10 merged) — 실 코드는 Sprint 2
   - **ADR-029 (proposed, PR#10 merged)** — `@krtour/map-marker-react` (MIT
     license, monorepo `packages/map-marker-react/`).
-  - PR#10에서 `packages/map-marker-react/` skeleton (`package.json` /
-    `README.md` / `vite.config.ts` / `.gitignore`) 박힘.
+  - PR#10에서 skeleton 박힘 (`package.json` / `README.md` / `vite.config.ts`
+    / `.gitignore`).
   - 실제 코드 (`src/categoryMaki.ts`, `<MakiMarker>` 등)는 Sprint 2 PR.
   - drift gate: `tests/unit/test_category_maki_consistency.py` (Python ↔ TS
     1:1 검증, Sprint 2 코드 작성).
@@ -54,13 +58,17 @@
     위치 (본 라이브러리 vs knps-api `[geo]` extra) Sprint 2 진입 시 결정.
   - `docs/forest-feature-etl.md §11` + `docs/knps-feature-etl.md` (본 PR#12
     에 신설) KNPS 통합 실행.
-  - upstream knps-api와 양방향 PR (예: knps-api PR#1 `docs/knps-feature-
-    maki-icons` — `shelter`/`barrier` maki icon 정정).
-- [ ] T-019 — **TripMate 측 후속 작업 추적** (ADR-026 후속, 본 저장소 외)
-  - TripMate `apps/web` Kakao Maps → maplibre-vworld 교체 PR (TripMate 저장소)
+  - upstream knps-api와 양방향 PR — knps-api PR#1 (`docs/knps-feature-
+    maki-icons`, shelter/barrier maki icon 정정) merge 후 본 라이브러리
+    docs/knps-feature-etl.md 동기.
+- [ ] T-019 — **TripMate 측 후속 작업 추적** (ADR-026 + ADR-029 후속, 본
+      저장소 외)
+  - TripMate `apps/web` Kakao Maps → maplibre-vworld 교체 PR (TripMate
+    저장소). Next.js stack 유지, 마커 import만 `@krtour/map-marker-react`
+    교체.
   - SPEC V8 v8_3 Kakao Maps 섹션에 "superseded by python-krtour-map ADR-026"
     표기 (SPEC 저장소)
-  - 본 저장소는 ADR-026 reference만 책임. 작업 자체는 미트래킹.
+  - 본 저장소는 ADR-026/029 reference만 책임. 작업 자체는 미트래킹.
 
 ## 보류 (v2 1차 범위 외)
 
@@ -148,14 +156,62 @@
   - KNPS dataset 7건 카탈로그 + 옵션 A/B 비교 (옵션 B 권고)
 - [x] T-017a — ADR-025 디버그 UI frontend = `maplibre-vworld-js` + ADR-025
       사용자 보강 (key 공유 + upstream 직접 PR) + ADR-026 TripMate 사용자 UI도
-      maplibre-vworld 통일 (완료: 2026-05-25, PR#6 검토 대기)
+      maplibre-vworld 통일 (완료: 2026-05-25, PR#6 merged)
   - `docs/decisions.md` ADR-025 + ADR-026
   - `docs/debug-ui-package.md` §14 frontend 사양
   - `packages/krtour-map-debug-ui/frontend/` skeleton
-    (package.json / .env.example / .gitignore / README)
   - `docs/tripmate-integration.md` §14.5 사용자 UI 지도 stack
   - `docs/external-apis.md` Kakao Maps SDK 미사용 처리
   - `docs/forest-feature-etl.md` §11.6 ADR-026 → ADR-027 후보 재번호
+- [x] T-017b — ADR-025 2차 사용자 보강 (frontend 빌드 도구 Vite → **Next.js**
+      정정) (완료: 2026-05-25, PR#11 merged)
+  - `docs/decisions.md` ADR-025 §사용자 보강 2차 추가
+  - `docs/debug-ui-package.md` §14 Next.js 전환 + 운영 옵션 3가지
+  - `packages/krtour-map-debug-ui/frontend/` skeleton 일괄 Next.js 전환
+    (package.json / .env.example / .gitignore / README / **next.config.js**
+    신설), `VITE_*` → `NEXT_PUBLIC_*`
+  - `docs/external-apis.md` / `docs/tripmate-integration.md` §14.5 / `docs/
+    tasks.md` (T-100 재해석) 동기
+- [x] T-013 — `CHANGELOG.md` 초기 엔트리 정리 (완료: 2026-05-25, PR#10 merged)
+  - ADR-024~033 + T-101~103 + 명명 일치화 + 코드 변경 모두 inline
+- [x] T-013b — 잔존 `krmois` → `mois` 명명 sweep (완료: 2026-05-25, PR#10
+      merged) — 4건 정리 (forest §11.1 / mois-license §payload / journal 2건),
+      ADR-024 narrative 등 역사 기록 컨텍스트는 유지
+- [x] T-014a — Sprint 1 진입 계획 작성 (완료: 2026-05-25, PR#10 merged)
+  - `docs/sprints/README.md` (Sprint 1~5 표 + 공통 진입 게이트)
+  - `docs/sprints/SPRINT-1.md` (진입 조건 + 산출물 + DoD + Sprint 2 진입)
+  - 실제 Sprint 1 진입 PR은 T-014 본체로 계속 pending (사용자 승인 필요)
+- [x] T-017c — ADR-029 (proposed) + `@krtour/map-marker-react` skeleton
+      (완료: 2026-05-25, PR#10 merged)
+  - `docs/decisions.md` ADR-029 본문 (MIT, monorepo 위치, peer deps,
+    drift gate, 배포 정책)
+  - `packages/map-marker-react/` skeleton (`package.json` / `README.md` /
+    `vite.config.ts` / `.gitignore`)
+  - 실 코드는 T-017 본체 (Sprint 2)
+- [x] T-018a — `python-knps-api` upstream scaffold 모니터링 + 본 라이브러리
+      ADR-028 (proposed) 작성 (완료: 2026-05-25, **본 PR#12** open)
+  - upstream `digitie/python-knps-api` `6e36990` scaffold 확인
+  - `docs/decisions.md` ADR-028 본문
+  - `docs/knps-feature-etl.md` 신설 (feature 적재 계약)
+  - `docs/forest-feature-etl.md §11` 갱신 (외부 API 표면 + 채택 ✅ 표기)
+  - `docs/provider-contract.md` / `docs/external-apis.md` / `pyproject.toml`
+    동기
+- [x] T-018b — upstream knps-api 측 PR — maki icon 정정 (완료: 2026-05-25,
+      knps-api PR#1 open, https://github.com/digitie/python-knps-api/pull/1)
+  - `docs/knps-feature-etl.md §4` shelter / barrier 정정 (본 라이브러리
+    ADR-027 정합 + Maki 표준 호환)
+  - 양방향 PR 워크플로 적용 사례 (ADR-028 §D)
+- [x] T-012a — T-101~103 상세 분석을 `docs/performance.md`에 inline (완료:
+      2026-05-25, PR#10 merged)
+  - §9.3 T-101 (PostGIS MV), §9.4 T-103 (streaming ETL), §9.5 T-102
+    (pg_prewarm) — 도입 조건, 부작용, ROI, 절차
+- [x] T-012b — ADR-030/031/032/033 enforcement 코드 (완료: 2026-05-25, PR#10
+      merged)
+  - `pyproject.toml`: import-linter 차단 계약 (cachetools/async_lru/
+    aiocache/diskcache + kafka/aiokafka/confluent_kafka/faust), coverage
+    Sprint별 schedule 주석
+  - `packages/krtour-map-debug-ui/scripts/export_openapi.py` skeleton
+    (ADR-031, `--check` drift gate)
 
 ## 폐기 / 재해석
 
@@ -169,19 +225,52 @@
 
 ## 우선순위 가이드
 
-- **즉시** — PR#9 (ADR-027) + PR#10 (T-012~T-017 진행 + ADR-029 + 코딩) 검토
-  + merge
-- **다음** — T-014 (코드 작성 단계 진입 검토, 사용자 승인 필요) → Sprint 1
-  진입 PR (ADR-032/033 accepted 전환 + scaffolding)
-- **백그라운드** — T-018 (`python-knps-api` 모니터링 후 본 라이브러리 반영)
-- **장기** — Sprint 5 (T-200~T-204), 보류 (T-101~T-103, ADR 신설과 함께)
+- **즉시 (검토 + merge)**: 본 PR#12 (ADR-028 + knps-feature-etl.md) +
+  upstream knps-api PR#1 (maki icon 정정)
+- **다음**: T-014 (코드 작성 단계 진입 검토 — 사용자 승인 필요) → Sprint 1
+  진입 PR (ADR-027/028/029/030/031/032/033 일괄 accepted 전환 + scaffolding
+  + `PLACE_CATEGORY_DEFINITIONS`/`NOTICE_TYPES`/`AreaDetail.area_kind`
+  코드 적용)
+- **백그라운드**: T-018 (`krtour.map.providers.knps` 모듈 구현, Sprint 2) +
+  T-019 (TripMate `apps/web` 측 Kakao → maplibre-vworld 교체 모니터링)
+- **장기**: Sprint 5 (T-200~T-204), 보류 (T-101~T-103, ADR 신설과 함께)
 
 ## ADR 번호 가이드 (현재)
 
-- **accepted**: ADR-001 ~ ADR-026
-- **proposed (사용자 검토)**: ADR-027 (forest 카테고리/notice_type 확장, PR#9
-  merged) / ADR-028 (`python-knps-api` provider 등록, **본 PR#12**) /
-  ADR-029 (공통 maki npm 패키지, PR#10 merged) / ADR-030 (캐시 금지) /
-  ADR-031 (OpenAPI export) / ADR-032 (Coverage 일정, 시기 의존) / ADR-033
-  (`feature_consistency_reports`, 시기 의존)
-- **다음 후보**: ADR-034+ (신규 provider 추가 절차 표준)
+- **accepted (text on main)**: ADR-001 ~ ADR-026
+- **proposed (text on main, 사용자 review → accepted PR 대기)**:
+  - **ADR-027** (forest 카테고리/notice_type 확장, PR#9 merged)
+  - **ADR-029** (공통 maki npm 패키지, PR#10 merged)
+  - **ADR-030** (라이브러리 캐시 금지, PR#8 merged)
+  - **ADR-031** (디버그 패키지 OpenAPI export, PR#8 merged)
+  - **ADR-032** (Coverage 단계적 상향 일정, 시기 의존, PR#8 merged) — T-014
+    에 묶어 accepted
+  - **ADR-033** (`feature_consistency_reports` 단계적 도입, 시기 의존, PR#8
+    merged) — T-014 + Sprint 3 진입에 묶어 accepted
+- **proposed (text in open PR)**:
+  - **ADR-028** (`python-knps-api` provider 등록, **본 PR#12**) — merge 후
+    위 그룹으로 이동
+- **다음 후보 (미작성)**:
+  - **ADR-034+** — 신규 provider 추가 절차 표준 (체크리스트)
+  - 후속 `@krtour/map-marker-react` npm 게시 자동화 ADR
+  - (필요 시) ADR — `core.feature_consistency_reports` Phase 2 알림 sink
+  - (필요 시) ADR — Sprint 2 SHP/GeoJSON parsing 위치 결정 (`krtour.map.
+    providers.knps` vs upstream `[geo]` extra)
+
+## 머지 history (참조)
+
+| PR | branch | 머지 일자 | 핵심 |
+|----|--------|----------|------|
+| #1 | `chore/pr-workflow-namespace-rename-category-migration` | 2026-05-24 | ADR-021/022/023 |
+| #2 | `docs/v1-to-v2-feature-ports` | 2026-05-24 | T-002~T-011 (14 docs) |
+| #3 | `feat/mois-feature-etl` | 2026-05-24 | ADR-024 + mois-feature-etl.md |
+| #4 | (merged via #3 lineage) | 2026-05-24 | 동일 |
+| #5 | `feat/forest-knps-category` | 2026-05-25 | T-015 (forest rename + KNPS 카탈로그 + category Tier 1~4) |
+| #6 | `feat/debug-ui-maplibre-vworld` | 2026-05-25 | ADR-025 + ADR-025 사용자 보강 + ADR-026 |
+| #7 | `chore/tasks-md-update` | 2026-05-25 | tasks.md 백로그 |
+| #8 | `docs/adr-030-031-032-033-proposed` | 2026-05-25 | ADR-030/031/032/033 proposed |
+| #9 | `docs/adr-027-forest-category-expansion` | 2026-05-25 | ADR-027 proposed |
+| #10 | `docs/pr10-t012-t018-codify` | 2026-05-25 | ADR-029 + T-013/14a/17c/12a/12b + 명명 sweep + 코딩 |
+| #11 | `docs/pr11-debug-ui-nextjs` | 2026-05-25 | ADR-025 2차 보강 (Vite → Next.js) |
+| **#12** | `docs/pr12-knps-api-integration` | **open** | ADR-028 + knps-feature-etl.md |
+| knps-api #1 | `docs/knps-feature-maki-icons` | **open** | maki icon 정정 (shelter / barrier) |
