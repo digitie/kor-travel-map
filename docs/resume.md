@@ -87,16 +87,19 @@ Python 패키지 `krtour-map-debug-ui` (ADR-020, `packages/krtour-map-debug-ui/`
 
 ### 코드 작성 단계 진입 전
 
-- [ ] T-012 ADR-020+ 후속 결정 (proposed 4건 — 본 PR#10에서 코드 박힘 + 사용자
+- [ ] T-012 ADR-020+ 후속 결정 (proposed 4건 — PR#10에서 코드 박힘 + 사용자
       review 후 accepted 전환)
-- [x] T-013 `CHANGELOG.md` 초기 엔트리 정리 — PR#10에서 완료
-- [ ] T-014 코드 작성 단계 진입 검토 (사용자 승인 후, Sprint 1 PR로 진입).
-      `docs/sprints/SPRINT-1.md` 초안 박혀 있음 (PR#10).
-- [ ] T-017 ADR-029 npm 패키지 추출 — PR#10에서 skeleton 박힘, Sprint 2에
-      실코드.
-- [ ] T-018 `python-knps-api` provider — 외부 repo `digitie/python-knps-api`
-      가 docs/forest-feature-etl.md §11 참고해서 개발 중. 모니터링 후 본
-      라이브러리 반영 (ADR-028 + `docs/knps-feature-etl.md`).
+- [x] T-013 `CHANGELOG.md` 초기 엔트리 정리 — PR#10 merged
+- [ ] T-014 코드 작성 단계 진입 검토 (사용자 승인 후, Sprint 1 PR로 진입)
+  - **Sprint 1 plan** (`docs/sprints/SPRINT-1.md`) — PR#10 merged (provider
+    없음 명확화는 본 PR#14)
+  - **Sprint 2~5 plan** (`docs/sprints/SPRINT-2.md` ~ `SPRINT-5.md`) —
+    **본 PR#14**에서 ADR-034 9단계 순서로 박음
+- [x] T-017c ADR-029 npm 패키지 추출 — PR#10 merged (skeleton). 실 코드는
+      Sprint 2.
+- [x] T-018a `python-knps-api` provider — PR#12 merged (ADR-028 +
+      `docs/knps-feature-etl.md`). 외부 repo scaffold `6e36990` 반영.
+- [ ] T-018 본체 — `krtour.map.providers.knps` 모듈 신설 + 적재 (Sprint 3)
 
 ## 다음 ADR (proposed / 후보)
 
@@ -105,9 +108,12 @@ Python 패키지 `krtour-map-debug-ui` (ADR-020, `packages/krtour-map-debug-ui/`
   (`LODGING_MOUNTAIN_SHELTER` + `area_kind=hazard_zone` + generic
   `notice_type=access_restriction`/`fire_alert`). WEATHER_MOUNTAIN_STATION /
   NATURE_ECOLOGY / SAFETY Tier 1은 거부.
-- **ADR-028** (본 PR#12) — `python-knps-api` provider 등록. 외부 repo
+- **ADR-028** (PR#12 merged) — `python-knps-api` provider 등록. 외부 repo
   scaffold 완료 (`6e36990`). 본 라이브러리 통합 모듈 + ADR-027 코드 적용은
-  T-018 시점.
+  Sprint 3.
+- **ADR-034** (본 PR#14) — Provider 구현 9단계 순서 (축제→날씨→유가→휴게소
+  →국립공원/트래킹→국가유산→**MOIS**→휴양림/수목원→박물관/미술관). MOIS
+  bulk 전에 dedup 룰을 작은 dataset에서 검증. Sprint 2~5 매핑.
 - **ADR-029** (PR#10) — `@krtour/map-marker-react` npm 패키지 추출 (MIT,
   monorepo). skeleton 박힘.
 - **ADR-030** (PR#8) — 라이브러리 in-memory 캐시 금지. **본 PR#10에서
