@@ -2,6 +2,70 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-25 00:30 (claude)
+
+**작업**: outdoor → forest rename + 모든 feature에 category 명시 + KNPS
+국립공원공단 datasets 카탈로그 + category.md Tier 1~4 상세 테이블.
+
+**변경 파일**:
+- **rename**: `docs/outdoor-feature-etl.md` → `docs/forest-feature-etl.md` (git mv)
+- **신규 섹션**:
+  - `docs/category.md` §4 — Tier 1~4 전체 141건 카탈로그 (트리 뷰 + maki icon 분포 표 + provider별 주된 카테고리 매핑 표)
+  - `docs/forest-feature-etl.md` §11 — KNPS (국립공원공단) 데이터 통합 계획
+    (provider 옵션 A/B/C 비교 + 권고, 핵심 dataset 7건 정밀 정리, 추가 발굴
+    8건, Dagster asset 11종, 카테고리 확장 후보 7건)
+- **갱신** (모든 ETL doc에 명시적 category code 추가):
+  - `docs/forest-feature-etl.md` §4 — 8개 카테고리 (`03030101` 국립휴양림,
+    `01030102` 수목원 등) 명시
+  - `docs/khoa-beach-info-etl.md` — `01050100` `TOURISM_NATURE_BEACH`
+  - `docs/opinet-place-price-etl.md` — `06020000` `TRANSPORT_FUEL`
+  - `docs/krex-rest-area-feature-etl.md` — `06040101` `TRANSPORT_REST_AREA_HIGHWAY_EX`
+  - `docs/event-feature-etl.md` — `TOURISM` 대분류 + EventDetail.event_kind
+  - `docs/krheritage-feature-etl.md` §4-pre — `01070100~400` 4개 매핑 표
+  - `docs/mois-feature-etl.md` §6.1 — 42 슬러그 → 정확한 카테고리 코드 매핑
+    (식음/숙박/관광/문화 모두 실 카테고리 트리 기준)
+  - `docs/standard-data-feature-etl.md` §2 — 5종 dataset에 category 추가
+  - `docs/notice-feature-etl.md` §2.5 — notice는 카테고리 비움 / notice_type
+    분류
+  - `docs/kma-weather-etl.md` §1 — weather-only anchor 카테고리 규약
+  - `docs/place-phone-enrichment.md` §1 — enrichment는 카테고리 변경 X
+  - `README.md` — 문서 지도에 forest-feature-etl 갱신
+  - `docs/resume.md` — outdoor → forest
+
+**의사결정 (사용자 위임, 검토 부탁)**:
+- **KNPS provider 옵션 B 권고** — 별도 `python-knps-api` 신설.
+  - 이유: 1기관 1라이브러리 컨벤션 (krmois/krheritage/krforest 등과 동일).
+    KNPS는 환경부 산하, 산림청은 농림식품부 — 별도 기관. file dataset(SHP/
+    GeoJSON) 처리 모듈 응집.
+  - dataset_key prefix: `knps_*` (13개 + 추가 후보).
+- **사용자 명시 7건 + 추가 8건** dataset 카탈로그 작성. data.go.kr ID는 web
+  access 차단으로 **확인 필요** 표시 (15084538~15084545 추정).
+- **카테고리 확장 후보 (ADR-025 후보)**:
+  - `SAFETY_HAZARD_ZONE` (위험지역)
+  - `LODGING_MOUNTAIN_SHELTER` (산장)
+  - `WEATHER_MOUNTAIN_STATION` (관측소 anchor)
+  - `NATURE_ECOLOGY` (식생/서식지)
+  - `notice_type=forest_access_restriction` / `forest_fire_alert`
+  - `area_kind=hazard_zone`
+- **MOIS 식음 매핑은 부모 카테고리로 default** — `02010100` 한식 또는
+  `02010000` 부모. provider가 세부 업태 자동 분류 데이터 미제공이라 보수적.
+  세부 분류는 향후 ADR.
+
+**발견**:
+- `python-kraddr-base/src/kraddr/base/categories.py`는 총 141건 (Tier 0
+  sentinel 1 + Tier 1 7 + Tier 2 29 + Tier 3 71 + Tier 4 33).
+- maki icon 55종 unique 사용. `park` 11회 (휴양림/공원/트레킹), `lodging` 11회
+  (호텔/리조트/모텔/게스트하우스) 등.
+- KNPS 위험지역/관측소/산장 같은 카테고리가 현재 트리에 없음 → 카테고리 확장
+  필요 (사용자 검토 후 ADR-025 작성).
+- v1 `outdoor-feature-etl.md`에 KNPS dataset 단서는 없었음 — 본 §11이 v2의
+  첫 정밀 카탈로그.
+
+**다음**: PR#3 push + 사용자 검토. PR 일괄 merge 후 backlog T-200/T-201 (Sprint
+5 batch DAG + consistency_reports), ADR-025 (카테고리 확장 — 사용자 결정 후).
+
+---
+
 ## 2026-05-24 23:30 (claude)
 
 **작업**: `python-mois-api` 활용 feature 적재 full lifecycle 문서화 + canonical

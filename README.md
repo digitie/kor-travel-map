@@ -198,7 +198,7 @@ lint-imports
 - [`docs/opinet-place-price-etl.md`](docs/opinet-place-price-etl.md) — OpiNet 주유소+유가 ETL
 - [`docs/khoa-beach-info-etl.md`](docs/khoa-beach-info-etl.md) — KHOA 해수욕장 ETL
 - [`docs/krheritage-feature-etl.md`](docs/krheritage-feature-etl.md) — 국가유산청 ETL
-- [`docs/outdoor-feature-etl.md`](docs/outdoor-feature-etl.md) — 산림청 outdoor ETL
+- [`docs/forest-feature-etl.md`](docs/forest-feature-etl.md) — 산림청 + 국립공원공단(KNPS) ETL
 - [`docs/krex-rest-area-feature-etl.md`](docs/krex-rest-area-feature-etl.md) — 도로공사 휴게소 ETL
 - [`docs/standard-data-feature-etl.md`](docs/standard-data-feature-etl.md) — data.go.kr 표준데이터 5종 ETL
 - [`docs/notice-feature-etl.md`](docs/notice-feature-etl.md) — 통합 notice ETL (4 provider)

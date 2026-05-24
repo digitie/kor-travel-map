@@ -22,6 +22,17 @@
 | `forest_safety_notices` | `python-krforest-api` | **30분** | 산사태/산불/탐방 위험 |
 | `khoa_coastal_notices` | `python-khoa-api` | **60분** | 바다 갈라짐/해양 위험 |
 
+## 2.5 카테고리 매핑
+
+`notice` kind는 **`Feature.category`를 비워두거나** Tier 1 `01000000`
+`TOURISM` (대분류 — 여행 영향)으로 설정. 분류는 `NoticeDetail.notice_type`이
+1차 담당 (`docs/category.md` §4의 8개 Tier 1과는 별도 축).
+
+marker_icon: `notice_type`별 (예: `alert` / `roadblock` / `rainwear`).
+marker_color: `notice_type`별 (`P-13` 위험 / `P-08` 기상 / `P-14` 일반).
+
+자세한 marker 매핑은 `notice_marker_style(notice_type, severity)` helper.
+
 ## 3. `notice_type` 표준 값
 
 ```python

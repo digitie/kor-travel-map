@@ -66,7 +66,7 @@ Python 패키지 `krtour-map-debug-ui` (ADR-020, `packages/krtour-map-debug-ui/`
 - [x] T-003 `docs/feature-files-rustfs.md`
 - [x] T-004 `docs/feature-opening-hours.md`
 - [x] T-005 `docs/kraddr-base-types.md` + `docs/address-geocoding.md`
-- [x] T-006 provider별 ETL 문서 10건 (event/mois-license/opinet/khoa/krheritage/outdoor/
+- [x] T-006 provider별 ETL 문서 10건 (event/mois-license/opinet/khoa/krheritage/forest/
       krex-rest-area/standard-data/notice/kma-weather/place-phone-enrichment)
 - [x] **ADR-024** + `docs/mois-feature-etl.md` 신설 — `python-mois-api` full lifecycle
       (Step A/B/C/D), 195 슬러그 카탈로그, PROMOTED 42종 + EXCLUDED 분류
