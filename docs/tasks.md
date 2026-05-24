@@ -4,9 +4,8 @@
 
 ## 진행 중 (open PR)
 
-- **본 PR#12** (docs/pr12-knps-api-integration): ADR-028 (proposed) +
-  `docs/knps-feature-etl.md` 신설 + provider-contract 갱신 — 검토 + merge
-  대기. (`python-knps-api` upstream `6e36990` scaffold 반영).
+- **본 PR#13** (chore/tasks-md-pr12-merged-update): tasks.md 백로그 갱신 —
+  PR#12 머지 후 늦은 push로 분리됨.
 - **upstream knps-api PR#1**
   (https://github.com/digitie/python-knps-api/pull/1):
   `docs/knps-feature-etl.md §4` maki icon 정정 (shelter / barrier) — 검토 +
@@ -189,7 +188,7 @@
     `vite.config.ts` / `.gitignore`)
   - 실 코드는 T-017 본체 (Sprint 2)
 - [x] T-018a — `python-knps-api` upstream scaffold 모니터링 + 본 라이브러리
-      ADR-028 (proposed) 작성 (완료: 2026-05-25, **본 PR#12** open)
+      ADR-028 (proposed) 작성 (완료: 2026-05-25, PR#12 merged)
   - upstream `digitie/python-knps-api` `6e36990` scaffold 확인
   - `docs/decisions.md` ADR-028 본문
   - `docs/knps-feature-etl.md` 신설 (feature 적재 계약)
@@ -225,8 +224,8 @@
 
 ## 우선순위 가이드
 
-- **즉시 (검토 + merge)**: 본 PR#12 (ADR-028 + knps-feature-etl.md) +
-  upstream knps-api PR#1 (maki icon 정정)
+- **즉시 (검토 + merge)**: 본 PR#13 (tasks.md 백로그 갱신) + upstream
+  knps-api PR#1 (maki icon 정정)
 - **다음**: T-014 (코드 작성 단계 진입 검토 — 사용자 승인 필요) → Sprint 1
   진입 PR (ADR-027/028/029/030/031/032/033 일괄 accepted 전환 + scaffolding
   + `PLACE_CATEGORY_DEFINITIONS`/`NOTICE_TYPES`/`AreaDetail.area_kind`
@@ -247,9 +246,7 @@
     에 묶어 accepted
   - **ADR-033** (`feature_consistency_reports` 단계적 도입, 시기 의존, PR#8
     merged) — T-014 + Sprint 3 진입에 묶어 accepted
-- **proposed (text in open PR)**:
-  - **ADR-028** (`python-knps-api` provider 등록, **본 PR#12**) — merge 후
-    위 그룹으로 이동
+  - **ADR-028** (`python-knps-api` provider 등록, PR#12 merged)
 - **다음 후보 (미작성)**:
   - **ADR-034+** — 신규 provider 추가 절차 표준 (체크리스트)
   - 후속 `@krtour/map-marker-react` npm 게시 자동화 ADR
@@ -272,5 +269,6 @@
 | #9 | `docs/adr-027-forest-category-expansion` | 2026-05-25 | ADR-027 proposed |
 | #10 | `docs/pr10-t012-t018-codify` | 2026-05-25 | ADR-029 + T-013/14a/17c/12a/12b + 명명 sweep + 코딩 |
 | #11 | `docs/pr11-debug-ui-nextjs` | 2026-05-25 | ADR-025 2차 보강 (Vite → Next.js) |
-| **#12** | `docs/pr12-knps-api-integration` | **open** | ADR-028 + knps-feature-etl.md |
+| #12 | `docs/pr12-knps-api-integration` | 2026-05-25 | ADR-028 + knps-feature-etl.md |
+| **#13** | `chore/tasks-md-pr12-merged-update` | **open** | tasks.md 백로그 갱신 (PR#12 머지 후) |
 | knps-api #1 | `docs/knps-feature-maki-icons` | **open** | maki icon 정정 (shelter / barrier) |
