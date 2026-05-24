@@ -1,18 +1,20 @@
-# TripMate feature docs migration
+# TripMate feature 문서 이관
 
-TripMate에 있던 feature 중심 문서는 이 라이브러리로 이관한다. TripMate 문서는 사용자, 여행계획, POI, API, Admin, 운영 runbook만 남기고 feature 세부 계약은 이 저장소를 canonical로 링크한다.
+TripMate에 있던 feature 중심 문서는 이 라이브러리로 이관한다. TripMate 문서는 사용자, 여행계획, POI, API, Admin, 운영 runbook만 남기고 feature 세부 계약은 이 저장소를 표준으로 링크한다.
 
 ## 이관 대상
 
-| TripMate 문서 | 이 라이브러리 canonical 문서 |
+| TripMate 문서 | 이 라이브러리 표준 문서 |
 | --- | --- |
-| `docs/architecture/map-feature-schema.md` | [Feature model](feature-model.md), [Postgres schema](postgres-schema.md) |
-| `docs/architecture/krtour-map-library.md` | [TripMate integration](tripmate-integration.md), [Architecture](architecture.md) |
-| `docs/architecture/provider-library-direct-use.md` | [Provider contract](provider-contract.md) |
-| `docs/architecture/weather-air-quality-schema.md`의 feature weather 섹션 | [Weather feature normalization](weather-feature-normalization.md) |
-| `docs/architecture/kraddr-base-boundary.md` | [kraddr-base types](kraddr-base-types.md) |
-| `docs/architecture/dagster-krtour-map-boundary.md` | [Dagster boundary](dagster-boundary.md) |
-| `docs/architecture/krtour-map-db-initialization.md` | [Feature DB initialization](feature-db-initialization.md) |
+| `docs/architecture/map-feature-schema.md` | [Feature 모델 기준](feature-model.md), [Postgres 스키마 기준](postgres-schema.md) |
+| `docs/architecture/krtour-map-library.md` | [TripMate 통합 가이드](tripmate-integration.md), [아키텍처](architecture.md) |
+| `docs/architecture/provider-library-direct-use.md` | [Provider 계약](provider-contract.md) |
+| `docs/architecture/weather-air-quality-schema.md`의 feature weather 섹션 | [날씨 feature 정규화](weather-feature-normalization.md) |
+| `docs/architecture/kraddr-base-boundary.md` | [python-kraddr-base 자료형 사용 기준](kraddr-base-types.md) |
+| `docs/architecture/dagster-krtour-map-boundary.md` | [Dagster 경계](dagster-boundary.md) |
+| `docs/architecture/krtour-map-db-initialization.md` | [Feature DB 초기화](feature-db-initialization.md) |
+| `docs/architecture/outdoor-feature-db.md` | [산림·등산 feature ETL](outdoor-feature-etl.md) |
+| TripMate feature/ETL 문서 작성 규칙 | [Feature 문서 작성 가이드](feature-docs-guide.md) |
 
 ## TripMate에 남길 내용
 

@@ -1,16 +1,23 @@
-# Address geocoding and match report
+# 주소 geocoding과 매칭 리포트
 
-`python-krtour-map`은 feature 주소와 좌표를 `python-kraddr-base` DTO로 정리한다. 실제
-reverse geocoding provider 실행은 TripMate/Dagster resource가 담당하고, 이 라이브러리는
-주입받은 callable 결과를 `Address`로 병합한다.
+`python-krtour-map`은 feature 주소와 좌표를 `python-kraddr-base` DTO로 정리한다. feature DB
+적재 전에 주소->좌표 geocoding 또는 좌표->주소 reverse geocoding이 필요하면 `python-kraddr-geo`를
+사용한다. TripMate가 이미 만든 callable을 넘길 수도 있고, loader/DB load resource에
+`kraddr_geo_store` 또는 `kraddr_geo_database_path`를 넘기면 이 라이브러리가 callable을 만든다.
 
 ## 원칙
 
 - 좌표 DTO는 `kraddr.base.PlaceCoordinate(lat, lon)`를 사용한다.
 - 주소 DTO는 `kraddr.base.Address`, `AddressRegion`, `AddressCodeSet`을 사용한다.
 - 지오코딩 provider별 wrapper/adapter/gateway를 만들지 않는다.
+- `address_geocoder: Callable[[Address], PlaceCoordinate | Mapping | object | None]`는
+  주소 문자열로 좌표를 보강한다.
 - `reverse_geocoder: Callable[[PlaceCoordinate], Address | Mapping | object | None]`는
-  TripMate resource에서 넘긴다.
+  TripMate resource에서 직접 넘길 수 있다.
+- callable이 없고 resource에 `kraddr_geo_store` 또는 `kraddr_geo_database_path`가 있으면
+  `kraddr_geo_address_geocoder()`와 `kraddr_geo_reverse_geocoder()`로 callable을 만든다.
+- `python-vworld-api`를 이 라이브러리에서 직접 import하거나 provider로 저장하지 않는다.
+  VWorld fallback이 필요하면 `python-kraddr-geo`의 store 설정에서 처리한다.
 - provider 원문 주소와 provider별 지역 코드는 `SourceRecord.raw_data`와 kind별 `payload`에
   보존한다.
 - feature row에 저장하는 `legal_dong_code`는 `kraddr.base`로 검증/정규화된 값만 사용한다.
@@ -51,6 +58,7 @@ reverse geocoding provider 실행은 TripMate/Dagster resource가 담당하고, 
 | `address_text_review` | 코드 없이 주소 문자열 검토 필요 |
 | `address_text_only` | 좌표/geocoder 없이 주소 문자열만 있음 |
 | `coordinate_only` | 주소 문자열 없이 좌표 reverse geocoding 결과만 있음 |
+| `address_geocode_legal_dong` | 주소 geocoding 결과에서 좌표/법정동코드를 보강 |
 | `not_geocoded` | 좌표는 있지만 reverse geocoder resource가 없음 |
 | `no_address` | 주소와 좌표 모두 없음 |
 
@@ -60,7 +68,10 @@ TripMate 운영 리포트는 `AddressMatchReport`를 모아 DOCX/스프레드시
 
 ## ETL 적용
 
-VisitKorea 축제 ETL과 OpiNet 주유소 ETL은 `reverse_geocoder`를 선택적으로 받는다.
+VisitKorea 축제 ETL, KHOA 해수욕장 ETL, KRMOIS 인허가 ETL, 국가유산 ETL, OpiNet 주유소 ETL은
+`reverse_geocoder`를 선택적으로 받는다. 또한 공통 `load_feature_rows()`는 `address_geocoder`,
+`reverse_geocoder`, `geocoder_resource`를 받아 DB 적재 직전에 좌표/주소를 보강할 수 있다.
+Dagster resource는 명시 callable 대신 kraddr-geo store/path를 넘길 수 있다.
 
 ```python
 result = collect_visitkorea_festival_events(
@@ -76,7 +87,26 @@ bundle = opinet_station_detail_to_feature_bundle(
 ```
 
 TripMate Dagster resource는 `reverse_geocoder` 속성이나 mapping key를 제공하면 된다. 이 callable
-내부에서는 `python-kraddr-geo`, `python-vworld-api` 같은 안정된 public client를 직접 사용한다.
+내부에서는 `python-kraddr-geo` public API를 사용한다.
+
+```python
+from krtour_map import kraddr_geo_reverse_geocoder
+
+resources = {
+    "client": provider_client,
+    "session": feature_session,
+    "reverse_geocoder": kraddr_geo_reverse_geocoder(
+        database_path="data/juso/kraddr_geo.sqlite",
+        store_kwargs={
+            "vworld_api_key": "...",  # optional, owned by python-kraddr-geo
+            "vworld_domain": "...",
+        },
+    ),
+}
+```
+
+또는 resource에 `kraddr_geo_store`, `kraddr_geo_database_path`, `kraddr_geo_store_kwargs`,
+`kraddr_geo_fallback`, `kraddr_geo_max_distance_m`를 넘기면 loader가 callable을 자동 생성한다.
 
 ## 영업시간/운영시간
 

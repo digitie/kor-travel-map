@@ -1,6 +1,17 @@
-# Event feature ETL
+# 행사 feature ETL
 
 이 문서는 VisitKorea 축제/행사 데이터를 `event` feature로 정리하는 표준 계약이다.
+
+## 문서 정보
+
+| 항목 | 값 |
+| --- | --- |
+| provider | `python-visitkorea-api` |
+| `dataset_key` | `visitkorea_festival_events` |
+| `Feature.kind` | `event` |
+| `source_entity_type` | `festival` |
+| 상세 테이블 | `feature_event_details` |
+| 코드 entrypoint | `krtour_map.events` |
 
 ## 범위
 
@@ -19,17 +30,17 @@
 사용자, 여행계획, POI는 TripMate 제품 도메인이며 이 라이브러리에서 관리하지 않는다.
 TripMate는 필요할 때 `feature_id`를 참조한다.
 
-## VisitKorea festival full scan
+## VisitKorea 축제 전체 스캔
 
 축제 풀스캔 ETL은 `visitkorea_festival_full_scan_job_spec`로 노출한다.
 
-- dataset key: `visitkorea_festival_events`
+- `dataset_key`: `visitkorea_festival_events`
 - provider: `python-visitkorea-api`
-- source type: `festival`
-- full scan interval: 1일 1회
-- default page size: `1000`
-- default start date: `2000-01-01`
-- page cap: 기본값 없음
+- `source_entity_type`: `festival`
+- 전체 스캔 주기: 1일 1회
+- 기본 page size: `1000`
+- 기본 시작일: `2000-01-01`
+- page 상한: 기본값 없음
 
 풀스캔은 모든 축제자료를 가져오기 위해 provider client의 pagination helper를 사용한다.
 
@@ -48,7 +59,7 @@ client.iter_pages(
 
 ## 저장 계약
 
-VisitKorea `content_id`는 source natural key로 사용한다. 좌표가 없는 축제도 존재할 수
+VisitKorea `content_id`는 원천 natural key로 사용한다. 좌표가 없는 축제도 존재할 수
 있으므로 `Feature.coord`는 `None`을 허용한다. 좌표가 있는 경우에는
 `python-kraddr-base`의 `PlaceCoordinate(lat, lon)`를 그대로 사용한다.
 
@@ -95,7 +106,7 @@ VisitKorea 축제 응답의 `first_image`, `first_image2`는 provider URL을 그
 
 ## DB 적재
 
-수집과 적재는 같은 라이브러리 안에 있지만 transaction ownership은 TripMate가 가진다.
+수집과 적재는 같은 라이브러리 안에 있지만 transaction 소유권은 TripMate가 가진다.
 
 - `collect_visitkorea_festival_events(client, ...)`: provider client를 직접 호출하고 DTO 묶음을 반환한다.
 - `collect_visitkorea_festival_events(..., reverse_geocoder=...)`: TripMate가 넘긴 callable로
@@ -117,7 +128,7 @@ VisitKorea 축제 응답의 `first_image`, `first_image2`는 provider URL을 그
 호출자는 성공 시 commit, 실패 시 rollback한다. 이 라이브러리는 Dagster daemon이나 schedule을
 직접 실행하지 않으며, TripMate가 resource 주입과 운영 정책을 담당한다.
 
-## TripMate boundary
+## TripMate 경계
 
 이 라이브러리는 ETL의 세부 수집/정규화 로직과 job spec을 제공한다. 실제 Dagster
 `Definitions`, schedule, daemon, resource 주입, 운영 로그, 알림은 TripMate 쪽에서 실행한다.

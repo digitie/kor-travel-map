@@ -12,6 +12,7 @@ from krtour_map.addressing import (
     AddressMatchReport,
     ReverseGeocoder,
     enrich_address_from_coordinate,
+    resolve_reverse_geocoder,
 )
 from krtour_map.dagster import (
     DagsterEtlExecution,
@@ -102,6 +103,11 @@ class KhoaBeachInfoLoadResources:
     rustfs_store: RustfsFileStore | None = None
     file_fetcher: FileFetcher | None = None
     reverse_geocoder: ReverseGeocoder | None = None
+    kraddr_geo_store: Any | None = None
+    kraddr_geo_database_path: str | None = None
+    kraddr_geo_store_kwargs: Mapping[str, Any] | None = None
+    kraddr_geo_fallback: bool = True
+    kraddr_geo_max_distance_m: float | None = 50.0
 
 
 def collect_khoa_oceans_beach_info(
@@ -736,7 +742,7 @@ def _resolve_khoa_beach_resources(
         session = resource.get("session") or resource.get("feature_session")
         rustfs_store = resource.get("rustfs_store") or resource.get("feature_file_store")
         file_fetcher = resource.get("file_fetcher")
-        reverse_geocoder = resource.get("reverse_geocoder")
+        reverse_geocoder = resolve_reverse_geocoder(resource)
     else:
         client = getattr(resource, "client", None) or getattr(resource, "khoa_client", None)
         session = getattr(resource, "session", None) or getattr(resource, "feature_session", None)
@@ -746,7 +752,7 @@ def _resolve_khoa_beach_resources(
             None,
         )
         file_fetcher = getattr(resource, "file_fetcher", None)
-        reverse_geocoder = getattr(resource, "reverse_geocoder", None)
+        reverse_geocoder = resolve_reverse_geocoder(resource)
         if client is None:
             client = resource
     if client is None:

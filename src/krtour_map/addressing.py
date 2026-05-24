@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal, TypeAlias
 
 from kraddr.base import (
@@ -13,6 +14,7 @@ from kraddr.base import (
 )
 
 AddressMatchLevel: TypeAlias = Literal[
+    "address_geocode_legal_dong",
     "legal_dong_exact",
     "coordinate_legal_dong",
     "legal_dong_conflict",
@@ -29,6 +31,10 @@ AddressMatchLevel: TypeAlias = Literal[
 ReverseGeocoder: TypeAlias = Callable[
     [PlaceCoordinate],
     Address | Mapping[str, Any] | object | None,
+]
+AddressGeocoder: TypeAlias = Callable[
+    [Address],
+    PlaceCoordinate | Mapping[str, Any] | object | None,
 ]
 
 
@@ -55,6 +61,250 @@ class AddressEnrichment:
     address: Address
     report: AddressMatchReport
     geocoded_address: Address | None = None
+    coordinate: PlaceCoordinate | None = None
+    geocoded_coordinate: PlaceCoordinate | None = None
+
+
+@dataclass
+class KrAddrGeoReverseGeocoder:
+    """Callable reverse geocoder backed by ``python-kraddr-geo``.
+
+    `python-krtour-map` only imports `kraddr.geo` lazily. If that store is
+    configured to fallback to VWorld, the fallback remains owned by
+    `python-kraddr-geo`; this package never imports `python-vworld-api`.
+    """
+
+    store: Any | None = None
+    database_path: str | Path | None = None
+    store_kwargs: Mapping[str, Any] | None = None
+    fallback: bool = True
+    max_distance_m: float | None = 50.0
+
+    _owned_store: Any | None = None
+
+    def __call__(self, coordinate: PlaceCoordinate) -> Address | None:
+        store = self._resolve_store()
+        request = {
+            "x": _coordinate_lon(coordinate),
+            "y": _coordinate_lat(coordinate),
+            "crs": "EPSG:4326",
+            "type": "both",
+            "max_distance_m": self.max_distance_m,
+        }
+        try:
+            result = store.get_address(request, fallback=self.fallback)
+        except TypeError:
+            result = store.get_address(request)
+        return _address_from_geocoder_result(result)
+
+    def close(self) -> None:
+        store = self._owned_store
+        self._owned_store = None
+        close = getattr(store, "close", None)
+        if callable(close):
+            close()
+
+    def _resolve_store(self) -> Any:
+        if self.store is not None:
+            return self.store
+        if self._owned_store is not None:
+            return self._owned_store
+        if self.database_path is None:
+            raise ValueError("kraddr-geo reverse geocoder requires a store or database_path")
+        try:
+            from kraddr.geo import SpatialiteAddressStore
+        except ImportError as exc:  # pragma: no cover - depends on optional package install.
+            raise RuntimeError(
+                "python-kraddr-geo is required for built-in reverse geocoding. "
+                "Install the geo extra or pass an explicit reverse_geocoder callable."
+            ) from exc
+        self._owned_store = SpatialiteAddressStore(
+            self.database_path,
+            **dict(self.store_kwargs or {}),
+        )
+        return self._owned_store
+
+
+def kraddr_geo_reverse_geocoder(
+    *,
+    store: Any | None = None,
+    database_path: str | Path | None = None,
+    store_kwargs: Mapping[str, Any] | None = None,
+    fallback: bool = True,
+    max_distance_m: float | None = 50.0,
+) -> KrAddrGeoReverseGeocoder:
+    """Build the standard kraddr-geo-backed reverse geocoder callable."""
+
+    return KrAddrGeoReverseGeocoder(
+        store=store,
+        database_path=database_path,
+        store_kwargs=store_kwargs,
+        fallback=fallback,
+        max_distance_m=max_distance_m,
+    )
+
+
+@dataclass
+class KrAddrGeoAddressGeocoder:
+    """Callable address geocoder backed by ``python-kraddr-geo``."""
+
+    store: Any | None = None
+    database_path: str | Path | None = None
+    store_kwargs: Mapping[str, Any] | None = None
+    fallback: bool = True
+    limit: int = 1
+
+    _owned_store: Any | None = None
+
+    def __call__(self, address: Address) -> PlaceCoordinate | Mapping[str, Any] | object | None:
+        query = address.display_address
+        if not query:
+            return None
+        store = self._resolve_store()
+        request = {
+            "query": query,
+            "crs": "EPSG:4326",
+            "type": "both",
+            "limit": self.limit,
+        }
+        try:
+            candidates = store.get_coord(request, fallback=self.fallback)
+        except TypeError:
+            candidates = store.get_coord(request)
+        if candidates is None:
+            return None
+        if isinstance(candidates, list | tuple):
+            return candidates[0] if candidates else None
+        return candidates
+
+    def close(self) -> None:
+        store = self._owned_store
+        self._owned_store = None
+        close = getattr(store, "close", None)
+        if callable(close):
+            close()
+
+    def _resolve_store(self) -> Any:
+        if self.store is not None:
+            return self.store
+        if self._owned_store is not None:
+            return self._owned_store
+        if self.database_path is None:
+            raise ValueError("kraddr-geo address geocoder requires a store or database_path")
+        try:
+            from kraddr.geo import SpatialiteAddressStore
+        except ImportError as exc:  # pragma: no cover - depends on optional package install.
+            raise RuntimeError(
+                "python-kraddr-geo is required for built-in address geocoding. "
+                "Install the geo extra or pass an explicit address_geocoder callable."
+            ) from exc
+        self._owned_store = SpatialiteAddressStore(
+            self.database_path,
+            **dict(self.store_kwargs or {}),
+        )
+        return self._owned_store
+
+
+def kraddr_geo_address_geocoder(
+    *,
+    store: Any | None = None,
+    database_path: str | Path | None = None,
+    store_kwargs: Mapping[str, Any] | None = None,
+    fallback: bool = True,
+    limit: int = 1,
+) -> KrAddrGeoAddressGeocoder:
+    """Build the standard kraddr-geo-backed address geocoder callable."""
+
+    return KrAddrGeoAddressGeocoder(
+        store=store,
+        database_path=database_path,
+        store_kwargs=store_kwargs,
+        fallback=fallback,
+        limit=limit,
+    )
+
+
+def resolve_reverse_geocoder(resource: Any) -> ReverseGeocoder | None:
+    """Return an explicit reverse geocoder or derive one from kraddr-geo settings.
+
+    Supported resource keys/attributes:
+
+    - `reverse_geocoder`: already-built callable
+    - `kraddr_geo_reverse_geocoder`: already-built callable
+    - `kraddr_geo_store`: `SpatialiteAddressStore` or compatible object
+    - `kraddr_geo_database_path` / `kraddr_geo_db_path`: local SQLite path
+    - `kraddr_geo_store_kwargs`: kwargs forwarded to `SpatialiteAddressStore`
+    """
+
+    direct = _resource_value(resource, "reverse_geocoder")
+    if callable(direct):
+        return direct
+
+    direct = _resource_value(resource, "kraddr_geo_reverse_geocoder")
+    if callable(direct):
+        return direct
+
+    store = _resource_value(resource, "kraddr_geo_store") or _resource_value(
+        resource,
+        "address_store",
+    )
+    database_path = _resource_value(resource, "kraddr_geo_database_path") or _resource_value(
+        resource,
+        "kraddr_geo_db_path",
+    )
+    if store is None and database_path is None:
+        return None
+
+    store_kwargs = _resource_value(resource, "kraddr_geo_store_kwargs")
+    if store_kwargs is not None and not isinstance(store_kwargs, Mapping):
+        raise TypeError("kraddr_geo_store_kwargs must be a mapping")
+
+    fallback = _resource_bool(resource, "kraddr_geo_fallback", default=True)
+    max_distance_m = _resource_float(resource, "kraddr_geo_max_distance_m", default=50.0)
+    return kraddr_geo_reverse_geocoder(
+        store=store,
+        database_path=database_path,
+        store_kwargs=store_kwargs,
+        fallback=fallback,
+        max_distance_m=max_distance_m,
+    )
+
+
+def resolve_address_geocoder(resource: Any) -> AddressGeocoder | None:
+    """Return an explicit address geocoder or derive one from kraddr-geo settings."""
+
+    direct = _resource_value(resource, "address_geocoder")
+    if callable(direct):
+        return direct
+
+    direct = _resource_value(resource, "kraddr_geo_address_geocoder")
+    if callable(direct):
+        return direct
+
+    store = _resource_value(resource, "kraddr_geo_store") or _resource_value(
+        resource,
+        "address_store",
+    )
+    database_path = _resource_value(resource, "kraddr_geo_database_path") or _resource_value(
+        resource,
+        "kraddr_geo_db_path",
+    )
+    if store is None and database_path is None:
+        return None
+
+    store_kwargs = _resource_value(resource, "kraddr_geo_store_kwargs")
+    if store_kwargs is not None and not isinstance(store_kwargs, Mapping):
+        raise TypeError("kraddr_geo_store_kwargs must be a mapping")
+
+    fallback = _resource_bool(resource, "kraddr_geo_fallback", default=True)
+    limit = int(_resource_float(resource, "kraddr_geo_geocode_limit", default=1) or 1)
+    return kraddr_geo_address_geocoder(
+        store=store,
+        database_path=database_path,
+        store_kwargs=store_kwargs,
+        fallback=fallback,
+        limit=limit,
+    )
 
 
 def enrich_address_from_coordinate(
@@ -62,15 +312,16 @@ def enrich_address_from_coordinate(
     address: Address | Mapping[str, Any] | None = None,
     coordinate: PlaceCoordinate | None = None,
     raw: Mapping[str, Any] | None = None,
+    address_geocoder: AddressGeocoder | None = None,
     reverse_geocoder: ReverseGeocoder | None = None,
     source_label: str,
     source_entity_id: str | None = None,
 ) -> AddressEnrichment:
     """Normalize an address and optionally enrich it from a coordinate.
 
-    `python-krtour-map` does not wrap a geocoding provider. TripMate can inject a
-    stable reverse-geocoding callable backed by `python-kraddr-geo`,
-    `python-vworld-api`, or another provider public client.
+    `python-krtour-map` does not wrap provider-specific geocoding clients. It can
+    call an injected callable, or loaders can derive one from `python-kraddr-geo`
+    resources. Any VWorld fallback is owned by `python-kraddr-geo`.
     """
 
     raw_mapping = dict(raw or {})
@@ -91,6 +342,22 @@ def enrich_address_from_coordinate(
             code_source = "source_address_code"
             match_level = derived_level
             confidence = 80 if derived_level == "provider_code_converted" else 65
+
+    geocoded_coordinate, address_geocode_address = _call_address_geocoder(
+        source_address,
+        coordinate,
+        address_geocoder,
+        notes=notes,
+    )
+    if coordinate is None and geocoded_coordinate is not None:
+        coordinate = geocoded_coordinate
+        notes.append("coordinate geocoded from address text")
+    if address_geocode_address is not None:
+        source_address = merge_address_enrichment(source_address, address_geocode_address)
+        if address_geocode_address.legal_dong_code is not None:
+            match_level = "address_geocode_legal_dong"
+            confidence = max(confidence, 85)
+            code_source = "address_geocode"
 
     geocoded_address = _call_reverse_geocoder(coordinate, reverse_geocoder, notes=notes)
     if geocoded_address is not None:
@@ -137,6 +404,8 @@ def enrich_address_from_coordinate(
     return AddressEnrichment(
         address=source_address,
         geocoded_address=geocoded_address,
+        coordinate=coordinate,
+        geocoded_coordinate=geocoded_coordinate,
         report=AddressMatchReport(
             source_label=source_label,
             source_entity_id=source_entity_id,
@@ -270,6 +539,23 @@ def _call_reverse_geocoder(
     return address
 
 
+def _call_address_geocoder(
+    address: Address,
+    coordinate: PlaceCoordinate | None,
+    address_geocoder: AddressGeocoder | None,
+    *,
+    notes: list[str],
+) -> tuple[PlaceCoordinate | None, Address | None]:
+    if coordinate is not None or address_geocoder is None or not address.display_address:
+        return None, None
+    result = address_geocoder(address)
+    coordinate_result = _coordinate_from_geocoder_result(result)
+    address_result = _address_from_geocoder_result(result)
+    if result is not None and coordinate_result is None:
+        notes.append("address geocoder returned no coordinate DTO-compatible value")
+    return coordinate_result, address_result
+
+
 def _address_from_geocoder_result(result: Any) -> Address | None:
     if result is None:
         return None
@@ -290,6 +576,81 @@ def _address_from_geocoder_result(result: Any) -> Address | None:
     if mapping:
         return _address_from_mapping(mapping)
     return None
+
+
+def _coordinate_from_geocoder_result(result: Any) -> PlaceCoordinate | None:
+    if result is None:
+        return None
+    if isinstance(result, PlaceCoordinate):
+        return result
+    coordinate = getattr(result, "coordinate", None) or getattr(result, "coord", None)
+    if isinstance(coordinate, PlaceCoordinate):
+        return coordinate
+    if isinstance(coordinate, Mapping):
+        return _coordinate_from_mapping(coordinate)
+    if isinstance(result, Mapping):
+        return _coordinate_from_mapping(result)
+    if hasattr(result, "model_dump"):
+        dumped = result.model_dump(mode="json")
+        if isinstance(dumped, Mapping):
+            return _coordinate_from_mapping(dumped)
+    mapping: dict[str, Any] = {}
+    for attr in ("lat", "latitude", "lon", "longitude", "x", "y", "crs"):
+        value = getattr(result, attr, None)
+        if value not in (None, ""):
+            mapping[attr] = value
+    return _coordinate_from_mapping(mapping)
+
+
+def _coordinate_from_mapping(row: Mapping[str, Any]) -> PlaceCoordinate | None:
+    lat = row.get("lat", row.get("latitude"))
+    lon = row.get("lon", row.get("longitude"))
+    if lat is None or lon is None:
+        crs = str(row.get("crs") or "EPSG:4326").upper()
+        if crs != "EPSG:4326":
+            return None
+        lon = row.get("x")
+        lat = row.get("y")
+    if lat in (None, "") or lon in (None, ""):
+        return None
+    try:
+        return PlaceCoordinate(lat=float(lat), lon=float(lon))
+    except (TypeError, ValueError):
+        return None
+
+
+def _resource_value(resource: Any, key: str) -> Any:
+    if resource is None:
+        return None
+    if isinstance(resource, Mapping):
+        return resource.get(key)
+    return getattr(resource, key, None)
+
+
+def _resource_bool(resource: Any, key: str, *, default: bool) -> bool:
+    value = _resource_value(resource, key)
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() not in {"0", "false", "no", "off", ""}
+    return bool(value)
+
+
+def _resource_float(resource: Any, key: str, *, default: float | None) -> float | None:
+    value = _resource_value(resource, key)
+    if value in (None, ""):
+        return default
+    return float(value)
+
+
+def _coordinate_lat(coordinate: PlaceCoordinate) -> float:
+    return float(coordinate.lat)
+
+
+def _coordinate_lon(coordinate: PlaceCoordinate) -> float:
+    return float(coordinate.lon)
 
 
 def _geocoder_attr_mapping(result: Any) -> dict[str, Any]:

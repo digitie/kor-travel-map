@@ -12,6 +12,7 @@ from krtour_map.addressing import (
     AddressMatchReport,
     ReverseGeocoder,
     enrich_address_from_coordinate,
+    resolve_reverse_geocoder,
 )
 from krtour_map.dagster import (
     DagsterEtlExecution,
@@ -121,6 +122,11 @@ class NoticeLoadResources:
     items: Iterable[Any]
     session: Any | None = None
     reverse_geocoder: ReverseGeocoder | None = None
+    kraddr_geo_store: Any | None = None
+    kraddr_geo_database_path: str | None = None
+    kraddr_geo_store_kwargs: Mapping[str, Any] | None = None
+    kraddr_geo_fallback: bool = True
+    kraddr_geo_max_distance_m: float | None = 50.0
 
 
 NOTICE_DATASET_SPECS = (
@@ -667,11 +673,11 @@ def _resolve_notice_resources(
     if isinstance(resource, Mapping):
         items = resource.get("items")
         session = resource.get("session") or resource.get("feature_session")
-        reverse_geocoder = resource.get("reverse_geocoder")
+        reverse_geocoder = resolve_reverse_geocoder(resource)
     else:
         items = getattr(resource, "items", None)
         session = getattr(resource, "session", None) or getattr(resource, "feature_session", None)
-        reverse_geocoder = getattr(resource, "reverse_geocoder", None)
+        reverse_geocoder = resolve_reverse_geocoder(resource)
     if items is None:
         raise ValueError("notice ETL resource must provide items from provider public clients")
     return items, session, reverse_geocoder

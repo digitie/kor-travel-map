@@ -1,4 +1,4 @@
-# KASI API compatibility
+# KASI API 호환성
 
 `python-krtour-map`은 KASI 데이터를 직접 호출하는 별도 wrapper/adapter를 만들지 않고
 `python-kasi-api`의 public client와 typed model을 그대로 사용한다.

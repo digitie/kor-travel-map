@@ -23,9 +23,11 @@
 ## 주소와 geocoding
 
 좌표에서 주소를 얻는 reverse geocoding 자체는 `python-kraddr-base`의 책임이 아니다.
-`python-krtour-map`은 TripMate resource가 넘긴 reverse geocoder callable 결과를
-`Address`로 병합한다. provider별 지오코딩 wrapper를 만들지 않고, callable 내부에서
-`python-kraddr-geo` 또는 `python-vworld-api`의 안정된 public client를 직접 사용한다.
+`python-krtour-map`은 `python-kraddr-geo` 기반 reverse geocoder callable 결과를
+`Address`로 병합한다. TripMate가 callable을 직접 넘길 수도 있고, loader resource의
+`kraddr_geo_store` 또는 `kraddr_geo_database_path`로 이 라이브러리가 callable을 만들 수도
+있다. `python-vworld-api`는 이 라이브러리의 직접 provider가 아니며, VWorld fallback이
+필요하면 `python-kraddr-geo` store 설정에서 처리한다.
 
 법정동코드가 아닌 별도 주소 코드는 다음 기준으로 다룬다.
 
@@ -35,16 +37,16 @@
   보지 않는다. 원문/payload에는 남기고, 좌표 reverse geocoding으로 확정한 법정동코드만
   feature 주소에 저장한다.
 
-매칭 수준과 운영 리포트 기준은 [Address geocoding and match report](address-geocoding.md)를 따른다.
+매칭 수준과 운영 리포트 기준은 [주소 geocoding과 매칭 리포트](address-geocoding.md)를 따른다.
 
-## Categories 위치 결정
+## Category 위치 결정
 
 `python-kraddr-base`의 categories는 `python-krtour-map`으로 옮기지 않는다.
 
 이유:
 
 - category code는 feature 저장소만의 세부 구현이 아니라 TripMate, provider library, 주소/POI 정규화 코드가 함께 쓰는 공통 vocabulary다.
-- categories를 `python-krtour-map`으로 옮기면 `python-kma-api`, `python-vworld-api`, `python-krmois-api` 같은 provider/base 계층이 feature 저장소 라이브러리에 의존하게 되어 의존 방향이 뒤집힌다.
+- categories를 `python-krtour-map`으로 옮기면 `python-kma-api`, `python-kraddr-geo`, `python-krmois-api` 같은 provider/base 계층이 feature 저장소 라이브러리에 의존하게 되어 의존 방향이 뒤집힌다.
 - `python-krtour-map`은 category를 소유하지 않고 feature row의 category code를 저장하고 표시 helper를 재노출하는 역할만 맡는다.
 
-따라서 category seed, enum, label/path/icon helper의 canonical source는 계속 `python-kraddr-base`다. `python-krtour-map`과 TripMate 문서는 이 위치를 기준으로 링크하고, 별도 category 사본을 만들지 않는다.
+따라서 category seed, enum, label/path/icon helper의 표준 source는 계속 `python-kraddr-base`다. `python-krtour-map`과 TripMate 문서는 이 위치를 기준으로 링크하고, 별도 category 사본을 만들지 않는다.

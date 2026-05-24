@@ -1,4 +1,4 @@
-# KHOA 해수욕장정보 place ETL
+# KHOA 해수욕장정보 장소 ETL
 
 TripMate의 해수욕장 장소 feature는 `python-khoa-api`가 제공하는
 `KhoaClient.oceans_beach_info()` / `KhoaClient.iter_oceans_beach_info_pages()`를
@@ -7,7 +7,18 @@ TripMate의 해수욕장 장소 feature는 `python-khoa-api`가 제공하는
 typed model, pagination, raw payload 보존을 안정화한 뒤 이 라이브러리의 feature
 정규화로 연결한다.
 
-## Provider endpoint
+## 문서 정보
+
+| 항목 | 값 |
+| --- | --- |
+| provider | `python-khoa-api` |
+| `dataset_key` | `khoa_oceans_beach_info` |
+| `Feature.kind` | `place` |
+| `source_entity_type` | `beach` |
+| 상세 테이블 | `feature_place_details` |
+| 코드 entrypoint | `krtour_map.beaches` |
+
+## Provider 엔드포인트
 
 - 공공데이터포털 상세: <https://www.data.go.kr/data/15058519/openapi.do>
 - 요청 URL:
@@ -18,15 +29,15 @@ typed model, pagination, raw payload 보존을 안정화한 뒤 이 라이브러
 
 응답 row는 `python-khoa-api`의 `OceanBeachInfo` DTO로 변환한 뒤 사용한다.
 
-## Feature mapping
+## Feature 매핑
 
 `khoa_oceans_beach_info` dataset은 해수욕장을 `place` feature로 적재한다.
 
 - provider: `python-khoa-api`
 - dataset key: `khoa_oceans_beach_info`
-- source entity type: `beach`
+- `source_entity_type`: `beach`
 - source natural key: `시도|구군|정점명`
-- feature kind: `place`
+- `Feature.kind`: `place`
 - category: `python-kraddr-base`의 `TOURISM_NATURE_BEACH` (`01050100`)
 - marker icon: `beach`
 - marker color: `#0077B6`
@@ -43,9 +54,10 @@ typed model, pagination, raw payload 보존을 안정화한 뒤 이 라이브러
 - 전체 row: `source_records.raw_data`
 
 주소는 provider row에 시도/구군 수준만 있으므로 기본 `Address(address="시도 구군")`
-를 만들고, TripMate가 넘긴 `reverse_geocoder` callable이 있으면 좌표 기준
-법정동코드와 도로명/지번 주소를 보강한다. 역지오코딩 구현은 TripMate resource가
-`python-kraddr-geo` 또는 `python-vworld-api` public client를 직접 사용한다.
+를 만들고, `reverse_geocoder` callable 또는 `kraddr_geo_*` resource가 있으면 좌표 기준
+법정동코드와 도로명/지번 주소를 보강한다. 역지오코딩 구현은 `python-kraddr-geo`
+public API를 사용한다. VWorld fallback이 필요하면 `python-kraddr-geo` store 설정으로
+처리하고, 이 라이브러리는 `python-vworld-api`를 직접 로드하지 않는다.
 
 ## RustFS
 
@@ -55,7 +67,7 @@ TripMate가 `rustfs_store` resource를 넘긴 경우 `upload_feature_file_source
 상대 경로나 파일명처럼 내려받을 수 없는 값은 raw payload와 detail payload에만
 보존한다.
 
-## Dagster boundary
+## Dagster 경계
 
 실제 Dagster daemon, schedule, transaction commit/rollback은 TripMate가 담당한다.
 이 라이브러리는 아래 순수 loader body와 job spec만 제공한다.
@@ -70,7 +82,7 @@ TripMate가 `rustfs_store` resource를 넘긴 경우 `upload_feature_file_source
 순회한다. 운영 schedule은 1일 1회를 기본으로 잡고, 긴급 제한이 필요할 때만
 TripMate config에서 `max_pages`를 넘긴다.
 
-## DB schema
+## DB 스키마
 
 새 전용 table은 만들지 않는다. 기존 feature DB 계약으로 충분하다.
 

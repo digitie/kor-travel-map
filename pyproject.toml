@@ -44,6 +44,9 @@ kasi = [
 datagokr = [
   "python-datagokr-api @ git+https://github.com/digitie/python-datagokr-api.git@ef7d3ab6961d851777023e344feecf869a8c8635",
 ]
+geo = [
+  "python-kraddr-geo @ git+https://github.com/digitie/python-kraddr-geo.git@48506d59a54c829f34d7a659c4c3b880bd2944a6",
+]
 
 [tool.setuptools]
 package-dir = { "" = "src" }
@@ -69,7 +72,7 @@ warn_unused_ignores = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = [".", "src"]
+pythonpath = [".", "src", "packages/krtour-map-debug-ui/src"]
 addopts = "-ra"
 markers = [
   "integration: tests that touch an external database or provider",

@@ -1,8 +1,8 @@
-# Feature opening hours
+# Feature 운영시간
 
 이 문서는 Google Docs
 [`영업시간 DB 및 DTO 설계 가이드`](https://docs.google.com/document/d/1NMb-qB2I1BxRKrR8duAS28vr_PldzIf75Lvz-OlVU80/edit?tab=t.0)를
-feature 공통 자료로 반영한 canonical 설계다.
+feature 공통 자료로 반영한 표준 설계다.
 
 ## 적용 범위
 
@@ -61,7 +61,7 @@ TripMate 초기 통합을 위해 portable한 `duration_minutes` 컬럼을 기본
 특정 날짜의 영업 상태를 계산할 때는 `feature_special_days`를 먼저 확인하고,
 매칭되는 날짜가 있으면 `feature_opening_periods`의 정규 패턴을 무시한다.
 
-## Event feature와의 관계
+## 행사 feature와의 관계
 
 축제/공연/행사는 기간성 자체가 중요하므로 `feature_event_details`가 별도로
 `starts_on`, `ends_on`, `event_kind`, VisitKorea `content_id`를 가진다. 운영시간

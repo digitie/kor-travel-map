@@ -13,3 +13,6 @@ artifacts/
 .env
 .env.*
 !.env.example
+
+# Word/Office lock files
+~$*

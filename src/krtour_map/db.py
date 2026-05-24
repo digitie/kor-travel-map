@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from sqlalchemy import (
@@ -27,6 +27,13 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.types import UserDefinedType
 
+from krtour_map.addressing import (
+    AddressGeocoder,
+    ReverseGeocoder,
+    enrich_address_from_coordinate,
+    resolve_address_geocoder,
+    resolve_reverse_geocoder,
+)
 from krtour_map.ids import make_payload_hash
 from krtour_map.models import (
     AreaDetail,
@@ -47,6 +54,11 @@ from krtour_map.models import (
     SourceRecord,
     SpecialOpeningDay,
     WeatherValue,
+)
+from krtour_map.places import (
+    PlacePhoneSearcher,
+    enrich_place_phone,
+    resolve_place_phone_searchers,
 )
 
 metadata = MetaData()
@@ -855,6 +867,11 @@ def load_feature_rows(
     price_point_items: Iterable[PricePoint] = (),
     price_value_items: Iterable[PriceValue] = (),
     provider_sync_state_items: Iterable[ProviderSyncState] = (),
+    address_geocoder: AddressGeocoder | None = None,
+    reverse_geocoder: ReverseGeocoder | None = None,
+    geocoder_resource: Any | None = None,
+    place_phone_searchers: Iterable[PlacePhoneSearcher] = (),
+    place_enrichment_resource: Any | None = None,
 ) -> FeatureDbLoadResult:
     """Update-or-insert normalized feature rows into an open SQLAlchemy session.
 
@@ -864,9 +881,33 @@ def load_feature_rows(
     """
 
     source_record_rows = list(source_record_items)
-    feature_rows = list(feature_items)
     source_link_rows = list(source_link_items)
+    resolved_address_geocoder = address_geocoder or resolve_address_geocoder(geocoder_resource)
+    resolved_reverse_geocoder = reverse_geocoder or resolve_reverse_geocoder(geocoder_resource)
+    feature_rows = [
+        _enrich_feature_for_db_load(
+            feature,
+            address_geocoder=resolved_address_geocoder,
+            reverse_geocoder=resolved_reverse_geocoder,
+        )
+        for feature in feature_items
+    ]
     place_detail_rows = list(place_detail_items)
+    resolved_place_phone_searchers = tuple(place_phone_searchers) or resolve_place_phone_searchers(
+        place_enrichment_resource
+    )
+    if resolved_place_phone_searchers:
+        (
+            place_detail_rows,
+            place_phone_source_records,
+            place_phone_source_links,
+        ) = _enrich_place_details_for_db_load(
+            feature_rows,
+            place_detail_rows,
+            searchers=resolved_place_phone_searchers,
+        )
+        source_record_rows.extend(place_phone_source_records)
+        source_link_rows.extend(place_phone_source_links)
     event_detail_rows = list(event_detail_items)
     area_detail_rows = list(area_detail_items)
     route_detail_rows = list(route_detail_items)
@@ -1034,6 +1075,95 @@ def load_feature_rows(
         feature_files=len(feature_file_rows),
         provider_sync_states=len(provider_sync_state_rows),
     )
+
+
+def _enrich_feature_for_db_load(
+    feature: Feature,
+    *,
+    address_geocoder: AddressGeocoder | None,
+    reverse_geocoder: ReverseGeocoder | None,
+) -> Feature:
+    if address_geocoder is None and reverse_geocoder is None:
+        return feature
+
+    source_label, source_entity_id = _feature_enrichment_source(feature)
+    enrichment = enrich_address_from_coordinate(
+        address=feature.address,
+        coordinate=feature.coord,
+        raw={},
+        address_geocoder=address_geocoder,
+        reverse_geocoder=reverse_geocoder,
+        source_label=source_label,
+        source_entity_id=source_entity_id,
+    )
+    coord = enrichment.coordinate or feature.coord
+    if (
+        enrichment.address == feature.address
+        and coord == feature.coord
+        and enrichment.geocoded_address is None
+        and enrichment.geocoded_coordinate is None
+    ):
+        return feature
+
+    detail = dict(feature.detail or {})
+    address_enrichment = dict(detail.get("address_enrichment") or {})
+    address_enrichment["feature_db_load"] = asdict(enrichment.report)
+    if enrichment.geocoded_coordinate is not None:
+        address_enrichment["geocoded_coordinate"] = {
+            "latitude": enrichment.geocoded_coordinate.latitude,
+            "longitude": enrichment.geocoded_coordinate.longitude,
+        }
+    detail["address_enrichment"] = address_enrichment
+    return feature.model_copy(
+        update={
+            "address": enrichment.address,
+            "coord": coord,
+            "detail": detail,
+        }
+    )
+
+
+def _feature_enrichment_source(feature: Feature) -> tuple[str, str]:
+    if feature.raw_refs:
+        ref = feature.raw_refs[0]
+        return ref.dataset_key, ref.source_entity_id
+    return "feature_db_load", feature.feature_id
+
+
+def _enrich_place_details_for_db_load(
+    feature_rows: Iterable[Feature],
+    place_detail_rows: Iterable[PlaceDetail],
+    *,
+    searchers: Iterable[PlacePhoneSearcher],
+) -> tuple[list[PlaceDetail], list[SourceRecord], list[SourceLink]]:
+    feature_by_id = {feature.feature_id: feature for feature in feature_rows}
+    enriched_details: list[PlaceDetail] = []
+    source_records: list[SourceRecord] = []
+    source_links: list[SourceLink] = []
+    seen_detail_ids: set[str] = set()
+
+    for detail in place_detail_rows:
+        seen_detail_ids.add(detail.feature_id)
+        feature = feature_by_id.get(detail.feature_id)
+        if feature is None:
+            enriched_details.append(detail)
+            continue
+        result = enrich_place_phone(feature, detail, searchers=searchers)
+        enriched_details.append(result.place_detail)
+        source_records.extend(result.source_records)
+        source_links.extend(result.source_links)
+
+    for feature in feature_by_id.values():
+        if str(feature.kind) != "place" or feature.feature_id in seen_detail_ids:
+            continue
+        result = enrich_place_phone(feature, None, searchers=searchers)
+        if not result.added_phones:
+            continue
+        enriched_details.append(result.place_detail)
+        source_records.extend(result.source_records)
+        source_links.extend(result.source_links)
+
+    return enriched_details, source_records, source_links
 
 
 def _upsert_row(

@@ -1,14 +1,13 @@
 # Provider 계약
 
-## Canonical provider name
+## 표준 provider name 기준
 
-문서, DB, API 응답에는 canonical provider name만 사용합니다.
+문서, DB, API 응답에는 표준 provider name만 사용합니다.
 
 | Provider | 역할 |
 | --- | --- |
 | `python-kraddr-base` | 주소, 좌표, 카테고리 공통 타입 |
-| `python-kraddr-geo` | Juso/주소 TXT/PostGIS 주소점, reverse geocoding |
-| `python-vworld-api` | VWorld 검색, geocoder, 경계, OGC |
+| `python-kraddr-geo` | Juso/주소 TXT/PostGIS 주소점, geocoding/reverse geocoding, 필요 시 VWorld fallback |
 | `python-visitkorea-api` | KTO 관광지, 숙박, 행사/축제, 이미지, 증분 동기화 |
 | `python-krmois-api` | 지방행정 인허가 데이터. place feature의 1차 원천 |
 | `python-opinet-api` | 주유소와 유가 source |
@@ -19,10 +18,13 @@
 | `python-airkorea-api` | PM10, PM25, CAI, 예보/경보 |
 | `python-mcst-api` | 문화/여가/숙박/도서관 위치 데이터 |
 | `python-krforest-api` | 휴양림, 숲길, 국립공원, 산림 안전 |
-| `python-krheritage-api` | Korea Heritage Administration heritage, GIS area, media, and event public models |
+| `python-krheritage-api` | 국가유산청 유산, GIS 구역, media, event public model |
 | `data.go.kr-standard` | `python-krtour-map` 내부 bounded client가 직접 처리하는 공공데이터포털 표준데이터 5건 |
+| `kakao-local-api` | place feature 전화번호 보강용 Kakao Local keyword search |
+| `naver-search-api` | place feature 검색 보조용 Naver Search local. 공식 `telephone`은 빈 값일 수 있음 |
+| `google-places-api-new` | place feature 전화번호 보강용 Google Places Text Search(New) |
 
-`pykma`, `kma`, `opinet`, `krex` 같은 alias는 입력 편의로만 받아들이고 저장 전에 canonical name으로 바꿉니다.
+`pykma`, `kma`, `opinet`, `krex` 같은 alias는 입력 편의로만 받아들이고 저장 전에 표준 name으로 바꿉니다.
 
 ## Adapter 금지
 
@@ -40,11 +42,11 @@ TripMate 내부와 `python-krtour-map` 내부에 provider별 adapter/gateway/wra
 
 금지되는 경계:
 
-- 안정된 public API를 단순 전달하는 `KmaWrapper`, `VWorldAdapter`, `OpiNetGateway` 같은 중간 계층
+- 안정된 public API를 단순 전달하는 `KmaWrapper`, `GeoAdapter`, `OpiNetGateway` 같은 중간 계층
 - 기존 호출부 수정을 피하기 위한 장기 호환 alias/facade
 - provider별 예외와 응답 모델을 TripMate 안에서 다시 정의하는 임시 계층
 
-## Source role
+## `SourceRole` 기준
 
 `SourceRole`은 하나의 source row가 feature에 어떤 역할로 붙었는지 나타냅니다.
 
@@ -59,7 +61,7 @@ TripMate 내부와 `python-krtour-map` 내부에 provider별 adapter/gateway/wra
 | `media` | 이미지/미디어 원천 |
 | `weather_context` | 날씨/대기질/해양 context 원천 |
 
-## Dataset key
+## `dataset_key` 기준
 
 `dataset_key`는 provider 안의 수집 단위를 식별합니다.
 
@@ -88,22 +90,31 @@ VisitKorea 축제 source는 `python-visitkorea-api` public client의
 `iter_pages(client.search_festival, ...)`를 직접 사용한다. 일일 full scan은 기본적으로
 `max_pages`를 두지 않고 provider pagination이 끝날 때까지 순회한다.
 
-Weather source는 provider public client를 직접 호출한 뒤 `WeatherValue`로 정규화한다. `forecast_style`에는 관측/예보/지수/특보 성격을 남기고, KMA식 초단기/단기/중기 분류는 `timeline_bucket`에 둔다. 세부 mapping은 `docs/weather-feature-normalization.md`를 따른다.
+날씨 source는 provider public client를 직접 호출한 뒤 `WeatherValue`로 정규화한다. `forecast_style`에는 관측/예보/지수/특보 성격을 남기고, KMA식 초단기/단기/중기 분류는 `timeline_bucket`에 둔다. 세부 매핑은 `docs/weather-feature-normalization.md`를 따른다.
 
-Address/geocoding source도 같은 원칙을 따른다. `python-krtour-map`은 VWorld/Juso/주소점 호출
-wrapper가 아니며, TripMate가 `python-kraddr-geo` 또는 `python-vworld-api` public client를
-직접 사용하는 reverse geocoder callable을 resource로 넘긴다. 이 라이브러리는 그 결과를
-`kraddr.base.Address`와 `AddressCodeSet`으로 정규화하고, provider별 지역 코드는 원문에 보존하되
-feature 저장 컬럼에는 검증된 법정동코드만 반영한다. 세부 기준은
+Address/geocoding source도 같은 원칙을 따른다. `python-krtour-map`은 Juso/주소점 호출
+wrapper가 아니며, 주소/좌표 보강이 필요하면 `python-kraddr-geo`만 사용한다.
+TripMate가 geocoder callable을 넘기지 않아도 loader resource에 `kraddr_geo_store` 또는
+`kraddr_geo_database_path`를 제공하면 이 라이브러리가 feature 로딩 중 필요한 주소/좌표 보강을
+수행한다. VWorld fallback이 필요한 환경에서는 `python-kraddr-geo`의 store 설정으로 처리하며,
+`python-krtour-map`은 `python-vworld-api`를 직접 import하거나 provider로 저장하지 않는다.
+보강 결과는 `kraddr.base.Address`와 `AddressCodeSet`으로 정규화하고, provider별 지역 코드는
+원문에 보존하되 feature 저장 컬럼에는 검증된 법정동코드만 반영한다. 세부 기준은
 `docs/address-geocoding.md`를 따른다.
+
+장소 전화번호 보강 source는 `PlaceDetail.phones` 보강에만 제한적으로 사용한다. Kakao Local,
+Naver Search Local, Google Places Text Search(New) 검색 결과는 `PlaceSearchCandidate`로
+정규화하고, confidence 기준을 통과한 전화번호만 추가한다. 사용된 candidate는
+`source_records(dataset_key="place_phone_enrichment")`와
+`source_links(source_role="enrichment")`로 남긴다. 현재 범위는 전화번호이며, provider별 장기
+wrapper/gateway를 만들지 않는다. 세부 기준은 `docs/place-phone-enrichment.md`를 따른다.
 
 Feature/source/weather/price 저장소는 `python-krtour-map`의 DB 계약이다. TripMate는 별도 feature DB를 정의하지 않고 `krtour_map.db` schema와 함수를 import해 사용한다.
 
-MCST source uses canonical provider `python-mcst-api`. Dataset keys are the
-catalog slugs exposed by `mcst.get_api_catalog()` such as `cafe_bookstores`,
-`leisure_activity_facilities`, and `leisure_classes_csv`. TripMate should use the
-provider client directly, preferably the async facade aligned with
-`python-krheritage-api`:
+MCST source는 표준 provider `python-mcst-api`를 사용한다. Dataset key는
+`mcst.get_api_catalog()`가 노출하는 catalog slug를 사용한다. 예시는 `cafe_bookstores`,
+`leisure_activity_facilities`, `leisure_classes_csv`다. TripMate는 provider client를 직접
+사용하고, 가능하면 `python-krheritage-api`와 맞춘 async facade를 사용한다.
 
 ```python
 from mcst import McstClient, PROVIDER_NAME
@@ -112,10 +123,9 @@ async with McstClient.aio(service_keys={"cafe_bookstores": service_key}) as clie
     page = await client.culture.cafe_bookstores(num_of_rows=100)
 ```
 
-`python-krtour-map` stores `PROVIDER_NAME == "python-mcst-api"` in source rows and
-sync state, and does not create an `McstWrapper`, adapter, or gateway. Missing
-dataset methods, async pagination, raw payload preservation, or provider-specific
-errors must be added to `python-mcst-api` first.
+`python-krtour-map`은 source row와 sync state에 `PROVIDER_NAME == "python-mcst-api"`를
+저장하고, `McstWrapper`, adapter, gateway를 만들지 않는다. 누락된 dataset method, async
+pagination, raw payload 보존, provider-specific error는 `python-mcst-api`에서 먼저 추가한다.
 
 KRMOIS 인허가 raw/localdata row는 `python-krmois-api` source DB가 보존한다. 이 라이브러리는
 `python-krmois-api` public `PlaceRecord`를 직접 읽어 여행자에게 의미 있는 영업중 row만
@@ -124,28 +134,25 @@ KRMOIS 인허가 raw/localdata row는 `python-krmois-api` source DB가 보존한
 결과를 이용해 feature 삭제 작업을 실행한다. 세부 기준은
 `docs/krmois-license-feature-etl.md`를 따른다.
 
-Korea Heritage source uses canonical provider `python-krheritage-api`, even if a
-local workspace folder is named `python-kheritage-api`. Heritage natural keys use
-`ccbaKdcd-ccbaAsno-ccbaCtcd`. `search_list` rows create `place` or `area`
-features, `gis_spca` and `gis_3070426` enrich coordinates/boundaries, and
-`event_list` rows create `event` features. The provider package owns public
-clients, typed models, endpoint pagination, exceptions, and raw payload
-preservation; `python-krtour-map` consumes those public models directly and does
-not add a provider wrapper/adapter/gateway.
+국가유산 source는 로컬 workspace 폴더가 `python-kheritage-api`라는 이름이어도 표준
+provider `python-krheritage-api`를 사용한다. Heritage natural key는
+`ccbaKdcd-ccbaAsno-ccbaCtcd`다. `search_list` row는 `place` 또는 `area` feature를 만들고,
+`gis_spca`와 `gis_3070426`은 좌표/경계를 보강하며, `event_list` row는 `event` feature를 만든다.
+public client, typed model, endpoint pagination, exception, raw payload 보존은 provider package가
+소유한다. `python-krtour-map`은 그 public model을 직접 소비하고 provider wrapper/adapter/gateway를
+추가하지 않는다.
 
-The direct provider methods used by ETL are
-`HeritageClient.search.iter_all_details(...)`,
-`HeritageClient.heritage.iter_all_details(...)`,
-`HeritageClient.event.iter_months(...)`, and `HeritageClient.gis.spca(...)`.
-TripMate passes the client/session/resources to `python-krtour-map`; this
-library performs normalize/load work but does not own Dagster execution.
-Provider media models such as image, video, narration/audio, and document URLs are
-converted to `FeatureFileSource` here; RustFS upload/config/list logic is not kept
-in `python-krheritage-api`.
+ETL에서 직접 사용하는 provider method는 `HeritageClient.search.iter_all_details(...)`,
+`HeritageClient.heritage.iter_all_details(...)`, `HeritageClient.event.iter_months(...)`,
+`HeritageClient.gis.spca(...)`다. TripMate는 client/session/resource를 `python-krtour-map`에
+넘기고, 이 라이브러리는 normalize/load 작업만 수행한다. 실제 Dagster 실행은 TripMate가 소유한다.
+image, video, narration/audio, document URL 같은 provider media model은 이 라이브러리에서
+`FeatureFileSource`로 변환한다. RustFS upload/config/list 로직은 `python-krheritage-api`에 두지
+않는다.
 
 provider cursor와 실패 상태는 `ProviderSyncState(provider, dataset_key, sync_scope)` 단위로 저장합니다.
 
-## data.go.kr standard-data exception
+## data.go.kr 표준데이터 예외
 
 공공데이터포털 표준데이터 중 다음 5건은 별도 `python-*-api` 라이브러리로 분리하지 않고
 `krtour_map.standard_data` 내부의 bounded asyncio client와 ETL에서 처리합니다.
@@ -160,8 +167,8 @@ provider cursor와 실패 상태는 `ProviderSyncState(provider, dataset_key, sy
 | `standard_cultural_festivals` | `15013104` 전국문화축제표준데이터 | `event` |
 
 내장 client는 `StandardDataClient.aio()`로 생성하고, `config`, `catalog`, `client`, `etl`,
-`exceptions` 경계를 둡니다. Web debug UI는 `krtour_map.debug_ui`에 포함하되 stdlib 기반
-로컬 도구로 제한합니다. raw item은 `source_records.raw_data`에 보존하고, feature id는
+`exceptions` 경계를 둡니다. Web debug UI는 별도 `python-krtour-map-debug-ui` 패키지의
+stdlib 기반 로컬 도구로 제한합니다. raw item은 `source_records.raw_data`에 보존하고, feature id는
 provider=`data.go.kr-standard`, dataset key, source entity id, kind, category,
 legal dong code 조합으로 생성합니다.
 `standard_tourism_roads`는 `feature_route_details.route_type`에 `hiking_trail`,

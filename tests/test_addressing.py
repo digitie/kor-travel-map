@@ -4,8 +4,15 @@ from dataclasses import dataclass
 
 from kraddr.base import Address
 
-from krtour_map.addressing import enrich_address_from_coordinate
+from krtour_map.addressing import (
+    enrich_address_from_coordinate,
+    kraddr_geo_address_geocoder,
+    kraddr_geo_reverse_geocoder,
+    resolve_address_geocoder,
+    resolve_reverse_geocoder,
+)
 from krtour_map.models import Coordinate
+from krtour_map.providers import normalize_provider_name
 
 
 @dataclass(frozen=True)
@@ -15,6 +22,44 @@ class KrAddrReverseResult:
     road_name_code: str
     building_management_number: str
     postal_code: str
+
+
+class FakeKrAddrGeoStore:
+    def __init__(self) -> None:
+        self.calls: list[tuple[dict[str, object], bool]] = []
+        self.coord_calls: list[tuple[dict[str, object], bool]] = []
+
+    def get_coord(
+        self,
+        request: dict[str, object],
+        *,
+        fallback: bool = True,
+    ) -> list[dict[str, object]]:
+        self.coord_calls.append((request, fallback))
+        return [
+            {
+                "x": 126.9779,
+                "y": 37.5663,
+                "crs": "EPSG:4326",
+                "road_address": "서울특별시 중구 세종대로 110",
+                "legal_dong_code": "1114010300",
+            }
+        ]
+
+    def get_address(
+        self,
+        request: dict[str, object],
+        *,
+        fallback: bool = True,
+    ) -> KrAddrReverseResult:
+        self.calls.append((request, fallback))
+        return KrAddrReverseResult(
+            road_address="서울특별시 중구 세종대로 110",
+            legal_dong_code="1114010300",
+            road_name_code="111402005001",
+            building_management_number="1114010300100310000000001",
+            postal_code="04524",
+        )
 
 
 def test_enrich_address_from_coordinate_fills_legal_dong_code() -> None:
@@ -58,6 +103,80 @@ def test_enrich_address_accepts_kraddr_geo_reverse_result_object() -> None:
     assert result.address.road_name.effective_road_name_code is not None
     assert result.address.road_name.effective_road_name_code.code == "111402005001"
     assert result.report.match_level == "coordinate_legal_dong"
+
+
+def test_kraddr_geo_reverse_geocoder_uses_store_get_address() -> None:
+    store = FakeKrAddrGeoStore()
+    reverse_geocoder = kraddr_geo_reverse_geocoder(store=store, fallback=True)
+
+    result = enrich_address_from_coordinate(
+        address=Address(address="서울특별시 중구 세종대로 110"),
+        coordinate=Coordinate(lat=37.5663, lon=126.9779),
+        raw={},
+        reverse_geocoder=reverse_geocoder,
+        source_label="test_source",
+    )
+
+    assert result.address.legal_dong_code == "1114010300"
+    assert store.calls[0][0]["x"] == 126.9779
+    assert store.calls[0][0]["y"] == 37.5663
+    assert store.calls[0][1] is True
+
+
+def test_resolve_reverse_geocoder_from_kraddr_geo_store_resource() -> None:
+    store = FakeKrAddrGeoStore()
+    reverse_geocoder = resolve_reverse_geocoder(
+        {
+            "kraddr_geo_store": store,
+            "kraddr_geo_fallback": "false",
+            "kraddr_geo_max_distance_m": 120,
+        }
+    )
+
+    assert reverse_geocoder is not None
+    address = reverse_geocoder(Coordinate(lat=37.5663, lon=126.9779))
+    assert isinstance(address, Address)
+    assert address.legal_dong_code == "1114010300"
+    assert store.calls[0][0]["max_distance_m"] == 120.0
+    assert store.calls[0][1] is False
+
+
+def test_kraddr_geo_address_geocoder_fills_missing_coordinate() -> None:
+    store = FakeKrAddrGeoStore()
+    address_geocoder = kraddr_geo_address_geocoder(store=store, fallback=False)
+
+    result = enrich_address_from_coordinate(
+        address=Address(address="서울특별시 중구 세종대로 110"),
+        raw={},
+        address_geocoder=address_geocoder,
+        source_label="test_source",
+    )
+
+    assert result.coordinate is not None
+    assert result.coordinate.latitude == 37.5663
+    assert result.coordinate.longitude == 126.9779
+    assert result.address.legal_dong_code == "1114010300"
+    assert result.report.match_level == "address_geocode_legal_dong"
+    assert store.coord_calls[0][1] is False
+
+
+def test_resolve_address_geocoder_from_kraddr_geo_store_resource() -> None:
+    store = FakeKrAddrGeoStore()
+    address_geocoder = resolve_address_geocoder({"kraddr_geo_store": store})
+
+    assert address_geocoder is not None
+    coordinate = address_geocoder(Address(address="서울특별시 중구 세종대로 110"))
+    assert isinstance(coordinate, dict)
+    assert coordinate["x"] == 126.9779
+
+
+def test_vworld_is_not_a_direct_krtour_map_provider() -> None:
+    try:
+        normalize_provider_name("vworld")
+    except ValueError as exc:
+        assert "Unsupported provider" in str(exc)
+    else:  # pragma: no cover - defensive assertion.
+        raise AssertionError("vworld should not normalize as a direct provider")
 
 
 def test_enrich_address_converts_valid_sigungu_code_to_legal_dong_code() -> None:

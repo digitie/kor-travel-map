@@ -1,10 +1,10 @@
-# Debug fixture workflow
+# 디버그 fixture 흐름
 
 첨부 문서 `rest_api_debug_ui_fixture_testcase_final.docx`의 기준을 이 라이브러리에 맞게 정리한 문서입니다.
 
 ## 결론
 
-Web UI는 테스트 코드를 직접 생성하는 도구가 아니라 fixture JSON 생성기입니다. pytest는 공통 runner를 통해 `tests/fixtures/**/*.json`을 읽고 replay 기반 회귀 테스트를 수행합니다.
+웹 UI는 테스트 코드를 직접 생성하는 도구가 아니라 fixture JSON 생성기입니다. pytest는 공통 실행기를 통해 `tests/fixtures/**/*.json`을 읽고 replay 기반 회귀 테스트를 수행합니다.
 
 ## 패키지 분리
 
@@ -21,13 +21,17 @@ python-krtour-map/
     test_generated_fixtures.py
 
 python-krtour-map/
-  src/krtour_map/debug_ui.py  # stdlib local Web UI
+  packages/krtour-map-debug-ui/
+    pyproject.toml
+    src/krtour_map_debug_ui/
+      api.py
+      server.py
 ```
 
-`python-krtour-map`은 Streamlit에 의존하지 않습니다. 포함된 Debug UI는 stdlib HTTP server로
+`python-krtour-map`은 Streamlit에 의존하지 않습니다. 디버그 UI는 별도 패키지의 stdlib HTTP server로
 프론트엔드 `http://localhost:8600`, 백엔드 `http://localhost:8601/api/debug`를 띄우며
-`debug_api.handle()`을 호출하는 로컬 개발 도구입니다. Kakao map marker, Dagster 계약 기반 ETL
-수동 실행, RustFS 설정/목록 확인을 포함합니다.
+`krtour_map_debug_ui.api.handle()`을 호출하는 로컬 개발 도구입니다. Kakao map marker,
+Dagster 계약 기반 ETL 수동 실행, RustFS 설정/목록 확인을 포함합니다.
 
 ## DebugRun
 
@@ -71,7 +75,7 @@ tests/fixtures/{function_name}/{case_name}.json
 
 `api_key`, `Authorization`, `serviceKey`, `access_token`, `refresh_token` 등 민감정보는 저장 전에 `<REDACTED>`로 마스킹합니다.
 
-## Assertion mode
+## `assertion` 모드
 
 현재 구현:
 
@@ -82,12 +86,12 @@ tests/fixtures/{function_name}/{case_name}.json
 
 후속 후보:
 
-- custom assertion registry
+- 사용자 정의 assertion registry
 - diff UI
-- markdown report export
+- 마크다운 리포트 export
 - batch replay UI
 
-## pytest runner
+## pytest 실행기
 
 테스트 코드를 케이스마다 생성하지 않습니다.
 
@@ -99,4 +103,4 @@ def test_generated_fixture(path):
     replay_fixture(load_fixture(path), RUNNERS)
 ```
 
-외부 API를 호출하는 live test는 기본 pytest 경로에 넣지 않습니다.
+외부 API를 호출하는 라이브 테스트는 기본 pytest 경로에 넣지 않습니다.

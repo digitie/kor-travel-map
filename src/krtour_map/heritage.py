@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -12,6 +12,7 @@ from krtour_map.addressing import (
     AddressMatchReport,
     ReverseGeocoder,
     enrich_address_from_coordinate,
+    resolve_reverse_geocoder,
 )
 from krtour_map.dagster import (
     DagsterEtlExecution,
@@ -157,6 +158,11 @@ class KrHeritageFeatureLoadResources:
     rustfs_store: RustfsFileStore | None = None
     file_fetcher: FileFetcher | None = None
     reverse_geocoder: ReverseGeocoder | None = None
+    kraddr_geo_store: Any | None = None
+    kraddr_geo_database_path: str | None = None
+    kraddr_geo_store_kwargs: Mapping[str, Any] | None = None
+    kraddr_geo_fallback: bool = True
+    kraddr_geo_max_distance_m: float | None = 50.0
 
 
 def krheritage_natural_key(item: Any) -> str | None:
@@ -1145,7 +1151,9 @@ krheritage_event_full_scan_job_spec = EtlJobSpec(
 
 def _resolve_krheritage_resources(resource: Any) -> KrHeritageFeatureLoadResources:
     if isinstance(resource, KrHeritageFeatureLoadResources):
-        return resource
+        if resource.reverse_geocoder is not None:
+            return resource
+        return replace(resource, reverse_geocoder=resolve_reverse_geocoder(resource))
     if isinstance(resource, Mapping):
         return KrHeritageFeatureLoadResources(
             client=resource.get("client") or resource.get("krheritage_client"),
@@ -1154,7 +1162,7 @@ def _resolve_krheritage_resources(resource: Any) -> KrHeritageFeatureLoadResourc
             event_items=resource.get("event_items"),
             rustfs_store=resource.get("rustfs_store") or resource.get("feature_file_store"),
             file_fetcher=resource.get("file_fetcher"),
-            reverse_geocoder=resource.get("reverse_geocoder"),
+            reverse_geocoder=resolve_reverse_geocoder(resource),
         )
     return KrHeritageFeatureLoadResources(
         client=getattr(resource, "client", None)
@@ -1166,7 +1174,7 @@ def _resolve_krheritage_resources(resource: Any) -> KrHeritageFeatureLoadResourc
         rustfs_store=getattr(resource, "rustfs_store", None)
         or getattr(resource, "feature_file_store", None),
         file_fetcher=getattr(resource, "file_fetcher", None),
-        reverse_geocoder=getattr(resource, "reverse_geocoder", None),
+        reverse_geocoder=resolve_reverse_geocoder(resource),
     )
 
 

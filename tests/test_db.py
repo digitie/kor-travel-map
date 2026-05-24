@@ -50,6 +50,8 @@ from krtour_map.db import (
     provider_sync_state_to_row,
     route_detail_from_row,
     route_detail_to_row,
+    source_links,
+    source_records,
     special_opening_day_from_row,
     special_opening_day_to_row,
     weather_value_from_row,
@@ -75,6 +77,44 @@ from krtour_map.models import (
     SpecialOpeningDay,
     WeatherValue,
 )
+from krtour_map.places import KAKAO_LOCAL_PROVIDER, PlaceSearchCandidate
+
+
+class FakeKrAddrGeoStore:
+    def __init__(self) -> None:
+        self.coord_calls: list[dict[str, object]] = []
+        self.address_calls: list[tuple[dict[str, object], bool]] = []
+
+    def get_coord(
+        self,
+        request: dict[str, object],
+        *,
+        fallback: bool = True,
+    ) -> list[dict[str, object]]:
+        self.coord_calls.append(request)
+        return [
+            {
+                "x": 126.9779,
+                "y": 37.5663,
+                "crs": "EPSG:4326",
+                "road_address": "서울특별시 중구 세종대로 110",
+                "legal_dong_code": "1114010300",
+                "road_name_code": "111402005001",
+            }
+        ]
+
+    def get_address(
+        self,
+        request: dict[str, object],
+        *,
+        fallback: bool = True,
+    ) -> dict[str, object]:
+        self.address_calls.append((request, fallback))
+        return {
+            "road_address": "서울특별시 중구 세종대로 110",
+            "legal_dong_code": "1114010300",
+            "road_name_code": "111402005001",
+        }
 
 
 def test_feature_db_schema_is_owned_by_krtour_map() -> None:
@@ -384,6 +424,132 @@ def test_load_feature_rows_writes_feature_db_tables(sample_feature) -> None:
         assert route_count == 1
         assert point_count == 1
         assert file_count == 1
+    finally:
+        context.dispose()
+
+
+def test_load_feature_rows_can_enrich_place_phone_before_insert(sample_feature) -> None:
+    context = initialize_feature_db("sqlite+pysqlite:///:memory:")
+    feature = sample_feature.model_copy(
+        update={
+            "kind": "place",
+            "name": "카카오프렌즈 코엑스점",
+            "category": "tourist_attraction",
+        }
+    )
+
+    def fake_searcher(_: object) -> tuple[PlaceSearchCandidate, ...]:
+        return (
+            PlaceSearchCandidate(
+                provider=KAKAO_LOCAL_PROVIDER,
+                provider_place_id="26338954",
+                name="카카오프렌즈 코엑스점",
+                phone="02-6002-1880",
+                road_address_name=feature.address.display_address,
+                coord=feature.coord,
+                raw={"id": "26338954", "phone": "02-6002-1880"},
+                confidence=90,
+                match_method="kakao_keyword_phone",
+            ),
+        )
+
+    try:
+        with context.session_factory() as session:
+            result = load_feature_rows(
+                session,
+                feature_items=[feature],
+                place_phone_searchers=[fake_searcher],
+            )
+            session.commit()
+
+        with context.session_factory() as session:
+            detail = session.execute(
+                select(feature_place_details).where(
+                    feature_place_details.c.feature_id == feature.feature_id
+                )
+            ).mappings().one()
+            source_count = session.scalar(select(func.count()).select_from(source_records))
+            link_count = session.scalar(select(func.count()).select_from(source_links))
+
+        assert result.features == 1
+        assert result.place_details == 1
+        assert result.source_records == 1
+        assert result.source_links == 1
+        assert detail["phones"] == ["02-6002-1880"]
+        assert detail["payload"]["place_phone_enrichment"]["added_phones"] == ["02-6002-1880"]
+        assert source_count == 1
+        assert link_count == 1
+    finally:
+        context.dispose()
+
+
+def test_load_feature_rows_can_geocode_missing_coordinate_before_insert(sample_feature) -> None:
+    context = initialize_feature_db("sqlite+pysqlite:///:memory:")
+    store = FakeKrAddrGeoStore()
+    feature = sample_feature.model_copy(
+        update={
+            "coord": None,
+            "address": Address(address="서울특별시 중구 세종대로 110"),
+        }
+    )
+    try:
+        with context.session_factory() as session:
+            load_feature_rows(
+                session,
+                feature_items=[feature],
+                geocoder_resource={"kraddr_geo_store": store},
+            )
+            session.commit()
+
+        with context.session_factory() as session:
+            row = session.execute(
+                select(features).where(features.c.feature_id == feature.feature_id)
+            )
+            stored = row.mappings().one()
+
+        assert store.coord_calls[0]["query"] == "서울특별시 중구 세종대로 110"
+        assert float(stored["longitude"]) == 126.9779
+        assert float(stored["latitude"]) == 37.5663
+        assert stored["legal_dong_code"] == "1114010300"
+        report = stored["detail"]["address_enrichment"]["feature_db_load"]
+        assert report["code_source"] == "coordinate_reverse_geocode"
+        assert "coordinate geocoded from address text" in report["notes"]
+    finally:
+        context.dispose()
+
+
+def test_load_feature_rows_can_reverse_geocode_coordinate_before_insert(sample_feature) -> None:
+    context = initialize_feature_db("sqlite+pysqlite:///:memory:")
+    store = FakeKrAddrGeoStore()
+    feature = sample_feature.model_copy(
+        update={
+            "address": Address(address="서울특별시 중구 세종대로 110"),
+        }
+    )
+    try:
+        with context.session_factory() as session:
+            load_feature_rows(
+                session,
+                feature_items=[feature],
+                geocoder_resource={
+                    "kraddr_geo_store": store,
+                    "kraddr_geo_fallback": "false",
+                },
+            )
+            session.commit()
+
+        with context.session_factory() as session:
+            row = session.execute(
+                select(features).where(features.c.feature_id == feature.feature_id)
+            )
+            stored = row.mappings().one()
+
+        assert store.address_calls[0][0]["x"] == feature.coord.longitude
+        assert store.address_calls[0][1] is False
+        assert stored["legal_dong_code"] == "1114010300"
+        assert stored["detail"]["address_enrichment"]["feature_db_load"]["match_level"] == (
+            "coordinate_legal_dong"
+        )
     finally:
         context.dispose()
 

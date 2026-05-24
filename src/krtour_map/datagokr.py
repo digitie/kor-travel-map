@@ -14,6 +14,7 @@ from krtour_map.addressing import (
     AddressMatchReport,
     ReverseGeocoder,
     enrich_address_from_coordinate,
+    resolve_reverse_geocoder,
 )
 from krtour_map.dagster import (
     DagsterEtlExecution,
@@ -200,6 +201,11 @@ class DataGoKrStandardLoadResources:
     client: Any
     session: Any | None = None
     reverse_geocoder: ReverseGeocoder | None = None
+    kraddr_geo_store: Any | None = None
+    kraddr_geo_database_path: str | None = None
+    kraddr_geo_store_kwargs: Mapping[str, Any] | None = None
+    kraddr_geo_fallback: bool = True
+    kraddr_geo_max_distance_m: float | None = 50.0
 
 
 def collect_datagokr_standard_features(
@@ -1055,11 +1061,11 @@ def _resolve_datagokr_resources(
     if isinstance(resource, Mapping):
         client = resource.get("client") or resource.get("datagokr_client")
         session = resource.get("session") or resource.get("feature_session")
-        reverse_geocoder = resource.get("reverse_geocoder")
+        reverse_geocoder = resolve_reverse_geocoder(resource)
     else:
         client = getattr(resource, "client", None) or getattr(resource, "datagokr_client", None)
         session = getattr(resource, "session", None) or getattr(resource, "feature_session", None)
-        reverse_geocoder = getattr(resource, "reverse_geocoder", None)
+        reverse_geocoder = resolve_reverse_geocoder(resource)
         if client is None:
             client = resource
     if client is None:

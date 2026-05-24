@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -13,6 +13,7 @@ from krtour_map.addressing import (
     AddressMatchReport,
     ReverseGeocoder,
     enrich_address_from_coordinate,
+    resolve_reverse_geocoder,
 )
 from krtour_map.dagster import (
     DagsterEtlExecution,
@@ -119,6 +120,11 @@ class StandardDataLoadResources:
     session: Any | None = None
     items: Iterable[Mapping[str, Any]] | None = None
     reverse_geocoder: ReverseGeocoder | None = None
+    kraddr_geo_store: Any | None = None
+    kraddr_geo_database_path: str | None = None
+    kraddr_geo_store_kwargs: Mapping[str, Any] | None = None
+    kraddr_geo_fallback: bool = True
+    kraddr_geo_max_distance_m: float | None = 50.0
 
 
 def collect_standard_data_features(
@@ -980,19 +986,21 @@ def _route_type(record: Mapping[str, Any]) -> str:
 
 def _resolve_standard_data_resources(resource: Any) -> StandardDataLoadResources:
     if isinstance(resource, StandardDataLoadResources):
-        return resource
+        if resource.reverse_geocoder is not None:
+            return resource
+        return replace(resource, reverse_geocoder=resolve_reverse_geocoder(resource))
     if isinstance(resource, Mapping):
         return StandardDataLoadResources(
             client=resource.get("client"),
             session=resource.get("session") or resource.get("db_session"),
             items=resource.get("items") if isinstance(resource.get("items"), Iterable) else None,
-            reverse_geocoder=resource.get("reverse_geocoder"),
+            reverse_geocoder=resolve_reverse_geocoder(resource),
         )
     return StandardDataLoadResources(
         client=getattr(resource, "client", None),
         session=getattr(resource, "session", None) or getattr(resource, "db_session", None),
         items=getattr(resource, "items", None),
-        reverse_geocoder=getattr(resource, "reverse_geocoder", None),
+        reverse_geocoder=resolve_reverse_geocoder(resource),
     )
 
 

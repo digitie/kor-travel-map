@@ -1,15 +1,15 @@
-# Feature files and RustFS
+# Feature 파일과 RustFS
 
 이미지, 문서, provider 첨부파일 같은 바이너리 데이터는 RustFS에 저장한다. feature DB에는
 파일 자체를 넣지 않고, RustFS 객체를 찾기 위한 메타데이터만 저장한다.
 
 ## 저장 원칙
 
-- storage backend는 `rustfs`를 canonical 값으로 사용한다.
+- storage backend는 `rustfs`를 표준 값으로 사용한다.
 - feature 하나에는 여러 이미지/파일이 붙을 수 있으므로 1:N 관계인 `feature_files`를 사용한다.
 - `features.detail`에는 provider 원문에서 온 이미지 URL을 참고용으로 남길 수 있지만, 앱에서 사용할 파일은 `feature_files`의 RustFS object metadata를 기준으로 조회한다.
 - TripMate는 RustFS client/resource, bucket, 공개 URL 정책, transaction commit/rollback을 주입한다.
-- 다운로드, checksum, object key 생성, RustFS 업로드, `FeatureFile` DTO 생성은 이 라이브러리의 helper를 사용한다.
+- 다운로드, checksum, object key 생성, RustFS 업로드, `FeatureFile` DTO 생성은 이 라이브러리의 헬퍼를 사용한다.
 
 ## DTO
 
@@ -29,10 +29,10 @@
 - `provider`, `dataset_key`, `source_record_key`: source trace 연결
 - `payload`: provider별 부가 메타데이터
 
-## RustFS 업로드 helper
+## RustFS 업로드 헬퍼
 
-`RustfsFileStore`는 S3-compatible `put_object` client를 받아 사용한다. Boto3-style keyword call과
-MinIO-style positional call을 모두 지원한다.
+`RustfsFileStore`는 S3 호환 `put_object` client를 받아 사용한다. Boto3 방식의 keyword call과
+MinIO 방식의 positional call을 모두 지원한다.
 
 ```python
 from krtour_map.files import FeatureFileSource, RustfsFileStore, upload_feature_file_sources_to_rustfs
@@ -60,11 +60,11 @@ files = upload_feature_file_sources_to_rustfs(
 )
 ```
 
-## VisitKorea festival images
+## VisitKorea 축제 이미지
 
-VisitKorea festival ETL은 `first_image`, `first_image2`를 `FeatureFileSource`로 추출한다.
+VisitKorea 축제 ETL은 `first_image`, `first_image2`를 `FeatureFileSource`로 추출한다.
 DB 적재 시 `RustfsFileStore`를 넘기면 이미지를 다운로드해서 RustFS에 올린 뒤 `feature_files`에
-metadata를 저장한다.
+메타데이터를 저장한다.
 
 Korea Heritage ETL은 `python-krheritage-api`의 media model 관례를 이 라이브러리로 가져와
 `MediaImage.image_url`, `MediaVideo.video_url`, `Narration.audio_url`, `fileUrl`/PDF류 문서를
@@ -85,9 +85,9 @@ result = load_visitkorea_festival_events(resources, run)
 RustFS resource를 넘기지 않으면 이미지 URL은 수집 결과의 `feature_file_sources`에만 남고,
 `feature_files` row는 생성하지 않는다. 운영 ETL에서는 RustFS resource를 주입하는 것을 기본으로 한다.
 
-## RustFS config and debug UI
+## RustFS 설정과 디버그 UI
 
-`krtour_map.rustfs`는 TripMate와 공유할 수 있는 설정/presign/list helper를 제공한다.
+`krtour_map.rustfs`는 TripMate와 공유할 수 있는 설정/presign/list 헬퍼를 제공한다.
 기본 bucket은 TripMate 로컬 compose와 같은 `tripmate-media`다.
 
 설정 파일 기본 경로:
@@ -96,7 +96,7 @@ RustFS resource를 넘기지 않으면 이미지 URL은 수집 결과의 `featur
 .krtour-map/rustfs.toml
 ```
 
-주요 env:
+주요 환경변수:
 
 ```bash
 KRTOUR_MAP_RUSTFS_ENDPOINT_URL=http://127.0.0.1:19000
@@ -108,8 +108,8 @@ KRTOUR_MAP_RUSTFS_SECRET_ACCESS_KEY=tripmate-dev-secret-change-me
 ```
 
 `TRIPMATE_RUSTFS_*`, `RUSTFS_ACCESS_KEY`, `RUSTFS_SECRET_KEY`도 fallback으로 읽는다.
-로컬 Debug UI(`http://localhost:8600`)는 설정 파일을 수정하고, signed S3 list call로 bucket
-object 목록을 확인하며, RustFS console 링크를 노출한다.
+별도 `python-krtour-map-debug-ui` 패키지의 로컬 디버그 UI(`http://localhost:8600`)는 설정 파일을
+수정하고, signed S3 list call로 bucket object 목록을 확인하며, RustFS console 링크를 노출한다.
 
 로컬 RustFS는 다음 compose로 실행한다.
 

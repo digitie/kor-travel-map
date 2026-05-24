@@ -6,7 +6,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-from krtour_map.debug_api import handle
+from krtour_map_debug_ui.api import handle
 
 DEFAULT_DEBUG_UI_HOST = "127.0.0.1"
 DEFAULT_DEBUG_API_HOST = "127.0.0.1"

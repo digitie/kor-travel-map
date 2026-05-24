@@ -1,4 +1,4 @@
-# WSL ext4 workflow
+# WSL ext4 작업 흐름
 
 이 저장소의 기본 작업 위치는 WSL2 내부 ext4 파일시스템이다. Windows NTFS 경로는 최종
 결과를 확인하거나 다른 Windows 도구가 읽을 수 있도록 export/sync하는 대상일 뿐이다.

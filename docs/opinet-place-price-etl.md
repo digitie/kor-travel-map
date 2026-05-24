@@ -1,8 +1,19 @@
-# OpiNet place and price ETL
+# OpiNet 장소/가격 ETL
 
 OpiNet 주유소/충전소 데이터는 장소 정보와 가격 시계열을 분리해서 저장한다. 이 라이브러리는
 provider 호출 wrapper를 만들지 않고, `python-opinet-api`의 안정된 `StationDetail` 또는
 `NormalizedFuelStationDetail` typed model을 직접 받아 feature DB 계약으로 변환한다.
+
+## 문서 정보
+
+| 항목 | 값 |
+| --- | --- |
+| provider | `python-opinet-api` |
+| `dataset_key` | `opinet_fuel_station_details` |
+| `Feature.kind` | `place`와 `PricePoint`/`PriceValue` |
+| `source_entity_type` | `fuel_station` |
+| 상세 테이블 | `feature_place_details`, `price_points`, `price_values` |
+| 코드 entrypoint | `krtour_map.opinet` |
 
 ## 변환 계약
 

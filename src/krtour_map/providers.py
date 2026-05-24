@@ -4,7 +4,6 @@ CANONICAL_PROVIDER_NAMES: frozenset[str] = frozenset(
     {
         "python-kraddr-base",
         "python-kraddr-geo",
-        "python-vworld-api",
         "python-visitkorea-api",
         "python-krmois-api",
         "python-opinet-api",
@@ -18,6 +17,9 @@ CANONICAL_PROVIDER_NAMES: frozenset[str] = frozenset(
         "python-krforest-api",
         "python-krheritage-api",
         "data.go.kr-standard",
+        "google-places-api-new",
+        "kakao-local-api",
+        "naver-search-api",
         "manual",
         "system",
     }
@@ -49,13 +51,18 @@ LEGACY_PROVIDER_ALIASES: dict[str, str] = {
     "pykrheritage": "python-krheritage-api",
     "pykrmois": "python-krmois-api",
     "pyopinet": "python-opinet-api",
-    "pyvworld": "python-vworld-api",
     "datagokr-standard": "data.go.kr-standard",
     "data-go-kr-standard": "data.go.kr-standard",
     "data.go.kr.standard": "data.go.kr-standard",
     "standard-data": "data.go.kr-standard",
+    "google-places": "google-places-api-new",
+    "google-places-new": "google-places-api-new",
+    "kakao": "kakao-local-api",
+    "kakao-local": "kakao-local-api",
+    "naver": "naver-search-api",
+    "naver-local": "naver-search-api",
+    "naver-search": "naver-search-api",
     "visitkorea": "python-visitkorea-api",
-    "vworld": "python-vworld-api",
     "python-kheritage-api": "python-krheritage-api",
 }
 

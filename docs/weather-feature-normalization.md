@@ -1,6 +1,6 @@
-# Weather feature normalization
+# 날씨 feature 정규화
 
-Weather feature는 KMA의 시간축을 기준으로 여러 provider의 날씨성 데이터를 `python-krtour-map`의 `WeatherValue` 계약과 feature DB에 저장한다. TripMate는 별도 feature DB를 만들지 않고 이 라이브러리의 DB schema와 함수를 import해 사용한다. provider 호출은 각 `python-*-api`의 안정된 public client와 typed model을 직접 사용하고, TripMate나 `python-krtour-map` 안에 provider별 wrapper/adapter/gateway를 새로 만들지 않는다.
+날씨 feature는 KMA의 시간축을 기준으로 여러 provider의 날씨성 데이터를 `python-krtour-map`의 `WeatherValue` 계약과 feature DB에 저장한다. TripMate는 별도 feature DB를 만들지 않고 이 라이브러리의 DB schema와 함수를 import해 사용한다. provider 호출은 각 `python-*-api`의 안정된 public client와 typed model을 직접 사용하고, TripMate나 `python-krtour-map` 안에 provider별 wrapper/adapter/gateway를 새로 만들지 않는다.
 
 ## 기준 축
 
@@ -22,7 +22,7 @@ Weather feature는 KMA의 시간축을 기준으로 여러 provider의 날씨성
 
 ## Provider별 1차 매핑
 
-| provider library | source model | domain | forecast_style | timeline_bucket | 검토 포인트 |
+| provider 라이브러리 | 원천 모델 | 도메인 | `forecast_style` | `timeline_bucket` | 검토 포인트 |
 | --- | --- | --- | --- | --- | --- |
 | `python-kma-api` | `ForecastItem`, `ForecastTimepoint`, `MidForecastItem` | `kma_ultra_short_nowcast`, `kma_ultra_short_forecast`, `kma_short_forecast`, `kma_mid_forecast` | `nowcast`, `ultra_short`, `short`, `mid` | KMA endpoint에 맞춤 | `base_at`, `forecast_at`, DFS `nx/ny`, `regId/stnId`, category code와 단위 보존 |
 | `python-krforest-api` | `MountainWeather` | `forest_mountain_weather` | `observed` | `ultra_short` | 산악 관측소 좌표/고도, 관측시각 raw key, 강수/풍속/기압 단위, feature와 관측소 거리 |
@@ -30,11 +30,11 @@ Weather feature는 KMA의 시간축을 기준으로 여러 provider의 날씨성
 | `python-krex-api` | `RestAreaWeather` | `rest_area_weather` | `observed` | `ultra_short` | `observed_at`, 휴게소 `unit_code`, 노선/방향, 측정소명, `-99` sentinel, 좌표계 |
 | `python-krairport-api` | `WorldWeather` | `airport_weather` | `observed` | `ultra_short` | 도착/출발 상대 공항의 도시 날씨인지 국내 공항 자체 날씨인지 구분, 항공편 시간과 날씨 관측시각 분리 |
 
-## Canonical metric key
+## 표준 metric key 기준
 
-KMA category code를 우선 canonical metric으로 사용한다.
+KMA category code를 우선 표준 metric으로 사용한다.
 
-| canonical metric_key | 의미 | 단위 예시 | source examples |
+| 표준 `metric_key` | 의미 | 단위 예시 | 원천 예시 |
 | --- | --- | --- | --- |
 | `T1H` | 현재 기온 | `deg_c` | KMA 초단기실황, KREX `temperature`, KRAirport `temperature`, KRForest 온도 |
 | `TMP` | 예보 기온 | `deg_c` | KMA 단기예보 |
@@ -47,24 +47,24 @@ KMA category code를 우선 canonical metric으로 사용한다.
 | `FIRE_RISK` | 산불위험 | grade/code | KRForest 산불위험 |
 | `LANDSLIDE_RISK` | 산사태 위험 | grade/code | KRForest 산사태 예측 |
 
-provider 원래 필드는 `source_metric_key`, `source_metric_name`, `payload`에 보존한다. canonical metric으로 확정하기 애매한 값은 `metric_key`를 provider domain 안에서만 안정적인 snake/code로 두고, mapping을 문서화한 뒤 올린다.
+provider 원래 필드는 `source_metric_key`, `source_metric_name`, `payload`에 보존한다. 표준 metric으로 확정하기 애매한 값은 `metric_key`를 provider domain 안에서만 안정적인 snake/code로 두고, 매핑을 문서화한 뒤 올린다.
 
-## DB schema
+## DB 스키마
 
-`python-krtour-map`이 소유하는 `feature_weather_values` table은 아래 weather normalization 컬럼을 가진다. TripMate 문서와 코드에는 이 table의 복제본이나 별도 feature weather table을 만들지 않는다.
+`python-krtour-map`이 소유하는 `feature_weather_values` table은 아래 날씨 정규화 컬럼을 가진다. TripMate 문서와 코드에는 이 table의 복제본이나 별도 feature weather table을 만들지 않는다.
 
 - `timeline_bucket text null`: `ultra_short`, `short`, `mid`. 신규 write는 반드시 채운다.
 - `valid_from timestamptz null`, `valid_until timestamptz null`: 특보, 중기 일 단위, 지수처럼 구간 유효성이 있는 row를 보존한다. 단일 시점 row는 `valid_at`을 계속 대표 시각으로 쓴다.
 - `source_metric_key text null`, `source_metric_name text null`: provider 원천 필드명을 추적한다.
 - `normalization_version text null`: provider별 mapping 규칙 버전. 예: `weather-feature-v1`.
 
-권장 index:
+권장 인덱스:
 
 - `(feature_id, timeline_bucket, valid_at)`
 - `brin(valid_from)`
 - `brin(valid_until)`
 
-Unique key는 `feature_id + provider + weather_domain + forecast_style + metric_key + issued_at + valid_at + observed_at`이다. `timeline_bucket`은 분류 결과라서 중복 판정의 1차 기준에 넣지 않는다.
+고유 키는 `feature_id + provider + weather_domain + forecast_style + metric_key + issued_at + valid_at + observed_at`이다. `timeline_bucket`은 분류 결과라서 중복 판정의 1차 기준에 넣지 않는다.
 
 ## Provider 검토 체크리스트
 

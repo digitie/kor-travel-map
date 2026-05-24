@@ -2,7 +2,7 @@
 
 ## 경계
 
-TripMate는 feature DB를 별도로 만들지 않는다. 지도 feature, source trace, weather/price 값, provider sync state는 `python-krtour-map`의 DTO, DB schema, helper 함수를 기준으로 저장하고 조회한다.
+TripMate는 feature DB를 별도로 만들지 않는다. 지도 feature, source trace, weather/price 값, provider sync state는 `python-krtour-map`의 DTO, DB 스키마, helper 함수를 기준으로 저장하고 조회한다.
 
 TripMate가 맡는 책임:
 
@@ -14,15 +14,15 @@ TripMate가 맡는 책임:
 `python-krtour-map`이 맡는 책임:
 
 - `Feature`, `SourceRecord`, `SourceLink`, `WeatherValue`, `PricePoint`, `ProviderSyncState` DTO
-- `krtour_map.db`의 feature/source/weather/price DB schema
-- provider canonical name과 alias 정규화
+- `krtour_map.db`의 feature/source/weather/price DB 스키마
+- 표준 provider name과 alias 정규화
 - feature/source ID 생성
 - provider typed model을 feature 계약으로 바꾸는 순수 함수
 - debug fixture 저장과 pytest replay helper
 
 TripMate 문서에는 TripMate 제품 DB, API, Admin, 운영 결정을 남기고, feature DB column/table 세부 정의는 이 라이브러리 문서를 canonical로 링크한다.
 
-TripMate의 feature 중심 문서는 [Feature model](feature-model.md)과 [TripMate feature docs migration](tripmate-feature-docs-migration.md)으로 이관한다. TripMate 쪽에는 사용자, 여행계획, POI 제품 문서와 이 라이브러리로 향하는 링크만 남긴다.
+TripMate의 feature 중심 문서는 [Feature 모델 기준](feature-model.md)과 [TripMate feature 문서 이관](tripmate-feature-docs-migration.md)으로 이관한다. TripMate 쪽에는 사용자, 여행계획, POI 제품 문서와 이 라이브러리로 향하는 링크만 남긴다.
 
 ## 구현 순서
 
@@ -32,7 +32,7 @@ TripMate의 feature 중심 문서는 [Feature model](feature-model.md)과 [TripM
 4. TripMate API는 feature DB에서 필요한 값을 읽어 사용자/여행계획/POI 응답에 조립한다.
 5. 의미 있는 provider 응답은 `save_fixture`로 저장하고 pytest replay를 추가한다.
 
-## Event ETL 예시
+## 행사 ETL 예시
 
 VisitKorea 축제 ETL은 TripMate가 provider client와 Dagster 실행 자원을 주입하고,
 `python-krtour-map`의 loader/job spec을 호출하는 방식으로 연결한다.
@@ -46,7 +46,7 @@ result = visitkorea_festival_full_scan_job_spec.loader(visitkorea_client, run)
 loader 내부에서는 `iter_pages(client.search_festival, ...)`를 사용해 모든 페이지를 순회한다.
 TripMate schedule은 이 job spec을 기준으로 1일 1회 실행한다.
 
-## Korea Heritage ETL 예시
+## 국가유산 ETL 예시
 
 TripMate는 `python-krheritage-api` public client/model을 resource로 넘기고,
 `python-krtour-map`의 loader가 `place`, `area`, `event` feature로 정리한다.
@@ -62,13 +62,36 @@ heritage_result = krheritage_heritage_full_scan_job_spec.loader(resources, run)
 event_result = krheritage_event_full_scan_job_spec.loader(resources, run)
 ```
 
-TripMate는 feature DB session, RustFS store, file fetcher, reverse geocoder를 resource로
-주입하고 commit/rollback과 schedule을 관리한다. heritage place/area full scan은 1주일 1회,
+TripMate는 feature DB session, RustFS store, file fetcher, reverse geocoder 또는 `kraddr_geo_*`
+resource를 주입하고 commit/rollback과 schedule을 관리한다. heritage place/area full scan은 1주일 1회,
 heritage event full scan은 1일 1회 실행한다.
 
-## Weather 예시
+## Feature DB 적재 geocoding
 
-## Dagster boundary
+ETL 정규화 단계에서 좌표나 법정동코드가 비어 있으면 TripMate는 DB 적재 helper에
+`geocoder_resource`를 넘길 수 있다.
+
+```python
+from krtour_map.db import load_feature_rows
+
+load_feature_rows(
+    session,
+    feature_items=feature_items,
+    source_record_items=source_records,
+    geocoder_resource={
+        "kraddr_geo_database_path": settings.kraddr_geo_database_path,
+        "kraddr_geo_store_kwargs": settings.kraddr_geo_store_kwargs,
+    },
+)
+```
+
+`python-krtour-map`은 이 resource로 `python-kraddr-geo` geocoding/reverse geocoding을 수행한다.
+`python-vworld-api`는 직접 로드하지 않는다. 필요 시 VWorld fallback 설정은
+`python-kraddr-geo` store kwargs에 둔다.
+
+## 날씨 예시
+
+## Dagster 경계
 
 API 수집 후 feature/source/weather/price로 가공하는 run context, job spec, logical time/config helper는 `krtour_map.dagster`를 사용한다. TripMate는 실제 Dagster process, `Definitions`, schedule 실행, DB session 주입, 실행 로그와 알림만 담당한다.
 

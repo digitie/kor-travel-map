@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from krtour_map.debug_api import handle
-from krtour_map.debug_ui import render_debug_ui_html
+from krtour_map_debug_ui.api import handle
+from krtour_map_debug_ui.server import render_debug_ui_html
 
 
 def _database_url(path: Path) -> str:

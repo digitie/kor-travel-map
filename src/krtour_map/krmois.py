@@ -13,6 +13,7 @@ from krtour_map.addressing import (
     AddressMatchReport,
     ReverseGeocoder,
     enrich_address_from_coordinate,
+    resolve_reverse_geocoder,
 )
 from krtour_map.dagster import (
     DagsterEtlExecution,
@@ -489,6 +490,11 @@ class KrmoisLicenseFeatureLoadResources:
     feature_session: Any | None = None
     file_client: Any | None = None
     reverse_geocoder: ReverseGeocoder | None = None
+    kraddr_geo_store: Any | None = None
+    kraddr_geo_database_path: str | None = None
+    kraddr_geo_store_kwargs: Mapping[str, Any] | None = None
+    kraddr_geo_fallback: bool = True
+    kraddr_geo_max_distance_m: float | None = 50.0
 
 
 def collect_krmois_license_features(
@@ -1154,7 +1160,7 @@ def _resolve_krmois_resources(
         )
         feature_session = resource.get("feature_session") or resource.get("session")
         file_client = resource.get("file_client") or resource.get("krmois_file_client")
-        reverse_geocoder = resource.get("reverse_geocoder")
+        reverse_geocoder = resolve_reverse_geocoder(resource)
     else:
         source_db_session = getattr(resource, "source_db_session", None) or getattr(
             resource,
@@ -1171,7 +1177,7 @@ def _resolve_krmois_resources(
             "krmois_file_client",
             None,
         )
-        reverse_geocoder = getattr(resource, "reverse_geocoder", None)
+        reverse_geocoder = resolve_reverse_geocoder(resource)
     if source_db_session is None:
         raise ValueError("KRMOIS ETL resource must provide source_db_session")
     return source_db_session, feature_session, file_client, reverse_geocoder

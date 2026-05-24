@@ -12,9 +12,6 @@ from pathlib import Path
 from typing import Any
 
 from kraddr.base import mapbox_maki_icon_or_none
-from sqlalchemy import Select, delete, func, or_, select
-from sqlalchemy.exc import SQLAlchemyError
-
 from krtour_map.dagster import DagsterEtlRun, parse_logical_datetime
 from krtour_map.db import (
     area_detail_from_row,
@@ -73,6 +70,8 @@ from krtour_map.standard_data import (
     standard_data_full_scan_job_specs,
     standard_dataset_specs,
 )
+from sqlalchemy import Select, delete, func, or_, select
+from sqlalchemy.exc import SQLAlchemyError
 
 DEFAULT_DATABASE_URL = "sqlite+pysqlite:///./artifacts/debug-ui.sqlite3"
 DEFAULT_FIXTURE_DIR = "tests/fixtures"

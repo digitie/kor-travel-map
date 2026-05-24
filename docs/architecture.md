@@ -22,7 +22,10 @@ TripMate 전용 provider adapter는 만들지 않습니다. provider public clie
 
 `python-krtour-map`은 DTO만 제공하는 보조 계층이 아니라 feature/source/weather/price 저장소 schema의 소유자입니다. TripMate는 별도 feature DB를 만들지 않고 `krtour_map.db`의 schema와 함수를 사용해 앱 API와 화면 조립만 담당합니다. 사용자, 여행계획, POI는 TripMate 제품 도메인에 남기고, 필요한 경우 `feature_id`로 이 라이브러리의 feature를 참조합니다.
 
-TripMate의 기존 feature 설계 문서는 [Feature model](feature-model.md)로 이관했습니다. TripMate 문서에는 제품 DB, API, Admin, 운영 runbook만 남기고 feature DTO/source/weather/price 저장 계약은 이 저장소를 canonical로 둡니다.
+TripMate의 기존 feature 설계 문서는 [Feature 모델 기준](feature-model.md)과 provider별 ETL 문서로
+이관했습니다. TripMate 문서에는 제품 DB, API, Admin, 운영 runbook만 남기고
+feature DTO/source/weather/price 저장 계약은 이 저장소를 canonical로 둡니다. 새 문서를
+추가할 때는 [Feature 문서 작성 가이드](feature-docs-guide.md)를 따른다.
 
 ## 핵심 모델
 
@@ -46,14 +49,17 @@ TripMate의 기존 feature 설계 문서는 [Feature model](feature-model.md)로
 - VisitKorea 축제: `Feature(kind="event")`, `EventDetail`, source trace, DB staged load
 - VisitKorea 축제 이미지: `first_image`, `first_image2`를 RustFS에 적재하고 `FeatureFile` metadata 저장
 - OpiNet 주유소 상세: `Feature(kind="place")`, `PlaceDetail`, `PricePoint`, `PriceValue`, source trace, DB staged load
+- KRMOIS 인허가: 영업중 여행 row를 `place` feature로 승격하고 폐업/취소 row를 prune
+- 국가유산: `place`, `area`, `event` feature와 media/file source 정규화
+- 산림/고속도로/해수욕장/표준데이터/notice: provider public model을 공통 feature/detail/weather/price 계약으로 정규화
 
-## Feature ID
+## Feature ID 기준
 
 `feature_id`는 멱등 upsert를 위해 deterministic하게 생성합니다.
 
 구성 요소:
 
-- canonical provider name
+- 표준 provider name
 - source type
 - source natural key
 - feature kind
@@ -63,7 +69,7 @@ TripMate의 기존 feature 설계 문서는 [Feature model](feature-model.md)로
 
 같은 원천 row가 반복 수집되어도 같은 feature ID가 만들어져야 합니다. payload가 달라졌지만 같은 장소/지점이면 source record hash는 바뀌어도 feature ID는 유지되도록 `source_natural_key`를 신중하게 잡습니다.
 
-## Weather 병합
+## 날씨 병합
 
 날씨 표시는 KMA timeline을 기준으로 합니다.
 
@@ -77,7 +83,7 @@ TripMate의 기존 feature 설계 문서는 [Feature model](feature-model.md)로
 | `python-khoa-api` | `beach_marine` | 해수욕장/해양 지수 |
 
 동일 `feature_id + provider + domain + forecast_style + metric_key + issued_at + valid_at + observed_at` 조합은 하나의 weather value로 upsert합니다.
-`forecast_style`은 관측/예보/지수/특보 같은 원천 성격을 보존하고, KMA식 초단기/단기/중기 조회 축은 `timeline_bucket`(`ultra_short`, `short`, `mid`)에 별도로 둡니다. 상세 기준은 [Weather feature normalization](weather-feature-normalization.md)을 따릅니다.
+`forecast_style`은 관측/예보/지수/특보 같은 원천 성격을 보존하고, KMA식 초단기/단기/중기 조회 축은 `timeline_bucket`(`ultra_short`, `short`, `mid`)에 별도로 둡니다. 상세 기준은 [날씨 feature 정규화](weather-feature-normalization.md)를 따릅니다.
 
 ## CRUD 경계
 
