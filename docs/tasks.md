@@ -4,11 +4,10 @@
 
 ## 진행 중 (open PR)
 
-- **본 PR#17** (feat/sprint1-pr17-scaffolding): Sprint 1 첫 코드 —
-  `src/krtour/map/` PEP 420 scaffolding (`__init__.py`/`py.typed`/`settings.
-  py`) + 6개 layer placeholder `__init__.py` + `pyproject.toml`에 `pydantic-
-  settings>=2.4` 의존 추가 + `tests/lint/test_no_namespace_init.py` (ADR-022
-  enforcement) + `tests/unit/test_smoke_import.py` (smoke).
+- **본 PR#18** (feat/sprint1-pr18-category-migration): `src/krtour/map/
+  category/_definitions.py` (kraddr-base 이전, ADR-023) + ADR-027 3건 신규
+  (LODGING_MOUNTAIN_SHELTER + KNPS/KFS, maki=shelter) + tests/unit/
+  test_category.py 16 cases + docs/category.md 통계 정정. 144 total.
 - **upstream knps-api PR#1**
   (https://github.com/digitie/python-knps-api/pull/1):
   `docs/knps-feature-etl.md §4` maki icon 정정 (shelter / barrier) — 검토 +
@@ -33,11 +32,10 @@
   - `pyproject.toml` `fail_under=0→50` 상향 (ADR-032 Sprint 1 bar)
   - Sprint 1 = **active** (`docs/sprints/SPRINT-1.md` 상태 → active)
   - 후속 Sprint 1 scaffolding PR로 실제 코드 작성:
-    - [x] **PR#17 (본)** `src/krtour/map/` PEP 420 scaffolding +
-          `settings.py` + 6개 layer placeholder + smoke 테스트
-    - [ ] PR#18 `src/krtour/map/category/` 144건 코드 이전 (kraddr-base →
-          krtour.map.category, ADR-023 + ADR-027 LODGING_MOUNTAIN_SHELTER
-          3행)
+    - [x] PR#17 `src/krtour/map/` PEP 420 scaffolding + `settings.py` +
+          6개 layer placeholder + smoke 테스트
+    - [x] **PR#18 (본)** `src/krtour/map/category/` 144건 (kraddr-base 이전
+          + ADR-027 3건 + tests/unit/test_category.py 16 cases)
     - [ ] PR#19 `src/krtour/map/dto/` (Feature + 7 detail kinds + ADR-027
           적용: `NOTICE_TYPES` 14건 + `AreaDetail.area_kind='hazard_zone'`)
     - [ ] PR#20 `src/krtour/map/core/` (exceptions + scoring stub + ADR-030
@@ -240,7 +238,7 @@
 
 ## 우선순위 가이드
 
-- **즉시 (검토 + merge)**: 본 PR#17 (`src/krtour/map/` scaffolding) +
+- **즉시 (검토 + merge)**: 본 PR#18 (`category/` 144건 + ADR-027) +
   upstream knps-api PR#1 (maki icon 정정)
 - **다음 (Sprint 1 scaffolding 연속 PR)**:
   - PR#18 — `src/krtour/map/category/` 144건 (kraddr-base 코드 이전,
@@ -299,5 +297,6 @@
 | #14 | `docs/pr14-impl-order-sprint-plans` | 2026-05-25 | ADR-034 provider 9단계 + Sprint 2~5 plan |
 | #15 | `docs/pr15-governance-sweep` | 2026-05-25 | governance docs sweep + DO NOT bug fix 3건 |
 | #16 | `feat/sprint1-entry-adr-accepted` | 2026-05-25 | T-014 Sprint 1 진입 — ADR 027~034 일괄 accepted + fail_under=50 |
-| **#17** | `feat/sprint1-pr17-scaffolding` | **open** | `src/krtour/map/` PEP 420 scaffolding + `settings.py` + smoke |
+| #17 | `feat/sprint1-pr17-scaffolding` | 2026-05-25 | `src/krtour/map/` PEP 420 scaffolding + `settings.py` + smoke |
+| **#18** | `feat/sprint1-pr18-category-migration` | **open** | `category/` 144건 (kraddr-base 이전 + ADR-027 3건) + 16 tests |
 | knps-api #1 | `docs/knps-feature-maki-icons` | **open** | maki icon 정정 (shelter / barrier) |

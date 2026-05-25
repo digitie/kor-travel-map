@@ -106,8 +106,8 @@ class PlaceCategory:
 | `iter_categories(*, depth=None, active_only=True) -> Iterator[PlaceCategory]` | 필터 순회 |
 | `category_path(code) -> tuple[str, ...]` | `PlaceCategory.path` 단축 |
 | `category_label(code, separator=" > ") -> str` | `PlaceCategory.label` 단축 |
-| `mapbox_maki_icon_for_category(code) -> str` | maki icon name, fallback `"marker"` |
-| `mapbox_maki_icon_or_none(code) -> str \| None` | unknown 코드 시 None |
+| `mapbox_maki_icon_for_category(code) -> str` | maki icon name. unknown 코드면 `KeyError` (strict, `get_category` 일치) |
+| `mapbox_maki_icon_or_none(code) -> str \| None` | unknown 코드면 `None` (lenient) |
 | `format_category_tree(root_code=None, include_codes=True, active_only=True) -> str` | 트리 문자열 |
 | `print_category_tree(...)` | 위 결과 print |
 
@@ -291,17 +291,21 @@ dict가 한국어 라벨 제공.
 
 ### 4.3 표 형식 (전체 141 rows)
 
-전체 표는 `python-kraddr-base/src/kraddr/base/categories.py`의 `PLACE_CATEGORY_DEFINITIONS`
-tuple에서 자동 생성된다. depth별 통계:
+전체 표는 `src/krtour/map/category/_definitions.py`의 `PLACE_CATEGORY_DEFINITIONS`
+tuple에서 자동 생성된다 (ADR-023으로 본 라이브러리로 이전, PR#18). depth별
+통계 (실측):
 
 | depth | 건수 | 비고 |
 |-------|----:|-----|
-| 0 (sentinel) | 1 | |
-| 1 (Tier 1 대분류) | 7 | ADR-027에서 신설 없음 (Tier 1은 8개 유지) |
-| 2 (Tier 2 중분류) | 30 | +1 `03.08 LODGING_MOUNTAIN_SHELTER` (ADR-027) |
-| 3 (Tier 3 소분류) | 73 | +2 `03.08.01/02` (ADR-027) |
-| 4 (Tier 4 세분류) | 33 | |
-| **합계** | **144** | ADR-027 적용 후 (현행 141 + 3) |
+| 0 (sentinel) | 1 | `UNCLASSIFIED` |
+| 1 (Tier 1 대분류) | 7 | `01 TOURISM` ~ `07 MEDICAL` — `00 UNCLASSIFIED`는 depth 0 sentinel로 분리 |
+| 2 (Tier 2 중분류) | 34 | 원본 33 + ADR-027 `03.08 LODGING_MOUNTAIN_SHELTER` |
+| 3 (Tier 3 소분류) | 73 | 원본 71 + ADR-027 `03.08.01/02` |
+| 4 (Tier 4 세분류) | 29 | ADR-027에서 추가 없음 |
+| **합계** | **144** | 원본 141 + ADR-027 신규 3 |
+
+`PlaceCategoryTier1Code` enum은 `00 UNCLASSIFIED` 포함 **8개** (depth 0 +
+depth 1 = 1 + 7). Tier 1 enum 자체는 ADR-027에서 변경 없음.
 
 자세한 행별 표는 코드(`format_category_tree()` 출력) 또는 `tests/unit/test_category.py`
 의 snapshot에 박는다 (코드 작성 단계 진입 시).
