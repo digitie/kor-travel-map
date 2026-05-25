@@ -240,14 +240,28 @@ python -m pytest -q
 proposed ADR (027/028/029/030/031/032/033/034) 일괄 accepted 전환 + `src/
 krtour/map/` scaffolding 시작. 자세히는 `docs/sprints/SPRINT-1.md`.
 
-**현재 허용된 예외** (코드 작성 단계 진입 전):
-- 빈 패키지 마커 (`pyproject.toml`, `py.typed`)
-- `pyproject.toml` policy enforcement (import-linter 차단 계약, coverage
-  schedule 주석 — ADR-030/032 등)
-- `packages/krtour-map-debug-ui/scripts/export_openapi.py` skeleton —
-  실행은 Sprint 2 첫 라우터부터 (ADR-031)
-- `packages/map-marker-react/` skeleton — `package.json`/`README.md`/
-  `vite.config.ts`/`.gitignore` (ADR-029, 실 코드는 Sprint 2)
-- `packages/krtour-map-debug-ui/frontend/` Next.js skeleton (ADR-025 2차
-  보강, 실 코드는 Sprint 2)
-- `docs/sprints/SPRINT-N.md` (Sprint 계획)
+**현재 상태 (Sprint 1 active, 2026-05-25)**: 코드 작성 단계 진입 완료.
+PR#17부터 `src/krtour/map/` scaffolding 진행 중. Sprint 1 종료 시점에는
+`category/`/`dto/`/`core/`/`infra/` 모든 layer가 채워져야 한다.
+
+**Sprint 1 진행 중 가이드** (`docs/sprints/SPRINT-1.md` §2 참조):
+- 모든 신규 코드는 `import-linter` 의존 방향 (`category → dto → core →
+  infra → providers → client → cli`) 준수.
+- `src/krtour/__init__.py`는 **절대 만들지 말 것** (PEP 420 implicit
+  namespace, `tests/lint/test_no_namespace_init.py`가 차단).
+- Sprint 1 coverage bar `fail_under = 50` (ADR-032).
+- `dto/`는 Sprint 2부터 100% branch 강제.
+
+**현재 박혀 있는 skeleton** (Sprint 1 PR#17~):
+- `src/krtour/map/__init__.py` (PR#17) — `__version__` + 공개 API 주석
+- `src/krtour/map/py.typed` (PR#17) — PEP 561 marker
+- `src/krtour/map/settings.py` (PR#17) — `KrtourMapSettings` 최소
+- `src/krtour/map/{category,dto,core,infra,providers,client}/__init__.py`
+  (PR#17) — placeholder, 후속 PR에서 채움
+- `tests/lint/test_no_namespace_init.py` (PR#17) — ADR-022 enforcement
+- `tests/unit/test_smoke_import.py` (PR#17) — import + settings smoke
+- `pyproject.toml` (PR#10/16) — import-linter 차단 계약 + coverage 50%
+- `packages/krtour-map-debug-ui/scripts/export_openapi.py` (PR#10) —
+  Sprint 2 첫 라우터부터 실효 (ADR-031)
+- `packages/map-marker-react/` (PR#10) — Sprint 2 실 코드 (ADR-029)
+- `packages/krtour-map-debug-ui/frontend/` (PR#6/11) — Sprint 2 실 코드

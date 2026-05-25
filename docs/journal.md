@@ -2,6 +2,57 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-25 11:00 (claude)
+
+**작업**: Sprint 1 PR#17 — `src/krtour/map/` PEP 420 scaffolding. **첫 실제
+Python 코드 commit**.
+
+**컨텍스트**: 사용자가 PR#16 머지 후 "다음단계 ㄱㄱ"로 PR#17 진행 승인.
+Sprint 1 §2.1 디렉토리 scaffolding 첫 구현. *최소 scaffolding*만 — provider
+/category/dto 실 코드는 PR#18~ 후속.
+
+**신규 파일** (13):
+- `src/krtour/map/__init__.py` — `__version__ = "0.2.0-dev"` + 공개 API
+  주석 + ADR 참조 (002/003/020/022/030/034).
+- `src/krtour/map/py.typed` — PEP 561 marker (빈 파일).
+- `src/krtour/map/settings.py` — `KrtourMapSettings(BaseSettings)`:
+  - `pg_dsn: SecretStr` (PostgreSQL DSN, ADR-007)
+  - `object_store_*` (S3 호환, ADR-015)
+  - `log_level` / `log_format` / `log_api_calls`
+  - env prefix `KRTOUR_MAP_`, `.env` 로딩, `extra="ignore"`
+- `src/krtour/map/{category,dto,core,infra,providers,client}/__init__.py`
+  (6건) — 각 layer placeholder + 후속 PR 매핑 주석 + ADR 참조.
+- `tests/__init__.py` / `tests/lint/__init__.py` / `tests/unit/__init__.py`
+  / `tests/conftest.py` (testcontainers는 PR#21).
+- `tests/lint/test_no_namespace_init.py` (3 케이스):
+  - `src/krtour/__init__.py`가 존재하지 않음 (ADR-022 PEP 420 enforcement)
+  - `src/krtour/map/__init__.py`는 존재
+  - `src/krtour/map/py.typed`는 존재
+- `tests/unit/test_smoke_import.py` (5 케이스):
+  - `import krtour.map` + `__version__` 노출
+  - 6 layer subpackage 모두 import 가능
+  - `KrtourMapSettings()` 기본값 적용
+  - `KRTOUR_MAP_*` 환경변수 우선
+  - `pg_dsn` SecretStr 마스킹
+
+**`pyproject.toml`**: `pydantic-settings>=2.4` 의존 추가.
+
+**verification**:
+- 모든 신규 .py `py_compile` 통과
+- `python -c "import krtour.map; print(krtour.map.__version__)"` →
+  `0.2.0-dev`
+- `KrtourMapSettings()` 인스턴스 생성 + `pg_dsn` SecretStr 마스킹 확인
+
+**문서 동기**:
+- `AGENTS.md §"코드 작성 금지"` — Sprint 1 active 상태 + 진행 중 가이드 +
+  박혀 있는 skeleton 8건 명기.
+- `docs/tasks.md` — T-014 sub-task PR#17 `[x]` + 머지 history 갱신.
+
+**다음**: PR#17 사용자 review/merge → PR#18 (`category/` 144건 코드 이전
+from kraddr-base + ADR-027 `LODGING_MOUNTAIN_SHELTER` 3행).
+
+---
+
 ## 2026-05-25 10:00 (claude)
 
 **작업**: **T-014 Sprint 1 진입** — ADR 027~034 일괄 proposed → accepted 전환
