@@ -112,6 +112,11 @@ mypy_path = "src"
 testpaths = ["tests"]
 pythonpath = [".", "src"]
 asyncio_mode = "auto"
+# session-scope async fixture (pg_engine)와 function-scope async test가 동일
+# event loop을 공유해야 함 — pytest-asyncio 0.23+ 권장 설정. 미설정 시 testcontainers
+# PostGIS 통합 테스트에서 "Task got Future attached to a different loop" 발생.
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
 addopts = "-ra --strict-markers --strict-config"
 markers = [
   "unit: 단위 테스트 — DB 없이 Fake repo만",
