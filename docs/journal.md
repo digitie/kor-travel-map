@@ -2,6 +2,28 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-25 18:08 (codex)
+
+**작업**: PR#1~#21 신규 소스·문서 상세 리뷰 리포트 충돌 해결.
+
+**컨텍스트**: PR#23 작성 후 PR#22가 main에 merge되어 `docs/journal.md`와
+`docs/resume.md`에 충돌 발생. 사용자 요청으로 `origin/main` (`01333cc`, PR#22
+merge commit)을 현재 브랜치에 병합하고, PR#22의 최신 CI/import-linter 기록과
+PR#1~#21 리뷰 리포트 기록을 모두 보존.
+
+**변경 파일**:
+- `docs/journal.md` — PR#22 entry 보존 + PR#23 리포트/충돌 해결 entry 추가.
+- `docs/resume.md` — PR#22 merged 상태와 PR#1~#21 리뷰 리포트 보완 후보 병합.
+- `docs/reports/pr-1-21-review.md` — PR#22 최종 상태를 open → merged로 갱신.
+
+**검증**:
+- `git fetch --all --prune` 후 `origin/main=01333cc` 확인.
+- `git diff --check` 재실행 예정.
+
+**다음**: 충돌 해결 merge commit push 후 PR#23 draft 해제/merge.
+
+---
+
 ## 2026-05-25 16:00 (claude)
 
 **작업**: Sprint 1 PR#22 — CI workflows 활성화 (`.github/workflows/
