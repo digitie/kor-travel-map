@@ -24,27 +24,33 @@ Python 패키지 `krtour-map-debug-ui` (ADR-020, `packages/krtour-map-debug-ui/`
 
 ## 다음 한 작업
 
-**PR#17 (`src/krtour/map/` scaffolding) merged 후 Sprint 1 후속 PR**:
+**Sprint 1 후속 PR 진행 상황**:
 - [x] PR#17 `src/krtour/map/` PEP 420 scaffolding (`__init__.py`,
       `settings.py`, `py.typed`, 6 layer placeholder + smoke tests)
-- [x] PR#18 `src/krtour/map/category/` 144건 코드 이전 + 16 tests
-- [x] **PR#19** `src/krtour/map/dto/` Feature + 5 detail + NOTICE_TYPES
-      14건 (ADR-027) + AreaDetail.area_kind hazard_zone (ADR-027) +
-      ADR-019 KST aware enforcement + 27 tests (62 total pytest passed).
-      WeatherValue/PriceValue/SourceRecord 등은 Sprint 2 PR로 연기.
-- [ ] PR#20 `src/krtour/map/core/` exceptions + scoring stub + ADR-030
-      narrow cache + `make_feature_id` ADR-009
-- PR#18 `src/krtour/map/category/` 144건 (kraddr-base에서 코드 이전, ADR-023
-  + ADR-027 LODGING_MOUNTAIN_SHELTER 3행 포함)
-- PR#19 `src/krtour/map/dto/` (Feature + 7 detail kinds + NOTICE_TYPES 14건
-  + AreaDetail.area_kind='hazard_zone' 적용)
-- PR#20 `src/krtour/map/core/` (exceptions, scoring stub, ADR-030 narrow
-  cache, make_feature_id)
-- PR#21 `src/krtour/map/infra/` skeleton + testcontainers PostGIS 통합
-  테스트 베이스
-- PR#22 CI workflows (`.github/workflows/{ci,lint,openapi}.yml`)
-- PR#23 첫 통합 테스트 (`tests/unit/test_category.py` +
-  `tests/lint/test_import_linter.py`)
+- [x] PR#18 `src/krtour/map/category/` 144건 코드 이전 (kraddr-base
+      → krtour.map.category, ADR-023 + ADR-027) + 16 tests + docs/category
+      통계 정정 — 30 pytest passed
+- [x] PR#19 `src/krtour/map/dto/` Feature + 5 detail kinds (place/event/
+      notice/route/area) + Coordinate + Address + URLs + OpeningHours +
+      `core/types.py` KST/kst_now + NOTICE_TYPES 14건 (ADR-027) +
+      AreaDetail.area_kind 'hazard_zone' (ADR-027) + ADR-018 detail
+      discriminator + ADR-019 KST aware enforcement + 27 dto tests.
+      WeatherValue/PriceValue/SourceRecord은 Sprint 2 PR로 연기.
+- [x] **PR#20 (현재 open)** `src/krtour/map/core/` exceptions 7종
+      (`docs/backend-package.md §5` + debug-ui HTTP 매핑) +
+      `make_feature_id` (ADR-009 결정적 SHA1) + 42 tests. dto 의존 없이
+      자체 완결 (kind: str annotation, FeatureKind StrEnum 호환). PR#19
+      머지 후 main rebase로 `core/__init__.py` (KST/kst_now + exceptions
+      + ids) 통합 export.
+- [ ] PR#21 `src/krtour/map/infra/` skeleton + testcontainers PostGIS 통합
+      테스트 베이스 + `crs.py` pyproj.Transformer (ADR-030 narrow cache)
+- [ ] PR#22 CI workflows (`.github/workflows/{ci,lint,openapi}.yml`) +
+      import-linter 계약 활성화
+- [ ] PR#23 첫 통합 테스트 (`tests/integration/test_dummy_db.py` +
+      provider 추가 unit 케이스)
+- [ ] **후속 PR**: `core/scoring.py` (ADR-016 Record Linkage Coordinate
+      의존) + `core/providers.py` CANONICAL_PROVIDER_NAMES + `core/weather.py`
+      build_weather_card. Sprint 2 첫 provider 적재 직전.
 
 ## 진척도
 
