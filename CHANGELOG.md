@@ -7,6 +7,16 @@
 
 ### Sprint 1 scaffolding (2026-05-25, PR#17+)
 
+- **PR#18 — `src/krtour/map/category/` 144건 (ADR-023 이전 + ADR-027)**:
+  - `_definitions.py` (~2110줄, kraddr-base 사본 + ADR-027 패치)
+  - ADR-027 신규 3건: `LODGING_MOUNTAIN_SHELTER` (Tier 2) +
+    `LODGING_MOUNTAIN_SHELTER_KNPS` / `_KFS` (Tier 3) + maki = `shelter`
+  - `PLACE_CATEGORY_TIER2_NAMES_BY_TIER1["03"]["08"] = "대피소·산장"`
+  - `@cache` on `get_category` (ADR-030 narrow 예외, immutable 카탈로그)
+  - `category/__init__.py` re-export 14 식별자
+  - `tests/unit/test_category.py` (16 cases) — 144 총건/depth/Tier1/
+    ADR-027/maki/helper/cache 검증. **30 passed** (전체 test suite)
+  - `docs/category.md` §4.3 depth 통계 정정 (원본 Tier 2/4 swap 오류)
 - **PR#17 — `src/krtour/map/` PEP 420 scaffolding**:
   - `src/krtour/map/__init__.py` (`__version__ = "0.2.0-dev"`)
   - `src/krtour/map/py.typed` (PEP 561)

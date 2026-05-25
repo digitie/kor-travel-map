@@ -2,6 +2,56 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-25 12:00 (claude)
+
+**작업**: Sprint 1 PR#18 — `src/krtour/map/category/` 144건 코드 이전
+(ADR-023) + ADR-027 `LODGING_MOUNTAIN_SHELTER` 3건 신규.
+
+**컨텍스트**: 사용자가 PR#17 머지 후 "이어서 진행"으로 PR#18 승인.
+`python-kraddr-base/src/kraddr/base/categories.py` (~2071줄, 141건)을 본
+라이브러리로 가져오고 ADR-027 3건 추가해서 총 144건.
+
+**신규 파일** (2):
+- `src/krtour/map/category/_definitions.py` (~2110줄) — kraddr-base 사본 +
+  ADR-027 패치:
+  - `from ._enum import StrEnum` → `from enum import StrEnum` (Python
+    3.11+ stdlib)
+  - `from functools import cache` 추가 (ADR-030 narrow 예외)
+  - 메타 update (`PLACE_CATEGORY_SOURCE` / `_SCHEMA_DOC` / `_SYNCED_ON`)
+  - **ADR-027 3건**:
+    - `PlaceCategoryCode.LODGING_MOUNTAIN_SHELTER = "03080000"` enum
+    - `LODGING_MOUNTAIN_SHELTER_KNPS = "03080100"`
+    - `LODGING_MOUNTAIN_SHELTER_KFS = "03080200"`
+    - `PLACE_CATEGORY_TIER2_NAMES_BY_TIER1["03"]["08"] = "대피소·산장"`
+    - 3건 `PLACE_CATEGORY_DEFINITIONS` row (sort_order 380/381/382)
+    - 3건 `PLACE_CATEGORY_MAPBOX_MAKI_ICONS` 매핑 (`shelter`, Maki 표준)
+  - `@cache` on `get_category` (ADR-030 narrow 예외)
+- `tests/unit/test_category.py` (16 cases) — 총건/depth/Tier1/ADR-027
+  3건/maki/helper/`@cache`/frozen dataclass 검증
+
+**변경 파일** (2):
+- `src/krtour/map/category/__init__.py` — `_definitions`에서 14 공개
+  식별자 re-export.
+- `docs/category.md`:
+  - §4.3 depth 통계 정정 — 원본 docs는 Tier 2/Tier 4 카운트가 swap돼
+    있었음 (29/33 → 실제 33/29). 실측 + ADR-027 적용 후 합계 144.
+  - §3 helper 표 — `mapbox_maki_icon_for_category`가 unknown 코드에 strict
+    KeyError 발생 정정 (docs의 fallback "marker" 표기는 오류였음).
+
+**verification**:
+- `python -m pytest tests/ -q` → **30 passed** (test_category 16 + smoke 5
+  + lint 3 + 추가 smoke import 6, 모두 통과).
+- `get_category(PlaceCategoryCode.LODGING_MOUNTAIN_SHELTER_KNPS).label` =
+  "숙박 > 대피소·산장 > 국립공원 대피소"
+- `mapbox_maki_icon_for_category("03080100")` → "shelter"
+- `get_category.cache_info().hits ≥ 1` (ADR-030 narrow cache 동작)
+
+**다음**: PR#18 사용자 review/merge → PR#19 (`src/krtour/map/dto/` —
+Feature + 7 detail kinds + NOTICE_TYPES 14건 + AreaDetail.area_kind
+hazard_zone). dto는 Sprint 2부터 100% branch 강제 (ADR-032).
+
+---
+
 ## 2026-05-25 11:00 (claude)
 
 **작업**: Sprint 1 PR#17 — `src/krtour/map/` PEP 420 scaffolding. **첫 실제
