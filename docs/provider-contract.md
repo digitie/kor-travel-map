@@ -131,7 +131,7 @@ system
 | python-khoa-api | place, notice, weather | primary, primary, weather_context | 일 / 시간 | 해수욕장, 해양 공지 |
 | python-airkorea-api | weather | weather_context | 시간 | PM10/PM2.5/CAI |
 | python-krforest-api | place, route, area, weather, notice | primary | 일/시간 | 휴양림/숲길/산악기상/안전공지 |
-| python-knps-api | place, route, area, notice, weather | primary | 일/분기/연 (notice: 30분~일) | 국립공원 경계·탐방로·시설·위험지역·문화자원·대피소·안전공지 (`docs/knps-feature-etl.md`, ADR-028) |
+| python-knps-api | place, route, area, weather | primary | 월/분기/연 (파일 데이터) | keyless file-only. 국립공원 경계·탐방로·선형시설·시설·위험지역·특별보호구역·문화자원·대피소 (`docs/knps-feature-etl.md`, ADR-028 amendment) |
 | python-krheritage-api | place, area, event | primary | 주 (place/area), 일 (event) | media → RustFS |
 | python-kasi-api | (calendar) | (system) | 주 1회 | 공휴일/달력 (TripMate utility) |
 | data.go.kr-standard (내부 client) | place, route, event | primary | 표준데이터별 | 5종 dataset bounded |

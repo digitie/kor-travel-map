@@ -20,6 +20,7 @@ ADR 참조
 - ADR-019 — KST aware datetime만 허용
 - ADR-027 — ``NOTICE_TYPES`` 14건 (``access_restriction``/``fire_alert``),
   ``AreaDetail.area_kind`` Literal에 ``hazard_zone``
+- ADR-028 amendment — KNPS ``protected_area`` / ``facility_road`` 표준값
 """
 
 from __future__ import annotations
@@ -61,6 +62,7 @@ from .route import (
     ROUTE_TYPE_ACCESSIBLE_WALK,
     ROUTE_TYPE_CYCLING,
     ROUTE_TYPE_DRIVE_COURSE,
+    ROUTE_TYPE_FACILITY_ROAD,
     ROUTE_TYPE_FOREST_TRAIL,
     ROUTE_TYPE_HIKING_TRAIL,
     ROUTE_TYPE_ROUTE,
@@ -120,6 +122,7 @@ __all__ = [
     "ROUTE_TYPE_TREKKING",
     "ROUTE_TYPE_FOREST_TRAIL",
     "ROUTE_TYPE_TOURISM_ROAD",
+    "ROUTE_TYPE_FACILITY_ROAD",
     "ROUTE_TYPE_WALKING_COURSE",
     "ROUTE_TYPE_CYCLING",
     "ROUTE_TYPE_DRIVE_COURSE",

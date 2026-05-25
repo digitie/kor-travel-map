@@ -196,6 +196,13 @@ def test_feature_route_normalization() -> None:
     assert route.route_type == "hiking_trail"
 
 
+@pytest.mark.unit
+def test_feature_route_facility_road_normalization() -> None:
+    """ADR-028 amendment — KNPS 선형시설 route_type을 보존."""
+    route = RouteDetail(feature_id="route:knps_linear", route_type="선형시설")
+    assert route.route_type == "facility_road"
+
+
 # ── ADR-019: KST aware datetime ──────────────────────────────────────────
 
 

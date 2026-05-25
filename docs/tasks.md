@@ -9,7 +9,7 @@
   반영. ADR-028 amendment §H 신설. `docs/knps-feature-etl.md` + `docs/forest-
   feature-etl.md §11` + `docs/external-apis.md §3.8.1` + `docs/provider-contract
   .md §3` + `pyproject.toml` 정정. 14 dataset 4건 신규 + 4건 source 이전.
-  코드 변경 0.
+  DTO에 `protected_area` / `facility_road` 표준값 추가.
 - **PR#24** (merged): review report P0-1/2/3 (DTO strictness) 해소.
 - **PR#23** (merged): `docs/reports/pr-1-21-review.md` 종합 리뷰.
 - **PR#22** (merged):
@@ -79,26 +79,22 @@
   - 실제 코드 (`src/categoryMaki.ts`, `<MakiMarker>` 등)는 Sprint 2 PR.
   - drift gate: `tests/unit/test_category_maki_consistency.py` (Python ↔ TS
     1:1 검증, Sprint 2 코드 작성).
-- [ ] T-018 — **`python-knps-api` provider 등록** (ADR-027 + ADR-028 모두
-      proposed, T-018 시점에 accepted 전환)
-  - **외부 repo scaffold 완료** (2026-05-25): `digitie/python-knps-api`
-    `6e36990 Initial KNPS API client scaffold`. 공개 API: `KnpsClient`,
-    `KnpsConfig`, `ApiEndpoint`, `FileDataset`, `CatalogEntry`, `Page` +
-    예외 7종 + helper 5종. catalog: API 3 + 파일 11. 인증
-    `KNPS_SERVICE_KEY`/`DATA_GO_KR_SERVICE_KEY`.
-  - **ADR-028 (proposed, 본 PR#12)** — provider 등록 (canonical name /
-    import / dataset prefix / 인증 env / SHP 파싱 책임 분리 / 양방향 PR
-    워크플로).
-  - **ADR-027 (PR#9 merged)** — forest 카테고리/notice_type 확장 결정 박힘.
-    T-018 시점에 accepted 전환 + 코드 적용 (`PLACE_CATEGORY_DEFINITIONS`
-    144건 + `NOTICE_TYPES` 14건 + `AreaDetail.area_kind` Literal).
-  - `krtour.map.providers.knps` 모듈 신설 (Sprint 2). SHP/GeoJSON parsing
-    위치 (본 라이브러리 vs knps-api `[geo]` extra) Sprint 2 진입 시 결정.
-  - `docs/forest-feature-etl.md §11` + `docs/knps-feature-etl.md` (본 PR#12
-    에 신설) KNPS 통합 실행.
-  - upstream knps-api와 양방향 PR — knps-api PR#1 (`docs/knps-feature-
-    maki-icons`, shelter/barrier maki icon 정정) merge 후 본 라이브러리
-    docs/knps-feature-etl.md 동기.
+- [ ] T-018 — **`python-knps-api` provider 등록 / KNPS 적재 준비**
+  - **외부 repo keyless file-only 전환 완료** (2026-05-25):
+    `digitie/python-knps-api` `06da125f` (PR#3+#4). 공개 API:
+    `KnpsClient`, `KnpsConfig`, `FileDataset`, `CatalogEntry`,
+    `FileArtifact`, `FileMember`, `CsvPreview`, `CsvPreviewRow` + 예외 계층 +
+    catalog helper. 삭제: `ApiEndpoint`, `Page`, `raw_endpoint`,
+    `api_endpoint(s)`.
+  - **ADR-028 accepted + amendment §H (PR#25)** — keyless, 14건 모두
+    file dataset, `KNPS_SERVICE_KEY`/`DATA_GO_KR_SERVICE_KEY` 사용 안 함.
+  - **ADR-027 accepted + 코드 적용 완료** — category 144건,
+    `NOTICE_TYPES` 14건, `AreaDetail.area_kind='hazard_zone'`.
+    PR#25에서 `protected_area`와 `facility_road` DTO 계약 추가.
+  - `krtour.map.providers.knps` 모듈 신설은 Sprint 3 (ADR-034 7단계).
+    SHP/CSV parsing은 본 라이브러리 `providers/knps` 책임.
+  - 후속 ADR: `access_restriction`/`fire_alert` notice source 결정
+    (산림청/소방청/scrape). KNPS는 notice source 아님.
 - [ ] T-019 — **TripMate 측 후속 작업 추적** (ADR-026 + ADR-029 후속, 본
       저장소 외)
   - TripMate `apps/web` Kakao Maps → maplibre-vworld 교체 PR (TripMate

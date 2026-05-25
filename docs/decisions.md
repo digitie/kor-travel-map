@@ -1361,7 +1361,7 @@ merged 2026-05-25):
    추가. `KnpsConfig`에서 `service_key`/`api_key` 필드 + `from_env` ENV 읽기
    완전 제거 — `timeout` + `max_rps`만 남음.
 
-본 라이브러리 영향 (다음 PR(#25) 일괄 반영):
+본 라이브러리 영향 (PR#25 일괄 반영):
 
 - **A 갱신 — provider 등록**:
   - 인증 env 제거 — `KNPS_SERVICE_KEY` / `DATA_GO_KR_SERVICE_KEY` 사용 안 함.
@@ -1407,6 +1407,9 @@ merged 2026-05-25):
     이 중 `access_restriction`/`fire_alert` notice는 다른 provider
     (`python-krforest-api`, 산림청 산불경보) 또는 web scraping으로 보완 — 별도
     ADR로 결정 (KNPS 단독 source 아님).
+  - 신규 dataset 구현을 위해 DTO 표준값도 확장:
+    `AreaDetail.area_kind='protected_area'`,
+    `RouteDetail.route_type='facility_road'`.
 
 - **G 신규 — file artifact API 사용 패턴**:
   ```python

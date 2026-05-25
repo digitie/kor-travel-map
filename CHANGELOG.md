@@ -22,7 +22,8 @@
   - 변경 docs: `decisions.md` (ADR-028 §H amendment) / `knps-feature-etl.md` /
     `forest-feature-etl.md §11` / `external-apis.md §3.8.1` /
     `provider-contract.md §3`. pyproject git URL 핀 (`@06da125f`) 주석.
-  - **코드 변경 0** — docs/pyproject 주석만. 141 pytest passed 유지 (이전 PR).
+  - DTO 정합 보강: `AreaDetail.area_kind='protected_area'`,
+    `ROUTE_TYPE_FACILITY_ROAD='facility_road'` 추가. 143 pytest passed.
 - **PR#24 — DTO strictness P0 (Sprint 2 진입 전 차단)**:
   Review report (`docs/reports/pr-1-21-review.md`, PR#23 DRAFT) P0-1/2/3 해소.
   - `Feature.detail` `mode="before"` dict 거부 (Pydantic union dict coercion

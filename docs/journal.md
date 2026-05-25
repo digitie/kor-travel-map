@@ -33,11 +33,11 @@ DTOs)이 본 라이브러리 docs와 어긋남 — sync 필요.
 - 인증 ENV 전부 제거 — `KNPS_SERVICE_KEY` deprecated, `DATA_GO_KR_SERVICE_KEY`
   KNPS 폴백 제거.
 
-**변경 파일** (6):
+**변경 파일**:
 - `docs/decisions.md` — ADR-028 §H amendment 추가 (~90 line). 신규 14 dataset
   table + 삭제 4 keys + keyless KnpsClient 사용 패턴.
 - `docs/knps-feature-etl.md` — §1 (auth=none, keyless 명기) / §2 (14 file
-  dataset 표 재작성, 공간 9 + 비공간 3 + 삭제 4 분리) / §3.5-3.6 (notice는
+  dataset 표 재작성, 공간 11 + 비공간 3 + 삭제 4 분리) / §3.5-3.6 (notice는
   source 이전 명기) / §4 (category 표에 linear_facilities/protected_areas 추가)
   / §5 (FileArtifact API 예시) / §6 (Dagster asset 11건, 이전 notice 2건 제거)
   / §7 (fixture 신규 dataset) / §8 (후속 작업 정정).
@@ -49,6 +49,11 @@ DTOs)이 본 라이브러리 docs와 어긋남 — sync 필요.
 - `docs/provider-contract.md` §3 dataset_key 표 — 14건 정정 + 4건 strikethrough.
 - `pyproject.toml` providers extras — knps git URL 주석 갱신 (`@06da125f` commit
   pin + keyless 비고).
+- `src/krtour/map/dto/{area,route}.py` — `protected_area` area_kind,
+  `facility_road` route_type 추가. KNPS PR#25 문서 계약과 DTO 정합.
+- `tests/unit/test_dto_{area,feature}.py` — 신규 DTO 값 회귀 테스트.
+- `docs/{feature-model,resume,tasks}.md` / `CHANGELOG.md` — DTO 정합 보강과
+  PR#25 상태 반영.
 
 **ADR 적용**:
 - ADR-028 §H amendment — 결정 영구화 (historical §A-F는 PR#12 시점 기록 보존).
@@ -57,8 +62,9 @@ DTOs)이 본 라이브러리 docs와 어긋남 — sync 필요.
   적재 PR 이전 결정 필요.
 
 **verification**:
-- 코드 변경 0건 (docs + pyproject 주석만) → pytest/lint 영향 없음.
-- 다음 환경에서 `python -m pytest tests/ -q` 재실행 시 141 passed 유지 기대.
+- `python -m pytest tests/ -q --ignore=tests/integration` 재실행 — 143 passed
+  기대 (PR#24 141 + 신규 2).
+- ruff/mypy/import-linter 재실행.
 
 **다음 PR**:
 - **PR#26** (review report P0-4): `make_source_record_key` + `make_payload_hash`

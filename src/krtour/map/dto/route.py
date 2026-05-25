@@ -20,6 +20,7 @@ __all__ = [
     "ROUTE_TYPE_TREKKING",
     "ROUTE_TYPE_FOREST_TRAIL",
     "ROUTE_TYPE_TOURISM_ROAD",
+    "ROUTE_TYPE_FACILITY_ROAD",
     "ROUTE_TYPE_WALKING_COURSE",
     "ROUTE_TYPE_CYCLING",
     "ROUTE_TYPE_DRIVE_COURSE",
@@ -38,6 +39,7 @@ ROUTE_TYPE_ACCESSIBLE_WALK: Final[str] = "accessible_walk"
 ROUTE_TYPE_TREKKING: Final[str] = "trekking"
 ROUTE_TYPE_FOREST_TRAIL: Final[str] = "forest_trail"
 ROUTE_TYPE_TOURISM_ROAD: Final[str] = "tourism_road"
+ROUTE_TYPE_FACILITY_ROAD: Final[str] = "facility_road"
 ROUTE_TYPE_WALKING_COURSE: Final[str] = "walking_course"
 ROUTE_TYPE_CYCLING: Final[str] = "cycling"
 ROUTE_TYPE_DRIVE_COURSE: Final[str] = "drive_course"
@@ -49,6 +51,7 @@ ROUTE_TYPES: Final[tuple[str, ...]] = (
     ROUTE_TYPE_TREKKING,
     ROUTE_TYPE_FOREST_TRAIL,
     ROUTE_TYPE_TOURISM_ROAD,
+    ROUTE_TYPE_FACILITY_ROAD,
     ROUTE_TYPE_WALKING_COURSE,
     ROUTE_TYPE_CYCLING,
     ROUTE_TYPE_DRIVE_COURSE,
@@ -73,6 +76,9 @@ _ROUTE_ALIAS_MAP: Final[dict[str, str]] = {
     "관광도로": ROUTE_TYPE_TOURISM_ROAD,
     "tourism_road": ROUTE_TYPE_TOURISM_ROAD,
     "관광길": ROUTE_TYPE_TOURISM_ROAD,
+    "시설도로": ROUTE_TYPE_FACILITY_ROAD,
+    "선형시설": ROUTE_TYPE_FACILITY_ROAD,
+    "facility_road": ROUTE_TYPE_FACILITY_ROAD,
     "산책로": ROUTE_TYPE_WALKING_COURSE,
     "walking": ROUTE_TYPE_WALKING_COURSE,
     "자전거길": ROUTE_TYPE_CYCLING,

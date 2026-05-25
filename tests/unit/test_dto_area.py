@@ -16,8 +16,8 @@ def test_area_kinds_includes_hazard_zone() -> None:
 
 @pytest.mark.unit
 def test_area_kinds_count() -> None:
-    """AREA_KINDS 12종 (원본 11 + ADR-027 'hazard_zone')."""
-    assert len(AREA_KINDS) == 12
+    """AREA_KINDS 13종 (원본 11 + hazard_zone + protected_area)."""
+    assert len(AREA_KINDS) == 13
 
 
 @pytest.mark.unit
@@ -30,6 +30,18 @@ def test_area_detail_hazard_zone() -> None:
     )
     assert detail.area_kind == "hazard_zone"
     assert detail.payload["hazard_type"] == "rockfall"
+
+
+@pytest.mark.unit
+def test_area_detail_protected_area() -> None:
+    """ADR-028 amendment — KNPS protected_areas는 protected_area로 보존."""
+    detail = AreaDetail(
+        feature_id="area:knps_protected_001",
+        area_kind="protected_area",
+        payload={"domain": "forest", "protection_type": "special"},
+    )
+    assert detail.area_kind == "protected_area"
+    assert detail.payload["protection_type"] == "special"
 
 
 @pytest.mark.unit

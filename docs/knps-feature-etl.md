@@ -35,7 +35,7 @@ knps-api `knps.catalog.FILE_DATASETS` 14건 (`from knps import file_datasets`
 로 enumerate). 모두 `kind="file_dataset"`, 13건 `verification_status='verified'`,
 1건 `needs_verification`.
 
-### 2.1 공간 데이터 (9건)
+### 2.1 공간 데이터 (11건)
 
 | dataset_key | data.go.kr ID | format | geometry | feature.kind | category / area_kind |
 |-------------|---------------|--------|----------|--------------|----------------------|
@@ -175,7 +175,7 @@ from knps import (
     catalog_entries, file_dataset, file_datasets,
 )
 
-# 공간 데이터 9건 (변환 함수 9개)
+# 공간 데이터 11건 (변환 함수 11개)
 DATASET_KEYS_KNPS_SPATIAL = (
     "knps_park_boundaries", "knps_trails", "knps_visitor_centers",
     "knps_hazard_zones", "knps_weather_stations", "knps_restrooms",

@@ -63,7 +63,8 @@ PR#22 CI/import-linter merge 후 gate 확인. PR#22 merge 후 PR#23 리포트
       `06da125f`) 본 라이브러리 docs/pyproject 일괄 반영. ADR-028 amendment §H
       신설. knps-feature-etl.md/forest-feature-etl.md §11/external-apis.md/
       provider-contract.md 정정. 14 dataset 4건 신규 + 4건 source 이전 (notice/
-      photos/recommended_courses는 별도 source). 코드 변경 0.
+      photos/recommended_courses는 별도 source). DTO에 `protected_area` /
+      `facility_road` 표준값 추가.
 - [ ] PR#26 (review report P0-4): ID helper 확장 (`make_source_record_key`,
       `make_payload_hash`) + `FeatureBundle` + `SourceRecord` + `SourceLink`
       DTO. Sprint 2 첫 provider 변환 직전 필수.
