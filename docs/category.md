@@ -3,8 +3,9 @@
 본 문서는 `krtour.map.category` 모듈의 사양 reference다. 해당 모듈은
 `python-kraddr-base`의 `kraddr.base.categories` 모듈을 이전해 온 것이다 (ADR-023).
 
-> **현재 상태**: v2 설계 단계. 본 문서는 모듈 사양을 박아두는 contract이며,
-> 실제 코드 이전은 코드 작성 단계 진입 시 별도 PR로 수행한다 (ADR-023 §후속).
+> **현재 상태**: Sprint 1에서 `src/krtour/map/category/` 이전 완료 (PR#18).
+> 본 문서는 현행 category 모듈의 계약 reference다. 신규 카테고리/마커 매핑
+> 변경은 ADR과 테스트를 함께 갱신한다.
 
 ## 1. 목적
 

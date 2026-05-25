@@ -2,10 +2,18 @@
 
 ## 현재 상태
 
-**v2 Sprint 1 active** (T-014 사용자 승인 2026-05-25, PR#16). main은 orphan
-으로 v2 사양 새로 시작. v1은 `v1` 브랜치에 보존. **코드 작성 단계 진입 완료** —
-ADR 027~034 일괄 accepted, `pyproject.toml` `fail_under=50`. 후속 PR#17+로
-`src/krtour/map/` scaffolding 시작.
+**v2 Sprint 1 scaffolding 종료, Sprint 2 진입 준비** (PR#17~#26 머지 완료
+2026-05-25). main은 orphan으로 v2 사양 새로 시작. v1은 `v1` 브랜치에 보존.
+ADR **001~034 모두 accepted** (T-014 + ADR-028 amendment §H, knps-api keyless
+반영). `pyproject.toml` `fail_under=50` (Sprint 1 bar). Sprint 1 산출물:
+- `src/krtour/map/` PEP 420 namespace + 6 layer (category 144건 + dto Feature
+  + 5 detail + Coordinate + SourceRecord/Link + FeatureBundle + core 7 exceptions
+  + ID helpers `make_feature_id`/`make_source_record_key`/`make_payload_hash` +
+  infra `crs.py`/`db.py` skeleton)
+- CI workflows (`.github/workflows/{ci,lint,openapi}.yml`) + import-linter
+  4 계약 + testcontainers PostGIS 통합 테스트 베이스
+- review report (`docs/reports/pr-1-21-review.md`) P0 4건 해소 (PR#24/#26 +
+  Codex 후속 보강)
 
 **중요 신규 룰 (ADR-021~023, 2026-05-24)**:
 - main 직접 push 금지 — feature branch + PR만 (ADR-021).
@@ -62,22 +70,23 @@ PR#22 CI/import-linter merge 후 gate 확인. PR#22 merge 후 PR#23 리포트
 - [x] PR#25 (merged) python-knps-api PR#3+#4 (keyless file-only, `06da125f`)
       반영. ADR-028 amendment §H. 14 dataset 정정. DTO에 `protected_area` /
       `facility_road` 표준값 추가 (사용자 별도 적용).
-- [x] **PR#26 (현재 open)** review report P0-4 — `make_source_record_key` +
+- [x] PR#26 (merged) review report P0-4 — `make_source_record_key` +
       `make_payload_hash` (`docs/data-model.md §11` 명세) + `SourceRecord` +
       `SourceLink` + `FeatureBundle` DTO. dto는 core 미import 원칙 준수
       (`SourceRecord.key()` 메서드 두지 않음 — 호출자가 helper로 계산).
       리뷰 후속으로 DB required 필드와 bundle 교차 검증, payload hash strict
       normalize, canonical docs 예시 정합 보강.
-- [ ] PR#27 (review report P1): docs drift sweep — README/SKILL/agent-guide/
+- [x] PR#27 (merged) review report P1: docs drift sweep — README/SKILL/agent-guide/
       tasks의 "Sprint 1 진입 직전" / "코드 작성 금지" 잔재 문단을 Sprint 1
-      active/종료 상태로 갱신.
+      종료/Sprint 2 진입 준비 상태로 갱신.
 - [ ] 후속 ADR (TBD, Sprint 3 KNPS 적재 이전): `access_restriction`/`fire_alert`
       notice source 결정 — 산림청 (`python-krforest-api`) / 소방청 / scrape
       중 선택.
-- [ ] **Sprint 2 첫 PR** (ADR-034 1단계): `providers/visitkorea/` 축제
-      + `infra/models.py` SQLAlchemy 매핑 + `infra/feature_repo.py` raw SQL
-      + Alembic migration 첫 revision + `core/scoring.py` ADR-016 Record
-      Linkage.
+- [ ] **PR#28 / Sprint 2 prep**: `infra/models.py` SQLAlchemy 2 declarative
+      + GeoAlchemy2 + `alembic/` 첫 revision + schema integration test.
+- [ ] **Sprint 2 첫 provider PR** (ADR-034 1단계): `providers/visitkorea/`
+      축제 + `infra/feature_repo.py` raw SQL + `core/scoring.py` ADR-016
+      Record Linkage.
 
 ## 진척도
 

@@ -2,6 +2,72 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-25 23:07 (claude)
+
+**작업**: PR#27 — review report P1 docs drift sweep. PR#26 머지(2026-05-25
+22:15, codex `befaf09`)로 review P0-4 4건 완전 해소 → P1 docs drift만 남음.
+사용자가 Sprint 4까지 자율 반복 사이클 개시 — 본 PR이 첫 cycle entry.
+
+**컨텍스트**: PR#26 머지 후 main 동기 결과 `befaf09 fix: tighten PR26 source
+DTO contracts`가 review 4건 (P1-1 bundle cross-validation / P1-2 SourceRecord
+required fields / P1-3 payload hash strict normalize / P2-4 docs sync) 모두
+해소. 추가 review 불필요. P1 (docs drift) 남은 진짜 잔재 — README/CLAUDE/
+SKILL/AGENTS/agent-guide의 "Sprint 1 진입 직전" / "코드 작성 금지" 문단 정정.
+
+**변경 파일**:
+- `README.md` `> [현재 상태]` callout — "v2 설계 단계 — Sprint 1 진입 직전" /
+  "문서/설계 전용" / "accepted 001~026, proposed 027~034" → "Sprint 1
+  scaffolding 종료, Sprint 2 진입 준비" + ADR 001~034 모두 accepted + Sprint 1
+  산출물 요약 (PEP 420 namespace / category 144 / dto / core / infra / CI gate).
+- `CLAUDE.md` §2 (현 단계) — 동일 내용 정정. PR#17~#26 머지 결과 명기.
+- `SKILL.md` §9 — "코드 작성 금지 (현 단계)" → "코드 작성 단계 (Sprint 1 종료,
+  Sprint 2 진입 준비)". 허용된 예외 5건 목록 → Sprint 1 산출물 + Sprint 2
+  prep 다음 단계 명시.
+- `AGENTS.md` §"코드 작성 금지" → "코드 작성 단계 (Sprint 1 종료, Sprint 2
+  진입 준비)". T-014 승인 + PR#17~#26 + 산출물 + 다음 단계.
+- `docs/agent-guide.md` §8 (코드 작성 금지 단계) → "코드 작성 단계 (Sprint 1
+  종료, Sprint 2 진입 준비)" + 기본 작업 절차 (의도 확인 → ADR → 테스트 우선
+  → 구현 → 통합 테스트/EXPLAIN → journal/resume). §4 resume.md 예시도 갱신.
+- `docs/resume.md` "현재 상태" — Sprint 1 scaffolding 종료 명기 + ADR 001~034
+  accepted + Sprint 1 산출물 + review report P0 4건 해소 (PR#24/#26 +
+  Codex 후속).
+- `docs/tasks.md` — open PR 목록에서 PR#26 잔재 제거, PR#27/PR#26 최근 완료와
+  다음 PR#28 후보를 분리.
+- `docs/category.md` + package README 3건 — "v2 설계 단계" 잔재를 Sprint 1
+  skeleton / 구현 완료 상태로 정정.
+
+**삭제하지 않은 것 (의도)**:
+- `docs/journal.md` historical entries — 시점별 기록 보존.
+- `docs/reports/pr-1-21-review.md` — 리뷰 시점 (PR#21 기준) 보존.
+- 다른 docs (data-model/decisions/architecture 등) — 정책 변경 없음.
+
+**verification**:
+- `.venv/bin/python -m pytest tests/ -q --ignore=tests/integration -s` →
+  **203 passed**.
+- `.venv/bin/python -m ruff check .` → All checks passed.
+- `.venv/bin/python -m mypy --strict -p krtour.map` → Success, 28 source files.
+- `.venv/bin/lint-imports` → 4 contracts kept, 0 broken.
+
+**자율 반복 사이클 진행 (사용자 지시)**:
+- 사이클: PR 머지 확인 → 추가 review → 신규 작업 + 완료 PR → 머지 확인 → 반복.
+- 목표: Sprint 4 (ADR-034 7단계 MOIS) 완료까지.
+- 첫 cycle: PR#26 머지 (codex befaf09) → review 추가 0 → PR#27 (P1 sweep).
+- 다음 cycle: PR#27 머지 대기 → review → PR#28 (`infra/models.py` + Alembic
+  첫 revision, Sprint 2 prep).
+- TripMate docs (`docs/tripmate-integration.md`) 참고: 통합 시나리오 1~4
+  (조회/적재/Admin검수/POI 도메인) + PoiSnapshot cascade + structlog 키
+  표준 — Sprint 2 첫 provider 적재 + debug UI 첫 라우터 PR에 반영 예정.
+
+**다음 PR (PR#28 Sprint 2 prep)**:
+- `src/krtour/map/infra/models.py` — SQLAlchemy 2 declarative + GeoAlchemy2
+  (Feature + 5 detail + opening_hours + weather + price + files). GENERATED
+  column `coord_5179` (ADR-012).
+- `alembic/` directory + `env.py` + 첫 migration revision (`data-model.md
+  §1~3` DDL).
+- `tests/integration/test_alembic_upgrade.py` — head 적용 후 schema check.
+
+---
+
 ## 2026-05-25 23:00 (claude)
 
 **작업**: PR#26 review report P0-4 — ID helpers (`make_source_record_key` /
