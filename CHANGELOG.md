@@ -7,6 +7,23 @@
 
 ### Sprint 1 scaffolding (2026-05-25, PR#17+)
 
+- **PR#19 — `src/krtour/map/dto/` Feature + 5 detail + ADR-027 적용**:
+  - `core/types.py` — `KST` / `kst_now()` (ADR-019)
+  - `dto/_enums.py` — FeatureKind 7 / FeatureStatus 6 / SourceRole 8
+  - `dto/coordinate.py` — Coordinate (Korea bounds, frozen)
+  - `dto/address.py` — Address basic
+  - `dto/urls.py` — FeatureUrls + RawDataRef
+  - `dto/opening_hours.py` — OpeningTime/Period/SpecialDay/FeatureOpeningHours
+  - `dto/place.py`/`event.py`/`route.py` — Detail 모델 + ROUTE_TYPES 9종 +
+    normalize_route_type
+  - **`dto/notice.py`** — NoticeDetail + **NOTICE_TYPES 14건** (ADR-027
+    `access_restriction`/`fire_alert` 포함) + normalize_notice_type
+  - **`dto/area.py`** — AreaDetail + AREA_KINDS 12종 (ADR-027 `hazard_zone`)
+  - `dto/feature.py` — Feature (ADR-018 detail discriminator, ADR-019 KST
+    aware enforcement, marker_color P-01~P-16 regex)
+  - `dto/__init__.py` — 38 공개 식별자 re-export
+  - `tests/unit/test_dto_{notice,area,feature}.py` (27 cases)
+  - **62 pytest passed** (전체 test suite)
 - **PR#18 — `src/krtour/map/category/` 144건 (ADR-023 이전 + ADR-027)**:
   - `_definitions.py` (~2110줄, kraddr-base 사본 + ADR-027 패치)
   - ADR-027 신규 3건: `LODGING_MOUNTAIN_SHELTER` (Tier 2) +
