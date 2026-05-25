@@ -1,7 +1,12 @@
 # CLAUDE.md — 1쪽 진입 요약
 
 이 파일은 Claude(Claude Code, Claude Agent SDK)가 가장 먼저 읽어야 할 1쪽 요약이다.
-정식 정책·결정은 `AGENTS.md`, `SKILL.md`, `docs/decisions.md`가 갖는다.
+정식 정책·결정은 **`AGENTS.md` (cross-AI-agent source of truth)**, `SKILL.md`,
+`docs/decisions.md`가 갖는다.
+
+> 다른 AI agent (GitHub Copilot / Cursor / Codex / Aider 등)는 각자 entry 파일
+> (`.github/copilot-instructions.md` / `.cursorrules` 등)을 통해 동일한 정책을
+> 따른다. 모두 `AGENTS.md`를 가리키는 thin pointer.
 
 ## 1. 이 저장소가 하는 일
 

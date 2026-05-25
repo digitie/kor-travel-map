@@ -2,6 +2,53 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-25 21:30 (claude)
+
+**작업**: CLAUDE.md WSL/개발환경 패러그래프를 다른 AI agent도 받아들일 수
+있게 cross-agent entry 파일 신설 + AGENTS.md를 source of truth로 명시.
+
+**컨텍스트**: 사용자가 "CLAUDE.md 에 반영한 내용을 다른 AI AGENT도 받아들일
+수 있게 문서화 해" 지시. CLAUDE.md는 Claude Code 전용 → GitHub Copilot /
+Cursor / Codex / Aider 등 다른 agent는 자기 entry 파일을 읽으므로 별도 sink
+필요. `AGENTS.md`가 표준 cross-agent entry이지만 다른 agent 자동 검출에는
+agent별 entry 파일이 더 확실.
+
+**신규 파일** (2):
+- `.github/copilot-instructions.md` — GitHub Copilot 자동 검출 위치. 본
+  라이브러리 진입 순서 + 개발 환경 (WSL ext4 base + 형제 라이브러리 동일
+  정책) + Top 5 금지 + 의존 스택 + 체크리스트 요약. AGENTS.md를 source of
+  truth로 명기.
+- `.cursorrules` — Cursor 자동 검출 위치. 동일 내용 요약 (조금 더 짧게).
+
+**변경 파일** (3):
+- `AGENTS.md` — top에 callout 추가: "cross-AI-agent 표준 entry, 다른 agent
+  entry 파일은 본 파일을 가리키는 thin pointer". 정책 변경 시 AGENTS.md
+  먼저 수정 후 sibling sync.
+- `CLAUDE.md` — 첫 문단에 callout: AGENTS.md가 cross-AI-agent source of
+  truth. 다른 agent entry 파일들이 모두 AGENTS.md를 가리킴 명기.
+- `docs/journal.md` — 본 엔트리.
+
+**왜 4 entry 파일이 필요한가**:
+- Claude Code → `CLAUDE.md` 자동 우선 (Claude 자체 convention)
+- GitHub Copilot → `.github/copilot-instructions.md` 자동 검출
+- Cursor → `.cursorrules` 자동 검출 (legacy `.cursor/rules/*.mdc`도 가능
+  하지만 `.cursorrules`가 가장 호환)
+- Codex / Aider / Continue / Windsurf / 기타 → `AGENTS.md` (de facto
+  cross-agent 표준)
+
+5개 파일이 모두 같은 메시지 (WSL ext4 base + Top 5 금지)를 전달하되,
+source of truth는 `AGENTS.md`. 정책 drift 방지를 위해 변경 시 sync 의무는
+AGENTS.md callout에 명기.
+
+**verification**:
+- 코드 변경 0 — pytest/lint 영향 없음.
+- 5 파일 (`AGENTS.md` / `CLAUDE.md` / `.github/copilot-instructions.md` /
+  `.cursorrules` / `README.md` §"개발 환경") 모두 동일 WSL 정책 stamping.
+
+**다음**: PR#25에 본 commit + 코멘트 추가 후 review/merge 대기.
+
+---
+
 ## 2026-05-25 21:00 (claude)
 
 **작업**: PR#25에 WSL ext4 base 정책 문서 명시 sweep. `python-kraddr-geo`

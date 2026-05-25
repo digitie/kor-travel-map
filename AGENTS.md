@@ -1,5 +1,11 @@
 # AGENTS.md
 
+> 본 파일은 **cross-AI-agent 표준 entry**다. Claude Code / GitHub Copilot /
+> Cursor / Codex / Aider / Continue / 기타 AI agent는 본 파일을 source of
+> truth로 한다. agent별 entry 파일 (`CLAUDE.md` / `.github/copilot-
+> instructions.md` / `.cursorrules` 등)은 본 파일을 가리키는 thin pointer다.
+> 정책 변경 시 본 파일을 먼저 수정한 뒤 sibling pointer 파일에 sync.
+
 ## 문서 언어 정책
 
 이 저장소의 모든 Markdown/RST 문서는 한국어로 작성한다. 공식 API 필드명, 코드 식별자,

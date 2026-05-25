@@ -1,0 +1,51 @@
+# Cursor 작업 가이드 — `python-krtour-map`
+
+본 파일은 **Cursor가 자동으로 읽는** 프로젝트별 룰이다. 다른 AI agent
+(Claude Code, GitHub Copilot, Codex 등)도 동일한 정책을 따른다 — source
+of truth는 `AGENTS.md`.
+
+## 진입 순서
+
+1. `AGENTS.md` — cross-agent 표준 entry (지시 우선순위, DO NOT 룰).
+2. `SKILL.md` — 도메인 어휘, 22개 DO NOT 룰.
+3. `CLAUDE.md` — Claude Code 1쪽 요약 (참고용).
+4. `README.md` — 프로젝트 정체성.
+5. `docs/sprints/README.md` — Sprint 계획.
+6. `docs/resume.md` + `docs/journal.md` 최신.
+
+## 개발 환경 (PC, WSL) — 필수
+
+- PC 개발은 **WSL ext4** 위에서 (`~/dev/python-krtour-map/`).
+- NTFS 마운트에서 직접 `git`/`pip`/`pytest`/`uvicorn`/`alembic` 실행 금지.
+- 형제 라이브러리 (`python-kraddr-geo` / `python-kraddr-base` /
+  `python-knps-api` 등)와 동일 정책.
+- 자세히는 `README.md` §"개발 환경 (PC, WSL)" + `AGENTS.md` + `docs/
+  dev-environment.md`.
+
+## 절대 금지 (Top 5)
+
+1. main 직접 push 금지 — feature branch + PR (ADR-021).
+2. `from krtour_map import ...` (flat) 금지 — `from krtour.map import ...`
+   (ADR-022, PEP 420 implicit namespace).
+3. provider adapter/wrapper 신규 생성 금지 (ADR-006).
+4. 의존 방향 역행 금지: `category → dto → core → infra → providers →
+   client → cli` (ADR-001/002, `krtour.map.api` 없음 — ADR-020).
+5. 공간 쿼리 술어에서 `ST_Transform` 금지 (인덱스 무효화, ADR-012).
+
+전체 22개 룰은 `SKILL.md` §4.
+
+## 의존 스택 (v2)
+
+PostgreSQL 16 + PostGIS 3.5 + pg_trgm + pgcrypto / SQLAlchemy 2 async +
+GeoAlchemy2 + asyncpg + psycopg[binary,pool]>=3.2 / GeoPandas + Shapely 2
++ GDAL / Pydantic v2 / FastAPI + Uvicorn / httpx + tenacity / Alembic.
+
+## 작업 후 체크리스트
+
+`pytest -q` + `ruff check` + `mypy --strict` + `lint-imports` +
+`docs/journal.md` + `docs/resume.md`.
+
+---
+
+정책 변경은 `AGENTS.md` 수정 후 본 파일 (+ `.github/copilot-instructions.md`)
+에 sync.
