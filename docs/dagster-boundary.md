@@ -64,12 +64,7 @@ async def feature_event_visitkorea_festivals(
         )
     )
 
-    # 3. 파일 (옵션)
-    file_sources = [fs for b in bundles for fs in b.file_sources]
-    if file_sources:
-        await krtour_map_client.upload_feature_files(file_sources)
-
-    # 4. 적재
+    # 3. 적재
     result = await krtour_map_client.load_feature_bundles(bundles)
     ctx.add_output_metadata(result.as_metadata())
 

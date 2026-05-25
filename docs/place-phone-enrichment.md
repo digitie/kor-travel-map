@@ -204,20 +204,29 @@ async def enrich_place_phones(
 
 ```python
 for candidate in used_candidates:
+    payload_hash = make_payload_hash(candidate.raw)
+    source_record_key = make_source_record_key(
+        provider=candidate.provider,
+        dataset_key="place_phone_enrichment",
+        source_entity_type="place_search_candidate",
+        source_entity_id=_candidate_id(candidate),
+        raw_payload_hash=payload_hash,
+    )
     sr = SourceRecord(
         provider=candidate.provider,
         dataset_key="place_phone_enrichment",
         source_entity_type="place_search_candidate",
         source_entity_id=_candidate_id(candidate),
-        raw_payload_hash=make_payload_hash(candidate.raw),
+        raw_payload_hash=payload_hash,
         raw_data=candidate.raw,
         fetched_at=fetched_at,
+        source_record_key=source_record_key,
     )
     await source_repo.upsert(sr)
     
     link = SourceLink(
         feature_id=feature.feature_id,
-        source_record_key=sr.key(),
+        source_record_key=source_record_key,
         source_role=SourceRole.ENRICHMENT,
         match_method="place_phone_search",
         confidence=candidate.total_confidence,

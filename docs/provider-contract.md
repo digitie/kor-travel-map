@@ -157,7 +157,7 @@ from krtour.map.dto import (
     Feature, FeatureKind, FeatureStatus,
     PlaceDetail,  # or EventDetail / ...
     SourceRecord, SourceLink, SourceRole,
-    RawDataRef, FeatureBundle, FeatureFileSource,
+    RawDataRef, FeatureBundle,
 )
 from krtour.map.core.ids import make_feature_id, make_source_record_key, make_payload_hash
 from krtour.map.core.providers import normalize_provider_name
@@ -233,19 +233,10 @@ def <entity>_to_bundle(item: <ProviderTypedModel>, *, fetched_at: datetime) -> F
         confidence=100,
         is_primary_source=True,
     )
-    file_sources = [
-        FeatureFileSource(
-            feature_id=feature_id,
-            source_url=url, role="gallery", display_order=i,
-            provider=PROVIDER, dataset_key=DATASET_KEY,
-            source_record_key=source_record_key,
-        )
-        for i, url in enumerate(item.image_urls or [])
-    ]
     return FeatureBundle(
-        feature=feature, detail=detail,
-        source_record=source_record, source_link=source_link,
-        file_sources=file_sources,
+        feature=feature,
+        source_record=source_record,
+        source_link=source_link,
     )
 
 
@@ -268,7 +259,8 @@ def <entity>_to_bundles(items: Iterable[<ProviderTypedModel>],
   `violation_type='F1_coord_outside_bjd'` 또는 `'coord_outside_korea'` 기록.
 - **payload 보존** — `SourceRecord.raw_data`에 provider 원문 dict 전체.
   `raw_payload_hash`가 다르면 새 source_record (schema drift 감지).
-- **media URL** — `FeatureFileSource` 리스트로 모으고, 실제 업로드는
+- **media URL** — PR#26 최소 `FeatureBundle`에는 포함하지 않는다.
+  `FeatureFileSource` DTO가 구현되는 후속 PR에서 리스트로 모으고, 실제 업로드는
   `client.upload_feature_files(sources)`가 별도 단계에서 수행.
 
 ## 7. 적재 흐름
@@ -282,14 +274,10 @@ async with AsyncKrtourMapClient(engine=engine, file_store=store, providers={...}
     # 2. 변환 (라이브러리 facade)
     bundles = list(client.providers.visitkorea.festival_to_bundles(items))
     
-    # 3. 파일 업로드 (옵션, 비동기 배치)
-    all_file_sources = [fs for b in bundles for fs in b.file_sources]
-    await client.upload_feature_files(all_file_sources)
-    
-    # 4. DB 적재
+    # 3. DB 적재
     result = await client.load_feature_bundles(bundles)
     
-    # 5. sync state 갱신
+    # 4. sync state 갱신
     await client.upsert_sync_state(ProviderSyncState(
         provider="python-visitkorea-api",
         dataset_key="visitkorea_festival_events",

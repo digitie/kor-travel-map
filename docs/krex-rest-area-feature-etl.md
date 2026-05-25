@@ -73,21 +73,21 @@ def krex_rest_area_to_bundle(item, *, fetched_at, reverse_geocoder=None):
             category="TRANSPORT_REST_AREA",
             marker_icon="car",
             marker_color="P-15",
+            detail=PlaceDetail(
+                feature_id=...,
+                place_kind="rest_area",
+                phones=[item.tel] if item.tel else [],
+                business_hours=_parse_business_hours(item.business_hours),
+                facility_info={
+                    "highway_name": item.highway_name,        # 예: "경부선"
+                    "direction": item.direction,              # 상행 / 하행
+                    "amenities": item.amenities,              # 리스트
+                    "ev_charger": item.has_ev_charger,
+                    "fuel_station": item.has_fuel,
+                    "restaurant_count": item.restaurant_count,
+                },
+            ),
             ...
-        ),
-        detail=PlaceDetail(
-            feature_id=...,
-            place_kind="rest_area",
-            phones=[item.tel] if item.tel else [],
-            business_hours=_parse_business_hours(item.business_hours),
-            facility_info={
-                "highway_name": item.highway_name,        # 예: "경부선"
-                "direction": item.direction,              # 상행 / 하행
-                "amenities": item.amenities,              # 리스트
-                "ev_charger": item.has_ev_charger,
-                "fuel_station": item.has_fuel,
-                "restaurant_count": item.restaurant_count,
-            },
         ),
         ...
     )

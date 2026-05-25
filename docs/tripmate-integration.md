@@ -194,12 +194,7 @@ async def feature_event_visitkorea_festivals(
         items, fetched_at=ctx.run.created_timestamp,
     ))
 
-    # 3. 파일 업로드
-    file_sources = [fs for b in bundles for fs in b.file_sources]
-    if file_sources:
-        await krtour_map_client.upload_feature_files(file_sources)
-
-    # 4. DB 적재
+    # 3. DB 적재
     result = await krtour_map_client.load_feature_bundles(bundles)
     ctx.log.info("loaded_festivals", extra=result.as_metadata())
 

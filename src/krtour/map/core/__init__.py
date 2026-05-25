@@ -37,7 +37,14 @@ from krtour.map.core.exceptions import (
     SourceRecordNotFoundError,
     ValidationError,
 )
-from krtour.map.core.ids import FEATURE_ID_HASH_LENGTH, make_feature_id
+from krtour.map.core.ids import (
+    FEATURE_ID_HASH_LENGTH,
+    PAYLOAD_HASH_DEFAULT_LENGTH,
+    SOURCE_RECORD_KEY_HASH_LENGTH,
+    make_feature_id,
+    make_payload_hash,
+    make_source_record_key,
+)
 from krtour.map.core.types import KST, kst_now
 
 __all__ = [
@@ -53,7 +60,11 @@ __all__ = [
     "ImportJobConflictError",
     "ProviderError",
     "FileStoreError",
-    # ids (PR#20, ADR-009)
+    # ids (PR#20, ADR-009 / PR#26 source key + payload hash)
     "make_feature_id",
+    "make_source_record_key",
+    "make_payload_hash",
     "FEATURE_ID_HASH_LENGTH",
+    "SOURCE_RECORD_KEY_HASH_LENGTH",
+    "PAYLOAD_HASH_DEFAULT_LENGTH",
 ]

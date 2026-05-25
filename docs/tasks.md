@@ -4,7 +4,14 @@
 
 ## 진행 중 (open PR)
 
-- **본 PR#25** (feat/pr25-knps-api-keyless-sync): python-knps-api PR#3+#4
+- **본 PR#26** (feat/pr26-source-dtos-and-id-helpers): review report P0-4 —
+  `make_source_record_key` + `make_payload_hash` + `SourceRecord` +
+  `SourceLink` + `FeatureBundle` DTO. core 의존 방향 (dto는 core 미import)
+  준수: `SourceRecord.key()` 메서드 두지 않고 호출자가 helper로 계산.
+  리뷰 후속으로 DB required 필드, bundle 교차 검증, payload hash strict
+  normalize, canonical docs 예시 정합까지 반영. Sprint 2 첫 provider 변환 함수
+  직전 필수 묶음.
+- **PR#25** (merged): python-knps-api PR#3+#4
   (keyless file-only, commit `06da125f`) 본 라이브러리 docs/pyproject 일괄
   반영. ADR-028 amendment §H 신설. `docs/knps-feature-etl.md` + `docs/forest-
   feature-etl.md §11` + `docs/external-apis.md §3.8.1` + `docs/provider-contract
