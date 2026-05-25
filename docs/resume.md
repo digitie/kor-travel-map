@@ -2,10 +2,18 @@
 
 ## 현재 상태
 
-**v2 Sprint 1 active** (T-014 사용자 승인 2026-05-25, PR#16). main은 orphan
-으로 v2 사양 새로 시작. v1은 `v1` 브랜치에 보존. **코드 작성 단계 진입 완료** —
-ADR 027~034 일괄 accepted, `pyproject.toml` `fail_under=50`. 후속 PR#17+로
-`src/krtour/map/` scaffolding 시작.
+**v2 Sprint 1 scaffolding 종료, Sprint 2 진입 준비** (PR#17~#26 머지 완료
+2026-05-25). main은 orphan으로 v2 사양 새로 시작. v1은 `v1` 브랜치에 보존.
+ADR **001~034 모두 accepted** (T-014 + ADR-028 amendment §H, knps-api keyless
+반영). `pyproject.toml` `fail_under=50` (Sprint 1 bar). Sprint 1 산출물:
+- `src/krtour/map/` PEP 420 namespace + 6 layer (category 144건 + dto Feature
+  + 5 detail + Coordinate + SourceRecord/Link + FeatureBundle + core 7 exceptions
+  + ID helpers `make_feature_id`/`make_source_record_key`/`make_payload_hash` +
+  infra `crs.py`/`db.py` skeleton)
+- CI workflows (`.github/workflows/{ci,lint,openapi}.yml`) + import-linter
+  4 계약 + testcontainers PostGIS 통합 테스트 베이스
+- review report (`docs/reports/pr-1-21-review.md`) P0 4건 해소 (PR#24/#26 +
+  Codex 후속 보강)
 
 **중요 신규 룰 (ADR-021~023, 2026-05-24)**:
 - main 직접 push 금지 — feature branch + PR만 (ADR-021).

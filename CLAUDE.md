@@ -24,13 +24,18 @@ FastAPI 의존이 없다.
 
 ## 2. 현 단계
 
-**v2 설계 단계 (Sprint 1 진입 직전)**. v1은 `v1` 브랜치 보존, main은
-orphan으로 새로 시작. **별도 요청 전까지 코드 작성 금지** — 사용자가 T-014
-(코드 작성 단계 진입) 승인 시 Sprint 1 PR로 해제. 본 단계 산출물은 문서/
-계약/결정 + skeleton placeholder뿐이다.
+**v2 Sprint 1 scaffolding 종료 / Sprint 2 진입 준비**. v1은 `v1` 브랜치
+보존, main은 orphan으로 v2 새로 시작. T-014 (코드 작성 단계 진입) 승인 +
+PR#17~#26 머지로 Sprint 1 산출물 완료:
+- `src/krtour/map/` PEP 420 namespace + category 144건 + dto (Feature +
+  5 detail + Coordinate + Source* + FeatureBundle) + core (exceptions +
+  ID helpers `make_feature_id`/`make_source_record_key`/`make_payload_hash`) +
+  infra skeleton (`crs.py` + `db.py`)
+- `.github/workflows/{ci,lint,openapi}.yml` + import-linter 4 계약 활성
+- review report (`docs/reports/pr-1-21-review.md`) P0 4건 해소
 
-ADR 현황: **accepted 001~026**, **proposed 027~034** (사용자 review 대기 →
-T-014 Sprint 1 진입 PR에 일괄 accepted 전환).
+ADR 현황: **001~034 모두 accepted** (T-014 Sprint 1 진입 PR + ADR-028
+amendment §H에서 027~034 일괄 전환, knps-api keyless 반영).
 
 Sprint 1~5 plan은 `docs/sprints/` 참조. **provider 9단계 구현 순서**
 (ADR-034): 축제 → 날씨 → 유가 → 휴게소 → 국립공원/트래킹 → 국가유산 →

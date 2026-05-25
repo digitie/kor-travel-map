@@ -91,10 +91,10 @@ PR은 불완전하다.
 # resume.md
 
 ## 현재 상태
-v2 설계 단계. 코드 작성 금지. 문서/계약/ADR만.
+v2 Sprint 1 scaffolding 종료, Sprint 2 진입 준비. ADR 001~034 모두 accepted.
 
 ## 다음 한 작업
-ADR-006 후속 — `docs/provider-contract.md`에 wrapper 금지 예시 보강.
+Sprint 2 prep — `infra/models.py` + Alembic 첫 revision.
 
 ## 진척도
 - [x] AGENTS.md / README / SKILL / CLAUDE
@@ -291,24 +291,22 @@ GitHub branch protection (운영자 수동 설정):
 (`docs/windows-reinstall-recovery.md` §4 포맷). 다음 에이전트/사람은 PR URL과
 `docs/resume.md`만 보면 바로 인수받을 수 있다.
 
-## 8. 코드 작성 금지 단계 (현재)
+## 8. 코드 작성 단계 (Sprint 1 종료, Sprint 2 진입 준비)
 
-본 단계에서는 `src/`, `tests/`, `alembic/`, `scripts/`, `sql/`에 코드를 작성하지
-않는다. 허용되는 변경:
+본 저장소는 T-014 승인 (2026-05-25, PR#16) 이후 **코드 작성 단계**다.
+Sprint 1 scaffolding 완료 — `src/krtour/map/` 6 layer (category 144건 + dto
++ core + infra + providers/client placeholder) + CI workflows + import-linter
+4 계약 활성. 신규 코드는 항상 PR (ADR-021).
 
-- `docs/` 신규/수정
-- `AGENTS.md`, `SKILL.md`, `CLAUDE.md`, `README.md`
-- `.env.example` 추가
-- `pyproject.toml` 의존성 placeholder
-- `.gitignore`, `.gitattributes`, `LICENSE`
-
-코드 작성 요청이 들어오면:
+기본 작업 절차:
 1. 사용자 의도 명확화 (어떤 모듈/계층/메서드인지)
-2. ADR이 필요한지 확인
+2. ADR이 필요한지 확인 (`docs/decisions.md` 001~034 모두 accepted, 신규는
+   035+)
 3. 테스트 우선 작성 (`docs/test-strategy.md` §12 우선순위)
-4. 구현
+4. 구현 (`pytest -q`/`ruff check`/`mypy --strict`/`lint-imports` 통과)
 5. 통합 테스트 + EXPLAIN 검증 (DB 닿는 경우)
-6. journal + resume
+6. `docs/journal.md` + `docs/resume.md` 업데이트 (+ ADR/CHANGELOG/OpenAPI
+   해당 시)
 
 ## 9. WSL ext4 vs NTFS 작업 흐름
 

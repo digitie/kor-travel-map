@@ -5,12 +5,15 @@
 **TripMate 하부 라이브러리**다. PostgreSQL + PostGIS + SQLAlchemy 2 async +
 GeoAlchemy2 + GeoPandas 위에서 동작한다.
 
-> **현재 상태 (v2 설계 단계 — Sprint 1 진입 직전)**: master/main 브랜치는
-> v2 사양으로 새로 시작했다. 이전(v1) 구현은 `v1` 브랜치에 보존되어 있다.
-> 본 단계는 **문서/설계 전용**이며 별도 요청 전에는 코드를 작성하지 않는다.
-> ADR 현황: accepted 001~026, proposed 027~034 (사용자 review 후 Sprint 1
-> 진입 PR에 일괄 accepted 전환 예정). Sprint 계획은 `docs/sprints/` 참조.
-> v1 산출물 요약은 `python-krtour-map-spec.docx`(저장소 루트, 약 80쪽) 참고.
+> **현재 상태 (v2 Sprint 1 scaffolding 종료, Sprint 2 진입 준비)**:
+> master/main 브랜치는 v2 사양으로 새로 시작했다. 이전(v1) 구현은 `v1`
+> 브랜치에 보존되어 있다. Sprint 1 scaffolding 완료 — `src/krtour/map/`
+> PEP 420 namespace + category 144건 + dto (Feature + 5 detail + Source*
+> + FeatureBundle) + core (exceptions + ID helpers) + infra skeleton +
+> CI/import-linter gate 활성. ADR 현황: **001~034 모두 accepted** (T-014
+> Sprint 1 진입 PR에서 027~034 일괄 전환). Sprint 계획은 `docs/sprints/`,
+> 다음 작업은 `docs/resume.md` 참조. v1 산출물 요약은
+> `python-krtour-map-spec.docx`(저장소 루트, 약 80쪽) 참고.
 
 ## 정체성
 

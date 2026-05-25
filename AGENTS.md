@@ -236,19 +236,23 @@ python -m pytest tests/integration -q
 python -m pytest -q
 ```
 
-## 코드 작성 금지 (현 단계)
+## 코드 작성 단계 (Sprint 1 종료, Sprint 2 진입 준비)
 
-설계·문서화 단계 동안에는 `src/`, `tests/`, `alembic/`, `scripts/`에 코드를
-작성하지 않는다. 별도의 코드 작성 요청이 있을 때까지 본 저장소는 문서·계약·결정의
-저장소다.
+본 저장소는 **T-014 (Sprint 1 진입)** 승인 (2026-05-25, PR#16) 이후
+**코드 작성 단계**다. Sprint 1 scaffolding 완료 (PR#17~#26 머지) — 모든
+proposed ADR (027~034)이 accepted 전환된 상태 (ADR-028 amendment §H 추가
+2026-05-25, knps-api keyless 반영).
 
-**해제 시점**: 사용자가 **T-014 (Sprint 1 진입)** 승인 → Sprint 1 PR로 모든
-proposed ADR (027/028/029/030/031/032/033/034) 일괄 accepted 전환 + `src/
-krtour/map/` scaffolding 시작. 자세히는 `docs/sprints/SPRINT-1.md`.
+**현재 상태 (2026-05-25, Sprint 1 종료)**:
+- `src/krtour/map/` 6 layer (category 144건 + dto Feature + 5 detail +
+  Coordinate + SourceRecord/Link + FeatureBundle + core 7 exceptions +
+  ID helpers + infra `crs.py`/`db.py` skeleton + providers/client placeholder)
+- `.github/workflows/{ci,lint,openapi}.yml` + import-linter 4 계약 활성
+- testcontainers PostGIS 통합 테스트 베이스
+- review report `docs/reports/pr-1-21-review.md` P0 4건 해소
 
-**현재 상태 (Sprint 1 active, 2026-05-25)**: 코드 작성 단계 진입 완료.
-PR#17부터 `src/krtour/map/` scaffolding 진행 중. Sprint 1 종료 시점에는
-`category/`/`dto/`/`core/`/`infra/` 모든 layer가 채워져야 한다.
+**다음 단계**: Sprint 2 (ADR-034 1-4단계 visitkorea/kma/opinet/krex) +
+진입 prep PR (`infra/models.py` + Alembic 첫 revision + `core/scoring.py`).
 
 **Sprint 1 진행 중 가이드** (`docs/sprints/SPRINT-1.md` §2 참조):
 - 모든 신규 코드는 `import-linter` 의존 방향 (`category → dto → core →
