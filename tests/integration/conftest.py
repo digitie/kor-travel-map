@@ -88,6 +88,11 @@ async def pg_engine(pg_container: Any) -> AsyncIterator[AsyncEngine]:
     async with engine.begin() as conn:
         for schema in _SCHEMAS:
             await conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema}"))
+        # postgis/postgis Docker image는 initdb 단계에서 postgis + postgis_topology를
+        # `public` schema에 자동 설치한다. ADR-008에 따라 `x_extension` schema로
+        # 재배치 — DROP CASCADE 후 재생성 (테스트 시작 시점이므로 안전).
+        await conn.execute(text("DROP EXTENSION IF EXISTS postgis_topology CASCADE"))
+        await conn.execute(text("DROP EXTENSION IF EXISTS postgis CASCADE"))
         for ext in _EXTENSIONS:
             await conn.execute(
                 text(f"CREATE EXTENSION IF NOT EXISTS {ext} WITH SCHEMA x_extension")
