@@ -2,6 +2,34 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-25 11:30 (codex)
+
+**작업**: PR#1~#21 신규 소스·문서 상세 리뷰 리포트 작성.
+
+**컨텍스트**: 사용자 요청으로 `origin/main` PR#21 merge 직후 상태를 기준으로
+GitHub PR metadata, merge commit first-parent history, 현재 `src/`/`docs/`/`tests/`
+상태를 따라가며 개선/보완 항목을 정리. 검토 중 PR#22가 open 상태로 CI/import-linter
+보완을 진행 중임을 별도 메모.
+
+**신규 파일**:
+- `docs/reports/pr-1-21-review.md` — PR별 타임라인, 코드·문서 정합성 이슈,
+  검증 결과, P0/P1/P2 보완안, 최종 동기화 메모.
+
+**발견**:
+- `Feature.detail` dict 입력 차단이 테스트 이름과 달리 완전하지 않음.
+- ADR-019 KST aware 정책이 일부 DTO datetime 필드와 README 예시에서 새고 있음.
+- README/SKILL/agent-guide/tasks/resume의 "현재 상태" 문단 일부가 Sprint 1 active
+  상태와 어긋남.
+- PR#21 기준 전체 ruff/import-linter gate는 아직 green이 아니며 PR#22가 보완 중.
+
+**최종 동기화**: 2026-05-25 11:28 KST `git fetch --all --prune` 재실행.
+`origin/main`은 `55c584c` 유지, PR#22는 updated 2026-05-25 02:28:47 UTC 기준
+open 상태.
+
+**다음**: 리뷰 리포트 PR 생성.
+
+---
+
 ## 2026-05-25 15:00 (claude)
 
 **작업**: Sprint 1 PR#21 — `src/krtour/map/infra/` skeleton: `crs.py`
