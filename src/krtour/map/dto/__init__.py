@@ -25,6 +25,7 @@ ADR 참조
 from __future__ import annotations
 
 from ._enums import FeatureKind, FeatureStatus, SourceRole
+from ._time import KST, check_aware_datetime, kst_now
 from .address import Address
 from .area import AREA_KINDS, AreaDetail
 from .coordinate import Coordinate
@@ -125,4 +126,8 @@ __all__ = [
     "normalize_route_type",
     # Feature 본체
     "Feature",
+    # KST aware datetime helper (PR#24, dto가 source of truth)
+    "KST",
+    "kst_now",
+    "check_aware_datetime",
 ]

@@ -99,3 +99,49 @@ def test_notice_detail_unknown_type_raises() -> None:
     """모르는 notice_type은 ValueError (Pydantic ValidationError로 wrap)."""
     with pytest.raises(ValidationError):  # wrapping ValueError
         NoticeDetail(feature_id="x", notice_type="totally_unknown")
+
+
+# ── ADR-019 datetime aware (review report P0-2) ─────────────────────────
+
+
+@pytest.mark.unit
+def test_notice_detail_naive_valid_start_time_rejected() -> None:
+    """``valid_start_time``에 naive datetime은 ValidationError (ADR-019)."""
+    from datetime import datetime
+
+    with pytest.raises(ValidationError, match="timezone-aware"):
+        NoticeDetail(
+            feature_id="x",
+            notice_type="safety",
+            valid_start_time=datetime(2026, 1, 1),  # naive
+        )
+
+
+@pytest.mark.unit
+def test_notice_detail_naive_valid_end_time_rejected() -> None:
+    """``valid_end_time``에 naive datetime은 ValidationError (ADR-019)."""
+    from datetime import datetime
+
+    with pytest.raises(ValidationError, match="timezone-aware"):
+        NoticeDetail(
+            feature_id="x",
+            notice_type="safety",
+            valid_end_time=datetime(2026, 1, 1),  # naive
+        )
+
+
+@pytest.mark.unit
+def test_notice_detail_aware_datetime_accepted() -> None:
+    """KST/UTC aware datetime 모두 허용 (변환은 호출자 책임)."""
+    from datetime import UTC, datetime
+    from zoneinfo import ZoneInfo
+
+    kst = ZoneInfo("Asia/Seoul")
+    detail = NoticeDetail(
+        feature_id="x",
+        notice_type="safety",
+        valid_start_time=datetime(2026, 1, 1, tzinfo=kst),
+        valid_end_time=datetime(2026, 1, 2, tzinfo=UTC),
+    )
+    assert detail.valid_start_time is not None
+    assert detail.valid_end_time is not None

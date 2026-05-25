@@ -7,6 +7,20 @@
 
 ### Sprint 1 scaffolding (2026-05-25, PR#17+)
 
+- **PR#24 — DTO strictness P0 (Sprint 2 진입 전 차단)**:
+  Review report (`docs/reports/pr-1-21-review.md`, PR#23 DRAFT) P0-1/2/3 해소.
+  - `Feature.detail` `mode="before"` dict 거부 (Pydantic union dict coercion
+    차단, ADR-018 진짜 강제)
+  - 모든 DTO datetime aware validator 일관 적용:
+    - `Feature.created_at/updated_at/deleted_at` (이전 PR#19)
+    - `NoticeDetail.valid_start_time/valid_end_time` (신규)
+    - `RawDataRef.fetched_at` (신규)
+  - `dto/_time.py`에 `check_aware_datetime()` 공용 helper 추가 + 모든 DTO에
+    적용. ADR-019 해석 명시: "aware면 OK, naive 거부" (KST 변환은 provider 책임)
+  - `Feature.category` `^\d{8}$` 정규식 validator (ADR-023 PlaceCategoryCode
+    8자리). strict known-code는 후속 PR (transitional)
+  - 신규 tests: `test_dto_time.py` (11 case) + dict reject 3건 split +
+    category 8자리 2건 + notice datetime 3건. 141 passed total.
 - **PR#22 — CI workflows + import-linter 활성화 (Sprint 1 scaffolding 종료)**:
   - `.github/workflows/ci.yml` — pytest unit + integration (testcontainers
     PostGIS, ADR-007) + coverage XML, Python 3.11/3.12/3.13 matrix +

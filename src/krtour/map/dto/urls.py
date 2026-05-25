@@ -5,9 +5,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import AnyUrl, BaseModel, ConfigDict, Field
+from pydantic import AnyUrl, BaseModel, ConfigDict, Field, field_validator
 
 from ._enums import SourceRole
+from ._time import check_aware_datetime
 
 __all__ = ["FeatureUrls", "RawDataRef"]
 
@@ -46,3 +47,9 @@ class RawDataRef(BaseModel):
     fetched_at: datetime | None = None
     payload_hash: str | None = None
     extra: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("fetched_at")
+    @classmethod
+    def _check_aware(cls, value: datetime | None) -> datetime | None:
+        """ADR-019 — naive datetime 입력은 ValidationError (review report P0-2)."""
+        return check_aware_datetime(value)

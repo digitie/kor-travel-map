@@ -103,10 +103,30 @@ def test_feature_detail_kind_mismatch_raises() -> None:
 
 
 @pytest.mark.unit
-def test_feature_detail_dict_rejected() -> None:
-    """ADR-018 — detail에 자유 dict 입력 금지."""
-    with pytest.raises(ValidationError):  # Pydantic validation
+def test_feature_detail_dict_rejected_with_complete_keys() -> None:
+    """ADR-018 — 완전한 PlaceDetail 키를 가진 dict도 거부 (mode=before).
+
+    review report P0-1: 이전 테스트는 ``feature_id`` 누락으로 우연히 실패했음.
+    완전한 키 셋을 가진 dict가 ``Pydantic union`` coercion으로 ``PlaceDetail``로
+    변환되는 path를 막아야 함.
+    """
+    complete_dict = {"feature_id": "place:1", "place_kind": "cafe"}
+    with pytest.raises(ValidationError, match="dict 입력 금지"):
+        _make_place_feature(detail=complete_dict)  # type: ignore[arg-type]
+
+
+@pytest.mark.unit
+def test_feature_detail_dict_rejected_partial() -> None:
+    """ADR-018 — partial dict도 마찬가지로 거부."""
+    with pytest.raises(ValidationError, match="dict 입력 금지"):
         _make_place_feature(detail={"place_kind": "cafe"})  # type: ignore[arg-type]
+
+
+@pytest.mark.unit
+def test_feature_detail_dict_rejected_empty() -> None:
+    """ADR-018 — 빈 dict도 거부."""
+    with pytest.raises(ValidationError, match="dict 입력 금지"):
+        _make_place_feature(detail={})  # type: ignore[arg-type]
 
 
 @pytest.mark.unit
@@ -200,6 +220,32 @@ def test_feature_utc_aware_accepted() -> None:
     utc_now = datetime.now(UTC)
     f = _make_place_feature(created_at=utc_now)
     assert f.created_at == utc_now
+
+
+# ── category (review report P0-3) ────────────────────────────────────────
+
+
+@pytest.mark.unit
+def test_feature_category_8digit_accepted() -> None:
+    """8자리 숫자 category는 허용."""
+    f = _make_place_feature(category="02020101")
+    assert f.category == "02020101"
+
+
+@pytest.mark.unit
+def test_feature_category_non_8digit_rejected() -> None:
+    """8자리 아닌 category는 거부 (ADR-023 + review report P0-3)."""
+    for bad in (
+        "",  # 빈 문자열
+        "1234567",  # 7자리
+        "123456789",  # 9자리
+        "0202010a",  # 영문 섞임
+        "PLACE_RESTAURANT",  # ALL CAPS legacy
+        "02-02-01-01",  # 구분자 포함
+        "  02020101",  # 공백
+    ):
+        with pytest.raises(ValidationError, match="8자리"):
+            _make_place_feature(category=bad)
 
 
 # ── marker_color ─────────────────────────────────────────────────────────

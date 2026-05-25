@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import Final
+from typing import Any, Final
 
 from pydantic import (
     BaseModel,
@@ -24,7 +24,7 @@ from pydantic import (
 )
 
 from ._enums import FeatureKind, FeatureStatus
-from ._time import kst_now
+from ._time import check_aware_datetime, kst_now
 from .address import Address
 from .area import AreaDetail
 from .coordinate import Coordinate
@@ -49,6 +49,14 @@ _DETAIL_MODELS: Final[dict[FeatureKind, type[BaseModel]]] = {
 
 # `marker_color` regex — `P-01` ~ `P-16`만 허용.
 _MARKER_COLOR_REGEX: Final[re.Pattern[str]] = re.compile(r"^P-(0[1-9]|1[0-6])$")
+
+# `category` 8자리 영숫자 (PlaceCategoryCode value, ADR-023 + category._definitions).
+# 예: "01010100" (식당 > 한식 > ...), "WEATHER_TEMPERATURE" 등 비표준은 거부.
+# PR#24 review report P0-3: ``min_length=1``만 보던 검증을 8자리로 강화.
+# **strict 미적용**: known PlaceCategoryCode value 검증은 category 모듈 import +
+# Sprint 2 첫 provider 적재 후 별도 PR로 — 미지원 코드를 임시 허용해 fallback
+# 룰 결정 시간을 확보 (review report P0-3 "transitional" 옵션 선택).
+_CATEGORY_REGEX: Final[re.Pattern[str]] = re.compile(r"^\d{8}$")
 
 
 class Feature(BaseModel):
@@ -79,8 +87,7 @@ class Feature(BaseModel):
     coord: Coordinate | None = None
     address: Address = Field(default_factory=Address)
     category: str = Field(
-        min_length=1,
-        description="``krtour.map.category.PlaceCategoryCode`` value 8자리 (ADR-023).",
+        description="``krtour.map.category.PlaceCategoryCode`` value 8자리 숫자 (ADR-023).",
     )
     urls: FeatureUrls = Field(default_factory=FeatureUrls)
     marker_icon: str = Field(min_length=1, description="Maki icon name.")
@@ -112,17 +119,46 @@ class Feature(BaseModel):
             )
         return value
 
+    @field_validator("category")
+    @classmethod
+    def _check_category_format(cls, value: str) -> str:
+        """ADR-023 — ``Feature.category``는 ``PlaceCategoryCode`` 8자리 숫자.
+
+        review report P0-3: 전엔 ``min_length=1``만 봤으나 provider 변환 전에
+        format 차단. **strict known-code 검증은 후속 PR**로 (transitional —
+        unknown 8자리는 임시 허용).
+        """
+        if not _CATEGORY_REGEX.match(value):
+            raise ValueError(
+                f"category는 8자리 숫자 (PlaceCategoryCode, ADR-023), got {value!r}."
+            )
+        return value
+
+    @field_validator("detail", mode="before")
+    @classmethod
+    def _reject_dict_detail(cls, value: Any) -> Any:
+        """ADR-018 — ``detail``에 raw dict 입력 금지.
+
+        Pydantic은 dict를 union 멤버로 자동 coerce하므로 ``mode="before"``로
+        type check를 선행. ``None`` 또는 detail 모델 인스턴스만 허용.
+
+        review report P0-1: 기존 ``after`` validator는 dict가 이미 model로
+        coerce된 상태에서 isinstance 검사를 수행 → 자유 dict 입력이 ADR-018
+        gate를 통과하는 문제. ``mode="before"``로 차단.
+        """
+        if isinstance(value, dict):
+            raise ValueError(
+                "Feature.detail에 dict 입력 금지 (ADR-018). "
+                "PlaceDetail/EventDetail/NoticeDetail/RouteDetail/AreaDetail "
+                "인스턴스를 명시적으로 생성해서 전달."
+            )
+        return value
+
     @field_validator("created_at", "updated_at", "deleted_at")
     @classmethod
     def _check_kst_aware(cls, value: datetime | None) -> datetime | None:
         """ADR-019 — naive datetime 입력은 ValidationError."""
-        if value is None:
-            return None
-        if value.tzinfo is None:
-            raise ValueError(
-                "datetime must be timezone-aware (KST). naive datetime은 금지 (ADR-019)."
-            )
-        return value
+        return check_aware_datetime(value)
 
     @model_validator(mode="after")
     def _check_detail_matches_kind(self) -> Feature:
