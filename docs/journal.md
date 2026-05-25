@@ -62,9 +62,10 @@ DTOs)이 본 라이브러리 docs와 어긋남 — sync 필요.
   적재 PR 이전 결정 필요.
 
 **verification**:
-- `python -m pytest tests/ -q --ignore=tests/integration` 재실행 — 143 passed
-  기대 (PR#24 141 + 신규 2).
-- ruff/mypy/import-linter 재실행.
+- GitHub Actions (`a646db5`) — lint, openapi-drift, pytest Python 3.11/3.12/
+  3.13 모두 green.
+- 로컬: `.venv/bin/python -m ruff check src/ tests/`, `git diff --check`,
+  `compileall src/krtour/map`, DTO smoke 통과.
 
 **다음 PR**:
 - **PR#26** (review report P0-4): `make_source_record_key` + `make_payload_hash`
