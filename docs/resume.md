@@ -49,21 +49,28 @@ PR#22 CI/import-linter merge 후 gate 확인. PR#22 merge 후 PR#23 리포트
       정규화) + `tests/integration/conftest.py` (testcontainers PostGIS) +
       `test_pg_smoke.py` (extension 격리 + ST_Transform 정합). pyproj>=3.6
       dep. 25 unit + 6 integration tests.
-- [x] PR#22 `.github/workflows/{ci,lint,openapi}.yml` +
-      import-linter 4 계약 활성화 + `tests/lint/test_import_linter.py`.
-      **ADR-002 위반 1건 실 해소** — PR#19에서 `KST`/`kst_now`를
-      `core/types.py`에 두면서 `dto/feature.py`가 core 역참조했던 것을
-      `dto/_time.py`로 이전 (공개 API preserve). ruff/mypy/import-linter
-      all green. **Sprint 1 scaffolding 마지막 PR, 2026-05-25 merge.**
-- [x] PR#23 `docs/reports/pr-1-21-review.md` — PR#1~#21 신규 소스·문서
-      상세 리뷰 리포트. PR#22 merge 후 충돌 해결 완료.
-- [ ] 다음 구현 PR 첫 적재 통합 테스트 (Sprint 2 직전 — `infra/models.py` +
-      첫 provider feature_repo + Alembic migration 첫 revision). 또는
-      SPRINT-2.md 활성화로 직접 Sprint 2 진입 (사용자 결정).
+- [x] PR#22 `.github/workflows/{ci,lint,openapi}.yml` + import-linter 4 계약
+      활성화 + `tests/lint/test_import_linter.py`. **ADR-002 위반 1건 실 해소**
+      — `dto/_time.py` 분리. ruff/mypy/import-linter all green. **Sprint 1
+      scaffolding 마지막 PR, 2026-05-25 merge.**
+- [x] PR#23 `docs/reports/pr-1-21-review.md` — PR#1~#21 신규 소스·문서 상세
+      리뷰 리포트. P0 4건 + P1 docs drift + P2 안정화 식별. PR#22 merge 후
+      충돌 해결 완료, merged.
+- [x] **PR#24 (현재 open)** review report P0-1/2/3 해소: `Feature.detail`
+      mode=before dict 거부 + 모든 DTO datetime aware validator (NoticeDetail
+      valid_* + RawDataRef.fetched_at) + 8자리 category 정규식.
+      `dto/_time.py`에 `check_aware_datetime()` 공용 helper. 141 pytest
+      passed, all lint green.
+- [ ] PR#25 (review report P0-4): ID helper 확장 (`make_source_record_key`,
+      `make_payload_hash`) + `FeatureBundle` + `SourceRecord` + `SourceLink`
+      DTO. Sprint 2 첫 provider 변환 직전 필수.
+- [ ] PR#26 (P1): docs drift sweep — README/SKILL/agent-guide/tasks의
+      "Sprint 1 진입 직전" / "코드 작성 금지" 잔재 문단을 Sprint 1 active/
+      종료 상태로 갱신.
 - [ ] **Sprint 2 첫 PR** (ADR-034 1단계): `providers/visitkorea/` 축제
       + `infra/models.py` SQLAlchemy 매핑 + `infra/feature_repo.py` raw SQL
       + Alembic migration 첫 revision + `core/scoring.py` ADR-016 Record
-      Linkage (Coordinate 의존).
+      Linkage.
 
 ## 진척도
 

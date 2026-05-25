@@ -4,7 +4,14 @@
 
 ## 진행 중 (open PR)
 
-- **본 PR#22** (feat/sprint1-pr22-ci-workflows-import-linter):
+- **본 PR#24** (feat/pr24-dto-strictness-p0): review report P0-1/2/3 해소 —
+  `Feature.detail` mode=before dict 거부 + 모든 DTO datetime aware validator
+  (NoticeDetail valid_*, RawDataRef.fetched_at) + `Feature.category` 8자리
+  정규식. `dto/_time.py`에 `check_aware_datetime()` 공용 helper. 141 pytest
+  passed, ruff/mypy/import-linter all green.
+- **PR#23** (docs/pr1-21-review-report, DRAFT): PR#1~#21 종합 리뷰 리포트
+  (`docs/reports/pr-1-21-review.md`). P0~P2 보완안 식별.
+- **PR#22** (feat/sprint1-pr22-ci-workflows-import-linter):
   `.github/workflows/{ci,lint,openapi}.yml` 활성화 + import-linter 4 계약
   활성화 (`tests/lint/test_import_linter.py`) + ADR-002 위반 1건 실 해소
   (`KST`/`kst_now` 정의 `core/types.py` → `dto/_time.py` 이전, 공개 API

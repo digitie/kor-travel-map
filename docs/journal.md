@@ -2,6 +2,83 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-25 19:00 (claude)
+
+**작업**: PR#24 DTO strictness P0 (Sprint 2 진입 전 차단) — review report
+(PR#23 merged, `docs/reports/pr-1-21-review.md`) P0-1/2/3 해소.
+
+**컨텍스트**: PR#22 머지(16:00) → PR#23 codex 리뷰 리포트 머지(18:08) 후
+사용자 "다음 작업 진행" + PR#24-26 분할 채택. PR#24는 DTO strictness 3건 묶음 —
+Sprint 2 첫 provider 변환 함수 직전 closeable. PR#24 push 후 PR#23 머지로
+`docs/journal.md` + `docs/resume.md` 충돌 발생 → rebase 해결.
+
+**review report P0 항목 해소**:
+- **P0-1 `Feature.detail` dict 입력 차단**: 기존 `@model_validator(after)`는
+  Pydantic union이 dict를 model로 자동 coerce한 *후* isinstance 검사 → 자유
+  dict 입력이 ADR-018 gate를 통과하던 문제. 해소: `@field_validator("detail",
+  mode="before")` 추가로 raw dict 즉시 거부.
+- **P0-2 datetime aware 정책 일관 적용**: `Feature.created_at/updated_at/
+  deleted_at`만 검증하던 것을 `NoticeDetail.valid_start_time/valid_end_time`
+  + `RawDataRef.fetched_at`까지 확장. `dto/_time.py`에 공용 `check_aware_
+  datetime()` helper 추가 — 매 모델마다 재구현 회피.
+- **P0-3 `Feature.category` 8자리 pattern**: 기존 `min_length=1`만 보던 검증을
+  `^\d{8}$` 정규식으로 강화 (ADR-023 PlaceCategoryCode value format). strict
+  known-code 검증은 후속 PR — provider 입력 fallback 룰 결정 시간 확보
+  (transitional 옵션).
+
+**신규 파일** (1):
+- `tests/unit/test_dto_time.py` (11 case) — `KST` 상수 / `kst_now()` aware /
+  `check_aware_datetime()` (KST/UTC accept, None pass, naive reject) +
+  `RawDataRef.fetched_at` aware/naive/None.
+
+**변경 파일** (6):
+- `src/krtour/map/dto/_time.py` — `check_aware_datetime(value)` 공용 helper
+  추가. docstring에 ADR-019 정책 (aware = any tz, naive = reject) 명시.
+- `src/krtour/map/dto/feature.py`:
+  - `Feature.detail` mode=before dict 거부 validator
+  - `Feature.category` 8자리 정규식 validator (`_CATEGORY_REGEX`)
+  - `Feature.created_at/updated_at/deleted_at` validator → 공용 helper 사용
+  - `category` Field에서 `min_length=1` 제거 (regex가 length도 강제)
+  - `typing.Any` import (validator return type)
+- `src/krtour/map/dto/notice.py` — `valid_start_time/valid_end_time` aware
+  validator 추가.
+- `src/krtour/map/dto/urls.py` — `RawDataRef.fetched_at` aware validator 추가.
+- `src/krtour/map/dto/__init__.py` — `KST`/`kst_now`/`check_aware_datetime`
+  공개 API 추가.
+- `tests/unit/test_dto_feature.py`:
+  - `test_feature_detail_dict_rejected` → 3건으로 분리 (complete keys / partial
+    / empty) — 모두 `mode=before` 차단 검증
+  - `test_feature_category_8digit_accepted` + `_non_8digit_rejected` 신규
+- `tests/unit/test_dto_notice.py` — naive valid_start_time / valid_end_time
+  reject + KST/UTC aware accept 케이스 3건 추가.
+
+**verification**:
+- `python -m pytest tests/ -q --ignore=tests/integration` → **141 passed**
+  (125 + 16 신규).
+- `python -m ruff check src/ tests/` → All checks passed
+- `python -m mypy --strict -p krtour.map` → Success, 26 source files
+- import-linter → 4 contracts kept, 0 broken
+
+**ADR 적용**:
+- ADR-018 — `Feature.detail` dict 입력 진짜 차단 (이전엔 우연한 ValidationError에
+  의존).
+- ADR-019 — datetime aware 정책 일관 적용. ADR 문구 해석: "aware면 OK, naive
+  거부" (any tz 허용, KST 변환은 호출자 책임). Sprint 2 provider 변환 함수에서
+  KST로 normalize.
+- ADR-023 — `Feature.category` 8자리 PlaceCategoryCode value format 강제
+  (transitional — known-code strict는 후속 PR).
+
+**다음 PR (review report P0/P1)**:
+- **PR#25** (P0-4): ID helper 확장 (`make_source_record_key`,
+  `make_payload_hash`) + `FeatureBundle` + `SourceRecord` + `SourceLink` DTO.
+- **PR#26** (P1): docs drift sweep — README/SKILL/agent-guide/tasks/resume의
+  "Sprint 1 진입 직전" / "코드 작성 금지" 문단을 Sprint 1 active/종료 상태로
+  갱신.
+- 이후 **Sprint 2 1단계**: `providers/visitkorea/` 축제 + `infra/models.py`
+  + Alembic migration 첫 revision.
+
+---
+
 ## 2026-05-25 18:08 (codex)
 
 **작업**: PR#1~#21 신규 소스·문서 상세 리뷰 리포트 충돌 해결.

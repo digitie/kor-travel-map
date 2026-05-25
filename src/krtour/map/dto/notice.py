@@ -16,6 +16,8 @@ from typing import Any, Final
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from ._time import check_aware_datetime
+
 __all__ = [
     # NoticeDetail 본체
     "NoticeDetail",
@@ -194,3 +196,13 @@ class NoticeDetail(BaseModel):
         if not isinstance(value, str):
             raise TypeError(f"notice_type must be a string, got {type(value).__name__}.")
         return normalize_notice_type(value)
+
+    @field_validator("valid_start_time", "valid_end_time")
+    @classmethod
+    def _check_aware(cls, value: datetime | None) -> datetime | None:
+        """ADR-019 — naive datetime 입력은 ValidationError.
+
+        review report P0-2: PR#19 시점엔 ``Feature`` timestamp만 검증했지만
+        notice의 효력 기간 datetime도 동일 정책 적용.
+        """
+        return check_aware_datetime(value)
