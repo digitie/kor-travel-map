@@ -7,6 +7,31 @@
 
 ### Sprint 1 scaffolding (2026-05-25, PR#17+)
 
+- **PR#26 — review P0-4 ID helpers + SourceRecord/Link/Bundle DTO**:
+  Sprint 2 첫 provider 변환 함수 직전 필수 묶음.
+  - `src/krtour/map/core/ids.py` 확장:
+    - `make_source_record_key(*, provider, dataset_key, source_entity_type,
+      source_entity_id, raw_payload_hash) -> str` — `sr_{sha1[:20]}` 포맷
+      (`docs/data-model.md §11`).
+    - `make_payload_hash(data, *, length=32) -> str` — canonical JSON 직렬화
+      (`sort_keys` + `separators=(",", ":")` + `ensure_ascii=False` +
+      `default=str`) → SHA256 hexdigest prefix. 1~64 hex char 길이 조정 가능.
+    - `SOURCE_RECORD_KEY_HASH_LENGTH = 20`, `PAYLOAD_HASH_DEFAULT_LENGTH = 32`
+      constants.
+  - `src/krtour/map/dto/source.py` 신설 — `SourceRecord` (provider raw payload
+    추적, 고유성 `(provider, dataset_key, source_entity_type, source_entity_id,
+    raw_payload_hash)`) + `SourceLink` (Feature ↔ Source 1:N 매핑,
+    `source_role`/`match_method`/`confidence`/`is_primary_source`).
+    datetime aware validator (ADR-019).
+  - `src/krtour/map/dto/bundle.py` 신설 — `FeatureBundle` (feature +
+    source_record + source_link 3개 필수). weather/price/file_sources 필드는
+    Sprint 2 DTO 추가와 함께 enable.
+  - **dto는 core를 import하지 않는다** (ADR-001/002 — import-linter 자동
+    차단). `SourceRecord.key()` 메서드 두지 않음 — 호출자가
+    `make_source_record_key(...)`로 계산해서 박는다.
+  - 신규 tests: `test_ids_extended.py` 24 case + `test_dto_source_bundle.py`
+    16 case (e2e flow: raw_payload → payload_hash → source_record_key →
+    feature_id → FeatureBundle 검증). **191 passed**.
 - **PR#25 — KNPS keyless sync (python-knps-api PR#3+#4 반영)**:
   upstream knps-api commit `06da125f` 변경 본 라이브러리 docs/pyproject 일괄
   반영. **ADR-028 amendment §H** 신설 (keyless + file-only).

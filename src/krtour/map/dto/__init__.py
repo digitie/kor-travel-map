@@ -29,6 +29,7 @@ from ._enums import FeatureKind, FeatureStatus, SourceRole
 from ._time import KST, check_aware_datetime, kst_now
 from .address import Address
 from .area import AREA_KINDS, AreaDetail
+from .bundle import FeatureBundle
 from .coordinate import Coordinate
 from .event import EventDetail
 from .feature import Feature
@@ -73,6 +74,7 @@ from .route import (
     RouteDetail,
     normalize_route_type,
 )
+from .source import SourceLink, SourceRecord
 from .urls import FeatureUrls, RawDataRef
 
 __all__ = [
@@ -133,4 +135,8 @@ __all__ = [
     "KST",
     "kst_now",
     "check_aware_datetime",
+    # source/bundle (PR#26)
+    "SourceRecord",
+    "SourceLink",
+    "FeatureBundle",
 ]

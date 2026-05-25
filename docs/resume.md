@@ -59,15 +59,15 @@ PR#22 CI/import-linter merge 후 gate 확인. PR#22 merge 후 PR#23 리포트
 - [x] PR#24 (merged) review report P0-1/2/3 해소: `Feature.detail` mode=before
       dict 거부 + 모든 DTO datetime aware validator + 8자리 category 정규식.
       `dto/_time.py`에 `check_aware_datetime()` 공용 helper.
-- [x] **PR#25 (현재 open)** python-knps-api PR#3+#4 (keyless file-only,
-      `06da125f`) 본 라이브러리 docs/pyproject 일괄 반영. ADR-028 amendment §H
-      신설. knps-feature-etl.md/forest-feature-etl.md §11/external-apis.md/
-      provider-contract.md 정정. 14 dataset 4건 신규 + 4건 source 이전 (notice/
-      photos/recommended_courses는 별도 source). DTO에 `protected_area` /
-      `facility_road` 표준값 추가.
-- [ ] PR#26 (review report P0-4): ID helper 확장 (`make_source_record_key`,
-      `make_payload_hash`) + `FeatureBundle` + `SourceRecord` + `SourceLink`
-      DTO. Sprint 2 첫 provider 변환 직전 필수.
+- [x] PR#25 (merged) python-knps-api PR#3+#4 (keyless file-only, `06da125f`)
+      반영. ADR-028 amendment §H. 14 dataset 정정. DTO에 `protected_area` /
+      `facility_road` 표준값 추가 (사용자 별도 적용).
+- [x] **PR#26 (현재 open)** review report P0-4 — `make_source_record_key` +
+      `make_payload_hash` (`docs/data-model.md §11` 명세) + `SourceRecord` +
+      `SourceLink` + `FeatureBundle` DTO. dto는 core 미import 원칙 준수
+      (`SourceRecord.key()` 메서드 두지 않음 — 호출자가 helper로 계산).
+      191 pytest passed (50 신규), 4 import-linter contracts kept,
+      mypy strict clean.
 - [ ] PR#27 (review report P1): docs drift sweep — README/SKILL/agent-guide/
       tasks의 "Sprint 1 진입 직전" / "코드 작성 금지" 잔재 문단을 Sprint 1
       active/종료 상태로 갱신.
