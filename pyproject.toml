@@ -38,6 +38,7 @@ dependencies = [
 dev = [
   "pytest>=8",
   "pytest-asyncio>=0.23",
+  "pytest-cov>=5",
   "hypothesis>=6.100",
   "ruff>=0.5",
   "mypy>=1.10",
@@ -101,11 +102,21 @@ python_version = "3.11"
 strict = true
 warn_unused_ignores = true
 plugins = ["pydantic.mypy"]
+# ADR-022 — krtour는 PEP 420 implicit namespace이므로 명시적으로 활성화.
+# pip install -e . 후에도 mypy는 namespace package를 자동 인식 못함.
+namespace_packages = true
+explicit_package_bases = true
+mypy_path = "src"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = [".", "src"]
 asyncio_mode = "auto"
+# session-scope async fixture (pg_engine)와 function-scope async test가 동일
+# event loop을 공유해야 함 — pytest-asyncio 0.23+ 권장 설정. 미설정 시 testcontainers
+# PostGIS 통합 테스트에서 "Task got Future attached to a different loop" 발생.
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
 addopts = "-ra --strict-markers --strict-config"
 markers = [
   "unit: 단위 테스트 — DB 없이 Fake repo만",
@@ -146,12 +157,15 @@ fail_under = 50  # ADR-032 Sprint 1 bar (T-014 Sprint 1 진입과 함께 0→50 
 
 [tool.importlinter]
 root_package = "krtour.map"
+# forbidden contracts에 외부 패키지가 포함됨 (fastapi/uvicorn/cachetools/kafka).
+include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "layered architecture"
 type = "layers"
+# krtour.map.cli는 Sprint 4~5에서 추가 — 그때 layers 첫 줄에 다시 박는다.
+# 의존 방향: category → dto → core → infra → providers → client → (cli)
 layers = [
-  "krtour.map.cli",
   "krtour.map.client",
   "krtour.map.providers",
   "krtour.map.infra",

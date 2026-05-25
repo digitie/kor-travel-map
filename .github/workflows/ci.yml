@@ -1,0 +1,61 @@
+name: ci
+
+# pytest unit + integration (testcontainers PostGIS via Docker-in-Docker) + coverage.
+# - unit: 모든 environment에서 실행 (Docker 불필요).
+# - integration: tests/integration/ — testcontainers가 PostGIS 컨테이너 자동 부팅
+#   (`postgis/postgis:16-3.5-alpine`, ADR-007). GHA runner는 Docker daemon 자동 제공.
+# - coverage: ADR-032 단계적 상향 schedule, 현재 fail_under=50 (pyproject.toml).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# 동일 PR/branch 안에서 push 연속 시 이전 실행을 취소해 CI 시간 절약.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: pytest (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install package + dev/geo extras
+        run: |
+          python -m pip install --upgrade pip
+          # geo extra는 GDAL system dependency 필요 — Sprint 2부터 별도 GDAL setup job
+          pip install -e ".[dev]"
+
+      - name: Run unit tests (without integration)
+        run: |
+          pytest tests/ --ignore=tests/integration -q \
+            --cov=src/krtour/map --cov-report=term-missing --cov-report=xml
+
+      - name: Run integration tests (testcontainers PostGIS via Docker)
+        # Docker는 ubuntu-latest runner에서 자동 제공.
+        # 통합 테스트는 conftest의 pg_container fixture가 PostGIS 컨테이너 자동 부팅.
+        run: |
+          pytest tests/integration -q --no-cov
+
+      - name: Upload coverage XML (latest Python only)
+        if: matrix.python-version == '3.13'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          retention-days: 7

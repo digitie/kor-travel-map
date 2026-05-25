@@ -78,22 +78,38 @@ async def pg_engine(pg_container: Any) -> AsyncIterator[AsyncEngine]:
     extension은 모두 ``x_extension`` schema에 격리 (ADR-008). 본 fixture
     이후 모든 통합 테스트는 schema/extension 이미 박혀 있다고 가정.
     """
-    from sqlalchemy import text
+    from sqlalchemy import event, text
 
     from krtour.map.infra.db import make_async_engine
 
     raw_dsn = pg_container.get_connection_url()
     engine = make_async_engine(raw_dsn)
 
+    # 모든 새 connection의 search_path를 ADR-008 격리 schema 포함으로 설정.
+    # `ALTER DATABASE ... SET search_path`는 새 connection에만 적용되고
+    # SQLAlchemy connection pool은 기존 connection을 재사용하므로, connect 이벤트
+    # 훅으로 명시 설정 → unqualified ``ST_*`` 함수 호출 가능.
+    @event.listens_for(engine.sync_engine, "connect")
+    def _set_search_path(dbapi_conn: Any, _conn_record: Any) -> None:
+        # asyncpg adapter는 sync cursor를 제공 (DBAPI 호환 wrapper).
+        cursor = dbapi_conn.cursor()
+        try:
+            cursor.execute("SET search_path = public, x_extension")
+        finally:
+            cursor.close()
+
     async with engine.begin() as conn:
         for schema in _SCHEMAS:
             await conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema}"))
+        # postgis/postgis Docker image는 initdb 단계에서 postgis + postgis_topology를
+        # `public` schema에 자동 설치한다. ADR-008에 따라 `x_extension` schema로
+        # 재배치 — DROP CASCADE 후 재생성 (테스트 시작 시점이므로 안전).
+        await conn.execute(text("DROP EXTENSION IF EXISTS postgis_topology CASCADE"))
+        await conn.execute(text("DROP EXTENSION IF EXISTS postgis CASCADE"))
         for ext in _EXTENSIONS:
             await conn.execute(
                 text(f"CREATE EXTENSION IF NOT EXISTS {ext} WITH SCHEMA x_extension")
             )
-        # 모든 세션 default search_path는 본 라이브러리 가정 (data-model.md §1)
-        await conn.execute(text("ALTER DATABASE test SET search_path = public, x_extension"))
 
     try:
         yield engine
@@ -107,6 +123,10 @@ async def pg_session(pg_engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
 
     각 테스트는 transaction 안에서 실행되며 종료 시 rollback — 테스트 간
     데이터 격리 보장. 실 commit이 필요한 케이스는 별도 fixture를 만든다.
+
+    ``search_path``는 ``pg_engine``의 ``connect`` 이벤트 훅이 모든 새 connection에
+    설정 — pool에서 재사용되는 connection도 마찬가지. 따라서 unqualified
+    ``ST_*`` 함수 호출 가능 (ADR-008).
     """
     from sqlalchemy.ext.asyncio import AsyncSession
 

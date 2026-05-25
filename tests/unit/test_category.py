@@ -18,10 +18,7 @@ from krtour.map.category import (
     PLACE_CATEGORY_BY_CODE,
     PLACE_CATEGORY_DEFINITIONS,
     PLACE_CATEGORY_MAPBOX_MAKI_ICON_VALUES,
-    PLACE_CATEGORY_MAPBOX_MAKI_ICONS,
-    PLACE_CATEGORY_TIER1_NAMES,
     PLACE_CATEGORY_TIER2_NAMES_BY_TIER1,
-    PlaceCategory,
     PlaceCategoryCode,
     PlaceCategoryTier1Code,
     category_label,
@@ -33,7 +30,6 @@ from krtour.map.category import (
     mapbox_maki_icon_for_category,
     mapbox_maki_icon_or_none,
 )
-
 
 # ── 144 카탈로그 ─────────────────────────────────────────────────────────
 
@@ -248,5 +244,6 @@ def test_place_category_as_dict() -> None:
 def test_place_category_frozen() -> None:
     """`PlaceCategory`는 frozen dataclass (immutable)."""
     cat = get_category("03080100")
-    with pytest.raises(Exception):  # FrozenInstanceError or AttributeError
+    # dataclass frozen 위반은 dataclasses.FrozenInstanceError (AttributeError 서브클래스).
+    with pytest.raises((AttributeError, TypeError)):
         cat.code = "modified"  # type: ignore[misc]

@@ -2,6 +2,86 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-25 16:00 (claude)
+
+**작업**: Sprint 1 PR#22 — CI workflows 활성화 (`.github/workflows/
+{ci,lint,openapi}.yml`) + import-linter 4 계약 활성화 + ADR-002 위반 1건
+실 해소 (dto → core 역참조).
+
+**컨텍스트**: PR#21 머지 후 사용자 "다음 진행"으로 PR#22 승인. Sprint 1
+scaffolding 마지막 PR — CI gate를 박아 PR#17~#21에서 쌓인 코드의 회귀를
+자동으로 막는다. import-linter 처음 가동 시 ADR-002 위반 1건 실 검출 +
+해소 (`dto/feature.py`가 `core.kst_now` import).
+
+**신규 파일** (5):
+- `.github/workflows/ci.yml` — pytest unit + integration (testcontainers
+  PostGIS, ADR-007) + coverage XML, Python 3.11/3.12/3.13 matrix.
+  `concurrency` group으로 동일 PR 연속 push 시 이전 run 자동 cancel.
+- `.github/workflows/lint.yml` — ruff check (src+tests) + mypy --strict
+  (krtour.map 전체) + import-linter (4 계약).
+- `.github/workflows/openapi.yml` — ADR-031 drift gate. Sprint 1은
+  `continue-on-error: true` (앱 모듈 미존재 SystemExit) — Sprint 2 첫
+  라우터 PR에서 제거.
+- `tests/lint/test_import_linter.py` — pyproject.toml의 4 계약을 pytest로
+  wrap (subprocess로 `lint-imports` 실행). 미설치 시 skip.
+- `src/krtour/map/dto/_time.py` — `KST` / `kst_now()` 정의 (이전 `core/
+  types.py`에서 이동, ADR-002 의존 방향 보존).
+
+**변경 파일** (10):
+- `pyproject.toml`:
+  - `[tool.importlinter]` `include_external_packages = true` 추가 (외부
+    forbidden modules 검증 활성화)
+  - `layers` 계약에서 `krtour.map.cli` 제거 (모듈 미존재 — Sprint 4~5
+    추가 시 다시 박음)
+- `src/krtour/map/core/types.py` — KST/kst_now 정의 → `dto/_time` re-export
+  shim. 공개 API (`from krtour.map.core import kst_now`)는 그대로.
+- `src/krtour/map/dto/feature.py` — `from ..core import kst_now` →
+  `from ._time import kst_now` (의존 방향 보존)
+- `src/krtour/map/providers/__init__.py` — docstring 표 줄바꿈 (E501 해소)
+- `tests/unit/test_dto_{notice,area,feature}.py` + `test_category.py` —
+  `pytest.raises(Exception)` → `pytest.raises(ValidationError)` (B017/PT011)
+  fix. 의도 명확화 + 잘못된 다른 예외 catch 방지.
+- `tests/lint/test_no_namespace_init.py` — ruff auto-import-sort
+
+**ADR-002 위반 실 해소 (import-linter 첫 가동 효과)**:
+- PR#19에서 `KST`/`kst_now`를 `core/types.py`에 추가 → `dto/feature.py`
+  가 `from ..core import kst_now`로 import → ADR-002 위반 (dto가 core를
+  import).
+- 해소: 정의를 `dto/_time.py`로 이전 (dto 레이어 내부). `core/types.py`는
+  re-export shim — 호출 측 (`from krtour.map.core import kst_now`) 코드
+  변경 0.
+
+**verification**:
+- `python -m pytest tests/ -q` → **125 passed, 10 skipped** (124 + 1
+  새 import_linter wrapper).
+- `python -m ruff check src/ tests/` → All checks passed (25 → 0건).
+- `python -m mypy --strict -p krtour.map` → Success, 26 source files.
+- `python -c "from importlinter.cli import lint_imports_command; ..."` →
+  **4 contracts kept, 0 broken** (layered + fastapi/uvicorn + cache +
+  kafka 금지).
+
+**ADR 적용**:
+- ADR-002 — import-linter `layers` 계약 활성화. `dto → core → infra →
+  providers → client → cli` (cli는 Sprint 4~5 추가 시 박음).
+- ADR-020 — `forbidden_modules = [fastapi, uvicorn, starlette]` 메인
+  패키지 의존 차단 (디버그 UI는 별도 패키지).
+- ADR-030 — `forbidden_modules = [cachetools, async_lru, aiocache,
+  diskcache]` in-memory cache 의존 차단 (narrow `@functools.cache` 예외만
+  허용).
+- ADR-031 — `openapi.yml` workflow + `export_openapi.py --check` drift
+  gate. Sprint 1은 `continue-on-error` (앱 미존재) → Sprint 2 첫 라우터 PR
+  에서 활성화.
+- ADR-032 — ci.yml에서 `--cov=src/krtour/map`, coverage XML upload.
+  현재 `fail_under=50` (pyproject.toml), Sprint별 단계 상향.
+- ADR-103 (T-103 보류) — `forbidden_modules = [kafka, aiokafka,
+  confluent_kafka, faust]` streaming consumer 의존 차단.
+
+**다음**: PR#22 사용자 review/merge → Sprint 1 scaffolding **완료**.
+다음 Sprint 진입: PR#23 (또는 SPRINT-2.md 활성화로 직접 진입) — Sprint 2
+ADR-034 9단계 순서대로 provider 적재 시작 (1단계 visitkorea 축제).
+
+---
+
 ## 2026-05-25 15:00 (claude)
 
 **작업**: Sprint 1 PR#21 — `src/krtour/map/infra/` skeleton: `crs.py`
