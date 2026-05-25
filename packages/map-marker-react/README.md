@@ -3,9 +3,10 @@
 `python-krtour-map` 디버그 UI와 TripMate 사용자 UI에서 공통으로 쓰는 마커/
 카테고리-maki 매핑/색상 팔레트 React 컴포넌트 라이브러리 (ADR-029).
 
-> **현재 상태 (v2 설계 단계)**: 본 패키지는 ADR-029 결정에 따른 placeholder.
-> 실제 코드는 별도 코드 작성 단계 PR (T-017)에서. 본 README + `package.json` +
-> `vite.config.ts`(skeleton) 만 박혀 있음.
+> **현재 상태 (Sprint 1 skeleton)**: 본 패키지는 ADR-029 결정에 따른 npm
+> package skeleton이다. 본 README + `package.json` + `vite.config.ts`
+> (skeleton)가 있으며, 실제 marker/component 구현은 category/notice 매핑
+> drift gate와 함께 후속 PR에서 진행한다.
 
 ## 라이선스
 

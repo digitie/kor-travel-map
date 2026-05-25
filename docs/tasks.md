@@ -4,7 +4,15 @@
 
 ## 진행 중 (open PR)
 
-- **본 PR#26** (feat/pr26-source-dtos-and-id-helpers): review report P0-4 —
+- 없음. PR#27 merge 후 다음 PR 후보는 **PR#28 / Sprint 2 prep**
+  (`infra/models.py` + Alembic 첫 revision + schema integration test).
+
+## 최근 완료
+
+- **PR#27** (merged): review report P1 docs drift sweep. README/SKILL/
+  AGENTS/CLAUDE/agent-guide/resume/tasks/category/package README의 현재 상태를
+  Sprint 1 종료 / Sprint 2 진입 준비로 정정.
+- **PR#26** (merged): review report P0-4 —
   `make_source_record_key` + `make_payload_hash` + `SourceRecord` +
   `SourceLink` + `FeatureBundle` DTO. core 의존 방향 (dto는 core 미import)
   준수: `SourceRecord.key()` 메서드 두지 않고 호출자가 helper로 계산.

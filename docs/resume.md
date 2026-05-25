@@ -70,22 +70,23 @@ PR#22 CI/import-linter merge 후 gate 확인. PR#22 merge 후 PR#23 리포트
 - [x] PR#25 (merged) python-knps-api PR#3+#4 (keyless file-only, `06da125f`)
       반영. ADR-028 amendment §H. 14 dataset 정정. DTO에 `protected_area` /
       `facility_road` 표준값 추가 (사용자 별도 적용).
-- [x] **PR#26 (현재 open)** review report P0-4 — `make_source_record_key` +
+- [x] PR#26 (merged) review report P0-4 — `make_source_record_key` +
       `make_payload_hash` (`docs/data-model.md §11` 명세) + `SourceRecord` +
       `SourceLink` + `FeatureBundle` DTO. dto는 core 미import 원칙 준수
       (`SourceRecord.key()` 메서드 두지 않음 — 호출자가 helper로 계산).
       리뷰 후속으로 DB required 필드와 bundle 교차 검증, payload hash strict
       normalize, canonical docs 예시 정합 보강.
-- [ ] PR#27 (review report P1): docs drift sweep — README/SKILL/agent-guide/
+- [x] PR#27 (merged) review report P1: docs drift sweep — README/SKILL/agent-guide/
       tasks의 "Sprint 1 진입 직전" / "코드 작성 금지" 잔재 문단을 Sprint 1
-      active/종료 상태로 갱신.
+      종료/Sprint 2 진입 준비 상태로 갱신.
 - [ ] 후속 ADR (TBD, Sprint 3 KNPS 적재 이전): `access_restriction`/`fire_alert`
       notice source 결정 — 산림청 (`python-krforest-api`) / 소방청 / scrape
       중 선택.
-- [ ] **Sprint 2 첫 PR** (ADR-034 1단계): `providers/visitkorea/` 축제
-      + `infra/models.py` SQLAlchemy 매핑 + `infra/feature_repo.py` raw SQL
-      + Alembic migration 첫 revision + `core/scoring.py` ADR-016 Record
-      Linkage.
+- [ ] **PR#28 / Sprint 2 prep**: `infra/models.py` SQLAlchemy 2 declarative
+      + GeoAlchemy2 + `alembic/` 첫 revision + schema integration test.
+- [ ] **Sprint 2 첫 provider PR** (ADR-034 1단계): `providers/visitkorea/`
+      축제 + `infra/feature_repo.py` raw SQL + `core/scoring.py` ADR-016
+      Record Linkage.
 
 ## 진척도
 

@@ -312,8 +312,9 @@ Sprint 1 scaffolding 완료 — `src/krtour/map/` 6 layer (category 144건 + dto
 
 - `git`, `pytest`, `ruff`, `mypy`는 WSL ext4에서.
 - `data/`는 NTFS에 두고 ext4에 심볼릭 링크.
-- 본 가이드 작성 동안은 NTFS 직접 작업도 임시 허용 (현 작업 위치
-  `F:\dev\python-krtour-map`). 단 코드 작성 단계 진입 직전에 ext4로 옮긴다.
+- NTFS 마운트에서 `git`/`pip`/`pytest`/`uvicorn`을 직접 실행하지 않는다.
+  파일 권한, inotify, symlink, 대량 I/O 성능 이슈가 재발한다.
+- 작업 완료 후 필요한 경우 ext4 source tree를 NTFS 보관 위치로 `rsync`한다.
 
 상세 절차는 `docs/dev-environment.md`.
 

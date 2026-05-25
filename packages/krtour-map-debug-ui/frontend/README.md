@@ -3,9 +3,10 @@
 `python-krtour-map` 디버그 UI의 **Next.js** 프론트엔드. **ADR-025**에 따라
 `maplibre-vworld-js` (VWorld 지도) 기반.
 
-> **현재 상태 (v2 설계 단계)**: 본 디렉토리는 ADR-025 결정에 따른 placeholder.
-> 실제 코드는 별도 코드 작성 단계 PR에서. 본 README + `.env.example` +
-> `package.json`(의존성 placeholder) + `.gitignore`만 박혀 있음.
+> **현재 상태 (Sprint 1 skeleton)**: 본 디렉토리는 ADR-025 결정에 따른
+> Next.js frontend skeleton이다. 본 README + `.env.example` + `package.json`
+> (의존성 placeholder) + `.gitignore`가 있으며, 실제 화면 구현은 Sprint 2
+> 디버그 UI PR에서 진행한다.
 
 ## 기술 스택 (ADR-025, Next.js 기반 — 2026-05-25 사용자 보강)
 

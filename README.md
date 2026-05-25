@@ -190,14 +190,14 @@ cli** 한 방향. `import-linter`가 CI에서 강제 (ADR-002, `docs/architectur
 ## 검증
 
 ```bash
-python -m pytest -q               # 코드 작성 단계 이후
+python -m pytest -q
 python -m ruff check .
 python -m mypy src/krtour/map
 lint-imports
 ```
 
-문서 단계에서는 위 명령이 의미 있는 산출물을 만들지 않는다. `docs/agent-guide.md`
-참고.
+통합 테스트와 DB schema 검증은 PostGIS testcontainers 또는 로컬 Postgres 준비가
+필요하다. 자세한 절차는 `docs/agent-guide.md` 참고.
 
 ## 문서 지도
 

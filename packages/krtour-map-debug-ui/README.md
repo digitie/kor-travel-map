@@ -2,10 +2,10 @@
 
 `python-krtour-map`의 **디버그 REST API + UI** 별도 Python 패키지.
 
-> **현재 상태 (v2 설계 단계)**: 본 패키지는 ADR-020에 따라 메인 라이브러리에서
-> 분리되어 신설되었다. 본 디렉토리는 패키지 구조의 placeholder이며, 코드는
-> 별도 요청이 있을 때까지 작성하지 않는다. 설계는 `docs/debug-ui-package.md`에
-> 박혀 있다.
+> **현재 상태 (Sprint 1 skeleton)**: 본 패키지는 ADR-020에 따라 메인
+> 라이브러리에서 분리되어 신설되었다. 패키지 구조와 OpenAPI export script가
+> 있으며, 실제 FastAPI 라우터/서비스 구현은 Sprint 2 첫 디버그 UI PR에서
+> 진행한다. 설계는 `docs/debug-ui-package.md`에 박혀 있다.
 
 ## 정체성
 
@@ -21,7 +21,7 @@
 - `python-krtour-map` (같은 저장소 메인 패키지, monorepo editable install)
 - FastAPI + Uvicorn + Pydantic v2 + pydantic-settings
 
-## 설치 / 실행 (코드 작성 단계 이후)
+## 설치 / 실행 (라우터 구현 이후)
 
 ### Backend (FastAPI)
 
