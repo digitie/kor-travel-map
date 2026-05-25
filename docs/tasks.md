@@ -4,10 +4,11 @@
 
 ## 진행 중 (open PR)
 
-- **본 PR#16** (feat/sprint1-entry-adr-accepted): **T-014 Sprint 1 진입** —
-  ADR 027~034 일괄 accepted 전환 (text only, decisions.md) + `pyproject.
-  toml` `fail_under=0→50` 상향 (ADR-032 Sprint 1 bar) + sprints/README +
-  SPRINT-1~5 상태 갱신. 실 scaffolding (`src/krtour/map/`)은 후속 PR.
+- **본 PR#17** (feat/sprint1-pr17-scaffolding): Sprint 1 첫 코드 —
+  `src/krtour/map/` PEP 420 scaffolding (`__init__.py`/`py.typed`/`settings.
+  py`) + 6개 layer placeholder `__init__.py` + `pyproject.toml`에 `pydantic-
+  settings>=2.4` 의존 추가 + `tests/lint/test_no_namespace_init.py` (ADR-022
+  enforcement) + `tests/unit/test_smoke_import.py` (smoke).
 - **upstream knps-api PR#1**
   (https://github.com/digitie/python-knps-api/pull/1):
   `docs/knps-feature-etl.md §4` maki icon 정정 (shelter / barrier) — 검토 +
@@ -32,14 +33,20 @@
   - `pyproject.toml` `fail_under=0→50` 상향 (ADR-032 Sprint 1 bar)
   - Sprint 1 = **active** (`docs/sprints/SPRINT-1.md` 상태 → active)
   - 후속 Sprint 1 scaffolding PR로 실제 코드 작성:
-    - PR#17+ `src/krtour/map/` PEP 420 scaffolding
-    - PR#18+ `category/` 144건 코드 이전 (kraddr-base → krtour.map.category)
-    - PR#19+ `dto/` (Feature + 7 detail kinds + ADR-027 적용:
-      `NOTICE_TYPES` 14건 + `AreaDetail.area_kind='hazard_zone'`)
-    - PR#20+ `core/` (exceptions + scoring stub + ADR-030 narrow cache)
-    - PR#21+ `infra/` + testcontainers 통합 테스트 베이스
-    - PR#22+ CI workflows (`.github/workflows/ci.yml` + `lint.yml` +
-      `openapi.yml`)
+    - [x] **PR#17 (본)** `src/krtour/map/` PEP 420 scaffolding +
+          `settings.py` + 6개 layer placeholder + smoke 테스트
+    - [ ] PR#18 `src/krtour/map/category/` 144건 코드 이전 (kraddr-base →
+          krtour.map.category, ADR-023 + ADR-027 LODGING_MOUNTAIN_SHELTER
+          3행)
+    - [ ] PR#19 `src/krtour/map/dto/` (Feature + 7 detail kinds + ADR-027
+          적용: `NOTICE_TYPES` 14건 + `AreaDetail.area_kind='hazard_zone'`)
+    - [ ] PR#20 `src/krtour/map/core/` (exceptions + scoring stub + ADR-030
+          narrow cache + `make_feature_id`)
+    - [ ] PR#21 `src/krtour/map/infra/` + testcontainers 통합 테스트 베이스
+    - [ ] PR#22 CI workflows (`.github/workflows/ci.yml` + `lint.yml` +
+          `openapi.yml`)
+    - [ ] PR#23 첫 통합 테스트 (`tests/integration/test_dummy_db.py` +
+          `tests/unit/test_category.py`)
 - [ ] T-017 — **공통 maki marker / category 매핑 npm 패키지 추출** (ADR-029
       proposed, PR#10 merged) — 실 코드는 Sprint 2
   - **ADR-029 (proposed, PR#10 merged)** — `@krtour/map-marker-react` (MIT
@@ -233,11 +240,9 @@
 
 ## 우선순위 가이드
 
-- **즉시 (검토 + merge)**: 본 PR#16 (T-014 Sprint 1 진입) + upstream
-  knps-api PR#1 (maki icon 정정)
+- **즉시 (검토 + merge)**: 본 PR#17 (`src/krtour/map/` scaffolding) +
+  upstream knps-api PR#1 (maki icon 정정)
 - **다음 (Sprint 1 scaffolding 연속 PR)**:
-  - PR#17 — `src/krtour/map/` PEP 420 scaffolding + `__init__.py` +
-    `settings.py`
   - PR#18 — `src/krtour/map/category/` 144건 (kraddr-base 코드 이전,
     ADR-023 + ADR-027 `LODGING_MOUNTAIN_SHELTER` 3행 포함)
   - PR#19 — `src/krtour/map/dto/` (Feature + 7 detail kinds + NOTICE_TYPES
@@ -293,5 +298,6 @@
 | #13 | `chore/tasks-md-pr12-merged-update` | 2026-05-25 | tasks.md 백로그 갱신 (PR#12 머지 후) |
 | #14 | `docs/pr14-impl-order-sprint-plans` | 2026-05-25 | ADR-034 provider 9단계 + Sprint 2~5 plan |
 | #15 | `docs/pr15-governance-sweep` | 2026-05-25 | governance docs sweep + DO NOT bug fix 3건 |
-| **#16** | `feat/sprint1-entry-adr-accepted` | **open** | T-014 Sprint 1 진입 — ADR 027~034 일괄 accepted + fail_under=50 |
+| #16 | `feat/sprint1-entry-adr-accepted` | 2026-05-25 | T-014 Sprint 1 진입 — ADR 027~034 일괄 accepted + fail_under=50 |
+| **#17** | `feat/sprint1-pr17-scaffolding` | **open** | `src/krtour/map/` PEP 420 scaffolding + `settings.py` + smoke |
 | knps-api #1 | `docs/knps-feature-maki-icons` | **open** | maki icon 정정 (shelter / barrier) |

@@ -5,6 +5,20 @@
 
 ## [Unreleased]
 
+### Sprint 1 scaffolding (2026-05-25, PR#17+)
+
+- **PR#17 — `src/krtour/map/` PEP 420 scaffolding**:
+  - `src/krtour/map/__init__.py` (`__version__ = "0.2.0-dev"`)
+  - `src/krtour/map/py.typed` (PEP 561)
+  - `src/krtour/map/settings.py` — `KrtourMapSettings(BaseSettings)`
+    (pg_dsn / object_store_* / log_*)
+  - `src/krtour/map/{category,dto,core,infra,providers,client}/__init__.py`
+    (placeholder, 후속 PR에서 채움)
+  - `pyproject.toml`: `pydantic-settings>=2.4` 의존 추가
+  - `tests/lint/test_no_namespace_init.py` — ADR-022 PEP 420 enforcement
+  - `tests/unit/test_smoke_import.py` — `krtour.map` + `KrtourMapSettings`
+    smoke (5 cases)
+
 ### Sprint 1 진입 (2026-05-25, PR#16)
 
 - **T-014 — 코드 작성 단계 진입**: 사용자 승인. Sprint 1 = **active**.

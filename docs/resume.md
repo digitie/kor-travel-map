@@ -24,9 +24,10 @@ Python 패키지 `krtour-map-debug-ui` (ADR-020, `packages/krtour-map-debug-ui/`
 
 ## 다음 한 작업
 
-**본 PR#16 (Sprint 1 진입) 머지 후 Sprint 1 scaffolding PR sequence**:
-- PR#17 `src/krtour/map/` PEP 420 scaffolding (`__init__.py`, `settings.py`,
-  `py.typed`)
+**PR#17 (`src/krtour/map/` scaffolding) merged 후 Sprint 1 후속 PR**:
+- [x] PR#17 `src/krtour/map/` PEP 420 scaffolding (`__init__.py`,
+      `settings.py`, `py.typed`, 6 layer placeholder + smoke tests)
+- [ ] PR#18 `src/krtour/map/category/` 144건 코드 이전 + ADR-027
 - PR#18 `src/krtour/map/category/` 144건 (kraddr-base에서 코드 이전, ADR-023
   + ADR-027 LODGING_MOUNTAIN_SHELTER 3행 포함)
 - PR#19 `src/krtour/map/dto/` (Feature + 7 detail kinds + NOTICE_TYPES 14건

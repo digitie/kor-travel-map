@@ -25,6 +25,7 @@ classifiers = [
 # 아래는 ADR-007/008/...에서 합의된 1차 스택의 placeholder.
 dependencies = [
   "pydantic>=2.7",
+  "pydantic-settings>=2.4",
   "sqlalchemy>=2.0",
   "geoalchemy2>=0.15",
   "asyncpg>=0.29",
