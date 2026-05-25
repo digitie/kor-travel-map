@@ -27,11 +27,13 @@ Python 패키지 `krtour-map-debug-ui` (ADR-020, `packages/krtour-map-debug-ui/`
 **PR#17 (`src/krtour/map/` scaffolding) merged 후 Sprint 1 후속 PR**:
 - [x] PR#17 `src/krtour/map/` PEP 420 scaffolding (`__init__.py`,
       `settings.py`, `py.typed`, 6 layer placeholder + smoke tests)
-- [x] **PR#18** `src/krtour/map/category/` 144건 코드 이전 (kraddr-base
-      → krtour.map.category, ADR-023 + ADR-027) + 16 tests + docs/category
-      통계 정정 — 30 pytest passed
-- [ ] PR#19 `src/krtour/map/dto/` Feature + 7 detail kinds + NOTICE_TYPES
-      14건 + AreaDetail.area_kind hazard_zone
+- [x] PR#18 `src/krtour/map/category/` 144건 코드 이전 + 16 tests
+- [x] **PR#19** `src/krtour/map/dto/` Feature + 5 detail + NOTICE_TYPES
+      14건 (ADR-027) + AreaDetail.area_kind hazard_zone (ADR-027) +
+      ADR-019 KST aware enforcement + 27 tests (62 total pytest passed).
+      WeatherValue/PriceValue/SourceRecord 등은 Sprint 2 PR로 연기.
+- [ ] PR#20 `src/krtour/map/core/` exceptions + scoring stub + ADR-030
+      narrow cache + `make_feature_id` ADR-009
 - PR#18 `src/krtour/map/category/` 144건 (kraddr-base에서 코드 이전, ADR-023
   + ADR-027 LODGING_MOUNTAIN_SHELTER 3행 포함)
 - PR#19 `src/krtour/map/dto/` (Feature + 7 detail kinds + NOTICE_TYPES 14건

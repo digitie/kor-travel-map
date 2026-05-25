@@ -2,6 +2,66 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-25 13:00 (claude)
+
+**작업**: Sprint 1 PR#19 — `src/krtour/map/dto/` Feature + 5 detail kind
++ NOTICE_TYPES 14건 (ADR-027) + AreaDetail.area_kind hazard_zone (ADR-027)
++ ADR-019 KST aware enforcement. `core/types.py`에 KST/kst_now.
+
+**컨텍스트**: 사용자 PR#18 머지 후 "다음 진행"으로 PR#19. Sprint 1 §2.4
+(ADR-027 코드 적용) + Sprint 2 진입 직전 Feature DTO 기반 구축.
+
+**신규 파일** (13):
+- `src/krtour/map/core/types.py` — `KST` / `kst_now()` (ADR-019)
+- `src/krtour/map/dto/_enums.py` — `FeatureKind` 7종 / `FeatureStatus` 6종
+  / `SourceRole` 8종 (StrEnum)
+- `src/krtour/map/dto/coordinate.py` — `Coordinate` (Korea bounds validator
+  [124, 132] × [33, 39.5], frozen)
+- `src/krtour/map/dto/address.py` — `Address` (basic, kraddr-base 통합은
+  Sprint 2)
+- `src/krtour/map/dto/urls.py` — `FeatureUrls` + `RawDataRef`
+- `src/krtour/map/dto/opening_hours.py` — `OpeningTime`/`OpeningPeriod`/
+  `SpecialOpeningDay`/`FeatureOpeningHours` (Google Places 호환)
+- `src/krtour/map/dto/place.py` — `PlaceDetail`
+- `src/krtour/map/dto/event.py` — `EventDetail` (날짜 순서 validator)
+- `src/krtour/map/dto/notice.py` — `NoticeDetail` + **NOTICE_TYPES 14건**
+  (ADR-027 `access_restriction`/`fire_alert` 포함) + `normalize_notice_type`
+  + 한/영 alias map (입산통제/해수욕장폐장/산불경보 등)
+- `src/krtour/map/dto/route.py` — `RouteDetail` + ROUTE_TYPES 9종 +
+  `normalize_route_type` (lenient unknown → 'route' fallback)
+- `src/krtour/map/dto/area.py` — `AreaDetail` + AREA_KINDS 12종 (ADR-027
+  **hazard_zone** 포함)
+- `src/krtour/map/dto/feature.py` — `Feature` 본체:
+  - coord (optional, Korea bounds), marker_color (P-01~P-16 regex), detail
+    (ADR-018 discriminator), KST timestamps
+  - ADR-018: kind→detail 매핑 강제, weather/price는 detail=None
+  - ADR-019: naive datetime → ValidationError
+- `tests/unit/test_dto_notice.py` (9 cases)
+- `tests/unit/test_dto_area.py` (5 cases)
+- `tests/unit/test_dto_feature.py` (13 cases)
+
+**변경 파일** (2):
+- `src/krtour/map/dto/__init__.py` — placeholder → 38 공개 식별자
+  re-export
+- `src/krtour/map/core/__init__.py` — `KST`/`kst_now` re-export
+
+**verification**: `python -m pytest tests/ -q` → **62 passed** (category
+16 + dto 27 + smoke 11 + lint 3 + 기타 5).
+
+**비목표 (Sprint 2 PR로 연기)**:
+- `WeatherValue` (ADR-010, Sprint 2 KMA provider)
+- `PriceValue` (Sprint 2 OpiNet)
+- `SourceRecord`/`SourceLink` (Sprint 2 첫 provider)
+- `FeatureFile`/`FeatureFileSource` (Sprint 2~3)
+- `ProviderSyncState` (Sprint 2)
+- `ImportJob` (Sprint 4 MOIS bulk)
+- `FeatureBundle` (적재 단위)
+
+**다음**: PR#19 review/merge → PR#20 `src/krtour/map/core/` 본격 구현
+(exceptions + `make_feature_id` ADR-009 + scoring stub ADR-016).
+
+---
+
 ## 2026-05-25 12:00 (claude)
 
 **작업**: Sprint 1 PR#18 — `src/krtour/map/category/` 144건 코드 이전

@@ -4,10 +4,10 @@
 
 ## 진행 중 (open PR)
 
-- **본 PR#18** (feat/sprint1-pr18-category-migration): `src/krtour/map/
-  category/_definitions.py` (kraddr-base 이전, ADR-023) + ADR-027 3건 신규
-  (LODGING_MOUNTAIN_SHELTER + KNPS/KFS, maki=shelter) + tests/unit/
-  test_category.py 16 cases + docs/category.md 통계 정정. 144 total.
+- **본 PR#19** (feat/sprint1-pr19-dto-foundation): `src/krtour/map/dto/`
+  Feature + 5 detail kind + NOTICE_TYPES 14건 (ADR-027) + AreaDetail.
+  area_kind hazard_zone (ADR-027) + ADR-019 KST aware + `core/types.py`
+  kst_now + 27 dto 테스트. 62 pytest passed (전체).
 - **upstream knps-api PR#1**
   (https://github.com/digitie/python-knps-api/pull/1):
   `docs/knps-feature-etl.md §4` maki icon 정정 (shelter / barrier) — 검토 +
@@ -34,12 +34,14 @@
   - 후속 Sprint 1 scaffolding PR로 실제 코드 작성:
     - [x] PR#17 `src/krtour/map/` PEP 420 scaffolding + `settings.py` +
           6개 layer placeholder + smoke 테스트
-    - [x] **PR#18 (본)** `src/krtour/map/category/` 144건 (kraddr-base 이전
-          + ADR-027 3건 + tests/unit/test_category.py 16 cases)
-    - [ ] PR#19 `src/krtour/map/dto/` (Feature + 7 detail kinds + ADR-027
-          적용: `NOTICE_TYPES` 14건 + `AreaDetail.area_kind='hazard_zone'`)
+    - [x] PR#18 `src/krtour/map/category/` 144건 (kraddr-base 이전 +
+          ADR-027 3건 + 16 cases)
+    - [x] **PR#19 (본)** `src/krtour/map/dto/` Feature + 5 detail + ADR-027
+          NOTICE_TYPES 14건 / AreaDetail.area_kind hazard_zone + ADR-019
+          KST + 27 cases (62 total pytest passed). WeatherValue/PriceValue/
+          SourceRecord 등은 Sprint 2 PR로 연기.
     - [ ] PR#20 `src/krtour/map/core/` (exceptions + scoring stub + ADR-030
-          narrow cache + `make_feature_id`)
+          narrow cache + `make_feature_id` ADR-009)
     - [ ] PR#21 `src/krtour/map/infra/` + testcontainers 통합 테스트 베이스
     - [ ] PR#22 CI workflows (`.github/workflows/ci.yml` + `lint.yml` +
           `openapi.yml`)
@@ -238,7 +240,7 @@
 
 ## 우선순위 가이드
 
-- **즉시 (검토 + merge)**: 본 PR#18 (`category/` 144건 + ADR-027) +
+- **즉시 (검토 + merge)**: 본 PR#19 (`dto/` Feature + ADR-027 적용) +
   upstream knps-api PR#1 (maki icon 정정)
 - **다음 (Sprint 1 scaffolding 연속 PR)**:
   - PR#18 — `src/krtour/map/category/` 144건 (kraddr-base 코드 이전,
@@ -298,5 +300,6 @@
 | #15 | `docs/pr15-governance-sweep` | 2026-05-25 | governance docs sweep + DO NOT bug fix 3건 |
 | #16 | `feat/sprint1-entry-adr-accepted` | 2026-05-25 | T-014 Sprint 1 진입 — ADR 027~034 일괄 accepted + fail_under=50 |
 | #17 | `feat/sprint1-pr17-scaffolding` | 2026-05-25 | `src/krtour/map/` PEP 420 scaffolding + `settings.py` + smoke |
-| **#18** | `feat/sprint1-pr18-category-migration` | **open** | `category/` 144건 (kraddr-base 이전 + ADR-027 3건) + 16 tests |
+| #18 | `feat/sprint1-pr18-category-migration` | 2026-05-25 | `category/` 144건 (kraddr-base 이전 + ADR-027 3건) + 16 tests |
+| **#19** | `feat/sprint1-pr19-dto-foundation` | **open** | `dto/` Feature + 5 detail + NOTICE_TYPES 14 (ADR-027) + AreaDetail hazard_zone + KST + 27 tests |
 | knps-api #1 | `docs/knps-feature-maki-icons` | **open** | maki icon 정정 (shelter / barrier) |
