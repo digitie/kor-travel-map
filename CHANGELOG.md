@@ -7,6 +7,22 @@
 
 ### Sprint 1 scaffolding (2026-05-25, PR#17+)
 
+- **PR#25 — KNPS keyless sync (python-knps-api PR#3+#4 반영)**:
+  upstream knps-api commit `06da125f` 변경 본 라이브러리 docs/pyproject 일괄
+  반영. **ADR-028 amendment §H** 신설 (keyless + file-only).
+  - `KNPS_SERVICE_KEY` / `DATA_GO_KR_SERVICE_KEY` 사용 안 함 (인증 제거).
+  - 14 dataset 모두 `kind="file_dataset"`. 신규 4건 (`knps_linear_facilities`,
+    `knps_protected_areas`, `knps_basic_statistics`, `knps_lod_table_catalog`),
+    제거 4건 (`knps_access_restrictions`, `knps_fire_alerts`,
+    `knps_recommended_courses`, `knps_park_photos`).
+  - 제거된 notice 2종 (`access_restriction`/`fire_alert`)은 산림청/소방청
+    별도 source로 이전 (후속 ADR).
+  - 공개 API 정정: `ApiEndpoint`/`Page`/`api_endpoint`/`raw_endpoint` 삭제,
+    `FileArtifact`/`FileMember`/`CsvPreview`/`CsvPreviewRow` 신규.
+  - 변경 docs: `decisions.md` (ADR-028 §H amendment) / `knps-feature-etl.md` /
+    `forest-feature-etl.md §11` / `external-apis.md §3.8.1` /
+    `provider-contract.md §3`. pyproject git URL 핀 (`@06da125f`) 주석.
+  - **코드 변경 0** — docs/pyproject 주석만. 141 pytest passed 유지 (이전 PR).
 - **PR#24 — DTO strictness P0 (Sprint 2 진입 전 차단)**:
   Review report (`docs/reports/pr-1-21-review.md`, PR#23 DRAFT) P0-1/2/3 해소.
   - `Feature.detail` `mode="before"` dict 거부 (Pydantic union dict coercion

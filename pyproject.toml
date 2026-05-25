@@ -69,7 +69,10 @@ providers = [
   # "python-mcst-api     @ git+...",
   # "python-krforest-api @ git+...",
   # "python-krheritage-api @ git+...",
-  # "python-knps-api @ git+https://github.com/digitie/python-knps-api.git@<sha>",  # ADR-028
+  # python-knps-api: keyless file dataset client (ADR-028 + amendment 2026-05-25).
+  # PR#4 (codex/keyless-file-download-dtos) merged → ApiEndpoint/Page 삭제,
+  # KNPS_SERVICE_KEY 사용 안 함. 사용 시 [providers] extra로 install.
+  # "python-knps-api @ git+https://github.com/digitie/python-knps-api.git@06da125f",
   # "python-datagokr-api @ git+...",
 ]
 

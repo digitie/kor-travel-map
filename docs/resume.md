@@ -56,17 +56,23 @@ PR#22 CI/import-linter merge 후 gate 확인. PR#22 merge 후 PR#23 리포트
 - [x] PR#23 `docs/reports/pr-1-21-review.md` — PR#1~#21 신규 소스·문서 상세
       리뷰 리포트. P0 4건 + P1 docs drift + P2 안정화 식별. PR#22 merge 후
       충돌 해결 완료, merged.
-- [x] **PR#24 (현재 open)** review report P0-1/2/3 해소: `Feature.detail`
-      mode=before dict 거부 + 모든 DTO datetime aware validator (NoticeDetail
-      valid_* + RawDataRef.fetched_at) + 8자리 category 정규식.
-      `dto/_time.py`에 `check_aware_datetime()` 공용 helper. 141 pytest
-      passed, all lint green.
-- [ ] PR#25 (review report P0-4): ID helper 확장 (`make_source_record_key`,
+- [x] PR#24 (merged) review report P0-1/2/3 해소: `Feature.detail` mode=before
+      dict 거부 + 모든 DTO datetime aware validator + 8자리 category 정규식.
+      `dto/_time.py`에 `check_aware_datetime()` 공용 helper.
+- [x] **PR#25 (현재 open)** python-knps-api PR#3+#4 (keyless file-only,
+      `06da125f`) 본 라이브러리 docs/pyproject 일괄 반영. ADR-028 amendment §H
+      신설. knps-feature-etl.md/forest-feature-etl.md §11/external-apis.md/
+      provider-contract.md 정정. 14 dataset 4건 신규 + 4건 source 이전 (notice/
+      photos/recommended_courses는 별도 source). 코드 변경 0.
+- [ ] PR#26 (review report P0-4): ID helper 확장 (`make_source_record_key`,
       `make_payload_hash`) + `FeatureBundle` + `SourceRecord` + `SourceLink`
       DTO. Sprint 2 첫 provider 변환 직전 필수.
-- [ ] PR#26 (P1): docs drift sweep — README/SKILL/agent-guide/tasks의
-      "Sprint 1 진입 직전" / "코드 작성 금지" 잔재 문단을 Sprint 1 active/
-      종료 상태로 갱신.
+- [ ] PR#27 (review report P1): docs drift sweep — README/SKILL/agent-guide/
+      tasks의 "Sprint 1 진입 직전" / "코드 작성 금지" 잔재 문단을 Sprint 1
+      active/종료 상태로 갱신.
+- [ ] 후속 ADR (TBD, Sprint 3 KNPS 적재 이전): `access_restriction`/`fire_alert`
+      notice source 결정 — 산림청 (`python-krforest-api`) / 소방청 / scrape
+      중 선택.
 - [ ] **Sprint 2 첫 PR** (ADR-034 1단계): `providers/visitkorea/` 축제
       + `infra/models.py` SQLAlchemy 매핑 + `infra/feature_repo.py` raw SQL
       + Alembic migration 첫 revision + `core/scoring.py` ADR-016 Record

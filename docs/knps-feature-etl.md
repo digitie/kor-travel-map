@@ -1,54 +1,63 @@
 # knps-feature-etl.md — KNPS feature 적재 계약
 
-본 문서는 `python-knps-api`가 제공하는 endpoint/dataset을 본 라이브러리의
-`Feature` / `AreaDetail` / `RouteDetail` / `NoticeDetail` / `WeatherValue`로
-정규화하는 ETL 계약이다. ADR-027 (forest 카테고리/notice_type 확장,
-proposed) + **ADR-028 (`python-knps-api` provider 등록, proposed)** 기준.
+본 문서는 `python-knps-api`가 제공하는 14건 **file dataset**을 본 라이브러리의
+`Feature` / `AreaDetail` / `RouteDetail` / `WeatherValue`로 정규화하는 ETL
+계약이다. ADR-027 (forest 카테고리/notice_type 확장) + **ADR-028 (`python-knps-api`
+provider 등록) + Amendment 2026-05-25 (keyless + file-only)** 기준.
 
-> upstream (`digitie/python-knps-api`) 측 동일 주제 문서:
-> `docs/knps-feature-etl.md`. 본 문서는 *downstream(`python-krtour-map`) 입장*
-> 의 ETL 계약. 두 문서는 dataset_key, category 코드, notice_type, area_kind
-> 표기를 정합 유지한다 (PR로 양방향 동기).
+> upstream (`digitie/python-knps-api`) 측 동일 주제 문서: `docs/knps-feature-
+> etl.md`. 본 문서는 *downstream(`python-krtour-map`) 입장*의 ETL 계약.
+> 두 문서는 dataset_key, category 코드, area_kind 표기를 정합 유지한다 (PR로
+> 양방향 동기).
+>
+> **knps-api PR#3+#4 변경 반영 (2026-05-25, 본 PR#25)**: OpenAPI 표면 전체
+> 제거 → 14건 모두 file dataset. 인증 env 제거 (keyless data.go.kr 직접
+> 다운로드 URL). 이전 표(API 3 + 파일 11)는 무효.
 
 ## 1. 문서 정보
 
 | 항목 | 값 |
 |------|----|
-| provider | `python-knps-api` (`digitie/python-knps-api`) |
-| import | `from knps import KnpsClient, KnpsConfig, ApiEndpoint, FileDataset, ...` |
+| provider | `python-knps-api` (`digitie/python-knps-api`, commit `06da125f`) |
+| import | `from knps import KnpsClient, FileDataset, FileArtifact, ...` (아래 §5) |
 | Python | `>=3.11` |
-| 인증 env | `KNPS_SERVICE_KEY` 우선, `DATA_GO_KR_SERVICE_KEY` 폴백 |
-| 코드 entrypoint (본 라이브러리) | `krtour.map.providers.knps` (Sprint 2 작성) |
-| Feature.kind | `place`, `area`, `route`, `notice`, `weather` |
-| 갱신 주기 | API notice 30분~일, 파일 공간데이터 월~연 |
+| 인증 | **없음 (keyless)** — knps-api PR#4. data.go.kr 직접 다운로드 URL 사용. `KNPS_SERVICE_KEY` / `DATA_GO_KR_SERVICE_KEY` 사용 안 함 (ADR-028 amendment) |
+| 코드 entrypoint (본 라이브러리) | `krtour.map.providers.knps` (Sprint 3 작성, ADR-034 7단계) |
+| Feature.kind | `place`, `area`, `route`, `weather` (notice는 다른 source — ADR-028 amendment) |
+| 갱신 주기 | 모두 파일 데이터 (월~연 갱신). real-time notice 없음 |
 | 라이선스 | GPL-3.0-or-later (upstream과 동일) |
+| Rate limit | `KnpsClient(max_rps=5.0)` 기본 (token bucket). data.go.kr 정책 5 RPS 보수치 |
 | Upstream PR 워크플로 | `python-krtour-map` 측에서 발견한 maki/카테고리/명명 정합 이슈는 upstream PR로 적극 수정 (ADR-025 사용자 보강 패턴 미러). 예: knps-api PR#1 `docs/knps-feature-maki-icons` (shelter/barrier 정정). |
 
-## 2. dataset 매핑 (총 14건 = API 3 + 파일 11)
+## 2. dataset 매핑 (총 14건 = 모두 file dataset, keyless)
 
-### 2.1 API endpoints (3건)
+knps-api `knps.catalog.FILE_DATASETS` 14건 (`from knps import file_datasets`
+로 enumerate). 모두 `kind="file_dataset"`, 13건 `verification_status='verified'`,
+1건 `needs_verification`.
 
-| dataset_key (knps-api) | data.go.kr ID | feature.kind | notice_type | upstream verification | 비고 |
-|------------------------|---------------|--------------|-------------|----------------------|------|
-| `knps_visitor_statistics` | `15107577` | (none, timeseries) | — | `needs_verification` | API endpoint 제공 여부 live 검증. timeseries는 별도 처리 (3.5). |
-| `knps_access_restrictions` | TBD | `notice` | `access_restriction` (ADR-027 generic) | `planned` | `payload.domain='forest'` 박음. |
-| `knps_fire_alerts` | TBD | `notice` | `fire_alert` (ADR-027 generic) | `planned` | `payload.domain='forest'`. |
+### 2.1 공간 데이터 (9건)
 
-### 2.2 파일 datasets (11건)
+| dataset_key | data.go.kr ID | format | geometry | feature.kind | category / area_kind |
+|-------------|---------------|--------|----------|--------------|----------------------|
+| `knps_park_boundaries` | `15017313` | SHP (ZIP) | MultiPolygon | `area` | `area_kind='national_park'` |
+| `knps_trails` | `15003467` | CSV | LineString | `route` | `route_type='hiking_trail'` |
+| `knps_visitor_centers` | `15003445` | CSV | Point | `place` | `01060101` `TOURISM_INFORMATION_CENTER_PUBLIC`, `place_kind='visitor_center'` |
+| `knps_hazard_zones` | `15003441` | CSV | Polygon | `area` | `area_kind='hazard_zone'` (ADR-027). `payload.hazard_type`/`risk_grade`/`domain='forest'` |
+| `knps_weather_stations` | `15090557` | CSV | Point | `weather` (anchor) | (kind=weather, no category) |
+| `knps_restrooms` | `15003468` | CSV | Point | `place` | `05060000` `CONVENIENCE_TOILET`, `place_kind='restroom_national_park'` |
+| `knps_cultural_resources` | `15003443` | CSV | Point | `place` | (subtype 분기 §2.3) |
+| `knps_campgrounds` | `15003469` | CSV | Point | `place` | `03060100` `LODGING_CAMPGROUND_AUTO`, `place_kind='campground'` |
+| `knps_shelters` | `2982556` | CSV | Point | `place` | **`03080100` `LODGING_MOUNTAIN_SHELTER_KNPS`** (ADR-027), `place_kind='mountain_shelter'`, maki `shelter` |
+| `knps_linear_facilities` | `15091972` | CSV | LineString | `route` | `route_type='facility_road'` (탐방로 외 시설 도로) |
+| `knps_protected_areas` | `15127921` | CSV | Polygon | `area` | `area_kind='protected_area'` (특별보호구역). `payload.protection_type` 보존 |
 
-| dataset_key (knps-api) | data.go.kr ID | feature.kind | category / area_kind | upstream verification | 비고 |
-|------------------------|---------------|--------------|---------------------|----------------------|------|
-| `knps_park_boundaries` | `15084538` | `area` | `area_kind='national_park'` | `needs_verification` | MultiPolygon. polygon centroid가 `feature.coord`. |
-| `knps_trails` | `15084540` | `route` | `route_type='hiking_trail'` | `needs_verification` | LineString/MultiLineString. |
-| `knps_visitor_centers` | `15084541` | `place` | `01060101` `TOURISM_INFORMATION_CENTER_PUBLIC` | `needs_verification` | Point. `place_kind='visitor_center'`. |
-| `knps_hazard_zones` | `15084542` | `area` | `area_kind='hazard_zone'` (ADR-027) | `needs_verification` | Polygon. `payload.hazard_type`, `payload.risk_grade`, `payload.domain='forest'`. |
-| `knps_weather_stations` | `15084543` | `weather` (anchor) | (kind=weather, category 없음) | `needs_verification` | Point. weather feature anchor. 관측값은 별도 API 확보 후 `WeatherValue` 분리 적재. |
-| `knps_restrooms` | `15084544` | `place` | `05060000` `CONVENIENCE_TOILET` | `needs_verification` | Point. `place_kind='restroom_national_park'`. |
-| `knps_cultural_resources` | `15084545` | `place` | (subtype 분기, 2.3) | `needs_verification` | Point. RESOURCE_TYPE에 따라 사찰/유적/기타로 category 분기. |
-| `knps_campgrounds` | TBD | `place` (또는 area) | `03060100` `LODGING_CAMPGROUND_AUTO` | `needs_verification` | Point/Polygon. `place_kind='campground'`. |
-| `knps_shelters` | TBD | `place` | **`03080100` `LODGING_MOUNTAIN_SHELTER_KNPS`** (ADR-027) | `planned` | Point. `place_kind='mountain_shelter'`. maki `shelter`. |
-| `knps_recommended_courses` | TBD | `route` | `01020103` `TOURISM_NATURAL_LANDSCAPE_MOUNTAIN_VALLEY_FOREST_TRAIL` | `planned` | LineString. `RouteDetail.difficulty` 직접 채움. |
-| `knps_park_photos` | TBD | (none, media) | — | `planned` | feature 본문 X. `feature_files` + `source_links(role='media')`로 연결. |
+### 2.2 비공간/통계/메타 (3건)
+
+| dataset_key | data.go.kr ID | format | feature 본문 처리 |
+|-------------|---------------|--------|-------------------|
+| `knps_basic_statistics` | `15087598` | CSV | **needs_verification** — feature 본문 X. 통계 테이블 (v2 1차 범위 밖, Sprint 3+ 결정) |
+| `knps_visitor_statistics` | `15107577` | CSV/XLSX | feature 본문 X. 별도 timeseries 테이블 또는 dashboard용 raw 보관만 |
+| `knps_lod_table_catalog` | `15118945` | CSV | 메타 카탈로그 — 적재 안 함. knps-api catalog 보강용 (upstream PR로 활용) |
 
 ### 2.3 cultural_resources subtype 분기
 
@@ -60,6 +69,23 @@ proposed) + **ADR-028 (`python-knps-api` provider 등록, proposed)** 기준.
 | `사찰` | `01070100` `TOURISM_HERITAGE_TEMPLE` | `temple` | `religious-buddhist` |
 | `유적`, `사적`, `기념물` | `01070300` `TOURISM_HERITAGE_HISTORIC_SITE` | `historic_site` | `monument` |
 | 기타 | `01070000` `TOURISM_HERITAGE` | `cultural_resource` | `monument` |
+
+### 2.4 삭제된 이전 dataset (knps-api에 더 이상 없음)
+
+knps-api PR#3 (`aa40541`)에서 OpenAPI 표면 삭제로 다음 keys는 카탈로그에서
+사라졌다:
+
+- `knps_access_restrictions` (입산통제) — `notice_type='access_restriction'`
+- `knps_fire_alerts` (산불경보) — `notice_type='fire_alert'`
+- `knps_recommended_courses` — `route_type='recommended_course'`
+- `knps_park_photos` — media
+
+**대안 source (후속 ADR로 결정)**:
+- 입산통제 / 산불경보 → `python-krforest-api` (산림청), 산림청 RSS 또는 한국
+  소방청 API. KNPS 단독 source 아님.
+- 추천코스 → KNPS 웹사이트 scrape 또는 `python-visitkorea-api` 산악 카테고리.
+- 사진 → 본 라이브러리 `feature_files` 적재 시 KNPS web에서 직접 수집 (license
+  확인 후).
 
 ## 3. 매핑 룰
 
@@ -87,29 +113,38 @@ proposed) + **ADR-028 (`python-knps-api` provider 등록, proposed)** 기준.
 - meta: `station_type='mountain'` (선택).
 - 실제 관측값은 별도 `WeatherValue` 적재 — 본 dataset은 anchor만.
 
-### 3.5 notice (입산통제 / 산불경보)
-- `feature.kind='notice'`, `NoticeDetail.notice_type` = `access_restriction`
-  또는 `fire_alert` (ADR-027 generic).
-- `NoticeDetail.payload.domain='forest'`.
-- `valid_start_time`/`valid_end_time` 보존.
-- `source_links(role='source')`에 KNPS 발표 URL.
-- 만료된 notice는 ADR-017 보관 정책에 따라 +1y 후 purge.
+### 3.5 notice (별도 source — KNPS에서 제거)
 
-### 3.6 timeseries / media (feature 본문 X)
-- `knps_visitor_statistics`: feature 본문에 섞지 않음. 별도 timeseries 테이블
-  (Sprint 3+ 도입 시점에 ADR 신설) 또는 `ops.api_call_log` 옆 통계 테이블.
-  v2 1차 범위 밖.
-- `knps_park_photos`: `feature_files` 또는 `source_links(role='media')`로
-  기존 KNPS 시설/area feature에 연결. feature 본문 X.
+knps-api PR#3에서 `knps_access_restrictions`/`knps_fire_alerts` 삭제. 본 dataset
+은 다른 provider로 대체 (ADR-028 amendment §F):
+
+- 입산통제 (`access_restriction`) → `python-krforest-api` (산림청) 또는 산림청
+  RSS scrape. KNPS dataset 사용 안 함.
+- 산불경보 (`fire_alert`) → `python-krforest-api` + 한국 소방청 RSS. KNPS dataset
+  사용 안 함.
+
+ADR-027 generic notice_type (`access_restriction` / `fire_alert`)은 유효 —
+다른 provider에서 NoticeDetail로 생성 시 동일 spec.
+
+### 3.6 통계 / 메타 (feature 본문 X)
+
+- `knps_basic_statistics` (`needs_verification`): feature 본문에 섞지 않음.
+  별도 통계 테이블 또는 `ops.api_call_log` 옆 분석 테이블. v2 1차 범위 밖
+  (Sprint 3+ 결정).
+- `knps_visitor_statistics`: 동일 — timeseries 별도. dashboard용 raw 보관만.
+- `knps_lod_table_catalog`: knps-api 자체 카탈로그 메타. **적재 안 함**.
+  upstream knps-api catalog 보강 PR 시 참고용.
 
 ## 4. category 매핑 요약 (검증된 표)
 
 | 종류 | category 코드 | detail | maki |
 |------|---------------|--------|------|
 | 국립공원 경계 | (area, no category) | `area_kind='national_park'` | (polygon, no maki) |
-| 탐방로/추천코스 | `01020103` `TOURISM_NATURAL_LANDSCAPE_MOUNTAIN_VALLEY_FOREST_TRAIL` | `route_type='hiking_trail'` | (route, no maki) |
+| 탐방로 | `01020103` `TOURISM_NATURAL_LANDSCAPE_MOUNTAIN_VALLEY_FOREST_TRAIL` | `route_type='hiking_trail'` | (route, no maki) |
+| 시설 도로 (linear_facilities) | `01020103` 동일 | `route_type='facility_road'` | (route, no maki) |
 | 탐방안내소 | `01060101` `TOURISM_INFORMATION_CENTER_PUBLIC` | `place_kind='visitor_center'` | `information` |
 | 위험지역 | (area, no category) | `area_kind='hazard_zone'` | (polygon, marker maki `barrier`) |
+| 특별보호구역 (protected_areas) | (area, no category) | `area_kind='protected_area'` | (polygon, marker maki `barrier`) |
 | 화장실 | `05060000` `CONVENIENCE_TOILET` | `place_kind='restroom_national_park'` | `toilet` |
 | 문화자원: 사찰 | `01070100` `TOURISM_HERITAGE_TEMPLE` | `place_kind='temple'` | `religious-buddhist` |
 | 문화자원: 유적 | `01070300` `TOURISM_HERITAGE_HISTORIC_SITE` | `place_kind='historic_site'` | `monument` |
@@ -120,59 +155,95 @@ proposed) + **ADR-028 (`python-knps-api` provider 등록, proposed)** 기준.
 
 > upstream knps-api docs/knps-feature-etl.md §4 표와 1:1 일치. upstream PR#1
 > (`docs/knps-feature-maki-icons`)에서 `shelter`/`barrier` maki icon 정정
-> 적용 후.
+> 적용 후. `linear_facilities`/`protected_areas`는 knps-api PR#4 시점 신규
+> 항목 — upstream `docs/knps-feature-etl.md`에 추가 필요 (양방향 sync PR).
 
-## 5. 핵심 함수 (Sprint 2 작성 시 시그니처 후보)
+## 5. 핵심 함수 (Sprint 3 작성 시 시그니처 후보, ADR-034 7단계)
 
 ```python
 # src/krtour/map/providers/knps/__init__.py
-from collections.abc import AsyncIterable
 from datetime import datetime
-from krtour.map.dto import FeatureBundle, NoticeDetail, WeatherValue
-from knps import FileDataset, Page, ApiEndpoint
+from krtour.map.dto import FeatureBundle
+# knps-api PR#4 이후 공개 API (ApiEndpoint/Page/raw_endpoint/api_endpoints는
+# knps-api에서 삭제됨)
+from knps import (
+    KnpsClient, KnpsConfig, CatalogEntry, FileDataset,
+    FileArtifact, FileMember, CsvPreview, CsvPreviewRow,
+    PROVIDER_NAME,
+    KnpsApiError, KnpsAuthError, KnpsNoDataError, KnpsParseError,
+    KnpsRateLimitError, KnpsRequestError, KnpsServerError,
+    catalog_entries, file_dataset, file_datasets,
+)
 
-DATASET_KEYS_KNPS_FILE = (
+# 공간 데이터 9건 (변환 함수 9개)
+DATASET_KEYS_KNPS_SPATIAL = (
     "knps_park_boundaries", "knps_trails", "knps_visitor_centers",
     "knps_hazard_zones", "knps_weather_stations", "knps_restrooms",
     "knps_cultural_resources", "knps_campgrounds", "knps_shelters",
-    "knps_recommended_courses",
+    "knps_linear_facilities", "knps_protected_areas",
 )
-DATASET_KEYS_KNPS_NOTICE = ("knps_access_restrictions", "knps_fire_alerts")
-DATASET_KEYS_KNPS_MEDIA = ("knps_park_photos",)
+# feature 본문 X (적재 안 함 또는 별도 timeseries 테이블)
+DATASET_KEYS_KNPS_STATS = (
+    "knps_basic_statistics", "knps_visitor_statistics", "knps_lod_table_catalog",
+)
 
 async def park_boundaries_to_bundles(
     raw_bytes: bytes, *, fetched_at: datetime,
     reverse_geocoder=None,
-) -> list[FeatureBundle]: ...
+) -> list[FeatureBundle]:
+    """SHP (ZIP) → area FeatureBundle 변환. EPSG:5179 → 4326."""
 
 async def trails_to_bundles(
     raw_bytes: bytes, *, fetched_at: datetime,
     reverse_geocoder=None,
-) -> list[FeatureBundle]: ...
+) -> list[FeatureBundle]:
+    """CSV (LineString WKT/좌표 컬럼) → route FeatureBundle."""
 
 async def facility_points_to_bundles(
     raw_bytes: bytes, *, dataset_key: str, fetched_at: datetime,
     reverse_geocoder=None,
-) -> list[FeatureBundle]: ...
+) -> list[FeatureBundle]:
+    """visitor_centers/restrooms/cultural_resources/campgrounds/shelters CSV →
+    place FeatureBundle. dataset_key로 category 분기."""
 
 async def hazard_zones_to_bundles(
     raw_bytes: bytes, *, fetched_at: datetime,
     reverse_geocoder=None,
-) -> list[FeatureBundle]: ...
+) -> list[FeatureBundle]:
+    """Polygon CSV → area FeatureBundle (area_kind='hazard_zone')."""
 
-async def access_restrictions_page_to_notices(
-    page: Page, *, fetched_at: datetime,
-) -> list[NoticeDetail]: ...
+async def protected_areas_to_bundles(
+    raw_bytes: bytes, *, fetched_at: datetime,
+    reverse_geocoder=None,
+) -> list[FeatureBundle]:
+    """Polygon CSV → area FeatureBundle (area_kind='protected_area')."""
 
-async def fire_alerts_page_to_notices(
-    page: Page, *, fetched_at: datetime,
-) -> list[NoticeDetail]: ...
+# 호출 측 예시 (Sprint 3 Dagster asset 내부)
+async def example_dagster_op() -> None:
+    async with KnpsClient(max_rps=5.0) as client:
+        # raw bytes — SHP/CSV parser에 직접 공급
+        data = await client.files.download("knps_park_boundaries")
+        bundles = await park_boundaries_to_bundles(data, fetched_at=kst_now())
+        # 또는 preview용 (debug UI / 디버깅)
+        artifact = await client.files.download_artifact(
+            "knps_trails", preview_rows=5,
+        )
+        for csv in artifact.csv_previews:
+            log.info("preview", member=csv.member_name, headers=csv.headers)
 ```
 
-SHP/GeoJSON parsing은 `pyproj` + `pyshp` 또는 `pyogrio` 사용. ADR-007 GDAL
-의존 그대로.
+**SHP/CSV parsing**: knps-api는 raw bytes 또는 `FileArtifact` preview만 제공.
+실 적재용 parser는 본 라이브러리 `providers/knps`에서:
+- SHP (ZIP) — `pyshp` (knps-api `[geo]` extra) 또는 `pyogrio`/`fiona`
+- CSV — Python `csv` 또는 `pandas` + `shapely.wkt.loads`
+- 좌표계 변환 — `krtour.map.infra.crs.transformer_4326_to_5179` (ADR-030 narrow
+  cache singleton)
+- CP949/euc-kr 인코딩 자동 (knps-api `CsvPreview.encoding` 참고)
 
-## 6. Dagster asset 카탈로그
+ADR-007 GDAL 의존 그대로. `pyshp`/`shapely`는 본 라이브러리 본 의존 (PR#21
+`pyproj` 후속).
+
+## 6. Dagster asset 카탈로그 (Sprint 3 KNPS 적재 시점, ADR-034 7단계)
 
 | asset | dataset_key | cron | group | concurrency |
 |-------|-------------|------|-------|-------------|
@@ -185,27 +256,29 @@ SHP/GeoJSON parsing은 `pyproj` + `pyshp` 또는 `pyogrio` 사용. ADR-007 GDAL
 | `feature_place_knps_cultural_resources` | `knps_cultural_resources` | `0 3 1 1 *` (연) | `features_place` | `knps_api: 1` |
 | `feature_place_knps_campgrounds` | `knps_campgrounds` | `0 3 1 */3 *` (분기) | `features_place` | `knps_api: 1` |
 | `feature_place_knps_shelters` | `knps_shelters` | `0 3 1 1 *` (연) | `features_place` | `knps_api: 1` |
-| `feature_route_knps_recommended_courses` | `knps_recommended_courses` | `0 3 1 */3 *` (분기) | `features_route` | `knps_api: 1` |
-| `notice_knps_access_restrictions` | `knps_access_restrictions` | `0 5 * * *` (일 + on-demand) | `features_notice` | `knps_api: 1` |
-| `notice_knps_fire_alerts` | `knps_fire_alerts` | `*/30 * * * *` (30분) | `features_notice` | `knps_api: 1` |
+| `feature_route_knps_linear_facilities` | `knps_linear_facilities` | `0 3 1 1 *` (연) | `features_route` | `knps_api: 1` |
+| `feature_area_knps_protected_areas` | `knps_protected_areas` | `0 3 1 1 *` (연) | `features_area` | `knps_api: 1` |
 
-`knps_park_photos`/`knps_visitor_statistics`는 별도 처리 (3.6).
+`knps_basic_statistics`/`knps_visitor_statistics`/`knps_lod_table_catalog`는
+별도 처리 (§3.6) — feature 적재 안 함.
+
+이전 표의 `notice_knps_access_restrictions` / `notice_knps_fire_alerts` 항목은
+knps-api PR#3에서 source 삭제로 제거 — 산림청/소방청 provider로 이전 (별도
+ADR).
 
 ## 7. 검증
 
-### 7.1 fixture (Sprint 2)
+### 7.1 fixture (Sprint 3)
 - dataset별 최소 1건 + geometry type별 1건 이상.
 - `knps_park_boundaries`: 1 park 1 polygon + 1 multipolygon.
 - `knps_trails`: 1 trail 1 LineString + 1 MultiLineString.
 - `knps_hazard_zones`: hazard_type 3종 (rockfall, flash_flood, wildlife).
-- `knps_access_restrictions`: 입산통제 시작/종료 + on-demand.
-- `knps_fire_alerts`: severity 등급별 1건.
+- `knps_protected_areas`: protection_type 2종 (special, restricted_use).
+- `knps_linear_facilities`: facility_type 2종 (service_road, boundary_fence).
 
 ### 7.2 통합 테스트 (EXPLAIN)
 - area centroid + GiST(`coord_5179`) 인덱스 사용 검증 (ADR-012).
-- notice `notice_type='access_restriction'` partial index 사용 (`docs/
-  performance.md §6`).
-- BRIN index on `notice_knps_*` `valid_start_time` (시계열 BRIN, ADR-014).
+- (notice/timeseries 항목은 KNPS 적재 범위에서 제외 — 산림청/소방청 별도 source.)
 
 ### 7.3 정합성 (ADR-033 Phase 1, Sprint 3~4)
 - F1 (orphan source) — KNPS raw가 있는데 Feature 없음.
@@ -219,14 +292,17 @@ SHP/GeoJSON parsing은 `pyproj` + `pyshp` 또는 `pyogrio` 사용. ADR-007 GDAL
 
 ## 8. 후속 작업
 
-1. **knps-api 측 verification_status `verified` 승격**: data.go.kr ID 확정,
-   직접 다운로드 URL 검증. upstream live test 책임.
-2. **knps-api 측 SHP/GeoJSON parser 추가 또는 본 라이브러리 측 파싱**:
-   현 시점 knps-api는 `[geo]` extra placeholder. Sprint 2 진입 시 결정 —
-   knps-api에 PR로 parser 추가 vs 본 라이브러리 `providers/knps`에서 처리.
-3. **ADR-028 accepted 전환**: T-018 시점에 본 라이브러리 통합 구현과 함께.
-4. **ADR-027 accepted 전환**: T-018 시점에 `LODGING_MOUNTAIN_SHELTER` 코드
-   적용과 함께 (`PLACE_CATEGORY_DEFINITIONS`에 3행 추가).
+1. **knps-api 측 `knps_basic_statistics` verification 승격**: 13/14
+   `verified`, 1건 (`knps_basic_statistics`)만 `needs_verification`. live
+   download 테스트 후 upstream에 verification PR.
+2. **본 라이브러리 SHP/CSV parser 구현 (Sprint 3 ADR-034 7단계)**: knps-api
+   raw bytes + `FileArtifact` preview만 제공 — 실 parser는 본 라이브러리
+   `providers/knps`. `pyshp` + `shapely` + `pyproj` (이미 본 의존).
+3. **`access_restriction` / `fire_alert` notice source 결정 (별도 ADR)**:
+   knps-api PR#3에서 source 삭제 → 산림청 (`python-krforest-api`) /
+   소방청 (`python-fireapi` TBD) / scrape 중 선택. Sprint 3 이전에 ADR.
+4. **`knps_lod_table_catalog` 활용**: knps-api `FILE_DATASETS` 카탈로그
+   보강에 사용 — upstream PR로 직접 반영 (downstream에서는 적재 안 함).
 
 ## 9. 비책임
 

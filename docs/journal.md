@@ -2,6 +2,74 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-25 20:00 (claude)
+
+**작업**: PR#25 KNPS keyless sync — python-knps-api PR#4 (`codex/keyless-file-
+download-dtos`, commit `06da125f`) 변경을 본 라이브러리 docs/pyproject에 일괄
+반영. ADR-028 amendment §H 신설.
+
+**컨텍스트**: 사용자가 "python-knps-api 구현 완료. 관련 부분 보강/구현할 것"
++ "review report 내용 반영" 요청. PR#24 (review report P0-1/2/3) merged 후.
+upstream knps-api 측 두 큰 변경 (PR#3 OpenAPI 표면 삭제 + PR#4 keyless file
+DTOs)이 본 라이브러리 docs와 어긋남 — sync 필요.
+
+**upstream knps-api 변경 (외부 repo)**:
+- **PR#3 (`aa40541` Remove KNPS OpenAPI surface)**: data.go.kr API endpoint
+  표면 전체 삭제. `ApiEndpoint`/`Page`/`api_endpoint`/`api_endpoints`/
+  `KnpsClient.raw_endpoint`/`KnpsClient.endpoints` 모두 제거. 카탈로그
+  14건 → 모두 `kind="file_dataset"`.
+- **PR#4 (`3269f22`+`3cac75e`+`80c17ed`)**: keyless file artifact DTOs 추가.
+  `FileArtifact`/`FileMember`/`CsvPreview`/`CsvPreviewRow` 모델. `client.files.
+  inspect_bytes()`/`download_artifact()` 메서드. `KnpsConfig`에서 `service_key`
+  /`api_key`/env var 읽기 완전 제거.
+
+**본 라이브러리 영향 (PR#25 일괄)**:
+- ADR-028 §A-F는 historical 유지. 새 amendment §H 추가 (keyless + file-only).
+- 14 dataset_key 정정 — 신규 4건 (`knps_linear_facilities`, `knps_protected_areas`,
+  `knps_basic_statistics`, `knps_lod_table_catalog`), 제거 4건
+  (`knps_access_restrictions`, `knps_fire_alerts`, `knps_recommended_courses`,
+  `knps_park_photos`). 모두 verified data.go.kr ID 박힘 (13/14, 1건만
+  `needs_verification`).
+- 인증 ENV 전부 제거 — `KNPS_SERVICE_KEY` deprecated, `DATA_GO_KR_SERVICE_KEY`
+  KNPS 폴백 제거.
+
+**변경 파일** (6):
+- `docs/decisions.md` — ADR-028 §H amendment 추가 (~90 line). 신규 14 dataset
+  table + 삭제 4 keys + keyless KnpsClient 사용 패턴.
+- `docs/knps-feature-etl.md` — §1 (auth=none, keyless 명기) / §2 (14 file
+  dataset 표 재작성, 공간 9 + 비공간 3 + 삭제 4 분리) / §3.5-3.6 (notice는
+  source 이전 명기) / §4 (category 표에 linear_facilities/protected_areas 추가)
+  / §5 (FileArtifact API 예시) / §6 (Dagster asset 11건, 이전 notice 2건 제거)
+  / §7 (fixture 신규 dataset) / §8 (후속 작업 정정).
+- `docs/forest-feature-etl.md` §11.1-§11.5 — keyless API 사용 패턴 재작성,
+  §11.4 추가 후보 표 정정 (3건 채택 + 4건 source 이전), §11.5 Dagster 카탈로그
+  11건 (linear_facilities/protected_areas 추가, notice 2건 제거).
+- `docs/external-apis.md` §2 env table — `KNPS_SERVICE_KEY` strikethrough +
+  비고에 "사용 안 함". §3.8.1 — keyless 명기, ServiceKey 발급 단계 삭제.
+- `docs/provider-contract.md` §3 dataset_key 표 — 14건 정정 + 4건 strikethrough.
+- `pyproject.toml` providers extras — knps git URL 주석 갱신 (`@06da125f` commit
+  pin + keyless 비고).
+
+**ADR 적용**:
+- ADR-028 §H amendment — 결정 영구화 (historical §A-F는 PR#12 시점 기록 보존).
+- 후속 ADR (TBD): `access_restriction`/`fire_alert` notice source 결정 —
+  산림청 (`python-krforest-api`) / 소방청 / scrape 중 선택. Sprint 3 KNPS
+  적재 PR 이전 결정 필요.
+
+**verification**:
+- 코드 변경 0건 (docs + pyproject 주석만) → pytest/lint 영향 없음.
+- 다음 환경에서 `python -m pytest tests/ -q` 재실행 시 141 passed 유지 기대.
+
+**다음 PR**:
+- **PR#26** (review report P0-4): `make_source_record_key` + `make_payload_hash`
+  + `SourceRecord` + `SourceLink` + `FeatureBundle` DTO. Sprint 2 첫 provider
+  변환 직전 필수.
+- **PR#27** (review report P1): docs drift sweep — README/SKILL/agent-guide의
+  "Sprint 1 진입 직전" / "코드 작성 금지" 잔재 정정.
+- 이후 **Sprint 2 1단계**: `providers/visitkorea/` 축제 + `infra/models.py`.
+
+---
+
 ## 2026-05-25 19:00 (claude)
 
 **작업**: PR#24 DTO strictness P0 (Sprint 2 진입 전 차단) — review report

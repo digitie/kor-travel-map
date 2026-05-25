@@ -91,20 +91,24 @@ system
 | `krheritage_gis_spca` | python-krheritage-api | 사적/명승 boundary |
 | `krheritage_gis_3070426` | python-krheritage-api | 천연기념물 boundary |
 | `krheritage_event_list` | python-krheritage-api | 국가유산 행사 |
-| `knps_park_boundaries` | python-knps-api | 국립공원 경계 (area, MultiPolygon) |
+| `knps_park_boundaries` | python-knps-api | 국립공원 경계 (area, MultiPolygon, SHP) |
 | `knps_trails` | python-knps-api | 국립공원 탐방로 (route, LineString) |
+| `knps_linear_facilities` | python-knps-api | 국립공원 선형시설 (route, `route_type='facility_road'`) |
 | `knps_visitor_centers` | python-knps-api | 탐방안내소 (place) |
 | `knps_hazard_zones` | python-knps-api | 위험지역 (area, `area_kind='hazard_zone'`, ADR-027) |
+| `knps_protected_areas` | python-knps-api | 특별보호구역 (area, `area_kind='protected_area'`) |
 | `knps_weather_stations` | python-knps-api | 산악 기상관측시설 (weather anchor) |
 | `knps_restrooms` | python-knps-api | 국립공원 화장실 (place) |
 | `knps_cultural_resources` | python-knps-api | 국립공원 문화자원 (place, RESOURCE_TYPE 분기) |
 | `knps_campgrounds` | python-knps-api | 야영장 (place) |
 | `knps_shelters` | python-knps-api | 대피소·산장 (place, `LODGING_MOUNTAIN_SHELTER_KNPS`, ADR-027) |
-| `knps_recommended_courses` | python-knps-api | 추천 탐방코스 (route, LineString, difficulty) |
-| `knps_park_photos` | python-knps-api | 명소 사진/VR (feature 본문 X, `feature_files`/source_links) |
+| `knps_basic_statistics` | python-knps-api | 기초통계 (feature 본문 X, timeseries, `needs_verification`) |
 | `knps_visitor_statistics` | python-knps-api | 월별 탐방객 통계 (feature 본문 X, timeseries) |
-| `knps_access_restrictions` | python-knps-api | 입산통제 (notice, `notice_type='access_restriction'`, ADR-027) |
-| `knps_fire_alerts` | python-knps-api | 산불경보 (notice, `notice_type='fire_alert'`, ADR-027) |
+| `knps_lod_table_catalog` | python-knps-api | LOD 메타 카탈로그 (적재 안 함, upstream 보강용) |
+| ~~`knps_recommended_courses`~~ | ~~python-knps-api~~ | knps-api PR#3 source 삭제 — visitkorea/scrape로 이전 |
+| ~~`knps_park_photos`~~ | ~~python-knps-api~~ | knps-api PR#3 source 삭제 — KNPS web 직접 fetch |
+| ~~`knps_access_restrictions`~~ | ~~python-knps-api~~ | knps-api PR#3 source 삭제 — `python-krforest-api`/scrape로 이전 (별도 ADR) |
+| ~~`knps_fire_alerts`~~ | ~~python-knps-api~~ | knps-api PR#3 source 삭제 — 소방청/산림청으로 이전 (별도 ADR) |
 | `standard_tourism_roads` | data.go.kr-standard | 관광길 표준데이터 |
 | `standard_museums` | data.go.kr-standard | 박물관·미술관 표준 |
 | `standard_parking_lots` | data.go.kr-standard | 주차장 표준 |
