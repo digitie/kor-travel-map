@@ -2,6 +2,38 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-25 21:00 (claude)
+
+**작업**: PR#25에 WSL ext4 base 정책 문서 명시 sweep. `python-kraddr-geo`
+패턴 미러.
+
+**컨텍스트**: 사용자가 "python-kraddr-geo와 똑같이 wsl이 베이스임을 문서에
+명시하고 PR25에도 코멘트와 함께 md 파일 업데이트 반영" 지시. kraddr-geo 측
+패턴 (`## 💻 개발 환경 (PC, WSL)` README 헤더 + WARNING callout + ext4/NTFS
+경로 표) 조사 후 본 라이브러리 동일 stamping. AGENTS/SKILL은 이미 §"개발
+환경 정책 (PC, WSL)" 섹션 존재 — README/CLAUDE/dev-environment 보강.
+
+**변경 파일** (5):
+- `README.md` — `## 💻 개발 환경 (PC, WSL)` 신규 섹션 (책임 비책임 다음).
+  `> [!WARNING]` GitHub callout + ext4/NTFS 경로 표 + AGENTS/SKILL cross-
+  reference. kraddr-geo `README.md:21-33`과 1:1 미러.
+- `CLAUDE.md` §4 (의존 스택) — "개발 환경" 한 문단 추가. WSL ext4 base +
+  형제 라이브러리 동일 정책 명기.
+- `docs/dev-environment.md` — title 변경 (`dev-environment.md — 개발 환경` →
+  `# 개발 환경 셋업 (WSL ext4 기준)`). 첫 단락에 AGENTS/SKILL/README cross-
+  reference + 형제 라이브러리 동일 명기.
+- `AGENTS.md` §"개발 환경 정책 (PC, WSL)" — 첫 단락 끝에 "형제 라이브러리
+  (kraddr-geo/kraddr-base/knps-api 등)와 동일 정책" 명시.
+- `SKILL.md` §"개발 환경 (PC, WSL)" — 첫 줄에 "형제 라이브러리 동일 정책"
+  + AGENTS/dev-environment cross-reference 추가.
+
+**verification**:
+- 코드 변경 0 — pytest/lint 영향 없음.
+- README/CLAUDE/AGENTS/SKILL/dev-environment 5개 파일이 WSL 정책을 동일하게
+  "박는" 형태 — kraddr-geo와 동일 cardinality.
+
+---
+
 ## 2026-05-25 20:00 (claude)
 
 **작업**: PR#25 KNPS keyless sync — python-knps-api PR#4 (`codex/keyless-file-

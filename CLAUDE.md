@@ -50,6 +50,11 @@ v1 산출물 요약: 저장소 루트 `python-krtour-map-spec.docx` (약 80쪽).
 SQLAlchemy 2 async + GeoAlchemy2 + asyncpg + psycopg[binary,pool]>=3.2 / GeoPandas
 + Shapely 2 + GDAL / Pydantic v2 / FastAPI + Uvicorn / httpx + tenacity / Alembic.
 
+**개발 환경**: PC 개발은 **WSL ext4** 위에서 (`~/dev/python-krtour-map/`).
+NTFS 마운트에서 직접 `git`/`pytest` 실행 금지 — 형제 라이브러리
+(`python-kraddr-geo`/`python-kraddr-base`)와 동일 정책. 자세히는 `README.md`
+§"개발 환경 (PC, WSL)" + `AGENTS.md` + `docs/dev-environment.md`.
+
 ## 5. 절대 금지 (가장 중요한 5개)
 
 1. **main에 직접 push 금지** — 모든 변경은 feature branch + PR (ADR-021).

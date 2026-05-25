@@ -62,6 +62,24 @@ async with AsyncKrtourMapClient(engine=tripmate_engine, providers=...) as client
 
 자세한 책임 경계는 `docs/architecture.md` 및 `docs/provider-contract.md`.
 
+## 💻 개발 환경 (PC, WSL)
+
+> [!WARNING]
+> PC 개발은 반드시 **WSL의 ext4 파일시스템** 위에서 진행해야 합니다.
+> NTFS 마운트(`/mnt/<drive>/...`) 위에서 직접 `git`/`pip`/`pytest`/`uvicorn`/
+> `alembic`을 실행하면 파일 권한, inotify, 심볼릭 링크, 대량 I/O 성능이 모두
+> 저하됩니다. `python-kraddr-geo`/`python-kraddr-base` 등 형제 라이브러리와
+> 동일한 정책입니다.
+
+```
+ext4 (개발):  ~/dev/python-krtour-map/                  ← 모든 코드/가상환경/테스트 (source of truth)
+NTFS (백업): /mnt/<drive>/projects/python-krtour-map/  ← 작업 완료 후 카피, Windows에서 접근
+data/:       NTFS에 두고 ext4 작업 디렉토리에 심볼릭 링크로 참조
+```
+
+자세한 셋업은 `docs/dev-environment.md` (WSL ext4 기준). 정책은 `AGENTS.md`
+§"개발 환경 정책 (PC, WSL)" + `SKILL.md` §"개발 환경 (PC, WSL)".
+
 ## 빠른 시작 (구현 후 사용 예정)
 
 ```bash
