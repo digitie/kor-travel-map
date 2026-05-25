@@ -1,6 +1,10 @@
-# dev-environment.md — 개발 환경
+# 개발 환경 셋업 (WSL ext4 기준)
 
-본 문서는 `python-krtour-map`의 개발 환경 셋업이다. WSL ext4가 표준 작업 위치다.
+본 문서는 `python-krtour-map`(`krtour.map`)을 PC에서 개발할 때 필요한 시스템
+의존성과 셋업 순서를 정리한다. **WSL ext4에서 작업하고 NTFS의 `data/`를 참조한다**는
+정책(`AGENTS.md` §"개발 환경 정책 (PC, WSL)", `SKILL.md` §"개발 환경 (PC,
+WSL)", `README.md` §"개발 환경 (PC, WSL)")을 전제로 한다. 형제 라이브러리
+(`python-kraddr-geo`/`python-kraddr-base`/`python-knps-api` 등)와 동일.
 
 ## 1. 권장 호스트
 

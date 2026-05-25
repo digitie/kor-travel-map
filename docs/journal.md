@@ -2,6 +2,160 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-25 22:00 (claude)
+
+**작업**: AI agent entry 파일 scope 축소 — OpenAI Codex / Google Antigravity
+관련 (`AGENTS.md`) + Claude Code (`CLAUDE.md`)만 남기고 나머지 (Copilot /
+Cursor) 삭제.
+
+**컨텍스트**: 사용자가 "CODEX와 Antigravity 관련 내용 빼고는 다 지워" 지시.
+앞서 (21:30) 신설했던 `.github/copilot-instructions.md` / `.cursorrules`는
+IDE-side 룰 파일로 drift 위험 — `AGENTS.md`/`CLAUDE.md`와 정책 동기화 의무가
+증가. 사용자는 본 라이브러리 작업에 Codex와 Antigravity (`AGENTS.md` 컨벤션
+공유) + Claude Code만 사용 → entry 파일 2종만 유지.
+
+**삭제 파일** (2):
+- `.github/copilot-instructions.md` — GitHub Copilot 자동 검출. 삭제.
+- `.cursorrules` — Cursor 자동 검출. 삭제.
+
+**변경 파일** (3):
+- `AGENTS.md` top callout 축소 — "OpenAI Codex / Google Antigravity 등
+  `AGENTS.md` 컨벤션 AI agent의 표준 entry. Claude Code는 별도 `CLAUDE.md`"
+  명시 (이전 sweep callout 제거).
+- `CLAUDE.md` top callout 축소 — "Codex / Antigravity는 `AGENTS.md`. 본
+  라이브러리는 CLAUDE.md + AGENTS.md 두 파일만 AI agent entry로 박음
+  (Copilot/Cursor 등 IDE-side 룰 파일은 두지 않음 — drift 회피)" 명시.
+- `docs/journal.md` — 본 엔트리 (이전 21:30 sweep 엔트리 supersede).
+
+**최종 cardinality (2 + 1 = 3 파일)**:
+- `AGENTS.md` — Codex / Antigravity 등 표준 cross-agent entry (source of
+  truth).
+- `CLAUDE.md` — Claude Code 1쪽 요약.
+- `README.md` §"개발 환경 (PC, WSL)" — 사람 + 일반 entry.
+
+**verification**:
+- 코드 변경 0 — pytest/lint 영향 없음.
+- 정책 (WSL ext4 base + Top 5 금지)은 `AGENTS.md` (Codex/Antigravity) +
+  `CLAUDE.md` (Claude Code) + `SKILL.md` + `README.md`에 stamping. drift
+  회피 위해 IDE-side 룰 파일 (Copilot/Cursor)은 명시적으로 두지 않음.
+
+---
+
+## 2026-05-25 21:30 (claude, superseded)
+
+(앞 entry — `.github/copilot-instructions.md` / `.cursorrules` 신설.
+사용자 지시로 22:00에 축소 — 본 엔트리는 history 보존용. 실 작업 결과는
+22:00 엔트리 기준.)
+
+---
+
+## 2026-05-25 21:00 (claude)
+
+**작업**: PR#25에 WSL ext4 base 정책 문서 명시 sweep. `python-kraddr-geo`
+패턴 미러.
+
+**컨텍스트**: 사용자가 "python-kraddr-geo와 똑같이 wsl이 베이스임을 문서에
+명시하고 PR25에도 코멘트와 함께 md 파일 업데이트 반영" 지시. kraddr-geo 측
+패턴 (`## 💻 개발 환경 (PC, WSL)` README 헤더 + WARNING callout + ext4/NTFS
+경로 표) 조사 후 본 라이브러리 동일 stamping. AGENTS/SKILL은 이미 §"개발
+환경 정책 (PC, WSL)" 섹션 존재 — README/CLAUDE/dev-environment 보강.
+
+**변경 파일** (5):
+- `README.md` — `## 💻 개발 환경 (PC, WSL)` 신규 섹션 (책임 비책임 다음).
+  `> [!WARNING]` GitHub callout + ext4/NTFS 경로 표 + AGENTS/SKILL cross-
+  reference. kraddr-geo `README.md:21-33`과 1:1 미러.
+- `CLAUDE.md` §4 (의존 스택) — "개발 환경" 한 문단 추가. WSL ext4 base +
+  형제 라이브러리 동일 정책 명기.
+- `docs/dev-environment.md` — title 변경 (`dev-environment.md — 개발 환경` →
+  `# 개발 환경 셋업 (WSL ext4 기준)`). 첫 단락에 AGENTS/SKILL/README cross-
+  reference + 형제 라이브러리 동일 명기.
+- `AGENTS.md` §"개발 환경 정책 (PC, WSL)" — 첫 단락 끝에 "형제 라이브러리
+  (kraddr-geo/kraddr-base/knps-api 등)와 동일 정책" 명시.
+- `SKILL.md` §"개발 환경 (PC, WSL)" — 첫 줄에 "형제 라이브러리 동일 정책"
+  + AGENTS/dev-environment cross-reference 추가.
+
+**verification**:
+- 코드 변경 0 — pytest/lint 영향 없음.
+- README/CLAUDE/AGENTS/SKILL/dev-environment 5개 파일이 WSL 정책을 동일하게
+  "박는" 형태 — kraddr-geo와 동일 cardinality.
+
+---
+
+## 2026-05-25 20:00 (claude)
+
+**작업**: PR#25 KNPS keyless sync — python-knps-api PR#4 (`codex/keyless-file-
+download-dtos`, commit `06da125f`) 변경을 본 라이브러리 docs/pyproject에 일괄
+반영. ADR-028 amendment §H 신설.
+
+**컨텍스트**: 사용자가 "python-knps-api 구현 완료. 관련 부분 보강/구현할 것"
++ "review report 내용 반영" 요청. PR#24 (review report P0-1/2/3) merged 후.
+upstream knps-api 측 두 큰 변경 (PR#3 OpenAPI 표면 삭제 + PR#4 keyless file
+DTOs)이 본 라이브러리 docs와 어긋남 — sync 필요.
+
+**upstream knps-api 변경 (외부 repo)**:
+- **PR#3 (`aa40541` Remove KNPS OpenAPI surface)**: data.go.kr API endpoint
+  표면 전체 삭제. `ApiEndpoint`/`Page`/`api_endpoint`/`api_endpoints`/
+  `KnpsClient.raw_endpoint`/`KnpsClient.endpoints` 모두 제거. 카탈로그
+  14건 → 모두 `kind="file_dataset"`.
+- **PR#4 (`3269f22`+`3cac75e`+`80c17ed`)**: keyless file artifact DTOs 추가.
+  `FileArtifact`/`FileMember`/`CsvPreview`/`CsvPreviewRow` 모델. `client.files.
+  inspect_bytes()`/`download_artifact()` 메서드. `KnpsConfig`에서 `service_key`
+  /`api_key`/env var 읽기 완전 제거.
+
+**본 라이브러리 영향 (PR#25 일괄)**:
+- ADR-028 §A-F는 historical 유지. 새 amendment §H 추가 (keyless + file-only).
+- 14 dataset_key 정정 — 신규 4건 (`knps_linear_facilities`, `knps_protected_areas`,
+  `knps_basic_statistics`, `knps_lod_table_catalog`), 제거 4건
+  (`knps_access_restrictions`, `knps_fire_alerts`, `knps_recommended_courses`,
+  `knps_park_photos`). 모두 verified data.go.kr ID 박힘 (13/14, 1건만
+  `needs_verification`).
+- 인증 ENV 전부 제거 — `KNPS_SERVICE_KEY` deprecated, `DATA_GO_KR_SERVICE_KEY`
+  KNPS 폴백 제거.
+
+**변경 파일**:
+- `docs/decisions.md` — ADR-028 §H amendment 추가 (~90 line). 신규 14 dataset
+  table + 삭제 4 keys + keyless KnpsClient 사용 패턴.
+- `docs/knps-feature-etl.md` — §1 (auth=none, keyless 명기) / §2 (14 file
+  dataset 표 재작성, 공간 11 + 비공간 3 + 삭제 4 분리) / §3.5-3.6 (notice는
+  source 이전 명기) / §4 (category 표에 linear_facilities/protected_areas 추가)
+  / §5 (FileArtifact API 예시) / §6 (Dagster asset 11건, 이전 notice 2건 제거)
+  / §7 (fixture 신규 dataset) / §8 (후속 작업 정정).
+- `docs/forest-feature-etl.md` §11.1-§11.5 — keyless API 사용 패턴 재작성,
+  §11.4 추가 후보 표 정정 (3건 채택 + 4건 source 이전), §11.5 Dagster 카탈로그
+  11건 (linear_facilities/protected_areas 추가, notice 2건 제거).
+- `docs/external-apis.md` §2 env table — `KNPS_SERVICE_KEY` strikethrough +
+  비고에 "사용 안 함". §3.8.1 — keyless 명기, ServiceKey 발급 단계 삭제.
+- `docs/provider-contract.md` §3 dataset_key 표 — 14건 정정 + 4건 strikethrough.
+- `pyproject.toml` providers extras — knps git URL 주석 갱신 (`@06da125f` commit
+  pin + keyless 비고).
+- `src/krtour/map/dto/{area,route}.py` — `protected_area` area_kind,
+  `facility_road` route_type 추가. KNPS PR#25 문서 계약과 DTO 정합.
+- `tests/unit/test_dto_{area,feature}.py` — 신규 DTO 값 회귀 테스트.
+- `docs/{feature-model,resume,tasks}.md` / `CHANGELOG.md` — DTO 정합 보강과
+  PR#25 상태 반영.
+
+**ADR 적용**:
+- ADR-028 §H amendment — 결정 영구화 (historical §A-F는 PR#12 시점 기록 보존).
+- 후속 ADR (TBD): `access_restriction`/`fire_alert` notice source 결정 —
+  산림청 (`python-krforest-api`) / 소방청 / scrape 중 선택. Sprint 3 KNPS
+  적재 PR 이전 결정 필요.
+
+**verification**:
+- GitHub Actions (`a646db5`) — lint, openapi-drift, pytest Python 3.11/3.12/
+  3.13 모두 green.
+- 로컬: `.venv/bin/python -m ruff check src/ tests/`, `git diff --check`,
+  `compileall src/krtour/map`, DTO smoke 통과.
+
+**다음 PR**:
+- **PR#26** (review report P0-4): `make_source_record_key` + `make_payload_hash`
+  + `SourceRecord` + `SourceLink` + `FeatureBundle` DTO. Sprint 2 첫 provider
+  변환 직전 필수.
+- **PR#27** (review report P1): docs drift sweep — README/SKILL/agent-guide의
+  "Sprint 1 진입 직전" / "코드 작성 금지" 잔재 정정.
+- 이후 **Sprint 2 1단계**: `providers/visitkorea/` 축제 + `infra/models.py`.
+
+---
+
 ## 2026-05-25 19:00 (claude)
 
 **작업**: PR#24 DTO strictness P0 (Sprint 2 진입 전 차단) — review report

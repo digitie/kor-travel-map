@@ -1225,8 +1225,9 @@
 
 ## ADR-028: `python-knps-api` provider 라이브러리 등록
 
-- **상태**: accepted (T-014 Sprint 1 진입 시 전환, 2026-05-25)
-- **날짜**: 2026-05-25
+- **상태**: accepted (T-014 Sprint 1 진입 시 전환, 2026-05-25) +
+  **amendment 2026-05-25 (keyless, file-only)** — 아래 §H 참조.
+- **날짜**: 2026-05-25 (원본) / 2026-05-25 (amendment, knps-api PR#4 후)
 - **결정자**: claude 제안 + 사용자 (외부 repo 작성 + downstream 반영)
 - **컨텍스트**: `docs/forest-feature-etl.md §11`에서 KNPS dataset 14건 통합
   plan 결정 (옵션 B = 별도 `python-knps-api`, ADR-027 기반 카테고리/notice_type
@@ -1344,6 +1345,111 @@
   - T-018 시점에 ADR-027/ADR-028 모두 `accepted` 전환 + 코드 적용 PR.
   - Sprint 2에서 SHP/GeoJSON parsing 책임 위치 결정 (`krtour.map.providers.
     knps` vs knps-api `[geo]` extra).
+
+### H. Amendment 2026-05-25 (keyless + file-only, knps-api PR#3+PR#4 merged)
+
+knps-api 측 변경 (commit `06da125f`, PR#4 `codex/keyless-file-download-dtos`
+merged 2026-05-25):
+
+1. **PR#3 (`aa40541` Remove KNPS OpenAPI surface)** — data.go.kr OpenAPI/REST
+   endpoint 표면 전체 삭제. `ApiEndpoint`/`api_endpoint`/`api_endpoints`/
+   `raw_endpoint`/`Page` 클래스/함수 모두 제거. 카탈로그는 14건 모두
+   `kind="file_dataset"`로 통일.
+2. **PR#4 (`3269f22`+`3cac75e`+`80c17ed`)** — keyless file artifact DTOs
+   추가. `FileArtifact`/`FileMember`/`CsvPreview`/`CsvPreviewRow` 모델 추가.
+   `client.files.inspect_bytes()` / `client.files.download_artifact()` 메서드
+   추가. `KnpsConfig`에서 `service_key`/`api_key` 필드 + `from_env` ENV 읽기
+   완전 제거 — `timeout` + `max_rps`만 남음.
+
+본 라이브러리 영향 (PR#25 일괄 반영):
+
+- **A 갱신 — provider 등록**:
+  - 인증 env 제거 — `KNPS_SERVICE_KEY` / `DATA_GO_KR_SERVICE_KEY` 사용 안 함.
+    `external-apis.md §3.8.1`에서 auth 단계 삭제, "data.go.kr 직접 다운로드
+    URL (keyless)" 명기.
+  - 공개 API import 목록 정정:
+    ```python
+    # 신규 (삭제: ApiEndpoint, Page, api_endpoint, api_endpoints)
+    from knps import (
+        KnpsClient, KnpsConfig, CatalogEntry, FileDataset,
+        FileArtifact, FileMember, CsvPreview, CsvPreviewRow,
+        PROVIDER_NAME, KnpsApiError, KnpsAuthError, KnpsNoDataError,
+        KnpsParseError, KnpsRateLimitError, KnpsRequestError, KnpsServerError,
+        catalog_entries, file_dataset, file_datasets,
+    )
+    ```
+  - `KnpsClient` 생성: `KnpsClient(timeout=10.0, max_rps=5.0)` 또는
+    `KnpsClient.from_env(...)` (env var 읽지 않음, alias). authentication 인자
+    없음.
+
+- **F 갱신 — 14 dataset_key 카탈로그**:
+  - **모두 file_dataset** (API endpoints 0건). 이전 §F의 "API endpoints (3)
+    /File datasets (11)" 분류 무효.
+  - 신규 verified 카탈로그 (knps-api `FILE_DATASETS` 14건):
+    | key | data.go.kr ID | feature.kind | verification |
+    |-----|---------------|--------------|--------------|
+    | `knps_park_boundaries` | `15017313` | area (MultiPolygon) | verified |
+    | `knps_trails` | `15003467` | route (LineString) | verified |
+    | `knps_visitor_centers` | `15003445` | place (Point) | verified |
+    | `knps_hazard_zones` | `15003441` | area (Polygon) | verified |
+    | `knps_weather_stations` | `15090557` | weather (Point) | verified |
+    | `knps_restrooms` | `15003468` | place (Point) | verified |
+    | `knps_cultural_resources` | `15003443` | place (Point) | verified |
+    | `knps_campgrounds` | `15003469` | place (Point) | verified |
+    | `knps_shelters` | `2982556` | place (Point) | verified |
+    | `knps_linear_facilities` | `15091972` | route (LineString) | verified |
+    | `knps_basic_statistics` | `15087598` | timeseries | needs_verification |
+    | `knps_visitor_statistics` | `15107577` | timeseries | verified |
+    | `knps_protected_areas` | `15127921` | area (Polygon) | verified |
+    | `knps_lod_table_catalog` | `15118945` | metadata | verified |
+  - **삭제된 이전 keys** (knps-api에 더 이상 없음): `knps_access_restrictions`,
+    `knps_fire_alerts`, `knps_recommended_courses`, `knps_park_photos`.
+    이 중 `access_restriction`/`fire_alert` notice는 다른 provider
+    (`python-krforest-api`, 산림청 산불경보) 또는 web scraping으로 보완 — 별도
+    ADR로 결정 (KNPS 단독 source 아님).
+  - 신규 dataset 구현을 위해 DTO 표준값도 확장:
+    `AreaDetail.area_kind='protected_area'`,
+    `RouteDetail.route_type='facility_road'`.
+
+- **G 신규 — file artifact API 사용 패턴**:
+  ```python
+  async with KnpsClient(max_rps=5.0) as client:
+      # raw bytes — 본 라이브러리의 SHP/CSV parser에 직접 공급
+      data: bytes = await client.files.download("knps_park_boundaries")
+      # 또는 preview용 (debug UI / 디버깅)
+      artifact: FileArtifact = await client.files.download_artifact(
+          "knps_trails", preview_rows=5,
+      )
+      for csv in artifact.csv_previews:
+          print(csv.member_name, csv.encoding, csv.headers, csv.rows[:1])
+  ```
+  - SHP/GeoJSON parsing은 여전히 본 라이브러리 책임 — knps-api는 raw bytes만
+    제공 (이전 결정 B 유지).
+
+- **pyproject.toml `providers` extras**: git URL 핀 active 권고 (코드 작성
+  단계 진입):
+  ```toml
+  "python-knps-api @ git+https://github.com/digitie/python-knps-api.git@06da125f",
+  ```
+
+**근거**:
+- knps-api 외부 repo가 keyless로 단순화 → 본 라이브러리는 ENV var/auth wiring
+  부담 0 (test fixture에서도 API key mock 불필요).
+- 14 dataset 모두 verified status → Sprint 3 KNPS 적재 시 needs_verification
+  대응 코드 분기 1건 (`knps_basic_statistics`)만.
+- notice 도메인 (`access_restriction`/`fire_alert`) 공급원이 knps에서 사라짐
+  → ADR-027 generic notice_type은 다른 provider (산림청 RSS, KFS 공시 등)
+  에서 채울 수 있도록 후속 ADR (TBD)에서 명시.
+
+**후속 (본 amendment 적용 PR#25)**:
+- `docs/knps-feature-etl.md` 재작성 (API endpoints 섹션 삭제, 14 file dataset
+  표 갱신, 인증 단계 삭제, FileArtifact API 사용 예시 추가).
+- `docs/forest-feature-etl.md §11` 동기 (provider 공개 API 표면 정정, auth env
+  삭제).
+- `docs/external-apis.md §3.8.1` 정정 (keyless, ServiceKey 단계 삭제).
+- `docs/provider-contract.md` (해당 시) — dataset_key 14건 갱신.
+- `pyproject.toml` knps git URL 핀 활성화.
+- 후속 ADR (TBD): `access_restriction`/`fire_alert` notice source 결정.
 
 ## ADR-029: 공통 maki marker / category 매핑 npm 패키지 추출 (`@krtour/map-marker-react`)
 

@@ -3,6 +3,11 @@
 이 파일은 Claude(Claude Code, Claude Agent SDK)가 가장 먼저 읽어야 할 1쪽 요약이다.
 정식 정책·결정은 `AGENTS.md`, `SKILL.md`, `docs/decisions.md`가 갖는다.
 
+> **OpenAI Codex / Google Antigravity** 등 `AGENTS.md` 컨벤션을 따르는 AI agent는
+> `AGENTS.md`를 entry로 사용한다. 본 라이브러리는 CLAUDE.md + AGENTS.md 두
+> 파일만 AI agent entry로 박는다 (Copilot/Cursor 등 IDE-side 룰 파일은 두지
+> 않음 — drift 회피).
+
 ## 1. 이 저장소가 하는 일
 
 `python-krtour-map`은 TripMate의 지도 데이터 정규화·저장 **함수 라이브러리**다.
@@ -49,6 +54,11 @@ v1 산출물 요약: 저장소 루트 `python-krtour-map-spec.docx` (약 80쪽).
 `python-kraddr-geo`와 동일 스택. PostgreSQL 16 + PostGIS 3.5 + pg_trgm + pgcrypto /
 SQLAlchemy 2 async + GeoAlchemy2 + asyncpg + psycopg[binary,pool]>=3.2 / GeoPandas
 + Shapely 2 + GDAL / Pydantic v2 / FastAPI + Uvicorn / httpx + tenacity / Alembic.
+
+**개발 환경**: PC 개발은 **WSL ext4** 위에서 (`~/dev/python-krtour-map/`).
+NTFS 마운트에서 직접 `git`/`pytest` 실행 금지 — 형제 라이브러리
+(`python-kraddr-geo`/`python-kraddr-base`)와 동일 정책. 자세히는 `README.md`
+§"개발 환경 (PC, WSL)" + `AGENTS.md` + `docs/dev-environment.md`.
 
 ## 5. 절대 금지 (가장 중요한 5개)
 

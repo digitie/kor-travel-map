@@ -5,6 +5,7 @@ ADR 참조
 - ADR-018 — ``Feature.detail``은 자유 dict 금지, AreaDetail로만 적재
 - ADR-027 — ``area_kind`` Literal에 ``"hazard_zone"`` 추가 (위험지역 =
   지역 area, ``payload.hazard_type`` + ``payload.domain``으로 구체)
+- ADR-028 amendment — KNPS ``protected_areas``는 ``"protected_area"``로 구체
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ AreaKind = Literal[
     "natural_heritage_area",
     "buried_heritage_area",
     "hazard_zone",  # ADR-027
+    "protected_area",  # ADR-028 amendment (KNPS protected areas)
     "other",
 ]
 
@@ -44,6 +46,7 @@ AREA_KINDS: Final[tuple[str, ...]] = (
     "natural_heritage_area",
     "buried_heritage_area",
     "hazard_zone",  # ADR-027
+    "protected_area",  # ADR-028 amendment (KNPS protected areas)
     "other",
 )
 
@@ -54,7 +57,8 @@ class AreaDetail(BaseModel):
 
     ADR-027: ``hazard_zone``일 때 ``payload.hazard_type`` (예: ``rockfall``,
     ``flash_flood``, ``wildlife``) + ``payload.domain`` (``forest``,
-    ``coastal``, ...).
+    ``coastal``, ...). ADR-028 amendment: ``protected_area``일 때
+    ``payload.protection_type`` 보존.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -74,6 +78,7 @@ class AreaDetail(BaseModel):
         description=(
             "ADR-027: ``hazard_zone``일 때 "
             "``{'hazard_type': 'rockfall|flash_flood|wildlife|...', "
-            "'domain': 'forest|coastal|urban|...'}``."
+            "'domain': 'forest|coastal|urban|...'}``. ADR-028 amendment: "
+            "``protected_area``일 때 ``{'protection_type': 'special|...'}``."
         ),
     )

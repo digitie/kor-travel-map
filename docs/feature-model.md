@@ -207,6 +207,7 @@ ROUTE_TYPE_ACCESSIBLE_WALK  = "accessible_walk"
 ROUTE_TYPE_TREKKING         = "trekking"
 ROUTE_TYPE_FOREST_TRAIL     = "forest_trail"
 ROUTE_TYPE_TOURISM_ROAD     = "tourism_road"
+ROUTE_TYPE_FACILITY_ROAD    = "facility_road"
 ROUTE_TYPE_WALKING_COURSE   = "walking_course"
 ROUTE_TYPE_CYCLING          = "cycling"
 ROUTE_TYPE_DRIVE_COURSE     = "drive_course"
@@ -223,7 +224,7 @@ RouteDetail에는 메타만.
 ```python
 class AreaDetail(BaseModel):
     feature_id: str
-    area_kind: str = "area"              # national_park / provincial_park / recreation_forest / tourism_district / beach / campsite / heritage_area / natural_heritage_area / buried_heritage_area / hazard_zone / other
+    area_kind: str = "area"              # national_park / provincial_park / recreation_forest / tourism_district / beach / campsite / heritage_area / natural_heritage_area / buried_heritage_area / hazard_zone / protected_area / other
     boundary_source: str | None = None   # 'gis_3070426', 'gis_spca', 'krforest', ...
     area_square_meters: Decimal | None = None
     regulation_scope: str | None = None
@@ -231,6 +232,7 @@ class AreaDetail(BaseModel):
     description: str | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
     # hazard_zone일 때 payload 예: {"hazard_type": "rockfall" | "flash_flood" | "wildlife" | ..., "domain": "forest" | "coastal" | ...}
+    # protected_area일 때 payload 예: {"protection_type": "special" | "restricted_use" | ...}
 ```
 
 geometry는 `features.geom` (MULTIPOLYGON).

@@ -1,5 +1,9 @@
 # AGENTS.md
 
+> 본 파일은 **OpenAI Codex / Google Antigravity** 등 `AGENTS.md` 컨벤션을
+> 따르는 AI agent의 표준 entry다. Claude Code는 별도 `CLAUDE.md` (1쪽 요약)
+> 가 있으나 정식 정책·결정은 본 파일·`SKILL.md`·`docs/decisions.md`가 갖는다.
+
 ## 문서 언어 정책
 
 이 저장소의 모든 Markdown/RST 문서는 한국어로 작성한다. 공식 API 필드명, 코드 식별자,
@@ -47,6 +51,8 @@ TripMate ↔ krtour-map 사이에는 REST API가 없다.
 
 PC 개발은 **WSL ext4** 위에서 수행한다. NTFS 마운트에서 직접 `git`/`pip`/`uvicorn`을
 실행하지 않는다 — 파일 권한, inotify, 심볼릭 링크, 대량 I/O 성능 모두 저하된다.
+형제 라이브러리 (`python-kraddr-geo` / `python-kraddr-base` / `python-knps-api`
+등)와 **동일 정책**.
 
 - **코드/가상환경**: ext4 (`~/dev/python-krtour-map/`).
 - **데이터(`data/`)**: NTFS의 프로젝트 디렉토리 (예: `/mnt/f/dev/python-krtour-map/data/`).
