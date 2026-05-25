@@ -13,34 +13,40 @@ Sprint 2 첫 provider 변환 함수 직전 필수 묶음.
 landing해서 ADR-028 amendment와 정합. 본 PR#26은 source record/link/bundle
 DTO + ID helper로 Sprint 2 진입 준비.
 
-**신규 파일** (3):
+**신규 파일** (4):
 - `src/krtour/map/dto/source.py` (~150 line):
   - `SourceRecord` — provider raw payload row (provider/dataset_key/
     source_entity_type/source_entity_id/raw_payload_hash + raw_data/raw_*/
-    fetched_at/imported_at/expires_at). datetime aware validator (ADR-019).
+    fetched_at/imported_at/expires_at). DB NOT NULL 계약에 맞춰
+    `source_record_key`/`fetched_at` 필수, `raw_data` 기본 `{}`. datetime aware
+    validator (ADR-019).
     `key()` 메서드 두지 않음 — dto는 core import 불가 (ADR-001/002), 호출자가
     `make_source_record_key(...)`로 직접 계산해서 박는다.
   - `SourceLink` — Feature ↔ SourceRecord 1:N 매핑 (source_role/match_method/
     confidence 0-100/is_primary_source). datetime aware validator.
 - `src/krtour/map/dto/bundle.py` (~80 line):
   - `FeatureBundle` — provider → load 전달 단위 (feature + source_record +
-    source_link 3개 필수). weather/price/file_sources 필드는 Sprint 2 DTO
-    추가와 함께 enable.
+    source_link 3개 필수). `source_link.feature_id`와
+    `source_link.source_record_key` 교차 검증. weather/price/file_sources 필드는
+    Sprint 2 DTO 추가와 함께 enable.
   - `detail` property — `feature.detail` alias (single source of truth).
-- `tests/unit/test_ids_extended.py` (24 case) — `make_source_record_key`
+- `tests/unit/test_ids_extended.py` — `make_source_record_key`
   (포맷/결정성/구성요소 변경/empty/pipe/SHA1 회귀) + `make_payload_hash`
   (default length/custom length/invalid length/canonical sort/whitespace/
-  unicode/diff data/datetime+Decimal/top-level list/SHA256 회귀).
-- `tests/unit/test_dto_source_bundle.py` (16 case) — SourceRecord/SourceLink/
-  FeatureBundle 생성 + ADR-019 datetime + extra='forbid' + e2e flow
-  (raw_payload → make_payload_hash → make_source_record_key → make_feature_id
-  → FeatureBundle).
+  unicode/diff data/datetime+date+Decimal/top-level list/SHA256 회귀 +
+  unsupported payload 거부).
+- `tests/unit/test_dto_source_bundle.py` — SourceRecord/SourceLink/
+  FeatureBundle 생성 + DB required fields + bundle 교차 검증 + ADR-019 datetime
+  + extra='forbid' + e2e flow (raw_payload → make_payload_hash →
+  make_source_record_key → make_feature_id → FeatureBundle).
 
-**변경 파일** (3):
+**주요 변경 파일**:
 - `src/krtour/map/core/ids.py` — `make_source_record_key` (`sr_{sha1[:20]}`,
   `docs/data-model.md §11`) + `make_payload_hash` (`docs/data-model.md §11`,
   canonical JSON `sort_keys`+`separators=(",", ":")`+`ensure_ascii=False`+
-  `default=str` → SHA256 hexdigest prefix, default 32 chars / 1-64 범위)
+  `allow_nan=False` → SHA256 hexdigest prefix, default 32 chars / 1-64 범위).
+  `datetime`/`date`는 ISO 문자열, `Decimal`은 문자열로 정규화하고
+  `set`/`bytes`/임의 객체는 거부.
   + `SOURCE_RECORD_KEY_HASH_LENGTH` / `PAYLOAD_HASH_DEFAULT_LENGTH` constants.
 - `src/krtour/map/core/__init__.py` — re-export 신규 helper + length constant
   (12 → 15 식별자).
@@ -56,13 +62,12 @@ DTO + ID helper로 Sprint 2 진입 준비.
 - PR#22에서 `dto/_time.py` 분리한 것과 동일 원칙 — dto는 core 절대 import 안 함.
 
 **verification**:
-- `python -m pytest tests/ -q --ignore=tests/integration` → **191 passed,
-  4 skipped** (141 + 50 신규: ids_extended 24 + dto_source_bundle 16 + 기타
-  micro-adjustments PR#24~PR#25 잔여 분).
-- `python -m ruff check src/ tests/` → All checks passed.
-- `python -m mypy --strict -p krtour.map` → Success, 28 source files.
-- `import-linter` → **4 contracts kept, 0 broken** (layered + fastapi 금지 +
-  cache 금지 + kafka 금지).
+- `.venv/bin/python -m pytest tests/ -q --ignore=tests/integration -s` →
+  **203 passed**.
+- `.venv/bin/python -m ruff check .` → All checks passed.
+- `.venv/bin/python -m mypy --strict -p krtour.map` → Success, 28 source files.
+- `.venv/bin/lint-imports` → **4 contracts kept, 0 broken** (layered +
+  fastapi 금지 + cache 금지 + kafka 금지).
 
 **ADR 적용**:
 - ADR-009 — `make_source_record_key` / `make_payload_hash` 결정적 ID 생성

@@ -6,9 +6,7 @@ provider 변환 함수의 출력 = load 함수의 입력. 하나의 raw payload 
 - ``feature`` (필수) — Feature 본체
 - ``source_record`` (필수) — provider raw payload 보존
 - ``source_link`` (필수) — feature ↔ source 매핑
-- ``file_sources`` (선택) — 이미지/VR 등 객체 저장소 업로드 입력
-- ``weather_values`` (선택) — kind=weather 또는 weather context anchor
-- ``price_values`` (선택) — kind=price 또는 price context
+- ``file_sources`` / ``weather_values`` / ``price_values``는 후속 DTO 구현 시 추가
 
 ``AsyncKrtourMapClient.load_feature_bundles(bundles)``가 본 DTO 리스트를 받아
 DB upsert + 객체 저장소 업로드 + source_link 생성을 한 transaction에서 수행.
@@ -24,7 +22,9 @@ ADR 참조
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from typing import Self
+
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from .area import AreaDetail
 from .event import EventDetail
@@ -69,6 +69,23 @@ class FeatureBundle(BaseModel):
     # weather_values: list[WeatherValue] = Field(default_factory=list)  # Sprint 2
     # price_values: list[PriceValue] = Field(default_factory=list)      # Sprint 2
     # file_sources: list[FeatureFileSource] = Field(default_factory=list)  # Sprint 2-3
+
+    @model_validator(mode="after")
+    def _check_source_consistency(self) -> Self:
+        """Feature와 source lineage FK가 같은 bundle 안에서 닫혀 있는지 검증."""
+        if self.source_link.feature_id != self.feature.feature_id:
+            raise ValueError(
+                "source_link.feature_id must match feature.feature_id "
+                f"({self.source_link.feature_id!r} != {self.feature.feature_id!r})."
+            )
+        if self.source_link.source_record_key != self.source_record.source_record_key:
+            raise ValueError(
+                "source_link.source_record_key must match "
+                "source_record.source_record_key "
+                f"({self.source_link.source_record_key!r} != "
+                f"{self.source_record.source_record_key!r})."
+            )
+        return self
 
     # ── convenience ─────────────────────────────────────────────────────
 

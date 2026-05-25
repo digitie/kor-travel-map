@@ -50,7 +50,10 @@ def export(output: Path) -> dict:
     app = _load_app()
     spec = app.openapi()
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(spec, indent=2, sort_keys=True, ensure_ascii=False), encoding="utf-8")
+    output.write_text(
+        json.dumps(spec, indent=2, sort_keys=True, ensure_ascii=False),
+        encoding="utf-8",
+    )
     return spec
 
 

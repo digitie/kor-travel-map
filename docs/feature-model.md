@@ -266,6 +266,7 @@ class FeatureOpeningHours(BaseModel):
 
 ```python
 class SourceRecord(BaseModel):
+    source_record_key: str                # make_source_record_key(...) 결과
     provider: str
     dataset_key: str
     source_entity_type: str
@@ -276,14 +277,16 @@ class SourceRecord(BaseModel):
     raw_address: str | None = None
     raw_longitude: Decimal | None = None
     raw_latitude: Decimal | None = None
-    raw_data: dict[str, Any] | None = None
-    fetched_at: datetime | None = None
+    raw_data: dict[str, Any] = Field(default_factory=dict)
+    fetched_at: datetime
     imported_at: datetime = Field(default_factory=kst_now)
     expires_at: datetime | None = None
-    source_record_key: str | None = None  # 비면 .key()로 생성
 ```
 
 고유성: `(provider, dataset_key, source_entity_type, source_entity_id, raw_payload_hash)`.
+`SourceRecord`는 `dto`가 `core`를 import하지 않도록 `.key()` 메서드를 두지 않는다.
+provider 변환 함수가 `make_payload_hash(...)`와 `make_source_record_key(...)`를
+호출해 `source_record_key`를 명시적으로 넣는다.
 
 ## 12. `SourceLink`
 
@@ -447,16 +450,19 @@ class ImportJob(BaseModel):
 ```python
 class FeatureBundle(BaseModel):
     feature: Feature
-    detail: PlaceDetail | EventDetail | NoticeDetail | RouteDetail | AreaDetail | None = None
     source_record: SourceRecord
     source_link: SourceLink
-    file_sources: list[FeatureFileSource] = Field(default_factory=list)
-    weather_values: list[WeatherValue] = Field(default_factory=list)
-    price_point: PricePoint | None = None
-    price_values: list[PriceValue] = Field(default_factory=list)
+
+    @property
+    def detail(self) -> PlaceDetail | EventDetail | NoticeDetail | RouteDetail | AreaDetail | None: ...
 ```
 
 `AsyncKrtourMapClient.load_feature_bundles(bundles)`이 받는 단위.
+`detail`은 별도 필드가 아니라 `feature.detail` alias다. PR#26 기준 bundle은
+`feature`/`source_record`/`source_link` 3개 필수 필드만 받으며,
+`file_sources`/`weather_values`/`price_values`는 해당 DTO가 구현되는 후속 PR에서
+추가한다. `FeatureBundle`은 `source_link.feature_id == feature.feature_id`와
+`source_link.source_record_key == source_record.source_record_key`를 검증한다.
 
 ## 19. detail 디스패치 (ADR-018)
 
@@ -481,6 +487,6 @@ DETAIL_MODELS: Final[dict[FeatureKind, type[BaseModel]]] = {
 - `EventDetail` `ends_on < starts_on` → ValidationError
 - `NoticeDetail` time range 검증
 - `WeatherValue.identity()` 결정성
-- `SourceRecord.key()` ↔ `make_source_record_key` 일치
+- `SourceRecord.source_record_key` ↔ `make_source_record_key` 일치
 - naive datetime 입력 → ValidationError
 - 자유 dict → ValidationError

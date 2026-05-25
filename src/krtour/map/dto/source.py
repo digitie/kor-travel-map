@@ -75,12 +75,11 @@ class SourceRecord(BaseModel):
         default=None,
         description="provider 원천 위도. EPSG:4326 추정.",
     )
-    raw_data: dict[str, Any] | None = Field(
-        default=None,
+    raw_data: dict[str, Any] = Field(
+        default_factory=dict,
         description="provider 응답 raw payload (``JSONB``). canonical 직렬화 필수.",
     )
-    fetched_at: datetime | None = Field(
-        default=None,
+    fetched_at: datetime = Field(
         description="provider 호출 시각 (aware datetime, ADR-019).",
     )
     imported_at: datetime = Field(
@@ -94,11 +93,10 @@ class SourceRecord(BaseModel):
             "후 purge (ADR-017)."
         ),
     )
-    source_record_key: str | None = Field(
-        default=None,
+    source_record_key: str = Field(
+        min_length=1,
         description=(
-            "PK. ``None``이면 ``key()`` 메서드로 계산해 박는다 (lazy). "
-            "``make_source_record_key(...)`` 결과."
+            "PK. 호출자가 ``make_source_record_key(...)``로 계산해서 명시적으로 넣는다."
         ),
     )
 

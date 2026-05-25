@@ -66,8 +66,8 @@ PR#22 CI/import-linter merge 후 gate 확인. PR#22 merge 후 PR#23 리포트
       `make_payload_hash` (`docs/data-model.md §11` 명세) + `SourceRecord` +
       `SourceLink` + `FeatureBundle` DTO. dto는 core 미import 원칙 준수
       (`SourceRecord.key()` 메서드 두지 않음 — 호출자가 helper로 계산).
-      191 pytest passed (50 신규), 4 import-linter contracts kept,
-      mypy strict clean.
+      리뷰 후속으로 DB required 필드와 bundle 교차 검증, payload hash strict
+      normalize, canonical docs 예시 정합 보강.
 - [ ] PR#27 (review report P1): docs drift sweep — README/SKILL/agent-guide/
       tasks의 "Sprint 1 진입 직전" / "코드 작성 금지" 잔재 문단을 Sprint 1
       active/종료 상태로 갱신.

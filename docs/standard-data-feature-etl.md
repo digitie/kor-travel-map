@@ -137,12 +137,13 @@ def tourism_road_row_to_bundle(row, *, dataset, fetched_at):
         feature=Feature(
             feature_id=feature_id, kind=FeatureKind.ROUTE,
             name=row.road_name, ...,
-        ),
-        detail=RouteDetail(
-            feature_id=feature_id,
-            route_type=route_type,
-            total_distance_meters=row.distance_m,
-            expected_duration_minutes=row.duration_min,
+            detail=RouteDetail(
+                feature_id=feature_id,
+                route_type=route_type,
+                total_distance_meters=row.distance_m,
+                expected_duration_minutes=row.duration_min,
+                ...
+            ),
             ...
         ),
         ...

@@ -30,12 +30,22 @@ from krtour.map.dto import (
 
 
 def _make_source_record(**overrides: object) -> SourceRecord:
+    source_record_key = make_source_record_key(
+        provider="python-visitkorea-api",
+        dataset_key="festival",
+        source_entity_type="festival_record",
+        source_entity_id="E001234",
+        raw_payload_hash="abc123",
+    )
     base = {
         "provider": "python-visitkorea-api",
         "dataset_key": "festival",
         "source_entity_type": "festival_record",
         "source_entity_id": "E001234",
         "raw_payload_hash": "abc123",
+        "raw_data": {"id": "E001234"},
+        "fetched_at": datetime(2026, 1, 1, tzinfo=KST),
+        "source_record_key": source_record_key,
     }
     base.update(overrides)  # type: ignore[arg-type]
     return SourceRecord(**base)  # type: ignore[arg-type]
@@ -43,11 +53,12 @@ def _make_source_record(**overrides: object) -> SourceRecord:
 
 @pytest.mark.unit
 def test_source_record_minimal_creation() -> None:
-    """5개 필수 필드만으로 생성 가능 (나머지는 기본값)."""
+    """DB에 바로 저장 가능한 필수 필드로 생성."""
     rec = _make_source_record()
     assert rec.provider == "python-visitkorea-api"
     assert rec.imported_at.tzinfo is not None  # kst_now default
-    assert rec.source_record_key is None
+    assert rec.source_record_key.startswith("sr_")
+    assert rec.raw_data == {"id": "E001234"}
 
 
 @pytest.mark.unit
@@ -70,10 +81,50 @@ def test_source_record_key_set_explicitly() -> None:
 
 
 @pytest.mark.unit
-def test_source_record_key_none_by_default() -> None:
-    """``source_record_key``는 기본 ``None`` — 호출자 책임."""
-    rec = _make_source_record()
-    assert rec.source_record_key is None
+@pytest.mark.parametrize("field", ["fetched_at", "source_record_key"])
+def test_source_record_db_required_fields(field: str) -> None:
+    """DB NOT NULL 필드는 load DTO에서도 누락을 거부."""
+    source_record_key = make_source_record_key(
+        provider="python-visitkorea-api",
+        dataset_key="festival",
+        source_entity_type="festival_record",
+        source_entity_id="E001234",
+        raw_payload_hash="abc123",
+    )
+    data: dict[str, object] = {
+        "provider": "python-visitkorea-api",
+        "dataset_key": "festival",
+        "source_entity_type": "festival_record",
+        "source_entity_id": "E001234",
+        "raw_payload_hash": "abc123",
+        "fetched_at": datetime(2026, 1, 1, tzinfo=KST),
+        "source_record_key": source_record_key,
+    }
+    del data[field]
+    with pytest.raises(ValidationError, match=field):
+        SourceRecord(**data)  # type: ignore[arg-type]
+
+
+@pytest.mark.unit
+def test_source_record_raw_data_defaults_to_empty_dict() -> None:
+    """``raw_data``는 JSONB NOT NULL 기본값과 맞춰 빈 dict로 시작."""
+    source_record_key = make_source_record_key(
+        provider="python-visitkorea-api",
+        dataset_key="festival",
+        source_entity_type="festival_record",
+        source_entity_id="E001234",
+        raw_payload_hash="abc123",
+    )
+    rec = SourceRecord(
+        provider="python-visitkorea-api",
+        dataset_key="festival",
+        source_entity_type="festival_record",
+        source_entity_id="E001234",
+        raw_payload_hash="abc123",
+        fetched_at=datetime(2026, 1, 1, tzinfo=KST),
+        source_record_key=source_record_key,
+    )
+    assert rec.raw_data == {}
 
 
 @pytest.mark.unit
@@ -117,9 +168,16 @@ def test_source_record_extra_forbid() -> None:
 
 
 def _make_source_link(**overrides: object) -> SourceLink:
+    source_record_key = make_source_record_key(
+        provider="python-visitkorea-api",
+        dataset_key="festival",
+        source_entity_type="festival_record",
+        source_entity_id="E001234",
+        raw_payload_hash="abc123",
+    )
     base = {
         "feature_id": "f_1100000000_e_abc",
-        "source_record_key": "sr_xyz",
+        "source_record_key": source_record_key,
         "source_role": SourceRole.PRIMARY,
         "match_method": "natural_key",
         "confidence": 100,
@@ -151,9 +209,10 @@ def test_source_link_confidence_bounds() -> None:
 @pytest.mark.unit
 def test_source_link_default_role() -> None:
     """기본 source_role은 ENRICHMENT (primary는 명시적 지정)."""
+    source_record = _make_source_record()
     link = SourceLink(
         feature_id="f_1100000000_p_abc",
-        source_record_key="sr_xyz",
+        source_record_key=source_record.source_record_key,
         match_method="natural_key",
         confidence=80,
     )
@@ -196,7 +255,10 @@ def test_feature_bundle_minimal_creation() -> None:
     """feature + source_record + source_link 3개 필수."""
     feature = _make_feature()
     source_record = _make_source_record()
-    source_link = _make_source_link(feature_id=feature.feature_id)
+    source_link = _make_source_link(
+        feature_id=feature.feature_id,
+        source_record_key=source_record.source_record_key,
+    )
     bundle = FeatureBundle(
         feature=feature,
         source_record=source_record,
@@ -211,10 +273,14 @@ def test_feature_bundle_minimal_creation() -> None:
 def test_feature_bundle_detail_alias() -> None:
     """``bundle.detail``은 ``bundle.feature.detail`` alias."""
     feature = _make_feature()
+    source_record = _make_source_record()
     bundle = FeatureBundle(
         feature=feature,
-        source_record=_make_source_record(),
-        source_link=_make_source_link(feature_id=feature.feature_id),
+        source_record=source_record,
+        source_link=_make_source_link(
+            feature_id=feature.feature_id,
+            source_record_key=source_record.source_record_key,
+        ),
     )
     assert bundle.detail is feature.detail
     assert isinstance(bundle.detail, PlaceDetail)
@@ -223,29 +289,60 @@ def test_feature_bundle_detail_alias() -> None:
 @pytest.mark.unit
 def test_feature_bundle_extra_forbid() -> None:
     """``ConfigDict(extra='forbid')`` — Sprint 2에서 추가될 필드 외 거부."""
+    feature = _make_feature()
+    source_record = _make_source_record()
     with pytest.raises(ValidationError, match="Extra inputs"):
         FeatureBundle(
-            feature=_make_feature(),
-            source_record=_make_source_record(),
-            source_link=_make_source_link(),
+            feature=feature,
+            source_record=source_record,
+            source_link=_make_source_link(
+                feature_id=feature.feature_id,
+                source_record_key=source_record.source_record_key,
+            ),
             unknown=42,  # type: ignore[call-arg]
         )
 
 
 @pytest.mark.unit
 def test_feature_bundle_feature_id_matches_source_link() -> None:
-    """convention: bundle.source_link.feature_id == bundle.feature.feature_id.
-
-    (현재는 검증 X — Sprint 2 load 함수에서 cross-check. 본 테스트는 의도를
-    문서화하는 placeholder.)
-    """
+    """``source_link.feature_id``는 ``feature.feature_id``와 일치해야 한다."""
     feature = _make_feature()
+    source_record = _make_source_record()
     bundle = FeatureBundle(
         feature=feature,
-        source_record=_make_source_record(),
-        source_link=_make_source_link(feature_id=feature.feature_id),
+        source_record=source_record,
+        source_link=_make_source_link(
+            feature_id=feature.feature_id,
+            source_record_key=source_record.source_record_key,
+        ),
     )
     assert bundle.source_link.feature_id == bundle.feature.feature_id
+
+
+@pytest.mark.unit
+def test_feature_bundle_rejects_feature_id_mismatch() -> None:
+    """bundle 내부 feature/source_link feature_id 불일치 거부."""
+    with pytest.raises(ValidationError, match="source_link.feature_id"):
+        FeatureBundle(
+            feature=_make_feature(),
+            source_record=_make_source_record(),
+            source_link=_make_source_link(feature_id="f_1100000000_p_other"),
+        )
+
+
+@pytest.mark.unit
+def test_feature_bundle_rejects_source_record_key_mismatch() -> None:
+    """bundle 내부 source_record/source_link key 불일치 거부."""
+    feature = _make_feature()
+    with pytest.raises(ValidationError, match="source_link.source_record_key"):
+        FeatureBundle(
+            feature=feature,
+            source_record=_make_source_record(),
+            source_link=_make_source_link(
+                feature_id=feature.feature_id,
+                source_record_key="sr_other",
+            ),
+        )
 
 
 # -- end-to-end integration: 전체 flow ----------------------------------

@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import date, datetime
+from decimal import Decimal
 
 import pytest
 
@@ -185,14 +187,11 @@ def test_payload_hash_different_data_different_hash() -> None:
 
 
 def test_payload_hash_handles_datetime_decimal() -> None:
-    """``default=str`` — datetime/Decimal 등 ``str()`` fallback."""
-    from datetime import datetime
-    from decimal import Decimal
-
-    # 같은 datetime + Decimal → 같은 hash
+    """datetime/date/Decimal은 명시적 canonical JSON 값으로 정규화."""
     dt = datetime(2026, 1, 1)
-    h1 = make_payload_hash({"d": dt, "n": Decimal("1.5")})
-    h2 = make_payload_hash({"d": dt, "n": Decimal("1.5")})
+    payload = {"d": dt, "day": date(2026, 1, 2), "n": Decimal("1.5")}
+    h1 = make_payload_hash(payload)
+    h2 = make_payload_hash(payload)
     assert h1 == h2
 
 
@@ -208,6 +207,26 @@ def test_payload_hash_handles_list_top_level() -> None:
         int(h, 16)
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"bad": {1, 2, 3}},
+        {"bad": b"bytes"},
+        {"bad": object()},
+    ],
+)
+def test_payload_hash_rejects_unsupported_values(payload: object) -> None:
+    """set/bytes/임의 객체는 str()로 삼키지 않고 거부."""
+    with pytest.raises(TypeError):
+        make_payload_hash(payload)
+
+
+def test_payload_hash_rejects_non_string_dict_key() -> None:
+    """JSON object key는 문자열만 허용."""
+    with pytest.raises(TypeError, match="dict key"):
+        make_payload_hash({1: "one"})
+
+
 def test_payload_hash_sha256_matches_explicit() -> None:
     """SHA256 결정성 회귀 — canonical 직렬화 규칙 변경 감지."""
     data = {"name": "북한산", "lat": 37.6, "lon": 126.9}
@@ -216,7 +235,7 @@ def test_payload_hash_sha256_matches_explicit() -> None:
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
-        default=str,
+        allow_nan=False,
     )
     expected = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:32]
     assert make_payload_hash(data) == expected

@@ -3,15 +3,14 @@
 본 모듈은 ``Feature`` + 5개 detail kind (place/event/notice/route/area)와
 부수 모델 (Coordinate/Address/OpeningHours/...)을 노출한다.
 
-**Sprint 1 (PR#19) 시점**: Feature + 5 detail + Coordinate + Address + URLs
+**Sprint 1 (PR#19~26) 시점**: Feature + 5 detail + Coordinate + Address + URLs
 + OpeningHours + enums + NOTICE_TYPES 14건 (ADR-027) + AreaDetail.area_kind
-hazard_zone (ADR-027). **Sprint 2 PR에서 추가 예정**:
+hazard_zone (ADR-027) + SourceRecord/SourceLink/FeatureBundle. **Sprint 2 PR에서
+추가 예정**:
 - ``WeatherValue`` (kind=weather 시계열, ADR-010)
 - ``PriceValue`` (kind=price 시계열)
-- ``SourceRecord`` / ``SourceLink``
 - ``FeatureFile`` / ``FeatureFileSource``
 - ``ProviderSyncState`` / ``ImportJob``
-- ``FeatureBundle`` (적재 단위)
 
 ADR 참조
 --------

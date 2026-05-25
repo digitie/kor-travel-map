@@ -8,8 +8,9 @@
   `make_source_record_key` + `make_payload_hash` + `SourceRecord` +
   `SourceLink` + `FeatureBundle` DTO. core 의존 방향 (dto는 core 미import)
   준수: `SourceRecord.key()` 메서드 두지 않고 호출자가 helper로 계산.
-  191 pytest passed (50 신규), 4 import-linter contracts kept, mypy strict
-  clean. Sprint 2 첫 provider 변환 함수 직전 필수 묶음.
+  리뷰 후속으로 DB required 필드, bundle 교차 검증, payload hash strict
+  normalize, canonical docs 예시 정합까지 반영. Sprint 2 첫 provider 변환 함수
+  직전 필수 묶음.
 - **PR#25** (merged): python-knps-api PR#3+#4
   (keyless file-only, commit `06da125f`) 본 라이브러리 docs/pyproject 일괄
   반영. ADR-028 amendment §H 신설. `docs/knps-feature-etl.md` + `docs/forest-

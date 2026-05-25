@@ -47,6 +47,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Any, Final
 
 __all__ = [
@@ -247,6 +249,7 @@ def make_payload_hash(data: Any, *, length: int = PAYLOAD_HASH_DEFAULT_LENGTH) -
     ----------
     data
         JSON 직렬화 가능한 객체 (``dict`` / ``list`` / ``str`` / ``int`` 등).
+        ``datetime``/``date``/``Decimal``은 canonical JSON 값으로 정규화한다.
         Pydantic 모델 등은 호출자가 ``.model_dump()``로 변환해 전달.
     length
         반환 hex digest의 prefix 길이. 기본 32 (128 bits). 1~64 hex chars.
@@ -261,7 +264,7 @@ def make_payload_hash(data: Any, *, length: int = PAYLOAD_HASH_DEFAULT_LENGTH) -
     ValueError
         ``length``가 1 미만 또는 64 초과.
     TypeError
-        ``data``가 JSON 직렬화 불가 (``json.dumps`` 위임).
+        ``data``가 canonical JSON 값으로 정규화 불가.
 
     Examples
     --------
@@ -279,8 +282,9 @@ def make_payload_hash(data: Any, *, length: int = PAYLOAD_HASH_DEFAULT_LENGTH) -
     - ``sort_keys=True`` — 키 순서 무관, 같은 dict는 같은 hash.
     - ``separators=(",", ":")`` — 공백 제거 (whitespace로 hash 깨짐 방지).
     - ``ensure_ascii=False`` — 한글 보존 (UTF-8 인코딩).
-    - ``default=str`` — ``datetime``/``Decimal`` 등은 ``str()`` 변환
-      (Pydantic 모델은 호출자가 사전에 ``.model_dump(mode='json')``).
+    - ``datetime``/``date``는 ISO 8601 문자열, ``Decimal``은 ``str()``로 변환.
+    - ``set``/``bytes``/임의 객체는 거부한다. Pydantic 모델은 호출자가 사전에
+      ``.model_dump(mode='json')``로 변환한다.
 
     이 규칙은 ``docs/data-model.md §11``과 일치. 변경 시 기존 source_records의
     hash 전부 재계산 필요 → **변경 금지** (영구 약속).
@@ -289,12 +293,41 @@ def make_payload_hash(data: Any, *, length: int = PAYLOAD_HASH_DEFAULT_LENGTH) -
         raise ValueError(
             f"length는 1~64 범위여야 함 (SHA256 hexdigest 길이), got {length}."
         )
+    normalized = _normalize_payload_value(data)
     canonical = json.dumps(
-        data,
+        normalized,
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
-        default=str,
+        allow_nan=False,
     )
     digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     return digest[:length]
+
+
+def _normalize_payload_value(value: Any) -> Any:
+    """Hash 입력을 JSONB에 보존 가능한 canonical JSON 값으로 제한한다."""
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, dict):
+        normalized: dict[str, Any] = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise TypeError(
+                    "payload dict key는 str이어야 함 "
+                    f"(got {type(key).__name__}: {key!r})."
+                )
+            normalized[key] = _normalize_payload_value(item)
+        return normalized
+    if isinstance(value, list | tuple):
+        return [_normalize_payload_value(item) for item in value]
+    raise TypeError(
+        "payload 값은 JSON primitive/list/dict 또는 datetime/date/Decimal만 "
+        f"허용됨 (got {type(value).__name__}: {value!r})."
+    )
