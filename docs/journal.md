@@ -2,6 +2,67 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-25 14:00 (claude)
+
+**작업**: Sprint 1 PR#20 — `src/krtour/map/core/` 예외 계층 + ADR-009
+`make_feature_id`. PR#19(dto) 머지 후 main rebase로 `core/__init__.py`에
+`KST`/`kst_now` (PR#19) + 예외 7종 + `make_feature_id` (PR#20) 통합 export.
+
+**컨텍스트**: 사용자가 PR#19 open 후 "이어서 진행"으로 PR#20 승인. 본 PR은
+PR#19와 병행 진행을 위해 dto 의존 없이 자체 완결되어야 하므로 `kind: str`
+타입으로 `make_feature_id` 정의 (`FeatureKind` StrEnum은 `str` 서브클래스
+이므로 그대로 호환). PR#19 머지 직후 main rebase에서 `core/__init__.py` /
+journal / tasks / resume / CHANGELOG 5건 충돌 해결.
+
+**신규 파일** (4):
+- `src/krtour/map/core/exceptions.py` (~110 line) — `KrtourMapError` 베이스 +
+  7 도메인 예외 (`docs/backend-package.md §5` + `docs/debug-ui-package.md §6.4`
+  HTTP 매핑):
+  - `ValidationError` (422) — DTO Pydantic / 도메인 룰
+  - `FeatureNotFoundError` (404)
+  - `SourceRecordNotFoundError` (404)
+  - `DuplicateFeatureError` (409)
+  - `ImportJobConflictError` (409) — ADR-011 advisory lock 미획득
+  - `ProviderError` (502) — ADR-006 raw httpx 예외 wrap
+  - `FileStoreError` (502) — RustFS 접근 실패
+- `src/krtour/map/core/ids.py` (~130 line) — ADR-009 결정적 ID 생성:
+  - `make_feature_id(*, bjd_code, kind, category, source_type, source_natural_key, content_hash=None)`
+    → `f_{bjd or 'global'}_{kind[0]}_{sha1(input)[:16]}`
+  - `FEATURE_ID_HASH_LENGTH = 16` (Final[int])
+  - `|` 구분자 / 빈 문자열 검증 (`_validate_component`)
+  - `make_source_record_key` / `make_payload_hash`는 후속 PR로 미룸 (사용처
+    없을 때 박지 않음)
+- `tests/unit/test_exceptions.py` (7 case) — 베이스 상속 / 7종 parametrize /
+  catch / re-export 검증
+- `tests/unit/test_ids.py` (35 case parametrize 포함) — 결정성 / 7 kind prefix /
+  StrEnum 호환 / 변경 감지 / validation / SHA1 회귀
+
+**변경 파일** (1):
+- `src/krtour/map/core/__init__.py` — PR#19에서 추가된 `KST`/`kst_now`와
+  공존하도록 통합 re-export (총 12 식별자: types 2 + exceptions 7 + ids 3).
+
+**ADR-009 핵심 결정 반영**:
+- `kind: str` 타입 annotation (dto 의존 회피) — `FeatureKind` StrEnum은
+  `str` 서브클래스이므로 PR#19 머지 후 그대로 호환 (호출 측 코드 변경 0).
+- `usedforsecurity=False` 명시 (SHA1는 ID 결정성용, 보안용 아님 — FIPS 환경
+  대비).
+- `_BJD_FALLBACK = "global"` 행정구역 외 / 매핑 실패 케이스 표준화.
+- `content_hash=None` ↔ `content_hash=""` 동치 (`x or ''` 평탄화).
+
+**verification (rebase 후)**:
+- `python -m pytest tests/ -q` → 72→? passed (rebase 후 재실행 필요).
+- `python -m ruff check src/krtour/map/core/ tests/unit/test_exceptions.py tests/unit/test_ids.py`
+  → all checks passed.
+- `python -m mypy --strict -p krtour.map.core` → Success.
+- `make_feature_id(bjd_code="1168010100", kind="place", category="PLACE_RESTAURANT",
+  source_type="krex_rest_area", source_natural_key="RA00012")` →
+  `f_1168010100_p_<16hex>` 결정적.
+
+**다음**: PR#20 사용자 review/merge → PR#21 (`src/krtour/map/infra/` skeleton
++ testcontainers PostGIS + `crs.py` pyproj.Transformer ADR-030 narrow cache).
+
+---
+
 ## 2026-05-25 13:00 (claude)
 
 **작업**: Sprint 1 PR#19 — `src/krtour/map/dto/` Feature + 5 detail kind

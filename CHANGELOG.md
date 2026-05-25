@@ -7,6 +7,21 @@
 
 ### Sprint 1 scaffolding (2026-05-25, PR#17+)
 
+- **PR#20 — `src/krtour/map/core/` 예외 계층 + ADR-009 `make_feature_id`**:
+  - `src/krtour/map/core/exceptions.py` — `KrtourMapError` 베이스 + 7 도메인
+    예외 (`ValidationError`/`FeatureNotFoundError`/`SourceRecordNotFoundError`/
+    `DuplicateFeatureError`/`ImportJobConflictError`/`ProviderError`/
+    `FileStoreError`). HTTP 매핑은 `docs/debug-ui-package.md §6.4`.
+  - `src/krtour/map/core/ids.py` — `make_feature_id(*, bjd_code, kind,
+    category, source_type, source_natural_key, content_hash=None)`. 포맷
+    `f_{bjd or 'global'}_{kind[0]}_{sha1[:16]}` (ADR-009 SPEC V8 D-2).
+    `usedforsecurity=False` 명시. `|` 구분자 / 빈 문자열 검증.
+  - dto 의존 회피 — `kind: str` 타입 (PR#19 `FeatureKind` StrEnum은 str
+    서브클래스이므로 그대로 호환, 호출 측 코드 변경 0).
+  - `core/__init__.py` — PR#19(`KST`/`kst_now`) + PR#20(exceptions 7 + ids
+    2) 통합 export, 총 12 공개 식별자.
+  - `tests/unit/test_exceptions.py` 7 case + `tests/unit/test_ids.py` 35
+    case (parametrize 포함). **72 passed** (전체 suite).
 - **PR#19 — `src/krtour/map/dto/` Feature + 5 detail + ADR-027 적용**:
   - `core/types.py` — `KST` / `kst_now()` (ADR-019)
   - `dto/_enums.py` — FeatureKind 7 / FeatureStatus 6 / SourceRole 8

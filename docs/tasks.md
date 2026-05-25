@@ -4,10 +4,16 @@
 
 ## 진행 중 (open PR)
 
-- **본 PR#19** (feat/sprint1-pr19-dto-foundation): `src/krtour/map/dto/`
-  Feature + 5 detail kind + NOTICE_TYPES 14건 (ADR-027) + AreaDetail.
-  area_kind hazard_zone (ADR-027) + ADR-019 KST aware + `core/types.py`
-  kst_now + 27 dto 테스트. 62 pytest passed (전체).
+- **본 PR#20** (feat/sprint1-pr20-core-exceptions-feature-id):
+  `src/krtour/map/core/exceptions.py` 7종 도메인 예외 (KrtourMapError +
+  ValidationError/FeatureNotFoundError/SourceRecordNotFoundError/
+  DuplicateFeatureError/ImportJobConflictError/ProviderError/FileStoreError) +
+  `src/krtour/map/core/ids.py` `make_feature_id` (ADR-009 결정적 SHA1,
+  `f_{bjd or 'global'}_{kind[0]}_{sha1[:16]}`) +
+  tests/unit/test_exceptions.py 7건 + tests/unit/test_ids.py 35건. dto 의존
+  없이 자체 완결 (`kind: str` annotation, FeatureKind StrEnum 호환). PR#19
+  머지 후 main rebase로 `core/__init__.py`에 PR#19(KST/kst_now) +
+  PR#20(예외 + ids) 통합 export.
 - **upstream knps-api PR#1**
   (https://github.com/digitie/python-knps-api/pull/1):
   `docs/knps-feature-etl.md §4` maki icon 정정 (shelter / barrier) — 검토 +
@@ -35,18 +41,25 @@
     - [x] PR#17 `src/krtour/map/` PEP 420 scaffolding + `settings.py` +
           6개 layer placeholder + smoke 테스트
     - [x] PR#18 `src/krtour/map/category/` 144건 (kraddr-base 이전 +
-          ADR-027 3건 + 16 cases)
-    - [x] **PR#19 (본)** `src/krtour/map/dto/` Feature + 5 detail + ADR-027
-          NOTICE_TYPES 14건 / AreaDetail.area_kind hazard_zone + ADR-019
-          KST + 27 cases (62 total pytest passed). WeatherValue/PriceValue/
-          SourceRecord 등은 Sprint 2 PR로 연기.
-    - [ ] PR#20 `src/krtour/map/core/` (exceptions + scoring stub + ADR-030
-          narrow cache + `make_feature_id` ADR-009)
+          ADR-027 3건 + tests/unit/test_category.py 16 cases)
+    - [x] PR#19 `src/krtour/map/dto/` Feature + 5 detail (place/event/
+          notice/route/area) + Coordinate + Address + URLs + OpeningHours +
+          `core/types.py` KST/kst_now + ADR-027 적용 (`NOTICE_TYPES` 14건 +
+          `AreaDetail.area_kind='hazard_zone'`) + ADR-018 detail discriminator
+          + ADR-019 KST aware datetime + 27 dto cases. WeatherValue/
+          PriceValue/SourceRecord은 Sprint 2 PR로 연기.
+    - [x] **PR#20 (본)** `src/krtour/map/core/` exceptions 7종 (ADR
+          backend-package.md §5) + `make_feature_id` (ADR-009 결정적 SHA1) +
+          tests 42건. scoring stub은 dto Coordinate 의존 위해 후속 PR로.
     - [ ] PR#21 `src/krtour/map/infra/` + testcontainers 통합 테스트 베이스
+          + `crs.py` (pyproj.Transformer ADR-030 narrow cache)
     - [ ] PR#22 CI workflows (`.github/workflows/ci.yml` + `lint.yml` +
-          `openapi.yml`)
+          `openapi.yml`) + import-linter 계약 활성화
     - [ ] PR#23 첫 통합 테스트 (`tests/integration/test_dummy_db.py` +
-          `tests/unit/test_category.py`)
+          provider 추가 unit 케이스)
+    - [ ] **후속**: `core/scoring.py` (Record Linkage ADR-016, Coordinate
+          의존) + `core/types.py` `kst_now` 통합 + `core/providers.py`
+          (CANONICAL_PROVIDER_NAMES) — PR#19 머지 후 별도 PR.
 - [ ] T-017 — **공통 maki marker / category 매핑 npm 패키지 추출** (ADR-029
       proposed, PR#10 merged) — 실 코드는 Sprint 2
   - **ADR-029 (proposed, PR#10 merged)** — `@krtour/map-marker-react` (MIT
