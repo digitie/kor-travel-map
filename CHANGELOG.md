@@ -7,6 +7,27 @@
 
 ### Sprint 1 scaffolding (2026-05-25, PR#17+)
 
+- **PR#21 — `src/krtour/map/infra/` skeleton (crs + db + testcontainers)**:
+  - `src/krtour/map/infra/crs.py` — `pyproj.Transformer` singleton
+    (`@functools.cache`, ADR-030 narrow 예외): `transformer_4326_to_5179` /
+    `transformer_5179_to_4326` + `project_to_5179` / `project_to_4326`
+    + `EPSG_WGS84` / `EPSG_UTM_K`. `always_xy=True` 강제.
+  - `src/krtour/map/infra/db.py` — `make_async_engine` (SQLAlchemy 2
+    AsyncEngine + asyncpg) + `make_async_session_factory` +
+    `normalize_async_dsn` (psycopg2/psycopg/postgres → asyncpg 통일).
+    `SecretStr` 자동 처리.
+  - `tests/integration/__init__.py` + `tests/integration/conftest.py` —
+    testcontainers PostGIS 베이스 (`pg_container` session-scope `postgis/
+    postgis:16-3.5-alpine`, `pg_engine` 4 schema + 3 extension 자동
+    생성, `pg_session` per-test rollback). Docker/testcontainers 미설치
+    시 자동 `pytest.skip`.
+  - `tests/integration/test_pg_smoke.py` — postgis/pg_trgm/pgcrypto
+    `x_extension` 격리 확인 (ADR-008) + 4 schema 존재 + ST_Transform
+    4326↔5179이 pyproj와 1m 이내 일치.
+  - `tests/unit/test_crs.py` 13 case + `tests/unit/test_db.py` 12 case
+    (asyncpg 미설치 환경 4건 자동 skip).
+  - `pyproject.toml`: `pyproj>=3.6` 본 의존 추가.
+  - **124 passed, 10 skipped** (전체 suite).
 - **PR#20 — `src/krtour/map/core/` 예외 계층 + ADR-009 `make_feature_id`**:
   - `src/krtour/map/core/exceptions.py` — `KrtourMapError` 베이스 + 7 도메인
     예외 (`ValidationError`/`FeatureNotFoundError`/`SourceRecordNotFoundError`/

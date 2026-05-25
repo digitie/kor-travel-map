@@ -2,6 +2,91 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-25 15:00 (claude)
+
+**작업**: Sprint 1 PR#21 — `src/krtour/map/infra/` skeleton: `crs.py`
+(pyproj.Transformer singleton, ADR-030 narrow cache) + `db.py` (async
+engine + session factory) + `tests/integration/conftest.py` (testcontainers
+PostGIS 베이스) + 첫 통합 smoke 테스트.
+
+**컨텍스트**: PR#20 머지(2026-05-25 14:00) 후 사용자 "다음 진행"으로 PR#21
+승인. Sprint 2 첫 provider 적재 직전에 필요한 인프라 가장 바닥 (좌표 변환
++ DB engine factory + testcontainers 베이스). 실 ORM 모델 (`infra/models.py`)
+과 repository (`infra/feature_repo.py`)는 Sprint 2 첫 provider PR로 분리.
+
+**신규 파일** (6):
+- `src/krtour/map/infra/crs.py` (~140 line):
+  - `transformer_4326_to_5179()` / `transformer_5179_to_4326()` — pyproj
+    Transformer singleton (`@functools.cache`, ADR-030 narrow 예외)
+  - `project_to_5179(lon, lat)` / `project_to_4326(x_m, y_m)` — convenience
+  - `EPSG_WGS84=4326` / `EPSG_UTM_K=5179` 상수
+  - `always_xy=True` 강제 — pyproj 기본 axis order 혼재 회피
+- `src/krtour/map/infra/db.py` (~150 line):
+  - `make_async_engine(dsn, *, echo, pool_size, max_overflow, pool_pre_ping)`
+    — SQLAlchemy 2 AsyncEngine + asyncpg driver 강제
+  - `make_async_session_factory(engine) -> async_sessionmaker`
+  - `normalize_async_dsn(dsn)` — `postgresql://` / `postgres://` / `psycopg2` /
+    `psycopg` → `postgresql+asyncpg://` 통일 (testcontainers 호환)
+  - `SecretStr` 입력 자동 처리 (KrtourMapSettings.pg_dsn 직접 주입 가능)
+- `tests/unit/test_crs.py` (13 case parametrize 포함) — singleton 정체성 /
+  EPSG 상수 / round-trip 정밀도 (서울/부산/제주/대구/경계 6점) / UTM-K
+  좌표 합리성 (서울 ≈ 953000, 1952000) / 서울-부산 거리 ≈ 325km /
+  always_xy 보증
+- `tests/unit/test_db.py` (12 case) — DSN 정규화 (5종 parametrize) +
+  empty/non-postgres ValueError + AsyncEngine 인스턴스 + SecretStr 처리 +
+  echo flag + async_sessionmaker. 엔진 생성 4건은 asyncpg 미설치 환경에서
+  자동 skip
+- `tests/integration/__init__.py` (빈 파일) + `tests/integration/conftest.py`
+  (~115 line) + `tests/integration/test_pg_smoke.py` (6 case):
+  - `pg_container` (session-scope, `postgis/postgis:16-3.5-alpine`)
+  - `pg_engine` (session-scope, 4 schema + 3 extension 자동 생성)
+  - `pg_session` (per-test, 자동 rollback)
+  - testcontainers/Docker 미설치 시 자동 `pytest.skip`
+  - smoke: postgis/pg_trgm/pgcrypto x_extension 격리 확인 (ADR-008) +
+    4 schema 존재 + ST_Transform 4326↔5179 Python pyproj와 1m 이내 일치
+
+**변경 파일** (3):
+- `src/krtour/map/infra/__init__.py` — 9 식별자 re-export (crs 6 + db 3),
+  placeholder → PR#21 명세 + Sprint 2 후속 계획 명시
+- `tests/conftest.py` — PR#21 통합 베이스 활성화 명기
+- `pyproject.toml` — `pyproj>=3.6` 본 의존 추가 (ADR-012 좌표 변환 +
+  ADR-030 narrow cache singleton)
+
+**verification**:
+- `python -m pytest tests/ -q` → **124 passed, 10 skipped**
+  (4 asyncpg 미설치 skip + 6 testcontainers 미설치 skip).
+- `python -m ruff check src/krtour/map/infra/ tests/unit/test_crs.py
+  tests/unit/test_db.py tests/integration/` → All checks passed.
+- `python -m mypy --strict -p krtour.map.infra` → Success, no issues
+  found in 3 source files.
+- pyproj round-trip (서울 시청 4326 → 5179 → 4326) → ±1cm 이내.
+- 서울 시청 EPSG:5179 좌표 ≈ (953000m, 1952000m) — 한국 권역 expected.
+- 서울-부산 직선거리 ≈ 325km (UTM-K Euclidean) — ADR-012 핵심.
+
+**ADR 적용**:
+- ADR-012 — 공간 쿼리 입력 좌표 1회 변환. 본 PR은 보조 Python 측 변환만
+  (PostGIS ST_Transform이 1차 — 인덱스 보존).
+- ADR-030 — `pyproj.Transformer` singleton을 narrow 예외에 명시적으로
+  포함 (`@functools.cache`).
+- ADR-007 — PostgreSQL 16 + PostGIS 3.5 + pg_trgm + pgcrypto, asyncpg.
+- ADR-008 — 모든 extension은 `x_extension` schema 격리 (smoke 테스트로
+  회귀 방지).
+
+**Sprint 2 후속 PR에 남긴 것**:
+- `infra/models.py` — SQLAlchemy 2 declarative + GeoAlchemy2 (`Feature` +
+  5 detail + opening_hours + weather + price + files). GENERATED column
+  (`coord_5179`) 매핑 + UNIQUE 제약.
+- `infra/feature_repo.py` — raw SQL `_SQL` 상수 + EXPLAIN 검증 통합 테스트
+  (ADR-004 + ADR-012).
+- `infra/source_repo.py` / `sync_repo.py` / `jobs_repo.py` — Sprint 2~4.
+- `infra/file_store.py` — Sprint 3 (S3 호환 RustFS, ADR-015).
+- Alembic migration 첫 revision — Sprint 2 PR (data-model.md §1~3 DDL).
+
+**다음**: PR#21 사용자 review/merge → PR#22 (CI workflows
+`.github/workflows/{ci,lint,openapi}.yml` + import-linter 계약 활성화).
+
+---
+
 ## 2026-05-25 14:00 (claude)
 
 **작업**: Sprint 1 PR#20 — `src/krtour/map/core/` 예외 계층 + ADR-009

@@ -36,21 +36,24 @@ Python 패키지 `krtour-map-debug-ui` (ADR-020, `packages/krtour-map-debug-ui/`
       AreaDetail.area_kind 'hazard_zone' (ADR-027) + ADR-018 detail
       discriminator + ADR-019 KST aware enforcement + 27 dto tests.
       WeatherValue/PriceValue/SourceRecord은 Sprint 2 PR로 연기.
-- [x] **PR#20 (현재 open)** `src/krtour/map/core/` exceptions 7종
-      (`docs/backend-package.md §5` + debug-ui HTTP 매핑) +
-      `make_feature_id` (ADR-009 결정적 SHA1) + 42 tests. dto 의존 없이
-      자체 완결 (kind: str annotation, FeatureKind StrEnum 호환). PR#19
-      머지 후 main rebase로 `core/__init__.py` (KST/kst_now + exceptions
-      + ids) 통합 export.
-- [ ] PR#21 `src/krtour/map/infra/` skeleton + testcontainers PostGIS 통합
-      테스트 베이스 + `crs.py` pyproj.Transformer (ADR-030 narrow cache)
+- [x] PR#20 `src/krtour/map/core/` exceptions 7종 + `make_feature_id`
+      (ADR-009 결정적 SHA1) + 42 tests. dto 의존 없이 자체 완결.
+- [x] **PR#21 (현재 open)** `src/krtour/map/infra/` skeleton:
+      `crs.py` (pyproj.Transformer 4326↔5179 singleton, ADR-030 narrow
+      cache) + `db.py` (async engine + session factory + DSN 정규화) +
+      `tests/integration/conftest.py` (testcontainers PostGIS
+      `pg_container`/`pg_engine`/`pg_session`, ADR-007/008) +
+      `test_pg_smoke.py` (extension 격리 + schema + ST_Transform 정합).
+      pyproj>=3.6 dep. 25 unit + 6 integration tests.
 - [ ] PR#22 CI workflows (`.github/workflows/{ci,lint,openapi}.yml`) +
-      import-linter 계약 활성화
-- [ ] PR#23 첫 통합 테스트 (`tests/integration/test_dummy_db.py` +
-      provider 추가 unit 케이스)
+      import-linter 계약 활성화 + tests/lint/test_import_linter.py
+- [ ] PR#23 첫 적재 통합 테스트 (Sprint 2 직전 — `infra/models.py` +
+      첫 provider feature_repo + Alembic migration 첫 revision)
 - [ ] **후속 PR**: `core/scoring.py` (ADR-016 Record Linkage Coordinate
       의존) + `core/providers.py` CANONICAL_PROVIDER_NAMES + `core/weather.py`
-      build_weather_card. Sprint 2 첫 provider 적재 직전.
+      build_weather_card + `infra/models.py` SQLAlchemy 매핑 +
+      `infra/feature_repo.py` raw SQL + Alembic. Sprint 2 첫 provider
+      적재 직전.
 
 ## 진척도
 

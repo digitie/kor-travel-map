@@ -4,16 +4,14 @@
 
 ## 진행 중 (open PR)
 
-- **본 PR#20** (feat/sprint1-pr20-core-exceptions-feature-id):
-  `src/krtour/map/core/exceptions.py` 7종 도메인 예외 (KrtourMapError +
-  ValidationError/FeatureNotFoundError/SourceRecordNotFoundError/
-  DuplicateFeatureError/ImportJobConflictError/ProviderError/FileStoreError) +
-  `src/krtour/map/core/ids.py` `make_feature_id` (ADR-009 결정적 SHA1,
-  `f_{bjd or 'global'}_{kind[0]}_{sha1[:16]}`) +
-  tests/unit/test_exceptions.py 7건 + tests/unit/test_ids.py 35건. dto 의존
-  없이 자체 완결 (`kind: str` annotation, FeatureKind StrEnum 호환). PR#19
-  머지 후 main rebase로 `core/__init__.py`에 PR#19(KST/kst_now) +
-  PR#20(예외 + ids) 통합 export.
+- **본 PR#21** (feat/sprint1-pr21-infra-skeleton-crs):
+  `src/krtour/map/infra/crs.py` (pyproj.Transformer 4326↔5179 singleton,
+  ADR-030 narrow cache) + `src/krtour/map/infra/db.py` (async engine +
+  session factory + DSN 정규화) + `tests/integration/conftest.py`
+  (testcontainers PostGIS `pg_container`/`pg_engine`/`pg_session`
+  fixture, ADR-007/008) + `tests/integration/test_pg_smoke.py` (extension
+  격리 + schema 존재 + ST_Transform 정합) + 25 unit + 6 integration.
+  `pyproj>=3.6` dep 추가.
 - **upstream knps-api PR#1**
   (https://github.com/digitie/python-knps-api/pull/1):
   `docs/knps-feature-etl.md §4` maki icon 정정 (shelter / barrier) — 검토 +
@@ -48,15 +46,18 @@
           `AreaDetail.area_kind='hazard_zone'`) + ADR-018 detail discriminator
           + ADR-019 KST aware datetime + 27 dto cases. WeatherValue/
           PriceValue/SourceRecord은 Sprint 2 PR로 연기.
-    - [x] **PR#20 (본)** `src/krtour/map/core/` exceptions 7종 (ADR
-          backend-package.md §5) + `make_feature_id` (ADR-009 결정적 SHA1) +
-          tests 42건. scoring stub은 dto Coordinate 의존 위해 후속 PR로.
-    - [ ] PR#21 `src/krtour/map/infra/` + testcontainers 통합 테스트 베이스
-          + `crs.py` (pyproj.Transformer ADR-030 narrow cache)
+    - [x] PR#20 `src/krtour/map/core/` exceptions 7종 (ADR backend-package.md §5)
+          + `make_feature_id` (ADR-009 결정적 SHA1) + tests 42건. scoring stub은
+          dto Coordinate 의존 위해 후속 PR로.
+    - [x] **PR#21 (본)** `src/krtour/map/infra/crs.py` (pyproj.Transformer
+          4326↔5179 singleton, ADR-030 narrow cache) + `infra/db.py` (async
+          engine + session factory + DSN 정규화) + `tests/integration/conftest.py`
+          (testcontainers PostGIS, ADR-007/008) + `test_pg_smoke.py` (extension
+          격리 + schema + ST_Transform). pyproj>=3.6 dep. 25 unit + 6 integration.
     - [ ] PR#22 CI workflows (`.github/workflows/ci.yml` + `lint.yml` +
           `openapi.yml`) + import-linter 계약 활성화
-    - [ ] PR#23 첫 통합 테스트 (`tests/integration/test_dummy_db.py` +
-          provider 추가 unit 케이스)
+    - [ ] PR#23 첫 적재 통합 테스트 (Sprint 2 직전 — `infra/models.py` +
+          첫 provider feature_repo + Alembic migration 첫 revision)
     - [ ] **후속**: `core/scoring.py` (Record Linkage ADR-016, Coordinate
           의존) + `core/types.py` `kst_now` 통합 + `core/providers.py`
           (CANONICAL_PROVIDER_NAMES) — PR#19 머지 후 별도 PR.
