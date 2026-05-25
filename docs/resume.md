@@ -38,22 +38,24 @@ Python 패키지 `krtour-map-debug-ui` (ADR-020, `packages/krtour-map-debug-ui/`
       WeatherValue/PriceValue/SourceRecord은 Sprint 2 PR로 연기.
 - [x] PR#20 `src/krtour/map/core/` exceptions 7종 + `make_feature_id`
       (ADR-009 결정적 SHA1) + 42 tests. dto 의존 없이 자체 완결.
-- [x] **PR#21 (현재 open)** `src/krtour/map/infra/` skeleton:
-      `crs.py` (pyproj.Transformer 4326↔5179 singleton, ADR-030 narrow
-      cache) + `db.py` (async engine + session factory + DSN 정규화) +
-      `tests/integration/conftest.py` (testcontainers PostGIS
-      `pg_container`/`pg_engine`/`pg_session`, ADR-007/008) +
-      `test_pg_smoke.py` (extension 격리 + schema + ST_Transform 정합).
-      pyproj>=3.6 dep. 25 unit + 6 integration tests.
-- [ ] PR#22 CI workflows (`.github/workflows/{ci,lint,openapi}.yml`) +
-      import-linter 계약 활성화 + tests/lint/test_import_linter.py
+- [x] PR#21 `src/krtour/map/infra/` skeleton: `crs.py` (pyproj.Transformer
+      singleton, ADR-030 narrow cache) + `db.py` (async engine + DSN
+      정규화) + `tests/integration/conftest.py` (testcontainers PostGIS) +
+      `test_pg_smoke.py` (extension 격리 + ST_Transform 정합). pyproj>=3.6
+      dep. 25 unit + 6 integration tests.
+- [x] **PR#22 (현재 open)** `.github/workflows/{ci,lint,openapi}.yml` +
+      import-linter 4 계약 활성화 + `tests/lint/test_import_linter.py`.
+      **ADR-002 위반 1건 실 해소** — PR#19에서 `KST`/`kst_now`를
+      `core/types.py`에 두면서 `dto/feature.py`가 core 역참조했던 것을
+      `dto/_time.py`로 이전 (공개 API preserve). ruff/mypy/import-linter
+      all green. **Sprint 1 scaffolding 마지막 PR.**
 - [ ] PR#23 첫 적재 통합 테스트 (Sprint 2 직전 — `infra/models.py` +
-      첫 provider feature_repo + Alembic migration 첫 revision)
-- [ ] **후속 PR**: `core/scoring.py` (ADR-016 Record Linkage Coordinate
-      의존) + `core/providers.py` CANONICAL_PROVIDER_NAMES + `core/weather.py`
-      build_weather_card + `infra/models.py` SQLAlchemy 매핑 +
-      `infra/feature_repo.py` raw SQL + Alembic. Sprint 2 첫 provider
-      적재 직전.
+      첫 provider feature_repo + Alembic migration 첫 revision). 또는
+      SPRINT-2.md 활성화로 직접 Sprint 2 진입 (사용자 결정).
+- [ ] **Sprint 2 첫 PR** (ADR-034 1단계): `providers/visitkorea/` 축제
+      + `infra/models.py` SQLAlchemy 매핑 + `infra/feature_repo.py` raw SQL
+      + Alembic migration 첫 revision + `core/scoring.py` ADR-016 Record
+      Linkage (Coordinate 의존).
 
 ## 진척도
 

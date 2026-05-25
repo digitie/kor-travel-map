@@ -8,7 +8,8 @@ gateway 신규 생성 금지 (ADR-006).
 
 | Sprint | provider 모듈 |
 |--------|--------------|
-| 2 | ``visitkorea`` (축제) / ``kma`` / ``airkorea`` / ``krforest_weather`` / ``khoa_weather`` / ``opinet`` / ``krex`` |
+| 2 | ``visitkorea`` / ``kma`` / ``airkorea`` / ``krforest_weather`` |
+|   | / ``khoa_weather`` / ``opinet`` / ``krex`` |
 | 3 | ``knps`` (14 dataset) / ``krforest_trails`` / ``krheritage`` |
 | 4 | ``mois`` (4단계 lifecycle) |
 | 5 | ``krforest`` (휴양림/수목원) / ``standard_data`` (5종) |

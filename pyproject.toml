@@ -146,12 +146,15 @@ fail_under = 50  # ADR-032 Sprint 1 bar (T-014 Sprint 1 진입과 함께 0→50 
 
 [tool.importlinter]
 root_package = "krtour.map"
+# forbidden contracts에 외부 패키지가 포함됨 (fastapi/uvicorn/cachetools/kafka).
+include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "layered architecture"
 type = "layers"
+# krtour.map.cli는 Sprint 4~5에서 추가 — 그때 layers 첫 줄에 다시 박는다.
+# 의존 방향: category → dto → core → infra → providers → client → (cli)
 layers = [
-  "krtour.map.cli",
   "krtour.map.client",
   "krtour.map.providers",
   "krtour.map.infra",

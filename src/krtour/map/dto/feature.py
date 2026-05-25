@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import Any, Final
+from typing import Final
 
 from pydantic import (
     BaseModel,
@@ -23,8 +23,8 @@ from pydantic import (
     model_validator,
 )
 
-from ..core import kst_now
 from ._enums import FeatureKind, FeatureStatus
+from ._time import kst_now
 from .address import Address
 from .area import AreaDetail
 from .coordinate import Coordinate
