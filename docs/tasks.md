@@ -4,14 +4,12 @@
 
 ## 진행 중 (open PR)
 
-- **본 PR#21** (feat/sprint1-pr21-infra-skeleton-crs):
-  `src/krtour/map/infra/crs.py` (pyproj.Transformer 4326↔5179 singleton,
-  ADR-030 narrow cache) + `src/krtour/map/infra/db.py` (async engine +
-  session factory + DSN 정규화) + `tests/integration/conftest.py`
-  (testcontainers PostGIS `pg_container`/`pg_engine`/`pg_session`
-  fixture, ADR-007/008) + `tests/integration/test_pg_smoke.py` (extension
-  격리 + schema 존재 + ST_Transform 정합) + 25 unit + 6 integration.
-  `pyproj>=3.6` dep 추가.
+- **본 PR#22** (feat/sprint1-pr22-ci-workflows-import-linter):
+  `.github/workflows/{ci,lint,openapi}.yml` 활성화 + import-linter 4 계약
+  활성화 (`tests/lint/test_import_linter.py`) + ADR-002 위반 1건 실 해소
+  (`KST`/`kst_now` 정의 `core/types.py` → `dto/_time.py` 이전, 공개 API
+  preserve). 125 pytest passed (124 + 1 새), 10 skip. ruff/mypy/import-linter
+  모두 green.
 - **upstream knps-api PR#1**
   (https://github.com/digitie/python-knps-api/pull/1):
   `docs/knps-feature-etl.md §4` maki icon 정정 (shelter / barrier) — 검토 +
@@ -49,15 +47,18 @@
     - [x] PR#20 `src/krtour/map/core/` exceptions 7종 (ADR backend-package.md §5)
           + `make_feature_id` (ADR-009 결정적 SHA1) + tests 42건. scoring stub은
           dto Coordinate 의존 위해 후속 PR로.
-    - [x] **PR#21 (본)** `src/krtour/map/infra/crs.py` (pyproj.Transformer
-          4326↔5179 singleton, ADR-030 narrow cache) + `infra/db.py` (async
-          engine + session factory + DSN 정규화) + `tests/integration/conftest.py`
+    - [x] PR#21 `src/krtour/map/infra/crs.py` (pyproj.Transformer 4326↔5179
+          singleton, ADR-030 narrow cache) + `infra/db.py` (async engine +
+          session factory + DSN 정규화) + `tests/integration/conftest.py`
           (testcontainers PostGIS, ADR-007/008) + `test_pg_smoke.py` (extension
           격리 + schema + ST_Transform). pyproj>=3.6 dep. 25 unit + 6 integration.
-    - [ ] PR#22 CI workflows (`.github/workflows/ci.yml` + `lint.yml` +
-          `openapi.yml`) + import-linter 계약 활성화
+    - [x] **PR#22 (본)** `.github/workflows/{ci,lint,openapi}.yml` + import-linter
+          4 계약 활성화 (`tests/lint/test_import_linter.py`) + ADR-002 위반 1건
+          실 해소 (KST/kst_now 정의 core/types.py → dto/_time.py 이전).
+          ruff/mypy/import-linter all green. **Sprint 1 scaffolding 종료점.**
     - [ ] PR#23 첫 적재 통합 테스트 (Sprint 2 직전 — `infra/models.py` +
-          첫 provider feature_repo + Alembic migration 첫 revision)
+          첫 provider feature_repo + Alembic migration 첫 revision).
+          또는 SPRINT-2.md 활성화로 직접 Sprint 2 진입.
     - [ ] **후속**: `core/scoring.py` (Record Linkage ADR-016, Coordinate
           의존) + `core/types.py` `kst_now` 통합 + `core/providers.py`
           (CANONICAL_PROVIDER_NAMES) — PR#19 머지 후 별도 PR.

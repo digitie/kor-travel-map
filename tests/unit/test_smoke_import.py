@@ -22,11 +22,11 @@ def test_krtour_map_import() -> None:
 def test_krtour_map_subpackages_importable() -> None:
     """6개 layer subpackage가 모두 PEP 420 namespace로 import된다."""
     import krtour.map.category  # noqa: F401
-    import krtour.map.dto  # noqa: F401
+    import krtour.map.client  # noqa: F401
     import krtour.map.core  # noqa: F401
+    import krtour.map.dto  # noqa: F401
     import krtour.map.infra  # noqa: F401
     import krtour.map.providers  # noqa: F401
-    import krtour.map.client  # noqa: F401
 
 
 @pytest.mark.unit

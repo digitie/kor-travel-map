@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
+from pydantic import ValidationError
 
 from krtour.map.core import kst_now
 from krtour.map.dto import (
@@ -18,7 +19,6 @@ from krtour.map.dto import (
     PlaceDetail,
     RouteDetail,
 )
-
 
 # ── Coordinate (Korea bounds) ────────────────────────────────────────────
 
@@ -51,7 +51,7 @@ def test_coordinate_out_of_korea_raises() -> None:
 def test_coordinate_frozen() -> None:
     """Coordinate는 frozen — mutation 차단."""
     c = Coordinate(lon=127.0, lat=37.5)
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):  # frozen 위반은 Pydantic ValidationError
         c.lon = 130.0  # type: ignore[misc]
 
 
@@ -98,14 +98,14 @@ def test_feature_coord_optional() -> None:
 def test_feature_detail_kind_mismatch_raises() -> None:
     """ADR-018 — kind=place인데 EventDetail이 들어오면 ValidationError."""
     event_detail = EventDetail(feature_id="x", event_kind="festival")
-    with pytest.raises(Exception, match="PlaceDetail만 허용"):
+    with pytest.raises(ValidationError, match="PlaceDetail만 허용"):
         _make_place_feature(detail=event_detail)
 
 
 @pytest.mark.unit
 def test_feature_detail_dict_rejected() -> None:
     """ADR-018 — detail에 자유 dict 입력 금지."""
-    with pytest.raises(Exception):  # Pydantic validation
+    with pytest.raises(ValidationError):  # Pydantic validation
         _make_place_feature(detail={"place_kind": "cafe"})  # type: ignore[arg-type]
 
 
@@ -113,7 +113,7 @@ def test_feature_detail_dict_rejected() -> None:
 def test_feature_weather_kind_detail_must_be_none() -> None:
     """kind=weather에 detail이 들어오면 ValidationError (별도 WeatherValue 테이블)."""
     place_detail = PlaceDetail(feature_id="w:1", place_kind="weather_station")
-    with pytest.raises(Exception, match="detail을 가질 수 없"):
+    with pytest.raises(ValidationError, match="detail을 가질 수 없"):
         Feature(
             feature_id="w:1",
             kind=FeatureKind.WEATHER,
@@ -217,7 +217,7 @@ def test_feature_marker_color_valid() -> None:
 def test_feature_marker_color_invalid() -> None:
     """P-17 / P-00 / 다른 형식은 거부."""
     for bad in ("P-00", "P-17", "P-1", "P-001", "Q-01", "red", ""):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             _make_place_feature(marker_color=bad)
 
 

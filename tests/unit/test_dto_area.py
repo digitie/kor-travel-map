@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from krtour.map.dto import AREA_KINDS, AreaDetail
 
@@ -45,5 +46,5 @@ def test_area_detail_national_park() -> None:
 @pytest.mark.unit
 def test_area_detail_invalid_kind_raises() -> None:
     """Literal에 없는 area_kind는 ValidationError."""
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         AreaDetail(feature_id="x", area_kind="not_a_valid_kind")

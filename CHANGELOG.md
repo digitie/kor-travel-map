@@ -7,6 +7,26 @@
 
 ### Sprint 1 scaffolding (2026-05-25, PR#17+)
 
+- **PR#22 — CI workflows + import-linter 활성화 (Sprint 1 scaffolding 종료)**:
+  - `.github/workflows/ci.yml` — pytest unit + integration (testcontainers
+    PostGIS, ADR-007) + coverage XML, Python 3.11/3.12/3.13 matrix +
+    `concurrency` group으로 이전 run 자동 cancel.
+  - `.github/workflows/lint.yml` — ruff check + mypy --strict
+    (`krtour.map` 전체) + import-linter (4 계약).
+  - `.github/workflows/openapi.yml` — ADR-031 drift gate. Sprint 1은
+    `continue-on-error: true` (앱 모듈 미존재) — Sprint 2 첫 라우터 PR
+    에서 제거.
+  - `tests/lint/test_import_linter.py` — pyproject.toml의 4 계약 wrap
+    (subprocess로 `lint-imports` 실행). 미설치 시 skip.
+  - `pyproject.toml`: `include_external_packages = true` (외부 forbidden
+    검증 활성화) + `layers`에서 `krtour.map.cli` 제거 (모듈 미존재).
+  - **ADR-002 위반 1건 실 해소** — `KST`/`kst_now` 정의를
+    `core/types.py` → `dto/_time.py`로 이전 (dto/feature.py가 core를
+    역참조하던 위반 해소). 공개 API `from krtour.map.core import kst_now`는
+    그대로 (core/types.py shim).
+  - `tests/unit/test_dto_*.py` + `test_category.py` —
+    `pytest.raises(Exception)` → 구체 예외 type (B017/PT011 해소).
+  - **125 passed, 10 skipped** (전체) + ruff/mypy/import-linter all green.
 - **PR#21 — `src/krtour/map/infra/` skeleton (crs + db + testcontainers)**:
   - `src/krtour/map/infra/crs.py` — `pyproj.Transformer` singleton
     (`@functools.cache`, ADR-030 narrow 예외): `transformer_4326_to_5179` /

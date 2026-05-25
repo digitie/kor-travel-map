@@ -25,7 +25,8 @@ Python 패키지 `krtour-map-debug-ui` (ADR-020, `packages/krtour-map-debug-ui/`
 2026-05-25 codex 리뷰: PR#1~#21 신규 소스·문서 상세 리뷰 리포트는
 `docs/reports/pr-1-21-review.md`. 핵심 보완 후보는 `Feature.detail` dict 입력
 차단, DTO datetime KST 정책 일관화, Sprint 1 active 상태 문서 drift 정리,
-PR#22 CI/import-linter merge 후 gate 확인.
+PR#22 CI/import-linter merge 후 gate 확인. PR#22 merge 후 PR#23 리포트
+브랜치 충돌은 2026-05-25 18:08 KST 기준 해결.
 
 ## 다음 한 작업
 
@@ -43,22 +44,26 @@ PR#22 CI/import-linter merge 후 gate 확인.
       WeatherValue/PriceValue/SourceRecord은 Sprint 2 PR로 연기.
 - [x] PR#20 `src/krtour/map/core/` exceptions 7종 + `make_feature_id`
       (ADR-009 결정적 SHA1) + 42 tests. dto 의존 없이 자체 완결.
-- [x] PR#21 `src/krtour/map/infra/` skeleton:
-      `crs.py` (pyproj.Transformer 4326↔5179 singleton, ADR-030 narrow
-      cache) + `db.py` (async engine + session factory + DSN 정규화) +
-      `tests/integration/conftest.py` (testcontainers PostGIS
-      `pg_container`/`pg_engine`/`pg_session`, ADR-007/008) +
-      `test_pg_smoke.py` (extension 격리 + schema + ST_Transform 정합).
-      pyproj>=3.6 dep. 25 unit + 6 integration tests.
-- [ ] PR#22 (open) CI workflows (`.github/workflows/{ci,lint,openapi}.yml`) +
-      import-linter 계약 활성화 + tests/lint/test_import_linter.py
-- [ ] PR#23 첫 적재 통합 테스트 (Sprint 2 직전 — `infra/models.py` +
-      첫 provider feature_repo + Alembic migration 첫 revision)
-- [ ] **후속 PR**: `core/scoring.py` (ADR-016 Record Linkage Coordinate
-      의존) + `core/providers.py` CANONICAL_PROVIDER_NAMES + `core/weather.py`
-      build_weather_card + `infra/models.py` SQLAlchemy 매핑 +
-      `infra/feature_repo.py` raw SQL + Alembic. Sprint 2 첫 provider
-      적재 직전.
+- [x] PR#21 `src/krtour/map/infra/` skeleton: `crs.py` (pyproj.Transformer
+      singleton, ADR-030 narrow cache) + `db.py` (async engine + DSN
+      정규화) + `tests/integration/conftest.py` (testcontainers PostGIS) +
+      `test_pg_smoke.py` (extension 격리 + ST_Transform 정합). pyproj>=3.6
+      dep. 25 unit + 6 integration tests.
+- [x] PR#22 `.github/workflows/{ci,lint,openapi}.yml` +
+      import-linter 4 계약 활성화 + `tests/lint/test_import_linter.py`.
+      **ADR-002 위반 1건 실 해소** — PR#19에서 `KST`/`kst_now`를
+      `core/types.py`에 두면서 `dto/feature.py`가 core 역참조했던 것을
+      `dto/_time.py`로 이전 (공개 API preserve). ruff/mypy/import-linter
+      all green. **Sprint 1 scaffolding 마지막 PR, 2026-05-25 merge.**
+- [x] PR#23 `docs/reports/pr-1-21-review.md` — PR#1~#21 신규 소스·문서
+      상세 리뷰 리포트. PR#22 merge 후 충돌 해결 완료.
+- [ ] 다음 구현 PR 첫 적재 통합 테스트 (Sprint 2 직전 — `infra/models.py` +
+      첫 provider feature_repo + Alembic migration 첫 revision). 또는
+      SPRINT-2.md 활성화로 직접 Sprint 2 진입 (사용자 결정).
+- [ ] **Sprint 2 첫 PR** (ADR-034 1단계): `providers/visitkorea/` 축제
+      + `infra/models.py` SQLAlchemy 매핑 + `infra/feature_repo.py` raw SQL
+      + Alembic migration 첫 revision + `core/scoring.py` ADR-016 Record
+      Linkage (Coordinate 의존).
 
 ## 진척도
 

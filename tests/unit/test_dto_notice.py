@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from krtour.map.dto import (
     NOTICE_TYPE_ACCESS_RESTRICTION,
@@ -87,14 +88,14 @@ def test_notice_detail_normalizes_alias_input() -> None:
 @pytest.mark.unit
 def test_notice_detail_severity_bounds() -> None:
     """severity는 0~5."""
-    with pytest.raises(Exception):  # ValidationError
+    with pytest.raises(ValidationError):
         NoticeDetail(feature_id="x", notice_type="safety", severity=10)
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         NoticeDetail(feature_id="x", notice_type="safety", severity=-1)
 
 
 @pytest.mark.unit
 def test_notice_detail_unknown_type_raises() -> None:
     """모르는 notice_type은 ValueError (Pydantic ValidationError로 wrap)."""
-    with pytest.raises(Exception):  # ValidationError wrapping ValueError
+    with pytest.raises(ValidationError):  # wrapping ValueError
         NoticeDetail(feature_id="x", notice_type="totally_unknown")
