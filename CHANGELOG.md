@@ -7,6 +7,26 @@
 
 ### Sprint 2 prep (2026-05-26, PR#28+)
 
+- **PR#29 — `core/scoring.py` (ADR-016 Record Linkage) + `core/providers.py`**:
+  Sprint 2 첫 provider 적재 전 dedup scoring + provider 이름 정규화 인프라.
+  - `core/providers.py` — `CANONICAL_PROVIDER_NAMES` 18종 (모든 형제 provider
+    + data.go.kr-standard + 외부 보강 3종) + `PROVIDER_ALIASES` 24종 (ADR-024
+    krmois→mois 포함) + `normalize_provider_name` (raise on unknown, silent
+    fallback 금지) + `is_known_provider` (lenient bool).
+  - `core/scoring.py` (ADR-016 SPEC V8 D-14):
+    - 가중치 상수: `WEIGHT_NAME=0.45`/`WEIGHT_SPATIAL=0.35`/`WEIGHT_CATEGORY=0.20`
+    - 임계값 상수: `THRESHOLD_AUTO=0.85`/`THRESHOLD_MANUAL=0.65`/`SPATIAL_DECAY_METERS=50.0`
+    - `normalize_kr_place_name` (NFKC + lower + 괄호 제거 + 모든 공백 제거)
+    - `name_similarity` (jellyfish.jaro_winkler_similarity 정규화 후)
+    - `haversine_meters` + `spatial_similarity(exp(-d/50))`
+    - `category_similarity` (Jaccard)
+    - `score_pair(*, ...)` (keyword-only) + `classify_decision(score)` →
+      `DedupDecision.AUTO_MERGE/MANUAL_REVIEW/KEEP_SEPARATE`
+  - `pyproject.toml`: `jellyfish>=1.0` 본 의존 추가.
+  - **238 unit pytest passed** (PR#28 199 + 신규 32 + 미세 변동).
+    ruff/mypy(31 src)/import-linter all green.
+  - **`core/weather.py`는 Sprint 2 KMA PR (PR#31)으로 연기** — WeatherValue
+    DTO 의존.
 - **PR#28 — `infra/models.py` (SQLAlchemy 2 + GeoAlchemy2) + Alembic 첫 revision**:
   Sprint 2 첫 provider PR (visitkorea 축제)이 의존할 DB schema + ORM 매핑 + Alembic
   인프라 미리 박음.

@@ -89,9 +89,11 @@ PR#22 CI/import-linter merge 후 gate 확인. PR#22 merge 후 PR#23 리포트
       + source 테이블 + 핵심 인덱스 STORED coord_5179 + BRIN imported/fetched_at)
       + integration test 6 case. `alembic>=1.13` dep. 199 unit pytest passed,
       ruff/mypy(29 src files)/import-linter all green.
-- [ ] **PR#29 / Sprint 2 prep 2**: `core/scoring.py` ADR-016 Record Linkage
-      (Coordinate 의존) + `core/providers.py` CANONICAL_PROVIDER_NAMES +
-      `core/weather.py` placeholder.
+- [x] **PR#29 (현재 open) / Sprint 2 prep 2**: `core/scoring.py` ADR-016
+      Record Linkage (가중치 0.45/0.35/0.20 + 임계값 0.85/0.65 + Coordinate
+      의존) + `core/providers.py` CANONICAL_PROVIDER_NAMES 18종 + alias 24종.
+      `jellyfish>=1.0` dep. `core/weather.py`는 WeatherValue DTO 의존 → 
+      Sprint 2 KMA PR에서 함께. 238 pytest passed, all lint green.
 - [ ] **Sprint 2 첫 provider PR** (ADR-034 1단계, PR#30 후보):
       `providers/visitkorea/` 축제 + `infra/feature_repo.py` raw SQL +
       `feature_event_details` 테이블 마이그레이션.

@@ -45,6 +45,28 @@ from krtour.map.core.ids import (
     make_payload_hash,
     make_source_record_key,
 )
+from krtour.map.core.providers import (
+    CANONICAL_PROVIDER_NAMES,
+    PROVIDER_ALIASES,
+    is_known_provider,
+    normalize_provider_name,
+)
+from krtour.map.core.scoring import (
+    SPATIAL_DECAY_METERS,
+    THRESHOLD_AUTO,
+    THRESHOLD_MANUAL,
+    WEIGHT_CATEGORY,
+    WEIGHT_NAME,
+    WEIGHT_SPATIAL,
+    DedupDecision,
+    category_similarity,
+    classify_decision,
+    haversine_meters,
+    name_similarity,
+    normalize_kr_place_name,
+    score_pair,
+    spatial_similarity,
+)
 from krtour.map.core.types import KST, kst_now
 
 __all__ = [
@@ -67,4 +89,24 @@ __all__ = [
     "FEATURE_ID_HASH_LENGTH",
     "SOURCE_RECORD_KEY_HASH_LENGTH",
     "PAYLOAD_HASH_DEFAULT_LENGTH",
+    # providers (PR#29, ADR-024/028)
+    "CANONICAL_PROVIDER_NAMES",
+    "PROVIDER_ALIASES",
+    "normalize_provider_name",
+    "is_known_provider",
+    # scoring (PR#29, ADR-016 Record Linkage)
+    "WEIGHT_NAME",
+    "WEIGHT_SPATIAL",
+    "WEIGHT_CATEGORY",
+    "THRESHOLD_AUTO",
+    "THRESHOLD_MANUAL",
+    "SPATIAL_DECAY_METERS",
+    "normalize_kr_place_name",
+    "name_similarity",
+    "spatial_similarity",
+    "category_similarity",
+    "score_pair",
+    "haversine_meters",
+    "DedupDecision",
+    "classify_decision",
 ]

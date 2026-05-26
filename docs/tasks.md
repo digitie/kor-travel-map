@@ -4,7 +4,14 @@
 
 ## 진행 중 (open PR)
 
-- **본 PR#28** (feat/pr28-infra-models-alembic): Sprint 2 prep —
+- **본 PR#29** (feat/pr29-core-scoring-providers-weather): Sprint 2 prep 2 —
+  `core/scoring.py` ADR-016 Record Linkage (가중치 0.45/0.35/0.20 + 임계값
+  0.85/0.65 + normalize_kr_place_name + jaro_winkler + haversine + Jaccard +
+  classify_decision) + `core/providers.py` CANONICAL_PROVIDER_NAMES 18종 +
+  PROVIDER_ALIASES 24종 + normalize_provider_name. `jellyfish>=1.0` dep.
+  238 unit pytest passed, ruff/mypy(31 src)/import-linter all green.
+  `core/weather.py`는 WeatherValue DTO 의존이라 Sprint 2 KMA PR로 연기.
+- **PR#28** (merged): Sprint 2 prep —
   `src/krtour/map/infra/models.py` SQLAlchemy 2 declarative (Feature +
   SourceRecord/Link + ProviderSyncState) + Alembic 인프라
   (`alembic.ini` + async-compatible `env.py` + script.py.mako) + 첫 2 revision
