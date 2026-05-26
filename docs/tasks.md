@@ -4,7 +4,14 @@
 
 ## 진행 중 (open PR)
 
-- 없음. PR#27 merge 후 다음 PR 후보는 **PR#28 / Sprint 2 prep**
+- **본 PR#28** (feat/pr28-infra-models-alembic): Sprint 2 prep —
+  `src/krtour/map/infra/models.py` SQLAlchemy 2 declarative (Feature +
+  SourceRecord/Link + ProviderSyncState) + Alembic 인프라
+  (`alembic.ini` + async-compatible `env.py` + script.py.mako) + 첫 2 revision
+  (0001 4 schemas + 3 extensions on `x_extension` ADR-008 / 0002 features
+  +source 테이블 + 핵심 인덱스). `alembic>=1.13` dep. integration test 6 case.
+  199 pytest passed (코드 변경 없음 기존 + 신규는 통합 테스트 — testcontainers
+  필요). ruff/mypy(29 source files)/import-linter all green.
   (`infra/models.py` + Alembic 첫 revision + schema integration test).
 
 ## 최근 완료

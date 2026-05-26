@@ -2,6 +2,90 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-26 01:00 (claude)
+
+**작업**: PR#28 Sprint 2 prep — `src/krtour/map/infra/models.py` (SQLAlchemy 2
+declarative + GeoAlchemy2) + Alembic 인프라 (`alembic.ini` + `alembic/env.py`
+async-compatible + `alembic/script.py.mako`) + 첫 2 revision (0001 schemas+
+extensions, 0002 features+source tables).
+
+**컨텍스트**: PR#27 머지(2026-05-25 23:41, codex `7d6136a` 후속 sweep 포함) 후
+Sprint 2 진입 준비. ADR-034 1단계 visitkorea 축제 PR (PR#30)이 의존할 DB
+schema + ORM 매핑 + Alembic 인프라 미리 박는다. detail 5종/opening_hours/
+weather/price/file/ops.* 테이블은 각자 owning provider PR에서 추가.
+
+**신규 파일** (8):
+- `alembic.ini` — Alembic config. DSN은 env.py가 `KRTOUR_MAP_PG_DSN`에서
+  read → asyncpg로 정규화. post_write_hooks ruff format/check.
+- `alembic/env.py` — async-compatible. `async_engine_from_config` +
+  `NullPool` + `SET search_path = public, x_extension` (ADR-008) + offline/
+  online mode. `target_metadata = infra.models.metadata`.
+- `alembic/script.py.mako` — 새 revision template.
+- `alembic/versions/0001_initial_schemas_and_extensions.py` — 4 schema
+  (feature/provider_sync/ops/x_extension) + 3 extension (postgis/pg_trgm/
+  pgcrypto) on `x_extension` (ADR-008). postgis는 image 기본 public 설치를
+  DROP CASCADE 후 재생성.
+- `alembic/versions/0002_features_and_source_tables.py` — features (ADR-012
+  `coord_5179` STORED generated column + 10 indexes incl. GiST/GIN partial)
+  + source_records (UNIQUE 5-tuple + 4 indexes incl. BRIN imported/fetched_at)
+  + source_links (FK CASCADE/RESTRICT + 3 indexes) + provider_sync_state
+  (composite PK + partial index).
+- `src/krtour/map/infra/models.py` (~290 line) — `Base` declarative +
+  `metadata` (naming convention 박힘) + 4 row class (FeatureRow / SourceRecord
+  Row / SourceLinkRow / ProviderSyncStateRow). Geoalchemy2 Geometry(POINT
+  4326/5179, GEOMETRY 4326). CheckConstraint kind/status/coord_pair.
+- `tests/integration/test_alembic_upgrade.py` (6 case) — testcontainers
+  PostGIS + `alembic upgrade head` subprocess + 4 schema/3 extension/features
+  컬럼/coord_5179 STORED 검증/source 3 tables/핵심 5 인덱스 존재.
+
+**변경 파일** (2):
+- `pyproject.toml` — `alembic>=1.13` 본 의존 추가 (ADR-007).
+- `src/krtour/map/infra/__init__.py` — Base/metadata/FeatureRow/SourceRecord
+  Row/SourceLinkRow/ProviderSyncStateRow 6 신규 식별자 re-export.
+
+**왜 detail/weather/price/file 테이블은 본 PR에 없는가**:
+- 각자 owning provider PR에서 추가 — opening_periods는 VisitKorea PR (PR#30)
+  에서, weather_values는 KMA PR (PR#31)에서, price_values는 OpiNet PR (PR#32)
+  에서, feature_files는 첫 사진 업로드 provider PR에서.
+- 본 PR은 visitkorea 첫 적재가 깨끗하게 통과하는 최소 schema (features +
+  source). detail은 Feature.detail JSONB로 임시 저장 (정식 detail row는
+  provider PR 시점에 별도 테이블 + JSONB 비교 마이그레이션).
+
+**verification**:
+- `python -m pytest tests/ -q --ignore=tests/integration` → **199 passed,
+  4 skipped** (PR#27 머지 후 동일).
+- `python -m ruff check src/ tests/ alembic/` → All checks passed.
+- `python -m mypy --strict -p krtour.map` → Success, **29 source files**
+  (infra/models.py 신규).
+- `import-linter` → **4 contracts kept, 0 broken**.
+- 통합 테스트 (testcontainers PostGIS 환경에서): 6 case 통과 기대 — CI에서
+  실 검증.
+
+**ADR 적용**:
+- ADR-004 — ORM 매핑만 (`models.py`는 declarative + Column). 쿼리는 후속
+  `infra/feature_repo.py`의 raw SQL `text()`.
+- ADR-007 — PostgreSQL 16 + PostGIS 3.5 + alembic>=1.13.
+- ADR-008 — extensions은 `x_extension` schema 격리 (0001 revision으로 강제).
+- ADR-012 — `coord_5179` STORED generated column (0002 revision + models.py
+  `Computed(persisted=True)`).
+- ADR-018 — `detail` JSONB column (Pydantic 직렬화 입력).
+- ADR-019 — 모든 datetime `TIMESTAMPTZ` (timezone-aware).
+
+**TripMate docs 참조** (`docs/tripmate-integration.md` §1-§18):
+- §5.1 raw → feature 흐름 — 본 PR의 schema가 입력. Sprint 2 visitkorea PR
+  에서 검증.
+- §10 structlog 키 표준 — `provider`/`dataset_key`/`source_record_id` 등.
+  현 시점 ID 생성 helpers (PR#26)와 직접 호환.
+- §11 에러 변환 — `KrtourMapError` 베이스 (PR#20)로 통합.
+
+**다음 PR**:
+- **PR#29** (Sprint 2 prep): `core/scoring.py` (ADR-016 Record Linkage,
+  Coordinate 의존) + `core/providers.py` (CANONICAL_PROVIDER_NAMES) +
+  `core/weather.py` placeholder.
+- 이후 **Sprint 2 PR#30** ADR-034 1단계: `providers/visitkorea/` 축제 적재.
+
+---
+
 ## 2026-05-25 23:07 (claude)
 
 **작업**: PR#27 — review report P1 docs drift sweep. PR#26 머지(2026-05-25

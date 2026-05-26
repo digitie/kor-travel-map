@@ -82,11 +82,19 @@ PR#22 CI/import-linter merge 후 gate 확인. PR#22 merge 후 PR#23 리포트
 - [ ] 후속 ADR (TBD, Sprint 3 KNPS 적재 이전): `access_restriction`/`fire_alert`
       notice source 결정 — 산림청 (`python-krforest-api`) / 소방청 / scrape
       중 선택.
-- [ ] **PR#28 / Sprint 2 prep**: `infra/models.py` SQLAlchemy 2 declarative
-      + GeoAlchemy2 + `alembic/` 첫 revision + schema integration test.
-- [ ] **Sprint 2 첫 provider PR** (ADR-034 1단계): `providers/visitkorea/`
-      축제 + `infra/feature_repo.py` raw SQL + `core/scoring.py` ADR-016
-      Record Linkage.
+- [x] **PR#28 (현재 open) / Sprint 2 prep**: `infra/models.py` SQLAlchemy 2
+      declarative + GeoAlchemy2 (FeatureRow + SourceRecord/Link + ProviderSyncState)
+      + Alembic 인프라 (`alembic.ini` + async-compatible `env.py` + 첫 2
+      revision: 0001 4 schemas + 3 extensions on `x_extension` / 0002 features
+      + source 테이블 + 핵심 인덱스 STORED coord_5179 + BRIN imported/fetched_at)
+      + integration test 6 case. `alembic>=1.13` dep. 199 unit pytest passed,
+      ruff/mypy(29 src files)/import-linter all green.
+- [ ] **PR#29 / Sprint 2 prep 2**: `core/scoring.py` ADR-016 Record Linkage
+      (Coordinate 의존) + `core/providers.py` CANONICAL_PROVIDER_NAMES +
+      `core/weather.py` placeholder.
+- [ ] **Sprint 2 첫 provider PR** (ADR-034 1단계, PR#30 후보):
+      `providers/visitkorea/` 축제 + `infra/feature_repo.py` raw SQL +
+      `feature_event_details` 테이블 마이그레이션.
 
 ## 진척도
 
