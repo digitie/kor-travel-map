@@ -32,6 +32,7 @@ dependencies = [
   "psycopg[binary,pool]>=3.2",
   "shapely>=2.0",
   "pyproj>=3.6",  # ADR-012 좌표 변환 / ADR-030 narrow cache singleton
+  "alembic>=1.13",  # ADR-007 schema migration
 ]
 
 [project.optional-dependencies]

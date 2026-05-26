@@ -46,6 +46,14 @@ from krtour.map.infra.db import (
     make_async_session_factory,
     normalize_async_dsn,
 )
+from krtour.map.infra.models import (
+    Base,
+    FeatureRow,
+    ProviderSyncStateRow,
+    SourceLinkRow,
+    SourceRecordRow,
+    metadata,
+)
 
 __all__ = [
     # crs (ADR-012 + ADR-030)
@@ -59,4 +67,11 @@ __all__ = [
     "make_async_engine",
     "make_async_session_factory",
     "normalize_async_dsn",
+    # models (PR#28, ADR-004 / ADR-007 / ADR-018)
+    "Base",
+    "metadata",
+    "FeatureRow",
+    "SourceRecordRow",
+    "SourceLinkRow",
+    "ProviderSyncStateRow",
 ]

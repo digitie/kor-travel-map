@@ -5,6 +5,32 @@
 
 ## [Unreleased]
 
+### Sprint 2 prep (2026-05-26, PR#28+)
+
+- **PR#28 — `infra/models.py` (SQLAlchemy 2 + GeoAlchemy2) + Alembic 첫 revision**:
+  Sprint 2 첫 provider PR (visitkorea 축제)이 의존할 DB schema + ORM 매핑 + Alembic
+  인프라 미리 박음.
+  - `alembic.ini` + `alembic/env.py` (async-compatible, asyncpg + NullPool +
+    SET search_path = public, x_extension) + `alembic/script.py.mako`.
+  - `alembic/versions/0001_initial_schemas_and_extensions.py` — 4 schema
+    (feature/provider_sync/ops/x_extension) + 3 extension (postgis/pg_trgm/
+    pgcrypto) on `x_extension` (ADR-008). postgis는 image 기본 public 설치
+    DROP CASCADE 후 재생성.
+  - `alembic/versions/0002_features_and_source_tables.py` — features (ADR-012
+    `coord_5179` STORED generated column + 10 indexes incl. GiST/GIN partial)
+    + source_records (UNIQUE 5-tuple + 4 indexes incl. BRIN) + source_links
+    (FK CASCADE/RESTRICT + 3 indexes) + provider_sync_state.
+  - `src/krtour/map/infra/models.py` — `Base` (naming convention) + 4 row class
+    (FeatureRow / SourceRecordRow / SourceLinkRow / ProviderSyncStateRow).
+    Geoalchemy2 Geometry(POINT 4326/5179, GEOMETRY 4326) + CheckConstraint
+    kind/status/coord_pair.
+  - `tests/integration/test_alembic_upgrade.py` — 6 case: 4 schema / 3
+    extension on x_extension / features 컬럼 / coord_5179 STORED / source 3
+    tables / 핵심 5 인덱스.
+  - `pyproject.toml`: `alembic>=1.13` 본 의존 추가.
+  - **199 unit pytest passed** (코드 변경 없음 기존 + 통합 신규는 testcontainers
+    필요). ruff/mypy/import-linter all green.
+
 ### Sprint 1 scaffolding (2026-05-25, PR#17+)
 
 - **PR#26 — review P0-4 ID helpers + SourceRecord/Link/Bundle DTO**:
