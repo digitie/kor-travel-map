@@ -33,6 +33,7 @@ dependencies = [
   "shapely>=2.0",
   "pyproj>=3.6",  # ADR-012 좌표 변환 / ADR-030 narrow cache singleton
   "alembic>=1.13",  # ADR-007 schema migration
+  "jellyfish>=1.0",  # ADR-016 Record Linkage (jaro_winkler_similarity)
 ]
 
 [project.optional-dependencies]

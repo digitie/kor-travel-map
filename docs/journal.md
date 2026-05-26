@@ -2,6 +2,89 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-26 02:00 (claude)
+
+**작업**: PR#29 — Sprint 2 prep 2. `core/scoring.py` (ADR-016 Record Linkage)
++ `core/providers.py` (CANONICAL_PROVIDER_NAMES + normalize_provider_name).
+`core/weather.py`는 WeatherValue DTO 의존이라 Sprint 2 KMA PR로 연기.
+
+**컨텍스트**: PR#28 머지(2026-05-26 12:53) 후 Sprint 2 첫 provider PR 진입
+직전 마지막 prep. ADR-016 dedup scoring (자동 병합 임계값 0.85, 수동 검토
+0.65) + provider 이름 정규화 (alias → canonical, ADR-024/028). `python-knps-
+api`/`python-mois-api` 등 모든 형제 provider 카탈로그 박음.
+
+**신규 파일** (4):
+- `src/krtour/map/core/providers.py` (~120 line) — `CANONICAL_PROVIDER_NAMES`
+  18종 + `PROVIDER_ALIASES` 24종 (krmois→mois ADR-024 포함) +
+  `normalize_provider_name(value)` (raise on unknown — silent fallback 금지) +
+  `is_known_provider(value)` (lenient bool 반환).
+- `src/krtour/map/core/scoring.py` (~270 line) — ADR-016:
+  - 가중치 상수: `WEIGHT_NAME=0.45` / `WEIGHT_SPATIAL=0.35` /
+    `WEIGHT_CATEGORY=0.20` (합 1.0 assert).
+  - 임계값 상수: `THRESHOLD_AUTO=0.85` / `THRESHOLD_MANUAL=0.65` /
+    `SPATIAL_DECAY_METERS=50.0`.
+  - `normalize_kr_place_name(name)` — NFKC + lower + 괄호 제거 + 모든 공백
+    제거 (한국어 장소명 공백 변형 흡수: "서울 시청"/"서울시청"/"서울 특별 시청"
+    모두 "서울시청" 또는 "서울특별시청").
+  - `name_similarity(a, b)` — jellyfish.jaro_winkler_similarity (정규화 후).
+  - `haversine_meters(a, b)` — Python 측 좌표 거리 (PostGIS ST_DWithin은
+    별도 — ADR-012).
+  - `spatial_similarity(a, b)` — `exp(-d / 50)`.
+  - `category_similarity(a_tags, b_tags)` — Jaccard.
+  - `score_pair(*, name_a, name_b, coord_a, coord_b, cat_a, cat_b)` — 종합
+    점수 (keyword-only).
+  - `DedupDecision` (AUTO_MERGE / MANUAL_REVIEW / KEEP_SEPARATE 상수) +
+    `classify_decision(score)`.
+- `tests/unit/test_providers.py` (8 case) — canonical 카탈로그 정합 +
+  alias 검증 + ADR-024 krmois→mois + unknown reject + lenient is_known.
+- `tests/unit/test_scoring.py` (24 case) — ADR-016 가중치/임계값 정합 +
+  normalize_kr_place_name (4종) + name/spatial/category sim (각 4종 +
+  haversine 서울-부산 325km) + score_pair (3종) + classify_decision
+  parametrize 8종.
+
+**변경 파일** (2):
+- `pyproject.toml` — `jellyfish>=1.0` 본 의존 추가 (ADR-016
+  jaro_winkler_similarity).
+- `src/krtour/map/core/__init__.py` — providers/scoring 18 신규 식별자
+  re-export.
+
+**왜 core/weather.py는 본 PR에 없는가**:
+- `build_weather_card`는 `WeatherValue`/`WeatherCard` DTO 의존.
+- `WeatherValue` DTO는 Sprint 2 KMA PR (PR#31)에서 추가 — 그때 `core/
+  weather.py` 함께 박음.
+- 본 PR은 detail/weather/price DTO 없이 동작 가능한 scoring + providers만.
+
+**verification**:
+- `python -m pytest tests/ -q --ignore=tests/integration` → **238 passed,
+  4 skipped** (PR#28 199 + 신규 32 + tasks 미세 변동).
+- `python -m ruff check src/ tests/ alembic/` → All checks passed.
+- `python -m mypy --strict -p krtour.map` → Success, **31 source files**.
+- `import-linter` → **4 contracts kept, 0 broken**.
+
+**ADR 적용**:
+- ADR-016 (Record Linkage) — 가중치 0.45/0.35/0.20 + 임계값 0.85/0.65 +
+  master 선정 룰 (TODO Sprint 3 dedup PR). 본 PR은 scoring 함수만 — master
+  선정/병합은 후속.
+- ADR-024 (canonical name) — `python-mois-api` (`krmois` 거부, alias로
+  자동 변환).
+- ADR-028 (knps) — `python-knps-api` canonical 등록.
+
+**TripMate docs 참조** (`docs/tripmate-integration.md`):
+- §10 structlog 키 표준 — `provider` 키 값은 `normalize_provider_name(...)`
+  결과여야 한다. Sprint 2 첫 provider PR에서 wiring.
+- §6.1 dedup 검토 — `dedup_review_queue`가 ADR-016 MANUAL_REVIEW 결정의
+  output. Sprint 3 dedup PR에서 통합.
+
+**다음 PR (PR#30, Sprint 2 1단계 ADR-034)**:
+- `src/krtour/map/providers/visitkorea/__init__.py` — 축제 변환 함수
+  (`festival_to_bundle`).
+- `src/krtour/map/infra/feature_repo.py` — raw SQL `_SQL` 상수 + upsert
+  (ADR-004 + ADR-013).
+- `alembic/versions/0003_feature_event_details.py` — event detail 테이블.
+- VisitKorea raw → FeatureBundle 통합 fixture 테스트.
+
+---
+
 ## 2026-05-26 01:00 (claude)
 
 **작업**: PR#28 Sprint 2 prep — `src/krtour/map/infra/models.py` (SQLAlchemy 2
