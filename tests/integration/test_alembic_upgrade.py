@@ -20,35 +20,27 @@ pytestmark = pytest.mark.integration
 
 
 async def _run_alembic_upgrade(dsn: str) -> None:
-    """프로세스 외부에서 ``alembic upgrade head`` 실행.
+    """``alembic.command.upgrade(cfg, "head")``를 worker thread에서 실행.
 
-    ``alembic.command.upgrade``는 sync API라 별도 subprocess에서 실행
-    (asyncpg event loop과 분리). ``env.py``는 settings에서 DSN을 읽으므로
-    ``KRTOUR_MAP_PG_DSN`` env var를 자식 process에 전달.
+    alembic은 sync API + 자체 asyncio.run(env.py)을 호출하므로 현재 pytest
+    event loop과 충돌. ``asyncio.to_thread``로 별도 thread에서 alembic의
+    asyncio 호출이 자기 event loop을 만들도록 분리.
+
+    env.py는 ``Config.get_main_option("sqlalchemy.url")``을 우선 사용하므로
+    여기서 박은 DSN이 적용됨 (KRTOUR_MAP_PG_DSN env var 불필요).
     """
     import asyncio
-    import os
-    import sys
+    from pathlib import Path
 
-    env = os.environ.copy()
-    env["KRTOUR_MAP_PG_DSN"] = dsn
-    proc = await asyncio.create_subprocess_exec(
-        sys.executable,
-        "-m",
-        "alembic",
-        "upgrade",
-        "head",
-        env=env,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout_b, stderr_b = await proc.communicate()
-    if proc.returncode != 0:
-        raise AssertionError(
-            "alembic upgrade head failed:\n"
-            f"stdout:\n{stdout_b.decode(errors='replace')}\n"
-            f"stderr:\n{stderr_b.decode(errors='replace')}"
-        )
+    from alembic.config import Config
+
+    from alembic import command
+
+    project_root = Path(__file__).resolve().parents[2]  # noqa: ASYNC240  # sync IO is trivial path-arith here
+    cfg = Config(str(project_root / "alembic.ini"))
+    cfg.set_main_option("script_location", str(project_root / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", dsn)
+    await asyncio.to_thread(command.upgrade, cfg, "head")
 
 
 @pytest.fixture(scope="session")
