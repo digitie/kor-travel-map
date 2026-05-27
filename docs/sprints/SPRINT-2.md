@@ -123,12 +123,19 @@ ADR-035 (2026-05-27)로 운영 범위가 "디버그 + admin + 유지보수 + 프
   (ADR-035) — `import_jobs` 테이블 + ADR-039 advisory lock 필요
 - `routers/ops_consistency.py` — `GET /ops/consistency` (Sprint 3 ADR-033
   Phase 1 진입 시 활성)
-- **frontend** (옵션, Sprint 2 끝물 또는 Sprint 3 시작):
-  - Next.js + maplibre-vworld (ADR-025) + **TanStack Query + Zustand (ADR-037)**
-  - 모든 라우터 응답은 `useQuery`/`useMutation` hook으로 래핑
-  - map viewport / 카테고리 filter는 Zustand store
-  - `packages/map-marker-react/` workspace import — npm 게시 안 함 (ADR-043,
-    `"private": true`)
+- **frontend** (PR#36, 2026-05-27 merged — skeleton 진입):
+  - Next.js 15 App Router + React 19 + maplibre-vworld (ADR-025) +
+    **TanStack Query + Zustand (ADR-037)**
+  - `src/api/{client,queries}.ts` — `useHealth` / `useVersion` hook 첫 통합
+  - `src/state/map.ts` — Zustand map viewport store (lon/lat/zoom + 카테고리
+    filter + 선택된 feature)
+  - `src/providers/query-client-provider.tsx` — `QueryClientProvider`
+  - `src/app/{layout,page.tsx}` — root + landing page (health/version smoke
+    display)
+  - `packages/map-marker-react/package.json` `"private": true` 박음 — ADR-043
+    npm 게시 보류 (workspace 내부 git share만)
+  - 실제 지도 + `/features/*` wiring은 후속 PR (`infra/feature_repo.py` +
+    `routers/features.py` 진입 후)
 
 ### 2.6 Record Linkage scoring (첫 검증)
 

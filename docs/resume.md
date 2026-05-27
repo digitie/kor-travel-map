@@ -121,14 +121,45 @@ PR#22 CI/import-linter merge 후 gate 확인. PR#22 merge 후 PR#23 리포트
       health` + `/debug/version` 2 라우터 + `openapi.json` drift gate
       baseline + `.github/workflows/{ci,openapi}.yml` 정상 활성. mypy_path
       통합. 6 debug-ui tests + 258 total green.
+- [x] **PR#36 (merged 2026-05-27)** — Sprint 2 §2.5 frontend skeleton.
+      Next.js 15 App Router + React 19 + TanStack Query + Zustand (ADR-025 +
+      ADR-037). `src/api/{client,queries}.ts` (`/debug/health` + `/debug/
+      version` useQuery hook) + `src/state/map.ts` (Zustand map viewport
+      store) + `src/providers/query-client-provider.tsx` + `src/app/
+      {layout,page}.tsx`. `packages/map-marker-react/package.json`
+      `"private": true` (ADR-043 npm 게시 보류).
 
 다음 PR 후보 (Sprint 2 entry 계속):
 
-1. **PR#36 — Sprint 2 §2.5 frontend 시작** (ADR-025 + ADR-037 + ADR-043):
-   - `packages/krtour-map-debug-ui/frontend/package.json`에 `@tanstack/
-     react-query` + `zustand` 추가
-   - `packages/map-marker-react/package.json` `"private": true` 박음 (ADR-043)
-   - 기본 페이지 + map viewport Zustand store + `/debug/version` useQuery hook
+1. **PR#37 — Sprint 2 §2.2 kma 날씨**:
+   - `src/krtour/map/providers/kma.py` —
+     `short_forecast_to_weather_values` / `ultra_short_nowcast_to_weather_
+     values` / `mid_forecast_to_weather_values` / `weather_alerts_to_notice_
+     bundles`.
+   - 보조 provider: airkorea / krforest_mountain_weather / khoa_coastal.
+   - `dto/weather.py` `WeatherValue` 신설 (timeline_bucket / forecast_style)
+   - `core/weather.py` `build_weather_card` (Sprint 2 prep PR#29 연기분).
+
+2. **PR#38 — Sprint 2 §2.3 opinet 유가** + `PriceValue` DTO + BRIN bulk
+   (`psycopg.copy_*` 안전 마진 30k 검증, ADR-013).
+
+3. **PR#39 — Sprint 2 §2.4 krex 휴게소** — multi-kind (place + price +
+   weather + notice) 통합 테스트 + EXPLAIN bbox/BRIN 검증.
+
+4. **PR#40 — Sprint 2 §2.1 끝물 visitkorea TourAPI enrichment** —
+   `festival_to_enrichment_links` (datagokr feature_id ↔ visitkorea
+   contentId, `source_role='enrichment'`).
+
+5. **PR#41 — Sprint 2 §2.5 backend `/features/*` 라우터 + frontend wiring**:
+   - `src/krtour/map/infra/feature_repo.py` raw SQL (`features_in_bounds`,
+     `features_nearby`, `get_feature_by_id`)
+   - `routers/features.py` — `/features/in-bounds`, `/features/nearby`,
+     `/features/{id}`
+   - frontend `src/api/{client,queries}.ts`에 `useFeaturesInBounds` 등 추가
+   - maplibre-vworld 실 컴포넌트 통합 — landing page를 지도 화면으로 교체
+
+6. **PR#42+ — Sprint 3 진입** — knps / krforest_trails / krheritage +
+   ADR-036 maplibre-vworld-js v0.1.0 분리 prep + ADR-033 Phase 1 (F1~F3).
 
 2. **PR#36 — Sprint 2 §2.5 frontend 시작** (ADR-025 + ADR-037 + ADR-043):
    - `packages/krtour-map-debug-ui/frontend/package.json`에 `@tanstack/

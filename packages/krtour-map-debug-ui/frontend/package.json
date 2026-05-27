@@ -12,7 +12,6 @@
     "gen:types": "openapi-typescript openapi.json -o src/api/types.ts",
     "test": "vitest run"
   },
-  "_comment_dependencies": "코드 작성 단계 진입 시 채울 것. 본 단계는 ADR-025 결정만 박음 (Next.js 기반, kraddr-geo-ui 패턴). 아래는 placeholder.",
   "dependencies": {
     "next": "^15.1.0",
     "maplibre-vworld": "^1.0.0",
@@ -21,6 +20,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "@tanstack/react-query": "^5.0.0",
+    "zustand": "^5.0.0",
     "@krtour/map-marker-react": "workspace:*"
   },
   "devDependencies": {
