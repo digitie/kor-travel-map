@@ -85,7 +85,7 @@
 - **module**: `src/krtour/map/providers/opinet.py` — **PR#42 merged 2026-05-28**
 - **함수**:
   - `prices_to_values(items, *, feature_id, source_record_key=None) -> list[PriceValue]` — **PR#42 구현 완료**
-  - `stations_to_bundles(items, *, fetched_at, reverse_geocoder) -> list[FeatureBundle]` — 후속 PR (gas station feature)
+  - `stations_to_bundles(items, *, fetched_at, reverse_geocoder=None) -> list[FeatureBundle]` — **PR#43 구현 완료** (gas station Feature(kind=place, category="06020000") + PlaceDetail(place_kind="gas_station") + SourceRecord + SourceLink)
 - **DTO foundation** (PR#42): `dto/price.py` `PriceValue` + `PriceDomain`
   enum (5값: opinet_gas_station / rest_area_food / rest_area_fuel / toll_fee /
   admission_fee). `core/ids.py` `make_price_value_key` (`pv_{sha1[:20]}`).

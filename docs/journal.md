@@ -2,6 +2,58 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-28 04:25 (claude)
+
+**작업**: PR#43 — Sprint 2 §2.3 마무리. opinet `stations_to_bundles` (gas
+station Feature) 추가. PR#34 datagokr 9-step 패턴과 동일 흐름.
+
+**컨텍스트**: PR#42에서 PriceValue + opinet `prices_to_values`만 박았음. 본
+PR로 주유소 자체 `Feature(kind=place)` 변환 완료 — Sprint 2 §2.3 (유가) 마무리.
+호출자는 uni_id → feature_id 매핑을 stations_to_bundles의 결과를 통해 확립한
+후 prices_to_values에서 동일 feature_id 사용.
+
+**변경 파일** (3):
+- `src/krtour/map/providers/opinet.py`:
+  - `OpinetStationItem` Protocol (uni_id/station_name/brand_code/address/
+    longitude/latitude/tel/lpg_yn)
+  - `stations_to_bundles(items, *, fetched_at, reverse_geocoder=None) -> list
+    [FeatureBundle]` (9-step)
+  - `_station_item_to_bundle` private helper
+  - `_coerce_bool_str` (Y/N/bool/None → bool|None)
+  - 상수: `OPINET_STATION_DATASET_KEY="opinet_fuel_station_details"` /
+    `OPINET_STATION_CATEGORY="06020000"` (TRANSPORT_FUEL) / marker `"fuel"`
+    "P-08"
+  - `Address`/`Coordinate`/`Feature`/`PlaceDetail`/`SourceRecord`/`SourceLink`
+    / `make_*` / address utility 모두 활용 (ADR-006 wrapper 금지 + PR#37
+    address utility 적극 활용)
+- `src/krtour/map/providers/__init__.py` — opinet 6 신규 re-export
+- `docs/sprints/SPRINT-2.md` §2.3 — PR#43 stations_to_bundles merged
+
+**신규 파일** (1):
+- `tests/unit/test_providers_opinet_stations.py` (15 case)
+
+**Verification (local)**:
+- `pytest tests/ packages/krtour-map-debug-ui/tests/ --ignore=tests/integration
+  -q` → **424 passed, 4 skipped** (PR#42 409 + 신규 15)
+- `ruff check src/ tests/ packages/krtour-map-debug-ui/` → All checks passed
+- `mypy --strict src/krtour/map packages/krtour-map-debug-ui/src/krtour/
+  map_debug_ui` → no issues found in 44 source files
+
+**ADR 정합**:
+- ADR-006 wrapper 금지 — `python-opinet-api` typed model 직접 import X.
+- ADR-041 (PR#37) — address utility 적극 사용 (normalize_korean_text,
+  normalize_phone_number, normalize_bjd_code, extract_sigungu_code/sido_code).
+- ADR-009 — make_feature_id/make_source_record_key/make_payload_hash 모두 사용.
+- ADR-018 — `Feature.detail=PlaceDetail` instance.
+
+**Sprint 2 §2.3 진행**:
+- ✅ PriceValue DTO + make_price_value_key (PR#42)
+- ✅ prices_to_values (PR#42)
+- ✅ stations_to_bundles (PR#43)
+- ⏳ infra/feature_repo.py 적재 (별도 PR — BRIN bulk 검증)
+
+**다음 작업**: PR#44 — 디버그 UI ETL preview 라우터.
+
 ## 2026-05-28 04:00 (claude)
 
 **작업**: PR#42 — Sprint 2 §2.3 진입. `PriceValue` DTO foundation +
