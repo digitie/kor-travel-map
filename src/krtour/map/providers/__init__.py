@@ -39,8 +39,14 @@ from krtour.map.providers.opinet import (
     OPINET_PRODUCT_KEY_MAP,
     OPINET_PRODUCT_NAME_KO,
     OPINET_PROVIDER_NAME,
+    OPINET_STATION_CATEGORY,
+    OPINET_STATION_DATASET_KEY,
+    OPINET_STATION_MARKER_COLOR,
+    OPINET_STATION_MARKER_ICON,
     OpinetPriceItem,
+    OpinetStationItem,
     prices_to_values,
+    stations_to_bundles,
 )
 from krtour.map.providers.standard_data import (
     DATASET_KEY_CULTURAL_FESTIVALS,
@@ -74,10 +80,16 @@ __all__ = [
     "KMA_PROVIDER_NAME",
     "KMA_METRIC_UNITS",
     "KMA_METRIC_NAMES",
-    # opinet (PR#42 prices 1차)
+    # opinet (PR#42 prices, PR#43 stations)
     "OpinetPriceItem",
+    "OpinetStationItem",
     "prices_to_values",
+    "stations_to_bundles",
     "OPINET_PROVIDER_NAME",
     "OPINET_PRODUCT_KEY_MAP",
     "OPINET_PRODUCT_NAME_KO",
+    "OPINET_STATION_DATASET_KEY",
+    "OPINET_STATION_CATEGORY",
+    "OPINET_STATION_MARKER_ICON",
+    "OPINET_STATION_MARKER_COLOR",
 ]

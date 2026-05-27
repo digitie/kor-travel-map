@@ -170,6 +170,12 @@ PR#22 CI/import-linter merge 후 gate 확인. PR#22 merge 후 PR#23 리포트
       `OpinetPriceItem` Protocol + B027/D047/B034/K015/C004 → gasoline/diesel/
       premium_gasoline/kerosene/lpg product code 매핑. opinet station Feature
       (place kind)는 별도 PR. 409 tests green (신규 26).
+- [x] **PR#43 (merged 2026-05-28)** — Sprint 2 §2.3 마무리. opinet
+      `stations_to_bundles` — gas station `Feature(kind=place, category=
+      "06020000" TRANSPORT_FUEL)` + `PlaceDetail(place_kind="gas_station")` +
+      SourceRecord + SourceLink. `OpinetStationItem` Protocol +
+      `_coerce_bool_str` LPG Y/N. PR#37 address utility (normalize_korean_
+      text/phone) 적극 활용. 424 tests green (신규 15).
 
 다음 PR 후보 (Sprint 2 entry 계속):
 
