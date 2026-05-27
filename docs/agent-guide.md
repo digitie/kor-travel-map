@@ -19,6 +19,23 @@
 
 5~10분 안에 위 8개를 훑으면 거의 모든 작업의 정합성 판단이 가능하다.
 
+### 1.1 자기 worktree로 이동
+
+본 저장소는 **에이전트별 고정 worktree** 정책을 쓴다 (`docs/codegraph-
+worktree.md`). 새 세션 진입 후 컨텍스트 확보 직전에 자기 worktree로 이동:
+
+```bash
+# 어떤 AI 에이전트인지에 따라:
+cd ~/dev/geo-codex            # ChatGPT Codex
+cd ~/dev/geo-claude            # Claude Code
+cd ~/dev/geo-antigravity      # Google Antigravity 2.0
+```
+
+worktree가 아직 없으면 `docs/codegraph-worktree.md` §3 "최초 setup" 참조.
+codegraph 인덱스는 `codegraph sync`로 증분 동기(있다면) / `codegraph init -i`
+(최초). 사용자가 직접 작업할 때는 메인 worktree(`~/dev/python-krtour-map/`)를
+쓰고 `geo-*`에는 들어가지 않는다.
+
 ## 2. 결정·기록 5종 (필수 유지)
 
 | 파일 | 역할 | 갱신 시점 |

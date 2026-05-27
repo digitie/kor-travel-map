@@ -38,6 +38,10 @@ ln -s /mnt/f/dev/python-krtour-map/data data
 이렇게 두면 코드는 `./data/...` 상대경로로 참조하고, 실제 파일은 NTFS에 있어
 WSL distro 손상에도 보존된다.
 
+agent별 worktree (`~/dev/geo-codex` / `~/dev/geo-claude` /
+`~/dev/geo-antigravity`)에서도 동일하게 `data` 심볼릭 링크를 박는다. 자세히는
+`docs/codegraph-worktree.md`.
+
 ### 2.2 ext4 → NTFS 동기 (rsync)
 
 작업이 끝나면 코드 변경분을 NTFS에 백업한다 (Windows에서 확인용):

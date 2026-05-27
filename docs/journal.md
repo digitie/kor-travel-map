@@ -2,6 +2,54 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-27 21:30 (claude)
+
+**작업**: `docs/codegraph-worktree.md` 신규 + AGENTS/CLAUDE/SKILL/agent-guide/
+dev-environment에 agent별 worktree + [colbymchenry/codegraph](https://github.com/colbymchenry/codegraph)
+운영 룰 박음. `.gitignore`에 `.codegraph/` 추가. 본 PC에 codegraph v0.9.5
+글로벌 설치 + `.codegraph/` 인덱스 초기화(64 파일, 719 노드, 1,205 edge).
+
+**컨텍스트**: PR#29 머지 직후 사용자 지시 — "AI 에이전트별 고정 worktree
+유지 + codegraph 인덱스 1개"를 표준으로 박을 것. 작업 사이에 브랜치만 새로
+딴다(`git switch -c feat/<topic> main`). worktree 명명: ChatGPT Codex →
+`~/dev/geo-codex`, Claude Code → `~/dev/geo-claude`, Google Antigravity 2.0
+→ `~/dev/geo-antigravity`. `geo-*` 접두사는 형제 저장소 (`python-kraddr-geo`
+등)와 공통 — 향후 다른 repo에도 동일 패턴 권장.
+
+**신규 파일** (1):
+- `docs/codegraph-worktree.md` (~170 line) — 9 절: 왜 agent별 worktree,
+  명명 규약, 최초 setup (npm + `codegraph init -i` + 선택적 `codegraph
+  install`), 작업 사이클 (sync 위주 — init 재실행 X), 자주 쓰는 커맨드
+  (query/callers/callees/impact), CI 무관성, WSL ext4 + NTFS data 호환,
+  사용자 직접 작업 시 메인 worktree 사용 규약, 참고.
+
+**변경 파일** (6):
+- `.gitignore` — `.codegraph/` 추가 + 주석 (SQLite worktree-local index).
+- `AGENTS.md` — "에이전트 worktree + codegraph (필수)" 절 신설 (개발 환경
+  정책 직후, 진입 순서 직전). 워크트리 이름 표 + 운영 룰 + 작업 사이클 +
+  최초 설치 코드 블록.
+- `CLAUDE.md` — "Claude Code 전용 worktree" 1 단락 추가 (`geo-claude`
+  명시 + 다른 두 에이전트 worktree 이름 참고).
+- `SKILL.md` §1 "개발 환경 (PC, WSL)" 뒤 "에이전트 worktree + codegraph"
+  서브절 추가 (1 단락 요약 + 본문 링크).
+- `docs/agent-guide.md` §1.1 "자기 worktree로 이동" 신설.
+- `docs/dev-environment.md` §2.1에 agent worktree에서도 `data` 심볼릭
+  링크 박는다는 1 단락 추가.
+
+**codegraph 실제 동작 확인**:
+- `npm i -g @colbymchenry/codegraph` → v0.9.5 설치.
+- `codegraph init -i` (F:\dev\python-krtour-map) → `.codegraph/codegraph.db`
+  SQLite (WAL 모드, 1.31 MB) 생성. 64 파일 / 719 노드 / 1,205 edge.
+- `codegraph status` → "Index is up to date".
+- `codegraph query make_feature_id` → `src/krtour/map/core/ids.py:73` 정확
+  히 위치 + import 출처도 같이 반환 (function/variable/import 3 hit).
+
+**검증**:
+- `.gitignore`에 `.codegraph/`이 박혀 있어 SQLite DB는 커밋되지 않음 (`git
+  status`에서 .codegraph 제외 확인).
+- `codegraph install`은 본 PR에서 실행하지 않음 — 에이전트별 MCP 설정은
+  각 에이전트(또는 사용자)가 자기 환경에서 1회 실행 권장.
+
 ## 2026-05-26 02:00 (claude)
 
 **작업**: PR#29 — Sprint 2 prep 2. `core/scoring.py` (ADR-016 Record Linkage)

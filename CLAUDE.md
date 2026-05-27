@@ -65,6 +65,14 @@ NTFS 마운트에서 직접 `git`/`pytest` 실행 금지 — 형제 라이브러
 (`python-kraddr-geo`/`python-kraddr-base`)와 동일 정책. 자세히는 `README.md`
 §"개발 환경 (PC, WSL)" + `AGENTS.md` + `docs/dev-environment.md`.
 
+**Claude Code 전용 worktree**: `~/dev/geo-claude/`(메인 repo의 형제).
+작업마다 worktree 안에서 브랜치만 새로 (`git switch -c feat/<topic> main`).
+worktree마다 [codegraph](https://github.com/colbymchenry/codegraph) 인덱스
+1개를 두고(`codegraph init -i` 최초 1회), 이후엔 `codegraph sync`로 증분
+동기. `.codegraph/`는 `.gitignore`. 자세히는 `docs/codegraph-worktree.md` +
+`AGENTS.md` §"에이전트 worktree + codegraph". ChatGPT Codex는 `geo-codex`,
+Google Antigravity 2.0은 `geo-antigravity` worktree를 쓴다.
+
 ## 5. 절대 금지 (가장 중요한 5개)
 
 1. **main에 직접 push 금지** — 모든 변경은 feature branch + PR (ADR-021).
