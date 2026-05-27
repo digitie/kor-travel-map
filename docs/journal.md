@@ -2,6 +2,64 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-28 00:30 (claude)
+
+**작업**: PR#36 — Sprint 2 §2.5 frontend skeleton 시작. Next.js 15 App Router
++ React 19 + TanStack Query + Zustand (ADR-025 + ADR-037 + ADR-043). `/debug/
+version` + `/debug/health` 첫 wiring + Zustand map viewport store.
+
+**컨텍스트**: PR#35로 backend FastAPI app + 2 라우터 + openapi.json drift gate
+가 활성화된 뒤 frontend 측 진입. 본 PR 이전엔 `package.json`(의존성 placeholder)
++ `README.md` + `next.config.js` skeleton만. 본 PR이 첫 실제 source.
+
+**신규 파일** (10):
+- `next.config.ts` (TS로 마이그레이션, `next.config.js` 삭제) — `transpile
+  Packages: ["@krtour/map-marker-react"]` + `productionBrowserSourceMaps:
+  false` + `poweredByHeader: false`
+- `tsconfig.json` — Next.js 15 권장 + paths `"@/*": ["./src/*"]`
+- `src/api/client.ts` — fetch wrapper, `BASE_URL` (env `NEXT_PUBLIC_KRTOUR_MAP
+  _DEBUG_UI_API` 또는 `http://127.0.0.1:8087` 기본), `HealthResponse` /
+  `VersionResponse` TS interface, `fetchHealth` / `fetchVersion`,
+  `DebugUiApiError`
+- `src/api/queries.ts` — TanStack Query hook (`useHealth` 5초 polling /
+  `useVersion` staleTime 60s) + `queryKeys` 컨벤션
+- `src/state/map.ts` — Zustand `useMapStore` (viewport / selectedFeatureId /
+  activeCategoryCodes Set + actions setViewport/resetViewport/toggleCategory/
+  clearCategories). DEFAULT_VIEWPORT 한국 본토 중심 (대전 부근)
+- `src/providers/query-client-provider.tsx` — `"use client"` +
+  `AppQueryClientProvider` (refetchOnWindowFocus: false / retry: 1)
+- `src/app/layout.tsx` — Root layout + `metadata` + `<html lang="ko">` +
+  `AppQueryClientProvider` wrapping
+- `src/app/page.tsx` — `"use client"` Landing page. health/version useQuery
+  hook 호출 + Zustand viewport 표시 + 미세 이동 / 초기화 버튼
+
+**변경 파일** (5):
+- `packages/krtour-map-debug-ui/frontend/package.json` — `_comment_dependencies`
+  placeholder 제거, `zustand: ^5.0.0` 추가 (ADR-037)
+- `packages/map-marker-react/package.json` — `"private": true` 박음 (ADR-043
+  npm 게시 보류), `publishConfig.access` 제거, description에 ADR-043 명시
+- `packages/krtour-map-debug-ui/frontend/.env.example` — default backend port
+  `8600` → `8087` (PR#35 DebugUiSettings.port 기본과 정합)
+- `packages/krtour-map-debug-ui/frontend/README.md` — Sprint 1 skeleton note →
+  PR#36 진입 status로 정정 + ADR-043 명시
+- `docs/sprints/SPRINT-2.md` §2.5 frontend block — PR#36 merged + 다음 단계
+  매핑
+
+**삭제 파일** (1):
+- `packages/krtour-map-debug-ui/frontend/next.config.js` — `next.config.ts`로
+  대체
+
+**Verification (python 측, 변동 없음)**:
+- `pytest tests/ packages/krtour-map-debug-ui/tests/ --ignore=tests/integration`
+  → 258 passed, 4 skipped
+- `ruff check src/ tests/ packages/krtour-map-debug-ui/` → All checks passed
+- `python packages/krtour-map-debug-ui/scripts/export_openapi.py --check` →
+  exit 0 (backend 영향 없음 → drift 없음)
+
+**Frontend 측 검증은 follow-up**: CI에 frontend type-check/lint step 추가 +
+`openapi-typescript`로 `src/api/types.ts` 자동 생성 + 실 maplibre-vworld
+컴포넌트 통합은 별도 PR.
+
 ## 2026-05-27 23:50 (claude)
 
 **작업**: PR#35 — Sprint 2 §2.5 debug/관리 UI backend 첫 라우터 + OpenAPI

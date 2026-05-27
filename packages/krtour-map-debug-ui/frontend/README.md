@@ -3,22 +3,28 @@
 `python-krtour-map` 디버그 UI의 **Next.js** 프론트엔드. **ADR-025**에 따라
 `maplibre-vworld-js` (VWorld 지도) 기반.
 
-> **현재 상태 (Sprint 1 skeleton)**: 본 디렉토리는 ADR-025 결정에 따른
-> Next.js frontend skeleton이다. 본 README + `.env.example` + `package.json`
-> (의존성 placeholder) + `.gitignore`가 있으며, 실제 화면 구현은 Sprint 2
-> 디버그 UI PR에서 진행한다.
+> **PR#36 (2026-05-27)**: Sprint 2 §2.5 frontend skeleton 진입. Next.js 15
+> App Router + TanStack Query + Zustand (ADR-037) 최소 골격 박음.
+> `src/api/{client,queries}.ts` (`/debug/health`/`/debug/version` 호출 hook) +
+> `src/state/map.ts` (Zustand map viewport store) + `src/providers/query-
+> client-provider.tsx` (`QueryClientProvider`) + `src/app/{layout,page}.tsx`
+> (root layout + landing page). 실제 지도 화면 + `/features/*` 라우터 wiring
+> 은 후속 PR에서 (`infra/feature_repo.py` + `routers/features.py` 진입 후).
 
 ## 기술 스택 (ADR-025, Next.js 기반 — 2026-05-25 사용자 보강)
 
 - **Next.js 15** (App Router) + **React 19** + **TypeScript** —
   `kraddr-geo-ui` / TripMate `apps/web`와 동일 stack
 - **maplibre-vworld** v1.0.0 (`digitie/maplibre-vworld-js`) — VWorld 지도 React
-  컴포넌트
+  컴포넌트 (ADR-036 — Sprint 3 후반 v0.1.0 분리)
 - **maplibre-gl** — WebGL 지도 엔진
 - **zod** — 좌표 검증
-- **@tanstack/react-query** — 데이터 페칭/캐시
-- **@krtour/map-marker-react** (`packages/map-marker-react`, ADR-029) — 공통
-  마커/카테고리-maki 매핑
+- **@tanstack/react-query** — 서버 데이터 페칭/캐시 (ADR-037)
+- **zustand** — UI 클라이언트 상태(map viewport / filter / 선택된 feature
+  등). ADR-037 (PR#36에 처음 추가)
+- **@krtour/map-marker-react** (`packages/map-marker-react`, ADR-029 + ADR-043
+  — npm 게시 X, `"private": true`, workspace 내부 share만) — 공통 마커/
+  카테고리-maki 매핑
 - Kakao Maps SDK 미사용 (ADR-025/026)
 
 > Vite 채택은 잠정 가설이었고, kraddr-geo-ui 및 TripMate `apps/web`와의
