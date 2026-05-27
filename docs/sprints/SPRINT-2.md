@@ -102,19 +102,27 @@
 ADR-035 (2026-05-27)로 운영 범위가 "디버그 + admin + 유지보수 + 프로덕션
 운영"으로 확장. 라우터 prefix로 시각적 분리.
 
-- `packages/krtour-map-debug-ui/src/krtour/map_debug_ui/app.py` 신설
-- `packages/krtour-map-debug-ui/src/krtour/map_debug_ui/routers/`:
-  - `health.py` — `GET /health`
-  - `version.py` — `GET /version`
-  - `features.py` — `GET /features/in-bounds`, `/features/nearby`,
-    `/features/{id}` (디버그 read)
-  - `admin_jobs.py` — `GET /admin/jobs`, `POST /admin/jobs/{id}/retry`
-    (ADR-035) — Sprint 2 후반 옵션
-  - `ops_consistency.py` — `GET /ops/consistency` (Sprint 3 ADR-033 Phase 1
-    진입 시 활성)
-- `packages/krtour-map-debug-ui/scripts/export_openapi.py` 실효 가동
-- `packages/krtour-map-debug-ui/openapi.json` 저장소 commit
-- `.github/workflows/openapi.yml` `--check` drift gate green (ADR-038)
+**PR#35 (2026-05-27, merged)** — 첫 두 라우터 + openapi.json drift gate 활성:
+- `packages/krtour-map-debug-ui/src/krtour/map_debug_ui/app.py` —
+  `create_app(settings)` FastAPI factory + 모듈-레벨 `app` instance
+- `settings.py` — `DebugUiSettings` (`KRTOUR_MAP_DEBUG_UI_*` env)
+- `routers/health.py` — `GET /debug/health` (정적 200 OK, 의존 없음)
+- `routers/version.py` — `GET /debug/version` (debug_ui + krtour_map version)
+- `packages/krtour-map-debug-ui/openapi.json` commit (drift gate baseline)
+- `.github/workflows/openapi.yml` `--check` drift gate active
+  (`continue-on-error: true` 제거)
+- `.github/workflows/ci.yml`에 debug-ui editable install + pytest step 추가
+- pyproject `mypy_path = "src:packages/krtour-map-debug-ui/src"` (PEP 420
+  namespace 통합)
+
+**Sprint 2 후반 / Sprint 3 후속 라우터**:
+- `routers/features.py` — `GET /features/in-bounds`, `/features/nearby`,
+  `/features/{id}` (디버그 read) — `infra/feature_repo.py` raw SQL +
+  Sprint 2 적재 후 의미 있는 응답
+- `routers/admin_jobs.py` — `GET /admin/jobs`, `POST /admin/jobs/{id}/retry`
+  (ADR-035) — `import_jobs` 테이블 + ADR-039 advisory lock 필요
+- `routers/ops_consistency.py` — `GET /ops/consistency` (Sprint 3 ADR-033
+  Phase 1 진입 시 활성)
 - **frontend** (옵션, Sprint 2 끝물 또는 Sprint 3 시작):
   - Next.js + maplibre-vworld (ADR-025) + **TanStack Query + Zustand (ADR-037)**
   - 모든 라우터 응답은 `useQuery`/`useMutation` hook으로 래핑

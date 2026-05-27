@@ -1,0 +1,102 @@
+{
+  "components": {
+    "schemas": {
+      "HealthResponse": {
+        "additionalProperties": false,
+        "description": "`/debug/health` 응답 schema.",
+        "properties": {
+          "service": {
+            "description": "서비스 식별자 — ``'krtour-map-debug-ui'``.",
+            "title": "Service",
+            "type": "string"
+          },
+          "status": {
+            "description": "항상 ``'ok'``. unhealthy면 본 라우터에 도달 X.",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "service"
+        ],
+        "title": "HealthResponse",
+        "type": "object"
+      },
+      "VersionResponse": {
+        "additionalProperties": false,
+        "description": "``/debug/version`` 응답 schema.",
+        "properties": {
+          "debug_ui": {
+            "description": "``krtour-map-debug-ui`` distribution version.",
+            "title": "Debug Ui",
+            "type": "string"
+          },
+          "krtour_map": {
+            "description": "``python-krtour-map`` (메인) distribution version.",
+            "title": "Krtour Map",
+            "type": "string"
+          }
+        },
+        "required": [
+          "debug_ui",
+          "krtour_map"
+        ],
+        "title": "VersionResponse",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Debug + admin REST API for TripMate `python-krtour-map`. Intranet-only (no auth in code, ADR-005). 운영 범위는 ADR-035 — /debug, /admin, /ops, /features prefix로 분리.",
+    "title": "krtour-map-debug-ui",
+    "version": "0.2.0-dev"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/debug/health": {
+      "get": {
+        "description": "정적 응답. 본 라우터가 200을 내면 FastAPI app이 살아 있다. DB/외부 자원의 deep health check는 별도 ``/ops/health-deep`` (Sprint 3+).",
+        "operationId": "get_health_debug_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "liveness probe",
+        "tags": [
+          "debug"
+        ]
+      }
+    },
+    "/debug/version": {
+      "get": {
+        "description": "본 디버그 패키지 + 메인 라이브러리 distribution version 응답. ADR-038 CI 재활성화 이후 PR 추적 / TripMate 측 호환성 점검에 사용.",
+        "operationId": "get_version_debug_version_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "package versions",
+        "tags": [
+          "debug"
+        ]
+      }
+    }
+  }
+}

@@ -109,9 +109,11 @@ warn_unused_ignores = true
 plugins = ["pydantic.mypy"]
 # ADR-022 — krtour는 PEP 420 implicit namespace이므로 명시적으로 활성화.
 # pip install -e . 후에도 mypy는 namespace package를 자동 인식 못함.
+# PR#35 (2026-05-27) — debug-ui 패키지가 같은 `krtour` namespace를 공유하므로
+# mypy_path에 두 src 트리 모두 등록.
 namespace_packages = true
 explicit_package_bases = true
-mypy_path = "src"
+mypy_path = "src:packages/krtour-map-debug-ui/src"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
