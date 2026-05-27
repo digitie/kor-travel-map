@@ -2,6 +2,32 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-27 22:50 (claude)
+
+**작업**: PR#33 — ADR-035~043 9건 일괄 accepted 전환. PR#16(027~034 일괄)과
+동일 패턴. proposed → accepted, 1차 implement는 ADR별 매핑된 Sprint에서.
+
+**변경 파일** (5):
+- `docs/decisions.md` — 9개 ADR 상태 `accepted (PR#33, 2026-05-27)`. ADR-038은
+  "쓰지마" reverse note 유지, ADR-043은 ADR-029 supersede note 유지.
+- `AGENTS.md` — ADR accepted/proposed 행 정정 (001~028, 030~043 accepted /
+  proposed 비어 있음 / 다음 번호 044).
+- `CLAUDE.md` — ADR 현황 "001~043 모두 accepted" + implementation 시점 매핑.
+- `docs/agent-guide.md` — 다음 ADR 번호 035 → 044 정정.
+- `docs/resume.md` — PR#33 완료 표기 + 다음 한 작업 (PR#34 ADR-038 CI 게이트
+  + datagokr provider) 박음.
+
+**Implementation 시점 매핑**:
+- ADR-038 (CI/CD 재활성화) — 즉시. 사용자 측 GitHub Settings branch protection
+  rules 활성 + 본 라이브러리 다음 PR(PR#34)부터 CI green 요구.
+- ADR-042 (datagokr 표준데이터 축제) — SPRINT-2 §2.1 (PR#34 후보).
+- ADR-035 / 037 / 043 — SPRINT-2 §2.5 debug UI 첫 라우터 PR (PR#35 후보).
+- ADR-036 (maplibre-vworld-js 분리) — SPRINT-3 후반.
+- ADR-039 / 040 / 041 — SPRINT-4 진입 prep.
+
+**검증**: docs-only PR. 모든 ADR이 "accepted" 상태 + 다음 후보 번호 ADR-044
+정합 확인.
+
 ## 2026-05-27 22:30 (claude)
 
 **작업**: PR#32 거버넌스 보강 + ADR-035~043 proposed 일괄. 운영 단계 진입에

@@ -103,26 +103,49 @@ PR#22 CI/import-linter merge 후 gate 확인. PR#22 merge 후 PR#23 리포트
 - [x] **PR#31 (merged 2026-05-27)** codegraph MCP 등록 snippet + `codegraph_
       explore` 영향도 평가 룰. `codegraph serve --mcp` 공식 snippet + `npx`
       대안 + WSL2 `--no-watch`.
-- [ ] **PR#32 거버넌스 보강 + ADR-035~043 proposed (현재 진행)** — 운영 단계
-      진입에 따른 사용자 지시 8건 + 정책 reverse 1건. ADR-035 (admin REST
-      운영 확장), 036 (`maplibre-vworld-js` 라이브러리 분리 v0.1.0), 037
-      (TanStack Query + Zustand), 038 (GitHub Actions CI/CD 재활성화 —
-      2026-05-26 "쓰지마" 지시 reverse), 039 (CLI mutex), 040 (Backup/Restore
-      + 핫스왑), 041 (kraddr-base 흡수 + 폐기), 042 (datagokr 표준데이터 축제
-      1차), 043 (`@krtour/map-marker-react` npm 게시 보류, ADR-029 supersede).
-      AGENTS/CLAUDE/SKILL + SPRINT-2/4 + event-feature-etl 보강.
+- [x] **PR#32 (merged 2026-05-27)** 거버넌스 보강 + ADR-035~043 proposed.
+      운영 단계 진입 사용자 지시 8건 + 정책 reverse 1건을 ADR 9건으로 박음.
+- [x] **PR#33 (merged 2026-05-27)** ADR-035~043 9건 일괄 accepted 전환 (PR#16
+      027~034 패턴 그대로). ADR 현황 = 001~043 모두 accepted, 029는 ADR-043
+      supersede. 다음 후보 번호 = ADR-044.
 
-## 다음 한 작업 (PR#32 머지 후)
+## 다음 한 작업 (PR#33 머지 후)
 
-PR#32 머지 후 사용자 ADR review → accepted 전환 PR. accept 순서 권고:
-1. **ADR-038 (CI/CD 재활성화)** — 가장 먼저. branch protection rules는
-   사용자 GitHub Settings 직접. 이후 PR부터 CI green 게이트 자동.
-2. **ADR-042 (datagokr 축제)** — Sprint 2 1단계 PR#33 직전 accept. SPRINT-2
-   §2.1 변경 반영.
-3. **ADR-035 / 037 / 043** — Sprint 2 §2.5 debug UI 첫 라우터 PR 진입 시.
-4. **ADR-036 (maplibre-vworld-js 분리)** — Sprint 3 후반.
-5. **ADR-039 (CLI mutex) / 040 (Backup) / 041 (kraddr-base)** — Sprint 4 진입
-   prep PR에서 일괄 accept (실 구현 시점에 맞춤).
+ADR 모두 accepted → implement 단계 진입. 다음 PR 후보 (Sprint 2 entry):
+
+1. **PR#34 — ADR-038 CI green 게이트 active + datagokr provider 1차 source**
+   (Sprint 2 §2.1 시작):
+   - 사용자 측 GitHub Settings → Branches → main → branch protection rules
+     에서 `Require status checks` (ci/lint/openapi) + `Require branches up
+     to date` + `Require 1 review` 활성 (코드 변경 없음).
+   - `pyproject.toml [providers]` extra에 `python-datagokr-api` git URL 핀
+     (commit sha는 client 안정화 후, 임시 main 핀 가능).
+   - `src/krtour/map/providers/standard_data.py` — `cultural_festivals_to_
+     bundles(items, *, fetched_at, reverse_geocoder=None) -> list[Feature
+     Bundle]` (ADR-042 1차 source).
+   - fixture 5건 (좌표 있음 3 + nullable 2, KST aware).
+   - unit test ≥ 3 (정상/엣지/실패) + EXPLAIN bbox 통합 테스트 1건.
+   - `docs/event-feature-etl.md` 1차 source 절 코드 예시 보강.
+
+2. **PR#35 — Sprint 2 §2.5 debug/admin UI 첫 라우터** (ADR-031 + ADR-035
+   활성):
+   - `packages/krtour-map-debug-ui/src/krtour/map_debug_ui/app.py`
+   - `routers/{health,version,features}.py` — `/debug/health`, `/debug/
+     version`, `/features/in-bounds` 등
+   - `scripts/export_openapi.py` 실효 가동 + `openapi.json` commit
+   - `.github/workflows/openapi.yml` `--check` drift gate green (ADR-038)
+
+3. **PR#36 — Sprint 2 §2.5 frontend 시작** (ADR-025 + ADR-037 + ADR-043):
+   - `packages/krtour-map-debug-ui/frontend/package.json`에 `@tanstack/
+     react-query` + `zustand` 추가
+   - `packages/map-marker-react/package.json` `"private": true` 박음 (ADR-043)
+   - 기본 페이지 + map viewport Zustand store + `/features/in-bounds`
+     useQuery hook
+
+4. **PR#37~39 — Sprint 2 §2.2~2.4** — kma 날씨 / opinet 유가 / krex 휴게소.
+
+5. **PR#40+ — Sprint 3 진입** — knps / krforest_trails / krheritage +
+   ADR-036 maplibre-vworld-js v0.1.0 분리 prep.
 - [ ] **Sprint 2 첫 provider PR** (ADR-034 1단계, PR#30 후보):
       `providers/visitkorea/` 축제 + `infra/feature_repo.py` raw SQL +
       `feature_event_details` 테이블 마이그레이션.

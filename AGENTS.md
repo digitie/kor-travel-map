@@ -42,8 +42,8 @@ TripMate ↔ krtour-map 사이에는 REST API가 없다.
 | PostGIS extension schema | `x_extension` (ADR-008) |
 | 디버그 UI 패키지 | `krtour-map-debug-ui` (별도 **Python** 패키지, monorepo 내 `packages/krtour-map-debug-ui/`, ADR-020) |
 | Category 모듈 출처 | `krtour.map.category` (구 `kraddr.base.categories`에서 이전, ADR-023) |
-| ADR accepted | 001~028, 030~034 (text on main). 029는 ADR-043으로 supersede. |
-| ADR proposed | 035 (REST API admin 운영 확장) / 036 (`maplibre-vworld-js` 라이브러리 분리, v0.1.0) / 037 (frontend TanStack Query + Zustand) / 038 (GitHub Actions CI/CD 재활성화) / 039 (CLI mutex advisory lock) / 040 (Backup/Restore + 핫스왑 UI) / 041 (`python-kraddr-base` 흡수 + 폐기) / 042 (datagokr 표준데이터 — 축제 1차 source) / 043 (`@krtour/map-marker-react` npm 게시 보류, ADR-029 supersede) — 2026-05-27 사용자 지시, 일괄 proposed |
+| ADR accepted | 001~028, 030~043 (text on main). 029는 ADR-043으로 supersede. **035~043 일괄 accepted 전환 PR#33, 2026-05-27** — 1차 implement 시점: 038(즉시) / 042(SPRINT-2 §2.1) / 035·037·043(SPRINT-2 §2.5) / 036(SPRINT-3 후반) / 039·040·041(SPRINT-4 prep). |
+| ADR proposed | (없음) — 다음 후보 번호는 ADR-044. |
 | Sprint plan | `docs/sprints/SPRINT-1.md` ~ `SPRINT-5.md` |
 | Provider 구현 순서 (ADR-034) | 축제→날씨→유가→휴게소→국립공원/트래킹→국가유산→**MOIS**→휴양림/수목원→박물관/미술관 |
 
