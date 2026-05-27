@@ -43,17 +43,15 @@ jobs:
           pip install -e ".[dev]"
 
       - name: Install krtour-map-debug-ui (editable)
-        # Sprint 1: 패키지 skeleton만 존재. FastAPI app 모듈은 Sprint 2 첫 라우터
-        # PR에서 활성화. 미존재 시 본 step도 graceful skip.
+        # PR#35 (2026-05-27): 첫 FastAPI 라우터 (`/debug/health`, `/debug/version`)
+        # 머지로 정상 install 가능. Sprint 2 §2.5 추가 라우터는 후속 PR.
         run: |
-          if [ -f packages/krtour-map-debug-ui/pyproject.toml ]; then
-            pip install -e packages/krtour-map-debug-ui || echo "debug-ui install failed (Sprint 1 skeleton)"
-          fi
+          pip install -e packages/krtour-map-debug-ui
 
       - name: OpenAPI drift check (ADR-031)
-        # Sprint 1은 app 모듈 미존재로 SystemExit — `continue-on-error: true`로
-        # CI green 유지. Sprint 2 첫 라우터 PR에서 `continue-on-error` 제거.
-        continue-on-error: true
+        # PR#35로 `continue-on-error: true` 제거. drift 시 즉시 머지 차단 — DTO/
+        # 라우터 변경 PR은 반드시 `python scripts/export_openapi.py` 재실행 +
+        # `openapi.json` commit을 동반.
         run: |
           python packages/krtour-map-debug-ui/scripts/export_openapi.py \
             --check \

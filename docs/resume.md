@@ -114,23 +114,21 @@ PR#22 CI/import-linter merge 후 gate 확인. PR#22 merge 후 PR#23 리포트
 - [x] **PR#34 (merged 2026-05-27)** — Sprint 2 §2.1 datagokr 표준데이터 1차
       축제 provider. `src/krtour/map/providers/standard_data.py` —
       `cultural_festivals_to_bundles` + `CulturalFestivalItem`/`ReverseGeocoder`
-      Protocol + fixture 5 + 14 unit tests. 14 case green, full unit suite
-      252 passed.
+      Protocol + fixture 5 + 14 unit tests.
+- [x] **PR#35 (merged 2026-05-27)** — Sprint 2 §2.5 debug/관리 UI backend 첫
+      라우터 (ADR-031 + ADR-035 + ADR-038). `packages/krtour-map-debug-ui/src/
+      krtour/map_debug_ui/` 신설 — `create_app(settings)` factory + `/debug/
+      health` + `/debug/version` 2 라우터 + `openapi.json` drift gate
+      baseline + `.github/workflows/{ci,openapi}.yml` 정상 활성. mypy_path
+      통합. 6 debug-ui tests + 258 total green.
 
 다음 PR 후보 (Sprint 2 entry 계속):
 
-1. **PR#35 — Sprint 2 §2.5 debug/admin UI 첫 라우터** (ADR-031 + ADR-035
-   활성):
-   - `packages/krtour-map-debug-ui/src/krtour/map_debug_ui/app.py` FastAPI
-     application factory
-   - `routers/health.py` — `GET /debug/health` (200 OK + version)
-   - `routers/version.py` — `GET /debug/version` (lib/server semver)
-   - `routers/features.py` — `GET /features/in-bounds`, `/features/nearby`,
-     `/features/{id}` (Sprint 2 적재 후 의미 있는 응답)
-   - `routers/admin_jobs.py` — `GET /admin/jobs`, `POST /admin/jobs/{id}/
-     retry` (ADR-035 admin prefix)
-   - `scripts/export_openapi.py` 실효 가동 + `openapi.json` commit
-   - `.github/workflows/openapi.yml` `--check` drift gate green (ADR-038)
+1. **PR#36 — Sprint 2 §2.5 frontend 시작** (ADR-025 + ADR-037 + ADR-043):
+   - `packages/krtour-map-debug-ui/frontend/package.json`에 `@tanstack/
+     react-query` + `zustand` 추가
+   - `packages/map-marker-react/package.json` `"private": true` 박음 (ADR-043)
+   - 기본 페이지 + map viewport Zustand store + `/debug/version` useQuery hook
 
 2. **PR#36 — Sprint 2 §2.5 frontend 시작** (ADR-025 + ADR-037 + ADR-043):
    - `packages/krtour-map-debug-ui/frontend/package.json`에 `@tanstack/

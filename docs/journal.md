@@ -2,6 +2,60 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-27 23:50 (claude)
+
+**작업**: PR#35 — Sprint 2 §2.5 debug/관리 UI backend 첫 라우터 + OpenAPI
+drift gate 활성화 (ADR-031 + ADR-035 + ADR-038).
+
+**컨텍스트**: `packages/krtour-map-debug-ui/`는 Sprint 1까지 `pyproject.toml`
++ `scripts/export_openapi.py` skeleton만 존재. 본 PR이 첫 실제 FastAPI app +
+2개 라우터 + openapi.json baseline 추가. `/features/...` + `/admin/...`은
+infra(`feature_repo.py` / `import_jobs`) 의존이라 후속 PR.
+
+**신규 파일** (7):
+- `packages/krtour-map-debug-ui/src/krtour/map_debug_ui/__init__.py` —
+  namespace package + `__version__ = "0.2.0-dev"`.
+- `py.typed` — PEP 561 marker.
+- `settings.py` — `DebugUiSettings` (pydantic-settings, host/port/log_level/
+  debug_routes_enabled, `KRTOUR_MAP_DEBUG_UI_*` env prefix).
+- `app.py` — `create_app(settings) -> FastAPI` factory + 모듈 레벨 `app`.
+- `routers/__init__.py` + `health.py` + `version.py` — 2 라우터 + 응답 schema
+  Pydantic 모델 (`HealthResponse` / `VersionResponse`, `extra="forbid"`).
+- `tests/test_routers.py` — pytest + httpx ASGI 테스트 6건 (200 OK / schema
+  정합 / `debug_routes_enabled=False`로 unmount / openapi 노출 / title-version
+  매칭).
+- `packages/krtour-map-debug-ui/openapi.json` — drift gate baseline (FastAPI
+  `app.openapi()` 직접 결과, sort_keys + indent=2).
+
+**변경 파일** (4):
+- `pyproject.toml` `tool.mypy.mypy_path` — `"src"` → `"src:packages/krtour-map-
+  debug-ui/src"` (PEP 420 namespace 통합).
+- `.github/workflows/openapi.yml` — `continue-on-error: true` 제거, debug-ui
+  graceful skip block 제거 (정상 install 가능 시점 진입).
+- `.github/workflows/ci.yml` — debug-ui editable install step + pytest step
+  추가 (main lib coverage gate에는 영향 X).
+- `docs/sprints/SPRINT-2.md` §2.5 — PR#35 merged + 후속 라우터 매핑.
+
+**Verification (local)**:
+- `pytest tests/ packages/krtour-map-debug-ui/tests/ --ignore=tests/integration`
+  → **258 passed, 4 skipped** (PR#34 252 + debug-ui 6).
+- `ruff check src/ tests/ packages/krtour-map-debug-ui/` → All checks passed
+  (auto-fix 1회 후 clean — `@pytest.fixture()` 괄호 제거 3건).
+- `mypy --strict src/krtour/map packages/krtour-map-debug-ui/src/krtour/
+  map_debug_ui` → Success: no issues found in 38 source files.
+- `lint-imports` → 4 contracts kept, 0 broken (debug-ui는 main lib 룰과 독립).
+- `python packages/krtour-map-debug-ui/scripts/export_openapi.py --check` →
+  exit 0 (drift 없음).
+
+**OpenAPI 노출**:
+- `GET /openapi.json` — schemas 2 (HealthResponse + VersionResponse) + paths
+  2 (/debug/health, /debug/version).
+- `info.title = "krtour-map-debug-ui"`, `info.version = "0.2.0-dev"`,
+  `servers = []` (호스트별 drift 회피).
+
+**알려진 후속 작업**: `/features/*` + `/admin/*` 라우터는 infra layer 진입
+PR(`feature_repo.py`, `import_jobs` 테이블)과 함께.
+
 ## 2026-05-27 23:20 (claude)
 
 **작업**: PR#34 — Sprint 2 §2.1 1차 provider 진입. ADR-042 datagokr 전국
