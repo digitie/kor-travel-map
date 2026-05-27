@@ -2,6 +2,58 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-28 03:00 (claude)
+
+**작업**: PR#40 — `python-*-api` provider 라이브러리들의 본 lib 측 status를
+최신화. `pyproject.toml [providers]` extra를 Sprint 그룹화 + Protocol 박힌
+라이브러리는 본 lib 측 참조 명시. `docs/provider-contract.md` §4 책임 매트릭스
++ §12 git URL/sha 핀 status 표 갱신.
+
+**컨텍스트**: 사용자 지시 "최신 python-*-api 반영". 본 라이브러리는 외부 lib
+typed model을 직접 import하지 않음(ADR-006) — Protocol로만 정합 유지. 그러나
+운영 single source of truth는 `pyproject.toml [providers]` + `provider-
+contract.md`. 최근 작업들(PR#37 kraddr-base archive, PR#34 datagokr/PR#38/39
+kma Protocol 박음, PR#25 knps `@06da125f`)이 반영된 일관 status가 필요.
+
+**변경 파일** (4):
+- `pyproject.toml [providers]` extra:
+  - **`python-kraddr-base` 라인 완전 제거** (ADR-041 흡수 완료, PR#37)
+  - Sprint 그룹화 + 코멘트로 Protocol 박힌 라이브러리 표시:
+    - kraddr-geo (on-demand geocoder, ReverseGeocoder Protocol)
+    - **Sprint 2 §2.1**: datagokr-api (CulturalFestivalItem Protocol, PR#34)
+    - **Sprint 2 §2.2**: kma-api (KmaShortForecastItem/KmaUltraShortNowcast
+      Item Protocol, PR#38/39) + airkorea + khoa + krforest
+    - **Sprint 2 §2.3**: opinet-api
+    - **Sprint 2 §2.4**: krex-api
+    - **Sprint 2 §2.1 enrichment**: visitkorea-api (ADR-042 2차)
+    - **Sprint 3**: knps (`@06da125f` 박음, PR#25) + krforest_trails +
+      krheritage + krairport
+    - **Sprint 4**: mois (ADR-024) + kasi
+    - **Sprint 5**: mcst + standard data
+- `docs/provider-contract.md`:
+  - §4 책임 매트릭스 — 헤더 row 명시 + datagokr 1차 표 row 추가 (ADR-042) +
+    visitkorea 행 enrichment 메모 + Protocol 박힌 라이브러리는 PR 번호 표시
+    + kraddr-base 행 `~~strikethrough~~` + ADR-041 archive 메모
+  - §12 status 표 (16 row) — 모든 provider의 `pyproject 핀` / `본 lib
+    Protocol` / `활성 PR` / `메모` 4 컬럼. 최신 sha 갱신 절차 5단계 박음
+    + `[providers]` extra optional 정책 명시
+- `AGENTS.md` 식별자 표 — "Provider 라이브러리 git URL/sha 핀 status" 행
+  추가 (`docs/provider-contract.md §12` 참조)
+
+**Verification**:
+- 본 PR은 docs/pyproject only — 소스 코드 영향 X.
+- `pytest tests/ packages/krtour-map-debug-ui/tests/ --ignore=tests/integration
+  -q` → **373 passed, 4 skipped** (PR#39와 동일)
+- `ruff check src/ tests/ packages/krtour-map-debug-ui/` → All checks passed
+- openapi drift / lint-imports / mypy 영향 없음 (점검 생략 시 안전)
+
+**다음 작업 권고**:
+- 외부 lib 모니터링이 동반되면 `[providers]` extra의 `<sha>` placeholder
+  들을 실 sha로 정정. 본 PR은 운영 정합 framework만 정리.
+- Sprint 2 §2.2 KMA 마무리(ultra_short_forecast / mid_forecast / alerts) 또는
+  Sprint 2 §2.3 opinet/§2.4 krex 진입 — provider 라이브러리 sha가 박혀 있지
+  않아도 Protocol-only 작업이라 진행 가능.
+
 ## 2026-05-28 02:30 (claude)
 
 **작업**: PR#39 — Sprint 2 §2.2 KMA 초단기실황 진입 + `core/weather.py` pure

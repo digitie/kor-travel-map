@@ -151,6 +151,12 @@ PR#22 CI/import-linter merge 후 gate 확인. PR#22 merge 후 PR#23 리포트
       slice` / `group_by_metric_key` / `filter_by_provider` / `latest_by_
       metric_key` — DB 없이 동작하는 build_weather_card 빌드 블록. 373 tests
       green (신규 21).
+- [x] **PR#40 (merged 2026-05-28)** — `python-*-api` 라이브러리 status sweep.
+      `pyproject.toml [providers]` extra Sprint 그룹화 + kraddr-base 라인
+      제거 (ADR-041) + Protocol 박힌 라이브러리(`kma`/`datagokr`) 본 lib 측
+      참조 명시 + knps `@06da125f` (PR#25) 박음. `docs/provider-contract.md`
+      §4 책임 매트릭스 + §12 git URL/sha status 표 (16 row) 갱신.
+      `AGENTS.md` 식별자 표 cross-reference 추가.
 
 다음 PR 후보 (Sprint 2 entry 계속):
 

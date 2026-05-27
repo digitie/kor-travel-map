@@ -122,11 +122,14 @@ system
 
 | provider | FeatureKind | source_role | 갱신 주기 | 비고 |
 |----------|-------------|-------------|----------|------|
-| python-visitkorea-api | event, place | primary | 일 1회 | 축제는 좌표 nullable 허용 |
-| python-mois-api | place | primary | 주 1회 (full update) + 일 1회 incremental + on-demand | 영업중 + PROMOTED_SERVICE_SLUGS (42종) 승격, EXCLUDED 제외 — 자세히는 `docs/mois-feature-etl.md` |
+| provider | FeatureKind | source_role | 갱신 주기 | 비고 |
+|----------|-------------|-------------|----------|------|
+| **data.go.kr-standard (via `python-datagokr-api`)** | event, place, route | primary | 표준데이터별 (행안부 announce) | **1차 source** for 축제(ADR-042) + 관광지 5종 dataset. Protocol `CulturalFestivalItem` (PR#34) |
+| python-visitkorea-api | event, place | **enrichment** (축제, ADR-042 supersede) / primary (그 외) | 일 1회 | 축제는 좌표 nullable 허용. ADR-042 (2026-05-27) 이후 datagokr 1차 + visitkorea 2차 |
+| python-mois-api | place | primary | 주 1회 (full) + 일 1회 incremental + on-demand | 영업중 + PROMOTED_SERVICE_SLUGS (42종) 승격, EXCLUDED 제외 — `docs/mois-feature-etl.md` |
 | python-opinet-api | place + price | primary | hours (가격), 일 (상세) | PriceValue 시계열 |
 | python-krex-api | place + price + weather + notice | primary | 시간/분 단위 | 휴게소 + 교통 공지 |
-| python-kma-api | weather | weather_context | 분/시간 | nowcast/short/mid + 특보 |
+| python-kma-api | weather | weather_context | 분/시간 | nowcast/short/mid + 특보. Protocol `KmaShortForecastItem` (PR#38) / `KmaUltraShortNowcastItem` (PR#39) |
 | python-krairport-api | weather, place | weather_context, enrichment | 시간 | 공항 운항·날씨 |
 | python-khoa-api | place, notice, weather | primary, primary, weather_context | 일 / 시간 | 해수욕장, 해양 공지 |
 | python-airkorea-api | weather | weather_context | 시간 | PM10/PM2.5/CAI |
@@ -134,12 +137,13 @@ system
 | python-knps-api | place, route, area, weather | primary | 월/분기/연 (파일 데이터) | keyless file-only. 국립공원 경계·탐방로·선형시설·시설·위험지역·특별보호구역·문화자원·대피소 (`docs/knps-feature-etl.md`, ADR-028 amendment) |
 | python-krheritage-api | place, area, event | primary | 주 (place/area), 일 (event) | media → RustFS |
 | python-kasi-api | (calendar) | (system) | 주 1회 | 공휴일/달력 (TripMate utility) |
-| data.go.kr-standard (내부 client) | place, route, event | primary | 표준데이터별 | 5종 dataset bounded |
+| python-datagokr-api (data.go.kr-standard) | event, place, route | primary | 표준데이터별 | 5종 dataset bounded. 본 lib에서 직접 사용 (ADR-042) — 위 첫 행 참조 |
 | python-mcst-api | place | enrichment | 일 | 독립서점/북카페/도서관 — MOIS에 enrichment |
 | kakao-local-api | place | enrichment | on-demand | 전화번호 보강 |
 | naver-search-api | place | enrichment | on-demand | 전화번호 보강 |
 | google-places-api-new | place | enrichment | on-demand | 전화번호 보강 (Text Search New) |
-| python-kraddr-geo | (geocoder) | base_address, base_coordinate | on-demand | 주소·좌표 보강 |
+| python-kraddr-geo | (geocoder) | base_address, base_coordinate | on-demand | 주소·좌표 보강. `krtour.map.providers.standard_data.ReverseGeocoder` Protocol (PR#34) |
+| ~~python-kraddr-base~~ | — | — | — | **ADR-041 (PR#37, 2026-05-28) 흡수 완료**. `Address` DTO + `core/address.py` utility는 본 lib로 이전. `PlaceCoordinate`는 명시적 제외 (좌표는 `Coordinate` 단일). archive 후보. |
 
 ## 5. provider 모듈 표준 구조
 
@@ -362,17 +366,37 @@ def test_no_provider_wrapper_classes():
 
 상기 룰은 ADR-006의 자동 강제 수단으로 코드 작성 단계에서 도입.
 
-## 12. provider 라이브러리 git URL + commit sha 핀
+## 12. provider 라이브러리 git URL + commit sha 핀 (status 표)
 
-`pyproject.toml`의 `providers` extra:
+`pyproject.toml`의 `providers` extra. 특정 sha 핀은 reproducible build를
+보장한다 — 업그레이드는 ADR + journal 기록. 현재 상태:
 
-```toml
-providers = [
-  "python-kraddr-base @ git+https://github.com/digitie/python-kraddr-base.git@<sha>",
-  "python-kraddr-geo  @ git+https://github.com/digitie/python-kraddr-geo.git@<sha>",
-  "python-visitkorea-api @ git+...@<sha>",
-  # ...
-]
-```
+| provider | pyproject 핀 | 본 lib Protocol | 활성 PR | 메모 |
+|----------|--------------|-----------------|---------|------|
+| python-kraddr-base | **제거** | — | — | ADR-041 (PR#37) 흡수 완료. archive 후보 |
+| python-kraddr-geo | placeholder | `ReverseGeocoder` (PR#34) | — | on-demand geocoder, sha 확정 시 ADR |
+| python-datagokr-api | placeholder | `CulturalFestivalItem` (PR#34) | PR#34 | ADR-042 1차 축제 source |
+| python-kma-api | placeholder | `KmaShortForecastItem` (PR#38), `KmaUltraShortNowcastItem` (PR#39) | PR#38/39 | ADR-010 두 축. 후속: ultra_short_forecast/mid/alerts |
+| python-airkorea-api | placeholder | (후속 PR) | — | PM10/PM2.5/CAI |
+| python-khoa-api | placeholder | (후속 PR) | — | 해수욕장, 해양 공지 |
+| python-krforest-api | placeholder | (후속 PR) | — | 산악기상 (Sprint 2) + trails (Sprint 3) 양쪽 사용 |
+| python-opinet-api | placeholder | (후속 PR) | — | Sprint 2 §2.3 PriceValue |
+| python-krex-api | placeholder | (후속 PR) | — | Sprint 2 §2.4 multi-kind |
+| python-visitkorea-api | placeholder | (후속 PR — enrichment) | — | ADR-042: 축제는 enrichment 2차 |
+| python-knps-api | `@06da125f` (PR#25 시점) | (Sprint 3 PR) | PR#25 | keyless file-only, ADR-028 amendment 2026-05-25 |
+| python-krheritage-api | placeholder | (Sprint 3 PR) | — | media → RustFS |
+| python-krairport-api | placeholder | (Sprint 3 PR) | — | 공항 운항·날씨 |
+| python-mois-api | placeholder | (Sprint 4 PR) | — | ADR-024 canonical name 정정. 4단계 lifecycle |
+| python-kasi-api | placeholder | (Sprint 4 PR) | — | KASI 영업주기 |
+| python-mcst-api | placeholder | (Sprint 5 PR) | — | 독립서점/북카페 — MOIS enrichment |
 
-특정 sha 핀은 reproducible build를 보장한다. 업그레이드는 ADR + journal 기록.
+**최신 sha 갱신 절차**:
+1. provider 저장소에서 안정 commit sha 확인 (사용자 모니터링).
+2. `pyproject.toml` `[providers]` extra의 해당 라인 주석에 sha 박음.
+3. 변환 함수 Protocol shape이 그 sha와 정합하는지 본 lib 측에서 검증.
+4. `docs/journal.md`에 sha 갱신 entry.
+5. 큰 schema breaking이면 ADR 작성.
+
+운영 환경은 `pip install -e ".[providers]"`로 git URL을 fetch — `[providers]`
+extra는 optional이므로 본 라이브러리 자체 install (`pip install -e .`)에는
+영향 없음.
