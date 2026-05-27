@@ -34,13 +34,17 @@ PR#17~#26 머지로 Sprint 1 산출물 완료:
 - `.github/workflows/{ci,lint,openapi}.yml` + import-linter 4 계약 활성
 - review report (`docs/reports/pr-1-21-review.md`) P0 4건 해소
 
-ADR 현황: **001~034 accepted** (029는 ADR-043으로 supersede). **035~043
-proposed** (2026-05-27 사용자 지시 — 운영 단계 진입에 따른 9건 일괄):
+ADR 현황: **001~043 모두 accepted** (029는 ADR-043으로 supersede). 035~043은
+**PR#33 (2026-05-27) 일괄 accepted 전환** — 운영 단계 진입에 따른 9건:
 - 035 REST API admin 운영 확장 / 036 maplibre-vworld-js v0.1.0 분리
 - 037 frontend TanStack Query + Zustand / 038 GitHub Actions CI/CD 재활성화
 - 039 CLI mutex (advisory lock) / 040 Backup/Restore + 핫스왑 UI
 - 041 kraddr-base 코드 흡수 + 폐기 / 042 datagokr 표준데이터 축제 1차 source
 - 043 `@krtour/map-marker-react` npm 게시 보류 (ADR-029 supersede)
+
+다음 후보 번호 = **ADR-044**. implementation 시점: 038 즉시 / 042 SPRINT-2
+§2.1 / 035·037·043 SPRINT-2 §2.5 / 036 SPRINT-3 후반 / 039·040·041
+SPRINT-4 prep.
 
 Sprint 1~5 plan은 `docs/sprints/` 참조. **provider 9단계 구현 순서**
 (ADR-034): 축제 → 날씨 → 유가 → 휴게소 → 국립공원/트래킹 → 국가유산 →
