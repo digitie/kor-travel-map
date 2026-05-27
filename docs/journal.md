@@ -2,6 +2,70 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-28 01:45 (claude)
+
+**작업**: PR#38 — Sprint 2 §2.2 KMA 단기예보 1차 진입. `WeatherValue` DTO +
+3 enum + `make_weather_value_key` + `providers/kma.py` `short_forecast_to_
+weather_values` + 8 fixture / 32 case 테스트.
+
+**컨텍스트**: PR#37 후 다음 한 작업 — Sprint 2 §2.2 (날씨 group). 본 PR이
+weather 도메인 foundation. WeatherCard + `build_weather_card` + 보조 providers
+(airkorea/khoa/krforest) + KMA의 나머지 dataset 4종은 별도 후속 PR로 분리.
+
+**신규 파일** (4):
+- `src/krtour/map/dto/weather.py` (~220 line) — `WeatherValue` DTO
+  - ADR-010 두 축: `weather_domain` (WeatherDomain enum 16종) + `forecast_
+    style` (7종) + `timeline_bucket` (3종, nullable)
+  - metric: `metric_key` 표준 + source_metric_key / source_metric_name /
+    metric_name (한글)
+  - 시간축: issued_at / valid_at / valid_from / valid_until / observed_at /
+    collected_at (모두 KST aware, ADR-019)
+  - 값: value_number(Decimal) / value_text / unit / severity
+  - 메타: normalization_version / payload(JSONB) / source_record_key
+  - model_validator: `_check_value_present` + `_check_valid_range_order`
+  - `identity()` tuple — unique key (timeline_bucket 제외, ADR-010)
+- `src/krtour/map/providers/kma.py` (~270 line):
+  - `KmaShortForecastItem` Protocol — KMA 단기예보 row shape
+  - `short_forecast_to_weather_values(items, *, feature_id, source_record_
+    key=None) -> list[WeatherValue]`
+  - `_parse_kma_datetime(YYYYMMDD, HHMM) -> KST aware datetime`
+  - `_parse_value(category, raw) -> (Decimal, text)` — `강수없음`/`적설없음`/
+    `1mm 미만` 텍스트 표기 흡수
+  - 상수: `KMA_PROVIDER_NAME` / `KMA_METRIC_UNITS` (18종) / `KMA_METRIC_
+    NAMES` (한글 18종)
+- `tests/unit/test_dto_weather.py` (12 case)
+- `tests/unit/test_providers_kma.py` (11 case)
+- `tests/unit/test_ids_weather.py` (9 case)
+
+**변경 파일** (6):
+- `src/krtour/map/dto/_enums.py` — `WeatherDomain` / `ForecastStyle` /
+  `TimelineBucket` 3 enum 추가 (총 26 값)
+- `src/krtour/map/dto/__init__.py` — re-export 4 신규
+- `src/krtour/map/core/ids.py` — `make_weather_value_key` + `WEATHER_VALUE_
+  KEY_HASH_LENGTH=20` 추가. `wv_{sha1[:20]}` 포맷. timeline_bucket 제외.
+- `src/krtour/map/core/__init__.py` — 2 신규 re-export
+- `src/krtour/map/providers/__init__.py` — kma 5 신규
+- `docs/sprints/SPRINT-2.md` §2.2 — PR#38 1차 merged + 후속 PR 매핑
+
+**Verification (local)**:
+- `pytest tests/ packages/krtour-map-debug-ui/tests/ --ignore=tests/integration
+  -q` → **352 passed, 4 skipped** (PR#37 320 + 신규 32)
+- `ruff check src/ tests/ packages/krtour-map-debug-ui/` → All checks passed
+- `mypy --strict src/krtour/map packages/krtour-map-debug-ui/src/krtour/
+  map_debug_ui` → no issues found in 41 source files
+- `lint-imports` → 4 contracts kept, 0 broken
+- openapi drift → exit 0
+
+**ADR-006 준수**:
+- `python-kma-api` typed model을 직접 import하지 않음 — `KmaShortForecastItem`
+  Protocol로 입력 shape만 정의.
+- KMA 격자점 → weather feature_id 매핑은 본 모듈 책임 X — 호출자가
+  `feature_id` 명시 전달.
+
+**알려진 후속 작업**: KMA 나머지 4종 / core/weather.py pure helpers /
+WeatherCard DTO + async build_weather_card / 보조 providers (airkorea /
+krforest / khoa) / Sprint 2 §2.5 `routers/features.py`에 weather 응답 wiring.
+
 ## 2026-05-28 01:10 (claude)
 
 **작업**: PR#37 — ADR-041 본격 구현. `python-kraddr-base` 의존 완전 제거 +

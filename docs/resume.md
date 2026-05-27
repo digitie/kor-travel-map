@@ -137,6 +137,13 @@ PR#22 CI/import-linter merge 후 gate 확인. PR#22 merge 후 PR#23 리포트
       extract_sido_code / normalize_phone_number / normalize_korean_text.
       `standard_data.py`에서 utility 적극 활용. 320 unit tests green.
       `PlaceCoordinate`는 명시적 제외 (좌표는 Coordinate 단일 source).
+- [x] **PR#38 (merged 2026-05-28)** — Sprint 2 §2.2 KMA 단기예보 1차 진입.
+      `dto/weather.py` `WeatherValue` DTO + 3 enum (`WeatherDomain` 16값 /
+      `ForecastStyle` 7값 / `TimelineBucket` 3값, ADR-010 두 축 분리).
+      `core/ids.py` `make_weather_value_key` 추가 (wv_{sha1[:20]}, timeline_
+      bucket 제외). `providers/kma.py` `short_forecast_to_weather_values` +
+      `KmaShortForecastItem` Protocol + KMA_METRIC_UNITS/NAMES 18종. 352
+      tests green (신규 32).
 
 다음 PR 후보 (Sprint 2 entry 계속):
 
