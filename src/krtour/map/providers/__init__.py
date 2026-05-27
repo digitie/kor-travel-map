@@ -29,8 +29,10 @@ from krtour.map.providers.kma import (
     KMA_METRIC_UNITS,
     KMA_PROVIDER_NAME,
     KmaShortForecastItem,
+    KmaUltraShortForecastItem,
     KmaUltraShortNowcastItem,
     short_forecast_to_weather_values,
+    ultra_short_forecast_to_weather_values,
     ultra_short_nowcast_to_weather_values,
 )
 from krtour.map.providers.standard_data import (
@@ -54,11 +56,14 @@ __all__ = [
     "FESTIVAL_CATEGORY",
     "FESTIVAL_MARKER_ICON",
     "FESTIVAL_MARKER_COLOR",
-    # kma (PR#38 short forecast, PR#39 ultra_short_nowcast, ADR-010)
+    # kma (PR#38 short, PR#39 ultra_short_nowcast, PR#41 ultra_short_forecast,
+    # ADR-010)
     "KmaShortForecastItem",
     "KmaUltraShortNowcastItem",
+    "KmaUltraShortForecastItem",
     "short_forecast_to_weather_values",
     "ultra_short_nowcast_to_weather_values",
+    "ultra_short_forecast_to_weather_values",
     "KMA_PROVIDER_NAME",
     "KMA_METRIC_UNITS",
     "KMA_METRIC_NAMES",
