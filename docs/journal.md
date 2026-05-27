@@ -2,6 +2,69 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-27 23:20 (claude)
+
+**작업**: PR#34 — Sprint 2 §2.1 1차 provider 진입. ADR-042 datagokr 전국
+문화축제표준데이터 → `FeatureBundle` 변환 함수 + Protocol + fixture 5건 +
+unit test 14건. ADR-038 CI green 게이트 active 후 첫 PR.
+
+**컨텍스트**: ADR-042로 축제 1차 source가 visitkorea TourAPI에서 datagokr
+표준데이터로 변경. `python-datagokr-api` provider 라이브러리는 외부 별도
+저장소이고, 본 라이브러리는 ADR-006(wrapper 금지)에 따라 그 typed model을
+직접 import하지 않는다 — 대신 `CulturalFestivalItem` Protocol로 입력 shape만
+정의. provider 라이브러리는 자기 모델이 본 Protocol을 만족하도록 필드 이름
+맞춤.
+
+**신규 파일** (2):
+- `src/krtour/map/providers/standard_data.py` (~340 line)
+  - `CulturalFestivalItem` `Protocol` (14 필드 — management_no/festival_name/
+    start_date/end_date/latitude/longitude/road_address/jibun_address/
+    organizer_name/organizer_tel/data_reference_date/provider_org_name 등)
+  - `ReverseGeocodeResult` / `ReverseGeocoder` Protocol — 좌표→bjd_code helper
+    plug-in 인터페이스
+  - `cultural_festivals_to_bundles(items, *, fetched_at, reverse_geocoder=None)
+    -> list[FeatureBundle]`
+  - `_item_to_bundle` 내부 helper — 9 단계 (Coordinate / reverse_geocode /
+    Address / raw_data canonical / payload_hash / source_record_key /
+    feature_id / Feature+EventDetail / SourceRecord+SourceLink+Bundle).
+  - 상수: `DATASET_KEY_CULTURAL_FESTIVALS = "datagokr_cultural_festivals"` /
+    `FESTIVAL_CATEGORY = "01000000"` (TOURISM 대분류, ADR-042) /
+    `FESTIVAL_MARKER_ICON = "star"` / `FESTIVAL_MARKER_COLOR = "P-11"`.
+- `tests/unit/test_providers_standard_data.py` (~390 line, 14 case):
+  - 5 fixture (`_F1`/`_F2`/`_F3` 좌표 있음 + `_F4_NO_COORD`/`_F5_NO_COORD_
+    MINIMAL` 좌표 nullable).
+  - happy path (bundle 필드 정합 / EventDetail 날짜·kind / SourceRecord
+    canonical / SourceLink PRIMARY).
+  - 좌표 nullable → `Feature.coord=None` + `feature_id` `global` fallback.
+  - minimal nullable fixture — Feature 여전히 valid.
+  - bundle FK consistency (PR#26 model_validator 가동).
+  - 결정성 (같은 입력 같은 ID).
+  - payload 변경 시 `raw_payload_hash` + `source_record_key`는 다르나
+    `feature_id`는 같음 (이력 보존).
+  - `EventDetail.starts_on > ends_on` reject.
+  - naive `fetched_at` reject (ADR-019).
+  - `ReverseGeocoder` 적용 시 `Address.bjd_code` 채워짐 + `feature_id`가
+    bjd_code 기반으로 변경.
+  - `ReverseGeocoder` lookup이 좌표 없을 때 호출 안 됨 (불필요 lookup 회피).
+
+**변경 파일** (3):
+- `src/krtour/map/providers/__init__.py` — `standard_data` re-export (`__all__`
+  4 식별자 + 4 상수).
+- `docs/event-feature-etl.md` §7.1 collect — datagokr 1차 source 예시 보강
+  + §7.1.5 visitkorea enrichment 별도 PR placeholder.
+- `docs/sprints/SPRINT-2.md` §2.1 — PR#34 merged 표기.
+
+**Verification (local)**:
+- `pytest tests/ --ignore=tests/integration` → **252 passed, 4 skipped**
+  (PR#29 238 + PR#34 신규 14).
+- `ruff check src/ tests/` → All checks passed (auto-fix 1회 후 clean).
+- `mypy --strict src/krtour/map` → Success: no issues found in 32 source files.
+- `lint-imports` → 4 contracts kept, 0 broken.
+
+**CI 게이트 (ADR-038)**: 본 PR이 ADR-038 머지 후 첫 PR — branch protection
+rules가 켜져 있으면 push 후 ci/lint/openapi 워크플로우 자동 실행, 1 review
+approval 필요. (사용자 측 GitHub Settings 활성 여부에 의존.)
+
 ## 2026-05-27 22:50 (claude)
 
 **작업**: PR#33 — ADR-035~043 9건 일괄 accepted 전환. PR#16(027~034 일괄)과

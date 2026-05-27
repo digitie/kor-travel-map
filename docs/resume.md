@@ -109,43 +109,56 @@ PR#22 CI/import-linter merge 후 gate 확인. PR#22 merge 후 PR#23 리포트
       027~034 패턴 그대로). ADR 현황 = 001~043 모두 accepted, 029는 ADR-043
       supersede. 다음 후보 번호 = ADR-044.
 
-## 다음 한 작업 (PR#33 머지 후)
+## 다음 한 작업 (PR#34 머지 후)
 
-ADR 모두 accepted → implement 단계 진입. 다음 PR 후보 (Sprint 2 entry):
+- [x] **PR#34 (merged 2026-05-27)** — Sprint 2 §2.1 datagokr 표준데이터 1차
+      축제 provider. `src/krtour/map/providers/standard_data.py` —
+      `cultural_festivals_to_bundles` + `CulturalFestivalItem`/`ReverseGeocoder`
+      Protocol + fixture 5 + 14 unit tests. 14 case green, full unit suite
+      252 passed.
 
-1. **PR#34 — ADR-038 CI green 게이트 active + datagokr provider 1차 source**
-   (Sprint 2 §2.1 시작):
-   - 사용자 측 GitHub Settings → Branches → main → branch protection rules
-     에서 `Require status checks` (ci/lint/openapi) + `Require branches up
-     to date` + `Require 1 review` 활성 (코드 변경 없음).
-   - `pyproject.toml [providers]` extra에 `python-datagokr-api` git URL 핀
-     (commit sha는 client 안정화 후, 임시 main 핀 가능).
-   - `src/krtour/map/providers/standard_data.py` — `cultural_festivals_to_
-     bundles(items, *, fetched_at, reverse_geocoder=None) -> list[Feature
-     Bundle]` (ADR-042 1차 source).
-   - fixture 5건 (좌표 있음 3 + nullable 2, KST aware).
-   - unit test ≥ 3 (정상/엣지/실패) + EXPLAIN bbox 통합 테스트 1건.
-   - `docs/event-feature-etl.md` 1차 source 절 코드 예시 보강.
+다음 PR 후보 (Sprint 2 entry 계속):
 
-2. **PR#35 — Sprint 2 §2.5 debug/admin UI 첫 라우터** (ADR-031 + ADR-035
+1. **PR#35 — Sprint 2 §2.5 debug/admin UI 첫 라우터** (ADR-031 + ADR-035
    활성):
-   - `packages/krtour-map-debug-ui/src/krtour/map_debug_ui/app.py`
-   - `routers/{health,version,features}.py` — `/debug/health`, `/debug/
-     version`, `/features/in-bounds` 등
+   - `packages/krtour-map-debug-ui/src/krtour/map_debug_ui/app.py` FastAPI
+     application factory
+   - `routers/health.py` — `GET /debug/health` (200 OK + version)
+   - `routers/version.py` — `GET /debug/version` (lib/server semver)
+   - `routers/features.py` — `GET /features/in-bounds`, `/features/nearby`,
+     `/features/{id}` (Sprint 2 적재 후 의미 있는 응답)
+   - `routers/admin_jobs.py` — `GET /admin/jobs`, `POST /admin/jobs/{id}/
+     retry` (ADR-035 admin prefix)
    - `scripts/export_openapi.py` 실효 가동 + `openapi.json` commit
    - `.github/workflows/openapi.yml` `--check` drift gate green (ADR-038)
 
-3. **PR#36 — Sprint 2 §2.5 frontend 시작** (ADR-025 + ADR-037 + ADR-043):
+2. **PR#36 — Sprint 2 §2.5 frontend 시작** (ADR-025 + ADR-037 + ADR-043):
    - `packages/krtour-map-debug-ui/frontend/package.json`에 `@tanstack/
      react-query` + `zustand` 추가
    - `packages/map-marker-react/package.json` `"private": true` 박음 (ADR-043)
    - 기본 페이지 + map viewport Zustand store + `/features/in-bounds`
      useQuery hook
 
-4. **PR#37~39 — Sprint 2 §2.2~2.4** — kma 날씨 / opinet 유가 / krex 휴게소.
+3. **PR#37 — Sprint 2 §2.2 kma 날씨**:
+   - `src/krtour/map/providers/kma.py` —
+     `short_forecast_to_weather_values` / `ultra_short_nowcast_to_weather_
+     values` / `mid_forecast_to_weather_values` / `weather_alerts_to_notice_
+     bundles`.
+   - 보조 provider: airkorea / krforest_mountain_weather / khoa_coastal.
+   - `dto/weather.py` `WeatherValue` 신설 (timeline_bucket / forecast_style)
+   - `core/weather.py` `build_weather_card` (Sprint 2 prep PR#29 연기분).
 
-5. **PR#40+ — Sprint 3 진입** — knps / krforest_trails / krheritage +
-   ADR-036 maplibre-vworld-js v0.1.0 분리 prep.
+4. **PR#38 — Sprint 2 §2.3 opinet 유가** + `PriceValue` DTO + BRIN bulk.
+
+5. **PR#39 — Sprint 2 §2.4 krex 휴게소** — multi-kind (place + price +
+   weather + notice) 통합 테스트.
+
+6. **PR#40 — Sprint 2 §2.1 끝물 visitkorea TourAPI enrichment** —
+   `festival_to_enrichment_links` (datagokr feature_id ↔ visitkorea
+   contentId, `source_role='enrichment'`).
+
+7. **PR#41+ — Sprint 3 진입** — knps / krforest_trails / krheritage +
+   ADR-036 maplibre-vworld-js v0.1.0 분리 prep + ADR-033 Phase 1 (F1~F3).
 - [ ] **Sprint 2 첫 provider PR** (ADR-034 1단계, PR#30 후보):
       `providers/visitkorea/` 축제 + `infra/feature_repo.py` raw SQL +
       `feature_event_details` 테이블 마이그레이션.
