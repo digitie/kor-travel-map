@@ -2,6 +2,59 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-28 02:30 (claude)
+
+**작업**: PR#39 — Sprint 2 §2.2 KMA 초단기실황 진입 + `core/weather.py` pure
+헬퍼 5종. PR#38 weather foundation을 활용한 두 번째 KMA dataset + DB 없이
+동작하는 weather card 합성 빌드 블록.
+
+**컨텍스트**: PR#38로 WeatherValue DTO + KMA 단기예보가 들어간 뒤 후속.
+`build_weather_card(client, ...)`는 `infra/feature_repo.py` 진입 후에 가능
+하지만, pure helper(`pick_nowcast_value` / `pick_timeline_slice` 등)는 DB 없이
+동작하므로 본 PR에 미리 박음. 후속 PR이 `core/weather.py`를 import해서 admin
+UI / TripMate apps/web 양쪽 build_weather_card 합성에 사용.
+
+**신규 파일** (3):
+- `src/krtour/map/core/weather.py` (~150 line) — pure helpers:
+  - `pick_nowcast_value(values, *, metric_key)` — nowcast/observed 중 가장
+    최근 `observed_at` (collected_at tie-break)
+  - `pick_timeline_slice(values, *, bucket)` — timeline_bucket 매칭 + valid_at
+    오름차순 정렬 (valid_at=None 제외)
+  - `group_by_metric_key(values)` — defaultdict(list), 입력 순서 유지
+  - `filter_by_provider(values, *, provider)` — canonical provider name 필터
+  - `latest_by_metric_key(values)` — metric별 최근 (observed > valid > collected)
+- `tests/unit/test_providers_kma_nowcast.py` (8 case)
+- `tests/unit/test_core_weather.py` (13 case)
+
+**변경 파일** (4):
+- `src/krtour/map/providers/kma.py`:
+  - `KmaUltraShortNowcastItem` Protocol — base_date/base_time/nx/ny/category/
+    obsr_value (단기예보의 fcst_date/fcst_time 없음, observed 성격)
+  - `ultra_short_nowcast_to_weather_values(items, *, feature_id, source_
+    record_key=None)` — `forecast_style=nowcast` + `timeline_bucket=ultra_
+    short` + `observed_at = base_date+base_time` + `valid_at=None`
+  - `_nowcast_item_to_weather_value` private helper
+- `src/krtour/map/core/__init__.py` — 5 신규 re-export
+- `src/krtour/map/providers/__init__.py` — kma 2 신규 (Protocol + 함수)
+- `docs/sprints/SPRINT-2.md` §2.2 — PR#39 nowcast merged 표기
+
+**Verification (local)**:
+- `pytest tests/ packages/krtour-map-debug-ui/tests/ --ignore=tests/integration
+  -q` → **373 passed, 4 skipped** (PR#38 352 + 신규 21)
+- `ruff check src/ tests/ packages/krtour-map-debug-ui/` → All checks passed
+- `mypy --strict src/krtour/map packages/krtour-map-debug-ui/src/krtour/
+  map_debug_ui` → no issues found in 42 source files
+- `lint-imports` → 4 contracts kept, 0 broken
+- openapi drift → exit 0
+
+**알려진 후속 작업 (Sprint 2 §2.2 완료까지)**:
+- `ultra_short_forecast_to_weather_values` (초단기예보)
+- `mid_forecast_to_weather_values` (중기예보, 텍스트 형식 + AM/PM split)
+- `weather_alerts_to_notice_bundles` (특보 → notice kind FeatureBundle)
+- `WeatherCard` DTO + async `build_weather_card(client, feature_id)`
+- 보조 providers (airkorea / krforest_weather / khoa_weather)
+- Sprint 2 §2.5 `/features/{id}` 라우터에 weather 응답 wiring
+
 ## 2026-05-28 01:45 (claude)
 
 **작업**: PR#38 — Sprint 2 §2.2 KMA 단기예보 1차 진입. `WeatherValue` DTO +
