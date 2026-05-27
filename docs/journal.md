@@ -2,6 +2,73 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-27 22:30 (claude)
+
+**작업**: PR#32 거버넌스 보강 + ADR-035~043 proposed 일괄. 운영 단계 진입에
+따른 사용자 지시 8건 + 정책 reverse 1건을 ADR 9건 + 거버넌스 문서 sweep으로
+박음.
+
+**컨텍스트**: PR#31(codegraph MCP 등록) 머지 직후 사용자 지시:
+- REST API는 디버그/관리/운영 UI 용도로 프로덕션 환경에서도 활용
+- 지도 = `maplibre-vworld-js` 별도 라이브러리(v0.1.0), 공통은 상류 / TripMate
+  전용만 본 저장소
+- Web UI는 유지보수 (통계/운영/관리/튜닝) 기능 보완
+- 프런트엔드 state는 TanStack Query + Zustand
+- **GitHub Actions CI/CD 재활성화** (2026-05-26 "쓰지마" 지시 reverse)
+- CLI 중복 실행 위험 명령은 mutex 박음
+- ADR 035+ 진행, npm 게시 보류 (`@krtour/map-marker-react`), 나머지 수용
+- Backup/Restore + UI (핫스왑 스타일)
+- `python-kraddr-base` 흡수 + 라이브러리 폐기 예정 (`PlaceCoordinate`는 제외)
+- 전국관광지정보표준데이터 / 전국문화축제표준데이터 — `python-datagokr-api`
+  경유, 축제는 표준데이터 primary로 전환
+
+**ADR 9건**:
+- ADR-035 디버그/관리 REST API 프로덕션 admin 운영 확장 (ADR-005/020 amendment)
+- ADR-036 `maplibre-vworld-js` 라이브러리 분리 + v0.1.0 (TripMate 전용만 본
+  저장소)
+- ADR-037 Frontend state — TanStack Query + Zustand
+- ADR-038 GitHub Actions CI/CD 재활성화 (2026-05-26 "쓰지마" 지시 reverse,
+  branch protection rules 활성)
+- ADR-039 CLI mutex — PostgreSQL advisory lock 기반
+- ADR-040 Backup/Restore + 핫스왑 UI (1차 cold restore → Sprint 5 hot-swap)
+- ADR-041 `python-kraddr-base` 코드 흡수 + 라이브러리 폐기 (`PlaceCoordinate`
+  제외)
+- ADR-042 datagokr 표준데이터 — 축제 1차 source 전환 + 관광지 표준데이터 추가
+- ADR-043 `@krtour/map-marker-react` npm 게시 보류 (ADR-029 supersede)
+
+**거버넌스 문서 sweep**:
+- AGENTS.md ADR proposed 목록 + 디버그 REST API 정책 (admin/ops prefix) +
+  Frontend stack (maplibre-vworld-js + TanStack + Zustand + `private` npm) +
+  DO NOT 룰 20~22 (CLI mutex / npm 게시 / PlaceCoordinate import) + 작업 후
+  체크리스트 (codegraph 영향도 + CI green) 추가.
+- CLAUDE.md ADR 현황 035~043 proposed 목록 + 절대 금지 5개 §5 보강.
+- SKILL.md DO NOT 룰 23~26 추가 (CI green 머지 / CLI mutex / npm 게시 /
+  PlaceCoordinate import).
+- docs/sprints/SPRINT-2.md §2.1 축제 1차 source = datagokr 전환 + §2.5 admin
+  라우터 prefix + Frontend TanStack/Zustand + §2.8/§2.9 신규 ADR implementation
+  매핑.
+- docs/sprints/SPRINT-4.md §2.8 CLI mutex 첫 도입 + §2.9 kraddr-base 흡수
+  prep + §2.10 Backup/Restore prep.
+- docs/event-feature-etl.md 1차 source 표 변경.
+- docs/decisions.md ADR-005/020/029 supersede note.
+
+**변경 파일 (9)**:
+- `docs/decisions.md` — ADR-035~043 9건 신규 (proposed) + ADR-005/020/029
+  supersede note
+- `AGENTS.md` — 다수 절 (식별자/디버그 REST/Frontend/DO NOT/체크리스트)
+- `CLAUDE.md` — ADR 현황 + 절대 금지 5개
+- `SKILL.md` — DO NOT 룰 23~26 추가
+- `docs/sprints/SPRINT-2.md` — §2.1 datagokr 1차 / §2.5 admin 라우터 + frontend
+  state / §2.8/§2.9 신규 ADR 매핑
+- `docs/sprints/SPRINT-4.md` — §2.8/2.9/2.10 CLI mutex + kraddr-base + backup
+  prep
+- `docs/event-feature-etl.md` — 1차 source 표 변경
+- `docs/journal.md` — 본 엔트리
+- `docs/resume.md` — 다음 한 작업 갱신
+
+**검증**: docs-only PR. ADR proposed → 사용자 review → 후속 PR로 accepted
+전환 + 코드 implement.
+
 ## 2026-05-27 21:55 (claude)
 
 **작업**: PR#30 머지 직후 후속 — `docs/codegraph-worktree.md`에 §6 "MCP

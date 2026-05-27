@@ -90,6 +90,47 @@ package), `_steps.py` (4단계), `_slugs.py` (195 슬러그 + PROMOTED 42 분류
   §8`).
 - 결과는 `Feature.phone` 갱신 + `source_links(role='enrichment')`.
 
+### 2.8 CLI mutex 첫 도입 (ADR-039 proposed 2026-05-27)
+
+Sprint 4 진입과 함께 `src/krtour/map/cli/` 폴더 신설 + 첫 CLI 명령부터
+PostgreSQL advisory lock 기반 mutex 박음:
+
+- `src/krtour/map/cli/mutex.py` — `async with mutex_lock(session, key)` async
+  context manager. `pg_try_advisory_lock(hash(key))` + `pg_advisory_unlock`.
+- mutex 적용 대상 (Sprint 4 시점):
+  - `krtour-map import <provider> <dataset>` — 같은 provider+dataset_key 중복
+    실행 차단. lock key: `import:{provider}:{dataset_key}`.
+  - `krtour-map dedup-merge <feature_id>` — manual merge 중복 실행 차단. lock
+    key: `dedup-merge:{feature_id}`.
+  - `alembic upgrade head` — Alembic 다중 워커 중복 실행 차단. lock key:
+    `alembic-upgrade`.
+- read-only (예: `krtour-map status`, `--dry-run`)는 mutex 없이.
+- ADR-039 lock 잔존 fallback: `lifespan`/`atexit`로 unlock + `pg_stat_activity`
+  helper로 lock holder 확인.
+
+### 2.9 kraddr-base 흡수 prep (ADR-041 proposed 2026-05-27)
+
+Sprint 4 진입 prep PR로 `python-kraddr-base` 전수 survey + 흡수 계획:
+
+- `docs/kraddr-base-absorption.md` 신설 — 모듈/함수 단위 매핑 표(address /
+  domain / utils 등) + `PlaceCoordinate` 명시적 **제외** + 우선순위.
+- Sprint 4 내에 `address` 모듈 흡수 PR (가장 단순). `domain` + `utils`는
+  Sprint 5.
+- 흡수 후 `pyproject.toml`에서 `python-kraddr-base` git URL 제거 PR (마지막).
+
+### 2.10 Backup/Restore prep (ADR-040 proposed 2026-05-27)
+
+운영 단계 진입 직전 Sprint 4 끝물에 backup/restore 1차 구현:
+
+- `docs/backup-restore.md` 신설 — pg_dump --format=custom 옵션 + RustFS
+  snapshot 절차 + hot-swap 흐름.
+- `src/krtour/map/infra/backup.py` — `dump_postgres` / `dump_rustfs` /
+  `restore_to_staging` / `swap_dsn`.
+- `packages/krtour-map-debug-ui/src/.../routers/admin_backups.py` —
+  ADR-035/040 admin 라우터.
+- mutex 적용: `backup` / `restore:{backup_id}` (ADR-039).
+- 1차는 **cold restore** (downtime 허용), hot-swap은 Sprint 5.
+
 ## 3. Sprint 4 분할 옵션 (Sprint 3 종료 회고에서 결정)
 
 분할 시 (4a/4b):

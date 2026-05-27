@@ -100,12 +100,29 @@ PR#22 CI/import-linter merge 후 gate 확인. PR#22 merge 후 PR#23 리포트
       v0.9.5 설치 + `.codegraph/` 인덱스 초기화 (64 파일/719 노드/1,205 edge).
       향후 모든 AI 에이전트는 자기 전용 worktree(`geo-codex`/`geo-claude`/
       `geo-antigravity`) + 로컬 codegraph 인덱스로 작업.
-- [ ] **agent worktree codegraph 보강 PR (현재 진행)**: `.claude.json`
-      `mcpServers` 등록 snippet (`codegraph serve --mcp` 정확 형태) + `npx`
-      대안 + WSL2 `--no-watch` + `codegraph_explore` MCP 도구로 컴포넌트 수정
-      전 영향도 평가하는 DO 룰. AGENTS.md / SKILL.md / CLAUDE.md / agent-guide
-      에 cross-reference. 사용자 초안의 `mcp` 서브커맨드 오기 보정
-      (`codegraph install --print-config claude` 출력에 정합).
+- [x] **PR#31 (merged 2026-05-27)** codegraph MCP 등록 snippet + `codegraph_
+      explore` 영향도 평가 룰. `codegraph serve --mcp` 공식 snippet + `npx`
+      대안 + WSL2 `--no-watch`.
+- [ ] **PR#32 거버넌스 보강 + ADR-035~043 proposed (현재 진행)** — 운영 단계
+      진입에 따른 사용자 지시 8건 + 정책 reverse 1건. ADR-035 (admin REST
+      운영 확장), 036 (`maplibre-vworld-js` 라이브러리 분리 v0.1.0), 037
+      (TanStack Query + Zustand), 038 (GitHub Actions CI/CD 재활성화 —
+      2026-05-26 "쓰지마" 지시 reverse), 039 (CLI mutex), 040 (Backup/Restore
+      + 핫스왑), 041 (kraddr-base 흡수 + 폐기), 042 (datagokr 표준데이터 축제
+      1차), 043 (`@krtour/map-marker-react` npm 게시 보류, ADR-029 supersede).
+      AGENTS/CLAUDE/SKILL + SPRINT-2/4 + event-feature-etl 보강.
+
+## 다음 한 작업 (PR#32 머지 후)
+
+PR#32 머지 후 사용자 ADR review → accepted 전환 PR. accept 순서 권고:
+1. **ADR-038 (CI/CD 재활성화)** — 가장 먼저. branch protection rules는
+   사용자 GitHub Settings 직접. 이후 PR부터 CI green 게이트 자동.
+2. **ADR-042 (datagokr 축제)** — Sprint 2 1단계 PR#33 직전 accept. SPRINT-2
+   §2.1 변경 반영.
+3. **ADR-035 / 037 / 043** — Sprint 2 §2.5 debug UI 첫 라우터 PR 진입 시.
+4. **ADR-036 (maplibre-vworld-js 분리)** — Sprint 3 후반.
+5. **ADR-039 (CLI mutex) / 040 (Backup) / 041 (kraddr-base)** — Sprint 4 진입
+   prep PR에서 일괄 accept (실 구현 시점에 맞춤).
 - [ ] **Sprint 2 첫 provider PR** (ADR-034 1단계, PR#30 후보):
       `providers/visitkorea/` 축제 + `infra/feature_repo.py` raw SQL +
       `feature_event_details` 테이블 마이그레이션.
