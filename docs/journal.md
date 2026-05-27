@@ -2,6 +2,42 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-28 03:30 (claude)
+
+**작업**: PR#41 — Sprint 2 §2.2 진행. KMA 초단기예보(`getUltraSrtFcst`)
+변환 추가. PR#38 단기예보 패턴과 거의 동일, domain/style/timeline만
+ultra_short. LGT(낙뢰) metric 추가.
+
+**컨텍스트**: PR#39 nowcast 이후 KMA dataset 3번째. 같은 fcst_date/fcst_time
+필드 shape이지만 forecast_style=ULTRA_SHORT, timeline=ULTRA_SHORT. 카테고리에
+LGT(낙뢰)가 추가됨 — 초단기예보 전용.
+
+**변경 파일** (4):
+- `src/krtour/map/providers/kma.py`:
+  - `KmaUltraShortForecastItem` Protocol — 단기예보와 동일 shape (base/fcst
+    분리)
+  - `ultra_short_forecast_to_weather_values(items, *, feature_id, source_
+    record_key=None)`
+  - `_ultra_short_forecast_item_to_weather_value` private helper
+  - `KMA_METRIC_UNITS["LGT"] = "code"` + `KMA_METRIC_NAMES["LGT"] = "낙뢰"`
+- `src/krtour/map/providers/__init__.py` — 2 신규 re-export
+- `docs/sprints/SPRINT-2.md` §2.2 — PR#41 merged
+- `tests/unit/test_providers_kma_ultra_short_forecast.py` (10 case 신규)
+
+**Verification**:
+- `pytest tests/ packages/krtour-map-debug-ui/tests/ --ignore=tests/integration
+  -q` → **383 passed, 4 skipped** (PR#40 373 + 신규 10)
+- `ruff check src/ tests/ packages/krtour-map-debug-ui/` → All checks passed
+- `mypy --strict src/krtour/map packages/krtour-map-debug-ui/src/krtour/
+  map_debug_ui` → no issues found in 42 source files
+
+**KMA dataset 진행 상황**:
+- ✅ short_forecast (PR#38)
+- ✅ ultra_short_nowcast (PR#39)
+- ✅ ultra_short_forecast (PR#41) ← 본 PR
+- ⏳ mid_forecast (텍스트 + AM/PM split, 별도 PR)
+- ⏳ weather_alerts → notice FeatureBundle (별도 PR)
+
 ## 2026-05-28 03:00 (claude)
 
 **작업**: PR#40 — `python-*-api` provider 라이브러리들의 본 lib 측 status를

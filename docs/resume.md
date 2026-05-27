@@ -157,6 +157,13 @@ PR#22 CI/import-linter merge 후 gate 확인. PR#22 merge 후 PR#23 리포트
       참조 명시 + knps `@06da125f` (PR#25) 박음. `docs/provider-contract.md`
       §4 책임 매트릭스 + §12 git URL/sha status 표 (16 row) 갱신.
       `AGENTS.md` 식별자 표 cross-reference 추가.
+- [x] **PR#41 (merged 2026-05-28)** — Sprint 2 §2.2 KMA 초단기예보 추가
+      (`getUltraSrtFcst`). `providers/kma.py` `ultra_short_forecast_to_
+      weather_values` + `KmaUltraShortForecastItem` Protocol. 단기예보와 동일
+      shape이지만 forecast_style=ULTRA_SHORT, timeline=ULTRA_SHORT.
+      `KMA_METRIC_UNITS/NAMES`에 LGT(낙뢰) 추가. 383 tests green (신규 10).
+      KMA 진행: short ✅ / ultra_short_nowcast ✅ / ultra_short_forecast ✅ /
+      mid ⏳ / weather_alerts ⏳.
 
 다음 PR 후보 (Sprint 2 entry 계속):
 

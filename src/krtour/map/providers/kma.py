@@ -45,8 +45,10 @@ from krtour.map.dto import (
 __all__ = [
     "KmaShortForecastItem",
     "KmaUltraShortNowcastItem",
+    "KmaUltraShortForecastItem",
     "short_forecast_to_weather_values",
     "ultra_short_nowcast_to_weather_values",
+    "ultra_short_forecast_to_weather_values",
     # 메타
     "KMA_PROVIDER_NAME",
     "KMA_METRIC_UNITS",
@@ -80,6 +82,7 @@ KMA_METRIC_UNITS: Final[dict[str, str]] = {
     "WAV": "m",  # 파고
     "UUU": "m/s",  # 동서바람성분
     "VVV": "m/s",  # 남북바람성분
+    "LGT": "code",  # 낙뢰 (초단기예보 전용)
 }
 
 # 표준 metric_key → 한글 metric_name.
@@ -102,6 +105,7 @@ KMA_METRIC_NAMES: Final[dict[str, str]] = {
     "WAV": "파고",
     "UUU": "동서바람성분",
     "VVV": "남북바람성분",
+    "LGT": "낙뢰",
 }
 
 
@@ -171,6 +175,42 @@ class KmaUltraShortNowcastItem(Protocol):
 
     obsr_value: str
     """관측값. 카테고리에 따라 숫자 또는 코드 문자열."""
+
+
+@runtime_checkable
+class KmaUltraShortForecastItem(Protocol):
+    """KMA 초단기예보 (``getUltraSrtFcst``) row 1건의 입력 shape.
+
+    필드 shape은 단기예보와 동일 (base/fcst 분리). 차이는 도메인 + style +
+    timeline_bucket과 카테고리 일부 (예: ``LGT`` 낙뢰가 ultra_short에만).
+
+    호출자가 단기예보 → ``KmaShortForecastItem``, 초단기예보 → 본 Protocol로
+    명시 분류해서 전달.
+    """
+
+    base_date: str
+    """발표 날짜 (YYYYMMDD)."""
+
+    base_time: str
+    """발표 시각 (HHMM)."""
+
+    fcst_date: str
+    """예보 대상 날짜 (YYYYMMDD)."""
+
+    fcst_time: str
+    """예보 대상 시각 (HHMM)."""
+
+    nx: int
+    """KMA 격자 X."""
+
+    ny: int
+    """KMA 격자 Y."""
+
+    category: str
+    """metric 카테고리 (T1H/RN1/REH/UUU/VVV/VEC/WSD/PTY/SKY/LGT)."""
+
+    fcst_value: str
+    """예보 값. 카테고리에 따라 숫자 또는 코드 문자열."""
 
 
 # -- 헬퍼 ---------------------------------------------------------------
@@ -419,6 +459,94 @@ def ultra_short_nowcast_to_weather_values(
     """
     return [
         _nowcast_item_to_weather_value(
+            item,
+            feature_id=feature_id,
+            source_record_key=source_record_key,
+        )
+        for item in items
+    ]
+
+
+# -- 초단기예보 (ultra_short_forecast) — PR#41 --------------------------
+
+
+def _ultra_short_forecast_item_to_weather_value(
+    item: KmaUltraShortForecastItem,
+    *,
+    feature_id: str,
+    source_record_key: str | None,
+) -> WeatherValue:
+    """KMA 초단기예보 row 한 건 → ``WeatherValue``.
+
+    단기예보와 필드 shape은 동일. domain/style/timeline만 ultra_short로.
+    """
+    issued_at = _parse_kma_datetime(item.base_date, item.base_time)
+    valid_at = _parse_kma_datetime(item.fcst_date, item.fcst_time)
+    value_number, value_text = _parse_value(item.category, item.fcst_value)
+
+    return WeatherValue(
+        feature_id=feature_id,
+        provider=normalize_provider_name(KMA_PROVIDER_NAME),
+        weather_domain=WeatherDomain.KMA_ULTRA_SHORT_FORECAST,
+        forecast_style=ForecastStyle.ULTRA_SHORT,
+        timeline_bucket=TimelineBucket.ULTRA_SHORT,
+        metric_key=item.category,
+        source_metric_key=item.category,
+        metric_name=KMA_METRIC_NAMES.get(item.category),
+        unit=KMA_METRIC_UNITS.get(item.category),
+        issued_at=issued_at,
+        valid_at=valid_at,
+        value_number=value_number,
+        value_text=value_text,
+        normalization_version="kma-v1.0",
+        payload={
+            "base_date": item.base_date,
+            "base_time": item.base_time,
+            "fcst_date": item.fcst_date,
+            "fcst_time": item.fcst_time,
+            "nx": item.nx,
+            "ny": item.ny,
+            "category": item.category,
+            "fcst_value": item.fcst_value,
+        },
+        source_record_key=source_record_key,
+    )
+
+
+def ultra_short_forecast_to_weather_values(
+    items: Iterable[KmaUltraShortForecastItem],
+    *,
+    feature_id: str,
+    source_record_key: str | None = None,
+) -> list[WeatherValue]:
+    """KMA 초단기예보 items → ``list[WeatherValue]``.
+
+    Parameters
+    ----------
+    items
+        ``python-kma-api``의 ``getUltraSrtFcst`` typed model iterable.
+        ``KmaUltraShortForecastItem`` Protocol을 만족해야 한다.
+    feature_id
+        weather kind ``Feature``의 ID.
+    source_record_key
+        provider raw payload 추적용.
+
+    Returns
+    -------
+    list[WeatherValue]
+        ``forecast_style=ultra_short``, ``timeline_bucket=ultra_short``,
+        `issued_at`/`valid_at` 채움, `observed_at=None`.
+
+    Notes
+    -----
+    - 초단기예보는 30분 단위로 발표, 6시간 예보. 한 격자점에서 10 카테고리 ×
+      ~12 시각 = ~120 row가 떨어진다.
+    - 카테고리 일부는 단기예보와 다름 (예: ``LGT`` 낙뢰는 초단기예보 전용).
+      현재 ``KMA_METRIC_UNITS``/``KMA_METRIC_NAMES``에 LGT 미수록 — 첫 LGT
+      적재 PR에서 표 추가.
+    """
+    return [
+        _ultra_short_forecast_item_to_weather_value(
             item,
             feature_id=feature_id,
             source_record_key=source_record_key,

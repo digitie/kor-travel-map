@@ -54,7 +54,8 @@
     `short_forecast_to_weather_values` merged 2026-05-28**
   - `kma_ultra_short_nowcast` (초단기실황, 1시간 단위 관측) — **PR#39
     `ultra_short_nowcast_to_weather_values` merged 2026-05-28**
-  - `kma_ultra_short_forecast` (초단기예보) — 후속 PR
+  - `kma_ultra_short_forecast` (초단기예보, 30분 단위 6시간) — **PR#41
+    `ultra_short_forecast_to_weather_values` merged 2026-05-28**
   - `kma_mid_forecast` (중기예보, 일 단위) — 후속 PR
   - `kma_weather_alerts` (특보, notice kind, `notice_type='weather_alert'`
     등 기존 NOTICE_TYPES 사용) — 후속 PR
