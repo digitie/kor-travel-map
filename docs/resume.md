@@ -144,6 +144,13 @@ PR#22 CI/import-linter merge 후 gate 확인. PR#22 merge 후 PR#23 리포트
       bucket 제외). `providers/kma.py` `short_forecast_to_weather_values` +
       `KmaShortForecastItem` Protocol + KMA_METRIC_UNITS/NAMES 18종. 352
       tests green (신규 32).
+- [x] **PR#39 (merged 2026-05-28)** — Sprint 2 §2.2 KMA 초단기실황 + `core/
+      weather.py` pure 헬퍼 5종. `providers/kma.py` `ultra_short_nowcast_to_
+      weather_values` + `KmaUltraShortNowcastItem` Protocol (observed_at 매핑,
+      valid_at None). `core/weather.py` `pick_nowcast_value` / `pick_timeline_
+      slice` / `group_by_metric_key` / `filter_by_provider` / `latest_by_
+      metric_key` — DB 없이 동작하는 build_weather_card 빌드 블록. 373 tests
+      green (신규 21).
 
 다음 PR 후보 (Sprint 2 entry 계속):
 

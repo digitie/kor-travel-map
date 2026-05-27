@@ -80,6 +80,13 @@ from krtour.map.core.scoring import (
     spatial_similarity,
 )
 from krtour.map.core.types import KST, kst_now
+from krtour.map.core.weather import (
+    filter_by_provider,
+    group_by_metric_key,
+    latest_by_metric_key,
+    pick_nowcast_value,
+    pick_timeline_slice,
+)
 
 __all__ = [
     # types (PR#19, ADR-019)
@@ -132,4 +139,10 @@ __all__ = [
     "extract_sido_code",
     "normalize_phone_number",
     "normalize_korean_text",
+    # weather pure helpers (PR#39, ADR-010)
+    "pick_nowcast_value",
+    "pick_timeline_slice",
+    "group_by_metric_key",
+    "filter_by_provider",
+    "latest_by_metric_key",
 ]

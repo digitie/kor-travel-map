@@ -44,7 +44,9 @@ from krtour.map.dto import (
 
 __all__ = [
     "KmaShortForecastItem",
+    "KmaUltraShortNowcastItem",
     "short_forecast_to_weather_values",
+    "ultra_short_nowcast_to_weather_values",
     # 메타
     "KMA_PROVIDER_NAME",
     "KMA_METRIC_UNITS",
@@ -138,6 +140,37 @@ class KmaShortForecastItem(Protocol):
 
     fcst_value: str
     """예보 값. 카테고리에 따라 숫자 또는 코드(예: PTY '1', SKY '1') 문자열."""
+
+
+@runtime_checkable
+class KmaUltraShortNowcastItem(Protocol):
+    """KMA 초단기실황 (`getUltraSrtNcst`) row 1건의 입력 shape.
+
+    단기예보와 달리 ``fcst_date``/``fcst_time``이 없다 — 발표 시각이 곧 관측
+    시각. ``base_date``/``base_time``을 그대로 ``observed_at``으로 매핑.
+
+    KMA 초단기실황 카테고리 (단기예보와 일부 다름):
+    - ``T1H`` (기온), ``RN1`` (1시간 강수량), ``REH`` (습도), ``UUU``/``VVV``/
+      ``VEC``/``WSD`` (바람), ``PTY`` (강수형태).
+    """
+
+    base_date: str
+    """관측 날짜 (YYYYMMDD)."""
+
+    base_time: str
+    """관측 시각 (HHMM)."""
+
+    nx: int
+    """KMA 격자 X."""
+
+    ny: int
+    """KMA 격자 Y."""
+
+    category: str
+    """metric 카테고리 (T1H/RN1/REH/UUU/VVV/VEC/WSD/PTY)."""
+
+    obsr_value: str
+    """관측값. 카테고리에 따라 숫자 또는 코드 문자열."""
 
 
 # -- 헬퍼 ---------------------------------------------------------------
@@ -297,12 +330,95 @@ def short_forecast_to_weather_values(
       개 (12 카테고리 × ~24 시각) row가 떨어진다.
     - 호출자는 격자점→`feature_id` 매핑을 캐시(`KmaGridFeatureCatalog` 등)로
       가지고 있어야 한다. 본 함수는 매핑 책임 X.
-    - PR#39+: `ultra_short_nowcast_to_weather_values` / `ultra_short_forecast_
-      to_weather_values` / `mid_forecast_to_weather_values` / `weather_alerts_
-      to_notice_bundles` (notice kind FeatureBundle) 추가 예정.
+    - PR#39+: `ultra_short_nowcast_to_weather_values` 추가됨 (본 PR). 후속
+      `ultra_short_forecast` / `mid_forecast` / `weather_alerts_to_notice_
+      bundles` (notice kind FeatureBundle)는 별도 PR.
     """
     return [
         _item_to_weather_value(
+            item,
+            feature_id=feature_id,
+            source_record_key=source_record_key,
+        )
+        for item in items
+    ]
+
+
+# -- 초단기실황 (ultra_short_nowcast) — PR#39 ---------------------------
+
+
+def _nowcast_item_to_weather_value(
+    item: KmaUltraShortNowcastItem,
+    *,
+    feature_id: str,
+    source_record_key: str | None,
+) -> WeatherValue:
+    """KMA 초단기실황 row 한 건 → ``WeatherValue``.
+
+    단기예보와 달리 발표 시각이 곧 관측 시각이라 ``issued_at``이 아니라
+    ``observed_at``에 채운다. ``valid_at``은 None — 관측은 시점값.
+    """
+    observed_at = _parse_kma_datetime(item.base_date, item.base_time)
+    value_number, value_text = _parse_value(item.category, item.obsr_value)
+
+    return WeatherValue(
+        feature_id=feature_id,
+        provider=normalize_provider_name(KMA_PROVIDER_NAME),
+        weather_domain=WeatherDomain.KMA_ULTRA_SHORT_NOWCAST,
+        forecast_style=ForecastStyle.NOWCAST,
+        timeline_bucket=TimelineBucket.ULTRA_SHORT,
+        metric_key=item.category,
+        source_metric_key=item.category,
+        metric_name=KMA_METRIC_NAMES.get(item.category),
+        unit=KMA_METRIC_UNITS.get(item.category),
+        observed_at=observed_at,
+        value_number=value_number,
+        value_text=value_text,
+        normalization_version="kma-v1.0",
+        payload={
+            "base_date": item.base_date,
+            "base_time": item.base_time,
+            "nx": item.nx,
+            "ny": item.ny,
+            "category": item.category,
+            "obsr_value": item.obsr_value,
+        },
+        source_record_key=source_record_key,
+    )
+
+
+def ultra_short_nowcast_to_weather_values(
+    items: Iterable[KmaUltraShortNowcastItem],
+    *,
+    feature_id: str,
+    source_record_key: str | None = None,
+) -> list[WeatherValue]:
+    """KMA 초단기실황 items → ``list[WeatherValue]``.
+
+    Parameters
+    ----------
+    items
+        `python-kma-api`의 ``getUltraSrtNcst`` typed model iterable.
+        ``KmaUltraShortNowcastItem`` Protocol을 만족해야 한다.
+    feature_id
+        weather kind ``Feature``의 ID (``make_feature_id`` 결과).
+    source_record_key
+        provider raw payload 추적용 (`make_source_record_key` 결과).
+
+    Returns
+    -------
+    list[WeatherValue]
+        입력 순서 유지. ``forecast_style=nowcast``, ``timeline_bucket=
+        ultra_short``, ``observed_at=base_date+base_time``, ``valid_at=None``.
+
+    Notes
+    -----
+    - 초단기실황 카테고리는 단기예보와 일부 다름 (예: ``T1H`` 사용). 단위/한글
+      이름은 ``KMA_METRIC_UNITS`` / ``KMA_METRIC_NAMES``에 모두 포함.
+    - 같은 격자점에서 8 카테고리 × 1 시각 = 8 row가 떨어진다.
+    """
+    return [
+        _nowcast_item_to_weather_value(
             item,
             feature_id=feature_id,
             source_record_key=source_record_key,

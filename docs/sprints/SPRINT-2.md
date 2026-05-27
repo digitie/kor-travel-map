@@ -52,7 +52,8 @@
 - **datasets**:
   - `kma_short_forecast` (단기예보, 3시간 단위, weather kind) — **PR#38 1차
     `short_forecast_to_weather_values` merged 2026-05-28**
-  - `kma_ultra_short_nowcast` (초단기실황, 분 단위) — 후속 PR
+  - `kma_ultra_short_nowcast` (초단기실황, 1시간 단위 관측) — **PR#39
+    `ultra_short_nowcast_to_weather_values` merged 2026-05-28**
   - `kma_ultra_short_forecast` (초단기예보) — 후속 PR
   - `kma_mid_forecast` (중기예보, 일 단위) — 후속 PR
   - `kma_weather_alerts` (특보, notice kind, `notice_type='weather_alert'`
