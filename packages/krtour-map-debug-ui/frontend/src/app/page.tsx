@@ -26,6 +26,10 @@ export default function HomePage() {
         후).
       </p>
 
+      <nav style={{ marginTop: 12 }}>
+        <a href="/etl">→ ETL preview (provider 변환 함수 수동 검증)</a>
+      </nav>
+
       <section style={{ marginTop: 24 }}>
         <h2>Backend health</h2>
         {health.isLoading && <p>loading…</p>}

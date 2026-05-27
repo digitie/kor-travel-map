@@ -23,7 +23,11 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from krtour.map_debug_ui import __version__
-from krtour.map_debug_ui.routers import health_router, version_router
+from krtour.map_debug_ui.routers import (
+    etl_router,
+    health_router,
+    version_router,
+)
 from krtour.map_debug_ui.settings import DebugUiSettings
 
 __all__ = ["app", "create_app"]
@@ -68,6 +72,7 @@ def create_app(settings: DebugUiSettings | None = None) -> FastAPI:
     if settings.debug_routes_enabled:
         application.include_router(health_router)
         application.include_router(version_router)
+        application.include_router(etl_router)
 
     return application
 

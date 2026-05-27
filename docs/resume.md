@@ -176,6 +176,13 @@ PR#22 CI/import-linter merge 후 gate 확인. PR#22 merge 후 PR#23 리포트
       SourceRecord + SourceLink. `OpinetStationItem` Protocol +
       `_coerce_bool_str` LPG Y/N. PR#37 address utility (normalize_korean_
       text/phone) 적극 활용. 424 tests green (신규 15).
+- [x] **PR#44 (merged 2026-05-28)** — 디버그 UI ETL preview 라우터 + frontend
+      페이지. `packages/krtour-map-debug-ui/src/krtour/map_debug_ui/etl_
+      fixtures.py` (6 dataset 등록) + `routers/etl.py` (`/debug/etl/providers
+      |{provider}/datasets|{provider}/{dataset}/preview`). frontend `src/api/
+      etl.ts` + `src/app/etl/page.tsx` (provider/dataset 선택 + Preview 실행
+      + JSON 결과). 적재 없음(dry-run). `?source=fixture` 활성, `?source=live`
+      는 501 후속. 437 tests green (신규 13).
 
 다음 PR 후보 (Sprint 2 entry 계속):
 
