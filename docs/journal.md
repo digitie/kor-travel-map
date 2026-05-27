@@ -2,6 +2,94 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-28 01:10 (claude)
+
+**작업**: PR#37 — ADR-041 본격 구현. `python-kraddr-base` 의존 완전 제거 +
+Address DTO 보강 + `core/address` utility 흡수 + `standard_data.py`에서 적극
+활용. PR 머지 후 `python-kraddr-base` 라이브러리는 archive 후보.
+
+**컨텍스트**: 사용자 지시 — `python-kraddr-base` 의존성을 완전히 삭제하고
+Address 관련 DTO 및 utility를 본 라이브러리로 이전, 본 lib 내에서 적극 활용.
+`PlaceCoordinate`는 제외 (ADR-041 명시).
+
+**Pre-state**: `python-kraddr-base` dependency는 이미 `pyproject.toml`에서
+주석 처리됨 (ADR-041 proposed/accepted 시점에 active dep 아님). 소스 import도
+없음 (docs reference만). 본 PR이 "흡수"의 실 구현.
+
+**신규 파일** (3):
+- `src/krtour/map/core/address.py` (~280 line) — kraddr-base 흡수 utility:
+  - `BjdParts` NamedTuple (sido/sigungu/eupmyeondong/ri) + compose helper
+    (sido_code / sigungu_code / eupmyeondong_code / to_bjd_code)
+  - `normalize_bjd_code(value)` — None/empty/int/str/dash/dot/9자리 padding
+    모두 흡수, 10자리 숫자 아니면 ValueError
+  - `is_valid_bjd_code(value)` — raise 없이 bool
+  - `parse_bjd_code(value)` → `BjdParts`
+  - `extract_sigungu_code(bjd_code)` / `extract_sido_code(bjd_code)` —
+    5자리/2자리 추출
+  - `normalize_phone_number(value)` — 한국 전화 표기 (02 지역 9/10자리,
+    일반 10자리 3-3-4, 11자리 3-4-4, normalize 불가능 시 원본 trim)
+  - `normalize_korean_text(value)` — NFKC + strip + 다중공백 1개로 (전각
+    공백 흡수)
+- `tests/unit/test_core_address.py` (~220 line, 30+ case)
+- `tests/unit/test_dto_address.py` (~140 line, 32 case)
+
+**변경 파일** (6):
+- `src/krtour/map/dto/address.py` — `Address` 모델 풍부화:
+  - 새 필드: `admin_dong_code` / `road_name_code` / `road_address_management_no`
+    / `zipcode` / `sido_name` / `sigungu_name`
+  - field validator: bjd_code/admin_dong_code(10자리) / sigungu_code(5자리) /
+    sido_code(2자리) / zipcode(5자리) 모두 strict 자릿수 검증
+  - model_validator: bjd_code prefix와 sido_code/sigungu_code 일관성 검증
+    (둘 다 있을 때만, 한쪽 None이면 skip)
+  - helper method: `is_complete()` (bjd + road or legal), `display()`
+    (우선순위 road → legal → admin → '')
+  - kraddr-base의 `LegalAddress` / `RoadAddress` / `AddressRegion`을 한
+    모델로 통합 (분리 모델 안 만듦)
+- `src/krtour/map/core/__init__.py` — 8 신규 식별자 re-export
+- `src/krtour/map/providers/standard_data.py` — `_item_to_bundle`에서 utility
+  적극 활용:
+  - `normalize_bjd_code(rg.bjd_code)` — reverse_geocoder 응답에 dash 변형
+    있어도 흡수
+  - `extract_sigungu_code(bjd_code)` / `extract_sido_code(bjd_code)` —
+    reverse_geocoder가 sigungu/sido 안 채워줘도 bjd_code에서 자동 추출
+  - `normalize_korean_text` — road/legal/admin/festival_name/venue_name/
+    organizer_name/provider_org_name 모두 전각공백 + 다중공백 흡수
+  - `normalize_phone_number(organizer_tel)` — dash 표준 표기 강제
+- `src/krtour/map/infra/models.py` — comment "kraddr.base.Address" →
+  "krtour.map.dto.Address (ADR-041)"
+- `docs/address-geocoding.md` §1 의존 라이브러리 정리 (kraddr-base 흡수 반영,
+  `Coordinate` 단일 source 명시, PlaceCoordinate 제외 강조), §2 핵심 callable
+  본 lib 타입으로 정정
+- `docs/kraddr-base-types.md` — 상단에 SUPERSEDED note 추가 (ADR-041, PR#37,
+  2026-05-27). 본문은 결정 이력 보존을 위해 유지.
+- `AGENTS.md` 식별자 표 — Address DTO + 행정코드 utility 행 신설
+- `docs/journal.md` / `docs/resume.md` / `docs/sprints/SPRINT-4.md` (계획
+  반영)
+
+**Verification (local)**:
+- `pytest tests/ packages/krtour-map-debug-ui/tests/ --ignore=tests/
+  integration -q` → **320 passed, 4 skipped** (PR#36 258 + 신규 62)
+- `ruff check src/ tests/ packages/krtour-map-debug-ui/` → All checks passed
+  (auto-fix 1회 후 clean)
+- `mypy --strict src/krtour/map packages/krtour-map-debug-ui/src/krtour/
+  map_debug_ui` → Success: no issues found in 39 source files
+- `lint-imports` → 4 contracts kept, 0 broken
+- `python packages/krtour-map-debug-ui/scripts/export_openapi.py --check` →
+  exit 0 (Address 변경은 backend 라우터/응답 schema에 영향 없음)
+
+**ADR-041 명시적 제외 ("`PlaceCoordinate`는 제외")**:
+- `core/address.py` 모듈 docstring + `dto/address.py` docstring 두 곳에서
+  명시. 좌표 DTO는 `krtour.map.dto.coordinate.Coordinate` 단일 source.
+- `SKILL.md` DO NOT 룰 26 ("kraddr-base의 PlaceCoordinate import 금지")가
+  CI에서 강제 — import 시점 차단.
+
+**알려진 후속 작업** (Sprint 4 prep + 별도 PR):
+- `python-kraddr-base` 저장소 archive PR (그쪽 저장소).
+- TripMate apps/etl이 본 라이브러리 새 Address/utility로 마이그레이션
+  (별도 저장소).
+- 다른 provider 모듈(`visitkorea`/`kma`/`opinet`/...) 진입 시 본 utility
+  적극 활용.
+
 ## 2026-05-28 00:30 (claude)
 
 **작업**: PR#36 — Sprint 2 §2.5 frontend skeleton 시작. Next.js 15 App Router

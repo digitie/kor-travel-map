@@ -42,6 +42,7 @@ TripMate ↔ krtour-map 사이에는 REST API가 없다.
 | PostGIS extension schema | `x_extension` (ADR-008) |
 | 디버그 UI 패키지 | `krtour-map-debug-ui` (별도 **Python** 패키지, monorepo 내 `packages/krtour-map-debug-ui/`, ADR-020) |
 | Category 모듈 출처 | `krtour.map.category` (구 `kraddr.base.categories`에서 이전, ADR-023) |
+| Address DTO + 행정코드 utility | `krtour.map.dto.Address` + `krtour.map.core.address` (구 `kraddr.base`에서 흡수, ADR-041 — `PlaceCoordinate`는 제외, 좌표는 `Coordinate`로 단일화) |
 | ADR accepted | 001~028, 030~043 (text on main). 029는 ADR-043으로 supersede. **035~043 일괄 accepted 전환 PR#33, 2026-05-27** — 1차 implement 시점: 038(즉시) / 042(SPRINT-2 §2.1) / 035·037·043(SPRINT-2 §2.5) / 036(SPRINT-3 후반) / 039·040·041(SPRINT-4 prep). |
 | ADR proposed | (없음) — 다음 후보 번호는 ADR-044. |
 | Sprint plan | `docs/sprints/SPRINT-1.md` ~ `SPRINT-5.md` |

@@ -1,13 +1,23 @@
-# kraddr-base-types.md — `python-kraddr-base` 사용 기준
+# kraddr-base-types.md — `python-kraddr-base` 사용 기준 (SUPERSEDED)
+
+> **이 문서는 superseded by ADR-041 (PR#37, 2026-05-27)**.
+> `python-kraddr-base` 의존은 완전 제거되었다. 주소/도메인/utility는 본
+> 라이브러리(`krtour.map.dto.Address` + `krtour.map.core.address`)로 흡수.
+> `PlaceCoordinate`는 명시적 제외 — 좌표 DTO는 `krtour.map.dto.coordinate
+> .Coordinate` 단일 source.
+>
+> 본 문서는 v2 sprint 2 진입 직전 ADR-023 시점 사양으로 작성되었다. 흡수 매핑
+> 표는 `krtour.map.core.address` 모듈 docstring 또는 `docs/decisions.md`
+> ADR-041 본문 참조. 신규 작업은 본 문서를 보지 말 것.
 
 본 문서는 `python-kraddr-base`(import: `kraddr.base`)의 주소·좌표·CRS 타입을
-본 라이브러리에서 어떻게 사용하는지 정리한다.
+본 라이브러리에서 어떻게 사용하는지 정리한다 (v2 ADR-023 시점, ADR-041 이전).
 
 > 주의: kraddr-base의 **category 모듈**(`kraddr.base.categories`)은 **본
 > 저장소로 이전**되었다 — `krtour.map.category` (ADR-023). 따라서 본 문서는
 > 주소/좌표/CRS만 다룬다. category는 `docs/category.md`.
 
-## 1. 의존 정책
+## 1. 의존 정책 (구 — ADR-041 이전)
 
 - `python-kraddr-base`는 본 라이브러리의 의존 dependency (`pyproject.toml`).
 - 주소(`Address`), 좌표(`PlaceCoordinate`), CRS 상수만 사용. Category는 본 저장소.
