@@ -128,6 +128,15 @@ PR#22 CI/import-linter merge 후 gate 확인. PR#22 merge 후 PR#23 리포트
       store) + `src/providers/query-client-provider.tsx` + `src/app/
       {layout,page}.tsx`. `packages/map-marker-react/package.json`
       `"private": true` (ADR-043 npm 게시 보류).
+- [x] **PR#37 (merged 2026-05-28)** — ADR-041 본격 구현. `python-kraddr-base`
+      의존 완전 제거. `Address` DTO 보강 (admin_dong_code/road_name_code/
+      road_address_management_no/zipcode/sido_name/sigungu_name 추가 +
+      자릿수 strict validator + bjd↔sigungu/sido consistency model_validator
+      + is_complete()/display() helper). `core/address.py` 신설 — BjdParts /
+      normalize_bjd_code / parse_bjd_code / extract_sigungu_code /
+      extract_sido_code / normalize_phone_number / normalize_korean_text.
+      `standard_data.py`에서 utility 적극 활용. 320 unit tests green.
+      `PlaceCoordinate`는 명시적 제외 (좌표는 Coordinate 단일 source).
 
 다음 PR 후보 (Sprint 2 entry 계속):
 

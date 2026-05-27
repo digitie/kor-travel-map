@@ -27,6 +27,16 @@ ADR 참조
 
 from __future__ import annotations
 
+from krtour.map.core.address import (
+    BjdParts,
+    extract_sido_code,
+    extract_sigungu_code,
+    is_valid_bjd_code,
+    normalize_bjd_code,
+    normalize_korean_text,
+    normalize_phone_number,
+    parse_bjd_code,
+)
 from krtour.map.core.exceptions import (
     DuplicateFeatureError,
     FeatureNotFoundError,
@@ -109,4 +119,13 @@ __all__ = [
     "haversine_meters",
     "DedupDecision",
     "classify_decision",
+    # address (PR#37, ADR-041 — python-kraddr-base 흡수)
+    "BjdParts",
+    "normalize_bjd_code",
+    "is_valid_bjd_code",
+    "parse_bjd_code",
+    "extract_sigungu_code",
+    "extract_sido_code",
+    "normalize_phone_number",
+    "normalize_korean_text",
 ]

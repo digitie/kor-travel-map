@@ -43,6 +43,13 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Final, Protocol, runtime_checkable
 
+from krtour.map.core.address import (
+    extract_sido_code,
+    extract_sigungu_code,
+    normalize_bjd_code,
+    normalize_korean_text,
+    normalize_phone_number,
+)
 from krtour.map.core.ids import (
     make_feature_id,
     make_payload_hash,
@@ -201,7 +208,12 @@ def _item_to_bundle(
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None,
 ) -> FeatureBundle:
-    """한 row → 한 ``FeatureBundle``. 본 함수는 모듈 private."""
+    """한 row → 한 ``FeatureBundle``. 본 함수는 모듈 private.
+
+    한국어 텍스트/전화번호/법정동코드는 ``krtour.map.core.address``의 정규화
+    helper를 적극 활용해 provider raw 변형(전각 공백 / dash 변형 / 9자리
+    bjd_code 등)을 흡수한다 (ADR-041).
+    """
 
     # 1) Coordinate (한 쪽이라도 None이면 좌표 미상).
     coord: Coordinate | None
@@ -210,7 +222,9 @@ def _item_to_bundle(
     else:
         coord = None
 
-    # 2) Reverse geocoding (있으면, 좌표 있을 때만).
+    # 2) Reverse geocoding (있으면, 좌표 있을 때만). bjd_code는 normalize로
+    #    9자리/dash 입력 같은 변형 흡수. sigungu/sido는 reverse_geocoder가 안
+    #    채워줘도 bjd_code에서 자동 추출.
     bjd_code: str | None = None
     sigungu_code: str | None = None
     sido_code: str | None = None
@@ -218,15 +232,16 @@ def _item_to_bundle(
     if coord is not None and reverse_geocoder is not None:
         rg = reverse_geocoder.lookup(lon=coord.lon, lat=coord.lat)
         if rg is not None:
-            bjd_code = rg.bjd_code
-            sigungu_code = rg.sigungu_code
-            sido_code = rg.sido_code
-            admin_address = rg.admin_address
+            bjd_code = normalize_bjd_code(rg.bjd_code)
+            sigungu_code = rg.sigungu_code or extract_sigungu_code(bjd_code)
+            sido_code = rg.sido_code or extract_sido_code(bjd_code)
+            admin_address = normalize_korean_text(rg.admin_address)
 
-    # 3) Address — 빈 필드는 None으로 남김 (Address(extra='forbid'), road/legal/admin은 nullable).
+    # 3) Address — 한국어 텍스트는 normalize로 전각/다중 공백 흡수. nullable
+    #    필드는 None 유지 — Address(extra='forbid') validator 통과.
     address = Address(
-        road=item.road_address,
-        legal=item.jibun_address,
+        road=normalize_korean_text(item.road_address),
+        legal=normalize_korean_text(item.jibun_address),
         admin=admin_address,
         bjd_code=bjd_code,
         sigungu_code=sigungu_code,
@@ -273,11 +288,12 @@ def _item_to_bundle(
         source_natural_key=item.management_no,
     )
 
-    # 7) Feature 본체.
+    # 7) Feature 본체. 한국어 텍스트는 normalize, 전화번호는 dash 표준 표기로.
+    normalized_name = normalize_korean_text(item.festival_name) or item.festival_name
     feature = Feature(
         feature_id=feature_id,
         kind=FeatureKind.EVENT,
-        name=item.festival_name,
+        name=normalized_name,
         coord=coord,
         address=address,
         category=FESTIVAL_CATEGORY,
@@ -288,13 +304,13 @@ def _item_to_bundle(
             event_kind="festival",
             starts_on=item.start_date,
             ends_on=item.end_date,
-            venue_name=item.venue_name,
-            tel=item.organizer_tel,
+            venue_name=normalize_korean_text(item.venue_name),
+            tel=normalize_phone_number(item.organizer_tel),
             # area_code / sigungu_code 등 TourAPI 식별자는 visitkorea enrichment
             # 단계에서 채움 (ADR-042). 표준데이터는 영문 행정코드만.
             payload={
-                "organizer_name": item.organizer_name,
-                "provider_org_name": item.provider_org_name,
+                "organizer_name": normalize_korean_text(item.organizer_name),
+                "provider_org_name": normalize_korean_text(item.provider_org_name),
             },
         ),
     )

@@ -146,7 +146,7 @@ class FeatureRow(Base):
     )
     geom: Mapped[Any | None] = mapped_column(Geometry("GEOMETRY", srid=4326))
 
-    # 주소 (kraddr.base.Address 직렬화).
+    # 주소 (krtour.map.dto.Address 직렬화, ADR-041 — kraddr-base 흡수).
     address: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb"),
     )

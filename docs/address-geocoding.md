@@ -1,13 +1,23 @@
 # address-geocoding.md — 주소·좌표 보강
 
-본 문서는 feature 주소/좌표를 `python-kraddr-base` DTO로 정리하고, 필요 시
-`python-kraddr-geo` 기반 정/역지오코딩으로 보강하는 패턴이다. 매칭 수준은
-`AddressMatchReport`로 추적한다.
+본 문서는 feature 주소/좌표를 본 라이브러리 `Address` DTO로 정리하고, 필요 시
+`python-kraddr-geo` 기반 정/역지오코딩으로 보강하는 패턴이다.
+
+**ADR-041 (2026-05-27)** — 주소 DTO + utility는 `python-kraddr-base`에서
+본 라이브러리로 흡수. 외부 의존 1개 제거.
 
 ## 1. 의존 라이브러리
 
-- 주소·좌표 DTO: `python-kraddr-base` (`docs/kraddr-base-types.md`)
-- geocoding 엔진: `python-kraddr-geo` (`kraddr.geo.AsyncAddressClient`)
+- 주소 DTO: **`krtour.map.dto.Address`** (PR#37, ADR-041 — kraddr-base 흡수).
+  보강 필드: bjd_code / admin_dong_code / sigungu_code / sido_code /
+  road_name_code / road_address_management_no / zipcode / sido_name /
+  sigungu_name.
+- 좌표 DTO: **`krtour.map.dto.Coordinate`** (`PlaceCoordinate` 명시적 제외).
+- 주소 normalize / 행정코드 parse: **`krtour.map.core.address`** (PR#37) —
+  `normalize_bjd_code` / `parse_bjd_code` / `extract_sigungu_code` /
+  `extract_sido_code` / `normalize_phone_number` / `normalize_korean_text`.
+- geocoding 엔진: `python-kraddr-geo` (`kraddr.geo.AsyncAddressClient`) — 별도
+  라이브러리 (흡수 대상 아님).
 - VWorld 폴백 키: `python-kraddr-geo` 내부 store 설정에서만. 본 라이브러리에서
   `python-vworld-api` 직접 import 금지.
 
@@ -15,14 +25,18 @@
 
 ```python
 from typing import Awaitable, Callable
-from kraddr.base import Address, PlaceCoordinate
+
+from krtour.map.dto import Address, Coordinate
 
 # 정지오코딩: 주소 문자열 + 코드 → 좌표
-AddressGeocoder = Callable[[Address], Awaitable[PlaceCoordinate | None]]
+AddressGeocoder = Callable[[Address], Awaitable[Coordinate | None]]
 
 # 역지오코딩: 좌표 → 행정구역 코드가 있는 Address
-ReverseGeocoder = Callable[[PlaceCoordinate], Awaitable[Address | None]]
+ReverseGeocoder = Callable[[Coordinate], Awaitable[Address | None]]
 ```
+
+provider 변환 모듈은 이 위에 동기 `Protocol` 변종을 따로 두기도 한다 — 예:
+`krtour.map.providers.standard_data.ReverseGeocoder` (PR#34).
 
 async-only (ADR-002). resource dataclass:
 
