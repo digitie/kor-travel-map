@@ -52,5 +52,10 @@ alembic/__pycache__/
 .claude/
 .codex_tmp/
 
+# codegraph (colbymchenry/codegraph) — agent용 semantic knowledge graph 인덱스
+# `.codegraph/codegraph.db`는 worktree 로컬 SQLite index. 공유하지 않음.
+# 자세히는 docs/codegraph-worktree.md.
+.codegraph/
+
 # Local tool state
 .dagster/

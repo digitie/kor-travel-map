@@ -65,6 +65,52 @@ PC 개발은 **WSL ext4** 위에서 수행한다. NTFS 마운트에서 직접 `g
 자세한 절차는 `docs/dev-environment.md`. Windows 재설치/WSL 초기화/새 세션 인수인계
 시 `docs/windows-reinstall-recovery.md`도 함께 읽는다.
 
+## 에이전트 worktree + codegraph (필수)
+
+여러 AI 에이전트가 동시에 한 저장소에서 일할 때 발생하는 브랜치 컨텍스트
+충돌·캐시 무효화·codegraph 인덱스 sync 비용 문제를 막기 위해, 각 AI
+에이전트는 **자기 전용 git worktree** + **로컬 codegraph 인덱스 1개**를
+가진다. 자세히는 `docs/codegraph-worktree.md`.
+
+| AI 에이전트 | 고정 worktree 디렉토리 |
+|------------|----------------------|
+| ChatGPT Codex | `~/dev/geo-codex/` |
+| Claude Code (본 SDK 포함) | `~/dev/geo-claude/` |
+| Google Antigravity 2.0 | `~/dev/geo-antigravity/` |
+
+운영 룰:
+
+- 메인 repo 디렉토리(`~/dev/python-krtour-map/`)의 **형제로** worktree 생성:
+  `git worktree add ../geo-claude main`.
+- 작업마다 **그 worktree 안에서 브랜치만 새로** 딴다 — worktree 자체는
+  고정. `git switch -c feat/<topic> main`.
+- 각 worktree에 [colbymchenry/codegraph](https://github.com/colbymchenry/codegraph)
+  인덱스가 **딱 1번** 만들어진다 (`codegraph init -i`). 이후 브랜치/pull
+  후에는 **재초기화 대신 `codegraph sync`로 증분 동기**.
+- `.codegraph/` 디렉토리는 `.gitignore`에 박혀 있다 — 커밋하지 않는다.
+- CI는 codegraph를 돌리지 않는다(에이전트 컨텍스트 절약용 도구).
+
+작업 사이클(PR 1건):
+
+```bash
+cd ~/dev/geo-claude         # 자기 worktree로 이동
+git fetch && git switch main && git pull --ff-only
+git switch -c feat/<topic> main
+codegraph sync              # 인덱스 증분 동기 (init 아님)
+# ... 작업 / pytest / ruff / mypy / lint-imports ...
+git push -u origin feat/<topic>
+gh pr create --title "..." --body "..."
+```
+
+최초 설치(worktree마다 1회):
+
+```bash
+npm i -g @colbymchenry/codegraph   # CLI 전역 (어느 OS든 동일)
+cd ~/dev/geo-<agent>
+codegraph init -i                   # .codegraph/ + SQLite 인덱스 생성
+codegraph install --yes             # (선택) MCP 서버를 자기 AI 에이전트에 등록
+```
+
 작업 전 반드시 다음을 읽는다:
 
 1. `README.md` — 프로젝트 개요와 빠른 시작
