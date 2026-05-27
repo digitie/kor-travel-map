@@ -111,6 +111,51 @@ codegraph init -i                   # .codegraph/ + SQLite 인덱스 생성
 codegraph install --yes             # (선택) MCP 서버를 자기 AI 에이전트에 등록
 ```
 
+자주 쓰는 커맨드 (`docs/codegraph-worktree.md` §5에 전체):
+
+- `codegraph init -i` — 인덱싱 초기화 (worktree마다 1회)
+- `codegraph status` — 동기화 상태 확인
+- `codegraph sync` — 브랜치 전환/pull 후 증분 동기
+- `codegraph impact <file>` / `callers <sym>` / `callees <sym>` — 영향도
+
+### MCP 서버 등록 (`.claude.json` 등)
+
+`codegraph install --yes`로 자동 등록하거나, 수동으로 `~/.claude.json` (Linux/
+macOS) / `C:\Users\<user>\.claude.json` (Windows)의 `mcpServers`에 다음 블록을
+추가:
+
+```json
+{
+  "mcpServers": {
+    "codegraph": {
+      "type": "stdio",
+      "command": "codegraph",
+      "args": ["serve", "--mcp"]
+    }
+  }
+}
+```
+
+`codegraph` 글로벌 설치를 회피하려면 `npx -y @colbymchenry/codegraph serve
+--mcp`로 대체. WSL2 `/mnt`에서는 `--no-watch`를 args에 추가(파일 watcher 느림
+해소). Codex CLI / Cursor / opencode / Hermes 등 다른 에이전트는 `codegraph
+install --print-config <target>`으로 각자 snippet 출력. 자세히는
+`docs/codegraph-worktree.md` §6.
+
+### Code Style & Rules — 수정 전 영향도 평가 (필수)
+
+본 라이브러리는 **함수 직접 호출 인터페이스**라서 한 함수/DTO 시그니처 변경이
+호출자 여러 곳을 깨뜨릴 수 있다. 코드 컴포넌트(특히 `Feature` DTO / `make_
+feature_id` / provider 변환 함수 / `core/scoring.py` / `infra/models.py`)를
+수정하기 **전에** codegraph로 영향도를 평가한다:
+
+- MCP 환경: `codegraph_explore` MCP 도구로 호출자/의존/영향을 한 번에.
+- CLI 환경: `codegraph callers <sym>` + `codegraph impact <file>` +
+  `codegraph callees <sym>` 조합.
+
+예외: 신규 파일만 추가하고 기존 심볼 시그니처가 그대로일 때(예: 새 provider
+변환 함수 추가)는 생략 가능. 자세히는 `docs/codegraph-worktree.md` §7.
+
 작업 전 반드시 다음을 읽는다:
 
 1. `README.md` — 프로젝트 개요와 빠른 시작

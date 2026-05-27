@@ -73,6 +73,15 @@ worktree마다 [codegraph](https://github.com/colbymchenry/codegraph) 인덱스
 `AGENTS.md` §"에이전트 worktree + codegraph". ChatGPT Codex는 `geo-codex`,
 Google Antigravity 2.0은 `geo-antigravity` worktree를 쓴다.
 
+**codegraph MCP 등록**: `~/.claude.json` (Windows: `C:\Users\<user>\.claude
+.json`)의 `mcpServers`에 `codegraph: { type: stdio, command: codegraph,
+args: ["serve", "--mcp"] }` 블록을 추가하거나 `codegraph install --yes`로
+자동 등록. 이후 Claude Code 세션은 `codegraph_explore` MCP 도구를 자동
+인식한다. **컴포넌트(특히 `Feature` DTO / `make_feature_id` / provider
+변환 함수) 수정 전에 반드시 `codegraph_explore` 또는 CLI `codegraph
+impact`/`callers`/`callees`로 영향도를 먼저 평가**한다 (`docs/codegraph-
+worktree.md` §7).
+
 ## 5. 절대 금지 (가장 중요한 5개)
 
 1. **main에 직접 push 금지** — 모든 변경은 feature branch + PR (ADR-021).

@@ -131,10 +131,13 @@ gh pr create --title "..." --body "..."
 업데이트된 codegraph CLI 새 버전과 호환 안 되면, `.codegraph/` 통째로 지우고
 `codegraph init -i` 다시.
 
-## 5. codegraph 자주 쓰는 커맨드
+## 5. CodeGraph Commands (CLI 빠른 참조)
 
 ```bash
-# 인덱스 상태 확인
+# 인덱싱 초기화 (worktree마다 1회)
+codegraph init -i
+
+# 동기화 상태 확인 (Files / Nodes / Edges / DB Size / 최신 여부)
 codegraph status
 
 # 증분 동기 (브랜치 전환/pull 직후)
@@ -150,21 +153,111 @@ codegraph query "Feature DTO"
 codegraph callers normalize_provider_name
 codegraph callees score_pair
 
-# 변경 영향 분석
+# 변경 영향 분석 (수정 전 영향도 평가에 사용 — §7 참조)
 codegraph impact src/krtour/map/dto/feature.py
+
+# AI 에이전트용 컨텍스트 빌드 (markdown 출력)
+codegraph context "Add visitkorea festival provider"
 ```
 
 본 라이브러리에서 자주 쓸 쿼리 예시는 `SKILL.md` §"자주 묻는 작업"의
 "새 provider 추가" 행을 참조.
 
-## 6. CI / 빌드와의 관계
+## 6. MCP 서버 등록 (AI 에이전트 통합)
+
+codegraph는 MCP(Model Context Protocol) stdio 서버로도 동작한다. 본 PC의
+`.claude.json`(Windows: `C:\Users\<user>\.claude.json`, Linux/macOS:
+`~/.claude.json`)에 다음 블록을 추가하면 Claude Code 세션이 자동으로
+codegraph MCP 도구(`codegraph_query`, `codegraph_callers`, `codegraph_explore`
+등)를 인식한다.
+
+### 6.1 권장 (codegraph CLI 글로벌 설치된 경우)
+
+```json
+{
+  "mcpServers": {
+    "codegraph": {
+      "type": "stdio",
+      "command": "codegraph",
+      "args": ["serve", "--mcp"]
+    }
+  }
+}
+```
+
+이 snippet은 `codegraph install --print-config claude`에서 출력되는 공식
+형태와 동일하다. `codegraph install --yes`로 자동 등록할 수도 있다(`.claude
+.json`을 직접 편집하는 대신).
+
+### 6.2 대안 (`npx`로 매번 fetch — 글로벌 설치 회피)
+
+`npm i -g`를 쓰고 싶지 않거나, 여러 PC에 빠르게 굴리고 싶을 때:
+
+```json
+{
+  "mcpServers": {
+    "codegraph": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@colbymchenry/codegraph", "serve", "--mcp"]
+    }
+  }
+}
+```
+
+`npx -y`는 매 실행마다 캐시된 패키지를 쓰거나 없으면 fetch한다 — 첫 실행이
+약간 느릴 수 있다. 글로벌 설치한 경우는 §6.1을 우선.
+
+### 6.3 다른 에이전트 (Codex CLI / Cursor / opencode / Hermes)
+
+`codegraph install --print-config <target>`으로 각 에이전트별 snippet을
+얻는다. `<target>`은 `codex` / `cursor` / `opencode` / `hermes`. 또는
+`codegraph install --target <id> --location global --yes`로 자동 등록.
+
+### 6.4 WSL2 `/mnt` 위에서 운영할 때
+
+WSL2가 `/mnt/f/`(NTFS)를 마운트한 경우 파일 시스템 watcher가 매우 느리다.
+`--no-watch`를 추가해서 auto-sync를 끄고, 대신 `git switch`/`pull` 후
+명시적으로 `codegraph sync`를 호출한다:
+
+```json
+"args": ["serve", "--mcp", "--no-watch"]
+```
+
+본 저장소 정책상 `.codegraph/`는 WSL ext4 또는 NTFS 네이티브(Windows
+PowerShell 기준)에 두는 게 권장 — §8 참조.
+
+## 7. Code Style & Rules — 수정 전 영향도 평가
+
+본 저장소는 **함수 라이브러리**라서 한 함수/DTO의 시그니처 변경이 호출자
+여러 곳을 깨뜨릴 수 있다(특히 `Feature` DTO, `make_feature_id`, provider
+변환 함수). 코드 컴포넌트를 수정하기 전에 **반드시** codegraph로 영향도를
+먼저 평가한다:
+
+- **MCP 환경 (Claude Code / Codex CLI 등)** — `codegraph_explore` MCP 도구를
+  호출해서 대상 심볼의 호출자 / 의존 / 변경 영향을 한 번에 본다. 그
+  결과를 바탕으로 PR 범위를 결정.
+- **CLI 환경 (사람 직접 작업)** — `codegraph callers <symbol>` +
+  `codegraph impact <file>` + `codegraph callees <symbol>` 조합으로
+  같은 정보를 얻는다.
+
+이 단계 없이 수정에 들어가면 import-linter 4 계약 위반 / 깨진 호출자 /
+잊혀진 테스트 fixture 등이 PR 끝물에서 발견되어 비용이 폭증한다. **변경
+이전 영향도 평가는 PR 절차의 일부**다(별도 lint 없이 에이전트가 자가
+규율).
+
+예외: 신규 파일만 추가하고 기존 심볼 시그니처가 그대로인 경우(예: 새
+provider 변환 함수 추가 — `score_pair`/`make_feature_id` 시그니처 변경 X)
+는 영향도 평가를 생략할 수 있다.
+
+## 8. CI / 빌드와의 관계
 
 - `.codegraph/`는 **로컬 전용**. CI(`.github/workflows/`)에서 codegraph를
   돌리지 않는다.
 - import-linter / pytest / ruff / mypy는 codegraph와 무관하게 그대로 돈다.
 - codegraph는 **에이전트의 컨텍스트 절약용 도구**이지 검증 도구가 아니다.
 
-## 7. WSL ext4 + NTFS data와의 호환
+## 9. WSL ext4 + NTFS data와의 호환
 
 `docs/dev-environment.md` §"파일 위치 정책"과 동일 정책:
 
@@ -178,14 +271,14 @@ codegraph impact src/krtour/map/dto/feature.py
 `.codegraph/`는 SQLite 파일이므로 ext4 권장(NTFS에서 직접 운영하면 락/inotify
 문제).
 
-## 8. 사용자가 직접 작업할 때
+## 10. 사용자가 직접 작업할 때
 
 사용자가 직접 (AI 에이전트 거치지 않고) 작업하는 경우는 메인 worktree
 (`~/dev/python-krtour-map/`)를 그대로 쓴다. `geo-*` worktree는 **각 AI
 에이전트의 sandbox** — 사용자가 그 안에 들어가서 직접 수정하면 에이전트의
 context와 충돌하므로 피한다.
 
-## 9. 참고
+## 11. 참고
 
 - [colbymchenry/codegraph](https://github.com/colbymchenry/codegraph) — 본
   도구 공식 저장소

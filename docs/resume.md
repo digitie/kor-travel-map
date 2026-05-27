@@ -94,12 +94,18 @@ PR#22 CI/import-linter merge 후 gate 확인. PR#22 merge 후 PR#23 리포트
       의존) + `core/providers.py` CANONICAL_PROVIDER_NAMES 18종 + alias 24종.
       `jellyfish>=1.0` dep. `core/weather.py`는 WeatherValue DTO 의존 →
       Sprint 2 KMA PR에서 함께. 238 pytest passed, all lint green.
-- [ ] **agent worktree + codegraph 룰 PR (현재 진행)**: `docs/codegraph-
-      worktree.md` 신규 + AGENTS/CLAUDE/SKILL/agent-guide/dev-environment 절
-      추가 + `.gitignore`에 `.codegraph/` 추가. 본 PC에 codegraph v0.9.5
-      설치 + `.codegraph/` 인덱스 초기화 (64 파일/719 노드/1,205 edge). 향후
-      모든 AI 에이전트는 자기 전용 worktree(`geo-codex`/`geo-claude`/
+- [x] **PR#30 (merged 2026-05-27 12:35)** agent worktree + codegraph 룰:
+      `docs/codegraph-worktree.md` 신규 + AGENTS/CLAUDE/SKILL/agent-guide/
+      dev-environment 절 추가 + `.gitignore`에 `.codegraph/`. 본 PC에 codegraph
+      v0.9.5 설치 + `.codegraph/` 인덱스 초기화 (64 파일/719 노드/1,205 edge).
+      향후 모든 AI 에이전트는 자기 전용 worktree(`geo-codex`/`geo-claude`/
       `geo-antigravity`) + 로컬 codegraph 인덱스로 작업.
+- [ ] **agent worktree codegraph 보강 PR (현재 진행)**: `.claude.json`
+      `mcpServers` 등록 snippet (`codegraph serve --mcp` 정확 형태) + `npx`
+      대안 + WSL2 `--no-watch` + `codegraph_explore` MCP 도구로 컴포넌트 수정
+      전 영향도 평가하는 DO 룰. AGENTS.md / SKILL.md / CLAUDE.md / agent-guide
+      에 cross-reference. 사용자 초안의 `mcp` 서브커맨드 오기 보정
+      (`codegraph install --print-config claude` 출력에 정합).
 - [ ] **Sprint 2 첫 provider PR** (ADR-034 1단계, PR#30 후보):
       `providers/visitkorea/` 축제 + `infra/feature_repo.py` raw SQL +
       `feature_event_details` 테이블 마이그레이션.
