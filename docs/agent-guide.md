@@ -169,6 +169,9 @@ Sprint 2 prep — `infra/models.py` + Alembic 첫 revision.
 
 ### 7.3 DTO 추가/변경 (코드 단계 진입 후)
 
+- [ ] **수정 전 영향도 평가** — MCP `codegraph_explore` 또는 CLI
+      `codegraph callers <sym>` + `codegraph impact <file>`로 호출자 파악
+      (`docs/codegraph-worktree.md` §7).
 - [ ] `dto/` 모듈 + Pydantic validator
 - [ ] `tests/unit/test_dto_*.py` validator branch 100%
 - [ ] 관련 통합 테스트

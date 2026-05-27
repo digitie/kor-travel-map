@@ -2,6 +2,55 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-27 21:55 (claude)
+
+**작업**: PR#30 머지 직후 후속 — `docs/codegraph-worktree.md`에 §6 "MCP
+서버 등록" + §7 "Code Style & Rules (수정 전 영향도 평가)" 추가. AGENTS.md /
+SKILL.md / CLAUDE.md / agent-guide.md에 동일 룰 cross-reference.
+
+**컨텍스트**: 사용자 지시 — `~/.claude.json` `mcpServers`에 codegraph 등록할
+수 있도록 snippet을 문서에 박을 것, 그리고 `codegraph_explore` 도구로 컴포넌트
+수정 전 영향도를 평가하는 룰을 추가할 것.
+
+**중요 fact-check**: 사용자가 적어준 snippet은 `args: ["-y", "@colbymchenry/
+codegraph", "mcp"]`였으나 `codegraph` CLI에 `mcp` 서브커맨드는 없음. 실제 MCP
+서버 명령은 `codegraph serve --mcp`. `codegraph install --print-config claude`
+가 출력하는 공식 snippet으로 보정:
+
+```json
+{
+  "mcpServers": {
+    "codegraph": {
+      "type": "stdio",
+      "command": "codegraph",
+      "args": ["serve", "--mcp"]
+    }
+  }
+}
+```
+
+사용자 의도(npx 대안)는 §6.2에 살림 — `["npx", "-y", "@colbymchenry/
+codegraph", "serve", "--mcp"]`. WSL2 `/mnt`에서는 `--no-watch` 추가 권장 (§6.4).
+
+**변경 파일** (5):
+- `docs/codegraph-worktree.md` — §5 "CodeGraph Commands" 빠른 참조 + §6 "MCP
+  서버 등록" 4 subsection (글로벌 / npx / 다른 에이전트 `codegraph install
+  --print-config` / WSL2 `--no-watch`) + §7 "Code Style & Rules — 수정 전
+  영향도 평가" 신설. §6→§8 / §7→§9 / §8→§10 / §9→§11 renumber.
+- `AGENTS.md` — "에이전트 worktree + codegraph (필수)" 절에 MCP snippet +
+  "Code Style & Rules — 수정 전 영향도 평가 (필수)" subsection 추가.
+- `CLAUDE.md` — codegraph MCP 등록 + `codegraph_explore` 사용 룰 1 단락.
+- `SKILL.md` "에이전트 worktree + codegraph" 절에 CodeGraph Commands 빠른
+  참조 + MCP 등록 + DO 룰 subsection 3개 추가.
+- `docs/agent-guide.md` §7.3 DTO 변경 체크리스트 첫 항목으로 "수정 전 영향도
+  평가" 추가.
+
+**검증**:
+- `codegraph install --print-config claude` → 본 PR snippet과 일치.
+- `codegraph serve --help` → `--mcp` 플래그 존재, `--no-watch`도 있음.
+- `codegraph --help` → `mcp`라는 subcommand 없음 (있는 건 `serve`만) —
+  사용자 초안 `mcp` 인자는 동작 X, 본 PR에서 `serve --mcp`로 보정.
+
 ## 2026-05-27 21:30 (claude)
 
 **작업**: `docs/codegraph-worktree.md` 신규 + AGENTS/CLAUDE/SKILL/agent-guide/
