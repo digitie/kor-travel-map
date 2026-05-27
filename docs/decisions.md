@@ -93,7 +93,10 @@
 ## ADR-005: 디버그 REST API는 인증 없음, 내부망 전용
 
 - **상태**: accepted (위치 부분은 ADR-020에서 superseded — 디버그 REST는 별도
-  패키지 `krtour-map-debug-ui`에 둠. 인증 없음 + 내부망 전용 정책은 그대로)
+  패키지 `krtour-map-debug-ui`에 둠. 인증 없음 + 내부망 전용 정책은 ADR-035
+  amendment에서 "프로덕션 admin/관리 라우터로도 운영 가능"으로 확장 — 인증/
+  네트워크 보호는 호출자(TripMate Cloudflare Tunnel/SSO 게이트웨이) 책임이라는
+  근본 원칙은 그대로)
 - **날짜**: 2026-05-24
 - **결정자**: 사용자
 - **컨텍스트**: 라이브러리는 자체 FastAPI 라우터(`krtour.map.api`)를 옵션으로
@@ -396,7 +399,9 @@
 
 ## ADR-020: 디버그 UI는 별도 Python 패키지 (`krtour-map-debug-ui`)
 
-- **상태**: accepted (ADR-005의 위치 부분을 supersede)
+- **상태**: accepted (ADR-005의 위치 부분을 supersede. ADR-035 amendment에서
+  "프로덕션 admin/관리/유지보수 UI"로 운영 범위 확장 — 패키지 분리 결정은
+  유지)
 - **날짜**: 2026-05-24
 - **결정자**: 사용자
 - **컨텍스트**: ADR-005에서 디버그 REST API를 본 라이브러리(`krtour.map.api`)
@@ -1453,7 +1458,9 @@ merged 2026-05-25):
 
 ## ADR-029: 공통 maki marker / category 매핑 npm 패키지 추출 (`@krtour/map-marker-react`)
 
-- **상태**: accepted (T-014 Sprint 1 진입 시 전환, 2026-05-25)
+- **상태**: superseded by ADR-043 — npm 게시 보류, `packages/map-marker-react/`
+  는 모노레포 내부 share 모듈로만 사용 (코드 자체는 유지, registry publish X).
+  (구 상태: accepted at T-014 Sprint 1 진입 2026-05-25.)
 - **날짜**: 2026-05-25
 - **결정자**: claude 제안, 사용자 검토 대기
 - **컨텍스트**: ADR-025 (디버그 UI = maplibre-vworld) + ADR-026 (TripMate 사용자
@@ -1671,3 +1678,546 @@ merged 2026-05-25):
 >
 > 기존 ADR을 뒤집을 때는 새 ADR을 추가하고, 옛 ADR의 상태를 `superseded by
 > ADR-XXX`로 표시한다 — 기존 본문은 지우지 않는다.
+
+---
+
+## ADR-035: 디버그/관리 REST API는 프로덕션 환경에서도 admin/유지보수 UI로 운영
+
+- **상태**: proposed (2026-05-27, 사용자 지시)
+- **날짜**: 2026-05-27
+- **결정자**: 사용자
+
+### 컨텍스트
+
+ADR-005/ADR-020에서 `krtour-map-debug-ui` 패키지는 "디버그 + 내부망 전용 + 인증
+없음"으로 정의되었다. 운영 단계에 들어가면서 다음 요구가 등장:
+
+- 운영자가 적재 jobs / dedup queue / consistency reports / RustFS 사용량 등을
+  **실시간으로 보고 손볼** UI가 필요.
+- TripMate 본 앱에 admin 화면을 별도로 만들 만큼 트래픽이 없음 — `krtour-map-
+  debug-ui` 패키지를 그대로 admin UI로 활용하는 게 자연.
+- 단, 인증 키는 본 패키지 코드 안에 박지 않는다 (ADR-005 원칙 유지). 네트워크
+  계층(Cloudflare Tunnel + SSO 게이트웨이 / IP allowlist)에서 보호.
+
+### 결정
+
+- `krtour-map-debug-ui` 패키지의 운영 범위를 **"디버그 + 내부망 전용"에서 "디버그
+  + admin/유지보수/프로덕션 운영"으로 확장**.
+- 인증/접근 제어는 여전히 코드 외부 (Cloudflare Tunnel / SSO / IP allowlist).
+  패키지 자체에 인증 로직 추가 금지(ADR-005 §SKILL DO NOT #14 그대로).
+- 프로덕션에서 노출되는 라우터 prefix는 `/admin/...` 또는 `/ops/...`로 분리해
+  디버그용(`/debug/...`)과 시각적으로 구분.
+- 운영 라우터는 **읽기 우선** + 쓰기는 explicit confirmation 필수(예: rerun
+  job, manual dedup decision). delete/purge는 별도 ADR.
+
+### 근거
+
+- 별도 admin 앱을 만들면 인증·DB 연결·이슈 디버깅이 모두 중복.
+- 디버그 패키지에 admin 라우터를 더하면 한 코드베이스가 됨 — 발견된 버그가
+  운영에 즉시 반영.
+- 인증을 코드에서 떼어내면 패키지 자체가 가볍고, 인프라 보안 정책 변경 시 코드
+  수정 불필요.
+
+### 결과 (긍정)
+
+- 운영자/개발자가 같은 UI에서 같은 데이터를 봄 → 일관성.
+- 운영 라우터가 patch/post 빈도가 낮아 부담 적음.
+
+### 결과 (부정)
+
+- 운영용 admin UI는 결국 인증이 필요한데, 인프라 계층에 의존하면 PC 개발자가
+  로컬에서 실수로 외부 노출하면 위험 → README/Settings에 경고 + `KRTOUR_MAP_
+  DEBUG_UI_HOST` 기본 `127.0.0.1` 강제 유지.
+
+### 후속
+
+- `docs/debug-ui-package.md` §"운영 라우터" 추가 — `/admin/jobs`, `/admin/dedup-
+  review`, `/ops/consistency`, `/ops/rustfs-usage` 등 prefix 분리.
+- `docs/decisions.md` ADR-005/020 supersede note 추가 (본 PR에서 동시).
+- `packages/krtour-map-debug-ui/README.md` "프로덕션 admin 가이드" 절 추가.
+
+---
+
+## ADR-036: `maplibre-vworld-js` 라이브러리 분리 + v0.1.0 — 공통 기능은 상류, TripMate 전용만 본 저장소
+
+- **상태**: proposed (2026-05-27, 사용자 지시)
+- **날짜**: 2026-05-27
+- **결정자**: 사용자
+
+### 컨텍스트
+
+ADR-025/ADR-026에서 디버그 UI frontend + TripMate 사용자 UI 모두 `maplibre-
+vworld` 통일. 현재 `packages/krtour-map-debug-ui/frontend/`에 vworld basemap +
+maki marker + 카테고리 토글 + bounds 검색 등 공통 기능이 빠르게 자란다. 이중
+중복 위험:
+
+- TripMate apps/web도 같은 vworld basemap 코드를 재구현해야 함.
+- 공통 기능 버그 수정이 두 코드베이스를 동시에 손봐야 함.
+
+별도 라이브러리 `maplibre-vworld-js`(또는 `maplibre-vworld`)로 빼서 한쪽에서
+유지보수 + 두 UI에서 import.
+
+### 결정
+
+- **공통 frontend 기능**(vworld basemap 설정 / maki marker render / 카테고리
+  legend / bounds 검색 helper / tile cache)는 **`maplibre-vworld-js` 별도
+  라이브러리**로 분리. 본 저장소 외부에 둔다 (사용자가 `digitie/maplibre-
+  vworld-js` 신규 GitHub repo 신설 예정).
+- **TripMate 전용 기능**(adminUI 시각화 / debug fixture replay / map overlay
+  on top of TripMate route plan 등)은 본 저장소(`packages/krtour-map-debug-
+  ui/frontend/` + 향후 `packages/tripmate-map-extensions/`)에 둔다.
+- 목표 release: **`maplibre-vworld-js@0.1.0`** — vworld basemap + maki marker
+  + 카테고리 legend 3종 안정화.
+
+### 근거
+
+- 공통 라이브러리 분리는 `python-kraddr-geo` / `python-knps-api`와 동일 패턴.
+- 분리 시점이 빠를수록 cross-cutting 책임 분리 비용이 작음.
+
+### 결과 (긍정)
+
+- TripMate apps/web이 본 저장소 디버그 UI와 vworld basemap 코드를 공유.
+- 라이브러리 단위로 semver 관리 + 회귀 테스트.
+
+### 결과 (부정)
+
+- 라이브러리 분리 작업 자체가 추가 PR/유지보수 비용.
+- npm registry 게시는 보류(ADR-043) — 형제 라이브러리 git URL + commit sha
+  핀으로 import.
+
+### 후속
+
+- 신규 저장소 `digitie/maplibre-vworld-js` 생성 (별도 작업, 사용자 직접 또는
+  Sprint 3 진입 시 본 라이브러리 측에서 PR 보조).
+- 본 저장소 `packages/krtour-map-debug-ui/frontend/` 코드 중 공통 부분을
+  `maplibre-vworld-js`로 이전 (Sprint 3 후반 PR).
+- `docs/decisions.md` ADR-025 amendment — 라이브러리 분리 시점/책임 분배 명시.
+- `packages/krtour-map-debug-ui/README.md` 의존성 트리 갱신.
+
+---
+
+## ADR-037: 디버그/관리 UI frontend state 관리 — TanStack Query + Zustand
+
+- **상태**: proposed (2026-05-27, 사용자 지시)
+- **날짜**: 2026-05-27
+- **결정자**: 사용자
+
+### 컨텍스트
+
+ADR-025에서 frontend는 Next.js + maplibre-vworld로 정의. state 관리 라이브러리
+는 미정. Sprint 2/3에서 라우터/UI 추가가 본격 시작되므로 표준 박음:
+
+- 서버 상태(REST 응답 캐싱/refetch): TanStack Query (구 react-query).
+- 클라이언트 상태(UI toggle / map viewport / filter chip 등): Zustand.
+
+### 결정
+
+- **TanStack Query** — REST API 데이터 fetching/캐싱/invalidation. 모든
+  `/admin/...`, `/ops/...`, `/features/...` 라우터 응답은 TanStack Query hook
+  으로 래핑.
+- **Zustand** — UI 클라이언트 상태(map viewport / 선택된 feature / 카테고리
+  filter / debug fixture playback 상태 등). Redux/MobX/Context-API 대신.
+- Redux Toolkit / SWR / Jotai / Recoil 검토했으나 본 use case 규모에 과함 —
+  Zustand의 hook 기반 store + TanStack의 query/mutation hook이 가장 가볍고
+  타입 강함.
+
+### 근거
+
+- TanStack Query는 stale-while-revalidate / refetch on focus / mutation
+  invalidation이 기본 → admin/유지보수 UI에서 운영자가 새로고침 의식 없이
+  최신 상태 보임.
+- Zustand는 React 18 concurrent feature 호환 + boilerplate 적음.
+
+### 결과 (긍정)
+
+- 두 라이브러리 모두 npm 다운로드 수백만/주 + 타입 강함 + 작은 번들.
+- 디버그 UI에서 검증한 state 패턴을 maplibre-vworld-js 라이브러리에도 그대로
+  이식 가능.
+
+### 결과 (부정)
+
+- 새 frontend 개발자가 두 라이브러리 학습 필요 — 단, learning curve가 낮아
+  허용.
+
+### 후속
+
+- `packages/krtour-map-debug-ui/frontend/package.json`에 `@tanstack/react-
+  query` + `zustand` 추가 (Sprint 2 첫 frontend PR과 함께).
+- `docs/decisions.md` ADR-025 amendment — frontend state stack 박음.
+- `packages/krtour-map-debug-ui/frontend/src/state/` 컨벤션 폴더 구조 docs.
+
+---
+
+## ADR-038: GitHub Actions CI/CD 재활성화 — 머지 게이트 다시 켬
+
+- **상태**: proposed (2026-05-27, 사용자 지시 — 종전 "쓰지마" 지시 reverse)
+- **날짜**: 2026-05-27
+- **결정자**: 사용자
+
+### 컨텍스트
+
+2026-05-26 사용자가 "깃헙 ci/cd 쓰지마"로 지시 → 로컬 검증(pytest + ruff +
+mypy + lint-imports) 기반 머지 직행 운영. `.github/workflows/{ci,lint,
+openapi}.yml`은 워크플로우 파일은 남겨두고 실행 결과를 머지 게이트로 쓰지 않음.
+
+운영 단계 진입 + 다중 에이전트 PR이 늘면서 다음 문제 인지:
+
+- 로컬 검증만으로는 "내 PC에서 됨" 함정 (testcontainers PostGIS 환경 차이,
+  Python 3.11/3.12/3.13 matrix 누락, OS 차이 등).
+- 사용자가 직접 일일이 머지 직전 검증을 보강하기 어렵다.
+
+### 결정
+
+- **GitHub Actions CI/CD 재활성화**. 다음 워크플로우를 PR/main push 기준 머지
+  게이트로 사용:
+  - `.github/workflows/ci.yml` — pytest unit + integration matrix (3.11/12/13)
+  - `.github/workflows/lint.yml` — ruff + mypy + import-linter
+  - `.github/workflows/openapi.yml` — OpenAPI drift gate (ADR-031, Sprint 2
+    첫 라우터 진입 후 실효)
+- branch protection rules에서 위 워크플로우 통과 + 1 review approval 필수
+  (사용자 직접 설정 — Settings → Branches → main).
+- 로컬 검증은 **유지** — PR 푸시 전 1차 확인용. CI는 2차 검증 + matrix.
+
+### 근거
+
+- CI는 환경 격차/regression의 마지막 차단선. 끄면 후속 PR 빚을 진다.
+- "쓰지마" 시기의 효율 이점(로컬 검증만 → 즉시 머지)은 PR 1~2건짜리 sprint
+  scaffolding에서만 유효 — Sprint 2 본격 진입하면 코드 변경량/충돌이 늘어
+  CI 없이 위험.
+
+### 결과 (긍정)
+
+- matrix CI로 3.11/3.12/3.13 + ubuntu-latest 환경 자동 검증.
+- testcontainers PostGIS가 CI에서 매번 부트 → 적재 회귀 차단.
+
+### 결과 (부정)
+
+- 머지 latency가 늘어남 (PR push → CI 실행 ~5~8분 대기).
+- CI 실패 시 fix 푸시 + 재실행 cycle.
+- 완화: branch protection을 `Require status checks` + `Require branches up
+  to date` 두 가지만, `Require linear history`/`Require signed commits`는
+  당장은 보류(Sprint 4 진입 시 재검토).
+
+### 후속
+
+- `AGENTS.md` 작업 후 체크리스트 §"검증" 갱신 — "로컬 + CI 모두 green"
+  표기.
+- `SKILL.md` DO NOT 룰 #17 "main 직접 push 금지" 옆에 "CI green 통과 후
+  머지" 추가.
+- 사용자 측 GitHub Settings → Branches → main → Branch protection rules
+  활성화 (사용자 직접 / 본 라이브러리 코드 변경 X).
+- 종전 머지 직행 패턴 폐기 — `docs/journal.md` 2026-05-26 "쓰지마" 지시
+  reference에 reverse note.
+
+---
+
+## ADR-039: CLI 중복 실행 차단 — 비-동시-실행 명령은 lock으로 보호
+
+- **상태**: proposed (2026-05-27, 사용자 지시)
+- **날짜**: 2026-05-27
+- **결정자**: 사용자
+
+### 컨텍스트
+
+본 라이브러리는 향후 `krtour-map` CLI를 제공한다 (Sprint 4~5). 일부 CLI 명령은
+동시 실행이 부적절:
+
+- `krtour-map import <provider>` — 같은 provider+dataset_key를 두 워커가
+  동시에 적재하면 source_record_key UNIQUE 충돌 + import_jobs 상태 불일치.
+- `krtour-map dedup-merge <feature_id>` — manual merge가 동시에 두 명에 의해
+  실행되면 master 선정 충돌.
+- `krtour-map backup` / `restore` — ADR-040의 hot-swap 절차 도중 두 번째
+  실행이 들어오면 데이터 손상.
+- `alembic upgrade head` — 다중 워커 동시 실행 시 잠금 경쟁 / migration
+  duplicate revision 위험.
+
+### 결정
+
+- 위 부류 CLI 명령에 **PostgreSQL advisory lock** (`pg_try_advisory_lock`)을
+  기반으로 한 mutex 가드 박음.
+- lock key naming: `hash(f"krtour-map:{command}:{scope}")` (예: `import:
+  python-visitkorea-api:festival`, `dedup-merge:f_xxx`, `backup`,
+  `alembic-upgrade`).
+- 이미 lock이 잡혀 있으면 즉시 `ImportJobConflictError`(또는 동등) raise +
+  exit code 2 반환.
+- 정상 종료/abort 시 `pg_advisory_unlock` 자동.
+- 동시 실행을 허용해도 무방한 read-only 명령(예: `krtour-map status`,
+  `--dry-run`)은 lock 없이 그대로.
+
+### 근거
+
+- DB advisory lock은 본 라이브러리 모든 CLI 명령이 PostgreSQL 연결을 갖고
+  있으므로 추가 의존 X.
+- in-memory file lock보다 multi-host 안전.
+- `import_jobs` 상태 + `pg_advisory_lock`은 ADR-013의 "in-memory 신뢰 금지"
+  원칙과 일관.
+
+### 결과 (긍정)
+
+- 사용자가 CLI를 잘못 두 번 호출해도 두 번째가 즉시 reject.
+- backup/restore 같은 critical path가 동시 진입 차단.
+
+### 결과 (부정)
+
+- lock acquire 실패 시 메시지가 명시적이지 않으면 사용자 혼란 — error 메시지에
+  현재 lock holder의 `pg_stat_activity` query 보여주는 helper 필요.
+- `restore` 같은 명령은 정상 종료가 보장 안 되면 lock 잔존 → `lifespan`/
+  `atexit`로 unlock fallback.
+
+### 후속
+
+- `src/krtour/map/cli/mutex.py` 신설 (Sprint 4 진입 시) — `with mutex_lock
+  (session, key)` async context manager.
+- `src/krtour/map/cli/` 첫 명령(예: `import`)부터 본 mutex 적용.
+- `docs/backend-package.md` §"CLI 명령 표"에 mutex 여부 컬럼 추가.
+- `SKILL.md` DO NOT 룰에 "mutex 필요한 CLI는 advisory lock 박음" 추가.
+
+---
+
+## ADR-040: Backup/Restore + 핫스왑 UI
+
+- **상태**: proposed (2026-05-27, 사용자 지시)
+- **날짜**: 2026-05-27
+- **결정자**: 사용자
+
+### 컨텍스트
+
+운영 단계에서 다음 시나리오 필요:
+
+- **백업**: PostgreSQL `feature.*` + `provider_sync.*` + `ops.*` schema + RustFS
+  `feature-files` 버킷을 한 번에 dump → 외부 저장소(NTFS / R2 / S3) 보관.
+- **복원**: 위 dump를 새 환경에 hot-swap. 운영 DB를 멈추지 않고 staging DB로
+  먼저 복원 후 atomic switch (DNS / connection pool 재설정).
+- **운영 UI**: 백업 schedule 보기 + 실행 / 복원 큐 보기 + 진행률 / failed
+  엔트리 retry.
+
+이 기능은 ADR-035의 "프로덕션 admin UI"의 한 갈래.
+
+### 결정
+
+- **Backup 단위**:
+  - PostgreSQL: `pg_dump --format=custom --schema=feature --schema=provider_
+    sync --schema=ops` (extension schema는 별도, `x_extension`은 복원 시
+    `CREATE EXTENSION ... SCHEMA x_extension`만 수동).
+  - RustFS: `rclone sync rustfs:feature-files <backup-target>:feature-files-
+    <YYYYMMDD-HHMMSS>` 또는 RustFS native snapshot.
+- **저장 위치**: 1차 NTFS의 `data/backups/<YYYYMMDD-HHMMSS>/`, 2차 외부
+  (S3/R2) — `KRTOUR_MAP_BACKUP_TARGETS` settings로 multi-target.
+- **Restore 패턴**: hot-swap 권장 — staging DB에 복원 → smoke test (디버그
+  API ping + count check) → connection pool DSN 교체 → 구 DB 제거.
+- **운영 UI 라우터** (ADR-035):
+  - `GET /admin/backups` — 목록 (날짜 / 사이즈 / status)
+  - `POST /admin/backups` — 즉시 백업 실행 (ADR-039 mutex `backup`)
+  - `POST /admin/restore/{backup_id}` — staging DB로 복원 (ADR-039 mutex
+    `restore`)
+  - `POST /admin/restore/{backup_id}/swap` — atomic switch
+- **스케줄**: daily full + hourly WAL(추후). Sprint 5 진입 시 cron 또는
+  Dagster schedule.
+
+### 근거
+
+- PostgreSQL `pg_dump --format=custom` + RustFS snapshot이 industry-standard.
+- hot-swap은 비용이 비싸지만 운영 downtime 0 — 본 라이브러리는 TripMate에
+  실시간 의존하므로 downtime cost가 크다.
+
+### 결과 (긍정)
+
+- 운영자가 콘솔에서 백업/복원 가능 — DB shell 진입 불필요.
+- staging 복원으로 PIT(point-in-time) 검증 후 switch.
+
+### 결과 (부정)
+
+- hot-swap을 위한 dual DB 환경이 필요 — 운영 인프라 비용 증가.
+- 완화: 초기 단계는 cold restore(downtime 허용)로 시작, Sprint 5에 hot-swap
+  도입.
+
+### 후속
+
+- `docs/decisions.md` ADR-035 amendment — admin 라우터 표에 backup/restore
+  prefix 추가.
+- `docs/backup-restore.md` 신설 (Sprint 4~5 prep PR).
+- `src/krtour/map/infra/backup.py` (Sprint 5).
+- `packages/krtour-map-debug-ui/src/krtour/map_debug_ui/routers/admin_backups.py`.
+- `KRTOUR_MAP_BACKUP_TARGETS` settings + Pydantic validator.
+
+---
+
+## ADR-041: `python-kraddr-base` 코드 본 라이브러리로 흡수 — kraddr-base 폐기 예정
+
+- **상태**: proposed (2026-05-27, 사용자 지시)
+- **날짜**: 2026-05-27
+- **결정자**: 사용자
+
+### 컨텍스트
+
+ADR-023에서 `python-kraddr-base.categories` 모듈을 `krtour.map.category`로
+이전 완료(PR#18). 다른 kraddr-base 모듈(`address`, `domain`, 일부 utility 함수)
+도 본 라이브러리 외에 사용처가 없거나 적음. `python-kraddr-base` 자체를 폐기하고
+필요한 코드만 본 라이브러리로 흡수.
+
+**중요 제외**: `PlaceCoordinate`는 본 라이브러리의 `dto/coordinate.py` `Coordinate`
+와 책임 중복 + EPSG/Decimal 처리 정책 충돌 → **가져오지 않음**. 호출자 측에서는
+`krtour.map.dto.Coordinate`만 사용.
+
+### 결정
+
+- **흡수 대상**(예시, 실 작업 시 kraddr-base 전수 survey 후 PR 단위):
+  - `kraddr.base.address` — `Address` 모델 + 한국 주소 정규화 helper. 본 lib
+    `dto/address.py`와 머지(필요 필드만 추가).
+  - `kraddr.base.domain` — 도메인 분류 enum/helper. `category` 모듈에 흡수
+    or `dto/_enums.py`로.
+  - utility 함수(예: `kraddr.base.utils.normalize_bjd_code`,
+    `clean_phone_number` 등) — `core/normalize.py` 또는 `core/strings.py`
+    신규 모듈로.
+- **제외 대상**:
+  - `PlaceCoordinate` — `krtour.map.dto.Coordinate`로 단일화. 호출자가
+    명시적으로 ergonomics에 맞춰 변환.
+- **`python-kraddr-base` 라이브러리는 본 흡수 PR이 모두 머지된 후 GitHub
+  repo archive**. v2 마지막 release에 deprecation note.
+
+### 근거
+
+- kraddr-base는 현재 본 라이브러리 + TripMate apps 외 호출자 없음 → 별도
+  유지비용 회피.
+- 코드 흡수 시 import 경로가 짧아짐 (`from krtour.map.core import normalize_
+  bjd_code` vs `from kraddr.base.utils import normalize_bjd_code`).
+- `PlaceCoordinate`를 가져오지 않는 것은 단일 책임 — 좌표 DTO는 본 lib가
+  source of truth.
+
+### 결과 (긍정)
+
+- 외부 의존 패키지 1개 감소 → install / version pinning 단순화.
+- 본 라이브러리 안에서 한국 주소/좌표/도메인 helper가 한곳에 모임.
+
+### 결과 (부정)
+
+- 흡수 PR이 코드 옮김 + import path 변경 + 테스트 회귀까지 포함 → 큰 PR.
+- 완화: 모듈 단위로 PR 분할 (address PR / domain PR / utils PR).
+
+### 후속
+
+- `python-kraddr-base` 저장소 전수 survey PR(Sprint 4 진입 prep).
+- 흡수 모듈 단위 PR 3~5건 (`docs/kraddr-base-absorption.md`로 추적).
+- `python-kraddr-base` deprecation note + archive (Sprint 5 종료 시).
+- `pyproject.toml` `python-kraddr-base` git URL 제거 (마지막 흡수 PR과 함께).
+- `docs/kraddr-base-types.md` superseded note.
+
+---
+
+## ADR-042: 전국관광지정보표준데이터 / 전국문화축제표준데이터 — `python-datagokr-api` 경유로 본 라이브러리에서 적재
+
+- **상태**: proposed (2026-05-27, 사용자 지시)
+- **날짜**: 2026-05-27
+- **결정자**: 사용자
+
+### 컨텍스트
+
+ADR-034 9단계 1단계가 "축제(`python-visitkorea-api`)"였다. 그러나 사용자가
+data.go.kr 표준데이터 2종을 1차 source로 사용하라고 지시:
+
+- **전국관광지정보표준데이터** — 전국 관광지 점 정보 (place kind).
+- **전국문화축제표준데이터** — 전국 축제/문화행사 (event kind).
+
+두 표준데이터는 안정성/갱신주기/품질이 visitkorea TourAPI보다 좋다. provider
+경계는 `python-datagokr-api` 라이브러리에서 client + typed model을 두고, 본
+라이브러리는 그 model을 `Feature` bundle로 변환.
+
+### 결정
+
+- **축제 1차 source 변경**: visitkorea festival → `data.go.kr-standard`
+  전국문화축제표준데이터. visitkorea는 enrichment(image / 상세 description /
+  contentId 매핑)로 활용 (`source_role='enrichment'`).
+- **관광지 표준데이터** — Sprint 5 박물관/미술관 라인에 추가. `data.go.kr-
+  standard.tourism_points` (place kind, 카테고리는 `01 TOURISM` 아래 세분류로
+  매핑 — kraddr-base category catalog의 8자리 코드).
+- **provider 라이브러리 책임**: `python-datagokr-api`에서 client + typed
+  model + iter_pages를 안정화. 본 라이브러리는 import + 변환 함수만.
+- **dataset_key 명명**:
+  - `datagokr_tourism_points` (관광지)
+  - `datagokr_cultural_festivals` (축제)
+- **Sprint 2 1단계 PR scope 갱신**: visitkorea festival → datagokr_cultural_
+  festivals로 변경. visitkorea는 Sprint 2 끝물에 enrichment PR 별도.
+
+### 근거
+
+- 표준데이터는 행정안전부 / 공공데이터포털이 안정 운영 — 갱신 주기가 명시되어
+  있고 schema 변경이 announce.
+- visitkorea TourAPI는 contentId 매핑은 좋으나 좌표 nullable이 많고 축제
+  데이터 정합성이 들쭉날쭉.
+- "여러 source가 같은 entity를 채운다"는 본 라이브러리의 1차 use case →
+  표준데이터 primary + visitkorea enrichment 패턴이 정석.
+
+### 결과 (긍정)
+
+- 축제 데이터 baseline 품질 향상.
+- `python-datagokr-api`를 본격 활용 → standard data 5종(관광지/축제/주차장/
+  도로/박물관)이 동일 client로 들어옴.
+
+### 결과 (부정)
+
+- visitkorea를 1차에서 enrichment로 강등하면 Sprint 2 1단계 fixture/test가
+  바뀜.
+- 완화: ADR-034 9단계 1단계 description을 본 ADR에서 amendment — "축제 (data.
+  go.kr-standard 1차 + visitkorea enrichment)"로 변경.
+
+### 후속
+
+- `docs/sprints/SPRINT-2.md` §2.1 갱신 — provider 1단계가 `data.go.kr-
+  standard` + `python-datagokr-api`로.
+- `docs/event-feature-etl.md` 1차 source를 datagokr 표준데이터로 정정,
+  visitkorea는 enrichment 절로 보강.
+- `docs/decisions.md` ADR-034 amendment — 9단계 1단계 표 행 수정.
+- `python-datagokr-api` 측 client/model 검증 (별도 라이브러리 작업).
+- `pyproject.toml` `[providers]` extra에 `python-datagokr-api` 핀 (Sprint 2
+  진입 시).
+- 본 라이브러리 신규 모듈 `src/krtour/map/providers/standard_data.py` —
+  `tourism_points_to_bundles` / `cultural_festivals_to_bundles`.
+
+---
+
+## ADR-043: `@krtour/map-marker-react` npm 게시 보류 — 모노레포 내부 share로만
+
+- **상태**: proposed (2026-05-27, 사용자 지시) — ADR-029를 supersede
+- **날짜**: 2026-05-27
+- **결정자**: 사용자
+
+### 컨텍스트
+
+ADR-029에서 `packages/map-marker-react/`를 별도 npm 패키지(`@krtour/map-
+marker-react`)로 추출 + npm registry 게시까지 계획. 사용자가 검토 후 "npm
+게시는 하지 말 것"으로 지시.
+
+### 결정
+
+- `packages/map-marker-react/` 코드 자체는 **유지** — 디버그 UI + TripMate
+  apps/web이 같은 카테고리/maki 매핑을 공유하는 단일 source.
+- **npm registry 게시 안 함** — `package.json`에 `"private": true` 박음.
+- TripMate apps/web 등 외부 사용처는 git URL + commit sha 또는 yarn/pnpm
+  workspace로 import (모노레포 내부 share).
+- `@krtour/map-marker-react` scope 이름은 유지(이전 등록 X). 향후 다시
+  registry 게시 필요해지면 새 ADR로 unfreeze.
+
+### 근거
+
+- npm registry 게시는 namespace 점유 / 버전 관리 / 보안 책임이 따른다.
+- 본 라이브러리 + TripMate 둘만이 사용처라 git share로 충분.
+- 사용자 결정 — registry 외부 노출 보류는 보안/유지보수 비용 절약.
+
+### 결과 (긍정)
+
+- npm 계정/2FA/access token 관리 회피.
+- 라이브러리 코드 변경이 즉시 디버그 UI/TripMate에 반영 (git URL refresh).
+
+### 결과 (부정)
+
+- 외부 OSS 사용자가 본 패키지를 쓰려면 git clone + workspace 설정 필요 —
+  진입장벽 약간 상승. (현재 외부 OSS user 0 → 비용 없음.)
+
+### 후속
+
+- `packages/map-marker-react/package.json`에 `"private": true` 박음.
+- ADR-029 status `superseded by ADR-043` 표기 (본 PR 동시).
+- `docs/journal.md`에 결정 reverse note.
+- `pyproject.toml`/TripMate `package.json` 등에서 `@krtour/map-marker-react`
+  의존성은 git URL 형식 유지(npm install registry 의존 X).
+

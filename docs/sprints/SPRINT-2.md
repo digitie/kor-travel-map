@@ -18,19 +18,33 @@
 
 ## 2. 산출물
 
-### 2.1 Provider ① — 축제 (`python-visitkorea-api`)
+### 2.1 Provider ① — 축제 (`data.go.kr-standard` 1차 + `python-visitkorea-api` enrichment, ADR-042)
 
-- **dataset_key**: `visitkorea_festival_events`
+**ADR-042 (2026-05-27)**로 1차 source 변경. 종전 visitkorea TourAPI 단독에서
+**전국문화축제표준데이터** primary + visitkorea enrichment 패턴으로 전환.
+
+- **dataset_key**:
+  - `datagokr_cultural_festivals` (1차, `data.go.kr-standard` via
+    `python-datagokr-api`)
+  - `visitkorea_festival_events` (enrichment — image / 상세 description /
+    contentId 매핑, `source_role='enrichment'`)
 - **Feature.kind**: `event`
 - **detail**: `EventDetail` (festival_kind / event_dates / event_address)
 - **category**: `01 TOURISM` 대분류 (festival 자체는 sub-category 없이 EventDetail
   에서 분기)
-- **module**: `src/krtour/map/providers/visitkorea.py`
-- **함수**:
-  - `festival_to_bundles(items, *, fetched_at, reverse_geocoder=None) -> list[FeatureBundle]`
-- **fixture**: 5건 (좌표 있음 3 + 좌표 nullable 2, ADR-019 KST aware)
+- **module**:
+  - `src/krtour/map/providers/standard_data.py` — `cultural_festivals_to_bundles`
+    (1차)
+  - `src/krtour/map/providers/visitkorea.py` — `festival_to_enrichment_links`
+    (enrichment, 2차 PR로)
+- **함수 시그니처**:
+  - `cultural_festivals_to_bundles(items, *, fetched_at, reverse_geocoder=None) -> list[FeatureBundle]`
+- **fixture**: 5건 datagokr 표준데이터 (좌표 있음 3 + 좌표 nullable 2, ADR-019
+  KST aware) + 2건 visitkorea enrichment fixture (Sprint 2 끝물 별도 PR).
 - **EXPLAIN 검증**: bbox 검색 (`features_in_bounds`) + 시간 범위
-  (`valid_start_time` BRIN)
+  (`valid_start_time` BRIN).
+- **`python-datagokr-api`**: `pyproject.toml` `[providers]` extra git URL 핀
+  (Sprint 2 진입 시 추가, commit sha는 client 안정화 후 결정).
 
 ### 2.2 Provider ② — 날씨 (`python-kma-api` + 보조)
 
@@ -82,17 +96,30 @@
 - **provider 자체에 4 kind**: 본 라이브러리에서 multi-kind FeatureBundle을
   올바르게 처리하는지 통합 테스트 베이스.
 
-### 2.5 디버그 UI backend 첫 라우터 (ADR-031 활성화)
+### 2.5 디버그/관리 UI backend 첫 라우터 (ADR-031 + ADR-035 활성화)
+
+ADR-035 (2026-05-27)로 운영 범위가 "디버그 + admin + 유지보수 + 프로덕션
+운영"으로 확장. 라우터 prefix로 시각적 분리.
 
 - `packages/krtour-map-debug-ui/src/krtour/map_debug_ui/app.py` 신설
 - `packages/krtour-map-debug-ui/src/krtour/map_debug_ui/routers/`:
-  - `health.py` — `/health`
-  - `version.py` — `/version`
-  - `features.py` — `/features/in-bounds`, `/features/nearby`, `/features/{id}`
+  - `health.py` — `GET /health`
+  - `version.py` — `GET /version`
+  - `features.py` — `GET /features/in-bounds`, `/features/nearby`,
+    `/features/{id}` (디버그 read)
+  - `admin_jobs.py` — `GET /admin/jobs`, `POST /admin/jobs/{id}/retry`
+    (ADR-035) — Sprint 2 후반 옵션
+  - `ops_consistency.py` — `GET /ops/consistency` (Sprint 3 ADR-033 Phase 1
+    진입 시 활성)
 - `packages/krtour-map-debug-ui/scripts/export_openapi.py` 실효 가동
 - `packages/krtour-map-debug-ui/openapi.json` 저장소 commit
-- `.github/workflows/openapi.yml` `--check` drift gate green
-- (frontend 코드는 별도 Sprint 또는 Sprint 2 끝 옵션)
+- `.github/workflows/openapi.yml` `--check` drift gate green (ADR-038)
+- **frontend** (옵션, Sprint 2 끝물 또는 Sprint 3 시작):
+  - Next.js + maplibre-vworld (ADR-025) + **TanStack Query + Zustand (ADR-037)**
+  - 모든 라우터 응답은 `useQuery`/`useMutation` hook으로 래핑
+  - map viewport / 카테고리 filter는 Zustand store
+  - `packages/map-marker-react/` workspace import — npm 게시 안 함 (ADR-043,
+    `"private": true`)
 
 ### 2.6 Record Linkage scoring (첫 검증)
 
@@ -105,6 +132,32 @@
 
 - Sprint 2부터 `dto/` 모듈 coverage 100% branch (validator + Literal 분기
   + Pydantic field validation 전부).
+
+### 2.8 신규 결정 사항 반영 (ADR-035~043, 2026-05-27)
+
+Sprint 2 진행 중 다음 ADR들의 1차 implementation 점진 도입:
+
+- **ADR-035** 운영 라우터 prefix 분리 (`/debug`/`/admin`/`/ops`) — §2.5 참조.
+- **ADR-036** `maplibre-vworld-js` 라이브러리 분리 — frontend 본격 시작 시점
+  검토, Sprint 3 후반 PR로 v0.1.0 release.
+- **ADR-037** Frontend TanStack Query + Zustand — §2.5 frontend 옵션과 함께.
+- **ADR-038** GitHub Actions CI/CD 재활성화 — Sprint 2 진입 직후 즉시
+  branch protection rules 설정 (사용자 측 GitHub Settings).
+- **ADR-042** datagokr 표준데이터 — §2.1 축제 1차 source 변경 반영.
+- ADR-039 CLI mutex / ADR-040 Backup/Restore / ADR-041 kraddr-base 흡수는
+  Sprint 4~5에 본격 implement (Sprint 2~3 prep 문서만).
+
+### 2.9 Sprint 2 신규 산출물 추가 (요약)
+
+| 항목 | 신규/변경 | 비고 |
+|------|----------|------|
+| `src/krtour/map/providers/standard_data.py` | 신규 | ADR-042 — `cultural_festivals_to_bundles` |
+| `src/krtour/map/providers/visitkorea.py` | 신규 (역할 축소) | enrichment 변환 함수만 |
+| `pyproject.toml` `[providers]` extra | 변경 | `python-datagokr-api` git URL 핀 추가 |
+| `packages/krtour-map-debug-ui/src/.../routers/admin_jobs.py` | 신규 (옵션) | ADR-035 |
+| `packages/krtour-map-debug-ui/frontend/package.json` | 변경 | `@tanstack/react-query` + `zustand` (ADR-037) |
+| `packages/map-marker-react/package.json` | 변경 | `"private": true` (ADR-043) |
+| `.github/workflows/*.yml` | 변경 (사용자 측) | branch protection 활성 (ADR-038) |
 
 ## 3. Sprint 2 ADR/T 항목 진척
 

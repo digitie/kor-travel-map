@@ -34,8 +34,13 @@ PR#17~#26 머지로 Sprint 1 산출물 완료:
 - `.github/workflows/{ci,lint,openapi}.yml` + import-linter 4 계약 활성
 - review report (`docs/reports/pr-1-21-review.md`) P0 4건 해소
 
-ADR 현황: **001~034 모두 accepted** (T-014 Sprint 1 진입 PR + ADR-028
-amendment §H에서 027~034 일괄 전환, knps-api keyless 반영).
+ADR 현황: **001~034 accepted** (029는 ADR-043으로 supersede). **035~043
+proposed** (2026-05-27 사용자 지시 — 운영 단계 진입에 따른 9건 일괄):
+- 035 REST API admin 운영 확장 / 036 maplibre-vworld-js v0.1.0 분리
+- 037 frontend TanStack Query + Zustand / 038 GitHub Actions CI/CD 재활성화
+- 039 CLI mutex (advisory lock) / 040 Backup/Restore + 핫스왑 UI
+- 041 kraddr-base 코드 흡수 + 폐기 / 042 datagokr 표준데이터 축제 1차 source
+- 043 `@krtour/map-marker-react` npm 게시 보류 (ADR-029 supersede)
 
 Sprint 1~5 plan은 `docs/sprints/` 참조. **provider 9단계 구현 순서**
 (ADR-034): 축제 → 날씨 → 유가 → 휴게소 → 국립공원/트래킹 → 국가유산 →
@@ -84,7 +89,8 @@ worktree.md` §7).
 
 ## 5. 절대 금지 (가장 중요한 5개)
 
-1. **main에 직접 push 금지** — 모든 변경은 feature branch + PR (ADR-021).
+1. **main에 직접 push 금지** — 모든 변경은 feature branch + PR + **CI green
+   후 머지** (ADR-021 + ADR-038 재활성화).
 2. **`from krtour_map import ...` (flat) 사용 금지** — 항상 `from krtour.map
    import ...` (ADR-022, PEP 420 implicit namespace).
 3. provider adapter/wrapper 신규 생성 금지 (public client 직접 사용, ADR-006).
@@ -92,7 +98,8 @@ worktree.md` §7).
    `krtour.map.api` 없음 (ADR-020).
 5. 공간 쿼리 술어에서 `ST_Transform` 금지 (인덱스 무효화, ADR-012).
 
-전체 22개 룰은 `SKILL.md` §4.
+전체 22개 룰은 `SKILL.md` §4 (ADR-039 CLI mutex / ADR-041 PlaceCoordinate
+import 금지 / ADR-043 npm 게시 금지 포함).
 
 ## 6. 작업 후 체크리스트 (1줄)
 

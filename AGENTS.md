@@ -42,8 +42,8 @@ TripMate ↔ krtour-map 사이에는 REST API가 없다.
 | PostGIS extension schema | `x_extension` (ADR-008) |
 | 디버그 UI 패키지 | `krtour-map-debug-ui` (별도 **Python** 패키지, monorepo 내 `packages/krtour-map-debug-ui/`, ADR-020) |
 | Category 모듈 출처 | `krtour.map.category` (구 `kraddr.base.categories`에서 이전, ADR-023) |
-| ADR accepted | 001~026 (text on main) |
-| ADR proposed | 027 (forest 카테고리/notice_type) / 028 (`python-knps-api` 등록) / 029 (`@krtour/map-marker-react` npm) / 030 (캐시 금지) / 031 (OpenAPI export) / 032 (Coverage schedule, 시기 의존) / 033 (`feature_consistency_reports`, 시기 의존) / 034 (provider 9단계 구현 순서) — 사용자 review → T-014 Sprint 1 진입 PR에 일괄 accepted 전환 예정 |
+| ADR accepted | 001~028, 030~034 (text on main). 029는 ADR-043으로 supersede. |
+| ADR proposed | 035 (REST API admin 운영 확장) / 036 (`maplibre-vworld-js` 라이브러리 분리, v0.1.0) / 037 (frontend TanStack Query + Zustand) / 038 (GitHub Actions CI/CD 재활성화) / 039 (CLI mutex advisory lock) / 040 (Backup/Restore + 핫스왑 UI) / 041 (`python-kraddr-base` 흡수 + 폐기) / 042 (datagokr 표준데이터 — 축제 1차 source) / 043 (`@krtour/map-marker-react` npm 게시 보류, ADR-029 supersede) — 2026-05-27 사용자 지시, 일괄 proposed |
 | Sprint plan | `docs/sprints/SPRINT-1.md` ~ `SPRINT-5.md` |
 | Provider 구현 순서 (ADR-034) | 축제→날씨→유가→휴게소→국립공원/트래킹→국가유산→**MOIS**→휴양림/수목원→박물관/미술관 |
 
@@ -191,21 +191,38 @@ feature_id` / provider 변환 함수 / `core/scoring.py` / `infra/models.py`)를
 - 라이브러리는 결과 DTO를 반환한다. 그 DTO를 어떤 HTTP 응답 셰입으로 감쌀지는
   TripMate 책임이다(SPEC V8의 `{"data": ..., "meta": ...}` 규약 적용은 TripMate).
 
-## 디버그 REST API 정책 (ADR-005 + ADR-020)
+## 디버그/관리 REST API 정책 (ADR-005 + ADR-020 + ADR-035 + ADR-040)
 
-디버그 REST는 **별도 패키지** `krtour-map-debug-ui`에 둔다. 메인 라이브러리
-`python-krtour-map`은 FastAPI/Uvicorn 의존이 없다.
+디버그 + admin REST는 **별도 패키지** `krtour-map-debug-ui`에 둔다. 메인
+라이브러리 `python-krtour-map`은 FastAPI/Uvicorn 의존이 없다.
 
 - **위치**: `packages/krtour-map-debug-ui/src/krtour/map_debug_ui/` (본 monorepo
   내, 별도 `pyproject.toml`).
-- **목적**: 디버그 UI 백엔드 + 향후 내부 도구 활용.
-- **인증**: 별도 키 없음. 내부망(localhost / WSL / 사내망) 전제. 외부 노출 금지.
+- **운영 범위 (ADR-035, proposed 2026-05-27)**: 디버그 + admin + 유지보수 +
+  프로덕션 운영 UI. 라우터 prefix로 시각적 분리:
+  - `/debug/...` — 개발자용 (fixture replay, EXPLAIN 등)
+  - `/admin/...` — 운영자용 (jobs / dedup-review / backup 등 — ADR-040)
+  - `/ops/...` — 옵저버빌리티 (consistency / metrics / rustfs-usage)
+- **인증**: 별도 키 없음 (ADR-005 그대로). 네트워크 계층(Cloudflare Tunnel /
+  SSO 게이트웨이 / IP allowlist)에서 보호. 코드에 인증 로직 침투 금지.
 - **메인 라이브러리 의존**: `pip install -e packages/krtour-map-debug-ui`만
   설치하면 `python-krtour-map`을 자동으로 의존성으로 가져간다.
 - **TripMate는 의존하지 않는다** — TripMate는 메인 라이브러리만 import해서
   함수 직접 호출.
 - `KRTOUR_MAP_DEBUG_UI_HOST` 기본 `127.0.0.1`. `0.0.0.0` 바인드 시 경고 로그.
-- 자세한 사양은 `docs/debug-ui-package.md`.
+- 자세한 사양은 `docs/debug-ui-package.md` + `docs/backup-restore.md`.
+
+### Frontend stack (ADR-025 + ADR-026 + ADR-036 + ADR-037)
+
+- **지도**: `maplibre-vworld-js` 별도 라이브러리(v0.1.0 목표, ADR-036). 공통
+  기능은 상류, TripMate 전용 확장만 본 저장소(`packages/krtour-map-debug-ui/
+  frontend/` + 향후 `packages/tripmate-map-extensions/`).
+- **서버 상태**: TanStack Query — 모든 `/debug/...`, `/admin/...`, `/ops/...`,
+  `/features/...` 응답은 useQuery/useMutation hook으로 래핑 (ADR-037).
+- **클라이언트 상태**: Zustand — map viewport / 카테고리 filter / fixture
+  playback 상태 (ADR-037).
+- **공통 marker/category 매핑**: `packages/map-marker-react/` (npm 게시는
+  보류, ADR-043 — `"private": true`, git URL share만).
 
 ## Provider API 사용 원칙
 
@@ -299,17 +316,34 @@ feature_id` / provider 변환 함수 / `core/scoring.py` / `infra/models.py`)를
 19. **`src/krtour/__init__.py` 만들지 금지** — PEP 420 implicit namespace.
     파일이 생기는 순간 `krtour-map-debug-ui` 같은 자매 distribution과 충돌.
     CI에서 차단 체크.
+20. **CLI 중복 실행이 위험한 명령에 mutex 없이 머지 금지** (ADR-039 proposed) —
+    `import`/`dedup-merge`/`backup`/`restore`/`alembic upgrade` 등은 PostgreSQL
+    advisory lock(`pg_try_advisory_lock`)으로 mutex 가드. read-only / `--dry-run`
+    은 예외. lock key: `hash(f"krtour-map:{command}:{scope}")`.
+21. **`@krtour/map-marker-react` npm registry 게시 금지** (ADR-043) —
+    `packages/map-marker-react/package.json` `"private": true`. 외부 사용처는
+    git URL share만.
+22. **`PlaceCoordinate` kraddr-base에서 import 금지** (ADR-041) — 좌표 DTO는
+    `krtour.map.dto.Coordinate` 단일 source. kraddr-base 흡수 작업에서 명시적
+    제외 대상.
 
 ## 작업 후 체크리스트
 
+- [ ] **수정 전 영향도 평가** (MCP `codegraph_explore` 또는 CLI `codegraph
+      callers`/`impact`/`callees`) — 컴포넌트 시그니처 변경 시 필수
+      (`docs/codegraph-worktree.md` §7).
 - [ ] `pytest -q` (unit + integration 일부) 통과
 - [ ] `ruff check .` / `mypy --strict` / `lint-imports` 통과
+- [ ] **GitHub Actions CI green 통과 후 머지** (ADR-038, 2026-05-27 재활성화) —
+      `.github/workflows/{ci,lint,openapi}.yml` 모두 통과 + 1 review approval.
 - [ ] `docs/journal.md`에 작업 항목 추가 (역시간순)
 - [ ] `docs/resume.md`의 진척도 갱신
 - [ ] 의사결정이 있었다면 `docs/decisions.md`에 ADR 추가
 - [ ] 사용자 가시 변경이면 `CHANGELOG.md` 갱신
 - [ ] DTO/스키마 변경이면 `scripts/export_openapi.py` 재실행
        (디버그 API 라우터 노출 시점부터 적용)
+- [ ] CLI 명령 추가 시 mutex 필요 여부 확인 (ADR-039 — write/bulk/restore는
+      advisory lock 박음)
 
 ## 검증
 

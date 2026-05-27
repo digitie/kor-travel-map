@@ -1,20 +1,28 @@
-# event-feature-etl.md — VisitKorea (TourAPI) 축제·행사 ETL
+# event-feature-etl.md — 전국문화축제표준데이터 + VisitKorea 축제·행사 ETL
 
-본 문서는 VisitKorea(TourAPI)의 축제/행사 데이터를 `event` feature로 정규화하는
-ETL이다.
+본 문서는 축제/행사 데이터를 `event` feature로 정규화하는 ETL이다.
+
+**ADR-042 (2026-05-27) 이후 1차 source 변경**: 종전 VisitKorea TourAPI 단독에서
+**전국문화축제표준데이터(`data.go.kr-standard` via `python-datagokr-api`)** 를
+1차로, VisitKorea TourAPI는 enrichment(이미지/상세설명/contentId 매핑) 2차로
+재구성. visitkorea contentId 매핑이 좋지만 좌표/일자 nullable이 많고 표준
+데이터가 행안부 announce 기반으로 안정 → primary 교체. 본 문서의 §1~§4는
+1차 source 기준, visitkorea 관련 절은 enrichment 책임으로 보존.
 
 ## 1. 문서 정보
 
-| 항목 | 값 |
-|------|----|
-| provider | `python-visitkorea-api` |
-| dataset_key | `visitkorea_festival_events` |
-| Feature.kind | `event` |
-| source_entity_type | `festival` |
-| 상세 테이블 | `feature_event_details` |
-| 코드 entrypoint | `krtour.map.providers.visitkorea` (변환), `krtour.map.events` (loader) |
-| 갱신 주기 | 1일 1회 (`VISITKOREA_FESTIVAL_FULL_SCAN_INTERVAL_DAYS=1`) |
-| 기본 page size | 1000 |
+| 항목 | 값 (1차) | 값 (enrichment) |
+|------|----------|-----------------|
+| provider | `data.go.kr-standard` | `python-visitkorea-api` |
+| provider 라이브러리 | `python-datagokr-api` | `python-visitkorea-api` |
+| dataset_key | `datagokr_cultural_festivals` | `visitkorea_festival_events` |
+| Feature.kind | `event` | (enrichment만) |
+| source_entity_type | `cultural_festival` | `festival` |
+| source_role | `primary` | `enrichment` |
+| 상세 테이블 | `feature_event_details` | (별도 row 없음 — enrichment 갱신만) |
+| 코드 entrypoint | `krtour.map.providers.standard_data.cultural_festivals_to_bundles` | `krtour.map.providers.visitkorea.festival_to_enrichment_links` |
+| 갱신 주기 | 1일 1회 (표준데이터 announce 주기) | 1주 1회 (enrichment 충분) |
+| 기본 page size | 1000 | 1000 |
 
 ## 2. 범위 / 책임
 
