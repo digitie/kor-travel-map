@@ -51,9 +51,11 @@ from krtour.map.core.ids import (
     FEATURE_ID_HASH_LENGTH,
     PAYLOAD_HASH_DEFAULT_LENGTH,
     SOURCE_RECORD_KEY_HASH_LENGTH,
+    WEATHER_VALUE_KEY_HASH_LENGTH,
     make_feature_id,
     make_payload_hash,
     make_source_record_key,
+    make_weather_value_key,
 )
 from krtour.map.core.providers import (
     CANONICAL_PROVIDER_NAMES,
@@ -92,13 +94,15 @@ __all__ = [
     "ImportJobConflictError",
     "ProviderError",
     "FileStoreError",
-    # ids (PR#20, ADR-009 / PR#26 source key + payload hash)
+    # ids (PR#20 ADR-009 / PR#26 source key + payload hash / PR#38 weather)
     "make_feature_id",
     "make_source_record_key",
     "make_payload_hash",
+    "make_weather_value_key",
     "FEATURE_ID_HASH_LENGTH",
     "SOURCE_RECORD_KEY_HASH_LENGTH",
     "PAYLOAD_HASH_DEFAULT_LENGTH",
+    "WEATHER_VALUE_KEY_HASH_LENGTH",
     # providers (PR#29, ADR-024/028)
     "CANONICAL_PROVIDER_NAMES",
     "PROVIDER_ALIASES",

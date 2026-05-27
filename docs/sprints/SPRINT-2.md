@@ -50,24 +50,29 @@
 ### 2.2 Provider ② — 날씨 (`python-kma-api` + 보조)
 
 - **datasets**:
-  - `kma_short_forecast` (단기예보, 3시간 단위, weather kind)
-  - `kma_ultra_short_nowcast` (초단기실황, 분 단위)
-  - `kma_mid_forecast` (중기예보, 일 단위)
+  - `kma_short_forecast` (단기예보, 3시간 단위, weather kind) — **PR#38 1차
+    `short_forecast_to_weather_values` merged 2026-05-28**
+  - `kma_ultra_short_nowcast` (초단기실황, 분 단위) — 후속 PR
+  - `kma_ultra_short_forecast` (초단기예보) — 후속 PR
+  - `kma_mid_forecast` (중기예보, 일 단위) — 후속 PR
   - `kma_weather_alerts` (특보, notice kind, `notice_type='weather_alert'`
-    등 기존 NOTICE_TYPES 사용)
+    등 기존 NOTICE_TYPES 사용) — 후속 PR
 - **Feature.kind**: `weather` (단/초단/중) + `notice` (특보)
-- **보조 (날씨 그룹에 같이)**:
+- **보조 (날씨 그룹에 같이, 후속 PR)**:
   - `python-airkorea-api` — `airkorea_air_quality` (PM10/PM2.5/CAI, kind=weather)
   - `python-krforest-api` 산악기상 — `krforest_mountain_weather` (kind=weather)
   - `python-khoa-api` 해양지수 — `khoa_coastal_observations` (kind=weather + notice)
 - **module**:
-  - `src/krtour/map/providers/kma.py`
-  - `src/krtour/map/providers/airkorea.py`
-  - `src/krtour/map/providers/krforest_weather.py`
-  - `src/krtour/map/providers/khoa_weather.py`
-- **fixture**: 3건/provider × 4 provider = 12건
+  - `src/krtour/map/providers/kma.py` — PR#38 (`short_forecast_to_weather_
+    values` + `KmaShortForecastItem` Protocol + KMA_METRIC_UNITS/NAMES 18종)
+  - `src/krtour/map/providers/airkorea.py` (후속 PR)
+  - `src/krtour/map/providers/krforest_weather.py` (후속 PR)
+  - `src/krtour/map/providers/khoa_weather.py` (후속 PR)
+- **fixture**: 3건/provider × 4 provider = 12건 (PR#38은 KMA 8 case 진입)
 - **WeatherValue 표 검증**: `docs/weather-feature-normalization.md` §5 timeline
-  bucket (nowcast / short / mid)
+  bucket (nowcast / short / mid). PR#38로 `WeatherValue` DTO + 3 enum
+  (`WeatherDomain`/`ForecastStyle`/`TimelineBucket`) + `make_weather_value_key`
+  진입.
 
 ### 2.3 Provider ③ — 유가 (`python-opinet-api`)
 

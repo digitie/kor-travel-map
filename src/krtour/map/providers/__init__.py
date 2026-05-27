@@ -24,6 +24,13 @@ ADR 참조
 
 from __future__ import annotations
 
+from krtour.map.providers.kma import (
+    KMA_METRIC_NAMES,
+    KMA_METRIC_UNITS,
+    KMA_PROVIDER_NAME,
+    KmaShortForecastItem,
+    short_forecast_to_weather_values,
+)
 from krtour.map.providers.standard_data import (
     DATASET_KEY_CULTURAL_FESTIVALS,
     FESTIVAL_CATEGORY,
@@ -45,4 +52,10 @@ __all__ = [
     "FESTIVAL_CATEGORY",
     "FESTIVAL_MARKER_ICON",
     "FESTIVAL_MARKER_COLOR",
+    # kma (PR#38, ADR-010 short forecast 1차)
+    "KmaShortForecastItem",
+    "short_forecast_to_weather_values",
+    "KMA_PROVIDER_NAME",
+    "KMA_METRIC_UNITS",
+    "KMA_METRIC_NAMES",
 ]

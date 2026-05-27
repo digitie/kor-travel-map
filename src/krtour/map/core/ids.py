@@ -55,9 +55,11 @@ __all__ = [
     "make_feature_id",
     "make_source_record_key",
     "make_payload_hash",
+    "make_weather_value_key",
     "FEATURE_ID_HASH_LENGTH",
     "SOURCE_RECORD_KEY_HASH_LENGTH",
     "PAYLOAD_HASH_DEFAULT_LENGTH",
+    "WEATHER_VALUE_KEY_HASH_LENGTH",
 ]
 
 
@@ -331,3 +333,93 @@ def _normalize_payload_value(value: Any) -> Any:
         "payload 값은 JSON primitive/list/dict 또는 datetime/date/Decimal만 "
         f"허용됨 (got {type(value).__name__}: {value!r})."
     )
+
+
+# ── make_weather_value_key (PR#38, ADR-010) ────────────────────────────────
+
+
+WEATHER_VALUE_KEY_HASH_LENGTH: Final[int] = 20
+"""SHA1 hex digest의 prefix 길이 (20 hex chars = 80 bits). source_record_key
+와 동등 — weather 시계열 row 수가 수억 단위로 늘어도 충돌 안전."""
+
+
+def make_weather_value_key(
+    *,
+    feature_id: str,
+    provider: str,
+    weather_domain: str,
+    forecast_style: str,
+    metric_key: str,
+    issued_at: datetime | None = None,
+    valid_at: datetime | None = None,
+    observed_at: datetime | None = None,
+) -> str:
+    """``WeatherValue.weather_value_key`` PK를 결정적으로 계산.
+
+    `docs/weather-feature-normalization.md §4` identity tuple과 동일 input —
+    `timeline_bucket`은 분류 결과(ADR-010)이므로 unique key에서 제외.
+
+    Parameters
+    ----------
+    feature_id
+        weather kind ``Feature``의 ID (`make_feature_id` 결과).
+    provider
+        canonical provider name (예: ``"python-kma-api"``).
+    weather_domain
+        ``WeatherDomain.value`` 또는 동등 문자열 (예: ``"kma_short_forecast"``).
+    forecast_style
+        ``ForecastStyle.value`` (예: ``"short"``).
+    metric_key
+        표준 metric_key (예: ``"TMP"``, ``"PM10"``).
+    issued_at / valid_at / observed_at
+        시간축 — 미상이면 ``None``. ISO 8601 문자열로 직렬화 후 hash에 포함.
+
+    Returns
+    -------
+    str
+        ``wv_{sha1[:20]}``.
+
+    Raises
+    ------
+    ValueError
+        구성요소 중 빈 문자열 또는 ``|`` 구분자 포함.
+
+    Examples
+    --------
+    >>> from datetime import datetime, timezone, timedelta
+    >>> KST = timezone(timedelta(hours=9))
+    >>> key = make_weather_value_key(
+    ...     feature_id="f_global_w_abc",
+    ...     provider="python-kma-api",
+    ...     weather_domain="kma_short_forecast",
+    ...     forecast_style="short",
+    ...     metric_key="TMP",
+    ...     issued_at=datetime(2026, 5, 27, 23, 0, tzinfo=KST),
+    ...     valid_at=datetime(2026, 5, 28, 9, 0, tzinfo=KST),
+    ... )
+    >>> key.startswith("wv_")
+    True
+    >>> len(key)
+    23
+
+    Notes
+    -----
+    같은 입력 → 같은 key (upsert idempotent). datetime은 ISO 8601 직렬화 +
+    tz 포함 → 같은 시각이라도 tz 표기 다르면 다른 key가 됨. 따라서 호출자는
+    aware datetime을 KST로 정규화해서 넘긴다 (ADR-019).
+    """
+    _validate_component("feature_id", feature_id)
+    _validate_component("provider", provider)
+    _validate_component("weather_domain", weather_domain)
+    _validate_component("forecast_style", forecast_style)
+    _validate_component("metric_key", metric_key)
+
+    def _ts(value: datetime | None) -> str:
+        return value.isoformat() if value is not None else ""
+
+    raw = (
+        f"{feature_id}|{provider}|{weather_domain}|{forecast_style}|"
+        f"{metric_key}|{_ts(issued_at)}|{_ts(valid_at)}|{_ts(observed_at)}"
+    )
+    digest = hashlib.sha1(raw.encode("utf-8"), usedforsecurity=False).hexdigest()
+    return f"wv_{digest[:WEATHER_VALUE_KEY_HASH_LENGTH]}"

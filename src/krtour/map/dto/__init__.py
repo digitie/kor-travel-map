@@ -24,7 +24,14 @@ ADR 참조
 
 from __future__ import annotations
 
-from ._enums import FeatureKind, FeatureStatus, SourceRole
+from ._enums import (
+    FeatureKind,
+    FeatureStatus,
+    ForecastStyle,
+    SourceRole,
+    TimelineBucket,
+    WeatherDomain,
+)
 from ._time import KST, check_aware_datetime, kst_now
 from .address import Address
 from .area import AREA_KINDS, AreaDetail
@@ -75,6 +82,7 @@ from .route import (
 )
 from .source import SourceLink, SourceRecord
 from .urls import FeatureUrls, RawDataRef
+from .weather import WeatherValue
 
 __all__ = [
     # enums
@@ -138,4 +146,9 @@ __all__ = [
     "SourceRecord",
     "SourceLink",
     "FeatureBundle",
+    # weather (PR#38, ADR-010)
+    "WeatherDomain",
+    "ForecastStyle",
+    "TimelineBucket",
+    "WeatherValue",
 ]
