@@ -56,26 +56,57 @@ geo = [
   "gdal>=3.8",      # 시스템 GDAL 버전과 맞춤
 ]
 providers = [
-  # provider 라이브러리는 git URL + commit sha 핀 (코드 작성 단계에서 ADR과 함께 확정)
-  # "python-kraddr-base @ git+https://github.com/digitie/python-kraddr-base.git@<sha>",
-  # "python-kraddr-geo  @ git+https://github.com/digitie/python-kraddr-geo.git@<sha>",
-  # "python-visitkorea-api @ git+...",
-  # "python-kasi-api     @ git+...",
-  # "python-mois-api     @ git+...",
-  # "python-opinet-api   @ git+...",
-  # "python-krex-api     @ git+...",
-  # "python-kma-api      @ git+...",
-  # "python-krairport-api @ git+...",
-  # "python-khoa-api     @ git+...",
-  # "python-airkorea-api @ git+...",
-  # "python-mcst-api     @ git+...",
-  # "python-krforest-api @ git+...",
-  # "python-krheritage-api @ git+...",
+  # provider 라이브러리는 git URL + commit sha 핀 (코드 작성 단계에서 ADR과 함께 확정).
+  # 본 라이브러리는 wrapper/adapter 생성 금지 (ADR-006) — provider client 직접 사용.
+  # 본 라이브러리 코드에서는 `Protocol`로 입력 shape만 정의 (모듈별 docstring 참조).
+  # 상세 status는 `docs/provider-contract.md` §12 표.
+  #
+  # ── note: `python-kraddr-base`는 ADR-041 (PR#37) 흡수 완료 + archive 후보.
+  #    본 lib에 의존성 없음. ─────────────────────────────────────────────────────
+  #
+  # ── 주소/좌표 보강 (on-demand) ─────────────────────────────────────────
+  # "python-kraddr-geo @ git+https://github.com/digitie/python-kraddr-geo.git@<sha>",
+  #
+  # ── Sprint 2 §2.1 — datagokr 표준데이터 (축제 1차, ADR-042) ────────────
+  # `krtour.map.providers.standard_data.CulturalFestivalItem` Protocol (PR#34) 정합.
+  # "python-datagokr-api @ git+https://github.com/digitie/python-datagokr-api.git@<sha>",
+  #
+  # ── Sprint 2 §2.2 — 날씨 (ADR-010) ────────────────────────────────────
+  # `krtour.map.providers.kma.{KmaShortForecastItem, KmaUltraShortNowcastItem}`
+  # Protocol (PR#38/39) 정합.
+  # "python-kma-api      @ git+https://github.com/digitie/python-kma-api.git@<sha>",
+  # "python-airkorea-api @ git+https://github.com/digitie/python-airkorea-api.git@<sha>",
+  # "python-khoa-api     @ git+https://github.com/digitie/python-khoa-api.git@<sha>",
+  # python-krforest-api는 산악기상 + Sprint 3 trails 양쪽 사용 (아래 §2.5와 동일 lib).
+  #
+  # ── Sprint 2 §2.3 — opinet 유가 (place + price) ───────────────────────
+  # "python-opinet-api   @ git+https://github.com/digitie/python-opinet-api.git@<sha>",
+  #
+  # ── Sprint 2 §2.4 — krex 휴게소 (multi-kind) ──────────────────────────
+  # "python-krex-api     @ git+https://github.com/digitie/python-krex-api.git@<sha>",
+  #
+  # ── Sprint 2 §2.1 (enrichment 2차, ADR-042) ───────────────────────────
+  # visitkorea TourAPI는 datagokr 1차 source의 enrichment (image/description/
+  # contentId 매핑) 책임 — Sprint 2 끝물 PR.
+  # "python-visitkorea-api @ git+https://github.com/digitie/python-visitkorea-api.git@<sha>",
+  #
+  # ── Sprint 3 — knps / krforest_trails / krheritage / krairport ────────
   # python-knps-api: keyless file dataset client (ADR-028 + amendment 2026-05-25).
   # PR#4 (codex/keyless-file-download-dtos) merged → ApiEndpoint/Page 삭제,
-  # KNPS_SERVICE_KEY 사용 안 함. 사용 시 [providers] extra로 install.
-  # "python-knps-api @ git+https://github.com/digitie/python-knps-api.git@06da125f",
-  # "python-datagokr-api @ git+...",
+  # KNPS_SERVICE_KEY 사용 안 함. PR#25 시점 sha 06da125f 알려짐 (사용자 사용
+  # 시점에 최신 sha 확인 + 정정).
+  # "python-knps-api     @ git+https://github.com/digitie/python-knps-api.git@06da125f",
+  # "python-krforest-api @ git+https://github.com/digitie/python-krforest-api.git@<sha>",
+  # "python-krheritage-api @ git+https://github.com/digitie/python-krheritage-api.git@<sha>",
+  # "python-krairport-api @ git+https://github.com/digitie/python-krairport-api.git@<sha>",
+  #
+  # ── Sprint 4 — MOIS 인허가 4단계 (ADR-024) ────────────────────────────
+  # "python-mois-api     @ git+https://github.com/digitie/python-mois-api.git@<sha>",
+  # "python-kasi-api     @ git+https://github.com/digitie/python-kasi-api.git@<sha>",
+  #
+  # ── Sprint 5 — 박물관/미술관 / mcst enrichment / standard data ────────
+  # "python-mcst-api     @ git+https://github.com/digitie/python-mcst-api.git@<sha>",
+  # data.go.kr-standard 5종은 본 라이브러리 + python-datagokr-api 경유 (ADR-042).
 ]
 
 [tool.setuptools]
