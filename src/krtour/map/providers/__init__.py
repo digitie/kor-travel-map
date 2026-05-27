@@ -24,5 +24,25 @@ ADR 참조
 
 from __future__ import annotations
 
-__all__: list[str] = []
-# Sprint 2~5에서 provider별 채워질 예정. 본 PR#17은 PEP 420 namespace 박음.
+from krtour.map.providers.standard_data import (
+    DATASET_KEY_CULTURAL_FESTIVALS,
+    FESTIVAL_CATEGORY,
+    FESTIVAL_MARKER_COLOR,
+    FESTIVAL_MARKER_ICON,
+    CulturalFestivalItem,
+    ReverseGeocoder,
+    ReverseGeocodeResult,
+    cultural_festivals_to_bundles,
+)
+
+__all__ = [
+    # standard_data (PR#34, ADR-042 — datagokr 표준데이터)
+    "CulturalFestivalItem",
+    "ReverseGeocoder",
+    "ReverseGeocodeResult",
+    "cultural_festivals_to_bundles",
+    "DATASET_KEY_CULTURAL_FESTIVALS",
+    "FESTIVAL_CATEGORY",
+    "FESTIVAL_MARKER_ICON",
+    "FESTIVAL_MARKER_COLOR",
+]

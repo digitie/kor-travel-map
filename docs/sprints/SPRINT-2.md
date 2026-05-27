@@ -22,12 +22,13 @@
 
 **ADR-042 (2026-05-27)**로 1차 source 변경. 종전 visitkorea TourAPI 단독에서
 **전국문화축제표준데이터** primary + visitkorea enrichment 패턴으로 전환.
+**1차 source 함수 PR#34 (2026-05-27) merged**.
 
 - **dataset_key**:
   - `datagokr_cultural_festivals` (1차, `data.go.kr-standard` via
-    `python-datagokr-api`)
+    `python-datagokr-api`) — **PR#34 구현 완료**
   - `visitkorea_festival_events` (enrichment — image / 상세 description /
-    contentId 매핑, `source_role='enrichment'`)
+    contentId 매핑, `source_role='enrichment'`) — Sprint 2 끝물 별도 PR
 - **Feature.kind**: `event`
 - **detail**: `EventDetail` (festival_kind / event_dates / event_address)
 - **category**: `01 TOURISM` 대분류 (festival 자체는 sub-category 없이 EventDetail

@@ -86,31 +86,64 @@ def festival_to_file_sources(item, *, feature_id, source_record_key):
 
 ## 7. DB 적재
 
-### 7.1 collect
+### 7.1 collect — 1차 (datagokr 표준데이터, PR#34 구현, ADR-042)
 
 ```python
-from krtour.map.providers.visitkorea import festival_to_bundles
+from datetime import datetime, timezone, timedelta
+from krtour.map.providers.standard_data import cultural_festivals_to_bundles
 
-async def collect_visitkorea_festival_events(
-    client: AsyncVisitKoreaClient,
+KST = timezone(timedelta(hours=9))
+
+
+async def collect_datagokr_cultural_festivals(
+    client: "AsyncDataGoKrClient",     # python-datagokr-api
     *,
     fetched_at: datetime,
-    event_start_date: str = "20000101",
     page_size: int = 1000,
     max_pages: int | None = None,
-    reverse_geocoder: ReverseGeocoder | None = None,
+    reverse_geocoder: "ReverseGeocoder | None" = None,
 ) -> list[FeatureBundle]:
-    bundles = []
+    """전국문화축제표준데이터 page iter → list[FeatureBundle].
+
+    `python-datagokr-api`의 `AsyncDataGoKrClient`는 본 라이브러리가 직접 의존
+    하지 않는다 — 호출자가 client + 호출 결과를 본 함수에 넘긴다.
+    """
+    bundles: list[FeatureBundle] = []
     async for page in client.aiter_pages(
-        client.asearch_festival, event_start_date=event_start_date,
+        client.aiter_cultural_festivals,
         page_no=1, num_of_rows=page_size, max_pages=max_pages,
     ):
-        for item in page.items:
-            bundle = await festival_to_bundle(
-                item, fetched_at=fetched_at, reverse_geocoder=reverse_geocoder,
+        # cultural_festivals_to_bundles는 모든 row를 한 fetched_at으로 묶음.
+        bundles.extend(
+            cultural_festivals_to_bundles(
+                page.items,
+                fetched_at=fetched_at,
+                reverse_geocoder=reverse_geocoder,
             )
-            bundles.append(bundle)
+        )
     return bundles
+
+
+# 호출 예시 (TripMate Dagster asset 측):
+# fetched = datetime.now(tz=KST)
+# bundles = await collect_datagokr_cultural_festivals(
+#     datagokr_client, fetched_at=fetched, reverse_geocoder=kraddr_geo,
+# )
+# await krtour_client.load_feature_bundles(bundles)
+```
+
+`cultural_festivals_to_bundles`의 시그니처/Protocol은 `src/krtour/map/providers/
+standard_data.py`. fixture/test는 `tests/unit/test_providers_standard_data.py`
+(PR#34, 14 case).
+
+### 7.1.5 collect — 2차 enrichment (visitkorea TourAPI, Sprint 2 끝물 별도 PR)
+
+```python
+# visitkorea TourAPI는 이미지/상세설명/contentId 매핑만 갱신 — Feature/Source
+# Record 본체는 생성하지 않는다. festival_to_enrichment_links가 datagokr로
+# 적재된 feature_id와 visitkorea contentId를 source_links(role='enrichment')로
+# 잇는다. (Sprint 2 끝물 PR로 구현 예정)
+from krtour.map.providers.visitkorea import festival_to_enrichment_links  # 미구현
 ```
 
 ### 7.2 load
