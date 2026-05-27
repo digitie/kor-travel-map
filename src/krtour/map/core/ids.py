@@ -56,10 +56,12 @@ __all__ = [
     "make_source_record_key",
     "make_payload_hash",
     "make_weather_value_key",
+    "make_price_value_key",
     "FEATURE_ID_HASH_LENGTH",
     "SOURCE_RECORD_KEY_HASH_LENGTH",
     "PAYLOAD_HASH_DEFAULT_LENGTH",
     "WEATHER_VALUE_KEY_HASH_LENGTH",
+    "PRICE_VALUE_KEY_HASH_LENGTH",
 ]
 
 
@@ -423,3 +425,80 @@ def make_weather_value_key(
     )
     digest = hashlib.sha1(raw.encode("utf-8"), usedforsecurity=False).hexdigest()
     return f"wv_{digest[:WEATHER_VALUE_KEY_HASH_LENGTH]}"
+
+
+# ── make_price_value_key (PR#42) ──────────────────────────────────────────
+
+
+PRICE_VALUE_KEY_HASH_LENGTH: Final[int] = 20
+"""SHA1 hex digest의 prefix 길이 — weather_value_key와 동등."""
+
+
+def make_price_value_key(
+    *,
+    feature_id: str,
+    provider: str,
+    price_domain: str,
+    product_key: str,
+    observed_at: datetime,
+) -> str:
+    """``PriceValue.price_value_key`` PK를 결정적으로 계산.
+
+    `PriceValue.identity()` tuple과 동일 input — 시간 필드는 ``observed_at`` 하나만
+    (forecast 없음, 가격은 관측만).
+
+    Parameters
+    ----------
+    feature_id
+        ``place`` kind ``Feature``의 ID (`make_feature_id` 결과).
+    provider
+        canonical provider name (예: ``"python-opinet-api"``).
+    price_domain
+        ``PriceDomain.value`` 또는 동등 문자열 (예: ``"opinet_gas_station"``).
+    product_key
+        표준 product code (예: ``"gasoline"``).
+    observed_at
+        관측 시각 (aware datetime, KST). ISO 8601 직렬화 + tz 포함 hash.
+
+    Returns
+    -------
+    str
+        ``pv_{sha1[:20]}``.
+
+    Raises
+    ------
+    ValueError
+        구성요소 중 빈 문자열 또는 ``|`` 구분자 포함.
+
+    Examples
+    --------
+    >>> from datetime import datetime, timezone, timedelta
+    >>> KST = timezone(timedelta(hours=9))
+    >>> key = make_price_value_key(
+    ...     feature_id="f_1156010100_p_abc",
+    ...     provider="python-opinet-api",
+    ...     price_domain="opinet_gas_station",
+    ...     product_key="gasoline",
+    ...     observed_at=datetime(2026, 5, 28, 3, 0, tzinfo=KST),
+    ... )
+    >>> key.startswith("pv_")
+    True
+    >>> len(key)
+    23
+
+    Notes
+    -----
+    같은 입력 → 같은 key (upsert idempotent). datetime은 ISO 8601 직렬화 +
+    tz 포함 → 호출자는 aware datetime을 KST로 정규화해서 넘긴다 (ADR-019).
+    """
+    _validate_component("feature_id", feature_id)
+    _validate_component("provider", provider)
+    _validate_component("price_domain", price_domain)
+    _validate_component("product_key", product_key)
+
+    raw = (
+        f"{feature_id}|{provider}|{price_domain}|"
+        f"{product_key}|{observed_at.isoformat()}"
+    )
+    digest = hashlib.sha1(raw.encode("utf-8"), usedforsecurity=False).hexdigest()
+    return f"pv_{digest[:PRICE_VALUE_KEY_HASH_LENGTH]}"

@@ -28,6 +28,7 @@ from ._enums import (
     FeatureKind,
     FeatureStatus,
     ForecastStyle,
+    PriceDomain,
     SourceRole,
     TimelineBucket,
     WeatherDomain,
@@ -65,6 +66,7 @@ from .opening_hours import (
     SpecialOpeningDay,
 )
 from .place import PlaceDetail
+from .price import PriceValue
 from .route import (
     ROUTE_TYPE_ACCESSIBLE_WALK,
     ROUTE_TYPE_CYCLING,
@@ -151,4 +153,7 @@ __all__ = [
     "ForecastStyle",
     "TimelineBucket",
     "WeatherValue",
+    # price (PR#42, ADR-013/014)
+    "PriceDomain",
+    "PriceValue",
 ]

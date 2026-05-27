@@ -82,13 +82,19 @@
 - **Feature.kind**: `place` + `price` (PriceValue 시계열)
 - **detail**: `PlaceDetail.place_kind='gas_station'`
 - **category**: `06020000` `TRANSPORT_FUEL`
-- **module**: `src/krtour/map/providers/opinet.py`
+- **module**: `src/krtour/map/providers/opinet.py` — **PR#42 merged 2026-05-28**
 - **함수**:
-  - `stations_to_bundles(items, *, fetched_at, reverse_geocoder) -> list[FeatureBundle]`
-  - `prices_to_values(items, *, fetched_at) -> list[PriceValue]`
+  - `prices_to_values(items, *, feature_id, source_record_key=None) -> list[PriceValue]` — **PR#42 구현 완료**
+  - `stations_to_bundles(items, *, fetched_at, reverse_geocoder) -> list[FeatureBundle]` — 후속 PR (gas station feature)
+- **DTO foundation** (PR#42): `dto/price.py` `PriceValue` + `PriceDomain`
+  enum (5값: opinet_gas_station / rest_area_food / rest_area_fuel / toll_fee /
+  admission_fee). `core/ids.py` `make_price_value_key` (`pv_{sha1[:20]}`).
+- **OpiNet product code 매핑** (PR#42): B027/D047/B034/K015/C004 → gasoline/
+  diesel/premium_gasoline/kerosene/lpg + 한글 이름.
 - **검증**: BRIN 인덱스 (`price_values.observed_at`) ADR-014 + bulk insert
-  `psycopg.copy_*` 안전 마진 30k (ADR-013)
-- **fixture**: 5건 (장유/일반/주유소 종류별)
+  `psycopg.copy_*` 안전 마진 30k (ADR-013) — 적재 PR에서 검증.
+- **fixture**: 5건 (장유/일반/주유소 종류별) — PR#42에서 가격 시계열 8건
+  진입.
 
 ### 2.4 Provider ④ — 휴게소 (`python-krex-api`)
 
