@@ -35,6 +35,13 @@ from krtour.map.providers.kma import (
     ultra_short_forecast_to_weather_values,
     ultra_short_nowcast_to_weather_values,
 )
+from krtour.map.providers.opinet import (
+    OPINET_PRODUCT_KEY_MAP,
+    OPINET_PRODUCT_NAME_KO,
+    OPINET_PROVIDER_NAME,
+    OpinetPriceItem,
+    prices_to_values,
+)
 from krtour.map.providers.standard_data import (
     DATASET_KEY_CULTURAL_FESTIVALS,
     FESTIVAL_CATEGORY,
@@ -67,4 +74,10 @@ __all__ = [
     "KMA_PROVIDER_NAME",
     "KMA_METRIC_UNITS",
     "KMA_METRIC_NAMES",
+    # opinet (PR#42 prices 1차)
+    "OpinetPriceItem",
+    "prices_to_values",
+    "OPINET_PROVIDER_NAME",
+    "OPINET_PRODUCT_KEY_MAP",
+    "OPINET_PRODUCT_NAME_KO",
 ]

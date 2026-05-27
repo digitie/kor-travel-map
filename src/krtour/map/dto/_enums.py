@@ -17,6 +17,7 @@ __all__ = [
     "WeatherDomain",
     "ForecastStyle",
     "TimelineBucket",
+    "PriceDomain",
 ]
 
 
@@ -120,3 +121,23 @@ class TimelineBucket(StrEnum):
     ULTRA_SHORT = "ultra_short"
     SHORT = "short"
     MID = "mid"
+
+
+class PriceDomain(StrEnum):
+    """``PriceValue.price_domain`` — provider별 가격 dataset 식별자.
+
+    신규 dataset은 새 enum 값 + ADR + ``docs/data-model.md`` 갱신.
+    """
+
+    # 유가 (`python-opinet-api`)
+    OPINET_GAS_STATION = "opinet_gas_station"
+
+    # 휴게소 식·식음료/주유 (`python-krex-api`)
+    REST_AREA_FOOD = "rest_area_food"
+    REST_AREA_FUEL = "rest_area_fuel"
+
+    # 통행료/요금 (data.go.kr-standard 등) — Sprint 5 후보
+    TOLL_FEE = "toll_fee"
+
+    # 일반 입장료/이용료 (관광지/문화시설) — Sprint 3+
+    ADMISSION_FEE = "admission_fee"

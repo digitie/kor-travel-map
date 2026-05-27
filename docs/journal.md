@@ -2,6 +2,69 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-28 04:00 (claude)
+
+**작업**: PR#42 — Sprint 2 §2.3 진입. `PriceValue` DTO foundation +
+`PriceDomain` enum + `make_price_value_key` + `providers/opinet.py prices_
+to_values` (가격 시계열만, gas station feature는 별도 PR).
+
+**컨텍스트**: ADR-034 9단계 ③ 진입. PR#38(WeatherValue) 패턴 그대로 적용 —
+시계열 값 DTO + provider 변환 함수 분리. opinet 주유소 자체(`Feature`)는
+infra 진입 후 별도 PR로.
+
+**신규 파일** (4):
+- `src/krtour/map/dto/price.py` (~140 line) — `PriceValue` DTO
+  - feature_id / provider / price_domain / product_key (+ source_*)
+  - product_name 한글 (예: '휘발유')
+  - observed_at (시계열, KST aware)
+  - value_number (Decimal NUMERIC(14,4)), unit 기본 'KRW'
+  - normalization_version / payload / collected_at / source_record_key
+  - field validator: aware datetime
+  - model_validator: value_number ≥ 0
+  - identity() tuple — (feature_id, provider, domain, product_key, observed_at)
+- `src/krtour/map/providers/opinet.py` (~170 line)
+  - `OpinetPriceItem` Protocol (uni_id/prodcd/price/trade_dt)
+  - `prices_to_values(items, *, feature_id, source_record_key=None) -> list
+    [PriceValue]`
+  - `_parse_price_value` — 천 단위 구분자 "," 흡수
+  - 상수: `OPINET_PROVIDER_NAME` / `OPINET_PRODUCT_KEY_MAP` (5종 매핑) /
+    `OPINET_PRODUCT_NAME_KO`
+- `tests/unit/test_dto_price.py` (9 case)
+- `tests/unit/test_ids_price.py` (7 case)
+- `tests/unit/test_providers_opinet.py` (10 case)
+
+**변경 파일** (4):
+- `src/krtour/map/dto/_enums.py` — `PriceDomain` enum 5값 (opinet_gas_station/
+  rest_area_food/rest_area_fuel/toll_fee/admission_fee)
+- `src/krtour/map/dto/__init__.py` — `PriceDomain` + `PriceValue` re-export
+- `src/krtour/map/core/ids.py` — `make_price_value_key(*, feature_id,
+  provider, price_domain, product_key, observed_at)` (`pv_{sha1[:20]}`,
+  PRICE_VALUE_KEY_HASH_LENGTH=20)
+- `src/krtour/map/core/__init__.py` — 2 신규 re-export
+- `src/krtour/map/providers/__init__.py` — opinet 5 신규
+- `docs/sprints/SPRINT-2.md` §2.3 — PR#42 prices_to_values merged
+
+**Verification (local)**:
+- `pytest tests/ packages/krtour-map-debug-ui/tests/ --ignore=tests/integration
+  -q` → **409 passed, 4 skipped** (PR#41 383 + 신규 26)
+- `ruff check src/ tests/ packages/krtour-map-debug-ui/` → All checks passed
+  (auto-fix 1회 후 clean)
+- `mypy --strict src/krtour/map packages/krtour-map-debug-ui/src/krtour/
+  map_debug_ui` → no issues found in 44 source files
+- `lint-imports` / openapi drift — 영향 없음
+
+**ADR-006 준수**: `python-opinet-api` typed model 직접 import X. `Opinet
+PriceItem` Protocol로 input shape만 정의. uni_id → feature_id 매핑은 호출자
+책임.
+
+**알려진 후속 작업**:
+- **PR#43 (Sprint 2 §2.3 마무리)**: opinet `stations_to_bundles` — gas station
+  Feature(kind=place, category="06020000") + SourceRecord + SourceLink
+- **PR#44+**: Sprint 2 §2.4 krex 휴게소 (multi-kind: place + price + weather
+  + notice — PriceValue/WeatherValue 모두 활용)
+- KMA 마무리: mid_forecast (텍스트 + AM/PM split) / weather_alerts (notice
+  FeatureBundle)
+
 ## 2026-05-28 03:30 (claude)
 
 **작업**: PR#41 — Sprint 2 §2.2 진행. KMA 초단기예보(`getUltraSrtFcst`)

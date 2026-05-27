@@ -164,6 +164,12 @@ PR#22 CI/import-linter merge 후 gate 확인. PR#22 merge 후 PR#23 리포트
       `KMA_METRIC_UNITS/NAMES`에 LGT(낙뢰) 추가. 383 tests green (신규 10).
       KMA 진행: short ✅ / ultra_short_nowcast ✅ / ultra_short_forecast ✅ /
       mid ⏳ / weather_alerts ⏳.
+- [x] **PR#42 (merged 2026-05-28)** — Sprint 2 §2.3 진입. `PriceValue` DTO +
+      `PriceDomain` enum (5값) + `make_price_value_key` (`pv_{sha1[:20]}`,
+      ADR-013/014 BRIN) + `providers/opinet.py prices_to_values` +
+      `OpinetPriceItem` Protocol + B027/D047/B034/K015/C004 → gasoline/diesel/
+      premium_gasoline/kerosene/lpg product code 매핑. opinet station Feature
+      (place kind)는 별도 PR. 409 tests green (신규 26).
 
 다음 PR 후보 (Sprint 2 entry 계속):
 
