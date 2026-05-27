@@ -1,6 +1,74 @@
 {
   "components": {
     "schemas": {
+      "EtlPreviewResponse": {
+        "additionalProperties": false,
+        "description": "`/debug/etl/{provider}/{dataset}/preview` 응답.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "dataset": {
+            "title": "Dataset",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "items": {
+            "description": "변환 결과 list. variant에 따라 schema가 다르다 — FeatureBundle (feature/source_record/source_link 3-key dict) / WeatherValue / PriceValue 등.",
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "fixture",
+              "live"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "variant": {
+            "description": "`FeatureBundle` / `WeatherValue` / `PriceValue`.",
+            "title": "Variant",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "dataset",
+          "source",
+          "variant",
+          "description",
+          "count",
+          "items"
+        ],
+        "title": "EtlPreviewResponse",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
       "HealthResponse": {
         "additionalProperties": false,
         "description": "`/debug/health` 응답 schema.",
@@ -21,6 +89,87 @@
           "service"
         ],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "ProviderDatasetsResponse": {
+        "additionalProperties": false,
+        "description": "`/debug/etl/{provider}/datasets` 응답.",
+        "properties": {
+          "datasets": {
+            "items": {
+              "$ref": "#/components/schemas/_DatasetEntry"
+            },
+            "title": "Datasets",
+            "type": "array"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "datasets"
+        ],
+        "title": "ProviderDatasetsResponse",
+        "type": "object"
+      },
+      "ProvidersResponse": {
+        "additionalProperties": false,
+        "description": "`/debug/etl/providers` 응답.",
+        "properties": {
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/_ProviderEntry"
+            },
+            "title": "Providers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "providers"
+        ],
+        "title": "ProvidersResponse",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
         "type": "object"
       },
       "VersionResponse": {
@@ -44,6 +193,53 @@
         ],
         "title": "VersionResponse",
         "type": "object"
+      },
+      "_DatasetEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "dataset": {
+            "title": "Dataset",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "variant": {
+            "description": "`FeatureBundle` / `WeatherValue` / `PriceValue`.",
+            "title": "Variant",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dataset",
+          "variant",
+          "description"
+        ],
+        "title": "_DatasetEntry",
+        "type": "object"
+      },
+      "_ProviderEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "datasets": {
+            "items": {
+              "$ref": "#/components/schemas/_DatasetEntry"
+            },
+            "title": "Datasets",
+            "type": "array"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "datasets"
+        ],
+        "title": "_ProviderEntry",
+        "type": "object"
       }
     }
   },
@@ -54,6 +250,145 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/debug/etl/providers": {
+      "get": {
+        "description": "fixture 변환이 등록된 provider/dataset 매트릭스. 추가 변환 함수가 본 lib에 들어오면 `etl_fixtures.FIXTURE_REGISTRY`에 1행 등록 → 본 응답에 자동 반영.",
+        "operationId": "get_providers_debug_etl_providers_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProvidersResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "ETL preview 가능한 provider + dataset 목록",
+        "tags": [
+          "debug",
+          "etl"
+        ]
+      }
+    },
+    "/debug/etl/{provider}/datasets": {
+      "get": {
+        "operationId": "get_provider_datasets_debug_etl__provider__datasets_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderDatasetsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "특정 provider의 dataset 목록",
+        "tags": [
+          "debug",
+          "etl"
+        ]
+      }
+    },
+    "/debug/etl/{provider}/{dataset}/preview": {
+      "post": {
+        "description": "fixture 또는 live source로 provider raw → DTO 변환을 실행하고 결과를 JSON으로 응답. DB write 없음. fixture 모드는 외부 의존 X — 본 lib 변환 함수 동작 검증용. live 모드는 후속 PR로.",
+        "operationId": "post_preview_debug_etl__provider___dataset__preview_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "dataset",
+            "required": true,
+            "schema": {
+              "title": "Dataset",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "default": "fixture",
+              "enum": [
+                "fixture",
+                "live"
+              ],
+              "title": "Source",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EtlPreviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "등록되지 않은 (provider, dataset) 조합"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "501": {
+            "description": "source=live 미구현 (후속 PR)"
+          }
+        },
+        "summary": "provider 변환 함수 dry-run preview",
+        "tags": [
+          "debug",
+          "etl"
+        ]
+      }
+    },
     "/debug/health": {
       "get": {
         "description": "정적 응답. 본 라우터가 200을 내면 FastAPI app이 살아 있다. DB/외부 자원의 deep health check는 별도 ``/ops/health-deep`` (Sprint 3+).",

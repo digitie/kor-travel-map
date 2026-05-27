@@ -2,6 +2,79 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-28 05:00 (claude)
+
+**작업**: PR#44 — 디버그 UI ETL preview 라우터 + frontend 페이지. 운영자가
+지금까지 구현한 provider 변환 함수를 디버그 UI에서 **수동 trigger**해서 변환
+결과를 JSON으로 확인할 수 있음. **적재(DB write) 없음** — dry-run preview만.
+
+**컨텍스트**: 사용자 지시 — "디버그 서버에서 지금까지 구현한 내용들 테스트
+할 수 있도록 준비. 단 ETL 부분은 디버그 UI에서 수동으로 받아올 수 있도록
+구성." PR#34/38/39/41/42/43에서 박힌 6개 dataset(datagokr 축제 / kma short·
+nowcast·ultra_short_forecast / opinet stations·prices)을 fixture 기반으로
+시연.
+
+**신규 파일 — backend** (2):
+- `packages/krtour-map-debug-ui/src/krtour/map_debug_ui/etl_fixtures.py`
+  (~340 line):
+  - 6 Protocol-만족 dataclass + 6 fixture builder + 6 converter
+  - `FIXTURE_REGISTRY: tuple[EtlFixtureEntry, ...]` (6 row)
+  - `list_providers()` / `list_datasets(provider)` / `run_fixture_preview(
+    provider, dataset)`
+- `packages/krtour-map-debug-ui/src/krtour/map_debug_ui/routers/etl.py`
+  (~150 line):
+  - `GET /debug/etl/providers` — provider/dataset 매트릭스
+  - `GET /debug/etl/{provider}/datasets` — provider별 dataset 목록 (404)
+  - `POST /debug/etl/{provider}/{dataset}/preview?source=fixture` — 변환
+    결과 JSON. `source=live`는 501 (후속 PR)
+
+**신규 파일 — frontend** (2):
+- `packages/krtour-map-debug-ui/frontend/src/api/etl.ts` — TanStack Query
+  hook: `useProviders` (60s staleTime), `useEtlPreviewMutation`
+- `packages/krtour-map-debug-ui/frontend/src/app/etl/page.tsx` — provider/
+  dataset/source 선택 UI + Preview 실행 버튼 + 결과 JSON 표시
+
+**변경 파일** (4):
+- `packages/krtour-map-debug-ui/src/krtour/map_debug_ui/app.py` —
+  `etl_router` include
+- `packages/krtour-map-debug-ui/src/krtour/map_debug_ui/routers/__init__.py`
+  — re-export
+- `packages/krtour-map-debug-ui/frontend/src/app/page.tsx` — `/etl` 링크
+- `packages/krtour-map-debug-ui/openapi.json` — drift gate baseline 재생성
+
+**테스트**:
+- `packages/krtour-map-debug-ui/tests/test_etl_routers.py` (13 case):
+  - `/providers` registry 정합 / kma 3 dataset 포함
+  - `/datasets` opinet 2종 + unknown 404
+  - `/preview` datagokr/kma_short/kma_nowcast/opinet_stations/opinet_prices
+    happy path (각 variant + count 정합)
+  - `/preview` unknown dataset 404 / `?source=live` 501 / `?source=bogus`
+    422 (FastAPI Literal validator)
+  - `debug_routes_enabled=False` → 404 unmount
+
+**Verification (local)**:
+- `pytest tests/ packages/krtour-map-debug-ui/tests/ --ignore=tests/integration
+  -q` → **437 passed, 4 skipped** (PR#43 424 + 신규 13)
+- `ruff check src/ tests/ packages/krtour-map-debug-ui/` → All checks passed
+- `mypy --strict src/krtour/map packages/krtour-map-debug-ui/src/krtour/
+  map_debug_ui` → no issues found in 46 source files
+- `python packages/krtour-map-debug-ui/scripts/export_openapi.py --check`
+  → exit 0
+
+**디버그 서버 사용 흐름** (사용자가 지금 바로):
+1. `pip install -e packages/krtour-map-debug-ui` (PR#35 시점에 1회만 필요)
+2. `uvicorn krtour.map_debug_ui.app:app --host 127.0.0.1 --port 8087`
+3. browser → `http://127.0.0.1:8087/docs` (Swagger UI) 또는 `/debug/etl/
+   providers`로 매트릭스 확인
+4. 또는 frontend `cd packages/krtour-map-debug-ui/frontend && npm run dev` →
+   `http://127.0.0.1:8610/etl` → provider/dataset 선택 후 Preview 실행
+5. fixture 6 dataset 모두 변환 결과 JSON 확인 가능
+
+**알려진 후속 작업**:
+- `?source=live` 활성화 — provider client 호출 + .env API key 입력 절차
+  (KMA `KMA_SERVICE_KEY` / OpiNet `OPINET_SERVICE_KEY` 등 dotenv 도입)
+- 적재(`/admin/jobs` 라우터 + `infra/feature_repo.py`) — 별도 PR
+
 ## 2026-05-28 04:25 (claude)
 
 **작업**: PR#43 — Sprint 2 §2.3 마무리. opinet `stations_to_bundles` (gas

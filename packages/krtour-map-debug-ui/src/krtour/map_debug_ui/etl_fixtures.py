@@ -1,0 +1,458 @@
+"""``krtour.map_debug_ui.etl_fixtures`` — ETL preview용 fixture sample.
+
+본 모듈은 디버그 UI에서 `/debug/etl/{provider}/{dataset}/preview?source=
+fixture` 라우터가 사용하는 hard-coded fixture를 모은다. 실 provider client
+없이 본 lib `providers/*` 변환 함수의 동작을 확인할 수 있다.
+
+설계 메모
+--------
+- fixture는 dataclass로 정의 — provider Protocol을 만족하는 가벼운 typed
+  model.
+- registry는 `(provider, dataset_key)` 튜플 → `(variant, build_fixture,
+  convert)` 매핑. 신규 변환 함수가 들어오면 본 registry에 1행 추가.
+- live source(`?source=live`)는 본 PR에서는 501 Not Implemented — 후속 PR로
+  실 provider client 호출 wiring.
+
+ADR 참조
+--------
+- ADR-005 + ADR-035 — 디버그/관리 UI 운영 범위. ETL preview는 디버그 prefix.
+- ADR-006 — provider wrapper 금지. 본 모듈은 본 lib 변환 함수만 호출.
+- ADR-019 — KST aware datetime.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
+from typing import Any, Final
+
+from krtour.map.providers.kma import (
+    short_forecast_to_weather_values,
+    ultra_short_forecast_to_weather_values,
+    ultra_short_nowcast_to_weather_values,
+)
+from krtour.map.providers.opinet import (
+    prices_to_values,
+    stations_to_bundles,
+)
+from krtour.map.providers.standard_data import cultural_festivals_to_bundles
+
+__all__ = [
+    "EtlFixtureEntry",
+    "FIXTURE_REGISTRY",
+    "list_providers",
+    "list_datasets",
+    "run_fixture_preview",
+]
+
+
+KST = timezone(timedelta(hours=9))
+
+
+def _now() -> datetime:
+    """fixture 적재 시점 — 본 lib 호출자가 보통 `kst_now()` 전달, 본 모듈은
+    deterministic용 fixed timestamp."""
+    return datetime(2026, 5, 28, 4, 30, tzinfo=KST)
+
+
+# ── datagokr 표준데이터 축제 fixture ────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class _CulturalFestival:
+    """`krtour.map.providers.standard_data.CulturalFestivalItem` Protocol 준수."""
+
+    management_no: str
+    festival_name: str
+    venue_name: str | None
+    start_date: date | None
+    end_date: date | None
+    description: str | None
+    latitude: Decimal | None
+    longitude: Decimal | None
+    road_address: str | None
+    jibun_address: str | None
+    organizer_name: str | None
+    organizer_tel: str | None
+    data_reference_date: date | None
+    provider_org_name: str | None
+
+
+def _datagokr_festival_fixture() -> Sequence[_CulturalFestival]:
+    return [
+        _CulturalFestival(
+            management_no="CF-DEMO-001",
+            festival_name="서울 봄꽃 축제",
+            venue_name="여의도공원",
+            start_date=date(2026, 4, 5),
+            end_date=date(2026, 4, 12),
+            description="봄꽃 만개 축제 (fixture demo).",
+            latitude=Decimal("37.5263"),
+            longitude=Decimal("126.9239"),
+            road_address="서울특별시 영등포구 여의공원로 120",
+            jibun_address="서울특별시 영등포구 여의도동 8",
+            organizer_name="영등포구청",
+            organizer_tel="02-2670-3114",
+            data_reference_date=date(2026, 3, 1),
+            provider_org_name="서울특별시 영등포구",
+        ),
+        _CulturalFestival(
+            management_no="CF-DEMO-002",
+            festival_name="제주 유채꽃 축제",
+            venue_name="가시리 마을",
+            start_date=date(2026, 4, 1),
+            end_date=date(2026, 4, 30),
+            description="제주 유채꽃 축제 (fixture demo).",
+            latitude=Decimal("33.3893"),
+            longitude=Decimal("126.7831"),
+            road_address="제주특별자치도 서귀포시 표선면 가시로 565번길 41",
+            jibun_address="제주특별자치도 서귀포시 표선면 가시리",
+            organizer_name="서귀포시청",
+            organizer_tel="064-740-6000",
+            data_reference_date=date(2026, 3, 1),
+            provider_org_name="제주특별자치도 서귀포시",
+        ),
+    ]
+
+
+def _convert_datagokr_festival(items: Sequence[Any]) -> list[Any]:
+    bundles = cultural_festivals_to_bundles(items, fetched_at=_now())
+    return [b.model_dump(mode="json") for b in bundles]
+
+
+# ── KMA 단기예보 fixture ───────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class _ShortFcst:
+    """`KmaShortForecastItem` Protocol 준수."""
+
+    base_date: str
+    base_time: str
+    fcst_date: str
+    fcst_time: str
+    nx: int
+    ny: int
+    category: str
+    fcst_value: str
+
+
+def _short(category: str, fcst_value: str) -> _ShortFcst:
+    return _ShortFcst(
+        base_date="20260527",
+        base_time="2300",
+        fcst_date="20260528",
+        fcst_time="0900",
+        nx=60,
+        ny=127,
+        category=category,
+        fcst_value=fcst_value,
+    )
+
+
+def _kma_short_forecast_fixture() -> Sequence[_ShortFcst]:
+    return [
+        _short("TMP", "23.5"),
+        _short("REH", "65"),
+        _short("WSD", "2.1"),
+        _short("POP", "20"),
+        _short("SKY", "3"),
+        _short("PTY", "0"),
+        _short("PCP", "강수없음"),
+    ]
+
+
+_FEATURE_ID_SEOUL_WEATHER = "f_global_w_seoul_demo"
+
+
+def _convert_kma_short(items: Sequence[Any]) -> list[Any]:
+    values = short_forecast_to_weather_values(
+        items, feature_id=_FEATURE_ID_SEOUL_WEATHER
+    )
+    return [v.model_dump(mode="json") for v in values]
+
+
+# ── KMA 초단기실황 fixture ─────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class _Nowcast:
+    """`KmaUltraShortNowcastItem` Protocol 준수."""
+
+    base_date: str
+    base_time: str
+    nx: int
+    ny: int
+    category: str
+    obsr_value: str
+
+
+def _now_item(category: str, obsr_value: str) -> _Nowcast:
+    return _Nowcast(
+        base_date="20260528",
+        base_time="0400",
+        nx=60,
+        ny=127,
+        category=category,
+        obsr_value=obsr_value,
+    )
+
+
+def _kma_nowcast_fixture() -> Sequence[_Nowcast]:
+    return [
+        _now_item("T1H", "18.0"),
+        _now_item("REH", "68"),
+        _now_item("WSD", "1.8"),
+        _now_item("RN1", "강수없음"),
+        _now_item("PTY", "0"),
+    ]
+
+
+def _convert_kma_nowcast(items: Sequence[Any]) -> list[Any]:
+    values = ultra_short_nowcast_to_weather_values(
+        items, feature_id=_FEATURE_ID_SEOUL_WEATHER
+    )
+    return [v.model_dump(mode="json") for v in values]
+
+
+# ── KMA 초단기예보 fixture ─────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class _UltraShortFcst:
+    """`KmaUltraShortForecastItem` Protocol 준수."""
+
+    base_date: str
+    base_time: str
+    fcst_date: str
+    fcst_time: str
+    nx: int
+    ny: int
+    category: str
+    fcst_value: str
+
+
+def _uf(category: str, fcst_value: str) -> _UltraShortFcst:
+    return _UltraShortFcst(
+        base_date="20260528",
+        base_time="0330",
+        fcst_date="20260528",
+        fcst_time="0400",
+        nx=60,
+        ny=127,
+        category=category,
+        fcst_value=fcst_value,
+    )
+
+
+def _kma_ultra_short_forecast_fixture() -> Sequence[_UltraShortFcst]:
+    return [
+        _uf("T1H", "18.5"),
+        _uf("RN1", "강수없음"),
+        _uf("LGT", "0"),
+        _uf("SKY", "1"),
+    ]
+
+
+def _convert_kma_ultra_short_forecast(items: Sequence[Any]) -> list[Any]:
+    values = ultra_short_forecast_to_weather_values(
+        items, feature_id=_FEATURE_ID_SEOUL_WEATHER
+    )
+    return [v.model_dump(mode="json") for v in values]
+
+
+# ── opinet 주유소 + 가격 fixture ───────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class _Station:
+    """`OpinetStationItem` Protocol 준수."""
+
+    uni_id: str
+    station_name: str
+    brand_code: str | None
+    address: str | None
+    longitude: Decimal | None
+    latitude: Decimal | None
+    tel: str | None
+    lpg_yn: str | bool | None
+
+
+def _opinet_stations_fixture() -> Sequence[_Station]:
+    return [
+        _Station(
+            uni_id="A0000001",
+            station_name="SK주유소 강남점",
+            brand_code="SKE",
+            address="서울특별시 강남구 테헤란로 100",
+            longitude=Decimal("127.0376"),
+            latitude=Decimal("37.4979"),
+            tel="02-1234-5678",
+            lpg_yn="Y",
+        ),
+        _Station(
+            uni_id="A0000002",
+            station_name="GS칼텍스 부산점",
+            brand_code="GSC",
+            address="부산광역시 해운대구 해운대로 200",
+            longitude=Decimal("129.1604"),
+            latitude=Decimal("35.1587"),
+            tel="0517491234",
+            lpg_yn="N",
+        ),
+    ]
+
+
+def _convert_opinet_stations(items: Sequence[Any]) -> list[Any]:
+    bundles = stations_to_bundles(items, fetched_at=_now())
+    return [b.model_dump(mode="json") for b in bundles]
+
+
+@dataclass(frozen=True)
+class _Price:
+    """`OpinetPriceItem` Protocol 준수."""
+
+    uni_id: str
+    prodcd: str
+    price: str
+    trade_dt: datetime
+
+
+def _opinet_prices_fixture() -> Sequence[_Price]:
+    t1 = datetime(2026, 5, 28, 3, 0, tzinfo=KST)
+    return [
+        _Price(uni_id="A0000001", prodcd="B027", price="1820", trade_dt=t1),
+        _Price(uni_id="A0000001", prodcd="D047", price="1650", trade_dt=t1),
+        _Price(uni_id="A0000001", prodcd="C004", price="1100", trade_dt=t1),
+    ]
+
+
+_FEATURE_ID_OPINET_STATION_DEMO = "f_1156010100_p_opinet_demo"
+
+
+def _convert_opinet_prices(items: Sequence[Any]) -> list[Any]:
+    values = prices_to_values(
+        items, feature_id=_FEATURE_ID_OPINET_STATION_DEMO
+    )
+    return [v.model_dump(mode="json") for v in values]
+
+
+# ── Registry ──────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class EtlFixtureEntry:
+    """(provider, dataset) → (variant + fixture builder + converter) 한 row."""
+
+    provider: str
+    dataset: str
+    variant: str  # "FeatureBundle" / "WeatherValue" / "PriceValue"
+    description: str
+    build_fixture: Callable[[], Sequence[Any]]
+    convert: Callable[[Sequence[Any]], list[Any]]
+
+
+FIXTURE_REGISTRY: Final[tuple[EtlFixtureEntry, ...]] = (
+    EtlFixtureEntry(
+        provider="data.go.kr-standard",
+        dataset="datagokr_cultural_festivals",
+        variant="FeatureBundle",
+        description=(
+            "전국문화축제표준데이터 → event Feature (1차 source, ADR-042). "
+            "PR#34."
+        ),
+        build_fixture=_datagokr_festival_fixture,
+        convert=_convert_datagokr_festival,
+    ),
+    EtlFixtureEntry(
+        provider="python-kma-api",
+        dataset="kma_short_forecast",
+        variant="WeatherValue",
+        description="KMA 단기예보 (3시간 단위 5일). PR#38.",
+        build_fixture=_kma_short_forecast_fixture,
+        convert=_convert_kma_short,
+    ),
+    EtlFixtureEntry(
+        provider="python-kma-api",
+        dataset="kma_ultra_short_nowcast",
+        variant="WeatherValue",
+        description="KMA 초단기실황 (1시간 단위 관측). PR#39.",
+        build_fixture=_kma_nowcast_fixture,
+        convert=_convert_kma_nowcast,
+    ),
+    EtlFixtureEntry(
+        provider="python-kma-api",
+        dataset="kma_ultra_short_forecast",
+        variant="WeatherValue",
+        description="KMA 초단기예보 (30분 단위 6시간). PR#41.",
+        build_fixture=_kma_ultra_short_forecast_fixture,
+        convert=_convert_kma_ultra_short_forecast,
+    ),
+    EtlFixtureEntry(
+        provider="python-opinet-api",
+        dataset="opinet_fuel_station_details",
+        variant="FeatureBundle",
+        description="OpiNet 주유소 place Feature. PR#43.",
+        build_fixture=_opinet_stations_fixture,
+        convert=_convert_opinet_stations,
+    ),
+    EtlFixtureEntry(
+        provider="python-opinet-api",
+        dataset="opinet_gas_station_prices",
+        variant="PriceValue",
+        description="OpiNet 가격 시계열 (B027/D047/C004 데모). PR#42.",
+        build_fixture=_opinet_prices_fixture,
+        convert=_convert_opinet_prices,
+    ),
+)
+
+
+def list_providers() -> list[str]:
+    """등록된 provider canonical name 목록 (중복 제거, 정렬)."""
+    return sorted({e.provider for e in FIXTURE_REGISTRY})
+
+
+def list_datasets(provider: str) -> list[str]:
+    """주어진 provider의 dataset 목록 (정렬)."""
+    return sorted(e.dataset for e in FIXTURE_REGISTRY if e.provider == provider)
+
+
+def _find_entry(provider: str, dataset: str) -> EtlFixtureEntry | None:
+    for entry in FIXTURE_REGISTRY:
+        if entry.provider == provider and entry.dataset == dataset:
+            return entry
+    return None
+
+
+def run_fixture_preview(provider: str, dataset: str) -> dict[str, Any]:
+    """`(provider, dataset)`의 fixture를 변환 함수에 넘기고 결과를 dict로.
+
+    Returns
+    -------
+    dict
+        ``{"provider", "dataset", "source", "variant", "count", "items"}``.
+
+    Raises
+    ------
+    KeyError
+        registry에 없는 (provider, dataset) 조합.
+    """
+    entry = _find_entry(provider, dataset)
+    if entry is None:
+        raise KeyError(
+            f"등록되지 않은 (provider, dataset): ({provider!r}, {dataset!r}). "
+            f"등록된 목록: {[(e.provider, e.dataset) for e in FIXTURE_REGISTRY]!r}"
+        )
+    fixture = entry.build_fixture()
+    items = entry.convert(fixture)
+    return {
+        "provider": entry.provider,
+        "dataset": entry.dataset,
+        "source": "fixture",
+        "variant": entry.variant,
+        "description": entry.description,
+        "count": len(items),
+        "items": items,
+    }
