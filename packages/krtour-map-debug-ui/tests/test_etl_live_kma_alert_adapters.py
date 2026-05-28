@@ -15,7 +15,10 @@ from krtour.map.providers.kma import weather_alerts_to_notice_bundles
 
 from krtour.map_debug_ui.etl_live import (
     KST,
+    _adapt_datagokr_wrn,
     _adapt_kma_wrn_row,
+    _datagokr_wrn_level,
+    _datagokr_wrn_notice_type,
     _kma_apihub_parse_dt,
     _kma_apihub_parse_table,
 )
@@ -123,3 +126,65 @@ def test_adapter_passes_transform() -> None:
     assert bundles[0].feature.kind.value == "notice"
     assert bundles[0].feature.detail.notice_type == "heavy_rain_warning"
     assert bundles[1].feature.detail.notice_type == "heat_wave_warning"
+
+
+# ── data.go.kr getWthrWrnList fallback (PR#60) — apihub 활용신청 전 live 경로 ──
+
+# 실 getWthrWrnList 응답 형태 (2026-05 확인): stnId/title/tmFc(int)/tmSeq.
+_DG_WRN_ROW = {
+    "stnId": "108",
+    "title": "[특보] 제05-115호 : 2026.05.27.04:00 / 강풍주의보·풍랑주의보 발효 (*)",
+    "tmFc": 202605270400,
+    "tmSeq": 115,
+}
+
+
+@pytest.mark.unit
+def test_datagokr_wrn_notice_type_keyword() -> None:
+    assert _datagokr_wrn_notice_type("호우주의보 발효") == "heavy_rain_warning"
+    assert _datagokr_wrn_notice_type("대설경보") == "heavy_snow_warning"
+    assert _datagokr_wrn_notice_type("폭염주의보") == "heat_wave_warning"
+    # alias 미등록 종류 → generic weather_alert (ValueError 회피).
+    assert _datagokr_wrn_notice_type("강풍주의보·풍랑주의보") == "weather_alert"
+    assert _datagokr_wrn_notice_type("특보 없음") == "weather_alert"
+
+
+@pytest.mark.unit
+def test_datagokr_wrn_level_priority() -> None:
+    assert _datagokr_wrn_level("호우경보") == "경보"
+    assert _datagokr_wrn_level("강풍주의보") == "주의보"
+    assert _datagokr_wrn_level("예비특보 발표") == "예비특보"
+    assert _datagokr_wrn_level("특보 해제") is None
+
+
+@pytest.mark.unit
+def test_adapt_datagokr_wrn_maps_fields() -> None:
+    a = _adapt_datagokr_wrn(_DG_WRN_ROW)
+    assert a.alert_id == "108:202605270400:115"  # 결정적 자연키
+    assert a.alert_type == "weather_alert"  # 강풍 → generic
+    assert a.level == "주의보"
+    assert a.issued_at == datetime(2026, 5, 27, 4, 0, tzinfo=KST)
+    assert a.source_agency == "기상청"
+    assert len(a.regions) == 1
+    assert a.regions[0].region_code == "stn:108"
+    assert a.regions[0].region_name == "기상청(전국 본청)"
+
+
+@pytest.mark.unit
+def test_adapt_datagokr_wrn_unknown_stn_fallback_name() -> None:
+    a = _adapt_datagokr_wrn({"stnId": "999", "title": "호우경보", "tmFc": "202605270400"})
+    assert a.regions[0].region_name == "KMA 관서 999"
+    assert a.alert_type == "heavy_rain_warning"
+    assert a.level == "경보"
+
+
+@pytest.mark.unit
+def test_datagokr_wrn_passes_transform() -> None:
+    """fallback adapter 결과도 weather_alerts_to_notice_bundles 통과."""
+    bundles = weather_alerts_to_notice_bundles(
+        [_adapt_datagokr_wrn(_DG_WRN_ROW)],  # type: ignore[list-item]
+        fetched_at=datetime.now(tz=KST),
+    )
+    assert len(bundles) == 1
+    assert bundles[0].feature.kind.value == "notice"
+    assert bundles[0].feature.detail.notice_type == "weather_alert"

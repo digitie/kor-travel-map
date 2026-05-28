@@ -69,9 +69,10 @@ class DebugUiSettings(BaseSettings):
     kma_service_key: SecretStr | None = Field(
         default=None,
         description=(
-            "기상청 공공데이터포털(apis.data.go.kr) service key. "
-            "`python-kma-api/.env` 의 ``KMA_SERVICE_KEY`` 값과 동일. 동네예보 "
-            "(단기/초단기) live loader에서 사용."
+            "기상청 공공데이터포털(apis.data.go.kr) service key. **source: "
+            "`python-kma-api/.env` 의 ``DATA_GO_KR_SERVICE_KEY``** (data.go.kr "
+            "게이트웨이 공통키 — datagokr/krex/visitkorea와 동일 값일 수 있음). "
+            "동네예보(단기/초단기) + weather_alerts fallback(getWthrWrnList)에서 사용."
         ),
     )
     kma_apihub_key: SecretStr | None = Field(
@@ -79,32 +80,41 @@ class DebugUiSettings(BaseSettings):
         description=(
             "기상청 API 허브(apihub.kma.go.kr) ``authKey``. data.go.kr "
             "``serviceKey``와 **다른 키** — `python-kma-api/.env` 의 "
-            "``KMA_APIHUB_AUTH_KEY``(또는 ``KMA_APIHUB_KEY``) 값. 특보현황 "
-            "(`kma_weather_alerts`) live loader는 apihub `wrn_now_data`가 "
-            "구조화 특보구역(REG_ID)을 주므로 이 키를 사용 (PR#58, ADR-044)."
+            "``KMA_APIHUB_AUTH_KEY``(또는 ``KMA_APIHUB_KEY``). 특보현황 "
+            "(`kma_weather_alerts`)의 apihub `wrn_now_data` primary 경로가 "
+            "구조화 특보구역(REG_ID)을 주므로 이 키 사용 (PR#58, ADR-044). "
+            "**apihub는 API별 '활용신청' 필요** — 미신청 시 HTTP 403 → loader는 "
+            "data.go.kr `getWthrWrnList`(kma_service_key) fallback으로 강등 (PR#60)."
         ),
     )
     opinet_service_key: SecretStr | None = Field(
         default=None,
         description=(
-            "OpiNet API key. `python-opinet-api/.env` 의 "
-            "``OPINET_SERVICE_KEY``."
+            "OpiNet API key. **source: `python-opinet-api/.env` 의 "
+            "``OPINET_API_KEY``** (opinet.co.kr `certkey`)."
         ),
     )
     datagokr_service_key: SecretStr | None = Field(
         default=None,
         description=(
-            "data.go.kr 표준데이터 service key. `python-datagokr-api/.env` 의 "
-            "``DATAGOKR_SERVICE_KEY``."
+            "data.go.kr 표준데이터 service key. **source: "
+            "`python-datagokr-api/.env` 의 ``DATA_GO_KR_SERVICE_KEY``** "
+            "(게이트웨이 공통키 — kma_service_key와 동일 값일 수 있음)."
         ),
     )
     visitkorea_service_key: SecretStr | None = Field(
         default=None,
-        description="`python-visitkorea-api/.env` 의 ``VISITKOREA_SERVICE_KEY``.",
+        description=(
+            "VisitKorea TourAPI key. **source: `python-visitkorea-api/.env` 의 "
+            "``KTO_DATA_GO_KR_SERVICE_KEY``** (또는 공통 ``DATA_GO_KR_SERVICE_KEY``)."
+        ),
     )
     krex_service_key: SecretStr | None = Field(
         default=None,
-        description="`python-krex-api/.env` 의 ``KREX_SERVICE_KEY``.",
+        description=(
+            "한국도로공사 EX OpenAPI key. **source: `python-krex-api/.env` 의 "
+            "``KEX_GO_API_KEY``** (data.ex.co.kr `key` — data.go.kr serviceKey와 다름)."
+        ),
     )
     knps_service_key: SecretStr | None = Field(
         default=None,
