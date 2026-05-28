@@ -105,10 +105,17 @@
   - `krex_traffic_notices` (notice)
 - **Feature.kind**: `place` + `price` + `weather` + `notice` — **multi-kind
   검증**
-- **module**: `src/krtour/map/providers/krex.py`
-- **fixture**: 6건 (휴게소 2 + 가격 2 + weather 1 + notice 1)
-- **provider 자체에 4 kind**: 본 라이브러리에서 multi-kind FeatureBundle을
-  올바르게 처리하는지 통합 테스트 베이스.
+- **module**: `src/krtour/map/providers/krex.py` — **PR#45 merged 2026-05-28**
+- **함수** (PR#45 구현 완료):
+  - `rest_areas_to_bundles(items, *, fetched_at, reverse_geocoder=None) -> list[FeatureBundle]` (place)
+  - `rest_area_prices_to_values(items, *, feature_id, source_record_key=None) -> list[PriceValue]` (food/fuel 분기)
+  - `rest_area_weather_to_values(items, *, feature_id, source_record_key=None) -> list[WeatherValue]` (forecast_style=observed)
+  - `traffic_notices_to_bundles(items, *, fetched_at, reverse_geocoder=None) -> list[FeatureBundle]` (notice + NoticeDetail + normalize_notice_type alias)
+- **fixture**: 8건 (휴게소 2 + 가격 2 + weather 2 + notice 2) — PR#45 tests
+  18 case
+- **provider 자체에 4 kind**: 본 라이브러리에서 multi-kind를 올바르게 처리
+  하는지 통합 검증 완료 — `multi_kind_pipeline_uses_same_feature_id` test로
+  rest_areas → prices/weather 동일 feature_id 흐름 검증.
 
 ### 2.5 디버그/관리 UI backend 첫 라우터 (ADR-031 + ADR-035 활성화)
 
