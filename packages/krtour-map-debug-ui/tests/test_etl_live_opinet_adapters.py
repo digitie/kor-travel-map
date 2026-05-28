@@ -18,7 +18,9 @@ from krtour.map_debug_ui.etl_live import (
     _OPINET_KATEC_PROJ,
     _adapt_opinet_price,
     _adapt_opinet_station,
+    _opinet_first_uni_id,
     _opinet_katec_to_wgs84,
+    _opinet_wgs84_to_katec,
 )
 
 _KST = timezone(timedelta(hours=9))
@@ -51,6 +53,33 @@ def test_katec_roundtrip_seoul() -> None:
 def test_katec_out_of_range_returns_none() -> None:
     # 비현실적 KATEC 값 → WGS84 범위 밖이거나 변환 실패 → None.
     assert _opinet_katec_to_wgs84(1e12, 1e12) is None
+
+
+# ── discovery helper (PR#63 auto-discovery) ───────────────────────────
+
+
+@pytest.mark.unit
+def test_wgs84_to_katec_roundtrip() -> None:
+    """WGS84 → KATEC(forward) → WGS84(reverse) round-trip (aroundAll discovery용)."""
+    katec = _opinet_wgs84_to_katec(127.0, 37.5)
+    assert katec is not None
+    back = _opinet_katec_to_wgs84(katec[0], katec[1])
+    assert back is not None
+    assert abs(float(back[0]) - 127.0) < 0.001
+    assert abs(float(back[1]) - 37.5) < 0.001
+
+
+@pytest.mark.unit
+def test_first_uni_id_picks_first_nonempty() -> None:
+    rows = [
+        {"UNI_ID": "", "PRICE": "1600"},
+        {"UNI_ID": "  ", "PRICE": "1610"},
+        {"UNI_ID": "A0019581", "PRICE": "1620"},
+        {"UNI_ID": "A0019999"},
+    ]
+    assert _opinet_first_uni_id(rows) == "A0019581"
+    assert _opinet_first_uni_id([{"PRICE": "1"}]) is None
+    assert _opinet_first_uni_id([]) is None
 
 
 # ── station adapter ───────────────────────────────────────────────────
