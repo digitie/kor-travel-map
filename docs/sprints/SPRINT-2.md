@@ -281,8 +281,14 @@ Sprint 2 진행 중 다음 ADR들의 1차 implementation 점진 도입:
       `festival_to_enrichment_links` + `FestivalMatcher` plug-in (PR#51, 8 test)
 - [x] 2. KMA 중기예보 — `mid_land_forecast_to_weather_values`(SKY 텍스트 + POP,
       AM/PM split) + `mid_temperature_to_weather_values`(TMN/TMX) (PR#52, 11 test)
-- [ ] 3. ETL live 나머지 8 dataset loader 등록 — datagokr 1 + opinet 2 + krex 4
-      + kma_weather_alerts 1 (`etl_live.LIVE_LOADER_REGISTRY` 확장)
+- [~] 3. ETL live 나머지 8 dataset loader 등록 (`etl_live.LIVE_LOADER_REGISTRY`)
+      — **provider repo 로컬(`F:\dev\`) 기준 정확히 wiring** (ADR-044). 8종 전부:
+      - [x] krex 4 (rest_areas/prices/weather/traffic_notices) — PR#55
+        (EX OpenAPI, 순수 adapter + 14 단위 test).
+      - [ ] opinet 2 (station/prices) — PR#56 (detailById.do, KATEC 좌표).
+      - [ ] datagokr 1 (cultural_festivals) — PR#57 (`python-datagokr-api` 로컬).
+      - [ ] kma_weather_alerts 1 — PR#58 (`python-kma-api/apihub_endpoints.py`
+        wrn_now_data 구조화 region/level).
 - [ ] 4. `pyproject.toml` `fail_under` 50 → 65 상향 (실측 96%라 무위험) +
       `docs/journal.md` Sprint 2 종료 회고 + `docs/resume.md` → Sprint 3 진입 +
       `docs/sprints/SPRINT-3.md` 진입 PR 준비
