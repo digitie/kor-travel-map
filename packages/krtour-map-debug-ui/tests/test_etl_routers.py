@@ -188,8 +188,32 @@ def test_providers_dataset_marks_live_supported(client: TestClient) -> None:
     assert live_map["kma_short_forecast"] is True
     assert live_map["kma_ultra_short_nowcast"] is True
     assert live_map["kma_ultra_short_forecast"] is True
-    # weather_alerts는 live 미등록.
+    # weather_alerts는 live 미등록 (getWthrWrnList 구조화 region 미제공 — PR#55 보류).
     assert live_map["kma_weather_alerts"] is False
+
+
+@pytest.mark.unit
+def test_providers_krex_live_supported(client: TestClient) -> None:
+    """krex 4 dataset은 PR#55부터 live_supported=True."""
+    response = client.get("/debug/etl/providers")
+    body = response.json()
+    krex = next(p for p in body["providers"] if p["provider"] == "python-krex-api")
+    live_map = {d["dataset"]: d["live_supported"] for d in krex["datasets"]}
+    assert live_map["krex_rest_areas"] is True
+    assert live_map["krex_rest_area_prices"] is True
+    assert live_map["krex_rest_area_weather"] is True
+    assert live_map["krex_traffic_notices"] is True
+
+
+@pytest.mark.unit
+def test_preview_live_krex_503_when_key_missing(client: TestClient) -> None:
+    """krex는 live 등록됐지만 .env 키 없으면 503."""
+    response = client.post(
+        "/debug/etl/python-krex-api/krex_rest_areas/preview?source=live"
+    )
+    assert response.status_code == 503
+    body = response.json()
+    assert "KREX_SERVICE_KEY 미설정" in body["detail"]
 
 
 @pytest.mark.unit

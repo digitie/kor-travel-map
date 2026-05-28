@@ -2,6 +2,37 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-28 11:30 (claude)
+
+**작업**: PR#55 — Sprint 2 item 3(ETL live) krex 4 dataset loader. 사용자
+"8종 전부 wiring" 결정 중 첫 4종. ADR-044 로컬 우선 조회로 `python-krex-api`
+EX OpenAPI 스펙 확인 후 정확히 wiring.
+
+**변경 — `etl_live.py`** (krex 섹션):
+- EX OpenAPI(`data.ex.co.kr`, `key`+`type=json`, `payload.list[]`) `_krex_call`.
+- 4 loader: `krex_rest_areas_live`(serviceAreaRoute, 좌표 없음→None) /
+  `krex_rest_area_prices_live`(curStateStation 주유 explode + restMenuList 식음료
+  combine) / `krex_rest_area_weather_live`(restWeatherList, sdate/stdHour 기본
+  현재, wide→long melt, -99 sentinel drop) / `krex_traffic_notices_live`
+  (incident, notice_id 합성, incidentType 코드→notice_type 매핑).
+- 순수 adapter 5종(`_adapt_krex_*`) — async fetch는 key 필요해 CI 미검증이라
+  adapter를 테스트 핵심으로 분리.
+- `LIVE_LOADER_REGISTRY`에 krex 4 등록 (이제 KMA 3 + krex 4 = 7 live).
+
+**신규 테스트**: `tests/test_etl_live_krex_adapters.py` (14 case — rest_area
+매핑, fuel explode, food, weather melt+sentinel, notice 합성/매핑, 각 adapter가
+실제 변환 함수 통과). `test_etl_routers.py` +2 (krex live_supported / 503).
+
+**설계**: EX incidentType 코드(1사고/2공사/3기상/4기타) → 표준 notice_type
+(traffic_accident/roadwork/weather_alert/traffic) 매핑 — NoticeDetail validator
+정합. rest_areas는 serviceAreaRoute에 좌표 없어 coord=None(좌표는 후속 join).
+
+**Verification**: debug-ui 37 passed (krex adapter 14 + 기존) / 메인 469 /
+ruff / mypy strict 49 / import-linter 4. openapi drift 0.
+
+**다음**: opinet 2(PR#56) → datagokr 1(PR#57) → kma_weather_alerts 1(PR#58)
+→ item 4 Sprint 2 종료.
+
 ## 2026-05-28 11:00 (claude)
 
 **작업**: PR#54 — ADR-044: 관련 라이브러리 로컬(`F:\dev\`) 우선 조회 + 데이터
