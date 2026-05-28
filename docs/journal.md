@@ -2,6 +2,28 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-28 10:30 (claude)
+
+**작업**: opinet product code 정정 — `OPINET_PRODUCT_KEY_MAP`에서 `K015`/`C004`가
+서로 뒤바뀌어 있던 것을 수정. 데이터 정합성 단일 fix (PR feat/fix-opinet-product-codes).
+
+**근거**: upstream `python-opinet-api` `codes.py`(`KEROSENE="C004"` / `LPG="K015"`)와
+한국석유공사 OpiNet OpenAPI 공식 제품코드(C004=실내등유, K015=자동차용부탄)가 일치.
+기존 map은 `K015→kerosene` / `C004→lpg`로 정반대였음.
+
+**변경**:
+- `providers/opinet.py` — `OPINET_PRODUCT_KEY_MAP` `C004→kerosene` / `K015→lpg`로
+  정정 + 모듈 docstring 표 동기화.
+- `tests/unit/test_providers_opinet.py` — `_LPG` fixture `prodcd` `C004→K015`(실제
+  LPG 코드)로 정정 + `test_product_code_map_complete` assertion 정정.
+- `docs/sprints/SPRINT-2.md` §2.3 — 잘못된 위치 매핑(`…/K015/C004`) 정정.
+
+**Verification**: `pytest tests/unit -k opinet` 26 passed / `ruff check src tests`
+clean / `mypy --strict src` 40 files.
+
+**비고**: `prices_to_values` 변환 경로는 무변(lookup table만 정정). debug-ui
+`etl_fixtures.py`의 C004 데모는 그대로 두되 이제 kerosene으로 정상 출력됨.
+
 ## 2026-05-28 09:40 (claude)
 
 **작업**: PR#52 — Sprint 2 잔여 2/4: KMA 중기예보 (mid forecast). ADR-010

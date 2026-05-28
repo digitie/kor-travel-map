@@ -37,7 +37,7 @@ _T2 = datetime(2026, 5, 28, 4, 0, tzinfo=KST)
 _GASOLINE = _PriceItem(uni_id="A0000001", prodcd="B027", price="1820", trade_dt=_T1)
 _DIESEL = _PriceItem(uni_id="A0000001", prodcd="D047", price="1650", trade_dt=_T1)
 _PREMIUM = _PriceItem(uni_id="A0000001", prodcd="B034", price="2050", trade_dt=_T1)
-_LPG = _PriceItem(uni_id="A0000001", prodcd="C004", price="1100", trade_dt=_T1)
+_LPG = _PriceItem(uni_id="A0000001", prodcd="K015", price="1100", trade_dt=_T1)
 _THOUSANDS = _PriceItem(
     uni_id="A0000001", prodcd="B027", price="1,820", trade_dt=_T2
 )
@@ -79,8 +79,8 @@ def test_product_code_map_complete() -> None:
     assert OPINET_PRODUCT_KEY_MAP["B027"] == "gasoline"
     assert OPINET_PRODUCT_KEY_MAP["D047"] == "diesel"
     assert OPINET_PRODUCT_KEY_MAP["B034"] == "premium_gasoline"
-    assert OPINET_PRODUCT_KEY_MAP["K015"] == "kerosene"
-    assert OPINET_PRODUCT_KEY_MAP["C004"] == "lpg"
+    assert OPINET_PRODUCT_KEY_MAP["C004"] == "kerosene"
+    assert OPINET_PRODUCT_KEY_MAP["K015"] == "lpg"
     # 한글 이름도 모두 존재.
     for key in ["gasoline", "diesel", "premium_gasoline", "kerosene", "lpg"]:
         assert key in OPINET_PRODUCT_NAME_KO
