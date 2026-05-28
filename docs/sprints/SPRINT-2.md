@@ -59,7 +59,9 @@
     `ultra_short_nowcast_to_weather_values` merged 2026-05-28**
   - `kma_ultra_short_forecast` (초단기예보, 30분 단위 6시간) — **PR#41
     `ultra_short_forecast_to_weather_values` merged 2026-05-28**
-  - `kma_mid_forecast` (중기예보, 일 단위) — 후속 PR (텍스트 + AM/PM split)
+  - `kma_mid_forecast` (중기예보, 일 단위) — **PR#52 구현 완료**
+    (`mid_land_forecast_to_weather_values` 텍스트 SKY + POP, AM/PM split +
+    `mid_temperature_to_weather_values` TMN/TMX)
   - `kma_weather_alerts` (특보, notice kind, region 단위 fan-out) — **PR#46
     `weather_alerts_to_notice_bundles` merged 2026-05-28**
 - **Feature.kind**: `weather` (단/초단/중) + `notice` (특보)
@@ -277,7 +279,8 @@ Sprint 2 진행 중 다음 ADR들의 1차 implementation 점진 도입:
 **잔여 (Sprint 2 종료 게이트)**:
 - [x] 1. visitkorea enrichment — `providers/visitkorea.py`
       `festival_to_enrichment_links` + `FestivalMatcher` plug-in (PR#51, 8 test)
-- [ ] 2. KMA `mid_forecast_to_weather_values` — 중기예보 텍스트 + AM/PM split (§2.2)
+- [x] 2. KMA 중기예보 — `mid_land_forecast_to_weather_values`(SKY 텍스트 + POP,
+      AM/PM split) + `mid_temperature_to_weather_values`(TMN/TMX) (PR#52, 11 test)
 - [ ] 3. ETL live 나머지 8 dataset loader 등록 — datagokr 1 + opinet 2 + krex 4
       + kma_weather_alerts 1 (`etl_live.LIVE_LOADER_REGISTRY` 확장)
 - [ ] 4. `pyproject.toml` `fail_under` 50 → 65 상향 (실측 96%라 무위험) +
