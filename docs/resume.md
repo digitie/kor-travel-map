@@ -183,6 +183,13 @@ PR#22 CI/import-linter merge 후 gate 확인. PR#22 merge 후 PR#23 리포트
       etl.ts` + `src/app/etl/page.tsx` (provider/dataset 선택 + Preview 실행
       + JSON 결과). 적재 없음(dry-run). `?source=fixture` 활성, `?source=live`
       는 501 후속. 437 tests green (신규 13).
+- [x] **PR#45 (merged 2026-05-28)** — Sprint 2 §2.4 krex 휴게소 multi-kind.
+      `providers/krex.py` — 4 Protocol + 4 변환 함수 (rest_areas_to_bundles
+      place / rest_area_prices_to_values food|fuel / rest_area_weather_to_
+      values observed / traffic_notices_to_bundles notice). NoticeDetail의
+      normalize_notice_type alias 활용 ('교통사고'→'traffic_accident').
+      `multi_kind_pipeline_uses_same_feature_id` 통합 검증 — rest_areas의
+      feature_id로 prices/weather 일관 흐름. 455 tests green (신규 18).
 
 다음 PR 후보 (Sprint 2 entry 계속):
 

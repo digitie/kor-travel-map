@@ -2,6 +2,69 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-28 05:30 (claude)
+
+**작업**: PR#45 — Sprint 2 §2.4 krex 휴게소 multi-kind 진입. 한 provider에서
+**place + price + weather + notice** 4 kind 동시 처리 — 본 라이브러리 multi-
+kind FeatureBundle/시계열 통합 검증.
+
+**신규 파일** (2):
+- `src/krtour/map/providers/krex.py` (~520 line):
+  - Protocols 4종: `KrexRestAreaItem` / `KrexRestAreaPriceItem` / `KrexRest
+    AreaWeatherItem` / `KrexTrafficNoticeItem`
+  - 변환 함수 4종:
+    - `rest_areas_to_bundles(items, *, fetched_at, reverse_geocoder=None)`
+      → list[FeatureBundle] (place kind, category `06040101` TRANSPORT_REST_
+      AREA_HIGHWAY_EX, marker `fast-food` P-06, PlaceDetail.place_kind=
+      "rest_area" + facility_info{direction, highway_name})
+    - `rest_area_prices_to_values(items, *, feature_id, source_record_key=
+      None)` → list[PriceValue] (category 'food' → REST_AREA_FOOD/KRW or
+      'fuel' → REST_AREA_FUEL/KRW/L)
+    - `rest_area_weather_to_values(items, *, feature_id, source_record_key=
+      None)` → list[WeatherValue] (REST_AREA_WEATHER, observed, ultra_short
+      bucket)
+    - `traffic_notices_to_bundles(items, *, fetched_at, reverse_geocoder=
+      None)` → list[FeatureBundle] (notice kind, category `06010000`
+      TRANSPORT_ROAD, marker `roadblock` P-13, NoticeDetail + normalize_
+      notice_type alias 적용)
+  - helpers: `_coord_or_none` / `_parse_numeric` (천단위 ',' 흡수) /
+    `_reverse_geocode` / `_price_domain_for` / `_price_unit_for`
+  - 상수: `KREX_PROVIDER_NAME` / 4 dataset_key / 2 category / 2 marker set
+- `tests/unit/test_providers_krex.py` (~310 line, 18 case)
+
+**변경 파일** (2):
+- `src/krtour/map/providers/__init__.py` — krex 18 신규 식별자 re-export
+- `docs/sprints/SPRINT-2.md` §2.4 — PR#45 4 함수 merged + multi-kind 통합
+  검증 완료 표기
+
+**테스트 (18 case)**:
+- rest_areas: bundle count/order / feature metadata / source_record dataset /
+  phone normalize / FK consistency
+- rest_area_prices: fuel KRW/L / food KRW / bad category raises / 비숫자 raises
+- rest_area_weather: observed metadata / count per metric
+- traffic_notices: bundle metadata / alias normalize ('교통사고' → 'traffic_
+  accident') / no coord global fallback / source_record / source_link primary
+- 통합: `test_multi_kind_pipeline_uses_same_feature_id` — rest_areas → bundles
+  → 그 feature_id로 prices/weather 호출이 일관 / 4 empty iterables
+
+**ADR 정합**:
+- ADR-006 — `python-krex-api` typed model 직접 import X (Protocol input only)
+- ADR-009/018/019 — make_*/Feature.detail/aware datetime
+- ADR-010 — WeatherValue 두 축 (observed/ultra_short)
+- ADR-013/014 — PriceValue/WeatherValue bulk/BRIN 적재 호환 (적재 PR에서 검증)
+- ADR-027 — NOTICE_TYPES + normalize_notice_type alias 활용
+- ADR-041 — address utility (normalize_korean_text/phone/bjd_code) 적극
+
+**Verification (local)**:
+- `pytest tests/ packages/krtour-map-debug-ui/tests/ --ignore=tests/integration
+  -q` → **455 passed, 4 skipped** (PR#44 437 + 신규 18)
+- `ruff check src/ tests/ packages/krtour-map-debug-ui/` → All checks passed
+- `mypy --strict src/krtour/map packages/krtour-map-debug-ui/src/krtour/
+  map_debug_ui` → no issues found in 47 source files
+
+**Sprint 2 §2.4 완료**. 다음 PR#46 — KMA weather_alerts (notice FeatureBundle)
+마무리.
+
 ## 2026-05-28 05:00 (claude)
 
 **작업**: PR#44 — 디버그 UI ETL preview 라우터 + frontend 페이지. 운영자가
