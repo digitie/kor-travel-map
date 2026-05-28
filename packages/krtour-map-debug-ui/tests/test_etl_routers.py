@@ -157,10 +157,12 @@ def test_preview_unknown_dataset_404(client: TestClient) -> None:
 
 @pytest.mark.unit
 def test_preview_live_source_501_when_not_registered(client: TestClient) -> None:
-    """datagokr_cultural_festivals는 LIVE_LOADER_REGISTRY 미등록 — 501."""
+    """kma_weather_alerts는 LIVE_LOADER_REGISTRY 미등록(PR#58 예정) — 501.
+
+    (datagokr_cultural_festivals는 PR#57부터 live 등록됨 — 더 이상 501 아님.)
+    """
     response = client.post(
-        "/debug/etl/data.go.kr-standard/datagokr_cultural_festivals/preview"
-        "?source=live"
+        "/debug/etl/python-kma-api/kma_weather_alerts/preview?source=live"
     )
     assert response.status_code == 501
     body = response.json()
@@ -236,6 +238,29 @@ def test_preview_live_opinet_503_when_key_missing(client: TestClient) -> None:
     assert response.status_code == 503
     body = response.json()
     assert "OPINET_SERVICE_KEY 미설정" in body["detail"]
+
+
+@pytest.mark.unit
+def test_providers_datagokr_live_supported(client: TestClient) -> None:
+    """datagokr_cultural_festivals는 PR#57부터 live_supported=True."""
+    response = client.get("/debug/etl/providers")
+    body = response.json()
+    dg = next(
+        p for p in body["providers"] if p["provider"] == "data.go.kr-standard"
+    )
+    live_map = {d["dataset"]: d["live_supported"] for d in dg["datasets"]}
+    assert live_map["datagokr_cultural_festivals"] is True
+
+
+@pytest.mark.unit
+def test_preview_live_datagokr_503_when_key_missing(client: TestClient) -> None:
+    """datagokr은 live 등록됐지만 .env 키 없으면 503."""
+    response = client.post(
+        "/debug/etl/data.go.kr-standard/datagokr_cultural_festivals/preview?source=live"
+    )
+    assert response.status_code == 503
+    body = response.json()
+    assert "DATAGOKR_SERVICE_KEY 미설정" in body["detail"]
 
 
 @pytest.mark.unit

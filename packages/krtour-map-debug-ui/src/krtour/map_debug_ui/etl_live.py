@@ -39,6 +39,7 @@ from krtour.map.providers.krex import (
     traffic_notices_to_bundles,
 )
 from krtour.map.providers.opinet import prices_to_values, stations_to_bundles
+from krtour.map.providers.standard_data import cultural_festivals_to_bundles
 
 from krtour.map_debug_ui.settings import DebugUiSettings
 
@@ -846,6 +847,133 @@ async def opinet_gas_station_prices_live(
     return [v.model_dump(mode="json") for v in values]
 
 
+# =========================================================================
+# data.go.kr 표준데이터 (datagokr) — 전국문화축제표준데이터. 로컬
+# `python-datagokr-api` `CulturalFestivalService` 기준 (ADR-044):
+# endpoint `tn_pubr_public_cltur_fstvl_api`, params serviceKey/pageNo/
+# numOfRows/type=json, 응답 `response.body.items[]`. PublicCulturalFestival
+# alias = raw JSON key.
+# =========================================================================
+
+_DATAGOKR_BASE_URL: Final[str] = "https://api.data.go.kr/openapi"
+"""data.go.kr 표준데이터 OpenAPI base URL (로컬 datagokr config 기준)."""
+
+_DATAGOKR_CULTURAL_FESTIVAL_ENDPOINT: Final[str] = "tn_pubr_public_cltur_fstvl_api"
+
+
+@dataclass(frozen=True)
+class _DatagokrFestivalAdapter:
+    """`CulturalFestivalItem` Protocol 만족 (standard_data.py)."""
+
+    management_no: str
+    festival_name: str
+    venue_name: str | None
+    start_date: date | None
+    end_date: date | None
+    description: str | None
+    latitude: Decimal | None
+    longitude: Decimal | None
+    road_address: str | None
+    jibun_address: str | None
+    organizer_name: str | None
+    organizer_tel: str | None
+    data_reference_date: date | None
+    provider_org_name: str | None
+
+
+def _datagokr_parse_date(value: str | None) -> date | None:
+    """표준데이터 날짜('YYYY-MM-DD' 또는 'YYYYMMDD') → date. 실패 시 None."""
+    if not value:
+        return None
+    text = value.strip().replace(".", "-")
+    digits = text.replace("-", "")
+    if len(digits) == 8 and digits.isdigit():
+        return date(int(digits[:4]), int(digits[4:6]), int(digits[6:8]))
+    return None
+
+
+def _datagokr_decimal(value: Any) -> Decimal | None:
+    if value is None or str(value).strip() == "":
+        return None
+    try:
+        return Decimal(str(value).strip())
+    except (ValueError, ArithmeticError):
+        return None
+
+
+def _adapt_datagokr_festival(raw: dict[str, Any]) -> _DatagokrFestivalAdapter:
+    festival_name = _first_str(raw, "fstvlNm", "festival_name") or ""
+    road = _first_str(raw, "rdnmadr")
+    jibun = _first_str(raw, "lnmadr")
+    # 표준데이터에 관리번호 컬럼이 없어 (축제명@주소)로 자연키 합성 (결정적).
+    management_no = f"{festival_name}@{road or jibun or ''}".strip("@") or festival_name
+    return _DatagokrFestivalAdapter(
+        management_no=management_no or "unknown",
+        festival_name=festival_name,
+        venue_name=_first_str(raw, "opar"),
+        start_date=_datagokr_parse_date(_first_str(raw, "fstvlStartDate")),
+        end_date=_datagokr_parse_date(_first_str(raw, "fstvlEndDate")),
+        description=_first_str(raw, "fstvlCo"),
+        latitude=_datagokr_decimal(raw.get("latitude")),
+        longitude=_datagokr_decimal(raw.get("longitude")),
+        road_address=road,
+        jibun_address=jibun,
+        organizer_name=_first_str(raw, "mnnstNm", "auspcInsttNm"),
+        organizer_tel=_first_str(raw, "phoneNumber"),
+        data_reference_date=_datagokr_parse_date(_first_str(raw, "referenceDate")),
+        provider_org_name=_first_str(raw, "instt_nm"),
+    )
+
+
+async def _datagokr_call(
+    endpoint: str, *, service_key: str, params: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """data.go.kr 표준데이터 GET → `response.body.items[]` list 반환."""
+    query: dict[str, Any] = {
+        "serviceKey": service_key,
+        "type": "json",
+        "pageNo": 1,
+        "numOfRows": 100,
+        **params,
+    }
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        response = await client.get(f"{_DATAGOKR_BASE_URL}/{endpoint}", params=query)
+    if response.status_code != 200:
+        raise LiveLoaderError(
+            f"datagokr {endpoint} HTTP {response.status_code}: {response.text[:200]}"
+        )
+    payload = response.json()
+    body = payload.get("response", {}).get("body", {}) if isinstance(payload, dict) else {}
+    items = body.get("items", []) if isinstance(body, dict) else []
+    if isinstance(items, dict):
+        items = items.get("item", [])
+    if isinstance(items, dict):
+        items = [items]
+    if not isinstance(items, list):
+        return []
+    return [row for row in items if isinstance(row, dict)]
+
+
+async def datagokr_cultural_festivals_live(
+    settings: DebugUiSettings, params: dict[str, str]
+) -> list[dict[str, Any]]:
+    """data.go.kr 전국문화축제표준데이터 raw API → list[FeatureBundle dict]."""
+    key = settings.datagokr_service_key
+    if key is None:
+        raise LiveLoaderError("DATAGOKR_SERVICE_KEY 미설정 (.env 확인).")
+    raw_items = await _datagokr_call(
+        _DATAGOKR_CULTURAL_FESTIVAL_ENDPOINT,
+        service_key=key.get_secret_value(),
+        params={},
+    )
+    adapted = [_adapt_datagokr_festival(r) for r in raw_items]
+    bundles = cultural_festivals_to_bundles(
+        adapted,  # type: ignore[arg-type]
+        fetched_at=datetime.now(tz=KST),
+    )
+    return [b.model_dump(mode="json") for b in bundles]
+
+
 # ── Registry ──────────────────────────────────────────────────────────
 
 
@@ -861,9 +989,10 @@ LIVE_LOADER_REGISTRY: Final[dict[tuple[str, str], LiveLoader]] = {
         opinet_fuel_station_details_live
     ),
     ("python-opinet-api", "opinet_gas_station_prices"): opinet_gas_station_prices_live,
+    ("data.go.kr-standard", "datagokr_cultural_festivals"): (
+        datagokr_cultural_festivals_live
+    ),
     # ── 후속 PR (ADR-044 로컬 repo 기준) ──
-    # `data.go.kr-standard` datagokr_cultural_festivals — PR#57 (로컬
-    #   python-datagokr-api client 기준).
     # `kma_weather_alerts` — PR#58 (로컬 python-kma-api apihub_endpoints.py
     #   wrn_now_data 구조화 region/level).
 }
@@ -872,7 +1001,3 @@ LIVE_LOADER_REGISTRY: Final[dict[tuple[str, str], LiveLoader]] = {
 def find_live_loader(provider: str, dataset: str) -> LiveLoader | None:
     """``(provider, dataset)`` → ``LiveLoader`` 또는 ``None`` (등록 안 됨)."""
     return LIVE_LOADER_REGISTRY.get((provider, dataset))
-
-
-# date / 사용 안 함 경고 silencer (향후 datagokr/opinet loader에서 date 활용).
-_ = date

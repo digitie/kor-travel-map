@@ -2,6 +2,33 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-28 12:30 (claude)
+
+**작업**: PR#57 — ETL live datagokr 전국문화축제표준데이터 loader. 8종 중 3차.
+**ADR-044 직접 효과** — GitHub 404로 보류했던 `python-datagokr-api`가 `F:\dev\`
+로컬에 존재 확인 → 정확히 wiring.
+
+**변경 — `etl_live.py`** (datagokr 섹션):
+- `_datagokr_call`(`api.data.go.kr/openapi/tn_pubr_public_cltur_fstvl_api`,
+  serviceKey/type=json/pageNo/numOfRows, `response.body.items[]`).
+- `datagokr_cultural_festivals_live` → `cultural_festivals_to_bundles`.
+- `_adapt_datagokr_festival` — 로컬 `PublicCulturalFestival` alias(fstvlNm/opar/
+  fstvlStartDate/fstvlEndDate/fstvlCo/mnnstNm/phoneNumber/rdnmadr/lnmadr/
+  latitude/longitude/referenceDate/instt_nm) → `CulturalFestivalItem` Protocol.
+  관리번호 컬럼 없어 (축제명@도로명) 결정적 합성. 날짜/Decimal 파서.
+- `LIVE_LOADER_REGISTRY` datagokr 등록 (KMA 3 + krex 4 + opinet 2 + datagokr 1
+  = 10 live). `_ = date` 묵음 처리 제거(date 실사용).
+
+**신규 테스트**: `test_etl_live_datagokr_adapters.py` (7 case — 날짜 변형 파싱,
+alias 매핑, 관리번호 합성 결정성, 좌표 없음, 변환 통과). `test_etl_routers.py`:
+501 테스트를 datagokr→kma_weather_alerts로 교체(datagokr 이제 등록됨) +
+datagokr live_supported/503 +2.
+
+**Verification**: debug-ui 54 / ruff / mypy strict 49 / import-linter 4 /
+openapi drift 0.
+
+**다음**: kma_weather_alerts 1(PR#58, apihub wrn_now_data) → 11/11 live → item 4.
+
 ## 2026-05-28 12:00 (claude)
 
 **작업**: PR#56 — ETL live opinet 2 dataset loader (station/prices). 8종 중

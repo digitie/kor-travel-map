@@ -287,7 +287,8 @@ Sprint 2 진행 중 다음 ADR들의 1차 implementation 점진 도입:
         (EX OpenAPI, 순수 adapter + 14 단위 test).
       - [x] opinet 2 (station/prices) — PR#56 (detailById.do `?id=`, KATEC→WGS84
         reproject via 로컬 coords.py proj, 순수 adapter + 10 단위 test).
-      - [ ] datagokr 1 (cultural_festivals) — PR#57 (`python-datagokr-api` 로컬).
+      - [x] datagokr 1 (cultural_festivals) — PR#57 (로컬 `python-datagokr-api`
+        `tn_pubr_public_cltur_fstvl_api`, alias 매핑 + 7 단위 test).
       - [ ] kma_weather_alerts 1 — PR#58 (`python-kma-api/apihub_endpoints.py`
         wrn_now_data 구조화 region/level).
 - [ ] 4. `pyproject.toml` `fail_under` 50 → 65 상향 (실측 96%라 무위험) +
