@@ -76,14 +76,14 @@ PC 개발은 **WSL ext4** 위에서 수행한다. NTFS 마운트에서 직접 `g
 
 | AI 에이전트 | 고정 worktree 디렉토리 |
 |------------|----------------------|
-| ChatGPT Codex | `~/dev/geo-codex/` |
-| Claude Code (본 SDK 포함) | `~/dev/geo-claude/` |
-| Google Antigravity 2.0 | `~/dev/geo-antigravity/` |
+| ChatGPT Codex | `~/dev/krtour-map-codex/` |
+| Claude Code (본 SDK 포함) | `~/dev/krtour-map-claude/` |
+| Google Antigravity 2.0 | `~/dev/krtour-map-antigravity/` |
 
 운영 룰:
 
 - 메인 repo 디렉토리(`~/dev/python-krtour-map/`)의 **형제로** worktree 생성:
-  `git worktree add ../geo-claude main`.
+  `git worktree add ../krtour-map-claude main`.
 - 작업마다 **그 worktree 안에서 브랜치만 새로** 딴다 — worktree 자체는
   고정. `git switch -c feat/<topic> main`.
 - 각 worktree에 [colbymchenry/codegraph](https://github.com/colbymchenry/codegraph)
@@ -95,7 +95,7 @@ PC 개발은 **WSL ext4** 위에서 수행한다. NTFS 마운트에서 직접 `g
 작업 사이클(PR 1건):
 
 ```bash
-cd ~/dev/geo-claude         # 자기 worktree로 이동
+cd ~/dev/krtour-map-claude         # 자기 worktree로 이동
 git fetch && git switch main && git pull --ff-only
 git switch -c feat/<topic> main
 codegraph sync              # 인덱스 증분 동기 (init 아님)
@@ -108,7 +108,7 @@ gh pr create --title "..." --body "..."
 
 ```bash
 npm i -g @colbymchenry/codegraph   # CLI 전역 (어느 OS든 동일)
-cd ~/dev/geo-<agent>
+cd ~/dev/krtour-map-<agent>
 codegraph init -i                   # .codegraph/ + SQLite 인덱스 생성
 codegraph install --yes             # (선택) MCP 서버를 자기 AI 에이전트에 등록
 ```

@@ -2,6 +2,34 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-28 07:40 (claude)
+
+**작업**: PR#48 — agent worktree 접두사 `geo-*` → `krtour-map-*` 일괄 rename
++ `docs/tasks.md` 최신화 (순수 docs).
+
+**worktree rename** (사용자 지시 — `krtour-map-` 접두사):
+- `geo-codex`/`geo-claude`/`geo-antigravity` → `krtour-map-codex`/
+  `krtour-map-claude`/`krtour-map-antigravity`.
+- 변경 파일: `AGENTS.md` / `CLAUDE.md` / `SKILL.md` / `docs/codegraph-
+  worktree.md` (§2 명명 규약 + rationale reword + tree + setup 예시) /
+  `docs/dev-environment.md` / `docs/agent-guide.md` / `docs/resume.md`.
+- `docs/codegraph-worktree.md` §2 rationale 재작성 — 접두사를 본 저장소
+  (`python-krtour-map`) 이름에서 따와 한 머신의 여러 저장소 worktree를 1:1
+  식별. (이전 `geo-*`는 형제 `python-kraddr-geo`와 모호.)
+- `docs/journal.md` 과거 엔트리(2026-05-27 PR#30~31)의 `geo-*`는 역사
+  기록이라 보존.
+
+**tasks.md 최신화** (PR#19 open으로 멈춰 있던 백로그 → PR#47 merged 반영):
+- "진행 중" → PR#48만. "최근 완료 (Sprint 2)" → PR#34~#47 요약 추가.
+- 우선순위 가이드 — Sprint 2 ①②③④ + 디버그 UI ✅ 표기, 다음(live 매트릭스
+  확장 / maplibre-vworld v0.1.0 정합 / mid_forecast / `/features/*`).
+- ADR 가이드 — 001~034 → **001~043 accepted**, 다음 후보 **ADR-044**.
+- 머지 history 표 — #19~#47 (26행) 추가, #48 open.
+- T-014 history block의 stale 미완 bullet 2건 (PR#28/#29) 완료 처리.
+
+**Verification**: 순수 docs (코드 변경 0). ruff/mypy 무관. 별도 신규 테스트
+없음.
+
 ## 2026-05-28 07:00 (claude)
 
 **작업**: PR#47 — ETL preview `?source=live` 활성화 + 8 provider API key를

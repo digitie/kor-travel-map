@@ -98,8 +98,8 @@ PR#22 CI/import-linter merge 후 gate 확인. PR#22 merge 후 PR#23 리포트
       `docs/codegraph-worktree.md` 신규 + AGENTS/CLAUDE/SKILL/agent-guide/
       dev-environment 절 추가 + `.gitignore`에 `.codegraph/`. 본 PC에 codegraph
       v0.9.5 설치 + `.codegraph/` 인덱스 초기화 (64 파일/719 노드/1,205 edge).
-      향후 모든 AI 에이전트는 자기 전용 worktree(`geo-codex`/`geo-claude`/
-      `geo-antigravity`) + 로컬 codegraph 인덱스로 작업.
+      향후 모든 AI 에이전트는 자기 전용 worktree(`krtour-map-codex`/
+      `krtour-map-claude`/`krtour-map-antigravity`) + 로컬 codegraph 인덱스로 작업.
 - [x] **PR#31 (merged 2026-05-27)** codegraph MCP 등록 snippet + `codegraph_
       explore` 영향도 평가 룰. `codegraph serve --mcp` 공식 snippet + `npx`
       대안 + WSL2 `--no-watch`.
