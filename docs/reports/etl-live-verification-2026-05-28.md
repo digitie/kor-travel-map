@@ -98,12 +98,18 @@ endpoint 변경/deprecated 이슈(키 무관, 아래 §4).
   - `KEX_GO_API_KEY`/`KEX_EX_API_KEY` → krex(data.ex.co.kr `key`)
   - `KMA_APIHUB_AUTH_KEY` → kma apihub(`authKey`, data.go.kr serviceKey와 별개)
 
-## 5. DB 적재 검증 (진행 예정 — task #116)
+## 5. DB 적재 검증 (✅ 완료 — `tests/integration/test_feature_bundle_persist.py`)
 
 `infra/models.py` ORM(FeatureRow/SourceRecordRow/SourceLinkRow) + Alembic
-upgrade로 testcontainer PostGIS에 FeatureBundle 적재 → 재조회·정합(coord_5179
-STORED generated = ST_Transform, JSONB detail round-trip, FK) 검증하는 통합
-테스트 작성 예정. (docker는 WSL 가용 확인.)
+upgrade로 testcontainer PostGIS에 FeatureBundle(datagokr 축제, 좌표 포함) 적재 →
+재조회 round-trip 검증 통과:
+- **JSONB round-trip**: detail/address dict 보존.
+- **STORED generated `coord_5179`**: `ST_SRID(coord_5179)=5179` (= ST_Transform
+  (coord,5179), ADR-012), `ST_X/ST_Y(coord)`가 입력 lon/lat과 1e-6 이내 일치.
+- **source_link FK 정합**: feature_id/source_record_key + is_primary_source.
+- conftest에 `migrated_engine`/`migrated_session` fixture 추가(alembic upgrade
+  head + search_path x_extension). 통합 13/13 통과(회귀 없음).
+- 실 적재 경로 `feature_repo.py`는 Sprint 3 — 본 테스트가 DTO→DB 계약을 선행 검증.
 
 ## 6. Debug UI E2E (진행 예정 — task #117)
 
