@@ -26,6 +26,18 @@ wrn_now_data_new/kma_sfctm2) 전부 **HTTP 403 "활용신청이 필요한 API"**
 미지 stn/transform) = 13 case. 라우터 503 테스트는 두 키 안내로 갱신.
 adapter 13/13 + ruff + mypy strict 통과.
 
+**CI 회귀 hotfix (같은 PR)**: starlette 1.0+ TestClient이 httpx2를 hard-require
+→ debug-ui 테스트 수집 단계 `ModuleNotFoundError: httpx2`로 전면 실패(내 코드
+무관, starlette 1.2.0 신규 릴리스 영향). `pyproject.toml`에 `starlette>=0.40,<1.0`
++ `httpx>=0.27,<1.0` 핀(코드가 httpx 0.x API 의존) → fastapi 0.136.3 + starlette
+0.52.1 + httpx 0.28.1로 resolve. debug-ui 69 test 전부 통과 확인.
+
+**live 검증 (실 키, repo 밖 임시 스크립트)**: 11 dataset 중 kma_short(1000)/
+nowcast(8)/ultra_short_fcst(60, 재시도)/datagokr 축제/weather_alerts(19) = **유입+
+정합성 OK**. krex 4 = EX 키(`KEX_EX_API_KEY`) 부재로 "인증키 무효"(사용자 .env엔
+`KEX_GO_API_KEY`만). opinet 2 = UNI_ID 필요(detailById 설계상) — 별도 확보 필요.
+apihub 특보 primary = 활용신청 필요(403). → 상세는 #118 리포트.
+
 **다음**: #115 전 dataset live 정합성 + #116 DB 적재 + #117 Playwright + #118 리포트.
 
 ## 2026-05-28 13:30 (claude) — Sprint 2 종료 회고 (PR#59)
