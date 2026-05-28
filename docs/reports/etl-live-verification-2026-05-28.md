@@ -24,7 +24,7 @@
 | 2 | kma_ultra_short_nowcast | ✅ 8건 | KST 100%, T1H/REH/RN1/PTY/UUU/VEC |
 | 3 | kma_ultra_short_forecast | ✅ 60건 | KST 100%, LGT 포함. 첫 호출 HTTP 429(rate limit)→재시도 정상 |
 | 4 | datagokr_cultural_festivals | ✅ 정상 | dataset 15013104, 실 축제 데이터. `api.data.go.kr` DNS 간헐 불안정(재시도 후 200) |
-| 5 | kma_weather_alerts | ✅ 19건 | data.go.kr `getWthrWrnList` fallback(notice), 호우→heavy_rain_warning 등 |
+| 5 | kma_weather_alerts | ✅ 19건 | data.go.kr `getWthrWrnList` **primary**(notice), 호우→heavy_rain_warning 등. apihub는 fallback (KMA 소스 정책) |
 | 6 | krex_rest_areas | ✅ 98건 | place Feature. null-name placeholder 행 skip(PR#62) 후 |
 | 7 | krex_rest_area_weather | ✅ endpoint 정상 | restWeatherList 200 (해당 시간대 0건 — 데이터 시점 의존) |
 | 8 | krex_rest_area_prices | ⚠️ 0건(crash 제거) | `curStateStation`이 주유가격 미제공(필드 불일치) — EX endpoint 이슈 |
@@ -63,14 +63,17 @@ endpoint 변경/deprecated 이슈(키 무관, 아래 §4).
 
 ## 4. 사람이 조치할 항목 (Action Items)
 
-### 4.1 KMA apihub 활용신청 (특보 구조화 region)
+### 4.1 KMA apihub 활용신청 (특보 구조화 region — 선택)
+> **KMA 소스 정책(2026-05-28)**: data.go.kr 소스가 있으면 **data.go.kr이 primary,
+> apihub는 fallback**. 따라서 특보현황은 data.go.kr `getWthrWrnList`가 primary
+> (관서 단위 coarse region, 현재 정상 유입). apihub는 더 정밀한 특보구역(REG_ID)을
+> 주는 **선택적 fallback**.
 - 키 `gagX…`(apihub.kma.go.kr authKey)는 **인증은 되나 활용신청된 API 0건** —
   `wrn_now_data`/`wrn_now_data_new`/`kma_sfctm2` 전부 HTTP 403
   "활용신청이 필요한 API 입니다".
-- **조치**: apihub.kma.go.kr 로그인 → 예특보>기상특보>특보현황(`wrn_now_data`)
-  **활용신청** → 승인 후 같은 키로 자동으로 apihub primary(구조화 특보구역
-  REG_ID) 경로 동작. **현재는 data.go.kr `getWthrWrnList` fallback으로 정상
-  유입 중**(관서 단위 coarse region)이라 긴급도 낮음.
+- **조치(선택)**: apihub.kma.go.kr → 특보현황(`wrn_now_data`) **활용신청** 후
+  `?via=apihub`로 구조화 특보구역(REG_ID) 경로 사용 가능. data.go.kr primary가
+  정상 동작 중이라 **필수 아님**.
 
 ### 4.2 krex EX OpenAPI endpoint 정정 (→ python-krex-api upstream)
 - EX 키(`2668138864`/`1371545112`)는 **유효**. serviceAreaRoute(221)/
