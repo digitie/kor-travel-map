@@ -282,12 +282,11 @@ def test_providers_kma_weather_alerts_live_supported(client: TestClient) -> None
 
 
 @pytest.mark.unit
-def test_preview_live_kma_alerts_503_when_apihub_key_missing(
+def test_preview_live_kma_alerts_503_when_both_keys_missing(
     client: TestClient,
 ) -> None:
-    """특보현황 live는 apihub authKey(KMA_APIHUB_KEY) 필요 — 미설정 시 503.
-
-    (동네예보의 KMA_SERVICE_KEY와 다른 키 — apihub.kma.go.kr.)
+    """특보현황 live는 apihub authKey(primary) 또는 data.go.kr serviceKey(fallback,
+    PR#60) 필요 — 둘 다 미설정 시 503. 두 키 이름 모두 안내.
     """
     response = client.post(
         "/debug/etl/python-kma-api/kma_weather_alerts/preview?source=live"
@@ -295,6 +294,7 @@ def test_preview_live_kma_alerts_503_when_apihub_key_missing(
     assert response.status_code == 503
     body = response.json()
     assert "KMA_APIHUB_KEY 미설정" in body["detail"]
+    assert "KMA_SERVICE_KEY" in body["detail"]
 
 
 @pytest.mark.unit

@@ -2,6 +2,44 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-28 14:00 (claude) — PR#60 weather_alerts data.go.kr fallback + 키 drift 정정
+
+**작업**: 통합 검증 1단계 (task #114). apihub 키 진단 결과 반영.
+
+**apihub 키 진단** (사용자 제공 `gagX...`): 3개 endpoint(wrn_now_data/
+wrn_now_data_new/kma_sfctm2) 전부 **HTTP 403 "활용신청이 필요한 API"** — 키는
+인증되나 활용신청된 apihub API 0건. → 사람이 apihub.kma.go.kr에서 활용신청 필요.
+
+**대응 — `kma_weather_alerts_live`를 apihub primary + data.go.kr fallback로**:
+- primary: apihub `wrn_now_data`(구조화 특보구역 REG_ID). 403/무키/무특보면 강등.
+- fallback: data.go.kr `WthrWrnInfoService/getWthrWrnList`(공통 serviceKey =
+  kma_service_key). 실 응답 stnId/title/tmFc/tmSeq → 관서 단위 pseudo-region 1건,
+  title 요약문 keyword→notice_type/level. `?via=datagokr`로 강제 가능.
+- **live 검증**: 실 키로 e2e 실행 → apihub 403 → fallback → **특보 19건 수신**
+  (호우주의보→heavy_rain_warning, 강풍·풍랑→weather_alert, region 기상청 본청, KST).
+
+**키 이름 drift 정정** (settings.py docstring + .env.example): 실제 provider .env
+키 이름은 공통 `DATA_GO_KR_SERVICE_KEY`(kma/datagokr/krex/visitkorea) /
+`OPINET_API_KEY` / `KEX_GO_API_KEY`(data.ex.co.kr) — 기존 가정과 달라 source 명시.
+
+**테스트**: `test_etl_live_kma_alert_adapters.py` +5 (fallback adapter/keyword/level/
+미지 stn/transform) = 13 case. 라우터 503 테스트는 두 키 안내로 갱신.
+adapter 13/13 + ruff + mypy strict 통과.
+
+**CI 회귀 hotfix (같은 PR)**: starlette 1.0+ TestClient이 httpx2를 hard-require
+→ debug-ui 테스트 수집 단계 `ModuleNotFoundError: httpx2`로 전면 실패(내 코드
+무관, starlette 1.2.0 신규 릴리스 영향). `pyproject.toml`에 `starlette>=0.40,<1.0`
++ `httpx>=0.27,<1.0` 핀(코드가 httpx 0.x API 의존) → fastapi 0.136.3 + starlette
+0.52.1 + httpx 0.28.1로 resolve. debug-ui 69 test 전부 통과 확인.
+
+**live 검증 (실 키, repo 밖 임시 스크립트)**: 11 dataset 중 kma_short(1000)/
+nowcast(8)/ultra_short_fcst(60, 재시도)/datagokr 축제/weather_alerts(19) = **유입+
+정합성 OK**. krex 4 = EX 키(`KEX_EX_API_KEY`) 부재로 "인증키 무효"(사용자 .env엔
+`KEX_GO_API_KEY`만). opinet 2 = UNI_ID 필요(detailById 설계상) — 별도 확보 필요.
+apihub 특보 primary = 활용신청 필요(403). → 상세는 #118 리포트.
+
+**다음**: #115 전 dataset live 정합성 + #116 DB 적재 + #117 Playwright + #118 리포트.
+
 ## 2026-05-28 13:30 (claude) — Sprint 2 종료 회고 (PR#59)
 
 **작업**: item 4 — Sprint 2 종료 게이트. `pyproject.toml` `fail_under` 50→65

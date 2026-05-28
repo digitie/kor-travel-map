@@ -1166,42 +1166,195 @@ async def _kma_apihub_text(
     return response.text
 
 
+# ── data.go.kr getWthrWrnList fallback (apihub 활용신청 전/미보유 시) ──────
+# apihub wrn_now_data가 활용신청 필요(HTTP 403)거나 KMA_APIHUB_KEY 미보유면
+# data.go.kr `WthrWrnInfoService/getWthrWrnList`(공통 serviceKey =
+# settings.kma_service_key)로 fallback. 단 getWthrWrnList는 구조화 특보구역이
+# 없고 title(요약문)만 줌 → 관서(stnId) 단위 pseudo-region 1건으로 강등.
+# 실 응답 필드(2026-05 확인): stnId / title / tmFc(int) / tmSeq.
+
+_KMA_WTHR_WRN_LIST_URL: Final[str] = (
+    "https://apis.data.go.kr/1360000/WthrWrnInfoService/getWthrWrnList"
+)
+
+# getWthrWrnList stnId 기본값 — 108(전국 본청).
+_KMA_DEFAULT_WRN_STN: Final[str] = "108"
+
+# 발표관서코드 → 한글명 (대표 몇 개; 미등록은 'KMA 관서 {stn}').
+_KMA_WRN_STN_NAME: Final[dict[str, str]] = {
+    "108": "기상청(전국 본청)",
+    "109": "수도권(서울·인천·경기)",
+    "159": "부산",
+    "143": "대구",
+    "146": "전주(전북)",
+    "156": "광주(전남)",
+    "133": "대전(충청)",
+    "184": "제주",
+    "105": "강원(영동)",
+}
+
+# 특보 title에서 특보종류 keyword → canonical notice_type (notice.py NOTICE_TYPES).
+# 미스펙 종류는 generic weather_alert (normalize_notice_type ValueError 회피).
+_KMA_WRN_TITLE_KEYWORDS: Final[tuple[tuple[str, str], ...]] = (
+    ("호우", "heavy_rain_warning"),
+    ("대설", "heavy_snow_warning"),
+    ("폭염", "heat_wave_warning"),
+    ("강풍", "weather_alert"),
+    ("풍랑", "weather_alert"),
+    ("한파", "weather_alert"),
+    ("건조", "weather_alert"),
+    ("태풍", "weather_alert"),
+    ("황사", "weather_alert"),
+    ("해일", "weather_alert"),
+    ("폭풍", "weather_alert"),
+)
+
+
+def _datagokr_wrn_notice_type(title: str) -> str:
+    """특보 title 요약문에서 특보종류 keyword → canonical notice_type."""
+    for keyword, notice_type in _KMA_WRN_TITLE_KEYWORDS:
+        if keyword in title:
+            return notice_type
+    return "weather_alert"
+
+
+def _datagokr_wrn_level(title: str) -> str | None:
+    """특보 title에서 등급 추출 (경보 > 주의보 > 예비특보 우선순위)."""
+    if "경보" in title:
+        return "경보"
+    if "주의보" in title:
+        return "주의보"
+    if "예비특보" in title:
+        return "예비특보"
+    return None
+
+
+def _adapt_datagokr_wrn(raw: dict[str, Any]) -> _KmaWeatherAlertAdapter:
+    """getWthrWrnList 1행(stnId/title/tmFc/tmSeq) → `_KmaWeatherAlertAdapter`.
+
+    구조화 특보구역이 없어 관서(stnId) 단위 pseudo-region 1건으로 강등. title
+    요약문에서 특보종류/등급을 keyword 매칭으로 추출(coarse). apihub 활용신청
+    시 primary(`_adapt_kma_wrn_row`)가 구조화 region 제공.
+    """
+    stn = _first_str(raw, "stnId") or _KMA_DEFAULT_WRN_STN
+    title = _first_str(raw, "title") or ""
+    tm_fc = _first_str(raw, "tmFc") or ""
+    tm_seq = _first_str(raw, "tmSeq") or ""
+    issued = _kma_apihub_parse_dt(tm_fc) or datetime.now(tz=KST)
+    region_name = _KMA_WRN_STN_NAME.get(stn, f"KMA 관서 {stn}")
+    return _KmaWeatherAlertAdapter(
+        alert_id=f"{stn}:{tm_fc}:{tm_seq}",
+        alert_type=_datagokr_wrn_notice_type(title),
+        level=_datagokr_wrn_level(title),
+        title=title or "기상특보",
+        description=title or None,
+        issued_at=issued,
+        effective_from=issued,
+        effective_until=None,
+        source_agency="기상청",
+        regions=[
+            _KmaAlertRegionAdapter(region_code=f"stn:{stn}", region_name=region_name)
+        ],
+    )
+
+
+async def _datagokr_wrn_list(
+    *, service_key: str, params: dict[str, str]
+) -> list[dict[str, Any]]:
+    """data.go.kr getWthrWrnList GET → `response.body.items.item[]` list."""
+    now = datetime.now(tz=KST)
+    query: dict[str, Any] = {
+        "serviceKey": service_key,
+        "dataType": "JSON",
+        "pageNo": 1,
+        "numOfRows": 100,
+        "stnId": params.get("stnId", _KMA_DEFAULT_WRN_STN),
+        "fromTmFc": params.get(
+            "fromTmFc", (now - timedelta(days=3)).strftime("%Y%m%d")
+        ),
+        "toTmFc": params.get("toTmFc", now.strftime("%Y%m%d")),
+    }
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        response = await client.get(_KMA_WTHR_WRN_LIST_URL, params=query)
+    if response.status_code != 200:
+        raise LiveLoaderError(
+            f"KMA getWthrWrnList HTTP {response.status_code}: {response.text[:200]}"
+        )
+    payload = response.json()
+    body = payload.get("response", {}).get("body", {}) if isinstance(payload, dict) else {}
+    items_wrap = body.get("items", {}) if isinstance(body, dict) else {}
+    raw_items = (
+        items_wrap.get("item", []) if isinstance(items_wrap, dict) else items_wrap
+    )
+    if isinstance(raw_items, dict):
+        raw_items = [raw_items]
+    if not isinstance(raw_items, list):
+        return []
+    return [it for it in raw_items if isinstance(it, dict)]
+
+
 async def kma_weather_alerts_live(
     settings: DebugUiSettings, params: dict[str, str]
 ) -> list[dict[str, Any]]:
-    """KMA 특보현황(apihub wrn_now_data) raw → list[FeatureBundle dict] (notice).
+    """KMA 특보현황 → list[FeatureBundle dict] (notice). apihub primary + data.go.kr fallback.
 
-    apihub `authKey`(settings.kma_apihub_key) 사용 — data.go.kr serviceKey와
-    별개. 응답 text 행(특보구역 단위)을 adapter로 변환 후 본 lib
-    `weather_alerts_to_notice_bundles`(region fan-out)로 통과.
+    - **primary**: apihub `wrn_now_data`(settings.kma_apihub_key) — 특보구역(REG_ID)
+      단위 구조화 region. apihub 활용신청 필요(403)/무키/무특보면 fallback으로 강등.
+    - **fallback**: data.go.kr `getWthrWrnList`(settings.kma_service_key, 공통키) —
+      관서(stnId) 단위 pseudo-region(coarse). title 요약문 keyword 매칭.
+
+    `?via=datagokr`로 fallback 강제 가능(디버그). 둘 다 미설정/불가면 503.
     """
-    key = settings.kma_apihub_key
-    if key is None:
-        raise LiveLoaderError(
-            "KMA_APIHUB_KEY 미설정 (.env 확인). apihub authKey는 data.go.kr "
-            "KMA_SERVICE_KEY와 다른 키 — apihub.kma.go.kr 발급."
+    fetched_at = datetime.now(tz=KST)
+    via = params.get("via", "")
+    errors: list[str] = []
+
+    apihub_key = settings.kma_apihub_key
+    if via != "datagokr" and apihub_key is not None:
+        try:
+            text = await _kma_apihub_text(
+                _KMA_WRN_NOW_PATH,
+                auth_key=apihub_key.get_secret_value(),
+                params={
+                    "fe": params.get("fe", "f"),
+                    "tm": params.get("tm", ""),
+                    "disp": params.get("disp", "0"),
+                    "help": "1",  # 컬럼 헤더(`#`-주석) 포함 — 파서 헤더 검출용.
+                },
+            )
+            rows = _kma_apihub_parse_table(text)
+            adapted = [a for a in (_adapt_kma_wrn_row(r) for r in rows) if a is not None]
+            if adapted:
+                bundles = weather_alerts_to_notice_bundles(
+                    adapted,  # type: ignore[arg-type]
+                    fetched_at=fetched_at,
+                )
+                return [b.model_dump(mode="json") for b in bundles]
+            errors.append("apihub: 0 특보구역 행 (활용신청 필요 또는 무특보)")
+        except LiveLoaderError as exc:
+            errors.append(f"apihub: {exc}")
+    elif via != "datagokr":
+        errors.append("apihub: KMA_APIHUB_KEY 미설정")
+
+    # data.go.kr getWthrWrnList fallback (공통 serviceKey).
+    datagokr_key = settings.kma_service_key
+    if datagokr_key is not None:
+        items = await _datagokr_wrn_list(
+            service_key=datagokr_key.get_secret_value(), params=params
         )
-    text = await _kma_apihub_text(
-        _KMA_WRN_NOW_PATH,
-        auth_key=key.get_secret_value(),
-        params={
-            "fe": params.get("fe", "f"),
-            "tm": params.get("tm", ""),
-            "disp": params.get("disp", "0"),
-            "help": "1",  # 컬럼 헤더(`#`-주석) 포함 — 파서가 헤더 검출에 사용.
-        },
+        adapted_dg = [_adapt_datagokr_wrn(it) for it in items]
+        bundles = weather_alerts_to_notice_bundles(
+            adapted_dg,  # type: ignore[arg-type]
+            fetched_at=fetched_at,
+        )
+        return [b.model_dump(mode="json") for b in bundles]
+    errors.append("fallback: KMA_SERVICE_KEY 미설정")
+
+    raise LiveLoaderError(
+        "weather_alerts live 미설정/불가 — apihub authKey(KMA_APIHUB_KEY, "
+        "apihub.kma.go.kr 활용신청) 또는 data.go.kr KMA_SERVICE_KEY 필요. "
+        f"[{' / '.join(errors)}]"
     )
-    rows = _kma_apihub_parse_table(text)
-    adapted = [
-        adapter
-        for adapter in (_adapt_kma_wrn_row(row) for row in rows)
-        if adapter is not None
-    ]
-    bundles = weather_alerts_to_notice_bundles(
-        adapted,  # type: ignore[arg-type]
-        fetched_at=datetime.now(tz=KST),
-    )
-    return [b.model_dump(mode="json") for b in bundles]
 
 
 # ── Registry ──────────────────────────────────────────────────────────
