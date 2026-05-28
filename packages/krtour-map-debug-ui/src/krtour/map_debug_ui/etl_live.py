@@ -804,27 +804,98 @@ def _adapt_opinet_price(
     )
 
 
-def _opinet_station_id(params: dict[str, str]) -> str:
-    station_id = params.get("id") or params.get("uni_id")
-    if not station_id:
-        raise LiveLoaderError(
-            "OpiNet detailById는 주유소 id 필요 — `?source=live&id=<UNI_ID>` 지정. "
-            "(전체 목록 endpoint 없음 — 가까운 주유소 UNI_ID를 직접 지정.)"
+def _opinet_wgs84_to_katec(lon: float, lat: float) -> tuple[float, float] | None:
+    """WGS84 (lon, lat) → OpiNet KATEC (x, y). aroundAll.do discovery용.
+
+    `_opinet_katec_to_wgs84`의 역변환 — python-opinet-api `coords.py`와 동일
+    proj (ADR-044). 실패 시 None.
+    """
+    from pyproj import Transformer
+
+    try:
+        transformer = Transformer.from_crs(
+            "EPSG:4326", _OPINET_KATEC_PROJ, always_xy=True
         )
-    return station_id
+        x, y = transformer.transform(lon, lat)
+    except Exception:  # noqa: BLE001 — 변환 실패는 discovery 미수행으로 강등.
+        return None
+    return (x, y)
+
+
+def _opinet_first_uni_id(rows: list[dict[str, Any]]) -> str | None:
+    for row in rows:
+        uni = row.get("UNI_ID")
+        if uni is not None and str(uni).strip():
+            return str(uni).strip()
+    return None
+
+
+async def _opinet_discover_uni_id(service_key: str, params: dict[str, str]) -> str:
+    """주유소 UNI_ID 결정 — ``id`` 명시 > ``(lon,lat)`` aroundAll > lowTop10.
+
+    OpiNet ``detailById``는 단건 조회라 UNI_ID 필요. 미지정 시 discovery
+    endpoint(``aroundAll.do``/``lowTop10.do``, certkey)로 자동 확보 —
+    python-opinet-api ``search_stations_around``/``get_lowest_price_top20``과
+    동일 endpoint (ADR-044). 좌표 변환·key param 모두 라이브러리 정합.
+    """
+    explicit = params.get("id") or params.get("uni_id")
+    if explicit:
+        return explicit
+    prodcd = params.get("prodcd", "B027")  # B027 = 휘발유(기본).
+    lon_s, lat_s = params.get("lon"), params.get("lat")
+    if lon_s and lat_s:
+        katec: tuple[float, float] | None = None
+        try:
+            katec = _opinet_wgs84_to_katec(float(lon_s), float(lat_s))
+        except (ValueError, TypeError):
+            katec = None
+        if katec is not None:
+            rows = await _opinet_call(
+                "aroundAll.do",
+                service_key=service_key,
+                params={
+                    "x": int(katec[0]),
+                    "y": int(katec[1]),
+                    "radius": int(params.get("radius", "5000")),
+                    "prodcd": prodcd,
+                    "sort": params.get("sort", "1"),
+                },
+            )
+            uni = _opinet_first_uni_id(rows)
+            if uni:
+                return uni
+    # 기본: 전국 최저가 top (좌표 불필요 — 가장 견고).
+    rows = await _opinet_call(
+        "lowTop10.do",
+        service_key=service_key,
+        params={"prodcd": prodcd, "cnt": int(params.get("cnt", "10"))},
+    )
+    uni = _opinet_first_uni_id(rows)
+    if uni:
+        return uni
+    raise LiveLoaderError(
+        "OpiNet 주유소 discovery 실패 — lowTop10/aroundAll 빈 결과. "
+        "`?id=<UNI_ID>` 또는 `?lon=&lat=`로 직접 지정 가능."
+    )
 
 
 async def opinet_fuel_station_details_live(
     settings: DebugUiSettings, params: dict[str, str]
 ) -> list[dict[str, Any]]:
-    """OpiNet 주유소 상세 raw API → list[FeatureBundle dict] (place)."""
+    """OpiNet 주유소 상세 raw API → list[FeatureBundle dict] (place).
+
+    UNI_ID 미지정 시 lowTop10/aroundAll로 자동 discovery (`?id=`/`?lon=&lat=`
+    override 가능, PR#63).
+    """
     key = settings.opinet_service_key
     if key is None:
         raise LiveLoaderError("OPINET_SERVICE_KEY 미설정 (.env 확인).")
+    secret = key.get_secret_value()
+    station_id = await _opinet_discover_uni_id(secret, params)
     rows = await _opinet_call(
         "detailById.do",
-        service_key=key.get_secret_value(),
-        params={"id": _opinet_station_id(params)},
+        service_key=secret,
+        params={"id": station_id},
     )
     adapted = [_adapt_opinet_station(r) for r in rows]
     bundles = stations_to_bundles(
@@ -837,14 +908,18 @@ async def opinet_fuel_station_details_live(
 async def opinet_gas_station_prices_live(
     settings: DebugUiSettings, params: dict[str, str]
 ) -> list[dict[str, Any]]:
-    """OpiNet 주유소 가격 raw API → list[PriceValue dict] (detailById 중첩 OIL_PRICE)."""
+    """OpiNet 주유소 가격 raw API → list[PriceValue dict] (detailById 중첩 OIL_PRICE).
+
+    UNI_ID 미지정 시 자동 discovery (PR#63 — fuel loader와 동일).
+    """
     key = settings.opinet_service_key
     if key is None:
         raise LiveLoaderError("OPINET_SERVICE_KEY 미설정 (.env 확인).")
-    station_id = _opinet_station_id(params)
+    secret = key.get_secret_value()
+    station_id = await _opinet_discover_uni_id(secret, params)
     rows = await _opinet_call(
         "detailById.do",
-        service_key=key.get_secret_value(),
+        service_key=secret,
         params={"id": station_id},
     )
     adapted: list[_OpinetPriceAdapter] = []

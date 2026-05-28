@@ -2,6 +2,32 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-28 15:00 (claude) — PR#63 opinet live auto-discovery
+
+**작업**: opinet live 검증의 "UNI_ID 필요" 마찰 해소 (사용자 지시 — 단,
+python-opinet-api는 검증 결과 이미 완전하여 라이브러리 무수정, 개선은 debug-ui
+로더에 적용하기로 결정).
+
+**python-opinet-api 검증**: 라이브러리 정상 — `get_lowest_price_top20`(5)/
+`search_stations_around`(서울 54, WGS84→KATEC OK)/`get_station_detail`(A0019581)
+전부 실 데이터. key param=`certkey`, KATEC proj는 본 loader `_OPINET_KATEC_PROJ`와
+동일(ADR-044). 앞선 내 smoke aroundAll 빈 결과는 내가 key를 `code`로 보낸 실수.
+
+**변경 — debug-ui `etl_live.py` opinet auto-discovery**:
+- `_opinet_discover_uni_id`: ``id`` 명시 > ``(lon,lat)`` aroundAll > lowTop10
+  (전국 최저가, 좌표 불필요·가장 견고). `_opinet_call`(certkey) 재사용.
+- `_opinet_wgs84_to_katec`(역변환) + `_opinet_first_uni_id`(순수) 추가.
+- `opinet_fuel_station_details_live`/`opinet_gas_station_prices_live`가 UNI_ID
+  미지정 시 자동 discovery → detail/prices. (`?id=`/`?lon=&lat=` override 가능.)
+- 기존 `_opinet_station_id`(id 없으면 raise) 제거.
+
+**live 검증**: opinet_fuel_station_details 1건(coord in-range, place)/
+opinet_gas_station_prices 2건(KRW/L) — **id 없이 동작**. → **11/11 dataset
+모두 live 검증 가능** 달성.
+
+**테스트**: opinet adapter +2(wgs84→katec round-trip, first_uni_id) = 12,
+debug-ui 71 전부. ruff, mypy strict.
+
 ## 2026-05-28 14:30 (claude) — PR#62 krex live robustness (실 EX 키 검증)
 
 > 주: PR#61은 타 에이전트의 "PR 17~60 리뷰 취합" 문서 PR로 선점됨 → 본 작업은 PR#62.
