@@ -35,6 +35,9 @@ dependencies = [
   "uvicorn[standard]>=0.30",
   "pydantic>=2.7",
   "pydantic-settings>=2.4",
+  # PR#47: ETL preview `?source=live`에서 provider raw API 호출용 async client.
+  # 메인 lib(`krtour.map`)는 httpx 미사용 — debug-ui가 직접 사용.
+  "httpx>=0.27",
 ]
 
 [project.optional-dependencies]

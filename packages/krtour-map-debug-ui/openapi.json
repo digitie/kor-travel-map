@@ -205,6 +205,12 @@
             "title": "Description",
             "type": "string"
           },
+          "live_supported": {
+            "default": false,
+            "description": "`?source=live` 활성 여부. False면 fixture만 — live 호출은 501. PR#47부터 KMA 3 dataset 활성.",
+            "title": "Live Supported",
+            "type": "boolean"
+          },
           "variant": {
             "description": "`FeatureBundle` / `WeatherValue` / `PriceValue`.",
             "title": "Variant",
@@ -318,7 +324,7 @@
     },
     "/debug/etl/{provider}/{dataset}/preview": {
       "post": {
-        "description": "fixture 또는 live source로 provider raw → DTO 변환을 실행하고 결과를 JSON으로 응답. DB write 없음. fixture 모드는 외부 의존 X — 본 lib 변환 함수 동작 검증용. live 모드는 후속 PR로.",
+        "description": "fixture 또는 live source로 provider raw → DTO 변환을 실행하고 결과를 JSON으로 응답. DB write 없음. fixture 모드는 외부 의존 X. live 모드는 `etl_live.LIVE_LOADER_REGISTRY` 등록된 dataset만 — `?source=fixture` 응답의 `live_supported` 필드로 확인.",
         "operationId": "post_preview_debug_etl__provider___dataset__preview_post",
         "parameters": [
           {
@@ -379,7 +385,13 @@
             "description": "Validation Error"
           },
           "501": {
-            "description": "source=live 미구현 (후속 PR)"
+            "description": "source=live 미구현 (LIVE_LOADER_REGISTRY 미등록)"
+          },
+          "502": {
+            "description": "provider 외부 API 호출 실패"
+          },
+          "503": {
+            "description": "API key 미설정 (.env 확인)"
           }
         },
         "summary": "provider 변환 함수 dry-run preview",

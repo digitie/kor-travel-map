@@ -2,6 +2,92 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-28 07:00 (claude)
+
+**작업**: PR#47 — ETL preview `?source=live` 활성화 + 8 provider API key를
+`DebugUiSettings`에 추가. KMA 3 dataset (short / nowcast / ultra_short_forecast)
+부터 실 호출 + 변환 통과. 다른 8 dataset (datagokr / kma_weather_alerts / opinet
+2 / krex 4)은 framework 등록만 — 미등록은 `501 Not Implemented`.
+
+**서비스 키 컨벤션** (.env 공유):
+- 각 provider repo (`python-kma-api`/`python-opinet-api`/…)의 `.env`에 박힌
+  키 이름을 그대로 가져오고, prefix `KRTOUR_MAP_DEBUG_UI_`만 붙여 디버그 UI
+  `.env`로 옮긴다.
+- 예: `python-kma-api/.env`의 `KMA_SERVICE_KEY=...` → 디버그 UI의
+  `.env`에 `KRTOUR_MAP_DEBUG_UI_KMA_SERVICE_KEY=...`로 저장.
+- ADR-005 + ADR-035: 운영 시 Cloudflare Tunnel/SSO 뒤. `SecretStr` 보호
+  (plaintext 로그/JSON 노출 방지).
+
+**신규 파일** (2):
+- `packages/krtour-map-debug-ui/.env.example` (8 provider 키 자리 + 컨벤션
+  주석)
+- `packages/krtour-map-debug-ui/src/krtour/map_debug_ui/etl_live.py` (~270
+  line):
+  - `LiveLoader` 타입 + `LiveLoaderError` exception
+  - KMA 3 endpoint async httpx wrapper (`_kma_call`)
+  - base_date/base_time 자동 계산 (`_kma_now_base`/`_kma_ncst_base`/
+    `_kma_usf_base`)
+  - `_KmaShortAdapter` / `_KmaNowcastAdapter` dataclass — provider raw JSON
+    → Protocol 만족 adapter (httpx 직접 사용 — provider client 의존 회피)
+  - `kma_short_forecast_live` / `kma_ultra_short_nowcast_live` /
+    `kma_ultra_short_forecast_live` 3 loader 함수
+  - `LIVE_LOADER_REGISTRY: dict[tuple[str,str], LiveLoader]` (KMA 3건만
+    등록 — 나머지는 `find_live_loader` 반환 `None`)
+
+**변경 — 디버그 UI** (4):
+- `pyproject.toml`: `httpx>=0.27` 추가 (provider raw API 호출용 async client)
+- `src/krtour/map_debug_ui/settings.py`: 8 `SecretStr | None` field 추가
+  (kma/opinet/datagokr/visitkorea/krex/knps/airkorea/krforest)
+- `src/krtour/map_debug_ui/routers/etl.py`:
+  - `_DatasetEntry`에 `live_supported: bool` 필드 추가 (`LIVE_LOADER_REGISTRY`
+    참조)
+  - `post_preview()` `?source=live` 분기 활성 — `_run_live_preview()`로
+    dispatch
+  - 응답 매핑: 404 (dataset 미등록) / 501 (live loader 미구현) / 503 (key
+    미설정) / 502 (provider 외부 API 실패)
+- `openapi.json` drift gate 재생성 (live_supported 필드 + 502/503 응답
+  추가)
+
+**신규 테스트** (3건 추가 — 11 → 21):
+- `test_preview_live_source_501_when_not_registered` — datagokr는 live 미등록
+  → 501
+- `test_preview_live_kma_503_when_key_missing` — KMA live 등록됐지만 `.env`
+  키 없으면 503
+- `test_providers_dataset_marks_live_supported` — KMA 3 dataset
+  `live_supported=True`, weather_alerts는 False
+
+**Verification**:
+- `python -m pytest -q` → **450 passed, 16 skipped** (메인 lib)
+- `cd packages/krtour-map-debug-ui && python -m pytest -q` → **21 passed**
+  (PR#46 18 + PR#47 3)
+- `ruff` All checks passed
+- `mypy --strict src packages/krtour-map-debug-ui/src` → **no issues found in
+  48 source files**
+- `lint-imports` 4 contracts KEPT
+- openapi drift exit 0
+
+**의도적 type ignore 3건** — `etl_live.py`:
+- `_KmaShortAdapter` 와 `KmaUltraShortForecastItem` Protocol은 attribute
+  set이 동일하나 mypy strict는 nominal 매칭만 한다. 실행 시 Protocol
+  structural check은 통과. 각 호출 부에 `# type: ignore[arg-type]` + 사유
+  주석.
+
+**디버그 UI live mode 매트릭스 (11 dataset 중 3건 활성)**:
+| Provider | Dataset | live_supported |
+|----------|---------|----------------|
+| python-kma-api | short_forecast / ultra_short_nowcast / ultra_short_forecast | ✅ |
+| python-kma-api | weather_alerts | ⏳ (framework only) |
+| data.go.kr-standard | cultural_festivals | ⏳ |
+| python-opinet-api | station_details / prices | ⏳ |
+| python-krex-api | rest_areas / prices / weather / traffic_notices | ⏳ |
+
+**Sprint 2 §2.5 진입 — debug UI live mode**. 다음 후보:
+- 디버그 UI live 매트릭스 확장 (datagokr 1 + opinet 2 + krex 4 + kma_weather
+  _alerts 1 = 8건)
+- KMA mid_forecast (텍스트 + AM/PM split)
+- `/features/*` 라우터 + infra/feature_repo
+- ADR-016 dedup scoring preview
+
 ## 2026-05-28 06:00 (claude)
 
 **작업**: PR#46 — KMA weather_alerts → notice FeatureBundle + krex
