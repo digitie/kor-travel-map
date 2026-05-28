@@ -80,11 +80,11 @@ class DebugUiSettings(BaseSettings):
         description=(
             "기상청 API 허브(apihub.kma.go.kr) ``authKey``. data.go.kr "
             "``serviceKey``와 **다른 키** — `python-kma-api/.env` 의 "
-            "``KMA_APIHUB_AUTH_KEY``(또는 ``KMA_APIHUB_KEY``). 특보현황 "
-            "(`kma_weather_alerts`)의 apihub `wrn_now_data` primary 경로가 "
-            "구조화 특보구역(REG_ID)을 주므로 이 키 사용 (PR#58, ADR-044). "
-            "**apihub는 API별 '활용신청' 필요** — 미신청 시 HTTP 403 → loader는 "
-            "data.go.kr `getWthrWrnList`(kma_service_key) fallback으로 강등 (PR#60)."
+            "``KMA_APIHUB_AUTH_KEY``(또는 ``KMA_APIHUB_KEY``). **KMA 소스 정책: "
+            "data.go.kr이 primary, apihub는 fallback** (data.go.kr 소스 존재 시). "
+            "특보현황(`kma_weather_alerts`)은 data.go.kr `getWthrWrnList`가 primary, "
+            "이 apihub `wrn_now_data`(구조화 특보구역 REG_ID)는 data.go.kr 실패 시 "
+            "fallback. **apihub는 API별 '활용신청' 필요**(미신청 시 HTTP 403)."
         ),
     )
     opinet_service_key: SecretStr | None = Field(

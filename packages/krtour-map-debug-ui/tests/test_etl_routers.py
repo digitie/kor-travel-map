@@ -285,8 +285,8 @@ def test_providers_kma_weather_alerts_live_supported(client: TestClient) -> None
 def test_preview_live_kma_alerts_503_when_both_keys_missing(
     client: TestClient,
 ) -> None:
-    """특보현황 live는 apihub authKey(primary) 또는 data.go.kr serviceKey(fallback,
-    PR#60) 필요 — 둘 다 미설정 시 503. 두 키 이름 모두 안내.
+    """특보현황 live는 data.go.kr serviceKey(primary) 또는 apihub authKey(fallback)
+    필요 — 둘 다 미설정 시 503. 두 키 이름 모두 안내 (KMA 소스 정책: data.go.kr 우선).
     """
     response = client.post(
         "/debug/etl/python-kma-api/kma_weather_alerts/preview?source=live"

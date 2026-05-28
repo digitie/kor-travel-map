@@ -2,6 +2,23 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-28 15:30 (claude) — KMA 소스 정책: data.go.kr primary + apihub fallback
+
+**작업**: 사용자 정책 정정 — "KMA는 data.go.kr 소스가 있으면 data.go.kr이 우선,
+apihub가 fallback". PR#60에서 weather_alerts를 apihub primary로 둔 것을 **뒤집음**.
+
+**변경 — `kma_weather_alerts_live`**:
+- **primary**: data.go.kr `getWthrWrnList`(kma_service_key). HTTP 200이면 빈 결과
+  (무특보)도 valid로 반환. **에러/무키 시에만** apihub fallback.
+- **fallback**: apihub `wrn_now_data`(kma_apihub_key, 구조화 REG_ID, 활용신청 필요).
+- `?via=apihub`(구조화 강제) / `?via=datagokr` override.
+- 503 메시지·settings(`kma_apihub_key`) docstring·`.env.example`·report §2/§4.1을
+  정책 정합으로 정정.
+- 동네예보 3종(short/nowcast/ultra_short)은 이미 data.go.kr 단독 → 정책 정합.
+
+**live 검증**: weather_alerts → data.go.kr primary로 19 notice 정상. ruff/mypy/
+debug-ui 71 test 통과.
+
 ## 2026-05-28 15:00 (claude) — PR#63 opinet live auto-discovery
 
 **작업**: opinet live 검증의 "UNI_ID 필요" 마찰 해소 (사용자 지시 — 단,

@@ -1389,21 +1389,46 @@ async def _datagokr_wrn_list(
 async def kma_weather_alerts_live(
     settings: DebugUiSettings, params: dict[str, str]
 ) -> list[dict[str, Any]]:
-    """KMA 특보현황 → list[FeatureBundle dict] (notice). apihub primary + data.go.kr fallback.
+    """KMA 특보현황 → list[FeatureBundle dict] (notice). **data.go.kr primary + apihub fallback**.
 
-    - **primary**: apihub `wrn_now_data`(settings.kma_apihub_key) — 특보구역(REG_ID)
-      단위 구조화 region. apihub 활용신청 필요(403)/무키/무특보면 fallback으로 강등.
-    - **fallback**: data.go.kr `getWthrWrnList`(settings.kma_service_key, 공통키) —
-      관서(stnId) 단위 pseudo-region(coarse). title 요약문 keyword 매칭.
+    KMA 소스 정책(사용자 지시 2026-05-28): **data.go.kr 소스가 있으면 data.go.kr이
+    primary, apihub는 fallback** (동네예보 3종도 data.go.kr 단독으로 동일 정책).
+    - **primary**: data.go.kr `getWthrWrnList`(settings.kma_service_key, 공통키) —
+      관서(stnId) 단위 region(coarse), title 요약문 keyword 매칭. HTTP 200이면
+      빈 결과(무특보)라도 valid로 반환.
+    - **fallback**: apihub `wrn_now_data`(settings.kma_apihub_key) — 특보구역(REG_ID)
+      구조화 region. data.go.kr **실패(에러/무키)** 시에만 사용 (apihub는 활용신청 필요).
 
-    `?via=datagokr`로 fallback 강제 가능(디버그). 둘 다 미설정/불가면 503.
+    `?via=apihub`로 apihub 강제(구조화 region 테스트), `?via=datagokr`로 data.go.kr
+    강제. 둘 다 미설정/불가면 503.
     """
     fetched_at = datetime.now(tz=KST)
     via = params.get("via", "")
     errors: list[str] = []
 
+    # primary: data.go.kr getWthrWrnList (공통 serviceKey).
+    datagokr_key = settings.kma_service_key
+    if via != "apihub" and datagokr_key is not None:
+        try:
+            items = await _datagokr_wrn_list(
+                service_key=datagokr_key.get_secret_value(), params=params
+            )
+        except LiveLoaderError as exc:
+            errors.append(f"data.go.kr: {exc}")  # 에러 → apihub fallback.
+        else:
+            # HTTP 200 → 빈 결과(무특보)도 valid 반환 (primary 성공).
+            adapted_dg = [_adapt_datagokr_wrn(it) for it in items]
+            bundles = weather_alerts_to_notice_bundles(
+                adapted_dg,  # type: ignore[arg-type]
+                fetched_at=fetched_at,
+            )
+            return [b.model_dump(mode="json") for b in bundles]
+    elif via != "apihub":
+        errors.append("data.go.kr: KMA_SERVICE_KEY 미설정")
+
+    # fallback: apihub wrn_now_data (구조화 region, 활용신청 필요).
     apihub_key = settings.kma_apihub_key
-    if via != "datagokr" and apihub_key is not None:
+    if apihub_key is not None:
         try:
             text = await _kma_apihub_text(
                 _KMA_WRN_NOW_PATH,
@@ -1417,35 +1442,19 @@ async def kma_weather_alerts_live(
             )
             rows = _kma_apihub_parse_table(text)
             adapted = [a for a in (_adapt_kma_wrn_row(r) for r in rows) if a is not None]
-            if adapted:
-                bundles = weather_alerts_to_notice_bundles(
-                    adapted,  # type: ignore[arg-type]
-                    fetched_at=fetched_at,
-                )
-                return [b.model_dump(mode="json") for b in bundles]
-            errors.append("apihub: 0 특보구역 행 (활용신청 필요 또는 무특보)")
+            bundles = weather_alerts_to_notice_bundles(
+                adapted,  # type: ignore[arg-type]
+                fetched_at=fetched_at,
+            )
+            return [b.model_dump(mode="json") for b in bundles]
         except LiveLoaderError as exc:
             errors.append(f"apihub: {exc}")
-    elif via != "datagokr":
+    else:
         errors.append("apihub: KMA_APIHUB_KEY 미설정")
 
-    # data.go.kr getWthrWrnList fallback (공통 serviceKey).
-    datagokr_key = settings.kma_service_key
-    if datagokr_key is not None:
-        items = await _datagokr_wrn_list(
-            service_key=datagokr_key.get_secret_value(), params=params
-        )
-        adapted_dg = [_adapt_datagokr_wrn(it) for it in items]
-        bundles = weather_alerts_to_notice_bundles(
-            adapted_dg,  # type: ignore[arg-type]
-            fetched_at=fetched_at,
-        )
-        return [b.model_dump(mode="json") for b in bundles]
-    errors.append("fallback: KMA_SERVICE_KEY 미설정")
-
     raise LiveLoaderError(
-        "weather_alerts live 미설정/불가 — apihub authKey(KMA_APIHUB_KEY, "
-        "apihub.kma.go.kr 활용신청) 또는 data.go.kr KMA_SERVICE_KEY 필요. "
+        "weather_alerts live 미설정/불가 — data.go.kr KMA_SERVICE_KEY(primary) "
+        "또는 apihub KMA_APIHUB_KEY(fallback, apihub.kma.go.kr 활용신청) 필요. "
         f"[{' / '.join(errors)}]"
     )
 
