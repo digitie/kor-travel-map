@@ -1,9 +1,8 @@
 # SPRINT-2.md — MOIS-독립 작은 provider 4건 + 디버그 UI 첫 라우터
 
-> **상태**: 🔵 **active (~97%, 2026-05-26~28)** — provider ①~④ + 디버그 UI 라우터
+> **상태**: ✅ **완료 (2026-05-26~28)** — provider ①~④ + 디버그 UI 라우터
 > + visitkorea enrichment + KMA mid_forecast + **ETL live 11/11 dataset 전부
-> wiring 완료**. 잔여: coverage bar 상향 + Sprint 2 종료 회고 (item 4).
-> (PR#28~#58 merged.)
+> wiring** + coverage bar 65 상향 (PR#59). (PR#28~#59 merged.) Sprint 3 진입.
 >
 > **목적**: ADR-034 9단계의 ①~④ — 축제 / 날씨 / 유가 / 휴게소. MOIS와 dedup
 > 가능성 없는 작은 dataset부터 적재해 Record Linkage 룰을 검증한다. 디버그
@@ -295,9 +294,9 @@ Sprint 2 진행 중 다음 ADR들의 1차 implementation 점진 도입:
         (REG_ID) 단위 행, WRN 코드→notice_type 매핑, 순수 parser/adapter + 8
         단위 test). apihub `authKey`는 data.go.kr serviceKey와 별개 →
         `kma_apihub_key` settings 추가. 컬럼 헤더 표기는 실 응답 후속 검증.
-- [ ] 4. `pyproject.toml` `fail_under` 50 → 65 상향 (실측 96%라 무위험) +
+- [x] 4. `pyproject.toml` `fail_under` 50 → 65 상향 (실측 96%라 무위험) +
       `docs/journal.md` Sprint 2 종료 회고 + `docs/resume.md` → Sprint 3 진입 +
-      `docs/sprints/SPRINT-3.md` 진입 PR 준비
+      `docs/sprints/SPRINT-3.md` 진입 active + `sprints/README.md` 상태 (PR#59).
 
 > **`/features/*` 라우터 + `infra/feature_repo.py`는 Sprint 2 종료 게이트가
 > 아니다** (§2.5 명시 — Sprint 2 후반/Sprint 3 후속). 실제 DB 적재·조회 흐름은
