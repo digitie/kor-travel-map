@@ -190,6 +190,14 @@ PR#22 CI/import-linter merge 후 gate 확인. PR#22 merge 후 PR#23 리포트
       normalize_notice_type alias 활용 ('교통사고'→'traffic_accident').
       `multi_kind_pipeline_uses_same_feature_id` 통합 검증 — rest_areas의
       feature_id로 prices/weather 일관 흐름. 455 tests green (신규 18).
+- [x] **PR#46 (merged 2026-05-28)** — KMA weather_alerts → notice FeatureBundle
+      + krex TRAFFIC_NOTICE_CATEGORY fix + ETL preview registry 확장.
+      `providers/kma.py` `weather_alerts_to_notice_bundles` (한 alert × N
+      region fan-out) + `KmaWeatherAlertItem`/`Region` Protocols + KMA_ALERT_
+      LEVEL_SEVERITY 매핑. krex의 잘못된 PARKING category (06010000) →
+      placeholder "99000000". `etl_fixtures.py` 11 dataset 등록 (datagokr 1
+      + kma 4 + opinet 2 + krex 4). 469 tests green (신규 14).
+      Sprint 2 §2.2 거의 마무리(mid_forecast만 남음), §2.4 완료.
 
 다음 PR 후보 (Sprint 2 entry 계속):
 

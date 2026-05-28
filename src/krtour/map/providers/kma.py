@@ -32,11 +32,21 @@ from __future__ import annotations
 from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Final, Protocol, runtime_checkable
+from typing import Any, Final, Protocol, runtime_checkable
 
+from krtour.map.core.address import normalize_korean_text
+from krtour.map.core.ids import make_feature_id, make_payload_hash, make_source_record_key
 from krtour.map.core.providers import normalize_provider_name
 from krtour.map.dto import (
+    Address,
+    Feature,
+    FeatureBundle,
+    FeatureKind,
     ForecastStyle,
+    NoticeDetail,
+    SourceLink,
+    SourceRecord,
+    SourceRole,
     TimelineBucket,
     WeatherDomain,
     WeatherValue,
@@ -46,13 +56,21 @@ __all__ = [
     "KmaShortForecastItem",
     "KmaUltraShortNowcastItem",
     "KmaUltraShortForecastItem",
+    "KmaWeatherAlertRegion",
+    "KmaWeatherAlertItem",
     "short_forecast_to_weather_values",
     "ultra_short_nowcast_to_weather_values",
     "ultra_short_forecast_to_weather_values",
+    "weather_alerts_to_notice_bundles",
     # 메타
     "KMA_PROVIDER_NAME",
     "KMA_METRIC_UNITS",
     "KMA_METRIC_NAMES",
+    "KMA_WEATHER_ALERT_DATASET_KEY",
+    "KMA_WEATHER_ALERT_CATEGORY",
+    "KMA_WEATHER_ALERT_MARKER_ICON",
+    "KMA_WEATHER_ALERT_MARKER_COLOR",
+    "KMA_ALERT_LEVEL_SEVERITY",
 ]
 
 
@@ -60,6 +78,34 @@ __all__ = [
 
 KMA_PROVIDER_NAME: Final[str] = "python-kma-api"
 """canonical provider name (ADR-024)."""
+
+
+# -- 특보 (weather_alerts) 상수 (PR#46) ---------------------------------
+
+KMA_WEATHER_ALERT_DATASET_KEY: Final[str] = "kma_weather_alerts"
+"""provider_sync.source_records.dataset_key — KMA 특보."""
+
+_KMA_WEATHER_ALERT_ENTITY_TYPE: Final[str] = "weather_alert"
+
+# notice kind는 NoticeDetail.notice_type이 진짜 분류. category는 부차적이라
+# 카테고리 트리 확장될 때까지 placeholder ``"99000000"``.
+KMA_WEATHER_ALERT_CATEGORY: Final[str] = "99000000"
+
+KMA_WEATHER_ALERT_MARKER_ICON: Final[str] = "danger"
+KMA_WEATHER_ALERT_MARKER_COLOR: Final[str] = "P-15"
+
+# KMA 특보 등급 → NoticeDetail.severity (0~5).
+KMA_ALERT_LEVEL_SEVERITY: Final[dict[str, int]] = {
+    "예비특보": 0,
+    "주의보": 1,
+    "경보": 2,
+    "긴급": 3,
+    # 등급 외 영문 alias.
+    "watch": 1,
+    "warning": 2,
+    "advisory": 1,
+    "emergency": 3,
+}
 
 
 # 표준 metric_key → unit (`docs/weather-feature-normalization.md §2` 표 정합).
@@ -553,5 +599,195 @@ def ultra_short_forecast_to_weather_values(
         )
         for item in items
     ]
+
+
+# -- 특보 (weather_alerts) → notice FeatureBundle — PR#46 ---------------
+
+
+@runtime_checkable
+class KmaWeatherAlertRegion(Protocol):
+    """KMA 특보 적용 지역 1건."""
+
+    region_code: str
+    """KMA 특보 구역 코드 (예: ``"11B10101"``). source_natural_key의 일부로 사용."""
+
+    region_name: str
+    """지역 한글 명 (예: ``"서울특별시"``)."""
+
+
+@runtime_checkable
+class KmaWeatherAlertItem(Protocol):
+    """KMA 특보 1건의 입력 shape.
+
+    한 alert은 여러 region에 적용된다 — 본 모듈은 ``alert × region`` 조합마다
+    별도 ``FeatureBundle``(notice kind)을 생성한다.
+    """
+
+    alert_id: str
+    """KMA 특보 자연키 (provider 내 unique)."""
+
+    alert_type: str
+    """특보 종류 (한/영 alias 가능 — ``normalize_notice_type``이 정규화)."""
+
+    level: str | None
+    """등급 (``"주의보"``/``"경보"``/``"긴급"`` 등)."""
+
+    title: str
+    """제목 (``Feature.name``)."""
+
+    description: str | None
+    """본문."""
+
+    issued_at: datetime
+    """발표 시각 (KST aware)."""
+
+    effective_from: datetime | None
+    """효력 시작."""
+
+    effective_until: datetime | None
+    """효력 종료 (open-ended 가능)."""
+
+    source_agency: str | None
+    """발령 기관 (보통 ``"기상청"``)."""
+
+    regions: list[KmaWeatherAlertRegion]
+    """적용 지역 list. 빈 list면 본 함수가 결과를 빈 list로 반환."""
+
+
+def _alert_region_to_bundle(
+    alert: KmaWeatherAlertItem,
+    region: KmaWeatherAlertRegion,
+    *,
+    fetched_at: datetime,
+) -> FeatureBundle:
+    """`(alert, region)` → 한 notice ``FeatureBundle``."""
+    raw_data: dict[str, Any] = {
+        "alert_id": alert.alert_id,
+        "alert_type": alert.alert_type,
+        "level": alert.level,
+        "title": alert.title,
+        "description": alert.description,
+        "issued_at": alert.issued_at.isoformat(),
+        "effective_from": (
+            alert.effective_from.isoformat() if alert.effective_from else None
+        ),
+        "effective_until": (
+            alert.effective_until.isoformat()
+            if alert.effective_until
+            else None
+        ),
+        "source_agency": alert.source_agency,
+        "region_code": region.region_code,
+        "region_name": region.region_name,
+    }
+    payload_hash = make_payload_hash(raw_data)
+
+    # source_natural_key는 alert_id × region_code 조합.
+    natural_key = f"{alert.alert_id}::{region.region_code}"
+    source_record_key = make_source_record_key(
+        provider=KMA_PROVIDER_NAME,
+        dataset_key=KMA_WEATHER_ALERT_DATASET_KEY,
+        source_entity_type=_KMA_WEATHER_ALERT_ENTITY_TYPE,
+        source_entity_id=natural_key,
+        raw_payload_hash=payload_hash,
+    )
+    feature_id = make_feature_id(
+        bjd_code=None,  # KMA region_code는 bjd_code와 다름. global fallback.
+        kind=FeatureKind.NOTICE.value,
+        category=KMA_WEATHER_ALERT_CATEGORY,
+        source_type=f"{KMA_PROVIDER_NAME}:{KMA_WEATHER_ALERT_DATASET_KEY}",
+        source_natural_key=natural_key,
+    )
+
+    title_normalized = normalize_korean_text(alert.title) or alert.title
+
+    feature = Feature(
+        feature_id=feature_id,
+        kind=FeatureKind.NOTICE,
+        name=title_normalized,
+        coord=None,  # 특보는 region 단위 — 점 좌표 X. 호출자가 후속 enrichment 가능.
+        address=Address(),  # 빈 주소 (region_name은 payload에).
+        category=KMA_WEATHER_ALERT_CATEGORY,
+        marker_icon=KMA_WEATHER_ALERT_MARKER_ICON,
+        marker_color=KMA_WEATHER_ALERT_MARKER_COLOR,
+        detail=NoticeDetail(
+            feature_id=feature_id,
+            notice_type=alert.alert_type,  # NoticeDetail validator가 normalize
+            severity=KMA_ALERT_LEVEL_SEVERITY.get(alert.level or ""),
+            valid_start_time=alert.effective_from or alert.issued_at,
+            valid_end_time=alert.effective_until,
+            source_agency=normalize_korean_text(alert.source_agency),
+            payload={
+                "domain": "weather",
+                "region_code": region.region_code,
+                "region_name": region.region_name,
+                "level": alert.level,
+                "kma_alert_id": alert.alert_id,
+                "description": normalize_korean_text(alert.description),
+            },
+        ),
+    )
+
+    source_record = SourceRecord(
+        provider=normalize_provider_name(KMA_PROVIDER_NAME),
+        dataset_key=KMA_WEATHER_ALERT_DATASET_KEY,
+        source_entity_type=_KMA_WEATHER_ALERT_ENTITY_TYPE,
+        source_entity_id=natural_key,
+        raw_payload_hash=payload_hash,
+        raw_name=alert.title,
+        raw_data=raw_data,
+        fetched_at=fetched_at,
+        source_record_key=source_record_key,
+    )
+    source_link = SourceLink(
+        feature_id=feature_id,
+        source_record_key=source_record_key,
+        source_role=SourceRole.PRIMARY,
+        match_method="natural_key",
+        confidence=100,
+        is_primary_source=True,
+    )
+    return FeatureBundle(
+        feature=feature, source_record=source_record, source_link=source_link
+    )
+
+
+def weather_alerts_to_notice_bundles(
+    items: Iterable[KmaWeatherAlertItem],
+    *,
+    fetched_at: datetime,
+) -> list[FeatureBundle]:
+    """KMA 특보 → notice ``FeatureBundle`` (region 단위로 fan-out).
+
+    Parameters
+    ----------
+    items
+        ``python-kma-api``의 특보 typed model iterable.
+    fetched_at
+        provider 호출 시각 (KST aware).
+
+    Returns
+    -------
+    list[FeatureBundle]
+        한 alert × N region → N bundle. ``Feature(kind=notice, coord=None)`` +
+        ``NoticeDetail`` (notice_type은 alias normalize, severity는 KMA level
+        매핑, valid_start_time = effective_from 또는 issued_at).
+
+    Notes
+    -----
+    - 좌표는 region 단위라 본 함수는 ``coord=None``. 호출자가 KMA region_code →
+      대표 좌표 매핑이 필요하면 후속 enrichment로 추가.
+    - notice_type alias 예: ``"호우주의보"`` → ``"heavy_rain_warning"`` /
+      ``"폭염"`` → ``"heat_wave_warning"`` (`normalize_notice_type`).
+    - alert_id의 `feature_id`는 region마다 다름 — `f"{alert_id}::{region_code}"`
+      가 자연키.
+    """
+    bundles: list[FeatureBundle] = []
+    for item in items:
+        for region in item.regions:
+            bundles.append(
+                _alert_region_to_bundle(item, region, fetched_at=fetched_at)
+            )
+    return bundles
 
 

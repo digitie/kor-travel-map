@@ -2,6 +2,50 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-28 06:00 (claude)
+
+**작업**: PR#46 — KMA weather_alerts → notice FeatureBundle + krex
+TRAFFIC_NOTICE_CATEGORY 정정 + ETL preview registry 11 dataset 확장.
+
+**변경 — 본 lib** (3):
+- `src/krtour/map/providers/kma.py`:
+  - `KmaWeatherAlertRegion`/`KmaWeatherAlertItem` Protocols
+  - `weather_alerts_to_notice_bundles(items, *, fetched_at)` — 한 alert × N
+    region fan-out
+  - 상수: `KMA_WEATHER_ALERT_DATASET_KEY`/`KMA_WEATHER_ALERT_CATEGORY=
+    "99000000"`(placeholder)/marker/`KMA_ALERT_LEVEL_SEVERITY` 매핑
+- `src/krtour/map/providers/krex.py`: `TRAFFIC_NOTICE_CATEGORY`
+  `"06010000"`(PARKING 오용) → `"99000000"` (notice placeholder) 정정
+- `src/krtour/map/providers/__init__.py` — kma 9 신규 re-export
+
+**변경 — 디버그 UI** (2):
+- `etl_fixtures.py`: krex 4 + kma alerts → registry 6 row → 11 row 확장
+- `openapi.json` — drift gate baseline 재생성
+
+**신규 테스트**:
+- `tests/unit/test_providers_kma_alerts.py` (14 case)
+- `tests/unit/test_providers_krex.py` 코멘트 정정
+
+**Verification**:
+- `pytest tests/ packages/krtour-map-debug-ui/tests/ --ignore=tests/integration
+  -q` → **469 passed** (PR#45 455 + 신규 14)
+- `ruff` All checks passed / `mypy --strict` no issues found in 47 source files
+- openapi drift exit 0
+
+**디버그 UI ETL preview 매트릭스 (총 11 dataset)**:
+| Provider | Datasets |
+|----------|----------|
+| data.go.kr-standard | 1 (cultural_festivals) |
+| python-kma-api | 4 (short/nowcast/ultra_short_forecast/weather_alerts) |
+| python-opinet-api | 2 (station_details/prices) |
+| python-krex-api | 4 (rest_areas/prices/weather/traffic_notices) |
+
+**KMA 진행**: short ✅ / nowcast ✅ / ultra_short_forecast ✅ / weather_alerts ✅
+/ mid_forecast ⏳ (텍스트 + AM/PM split, 별도 후속)
+
+**Sprint 2 §2.4 완료 + §2.2 거의 마무리**. 다음은 사용자 지시 — 디버그 UI 추가
+작업.
+
 ## 2026-05-28 05:30 (claude)
 
 **작업**: PR#45 — Sprint 2 §2.4 krex 휴게소 multi-kind 진입. 한 provider에서
