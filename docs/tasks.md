@@ -4,53 +4,57 @@
 
 ## 진행 중 (open PR)
 
-- **본 PR#29** (feat/pr29-core-scoring-providers-weather): Sprint 2 prep 2 —
-  `core/scoring.py` ADR-016 Record Linkage (가중치 0.45/0.35/0.20 + 임계값
-  0.85/0.65 + normalize_kr_place_name + jaro_winkler + haversine + Jaccard +
-  classify_decision) + `core/providers.py` CANONICAL_PROVIDER_NAMES 18종 +
-  PROVIDER_ALIASES 24종 + normalize_provider_name. `jellyfish>=1.0` dep.
-  238 unit pytest passed, ruff/mypy(31 src)/import-linter all green.
-  `core/weather.py`는 WeatherValue DTO 의존이라 Sprint 2 KMA PR로 연기.
-- **PR#28** (merged): Sprint 2 prep —
-  `src/krtour/map/infra/models.py` SQLAlchemy 2 declarative (Feature +
-  SourceRecord/Link + ProviderSyncState) + Alembic 인프라
-  (`alembic.ini` + async-compatible `env.py` + script.py.mako) + 첫 2 revision
-  (0001 4 schemas + 3 extensions on `x_extension` ADR-008 / 0002 features
-  +source 테이블 + 핵심 인덱스). `alembic>=1.13` dep. integration test 6 case.
-  199 pytest passed (코드 변경 없음 기존 + 신규는 통합 테스트 — testcontainers
-  필요). ruff/mypy(29 source files)/import-linter all green.
-  (`infra/models.py` + Alembic 첫 revision + schema integration test).
+- **본 PR#48** (docs/pr48-worktree-rename-tasks-sweep): agent worktree 접두사
+  `geo-*` → `krtour-map-*` 일괄 rename (AGENTS/CLAUDE/SKILL/codegraph-worktree/
+  dev-environment/agent-guide/resume) + 본 `tasks.md` 최신화 (PR#19~#47 반영).
+  순수 docs.
 
-## 최근 완료
+## 최근 완료 (Sprint 2)
 
-- **PR#27** (merged): review report P1 docs drift sweep. README/SKILL/
-  AGENTS/CLAUDE/agent-guide/resume/tasks/category/package README의 현재 상태를
-  Sprint 1 종료 / Sprint 2 진입 준비로 정정.
-- **PR#26** (merged): review report P0-4 —
-  `make_source_record_key` + `make_payload_hash` + `SourceRecord` +
-  `SourceLink` + `FeatureBundle` DTO. core 의존 방향 (dto는 core 미import)
-  준수: `SourceRecord.key()` 메서드 두지 않고 호출자가 helper로 계산.
-  리뷰 후속으로 DB required 필드, bundle 교차 검증, payload hash strict
-  normalize, canonical docs 예시 정합까지 반영. Sprint 2 첫 provider 변환 함수
-  직전 필수 묶음.
-- **PR#25** (merged): python-knps-api PR#3+#4
-  (keyless file-only, commit `06da125f`) 본 라이브러리 docs/pyproject 일괄
-  반영. ADR-028 amendment §H 신설. `docs/knps-feature-etl.md` + `docs/forest-
-  feature-etl.md §11` + `docs/external-apis.md §3.8.1` + `docs/provider-contract
-  .md §3` + `pyproject.toml` 정정. 14 dataset 4건 신규 + 4건 source 이전.
-  DTO에 `protected_area` / `facility_road` 표준값 추가.
-- **PR#24** (merged): review report P0-1/2/3 (DTO strictness) 해소.
-- **PR#23** (merged): `docs/reports/pr-1-21-review.md` 종합 리뷰.
-- **PR#22** (merged):
-  `.github/workflows/{ci,lint,openapi}.yml` 활성화 + import-linter 4 계약
-  활성화 (`tests/lint/test_import_linter.py`) + ADR-002 위반 1건 실 해소
-  (`KST`/`kst_now` 정의 `core/types.py` → `dto/_time.py` 이전, 공개 API
-  preserve). 125 pytest passed (124 + 1 새), 10 skip. ruff/mypy/import-linter
-  모두 green.
-- **upstream knps-api PR#1**
-  (https://github.com/digitie/python-knps-api/pull/1):
-  `docs/knps-feature-etl.md §4` maki icon 정정 (shelter / barrier) — 검토 +
-  merge 대기.
+- **PR#47** (merged 2026-05-28): 디버그 UI ETL preview `?source=live` 활성화 +
+  8 provider API key(`SecretStr`) settings + `.env.example`. KMA 3 dataset
+  (short/nowcast/ultra_short_forecast) 실 호출, 나머지 8은 framework(501).
+  `etl_live.py` httpx async loader + LIVE_LOADER_REGISTRY. **CI red 3종 동반
+  해소**: httpx dep 누락 / Alembic 1.18 `path_separator` deprecation /
+  Alembic 1.18 async migration commit 안 됨(env.py) / coord_5179 assert
+  대소문자. 450+21 green.
+- **PR#46** (merged): KMA weather_alerts → notice FeatureBundle (alert×region
+  fan-out) + krex TRAFFIC_NOTICE_CATEGORY 99000000 정정 + ETL preview registry
+  11 dataset.
+- **PR#45** (merged): Sprint 2 §2.4 krex 휴게소 multi-kind — 4 Protocol + 4
+  변환(rest_areas place / prices food|fuel / weather observed / traffic notice)
+  + 동일 feature_id 통합 검증.
+- **PR#44** (merged): 디버그 UI ETL preview 라우터 3종 (`providers`/`{provider}/
+  datasets`/`{provider}/{dataset}/preview`) + frontend `etl/page.tsx`. dry-run.
+- **PR#43** (merged): Sprint 2 §2.3 마무리 — opinet `stations_to_bundles`
+  (gas station place Feature, category 06020000).
+- **PR#42** (merged): Sprint 2 §2.3 진입 — `PriceValue` DTO + `PriceDomain` +
+  `make_price_value_key` + opinet `prices_to_values`.
+- **PR#41** (merged): KMA `ultra_short_forecast_to_weather_values`
+  (getUltraSrtFcst) + LGT(낙뢰) metric.
+- **PR#40** (merged): `python-*-api` 라이브러리 status sweep — pyproject
+  `[providers]` extra Sprint 그룹화 + provider-contract §12 git URL/sha 표.
+- **PR#39** (merged): KMA `ultra_short_nowcast_to_weather_values` + `core/
+  weather.py` pure 헬퍼 5종.
+- **PR#38** (merged): Sprint 2 §2.2 진입 — `WeatherValue` DTO + 3 enum
+  (WeatherDomain/ForecastStyle/TimelineBucket, ADR-010) + `make_weather_value_
+  key` + KMA `short_forecast_to_weather_values`.
+- **PR#37** (merged): ADR-041 본격 구현 — `python-kraddr-base` 의존 제거,
+  `Address` DTO 보강 + `core/address.py` (bjd/phone/한글 정규화 utility).
+- **PR#36** (merged): 디버그 UI frontend skeleton — Next.js 15 + React 19 +
+  TanStack Query + Zustand (ADR-037) + map-marker-react `private:true` (ADR-043).
+- **PR#35** (merged): 디버그 UI backend 첫 라우터 — `create_app` factory +
+  `/debug/health` + `/debug/version` + `openapi.json` drift gate 활성 (ADR-031).
+- **PR#34** (merged): Sprint 2 §2.1 datagokr 표준데이터 축제 1차 source
+  (`cultural_festivals_to_bundles`, ADR-042).
+- **PR#30~33** (merged): agent worktree + codegraph 룰 docs / codegraph MCP /
+  거버넌스 보강 + ADR-035~043 proposed→accepted 일괄 전환.
+- **PR#28~29** (merged): Sprint 2 prep — `infra/models.py` + Alembic 첫 2
+  revision / `core/scoring.py`(ADR-016) + `core/providers.py`.
+- **PR#19~27** (merged): Sprint 1 scaffolding (dto/core/infra) + review P0/P1
+  해소. 상세는 `docs/journal.md`.
+- **upstream knps-api PR#1** (https://github.com/digitie/python-knps-api/pull/1):
+  maki icon 정정 (shelter / barrier).
 
 ## 다음 (우선순위 순)
 
@@ -93,12 +97,11 @@
           4 계약 활성화 (`tests/lint/test_import_linter.py`) + ADR-002 위반 1건
           실 해소 (KST/kst_now 정의 core/types.py → dto/_time.py 이전).
           ruff/mypy/import-linter all green. **Sprint 1 scaffolding 종료점.**
-    - [ ] PR#23 첫 적재 통합 테스트 (Sprint 2 직전 — `infra/models.py` +
-          첫 provider feature_repo + Alembic migration 첫 revision).
-          또는 SPRINT-2.md 활성화로 직접 Sprint 2 진입.
-    - [ ] **후속**: `core/scoring.py` (Record Linkage ADR-016, Coordinate
-          의존) + `core/types.py` `kst_now` 통합 + `core/providers.py`
-          (CANONICAL_PROVIDER_NAMES) — PR#19 머지 후 별도 PR.
+    - [x] PR#28 `infra/models.py` + Alembic 첫 2 revision (0001/0002) +
+          통합 테스트 6 case (Sprint 2 prep, 2026-05-26 merged).
+    - [x] **후속 (PR#29 merged)**: `core/scoring.py` (Record Linkage ADR-016) +
+          `core/providers.py` (CANONICAL_PROVIDER_NAMES 18종). `core/weather.py`
+          + `kst_now` 통합은 Sprint 2 KMA PR(#38~#39)에서 완료.
 - [ ] T-017 — **공통 maki marker / category 매핑 npm 패키지 추출** (ADR-029
       proposed, PR#10 merged) — 실 코드는 Sprint 2
   - **ADR-029 (proposed, PR#10 merged)** — `@krtour/map-marker-react` (MIT
@@ -288,41 +291,40 @@
 
 ## 우선순위 가이드
 
-- **즉시 (검토 + merge)**: 본 PR#19 (`dto/` Feature + ADR-027 적용) +
+- **즉시 (검토 + merge)**: 본 PR#48 (worktree rename + tasks.md sweep) +
   upstream knps-api PR#1 (maki icon 정정)
-- **다음 (Sprint 1 scaffolding 연속 PR)**:
-  - PR#18 — `src/krtour/map/category/` 144건 (kraddr-base 코드 이전,
-    ADR-023 + ADR-027 `LODGING_MOUNTAIN_SHELTER` 3행 포함)
-  - PR#19 — `src/krtour/map/dto/` (Feature + 7 detail kinds + NOTICE_TYPES
-    14건 + AreaDetail.area_kind='hazard_zone', ADR-027 적용)
-  - PR#20 — `src/krtour/map/core/` (exceptions + scoring stub + ADR-030
-    narrow cache)
-  - PR#21 — `src/krtour/map/infra/` skeleton + testcontainers PostGIS
-    통합 테스트 베이스
-  - PR#22 — CI workflows (`.github/workflows/{ci,lint,openapi}.yml`)
-  - PR#23 — `tests/unit/test_category.py` + `tests/lint/
-    test_import_linter.py` (Sprint 1 DoD)
+- **다음 (Sprint 2 잔여 → Sprint 3 진입)**:
+  - 디버그 UI ETL preview live 매트릭스 확장 — datagokr 1 + opinet 2 +
+    krex 4 + kma_weather_alerts 1 = 8 dataset live loader 등록 (현재 KMA 3만)
+  - `maplibre-vworld-js v0.1.0` 정합 — frontend `package.json` 의존 핀 정정
+    (`^1.0.0`→git URL `#v0.1.0`, zod `^3`→`^4.4.3`) + docs 버전 갱신 (T-019 관련)
+  - KMA `mid_forecast_to_weather_values` (중기예보 텍스트 + AM/PM split)
+  - `/features/*` 라우터 + `infra/feature_repo.py` raw SQL + frontend 지도 화면
+  - Sprint 2 §2.1 끝물 visitkorea TourAPI enrichment
+    (`festival_to_enrichment_links`)
 - **Sprint 진행 순서** (ADR-034):
-  - Sprint 2 = ① 축제 → ② 날씨 → ③ 유가 → ④ 휴게소 (`docs/sprints/SPRINT-2.md`)
+  - Sprint 2 = ① 축제 ✅ → ② 날씨 ✅(mid 잔여) → ③ 유가 ✅ → ④ 휴게소 ✅
+    + 디버그 UI 라우터 ✅ (`docs/sprints/SPRINT-2.md`)
   - Sprint 3 = ⑤ 국립공원/트래킹 → ⑥ 국가유산 + 정합성 Phase 1 (F1~F3)
-    (`SPRINT-3.md`)
+    + ADR-036 maplibre-vworld-js v0.1.0 분리 (`SPRINT-3.md`)
   - Sprint 4 = ⑦ MOIS bulk 4단계 + dedup queue 운영 (`SPRINT-4.md`)
   - Sprint 5 = ⑧ 휴양림/수목원 → ⑨ 박물관/미술관 + Phase 2 F4~F8 + Dagster
     게이트 + 운영 진입 (`SPRINT-5.md`)
 - **백그라운드**: T-019 (TripMate `apps/web` 측 Kakao → maplibre-vworld
-  교체 모니터링)
+  교체 모니터링) — upstream `digitie/maplibre-vworld-js` **v0.1.0 릴리스됨**
+  (npm 미게시, git URL+tag 핀).
 - **장기**: 운영 진입 후 v2.1 검토 (T-101 MV / T-102 pg_prewarm / T-103
-  streaming / ADR-035+ 신규 provider)
+  streaming / ADR-044+ 신규 provider)
 
 ## ADR 번호 가이드 (현재)
 
-- **accepted (text on main)**: ADR-001 ~ ADR-034 (전부, 본 PR#16에서
-  027~034 일괄 accepted 전환)
-- **다음 후보 (미작성)**:
-  - **ADR-035+** — 신규 provider 추가 절차 표준 (체크리스트)
-  - 후속 `@krtour/map-marker-react` npm 게시 자동화 ADR
+- **accepted (text on main)**: ADR-001 ~ ADR-043 (전부). PR#16에서 027~034,
+  PR#33에서 035~043 일괄 accepted 전환. 029는 ADR-043으로 supersede.
+- **다음 후보 번호 = ADR-044**:
+  - **ADR-044+** — 신규 provider 추가 절차 표준 (체크리스트)
+  - 후속 `@krtour/map-marker-react` npm 게시 자동화 ADR (현재 ADR-043 보류)
   - (필요 시) ADR — `core.feature_consistency_reports` Phase 2 알림 sink
-  - (필요 시) ADR — Sprint 2 SHP/GeoJSON parsing 위치 결정 (`krtour.map.
+  - (필요 시) ADR — Sprint 3 SHP/GeoJSON parsing 위치 결정 (`krtour.map.
     providers.knps` vs upstream `[geo]` extra)
   - (필요 시) ADR — MV 도입 (T-101 Sprint 5 시범 결과 후)
   - (필요 시) ADR — pg_prewarm 운영 정책 (T-102)
@@ -349,5 +351,32 @@
 | #16 | `feat/sprint1-entry-adr-accepted` | 2026-05-25 | T-014 Sprint 1 진입 — ADR 027~034 일괄 accepted + fail_under=50 |
 | #17 | `feat/sprint1-pr17-scaffolding` | 2026-05-25 | `src/krtour/map/` PEP 420 scaffolding + `settings.py` + smoke |
 | #18 | `feat/sprint1-pr18-category-migration` | 2026-05-25 | `category/` 144건 (kraddr-base 이전 + ADR-027 3건) + 16 tests |
-| **#19** | `feat/sprint1-pr19-dto-foundation` | **open** | `dto/` Feature + 5 detail + NOTICE_TYPES 14 (ADR-027) + AreaDetail hazard_zone + KST + 27 tests |
+| #19 | `feat/sprint1-pr19-dto-foundation` | 2026-05-25 | `dto/` Feature + 5 detail + NOTICE_TYPES 14 (ADR-027) + AreaDetail hazard_zone + KST + 27 tests |
+| #20 | `feat/sprint1-pr20-core-exceptions-id` | 2026-05-25 | `core/` exceptions 7종 + `make_feature_id` (ADR-009) + 42 tests |
+| #21 | `feat/sprint1-pr21-infra-skeleton` | 2026-05-25 | `infra/crs.py` + `infra/db.py` + testcontainers PostGIS conftest |
+| #22 | `feat/sprint1-pr22-ci-import-linter` | 2026-05-25 | CI workflows + import-linter 4 계약 + ADR-002 위반 해소 (dto/_time.py) |
+| #23 | `docs/pr23-review-report` | 2026-05-25 | `docs/reports/pr-1-21-review.md` 종합 리뷰 |
+| #24 | `fix/pr24-dto-strictness-p0` | 2026-05-25 | review P0-1/2/3 — detail dict 거부 + datetime aware + category 정규식 |
+| #25 | `docs/pr25-knps-keyless-sync` | 2026-05-25 | python-knps-api keyless(`06da125f`) 반영 + ADR-028 amendment §H |
+| #26 | `feat/pr26-source-record-bundle-dto` | 2026-05-25 | review P0-4 — ID helper 2종 + SourceRecord/Link/FeatureBundle DTO |
+| #27 | `docs/pr27-p1-docs-drift-sweep` | 2026-05-25 | review P1 docs drift sweep |
+| #28 | `feat/pr28-infra-models-alembic` | 2026-05-26 | `infra/models.py` + Alembic 첫 2 revision (0001/0002) + 통합 테스트 6 |
+| #29 | `feat/pr29-core-scoring-providers` | 2026-05-26 | `core/scoring.py`(ADR-016) + `core/providers.py` (canonical 18종) |
+| #30~31 | `docs/pr30-31-codegraph-worktree` | 2026-05-27 | agent worktree + codegraph 룰 docs + MCP 등록 |
+| #32~33 | `docs/pr32-33-adr-035-043` | 2026-05-27 | 거버넌스 보강 + ADR-035~043 proposed→accepted |
+| #34 | `feat/pr34-datagokr-festivals` | 2026-05-27 | Sprint 2 §2.1 datagokr 축제 1차 source (ADR-042) |
+| #35 | `feat/pr35-debug-ui-routers` | 2026-05-27 | 디버그 UI `create_app` + health/version + openapi drift gate |
+| #36 | `feat/pr36-frontend-skeleton` | 2026-05-27 | Next.js 15 frontend skeleton + TanStack/Zustand (ADR-037) |
+| #37 | `feat/pr37-kraddr-base-absorb` | 2026-05-28 | ADR-041 — Address DTO 보강 + `core/address.py` |
+| #38 | `feat/pr38-kma-short-forecast` | 2026-05-28 | `WeatherValue` DTO + 3 enum + KMA 단기예보 1차 |
+| #39 | `feat/pr39-kma-nowcast` | 2026-05-28 | KMA 초단기실황 + `core/weather.py` pure 헬퍼 5종 |
+| #40 | `docs/pr40-provider-status-sweep` | 2026-05-28 | `python-*-api` 라이브러리 status sweep |
+| #41 | `feat/pr41-kma-ultra-short-forecast` | 2026-05-28 | KMA 초단기예보 (getUltraSrtFcst) + LGT |
+| #42 | `feat/pr42-pricevalue-opinet` | 2026-05-28 | `PriceValue` DTO + opinet 가격 1차 |
+| #43 | `feat/pr43-opinet-stations` | 2026-05-28 | opinet `stations_to_bundles` (gas station Feature) |
+| #44 | `feat/pr44-etl-preview-router` | 2026-05-28 | 디버그 UI ETL preview 라우터 (fixture dry-run) |
+| #45 | `feat/pr45-krex-multi-kind` | 2026-05-28 | Sprint 2 §2.4 krex 휴게소 4 dataset multi-kind |
+| #46 | `feat/pr46-kma-weather-alerts` | 2026-05-28 | KMA weather_alerts → notice + krex category fix + ETL 11 dataset |
+| #47 | `feat/pr47-etl-live-source` | 2026-05-28 | ETL preview `?source=live` (KMA 3) + 8 provider key + CI red 3종 해소 |
+| **#48** | `docs/pr48-worktree-rename-tasks-sweep` | **open** | worktree `geo-*`→`krtour-map-*` rename + tasks.md 최신화 |
 | knps-api #1 | `docs/knps-feature-maki-icons` | **open** | maki icon 정정 (shelter / barrier) |
