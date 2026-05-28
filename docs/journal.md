@@ -2,6 +2,41 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-28 09:10 (claude)
+
+**작업**: PR#51 — Sprint 2 잔여 1/4: VisitKorea TourAPI enrichment
+(`festival_to_enrichment_links`). ADR-042 2차 source.
+
+**신규** (2):
+- `src/krtour/map/providers/visitkorea.py` (~290 line) — datagokr 1차로 적재된
+  festival `feature_id`에 visitkorea `SourceRecord` + `SourceLink`
+  (`source_role='enrichment'`)만 잇는다. **새 Feature를 만들지 않음.**
+  - `VisitKoreaFestivalItem` Protocol (contentId/overview/first_image 등)
+  - `FestivalMatcher`/`FestivalMatch` Protocol — datagokr↔visitkorea 매칭은
+    이름/지역 fuzzy(ADR-016)라 plug-in 주입 (`standard_data.ReverseGeocoder`
+    패턴). `match()->None`이면 해당 item enrichment 생략.
+  - `FestivalEnrichment` 결과 모델 (source_record + source_link) + consistency
+    validator (role=ENRICHMENT / key 일치 / not primary).
+  - `festival_to_enrichment_links(items, *, matcher, fetched_at)`.
+- `tests/unit/test_providers_visitkorea.py` (8 case).
+
+**변경**:
+- `providers/__init__.py` — visitkorea 7 심볼 re-export.
+- `docs/event-feature-etl.md §7.1.5` "미구현" → PR#51 구현 + 시그니처 안내.
+- `docs/sprints/SPRINT-2.md` §2.1 + §7 잔여 1 → 완료.
+
+**설계 결정**:
+- enrichment는 `FeatureBundle`이 아님 (Feature 없음) → `FestivalEnrichment`
+  (record+link 쌍) 신설. 일반화(`EnrichmentBundle` in dto/)는 2번째 enrichment
+  provider 등장 시(Sprint 3+) 검토 — 지금 dto/ 확장은 과함.
+- 이미지 URL은 `SourceRecord.raw_data`에만 보존 — `FeatureFileSource` DTO는
+  Sprint 2-3 (bundle.py 주석 명시).
+
+**Verification**: 458 passed (+8) / ruff / mypy strict 49 files / import-linter
+4 contracts green.
+
+**Sprint 2 종료 게이트**: 1/4 완료. 다음 = KMA mid_forecast (2/4).
+
 ## 2026-05-28 08:40 (claude)
 
 **작업**: PR#50 — Sprint/task/resume 문서 일관성 재정비 (사용자 지시 "코드와

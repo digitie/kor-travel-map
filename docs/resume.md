@@ -40,16 +40,15 @@ Python 패키지 `krtour-map-debug-ui` (ADR-020, `packages/krtour-map-debug-ui/`
 
 ## 다음 한 작업
 
-### Sprint 2 잔여 (4건 — `sprints/SPRINT-2.md §7`과 동일 순서)
+### Sprint 2 잔여 (3건 — `sprints/SPRINT-2.md §7`과 동일 순서)
 
-1. **visitkorea enrichment** (`festival_to_enrichment_links`) — datagokr
-   feature_id ↔ visitkorea contentId 매핑. `providers/visitkorea.py` 신설.
-   Sprint 2 §2.1 끝물.
-2. **KMA `mid_forecast_to_weather_values`** — 중기예보 텍스트 파싱 + AM/PM
-   split. `providers/kma.py`에 추가. Sprint 2 §2.2 마지막 dataset.
-3. **ETL live 나머지 8 dataset** loader 등록 — datagokr 1 + opinet 2 + krex 4
+- [x] ~~visitkorea enrichment~~ — **PR#51 완료** (`festival_to_enrichment_links`
+  + `FestivalMatcher` plug-in, 8 test).
+1. **KMA `mid_forecast_to_weather_values`** — 중기예보 텍스트 파싱 + AM/PM
+   split. `providers/kma.py`에 추가. Sprint 2 §2.2 마지막 dataset. ← **다음**
+2. **ETL live 나머지 8 dataset** loader 등록 — datagokr 1 + opinet 2 + krex 4
    + kma_weather_alerts 1. `etl_live.py` LIVE_LOADER_REGISTRY 확장.
-4. **Coverage bar 상향 + Sprint 2 종료 마무리** — `pyproject.toml` `fail_under`
+3. **Coverage bar 상향 + Sprint 2 종료 마무리** — `pyproject.toml` `fail_under`
    50→65 (실측 96%) + journal 회고 + 본 resume → Sprint 3 + `SPRINT-3.md` 진입 PR.
 
 ### Sprint 3 진입 후 첫 작업 (예정)
@@ -156,9 +155,9 @@ Python 패키지 `krtour-map-debug-ui` (ADR-020, `packages/krtour-map-debug-ui/`
       + weather (5 helper) + address (bjd/phone/한글 정규화) + types (KST)
 - [x] `src/krtour/map/infra/` — models.py (ORM) + crs.py (pyproj) + db.py (async
       engine) + Alembic 2 revision
-- [x] `src/krtour/map/providers/` — standard_data / kma / opinet / krex (4 provider)
-- [ ] `src/krtour/map/providers/` — visitkorea (enrichment, Sprint 2 잔여) /
-      knps / krheritage (Sprint 3) / mois (Sprint 4)
+- [x] `src/krtour/map/providers/` — standard_data / kma / opinet / krex /
+      visitkorea (enrichment, PR#51) — 5 provider
+- [ ] `src/krtour/map/providers/` — knps / krheritage (Sprint 3) / mois (Sprint 4)
 - [ ] `src/krtour/map/infra/feature_repo.py` — raw SQL (Sprint 3)
 - [ ] `src/krtour/map/client/` — `AsyncKrtourMapClient` (Sprint 3~4)
 - [x] `packages/krtour-map-debug-ui/` — create_app + routers (health/version/etl)
@@ -171,9 +170,9 @@ Python 패키지 `krtour-map-debug-ui` (ADR-020, `packages/krtour-map-debug-ui/`
 
 ### 미완료 (Sprint 순서)
 
-- [ ] KMA 중기예보 (`mid_forecast`, Sprint 2 잔여)
-- [ ] visitkorea enrichment (Sprint 2 잔여)
-- [ ] ETL live 나머지 8 dataset (Sprint 2 잔여)
+- [x] visitkorea enrichment (Sprint 2 잔여 1/4 — PR#51)
+- [ ] KMA 중기예보 (`mid_forecast`, Sprint 2 잔여 2/4)
+- [ ] ETL live 나머지 8 dataset (Sprint 2 잔여 3/4)
 - [ ] Coverage 65% (Sprint 2 DoD)
 - [ ] KNPS 14 dataset + krforest trails (Sprint 3)
 - [ ] krheritage 국가유산 (Sprint 3)
@@ -198,8 +197,8 @@ Python 패키지 `krtour-map-debug-ui` (ADR-020, `packages/krtour-map-debug-ui/`
 
 ## 차단 사유 / 결정 대기
 
-- **Sprint 2 → 3 전환**: mid_forecast + visitkorea enrichment + ETL live 8종 +
-  coverage 65% 달성 후 Sprint 2 종료 회고 → Sprint 3 진입 PR.
+- **Sprint 2 → 3 전환**: (visitkorea enrichment ✅ PR#51) mid_forecast + ETL
+  live 8종 + coverage 상향 후 Sprint 2 종료 회고 → Sprint 3 진입 PR.
 - **SHP/GeoJSON parser 위치**: Sprint 3 KNPS 진입 시 본 라이브러리 vs upstream
   knps-api `[geo]` extra 선택 필요.
 - **ADR-033 Phase 1 시점**: Sprint 3 진입 후 `feature_consistency_reports` F1~F3
@@ -224,8 +223,9 @@ git checkout main                        # 복귀
 
 ## 핵심 메시지
 
-Sprint 2 4 provider 변환 함수가 안정화되었다. 다음은 Sprint 2 잔여 (mid_forecast
-+ visitkorea enrichment) 마무리 후 Sprint 3 (KNPS/krheritage + 정합성 Phase 1)
-진입이다. 적재(DB write)는 아직 없고, provider → DTO 변환까지만 완성된 상태.
+Sprint 2 핵심 provider(축제 1차/2차·날씨·유가·휴게소)가 안정화되었다. 다음은
+Sprint 2 잔여 (mid_forecast → ETL live 8종 → coverage+종료) 마무리 후 Sprint 3
+(KNPS/krheritage + 정합성 Phase 1) 진입이다. 적재(DB write)는 아직 없고,
+provider → DTO 변환까지만 완성된 상태.
 Sprint 3에서 `feature_repo.py` raw SQL + `/features/*` 라우터로 실제 적재 +
 조회 흐름을 연결한다.

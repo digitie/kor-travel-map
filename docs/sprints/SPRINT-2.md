@@ -30,7 +30,8 @@
   - `datagokr_cultural_festivals` (1차, `data.go.kr-standard` via
     `python-datagokr-api`) — **PR#34 구현 완료**
   - `visitkorea_festival_events` (enrichment — image / 상세 description /
-    contentId 매핑, `source_role='enrichment'`) — Sprint 2 끝물 별도 PR
+    contentId 매핑, `source_role='enrichment'`) — **PR#51 구현 완료**
+    (`festival_to_enrichment_links` + `FestivalMatcher` plug-in)
 - **Feature.kind**: `event`
 - **detail**: `EventDetail` (festival_kind / event_dates / event_address)
 - **category**: `01 TOURISM` 대분류 (festival 자체는 sub-category 없이 EventDetail
@@ -274,8 +275,8 @@ Sprint 2 진행 중 다음 ADR들의 1차 implementation 점진 도입:
 - [x] Coverage bar 65% pass — **실측 96%** (`fail_under` 상향은 잔여 작업 4에서)
 
 **잔여 (Sprint 2 종료 게이트)**:
-- [ ] 1. visitkorea enrichment — `providers/visitkorea.py`
-      `festival_to_enrichment_links` (§2.1 끝물, `source_role='enrichment'`)
+- [x] 1. visitkorea enrichment — `providers/visitkorea.py`
+      `festival_to_enrichment_links` + `FestivalMatcher` plug-in (PR#51, 8 test)
 - [ ] 2. KMA `mid_forecast_to_weather_values` — 중기예보 텍스트 + AM/PM split (§2.2)
 - [ ] 3. ETL live 나머지 8 dataset loader 등록 — datagokr 1 + opinet 2 + krex 4
       + kma_weather_alerts 1 (`etl_live.LIVE_LOADER_REGISTRY` 확장)
