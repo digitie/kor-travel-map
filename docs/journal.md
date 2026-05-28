@@ -2,6 +2,37 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-28 08:40 (claude)
+
+**작업**: PR#50 — Sprint/task/resume 문서 일관성 재정비 (사용자 지시 "코드와
+PR 상태 확인해서 sprint/task 정리 + resume.md 정리 + 일관성·목표 명확화").
+순수 docs.
+
+**그라운드 트루스 확인** (codegraph + git + pytest):
+- main `225ac77`, **open PR 없음**, 총 49 PR merged.
+- 구현 완료: provider 4종(standard_data/kma/opinet/krex) + dto 18 + core 8 +
+  infra 3(models/db/crs)+Alembic + debug-ui 라우터 3(health/version/etl) +
+  frontend skeleton. **coverage 96%** (unit 450 + debug-ui 21).
+- 미구현: visitkorea / knps / krheritage / mois provider, `infra/feature_repo.py`,
+  `/features/*` 라우터.
+
+**변경 — docs** (4):
+- `docs/resume.md` — 직전 세션의 미커밋 재작성본 채택 + PR#49 merged 사실 정합
+  (main hash/PR수/open PR 표/완료 목록). 기존의 **중복 "다음 PR 후보" 3블록
+  제거** → 현 상태/다음 한 작업/완료 PR/진척도/ADR/차단 단일 구조.
+- `docs/sprints/README.md` — 상태 컬럼 정정: Sprint 1 ✅완료 / Sprint 2 🔵
+  active(~90%) / Sprint 3 다음. "현 위치" 박스 추가.
+- `docs/sprints/SPRINT-2.md` — header 상태 active, §1 진입조건 [x], §7 종료조건
+  완료/잔여 분리 (잔여 4건 = 단일 출처). `/features/*`는 Sprint 2 게이트 아님 명시.
+- `docs/tasks.md` — 진행 중→open PR 없음 + Sprint 2 종료 게이트 4건 / 최근 완료
+  PR#48·#49 추가 / 머지 history #48·#49 merged + #50 open.
+
+**Sprint 2 종료 게이트 = 잔여 4건** (resume/tasks/SPRINT-2 §7 동일):
+visitkorea enrichment / KMA mid_forecast / ETL live 8 dataset / coverage bar
+상향+회고. 이후 Sprint 3 (KNPS·krheritage + 정합성 Phase 1 + `/features/*`).
+
+**부수**: 직전 세션 잔류 0-byte 잡파일(`3`, `~220줄`) 제거.
+
 ## 2026-05-28 08:10 (claude)
 
 **작업**: PR#49 — `maplibre-vworld-js` **v0.1.0** 기준 의존 핀 정합 (사용자

@@ -2,15 +2,30 @@
 
 이 문서는 작업 백로그다. 우선순위 순. 각 작업은 `T-NNN` 번호로 식별한다.
 
-## 진행 중 (open PR)
+## 진행 중
 
-- **본 PR#48** (docs/pr48-worktree-rename-tasks-sweep): agent worktree 접두사
-  `geo-*` → `krtour-map-*` 일괄 rename (AGENTS/CLAUDE/SKILL/codegraph-worktree/
-  dev-environment/agent-guide/resume) + 본 `tasks.md` 최신화 (PR#19~#47 반영).
-  순수 docs.
+**open PR 없음** (main `225ac77`, PR#49까지 merged). 다음 작업은 새 feature
+branch로.
+
+### Sprint 2 종료 게이트 (잔여 4건 — 단일 출처: `sprints/SPRINT-2.md §7`)
+
+1. **visitkorea enrichment** — `providers/visitkorea.py`
+   `festival_to_enrichment_links` (datagokr feature_id ↔ visitkorea contentId,
+   `source_role='enrichment'`). Sprint 2 §2.1 끝물.
+2. **KMA `mid_forecast`** — `mid_forecast_to_weather_values` 중기예보 텍스트 +
+   AM/PM split. Sprint 2 §2.2 마지막 dataset.
+3. **ETL live 나머지 8 dataset** — `etl_live.LIVE_LOADER_REGISTRY` 확장
+   (datagokr 1 + opinet 2 + krex 4 + kma_weather_alerts 1).
+4. **Coverage bar 상향 + Sprint 2 종료 마무리** — `pyproject.toml` `fail_under`
+   50→65 (실측 96%) + journal 회고 + resume → Sprint 3 + `SPRINT-3.md` 진입 PR 준비.
 
 ## 최근 완료 (Sprint 2)
 
+- **PR#49** (merged 2026-05-28): `maplibre-vworld` v0.1.0 의존 핀 정합 — 기존
+  `^1.0.0`은 이중 오류(버전 미존재 + npm 미게시) → `github:digitie/maplibre-
+  vworld-js#v0.1.0` git URL+tag 핀 + `zod ^4.4.3`(peer) + ADR-036 amendment.
+- **PR#48** (merged 2026-05-28): agent worktree 접두사 `geo-*` → `krtour-map-*`
+  일괄 rename (7 normative docs) + 본 `tasks.md` 최신화 (PR#19~#47 반영).
 - **PR#47** (merged 2026-05-28): 디버그 UI ETL preview `?source=live` 활성화 +
   8 provider API key(`SecretStr`) settings + `.env.example`. KMA 3 dataset
   (short/nowcast/ultra_short_forecast) 실 호출, 나머지 8은 framework(501).
@@ -378,5 +393,7 @@
 | #45 | `feat/pr45-krex-multi-kind` | 2026-05-28 | Sprint 2 §2.4 krex 휴게소 4 dataset multi-kind |
 | #46 | `feat/pr46-kma-weather-alerts` | 2026-05-28 | KMA weather_alerts → notice + krex category fix + ETL 11 dataset |
 | #47 | `feat/pr47-etl-live-source` | 2026-05-28 | ETL preview `?source=live` (KMA 3) + 8 provider key + CI red 3종 해소 |
-| **#48** | `docs/pr48-worktree-rename-tasks-sweep` | **open** | worktree `geo-*`→`krtour-map-*` rename + tasks.md 최신화 |
+| #48 | `docs/pr48-worktree-rename-tasks-sweep` | 2026-05-28 | worktree `geo-*`→`krtour-map-*` rename + tasks.md 최신화 |
+| #49 | `feat/pr49-maplibre-vworld-v010` | 2026-05-28 | maplibre-vworld v0.1.0 의존 핀 정합 (git URL+tag, zod ^4.4.3, ADR-036 amendment) |
+| **#50** | `docs/pr50-sprint-task-resume-consolidation` | **open** | Sprint/task/resume 일관성 재정비 (현 상태 단일화) |
 | knps-api #1 | `docs/knps-feature-maki-icons` | **open** | maki icon 정정 (shelter / barrier) |

@@ -1,7 +1,8 @@
 # SPRINT-1.md — 코드 작성 단계 진입 + scaffolding
 
-> **상태**: **active** (T-014 사용자 승인 2026-05-25, PR#16에서 ADR 027~034
-> 일괄 accepted 전환 + `pyproject.toml` `fail_under=50` 상향)
+> **상태**: ✅ **완료** (PR#17~#27 merged, 2026-05-25). T-014 사용자 승인으로
+> 진입(PR#16에서 ADR 027~034 일괄 accepted + `fail_under=50`), scaffolding +
+> category 이전 + CI/import-linter 활성화까지 종료. 다음은 Sprint 2 (active).
 >
 > **목적**: v2 설계 단계 종료 → 실제 코드 작성 단계 진입. 의존 계층 +
 > 디렉토리 구조 + dto + category + 첫 통합 테스트 인프라까지.
@@ -182,14 +183,14 @@ Sprint 1 비목표 (위 9단계 외에도):
 - **테스트 인프라 부담**: testcontainers PostGIS 첫 부팅이 느림 (수 분).
   CI에서는 dind + image cache 권장.
 
-## 7. 종료 조건 (Sprint 1 → Sprint 2)
+## 7. 종료 조건 (Sprint 1 → Sprint 2) — ✅ 전부 충족
 
-- [ ] 위 모든 산출물 merge
-- [ ] CI 4개 workflow green
-- [ ] Coverage bar 50% 통과
-- [ ] `docs/journal.md` Sprint 1 종료 회고 entry
-- [ ] `docs/resume.md` "다음 한 작업" → Sprint 2 진입 갱신
-- [ ] `docs/sprints/SPRINT-2.md` 작성 — Sprint 2 진입 계획
+- [x] 위 모든 산출물 merge (PR#17~#22 scaffolding + PR#24~#27 review 보강)
+- [x] CI 4개 workflow green
+- [x] Coverage bar 50% 통과 (실측 96%까지 상회)
+- [x] `docs/journal.md` Sprint 1 종료 회고 entry
+- [x] `docs/resume.md` "다음 한 작업" → Sprint 2 진입 갱신
+- [x] `docs/sprints/SPRINT-2.md` 작성 — Sprint 2 진입 계획
 
 ## 8. 예상 PR 수 (참고)
 
