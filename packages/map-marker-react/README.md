@@ -24,7 +24,7 @@
 | 위치 | `packages/map-marker-react/` (`python-krtour-map` monorepo) |
 | import | `import { MakiMarker, categoryMakiIcon } from "@krtour/map-marker-react"` |
 | 라이선스 | MIT |
-| peer deps | `react@^19`, `maplibre-gl@^5`, `maplibre-vworld@^1` |
+| peer deps | `react@^19`, `maplibre-gl@^5.24`, `maplibre-vworld@^0.1` (git URL+tag, npm 미게시), `zod@^4.4` |
 
 ## 포함 항목 (계획)
 

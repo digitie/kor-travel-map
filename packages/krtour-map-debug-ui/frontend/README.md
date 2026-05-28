@@ -15,10 +15,13 @@
 
 - **Next.js 15** (App Router) + **React 19** + **TypeScript** —
   `kraddr-geo-ui` / TripMate `apps/web`와 동일 stack
-- **maplibre-vworld** v1.0.0 (`digitie/maplibre-vworld-js`) — VWorld 지도 React
-  컴포넌트 (ADR-036 — Sprint 3 후반 v0.1.0 분리)
-- **maplibre-gl** — WebGL 지도 엔진
-- **zod** — 좌표 검증
+- **maplibre-vworld** v0.1.0 (`github:digitie/maplibre-vworld-js#v0.1.0`) —
+  VWorld 지도 React 컴포넌트 (ADR-036). **npm 미게시** — git URL + release
+  tag로 핀 (ADR-043 형제 라이브러리 패턴). 공개 API: `VWorldMap`(apiKey/
+  center/zoom) + `MapStore`/`useMap*` hook + `MakiMarker`/`PlaceMarker`/
+  `PriceMarker`/`WeatherMarker` 등 마커 13종 + `ClusterLayer`/`RouteLine`.
+- **maplibre-gl** ^5.24.0 — WebGL 지도 엔진 (maplibre-vworld v0.1.0 peer)
+- **zod** ^4.4.3 — 좌표 검증 (maplibre-vworld v0.1.0 peer — schemas 모듈)
 - **@tanstack/react-query** — 서버 데이터 페칭/캐시 (ADR-037)
 - **zustand** — UI 클라이언트 상태(map viewport / filter / 선택된 feature
   등). ADR-037 (PR#36에 처음 추가)
