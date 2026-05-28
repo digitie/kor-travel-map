@@ -1,20 +1,22 @@
 # SPRINT-2.md — MOIS-독립 작은 provider 4건 + 디버그 UI 첫 라우터
 
-> **상태**: accepted (시기 대기 — Sprint 1 종료 후 Sprint 2 진입 PR)
+> **상태**: 🔵 **active (~90%, 2026-05-26~28)** — provider ①~④ + 디버그 UI 라우터
+> 완료. 잔여: visitkorea enrichment / KMA mid_forecast / ETL live 8종 / coverage
+> bar 상향 + Sprint 2 종료 회고. (PR#28~#49 merged.)
 >
 > **목적**: ADR-034 9단계의 ①~④ — 축제 / 날씨 / 유가 / 휴게소. MOIS와 dedup
 > 가능성 없는 작은 dataset부터 적재해 Record Linkage 룰을 검증한다. 디버그
 > UI backend 첫 라우터로 ADR-031 OpenAPI export drift gate 활성화.
 
-## 1. 진입 조건 (Sprint 1 DoD)
+## 1. 진입 조건 (Sprint 1 DoD) — ✅ 충족 (PR#27 종료)
 
-- [ ] Sprint 1 모든 DoD 충족 (`SPRINT-1.md §7`)
-- [ ] `src/krtour/map/` scaffolding (`__init__.py`, `category/`, `dto/`,
+- [x] Sprint 1 모든 DoD 충족 (`SPRINT-1.md §7`)
+- [x] `src/krtour/map/` scaffolding (`__init__.py`, `category/`, `dto/`,
       `core/`, `infra/`, `providers/`, `client/`, `settings.py`)
-- [ ] `category/` 144건 (`PLACE_CATEGORY_DEFINITIONS` + maki + helpers)
-- [ ] ADR-030 `import-linter` 계약 green
-- [ ] Coverage bar 50% pass
-- [ ] testcontainers PostGIS infra green
+- [x] `category/` 144건 (`PLACE_CATEGORY_DEFINITIONS` + maki + helpers)
+- [x] ADR-030 `import-linter` 계약 green
+- [x] Coverage bar 50% pass
+- [x] testcontainers PostGIS infra green
 
 ## 2. 산출물
 
@@ -264,9 +266,23 @@ Sprint 2 진행 중 다음 ADR들의 1차 implementation 점진 도입:
 
 ## 7. 종료 조건 (Sprint 2 → Sprint 3)
 
-- [ ] Provider ①~④ 모듈 + fixture + 통합 테스트 모두 merge
-- [ ] 디버그 UI backend 첫 라우터 + OpenAPI drift gate green
-- [ ] Coverage bar 65% pass
-- [ ] `docs/journal.md` Sprint 2 종료 회고 entry
-- [ ] `docs/resume.md` "다음 한 작업" → Sprint 3 진입 갱신
-- [ ] `docs/sprints/SPRINT-3.md` 진입 PR 준비
+**완료**:
+- [x] Provider ①~④ 핵심 변환 함수 + fixture + 단위 테스트 merge
+      (datagokr PR#34 / kma PR#38·39·41·46 / opinet PR#42·43 / krex PR#45)
+- [x] 디버그 UI backend 첫 라우터 (health/version/etl) + OpenAPI drift gate green
+      (PR#35·44·47)
+- [x] Coverage bar 65% pass — **실측 96%** (`fail_under` 상향은 잔여 작업 4에서)
+
+**잔여 (Sprint 2 종료 게이트)**:
+- [ ] 1. visitkorea enrichment — `providers/visitkorea.py`
+      `festival_to_enrichment_links` (§2.1 끝물, `source_role='enrichment'`)
+- [ ] 2. KMA `mid_forecast_to_weather_values` — 중기예보 텍스트 + AM/PM split (§2.2)
+- [ ] 3. ETL live 나머지 8 dataset loader 등록 — datagokr 1 + opinet 2 + krex 4
+      + kma_weather_alerts 1 (`etl_live.LIVE_LOADER_REGISTRY` 확장)
+- [ ] 4. `pyproject.toml` `fail_under` 50 → 65 상향 (실측 96%라 무위험) +
+      `docs/journal.md` Sprint 2 종료 회고 + `docs/resume.md` → Sprint 3 진입 +
+      `docs/sprints/SPRINT-3.md` 진입 PR 준비
+
+> **`/features/*` 라우터 + `infra/feature_repo.py`는 Sprint 2 종료 게이트가
+> 아니다** (§2.5 명시 — Sprint 2 후반/Sprint 3 후속). 실제 DB 적재·조회 흐름은
+> Sprint 3에서 첫 provider 적재와 함께 연결.
