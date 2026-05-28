@@ -670,8 +670,9 @@
   - Kakao Maps JS SDK (Canvas, JS key 필요, 일 호출 한도, 오프라인 캐싱 금지)
   - MapLibre GL JS + raster tile (OpenStreetMap 또는 VWorld raster 직접)
   - **MapLibre GL JS + `maplibre-vworld-js`** (`digitie/maplibre-vworld-js`,
-    npm `maplibre-vworld` v1.0.0, React/TS, WebGL 60fps, `MakiMarker` +
-    `MarkerClusterer` 내장, `zod` 좌표 검증, Next.js App Router 지원)
+    React/TS, WebGL 60fps, `MakiMarker` + cluster layer 내장, `zod` 좌표 검증,
+    Next.js App Router 지원) — *실제 릴리스 버전 **v0.1.0**, npm 미게시(git
+    URL+tag 핀). 결정 당시 추정한 v1.0.0은 ADR-036 amendment(2026-05-28)로 정정.*
 
   사용자가 maplibre-vworld-js 채택을 지시.
 
@@ -735,7 +736,7 @@
      발생 시 `digitie/maplibre-vworld-js` 저장소에 **직접 PR로 적극 수정**.
      본 사용자가 직접 운영하는 저장소이므로 stability 우려는 "외부 의존"이
      아닌 "관리 부담"으로 분류 — wrapper 도입(ADR-006 위배) 대신 upstream
-     수정으로 해소. 이로써 `maplibre-vworld` v1.0.0 채택의 부정적 결과
+     수정으로 해소. 이로써 `maplibre-vworld` (v0.1.0) 채택의 부정적 결과
      "stability 모니터링 필요" 항목은 **해소됨**.
 - **사용자 보강 (2026-05-25, 2차) — 빌드 도구 정정 Vite → Next.js**:
   3. **디버그 UI frontend = Next.js (App Router)**. 1차 결정의 "React + Vite"
@@ -1793,6 +1794,29 @@ maki marker + 카테고리 토글 + bounds 검색 등 공통 기능이 빠르게
   `maplibre-vworld-js`로 이전 (Sprint 3 후반 PR).
 - `docs/decisions.md` ADR-025 amendment — 라이브러리 분리 시점/책임 분배 명시.
 - `packages/krtour-map-debug-ui/README.md` 의존성 트리 갱신.
+
+### Amendment (2026-05-28, PR#49) — v0.1.0 릴리스 + 의존 핀 정합
+
+`digitie/maplibre-vworld-js` **v0.1.0 태그가 실제 릴리스됨**. 이에 본 저장소
+의존 핀을 v0.1.0 기준으로 정정:
+
+- **npm 미게시 확인** — `maplibre-vworld`는 npm registry에 없음. 따라서
+  semver(`^1.0.0`)로는 설치 불가. **git URL + release tag**로 핀:
+  `"maplibre-vworld": "github:digitie/maplibre-vworld-js#v0.1.0"` (ADR-043
+  형제 라이브러리 git 핀 패턴과 동일 정신).
+- 기존 `frontend/package.json` + `packages/map-marker-react/package.json`의
+  `"^1.0.0"`은 **이중으로 잘못됨** (그 버전 미존재 + npm 미게시) → 정정.
+- v0.1.0 **peerDependencies 정합**: `maplibre-gl ^5.24.0` / `react >=18 <20`
+  / `zod ^4.4.3`. 본 저장소 frontend의 `zod`를 `^3.23.0` → `^4.4.3`으로 상향.
+  `map-marker-react` peer/dev도 동일 정합 (zod peer 추가).
+- v0.1.0 공개 API 표면(참고): `VWorldMap`(`apiKey`/`center`/`zoom`/`fallback`)
+  + `MapStore`/`useMap`/`useMapZoom`/`useMapSelector` hook + 마커 13종
+  (`MakiMarker`/`PlaceMarker`/`PriceMarker`/`WeatherMarker`/`ClusterMarker`
+  등) + 레이어(`ClusterLayer`/`ServerClusterLayer`/`RouteLine`/`PolygonArea`)
+  + `zod` schemas(`LngLatSchema`/`BoundsSchema` + `parseBoundsParam` 등).
+- 본 저장소 frontend의 Zustand `useMapStore`(viewport/selectedFeatureId/
+  activeCategoryCodes)는 v0.1.0의 map-인스턴스 바인딩 `MapStore`와 **역할이
+  다르다**(앱 UI 상태 vs 지도 인스턴스 상태) — 병존 OK, 중복 아님.
 
 ---
 

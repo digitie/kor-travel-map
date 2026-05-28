@@ -2,6 +2,43 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-28 08:10 (claude)
+
+**작업**: PR#49 — `maplibre-vworld-js` **v0.1.0** 기준 의존 핀 정합 (사용자
+지시 "0.1.0 기준으로 코드 재확인"). 순수 frontend 의존/docs.
+
+**핵심 발견 — 기존 `^1.0.0` 핀이 이중으로 잘못됨**:
+- upstream `digitie/maplibre-vworld-js`는 **v0.1.0 태그만 릴리스** (v1.0.0
+  미존재).
+- npm `maplibre-vworld` 패키지 **미게시** → semver `^1.0.0`로는 애초에 설치
+  불가. git URL+tag로 핀해야 함.
+
+**변경 — package.json** (2):
+- `frontend/package.json`: `maplibre-vworld ^1.0.0` →
+  `github:digitie/maplibre-vworld-js#v0.1.0`; `zod ^3.23.0` → `^4.4.3`
+  (v0.1.0 peer).
+- `map-marker-react/package.json`: peer `maplibre-vworld ^0.1.0` + `zod
+  ^4.4.3` 추가 + `maplibre-gl ^5.0.0`→`^5.24.0`; devDep maplibre-vworld git
+  URL + zod + maplibre-gl 동일 정합.
+
+**변경 — docs** (5):
+- `frontend/README.md` / `docs/debug-ui-package.md §14` /
+  `docs/tripmate-integration.md §14.5` — v1.0.0 → v0.1.0 + npm 미게시 + peer
+  버전.
+- `docs/decisions.md` ADR-025 v1.0.0 inline 2건 정정 + **ADR-036 amendment
+  (2026-05-28, PR#49)** 추가 — v0.1.0 릴리스/npm 미게시/git URL 핀/peer 정합
+  /v0.1.0 공개 API 표면/Zustand vs MapStore 역할 구분.
+- `packages/map-marker-react/README.md` peer deps 표.
+
+**v0.1.0 API 확인** (upstream `src/index.ts`): `VWorldMap`(apiKey/center/zoom/
+fallback) + `MapStore`/`useMap`/`useMapZoom`/`useMapSelector` + 마커 13종 +
+레이어 4종 + `zod` schemas. 현 frontend는 아직 지도 미렌더(skeleton)라 API
+직접 사용 0 — 핀/문서 정합만. 본 frontend Zustand `useMapStore`(앱 UI 상태)는
+v0.1.0 `MapStore`(지도 인스턴스 상태)와 역할이 달라 병존.
+
+**Verification**: 순수 frontend 의존/docs (Python 코드 0). 두 package.json
+JSON 유효성 확인. ruff/mypy/pytest 무관.
+
 ## 2026-05-28 07:40 (claude)
 
 **작업**: PR#48 — agent worktree 접두사 `geo-*` → `krtour-map-*` 일괄 rename
