@@ -395,13 +395,24 @@ def rest_areas_to_bundles(
     호출자는 결과 bundle의 `feature_id`를 캐시(uni_id → feature_id)로 두고
     `rest_area_prices_to_values`/`rest_area_weather_to_values` 호출 시 동일
     `feature_id`를 전달.
+
+    Notes
+    -----
+    휴게소명(`name`) 또는 `uni_id`가 빈 레코드는 유효 `Feature`(name 1자 이상,
+    source key 필요)를 구성할 수 없어 **skip**한다. EX OpenAPI
+    ``serviceAreaRoute``가 간혹 모든 표시 필드가 ``null``인 placeholder 행을
+    반환하므로(실측, ADR-044) 방어적으로 거른다.
     """
-    return [
-        _rest_area_item_to_bundle(
-            item, fetched_at=fetched_at, reverse_geocoder=reverse_geocoder
+    bundles: list[FeatureBundle] = []
+    for item in items:
+        if not (item.name or "").strip() or not (item.uni_id or "").strip():
+            continue
+        bundles.append(
+            _rest_area_item_to_bundle(
+                item, fetched_at=fetched_at, reverse_geocoder=reverse_geocoder
+            )
         )
-        for item in items
-    ]
+    return bundles
 
 
 # -- rest_area_prices → PriceValue 시계열 ------------------------------
