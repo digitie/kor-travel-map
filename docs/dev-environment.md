@@ -183,21 +183,43 @@ ALTER DATABASE krtour_map SET search_path = public, x_extension;
 - `editor.formatOnSave = true` + ruff
 - mypy strict이 IDE에 통합되어 있어야 즉시 피드백.
 
-## 7. provider 라이브러리 로컬 개발
+## 7. provider 라이브러리 로컬 개발 + 로컬 우선 조회 (ADR-044)
 
-각 `python-*-api` 라이브러리는 git URL + commit sha로 핀된다. 로컬에서 동시
-개발하려면:
+모든 형제 `python-*-api` provider 라이브러리 + `maplibre-vworld-js`는 본 repo의
+**형제로 `~/dev/` (NTFS: `F:\dev\`) 아래 로컬 체크아웃**되어 있다:
+
+```
+~/dev/   (= F:\dev\)
+├── python-krtour-map/          # 본 repo
+├── python-kma-api/             # 기상청 (단기/초단기/중기/특보)
+├── python-opinet-api/          # 한국석유공사 유가
+├── python-krex-api/            # 한국도로공사 휴게소
+├── python-datagokr-api/        # data.go.kr 표준데이터 (축제 등)
+├── python-visitkorea-api/      # VisitKorea TourAPI
+├── python-knps-api/            # 국립공원공단
+├── python-krheritage-api/      # 국가유산청
+├── python-mois-api/            # 행정안전부 인허가
+├── python-airkorea-api/ python-krforest-api/ python-khoa-api/ …
+├── python-kraddr-geo/  python-kraddr-base/   # 주소/지오코딩
+└── maplibre-vworld-js/         # frontend VWorld 지도
+```
+
+**조회 룰 (ADR-044)**: provider client·model·codes·스펙 확인은 **로컬을 먼저**
+(`Glob`/`Read` on `F:\dev\python-*-api/src/...`). GitHub 원격 fetch는 로컬에
+없을 때만 fallback — GitHub 404/private는 "미존재" 근거가 아니다. **데이터
+정합성(코드/필드/단위 의미)의 1차 책임은 각 provider 라이브러리** — 본 lib는
+신뢰·미러하고 불일치 시 그 라이브러리 기준으로 정렬(+필요 시 upstream PR).
+
+git URL + commit sha 핀 + 동시 개발(editable install):
 
 ```bash
-# kraddr-geo 동시 개발 예시
-cd ~/dev
-git clone https://github.com/digitie/python-kraddr-geo.git
-cd python-krtour-map
-uv pip install -e ../python-kraddr-geo
+# 예: opinet 동시 개발
+cd ~/dev/python-krtour-map
+uv pip install -e ../python-opinet-api
 ```
 
 `-e`는 editable install. 작업이 끝나면 commit sha로 다시 핀 (`pyproject.toml`
-`providers` extra).
+`providers` extra). 로컬 체크아웃은 stale 가능 → 조회 전 `git pull` 권장.
 
 ## 8. 단위 vs 통합 테스트 분리
 

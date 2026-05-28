@@ -69,6 +69,17 @@ v1 산출물 요약: 저장소 루트 `python-krtour-map-spec.docx` (약 80쪽).
 SQLAlchemy 2 async + GeoAlchemy2 + asyncpg + psycopg[binary,pool]>=3.2 / GeoPandas
 + Shapely 2 + GDAL / Pydantic v2 / FastAPI + Uvicorn / httpx + tenacity / Alembic.
 
+**관련 라이브러리 로컬 우선 조회 (ADR-044)**: 모든 형제 `python-*-api` provider
+라이브러리(`python-kma-api`/`python-opinet-api`/`python-krex-api`/`python-
+datagokr-api`/`python-visitkorea-api`/`python-knps-api`/`python-krheritage-api`/
+`python-mois-api`/`python-airkorea-api`/`python-krforest-api`/`python-khoa-api`
+…)와 `maplibre-vworld-js`는 **`F:\dev\` (WSL `~/dev/`) 아래 로컬 체크아웃**되어
+있다. provider client·model·스펙을 볼 때는 **로컬을 먼저** `Glob`/`Read`로
+조회하고, GitHub 원격 fetch는 로컬에 없을 때만 fallback (GitHub 404/private는
+"미존재" 근거 아님). **데이터 정합성(코드/필드/단위 의미)의 1차 책임은 각
+provider 라이브러리** — 본 lib는 신뢰·미러하고, 불일치 시 그 라이브러리 기준
+으로 정렬(+필요 시 upstream PR).
+
 **개발 환경**: PC 개발은 **WSL ext4** 위에서 (`~/dev/python-krtour-map/`).
 NTFS 마운트에서 직접 `git`/`pytest` 실행 금지 — 형제 라이브러리
 (`python-kraddr-geo`/`python-kraddr-base`)와 동일 정책. 자세히는 `README.md`

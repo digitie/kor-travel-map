@@ -239,6 +239,17 @@ feature_id` / provider 변환 함수 / `core/scoring.py` / `infra/models.py`)를
 - 단순 전달용 alias도 만들지 않는다.
 - 허용 경계: provider model → `Feature`, `SourceRecord`, `WeatherValue`,
   `PriceValue`로 바꾸는 순수 함수와 저장소 repository까지.
+- **관련 라이브러리는 로컬 `F:\dev\` (WSL `~/dev/`)를 먼저 탐색한다 (ADR-044).**
+  provider/형제 라이브러리(`python-*-api`, `maplibre-vworld-js` 등)의 client·
+  model·codes·스펙 확인은 **로컬 체크아웃이 1차 source** (`Glob`/`Read`로
+  `F:\dev\python-*-api/src/...`). GitHub 원격 fetch는 로컬에 없을 때만 fallback
+  — GitHub 404/private는 "미존재" 근거가 아니다 (PR#53에서 `python-datagokr-api`
+  를 404로 오판해 잘못 보류한 사고 방지).
+- **데이터 정합성(코드 매핑 / 필드 의미 / 단위 / 분류값)의 1차 책임은 각
+  provider 라이브러리에 있다 (ADR-044).** 예: OpiNet 제품코드 의미는
+  `python-opinet-api`가 authoritative — 본 lib는 신뢰·미러만 하고 재정의하지
+  않는다. 불일치 발견 시 provider 라이브러리(+공식 API 스펙) 기준으로 정렬하고
+  필요하면 해당 라이브러리에 직접 PR로 수정한다.
 
 ## 데이터 저장 원칙
 

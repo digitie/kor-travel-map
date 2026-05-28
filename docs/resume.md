@@ -9,8 +9,9 @@ main `225ac77` (PR#49 merged). 총 49 PR merged, open PR 없음.
 Sprint 1 scaffolding (PR#17~#27) 종료 후 Sprint 2 (PR#28~#48)에서
 ADR-034 9단계 중 ①~④ provider + 디버그 UI를 구현했다.
 
-ADR **001~043 모두 accepted**. 029는 ADR-043으로 supersede.
-다음 후보 번호 = ADR-044.
+ADR **001~044 모두 accepted**. 029는 ADR-043으로 supersede.
+ADR-044 = 관련 라이브러리 `F:\dev\` 로컬 우선 조회 + 데이터 정합성 책임은 각
+provider 라이브러리. 다음 후보 번호 = ADR-045.
 
 **Sprint 2 주요 산출물**:
 - Provider ① 축제: `providers/standard_data.py` (datagokr 표준데이터,
@@ -187,10 +188,11 @@ Python 패키지 `krtour-map-debug-ui` (ADR-020, `packages/krtour-map-debug-ui/`
 ## 다음 ADR
 
 **accepted (text on main)**: ADR-001 ~ ADR-043 전부.
-029는 ADR-043으로 supersede. 다음 후보 번호 = ADR-044.
+029는 ADR-043으로 supersede, 044 accepted (로컬 우선 조회 + 정합성 책임).
+다음 후보 번호 = ADR-045.
 
 **후보 (미작성)**:
-- ADR-044+ — 신규 provider 추가 절차 표준 (체크리스트)
+- ADR-045+ — 신규 provider 추가 절차 표준 (체크리스트)
 - (필요 시) Sprint 3 SHP/GeoJSON parser 위치 결정 ADR
 - (필요 시) `@krtour/map-marker-react` npm 게시 자동화 ADR
 - (필요 시) Sprint 5 MV / pg_prewarm 도입 ADR (T-101/102)
