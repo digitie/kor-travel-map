@@ -54,11 +54,6 @@ else:
 target_metadata = metadata
 
 
-def _set_search_path(connection: Connection) -> None:
-    """ADR-008 — 모든 connection에 ``search_path = public, x_extension``."""
-    connection.execute(text("SET search_path = public, x_extension"))
-
-
 def run_migrations_offline() -> None:
     """offline mode — SQL 출력만 (실 DB connect 안 함)."""
     url = config.get_main_option("sqlalchemy.url")
@@ -74,7 +69,13 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
-    _set_search_path(connection)
+    # ⚠️ configure() 호출 시점에 connection이 트랜잭션 밖이어야 한다.
+    # Alembic 1.18은 configure() 시 connection.in_transaction()을 보고
+    # ``_in_external_transaction`` 을 판정하는데, True면 begin_transaction()이
+    # nullcontext로 단락되어 **commit을 하지 않는다** (migration.py L156-161,
+    # L416-417). 즉 search_path SET 등 어떤 execute()도 configure() 이전에
+    # 하면 SQLAlchemy 2.0 autobegin으로 트랜잭션이 열려 → migration이 적용은
+    # 되지만 connection close 시 rollback → 빈 DB. (Alembic ≤1.17에선 무증상.)
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
@@ -84,6 +85,10 @@ def do_run_migrations(connection: Connection) -> None:
         compare_server_default=True,
     )
     with context.begin_transaction():
+        # ADR-008 — search_path를 Alembic이 소유한 트랜잭션 **안에서** 설정.
+        # 0002의 ``coord_5179`` STORED 생성 컬럼이 ``x_extension`` 의 PostGIS
+        # ``ST_Transform`` 을 참조하므로 DDL 실행 전 search_path 필요.
+        connection.execute(text("SET search_path = public, x_extension"))
         context.run_migrations()
 
 
