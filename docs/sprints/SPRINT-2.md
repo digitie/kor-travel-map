@@ -94,7 +94,7 @@
 - **DTO foundation** (PR#42): `dto/price.py` `PriceValue` + `PriceDomain`
   enum (5값: opinet_gas_station / rest_area_food / rest_area_fuel / toll_fee /
   admission_fee). `core/ids.py` `make_price_value_key` (`pv_{sha1[:20]}`).
-- **OpiNet product code 매핑** (PR#42): B027/D047/B034/K015/C004 → gasoline/
+- **OpiNet product code 매핑** (PR#42): B027/D047/B034/C004/K015 → gasoline/
   diesel/premium_gasoline/kerosene/lpg + 한글 이름.
 - **검증**: BRIN 인덱스 (`price_values.observed_at`) ADR-014 + bulk insert
   `psycopg.copy_*` 안전 마진 30k (ADR-013) — 적재 PR에서 검증.

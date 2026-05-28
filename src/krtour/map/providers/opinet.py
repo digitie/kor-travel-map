@@ -15,8 +15,8 @@ OpiNet product code(KMA `category` 위치):
 | `B027` | `gasoline` | 휘발유 |
 | `D047` | `diesel` | 경유 |
 | `B034` | `premium_gasoline` | 고급휘발유 |
-| `K015` | `kerosene` | 등유 |
-| `C004` | `lpg` | LPG |
+| `C004` | `kerosene` | 등유 |
+| `K015` | `lpg` | LPG |
 
 ADR 참조
 --------
@@ -104,8 +104,8 @@ OPINET_PRODUCT_KEY_MAP: Final[dict[str, str]] = {
     "B027": "gasoline",
     "D047": "diesel",
     "B034": "premium_gasoline",
-    "K015": "kerosene",
-    "C004": "lpg",
+    "C004": "kerosene",
+    "K015": "lpg",
 }
 
 # 표준 product_key → 한글 이름.
