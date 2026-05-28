@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from krtour.map_debug_ui.etl_fixtures import (
@@ -29,6 +29,12 @@ from krtour.map_debug_ui.etl_fixtures import (
     list_providers,
     run_fixture_preview,
 )
+from krtour.map_debug_ui.etl_live import (
+    LIVE_LOADER_REGISTRY,
+    LiveLoaderError,
+    find_live_loader,
+)
+from krtour.map_debug_ui.settings import DebugUiSettings
 
 __all__ = [
     "router",
@@ -52,6 +58,13 @@ class _DatasetEntry(BaseModel):
         description="`FeatureBundle` / `WeatherValue` / `PriceValue`.",
     )
     description: str
+    live_supported: bool = Field(
+        default=False,
+        description=(
+            "`?source=live` 활성 여부. False면 fixture만 — live 호출은 501. "
+            "PR#47부터 KMA 3 dataset 활성."
+        ),
+    )
 
 
 class _ProviderEntry(BaseModel):
@@ -102,10 +115,14 @@ class EtlPreviewResponse(BaseModel):
 
 
 def _dataset_entries(provider: str) -> list[_DatasetEntry]:
-    """registry에서 provider의 dataset entries 생성."""
+    """registry에서 provider의 dataset entries 생성. ``live_supported``는
+    `etl_live.LIVE_LOADER_REGISTRY`에 매핑 여부로 결정."""
     return [
         _DatasetEntry(
-            dataset=e.dataset, variant=e.variant, description=e.description
+            dataset=e.dataset,
+            variant=e.variant,
+            description=e.description,
+            live_supported=(e.provider, e.dataset) in LIVE_LOADER_REGISTRY,
         )
         for e in FIXTURE_REGISTRY
         if e.provider == provider
@@ -160,28 +177,25 @@ async def get_provider_datasets(provider: str) -> ProviderDatasetsResponse:
     summary="provider 변환 함수 dry-run preview",
     description=(
         "fixture 또는 live source로 provider raw → DTO 변환을 실행하고 결과를 "
-        "JSON으로 응답. DB write 없음. fixture 모드는 외부 의존 X — 본 lib "
-        "변환 함수 동작 검증용. live 모드는 후속 PR로."
+        "JSON으로 응답. DB write 없음. fixture 모드는 외부 의존 X. live 모드는 "
+        "`etl_live.LIVE_LOADER_REGISTRY` 등록된 dataset만 — `?source=fixture` "
+        "응답의 `live_supported` 필드로 확인."
     ),
     responses={
         404: {"description": "등록되지 않은 (provider, dataset) 조합"},
-        501: {"description": "source=live 미구현 (후속 PR)"},
+        501: {"description": "source=live 미구현 (LIVE_LOADER_REGISTRY 미등록)"},
+        502: {"description": "provider 외부 API 호출 실패"},
+        503: {"description": "API key 미설정 (.env 확인)"},
     },
 )
 async def post_preview(
+    request: Request,
     provider: str,
     dataset: str,
     source: Literal["fixture", "live"] = Query(default="fixture"),
 ) -> EtlPreviewResponse:
     if source == "live":
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail=(
-                "source=live 미구현. 본 PR(#44)은 fixture 모드만. "
-                "실 provider client 호출은 후속 PR에서 wiring "
-                "(provider 라이브러리 의존성 추가 + .env 키 입력 절차 동반)."
-            ),
-        )
+        return await _run_live_preview(provider, dataset, request)
 
     try:
         result = run_fixture_preview(provider, dataset)
@@ -191,3 +205,63 @@ async def post_preview(
         ) from exc
 
     return EtlPreviewResponse(**result)
+
+
+async def _run_live_preview(
+    provider: str, dataset: str, request: Request
+) -> EtlPreviewResponse:
+    """``?source=live`` 분기 — provider 실 호출 + 변환 결과 응답."""
+    entry = next(
+        (
+            e
+            for e in FIXTURE_REGISTRY
+            if e.provider == provider and e.dataset == dataset
+        ),
+        None,
+    )
+    if entry is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                f"등록되지 않은 (provider, dataset): ({provider!r}, "
+                f"{dataset!r}). `/debug/etl/providers`에서 확인."
+            ),
+        )
+    loader = find_live_loader(provider, dataset)
+    if loader is None:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail=(
+                f"source=live 미구현: ({provider!r}, {dataset!r}). "
+                "fixture 모드는 동작하나 live 호출 wiring은 후속 PR. "
+                "`etl_live.LIVE_LOADER_REGISTRY`에 매핑 추가 필요."
+            ),
+        )
+
+    # query 파라미터를 그대로 loader에 전달 (provider별 의미는 loader 자체에서).
+    params: dict[str, str] = {
+        k: v for k, v in request.query_params.items() if k != "source"
+    }
+
+    settings = DebugUiSettings()
+    try:
+        items = await loader(settings, params)
+    except LiveLoaderError as exc:
+        # API key 미설정 / provider 응답 실패 등.
+        msg = str(exc)
+        status_code = (
+            status.HTTP_503_SERVICE_UNAVAILABLE
+            if "미설정" in msg or "not configured" in msg.lower()
+            else status.HTTP_502_BAD_GATEWAY
+        )
+        raise HTTPException(status_code=status_code, detail=msg) from exc
+
+    return EtlPreviewResponse(
+        provider=entry.provider,
+        dataset=entry.dataset,
+        source="live",
+        variant=entry.variant,
+        description=entry.description,
+        count=len(items),
+        items=items,
+    )

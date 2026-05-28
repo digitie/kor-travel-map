@@ -156,7 +156,8 @@ def test_preview_unknown_dataset_404(client: TestClient) -> None:
 
 
 @pytest.mark.unit
-def test_preview_live_source_501(client: TestClient) -> None:
+def test_preview_live_source_501_when_not_registered(client: TestClient) -> None:
+    """datagokr_cultural_festivals는 LIVE_LOADER_REGISTRY 미등록 — 501."""
     response = client.post(
         "/debug/etl/data.go.kr-standard/datagokr_cultural_festivals/preview"
         "?source=live"
@@ -164,6 +165,31 @@ def test_preview_live_source_501(client: TestClient) -> None:
     assert response.status_code == 501
     body = response.json()
     assert "source=live 미구현" in body["detail"]
+
+
+@pytest.mark.unit
+def test_preview_live_kma_503_when_key_missing(client: TestClient) -> None:
+    """KMA 단기예보는 live 등록됐지만 .env 키 없으면 503."""
+    response = client.post(
+        "/debug/etl/python-kma-api/kma_short_forecast/preview?source=live"
+    )
+    assert response.status_code == 503
+    body = response.json()
+    assert "KMA_SERVICE_KEY 미설정" in body["detail"]
+
+
+@pytest.mark.unit
+def test_providers_dataset_marks_live_supported(client: TestClient) -> None:
+    """KMA 3 dataset은 live_supported=True, 나머지는 False."""
+    response = client.get("/debug/etl/providers")
+    body = response.json()
+    kma = next(p for p in body["providers"] if p["provider"] == "python-kma-api")
+    live_map = {d["dataset"]: d["live_supported"] for d in kma["datasets"]}
+    assert live_map["kma_short_forecast"] is True
+    assert live_map["kma_ultra_short_nowcast"] is True
+    assert live_map["kma_ultra_short_forecast"] is True
+    # weather_alerts는 live 미등록.
+    assert live_map["kma_weather_alerts"] is False
 
 
 @pytest.mark.unit

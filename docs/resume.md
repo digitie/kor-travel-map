@@ -198,6 +198,32 @@ PR#22 CI/import-linter merge 후 gate 확인. PR#22 merge 후 PR#23 리포트
       placeholder "99000000". `etl_fixtures.py` 11 dataset 등록 (datagokr 1
       + kma 4 + opinet 2 + krex 4). 469 tests green (신규 14).
       Sprint 2 §2.2 거의 마무리(mid_forecast만 남음), §2.4 완료.
+- [x] **PR#47 (현재 open) — ETL preview `?source=live` 활성화 + 8 provider
+      API key 설정**. 사용자 지시 ("Source Live로. 서비스키는 각 레포의 .env
+      파일에서 추출하여 krtour-map에 저장할 것.")로 KMA 3 dataset (short/
+      nowcast/ultra_short_forecast) 실 호출 활성화. 다른 8 dataset은 framework
+      등록만 (`501 Not Implemented`).
+      - **신규**: `packages/krtour-map-debug-ui/.env.example` (provider 키
+        8건 자리 + 컨벤션 주석) + `src/krtour/map_debug_ui/etl_live.py`
+        (~270 line: LiveLoader 타입 + LIVE_LOADER_REGISTRY + KMA 3 endpoint
+        async httpx wrapper + base_date/base_time 자동 계산 + Protocol-만족
+        dataclass adapter)
+      - **변경**: `pyproject.toml` `httpx>=0.27` 추가 / `settings.py` 8
+        `SecretStr | None` field (kma/opinet/datagokr/visitkorea/krex/knps/
+        airkorea/krforest) / `routers/etl.py` `_DatasetEntry.live_supported`
+        + `post_preview` live 분기 + 404/501/503/502 매핑 / `openapi.json`
+        drift gate 재생성
+      - **서비스 키 컨벤션**: provider repo `.env`의 키 이름을 그대로
+        가져오고 prefix `KRTOUR_MAP_DEBUG_UI_`만 붙여 디버그 UI `.env`로
+        옮긴다. 예: `python-kma-api/.env`의 `KMA_SERVICE_KEY=...` → 디버그
+        UI의 `KRTOUR_MAP_DEBUG_UI_KMA_SERVICE_KEY=...`.
+      - **테스트**: debug-ui 21 passed (PR#46 18 + PR#47 3 — live_source
+        501/live_kma_503/live_supported flag). 메인 lib 450 passed.
+      - **Verification**: ruff/mypy strict (48 src files)/lint-imports 4
+        contracts/openapi drift all green.
+      - **의도적 type ignore 3건** (`etl_live.py`): `_KmaShortAdapter` /
+        `_KmaNowcastAdapter` Protocol attribute set은 동일하지만 mypy strict
+        는 nominal 매칭만 한다. runtime Protocol structural check은 통과.
 
 다음 PR 후보 (Sprint 2 entry 계속):
 

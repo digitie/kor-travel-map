@@ -135,6 +135,35 @@ ADR-035 (2026-05-27)로 운영 범위가 "디버그 + admin + 유지보수 + 프
 - pyproject `mypy_path = "src:packages/krtour-map-debug-ui/src"` (PEP 420
   namespace 통합)
 
+**PR#44 (2026-05-28, merged)** — ETL preview 라우터 (`?source=fixture` 활성):
+- `routers/etl.py` 3 endpoint (`/debug/etl/providers`/`{provider}/datasets`/
+  `{provider}/{dataset}/preview`) + `etl_fixtures.py` registry (PR#46까지
+  11 dataset). DB write 없음 — provider raw → DTO 변환 수동 trigger.
+- frontend `src/app/etl/page.tsx` — provider/dataset 선택 + Preview 실행
+  + JSON 결과 표시.
+
+**PR#47 (2026-05-28, merged)** — ETL preview `?source=live` 활성화 + 8
+provider API key 설정:
+- `src/krtour/map_debug_ui/etl_live.py` 신설 (`LiveLoader` + `LIVE_LOADER_
+  REGISTRY` + KMA 3 endpoint async httpx wrapper + base_date/base_time 자동
+  계산 + Protocol-만족 dataclass adapter).
+- KMA 3 dataset (`kma_short_forecast` / `kma_ultra_short_nowcast` / `kma_
+  ultra_short_forecast`) **활성** — 실 호출 + 변환 통과.
+- 나머지 8 dataset (datagokr 1 + kma_weather_alerts 1 + opinet 2 + krex 4)
+  framework 등록만 — 미등록 시 `501 Not Implemented`.
+- `settings.py` 8 `SecretStr | None` field 추가 (kma/opinet/datagokr/
+  visitkorea/krex/knps/airkorea/krforest).
+- 서비스 키 컨벤션: 각 provider repo `.env`의 키 이름 그대로 + prefix
+  `KRTOUR_MAP_DEBUG_UI_`만 붙여 디버그 UI `.env`에 옮긴다. 예: `python-kma-
+  api/.env`의 `KMA_SERVICE_KEY=...` → 디버그 UI의 `KRTOUR_MAP_DEBUG_UI_KMA_
+  SERVICE_KEY=...`.
+- `.env.example` (8 key 자리 + 컨벤션 주석) 신설. `pyproject.toml`
+  `httpx>=0.27` 추가.
+- 응답 매핑: 404 (FIXTURE_REGISTRY 미등록) / 501 (LIVE_LOADER_REGISTRY
+  미등록) / 503 (API key 미설정 — `.env` 확인) / 502 (provider 외부 API 실패).
+- `openapi.json` drift gate 재생성 (`_DatasetEntry.live_supported: bool` +
+  502/503 응답 추가).
+
 **Sprint 2 후반 / Sprint 3 후속 라우터**:
 - `routers/features.py` — `GET /features/in-bounds`, `/features/nearby`,
   `/features/{id}` (디버그 read) — `infra/feature_repo.py` raw SQL +
@@ -143,6 +172,8 @@ ADR-035 (2026-05-27)로 운영 범위가 "디버그 + admin + 유지보수 + 프
   (ADR-035) — `import_jobs` 테이블 + ADR-039 advisory lock 필요
 - `routers/ops_consistency.py` — `GET /ops/consistency` (Sprint 3 ADR-033
   Phase 1 진입 시 활성)
+- ETL preview live mode 확장 — 나머지 8 dataset (datagokr/opinet 2/krex 4/
+  kma_weather_alerts) live loader 등록.
 - **frontend** (PR#36, 2026-05-27 merged — skeleton 진입):
   - Next.js 15 App Router + React 19 + maplibre-vworld (ADR-025) +
     **TanStack Query + Zustand (ADR-037)**

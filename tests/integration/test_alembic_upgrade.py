@@ -136,7 +136,10 @@ async def test_alembic_coord_5179_is_generated_stored(
         )
         row = result.one()
     assert row.is_generated == "ALWAYS"
-    assert "ST_Transform" in (row.generation_expression or "")
+    # PostgreSQL은 generation_expression을 재파싱하며 함수명을 소문자 +
+    # 스키마 한정으로 정규화한다 (예: ``x_extension.st_transform(coord, 5179)``).
+    # 따라서 대소문자 무시하고 ``st_transform`` 참조만 확인 (ADR-008 + ADR-012).
+    assert "st_transform" in (row.generation_expression or "").lower()
 
 
 async def test_alembic_creates_source_tables(
