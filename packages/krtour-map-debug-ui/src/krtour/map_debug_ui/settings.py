@@ -55,6 +55,18 @@ class DebugUiSettings(BaseSettings):
             "내려 두면 발견 reduce. ``/admin/...`` 운영 라우터는 별도 flag (Sprint 4+)."
         ),
     )
+    cors_allow_origins: list[str] = Field(
+        default=[
+            "http://localhost:8610",
+            "http://127.0.0.1:8610",
+        ],
+        description=(
+            "CORS 허용 origin 목록. frontend(Next.js dev, 8610)가 브라우저에서 "
+            "backend(8087)로 cross-origin fetch하므로 필요. 내부 debug 도구라 "
+            "기본은 localhost frontend만 (ADR-005 — 네트워크 계층이 외부 차단). "
+            "env override는 JSON 배열."
+        ),
+    )
 
     # ── Provider API keys (PR#47, source=live 활성화용) ──────────────────
     #

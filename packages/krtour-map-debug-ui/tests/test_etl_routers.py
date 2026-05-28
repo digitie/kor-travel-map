@@ -307,6 +307,40 @@ def test_preview_invalid_source_query_422(client: TestClient) -> None:
     assert response.status_code == 422
 
 
+# ── CORS (frontend 8610 → backend 8087 cross-origin) ────────────────
+
+
+@pytest.mark.unit
+def test_cors_allows_frontend_origin(client: TestClient) -> None:
+    """frontend(Next.js dev 8610) origin은 CORS 허용 (debug UI 동작 전제)."""
+    response = client.get(
+        "/debug/etl/providers",
+        headers={"Origin": "http://localhost:8610"},
+    )
+    assert response.status_code == 200
+    assert (
+        response.headers.get("access-control-allow-origin")
+        == "http://localhost:8610"
+    )
+
+
+@pytest.mark.unit
+def test_cors_preflight_options(client: TestClient) -> None:
+    """preflight OPTIONS도 허용 origin에 대해 200 + allow-origin."""
+    response = client.options(
+        "/debug/etl/python-kma-api/kma_short_forecast/preview",
+        headers={
+            "Origin": "http://localhost:8610",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+    assert response.status_code == 200
+    assert (
+        response.headers.get("access-control-allow-origin")
+        == "http://localhost:8610"
+    )
+
+
 # ── debug_routes_enabled=False 시 unmount ───────────────────────────
 
 
