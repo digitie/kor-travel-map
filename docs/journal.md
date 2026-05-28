@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-29 (claude) — debug UI CORS (Playwright e2e #117 Stage A)
+
+**작업**: #117 e2e 준비 중 발견 — frontend(Next.js 8610)가 브라우저에서
+backend(8087)로 cross-origin fetch하는데 **backend에 CORS 미들웨어 부재** →
+실제 debug UI가 동작 불가였음. CORS 추가.
+
+- `settings.cors_allow_origins`(기본 `localhost:8610`/`127.0.0.1:8610`, ADR-005
+  내부 도구라 localhost frontend만) + `app.py` `CORSMiddleware`.
+- OpenAPI spec 무영향(미들웨어) → drift gate green 확인.
+- 테스트 +2 (allow-origin GET, preflight OPTIONS) → debug-ui 73 통과. ruff/mypy.
+
+**다음 (#117 Stage B)**: WSL node 설치 → frontend npm install + next dev + uvicorn
+기동 → Windows Playwright로 frontend e2e.
+
 ## 2026-05-28 16:00 (claude) — DB 적재 통합 테스트 (통합 검증 #116)
 
 **작업**: FeatureBundle → ORM → testcontainer PostGIS → 재조회 round-trip 검증.
