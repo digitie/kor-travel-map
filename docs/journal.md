@@ -2,6 +2,45 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-28 09:40 (claude)
+
+**작업**: PR#52 — Sprint 2 잔여 2/4: KMA 중기예보 (mid forecast). ADR-010
+forecast_style=mid / timeline=mid.
+
+**변경 — `providers/kma.py`** (mid 섹션 추가):
+- `KmaMidLandForecastItem` Protocol (중기육상 getMidLandFcst — reg_id/tm_fc +
+  wf_{3..7}_{am|pm}/wf_{8..10} 날씨 텍스트 + rn_st_* 강수확률).
+- `KmaMidTemperatureItem` Protocol (중기기온 getMidTa — ta_min/ta_max_{3..10}).
+- `mid_land_forecast_to_weather_values` — 한 region을 day-period로 fan-out:
+  3~7일 AM/PM 2건 + 8~10일 단일. 각 period에 SKY(`value_text`) + POP
+  (`value_number`). **AM/PM 구간 = `valid_from`/`valid_until`**, identity
+  유일성 = `valid_at`(구간 시작) — ADR-010에서 valid_from은 identity 제외라
+  day-period 구분용으로 valid_at을 박음.
+- `mid_temperature_to_weather_values` — 일자별 TMN/TMX (종일 구간).
+- `_parse_mid_announce`(tm_fc YYYYMMDDHHMM) + `_mid_window`(발표일+N일 구간).
+- 빈 텍스트/None metric 생략.
+
+**신규 테스트**: `tests/unit/test_providers_kma_mid.py` (11 case — fan-out count
+26/16, AM/PM window, day8 종일, POP numeric, None 생략, **identity 유일성**,
+tm_fc reject).
+
+**변경**: `providers/__init__.py` mid 6 심볼 re-export / `SPRINT-2.md` §2.2 +
+§7 잔여 2 완료.
+
+**설계 결정**:
+- 중기 날씨는 텍스트("맑음"/"흐리고 비")라 표준 `SKY`에 `value_text`로 담고
+  원천 필드는 `source_metric_key='wf3Am'`로 보존 (단기 SKY code와 의미 다르나
+  표준 키 재사용 — §2 "표준에 없는 지표는 source_metric_key 유지" 정신).
+- 26-field flat Protocol은 `getattr(item, f"wf_{day}{suffix}")` 스케줄 테이블
+  로 DRY 처리 (mypy strict OK — getattr→Any→typed local).
+- WeatherValue.identity()가 valid_at 사용 → mid는 valid_at을 구간 시작으로
+  박아 day-period별 유일 (DB UNIQUE 충돌 방지). 테스트로 검증.
+
+**Verification**: 469 passed (+11) / ruff / mypy strict 49 files / import-linter
+4 contracts green.
+
+**Sprint 2 종료 게이트**: 2/4 완료. 다음 = ETL live 나머지 8 dataset (3/4).
+
 ## 2026-05-28 09:10 (claude)
 
 **작업**: PR#51 — Sprint 2 잔여 1/4: VisitKorea TourAPI enrichment

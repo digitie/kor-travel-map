@@ -58,14 +58,19 @@ __all__ = [
     "KmaUltraShortForecastItem",
     "KmaWeatherAlertRegion",
     "KmaWeatherAlertItem",
+    "KmaMidLandForecastItem",
+    "KmaMidTemperatureItem",
     "short_forecast_to_weather_values",
     "ultra_short_nowcast_to_weather_values",
     "ultra_short_forecast_to_weather_values",
     "weather_alerts_to_notice_bundles",
+    "mid_land_forecast_to_weather_values",
+    "mid_temperature_to_weather_values",
     # 메타
     "KMA_PROVIDER_NAME",
     "KMA_METRIC_UNITS",
     "KMA_METRIC_NAMES",
+    "KMA_MID_FORECAST_DATASET_KEY",
     "KMA_WEATHER_ALERT_DATASET_KEY",
     "KMA_WEATHER_ALERT_CATEGORY",
     "KMA_WEATHER_ALERT_MARKER_ICON",
@@ -789,5 +794,339 @@ def weather_alerts_to_notice_bundles(
                 _alert_region_to_bundle(item, region, fetched_at=fetched_at)
             )
     return bundles
+
+
+# =========================================================================
+# 중기예보 (mid forecast) — getMidLandFcst (육상, 텍스트 + AM/PM) +
+# getMidTa (기온, 일 최저/최고). ADR-010 forecast_style=mid / timeline=mid.
+# =========================================================================
+
+KMA_MID_FORECAST_DATASET_KEY: Final[str] = "kma_mid_forecast"
+"""``WeatherValue.weather_domain`` = ``kma_mid_forecast`` dataset 식별자."""
+
+_MID_ANNOUNCE_FMT: Final[str] = "%Y%m%d%H%M"
+"""중기예보 ``tm_fc`` (발표시각) 형식 — ``"YYYYMMDDHHMM"`` 12자리."""
+
+# (day_offset, period, hour_start, hour_end). 3~7일은 AM/PM 분리, 8~10일 단일.
+# day_offset은 발표일(tm_fc) 기준 N일 후. period=None이면 종일.
+_MID_LAND_PERIODS: Final[tuple[tuple[int, str | None, int, int], ...]] = (
+    (3, "am", 0, 12),
+    (3, "pm", 12, 24),
+    (4, "am", 0, 12),
+    (4, "pm", 12, 24),
+    (5, "am", 0, 12),
+    (5, "pm", 12, 24),
+    (6, "am", 0, 12),
+    (6, "pm", 12, 24),
+    (7, "am", 0, 12),
+    (7, "pm", 12, 24),
+    (8, None, 0, 24),
+    (9, None, 0, 24),
+    (10, None, 0, 24),
+)
+
+_MID_TEMP_DAYS: Final[tuple[int, ...]] = (3, 4, 5, 6, 7, 8, 9, 10)
+"""중기기온 일 최저/최고 제공 일자 (발표일 기준 N일 후)."""
+
+
+@runtime_checkable
+class KmaMidLandForecastItem(Protocol):
+    """중기육상예보 (``getMidLandFcst``) 한 region row의 입력 shape.
+
+    한 row(=한 ``reg_id``)가 3~10일 예보를 flat 필드로 담는다. 3~7일은 오전
+    (``_am``)/오후(``_pm``) 분리, 8~10일은 단일. 본 모듈이 day-period별
+    ``WeatherValue``로 fan-out한다.
+
+    필드명은 ``python-kma-api`` 원천 camelCase(``wf3Am``)를 snake_case로 맞춘
+    것 — 다르면 호출자가 dataclass adapter로 변환.
+    """
+
+    reg_id: str
+    """예보구역 코드 (예: ``"11B00000"`` 서울/인천/경기)."""
+    tm_fc: str
+    """발표시각 ``"YYYYMMDDHHMM"`` 12자리 (``issued_at`` 산출)."""
+
+    # 날씨 텍스트 (예: ``"맑음"`` / ``"구름많음"`` / ``"흐리고 비"``).
+    wf_3_am: str | None
+    wf_3_pm: str | None
+    wf_4_am: str | None
+    wf_4_pm: str | None
+    wf_5_am: str | None
+    wf_5_pm: str | None
+    wf_6_am: str | None
+    wf_6_pm: str | None
+    wf_7_am: str | None
+    wf_7_pm: str | None
+    wf_8: str | None
+    wf_9: str | None
+    wf_10: str | None
+
+    # 강수확률 % (정수).
+    rn_st_3_am: int | None
+    rn_st_3_pm: int | None
+    rn_st_4_am: int | None
+    rn_st_4_pm: int | None
+    rn_st_5_am: int | None
+    rn_st_5_pm: int | None
+    rn_st_6_am: int | None
+    rn_st_6_pm: int | None
+    rn_st_7_am: int | None
+    rn_st_7_pm: int | None
+    rn_st_8: int | None
+    rn_st_9: int | None
+    rn_st_10: int | None
+
+
+@runtime_checkable
+class KmaMidTemperatureItem(Protocol):
+    """중기기온예보 (``getMidTa``) 한 region row의 입력 shape.
+
+    3~10일 일 최저(``ta_min_N``)/최고(``ta_max_N``) 기온. 본 모듈이 일자별
+    ``TMN``/``TMX`` ``WeatherValue``로 fan-out.
+    """
+
+    reg_id: str
+    """기온 예보구역 코드 (예: ``"11B10101"`` 서울)."""
+    tm_fc: str
+    """발표시각 ``"YYYYMMDDHHMM"``."""
+
+    ta_min_3: int | None
+    ta_max_3: int | None
+    ta_min_4: int | None
+    ta_max_4: int | None
+    ta_min_5: int | None
+    ta_max_5: int | None
+    ta_min_6: int | None
+    ta_max_6: int | None
+    ta_min_7: int | None
+    ta_max_7: int | None
+    ta_min_8: int | None
+    ta_max_8: int | None
+    ta_min_9: int | None
+    ta_max_9: int | None
+    ta_min_10: int | None
+    ta_max_10: int | None
+
+
+def _parse_mid_announce(tm_fc: str) -> datetime:
+    """중기예보 ``tm_fc`` (``"YYYYMMDDHHMM"``) → KST aware datetime."""
+    if len(tm_fc) != 12:
+        raise ValueError(f"중기예보 tm_fc 형식 오류 — {tm_fc!r} (12자리 필요).")
+    naive = datetime.strptime(tm_fc, _MID_ANNOUNCE_FMT)
+    return naive.replace(tzinfo=_KST)
+
+
+def _mid_window(
+    issued_at: datetime, day_offset: int, hour_start: int, hour_end: int
+) -> tuple[datetime, datetime]:
+    """발표일 자정 기준 N일 후 ``[hour_start, hour_end)`` 구간 (KST aware)."""
+    base_midnight = issued_at.replace(hour=0, minute=0, second=0, microsecond=0)
+    valid_from = base_midnight + timedelta(days=day_offset, hours=hour_start)
+    valid_until = base_midnight + timedelta(days=day_offset, hours=hour_end)
+    return (valid_from, valid_until)
+
+
+def _mid_land_item_to_values(
+    item: KmaMidLandForecastItem,
+    *,
+    feature_id: str,
+    source_record_key: str | None,
+) -> list[WeatherValue]:
+    """중기육상예보 한 region → day-period별 ``WeatherValue`` (SKY 텍스트 + POP)."""
+    issued_at = _parse_mid_announce(item.tm_fc)
+    values: list[WeatherValue] = []
+
+    for day, period, h_start, h_end in _MID_LAND_PERIODS:
+        suffix = f"_{period}" if period else ""
+        wf_raw: str | None = getattr(item, f"wf_{day}{suffix}")
+        pop_raw: int | None = getattr(item, f"rn_st_{day}{suffix}")
+        valid_from, valid_until = _mid_window(issued_at, day, h_start, h_end)
+
+        payload = {
+            "reg_id": item.reg_id,
+            "tm_fc": item.tm_fc,
+            "day_offset": day,
+            "period": period,
+        }
+        # valid_at = 구간 시작 — identity() 유일성 보장 (ADR-010 valid_from은
+        # identity 제외라 day-period 구분용으로 valid_at을 박는다).
+        if wf_raw is not None and wf_raw.strip():
+            values.append(
+                WeatherValue(
+                    feature_id=feature_id,
+                    provider=normalize_provider_name(KMA_PROVIDER_NAME),
+                    weather_domain=WeatherDomain.KMA_MID_FORECAST,
+                    forecast_style=ForecastStyle.MID,
+                    timeline_bucket=TimelineBucket.MID,
+                    metric_key="SKY",
+                    source_metric_key=f"wf{day}{suffix}",
+                    metric_name=KMA_METRIC_NAMES.get("SKY", "하늘상태"),
+                    issued_at=issued_at,
+                    valid_at=valid_from,
+                    valid_from=valid_from,
+                    valid_until=valid_until,
+                    value_text=wf_raw.strip(),
+                    normalization_version="kma-v1.0",
+                    payload=payload,
+                    source_record_key=source_record_key,
+                )
+            )
+        if pop_raw is not None:
+            values.append(
+                WeatherValue(
+                    feature_id=feature_id,
+                    provider=normalize_provider_name(KMA_PROVIDER_NAME),
+                    weather_domain=WeatherDomain.KMA_MID_FORECAST,
+                    forecast_style=ForecastStyle.MID,
+                    timeline_bucket=TimelineBucket.MID,
+                    metric_key="POP",
+                    source_metric_key=f"rnSt{day}{suffix}",
+                    metric_name=KMA_METRIC_NAMES.get("POP", "강수확률"),
+                    unit=KMA_METRIC_UNITS.get("POP", "%"),
+                    issued_at=issued_at,
+                    valid_at=valid_from,
+                    valid_from=valid_from,
+                    valid_until=valid_until,
+                    value_number=Decimal(pop_raw),
+                    normalization_version="kma-v1.0",
+                    payload=payload,
+                    source_record_key=source_record_key,
+                )
+            )
+    return values
+
+
+def _mid_temp_item_to_values(
+    item: KmaMidTemperatureItem,
+    *,
+    feature_id: str,
+    source_record_key: str | None,
+) -> list[WeatherValue]:
+    """중기기온예보 한 region → 일자별 ``TMN``/``TMX`` ``WeatherValue``."""
+    issued_at = _parse_mid_announce(item.tm_fc)
+    values: list[WeatherValue] = []
+
+    for day in _MID_TEMP_DAYS:
+        valid_from, valid_until = _mid_window(issued_at, day, 0, 24)
+        payload = {"reg_id": item.reg_id, "tm_fc": item.tm_fc, "day_offset": day}
+        for metric_key, attr in (("TMN", f"ta_min_{day}"), ("TMX", f"ta_max_{day}")):
+            raw: int | None = getattr(item, attr)
+            if raw is None:
+                continue
+            values.append(
+                WeatherValue(
+                    feature_id=feature_id,
+                    provider=normalize_provider_name(KMA_PROVIDER_NAME),
+                    weather_domain=WeatherDomain.KMA_MID_FORECAST,
+                    forecast_style=ForecastStyle.MID,
+                    timeline_bucket=TimelineBucket.MID,
+                    metric_key=metric_key,
+                    source_metric_key=attr,
+                    metric_name=KMA_METRIC_NAMES.get(metric_key),
+                    unit=KMA_METRIC_UNITS.get(metric_key, "deg_c"),
+                    issued_at=issued_at,
+                    valid_at=valid_from,
+                    valid_from=valid_from,
+                    valid_until=valid_until,
+                    value_number=Decimal(raw),
+                    normalization_version="kma-v1.0",
+                    payload=payload,
+                    source_record_key=source_record_key,
+                )
+            )
+    return values
+
+
+def mid_land_forecast_to_weather_values(
+    items: Iterable[KmaMidLandForecastItem],
+    *,
+    feature_id: str,
+    source_record_key: str | None = None,
+) -> list[WeatherValue]:
+    """KMA 중기육상예보 items → ``list[WeatherValue]`` (SKY 텍스트 + POP).
+
+    한 region row가 3~10일 예보를 담고, 본 함수가 day-period별로 fan-out한다.
+    3~7일은 AM/PM 2건씩, 8~10일은 1건. 각 day-period마다 날씨 텍스트(``SKY``,
+    ``value_text``) + 강수확률(``POP``, ``value_number``)을 만든다. AM/PM 구간은
+    ``valid_from``/``valid_until``로, identity 유일성은 ``valid_at``(구간 시작)로.
+
+    Parameters
+    ----------
+    items
+        ``python-kma-api`` 중기육상예보 typed model iterable
+        (``KmaMidLandForecastItem`` Protocol).
+    feature_id
+        weather kind ``Feature`` ID. 호출자가 예보구역→Feature 매핑 사전 결정.
+    source_record_key
+        provider raw 추적용 (``make_source_record_key`` 결과, 권장).
+
+    Returns
+    -------
+    list[WeatherValue]
+        빈 텍스트/None metric은 생략 — ``len`` 가변. ``forecast_style=mid`` /
+        ``timeline_bucket=mid`` / ``weather_domain=kma_mid_forecast``.
+
+    Raises
+    ------
+    ValueError
+        ``tm_fc`` 형식 위반 (12자리 아님).
+
+    Notes
+    -----
+    - 좌표는 예보구역 단위 — 본 함수는 좌표를 다루지 않는다 (값만).
+    - 중기 날씨 텍스트는 표준 ``SKY``에 ``value_text``로 담는다 (단기처럼 code가
+      아님) — 원천 필드는 ``source_metric_key='wf3Am'`` 등으로 보존.
+    - 기온(``TMN``/``TMX``)은 별도 endpoint(``getMidTa``) →
+      ``mid_temperature_to_weather_values``.
+    """
+    values: list[WeatherValue] = []
+    for item in items:
+        values.extend(
+            _mid_land_item_to_values(
+                item, feature_id=feature_id, source_record_key=source_record_key
+            )
+        )
+    return values
+
+
+def mid_temperature_to_weather_values(
+    items: Iterable[KmaMidTemperatureItem],
+    *,
+    feature_id: str,
+    source_record_key: str | None = None,
+) -> list[WeatherValue]:
+    """KMA 중기기온예보 items → ``list[WeatherValue]`` (일 ``TMN``/``TMX``).
+
+    한 region row가 3~10일 최저/최고 기온을 담고, 본 함수가 일자별로 fan-out.
+    각 일자에 ``TMN``(최저) + ``TMX``(최고) ``WeatherValue`` (종일 구간).
+
+    Parameters
+    ----------
+    items
+        ``python-kma-api`` 중기기온 typed model iterable
+        (``KmaMidTemperatureItem`` Protocol).
+    feature_id
+        weather kind ``Feature`` ID.
+    source_record_key
+        provider raw 추적용 (권장).
+
+    Returns
+    -------
+    list[WeatherValue]
+        ``forecast_style=mid`` / ``timeline_bucket=mid``. None 기온은 생략.
+
+    Raises
+    ------
+    ValueError
+        ``tm_fc`` 형식 위반.
+    """
+    values: list[WeatherValue] = []
+    for item in items:
+        values.extend(
+            _mid_temp_item_to_values(
+                item, feature_id=feature_id, source_record_key=source_record_key
+            )
+        )
+    return values
 
 

@@ -40,15 +40,15 @@ Python 패키지 `krtour-map-debug-ui` (ADR-020, `packages/krtour-map-debug-ui/`
 
 ## 다음 한 작업
 
-### Sprint 2 잔여 (3건 — `sprints/SPRINT-2.md §7`과 동일 순서)
+### Sprint 2 잔여 (2건 — `sprints/SPRINT-2.md §7`과 동일 순서)
 
 - [x] ~~visitkorea enrichment~~ — **PR#51 완료** (`festival_to_enrichment_links`
   + `FestivalMatcher` plug-in, 8 test).
-1. **KMA `mid_forecast_to_weather_values`** — 중기예보 텍스트 파싱 + AM/PM
-   split. `providers/kma.py`에 추가. Sprint 2 §2.2 마지막 dataset. ← **다음**
-2. **ETL live 나머지 8 dataset** loader 등록 — datagokr 1 + opinet 2 + krex 4
-   + kma_weather_alerts 1. `etl_live.py` LIVE_LOADER_REGISTRY 확장.
-3. **Coverage bar 상향 + Sprint 2 종료 마무리** — `pyproject.toml` `fail_under`
+- [x] ~~KMA mid_forecast~~ — **PR#52 완료** (`mid_land_forecast_to_weather_values`
+  SKY 텍스트+POP AM/PM split + `mid_temperature_to_weather_values` TMN/TMX, 11 test).
+1. **ETL live 나머지 8 dataset** loader 등록 — datagokr 1 + opinet 2 + krex 4
+   + kma_weather_alerts 1. `etl_live.py` LIVE_LOADER_REGISTRY 확장. ← **다음**
+2. **Coverage bar 상향 + Sprint 2 종료 마무리** — `pyproject.toml` `fail_under`
    50→65 (실측 96%) + journal 회고 + 본 resume → Sprint 3 + `SPRINT-3.md` 진입 PR.
 
 ### Sprint 3 진입 후 첫 작업 (예정)
@@ -171,7 +171,7 @@ Python 패키지 `krtour-map-debug-ui` (ADR-020, `packages/krtour-map-debug-ui/`
 ### 미완료 (Sprint 순서)
 
 - [x] visitkorea enrichment (Sprint 2 잔여 1/4 — PR#51)
-- [ ] KMA 중기예보 (`mid_forecast`, Sprint 2 잔여 2/4)
+- [x] KMA 중기예보 (`mid_forecast`, Sprint 2 잔여 2/4 — PR#52)
 - [ ] ETL live 나머지 8 dataset (Sprint 2 잔여 3/4)
 - [ ] Coverage 65% (Sprint 2 DoD)
 - [ ] KNPS 14 dataset + krforest trails (Sprint 3)
