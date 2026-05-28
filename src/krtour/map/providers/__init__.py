@@ -87,6 +87,15 @@ from krtour.map.providers.standard_data import (
     ReverseGeocodeResult,
     cultural_festivals_to_bundles,
 )
+from krtour.map.providers.visitkorea import (
+    DATASET_KEY_FESTIVAL_EVENTS,
+    VISITKOREA_PROVIDER_NAME,
+    FestivalEnrichment,
+    FestivalMatch,
+    FestivalMatcher,
+    VisitKoreaFestivalItem,
+    festival_to_enrichment_links,
+)
 
 __all__ = [
     # standard_data (PR#34, ADR-042 — datagokr 표준데이터)
@@ -98,6 +107,14 @@ __all__ = [
     "FESTIVAL_CATEGORY",
     "FESTIVAL_MARKER_ICON",
     "FESTIVAL_MARKER_COLOR",
+    # visitkorea (PR#51, ADR-042 — TourAPI enrichment 2차)
+    "VisitKoreaFestivalItem",
+    "FestivalMatch",
+    "FestivalMatcher",
+    "FestivalEnrichment",
+    "festival_to_enrichment_links",
+    "VISITKOREA_PROVIDER_NAME",
+    "DATASET_KEY_FESTIVAL_EVENTS",
     # kma (PR#38 short, PR#39 nowcast, PR#41 ultra_short, PR#46 alerts —
     # ADR-010)
     "KmaShortForecastItem",

@@ -136,15 +136,27 @@ async def collect_datagokr_cultural_festivals(
 standard_data.py`. fixture/test는 `tests/unit/test_providers_standard_data.py`
 (PR#34, 14 case).
 
-### 7.1.5 collect — 2차 enrichment (visitkorea TourAPI, Sprint 2 끝물 별도 PR)
+### 7.1.5 collect — 2차 enrichment (visitkorea TourAPI, PR#51 구현)
 
 ```python
 # visitkorea TourAPI는 이미지/상세설명/contentId 매핑만 갱신 — Feature/Source
 # Record 본체는 생성하지 않는다. festival_to_enrichment_links가 datagokr로
 # 적재된 feature_id와 visitkorea contentId를 source_links(role='enrichment')로
-# 잇는다. (Sprint 2 끝물 PR로 구현 예정)
-from krtour.map.providers.visitkorea import festival_to_enrichment_links  # 미구현
+# 잇는다. (PR#51 구현 완료)
+from krtour.map.providers.visitkorea import festival_to_enrichment_links
+
+# 매칭(datagokr festival ↔ visitkorea)은 이름/지역 fuzzy(ADR-016)이므로
+# FestivalMatcher plug-in으로 주입 — match() -> None이면 해당 item 생략.
+# links = festival_to_enrichment_links(
+#     visitkorea_items, matcher=scoring_matcher, fetched_at=datetime.now(KST),
+# )
+# 각 원소는 FestivalEnrichment(source_record + source_link[role=enrichment]).
+# FeatureFileSource DTO는 Sprint 2-3 — 지금은 이미지 URL이 raw_data에만 보존.
 ```
+
+시그니처/Protocol(`VisitKoreaFestivalItem` / `FestivalMatcher` / `FestivalMatch`
+/ `FestivalEnrichment`)은 `src/krtour/map/providers/visitkorea.py`. 테스트는
+`tests/unit/test_providers_visitkorea.py` (PR#51, 8 case).
 
 ### 7.2 load
 
