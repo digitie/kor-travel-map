@@ -329,14 +329,16 @@ branch로.
   교체 모니터링) — upstream `digitie/maplibre-vworld-js` **v0.1.0 릴리스됨**
   (npm 미게시, git URL+tag 핀).
 - **장기**: 운영 진입 후 v2.1 검토 (T-101 MV / T-102 pg_prewarm / T-103
-  streaming / ADR-044+ 신규 provider)
+  streaming / ADR-045+ 신규 provider)
 
 ## ADR 번호 가이드 (현재)
 
-- **accepted (text on main)**: ADR-001 ~ ADR-043 (전부). PR#16에서 027~034,
-  PR#33에서 035~043 일괄 accepted 전환. 029는 ADR-043으로 supersede.
-- **다음 후보 번호 = ADR-044**:
-  - **ADR-044+** — 신규 provider 추가 절차 표준 (체크리스트)
+- **accepted (text on main)**: ADR-001 ~ ADR-044 (전부). PR#16에서 027~034,
+  PR#33에서 035~043 일괄 accepted 전환. 029는 ADR-043으로 supersede. ADR-044
+  (로컬 우선 조회 + 정합성 책임) PR#54.
+- **001~044 accepted** (ADR-044 = 로컬 우선 조회 + 데이터 정합성 책임은 각
+  provider 라이브러리). **다음 후보 번호 = ADR-045**:
+  - **ADR-045+** — 신규 provider 추가 절차 표준 (체크리스트)
   - 후속 `@krtour/map-marker-react` npm 게시 자동화 ADR (현재 ADR-043 보류)
   - (필요 시) ADR — `core.feature_consistency_reports` Phase 2 알림 sink
   - (필요 시) ADR — Sprint 3 SHP/GeoJSON parsing 위치 결정 (`krtour.map.

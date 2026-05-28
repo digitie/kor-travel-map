@@ -2,6 +2,36 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-28 11:00 (claude)
+
+**작업**: PR#54 — ADR-044: 관련 라이브러리 로컬(`F:\dev\`) 우선 조회 + 데이터
+정합성 책임은 각 라이브러리. 사용자 지시 문서화. 순수 docs.
+
+**계기**: PR#53(ETL live) 조사 중 `python-datagokr-api`를 **GitHub 404로만 확인**
+하여 "repo 부재 → wiring 불가"로 잘못 보류. 그러나 `F:\dev\python-datagokr-api`
+는 로컬에 존재. 모든 형제 `python-*-api` + `maplibre-vworld-js`가 `F:\dev\`
+아래 로컬 체크아웃됨. → 로컬 우선 조회 룰 + 데이터 정합성 책임 분계를 ADR로 박음.
+
+**ADR-044 결정**:
+1. **로컬 우선 조회** — provider/형제 라이브러리의 client·model·codes·스펙은
+   `F:\dev\` (WSL `~/dev/`) 로컬을 `Glob`/`Read`로 먼저 조회. GitHub fetch는
+   로컬에 없을 때만 fallback. GitHub 404/private ≠ "미존재".
+2. **데이터 정합성 책임 = 각 provider 라이브러리** — 코드 매핑/필드 의미/단위/
+   분류값의 1차 책임은 provider 라이브러리. 본 lib는 신뢰·미러만, 재정의 X.
+   불일치 시 그 라이브러리(+공식 스펙) 기준 정렬 + 필요 시 upstream PR.
+
+**변경 (docs 5)**:
+- `docs/decisions.md` — ADR-044 본문 추가 (001~044 accepted).
+- `AGENTS.md` §"Provider API 사용 원칙" — 로컬 우선 + 정합성 책임 2 bullet.
+- `CLAUDE.md` §4 — `F:\dev\` 형제 repo 목록 + 우선 조회/정합성 룰.
+- `docs/provider-contract.md` §1.4 — 로컬 우선 + 정합성 책임 (PR#53 사례).
+- `docs/dev-environment.md` §7 — `F:\dev\` provider 로컬 레이아웃 트리 + 룰.
+- `docs/tasks.md` / `docs/resume.md` — ADR 가이드 001~044 / 다음 ADR-045.
+
+**영향**: Sprint 2 item 3(ETL live)에서 **datagokr live는 실제 feasible**
+(로컬 repo 존재) — 기존 "infeasible" 보류 재검토 대상. kma_weather_alerts도
+`python-kma-api/apihub_endpoints.py`(wrn_now_data 구조화) 재검토 가능.
+
 ## 2026-05-28 10:30 (claude)
 
 **작업**: opinet product code 정정 — `OPINET_PRODUCT_KEY_MAP`에서 `K015`/`C004`가
