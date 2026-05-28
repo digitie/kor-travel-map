@@ -2,6 +2,35 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-28 12:00 (claude)
+
+**작업**: PR#56 — ETL live opinet 2 dataset loader (station/prices). 8종 중
+2차. ADR-044 로컬 우선 — `python-opinet-api` client `_build_station_detail`/
+`_build_oil_price` + `coords.py` KATEC proj 그대로 참조.
+
+**변경 — `etl_live.py`** (opinet 섹션):
+- `_opinet_call`(`opinet.co.kr/api`, `certkey`+`out=json`, `RESULT.OIL[]`).
+- `opinet_fuel_station_details_live`(detailById.do `?id=<UNI_ID>` 필수 → station
+  place) / `opinet_gas_station_prices_live`(같은 호출 중첩 `OIL_PRICE[]` →
+  PriceValue).
+- KATEC→WGS84: 로컬 `coords.py` proj4를 그대로 박아 pyproj 변환, 범위 밖/실패
+  시 좌표 None 강등.
+- adapter 2종 순수 함수. raw 필드: UNI_ID/OS_NM/POLL_DIV_CO/NEW_ADR|VAN_ADR/
+  GIS_X|Y_COOR/TEL/LPG_YN + OIL_PRICE[PRODCD/PRICE/TRADE_DT/TRADE_TM].
+- `LIVE_LOADER_REGISTRY` opinet 2 등록 (KMA 3 + krex 4 + opinet 2 = 9 live).
+
+**신규 테스트**: `test_etl_live_opinet_adapters.py` (10 case — KATEC round-trip
+서울 forward→back ~127/37.5, 좌표 없음 None, station/price 매핑, 변환 통과).
+`test_etl_routers.py` +2 (opinet live_supported / 503).
+
+**설계**: detailById.do는 전체 목록 endpoint 없어 `?id=<UNI_ID>` 필수. 좌표는
+KATEC라 reproject 필수(미변환 시 Coordinate 범위 validator reject).
+
+**Verification**: debug-ui 47 / 메인 469 / ruff / mypy strict 49 / import-linter
+4 / openapi drift 0.
+
+**다음**: datagokr 1(PR#57) → kma_weather_alerts 1(PR#58) → 11/11 live → item 4.
+
 ## 2026-05-28 11:30 (claude)
 
 **작업**: PR#55 — Sprint 2 item 3(ETL live) krex 4 dataset loader. 사용자

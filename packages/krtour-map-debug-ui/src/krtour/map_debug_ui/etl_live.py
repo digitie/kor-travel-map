@@ -38,6 +38,7 @@ from krtour.map.providers.krex import (
     rest_areas_to_bundles,
     traffic_notices_to_bundles,
 )
+from krtour.map.providers.opinet import prices_to_values, stations_to_bundles
 
 from krtour.map_debug_ui.settings import DebugUiSettings
 
@@ -641,6 +642,210 @@ async def krex_traffic_notices_live(
     return [b.model_dump(mode="json") for b in bundles]
 
 
+# =========================================================================
+# 한국석유공사 (opinet) — detailById.do 주유소 상세 + 중첩 가격. 좌표는 KATEC
+# (오피넷 전용 TM, bessel) → WGS84 reproject. raw 스펙은 로컬 `python-opinet-
+# api` client `_build_station_detail`/`_build_oil_price` 기준 (ADR-044).
+#
+# detailById.do는 station id(UNI_ID) 1건만 조회 — "전체 목록" endpoint 없음.
+# 따라서 본 loader는 `?id=<UNI_ID>` query 파라미터 필수.
+# =========================================================================
+
+_OPINET_BASE_URL: Final[str] = "https://www.opinet.co.kr/api"
+"""한국석유공사 OpiNet OpenAPI base URL."""
+
+# 오피넷 KATEC proj4 (로컬 python-opinet-api `coords.py`에서 그대로 가져옴).
+_OPINET_KATEC_PROJ: Final[str] = (
+    "+proj=tmerc +lat_0=38 +lon_0=128 +k=0.9999 +x_0=400000 +y_0=600000 "
+    "+ellps=bessel +units=m "
+    "+towgs84=-115.80,474.99,674.11,1.16,-2.31,-1.63,6.43 +no_defs"
+)
+
+# 가격 변환은 주유소 feature_id 필요 — debug placeholder.
+_DEFAULT_STATION_FEATURE_ID: Final[str] = "f_global_p_opinet_demo"
+
+
+@dataclass(frozen=True)
+class _OpinetStationAdapter:
+    """`OpinetStationItem` Protocol 만족."""
+
+    uni_id: str
+    station_name: str
+    brand_code: str | None
+    address: str | None
+    longitude: Decimal | None
+    latitude: Decimal | None
+    tel: str | None
+    lpg_yn: str | None
+
+
+@dataclass(frozen=True)
+class _OpinetPriceAdapter:
+    """`OpinetPriceItem` Protocol 만족."""
+
+    uni_id: str
+    prodcd: str
+    price: Decimal
+    trade_dt: datetime
+
+
+def _opinet_katec_to_wgs84(x: float, y: float) -> tuple[Decimal, Decimal] | None:
+    """KATEC (x, y) → WGS84 (lon, lat) Decimal. 변환 실패/범위 밖이면 None."""
+    from pyproj import Transformer  # krtour.map 의존으로 설치됨 (infra/crs.py).
+
+    try:
+        transformer = Transformer.from_crs(
+            _OPINET_KATEC_PROJ, "EPSG:4326", always_xy=True
+        )
+        lon, lat = transformer.transform(x, y)
+    except Exception:  # noqa: BLE001 — 좌표 변환 실패는 좌표 없음으로 강등.
+        return None
+    if not (-180.0 <= lon <= 180.0 and -90.0 <= lat <= 90.0):
+        return None
+    return (Decimal(str(round(lon, 7))), Decimal(str(round(lat, 7))))
+
+
+def _opinet_parse_trade_dt(date_str: str | None, time_str: str | None) -> datetime:
+    """OpiNet TRADE_DT(YYYYMMDD) + TRADE_TM(HHMMSS) → KST aware. 결측 시 now."""
+    if date_str and len(date_str) == 8 and date_str.isdigit():
+        hh, mm, ss = 0, 0, 0
+        if time_str and time_str.isdigit() and len(time_str) >= 4:
+            hh, mm = int(time_str[:2]), int(time_str[2:4])
+            ss = int(time_str[4:6]) if len(time_str) >= 6 else 0
+        return datetime(
+            int(date_str[:4]), int(date_str[4:6]), int(date_str[6:8]),
+            hh, mm, ss, tzinfo=KST,
+        )
+    return datetime.now(tz=KST)
+
+
+async def _opinet_call(
+    endpoint: str, *, service_key: str, params: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """OpiNet API GET → `RESULT.OIL[]` list 반환."""
+    query: dict[str, Any] = {"certkey": service_key, "out": "json", **params}
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        response = await client.get(f"{_OPINET_BASE_URL}/{endpoint}", params=query)
+    if response.status_code != 200:
+        raise LiveLoaderError(
+            f"opinet {endpoint} HTTP {response.status_code}: {response.text[:200]}"
+        )
+    payload = response.json()
+    result = payload.get("RESULT", {})
+    oil = result.get("OIL", []) if isinstance(result, dict) else []
+    if isinstance(oil, dict):
+        oil = [oil]
+    if not isinstance(oil, list):
+        return []
+    return [row for row in oil if isinstance(row, dict)]
+
+
+def _adapt_opinet_station(raw: dict[str, Any]) -> _OpinetStationAdapter:
+    lon_lat: tuple[Decimal, Decimal] | None = None
+    gis_x = raw.get("GIS_X_COOR")
+    gis_y = raw.get("GIS_Y_COOR")
+    if gis_x is not None and gis_y is not None and str(gis_x).strip() and str(gis_y).strip():
+        try:
+            lon_lat = _opinet_katec_to_wgs84(float(gis_x), float(gis_y))
+        except (ValueError, TypeError):
+            lon_lat = None
+    lon = lon_lat[0] if lon_lat else None
+    lat = lon_lat[1] if lon_lat else None
+    return _OpinetStationAdapter(
+        uni_id=str(raw.get("UNI_ID", "")),
+        station_name=_first_str(raw, "OS_NM") or "",
+        brand_code=_first_str(raw, "POLL_DIV_CO", "POLL_DIV_CD"),
+        address=_first_str(raw, "NEW_ADR", "VAN_ADR"),
+        longitude=lon,
+        latitude=lat,
+        tel=_first_str(raw, "TEL"),
+        lpg_yn=_first_str(raw, "LPG_YN"),
+    )
+
+
+def _adapt_opinet_price(
+    raw: dict[str, Any], *, uni_id: str
+) -> _OpinetPriceAdapter | None:
+    prodcd = _first_str(raw, "PRODCD")
+    price = raw.get("PRICE")
+    if prodcd is None or price is None or str(price).strip() in {"", "0"}:
+        return None
+    try:
+        price_dec = Decimal(str(price))
+    except (ValueError, ArithmeticError):
+        return None
+    return _OpinetPriceAdapter(
+        uni_id=uni_id,
+        prodcd=prodcd,
+        price=price_dec,
+        trade_dt=_opinet_parse_trade_dt(
+            _first_str(raw, "TRADE_DT"), _first_str(raw, "TRADE_TM")
+        ),
+    )
+
+
+def _opinet_station_id(params: dict[str, str]) -> str:
+    station_id = params.get("id") or params.get("uni_id")
+    if not station_id:
+        raise LiveLoaderError(
+            "OpiNet detailById는 주유소 id 필요 — `?source=live&id=<UNI_ID>` 지정. "
+            "(전체 목록 endpoint 없음 — 가까운 주유소 UNI_ID를 직접 지정.)"
+        )
+    return station_id
+
+
+async def opinet_fuel_station_details_live(
+    settings: DebugUiSettings, params: dict[str, str]
+) -> list[dict[str, Any]]:
+    """OpiNet 주유소 상세 raw API → list[FeatureBundle dict] (place)."""
+    key = settings.opinet_service_key
+    if key is None:
+        raise LiveLoaderError("OPINET_SERVICE_KEY 미설정 (.env 확인).")
+    rows = await _opinet_call(
+        "detailById.do",
+        service_key=key.get_secret_value(),
+        params={"id": _opinet_station_id(params)},
+    )
+    adapted = [_adapt_opinet_station(r) for r in rows]
+    bundles = stations_to_bundles(
+        adapted,  # type: ignore[arg-type]
+        fetched_at=datetime.now(tz=KST),
+    )
+    return [b.model_dump(mode="json") for b in bundles]
+
+
+async def opinet_gas_station_prices_live(
+    settings: DebugUiSettings, params: dict[str, str]
+) -> list[dict[str, Any]]:
+    """OpiNet 주유소 가격 raw API → list[PriceValue dict] (detailById 중첩 OIL_PRICE)."""
+    key = settings.opinet_service_key
+    if key is None:
+        raise LiveLoaderError("OPINET_SERVICE_KEY 미설정 (.env 확인).")
+    station_id = _opinet_station_id(params)
+    rows = await _opinet_call(
+        "detailById.do",
+        service_key=key.get_secret_value(),
+        params={"id": station_id},
+    )
+    adapted: list[_OpinetPriceAdapter] = []
+    for station in rows:
+        uni_id = str(station.get("UNI_ID", station_id))
+        oil_prices = station.get("OIL_PRICE", [])
+        if isinstance(oil_prices, dict):
+            oil_prices = [oil_prices]
+        for op in oil_prices if isinstance(oil_prices, list) else []:
+            if not isinstance(op, dict):
+                continue
+            price = _adapt_opinet_price(op, uni_id=uni_id)
+            if price is not None:
+                adapted.append(price)
+    values = prices_to_values(
+        adapted,  # type: ignore[arg-type]
+        feature_id=params.get("feature_id", _DEFAULT_STATION_FEATURE_ID),
+    )
+    return [v.model_dump(mode="json") for v in values]
+
+
 # ── Registry ──────────────────────────────────────────────────────────
 
 
@@ -652,14 +857,15 @@ LIVE_LOADER_REGISTRY: Final[dict[tuple[str, str], LiveLoader]] = {
     ("python-krex-api", "krex_rest_area_prices"): krex_rest_area_prices_live,
     ("python-krex-api", "krex_rest_area_weather"): krex_rest_area_weather_live,
     ("python-krex-api", "krex_traffic_notices"): krex_traffic_notices_live,
-    # ── 후속 PR ──
-    # `python-opinet-api` station/prices — PR#54 (detailById.do, KATEC 좌표 +
-    #   product-code 검증 후).
-    # `kma_weather_alerts` — getWthrWrnList는 구조화된 region/level 미제공이라
-    #   현 transform(weather_alerts_to_notice_bundles, .regions 요구)에 못 맞춤.
-    #   apihub wrn_now_data(별도 gateway/key) 필요 → 보류.
-    # `data.go.kr-standard` datagokr_cultural_festivals — provider repo 부재 →
-    #   raw REST 스펙 확인 불가 → 보류.
+    ("python-opinet-api", "opinet_fuel_station_details"): (
+        opinet_fuel_station_details_live
+    ),
+    ("python-opinet-api", "opinet_gas_station_prices"): opinet_gas_station_prices_live,
+    # ── 후속 PR (ADR-044 로컬 repo 기준) ──
+    # `data.go.kr-standard` datagokr_cultural_festivals — PR#57 (로컬
+    #   python-datagokr-api client 기준).
+    # `kma_weather_alerts` — PR#58 (로컬 python-kma-api apihub_endpoints.py
+    #   wrn_now_data 구조화 region/level).
 }
 
 

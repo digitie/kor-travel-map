@@ -285,7 +285,8 @@ Sprint 2 진행 중 다음 ADR들의 1차 implementation 점진 도입:
       — **provider repo 로컬(`F:\dev\`) 기준 정확히 wiring** (ADR-044). 8종 전부:
       - [x] krex 4 (rest_areas/prices/weather/traffic_notices) — PR#55
         (EX OpenAPI, 순수 adapter + 14 단위 test).
-      - [ ] opinet 2 (station/prices) — PR#56 (detailById.do, KATEC 좌표).
+      - [x] opinet 2 (station/prices) — PR#56 (detailById.do `?id=`, KATEC→WGS84
+        reproject via 로컬 coords.py proj, 순수 adapter + 10 단위 test).
       - [ ] datagokr 1 (cultural_festivals) — PR#57 (`python-datagokr-api` 로컬).
       - [ ] kma_weather_alerts 1 — PR#58 (`python-kma-api/apihub_endpoints.py`
         wrn_now_data 구조화 region/level).

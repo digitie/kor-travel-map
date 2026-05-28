@@ -217,6 +217,28 @@ def test_preview_live_krex_503_when_key_missing(client: TestClient) -> None:
 
 
 @pytest.mark.unit
+def test_providers_opinet_live_supported(client: TestClient) -> None:
+    """opinet 2 dataset은 PR#56부터 live_supported=True."""
+    response = client.get("/debug/etl/providers")
+    body = response.json()
+    op = next(p for p in body["providers"] if p["provider"] == "python-opinet-api")
+    live_map = {d["dataset"]: d["live_supported"] for d in op["datasets"]}
+    assert live_map["opinet_fuel_station_details"] is True
+    assert live_map["opinet_gas_station_prices"] is True
+
+
+@pytest.mark.unit
+def test_preview_live_opinet_503_when_key_missing(client: TestClient) -> None:
+    """opinet은 live 등록됐지만 .env 키 없으면 503."""
+    response = client.post(
+        "/debug/etl/python-opinet-api/opinet_fuel_station_details/preview?source=live"
+    )
+    assert response.status_code == 503
+    body = response.json()
+    assert "OPINET_SERVICE_KEY 미설정" in body["detail"]
+
+
+@pytest.mark.unit
 def test_preview_invalid_source_query_422(client: TestClient) -> None:
     """source는 Literal['fixture', 'live'] — 그 외는 FastAPI validator가 422."""
     response = client.post(
