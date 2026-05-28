@@ -473,13 +473,19 @@ def _adapt_krex_fuel_row(
         value = raw.get(raw_key)
         if value is None or str(value).strip() in {"", "0"}:
             continue
+        # 실측: curStateStation 일부 행이 비숫자 가격('-' 등) 반환 → Decimal
+        # 변환 실패(InvalidOperation⊂ArithmeticError)는 skip (robustness, ADR-044).
+        try:
+            price = Decimal(str(value).strip())
+        except (ValueError, ArithmeticError):
+            continue
         out.append(
             _KrexPriceAdapter(
                 uni_id=uni_id,
                 category="fuel",
                 product_key=product_key,
                 product_name=None,
-                price=Decimal(str(value)),
+                price=price,
                 observed_at=observed_at,
             )
         )
@@ -489,15 +495,19 @@ def _adapt_krex_fuel_row(
 def _adapt_krex_food_row(
     raw: dict[str, Any], *, observed_at: datetime
 ) -> _KrexPriceAdapter | None:
-    price = raw.get("price") or raw.get("foodPrice")
-    if price is None or str(price).strip() in {"", "0"}:
+    raw_price = raw.get("price") or raw.get("foodPrice")
+    if raw_price is None or str(raw_price).strip() in {"", "0"}:
+        return None
+    try:
+        price = Decimal(str(raw_price).strip())
+    except (ValueError, ArithmeticError):
         return None
     return _KrexPriceAdapter(
         uni_id=_first_str(raw, "serviceAreaCode", "unitCode", "uni_id") or "",
         category="food",
         product_key=_first_str(raw, "foodCode", "menuCode") or "menu",
         product_name=_first_str(raw, "foodName", "menuName"),
-        price=Decimal(str(price)),
+        price=price,
         observed_at=observed_at,
     )
 
@@ -580,15 +590,23 @@ async def krex_rest_areas_live(
 async def krex_rest_area_prices_live(
     settings: DebugUiSettings, params: dict[str, str]
 ) -> list[dict[str, Any]]:
-    """krex 휴게소 가격(주유 + 식음료) raw API → list[PriceValue dict]."""
+    """krex 휴게소 가격(주유 + 식음료) raw API → list[PriceValue dict].
+
+    주유(``curStateStation``)는 정상. 식음료(``restMenuList``)는 EX OpenAPI에서
+    404(deprecated, 2026-05 실측) — best-effort로 호출하고 실패 시 주유 가격만
+    반환(전체 실패 방지). EX 식음료 가격 endpoint 정정은 krex-api upstream 과제.
+    """
     key = _krex_key(settings)
     observed_at = datetime.now(tz=KST)
     fuel_raw = await _krex_call(
         "openapi/business/curStateStation", service_key=key, params={}
     )
-    food_raw = await _krex_call(
-        "openapi/restinfo/restMenuList", service_key=key, params={}
-    )
+    try:
+        food_raw = await _krex_call(
+            "openapi/restinfo/restMenuList", service_key=key, params={}
+        )
+    except LiveLoaderError:
+        food_raw = []  # 식음료 endpoint 404(deprecated) — 주유 가격만으로 진행.
     adapted: list[_KrexPriceAdapter] = []
     for row in fuel_raw:
         adapted.extend(_adapt_krex_fuel_row(row, observed_at=observed_at))

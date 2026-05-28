@@ -2,6 +2,39 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-28 14:30 (claude) — PR#62 krex live robustness (실 EX 키 검증)
+
+> 주: PR#61은 타 에이전트의 "PR 17~60 리뷰 취합" 문서 PR로 선점됨 → 본 작업은 PR#62.
+
+**작업**: 사용자 제공 EX 키(`2668138864`/`1371545112`)로 krex live 검증 →
+실데이터에서 드러난 버그 수정 + EX endpoint 이슈 규명.
+
+**EX 키 진단**: 두 키 모두 유효(serviceAreaRoute 221 / curStateStation 226 /
+restWeatherList 200). 앞선 "인증키 무효"는 사용자 .env의 `KEX_GO_API_KEY`가 EX키가
+아니었던 것(EX는 `KEX_EX_API_KEY` 필요).
+
+**수정 (검증됨)**:
+- `rest_areas_to_bundles`(main lib): EX serviceAreaRoute가 모든 표시필드 null인
+  placeholder 행 반환 → name="" → Feature ValidationError. **빈 name/uni_id skip**
+  추가 → live 98 place Feature 정상.
+- `_adapt_krex_fuel_row`/`_adapt_krex_food_row`: 비숫자 가격 `Decimal` 변환 실패
+  guard(skip) → InvalidOperation crash 방지.
+- prices 로더: 식음료(`restMenuList`) 404 best-effort → 주유 가격만으로 진행.
+
+**EX endpoint 이슈 (krex-api upstream 과제 — introduce02 JS 렌더라 자동 추출 불가)**:
+- `restMenuList`(식음료) HTTP 404 deprecated. `restBrandList`는 200(브랜드 목록,
+  가격 아님).
+- `incident`(돌발) HTTP 404 — 유효 키로도 404, 경로 deprecated/변경.
+- `curStateStation`은 주유가격이 아닌 휴게소 목록 반환 → prices fuel 0건(필드 불일치).
+  → krex 주유/식음료/돌발 정확한 EX endpoint는 introduce02(브라우저) 확인 후
+  krex-api + 본 loader 정정 필요. (rest_areas/weather endpoint는 정상.)
+
+**테스트**: krex provider +2(빈 name/uni_id skip) = 20, krex adapter 14, ruff,
+mypy strict 통과.
+
+**다음**: #116 DB 적재 통합 테스트 → #117 Playwright e2e → #118 종합 리포트(키/
+endpoint 이슈 + 사람 조치 항목 정리).
+
 ## 2026-05-28 14:00 (claude) — PR#60 weather_alerts data.go.kr fallback + 키 drift 정정
 
 **작업**: 통합 검증 1단계 (task #114). apihub 키 진단 결과 반영.

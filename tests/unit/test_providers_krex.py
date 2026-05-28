@@ -81,6 +81,32 @@ def test_rest_areas_bundle_count_and_order() -> None:
 
 
 @pytest.mark.unit
+def test_rest_areas_skips_blank_name_record() -> None:
+    """EX serviceAreaRoute placeholder(모든 표시필드 null) 행은 skip (PR#61).
+
+    실측: serviceAreaRoute가 ``serviceAreaName=null``인 행을 반환 → name="" →
+    이전엔 Feature(name 1자 이상) ValidationError. 이제 방어적으로 거른다.
+    """
+    blank = _RestArea(
+        uni_id="A00195", name="", direction=None, highway_name=None,
+        address=None, longitude=None, latitude=None, tel=None,
+    )
+    bundles = rest_areas_to_bundles([blank, _RA_SEOSAN], fetched_at=_NOW)
+    assert len(bundles) == 1
+    assert bundles[0].source_record.source_entity_id == "RA-001"
+
+
+@pytest.mark.unit
+def test_rest_areas_skips_blank_uni_id_record() -> None:
+    """uni_id 빈 행도 skip (source key 구성 불가)."""
+    blank_id = _RestArea(
+        uni_id="  ", name="이름있음휴게소", direction=None, highway_name=None,
+        address=None, longitude=None, latitude=None, tel=None,
+    )
+    assert rest_areas_to_bundles([blank_id], fetched_at=_NOW) == []
+
+
+@pytest.mark.unit
 def test_rest_areas_feature_metadata() -> None:
     [bundle] = rest_areas_to_bundles([_RA_SEOSAN], fetched_at=_NOW)
     f = bundle.feature
