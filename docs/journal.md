@@ -2,6 +2,23 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-28 16:00 (claude) — DB 적재 통합 테스트 (통합 검증 #116)
+
+**작업**: FeatureBundle → ORM → testcontainer PostGIS → 재조회 round-trip 검증.
+
+- `tests/integration/conftest.py`: `migrated_engine`(alembic upgrade head +
+  search_path x_extension) + `migrated_session`(per-test, flush 후 재조회, rollback)
+  fixture 추가.
+- `tests/integration/test_feature_bundle_persist.py`: datagokr 축제(좌표 포함)
+  FeatureBundle을 FeatureRow/SourceRecordRow/SourceLinkRow로 적재 → 재조회. 검증:
+  ① JSONB(detail/address) round-trip ② STORED generated `coord_5179`
+  (ST_SRID=5179, ST_X/ST_Y가 입력 lon/lat과 1e-6 이내, ADR-012) ③ source_link FK.
+- 실 적재 경로 `feature_repo.py`는 Sprint 3 — 본 테스트가 DTO→DB 계약 선행 검증.
+
+**검증**: 통합 13/13 통과(회귀 없음), ruff. report §5 완료로 갱신.
+
+**다음**: #117 Debug UI(WSL) + Windows Playwright e2e.
+
 ## 2026-05-28 15:30 (claude) — KMA 소스 정책: data.go.kr primary + apihub fallback
 
 **작업**: 사용자 정책 정정 — "KMA는 data.go.kr 소스가 있으면 data.go.kr이 우선,

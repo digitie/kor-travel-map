@@ -133,3 +133,62 @@ async def pg_session(pg_engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
     async with AsyncSession(pg_engine, expire_on_commit=False) as session, session.begin():
         yield session
         await session.rollback()
+
+
+@pytest.fixture(scope="session")
+async def migrated_engine(pg_container: Any) -> AsyncIterator[AsyncEngine]:
+    """`alembic upgrade head` 적용된 async engine (DB 적재 round-trip 테스트용).
+
+    `pg_engine`(직접 schema/extension 생성)과 달리 실 DDL(Alembic 0001/0002)로
+    테이블까지 만든 엔진. search_path에 ``x_extension`` 포함 → unqualified ST_*
+    (GeoAlchemy2 INSERT의 ``ST_GeomFromEWKT`` 등) 호출 가능 (ADR-008/012).
+    """
+    import asyncio
+    from pathlib import Path
+
+    from alembic.config import Config
+    from sqlalchemy import event
+
+    from alembic import command
+    from krtour.map.infra.db import make_async_engine, normalize_async_dsn
+
+    raw_dsn = pg_container.get_connection_url()  # type: ignore[attr-defined]
+    async_dsn = normalize_async_dsn(raw_dsn)
+
+    root = Path(__file__).resolve().parents[2]  # noqa: ASYNC240  # sync path-arith
+    cfg = Config(str(root / "alembic.ini"))
+    cfg.set_main_option("script_location", str(root / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", async_dsn)
+    await asyncio.to_thread(command.upgrade, cfg, "head")
+
+    engine = make_async_engine(async_dsn)
+
+    @event.listens_for(engine.sync_engine, "connect")
+    def _set_search_path(dbapi_conn: Any, _conn_record: Any) -> None:
+        cursor = dbapi_conn.cursor()
+        try:
+            cursor.execute("SET search_path = public, x_extension")
+        finally:
+            cursor.close()
+
+    try:
+        yield engine
+    finally:
+        await engine.dispose()
+
+
+@pytest.fixture
+async def migrated_session(migrated_engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
+    """migrated_engine per-test ``AsyncSession`` + 자동 rollback (테스트 간 격리).
+
+    INSERT 후 ``flush``하면 STORED generated column(coord_5179)이 DB에서 계산되어
+    같은 transaction 내에서 재조회 가능. teardown에서 rollback.
+    """
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    async with (
+        AsyncSession(migrated_engine, expire_on_commit=False) as session,
+        session.begin(),
+    ):
+        yield session
+        await session.rollback()
