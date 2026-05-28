@@ -56,9 +56,9 @@
     `ultra_short_nowcast_to_weather_values` merged 2026-05-28**
   - `kma_ultra_short_forecast` (초단기예보, 30분 단위 6시간) — **PR#41
     `ultra_short_forecast_to_weather_values` merged 2026-05-28**
-  - `kma_mid_forecast` (중기예보, 일 단위) — 후속 PR
-  - `kma_weather_alerts` (특보, notice kind, `notice_type='weather_alert'`
-    등 기존 NOTICE_TYPES 사용) — 후속 PR
+  - `kma_mid_forecast` (중기예보, 일 단위) — 후속 PR (텍스트 + AM/PM split)
+  - `kma_weather_alerts` (특보, notice kind, region 단위 fan-out) — **PR#46
+    `weather_alerts_to_notice_bundles` merged 2026-05-28**
 - **Feature.kind**: `weather` (단/초단/중) + `notice` (특보)
 - **보조 (날씨 그룹에 같이, 후속 PR)**:
   - `python-airkorea-api` — `airkorea_air_quality` (PM10/PM2.5/CAI, kind=weather)

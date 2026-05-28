@@ -309,7 +309,7 @@ def test_traffic_notice_bundle_metadata() -> None:
     [bundle] = traffic_notices_to_bundles([_N_ROADWORK], fetched_at=_NOW)
     f = bundle.feature
     assert f.kind == FeatureKind.NOTICE
-    assert f.category == TRAFFIC_NOTICE_CATEGORY  # "06010000"
+    assert f.category == TRAFFIC_NOTICE_CATEGORY  # "99000000" placeholder
     assert f.name == "서해안고속도로 105km 지점 도로공사"
     detail = f.detail
     assert detail is not None

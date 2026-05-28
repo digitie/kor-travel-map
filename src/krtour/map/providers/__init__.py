@@ -25,15 +25,23 @@ ADR 참조
 from __future__ import annotations
 
 from krtour.map.providers.kma import (
+    KMA_ALERT_LEVEL_SEVERITY,
     KMA_METRIC_NAMES,
     KMA_METRIC_UNITS,
     KMA_PROVIDER_NAME,
+    KMA_WEATHER_ALERT_CATEGORY,
+    KMA_WEATHER_ALERT_DATASET_KEY,
+    KMA_WEATHER_ALERT_MARKER_COLOR,
+    KMA_WEATHER_ALERT_MARKER_ICON,
     KmaShortForecastItem,
     KmaUltraShortForecastItem,
     KmaUltraShortNowcastItem,
+    KmaWeatherAlertItem,
+    KmaWeatherAlertRegion,
     short_forecast_to_weather_values,
     ultra_short_forecast_to_weather_values,
     ultra_short_nowcast_to_weather_values,
+    weather_alerts_to_notice_bundles,
 )
 from krtour.map.providers.krex import (
     KREX_PROVIDER_NAME,
@@ -90,17 +98,25 @@ __all__ = [
     "FESTIVAL_CATEGORY",
     "FESTIVAL_MARKER_ICON",
     "FESTIVAL_MARKER_COLOR",
-    # kma (PR#38 short, PR#39 ultra_short_nowcast, PR#41 ultra_short_forecast,
+    # kma (PR#38 short, PR#39 nowcast, PR#41 ultra_short, PR#46 alerts —
     # ADR-010)
     "KmaShortForecastItem",
     "KmaUltraShortNowcastItem",
     "KmaUltraShortForecastItem",
+    "KmaWeatherAlertItem",
+    "KmaWeatherAlertRegion",
     "short_forecast_to_weather_values",
     "ultra_short_nowcast_to_weather_values",
     "ultra_short_forecast_to_weather_values",
+    "weather_alerts_to_notice_bundles",
     "KMA_PROVIDER_NAME",
     "KMA_METRIC_UNITS",
     "KMA_METRIC_NAMES",
+    "KMA_WEATHER_ALERT_DATASET_KEY",
+    "KMA_WEATHER_ALERT_CATEGORY",
+    "KMA_WEATHER_ALERT_MARKER_ICON",
+    "KMA_WEATHER_ALERT_MARKER_COLOR",
+    "KMA_ALERT_LEVEL_SEVERITY",
     # opinet (PR#42 prices, PR#43 stations)
     "OpinetPriceItem",
     "OpinetStationItem",

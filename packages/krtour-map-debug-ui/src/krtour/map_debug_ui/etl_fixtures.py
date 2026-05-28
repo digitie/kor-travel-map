@@ -32,6 +32,13 @@ from krtour.map.providers.kma import (
     short_forecast_to_weather_values,
     ultra_short_forecast_to_weather_values,
     ultra_short_nowcast_to_weather_values,
+    weather_alerts_to_notice_bundles,
+)
+from krtour.map.providers.krex import (
+    rest_area_prices_to_values,
+    rest_area_weather_to_values,
+    rest_areas_to_bundles,
+    traffic_notices_to_bundles,
 )
 from krtour.map.providers.opinet import (
     prices_to_values,
@@ -339,6 +346,241 @@ def _convert_opinet_prices(items: Sequence[Any]) -> list[Any]:
     return [v.model_dump(mode="json") for v in values]
 
 
+# ── KMA weather_alerts fixture (PR#46) ─────────────────────────────────
+
+
+@dataclass(frozen=True)
+class _AlertRegion:
+    """`KmaWeatherAlertRegion` Protocol 준수."""
+
+    region_code: str
+    region_name: str
+
+
+@dataclass(frozen=True)
+class _Alert:
+    """`KmaWeatherAlertItem` Protocol 준수."""
+
+    alert_id: str
+    alert_type: str
+    level: str | None
+    title: str
+    description: str | None
+    issued_at: datetime
+    effective_from: datetime | None
+    effective_until: datetime | None
+    source_agency: str | None
+    regions: list[_AlertRegion]
+
+
+def _kma_weather_alerts_fixture() -> Sequence[_Alert]:
+    issued = datetime(2026, 7, 15, 9, 0, tzinfo=KST)
+    return [
+        _Alert(
+            alert_id="DEMO-ALERT-001",
+            alert_type="호우주의보",  # alias → 'heavy_rain_warning'
+            level="주의보",
+            title="수도권 호우주의보",
+            description="2026-07-15 12:00부터 호우 예상.",
+            issued_at=issued,
+            effective_from=issued + timedelta(hours=3),
+            effective_until=issued + timedelta(hours=12),
+            source_agency="기상청",
+            regions=[
+                _AlertRegion(region_code="11B10101", region_name="서울특별시"),
+                _AlertRegion(region_code="11B20201", region_name="경기도"),
+            ],
+        ),
+        _Alert(
+            alert_id="DEMO-ALERT-002",
+            alert_type="폭염",
+            level="경보",
+            title="전국 폭염경보",
+            description=None,
+            issued_at=issued,
+            effective_from=None,
+            effective_until=None,
+            source_agency="기상청",
+            regions=[
+                _AlertRegion(region_code="11B10101", region_name="서울특별시"),
+            ],
+        ),
+    ]
+
+
+def _convert_kma_weather_alerts(items: Sequence[Any]) -> list[Any]:
+    bundles = weather_alerts_to_notice_bundles(items, fetched_at=_now())
+    return [b.model_dump(mode="json") for b in bundles]
+
+
+# ── krex 4 dataset fixtures (PR#45) ─────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class _RestArea:
+    """`KrexRestAreaItem` Protocol 준수."""
+
+    uni_id: str
+    name: str
+    direction: str | None
+    highway_name: str | None
+    address: str | None
+    longitude: Decimal | None
+    latitude: Decimal | None
+    tel: str | None
+
+
+def _krex_rest_areas_fixture() -> Sequence[_RestArea]:
+    return [
+        _RestArea(
+            uni_id="RA-001",
+            name="서산휴게소",
+            direction="부산방향",
+            highway_name="서해안고속도로",
+            address="충청남도 서산시 운산면 서해로 100",
+            longitude=Decimal("126.6500"),
+            latitude=Decimal("36.7800"),
+            tel="041-1234-5678",
+        ),
+        _RestArea(
+            uni_id="RA-002",
+            name="경주휴게소",
+            direction="서울방향",
+            highway_name="경부고속도로",
+            address="경상북도 경주시 외동읍 동해남부로 200",
+            longitude=Decimal("129.2200"),
+            latitude=Decimal("35.8400"),
+            tel="054-7491234",
+        ),
+    ]
+
+
+def _convert_krex_rest_areas(items: Sequence[Any]) -> list[Any]:
+    bundles = rest_areas_to_bundles(items, fetched_at=_now())
+    return [b.model_dump(mode="json") for b in bundles]
+
+
+_FEATURE_ID_KREX_REST_AREA_DEMO = "f_global_p_krex_demo"
+
+
+@dataclass(frozen=True)
+class _KrexPrice:
+    """`KrexRestAreaPriceItem` Protocol 준수."""
+
+    uni_id: str
+    category: str  # 'food' or 'fuel'
+    product_key: str
+    product_name: str | None
+    price: str
+    observed_at: datetime
+
+
+def _krex_prices_fixture() -> Sequence[_KrexPrice]:
+    obs = datetime(2026, 5, 28, 5, 0, tzinfo=KST)
+    return [
+        _KrexPrice(
+            uni_id="RA-001",
+            category="fuel",
+            product_key="gasoline",
+            product_name="휘발유",
+            price="1820",
+            observed_at=obs,
+        ),
+        _KrexPrice(
+            uni_id="RA-001",
+            category="food",
+            product_key="menu_001",
+            product_name="우동",
+            price="5500",
+            observed_at=obs,
+        ),
+    ]
+
+
+def _convert_krex_prices(items: Sequence[Any]) -> list[Any]:
+    values = rest_area_prices_to_values(
+        items, feature_id=_FEATURE_ID_KREX_REST_AREA_DEMO
+    )
+    return [v.model_dump(mode="json") for v in values]
+
+
+@dataclass(frozen=True)
+class _KrexWeather:
+    """`KrexRestAreaWeatherItem` Protocol 준수."""
+
+    uni_id: str
+    metric_key: str
+    value: str
+    observed_at: datetime
+    unit: str | None
+
+
+def _krex_weather_fixture() -> Sequence[_KrexWeather]:
+    obs = datetime(2026, 5, 28, 5, 0, tzinfo=KST)
+    return [
+        _KrexWeather(
+            uni_id="RA-001",
+            metric_key="T1H",
+            value="22.5",
+            observed_at=obs,
+            unit="deg_c",
+        ),
+        _KrexWeather(
+            uni_id="RA-001",
+            metric_key="REH",
+            value="60",
+            observed_at=obs,
+            unit="%",
+        ),
+    ]
+
+
+def _convert_krex_weather(items: Sequence[Any]) -> list[Any]:
+    values = rest_area_weather_to_values(
+        items, feature_id=_FEATURE_ID_KREX_REST_AREA_DEMO
+    )
+    return [v.model_dump(mode="json") for v in values]
+
+
+@dataclass(frozen=True)
+class _KrexNotice:
+    """`KrexTrafficNoticeItem` Protocol 준수."""
+
+    notice_id: str
+    title: str
+    notice_type: str
+    description: str | None
+    longitude: Decimal | None
+    latitude: Decimal | None
+    valid_from: datetime | None
+    valid_until: datetime | None
+    severity: int | None
+    source_agency: str | None
+
+
+def _krex_traffic_notices_fixture() -> Sequence[_KrexNotice]:
+    obs = datetime(2026, 5, 28, 5, 0, tzinfo=KST)
+    return [
+        _KrexNotice(
+            notice_id="N-DEMO-001",
+            title="서해안고속도로 105km 지점 도로공사",
+            notice_type="roadwork",
+            description="야간 차로 변경.",
+            longitude=Decimal("126.6500"),
+            latitude=Decimal("36.7800"),
+            valid_from=obs,
+            valid_until=obs + timedelta(days=2),
+            severity=2,
+            source_agency="한국도로공사",
+        ),
+    ]
+
+
+def _convert_krex_traffic_notices(items: Sequence[Any]) -> list[Any]:
+    bundles = traffic_notices_to_bundles(items, fetched_at=_now())
+    return [b.model_dump(mode="json") for b in bundles]
+
+
 # ── Registry ──────────────────────────────────────────────────────────
 
 
@@ -405,6 +647,48 @@ FIXTURE_REGISTRY: Final[tuple[EtlFixtureEntry, ...]] = (
         description="OpiNet 가격 시계열 (B027/D047/C004 데모). PR#42.",
         build_fixture=_opinet_prices_fixture,
         convert=_convert_opinet_prices,
+    ),
+    EtlFixtureEntry(
+        provider="python-kma-api",
+        dataset="kma_weather_alerts",
+        variant="FeatureBundle",
+        description=(
+            "KMA 특보 → notice FeatureBundle (region 단위 fan-out). PR#46."
+        ),
+        build_fixture=_kma_weather_alerts_fixture,
+        convert=_convert_kma_weather_alerts,
+    ),
+    EtlFixtureEntry(
+        provider="python-krex-api",
+        dataset="krex_rest_areas",
+        variant="FeatureBundle",
+        description="krex 휴게소 place Feature. PR#45.",
+        build_fixture=_krex_rest_areas_fixture,
+        convert=_convert_krex_rest_areas,
+    ),
+    EtlFixtureEntry(
+        provider="python-krex-api",
+        dataset="krex_rest_area_prices",
+        variant="PriceValue",
+        description="krex 휴게소 food/fuel 가격 시계열. PR#45.",
+        build_fixture=_krex_prices_fixture,
+        convert=_convert_krex_prices,
+    ),
+    EtlFixtureEntry(
+        provider="python-krex-api",
+        dataset="krex_rest_area_weather",
+        variant="WeatherValue",
+        description="krex 휴게소 관측 기상 (observed). PR#45.",
+        build_fixture=_krex_weather_fixture,
+        convert=_convert_krex_weather,
+    ),
+    EtlFixtureEntry(
+        provider="python-krex-api",
+        dataset="krex_traffic_notices",
+        variant="FeatureBundle",
+        description="krex 교통 공지 → notice FeatureBundle. PR#45.",
+        build_fixture=_krex_traffic_notices_fixture,
+        convert=_convert_krex_traffic_notices,
     ),
 )
 

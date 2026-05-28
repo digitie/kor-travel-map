@@ -117,10 +117,11 @@ _TRAFFIC_NOTICE_ENTITY_TYPE: Final[str] = "traffic_notice"
 REST_AREA_CATEGORY: Final[str] = "06040101"
 """`PlaceCategoryCode.TRANSPORT_REST_AREA_HIGHWAY_EX` — 고속도로 휴게소."""
 
-# notice kind의 `Feature.category`는 ADR-023 강제로 8자리 숫자. 교통 공지는
-# 도로/교통 분류 — placeholder 코드 "06010000"(TRANSPORT_ROAD) 사용. 실제 도로
-# 카테고리 트리 보강 시 정정.
-TRAFFIC_NOTICE_CATEGORY: Final[str] = "06010000"
+# notice kind의 ``Feature.category``는 ADR-023 강제로 8자리 숫자. notice는
+# `NoticeDetail.notice_type`가 진짜 분류 — category는 부차적이므로 PlaceCategory
+# Code에 notice 도메인이 등록될 때까지 placeholder ``"99000000"`` 사용. 도메인
+# 구분은 `NoticeDetail.payload['domain']='highway'`로.
+TRAFFIC_NOTICE_CATEGORY: Final[str] = "99000000"
 
 REST_AREA_MARKER_ICON: Final[str] = "fast-food"
 REST_AREA_MARKER_COLOR: Final[str] = "P-06"
