@@ -156,11 +156,19 @@ def test_preview_unknown_dataset_404(client: TestClient) -> None:
 
 
 @pytest.mark.unit
-def test_preview_live_source_501_when_not_registered(client: TestClient) -> None:
-    """kma_weather_alerts는 LIVE_LOADER_REGISTRY 미등록(PR#58 예정) — 501.
+def test_preview_live_source_501_when_loader_missing(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """fixture엔 있으나 live loader 미등록 dataset → 501 (방어 분기).
 
-    (datagokr_cultural_festivals는 PR#57부터 live 등록됨 — 더 이상 501 아님.)
+    PR#58부터 11/11 fixture dataset이 전부 live 등록되어 실제로는 트리거되지
+    않지만, 라우터 501 분기 자체는 유지 — find_live_loader를 None으로
+    monkeypatch해 분기를 검증.
     """
+    monkeypatch.setattr(
+        "krtour.map_debug_ui.routers.etl.find_live_loader",
+        lambda *a, **k: None,
+    )
     response = client.post(
         "/debug/etl/python-kma-api/kma_weather_alerts/preview?source=live"
     )
@@ -182,7 +190,7 @@ def test_preview_live_kma_503_when_key_missing(client: TestClient) -> None:
 
 @pytest.mark.unit
 def test_providers_dataset_marks_live_supported(client: TestClient) -> None:
-    """KMA 3 dataset은 live_supported=True, 나머지는 False."""
+    """KMA 4 dataset 전부 live_supported=True (PR#58부터 weather_alerts 포함)."""
     response = client.get("/debug/etl/providers")
     body = response.json()
     kma = next(p for p in body["providers"] if p["provider"] == "python-kma-api")
@@ -190,8 +198,8 @@ def test_providers_dataset_marks_live_supported(client: TestClient) -> None:
     assert live_map["kma_short_forecast"] is True
     assert live_map["kma_ultra_short_nowcast"] is True
     assert live_map["kma_ultra_short_forecast"] is True
-    # weather_alerts는 live 미등록 (getWthrWrnList 구조화 region 미제공 — PR#55 보류).
-    assert live_map["kma_weather_alerts"] is False
+    # weather_alerts는 PR#58부터 apihub wrn_now_data(구조화 특보구역)로 live 등록.
+    assert live_map["kma_weather_alerts"] is True
 
 
 @pytest.mark.unit
@@ -261,6 +269,32 @@ def test_preview_live_datagokr_503_when_key_missing(client: TestClient) -> None:
     assert response.status_code == 503
     body = response.json()
     assert "DATAGOKR_SERVICE_KEY 미설정" in body["detail"]
+
+
+@pytest.mark.unit
+def test_providers_kma_weather_alerts_live_supported(client: TestClient) -> None:
+    """kma_weather_alerts는 PR#58부터 live_supported=True (apihub wrn_now_data)."""
+    response = client.get("/debug/etl/providers")
+    body = response.json()
+    kma = next(p for p in body["providers"] if p["provider"] == "python-kma-api")
+    live_map = {d["dataset"]: d["live_supported"] for d in kma["datasets"]}
+    assert live_map["kma_weather_alerts"] is True
+
+
+@pytest.mark.unit
+def test_preview_live_kma_alerts_503_when_apihub_key_missing(
+    client: TestClient,
+) -> None:
+    """특보현황 live는 apihub authKey(KMA_APIHUB_KEY) 필요 — 미설정 시 503.
+
+    (동네예보의 KMA_SERVICE_KEY와 다른 키 — apihub.kma.go.kr.)
+    """
+    response = client.post(
+        "/debug/etl/python-kma-api/kma_weather_alerts/preview?source=live"
+    )
+    assert response.status_code == 503
+    body = response.json()
+    assert "KMA_APIHUB_KEY 미설정" in body["detail"]
 
 
 @pytest.mark.unit

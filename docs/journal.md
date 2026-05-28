@@ -2,6 +2,44 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-28 13:00 (claude)
+
+**작업**: PR#58 — ETL live `kma_weather_alerts` loader (특보현황). 8종 중 4차이자
+**마지막 → 11/11 fixture dataset 전부 live 지원**. ADR-044: 로컬
+`python-kma-api/apihub_endpoints.py`의 `wrn_now_data`(특보현황) endpoint 기준.
+
+**핵심 결정 — apihub 경로 선택**:
+- data.go.kr `getWthrWrnList`는 `t6` free-text 블롭만 줘서 구조화 특보구역 없음.
+- apihub `wrn_now_data`는 **특보구역(REG_ID) 단위 행** 제공 → provider
+  `weather_alerts_to_notice_bundles`(region fan-out)에 정합 → apihub 채택.
+- apihub는 `authKey`(apihub.kma.go.kr)로 인증 — data.go.kr `serviceKey`와 **별개
+  키** → `settings.kma_apihub_key` (`KRTOUR_MAP_DEBUG_UI_KMA_APIHUB_KEY`) +
+  `.env.example` 추가. 미설정 시 503 (다른 KMA loader와 일관).
+
+**변경 — `etl_live.py`** (KMA apihub 섹션):
+- `_kma_apihub_text`(text/plain GET) + `_kma_apihub_parse_table`(`#`-주석 헤더
+  검출 → 콤마/공백 데이터 행 dict, 로컬 `apihub.parse_apihub_text_table` 정책
+  정합). 헤더 못 찾으면 빈 list (graceful).
+- `_adapt_kma_wrn_row` — WRN 1자 코드→(한글,canonical notice_type) 매핑. alias
+  미등록 종류(강풍/한파/건조/풍랑/태풍/황사/해일)는 `weather_alert`로 강등
+  (`normalize_notice_type` ValueError 회피). LVL→등급, TM_FC/TM_EF/ED_TM 파싱,
+  REG_ID 1건=1 region.
+- `kma_weather_alerts_live` → `weather_alerts_to_notice_bundles`.
+- `LIVE_LOADER_REGISTRY` 등록 (11/11). registry 후속-PR 주석 제거.
+
+**신규 테스트**: `test_etl_live_kma_alert_adapters.py` (8 case — dt 파싱 변형,
+콤마/공백 헤더 파싱, 헤더 없음 graceful, WRN 코드 매핑, 미스펙 강등, 필수 결측
+None, 변환 통과). `test_etl_routers.py`: 501 테스트를 monkeypatch 방식으로 교체
+(11/11 등록되어 실 dataset로는 트리거 불가) + weather_alerts live_supported/503 +2.
+
+**⚠️ 잔여 검증**: apihub help 블록의 정확한 컬럼 헤더 표기(REG_ID/TM_FC/...)는
+authKey 발급 후 실 응답으로 확인 필요. 파서는 헤더 미검출 시 빈 list라 무해.
+
+**Verification**: adapter 8/8 (WSL venv) + ruff + mypy strict (etl_live/settings)
+통과. 라우터 테스트(fastapi 필요)는 CI 검증.
+
+**다음**: item 4 — `fail_under` 50→65 + Sprint 2 종료 회고 + Sprint 3 진입 준비.
+
 ## 2026-05-28 12:30 (claude)
 
 **작업**: PR#57 — ETL live datagokr 전국문화축제표준데이터 loader. 8종 중 3차.

@@ -1,8 +1,9 @@
 # SPRINT-2.md — MOIS-독립 작은 provider 4건 + 디버그 UI 첫 라우터
 
-> **상태**: 🔵 **active (~90%, 2026-05-26~28)** — provider ①~④ + 디버그 UI 라우터
-> 완료. 잔여: visitkorea enrichment / KMA mid_forecast / ETL live 8종 / coverage
-> bar 상향 + Sprint 2 종료 회고. (PR#28~#49 merged.)
+> **상태**: 🔵 **active (~97%, 2026-05-26~28)** — provider ①~④ + 디버그 UI 라우터
+> + visitkorea enrichment + KMA mid_forecast + **ETL live 11/11 dataset 전부
+> wiring 완료**. 잔여: coverage bar 상향 + Sprint 2 종료 회고 (item 4).
+> (PR#28~#58 merged.)
 >
 > **목적**: ADR-034 9단계의 ①~④ — 축제 / 날씨 / 유가 / 휴게소. MOIS와 dedup
 > 가능성 없는 작은 dataset부터 적재해 Record Linkage 룰을 검증한다. 디버그
@@ -281,16 +282,19 @@ Sprint 2 진행 중 다음 ADR들의 1차 implementation 점진 도입:
       `festival_to_enrichment_links` + `FestivalMatcher` plug-in (PR#51, 8 test)
 - [x] 2. KMA 중기예보 — `mid_land_forecast_to_weather_values`(SKY 텍스트 + POP,
       AM/PM split) + `mid_temperature_to_weather_values`(TMN/TMX) (PR#52, 11 test)
-- [~] 3. ETL live 나머지 8 dataset loader 등록 (`etl_live.LIVE_LOADER_REGISTRY`)
-      — **provider repo 로컬(`F:\dev\`) 기준 정확히 wiring** (ADR-044). 8종 전부:
+- [x] 3. ETL live 나머지 8 dataset loader 등록 (`etl_live.LIVE_LOADER_REGISTRY`)
+      — **provider repo 로컬(`F:\dev\`) 기준 정확히 wiring** (ADR-044). 8종 전부
+      완료 → **11/11 fixture dataset 전부 live 지원**:
       - [x] krex 4 (rest_areas/prices/weather/traffic_notices) — PR#55
         (EX OpenAPI, 순수 adapter + 14 단위 test).
       - [x] opinet 2 (station/prices) — PR#56 (detailById.do `?id=`, KATEC→WGS84
         reproject via 로컬 coords.py proj, 순수 adapter + 10 단위 test).
       - [x] datagokr 1 (cultural_festivals) — PR#57 (로컬 `python-datagokr-api`
         `tn_pubr_public_cltur_fstvl_api`, alias 매핑 + 7 단위 test).
-      - [ ] kma_weather_alerts 1 — PR#58 (`python-kma-api/apihub_endpoints.py`
-        wrn_now_data 구조화 region/level).
+      - [x] kma_weather_alerts 1 — PR#58 (apihub `wrn_now_data` text → 특보구역
+        (REG_ID) 단위 행, WRN 코드→notice_type 매핑, 순수 parser/adapter + 8
+        단위 test). apihub `authKey`는 data.go.kr serviceKey와 별개 →
+        `kma_apihub_key` settings 추가. 컬럼 헤더 표기는 실 응답 후속 검증.
 - [ ] 4. `pyproject.toml` `fail_under` 50 → 65 상향 (실측 96%라 무위험) +
       `docs/journal.md` Sprint 2 종료 회고 + `docs/resume.md` → Sprint 3 진입 +
       `docs/sprints/SPRINT-3.md` 진입 PR 준비

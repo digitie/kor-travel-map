@@ -69,8 +69,19 @@ class DebugUiSettings(BaseSettings):
     kma_service_key: SecretStr | None = Field(
         default=None,
         description=(
-            "기상청 공공데이터포털 service key. `python-kma-api/.env` 의 "
-            "``KMA_SERVICE_KEY`` 값과 동일."
+            "기상청 공공데이터포털(apis.data.go.kr) service key. "
+            "`python-kma-api/.env` 의 ``KMA_SERVICE_KEY`` 값과 동일. 동네예보 "
+            "(단기/초단기) live loader에서 사용."
+        ),
+    )
+    kma_apihub_key: SecretStr | None = Field(
+        default=None,
+        description=(
+            "기상청 API 허브(apihub.kma.go.kr) ``authKey``. data.go.kr "
+            "``serviceKey``와 **다른 키** — `python-kma-api/.env` 의 "
+            "``KMA_APIHUB_AUTH_KEY``(또는 ``KMA_APIHUB_KEY``) 값. 특보현황 "
+            "(`kma_weather_alerts`) live loader는 apihub `wrn_now_data`가 "
+            "구조화 특보구역(REG_ID)을 주므로 이 키를 사용 (PR#58, ADR-044)."
         ),
     )
     opinet_service_key: SecretStr | None = Field(

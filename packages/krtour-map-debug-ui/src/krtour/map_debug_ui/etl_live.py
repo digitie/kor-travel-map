@@ -31,6 +31,7 @@ from krtour.map.providers.kma import (
     short_forecast_to_weather_values,
     ultra_short_forecast_to_weather_values,
     ultra_short_nowcast_to_weather_values,
+    weather_alerts_to_notice_bundles,
 )
 from krtour.map.providers.krex import (
     rest_area_prices_to_values,
@@ -974,6 +975,235 @@ async def datagokr_cultural_festivals_live(
     return [b.model_dump(mode="json") for b in bundles]
 
 
+# =========================================================================
+# 기상청 API 허브 (apihub.kma.go.kr) — 특보현황 `wrn_now_data`. data.go.kr
+# 게이트웨이(serviceKey)와 달리 apihub는 `authKey`(별도 키, settings.
+# kma_apihub_key)를 쓴다. wrn_now_data는 **특보구역(REG_ID) 단위 행**을 주므로
+# 본 lib `weather_alerts_to_notice_bundles`(region fan-out)에 정합.
+#
+# 응답은 text/plain (JSON 아님): `#`-주석 헤더 + 공백/콤마 구분 데이터 행
+# (로컬 python-kma-api `apihub.parse_apihub_text_table` 포맷 — ADR-044). 본
+# 모듈은 동일 방식으로 헤더 줄을 찾아 행을 dict로 파싱한다.
+#
+# ⚠️ 컬럼명(REG_ID/TM_FC/TM_EF/WRN/LVL)은 KMA 공표 특보 스펙 기준으로 매핑하되,
+# apihub help 블록의 정확한 헤더 표기는 실 응답(authKey 필요)으로 후속 검증
+# 필요 — 헤더 줄을 못 찾으면 빈 list 반환(graceful). adapter는 순수 함수라
+# `tests/test_etl_live_kma_alert_adapters.py`로 단위 검증.
+# =========================================================================
+
+_KMA_APIHUB_BASE_URL: Final[str] = "https://apihub.kma.go.kr"
+"""기상청 API 허브 base URL (authKey 인증, data.go.kr와 별개)."""
+
+_KMA_WRN_NOW_PATH: Final[str] = "api/typ01/url/wrn_now_data.php"
+"""특보현황 조회 endpoint (로컬 apihub_endpoints.py `wrn_now_data` 기준)."""
+
+# 특보종류 코드(WRN 1자) → (한글명, canonical notice_type). 미스펙 종류는
+# generic `weather_alert`로 강등 (normalize_notice_type ValueError 회피 —
+# dto/notice.py alias에 강풍/한파/건조/풍랑/태풍/황사/해일 미등록).
+_KMA_WRN_CODE_MAP: Final[dict[str, tuple[str, str]]] = {
+    "W": ("강풍", "weather_alert"),
+    "R": ("호우", "heavy_rain_warning"),
+    "C": ("한파", "weather_alert"),
+    "D": ("건조", "weather_alert"),
+    "O": ("폭풍해일", "weather_alert"),
+    "N": ("지진해일", "weather_alert"),
+    "V": ("풍랑", "weather_alert"),
+    "T": ("태풍", "weather_alert"),
+    "S": ("대설", "heavy_snow_warning"),
+    "Y": ("황사", "weather_alert"),
+    "H": ("폭염", "heat_wave_warning"),
+}
+
+# 특보수준 코드(LVL) → 한글 등급 (provider KMA_ALERT_LEVEL_SEVERITY 키와 정합).
+_KMA_WRN_LEVEL_MAP: Final[dict[str, str]] = {
+    "0": "예비특보",
+    "1": "주의보",
+    "2": "경보",
+    "3": "경보",
+}
+
+# wrn_now_data 헤더 줄 식별용 known 컬럼 토큰 (help 블록의 설명 줄과 구분).
+_KMA_WRN_HEADER_TOKENS: Final[frozenset[str]] = frozenset(
+    {
+        "REG_ID",
+        "REG_UP",
+        "REG_KO",
+        "REG_NM",
+        "REG_NAME",
+        "TM_FC",
+        "TM_EF",
+        "TM_ED",
+        "ED_TM",
+        "WRN",
+        "LVL",
+        "CMD",
+    }
+)
+
+
+@dataclass(frozen=True)
+class _KmaAlertRegionAdapter:
+    """`KmaWeatherAlertRegion` Protocol 만족."""
+
+    region_code: str
+    region_name: str
+
+
+@dataclass(frozen=True)
+class _KmaWeatherAlertAdapter:
+    """`KmaWeatherAlertItem` Protocol 만족 — wrn_now_data 1행 = 1 (특보×구역)."""
+
+    alert_id: str
+    alert_type: str
+    level: str | None
+    title: str
+    description: str | None
+    issued_at: datetime
+    effective_from: datetime | None
+    effective_until: datetime | None
+    source_agency: str | None
+    regions: list[_KmaAlertRegionAdapter]
+
+
+def _kma_apihub_parse_dt(value: str | None) -> datetime | None:
+    """apihub 시각(YYYYMMDDHHmm 12자리 / YYYYMMDD 8자리) → KST aware. 실패 None."""
+    if not value:
+        return None
+    digits = value.strip()
+    if not digits.isdigit():
+        return None
+    if len(digits) >= 12:
+        return datetime(
+            int(digits[:4]), int(digits[4:6]), int(digits[6:8]),
+            int(digits[8:10]), int(digits[10:12]), tzinfo=KST,
+        )
+    if len(digits) == 8:
+        return datetime(
+            int(digits[:4]), int(digits[4:6]), int(digits[6:8]), tzinfo=KST
+        )
+    return None
+
+
+def _kma_apihub_parse_table(text: str) -> list[dict[str, str]]:
+    """apihub text 응답 → row dict list (헤더는 `#`-주석에서 추출, 대문자 키).
+
+    로컬 `apihub.parse_apihub_text_table` 정책 정합: `#`-주석 줄 중 known 컬럼
+    토큰 3개 이상인 줄을 헤더로 삼고, 데이터 행은 콤마(있으면)/공백으로 분리.
+    헤더를 못 찾으면 빈 list (graceful).
+    """
+    lines = [ln.rstrip("\r") for ln in text.splitlines()]
+    nonempty = [ln.strip() for ln in lines if ln.strip()]
+    comments = [ln for ln in nonempty if ln.startswith("#")]
+    data_lines = [ln for ln in nonempty if not ln.startswith("#")]
+    headers: list[str] = []
+    for comment in comments:
+        tokens = [t.upper() for t in comment.lstrip("#").replace(",", " ").split()]
+        known = [t for t in tokens if t in _KMA_WRN_HEADER_TOKENS]
+        if len(known) >= 3:
+            headers = tokens
+            break
+    if not headers:
+        return []
+    rows: list[dict[str, str]] = []
+    for line in data_lines:
+        values = line.split(",") if "," in line else line.split()
+        values = [v.strip() for v in values]
+        if len(values) < 2:
+            continue
+        rows.append(
+            {
+                headers[i]: (values[i] if i < len(values) else "")
+                for i in range(len(headers))
+            }
+        )
+    return rows
+
+
+def _adapt_kma_wrn_row(row: dict[str, str]) -> _KmaWeatherAlertAdapter | None:
+    """wrn_now_data 1행(dict, 대문자 키) → `_KmaWeatherAlertAdapter` 또는 None."""
+    reg_code = _first_str(row, "REG_ID", "REG_UP")
+    wrn = _first_str(row, "WRN")
+    if reg_code is None or wrn is None:
+        return None
+    korean, notice_type = _KMA_WRN_CODE_MAP.get(wrn.upper(), (wrn, "weather_alert"))
+    lvl_raw = _first_str(row, "LVL")
+    level = _KMA_WRN_LEVEL_MAP.get(lvl_raw or "")
+    tm_fc = _first_str(row, "TM_FC")
+    issued = _kma_apihub_parse_dt(tm_fc) or datetime.now(tz=KST)
+    effective_from = _kma_apihub_parse_dt(_first_str(row, "TM_EF")) or issued
+    effective_until = _kma_apihub_parse_dt(_first_str(row, "ED_TM", "TM_ED"))
+    region_name = _first_str(row, "REG_KO", "REG_NM", "REG_NAME") or reg_code
+    title = f"{korean}{level}" if level else korean
+    return _KmaWeatherAlertAdapter(
+        alert_id=f"{reg_code}:{tm_fc or ''}:{wrn.upper()}:{lvl_raw or ''}",
+        alert_type=notice_type,
+        level=level,
+        title=title,
+        description=f"{title} 발효 — {region_name}",
+        issued_at=issued,
+        effective_from=effective_from,
+        effective_until=effective_until,
+        source_agency="기상청",
+        regions=[
+            _KmaAlertRegionAdapter(region_code=reg_code, region_name=region_name)
+        ],
+    )
+
+
+async def _kma_apihub_text(
+    path: str, *, auth_key: str, params: dict[str, Any]
+) -> str:
+    """apihub GET → response.text (text/plain). 비-200은 LiveLoaderError."""
+    query: dict[str, Any] = {"authKey": auth_key, **params}
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        response = await client.get(
+            f"{_KMA_APIHUB_BASE_URL}/{path.lstrip('/')}", params=query
+        )
+    if response.status_code != 200:
+        raise LiveLoaderError(
+            f"KMA apihub {path} HTTP {response.status_code}: {response.text[:200]}"
+        )
+    return response.text
+
+
+async def kma_weather_alerts_live(
+    settings: DebugUiSettings, params: dict[str, str]
+) -> list[dict[str, Any]]:
+    """KMA 특보현황(apihub wrn_now_data) raw → list[FeatureBundle dict] (notice).
+
+    apihub `authKey`(settings.kma_apihub_key) 사용 — data.go.kr serviceKey와
+    별개. 응답 text 행(특보구역 단위)을 adapter로 변환 후 본 lib
+    `weather_alerts_to_notice_bundles`(region fan-out)로 통과.
+    """
+    key = settings.kma_apihub_key
+    if key is None:
+        raise LiveLoaderError(
+            "KMA_APIHUB_KEY 미설정 (.env 확인). apihub authKey는 data.go.kr "
+            "KMA_SERVICE_KEY와 다른 키 — apihub.kma.go.kr 발급."
+        )
+    text = await _kma_apihub_text(
+        _KMA_WRN_NOW_PATH,
+        auth_key=key.get_secret_value(),
+        params={
+            "fe": params.get("fe", "f"),
+            "tm": params.get("tm", ""),
+            "disp": params.get("disp", "0"),
+            "help": "1",  # 컬럼 헤더(`#`-주석) 포함 — 파서가 헤더 검출에 사용.
+        },
+    )
+    rows = _kma_apihub_parse_table(text)
+    adapted = [
+        adapter
+        for adapter in (_adapt_kma_wrn_row(row) for row in rows)
+        if adapter is not None
+    ]
+    bundles = weather_alerts_to_notice_bundles(
+        adapted,  # type: ignore[arg-type]
+        fetched_at=datetime.now(tz=KST),
+    )
+    return [b.model_dump(mode="json") for b in bundles]
+
+
 # ── Registry ──────────────────────────────────────────────────────────
 
 
@@ -992,9 +1222,8 @@ LIVE_LOADER_REGISTRY: Final[dict[tuple[str, str], LiveLoader]] = {
     ("data.go.kr-standard", "datagokr_cultural_festivals"): (
         datagokr_cultural_festivals_live
     ),
-    # ── 후속 PR (ADR-044 로컬 repo 기준) ──
-    # `kma_weather_alerts` — PR#58 (로컬 python-kma-api apihub_endpoints.py
-    #   wrn_now_data 구조화 region/level).
+    ("python-kma-api", "kma_weather_alerts"): kma_weather_alerts_live,
+    # ── 11/11 fixture dataset 전부 live wiring 완료 (ADR-044 로컬 repo 기준) ──
 }
 
 
