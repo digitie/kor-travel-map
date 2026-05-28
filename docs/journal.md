@@ -2,6 +2,32 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-28 13:30 (claude) — Sprint 2 종료 회고 (PR#59)
+
+**작업**: item 4 — Sprint 2 종료 게이트. `pyproject.toml` `fail_under` 50→65
+(실측 96%, ADR-032 schedule상 Sprint 2 bar) + `SPRINT-2.md` ✅완료 +
+`SPRINT-3.md` 🔵active 진입 + `sprints/README.md` 상태표 + `resume.md` 종합 갱신.
+
+**Sprint 2 (PR#28~#59) 회고**:
+- ✅ Provider ①~④ (datagokr 축제 / kma 날씨 4종+중기 / opinet 유가 / krex 휴게소
+  4종) provider→DTO 변환 + visitkorea enrichment.
+- ✅ 디버그 UI backend (create_app + health/version + ETL preview fixture/live)
+  + OpenAPI drift gate + frontend skeleton.
+- ✅ **ETL live 11/11 dataset** wiring (PR#47 KMA 3 + PR#55~58 8종). ADR-044
+  로컬 repo 기준.
+- ✅ Coverage 96% / fail_under 65 / ruff / mypy strict / import-linter 4.
+- **회고 인사이트**:
+  - ADR-044(로컬 우선)가 datagokr·opinet·krex wiring 정확도를 크게 높임.
+    GitHub 404로 보류했던 provider가 `F:\dev\`에 존재한 사례 다수.
+  - apihub vs data.go.kr 게이트웨이 키 분리(서로 다른 인증)를 weather_alerts에서
+    실증 — settings에 `kma_apihub_key` 분리 필요했음.
+  - **drift 발견**: provider repo .env 실제 키 이름이 debug-ui settings 가정과
+    다름 (공통 `DATA_GO_KR_SERVICE_KEY` / `OPINET_API_KEY` / `KEX_GO_API_KEY`).
+    → 통합 검증 단계에서 매핑 + settings 문서 정정 예정.
+
+**다음 (사용자 지시)**: 통합 검증 — ETL live 실데이터 유입/정합성 + DB 적재
+(ORM→PostGIS) + Debug UI Playwright e2e + 상세 리포트 (tasks #114~#118).
+
 ## 2026-05-28 13:00 (claude)
 
 **작업**: PR#58 — ETL live `kma_weather_alerts` loader (특보현황). 8종 중 4차이자

@@ -179,10 +179,10 @@ exclude_lines = [
   "if TYPE_CHECKING:",
   "@overload",
 ]
-fail_under = 50  # ADR-032 Sprint 1 bar (T-014 Sprint 1 진입과 함께 0→50 상향, 2026-05-25).
+fail_under = 65  # ADR-032 Sprint 2 bar (50→65 상향, 2026-05-28 Sprint 2 종료). 실측 96%.
 # ADR-032 Sprint별 fail_under schedule:
-#   Sprint 1 (scaffolding):  fail_under = 50   ← 현재
-#   Sprint 2 (core + 4 provider): 65
+#   Sprint 1 (scaffolding):  fail_under = 50
+#   Sprint 2 (core + 4 provider): 65   ← 현재 (실측 96%라 무위험 상향)
 #   Sprint 3 (provider 절반 + infra): 75
 #   Sprint 4 (integrity + edge cases): 80  ← 목표 도달
 #   Sprint 5 (operational entry): 80 유지 + 회귀 방지

@@ -1,6 +1,6 @@
 # SPRINT-3.md — KNPS/트래킹 + 국가유산 + 정합성 Phase 1
 
-> **상태**: accepted (시기 대기 — Sprint 2 종료 후 Sprint 3 진입 PR)
+> **상태**: 🔵 **active (진입, 2026-05-28)** — Sprint 2 종료(PR#28~#59) 후 진입.
 >
 > **목적**: ADR-034 9단계의 ⑤~⑥ — 국립공원/트래킹 (`python-knps-api` +
 > `python-krforest-api` trails) + 국가유산 (`python-krheritage-api`). area/
@@ -8,12 +8,15 @@
 
 ## 1. 진입 조건 (Sprint 2 DoD)
 
-- [ ] Sprint 2 모든 DoD 충족 (`SPRINT-2.md §7`)
-- [ ] 4 provider (visitkorea/kma/opinet/krex) + 보조 (airkorea/krforest_weather
-      /khoa_weather) 적재 안정
-- [ ] 디버그 UI backend 라우터 + OpenAPI drift gate green
-- [ ] Coverage bar 65% pass
-- [ ] Record Linkage scoring 첫 검증 완료 (휴게소 sibling group)
+- [x] Sprint 2 모든 DoD 충족 (`SPRINT-2.md §7`) — provider ①~④ + visitkorea
+      enrichment + KMA mid_forecast + ETL live 11/11 + coverage 65.
+- [x] 4 provider (visitkorea/kma/opinet/krex) provider→DTO 변환 안정 (적재는
+      Sprint 3 `feature_repo.py`에서. 보조 provider airkorea/krforest_weather/
+      khoa_weather는 Sprint 3+ 후속).
+- [x] 디버그 UI backend 라우터 + OpenAPI drift gate green
+- [x] Coverage bar 65% pass (PR#59, 실측 96%)
+- [~] Record Linkage scoring 첫 검증 — `core/scoring.py` 단위 검증 완료. 실 적재
+      기반 sibling group 검증은 Sprint 3 `feature_repo.py` + 첫 provider 적재와 함께.
 
 ## 2. 산출물
 

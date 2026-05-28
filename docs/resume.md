@@ -2,12 +2,13 @@
 
 ## 현재 상태
 
-**Sprint 2 거의 완료, Sprint 3 진입 준비 중** (2026-05-28 기준).
-main `225ac77` (PR#49 merged). 총 49 PR merged, open PR 없음.
-테스트: unit 450 + debug-ui 21 + 통합(testcontainers) — coverage 96%.
+**Sprint 2 완료 → Sprint 3 진입** (2026-05-28 기준).
+main `5452d4d` (PR#58 merged) + PR#59(Sprint 2 종료) 진행 중.
+테스트: unit + debug-ui + 통합(testcontainers) — coverage 96% (fail_under 65).
 
-Sprint 1 scaffolding (PR#17~#27) 종료 후 Sprint 2 (PR#28~#48)에서
-ADR-034 9단계 중 ①~④ provider + 디버그 UI를 구현했다.
+Sprint 1 scaffolding (PR#17~#27) 종료 후 Sprint 2 (PR#28~#59)에서
+ADR-034 9단계 중 ①~④ provider + 디버그 UI + ETL live 11/11 dataset을 구현했다.
+적재(DB write)는 아직 없음 — provider raw → DTO 변환 + 디버그 preview까지 완성.
 
 ADR **001~044 모두 accepted**. 029는 ADR-043으로 supersede.
 ADR-044 = 관련 라이브러리 `F:\dev\` 로컬 우선 조회 + 데이터 정합성 책임은 각
@@ -41,18 +42,37 @@ Python 패키지 `krtour-map-debug-ui` (ADR-020, `packages/krtour-map-debug-ui/`
 
 ## 다음 한 작업
 
-### Sprint 2 잔여 (2건 — `sprints/SPRINT-2.md §7`과 동일 순서)
+### Sprint 2 잔여 — **전부 완료** (`sprints/SPRINT-2.md §7`)
 
-- [x] ~~visitkorea enrichment~~ — **PR#51 완료** (`festival_to_enrichment_links`
-  + `FestivalMatcher` plug-in, 8 test).
-- [x] ~~KMA mid_forecast~~ — **PR#52 완료** (`mid_land_forecast_to_weather_values`
-  SKY 텍스트+POP AM/PM split + `mid_temperature_to_weather_values` TMN/TMX, 11 test).
-1. **ETL live 나머지 8 dataset** loader 등록 — datagokr 1 + opinet 2 + krex 4
-   + kma_weather_alerts 1. `etl_live.py` LIVE_LOADER_REGISTRY 확장. ← **다음**
-2. **Coverage bar 상향 + Sprint 2 종료 마무리** — `pyproject.toml` `fail_under`
-   50→65 (실측 96%) + journal 회고 + 본 resume → Sprint 3 + `SPRINT-3.md` 진입 PR.
+- [x] visitkorea enrichment — PR#51 (`festival_to_enrichment_links`, 8 test).
+- [x] KMA mid_forecast — PR#52 (`mid_land_forecast_to_weather_values` +
+  `mid_temperature_to_weather_values`, 11 test).
+- [x] ETL live 11/11 dataset — krex 4 (PR#55) / opinet 2 (PR#56) / datagokr 1
+  (PR#57) / kma_weather_alerts apihub (PR#58).
+- [x] Coverage bar 50→65 + Sprint 2 종료 회고 + Sprint 3 진입 (PR#59).
 
-### Sprint 3 진입 후 첫 작업 (예정)
+### 통합 검증 (사용자 지시 2026-05-28 — Sprint 2 종료 직후)
+
+ETL 로직을 실데이터로 끝까지 검증하고 상세 리포트를 남긴다. (`tasks #114~#118`)
+
+1. **weather_alerts data.go.kr fallback** (PR) — apihub authKey가 로컬에 없어
+   `getWthrWrnList`(기존 `DATA_GO_KR_SERVICE_KEY`) fallback loader 추가 → 11/11
+   전부 지금 live 검증 가능.
+2. **ETL live 실데이터 + 정합성** — provider .env 키를 debug-ui `.env`(gitignore,
+   커밋 금지)로 매핑 복사 후 11 dataset live 호출 → 유입/정합성 검증 + 리포트.
+3. **DB 적재 통합 테스트** — FeatureBundle→`infra/models` ORM→testcontainer
+   PostGIS 적재·재조회 검증 (docker는 WSL).
+4. **Debug UI e2e** — WSL에 node 설치 → backend+frontend 기동, Windows Playwright로
+   검증 + 스크린샷/리포트.
+5. **종합 리포트** — `docs/reports/`에 테스트 케이스·결과·발견 이슈 정리.
+
+> ⚠️ **키 이름 drift 발견**: provider repo .env의 실제 키 이름이 debug-ui
+> settings 가정과 다름 — data.go.kr 게이트웨이는 공통 `DATA_GO_KR_SERVICE_KEY`
+> (kma 동네예보/datagokr/krex/visitkorea), opinet=`OPINET_API_KEY`,
+> krex(data.ex.co.kr)=`KEX_GO_API_KEY`. apihub authKey는 부재. → 통합 검증 시
+> 매핑 + settings 문서 정정.
+
+### Sprint 3 본작업 (통합 검증 후)
 
 - **Provider ⑤ KNPS** 14 dataset (`providers/knps.py`) — SHP/GeoJSON parsing
   + area/route geometry + `python-knps-api` `06da125f` 핀
@@ -107,6 +127,16 @@ Python 패키지 `krtour-map-debug-ui` (ADR-020, `packages/krtour-map-debug-ui/`
   (httpx dep / Alembic 1.18 path_separator + async commit / coord_5179 assert)
 - PR#48 agent worktree `geo-*` → `krtour-map-*` rename + tasks.md 최신화
 - PR#49 maplibre-vworld v0.1.0 의존 핀 정합 (git URL+tag, zod ^4.4.3, ADR-036 amendment)
+- PR#50 Sprint/task/resume 문서 일관성 재정비
+- PR#51 Sprint 2 §2.1 끝물 — VisitKorea TourAPI enrichment (`festival_to_enrichment_links`)
+- PR#52 Sprint 2 §2.2 마무리 — KMA 중기예보 (`mid_land_forecast`/`mid_temperature`)
+- PR#53 fix: OpiNet product code map C004/K015 정정 (kerosene/lpg)
+- PR#54 ADR-044 — 관련 라이브러리 로컬(`F:\dev\`) 우선 조회 + 데이터 정합성 책임 분계
+- PR#55 ETL live — krex 4 dataset loader (EX OpenAPI, 14 단위 test)
+- PR#56 ETL live — opinet 2 dataset loader (detailById.do, KATEC→WGS84, 10 단위 test)
+- PR#57 ETL live — datagokr 전국문화축제표준데이터 loader (7 단위 test)
+- PR#58 ETL live — kma_weather_alerts (apihub `wrn_now_data`, 8 단위 test) → 11/11 live
+- PR#59 Sprint 2 종료 — coverage 50→65 + 회고 + Sprint 3 진입 (본 PR)
 
 ### 문서/거버넌스 (PR#1~#16, 2026-05-24~25)
 
@@ -173,8 +203,9 @@ Python 패키지 `krtour-map-debug-ui` (ADR-020, `packages/krtour-map-debug-ui/`
 
 - [x] visitkorea enrichment (Sprint 2 잔여 1/4 — PR#51)
 - [x] KMA 중기예보 (`mid_forecast`, Sprint 2 잔여 2/4 — PR#52)
-- [ ] ETL live 나머지 8 dataset (Sprint 2 잔여 3/4)
-- [ ] Coverage 65% (Sprint 2 DoD)
+- [x] ETL live 11/11 dataset (Sprint 2 잔여 3/4 — PR#55~#58)
+- [x] Coverage 65% (Sprint 2 DoD — PR#59)
+- [ ] 통합 검증 (ETL live 실데이터/정합성/DB 적재/Playwright e2e + 리포트, tasks #114~#118)
 - [ ] KNPS 14 dataset + krforest trails (Sprint 3)
 - [ ] krheritage 국가유산 (Sprint 3)
 - [ ] ADR-033 Phase 1 F1~F3 (Sprint 3)
@@ -225,9 +256,10 @@ git checkout main                        # 복귀
 
 ## 핵심 메시지
 
-Sprint 2 핵심 provider(축제 1차/2차·날씨·유가·휴게소)가 안정화되었다. 다음은
-Sprint 2 잔여 (mid_forecast → ETL live 8종 → coverage+종료) 마무리 후 Sprint 3
-(KNPS/krheritage + 정합성 Phase 1) 진입이다. 적재(DB write)는 아직 없고,
-provider → DTO 변환까지만 완성된 상태.
-Sprint 3에서 `feature_repo.py` raw SQL + `/features/*` 라우터로 실제 적재 +
-조회 흐름을 연결한다.
+Sprint 2 완료 — provider ①~④(축제·날씨·유가·휴게소) + visitkorea enrichment +
+KMA mid_forecast + 디버그 UI backend + **ETL live 11/11 dataset** + coverage 65.
+다음은 사용자 지시(2026-05-28)에 따른 **통합 검증**: ETL live 실데이터로 유입·
+정합성·DB 적재·debug UI(Playwright)를 끝까지 검증하고 상세 리포트를 남긴다.
+그 후 Sprint 3 (KNPS/krheritage + 정합성 Phase 1 + `feature_repo.py` 실 적재)
+진입. 현재 적재(DB write)는 아직 없고 provider → DTO 변환 + 디버그 preview까지
+완성된 상태다.
