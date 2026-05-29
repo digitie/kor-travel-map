@@ -25,3 +25,9 @@ src/api/types.ts.bak
 
 # turbo / build cache
 .turbo/
+
+# playwright e2e (#117)
+test-results/
+playwright-report/
+playwright/.cache/
+blob-report/
