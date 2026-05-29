@@ -2,6 +2,32 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-29 (claude) — Provider ⑤ KNPS Point/place 변환 (Sprint 3, ADR-034 7단계)
+
+**작업**: `python-knps-api`(06da125f, GitHub에서 설치 가능 확인) 실제 catalog/model을
+근거로 `providers/knps.py` 구현. ADR-006(wrapper 금지) — knps-api public 직접 사용,
+본 모듈은 순수 변환 함수.
+
+- knps-api 실측: `file_datasets()` 14건, `FileDataset.geometry_type`/`feature_kind`
+  필드로 Point/place 5건(visitor_centers/restrooms/campgrounds/shelters/
+  cultural_resources) 확인.
+- `providers/knps.py` — `KnpsPointRecord` Protocol(파싱된 행 입력) +
+  `KNPS_PLACE_DATASETS` spec(category/place_kind/marker, knps-feature-etl.md §4
+  검증표) + `knps_point_records_to_bundles` + cultural_resources subtype 분기
+  (`resolve_cultural_resource_category`: 사찰→01070100/유적→01070300/기타→01070000).
+  category→maki는 `get_category().mapbox_maki_icon`. SourceRole.PRIMARY.
+- 좌표는 WGS84 `Coordinate`(한국 경계 밖/None은 coord=None). 결정적 ID(ADR-009).
+- **SHP(area)/LineString(route) parsing은 후속** — pyshp+shapely 필요. 미지원
+  dataset_key는 명시적 KeyError.
+- CSV 디코딩/컬럼 추출은 호출자/파서 책임(Protocol 입력) — 변환 함수는 좌표계·
+  category·DTO 조립에 집중(테스트 용이). 다른 provider처럼 본 lib 본 의존 X.
+- 테스트 `tests/unit/test_providers_knps.py` 18건(매핑/subtype/좌표/결정성/FK/미지원).
+
+**검증(로컬 venv)**: unit+lint 504 passed(+18), ruff/mypy --strict/import-linter
+(4 kept) green. DB 무관(순수 변환)이라 통합 테스트 불필요.
+
+**다음**: KNPS SHP/route geometry parser 또는 provider ⑥ krheritage.
+
 ## 2026-05-29 (claude) — 문서 정리 리포트 §2.2/§2.3 후속 (문서만)
 
 **작업**: docs-consistency-sweep 리포트의 남은 2건을 문서 정리로 해소 (코드 무수정).
