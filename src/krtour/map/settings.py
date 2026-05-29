@@ -81,6 +81,17 @@ class KrtourMapSettings(BaseSettings):
         description="S3 호환 secret access key.",
     )
 
+    # ── kraddr-geo REST API v2 (geocoding, ADR-006/044) ─────────────────
+    kraddr_geo_base_url: str | None = Field(
+        default=None,
+        description=(
+            "kraddr-geo REST 서비스 base URL (예: ``http://kraddr-geo:8080``). "
+            "``None``이면 정/역지오코딩 보강 비활성 (좌표만으로 적재). 호출 측이 "
+            "이 URL로 ``httpx.AsyncClient(base_url=...)``를 만들어 "
+            "``KraddrGeoRestClient``에 주입한다 (python 패키지/DB 의존 없음)."
+        ),
+    )
+
     # ── 로깅 ─────────────────────────────────────────────────────────────
     log_level: str = Field(
         default="INFO",
@@ -107,7 +118,5 @@ class KrtourMapSettings(BaseSettings):
     #   - provider API keys (KMA_API_KEY, VISITKOREA_SERVICE_KEY,
     #     KNPS_SERVICE_KEY, MOIS_*, KAKAO_LOCAL_REST_API_KEY, ...)
     #     자세히는 ``docs/external-apis.md §2 환경변수 카탈로그``.
-    #   - KRADDR_GEO_* (python-kraddr-geo client wiring, ADR-025/026 VWorld
-    #     key 공유 포함).
     #   - settings for Record Linkage 임계값 override (ADR-016).
     #   - settings for opening_hours 시간대 정책 (ADR-019).
