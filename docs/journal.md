@@ -2,6 +2,29 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-29 (claude) — debug-ui /features 조회 라우터 (Sprint 3)
+
+**작업**: 적재된 feature를 조회하는 `/features` REST 라우터 (debug-ui, ADR-035).
+feature_repo의 raw SQL(ADR-004)을 HTTP 표면으로 노출 — 지도/목록 조회.
+
+- `infra/feature_repo.py` `features_in_bbox` 추가 — bbox(4326) 안 feature 경량
+  표현. `coord && ST_MakeEnvelope(...)`로 GIST 인덱스(`idx_features_coord_gist`)
+  사용 (ADR-012, 술어에 ST_Transform 없음). `x_extension.` 함수 한정(ADR-008).
+  kind 필터(`text[]`) + limit. infra `__init__` export.
+- debug-ui `db.py` — `get_session` FastAPI 의존성 (메인 lib `KrtourMapSettings.
+  pg_dsn` → async engine, lazy singleton). `set_engine_for_test`/`reset_engine`.
+- debug-ui `routers/features.py` — `GET /features`(bbox) + `GET /features/{id}`
+  (단건). 경량 `FeatureSummary` / `FeatureDetailResponse`. bbox min>max 422.
+- `settings.features_routes_enabled`(기본 True) + app.py wiring + routers export.
+- `openapi.json` 갱신(drift gate, ADR-031) — `/features` 2 path + 3 schema.
+- 테스트: debug-ui 단위 6(마운트/disable/422/404/매핑, 의존성 override) + 메인
+  통합 1(`features_in_bbox` 적재→조회→kind/밖 bbox).
+
+**검증(네이티브 PostGIS)**: 통합 20/20, debug-ui 79, 메인 unit+lint 486,
+ruff/mypy --strict/openapi drift(exit 0) green.
+
+**다음**: frontend 지도 wiring(#117 e2e) 또는 provider ⑤ KNPS.
+
 ## 2026-05-29 (claude) — infra/feature_repo.py — 첫 DB write 경로 (Sprint 3)
 
 **작업**: `FeatureBundle` → DB 적재 raw SQL repository (ADR-004). provider 변환
