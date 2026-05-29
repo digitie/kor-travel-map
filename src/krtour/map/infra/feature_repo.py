@@ -13,8 +13,11 @@ upsert하는 **첫 DB write 경로** (ADR-004 raw SQL, ORM은 매핑만).
   test-strategy §4.4). source_records는 payload_hash가 PK 구성요소라
   ``DO NOTHING`` (이력 보존, ADR-017).
 - **coord_5179는 건드리지 않음** (ADR-012 STORED generated) — ``coord``만 INSERT.
-- **ST_Transform을 술어에 쓰지 않음** (ADR-012) — 좌표 INSERT는 ``ST_SetSRID(
-  ST_MakePoint(lon,lat),4326)``.
+- **ST_Transform을 술어에 쓰지 않음** (ADR-012) — 좌표 INSERT는
+  ``x_extension.ST_SetSRID(x_extension.ST_MakePoint(lon,lat),4326)``.
+- **PostGIS 함수는 ``x_extension.`` 스키마 한정** (ADR-008) — raw SQL은 DML 실행
+  connection의 search_path에 의존하지 않도록 명시 qualify (asyncpg pool 연결마다
+  search_path 보장이 어려움 → ``function st_makepoint does not exist`` 회피).
 
 ADR 참조
 --------
@@ -66,8 +69,8 @@ INSERT INTO feature.features (
 ) VALUES (
     :feature_id, :kind, :name, :category,
     CASE WHEN CAST(:lon AS double precision) IS NULL THEN NULL
-         ELSE ST_SetSRID(
-             ST_MakePoint(CAST(:lon AS double precision),
+         ELSE x_extension.ST_SetSRID(
+             x_extension.ST_MakePoint(CAST(:lon AS double precision),
                           CAST(:lat AS double precision)), 4326) END,
     CAST(:address AS jsonb), :legal_dong_code, :road_name_code,
     :road_address_management_no, :admin_dong_code, :sido_code, :sigungu_code,
@@ -139,8 +142,8 @@ RETURNING (xmax = 0) AS inserted
 _GET_FEATURE_SQL: Final[str] = """
 SELECT
     feature_id, kind, name, category,
-    ST_X(coord) AS lon, ST_Y(coord) AS lat,
-    ST_SRID(coord_5179) AS coord_5179_srid,
+    x_extension.ST_X(coord) AS lon, x_extension.ST_Y(coord) AS lat,
+    x_extension.ST_SRID(coord_5179) AS coord_5179_srid,
     address, detail, urls, raw_refs,
     legal_dong_code, sido_code, sigungu_code,
     marker_icon, marker_color, status,
