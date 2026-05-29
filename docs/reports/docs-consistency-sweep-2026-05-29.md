@@ -46,17 +46,26 @@ enum을 정본으로 쓰고, `geocoded`/`phone`/`observation`/`external_link`는
 - 회귀 테스트 `tests/integration/test_source_role_check.py` — 8개 enum 값 전부
   INSERT 가능 확인
 
-### 2.2 `provider_sync_state` 컬럼 설계 차이
+### 2.2 `provider_sync_state` 컬럼 설계 차이 — ✅ 문서를 구현에 맞춰 정정
 
-data-model.md의 초기 설계(metadata_hash / last_error 등)와 실제 마이그레이션 0002의
-간소화 스키마(last_failure_at / consecutive_failures)가 다르다. 이미 마이그레이션이
-간소화 버전으로 적용됨 — 문서를 코드에 맞춰 줄일지, 누락 컬럼을 ADR로 정식 추가할지
-결정 필요. 본 정리에서는 보류(설계 의도 확인 필요).
+data-model.md §4가 초기 설계(metadata_hash / last_observed_source_version /
+last_attempt_at / last_full_scan_at / last_error / last_error_at / extra)를
+서술했으나 실제 마이그레이션 0002 / `ProviderSyncStateRow`는 간소화 버전
+(last_failure_at / consecutive_failures + status CHECK)으로 적용됨.
 
-### 2.3 alembic 파일명 ↔ revision id
+**해소(후속 PR, 2026-05-29)**: data-model.md §4 SQL을 **구현 스키마로 교체** +
+status CHECK 추가, 제외된 컬럼은 "후속 후보 (미구현)" 주석으로 명시. 컬럼을 실제로
+추가할지는 별도 ADR 판단 — 본 정리는 문서를 코드 현실에 정렬만 함.
 
-`alembic/versions/0003_feature_consistency_reports.py`의 revision id는
-`0003_consistency_reports`. 기능상 문제 없으나 명명 일관성은 향후 정리 권장.
+### 2.3 alembic 파일명 ↔ revision id — ✅ 명명 규약 문서화
+
+`0003_feature_consistency_reports.py`의 revision id는 `0003_consistency_reports`
+처럼 파일명과 id가 다른 게 4건 전부의 패턴. 기능상 무해(`down_revision`은 id로
+연결).
+
+**해소(후속 PR, 2026-05-29)**: postgres-schema.md §8.4 명명 규약을 실제 컨벤션
+(`NNNN_<descriptive>.py`, 파일명≠revision id 허용)으로 갱신. 옛 `YYYYMMDDhhmm`
+예시는 미사용이라 제거.
 
 ## 3. 결론
 
