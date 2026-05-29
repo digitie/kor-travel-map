@@ -2,6 +2,30 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-29 (claude) — 문서 정합성 정리 (PR#69~#73 머지 후 drift sweep)
+
+**작업**: Sprint 3 코드 머지(ADR-033 Phase 1 + feature_repo + /features 라우터)
+이후 전체 문서를 재검토(Explore 에이전트 3대 병렬 → 실제 소스로 재검증)하고
+코드와의 충돌·drift·누락을 문서 정리. **코드 무수정**.
+
+- **포트 drift**: debug-ui 기본 포트 8600 → 8087 정정 (16곳/6파일 — architecture/
+  debug-ui-package/backend-package/standard-data-feature-etl/tripmate-integration/
+  README). journal 역사 기록은 보존.
+- **구현 현황 동기화**: architecture §4 엔드포인트(구현됨 vs 예정 구분), debug-ui-
+  package §6 구현 현황 블록, §4 settings 실제 필드 반영, backend-package
+  AsyncKrtourMapClient "설계 단계" 주석, README 빠른시작 제목.
+- **신규 테이블 문서화**: data-model §9.7 `ops.feature_consistency_reports`(ADR-033
+  Phase 1) 추가 + §9.5 data_integrity_violations "미구현(계획)" 표기.
+- **테스트 경로**: test-strategy §5 e2e → `packages/krtour-map-debug-ui/tests/`.
+- **ADR 현황**: agent-guide/CLAUDE/AGENTS "027~034 proposed"·"다음 후보 044" →
+  "001~044 accepted, 다음 후보 045" + 030~033/Phase 1 반영.
+- 요약 리포트: `docs/reports/docs-consistency-sweep-2026-05-29.md`.
+
+**미수정(코드 범위, 별도 PR 필요)**: ① `source_role` enum 불일치 — DTO/data-model
+(base_address 등) ↔ ORM/migration(geocoded/phone 등). DTO로 BASE_ADDRESS 적재 시
+DB CHECK 위반 가능(잠재 버그). ② provider_sync_state 컬럼 설계 차이. ③ alembic
+0003 파일명↔revision id. 리포트 §2에 기록.
+
 ## 2026-05-29 (claude) — debug-ui /features 조회 라우터 (Sprint 3)
 
 **작업**: 적재된 feature를 조회하는 `/features` REST 라우터 (debug-ui, ADR-035).

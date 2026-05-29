@@ -44,8 +44,8 @@ TripMate ↔ krtour-map 사이에는 REST API가 없다.
 | Category 모듈 출처 | `krtour.map.category` (구 `kraddr.base.categories`에서 이전, ADR-023) |
 | Address DTO + 행정코드 utility | `krtour.map.dto.Address` + `krtour.map.core.address` (구 `kraddr.base`에서 흡수, ADR-041 — `PlaceCoordinate`는 제외, 좌표는 `Coordinate`로 단일화) |
 | Provider 라이브러리 git URL/sha 핀 status | `docs/provider-contract.md` §12 표 (Sprint별 그룹화, kma/datagokr는 Protocol 박힘) |
-| ADR accepted | 001~028, 030~043 (text on main). 029는 ADR-043으로 supersede. **035~043 일괄 accepted 전환 PR#33, 2026-05-27** — 1차 implement 시점: 038(즉시) / 042(SPRINT-2 §2.1) / 035·037·043(SPRINT-2 §2.5) / 036(SPRINT-3 후반) / 039·040·041(SPRINT-4 prep). |
-| ADR proposed | (없음) — 다음 후보 번호는 ADR-044. |
+| ADR accepted | 001~044 전부 (text on main). 029는 ADR-043으로 supersede. **035~043 일괄 accepted 전환 PR#33, 2026-05-27** / **030~033 사용자 승인 확정 2026-05-29 (PR#69)**, ADR-033 Phase 1(F1~F3 정합성) 구현 완료. 1차 implement 시점: 038(즉시) / 042(SPRINT-2 §2.1) / 035·037·043(SPRINT-2 §2.5) / 036(SPRINT-3 후반) / 039·040·041(SPRINT-4 prep). |
+| ADR proposed | (없음) — 다음 후보 번호는 ADR-045. |
 | Sprint plan | `docs/sprints/SPRINT-1.md` ~ `SPRINT-5.md` |
 | Provider 구현 순서 (ADR-034) | 축제→날씨→유가→휴게소→국립공원/트래킹→국가유산→**MOIS**→휴양림/수목원→박물관/미술관 |
 

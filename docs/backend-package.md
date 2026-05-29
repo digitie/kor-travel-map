@@ -9,7 +9,13 @@
 
 ## 1. 라이브러리 진입점
 
-### 1.1 `AsyncKrtourMapClient`
+> **구현 현황 (2026-05-29)**: 본 절의 `AsyncKrtourMapClient`는 **설계 단계 API**다
+> (`src/krtour/map/client/`는 아직 미구현, Sprint 3~4 예정). 현재 적재/조회는
+> `krtour.map.infra.feature_repo`의 함수(`load_bundles` / `get_feature_row` /
+> `features_in_bbox`)를 직접 호출하는 단계이며, debug-ui `/features` 라우터가 이를
+> 사용한다 (PR#71~#73). client는 이 repo 함수들을 묶는 단일 진입점이 될 예정.
+
+### 1.1 `AsyncKrtourMapClient` (설계)
 
 ```python
 from krtour.map import AsyncKrtourMapClient, KrtourMapSettings
@@ -156,7 +162,7 @@ class KrtourMapSettings(BaseSettings):
 
     # 디버그 API (옵션)
     debug_api_host: str = "127.0.0.1"  # 외부 노출 금지 default
-    debug_api_port: int = 8600
+    debug_api_port: int = 8087
 
     # 객체 저장소 (boto3 S3 호환)
     object_store_endpoint_url: str = "http://127.0.0.1:9000"

@@ -56,7 +56,7 @@
 ┌──────────────────────────────────────────────────────────────────────┐
 │ krtour-map-debug-ui (별도 Python 패키지, ADR-020)                       │
 │                                                                      │
-│  app.py           FastAPI app (uvicorn ... 8600)                     │
+│  app.py           FastAPI app (uvicorn ... 8087)                     │
 │  routers/         디버그 엔드포인트                                       │
 │  views/static/    선택: 정적 HTML/JS 또는 Next.js bridge                 │
 │                                                                      │
@@ -125,17 +125,16 @@ async def feature_event_festivals(ctx, visitkorea_client):
 │ krtour-map-debug-ui (별도 패키지)                                  │
 │ packages/krtour-map-debug-ui/src/krtour/map_debug_ui/            │
 │                                                                  │
-│  uvicorn krtour.map_debug_ui.app:app --host 127.0.0.1 --port 8600│
+│  uvicorn krtour.map_debug_ui.app:app --host 127.0.0.1 --port 8087│
 │                                                                  │
-│   ├── /features/{id}                                             │
-│   ├── /features/in-bounds                                        │
-│   ├── /features/nearby                                           │
-│   ├── /features/{id}/weather                                     │
-│   ├── /features/{id}/sources                                     │
-│   ├── /providers/{name}/sync-state                               │
-│   ├── /debug/explain   (raw SQL EXPLAIN viewer)                  │
-│   ├── /debug/fixtures  (fixture 저장/replay)                      │
-│   └── /admin/dedup-review, /admin/integrity                      │
+│   ├── /debug/health, /debug/version          (구현됨, PR#35)    │
+│   ├── /debug/etl/...   (provider preview)     (구현됨, PR#44~47) │
+│   ├── /features        (bbox 목록)            (구현됨, PR#73)    │
+│   ├── /features/{feature_id}  (단건 상세)     (구현됨, PR#73)    │
+│   ├── /features/nearby, /{id}/weather, /sources  (Sprint 3~4)   │
+│   ├── /providers/{name}/sync-state               (Sprint 4)     │
+│   ├── /debug/explain, /debug/fixtures            (Sprint 4)     │
+│   └── /admin/dedup-review, /admin/integrity      (Sprint 4~5)   │
 └──────────────────────────────────────────────────────────────────┘
         │  authentication: 없음 (내부망 / localhost 전제)
         │  HTTP 아님 — 함수 호출

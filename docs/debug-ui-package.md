@@ -95,6 +95,8 @@ krtour.map_debug_ui.deps   ──→   krtour.map.client (AsyncKrtourMapClient)
 
 ## 4. settings
 
+실제 구현은 `packages/krtour-map-debug-ui/src/krtour/map_debug_ui/settings.py`:
+
 ```python
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -103,12 +105,20 @@ class DebugUiSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="KRTOUR_MAP_DEBUG_UI_", env_file=".env")
 
     host: str = "127.0.0.1"                   # 외부 노출 금지 default (ADR-005)
-    port: int = 8600
-    reload: bool = False                      # dev 모드 hot-reload
-    cors_allow_origins: list[str] = ["http://localhost:3000"]
-    log_level: str = "INFO"
-    log_format: Literal["json", "console"] = "json"
+    port: int = 8087
+    log_level: str = "info"
+    debug_routes_enabled: bool = True         # /debug/* 활성
+    features_routes_enabled: bool = True      # /features/* 활성 (DB 필요, PR#73)
+    cors_allow_origins: list[str] = [         # frontend(8610) cross-origin (PR#68)
+        "http://localhost:8610", "http://127.0.0.1:8610",
+    ]
+    # provider API key 8종 (source=live용, PR#47) — SecretStr | None:
+    #   kma_service_key / kma_apihub_key / opinet_service_key /
+    #   datagokr_service_key / visitkorea_service_key / krex_service_key /
+    #   knps_service_key / airkorea_service_key / krforest_service_key
 ```
+
+각 provider key의 출처(.env 이름)는 `settings.py` 필드 docstring 참조.
 
 메인 라이브러리 settings는 별도 `KrtourMapSettings`를 그대로 import해서 사용한다.
 `pg_dsn`, `object_store_*` 같은 항목은 본 패키지에서 재정의하지 않는다.
@@ -121,16 +131,16 @@ uv pip install -e .
 uv pip install -e packages/krtour-map-debug-ui
 
 # 기동 (인증 없음, localhost 전용)
-uvicorn krtour.map_debug_ui.app:app --host 127.0.0.1 --port 8600
+uvicorn krtour.map_debug_ui.app:app --host 127.0.0.1 --port 8087
 
 # 환경변수로 override
 KRTOUR_MAP_DEBUG_UI_HOST=127.0.0.1 \
-KRTOUR_MAP_DEBUG_UI_PORT=8600 \
+KRTOUR_MAP_DEBUG_UI_PORT=8087 \
 KRTOUR_MAP_PG_DSN=postgresql+asyncpg://... \
 uvicorn krtour.map_debug_ui.app:app
 
 # 또는 CLI (옵션)
-krtour-map-debug-ui run --host 127.0.0.1 --port 8600
+krtour-map-debug-ui run --host 127.0.0.1 --port 8087
 ```
 
 `0.0.0.0` 바인드 시 경고 로그 (ADR-005 후속). 코드 작성 단계에서
@@ -139,6 +149,21 @@ krtour-map-debug-ui run --host 127.0.0.1 --port 8600
 ## 6. 엔드포인트
 
 모두 인증 없음. `OpenAPI` 자동 노출 — `/docs` (Swagger UI), `/openapi.json`.
+
+> **구현 현황 (2026-05-29 기준)**: 아래 표는 **전체 계획**이다. 실제 구현·노출
+> 중인 엔드포인트는 다음과 같다 (`openapi.json`이 single source of truth):
+>
+> | Path | 메서드 | 비고 |
+> |------|--------|------|
+> | `/debug/health` | GET | liveness (PR#35) |
+> | `/debug/version` | GET | 패키지 version (PR#35) |
+> | `/debug/etl/providers`, `/debug/etl/{provider}/datasets`, `/debug/etl/{provider}/{dataset}/preview` | GET/POST | ETL preview (PR#44~47) |
+> | `/features` | GET | **bbox 목록** (`min_lon/min_lat/max_lon/max_lat`, `kind[]`, `limit`) — PR#73 |
+> | `/features/{feature_id}` | GET | 단건 상세 (PR#73) |
+>
+> 나머지 행(`/features/nearby`, `/{id}/weather`, `/sources`, `/import-jobs`,
+> `/dedup-review`, `/debug/explain` 등)은 **Sprint 3~5 예정**. 활성 라우터는
+> `settings.debug_routes_enabled` / `settings.features_routes_enabled` flag로 제어.
 
 | Path | 메서드 | 설명 |
 |------|--------|------|
@@ -225,7 +250,7 @@ type drift 부채 0).
 
 - **외부 노출 금지**. host default `127.0.0.1`. `0.0.0.0` 바인드 시 경고.
 - **방화벽**: Odroid 운영 노드에서 외부 포트 차단. `ufw allow from 192.168.0.0/16
-  to any port 8600` 같은 사내망 한정 허용만.
+  to any port 8087` 같은 사내망 한정 허용만.
 - **Cloudflare Tunnel** 또는 **Tailscale**로 원격 접근 시에도 인증은 네트워크
   계층에서.
 - **로그**: structlog JSON to stdout. 메인 라이브러리와 동일 키 표준
@@ -278,7 +303,7 @@ type drift 부채 0).
 | 변수 | 의미 |
 |------|------|
 | `NEXT_PUBLIC_VWORLD_API_KEY` | VWorld API key. **`KRADDR_GEO_VWORLD_API_KEY`와 동일 값 공유** (ADR-025 사용자 보강 1차 + 2차 2026-05-25). frontend 빌드/런타임 주입. |
-| `NEXT_PUBLIC_KRTOUR_MAP_DEBUG_UI_API` | 백엔드 API base URL (개발: `http://127.0.0.1:8600`) |
+| `NEXT_PUBLIC_KRTOUR_MAP_DEBUG_UI_API` | 백엔드 API base URL (개발: `http://127.0.0.1:8087`) |
 | `KRTOUR_MAP_DEBUG_UI_FRONTEND_DIST` | (FastAPI 측) Next.js build 산출물 경로 — static export 모드 시에만 사용 (`.next/` 또는 `out/`) |
 
 **VWorld API key 공유 정책 (확정, ADR-025 보강 2026-05-25)**:
@@ -303,7 +328,7 @@ uv pip install -e ".[dev]"
 uv pip install -e packages/krtour-map-debug-ui
 
 # 2. backend (FastAPI) 기동
-uvicorn krtour.map_debug_ui.app:app --host 127.0.0.1 --port 8600
+uvicorn krtour.map_debug_ui.app:app --host 127.0.0.1 --port 8087
 
 # 3. frontend (Next.js dev) 기동
 cd packages/krtour-map-debug-ui/frontend
@@ -316,7 +341,7 @@ npm run dev                  # http://127.0.0.1:8610
 **운영 옵션 3가지** (운영자 결정):
 
 - **A. standalone (default 권고)**: `next build` + `next start` — frontend는
-  8610 포트, backend는 8600 포트로 동일 호스트에서 별도 프로세스. CORS
+  8610 포트, backend는 8087 포트로 동일 호스트에서 별도 프로세스. CORS
   미필요 (Next.js rewrites로 same-origin fetch).
   ```bash
   cd packages/krtour-map-debug-ui/frontend
@@ -324,7 +349,7 @@ npm run dev                  # http://127.0.0.1:8610
   npm run start                # next start --port 8610 --hostname 127.0.0.1
   ```
 - **B. FastAPI reverse proxy**: backend의 `/ui/*` 경로가 Next.js로 proxy.
-  Next.js는 `basePath: '/ui'` 설정. 단일 포트 운영 (8600).
+  Next.js는 `basePath: '/ui'` 설정. 단일 포트 운영 (8087).
 - **C. static export**: `next build` + `next export` → `out/` HTML/JS.
   FastAPI가 `out/`을 static mount. SSR 미사용 (App Router의 client-only
   페이지만 가능). 본 디버그 UI는 read-mostly이라 가능하지만 server actions
@@ -394,7 +419,7 @@ CI에서 drift 검증 (kraddr-geo ADR-015 패턴 미러). 자세한 절차는 §
 
 ### 14.8 외부 노출 안전
 
-- frontend는 `127.0.0.1:8610` (Next.js dev/standalone) 또는 `127.0.0.1:8600`
+- frontend는 `127.0.0.1:8610` (Next.js dev/standalone) 또는 `127.0.0.1:8087`
   (FastAPI proxy/static mount, §14.3 옵션 B/C) 만.
 - VWorld API key는 frontend에 노출되지만 HTTP referrer 제한으로 보호.
   공유 키(`KRADDR_GEO_VWORLD_API_KEY`)이므로 referrer 화이트리스트에 backend

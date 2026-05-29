@@ -556,6 +556,11 @@ CREATE INDEX idx_merge_history_merged_at_brin ON ops.feature_merge_history USING
 
 ### 9.5 `ops.data_integrity_violations`
 
+> **구현 현황**: 본 테이블은 **미구현 (계획)**. ADR-033 Phase 1(Sprint 3)에서
+> 실제로 도입된 정합성 테이블은 §9.7 `ops.feature_consistency_reports`(배치 단위
+> 집계)다. 본 `data_integrity_violations`(위반 1건 = 1행, 운영 큐 성격)는 후속
+> ADR + 마이그레이션에서 도입 검토.
+
 ```sql
 CREATE TABLE ops.data_integrity_violations (
   violation_key       UUID PRIMARY KEY DEFAULT x_extension.gen_random_uuid(),
@@ -594,6 +599,26 @@ CREATE TABLE ops.api_call_log (
 
 CREATE INDEX idx_api_call_occurred_brin ON ops.api_call_log USING BRIN (occurred_at);
 CREATE INDEX idx_api_call_provider_time ON ops.api_call_log (provider, occurred_at DESC);
+```
+
+### 9.7 `ops.feature_consistency_reports` (ADR-033 Phase 1, 구현됨)
+
+정합성 배치 1회 = 1행. F1~F3(orphan source_record / detail 누락 / CRS drift)을
+`infra/consistency.py`가 검사해 집계 결과를 적재한다 (관측 모드 — Dagster swap
+게이트는 Phase 2/Sprint 5). alembic `0003_consistency_reports`로 도입.
+
+```sql
+CREATE TABLE ops.feature_consistency_reports (
+  report_id    UUID PRIMARY KEY DEFAULT x_extension.gen_random_uuid(),
+  batch_id     UUID NOT NULL,
+  started_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at  TIMESTAMPTZ,
+  severity_max TEXT NOT NULL CHECK (severity_max IN ('OK','WARN','ERROR')),
+  cases        JSONB NOT NULL,   -- [{code, severity, description, count, sample_ids}]
+  summary      JSONB NOT NULL    -- {total_violations, cases_evaluated, by_severity, by_code}
+);
+CREATE INDEX idx_reports_batch   ON ops.feature_consistency_reports (batch_id);
+CREATE INDEX idx_reports_started ON ops.feature_consistency_reports (started_at DESC);
 ```
 
 ## 10. 보관 정책 (ADR-017) → purge 작업
