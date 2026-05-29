@@ -1229,6 +1229,21 @@
   - 코드 작성 단계 진입 결정(T-014) PR에 본 ADR을 묶어 `proposed` →
     `accepted` 전환 + T-201을 T-201a (Phase 1) / T-201b (Phase 2)로 분할.
 
+- **Amendment (2026-05-29, Sprint 3) — Phase 1 (T-201a) 구현 완료**:
+  - `alembic 0003_feature_consistency_reports` — `ops.feature_consistency_reports`
+    테이블 + `idx_reports_batch` / `idx_reports_started` (PK `gen_random_uuid()`,
+    pgcrypto는 `x_extension`에 격리되어 있고 search_path 포함 → unqualified 호출).
+  - `infra/models.py` `FeatureConsistencyReportRow` (Alembic target_metadata).
+  - `infra/consistency.py` — F1~F3 raw SQL(ADR-004) + `build_report`(순수 집계) +
+    `run_consistency_checks(session, *, batch_id, persist)`. **Dagster 게이트
+    미적용** (Phase 1 = 관측). 케이스 추가는 `CONSISTENCY_CASES`에 선언만 추가.
+  - **schema 현실 반영**: 본 저장소는 detail을 별도 테이블이 아닌 `features.detail`
+    JSONB로 보관(ADR-018)하므로, F2는 "PlaceDetail 행 없음"이 아니라 "detail-bearing
+    kind(place/event/notice/route/area)인데 `detail` JSONB 비어있음"으로 구현.
+    price/weather는 detail 미보유(DETAIL_MODELS 제외)라 F2 대상 아님.
+  - 테스트: `tests/unit/infra/test_consistency.py`(집계 5건) +
+    `tests/integration/test_consistency_reports.py`(F1/F2 검출 + OK + 영속화, 2건).
+
 ## ADR-028: `python-knps-api` provider 라이브러리 등록
 
 - **상태**: accepted (T-014 Sprint 1 진입 시 전환, 2026-05-25) +

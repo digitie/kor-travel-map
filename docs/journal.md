@@ -2,6 +2,31 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-29 (claude) — ADR-033 Phase 1 (T-201a) feature_consistency_reports F1~F3
+
+**작업**: ADR-033 Phase 1 구현 (Sprint 3). 정합성 검사 스키마 + critical 3건 +
+관측(Dagster 게이트 미적용).
+
+- `alembic 0003_feature_consistency_reports` — `ops.feature_consistency_reports`
+  (report_id `gen_random_uuid()`/batch_id/started_at/finished_at/severity_max
+  CHECK/cases JSONB/summary JSONB) + `idx_reports_batch`/`idx_reports_started`.
+- `infra/models.py` `FeatureConsistencyReportRow` (target_metadata) + `__all__`.
+- `infra/consistency.py` — F1(orphan source_record)/F2(detail-bearing kind인데
+  `detail` JSONB 비어있음, ADR-018)/F3(CRS drift, `coord_5179`≠ST_Transform,
+  ADR-012) raw SQL(ADR-004) + 순수 집계 `build_report` + `run_consistency_checks`.
+  **Dagster 게이트 미적용**(Phase 1=관측). 케이스 확장은 `CONSISTENCY_CASES` 추가.
+- 테스트: 단위 `tests/unit/test_infra_consistency.py`(집계) + 통합
+  `tests/integration/test_consistency_reports.py`(F1/F2 검출+영속화/정상 OK).
+- 문서: decisions ADR-033 Amendment / postgres-schema ops / dagster-boundary §12 /
+  test-strategy 정합성 매트릭스.
+
+**검증(로컬 venv)**: 단위+lint 503 passed + 신규 6, mypy --strict OK, ruff OK,
+import-linter 4 kept, alembic head 단일(0003). 통합은 로컬 docker 부재로 skip(2) →
+CI에서 실행.
+
+**다음**: Sprint 3 본작업 — KNPS/krheritage provider 또는 `/features/*` 라우터 +
+`feature_repo.py` 실 적재.
+
 ## 2026-05-29 (claude) — ADR-030~033 사용자 승인 확정 + 문서 drift 정정
 
 **작업**: 사용자가 ADR-030/031/032/033을 "제안한 대로 진행" 승인. 이 4건은

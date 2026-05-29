@@ -338,10 +338,13 @@ import 책임).
 
 **도입 시점은 ADR-033** (accepted, T-014에 묶어 전환) — 두 단계로 분할:
 
-- **Phase 1 (Sprint 3~4, T-201a)**: 스키마 + F1~F3 critical 케이스 (orphan
-  source / detail 누락 / CRS drift). Dagster 게이트 **미적용** — 검증만.
+- **Phase 1 (Sprint 3~4, T-201a)** — ✅ **구현 완료 (2026-05-29)**: 스키마
+  (`alembic 0003`, `ops.feature_consistency_reports`) + F1~F3 critical 케이스
+  (orphan source / detail 누락 / CRS drift) — `infra/consistency.py`
+  `run_consistency_checks`. Dagster 게이트 **미적용** — 검증만(관측).
 - **Phase 2 (Sprint 5 운영 진입 직전, T-201b)**: F4~F8 + Dagster 게이트 +
-  swap 차단. dry-run report 첨부 후 점진 enable.
+  swap 차단. dry-run report 첨부 후 점진 enable. 위 흐름(child 완료 →
+  `consistency_check` → `severity_max != ERROR`이면 swap)을 Phase 2에서 wiring.
 
 자세한 구현은 T-200/T-201에서.
 

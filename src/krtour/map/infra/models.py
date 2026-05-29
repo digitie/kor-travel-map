@@ -56,6 +56,7 @@ __all__ = [
     "SourceRecordRow",
     "SourceLinkRow",
     "ProviderSyncStateRow",
+    "FeatureConsistencyReportRow",
 ]
 
 
@@ -359,3 +360,43 @@ class ProviderSyncStateRow(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()"),
     )
+
+
+# =============================================================================
+# ops.feature_consistency_reports  (ADR-033 Phase 1 / ADR-017 미러)
+# =============================================================================
+
+
+class FeatureConsistencyReportRow(Base):
+    """``ops.feature_consistency_reports`` row mapping — 정합성 배치 결과.
+
+    ADR-033 Phase 1: F1~F3 critical 케이스를 ``infra/consistency.py``의 raw SQL
+    (ADR-004)로 검사한 결과를 1 배치 = 1 행으로 영속화. ``cases``는 케이스별
+    결과 array, ``summary``는 집계(total / by_severity / by_code). Dagster 게이트
+    (swap 차단)는 Phase 2(Sprint 5) — 본 테이블은 그 전까지 "관측" 용도.
+    """
+
+    __tablename__ = "feature_consistency_reports"
+    __table_args__ = (
+        CheckConstraint(
+            "severity_max IN ('OK','WARN','ERROR')",
+            name="feature_consistency_reports_severity_max",
+        ),
+        Index("idx_reports_batch", "batch_id"),
+        Index("idx_reports_started", text("started_at DESC")),
+        {"schema": "ops"},
+    )
+
+    report_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    batch_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    severity_max: Mapped[str] = mapped_column(String, nullable=False)
+    cases: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
+    summary: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)

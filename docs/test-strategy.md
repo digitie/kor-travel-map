@@ -154,6 +154,27 @@ def test_korean_coord_validates_bounds(coord):
 
 ## 4. 통합 테스트 (`tests/integration/`)
 
+### 4.0 정합성 케이스 매트릭스 (ADR-033)
+
+`ops.feature_consistency_reports` F1~F8. Phase 1(F1~F3)은 통합
+`tests/integration/test_consistency_reports.py` + 집계 단위
+`tests/unit/test_infra_consistency.py`. Phase 2(F4~F8 + Dagster 게이트)는 Sprint 5.
+
+| 케이스 | 정의 | severity | Phase |
+|--------|------|----------|-------|
+| F1 | orphan source_record (`source_links` 없음) | ERROR | 1 ✅ |
+| F2 | detail-bearing kind인데 `detail` JSONB 비어있음 (ADR-018) | ERROR | 1 ✅ |
+| F3 | `coord_5179` ≠ `ST_Transform(coord,5179)` (ADR-012) | ERROR | 1 ✅ |
+| F4 | `dedup_review_queue` 미해소 초과 | WARN | 2 |
+| F5 | provider `last_success` SLA 초과 | WARN | 2 |
+| F6 | `opening_hours` 모순 (ADR-019) | ERROR | 2 |
+| F7 | cross-provider dedup mismatch | WARN | 2 |
+| F8 | `file_object` orphan (RustFS↔DB) | WARN | 2 |
+
+집계(`build_report`): `severity_max` = 위반 케이스 최고 severity, 없으면 `OK`.
+Phase 1은 **관측만**(Dagster swap 차단 없음).
+
+
 ### 4.1 testcontainers PostGIS
 
 ```python
