@@ -46,6 +46,12 @@ from krtour.map.infra.db import (
     make_async_session_factory,
     normalize_async_dsn,
 )
+from krtour.map.infra.dedup_repo import (
+    DedupQueueResult,
+    enqueue_dedup_candidate,
+    enqueue_dedup_candidates,
+    pending_dedup_reviews,
+)
 from krtour.map.infra.feature_repo import (
     FeatureLoadResult,
     features_in_bbox,
@@ -58,6 +64,7 @@ from krtour.map.infra.feature_repo import (
 )
 from krtour.map.infra.models import (
     Base,
+    DedupReviewQueueRow,
     FeatureConsistencyReportRow,
     FeatureRow,
     ProviderSyncStateRow,
@@ -86,6 +93,7 @@ __all__ = [
     "SourceLinkRow",
     "ProviderSyncStateRow",
     "FeatureConsistencyReportRow",
+    "DedupReviewQueueRow",
     # feature_repo (ADR-004 raw SQL load 경로)
     "FeatureLoadResult",
     "upsert_feature",
@@ -95,4 +103,9 @@ __all__ = [
     "load_bundles",
     "get_feature_row",
     "features_in_bbox",
+    # dedup_repo (ADR-016 dedup 후보 큐)
+    "DedupQueueResult",
+    "enqueue_dedup_candidate",
+    "enqueue_dedup_candidates",
+    "pending_dedup_reviews",
 ]
