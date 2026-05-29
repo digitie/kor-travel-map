@@ -205,14 +205,36 @@ def knps_geometry_records_to_bundles(
     protected_areas → area. centroid를 coord로, geom(WKT)을 Feature.geom으로.
     파싱실패/경계밖/type불일치 행은 skip."""
 
+# knps-api CsvPreview 브리지 (knps-api parse_records API가 아직 없을 때 — 현재 경로).
+# knps-api는 CSV를 CsvPreview(헤더+행)로 파싱해 주므로, 그 행을 직접 bundle로 잇는다.
+def knps_csv_preview_to_point_bundles(
+    preview: KnpsCsvPreview, *, dataset_key: str, fetched_at: datetime,
+    column_map: KnpsPointColumnMap | None = None,
+) -> list[FeatureBundle]:
+    """CsvPreview(헤더→값 행) → place bundle. column_map None이면 best-guess
+    KNPS_DEFAULT_POINT_COLUMN_MAP(경도/위도/명칭/관리번호 후보). ⚠️ live headers 검증."""
+
+def knps_csv_preview_to_geometry_bundles(
+    preview: KnpsCsvPreview, *, dataset_key: str, fetched_at: datetime,
+    column_map: KnpsGeometryColumnMap | None = None,
+) -> list[FeatureBundle]:
+    """CsvPreview → route/area bundle (geom WKT 컬럼). WKT 컬럼 없는 행 skip."""
+
 # 호출 측 예시 (Sprint 3 Dagster asset 내부)
 async def example_dagster_op() -> None:
     async with KnpsClient(max_rps=5.0) as client:
-        # knps-api가 SHP/CSV를 파싱해 typed record(좌표·geometry WKT) 제공 (ADR-044).
-        records = await client.files.parse_records("knps_park_boundaries")  # upstream
-        bundles = knps_geometry_records_to_bundles(
-            records, dataset_key="knps_park_boundaries", fetched_at=kst_now(),
+        # (A) CSV Point: 현재 가능 — download_artifact preview_rows를 크게.
+        artifact = await client.files.download_artifact(
+            "knps_restrooms", preview_rows=10**9,
         )
+        for preview in artifact.csv_previews:
+            # ⚠️ preview.headers로 실제 컬럼명 확인 후 column_map 지정 권장.
+            bundles = knps_csv_preview_to_point_bundles(
+                preview, dataset_key="knps_restrooms", fetched_at=kst_now(),
+            )
+        # (B) SHP geometry: knps-api가 WGS84 WKT를 노출한 뒤 (upstream PR) 직접.
+        # records = await client.files.parse_records("knps_park_boundaries")
+        # bundles = knps_geometry_records_to_bundles(records, dataset_key=..., ...)
 ```
 
 **SHP/CSV parsing 책임 = knps-api (ADR-044)**: 데이터 정합성·파싱의 1차 책임은

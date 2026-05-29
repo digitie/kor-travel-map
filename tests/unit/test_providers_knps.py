@@ -26,6 +26,10 @@ from krtour.map.providers.knps import (
     KNPS_PLACE_DATASETS,
     KNPS_POINT_DATASET_KEYS,
     PROVIDER_NAME,
+    KnpsGeometryColumnMap,
+    KnpsPointColumnMap,
+    knps_csv_preview_to_geometry_bundles,
+    knps_csv_preview_to_point_bundles,
     knps_geometry_records_to_bundles,
     knps_point_records_to_bundles,
     resolve_cultural_resource_category,
@@ -288,3 +292,136 @@ def test_geometry_dataset_keys_registry() -> None:
     assert "knps_trails" in KNPS_GEOMETRY_DATASET_KEYS
     # Point/geometry dataset 집합은 서로 disjoint.
     assert KNPS_GEOMETRY_DATASET_KEYS.isdisjoint(KNPS_POINT_DATASET_KEYS)
+
+
+# ── knps-api CsvPreview → FeatureBundle 브리지 ────────────────────────────
+
+
+@dataclass(frozen=True)
+class _Row:
+    """knps-api ``CsvPreviewRow`` structural stub."""
+
+    mapping: dict[str, str | None]
+
+    @property
+    def as_dict(self) -> dict[str, str | None]:
+        return self.mapping
+
+
+@dataclass(frozen=True)
+class _Preview:
+    """knps-api ``CsvPreview`` structural stub."""
+
+    rows: tuple[_Row, ...]
+
+
+def _preview(*dicts: dict[str, str | None]) -> _Preview:
+    return _Preview(rows=tuple(_Row(d) for d in dicts))
+
+
+def test_csv_preview_point_default_columns() -> None:
+    prev = _preview(
+        {"관리번호": "VC-1", "명칭": "북한산 탐방안내소", "경도": "126.9876", "위도": "37.6584"},
+    )
+    b = knps_csv_preview_to_point_bundles(
+        prev, dataset_key="knps_visitor_centers", fetched_at=_FETCHED
+    )[0]
+    assert b.feature.name == "북한산 탐방안내소"
+    assert b.feature.category == "01060101"
+    assert b.feature.coord is not None
+    assert float(b.feature.coord.lon) == pytest.approx(126.9876)
+    assert b.source_record.source_entity_id == "VC-1"
+
+
+def test_csv_preview_point_missing_coord_is_none() -> None:
+    prev = _preview({"관리번호": "VC-2", "명칭": "좌표없음", "경도": "", "위도": ""})
+    b = knps_csv_preview_to_point_bundles(
+        prev, dataset_key="knps_restrooms", fetched_at=_FETCHED
+    )[0]
+    assert b.feature.coord is None
+
+
+def test_csv_preview_point_id_hash_fallback() -> None:
+    # source_id 컬럼 없음 → 행 해시 기반 결정적 fallback.
+    prev = _preview({"명칭": "무명소", "경도": "127.0", "위도": "37.5"})
+    b = knps_csv_preview_to_point_bundles(
+        prev, dataset_key="knps_restrooms", fetched_at=_FETCHED
+    )[0]
+    assert b.source_record.source_entity_id.startswith("row-")
+    # 결정적: 같은 행은 같은 id
+    b2 = knps_csv_preview_to_point_bundles(
+        prev, dataset_key="knps_restrooms", fetched_at=_FETCHED
+    )[0]
+    assert b.source_record.source_entity_id == b2.source_record.source_entity_id
+
+
+def test_csv_preview_point_column_map_override() -> None:
+    cm = KnpsPointColumnMap(
+        source_id=("ID",), name=("NAME",), longitude=("LON",), latitude=("LAT",)
+    )
+    prev = _preview({"ID": "x1", "NAME": "영문헤더", "LON": "127.1", "LAT": "37.4"})
+    b = knps_csv_preview_to_point_bundles(
+        prev, dataset_key="knps_campgrounds", fetched_at=_FETCHED, column_map=cm
+    )[0]
+    assert b.feature.name == "영문헤더"
+    assert float(b.feature.coord.lon) == pytest.approx(127.1)
+
+
+def test_csv_preview_point_cultural_subtype_from_raw() -> None:
+    prev = _preview(
+        {
+            "관리번호": "c1",
+            "명칭": "화엄사",
+            "경도": "127.3",
+            "위도": "35.3",
+            "RESOURCE_TYPE": "사찰",
+        },
+    )
+    b = knps_csv_preview_to_point_bundles(
+        prev, dataset_key="knps_cultural_resources", fetched_at=_FETCHED
+    )[0]
+    assert b.feature.category == "01070100"
+    assert b.feature.detail.place_kind == "temple"
+
+
+def test_csv_preview_point_unsupported_key_raises() -> None:
+    with pytest.raises(KeyError, match="Point/place dataset 아님"):
+        knps_csv_preview_to_point_bundles(
+            _preview(), dataset_key="knps_trails", fetched_at=_FETCHED
+        )
+
+
+def test_csv_preview_geometry_wkt_column() -> None:
+    prev = _preview(
+        {"관리번호": "t1", "노선명": "둘레길", "WKT": "LINESTRING(127 37.5, 127.1 37.6)"},
+        {"관리번호": "t2", "노선명": "WKT없음"},  # geometry 없음 → skip
+    )
+    bundles = knps_csv_preview_to_geometry_bundles(
+        prev, dataset_key="knps_trails", fetched_at=_FETCHED
+    )
+    assert len(bundles) == 1
+    assert bundles[0].feature.kind is FeatureKind.ROUTE
+    assert bundles[0].feature.geom is not None
+
+
+def test_csv_preview_geometry_column_map_override() -> None:
+    cm = KnpsGeometryColumnMap(source_id=("ID",), name=("NM",), geom_wkt=("SHAPE",))
+    prev = _preview(
+        {
+            "ID": "p1",
+            "NM": "북한산",
+            "SHAPE": "POLYGON((126.9 37.6,127 37.6,127 37.7,126.9 37.7,126.9 37.6))",
+        }
+    )
+    b = knps_csv_preview_to_geometry_bundles(
+        prev, dataset_key="knps_park_boundaries", fetched_at=_FETCHED, column_map=cm
+    )[0]
+    assert b.feature.kind is FeatureKind.AREA
+    assert b.feature.category == "01020101"
+
+
+def test_csv_preview_geometry_unsupported_key_raises() -> None:
+    with pytest.raises(KeyError, match="route/area geometry dataset 아님"):
+        knps_csv_preview_to_geometry_bundles(
+            _preview(), dataset_key="knps_restrooms", fetched_at=_FETCHED
+        )
