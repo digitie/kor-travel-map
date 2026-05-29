@@ -241,7 +241,7 @@ ConcurrencyConfig: `datagokr_api: max_concurrent=2`.
 
 ```bash
 # 디버그 패키지에서 (별도)
-curl -X POST http://127.0.0.1:8600/debug/standard-data \
+curl -X POST http://127.0.0.1:8087/debug/standard-data \
      -H 'content-type: application/json' \
      -d '{"dataset_key": "standard_tourism_roads", "page_no": 1, "num_of_rows": 5}'
 ```

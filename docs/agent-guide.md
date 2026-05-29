@@ -13,7 +13,7 @@
 4. `docs/architecture.md` 목차 — 의존 방향, 데이터 흐름
 5. `docs/resume.md` — "다음 한 작업"
 6. `docs/journal.md` 최신 3건 — 직전 컨텍스트
-7. 관련 ADR (`docs/decisions.md` 특히 027~034 proposed)
+7. 관련 ADR (`docs/decisions.md` — ADR-001~044 전부 accepted, 다음 후보 045)
 8. 직결 docs (provider 추가면 `docs/provider-contract.md`, 현재 sprint면
    `docs/sprints/SPRINT-N.md` 등)
 

@@ -302,11 +302,15 @@ async def test_bulk_price_values_copy_handles_100k_rows(pg_engine, generate_pric
     assert count == 100_000
 ```
 
-## 5. e2e 테스트 (`tests/e2e/`)
+## 5. e2e 테스트 (`packages/krtour-map-debug-ui/tests/`)
 
-e2e 테스트는 **별도 패키지** `krtour-map-debug-ui`의 FastAPI app을 띄워
-검증한다 (ADR-020). 따라서 e2e 환경은 메인 패키지 + 디버그 UI 패키지 둘 다
-설치된 venv에서 실행한다 (`uv pip install -e . -e packages/krtour-map-debug-ui`).
+e2e/라우터 테스트는 **별도 패키지** `krtour-map-debug-ui`의 FastAPI app을 띄워
+검증한다 (ADR-020). 메인 패키지 `tests/` 트리에는 e2e 디렉토리가 없고, 디버그 UI
+테스트는 `packages/krtour-map-debug-ui/tests/`에 둔다 (`test_routers.py` /
+`test_features_router.py` / `test_etl_routers.py` 등 — `TestClient` 기반, 대부분
+DB 없이 의존성 override). 실행 환경은 메인 + 디버그 UI 둘 다 설치된 venv
+(`uv pip install -e . -e packages/krtour-map-debug-ui`). 실 DB round-trip은 메인
+패키지 `tests/integration/`(testcontainers PostGIS)이 담당한다.
 
 ### 5.1 디버그 FastAPI app 테스트
 

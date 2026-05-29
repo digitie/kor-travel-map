@@ -425,7 +425,7 @@ TripMate 테스트는 라이브러리의 Fake repo / InMemoryFileStore를 재사
 uv pip install -e ../python-krtour-map/packages/krtour-map-debug-ui
 
 # 내부망에서 운영자가 띄움 (인증 없음, 127.0.0.1 default)
-uvicorn krtour.map_debug_ui.app:app --host 127.0.0.1 --port 8600
+uvicorn krtour.map_debug_ui.app:app --host 127.0.0.1 --port 8087
 ```
 
 TripMate UI에서 사용자에게 노출되지 않음. 운영자 SSH 터널/내부망 전용.
