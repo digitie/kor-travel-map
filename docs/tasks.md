@@ -315,7 +315,8 @@ branch로.
   - `maplibre-vworld-js v0.1.0` 정합 — frontend `package.json` 의존 핀 정정
     (`^1.0.0`→git URL `#v0.1.0`, zod `^3`→`^4.4.3`) + docs 버전 갱신 (T-019 관련)
   - KMA `mid_forecast_to_weather_values` (중기예보 텍스트 + AM/PM split)
-  - `/features/*` 라우터 + `infra/feature_repo.py` raw SQL + frontend 지도 화면
+  - `/features/*` 라우터 + `infra/feature_repo.py` raw SQL (✅ feature_repo 완료
+    2026-05-29 — load_bundles/get_feature_row; 라우터+frontend 지도는 후속) 
   - Sprint 2 §2.1 끝물 visitkorea TourAPI enrichment
     (`festival_to_enrichment_links`)
 - **Sprint 진행 순서** (ADR-034):

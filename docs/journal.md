@@ -2,6 +2,30 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-29 (claude) — infra/feature_repo.py — 첫 DB write 경로 (Sprint 3)
+
+**작업**: `FeatureBundle` → DB 적재 raw SQL repository (ADR-004). provider 변환
+결과를 실제로 적재하는 첫 write 경로.
+
+- `infra/feature_repo.py` — `_SQL` 상수 3종(features/source_records/source_links
+  upsert) + `get_feature_row` 조회. `upsert_feature`/`upsert_source_record`/
+  `upsert_source_link`/`load_bundle`/`load_bundles` + `FeatureLoadResult` dataclass.
+- **idempotent**: features/source_links는 `ON CONFLICT DO UPDATE`
+  (`RETURNING xmax=0`으로 신규/갱신 구분), source_records는 `DO NOTHING`
+  (payload_hash UNIQUE → 이력 보존, ADR-017).
+- **ADR-012 준수**: `coord`(4326)만 `ST_SetSRID(ST_MakePoint(lon,lat),4326)`으로
+  INSERT, `coord_5179`는 STORED generated라 제외. 술어에 `ST_Transform` 없음.
+- commit은 호출자 책임(단위 of work). bulk COPY(ADR-013)는 후속.
+- `infra/__init__.py` export + `__all__` 추가.
+- 테스트: 단위 `tests/unit/test_infra_feature_repo.py`(param 빌더/집계 6) + 통합
+  `tests/integration/test_feature_repo_load.py`(적재/idempotent/coord_5179/FK/조회 4).
+
+**검증(로컬 venv)**: unit+lint 486 passed(+6), mypy --strict OK, ruff OK,
+import-linter 4 kept. 통합은 로컬 docker 부재로 skip → CI에서 실행.
+
+**다음**: `/features/*` 조회 라우터(debug-ui) + frontend 지도 wiring, 또는
+provider ⑤ KNPS.
+
 ## 2026-05-29 (claude) — ADR-033 Phase 1 (T-201a) feature_consistency_reports F1~F3
 
 **작업**: ADR-033 Phase 1 구현 (Sprint 3). 정합성 검사 스키마 + critical 3건 +

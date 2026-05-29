@@ -218,7 +218,7 @@ schema 분리로 TripMate 도메인 테이블(`users`, `trips`, `trip_pois`, ...
 | `core/exceptions.py` | 도메인 예외 |
 | `core/settings.py` | Pydantic settings (`KRTOUR_MAP_*`, `SecretStr`) |
 | `infra/models.py` | SQLAlchemy ORM 매핑 (read-only mapping) |
-| `infra/features_repo.py` | raw SQL repository (`_SQL` 상수 + `text()`) |
+| `infra/feature_repo.py` | raw SQL repository (`_SQL` 상수 + `text()`) — FeatureBundle upsert + get_feature_row |
 | `infra/source_repo.py`, `infra/sync_repo.py`, `infra/jobs_repo.py`, ... | 각 도메인 repository |
 | `infra/file_store.py` | S3 호환 객체 저장소 (RustFS) |
 | `providers/<name>.py` | provider raw → DTO 변환 + dataset_key 상수 |
