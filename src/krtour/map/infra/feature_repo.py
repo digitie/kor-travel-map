@@ -65,8 +65,10 @@ INSERT INTO feature.features (
     created_at, updated_at, deleted_at
 ) VALUES (
     :feature_id, :kind, :name, :category,
-    CASE WHEN :lon IS NULL THEN NULL
-         ELSE ST_SetSRID(ST_MakePoint(:lon, :lat), 4326) END,
+    CASE WHEN CAST(:lon AS double precision) IS NULL THEN NULL
+         ELSE ST_SetSRID(
+             ST_MakePoint(CAST(:lon AS double precision),
+                          CAST(:lat AS double precision)), 4326) END,
     CAST(:address AS jsonb), :legal_dong_code, :road_name_code,
     :road_address_management_no, :admin_dong_code, :sido_code, :sigungu_code,
     CAST(:urls AS jsonb), :marker_icon, :marker_color,
@@ -317,17 +319,33 @@ async def load_bundles(
     return total
 
 
+# JSONB 컬럼 — raw ``text()`` 쿼리는 driver에 따라 str(asyncpg)로 돌려줄 수 있어
+# (typed 컬럼이 없으면 SQLAlchemy JSON 디시리얼라이저 미작동) 명시적으로 파싱한다.
+_JSONB_COLUMNS: Final[tuple[str, ...]] = ("address", "detail", "urls", "raw_refs")
+
+
 async def get_feature_row(
     session: AsyncSession, feature_id: str
 ) -> dict[str, Any] | None:
     """``feature.features`` 단건 조회 (raw row dict). 없으면 ``None``.
 
     좌표는 ``lon``/``lat`` (4326)으로 분해해서 반환. ``coord_5179_srid``로
-    generated column이 5179로 채워졌는지 확인 가능 (ADR-012). DTO 매핑은
-    상위(client) 책임 — 본 repo는 raw row만.
+    generated column이 5179로 채워졌는지 확인 가능 (ADR-012). JSONB 컬럼
+    (``address``/``detail``/``urls``/``raw_refs``)은 dict/list로 디시리얼라이즈해서
+    반환 — driver(asyncpg)가 str로 돌려줘도 일관성 보장. DTO 매핑은 상위(client)
+    책임 — 본 repo는 raw row만.
     """
+    import json
+
     result = await session.execute(
         text(_GET_FEATURE_SQL), {"feature_id": feature_id}
     )
     row = result.mappings().first()
-    return dict(row) if row is not None else None
+    if row is None:
+        return None
+    data = dict(row)
+    for col in _JSONB_COLUMNS:
+        value = data.get(col)
+        if isinstance(value, str):
+            data[col] = json.loads(value)
+    return data
