@@ -2,6 +2,33 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-29 (claude) — KNPS 최신 재검토: 국립공원 경계 category + route/area maki 정정
+
+**작업**: 사용자 요청 "knps api 최신으로 읽어서 다시 검토". knps-api 최신 HEAD =
+`06da125f`(내가 핀한 것과 동일, upstream 변경 없음) 소스를 직접 clone해 catalog/
+models/files API + upstream `docs/knps-feature-etl.md §4` 표 대조.
+
+**확인**: 14 dataset의 key/geometry_type/feature_kind/formats가 내 `KNPS_*_DATASETS`
+와 1:1 일치. place 5건의 maki는 `get_category().mapbox_maki_icon`이 upstream 표와
+완전 일치(information/toilet/campsite/shelter/religious-buddhist/monument). `files`
+API는 download(bytes)/inspect_bytes/download_artifact(preview)만 — record/geometry
+파싱 없음 → Amendment I(파싱=knps-api 책임, upstream PR 필요) 재확인.
+
+**정정(upstream §4 대조로 발견한 내 오류)**:
+- `knps_park_boundaries`: category를 sentinel `00000000`로 잘못 둠 → upstream은
+  실제 `01020101`(국립공원 경계도 관광 category 보유) + maki `park`. 수정.
+- `knps_trails`/`knps_linear_facilities`: maki가 기본 "marker" → upstream `park`. 수정.
+- hazard/protected는 category 없음 + barrier 유지(정확). place 5건 무변경(이미 정합).
+- 변경 파일: `providers/knps.py`(spec + 상수 `_NATIONAL_PARK_CATEGORY`/`_PARK_MAKI`),
+  `knps-feature-etl.md §3.1/§4` 표, 테스트(park=01020101/park maki assert + place
+  maki parity parametrized 4건).
+
+**검증(네이티브 PostGIS)**: unit+lint 528, 통합 feature_repo 6/6, ruff/mypy/
+import-linter green.
+
+**주의**: park_boundaries의 feature_id가 category 변경으로 달라짐 — 아직 적재 전
+(Sprint 3 미실행)이라 영향 없음.
+
 ## 2026-05-29 (claude) — KNPS SHP/CSV 파싱 책임 = knps-api 확정 (ADR-028 Amendment I)
 
 **결정(사용자)**: "knps shp 로딩은 knps-api 에서 진행하는게 맞음." → ADR-028 §B

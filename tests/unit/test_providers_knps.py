@@ -82,6 +82,20 @@ def test_restroom_and_campground_categories() -> None:
 
 
 @pytest.mark.parametrize(
+    ("dataset_key", "maki"),
+    [
+        # upstream knps-feature-etl.md §4 표와 1:1 (category 카탈로그 drift 방지)
+        ("knps_visitor_centers", "information"),
+        ("knps_restrooms", "toilet"),
+        ("knps_campgrounds", "campsite"),
+        ("knps_shelters", "shelter"),
+    ],
+)
+def test_place_maki_matches_upstream_table(dataset_key: str, maki: str) -> None:
+    assert _one(dataset_key).feature.marker_icon == maki
+
+
+@pytest.mark.parametrize(
     ("rtype", "category", "place_kind"),
     [
         ("사찰", "01070100", "temple"),
@@ -199,6 +213,7 @@ def test_trail_route_mapping() -> None:
     b = _geo_one("knps_trails", _LINE)[0]
     assert b.feature.kind is FeatureKind.ROUTE
     assert b.feature.category == "01020103"
+    assert b.feature.marker_icon == "park"  # upstream §4 — route는 park
     assert b.feature.detail.route_type == "hiking_trail"
     assert b.feature.detail.geometry_source == "knps"
     assert b.feature.geom is not None
@@ -211,13 +226,16 @@ def test_trail_route_mapping() -> None:
 def test_linear_facility_route_type() -> None:
     b = _geo_one("knps_linear_facilities", _LINE)[0]
     assert b.feature.detail.route_type == "facility_road"
+    assert b.feature.category == "01020103"
+    assert b.feature.marker_icon == "park"
 
 
 def test_park_boundary_area_mapping() -> None:
     b = _geo_one("knps_park_boundaries", _POLY, name="북한산국립공원")[0]
     assert b.feature.kind is FeatureKind.AREA
-    # area는 카테고리 트리 밖 → sentinel
-    assert b.feature.category == "00000000"
+    # 국립공원 경계는 실제 관광 category 보유 (upstream §4, sentinel 아님)
+    assert b.feature.category == "01020101"
+    assert b.feature.marker_icon == "park"
     assert b.feature.detail.area_kind == "national_park"
     assert b.feature.detail.boundary_source == "knps"
     assert b.feature.geom is not None
@@ -225,11 +243,14 @@ def test_park_boundary_area_mapping() -> None:
 
 
 def test_hazard_and_protected_area_kinds() -> None:
-    assert _geo_one("knps_hazard_zones", _POLY)[0].feature.detail.area_kind == "hazard_zone"
-    assert (
-        _geo_one("knps_protected_areas", _POLY)[0].feature.detail.area_kind
-        == "protected_area"
-    )
+    # 위험/보호지역은 관광 category 없음 → sentinel + barrier (upstream §3/§4)
+    hazard = _geo_one("knps_hazard_zones", _POLY)[0]
+    assert hazard.feature.detail.area_kind == "hazard_zone"
+    assert hazard.feature.category == "00000000"
+    assert hazard.feature.marker_icon == "barrier"
+    protected = _geo_one("knps_protected_areas", _POLY)[0]
+    assert protected.feature.detail.area_kind == "protected_area"
+    assert protected.feature.category == "00000000"
 
 
 def test_invalid_wkt_is_skipped() -> None:
