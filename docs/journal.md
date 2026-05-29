@@ -2,6 +2,76 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-30 (claude) — Debug UI WSL+Windows Playwright e2e + frontend CI 게이트 (#117 마무리)
+
+**작업**: 사용자 지시 "frontend도 WSL에서 돌고 Playwright만 Windows에서 구동" →
+debug UI 전체를 WSL에서 띄우고 Windows Playwright로 라이브 e2e를 7/7 통과시킴.
+그 과정에서 잠복 버그 검출+수정.
+
+- **PR#92 — workspace 루트 + frontend WSL 기동 + 라이브 e2e + 버그 fix**: 저장소에
+  npm workspace 루트가 없어 frontend가 한 번도 install된 적 없었다. 루트
+  `package.json`(workspaces: map-marker-react + debug-ui/frontend) 신설 + frontend
+  `"@krtour/map-marker-react": "workspace:*"`(pnpm/yarn 문법) → npm 호환 `"*"`.
+  `npm install` 419 pkgs(github `maplibre-vworld#v0.1.0` 포함) 성공. WSL backend(:8087)
+  + frontend(:8610, `--hostname 0.0.0.0`) 기동 → Windows `.e2e-win`(gitignored
+  scratch — node_modules 플랫폼 충돌 회피)에서 `@playwright/test` 1.60.0 +
+  chromium → `npx playwright test` → **7/7 통과**(home 4 + etl 3, 실 backend 연동).
+  🐞 **검출+수정**: `etl/page.tsx` JSDoc 주석의 `` `/debug/etl/*/preview` ``에서
+  `*/`가 블록 주석을 조기 종료해 빌드 실패(PR#44 이후 잠복, frontend 미컴파일로
+  미검출). 주석을 `/debug/etl/{provider}/{dataset}/preview`로 수정 → 정상 빌드.
+  WSL `/mnt/f`(NTFS) inotify hot-reload가 파일 수정을 놓쳐 `.next` 클린 + dev
+  재시작 필요했던 점도 리포트에 기록.
+- **PR#91 — Playwright e2e 스위트 + backend 라이브 검증 리포트**: `playwright.
+  config.ts` + `e2e/home.spec.ts`/`etl.spec.ts` (실 backend 연동, role/heading +
+  native select nth 선택자). `docs/reports/debug-ui-e2e-2026-05-29.md`에 backend
+  5경로 실 HTTP 통과 증거 + 사람용 런북.
+- **PR#93 — frontend CI 게이트**: `.github/workflows/frontend.yml` (Node 20 +
+  workspace `npm install` + `tsc --noEmit` + `next build`, paths 필터). PR#92
+  회고에 따라 잠복 syntax/타입 오류를 PR 머지 전에 차단. 로컬 검증: type-check ✓ /
+  next build ✓ (13.5s, 5 static pages).
+
+**다음**: 지도 캔버스(`/features/*` + maplibre-vworld) 도입 — (c).
+
+## 2026-05-29 (claude) — DB 적재 오케스트레이션 + cross-provider dedup + geocoding REST (#120~#123)
+
+**작업**: 사용자 지시 시퀀스 — krheritage 후속 마지막(#120) + SPRINT-3 §2.5 dedup
+큐(#121/#122) + kraddr-geo 호출 python API → REST API v2 전환(#123). 5 PR 머지.
+
+- **PR#86 (#120) — `geometry_area_square_meters` 측지 면적**: `pyproj.Geod
+  (ellps='WGS84').geometry_area_perimeter` 측지 면적 helper + krheritage AREA
+  변환기가 `AreaDetail.area_square_meters` 채움. test_core_geometry +4건.
+- **PR#87 (#121) — `core/dedup.py` cross-provider 후보 탐지**:
+  `find_dedup_candidates(left, right, *, include_auto_merge)` 순수 함수 —
+  `core.scoring.score_pair`(ADR-016)로 cross-score, KEEP_SEPARATE 제외, score
+  내림차순. `DedupInput` Protocol(`Feature`가 그대로 만족) + `DedupCandidate`
+  frozen dataclass(score + decision + 성분 점수). test_core_dedup 6건.
+- **PR#88 (#122) — `ops.dedup_review_queue` + `infra/dedup_repo.py`**: alembic
+  0005 (UUID PK, FK→features CASCADE, NUMERIC(5,2) 0~100 score, `uq_dedup_pair`,
+  `ck_dedup_scores`/`ck_dedup_status`, `idx_dedup_status_score`). 점수 0.0~1.0 →
+  0~100 변환, **검토완료 행 보존 upsert**(`DO UPDATE ... WHERE status='pending'`).
+  integration 5(testcontainers).
+- **PR#89 (#122) — `AsyncKrtourMapClient` 오케스트레이터**: placeholder 진입점에
+  transaction 소유 메서드 — `load_feature_bundles`(`infra.load_bundles` 래핑),
+  `sync_dedup_candidates`(`core.dedup` + `infra.enqueue_dedup_candidates`), 읽기
+  (`get_feature`/`features_in_bounds`/`pending_dedup_reviews`). engine 수명은
+  호출자 소유 (`__aexit__`는 dispose X). unit 2 + integration 3(teardown TRUNCATE).
+- **PR#90 (#123) — geocoding python API → REST API v2 전환**: 기존 geocoding은
+  in-process `AsyncAddressClient.reverse_v2/geocode_v2`를 가정했으나, 그 메서드는
+  현 kraddr-geo에 **존재하지 않음**(미존재). 실제 REST API(`/v1/address/*`,
+  ServiceMeta ver 2.0)에 맞춰 재작성. structural Protocol을 실제
+  `ReverseResponse`/`GeocodeResponse`/`AddressStructure`(vworld 호환 levels —
+  `level4LC=bjd_cd` 등)/`GeocodeExtension`으로 교체. 순수 변환
+  `reverse_response_to_address` / `geocode_response_to_coordinate` + 새
+  `KraddrGeoRestClient`(httpx **주입**, TYPE_CHECKING-only import — 메인 패키지
+  런타임 httpx 의존 X). 소비자 계약(`ReverseGeocoder`/`AddressGeocoder`/
+  `cached_reverse_geocoder`) 유지 → provider 무영향. `KRTOUR_MAP_KRADDR_GEO_BASE_URL`
+  설정 추가. test_geocoding 21건(fake dataclass + `httpx.MockTransport`).
+
+검증: ruff / mypy --strict(49 src files) / unit 599 / integration 11 +
+lint-imports 4 contracts 모두 green. main 5개 PR fast-merge 적용 (no CI wait).
+
+**다음**: #117 라이브 e2e 실행 (다음 entry).
+
 ## 2026-05-29 (claude) — FeatureFileSource DTO + krheritage 미디어 file_sources (#119)
 
 **작업**: krheritage 후속 1/3 — 미디어 파일 참조 DTO.
