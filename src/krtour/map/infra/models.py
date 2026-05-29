@@ -268,8 +268,9 @@ class SourceLinkRow(Base):
     __tablename__ = "source_links"
     __table_args__ = (
         CheckConstraint(
-            "source_role IN ('primary','enrichment','geocoded','phone',"
-            "'media','weather_context','observation','external_link')",
+            "source_role IN ('primary','base_address','base_coordinate',"
+            "'enrichment','correction','duplicate_candidate','media',"
+            "'weather_context')",
             name="source_links_role",
         ),
         CheckConstraint(
