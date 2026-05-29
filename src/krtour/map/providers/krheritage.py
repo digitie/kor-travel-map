@@ -57,6 +57,7 @@ from krtour.map.dto import (
     EventDetail,
     Feature,
     FeatureBundle,
+    FeatureFileSource,
     FeatureKind,
     PlaceDetail,
     SourceLink,
@@ -170,6 +171,11 @@ class KrHeritageItem(Protocol):
         ...
 
     @property
+    def image_url(self) -> str | None:
+        """대표 이미지 URL (``imageUrl``). 있으면 ``file_sources``로 변환."""
+        ...
+
+    @property
     def raw(self) -> dict[str, Any]:
         """원천 row 전체 (raw_data JSONB 보존용)."""
         ...
@@ -222,6 +228,11 @@ class KrHeritageEvent(Protocol):
     @property
     def latitude(self) -> Decimal | float | None:
         """위도 (WGS84)."""
+        ...
+
+    @property
+    def main_image(self) -> str | None:
+        """대표 이미지 URL (``mainImage``). 있으면 ``file_sources``로 변환."""
         ...
 
     @property
@@ -322,6 +333,37 @@ def _merge_address(geo: Address | None, location_text: str | None) -> Address:
 
 
 # -- place/area 변환 ----------------------------------------------------------
+
+
+def _image_file_sources(
+    *,
+    feature_id: str,
+    source_record_key: str,
+    dataset_key: str,
+    image_url: str | None,
+    alt_text: str | None,
+) -> list[FeatureFileSource]:
+    """대표 이미지 URL → ``[FeatureFileSource]`` (없으면 빈 list).
+
+    국가유산 미디어(이미지)를 load 시 객체 저장소 업로드 대상으로 담는다
+    (docs/feature-files-rustfs.md). 단일 대표 이미지 → role='primary'.
+    """
+    url = (image_url or "").strip()
+    if not url:
+        return []
+    return [
+        FeatureFileSource(
+            feature_id=feature_id,
+            source_url=url,
+            role="primary",
+            display_order=0,
+            file_type="image",
+            alt_text=alt_text,
+            provider=normalize_provider_name(PROVIDER_NAME),
+            dataset_key=dataset_key,
+            source_record_key=source_record_key,
+        )
+    ]
 
 
 async def _heritage_item_to_bundle(
@@ -430,8 +472,18 @@ async def _heritage_item_to_bundle(
         confidence=100,
         is_primary_source=True,
     )
+    file_sources = _image_file_sources(
+        feature_id=feature_id,
+        source_record_key=source_record_key,
+        dataset_key=DATASET_KEY_HERITAGE,
+        image_url=getattr(item, "image_url", None),
+        alt_text=name,
+    )
     return FeatureBundle(
-        feature=feature, source_record=source_record, source_link=source_link
+        feature=feature,
+        source_record=source_record,
+        source_link=source_link,
+        file_sources=file_sources,
     )
 
 
@@ -549,8 +601,18 @@ async def _event_to_bundle(
         confidence=100,
         is_primary_source=True,
     )
+    file_sources = _image_file_sources(
+        feature_id=feature_id,
+        source_record_key=source_record_key,
+        dataset_key=DATASET_KEY_EVENT,
+        image_url=getattr(event, "main_image", None),
+        alt_text=name,
+    )
     return FeatureBundle(
-        feature=feature, source_record=source_record, source_link=source_link
+        feature=feature,
+        source_record=source_record,
+        source_link=source_link,
+        file_sources=file_sources,
     )
 
 

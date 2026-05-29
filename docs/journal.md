@@ -2,6 +2,25 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-29 (claude) — FeatureFileSource DTO + krheritage 미디어 file_sources (#119)
+
+**작업**: krheritage 후속 1/3 — 미디어 파일 참조 DTO.
+
+- `dto/file.py` 신규 `FeatureFileSource` (docs/feature-files-rustfs.md §2.2 — 업로드
+  전 입력: feature_id/source_url/role/display_order/file_type/content_type/
+  alt_text/provider/dataset_key/source_record_key/payload). `FileRole`/`FileType`
+  Literal. dto/__init__ export.
+- `FeatureBundle.file_sources: list[FeatureFileSource]` 필드 추가(기본 빈 list) +
+  validator에 file_sources[].feature_id ↔ feature.feature_id FK 검증.
+- `krheritage`: `KrHeritageItem.image_url` / `KrHeritageEvent.main_image` Protocol
+  property 추가 + `_image_file_sources` helper → heritage/event bundle이 대표
+  이미지를 role='primary' file_source로 변환 (getattr로 기존 fixture 호환).
+- 테스트: `test_dto_file.py`(6) + krheritage file_sources 3 + item/event fixture에
+  image 필드. 589 unit / cov 93.75% / ruff / mypy strict / import-linter 4 /
+  openapi drift 0 (FeatureBundle는 preview가 dict라 spec 무영향).
+
+**다음**: #120 area_square_meters (krheritage AREA 면적 GIS 보강).
+
 ## 2026-05-29 (claude) — Provider ⑥ krheritage (국가유산 place/area/event, ADR-034 8단계)
 
 **작업**: 사용자 "krheritage 진행". `src/krtour/map/providers/krheritage.py` 신설.
