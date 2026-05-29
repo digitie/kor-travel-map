@@ -7,13 +7,14 @@
 |--------|------|------|------|
 | Sprint 1 | [SPRINT-1.md](./SPRINT-1.md) | ✅ **완료** (PR#17~#27, 2026-05-25) | 코드 작성 단계 진입 + scaffolding + category 코드 이전 (provider 없음) |
 | Sprint 2 | [SPRINT-2.md](./SPRINT-2.md) | ✅ **완료** (PR#28~#59, 2026-05-26~28) | MOIS-독립 작은 provider 4건 (축제·날씨·유가·휴게소) + visitkorea enrichment + KMA mid_forecast + 디버그 UI backend 라우터 + ETL live 11/11 dataset + coverage 65 |
-| Sprint 3 | [SPRINT-3.md](./SPRINT-3.md) | 🔵 **active (진입)** (2026-05-28~) | 국립공원/트래킹 (KNPS+krforest_trails) + 국가유산 (krheritage) + 정합성 Phase 1 (F1~F3, ADR-033) + `/features/*` 라우터 + `feature_repo.py` |
-| Sprint 4 | [SPRINT-4.md](./SPRINT-4.md) | accepted (대기) | **MOIS 인허가** bulk (4단계 lifecycle) + dedup queue 운영 시작 (Coverage 80% 도달, ADR-032) |
+| Sprint 3 | [SPRINT-3.md](./SPRINT-3.md) | ✅ **완료** (PR#60~#95, 2026-05-28~30) | KNPS + krheritage(+area_square_meters/file_sources) + ADR-033 Phase 1(F1~F3, 관측만) + `/features/*` 라우터 + `feature_repo.py` + `core/dedup` + `ops.dedup_review_queue` + `AsyncKrtourMapClient` 오케스트레이터 + geocoding REST API v2 전환 + `/features` 지도 페이지 + Windows Playwright e2e + frontend CI 게이트 + coverage 75 |
+| Sprint 4 | [SPRINT-4.md](./SPRINT-4.md) | 🟡 **진입 준비 완료** — 4a/4b 분할 채택 (`SPRINT-4.md §3`) | **MOIS 인허가** bulk (4단계 lifecycle, 4a/4b 분할) + dedup queue 운영 시작 (Coverage 80% 도달, ADR-032) |
 | Sprint 5 | [SPRINT-5.md](./SPRINT-5.md) | accepted (대기) | MOIS-sibling (휴양림/수목원/박물관/표준데이터) + 정합성 Phase 2 (F4~F8 + Dagster 게이트) + 운영 직전 T-200~T-204 |
 
-> **현 위치 (2026-05-28)**: Sprint 2 핵심(provider ①~④ + 디버그 UI) 완료, coverage 96%.
-> Sprint 2 종료 게이트(잔여 4건 + 회고)만 남음 → Sprint 3 진입. 단일 진척 추적은
-> `../resume.md`, 백로그는 `../tasks.md`.
+> **현 위치 (2026-05-30)**: Sprint 3 종료 게이트 충족(coverage 실측 92.66%,
+> dedup_review_queue 첫 운영 안정, frontend WSL + Windows Playwright e2e 9/9
+> 통과). 다음 = **Sprint 4 진입 PR**(4a: MOIS Step A/B + dedup queue 본격 운영).
+> 단일 진척 추적은 `../resume.md`, 백로그는 `../tasks.md`.
 
 ## 9단계 구현 순서 (ADR-034)
 
