@@ -59,3 +59,8 @@ alembic/__pycache__/
 
 # Local tool state
 .dagster/
+
+# Node / npm workspace (frontend debug UI — ADR-025/029/043)
+node_modules/
+# Windows-side Playwright e2e scratch (frontend WSL + Playwright Windows, #117)
+.e2e-win/

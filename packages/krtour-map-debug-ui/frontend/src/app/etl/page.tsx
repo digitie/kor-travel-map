@@ -3,7 +3,7 @@
 /**
  * /etl — ETL preview 화면 (PR#44).
  *
- * provider/dataset 선택 → "Preview" 버튼 → backend `/debug/etl/*/preview`
+ * provider/dataset 선택 → "Preview" 버튼 → backend `/debug/etl/{provider}/{dataset}/preview`
  * 호출 → 변환 결과 JSON 표시. 적재(DB write) 없음.
  *
  * 실제 provider client 호출(`source=live`)은 후속 PR — 본 페이지는 fixture
