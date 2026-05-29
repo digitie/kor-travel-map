@@ -185,7 +185,7 @@ branch로.
   - root job → child source loads → consistency_check gate → severity!=ERROR →
     mv_refresh (`strategy='swap'`)
   - phase별 중단/재개 (`PLAN_ONLY=1` preflight 포함)
-- [ ] T-201 — **`ops.feature_consistency_reports` 도입**
+- [~] T-201 — **`ops.feature_consistency_reports` 도입** (T-201a Phase 1 ✅ 2026-05-29: alembic 0003 + `infra/consistency.py` F1~F3 관측; T-201b Phase 2 = F4~F8 + Dagster 게이트, Sprint 5)
   - 컬럼: `report_id UUID PK, batch_id UUID, started_at, finished_at,
     severity_max TEXT, cases JSONB, summary JSONB`
   - 케이스 F1~F8 (`python-krtour-map-spec.docx` B.18 참고)

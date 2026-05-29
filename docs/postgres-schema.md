@@ -33,7 +33,7 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 |--------|------|------------------|
 | `feature` | feature 도메인 본체 (features + 5 detail + opening_hours + weather + price + files) | 11 |
 | `provider_sync` | source 추적 + sync state | 3 |
-| `ops` | 운영 (작업 큐, 검수, 정합성, api 로그) | 6 |
+| `ops` | 운영 (작업 큐, 검수, 정합성, api 로그) | 7 |
 | `x_extension` | 확장 (postgis 등) | extensions only |
 
 ## 3. 테이블 카탈로그 (alphabetical by schema)
@@ -73,6 +73,7 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 | `feature_merge_history` | `history_id UUID` | loser_id, master_id FK, score, merged_at |
 | `data_integrity_violations` | `violation_key UUID` | violation_type, severity (info/warning/error/critical), payload, status |
 | `api_call_log` | `id BIGSERIAL` | provider, endpoint, status, latency_ms, occurred_at; BRIN(occurred_at) |
+| `feature_consistency_reports` | `report_id UUID` | ADR-033 Phase 1; batch_id, started_at/finished_at, severity_max CHECK(OK/WARN/ERROR), cases/summary JSONB |
 
 ## 4. 인덱스 카탈로그
 
@@ -155,6 +156,8 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 | `idx_violations_detected_brin` | BRIN(detected_at) | |
 | `idx_api_call_occurred_brin` | BRIN(occurred_at) | |
 | `idx_api_call_provider_time` | (provider, occurred_at DESC) | |
+| `idx_reports_batch` | (batch_id) | feature_consistency_reports (ADR-033) |
+| `idx_reports_started` | (started_at DESC) | feature_consistency_reports |
 
 ## 5. CHECK constraint 카탈로그
 
