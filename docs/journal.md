@@ -2,6 +2,43 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-30 (claude) — Sprint 3 종료 회고 + Sprint 4 진입 준비 (4a/4b 분할 채택)
+
+**작업**: 사용자 지시 "스프린트4 진입 전 단계까지 진행" — Sprint 3 종료 게이트
+일괄 정리 + Sprint 4 진입 조건 충족 표기 + 4a/4b 분할 결정.
+
+- `pyproject.toml`: `[tool.coverage.report] fail_under = 65 → 75` (ADR-032 Sprint 3
+  bar). 실측 92.66%로 무위험 상향(unit 599 통과).
+- `docs/sprints/SPRINT-3.md` §6 종료 조건 7개 모두 ☑ 또는 ~(deferred): provider
+  ⑤⑥ merge / ADR-033 Phase 1 green / consistency 적재(Dagster 트리거는 Phase 2
+  Sprint 5로 묶음) / dedup_review_queue 첫 운영 안정 / coverage 75 / 회고 entry /
+  Sprint 4 진입 PR 준비.
+- `docs/sprints/SPRINT-4.md` §1 진입 조건 6개 모두 ☑ 표기 + §3 **4a/4b 분할
+  채택** 결정 명시. 분할 사유: MOIS 4단계 한 sprint risk(bulk 시간 + dedup queue
+  폭증) + dedup 룰 false-positive 측정 자연 인큐베이션 + coverage 80% 도달
+  단계 분리.
+- `docs/sprints/README.md`: Sprint 3 상태 → ✅ 완료(PR#60~#95) / Sprint 4 상태
+  → 🟡 진입 준비 완료(4a/4b) / 현 위치 노트 2026-05-30로 갱신.
+
+**Sprint 3 정리(이 sprint에 머지된 핵심)**:
+- Provider ⑤ KNPS(point + geometry + CSV preview) / ⑥ krheritage(place/area/event
+  + media file_sources + 측지 면적).
+- DB 적재: `infra/feature_repo.py` raw SQL 3-table upsert / `infra/dedup_repo.py`
+  + `ops.dedup_review_queue` / `AsyncKrtourMapClient` 오케스트레이터.
+- Core: `find_dedup_candidates` 순수 함수(ADR-016 cross-score) /
+  `geometry_area_square_meters` 측지 면적 / `consistency.py` F1~F3.
+- 데이터 통로: geocoding **python API → REST API v2** 전환(httpx 주입,
+  TYPE_CHECKING-only) — kraddr-geo DB/패키지 의존 0.
+- Frontend & 검증: `/features` 지도(maplibre + Zustand viewport + bbox refetch) /
+  Windows Playwright e2e **9/9 통과**(WSL frontend↔backend, npm workspace 루트
+  확립) / **frontend CI 게이트**(type-check + next build) + `etl/page.tsx` 잠복
+  `*/` 주석 버그 검출+수정.
+- 거버넌스: docs 일괄 정합(`address-geocoding.md` REST API v2 + vworld level
+  매핑 표) + CHANGELOG Sprint 3 섹션 + journal 2 entry.
+
+**다음(Sprint 4 진입 PR)**: 4a 첫 작업 — MOIS Step A(bulk) provider 모듈 + 첫
+적재. 가중치 조정 후보 측정을 위한 dedup queue 모니터링 패널(`/dedup`?) 후속.
+
 ## 2026-05-30 (claude) — Debug UI WSL+Windows Playwright e2e + frontend CI 게이트 (#117 마무리)
 
 **작업**: 사용자 지시 "frontend도 WSL에서 돌고 Playwright만 Windows에서 구동" →

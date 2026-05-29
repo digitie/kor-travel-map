@@ -8,13 +8,19 @@
 
 ## 1. 진입 조건 (Sprint 3 DoD)
 
-- [ ] Sprint 3 모든 DoD 충족 (`SPRINT-3.md §6`)
-- [ ] knps + krheritage 적재 안정, area/route geometry 처리 동작
-- [ ] ADR-033 Phase 1 (F1~F3) 정합성 검증 green + 일 1회 report 생성
-- [ ] dedup_review_queue 첫 운영 (knps cultural_resources vs krheritage
-      temple) 룰 안정
-- [ ] Coverage bar 75% pass
-- [ ] Sprint 4 분할 여부 (4a/4b) 결정 — Sprint 3 종료 회고에서
+- [x] Sprint 3 모든 DoD 충족 (`SPRINT-3.md §6` — 본 prep PR에서 일괄 체크).
+- [x] knps + krheritage 적재 안정, area/route geometry 처리 동작 (knps
+      `*_to_bundles` + krheritage `heritage_{items,events}_to_bundles`,
+      `core/geometry.py` WKT 검증 + centroid + `geometry_area_square_meters`).
+- [x] ADR-033 Phase 1 (F1~F3) 정합성 검증 green (`run_consistency_checks` +
+      `tests/integration/test_consistency_reports.py`). **일 1회 트리거(Dagster
+      asset)는 Phase 2(Sprint 5)와 묶어 도입** — Phase 1은 본 lib 내 관측만.
+- [x] dedup_review_queue 첫 운영 (PR#87/#88/#89 — `find_dedup_candidates`(knps
+      사찰 ↔ krheritage temple) → `ops.dedup_review_queue` upsert,
+      `AsyncKrtourMapClient.sync_dedup_candidates`로 transaction 오케스트레이션).
+      룰 안정성은 실 PostGIS integration 5+3건 + unit 6건 검증.
+- [x] Coverage bar 75% pass (실측 92.66%, `pyproject.toml` `fail_under=75`).
+- [x] Sprint 4 분할 여부 (4a/4b) 결정 — **분할(4a/4b) 채택** (§3 노트).
 
 ## 2. 산출물
 
@@ -133,14 +139,20 @@ Sprint 4 진입 prep PR로 `python-kraddr-base` 전수 survey + 흡수 계획:
 
 ## 3. Sprint 4 분할 옵션 (Sprint 3 종료 회고에서 결정)
 
-분할 시 (4a/4b):
+**결정 (2026-05-30 Sprint 3 종료 회고 시점): 분할(4a/4b) 채택.** 사유:
+- MOIS 4단계 lifecycle을 한 sprint에 넣으면 bulk 적재 시간(수시간~일 단위) +
+  dedup queue 폭증(수만 건 예상, §6 위험)이 한 burndown에 누적 → 단일 sprint
+  안정 종료 어려움.
+- Sprint 3에서 검증한 dedup 룰을 **작은 dataset(4a Step A bulk)** 부터 적용해
+  false-positive율을 측정 → 가중치 조정(필요 시 ADR-016 supersede PR) → 4b
+  진입 시점에 룰 안정. 분할이 룰 검증의 자연스러운 인큐베이션 단계.
+- Coverage 80% 도달도 단일 sprint에 무리 — 4a 부분 달성 → 4b 완전 달성.
+
+분할 정의:
 - **Sprint 4a** — Step A (bulk) + Step B (incremental) + dedup_review_queue
   운영 시작. Coverage 80% 부분 달성.
 - **Sprint 4b** — Step C (closed) + Step D (detail) + F4 baseline + Place
   phone enrichment 백그라운드. Coverage 80% 완전 달성.
-
-분할 결정 기준: Sprint 3 종료 시 burndown 진척도. MOIS 4단계 한 sprint 안에
-들어가면 risk 큼 → 보수적으로 4a/4b 분할 권고.
 
 ## 4. Sprint 4 ADR/T 항목 진척
 

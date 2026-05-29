@@ -141,11 +141,21 @@
 
 ## 6. 종료 조건 (Sprint 3 → Sprint 4)
 
-- [ ] Provider ⑤⑥ 모듈 + fixture + 통합 테스트 모두 merge
-- [ ] ADR-033 Phase 1 (F1~F3) 코드 + 통합 테스트 green
-- [ ] `feature_consistency_reports` 테이블 + 일 1회 Dagster asset 동작
-- [ ] dedup_review_queue 첫 운영 시작 (룰 안정 확인)
-- [ ] Coverage bar 75% pass
-- [ ] `docs/journal.md` Sprint 3 종료 회고 entry
-- [ ] `docs/sprints/SPRINT-4.md` 진입 PR 준비 (특히 SPRINT-4 분할 여부
-      4a/4b 결정)
+- [x] Provider ⑤⑥ 모듈 + fixture + 통합 테스트 모두 merge (PR#81 KNPS / PR#82
+      geocoding wiring / PR#83 async + geocoder / PR#84 krheritage / PR#85
+      file_sources / PR#86 area_square_meters).
+- [x] ADR-033 Phase 1 (F1~F3) 코드 + 통합 테스트 green (`infra/consistency.py` +
+      `tests/integration/test_consistency_reports.py`, alembic 0003 `ops.
+      feature_consistency_reports`).
+- [~] `feature_consistency_reports` 테이블 적재 ✅ (`run_consistency_checks` 호출
+      시). **Dagster asset 트리거는 Phase 2(Sprint 5)와 묶어 도입** — ADR-033
+      Phase 1은 본 lib에 Dagster 코드 없이 "관측만" (manual/외부 cron 호출).
+- [x] dedup_review_queue 첫 운영 시작 (PR#87 `core/dedup.find_dedup_candidates`
+      + PR#88 `ops.dedup_review_queue` + `infra/dedup_repo.py` + PR#89
+      `AsyncKrtourMapClient.sync_dedup_candidates`). 룰 안정: 실 PostGIS
+      integration 5건 + client integration 3건 통과.
+- [x] Coverage bar 75% pass (실측 92.66%, `pyproject.toml` `fail_under=75`
+      상향, 본 PR).
+- [x] `docs/journal.md` Sprint 3 종료 회고 entry (본 PR).
+- [x] `docs/sprints/SPRINT-4.md` 진입 PR 준비 — §1 진입 조건 충족 표기 + §3
+      **4a/4b 분할 결정**(권고대로 분할, 본 PR §3 노트).
