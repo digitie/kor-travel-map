@@ -21,9 +21,12 @@ import pytest
 
 from krtour.map.dto import FeatureKind, SourceRole
 from krtour.map.providers.knps import (
+    KNPS_GEOMETRY_DATASET_KEYS,
+    KNPS_GEOMETRY_DATASETS,
     KNPS_PLACE_DATASETS,
     KNPS_POINT_DATASET_KEYS,
     PROVIDER_NAME,
+    knps_geometry_records_to_bundles,
     knps_point_records_to_bundles,
     resolve_cultural_resource_category,
 )
@@ -162,3 +165,105 @@ def test_preserves_input_order() -> None:
         recs, dataset_key="knps_restrooms", fetched_at=_FETCHED
     )
     assert [b.source_record.source_entity_id for b in bundles] == ["K-0", "K-1", "K-2"]
+
+
+# ── geometry datasets (route/area) ───────────────────────────────────────
+
+_LINE = "LINESTRING(126.98 37.65, 126.99 37.66, 127.0 37.67)"
+_POLY = "POLYGON((126.9 37.6, 127.0 37.6, 127.0 37.7, 126.9 37.7, 126.9 37.6))"
+
+
+@dataclass(frozen=True)
+class _GRec:
+    """`KnpsGeometryRecord` Protocol 만족."""
+
+    source_id: str
+    name: str
+    geom_wkt: str
+    raw: dict[str, Any]
+
+
+def _geo_one(dataset_key: str, geom_wkt: str, **over: Any):
+    rec = _GRec(
+        source_id=over.get("source_id", "G-001"),
+        name=over.get("name", "북한산 둘레길"),
+        geom_wkt=geom_wkt,
+        raw=over.get("raw", {"NO": "G-001"}),
+    )
+    return knps_geometry_records_to_bundles(
+        [rec], dataset_key=dataset_key, fetched_at=_FETCHED
+    )
+
+
+def test_trail_route_mapping() -> None:
+    b = _geo_one("knps_trails", _LINE)[0]
+    assert b.feature.kind is FeatureKind.ROUTE
+    assert b.feature.category == "01020103"
+    assert b.feature.detail.route_type == "hiking_trail"
+    assert b.feature.detail.geometry_source == "knps"
+    assert b.feature.geom is not None
+    assert "LINESTRING" in b.feature.geom
+    # centroid가 coord로
+    assert b.feature.coord is not None
+    assert float(b.feature.coord.lon) == pytest.approx(126.99)
+
+
+def test_linear_facility_route_type() -> None:
+    b = _geo_one("knps_linear_facilities", _LINE)[0]
+    assert b.feature.detail.route_type == "facility_road"
+
+
+def test_park_boundary_area_mapping() -> None:
+    b = _geo_one("knps_park_boundaries", _POLY, name="북한산국립공원")[0]
+    assert b.feature.kind is FeatureKind.AREA
+    # area는 카테고리 트리 밖 → sentinel
+    assert b.feature.category == "00000000"
+    assert b.feature.detail.area_kind == "national_park"
+    assert b.feature.detail.boundary_source == "knps"
+    assert b.feature.geom is not None
+    assert b.feature.geom.startswith("POLYGON")
+
+
+def test_hazard_and_protected_area_kinds() -> None:
+    assert _geo_one("knps_hazard_zones", _POLY)[0].feature.detail.area_kind == "hazard_zone"
+    assert (
+        _geo_one("knps_protected_areas", _POLY)[0].feature.detail.area_kind
+        == "protected_area"
+    )
+
+
+def test_invalid_wkt_is_skipped() -> None:
+    assert _geo_one("knps_trails", "NOT WKT") == []
+
+
+def test_wrong_geometry_type_is_skipped() -> None:
+    # trails(route)에 polygon → 허용 type 위반 → skip.
+    assert _geo_one("knps_trails", _POLY) == []
+    # park_boundaries(area)에 linestring → skip.
+    assert _geo_one("knps_park_boundaries", _LINE) == []
+
+
+def test_out_of_korea_geometry_is_skipped() -> None:
+    assert _geo_one("knps_trails", "LINESTRING(0 0, 1 1)") == []
+
+
+def test_geometry_deterministic_and_primary() -> None:
+    b1 = _geo_one("knps_trails", _LINE)[0]
+    b2 = _geo_one("knps_trails", _LINE)[0]
+    assert b1.feature.feature_id == b2.feature.feature_id
+    assert b1.source_link.source_role is SourceRole.PRIMARY
+    assert b1.source_link.feature_id == b1.feature.feature_id
+
+
+def test_geometry_unsupported_dataset_key_raises() -> None:
+    with pytest.raises(KeyError, match="route/area geometry dataset 아님"):
+        knps_geometry_records_to_bundles(
+            [], dataset_key="knps_visitor_centers", fetched_at=_FETCHED
+        )
+
+
+def test_geometry_dataset_keys_registry() -> None:
+    assert frozenset(KNPS_GEOMETRY_DATASETS) == KNPS_GEOMETRY_DATASET_KEYS
+    assert "knps_trails" in KNPS_GEOMETRY_DATASET_KEYS
+    # Point/geometry dataset 집합은 서로 disjoint.
+    assert KNPS_GEOMETRY_DATASET_KEYS.isdisjoint(KNPS_POINT_DATASET_KEYS)

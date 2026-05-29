@@ -36,6 +36,12 @@ from typing import Any, Final, Protocol, runtime_checkable
 
 from krtour.map.category import get_category, is_known_category_code
 from krtour.map.core.address import normalize_korean_text
+from krtour.map.core.geometry import (
+    AREA_GEOMETRY_TYPES,
+    ROUTE_GEOMETRY_TYPES,
+    GeometryError,
+    normalize_geometry,
+)
 from krtour.map.core.ids import (
     make_feature_id,
     make_payload_hash,
@@ -43,11 +49,13 @@ from krtour.map.core.ids import (
 )
 from krtour.map.core.providers import normalize_provider_name
 from krtour.map.dto import (
+    AreaDetail,
     Coordinate,
     Feature,
     FeatureBundle,
     FeatureKind,
     PlaceDetail,
+    RouteDetail,
     SourceLink,
     SourceRecord,
     SourceRole,
@@ -55,10 +63,15 @@ from krtour.map.dto import (
 
 __all__ = [
     "KnpsPointRecord",
+    "KnpsGeometryRecord",
     "KnpsPlaceDatasetSpec",
+    "KnpsGeometryDatasetSpec",
     "KNPS_PLACE_DATASETS",
     "KNPS_POINT_DATASET_KEYS",
+    "KNPS_GEOMETRY_DATASETS",
+    "KNPS_GEOMETRY_DATASET_KEYS",
     "knps_point_records_to_bundles",
+    "knps_geometry_records_to_bundles",
     "resolve_cultural_resource_category",
     "PROVIDER_NAME",
 ]
@@ -334,3 +347,263 @@ def knps_point_records_to_bundles(
         _point_record_to_bundle(record, spec, fetched_at=fetched_at)
         for record in records
     ]
+
+
+# =====================================================================
+# geometry datasets (route LINESTRING / area POLYGON) — Sprint 3 후속
+# =====================================================================
+
+
+@runtime_checkable
+class KnpsGeometryRecord(Protocol):
+    """파싱된 KNPS geometry(route/area) dataset 한 행의 입력 shape.
+
+    knps-api raw(CSV/SHP)를 호출자/파서가 행 단위로 풀고 geometry를 **WKT(4326)**
+    문자열로 추출한 결과. SHP/CSV 디코딩·좌표계 변환(EPSG:5179→4326 등)은 호출자
+    책임 — 본 변환 함수는 WKT 검증·centroid·DTO 조립에 집중 (테스트 용이, ADR-002).
+    """
+
+    @property
+    def source_id(self) -> str:
+        """provider 원천 식별자 (결정적 ID/dedup용)."""
+        ...
+
+    @property
+    def name(self) -> str:
+        """탐방로/구역 이름 (한글)."""
+        ...
+
+    @property
+    def geom_wkt(self) -> str:
+        """geometry WKT (EPSG:4326). route는 LINESTRING/MULTILINESTRING,
+        area는 POLYGON/MULTIPOLYGON."""
+        ...
+
+    @property
+    def raw(self) -> dict[str, Any]:
+        """원천 row 전체 (raw_data JSONB 보존 + payload 분기용)."""
+        ...
+
+
+class KnpsGeometryDatasetSpec:
+    """KNPS route/area dataset 1건의 변환 사양.
+
+    route는 ``RouteDetail.route_type``, area는 ``AreaDetail.area_kind``로 분기.
+    category는 route(탐방로/시설도로)만 존재; area(공원경계/위험지역/특별보호구역)는
+    카테고리 트리에 진입하지 않음(``category=None`` → sentinel ``00000000``,
+    ``docs/knps-feature-etl.md §3.1``). marker_icon은 선/면이라 fallback.
+    """
+
+    __slots__ = (
+        "dataset_key", "feature_kind", "category", "detail_kind",
+        "allowed_geom_types", "marker_icon", "marker_color",
+    )
+
+    def __init__(
+        self,
+        dataset_key: str,
+        *,
+        feature_kind: FeatureKind,
+        detail_kind: str,
+        allowed_geom_types: frozenset[str],
+        category: str | None = None,
+        marker_icon: str = "marker",
+        marker_color: str = _DEFAULT_MARKER_COLOR,
+    ) -> None:
+        self.dataset_key = dataset_key
+        self.feature_kind = feature_kind
+        self.category = category
+        # route → route_type 값, area → area_kind 값.
+        self.detail_kind = detail_kind
+        self.allowed_geom_types = allowed_geom_types
+        self.marker_icon = marker_icon
+        self.marker_color = marker_color
+
+
+# area/route feature는 카테고리 트리 밖 — sentinel category (Feature.category는
+# 8자리 숫자 형식 강제, ADR-023). area_kind/route_type로만 식별.
+_SENTINEL_CATEGORY: Final[str] = "00000000"
+# 탐방로 category (TOURISM_NATURAL_LANDSCAPE...TRAIL, knps-feature-etl.md §4).
+_TRAIL_CATEGORY: Final[str] = "01020103"
+
+
+KNPS_GEOMETRY_DATASETS: Final[dict[str, KnpsGeometryDatasetSpec]] = {
+    "knps_trails": KnpsGeometryDatasetSpec(
+        "knps_trails",
+        feature_kind=FeatureKind.ROUTE,
+        detail_kind="hiking_trail",
+        allowed_geom_types=ROUTE_GEOMETRY_TYPES,
+        category=_TRAIL_CATEGORY,
+        marker_color="P-06",
+    ),
+    "knps_linear_facilities": KnpsGeometryDatasetSpec(
+        "knps_linear_facilities",
+        feature_kind=FeatureKind.ROUTE,
+        detail_kind="facility_road",
+        allowed_geom_types=ROUTE_GEOMETRY_TYPES,
+        category=_TRAIL_CATEGORY,
+        marker_color="P-06",
+    ),
+    "knps_park_boundaries": KnpsGeometryDatasetSpec(
+        "knps_park_boundaries",
+        feature_kind=FeatureKind.AREA,
+        detail_kind="national_park",
+        allowed_geom_types=AREA_GEOMETRY_TYPES,
+        category=None,
+        marker_color="P-06",
+    ),
+    "knps_hazard_zones": KnpsGeometryDatasetSpec(
+        "knps_hazard_zones",
+        feature_kind=FeatureKind.AREA,
+        detail_kind="hazard_zone",
+        allowed_geom_types=AREA_GEOMETRY_TYPES,
+        category=None,
+        marker_icon="barrier",
+        marker_color="P-13",
+    ),
+    "knps_protected_areas": KnpsGeometryDatasetSpec(
+        "knps_protected_areas",
+        feature_kind=FeatureKind.AREA,
+        detail_kind="protected_area",
+        allowed_geom_types=AREA_GEOMETRY_TYPES,
+        category=None,
+        marker_icon="barrier",
+        marker_color="P-13",
+    ),
+}
+
+KNPS_GEOMETRY_DATASET_KEYS: Final[frozenset[str]] = frozenset(KNPS_GEOMETRY_DATASETS)
+
+
+def _geometry_detail(
+    spec: KnpsGeometryDatasetSpec, feature_id: str, raw: dict[str, Any]
+) -> RouteDetail | AreaDetail:
+    """spec.feature_kind에 맞는 detail 생성 (route/area)."""
+    if spec.feature_kind is FeatureKind.ROUTE:
+        return RouteDetail(
+            feature_id=feature_id,
+            route_type=spec.detail_kind,
+            geometry_source="knps",
+            geometry_status="provided",
+            payload={"knps_dataset": spec.dataset_key},
+        )
+    return AreaDetail(
+        feature_id=feature_id,
+        area_kind=spec.detail_kind,  # Literal 값 검증은 AreaDetail validator
+        boundary_source="knps",
+        payload={"knps_dataset": spec.dataset_key},
+    )
+
+
+def _geometry_record_to_bundle(
+    record: KnpsGeometryRecord,
+    spec: KnpsGeometryDatasetSpec,
+    *,
+    fetched_at: datetime,
+) -> FeatureBundle | None:
+    """KNPS geometry record 1건 → route/area ``FeatureBundle``.
+
+    geometry 파싱 실패/경계 밖 centroid는 ``None`` 반환 (호출자가 skip/집계).
+    """
+    try:
+        canonical_wkt, centroid = normalize_geometry(
+            record.geom_wkt, allowed_types=spec.allowed_geom_types
+        )
+    except GeometryError:
+        return None
+
+    category = spec.category if spec.category is not None else _SENTINEL_CATEGORY
+    raw_data = dict(record.raw)
+    payload_hash = make_payload_hash(raw_data)
+    source_record_key = make_source_record_key(
+        provider=PROVIDER_NAME,
+        dataset_key=spec.dataset_key,
+        source_entity_type=_SOURCE_ENTITY_TYPE,
+        source_entity_id=record.source_id,
+        raw_payload_hash=payload_hash,
+    )
+    feature_id = make_feature_id(
+        bjd_code=None,
+        kind=spec.feature_kind.value,
+        category=category,
+        source_type=f"{PROVIDER_NAME}:{spec.dataset_key}",
+        source_natural_key=record.source_id,
+    )
+    normalized_name = normalize_korean_text(record.name) or record.name
+
+    feature = Feature(
+        feature_id=feature_id,
+        kind=spec.feature_kind,
+        name=normalized_name,
+        coord=centroid,  # 선/면 대표 좌표 = centroid (ADR-012, 지도 마커용)
+        geom=canonical_wkt,
+        category=category,
+        marker_icon=spec.marker_icon,
+        marker_color=spec.marker_color,
+        detail=_geometry_detail(spec, feature_id, raw_data),
+    )
+    source_record = SourceRecord(
+        provider=normalize_provider_name(PROVIDER_NAME),
+        dataset_key=spec.dataset_key,
+        source_entity_type=_SOURCE_ENTITY_TYPE,
+        source_entity_id=record.source_id,
+        raw_payload_hash=payload_hash,
+        raw_name=record.name,
+        raw_data=raw_data,
+        fetched_at=fetched_at,
+        source_record_key=source_record_key,
+    )
+    source_link = SourceLink(
+        feature_id=feature_id,
+        source_record_key=source_record_key,
+        source_role=SourceRole.PRIMARY,
+        match_method="natural_key",
+        confidence=100,
+        is_primary_source=True,
+    )
+    return FeatureBundle(
+        feature=feature, source_record=source_record, source_link=source_link
+    )
+
+
+def knps_geometry_records_to_bundles(
+    records: Iterable[KnpsGeometryRecord],
+    *,
+    dataset_key: str,
+    fetched_at: datetime,
+) -> list[FeatureBundle]:
+    """KNPS route/area dataset의 파싱된 행들(WKT geometry) → ``list[FeatureBundle]``.
+
+    geometry 파싱 실패/한국 경계 밖 centroid 행은 **건너뛴다**(결과에서 제외).
+    SHP/CSV 디코딩·좌표계 변환은 호출자 책임 — 본 함수는 WKT(4326) 입력만 받는다.
+
+    Parameters
+    ----------
+    records
+        ``KnpsGeometryRecord`` Protocol 만족 (``geom_wkt``는 EPSG:4326 WKT).
+    dataset_key
+        ``KNPS_GEOMETRY_DATASETS`` 키 (trails / linear_facilities /
+        park_boundaries / hazard_zones / protected_areas).
+    fetched_at
+        provider 호출 시각 (KST aware, ADR-019).
+
+    Raises
+    ------
+    KeyError
+        ``dataset_key``가 route/area geometry dataset이 아님.
+    """
+    try:
+        spec = KNPS_GEOMETRY_DATASETS[dataset_key]
+    except KeyError as exc:
+        raise KeyError(
+            f"KNPS route/area geometry dataset 아님: {dataset_key!r}. "
+            f"지원: {sorted(KNPS_GEOMETRY_DATASETS)}. Point/place는 "
+            "knps_point_records_to_bundles."
+        ) from exc
+
+    bundles: list[FeatureBundle] = []
+    for record in records:
+        bundle = _geometry_record_to_bundle(record, spec, fetched_at=fetched_at)
+        if bundle is not None:
+            bundles.append(bundle)
+    return bundles

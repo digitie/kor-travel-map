@@ -213,3 +213,50 @@ async def test_features_in_bbox_finds_loaded_feature(
         max_lon=lon + 1.1, max_lat=lat + 1.1,
     )
     assert bundle.feature.feature_id not in {r["feature_id"] for r in rows_far}
+
+
+async def test_area_feature_geom_persists(migrated_session: AsyncSession) -> None:
+    """route/area Feature.geom(WKT)이 features.geom으로 적재되는지 (ADR-012)."""
+    from krtour.map.providers.knps import knps_geometry_records_to_bundles
+
+    @dataclass(frozen=True)
+    class _GRec:
+        source_id: str
+        name: str
+        geom_wkt: str
+        raw: dict
+
+    rec = _GRec(
+        "PB-1",
+        "북한산국립공원",
+        "POLYGON((126.9 37.6, 127.0 37.6, 127.0 37.7, 126.9 37.7, 126.9 37.6))",
+        {"PARK": "북한산"},
+    )
+    bundle = knps_geometry_records_to_bundles(
+        [rec], dataset_key="knps_park_boundaries", fetched_at=_FETCHED
+    )[0]
+
+    await feature_repo.load_bundle(migrated_session, bundle)
+    await migrated_session.flush()
+
+    # geom이 4326 polygon으로 저장됐는지 직접 확인.
+    row = (
+        await migrated_session.execute(
+            text(
+                "SELECT x_extension.ST_SRID(geom) AS srid, "
+                "x_extension.GeometryType(geom) AS gtype "
+                "FROM feature.features WHERE feature_id = :fid"
+            ),
+            {"fid": bundle.feature.feature_id},
+        )
+    ).one()
+    assert row.srid == 4326
+    assert row.gtype == "POLYGON"
+
+    # get_feature_row는 coord(centroid) 기반 lon/lat 반환.
+    got = await feature_repo.get_feature_row(
+        migrated_session, bundle.feature.feature_id
+    )
+    assert got is not None
+    assert got["kind"] == "area"
+    assert got["lon"] is not None  # centroid

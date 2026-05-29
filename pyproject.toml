@@ -147,6 +147,12 @@ namespace_packages = true
 explicit_package_bases = true
 mypy_path = "src:packages/krtour-map-debug-ui/src"
 
+# shapely는 type stub를 제공하지 않음 (pyproj와 달리 py.typed 없음).
+# core/geometry.py가 WKT 파싱·centroid에 사용 — import-untyped만 무시.
+[[tool.mypy.overrides]]
+module = ["shapely.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = [".", "src"]

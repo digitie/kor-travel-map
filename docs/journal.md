@@ -2,6 +2,32 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-29 (claude) — KNPS geometry(route/area) 파서 + Feature.geom (Sprint 3)
+
+**작업**: KNPS route(LINESTRING)/area(POLYGON) dataset 변환. Point/place(PR#77)에
+이은 KNPS 2단계. geometry는 WKT(4326)로 `Feature.geom`(신규 필드) + `features.geom`
+컬럼에 저장, centroid를 `coord`로 (ADR-012 지도 마커용).
+
+- `core/geometry.py` (신규) — shapely 기반 순수 함수: `parse_wkt`(type 검증) +
+  `geometry_centroid`(한국 경계 검증) + `normalize_geometry`. `GeometryError`.
+  ROUTE/AREA_GEOMETRY_TYPES 집합. core→dto import (layers 정합).
+- `dto/feature.py` — `Feature.geom: str | None`(WKT, 4326) 필드 추가.
+- `infra/feature_repo.py` — INSERT에 geom 컬럼 추가 (`x_extension.ST_GeomFromText`
+  + ST_SetSRID 4326, ADR-008 함수 한정). ON CONFLICT에도 geom 갱신.
+- `providers/knps.py` — `KnpsGeometryRecord` Protocol(WKT 입력) +
+  `KNPS_GEOMETRY_DATASETS` 5건(trails/linear_facilities=route, park_boundaries/
+  hazard_zones/protected_areas=area) + `knps_geometry_records_to_bundles`. route는
+  category 01020103, area는 sentinel 00000000(트리 밖, area_kind로만 식별). 파싱
+  실패/경계밖/type불일치 행은 skip. SHP→WKT 디코딩은 호출자/파서 책임(Protocol).
+- `pyproject.toml` — shapely mypy override(stub 없음, import-untyped 무시).
+- 테스트: 단위 `test_core_geometry.py`(10) + knps geometry(18 추가) + 통합
+  geom 적재(POLYGON SRID 4326 확인) 1.
+
+**검증(네이티브 PostGIS)**: 통합 22/22, unit+lint 524, ruff/mypy --strict/
+import-linter(4 kept) green.
+
+**다음**: KNPS SHP bytes→WKT 파서(pyshp, park_boundaries) 또는 provider ⑥ krheritage.
+
 ## 2026-05-29 (claude) — Provider ⑤ KNPS Point/place 변환 (Sprint 3, ADR-034 7단계)
 
 **작업**: `python-knps-api`(06da125f, GitHub에서 설치 가능 확인) 실제 catalog/model을
