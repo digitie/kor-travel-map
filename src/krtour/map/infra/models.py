@@ -57,6 +57,7 @@ __all__ = [
     "SourceLinkRow",
     "ProviderSyncStateRow",
     "FeatureConsistencyReportRow",
+    "DedupReviewQueueRow",
 ]
 
 
@@ -401,3 +402,71 @@ class FeatureConsistencyReportRow(Base):
     severity_max: Mapped[str] = mapped_column(String, nullable=False)
     cases: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
     summary: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+
+
+# =============================================================================
+# ops.dedup_review_queue  (ADR-016 / docs/data-model.md §9.2)
+# =============================================================================
+
+
+class DedupReviewQueueRow(Base):
+    """``ops.dedup_review_queue`` row mapping — cross-provider 중복 후보 검토 큐.
+
+    ``core.dedup.find_dedup_candidates``가 만든 ``manual_review``(및 옵션
+    ``auto_merge``) 후보를 영속화한다 (ADR-016, SPRINT-3 §2.5). raw SQL은
+    ``infra/dedup_repo.py``의 ``_SQL`` 상수에서 (ADR-004).
+
+    점수는 0~100 ``NUMERIC(5,2)`` (core.scoring의 0.0~1.0 ×100). ``status``는
+    운영자 검토 워크플로(pending→accepted/rejected/merged/ignored),
+    ``decision_reason``에 알고리즘 제안(auto_merge/manual_review)을 보관.
+    ``(feature_id_a, feature_id_b)`` UNIQUE — 재스캔은 pending 행 점수만 갱신.
+    """
+
+    __tablename__ = "dedup_review_queue"
+    __table_args__ = (
+        UniqueConstraint("feature_id_a", "feature_id_b", name="uq_dedup_pair"),
+        CheckConstraint(
+            "status IN ('pending','accepted','rejected','merged','ignored')",
+            name="ck_dedup_status",
+        ),
+        CheckConstraint(
+            "total_score BETWEEN 0 AND 100 AND "
+            "name_score BETWEEN 0 AND 100 AND "
+            "spatial_score BETWEEN 0 AND 100 AND "
+            "category_score BETWEEN 0 AND 100",
+            name="ck_dedup_scores",
+        ),
+        Index(
+            "idx_dedup_status_score", "status", text("total_score DESC"),
+        ),
+        {"schema": "ops"},
+    )
+
+    review_key: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    feature_id_a: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("feature.features.feature_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    feature_id_b: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("feature.features.feature_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    total_score: Mapped[Any] = mapped_column(Numeric(5, 2), nullable=False)
+    name_score: Mapped[Any] = mapped_column(Numeric(5, 2), nullable=False)
+    spatial_score: Mapped[Any] = mapped_column(Numeric(5, 2), nullable=False)
+    category_score: Mapped[Any] = mapped_column(Numeric(5, 2), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String, nullable=False, server_default=text("'pending'"),
+    )
+    decision_reason: Mapped[str | None] = mapped_column(String)
+    reviewed_by: Mapped[str | None] = mapped_column(String)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
