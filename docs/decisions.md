@@ -983,7 +983,7 @@
 
 - **상태**: accepted (T-014 Sprint 1 진입 시 전환, 2026-05-25)
 - **날짜**: 2026-05-25
-- **결정자**: claude 제안, 사용자 검토 대기
+- **결정자**: claude 제안 + 사용자 결정 (2026-05-29 승인 확정)
 - **컨텍스트**: `docs/performance.md §9.1`에 이미 "in-memory 캐시 두지 않는다"
   방침이 박혀 있으나, 정식 ADR로 격상되지 않았다. 코드 작성 단계에서 누군가
   "이 hot path는 캐시하면 빠르지 않나"라고 시작하면 매번 review에서 같은 논쟁
@@ -1039,7 +1039,7 @@
 
 - **상태**: accepted (T-014 Sprint 1 진입 시 전환, 2026-05-25)
 - **날짜**: 2026-05-25
-- **결정자**: claude 제안, 사용자 검토 대기
+- **결정자**: claude 제안 + 사용자 결정 (2026-05-29 승인 확정)
 - **컨텍스트**: `packages/krtour-map-debug-ui`가 FastAPI 라우터를 노출하면
   OpenAPI spec (`openapi.json`)이 자동 생성된다. 이를 저장소에 커밋하고
   drift gate를 두는 정책은 `kraddr-geo` ADR-015 패턴이 있으나, 본 저장소는
@@ -1095,7 +1095,7 @@
 
 - **상태**: accepted (T-014 Sprint 1 진입과 동시 확정, 2026-05-25)
 - **날짜**: 2026-05-25
-- **결정자**: claude 제안, 사용자 검토 대기
+- **결정자**: claude 제안 + 사용자 결정 (2026-05-29 승인 확정)
 - **컨텍스트**: `docs/test-strategy.md §2`에 최종 coverage 목표(core 90% /
   infra 80% / providers 70% / client 80% / api 70% / dto 100% / 전체 80%
   branch)가 박혀 있고 "단계적으로 상향"이라고만 표기. 실제 schedule이 박혀
@@ -1149,7 +1149,7 @@
 
 - **상태**: accepted (T-014 Sprint 1 진입과 동시 확정 — Phase 1은 Sprint 3, Phase 2는 Sprint 5에 코드 적용, 2026-05-25)
 - **날짜**: 2026-05-25
-- **결정자**: claude 제안, 사용자 검토 대기
+- **결정자**: claude 제안 + 사용자 결정 (2026-05-29 승인 확정)
 - **컨텍스트**: `kraddr-geo` ADR-017 미러로 `ops.feature_consistency_reports`
   + batch DAG 게이트가 T-201로 잡혀 있음 (`docs/dagster-boundary.md §12`).
   F1~F8 케이스는 `python-krtour-map-spec.docx` B.18에 정의. 도입 시점이
@@ -1463,7 +1463,7 @@ merged 2026-05-25):
   는 모노레포 내부 share 모듈로만 사용 (코드 자체는 유지, registry publish X).
   (구 상태: accepted at T-014 Sprint 1 진입 2026-05-25.)
 - **날짜**: 2026-05-25
-- **결정자**: claude 제안, 사용자 검토 대기
+- **결정자**: claude 제안 + 사용자 결정 (T-014 Sprint 1 진입)
 - **컨텍스트**: ADR-025 (디버그 UI = maplibre-vworld) + ADR-026 (TripMate 사용자
   UI도 maplibre-vworld 통일)으로 frontend stack은 일원화됨. 그러나 두 UI에서
   공통으로 쓰는 코드 — `krtour.map.category` Tier 1~4 → maki icon(55종)

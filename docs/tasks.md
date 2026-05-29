@@ -73,17 +73,18 @@ branch로.
 
 ## 다음 (우선순위 순)
 
-- [ ] T-012 — ADR-020+ 후속 결정 작성 (proposed → accepted 사용자 검토 대기)
-  - **ADR-030 (proposed, PR#8 merged)** — 라이브러리 in-memory 캐시 금지
+- [x] T-012 — ADR-020+ 후속 결정 작성 (proposed → **accepted**, 사용자 승인
+  2026-05-29) — ADR-030~033 결정자 라인 정정 + 교차 참조 (proposed) → (accepted)
+  - **ADR-030 (accepted)** — 라이브러리 in-memory 캐시 금지
     (`functools.cache` 한정 예외) + `import-linter` 계약. PR#10에서
-    `pyproject.toml`에 forbidden 계약 박힘 → 사용자 review 후 accepted PR.
-  - **ADR-031 (proposed, PR#8 merged)** — 디버그 패키지 OpenAPI export 정책
+    `pyproject.toml`에 forbidden 계약 박힘 (PR#16 T-014에서 일괄 accepted).
+  - **ADR-031 (accepted)** — 디버그 패키지 OpenAPI export 정책
     (첫 라우터부터 활성화). PR#10에서 `scripts/export_openapi.py` skeleton
-    박힘 → 사용자 review 후 accepted PR.
-  - **ADR-032 (proposed, 시기 의존)** — Coverage 단계적 상향 일정. PR#10에서
+    박힘 (PR#16 T-014에서 일괄 accepted).
+  - **ADR-032 (accepted)** — Coverage 단계적 상향 일정. PR#10에서
     `pyproject.toml` `fail_under=0` + 주석으로 Sprint 1~5 schedule 박음.
     T-014 + Sprint 1 진입 PR에서 `fail_under=50`으로 상향 + accepted.
-  - **ADR-033 (proposed, 시기 의존)** — `feature_consistency_reports` 단계적
+  - **ADR-033 (accepted)** — `feature_consistency_reports` 단계적
     도입. T-014 + Sprint 3 진입 PR에서 Phase 1 (F1~F3) accepted.
 - [x] **T-014 — 코드 작성 단계 진입** (사용자 승인 2026-05-25, 본 PR#16)
   - ADR 027/028/029/030/031/032/033/034 일괄 accepted 전환

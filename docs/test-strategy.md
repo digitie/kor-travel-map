@@ -55,8 +55,8 @@ def test_visitkorea_festival_fixture_replay(fixture_path): ...
 | **전체** | **80%+ branch** | CI 강제 |
 
 `pyproject.toml`의 `[tool.coverage.run]`에 source = `src/krtour/map`, `branch =
-true`. 단계적 상향 schedule은 **ADR-032** (proposed, T-014 코드 작성 단계
-진입 결정 시 accepted 전환):
+true`. 단계적 상향 schedule은 **ADR-032** (accepted, T-014 코드 작성 단계
+진입 시 전환):
 
 | Sprint | 전체 (branch) | `core/` | `providers/` | `infra/client/api/` |
 |--------|---------------|---------|--------------|---------------------|
