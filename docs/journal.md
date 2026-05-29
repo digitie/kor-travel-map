@@ -2,6 +2,25 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-29 (claude) — source_role CHECK 정합 (문서 정리 리포트 §2.1 후속 코드 수정)
+
+**작업**: 문서 정리(PR#74) 리포트 §2.1에서 발견한 코드 레벨 잠재 버그 수정.
+`source_links` CHECK가 DTO `SourceRole` enum과 불일치 → DTO로 BASE_ADDRESS 등
+적재 시 DB CHECK 위반 가능했음.
+
+- 정본 확인: DTO `_enums.SourceRole` = `feature-model.md §3` = `data-model.md`
+  (primary/base_address/base_coordinate/enrichment/correction/duplicate_candidate/
+  media/weather_context). `geocoded`/`phone`/`observation`/`external_link`(0002
+  CHECK)는 코드/테스트/문서 어디에도 미사용 → 잘못 들어간 값.
+- `infra/models.py` `ck_source_links_role` CHECK를 정본 8종으로 교체.
+- alembic `0004_fix_source_links_role_check` — 기존 DB CHECK를 ALTER(drop+create).
+  기존 데이터는 primary/enrichment만이라 위반 없음. downgrade는 0002 값 복원.
+- 회귀 테스트 `tests/integration/test_source_role_check.py` — 8 enum 값 전부 INSERT
+  가능 확인.
+
+**검증(네이티브 PostGIS)**: 통합 21/21, unit+lint 486, ruff/mypy --strict green.
+alembic upgrade/downgrade/re-upgrade(0004↔0003) round-trip OK. head 단일.
+
 ## 2026-05-29 (claude) — 문서 정합성 정리 (PR#69~#73 머지 후 drift sweep)
 
 **작업**: Sprint 3 코드 머지(ADR-033 Phase 1 + feature_repo + /features 라우터)
