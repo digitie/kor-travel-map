@@ -5,6 +5,52 @@
 
 ## [Unreleased]
 
+### Sprint 3 — DB 적재 오케스트레이션 + dedup + geocoding REST + e2e (2026-05-29~30)
+
+- **PR#93 — frontend CI 게이트** (`.github/workflows/frontend.yml`): Node 20 +
+  workspace `npm install` + `tsc --noEmit` + `next build` (paths 필터). PR#92
+  회고에 따라 잠복 syntax/타입 오류를 PR 머지 전에 차단.
+- **PR#92 — npm workspace 루트 + frontend WSL 기동 + Windows Playwright e2e 7/7** (#117):
+  루트 `package.json`(workspaces: map-marker-react + debug-ui/frontend) +
+  frontend `workspace:*` → npm 호환 `*`. `npm install`(419 pkgs, github
+  `maplibre-vworld#v0.1.0` 포함) 성공. WSL backend(:8087) + frontend(:8610)
+  기동 + Windows `npx playwright test` → home 4 + etl 3 = 7/7 통과 (실 backend
+  연동). 검출+수정: `etl/page.tsx` JSDoc 주석의 `*/`가 블록 주석을 조기 종료해
+  PR#44부터 잠복했던 빌드 버그 (frontend 미컴파일 환경에서 미검출).
+- **PR#91 — Playwright e2e 스위트 + backend 라이브 검증 리포트** (#117):
+  `frontend/playwright.config.ts` + `e2e/home.spec.ts`/`etl.spec.ts` (실
+  backend `/debug/health`·`/debug/version`·`/debug/etl/*` 연동, role/heading
+  + native select nth 선택자). `docs/reports/debug-ui-e2e-2026-05-29.md`에
+  backend 5경로 실 HTTP 통과 증거 + 사람용 런북.
+- **PR#90 — geocoding python API → REST API v2 전환** (#123):
+  `krtour.map.geocoding`을 in-process `AsyncAddressClient` 가정에서
+  **kraddr-geo REST `/v1/address/*`**(ver 2.0)로 재작성. structural Protocol을
+  실제 `ReverseResponse`/`GeocodeResponse`/`AddressStructure`(vworld
+  `level4LC=bjd_cd` 등)/`GeocodeExtension`으로 교체. 순수 변환
+  `reverse_response_to_address` / `geocode_response_to_coordinate` + 새
+  `KraddrGeoRestClient`(httpx 주입, TYPE_CHECKING-only import — 메인 패키지
+  런타임 httpx 의존 X). 소비자 계약(`ReverseGeocoder` 등) 유지 →
+  provider 무영향. `KRTOUR_MAP_KRADDR_GEO_BASE_URL` 설정 추가.
+- **PR#89 — `AsyncKrtourMapClient` 적재/dedup 오케스트레이션** (#122):
+  placeholder였던 라이브러리 진입점에 transaction 소유 메서드 구현 —
+  `load_feature_bundles`(`infra.load_bundles` 래핑), `sync_dedup_candidates`
+  (`core.dedup` + `infra.enqueue_dedup_candidates`), 읽기
+  (`get_feature`/`features_in_bounds`/`pending_dedup_reviews`). engine 수명은
+  호출자 소유. unit 2 + integration 3 (testcontainers, teardown TRUNCATE).
+- **PR#88 — `ops.dedup_review_queue` 적재 + `infra/dedup_repo.py`** (#122):
+  alembic 0005 (`ops.dedup_review_queue` — UUID PK, FK→features CASCADE,
+  `NUMERIC(5,2)` 0~100 score, `ck_dedup_scores`/`ck_dedup_status`,
+  `idx_dedup_status_score`). 점수 0.0~1.0 → 0~100 변환,
+  검토완료 행 보존 upsert(`DO UPDATE ... WHERE status='pending'`).
+- **PR#87 — `core/dedup.py` cross-provider 중복 후보** (#121):
+  `find_dedup_candidates(left, right, *, include_auto_merge)` 순수 함수 —
+  `score_pair`(ADR-016)로 cross-score, `KEEP_SEPARATE` 제외, score 내림차순.
+  `DedupInput` Protocol(`Feature`가 그대로 만족) + `DedupCandidate` frozen
+  dataclass. unit 6.
+- **PR#86 — `geometry_area_square_meters` 측지 면적 + krheritage AREA 보강** (#120):
+  `pyproj.Geod(ellps='WGS84').geometry_area_perimeter` 측지 면적,
+  krheritage AREA 변환기가 `AreaDetail.area_square_meters` 채움 + 단위 4건.
+
 ### Sprint 2 prep (2026-05-26, PR#28+)
 
 - **PR#29 — `core/scoring.py` (ADR-016 Record Linkage) + `core/providers.py`**:

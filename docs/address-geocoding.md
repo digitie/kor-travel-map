@@ -16,13 +16,18 @@
 - 주소 normalize / 행정코드 parse: **`krtour.map.core.address`** (PR#37) —
   `normalize_bjd_code` / `parse_bjd_code` / `extract_sigungu_code` /
   `extract_sido_code` / `normalize_phone_number` / `normalize_korean_text`.
-- geocoding 엔진: `python-kraddr-geo` **v2** (`kraddr.geo.AsyncAddressClient` —
-  `open_client(pg_dsn=...)` / `reverse_v2` / `geocode_v2`) — 별도 라이브러리
-  (흡수 대상 아님). PostgreSQL DSN 기반 (v1 sqlite store는 폐기).
-- 연동 모듈: **`krtour.map.geocoding`** (PR — 본 PR) — kraddr-geo를 import하지
-  않고 v2 응답 structural Protocol만 의존(ADR-006). 순수 변환 함수
-  `reverse_v2_to_address` / `geocode_v2_to_coordinate` + 콜러블 팩토리.
-- VWorld 폴백 키: `python-kraddr-geo` 내부 설정에서만. 본 라이브러리에서
+- geocoding 엔진: `kraddr-geo` **REST API v2** (`/v1/address/reverse`,
+  `/v1/address/geocode`, ServiceMeta.version=`"2.0"`). 별도 FastAPI 서비스로 기동
+  하며 본 라이브러리는 **HTTP로만** 호출한다 — python 패키지/DB 의존 없음
+  (PR#90/#123, ADR-006). v1 sqlite store 및 in-process `AsyncAddressClient`는 폐기.
+- 연동 모듈: **`krtour.map.geocoding`** — kraddr-geo / httpx를 **런타임 import 하지
+  않는다**(httpx는 TYPE_CHECKING 전용). REST 응답(`ReverseResponse`/`GeocodeResponse`/
+  `AddressStructure`/`GeocodeExtension`) structural Protocol만 의존(ADR-006). 순수
+  변환 함수 `reverse_response_to_address` / `geocode_response_to_coordinate` +
+  `KraddrGeoRestClient`(httpx.AsyncClient 주입) + 콜러블 팩토리.
+- 설정: `KRTOUR_MAP_KRADDR_GEO_BASE_URL` — REST 서비스 base URL (`http://kraddr-geo:8080`
+  등). `None`이면 정/역지오코딩 보강 비활성(좌표만으로 적재).
+- VWorld 폴백 키: `kraddr-geo` REST 서비스 내부 설정에서만. 본 라이브러리에서
   `python-vworld-api` 직접 import 금지.
 
 ## 2. 핵심 callable
@@ -58,31 +63,53 @@ class GeocoderResources:
     reverse_geocoder: ReverseGeocoder | None = None
 ```
 
-## 3. kraddr-geo v2 client → 콜러블 (구현 완료)
+## 3. kraddr-geo REST 클라이언트 → 콜러블 (구현 완료, PR#90/#123)
 
-호출자가 kraddr-geo v2 client를 열어(`open_client(pg_dsn=...)` / `async with`)
-팩토리에 넘기면 §2 콜러블이 만들어진다. client 수명(open/close)은 호출자 책임
-(ADR-002 async-only). 본 라이브러리는 kraddr-geo를 import하지 않는다 — client는
-`KraddrGeoClient` structural Protocol(`reverse_v2`/`geocode_v2`)로만 의존.
+호출자가 `httpx.AsyncClient`(base URL = REST 서비스 호스트)를 만들어
+`KraddrGeoRestClient`에 주입하고 팩토리에 넘기면 §2 콜러블이 만들어진다.
+httpx/AsyncClient 수명(close)은 호출자 책임 (ADR-002 async-only). 본 라이브러리는
+kraddr-geo / httpx를 **런타임 import 하지 않는다** — httpx는 TYPE_CHECKING 전용,
+client는 `KraddrGeoRestClient`(REST 응답 structural Protocol)로만 의존.
 
 ```python
-from kraddr.geo import open_client          # 호출자(TripMate/Dagster) 영역
+import httpx
 from krtour.map.geocoding import (
+    KraddrGeoRestClient,
     kraddr_geo_reverse_geocoder,
     kraddr_geo_address_geocoder,
 )
 
-async with open_client(pg_dsn=settings.kraddr_geo_dsn) as client:
-    reverse = kraddr_geo_reverse_geocoder(client, min_confidence=0.5, radius_m=50)
-    geocode = kraddr_geo_address_geocoder(client)
+async with httpx.AsyncClient(base_url=settings.kraddr_geo_base_url) as http:
+    client = KraddrGeoRestClient(http)              # GET /v1/address/reverse·geocode
+    reverse = kraddr_geo_reverse_geocoder(client, max_distance_m=50)
+    geocode = kraddr_geo_address_geocoder(client, min_confidence=0.5)
 
     addr = await reverse(Coordinate(lon=Decimal("127.0"), lat=Decimal("37.5")))
     coord = await geocode(Address(road="서울특별시 영등포구 여의공원로 120"))
 ```
 
-매핑은 §4. `status != "OK"`/후보 없음/min_confidence 미달이면 `None`. 자릿수가
-틀린 코드(bjd/sigungu/zipcode/admin_dong)는 `None`으로 떨어뜨려 `Address`
-validator 거부를 피한다.
+매핑은 §4. `status != "OK"`/결과 없음/(reverse) `max_distance_m` 초과/(geocode)
+`min_confidence` 미달이면 `None`. 자릿수가 틀린 코드(bjd/sigungu/zipcode/admin_dong)는
+`None`으로 떨어뜨려 `Address` validator 거부를 피한다.
+
+### 3.1 REST 응답 → `Address` level 매핑 (reverse)
+
+`ReverseResultItem.structure`는 vworld 호환 level 구조 (kraddr.geo.core.responses 정본):
+
+| AddressStructure | 원천 컬럼 | `Address` 필드 |
+|------------------|-----------|----------------|
+| `level1`         | `si_nm`   | `sido_name`    |
+| `level2`         | `sgg_nm`  | `sigungu_name` |
+| `level4L`        | `li_nm`/`emd_nm` | `admin`/`legal`(fallback) |
+| `level4LC`       | `bjd_cd` (10자리) | `bjd_code` → `sigungu_code`/`sido_code` 파생 |
+| `level4A`        | `adm_nm`  | `admin`        |
+| `level4AC`       | `adm_cd` (10자리) | `admin_dong_code` |
+| `level5`         | `road_nm` | `road`(road 항목 부재 시 fallback) |
+| (item)`text`     | 전체 주소  | `road`(type=road)/`legal`(type=parcel) |
+| (item)`zipcode`  | 우편번호 5 | `zipcode`      |
+
+reverse `AddressStructure`에는 도로명코드가 없어 `road_name_code`는 채우지 않는다
+(geocode `x_extension.rncode_full`에만 존재).
 
 ## 4. 코드 변환 기준
 
@@ -194,8 +221,7 @@ await load_feature_rows(
     feature_items=feature_bundles,
     source_record_items=...,
     geocoder_resource={
-        "kraddr_geo_database_path": settings.kraddr_geo_database_path,
-        "kraddr_geo_store_kwargs": settings.kraddr_geo_store_kwargs,
+        "kraddr_geo_base_url": settings.kraddr_geo_base_url,   # REST 서비스 URL
     },
 )
 ```
@@ -277,33 +303,35 @@ async def enrich_address_from_coordinate(
 ## 12. VWorld / juso / epost 경계
 
 본 라이브러리는 vworld/juso/epost API를 직접 호출하지 않는다. 모두
-`python-kraddr-geo` 내부에서 처리:
+`kraddr-geo` REST 서비스 내부에서 처리:
 
 ```
 [python-krtour-map]
   ↓ ReverseGeocoder callable 호출
-[python-kraddr-geo] AsyncAddressClient
+[httpx.AsyncClient → kraddr-geo REST]   GET /v1/address/reverse·geocode
   ├─ 1차: 로컬 PostGIS (도로명주소 전자지도)
   ├─ 2차: vworld API fallback (선택)
   ├─ 3차: juso API fallback (선택)
   └─ 4차: epost API fallback (선택)
 ```
 
-API 키/한도/재시도는 `python-kraddr-geo` 책임.
+API 키/한도/재시도는 `kraddr-geo` REST 서비스 책임. 본 라이브러리는 REST 응답만 신뢰.
 
 ## 13. 테스트
 
 - 단위: Fake reverse_geocoder로 `enrich_address_from_coordinate`의
   match_level branch 전수 검증 (`tests/unit/test_geocoding.py`).
-- 통합: 실제 `AsyncAddressClient` + 소량 SQLite store → 좌표 → Address
-  보강 시나리오.
+  REST 클라이언트는 `httpx.MockTransport`로 서버 없이 GET 요청 params + JSON
+  파싱 + 변환 검증 (PR#90 test_geocoding 21건).
+- 통합: 실제 `kraddr-geo` REST 서비스 인스턴스 (docker compose 등) → 좌표 →
+  Address 보강 시나리오.
 - fixture: provider별 fixture에 `address_enrichment` snapshot 포함.
 
 ## 14. 운영 체크리스트
 
-- [ ] `python-kraddr-geo` git sha 핀
-- [ ] `KRTOUR_MAP_KRADDR_GEO_PG_DSN` 또는 SQLite path 환경변수
+- [ ] `KRTOUR_MAP_KRADDR_GEO_BASE_URL` 환경변수 (REST 서비스 URL)
+- [ ] `kraddr-geo` REST 서비스(`/v1/address/*`)가 운영 환경에서 reachable
 - [ ] reverse geocoder가 MOIS/OpiNet ETL에 주입되어 있는가
 - [ ] `legal_dong_conflict` / `sigungu_code_only` / `not_geocoded` 비율
       모니터링 (Grafana panel)
-- [ ] VWorld API 키 회전 시 `python-kraddr-geo` store 재설정
+- [ ] VWorld API 키 회전 시 `kraddr-geo` REST 서비스 재설정 (본 lib는 무관)
