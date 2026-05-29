@@ -390,9 +390,10 @@ class KnpsGeometryDatasetSpec:
     """KNPS route/area dataset 1건의 변환 사양.
 
     route는 ``RouteDetail.route_type``, area는 ``AreaDetail.area_kind``로 분기.
-    category는 route(탐방로/시설도로)만 존재; area(공원경계/위험지역/특별보호구역)는
-    카테고리 트리에 진입하지 않음(``category=None`` → sentinel ``00000000``,
-    ``docs/knps-feature-etl.md §3.1``). marker_icon은 선/면이라 fallback.
+    category는 탐방로/시설도로(route)·국립공원 경계(area)는 실제 관광 category를
+    갖고(upstream ``docs/knps-feature-etl.md §4``), 위험지역/보호지역은 category가
+    없어 ``category=None`` → sentinel ``00000000``. marker_icon은 spec에 명시
+    (upstream §4 표: route/공원 ``park``, 위험/보호 ``barrier``).
     """
 
     __slots__ = (
@@ -421,11 +422,16 @@ class KnpsGeometryDatasetSpec:
         self.marker_color = marker_color
 
 
-# area/route feature는 카테고리 트리 밖 — sentinel category (Feature.category는
-# 8자리 숫자 형식 강제, ADR-023). area_kind/route_type로만 식별.
+# 일부 area(hazard/protected)는 관광 category 없음 → sentinel (Feature.category는
+# 8자리 숫자 형식 강제, ADR-023). area_kind로만 식별. 단, 국립공원 경계는 실제
+# 관광 category가 있음 (upstream knps-feature-etl.md §4).
 _SENTINEL_CATEGORY: Final[str] = "00000000"
-# 탐방로 category (TOURISM_NATURAL_LANDSCAPE...TRAIL, knps-feature-etl.md §4).
+# 국립공원 경계 (TOURISM_NATURAL_LANDSCAPE_MOUNTAIN_VALLEY_NATIONAL_PARK).
+_NATIONAL_PARK_CATEGORY: Final[str] = "01020101"
+# 탐방로/시설도로 (TOURISM_NATURAL_LANDSCAPE_MOUNTAIN_VALLEY_FOREST_TRAIL).
 _TRAIL_CATEGORY: Final[str] = "01020103"
+# route/national_park maki — upstream knps-feature-etl.md §4 표 ("park").
+_PARK_MAKI: Final[str] = "park"
 
 
 KNPS_GEOMETRY_DATASETS: Final[dict[str, KnpsGeometryDatasetSpec]] = {
@@ -435,6 +441,7 @@ KNPS_GEOMETRY_DATASETS: Final[dict[str, KnpsGeometryDatasetSpec]] = {
         detail_kind="hiking_trail",
         allowed_geom_types=ROUTE_GEOMETRY_TYPES,
         category=_TRAIL_CATEGORY,
+        marker_icon=_PARK_MAKI,
         marker_color="P-06",
     ),
     "knps_linear_facilities": KnpsGeometryDatasetSpec(
@@ -443,6 +450,7 @@ KNPS_GEOMETRY_DATASETS: Final[dict[str, KnpsGeometryDatasetSpec]] = {
         detail_kind="facility_road",
         allowed_geom_types=ROUTE_GEOMETRY_TYPES,
         category=_TRAIL_CATEGORY,
+        marker_icon=_PARK_MAKI,
         marker_color="P-06",
     ),
     "knps_park_boundaries": KnpsGeometryDatasetSpec(
@@ -450,7 +458,8 @@ KNPS_GEOMETRY_DATASETS: Final[dict[str, KnpsGeometryDatasetSpec]] = {
         feature_kind=FeatureKind.AREA,
         detail_kind="national_park",
         allowed_geom_types=AREA_GEOMETRY_TYPES,
-        category=None,
+        category=_NATIONAL_PARK_CATEGORY,  # upstream §4 — 경계도 관광 category 보유
+        marker_icon=_PARK_MAKI,
         marker_color="P-06",
     ),
     "knps_hazard_zones": KnpsGeometryDatasetSpec(
@@ -458,7 +467,7 @@ KNPS_GEOMETRY_DATASETS: Final[dict[str, KnpsGeometryDatasetSpec]] = {
         feature_kind=FeatureKind.AREA,
         detail_kind="hazard_zone",
         allowed_geom_types=AREA_GEOMETRY_TYPES,
-        category=None,
+        category=None,  # 위험지역은 관광 category 없음 (upstream §3/§4)
         marker_icon="barrier",
         marker_color="P-13",
     ),
@@ -467,7 +476,7 @@ KNPS_GEOMETRY_DATASETS: Final[dict[str, KnpsGeometryDatasetSpec]] = {
         feature_kind=FeatureKind.AREA,
         detail_kind="protected_area",
         allowed_geom_types=AREA_GEOMETRY_TYPES,
-        category=None,
+        category=None,  # 보호지역도 관광 category 없음 (upstream §2 layer)
         marker_icon="barrier",
         marker_color="P-13",
     ),
