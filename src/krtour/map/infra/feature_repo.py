@@ -13,8 +13,11 @@ upsert하는 **첫 DB write 경로** (ADR-004 raw SQL, ORM은 매핑만).
   test-strategy §4.4). source_records는 payload_hash가 PK 구성요소라
   ``DO NOTHING`` (이력 보존, ADR-017).
 - **coord_5179는 건드리지 않음** (ADR-012 STORED generated) — ``coord``만 INSERT.
-- **ST_Transform을 술어에 쓰지 않음** (ADR-012) — 좌표 INSERT는 ``ST_SetSRID(
-  ST_MakePoint(lon,lat),4326)``.
+- **ST_Transform을 술어에 쓰지 않음** (ADR-012) — 좌표 INSERT는
+  ``x_extension.ST_SetSRID(x_extension.ST_MakePoint(lon,lat),4326)``.
+- **PostGIS 함수는 ``x_extension.`` 스키마 한정** (ADR-008) — raw SQL은 DML 실행
+  connection의 search_path에 의존하지 않도록 명시 qualify (asyncpg pool 연결마다
+  search_path 보장이 어려움 → ``function st_makepoint does not exist`` 회피).
 
 ADR 참조
 --------
@@ -65,8 +68,10 @@ INSERT INTO feature.features (
     created_at, updated_at, deleted_at
 ) VALUES (
     :feature_id, :kind, :name, :category,
-    CASE WHEN :lon IS NULL THEN NULL
-         ELSE ST_SetSRID(ST_MakePoint(:lon, :lat), 4326) END,
+    CASE WHEN CAST(:lon AS double precision) IS NULL THEN NULL
+         ELSE x_extension.ST_SetSRID(
+             x_extension.ST_MakePoint(CAST(:lon AS double precision),
+                          CAST(:lat AS double precision)), 4326) END,
     CAST(:address AS jsonb), :legal_dong_code, :road_name_code,
     :road_address_management_no, :admin_dong_code, :sido_code, :sigungu_code,
     CAST(:urls AS jsonb), :marker_icon, :marker_color,
@@ -137,8 +142,8 @@ RETURNING (xmax = 0) AS inserted
 _GET_FEATURE_SQL: Final[str] = """
 SELECT
     feature_id, kind, name, category,
-    ST_X(coord) AS lon, ST_Y(coord) AS lat,
-    ST_SRID(coord_5179) AS coord_5179_srid,
+    x_extension.ST_X(coord) AS lon, x_extension.ST_Y(coord) AS lat,
+    x_extension.ST_SRID(coord_5179) AS coord_5179_srid,
     address, detail, urls, raw_refs,
     legal_dong_code, sido_code, sigungu_code,
     marker_icon, marker_color, status,
@@ -317,17 +322,33 @@ async def load_bundles(
     return total
 
 
+# JSONB 컬럼 — raw ``text()`` 쿼리는 driver에 따라 str(asyncpg)로 돌려줄 수 있어
+# (typed 컬럼이 없으면 SQLAlchemy JSON 디시리얼라이저 미작동) 명시적으로 파싱한다.
+_JSONB_COLUMNS: Final[tuple[str, ...]] = ("address", "detail", "urls", "raw_refs")
+
+
 async def get_feature_row(
     session: AsyncSession, feature_id: str
 ) -> dict[str, Any] | None:
     """``feature.features`` 단건 조회 (raw row dict). 없으면 ``None``.
 
     좌표는 ``lon``/``lat`` (4326)으로 분해해서 반환. ``coord_5179_srid``로
-    generated column이 5179로 채워졌는지 확인 가능 (ADR-012). DTO 매핑은
-    상위(client) 책임 — 본 repo는 raw row만.
+    generated column이 5179로 채워졌는지 확인 가능 (ADR-012). JSONB 컬럼
+    (``address``/``detail``/``urls``/``raw_refs``)은 dict/list로 디시리얼라이즈해서
+    반환 — driver(asyncpg)가 str로 돌려줘도 일관성 보장. DTO 매핑은 상위(client)
+    책임 — 본 repo는 raw row만.
     """
+    import json
+
     result = await session.execute(
         text(_GET_FEATURE_SQL), {"feature_id": feature_id}
     )
     row = result.mappings().first()
-    return dict(row) if row is not None else None
+    if row is None:
+        return None
+    data = dict(row)
+    for col in _JSONB_COLUMNS:
+        value = data.get(col)
+        if isinstance(value, str):
+            data[col] = json.loads(value)
+    return data
