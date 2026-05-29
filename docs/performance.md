@@ -339,7 +339,7 @@ LIMIT 1;
 ### 9.1 라이브러리 레벨 캐시 — 사용하지 않는다
 
 - 라이브러리는 stateless. in-memory 캐시 두지 않는다 (lifespan 복원 복잡, 다중
-  워커 일관성 깨짐). 정식 결정은 **ADR-030** (proposed) — `functools.cache`
+  워커 일관성 깨짐). 정식 결정은 **ADR-030** (accepted) — `functools.cache`
   한정 narrow 예외 (PlaceCategoryCode 카탈로그, `pyproj.Transformer` singleton).
   `import-linter` 계약으로 `cachetools` / `async_lru` / `aiocache` /
   `diskcache` 의존 차단.

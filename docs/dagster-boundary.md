@@ -336,7 +336,7 @@ import 책임).
 - severity != ERROR이면 `mv_refresh`로 swap
 - ERROR이면 `feature_consistency_reports`에 기록 + 알림
 
-**도입 시점은 ADR-033** (proposed, T-014에 묶어 accepted 전환) — 두 단계로 분할:
+**도입 시점은 ADR-033** (accepted, T-014에 묶어 전환) — 두 단계로 분할:
 
 - **Phase 1 (Sprint 3~4, T-201a)**: 스키마 + F1~F3 critical 케이스 (orphan
   source / detail 누락 / CRS drift). Dagster 게이트 **미적용** — 검증만.

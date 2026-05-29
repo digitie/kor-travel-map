@@ -2,6 +2,23 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-29 (claude) — ADR-030~033 사용자 승인 확정 + 문서 drift 정정
+
+**작업**: 사용자가 ADR-030/031/032/033을 "제안한 대로 진행" 승인. 이 4건은
+이미 PR#16(T-014)에서 `accepted`로 전환됐으나 `결정자` 라인에 "claude 제안,
+사용자 검토 대기" 잔존 + 교차 참조 문서가 `(proposed)`로 남아 있던 drift를 정정.
+
+- `docs/decisions.md`: ADR-030/031/032/033 `결정자` → "claude 제안 + 사용자
+  결정 (2026-05-29 승인 확정)" (형제 ADR-027 컨벤션 정합).
+- 교차 참조 `(proposed)` → `(accepted)`: `performance.md §9.1`(ADR-030) /
+  `debug-ui-package.md §`(ADR-031) / `test-strategy.md §2`(ADR-032) /
+  `dagster-boundary.md §12`(ADR-033).
+- `docs/tasks.md`: T-012 (proposed→accepted 검토 대기) `[ ]` → `[x]` 종결.
+- 역사적 기록(journal PR#8 / resume 완료 PR / SPRINT-1 전환표 / 리뷰 리포트)은
+  당시 상태를 정확히 기록하므로 미변경.
+
+**다음**: #117 Debug UI(WSL) + Windows Playwright e2e (변동 없음).
+
 ## 2026-05-29 (claude) — debug UI CORS (Playwright e2e #117 Stage A)
 
 **작업**: #117 e2e 준비 중 발견 — frontend(Next.js 8610)가 브라우저에서

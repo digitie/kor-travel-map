@@ -203,7 +203,7 @@ python packages/krtour-map-debug-ui/scripts/export_openapi.py \
 ```
 
 `.github/workflows/openapi.yml`에 본 패키지용 step 추가. DTO/라우터 변경 시
-`openapi.json` 갱신 강제. 정식 결정은 **ADR-031** (proposed) — 첫 FastAPI
+`openapi.json` 갱신 강제. 정식 결정은 **ADR-031** (accepted) — 첫 FastAPI
 라우터 등장 PR부터 즉시 활성화 (frontend 도입 전부터 drift gate 가동 →
 type drift 부채 0).
 
