@@ -2,6 +2,43 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-29 (claude) — 적재 자동 보강 wiring: provider 변환기 전면 async + geocoder 주입
+
+**작업**: 사용자 "knps 재검토 + kraddr geo v2 연동" 후속으로 "적재 자동 보강
+wiring" 선택 → 진행 중 "모두 async로 구현" 지시. 두 결정 반영.
+
+**핵심 제약**: `feature_id = f_{bjd_code or 'global'}_...` (ADR-009) — bjd_code가
+feature_id에 박히므로 역지오코딩은 **feature_id 계산 전**에 끝나야 한다. 사후
+보강은 불가('global' bucket 고정). + kraddr-geo v2는 async(`reverse_v2`).
+→ 결론: provider 변환 함수를 async로 만들어 feature_id 직전 `await`.
+
+**설계 (사용자 승인: 사전해소 → 전면 async)**:
+- `geocoding.cached_reverse_geocoder(geocoder, *, precision=6)` — 좌표 양자화
+  메모이즈 async wrapper (중복 좌표 1회 호출, None도 캐싱). (초기 sync
+  `ReverseLookup`/`build_reverse_lookup` 설계는 "모두 async" 지시로 폐기.)
+- **provider 변환 함수 전면 async화** + `reverse_geocoder: ReverseGeocoder | None`
+  주입: standard_data(festival) / opinet(stations) / krex(rest_areas·notices) /
+  knps(point·geometry·CsvPreview 브리지). 각자 cached_reverse_geocoder로 래핑 후
+  feature_id 전에 await해 Address(bjd_code 등) 채움. geometry는 centroid 역지오.
+- standard_data의 bespoke sync `ReverseGeocoder`/`ReverseGeocodeResult` Protocol
+  제거 → geocoding의 async `ReverseGeocoder`로 통일 (krex/opinet도 이 import로
+  교체, `.admin_address`→Address `.admin`).
+- knps Feature에 `address=address or Address()` (Feature.address는 non-optional).
+
+**테스트**: 단위 테스트는 sync ergonomics shim(`asyncio.run`)으로 기존 호출처
+보존; geocoder fake는 async 콜러블(→Address)로 교체. 통합/debug-ui adapter
+테스트는 `async def`+`await` (asyncio_mode=auto). debug-ui `etl_fixtures`
+(`_convert_*`/`run_fixture_preview`) + `etl_live` + route도 async 전파.
+geocoding cached_reverse_geocoder 테스트 2건 추가.
+
+**검증(로컬)**: main unit+lint **556** / debug-ui **79** / ruff / mypy --strict
+(-p krtour.map, 45 files) / import-linter 4 kept / openapi --check 0 green.
+
+**경계**: kraddr-geo client 수명·실제 호출은 호출자(TripMate/Dagster). 본 lib는
+async 변환 + geocoder 주입 지점까지. DB write(적재) 경로는 여전히 feature_repo.
+
+**다음**: provider ⑥ krheritage 또는 실 DB 적재 오케스트레이션.
+
 ## 2026-05-29 (claude) — KNPS provider 재검토 + kraddr-geo v2 함수 연동(`krtour.map.geocoding`)
 
 **작업**: 사용자 요청 "knps api 프로바이더 재검토 + kraddr geo v2 함수 연동 구현".

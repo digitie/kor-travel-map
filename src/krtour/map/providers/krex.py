@@ -45,7 +45,6 @@ from typing import Any, Final, Literal, Protocol, runtime_checkable
 from krtour.map.core.address import (
     extract_sido_code,
     extract_sigungu_code,
-    normalize_bjd_code,
     normalize_korean_text,
     normalize_phone_number,
 )
@@ -73,7 +72,7 @@ from krtour.map.dto import (
     WeatherDomain,
     WeatherValue,
 )
-from krtour.map.providers.standard_data import ReverseGeocoder
+from krtour.map.geocoding import ReverseGeocoder, cached_reverse_geocoder
 
 __all__ = [
     # Protocols
@@ -268,33 +267,32 @@ def _parse_numeric(raw: str | Decimal | int | float | None) -> Decimal | None:
         return None
 
 
-def _reverse_geocode(
-    coord: Coordinate | None, rg: ReverseGeocoder | None
+async def _reverse_geocode(
+    coord: Coordinate | None, geocoder: ReverseGeocoder | None
 ) -> tuple[str | None, str | None, str | None, str | None]:
     """reverse geocoding 결과 → (bjd_code, sigungu_code, sido_code, admin)."""
-    if coord is None or rg is None:
+    if coord is None or geocoder is None:
         return (None, None, None, None)
-    result = rg.lookup(lon=coord.lon, lat=coord.lat)
-    if result is None:
+    geo = await geocoder(coord)
+    if geo is None:
         return (None, None, None, None)
-    bjd = normalize_bjd_code(result.bjd_code)
-    sigungu = result.sigungu_code or extract_sigungu_code(bjd)
-    sido = result.sido_code or extract_sido_code(bjd)
-    admin = normalize_korean_text(result.admin_address)
-    return (bjd, sigungu, sido, admin)
+    bjd = geo.bjd_code  # geocoding이 이미 정규화·검증
+    sigungu = geo.sigungu_code or extract_sigungu_code(bjd)
+    sido = geo.sido_code or extract_sido_code(bjd)
+    return (bjd, sigungu, sido, geo.admin)
 
 
 # -- rest_areas → place FeatureBundle ----------------------------------
 
 
-def _rest_area_item_to_bundle(
+async def _rest_area_item_to_bundle(
     item: KrexRestAreaItem,
     *,
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None,
 ) -> FeatureBundle:
     coord = _coord_or_none(item.latitude, item.longitude)
-    bjd_code, sigungu, sido, admin = _reverse_geocode(coord, reverse_geocoder)
+    bjd_code, sigungu, sido, admin = await _reverse_geocode(coord, reverse_geocoder)
 
     address = Address(
         road=normalize_korean_text(item.address),
@@ -384,7 +382,7 @@ def _rest_area_item_to_bundle(
     )
 
 
-def rest_areas_to_bundles(
+async def rest_areas_to_bundles(
     items: Iterable[KrexRestAreaItem],
     *,
     fetched_at: datetime,
@@ -403,13 +401,18 @@ def rest_areas_to_bundles(
     ``serviceAreaRoute``가 간혹 모든 표시 필드가 ``null``인 placeholder 행을
     반환하므로(실측, ADR-044) 방어적으로 거른다.
     """
+    geocoder = (
+        cached_reverse_geocoder(reverse_geocoder)
+        if reverse_geocoder is not None
+        else None
+    )
     bundles: list[FeatureBundle] = []
     for item in items:
         if not (item.name or "").strip() or not (item.uni_id or "").strip():
             continue
         bundles.append(
-            _rest_area_item_to_bundle(
-                item, fetched_at=fetched_at, reverse_geocoder=reverse_geocoder
+            await _rest_area_item_to_bundle(
+                item, fetched_at=fetched_at, reverse_geocoder=geocoder
             )
         )
     return bundles
@@ -551,14 +554,14 @@ def rest_area_weather_to_values(
 # -- traffic_notices → notice FeatureBundle ----------------------------
 
 
-def _traffic_notice_item_to_bundle(
+async def _traffic_notice_item_to_bundle(
     item: KrexTrafficNoticeItem,
     *,
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None,
 ) -> FeatureBundle:
     coord = _coord_or_none(item.latitude, item.longitude)
-    bjd_code, sigungu, sido, admin = _reverse_geocode(coord, reverse_geocoder)
+    bjd_code, sigungu, sido, admin = await _reverse_geocode(coord, reverse_geocoder)
 
     address = Address(
         admin=admin,
@@ -646,7 +649,7 @@ def _traffic_notice_item_to_bundle(
     )
 
 
-def traffic_notices_to_bundles(
+async def traffic_notices_to_bundles(
     items: Iterable[KrexTrafficNoticeItem],
     *,
     fetched_at: datetime,
@@ -657,9 +660,14 @@ def traffic_notices_to_bundles(
     `Feature(kind=notice)` + `NoticeDetail`. notice_type은 한/영 alias 입력 가능
     (NoticeDetail validator의 ``normalize_notice_type``이 canonical 변환).
     """
+    geocoder = (
+        cached_reverse_geocoder(reverse_geocoder)
+        if reverse_geocoder is not None
+        else None
+    )
     return [
-        _traffic_notice_item_to_bundle(
-            item, fetched_at=fetched_at, reverse_geocoder=reverse_geocoder
+        await _traffic_notice_item_to_bundle(
+            item, fetched_at=fetched_at, reverse_geocoder=geocoder
         )
         for item in items
     ]

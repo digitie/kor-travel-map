@@ -39,10 +39,17 @@ AddressGeocoder = Callable[[Address], Awaitable[Coordinate | None]]
 ReverseGeocoder = Callable[[Coordinate], Awaitable[Address | None]]
 ```
 
-provider 변환 모듈은 이 위에 동기 `Protocol` 변종을 따로 두기도 한다 — 예:
-`krtour.map.providers.standard_data.ReverseGeocoder` (PR#34).
+**provider 변환 함수는 모두 async** (ADR-002). feature_id가 bjd_code에
+의존하므로(ADR-009) 변환기는 feature_id 계산 **전에** `await reverse_geocoder
+(coord)`로 `Address`를 채운다. 같은 batch의 중복 좌표는
+`geocoding.cached_reverse_geocoder`로 1회만 호출한다 (변환기가 내부에서 자동 래핑).
 
-async-only (ADR-002). resource dataclass:
+`reverse_geocoder`를 받는 변환 함수 (모두 async):
+- `standard_data.cultural_festivals_to_bundles` (datagokr 축제)
+- `opinet.stations_to_bundles` (주유소)
+- `krex.rest_areas_to_bundles` / `traffic_notices_to_bundles` (휴게소/공지)
+- `knps.knps_point_records_to_bundles` / `knps_geometry_records_to_bundles`
+  + CsvPreview 브리지 (centroid 역지오코딩)
 
 ```python
 @dataclass(frozen=True)

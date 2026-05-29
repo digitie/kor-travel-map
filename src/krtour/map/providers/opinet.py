@@ -37,7 +37,6 @@ from typing import Any, Final, Protocol, runtime_checkable
 from krtour.map.core.address import (
     extract_sido_code,
     extract_sigungu_code,
-    normalize_bjd_code,
     normalize_korean_text,
     normalize_phone_number,
 )
@@ -60,7 +59,7 @@ from krtour.map.dto import (
     SourceRecord,
     SourceRole,
 )
-from krtour.map.providers.standard_data import ReverseGeocoder
+from krtour.map.geocoding import ReverseGeocoder, cached_reverse_geocoder
 
 __all__ = [
     "OpinetPriceItem",
@@ -302,7 +301,7 @@ def prices_to_values(
 # -- stations_to_bundles (PR#43) -----------------------------------------
 
 
-def _station_item_to_bundle(
+async def _station_item_to_bundle(
     item: OpinetStationItem,
     *,
     fetched_at: datetime,
@@ -320,18 +319,18 @@ def _station_item_to_bundle(
     else:
         coord = None
 
-    # 2) Reverse geocoding (있으면, 좌표 있을 때만).
+    # 2) Reverse geocoding (있으면, 좌표 있을 때만) — geocoding이 정규화·검증한 Address.
     bjd_code: str | None = None
     sigungu_code: str | None = None
     sido_code: str | None = None
     admin_address: str | None = None
     if coord is not None and reverse_geocoder is not None:
-        rg = reverse_geocoder.lookup(lon=coord.lon, lat=coord.lat)
-        if rg is not None:
-            bjd_code = normalize_bjd_code(rg.bjd_code)
-            sigungu_code = rg.sigungu_code or extract_sigungu_code(bjd_code)
-            sido_code = rg.sido_code or extract_sido_code(bjd_code)
-            admin_address = normalize_korean_text(rg.admin_address)
+        geo = await reverse_geocoder(coord)
+        if geo is not None:
+            bjd_code = geo.bjd_code
+            sigungu_code = geo.sigungu_code or extract_sigungu_code(bjd_code)
+            sido_code = geo.sido_code or extract_sido_code(bjd_code)
+            admin_address = geo.admin
 
     # 3) Address — 한 column으로 들어오는 raw address를 road 슬롯에 둠.
     #    legal은 reverse_geocoder가 제공하지 않으면 None.
@@ -452,7 +451,7 @@ def _coerce_bool_str(value: str | bool | None) -> bool | None:
     return None
 
 
-def stations_to_bundles(
+async def stations_to_bundles(
     items: Iterable[OpinetStationItem],
     *,
     fetched_at: datetime,
@@ -468,7 +467,9 @@ def stations_to_bundles(
     fetched_at
         provider 호출 시각 (KST aware). 모든 bundle 공통.
     reverse_geocoder
-        좌표 → 법정동코드 helper (있으면).
+        좌표 → ``Address`` async 역지오코더 (있으면). feature_id가 bjd_code에
+        의존하므로(ADR-009) feature_id 계산 전에 await해 보강. 중복 좌표는
+        ``cached_reverse_geocoder``로 1회만 호출.
 
     Returns
     -------
@@ -485,11 +486,16 @@ def stations_to_bundles(
     - PriceValue의 `feature_id`는 본 함수가 만든 `feature_id`와 같아야 — 호출자
       `OpinetStationCatalog`가 ``uni_id -> feature_id`` 매핑을 유지.
     """
+    geocoder = (
+        cached_reverse_geocoder(reverse_geocoder)
+        if reverse_geocoder is not None
+        else None
+    )
     return [
-        _station_item_to_bundle(
+        await _station_item_to_bundle(
             item,
             fetched_at=fetched_at,
-            reverse_geocoder=reverse_geocoder,
+            reverse_geocoder=geocoder,
         )
         for item in items
     ]

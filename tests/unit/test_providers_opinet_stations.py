@@ -2,22 +2,34 @@
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from typing import Any
 
 import pytest
 
-from krtour.map.dto import FeatureKind, SourceRole
+from krtour.map.dto import FeatureBundle, FeatureKind, SourceRole
 from krtour.map.providers.opinet import (
     OPINET_STATION_CATEGORY,
     OPINET_STATION_DATASET_KEY,
     OPINET_STATION_MARKER_COLOR,
     OPINET_STATION_MARKER_ICON,
-    stations_to_bundles,
+)
+from krtour.map.providers.opinet import (
+    stations_to_bundles as _stations_to_bundles_async,
 )
 
 KST = timezone(timedelta(hours=9))
+
+
+def stations_to_bundles(
+    items: Iterable[Any], **kwargs: Any
+) -> list[FeatureBundle]:
+    """sync 테스트 ergonomics — 실제 async 변환을 asyncio.run으로 구동."""
+    return asyncio.run(_stations_to_bundles_async(items, **kwargs))
 
 
 @dataclass(frozen=True)

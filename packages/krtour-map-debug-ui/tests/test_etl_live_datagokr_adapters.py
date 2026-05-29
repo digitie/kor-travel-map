@@ -85,9 +85,9 @@ def test_adapt_festival_handles_missing_coords() -> None:
 
 
 @pytest.mark.unit
-def test_festival_adapter_passes_transform() -> None:
+async def test_festival_adapter_passes_transform() -> None:
     """adapter 결과가 실제 cultural_festivals_to_bundles를 통과 (Protocol 정합)."""
-    bundles = cultural_festivals_to_bundles(
+    bundles = await cultural_festivals_to_bundles(
         [_adapt_datagokr_festival(_RAW)],  # type: ignore[list-item]
         fetched_at=datetime.now(tz=_KST),
     )

@@ -12,23 +12,34 @@
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+from typing import Any
 
 import pytest
 
-from krtour.map.dto import FeatureKind, SourceRole
+from krtour.map.dto import Address, Coordinate, FeatureBundle, FeatureKind, SourceRole
 from krtour.map.providers.standard_data import (
     DATASET_KEY_CULTURAL_FESTIVALS,
     FESTIVAL_CATEGORY,
     FESTIVAL_MARKER_COLOR,
     FESTIVAL_MARKER_ICON,
-    ReverseGeocodeResult,
-    cultural_festivals_to_bundles,
+)
+from krtour.map.providers.standard_data import (
+    cultural_festivals_to_bundles as _cultural_festivals_to_bundles_async,
 )
 
 KST = timezone(timedelta(hours=9))
+
+
+def cultural_festivals_to_bundles(
+    items: Iterable[Any], **kwargs: Any
+) -> list[FeatureBundle]:
+    """sync 테스트 ergonomics — 실제 async 변환을 asyncio.run으로 구동."""
+    return asyncio.run(_cultural_festivals_to_bundles_async(items, **kwargs))
 
 
 # -- 테스트 fixture (CulturalFestivalItem Protocol 만족 dataclass) ----------
@@ -345,29 +356,19 @@ def test_naive_fetched_at_rejected() -> None:
 
 @pytest.mark.unit
 def test_reverse_geocoder_fills_bjd_and_codes() -> None:
-    """ReverseGeocoder가 좌표→bjd_code 변환 시 Address.bjd_code 채워짐."""
+    """async ReverseGeocoder가 좌표→bjd_code 변환 시 Address.bjd_code 채워짐."""
 
-    class _FakeRG:
-        def lookup(
-            self, *, lon: Decimal, lat: Decimal
-        ) -> ReverseGeocodeResult | None:
-            # 영등포구 여의도동의 가짜 bjd_code.
-            return _FakeRGResult(
-                bjd_code="1156010100",
-                sigungu_code="11560",
-                sido_code="11",
-                admin_address="서울특별시 영등포구 여의동",
-            )
-
-    @dataclass(frozen=True)
-    class _FakeRGResult:
-        bjd_code: str | None
-        sigungu_code: str | None
-        sido_code: str | None
-        admin_address: str | None
+    async def _fake_rg(coord: Coordinate) -> Address | None:
+        # 영등포구 여의도동의 가짜 bjd_code.
+        return Address(
+            bjd_code="1156010100",
+            sigungu_code="11560",
+            sido_code="11",
+            admin="서울특별시 영등포구 여의동",
+        )
 
     bundles = cultural_festivals_to_bundles(
-        [_F1], fetched_at=_now(), reverse_geocoder=_FakeRG()
+        [_F1], fetched_at=_now(), reverse_geocoder=_fake_rg
     )
     addr = bundles[0].feature.address
     assert addr.bjd_code == "1156010100"
@@ -380,19 +381,16 @@ def test_reverse_geocoder_fills_bjd_and_codes() -> None:
 
 @pytest.mark.unit
 def test_reverse_geocoder_skipped_when_no_coord() -> None:
-    """좌표 없으면 reverse_geocoder 호출 안 함 (불필요 lookup 회피)."""
+    """좌표 없으면 reverse_geocoder 호출 안 함 (불필요 await 회피)."""
     calls: list[tuple[Decimal, Decimal]] = []
 
-    class _RecordingRG:
-        def lookup(
-            self, *, lon: Decimal, lat: Decimal
-        ) -> ReverseGeocodeResult | None:
-            calls.append((lon, lat))
-            return None
+    async def _recording_rg(coord: Coordinate) -> Address | None:
+        calls.append((coord.lon, coord.lat))
+        return None
 
     bundles = cultural_festivals_to_bundles(
-        [_F4_NO_COORD], fetched_at=_now(), reverse_geocoder=_RecordingRG()
+        [_F4_NO_COORD], fetched_at=_now(), reverse_geocoder=_recording_rg
     )
-    assert calls == []  # 좌표 없으니 lookup 호출 안 됨
+    assert calls == []  # 좌표 없으니 호출 안 됨
     assert bundles[0].feature.coord is None
     assert bundles[0].feature.address.bjd_code is None

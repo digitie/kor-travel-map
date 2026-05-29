@@ -54,7 +54,7 @@ class _Festival:
     admin_address: str | None = None
 
 
-def _bundle(management_no: str = "FEST-REPO-001"):
+async def _bundle(management_no: str = "FEST-REPO-001"):
     item = _Festival(
         management_no=management_no,
         festival_name="서울 봄꽃 축제",
@@ -71,16 +71,18 @@ def _bundle(management_no: str = "FEST-REPO-001"):
         data_reference_date=date(2026, 3, 1),
         provider_org_name="서울특별시 영등포구",
     )
-    return cultural_festivals_to_bundles(
-        [item],  # type: ignore[list-item]
-        fetched_at=_FETCHED,
+    return (
+        await cultural_festivals_to_bundles(
+            [item],  # type: ignore[list-item]
+            fetched_at=_FETCHED,
+        )
     )[0]
 
 
 async def test_load_bundle_inserts_and_roundtrips(
     migrated_session: AsyncSession,
 ) -> None:
-    bundle = _bundle()
+    bundle = await _bundle()
     result = await feature_repo.load_bundle(migrated_session, bundle)
     await migrated_session.flush()
 
@@ -119,7 +121,7 @@ async def test_load_bundle_inserts_and_roundtrips(
 
 
 async def test_load_bundle_is_idempotent(migrated_session: AsyncSession) -> None:
-    bundle = _bundle("FEST-REPO-IDEM")
+    bundle = await _bundle("FEST-REPO-IDEM")
 
     first = await feature_repo.load_bundle(migrated_session, bundle)
     await migrated_session.flush()
@@ -158,7 +160,7 @@ async def test_load_bundle_is_idempotent(migrated_session: AsyncSession) -> None
 async def test_load_bundles_aggregates_counts(
     migrated_session: AsyncSession,
 ) -> None:
-    bundles = [_bundle("FEST-REPO-A"), _bundle("FEST-REPO-B")]
+    bundles = [await _bundle("FEST-REPO-A"), await _bundle("FEST-REPO-B")]
     result = await feature_repo.load_bundles(migrated_session, bundles)
     await migrated_session.flush()
 
@@ -178,7 +180,7 @@ async def test_get_feature_row_missing_returns_none(
 async def test_features_in_bbox_finds_loaded_feature(
     migrated_session: AsyncSession,
 ) -> None:
-    bundle = _bundle("FEST-BBOX")
+    bundle = await _bundle("FEST-BBOX")
     await feature_repo.load_bundle(migrated_session, bundle)
     await migrated_session.flush()
 
@@ -232,8 +234,10 @@ async def test_area_feature_geom_persists(migrated_session: AsyncSession) -> Non
         "POLYGON((126.9 37.6, 127.0 37.6, 127.0 37.7, 126.9 37.7, 126.9 37.6))",
         {"PARK": "북한산"},
     )
-    bundle = knps_geometry_records_to_bundles(
-        [rec], dataset_key="knps_park_boundaries", fetched_at=_FETCHED
+    bundle = (
+        await knps_geometry_records_to_bundles(
+            [rec], dataset_key="knps_park_boundaries", fetched_at=_FETCHED
+        )
     )[0]
 
     await feature_repo.load_bundle(migrated_session, bundle)

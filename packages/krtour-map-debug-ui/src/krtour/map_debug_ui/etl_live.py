@@ -580,7 +580,7 @@ async def krex_rest_areas_live(
         params={k: v for k, v in params.items() if k in {"routeName", "direction"}},
     )
     adapted = [_adapt_krex_rest_area(r) for r in raw_items]
-    bundles = rest_areas_to_bundles(
+    bundles = await rest_areas_to_bundles(
         adapted,  # type: ignore[arg-type]
         fetched_at=datetime.now(tz=KST),
     )
@@ -655,7 +655,7 @@ async def krex_traffic_notices_live(
         params={k: v for k, v in params.items() if k in {"routeNo", "incidentType"}},
     )
     adapted = [_adapt_krex_notice(r) for r in raw_items]
-    bundles = traffic_notices_to_bundles(
+    bundles = await traffic_notices_to_bundles(
         adapted,  # type: ignore[arg-type]
         fetched_at=datetime.now(tz=KST),
     )
@@ -898,7 +898,7 @@ async def opinet_fuel_station_details_live(
         params={"id": station_id},
     )
     adapted = [_adapt_opinet_station(r) for r in rows]
-    bundles = stations_to_bundles(
+    bundles = await stations_to_bundles(
         adapted,  # type: ignore[arg-type]
         fetched_at=datetime.now(tz=KST),
     )
@@ -1061,7 +1061,7 @@ async def datagokr_cultural_festivals_live(
         params={},
     )
     adapted = [_adapt_datagokr_festival(r) for r in raw_items]
-    bundles = cultural_festivals_to_bundles(
+    bundles = await cultural_festivals_to_bundles(
         adapted,  # type: ignore[arg-type]
         fetched_at=datetime.now(tz=KST),
     )
