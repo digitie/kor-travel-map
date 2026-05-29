@@ -213,6 +213,7 @@ type = "layers"
 layers = [
   "krtour.map.client",
   "krtour.map.providers",
+  "krtour.map.geocoding",
   "krtour.map.infra",
   "krtour.map.core",
   "krtour.map.dto",

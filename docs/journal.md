@@ -2,6 +2,52 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-29 (claude) — KNPS provider 재검토 + kraddr-geo v2 함수 연동(`krtour.map.geocoding`)
+
+**작업**: 사용자 요청 "knps api 프로바이더 재검토 + kraddr geo v2 함수 연동 구현".
+
+**① KNPS 재검토 (코드 변경 없음 — 정상 확인)**: 설치된 `python-knps-api` 0.1.0
+소스 직접 대조.
+- `FileArtifact`(dataset_key/data_go_id/kind/size_bytes/members/csv_previews) +
+  `CsvPreview`(member_name/encoding/headers/rows) + `CsvPreviewRow`(values/
+  extra_fields, `.as_dict`) — 내 CsvPreview 브리지 Protocol과 1:1 일치 (실제
+  객체로 동작 재확인).
+- `files.download_artifact(key, *, preview_rows=N, max_bytes=None) → FileArtifact`.
+  `artifacts.py`의 `rows[1:1+preview_rows]` 확인 → preview_rows 크게 = 전 행.
+  내 docs 예시 정확. geometry/SHP 파싱 여전히 미구현(knps-api 책임, Amendment I).
+- 결론: KNPS provider + CsvPreview 브리지 정합. 재검토發 코드 수정 없음.
+
+**② kraddr-geo v2 함수 연동 — `krtour.map.geocoding` 신설**: kraddr-geo가
+이 환경에 없어 GitHub raw로 v2 API 전수 확인:
+- client(`AsyncAddressClient`) v2 메서드: `reverse_v2(lon,lat,*,radius_m,...)`
+  → `ReverseV2Response`, `geocode_v2(*,road_address,jibun_address,sig_cd,bjd_cd,
+  limit,...)` → `GeocodeV2Response`. `open_client(pg_dsn=...)`. v2는 PostgreSQL
+  DSN 기반(v1 sqlite store 폐기).
+- 응답 DTO: `*V2Response`(status: "OK"/"NOT_FOUND"/"ERROR", candidates:
+  tuple[CandidateV2]), `CandidateV2`(confidence/address/point/region/...),
+  `RegionV2`(sig_cd/bjd_cd/sido/sigungu/admin_dong/...), `AddressV2`(road_address/
+  parcel_address/postal_code/legal_dong_code/admin_dong_code/road_name_code/...),
+  `Point`(x=lon,y=lat).
+- 구현: kraddr-geo를 import하지 않고 **structural Protocol**로 소비(ADR-006,
+  knps/datagokr 패턴 동일). 순수 변환 함수 `reverse_v2_to_address`(최고 confidence
+  후보 → Address, 자릿수 틀린 코드는 None으로 떨궈 validator 거부 회피) /
+  `geocode_v2_to_coordinate`(point 보유 최고 후보 → Coordinate). 비동기 콜러블
+  팩토리 `kraddr_geo_reverse_geocoder`/`kraddr_geo_address_geocoder`(client는
+  `KraddrGeoClient` Protocol, 수명은 호출자). async 타입 별칭 `AddressGeocoder`/
+  `ReverseGeocoder`(docs §2).
+- import-linter layers에 `krtour.map.geocoding`(providers↔infra 사이) 추가.
+- 테스트 17건(매핑/confidence/fallback/잘못된코드/status/팩토리). 실제 kraddr-geo
+  없이 fake v2 응답으로 검증. `KraddrGeoClient` Protocol 구조 적합성도 mypy 확인.
+
+**검증(로컬)**: unit+lint **554** / ruff / mypy --strict(-p krtour.map, 45 files) /
+import-linter 4 kept green.
+
+**경계**: 데이터 정합성 1차 책임은 kraddr-geo(ADR-044). 본 모듈은 v2 응답 신뢰·
+미러. standard_data의 sync `ReverseGeocoder`(lookup table용)와 본 모듈 async
+콜러블은 별개. 적재 파이프라인 자동 보강 wiring은 후속.
+
+**다음**: 적재 함수에 geocoder resource 자동 보강(§7) 또는 provider ⑥ krheritage.
+
 ## 2026-05-29 (claude) — KNPS CsvPreview → FeatureBundle 브리지 (knps-api DTO 직접 소비)
 
 **작업**: 사용자 요청 "knps api 다시 확인해서 프로바이더 구현". knps-api 소스 전수

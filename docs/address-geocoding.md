@@ -16,9 +16,13 @@
 - 주소 normalize / 행정코드 parse: **`krtour.map.core.address`** (PR#37) —
   `normalize_bjd_code` / `parse_bjd_code` / `extract_sigungu_code` /
   `extract_sido_code` / `normalize_phone_number` / `normalize_korean_text`.
-- geocoding 엔진: `python-kraddr-geo` (`kraddr.geo.AsyncAddressClient`) — 별도
-  라이브러리 (흡수 대상 아님).
-- VWorld 폴백 키: `python-kraddr-geo` 내부 store 설정에서만. 본 라이브러리에서
+- geocoding 엔진: `python-kraddr-geo` **v2** (`kraddr.geo.AsyncAddressClient` —
+  `open_client(pg_dsn=...)` / `reverse_v2` / `geocode_v2`) — 별도 라이브러리
+  (흡수 대상 아님). PostgreSQL DSN 기반 (v1 sqlite store는 폐기).
+- 연동 모듈: **`krtour.map.geocoding`** (PR — 본 PR) — kraddr-geo를 import하지
+  않고 v2 응답 structural Protocol만 의존(ADR-006). 순수 변환 함수
+  `reverse_v2_to_address` / `geocode_v2_to_coordinate` + 콜러블 팩토리.
+- VWorld 폴백 키: `python-kraddr-geo` 내부 설정에서만. 본 라이브러리에서
   `python-vworld-api` 직접 import 금지.
 
 ## 2. 핵심 callable
@@ -47,27 +51,31 @@ class GeocoderResources:
     reverse_geocoder: ReverseGeocoder | None = None
 ```
 
-## 3. resource 자동 생성
+## 3. kraddr-geo v2 client → 콜러블 (구현 완료)
 
-resource dict에 `kraddr_geo_store` 또는 `kraddr_geo_database_path`가 있으면 본
-라이브러리가 callable을 자동 생성한다.
+호출자가 kraddr-geo v2 client를 열어(`open_client(pg_dsn=...)` / `async with`)
+팩토리에 넘기면 §2 콜러블이 만들어진다. client 수명(open/close)은 호출자 책임
+(ADR-002 async-only). 본 라이브러리는 kraddr-geo를 import하지 않는다 — client는
+`KraddrGeoClient` structural Protocol(`reverse_v2`/`geocode_v2`)로만 의존.
 
 ```python
+from kraddr.geo import open_client          # 호출자(TripMate/Dagster) 영역
 from krtour.map.geocoding import (
     kraddr_geo_reverse_geocoder,
     kraddr_geo_address_geocoder,
 )
 
-reverse = kraddr_geo_reverse_geocoder(
-    database_path="data/juso/kraddr_geo.sqlite",
-    store_kwargs={
-        "vworld_api_key": "...",
-        "vworld_domain": "...",
-    },
-)
+async with open_client(pg_dsn=settings.kraddr_geo_dsn) as client:
+    reverse = kraddr_geo_reverse_geocoder(client, min_confidence=0.5, radius_m=50)
+    geocode = kraddr_geo_address_geocoder(client)
+
+    addr = await reverse(Coordinate(lon=Decimal("127.0"), lat=Decimal("37.5")))
+    coord = await geocode(Address(road="서울특별시 영등포구 여의공원로 120"))
 ```
 
-helper는 내부적으로 `AsyncAddressClient`를 lazy 생성. caller는 dispose 책임.
+매핑은 §4. `status != "OK"`/후보 없음/min_confidence 미달이면 `None`. 자릿수가
+틀린 코드(bjd/sigungu/zipcode/admin_dong)는 `None`으로 떨어뜨려 `Address`
+validator 거부를 피한다.
 
 ## 4. 코드 변환 기준
 
