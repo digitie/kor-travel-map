@@ -1,0 +1,57 @@
+name: frontend
+
+# Next.js frontend(debug UI) 컴파일 게이트 — type-check + 프로덕션 build.
+# PR#92(#117) 회고: `etl/page.tsx` JSDoc 주석 안의 `*/`가 블록 주석을 조기 종료해
+# 빌드가 깨졌으나 frontend가 한 번도 컴파일된 적 없어 잠복했다. 본 게이트는
+# 그런 잠복 syntax/타입 오류를 PR 머지 전에 차단한다.
+#
+# Trigger paths: workspace 루트 + map-marker-react + debug-ui frontend + 본 워크플로.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "package.json"
+      - "packages/map-marker-react/**"
+      - "packages/krtour-map-debug-ui/frontend/**"
+      - ".github/workflows/frontend.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "package.json"
+      - "packages/map-marker-react/**"
+      - "packages/krtour-map-debug-ui/frontend/**"
+      - ".github/workflows/frontend.yml"
+
+concurrency:
+  group: frontend-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: type-check + next build (Node 20)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: npm install (workspace 루트 — map-marker-react + frontend)
+        # 루트 package.json의 npm workspaces 로 두 패키지 한 번에 설치.
+        # github git dep `maplibre-vworld#v0.1.0` 포함 (PR#92 검증).
+        run: npm install --no-audit --no-fund
+
+      - name: tsc --noEmit (frontend type-check)
+        # 빠른 1차 게이트. JSDoc 주석 안의 `*/`(comment terminator) 같은 잠복
+        # syntax 오류도 검출 (PR#92 회고).
+        run: npm -w packages/krtour-map-debug-ui/frontend run type-check
+
+      - name: next build (production compile)
+        # ADR-025 — swc/turbo의 syntax + 모듈 해석을 production 경로까지 확인.
+        # NEXT_PUBLIC_* 는 build-time inline이므로 임의 값으로 진행 (실 호출 없음).
+        env:
+          NEXT_PUBLIC_KRTOUR_MAP_DEBUG_UI_API: http://127.0.0.1:8087
+        run: npm -w packages/krtour-map-debug-ui/frontend run build
