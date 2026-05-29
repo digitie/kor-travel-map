@@ -11,6 +11,7 @@
  * 통합은 후속.
  */
 
+import { createMarkerElement } from "@krtour/map-marker-react";
 import maplibregl, { LngLatBounds, type StyleSpecification } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -125,16 +126,13 @@ export default function FeaturesPage() {
     markerLayerRef.current = [];
     for (const f of data) {
       if (f.lon === null || f.lat === null) continue;
-      const el = document.createElement("div");
-      el.style.width = "12px";
-      el.style.height = "12px";
-      el.style.borderRadius = "50%";
-      el.style.background = f.marker_color ?? "#3b82f6";
-      el.style.border = "2px solid white";
-      el.style.boxShadow = "0 1px 4px rgba(0,0,0,0.3)";
-      el.style.cursor = "pointer";
-      el.title = `${f.name} (${f.kind})`;
-      el.addEventListener("click", () => setSelectedFeatureId(f.feature_id));
+      const el = createMarkerElement({
+        markerIcon: f.marker_icon,
+        markerColor: f.marker_color,
+        size: 24,
+        title: `${f.name} (${f.kind})`,
+        onClick: () => setSelectedFeatureId(f.feature_id),
+      });
       const marker = new maplibregl.Marker({ element: el })
         .setLngLat([f.lon, f.lat])
         .addTo(mapRef.current!);
