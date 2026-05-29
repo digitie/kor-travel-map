@@ -42,6 +42,7 @@ from krtour.map.core.address import normalize_korean_text, normalize_phone_numbe
 from krtour.map.core.geometry import (
     AREA_GEOMETRY_TYPES,
     GeometryError,
+    geometry_area_square_meters,
     normalize_geometry,
 )
 from krtour.map.core.ids import (
@@ -382,10 +383,15 @@ async def _heritage_item_to_bundle(
     }
     detail: PlaceDetail | AreaDetail
     if kind is FeatureKind.AREA:
+        # geometry 있으면 측지 면적(m²) 보강 (GIS spca, ADR-012 WGS84 입력).
+        area_sqm = (
+            geometry_area_square_meters(geom) if geom is not None else None
+        )
         detail = AreaDetail(
             feature_id=feature_id,
             area_kind=_area_kind(item),
             boundary_source="gis" if geom is not None else None,
+            area_square_meters=area_sqm,
             administrative_office=normalize_korean_text(item.manager),
             payload=detail_payload,
         )

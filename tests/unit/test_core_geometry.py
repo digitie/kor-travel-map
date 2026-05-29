@@ -5,12 +5,15 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 import pytest
 
 from krtour.map.core.geometry import (
     AREA_GEOMETRY_TYPES,
     ROUTE_GEOMETRY_TYPES,
     GeometryError,
+    geometry_area_square_meters,
     geometry_centroid,
     normalize_geometry,
     parse_wkt,
@@ -77,3 +80,31 @@ def test_geometry_type_sets() -> None:
     assert "MultiLineString" in ROUTE_GEOMETRY_TYPES
     assert "Polygon" in AREA_GEOMETRY_TYPES
     assert "MultiPolygon" in AREA_GEOMETRY_TYPES
+
+
+# -- 측지 면적 (area_square_meters, GIS spca) ---------------------------------
+
+
+def test_geometry_area_polygon_square_meters() -> None:
+    # 0.1°×0.1° 폴리곤 @37°N ≈ 8.8km×11.1km ≈ 9~10e7 m².
+    area = geometry_area_square_meters(_POLY)
+    assert isinstance(area, Decimal)
+    assert 5e7 < float(area) < 1.5e8
+
+
+def test_geometry_area_multipolygon() -> None:
+    mpoly = (
+        "MULTIPOLYGON(((127 37, 127.1 37, 127.1 37.1, 127 37.1, 127 37)),"
+        "((128 37, 128.1 37, 128.1 37.1, 128 37.1, 128 37)))"
+    )
+    assert float(geometry_area_square_meters(mpoly)) > 1e8
+
+
+def test_geometry_area_zero_for_non_area() -> None:
+    assert geometry_area_square_meters(_LINE) == Decimal("0")  # LineString
+    assert geometry_area_square_meters("POINT(127 37)") == Decimal("0")
+
+
+def test_geometry_area_zero_for_invalid() -> None:
+    assert geometry_area_square_meters("NOT WKT") == Decimal("0")
+    assert geometry_area_square_meters("POLYGON EMPTY") == Decimal("0")

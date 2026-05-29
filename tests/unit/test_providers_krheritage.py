@@ -185,6 +185,9 @@ async def test_area_bundle_with_geometry() -> None:
     assert float(feat.coord.lon) == pytest.approx(127.05, abs=0.01)
     assert feat.detail.area_kind == "heritage_area"
     assert feat.detail.boundary_source == "gis"
+    # geometry 면적 보강 (측지, m²) — 0.1°×0.1° 폴리곤은 ~1e8 m² 규모.
+    assert feat.detail.area_square_meters is not None
+    assert float(feat.detail.area_square_meters) > 5e7
 
 
 async def test_area_invalid_geometry_falls_back_to_coord() -> None:
