@@ -93,3 +93,67 @@ export function useFeaturesInBbox(
     staleTime: 30_000,
   });
 }
+
+// ── feature 단건 상세 (`GET /features/{feature_id}`) ────────────────────────
+
+export interface FeatureDetail {
+  feature_id: string;
+  kind: string;
+  name: string;
+  category: string;
+  lon: number | null;
+  lat: number | null;
+  coord_5179_srid: number | null;
+  address: Record<string, unknown>;
+  detail: Record<string, unknown>;
+  urls: Record<string, unknown>;
+  legal_dong_code: string | null;
+  sido_code: string | null;
+  sigungu_code: string | null;
+  marker_icon: string | null;
+  marker_color: string | null;
+  status: string;
+  parent_feature_id: string | null;
+  sibling_group_id: string | null;
+}
+
+export async function fetchFeatureDetail(featureId: string): Promise<FeatureDetail> {
+  const url = `${BASE_URL}/features/${encodeURIComponent(featureId)}`;
+  const response = await fetch(url, {
+    method: "GET",
+    headers: { Accept: "application/json" },
+    credentials: "omit",
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    throw new DebugUiApiError(
+      `GET /features/{id} 실패 (HTTP ${response.status})`,
+      response.status,
+      `/features/${featureId}`,
+    );
+  }
+  return (await response.json()) as FeatureDetail;
+}
+
+/** react-query hook — `selectedFeatureId` 변경 시 자동 fetch. */
+export function useFeatureDetail(featureId: string | null) {
+  return useQuery({
+    queryKey: ["feature", featureId] as const,
+    queryFn: () => fetchFeatureDetail(featureId as string),
+    enabled: featureId !== null && featureId.length > 0,
+    staleTime: 60_000,
+  });
+}
+
+// ── kind 필터 — backend가 받는 7종 (data-model.md §1 FeatureKind) ───────────
+
+export const FEATURE_KINDS = [
+  "place",
+  "event",
+  "notice",
+  "price",
+  "weather",
+  "route",
+  "area",
+] as const;
+export type FeatureKind = (typeof FEATURE_KINDS)[number];
