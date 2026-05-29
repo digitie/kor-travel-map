@@ -26,8 +26,9 @@ export default function HomePage() {
         후).
       </p>
 
-      <nav style={{ marginTop: 12 }}>
+      <nav style={{ marginTop: 12, display: "flex", gap: 16 }}>
         <a href="/etl">→ ETL preview (provider 변환 함수 수동 검증)</a>
+        <a href="/features">→ Feature 지도 (적재 분 bbox 조회)</a>
       </nav>
 
       <section style={{ marginTop: 24 }}>
