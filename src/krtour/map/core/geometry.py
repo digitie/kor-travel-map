@@ -35,6 +35,7 @@ __all__ = [
     "parse_wkt",
     "geometry_centroid",
     "normalize_geometry",
+    "geometry_area_square_meters",
 ]
 
 # kind별 허용 geometry type (shapely ``geom_type``).
@@ -111,3 +112,26 @@ def normalize_geometry(
     geom = parse_wkt(wkt_str, allowed_types=allowed_types)
     centroid = geometry_centroid(geom)
     return geom.wkt, centroid
+
+
+def geometry_area_square_meters(wkt_str: str) -> Decimal:
+    """area(POLYGON/MULTIPOLYGON) WKT → 측지 면적(m², ge=0). 비-면/불량은 ``0``.
+
+    WGS84 lon/lat 위에서 pyproj ``Geod(ellps='WGS84')`` 측지 면적을 계산한다 —
+    EPSG:5179 투영 단계 없이 한국 영역에서 충분히 정확(ADR-012 입력은 4326).
+    POINT/LINESTRING 등 면적 0 geometry나 파싱 실패는 ``Decimal('0')``.
+    소수점 2자리 반올림 (``AreaDetail.area_square_meters``, ge=0).
+    """
+    from pyproj import Geod
+
+    try:
+        geom = _wkt.loads(wkt_str)
+    except (ShapelyError, GEOSException, TypeError, ValueError):
+        return Decimal("0")
+    if geom.is_empty:
+        return Decimal("0")
+    try:
+        area, _perimeter = Geod(ellps="WGS84").geometry_area_perimeter(geom)
+    except (ShapelyError, GEOSException, ValueError, AttributeError):
+        return Decimal("0")
+    return Decimal(str(round(abs(float(area)), 2)))
