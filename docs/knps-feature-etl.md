@@ -187,61 +187,44 @@ DATASET_KEYS_KNPS_STATS = (
     "knps_basic_statistics", "knps_visitor_statistics", "knps_lod_table_catalog",
 )
 
-async def park_boundaries_to_bundles(
-    raw_bytes: bytes, *, fetched_at: datetime,
-    reverse_geocoder=None,
+# 구현된 공개 API (raw bytes를 받지 않음 — knps-api가 파싱한 record를 소비).
+# Point/place 5건:
+def knps_point_records_to_bundles(
+    records: Iterable[KnpsPointRecord], *, dataset_key: str, fetched_at: datetime,
 ) -> list[FeatureBundle]:
-    """SHP (ZIP) → area FeatureBundle 변환. EPSG:5179 → 4326."""
+    """visitor_centers/restrooms/cultural_resources/campgrounds/shelters →
+    place FeatureBundle. dataset_key로 category 분기 (cultural_resources는 subtype)."""
 
-async def trails_to_bundles(
-    raw_bytes: bytes, *, fetched_at: datetime,
-    reverse_geocoder=None,
+# route/area 5건 (geometry WKT 4326 입력):
+def knps_geometry_records_to_bundles(
+    records: Iterable[KnpsGeometryRecord], *, dataset_key: str, fetched_at: datetime,
 ) -> list[FeatureBundle]:
-    """CSV (LineString WKT/좌표 컬럼) → route FeatureBundle."""
-
-async def facility_points_to_bundles(
-    raw_bytes: bytes, *, dataset_key: str, fetched_at: datetime,
-    reverse_geocoder=None,
-) -> list[FeatureBundle]:
-    """visitor_centers/restrooms/cultural_resources/campgrounds/shelters CSV →
-    place FeatureBundle. dataset_key로 category 분기."""
-
-async def hazard_zones_to_bundles(
-    raw_bytes: bytes, *, fetched_at: datetime,
-    reverse_geocoder=None,
-) -> list[FeatureBundle]:
-    """Polygon CSV → area FeatureBundle (area_kind='hazard_zone')."""
-
-async def protected_areas_to_bundles(
-    raw_bytes: bytes, *, fetched_at: datetime,
-    reverse_geocoder=None,
-) -> list[FeatureBundle]:
-    """Polygon CSV → area FeatureBundle (area_kind='protected_area')."""
+    """trails/linear_facilities → route, park_boundaries/hazard_zones/
+    protected_areas → area. centroid를 coord로, geom(WKT)을 Feature.geom으로.
+    파싱실패/경계밖/type불일치 행은 skip."""
 
 # 호출 측 예시 (Sprint 3 Dagster asset 내부)
 async def example_dagster_op() -> None:
     async with KnpsClient(max_rps=5.0) as client:
-        # raw bytes — SHP/CSV parser에 직접 공급
-        data = await client.files.download("knps_park_boundaries")
-        bundles = await park_boundaries_to_bundles(data, fetched_at=kst_now())
-        # 또는 preview용 (debug UI / 디버깅)
-        artifact = await client.files.download_artifact(
-            "knps_trails", preview_rows=5,
+        # knps-api가 SHP/CSV를 파싱해 typed record(좌표·geometry WKT) 제공 (ADR-044).
+        records = await client.files.parse_records("knps_park_boundaries")  # upstream
+        bundles = knps_geometry_records_to_bundles(
+            records, dataset_key="knps_park_boundaries", fetched_at=kst_now(),
         )
-        for csv in artifact.csv_previews:
-            log.info("preview", member=csv.member_name, headers=csv.headers)
 ```
 
-**SHP/CSV parsing**: knps-api는 raw bytes 또는 `FileArtifact` preview만 제공.
-실 적재용 parser는 본 라이브러리 `providers/knps`에서:
-- SHP (ZIP) — `pyshp` (knps-api `[geo]` extra) 또는 `pyogrio`/`fiona`
-- CSV — Python `csv` 또는 `pandas` + `shapely.wkt.loads`
-- 좌표계 변환 — `krtour.map.infra.crs.transformer_4326_to_5179` (ADR-030 narrow
-  cache singleton)
-- CP949/euc-kr 인코딩 자동 (knps-api `CsvPreview.encoding` 참고)
+**SHP/CSV parsing 책임 = knps-api (ADR-044)**: 데이터 정합성·파싱의 1차 책임은
+provider 라이브러리. 따라서 raw 파일(SHP ZIP / CSV) → typed record(좌표·geometry
+**WKT 4326** 포함) 변환은 **knps-api 측**에서 수행한다 (필요 시 upstream PR —
+ADR-025 보강 패턴):
+- SHP (ZIP) → geometry 디코딩 — knps-api `[geo]` extra(`pyshp`/`pyogrio`/`fiona`)
+- CP949/euc-kr 인코딩 처리 (knps-api `CsvPreview.encoding`)
+- EPSG:5179 → 4326 좌표계 변환 (knps-api 측에서 4326 WKT/좌표로 노출)
 
-ADR-007 GDAL 의존 그대로. `pyshp`/`shapely`는 본 라이브러리 본 의존 (PR#21
-`pyproj` 후속).
+본 라이브러리 `providers/knps`는 그 결과를 `KnpsPointRecord`(좌표) /
+`KnpsGeometryRecord`(geometry WKT) Protocol로 **소비**만 한다 — geometry 검증·
+centroid·DTO 조립은 `core/geometry.py`(shapely WKT). `shapely`/`pyproj`는 본
+라이브러리 본 의존이지만 **`pyshp`/SHP 디코딩은 본 lib에 두지 않는다**(knps-api).
 
 ## 6. Dagster asset 카탈로그 (Sprint 3 KNPS 적재 시점, ADR-034 7단계)
 

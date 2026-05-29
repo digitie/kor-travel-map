@@ -140,7 +140,8 @@ branch로.
     `NOTICE_TYPES` 14건, `AreaDetail.area_kind='hazard_zone'`.
     PR#25에서 `protected_area`와 `facility_road` DTO 계약 추가.
   - `krtour.map.providers.knps` 모듈 신설은 Sprint 3 (ADR-034 7단계).
-    SHP/CSV parsing은 본 라이브러리 `providers/knps` 책임.
+    SHP/CSV parsing·geometry 추출은 **knps-api 책임** (ADR-028 Amendment I /
+    ADR-044). 본 lib는 record(좌표·WKT) Protocol로 소비만. PR#77/#78 구현 완료.
   - 후속 ADR: `access_restriction`/`fire_alert` notice source 결정
     (산림청/소방청/scrape). KNPS는 notice source 아님.
 - [ ] T-019 — **TripMate 측 후속 작업 추적** (ADR-026 + ADR-029 후속, 본
