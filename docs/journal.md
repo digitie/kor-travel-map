@@ -2,6 +2,26 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-29 (claude) — KNPS SHP/CSV 파싱 책임 = knps-api 확정 (ADR-028 Amendment I)
+
+**결정(사용자)**: "knps shp 로딩은 knps-api 에서 진행하는게 맞음." → ADR-028 §B
+에서 Sprint 2로 연기됐던 "SHP/GeoJSON parsing 위치"를 **knps-api 책임**으로 확정
+(ADR-044 — 파싱·정합성 1차 책임은 provider 라이브러리). raw 파일(SHP ZIP/CSV) →
+typed record(좌표·geometry WKT 4326) 변환은 knps-api에서, 본 lib는 record
+Protocol로 소비만.
+
+**본 lib 코드 변경 없음** — PR#77/#78의 변환 함수가 처음부터 WKT/좌표 입력
+(`KnpsPointRecord`/`KnpsGeometryRecord`)이라 설계가 이미 정합. 문서/주석만 정정:
+- `decisions.md` ADR-028 — Amendment I 추가 + §G 모순 문구(SHP 본 lib 책임) 정정.
+- `knps-feature-etl.md §5` — 파싱 책임 knps-api로 flip + 구현된 함수 시그니처로
+  교체(raw_bytes stub 제거). `providers/knps.py` 모듈 docstring 정정.
+- `tasks.md`/`resume.md` — SHP parser 위치 open item 해소 표기.
+
+**검증**: ruff/mypy(knps.py docstring only) green, 코드 무변경이라 테스트 영향 없음.
+
+**다음**: provider ⑥ krheritage (ADR-034 8단계). knps-api record 파싱 API
+(`parse_records`)는 Sprint 3 적재 직전 upstream PR.
+
 ## 2026-05-29 (claude) — KNPS geometry(route/area) 파서 + Feature.geom (Sprint 3)
 
 **작업**: KNPS route(LINESTRING)/area(POLYGON) dataset 변환. Point/place(PR#77)에

@@ -1278,14 +1278,14 @@
     # "python-knps-api @ git+https://github.com/digitie/python-knps-api.git@<sha>"
     ```
 
-  **B. SHP/GeoJSON 파싱 책임 분리**:
-  - knps-api는 원본 bytes (`client.files.download(key)`)와 normalized API
-    page (`client.raw_endpoint(...)`)를 안정 제공.
-  - **SHP/GeoJSON 파싱은 본 라이브러리 `krtour.map.providers.knps`에서**
-    수행 (ADR-006 정신: provider 라이브러리는 raw, 본 라이브러리는 변환).
-  - 단, knps-api 측에 `[geo]` extra가 이미 있으므로 (placeholder 상태),
-    향후 knps-api 측에 parser PR 추가하는 옵션도 열림 — Sprint 2 진입 시
-    재검토.
+  **B. SHP/GeoJSON 파싱 책임 분리** → **Amendment I(2026-05-29)로 확정**:
+  - knps-api는 원본 bytes (`client.files.download(key)`)와 file artifact preview
+    를 안정 제공.
+  - ~~SHP/GeoJSON 파싱은 본 라이브러리 `krtour.map.providers.knps`에서 수행~~
+    → **knps-api 책임으로 확정** (Amendment I / ADR-044): raw 파일 → typed
+    record(좌표·geometry WKT)는 knps-api, 본 lib는 record Protocol 소비만.
+  - knps-api 측 `[geo]` extra(placeholder)에 parser 구현 — 미구현 시 upstream
+    PR (Sprint 2 진입 시 재검토 → 2026-05-29 확정).
 
   **C. ADR-027 코드 적용 시기 정렬**:
   - T-018 시점에 ADR-027 (forest 카테고리/notice_type 확장) + ADR-028 (본
@@ -1444,8 +1444,8 @@ merged 2026-05-25):
       for csv in artifact.csv_previews:
           print(csv.member_name, csv.encoding, csv.headers, csv.rows[:1])
   ```
-  - SHP/GeoJSON parsing은 여전히 본 라이브러리 책임 — knps-api는 raw bytes만
-    제공 (이전 결정 B 유지).
+  - ~~SHP/GeoJSON parsing은 여전히 본 라이브러리 책임~~ → **Amendment I로 정정
+    (2026-05-29)**: SHP/CSV 파싱·geometry 추출은 **knps-api 책임** (ADR-044).
 
 - **pyproject.toml `providers` extras**: git URL 핀 active 권고 (코드 작성
   단계 진입):
@@ -1471,6 +1471,32 @@ merged 2026-05-25):
 - `docs/provider-contract.md` (해당 시) — dataset_key 14건 갱신.
 - `pyproject.toml` knps git URL 핀 활성화.
 - 후속 ADR (TBD): `access_restriction`/`fire_alert` notice source 결정.
+
+### I. Amendment 2026-05-29 (SHP/CSV 파싱 책임 = knps-api, 결정 B 확정)
+
+§B에서 Sprint 2로 연기했던 "SHP/GeoJSON parsing 위치"를 사용자 결정(2026-05-29)
+으로 확정: **raw 파일(SHP ZIP / CSV) → typed record(좌표·geometry WKT 4326)
+파싱은 knps-api 책임** (ADR-044 — 데이터 정합성·파싱의 1차 책임은 provider
+라이브러리). 본 라이브러리 `providers/knps`는 그 결과를 Protocol로 **소비**만.
+
+- **분계**:
+  - knps-api: SHP(ZIP) geometry 디코딩, CP949/euc-kr 인코딩, EPSG:5179→4326
+    좌표 변환, geometry를 **WKT(4326)**로 노출. 미구현 시 upstream PR (ADR-025
+    보강 패턴, knps-api `[geo]` extra 활용).
+  - 본 lib: `KnpsPointRecord`(좌표) / `KnpsGeometryRecord`(geom WKT) Protocol로
+    소비 → `Feature` 정규화. geometry 검증·centroid·DTO 조립은
+    `core/geometry.py`(shapely). **`pyshp`/SHP 디코딩은 본 lib 의존 아님.**
+- **이미 구현 (PR#77/#78)**: `knps_point_records_to_bundles`(place 5건) +
+  `knps_geometry_records_to_bundles`(route/area 5건, WKT 입력) + `Feature.geom`
+  필드 + `feature_repo` geom 적재. 변환 함수가 처음부터 WKT/좌표 입력이라 본
+  amendment로 인한 본 lib **코드 변경 없음** — 문서/주석 정합만.
+- **근거**: ADR-006(provider raw, 본 lib 변환)의 "raw"를 ADR-044 기준으로
+  "parsed typed record"까지 provider 책임으로 당김 — 형제 provider(kma/opinet/
+  datagokr 등)가 모두 typed model을 노출하는 패턴과 일치. SHP byte 핸들링/GDAL
+  계열 의존을 provider에 가두어 본 lib 의존 스택을 가볍게 유지.
+- **후속**: `docs/knps-feature-etl.md §5` + `providers/knps.py` docstring +
+  `docs/tasks.md`/`docs/resume.md` 정합 (본 PR). knps-api 측 record 파싱 API
+  (예: `client.files.parse_records(key)`)는 Sprint 3 적재 직전 upstream PR.
 
 ## ADR-029: 공통 maki marker / category 매핑 npm 패키지 추출 (`@krtour/map-marker-react`)
 

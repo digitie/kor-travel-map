@@ -5,16 +5,17 @@
 ADR-006(provider wrapper 금지) — knps-api의 public client/catalog를 직접 쓰고,
 본 모듈은 **순수 변환 함수**만 둔다 (ADR-002).
 
-knps-api는 raw bytes(`client.files...`)와 `FileArtifact` preview만 제공한다.
-**SHP/CSV 파싱은 본 라이브러리 책임** (`docs/knps-feature-etl.md §5`). 본 PR은
-**Point CSV → place** 경로(검증된 5 dataset: visitor_centers/restrooms/
-cultural_resources/campgrounds/shelters)를 구현한다. SHP(area)/LineString(route)/
-Polygon(area)은 `pyshp`+`shapely` 파서가 필요해 후속 PR (stub로 표시).
+knps-api는 raw bytes(`client.files...`)와 `FileArtifact` preview 외에, **SHP/CSV를
+파싱한 typed record(좌표·geometry WKT 포함)를 노출하는 것이 책임**이다 (ADR-044 —
+데이터 정합성·파싱의 1차 책임은 provider 라이브러리). 따라서 SHP(ZIP) →
+geometry, CP949/euc-kr 디코딩, EPSG:5179→4326 좌표 변환은 **knps-api 측**에서
+수행하고(필요 시 upstream PR), 본 모듈은 그 결과(WKT/좌표)를 `Feature` 계약으로
+정규화한다.
 
 입력 계약: 본 모듈은 raw bytes를 직접 파싱하지 않고, **이미 행 단위로 파싱된**
-``KnpsPointRecord`` Protocol(좌표 + 이름 + dataset_key + raw dict)을 받는다.
-CSV 디코딩(CP949 등)/컬럼 추출은 호출자(Dagster asset) 또는 후속 parser helper가
-수행 — provider 변환 함수는 좌표계·category·DTO 조립에 집중 (테스트 용이).
+record Protocol을 받는다 — Point는 ``KnpsPointRecord``(좌표+이름+raw),
+route/area는 ``KnpsGeometryRecord``(geometry WKT 4326+이름+raw). provider 변환
+함수는 category·DTO 조립·centroid에 집중 (테스트 용이, knps-api와 책임 분계).
 
 ADR 참조
 --------
