@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-29 (claude) — 문서 정리 리포트 §2.2/§2.3 후속 (문서만)
+
+**작업**: docs-consistency-sweep 리포트의 남은 2건을 문서 정리로 해소 (코드 무수정).
+
+- **§2.2** `data-model.md §4 provider_sync_state` — 초기 설계(metadata_hash /
+  last_attempt_at / last_full_scan_at / last_error / extra 등)를 실제 구현 스키마
+  (last_failure_at / consecutive_failures + status CHECK)로 교체. 제외 컬럼은
+  "후속 후보 (미구현)" 주석으로 명시. index도 `(next_run_after)`로 정합.
+- **§2.3** `postgres-schema.md §8.4` 명명 규약 — 미사용 `YYYYMMDDhhmm` 예시를 실제
+  컨벤션 `NNNN_<descriptive>.py`(파일명≠revision id 허용, 4건 실례)로 갱신.
+- 리포트 §2.2/§2.3 "해소" 표기.
+
+코드/스키마 무변경 — 문서가 구현 현실을 정확히 반영하도록 정렬만.
+
 ## 2026-05-29 (claude) — source_role CHECK 정합 (문서 정리 리포트 §2.1 후속 코드 수정)
 
 **작업**: 문서 정리(PR#74) 리포트 §2.1에서 발견한 코드 레벨 잠재 버그 수정.

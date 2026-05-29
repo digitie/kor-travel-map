@@ -283,12 +283,19 @@ async def test_alembic_upgrade_then_downgrade_then_upgrade(pg_engine):
 
 ### 8.4 명명 규약
 
+실제 저장소 컨벤션: **`NNNN_<descriptive_name>.py`** (4자리 순번 + 설명).
+
 ```
-alembic/versions/YYYYMMDDhhmm_<imperative>.py
-예: 202605240900_add_features_coord_5179_generated.py
+alembic/versions/0001_initial_schemas_and_extensions.py   # revision id: 0001_initial
+alembic/versions/0002_features_and_source_tables.py       # revision id: 0002_features_source
+alembic/versions/0003_feature_consistency_reports.py      # revision id: 0003_consistency_reports
+alembic/versions/0004_fix_source_links_role_check.py      # revision id: 0004_fix_source_role_check
 ```
 
-revision message는 commit summary와 일치.
+- **파일명과 revision id가 반드시 동일할 필요는 없다** (위 4건 모두 파일명은
+  서술형 길게, revision id는 짧게). `down_revision`은 revision **id**로 잇는다.
+- 4자리 순번(`0001`~)으로 적용 순서를 가시화한다.
+- revision message(파일 docstring 첫 줄)는 commit summary와 일치시킨다.
 
 ## 9. EXPLAIN 통합 테스트
 

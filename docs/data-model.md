@@ -171,29 +171,35 @@ CREATE INDEX idx_source_links_primary      ON provider_sync.source_links (featur
 
 ## 4. `provider_sync.provider_sync_state`
 
+실제 구현(alembic 0002 / `infra/models.py` `ProviderSyncStateRow`):
+
 ```sql
 CREATE TABLE provider_sync.provider_sync_state (
-  provider                       TEXT NOT NULL,
-  dataset_key                    TEXT NOT NULL,
-  sync_scope                     TEXT NOT NULL DEFAULT 'global',
-  status                         TEXT NOT NULL DEFAULT 'active',  -- active, paused, error
-  cursor                         JSONB,
-  metadata_hash                  TEXT,
-  last_observed_source_version   TEXT,
-  last_success_at                TIMESTAMPTZ,
-  last_attempt_at                TIMESTAMPTZ,
-  last_full_scan_at              TIMESTAMPTZ,
-  next_run_after                 TIMESTAMPTZ,
-  last_error                     TEXT,
-  last_error_at                  TIMESTAMPTZ,
-  extra                          JSONB NOT NULL DEFAULT '{}'::jsonb,
-  updated_at                     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  provider               TEXT NOT NULL,
+  dataset_key            TEXT NOT NULL,
+  sync_scope             TEXT NOT NULL,                  -- PK 구성요소 (DEFAULT 없음)
+  status                 TEXT NOT NULL DEFAULT 'active',
+  cursor                 JSONB NOT NULL DEFAULT '{}'::jsonb,
+  last_success_at        TIMESTAMPTZ,
+  last_failure_at        TIMESTAMPTZ,
+  consecutive_failures   INTEGER NOT NULL DEFAULT 0,
+  next_run_after         TIMESTAMPTZ,
+  updated_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-  PRIMARY KEY (provider, dataset_key, sync_scope)
+  PRIMARY KEY (provider, dataset_key, sync_scope),
+  CONSTRAINT ck_provider_sync_state_status
+    CHECK (status IN ('active','paused','disabled','failed'))
 );
 
-CREATE INDEX idx_sync_state_next_run ON provider_sync.provider_sync_state (next_run_after) WHERE status='active';
+CREATE INDEX idx_sync_state_next_run ON provider_sync.provider_sync_state
+  (next_run_after) WHERE status='active';
 ```
+
+> **후속 후보 (미구현)**: 초기 설계에 있던 `metadata_hash` /
+> `last_observed_source_version` / `last_attempt_at` / `last_full_scan_at` /
+> `last_error`/`last_error_at` / `extra`는 현재 스키마에서 제외됐다 (간소화).
+> 실패 추적은 `last_failure_at` + `consecutive_failures`로 대체. 필요 시 ADR +
+> 마이그레이션으로 정식 추가.
 
 ## 5. `feature.feature_files`
 
