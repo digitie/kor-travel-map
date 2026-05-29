@@ -29,4 +29,28 @@ test.describe("/features", () => {
       page.getByRole("heading", { level: 1, name: "Feature 지도" }),
     ).toBeVisible();
   });
+
+  test("kind 필터 — 칩 7종 + 토글 + 초기화", async ({ page }) => {
+    await page.goto("/features");
+    const filter = page.getByTestId("kind-filter");
+    await expect(filter).toBeVisible();
+    for (const k of ["place", "event", "notice", "price", "weather", "route", "area"]) {
+      await expect(filter.getByRole("button", { name: k, exact: true })).toBeVisible();
+    }
+    const placeBtn = filter.getByRole("button", { name: "place", exact: true });
+    await expect(placeBtn).toHaveAttribute("aria-pressed", "false");
+    await placeBtn.click();
+    await expect(placeBtn).toHaveAttribute("aria-pressed", "true");
+    // 활성화되면 "초기화" 버튼 노출.
+    const reset = filter.getByRole("button", { name: "초기화" });
+    await expect(reset).toBeVisible();
+    await reset.click();
+    await expect(placeBtn).toHaveAttribute("aria-pressed", "false");
+    await expect(reset).toBeHidden();
+  });
+
+  test("선택 안 했을 때 상세 패널은 안 보임", async ({ page }) => {
+    await page.goto("/features");
+    await expect(page.getByTestId("feature-detail-panel")).toBeHidden();
+  });
 });
