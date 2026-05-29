@@ -24,11 +24,12 @@ from __future__ import annotations
 
 from typing import Self
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .area import AreaDetail
 from .event import EventDetail
 from .feature import Feature
+from .file import FeatureFileSource
 from .notice import NoticeDetail
 from .place import PlaceDetail
 from .route import RouteDetail
@@ -44,10 +45,10 @@ class FeatureBundle(BaseModel):
     bundle은 별도 ``detail`` 필드를 두지 않는다 (중복 회피, single source of
     truth).
 
-    WeatherValue/PriceValue/FeatureFileSource는 Sprint 2 첫 provider 변환 시
-    추가된 DTO. 본 PR(#26)은 source_record/source_link/feature를 묶는 최소
-    bundle만 정의. weather/price/file_sources 필드는 후속 PR (Sprint 2)에서
-    DTO 추가와 함께 enable.
+    ``file_sources``는 미디어(이미지 등) 파일 참조 — provider 응답의 미디어 URL을
+    ``FeatureFileSource``(docs/feature-files-rustfs.md §2.2)로 담는다. load 시
+    객체 저장소(rustfs/s3) 업로드 대상. WeatherValue/PriceValue는 별도 bundle
+    (Sprint 2 weather/price provider 변환).
 
     예시 (Sprint 2 첫 provider 변환 함수 출력):
 
@@ -66,9 +67,13 @@ class FeatureBundle(BaseModel):
     feature: Feature
     source_record: SourceRecord
     source_link: SourceLink
-    # weather_values: list[WeatherValue] = Field(default_factory=list)  # Sprint 2
-    # price_values: list[PriceValue] = Field(default_factory=list)      # Sprint 2
-    # file_sources: list[FeatureFileSource] = Field(default_factory=list)  # Sprint 2-3
+    file_sources: list[FeatureFileSource] = Field(
+        default_factory=list,
+        description=(
+            "미디어 파일 참조 (이미지/영상 등). provider 응답 URL → load 시 "
+            "객체 저장소 업로드 (docs/feature-files-rustfs.md). 기본 빈 list."
+        ),
+    )
 
     @model_validator(mode="after")
     def _check_source_consistency(self) -> Self:
@@ -85,6 +90,12 @@ class FeatureBundle(BaseModel):
                 f"({self.source_link.source_record_key!r} != "
                 f"{self.source_record.source_record_key!r})."
             )
+        for fs in self.file_sources:
+            if fs.feature_id != self.feature.feature_id:
+                raise ValueError(
+                    "file_sources[].feature_id must match feature.feature_id "
+                    f"({fs.feature_id!r} != {self.feature.feature_id!r})."
+                )
         return self
 
     # ── convenience ─────────────────────────────────────────────────────

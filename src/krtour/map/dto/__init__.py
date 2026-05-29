@@ -40,6 +40,7 @@ from .bundle import FeatureBundle
 from .coordinate import Coordinate
 from .event import EventDetail
 from .feature import Feature
+from .file import FeatureFileSource, FileRole, FileType
 from .notice import (
     NOTICE_TYPE_ACCESS_RESTRICTION,
     NOTICE_TYPE_COASTAL_ISOLATION,
@@ -156,4 +157,8 @@ __all__ = [
     # price (PR#42, ADR-013/014)
     "PriceDomain",
     "PriceValue",
+    # file sources (미디어, docs/feature-files-rustfs.md §2.2)
+    "FeatureFileSource",
+    "FileRole",
+    "FileType",
 ]
