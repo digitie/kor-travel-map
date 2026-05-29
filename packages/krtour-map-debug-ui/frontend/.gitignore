@@ -9,6 +9,9 @@ node_modules/
 out/
 next-env.d.ts
 
+# tsc --noEmit incremental build cache (CI gate, PR#93)
+*.tsbuildinfo
+
 # editor
 .vscode/
 .idea/
