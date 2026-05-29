@@ -3,6 +3,14 @@
 본 문서는 국가유산청(`python-krheritage-api`) 데이터를 `place`/`area`/`event`
 feature로 적재하는 ETL이다.
 
+> **구현 현황 (2026-05-29)**: `krtour.map.providers.krheritage` 변환 함수 구현
+> 완료 — `heritage_items_to_bundles`(place/area, async + reverse_geocoder) /
+> `heritage_events_to_bundles`(event). structural Protocol 입력
+> (`KrHeritageItem`/`KrHeritageEvent`). area는 GIS WKT가 있으면 `Feature.geom` +
+> centroid. **미구현(후속)**: §7 미디어 file_sources(`FeatureFileSource` DTO 대기) /
+> §10 collect·load 오케스트레이션 / GIS 면적(`area_square_meters`) 보강 /
+> §2.5 knps 사찰↔temple dedup.
+
 ## 1. 문서 정보
 
 | 항목 | 값 |

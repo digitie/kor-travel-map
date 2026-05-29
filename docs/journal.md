@@ -2,6 +2,35 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-29 (claude) — Provider ⑥ krheritage (국가유산 place/area/event, ADR-034 8단계)
+
+**작업**: 사용자 "krheritage 진행". `src/krtour/map/providers/krheritage.py` 신설.
+`docs/krheritage-feature-etl.md` + SPRINT-3 §2.2 사양 구현.
+
+**설계**: krheritage-api 미설치 → knps/datagokr와 동일하게 **structural Protocol**
+입력(`KrHeritageItem`/`KrHeritageEvent`), krheritage import 안 함(ADR-006). PR#83
+패턴 따라 변환 함수 **async + reverse_geocoder**(feature_id 전 bjd_code 보강, ADR-009).
+- `classify_heritage_kind(item)` — ccba_kdcd로 place/area (13/16 사적·명승→area,
+  15 천연기념물→경계 있으면 area 없으면 place, 그 외 place).
+- `resolve_heritage_category(item)` — 명칭/유형 키워드 우선(사찰 01070100 / 궁궐·왕릉
+  01070200 / 한옥·민속 01070400 / 사적·명승 01070300) + 15→01020400(자연) +
+  미분류 01070000. maki override(religious-buddhist/castle/village/monument), P-07.
+- `heritage_items_to_bundles` — place/area. area + geom_wkt이면 normalize_geometry
+  (AREA_GEOMETRY_TYPES) → Feature.geom + centroid 좌표; 불량 WKT면 좌표 fallback.
+  PlaceDetail/AreaDetail(area_kind heritage_area/natural_heritage_area). 자연키
+  ccbaKdcd-ccbaAsno-ccbaCtcd.
+- `heritage_events_to_bundles` — EventDetail(event_kind=heritage_event,
+  content_id=sn), category 01070000. 자연키 sn.
+- 소재지 텍스트는 reverse 결과에 legal 보강(`_merge_address`).
+
+**범위 밖(후속)**: 미디어 file_sources(FeatureFileSource DTO 미구현, bundle.py
+주석 처리) / GIS spca 면적 보강(area_square_meters) / knps 사찰↔temple dedup(§2.5).
+
+**검증(로컬)**: 단위 25건 추가 → unit+lint **581** / ruff / mypy --strict
+(-p krtour.map, 46 files) / import-linter 4 kept / coverage gate green.
+
+**다음**: GIS 면적 보강 + dedup_review_queue(§2.5) 또는 실 DB 적재 오케스트레이션.
+
 ## 2026-05-29 (claude) — 적재 자동 보강 wiring: provider 변환기 전면 async + geocoder 주입
 
 **작업**: 사용자 "knps 재검토 + kraddr geo v2 연동" 후속으로 "적재 자동 보강
