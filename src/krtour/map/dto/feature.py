@@ -85,6 +85,14 @@ class Feature(BaseModel):
     kind: FeatureKind
     name: str = Field(min_length=1)
     coord: Coordinate | None = None
+    geom: str | None = Field(
+        default=None,
+        description=(
+            "route/area feature의 선·면 geometry (WKT, EPSG:4326). place/event 등 "
+            "Point feature는 ``None`` — 좌표는 ``coord``. ``features.geom`` 컬럼에 "
+            "저장 (ADR-012). 생성/검증은 ``krtour.map.core.geometry``."
+        ),
+    )
     address: Address = Field(default_factory=Address)
     category: str = Field(
         description="``krtour.map.category.PlaceCategoryCode`` value 8자리 숫자 (ADR-023).",

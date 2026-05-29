@@ -47,6 +47,14 @@ from krtour.map.core.exceptions import (
     SourceRecordNotFoundError,
     ValidationError,
 )
+from krtour.map.core.geometry import (
+    AREA_GEOMETRY_TYPES,
+    ROUTE_GEOMETRY_TYPES,
+    GeometryError,
+    geometry_centroid,
+    normalize_geometry,
+    parse_wkt,
+)
 from krtour.map.core.ids import (
     FEATURE_ID_HASH_LENGTH,
     PAYLOAD_HASH_DEFAULT_LENGTH,
@@ -150,4 +158,11 @@ __all__ = [
     "group_by_metric_key",
     "filter_by_provider",
     "latest_by_metric_key",
+    # geometry (route/area WKT, ADR-012)
+    "ROUTE_GEOMETRY_TYPES",
+    "AREA_GEOMETRY_TYPES",
+    "GeometryError",
+    "parse_wkt",
+    "geometry_centroid",
+    "normalize_geometry",
 ]
