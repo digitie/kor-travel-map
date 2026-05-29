@@ -50,6 +50,7 @@ __all__ = [
     "load_bundle",
     "load_bundles",
     "get_feature_row",
+    "features_in_bbox",
 ]
 
 
@@ -151,6 +152,24 @@ SELECT
     created_at, updated_at, deleted_at
 FROM feature.features
 WHERE feature_id = :feature_id
+"""
+
+# bbox 조회 — ADR-012: 입력 bbox는 4326, GIST(coord) 인덱스 사용. deleted_at 제외.
+# kinds 필터는 NULL이면 전체 (asyncpg ARRAY 바인딩). 경량 표현(좌표 + 표시 메타).
+_FEATURES_IN_BBOX_SQL: Final[str] = """
+SELECT
+    feature_id, kind, name, category,
+    x_extension.ST_X(coord) AS lon, x_extension.ST_Y(coord) AS lat,
+    marker_icon, marker_color, status
+FROM feature.features
+WHERE deleted_at IS NULL
+  AND coord IS NOT NULL
+  AND coord && x_extension.ST_MakeEnvelope(
+        CAST(:min_lon AS double precision), CAST(:min_lat AS double precision),
+        CAST(:max_lon AS double precision), CAST(:max_lat AS double precision), 4326)
+  AND (CAST(:kinds AS text[]) IS NULL OR kind = ANY(CAST(:kinds AS text[])))
+ORDER BY feature_id
+LIMIT :limit
 """
 
 
@@ -352,3 +371,35 @@ async def get_feature_row(
         if isinstance(value, str):
             data[col] = json.loads(value)
     return data
+
+
+async def features_in_bbox(
+    session: AsyncSession,
+    *,
+    min_lon: float,
+    min_lat: float,
+    max_lon: float,
+    max_lat: float,
+    kinds: list[str] | None = None,
+    limit: int = 1000,
+) -> list[dict[str, Any]]:
+    """bbox 안의 feature 경량 표현 list (지도/목록용). 좌표는 ``lon``/``lat`` (4326).
+
+    ADR-012 — 입력 bbox는 4326, ``coord``의 GIST 인덱스(``idx_features_coord_gist``)를
+    사용하는 ``&&`` 연산. ``deleted_at IS NULL`` + ``coord IS NOT NULL``만. ``kinds``가
+    ``None``이면 전체 kind. DTO 매핑은 상위(client) 책임 — 본 repo는 raw row만.
+    """
+    rows = (
+        await session.execute(
+            text(_FEATURES_IN_BBOX_SQL),
+            {
+                "min_lon": min_lon,
+                "min_lat": min_lat,
+                "max_lon": max_lon,
+                "max_lat": max_lat,
+                "kinds": kinds,
+                "limit": limit,
+            },
+        )
+    ).mappings().all()
+    return [dict(r) for r in rows]

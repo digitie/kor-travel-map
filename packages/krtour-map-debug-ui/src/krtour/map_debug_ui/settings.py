@@ -55,6 +55,14 @@ class DebugUiSettings(BaseSettings):
             "내려 두면 발견 reduce. ``/admin/...`` 운영 라우터는 별도 flag (Sprint 4+)."
         ),
     )
+    features_routes_enabled: bool = Field(
+        default=True,
+        description=(
+            "``/features/...`` 조회 라우터 활성 여부. feature 적재 후 지도/목록 "
+            "조회용 (ADR-035). DB(``KRTOUR_MAP_PG_DSN``) 연결 필요 — DB 없는 "
+            "환경에서는 False로 내려 import/기동만 검증."
+        ),
+    )
     cors_allow_origins: list[str] = Field(
         default=[
             "http://localhost:8610",

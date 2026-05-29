@@ -48,6 +48,7 @@ from krtour.map.infra.db import (
 )
 from krtour.map.infra.feature_repo import (
     FeatureLoadResult,
+    features_in_bbox,
     get_feature_row,
     load_bundle,
     load_bundles,
@@ -93,4 +94,5 @@ __all__ = [
     "load_bundle",
     "load_bundles",
     "get_feature_row",
+    "features_in_bbox",
 ]

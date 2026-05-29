@@ -173,3 +173,43 @@ async def test_get_feature_row_missing_returns_none(
 ) -> None:
     row = await feature_repo.get_feature_row(migrated_session, "does-not-exist")
     assert row is None
+
+
+async def test_features_in_bbox_finds_loaded_feature(
+    migrated_session: AsyncSession,
+) -> None:
+    bundle = _bundle("FEST-BBOX")
+    await feature_repo.load_bundle(migrated_session, bundle)
+    await migrated_session.flush()
+
+    lon = float(bundle.feature.coord.lon)
+    lat = float(bundle.feature.coord.lat)
+
+    # feature를 포함하는 bbox
+    rows = await feature_repo.features_in_bbox(
+        migrated_session,
+        min_lon=lon - 0.1, min_lat=lat - 0.1,
+        max_lon=lon + 0.1, max_lat=lat + 0.1,
+    )
+    ids = {r["feature_id"] for r in rows}
+    assert bundle.feature.feature_id in ids
+    hit = next(r for r in rows if r["feature_id"] == bundle.feature.feature_id)
+    assert abs(float(hit["lon"]) - lon) < 1e-6
+    assert hit["kind"] == "event"
+
+    # kind 필터 mismatch면 제외
+    rows_place = await feature_repo.features_in_bbox(
+        migrated_session,
+        min_lon=lon - 0.1, min_lat=lat - 0.1,
+        max_lon=lon + 0.1, max_lat=lat + 0.1,
+        kinds=["place"],
+    )
+    assert bundle.feature.feature_id not in {r["feature_id"] for r in rows_place}
+
+    # feature 밖 bbox면 빈 결과
+    rows_far = await feature_repo.features_in_bbox(
+        migrated_session,
+        min_lon=lon + 1.0, min_lat=lat + 1.0,
+        max_lon=lon + 1.1, max_lat=lat + 1.1,
+    )
+    assert bundle.feature.feature_id not in {r["feature_id"] for r in rows_far}

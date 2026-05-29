@@ -56,6 +56,276 @@
         "title": "EtlPreviewResponse",
         "type": "object"
       },
+      "FeatureDetailResponse": {
+        "additionalProperties": false,
+        "description": "``GET /features/{feature_id}`` 응답 — 단건 상세 (raw row 기반).",
+        "properties": {
+          "address": {
+            "additionalProperties": true,
+            "title": "Address",
+            "type": "object"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "coord_5179_srid": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "coord_5179 STORED generated column의 SRID (ADR-012 검증용).",
+            "title": "Coord 5179 Srid"
+          },
+          "detail": {
+            "additionalProperties": true,
+            "title": "Detail",
+            "type": "object"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "lat": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lat"
+          },
+          "legal_dong_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legal Dong Code"
+          },
+          "lon": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lon"
+          },
+          "marker_color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Marker Color"
+          },
+          "marker_icon": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Marker Icon"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "parent_feature_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Feature Id"
+          },
+          "sibling_group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sibling Group Id"
+          },
+          "sido_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sido Code"
+          },
+          "sigungu_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sigungu Code"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "urls": {
+            "additionalProperties": true,
+            "title": "Urls",
+            "type": "object"
+          }
+        },
+        "required": [
+          "feature_id",
+          "kind",
+          "name",
+          "category",
+          "address",
+          "detail",
+          "urls",
+          "status"
+        ],
+        "title": "FeatureDetailResponse",
+        "type": "object"
+      },
+      "FeatureSummary": {
+        "additionalProperties": false,
+        "description": "지도/목록용 경량 feature 표현 (bbox 조회 결과 1건).",
+        "properties": {
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "lat": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "위도 (WGS84).",
+            "title": "Lat"
+          },
+          "lon": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "경도 (WGS84). coord 없으면 null.",
+            "title": "Lon"
+          },
+          "marker_color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Marker Color"
+          },
+          "marker_icon": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Marker Icon"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_id",
+          "kind",
+          "name",
+          "category",
+          "lon",
+          "lat",
+          "status"
+        ],
+        "title": "FeatureSummary",
+        "type": "object"
+      },
+      "FeaturesInBboxResponse": {
+        "additionalProperties": false,
+        "description": "``GET /features`` 응답 — bbox 안 feature 목록.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FeatureSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "items"
+        ],
+        "title": "FeaturesInBboxResponse",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -442,6 +712,164 @@
         "summary": "package versions",
         "tags": [
           "debug"
+        ]
+      }
+    },
+    "/features": {
+      "get": {
+        "description": "주어진 경계 상자(WGS84) 안의 feature 경량 표현 list. ``coord``의 GIST 인덱스를 사용하는 공간 조회 (ADR-012). ``kind`` 반복 파라미터로 종류 필터 (예: ``?kind=place&kind=event``). 삭제된 feature 제외.",
+        "operationId": "list_features_in_bbox_features_get",
+        "parameters": [
+          {
+            "description": "bbox 최소 경도 (WGS84).",
+            "in": "query",
+            "name": "min_lon",
+            "required": true,
+            "schema": {
+              "description": "bbox 최소 경도 (WGS84).",
+              "title": "Min Lon",
+              "type": "number"
+            }
+          },
+          {
+            "description": "bbox 최소 위도.",
+            "in": "query",
+            "name": "min_lat",
+            "required": true,
+            "schema": {
+              "description": "bbox 최소 위도.",
+              "title": "Min Lat",
+              "type": "number"
+            }
+          },
+          {
+            "description": "bbox 최대 경도.",
+            "in": "query",
+            "name": "max_lon",
+            "required": true,
+            "schema": {
+              "description": "bbox 최대 경도.",
+              "title": "Max Lon",
+              "type": "number"
+            }
+          },
+          {
+            "description": "bbox 최대 위도.",
+            "in": "query",
+            "name": "max_lat",
+            "required": true,
+            "schema": {
+              "description": "bbox 최대 위도.",
+              "title": "Max Lat",
+              "type": "number"
+            }
+          },
+          {
+            "description": "feature kind 필터 (반복 가능). 미지정 시 전체.",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "feature kind 필터 (반복 가능). 미지정 시 전체.",
+              "title": "Kind"
+            }
+          },
+          {
+            "description": "최대 반환 수.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 1000,
+              "description": "최대 반환 수.",
+              "maximum": 5000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeaturesInBboxResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "bbox 안 feature 목록 (지도 뷰포트)",
+        "tags": [
+          "features"
+        ]
+      }
+    },
+    "/features/{feature_id}": {
+      "get": {
+        "operationId": "get_feature_features__feature_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature_id",
+            "required": true,
+            "schema": {
+              "title": "Feature Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "feature_id 없음"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "feature 단건 상세",
+        "tags": [
+          "features"
         ]
       }
     }
