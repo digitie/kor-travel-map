@@ -2,6 +2,35 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-29 (claude) — KNPS CsvPreview → FeatureBundle 브리지 (knps-api DTO 직접 소비)
+
+**작업**: 사용자 요청 "knps api 다시 확인해서 프로바이더 구현". knps-api 소스 전수
+재확인(catalog/models/files/artifacts) 결과:
+- knps-api는 CSV를 `CsvPreview`(headers + `CsvPreviewRow.as_dict`)로 파싱 제공
+  (`download_artifact(preview_rows=N)`, N 크게 주면 전 행). **geometry/SHP 파싱은
+  미구현**(자체 testing.md "planned", knps-api.md "parser가 WGS84+geometry 노출").
+- 실제 feature dataset CSV 컬럼명은 어디에도 없음(소스/테스트/문서). live 확인은
+  이 환경 data.go.kr 차단(403 allowlist). → 사용자 결정: "브리지 + 추정 컬럼
+  기본값(검증 필요 표기)".
+
+**구현(`providers/knps.py`)**: knps를 import하지 않고 structural Protocol로 소비.
+- `KnpsCsvRow`/`KnpsCsvPreview` Protocol (knps-api `CsvPreviewRow`/`CsvPreview`와
+  구조 일치 — 실제 객체로 동작 확인).
+- `KnpsPointColumnMap`/`KnpsGeometryColumnMap` + best-guess 기본 후보맵
+  (`KNPS_DEFAULT_*_COLUMN_MAP`, 경도/위도/명칭/관리번호/WKT 한·영 후보, ⚠️VERIFY).
+- `knps_csv_preview_to_point_bundles` / `knps_csv_preview_to_geometry_bundles` —
+  행 dict에서 첫 매칭 컬럼 추출 → 기존 `knps_*_records_to_bundles` 재사용.
+  좌표 없으면 coord=None, id 컬럼 없으면 행 해시 fallback, geom 없으면 skip.
+  `column_map` 인자로 override.
+
+**검증(로컬)**: unit+lint 537(+9), ruff/mypy --strict/import-linter green. 실제
+knps-api `CsvPreview`(`knps.models`)가 브리지 Protocol 만족함을 직접 확인.
+
+**경계 재확인**: geometry/SHP 파싱은 여전히 knps-api 책임(ADR-028 Amendment I).
+본 브리지는 knps-api가 현재 제공하는 CSV preview를 잇는 현실 경로.
+
+**다음**: live 컬럼명 확정(별도 환경/세션) 또는 provider ⑥ krheritage.
+
 ## 2026-05-29 (claude) — KNPS 최신 재검토: 국립공원 경계 category + route/area maki 정정
 
 **작업**: 사용자 요청 "knps api 최신으로 읽어서 다시 검토". knps-api 최신 HEAD =

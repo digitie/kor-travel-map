@@ -31,6 +31,7 @@ ADR 참조
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Final, Protocol, runtime_checkable
@@ -74,6 +75,15 @@ __all__ = [
     "knps_point_records_to_bundles",
     "knps_geometry_records_to_bundles",
     "resolve_cultural_resource_category",
+    # knps-api CsvPreview → FeatureBundle 브리지
+    "KnpsCsvRow",
+    "KnpsCsvPreview",
+    "KnpsPointColumnMap",
+    "KnpsGeometryColumnMap",
+    "KNPS_DEFAULT_POINT_COLUMN_MAP",
+    "KNPS_DEFAULT_GEOMETRY_COLUMN_MAP",
+    "knps_csv_preview_to_point_bundles",
+    "knps_csv_preview_to_geometry_bundles",
     "PROVIDER_NAME",
 ]
 
@@ -617,3 +627,218 @@ def knps_geometry_records_to_bundles(
         if bundle is not None:
             bundles.append(bundle)
     return bundles
+
+
+# =====================================================================
+# knps-api CsvPreview → FeatureBundle 브리지
+# =====================================================================
+#
+# knps-api는 raw bytes를 `client.files.download_artifact(key, preview_rows=N)`로
+# 파싱해 `FileArtifact.csv_previews[*]`(헤더 + 행)를 돌려준다 (preview_rows를 크게
+# 주면 전 행 획득). 본 브리지는 그 `CsvPreview`(structural Protocol)를 직접 소비해
+# place/route/area bundle로 잇는다 — knps를 import하지 않고 구조만 의존(ADR-006).
+#
+# ⚠️ 실제 CSV 컬럼명은 knps-api(소스/테스트/문서)에 없고 live(data.go.kr) 확인이
+# 필요하다. 아래 DEFAULT 컬럼 후보는 data.go.kr 한국어 관례 기반 **best-guess**다.
+# 적재 전 `CsvPreview.headers`로 검증하고 필요 시 `column_map`으로 override할 것.
+# (geometry는 knps-api parser가 WGS84 WKT를 노출하면 그 컬럼을 가리키게 한다.)
+
+
+@runtime_checkable
+class KnpsCsvRow(Protocol):
+    """knps-api ``CsvPreviewRow``의 structural 입력 shape."""
+
+    @property
+    def as_dict(self) -> dict[str, str | None]:
+        """header→value dict (knps-api ``CsvPreviewRow.as_dict``)."""
+        ...
+
+
+@runtime_checkable
+class KnpsCsvPreview(Protocol):
+    """knps-api ``CsvPreview``의 structural 입력 shape."""
+
+    @property
+    def rows(self) -> tuple[KnpsCsvRow, ...]:
+        """파싱된 데이터 행들 (knps-api ``CsvPreview.rows``)."""
+        ...
+
+
+@dataclass(frozen=True)
+class KnpsPointColumnMap:
+    """Point(place) CSV의 필드별 컬럼명 후보 (첫 매칭 우선).
+
+    각 필드는 후보 헤더명 tuple — 행 dict에서 처음 매칭되는 비어있지 않은 값 사용.
+    ⚠️ best-guess. live ``CsvPreview.headers``로 검증 후 확정/확장.
+    """
+
+    source_id: tuple[str, ...]
+    name: tuple[str, ...]
+    longitude: tuple[str, ...]
+    latitude: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class KnpsGeometryColumnMap:
+    """route/area CSV의 필드별 컬럼명 후보 (geometry는 WKT 컬럼)."""
+
+    source_id: tuple[str, ...]
+    name: tuple[str, ...]
+    geom_wkt: tuple[str, ...]
+
+
+# best-guess 기본 컬럼 후보 (VERIFY against live headers).
+KNPS_DEFAULT_POINT_COLUMN_MAP: Final[KnpsPointColumnMap] = KnpsPointColumnMap(
+    source_id=("관리번호", "고유번호", "일련번호", "번호", "NO", "no", "id"),
+    name=("명칭", "시설명", "관리소명", "이름", "name"),
+    longitude=("경도", "경도(WGS84)", "X좌표", "x좌표", "longitude", "lon", "lng", "x"),
+    latitude=("위도", "위도(WGS84)", "Y좌표", "y좌표", "latitude", "lat", "y"),
+)
+
+KNPS_DEFAULT_GEOMETRY_COLUMN_MAP: Final[KnpsGeometryColumnMap] = KnpsGeometryColumnMap(
+    source_id=("관리번호", "고유번호", "일련번호", "번호", "NO", "no", "id"),
+    name=("명칭", "노선명", "구간명", "구역명", "이름", "name"),
+    # knps-api parser가 노출할 WGS84 WKT 컬럼 후보 (현재 미확정).
+    geom_wkt=("WKT", "wkt", "the_geom", "geom", "공간정보", "도형", "geometry"),
+)
+
+
+@dataclass(frozen=True)
+class _CsvPointRecord:
+    """``KnpsPointRecord`` Protocol을 만족하는 내부 record (CsvPreview 행 기반)."""
+
+    source_id: str
+    name: str
+    longitude: Decimal | None
+    latitude: Decimal | None
+    raw: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class _CsvGeometryRecord:
+    """``KnpsGeometryRecord`` Protocol을 만족하는 내부 record."""
+
+    source_id: str
+    name: str
+    geom_wkt: str
+    raw: dict[str, Any]
+
+
+def _pick(row: dict[str, str | None], candidates: tuple[str, ...]) -> str | None:
+    """행 dict에서 후보 헤더 중 처음 매칭되는 비어있지 않은 값 (strip)."""
+    for col in candidates:
+        val = row.get(col)
+        if val is not None:
+            text = str(val).strip()
+            if text:
+                return text
+    return None
+
+
+def _to_decimal(text: str | None) -> Decimal | None:
+    """좌표 문자열 → Decimal (빈값/파싱 실패는 None)."""
+    if text is None:
+        return None
+    try:
+        return Decimal(text)
+    except (ArithmeticError, ValueError):
+        return None
+
+
+def _row_natural_key(row: dict[str, Any], picked_id: str | None) -> str:
+    """source_id 컬럼이 없으면 행 내용 해시로 결정적 fallback."""
+    return picked_id if picked_id is not None else f"row-{make_payload_hash(row)[:16]}"
+
+
+def knps_csv_preview_to_point_bundles(
+    preview: KnpsCsvPreview,
+    *,
+    dataset_key: str,
+    fetched_at: datetime,
+    column_map: KnpsPointColumnMap | None = None,
+) -> list[FeatureBundle]:
+    """knps-api ``CsvPreview`` → place ``FeatureBundle`` (Point dataset).
+
+    ``column_map``이 ``None``이면 ``KNPS_DEFAULT_POINT_COLUMN_MAP``(best-guess)
+    사용. 좌표 컬럼이 없거나 한국 경계 밖이면 ``Feature.coord=None``로 적재된다.
+
+    Parameters
+    ----------
+    preview
+        knps-api ``FileArtifact.csv_previews[*]`` 한 건 (structural Protocol).
+    dataset_key
+        ``KNPS_PLACE_DATASETS`` 키.
+    fetched_at
+        provider 호출 시각 (KST aware, ADR-019).
+    column_map
+        컬럼명 매핑 override (live ``CsvPreview.headers`` 확인 후 권장).
+
+    Raises
+    ------
+    KeyError
+        ``dataset_key``가 Point/place dataset이 아님.
+    """
+    if dataset_key not in KNPS_PLACE_DATASETS:
+        raise KeyError(
+            f"KNPS Point/place dataset 아님: {dataset_key!r}. "
+            f"지원: {sorted(KNPS_PLACE_DATASETS)}."
+        )
+    cmap = column_map or KNPS_DEFAULT_POINT_COLUMN_MAP
+    records: list[_CsvPointRecord] = []
+    for row in preview.rows:
+        data = dict(row.as_dict)
+        sid = _row_natural_key(data, _pick(data, cmap.source_id))
+        name = _pick(data, cmap.name) or sid
+        records.append(
+            _CsvPointRecord(
+                source_id=sid,
+                name=name,
+                longitude=_to_decimal(_pick(data, cmap.longitude)),
+                latitude=_to_decimal(_pick(data, cmap.latitude)),
+                raw=data,
+            )
+        )
+    return knps_point_records_to_bundles(
+        records, dataset_key=dataset_key, fetched_at=fetched_at
+    )
+
+
+def knps_csv_preview_to_geometry_bundles(
+    preview: KnpsCsvPreview,
+    *,
+    dataset_key: str,
+    fetched_at: datetime,
+    column_map: KnpsGeometryColumnMap | None = None,
+) -> list[FeatureBundle]:
+    """knps-api ``CsvPreview`` → route/area ``FeatureBundle`` (geometry dataset).
+
+    geometry WKT 컬럼이 없는 행은 건너뛴다. ⚠️ CSV의 geometry 표현(WKT 컬럼 vs
+    좌표 컬럼)은 knps-api parser 확정 후 ``column_map``으로 맞춘다. SHP(ZIP)
+    dataset(``knps_park_boundaries``)은 knps-api가 geometry를 노출한 뒤 본
+    함수 대신 ``knps_geometry_records_to_bundles``로 직접 잇는다.
+
+    Raises
+    ------
+    KeyError
+        ``dataset_key``가 route/area geometry dataset이 아님.
+    """
+    if dataset_key not in KNPS_GEOMETRY_DATASETS:
+        raise KeyError(
+            f"KNPS route/area geometry dataset 아님: {dataset_key!r}. "
+            f"지원: {sorted(KNPS_GEOMETRY_DATASETS)}."
+        )
+    cmap = column_map or KNPS_DEFAULT_GEOMETRY_COLUMN_MAP
+    records: list[_CsvGeometryRecord] = []
+    for row in preview.rows:
+        data = dict(row.as_dict)
+        wkt = _pick(data, cmap.geom_wkt)
+        if wkt is None:
+            continue  # geometry 없는 행은 skip (route/area는 geometry 필수)
+        sid = _row_natural_key(data, _pick(data, cmap.source_id))
+        name = _pick(data, cmap.name) or sid
+        records.append(
+            _CsvGeometryRecord(source_id=sid, name=name, geom_wkt=wkt, raw=data)
+        )
+    return knps_geometry_records_to_bundles(
+        records, dataset_key=dataset_key, fetched_at=fetched_at
+    )
