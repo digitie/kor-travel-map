@@ -46,8 +46,18 @@ from krtour.map.infra.db import (
     make_async_session_factory,
     normalize_async_dsn,
 )
+from krtour.map.infra.feature_repo import (
+    FeatureLoadResult,
+    get_feature_row,
+    load_bundle,
+    load_bundles,
+    upsert_feature,
+    upsert_source_link,
+    upsert_source_record,
+)
 from krtour.map.infra.models import (
     Base,
+    FeatureConsistencyReportRow,
     FeatureRow,
     ProviderSyncStateRow,
     SourceLinkRow,
@@ -74,4 +84,13 @@ __all__ = [
     "SourceRecordRow",
     "SourceLinkRow",
     "ProviderSyncStateRow",
+    "FeatureConsistencyReportRow",
+    # feature_repo (ADR-004 raw SQL load 경로)
+    "FeatureLoadResult",
+    "upsert_feature",
+    "upsert_source_record",
+    "upsert_source_link",
+    "load_bundle",
+    "load_bundles",
+    "get_feature_row",
 ]
