@@ -1,7 +1,7 @@
 """ops.feature_consistency_reports (ADR-033 Phase 1, Sprint 3).
 
-Revision ID: 0003_feature_consistency_reports
-Revises: 0002_features_and_source_tables
+Revision ID: 0003_consistency_reports
+Revises: 0002_features_source
 Create Date: 2026-05-29
 
 ``infra/models.py``의 ``FeatureConsistencyReportRow``와 1:1 (ADR-004 ORM=매핑,
@@ -21,8 +21,8 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision: str = "0003_feature_consistency_reports"
-down_revision: str | Sequence[str] | None = "0002_features_and_source_tables"
+revision: str = "0003_consistency_reports"
+down_revision: str | Sequence[str] | None = "0002_features_source"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
