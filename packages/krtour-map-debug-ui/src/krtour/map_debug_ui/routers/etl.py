@@ -198,7 +198,7 @@ async def post_preview(
         return await _run_live_preview(provider, dataset, request)
 
     try:
-        result = run_fixture_preview(provider, dataset)
+        result = await run_fixture_preview(provider, dataset)
     except KeyError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)

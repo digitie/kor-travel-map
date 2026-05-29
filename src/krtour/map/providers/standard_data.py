@@ -31,9 +31,11 @@ ADR 참조
 하도록 필드 이름을 맞추거나, 호출자가 가벼운 dict→model adapter를 자기
 영역에서 만든다.
 
-``reverse_geocoder``는 좌표 → 법정동코드 / 시도/시군구 코드 reverse geocoding
-helper (있으면). Sprint 1 시점에는 placeholder Protocol — 실제 구현은
-``python-kraddr-geo`` 측에. ``None``이면 ``Feature.address.bjd_code``는 비움.
+``reverse_geocoder``는 좌표 → ``Address``(법정동코드 등) async 역지오코더
+(``krtour.map.geocoding.ReverseGeocoder``, 예: ``kraddr_geo_reverse_geocoder``).
+feature_id가 bjd_code에 의존하므로(ADR-009) 변환 함수는 **async**이고 feature_id
+계산 전에 ``await``한다. ``None``이면 ``Feature.address.bjd_code``는 비고
+feature_id는 'global' bucket으로 떨어진다.
 """
 
 from __future__ import annotations
@@ -46,7 +48,6 @@ from typing import Any, Final, Protocol, runtime_checkable
 from krtour.map.core.address import (
     extract_sido_code,
     extract_sigungu_code,
-    normalize_bjd_code,
     normalize_korean_text,
     normalize_phone_number,
 )
@@ -67,11 +68,10 @@ from krtour.map.dto import (
     SourceRecord,
     SourceRole,
 )
+from krtour.map.geocoding import ReverseGeocoder, cached_reverse_geocoder
 
 __all__ = [
     "CulturalFestivalItem",
-    "ReverseGeocodeResult",
-    "ReverseGeocoder",
     "cultural_festivals_to_bundles",
     # 상수 (호출자가 source_role/marker 등 변경하고 싶을 때 참조)
     "DATASET_KEY_CULTURAL_FESTIVALS",
@@ -168,41 +168,10 @@ class CulturalFestivalItem(Protocol):
     """제공기관명 (``SourceRecord.source_version`` 또는 raw_data)."""
 
 
-# -- Reverse geocoder Protocol -------------------------------------------
-
-
-class ReverseGeocodeResult(Protocol):
-    """``reverse_geocoder.lookup(lon, lat)``의 반환 shape."""
-
-    bjd_code: str | None
-    """법정동코드 10자리."""
-
-    sigungu_code: str | None
-    """시·군·구 코드 5자리."""
-
-    sido_code: str | None
-    """시·도 코드 2자리."""
-
-    admin_address: str | None
-    """행정동 주소 (있으면)."""
-
-
-class ReverseGeocoder(Protocol):
-    """좌표 → 행정구역 코드 reverse geocoding helper (있으면).
-
-    Sprint 1 시점에는 plug-in 인터페이스만 정의 — 구현체는 ``python-kraddr-
-    geo`` 측이 후속 PR에서 제공.
-    """
-
-    def lookup(
-        self, *, lon: Decimal, lat: Decimal
-    ) -> ReverseGeocodeResult | None: ...
-
-
 # -- 단일 변환 ------------------------------------------------------------
 
 
-def _item_to_bundle(
+async def _item_to_bundle(
     item: CulturalFestivalItem,
     *,
     fetched_at: datetime,
@@ -222,30 +191,35 @@ def _item_to_bundle(
     else:
         coord = None
 
-    # 2) Reverse geocoding (있으면, 좌표 있을 때만). bjd_code는 normalize로
-    #    9자리/dash 입력 같은 변형 흡수. sigungu/sido는 reverse_geocoder가 안
-    #    채워줘도 bjd_code에서 자동 추출.
-    bjd_code: str | None = None
-    sigungu_code: str | None = None
-    sido_code: str | None = None
-    admin_address: str | None = None
+    # 2) Reverse geocoding (있으면, 좌표 있을 때만) — geocoding이 이미 정규화·검증한
+    #    Address. sigungu/sido는 geocoder가 안 채워줘도 bjd_code에서 자동 추출.
+    geo: Address | None = None
     if coord is not None and reverse_geocoder is not None:
-        rg = reverse_geocoder.lookup(lon=coord.lon, lat=coord.lat)
-        if rg is not None:
-            bjd_code = normalize_bjd_code(rg.bjd_code)
-            sigungu_code = rg.sigungu_code or extract_sigungu_code(bjd_code)
-            sido_code = rg.sido_code or extract_sido_code(bjd_code)
-            admin_address = normalize_korean_text(rg.admin_address)
+        geo = await reverse_geocoder(coord)
+    bjd_code = geo.bjd_code if geo is not None else None
+    sigungu_code = (
+        (geo.sigungu_code if geo is not None else None)
+        or extract_sigungu_code(bjd_code)
+    )
+    sido_code = (
+        (geo.sido_code if geo is not None else None) or extract_sido_code(bjd_code)
+    )
 
-    # 3) Address — 한국어 텍스트는 normalize로 전각/다중 공백 흡수. nullable
-    #    필드는 None 유지 — Address(extra='forbid') validator 통과.
+    # 3) Address — 표시 텍스트는 item 원천(도로명/지번)을 정규화해 유지하고,
+    #    행정코드/행정동명/우편번호 등은 reverse lookup 결과(geo)에서 채운다.
+    #    nullable 필드는 None 유지 — Address(extra='forbid') validator 통과.
     address = Address(
         road=normalize_korean_text(item.road_address),
         legal=normalize_korean_text(item.jibun_address),
-        admin=admin_address,
+        admin=geo.admin if geo is not None else None,
         bjd_code=bjd_code,
+        admin_dong_code=geo.admin_dong_code if geo is not None else None,
         sigungu_code=sigungu_code,
         sido_code=sido_code,
+        road_name_code=geo.road_name_code if geo is not None else None,
+        zipcode=geo.zipcode if geo is not None else None,
+        sido_name=geo.sido_name if geo is not None else None,
+        sigungu_name=geo.sigungu_name if geo is not None else None,
     )
 
     # 4) Raw payload (canonical JSON 직렬화 가능한 dict).
@@ -352,7 +326,7 @@ def _item_to_bundle(
 # -- 공개 API -----------------------------------------------------------
 
 
-def cultural_festivals_to_bundles(
+async def cultural_festivals_to_bundles(
     items: Iterable[CulturalFestivalItem],
     *,
     fetched_at: datetime,
@@ -369,8 +343,12 @@ def cultural_festivals_to_bundles(
         provider 호출 시각 (KST aware, ADR-019). 모든 bundle의 ``SourceRecord
         .fetched_at``에 같은 값 사용 — 호출자가 page batch 단위로 1회 결정.
     reverse_geocoder
-        좌표 → 법정동코드 helper (있으면). ``None``이면 ``Feature.address.
-        bjd_code`` 등은 비움 — 후속 enrichment PR에서 채울 수 있음.
+        좌표 → ``Address`` async 역지오코더 (``krtour.map.geocoding.
+        ReverseGeocoder``, 예: ``kraddr_geo_reverse_geocoder(client)``).
+        feature_id가 bjd_code에 의존하므로(ADR-009) feature_id 계산 전에 await해
+        채운다. 중복 좌표는 내부에서 ``cached_reverse_geocoder``로 1회만 호출.
+        ``None``이면 ``Feature.address.bjd_code``는 비고 feature_id는 'global'
+        bucket으로 떨어진다.
 
     Returns
     -------
@@ -410,13 +388,16 @@ def cultural_festivals_to_bundles(
       ``Feature.coord=None``으로 적재되고 ``features_in_bounds`` 쿼리에서
       자연히 제외된다 (ADR-012).
     - reverse_geocoder가 ``None``이고 좌표가 있어도 ``bjd_code``는 채워지지
-      않는다 — 호출자가 이후 enrichment PR에서 batch 보강.
+      않는다 — 호출자가 역지오코더를 주입하면 batch 보강된다.
     - visitkorea enrichment(이미지 / 상세설명 / contentId)는 Sprint 2 끝물
       별도 PR — `festival_to_enrichment_links`에서 처리.
     """
+    geocoder = (
+        cached_reverse_geocoder(reverse_geocoder)
+        if reverse_geocoder is not None
+        else None
+    )
     return [
-        _item_to_bundle(
-            item, fetched_at=fetched_at, reverse_geocoder=reverse_geocoder
-        )
+        await _item_to_bundle(item, fetched_at=fetched_at, reverse_geocoder=geocoder)
         for item in items
     ]

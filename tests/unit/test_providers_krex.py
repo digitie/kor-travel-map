@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Literal
+from typing import Any, Literal
 
 import pytest
 
 from krtour.map.dto import (
+    FeatureBundle,
     FeatureKind,
     ForecastStyle,
     PriceDomain,
@@ -25,12 +28,28 @@ from krtour.map.providers.krex import (
     TRAFFIC_NOTICES_DATASET_KEY,
     rest_area_prices_to_values,
     rest_area_weather_to_values,
-    rest_areas_to_bundles,
-    traffic_notices_to_bundles,
+)
+from krtour.map.providers.krex import (
+    rest_areas_to_bundles as _rest_areas_to_bundles_async,
+)
+from krtour.map.providers.krex import (
+    traffic_notices_to_bundles as _traffic_notices_to_bundles_async,
 )
 
 KST = timezone(timedelta(hours=9))
 _NOW = datetime(2026, 5, 28, 5, 0, tzinfo=KST)
+
+
+def rest_areas_to_bundles(items: Iterable[Any], **kwargs: Any) -> list[FeatureBundle]:
+    """sync 테스트 ergonomics — 실제 async 변환을 asyncio.run으로 구동."""
+    return asyncio.run(_rest_areas_to_bundles_async(items, **kwargs))
+
+
+def traffic_notices_to_bundles(
+    items: Iterable[Any], **kwargs: Any
+) -> list[FeatureBundle]:
+    """sync 테스트 ergonomics — 실제 async 변환을 asyncio.run으로 구동."""
+    return asyncio.run(_traffic_notices_to_bundles_async(items, **kwargs))
 
 
 # ── rest_areas → place FeatureBundle ─────────────────────────────────

@@ -12,6 +12,8 @@
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -19,7 +21,7 @@ from typing import Any
 
 import pytest
 
-from krtour.map.dto import FeatureKind, SourceRole
+from krtour.map.dto import FeatureBundle, FeatureKind, SourceRole
 from krtour.map.providers.knps import (
     KNPS_GEOMETRY_DATASET_KEYS,
     KNPS_GEOMETRY_DATASETS,
@@ -28,12 +30,43 @@ from krtour.map.providers.knps import (
     PROVIDER_NAME,
     KnpsGeometryColumnMap,
     KnpsPointColumnMap,
-    knps_csv_preview_to_geometry_bundles,
-    knps_csv_preview_to_point_bundles,
-    knps_geometry_records_to_bundles,
-    knps_point_records_to_bundles,
     resolve_cultural_resource_category,
 )
+from krtour.map.providers.knps import (
+    knps_csv_preview_to_geometry_bundles as _csv_geometry_async,
+)
+from krtour.map.providers.knps import (
+    knps_csv_preview_to_point_bundles as _csv_point_async,
+)
+from krtour.map.providers.knps import (
+    knps_geometry_records_to_bundles as _geometry_async,
+)
+from krtour.map.providers.knps import (
+    knps_point_records_to_bundles as _point_async,
+)
+
+
+# sync 테스트 ergonomics — 실제 async 변환을 asyncio.run으로 구동.
+def knps_point_records_to_bundles(
+    records: Iterable[Any], **kwargs: Any
+) -> list[FeatureBundle]:
+    return asyncio.run(_point_async(records, **kwargs))
+
+
+def knps_geometry_records_to_bundles(
+    records: Iterable[Any], **kwargs: Any
+) -> list[FeatureBundle]:
+    return asyncio.run(_geometry_async(records, **kwargs))
+
+
+def knps_csv_preview_to_point_bundles(preview: Any, **kwargs: Any) -> list[FeatureBundle]:
+    return asyncio.run(_csv_point_async(preview, **kwargs))
+
+
+def knps_csv_preview_to_geometry_bundles(
+    preview: Any, **kwargs: Any
+) -> list[FeatureBundle]:
+    return asyncio.run(_csv_geometry_async(preview, **kwargs))
 
 _KST = timezone(timedelta(hours=9))
 _FETCHED = datetime(2026, 5, 29, 12, 0, tzinfo=_KST)

@@ -22,7 +22,7 @@ ADR 참조
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -124,8 +124,8 @@ def _datagokr_festival_fixture() -> Sequence[_CulturalFestival]:
     ]
 
 
-def _convert_datagokr_festival(items: Sequence[Any]) -> list[Any]:
-    bundles = cultural_festivals_to_bundles(items, fetched_at=_now())
+async def _convert_datagokr_festival(items: Sequence[Any]) -> list[Any]:
+    bundles = await cultural_festivals_to_bundles(items, fetched_at=_now())
     return [b.model_dump(mode="json") for b in bundles]
 
 
@@ -174,7 +174,7 @@ def _kma_short_forecast_fixture() -> Sequence[_ShortFcst]:
 _FEATURE_ID_SEOUL_WEATHER = "f_global_w_seoul_demo"
 
 
-def _convert_kma_short(items: Sequence[Any]) -> list[Any]:
+async def _convert_kma_short(items: Sequence[Any]) -> list[Any]:
     values = short_forecast_to_weather_values(
         items, feature_id=_FEATURE_ID_SEOUL_WEATHER
     )
@@ -217,7 +217,7 @@ def _kma_nowcast_fixture() -> Sequence[_Nowcast]:
     ]
 
 
-def _convert_kma_nowcast(items: Sequence[Any]) -> list[Any]:
+async def _convert_kma_nowcast(items: Sequence[Any]) -> list[Any]:
     values = ultra_short_nowcast_to_weather_values(
         items, feature_id=_FEATURE_ID_SEOUL_WEATHER
     )
@@ -263,7 +263,7 @@ def _kma_ultra_short_forecast_fixture() -> Sequence[_UltraShortFcst]:
     ]
 
 
-def _convert_kma_ultra_short_forecast(items: Sequence[Any]) -> list[Any]:
+async def _convert_kma_ultra_short_forecast(items: Sequence[Any]) -> list[Any]:
     values = ultra_short_forecast_to_weather_values(
         items, feature_id=_FEATURE_ID_SEOUL_WEATHER
     )
@@ -312,8 +312,8 @@ def _opinet_stations_fixture() -> Sequence[_Station]:
     ]
 
 
-def _convert_opinet_stations(items: Sequence[Any]) -> list[Any]:
-    bundles = stations_to_bundles(items, fetched_at=_now())
+async def _convert_opinet_stations(items: Sequence[Any]) -> list[Any]:
+    bundles = await stations_to_bundles(items, fetched_at=_now())
     return [b.model_dump(mode="json") for b in bundles]
 
 
@@ -339,7 +339,7 @@ def _opinet_prices_fixture() -> Sequence[_Price]:
 _FEATURE_ID_OPINET_STATION_DEMO = "f_1156010100_p_opinet_demo"
 
 
-def _convert_opinet_prices(items: Sequence[Any]) -> list[Any]:
+async def _convert_opinet_prices(items: Sequence[Any]) -> list[Any]:
     values = prices_to_values(
         items, feature_id=_FEATURE_ID_OPINET_STATION_DEMO
     )
@@ -408,7 +408,7 @@ def _kma_weather_alerts_fixture() -> Sequence[_Alert]:
     ]
 
 
-def _convert_kma_weather_alerts(items: Sequence[Any]) -> list[Any]:
+async def _convert_kma_weather_alerts(items: Sequence[Any]) -> list[Any]:
     bundles = weather_alerts_to_notice_bundles(items, fetched_at=_now())
     return [b.model_dump(mode="json") for b in bundles]
 
@@ -455,8 +455,8 @@ def _krex_rest_areas_fixture() -> Sequence[_RestArea]:
     ]
 
 
-def _convert_krex_rest_areas(items: Sequence[Any]) -> list[Any]:
-    bundles = rest_areas_to_bundles(items, fetched_at=_now())
+async def _convert_krex_rest_areas(items: Sequence[Any]) -> list[Any]:
+    bundles = await rest_areas_to_bundles(items, fetched_at=_now())
     return [b.model_dump(mode="json") for b in bundles]
 
 
@@ -497,7 +497,7 @@ def _krex_prices_fixture() -> Sequence[_KrexPrice]:
     ]
 
 
-def _convert_krex_prices(items: Sequence[Any]) -> list[Any]:
+async def _convert_krex_prices(items: Sequence[Any]) -> list[Any]:
     values = rest_area_prices_to_values(
         items, feature_id=_FEATURE_ID_KREX_REST_AREA_DEMO
     )
@@ -535,7 +535,7 @@ def _krex_weather_fixture() -> Sequence[_KrexWeather]:
     ]
 
 
-def _convert_krex_weather(items: Sequence[Any]) -> list[Any]:
+async def _convert_krex_weather(items: Sequence[Any]) -> list[Any]:
     values = rest_area_weather_to_values(
         items, feature_id=_FEATURE_ID_KREX_REST_AREA_DEMO
     )
@@ -576,8 +576,8 @@ def _krex_traffic_notices_fixture() -> Sequence[_KrexNotice]:
     ]
 
 
-def _convert_krex_traffic_notices(items: Sequence[Any]) -> list[Any]:
-    bundles = traffic_notices_to_bundles(items, fetched_at=_now())
+async def _convert_krex_traffic_notices(items: Sequence[Any]) -> list[Any]:
+    bundles = await traffic_notices_to_bundles(items, fetched_at=_now())
     return [b.model_dump(mode="json") for b in bundles]
 
 
@@ -593,7 +593,7 @@ class EtlFixtureEntry:
     variant: str  # "FeatureBundle" / "WeatherValue" / "PriceValue"
     description: str
     build_fixture: Callable[[], Sequence[Any]]
-    convert: Callable[[Sequence[Any]], list[Any]]
+    convert: Callable[[Sequence[Any]], Awaitable[list[Any]]]
 
 
 FIXTURE_REGISTRY: Final[tuple[EtlFixtureEntry, ...]] = (
@@ -710,7 +710,7 @@ def _find_entry(provider: str, dataset: str) -> EtlFixtureEntry | None:
     return None
 
 
-def run_fixture_preview(provider: str, dataset: str) -> dict[str, Any]:
+async def run_fixture_preview(provider: str, dataset: str) -> dict[str, Any]:
     """`(provider, dataset)`의 fixture를 변환 함수에 넘기고 결과를 dict로.
 
     Returns
@@ -730,7 +730,7 @@ def run_fixture_preview(provider: str, dataset: str) -> dict[str, Any]:
             f"등록된 목록: {[(e.provider, e.dataset) for e in FIXTURE_REGISTRY]!r}"
         )
     fixture = entry.build_fixture()
-    items = entry.convert(fixture)
+    items = await entry.convert(fixture)
     return {
         "provider": entry.provider,
         "dataset": entry.dataset,

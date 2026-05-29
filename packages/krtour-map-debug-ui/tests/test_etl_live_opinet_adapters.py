@@ -120,10 +120,10 @@ def test_adapt_station_no_coords_when_missing() -> None:
 
 
 @pytest.mark.unit
-def test_station_adapter_passes_transform() -> None:
+async def test_station_adapter_passes_transform() -> None:
     x, y = _seoul_katec()
     raw = {"UNI_ID": "A1", "OS_NM": "주유소", "GIS_X_COOR": str(x), "GIS_Y_COOR": str(y)}
-    bundles = stations_to_bundles(
+    bundles = await stations_to_bundles(
         [_adapt_opinet_station(raw)],  # type: ignore[list-item]
         fetched_at=datetime.now(tz=_KST),
     )

@@ -58,10 +58,10 @@ def test_adapt_rest_area_maps_fields() -> None:
 
 
 @pytest.mark.unit
-def test_rest_area_adapter_passes_transform() -> None:
+async def test_rest_area_adapter_passes_transform() -> None:
     """adapter 결과가 실제 rest_areas_to_bundles를 통과 (Protocol 정합)."""
     raw = {"serviceAreaCode": "0010", "serviceAreaName": "안성휴게소"}
-    bundles = rest_areas_to_bundles(
+    bundles = await rest_areas_to_bundles(
         [_adapt_krex_rest_area(raw)], fetched_at=_OBS  # type: ignore[list-item]
     )
     assert len(bundles) == 1
@@ -184,9 +184,9 @@ def test_adapt_notice_uses_explicit_id() -> None:
 
 
 @pytest.mark.unit
-def test_notice_adapter_passes_transform() -> None:
+async def test_notice_adapter_passes_transform() -> None:
     raw = {"incidentType": "사고", "message": "정체", "startDate": "20260528"}
-    bundles = traffic_notices_to_bundles(
+    bundles = await traffic_notices_to_bundles(
         [_adapt_krex_notice(raw)], fetched_at=_OBS  # type: ignore[list-item]
     )
     assert len(bundles) == 1

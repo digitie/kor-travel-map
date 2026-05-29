@@ -51,6 +51,7 @@ from krtour.map.core.ids import (
 )
 from krtour.map.core.providers import normalize_provider_name
 from krtour.map.dto import (
+    Address,
     AreaDetail,
     Coordinate,
     Feature,
@@ -62,6 +63,7 @@ from krtour.map.dto import (
     SourceRecord,
     SourceRole,
 )
+from krtour.map.geocoding import ReverseGeocoder, cached_reverse_geocoder
 
 __all__ = [
     "KnpsPointRecord",
@@ -239,11 +241,12 @@ def _maki_for(category: str) -> str:
     return "marker"
 
 
-def _point_record_to_bundle(
+async def _point_record_to_bundle(
     record: KnpsPointRecord,
     spec: KnpsPlaceDatasetSpec,
     *,
     fetched_at: datetime,
+    reverse_geocoder: ReverseGeocoder | None,
 ) -> FeatureBundle:
     """KNPS point record 1건 → place ``FeatureBundle``."""
     if spec.dynamic:
@@ -261,15 +264,23 @@ def _point_record_to_bundle(
         source_entity_id=record.source_id,
         raw_payload_hash=payload_hash,
     )
+
+    # KNPS file dataset엔 법정동코드가 없다. 좌표가 있고 reverse_geocoder가 주입되면
+    # feature_id 계산 전에 await해 bjd_code를 채운다 (ADR-009 — feature_id는 bjd 의존).
+    coord = _coord(record)
+    address: Address | None = None
+    if coord is not None and reverse_geocoder is not None:
+        address = await reverse_geocoder(coord)
+    bjd_code = address.bjd_code if address is not None else None
+
     feature_id = make_feature_id(
-        bjd_code=None,  # KNPS file dataset에 법정동코드 없음 — reverse geocode 후속
+        bjd_code=bjd_code,  # 없으면 make_feature_id 내부에서 'global'
         kind=FeatureKind.PLACE.value,
         category=category,
         source_type=f"{PROVIDER_NAME}:{spec.dataset_key}",
         source_natural_key=record.source_id,
     )
 
-    coord = _coord(record)
     normalized_name = normalize_korean_text(record.name) or record.name
 
     feature = Feature(
@@ -277,6 +288,7 @@ def _point_record_to_bundle(
         kind=FeatureKind.PLACE,
         name=normalized_name,
         coord=coord,
+        address=address or Address(),
         category=category,
         marker_icon=_maki_for(category),
         marker_color=spec.marker_color,
@@ -316,11 +328,12 @@ def _point_record_to_bundle(
     )
 
 
-def knps_point_records_to_bundles(
+async def knps_point_records_to_bundles(
     records: Iterable[KnpsPointRecord],
     *,
     dataset_key: str,
     fetched_at: datetime,
+    reverse_geocoder: ReverseGeocoder | None = None,
 ) -> list[FeatureBundle]:
     """KNPS Point/place dataset의 파싱된 행들 → ``list[FeatureBundle]``.
 
@@ -334,6 +347,11 @@ def knps_point_records_to_bundles(
         campgrounds / shelters / cultural_resources).
     fetched_at
         provider 호출 시각 (KST aware, ADR-019). batch 단위 1회 결정.
+    reverse_geocoder
+        좌표 → ``Address`` async 역지오코더 (``krtour.map.geocoding.
+        ReverseGeocoder``). KNPS file dataset엔 법정동코드가 없으므로, 주입하면
+        좌표로 bjd_code를 채워 feature_id가 'global' bucket을 벗어난다 (ADR-009).
+        중복 좌표는 ``cached_reverse_geocoder``로 1회만 호출.
 
     Returns
     -------
@@ -354,8 +372,15 @@ def knps_point_records_to_bundles(
             "(docs/knps-feature-etl.md §5)."
         ) from exc
 
+    geocoder = (
+        cached_reverse_geocoder(reverse_geocoder)
+        if reverse_geocoder is not None
+        else None
+    )
     return [
-        _point_record_to_bundle(record, spec, fetched_at=fetched_at)
+        await _point_record_to_bundle(
+            record, spec, fetched_at=fetched_at, reverse_geocoder=geocoder
+        )
         for record in records
     ]
 
@@ -515,11 +540,12 @@ def _geometry_detail(
     )
 
 
-def _geometry_record_to_bundle(
+async def _geometry_record_to_bundle(
     record: KnpsGeometryRecord,
     spec: KnpsGeometryDatasetSpec,
     *,
     fetched_at: datetime,
+    reverse_geocoder: ReverseGeocoder | None,
 ) -> FeatureBundle | None:
     """KNPS geometry record 1건 → route/area ``FeatureBundle``.
 
@@ -542,8 +568,16 @@ def _geometry_record_to_bundle(
         source_entity_id=record.source_id,
         raw_payload_hash=payload_hash,
     )
+
+    # route/area도 법정동코드가 없다. centroid를 역지오코딩해 feature_id 계산 전에
+    # bjd_code/주소를 채운다 (ADR-009).
+    address: Address | None = None
+    if reverse_geocoder is not None:
+        address = await reverse_geocoder(centroid)
+    bjd_code = address.bjd_code if address is not None else None
+
     feature_id = make_feature_id(
-        bjd_code=None,
+        bjd_code=bjd_code,
         kind=spec.feature_kind.value,
         category=category,
         source_type=f"{PROVIDER_NAME}:{spec.dataset_key}",
@@ -556,6 +590,7 @@ def _geometry_record_to_bundle(
         kind=spec.feature_kind,
         name=normalized_name,
         coord=centroid,  # 선/면 대표 좌표 = centroid (ADR-012, 지도 마커용)
+        address=address or Address(),
         geom=canonical_wkt,
         category=category,
         marker_icon=spec.marker_icon,
@@ -586,11 +621,12 @@ def _geometry_record_to_bundle(
     )
 
 
-def knps_geometry_records_to_bundles(
+async def knps_geometry_records_to_bundles(
     records: Iterable[KnpsGeometryRecord],
     *,
     dataset_key: str,
     fetched_at: datetime,
+    reverse_geocoder: ReverseGeocoder | None = None,
 ) -> list[FeatureBundle]:
     """KNPS route/area dataset의 파싱된 행들(WKT geometry) → ``list[FeatureBundle]``.
 
@@ -606,6 +642,9 @@ def knps_geometry_records_to_bundles(
         park_boundaries / hazard_zones / protected_areas).
     fetched_at
         provider 호출 시각 (KST aware, ADR-019).
+    reverse_geocoder
+        좌표 → ``Address`` async 역지오코더. 주입하면 centroid를 역지오코딩해
+        bjd_code를 채워 feature_id가 'global' bucket을 벗어난다 (ADR-009).
 
     Raises
     ------
@@ -621,9 +660,16 @@ def knps_geometry_records_to_bundles(
             "knps_point_records_to_bundles."
         ) from exc
 
+    geocoder = (
+        cached_reverse_geocoder(reverse_geocoder)
+        if reverse_geocoder is not None
+        else None
+    )
     bundles: list[FeatureBundle] = []
     for record in records:
-        bundle = _geometry_record_to_bundle(record, spec, fetched_at=fetched_at)
+        bundle = await _geometry_record_to_bundle(
+            record, spec, fetched_at=fetched_at, reverse_geocoder=geocoder
+        )
         if bundle is not None:
             bundles.append(bundle)
     return bundles
@@ -750,12 +796,13 @@ def _row_natural_key(row: dict[str, Any], picked_id: str | None) -> str:
     return picked_id if picked_id is not None else f"row-{make_payload_hash(row)[:16]}"
 
 
-def knps_csv_preview_to_point_bundles(
+async def knps_csv_preview_to_point_bundles(
     preview: KnpsCsvPreview,
     *,
     dataset_key: str,
     fetched_at: datetime,
     column_map: KnpsPointColumnMap | None = None,
+    reverse_geocoder: ReverseGeocoder | None = None,
 ) -> list[FeatureBundle]:
     """knps-api ``CsvPreview`` → place ``FeatureBundle`` (Point dataset).
 
@@ -772,6 +819,8 @@ def knps_csv_preview_to_point_bundles(
         provider 호출 시각 (KST aware, ADR-019).
     column_map
         컬럼명 매핑 override (live ``CsvPreview.headers`` 확인 후 권장).
+    reverse_geocoder
+        좌표 → ``Address`` async 역지오코더 (bjd_code 보강, ADR-009).
 
     Raises
     ------
@@ -798,17 +847,21 @@ def knps_csv_preview_to_point_bundles(
                 raw=data,
             )
         )
-    return knps_point_records_to_bundles(
-        records, dataset_key=dataset_key, fetched_at=fetched_at
+    return await knps_point_records_to_bundles(
+        records,
+        dataset_key=dataset_key,
+        fetched_at=fetched_at,
+        reverse_geocoder=reverse_geocoder,
     )
 
 
-def knps_csv_preview_to_geometry_bundles(
+async def knps_csv_preview_to_geometry_bundles(
     preview: KnpsCsvPreview,
     *,
     dataset_key: str,
     fetched_at: datetime,
     column_map: KnpsGeometryColumnMap | None = None,
+    reverse_geocoder: ReverseGeocoder | None = None,
 ) -> list[FeatureBundle]:
     """knps-api ``CsvPreview`` → route/area ``FeatureBundle`` (geometry dataset).
 
@@ -839,6 +892,9 @@ def knps_csv_preview_to_geometry_bundles(
         records.append(
             _CsvGeometryRecord(source_id=sid, name=name, geom_wkt=wkt, raw=data)
         )
-    return knps_geometry_records_to_bundles(
-        records, dataset_key=dataset_key, fetched_at=fetched_at
+    return await knps_geometry_records_to_bundles(
+        records,
+        dataset_key=dataset_key,
+        fetched_at=fetched_at,
+        reverse_geocoder=reverse_geocoder,
     )

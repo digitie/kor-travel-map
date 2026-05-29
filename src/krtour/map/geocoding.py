@@ -50,6 +50,7 @@ __all__ = [
     # 비동기 콜러블 계약 (docs/address-geocoding.md §2)
     "AddressGeocoder",
     "ReverseGeocoder",
+    "cached_reverse_geocoder",
     # kraddr-geo v2 응답 structural Protocol
     "KraddrPoint",
     "KraddrRegionV2",
@@ -78,6 +79,39 @@ AddressGeocoder = Callable[[Address], Awaitable[Coordinate | None]]
 
 ReverseGeocoder = Callable[[Coordinate], Awaitable[Address | None]]
 """역지오코딩: ``Coordinate`` → ``Address | None`` (await)."""
+
+
+# -- 역지오코딩 결과 캐싱 (async) ---------------------------------------------
+#
+# provider 변환 함수는 모두 async이고 feature_id가 bjd_code에 의존(ADR-009)하므로,
+# 변환기는 feature_id 계산 전에 ``await reverse_geocoder(coord)``로 ``Address``를
+# 채운다. 같은 batch 안의 중복 좌표를 반복 호출하지 않도록 변환기는 주입받은
+# geocoder를 ``cached_reverse_geocoder``로 감싸 메모이즈한다.
+
+_DEFAULT_COORD_PRECISION = 6
+"""좌표 캐시 키 소수 자릿수 (1e-6° ≈ 0.11m — 같은 시설 묶기 충분)."""
+
+
+def cached_reverse_geocoder(
+    geocoder: ReverseGeocoder,
+    *,
+    precision: int = _DEFAULT_COORD_PRECISION,
+) -> ReverseGeocoder:
+    """``ReverseGeocoder``를 좌표(precision 자리 양자화) 기준 메모이즈한다.
+
+    반환 콜러블은 호출 수명 동안 결과(``Address | None`` 포함)를 캐싱 — batch
+    변환에서 중복 좌표의 역지오코딩 round-trip을 1회로 줄인다. ``None`` 결과도
+    캐싱하므로 실패 좌표를 재시도하지 않는다.
+    """
+    cache: dict[tuple[str, str], Address | None] = {}
+
+    async def _cached(coord: Coordinate) -> Address | None:
+        key = (f"{coord.lon:.{precision}f}", f"{coord.lat:.{precision}f}")
+        if key not in cache:
+            cache[key] = await geocoder(coord)
+        return cache[key]
+
+    return _cached
 
 
 # -- kraddr-geo v2 응답 structural Protocol -----------------------------------

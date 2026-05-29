@@ -77,9 +77,11 @@ async def test_feature_bundle_persists_and_roundtrips(
 ) -> None:
     from geoalchemy2 import WKTElement
 
-    bundle = cultural_festivals_to_bundles(
-        [_ITEM],  # type: ignore[list-item]
-        fetched_at=datetime(2026, 5, 28, 12, 0, tzinfo=_KST),
+    bundle = (
+        await cultural_festivals_to_bundles(
+            [_ITEM],  # type: ignore[list-item]
+            fetched_at=datetime(2026, 5, 28, 12, 0, tzinfo=_KST),
+        )
     )[0]
     feature, source_record, source_link = (
         bundle.feature,

@@ -88,8 +88,6 @@ from krtour.map.providers.standard_data import (
     FESTIVAL_MARKER_COLOR,
     FESTIVAL_MARKER_ICON,
     CulturalFestivalItem,
-    ReverseGeocoder,
-    ReverseGeocodeResult,
     cultural_festivals_to_bundles,
 )
 from krtour.map.providers.visitkorea import (
@@ -105,8 +103,6 @@ from krtour.map.providers.visitkorea import (
 __all__ = [
     # standard_data (PR#34, ADR-042 — datagokr 표준데이터)
     "CulturalFestivalItem",
-    "ReverseGeocoder",
-    "ReverseGeocodeResult",
     "cultural_festivals_to_bundles",
     "DATASET_KEY_CULTURAL_FESTIVALS",
     "FESTIVAL_CATEGORY",

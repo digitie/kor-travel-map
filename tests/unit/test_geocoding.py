@@ -301,3 +301,55 @@ def test_geocoder_returns_none_on_empty_response() -> None:
 def test_reverse_to_address_handles_all_non_ok(bad_status: str) -> None:
     resp = _Response(status=bad_status, candidates=(_Candidate(),))
     assert reverse_v2_to_address(resp) is None
+
+
+# -- cached_reverse_geocoder --------------------------------------------------
+
+
+def test_cached_reverse_geocoder_dedupes_by_coord() -> None:
+    from krtour.map.geocoding import cached_reverse_geocoder
+
+    calls: list[tuple[Decimal, Decimal]] = []
+
+    async def _rg(coord: Coordinate) -> Address | None:
+        calls.append((coord.lon, coord.lat))
+        return Address(bjd_code="1156010100")
+
+    cached = cached_reverse_geocoder(_rg)
+
+    async def _run() -> None:
+        c1 = Coordinate(lon=Decimal("127.0000001"), lat=Decimal("37.5000001"))
+        c2 = Coordinate(lon=Decimal("127.0000002"), lat=Decimal("37.5000002"))  # 6자리 동일
+        c3 = Coordinate(lon=Decimal("128.0"), lat=Decimal("38.0"))
+        a1 = await cached(c1)
+        a2 = await cached(c2)
+        a3 = await cached(c3)
+        assert a1 is not None
+        assert a1.bjd_code == "1156010100"
+        assert a2 is a1  # 같은 양자화 키 → 캐시 재사용 (동일 객체)
+        assert a3 is not None
+
+    asyncio.run(_run())
+    # 6자리 양자화로 c1==c2 → 호출 2회 (c1/c2 묶임, c3 별도).
+    assert len(calls) == 2
+
+
+def test_cached_reverse_geocoder_caches_none() -> None:
+    from krtour.map.geocoding import cached_reverse_geocoder
+
+    calls = 0
+
+    async def _rg(coord: Coordinate) -> Address | None:
+        nonlocal calls
+        calls += 1
+        return None
+
+    cached = cached_reverse_geocoder(_rg)
+
+    async def _run() -> None:
+        c = Coordinate(lon=Decimal("127.0"), lat=Decimal("37.5"))
+        assert await cached(c) is None
+        assert await cached(c) is None  # None도 캐싱 — 재시도 안 함
+
+    asyncio.run(_run())
+    assert calls == 1
