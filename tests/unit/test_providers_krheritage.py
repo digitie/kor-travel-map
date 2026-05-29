@@ -52,6 +52,7 @@ class _Item:
     designated_date: date | None = None
     manager: str | None = None
     geom_wkt: str | None = None
+    image_url: str | None = None
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -68,6 +69,7 @@ class _Event:
     location_text: str | None = None
     longitude: Decimal | float | None = None
     latitude: Decimal | float | None = None
+    main_image: str | None = None
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -285,3 +287,43 @@ async def test_provider_name_constant() -> None:
     item = _Item("11", "1", "11", "x")
     [bundle] = await heritage_items_to_bundles([item], fetched_at=_FETCHED)
     assert bundle.source_record.provider == PROVIDER_NAME
+
+
+# -- file_sources (미디어, docs/feature-files-rustfs.md §2.2) ------------------
+
+
+async def test_heritage_image_url_becomes_file_source() -> None:
+    item = _Item(
+        "11", "1", "11", "통도사 대웅전",
+        image_url="https://www.khs.go.kr/img/heritage/1234.jpg",
+    )
+    [bundle] = await heritage_items_to_bundles([item], fetched_at=_FETCHED)
+    assert len(bundle.file_sources) == 1
+    fs = bundle.file_sources[0]
+    assert fs.source_url == "https://www.khs.go.kr/img/heritage/1234.jpg"
+    assert fs.role == "primary"
+    assert fs.file_type == "image"
+    assert fs.feature_id == bundle.feature.feature_id  # FK 정합
+    assert fs.source_record_key == bundle.source_record.source_record_key
+    assert fs.provider == PROVIDER_NAME
+    assert fs.alt_text == "통도사 대웅전"
+
+
+async def test_heritage_no_image_url_empty_file_sources() -> None:
+    [bundle] = await heritage_items_to_bundles(
+        [_Item("11", "1", "11", "이미지 없음")], fetched_at=_FETCHED
+    )
+    assert bundle.file_sources == []
+
+
+async def test_event_main_image_becomes_file_source() -> None:
+    event = _Event(
+        sn="EVT-IMG-1",
+        title="무형유산 공연",
+        main_image="https://www.khs.go.kr/img/event/9.jpg",
+    )
+    [bundle] = await heritage_events_to_bundles([event], fetched_at=_FETCHED)
+    assert len(bundle.file_sources) == 1
+    assert bundle.file_sources[0].source_url == "https://www.khs.go.kr/img/event/9.jpg"
+    assert bundle.file_sources[0].dataset_key == DATASET_KEY_EVENT
+    assert bundle.file_sources[0].feature_id == bundle.feature.feature_id
