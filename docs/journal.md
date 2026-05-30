@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-31 (antigravity) — agent별 MCP 서버 설정 파일 추가 및 형상관리
+
+**작업**: 사용자 지시에 따라 `claude code`, `gpt codex`, `antigravity` 각 에이전트의 MCP 설정 파일을 작성 및 형상관리(git)에 추가하고, PR 생성 및 메인 브랜치 머지까지 성공적으로 수행함.
+
+- **산출물**:
+  - `claude.json` (프로젝트 루트): Playwright 및 Sequential Thinking MCP 서버 설정 등록.
+  - `antigravity.json` (프로젝트 루트): Playwright 및 Sequential Thinking MCP 서버 설정 등록.
+  - `.codex/config.toml` (프로젝트 루트): Codegraph, Playwright 및 Sequential Thinking MCP 서버 설정 등록.
+- **배포 및 통합**:
+  - `chore/agent-mcp-configs` 브랜치 생성 및 형상관리 추가.
+  - GitHub `gh` CLI 도구를 사용하여 PR#105 생성.
+  - PR 승인 및 `main` 브랜치로의 squash merge 완료.
+
 ## 2026-05-30 (claude) — Sprint 3 종료 회고 + Sprint 4 진입 준비 (4a/4b 분할 채택)
 
 **작업**: 사용자 지시 "스프린트4 진입 전 단계까지 진행" — Sprint 3 종료 게이트
