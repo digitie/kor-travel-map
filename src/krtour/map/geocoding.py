@@ -305,7 +305,13 @@ def reverse_response_to_address(
     road_text = next((it.text for it in items if it.type == _TYPE_ROAD), None)
     parcel_text = next((it.text for it in items if it.type == _TYPE_PARCEL), None)
 
-    bjd_code = normalize_bjd_code(struct.level4LC)
+    # `normalize_bjd_code`는 비-10자리 입력에 `ValueError` raise — kraddr-geo가
+    # 어쩌다 비정형 `level4LC`(예: 짧은 임시 코드)를 돌려줘도 reverse 전체가
+    # 깨지지 않도록 graceful drop (None 처리, Address validator도 None 허용).
+    try:
+        bjd_code = normalize_bjd_code(struct.level4LC)
+    except ValueError:
+        bjd_code = None
     return Address(
         road=normalize_korean_text(road_text or struct.level5),
         legal=normalize_korean_text(parcel_text),

@@ -221,6 +221,27 @@ def test_reverse_invalid_codes_dropped_not_raised() -> None:
     assert addr.admin_dong_code is None
 
 
+def test_reverse_bjd_value_error_is_caught() -> None:
+    """`normalize_bjd_code`는 비-10자리 입력에 ValueError raise — 이 raise가
+    `reverse_response_to_address`까지 새지 않도록 보장(graceful drop, PR#103
+    edge 회귀)."""
+    resp = _RevResp(
+        result=(
+            _RevItem(
+                type="parcel",
+                text="x",
+                # 숫자지만 비-10자리 — normalize_bjd_code가 ValueError raise.
+                structure=_Struct(level4LC="1234"),
+            ),
+        ),
+    )
+    addr = reverse_response_to_address(resp)
+    assert addr is not None
+    assert addr.bjd_code is None
+    assert addr.sigungu_code is None
+    assert addr.sido_code is None
+
+
 @pytest.mark.parametrize("bad_status", ["NOT_FOUND", "ERROR"])
 def test_reverse_handles_all_non_ok(bad_status: str) -> None:
     resp = _RevResp(
