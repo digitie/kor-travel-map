@@ -407,6 +407,296 @@ def test_rest_geocoder_returns_none_on_not_found() -> None:
     asyncio.run(_run())
 
 
+# -- KraddrGeoRestClient 세부 동작 (K 영역 회귀) -------------------------------
+#
+# base_path/쿼리 직렬화/예외 전파 등 client 내부 동작은 통합 e2e만으로는
+# 회귀 검출이 어렵다 — httpx.MockTransport로 wire-level 동작을 고정한다.
+
+
+def test_rest_client_base_path_trailing_slash_stripped() -> None:
+    """base_path="/v1/" (끝 슬래시) → 내부에서 정규화 후 "/v1/address/..."."""
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        return httpx.Response(200, json={"status": "OK", "result": []})
+
+    async def _run() -> None:
+        async with _mock_client(handler) as http:
+            client = KraddrGeoRestClient(http, base_path="/v1/")
+            await client.reverse(127.0, 37.0)
+            await client.geocode("서울특별시 중구 세종대로 110")
+
+    asyncio.run(_run())
+    # 슬래시 중복 없음 — "/v1//address/..." 되면 일부 ASGI는 404.
+    assert seen == ["/v1/address/reverse", "/v1/address/geocode"]
+
+
+def test_rest_client_custom_base_path() -> None:
+    """base_path를 "/api/v2"로 — 운영 reverse proxy 경로 prefix 시나리오."""
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        return httpx.Response(200, json={"status": "OK", "result": []})
+
+    async def _run() -> None:
+        async with _mock_client(handler) as http:
+            client = KraddrGeoRestClient(http, base_path="/api/v2")
+            await client.reverse(127.0, 37.0)
+
+    asyncio.run(_run())
+    assert seen == ["/api/v2/address/reverse"]
+
+
+def test_rest_client_reverse_radius_m_none_omits_param() -> None:
+    """radius_m=None (기본) → 쿼리에서 키 자체 누락 — upstream 기본값 따름."""
+    seen: list[httpx.QueryParams] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.params)
+        return httpx.Response(200, json={"status": "OK", "result": []})
+
+    async def _run() -> None:
+        async with _mock_client(handler) as http:
+            client = KraddrGeoRestClient(http)
+            await client.reverse(127.0, 37.0)  # radius_m 미지정.
+
+    asyncio.run(_run())
+    assert "radius_m" not in seen[0]
+
+
+def test_rest_client_reverse_zipcode_default_true_lower() -> None:
+    """zipcode=True (기본) → "true" (소문자).
+
+    httpx는 bool을 "True"로 직렬화 — `str().lower()` 보장이 필요.
+    """
+    seen: list[httpx.QueryParams] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.params)
+        return httpx.Response(200, json={"status": "OK", "result": []})
+
+    async def _run() -> None:
+        async with _mock_client(handler) as http:
+            client = KraddrGeoRestClient(http)
+            await client.reverse(127.0, 37.0)
+
+    asyncio.run(_run())
+    assert seen[0].get("zipcode") == "true"
+
+
+def test_rest_client_reverse_zipcode_false_lower() -> None:
+    """zipcode=False → "false"."""
+    seen: list[httpx.QueryParams] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.params)
+        return httpx.Response(200, json={"status": "OK", "result": []})
+
+    async def _run() -> None:
+        async with _mock_client(handler) as http:
+            client = KraddrGeoRestClient(http)
+            await client.reverse(127.0, 37.0, zipcode=False)
+
+    asyncio.run(_run())
+    assert seen[0].get("zipcode") == "false"
+
+
+@pytest.mark.parametrize("type_", ["both", "road", "parcel"])
+def test_rest_client_reverse_type_param(type_: str) -> None:
+    """type_ 인자가 쿼리 `type`로 그대로 전달."""
+    seen: list[httpx.QueryParams] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.params)
+        return httpx.Response(200, json={"status": "OK", "result": []})
+
+    async def _run() -> None:
+        async with _mock_client(handler) as http:
+            client = KraddrGeoRestClient(http)
+            await client.reverse(127.0, 37.0, type_=type_)  # type: ignore[arg-type]
+
+    asyncio.run(_run())
+    assert seen[0].get("type") == type_
+
+
+def test_rest_client_geocode_refine_default_true_lower() -> None:
+    """refine=True (기본) → "true"."""
+    seen: list[httpx.QueryParams] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.params)
+        return httpx.Response(200, json={"status": "OK", "result": {"point": {"x": 1, "y": 1}}})
+
+    async def _run() -> None:
+        async with _mock_client(handler) as http:
+            client = KraddrGeoRestClient(http)
+            await client.geocode("addr")
+
+    asyncio.run(_run())
+    assert seen[0].get("refine") == "true"
+
+
+def test_rest_client_geocode_refine_false_lower() -> None:
+    """refine=False → "false"."""
+    seen: list[httpx.QueryParams] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.params)
+        return httpx.Response(200, json={"status": "OK", "result": {"point": {"x": 1, "y": 1}}})
+
+    async def _run() -> None:
+        async with _mock_client(handler) as http:
+            client = KraddrGeoRestClient(http)
+            await client.geocode("addr", refine=False)
+
+    asyncio.run(_run())
+    assert seen[0].get("refine") == "false"
+
+
+@pytest.mark.parametrize("fallback", ["off", "local_only", "api"])
+def test_rest_client_geocode_fallback_passes_through(fallback: str) -> None:
+    """fallback 인자가 쿼리 `fallback`로 그대로 전달."""
+    seen: list[httpx.QueryParams] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.params)
+        return httpx.Response(200, json={"status": "OK", "result": {"point": {"x": 1, "y": 1}}})
+
+    async def _run() -> None:
+        async with _mock_client(handler) as http:
+            client = KraddrGeoRestClient(http)
+            await client.geocode("addr", fallback=fallback)  # type: ignore[arg-type]
+
+    asyncio.run(_run())
+    assert seen[0].get("fallback") == fallback
+
+
+def test_rest_client_reverse_raises_on_http_500() -> None:
+    """upstream 500 → httpx.HTTPStatusError 전파 (raise_for_status). caller가 retry/skip 책임."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"detail": "upstream broken"})
+
+    async def _run() -> None:
+        async with _mock_client(handler) as http:
+            client = KraddrGeoRestClient(http)
+            with pytest.raises(httpx.HTTPStatusError):
+                await client.reverse(127.0, 37.0)
+
+    asyncio.run(_run())
+
+
+def test_rest_client_geocode_raises_on_http_502() -> None:
+    """upstream 502 (bad gateway) → 전파."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(502)
+
+    async def _run() -> None:
+        async with _mock_client(handler) as http:
+            client = KraddrGeoRestClient(http)
+            with pytest.raises(httpx.HTTPStatusError):
+                await client.geocode("addr")
+
+    asyncio.run(_run())
+
+
+def test_kraddr_geo_reverse_geocoder_max_distance_filters() -> None:
+    """팩토리 인자 `max_distance_m`가 변환 함수에 그대로 전달돼 멀리 있는 결과 drop."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "status": "OK",
+                "result": [
+                    {
+                        "type": "parcel",
+                        "text": "멀리 떨어진 좌표",
+                        "structure": {"level4LC": "1156010100"},
+                        "distance_m": 800.0,
+                    }
+                ],
+            },
+        )
+
+    async def _run() -> None:
+        async with _mock_client(handler) as http:
+            client = KraddrGeoRestClient(http)
+            # 100m 안쪽만 받아들임 — 800m 결과는 drop.
+            reverse = kraddr_geo_reverse_geocoder(client, max_distance_m=100.0)
+            assert await reverse(Coordinate(lon=Decimal("127"), lat=Decimal("37"))) is None
+            # 없으면 1000m로 — 받아들임.
+            reverse_relaxed = kraddr_geo_reverse_geocoder(client, max_distance_m=1000.0)
+            addr = await reverse_relaxed(
+                Coordinate(lon=Decimal("127"), lat=Decimal("37"))
+            )
+            assert addr is not None
+            assert addr.bjd_code == "1156010100"
+
+    asyncio.run(_run())
+
+
+def test_kraddr_geo_address_geocoder_min_confidence_via_wrapper() -> None:
+    """팩토리 인자 `min_confidence`가 변환 함수에 그대로 전달 — 신뢰도 낮은 결과 drop."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "status": "OK",
+                "result": {"point": {"x": 127.0, "y": 37.0}},
+                "x_extension": {"confidence": 0.3},
+            },
+        )
+
+    async def _run() -> None:
+        async with _mock_client(handler) as http:
+            client = KraddrGeoRestClient(http)
+            strict = kraddr_geo_address_geocoder(client, min_confidence=0.8)
+            assert await strict(Address(road="아무 도로 1")) is None
+            relaxed = kraddr_geo_address_geocoder(client, min_confidence=0.1)
+            coord = await relaxed(Address(road="아무 도로 1"))
+            assert coord is not None
+            assert coord.lon == Decimal("127.0")
+
+    asyncio.run(_run())
+
+
+def test_kraddr_geo_reverse_geocoder_type_road_passed() -> None:
+    """팩토리 인자 `type_="road"`가 client.reverse `type` 쿼리로 전달."""
+    seen: list[httpx.QueryParams] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.params)
+        return httpx.Response(200, json={"status": "OK", "result": []})
+
+    async def _run() -> None:
+        async with _mock_client(handler) as http:
+            client = KraddrGeoRestClient(http)
+            reverse = kraddr_geo_reverse_geocoder(client, type_="road")
+            await reverse(Coordinate(lon=Decimal("127"), lat=Decimal("37")))
+
+    asyncio.run(_run())
+    assert seen[0].get("type") == "road"
+
+
+def test_kraddr_geo_address_geocoder_fallback_off_passed() -> None:
+    """팩토리 인자 `fallback="off"`가 client.geocode `fallback` 쿼리로 전달."""
+    seen: list[httpx.QueryParams] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.params)
+        return httpx.Response(200, json={"status": "OK", "result": {"point": {"x": 1, "y": 1}}})
+
+    async def _run() -> None:
+        async with _mock_client(handler) as http:
+            client = KraddrGeoRestClient(http)
+            geocode = kraddr_geo_address_geocoder(client, fallback="off")
+            await geocode(Address(road="아무 도로 1"))
+
+    asyncio.run(_run())
+    assert seen[0].get("fallback") == "off"
+
+
 # -- cached_reverse_geocoder --------------------------------------------------
 
 
