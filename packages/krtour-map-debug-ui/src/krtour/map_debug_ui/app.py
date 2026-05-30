@@ -27,6 +27,7 @@ from krtour.map_debug_ui import __version__
 from krtour.map_debug_ui.routers import (
     etl_router,
     features_router,
+    geocoding_router,
     health_router,
     version_router,
 )
@@ -86,6 +87,7 @@ def create_app(settings: DebugUiSettings | None = None) -> FastAPI:
         application.include_router(health_router)
         application.include_router(version_router)
         application.include_router(etl_router)
+        application.include_router(geocoding_router)
 
     if settings.features_routes_enabled:
         application.include_router(features_router)

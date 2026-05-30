@@ -13,7 +13,14 @@ from __future__ import annotations
 
 from krtour.map_debug_ui.routers.etl import router as etl_router
 from krtour.map_debug_ui.routers.features import router as features_router
+from krtour.map_debug_ui.routers.geocoding import router as geocoding_router
 from krtour.map_debug_ui.routers.health import router as health_router
 from krtour.map_debug_ui.routers.version import router as version_router
 
-__all__ = ["health_router", "version_router", "etl_router", "features_router"]
+__all__ = [
+    "health_router",
+    "version_router",
+    "etl_router",
+    "features_router",
+    "geocoding_router",
+]

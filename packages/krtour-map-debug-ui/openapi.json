@@ -1,6 +1,181 @@
 {
   "components": {
     "schemas": {
+      "Address": {
+        "additionalProperties": false,
+        "description": "한국 주소 + 행정구역 코드 통합 DTO.\n\nprovider raw에서 채워지지 않는 필드는 ``None``으로 남긴다. 정규화/파싱은\n호출자 또는 ``krtour.map.core.address``의 helper(`normalize_bjd_code` 등)에서.\n\n예시 — 표준데이터 1차 source:\n    >>> Address(\n    ...     road=\"서울특별시 영등포구 여의공원로 120\",\n    ...     legal=\"서울특별시 영등포구 여의도동 8\",\n    ...     bjd_code=\"1156010100\",\n    ...     sigungu_code=\"11560\",\n    ...     sido_code=\"11\",\n    ... )\n    Address(...)\n\n예시 — 좌표만 있고 reverse geocoding 미적용:\n    >>> Address()  # 모든 필드 None — 호출자가 후속 enrichment에서 채움\n    Address(...)",
+        "properties": {
+          "admin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "행정동 주소.",
+            "title": "Admin"
+          },
+          "admin_dong_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "행정동 코드 10자리. 행정구역 변경 시 갱신 — 법정동과 다름.",
+            "title": "Admin Dong Code"
+          },
+          "bjd_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "법정동 코드 10자리 (시도2 + 시군구3 + 읍면동3 + 리2). reverse geocoding 결과 또는 provider 원천에서 채워짐.",
+            "title": "Bjd Code"
+          },
+          "legal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "법정동 주소 (지번 포함).",
+            "title": "Legal"
+          },
+          "road": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "도로명 주소 (정규화된 형태).",
+            "title": "Road"
+          },
+          "road_address_management_no": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "도로명주소 관리번호 (행정안전부 발급 25자리 식별자). 도로명주소 변경 이력 추적용.",
+            "title": "Road Address Management No"
+          },
+          "road_name_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "도로명 코드 (PNU 기반 7~12자리 — provider별 길이 다양). 도로명주소 표준 매핑 시 사용.",
+            "title": "Road Name Code"
+          },
+          "sido_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "시·도 코드 2자리.",
+            "title": "Sido Code"
+          },
+          "sido_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "시·도 한글 명 (예: '서울특별시'). 검색/UI 표시용.",
+            "title": "Sido Name"
+          },
+          "sigungu_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "시·군·구 코드 5자리 (시도2 + 시군구3). `infra.models` 별도 칼럼.",
+            "title": "Sigungu Code"
+          },
+          "sigungu_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "시·군·구 한글 명 (예: '영등포구'). 검색/UI 표시용.",
+            "title": "Sigungu Name"
+          },
+          "zipcode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "신우편번호 5자리 (구 우편번호 6자리는 폐기).",
+            "title": "Zipcode"
+          }
+        },
+        "title": "Address",
+        "type": "object"
+      },
+      "Coordinate": {
+        "description": "WGS84 좌표 (lon, lat).\n\n저장/API 직렬화는 ``(lon, lat)`` 순서 (SKILL.md DO NOT #5). 본 모델은\nfield alias 없이 명시 키 ``lon``/``lat`` 사용. 한국 경계 내인지 자동\n검증 — 범위를 벗어나면 ``ValidationError``.\n\n예시:\n    >>> Coordinate(lon=127.0, lat=37.5)\n    Coordinate(lon=Decimal('127.0'), lat=Decimal('37.5'))\n    >>> Coordinate(lon=200.0, lat=37.5)  # 한국 경계 밖\n    Traceback (most recent call last):\n    ...\n    pydantic_core._pydantic_core.ValidationError: ...",
+        "properties": {
+          "lat": {
+            "description": "위도 (latitude, WGS84). 한국 본토 범위 [33.0, 39.5].",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Lat",
+            "type": "string"
+          },
+          "lon": {
+            "description": "경도 (longitude, WGS84). 한국 본토 범위 [124.0, 132.0].",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Lon",
+            "type": "string"
+          }
+        },
+        "required": [
+          "lon",
+          "lat"
+        ],
+        "title": "Coordinate",
+        "type": "object"
+      },
       "EtlPreviewResponse": {
         "additionalProperties": false,
         "description": "`/debug/etl/{provider}/{dataset}/preview` 응답.",
@@ -326,6 +501,70 @@
         "title": "FeaturesInBboxResponse",
         "type": "object"
       },
+      "GeocodeResponseSchema": {
+        "additionalProperties": false,
+        "description": "매핑된 Coordinate (`geocode_response_to_coordinate` 결과) — None이면 404.",
+        "properties": {
+          "coord": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Coordinate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "coord"
+        ],
+        "title": "GeocodeResponseSchema",
+        "type": "object"
+      },
+      "GeocodingHealthResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "base_url": {
+            "title": "Base Url",
+            "type": "string"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "reachable": {
+            "title": "Reachable",
+            "type": "boolean"
+          },
+          "upstream_status": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Upstream Status"
+          }
+        },
+        "required": [
+          "base_url",
+          "reachable",
+          "upstream_status",
+          "detail"
+        ],
+        "title": "GeocodingHealthResponse",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -400,6 +639,27 @@
           "providers"
         ],
         "title": "ProvidersResponse",
+        "type": "object"
+      },
+      "ReverseResponseSchema": {
+        "additionalProperties": false,
+        "description": "매핑된 Address (`reverse_response_to_address` 결과) — None이면 404.",
+        "properties": {
+          "address": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Address"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "address"
+        ],
+        "title": "ReverseResponseSchema",
         "type": "object"
       },
       "ValidationError": {
@@ -668,6 +928,398 @@
         "tags": [
           "debug",
           "etl"
+        ]
+      }
+    },
+    "/debug/geocoding/geocode": {
+      "get": {
+        "operationId": "geocode_debug_geocoding_geocode_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "address",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Address",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "default": "road",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "refine",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Refine",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "fallback",
+            "required": false,
+            "schema": {
+              "default": "local_only",
+              "title": "Fallback",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_confidence",
+            "required": false,
+            "schema": {
+              "default": 0.0,
+              "maximum": 1.0,
+              "minimum": 0,
+              "title": "Min Confidence",
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeocodeResponseSchema"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "주소 → 매핑된 Coordinate (geocoding)",
+        "tags": [
+          "geocoding"
+        ]
+      }
+    },
+    "/debug/geocoding/geocode/raw": {
+      "get": {
+        "operationId": "geocode_raw_debug_geocoding_geocode_raw_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "address",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Address",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "default": "road",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "refine",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Refine",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "fallback",
+            "required": false,
+            "schema": {
+              "default": "local_only",
+              "title": "Fallback",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Geocode Raw Debug Geocoding Geocode Raw Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "주소 → kraddr-geo 원본 응답 그대로 (디버그)",
+        "tags": [
+          "geocoding"
+        ]
+      }
+    },
+    "/debug/geocoding/health": {
+      "get": {
+        "description": "``base_url + /v1/healthz`` 호출 결과 요약.",
+        "operationId": "health_debug_geocoding_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeocodingHealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "kraddr-geo upstream 도달성 확인",
+        "tags": [
+          "geocoding"
+        ]
+      }
+    },
+    "/debug/geocoding/reverse": {
+      "get": {
+        "operationId": "reverse_geocode_debug_geocoding_reverse_get",
+        "parameters": [
+          {
+            "description": "경도 (WGS84).",
+            "in": "query",
+            "name": "lon",
+            "required": true,
+            "schema": {
+              "description": "경도 (WGS84).",
+              "title": "Lon",
+              "type": "number"
+            }
+          },
+          {
+            "description": "위도 (WGS84).",
+            "in": "query",
+            "name": "lat",
+            "required": true,
+            "schema": {
+              "description": "위도 (WGS84).",
+              "title": "Lat",
+              "type": "number"
+            }
+          },
+          {
+            "description": "road/parcel/both — kraddr-geo 인자 그대로.",
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "default": "both",
+              "description": "road/parcel/both — kraddr-geo 인자 그대로.",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          {
+            "description": "우편번호 포함 여부.",
+            "in": "query",
+            "name": "zipcode",
+            "required": false,
+            "schema": {
+              "default": true,
+              "description": "우편번호 포함 여부.",
+              "title": "Zipcode",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "radius_m",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 2000,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Radius M"
+            }
+          },
+          {
+            "description": "결과 필터 — 본 lib 변환기 옵션.",
+            "in": "query",
+            "name": "max_distance_m",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "결과 필터 — 본 lib 변환기 옵션.",
+              "title": "Max Distance M"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReverseResponseSchema"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "좌표 → 매핑된 Address (reverse geocoding)",
+        "tags": [
+          "geocoding"
+        ]
+      }
+    },
+    "/debug/geocoding/reverse/raw": {
+      "get": {
+        "description": "``KraddrGeoRestClient`` 사용하지 않고 raw HTTP 그대로 — 디버그용.",
+        "operationId": "reverse_raw_debug_geocoding_reverse_raw_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "lon",
+            "required": true,
+            "schema": {
+              "title": "Lon",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "lat",
+            "required": true,
+            "schema": {
+              "title": "Lat",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "default": "both",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "zipcode",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Zipcode",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "radius_m",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 2000,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Radius M"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reverse Raw Debug Geocoding Reverse Raw Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "좌표 → kraddr-geo 원본 응답 그대로 (디버그)",
+        "tags": [
+          "geocoding"
         ]
       }
     },
