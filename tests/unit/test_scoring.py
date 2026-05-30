@@ -269,3 +269,109 @@ def test_decision_constants_unique() -> None:
         DedupDecision.MANUAL_REVIEW,
         DedupDecision.KEEP_SEPARATE,
     }) == 3
+
+
+# -- normalize_kr_place_name 엣지 회귀 (I 영역 확장) --------------------------
+#
+# provider raw 장소명은 한국어 + 전각 + 영문 + 한자 + 괄호 + 숫자가 자주
+# 혼재. 한 두 패턴이라도 빠지면 dedup name_similarity가 false-negative.
+
+
+@pytest.mark.unit
+def test_normalize_fullwidth_ascii_to_halfwidth() -> None:
+    """NFKC: 전각 영문/숫자 → 반각. 동일 가게의 영문 표기 흡수."""
+    # "ＳＴＡＲＢＵＣＫＳ" (전각) → "starbucks" (반각 + lower)
+    assert normalize_kr_place_name("ＳＴＡＲＢＵＣＫＳ") == "starbucks"
+
+
+@pytest.mark.unit
+def test_normalize_fullwidth_digits_normalized() -> None:
+    """전각 숫자 (０-９) → 반각."""
+    # "지점１" → "지점1"
+    assert normalize_kr_place_name("지점１") == "지점1"
+    assert normalize_kr_place_name("１２３") == "123"
+
+
+@pytest.mark.unit
+def test_normalize_korean_english_mix() -> None:
+    """한국어 + 영문 mix — 공백 제거 + 소문자."""
+    assert normalize_kr_place_name("서울 Hotel 신라") == "서울hotel신라"
+    assert normalize_kr_place_name("SK 주유소") == "sk주유소"
+
+
+@pytest.mark.unit
+def test_normalize_multiple_parens() -> None:
+    """괄호가 여러 개 — 모두 제거."""
+    assert normalize_kr_place_name("장소(분점)(서울)") == "장소"
+    assert normalize_kr_place_name("[a]장소[b]") == "장소"
+
+
+@pytest.mark.unit
+def test_normalize_mixed_paren_types() -> None:
+    """소괄호 + 대괄호 mix."""
+    assert normalize_kr_place_name("장소(주)[지점1]") == "장소"
+
+
+@pytest.mark.unit
+def test_normalize_newline_tab_whitespace_removed() -> None:
+    """탭/newline도 공백 — 전부 제거."""
+    assert normalize_kr_place_name("서울\n시청") == "서울시청"
+    assert normalize_kr_place_name("서울\t시청") == "서울시청"
+    assert normalize_kr_place_name("서울\r\n시청") == "서울시청"
+
+
+@pytest.mark.unit
+def test_normalize_only_whitespace_returns_empty() -> None:
+    """공백만 → 빈 문자열."""
+    assert normalize_kr_place_name("   ") == ""
+    assert normalize_kr_place_name("\t\n  ") == ""
+
+
+@pytest.mark.unit
+def test_normalize_hanja_preserved_via_nfkc() -> None:
+    """한자(漢字)는 NFKC 후 그대로 보존 — 같은 한자 → name_sim 1.0."""
+    # NFKC는 한자 그대로 둠 (호환 분해 대상 아님).
+    norm = normalize_kr_place_name("景福宮")
+    assert norm == "景福宮"
+    # 동일 입력 → name_sim 1.0.
+    assert name_similarity("景福宮", "景福宮") == 1.0
+
+
+@pytest.mark.unit
+def test_normalize_punctuation_preserved() -> None:
+    """점/콤마 등 일반 punct는 공백·괄호와 달리 보존 — 식별성 유지."""
+    # 점은 안 지움 (단, NFKC + lower만 적용).
+    assert normalize_kr_place_name("S.K.주유소") == "s.k.주유소"
+    # 콤마.
+    assert "," in normalize_kr_place_name("a,b")
+
+
+@pytest.mark.unit
+def test_normalize_unbalanced_paren_still_handled() -> None:
+    """짝 안 맞는 괄호 — 정규식은 균형 잡힌 쌍만 제거 — 짝 없으면 그대로 둠."""
+    # ")만 있는 경우 — 패턴 매치 안 됨.
+    assert normalize_kr_place_name("장소)") == "장소)"
+
+
+@pytest.mark.unit
+def test_name_sim_korean_english_normalized() -> None:
+    """전각/반각 영문 mix — 정규화 후 동일이면 1.0."""
+    # 같은 가게의 다른 표기.
+    assert name_similarity("서울Hotel", "서울ＨＯＴＥＬ") == pytest.approx(1.0, abs=0.01)
+
+
+@pytest.mark.unit
+def test_name_sim_jaro_winkler_partial_overlap() -> None:
+    """jaro_winkler는 부분 일치도 점수 — "불국사" vs "불국사터" 같은 변형."""
+    sim = name_similarity("불국사", "불국사터")
+    # 완전 일치 아니지만 prefix 같아 jaro_winkler 보너스로 높은 점수.
+    assert 0.85 < sim < 1.0
+
+
+@pytest.mark.unit
+def test_name_sim_one_empty_after_normalize_zero() -> None:
+    """정규화 후 한쪽이 비면 0."""
+    # 괄호만 — 정규화 후 빈 문자열.
+    assert name_similarity("(주)", "서울시청") == 0.0
+    # 공백만 — 정규화 후 빈 문자열.
+    assert name_similarity("   ", "서울시청") == 0.0
