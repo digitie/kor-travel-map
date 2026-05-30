@@ -1,0 +1,13 @@
+[mcp_servers.codegraph]
+enabled = true
+command = "codegraph"
+args = ["serve", "--mcp"]
+
+[mcp_servers.playwright]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-playwright"]
+env = { PLAYWRIGHT_HEADLESS = "true" }
+
+[mcp_servers.sequential-thinking]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-sequential-thinking"]
