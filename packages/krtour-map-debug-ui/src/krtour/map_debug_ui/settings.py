@@ -76,6 +76,18 @@ class DebugUiSettings(BaseSettings):
         ),
     )
 
+    # ── kraddr-geo REST API v2 (ADR-006/044) ────────────────────────────
+    kraddr_geo_base_url: str | None = Field(
+        default=None,
+        description=(
+            "kraddr-geo REST 서비스 base URL. ``KraddrGeoRestClient``가 GET "
+            "``{base}/v1/address/reverse``/``geocode``를 호출. 예: "
+            "``http://kraddr-geo:8080`` 또는 (kraddr-geo-ui proxy 경유) "
+            "``http://127.0.0.1:13088/api/proxy``. ``None``이면 ``/debug/geocoding/`` "
+            "라우터는 503 응답."
+        ),
+    )
+
     # ── Provider API keys (PR#47, source=live 활성화용) ──────────────────
     #
     # 각 provider repo의 `.env`에 박힌 이름과 동일 (prefix `KRTOUR_MAP_DEBUG_UI_`

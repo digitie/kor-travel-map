@@ -169,6 +169,7 @@ markers = [
   "e2e: 디버그 API + integration DB",
   "slow: 느린 테스트 (CI nightly only)",
   "fixture_replay: replay fixture 회귀",
+  "live: 외부 라이브 서비스 호출(예: kraddr-geo). 도달 불가 시 자동 skip.",
 ]
 filterwarnings = [
   "error",
