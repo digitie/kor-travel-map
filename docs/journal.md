@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-31 (antigravity) — 개발 정책 NTFS 메인레포 전환 및 에이전트 워크트리 재설정
+
+**작업**: 개발 및 형상관리의 중심을 WSL ext4에서 NTFS(`F:\dev\python-krtour-map`)로 전면 이전함. WSL ext4는 가상/컨테이너 가속 테스트(PostGIS testcontainers) 실행을 위한 **샌드박스**로 역할을 재규정함. 이에 따라 에이전트별 worktree를 NTFS상에 신설 및 프리픽스를 `python-krtour-map-`으로 개정하고 로컬 키값(`.env`)을 동기화 완료함. 정책 관련 문서 3종을 전면 정비하여 PR#110 머지 완료.
+
+- **산출물**:
+  - `python-krtour-map-codex` (worktree): F:\dev\ 하위에 `sandbox/codex` 브랜치로 신설 및 `.env` 키값 복사.
+  - `python-krtour-map-claude` (worktree): F:\dev\ 하위에 `sandbox/claude` 브랜치로 신설 및 `.env` 키값 복사.
+  - `python-krtour-map-antigravity` (worktree): F:\dev\ 하위에 `sandbox/antigravity` 브랜치로 신설 및 `.env` 키값 복사.
+- **문서 및 설정 개정**:
+  - `AGENTS.md`, `docs/dev-environment.md`, `docs/codegraph-worktree.md` 정책 문서 개정 (NTFS 메인레포 & WSL ext4 복사 테스트 전략 구체화 및 워크트리 프리픽스 반영).
+  - 메인 레포 및 에이전트 워크트리별 MCP 설정 파일 (`antigravity.json`, `claude.json`, `.codex/config.toml`, `.gemini/mcp.json`)의 `codegraph.cwd` 를 새로운 워크트리 명명 경로로 정합성 보정.
+- **배포 및 통합**:
+  - `chore/ntfs-policy-transition` 브랜치 생성 후 GitHub `gh` CLI 도구를 사용하여 PR#110 생성 및 main 브랜치 Squash merge 완료.
+
 ## 2026-05-31 (antigravity) — maplibre-vworld-js 스타일 및 MCP 설정 동기화
 
 **작업**: 사용자 지시에 따라 `maplibre-vworld-js` 프로젝트의 스타일(`react-doctor.config.json`) 및 에이전트별 MCP 설정 파일(`.gemini/mcp.json`, `antigravity.json`, `claude.json`, `.codex/config.toml`)을 가져와서 현재 프로젝트의 worktree 경로(`F:\dev\krtour-map-*`)에 맞춤 보정 후 적용. PR #107 생성 후 성공적으로 머지 및 리모트/로컬 동기화 완료.
