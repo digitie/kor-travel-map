@@ -2,7 +2,7 @@
 enabled = true
 command = "npx"
 args = ["-y", "@colbymchenry/codegraph", "serve", "--mcp"]
-cwd = "F:\\dev\\krtour-map-codex"
+cwd = "F:\\dev\\python-krtour-map-codex"
 
 [mcp_servers.playwright]
 command = "npx"

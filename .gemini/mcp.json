@@ -25,7 +25,7 @@
         "serve",
         "--mcp"
       ],
-      "cwd": "F:\\dev\\krtour-map-antigravity"
+      "cwd": "F:\\dev\\python-krtour-map-antigravity"
     }
   }
 }
