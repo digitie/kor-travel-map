@@ -1,7 +1,7 @@
 """``test_geocoding_router_live`` — 실 kraddr-geo 연동 검증.
 
-기본 base URL: ``http://127.0.0.1:13088/api/proxy`` (kraddr-geo-ui가 proxy하는
-경로). env ``LIVE_KRADDR_GEO_BASE_URL``로 override 가능.
+기본 base URL: ``http://127.0.0.1:8888`` (kraddr-geo FastAPI 백엔드 직접 호출).
+env ``LIVE_KRADDR_GEO_BASE_URL``로 override 가능.
 
 도달 불가 시(connection refused / non-200 healthz) 모든 테스트가 ``pytest.skip``
 — 본 파일은 라이브 디버깅 / 정합성 회귀 추적 용도이며 CI 의존성 없음.
@@ -34,7 +34,7 @@ from krtour.map_debug_ui.settings import DebugUiSettings
 pytestmark = pytest.mark.live
 
 
-_DEFAULT_BASE_URL = "http://127.0.0.1:13088/api/proxy"
+_DEFAULT_BASE_URL = "http://127.0.0.1:8888"
 
 
 def _resolve_base_url() -> str:

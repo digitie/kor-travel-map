@@ -34,7 +34,7 @@ uv pip install -e ".[dev,geo,providers]"
 uv pip install -e packages/krtour-map-debug-ui
 
 # 실행 — 인증 없음, localhost 전용
-uvicorn krtour.map_debug_ui.app:app --host 127.0.0.1 --port 8600 --reload
+uvicorn krtour.map_debug_ui.app:app --host 127.0.0.1 --port 8087 --reload
 ```
 
 기본 host `127.0.0.1` (외부 노출 금지 default). `0.0.0.0` 바인드 시 경고
@@ -68,9 +68,10 @@ VWorld 지도 (Kakao Maps SDK 미사용). Next.js App Router + `maplibre-gl` +
 | 변수 | 기본값 | 설명 |
 |------|--------|------|
 | `KRTOUR_MAP_DEBUG_UI_HOST` | `127.0.0.1` | uvicorn 바인드 host (외부 노출 금지) |
-| `KRTOUR_MAP_DEBUG_UI_PORT` | `8600` | uvicorn 포트 |
+| `KRTOUR_MAP_DEBUG_UI_PORT` | `8087` | uvicorn 포트 |
 | `KRTOUR_MAP_DEBUG_UI_RELOAD` | `false` | dev 모드 hot-reload |
 | `KRTOUR_MAP_DEBUG_UI_CORS_ALLOW_ORIGINS` | `http://localhost:8610` | Next.js dev 서버 |
+| `KRTOUR_MAP_DEBUG_UI_KRADDR_GEO_BASE_URL` | `http://127.0.0.1:8888` | kraddr-geo FastAPI base URL |
 | `KRTOUR_MAP_DEBUG_UI_FRONTEND_DIST` | (auto) | static export 모드 시 `frontend/out/` 경로 |
 
 ### Frontend (`NEXT_PUBLIC_*` — Next.js 규약)
@@ -78,7 +79,7 @@ VWorld 지도 (Kakao Maps SDK 미사용). Next.js App Router + `maplibre-gl` +
 | 변수 | 기본값 | 설명 |
 |------|--------|------|
 | `NEXT_PUBLIC_VWORLD_API_KEY` | (필수) | VWorld API key. `KRADDR_GEO_VWORLD_API_KEY` 공유 (ADR-025 보강). |
-| `NEXT_PUBLIC_KRTOUR_MAP_DEBUG_UI_API` | `http://127.0.0.1:8600` | 백엔드 base URL |
+| `NEXT_PUBLIC_KRTOUR_MAP_DEBUG_UI_API` | `http://127.0.0.1:8087` | 백엔드 base URL |
 
 메인 라이브러리 환경변수(`KRTOUR_MAP_PG_DSN`, `KRTOUR_MAP_OBJECT_STORE_*` 등)는
 그대로 사용한다. 디버그 UI는 메인 라이브러리의 settings를 상속한다.

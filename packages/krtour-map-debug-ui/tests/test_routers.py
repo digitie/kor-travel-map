@@ -84,3 +84,15 @@ def test_openapi_title_and_version_match_package() -> None:
     spec = app.openapi()
     assert spec["info"]["title"] == "krtour-map-debug-ui"
     assert spec["info"]["version"] == DEBUG_UI_VERSION
+
+
+@pytest.mark.unit
+def test_settings_default_kraddr_geo_base_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """debug-ui geocoding live 기본값은 kraddr-geo FastAPI backend 8888."""
+    monkeypatch.delenv("KRTOUR_MAP_DEBUG_UI_KRADDR_GEO_BASE_URL", raising=False)
+
+    settings = DebugUiSettings(_env_file=None)
+
+    assert settings.kraddr_geo_base_url == "http://127.0.0.1:8888"

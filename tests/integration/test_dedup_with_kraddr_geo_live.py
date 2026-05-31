@@ -2,7 +2,7 @@
 kraddr-geo). 두 provider feature가 실 kraddr-geo로 보강되고, 적재 → dedup 후보
 검출 → ``ops.dedup_review_queue`` 영속화까지 한 PR로 닫는다.
 
-요구: ``LIVE_KRADDR_GEO_BASE_URL`` 도달 가능 (기본 http://127.0.0.1:13088/api/proxy)
+요구: ``LIVE_KRADDR_GEO_BASE_URL`` 도달 가능 (기본 http://127.0.0.1:8888)
 + Docker(testcontainers PostGIS). 도달 불가 시 ``pytest.skip``.
 
 검증 시나리오:
@@ -47,7 +47,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.live]
 
 _KST = timezone(timedelta(hours=9))
 _FETCHED_AT = datetime(2026, 5, 28, 12, 0, tzinfo=_KST)
-_DEFAULT_BASE_URL = "http://127.0.0.1:13088/api/proxy"
+_DEFAULT_BASE_URL = "http://127.0.0.1:8888"
 
 
 def _resolve_base_url() -> str:

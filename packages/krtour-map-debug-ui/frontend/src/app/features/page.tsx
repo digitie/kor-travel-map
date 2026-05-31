@@ -14,6 +14,7 @@
 import { createMarkerElement } from "@krtour/map-marker-react";
 import maplibregl, { LngLatBounds, type StyleSpecification } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
@@ -235,9 +236,9 @@ export default function FeaturesPage() {
             </button>
           )}
         </div>
-        <a href="/" style={{ marginLeft: "auto", fontSize: 14 }}>
+        <Link href="/" style={{ marginLeft: "auto", fontSize: 14 }}>
           ← 홈
-        </a>
+        </Link>
       </header>
       <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
         <div

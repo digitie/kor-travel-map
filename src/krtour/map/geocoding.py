@@ -477,8 +477,8 @@ class KraddrGeoRestClient:
 
     ``httpx.AsyncClient``를 주입받아 ``GET /v1/address/reverse`` /
     ``GET /v1/address/geocode``를 호출하고 JSON을 structural 응답 객체로 파싱한다.
-    호스트는 주입한 ``httpx.AsyncClient``의 ``base_url``로 설정 (예:
-    ``httpx.AsyncClient(base_url="http://kraddr-geo:8080")``), 경로 prefix는
+    호스트는 주입한 ``httpx.AsyncClient``의 ``base_url``로 설정 (로컬 개발 예:
+    ``httpx.AsyncClient(base_url="http://127.0.0.1:8888")``), 경로 prefix는
     ``base_path`` (기본 ``/v1``). client 수명은 호출자 책임 (ADR-002).
     """
 
@@ -545,7 +545,7 @@ def kraddr_geo_reverse_geocoder(
     Examples
     --------
     >>> # import httpx
-    >>> # async with httpx.AsyncClient(base_url="http://kraddr-geo:8080") as http:
+    >>> # async with httpx.AsyncClient(base_url="http://127.0.0.1:8888") as http:
     >>> #     client = KraddrGeoRestClient(http)
     >>> #     reverse = kraddr_geo_reverse_geocoder(client)
     >>> #     addr = await reverse(Coordinate(lon=Decimal("127.0"), lat=Decimal("37.5")))

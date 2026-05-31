@@ -31,7 +31,7 @@ from krtour.map.geocoding import (
 pytestmark = pytest.mark.live
 
 
-_DEFAULT_BASE_URL = "http://127.0.0.1:13088/api/proxy"
+_DEFAULT_BASE_URL = "http://127.0.0.1:8888"
 
 
 def _resolve_base_url() -> str:

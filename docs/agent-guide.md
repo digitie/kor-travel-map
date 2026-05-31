@@ -26,14 +26,14 @@ worktree.md`). 새 세션 진입 후 컨텍스트 확보 직전에 자기 worktr
 
 ```bash
 # 어떤 AI 에이전트인지에 따라:
-cd ~/dev/krtour-map-codex            # ChatGPT Codex
-cd ~/dev/krtour-map-claude            # Claude Code
-cd ~/dev/krtour-map-antigravity      # Google Antigravity 2.0
+git.exe -C F:/dev/python-krtour-map-codex status       # ChatGPT Codex
+git.exe -C F:/dev/python-krtour-map-claude status      # Claude Code
+git.exe -C F:/dev/python-krtour-map-antigravity status # Google Antigravity 2.0
 ```
 
 worktree가 아직 없으면 `docs/codegraph-worktree.md` §3 "최초 setup" 참조.
 codegraph 인덱스는 `codegraph sync`로 증분 동기(있다면) / `codegraph init -i`
-(최초). 사용자가 직접 작업할 때는 메인 worktree(`~/dev/python-krtour-map/`)를
+(최초). 사용자가 직접 작업할 때는 메인 worktree(`F:\dev\python-krtour-map\`)를
 쓰고 `krtour-map-*`에는 들어가지 않는다.
 
 ## 2. 결정·기록 5종 (필수 유지)
@@ -329,13 +329,13 @@ Sprint 1 scaffolding 완료 — `src/krtour/map/` 6 layer (category 144건 + dto
 6. `docs/journal.md` + `docs/resume.md` 업데이트 (+ ADR/CHANGELOG/OpenAPI
    해당 시)
 
-## 9. WSL ext4 vs NTFS 작업 흐름
+## 9. Windows Git vs WSL 실행 흐름
 
-- `git`, `pytest`, `ruff`, `mypy`는 WSL ext4에서.
-- `data/`는 NTFS에 두고 ext4에 심볼릭 링크.
-- NTFS 마운트에서 `git`/`pip`/`pytest`/`uvicorn`을 직접 실행하지 않는다.
-  파일 권한, inotify, symlink, 대량 I/O 성능 이슈가 재발한다.
-- 작업 완료 후 필요한 경우 ext4 source tree를 NTFS 보관 위치로 `rsync`한다.
+- `git`/브랜치/커밋/PR 준비는 Windows NTFS worktree에서 Windows Git(`git.exe`)로 수행한다.
+- `pytest`, `ruff`, `mypy`, `uvicorn`, `alembic`처럼 Linux 실행 환경이 필요한 작업은
+  NTFS 소스를 WSL ext4 샌드박스로 `rsync`한 뒤 실행한다.
+- `data/`는 NTFS에 보관하고 git에는 넣지 않는다.
+- WSL 샌드박스의 `.git`은 원본이 아니다. Git source of truth는 NTFS다.
 
 상세 절차는 `docs/dev-environment.md`.
 

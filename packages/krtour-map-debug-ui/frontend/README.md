@@ -13,15 +13,15 @@
 
 ## 기술 스택 (ADR-025, Next.js 기반 — 2026-05-25 사용자 보강)
 
-- **Next.js 15** (App Router) + **React 19** + **TypeScript** —
+- **Next.js 16** (App Router) + **React 19** + **TypeScript** —
   `kraddr-geo-ui` / TripMate `apps/web`와 동일 stack
-- **maplibre-vworld** v0.1.0 (`github:digitie/maplibre-vworld-js#v0.1.0`) —
+- **maplibre-vworld** v0.1.2 (`github:digitie/maplibre-vworld-js#v0.1.2`) —
   VWorld 지도 React 컴포넌트 (ADR-036). **npm 미게시** — git URL + release
   tag로 핀 (ADR-043 형제 라이브러리 패턴). 공개 API: `VWorldMap`(apiKey/
   center/zoom) + `MapStore`/`useMap*` hook + `MakiMarker`/`PlaceMarker`/
   `PriceMarker`/`WeatherMarker` 등 마커 13종 + `ClusterLayer`/`RouteLine`.
-- **maplibre-gl** ^5.24.0 — WebGL 지도 엔진 (maplibre-vworld v0.1.0 peer)
-- **zod** ^4.4.3 — 좌표 검증 (maplibre-vworld v0.1.0 peer — schemas 모듈)
+- **maplibre-gl** ^5.24.0 — WebGL 지도 엔진 (maplibre-vworld v0.1.2 peer)
+- **zod** ^4.4.3 — 좌표 검증 (maplibre-vworld v0.1.2 peer — schemas 모듈)
 - **@tanstack/react-query** — 서버 데이터 페칭/캐시 (ADR-037)
 - **zustand** — UI 클라이언트 상태(map viewport / filter / 선택된 feature
   등). ADR-037 (PR#36에 처음 추가)
@@ -40,7 +40,7 @@
 | 변수 | 의미 |
 |------|------|
 | `NEXT_PUBLIC_VWORLD_API_KEY` | VWorld API key. **`python-kraddr-geo`의 `KRADDR_GEO_VWORLD_API_KEY`와 동일 값 공유** (ADR-025 사용자 보강 2026-05-25). 별도 발급 금지. |
-| `NEXT_PUBLIC_KRTOUR_MAP_DEBUG_UI_API` | 백엔드 base URL (`http://127.0.0.1:8600` 기본) |
+| `NEXT_PUBLIC_KRTOUR_MAP_DEBUG_UI_API` | 백엔드 base URL (`http://127.0.0.1:8087` 기본) |
 
 > **VWorld key 공유 정책**: 본 frontend가 사용하는 VWorld key는
 > `python-kraddr-geo` ADR-019의 `KRADDR_GEO_VWORLD_API_KEY`와 동일하다.
@@ -73,7 +73,7 @@ npm run start                # next start — production server
 ```
 
 운영 옵션:
-- **A. standalone**: `next build` + `next start` — FastAPI(8600)와 별도 포트
+- **A. standalone**: `next build` + `next start` — FastAPI(8087)와 별도 포트
   (8610)로 동일 호스트에서 동작.
 - **B. FastAPI proxy**: FastAPI가 `/ui/*`로 reverse proxy. Next.js는
   `basePath: '/ui'` 설정.

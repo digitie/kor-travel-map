@@ -2,6 +2,53 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-31 (codex) — kraddr-geo 최신 포트 8888 정합 + 라이브 검증 준비
+
+**작업**: 사용자 지시 "라이브러리 최신버전을 기준으로 업데이트"에 따라 로컬
+`F:\dev\python-kraddr-geo` 최신 `main`과 `docs/ports.md`를 확인하고, 지오코딩 REST
+기본 연동 포트를 공식 FastAPI backend `http://127.0.0.1:8888`로 정렬함. 기존
+Next proxy(`13088/api/proxy`) 또는 컨테이너 예제(`kraddr-geo:8080`)는 테스트 기본값과
+문서 예시에서 제거했다.
+
+- `packages/krtour-map-debug-ui/settings.py`: `KRTOUR_MAP_DEBUG_UI_KRADDR_GEO_BASE_URL`
+  기본값을 `http://127.0.0.1:8888`로 지정. 명시적으로 `None`을 주면 기존처럼
+  `/debug/geocoding/*` 503 응답.
+- `tests/*live*.py`: geocoding live 기본 URL을 `http://127.0.0.1:8888`로 정렬.
+- `.env.example`, `docs/address-geocoding.md`, `docs/debug-ui-package.md`,
+  debug-ui/frontend README, `CHANGELOG.md`, `docs/resume.md`에 동일 정책 반영.
+- 로컬 `maplibre-vworld-js` 최신 tag `v0.1.2`도 확인해 frontend와
+  `@krtour/map-marker-react`의 git URL 핀을 `#v0.1.2`로 올림. Next.js 16에서
+  `next lint`가 제거된 점에 맞춰 `eslint .` + flat `eslint.config.mjs`로 전환.
+  Next.js stable은 유지하되 transitive `postcss` audit 이슈는 root override로
+  `^8.5.15`를 강제해 `npm audit` 0건 확인.
+- WSL 설치 검증 중 `gdal>=3.8`이 최신 Python binding 3.13.0/3.8.5를 잡아 시스템
+  `libgdal 3.8.4`와 ABI mismatch를 일으키는 문제 확인. geo extra는
+  `gdal==3.8.4`로 고정해 현재 WSL/Docker 개발 환경과 patch 버전까지 맞춤.
+
+**검증**:
+- WSL ext4 샌드박스 `/home/digitie/dev/python-krtour-map`에 NTFS 원본 rsync 후
+  editable install 성공 (`gdal-3.8.4` wheel).
+- `pytest tests/unit`: 642 passed.
+- `pytest packages/krtour-map-debug-ui/tests -m "not live"`: 113 passed / 45 deselected.
+- kraddr-geo live 8888 geocoding/debug/provider tests: 45 passed.
+- `pytest tests/integration`: 35 passed. `test_dedup_with_kraddr_geo_live.py`: 5 passed.
+- 전체 main pytest: 681 passed. `ruff`, `mypy`, `lint-imports` green.
+- Windows frontend: `npm run lint`, `type-check`, `next build`, `npm audit` 0건,
+  Windows Playwright e2e 14/14 passed.
+
+## 2026-05-31 (codex) — Windows Git 기준 개발 환경 명시 보강
+
+**작업**: 사용자 지시 "windows git 사용 환경으로 명시"에 따라 NTFS worktree를
+Git source of truth로 쓰고, WSL은 테스트/실행용 ext4 샌드박스로만 동기화한다는
+정책을 entry 문서 전반에 명확히 반영함.
+
+- `README.md`, `SKILL.md`, `CLAUDE.md`, `docs/agent-guide.md`: 기존 WSL ext4
+  원본 문구를 Windows Git(`git.exe`) + NTFS worktree 기준으로 수정.
+- `docs/dev-environment.md`: 제목과 본문 첫 정책 설명에 Windows Git 원본 +
+  WSL 실행 모델을 명시.
+- `AGENTS.md`, `docs/codegraph-worktree.md`: 남아 있던 `~/dev/krtour-map-*`
+  예시를 `F:\dev\python-krtour-map-*` 기준으로 정리.
+
 ## 2026-05-31 (antigravity) — 개발 정책 NTFS 메인레포 전환 및 에이전트 워크트리 재설정
 
 **작업**: 개발 및 형상관리의 중심을 WSL ext4에서 NTFS(`F:\dev\python-krtour-map`)로 전면 이전함. WSL ext4는 가상/컨테이너 가속 테스트(PostGIS testcontainers) 실행을 위한 **샌드박스**로 역할을 재규정함. 이에 따라 에이전트별 worktree를 NTFS상에 신설 및 프리픽스를 `python-krtour-map-`으로 개정하고 로컬 키값(`.env`)을 동기화 완료함. 정책 관련 문서 3종을 전면 정비하여 PR#110 머지 완료.

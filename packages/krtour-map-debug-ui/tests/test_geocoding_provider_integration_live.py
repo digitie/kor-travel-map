@@ -34,7 +34,7 @@ from krtour.map.providers.standard_data import cultural_festivals_to_bundles
 pytestmark = pytest.mark.live
 
 
-_DEFAULT_BASE_URL = "http://127.0.0.1:13088/api/proxy"
+_DEFAULT_BASE_URL = "http://127.0.0.1:8888"
 _KST = timezone(timedelta(hours=9))
 
 
