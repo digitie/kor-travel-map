@@ -81,6 +81,38 @@ npm run start                # next start — production server
   client-side 페이지는 동작하나 server actions는 disabled — 본 디버그 UI는
   read-mostly이므로 가능. backend가 `.next/` 또는 `out/` static mount.
 
+## e2e (Playwright)
+
+> ⚠️ **Playwright e2e는 Windows 호스트에서 실행한다 (WSL 아님).**
+> 실행 모델: debug UI 서버(backend `uvicorn … :8087` + frontend
+> `next start :8610`)는 **WSL ext4**에서 띄우고, **Playwright
+> (`npx playwright test`)는 Windows에서** 돌린다. WSL2
+> `localhostForwarding=true` 덕분에 Windows의 `http://127.0.0.1:8610`(frontend)
+> / `:8087`(backend) 요청이 WSL 서버에 그대로 도달한다.
+>
+> **이유**: WSL Ubuntu에는 Playwright chromium 구동에 필요한 system lib
+> (`libasound.so.2` 등)가 없고, `sudo`가 비밀번호를 요구해 WSL 안에서의
+> `playwright install-deps` 자동 설치가 불가하다. Windows에는 node + chromium이
+> 이미 갖춰져 있어 **e2e는 Windows에서 수행하는 것을 표준**으로 한다.
+> (`playwright.config.ts`는 `webServer`를 두지 않아 서버가 외부(WSL)에 떠 있다고
+> 가정한다.)
+
+```powershell
+# 1) WSL 셸에서 서버 2개 기동
+#    backend : .venv/bin/uvicorn krtour.map_debug_ui.app:create_app --factory --port 8087
+#    frontend: npm run start   # next start :8610
+
+# 2) Windows(PowerShell)에서 frontend 디렉터리로 이동해 Playwright 실행
+cd packages\krtour-map-debug-ui\frontend
+npm install              # 최초 1회 (workspace deps)
+npm run e2e:install      # chromium 설치 (최초 1회)
+npm run e2e              # playwright test (servers는 WSL에 떠 있어야 함)
+npm run e2e:ui           # --ui 모드
+```
+
+baseURL은 `E2E_BASE_URL` env로 override 가능(기본 `http://127.0.0.1:8610`).
+자세한 실행 모델은 `playwright.config.ts` 상단 주석 참고.
+
 ## 주요 페이지 (계획, App Router)
 
 | Route | 백엔드 API | 비고 |
