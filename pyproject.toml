@@ -53,7 +53,7 @@ dev = [
 #   `packages/krtour-map-debug-ui/`. FastAPI/Uvicorn 의존성은 거기 있다.
 geo = [
   "geopandas>=1.0",
-  "gdal>=3.8",      # 시스템 GDAL 버전과 맞춤
+  "gdal==3.8.4",  # Python binding은 시스템 libgdal ABI와 patch 버전까지 맞춤
 ]
 providers = [
   # provider 라이브러리는 git URL + commit sha 핀 (코드 작성 단계에서 ADR과 함께 확정).

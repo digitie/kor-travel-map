@@ -3,7 +3,7 @@
 /**
  * TanStack Query 전역 Provider (ADR-037).
  *
- * Next.js 15 App Router에서는 client component로 박는다 (`"use client"`).
+ * Next.js 16 App Router에서는 client component로 박는다 (`"use client"`).
  * QueryClient instance를 component 인스턴스 라이프사이클 안에서 생성해 HMR
  * 충돌 회피.
  */

@@ -82,18 +82,20 @@ datagokr-api`/`python-visitkorea-api`/`python-knps-api`/`python-krheritage-api`/
 provider 라이브러리** — 본 lib는 신뢰·미러하고, 불일치 시 그 라이브러리 기준
 으로 정렬(+필요 시 upstream PR).
 
-**개발 환경**: PC 개발은 **WSL ext4** 위에서 (`~/dev/python-krtour-map/`).
-NTFS 마운트에서 직접 `git`/`pytest` 실행 금지 — 형제 라이브러리
-(`python-kraddr-geo`/`python-kraddr-base`)와 동일 정책. 자세히는 `README.md`
-§"개발 환경 (PC, WSL)" + `AGENTS.md` + `docs/dev-environment.md`.
+**개발 환경**: PC 개발의 Git 원본은 **Windows NTFS**
+(`F:\dev\python-krtour-map\`)다. 브랜치 전환, 커밋, PR 준비는 Windows
+Git(`git.exe`) 기준으로 수행한다. WSL은 PostGIS/testcontainers/e2e 같은 Linux
+실행이 필요할 때 NTFS 소스를 ext4 샌드박스로 `rsync`해서 쓴다. 자세히는
+`README.md` §"개발 환경 (PC, WSL)" + `AGENTS.md` + `docs/dev-environment.md`.
 
-**Claude Code 전용 worktree**: `~/dev/krtour-map-claude/`(메인 repo의 형제).
+**Claude Code 전용 worktree**: `F:\dev\python-krtour-map-claude\`(메인 repo의 형제).
 작업마다 worktree 안에서 브랜치만 새로 (`git switch -c feat/<topic> main`).
 worktree마다 [codegraph](https://github.com/colbymchenry/codegraph) 인덱스
 1개를 두고(`codegraph init -i` 최초 1회), 이후엔 `codegraph sync`로 증분
 동기. `.codegraph/`는 `.gitignore`. 자세히는 `docs/codegraph-worktree.md` +
-`AGENTS.md` §"에이전트 worktree + codegraph". ChatGPT Codex는 `krtour-map-codex`,
-Google Antigravity 2.0은 `krtour-map-antigravity` worktree를 쓴다.
+`AGENTS.md` §"에이전트 worktree + codegraph". ChatGPT Codex는
+`F:\dev\python-krtour-map-codex\`, Google Antigravity 2.0은
+`F:\dev\python-krtour-map-antigravity\` worktree를 쓴다.
 
 **codegraph MCP 등록**: `~/.claude.json` (Windows: `C:\Users\<user>\.claude
 .json`)의 `mcpServers`에 `codegraph: { type: stdio, command: codegraph,

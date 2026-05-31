@@ -12,7 +12,8 @@
 - 부산/대전 round-trip.
 - 주소 입력 엣지(괄호, 200자, 영문 mix).
 
-도달 불가 시 `pytest.skip` (LIVE_KRADDR_GEO_BASE_URL env override).
+도달 불가 시 `pytest.skip` (LIVE_KRADDR_GEO_BASE_URL env override, 기본
+`http://127.0.0.1:8888`).
 """
 
 from __future__ import annotations
@@ -32,7 +33,7 @@ from krtour.map_debug_ui.settings import DebugUiSettings
 pytestmark = pytest.mark.live
 
 
-_DEFAULT_BASE_URL = "http://127.0.0.1:13088/api/proxy"
+_DEFAULT_BASE_URL = "http://127.0.0.1:8888"
 
 
 def _resolve_base_url() -> str:

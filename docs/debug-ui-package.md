@@ -45,7 +45,7 @@ packages/krtour-map-debug-ui/
 │   │   ├── debug.py           — /debug/explain, /debug/fixtures
 │   │   └── fixtures.py        — /debug/fixtures (저장/replay)
 │   └── static/                — Next.js static export 산출물 mount 시 (옵션 C, frontend/out/ 복사)
-├── frontend/                  — Next.js 15 + React 19 + TS + maplibre-vworld (ADR-025 2차 보강)
+├── frontend/                  — Next.js 16 + React 19 + TS + maplibre-vworld (ADR-025 2차 보강)
 │   ├── package.json
 │   ├── next.config.js
 │   ├── tsconfig.json
@@ -112,6 +112,7 @@ class DebugUiSettings(BaseSettings):
     cors_allow_origins: list[str] = [         # frontend(8610) cross-origin (PR#68)
         "http://localhost:8610", "http://127.0.0.1:8610",
     ]
+    kraddr_geo_base_url: str | None = "http://127.0.0.1:8888"  # kraddr-geo FastAPI
     # provider API key 8종 (source=live용, PR#47) — SecretStr | None:
     #   kma_service_key / kma_apihub_key / opinet_service_key /
     #   datagokr_service_key / visitkorea_service_key / krex_service_key /
@@ -287,9 +288,9 @@ type drift 부채 0).
 
 | 항목 | 값 |
 |------|----|
-| Framework | **Next.js 15 (App Router)** — `kraddr-geo-ui` / TripMate `apps/web`와 동일 stack (ADR-025 2차 보강 2026-05-25) |
-| 라이브러리 | `maplibre-vworld` **v0.1.0** (`github:digitie/maplibre-vworld-js#v0.1.0` — npm 미게시, git URL+tag 핀, ADR-043 패턴) |
-| 의존 | `maplibre-gl` ^5.24.0 (BSD-3), `zod` ^4.4.3 (좌표 검증, v0.1.0 peer), React 19, `@tanstack/react-query` |
+| Framework | **Next.js 16 (App Router)** — `kraddr-geo-ui` / TripMate `apps/web`와 동일 stack (ADR-025 2차 보강 2026-05-25, 2026-05-31 최신화) |
+| 라이브러리 | `maplibre-vworld` **v0.1.2** (`github:digitie/maplibre-vworld-js#v0.1.2` — npm 미게시, git URL+tag 핀, ADR-043 패턴) |
+| 의존 | `maplibre-gl` ^5.24.0 (BSD-3), `zod` ^4.4.3 (좌표 검증, v0.1.2 peer), React 19, `@tanstack/react-query` |
 | 공통 마커 | `@krtour/map-marker-react` (workspace, ADR-029) |
 | 언어 | TypeScript |
 | 라이선스 | MIT (`next`) + ISC (`maplibre-vworld`) + BSD-3 (`maplibre-gl`) + GPL-3.0 (본 저장소) — 호환 |

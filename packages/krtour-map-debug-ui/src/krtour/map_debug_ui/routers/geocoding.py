@@ -4,8 +4,8 @@
 ``GET /debug/geocoding/{reverse,geocode}``(매핑된 Address/Coordinate) +
 ``/raw``(kraddr-geo 응답 그대로) + ``/health``(upstream 도달성) 5경로를 노출한다.
 
-설정: ``KRTOUR_MAP_DEBUG_UI_KRADDR_GEO_BASE_URL``(예 ``http://127.0.0.1:13088/api/proxy``).
-미설정 시 모든 엔드포인트는 503 반환.
+설정: ``KRTOUR_MAP_DEBUG_UI_KRADDR_GEO_BASE_URL``(기본 ``http://127.0.0.1:8888``).
+명시적으로 ``None``/빈 값이면 모든 엔드포인트는 503 반환.
 
 ADR 참조: ADR-006(client 주입 + structural Protocol), ADR-035(/debug 운영 범위).
 """

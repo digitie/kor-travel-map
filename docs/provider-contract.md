@@ -157,7 +157,7 @@ system
 | kakao-local-api | place | enrichment | on-demand | 전화번호 보강 |
 | naver-search-api | place | enrichment | on-demand | 전화번호 보강 |
 | google-places-api-new | place | enrichment | on-demand | 전화번호 보강 (Text Search New) |
-| python-kraddr-geo | (geocoder) | base_address, base_coordinate | on-demand | 주소·좌표 보강. `krtour.map.providers.standard_data.ReverseGeocoder` Protocol (PR#34) |
+| python-kraddr-geo | (geocoder) | base_address, base_coordinate | on-demand | 주소·좌표 보강. `krtour.map.geocoding.KraddrGeoRestClient`가 REST `/v1/address/*` 호출. 로컬 FastAPI 기본 `http://127.0.0.1:8888` |
 | ~~python-kraddr-base~~ | — | — | — | **ADR-041 (PR#37, 2026-05-28) 흡수 완료**. `Address` DTO + `core/address.py` utility는 본 lib로 이전. `PlaceCoordinate`는 명시적 제외 (좌표는 `Coordinate` 단일). archive 후보. |
 
 ## 5. provider 모듈 표준 구조
@@ -348,8 +348,8 @@ WeatherValue로 일관 적재.
 2. 범위: 책임 분리 (provider 라이브러리 vs 본 라이브러리 vs TripMate)
 3. Provider 경계: public client/typed model 직접 사용, wrapper 금지 재확인
 4. Dataset 매핑: natural key, FeatureKind, detail table, source_role
-5. 주소/좌표: kraddr-base DTO (`Address`, `PlaceCoordinate` 등 — category는 본
-   저장소의 `krtour.map.category`, ADR-023), geocoding, match report
+5. 주소/좌표: 본 저장소 DTO (`Address`, `Coordinate`) + `core/address.py`
+   utility, `python-kraddr-geo` REST geocoding, match report
 6. 파일: RustFS 적재 대상, FeatureFileSource 매핑
 7. DB 적재: collect/load 함수, transaction owner, prune 정책
 8. Dagster: TripMate가 정의하는 asset 이름, schedule
@@ -389,7 +389,7 @@ def test_no_provider_wrapper_classes():
 | provider | pyproject 핀 | 본 lib Protocol | 활성 PR | 메모 |
 |----------|--------------|-----------------|---------|------|
 | python-kraddr-base | **제거** | — | — | ADR-041 (PR#37) 흡수 완료. archive 후보 |
-| python-kraddr-geo | placeholder | `ReverseGeocoder` (PR#34) | — | on-demand geocoder, sha 확정 시 ADR |
+| python-kraddr-geo | REST 서비스(직접 의존 없음) | `KraddrGeoRestClient` + `ReverseGeocoder`/`AddressGeocoder` 콜러블 | PR#90/#123 | on-demand geocoder. 최신 로컬 FastAPI 포트 `8888` 기준 |
 | python-datagokr-api | placeholder | `CulturalFestivalItem` (PR#34) | PR#34 | ADR-042 1차 축제 source |
 | python-kma-api | placeholder | `KmaShortForecastItem` (PR#38), `KmaUltraShortNowcastItem` (PR#39) | PR#38/39 | ADR-010 두 축. 후속: ultra_short_forecast/mid/alerts |
 | python-airkorea-api | placeholder | (후속 PR) | — | PM10/PM2.5/CAI |

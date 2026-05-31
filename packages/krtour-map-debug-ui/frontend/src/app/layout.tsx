@@ -1,5 +1,5 @@
 /**
- * Next.js 15 App Router root layout.
+ * Next.js 16 App Router root layout.
  *
  * - QueryClientProvider 박음 (ADR-037 TanStack Query)
  * - 카테고리/마커 자원은 `@krtour/map-marker-react`에서 import (ADR-029/043)

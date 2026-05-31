@@ -10,5 +10,10 @@
   "scripts": {
     "debug-ui:dev": "npm -w packages/krtour-map-debug-ui/frontend run dev",
     "debug-ui:e2e": "npm -w packages/krtour-map-debug-ui/frontend run e2e"
+  },
+  "overrides": {
+    "next": {
+      "postcss": "^8.5.15"
+    }
   }
 }

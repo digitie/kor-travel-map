@@ -7,6 +7,14 @@
 
 ### Sprint 3 — DB 적재 오케스트레이션 + dedup + geocoding REST + e2e (2026-05-29~30)
 
+- **PR#114 — kraddr-geo 최신 로컬 포트 정합 + 라이브 검증 보강**:
+  `python-kraddr-geo` 최신 로컬 정책(`docs/ports.md`)에 맞춰 debug-ui
+  geocoding 기본 base URL과 live 테스트 기본값을 `http://127.0.0.1:8888`로
+  고정. frontend 의존도 로컬 최신 `maplibre-vworld-js#v0.1.2` + Next.js 16
+  기준으로 올리고 `next lint` 제거에 맞춰 ESLint CLI flat config를 추가.
+  WSL 시스템 `libgdal 3.8.4`와 맞도록 Python `gdal` binding을
+  `==3.8.4`로 고정. `.env.example`/README/debug-ui/address-geocoding 문서를
+  함께 갱신.
 - **PR#93 — frontend CI 게이트** (`.github/workflows/frontend.yml`): Node 20 +
   workspace `npm install` + `tsc --noEmit` + `next build` (paths 필터). PR#92
   회고에 따라 잠복 syntax/타입 오류를 PR 머지 전에 차단.
@@ -380,7 +388,7 @@
   `python-krtour-map`에서 FastAPI/Uvicorn 의존성 제거. `[api]` extra 폐기.
   `krtour.map.api` 모듈 없음. ADR-005의 위치 부분은 ADR-020으로 superseded
   (인증 없음 + 내부망 전용 정책은 유지).
-  - 디버그 UI 실행: `uvicorn krtour.map_debug_ui.app:app --host 127.0.0.1 --port 8600`
+  - 디버그 UI 실행: `uvicorn krtour.map_debug_ui.app:app --host 127.0.0.1 --port 8087`
   - 환경변수 prefix: `KRTOUR_MAP_DEBUG_UI_*`
   - `import-linter`에 `메인 패키지는 fastapi/uvicorn/starlette import 금지`
     계약 추가.

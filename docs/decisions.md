@@ -1859,6 +1859,27 @@ maki marker + 카테고리 토글 + bounds 검색 등 공통 기능이 빠르게
   activeCategoryCodes)는 v0.1.0의 map-인스턴스 바인딩 `MapStore`와 **역할이
   다르다**(앱 UI 상태 vs 지도 인스턴스 상태) — 병존 OK, 중복 아님.
 
+### Amendment (2026-05-31, PR#114) — v0.1.2 + Next.js 16 최신화
+
+로컬 `F:\dev\maplibre-vworld-js` 최신 `main`/tag를 확인한 결과
+`maplibre-vworld-js` 최신 릴리스는 **v0.1.2**다. 본 저장소 frontend와
+`@krtour/map-marker-react`의 git URL 핀을 `#v0.1.2`로 올리고, Next.js는 공식
+v16 업그레이드 가이드에 따라 **Next.js 16 + ESLint CLI(flat config)** 기준으로
+정렬한다.
+
+- `next lint`는 Next.js 16에서 제거되었으므로 `npm run lint`는 `eslint .`를
+  실행한다.
+- `packages/krtour-map-debug-ui/frontend/eslint.config.mjs`는
+  `eslint-config-next/core-web-vitals` + `eslint-config-next/typescript` flat config를
+  사용한다.
+- npm workspace에서 Next.js 16 production build(Turbopack)가 root를 `src/app`으로
+  오판하지 않도록 `next.config.ts`에 repo root 기준 `turbopack.root`를 명시한다.
+- Next.js 16.2.6 stable은 아직 transitive `postcss 8.4.31`을 선언하므로
+  npm audit의 `GHSA-qx2v-qp2m-jg93` 차단을 위해 root `package.json`에서
+  `next > postcss`를 `^8.5.15`로 override한다. canary(`16.3.0-canary.*`)로
+  넘어가지 않고 stable을 유지한다.
+- `maplibre-gl ^5.24.0`, `zod ^4.4.3`, React 19 계열은 v0.1.2 peer와 정합하다.
+
 ---
 
 ## ADR-037: 디버그/관리 UI frontend state 관리 — TanStack Query + Zustand
@@ -2357,4 +2378,3 @@ provider 라이브러리에 있다.**
 - `CLAUDE.md` §4 — `F:\dev\` 형제 repo 목록 + 우선 조회 룰 명시.
 - `docs/provider-contract.md` — 데이터 정합성 책임 = 각 라이브러리 절 추가.
 - `docs/dev-environment.md` — `F:\dev\` provider 라이브러리 로컬 레이아웃.
-

@@ -9,6 +9,7 @@
  */
 
 import { useMutation, useQuery } from "@tanstack/react-query";
+import Link from "next/link";
 import { useState } from "react";
 
 import {
@@ -109,9 +110,9 @@ export default function GeocodingPage() {
     <main style={{ fontFamily: "sans-serif", padding: 24, lineHeight: 1.5 }}>
       <header style={{ display: "flex", alignItems: "center", gap: 16 }}>
         <h1 style={{ margin: 0, fontSize: 18 }}>kraddr-geo 디버그</h1>
-        <a href="/" style={{ marginLeft: "auto", fontSize: 14 }}>
+        <Link href="/" style={{ marginLeft: "auto", fontSize: 14 }}>
           ← 홈
-        </a>
+        </Link>
       </header>
 
       <section style={{ marginTop: 12 }}>

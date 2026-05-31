@@ -51,7 +51,8 @@ async with AsyncKrtourMapClient(engine=tripmate_engine, providers=...) as client
   `FeatureFile`로 정규화
 - PostgreSQL + PostGIS 스키마 + Alembic 마이그레이션 + raw SQL repository
 - S3 호환 객체 저장소(RustFS) 연동: 이미지/문서 메타데이터
-- 주소/좌표 정규화: `python-kraddr-base`/`python-kraddr-geo` 직접 사용
+- 주소/좌표 정규화: 내장 `Address`/`Coordinate` DTO + `python-kraddr-geo`
+  REST 서비스 연동
 - 디버그 REST API (옵션, 인증 없음, 내부망 전용)
 - Dagster asset에서 호출 가능한 collect/load 순수 함수
 
@@ -68,26 +69,32 @@ async with AsyncKrtourMapClient(engine=tripmate_engine, providers=...) as client
 ## 💻 개발 환경 (PC, WSL)
 
 > [!WARNING]
-> PC 개발은 반드시 **WSL의 ext4 파일시스템** 위에서 진행해야 합니다.
-> NTFS 마운트(`/mnt/<drive>/...`) 위에서 직접 `git`/`pip`/`pytest`/`uvicorn`/
-> `alembic`을 실행하면 파일 권한, inotify, 심볼릭 링크, 대량 I/O 성능이 모두
-> 저하됩니다. `python-kraddr-geo`/`python-kraddr-base` 등 형제 라이브러리와
-> 동일한 정책입니다.
+> PC 개발의 Git 원본은 **Windows NTFS (`F:\dev\python-krtour-map`)** 입니다.
+> 브랜치 전환, 커밋, PR 준비는 Windows Git(`git.exe`) 기준으로 수행합니다.
+> WSL은 PostGIS/testcontainers/e2e처럼 Linux 실행 환경이 필요할 때만
+> NTFS 소스를 ext4 샌드박스로 `rsync`해서 사용합니다.
 
 ```
-ext4 (개발):  ~/dev/python-krtour-map/                  ← 모든 코드/가상환경/테스트 (source of truth)
-NTFS (백업): /mnt/<drive>/projects/python-krtour-map/  ← 작업 완료 후 카피, Windows에서 접근
-data/:       NTFS에 두고 ext4 작업 디렉토리에 심볼릭 링크로 참조
+NTFS (Git 원본): F:\dev\python-krtour-map\              ← 코드/git/source of truth
+agent worktree:  F:\dev\python-krtour-map-codex\        ← ChatGPT Codex 전용
+WSL 샌드박스:    ~/dev/python-krtour-map/                ← 테스트/실행 전용 복사본
+data/:           F:\dev\python-krtour-map\data\          ← git 제외, NTFS 보관
 ```
 
-자세한 셋업은 `docs/dev-environment.md` (WSL ext4 기준). 정책은 `AGENTS.md`
+자세한 셋업은 `docs/dev-environment.md` (Windows Git + WSL 실행 기준). 정책은 `AGENTS.md`
 §"개발 환경 정책 (PC, WSL)" + `SKILL.md` §"개발 환경 (PC, WSL)".
 
 ## 빠른 시작 (Sprint 3 진행 중 — feature 적재/조회 + debug UI 동작)
 
 ```bash
-# WSL ext4 작업 디렉토리에서
+# Windows Git 작업은 F:\dev\python-krtour-map 또는 agent worktree에서 수행
+git.exe -C F:/dev/python-krtour-map status
+
+# 테스트 전 WSL ext4 샌드박스로 동기화
+rsync -a --delete --exclude .git --exclude .venv --exclude data \
+  /mnt/f/dev/python-krtour-map/ ~/dev/python-krtour-map/
 cd ~/dev/python-krtour-map
+ln -sfn /mnt/f/dev/python-krtour-map/data data
 
 # 메인 라이브러리 (FastAPI 의존 없음)
 uv venv && uv pip install -e ".[dev,geo,providers]"
@@ -103,6 +110,9 @@ uv pip install -e packages/krtour-map-debug-ui
 
 # (디버그) REST API 기동 — 인증 없음, localhost 전용
 uvicorn krtour.map_debug_ui.app:app --host 127.0.0.1 --port 8087
+
+# (옵션) geocoding live 연동 — python-kraddr-geo FastAPI backend
+export KRTOUR_MAP_DEBUG_UI_KRADDR_GEO_BASE_URL=http://127.0.0.1:8888
 
 # (옵션) 디버그 UI frontend (Next.js + maplibre-vworld, ADR-025 2차 보강)
 cd packages/krtour-map-debug-ui/frontend
@@ -247,7 +257,7 @@ lint-imports
   카탈로그
 - [`docs/feature-model.md`](docs/feature-model.md) — Feature DTO 7 kind + detail
 - [`docs/agent-guide.md`](docs/agent-guide.md) — 작업·문서화 가이드, 첫 5분 프로토콜
-- [`docs/dev-environment.md`](docs/dev-environment.md) — WSL ext4/NTFS 설정
+- [`docs/dev-environment.md`](docs/dev-environment.md) — Windows Git + WSL 실행 설정
 - [`docs/windows-reinstall-recovery.md`](docs/windows-reinstall-recovery.md) —
   세션 복구 절차
 - [`docs/external-apis.md`](docs/external-apis.md) — provider API 키 발급/호출

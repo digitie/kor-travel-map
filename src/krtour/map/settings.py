@@ -85,7 +85,7 @@ class KrtourMapSettings(BaseSettings):
     kraddr_geo_base_url: str | None = Field(
         default=None,
         description=(
-            "kraddr-geo REST 서비스 base URL (예: ``http://kraddr-geo:8080``). "
+            "kraddr-geo REST 서비스 base URL (로컬 기본 예: ``http://127.0.0.1:8888``). "
             "``None``이면 정/역지오코딩 보강 비활성 (좌표만으로 적재). 호출 측이 "
             "이 URL로 ``httpx.AsyncClient(base_url=...)``를 만들어 "
             "``KraddrGeoRestClient``에 주입한다 (python 패키지/DB 의존 없음)."

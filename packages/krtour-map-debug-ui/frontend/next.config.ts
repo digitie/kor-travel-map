@@ -1,4 +1,7 @@
 import type { NextConfig } from "next";
+import path from "node:path";
+
+const workspaceRoot = path.resolve(process.cwd(), "../../..");
 
 /**
  * Next.js config for krtour-map-debug-ui-frontend.
@@ -14,6 +17,13 @@ import type { NextConfig } from "next";
  */
 const config: NextConfig = {
   reactStrictMode: true,
+
+  // Next.js 16 production build uses Turbopack by default. In this npm
+  // workspace, set the repo root explicitly so Turbopack can resolve the
+  // hoisted `next` package from root node_modules.
+  turbopack: {
+    root: workspaceRoot,
+  },
 
   // monorepo workspace의 @krtour/map-marker-react (ADR-029, ADR-043 — private:
   // true, registry 게시 X)를 transpile.
