@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-05-31 (antigravity) — maplibre-vworld-js 스타일 및 MCP 설정 동기화
+
+**작업**: 사용자 지시에 따라 `maplibre-vworld-js` 프로젝트의 스타일(`react-doctor.config.json`) 및 에이전트별 MCP 설정 파일(`.gemini/mcp.json`, `antigravity.json`, `claude.json`, `.codex/config.toml`)을 가져와서 현재 프로젝트의 worktree 경로(`F:\dev\krtour-map-*`)에 맞춤 보정 후 적용. PR #107 생성 후 성공적으로 머지 및 리모트/로컬 동기화 완료.
+
+- **산출물**:
+  - `react-doctor.config.json` (프로젝트 루트): React 정적 분석 규칙 및 스타일 일관성 검사 예외 설정 복사.
+  - `.gemini/mcp.json` (새로 생성): Antigravity 에이전트용 `codegraph` (`cwd: F:\\dev\\krtour-map-antigravity`), Playwright, Sequential Thinking MCP 서버 등록.
+  - `antigravity.json` (프로젝트 루트): Antigravity용 MCP 구성 동기화.
+  - `claude.json` (프로젝트 루트): Claude Code용 `codegraph` (`cwd: F:\\dev\\krtour-map-claude`) 등 MCP 설정 동기화.
+  - `.codex/config.toml` (프로젝트 루트): Codex용 `codegraph` (`cwd: F:\\dev\\krtour-map-codex`) 등 MCP 설정 동기화.
+- **배포 및 통합**:
+  - `chore/sync-mcp-style` 브랜치 생성 및 형상관리 추가.
+  - GitHub `gh` CLI 도구를 사용하여 PR#107 생성 후 Squash merge 및 원격 main 브랜치 머지 완료.
+
 ## 2026-05-31 (antigravity) — agent별 MCP 서버 설정 파일 추가 및 형상관리
 
 **작업**: 사용자 지시에 따라 `claude code`, `gpt codex`, `antigravity` 각 에이전트의 MCP 설정 파일을 작성 및 형상관리(git)에 추가하고, PR 생성 및 메인 브랜치 머지까지 성공적으로 수행함.
