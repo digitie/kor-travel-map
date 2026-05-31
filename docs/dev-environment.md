@@ -237,6 +237,32 @@ pytest -q
 pytest -m slow -q
 ```
 
+### 8.1 디버그 UI Playwright e2e — **서버는 WSL, Playwright는 Windows**
+
+debug UI(`packages/krtour-map-debug-ui`)의 Playwright e2e는 **하이브리드
+토폴로지**로 실행한다:
+
+| 구성요소 | 실행 위치 | 명령 |
+|----------|-----------|------|
+| backend (FastAPI) | **WSL ext4** | `.venv/bin/uvicorn krtour.map_debug_ui.app:create_app --factory --port 8087` |
+| frontend (Next.js) | **WSL ext4** | `npm run start` (`next start :8610`) |
+| **Playwright (chromium)** | **Windows** | `cd packages\krtour-map-debug-ui\frontend; npm run e2e` |
+
+WSL2 `localhostForwarding=true`로 Windows의 `http://127.0.0.1:8610` /
+`:8087` 요청이 WSL 서버에 도달한다. `playwright.config.ts`는 `webServer`를
+두지 않으므로 서버 2개는 미리 WSL에 떠 있어야 한다.
+
+> **왜 Playwright만 Windows인가**: WSL Ubuntu에는 chromium 구동에 필요한
+> system lib(`libasound.so.2` 등)가 없고 `sudo`가 비밀번호를 요구해 WSL 내
+> `playwright install-deps` 자동 설치가 불가하다. Windows에는 node + chromium이
+> 이미 갖춰져 있다. 따라서 **pytest(단위/통합)는 WSL, Playwright e2e는
+> Windows**가 표준이다. (WSL에서 굳이 돌리려면 `sudo apt-get install -y
+> libasound2t64 libnss3 libnspr4 …` 또는 `npx playwright install-deps`를 수동
+> 실행해야 하나, 권장 경로는 Windows 실행.)
+
+자세히는 `packages/krtour-map-debug-ui/frontend/README.md` §"e2e (Playwright)"
++ `frontend/playwright.config.ts` 상단 주석.
+
 ## 9. lint / type
 
 ```bash
