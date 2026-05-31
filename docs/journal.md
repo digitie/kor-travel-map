@@ -2,6 +2,17 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-01 (claude) — Sprint 4a 진입: MOIS provider 변환 코어
+
+**작업**: ADR-034 9단계 ⑦ — MOIS 인허가(LOCALDATA) provider 변환 코어 추가. `python-mois-api`(`import mois`)의 `PlaceRecord`를 place `FeatureBundle`로 정규화. 사용자 지시에 따라 **변환까지만** (적재/dedup/CLI mutex는 후속 PR).
+
+- **산출물**:
+  - `src/krtour/map/providers/mois.py` — structural Protocol `MoisLicensePlaceRecord`(`mois` 런타임 import 안 함, ADR-006) + async `license_record_to_bundle` / `license_records_to_bundles`(reverse_geocoder 보강). PROMOTED 42 슬러그만 승격 + `PROMOTED_CATEGORY_BY_SLUG`/`PROMOTED_PLACE_KIND_BY_SLUG` (docs §6.1, category 31코드 `_definitions` 검증). EXCLUDED 21 + 미매핑 + 비영업 skip. facility_info(building/medical/food/culture_sports).
+  - `tests/unit/test_providers_mois.py` (23 test).
+  - `providers/__init__.py` mois export + `__all__`.
+- **설계 결정 2건**: ① 자연키 구분자 `::` (`make_feature_id`/`make_source_record_key`가 `|` 금지 → kma 패턴) ② marker_color `P-01` (미사용 팔레트). `docs/mois-feature-etl.md` §8 `|`→`::` 정정.
+- **검증(WSL)**: mypy --strict 50 files / ruff All checks passed / import-linter 4 kept / 신규 23 test / 전체 699 passed·5 skip. 좌표는 mois가 변환한 WGS84 그대로(ADR-012/044, 좌표계 변환 X), legal_dong_code 1차 bjd_code·없으면 역지오코딩(ADR-009).
+
 ## 2026-06-01 (codex) — PR review 누락 보강 + 문서 정합성 sweep
 
 **작업**: 사용자 지시 "4일전 PR부터 검색해서 리뷰를 달지 않은 PR에는 상세리뷰"에
