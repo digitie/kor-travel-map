@@ -7,6 +7,11 @@
 
 ### Sprint 3 — DB 적재 오케스트레이션 + dedup + geocoding REST + e2e (2026-05-29~30)
 
+- **PR#115 — PR review 누락 보강 + 문서 정합성 sweep**:
+  2026-05-28 이후 PR #45~#114를 재조회하고 review submission이 없던 PR에
+  한국어 사후 상세 리뷰를 등록. 문서에서는 geocoding endpoint 정본(`/v1/address/*`)
+  과 서비스 메타 버전 2.0 표현을 분리하고, accepted ADR을 proposed로 부르던 문구와
+  `PlaceCoordinate` 잔존 예시, `docs/tasks.md` 현재 상태 drift를 정정.
 - **PR#114 — kraddr-geo 최신 로컬 포트 정합 + 라이브 검증 보강**:
   `python-kraddr-geo` 최신 로컬 정책(`docs/ports.md`)에 맞춰 debug-ui
   geocoding 기본 base URL과 live 테스트 기본값을 `http://127.0.0.1:8888`로
@@ -30,7 +35,7 @@
   backend `/debug/health`·`/debug/version`·`/debug/etl/*` 연동, role/heading
   + native select nth 선택자). `docs/reports/debug-ui-e2e-2026-05-29.md`에
   backend 5경로 실 HTTP 통과 증거 + 사람용 런북.
-- **PR#90 — geocoding python API → REST API v2 전환** (#123):
+- **PR#90 — geocoding python API → REST `/v1/address/*` 전환** (#123):
   `krtour.map.geocoding`을 in-process `AsyncAddressClient` 가정에서
   **kraddr-geo REST `/v1/address/*`**(ver 2.0)로 재작성. structural Protocol을
   실제 `ReverseResponse`/`GeocodeResponse`/`AddressStructure`(vworld

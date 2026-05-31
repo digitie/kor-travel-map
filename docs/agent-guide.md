@@ -109,26 +109,21 @@ PR은 불완전하다.
 # resume.md
 
 ## 현재 상태
-v2 Sprint 1 scaffolding 종료, Sprint 2 진입 준비. ADR 001~034 모두 accepted.
+Sprint 3 완료, Sprint 4 4a 진입 준비. ADR 001~044 모두 accepted.
+main 최신은 PR#114이며 geocoding 정본은 REST `/v1/address/*` + 8888 포트.
 
 ## 다음 한 작업
-Sprint 2 prep — `infra/models.py` + Alembic 첫 revision.
+Sprint 4 4a — MOIS Step A/B bulk 변환 + dedup queue 본격 운영.
 
 ## 진척도
 - [x] AGENTS.md / README / SKILL / CLAUDE
-- [x] docs/architecture, decisions(ADR-001~019), data-model
-- [x] docs/performance, test-strategy, backend-package, agent-guide
-- [ ] docs/feature-model (v1에서 가져와 v2 기준으로 정리)
-- [ ] docs/provider-contract (v1 + ADR-006 통합)
-- [ ] docs/external-apis (provider별 키 발급/호출 정책)
-- [ ] docs/dev-environment + windows-reinstall-recovery
-- [ ] docs/tasks, resume, journal 초기 엔트리
-- [ ] 코드 작성 단계 진입 검토
+- [x] docs/architecture, decisions(ADR-001~044), data-model
+- [x] provider 변환, PostGIS 적재/조회, consistency report, dedup queue
+- [x] debug-ui `/features` + `/geocoding`, Windows Playwright e2e
+- [ ] Sprint 4 MOIS provider + 첫 bulk 적재
 
 ## 다음 ADR 후보
-- ADR-020: 캐시 전략
-- ADR-021: 디버그 API OpenAPI 정책
-- ADR-022: 단위 테스트 coverage 단계적 상향 계획
+- ADR-045: 다음 신규 의사결정
 
 ## 차단 사유 / 결정 대기
 - (없음)
@@ -312,17 +307,17 @@ GitHub branch protection (운영자 수동 설정):
 (`docs/windows-reinstall-recovery.md` §4 포맷). 다음 에이전트/사람은 PR URL과
 `docs/resume.md`만 보면 바로 인수받을 수 있다.
 
-## 8. 코드 작성 단계 (Sprint 1 종료, Sprint 2 진입 준비)
+## 8. 코드 작성 단계 (Sprint 4 진입 준비)
 
 본 저장소는 T-014 승인 (2026-05-25, PR#16) 이후 **코드 작성 단계**다.
-Sprint 1 scaffolding 완료 — `src/krtour/map/` 6 layer (category 144건 + dto
-+ core + infra + providers/client placeholder) + CI workflows + import-linter
-4 계약 활성. 신규 코드는 항상 PR (ADR-021).
+2026-06-01 현재 Sprint 1~3은 완료되었고 main은 PR#114까지 머지되었다.
+다음 코드는 Sprint 4 4a(MOIS Step A/B bulk 변환 + dedup queue 운영)에서 시작한다.
+신규 코드는 항상 PR (ADR-021).
 
 기본 작업 절차:
 1. 사용자 의도 명확화 (어떤 모듈/계층/메서드인지)
-2. ADR이 필요한지 확인 (`docs/decisions.md` 001~034 모두 accepted, 신규는
-   035+)
+2. ADR이 필요한지 확인 (`docs/decisions.md` 001~044 모두 accepted, 신규는
+   045+)
 3. 테스트 우선 작성 (`docs/test-strategy.md` §12 우선순위)
 4. 구현 (`pytest -q`/`ruff check`/`mypy --strict`/`lint-imports` 통과)
 5. 통합 테스트 + EXPLAIN 검증 (DB 닿는 경우)

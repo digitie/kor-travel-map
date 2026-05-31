@@ -2,6 +2,26 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-01 (codex) — PR review 누락 보강 + 문서 정합성 sweep
+
+**작업**: 사용자 지시 "4일전 PR부터 검색해서 리뷰를 달지 않은 PR에는 상세리뷰"에
+따라 2026-05-28 이후 PR #45~#114를 GitHub에서 조회했다. review submission이 없던
+PR #61~#114에 한국어 사후 상세 리뷰를 등록했고, 재조회 결과 review 누락 PR 0건을
+확인했다.
+
+**문서 보강**:
+- `AGENTS.md`/`SKILL.md`/`docs/sprints/SPRINT-4.md`: 이미 accepted인 ADR-035/039/040/041을
+  proposed로 표기하던 문구를 정정.
+- `docs/address-geocoding.md`/`docs/resume.md`/`docs/sprints/README.md`: geocoding 현재
+  endpoint 정본을 REST `/v1/address/*` + 로컬 `http://127.0.0.1:8888`로 명확히 하고,
+  서비스 메타 버전 2.0과 endpoint prefix v1이 서로 다른 축임을 명시.
+- `docs/address-geocoding.md`: `PlaceCoordinate` 잔존 예시를 `Coordinate`로 교체.
+- `docs/tasks.md`: 오래된 Sprint 2 진행 중 문구를 PR#114 기준 현재 상태와 Sprint 4 4a
+  다음 작업으로 갱신.
+
+**검증**: review 누락 목록 재조회 결과 없음. 문서 변경은 `ruff format --check` 대상이
+아니므로 Markdown 링크/키워드 검색과 `git diff --check`로 확인.
+
 ## 2026-05-31 (codex) — kraddr-geo 최신 포트 8888 정합 + 라이브 검증 준비
 
 **작업**: 사용자 지시 "라이브러리 최신버전을 기준으로 업데이트"에 따라 로컬

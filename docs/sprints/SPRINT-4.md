@@ -96,7 +96,7 @@ package), `_steps.py` (4단계), `_slugs.py` (195 슬러그 + PROMOTED 42 분류
   §8`).
 - 결과는 `Feature.phone` 갱신 + `source_links(role='enrichment')`.
 
-### 2.8 CLI mutex 첫 도입 (ADR-039 proposed 2026-05-27)
+### 2.8 CLI mutex 첫 도입 (ADR-039 accepted 2026-05-27)
 
 Sprint 4 진입과 함께 `src/krtour/map/cli/` 폴더 신설 + 첫 CLI 명령부터
 PostgreSQL advisory lock 기반 mutex 박음:
@@ -114,7 +114,7 @@ PostgreSQL advisory lock 기반 mutex 박음:
 - ADR-039 lock 잔존 fallback: `lifespan`/`atexit`로 unlock + `pg_stat_activity`
   helper로 lock holder 확인.
 
-### 2.9 kraddr-base 흡수 prep (ADR-041 proposed 2026-05-27)
+### 2.9 kraddr-base 흡수 prep (ADR-041 accepted 2026-05-27)
 
 Sprint 4 진입 prep PR로 `python-kraddr-base` 전수 survey + 흡수 계획:
 
@@ -124,7 +124,7 @@ Sprint 4 진입 prep PR로 `python-kraddr-base` 전수 survey + 흡수 계획:
   Sprint 5.
 - 흡수 후 `pyproject.toml`에서 `python-kraddr-base` git URL 제거 PR (마지막).
 
-### 2.10 Backup/Restore prep (ADR-040 proposed 2026-05-27)
+### 2.10 Backup/Restore prep (ADR-040 accepted 2026-05-27)
 
 운영 단계 진입 직전 Sprint 4 끝물에 backup/restore 1차 구현:
 

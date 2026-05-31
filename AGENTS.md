@@ -160,7 +160,7 @@ feature_id` / provider 변환 함수 / `core/scoring.py` / `infra/models.py`)를
 3. `docs/sprints/README.md` — Sprint 1~5 계획 + ADR-034 9단계 순서
 4. `docs/architecture.md` — 의존 방향, 계층, 데이터 흐름
 5. `docs/resume.md` — 현재 진척도와 "다음 한 작업"
-6. `docs/decisions.md` — 관련 ADR (특히 027~034 proposed)
+6. `docs/decisions.md` — 관련 ADR (특히 accepted ADR 027~044)
 7. 이번 작업과 직결된 docs 항목 (provider 추가면 `docs/provider-contract.md`,
    현재 sprint면 해당 `docs/sprints/SPRINT-N.md` 등)
 
@@ -195,7 +195,7 @@ feature_id` / provider 변환 함수 / `core/scoring.py` / `infra/models.py`)를
 
 - **위치**: `packages/krtour-map-debug-ui/src/krtour/map_debug_ui/` (본 monorepo
   내, 별도 `pyproject.toml`).
-- **운영 범위 (ADR-035, proposed 2026-05-27)**: 디버그 + admin + 유지보수 +
+- **운영 범위 (ADR-035, accepted 2026-05-27)**: 디버그 + admin + 유지보수 +
   프로덕션 운영 UI. 라우터 prefix로 시각적 분리:
   - `/debug/...` — 개발자용 (fixture replay, EXPLAIN 등)
   - `/admin/...` — 운영자용 (jobs / dedup-review / backup 등 — ADR-040)
@@ -211,9 +211,11 @@ feature_id` / provider 변환 함수 / `core/scoring.py` / `infra/models.py`)를
 
 ### Frontend stack (ADR-025 + ADR-026 + ADR-036 + ADR-037)
 
-- **지도**: `maplibre-vworld-js` 별도 라이브러리(v0.1.0 목표, ADR-036). 공통
+- **지도**: `maplibre-vworld-js` 별도 라이브러리(현재 v0.1.2, ADR-036). 공통
   기능은 상류, TripMate 전용 확장만 본 저장소(`packages/krtour-map-debug-ui/
   frontend/` + 향후 `packages/tripmate-map-extensions/`).
+- **앱 프레임워크**: Next.js 16 + React 19 + TypeScript. `next lint`는 Next.js
+  16에서 제거되어 ESLint flat config(`eslint.config.mjs`)를 직접 실행한다.
 - **서버 상태**: TanStack Query — 모든 `/debug/...`, `/admin/...`, `/ops/...`,
   `/features/...` 응답은 useQuery/useMutation hook으로 래핑 (ADR-037).
 - **클라이언트 상태**: Zustand — map viewport / 카테고리 filter / fixture
@@ -324,7 +326,7 @@ feature_id` / provider 변환 함수 / `core/scoring.py` / `infra/models.py`)를
 19. **`src/krtour/__init__.py` 만들지 금지** — PEP 420 implicit namespace.
     파일이 생기는 순간 `krtour-map-debug-ui` 같은 자매 distribution과 충돌.
     CI에서 차단 체크.
-20. **CLI 중복 실행이 위험한 명령에 mutex 없이 머지 금지** (ADR-039 proposed) —
+20. **CLI 중복 실행이 위험한 명령에 mutex 없이 머지 금지** (ADR-039 accepted) —
     `import`/`dedup-merge`/`backup`/`restore`/`alembic upgrade` 등은 PostgreSQL
     advisory lock(`pg_try_advisory_lock`)으로 mutex 가드. read-only / `--dry-run`
     은 예외. lock key: `hash(f"krtour-map:{command}:{scope}")`.
@@ -369,42 +371,29 @@ python -m pytest tests/integration -q
 python -m pytest -q
 ```
 
-## 코드 작성 단계 (Sprint 1 종료, Sprint 2 진입 준비)
+## 코드 작성 단계 (Sprint 4 진입 준비)
 
 본 저장소는 **T-014 (Sprint 1 진입)** 승인 (2026-05-25, PR#16) 이후
-**코드 작성 단계**다. Sprint 1 scaffolding 완료 (PR#17~#26 머지) — 모든
-proposed ADR (027~034)이 accepted 전환된 상태 (ADR-028 amendment §H 추가
-2026-05-25, knps-api keyless 반영).
+**코드 작성 단계**다. Sprint 1~3은 완료되었고, 2026-06-01 현재 main은
+PR#114까지 머지된 상태다.
 
-**현재 상태 (2026-05-25, Sprint 1 종료)**:
-- `src/krtour/map/` 6 layer (category 144건 + dto Feature + 5 detail +
-  Coordinate + SourceRecord/Link + FeatureBundle + core 7 exceptions +
-  ID helpers + infra `crs.py`/`db.py` skeleton + providers/client placeholder)
-- `.github/workflows/{ci,lint,openapi}.yml` + import-linter 4 계약 활성
-- testcontainers PostGIS 통합 테스트 베이스
-- review report `docs/reports/pr-1-21-review.md` P0 4건 해소
+**현재 상태 (2026-06-01, PR#114 기준)**:
+- Sprint 2: ADR-034 ①~④ provider(축제/날씨/유가/휴게소) + ETL live 11/11 dataset.
+- Sprint 3: KNPS + krheritage provider, PostGIS 적재/조회, consistency report,
+  dedup queue, `AsyncKrtourMapClient`, `/features` debug UI.
+- Geocoding: `krtour.map.geocoding.KraddrGeoRestClient`가 kraddr-geo REST
+  `/v1/address/*`를 호출한다. 로컬 기본 포트는 `http://127.0.0.1:8888`.
+- Frontend: Next.js 16 + React 19 + `maplibre-vworld-js#v0.1.2`, Windows
+  Playwright e2e 최신 기준 14/14 통과.
+- Coverage gate는 Sprint 3 기준 `fail_under=75`. Sprint 4 목표는 80% 도달.
 
-**다음 단계**: Sprint 2 (ADR-034 1-4단계 visitkorea/kma/opinet/krex) +
-진입 prep PR (`infra/models.py` + Alembic 첫 revision + `core/scoring.py`).
+**다음 단계**: Sprint 4 4a — MOIS Step A/B bulk 변환(`providers/mois.py`) +
+dedup queue 본격 운영 + 첫 적재 후 false-positive 측정.
 
-**Sprint 1 진행 중 가이드** (`docs/sprints/SPRINT-1.md` §2 참조):
+**계속 유효한 코드 작성 가이드**:
 - 모든 신규 코드는 `import-linter` 의존 방향 (`category → dto → core →
   infra → providers → client → cli`) 준수.
-- `src/krtour/__init__.py`는 **절대 만들지 말 것** (PEP 420 implicit
-  namespace, `tests/lint/test_no_namespace_init.py`가 차단).
-- Sprint 1 coverage bar `fail_under = 50` (ADR-032).
-- `dto/`는 Sprint 2부터 100% branch 강제.
-
-**현재 박혀 있는 skeleton** (Sprint 1 PR#17~):
-- `src/krtour/map/__init__.py` (PR#17) — `__version__` + 공개 API 주석
-- `src/krtour/map/py.typed` (PR#17) — PEP 561 marker
-- `src/krtour/map/settings.py` (PR#17) — `KrtourMapSettings` 최소
-- `src/krtour/map/{category,dto,core,infra,providers,client}/__init__.py`
-  (PR#17) — placeholder, 후속 PR에서 채움
-- `tests/lint/test_no_namespace_init.py` (PR#17) — ADR-022 enforcement
-- `tests/unit/test_smoke_import.py` (PR#17) — import + settings smoke
-- `pyproject.toml` (PR#10/16) — import-linter 차단 계약 + coverage 50%
-- `packages/krtour-map-debug-ui/scripts/export_openapi.py` (PR#10) —
-  Sprint 2 첫 라우터부터 실효 (ADR-031)
-- `packages/map-marker-react/` (PR#10) — Sprint 2 실 코드 (ADR-029)
-- `packages/krtour-map-debug-ui/frontend/` (PR#6/11) — Sprint 2 실 코드
+- `src/krtour/__init__.py`는 **절대 만들지 말 것** (PEP 420 implicit namespace,
+  `tests/lint/test_no_namespace_init.py`가 차단).
+- DTO/schema 변경 시 OpenAPI export와 debug-ui schema drift 여부를 함께 확인.
+- write/bulk/restore 계열 CLI 명령은 ADR-039 advisory lock 필요 여부를 확인.
