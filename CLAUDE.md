@@ -24,24 +24,23 @@ FastAPI 의존이 없다.
 
 ## 2. 현 단계
 
-**v2 Sprint 1 scaffolding 종료 / Sprint 2 진입 준비**. v1은 `v1` 브랜치
-보존, main은 orphan으로 v2 새로 시작. T-014 (코드 작성 단계 진입) 승인 +
-PR#17~#26 머지로 Sprint 1 산출물 완료:
-- `src/krtour/map/` PEP 420 namespace + category 144건 + dto (Feature +
-  5 detail + Coordinate + Source* + FeatureBundle) + core (exceptions +
-  ID helpers `make_feature_id`/`make_source_record_key`/`make_payload_hash`) +
-  infra skeleton (`crs.py` + `db.py`)
-- `.github/workflows/{ci,lint,openapi}.yml` + import-linter 4 계약 활성
-- review report (`docs/reports/pr-1-21-review.md`) P0 4건 해소
+**v2 Sprint 3 완료 / Sprint 4 진입 준비**. v1은 `v1` 브랜치 보존, main은
+orphan으로 v2 새로 시작. 2026-06-01 현재 main은 PR#114까지 머지됨:
+- Sprint 2~3: provider 변환, PostGIS 적재/조회, consistency report, dedup queue,
+  `AsyncKrtourMapClient`, KNPS/krheritage, debug UI `/features` 구현 완료
+- geocoding 정본: kraddr-geo REST `/v1/address/*`, 로컬 기본 `http://127.0.0.1:8888`
+- frontend 정본: Next.js 16 + React 19 + `maplibre-vworld-js#v0.1.2`, Windows
+  Playwright e2e 최신 14/14
+- 다음 작업: Sprint 4 4a — MOIS Step A/B bulk 변환 + dedup queue 본격 운영
 
 ADR 현황: **001~044 모두 accepted** (029는 ADR-043으로 supersede). 035~043은
 **PR#33 (2026-05-27) 일괄 accepted 전환** — 운영 단계 진입에 따른 9건:
-- 035 REST API admin 운영 확장 / 036 maplibre-vworld-js v0.1.0 분리
+- 035 REST API admin 운영 확장 / 036 maplibre-vworld-js 분리 (현재 본 저장소 핀 v0.1.2)
 - 037 frontend TanStack Query + Zustand / 038 GitHub Actions CI/CD 재활성화
 - 039 CLI mutex (advisory lock) / 040 Backup/Restore + 핫스왑 UI
 - 041 kraddr-base 코드 흡수 + 폐기 / 042 datagokr 표준데이터 축제 1차 source
 - 043 `@krtour/map-marker-react` npm 게시 보류 (ADR-029 supersede)
-- 044 관련 라이브러리 로컬(`~/dev/`) 우선 조회 + 데이터 정합성 책임 분계
+- 044 관련 라이브러리 로컬(`F:\dev\`, WSL `~/dev/`) 우선 조회 + 데이터 정합성 책임 분계
 
 다음 후보 번호 = **ADR-045**. ADR-030~033은 2026-05-29 사용자 승인 확정,
 ADR-033 Phase 1(F1~F3 정합성) 구현 완료. implementation 시점: 038 즉시 / 042

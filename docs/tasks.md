@@ -4,22 +4,34 @@
 
 ## 진행 중
 
-**open PR 없음** (main `225ac77`, PR#49까지 merged). 다음 작업은 새 feature
-branch로.
+**open PR 없음** (main `765e108`, PR#114까지 merged). 다음 작업은 새 feature branch에서
+Sprint 4 4a(MOIS Step A/B bulk 변환 + dedup queue 본격 운영)로 시작한다.
 
-### Sprint 2 종료 게이트 (잔여 4건 — 단일 출처: `sprints/SPRINT-2.md §7`)
+### 현재 기준 보강 필요 체크포인트 (2026-06-01)
 
-1. **visitkorea enrichment** — `providers/visitkorea.py`
-   `festival_to_enrichment_links` (datagokr feature_id ↔ visitkorea contentId,
-   `source_role='enrichment'`). Sprint 2 §2.1 끝물.
-2. **KMA `mid_forecast`** — `mid_forecast_to_weather_values` 중기예보 텍스트 +
-   AM/PM split. Sprint 2 §2.2 마지막 dataset.
-3. **ETL live 나머지 8 dataset** — `etl_live.LIVE_LOADER_REGISTRY` 확장
-   (datagokr 1 + opinet 2 + krex 4 + kma_weather_alerts 1).
-4. **Coverage bar 상향 + Sprint 2 종료 마무리** — `pyproject.toml` `fail_under`
-   50→65 (실측 96%) + journal 회고 + resume → Sprint 3 + `SPRINT-3.md` 진입 PR 준비.
+1. **MOIS 4a 진입** — `docs/sprints/SPRINT-4.md §2.1` Step A/B를 기준으로
+   `providers/mois.py` structural Protocol + bulk 변환 함수부터 구현.
+2. **dedup queue 운영화** — PR#88/#89로 적재 경로는 들어갔으므로 MOIS 첫 적재 후
+   false-positive 측정과 가중치 조정 여부를 기록.
+3. **문서 최신성 유지** — 현재 geocoding endpoint 정본은 REST `/v1/address/*`,
+   로컬 포트는 `http://127.0.0.1:8888`, frontend 현재 기준은 Next.js 16 +
+   `maplibre-vworld-js#v0.1.2`.
+4. **검증 기준** — WSL unit/integration/live pytest + Windows Playwright e2e + GitHub
+   Actions green 후 머지.
 
-## 최근 완료 (Sprint 2)
+## 최근 완료 (2026-05-31~2026-06-01)
+
+- **PR#114** (merged 2026-05-31): geocoding live 기본 포트 8888 정합,
+  Next.js 16 + `maplibre-vworld-js#v0.1.2`, GDAL 3.8.4 고정, Windows Playwright
+  e2e 14/14, 관련 문서 갱신.
+- **PR#110~#112**: Windows Git + NTFS source-of-truth 정책, WSL 실행/Playwright
+  분리, journal/resume 정책 로그 보강.
+- **PR#101~#104**: `/debug/geocoding/*`, `/geocoding` frontend, geocoding edge/live,
+  dedup/geocoding 통합 회귀 테스트 보강.
+- **PR#96~#100**: Sprint 4 prep, `/features` UX 보강, map-marker-react 구현,
+  direct-main push revert와 통합 검증 보고서 재적용.
+
+## 완료 이력 (Sprint 2)
 
 - **PR#49** (merged 2026-05-28): `maplibre-vworld` v0.1.0 의존 핀 정합 — 기존
   `^1.0.0`은 이중 오류(버전 미존재 + npm 미게시) → `github:digitie/maplibre-
