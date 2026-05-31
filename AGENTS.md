@@ -51,18 +51,12 @@ TripMate ↔ krtour-map 사이에는 REST API가 없다.
 
 ## 개발 환경 정책 (PC, WSL)
 
-PC 개발은 **WSL ext4** 위에서 수행한다. NTFS 마운트에서 직접 `git`/`pip`/`uvicorn`을
-실행하지 않는다 — 파일 권한, inotify, 심볼릭 링크, 대량 I/O 성능 모두 저하된다.
-형제 라이브러리 (`python-kraddr-geo` / `python-kraddr-base` / `python-knps-api`
-등)와 **동일 정책**.
+PC 개발은 **NTFS (`F:\dev\python-krtour-map`)** 위에서 수행한다. 모든 코드 수정과 git 관리는 NTFS에서 이루어지며, 테스트 및 실행이 필요할 때만 WSL ext4(`~/sandbox/python-krtour-map/` 등)로 복사하여 구동하는 정책을 따른다. 형제 라이브러리 (`python-kraddr-geo` / `python-kraddr-base` / `python-knps-api` 등)와 **동일 정책**.
 
-- **코드/가상환경**: ext4 (`~/dev/python-krtour-map/`).
-- **데이터(`data/`)**: NTFS의 프로젝트 디렉토리 (예: `/mnt/f/dev/python-krtour-map/data/`).
-  MOIS localdata zip, krheritage SHP, fixture 대용량은 모두 NTFS. ext4 작업
-  디렉토리에는 심볼릭 링크(`ln -s /mnt/f/dev/python-krtour-map/data data`).
-- **테스트**: 단위 테스트 픽스처는 소량을 ext4의 `tests/fixtures/`에. 통합/e2e와
-  전수 검증은 NTFS의 `data/`를 reference.
-- **카피 정책**: 작업이 끝나면 ext4 → NTFS로 rsync. Git의 source of truth는 ext4.
+- **코드/가상환경**: NTFS (`F:\dev\python-krtour-map/`).
+- **데이터(`data/`)**: NTFS의 프로젝트 디렉토리 (`F:\dev\python-krtour-map\data\`).
+- **테스트**: 테스트 수행 시 WSL 내의 ext4 디렉토리로 소스코드를 복사하여 WSL 및 Docker 환경에서 통합 테스트(PostGIS)와 e2e 테스트를 구동한다.
+- **카피 정책**: 테스트 실행 및 배포 전 NTFS -> WSL ext4로 rsync 하여 동기화한다. Git의 source of truth는 NTFS다.
 
 자세한 절차는 `docs/dev-environment.md`. Windows 재설치/WSL 초기화/새 세션 인수인계
 시 `docs/windows-reinstall-recovery.md`도 함께 읽는다.
@@ -76,14 +70,14 @@ PC 개발은 **WSL ext4** 위에서 수행한다. NTFS 마운트에서 직접 `g
 
 | AI 에이전트 | 고정 worktree 디렉토리 |
 |------------|----------------------|
-| ChatGPT Codex | `~/dev/krtour-map-codex/` |
-| Claude Code (본 SDK 포함) | `~/dev/krtour-map-claude/` |
-| Google Antigravity 2.0 | `~/dev/krtour-map-antigravity/` |
+| ChatGPT Codex | `F:\dev\python-krtour-map-codex` |
+| Claude Code (본 SDK 포함) | `F:\dev\python-krtour-map-claude` |
+| Google Antigravity 2.0 | `F:\dev\python-krtour-map-antigravity` |
 
 운영 룰:
 
-- 메인 repo 디렉토리(`~/dev/python-krtour-map/`)의 **형제로** worktree 생성:
-  `git worktree add ../krtour-map-claude main`.
+- 메인 repo 디렉토리(`F:\dev\python-krtour-map\`)의 **형제로** worktree 생성:
+  `git worktree add -b sandbox/claude ../python-krtour-map-claude main`.
 - 작업마다 **그 worktree 안에서 브랜치만 새로** 딴다 — worktree 자체는
   고정. `git switch -c feat/<topic> main`.
 - 각 worktree에 [colbymchenry/codegraph](https://github.com/colbymchenry/codegraph)
