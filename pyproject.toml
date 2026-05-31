@@ -48,6 +48,9 @@ dev = [
   "testcontainers[postgres]>=4",
   "vcrpy>=6",
   "coverage>=7",
+  # geocoding.py는 httpx를 TYPE_CHECKING-only로 import (런타임 의존 아님,
+  # 호출자 주입 — ADR-006/044). mypy --strict가 stub를 찾도록 dev에만 둔다.
+  "httpx>=0.27",
 ]
 # 디버그 REST API/UI는 별도 패키지로 분리 (ADR-020):
 #   `packages/krtour-map-debug-ui/`. FastAPI/Uvicorn 의존성은 거기 있다.
