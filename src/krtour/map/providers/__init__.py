@@ -69,6 +69,33 @@ from krtour.map.providers.krex import (
     rest_areas_to_bundles,
     traffic_notices_to_bundles,
 )
+from krtour.map.providers.mois import (
+    DATASET_KEY_BULK as MOIS_DATASET_KEY_BULK,
+)
+from krtour.map.providers.mois import (
+    DATASET_KEY_CLOSED as MOIS_DATASET_KEY_CLOSED,
+)
+from krtour.map.providers.mois import (
+    DATASET_KEY_DETAIL as MOIS_DATASET_KEY_DETAIL,
+)
+from krtour.map.providers.mois import (
+    DATASET_KEY_HISTORY as MOIS_DATASET_KEY_HISTORY,
+)
+from krtour.map.providers.mois import (
+    EXCLUDED_SERVICE_SLUGS,
+    MOIS_MARKER_COLOR,
+    PROMOTED_CATEGORY_BY_SLUG,
+    PROMOTED_PLACE_KIND_BY_SLUG,
+    PROMOTED_SERVICE_SLUGS,
+    MoisLicensePlaceRecord,
+    license_record_to_bundle,
+    license_records_to_bundles,
+    resolve_license_category,
+    resolve_license_place_kind,
+)
+from krtour.map.providers.mois import (
+    PROVIDER_NAME as MOIS_PROVIDER_NAME,
+)
 from krtour.map.providers.opinet import (
     OPINET_PRODUCT_KEY_MAP,
     OPINET_PRODUCT_NAME_KO,
@@ -172,4 +199,20 @@ __all__ = [
     "REST_AREA_MARKER_COLOR",
     "TRAFFIC_NOTICE_MARKER_ICON",
     "TRAFFIC_NOTICE_MARKER_COLOR",
+    # mois (Sprint 4a — MOIS 인허가 LOCALDATA, ADR-024/034 ⑦)
+    "MoisLicensePlaceRecord",
+    "license_record_to_bundle",
+    "license_records_to_bundles",
+    "resolve_license_category",
+    "resolve_license_place_kind",
+    "PROMOTED_SERVICE_SLUGS",
+    "EXCLUDED_SERVICE_SLUGS",
+    "PROMOTED_CATEGORY_BY_SLUG",
+    "PROMOTED_PLACE_KIND_BY_SLUG",
+    "MOIS_PROVIDER_NAME",
+    "MOIS_DATASET_KEY_BULK",
+    "MOIS_DATASET_KEY_HISTORY",
+    "MOIS_DATASET_KEY_CLOSED",
+    "MOIS_DATASET_KEY_DETAIL",
+    "MOIS_MARKER_COLOR",
 ]
