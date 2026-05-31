@@ -1,0 +1,20 @@
+{
+  "ignore": {
+    "files": ["dist/**", "dev/**"],
+    "rules": [
+      "deslop/unused-file",
+      "deslop/unused-dev-dependency",
+      "react-doctor/exhaustive-deps",
+      "react-doctor/no-event-handler",
+      "react-doctor/advanced-event-handler-refs",
+      "react-doctor/no-cascading-set-state",
+      "react-doctor/rerender-state-only-in-handlers",
+      "react-doctor/prefer-useReducer",
+      "react-doctor/no-giant-component",
+      "react-doctor/no-z-index-9999",
+      "react-doctor/no-long-transition-duration",
+      "react-doctor/no-render-in-render",
+      "react-doctor/prefer-tag-over-role"
+    ]
+  }
+}

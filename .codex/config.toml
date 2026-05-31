@@ -1,7 +1,8 @@
 [mcp_servers.codegraph]
 enabled = true
-command = "codegraph"
-args = ["serve", "--mcp"]
+command = "npx"
+args = ["-y", "@colbymchenry/codegraph", "serve", "--mcp"]
+cwd = "F:\\dev\\krtour-map-codex"
 
 [mcp_servers.playwright]
 command = "npx"
