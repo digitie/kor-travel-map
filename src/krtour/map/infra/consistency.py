@@ -15,9 +15,13 @@ F1~F3 critical 케이스를 raw SQL(ADR-004)로 검사하고 결과를
   (price/weather는 detail을 갖지 않음 — DETAIL_MODELS 제외.)
 - **F3** CRS drift — ``coord``가 있는데 ``coord_5179`` ≠ ST_Transform(coord,5179)
   (ADR-012 STORED generated column 신뢰 손상). severity=ERROR.
+- **F4** dedup 백로그 — ``ops.dedup_review_queue`` 미해소(pending) 수가
+  ``DEDUP_PENDING_WARN_THRESHOLD``(baseline) 초과. severity=**WARN**(observe-only,
+  적재 차단 안 함). F1~F3과 달리 행별 위반이 아니라 **임계 초과 집계** — 초과 시
+  count=pending 수, 이하면 OK. (SPRINT-4 §2.3, Sprint 4b.)
 
-F4~F8 + Dagster 게이트는 Phase 2(ADR-033). 본 모듈은 케이스를
-``CONSISTENCY_CASES``로 선언만 추가하면 확장된다.
+F5~F8 + Dagster 게이트는 Phase 2(ADR-033). F1~F3은 ``CONSISTENCY_CASES``(행별 정적
+SQL)로, F4는 ``run_consistency_checks``의 임계 분기로 추가된다.
 
 ADR 참조: ADR-002(async) / ADR-004(raw SQL) / ADR-012 / ADR-018 / ADR-033.
 """
@@ -39,6 +43,7 @@ __all__ = [
     "CaseResult",
     "ConsistencyReport",
     "CONSISTENCY_CASES",
+    "DEDUP_PENDING_WARN_THRESHOLD",
     "build_report",
     "run_consistency_checks",
 ]
@@ -48,6 +53,13 @@ _SEVERITY_ORDER: Final[dict[str, int]] = {"OK": 0, "WARN": 1, "ERROR": 2}
 
 # 케이스별 sample id 기본 상한 (리포트 비대화 방지).
 _SAMPLE_LIMIT: Final[int] = 20
+
+# F4 baseline (ADR-033 §2.3) — dedup_review_queue 미해소(pending) 백로그가 이 수를
+# 초과하면 severity=WARN(observe-only, Phase 1은 게이트 없음). **provisional** — MOIS
+# Step A bulk가 큐를 채운 뒤 첫 적재 후보 수 기준으로 재조정한다(SPRINT-4 §2.3
+# "후반에 baseline 조정"). 운영 시 호출자가 ``dedup_pending_threshold`` 인자로 덮어쓸
+# 수 있다.
+DEDUP_PENDING_WARN_THRESHOLD: Final[int] = 1000
 
 # detail-bearing kind (DETAIL_MODELS 매핑 — price/weather 제외, ADR-018).
 _DETAIL_KINDS_SQL: Final[str] = "'place','event','notice','route','area'"
@@ -170,14 +182,53 @@ def build_report(batch_id: str, cases: list[CaseResult]) -> ConsistencyReport:
     )
 
 
+_F4_PENDING_COUNT_SQL: Final[str] = (
+    "SELECT count(*) FROM ops.dedup_review_queue WHERE status = 'pending'"
+)
+_F4_PENDING_SAMPLE_SQL: Final[str] = (
+    "SELECT review_key FROM ops.dedup_review_queue WHERE status = 'pending' "
+    "ORDER BY total_score DESC LIMIT :lim"
+)
+
+
+async def _check_f4_dedup_backlog(
+    session: AsyncSession, *, threshold: int, sample_limit: int
+) -> CaseResult:
+    """F4 — pending dedup 백로그가 baseline 초과 시 WARN (임계 집계 케이스)."""
+    pending = int(
+        (await session.execute(text(_F4_PENDING_COUNT_SQL))).scalar_one()
+    )
+    over = pending > threshold
+    sample_ids: list[str] = []
+    if over:
+        rows = (
+            await session.execute(
+                text(_F4_PENDING_SAMPLE_SQL), {"lim": sample_limit}
+            )
+        ).scalars().all()
+        sample_ids = [str(r) for r in rows]
+    return CaseResult(
+        code="F4",
+        severity="WARN",
+        description=(
+            f"dedup_review_queue 미해소(pending) 백로그 baseline {threshold} 초과 "
+            f"(현재 {pending}, ADR-033 F4 — observe-only)"
+        ),
+        # 초과 시에만 위반(count>0) — 이하면 OK. count는 현재 pending 수.
+        count=pending if over else 0,
+        sample_ids=sample_ids,
+    )
+
+
 async def run_consistency_checks(
     session: AsyncSession,
     *,
     batch_id: str | None = None,
     persist: bool = True,
     sample_limit: int = _SAMPLE_LIMIT,
+    dedup_pending_threshold: int = DEDUP_PENDING_WARN_THRESHOLD,
 ) -> ConsistencyReport:
-    """F1~F3 정합성 검사 실행 + (옵션) ``ops.feature_consistency_reports`` 적재.
+    """F1~F4 정합성 검사 실행 + (옵션) ``ops.feature_consistency_reports`` 적재.
 
     Parameters
     ----------
@@ -190,6 +241,9 @@ async def run_consistency_checks(
         호출자 책임 — Phase 1은 게이트 없이 관측만).
     sample_limit:
         케이스별 ``sample_ids`` 상한.
+    dedup_pending_threshold:
+        F4 baseline — pending dedup 백로그가 이 수를 초과하면 WARN. 기본
+        ``DEDUP_PENDING_WARN_THRESHOLD``(provisional).
 
     Returns
     -------
@@ -224,6 +278,13 @@ async def run_consistency_checks(
                 sample_ids=sample_ids,
             )
         )
+
+    # F4 — 임계 집계 케이스(행별 정적 SQL 아님). F1~F3 뒤에 append.
+    cases.append(
+        await _check_f4_dedup_backlog(
+            session, threshold=dedup_pending_threshold, sample_limit=sample_limit
+        )
+    )
 
     report = build_report(bid, cases)
     if persist:

@@ -2,6 +2,25 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-01 (claude) — Sprint 4b: ADR-033 F4 정합성 검사 (dedup 백로그 baseline)
+
+**작업**: ADR-033 Phase 1에 **F4**(dedup_review_queue 미해소 백로그 baseline 초과
+→ WARN) 추가. SPRINT-4 §2.3. observe-only(적재 차단 없음).
+
+- **infra/consistency**: `_check_f4_dedup_backlog` — pending dedup 수가
+  `DEDUP_PENDING_WARN_THRESHOLD`(provisional 1000) 초과 시 WARN, 이하면 OK. F1~F3
+  (행별 정적 SQL `CONSISTENCY_CASES`)과 달리 **임계 집계 케이스**라
+  `run_consistency_checks`의 분기로 추가(`dedup_pending_threshold` 인자로 override).
+  초과 시 count=현재 pending 수 + sample은 total_score 상위 pending review_key.
+- baseline는 **provisional** — MOIS Step A bulk가 큐를 채운 뒤 첫 적재 후보 수
+  기준 재조정(§2.3 "후반에 baseline 조정"). WARN은 ERROR(F1~F3)를 가리지 않음
+  (severity_max 우선순위).
+- **테스트**: integration 3(임계 이하 OK / 초과 WARN+sample / F4 WARN과 F1 ERROR
+  공존 시 severity_max=ERROR). 기존 clean-data 테스트는 빈 큐 → F4 count=0로 안 깨짐.
+- **검증(WSL)**: ruff clean / mypy --strict 60 files / import-linter 4 kept / 전체
+  **829 passed**(826 → +3).
+- **다음(Sprint 4b 잔여)**: Place phone enrichment 백그라운드 + Coverage 80%.
+
 ## 2026-06-01 (claude) — Sprint 4b: dedup 운영 FP 측정 도구 (queue accept/reject)
 
 **작업**: dedup_review_queue의 **운영자 결정** 누적분으로 실 false-positive율을
