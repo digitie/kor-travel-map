@@ -135,3 +135,80 @@ async def test_clean_data_reports_ok(migrated_session: AsyncSession) -> None:
         )
     ).scalar_one()
     assert cnt == 0
+
+
+# ── F4: dedup 백로그 baseline WARN (ADR-033 §2.3, Sprint 4b) ──────────────
+
+
+async def _seed_pending_dedup(
+    session: AsyncSession, n: int
+) -> None:
+    """정상 feature 2건 + pending dedup_review_queue n쌍 적재(서로 다른 pair)."""
+    session.add(_clean_place("f4-a"))
+    session.add(_clean_place("f4-b"))
+    for i in range(n):
+        session.add(_clean_place(f"f4-x{i}"))
+    await session.flush()
+    for i in range(n):
+        await session.execute(
+            text(
+                "INSERT INTO ops.dedup_review_queue "
+                "(feature_id_a, feature_id_b, total_score, name_score, "
+                " spatial_score, category_score, status) "
+                "VALUES ('f4-a', :fb, 70, 70, 70, 70, 'pending')"
+            ),
+            {"fb": f"f4-x{i}"},
+        )
+    await session.flush()
+
+
+async def test_f4_ok_below_threshold(migrated_session: AsyncSession) -> None:
+    await _seed_pending_dedup(migrated_session, 3)
+    report = await run_consistency_checks(
+        migrated_session, persist=False, dedup_pending_threshold=10
+    )
+    by_code = {c.code: c for c in report.cases}
+    assert "F4" in by_code
+    assert by_code["F4"].count == 0  # 3 ≤ 10 → OK
+    assert by_code["F4"].ok is True
+    assert report.severity_max == "OK"
+
+
+async def test_f4_warn_over_threshold(migrated_session: AsyncSession) -> None:
+    await _seed_pending_dedup(migrated_session, 5)
+    report = await run_consistency_checks(
+        migrated_session, persist=False, dedup_pending_threshold=2
+    )
+    by_code = {c.code: c for c in report.cases}
+    f4 = by_code["F4"]
+    assert f4.severity == "WARN"
+    assert f4.count == 5  # 5 > 2 → 위반(count=pending 수)
+    assert len(f4.sample_ids) == 5  # pending review_key 샘플
+    # 다른 위반(F1~F3) 없으면 severity_max는 WARN.
+    assert report.severity_max == "WARN"
+    assert report.summary["by_severity"]["WARN"] == 5
+
+
+async def test_f4_warn_does_not_block_errors(migrated_session: AsyncSession) -> None:
+    # F4 WARN + F1 ERROR 공존 → severity_max는 ERROR(F4가 ERROR를 가리지 않음).
+    await _seed_pending_dedup(migrated_session, 3)
+    migrated_session.add(
+        SourceRecordRow(
+            source_record_key="f4-orphan",
+            provider="datagokr",
+            dataset_key="d",
+            source_entity_type="t",
+            source_entity_id="o1",
+            raw_payload_hash="h",
+            fetched_at=_FETCHED,
+        )
+    )
+    await migrated_session.flush()
+    report = await run_consistency_checks(
+        migrated_session, persist=False, dedup_pending_threshold=1
+    )
+    by_code = {c.code: c for c in report.cases}
+    assert by_code["F4"].severity == "WARN"
+    assert by_code["F4"].count == 3
+    assert by_code["F1"].count >= 1
+    assert report.severity_max == "ERROR"

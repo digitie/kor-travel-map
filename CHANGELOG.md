@@ -7,6 +7,11 @@
 
 ### Sprint 4 — 운영 CLI (2026-06-01~)
 
+- **NEW**: ADR-033 **F4** 정합성 검사 — `infra.consistency`에 dedup 백로그 baseline
+  체크 추가. `ops.dedup_review_queue` 미해소(pending) 수가
+  `DEDUP_PENDING_WARN_THRESHOLD`(provisional 1000, `run_consistency_checks(...,
+  dedup_pending_threshold=N)`로 override) 초과 시 severity=**WARN**(observe-only —
+  적재 차단 없음, Phase 1). F1~F3(행별 정적 SQL)과 달리 임계 초과 집계 케이스.
 - **NEW**: dedup 운영 FP 측정 — `infra.status_repo.dedup_fp_stats`(dedup_review_queue
   status별 카운트 → confirmed=merged+accepted / FP=rejected / precision / fp_rate;
   ignored·pending 제외) + `krtour-map status` 출력에 `dedup FP(운영)` 라인 추가.
