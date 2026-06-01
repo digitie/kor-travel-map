@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-01 (claude) — ops.import_jobs 작업 큐 + jobs_repo (ADR-011)
+
+**작업**: advisory lock helper 위에 ADR-011 작업 큐 영속화. 프로세스 재시작
+안전성 + 다중 워커 직렬화(SKIP LOCKED). data-model.md §9.1 DDL 그대로.
+
+- **산출물**:
+  - `alembic/versions/0006_import_jobs.py` — `ops.import_jobs`(job_id/kind/payload/state/progress/current_stage/source_checksum/error_message/started_at/finished_at/heartbeat_at/created_at) + state/progress CHECK + 3 인덱스(state·kind_state·heartbeat partial).
+  - `infra/models.py` `ImportJobRow` ORM.
+  - `infra/jobs_repo.py` — `enqueue_import_job` / `claim_next_import_job`(advisory lock + `FOR UPDATE SKIP LOCKED`로 가장 오래된 queued→running) / `heartbeat_import_job` / `finish_import_job`(done→progress 100/failed/cancelled) / `recover_stale_running_jobs`(lifespan 복구 — heartbeat 만료 running→failed) + `ImportJob` dataclass.
+  - `infra/__init__.py` export (jobs_repo + 누락됐던 soft_delete_features_not_in_snapshot 보강).
+  - `tests/integration/test_jobs_repo.py`(9) — enqueue/claim FIFO/빈 큐 None/heartbeat/finish done·failed/invalid state raise/recover stale·fresh.
+- **검증(WSL)**: mypy --strict 53 files / ruff All checks passed / import-linter 4 kept / 신규 integration 9 + alembic 0006 upgrade green / 전체 **720 passed, 5 skipped**.
+
 ## 2026-06-01 (claude) — advisory lock helper (ADR-011 기초)
 
 **작업**: ADR-011 작업 큐 직렬화 / ADR-039 CLI mutex의 공통 기초인 PostgreSQL

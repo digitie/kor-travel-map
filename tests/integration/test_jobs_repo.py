@@ -1,0 +1,142 @@
+"""``test_jobs_repo`` — ops.import_jobs 작업 큐 lifecycle (ADR-011).
+
+enqueue → claim(SKIP LOCKED + advisory lock) → heartbeat → finish + lifespan
+복구를 testcontainers PostGIS(migrated_session, 0006 적용)로 검증한다.
+
+검증: ① enqueue queued ② claim FIFO + running 전이 ③ 빈 큐 claim None
+④ heartbeat progress/stage ⑤ finish done(progress=100)/failed ⑥ 종료 후
+재finish None ⑦ recover_stale running→failed.
+"""
+
+from __future__ import annotations
+
+from datetime import timedelta
+from typing import TYPE_CHECKING
+
+import pytest
+from sqlalchemy import text
+
+from krtour.map.infra.jobs_repo import (
+    claim_next_import_job,
+    enqueue_import_job,
+    finish_import_job,
+    heartbeat_import_job,
+    recover_stale_running_jobs,
+)
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+pytestmark = pytest.mark.integration
+
+
+async def _state(session: AsyncSession, job_id: str) -> str:
+    return (
+        await session.execute(
+            text("SELECT state FROM ops.import_jobs WHERE job_id = :id"),
+            {"id": job_id},
+        )
+    ).scalar_one()
+
+
+async def test_enqueue_creates_queued_job(migrated_session: AsyncSession) -> None:
+    job = await enqueue_import_job(
+        migrated_session,
+        kind="mois_license_full_update",
+        payload={"dataset_key": "mois_license_features_bulk"},
+        source_checksum="abc123",
+    )
+    assert job.state == "queued"
+    assert job.kind == "mois_license_full_update"
+    assert job.payload == {"dataset_key": "mois_license_features_bulk"}
+    assert job.progress == 0
+    assert await _state(migrated_session, job.job_id) == "queued"
+
+
+async def test_claim_fifo_and_transition_running(migrated_session: AsyncSession) -> None:
+    j1 = await enqueue_import_job(migrated_session, kind="k", payload={"n": 1})
+    j2 = await enqueue_import_job(migrated_session, kind="k", payload={"n": 2})
+    await migrated_session.flush()
+
+    claimed1 = await claim_next_import_job(migrated_session)
+    assert claimed1 is not None
+    assert claimed1.job_id == j1.job_id  # FIFO (created_at order)
+    assert claimed1.state == "running"
+    assert await _state(migrated_session, j1.job_id) == "running"
+
+    claimed2 = await claim_next_import_job(migrated_session)
+    assert claimed2 is not None
+    assert claimed2.job_id == j2.job_id
+
+
+async def test_claim_empty_queue_returns_none(migrated_session: AsyncSession) -> None:
+    assert await claim_next_import_job(migrated_session) is None
+
+
+async def test_heartbeat_updates_progress_and_stage(
+    migrated_session: AsyncSession,
+) -> None:
+    job = await enqueue_import_job(migrated_session, kind="k")
+    await claim_next_import_job(migrated_session)
+    updated = await heartbeat_import_job(
+        migrated_session, job.job_id, progress=42, current_stage="loading"
+    )
+    assert updated is not None
+    assert updated.progress == 42
+    assert updated.current_stage == "loading"
+    # queued 작업엔 heartbeat 안 먹음(running만).
+    other = await enqueue_import_job(migrated_session, kind="k")
+    assert await heartbeat_import_job(migrated_session, other.job_id) is None
+
+
+async def test_finish_done_sets_progress_100(migrated_session: AsyncSession) -> None:
+    job = await enqueue_import_job(migrated_session, kind="k")
+    await claim_next_import_job(migrated_session)
+    done = await finish_import_job(migrated_session, job.job_id, state="done")
+    assert done is not None
+    assert done.state == "done"
+    assert done.progress == 100
+    # 종료 후 재finish는 None(running 아님).
+    assert await finish_import_job(migrated_session, job.job_id, state="failed") is None
+
+
+async def test_finish_failed_records_error(migrated_session: AsyncSession) -> None:
+    job = await enqueue_import_job(migrated_session, kind="k")
+    await claim_next_import_job(migrated_session)
+    failed = await finish_import_job(
+        migrated_session, job.job_id, state="failed", error_message="boom"
+    )
+    assert failed is not None
+    assert failed.state == "failed"
+    assert failed.error_message == "boom"
+
+
+async def test_finish_invalid_state_raises(migrated_session: AsyncSession) -> None:
+    job = await enqueue_import_job(migrated_session, kind="k")
+    await claim_next_import_job(migrated_session)
+    with pytest.raises(ValueError, match="state must be one of"):
+        await finish_import_job(migrated_session, job.job_id, state="running")
+
+
+async def test_recover_stale_running_all(migrated_session: AsyncSession) -> None:
+    job = await enqueue_import_job(migrated_session, kind="k")
+    await claim_next_import_job(migrated_session)
+    assert await _state(migrated_session, job.job_id) == "running"
+
+    # stale_after=None → 모든 running 복구(재시작 가정).
+    recovered = await recover_stale_running_jobs(migrated_session, stale_after=None)
+    assert recovered == 1
+    assert await _state(migrated_session, job.job_id) == "failed"
+
+
+async def test_recover_stale_respects_fresh_heartbeat(
+    migrated_session: AsyncSession,
+) -> None:
+    job = await enqueue_import_job(migrated_session, kind="k")
+    await claim_next_import_job(migrated_session)  # heartbeat_at = now()
+    # 5분 cutoff → 방금 claim한 fresh 행은 복구 대상 아님.
+    recovered = await recover_stale_running_jobs(
+        migrated_session, stale_after=timedelta(minutes=5)
+    )
+    assert recovered == 0
+    assert await _state(migrated_session, job.job_id) == "running"
