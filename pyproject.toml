@@ -194,12 +194,12 @@ exclude_lines = [
   "if TYPE_CHECKING:",
   "@overload",
 ]
-fail_under = 75  # ADR-032 Sprint 3 bar (65→75 상향, 2026-05-30 Sprint 3 종료). 실측 92.66%.
+fail_under = 80  # ADR-032 Sprint 4 bar (75→80 상향, 2026-06-01 Sprint 4b 종료). 실측 94.12%.
 # ADR-032 Sprint별 fail_under schedule:
 #   Sprint 1 (scaffolding):  fail_under = 50
 #   Sprint 2 (core + 4 provider): 65
-#   Sprint 3 (provider 절반 + infra): 75   ← 현재 (실측 92.66%라 무위험 상향)
-#   Sprint 4 (integrity + edge cases): 80  ← 목표 도달
+#   Sprint 3 (provider 절반 + infra): 75
+#   Sprint 4 (integrity + edge cases): 80   ← 현재 (실측 94.12%라 무위험 상향, Sprint 4b)
 #   Sprint 5 (operational entry): 80 유지 + 회귀 방지
 # 단계 상향 PR은 반드시 coverage gap 해소 PR과 묶음 (red main 0회).
 # dto/는 Sprint 2부터 100% branch 항상 강제 (별도 [tool.coverage.report.partial_branches]).

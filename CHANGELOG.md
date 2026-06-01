@@ -7,6 +7,8 @@
 
 ### Sprint 4 — 운영 CLI (2026-06-01~)
 
+- **CHANGED**: coverage 게이트 `fail_under` 75 → **80** 상향 (ADR-032 Sprint 4 목표
+  도달, 실측 94.12%). 모든 tier 충족(core/infra/providers/전체 ≥ 목표). Sprint 4b 종료.
 - **NEW**: Place 전화번호 보강(`krtour.map.enrichment`, Sprint 4b 백그라운드 시작) —
   전화번호 없는 MOIS place 후보 발굴(`find_place_phone_candidates`) + 외부 lookup
   결과 보강(`apply_place_phone_enrichment` — `detail.phones` 정규화·dedup·max3 갱신 +
