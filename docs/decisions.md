@@ -108,6 +108,11 @@
   의존하지 않는다 (ADR-003).
 - **결정**: 디버그 API에 인증 키, JWT, OAuth 등 어떤 인증 로직도 추가하지
   않는다. 내부망(localhost, WSL, 사내망) 사용을 전제로 한다.
+- **Amendment (2026-06-02, ADR-045 D-1)**: ADR-045로 API가 TripMate(외부)에도
+  서비스되지만 **코드에 인증 로직을 추가하지 않는 원칙은 유지**한다. 운영 인증은
+  **infra 계층**(Cloudflare Tunnel SSO + IP allowlist)이 책임지고, TripMate 서비스
+  토큰은 **`X-Krtour-Service-Token`** 헤더로 pass-through한다(앱은 검증하지 않고
+  "인증된 요청만 도달"을 가정, 로그/감사만). reverse proxy에서 미인증 요청을 차단.
 - **근거**:
   - `python-kraddr-geo` ADR-013과 동일 패턴 (디버그 UI 내부망 전용).
   - 라이브러리 코드/응답에 인증 로직이 침투하지 않음 → 코드 단순.
@@ -1053,6 +1058,13 @@
 ## ADR-031: 디버그 패키지 OpenAPI export 정책 (첫 라우터부터 활성화)
 
 - **상태**: accepted (T-014 Sprint 1 진입 시 전환, 2026-05-25)
+- **Amendment (2026-06-02, ADR-045 D-3)**: ADR-045로 API가 admin과 TripMate(사용자)
+  양쪽에 서비스되므로 OpenAPI를 **이원화**한다 — admin schema(`/admin`·`/ops`·
+  `/debug`·`/features` admin 뷰)와 사용자 schema(`/features` 공개 뷰, `tripmate-rest-
+  api.md`)를 **별도 export + 별도 drift gate**(CI 2개). versioning은 **SemVer**
+  (필드 추가=minor / 제거·의미변경=major, breaking 시 구버전 한동안 유지),
+  CHANGELOG `### API` 섹션에 변경 기록(D-16). frontend client는 `openapi-typescript`
+  codegen(D-4).
 - **날짜**: 2026-05-25
 - **결정자**: claude 제안 + 사용자 결정 (2026-05-29 승인 확정)
 - **컨텍스트**: `packages/krtour-map-admin`가 FastAPI 라우터를 노출하면
