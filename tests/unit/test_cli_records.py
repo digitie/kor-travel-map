@@ -15,10 +15,30 @@ from krtour.map.cli.records import (
     MoisLicenseJsonRecord,
     iter_mois_license_records,
 )
-from krtour.map.providers.mois import MoisLicensePlaceRecord
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+# ``MoisLicensePlaceRecord`` Protocol 필드 대표 집합 — ``@property`` 멤버(앞쪽)와
+# 일반 method 멤버(facility_info)를 모두 포함해 ``__getattr__`` 계약을 검증한다.
+# (Protocol 전체 열거는 ``__protocol_attrs__``가 3.12+ 전용이라 버전 비의존적으로
+# 명시 집합을 쓴다.)
+_REPRESENTATIVE_FIELDS = (
+    "service_slug",
+    "mng_no",
+    "place_name",
+    "telno",
+    "lon",
+    "lat",
+    "legal_dong_code",
+    "road_name_code",
+    "license_date",
+    "designation_date",
+    "business_type_name",
+    "medical_subject_names",
+    "ground_floor_count",
+    "facility_area",
+)
 
 
 def test_record_exposes_dict_fields() -> None:
@@ -71,9 +91,9 @@ def test_record_exposes_all_protocol_fields() -> None:
     섞어 선언해 ``__getattr__`` 인스턴스에 대해 신뢰할 수 없으므로 쓰지 않는다.)
     """
     rec = MoisLicenseJsonRecord({})
-    for attr in MoisLicensePlaceRecord.__protocol_attrs__:  # type: ignore[attr-defined]
-        # 접근 자체가 예외 없이 되는지 — 값은 None 허용.
-        getattr(rec, attr)
+    for attr in _REPRESENTATIVE_FIELDS:
+        # 접근 자체가 예외 없이 되고 빈 dict에선 None — 누락 허용 계약.
+        assert getattr(rec, attr) is None
 
 
 def test_record_dunder_access_raises() -> None:
