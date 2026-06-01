@@ -10,6 +10,7 @@ import pytest
 from krtour.map.cli.main import (
     _EXIT_LOCK_SKIPPED,
     _format_bulk_result,
+    _format_closed_result,
     _format_incremental_result,
     _format_merge_outcome,
     _format_status,
@@ -23,6 +24,7 @@ from krtour.map.infra.sync_state_repo import SyncState
 from krtour.map.mois import (
     MoisBulkJobResult,
     MoisBulkSyncResult,
+    MoisClosedJobResult,
     MoisIncrementalJobResult,
 )
 
@@ -155,6 +157,53 @@ def test_format_incremental_result_done() -> None:
 
 def test_format_incremental_result_skipped() -> None:
     out = _format_incremental_result(MoisIncrementalJobResult(acquired=False))
+    assert "skipped" in out
+
+
+def test_parser_import_mois_closed() -> None:
+    parser = build_parser()
+    args = parser.parse_args(
+        ["import", "mois", "closed.ndjson", "--mode", "closed", "--cursor", "2026-06-03"]
+    )
+    assert args.mode == "closed"
+    assert args.cursor == "2026-06-03"
+
+
+def test_format_closed_result_done() -> None:
+    out = _format_closed_result(
+        MoisClosedJobResult(
+            acquired=True,
+            job=ImportJob(
+                job_id="job-c",
+                kind="mois_license_closed_update",
+                payload={},
+                state="done",
+                progress=100,
+                current_stage=None,
+                source_checksum=None,
+                error_message=None,
+            ),
+            deactivated=3,
+            sync_state=SyncState(
+                provider="python-mois-api",
+                dataset_key="mois_license_features_closed",
+                sync_scope="default",
+                status="active",
+                cursor={"last_modified_date": "2026-06-03"},
+                last_success_at=None,
+                last_failure_at=None,
+                consecutive_failures=0,
+                next_run_after=None,
+            ),
+        )
+    )
+    assert "closed): done (job_id=job-c)" in out
+    assert "deactivated (inactive 전환): 3" in out
+    assert "2026-06-03" in out
+
+
+def test_format_closed_result_skipped() -> None:
+    out = _format_closed_result(MoisClosedJobResult(acquired=False))
     assert "skipped" in out
 
 

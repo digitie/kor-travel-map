@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Final
 from krtour.map.infra.advisory_lock import try_advisory_lock
 from krtour.map.infra.feature_repo import (
     FeatureLoadResult,
+    inactivate_features_by_source_entity_ids,
     load_bundles,
     soft_delete_features_not_in_snapshot,
 )
@@ -44,9 +45,11 @@ from krtour.map.infra.sync_state_repo import (
 )
 from krtour.map.providers.mois import (
     DATASET_KEY_BULK,
+    DATASET_KEY_CLOSED,
     DATASET_KEY_HISTORY,
     PROVIDER_NAME,
     license_records_to_bundles,
+    license_source_entity_id,
 )
 
 if TYPE_CHECKING:
@@ -65,6 +68,7 @@ _LICENSE_ENTITY_TYPE = "license_place"
 # import_jobs kind (data-model.md §9.1 예시).
 _BULK_JOB_KIND = "mois_license_full_update"
 _INCREMENTAL_JOB_KIND = "mois_license_incremental_update"
+_CLOSED_JOB_KIND = "mois_license_closed_update"
 
 # streaming 배치 적재 기본 크기 (대용량 source DB snapshot 메모리 바운드).
 DEFAULT_BATCH_SIZE: Final[int] = 500
@@ -100,6 +104,9 @@ __all__ = [
     "run_mois_license_bulk_job",
     "load_mois_license_features_incremental",
     "run_mois_license_incremental_job",
+    "MoisClosedJobResult",
+    "close_mois_license_features",
+    "run_mois_license_closed_job",
 ]
 
 
@@ -144,6 +151,22 @@ class MoisIncrementalJobResult:
     acquired: bool
     job: ImportJob | None = None
     load: FeatureLoadResult | None = None
+    sync_state: SyncState | None = None
+
+
+@dataclass(frozen=True)
+class MoisClosedJobResult:
+    """``run_mois_license_closed_job`` 결과 — 작업 추적 + 비활성화 + cursor.
+
+    - ``acquired`` — advisory lock 획득 여부. ``False``면 skip(나머지 ``None``).
+    - ``job`` — 종료 상태의 ``ImportJob``.
+    - ``deactivated`` — ``status='inactive'``로 전환된 feature 수.
+    - ``sync_state`` — closed dataset cursor 전진 후 ``SyncState``.
+    """
+
+    acquired: bool
+    job: ImportJob | None = None
+    deactivated: int = 0
     sync_state: SyncState | None = None
 
 
@@ -421,4 +444,98 @@ async def run_mois_license_incremental_job(
         finished = await finish_import_job(session, job.job_id, state="done")
         return MoisIncrementalJobResult(
             acquired=True, job=finished or job, load=load, sync_state=state
+        )
+
+
+# -- Step C: 폐업/취소 feature 비활성화 ----------------------------------
+
+
+async def close_mois_license_features(
+    session: AsyncSession,
+    records: Iterable[MoisLicensePlaceRecord],
+    *,
+    target_dataset_key: str = DATASET_KEY_BULK,
+) -> int:
+    """폐업/취소된 인허가 record에 대응하는 feature를 ``status='inactive'``로 전환.
+
+    ``records``는 provider가 ``closed``/``cancelled``로 통지한 인허가다. 각 record의
+    ``source_entity_id``(``{slug}::{mng_no}``)를 뽑아, **이미 적재된 feature**
+    (보통 Step A bulk의 ``target_dataset_key``)를 비활성화한다 (ADR-017 — place는
+    무기한 유지, status만 inactive). feature를 새로 만들지 않는다. 매칭 안 되는
+    record(미적재/EXCLUDED)는 무시. commit은 호출자 책임.
+    """
+    entity_ids = {license_source_entity_id(r) for r in records}
+    return await inactivate_features_by_source_entity_ids(
+        session,
+        provider=PROVIDER_NAME,
+        dataset_key=target_dataset_key,
+        source_entity_type=_LICENSE_ENTITY_TYPE,
+        source_entity_ids=entity_ids,
+    )
+
+
+async def run_mois_license_closed_job(
+    session: AsyncSession,
+    records: Iterable[MoisLicensePlaceRecord],
+    *,
+    new_cursor: dict[str, Any],
+    target_dataset_key: str = DATASET_KEY_BULK,
+    sync_scope: str = "default",
+    source_checksum: str | None = None,
+) -> MoisClosedJobResult:
+    """Step C 폐업 처리를 advisory lock + import_jobs + cursor 전진으로 감싼다.
+
+    1. ``try_advisory_lock("import:python-mois-api:mois_license_features_closed")``
+       — 단일 워커 직렬화. 미획득 시 ``MoisClosedJobResult(acquired=False)``로 skip.
+    2. ``start_import_job`` → ``close_mois_license_features``(비활성화) → cursor 전진
+       (closed dataset) → ``done``. 예외 시 ``record_sync_failure`` + ``failed`` 후
+       re-raise.
+
+    ``new_cursor``는 이번 폐업분 이후 다음 시작 위치(provider 결정, ADR-006).
+    inactivation 대상은 ``target_dataset_key``(feature가 사는 dataset, 보통 bulk),
+    cursor/lock/job은 ``mois_license_features_closed`` 기준. 한 transaction.
+    """
+    async with try_advisory_lock(
+        session, _bulk_advisory_key(DATASET_KEY_CLOSED)
+    ) as acquired:
+        if not acquired:
+            return MoisClosedJobResult(acquired=False)
+        job = await start_import_job(
+            session,
+            kind=_CLOSED_JOB_KIND,
+            payload={
+                "dataset_key": DATASET_KEY_CLOSED,
+                "target_dataset_key": target_dataset_key,
+                "sync_scope": sync_scope,
+            },
+            source_checksum=source_checksum,
+        )
+        try:
+            deactivated = await close_mois_license_features(
+                session, records, target_dataset_key=target_dataset_key
+            )
+        except Exception as exc:
+            await record_sync_failure(
+                session,
+                provider=PROVIDER_NAME,
+                dataset_key=DATASET_KEY_CLOSED,
+                sync_scope=sync_scope,
+            )
+            await finish_import_job(
+                session, job.job_id, state="failed", error_message=str(exc)
+            )
+            raise
+        state = await record_sync_success(
+            session,
+            provider=PROVIDER_NAME,
+            dataset_key=DATASET_KEY_CLOSED,
+            sync_scope=sync_scope,
+            cursor=new_cursor,
+        )
+        finished = await finish_import_job(session, job.job_id, state="done")
+        return MoisClosedJobResult(
+            acquired=True,
+            job=finished or job,
+            deactivated=deactivated,
+            sync_state=state,
         )

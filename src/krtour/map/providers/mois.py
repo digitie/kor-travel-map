@@ -72,6 +72,7 @@ __all__ = [
     "license_records_to_bundles",
     "resolve_license_category",
     "resolve_license_place_kind",
+    "license_source_entity_id",
     "PROVIDER_NAME",
     "DATASET_KEY_BULK",
     "DATASET_KEY_HISTORY",
@@ -488,6 +489,15 @@ def resolve_license_place_kind(slug: str) -> str:
     return PROMOTED_PLACE_KIND_BY_SLUG.get(slug, _LICENSE_ENTITY_TYPE)
 
 
+def license_source_entity_id(record: MoisLicensePlaceRecord) -> str:
+    """MOIS 인허가 record의 ``source_entity_id`` (자연키 ``{slug}::{mng_no}``).
+
+    Step C 폐업/취소가 변환 없이 폐업 record → feature 매칭 키를 뽑을 때 사용
+    (bulk 적재 시와 동일 공식, ADR-009 — ``|`` 금지 ``::``).
+    """
+    return f"{record.service_slug}{_NATURAL_KEY_SEP}{record.mng_no or ''}"
+
+
 def _maki_for(category: str) -> str:
     """category → maki icon (카탈로그 우선, 없으면 fallback)."""
     if is_known_category_code(category):
@@ -643,8 +653,7 @@ async def license_record_to_bundle(
             f"service_slug={slug!r}는 PROMOTED 슬러그가 아님 — 변환 불가."
         )
     place_kind = resolve_license_place_kind(slug)
-    mng_no = record.mng_no or ""
-    natural_key = f"{slug}{_NATURAL_KEY_SEP}{mng_no}"
+    natural_key = license_source_entity_id(record)
 
     coord = _coord_from(record.lon, record.lat)
 

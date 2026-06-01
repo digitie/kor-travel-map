@@ -56,7 +56,11 @@ if TYPE_CHECKING:
     from krtour.map.geocoding import ReverseGeocoder
     from krtour.map.infra.merge_repo import MergeOutcome
     from krtour.map.infra.status_repo import StatusCounts
-    from krtour.map.mois import MoisBulkJobResult, MoisIncrementalJobResult
+    from krtour.map.mois import (
+        MoisBulkJobResult,
+        MoisClosedJobResult,
+        MoisIncrementalJobResult,
+    )
 
 __all__ = ["main", "build_parser"]
 
@@ -100,11 +104,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     mois_p.add_argument(
         "--mode",
-        choices=["bulk", "incremental"],
+        choices=["bulk", "incremental", "closed"],
         default="bulk",
         help=(
-            "bulk(Step A — 전체 snapshot + 부재분 soft-delete) 또는 "
-            "incremental(Step B — 변경분만 upsert + cursor 전진, prune 없음). 기본 bulk."
+            "bulk(Step A — 전체 snapshot + 부재분 soft-delete) / "
+            "incremental(Step B — 변경분 upsert + cursor 전진, prune 없음) / "
+            "closed(Step C — 폐업·취소 record의 대응 feature를 inactive 전환). 기본 bulk."
         ),
     )
     mois_p.add_argument(
@@ -283,15 +288,32 @@ def _format_incremental_result(result: MoisIncrementalJobResult) -> str:
     )
 
 
+def _format_closed_result(result: MoisClosedJobResult) -> str:
+    if not result.acquired:
+        return (
+            "import: skipped — 다른 워커가 이미 적재 중 (import advisory lock 미획득)."
+        )
+    assert result.sync_state is not None
+    job_id = result.job.job_id if result.job is not None else "?"
+    return "\n".join(
+        [
+            f"import (closed): done (job_id={job_id})",
+            f"  deactivated (inactive 전환): {result.deactivated}",
+            f"  cursor: {result.sync_state.cursor}",
+        ]
+    )
+
+
 async def _cmd_import_mois(args: argparse.Namespace) -> int:
     records_path = Path(args.records_file)
     if not records_path.is_file():  # noqa: ASYNC240  # 1회 stat — 진입 검증
         print(f"import: records 파일 없음 — {records_path}", file=sys.stderr)
         return _EXIT_INVALID
     incremental = args.mode == "incremental"
-    if incremental and not args.cursor:
+    closed = args.mode == "closed"
+    if (incremental or closed) and not args.cursor:
         print(
-            "import: --mode incremental은 --cursor 가 필수입니다.", file=sys.stderr
+            f"import: --mode {args.mode}은 --cursor 가 필수입니다.", file=sys.stderr
         )
         return _EXIT_INVALID
     dataset_key = args.dataset_key or (
@@ -304,6 +326,16 @@ async def _cmd_import_mois(args: argparse.Namespace) -> int:
             _reverse_geocoder_for(args.geocoder_url) as geocoder,
             AsyncKrtourMapClient(engine) as client,
         ):
+            if closed:
+                cl = await client.run_mois_license_closed_job(
+                    records,
+                    new_cursor={"last_modified_date": args.cursor},
+                    target_dataset_key=dataset_key,
+                    sync_scope=args.sync_scope,
+                    source_checksum=args.source_checksum,
+                )
+                print(_format_closed_result(cl))
+                return 0 if cl.acquired else _EXIT_LOCK_SKIPPED
             if incremental:
                 inc = await client.run_mois_license_incremental_job(
                     records,

@@ -149,3 +149,69 @@ async def test_cli_import_mois_incremental_requires_cursor(
     )
     rc = await args.func(args)  # type: ignore[attr-defined]
     assert rc == 2  # _EXIT_INVALID — cursor 누락
+
+
+_CLOSED_NDJSON = '{"service_slug":"general_restaurants","mng_no":"cli-1"}\n'
+
+
+async def _active_feature_count(engine: AsyncEngine) -> int:
+    async with AsyncSession(engine) as session:
+        return int(
+            (
+                await session.execute(
+                    text(
+                        "SELECT count(*) FROM feature.features "
+                        "WHERE deleted_at IS NULL"
+                    )
+                )
+            ).scalar_one()
+        )
+
+
+async def test_cli_import_mois_closed_inactivates(
+    container_dsn: str, migrated_engine: AsyncEngine, tmp_path: Path
+) -> None:
+    # bulk 적재(2건).
+    bulk = tmp_path / "snap.ndjson"
+    bulk.write_text(_NDJSON, encoding="utf-8")
+    bulk_args = _import_args(container_dsn, bulk)
+    rc = await bulk_args.func(bulk_args)  # type: ignore[attr-defined]
+    assert rc == 0
+    assert await _active_feature_count(migrated_engine) == 2
+
+    # 폐업 통지(cli-1) → inactive.
+    closed = tmp_path / "closed.ndjson"
+    closed.write_text(_CLOSED_NDJSON, encoding="utf-8")
+    args = build_parser().parse_args(
+        [
+            "--dsn", container_dsn, "import", "mois", str(closed),
+            "--mode", "closed", "--cursor", "2026-06-03",
+        ]
+    )
+    rc2 = await args.func(args)  # type: ignore[attr-defined]
+    assert rc2 == 0
+    # cli-1 inactive → active 1건(cli-2)만.
+    assert await _active_feature_count(migrated_engine) == 1
+
+    # closed dataset cursor 영속.
+    from krtour.map.infra.sync_state_repo import get_sync_state
+    from krtour.map.providers.mois import DATASET_KEY_CLOSED
+
+    async with AsyncSession(migrated_engine) as session:
+        state = await get_sync_state(
+            session, provider=PROVIDER_NAME, dataset_key=DATASET_KEY_CLOSED
+        )
+    assert state is not None
+    assert state.cursor == {"last_modified_date": "2026-06-03"}
+
+
+async def test_cli_import_mois_closed_requires_cursor(
+    container_dsn: str, migrated_engine: AsyncEngine, tmp_path: Path
+) -> None:
+    closed = tmp_path / "closed.ndjson"
+    closed.write_text(_CLOSED_NDJSON, encoding="utf-8")
+    args = build_parser().parse_args(
+        ["--dsn", container_dsn, "import", "mois", str(closed), "--mode", "closed"]
+    )
+    rc = await args.func(args)  # type: ignore[attr-defined]
+    assert rc == 2  # _EXIT_INVALID — cursor 누락

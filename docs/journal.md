@@ -2,6 +2,28 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-01 (claude) — Sprint 4b: Step C 폐업/취소 처리 (feature inactive)
+
+**작업**: MOIS Step C(`mois_license_features_closed`) — provider가 폐업/취소 통지한
+인허가의 대응 feature를 `status='inactive'`로 전환(ADR-017 — place 무기한 유지,
+status만). Sprint 4b 1번째.
+
+- **infra**: `inactivate_features_by_source_entity_ids`(soft-delete inverse — 주어진
+  source_entity_id 집합에 **속하는** primary-source feature를 inactive). 빈 집합 no-op.
+- **providers/mois**: `license_source_entity_id(record)` 헬퍼(자연키 `{slug}::{mng_no}`,
+  변환 없이 폐업 record→feature 매칭 키 추출). 변환기 natural_key도 이 헬퍼로 단일화.
+- **mois.py**: `close_mois_license_features`(폐업 record→entity_id→inactivate,
+  feature 생성 없음) + `run_mois_license_closed_job`(advisory lock `import:mois:closed`
+  + import_jobs + closed dataset cursor 전진) + `MoisClosedJobResult`. inactivation
+  대상은 `target_dataset_key`(feature가 사는 bulk), cursor/lock은 closed dataset.
+- **client + CLI**: `run_mois_license_closed_job` 메서드 + `import mois --mode closed
+  --cursor <값>`. `--cursor` 미지정 → exit 2.
+- **테스트**: unit 3(closed 파서 + 포맷 2) + integration 7(close 비활성화/미매칭
+  no-op/job+cursor; cli closed inactivate/cursor 누락 exit 2). 
+- **검증(WSL)**: ruff clean / mypy --strict 60 files / import-linter 4 kept / 전체
+  **818 passed**(810 → +8).
+- **다음**: Step D on-demand detail 라우터(debug-ui) + dedup 운영 FP 측정 도구.
+
 ## 2026-06-01 (claude) — Sprint 4a: dedup false-positive 측정 + ADR-016 검토
 
 **작업**: dedup scoring(ADR-016) false-positive를 대표 라벨 평가셋으로 측정하고
