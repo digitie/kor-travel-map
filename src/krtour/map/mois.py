@@ -23,11 +23,17 @@ ADR 참조
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from krtour.map.infra.feature_repo import FeatureLoadResult, load_bundles
+from krtour.map.infra.feature_repo import (
+    FeatureLoadResult,
+    load_bundles,
+    soft_delete_features_not_in_snapshot,
+)
 from krtour.map.providers.mois import (
     DATASET_KEY_BULK,
+    PROVIDER_NAME,
     license_records_to_bundles,
 )
 
@@ -40,7 +46,27 @@ if TYPE_CHECKING:
     from krtour.map.geocoding import ReverseGeocoder
     from krtour.map.providers.mois import MoisLicensePlaceRecord
 
-__all__ = ["load_mois_license_features_bulk"]
+# providers.mois의 source_entity_type (license_place). 변환 모듈 내부 상수와 동일.
+_LICENSE_ENTITY_TYPE = "license_place"
+
+__all__ = [
+    "MoisBulkSyncResult",
+    "load_mois_license_features_bulk",
+    "delete_mois_license_features_not_in",
+    "sync_mois_license_features_bulk",
+]
+
+
+@dataclass(frozen=True)
+class MoisBulkSyncResult:
+    """``sync_mois_license_features_bulk`` 결과 — 적재 카운트 + 비활성화 수.
+
+    - ``load`` — upsert 카운트 (``FeatureLoadResult``).
+    - ``deactivated`` — snapshot에 없어 soft-delete된 기존 feature 수.
+    """
+
+    load: FeatureLoadResult
+    deactivated: int
 
 
 async def load_mois_license_features_bulk(
@@ -88,3 +114,71 @@ async def load_mois_license_features_bulk(
         reverse_geocoder=reverse_geocoder,
     )
     return await load_bundles(session, bundles)
+
+
+async def delete_mois_license_features_not_in(
+    session: AsyncSession,
+    snapshot_source_entity_ids: set[str],
+    *,
+    dataset_key: str = DATASET_KEY_BULK,
+) -> int:
+    """snapshot에 없는 mois license feature를 soft-delete (status='inactive').
+
+    Step A bulk snapshot 적재 후, 이번 snapshot에서 사라진(폐업/제외) feature를
+    비활성화한다 (ADR-017 — place는 무기한 유지, status만 inactive + deleted_at).
+    이미 비활성인 feature는 건드리지 않는다. commit은 호출자 책임.
+
+    Parameters
+    ----------
+    snapshot_source_entity_ids
+        이번 snapshot에 적재된 ``source_entity_id``(= ``f"{slug}::{mng_no}"``) 집합.
+        비어 있으면 해당 dataset의 모든 활성 mois license feature가 비활성화된다.
+    dataset_key
+        대상 dataset (기본 ``mois_license_features_bulk``).
+
+    Returns
+    -------
+    int
+        soft-delete된 feature 수.
+    """
+    return await soft_delete_features_not_in_snapshot(
+        session,
+        provider=PROVIDER_NAME,
+        dataset_key=dataset_key,
+        source_entity_type=_LICENSE_ENTITY_TYPE,
+        snapshot_source_entity_ids=snapshot_source_entity_ids,
+    )
+
+
+async def sync_mois_license_features_bulk(
+    session: AsyncSession,
+    records: Iterable[MoisLicensePlaceRecord],
+    *,
+    fetched_at: datetime,
+    dataset_key: str = DATASET_KEY_BULK,
+    reverse_geocoder: ReverseGeocoder | None = None,
+) -> MoisBulkSyncResult:
+    """전체 영업중 snapshot 적재 + snapshot 부재 feature soft-delete (Step A bulk).
+
+    ``records``는 **이번 전체 snapshot**(영업중 PROMOTED record)이어야 한다 —
+    부분 batch에 쓰면 누락분이 전부 비활성화된다. 변환 → upsert → snapshot에 없는
+    기존 feature soft-delete를 한 단위 of work로 수행한다 (commit은 호출자/감싼
+    transaction 소유). mois source DB cursor iterator(``collect_and_load_*``)는
+    후속 PR — 본 함수는 in-memory snapshot iterable을 받는다.
+    """
+    bundles = await license_records_to_bundles(
+        records,
+        fetched_at=fetched_at,
+        dataset_key=dataset_key,
+        reverse_geocoder=reverse_geocoder,
+    )
+    load_result = await load_bundles(session, bundles)
+    snapshot_keys = {b.source_record.source_entity_id for b in bundles}
+    deactivated = await soft_delete_features_not_in_snapshot(
+        session,
+        provider=PROVIDER_NAME,
+        dataset_key=dataset_key,
+        source_entity_type=_LICENSE_ENTITY_TYPE,
+        snapshot_source_entity_ids=snapshot_keys,
+    )
+    return MoisBulkSyncResult(load=load_result, deactivated=deactivated)

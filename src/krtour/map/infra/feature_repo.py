@@ -49,6 +49,7 @@ __all__ = [
     "upsert_source_link",
     "load_bundle",
     "load_bundles",
+    "soft_delete_features_not_in_snapshot",
     "get_feature_row",
     "features_in_bbox",
 ]
@@ -174,6 +175,31 @@ WHERE deleted_at IS NULL
   AND (CAST(:kinds AS text[]) IS NULL OR kind = ANY(CAST(:kinds AS text[])))
 ORDER BY feature_id
 LIMIT :limit
+"""
+
+# snapshot soft-delete — 주어진 (provider, dataset_key, source_entity_type)의
+# **primary source**로 적재된 feature 중, snapshot source_entity_id 집합에 없는
+# 것을 soft-delete (status='inactive' + deleted_at). 전체 snapshot 적재 후 호출해
+# "이번 snapshot에서 사라진" feature를 비활성화한다 (Step A bulk, ADR-017 — place는
+# 무기한 유지하되 status만 inactive). 이미 deleted_at IS NOT NULL이면 건너뛴다.
+# source_entity_id 매칭은 BRIN/B-tree 인덱스(idx_source_records_provider_dataset_entity)
+# 사용. ``:keys`` 빈 배열이면 전체 비활성화(snapshot이 비었음을 의미).
+_SOFT_DELETE_NOT_IN_SNAPSHOT_SQL: Final[str] = """
+UPDATE feature.features AS f
+SET status = 'inactive', deleted_at = now(), updated_at = now()
+WHERE f.deleted_at IS NULL
+  AND f.feature_id IN (
+    SELECT sl.feature_id
+    FROM provider_sync.source_links AS sl
+    JOIN provider_sync.source_records AS sr
+      ON sr.source_record_key = sl.source_record_key
+    WHERE sl.is_primary_source
+      AND sr.provider = :provider
+      AND sr.dataset_key = :dataset_key
+      AND sr.source_entity_type = :source_entity_type
+      AND NOT (sr.source_entity_id = ANY(CAST(:keys AS text[])))
+  )
+RETURNING f.feature_id
 """
 
 
@@ -344,6 +370,47 @@ async def load_bundles(
             source_links_updated=total.source_links_updated + r.source_links_updated,
         )
     return total
+
+
+async def soft_delete_features_not_in_snapshot(
+    session: AsyncSession,
+    *,
+    provider: str,
+    dataset_key: str,
+    source_entity_type: str,
+    snapshot_source_entity_ids: set[str],
+) -> int:
+    """주어진 primary source의 feature 중 snapshot에 없는 것을 soft-delete.
+
+    전체 snapshot 적재 후 호출 — 이번 snapshot에서 사라진(폐업/제외) feature를
+    ``status='inactive'`` + ``deleted_at``으로 비활성화한다 (Step A bulk,
+    ADR-017 — place는 무기한 유지, status만 inactive). 이미 비활성(deleted_at IS
+    NOT NULL)인 feature는 건드리지 않는다. commit은 호출자 책임.
+
+    Parameters
+    ----------
+    provider, dataset_key, source_entity_type
+        대상 primary source 식별자 (예: ``python-mois-api`` /
+        ``mois_license_features_bulk`` / ``license_place``).
+    snapshot_source_entity_ids
+        이번 snapshot에 포함된 ``source_entity_id`` 집합. 비어 있으면 해당
+        source의 모든 활성 feature가 비활성화된다.
+
+    Returns
+    -------
+    int
+        soft-delete된 feature 수.
+    """
+    result = await session.execute(
+        text(_SOFT_DELETE_NOT_IN_SNAPSHOT_SQL),
+        {
+            "provider": provider,
+            "dataset_key": dataset_key,
+            "source_entity_type": source_entity_type,
+            "keys": sorted(snapshot_source_entity_ids),
+        },
+    )
+    return len(result.fetchall())
 
 
 # JSONB 컬럼 — raw ``text()`` 쿼리는 driver에 따라 str(asyncpg)로 돌려줄 수 있어

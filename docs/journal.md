@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-01 (claude) — Sprint 4a MOIS snapshot prune (delete_not_in)
+
+**작업**: loader(앞 entry)에 이어 Step A bulk snapshot soft-delete 추가. 사용자
+결정에 따라 **snapshot delete_not_in만** (advisory lock / import_jobs / mois source
+DB iterator는 후속).
+
+- **산출물**:
+  - `infra/feature_repo.py` — `soft_delete_features_not_in_snapshot(session, *, provider, dataset_key, source_entity_type, snapshot_source_entity_ids)`. 주어진 primary source의 활성 feature 중 snapshot에 없는 것을 `status='inactive'` + `deleted_at`으로 비활성화(ADR-017, place 무기한 유지). raw SQL `UPDATE ... WHERE feature_id IN (… source_links ⨝ source_records … NOT IN snapshot)` + RETURNING count. 이미 비활성은 skip(idempotent).
+  - `krtour.map.mois` — `delete_mois_license_features_not_in`(mois 래퍼) + `sync_mois_license_features_bulk`(변환→upsert→prune 한 단위 of work) + `MoisBulkSyncResult`(load 카운트 + deactivated).
+  - `AsyncKrtourMapClient.sync_mois_license_features_bulk` — client 진입점(한 transaction).
+  - `tests/integration/test_mois_loader.py` +3 (snapshot 누락 soft-delete + idempotent / sync 1콜 load+prune / 빈 snapshot 전체 비활성화).
+- **검증(WSL)**: mypy --strict 51 files / ruff All checks passed / import-linter 4 kept / integration 6(+3) / 전체 **705 passed, 5 skipped**.
+
 ## 2026-06-01 (claude) — Sprint 4a MOIS loader (변환 → 적재 오케스트레이션)
 
 **작업**: MOIS provider 변환 코어(앞 entry)에 이어 적재 loader 추가. 사용자
