@@ -2,6 +2,18 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-01 (claude) — MOIS Step A 작업 통합 (advisory lock + import_jobs)
+
+**작업**: advisory lock + import_jobs(앞 entry들) 위에 MOIS Step A bulk 적재를
+작업 추적 + 단일 워커 직렬화로 감싸는 오케스트레이션.
+
+- **산출물**:
+  - `infra/jobs_repo.py` `start_import_job` — queue를 거치지 않고 곧바로 `state='running'` INSERT(self-driven inline job; enqueue+claim queue-worker 경로와 구분).
+  - `krtour.map.mois.run_mois_license_bulk_job` — `try_advisory_lock("import:python-mois-api:<dataset>")`로 단일 워커 직렬화(미획득 시 `acquired=False` skip) → `start_import_job`(running) → `sync_mois_license_features_bulk`(변환·upsert·snapshot prune) → `finish_import_job`(done/예외 시 failed+re-raise) + `MoisBulkJobResult`.
+  - `AsyncKrtourMapClient.run_mois_license_bulk_job` — client 진입점(한 transaction).
+  - `tests/integration/test_mois_loader.py` +2 — done 추적+sync / lock 보유 중 skip(작업·feature 미생성).
+- **검증(WSL)**: mypy --strict 53 files / ruff All checks passed / import-linter 4 kept / 신규 integration 2 / 전체 **722 passed, 5 skipped**.
+
 ## 2026-06-01 (claude) — ops.import_jobs 작업 큐 + jobs_repo (ADR-011)
 
 **작업**: advisory lock helper 위에 ADR-011 작업 큐 영속화. 프로세스 재시작

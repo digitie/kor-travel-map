@@ -26,10 +26,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from krtour.map.infra.advisory_lock import try_advisory_lock
 from krtour.map.infra.feature_repo import (
     FeatureLoadResult,
     load_bundles,
     soft_delete_features_not_in_snapshot,
+)
+from krtour.map.infra.jobs_repo import (
+    ImportJob,
+    finish_import_job,
+    start_import_job,
 )
 from krtour.map.providers.mois import (
     DATASET_KEY_BULK,
@@ -49,11 +55,22 @@ if TYPE_CHECKING:
 # providers.mois의 source_entity_type (license_place). 변환 모듈 내부 상수와 동일.
 _LICENSE_ENTITY_TYPE = "license_place"
 
+# import_jobs kind (data-model.md §9.1 예시).
+_BULK_JOB_KIND = "mois_license_full_update"
+
+
+def _bulk_advisory_key(dataset_key: str) -> str:
+    """Step A 단일 워커 직렬화용 advisory lock 키 (ADR-011/039 import:* 패턴)."""
+    return f"import:{PROVIDER_NAME}:{dataset_key}"
+
+
 __all__ = [
     "MoisBulkSyncResult",
+    "MoisBulkJobResult",
     "load_mois_license_features_bulk",
     "delete_mois_license_features_not_in",
     "sync_mois_license_features_bulk",
+    "run_mois_license_bulk_job",
 ]
 
 
@@ -67,6 +84,21 @@ class MoisBulkSyncResult:
 
     load: FeatureLoadResult
     deactivated: int
+
+
+@dataclass(frozen=True)
+class MoisBulkJobResult:
+    """``run_mois_license_bulk_job`` 결과 — 작업 추적 + 동기화 카운트.
+
+    - ``acquired`` — advisory lock 획득 여부. ``False``면 다른 워커가 이미 적재
+      중이라 건너뜀(``job``/``sync`` 모두 ``None``).
+    - ``job`` — 종료 상태의 ``ImportJob``(done/failed). lock 미획득 시 ``None``.
+    - ``sync`` — ``MoisBulkSyncResult``. 실패 또는 lock 미획득 시 ``None``.
+    """
+
+    acquired: bool
+    job: ImportJob | None = None
+    sync: MoisBulkSyncResult | None = None
 
 
 async def load_mois_license_features_bulk(
@@ -182,3 +214,55 @@ async def sync_mois_license_features_bulk(
         snapshot_source_entity_ids=snapshot_keys,
     )
     return MoisBulkSyncResult(load=load_result, deactivated=deactivated)
+
+
+async def run_mois_license_bulk_job(
+    session: AsyncSession,
+    records: Iterable[MoisLicensePlaceRecord],
+    *,
+    fetched_at: datetime,
+    dataset_key: str = DATASET_KEY_BULK,
+    reverse_geocoder: ReverseGeocoder | None = None,
+    source_checksum: str | None = None,
+) -> MoisBulkJobResult:
+    """Step A bulk 적재를 **advisory lock + import_jobs 추적**으로 감싼 오케스트레이션.
+
+    1. ``try_advisory_lock("import:python-mois-api:<dataset_key>")`` — 단일 워커
+       직렬화. 다른 워커가 이미 적재 중이면 대기하지 않고
+       ``MoisBulkJobResult(acquired=False)``로 즉시 반환(skip).
+    2. ``start_import_job`` — ``state='running'`` 작업 row 생성(추적).
+    3. ``sync_mois_license_features_bulk`` — 변환 → upsert → snapshot prune.
+    4. ``finish_import_job`` — 성공 시 ``done``(progress 100), 예외 시 ``failed``
+       (error_message 기록) 후 re-raise.
+
+    **transaction 주의**: 본 함수는 한 ``session``에서 job row와 데이터 작업을
+    함께 수행한다. 호출자가 outer transaction을 rollback하면 ``failed`` 작업
+    기록도 함께 사라진다. 작업 기록을 데이터 실패와 독립적으로 영속화하려면
+    ``AsyncKrtourMapClient.run_mois_license_bulk_job``(분리 transaction)을 쓴다.
+    """
+    async with try_advisory_lock(session, _bulk_advisory_key(dataset_key)) as acquired:
+        if not acquired:
+            return MoisBulkJobResult(acquired=False)
+        job = await start_import_job(
+            session,
+            kind=_BULK_JOB_KIND,
+            payload={"dataset_key": dataset_key},
+            source_checksum=source_checksum,
+        )
+        try:
+            sync = await sync_mois_license_features_bulk(
+                session,
+                records,
+                fetched_at=fetched_at,
+                dataset_key=dataset_key,
+                reverse_geocoder=reverse_geocoder,
+            )
+        except Exception as exc:
+            # 작업을 failed로 표시 후 원래 예외를 re-raise. 같은 transaction을
+            # 호출자가 rollback하면 이 기록도 사라진다(docstring 참조).
+            await finish_import_job(
+                session, job.job_id, state="failed", error_message=str(exc)
+            )
+            raise
+        finished = await finish_import_job(session, job.job_id, state="done")
+        return MoisBulkJobResult(acquired=True, job=finished or job, sync=sync)

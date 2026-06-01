@@ -21,11 +21,12 @@ from krtour.map.infra.models import FeatureRow, SourceLinkRow
 from krtour.map.mois import (
     delete_mois_license_features_not_in,
     load_mois_license_features_bulk,
+    run_mois_license_bulk_job,
     sync_mois_license_features_bulk,
 )
 
 if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 pytestmark = pytest.mark.integration
 
@@ -297,4 +298,72 @@ async def test_sync_bulk_empty_snapshot_deactivates_all(
     await migrated_session.flush()
     assert result.load.bundles_total == 0
     assert result.deactivated == 1
+    assert await _active_entity_ids(migrated_session) == set()
+
+
+# -- run_mois_license_bulk_job (advisory lock + import_jobs 추적) -------------
+
+
+async def _job_states(session: AsyncSession) -> list[tuple[str, str, int]]:
+    rows = (
+        await session.execute(
+            text("SELECT kind, state, progress FROM ops.import_jobs ORDER BY created_at")
+        )
+    ).all()
+    return [(r.kind, r.state, r.progress) for r in rows]
+
+
+async def test_run_bulk_job_tracks_done_and_syncs(
+    migrated_session: AsyncSession,
+) -> None:
+    result = await run_mois_license_bulk_job(
+        migrated_session,
+        [
+            _Record(service_slug="general_restaurants", mng_no="j1"),
+            _Record(service_slug="bakeries", mng_no="j2"),
+        ],
+        fetched_at=_FETCHED,
+    )
+    await migrated_session.flush()
+    assert result.acquired is True
+    assert result.job is not None
+    assert result.job.state == "done"
+    assert result.job.progress == 100
+    assert result.sync is not None
+    assert result.sync.load.bundles_total == 2
+    # import_jobs에 done 1건 기록.
+    assert await _job_states(migrated_session) == [
+        ("mois_license_full_update", "done", 100)
+    ]
+    assert await _active_entity_ids(migrated_session) == {
+        "general_restaurants::j1",
+        "bakeries::j2",
+    }
+
+
+async def test_run_bulk_job_skips_when_lock_held(
+    migrated_engine: AsyncEngine,
+    migrated_session: AsyncSession,
+) -> None:
+    from sqlalchemy.ext.asyncio import AsyncSession as _Session
+
+    from krtour.map.infra.advisory_lock import advisory_lock
+    from krtour.map.mois import _bulk_advisory_key  # type: ignore[attr-defined]
+    from krtour.map.providers.mois import DATASET_KEY_BULK
+
+    # 다른 connection(별도 세션)이 같은 키 lock 보유 → run은 skip.
+    async with (
+        _Session(migrated_engine) as holder,
+        advisory_lock(holder, _bulk_advisory_key(DATASET_KEY_BULK)),
+    ):
+        result = await run_mois_license_bulk_job(
+            migrated_session,
+            [_Record(service_slug="bakeries", mng_no="skip")],
+            fetched_at=_FETCHED,
+        )
+        assert result.acquired is False
+        assert result.job is None
+        assert result.sync is None
+    # 작업 row도, feature도 생성 안 됨.
+    assert await _job_states(migrated_session) == []
     assert await _active_entity_ids(migrated_session) == set()

@@ -75,6 +75,7 @@ from krtour.map.infra.jobs_repo import (
     finish_import_job,
     heartbeat_import_job,
     recover_stale_running_jobs,
+    start_import_job,
 )
 from krtour.map.infra.models import (
     Base,
@@ -132,6 +133,7 @@ __all__ = [
     # jobs_repo (ADR-011 작업 큐)
     "ImportJob",
     "enqueue_import_job",
+    "start_import_job",
     "claim_next_import_job",
     "heartbeat_import_job",
     "finish_import_job",

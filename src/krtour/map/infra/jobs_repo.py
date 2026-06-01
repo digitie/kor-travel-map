@@ -48,6 +48,7 @@ __all__ = [
     "IMPORT_QUEUE_ADVISORY_KEY",
     "DEFAULT_STALE_AFTER",
     "enqueue_import_job",
+    "start_import_job",
     "claim_next_import_job",
     "heartbeat_import_job",
     "finish_import_job",
@@ -101,6 +102,14 @@ def _row_to_job(row: Any) -> ImportJob:
 _INSERT_JOB_SQL: Final[str] = f"""
 INSERT INTO ops.import_jobs (kind, payload, source_checksum)
 VALUES (:kind, CAST(:payload AS jsonb), :source_checksum)
+RETURNING {_RETURN_COLUMNS}
+"""
+
+# self-driven 작업 — queue를 거치지 않고 곧바로 running으로 INSERT (호출자가 직접
+# 수행하는 inline job, 예: advisory lock 보유 중인 단일 워커 적재).
+_START_JOB_SQL: Final[str] = f"""
+INSERT INTO ops.import_jobs (kind, payload, source_checksum, state, started_at, heartbeat_at)
+VALUES (:kind, CAST(:payload AS jsonb), :source_checksum, 'running', now(), now())
 RETURNING {_RETURN_COLUMNS}
 """
 
@@ -167,6 +176,31 @@ async def enqueue_import_job(
     """``state='queued'`` 작업 1건 INSERT. commit은 호출자 책임."""
     result = await session.execute(
         text(_INSERT_JOB_SQL),
+        {
+            "kind": kind,
+            "payload": json.dumps(dict(payload) if payload else {}),
+            "source_checksum": source_checksum,
+        },
+    )
+    return _row_to_job(result.one())
+
+
+async def start_import_job(
+    session: AsyncSession,
+    *,
+    kind: str,
+    payload: Mapping[str, Any] | None = None,
+    source_checksum: str | None = None,
+) -> ImportJob:
+    """곧바로 ``state='running'``인 작업 1건 INSERT (self-driven inline job).
+
+    queue를 거치지 않고 호출자가 직접 수행하는 작업 추적용 — 보통 advisory lock을
+    보유한 단일 워커가 적재 전에 호출하고, 종료 시 ``finish_import_job``으로 닫는다.
+    queue-worker 경로는 ``enqueue_import_job`` + ``claim_next_import_job`` 사용.
+    commit은 호출자 책임.
+    """
+    result = await session.execute(
+        text(_START_JOB_SQL),
         {
             "kind": kind,
             "payload": json.dumps(dict(payload) if payload else {}),
