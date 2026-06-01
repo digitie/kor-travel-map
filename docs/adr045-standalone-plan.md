@@ -175,10 +175,12 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
 - **T-210c** TripMate→krtour-map **이관**: TripMate `apps/etl`의 Dagster 자산/
   resource/schedule(현재 skeleton)을 krtour-map `packages/krtour-map-dagster`로
   이관(T-208). offline upload load·consistency/dedup job도 krtour-map 소유로.
-- **T-210d** TripMate 측 신규: `httpx` 기반 krtour-map OpenAPI client(직접 import
-  제거) + `docs/api/krtour-map-openapi-integration.md`. (TripMate repo.)
-- **T-210e** OpenAPI client 생성(`openapi-typescript`) — TripMate frontend/서버용
-  (D-4 timing).
+- **T-210d** TripMate **backend(Python)** 신규: 수기 `httpx` wrapper
+  `integrations/krtour_map_client.py`(krtour-map의 `KraddrGeoRestClient` 방식, 직접
+  import 제거) + `docs/api/krtour-map-openapi-integration.md`. (TripMate repo, D-4.)
+- **T-210e** TripMate **frontend(TS)**: krtour-map `openapi.json` →
+  `openapi-typescript` codegen(`types/api.gen.ts`) + 수동 Zod mirror + CI diff 게이트
+  (kraddr-geo `gen-types.mjs` 패턴, D-4). (TripMate repo.)
 
 ---
 
