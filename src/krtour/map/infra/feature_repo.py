@@ -220,6 +220,23 @@ class FeatureLoadResult:
     source_links_inserted: int = 0
     source_links_updated: int = 0
 
+    def merge(self, other: FeatureLoadResult) -> FeatureLoadResult:
+        """두 결과 카운트를 합산 (streaming 배치 적재 누적용)."""
+        return FeatureLoadResult(
+            bundles_total=self.bundles_total + other.bundles_total,
+            features_inserted=self.features_inserted + other.features_inserted,
+            features_updated=self.features_updated + other.features_updated,
+            source_records_inserted=(
+                self.source_records_inserted + other.source_records_inserted
+            ),
+            source_links_inserted=(
+                self.source_links_inserted + other.source_links_inserted
+            ),
+            source_links_updated=(
+                self.source_links_updated + other.source_links_updated
+            ),
+        )
+
 
 def _feature_params(feature: Feature) -> dict[str, Any]:
     """``Feature`` DTO → ``_UPSERT_FEATURE_SQL`` bind params."""
@@ -358,17 +375,7 @@ async def load_bundles(
     """
     total = FeatureLoadResult()
     for bundle in bundles:
-        r = await load_bundle(session, bundle)
-        total = FeatureLoadResult(
-            bundles_total=total.bundles_total + r.bundles_total,
-            features_inserted=total.features_inserted + r.features_inserted,
-            features_updated=total.features_updated + r.features_updated,
-            source_records_inserted=(
-                total.source_records_inserted + r.source_records_inserted
-            ),
-            source_links_inserted=total.source_links_inserted + r.source_links_inserted,
-            source_links_updated=total.source_links_updated + r.source_links_updated,
-        )
+        total = total.merge(await load_bundle(session, bundle))
     return total
 
 

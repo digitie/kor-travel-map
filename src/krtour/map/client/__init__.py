@@ -48,6 +48,7 @@ from krtour.map.infra.feature_repo import (
     get_feature_row,
     load_bundles,
 )
+from krtour.map.mois import DEFAULT_BATCH_SIZE as MOIS_DEFAULT_BATCH_SIZE
 from krtour.map.mois import (
     MoisBulkJobResult,
     MoisBulkSyncResult,
@@ -170,13 +171,15 @@ class AsyncKrtourMapClient:
         fetched_at: datetime,
         dataset_key: str = MOIS_DATASET_KEY_BULK,
         reverse_geocoder: ReverseGeocoder | None = None,
+        batch_size: int = MOIS_DEFAULT_BATCH_SIZE,
     ) -> MoisBulkSyncResult:
         """MOIS 인허가 전체 snapshot 적재 + 부재 feature soft-delete (한 transaction).
 
         ``records``는 **이번 전체 snapshot**(영업중 PROMOTED record)이어야 한다 —
-        변환 → upsert → snapshot에 없는 기존 feature를 ``status='inactive'``로
-        비활성화(ADR-017)까지 한 단위 of work로 수행한다. 하나라도 실패하면 전체
-        rollback. mois source DB cursor iterator는 후속 PR.
+        ``batch_size``개씩 streaming 변환·upsert(메모리 바운드) → snapshot에 없는
+        기존 feature를 ``status='inactive'``로 비활성화(ADR-017)까지 한 단위 of
+        work로 수행한다. 하나라도 실패하면 전체 rollback. ``records``로 mois source
+        DB의 ``iter_open_place_records(...)``를 그대로 넘기면 Step A가 완성된다.
         """
         async with self._session_factory() as session, session.begin():
             return await sync_mois_license_features_bulk(
@@ -185,6 +188,7 @@ class AsyncKrtourMapClient:
                 fetched_at=fetched_at,
                 dataset_key=dataset_key,
                 reverse_geocoder=reverse_geocoder,
+                batch_size=batch_size,
             )
 
     async def run_mois_license_bulk_job(
@@ -195,14 +199,17 @@ class AsyncKrtourMapClient:
         dataset_key: str = MOIS_DATASET_KEY_BULK,
         reverse_geocoder: ReverseGeocoder | None = None,
         source_checksum: str | None = None,
+        batch_size: int = MOIS_DEFAULT_BATCH_SIZE,
     ) -> MoisBulkJobResult:
         """MOIS Step A bulk 적재를 advisory lock + import_jobs 추적으로 실행.
 
         단일 워커 직렬화(``try_advisory_lock``)로 다른 워커가 적재 중이면
         ``acquired=False``로 skip한다. 획득 시 ``import_jobs`` 작업을 running으로
-        시작 → 변환·upsert·snapshot prune → done/failed 종료. 한 transaction —
-        실패 시 데이터와 작업 기록이 함께 rollback된다(원자성 우선; 영속 failed
-        기록이 필요하면 후속 lifespan 복구가 stale running을 정리, ADR-011).
+        시작 → ``batch_size`` streaming 변환·upsert·snapshot prune → done/failed
+        종료. 한 transaction — 실패 시 데이터와 작업 기록이 함께 rollback된다
+        (원자성 우선; 영속 failed 기록이 필요하면 후속 lifespan 복구가 stale
+        running을 정리, ADR-011). ``records``로 mois source DB의
+        ``iter_open_place_records(...)``를 그대로 넘기면 Step A가 완성된다.
         """
         async with self._session_factory() as session, session.begin():
             return await run_mois_license_bulk_job(
@@ -212,6 +219,7 @@ class AsyncKrtourMapClient:
                 dataset_key=dataset_key,
                 reverse_geocoder=reverse_geocoder,
                 source_checksum=source_checksum,
+                batch_size=batch_size,
             )
 
     async def sync_dedup_candidates(

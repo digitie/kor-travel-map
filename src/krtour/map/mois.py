@@ -24,7 +24,7 @@ ADR 참조
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from krtour.map.infra.advisory_lock import try_advisory_lock
 from krtour.map.infra.feature_repo import (
@@ -44,7 +44,7 @@ from krtour.map.providers.mois import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Iterator
     from datetime import datetime
 
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -58,6 +58,23 @@ _LICENSE_ENTITY_TYPE = "license_place"
 # import_jobs kind (data-model.md §9.1 예시).
 _BULK_JOB_KIND = "mois_license_full_update"
 
+# streaming 배치 적재 기본 크기 (대용량 source DB snapshot 메모리 바운드).
+DEFAULT_BATCH_SIZE: Final[int] = 500
+
+
+def _batched(
+    records: Iterable[MoisLicensePlaceRecord], size: int
+) -> Iterator[list[MoisLicensePlaceRecord]]:
+    """iterable을 ``size``개씩 list 배치로 끊어 내보낸다 (메모리 바운드)."""
+    batch: list[MoisLicensePlaceRecord] = []
+    for record in records:
+        batch.append(record)
+        if len(batch) >= size:
+            yield batch
+            batch = []
+    if batch:
+        yield batch
+
 
 def _bulk_advisory_key(dataset_key: str) -> str:
     """Step A 단일 워커 직렬화용 advisory lock 키 (ADR-011/039 import:* 패턴)."""
@@ -65,6 +82,7 @@ def _bulk_advisory_key(dataset_key: str) -> str:
 
 
 __all__ = [
+    "DEFAULT_BATCH_SIZE",
     "MoisBulkSyncResult",
     "MoisBulkJobResult",
     "load_mois_license_features_bulk",
@@ -189,23 +207,32 @@ async def sync_mois_license_features_bulk(
     fetched_at: datetime,
     dataset_key: str = DATASET_KEY_BULK,
     reverse_geocoder: ReverseGeocoder | None = None,
+    batch_size: int = DEFAULT_BATCH_SIZE,
 ) -> MoisBulkSyncResult:
     """전체 영업중 snapshot 적재 + snapshot 부재 feature soft-delete (Step A bulk).
 
     ``records``는 **이번 전체 snapshot**(영업중 PROMOTED record)이어야 한다 —
-    부분 batch에 쓰면 누락분이 전부 비활성화된다. 변환 → upsert → snapshot에 없는
-    기존 feature soft-delete를 한 단위 of work로 수행한다 (commit은 호출자/감싼
-    transaction 소유). mois source DB cursor iterator(``collect_and_load_*``)는
-    후속 PR — 본 함수는 in-memory snapshot iterable을 받는다.
+    부분 batch에 쓰면 누락분이 전부 비활성화된다. mois source DB의 대용량 스트림을
+    메모리 바운드로 처리하기 위해 ``batch_size``개씩 끊어 변환·upsert하며 snapshot
+    key만 누적한다. 전체 적재 후 snapshot에 없는 기존 feature를 soft-delete한다.
+    commit은 호출자/감싼 transaction 소유 (한 단위 of work — 하나라도 실패하면
+    전체 rollback).
+
+    ``records``로 ``mois.db.iter_open_place_records(...)``(source DB 영업중 스트림)을
+    그대로 넘기면 Step A가 완성된다 (본 모듈은 ADR-006상 mois를 import하지 않으므로
+    iterator를 호출자가 주입).
     """
-    bundles = await license_records_to_bundles(
-        records,
-        fetched_at=fetched_at,
-        dataset_key=dataset_key,
-        reverse_geocoder=reverse_geocoder,
-    )
-    load_result = await load_bundles(session, bundles)
-    snapshot_keys = {b.source_record.source_entity_id for b in bundles}
+    load_result = FeatureLoadResult()
+    snapshot_keys: set[str] = set()
+    for batch in _batched(records, batch_size):
+        bundles = await license_records_to_bundles(
+            batch,
+            fetched_at=fetched_at,
+            dataset_key=dataset_key,
+            reverse_geocoder=reverse_geocoder,
+        )
+        load_result = load_result.merge(await load_bundles(session, bundles))
+        snapshot_keys.update(b.source_record.source_entity_id for b in bundles)
     deactivated = await soft_delete_features_not_in_snapshot(
         session,
         provider=PROVIDER_NAME,
@@ -224,6 +251,7 @@ async def run_mois_license_bulk_job(
     dataset_key: str = DATASET_KEY_BULK,
     reverse_geocoder: ReverseGeocoder | None = None,
     source_checksum: str | None = None,
+    batch_size: int = DEFAULT_BATCH_SIZE,
 ) -> MoisBulkJobResult:
     """Step A bulk 적재를 **advisory lock + import_jobs 추적**으로 감싼 오케스트레이션.
 
@@ -256,6 +284,7 @@ async def run_mois_license_bulk_job(
                 fetched_at=fetched_at,
                 dataset_key=dataset_key,
                 reverse_geocoder=reverse_geocoder,
+                batch_size=batch_size,
             )
         except Exception as exc:
             # 작업을 failed로 표시 후 원래 예외를 re-raise. 같은 transaction을
