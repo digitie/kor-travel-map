@@ -88,6 +88,7 @@ from krtour.map.infra.models import (
     SourceRecordRow,
     metadata,
 )
+from krtour.map.infra.status_repo import StatusCounts, gather_status_counts
 
 __all__ = [
     # advisory_lock (ADR-011 / ADR-039)
@@ -138,4 +139,7 @@ __all__ = [
     "heartbeat_import_job",
     "finish_import_job",
     "recover_stale_running_jobs",
+    # status_repo (read-only 운영 현황)
+    "StatusCounts",
+    "gather_status_counts",
 ]

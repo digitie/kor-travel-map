@@ -22,6 +22,7 @@ ADR 참조
 
 from __future__ import annotations
 
+from krtour.map.cli.main import build_parser, main
 from krtour.map.cli.mutex import (
     alembic_upgrade_lock_key,
     dedup_merge_lock_key,
@@ -31,6 +32,8 @@ from krtour.map.cli.mutex import (
 )
 
 __all__ = [
+    "main",
+    "build_parser",
     "mutex_lock",
     "try_mutex_lock",
     "import_lock_key",

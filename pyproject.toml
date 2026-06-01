@@ -36,6 +36,10 @@ dependencies = [
   "jellyfish>=1.0",  # ADR-016 Record Linkage (jaro_winkler_similarity)
 ]
 
+# CLI entry-point (ADR-022 — 명령 이름 `krtour-map`, ADR-039 mutex).
+[project.scripts]
+krtour-map = "krtour.map.cli.main:main"
+
 [project.optional-dependencies]
 dev = [
   "pytest>=8",

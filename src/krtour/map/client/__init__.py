@@ -48,6 +48,7 @@ from krtour.map.infra.feature_repo import (
     get_feature_row,
     load_bundles,
 )
+from krtour.map.infra.status_repo import StatusCounts, gather_status_counts
 from krtour.map.mois import DEFAULT_BATCH_SIZE as MOIS_DEFAULT_BATCH_SIZE
 from krtour.map.mois import (
     MoisBulkJobResult,
@@ -287,3 +288,12 @@ class AsyncKrtourMapClient:
         """검토 대기(``status='pending'``) dedup 후보 list — total_score 내림차순."""
         async with self._session_factory() as session:
             return await pending_dedup_reviews(session, limit=limit)
+
+    async def status_counts(self) -> StatusCounts:
+        """운영 현황 카운트 스냅샷 (read-only) — ``krtour-map status``용.
+
+        features(활성/비활성/kind별) + source_records(provider별) + import_jobs
+        (state별) + dedup_review_queue(status별)를 한 번에 집계. mutex 불필요.
+        """
+        async with self._session_factory() as session:
+            return await gather_status_counts(session)

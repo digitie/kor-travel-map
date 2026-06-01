@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-01 (claude) — krtour-map CLI 골격 + status 명령
+
+**작업**: SPRINT-4 §2.8 CLI entry-point 신설. read-only `status` 명령 + argparse
+프레임. mutate 명령(`import`/`dedup-merge`)은 provider record source 주입 설계 후
+후속.
+
+- **산출물**:
+  - `src/krtour/map/cli/main.py` — `krtour-map` argparse(`build_parser`) + `status` 서브명령(`KrtourMapSettings.pg_dsn`/`--dsn`로 engine → `AsyncKrtourMapClient.status_counts` → 출력) + `main(argv)` entry-point.
+  - `infra/status_repo.py` — `gather_status_counts`(features 활성/비활성/kind별 + source_records provider별 + import_jobs state별 + dedup_queue status별) + `StatusCounts`. read-only raw SQL(ADR-004).
+  - `AsyncKrtourMapClient.status_counts` + `pyproject.toml [project.scripts] krtour-map`.
+  - tests: unit 5(parser/format) + integration 2(빈/데이터).
+- **검증(WSL)**: mypy --strict 57 files / ruff All checks passed / import-linter 4 kept(cli layer) / 신규 unit 5 + integration 2 / 전체 **744 passed, 5 skipped**. `krtour-map --help` 실동작 확인(entry-point 등록).
+
 ## 2026-06-01 (claude) — MOIS Step A 실데이터 라이브 테스트
 
 **작업**: Sprint 4a MOIS 파이프라인을 행안부 LOCALDATA 실데이터로 end-to-end
