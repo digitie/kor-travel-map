@@ -2,6 +2,30 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-01 (claude) — ADR-045 BLOCKER 의사결정 확정 + kraddr-geo 시군구 반경 API 설계
+
+**작업**: 사용자가 BLOCKER 5건 결정 → 문서에 확정 반영 + 영향 task/spec 갱신.
+
+- **확정 (D-2/D-6/D-7/D-11/D-14)** — `adr045-open-decisions.md` BLOCKER 섹션 ✅:
+  - D-2 = (a) 같은 Postgres, 별도 DB `krtour_map_dagster` + 기동 순서 확정.
+  - D-6 = 권고대로 — request:job **1:1**, `run_mode=now` lock 충돌 시 **409 +
+    retry_after**, sensor 폴링 **15초**.
+  - D-7 = **분리** — `/features/*`(공개) + `/admin/features/*`(원문/이력).
+  - D-11 = **kraddr-geo에 신규 엔드포인트 추가** + krtour-map REST 호출. krtour-map
+    경계 테이블(T-205b) 취소.
+  - D-14 = **RustFS 무제한 보존**(정리 job 없음).
+- **kraddr-geo `POST /v2/regions/within-radius` 설계**(형제 repo 별도 PR) —
+  요청 `{lon,lat,radius_km,levels}` → 응답 `{sigungu:[{code,name,relation}]}`.
+  `tl_scco_sig`(이미 적재된 시군구 경계 polygon) PostGIS 교차. krtour-map
+  `resolve_sigungu_by_radius`가 `KraddrGeoRestClient`로 호출.
+  **기타 코멘트 저장**: (1) `sig_cd`↔`sigungu_code` 코드체계 1건 실측 검증 필수,
+  (2) `levels`는 sigungu 우선·시도/읍면동 확장 여지, (3) reverse에 radius 옵션
+  얹는 대안은 의미 흐려져 미채택(사용자: 엔드포인트 늘려도 됨).
+- **task 반영**: T-205b 취소, T-206a를 kraddr-geo 호출로, **T-206a-geo 신규**
+  (kraddr-geo 엔드포인트, 별도 repo). plan §1/§2 + tasks.md + tripmate-rest-api §3.7/§6.
+- 비BLOCKER(D-1,3,4,5,8,9,10,12,13,15,16)은 권고안 유지(추후 결정).
+- **docs-only** — 코드/게이트 변경 없음. kraddr-geo 엔드포인트는 그 repo 별도 PR.
+
 ## 2026-06-01 (claude) — ADR-045 실행 계획 + 의사결정 + TripMate REST 구체화
 
 **작업**: 사용자 지시 — (1) DB 스키마/로직 추가 구체화, (2) sprint/task/ADR 충돌
