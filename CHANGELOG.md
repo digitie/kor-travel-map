@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### Sprint 4 — 운영 CLI (2026-06-01~)
+
+- **NEW**: `krtour-map import mois <records-file>` — MOIS 인허가 Step A bulk 적재
+  CLI 명령. provider가 export한 provider-neutral **NDJSON snapshot**(한 줄당 JSON
+  object)을 record source로 읽어(ADR-006 — provider 라이브러리 미import)
+  `run_mois_license_bulk_job`으로 적재한다. `import:python-mois-api:<dataset>`
+  advisory lock 단일 워커 직렬화(ADR-039) + `import_jobs` 추적(ADR-011); 다른
+  워커가 적재 중이면 skip(exit 3). `--geocoder-url`로 좌표 → bjd_code 역지오코딩
+  보강(kraddr-geo REST) 선택. `--dataset-key`/`--batch-size`/`--source-checksum`
+  옵션. (`cli/records.py` NDJSON 리더 + `cli/main.py` import 서브명령.)
+
 ### Sprint 3 — DB 적재 오케스트레이션 + dedup + geocoding REST + e2e (2026-05-29~30)
 
 - **PR#115 — PR review 누락 보강 + 문서 정합성 sweep**:

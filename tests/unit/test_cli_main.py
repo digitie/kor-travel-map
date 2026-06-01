@@ -7,8 +7,16 @@ from __future__ import annotations
 
 import pytest
 
-from krtour.map.cli.main import _format_status, build_parser
+from krtour.map.cli.main import (
+    _EXIT_IMPORT_SKIPPED,
+    _format_bulk_result,
+    _format_status,
+    build_parser,
+)
+from krtour.map.infra.feature_repo import FeatureLoadResult
+from krtour.map.infra.jobs_repo import ImportJob
 from krtour.map.infra.status_repo import StatusCounts
+from krtour.map.mois import MoisBulkJobResult, MoisBulkSyncResult
 
 
 def test_parser_requires_command() -> None:
@@ -57,3 +65,94 @@ def test_format_status_empty() -> None:
     # 비어있는 섹션은 생략.
     assert "by_provider" not in out
     assert "by_state" not in out
+
+
+# ── import mois 서브명령 ────────────────────────────────────────────────
+
+
+def test_parser_import_mois_minimal() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["import", "mois", "snap.ndjson"])
+    assert args.command == "import"
+    assert args.provider == "mois"
+    assert args.records_file == "snap.ndjson"
+    # 기본값
+    assert args.dataset_key == "mois_license_features_bulk"
+    assert args.geocoder_url is None
+    assert hasattr(args, "func")
+
+
+def test_parser_import_mois_options() -> None:
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "import",
+            "mois",
+            "snap.ndjson",
+            "--dataset-key",
+            "mois_license_features_history",
+            "--batch-size",
+            "100",
+            "--geocoder-url",
+            "http://127.0.0.1:8888",
+            "--source-checksum",
+            "abc123",
+        ]
+    )
+    assert args.dataset_key == "mois_license_features_history"
+    assert args.batch_size == 100
+    assert args.geocoder_url == "http://127.0.0.1:8888"
+    assert args.source_checksum == "abc123"
+
+
+def test_parser_import_requires_provider() -> None:
+    parser = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["import"])  # provider 서브명령 필수
+
+
+def test_parser_import_requires_records_file() -> None:
+    parser = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["import", "mois"])  # records_file 필수
+
+
+def _job_result(*, acquired: bool) -> MoisBulkJobResult:
+    if not acquired:
+        return MoisBulkJobResult(acquired=False)
+    job = ImportJob(
+        job_id="job-1",
+        kind="mois_license_full_update",
+        payload={"dataset_key": "mois_license_features_bulk"},
+        state="done",
+        progress=100,
+        current_stage=None,
+        source_checksum=None,
+        error_message=None,
+    )
+    sync = MoisBulkSyncResult(
+        load=FeatureLoadResult(
+            bundles_total=5,
+            features_inserted=4,
+            features_updated=1,
+            source_records_inserted=5,
+            source_links_inserted=5,
+            source_links_updated=0,
+        ),
+        deactivated=2,
+    )
+    return MoisBulkJobResult(acquired=True, job=job, sync=sync)
+
+
+def test_format_bulk_result_done() -> None:
+    out = _format_bulk_result(_job_result(acquired=True))
+    assert "done (job_id=job-1)" in out
+    assert "inserted=4 updated=1" in out
+    assert "source_records: inserted=5" in out
+    assert "deactivated (snapshot prune): 2" in out
+
+
+def test_format_bulk_result_skipped() -> None:
+    out = _format_bulk_result(_job_result(acquired=False))
+    assert "skipped" in out
+    assert _EXIT_IMPORT_SKIPPED == 3
