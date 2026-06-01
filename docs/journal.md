@@ -2,6 +2,29 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-01 (claude) — 에이전트 공용 runbook 신설 (agent-workflow / agent-failure-patterns)
+
+**작업**: 사용자 지시 — TripMate(`F:\dev\tripmate`)의 `docs/runbooks/` 컨벤션을 참고해
+본 repo에 **에이전트 공용 runbook**을 신설(agent-workflow + agent-failure-patterns
+포함, Claude/Codex/Antigravity가 같은 파일 공유).
+
+- **신설 `docs/runbooks/`**:
+  - `README.md` — 인덱스 + 에이전트별 분기 표(worktree/`sandbox/<agent>`) + 공통 정책
+    (NTFS source of truth / WSL 테스트 / 4 게이트 / main 직접 push 금지).
+  - `agent-workflow.md` — 표준 1-PR 흐름(진입 → 브랜치 → NTFS 편집 → WSL rsync+4게이트
+    +openapi-drift → 커밋/PR → CI 3버전 green → 머지 → sandbox/<agent>+WSL 동기화) +
+    1-PR 체크리스트. 에이전트 중립.
+  - `agent-failure-patterns.md` — 본 repo 실사례 패턴: A(CI↔로컬 괴리: WSL venv가
+    [dev] extra 가림 / 안 돌린 결과 보고 금지 / 버전별 CI / openapi drift), B(git:
+    sandbox 직접 커밋 복구 / WSL 미러 reset / 무관 파일), C(도메인: 자연키 `::` /
+    스키마 한정 / CHECK 허용값 / upstream drift ADR-044 / 증분 prune 금지), D(python:
+    normalize_phone 관대함 / runtime_checkable 불안정 / Result.rowcount / commit 테스트
+    오염 / CJK E501 / future annotations).
+- **포인터**: `docs/agent-guide.md` §1 진입 프로토콜에 runbook 9번 추가 +
+  `AGENTS.md`에 "에이전트 공용 runbook (필독)" 섹션.
+- 출처: 세션 transcript + `MEMORY.md`(wsl-test-venv / playwright-e2e) + PR 회고.
+- **docs-only** — 코드/게이트 변경 없음(ruff/mypy/pytest 영향 없음).
+
 ## 2026-06-01 (claude) — Sprint 4b: Coverage 80% 완전 달성 (게이트 75→80)
 
 **작업**: ADR-032 Sprint 4 목표인 coverage 80%를 게이트(`fail_under`)에 박음 — Sprint
