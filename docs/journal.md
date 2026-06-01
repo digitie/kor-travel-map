@@ -2,6 +2,22 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-01 (claude) — Sprint 4b: Coverage 80% 완전 달성 (게이트 75→80)
+
+**작업**: ADR-032 Sprint 4 목표인 coverage 80%를 게이트(`fail_under`)에 박음 — Sprint
+4b 마지막 항목.
+
+- **측정(WSL, 835 tests 전체)**: 전체 **94.12%**. 모든 tier 목표 상회 — enrichment/
+  consistency/status_repo 100%, infra 94~100%, providers 최저 mois 82%·krheritage 87%
+  (모두 ≥70 providers tier), dto 92~100%.
+- **변경**: `pyproject.toml` `[tool.coverage.report] fail_under` 75 → **80**(ADR-032
+  Sprint 4 스케줄 목표). 실측 94.12%라 무위험 상향 — 신규 테스트 불필요(이번 Sprint
+  4a/4b PR들이 함께 보강됨). schedule 주석을 Sprint 4=현재로 갱신.
+- **검증(WSL)**: `pytest --cov` → "Required test coverage of 80.0% reached. Total
+  coverage: 94.12%" / 835 passed.
+- **Sprint 4b 3종(F4 / Place phone enrichment / Coverage 80%) 완료. Sprint 4
+  (4a+4b) 종료.**
+
 ## 2026-06-01 (claude) — Sprint 4b: Place 전화번호 보강 (백그라운드 시작)
 
 **작업**: Place phone enrichment(SPRINT-4 §2.7) — 전화번호 없는 MOIS place 후보 발굴
