@@ -69,7 +69,7 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
   - `resolve_sigungu_by_radius(session, lon, lat, radius_km)` — **kraddr-geo
     `POST /v2/regions/within-radius`(D-11) 호출** → 교차 시군구 `code` 목록 →
     `WHERE sigungu_code = ANY(:codes)` feature 조회. `KraddrGeoRestClient` 재사용.
-    ⚠️ sig_cd↔sigungu_code 코드체계 1건 검증(D-11 기타 코멘트).
+    sig_cd = sigungu_code 동일 체계(D-11 확인) — 매핑 없이 그대로 사용.
   - `resolve_provider_dataset(session, provider, dataset_key, sync_scope)` —
     `source_links`(primary) JOIN `source_records` 필터.
   - `resolve_cache_target_keys(...)` — `poi-cache-update-targets.md` (Phase 2).
@@ -77,8 +77,8 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
     (write 없이 count + sigungu_codes).
 - **T-206a-geo** (형제 repo `python-kraddr-geo`, 별도 PR) — `POST /v2/regions/
   within-radius` 신규 엔드포인트. 요청/응답/구현은 `adr045-open-decisions.md` D-11.
-  `tl_scco_sig`(+ctprvn/emd) PostGIS 교차. **선행 검증**: 반환 `code`(sig_cd)가
-  krtour-map `sigungu_code`와 동일 체계인지 1건 실측. T-206a `resolve_sigungu_by_
+  `tl_scco_sig`(+ctprvn/emd) PostGIS 교차. 반환 `code`(sig_cd)는 krtour-map
+  `sigungu_code`와 동일 체계(D-11 확인) — 매핑 불필요. T-206a `resolve_sigungu_by_
   radius`의 선행 의존.
 - **T-206b** `infra/feature_update_repo.py` 신규 — 요청 생명주기:
   - `enqueue_feature_update_request(session, scope, providers, dataset_keys,

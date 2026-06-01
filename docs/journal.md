@@ -18,9 +18,10 @@
   요청 `{lon,lat,radius_km,levels}` → 응답 `{sigungu:[{code,name,relation}]}`.
   `tl_scco_sig`(이미 적재된 시군구 경계 polygon) PostGIS 교차. krtour-map
   `resolve_sigungu_by_radius`가 `KraddrGeoRestClient`로 호출.
-  **기타 코멘트 저장**: (1) `sig_cd`↔`sigungu_code` 코드체계 1건 실측 검증 필수,
-  (2) `levels`는 sigungu 우선·시도/읍면동 확장 여지, (3) reverse에 radius 옵션
-  얹는 대안은 의미 흐려져 미채택(사용자: 엔드포인트 늘려도 됨).
+  **기타 코멘트 저장**: (1) `sig_cd`(5자리) = `sigungu_code`(5자리) **동일 체계
+  (사용자 확인)** — 매핑 불필요, (2) `levels`는 sigungu 우선·시도/읍면동 확장 여지
+  (사용자 확인), (3) reverse에 radius 옵션 얹는 대안은 의미 흐려져 미채택(사용자:
+  엔드포인트 늘려도 됨).
 - **task 반영**: T-205b 취소, T-206a를 kraddr-geo 호출로, **T-206a-geo 신규**
   (kraddr-geo 엔드포인트, 별도 repo). plan §1/§2 + tasks.md + tripmate-rest-api §3.7/§6.
 - 비BLOCKER(D-1,3,4,5,8,9,10,12,13,15,16)은 권고안 유지(추후 결정).
