@@ -375,3 +375,65 @@ def test_name_sim_one_empty_after_normalize_zero() -> None:
     assert name_similarity("(주)", "서울시청") == 0.0
     # 공백만 — 정규화 후 빈 문자열.
     assert name_similarity("   ", "서울시청") == 0.0
+
+
+# ── master 선정 (ADR-016 병합 시) ────────────────────────────────────────
+
+from datetime import UTC, datetime  # noqa: E402
+
+from krtour.map.core.scoring import (  # noqa: E402
+    DEFAULT_SOURCE_PRIORITY,
+    MasterCandidate,
+    select_master,
+    source_priority,
+)
+
+_T0 = datetime(2026, 1, 1, tzinfo=UTC)
+_T1 = datetime(2026, 6, 1, tzinfo=UTC)
+
+
+@pytest.mark.unit
+def test_source_priority_known_and_default() -> None:
+    # 행안부(mois)가 TourAPI(visitkorea)보다 높음 (ADR-016).
+    assert source_priority("python-mois-api") > source_priority(
+        "python-visitkorea-api"
+    )
+    # 미등록 provider → 기본값.
+    assert source_priority("python-unknown-api") == DEFAULT_SOURCE_PRIORITY
+    # 사용자 등록(provider 부재) → 0.
+    assert source_priority(None) == 0
+    assert source_priority("") == 0
+
+
+@pytest.mark.unit
+def test_select_master_coord_beats_no_coord() -> None:
+    a = MasterCandidate("f_a", has_coord=False, updated_at=_T1, provider="python-mois-api")
+    b = MasterCandidate("f_b", has_coord=True, updated_at=_T0, provider=None)
+    # 좌표 보유가 1순위 — b가 master (updated_at/우선순위는 a가 높아도 무시).
+    assert select_master(a, b) == ("f_b", "f_a")
+
+
+@pytest.mark.unit
+def test_select_master_recency_second() -> None:
+    a = MasterCandidate("f_a", has_coord=True, updated_at=_T1, provider=None)
+    b = MasterCandidate("f_b", has_coord=True, updated_at=_T0, provider="python-mois-api")
+    # 둘 다 좌표 — 최신(updated_at) a가 master (provider 우선순위보다 앞).
+    assert select_master(a, b) == ("f_a", "f_b")
+
+
+@pytest.mark.unit
+def test_select_master_source_priority_third() -> None:
+    a = MasterCandidate("f_a", has_coord=True, updated_at=_T0, provider="python-visitkorea-api")
+    b = MasterCandidate("f_b", has_coord=True, updated_at=_T0, provider="python-mois-api")
+    # 좌표·updated_at 동률 — 원천 우선순위 높은 mois(b)가 master.
+    assert select_master(a, b) == ("f_b", "f_a")
+
+
+@pytest.mark.unit
+def test_select_master_full_tie_lexicographic() -> None:
+    a = MasterCandidate("f_b", has_coord=True, updated_at=_T0, provider="python-mois-api")
+    b = MasterCandidate("f_a", has_coord=True, updated_at=_T0, provider="python-mois-api")
+    # 완전 동률 — feature_id 사전순 작은 f_a가 master (결정적).
+    assert select_master(a, b) == ("f_a", "f_b")
+    # 인자 순서 무관.
+    assert select_master(b, a) == ("f_a", "f_b")

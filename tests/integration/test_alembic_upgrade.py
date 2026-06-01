@@ -179,3 +179,16 @@ async def test_alembic_features_indexes_exist(
     }
     missing = required - idx
     assert not missing, f"missing indexes: {missing}"
+
+
+async def test_alembic_creates_feature_merge_history(
+    pg_engine_with_migrations: AsyncEngine,
+) -> None:
+    """0007 revision이 ``ops.feature_merge_history`` 생성 (ADR-016)."""
+    async with pg_engine_with_migrations.connect() as conn:
+        exists = (
+            await conn.execute(
+                text("SELECT to_regclass('ops.feature_merge_history')")
+            )
+        ).scalar_one()
+    assert exists is not None
