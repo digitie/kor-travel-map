@@ -2,6 +2,24 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-01 (claude) — krex 휴게소 라이브 적재 재검증 (upstream entrpsNm fix 후)
+
+**작업**: 사용자가 `python-krex-api`의 `entrpsNm` 미추종(ADR-044 provider 책임)을
+수정 완료 → 휴게소 적재 라이브 테스트 재실행.
+
+- **upstream fix 확인**: `python-krex-api` PR#6(`fix/restarea-entrpsNm-field`,
+  `ea4c08d`) origin 머지 → 로컬 체크아웃 `F:\dev\python-krex-api` ff pull(`72b74d7`).
+  `client.py`가 `_required(row, "entrpsNm", "restAreaNm", "serviceAreaName")`로
+  `entrpsNm` 우선 처리.
+- **재검증(WSL, testcontainers postgis 16-3.5 + alembic 0001~0006)**: 휴게소 60건
+  fetch(좌표 60/60) → `rest_areas_to_bundles` 60 변환 → `load_bundles` 60 적재.
+  DB features 60 / `coord_5179` SRID=5179 60/60 / category `06040101` 60/60 —
+  **PASS**. 어댑터 자연키 `휴게소명::노선::방향::lon::lat`(이 데이터셋은 노선·방향
+  None → 휴게소명+좌표가 사실상 키). 본 lib 코드 변경 없음(변환은 최초부터 정상).
+- **문서**: `docs/reports/provider-live-test-2026-06-01.md` §2/§4/§6/§7 갱신 — krex
+  ❌→✅ 60, 후속 항목 완료 처리. 라이브 스크립트는 임시(`scripts/_live_krex_*`)로
+  작성 후 제거(provider lib는 런타임 의존 아님, ADR-006).
+
 ## 2026-06-01 (claude) — provider 다종 실데이터 라이브 적재 테스트 + notice alias 보강
 
 **작업**: geocoder v2 전환에 이어 kma/opinet/krforest 등 다른 provider DB 적재를
