@@ -20,6 +20,13 @@
 
 ## 2. 산출물
 
+> **ADR-045 독립 프로그램화 트랙(Sprint 5 핵심)**: Docker compose + admin-first
+> OpenAPI + 독립 Dagster + TripMate REST 연계. **세분 실행 계획은
+> `docs/adr045-standalone-plan.md`**(T-205~T-210), 의사결정 대기는
+> `docs/adr045-open-decisions.md`(D-1~D-16), TripMate REST 계약은
+> `docs/tripmate-rest-api.md`. 아래 §2.1+ provider 적재는 ADR-045 Dagster asset
+> (krtour-map 소유)로 운영 전환된다(T-208c).
+
 ### 2.1 Provider ⑧ — 휴양림/수목원 (`python-krforest-api`)
 
 - **datasets**:

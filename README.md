@@ -228,6 +228,9 @@ lint-imports
 - [`docs/debug-ui-package.md`](docs/debug-ui-package.md) — `krtour-map-debug-ui` 별도 패키지 사양 (ADR-020)
 - [`docs/debug-ui-admin-workflows.md`](docs/debug-ui-admin-workflows.md) — debug UI/admin 운영 콘솔 상세 구현 사양
 - [`docs/openapi-admin-contract.md`](docs/openapi-admin-contract.md) — Admin 우선 OpenAPI + Dagster feature update queue 계약
+- [`docs/adr045-standalone-plan.md`](docs/adr045-standalone-plan.md) — **ADR-045 독립 프로그램화 실행 계획**(T-205~T-210, AI agent 실행용)
+- [`docs/adr045-open-decisions.md`](docs/adr045-open-decisions.md) — ADR-045 의사결정 대기(D-1~D-16, 차단요소 포함)
+- [`docs/tripmate-rest-api.md`](docs/tripmate-rest-api.md) — TripMate 연계 REST API params/returns 계약
 - [`docs/poi-cache-update-targets.md`](docs/poi-cache-update-targets.md) — 외부 POI key 기반 주변 feature 캐시 갱신 타깃
 - [`docs/category.md`](docs/category.md) — `krtour.map.category` 모듈 사양 (kraddr-base에서 이전, ADR-023)
 - [`docs/postgres-schema.md`](docs/postgres-schema.md) — PostgreSQL 스키마 reference 카탈로그 (data-model의 빠른 참조)

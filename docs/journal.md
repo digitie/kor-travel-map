@@ -2,6 +2,35 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-01 (claude) — ADR-045 실행 계획 + 의사결정 + TripMate REST 구체화
+
+**작업**: 사용자 지시 — (1) DB 스키마/로직 추가 구체화, (2) sprint/task/ADR 충돌
+정리, (3) TripMate 문서 정리 + 이관 + Dagster 복사·구체화 + 연계 REST 명세. AI
+agent가 바로 실행 가능하도록 task를 세분하고, 의사결정 필요분을 문서화.
+
+- **리서치**: 병렬 에이전트 4개로 (A) ADR-045 후속 문서 갭, (B) TripMate 문서/
+  Dagster/REST 요구, (C) DB 스키마·로직 갭, (D) sprint/task/ADR 충돌을 수집. 핵심:
+  codex가 admin OpenAPI/큐 DDL/Docker 서비스를 이미 명세(`openapi-admin-contract.md`
+  등)했고, **빠진 것은 alembic/코드/Dagster/compose 구현 + TripMate REST params/
+  returns + 의사결정 10여건**.
+- **신규 문서 3종**:
+  - `docs/adr045-standalone-plan.md` — 독립 프로그램화 **마스터 실행 계획**. Phase
+    1~6(DB 스키마 / 로직 scope resolver / FastAPI 라우터 / Dagster / Docker compose /
+    TripMate 연계) + **fine-grained T-205~T-210** + 재사용 자산 + 권장 순서 §8 +
+    충돌·정리 표 §7. 기존 명세는 재작성 않고 참조.
+  - `docs/tripmate-rest-api.md` — TripMate 호출 REST의 엔드포인트·**params/returns**
+    구체화(in-bounds/{id}/batch/search/nearby-by-target/last-sync/feature-update-
+    requests/health·version) + 공개 Feature 응답 형태 + 에러 코드.
+  - `docs/adr045-open-decisions.md` — **의사결정 대기 D-1~D-16**(BLOCKER 5: Dagster
+    DB / 큐 모델 / features admin↔user 분리 / sigungu 경계 / offline 저장).
+- **backlog 세분**: `docs/tasks.md`에 ADR-045 섹션 + T-205~T-210(Phase별, 각 1-PR).
+- **충돌 정리**: SPRINT-5 §2에 ADR-045 트랙 포인터, T-200에 Dagster=krtour-map 소유
+  주석, ADR-011 §결과(부정) 오참조("ADR-016에서 분리"→"import_jobs 1차 큐 +
+  Dagster sensor 폴링, ADR-045 §5") 정정. 나머지 ADR amendment(003/005/031/034/040)
+  는 해당 의사결정 확정 시 반영(plan §7 + decisions에 목록).
+- README 문서 지도에 신규 3종 등록. resume 다음 한 작업을 plan/decisions 참조로 갱신.
+- **docs-only** — 코드/게이트 변경 없음.
+
 ## 2026-06-01 (claude) — 문서 전체 정합성 sweep (ADR-045 충돌 + Sprint 4 staleness)
 
 **작업**: 사용자 지시 — 최신 pull 후 문서 전체를 점검해 충돌/갭을 꼼꼼히 정정.

@@ -241,9 +241,13 @@
     `SELECT ... FOR UPDATE SKIP LOCKED`.
 - **근거**: kraddr-geo ADR-011 운영 검증.
 - **결과 (긍정)**: 재시작 안전성. 중복 실행 방지.
-- **결과 (부정)**: Dagster 자체 영속 큐와 중복 가능 — 책임 경계 ADR-016에서
-  분리.
-- **후속**: `infra/jobs_repo.py` + Alembic migration + 통합 테스트.
+- **결과 (부정)**: Dagster도 자체 내부 queue(RunRequest/asset materialization)를
+  가질 수 있으나, **ADR-045 모델에서 `ops.import_jobs`가 1차 영속 큐이고 krtour-map
+  소유 Dagster sensor가 이를 폴링·claim한다**(ADR-045 §5). (이전 "ADR-016에서 분리"
+  표현은 오참조 — ADR-016은 Record Linkage.)
+- **후속**: `infra/jobs_repo.py` + Alembic migration + 통합 테스트 (완료). ADR-045
+  feature-update 큐(`ops.feature_update_requests`)가 import_jobs 위에 얹힌다
+  (`docs/adr045-standalone-plan.md` §2).
 
 ## ADR-012: 공간 쿼리는 입력 좌표 1회 변환, 반경은 `coord_5179`(meter) 컬럼
 
