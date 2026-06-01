@@ -110,6 +110,14 @@ async def pg_engine(pg_container: Any) -> AsyncIterator[AsyncEngine]:
             await conn.execute(
                 text(f"CREATE EXTENSION IF NOT EXISTS {ext} WITH SCHEMA x_extension")
             )
+        # connect-event의 session-level ``SET search_path``는 asyncpg pool이
+        # connection을 reset(RESET ALL)하면 지워질 수 있다 — 다른 테스트가 bare
+        # ``AsyncSession``으로 connection을 recycle하면 다음 unqualified ``ST_*``
+        # 호출이 깨진다. role 레벨로 못박아 reset 후에도 유지 (migrated_engine과
+        # 동일 방어, ADR-008).
+        await conn.execute(
+            text("ALTER ROLE CURRENT_USER SET search_path = public, x_extension")
+        )
 
     try:
         yield engine

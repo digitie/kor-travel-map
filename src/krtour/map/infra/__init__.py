@@ -33,6 +33,11 @@ ADR 참조
 
 from __future__ import annotations
 
+from krtour.map.infra.advisory_lock import (
+    advisory_lock,
+    advisory_lock_key,
+    try_advisory_lock,
+)
 from krtour.map.infra.crs import (
     EPSG_UTM_K,
     EPSG_WGS84,
@@ -74,6 +79,10 @@ from krtour.map.infra.models import (
 )
 
 __all__ = [
+    # advisory_lock (ADR-011 / ADR-039)
+    "advisory_lock",
+    "advisory_lock_key",
+    "try_advisory_lock",
     # crs (ADR-012 + ADR-030)
     "EPSG_WGS84",
     "EPSG_UTM_K",

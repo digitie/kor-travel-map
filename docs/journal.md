@@ -2,6 +2,22 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-01 (claude) — advisory lock helper (ADR-011 기초)
+
+**작업**: ADR-011 작업 큐 직렬화 / ADR-039 CLI mutex의 공통 기초인 PostgreSQL
+advisory lock 헬퍼 추가. 사용자 결정에 따라 **helper만** (import_jobs 테이블 +
+jobs_repo는 후속).
+
+- **산출물**:
+  - `src/krtour/map/infra/advisory_lock.py` — `advisory_lock(session, key)`(blocking, `pg_advisory_lock`/`pg_advisory_unlock`) + `try_advisory_lock(session, key)`(non-blocking `pg_try_advisory_lock`, acquired bool yield) async context manager + `advisory_lock_key`(문자열 → BLAKE2b 8바이트 → signed int64 결정적 해시). session-level lock은 finally에서 명시 unlock(commit 자동해제 X).
+  - `infra/__init__.py` export.
+  - `tests/unit/test_advisory_lock_key.py`(3) + `tests/integration/test_advisory_lock.py`(3, 두 세션 상호배제/release/int 키).
+- **conftest 방어 보강**: `pg_engine`에 `ALTER ROLE CURRENT_USER SET search_path`
+  추가. bare `AsyncSession`이 connection을 recycle하면 asyncpg reset이
+  connect-event의 session-level search_path를 지워 후속 unqualified `ST_*`가
+  깨지던 잠복 버그 해소(advisory 테스트가 노출, migrated_engine과 동일 방어).
+- **검증(WSL)**: mypy --strict 52 files / ruff All checks passed / import-linter 4 kept / 신규 unit 3 + integration 3 / 전체 **711 passed, 5 skipped**.
+
 ## 2026-06-01 (claude) — Sprint 4a MOIS snapshot prune (delete_not_in)
 
 **작업**: loader(앞 entry)에 이어 Step A bulk snapshot soft-delete 추가. 사용자
