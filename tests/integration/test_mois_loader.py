@@ -20,13 +20,19 @@ from sqlalchemy import func, select, text
 from krtour.map.infra.models import FeatureRow, SourceLinkRow
 from krtour.map.infra.sync_state_repo import get_sync_state
 from krtour.map.mois import (
+    close_mois_license_features,
     delete_mois_license_features_not_in,
     load_mois_license_features_bulk,
     run_mois_license_bulk_job,
+    run_mois_license_closed_job,
     run_mois_license_incremental_job,
     sync_mois_license_features_bulk,
 )
-from krtour.map.providers.mois import DATASET_KEY_HISTORY, PROVIDER_NAME
+from krtour.map.providers.mois import (
+    DATASET_KEY_CLOSED,
+    DATASET_KEY_HISTORY,
+    PROVIDER_NAME,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -472,3 +478,84 @@ async def test_incremental_does_not_prune_existing(
     await migrated_session.flush()
     # 둘 다 active — prune 없음(Step B).
     assert await _active_count(migrated_session) == 2
+
+
+# ── Step C: 폐업/취소 feature 비활성화 ───────────────────────────────────
+
+
+async def test_close_inactivates_matching_features(
+    migrated_session: AsyncSession,
+) -> None:
+    # bulk 2건 적재.
+    await load_mois_license_features_bulk(
+        migrated_session,
+        [
+            _Record(service_slug="general_restaurants", mng_no="keep-1"),
+            _Record(service_slug="bakeries", mng_no="keep-2"),
+        ],
+        fetched_at=_FETCHED,
+    )
+    await migrated_session.flush()
+    assert await _active_entity_ids(migrated_session) == {
+        "general_restaurants::keep-1",
+        "bakeries::keep-2",
+    }
+
+    # 한 건 폐업 통지 → 해당 feature만 inactive.
+    deactivated = await close_mois_license_features(
+        migrated_session,
+        [_Record(service_slug="general_restaurants", mng_no="keep-1")],
+    )
+    await migrated_session.flush()
+    assert deactivated == 1
+    assert await _active_entity_ids(migrated_session) == {"bakeries::keep-2"}
+
+
+async def test_close_ignores_unmatched_records(
+    migrated_session: AsyncSession,
+) -> None:
+    await load_mois_license_features_bulk(
+        migrated_session,
+        [_Record(service_slug="bakeries", mng_no="b1")],
+        fetched_at=_FETCHED,
+    )
+    await migrated_session.flush()
+    # 미적재 mng_no 폐업 통지 — no-op.
+    deactivated = await close_mois_license_features(
+        migrated_session,
+        [_Record(service_slug="bakeries", mng_no="never-loaded")],
+    )
+    await migrated_session.flush()
+    assert deactivated == 0
+    assert await _active_entity_ids(migrated_session) == {"bakeries::b1"}
+
+
+async def test_run_closed_job_tracks_and_advances_cursor(
+    migrated_session: AsyncSession,
+) -> None:
+    await load_mois_license_features_bulk(
+        migrated_session,
+        [_Record(service_slug="general_restaurants", mng_no="c1")],
+        fetched_at=_FETCHED,
+    )
+    await migrated_session.flush()
+
+    result = await run_mois_license_closed_job(
+        migrated_session,
+        [_Record(service_slug="general_restaurants", mng_no="c1")],
+        new_cursor={"last_modified_date": "2026-06-03"},
+    )
+    assert result.acquired is True
+    assert result.job is not None
+    assert result.job.state == "done"
+    assert result.deactivated == 1
+    assert result.sync_state is not None
+    assert result.sync_state.cursor == {"last_modified_date": "2026-06-03"}
+
+    # closed dataset cursor 영속.
+    state = await get_sync_state(
+        migrated_session, provider=PROVIDER_NAME, dataset_key=DATASET_KEY_CLOSED
+    )
+    assert state is not None
+    assert state.cursor == {"last_modified_date": "2026-06-03"}
+    assert await _active_entity_ids(migrated_session) == set()

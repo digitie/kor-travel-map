@@ -54,9 +54,11 @@ from krtour.map.mois import DEFAULT_BATCH_SIZE as MOIS_DEFAULT_BATCH_SIZE
 from krtour.map.mois import (
     MoisBulkJobResult,
     MoisBulkSyncResult,
+    MoisClosedJobResult,
     MoisIncrementalJobResult,
     load_mois_license_features_bulk,
     run_mois_license_bulk_job,
+    run_mois_license_closed_job,
     run_mois_license_incremental_job,
     sync_mois_license_features_bulk,
 )
@@ -258,6 +260,33 @@ class AsyncKrtourMapClient:
                 reverse_geocoder=reverse_geocoder,
                 source_checksum=source_checksum,
                 batch_size=batch_size,
+            )
+
+    async def run_mois_license_closed_job(
+        self,
+        records: Iterable[MoisLicensePlaceRecord],
+        *,
+        new_cursor: dict[str, Any],
+        target_dataset_key: str = MOIS_DATASET_KEY_BULK,
+        sync_scope: str = "default",
+        source_checksum: str | None = None,
+    ) -> MoisClosedJobResult:
+        """MOIS Step C 폐업/취소 — 대응 feature를 inactive로 전환(ADR-017).
+
+        ``records``는 provider가 closed/cancelled로 통지한 인허가. 각 record의
+        ``source_entity_id``로 ``target_dataset_key``(보통 bulk)의 feature를
+        ``status='inactive'``로 전환하고, closed dataset cursor를 ``new_cursor``로
+        전진시킨다. advisory lock 단일 워커 직렬화(``acquired=False``면 skip). 한
+        transaction.
+        """
+        async with self._session_factory() as session, session.begin():
+            return await run_mois_license_closed_job(
+                session,
+                records,
+                new_cursor=new_cursor,
+                target_dataset_key=target_dataset_key,
+                sync_scope=sync_scope,
+                source_checksum=source_checksum,
             )
 
     async def sync_dedup_candidates(

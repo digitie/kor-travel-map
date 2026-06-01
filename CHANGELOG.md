@@ -7,6 +7,13 @@
 
 ### Sprint 4 — 운영 CLI (2026-06-01~)
 
+- **NEW**: MOIS Step C 폐업/취소 처리 — `krtour-map import mois <file> --mode closed
+  --cursor <값>`. provider가 `closed`/`cancelled`로 통지한 인허가 record의 대응
+  feature를 `status='inactive'`+`deleted_at`으로 전환한다(ADR-017 — place는 무기한
+  유지, status만 inactive; 새 feature 생성 없음). `infra.inactivate_features_by_
+  source_entity_ids`(soft-delete inverse) + `mois.close_mois_license_features` /
+  `run_mois_license_closed_job`(advisory lock + import_jobs + closed dataset cursor)
+  + `AsyncKrtourMapClient` 메서드. `--cursor` 미지정 시 exit 2.
 - **NEW**: MOIS Step B 증분 적재 — `krtour-map import mois <file> --mode incremental
   --cursor <값>`. 변경분만 upsert(snapshot prune 없음)하고 성공 시
   `provider_sync.provider_sync_state`의 cursor(`{"last_modified_date": …}`)를 전진

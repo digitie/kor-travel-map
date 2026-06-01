@@ -50,6 +50,7 @@ __all__ = [
     "load_bundle",
     "load_bundles",
     "soft_delete_features_not_in_snapshot",
+    "inactivate_features_by_source_entity_ids",
     "get_feature_row",
     "features_in_bbox",
 ]
@@ -198,6 +199,29 @@ WHERE f.deleted_at IS NULL
       AND sr.dataset_key = :dataset_key
       AND sr.source_entity_type = :source_entity_type
       AND NOT (sr.source_entity_id = ANY(CAST(:keys AS text[])))
+  )
+RETURNING f.feature_id
+"""
+
+
+# Step C 폐업/취소 — soft_delete_not_in_snapshot의 inverse. 주어진 source_entity_id
+# 집합에 **속하는** primary-source feature를 inactive로 전환(폐업/취소된 인허가).
+# ADR-017 — place는 무기한 유지, status만 inactive. 이미 비활성이면 건너뛴다.
+# ``:keys`` 빈 배열이면 아무 것도 비활성화하지 않는다(폐업 목록이 비었음).
+_INACTIVATE_BY_ENTITY_IDS_SQL: Final[str] = """
+UPDATE feature.features AS f
+SET status = 'inactive', deleted_at = now(), updated_at = now()
+WHERE f.deleted_at IS NULL
+  AND f.feature_id IN (
+    SELECT sl.feature_id
+    FROM provider_sync.source_links AS sl
+    JOIN provider_sync.source_records AS sr
+      ON sr.source_record_key = sl.source_record_key
+    WHERE sl.is_primary_source
+      AND sr.provider = :provider
+      AND sr.dataset_key = :dataset_key
+      AND sr.source_entity_type = :source_entity_type
+      AND sr.source_entity_id = ANY(CAST(:keys AS text[]))
   )
 RETURNING f.feature_id
 """
@@ -415,6 +439,50 @@ async def soft_delete_features_not_in_snapshot(
             "dataset_key": dataset_key,
             "source_entity_type": source_entity_type,
             "keys": sorted(snapshot_source_entity_ids),
+        },
+    )
+    return len(result.fetchall())
+
+
+async def inactivate_features_by_source_entity_ids(
+    session: AsyncSession,
+    *,
+    provider: str,
+    dataset_key: str,
+    source_entity_type: str,
+    source_entity_ids: set[str],
+) -> int:
+    """주어진 ``source_entity_id`` 집합에 **속하는** primary-source feature를 비활성화.
+
+    Step C 폐업/취소 — provider가 ``closed``/``cancelled``로 통지한 인허가에 대응하는
+    feature를 ``status='inactive'`` + ``deleted_at``으로 전환한다 (ADR-017 — place는
+    무기한 유지, status만 inactive). ``soft_delete_features_not_in_snapshot``의 inverse
+    (snapshot 부재분이 아니라 명시 폐업분). 이미 비활성인 feature·집합 밖 feature는
+    건드리지 않는다. 빈 집합이면 no-op(0). commit은 호출자 책임.
+
+    Parameters
+    ----------
+    provider, dataset_key, source_entity_type
+        feature가 적재된 **primary source** 식별자 (예: ``python-mois-api`` /
+        ``mois_license_features_bulk`` / ``license_place``). 폐업 dataset이 아니라
+        feature가 실제 사는 dataset을 가리킨다.
+    source_entity_ids
+        폐업/취소된 ``source_entity_id`` 집합. 비어 있으면 no-op.
+
+    Returns
+    -------
+    int
+        inactive로 전환된 feature 수.
+    """
+    if not source_entity_ids:
+        return 0
+    result = await session.execute(
+        text(_INACTIVATE_BY_ENTITY_IDS_SQL),
+        {
+            "provider": provider,
+            "dataset_key": dataset_key,
+            "source_entity_type": source_entity_type,
+            "keys": sorted(source_entity_ids),
         },
     )
     return len(result.fetchall())
