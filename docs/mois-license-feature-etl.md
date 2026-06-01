@@ -8,6 +8,21 @@ feature로 승격하는 ETL의 Step B 좁은 가이드다. 폐업/취소/제외 
 > incremental, Step D on-demand)은 `docs/mois-feature-etl.md`가 정답.
 > 본 문서는 Step B의 상세 매핑·제외 슬러그·시설 정보만 집중적으로 다룬다.
 
+> **구현 현황 (Sprint 4, 2026-06-01 — PR#115~#137)**: SPRINT-4 §2.1 Step 라벨
+> 기준(A=bulk / B=incremental / C=closed / D=detail)으로 **전 단계 구현 완료**.
+> - 변환 코어: `providers/mois.py` — `MoisLicensePlaceRecord` Protocol +
+>   `license_records_to_bundles`(async, PROMOTED 42 매핑 + EXCLUDED skip) +
+>   `license_source_entity_id`(자연키 `{slug}::{mng_no}`).
+> - Step A bulk: `mois.sync_mois_license_features_bulk` / `run_mois_license_bulk_job`
+>   (advisory lock + `ops.import_jobs` + snapshot soft-delete).
+> - Step B incremental: `mois.run_mois_license_incremental_job` (prune 없음 +
+>   `provider_sync_state` cursor 전진, `infra/sync_state_repo.py`).
+> - Step C closed: `mois.run_mois_license_closed_job` → `inactivate_features_by_
+>   source_entity_ids` (status='inactive', ADR-017).
+> - Step D detail: debug-ui `GET /debug/mois-license/{license_id}` +
+>   `feature_repo.get_primary_source_detail` (캐시만, 적재 없음).
+> - CLI: `krtour-map import mois <file> --mode {bulk|incremental|closed} [--cursor]`.
+
 ## 1. 문서 정보
 
 | 항목 | 값 |

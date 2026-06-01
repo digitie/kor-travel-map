@@ -70,7 +70,7 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 | `import_jobs` | `job_id UUID` | kind, payload, state (queued/running/done/failed/cancelled), progress (0-100), heartbeat_at |
 | `dedup_review_queue` | `review_key UUID` | (feature_id_a, feature_id_b) UNIQUE, total_score/name/spatial/category (0-100), status, decision_reason |
 | `feature_overrides` | `override_key UUID` | feature_id FK, field_path, source_value/override_value JSONB, status |
-| `feature_merge_history` | `history_id UUID` | loser_id, master_id FK, score, merged_at |
+| `feature_merge_history` | `merge_id UUID` | master_feature_id FK, loser_feature_id FK (둘 다 CASCADE), score, review_key FK (SET NULL), merged_by, reason, merged_at (alembic 0007, ADR-016) |
 | `data_integrity_violations` | `violation_key UUID` | violation_type, severity (info/warning/error/critical), payload, status |
 | `api_call_log` | `id BIGSERIAL` | provider, endpoint, status, latency_ms, occurred_at; BRIN(occurred_at) |
 | `feature_consistency_reports` | `report_id UUID` | ADR-033 Phase 1; batch_id, started_at/finished_at, severity_max CHECK(OK/WARN/ERROR), cases/summary JSONB |
@@ -149,8 +149,8 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 | `idx_dedup_status_score` | (status, total_score DESC) | partial pending |
 | `idx_overrides_feature` | (feature_id, status) | |
 | `idx_overrides_field` | (field_path) | |
-| `idx_merge_history_master` | (master_id) | |
-| `idx_merge_history_merged_at_brin` | BRIN(merged_at) | |
+| `idx_merge_history_master` | (master_feature_id, merged_at DESC) | |
+| `idx_merge_history_loser` | (loser_feature_id) | "이 feature가 어디로 병합됐나" 역추적 |
 | `idx_violations_type_status` | (violation_type, status) | |
 | `idx_violations_feature` | (feature_id) | partial NOT NULL |
 | `idx_violations_detected_brin` | BRIN(detected_at) | |
@@ -209,10 +209,10 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 | `dedup_review_queue.feature_id_*` → `features` | CASCADE | |
 | `feature_overrides.feature_id` → `features` | CASCADE | |
 | `feature_overrides.source_record_key` → `source_records` | SET NULL | |
-| `feature_merge_history.master_id` → `features` | CASCADE | |
+| `feature_merge_history.master_feature_id` → `features` | CASCADE | |
+| `feature_merge_history.loser_feature_id` → `features` | CASCADE | loser는 soft-delete(ADR-017)라 행 잔존 → FK 유효 |
+| `feature_merge_history.review_key` → `dedup_review_queue` | SET NULL | 큐 행 삭제돼도 이력 보존 |
 | `data_integrity_violations.feature_id` → `features` | CASCADE | |
-
-`feature_merge_history.loser_id`는 FK 없음 — loser는 이미 삭제됨.
 
 ## 7. 보관 정책 (ADR-017) → purge SQL
 

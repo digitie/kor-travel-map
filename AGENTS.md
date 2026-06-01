@@ -403,24 +403,31 @@ python -m pytest tests/integration -q
 python -m pytest -q
 ```
 
-## 코드 작성 단계 (Sprint 4 진입 준비)
+## 코드 작성 단계 (Sprint 4 완료 / Sprint 5 + ADR-045 진입 준비)
 
 본 저장소는 **T-014 (Sprint 1 진입)** 승인 (2026-05-25, PR#16) 이후
-**코드 작성 단계**다. Sprint 1~3은 완료되었고, 2026-06-01 현재 main은
-PR#114까지 머지된 상태다.
+**코드 작성 단계**다. Sprint 1~4(4a+4b)는 완료되었고, 2026-06-01 현재 main은
+PR#142 이후(admin OpenAPI cache 문서)까지 머지된 상태다.
 
-**현재 상태 (2026-06-01, PR#114 기준)**:
+**현재 상태 (2026-06-01)**:
 - Sprint 2: ADR-034 ①~④ provider(축제/날씨/유가/휴게소) + ETL live 11/11 dataset.
 - Sprint 3: KNPS + krheritage provider, PostGIS 적재/조회, consistency report,
   dedup queue, `AsyncKrtourMapClient`, `/features` debug UI.
-- Geocoding: `krtour.map.geocoding.KraddrGeoRestClient`가 kraddr-geo REST
-  `/v1/address/*`를 호출한다. 로컬 기본 포트는 `http://127.0.0.1:8888`.
-- Frontend: Next.js 16 + React 19 + `maplibre-vworld-js#v0.1.2`, Windows
-  Playwright e2e 최신 기준 14/14 통과.
-- Coverage gate는 Sprint 3 기준 `fail_under=75`. Sprint 4 목표는 80% 도달.
+- Sprint 4a: MOIS Step A bulk + Step B incremental(`provider_sync_state` cursor,
+  `infra/sync_state_repo.py`) + `krtour-map dedup-merge`(`infra/merge_repo.py` +
+  `core.scoring.select_master`) + `ops.feature_merge_history`(alembic 0007) +
+  dedup FP 측정/운영 통계(`status_repo.dedup_fp_stats`).
+- Sprint 4b: MOIS Step C(폐업→inactive) + Step D(on-demand 상세, debug-ui
+  `/debug/mois-license/{id}`) + ADR-033 **F4**(dedup 백로그 WARN) + Place phone
+  enrichment(`krtour.map.enrichment`) + 에이전트 공용 runbook(`docs/runbooks/`).
+- Geocoding: `krtour.map.geocoding.KraddrGeoRestClient`가 kraddr-geo REST v2
+  `POST /v2/{reverse,geocode}`를 호출. 로컬 기본 `http://127.0.0.1:8888`.
+- Frontend: Next.js 16 + React 19 + `maplibre-vworld-js#v0.1.2`, Windows Playwright e2e.
+- Coverage gate는 Sprint 4 기준 `fail_under=80` (실측 94.12%). 전체 pytest ~835 green.
 
-**다음 단계**: Sprint 4 4a — MOIS Step A/B bulk 변환(`providers/mois.py`) +
-dedup queue 본격 운영 + 첫 적재 후 false-positive 측정.
+**다음 단계**: ADR-045 독립 프로그램화(Docker compose `api`/`frontend`/`dagster`/
+`postgres` + admin-first OpenAPI + 독립 Dagster queue) + Sprint 5 (MOIS-sibling
+provider 휴양림/수목원/박물관 + ADR-033 Phase 2 정합성 게이트).
 
 **계속 유효한 코드 작성 가이드**:
 - 모든 신규 코드는 `import-linter` 의존 방향 (`category → dto → core →

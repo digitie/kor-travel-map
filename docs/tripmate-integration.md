@@ -132,11 +132,14 @@ Content-Type: application/json
 }
 ```
 
-## Legacy 참고: ADR-045 이전 직접 import 모델
+## ⚠️ DEPRECATED (ADR-045 supersede, 2026-06-01) — 직접 import 모델 (사용 금지)
 
-아래 내용은 TripMate(상위 앱)가 `python-krtour-map`을 import해서 사용하던 ADR-003
-기준 설계다. 새 구현 지침으로 사용하지 말고, 내부 Python API의 의도와 이전 결정
-맥락을 이해하는 참고 자료로만 본다.
+> **이 섹션 아래 전체(§1~끝)는 ADR-003 기준 legacy 설계다. TripMate ↔ krtour-map
+> 새 연동/구현에는 절대 사용하지 말 것.** 현행 모델은 본 문서 상단 "OpenAPI 연동"
+> 섹션 + `docs/architecture.md` + ADR-045. TripMate는 라이브러리를 import하지 않고
+> krtour-map OpenAPI를 HTTP로 호출하며 krtour-map DB에 직접 연결하지 않는다.
+> 아래는 (a) 내부 Python API(`api`/`dagster`가 내부에서 쓰는 `AsyncKrtourMapClient`)
+> 의 의도, (b) 이전 결정 맥락 이해 — 두 용도로만 보존한다.
 
 ## 1. 개관
 

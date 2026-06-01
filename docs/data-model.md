@@ -182,7 +182,7 @@ CREATE TABLE provider_sync.provider_sync_state (
   dataset_key            TEXT NOT NULL,
   sync_scope             TEXT NOT NULL,                  -- PK 구성요소 (DEFAULT 없음)
   status                 TEXT NOT NULL DEFAULT 'active',
-  cursor                 JSONB NOT NULL DEFAULT '{}'::jsonb,
+  cursor                 JSONB NOT NULL DEFAULT '{}'::jsonb,  -- Step B 증분 진행 위치 (예: {"last_modified_date": "2026-06-01"}), infra/sync_state_repo.py 가 운영
   last_success_at        TIMESTAMPTZ,
   last_failure_at        TIMESTAMPTZ,
   consecutive_failures   INTEGER NOT NULL DEFAULT 0,
@@ -548,20 +548,33 @@ CREATE INDEX idx_overrides_field    ON ops.feature_overrides (field_path);
 
 ### 9.4 `ops.feature_merge_history`
 
+구현됨 — **alembic 0007** + `infra/models.py::FeatureMergeHistoryRow` +
+`infra/merge_repo.py`(`apply_feature_merge`/`merge_from_review`). `krtour-map
+dedup-merge`가 `dedup_review_queue` 후보 1쌍을 master/loser로 확정(ADR-016
+`core.scoring.select_master`)해 병합할 때 1행 INSERT. loser의 `source_links`는
+master로 재지정되고 loser feature는 soft-delete(`status='deleted'`)된다.
+
 ```sql
 CREATE TABLE ops.feature_merge_history (
-  history_id    UUID PRIMARY KEY DEFAULT x_extension.gen_random_uuid(),
-  loser_id      TEXT NOT NULL,                        -- FK 안 검 (loser는 이미 삭제됨)
-  master_id     TEXT NOT NULL REFERENCES feature.features(feature_id) ON DELETE CASCADE,
-  score         NUMERIC(5,2) NOT NULL,
-  merged_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-  reason        TEXT,
-  reviewer      TEXT
+  merge_id          UUID PRIMARY KEY DEFAULT x_extension.gen_random_uuid(),
+  master_feature_id TEXT NOT NULL REFERENCES feature.features(feature_id) ON DELETE CASCADE,
+  loser_feature_id  TEXT NOT NULL REFERENCES feature.features(feature_id) ON DELETE CASCADE,
+  score             NUMERIC(5,2),                     -- dedup total_score (0~100), nullable
+  review_key        UUID REFERENCES ops.dedup_review_queue(review_key) ON DELETE SET NULL,
+  merged_by         TEXT,                             -- 운영자 ID 등
+  reason            TEXT,
+  merged_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT ck_merge_history_distinct CHECK (master_feature_id <> loser_feature_id)
 );
 
-CREATE INDEX idx_merge_history_master  ON ops.feature_merge_history (master_id);
-CREATE INDEX idx_merge_history_merged_at_brin ON ops.feature_merge_history USING BRIN (merged_at);
+CREATE INDEX idx_merge_history_loser  ON ops.feature_merge_history (loser_feature_id);
+CREATE INDEX idx_merge_history_master ON ops.feature_merge_history (master_feature_id, merged_at DESC);
 ```
+
+> 설계 메모: master/loser **둘 다** FK(CASCADE) — loser는 하드 삭제가 아니라
+> soft-delete(ADR-017)라 행이 남으므로 FK 유효. `review_key` FK는 큐 행 삭제 시
+> SET NULL(이력 보존). master 자동 선정은 `select_master`(좌표 보유 → updated_at →
+> source 우선순위 행안부>TourAPI>사용자, 동률은 feature_id 사전순).
 
 ### 9.5 `ops.data_integrity_violations`
 
@@ -630,7 +643,7 @@ CREATE INDEX idx_reports_batch   ON ops.feature_consistency_reports (batch_id);
 CREATE INDEX idx_reports_started ON ops.feature_consistency_reports (started_at DESC);
 ```
 
-### 9.8 `ops.feature_update_requests` (ADR-045, 계획)
+### 9.8 `ops.feature_update_requests` (ADR-045 accepted — 테이블 미구현, 계획)
 
 OpenAPI로 들어온 feature update request를 저장한다. `center_radius`,
 `sigungu_by_radius`, `provider_dataset`, `cache_target_keys` 같은 scope를 Dagster

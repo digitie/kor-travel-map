@@ -1,6 +1,6 @@
 # SPRINT-4.md — MOIS 인허가 bulk + dedup queue 운영
 
-> **상태**: accepted (시기 대기 — Sprint 3 종료 후 Sprint 4 진입 PR)
+> **상태**: ✅ **완료** (4a/4b 분할, PR#133~#142, 2026-05-31~2026-06-01)
 >
 > **목적**: ADR-034 9단계의 ⑦ — `python-mois-api` 인허가 4단계 lifecycle
 > 적재. 가장 큰 bulk + 195 슬러그 + PROMOTED 42 분류 + dedup_review_queue
@@ -187,12 +187,13 @@ Sprint 4 진입 prep PR로 `python-kraddr-base` 전수 survey + 흡수 계획:
 - **address 정규화 실패율**: PROMOTED 슬러그 중 일부는 admin_address
   format 깨짐 — `_address.py` fallback 처리.
 
-## 7. 종료 조건 (Sprint 4 → Sprint 5)
+## 7. 종료 조건 (Sprint 4 → Sprint 5) — ✅ 충족 (2026-06-01)
 
-- [ ] MOIS Step A/B/C/D 모두 적재 안정 (또는 4a/4b 분할 시 4b 종료 시점)
-- [ ] PROMOTED 42 슬러그 카테고리 매핑 정확
-- [ ] dedup_review_queue 운영 안정 + F4 WARN baseline 결정
-- [ ] Coverage bar 80% pass (목표치 도달, ADR-032)
-- [ ] Place phone enrichment 백그라운드 가동
-- [ ] `docs/journal.md` Sprint 4 종료 회고 entry
-- [ ] `docs/sprints/SPRINT-5.md` 진입 PR 준비
+- [x] MOIS Step A/B/C/D 모두 적재 안정 (4a: A/B, 4b: C/D — PR#115~#137)
+- [x] PROMOTED 42 슬러그 카테고리 매핑 정확 (`providers/mois.py`)
+- [x] dedup_review_queue 운영 안정 + F4 WARN baseline 결정 (provisional 1000,
+      `DEDUP_PENDING_WARN_THRESHOLD`; dedup-merge + 운영 FP 통계 + F4 — PR#133/#138/#139)
+- [x] Coverage bar 80% pass (실측 94.12%, `pyproject.toml` `fail_under=80` — PR#141)
+- [x] Place phone enrichment 백그라운드 시작 (`krtour.map.enrichment` — PR#140)
+- [x] `docs/journal.md` Sprint 4 종료 회고 entry (PR#141 coverage 80% entry)
+- [x] `docs/sprints/SPRINT-5.md` 진입 준비 (+ ADR-045 독립 프로그램화 반영 필요)

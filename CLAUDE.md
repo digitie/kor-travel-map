@@ -10,30 +10,48 @@
 
 ## 1. 이 저장소가 하는 일
 
-`python-krtour-map`은 TripMate의 지도 데이터 정규화·저장 **함수 라이브러리**다.
-한국 공공 API (`python-*-api`) 결과를 `Feature`(place/event/notice/price/weather/
-route/area) 계약으로 정규화하고 PostgreSQL + PostGIS에 저장한다.
+`python-krtour-map`은 한국 공공 API (`python-*-api`) 결과를
+`Feature`(place/event/notice/price/weather/route/area) 계약으로 정규화하고
+PostgreSQL + PostGIS에 저장·조회·병합하는 한국 여행 지도 데이터 시스템이다.
 
-**Python import**: `from krtour.map import ...` (PEP 420 implicit namespace
-`krtour`, ADR-022). PyPI distribution은 `python-krtour-map`.
+**운영 모델 (ADR-045, 2026-06-01 — ADR-003 supersede)**: krtour-map은 TripMate와
+**별개로 Docker에서 실행되는 독립 프로그램**이다 — 논리 서비스 `api`(FastAPI/
+OpenAPI) · `frontend`(Next.js admin UI) · `dagster`(feature 업데이트 orchestration)
+· `postgres`(krtour-map 소유 독립 PostGIS DB, 기본 `krtour_map`) · 선택 `rustfs`.
+**TripMate는 라이브러리를 직접 import하지 않고 krtour-map OpenAPI를 HTTP로 호출**
+한다(공유 DB 없음). 함수 직접 호출 모델은 ADR-045로 폐기됐다.
 
-TripMate ↔ 라이브러리는 **함수 직접 호출**. HTTP가 아니다. 디버그 REST/UI는
-**별도 Python 패키지** `krtour-map-debug-ui` (`packages/krtour-map-debug-ui/`,
-ADR-020)로 분리되어 있고, 인증 없이 내부망에서만 사용한다. 메인 라이브러리는
-FastAPI 의존이 없다.
+**Python core**: `from krtour.map import ...` (PEP 420 implicit namespace `krtour`,
+ADR-022). 이 라이브러리는 위 `api`/`dagster`가 **내부에서** import하는 핵심
+정규화·적재 엔진이다(외부 경계는 OpenAPI). PyPI distribution은 `python-krtour-map`.
+
+**api/admin 프로그램**: `packages/krtour-map-debug-ui/` — 이름은 당장 유지하되
+역할은 "debug UI"를 넘어 krtour-map **admin/API 프로그램**으로 확장됐다(ADR-045).
+메인 라이브러리(`krtour.map`)는 FastAPI 의존이 없고, FastAPI는 이 패키지가 진다.
 
 ## 2. 현 단계
 
-**v2 Sprint 3 완료 / Sprint 4 진입 준비**. v1은 `v1` 브랜치 보존, main은
-orphan으로 v2 새로 시작. 2026-06-01 현재 main은 PR#114까지 머지됨:
+**v2 Sprint 4 (4a+4b) 완료 / Sprint 5 + ADR-045 독립 프로그램화 진입 준비**. v1은
+`v1` 브랜치 보존, main은 orphan으로 v2 새로 시작. 2026-06-01 현재 main은 PR#142
+이후(admin OpenAPI cache 문서까지) 머지됨:
 - Sprint 2~3: provider 변환, PostGIS 적재/조회, consistency report, dedup queue,
   `AsyncKrtourMapClient`, KNPS/krheritage, debug UI `/features` 구현 완료
-- geocoding 정본: kraddr-geo REST `/v1/address/*`, 로컬 기본 `http://127.0.0.1:8888`
+- Sprint 4a: MOIS Step A bulk + Step B incremental(`provider_sync_state` cursor) +
+  dedup-merge 명령 + `feature_merge_history`(alembic 0007, ADR-016 master 선정) +
+  dedup FP 측정/운영 통계
+- Sprint 4b: MOIS Step C(폐업→inactive) + Step D(on-demand 상세) + ADR-033 F4
+  (dedup 백로그 WARN) + Place phone enrichment(`krtour.map.enrichment`) +
+  coverage 게이트 75→**80**(실측 94.12%) + 에이전트 공용 runbook(`docs/runbooks/`)
+- geocoding 정본: kraddr-geo REST(v2 `POST /v2/{reverse,geocode}`), 로컬 기본
+  `http://127.0.0.1:8888`
 - frontend 정본: Next.js 16 + React 19 + `maplibre-vworld-js#v0.1.2`, Windows
-  Playwright e2e 최신 14/14
-- 다음 작업: Sprint 4 4a — MOIS Step A/B bulk 변환 + dedup queue 본격 운영
+  Playwright e2e
+- 다음 작업: ADR-045 독립 프로그램화(Docker compose / admin-first OpenAPI / 독립
+  Dagster) + Sprint 5 (MOIS-sibling provider + Phase 2 정합성 게이트)
 
-ADR 현황: **001~044 모두 accepted** (029는 ADR-043으로 supersede). 035~043은
+ADR 현황: **001~045 모두 accepted** (029→043, 003·035 일부→**045**로 supersede).
+045 = krtour-map Docker 독립 프로그램 + 독립 DB/Dagster + TripMate OpenAPI 연동
+(2026-06-01). 035~043은
 **PR#33 (2026-05-27) 일괄 accepted 전환** — 운영 단계 진입에 따른 9건:
 - 035 REST API admin 운영 확장 / 036 maplibre-vworld-js 분리 (현재 본 저장소 핀 v0.1.2)
 - 037 frontend TanStack Query + Zustand / 038 GitHub Actions CI/CD 재활성화
@@ -42,10 +60,10 @@ ADR 현황: **001~044 모두 accepted** (029는 ADR-043으로 supersede). 035~04
 - 043 `@krtour/map-marker-react` npm 게시 보류 (ADR-029 supersede)
 - 044 관련 라이브러리 로컬(`F:\dev\`, WSL `~/dev/`) 우선 조회 + 데이터 정합성 책임 분계
 
-다음 후보 번호 = **ADR-045**. ADR-030~033은 2026-05-29 사용자 승인 확정,
-ADR-033 Phase 1(F1~F3 정합성) 구현 완료. implementation 시점: 038 즉시 / 042
-SPRINT-2 §2.1 / 035·037·043 SPRINT-2 §2.5 / 036 SPRINT-3 후반 / 039·040·041
-SPRINT-4 prep.
+다음 후보 번호 = **ADR-046**. ADR-030~033은 2026-05-29 사용자 승인 확정,
+ADR-033 Phase 1(F1~F3) + **F4(dedup 백로그 WARN, Sprint 4b)** 구현 완료.
+implementation 시점: 038 즉시 / 042 SPRINT-2 §2.1 / 035·037·043 SPRINT-2 §2.5 /
+036 SPRINT-3 후반 / 039·040·041 Sprint 4a / 045 독립 프로그램화는 Sprint 5 진입.
 
 Sprint 1~5 plan은 `docs/sprints/` 참조. **provider 9단계 구현 순서**
 (ADR-034): 축제 → 날씨 → 유가 → 휴게소 → 국립공원/트래킹 → 국가유산 →

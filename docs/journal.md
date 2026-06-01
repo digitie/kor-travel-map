@@ -2,6 +2,36 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-01 (claude) — 문서 전체 정합성 sweep (ADR-045 충돌 + Sprint 4 staleness)
+
+**작업**: 사용자 지시 — 최신 pull 후 문서 전체를 점검해 충돌/갭을 꼼꼼히 정정.
+병렬 감사 에이전트 4개로 클러스터별(진입/통합/status/스키마) 충돌·갭을 file:line
+수집한 뒤 일괄 수정. codex가 추가한 ADR-045(Docker 독립 + OpenAPI)와 Sprint 4 완료
+사실을 진입·status·스키마 문서에 반영.
+
+- **ADR-045 충돌 해소 (함수 직접 호출 → OpenAPI/HTTP, ADR-003 supersede)**:
+  - `CLAUDE.md` §1 "이 저장소가 하는 일" 전면 재작성(독립 프로그램 + 논리 서비스 +
+    OpenAPI 경계 + admin/API 패키지 framing).
+  - `docs/resume.md` "TripMate 연계 (ADR-003) 함수 직접 호출" → ADR-045 OpenAPI.
+  - `docs/tripmate-integration.md` legacy 섹션에 ⚠️ DEPRECATED(사용 금지) 배너 강화.
+- **Sprint 4 완료 staleness 정정**: CLAUDE/AGENTS/SKILL/README/agent-guide의
+  "Sprint 3 완료 / Sprint 4 진입 준비 / PR#114 / ADR 001~044 / 다음 후보 045 /
+  fail_under=75" → "Sprint 4(4a+4b) 완료 / PR#142 / 001~045 / 다음 046 /
+  fail_under=80(94.12%)". MOIS Step A~D·dedup-merge·F4·phone enrichment·runbook
+  추가 사실 반영.
+- **status/tracking 동기화**: `resume.md`(다음 한 작업 = ADR-045 독립화) +
+  `tasks.md`(머지 history #51~#142 그룹 + ADR 가이드 046) + `sprints/README`·
+  `SPRINT-4`(✅완료 + §7 DoD [x]) · `SPRINT-5`(진입조건 [x] + ADR-045 트랙).
+- **스키마 갭 정정(코드와 일치화)**: `data-model.md`/`postgres-schema.md`의
+  `ops.feature_merge_history` 컬럼명을 alembic 0007 실제값으로
+  (history_id→merge_id, loser_id→loser_feature_id(+FK CASCADE), master_id→
+  master_feature_id, reviewer→merged_by, +review_key FK SET NULL,
+  idx_merge_history_loser 추가). provider_sync_state.cursor(Step B 용도) 주석.
+- **ETL 구현현황 추가**: `mois-license-feature-etl.md`(Step A~D 코드 모듈 매핑) +
+  `place-phone-enrichment.md`(`krtour.map.enrichment` 함수) "구현 현황" 노트.
+- 과거 append-only 기록(journal/reports/dated)은 그대로 보존(당시 사실 반영).
+- **docs-only** — 코드/게이트 변경 없음.
+
 ## 2026-06-01 (codex) — ADR-045 독립 프로그램/OpenAPI 전환 + admin 캐시 갱신 사양
 
 **작업**: 사용자 지시에 따라 debug UI/admin 운영 콘솔을 문서화하고, 이어서 운영 모델을
