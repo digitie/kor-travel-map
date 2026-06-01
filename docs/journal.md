@@ -2,6 +2,37 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-01 (claude) — Sprint 4a: krtour-map import mois 명령 (NDJSON → Step A bulk 적재)
+
+**작업**: Sprint 4a 본 작업 — CLI mutate 명령의 첫 번째인 `krtour-map import mois`
+(SPRINT-4 §2.8). 기존 read-only `status`에 이어 MOIS Step A bulk 적재 진입점을 박았다.
+
+- **설계 핵심 (provider record source 주입)**: ADR-006상 CLI는 provider 라이브러리를
+  런타임 import하지 않으므로, provider가 외부에서 export한 **provider-neutral
+  NDJSON 파일**(한 줄당 JSON object)을 record source로 읽는다. `cli/records.py`의
+  `MoisLicenseJsonRecord`(dict → `MoisLicensePlaceRecord` Protocol 만족 `__getattr__`
+  래퍼, date 필드 ISO 파싱) + `iter_mois_license_records`(lazy streaming, 빈 줄 skip,
+  줄번호 포함 에러).
+- **mutex 중복 회피**: `run_mois_license_bulk_job`이 이미 내부에서
+  `import:python-mois-api:<dataset>` advisory lock으로 self-serialize(ADR-039) +
+  `import_jobs` 추적(ADR-011)하므로, CLI에서 같은 키 mutex를 **다시 감싸지 않는다**
+  (자기 충돌 회피). lock 미획득(다른 워커 적재 중)이면 skip → **exit 3**(실패 1과
+  구분, 운영 스크립트 재시도 판단용).
+- **geocoder 선택 보강**: `--geocoder-url` 주면 httpx + `KraddrGeoRestClient` →
+  `kraddr_geo_reverse_geocoder`로 좌표 → bjd_code 역지오코딩 보강. 미지정 시 mois
+  `legal_dong_code`만 사용. client 수명은 async 컨텍스트 소유(ADR-002).
+- **산출물**: `cli/records.py` 신규 + `cli/main.py` import 서브명령
+  (`--dataset-key`/`--batch-size`/`--geocoder-url`/`--source-checksum`). 상수는
+  정본 모듈(`providers.mois.DATASET_KEY_BULK`/`mois.DEFAULT_BATCH_SIZE`)에서 직접
+  import(client는 별칭 비노출).
+- **테스트**: unit 17(records 파싱 11 + import 파서/포맷 6) + integration 2(NDJSON
+  round-trip 적재 PROMOTED 2건/EXCLUDED skip + advisory lock 점유 시 skip·미적재).
+- **검증(WSL)**: ruff All checks passed / mypy --strict 58 files / import-linter 4
+  kept / 전체 **776 passed**(757 → +19).
+- **다음**: `krtour-map dedup-merge <feature_id>` — manual merge. merge primitive
+  (생존 feature로 supersede + source_link 재지정 + dedup_review_queue 상태 갱신)이
+  아직 없어 infra 1차 함수 설계부터 필요(별도 PR). 또는 Step B incremental cursor.
+
 ## 2026-06-01 (claude) — krex 휴게소 라이브 적재 재검증 (upstream entrpsNm fix 후)
 
 **작업**: 사용자가 `python-krex-api`의 `entrpsNm` 미추종(ADR-044 provider 책임)을
