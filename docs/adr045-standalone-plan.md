@@ -50,10 +50,9 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
   (scope_type/scope JSONB/providers/dataset_keys/update_policy/run_mode/priority/
   state/dry_run/matched_scope/job_id FK/dagster_run_id/operator/reason/error/
   타임스탬프). models.py에 ORM row 추가(ImportJobRow 패턴).
-- **T-205b** `sigungu_by_radius` scope의 시군구 경계 소스 확정 후 (D-11) 필요 시
-  `feature.sigungu_boundaries`(또는 `x_*`) geometry 테이블 + alembic. **결정 전엔
-  feature의 `sigungu_code` distinct fallback으로 우회**(경계 polygon 없이 반경 내
-  feature의 sigungu_code 집합 → 그 시군구 전체 feature). T-205b는 D-11=경계 도입 시만.
+- **T-205b** ~~`feature.sigungu_boundaries` 테이블~~ **취소** — D-11 결정: 시군구
+  경계는 **kraddr-geo가 소유**(`tl_scco_sig`), krtour-map은 REST 호출만(T-206a /
+  T-206a-geo). krtour-map에 경계 테이블 신설하지 않는다.
 - **T-205c** (Phase 2) `ops.data_integrity_violations`(F5~F8) / `ops.poi_cache_targets`
   + `ops.poi_cache_target_feature_links`(`poi-cache-update-targets.md` 정본) /
   `ops.provider_refresh_policies` — MVP 차단 아님. 각 alembic + model + repo.
@@ -67,14 +66,20 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
   - `resolve_center_radius(session, lon, lat, radius_km)` — `coord_5179` +
     `ST_DWithin`(ADR-012, 입력 1회 ST_Transform). `features_in_bbox` 패턴 재사용.
   - `resolve_bbox(session, bounds)` — `features_in_bbox` 위 얇은 래퍼.
-  - `resolve_sigungu_by_radius(session, lon, lat, radius_km)` — 반경 내 feature의
-    `sigungu_code` 집합 → 그 시군구 전체 feature (D-11에 따라 경계 polygon 교차로
-    승격 가능).
+  - `resolve_sigungu_by_radius(session, lon, lat, radius_km)` — **kraddr-geo
+    `POST /v2/regions/within-radius`(D-11) 호출** → 교차 시군구 `code` 목록 →
+    `WHERE sigungu_code = ANY(:codes)` feature 조회. `KraddrGeoRestClient` 재사용.
+    sig_cd = sigungu_code 동일 체계(D-11 확인) — 매핑 없이 그대로 사용.
   - `resolve_provider_dataset(session, provider, dataset_key, sync_scope)` —
     `source_links`(primary) JOIN `source_records` 필터.
   - `resolve_cache_target_keys(...)` — `poi-cache-update-targets.md` (Phase 2).
   - `count_features_matching_scope(session, scope)` — **dry_run/ matched_scope용**
     (write 없이 count + sigungu_codes).
+- **T-206a-geo** (형제 repo `python-kraddr-geo`, 별도 PR) — `POST /v2/regions/
+  within-radius` 신규 엔드포인트. 요청/응답/구현은 `adr045-open-decisions.md` D-11.
+  `tl_scco_sig`(+ctprvn/emd) PostGIS 교차. 반환 `code`(sig_cd)는 krtour-map
+  `sigungu_code`와 동일 체계(D-11 확인) — 매핑 불필요. T-206a `resolve_sigungu_by_
+  radius`의 선행 의존.
 - **T-206b** `infra/feature_update_repo.py` 신규 — 요청 생명주기:
   - `enqueue_feature_update_request(session, scope, providers, dataset_keys,
     update_policy, run_mode, priority, dry_run, operator, reason) -> FeatureUpdateRequest`
