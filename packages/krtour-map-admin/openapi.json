@@ -1,0 +1,1617 @@
+{
+  "components": {
+    "schemas": {
+      "Address": {
+        "additionalProperties": false,
+        "description": "한국 주소 + 행정구역 코드 통합 DTO.\n\nprovider raw에서 채워지지 않는 필드는 ``None``으로 남긴다. 정규화/파싱은\n호출자 또는 ``krtour.map.core.address``의 helper(`normalize_bjd_code` 등)에서.\n\n예시 — 표준데이터 1차 source:\n    >>> Address(\n    ...     road=\"서울특별시 영등포구 여의공원로 120\",\n    ...     legal=\"서울특별시 영등포구 여의도동 8\",\n    ...     bjd_code=\"1156010100\",\n    ...     sigungu_code=\"11560\",\n    ...     sido_code=\"11\",\n    ... )\n    Address(...)\n\n예시 — 좌표만 있고 reverse geocoding 미적용:\n    >>> Address()  # 모든 필드 None — 호출자가 후속 enrichment에서 채움\n    Address(...)",
+        "properties": {
+          "admin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "행정동 주소.",
+            "title": "Admin"
+          },
+          "admin_dong_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "행정동 코드 10자리. 행정구역 변경 시 갱신 — 법정동과 다름.",
+            "title": "Admin Dong Code"
+          },
+          "bjd_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "법정동 코드 10자리 (시도2 + 시군구3 + 읍면동3 + 리2). reverse geocoding 결과 또는 provider 원천에서 채워짐.",
+            "title": "Bjd Code"
+          },
+          "legal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "법정동 주소 (지번 포함).",
+            "title": "Legal"
+          },
+          "road": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "도로명 주소 (정규화된 형태).",
+            "title": "Road"
+          },
+          "road_address_management_no": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "도로명주소 관리번호 (행정안전부 발급 25자리 식별자). 도로명주소 변경 이력 추적용.",
+            "title": "Road Address Management No"
+          },
+          "road_name_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "도로명 코드 (PNU 기반 7~12자리 — provider별 길이 다양). 도로명주소 표준 매핑 시 사용.",
+            "title": "Road Name Code"
+          },
+          "sido_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "시·도 코드 2자리.",
+            "title": "Sido Code"
+          },
+          "sido_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "시·도 한글 명 (예: '서울특별시'). 검색/UI 표시용.",
+            "title": "Sido Name"
+          },
+          "sigungu_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "시·군·구 코드 5자리 (시도2 + 시군구3). `infra.models` 별도 칼럼.",
+            "title": "Sigungu Code"
+          },
+          "sigungu_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "시·군·구 한글 명 (예: '영등포구'). 검색/UI 표시용.",
+            "title": "Sigungu Name"
+          },
+          "zipcode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "신우편번호 5자리 (구 우편번호 6자리는 폐기).",
+            "title": "Zipcode"
+          }
+        },
+        "title": "Address",
+        "type": "object"
+      },
+      "Coordinate": {
+        "description": "WGS84 좌표 (lon, lat).\n\n저장/API 직렬화는 ``(lon, lat)`` 순서 (SKILL.md DO NOT #5). 본 모델은\nfield alias 없이 명시 키 ``lon``/``lat`` 사용. 한국 경계 내인지 자동\n검증 — 범위를 벗어나면 ``ValidationError``.\n\n예시:\n    >>> Coordinate(lon=127.0, lat=37.5)\n    Coordinate(lon=Decimal('127.0'), lat=Decimal('37.5'))\n    >>> Coordinate(lon=200.0, lat=37.5)  # 한국 경계 밖\n    Traceback (most recent call last):\n    ...\n    pydantic_core._pydantic_core.ValidationError: ...",
+        "properties": {
+          "lat": {
+            "description": "위도 (latitude, WGS84). 한국 본토 범위 [33.0, 39.5].",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Lat",
+            "type": "string"
+          },
+          "lon": {
+            "description": "경도 (longitude, WGS84). 한국 본토 범위 [124.0, 132.0].",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Lon",
+            "type": "string"
+          }
+        },
+        "required": [
+          "lon",
+          "lat"
+        ],
+        "title": "Coordinate",
+        "type": "object"
+      },
+      "EtlPreviewResponse": {
+        "additionalProperties": false,
+        "description": "`/debug/etl/{provider}/{dataset}/preview` 응답.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "dataset": {
+            "title": "Dataset",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "items": {
+            "description": "변환 결과 list. variant에 따라 schema가 다르다 — FeatureBundle (feature/source_record/source_link 3-key dict) / WeatherValue / PriceValue 등.",
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "fixture",
+              "live"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "variant": {
+            "description": "`FeatureBundle` / `WeatherValue` / `PriceValue`.",
+            "title": "Variant",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "dataset",
+          "source",
+          "variant",
+          "description",
+          "count",
+          "items"
+        ],
+        "title": "EtlPreviewResponse",
+        "type": "object"
+      },
+      "FeatureDetailResponse": {
+        "additionalProperties": false,
+        "description": "``GET /features/{feature_id}`` 응답 — 단건 상세 (raw row 기반).",
+        "properties": {
+          "address": {
+            "additionalProperties": true,
+            "title": "Address",
+            "type": "object"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "coord_5179_srid": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "coord_5179 STORED generated column의 SRID (ADR-012 검증용).",
+            "title": "Coord 5179 Srid"
+          },
+          "detail": {
+            "additionalProperties": true,
+            "title": "Detail",
+            "type": "object"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "lat": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lat"
+          },
+          "legal_dong_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legal Dong Code"
+          },
+          "lon": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lon"
+          },
+          "marker_color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Marker Color"
+          },
+          "marker_icon": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Marker Icon"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "parent_feature_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Feature Id"
+          },
+          "sibling_group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sibling Group Id"
+          },
+          "sido_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sido Code"
+          },
+          "sigungu_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sigungu Code"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "urls": {
+            "additionalProperties": true,
+            "title": "Urls",
+            "type": "object"
+          }
+        },
+        "required": [
+          "feature_id",
+          "kind",
+          "name",
+          "category",
+          "address",
+          "detail",
+          "urls",
+          "status"
+        ],
+        "title": "FeatureDetailResponse",
+        "type": "object"
+      },
+      "FeatureSummary": {
+        "additionalProperties": false,
+        "description": "지도/목록용 경량 feature 표현 (bbox 조회 결과 1건).",
+        "properties": {
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "lat": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "위도 (WGS84).",
+            "title": "Lat"
+          },
+          "lon": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "경도 (WGS84). coord 없으면 null.",
+            "title": "Lon"
+          },
+          "marker_color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Marker Color"
+          },
+          "marker_icon": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Marker Icon"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_id",
+          "kind",
+          "name",
+          "category",
+          "lon",
+          "lat",
+          "status"
+        ],
+        "title": "FeatureSummary",
+        "type": "object"
+      },
+      "FeaturesInBboxResponse": {
+        "additionalProperties": false,
+        "description": "``GET /features`` 응답 — bbox 안 feature 목록.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FeatureSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "items"
+        ],
+        "title": "FeaturesInBboxResponse",
+        "type": "object"
+      },
+      "GeocodeResponseSchema": {
+        "additionalProperties": false,
+        "description": "매핑된 Coordinate (`geocode_response_to_coordinate` 결과) — None이면 404.",
+        "properties": {
+          "coord": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Coordinate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "coord"
+        ],
+        "title": "GeocodeResponseSchema",
+        "type": "object"
+      },
+      "GeocodingHealthResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "base_url": {
+            "title": "Base Url",
+            "type": "string"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "reachable": {
+            "title": "Reachable",
+            "type": "boolean"
+          },
+          "upstream_status": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Upstream Status"
+          }
+        },
+        "required": [
+          "base_url",
+          "reachable",
+          "upstream_status",
+          "detail"
+        ],
+        "title": "GeocodingHealthResponse",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HealthResponse": {
+        "additionalProperties": false,
+        "description": "`/debug/health` 응답 schema.",
+        "properties": {
+          "service": {
+            "description": "서비스 식별자 — ``'krtour-map-admin'``.",
+            "title": "Service",
+            "type": "string"
+          },
+          "status": {
+            "description": "항상 ``'ok'``. unhealthy면 본 라우터에 도달 X.",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "service"
+        ],
+        "title": "HealthResponse",
+        "type": "object"
+      },
+      "MoisLicenseDetailResponse": {
+        "additionalProperties": false,
+        "description": "``GET /debug/mois-license/{license_id}`` 응답 — 단건 on-demand 상세.",
+        "properties": {
+          "address": {
+            "additionalProperties": true,
+            "title": "Address",
+            "type": "object"
+          },
+          "cached": {
+            "description": "프로세스 캐시 히트 여부.",
+            "title": "Cached",
+            "type": "boolean"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "detail": {
+            "additionalProperties": true,
+            "title": "Detail",
+            "type": "object"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "lat": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lat"
+          },
+          "license_id": {
+            "description": "source_entity_id ({slug}::{mng_no}).",
+            "title": "License Id",
+            "type": "string"
+          },
+          "lon": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lon"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "raw": {
+            "additionalProperties": true,
+            "description": "원본 MOIS payload (source_records.raw_data).",
+            "title": "Raw",
+            "type": "object"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "license_id",
+          "feature_id",
+          "name",
+          "category",
+          "status",
+          "address",
+          "detail",
+          "raw",
+          "cached"
+        ],
+        "title": "MoisLicenseDetailResponse",
+        "type": "object"
+      },
+      "ProviderDatasetsResponse": {
+        "additionalProperties": false,
+        "description": "`/debug/etl/{provider}/datasets` 응답.",
+        "properties": {
+          "datasets": {
+            "items": {
+              "$ref": "#/components/schemas/_DatasetEntry"
+            },
+            "title": "Datasets",
+            "type": "array"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "datasets"
+        ],
+        "title": "ProviderDatasetsResponse",
+        "type": "object"
+      },
+      "ProvidersResponse": {
+        "additionalProperties": false,
+        "description": "`/debug/etl/providers` 응답.",
+        "properties": {
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/_ProviderEntry"
+            },
+            "title": "Providers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "providers"
+        ],
+        "title": "ProvidersResponse",
+        "type": "object"
+      },
+      "ReverseResponseSchema": {
+        "additionalProperties": false,
+        "description": "매핑된 Address (`reverse_response_to_address` 결과) — None이면 404.",
+        "properties": {
+          "address": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Address"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "address"
+        ],
+        "title": "ReverseResponseSchema",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "VersionResponse": {
+        "additionalProperties": false,
+        "description": "``/debug/version`` 응답 schema.",
+        "properties": {
+          "debug_ui": {
+            "description": "``krtour-map-admin`` distribution version.",
+            "title": "Debug Ui",
+            "type": "string"
+          },
+          "krtour_map": {
+            "description": "``python-krtour-map`` (메인) distribution version.",
+            "title": "Krtour Map",
+            "type": "string"
+          }
+        },
+        "required": [
+          "debug_ui",
+          "krtour_map"
+        ],
+        "title": "VersionResponse",
+        "type": "object"
+      },
+      "_DatasetEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "dataset": {
+            "title": "Dataset",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "live_supported": {
+            "default": false,
+            "description": "`?source=live` 활성 여부. False면 fixture만 — live 호출은 501. PR#47부터 KMA 3 dataset 활성.",
+            "title": "Live Supported",
+            "type": "boolean"
+          },
+          "variant": {
+            "description": "`FeatureBundle` / `WeatherValue` / `PriceValue`.",
+            "title": "Variant",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dataset",
+          "variant",
+          "description"
+        ],
+        "title": "_DatasetEntry",
+        "type": "object"
+      },
+      "_ProviderEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "datasets": {
+            "items": {
+              "$ref": "#/components/schemas/_DatasetEntry"
+            },
+            "title": "Datasets",
+            "type": "array"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "datasets"
+        ],
+        "title": "_ProviderEntry",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Debug + admin REST API for TripMate `python-krtour-map`. Intranet-only (no auth in code, ADR-005). 운영 범위는 ADR-035 — /debug, /admin, /ops, /features prefix로 분리.",
+    "title": "krtour-map-admin",
+    "version": "0.2.0-dev"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/debug/etl/providers": {
+      "get": {
+        "description": "fixture 변환이 등록된 provider/dataset 매트릭스. 추가 변환 함수가 본 lib에 들어오면 `etl_fixtures.FIXTURE_REGISTRY`에 1행 등록 → 본 응답에 자동 반영.",
+        "operationId": "get_providers_debug_etl_providers_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProvidersResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "ETL preview 가능한 provider + dataset 목록",
+        "tags": [
+          "debug",
+          "etl"
+        ]
+      }
+    },
+    "/debug/etl/{provider}/datasets": {
+      "get": {
+        "operationId": "get_provider_datasets_debug_etl__provider__datasets_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderDatasetsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "특정 provider의 dataset 목록",
+        "tags": [
+          "debug",
+          "etl"
+        ]
+      }
+    },
+    "/debug/etl/{provider}/{dataset}/preview": {
+      "post": {
+        "description": "fixture 또는 live source로 provider raw → DTO 변환을 실행하고 결과를 JSON으로 응답. DB write 없음. fixture 모드는 외부 의존 X. live 모드는 `etl_live.LIVE_LOADER_REGISTRY` 등록된 dataset만 — `?source=fixture` 응답의 `live_supported` 필드로 확인.",
+        "operationId": "post_preview_debug_etl__provider___dataset__preview_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "dataset",
+            "required": true,
+            "schema": {
+              "title": "Dataset",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "default": "fixture",
+              "enum": [
+                "fixture",
+                "live"
+              ],
+              "title": "Source",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EtlPreviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "등록되지 않은 (provider, dataset) 조합"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "501": {
+            "description": "source=live 미구현 (LIVE_LOADER_REGISTRY 미등록)"
+          },
+          "502": {
+            "description": "provider 외부 API 호출 실패"
+          },
+          "503": {
+            "description": "API key 미설정 (.env 확인)"
+          }
+        },
+        "summary": "provider 변환 함수 dry-run preview",
+        "tags": [
+          "debug",
+          "etl"
+        ]
+      }
+    },
+    "/debug/geocoding/geocode": {
+      "get": {
+        "operationId": "geocode_debug_geocoding_geocode_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "address",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Address",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "default": "road",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "fallback",
+            "required": false,
+            "schema": {
+              "default": "none",
+              "title": "Fallback",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_confidence",
+            "required": false,
+            "schema": {
+              "default": 0.0,
+              "maximum": 1.0,
+              "minimum": 0,
+              "title": "Min Confidence",
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeocodeResponseSchema"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "주소 → 매핑된 Coordinate (geocoding)",
+        "tags": [
+          "geocoding"
+        ]
+      }
+    },
+    "/debug/geocoding/geocode/raw": {
+      "get": {
+        "description": "v2 ``POST /v2/geocode`` raw — road/parcel에 따라 입력 필드 분기.",
+        "operationId": "geocode_raw_debug_geocoding_geocode_raw_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "address",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Address",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "default": "road",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "fallback",
+            "required": false,
+            "schema": {
+              "default": "none",
+              "title": "Fallback",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Geocode Raw Debug Geocoding Geocode Raw Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "주소 → kraddr-geo 원본 응답 그대로 (디버그)",
+        "tags": [
+          "geocoding"
+        ]
+      }
+    },
+    "/debug/geocoding/health": {
+      "get": {
+        "description": "``base_url + /v1/healthz`` 호출 결과 요약.",
+        "operationId": "health_debug_geocoding_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeocodingHealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "kraddr-geo upstream 도달성 확인",
+        "tags": [
+          "geocoding"
+        ]
+      }
+    },
+    "/debug/geocoding/reverse": {
+      "get": {
+        "operationId": "reverse_geocode_debug_geocoding_reverse_get",
+        "parameters": [
+          {
+            "description": "경도 (WGS84).",
+            "in": "query",
+            "name": "lon",
+            "required": true,
+            "schema": {
+              "description": "경도 (WGS84).",
+              "title": "Lon",
+              "type": "number"
+            }
+          },
+          {
+            "description": "위도 (WGS84).",
+            "in": "query",
+            "name": "lat",
+            "required": true,
+            "schema": {
+              "description": "위도 (WGS84).",
+              "title": "Lat",
+              "type": "number"
+            }
+          },
+          {
+            "description": "우편번호 포함 여부.",
+            "in": "query",
+            "name": "zipcode",
+            "required": false,
+            "schema": {
+              "default": true,
+              "description": "우편번호 포함 여부.",
+              "title": "Zipcode",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "radius_m",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 2000,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Radius M"
+            }
+          },
+          {
+            "description": "결과 필터 — 본 lib 변환기 옵션.",
+            "in": "query",
+            "name": "max_distance_m",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "결과 필터 — 본 lib 변환기 옵션.",
+              "title": "Max Distance M"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReverseResponseSchema"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "좌표 → 매핑된 Address (reverse geocoding)",
+        "tags": [
+          "geocoding"
+        ]
+      }
+    },
+    "/debug/geocoding/reverse/raw": {
+      "get": {
+        "description": "``KraddrGeoRestClient`` 사용하지 않고 raw HTTP 그대로 — 디버그용 (v2).",
+        "operationId": "reverse_raw_debug_geocoding_reverse_raw_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "lon",
+            "required": true,
+            "schema": {
+              "title": "Lon",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "lat",
+            "required": true,
+            "schema": {
+              "title": "Lat",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "zipcode",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Zipcode",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "radius_m",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 2000,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Radius M"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reverse Raw Debug Geocoding Reverse Raw Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "좌표 → kraddr-geo 원본 응답 그대로 (디버그)",
+        "tags": [
+          "geocoding"
+        ]
+      }
+    },
+    "/debug/health": {
+      "get": {
+        "description": "정적 응답. 본 라우터가 200을 내면 FastAPI app이 살아 있다. DB/외부 자원의 deep health check는 별도 ``/ops/health-deep`` (Sprint 3+).",
+        "operationId": "get_health_debug_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "liveness probe",
+        "tags": [
+          "debug"
+        ]
+      }
+    },
+    "/debug/mois-license/{license_id}": {
+      "get": {
+        "operationId": "get_mois_license_detail_debug_mois_license__license_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "license_id",
+            "required": true,
+            "schema": {
+              "title": "License Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MoisLicenseDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "license_id(source_entity_id) 미적재"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "MOIS 인허가 on-demand 상세 (Step D, 캐시만)",
+        "tags": [
+          "debug",
+          "mois"
+        ]
+      }
+    },
+    "/debug/version": {
+      "get": {
+        "description": "본 디버그 패키지 + 메인 라이브러리 distribution version 응답. ADR-038 CI 재활성화 이후 PR 추적 / TripMate 측 호환성 점검에 사용.",
+        "operationId": "get_version_debug_version_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "package versions",
+        "tags": [
+          "debug"
+        ]
+      }
+    },
+    "/features": {
+      "get": {
+        "description": "주어진 경계 상자(WGS84) 안의 feature 경량 표현 list. ``coord``의 GIST 인덱스를 사용하는 공간 조회 (ADR-012). ``kind`` 반복 파라미터로 종류 필터 (예: ``?kind=place&kind=event``). 삭제된 feature 제외.",
+        "operationId": "list_features_in_bbox_features_get",
+        "parameters": [
+          {
+            "description": "bbox 최소 경도 (WGS84).",
+            "in": "query",
+            "name": "min_lon",
+            "required": true,
+            "schema": {
+              "description": "bbox 최소 경도 (WGS84).",
+              "title": "Min Lon",
+              "type": "number"
+            }
+          },
+          {
+            "description": "bbox 최소 위도.",
+            "in": "query",
+            "name": "min_lat",
+            "required": true,
+            "schema": {
+              "description": "bbox 최소 위도.",
+              "title": "Min Lat",
+              "type": "number"
+            }
+          },
+          {
+            "description": "bbox 최대 경도.",
+            "in": "query",
+            "name": "max_lon",
+            "required": true,
+            "schema": {
+              "description": "bbox 최대 경도.",
+              "title": "Max Lon",
+              "type": "number"
+            }
+          },
+          {
+            "description": "bbox 최대 위도.",
+            "in": "query",
+            "name": "max_lat",
+            "required": true,
+            "schema": {
+              "description": "bbox 최대 위도.",
+              "title": "Max Lat",
+              "type": "number"
+            }
+          },
+          {
+            "description": "feature kind 필터 (반복 가능). 미지정 시 전체.",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "feature kind 필터 (반복 가능). 미지정 시 전체.",
+              "title": "Kind"
+            }
+          },
+          {
+            "description": "최대 반환 수.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 1000,
+              "description": "최대 반환 수.",
+              "maximum": 5000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeaturesInBboxResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "bbox 안 feature 목록 (지도 뷰포트)",
+        "tags": [
+          "features"
+        ]
+      }
+    },
+    "/features/{feature_id}": {
+      "get": {
+        "operationId": "get_feature_features__feature_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature_id",
+            "required": true,
+            "schema": {
+              "title": "Feature Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "feature_id 없음"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "feature 단건 상세",
+        "tags": [
+          "features"
+        ]
+      }
+    }
+  }
+}

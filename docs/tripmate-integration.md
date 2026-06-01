@@ -180,7 +180,7 @@ dependencies = [
 ]
 ```
 
-본 라이브러리의 디버그 UI는 별도 패키지(`krtour-map-debug-ui`)이며 TripMate는
+본 라이브러리의 디버그 UI는 별도 패키지(`krtour-map-admin`)이며 TripMate는
 의존하지 않는다 (ADR-020). 디버그 UI는 운영자가 별도로 띄울 수 있다.
 
 ## 3. Resource 주입 (TripMate가 책임)
@@ -559,10 +559,10 @@ TripMate 테스트는 라이브러리의 Fake repo / InMemoryFileStore를 재사
 
 ```bash
 # TripMate와 같은 venv에 추가 설치
-uv pip install -e ../python-krtour-map/packages/krtour-map-debug-ui
+uv pip install -e ../python-krtour-map/packages/krtour-map-admin
 
 # 내부망에서 운영자가 띄움 (인증 없음, 127.0.0.1 default)
-uvicorn krtour.map_debug_ui.app:app --host 127.0.0.1 --port 8087
+uvicorn krtour.map_admin.app:app --host 127.0.0.1 --port 8087
 ```
 
 TripMate UI에서 사용자에게 노출되지 않음. 운영자 SSH 터널/내부망 전용.
@@ -605,9 +605,9 @@ v1을 import한 TripMate 코드 → v2로 옮길 때:
 | v1 | v2 |
 |----|----|
 | `from krtour_map import ...` | `from krtour.map import ...` |
-| `from krtour_map_debug_ui import ...` | `from krtour.map_debug_ui import ...` |
+| `from krtour_map_admin import ...` | `from krtour.map_admin import ...` |
 | `from kraddr.base import PlaceCategory` | `from krtour.map.category import PlaceCategory` (ADR-023) |
-| `krtour_map.api.app` | `krtour.map_debug_ui.app` (별도 패키지로 분리, ADR-020) |
+| `krtour_map.api.app` | `krtour.map_admin.app` (별도 패키지로 분리, ADR-020) |
 | 동기 client 사용 | `asyncio.run(...)` 로 감싸기 (ADR-002 async-only) |
 | `Feature.detail: dict` 자유 입력 | `PlaceDetail/EventDetail/...` Pydantic 인스턴스만 (ADR-018) |
 | naive datetime | KST aware (`kst_now()`) (ADR-019) |
@@ -639,7 +639,7 @@ v1을 import한 TripMate 코드 → v2로 옮길 때:
                            → boto3 client → 객체 저장소
                            → provider client → 외부 공공 API
 
-운영자 → krtour.map_debug_ui (별도 uvicorn) → AsyncKrtourMapClient (메모리 호출)
+운영자 → krtour.map_admin (별도 uvicorn) → AsyncKrtourMapClient (메모리 호출)
                                               → ... (위와 동일)
 ```
 
@@ -655,4 +655,4 @@ v1을 import한 TripMate 코드 → v2로 옮길 때:
 - [ ] 객체 저장소 bucket healthy
 - [ ] `client.healthz()` 모든 항목 true
 - [ ] Dagster asset 정의 + scheduler 활성
-- [ ] (옵션) `krtour-map-debug-ui` 별도 설치, 운영자 내부망만
+- [ ] (옵션) `krtour-map-admin` 별도 설치, 운영자 내부망만

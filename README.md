@@ -38,7 +38,7 @@ TripMate는 krtour-map DB에 직접 접근하지 않고, `python-krtour-map`을 
 
 `python-krtour-map` 메인 패키지는 krtour-map API/Dagster 내부 구현에서 사용하는
 async 함수 라이브러리다. REST/OpenAPI와 admin UI는 **별도 Python 패키지**
-`krtour-map-debug-ui`(`packages/krtour-map-debug-ui/`, ADR-020/035/045)에 둔다.
+`krtour-map-admin`(`packages/krtour-map-admin/`, ADR-020/035/045)에 둔다.
 OpenAPI는 우선 admin UI 기준으로 작성하고, TripMate 연동 시 필요한 API를 보완·확장한다.
 
 ## 책임 / 비책임 요약
@@ -106,16 +106,16 @@ docker compose up -d postgres
 alembic upgrade head
 
 # (옵션) 디버그 UI 별도 패키지 설치
-uv pip install -e packages/krtour-map-debug-ui
+uv pip install -e packages/krtour-map-admin
 
 # (디버그) REST API 기동 — 인증 없음, localhost 전용
-uvicorn krtour.map_debug_ui.app:app --host 127.0.0.1 --port 8087
+uvicorn krtour.map_admin.app:app --host 127.0.0.1 --port 8087
 
 # (옵션) geocoding live 연동 — python-kraddr-geo FastAPI backend
-export KRTOUR_MAP_DEBUG_UI_KRADDR_GEO_BASE_URL=http://127.0.0.1:8888
+export KRTOUR_MAP_ADMIN_KRADDR_GEO_BASE_URL=http://127.0.0.1:8888
 
 # (옵션) 디버그 UI frontend (Next.js + maplibre-vworld, ADR-025 2차 보강)
-cd packages/krtour-map-debug-ui/frontend
+cd packages/krtour-map-admin/frontend
 cp .env.example .env.local  # NEXT_PUBLIC_VWORLD_API_KEY 설정
 npm ci && npm run dev        # http://127.0.0.1:8610
 ```
@@ -128,7 +128,7 @@ npm ci && npm run dev        # http://127.0.0.1:8610
 | ORM/SQL | SQLAlchemy 2.x async + GeoAlchemy2 + asyncpg + psycopg[binary,pool]>=3.2 |
 | 공간 처리 | GeoPandas, Shapely 2, GDAL Python binding |
 | 모델 | Pydantic v2 |
-| HTTP (디버그 API, 별도 패키지) | FastAPI + Uvicorn — `krtour-map-debug-ui`만 |
+| HTTP (디버그 API, 별도 패키지) | FastAPI + Uvicorn — `krtour-map-admin`만 |
 | HTTP client | httpx + tenacity |
 | 마이그레이션 | Alembic |
 | 주소/좌표 | `python-kraddr-base`, `python-kraddr-geo` |
@@ -157,10 +157,10 @@ src/krtour/                        ← PEP 420 implicit namespace (NO __init__.p
     client.py    — AsyncKrtourMapClient (라이브러리 진입점)
     cli/         — typer CLI (옵션)
 
-packages/krtour-map-debug-ui/      ← 별도 패키지 (ADR-020)
+packages/krtour-map-admin/      ← 별도 패키지 (ADR-020)
   pyproject.toml
   src/krtour/                      ← 같은 namespace 공유 (NO __init__.py)
-    map_debug_ui/
+    map_admin/
       __init__.py
       app.py     — FastAPI app factory + uvicorn entrypoint
       routers/   — 디버그 엔드포인트
@@ -182,7 +182,7 @@ data/          — 원천/픽스처 대용량 (NTFS, .gitignore)
 cli** 한 방향. `import-linter`가 CI에서 강제 (ADR-002, `docs/architecture.md`).
 `krtour.map.api`는 존재하지 않는다 (ADR-020).
 
-별도 패키지 `krtour.map_debug_ui`는 `krtour.map.client`만 import해서 함수
+별도 패키지 `krtour.map_admin`는 `krtour.map.client`만 import해서 함수
 호출한다 (ADR-020 + ADR-022, `docs/debug-ui-package.md`).
 
 ## 설계 원칙
@@ -225,7 +225,7 @@ lint-imports
   - [`docs/sprints/SPRINT-5.md`](docs/sprints/SPRINT-5.md) — MOIS-sibling (휴양림/박물관) + Phase 2 + 운영 진입
 - [`docs/data-model.md`](docs/data-model.md) — Postgres 테이블·인덱스 reference
 - [`docs/backend-package.md`](docs/backend-package.md) — 메인 라이브러리 사양
-- [`docs/debug-ui-package.md`](docs/debug-ui-package.md) — `krtour-map-debug-ui` 별도 패키지 사양 (ADR-020)
+- [`docs/debug-ui-package.md`](docs/debug-ui-package.md) — `krtour-map-admin` 별도 패키지 사양 (ADR-020)
 - [`docs/debug-ui-admin-workflows.md`](docs/debug-ui-admin-workflows.md) — debug UI/admin 운영 콘솔 상세 구현 사양
 - [`docs/openapi-admin-contract.md`](docs/openapi-admin-contract.md) — Admin 우선 OpenAPI + Dagster feature update queue 계약
 - [`docs/adr045-standalone-plan.md`](docs/adr045-standalone-plan.md) — **ADR-045 독립 프로그램화 실행 계획**(T-205~T-210, AI agent 실행용)

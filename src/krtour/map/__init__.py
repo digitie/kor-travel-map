@@ -8,7 +8,7 @@ import 경로
 -----------
 - 메인 라이브러리: ``from krtour.map import ...`` (PEP 420 implicit namespace
   ``krtour``, ADR-022).
-- 디버그 UI: ``from krtour.map_debug_ui import ...`` (별도 distribution,
+- 디버그 UI: ``from krtour.map_admin import ...`` (별도 distribution,
   같은 ``krtour`` namespace, ADR-020).
 
 핵심 진입점 (Sprint 2~5에서 구현):
@@ -20,7 +20,7 @@ ADR 참조
 --------
 - ADR-002 — async-only API (sync 인터페이스 추가 금지)
 - ADR-003 — TripMate 연계는 함수 직접 호출 (REST 없음)
-- ADR-020 — 디버그 REST/UI는 별도 패키지 ``krtour-map-debug-ui``
+- ADR-020 — 디버그 REST/UI는 별도 패키지 ``krtour-map-admin``
 - ADR-022 — PEP 420 implicit namespace ``krtour``
 - ADR-030 — in-memory 캐시 금지 (``functools.cache`` 한정 narrow 예외)
 - ADR-034 — Provider 9단계 구현 순서

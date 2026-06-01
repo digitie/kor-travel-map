@@ -244,14 +244,14 @@ pytest -m slow -q
 
 ### 8.1 디버그 UI Playwright e2e — **서버는 WSL, Playwright는 Windows**
 
-debug UI(`packages/krtour-map-debug-ui`)의 Playwright e2e는 **하이브리드
+debug UI(`packages/krtour-map-admin`)의 Playwright e2e는 **하이브리드
 토폴로지**로 실행한다:
 
 | 구성요소 | 실행 위치 | 명령 |
 |----------|-----------|------|
-| backend (FastAPI) | **WSL ext4** | `.venv/bin/uvicorn krtour.map_debug_ui.app:create_app --factory --port 8087` |
+| backend (FastAPI) | **WSL ext4** | `.venv/bin/uvicorn krtour.map_admin.app:create_app --factory --port 8087` |
 | frontend (Next.js) | **WSL ext4** | `npm run start` (`next start :8610`) |
-| **Playwright (chromium)** | **Windows** | `cd packages\krtour-map-debug-ui\frontend; npm run e2e` |
+| **Playwright (chromium)** | **Windows** | `cd packages\krtour-map-admin\frontend; npm run e2e` |
 
 WSL2 `localhostForwarding=true`로 Windows의 `http://127.0.0.1:8610` /
 `:8087` 요청이 WSL 서버에 도달한다. `playwright.config.ts`는 `webServer`를
@@ -265,7 +265,7 @@ WSL2 `localhostForwarding=true`로 Windows의 `http://127.0.0.1:8610` /
 > libasound2t64 libnss3 libnspr4 …` 또는 `npx playwright install-deps`를 수동
 > 실행해야 하나, 권장 경로는 Windows 실행.)
 
-자세히는 `packages/krtour-map-debug-ui/frontend/README.md` §"e2e (Playwright)"
+자세히는 `packages/krtour-map-admin/frontend/README.md` §"e2e (Playwright)"
 + `frontend/playwright.config.ts` 상단 주석.
 
 ## 9. lint / type

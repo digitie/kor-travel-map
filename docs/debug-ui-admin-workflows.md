@@ -1,6 +1,6 @@
 # debug-ui-admin-workflows.md - 디버그 UI + Admin 운영 콘솔 구현 사양
 
-본 문서는 `krtour-map-debug-ui`를 **디버그 UI이자 admin/운영 콘솔**로 구현하기
+본 문서는 `krtour-map-admin`를 **디버그 UI이자 admin/운영 콘솔**로 구현하기
 위한 상세 사양이다. `docs/debug-ui-package.md`는 패키지 경계와 라우터 정책의
 기준이고, 본 문서는 실제 화면, API, 진행 상태, 검토 흐름을 AI agent가 바로
 구현할 수 있도록 풀어 쓴 작업 지시서다.
@@ -17,11 +17,11 @@
 
 ## 1. 목표
 
-`krtour-map-debug-ui`는 ADR-045 이후 단순 보조 UI가 아니라 Docker에서 실행되는
+`krtour-map-admin`는 ADR-045 이후 단순 보조 UI가 아니라 Docker에서 실행되는
 krtour-map 독립 프로그램의 admin frontend/backend다. TripMate와는 OpenAPI로
 통신하고, 자체 PostgreSQL/PostGIS DB와 자체 Dagster를 가진다.
 
-`krtour-map-debug-ui`는 다음 업무를 한 화면 체계에서 처리한다.
+`krtour-map-admin`는 다음 업무를 한 화면 체계에서 처리한다.
 
 1. 모든 `Feature`를 목록/지도에서 확인하고 검색, 필터, 소팅, 페이지 크기 변경을
    지원한다.
@@ -1458,11 +1458,11 @@ Windows Playwright 표준 실행 모델을 따른다.
 새 라우터/DTO 추가 시:
 
 ```bash
-python packages/krtour-map-debug-ui/scripts/export_openapi.py \
-  --output packages/krtour-map-debug-ui/openapi.json
+python packages/krtour-map-admin/scripts/export_openapi.py \
+  --output packages/krtour-map-admin/openapi.json
 
-python packages/krtour-map-debug-ui/scripts/export_openapi.py \
-  --check --output packages/krtour-map-debug-ui/openapi.json
+python packages/krtour-map-admin/scripts/export_openapi.py \
+  --check --output packages/krtour-map-admin/openapi.json
 ```
 
 frontend type generation이 도입된 라우터는 `npm run gen:types`도 함께 실행한다.
@@ -1472,7 +1472,7 @@ frontend type generation이 도입된 라우터는 `npm run gen:types`도 함께
 frontend 작업이 포함된 PR은 React Doctor를 실행한다.
 
 ```bash
-cd packages/krtour-map-debug-ui/frontend
+cd packages/krtour-map-admin/frontend
 npm run doctor
 ```
 

@@ -356,7 +356,7 @@
   (git mv).
 - **NEW (accepted)**: ADR-025 — 디버그 UI frontend는 `maplibre-vworld-js` 채택
   (React + Vite + TS + `maplibre-vworld` + `maplibre-gl` + `zod`). Kakao
-  Maps SDK 미사용. `packages/krtour-map-debug-ui/frontend/` skeleton.
+  Maps SDK 미사용. `packages/krtour-map-admin/frontend/` skeleton.
   **사용자 보강 (2026-05-25)**: VWorld key는 `KRADDR_GEO_VWORLD_API_KEY`
   공유 / maplibre-vworld-js upstream 직접 PR로 적극 수정.
 - **NEW (accepted)**: ADR-026 — TripMate 사용자 UI도 `maplibre-vworld` 채택
@@ -403,7 +403,7 @@
   `access_restriction` / `fire_alert` 추가). 마커 스타일 매핑.
 - `docs/tripmate-integration.md` §14.5 — TripMate 사용자 UI 지도 stack
   (ADR-026).
-- `packages/krtour-map-debug-ui/frontend/` — React + Vite + maplibre-vworld
+- `packages/krtour-map-admin/frontend/` — React + Vite + maplibre-vworld
   skeleton (`package.json` / `.env.example` / `.gitignore` / `README.md`).
 
 ### 잔존 명명 일치화 (본 PR#10)
@@ -424,7 +424,7 @@
 - `pyproject.toml` — ADR-030 `import-linter` forbidden 계약에
   `cachetools` / `async_lru` / `aiocache` / `diskcache` 추가. ADR-032
   `[tool.coverage.report] fail_under = 50` Sprint 1 bar 설정.
-- `packages/krtour-map-debug-ui/scripts/export_openapi.py` — ADR-031
+- `packages/krtour-map-admin/scripts/export_openapi.py` — ADR-031
   CLI skeleton (실행은 코드 작성 단계에서).
 - `packages/map-marker-react/` — ADR-029 skeleton (`package.json` /
   `README.md` / `.gitignore` / `vite.config.ts`).
@@ -437,9 +437,9 @@
 
 - **BREAKING**: ADR-022 — Python import 경로 변경.
   - `from krtour_map import ...` → `from krtour.map import ...`
-  - `from krtour_map_debug_ui import ...` → `from krtour.map_debug_ui import ...`
+  - `from krtour_map_admin import ...` → `from krtour.map_admin import ...`
   - `src/krtour_map/` → `src/krtour/map/`
-  - `src/krtour_map_debug_ui/` → `src/krtour/map_debug_ui/` (디버그 UI 패키지)
+  - `src/krtour_map_admin/` → `src/krtour/map_admin/` (디버그 UI 패키지)
   - `krtour` PEP 420 implicit namespace (no `src/krtour/__init__.py`).
   - PyPI distribution 이름(`python-krtour-map`), CLI(`krtour-map`),
     env prefix(`KRTOUR_MAP_*`), DB 이름(`krtour_map`)는 모두 유지.
@@ -455,13 +455,13 @@
   - 라이선스 GPL-3.0-or-later 호환. 실제 코드 이전은 코드 작성 단계에서 별도 PR.
   - 사양: `docs/category.md`.
 
-- **BREAKING**: 디버그 REST API/UI를 별도 Python 패키지 `krtour-map-debug-ui`
-  (`packages/krtour-map-debug-ui/`)로 분리 (ADR-020). 메인 라이브러리
+- **BREAKING**: 디버그 REST API/UI를 별도 Python 패키지 `krtour-map-admin`
+  (`packages/krtour-map-admin/`)로 분리 (ADR-020). 메인 라이브러리
   `python-krtour-map`에서 FastAPI/Uvicorn 의존성 제거. `[api]` extra 폐기.
   `krtour.map.api` 모듈 없음. ADR-005의 위치 부분은 ADR-020으로 superseded
   (인증 없음 + 내부망 전용 정책은 유지).
-  - 디버그 UI 실행: `uvicorn krtour.map_debug_ui.app:app --host 127.0.0.1 --port 8087`
-  - 환경변수 prefix: `KRTOUR_MAP_DEBUG_UI_*`
+  - 디버그 UI 실행: `uvicorn krtour.map_admin.app:app --host 127.0.0.1 --port 8087`
+  - 환경변수 prefix: `KRTOUR_MAP_ADMIN_*`
   - `import-linter`에 `메인 패키지는 fastapi/uvicorn/starlette import 금지`
     계약 추가.
 
