@@ -15,6 +15,7 @@ from krtour.map_debug_ui.routers.etl import router as etl_router
 from krtour.map_debug_ui.routers.features import router as features_router
 from krtour.map_debug_ui.routers.geocoding import router as geocoding_router
 from krtour.map_debug_ui.routers.health import router as health_router
+from krtour.map_debug_ui.routers.mois_detail import router as mois_detail_router
 from krtour.map_debug_ui.routers.version import router as version_router
 
 __all__ = [
@@ -23,4 +24,5 @@ __all__ = [
     "etl_router",
     "features_router",
     "geocoding_router",
+    "mois_detail_router",
 ]
