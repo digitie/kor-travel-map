@@ -2,6 +2,18 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-01 (claude) — Sprint 4a MOIS loader (변환 → 적재 오케스트레이션)
+
+**작업**: MOIS provider 변환 코어(앞 entry)에 이어 적재 loader 추가. 사용자
+결정에 따라 **loader 모듈만** (advisory lock / snapshot delete_not_in / mois
+source DB iterator는 후속 PR).
+
+- **산출물**:
+  - `src/krtour/map/mois.py` — `load_mois_license_features_bulk(session, records, *, fetched_at, dataset_key, reverse_geocoder)`. `providers.mois.license_records_to_bundles`(async 변환) → `infra.load_bundles`(idempotent upsert) 얇은 오케스트레이션. mois 라이브러리 런타임 import 안 함(Protocol 입력). commit은 호출자/감싼 transaction 소유(ADR-002/004).
+  - `AsyncKrtourMapClient.load_mois_license_features_bulk` — client 진입점(한 transaction).
+  - `tests/integration/test_mois_loader.py` — testcontainers PostGIS 3건: PROMOTED 적재+EXCLUDED/미매핑/비영업 skip / 재적재 idempotent(feature 수 불변) / 전부 skip 시 빈 결과.
+- **검증(WSL)**: mypy --strict 51 files / ruff All checks passed / import-linter 4 kept / 신규 integration 3 / 전체 **702 passed, 5 skipped**.
+
 ## 2026-06-01 (claude) — Sprint 4a 진입: MOIS provider 변환 코어
 
 **작업**: ADR-034 9단계 ⑦ — MOIS 인허가(LOCALDATA) provider 변환 코어 추가. `python-mois-api`(`import mois`)의 `PlaceRecord`를 place `FeatureBundle`로 정규화. 사용자 지시에 따라 **변환까지만** (적재/dedup/CLI mutex는 후속 PR).
