@@ -461,8 +461,11 @@ def license_records_to_bundles(
 
 `source_entity_id`: `record.mng_no` (25자 관리번호).
 
-`source_natural_key`: `f"{record.service_slug}|{record.mng_no}"` (slug 변경 시
-다른 feature로 인식되도록).
+`source_natural_key`: `f"{record.service_slug}::{record.mng_no}"` (slug 변경 시
+다른 feature로 인식되도록). 구분자는 **`::`** — `make_feature_id` /
+`make_source_record_key`는 구성요소 내부 `|`를 금지(ValueError)하므로 `kma`의
+`alert_id::region_code` 패턴과 동일하게 맞춘다 (Sprint 4a 구현 시 확정). MOIS
+mng_no는 `|`를 포함하지 않는다.
 
 ## 9. loader (`krtour.map.mois`)
 
