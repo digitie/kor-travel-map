@@ -113,21 +113,21 @@ PR은 불완전하다.
 # resume.md
 
 ## 현재 상태
-Sprint 3 완료, Sprint 4 4a 진입 준비. ADR 001~044 모두 accepted.
-main 최신은 PR#114이며 geocoding 정본은 REST `/v1/address/*` + 8888 포트.
+Sprint 4(4a+4b) 완료, Sprint 5 + ADR-045 독립 프로그램화 진입 준비.
+ADR 001~045 모두 accepted (다음 후보 046). main 최신은 PR#142 이후.
 
 ## 다음 한 작업
-Sprint 4 4a — MOIS Step A/B bulk 변환 + dedup queue 본격 운영.
+ADR-045 독립 프로그램화(Docker compose + admin-first OpenAPI + 독립 Dagster).
 
 ## 진척도
 - [x] AGENTS.md / README / SKILL / CLAUDE
-- [x] docs/architecture, decisions(ADR-001~044), data-model
+- [x] docs/architecture, decisions(ADR-001~045), data-model
 - [x] provider 변환, PostGIS 적재/조회, consistency report, dedup queue
-- [x] debug-ui `/features` + `/geocoding`, Windows Playwright e2e
-- [ ] Sprint 4 MOIS provider + 첫 bulk 적재
+- [x] MOIS Step A~D + dedup-merge + feature_merge_history + phone enrichment
+- [ ] ADR-045 독립 프로그램화 + Sprint 5 MOIS-sibling provider
 
 ## 다음 ADR 후보
-- ADR-045: 다음 신규 의사결정
+- ADR-046: 다음 신규 의사결정
 
 ## 차단 사유 / 결정 대기
 - (없음)
@@ -320,8 +320,8 @@ GitHub branch protection (운영자 수동 설정):
 
 기본 작업 절차:
 1. 사용자 의도 명확화 (어떤 모듈/계층/메서드인지)
-2. ADR이 필요한지 확인 (`docs/decisions.md` 001~044 모두 accepted, 신규는
-   045+)
+2. ADR이 필요한지 확인 (`docs/decisions.md` 001~045 모두 accepted, 신규는
+   046+)
 3. 테스트 우선 작성 (`docs/test-strategy.md` §12 우선순위)
 4. 구현 (`pytest -q`/`ruff check`/`mypy --strict`/`lint-imports` 통과)
 5. 통합 테스트 + EXPLAIN 검증 (DB 닿는 경우)

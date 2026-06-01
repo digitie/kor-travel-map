@@ -1,19 +1,22 @@
 # SPRINT-5.md — MOIS-sibling provider + 정합성 Phase 2 + 운영 진입
 
-> **상태**: accepted (시기 대기 — Sprint 4 종료 후 Sprint 5 진입 PR)
+> **상태**: 🟡 진입 준비 (Sprint 4 종료 2026-06-01). **ADR-045 독립 프로그램화**
+> (Docker compose + admin-first OpenAPI + 독립 Dagster)가 Sprint 5 핵심 트랙으로
+> 추가됨 — F5~F8 + Dagster 게이트는 ADR-045의 krtour-map-owned Dagster 위에서 구현.
 >
 > **목적**: ADR-034 9단계의 ⑧⑨ — 휴양림/수목원 (`python-krforest-api`) +
 > 박물관/미술관 (`data.go.kr-standard`). MOIS와 sibling 가능한 provider를
-> 검증된 dedup 룰로 적재. 정합성 Phase 2 (F4~F8 + Dagster 게이트) + 운영
-> 진입 직전 T-200~T-204.
+> 검증된 dedup 룰로 적재. 정합성 Phase 2 (F5~F8 + Dagster 게이트) + ADR-045
+> 독립 프로그램화 + 운영 진입 직전 T-200~T-204.
 
-## 1. 진입 조건 (Sprint 4 DoD)
+## 1. 진입 조건 (Sprint 4 DoD) — ✅ 충족 (2026-06-01)
 
-- [ ] Sprint 4 모든 DoD 충족 (`SPRINT-4.md §7`, 분할 시 4b 종료)
-- [ ] MOIS 4단계 lifecycle 적재 안정
-- [ ] dedup_review_queue 운영 안정 + F4 WARN baseline 결정
-- [ ] Coverage bar 80% pass (목표치 도달, ADR-032)
-- [ ] Place phone enrichment 백그라운드 안정 가동
+- [x] Sprint 4 모든 DoD 충족 (`SPRINT-4.md §7`, 4a/4b 완료 PR#133~#142)
+- [x] MOIS Step A~D lifecycle 적재 안정 (bulk/incremental/closed/detail)
+- [x] dedup_review_queue 운영 안정 + F4 WARN baseline 결정 (dedup-merge + 운영
+      FP 통계 + F4 provisional 1000)
+- [x] Coverage bar 80% pass (실측 94.12%, `fail_under=80`)
+- [x] Place phone enrichment 백그라운드 시작 (`krtour.map.enrichment`)
 
 ## 2. 산출물
 
