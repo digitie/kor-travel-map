@@ -38,9 +38,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from krtour.map.cli.mutex import dedup_merge_lock_key, try_mutex_lock
 from krtour.map.cli.records import iter_mois_license_records
 from krtour.map.client import AsyncKrtourMapClient
 from krtour.map.infra.db import make_async_engine
+from krtour.map.infra.merge_repo import MergeError
 from krtour.map.mois import DEFAULT_BATCH_SIZE as MOIS_DEFAULT_BATCH_SIZE
 from krtour.map.providers.mois import DATASET_KEY_BULK as MOIS_DATASET_KEY_BULK
 from krtour.map.settings import KrtourMapSettings
@@ -49,14 +53,17 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
 
     from krtour.map.geocoding import ReverseGeocoder
+    from krtour.map.infra.merge_repo import MergeOutcome
     from krtour.map.infra.status_repo import StatusCounts
     from krtour.map.mois import MoisBulkJobResult
 
 __all__ = ["main", "build_parser"]
 
-# import mois가 다른 워커의 적재와 충돌(advisory lock 미획득)해 skip된 경우의
-# exit code — 실패(1)와 구분해 운영 스크립트가 재시도/대기 판단에 쓴다.
-_EXIT_IMPORT_SKIPPED = 3
+# mutate 명령이 다른 워커와 충돌(advisory lock 미획득)해 skip된 경우의 exit code —
+# 실패(1)와 구분해 운영 스크립트가 재시도/대기 판단에 쓴다.
+_EXIT_LOCK_SKIPPED = 3
+# 입력 오류(파일 없음 / review_key 없음·이미 검토) — 재시도 무의미.
+_EXIT_INVALID = 2
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -115,6 +122,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="snapshot 체크섬(import_jobs.source_checksum 기록용, 선택).",
     )
     mois_p.set_defaults(func=_cmd_import_mois)
+
+    merge_p = sub.add_parser(
+        "dedup-merge",
+        help="검토 큐 후보 1쌍을 병합 (mutate, advisory lock; ADR-016).",
+    )
+    merge_p.add_argument(
+        "review_key",
+        help="ops.dedup_review_queue.review_key (UUID). status로 후보 목록 확인.",
+    )
+    merge_p.add_argument(
+        "--merged-by",
+        default=None,
+        help="병합 수행자(운영자 ID 등). feature_merge_history.merged_by 기록.",
+    )
+    merge_p.add_argument(
+        "--reason",
+        default=None,
+        help="병합 사유(선택). history.reason + 큐 decision_reason 기록.",
+    )
+    merge_p.set_defaults(func=_cmd_dedup_merge)
 
     return parser
 
@@ -214,7 +241,7 @@ async def _cmd_import_mois(args: argparse.Namespace) -> int:
     records_path = Path(args.records_file)
     if not records_path.is_file():  # noqa: ASYNC240  # 1회 stat — 진입 검증
         print(f"import: records 파일 없음 — {records_path}", file=sys.stderr)
-        return 2
+        return _EXIT_INVALID
     engine = make_async_engine(_resolve_dsn(args))
     try:
         records = iter_mois_license_records(records_path)
@@ -231,7 +258,53 @@ async def _cmd_import_mois(args: argparse.Namespace) -> int:
                 batch_size=args.batch_size,
             )
         print(_format_bulk_result(result))
-        return 0 if result.acquired else _EXIT_IMPORT_SKIPPED
+        return 0 if result.acquired else _EXIT_LOCK_SKIPPED
+    finally:
+        await engine.dispose()
+
+
+def _format_merge_outcome(o: MergeOutcome) -> str:
+    return "\n".join(
+        [
+            f"dedup-merge: done (merge_id={o.merge_id})",
+            f"  master: {o.master_feature_id}",
+            f"  loser:  {o.loser_feature_id} (soft-deleted)",
+            f"  source_links: moved={o.source_links_moved} "
+            f"dropped={o.source_links_dropped}",
+            f"  queue: {'merged' if o.queue_updated else 'unchanged'}",
+        ]
+    )
+
+
+async def _cmd_dedup_merge(args: argparse.Namespace) -> int:
+    engine = make_async_engine(_resolve_dsn(args))
+    try:
+        # advisory lock으로 같은 review 병합 중복 실행 차단(ADR-039). lock은 별도
+        # 세션이 보유하고, 실제 병합은 client가 자체 transaction에서 수행한다.
+        async with (
+            AsyncSession(engine) as lock_session,
+            try_mutex_lock(
+                lock_session, dedup_merge_lock_key(args.review_key)
+            ) as acquired,
+        ):
+            if not acquired:
+                print(
+                    f"dedup-merge: skipped — 같은 review 병합 진행 중 "
+                    f"({args.review_key}).",
+                )
+                return _EXIT_LOCK_SKIPPED
+            async with AsyncKrtourMapClient(engine) as client:
+                try:
+                    outcome = await client.merge_dedup_review(
+                        args.review_key,
+                        merged_by=args.merged_by,
+                        reason=args.reason,
+                    )
+                except MergeError as exc:
+                    print(f"dedup-merge: {exc}", file=sys.stderr)
+                    return _EXIT_INVALID
+            print(_format_merge_outcome(outcome))
+            return 0
     finally:
         await engine.dispose()
 

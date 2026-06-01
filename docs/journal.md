@@ -2,6 +2,42 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-01 (claude) — Sprint 4a: dedup-merge 명령 + merge primitive (ADR-016)
+
+**작업**: Sprint 4a 두 번째 CLI mutate 명령 `krtour-map dedup-merge`. ADR-016이
+명시한 수동 병합 메커니즘(master 선정 + `feature_merge_history`)을 처음 구현했다.
+
+- **신규 스키마(alembic 0007)**: `ops.feature_merge_history(merge_id, master_feature_id,
+  loser_feature_id, score, review_key, merged_by, reason, merged_at)`. master/loser
+  FK는 feature 하드 삭제 시 CASCADE, review_key FK는 큐 행 삭제 시 SET NULL(이력
+  보존). `FeatureMergeHistoryRow` 모델 + alembic 검증 1건.
+- **master 선정(core/scoring.py, 순수)**: `select_master(a, b)` — ADR-016 3순위
+  (1) 좌표 보유 → (2) `updated_at` 최신 → (3) 원천 우선순위(`SOURCE_PRIORITY`:
+  행안부 mois 50 > 국가유산/국립공원/산림청 45 > datagokr 35 > TourAPI 30 > … >
+  사용자 0). 완전 동률은 feature_id 사전순(결정적). "좌표 정밀도"는 좌표 보유
+  여부로 근사(좌표 있는 쪽 우선).
+- **merge primitive(infra/merge_repo.py)**: `apply_feature_merge`(명시 master/loser)
+  + `merge_from_review`(큐 후보 → master 자동 선정 → 병합). 단계: loser
+  source_links를 master로 재지정(master가 이미 가진 충돌 source_record_key는
+  drop) → loser feature soft-delete(`status='deleted'`+deleted_at, ADR-017) →
+  history INSERT → 큐 행 `merged` 전이(pending 행만). `MergeError`(미존재/이미
+  검토/master==loser). rowcount 대신 RETURNING+fetchall(코드베이스 컨벤션).
+- **client + CLI**: `AsyncKrtourMapClient.merge_dedup_review`(lock 미적용, 한
+  transaction) + `krtour-map dedup-merge <review_key> [--merged-by --reason]`.
+  **lock은 CLI가 소유**(layering — mutex 헬퍼는 cli) — 별도 lock 세션이
+  `dedup-merge:{review_key}` advisory lock을 쥐고 client가 병합 수행. 미획득 시
+  skip(exit 3), 미존재/이미 검토 시 exit 2.
+- **인터페이스 결정**: SPRINT-4 §2.8 예시 `dedup-merge <feature_id>`는 후보쌍을
+  **유일 식별**하는 `<review_key>`로 구체화(한 feature가 여러 pending 쌍에 속할 수
+  있어 feature_id는 모호). lock 헬퍼 `dedup_merge_lock_key`는 generic(opaque id).
+- **테스트**: unit 9(select_master/source_priority 5 + dedup-merge 파서·포맷 4) +
+  integration 9(merge_repo 5: 전체흐름/충돌drop/미존재/이미merged/distinct guard;
+  cli_dedup_merge 3: round-trip/lock-skip/unknown-key; alembic 1).
+- **검증(WSL)**: ruff clean / mypy --strict 59 files / import-linter 4 kept / 전체
+  **794 passed**(776 → +18).
+- **다음**: #2 Step B incremental cursor(`ProviderSyncState` 테이블은 이미 존재 —
+  cursor JSONB 컬럼 보유, 마이그레이션 불필요). 이어서 #3 dedup false-positive 측정.
+
 ## 2026-06-01 (claude) — Sprint 4a: krtour-map import mois 명령 (NDJSON → Step A bulk 적재)
 
 **작업**: Sprint 4a 본 작업 — CLI mutate 명령의 첫 번째인 `krtour-map import mois`

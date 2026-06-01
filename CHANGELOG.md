@@ -7,6 +7,15 @@
 
 ### Sprint 4 — 운영 CLI (2026-06-01~)
 
+- **NEW**: `krtour-map dedup-merge <review_key>` — dedup 검토 큐 후보 1쌍 수동 병합
+  (ADR-016). master를 `select_master`(좌표 보유 → `updated_at` 최신 → 원천 우선순위
+  행안부>TourAPI>사용자)로 자동 선정하고, loser의 `source_links`를 master로 재지정
+  (충돌 키는 drop), loser feature를 soft-delete(`status='deleted'`), 신규
+  `ops.feature_merge_history`(alembic 0007)에 이력 기록, 큐 행을 `merged` 전이한다.
+  `dedup-merge:{review_key}` advisory lock으로 중복 실행 차단(ADR-039), 미획득 시
+  skip(exit 3); 미존재/이미 검토된 review_key는 exit 2. `--merged-by`/`--reason`
+  옵션. (SPRINT-4 §2.8의 예시 인자 `<feature_id>`는 후보쌍을 유일 식별하는
+  `<review_key>`로 구체화.)
 - **NEW**: `krtour-map import mois <records-file>` — MOIS 인허가 Step A bulk 적재
   CLI 명령. provider가 export한 provider-neutral **NDJSON snapshot**(한 줄당 JSON
   object)을 record source로 읽어(ADR-006 — provider 라이브러리 미import)

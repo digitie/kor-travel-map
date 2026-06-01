@@ -60,6 +60,7 @@ __all__ = [
     "FeatureConsistencyReportRow",
     "DedupReviewQueueRow",
     "ImportJobRow",
+    "FeatureMergeHistoryRow",
 ]
 
 
@@ -534,5 +535,57 @@ class ImportJobRow(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
+
+
+class FeatureMergeHistoryRow(Base):
+    """``ops.feature_merge_history`` row mapping — dedup 병합 이력 (ADR-016).
+
+    ``krtour-map dedup-merge``가 ``dedup_review_queue`` 후보 1쌍을 master/loser로
+    확정해 병합할 때 1행 INSERT한다. loser의 ``source_links``는 master로 재지정되고
+    loser feature는 soft-delete(status='deleted')된다. raw SQL은
+    ``infra/merge_repo.py`` (ADR-004). master/loser FK는 feature 하드 삭제 시
+    CASCADE, ``review_key`` FK는 큐 행 삭제 시 SET NULL(이력 보존).
+    """
+
+    __tablename__ = "feature_merge_history"
+    __table_args__ = (
+        CheckConstraint(
+            "master_feature_id <> loser_feature_id",
+            name="ck_merge_history_distinct",
+        ),
+        Index("idx_merge_history_loser", "loser_feature_id"),
+        Index(
+            "idx_merge_history_master",
+            "master_feature_id",
+            text("merged_at DESC"),
+        ),
+        {"schema": "ops"},
+    )
+
+    merge_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    master_feature_id: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey("feature.features.feature_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    loser_feature_id: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey("feature.features.feature_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    score: Mapped[Any | None] = mapped_column(Numeric(5, 2))
+    review_key: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("ops.dedup_review_queue.review_key", ondelete="SET NULL"),
+    )
+    merged_by: Mapped[str | None] = mapped_column(Text)
+    reason: Mapped[str | None] = mapped_column(Text)
+    merged_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()"),
     )

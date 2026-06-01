@@ -48,6 +48,7 @@ from krtour.map.infra.feature_repo import (
     get_feature_row,
     load_bundles,
 )
+from krtour.map.infra.merge_repo import MergeOutcome, merge_from_review
 from krtour.map.infra.status_repo import StatusCounts, gather_status_counts
 from krtour.map.mois import DEFAULT_BATCH_SIZE as MOIS_DEFAULT_BATCH_SIZE
 from krtour.map.mois import (
@@ -281,6 +282,28 @@ class AsyncKrtourMapClient:
         async with self._session_factory() as session, session.begin():
             queue = await enqueue_dedup_candidates(session, candidates)
         return DedupSyncResult(candidates=candidates, queue=queue)
+
+    async def merge_dedup_review(
+        self,
+        review_key: str,
+        *,
+        merged_by: str | None = None,
+        reason: str | None = None,
+    ) -> MergeOutcome:
+        """검토 큐 후보(``review_key``) 1쌍을 master 자동 선정 후 병합한다 (ADR-016).
+
+        ``infra.merge_repo.merge_from_review``를 한 transaction에서 실행: loser의
+        source_link를 master로 재지정, loser feature soft-delete, ``feature_merge_history``
+        기록, 큐 행 ``merged`` 전이. master는 ``select_master``(좌표 → updated_at →
+        source 우선순위)로 결정. 큐 행이 없거나 이미 검토됐으면 ``MergeError``.
+
+        **중복 실행 직렬화(ADR-039)는 호출 측 책임** — CLI ``dedup-merge``가
+        ``dedup-merge:{review_key}`` advisory lock으로 감싼다(본 메서드는 lock 미적용).
+        """
+        async with self._session_factory() as session, session.begin():
+            return await merge_from_review(
+                session, review_key, merged_by=merged_by, reason=reason
+            )
 
     # ─── read ──────────────────────────────────────────────────────────────
 

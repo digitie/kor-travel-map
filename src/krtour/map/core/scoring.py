@@ -28,11 +28,15 @@ from __future__ import annotations
 import math
 import re
 import unicodedata
-from typing import Final
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Final
 
 import jellyfish
 
 from krtour.map.dto.coordinate import Coordinate
+
+if TYPE_CHECKING:
+    from datetime import datetime
 
 __all__ = [
     # 가중치 + 임계값 상수
@@ -52,6 +56,12 @@ __all__ = [
     # 결과 분류
     "DedupDecision",
     "classify_decision",
+    # master 선정 (병합 시)
+    "MasterCandidate",
+    "SOURCE_PRIORITY",
+    "DEFAULT_SOURCE_PRIORITY",
+    "source_priority",
+    "select_master",
 ]
 
 
@@ -296,3 +306,82 @@ def classify_decision(score: float) -> str:
     if score >= THRESHOLD_MANUAL:
         return DedupDecision.MANUAL_REVIEW
     return DedupDecision.KEEP_SEPARATE
+
+
+# -- master 선정 (ADR-016 병합 시) ---------------------------------------
+
+
+# provider별 원천 신뢰 우선순위 (높을수록 master 우선). ADR-016: 행안부(정부
+# 원천) > TourAPI(한국관광공사) > 사용자 등록. 운영 데이터로 재조정 가능(후속).
+SOURCE_PRIORITY: Final[dict[str, int]] = {
+    # 정부 원천(행안부/소관 부처) — 최우선
+    "python-mois-api": 50,  # 행정안전부 인허가
+    "python-krheritage-api": 45,  # 국가유산청
+    "python-knps-api": 45,  # 국립공원공단
+    "python-krforest-api": 45,  # 산림청
+    # 공공 표준데이터 게이트(data.go.kr)
+    "python-datagokr-api": 35,
+    # 한국관광공사 TourAPI
+    "python-visitkorea-api": 30,
+    # 기타 공공 provider(도메인 한정 원천)
+    "python-opinet-api": 25,
+    "python-kma-api": 25,
+    "python-krex-api": 25,
+    "python-airkorea-api": 25,
+    "python-khoa-api": 25,
+}
+
+DEFAULT_SOURCE_PRIORITY: Final[int] = 10
+"""미등록 provider 기본 우선순위. 사용자 등록(provider 부재)은 ``0``."""
+
+
+def source_priority(provider: str | None) -> int:
+    """provider 원천 우선순위(높을수록 master 우선). ADR-016 master 선정 3순위.
+
+    미등록 provider는 ``DEFAULT_SOURCE_PRIORITY``, 사용자 등록(provider ``None``)은
+    ``0``.
+    """
+    if not provider:
+        return 0
+    return SOURCE_PRIORITY.get(provider, DEFAULT_SOURCE_PRIORITY)
+
+
+@dataclass(frozen=True)
+class MasterCandidate:
+    """master 선정 입력 — 병합 후보 feature 1건의 선정 관련 속성 (ADR-016).
+
+    - ``has_coord`` — 좌표 보유 여부. 좌표 있는 쪽이 "좌표 정밀도" 1순위에서 우선
+      (좌표 없는 feature보다 신뢰).
+    - ``updated_at`` — 최신 갱신(2순위, ADR-019 aware).
+    - ``provider`` — 원천 provider(3순위, ``source_priority``).
+    """
+
+    feature_id: str
+    has_coord: bool
+    updated_at: datetime
+    provider: str | None
+
+
+def select_master(a: MasterCandidate, b: MasterCandidate) -> tuple[str, str]:
+    """병합 후보 1쌍 → ``(master_feature_id, loser_feature_id)`` (ADR-016).
+
+    우선순위: (1) 좌표 보유 → (2) ``updated_at`` 최신 → (3) provider 원천 우선순위.
+    모두 동률이면 ``feature_id`` 사전순 작은 쪽을 master로(결정적 tie-break).
+
+    >>> from datetime import UTC, datetime
+    >>> t = datetime(2026, 1, 1, tzinfo=UTC)
+    >>> a = MasterCandidate("f_a", has_coord=False, updated_at=t, provider="x")
+    >>> b = MasterCandidate("f_b", has_coord=True, updated_at=t, provider="x")
+    >>> select_master(a, b)  # b가 좌표 보유 → master
+    ('f_b', 'f_a')
+    """
+    a_key = (a.has_coord, a.updated_at, source_priority(a.provider))
+    b_key = (b.has_coord, b.updated_at, source_priority(b.provider))
+    if a_key > b_key:
+        return (a.feature_id, b.feature_id)
+    if b_key > a_key:
+        return (b.feature_id, a.feature_id)
+    # 완전 동률 — feature_id 사전순 작은 쪽 master.
+    if a.feature_id <= b.feature_id:
+        return (a.feature_id, b.feature_id)
+    return (b.feature_id, a.feature_id)

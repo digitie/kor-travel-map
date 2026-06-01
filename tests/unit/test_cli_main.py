@@ -8,13 +8,15 @@ from __future__ import annotations
 import pytest
 
 from krtour.map.cli.main import (
-    _EXIT_IMPORT_SKIPPED,
+    _EXIT_LOCK_SKIPPED,
     _format_bulk_result,
+    _format_merge_outcome,
     _format_status,
     build_parser,
 )
 from krtour.map.infra.feature_repo import FeatureLoadResult
 from krtour.map.infra.jobs_repo import ImportJob
+from krtour.map.infra.merge_repo import MergeOutcome
 from krtour.map.infra.status_repo import StatusCounts
 from krtour.map.mois import MoisBulkJobResult, MoisBulkSyncResult
 
@@ -155,4 +157,50 @@ def test_format_bulk_result_done() -> None:
 def test_format_bulk_result_skipped() -> None:
     out = _format_bulk_result(_job_result(acquired=False))
     assert "skipped" in out
-    assert _EXIT_IMPORT_SKIPPED == 3
+    assert _EXIT_LOCK_SKIPPED == 3
+
+
+# ── dedup-merge 서브명령 ─────────────────────────────────────────────────
+
+
+def test_parser_dedup_merge_minimal() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["dedup-merge", "rk-123"])
+    assert args.command == "dedup-merge"
+    assert args.review_key == "rk-123"
+    assert args.merged_by is None
+    assert args.reason is None
+    assert hasattr(args, "func")
+
+
+def test_parser_dedup_merge_options() -> None:
+    parser = build_parser()
+    args = parser.parse_args(
+        ["dedup-merge", "rk-9", "--merged-by", "op-1", "--reason", "dup"]
+    )
+    assert args.merged_by == "op-1"
+    assert args.reason == "dup"
+
+
+def test_parser_dedup_merge_requires_review_key() -> None:
+    parser = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["dedup-merge"])  # review_key 필수
+
+
+def test_format_merge_outcome() -> None:
+    out = _format_merge_outcome(
+        MergeOutcome(
+            master_feature_id="f_m",
+            loser_feature_id="f_l",
+            source_links_moved=2,
+            source_links_dropped=1,
+            merge_id="mid-1",
+            queue_updated=True,
+        )
+    )
+    assert "done (merge_id=mid-1)" in out
+    assert "master: f_m" in out
+    assert "loser:  f_l (soft-deleted)" in out
+    assert "moved=2 dropped=1" in out
+    assert "queue: merged" in out

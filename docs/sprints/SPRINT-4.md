@@ -106,8 +106,10 @@ PostgreSQL advisory lock 기반 mutex 박음:
 - mutex 적용 대상 (Sprint 4 시점):
   - `krtour-map import <provider> <dataset>` — 같은 provider+dataset_key 중복
     실행 차단. lock key: `import:{provider}:{dataset_key}`.
-  - `krtour-map dedup-merge <feature_id>` — manual merge 중복 실행 차단. lock
-    key: `dedup-merge:{feature_id}`.
+  - `krtour-map dedup-merge <review_key>` — manual merge 중복 실행 차단. lock
+    key: `dedup-merge:{review_key}`. (구현: 후보쌍을 유일 식별하는 `review_key`로
+    구체화 — 한 feature가 여러 pending 쌍에 속할 수 있어 feature_id는 모호. ADR-016
+    master 자동 선정 + `ops.feature_merge_history`. 2026-06-01 완료.)
   - `alembic upgrade head` — Alembic 다중 워커 중복 실행 차단. lock key:
     `alembic-upgrade`.
 - read-only (예: `krtour-map status`, `--dry-run`)는 mutex 없이.
