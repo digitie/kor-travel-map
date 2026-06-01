@@ -7,6 +7,12 @@ main 최신: `PR#114` (merge commit `765e108`). PR#96~#114에서 Sprint 4 진입
 prep, `/features` UX, `map-marker-react`, geocoding debug/frontend/live 회귀,
 Windows Git + NTFS 정책, Next.js 16 + `maplibre-vworld-js#v0.1.2` 최신화를
 추가 반영했다.
+2026-06-01 추가 결정: **ADR-045**로 운영 모델을 Docker 독립 프로그램 + 독립
+PostgreSQL/PostGIS DB + 독립 Dagster + TripMate OpenAPI 연동으로 전환했다. Admin
+OpenAPI 기준 문서(`docs/openapi-admin-contract.md`), admin UI 상세 사양
+(`docs/debug-ui-admin-workflows.md`), 외부 POI key 기반 캐시 갱신 타깃
+(`docs/poi-cache-update-targets.md`)을 추가했다. TripMate 직접 import/공유 DB 모델은
+legacy 참고로만 본다.
 테스트 최신 기준: unit 642 / debug-ui non-live 113 / geocoding live 45 /
 integration 35 / live DB·dedup 5 / full pytest 681 / Windows Playwright e2e
 14/14 / GitHub Actions 전체 green.

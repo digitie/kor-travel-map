@@ -1,20 +1,25 @@
 # krtour-map-debug-ui
 
-`python-krtour-map`의 **디버그 REST API + UI** 별도 Python 패키지.
+`python-krtour-map`의 **디버그 REST API + admin 운영 UI** 별도 Python 패키지.
 
-> **현재 상태 (Sprint 1 skeleton)**: 본 패키지는 ADR-020에 따라 메인
-> 라이브러리에서 분리되어 신설되었다. 패키지 구조와 OpenAPI export script가
-> 있으며, 실제 FastAPI 라우터/서비스 구현은 Sprint 2 첫 디버그 UI PR에서
-> 진행한다. 설계는 `docs/debug-ui-package.md`에 박혀 있다.
+> **현재 상태 (Sprint 3 완료, Sprint 4 진입 준비)**: health/version, ETL preview,
+> geocoding debug, `/features` bbox 조회와 frontend 지도 화면이 구현되어 있다.
+> Sprint 4부터는 ADR-035에 따라 provider 적재, dedup 검토, 이슈 처리, 오프라인
+> 업로드를 포함한 admin 운영 콘솔로 확장한다. 패키지 경계는
+> `docs/debug-ui-package.md`, 상세 구현 사양은
+> `docs/debug-ui-admin-workflows.md`, OpenAPI/Dagster update queue 계약은
+> `docs/openapi-admin-contract.md`를 기준으로 한다.
 
 ## 정체성
 
 - **패키지명**: `krtour-map-debug-ui` (PyPI distribution) / `krtour.map_debug_ui` (Python import, ADR-022)
 - **위치**: `python-krtour-map` 저장소 내 `packages/krtour-map-debug-ui/`
   (monorepo)
-- **목적**: 디버그 UI 백엔드 + 향후 내부 도구 활용
+- **목적**: 디버그 UI 백엔드 + admin/유지보수/프로덕션 운영 콘솔
 - **인증**: 없음. 내부망 / localhost / WSL / 사내망 전제 (ADR-005)
-- **TripMate 의존**: 없음. TripMate는 메인 라이브러리만 import.
+- **TripMate 의존**: 없음. ADR-045 이후 TripMate는 OpenAPI client로만 연동.
+- **운영 형태**: Docker에서 실행되는 krtour-map 독립 프로그램의 API/admin UI.
+- **DB/Dagster**: 독립 PostgreSQL/PostGIS DB와 독립 Dagster를 사용.
 
 ## 의존성
 
@@ -51,8 +56,9 @@ npm run dev                  # http://127.0.0.1:8610 (next dev)
 ```
 
 VWorld 지도 (Kakao Maps SDK 미사용). Next.js App Router + `maplibre-gl` +
-`maplibre-vworld` + `zod` + `@krtour/map-marker-react` (ADR-029). 자세한
-사양: `../../docs/debug-ui-package.md` §14.
+`maplibre-vworld` + TanStack Query + Zustand + `zod` + React Hook Form +
+shadcn/ui + `@krtour/map-marker-react` (ADR-029). 자세한 사양:
+`../../docs/debug-ui-package.md` §14.
 
 운영 배포 (옵션 3가지 — `docs/debug-ui-package.md §14.3` 참조):
 - **A. standalone (default)**: `npm run build` + `npm run start` → 8610.
@@ -86,14 +92,21 @@ VWorld 지도 (Kakao Maps SDK 미사용). Next.js App Router + `maplibre-gl` +
 
 ## 엔드포인트 (계획)
 
-자세한 사양은 `../../docs/debug-ui-package.md`. 요약:
+자세한 패키지 사양은 `../../docs/debug-ui-package.md`, admin 운영 콘솔 구현 사양은
+`../../docs/debug-ui-admin-workflows.md`. 요약:
 
 - `/health`, `/version`
 - `/features/{id}`, `/features/in-bounds`, `/features/nearby`
+- `/admin/features`, `/admin/features/{id}/deactivate`
+- `/admin/providers`, `/admin/providers/{provider}/datasets/{dataset_key}/runs`
+- `/admin/feature-update-requests` (좌표/반경/시군구/provider 기준 업데이트 즉시 실행/큐잉)
+- `/admin/poi-cache-targets`, `/features/nearby/by-target` (외부 POI key 기준 주변 feature 캐시)
+- `/admin/provider-refresh-policies` (provider별 update 주기/rate limit 정책)
 - `/features/{id}/weather`, `/features/{id}/sources`, `/features/{id}/files`
 - `/providers/{name}/sync-state`
 - `/import-jobs`, `/import-jobs/{job_id}`
 - `/dedup-review`, `/integrity-violations`
+- `/admin/offline-uploads`, `/ops/error-logs`
 - `/debug/explain`, `/debug/fixtures`
 
 모두 인증 없음. `OpenAPI` 문서는 `/docs` (Swagger UI), `/openapi.json`.

@@ -2,6 +2,30 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-01 (codex) — ADR-045 독립 프로그램/OpenAPI 전환 + admin 캐시 갱신 사양
+
+**작업**: 사용자 지시에 따라 debug UI/admin 운영 콘솔을 문서화하고, 이어서 운영 모델을
+Docker 독립 프로그램 + 독립 PostgreSQL/PostGIS DB + 독립 Dagster + TripMate OpenAPI
+연동으로 전환하는 결정을 문서화했다. 코드 변경은 없다.
+
+**문서 보강**:
+- `docs/decisions.md`: ADR-045 추가. ADR-003의 TripMate 직접 함수 호출 운영 모델을
+  supersede하고, OpenAPI/Docker/독립 DB/Dagster 기준을 확정.
+- `docs/debug-ui-admin-workflows.md`: feature 목록/상세/수동추가/비활성화/삭제,
+  provider 강제 실행, job progress/cancel, dedup/결측/이슈 지도·테이블, offline upload,
+  React Doctor 필수 검증까지 admin UI 구현 사양 작성.
+- `docs/openapi-admin-contract.md`: admin 우선 OpenAPI, Dagster feature update request,
+  좌표 반경/시군구/provider scope, 즉시 실행/큐잉, Docker 서비스 구조 작성.
+- `docs/poi-cache-update-targets.md`: 외부 앱 POI key + 좌표 기반 cache target,
+  주변 feature 조회, target 삭제 처리, 교집합 dedup, provider refresh policy/rate limit,
+  KST `last_updated_at`, 목록/상세 응답 분리 규칙 작성.
+- `docs/architecture.md`, `docs/dagster-boundary.md`, `docs/tripmate-integration.md`,
+  `docs/debug-ui-package.md`, `README.md`, `SKILL.md`, `AGENTS.md`, debug-ui README류:
+  ADR-045 기준으로 참조와 우선 규칙 정합.
+
+**검증**: Markdown 문서 변경만 수행. `rg`로 주요 legacy 표현을 검색해 새 ADR-045
+우선 안내 또는 legacy 배너가 붙었는지 확인.
+
 ## 2026-06-01 (claude) — 에이전트 공용 runbook 신설 (agent-workflow / agent-failure-patterns)
 
 **작업**: 사용자 지시 — TripMate(`F:\dev\tripmate`)의 `docs/runbooks/` 컨벤션을 참고해
@@ -477,7 +501,6 @@ source DB iterator는 후속 PR).
   - `providers/__init__.py` mois export + `__all__`.
 - **설계 결정 2건**: ① 자연키 구분자 `::` (`make_feature_id`/`make_source_record_key`가 `|` 금지 → kma 패턴) ② marker_color `P-01` (미사용 팔레트). `docs/mois-feature-etl.md` §8 `|`→`::` 정정.
 - **검증(WSL)**: mypy --strict 50 files / ruff All checks passed / import-linter 4 kept / 신규 23 test / 전체 699 passed·5 skip. 좌표는 mois가 변환한 WGS84 그대로(ADR-012/044, 좌표계 변환 X), legal_dong_code 1차 bjd_code·없으면 역지오코딩(ADR-009).
-
 ## 2026-06-01 (codex) — PR review 누락 보강 + 문서 정합성 sweep
 
 **작업**: 사용자 지시 "4일전 PR부터 검색해서 리뷰를 달지 않은 PR에는 상세리뷰"에

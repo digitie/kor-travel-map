@@ -3,6 +3,11 @@
 본 문서는 `python-krtour-map` (메인 패키지)의 외부 표면(public API) reference다.
 사용자 시나리오와 함수 시그니처 중심이다.
 
+> **ADR-045 주의**: 메인 패키지의 Python API는 krtour-map 독립 프로그램 내부
+> API/Dagster/테스트에서 사용하는 public Python 표면이다. TripMate 운영 연동은
+> 이 Python API를 직접 import하지 않고 OpenAPI로 한다. Admin/OpenAPI 계약은
+> `docs/openapi-admin-contract.md`를 기준으로 한다.
+
 디버그 REST API/UI는 **별도 Python 패키지** `krtour-map-debug-ui` (ADR-020)에
 있고, 사양은 `docs/debug-ui-package.md`를 따른다. 메인 라이브러리는 FastAPI
 의존이 없다.
@@ -324,15 +329,16 @@ krtour-map import enqueue --kind ...     # import_job 등록
 krtour-map import claim                  # 워커 모드
 ```
 
-CLI는 `typer`. 인증 없음 (로컬 전용). 운영 schedule은 Dagster (TripMate)에서.
+CLI는 `typer`. 인증 없음 (로컬 전용). 운영 schedule은 krtour-map 독립 Dagster에서.
 
 ## 11. 비책임 (다시 확인)
 
 - 사용자/여행계획/POI 도메인 — TripMate
-- JWT/OAuth/세션/권한 — TripMate
+- JWT/OAuth/세션/권한 — 네트워크 계층 또는 호출자
 - 이메일 발송 — TripMate (Resend)
 - WebSocket 실시간 동기 — TripMate
-- Admin UI 페이지 — TripMate
-- Dagster orchestration (job 정의, scheduler, daemon) — TripMate
+- TripMate 사용자 UI 페이지 — TripMate
+- Dagster orchestration (job 정의, scheduler, daemon) — krtour-map 독립 Dagster 패키지
 
-본 라이브러리는 함수만 제공한다.
+본 메인 라이브러리는 함수만 제공한다. OpenAPI/admin UI/Dagster 실행 코드는 별도
+패키지 책임이다.

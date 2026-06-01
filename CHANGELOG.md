@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### 문서 — ADR-045 독립 프로그램/OpenAPI 전환 (2026-06-01)
+
+- krtour-map 운영 모델을 Docker 독립 프로그램 + 독립 PostgreSQL/PostGIS DB + 독립
+  Dagster + TripMate OpenAPI 연동으로 전환하는 ADR-045를 추가했다.
+- Admin 우선 OpenAPI, Dagster feature update request, POI/cache target 기반 주변
+  feature 캐시 갱신, provider refresh policy/rate limit, frontend React Doctor 필수
+  검증 사양을 문서화했다.
+
 ### Sprint 4 — 운영 CLI (2026-06-01~)
 
 - **CHANGED**: coverage 게이트 `fail_under` 75 → **80** 상향 (ADR-032 Sprint 4 목표
@@ -64,7 +72,6 @@
   워커가 적재 중이면 skip(exit 3). `--geocoder-url`로 좌표 → bjd_code 역지오코딩
   보강(kraddr-geo REST) 선택. `--dataset-key`/`--batch-size`/`--source-checksum`
   옵션. (`cli/records.py` NDJSON 리더 + `cli/main.py` import 서브명령.)
-
 ### Sprint 3 — DB 적재 오케스트레이션 + dedup + geocoding REST + e2e (2026-05-29~30)
 
 - **PR#115 — PR review 누락 보강 + 문서 정합성 sweep**:

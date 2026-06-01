@@ -1,24 +1,33 @@
-# dagster-boundary.md — Dagster 책임 경계
+# dagster-boundary.md — krtour-map 독립 Dagster 책임 경계
 
-본 문서는 ETL orchestration의 책임 분리다. **본 라이브러리는 Dagster를 import
-하지 않는다**. Dagster는 TripMate `apps/etl/`이 책임. 본 라이브러리는 Dagster
-asset의 body에서 호출할 **순수 함수 + helper DTO**만 제공한다.
+본 문서는 ADR-045 이후 krtour-map 독립 프로그램의 Dagster 책임 경계다.
+
+핵심 변경:
+
+- Dagster는 더 이상 TripMate `apps/etl/` 책임이 아니다.
+- krtour-map Docker 프로그램이 자체 Dagster webserver/daemon/metadata DB를 가진다.
+- TripMate는 Dagster를 직접 제어하지 않고 krtour-map OpenAPI를 호출한다.
+- FastAPI admin API는 feature update request를 만들고, Dagster가 이를 실행한다.
+- 메인 라이브러리 `krtour.map` 자체는 여전히 Dagster를 import하지 않는다.
+  Dagster 코드는 독립 프로그램 패키지 또는 별도 `packages/krtour-map-dagster/`
+  후보에 둔다.
 
 ## 1. 책임 매트릭스
 
 | 책임 | 위치 |
 |------|------|
-| Dagster install / daemon / scheduler | TripMate (`apps/etl/`) |
-| `@asset`, `@op`, `@job`, `@schedule`, `Definitions` | TripMate |
-| Asset 이름, dataset_key 매핑, group 구조 | TripMate (참고: 본 라이브러리가 `dataset_key` 표준 제공) |
-| Cron schedule (시각, frequency) | TripMate |
-| Asset 간 dependency graph | TripMate |
-| `ConcurrencyConfig` (provider 쿼터 보호) | TripMate |
-| Retry policy (`tenacity` backoff 횟수) | TripMate |
-| Run failure 알림 (Telegram, Slack, Sentry) | TripMate |
-| `etl_run_logs` 운영 테이블 | TripMate |
-| Asset materialization metadata | TripMate (본 라이브러리가 `as_metadata()` helper) |
-| Dagster resource 정의 (engine, file_store, provider clients) | TripMate |
+| Dagster install / daemon / scheduler | krtour-map 독립 프로그램 |
+| `@asset`, `@op`, `@job`, `@schedule`, `Definitions` | krtour-map Dagster 패키지 |
+| Asset/job 이름, dataset_key 매핑, group 구조 | krtour-map Dagster |
+| Cron schedule (시각, frequency) | krtour-map Dagster |
+| Asset/job dependency graph | krtour-map Dagster |
+| `ConcurrencyConfig` 또는 pool 설정(provider 쿼터 보호) | krtour-map Dagster |
+| Retry policy (`tenacity`/Dagster retry) | krtour-map Dagster |
+| Run failure 알림 (Telegram, Slack, Sentry) | krtour-map 운영 설정 |
+| Dagster metadata DB | `krtour_map_dagster` |
+| Feature update request queue | krtour-map API + `ops.feature_update_requests` |
+| Import job progress | krtour-map API + `ops.import_jobs` |
+| Dagster resource 정의 (engine, file_store, provider clients) | krtour-map Dagster |
 | **provider 호출 자체** | provider 라이브러리 직접 (ADR-006) |
 | **raw → DTO 변환 (순수 함수)** | **본 라이브러리 (`providers/<name>.py`)** |
 | **DB 적재 (raw SQL upsert/COPY)** | **본 라이브러리 (`infra/*_repo.py`)** |
@@ -27,15 +36,20 @@ asset의 body에서 호출할 **순수 함수 + helper DTO**만 제공한다.
 | **import_jobs 큐 관리** | **본 라이브러리 (`infra/jobs_repo.py`)** |
 | Dedup scoring / Record Linkage | 본 라이브러리 (`core/scoring.py`) |
 | 정합성 검증 룰 (F1~F8) | 본 라이브러리 (`core/integrity.py`, T-201) |
+| TripMate 사용자/여행계획/POI 도메인 | TripMate |
+| TripMate에서 feature update 요청 | krtour-map OpenAPI 호출 |
 
 요약:
 - **본 라이브러리**: 변환 + 저장 + 검증 (Dagster 없이도 호출 가능한 함수)
-- **TripMate**: orchestration shell (asset 정의, schedule, resource, 알림)
+- **krtour-map API**: OpenAPI, admin UI, queue 생성, 진행 상태 조회/취소
+- **krtour-map Dagster**: provider sync, feature update, offline upload load,
+  consistency/dedup jobs 실행
+- **TripMate**: OpenAPI client 소비자
 
-## 2. 표준 Asset 패턴
+## 2. 표준 Job/Asset 패턴
 
 ```python
-# apps/etl/assets/visitkorea_festivals.py (TripMate 측)
+# packages/krtour-map-dagster/assets/visitkorea_festivals.py (후보 위치)
 from dagster import asset, FreshnessPolicy, RetryPolicy, AssetExecutionContext
 from krtour.map import AsyncKrtourMapClient
 from krtour.map.dto import ProviderSyncState
@@ -109,10 +123,10 @@ strategy.md`).
 ## 4. dataset_key 표준 (본 라이브러리 제공)
 
 `krtour.map.providers.<name>` 모듈마다 `DATASET_KEY: Final[str]` 상수 노출.
-TripMate asset이 이 상수를 import해서 dataset_key를 일관 사용:
+krtour-map Dagster asset/job이 이 상수를 import해서 dataset_key를 일관 사용:
 
 ```python
-# apps/etl/assets/visitkorea_festivals.py
+# packages/krtour-map-dagster/assets/visitkorea_festivals.py
 from krtour.map.providers.visitkorea import DATASET_KEY as VISITKOREA_FESTIVAL_DATASET_KEY
 
 # asset 이름 / Dagster metadata에 사용
@@ -121,9 +135,9 @@ ctx.log.info("loaded", extra={"dataset_key": VISITKOREA_FESTIVAL_DATASET_KEY})
 
 전체 dataset_key 카탈로그는 `docs/provider-contract.md` §3.
 
-## 5. asset 명명 규약
+## 5. asset/job 명명 규약
 
-TripMate의 asset 이름 표준 (참고용 — TripMate 결정):
+krtour-map Dagster의 asset/job 이름 표준:
 
 | asset 이름 | dataset_key | group |
 |-----------|-------------|-------|
@@ -152,7 +166,7 @@ TripMate의 asset 이름 표준 (참고용 — TripMate 결정):
 ## 6. ConcurrencyConfig (provider 쿼터)
 
 ```python
-# apps/etl/definitions.py
+# packages/krtour-map-dagster/definitions.py
 from dagster import Definitions, ConcurrencyConfig
 
 defs = Definitions(
@@ -173,10 +187,10 @@ defs = Definitions(
 
 provider별 max_concurrent는 그 provider의 분당 쿼터 / 안전 마진으로 결정.
 
-## 7. Resource 정의 (TripMate)
+## 7. Resource 정의 (krtour-map Dagster)
 
 ```python
-# apps/etl/resources.py
+# packages/krtour-map-dagster/resources.py
 from dagster import resource, ResourceDefinition
 from krtour.map import AsyncKrtourMapClient
 
@@ -202,9 +216,39 @@ def visitkorea_resource(init_context):
 
 본 라이브러리는 resource 정의를 노출하지 않는다 — Dagster 의존하지 않으므로.
 
+## 7.1 OpenAPI 기반 feature update queue
+
+Admin UI 또는 TripMate는 Dagster를 직접 호출하지 않고 다음 OpenAPI를 호출한다.
+
+```http
+POST /admin/feature-update-requests
+```
+
+대표 scope:
+
+- `feature_ids`: 특정 feature 목록.
+- `center_radius`: 특정 좌표 중심 반경 `n` km 안 feature.
+- `sigungu_by_radius`: 특정 좌표 중심 반경 `n` km와 교차/포함되는 시군구의 feature.
+- `bbox`: 지도 bbox 안 feature.
+- `provider_dataset`: 특정 provider/dataset/sync_scope.
+
+처리 흐름:
+
+1. API가 scope를 검증하고 대상 feature/provider/dataset을 계산한다.
+2. API가 `ops.feature_update_requests`와 `ops.import_jobs` row를 만든다.
+3. `run_mode=queued`이면 Dagster sensor가 queued request를 claim한다.
+4. `run_mode=now`이면 API가 즉시 Dagster run을 만들 수 있으나 request/job row는
+   먼저 저장한다.
+5. Dagster run은 provider 호출, DTO 변환, 적재, dedup refresh, consistency check를
+   수행하고 progress를 `ops.import_jobs`에 갱신한다.
+6. API는 `GET /admin/feature-update-requests/{id}`와
+   `GET /admin/import-jobs/{job_id}`로 진행 상태를 제공한다.
+
+세부 OpenAPI 계약은 `docs/openapi-admin-contract.md`.
+
 ## 8. EtlJobSpec helper (선택, 본 라이브러리 제공)
 
-TripMate가 asset 정의할 때 참고용으로, 본 라이브러리가 `EtlJobSpec` dataclass를
+krtour-map Dagster가 asset/job 정의할 때 참고용으로, 본 라이브러리가 `EtlJobSpec` dataclass를
 제공할 수 있다:
 
 ```python
@@ -215,7 +259,7 @@ from dataclasses import dataclass
 class EtlJobSpec:
     """provider별 ETL 메타데이터.
     
-    TripMate asset 정의 시 참고용. Dagster import 없음."""
+    krtour-map Dagster 정의 시 참고용. 메인 라이브러리에는 Dagster import 없음."""
     provider: str
     dataset_key: str
     source_entity_type: str
@@ -244,22 +288,25 @@ JOB_SPEC = EtlJobSpec(
 )
 ```
 
-TripMate는 위 spec을 참고해 asset/schedule을 정의 (직접 의존성은 아님).
+krtour-map Dagster는 위 spec을 참고해 asset/schedule을 정의 (메인 라이브러리의
+직접 Dagster 의존성은 아님).
 
 ## 9. import_jobs 큐와 Dagster의 관계
 
-본 라이브러리의 `ops.import_jobs` 테이블은 Dagster의 영속 큐와 **중복이 아니라
+본 라이브러리의 `ops.import_jobs` 테이블은 Dagster run storage와 **중복이 아니라
 분리**:
 
 | 큐 | 용도 |
 |----|------|
-| Dagster 자체 영속 큐 (PostgreSQL backend) | 정기 ETL asset 실행, schedule 기반 |
-| `ops.import_jobs` (본 라이브러리) | 사용자가 admin UI에서 트리거하는 일회성 import (예: 특정 지역 재적재, 수동 우선 처리) |
+| Dagster run storage (`krtour_map_dagster`) | Dagster run/event/asset metadata |
+| `ops.import_jobs` (`krtour_map`) | admin/OpenAPI에서 보는 작업 진행률과 취소 상태 |
+| `ops.feature_update_requests` (`krtour_map`) | 지리 범위/provider 범위 업데이트 요청 |
 
-운영 시 대부분의 적재는 Dagster asset이 담당. `import_jobs`는 admin 운영 시
-사용자 트리거용. 둘 다 advisory lock으로 race 방지 (ADR-011).
+운영 시 정기 적재와 사용자 트리거 update 모두 Dagster가 실행한다. admin API는
+OpenAPI 계약과 queue/progress를 관리한다. 둘 다 advisory lock으로 race를 방지한다
+(ADR-011/039).
 
-## 10. 정기 schedule 가이드 (TripMate 결정 — 참고용)
+## 10. 정기 schedule 가이드 (krtour-map Dagster)
 
 | asset group | suggested cron | 비고 |
 |-------------|---------------|------|
@@ -293,7 +340,7 @@ TripMate는 위 spec을 참고해 asset/schedule을 정의 (직접 의존성은 
 | purge weather old (>30d) | `0 6 * * *` | 일 1회 |
 | purge notice old (>1y) | `0 6 * * 0` | 주 1회 |
 
-운영 임계값은 SPEC V8 v8_0 + 실제 부하 기반으로 TripMate가 조정.
+운영 임계값은 SPEC V8 v8_0 + 실제 부하 기반으로 krtour-map 운영자가 조정한다.
 
 ## 11. Asset materialization metadata
 
@@ -313,8 +360,8 @@ TripMate는 위 spec을 참고해 asset/schedule을 정의 (직접 의존성은 
 }
 ```
 
-본 라이브러리는 dict로 반환. TripMate가 `MetadataValue.*` 변환 (Dagster
-import 책임).
+본 라이브러리는 dict로 반환한다. krtour-map Dagster 패키지가 `MetadataValue.*`로
+변환한다. 메인 라이브러리는 Dagster를 import하지 않는다.
 
 ## 12. 정합성 게이트 패턴 (T-200, kraddr-geo ADR-017 미러)
 
@@ -348,9 +395,9 @@ import 책임).
 
 자세한 구현은 T-200/T-201에서.
 
-## 13. 운영 알림 (TripMate)
+## 13. 운영 알림 (krtour-map)
 
-본 라이브러리는 알림 sink를 결정하지 않는다. TripMate가:
+메인 라이브러리는 알림 sink를 결정하지 않는다. krtour-map 운영 프로그램이:
 - Dagster `RunStatusSensor`로 run failure → Sentry/Telegram/Slack
 - `data_integrity_violations.severity='critical'` 신규 row → 알림
 - `import_jobs.state='failed'` 신규 row → 알림
@@ -361,15 +408,16 @@ import 책임).
 ## 14. 로컬 디버그 (Dagster dev)
 
 ```bash
-# TripMate apps/etl/에서
-dagster dev -m apps.etl.definitions
+# krtour-map Dagster 패키지에서
+dagster dev -m krtour.map_dagster.definitions
 
 # 또는 docker compose
-docker compose -f apps/etl/docker-compose.yml up
+docker compose up krtour-map-dagster-webserver krtour-map-dagster-daemon
 ```
 
-본 라이브러리 단독으로는 Dagster 못 띄움 (의존성 X). 디버그 / 적재 검증은 본
-라이브러리의 디버그 패키지 (`krtour.map_debug_ui`) 또는 직접 Python 스크립트.
+메인 라이브러리 단독으로는 Dagster를 띄우지 않는다 (의존성 X). Dagster 실행 코드는
+krtour-map 독립 프로그램 패키지에 둔다. 디버그 / 적재 검증은 admin API
+(`krtour.map_debug_ui`) 또는 직접 Python 스크립트로도 가능하다.
 
 ## 15. 본 라이브러리가 노출하는 helper 요약
 
@@ -398,7 +446,7 @@ dataclasses:
 - ScheduleDefinition, SensorDefinition 정의 안 함
 - Dagster `Config`, `RunConfig` 정의 안 함
 
-위는 모두 TripMate `apps/etl/` 책임.
+위는 모두 krtour-map Dagster 패키지 책임이다.
 
 본 라이브러리는 **순수 함수와 DTO + DB 적재 helper**만 제공 → Dagster 없이도
 import해서 사용 가능 → 단위 테스트가 Dagster 의존 없이 빠르게 동작.
