@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-01 (claude) — geocoder 보강 라이브 재검증 (kraddr-geo REST)
+
+**작업**: MOIS 실데이터 라이브 테스트의 미검증 항목(geocoder 보강 실연동)을
+kraddr-geo REST(`127.0.0.1:8888`, 사용자 기동)로 검증.
+
+- `bakeries` 영업중 + 좌표O + legal_dong=None 200건 → `KraddrGeoRestClient`(httpx
+  주입) + `kraddr_geo_reverse_geocoder` + `cached_reverse_geocoder`를
+  `license_records_to_bundles`에 주입.
+- 결과: geocoder 미주입 0/200 bjd → **주입 200/200(100%) bjd 보강, f_global_* 0**.
+  '원더쿠키' → bjd 1111014700(재동), feature_id `f_1111014700_p_*` 실제 법정동
+  bucket. §4 설계 예측(ADR-009)이 실데이터로 100% 확인.
+- 주의: `KraddrGeoRestClient(base_path='/v1')`가 prefix를 붙이므로 httpx base_url은
+  `/v1` 미포함(`http://host:8888`)로 줘야 함(중복 404 방지).
+- 상세: `docs/reports/mois-live-test-2026-06-01.md` §5 추가. 코드 변경 없음.
+
 ## 2026-06-01 (claude) — dedup MOIS self-sibling (within-set pairwise)
 
 **작업**: SPRINT-4 §2.2 — 한 dataset 안에서 같은 사업장이 2슬러그로 중복 등록된
