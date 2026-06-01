@@ -7,6 +7,14 @@
 
 ### Sprint 4 — 운영 CLI (2026-06-01~)
 
+- **NEW**: MOIS Step B 증분 적재 — `krtour-map import mois <file> --mode incremental
+  --cursor <값>`. 변경분만 upsert(snapshot prune 없음)하고 성공 시
+  `provider_sync.provider_sync_state`의 cursor(`{"last_modified_date": …}`)를 전진
+  시킨다(`--sync-scope`로 scope 분리). 신규 `infra/sync_state_repo`
+  (get/record_success/record_failure) + `mois.run_mois_license_incremental_job`
+  (advisory lock + import_jobs + cursor) + `AsyncKrtourMapClient` 메서드. `--cursor`
+  미지정 시 exit 2. (Step C 폐업 처리는 별도 — 증분은 사라진 record를 비활성화하지
+  않는다.)
 - **NEW**: `krtour-map dedup-merge <review_key>` — dedup 검토 큐 후보 1쌍 수동 병합
   (ADR-016). master를 `select_master`(좌표 보유 → `updated_at` 최신 → 원천 우선순위
   행안부>TourAPI>사용자)로 자동 선정하고, loser의 `source_links`를 master로 재지정

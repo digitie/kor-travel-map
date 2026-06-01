@@ -2,6 +2,34 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-01 (claude) — Sprint 4a: Step B 증분 적재 + cursor (ProviderSyncState)
+
+**작업**: MOIS Step B(`mois_license_features_history`) 증분 적재 — 변경분만 upsert +
+`provider_sync_state` cursor 전진. `provider_sync_state` 테이블은 이미 존재(cursor
+JSONB) → **마이그레이션 불필요**.
+
+- **신규 `infra/sync_state_repo.py`**: `SyncState` + `get_sync_state` /
+  `record_sync_success`(cursor 전진 + last_success + 연속실패 0, UPSERT) /
+  `record_sync_failure`(cursor 미전진 + last_failure + 연속실패 +1). raw SQL
+  ON CONFLICT (provider, dataset_key, sync_scope).
+- **mois.py**: `load_mois_license_features_incremental`(batched upsert, **prune
+  없음** — 증분은 전체 snapshot이 아니라 사라진 record를 비활성화하면 오삭제. 폐업은
+  Step C 책임) + `run_mois_license_incremental_job`(advisory lock 직렬화 + import_jobs
+  추적 + 성공 시 cursor 전진/실패 시 record_sync_failure) + `MoisIncrementalJobResult`.
+- **client + CLI**: `AsyncKrtourMapClient.run_mois_license_incremental_job` +
+  `import mois <file> --mode incremental --cursor <값> [--sync-scope]`. `--dataset-key`
+  기본을 None으로 바꿔 모드별 해석(bulk→BULK / incremental→HISTORY). `--cursor` 미지정
+  → exit 2. cursor는 `{"last_modified_date": <값>}`로 기록(provider가 다음 시작 위치
+  결정, ADR-006).
+- **테스트**: unit 3(incremental 파서 + 결과 포맷 2) + integration 9(sync_state_repo 5:
+  get-none/success-advance/failure-increment/success-reset/scope-independent; mois_loader
+  2: 증분 적재+cursor 전진 / no-prune; cli_import 2: 증분 cursor 영속 / cursor 누락
+  exit 2). cli_import teardown TRUNCATE에 `provider_sync_state` 추가(CLI commit 격리).
+- **검증(WSL)**: ruff clean / mypy --strict 60 files / import-linter 4 kept / 전체
+  **806 passed**(794 → +12).
+- **다음**: #3 실적재 후 dedup false-positive 측정 → ADR-016 가중치 조정. (Step C 폐업
+  처리 + Step D detail은 Sprint 4b.)
+
 ## 2026-06-01 (claude) — Sprint 4a: dedup-merge 명령 + merge primitive (ADR-016)
 
 **작업**: Sprint 4a 두 번째 CLI mutate 명령 `krtour-map dedup-merge`. ADR-016이

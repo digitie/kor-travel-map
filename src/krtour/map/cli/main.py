@@ -47,6 +47,7 @@ from krtour.map.infra.db import make_async_engine
 from krtour.map.infra.merge_repo import MergeError
 from krtour.map.mois import DEFAULT_BATCH_SIZE as MOIS_DEFAULT_BATCH_SIZE
 from krtour.map.providers.mois import DATASET_KEY_BULK as MOIS_DATASET_KEY_BULK
+from krtour.map.providers.mois import DATASET_KEY_HISTORY as MOIS_DATASET_KEY_HISTORY
 from krtour.map.settings import KrtourMapSettings
 
 if TYPE_CHECKING:
@@ -55,7 +56,7 @@ if TYPE_CHECKING:
     from krtour.map.geocoding import ReverseGeocoder
     from krtour.map.infra.merge_repo import MergeOutcome
     from krtour.map.infra.status_repo import StatusCounts
-    from krtour.map.mois import MoisBulkJobResult
+    from krtour.map.mois import MoisBulkJobResult, MoisIncrementalJobResult
 
 __all__ = ["main", "build_parser"]
 
@@ -98,9 +99,34 @@ def build_parser() -> argparse.ArgumentParser:
         help="MOIS 인허가 NDJSON snapshot 파일(한 줄당 JSON object). cli.records 계약.",
     )
     mois_p.add_argument(
+        "--mode",
+        choices=["bulk", "incremental"],
+        default="bulk",
+        help=(
+            "bulk(Step A — 전체 snapshot + 부재분 soft-delete) 또는 "
+            "incremental(Step B — 변경분만 upsert + cursor 전진, prune 없음). 기본 bulk."
+        ),
+    )
+    mois_p.add_argument(
         "--dataset-key",
-        default=MOIS_DATASET_KEY_BULK,
-        help=f"적재 dataset_key (기본 {MOIS_DATASET_KEY_BULK}).",
+        default=None,
+        help=(
+            "적재 dataset_key. 미지정 시 모드별 기본 — bulk="
+            f"{MOIS_DATASET_KEY_BULK} / incremental={MOIS_DATASET_KEY_HISTORY}."
+        ),
+    )
+    mois_p.add_argument(
+        "--cursor",
+        default=None,
+        help=(
+            "incremental 전용(필수) — 이번 적재 후 저장할 cursor 값. "
+            "``{\"last_modified_date\": <값>}``로 provider_sync_state에 기록."
+        ),
+    )
+    mois_p.add_argument(
+        "--sync-scope",
+        default="default",
+        help="incremental cursor scope (provider_sync_state.sync_scope, 기본 default).",
     )
     mois_p.add_argument(
         "--batch-size",
@@ -237,11 +263,40 @@ def _format_bulk_result(result: MoisBulkJobResult) -> str:
     )
 
 
+def _format_incremental_result(result: MoisIncrementalJobResult) -> str:
+    if not result.acquired:
+        return (
+            "import: skipped — 다른 워커가 이미 적재 중 (import advisory lock 미획득)."
+        )
+    assert result.load is not None
+    assert result.sync_state is not None
+    load = result.load
+    job_id = result.job.job_id if result.job is not None else "?"
+    return "\n".join(
+        [
+            f"import (incremental): done (job_id={job_id})",
+            f"  features: inserted={load.features_inserted} "
+            f"updated={load.features_updated}",
+            f"  source_records: inserted={load.source_records_inserted}",
+            f"  cursor: {result.sync_state.cursor}",
+        ]
+    )
+
+
 async def _cmd_import_mois(args: argparse.Namespace) -> int:
     records_path = Path(args.records_file)
     if not records_path.is_file():  # noqa: ASYNC240  # 1회 stat — 진입 검증
         print(f"import: records 파일 없음 — {records_path}", file=sys.stderr)
         return _EXIT_INVALID
+    incremental = args.mode == "incremental"
+    if incremental and not args.cursor:
+        print(
+            "import: --mode incremental은 --cursor 가 필수입니다.", file=sys.stderr
+        )
+        return _EXIT_INVALID
+    dataset_key = args.dataset_key or (
+        MOIS_DATASET_KEY_HISTORY if incremental else MOIS_DATASET_KEY_BULK
+    )
     engine = make_async_engine(_resolve_dsn(args))
     try:
         records = iter_mois_license_records(records_path)
@@ -249,10 +304,23 @@ async def _cmd_import_mois(args: argparse.Namespace) -> int:
             _reverse_geocoder_for(args.geocoder_url) as geocoder,
             AsyncKrtourMapClient(engine) as client,
         ):
+            if incremental:
+                inc = await client.run_mois_license_incremental_job(
+                    records,
+                    fetched_at=datetime.now(UTC),
+                    new_cursor={"last_modified_date": args.cursor},
+                    dataset_key=dataset_key,
+                    sync_scope=args.sync_scope,
+                    reverse_geocoder=geocoder,
+                    source_checksum=args.source_checksum,
+                    batch_size=args.batch_size,
+                )
+                print(_format_incremental_result(inc))
+                return 0 if inc.acquired else _EXIT_LOCK_SKIPPED
             result = await client.run_mois_license_bulk_job(
                 records,
                 fetched_at=datetime.now(UTC),
-                dataset_key=args.dataset_key,
+                dataset_key=dataset_key,
                 reverse_geocoder=geocoder,
                 source_checksum=args.source_checksum,
                 batch_size=args.batch_size,

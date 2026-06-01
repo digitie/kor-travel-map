@@ -18,12 +18,15 @@ import pytest
 from sqlalchemy import func, select, text
 
 from krtour.map.infra.models import FeatureRow, SourceLinkRow
+from krtour.map.infra.sync_state_repo import get_sync_state
 from krtour.map.mois import (
     delete_mois_license_features_not_in,
     load_mois_license_features_bulk,
     run_mois_license_bulk_job,
+    run_mois_license_incremental_job,
     sync_mois_license_features_bulk,
 )
+from krtour.map.providers.mois import DATASET_KEY_HISTORY, PROVIDER_NAME
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -396,3 +399,76 @@ async def test_sync_bulk_streaming_batches_equivalent(
     await migrated_session.flush()
     assert result2.deactivated == 4
     assert await _active_entity_ids(migrated_session) == {"general_restaurants::b0"}
+
+
+# ── Step B: incremental(history) 적재 + cursor 전진 ──────────────────────
+
+
+async def _active_count(session: AsyncSession) -> int:
+    from sqlalchemy import func, select
+
+    return int(
+        (
+            await session.execute(
+                select(func.count())
+                .select_from(FeatureRow)
+                .where(FeatureRow.status != "deleted")
+                .where(FeatureRow.deleted_at.is_(None))
+            )
+        ).scalar_one()
+    )
+
+
+async def test_incremental_job_loads_and_advances_cursor(
+    migrated_session: AsyncSession,
+) -> None:
+    result = await run_mois_license_incremental_job(
+        migrated_session,
+        [
+            _Record(service_slug="general_restaurants", mng_no="inc-1",
+                    lon=126.97, lat=37.56),
+            _Record(service_slug="bakeries", mng_no="inc-2"),
+        ],
+        fetched_at=_FETCHED,
+        new_cursor={"last_modified_date": "2026-06-01"},
+    )
+    assert result.acquired is True
+    assert result.job is not None
+    assert result.job.state == "done"
+    assert result.load is not None
+    assert result.load.features_inserted == 2
+    assert result.sync_state is not None
+    assert result.sync_state.cursor == {"last_modified_date": "2026-06-01"}
+
+    # cursor가 provider_sync_state에 영속화됨.
+    state = await get_sync_state(
+        migrated_session, provider=PROVIDER_NAME, dataset_key=DATASET_KEY_HISTORY
+    )
+    assert state is not None
+    assert state.cursor == {"last_modified_date": "2026-06-01"}
+
+
+async def test_incremental_does_not_prune_existing(
+    migrated_session: AsyncSession,
+) -> None:
+    # 기존 feature 1건(history dataset)을 먼저 적재.
+    await load_mois_license_features_bulk(
+        migrated_session,
+        [_Record(service_slug="public_baths", mng_no="old-1")],
+        fetched_at=_FETCHED,
+        dataset_key=DATASET_KEY_HISTORY,
+    )
+    await migrated_session.flush()
+    assert await _active_count(migrated_session) == 1
+
+    # 증분으로 다른 record 적재 — 기존 record는 batch에 없지만 soft-delete 금지.
+    await run_mois_license_incremental_job(
+        migrated_session,
+        [_Record(service_slug="bakeries", mng_no="new-1")],
+        fetched_at=_FETCHED,
+        new_cursor={"last_modified_date": "2026-06-02"},
+        dataset_key=DATASET_KEY_HISTORY,
+    )
+    await migrated_session.flush()
+    # 둘 다 active — prune 없음(Step B).
+    assert await _active_count(migrated_session) == 2

@@ -37,8 +37,14 @@ from krtour.map.infra.jobs_repo import (
     finish_import_job,
     start_import_job,
 )
+from krtour.map.infra.sync_state_repo import (
+    SyncState,
+    record_sync_failure,
+    record_sync_success,
+)
 from krtour.map.providers.mois import (
     DATASET_KEY_BULK,
+    DATASET_KEY_HISTORY,
     PROVIDER_NAME,
     license_records_to_bundles,
 )
@@ -46,6 +52,7 @@ from krtour.map.providers.mois import (
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
     from datetime import datetime
+    from typing import Any
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -57,6 +64,7 @@ _LICENSE_ENTITY_TYPE = "license_place"
 
 # import_jobs kind (data-model.md §9.1 예시).
 _BULK_JOB_KIND = "mois_license_full_update"
+_INCREMENTAL_JOB_KIND = "mois_license_incremental_update"
 
 # streaming 배치 적재 기본 크기 (대용량 source DB snapshot 메모리 바운드).
 DEFAULT_BATCH_SIZE: Final[int] = 500
@@ -85,10 +93,13 @@ __all__ = [
     "DEFAULT_BATCH_SIZE",
     "MoisBulkSyncResult",
     "MoisBulkJobResult",
+    "MoisIncrementalJobResult",
     "load_mois_license_features_bulk",
     "delete_mois_license_features_not_in",
     "sync_mois_license_features_bulk",
     "run_mois_license_bulk_job",
+    "load_mois_license_features_incremental",
+    "run_mois_license_incremental_job",
 ]
 
 
@@ -117,6 +128,23 @@ class MoisBulkJobResult:
     acquired: bool
     job: ImportJob | None = None
     sync: MoisBulkSyncResult | None = None
+
+
+@dataclass(frozen=True)
+class MoisIncrementalJobResult:
+    """``run_mois_license_incremental_job`` 결과 — 작업 추적 + 적재 + cursor.
+
+    - ``acquired`` — advisory lock 획득 여부. ``False``면 다른 워커가 적재 중이라
+      건너뜀(나머지 ``None``).
+    - ``job`` — 종료 상태의 ``ImportJob``. lock 미획득 시 ``None``.
+    - ``load`` — ``FeatureLoadResult``(upsert 카운트, snapshot prune 없음).
+    - ``sync_state`` — cursor 전진 후 ``SyncState``.
+    """
+
+    acquired: bool
+    job: ImportJob | None = None
+    load: FeatureLoadResult | None = None
+    sync_state: SyncState | None = None
 
 
 async def load_mois_license_features_bulk(
@@ -295,3 +323,102 @@ async def run_mois_license_bulk_job(
             raise
         finished = await finish_import_job(session, job.job_id, state="done")
         return MoisBulkJobResult(acquired=True, job=finished or job, sync=sync)
+
+
+# -- Step B: incremental(history) 적재 + cursor 전진 ----------------------
+
+
+async def load_mois_license_features_incremental(
+    session: AsyncSession,
+    records: Iterable[MoisLicensePlaceRecord],
+    *,
+    fetched_at: datetime,
+    dataset_key: str = DATASET_KEY_HISTORY,
+    reverse_geocoder: ReverseGeocoder | None = None,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+) -> FeatureLoadResult:
+    """증분(변경분) record를 batched upsert (Step B — **snapshot prune 없음**).
+
+    ``records``는 "지난 cursor 이후 변경된 record"만(호출자/provider가 cursor로
+    필터링)이어야 한다. 전체 snapshot이 아니므로 ``sync_*``의 soft-delete를 하지
+    않는다 — 증분에서 사라진 record를 비활성화하면 오삭제된다(폐업 처리는 Step C
+    ``mois_license_features_closed``의 책임). commit은 호출자 책임.
+    """
+    load_result = FeatureLoadResult()
+    for batch in _batched(records, batch_size):
+        bundles = await license_records_to_bundles(
+            batch,
+            fetched_at=fetched_at,
+            dataset_key=dataset_key,
+            reverse_geocoder=reverse_geocoder,
+        )
+        load_result = load_result.merge(await load_bundles(session, bundles))
+    return load_result
+
+
+async def run_mois_license_incremental_job(
+    session: AsyncSession,
+    records: Iterable[MoisLicensePlaceRecord],
+    *,
+    fetched_at: datetime,
+    new_cursor: dict[str, Any],
+    dataset_key: str = DATASET_KEY_HISTORY,
+    sync_scope: str = "default",
+    reverse_geocoder: ReverseGeocoder | None = None,
+    source_checksum: str | None = None,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+) -> MoisIncrementalJobResult:
+    """Step B 증분 적재를 advisory lock + import_jobs + cursor 전진으로 감싼다.
+
+    1. ``try_advisory_lock("import:python-mois-api:<dataset_key>")`` — 단일 워커
+       직렬화. 미획득 시 ``MoisIncrementalJobResult(acquired=False)``로 skip.
+    2. ``start_import_job`` — running 작업 row.
+    3. ``load_mois_license_features_incremental`` — batched upsert(prune 없음).
+    4. 성공: ``record_sync_success``로 cursor 전진(``new_cursor``) + ``done``.
+       예외: ``record_sync_failure``(cursor 미전진) + ``failed`` 후 re-raise.
+
+    ``new_cursor``는 이번 증분 이후 다음 시작 위치(예:
+    ``{"last_modified_date": "2026-06-01"}``) — provider/호출자가 결정(ADR-006).
+    **transaction 주의**: 본 함수는 한 ``session``에서 작업·데이터·cursor를 함께
+    수행한다. 호출자가 rollback하면 cursor 전진/failed 기록도 함께 사라진다.
+    """
+    async with try_advisory_lock(session, _bulk_advisory_key(dataset_key)) as acquired:
+        if not acquired:
+            return MoisIncrementalJobResult(acquired=False)
+        job = await start_import_job(
+            session,
+            kind=_INCREMENTAL_JOB_KIND,
+            payload={"dataset_key": dataset_key, "sync_scope": sync_scope},
+            source_checksum=source_checksum,
+        )
+        try:
+            load = await load_mois_license_features_incremental(
+                session,
+                records,
+                fetched_at=fetched_at,
+                dataset_key=dataset_key,
+                reverse_geocoder=reverse_geocoder,
+                batch_size=batch_size,
+            )
+        except Exception as exc:
+            await record_sync_failure(
+                session,
+                provider=PROVIDER_NAME,
+                dataset_key=dataset_key,
+                sync_scope=sync_scope,
+            )
+            await finish_import_job(
+                session, job.job_id, state="failed", error_message=str(exc)
+            )
+            raise
+        state = await record_sync_success(
+            session,
+            provider=PROVIDER_NAME,
+            dataset_key=dataset_key,
+            sync_scope=sync_scope,
+            cursor=new_cursor,
+        )
+        finished = await finish_import_job(session, job.job_id, state="done")
+        return MoisIncrementalJobResult(
+            acquired=True, job=finished or job, load=load, sync_state=state
+        )

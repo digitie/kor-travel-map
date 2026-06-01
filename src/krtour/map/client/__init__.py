@@ -54,11 +54,14 @@ from krtour.map.mois import DEFAULT_BATCH_SIZE as MOIS_DEFAULT_BATCH_SIZE
 from krtour.map.mois import (
     MoisBulkJobResult,
     MoisBulkSyncResult,
+    MoisIncrementalJobResult,
     load_mois_license_features_bulk,
     run_mois_license_bulk_job,
+    run_mois_license_incremental_job,
     sync_mois_license_features_bulk,
 )
 from krtour.map.providers.mois import DATASET_KEY_BULK as MOIS_DATASET_KEY_BULK
+from krtour.map.providers.mois import DATASET_KEY_HISTORY as MOIS_DATASET_KEY_HISTORY
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -219,6 +222,39 @@ class AsyncKrtourMapClient:
                 records,
                 fetched_at=fetched_at,
                 dataset_key=dataset_key,
+                reverse_geocoder=reverse_geocoder,
+                source_checksum=source_checksum,
+                batch_size=batch_size,
+            )
+
+    async def run_mois_license_incremental_job(
+        self,
+        records: Iterable[MoisLicensePlaceRecord],
+        *,
+        fetched_at: datetime,
+        new_cursor: dict[str, Any],
+        dataset_key: str = MOIS_DATASET_KEY_HISTORY,
+        sync_scope: str = "default",
+        reverse_geocoder: ReverseGeocoder | None = None,
+        source_checksum: str | None = None,
+        batch_size: int = MOIS_DEFAULT_BATCH_SIZE,
+    ) -> MoisIncrementalJobResult:
+        """MOIS Step B 증분 적재를 advisory lock + import_jobs + cursor 전진으로 실행.
+
+        ``records``는 "지난 cursor 이후 변경된" record만(호출자/provider가 필터링).
+        전체 snapshot이 아니므로 soft-delete(prune)하지 않는다. 성공 시
+        ``provider_sync_state``의 cursor를 ``new_cursor``로 전진시킨다. 단일 워커
+        직렬화(``acquired=False``면 skip). 한 transaction — 실패 시 데이터·cursor·
+        작업 기록이 함께 rollback된다.
+        """
+        async with self._session_factory() as session, session.begin():
+            return await run_mois_license_incremental_job(
+                session,
+                records,
+                fetched_at=fetched_at,
+                new_cursor=new_cursor,
+                dataset_key=dataset_key,
+                sync_scope=sync_scope,
                 reverse_geocoder=reverse_geocoder,
                 source_checksum=source_checksum,
                 batch_size=batch_size,
