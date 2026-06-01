@@ -53,6 +53,8 @@ __all__ = [
     "inactivate_features_by_source_entity_ids",
     "get_feature_row",
     "get_primary_source_detail",
+    "find_place_features_without_phone",
+    "set_feature_phones",
     "features_in_bbox",
 ]
 
@@ -581,6 +583,86 @@ async def get_primary_source_detail(
         if isinstance(value, str):
             data[col] = json.loads(value)
     return data
+
+
+_FIND_PLACE_NO_PHONE_SQL: Final[str] = """
+SELECT f.feature_id, f.name, f.address, sr.source_entity_id
+FROM feature.features f
+JOIN provider_sync.source_links sl
+  ON sl.feature_id = f.feature_id AND sl.is_primary_source
+JOIN provider_sync.source_records sr
+  ON sr.source_record_key = sl.source_record_key
+WHERE f.deleted_at IS NULL
+  AND f.kind = 'place'
+  AND sr.provider = :provider
+  AND sr.dataset_key = :dataset_key
+  AND sr.source_entity_type = :source_entity_type
+  AND jsonb_array_length(COALESCE(f.detail -> 'phones', '[]'::jsonb)) = 0
+ORDER BY f.feature_id
+LIMIT :limit
+"""
+
+_SET_FEATURE_PHONES_SQL: Final[str] = """
+UPDATE feature.features
+SET detail = jsonb_set(detail, '{phones}', CAST(:phones AS jsonb)),
+    updated_at = now()
+WHERE feature_id = :feature_id
+RETURNING feature_id
+"""
+
+
+async def find_place_features_without_phone(
+    session: AsyncSession,
+    *,
+    provider: str,
+    dataset_key: str,
+    source_entity_type: str,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """전화번호 없는 place feature 후보 list (phone enrichment 대상, 읽기 전용).
+
+    primary source가 ``(provider, dataset_key, source_entity_type)``인 place 중
+    ``detail.phones``가 빈 배열인 feature를 반환한다(`feature_id`/`name`/`address`/
+    `source_entity_id`). 외부 phone lookup(kakao/naver/google)은 호출자 책임(ADR-006).
+    """
+    import json
+
+    rows = (
+        await session.execute(
+            text(_FIND_PLACE_NO_PHONE_SQL),
+            {
+                "provider": provider,
+                "dataset_key": dataset_key,
+                "source_entity_type": source_entity_type,
+                "limit": limit,
+            },
+        )
+    ).mappings().all()
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        data = dict(row)
+        addr = data.get("address")
+        if isinstance(addr, str):
+            data["address"] = json.loads(addr)
+        out.append(data)
+    return out
+
+
+async def set_feature_phones(
+    session: AsyncSession, feature_id: str, phones: list[str]
+) -> bool:
+    """feature의 ``detail.phones`` 배열을 통째로 교체. 갱신되면 ``True``.
+
+    phone enrichment가 정규화·dedup·max3을 적용한 최종 배열을 넘긴다. commit은
+    호출자 책임.
+    """
+    import json
+
+    result = await session.execute(
+        text(_SET_FEATURE_PHONES_SQL),
+        {"feature_id": feature_id, "phones": json.dumps(phones)},
+    )
+    return result.first() is not None
 
 
 async def features_in_bbox(

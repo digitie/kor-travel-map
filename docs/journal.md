@@ -2,6 +2,30 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-01 (claude) — Sprint 4b: Place 전화번호 보강 (백그라운드 시작)
+
+**작업**: Place phone enrichment(SPRINT-4 §2.7) — 전화번호 없는 MOIS place 후보 발굴
++ 외부 lookup 결과 보강. 외부 API 호출은 ADR-006상 본 lib가 안 하고 호출자(백그라운드
+워커)가 주입.
+
+- **infra/feature_repo**: `find_place_features_without_phone`(detail.phones 빈 place
+  후보 조회, generic provider/dataset) + `set_feature_phones`(detail.phones JSONB
+  교체).
+- **enrichment.py(신규 top-level loader)**: `find_place_phone_candidates`(기본 MOIS
+  bulk) + `apply_place_phone_enrichment`(전화번호 정규화+자릿수≥9 검증+dedup+max3 →
+  detail.phones 갱신 + enrichment SourceRecord/SourceLink(role='enrichment',
+  is_primary_source=False) 적재). 무효/중복/초과/미존재 시 `applied=False`+reason.
+  `PhoneEnrichmentCandidate`/`PhoneEnrichmentResult`.
+- **client**: `find_place_phone_candidates`(read) + `enrich_place_phone`(write, 한
+  transaction).
+- 설계: `normalize_phone_number`는 숫자 부족 시 원본 반환(provenance) → enrichment는
+  품질 위해 자릿수<9를 invalid로 거른다.
+- **테스트**: integration 6(후보 발굴 phone 유무 분기 / 보강+link / 중복 skip /
+  무효 / 미존재 / max3).
+- **검증(WSL)**: ruff clean / mypy --strict 61 files / import-linter 4 kept / 전체
+  **835 passed**(829 → +6).
+- **다음**: Coverage 80% 완전 달성(Sprint 4b 마지막).
+
 ## 2026-06-01 (claude) — Sprint 4b: ADR-033 F4 정합성 검사 (dedup 백로그 baseline)
 
 **작업**: ADR-033 Phase 1에 **F4**(dedup_review_queue 미해소 백로그 baseline 초과
