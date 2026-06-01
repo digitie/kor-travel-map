@@ -2,6 +2,26 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-01 (claude) — MOIS Step A 실데이터 라이브 테스트
+
+**작업**: Sprint 4a MOIS 파이프라인을 행안부 LOCALDATA 실데이터로 end-to-end
+검증 (사용자 지시). 서비스키는 `F:\dev\python-krmois-api\.env`
+(`DATA_GO_KR_SERVICE_KEY`) — 단, 파일 다운로드 경로(`LocalDataFileClient`,
+`file.localdata.go.kr`)는 키 불필요.
+
+- **변환**: 4 PROMOTED 슬러그(bakeries/traditional_temples/public_baths/
+  museums_and_art_galleries) 실데이터 변환 — category/place_kind 매핑 docs §6.1과
+  100% 일치, 좌표 96~99% 보유(EPSG:5174→WGS84 mois 변환). EXCLUDED(pet_grooming)
+  영업중 200건 → 0건 skip.
+- **적재**: public_baths 300건 testcontainers PostGIS 적재 → 재조회 300, coord_5179
+  generated SRID=5179(ADR-012), source_records 300. alembic 0001~0006 적용.
+- **발견(데이터 정합성)**: 파일 다운로드 CSV에 법정동코드 컬럼 부재 →
+  `legal_dong_code` 전부 None → geocoder 미주입 시 `f_global_*` bucket. 본 lib는
+  좌표 reverse geocoding으로 보강 설계(ADR-009) — 운영 시 kraddr-geo geocoder 주입
+  필수. `opn_authority_code`는 bjd 미사용(payload만) 확인.
+- 상세: `docs/reports/mois-live-test-2026-06-01.md`. (geocoder 보강 실연동 +
+  OpenAPI 경로 법정동코드는 후속 — kraddr-geo REST 미기동.)
+
 ## 2026-06-01 (claude) — CLI mutex 첫 도입 (cli layer 신설, ADR-039)
 
 **작업**: SPRINT-4 §2.8 — `src/krtour/map/cli/` layer 신설 + advisory lock 기반
