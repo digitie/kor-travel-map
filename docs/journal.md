@@ -2,6 +2,27 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-01 (claude) — Sprint 4b: dedup 운영 FP 측정 도구 (queue accept/reject)
+
+**작업**: dedup_review_queue의 **운영자 결정** 누적분으로 실 false-positive율을
+집계하는 측정 도구. dedup-fp 리포트(대표 평가셋)의 운영 데이터 후속 — 큐가 채워지면
+실 FP율이 자동 측정된다.
+
+- **infra/status_repo**: `DedupQueueFpStats` + `dedup_fp_stats(by_status)` 순수
+  함수 — confirmed=merged+accepted(진짜 중복), FP=rejected, ignored·pending은 제외.
+  `precision=confirmed/resolved`, `fp_rate=rejected/resolved`(resolved=0이면 None).
+- **CLI**: `krtour-map status` 출력에 `dedup FP(운영)` 라인 추가 — 기존
+  `gather_status_counts`의 dedup_queue_by_status를 재사용(새 쿼리 없음). 검토 완료
+  후보 0이면 "검토 완료 후보 없음" 표시.
+- **리포트 연결**: `docs/reports/dedup-fp-measurement-2026-06-01.md` §6에 운영 측정
+  도구 경로 명시(대표 평가셋 → 실 운영 accept/reject 측정으로 이행).
+- **테스트**: unit 7(dedup_fp_stats 6 — empty/pending-only/merged+rejected/accepted/
+  ignored-제외/all-rejected + status 포맷 FP 라인 1).
+- **검증(WSL)**: ruff clean / mypy --strict 60 files / import-linter 4 kept / 전체
+  **826 passed**(819 → +7).
+- **Sprint 4b 3종(Step C / Step D / dedup 운영 FP 도구) 완료.** Step A~D 4단계
+  lifecycle + dedup 운영 측정까지 닫힘.
+
 ## 2026-06-01 (claude) — Sprint 4b: Step D on-demand 상세 라우터 (debug-ui)
 
 **작업**: MOIS Step D(`mois_license_detail`) — debug-ui `GET /debug/mois-license/

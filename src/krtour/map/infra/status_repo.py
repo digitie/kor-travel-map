@@ -20,7 +20,12 @@ from sqlalchemy import text
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
-__all__ = ["StatusCounts", "gather_status_counts"]
+__all__ = [
+    "StatusCounts",
+    "gather_status_counts",
+    "DedupQueueFpStats",
+    "dedup_fp_stats",
+]
 
 
 @dataclass(frozen=True)
@@ -34,6 +39,52 @@ class StatusCounts:
     source_records_by_provider: dict[str, int] = field(default_factory=dict)
     import_jobs_by_state: dict[str, int] = field(default_factory=dict)
     dedup_queue_by_status: dict[str, int] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class DedupQueueFpStats:
+    """dedup 검토 큐의 **운영자 결정** 기반 실 false-positive 통계 (ADR-016 후속).
+
+    `dedup-fp-measurement` 리포트(2026-06-01)의 대표 평가셋 측정을, 실제 운영자
+    accept/reject 누적분으로 교체하기 위한 측정 도구. 운영자가 `dedup-merge`로
+    병합(merged)하거나 accept한 후보는 **진짜 중복**(confirmed), reject한 후보는
+    **false positive**, ignore는 판단 불가(precision 계산 제외).
+
+    - ``resolved`` = confirmed + rejected (판단된 후보).
+    - ``precision`` = confirmed / resolved (운영 정밀도). resolved=0이면 None.
+    - ``fp_rate`` = rejected / resolved (운영 FP율). resolved=0이면 None.
+    """
+
+    resolved: int
+    confirmed: int
+    rejected: int
+    ignored: int
+    pending: int
+    precision: float | None
+    fp_rate: float | None
+
+
+def dedup_fp_stats(by_status: dict[str, int]) -> DedupQueueFpStats:
+    """dedup_review_queue status별 카운트 → 운영자 결정 기반 FP 통계.
+
+    confirmed = merged + accepted, false positive = rejected, ignored/pending은
+    precision 계산에서 제외. resolved(confirmed+rejected)=0이면 precision/fp_rate는
+    ``None``(아직 검토 완료 후보 없음).
+    """
+    confirmed = by_status.get("merged", 0) + by_status.get("accepted", 0)
+    rejected = by_status.get("rejected", 0)
+    resolved = confirmed + rejected
+    precision = (confirmed / resolved) if resolved else None
+    fp_rate = (rejected / resolved) if resolved else None
+    return DedupQueueFpStats(
+        resolved=resolved,
+        confirmed=confirmed,
+        rejected=rejected,
+        ignored=by_status.get("ignored", 0),
+        pending=by_status.get("pending", 0),
+        precision=precision,
+        fp_rate=fp_rate,
+    )
 
 
 _FEATURES_SQL: Final[str] = """

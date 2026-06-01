@@ -66,6 +66,20 @@ def test_format_status_full() -> None:
     assert "done=3" in out
     assert "running=1" in out
     assert "pending=5" in out
+    # 검토 완료 후보 없음 → FP율 미산출 라인.
+    assert "dedup FP(운영): 검토 완료 후보 없음" in out
+
+
+def test_format_status_dedup_fp_with_resolved() -> None:
+    counts = StatusCounts(
+        dedup_queue_by_status={"merged": 8, "rejected": 2, "pending": 3},
+    )
+    out = _format_status(counts)
+    assert "resolved=10" in out
+    assert "confirmed=8" in out
+    assert "rejected=2" in out
+    assert "precision=0.800" in out
+    assert "fp_rate=0.200" in out
 
 
 def test_format_status_empty() -> None:
@@ -75,6 +89,8 @@ def test_format_status_empty() -> None:
     # 비어있는 섹션은 생략.
     assert "by_provider" not in out
     assert "by_state" not in out
+    # dedup 큐 자체가 비면 FP 라인도 없음.
+    assert "dedup FP" not in out
 
 
 # ── import mois 서브명령 ────────────────────────────────────────────────
