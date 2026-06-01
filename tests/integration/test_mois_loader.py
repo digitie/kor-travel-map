@@ -18,7 +18,11 @@ import pytest
 from sqlalchemy import func, select, text
 
 from krtour.map.infra.models import FeatureRow, SourceLinkRow
-from krtour.map.mois import load_mois_license_features_bulk
+from krtour.map.mois import (
+    delete_mois_license_features_not_in,
+    load_mois_license_features_bulk,
+    sync_mois_license_features_bulk,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -181,3 +185,116 @@ async def test_loader_empty_when_all_skipped(migrated_session: AsyncSession) -> 
         )
     ).scalar_one()
     assert int(count) == 0
+
+
+async def _active_entity_ids(session: AsyncSession) -> set[str]:
+    rows = (
+        await session.execute(
+            text(
+                "SELECT sr.source_entity_id "
+                "FROM feature.features f "
+                "JOIN provider_sync.source_links sl ON sl.feature_id = f.feature_id "
+                "JOIN provider_sync.source_records sr "
+                "  ON sr.source_record_key = sl.source_record_key "
+                "WHERE f.deleted_at IS NULL AND sl.is_primary_source"
+            )
+        )
+    ).scalars().all()
+    return set(rows)
+
+
+async def test_delete_not_in_snapshot_soft_deletes_missing(
+    migrated_session: AsyncSession,
+) -> None:
+    # 1차 적재 — 3건.
+    first = [
+        _Record(service_slug="general_restaurants", mng_no="keep-1"),
+        _Record(service_slug="bakeries", mng_no="keep-2"),
+        _Record(service_slug="public_baths", mng_no="gone-3"),
+    ]
+    await load_mois_license_features_bulk(migrated_session, first, fetched_at=_FETCHED)
+    await migrated_session.flush()
+    assert await _active_entity_ids(migrated_session) == {
+        "general_restaurants::keep-1",
+        "bakeries::keep-2",
+        "public_baths::gone-3",
+    }
+
+    # snapshot에 keep-1/keep-2만 → gone-3 soft-delete.
+    snapshot = {"general_restaurants::keep-1", "bakeries::keep-2"}
+    deleted = await delete_mois_license_features_not_in(migrated_session, snapshot)
+    await migrated_session.flush()
+    assert deleted == 1
+    assert await _active_entity_ids(migrated_session) == snapshot
+
+    # 재호출 idempotent — 이미 비활성이므로 0건.
+    again = await delete_mois_license_features_not_in(migrated_session, snapshot)
+    assert again == 0
+
+    # deleted_at + status='inactive' 확인 (비활성 1건).
+    statuses = (
+        await migrated_session.execute(
+            text("SELECT status, deleted_at IS NOT NULL AS gone FROM feature.features")
+        )
+    ).all()
+    inactive = [s for s in statuses if s.status == "inactive"]
+    assert len(inactive) == 1
+    assert inactive[0].gone is True
+
+
+async def test_sync_bulk_loads_and_prunes_in_one_call(
+    migrated_session: AsyncSession,
+) -> None:
+    # 1차 snapshot — 2건.
+    await sync_mois_license_features_bulk(
+        migrated_session,
+        [
+            _Record(service_slug="general_restaurants", mng_no="a"),
+            _Record(service_slug="bakeries", mng_no="b"),
+        ],
+        fetched_at=_FETCHED,
+    )
+    await migrated_session.flush()
+    assert await _active_entity_ids(migrated_session) == {
+        "general_restaurants::a",
+        "bakeries::b",
+    }
+
+    # 2차 snapshot — a는 유지, b는 사라지고 c 신규 + EXCLUDED 1건(무시).
+    result = await sync_mois_license_features_bulk(
+        migrated_session,
+        [
+            _Record(service_slug="general_restaurants", mng_no="a"),
+            _Record(service_slug="public_baths", mng_no="c"),
+            _Record(service_slug="billiard_halls", mng_no="excluded"),
+        ],
+        fetched_at=_FETCHED,
+    )
+    await migrated_session.flush()
+    assert result.load.bundles_total == 2  # a(update) + c(insert)
+    assert result.deactivated == 1  # b
+    assert await _active_entity_ids(migrated_session) == {
+        "general_restaurants::a",
+        "public_baths::c",
+    }
+
+
+async def test_sync_bulk_empty_snapshot_deactivates_all(
+    migrated_session: AsyncSession,
+) -> None:
+    await sync_mois_license_features_bulk(
+        migrated_session,
+        [_Record(service_slug="bakeries", mng_no="solo")],
+        fetched_at=_FETCHED,
+    )
+    await migrated_session.flush()
+    assert await _active_entity_ids(migrated_session) == {"bakeries::solo"}
+
+    # 빈 snapshot(전부 폐업) → 모두 비활성화.
+    result = await sync_mois_license_features_bulk(
+        migrated_session, [], fetched_at=_FETCHED
+    )
+    await migrated_session.flush()
+    assert result.load.bundles_total == 0
+    assert result.deactivated == 1
+    assert await _active_entity_ids(migrated_session) == set()

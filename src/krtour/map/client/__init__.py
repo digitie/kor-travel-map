@@ -48,7 +48,11 @@ from krtour.map.infra.feature_repo import (
     get_feature_row,
     load_bundles,
 )
-from krtour.map.mois import load_mois_license_features_bulk
+from krtour.map.mois import (
+    MoisBulkSyncResult,
+    load_mois_license_features_bulk,
+    sync_mois_license_features_bulk,
+)
 from krtour.map.providers.mois import DATASET_KEY_BULK as MOIS_DATASET_KEY_BULK
 
 if TYPE_CHECKING:
@@ -145,10 +149,35 @@ class AsyncKrtourMapClient:
         PROMOTED 슬러그 / 영업중 record만 ``providers.mois``로 bundle화한 뒤
         idempotent upsert (``krtour.map.mois.load_mois_license_features_bulk``).
         EXCLUDED/미매핑/비영업 record는 변환 단계에서 skip. 하나라도 실패하면
-        전체 rollback. snapshot delete / advisory lock은 후속 PR (Sprint 4a §9).
+        전체 rollback. snapshot delete는 ``sync_mois_license_features_bulk``,
+        advisory lock은 후속 PR (Sprint 4a §9).
         """
         async with self._session_factory() as session, session.begin():
             return await load_mois_license_features_bulk(
+                session,
+                records,
+                fetched_at=fetched_at,
+                dataset_key=dataset_key,
+                reverse_geocoder=reverse_geocoder,
+            )
+
+    async def sync_mois_license_features_bulk(
+        self,
+        records: Iterable[MoisLicensePlaceRecord],
+        *,
+        fetched_at: datetime,
+        dataset_key: str = MOIS_DATASET_KEY_BULK,
+        reverse_geocoder: ReverseGeocoder | None = None,
+    ) -> MoisBulkSyncResult:
+        """MOIS 인허가 전체 snapshot 적재 + 부재 feature soft-delete (한 transaction).
+
+        ``records``는 **이번 전체 snapshot**(영업중 PROMOTED record)이어야 한다 —
+        변환 → upsert → snapshot에 없는 기존 feature를 ``status='inactive'``로
+        비활성화(ADR-017)까지 한 단위 of work로 수행한다. 하나라도 실패하면 전체
+        rollback. mois source DB cursor iterator는 후속 PR.
+        """
+        async with self._session_factory() as session, session.begin():
+            return await sync_mois_license_features_bulk(
                 session,
                 records,
                 fetched_at=fetched_at,
