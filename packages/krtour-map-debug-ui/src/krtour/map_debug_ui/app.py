@@ -29,6 +29,7 @@ from krtour.map_debug_ui.routers import (
     features_router,
     geocoding_router,
     health_router,
+    mois_detail_router,
     version_router,
 )
 from krtour.map_debug_ui.settings import DebugUiSettings
@@ -91,6 +92,9 @@ def create_app(settings: DebugUiSettings | None = None) -> FastAPI:
 
     if settings.features_routes_enabled:
         application.include_router(features_router)
+        # Step D on-demand 상세는 DB(적재된 raw_data) 필요 → features와 동일 gate.
+        if settings.debug_routes_enabled:
+            application.include_router(mois_detail_router)
 
     return application
 

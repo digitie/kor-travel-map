@@ -7,6 +7,12 @@
 
 ### Sprint 4 — 운영 CLI (2026-06-01~)
 
+- **NEW**: MOIS Step D on-demand 상세 — debug-ui `GET /debug/mois-license/{license_id}`.
+  적재된 MOIS feature의 원본 provider payload(`source_records.raw_data`) + feature
+  core를 조립해 반환하고 프로세스 내 TTL 캐시에 담는다(**캐시만, DB write 없음**).
+  `license_id` = `source_entity_id`(`{slug}::{mng_no}`). 신규
+  `infra.get_primary_source_detail`(읽기 전용 단건 조회) + `routers/mois_detail`.
+  미적재 시 404. `features_routes_enabled` + `debug_routes_enabled` gate.
 - **NEW**: MOIS Step C 폐업/취소 처리 — `krtour-map import mois <file> --mode closed
   --cursor <값>`. provider가 `closed`/`cancelled`로 통지한 인허가 record의 대응
   feature를 `status='inactive'`+`deleted_at`으로 전환한다(ADR-017 — place는 무기한

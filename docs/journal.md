@@ -2,6 +2,27 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-01 (claude) — Sprint 4b: Step D on-demand 상세 라우터 (debug-ui)
+
+**작업**: MOIS Step D(`mois_license_detail`) — debug-ui `GET /debug/mois-license/
+{license_id}`. 사용자 명시 트리거 단건 상세, **캐시만·적재 없음**(SPRINT-4 §2.1).
+
+- **infra**: `get_primary_source_detail`(읽기 전용) — `source_entity_id`로 primary
+  link 1건을 찾아 원본 provider payload(`source_records.raw_data`) + feature core를
+  조립. JSONB(address/detail/raw_data) 디시리얼라이즈. 없으면 None.
+- **debug-ui**: `routers/mois_detail.py` — `GET /debug/mois-license/{license_id}`
+  (license_id = `{slug}::{mng_no}`). 프로세스 내 TTL 캐시(300s, `clear_detail_cache`)
+  — 반복 클릭 시 재조회 회피, **DB write 없음**. 미적재 404. `MoisLicenseDetailResponse`
+  (cached 플래그 포함). app.py에 `features_routes_enabled`+`debug_routes_enabled` gate로
+  등록. openapi.json 재생성(drift EXIT=0).
+- ADR-006: provider 라이브러리 미import — on-demand fetch가 아니라 **적재된 raw_data
+  재사용**(MOIS는 DB-backed이라 public REST detail 없음). 운영 데이터 재조회만.
+- **테스트**: debug-ui unit 4(마운트/disable unmount/404/상세+캐시 히트) + main
+  integration 1(get_primary_source_detail round-trip + None). 
+- **검증(WSL)**: ruff clean / mypy --strict main 60 + debug-ui 13 / import-linter 4
+  kept / openapi drift EXIT=0 / main **819 passed** + debug-ui **117 passed**.
+- **다음**: dedup 운영 FP 측정 도구(queue accept/reject) — Sprint 4b 마지막 항목.
+
 ## 2026-06-01 (claude) — Sprint 4b: Step C 폐업/취소 처리 (feature inactive)
 
 **작업**: MOIS Step C(`mois_license_features_closed`) — provider가 폐업/취소 통지한

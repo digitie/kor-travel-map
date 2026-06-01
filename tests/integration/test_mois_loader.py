@@ -559,3 +559,53 @@ async def test_run_closed_job_tracks_and_advances_cursor(
     assert state is not None
     assert state.cursor == {"last_modified_date": "2026-06-03"}
     assert await _active_entity_ids(migrated_session) == set()
+
+
+# ── Step D: on-demand 상세 (get_primary_source_detail) ───────────────────
+
+
+async def test_primary_source_detail_round_trip(
+    migrated_session: AsyncSession,
+) -> None:
+    from krtour.map.infra.feature_repo import get_primary_source_detail
+    from krtour.map.providers.mois import DATASET_KEY_BULK as _BULK
+
+    await load_mois_license_features_bulk(
+        migrated_session,
+        [
+            _Record(
+                service_slug="general_restaurants",
+                mng_no="d1",
+                place_name="한식당 가나다",
+                lon=126.97,
+                lat=37.56,
+            )
+        ],
+        fetched_at=_FETCHED,
+    )
+    await migrated_session.flush()
+
+    detail = await get_primary_source_detail(
+        migrated_session,
+        provider=PROVIDER_NAME,
+        dataset_key=_BULK,
+        source_entity_type="license_place",
+        source_entity_id="general_restaurants::d1",
+    )
+    assert detail is not None
+    assert detail["name"] == "한식당 가나다"
+    assert detail["category"] == "02010100"
+    assert detail["status"] == "active"
+    # 원본 provider payload(raw_data) 보존 — dict로 디시리얼라이즈.
+    assert isinstance(detail["raw_data"], dict)
+    assert detail["raw_data"].get("mng_no") == "d1"
+
+    # 미적재 키 → None.
+    missing = await get_primary_source_detail(
+        migrated_session,
+        provider=PROVIDER_NAME,
+        dataset_key=_BULK,
+        source_entity_type="license_place",
+        source_entity_id="general_restaurants::never",
+    )
+    assert missing is None
