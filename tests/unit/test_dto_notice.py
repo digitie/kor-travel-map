@@ -9,7 +9,9 @@ from krtour.map.dto import (
     NOTICE_TYPE_ACCESS_RESTRICTION,
     NOTICE_TYPE_FIRE_ALERT,
     NOTICE_TYPE_HEAVY_RAIN,
+    NOTICE_TYPE_HEAVY_SNOW,
     NOTICE_TYPE_ROAD_CLOSURE,
+    NOTICE_TYPE_WEATHER_ALERT,
     NOTICE_TYPES,
     NoticeDetail,
     normalize_notice_type,
@@ -43,6 +45,19 @@ def test_normalize_notice_type_korean_aliases() -> None:
     assert normalize_notice_type("해수욕장폐장") == NOTICE_TYPE_ACCESS_RESTRICTION
     assert normalize_notice_type("산불경보") == NOTICE_TYPE_FIRE_ALERT
     assert normalize_notice_type("화재경보") == NOTICE_TYPE_FIRE_ALERT
+
+
+@pytest.mark.unit
+def test_normalize_notice_type_kma_weather_alerts() -> None:
+    """KMA 기상특보 13종 — base type 매핑 (실데이터 라이브 검증으로 보강)."""
+    # 전용 canonical 보유 종류
+    assert normalize_notice_type("호우") == NOTICE_TYPE_HEAVY_RAIN
+    assert normalize_notice_type("대설") == NOTICE_TYPE_HEAVY_SNOW
+    assert normalize_notice_type("대설경보") == NOTICE_TYPE_HEAVY_SNOW
+    # 전용 canonical 없는 종류 → generic weather_alert
+    for kind in ("강풍", "풍랑", "태풍", "건조", "한파", "폭풍해일", "황사"):
+        assert normalize_notice_type(kind) == NOTICE_TYPE_WEATHER_ALERT, kind
+    assert normalize_notice_type("weather_alert") == NOTICE_TYPE_WEATHER_ALERT
 
 
 @pytest.mark.unit

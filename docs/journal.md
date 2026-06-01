@@ -2,6 +2,24 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-01 (claude) — provider 다종 실데이터 라이브 적재 테스트 + notice alias 보강
+
+**작업**: geocoder v2 전환에 이어 kma/opinet/krforest 등 다른 provider DB 적재를
+실데이터로 검증(사용자 지시). 서비스키는 각 라이브러리 `.env`.
+
+- **결과**: opinet(유가 54, place 06020000) / krheritage(국가유산 12, place
+  01070100) / datagokr(축제 20, event 01000000) / kma(특보 7, notice 99000000)
+  4종 변환·적재·5179 generated 검증 ✅. krex는 upstream 라이브러리 파싱
+  에러(`entrpsNm` 필드명 미추종, ADR-044 provider 책임), krforest는 본 lib provider
+  모듈 미구현(ADR-034 Sprint 5)으로 제외.
+- **본 lib 수정(실데이터 발견)**: `dto/notice.py` `_ALIAS_MAP`에 KMA 기상특보 종류
+  추가 — `호우`/`대설`(base) → heavy_rain/heavy_snow, 전용 canonical 없는 7종
+  (`강풍`/`풍랑`/`태풍`/`건조`/`한파`/`폭풍해일`/`황사`) → generic `weather_alert`.
+  누락 시 `weather_alerts_to_notice_bundles`가 NoticeDetail ValidationError로 적재
+  실패하던 갭. unit test 1건 추가.
+- **검증(WSL)**: mypy --strict 57 / ruff All checks passed / import-linter 4 kept /
+  전체 **757 passed**. 상세: `docs/reports/provider-live-test-2026-06-01.md`.
+
 ## 2026-06-01 (claude) — geocoding kraddr-geo v1 → v2 전면 전환
 
 **작업**: 사용자 지시 — geocoder API를 v1(`GET /v1/address/*`, vworld level 파싱)

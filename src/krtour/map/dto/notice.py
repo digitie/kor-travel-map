@@ -82,15 +82,28 @@ NOTICE_TYPES: Final[tuple[str, ...]] = (
 # ── 한국어/영어 alias → canonical notice_type ────────────────────────────
 
 _ALIAS_MAP: Final[dict[str, str]] = {
-    # weather alerts
+    # weather alerts (base type + 주의보/경보 suffix 모두 매핑)
+    "호우": NOTICE_TYPE_HEAVY_RAIN,
     "호우주의보": NOTICE_TYPE_HEAVY_RAIN,
     "호우경보": NOTICE_TYPE_HEAVY_RAIN,
     "heavy_rain": NOTICE_TYPE_HEAVY_RAIN,
     "대설": NOTICE_TYPE_HEAVY_SNOW,
+    "대설주의보": NOTICE_TYPE_HEAVY_SNOW,
+    "대설경보": NOTICE_TYPE_HEAVY_SNOW,
     "폭설": NOTICE_TYPE_HEAVY_SNOW,
     "heavy_snow": NOTICE_TYPE_HEAVY_SNOW,
     "폭염": NOTICE_TYPE_HEAT_WAVE,
     "폭염주의보": NOTICE_TYPE_HEAT_WAVE,
+    # KMA 기상특보 13종 중 전용 canonical이 없는 종류 → generic weather_alert.
+    # (payload/title에 원문 특보명 보존. docs/notice-feature-etl.md §3 / ADR-027.)
+    "강풍": NOTICE_TYPE_WEATHER_ALERT,
+    "풍랑": NOTICE_TYPE_WEATHER_ALERT,
+    "태풍": NOTICE_TYPE_WEATHER_ALERT,
+    "건조": NOTICE_TYPE_WEATHER_ALERT,
+    "한파": NOTICE_TYPE_WEATHER_ALERT,
+    "폭풍해일": NOTICE_TYPE_WEATHER_ALERT,
+    "황사": NOTICE_TYPE_WEATHER_ALERT,
+    "weather_alert": NOTICE_TYPE_WEATHER_ALERT,
     "지진": NOTICE_TYPE_EARTHQUAKE,
     "earthquake": NOTICE_TYPE_EARTHQUAKE,
     "산사태": NOTICE_TYPE_LANDSLIDE,
