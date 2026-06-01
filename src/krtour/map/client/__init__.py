@@ -48,14 +48,19 @@ from krtour.map.infra.feature_repo import (
     get_feature_row,
     load_bundles,
 )
+from krtour.map.mois import load_mois_license_features_bulk
+from krtour.map.providers.mois import DATASET_KEY_BULK as MOIS_DATASET_KEY_BULK
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+    from datetime import datetime
 
     from sqlalchemy.ext.asyncio import AsyncEngine
 
     from krtour.map.core.dedup import DedupCandidate, DedupInput
     from krtour.map.dto import FeatureBundle
+    from krtour.map.geocoding import ReverseGeocoder
+    from krtour.map.providers.mois import MoisLicensePlaceRecord
     from krtour.map.settings import KrtourMapSettings
 
 __all__ = ["AsyncKrtourMapClient", "DedupSyncResult"]
@@ -126,6 +131,30 @@ class AsyncKrtourMapClient:
         """
         async with self._session_factory() as session, session.begin():
             return await load_bundles(session, bundles)
+
+    async def load_mois_license_features_bulk(
+        self,
+        records: Iterable[MoisLicensePlaceRecord],
+        *,
+        fetched_at: datetime,
+        dataset_key: str = MOIS_DATASET_KEY_BULK,
+        reverse_geocoder: ReverseGeocoder | None = None,
+    ) -> FeatureLoadResult:
+        """MOIS 인허가 ``PlaceRecord`` 묶음을 변환 → 적재 (한 transaction).
+
+        PROMOTED 슬러그 / 영업중 record만 ``providers.mois``로 bundle화한 뒤
+        idempotent upsert (``krtour.map.mois.load_mois_license_features_bulk``).
+        EXCLUDED/미매핑/비영업 record는 변환 단계에서 skip. 하나라도 실패하면
+        전체 rollback. snapshot delete / advisory lock은 후속 PR (Sprint 4a §9).
+        """
+        async with self._session_factory() as session, session.begin():
+            return await load_mois_license_features_bulk(
+                session,
+                records,
+                fetched_at=fetched_at,
+                dataset_key=dataset_key,
+                reverse_geocoder=reverse_geocoder,
+            )
 
     async def sync_dedup_candidates(
         self,
