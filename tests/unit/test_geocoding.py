@@ -2,16 +2,19 @@
 
 kraddr-geo를 import하지 않고:
 - 순수 변환 함수(``reverse_response_to_address``/``geocode_response_to_coordinate``)는
-  REST 응답 shape를 만족하는 fake dataclass로 검증.
+  REST v2 응답 shape(``CandidateV2``/``AddressV2``/``RegionV2``/``Point``)를 만족하는
+  fake dataclass로 검증.
 - ``KraddrGeoRestClient`` + 콜러블 팩토리는 ``httpx.MockTransport``로 실 HTTP 경로
-  (요청 params + JSON 파싱 + 변환)를 서버 없이 검증.
+  (``POST /v2/*`` JSON body + 응답 파싱 + 변환)를 서버 없이 검증.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass, field
 from decimal import Decimal
+from typing import Any
 
 import httpx
 import pytest
@@ -26,7 +29,9 @@ from krtour.map.geocoding import (
     reverse_response_to_address,
 )
 
-# -- kraddr-geo REST v2 응답 fake (structural) --------------------------------
+pytestmark = pytest.mark.unit
+
+# -- kraddr-geo REST v2 응답 fake (structural Protocol 만족) -------------------
 
 
 @dataclass(frozen=True)
@@ -36,61 +41,70 @@ class _Point:
 
 
 @dataclass(frozen=True)
-class _Struct:
-    level1: str | None = None
-    level2: str | None = None
-    level4L: str | None = None
-    level4LC: str | None = None
-    level4A: str | None = None
-    level4AC: str | None = None
-    level5: str | None = None
-    detail: str | None = None
+class _AddrV2:
+    full: str = ""
+    road_address: str | None = None
+    parcel_address: str | None = None
+    postal_code: str | None = None
+    legal_dong_code: str | None = None
+    admin_dong_code: str | None = None
+    road_name: str | None = None
+    road_name_code: str | None = None
 
 
 @dataclass(frozen=True)
-class _RevItem:
-    type: str
-    text: str
-    structure: _Struct
+class _RegionV2:
+    bjd_cd: str | None = None
+    sido: str | None = None
+    sigungu: str | None = None
+    legal_dong: str | None = None
+    admin_dong: str | None = None
+
+
+@dataclass(frozen=True)
+class _CandV2:
+    confidence: float = 0.0
+    match_kind: str = ""
+    address: _AddrV2 | None = None
     point: _Point | None = None
-    zipcode: str | None = None
     distance_m: float | None = None
+    region: _RegionV2 | None = None
 
 
 @dataclass(frozen=True)
 class _RevResp:
     status: str = "OK"
-    result: tuple[_RevItem, ...] = field(default_factory=tuple)
-
-
-@dataclass(frozen=True)
-class _GeoResult:
-    point: _Point
-
-
-@dataclass(frozen=True)
-class _GeoExt:
-    confidence: float = 1.0
-    bjd_cd: str | None = None
-    rncode_full: str | None = None
-    zip_no: str | None = None
+    candidates: tuple[_CandV2, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)
 class _GeoResp:
     status: str = "OK"
-    result: _GeoResult | None = None
-    x_extension: _GeoExt | None = None
+    candidates: tuple[_CandV2, ...] = field(default_factory=tuple)
 
 
-_FULL_STRUCT = _Struct(
-    level1="서울특별시",
-    level2="영등포구",
-    level4L="여의도동",
-    level4LC="1156010100",
-    level4A="여의동",
-    level4AC="1156051000",
-    level5="여의공원로",
+_FULL_ADDR_ROAD = _AddrV2(
+    full="서울특별시 영등포구 여의공원로 120",
+    road_address="서울특별시 영등포구 여의공원로 120",
+    postal_code="07237",
+    legal_dong_code="1156010100",
+    admin_dong_code="1156051000",
+    road_name="여의공원로",
+    road_name_code="115603122001",
+)
+_FULL_ADDR_PARCEL = _AddrV2(
+    full="서울특별시 영등포구 여의도동 8",
+    parcel_address="서울특별시 영등포구 여의도동 8",
+    postal_code="07237",
+    legal_dong_code="1156010100",
+    admin_dong_code="1156051000",
+)
+_FULL_REGION = _RegionV2(
+    bjd_cd="1156010100",
+    sido="서울특별시",
+    sigungu="영등포구",
+    legal_dong="여의도동",
+    admin_dong="여의동",
 )
 
 
@@ -99,20 +113,22 @@ _FULL_STRUCT = _Struct(
 
 def test_reverse_full_mapping() -> None:
     resp = _RevResp(
-        result=(
-            _RevItem(
-                type="road",
-                text="서울특별시 영등포구 여의공원로 120",
-                structure=_FULL_STRUCT,
-                zipcode="07237",
+        candidates=(
+            _CandV2(
+                confidence=0.66,
+                match_kind="road",
+                address=_FULL_ADDR_ROAD,
+                point=_Point(126.978, 37.567),
                 distance_m=5.0,
+                region=_FULL_REGION,
             ),
-            _RevItem(
-                type="parcel",
-                text="서울특별시 영등포구 여의도동 8",
-                structure=_FULL_STRUCT,
-                zipcode="07237",
+            _CandV2(
+                confidence=0.66,
+                match_kind="parcel",
+                address=_FULL_ADDR_PARCEL,
+                point=_Point(126.978, 37.567),
                 distance_m=6.0,
+                region=_FULL_REGION,
             ),
         ),
     )
@@ -128,13 +144,17 @@ def test_reverse_full_mapping() -> None:
     assert addr.zipcode == "07237"
     assert addr.sido_name == "서울특별시"
     assert addr.sigungu_name == "영등포구"
-    # reverse structure에는 도로명코드 없음.
-    assert addr.road_name_code is None
+    assert addr.road_name_code == "115603122001"
 
 
 def test_reverse_derives_codes_from_bjd() -> None:
     resp = _RevResp(
-        result=(_RevItem(type="parcel", text="x", structure=_Struct(level4LC="4117310200")),),
+        candidates=(
+            _CandV2(
+                match_kind="parcel",
+                address=_AddrV2(full="x", legal_dong_code="4117310200"),
+            ),
+        ),
     )
     addr = reverse_response_to_address(resp)
     assert addr is not None
@@ -143,32 +163,53 @@ def test_reverse_derives_codes_from_bjd() -> None:
     assert addr.sido_code == "41"
 
 
-def test_reverse_road_falls_back_to_level5() -> None:
-    # road 항목이 없으면 structure.level5(도로명)로 road 채움.
+def test_reverse_bjd_falls_back_to_region() -> None:
+    # address.legal_dong_code가 없으면 region.bjd_cd로 채움.
     resp = _RevResp(
-        result=(
-            _RevItem(type="parcel", text="지번주소", structure=_FULL_STRUCT, distance_m=3.0),
+        candidates=(
+            _CandV2(
+                match_kind="parcel",
+                address=_AddrV2(full="x"),
+                region=_RegionV2(bjd_cd="1156010100"),
+            ),
         ),
     )
     addr = reverse_response_to_address(resp)
     assert addr is not None
-    assert addr.legal == "지번주소"
-    assert addr.road == "여의공원로"  # level5 fallback
+    assert addr.bjd_code == "1156010100"
+
+
+def test_reverse_road_falls_back_to_full() -> None:
+    # road match candidate가 없으면 대표 candidate의 road_address(없으면 full)로 road 채움.
+    resp = _RevResp(
+        candidates=(
+            _CandV2(
+                match_kind="parcel",
+                address=_AddrV2(
+                    full="서울특별시 영등포구 여의도동 8",
+                    parcel_address="서울특별시 영등포구 여의도동 8",
+                ),
+                distance_m=3.0,
+            ),
+        ),
+    )
+    addr = reverse_response_to_address(resp)
+    assert addr is not None
+    assert addr.legal == "서울특별시 영등포구 여의도동 8"
+    assert addr.road == "서울특별시 영등포구 여의도동 8"  # full fallback
 
 
 def test_reverse_picks_closest_as_primary() -> None:
     resp = _RevResp(
-        result=(
-            _RevItem(
-                type="parcel",
-                text="가까움",
-                structure=_Struct(level4LC="1111010100"),
+        candidates=(
+            _CandV2(
+                match_kind="parcel",
+                address=_AddrV2(full="가까움", legal_dong_code="1111010100"),
                 distance_m=3.0,
             ),
-            _RevItem(
-                type="parcel",
-                text="멈",
-                structure=_Struct(level4LC="1156010100"),
+            _CandV2(
+                match_kind="parcel",
+                address=_AddrV2(full="멈", legal_dong_code="1156010100"),
                 distance_m=50.0,
             ),
         ),
@@ -178,11 +219,43 @@ def test_reverse_picks_closest_as_primary() -> None:
     assert addr.bjd_code == "1111010100"  # 최근접 항목이 대표
 
 
+def test_reverse_road_parcel_text_split() -> None:
+    # road candidate → road, parcel candidate → legal 로 분리 채움.
+    resp = _RevResp(
+        candidates=(
+            _CandV2(
+                match_kind="road",
+                address=_AddrV2(
+                    full="서울특별시 영등포구 여의공원로 120",
+                    road_address="서울특별시 영등포구 여의공원로 120",
+                    legal_dong_code="1156010100",
+                ),
+                distance_m=5.0,
+            ),
+            _CandV2(
+                match_kind="parcel",
+                address=_AddrV2(
+                    full="서울특별시 영등포구 여의도동 8",
+                    parcel_address="서울특별시 영등포구 여의도동 8",
+                    legal_dong_code="1156010100",
+                ),
+                distance_m=6.0,
+            ),
+        ),
+    )
+    addr = reverse_response_to_address(resp)
+    assert addr is not None
+    assert addr.road == "서울특별시 영등포구 여의공원로 120"
+    assert addr.legal == "서울특별시 영등포구 여의도동 8"
+
+
 def test_reverse_max_distance_filters_out() -> None:
     resp = _RevResp(
-        result=(
-            _RevItem(
-                type="parcel", text="far", structure=_FULL_STRUCT, distance_m=500.0
+        candidates=(
+            _CandV2(
+                match_kind="parcel",
+                address=_FULL_ADDR_PARCEL,
+                distance_m=500.0,
             ),
         ),
     )
@@ -192,23 +265,26 @@ def test_reverse_max_distance_filters_out() -> None:
 def test_reverse_non_ok_status_is_none() -> None:
     resp = _RevResp(
         status="NOT_FOUND",
-        result=(_RevItem(type="parcel", text="x", structure=_Struct()),),
+        candidates=(_CandV2(match_kind="parcel", address=_AddrV2(full="x")),),
     )
     assert reverse_response_to_address(resp) is None
 
 
-def test_reverse_empty_result_is_none() -> None:
+def test_reverse_empty_candidates_is_none() -> None:
     assert reverse_response_to_address(_RevResp()) is None
 
 
 def test_reverse_invalid_codes_dropped_not_raised() -> None:
     resp = _RevResp(
-        result=(
-            _RevItem(
-                type="parcel",
-                text="x",
-                structure=_Struct(level4LC="짧음", level4AC="999"),
-                zipcode="123",
+        candidates=(
+            _CandV2(
+                match_kind="parcel",
+                address=_AddrV2(
+                    full="x",
+                    legal_dong_code="짧음",
+                    admin_dong_code="999",
+                    postal_code="123",
+                ),
             ),
         ),
     )
@@ -217,21 +293,19 @@ def test_reverse_invalid_codes_dropped_not_raised() -> None:
     assert addr.bjd_code is None
     assert addr.sigungu_code is None
     assert addr.sido_code is None
-    assert addr.zipcode is None
-    assert addr.admin_dong_code is None
+    assert addr.zipcode is None  # 5자리 아님 → drop
+    assert addr.admin_dong_code is None  # 10자리 아님 → drop
 
 
 def test_reverse_bjd_value_error_is_caught() -> None:
-    """`normalize_bjd_code`는 비-10자리 입력에 ValueError raise — 이 raise가
-    `reverse_response_to_address`까지 새지 않도록 보장(graceful drop, PR#103
-    edge 회귀)."""
+    """``normalize_bjd_code``는 비-10자리 입력에 ValueError raise — 이 raise가
+    ``reverse_response_to_address``까지 새지 않도록 보장(graceful drop)."""
     resp = _RevResp(
-        result=(
-            _RevItem(
-                type="parcel",
-                text="x",
+        candidates=(
+            _CandV2(
+                match_kind="parcel",
                 # 숫자지만 비-10자리 — normalize_bjd_code가 ValueError raise.
-                structure=_Struct(level4LC="1234"),
+                address=_AddrV2(full="x", legal_dong_code="1234"),
             ),
         ),
     )
@@ -240,13 +314,28 @@ def test_reverse_bjd_value_error_is_caught() -> None:
     assert addr.bjd_code is None
     assert addr.sigungu_code is None
     assert addr.sido_code is None
+
+
+def test_reverse_zipcode_five_digit_filter() -> None:
+    resp = _RevResp(
+        candidates=(
+            _CandV2(
+                match_kind="parcel",
+                address=_AddrV2(full="x", postal_code="04520"),
+                distance_m=1.0,
+            ),
+        ),
+    )
+    addr = reverse_response_to_address(resp)
+    assert addr is not None
+    assert addr.zipcode == "04520"
 
 
 @pytest.mark.parametrize("bad_status", ["NOT_FOUND", "ERROR"])
 def test_reverse_handles_all_non_ok(bad_status: str) -> None:
     resp = _RevResp(
         status=bad_status,
-        result=(_RevItem(type="parcel", text="x", structure=_Struct()),),
+        candidates=(_CandV2(match_kind="parcel", address=_AddrV2(full="x")),),
     )
     assert reverse_response_to_address(resp) is None
 
@@ -256,8 +345,13 @@ def test_reverse_handles_all_non_ok(bad_status: str) -> None:
 
 def test_geocode_point_to_coordinate() -> None:
     resp = _GeoResp(
-        result=_GeoResult(point=_Point(x=127.05, y=37.55)),
-        x_extension=_GeoExt(confidence=0.9),
+        candidates=(
+            _CandV2(
+                confidence=0.9,
+                match_kind="road",
+                point=_Point(x=127.05, y=37.55),
+            ),
+        ),
     )
     coord = geocode_response_to_coordinate(resp)
     assert coord is not None
@@ -265,21 +359,43 @@ def test_geocode_point_to_coordinate() -> None:
     assert coord.lat == Decimal("37.55")
 
 
+def test_geocode_picks_max_confidence() -> None:
+    resp = _GeoResp(
+        candidates=(
+            _CandV2(confidence=0.4, match_kind="road", point=_Point(1.0, 1.0)),
+            _CandV2(confidence=0.95, match_kind="road", point=_Point(127.0, 37.0)),
+        ),
+    )
+    coord = geocode_response_to_coordinate(resp)
+    assert coord is not None
+    assert coord.lon == Decimal("127.0")
+    assert coord.lat == Decimal("37.0")
+
+
 def test_geocode_min_confidence_filters_out() -> None:
     resp = _GeoResp(
-        result=_GeoResult(point=_Point(127.0, 37.0)),
-        x_extension=_GeoExt(confidence=0.4),
+        candidates=(
+            _CandV2(confidence=0.4, match_kind="road", point=_Point(127.0, 37.0)),
+        ),
     )
     assert geocode_response_to_coordinate(resp, min_confidence=0.8) is None
 
 
 def test_geocode_non_ok_is_none() -> None:
-    resp = _GeoResp(status="ERROR", result=_GeoResult(point=_Point(1.0, 2.0)))
+    resp = _GeoResp(
+        status="ERROR",
+        candidates=(_CandV2(confidence=0.9, point=_Point(1.0, 2.0)),),
+    )
     assert geocode_response_to_coordinate(resp) is None
 
 
-def test_geocode_no_result_is_none() -> None:
-    assert geocode_response_to_coordinate(_GeoResp(status="OK", result=None)) is None
+def test_geocode_no_candidates_is_none() -> None:
+    assert geocode_response_to_coordinate(_GeoResp(status="OK")) is None
+
+
+def test_geocode_no_point_is_none() -> None:
+    resp = _GeoResp(candidates=(_CandV2(confidence=0.9, match_kind="road"),))
+    assert geocode_response_to_coordinate(resp) is None
 
 
 # -- KraddrGeoRestClient + 콜러블 팩토리 (httpx.MockTransport) -----------------
@@ -292,23 +408,35 @@ def _mock_client(handler: object) -> httpx.AsyncClient:
     )
 
 
+def _body(request: httpx.Request) -> dict[str, Any]:
+    parsed: dict[str, Any] = json.loads(request.content.decode())
+    return parsed
+
+
 def test_rest_reverse_geocoder_hits_endpoint() -> None:
-    seen: list[httpx.QueryParams] = []
+    seen: list[dict[str, Any]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        seen.append(request.url.params)
-        assert request.url.path == "/v1/address/reverse"
+        seen.append(_body(request))
+        assert request.method == "POST"
+        assert request.url.path == "/v2/reverse"
         return httpx.Response(
             200,
             json={
                 "status": "OK",
-                "result": [
+                "candidates": [
                     {
-                        "type": "parcel",
-                        "text": "서울특별시 영등포구 여의도동 8",
-                        "structure": {"level1": "서울특별시", "level4LC": "1156010100"},
-                        "zipcode": "07237",
+                        "confidence": 0.66,
+                        "match_kind": "parcel",
+                        "address": {
+                            "full": "서울특별시 영등포구 여의도동 8",
+                            "parcel_address": "서울특별시 영등포구 여의도동 8",
+                            "postal_code": "07237",
+                            "legal_dong_code": "1156010100",
+                        },
+                        "point": {"x": 126.924, "y": 37.526},
                         "distance_m": 5.0,
+                        "region": {"bjd_cd": "1156010100"},
                     }
                 ],
             },
@@ -316,31 +444,43 @@ def test_rest_reverse_geocoder_hits_endpoint() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            reverse = kraddr_geo_reverse_geocoder(KraddrGeoRestClient(http), radius_m=100)
-            addr = await reverse(Coordinate(lon=Decimal("126.924"), lat=Decimal("37.526")))
+            reverse = kraddr_geo_reverse_geocoder(
+                KraddrGeoRestClient(http), radius_m=100
+            )
+            addr = await reverse(
+                Coordinate(lon=Decimal("126.924"), lat=Decimal("37.526"))
+            )
             assert addr is not None
             assert addr.bjd_code == "1156010100"
             assert addr.zipcode == "07237"
 
     asyncio.run(_run())
-    assert seen[0].get("x") == "126.924"
-    assert seen[0].get("y") == "37.526"
-    assert seen[0].get("radius_m") == "100"
-    assert seen[0].get("type") == "both"
+    body = seen[0]
+    assert body["lon"] == 126.924
+    assert body["lat"] == 37.526
+    assert body["radius_m"] == 100
+    assert body["include_region"] is True
+    assert body["include_zipcode"] is True
 
 
 def test_rest_address_geocoder_hits_endpoint() -> None:
-    seen: list[httpx.QueryParams] = []
+    seen: list[dict[str, Any]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        seen.append(request.url.params)
-        assert request.url.path == "/v1/address/geocode"
+        seen.append(_body(request))
+        assert request.method == "POST"
+        assert request.url.path == "/v2/geocode"
         return httpx.Response(
             200,
             json={
                 "status": "OK",
-                "result": {"crs": "EPSG:4326", "point": {"x": 127.1, "y": 37.4}},
-                "x_extension": {"confidence": 0.95, "bjd_cd": "1156010100"},
+                "candidates": [
+                    {
+                        "confidence": 0.9,
+                        "match_kind": "road",
+                        "point": {"x": 127.1, "y": 37.4},
+                    }
+                ],
             },
         )
 
@@ -348,25 +488,38 @@ def test_rest_address_geocoder_hits_endpoint() -> None:
         async with _mock_client(handler) as http:
             geocode = kraddr_geo_address_geocoder(KraddrGeoRestClient(http))
             coord = await geocode(
-                Address(road="서울특별시 영등포구 여의공원로 120", bjd_code="1156010100")
+                Address(
+                    road="서울특별시 영등포구 여의공원로 120", bjd_code="1156010100"
+                )
             )
             assert coord is not None
             assert coord.lon == Decimal("127.1")
             assert coord.lat == Decimal("37.4")
 
     asyncio.run(_run())
-    assert seen[0].get("address") == "서울특별시 영등포구 여의공원로 120"
-    assert seen[0].get("type") == "road"
+    body = seen[0]
+    assert body["road_address"] == "서울특별시 영등포구 여의공원로 120"
+    assert "jibun_address" not in body
+    assert body["fallback"] == "none"
 
 
 def test_rest_address_geocoder_uses_parcel_when_no_road() -> None:
-    seen: list[httpx.QueryParams] = []
+    seen: list[dict[str, Any]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        seen.append(request.url.params)
+        seen.append(_body(request))
         return httpx.Response(
             200,
-            json={"status": "OK", "result": {"point": {"x": 127.0, "y": 37.0}}},
+            json={
+                "status": "OK",
+                "candidates": [
+                    {
+                        "confidence": 0.9,
+                        "match_kind": "parcel",
+                        "point": {"x": 127.0, "y": 37.0},
+                    }
+                ],
+            },
         )
 
     async def _run() -> None:
@@ -376,8 +529,9 @@ def test_rest_address_geocoder_uses_parcel_when_no_road() -> None:
             assert coord is not None
 
     asyncio.run(_run())
-    assert seen[0].get("type") == "parcel"
-    assert seen[0].get("address") == "서울특별시 영등포구 여의도동 8"
+    body = seen[0]
+    assert body["jibun_address"] == "서울특별시 영등포구 여의도동 8"
+    assert "road_address" not in body
 
 
 def test_address_geocoder_returns_none_without_query() -> None:
@@ -394,42 +548,45 @@ def test_address_geocoder_returns_none_without_query() -> None:
 
 def test_rest_geocoder_returns_none_on_not_found() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"status": "NOT_FOUND"})
+        return httpx.Response(200, json={"status": "NOT_FOUND", "candidates": []})
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
             client = KraddrGeoRestClient(http)
             reverse = kraddr_geo_reverse_geocoder(client)
             geocode = kraddr_geo_address_geocoder(client)
-            assert await reverse(Coordinate(lon=Decimal("127"), lat=Decimal("37"))) is None
-            assert await geocode(Address(road="아무 도로 1")) is None
+            rev = await reverse(
+                Coordinate(lon=Decimal("127"), lat=Decimal("37"))
+            )
+            geo = await geocode(Address(road="아무 도로 1"))
+            assert rev is None
+            assert geo is None
 
     asyncio.run(_run())
 
 
-# -- KraddrGeoRestClient 세부 동작 (K 영역 회귀) -------------------------------
+# -- KraddrGeoRestClient 세부 동작 (wire-level 회귀) ---------------------------
 #
-# base_path/쿼리 직렬화/예외 전파 등 client 내부 동작은 통합 e2e만으로는
-# 회귀 검출이 어렵다 — httpx.MockTransport로 wire-level 동작을 고정한다.
+# base_path/JSON body/예외 전파 등 client 내부 동작은 통합 e2e만으로는 회귀
+# 검출이 어렵다 — httpx.MockTransport로 wire-level 동작을 고정한다.
 
 
 def test_rest_client_base_path_trailing_slash_stripped() -> None:
-    """base_path="/v1/" (끝 슬래시) → 내부에서 정규화 후 "/v1/address/..."."""
+    """base_path="/v2/" (끝 슬래시) → 내부에서 정규화 후 "/v2/...". 슬래시 중복 없음."""
     seen: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request.url.path)
-        return httpx.Response(200, json={"status": "OK", "result": []})
+        return httpx.Response(200, json={"status": "OK", "candidates": []})
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            client = KraddrGeoRestClient(http, base_path="/v1/")
+            client = KraddrGeoRestClient(http, base_path="/v2/")
             await client.reverse(127.0, 37.0)
             await client.geocode("서울특별시 중구 세종대로 110")
 
     asyncio.run(_run())
-    # 슬래시 중복 없음 — "/v1//address/..." 되면 일부 ASGI는 404.
-    assert seen == ["/v1/address/reverse", "/v1/address/geocode"]
+    assert seen == ["/v2/reverse", "/v2/geocode"]
 
 
 def test_rest_client_custom_base_path() -> None:
@@ -438,7 +595,7 @@ def test_rest_client_custom_base_path() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request.url.path)
-        return httpx.Response(200, json={"status": "OK", "result": []})
+        return httpx.Response(200, json={"status": "OK", "candidates": []})
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
@@ -446,16 +603,16 @@ def test_rest_client_custom_base_path() -> None:
             await client.reverse(127.0, 37.0)
 
     asyncio.run(_run())
-    assert seen == ["/api/v2/address/reverse"]
+    assert seen == ["/api/v2/reverse"]
 
 
-def test_rest_client_reverse_radius_m_none_omits_param() -> None:
-    """radius_m=None (기본) → 쿼리에서 키 자체 누락 — upstream 기본값 따름."""
-    seen: list[httpx.QueryParams] = []
+def test_rest_client_reverse_radius_m_none_omits_key() -> None:
+    """radius_m=None (기본) → JSON body에서 키 자체 누락 — upstream 기본값 따름."""
+    seen: list[dict[str, Any]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        seen.append(request.url.params)
-        return httpx.Response(200, json={"status": "OK", "result": []})
+        seen.append(_body(request))
+        return httpx.Response(200, json={"status": "OK", "candidates": []})
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
@@ -466,16 +623,13 @@ def test_rest_client_reverse_radius_m_none_omits_param() -> None:
     assert "radius_m" not in seen[0]
 
 
-def test_rest_client_reverse_zipcode_default_true_lower() -> None:
-    """zipcode=True (기본) → "true" (소문자).
-
-    httpx는 bool을 "True"로 직렬화 — `str().lower()` 보장이 필요.
-    """
-    seen: list[httpx.QueryParams] = []
+def test_rest_client_reverse_include_flags_default_true() -> None:
+    """include_region/include_zipcode 기본 True가 JSON body bool로 직렬화."""
+    seen: list[dict[str, Any]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        seen.append(request.url.params)
-        return httpx.Response(200, json={"status": "OK", "result": []})
+        seen.append(_body(request))
+        return httpx.Response(200, json={"status": "OK", "candidates": []})
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
@@ -483,86 +637,73 @@ def test_rest_client_reverse_zipcode_default_true_lower() -> None:
             await client.reverse(127.0, 37.0)
 
     asyncio.run(_run())
-    assert seen[0].get("zipcode") == "true"
+    body = seen[0]
+    assert body["include_region"] is True
+    assert body["include_zipcode"] is True
 
 
-def test_rest_client_reverse_zipcode_false_lower() -> None:
-    """zipcode=False → "false"."""
-    seen: list[httpx.QueryParams] = []
+def test_rest_client_reverse_include_flags_false() -> None:
+    """include_region/include_zipcode=False가 JSON body에 그대로 반영."""
+    seen: list[dict[str, Any]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        seen.append(request.url.params)
-        return httpx.Response(200, json={"status": "OK", "result": []})
+        seen.append(_body(request))
+        return httpx.Response(200, json={"status": "OK", "candidates": []})
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
             client = KraddrGeoRestClient(http)
-            await client.reverse(127.0, 37.0, zipcode=False)
+            await client.reverse(
+                127.0, 37.0, include_region=False, include_zipcode=False
+            )
 
     asyncio.run(_run())
-    assert seen[0].get("zipcode") == "false"
+    body = seen[0]
+    assert body["include_region"] is False
+    assert body["include_zipcode"] is False
 
 
-@pytest.mark.parametrize("type_", ["both", "road", "parcel"])
-def test_rest_client_reverse_type_param(type_: str) -> None:
-    """type_ 인자가 쿼리 `type`로 그대로 전달."""
-    seen: list[httpx.QueryParams] = []
+@pytest.mark.parametrize(
+    ("type_", "key"),
+    [("road", "road_address"), ("parcel", "jibun_address")],
+)
+def test_rest_client_geocode_type_selects_body_key(type_: str, key: str) -> None:
+    """type_="road" → road_address, type_="parcel" → jibun_address 필드로 보냄."""
+    seen: list[dict[str, Any]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        seen.append(request.url.params)
-        return httpx.Response(200, json={"status": "OK", "result": []})
+        seen.append(_body(request))
+        return httpx.Response(
+            200,
+            json={
+                "status": "OK",
+                "candidates": [{"confidence": 1.0, "point": {"x": 1, "y": 1}}],
+            },
+        )
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
             client = KraddrGeoRestClient(http)
-            await client.reverse(127.0, 37.0, type_=type_)  # type: ignore[arg-type]
+            await client.geocode("addr", type_=type_)  # type: ignore[arg-type]
 
     asyncio.run(_run())
-    assert seen[0].get("type") == type_
+    assert seen[0][key] == "addr"
 
 
-def test_rest_client_geocode_refine_default_true_lower() -> None:
-    """refine=True (기본) → "true"."""
-    seen: list[httpx.QueryParams] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen.append(request.url.params)
-        return httpx.Response(200, json={"status": "OK", "result": {"point": {"x": 1, "y": 1}}})
-
-    async def _run() -> None:
-        async with _mock_client(handler) as http:
-            client = KraddrGeoRestClient(http)
-            await client.geocode("addr")
-
-    asyncio.run(_run())
-    assert seen[0].get("refine") == "true"
-
-
-def test_rest_client_geocode_refine_false_lower() -> None:
-    """refine=False → "false"."""
-    seen: list[httpx.QueryParams] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen.append(request.url.params)
-        return httpx.Response(200, json={"status": "OK", "result": {"point": {"x": 1, "y": 1}}})
-
-    async def _run() -> None:
-        async with _mock_client(handler) as http:
-            client = KraddrGeoRestClient(http)
-            await client.geocode("addr", refine=False)
-
-    asyncio.run(_run())
-    assert seen[0].get("refine") == "false"
-
-
-@pytest.mark.parametrize("fallback", ["off", "local_only", "api"])
+@pytest.mark.parametrize("fallback", ["none", "api"])
 def test_rest_client_geocode_fallback_passes_through(fallback: str) -> None:
-    """fallback 인자가 쿼리 `fallback`로 그대로 전달."""
-    seen: list[httpx.QueryParams] = []
+    """fallback 인자가 JSON body `fallback`로 그대로 전달."""
+    seen: list[dict[str, Any]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        seen.append(request.url.params)
-        return httpx.Response(200, json={"status": "OK", "result": {"point": {"x": 1, "y": 1}}})
+        seen.append(_body(request))
+        return httpx.Response(
+            200,
+            json={
+                "status": "OK",
+                "candidates": [{"confidence": 1.0, "point": {"x": 1, "y": 1}}],
+            },
+        )
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
@@ -570,11 +711,12 @@ def test_rest_client_geocode_fallback_passes_through(fallback: str) -> None:
             await client.geocode("addr", fallback=fallback)  # type: ignore[arg-type]
 
     asyncio.run(_run())
-    assert seen[0].get("fallback") == fallback
+    assert seen[0]["fallback"] == fallback
 
 
 def test_rest_client_reverse_raises_on_http_500() -> None:
-    """upstream 500 → httpx.HTTPStatusError 전파 (raise_for_status). caller가 retry/skip 책임."""
+    """upstream 500 → httpx.HTTPStatusError 전파 (raise_for_status)."""
+
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500, json={"detail": "upstream broken"})
 
@@ -589,6 +731,7 @@ def test_rest_client_reverse_raises_on_http_500() -> None:
 
 def test_rest_client_geocode_raises_on_http_502() -> None:
     """upstream 502 (bad gateway) → 전파."""
+
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(502)
 
@@ -603,16 +746,20 @@ def test_rest_client_geocode_raises_on_http_502() -> None:
 
 def test_kraddr_geo_reverse_geocoder_max_distance_filters() -> None:
     """팩토리 인자 `max_distance_m`가 변환 함수에 그대로 전달돼 멀리 있는 결과 drop."""
+
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
             json={
                 "status": "OK",
-                "result": [
+                "candidates": [
                     {
-                        "type": "parcel",
-                        "text": "멀리 떨어진 좌표",
-                        "structure": {"level4LC": "1156010100"},
+                        "confidence": 0.66,
+                        "match_kind": "parcel",
+                        "address": {
+                            "full": "멀리 떨어진 좌표",
+                            "legal_dong_code": "1156010100",
+                        },
                         "distance_m": 800.0,
                     }
                 ],
@@ -624,9 +771,14 @@ def test_kraddr_geo_reverse_geocoder_max_distance_filters() -> None:
             client = KraddrGeoRestClient(http)
             # 100m 안쪽만 받아들임 — 800m 결과는 drop.
             reverse = kraddr_geo_reverse_geocoder(client, max_distance_m=100.0)
-            assert await reverse(Coordinate(lon=Decimal("127"), lat=Decimal("37"))) is None
-            # 없으면 1000m로 — 받아들임.
-            reverse_relaxed = kraddr_geo_reverse_geocoder(client, max_distance_m=1000.0)
+            dropped = await reverse(
+                Coordinate(lon=Decimal("127"), lat=Decimal("37"))
+            )
+            assert dropped is None
+            # 1000m로 완화 — 받아들임.
+            reverse_relaxed = kraddr_geo_reverse_geocoder(
+                client, max_distance_m=1000.0
+            )
             addr = await reverse_relaxed(
                 Coordinate(lon=Decimal("127"), lat=Decimal("37"))
             )
@@ -638,13 +790,19 @@ def test_kraddr_geo_reverse_geocoder_max_distance_filters() -> None:
 
 def test_kraddr_geo_address_geocoder_min_confidence_via_wrapper() -> None:
     """팩토리 인자 `min_confidence`가 변환 함수에 그대로 전달 — 신뢰도 낮은 결과 drop."""
+
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
             json={
                 "status": "OK",
-                "result": {"point": {"x": 127.0, "y": 37.0}},
-                "x_extension": {"confidence": 0.3},
+                "candidates": [
+                    {
+                        "confidence": 0.3,
+                        "match_kind": "road",
+                        "point": {"x": 127.0, "y": 37.0},
+                    }
+                ],
             },
         )
 
@@ -661,40 +819,28 @@ def test_kraddr_geo_address_geocoder_min_confidence_via_wrapper() -> None:
     asyncio.run(_run())
 
 
-def test_kraddr_geo_reverse_geocoder_type_road_passed() -> None:
-    """팩토리 인자 `type_="road"`가 client.reverse `type` 쿼리로 전달."""
-    seen: list[httpx.QueryParams] = []
+def test_kraddr_geo_address_geocoder_fallback_passed() -> None:
+    """팩토리 인자 `fallback="api"`가 client.geocode JSON body `fallback`로 전달."""
+    seen: list[dict[str, Any]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        seen.append(request.url.params)
-        return httpx.Response(200, json={"status": "OK", "result": []})
+        seen.append(_body(request))
+        return httpx.Response(
+            200,
+            json={
+                "status": "OK",
+                "candidates": [{"confidence": 1.0, "point": {"x": 1, "y": 1}}],
+            },
+        )
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
             client = KraddrGeoRestClient(http)
-            reverse = kraddr_geo_reverse_geocoder(client, type_="road")
-            await reverse(Coordinate(lon=Decimal("127"), lat=Decimal("37")))
-
-    asyncio.run(_run())
-    assert seen[0].get("type") == "road"
-
-
-def test_kraddr_geo_address_geocoder_fallback_off_passed() -> None:
-    """팩토리 인자 `fallback="off"`가 client.geocode `fallback` 쿼리로 전달."""
-    seen: list[httpx.QueryParams] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen.append(request.url.params)
-        return httpx.Response(200, json={"status": "OK", "result": {"point": {"x": 1, "y": 1}}})
-
-    async def _run() -> None:
-        async with _mock_client(handler) as http:
-            client = KraddrGeoRestClient(http)
-            geocode = kraddr_geo_address_geocoder(client, fallback="off")
+            geocode = kraddr_geo_address_geocoder(client, fallback="api")
             await geocode(Address(road="아무 도로 1"))
 
     asyncio.run(_run())
-    assert seen[0].get("fallback") == "off"
+    assert seen[0]["fallback"] == "api"
 
 
 # -- cached_reverse_geocoder --------------------------------------------------
@@ -711,7 +857,7 @@ def test_cached_reverse_geocoder_dedupes_by_coord() -> None:
 
     async def _run() -> None:
         c1 = Coordinate(lon=Decimal("127.0000001"), lat=Decimal("37.5000001"))
-        c2 = Coordinate(lon=Decimal("127.0000002"), lat=Decimal("37.5000002"))  # 6자리 동일
+        c2 = Coordinate(lon=Decimal("127.0000002"), lat=Decimal("37.5000002"))
         c3 = Coordinate(lon=Decimal("128.0"), lat=Decimal("38.0"))
         a1 = await cached(c1)
         a2 = await cached(c2)
@@ -737,8 +883,10 @@ def test_cached_reverse_geocoder_caches_none() -> None:
 
     async def _run() -> None:
         c = Coordinate(lon=Decimal("127.0"), lat=Decimal("37.5"))
-        assert await cached(c) is None
-        assert await cached(c) is None  # None도 캐싱 — 재시도 안 함
+        first = await cached(c)
+        second = await cached(c)  # None도 캐싱 — 재시도 안 함
+        assert first is None
+        assert second is None
 
     asyncio.run(_run())
     assert calls == 1
