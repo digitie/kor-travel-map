@@ -7,6 +7,13 @@
 
 ### Sprint 4 — 운영 CLI (2026-06-01~)
 
+- **NEW**: Place 전화번호 보강(`krtour.map.enrichment`, Sprint 4b 백그라운드 시작) —
+  전화번호 없는 MOIS place 후보 발굴(`find_place_phone_candidates`) + 외부 lookup
+  결과 보강(`apply_place_phone_enrichment` — `detail.phones` 정규화·dedup·max3 갱신 +
+  `source_links(role='enrichment')` 이력). 외부 API(kakao/naver/google) 호출은 호출자
+  책임(ADR-006 — 결과 주입). `AsyncKrtourMapClient.find_place_phone_candidates` /
+  `enrich_place_phone` + `infra.feature_repo.{find_place_features_without_phone,
+  set_feature_phones}`.
 - **NEW**: ADR-033 **F4** 정합성 검사 — `infra.consistency`에 dedup 백로그 baseline
   체크 추가. `ops.dedup_review_queue` 미해소(pending) 수가
   `DEDUP_PENDING_WARN_THRESHOLD`(provisional 1000, `run_consistency_checks(...,

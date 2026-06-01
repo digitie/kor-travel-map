@@ -36,6 +36,12 @@ from types import TracebackType
 from typing import TYPE_CHECKING, Any
 
 from krtour.map.core.dedup import find_dedup_candidates, find_sibling_candidates
+from krtour.map.enrichment import (
+    PhoneEnrichmentCandidate,
+    PhoneEnrichmentResult,
+    apply_place_phone_enrichment,
+    find_place_phone_candidates,
+)
 from krtour.map.infra.db import make_async_session_factory
 from krtour.map.infra.dedup_repo import (
     DedupQueueResult,
@@ -64,6 +70,7 @@ from krtour.map.mois import (
 )
 from krtour.map.providers.mois import DATASET_KEY_BULK as MOIS_DATASET_KEY_BULK
 from krtour.map.providers.mois import DATASET_KEY_HISTORY as MOIS_DATASET_KEY_HISTORY
+from krtour.map.providers.mois import PROVIDER_NAME as MOIS_PROVIDER_NAME
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -287,6 +294,46 @@ class AsyncKrtourMapClient:
                 target_dataset_key=target_dataset_key,
                 sync_scope=sync_scope,
                 source_checksum=source_checksum,
+            )
+
+    async def find_place_phone_candidates(
+        self,
+        *,
+        provider: str = MOIS_PROVIDER_NAME,
+        dataset_key: str = MOIS_DATASET_KEY_BULK,
+        limit: int = 100,
+    ) -> list[PhoneEnrichmentCandidate]:
+        """전화번호 없는 place feature 후보 (phone enrichment 대상, 읽기 전용).
+
+        외부 phone lookup(kakao/naver/google)은 호출자(백그라운드 워커) 책임(ADR-006).
+        """
+        async with self._session_factory() as session:
+            return await find_place_phone_candidates(
+                session, provider=provider, dataset_key=dataset_key, limit=limit
+            )
+
+    async def enrich_place_phone(
+        self,
+        *,
+        feature_id: str,
+        phone: str,
+        enrichment_provider: str,
+        source_entity_id: str,
+        fetched_at: datetime,
+    ) -> PhoneEnrichmentResult:
+        """외부 lookup 전화번호를 feature에 보강 (detail.phones + enrichment 이력).
+
+        정규화·dedup·max3 적용 후 ``detail.phones`` 갱신 + ``source_links(role=
+        'enrichment')`` 적재. 무효/중복/초과 시 ``applied=False``. 한 transaction.
+        """
+        async with self._session_factory() as session, session.begin():
+            return await apply_place_phone_enrichment(
+                session,
+                feature_id=feature_id,
+                phone=phone,
+                enrichment_provider=enrichment_provider,
+                source_entity_id=source_entity_id,
+                fetched_at=fetched_at,
             )
 
     async def sync_dedup_candidates(
