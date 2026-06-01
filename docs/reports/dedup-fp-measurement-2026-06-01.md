@@ -81,6 +81,11 @@ ADR-016 가중치(0.45/0.35/0.20)와 임계값(AUTO 0.85 / MANUAL 0.65)을 **유
   재측정해야 한다(reject/전체 비율 = manual FP율의 직접 추정). MOIS Step A bulk +
   cross-provider 적재가 큐를 채우면 그 데이터로 재검토 → 그때 임계 미세조정 또는
   ADR-016 amendment 판단.
+  - **운영 측정 도구 추가(2026-06-01)**: `infra.status_repo.dedup_fp_stats`
+    (status별 카운트 → confirmed=merged+accepted / FP=rejected / precision /
+    fp_rate, ignored·pending 제외) + `krtour-map status` 출력의 `dedup FP(운영)`
+    라인. 운영자가 `dedup-merge`/reject로 큐를 해소하면 실 FP율이 자동 집계된다.
+    검토 완료 후보가 0이면 "검토 완료 후보 없음"으로 표시(현 상태).
 - 회귀 가드: `tests/unit/test_dedup_fp_measurement.py`가 (1) 오토머지 FP 0,
   (2) true-dup recall 100%, (3) manual precision floor 0.55를 CI에서 지속 검증.
 

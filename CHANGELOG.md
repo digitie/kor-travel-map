@@ -7,6 +7,11 @@
 
 ### Sprint 4 — 운영 CLI (2026-06-01~)
 
+- **NEW**: dedup 운영 FP 측정 — `infra.status_repo.dedup_fp_stats`(dedup_review_queue
+  status별 카운트 → confirmed=merged+accepted / FP=rejected / precision / fp_rate;
+  ignored·pending 제외) + `krtour-map status` 출력에 `dedup FP(운영)` 라인 추가.
+  운영자가 `dedup-merge`/reject로 큐를 해소하면 실 FP율이 자동 집계된다(검토 완료
+  후보 0이면 "검토 완료 후보 없음"). ADR-016 dedup-fp 리포트의 후속 운영 측정 도구.
 - **NEW**: MOIS Step D on-demand 상세 — debug-ui `GET /debug/mois-license/{license_id}`.
   적재된 MOIS feature의 원본 provider payload(`source_records.raw_data`) + feature
   core를 조립해 반환하고 프로세스 내 TTL 캐시에 담는다(**캐시만, DB write 없음**).

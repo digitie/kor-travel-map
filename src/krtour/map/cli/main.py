@@ -45,6 +45,7 @@ from krtour.map.cli.records import iter_mois_license_records
 from krtour.map.client import AsyncKrtourMapClient
 from krtour.map.infra.db import make_async_engine
 from krtour.map.infra.merge_repo import MergeError
+from krtour.map.infra.status_repo import dedup_fp_stats
 from krtour.map.mois import DEFAULT_BATCH_SIZE as MOIS_DEFAULT_BATCH_SIZE
 from krtour.map.providers.mois import DATASET_KEY_BULK as MOIS_DATASET_KEY_BULK
 from krtour.map.providers.mois import DATASET_KEY_HISTORY as MOIS_DATASET_KEY_HISTORY
@@ -204,6 +205,18 @@ def _format_status(counts: StatusCounts) -> str:
             f"{k}={v}" for k, v in sorted(counts.dedup_queue_by_status.items())
         )
         lines.append(f"dedup_review_queue by_status: {dq}")
+        fp = dedup_fp_stats(counts.dedup_queue_by_status)
+        if fp.resolved and fp.precision is not None and fp.fp_rate is not None:
+            lines.append(
+                f"dedup FP(운영): resolved={fp.resolved} "
+                f"confirmed={fp.confirmed} rejected={fp.rejected} "
+                f"precision={fp.precision:.3f} fp_rate={fp.fp_rate:.3f}"
+            )
+        else:
+            lines.append(
+                f"dedup FP(운영): 검토 완료 후보 없음 "
+                f"(pending={fp.pending}, ignored={fp.ignored})"
+            )
     return "\n".join(lines)
 
 
