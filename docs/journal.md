@@ -2,6 +2,32 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-01 (claude) — Sprint 4a: dedup false-positive 측정 + ADR-016 검토
+
+**작업**: dedup scoring(ADR-016) false-positive를 대표 라벨 평가셋으로 측정하고
+가중치(0.45/0.35/0.20)·임계값(0.85/0.65) 조정 필요 여부 판단.
+
+- **방법**: 실제 `score_pair`/`classify_decision`로 14쌍(true dup 7 + distinct 7,
+  모두 blocking 범위 내 — 100m·같은 bjd·같은 kind로 사전 필터되므로 distinct는
+  "가까운 별개 장소") 채점.
+- **결과**: AUTO 임계(≥0.85) precision **100% / 오토머지 FP 0건**(핵심 안전속성).
+  MANUAL 임계(≥0.65) precision 63.6% / recall **100%**(true dup 7건 전부 큐 진입).
+  distinct 7건 중 auto 0 / manual 4 / keep 3.
+- **manual FP 4건 원인**: 카테고리 접미사 공유(약국/마트/교회 2글자 → name_sim
+  0.67) + 짧은 브랜드명 우연 겹침(스타벅스↔투썸 0.47), 같은 건물·같은 카테고리와
+  결합. 모두 AUTO 아래 → 운영자 reject(설계 의도).
+- **결론/권고**: **가중치·임계값 변경 없음.** 안전성 검증됨(오토머지 오류 0, true
+  dup 누락 0). 검토 큐 noise는 설계 의도(가까운 동일-카테고리 별개 장소). 접미사
+  stripping은 접두사 충돌 FP(`강남약국`↔`강남마트`→`강남`)를 새로 만들어 권하지
+  않음(`_NAME_SUFFIX_TO_STRIP` 빈 튜플 보수 설정과 일치). production은 운영자
+  accept/reject 누적분으로 실 FP율 재측정.
+- **산출물**: `docs/reports/dedup-fp-measurement-2026-06-01.md` +
+  `tests/unit/test_dedup_fp_measurement.py`(회귀 가드 4건 — 오토머지 FP 0 / true-dup
+  recall 100% / manual precision floor 0.55 / auto precision 100%). 코드 변경 없음.
+- **검증(WSL)**: ruff clean / mypy --strict / 전체 **810 passed**(806 → +4).
+- **Sprint 4a 3종(dedup-merge / Step B / dedup FP) 완료.** 남은 건 Sprint 4b(Step C
+  폐업 / Step D detail / dedup 운영 데이터 재측정).
+
 ## 2026-06-01 (claude) — Sprint 4a: Step B 증분 적재 + cursor (ProviderSyncState)
 
 **작업**: MOIS Step B(`mois_license_features_history`) 증분 적재 — 변경분만 upsert +
