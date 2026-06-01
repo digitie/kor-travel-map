@@ -212,9 +212,10 @@ include_external_packages = true
 [[tool.importlinter.contracts]]
 name = "layered architecture"
 type = "layers"
-# krtour.map.cli는 Sprint 4~5에서 추가 — 그때 layers 첫 줄에 다시 박는다.
-# 의존 방향: category → dto → core → infra → providers → client → (cli)
+# 의존 방향: category → dto → core → infra → providers → geocoding → client → cli.
+# krtour.map.cli는 Sprint 4 §2.8(ADR-039 CLI mutex)에서 추가 — 최상위 layer.
 layers = [
+  "krtour.map.cli",
   "krtour.map.client",
   "krtour.map.providers",
   "krtour.map.geocoding",
