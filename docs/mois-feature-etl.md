@@ -36,10 +36,10 @@
 | 날짜/시각/숫자 정규화 | `python-mois-api` `mois.convert` |
 | **SQLite/SpatiaLite source DB 적재** (`mois_place_master`, `mois_place_detail`, `mois_batch_sync_log`) | `python-mois-api` `sync_localdata_source_db` |
 | 영업중/폐업 row iterator | `python-mois-api` `iter_open_place_records`, `iter_closed_place_records` |
-| 디버그 UI (FastAPI + Vite) | `python-mois-api`의 **별도 패키지** `mois-debug-ui` (mois-api ADR-007) |
+| 디버그 UI | `python-mois-api`의 **별도 패키지** `mois-debug-ui` (mois-api ADR-007) |
 | **source DB → feature DB 승격 (영업중만)** | **본 라이브러리** `krtour.map.mois.load_*` |
 | 폐업/취소 trigger로 feature 삭제 | **본 라이브러리** `delete_mois_license_features_*` |
-| Dagster asset wiring / cron / 알림 | TripMate `apps/etl/` |
+| Dagster asset wiring / cron / 알림 | krtour-map Dagster (`packages/krtour-map-dagster/`, ADR-045) |
 
 ## 3. lifecycle 4 step
 
@@ -56,11 +56,11 @@
 
 ### 3.1 Step A — source DB sync (mois-api 자체)
 
-**본 라이브러리는 관여하지 않는다**. TripMate `apps/etl/`의 Dagster asset이
-`python-mois-api`의 `sync_localdata_source_db()`를 직접 호출.
+**메인 라이브러리 변환 계층은 관여하지 않는다**. ADR-045 이후 krtour-map Dagster
+asset이 `python-mois-api`의 `sync_localdata_source_db()`를 직접 호출한다.
 
 ```python
-# TripMate apps/etl/assets/mois_source_db_sync.py
+# packages/krtour-map-dagster/assets/mois_source_db_sync.py
 from mois import LocalDataFileClient
 from mois.db import sync_localdata_source_db
 
@@ -400,8 +400,8 @@ def _facility_info(record: PlaceRecord) -> dict:
 | mois 필드 | 처리 |
 |----------|------|
 | `source_x`, `source_y` (EPSG:5174) | `payload.epsg5174` 보존 |
-| `lat`, `lon` (WGS84) | `Feature.coord = PlaceCoordinate(lat, lon)` |
-| `road_address`, `lot_address` | `kraddr.base.Address` (display + road/jibun 분리) |
+| `lat`, `lon` (WGS84) | `Feature.coord = Coordinate(lon=lon, lat=lat)` |
+| `road_address`, `lot_address` | `krtour.map.dto.Address` (display + road/jibun 분리) |
 | `road_zip`, `lot_zip` | `payload.zips` |
 | `legal_dong_code` (mois 제공) | `features.legal_dong_code` 직접 사용 |
 | `road_name_code` | `features.road_name_code` |
@@ -594,8 +594,8 @@ ConcurrencyConfig: `mois_api: max_concurrent=1` (rate limit 보호 + bulk 적재
   geocoder 검증 helper.
 - **mois debug UI 연계**: `packages/mois-debug-ui/`의 `/api/places`를 본
   라이브러리 디버그 UI (`krtour.map_admin`)에서 iframe/링크로 연결.
-- **source DB 분리 옵션**: source DB(`mois_*`)를 TripMate 공유 DB 안 별도
-  schema(`mois`)에 두거나 별도 DB로 분리할지 결정.
+- **source DB 분리 옵션**: source DB(`mois_*`)는 krtour-map 운영 경계 안에 둔다.
+  TripMate 공유 DB에 두지 않는다(ADR-045/046).
 
 ## 15. 환경변수
 

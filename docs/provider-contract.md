@@ -157,7 +157,7 @@ system
 | kakao-local-api | place | enrichment | on-demand | 전화번호 보강 |
 | naver-search-api | place | enrichment | on-demand | 전화번호 보강 |
 | google-places-api-new | place | enrichment | on-demand | 전화번호 보강 (Text Search New) |
-| python-kraddr-geo | (geocoder) | base_address, base_coordinate | on-demand | 주소·좌표 보강. `krtour.map.geocoding.KraddrGeoRestClient`가 REST `/v1/address/*` 호출. 로컬 FastAPI 기본 `http://127.0.0.1:8888` |
+| python-kraddr-geo | (geocoder) | base_address, base_coordinate | on-demand | 주소·좌표 보강. `krtour.map.geocoding.KraddrGeoRestClient`가 REST v2 `POST /v2/reverse`, `POST /v2/geocode` 호출. 로컬 FastAPI 기본 `http://127.0.0.1:8888` |
 | ~~python-kraddr-base~~ | — | — | — | **ADR-041 (PR#37, 2026-05-28) 흡수 완료**. `Address` DTO + `core/address.py` utility는 본 lib로 이전. `PlaceCoordinate`는 명시적 제외 (좌표는 `Coordinate` 단일). archive 후보. |
 
 ## 5. provider 모듈 표준 구조
@@ -285,7 +285,7 @@ def <entity>_to_bundles(items: Iterable[<ProviderTypedModel>],
 ## 7. 적재 흐름
 
 ```python
-# TripMate 측 (Dagster asset)
+# krtour-map Dagster asset 측
 async with AsyncKrtourMapClient(engine=engine, file_store=store, providers={...}) as client:
     # 1. provider 호출 (provider 라이브러리 직접 사용)
     items = list(visitkorea_client.search_festival(...))

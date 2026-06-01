@@ -76,7 +76,7 @@ API 키 없으면 searcher 생성 안 함 (graceful disable).
 class PlaceSearchCandidate:
     name: str
     address: str
-    coord: PlaceCoordinate | None
+    coord: Coordinate | None
     phone: str | None
     
     # confidence 점수 (0-100)

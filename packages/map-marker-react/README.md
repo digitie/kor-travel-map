@@ -78,7 +78,8 @@ drift 0.
 
 - 디버그 UI frontend(`packages/krtour-map-admin/frontend/`)는
   `"@krtour/map-marker-react": "workspace:*"`로 참조.
-- TripMate `apps/web`은 npm 게시본을 import.
+- TripMate `apps/web`은 현 단계에서 git URL 또는 monorepo/workspace 배포본을
+  import한다. npm registry 게시는 ADR-043에 따라 보류한다.
 
 ## 사양
 

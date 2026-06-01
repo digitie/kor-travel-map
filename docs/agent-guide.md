@@ -114,14 +114,14 @@ PR은 불완전하다.
 
 ## 현재 상태
 Sprint 4(4a+4b) 완료, Sprint 5 + ADR-045 독립 프로그램화 진입 준비.
-ADR 001~045 모두 accepted (다음 후보 046). main 최신은 PR#142 이후.
+ADR 001~046 모두 accepted (다음 후보 047). main 최신은 PR#149 이후.
 
 ## 다음 한 작업
 ADR-045 독립 프로그램화(Docker compose + admin-first OpenAPI + 독립 Dagster).
 
 ## 진척도
 - [x] AGENTS.md / README / SKILL / CLAUDE
-- [x] docs/architecture, decisions(ADR-001~045), data-model
+- [x] docs/architecture, decisions(ADR-001~046), data-model
 - [x] provider 변환, PostGIS 적재/조회, consistency report, dedup queue
 - [x] MOIS Step A~D + dedup-merge + feature_merge_history + phone enrichment
 - [ ] ADR-045 독립 프로그램화 + Sprint 5 MOIS-sibling provider
@@ -320,8 +320,8 @@ GitHub branch protection (운영자 수동 설정):
 
 기본 작업 절차:
 1. 사용자 의도 명확화 (어떤 모듈/계층/메서드인지)
-2. ADR이 필요한지 확인 (`docs/decisions.md` 001~045 모두 accepted, 신규는
-   046+)
+2. ADR이 필요한지 확인 (`docs/decisions.md` 001~046 모두 accepted, 신규는
+   047+)
 3. 테스트 우선 작성 (`docs/test-strategy.md` §12 우선순위)
 4. 구현 (`pytest -q`/`ruff check`/`mypy --strict`/`lint-imports` 통과)
 5. 통합 테스트 + EXPLAIN 검증 (DB 닿는 경우)

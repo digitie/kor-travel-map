@@ -45,7 +45,7 @@ CREATE TABLE feature.features (
     ) STORED,
   geom                         geometry(Geometry, 4326), -- route LINESTRING / area MULTIPOLYGON
 
-  -- 주소 (kraddr.base.Address 직렬화)
+  -- 주소 (krtour.map.dto.Address 직렬화)
   address                      JSONB NOT NULL DEFAULT '{}'::jsonb,
   legal_dong_code              CHAR(10),
   road_name_code               TEXT,
@@ -605,6 +605,22 @@ CREATE INDEX idx_violations_type_status ON ops.data_integrity_violations (violat
 CREATE INDEX idx_violations_feature     ON ops.data_integrity_violations (feature_id) WHERE feature_id IS NOT NULL;
 CREATE INDEX idx_violations_detected_brin ON ops.data_integrity_violations USING BRIN (detected_at);
 ```
+
+주소/좌표 정합성 위반은 다음 `violation_type`을 우선 지원한다.
+
+| violation_type | 발생 조건 | payload 필수 필드 |
+|----------------|-----------|-------------------|
+| `provider_address_mismatch` | provider 주소와 좌표 기준 kraddr-geo reverse 주소가 다른 장소로 판단됨 | `provider_address`, `kraddr_geo_address`, `coord`, `match_level`, `distance_m`, `source_record_key` |
+| `provider_address_partial_match` | 시군구/읍면동은 맞지만 상세 주소가 불완전하거나 다름 | `provider_address`, `kraddr_geo_address`, `match_level`, `notes` |
+| `geocode_failed` | provider 주소 문자열로 `POST /v2/geocode` 후보를 얻지 못함 | `provider_address`, `provider_fields`, `error` |
+| `reverse_geocode_failed` | 좌표로 `POST /v2/reverse` 주소를 얻지 못함 | `coord`, `error` |
+| `missing_address` | provider 주소도 kraddr-geo 주소도 없음 | `provider_fields`, `coord` |
+| `missing_bjd_code` | kraddr-geo 결과에 10자리 법정동코드가 없음 | `kraddr_geo_address`, `coord` |
+
+admin UI가 수동 수정하면 `status='resolved'`, `resolved_at`, `payload.resolution`
+(`field_path`, `old_value`, `new_value`, `operator`, `reason`)을 기록한다. 실제 보정값은
+`feature.features` row와 `ops.feature_overrides`에 반영해 provider 재적재가 덮어쓰지
+않도록 한다.
 
 ### 9.6 `ops.api_call_log` (옵션)
 

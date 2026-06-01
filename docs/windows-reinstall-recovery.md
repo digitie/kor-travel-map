@@ -161,7 +161,7 @@ JOIN feature.features f USING (feature_id)
 WHERE f.kind='notice' AND d.valid_end_time < now() - interval '1 year';
 ```
 
-count가 0이 아니면 purge job이 멈춰 있을 가능성 — TripMate Dagster asset 점검.
+count가 0이 아니면 purge job이 멈춰 있을 가능성 — krtour-map Dagster asset 점검.
 
 ## 9. 새 PC로 이전 체크리스트
 

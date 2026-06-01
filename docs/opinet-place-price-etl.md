@@ -26,7 +26,7 @@
   `StationPrice`), pagination, KATEC (EPSG:5181) 좌표 처리.
 - `python-krtour-map`: typed model → `Feature(kind=place)` + `PlaceDetail` +
   `PricePoint` + `PriceValue`, DB 적재.
-- TripMate: Dagster, schedule, OpiNet 분당 60회 쿼터 보호 (max_concurrent=1).
+- krtour-map Dagster: schedule, OpiNet 분당 60회 쿼터 보호 (max_concurrent=1).
 
 ## 3. 변환 계약
 
@@ -47,8 +47,8 @@ bundle: OpinetStationFeatureBundle = station_detail_to_bundle(
 ## 4. 주소·좌표
 
 - 좌표: OpiNet 응답은 KATEC (EPSG:5181). `python-opinet-api`가 WGS84 변환 결과를
-  `PlaceCoordinate(lat, lon)`로 제공.
-- 주소: `address_road` (도로명) + `address_jibun` (지번) → `kraddr.base.Address`.
+  제공하고, 본 라이브러리는 `Coordinate(lon=..., lat=...)`로 저장한다.
+- 주소: `address_road` (도로명) + `address_jibun` (지번) → `krtour.map.dto.Address`.
 - **OpiNet `sigun_code`는 OpiNet 자체 코드** — 법정동코드 X. raw/payload만.
 - reverse geocoder **필수** — 정확한 `legal_dong_code` 확정.
 

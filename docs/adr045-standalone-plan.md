@@ -11,7 +11,7 @@ ADR-045(krtour-map = Docker 독립 프로그램 + 독립 DB/Dagster + TripMate O
 > - 외부 POI 캐시 갱신 타깃: `docs/poi-cache-update-targets.md`
 > - Dagster 책임 경계: `docs/dagster-boundary.md`
 > - TripMate 연계 REST 세부(params/returns): `docs/tripmate-rest-api.md`
-> - 의사결정 대기: `docs/adr045-open-decisions.md`
+> - 의사결정 결과: `docs/adr045-open-decisions.md` (D-1~D-16 전부 결정 완료)
 > - 데이터 모델: `docs/data-model.md` / `docs/postgres-schema.md`
 
 ## 0. 현황 요약 (2026-06-01)
@@ -29,7 +29,7 @@ update-requests` CRUD + cancel/run-now, 6 scope, provider runs, POI cache),
 4. **Dagster 프로그램 자체가 없음** (TripMate에서 복사·구체화 필요).
 5. **docker-compose.yml / 배포 매니페스트 없음**.
 6. TripMate 연계 REST의 **params/returns 미확정** → `tripmate-rest-api.md`로 분리.
-7. **의사결정 10건 미정** → `adr045-open-decisions.md` (일부는 구현 차단요소).
+7. **ADR-045 의사결정 D-1~D-16 전부 확정** → `adr045-open-decisions.md`.
 
 **재사용 가능한 기존 자산 (재발명 금지)**: `infra/feature_repo.features_in_bbox`,
 `infra/jobs_repo`(`ops.import_jobs` enqueue/claim/finish + advisory lock),
@@ -41,9 +41,9 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
 
 ## 1. Phase 1 — DB 스키마 추가 (라이브러리/alembic)
 
-> 차단: D-2(Dagster metadata DB), D-6(큐 실행 모델), D-11(sigungu 경계 테이블 유무)
-> — `adr045-open-decisions.md`. 단 `feature_update_requests`는 §6.1 DDL 확정이라
-> 결정 없이 진행 가능.
+> 관련 결정: D-2(Dagster metadata DB), D-6(큐 실행 모델), D-11(sigungu 경계 소스)
+> 모두 확정됨 — `adr045-open-decisions.md`. `feature_update_requests`는 §6.1 DDL
+> 그대로 진행한다.
 
 - **T-205a** `alembic 0008` + `FeatureUpdateRequestRow` — `ops.feature_update_requests`
   생성. 컬럼/CHECK/인덱스는 `openapi-admin-contract.md §6.1` DDL 그대로
@@ -57,7 +57,8 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
   + `ops.poi_cache_target_feature_links`(`poi-cache-update-targets.md` 정본) /
   `ops.provider_refresh_policies` — MVP 차단 아님. 각 alembic + model + repo.
 - **T-205d** `feature_consistency_reports`/`import_jobs` 기존 테이블에 `load_batch_id`
-  /`parent_job_id` 등 batch DAG 컬럼 필요 여부 확인(SPRINT-5 T-200) — D-6 결정 후.
+  /`parent_job_id` 등 batch DAG 컬럼 필요 여부 확인(SPRINT-5 T-200) — D-6 결정
+  (request:job=1:1, 큰 scope는 job 내부 배치)를 따른다.
 
 ## 2. Phase 2 — 로직 (scope resolver + 큐 브리지)
 
@@ -95,7 +96,8 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
 - **T-206d** request 실행 본체 — scope 해석된 feature/provider를 실제 적재하는
   worker 로직. provider_dataset scope는 기존 `run_mois_*_job` 류 재사용; geographic
   scope(center/bbox/sigungu)는 "해당 feature를 소유한 provider/dataset을 역추적 →
-  해당 dataset refresh" 정책(D-6, D-8 deactivate 상호작용 확정 필요).
+  해당 dataset refresh" 정책. D-6(1 request:1 job, `run_mode=now` lock 충돌 시
+  409)과 D-8(`prevent_provider_reactivation`) 결정을 따른다.
 
 ## 3. Phase 3 — FastAPI admin/ops/features 라우터 (debug-ui 패키지)
 
@@ -109,11 +111,13 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
   실행, §7) — `ops.import_jobs` enqueue.
 - **T-207c** `/admin/feature 검토/병합/override/deactivate` 라우터 —
   `debug-ui-admin-workflows.md` 정본. dedup-merge/override/deactivate(기존
-  `merge_repo` + 신규 override 로직). D-8(deactivate↔재적재) 확정 필요.
+  `merge_repo` + 신규 override 로직). D-8 결정에 따라
+  `prevent_provider_reactivation`을 구현한다.
 - **T-207d** `/ops/*` — consistency report 조회(F1~F4 기존 + Phase 2 F5~F8),
   import_jobs 모니터, metrics. `status_repo` + `consistency` 재사용.
 - **T-207e** `/features/*` 사용자/admin 공용 read 라우터 — in-bounds/{id}/search/
-  batch. **admin vs 사용자 응답 분리 여부 D-7** → `tripmate-rest-api.md` 참고.
+  batch. D-7 결정에 따라 사용자 `/features/*`와 admin `/admin/features/*` 응답을
+  분리한다. `tripmate-rest-api.md` 참고.
 - **T-207f** `/admin/poi-cache-targets` + `/features/nearby/by-target` (Phase 2,
   `poi-cache-update-targets.md`).
 - **T-207g** OpenAPI export 이원화(admin schema + 사용자 schema) + drift gate 갱신
@@ -150,7 +154,8 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
 > 정본 서비스 목록: `openapi-admin-contract.md §2`. 파일 자체가 없음 → 신규.
 
 - **T-209a** `docker-compose.yml` — 서비스 6종(api/frontend/dagster-webserver/
-  dagster-daemon/postgres/선택 rustfs) + 네트워크 + 볼륨 + 포트(D-21 포트 규약) +
+  dagster-daemon/postgres/선택 rustfs) + 네트워크 + 볼륨 + 포트(`api` 8087,
+  `frontend` 8610, Dagster/Postgres/RustFS 표준 포트) +
   env(`KRTOUR_MAP_PG_DSN`/provider keys/RUSTFS). healthcheck + depends_on(기동 순서:
   postgres → migrate → api/dagster).
 - **T-209b** 기동 순서 스크립트 — postgres ready → `alembic upgrade head`(app DB
@@ -184,14 +189,14 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
 
 ---
 
-## 7. 충돌·정리 필요 (현 sprint/task/ADR)
+## 7. 충돌·정리 결과 (현 sprint/task/ADR)
 
-> 리서치(agent D) 종합. 상세는 `adr045-open-decisions.md` §충돌. ADR 본문 일부는
-> 이미 ADR-045 annotation 있음 — 아래는 *추가/갱신 필요*분.
+> 리서치(agent D) 종합 결과를 바탕으로 정리한 항목이다. D-1~D-16이 모두 결정된
+> 뒤 현재 실행 문서에는 아래 조치를 반영했다.
 
 | 위치 | 충돌/갭 | 조치 |
 |------|---------|------|
-| SPRINT-5 §2.3 (T-200) | "TripMate Dagster 측 asset, 본 lib는 helper만" | "krtour-map Dagster asset, TripMate는 OpenAPI queue 제어만"(ADR-045 §5) |
+| SPRINT-5 §2.4 (T-200) | 구 Dagster 소유권 문구가 ADR-045와 충돌 | krtour-map Dagster asset, TripMate는 OpenAPI queue 제어만(ADR-045 §5)으로 정리 완료 |
 | SPRINT-5 §2.5~2.11 | "debug-ui" 용어 = admin/ops UI로 확장 모호 | `/debug`(개발) vs `/admin`·`/ops`(운영) prefix 분리 명시 |
 | SPRINT-4 §2.9 (backup) | 백업 대상 DB 소유 불명 | 독립 `krtour_map`+`krtour_map_dagster`+RustFS 대상(ADR-040 amendment) |
 | tasks.md | T-205~T-210 (Docker/OpenAPI ver/Dagster/admin routes/React Doctor) **없음** | 본 계획의 T-205~210 backlog 등록(완료, tasks.md) |
@@ -204,8 +209,8 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
 
 ## 8. 권장 진행 순서 (의존)
 
-1. **의사결정 먼저 해소**: D-2/D-6/D-7/D-11/D-14 (차단요소) — `adr045-open-decisions.md`.
-2. **Phase 1 T-205a** (feature_update_requests alembic/model) — 결정 없이 가능.
+1. **의사결정 확인**: D-1~D-16은 모두 확정됨 — `adr045-open-decisions.md`.
+2. **Phase 1 T-205a** (feature_update_requests alembic/model).
 3. **Phase 2 T-206a/b/c** (scope resolver + repo + client) — T-205a 후.
 4. **Phase 3 T-207a/d/e** (admin update-requests + ops + features 라우터) — T-206 후.
 5. **Phase 5 T-209a/b** (docker-compose + 기동) — 라우터 동작 후 통합.

@@ -517,7 +517,11 @@ Route: `/features/[feature_id]`
 4. 주소
    - `Address` DTO 직렬화 결과.
    - legal/admin dong code.
-   - reverse/geocode 재검증 버튼.
+   - kraddr-geo REST v2 reverse/geocode 재검증 버튼.
+   - provider 원천 주소와 좌표 기준 kraddr-geo 주소 비교 결과.
+   - `AddressMatchReport`(`match_level`, provider_address, normalized_address,
+     distance_m, notes).
+   - 주소/좌표 불일치가 있으면 "주소 검토 필요" badge와 issue action.
 5. 원천
    - source links.
    - source records.
@@ -998,8 +1002,12 @@ Provider 적재와 consistency check는 다음 issue type을 생성하거나 집
 | issue_type | 설명 | 일반 처리 |
 |------------|------|-----------|
 | `missing_coordinate` | 지도 표시 좌표 없음 | geocode, manual coord 입력, ignored |
-| `missing_address` | 주소 없음 또는 파싱 실패 | reverse geocode, manual address 입력 |
+| `missing_address` | 주소 없음 또는 kraddr-geo 정규화 실패 | geocode/reverse 재시도, manual address 입력 |
 | `missing_bjd_code` | 법정동코드 없음 | kraddr-geo 보강, manual code 입력 |
+| `provider_address_mismatch` | provider 주소와 좌표 기준 kraddr-geo 주소가 서로 다른 장소로 보임 | 지도 비교, 좌표/주소 수정, source ignored |
+| `provider_address_partial_match` | 시군구/읍면동은 맞지만 상세 주소가 불완전하거나 다름 | kraddr-geo 결과 채택, manual address 보정 |
+| `geocode_failed` | 주소 문자열로 좌표를 찾지 못함 | 주소 수정 후 geocode 재시도, manual coord |
+| `reverse_geocode_failed` | 좌표로 주소를 찾지 못함 | 좌표 수정 후 reverse 재시도, manual address |
 | `missing_category` | category 결정 실패 | category 선택 |
 | `invalid_coordinate` | 한국 bbox 밖 또는 좌표 순서 의심 | 좌표 수정, source ignored |
 | `detail_validation_error` | kind별 detail DTO 검증 실패 | provider 변환 수정 또는 source ignored |
@@ -1041,7 +1049,8 @@ Query:
 
 #### `PATCH /admin/issues/{issue_key}`
 
-결측/정합성 이슈 처리.
+결측/정합성 이슈 처리. 주소/좌표 이슈는 kraddr-geo 재시도와 수동 override를 모두
+지원해야 한다.
 
 요청 예:
 
@@ -1063,6 +1072,37 @@ Query:
 - `acknowledge`
 - `ignore`
 - `reopen`
+- `retry_geocode`
+- `retry_reverse_geocode`
+- `apply_kraddr_geo_address`
+- `manual_override`
+
+주소/좌표 이슈 resolution 예:
+
+```json
+{
+  "action": "manual_override",
+  "resolution": {
+    "field_path": "address",
+    "value": {
+      "road": "서울특별시 종로구 세종대로 172",
+      "legal": "서울특별시 종로구 세종로 1-68",
+      "bjd_code": "1111011900",
+      "sigungu_code": "11110",
+      "sido_code": "11"
+    },
+    "coord": {"lon": 126.9769, "lat": 37.5759},
+    "prevent_provider_overwrite": true
+  },
+  "operator": "local-admin",
+  "reason": "provider 주소와 좌표가 충돌하여 지도에서 수동 확인"
+}
+```
+
+`apply_kraddr_geo_address`는 좌표 기준 kraddr-geo reverse 결과를 그대로 정본으로
+채택한다. `manual_override`는 `ops.feature_overrides`에 field_path `address`,
+`coord`, `legal_dong_code` 등을 기록하고, provider 재적재가 이 값을 덮어쓰지 않게
+D-8의 `prevent_provider_reactivation`/override 정책을 따른다.
 
 스키마 주의:
 

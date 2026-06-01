@@ -278,14 +278,14 @@ docs/
 4. `docs/architecture.md` — 의존 방향, 데이터 흐름
 5. `docs/resume.md` — "다음 한 작업"
 6. `docs/journal.md` 최신 3건 — 직전 컨텍스트
-7. 관련 ADR (`docs/decisions.md` 001~045 모두 accepted; 다음 후보 046)
+7. 관련 ADR (`docs/decisions.md` 001~046 모두 accepted; 다음 후보 047)
 8. 직결 docs (provider 추가면 `docs/provider-contract.md`, 현재 sprint면
    `docs/sprints/SPRINT-N.md` 등)
 
 ## 9. 코드 작성 단계 (Sprint 4 완료 / Sprint 5 + ADR-045 진입 준비)
 
 본 저장소는 T-014 승인 (2026-05-25, PR#16) 이후 **코드 작성 단계**다.
-2026-06-01 현재 main은 PR#142 이후까지 머지되었고 Sprint 4(4a+4b) 완료 상태다.
+2026-06-02 현재 main은 PR#149까지 머지되었고 Sprint 4(4a+4b) 완료 상태다.
 
 - Sprint 2 완료: 축제/날씨/유가/휴게소 provider + ETL live 11/11 dataset.
 - Sprint 3 완료: KNPS/krheritage, PostGIS 적재/조회, consistency report,
@@ -293,6 +293,9 @@ docs/
 - Sprint 4 완료: MOIS Step A~D lifecycle(bulk/incremental/closed/detail),
   `krtour-map dedup-merge` + `ops.feature_merge_history`(alembic 0007),
   dedup 운영 FP 통계, ADR-033 F4, Place phone enrichment, coverage 80% 달성.
+- ADR-045 D-1~D-16 결정 완료. `krtour-map-debug-ui` 호환 경로/env/import,
+  TripMate 직접 import, 공유 DB, TripMate-owned Dagster 호환 shim은 만들지 않는다
+  (ADR-046).
 - Geocoding 현재 정본: kraddr-geo REST v2 `POST /v2/{reverse,geocode}`, 로컬 기본
   `http://127.0.0.1:8888`.
 - Frontend 현재 정본: Next.js 16 + React 19 + `maplibre-vworld-js#v0.1.2`,

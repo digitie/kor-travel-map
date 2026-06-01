@@ -109,6 +109,35 @@ Dagster DB에는 Dagster가 자체 schema를 관리한다.
 | `ops` | `/ops` | 에러 로그, metrics, consistency |
 | `debug` | `/debug` | fixture, ETL preview, EXPLAIN, geocoding debug |
 
+### 4.1 Admin issues / 주소 검토
+
+`/admin/issues`는 결측/정합성 이슈를 한 건 단위로 처리하는 운영 API다. 특히
+kraddr-geo REST v2 적용 중 발생한 주소/좌표 이슈를 admin UI에서 수동 처리할 수
+있어야 한다.
+
+#### 주소 이슈 타입
+
+| issue_type | 의미 |
+|------------|------|
+| `provider_address_mismatch` | provider 주소와 좌표 기준 kraddr-geo 주소가 다른 장소로 보임 |
+| `provider_address_partial_match` | 시군구/읍면동은 맞지만 상세 주소가 불완전하거나 다름 |
+| `geocode_failed` | provider 주소 문자열로 좌표를 찾지 못함 |
+| `reverse_geocode_failed` | 좌표로 주소를 찾지 못함 |
+| `missing_address` | provider/kraddr-geo 양쪽 주소 없음 |
+| `missing_bjd_code` | kraddr-geo 결과에 법정동코드 없음 |
+
+#### 필수 엔드포인트
+
+| Method | Path | 용도 |
+|--------|------|------|
+| GET | `/admin/issues` | 이슈 목록. `issue_type`, `provider`, `dataset_key`, `severity`, `status`, `bbox`, `q`, `cursor` 지원 |
+| GET | `/admin/issues/{issue_key}` | 이슈 상세. provider raw 주소, kraddr-geo 후보, 좌표, 지도 표시 데이터 포함 |
+| PATCH | `/admin/issues/{issue_key}` | `resolve`, `ignore`, `reopen`, `retry_geocode`, `retry_reverse_geocode`, `apply_kraddr_geo_address`, `manual_override` |
+
+`manual_override`는 `feature.features`의 `address`/`coord`/행정코드 컬럼을 갱신하고
+`ops.feature_overrides`에 같은 값을 기록해 provider 재적재가 덮어쓰지 않게 한다.
+`apply_kraddr_geo_address`는 좌표 기준 kraddr-geo reverse 결과를 정본 주소로 채택한다.
+
 ## 5. Feature update request
 
 Feature update request는 OpenAPI로 Dagster feature update job을 제어하는 표준
