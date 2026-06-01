@@ -41,23 +41,23 @@ jobs:
           # geo extra는 GDAL system dependency 필요 — Sprint 2부터 별도 GDAL setup job
           pip install -e ".[dev]"
 
-      - name: Install krtour-map-debug-ui (editable, PR#35+)
+      - name: Install krtour-map-admin (editable, PR#35+)
         # PR#35로 첫 FastAPI 라우터 머지 — 본 step에서 install + 후속 step에서
         # 패키지 tests 실행. 메인 라이브러리 coverage에는 포함되지 않는다 (별도
         # tests/ 트리, debug-ui pyproject은 독립 dev deps).
         run: |
-          pip install -e packages/krtour-map-debug-ui
+          pip install -e packages/krtour-map-admin
 
       - name: Run unit tests (without integration)
         run: |
           pytest tests/ --ignore=tests/integration -q \
             --cov=src/krtour/map --cov-report=term-missing --cov-report=xml
 
-      - name: Run krtour-map-debug-ui unit tests
+      - name: Run krtour-map-admin unit tests
         # 본 step은 메인 lib coverage gate(ADR-032)에 영향 X — debug-ui 패키지
         # 자체 회귀 차단용. fail이면 PR 머지 차단.
         run: |
-          pytest packages/krtour-map-debug-ui/tests/ -q
+          pytest packages/krtour-map-admin/tests/ -q
 
       - name: Run integration tests (testcontainers PostGIS via Docker)
         # Docker는 ubuntu-latest runner에서 자동 제공.

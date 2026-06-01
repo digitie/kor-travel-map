@@ -51,7 +51,7 @@ src/krtour/map/                  # PEP 420 implicit namespace (ADR-022)
 └── settings.py                  # KrtourMapSettings (pydantic-settings)
 ```
 
-`packages/krtour-map-debug-ui/` 도 동일 시기 scaffolding (디버그 UI backend
+`packages/krtour-map-admin/` 도 동일 시기 scaffolding (디버그 UI backend
 첫 라우터는 Sprint 2부터).
 
 ### 2.2 의존 계층 강제 (ADR-002)
@@ -133,7 +133,7 @@ def transformer_4326_to_5179() -> Transformer:
 
 - `.github/workflows/ci.yml` — unit / integration / fixture_replay 분리 jobs.
 - `.github/workflows/lint.yml` — ruff format + mypy --strict + lint-imports.
-- `.github/workflows/openapi.yml` — packages/krtour-map-debug-ui/scripts/export_openapi.py
+- `.github/workflows/openapi.yml` — packages/krtour-map-admin/scripts/export_openapi.py
   `--check` (디버그 UI 첫 라우터 등장 시점부터 실효성, Sprint 1 시점에는
   spec이 비어 있어도 명령 자체는 작동해야 함).
 

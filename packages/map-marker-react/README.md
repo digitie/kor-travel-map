@@ -39,7 +39,7 @@
 ## 두 UI에서의 사용
 
 ```typescript
-// debug UI (packages/krtour-map-debug-ui/frontend/src/pages/FeatureMap.tsx)
+// debug UI (packages/krtour-map-admin/frontend/src/pages/FeatureMap.tsx)
 // 또는 TripMate apps/web/components/FeatureMap.tsx
 import { MakiMarker, categoryMakiIcon } from "@krtour/map-marker-react";
 
@@ -76,7 +76,7 @@ import { MakiMarker, categoryMakiIcon } from "@krtour/map-marker-react";
 Python 카테고리/notice 변경과 동시에 TypeScript 매핑도 변경할 수 있다 →
 drift 0.
 
-- 디버그 UI frontend(`packages/krtour-map-debug-ui/frontend/`)는
+- 디버그 UI frontend(`packages/krtour-map-admin/frontend/`)는
   `"@krtour/map-marker-react": "workspace:*"`로 참조.
 - TripMate `apps/web`은 npm 게시본을 import.
 

@@ -20,7 +20,7 @@
 | DB 적재 (testcontainers PostGIS) | ✅ FeatureBundle round-trip + STORED `coord_5179` + JSONB + FK / `ops.dedup_review_queue` 적재 + 검토완료 행 보존 / consistency F1~F3 | `tests/integration/test_*.py` + 본 리포트 §3 |
 | Debug UI backend (WSL :8087) | ✅ health/version/ETL providers/ETL fixture preview 실 HTTP 통과 | `debug-ui-e2e-2026-05-29.md` §2 |
 | Debug UI frontend (WSL :8610) | ✅ npm workspace 루트 확립 → `next dev` 정상 (PR#92) + maki 글리프·16색 팔레트 공통 마커(PR#97) + kind 필터·상세 패널(PR#98) | `debug-ui-e2e-2026-05-29.md` §1 + 본 리포트 §4 |
-| Windows Playwright e2e | ✅ **11/11 통과** (home 4 + etl 3 + features 4) — WSL frontend↔backend 실연동 | 본 리포트 §4 + 자체 spec(`packages/krtour-map-debug-ui/frontend/e2e/*.spec.ts`) |
+| Windows Playwright e2e | ✅ **11/11 통과** (home 4 + etl 3 + features 4) — WSL frontend↔backend 실연동 | 본 리포트 §4 + 자체 spec(`packages/krtour-map-admin/frontend/e2e/*.spec.ts`) |
 | frontend CI 게이트 | ✅ `type-check` + `next build` (PR#93). 잠복 syntax(`*/`) 버그 같은 종류 머지 전 차단 | `.github/workflows/frontend.yml` |
 | Coverage bar | ✅ Sprint 3 bar 75 ☑ (`pyproject.toml fail_under=75`, 실측 92.66%) | PR#96 |
 

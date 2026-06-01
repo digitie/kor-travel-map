@@ -57,7 +57,7 @@ dev = [
   "httpx>=0.27",
 ]
 # 디버그 REST API/UI는 별도 패키지로 분리 (ADR-020):
-#   `packages/krtour-map-debug-ui/`. FastAPI/Uvicorn 의존성은 거기 있다.
+#   `packages/krtour-map-admin/`. FastAPI/Uvicorn 의존성은 거기 있다.
 geo = [
   "geopandas>=1.0",
   "gdal==3.8.4",  # Python binding은 시스템 libgdal ABI와 patch 버전까지 맞춤
@@ -152,7 +152,7 @@ plugins = ["pydantic.mypy"]
 # mypy_path에 두 src 트리 모두 등록.
 namespace_packages = true
 explicit_package_bases = true
-mypy_path = "src:packages/krtour-map-debug-ui/src"
+mypy_path = "src:packages/krtour-map-admin/src"
 
 # shapely는 type stub를 제공하지 않음 (pyproj와 달리 py.typed 없음).
 # core/geometry.py가 WKT 파싱·centroid에 사용 — import-untyped만 무시.
@@ -230,7 +230,7 @@ layers = [
 ]
 
 # 메인 패키지(krtour.map)는 FastAPI/Uvicorn 의존을 가져선 안 된다 (ADR-020).
-# 디버그 REST는 packages/krtour-map-debug-ui/(import: `krtour.map_debug_ui`)에 있다.
+# 디버그 REST는 packages/krtour-map-admin/(import: `krtour.map_admin`)에 있다.
 [[tool.importlinter.contracts]]
 name = "main package must not import fastapi/uvicorn"
 type = "forbidden"

@@ -25,7 +25,7 @@ OpenAPI) · `frontend`(Next.js admin UI) · `dagster`(feature 업데이트 orche
 ADR-022). 이 라이브러리는 위 `api`/`dagster`가 **내부에서** import하는 핵심
 정규화·적재 엔진이다(외부 경계는 OpenAPI). PyPI distribution은 `python-krtour-map`.
 
-**api/admin 프로그램**: `packages/krtour-map-debug-ui/` — 이름은 당장 유지하되
+**api/admin 프로그램**: `packages/krtour-map-admin/` — 이름은 당장 유지하되
 역할은 "debug UI"를 넘어 krtour-map **admin/API 프로그램**으로 확장됐다(ADR-045).
 메인 라이브러리(`krtour.map`)는 FastAPI 의존이 없고, FastAPI는 이 패키지가 진다.
 

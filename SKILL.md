@@ -12,8 +12,8 @@ PostGIS DB에 저장한다.
 
 ADR-045 이후 TripMate ↔ krtour-map은 **OpenAPI 기반 HTTP**로 연결된다. TripMate는
 krtour-map DB에 직접 접근하지 않고 `python-krtour-map`을 운영 코드에서 직접 import하지
-않는다. REST/API/admin UI는 **별도 패키지** `krtour-map-debug-ui`
-(`packages/krtour-map-debug-ui/`, ADR-020/035/045)로 분리되어 있고 인증 없이 내부망에서
+않는다. REST/API/admin UI는 **별도 패키지** `krtour-map-admin`
+(`packages/krtour-map-admin/`, ADR-020/035/045)로 분리되어 있고 인증 없이 내부망에서
 사용한다.
 
 외부 앱 POI 주변 캐시 갱신은 `external_system + target_key + 좌표 + radius_km`로
@@ -31,13 +31,13 @@ krtour-map DB에 직접 접근하지 않고 `python-krtour-map`을 운영 코드
 | GitHub 저장소 | `python-krtour-map` |
 | PyPI distribution | `python-krtour-map` |
 | Python import (메인) | `from krtour.map import ...` (ADR-022) |
-| Python import (디버그 UI) | `from krtour.map_debug_ui import ...` |
+| Python import (디버그 UI) | `from krtour.map_admin import ...` |
 | CLI 명령 (있다면) | `krtour-map` |
 | 환경변수 prefix | `KRTOUR_MAP_*` |
 | PostgreSQL DB 이름 (개발/운영 기본) | `krtour_map` (TripMate 공유 DB 아님, ADR-045) |
 | Dagster metadata DB 기본 | `krtour_map_dagster` |
 | Postgres schema | `feature`, `provider_sync`, `ops`, `x_extension` |
-| 디버그 UI 패키지 | `krtour-map-debug-ui` (별도 Python 패키지, `packages/krtour-map-debug-ui/`, ADR-020) |
+| 디버그 UI 패키지 | `krtour-map-admin` (별도 Python 패키지, `packages/krtour-map-admin/`, ADR-020) |
 | Category 모듈 | `krtour.map.category` (구 `kraddr.base.categories`에서 이전, ADR-023) |
 
 ### 개발 환경 (PC, WSL)
@@ -129,10 +129,10 @@ src/krtour/                        ← PEP 420 implicit namespace (NO __init__.p
     client.py  — AsyncKrtourMapClient (라이브러리 진입점)
     cli/       — typer CLI (옵션)
 
-packages/krtour-map-debug-ui/      ← 별도 Python 패키지 (ADR-020)
+packages/krtour-map-admin/      ← 별도 Python 패키지 (ADR-020)
   pyproject.toml
   src/krtour/                      ← 같은 namespace 공유 (NO __init__.py)
-    map_debug_ui/
+    map_admin/
       __init__.py
       app.py     — FastAPI app + uvicorn entrypoint
       routers/   — 디버그 엔드포인트
@@ -149,7 +149,7 @@ docs/
 한 방향. `import-linter`가 CI에서 강제한다. `krtour.map.api`는 존재하지
 않는다 (ADR-020).
 
-`krtour-map-debug-ui` 패키지는 OpenAPI backend/admin UI이며, 내부 구현에서
+`krtour-map-admin` 패키지는 OpenAPI backend/admin UI이며, 내부 구현에서
 `krtour.map.client`(`AsyncKrtourMapClient`)를 호출한다. 라우터가 메인 패키지의
 `infra/`/`providers/`를 직접 우회하지 않는다.
 
@@ -169,7 +169,7 @@ docs/
    `Settings`에서 읽음. 라이브러리 default 상수(`KRTOUR_MAP_CATEGORY_DEFAULTS`)는
    허용하되 DB override가 우선.
 7. **응답 셰입 임의 변경 금지** — 메인 라이브러리 DTO는 `data/meta/error` 같은 HTTP
-   래핑 키를 갖지 않는다. 래핑은 OpenAPI backend(`krtour-map-debug-ui`) 책임.
+   래핑 키를 갖지 않는다. 래핑은 OpenAPI backend(`krtour-map-admin`) 책임.
 8. **외부 API 키 평문 커밋 금지** — 모두 `SecretStr`. `.env`는 권한 600 또는
    systemd `EnvironmentFile`/vault.
 9. **provider adapter/wrapper 신규 생성 금지** — public client 직접 사용.
@@ -193,7 +193,7 @@ docs/
     필요해지면 네트워크 계층(SSO 게이트웨이 / IP allowlist / Cloudflare
     Tunnel)에서 보호.
 15. **메인 라이브러리(`krtour.map`)에 FastAPI/Uvicorn import 금지** — ADR-020.
-    HTTP 서버 코드는 `packages/krtour-map-debug-ui/`에만 둔다.
+    HTTP 서버 코드는 `packages/krtour-map-admin/`에만 둔다.
 16. **데이터/원천 파일을 git에 커밋 금지** — `data/`는 `.gitignore`. NTFS 보관.
 17. **시간 직접 사용 금지** — 모든 datetime은 KST aware (Asia/Seoul). naive
     datetime을 DTO에 넣지 않는다. `kst_now()` 사용.

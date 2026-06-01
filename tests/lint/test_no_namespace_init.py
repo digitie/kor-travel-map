@@ -1,7 +1,7 @@
 """``src/krtour/__init__.py``가 생성되지 않았는지 검증 (ADR-022).
 
 PEP 420 implicit namespace ``krtour`` 위에 `krtour.map` (메인) /
-`krtour.map_debug_ui` (별도 패키지) 가 공존한다. 누군가 ``src/krtour/__init__.py``
+`krtour.map_admin` (별도 패키지) 가 공존한다. 누군가 ``src/krtour/__init__.py``
 를 만들면 자매 distribution과 namespace 충돌 — CI에서 즉시 차단.
 
 참조:
@@ -24,7 +24,7 @@ def test_krtour_namespace_has_no_init() -> None:
     assert not namespace_init.exists(), (
         f"ADR-022 위반: {namespace_init} 가 존재합니다. "
         "PEP 420 implicit namespace `krtour`는 `__init__.py`를 가지면 안 됩니다. "
-        "자매 distribution(`krtour-map-debug-ui` 등)과 namespace 충돌합니다. "
+        "자매 distribution(`krtour-map-admin` 등)과 namespace 충돌합니다. "
         "SKILL.md DO NOT #21 / AGENTS.md DO NOT #19 / ADR-022 §결과/부정 참조."
     )
 

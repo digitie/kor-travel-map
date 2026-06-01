@@ -417,7 +417,7 @@ docker compose up krtour-map-dagster-webserver krtour-map-dagster-daemon
 
 메인 라이브러리 단독으로는 Dagster를 띄우지 않는다 (의존성 X). Dagster 실행 코드는
 krtour-map 독립 프로그램 패키지에 둔다. 디버그 / 적재 검증은 admin API
-(`krtour.map_debug_ui`) 또는 직접 Python 스크립트로도 가능하다.
+(`krtour.map_admin`) 또는 직접 Python 스크립트로도 가능하다.
 
 ## 15. 본 라이브러리가 노출하는 helper 요약
 

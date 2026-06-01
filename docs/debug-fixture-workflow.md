@@ -382,7 +382,7 @@ def test_visitkorea_all_fixtures(fixture_path):
 
 ## 11. 디버그 UI에서 fixture 저장 (옵션)
 
-`krtour.map_debug_ui`의 `/debug/fixtures` 엔드포인트:
+`krtour.map_admin`의 `/debug/fixtures` 엔드포인트:
 
 ```
 POST /debug/fixtures

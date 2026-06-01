@@ -61,7 +61,7 @@ Dagster DB에는 Dagster가 자체 schema를 관리한다.
 
 ## 3. OpenAPI 작성 원칙
 
-- OpenAPI는 `packages/krtour-map-debug-ui/openapi.json`을 정본 산출물로 둔다.
+- OpenAPI는 `packages/krtour-map-admin/openapi.json`을 정본 산출물로 둔다.
 - 1차 scope는 admin UI가 쓰는 `/features`, `/admin`, `/ops`, `/debug` API다.
 - TripMate 연동 시 같은 OpenAPI에 `/public` 또는 `/tripmate` prefix를 추가할지,
   기존 `/features` read API를 안정화할지는 실제 소비 요구가 생길 때 결정한다.
@@ -474,7 +474,7 @@ Frontend 작업을 포함한 PR은 마무리 전에 React Doctor를 실행한다
 권장 명령:
 
 ```bash
-cd packages/krtour-map-debug-ui/frontend
+cd packages/krtour-map-admin/frontend
 npm run lint
 npm run type-check
 npm run build
@@ -496,17 +496,17 @@ npm run doctor
 Backend 변경 후:
 
 ```bash
-python packages/krtour-map-debug-ui/scripts/export_openapi.py \
-  --output packages/krtour-map-debug-ui/openapi.json
+python packages/krtour-map-admin/scripts/export_openapi.py \
+  --output packages/krtour-map-admin/openapi.json
 
-python packages/krtour-map-debug-ui/scripts/export_openapi.py \
-  --check --output packages/krtour-map-debug-ui/openapi.json
+python packages/krtour-map-admin/scripts/export_openapi.py \
+  --check --output packages/krtour-map-admin/openapi.json
 ```
 
 Frontend 타입 생성:
 
 ```bash
-cd packages/krtour-map-debug-ui/frontend
+cd packages/krtour-map-admin/frontend
 npm run gen:types
 ```
 
