@@ -2,6 +2,18 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-01 (claude) — CLI mutex 첫 도입 (cli layer 신설, ADR-039)
+
+**작업**: SPRINT-4 §2.8 — `src/krtour/map/cli/` layer 신설 + advisory lock 기반
+CLI 명령 mutex. import-linter layered 최상위에 cli 추가.
+
+- **산출물**:
+  - `src/krtour/map/cli/__init__.py` + `cli/mutex.py` — `mutex_lock`(blocking)/`try_mutex_lock`(non-blocking) async ctx (`infra.advisory_lock` 얇은 래퍼) + lock key 헬퍼(`import_lock_key`/`dedup_merge_lock_key`/`alembic_upgrade_lock_key`, §2.8 컨벤션).
+  - `pyproject.toml` import-linter layers에 `krtour.map.cli` 최상위 추가(`cli → client → providers → geocoding → infra → core → dto → category`).
+  - `tests/unit/test_cli_mutex_keys.py`(4) + `tests/integration/test_cli_mutex.py`(3 — 상호배제/release/독립 키).
+- **검증(WSL)**: mypy --strict 55 files / ruff All checks passed / import-linter 4 kept(cli layer 강제) / 신규 unit 4 + integration 3 / 전체 **737 passed, 5 skipped**.
+- 실제 CLI 명령(`krtour-map import` 등 argparse/entry-point)은 후속 PR.
+
 ## 2026-06-01 (claude) — MOIS Step A streaming 배치 적재 (source DB 연결 준비)
 
 **작업**: Step A bulk 적재를 대용량 source DB 스트림 대응 streaming 배치로 전환.
