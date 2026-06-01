@@ -42,7 +42,7 @@ feature로 승격하는 ETL의 Step B 좁은 가이드다. 폐업/취소/제외 
   `iter_closed_place_records`), 주소 EPSG:5174 → WGS84 변환.
 - `python-krtour-map`: 영업중 `PlaceRecord` → `Feature(kind=place)` + `PlaceDetail`,
   service slug 필터링, 오래된 MOIS feature 삭제, job metadata.
-- TripMate: Dagster, MOIS source DB session, feature DB session, reverse
+- krtour-map Dagster: MOIS source DB session, feature DB session, reverse
   geocoder, transaction, 알림.
 
 wrapper/adapter/gateway 금지. 누락은 `python-mois-api`에서 먼저.
@@ -107,7 +107,7 @@ service slug → `PlaceDetail.place_kind` + category:
 ## 6. 주소·좌표
 
 - 원본 좌표: EPSG:5174 → WGS84 변환 (`python-mois-api`가 처리).
-- 주소: `admin_address` (지번) + `road_address` (도로명) → `kraddr.base.Address`.
+- 주소: `admin_address` (지번) + `road_address` (도로명) → `krtour.map.dto.Address`.
 - `mng_no` (관리번호 25자): `source_entity_id`.
 - **`sigun_code` (관할기관)는 법정동코드 아님** — raw/payload만.
 - reverse geocoder **필수** — 정확한 `legal_dong_code` 확정 위해.

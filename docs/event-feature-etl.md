@@ -30,7 +30,7 @@
   pagination (`iter_pages`).
 - `python-krtour-map`: typed model → `Feature(kind=event)` + `EventDetail` +
   `SourceRecord` + `SourceLink` 변환, 이미지 → RustFS, DB 적재.
-- TripMate: Dagster asset wiring, schedule, retry, 알림.
+- krtour-map Dagster: asset wiring, schedule, retry, 알림.
 
 ## 3. Provider 경계
 
@@ -51,9 +51,9 @@
 
 ## 5. 주소·좌표
 
-- 좌표: `item.mapx` (lon), `item.mapy` (lat) → `PlaceCoordinate(lat, lon)`. 없으면
+- 좌표: `item.mapx` (lon), `item.mapy` (lat) → `Coordinate(lon=..., lat=...)`. 없으면
   None (event는 좌표 nullable 허용).
-- 주소: `item.addr1`, `item.addr2`, `item.zipcode` → `kraddr.base.Address`.
+- 주소: `item.addr1`, `item.addr2`, `item.zipcode` → `krtour.map.dto.Address`.
 - **`item.area_code` / `item.sigungu_code` / `item.l_dong_regn_cd` /
   `item.l_dong_signgu_cd`는 TourAPI 자체 코드 — 법정동코드로 저장 X**.
   raw/payload에만. 좌표 reverse geocoding으로 법정동코드 확정.
@@ -124,7 +124,7 @@ async def collect_datagokr_cultural_festivals(
     return bundles
 
 
-# 호출 예시 (TripMate Dagster asset 측):
+# 호출 예시 (krtour-map Dagster asset 측):
 # fetched = datetime.now(tz=KST)
 # bundles = await collect_datagokr_cultural_festivals(
 #     datagokr_client, fetched_at=fetched, reverse_geocoder=kraddr_geo,

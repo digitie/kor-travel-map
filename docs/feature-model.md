@@ -46,7 +46,7 @@ class Feature(BaseModel):
     feature_id: str                      # make_feature_id(...) 결과
     kind: FeatureKind
     name: str = Field(min_length=1)
-    coord: Coordinate | None = None      # PlaceCoordinate(lat, lon) — Korean bounds 검증
+    coord: Coordinate | None = None      # WGS84 lon/lat — Korean bounds 검증
     address: Address = Field(default_factory=Address)
     category: str = Field(min_length=1)  # krtour.map.category.PlaceCategoryCode value (ADR-023)
     urls: FeatureUrls = Field(default_factory=FeatureUrls)

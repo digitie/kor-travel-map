@@ -417,16 +417,18 @@ detail kind union)는 MV로. `REFRESH MATERIALIZED VIEW CONCURRENTLY`로 lock
 - exactly-once vs at-least-once trade-off, idempotency 키 설계.
 - 디버깅이 Dagster batch보다 어려움 (consumer lag, offset 추적).
 
-**본 라이브러리 위치**:
-- consumer 자체는 **TripMate `apps/etl`이 담당**. 본 라이브러리는 받은
-  message → DTO 변환 → `load_feature_bundles()` 호출의 *함수만* 제공.
-- 본 라이브러리에 Kafka client 의존 추가 금지 (`pyproject.toml` import-linter
-  계약).
-- 단, schema (Avro/Protobuf if used)는 본 라이브러리의 `dto/` Pydantic 모델
-  과 동기 유지 — TripMate 측 producer가 본 라이브러리의 DTO를 직접 사용.
+**krtour-map 위치**:
+- ADR-045 이후 provider ingestion consumer를 도입한다면 krtour-map 독립 프로그램
+  경계 안(`packages/krtour-map-dagster` 또는 별도 worker)에서 소유한다. TripMate
+  `apps/etl`에 consumer를 두지 않는다.
+- 메인 라이브러리(`krtour.map`)에 Kafka client 의존 추가 금지
+  (`pyproject.toml` import-linter 계약). 필요한 경우 별도 worker/Dagster 패키지와
+  ADR로 다룬다.
+- schema (Avro/Protobuf if used)는 `dto/` Pydantic 모델과 동기 유지하되,
+  TripMate는 OpenAPI consumer일 뿐 Python DTO를 직접 import하지 않는다.
 
 **판단 권고**: 특정 provider가 진짜 초 단위 latency를 요구한다는 증거가
-잡힐 때만 ADR 작성 + TripMate 측 인프라 추가. 추측만으로 도입 금지.
+잡힐 때만 ADR 작성 + krtour-map 운영 인프라 추가. 추측만으로 도입 금지.
 
 ### 9.5 pg_prewarm 부팅 후 warm-up — T-102
 

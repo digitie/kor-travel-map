@@ -68,7 +68,7 @@ def krex_rest_area_to_bundle(item, *, fetched_at, reverse_geocoder=None):
             ),
             kind=FeatureKind.PLACE,
             name=item.name,
-            coord=PlaceCoordinate(lat=item.lat, lon=item.lon),
+            coord=Coordinate(lon=item.lon, lat=item.lat),
             address=Address(display_address=item.address),
             category="TRANSPORT_REST_AREA",
             marker_icon="car",

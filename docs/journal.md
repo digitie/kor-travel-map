@@ -2,6 +2,44 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-02 (codex) — ADR-045 D-11 POI 반경 행정구역 조회 + admin 디버깅 UI
+
+**작업**: 사용자 지시 — POI 좌표 기준 주변 `n` km에 포함/교차하는 시군구·읍면동을
+반환하는 함수를 krtour-map의 ADR-045 방향에 맞춰 구현하고, admin에서 디버깅 가능하게
+함.
+
+- **Python API**: `KraddrGeoRestClient.regions_within_radius`,
+  `resolve_regions_within_radius`, `resolve_sigungu_by_radius` 추가. kraddr-geo REST v2
+  `POST /v2/regions/within-radius`를 호출하고 `sido`/`sigungu`/`emd` 응답을 typed
+  dataclass로 정규화.
+- **Admin API/UI**: `/debug/geocoding/regions/within-radius`와 `/raw` 라우트 추가,
+  `/geocoding` frontend에 좌표·반경·level 선택·raw toggle 폼 추가.
+- **테스트**: REST body/path/default level/custom level, malformed item, HTTP error,
+  admin schema/raw/503/502, frontend form/level toggle e2e를 보강.
+- **문서**: `docs/regions-within-radius.md` 신설, OpenAPI 재생성,
+  `CHANGELOG.md`/`resume.md` 갱신.
+
+## 2026-06-02 (codex) — ADR-046 정본 전환 + kraddr-geo v2 주소 정책 문서 정리
+
+**작업**: 사용자 지시 — 호환성 shim 없이 올바른 방향으로 문서를 정리하고,
+kraddr-geo REST API를 v2 기준으로 통일. provider 주소/좌표 정본화 중 발생하는
+오류를 admin UI에서 수동 처리하도록 명세.
+
+- **ADR-046 추가**: ADR-045 이행 시 legacy package/path/env/direct import/shared DB/
+  TripMate Dagster 호환 shim을 만들지 않고 정본 방향으로 전환. 다음 후보 번호는
+  ADR-047.
+- **주소 정본 정책**: provider가 제공하는 주소/행정코드는 provenance로만 보존하고,
+  저장 정본은 kraddr-geo REST v2 `POST /v2/reverse`, `POST /v2/geocode` 결과로
+  만든 `krtour.map.dto.Address`로 통일. 좌표+주소가 같이 있으면 좌표 reverse를
+  정본으로 삼고 provider 주소와 매칭한다.
+- **Admin 수동 처리**: `provider_address_mismatch`, `provider_address_partial_match`,
+  `geocode_failed`, `reverse_geocode_failed`, `missing_address`, `missing_bjd_code`
+  이슈를 `/admin/issues` 지도/테이블에서 검토하고, 재시도·kraddr-geo 주소 채택·
+  수동 override·ignore/reopen을 할 수 있도록 OpenAPI/UI 사양 보강.
+- **문서 정합성**: TripMate 직접 import legacy 본문 제거, Sprint 5 Dagster 소유권을
+  krtour-map으로 정리, streaming consumer/백업/DB/패키지명/ADR 번호 drift 정정.
+- **docs-only 의도** — PR staging 대상은 문서만.
+
 ## 2026-06-02 (claude) — ADR-045 비BLOCKER 의사결정 8건 전부 권고대로 확정
 
 **작업**: 사용자 "모두 권고안대로" → 남은 비BLOCKER 8건 확정 + ADR amendment.

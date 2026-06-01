@@ -5,6 +5,27 @@
 
 ## [Unreleased]
 
+### API/Admin UI — POI 반경 행정구역 조회 (2026-06-02)
+
+- **NEW**: `KraddrGeoRestClient.regions_within_radius`와
+  `resolve_regions_within_radius`를 추가해 kraddr-geo REST v2
+  `POST /v2/regions/within-radius`로 POI 좌표 기준 반경 내 시군구/읍면동을 조회한다.
+- **NEW**: admin backend `/debug/geocoding/regions/within-radius`와 `/raw`, frontend
+  `/geocoding` 디버깅 폼을 추가했다.
+- **DOCS**: `docs/regions-within-radius.md`에 책임 경계, Python API, REST 계약,
+  admin 디버깅 방법, 테스트 표면을 정리했다.
+
+### 문서 — ADR-046 정본 전환 + kraddr-geo v2 주소 정책 (2026-06-02)
+
+- ADR-045 이행 시 legacy 호환 shim을 남기지 않고 `krtour-map-admin`, 독립 DB,
+  독립 Dagster, OpenAPI 연동을 정본으로 삼는 ADR-046을 추가했다.
+- provider 주소/좌표 정본을 kraddr-geo REST v2 `POST /v2/reverse`,
+  `POST /v2/geocode` 결과로 통일하고, provider 원문 주소는 provenance로 보존하는
+  정책을 문서화했다.
+- 주소/좌표 매칭 실패, 결측, reverse/geocode 실패를 admin UI `/admin/issues`에서
+  재시도·수동 수정·kraddr-geo 주소 채택·ignore/reopen 할 수 있도록 OpenAPI/UI
+  사양을 보강했다.
+
 ### 문서 — ADR-045 독립 프로그램/OpenAPI 전환 (2026-06-01)
 
 - krtour-map 운영 모델을 Docker 독립 프로그램 + 독립 PostgreSQL/PostGIS DB + 독립
@@ -76,8 +97,8 @@
 
 - **PR#115 — PR review 누락 보강 + 문서 정합성 sweep**:
   2026-05-28 이후 PR #45~#114를 재조회하고 review submission이 없던 PR에
-  한국어 사후 상세 리뷰를 등록. 문서에서는 geocoding endpoint 정본(`/v1/address/*`)
-  과 서비스 메타 버전 2.0 표현을 분리하고, accepted ADR을 proposed로 부르던 문구와
+  한국어 사후 상세 리뷰를 등록. 당시 문서에서는 구 geocoding REST address endpoint와
+  서비스 메타 버전 2.0 표현을 분리하고, accepted ADR을 proposed로 부르던 문구와
   `PlaceCoordinate` 잔존 예시, `docs/tasks.md` 현재 상태 drift를 정정.
 - **PR#114 — kraddr-geo 최신 로컬 포트 정합 + 라이브 검증 보강**:
   `python-kraddr-geo` 최신 로컬 정책(`docs/ports.md`)에 맞춰 debug-ui
@@ -102,10 +123,10 @@
   backend `/debug/health`·`/debug/version`·`/debug/etl/*` 연동, role/heading
   + native select nth 선택자). `docs/reports/debug-ui-e2e-2026-05-29.md`에
   backend 5경로 실 HTTP 통과 증거 + 사람용 런북.
-- **PR#90 — geocoding python API → REST `/v1/address/*` 전환** (#123):
+- **PR#90 — geocoding python API → REST address API 전환** (#123, 이후 v2로 supersede):
   `krtour.map.geocoding`을 in-process `AsyncAddressClient` 가정에서
-  **kraddr-geo REST `/v1/address/*`**(ver 2.0)로 재작성. structural Protocol을
-  실제 `ReverseResponse`/`GeocodeResponse`/`AddressStructure`(vworld
+  **kraddr-geo REST address API**로 재작성. structural Protocol을 실제
+  `ReverseResponse`/`GeocodeResponse`/`AddressStructure`(vworld
   `level4LC=bjd_cd` 등)/`GeocodeExtension`으로 교체. 순수 변환
   `reverse_response_to_address` / `geocode_response_to_coordinate` + 새
   `KraddrGeoRestClient`(httpx 주입, TYPE_CHECKING-only import — 메인 패키지

@@ -234,7 +234,7 @@ Grafana 패널에 노출 (TripMate 측). 5xx 비율 임계 초과 시 알림.
 
 라이브 호출이 필요한 시나리오:
 - 디버그 UI에서 "라이브 호출" 옵션 (개발자 명시 트리거)
-- nightly canary (TripMate Dagster `provider_canary` asset)
+- nightly canary (krtour-map Dagster `provider_canary` asset)
 - 운영 ETL
 
 위 시나리오는 모두 provider 라이브러리에서 직접 호출하고, 본 라이브러리는

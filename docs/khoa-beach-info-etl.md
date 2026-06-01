@@ -21,7 +21,7 @@
 - `python-khoa-api`: REST 호출, typed model (`OceanBeachInfo`), pagination.
 - `python-krtour-map`: typed model → `Feature(kind=place)` + `PlaceDetail`,
   이미지 → RustFS.
-- TripMate: Dagster, schedule.
+- krtour-map Dagster: schedule.
 
 ## 3. dataset 매핑
 
@@ -54,7 +54,7 @@
 
 ## 5. 주소·좌표
 
-- 좌표: WGS84 그대로 (`PlaceCoordinate(lat, lon)`).
+- 좌표: WGS84 그대로 `Coordinate(lon=..., lat=...)`.
 - 주소: 기본 `Address(display_address=f"{sidoNm} {gugunNm}")` — 시도/구군 한글만.
 - reverse geocoder 권장 — 정확한 `legal_dong_code` + `road_name_code` 보강.
 

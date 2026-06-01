@@ -6,7 +6,7 @@
 SQLAlchemy 2 async + GeoAlchemy2 + GeoPandas 위에서 동작한다.
 
 > **현재 상태 (v2 Sprint 4(4a+4b) 완료, Sprint 5 + ADR-045 독립 프로그램화 진입
-> 준비 — PR#142 이후 기준)**:
+> 준비 — PR#149 이후 기준)**:
 > master/main 브랜치는 v2 사양으로 새로 시작했다. 이전(v1) 구현은 `v1`
 > 브랜치에 보존되어 있다. Sprint 2~3에서 provider 변환, PostGIS 적재/조회,
 > consistency report, dedup queue, `AsyncKrtourMapClient`, debug UI `/features`와
@@ -17,7 +17,7 @@ SQLAlchemy 2 async + GeoAlchemy2 + GeoPandas 위에서 동작한다.
 > `POST /v2/{reverse,geocode}` + 로컬 `http://127.0.0.1:8888`, frontend 정본은
 > Next.js 16 + `maplibre-vworld-js#v0.1.2`다. 2026-06-01 ADR-045로 운영 모델은
 > Docker 독립 프로그램 + 독립 DB/Dagster + TripMate OpenAPI 연동으로 전환됐다.
-> ADR 현황: **001~045 모두 accepted** (다음 후보 046). Sprint 계획은
+> ADR 현황: **001~046 모두 accepted** (다음 후보 047). Sprint 계획은
 > `docs/sprints/`, 다음 작업은 `docs/resume.md` 참조. v1 산출물 요약은
 > `python-krtour-map-spec.docx`(저장소 루트, 약 80쪽) 참고.
 
@@ -196,6 +196,9 @@ cli** 한 방향. `import-linter`가 CI에서 강제 (ADR-002, `docs/architectur
   지우지 않고 `superseded by ADR-XXX`.
 - **async-only API** — 동기 인터페이스 추가 금지. 호출자가 `asyncio.run`.
 - **wrapper 금지** — provider client는 그대로 사용. 변환 순수 함수까지만 허용.
+- **ADR-045 이행은 정본 우선** — 구 `krtour-map-debug-ui` 경로/env/import,
+  TripMate 직접 import, 공유 DB, TripMate-owned Dagster 호환 shim은 만들지 않는다
+  (ADR-046).
 
 ## 검증
 
@@ -216,7 +219,7 @@ lint-imports
 - [`CLAUDE.md`](CLAUDE.md) — Claude(Code/Agent SDK)용 1쪽 진입 요약
 - [`CHANGELOG.md`](CHANGELOG.md) — Keep a Changelog 형식 (Unreleased + ADR-024~034)
 - [`docs/architecture.md`](docs/architecture.md) — 의존 방향, 계층, 데이터 흐름
-- [`docs/decisions.md`](docs/decisions.md) — ADR 누적 (ADR-001~045)
+- [`docs/decisions.md`](docs/decisions.md) — ADR 누적 (ADR-001~046)
 - [`docs/sprints/README.md`](docs/sprints/README.md) — Sprint 1~5 계획 + ADR-034 9단계 구현 순서
   - [`docs/sprints/SPRINT-1.md`](docs/sprints/SPRINT-1.md) — 코드 작성 단계 진입 + scaffolding (provider 없음)
   - [`docs/sprints/SPRINT-2.md`](docs/sprints/SPRINT-2.md) — MOIS-독립 4 provider (축제/날씨/유가/휴게소) + 디버그 UI 첫 라우터
@@ -228,8 +231,9 @@ lint-imports
 - [`docs/debug-ui-package.md`](docs/debug-ui-package.md) — `krtour-map-admin` 별도 패키지 사양 (ADR-020)
 - [`docs/debug-ui-admin-workflows.md`](docs/debug-ui-admin-workflows.md) — debug UI/admin 운영 콘솔 상세 구현 사양
 - [`docs/openapi-admin-contract.md`](docs/openapi-admin-contract.md) — Admin 우선 OpenAPI + Dagster feature update queue 계약
+- [`docs/regions-within-radius.md`](docs/regions-within-radius.md) — POI 반경 내/교차 행정구역 조회(kraddr-geo REST v2) 사양
 - [`docs/adr045-standalone-plan.md`](docs/adr045-standalone-plan.md) — **ADR-045 독립 프로그램화 실행 계획**(T-205~T-210, AI agent 실행용)
-- [`docs/adr045-open-decisions.md`](docs/adr045-open-decisions.md) — ADR-045 의사결정 대기(D-1~D-16, 차단요소 포함)
+- [`docs/adr045-open-decisions.md`](docs/adr045-open-decisions.md) — ADR-045 의사결정 결과(D-1~D-16, 전부 결정 완료)
 - [`docs/tripmate-rest-api.md`](docs/tripmate-rest-api.md) — TripMate 연계 REST API params/returns 계약
 - [`docs/poi-cache-update-targets.md`](docs/poi-cache-update-targets.md) — 외부 POI key 기반 주변 feature 캐시 갱신 타깃
 - [`docs/category.md`](docs/category.md) — `krtour.map.category` 모듈 사양 (kraddr-base에서 이전, ADR-023)
