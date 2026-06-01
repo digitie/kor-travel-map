@@ -32,7 +32,8 @@ pytestmark = pytest.mark.integration
 
 _TRUNCATE_SQL = (
     "TRUNCATE feature.features, provider_sync.source_records, "
-    "provider_sync.source_links, ops.import_jobs RESTART IDENTITY CASCADE"
+    "provider_sync.source_links, provider_sync.provider_sync_state, "
+    "ops.import_jobs RESTART IDENTITY CASCADE"
 )
 
 # 영업중 PROMOTED 2건 + EXCLUDED 1건(적재 안 됨).
@@ -108,5 +109,43 @@ async def test_cli_import_mois_skips_when_locked(
     ):
         rc = await args.func(args)  # type: ignore[attr-defined]
 
-    assert rc == 3  # _EXIT_IMPORT_SKIPPED
+    assert rc == 3  # _EXIT_LOCK_SKIPPED
     assert await _feature_count(migrated_engine) == 0
+
+
+async def test_cli_import_mois_incremental_advances_cursor(
+    container_dsn: str, migrated_engine: AsyncEngine, tmp_path: Path
+) -> None:
+    path = tmp_path / "inc.ndjson"
+    path.write_text(_NDJSON, encoding="utf-8")
+    args = build_parser().parse_args(
+        [
+            "--dsn", container_dsn, "import", "mois", str(path),
+            "--mode", "incremental", "--cursor", "2026-06-01",
+        ]
+    )
+    rc = await args.func(args)  # type: ignore[attr-defined]
+    assert rc == 0
+    assert await _feature_count(migrated_engine) == 2
+    # cursor가 history dataset에 영속화됨.
+    from krtour.map.infra.sync_state_repo import get_sync_state
+    from krtour.map.providers.mois import DATASET_KEY_HISTORY
+
+    async with AsyncSession(migrated_engine) as session:
+        state = await get_sync_state(
+            session, provider=PROVIDER_NAME, dataset_key=DATASET_KEY_HISTORY
+        )
+    assert state is not None
+    assert state.cursor == {"last_modified_date": "2026-06-01"}
+
+
+async def test_cli_import_mois_incremental_requires_cursor(
+    container_dsn: str, migrated_engine: AsyncEngine, tmp_path: Path
+) -> None:
+    path = tmp_path / "inc.ndjson"
+    path.write_text(_NDJSON, encoding="utf-8")
+    args = build_parser().parse_args(
+        ["--dsn", container_dsn, "import", "mois", str(path), "--mode", "incremental"]
+    )
+    rc = await args.func(args)  # type: ignore[attr-defined]
+    assert rc == 2  # _EXIT_INVALID — cursor 누락

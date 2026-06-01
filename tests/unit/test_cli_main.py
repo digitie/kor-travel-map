@@ -10,6 +10,7 @@ import pytest
 from krtour.map.cli.main import (
     _EXIT_LOCK_SKIPPED,
     _format_bulk_result,
+    _format_incremental_result,
     _format_merge_outcome,
     _format_status,
     build_parser,
@@ -18,7 +19,12 @@ from krtour.map.infra.feature_repo import FeatureLoadResult
 from krtour.map.infra.jobs_repo import ImportJob
 from krtour.map.infra.merge_repo import MergeOutcome
 from krtour.map.infra.status_repo import StatusCounts
-from krtour.map.mois import MoisBulkJobResult, MoisBulkSyncResult
+from krtour.map.infra.sync_state_repo import SyncState
+from krtour.map.mois import (
+    MoisBulkJobResult,
+    MoisBulkSyncResult,
+    MoisIncrementalJobResult,
+)
 
 
 def test_parser_requires_command() -> None:
@@ -78,10 +84,78 @@ def test_parser_import_mois_minimal() -> None:
     assert args.command == "import"
     assert args.provider == "mois"
     assert args.records_file == "snap.ndjson"
-    # 기본값
-    assert args.dataset_key == "mois_license_features_bulk"
+    # 기본값 — dataset_key는 None(모드별 핸들러 해석), 모드 bulk.
+    assert args.dataset_key is None
+    assert args.mode == "bulk"
+    assert args.cursor is None
+    assert args.sync_scope == "default"
     assert args.geocoder_url is None
     assert hasattr(args, "func")
+
+
+def test_parser_import_mois_incremental() -> None:
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "import",
+            "mois",
+            "snap.ndjson",
+            "--mode",
+            "incremental",
+            "--cursor",
+            "2026-06-01",
+            "--sync-scope",
+            "nightly",
+        ]
+    )
+    assert args.mode == "incremental"
+    assert args.cursor == "2026-06-01"
+    assert args.sync_scope == "nightly"
+
+
+def test_format_incremental_result_done() -> None:
+    out = _format_incremental_result(
+        MoisIncrementalJobResult(
+            acquired=True,
+            job=ImportJob(
+                job_id="job-9",
+                kind="mois_license_incremental_update",
+                payload={},
+                state="done",
+                progress=100,
+                current_stage=None,
+                source_checksum=None,
+                error_message=None,
+            ),
+            load=FeatureLoadResult(
+                bundles_total=3,
+                features_inserted=2,
+                features_updated=1,
+                source_records_inserted=3,
+                source_links_inserted=3,
+                source_links_updated=0,
+            ),
+            sync_state=SyncState(
+                provider="python-mois-api",
+                dataset_key="mois_license_features_history",
+                sync_scope="default",
+                status="active",
+                cursor={"last_modified_date": "2026-06-01"},
+                last_success_at=None,
+                last_failure_at=None,
+                consecutive_failures=0,
+                next_run_after=None,
+            ),
+        )
+    )
+    assert "incremental): done (job_id=job-9)" in out
+    assert "inserted=2 updated=1" in out
+    assert "2026-06-01" in out
+
+
+def test_format_incremental_result_skipped() -> None:
+    out = _format_incremental_result(MoisIncrementalJobResult(acquired=False))
+    assert "skipped" in out
 
 
 def test_parser_import_mois_options() -> None:
