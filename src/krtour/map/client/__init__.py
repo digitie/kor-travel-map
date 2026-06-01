@@ -49,8 +49,10 @@ from krtour.map.infra.feature_repo import (
     load_bundles,
 )
 from krtour.map.mois import (
+    MoisBulkJobResult,
     MoisBulkSyncResult,
     load_mois_license_features_bulk,
+    run_mois_license_bulk_job,
     sync_mois_license_features_bulk,
 )
 from krtour.map.providers.mois import DATASET_KEY_BULK as MOIS_DATASET_KEY_BULK
@@ -183,6 +185,33 @@ class AsyncKrtourMapClient:
                 fetched_at=fetched_at,
                 dataset_key=dataset_key,
                 reverse_geocoder=reverse_geocoder,
+            )
+
+    async def run_mois_license_bulk_job(
+        self,
+        records: Iterable[MoisLicensePlaceRecord],
+        *,
+        fetched_at: datetime,
+        dataset_key: str = MOIS_DATASET_KEY_BULK,
+        reverse_geocoder: ReverseGeocoder | None = None,
+        source_checksum: str | None = None,
+    ) -> MoisBulkJobResult:
+        """MOIS Step A bulk 적재를 advisory lock + import_jobs 추적으로 실행.
+
+        단일 워커 직렬화(``try_advisory_lock``)로 다른 워커가 적재 중이면
+        ``acquired=False``로 skip한다. 획득 시 ``import_jobs`` 작업을 running으로
+        시작 → 변환·upsert·snapshot prune → done/failed 종료. 한 transaction —
+        실패 시 데이터와 작업 기록이 함께 rollback된다(원자성 우선; 영속 failed
+        기록이 필요하면 후속 lifespan 복구가 stale running을 정리, ADR-011).
+        """
+        async with self._session_factory() as session, session.begin():
+            return await run_mois_license_bulk_job(
+                session,
+                records,
+                fetched_at=fetched_at,
+                dataset_key=dataset_key,
+                reverse_geocoder=reverse_geocoder,
+                source_checksum=source_checksum,
             )
 
     async def sync_dedup_candidates(
