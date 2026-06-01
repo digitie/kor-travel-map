@@ -35,7 +35,7 @@ from dataclasses import dataclass
 from types import TracebackType
 from typing import TYPE_CHECKING, Any
 
-from krtour.map.core.dedup import find_dedup_candidates
+from krtour.map.core.dedup import find_dedup_candidates, find_sibling_candidates
 from krtour.map.infra.db import make_async_session_factory
 from krtour.map.infra.dedup_repo import (
     DedupQueueResult,
@@ -246,6 +246,35 @@ class AsyncKrtourMapClient:
         """
         candidates = find_dedup_candidates(
             left, right, include_auto_merge=include_auto_merge
+        )
+        if not candidates:
+            return DedupSyncResult(candidates=[], queue=DedupQueueResult())
+        async with self._session_factory() as session, session.begin():
+            queue = await enqueue_dedup_candidates(session, candidates)
+        return DedupSyncResult(candidates=candidates, queue=queue)
+
+    async def sync_sibling_candidates(
+        self,
+        features: Iterable[DedupInput],
+        *,
+        include_auto_merge: bool = True,
+    ) -> DedupSyncResult:
+        """**같은 dataset 내** 중복 후보 탐지 + ``ops.dedup_review_queue`` 적재.
+
+        ``find_sibling_candidates``(순수, within-set pairwise)로 한 provider/dataset
+        안의 self-sibling(예: MOIS 같은 사업장이 2슬러그로 중복 등록)을 탐지해 큐에
+        upsert한다. ``features``의 feature는 이미 ``feature.features``에 적재돼 있어야
+        한다 (큐 FK). 후보가 없으면 빈 큐 결과.
+
+        Parameters
+        ----------
+        features
+            같은 dataset의 ``DedupInput`` 집합 (``Feature``가 그대로 만족).
+        include_auto_merge
+            ``auto_merge`` 후보 포함 여부 (기본 True). False면 ``manual_review``만.
+        """
+        candidates = find_sibling_candidates(
+            features, include_auto_merge=include_auto_merge
         )
         if not candidates:
             return DedupSyncResult(candidates=[], queue=DedupQueueResult())

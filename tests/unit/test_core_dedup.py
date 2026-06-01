@@ -11,7 +11,12 @@ from decimal import Decimal
 
 import pytest
 
-from krtour.map.core.dedup import DedupCandidate, DedupInput, find_dedup_candidates
+from krtour.map.core.dedup import (
+    DedupCandidate,
+    DedupInput,
+    find_dedup_candidates,
+    find_sibling_candidates,
+)
 from krtour.map.core.scoring import DedupDecision
 from krtour.map.dto.coordinate import Coordinate
 
@@ -252,3 +257,70 @@ def test_candidate_score_rounded_to_4_decimals() -> None:
             assert len(decimals) <= 4, (
                 f"{v} has more than 4 decimals after rstrip: {rounded_str}"
             )
+
+
+# -- find_sibling_candidates (within-set, MOIS self-sibling) ------------------
+
+_REST_CAT = "02010100"  # FOOD_RESTAURANT_KOREAN
+
+
+def test_sibling_same_business_two_slugs_is_candidate() -> None:
+    # 같은 사업장이 general_restaurants + tourist_restaurants 2슬러그로 등록.
+    feats = [
+        _Stub("f_gen", "행복식당", _c("127.0000", "37.5000"), _REST_CAT),
+        _Stub("f_tour", "행복식당", _c("127.0000", "37.5000"), _REST_CAT),
+    ]
+    [cand] = find_sibling_candidates(feats)
+    assert cand.decision == DedupDecision.AUTO_MERGE
+    assert {cand.feature_id_a, cand.feature_id_b} == {"f_gen", "f_tour"}
+
+
+def test_sibling_unique_pairs_no_symmetric_dup() -> None:
+    # 3건 모두 동일 → 고유 쌍 3개(C(3,2)), 대칭/self 제외.
+    feats = [
+        _Stub("f1", "행복식당", _c("127.0000", "37.5000"), _REST_CAT),
+        _Stub("f2", "행복식당", _c("127.0000", "37.5000"), _REST_CAT),
+        _Stub("f3", "행복식당", _c("127.0000", "37.5000"), _REST_CAT),
+    ]
+    cands = find_sibling_candidates(feats)
+    assert len(cands) == 3
+    pairs = {frozenset((c.feature_id_a, c.feature_id_b)) for c in cands}
+    assert pairs == {
+        frozenset(("f1", "f2")),
+        frozenset(("f1", "f3")),
+        frozenset(("f2", "f3")),
+    }
+
+
+def test_sibling_skips_self_pair_on_duplicate_id() -> None:
+    # 같은 feature_id가 중복 입력돼도 self-pair는 제외.
+    feats = [
+        _Stub("dup", "행복식당", _c("127.0000", "37.5000"), _REST_CAT),
+        _Stub("dup", "행복식당", _c("127.0000", "37.5000"), _REST_CAT),
+    ]
+    assert find_sibling_candidates(feats) == []
+
+
+def test_sibling_distinct_places_keep_separate() -> None:
+    # 다른 이름 + 먼 좌표 → KEEP_SEPARATE → 후보 없음.
+    feats = [
+        _Stub("f1", "행복식당", _c("127.0000", "37.5000"), _REST_CAT),
+        _Stub("f2", "전혀다른집", _c("129.0000", "35.1000"), _REST_CAT),
+    ]
+    assert find_sibling_candidates(feats) == []
+
+
+def test_sibling_empty_and_single() -> None:
+    assert find_sibling_candidates([]) == []
+    assert find_sibling_candidates(
+        [_Stub("f1", "행복식당", _c("127.0", "37.5"), _REST_CAT)]
+    ) == []
+
+
+def test_sibling_exclude_auto_merge() -> None:
+    feats = [
+        _Stub("f1", "행복식당", _c("127.0000", "37.5000"), _REST_CAT),
+        _Stub("f2", "행복식당", _c("127.0000", "37.5000"), _REST_CAT),
+    ]
+    # auto_merge 후보 → include_auto_merge=False면 제외.
+    assert find_sibling_candidates(feats, include_auto_merge=False) == []

@@ -2,6 +2,17 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-01 (claude) — dedup MOIS self-sibling (within-set pairwise)
+
+**작업**: SPRINT-4 §2.2 — 한 dataset 안에서 같은 사업장이 2슬러그로 중복 등록된
+경우(MOIS self-sibling)를 탐지해 dedup queue 적재.
+
+- **산출물**:
+  - `core/dedup.py` — `find_sibling_candidates(features)` within-set pairwise(i<j, self-pair/대칭 제외) + 공통 `_score_candidate` helper로 `find_dedup_candidates`와 스코어링 공유.
+  - `AsyncKrtourMapClient.sync_sibling_candidates` — 탐지 → `ops.dedup_review_queue` upsert (cross-provider `sync_dedup_candidates`와 같은 enqueue 경로).
+  - tests: unit 6(같은 사업장 2슬러그/고유쌍/self-pair 제외/KEEP_SEPARATE/빈·단일/auto_merge 제외) + integration 1(MOIS 2슬러그 적재 → sibling 탐지 → 큐 적재 + FK).
+- **검증(WSL)**: mypy --strict 57 files / ruff All checks passed / import-linter 4 kept / 신규 unit 6 + integration 1 / 전체 **751 passed, 5 skipped**.
+
 ## 2026-06-01 (claude) — krtour-map CLI 골격 + status 명령
 
 **작업**: SPRINT-4 §2.8 CLI entry-point 신설. read-only `status` 명령 + argparse
