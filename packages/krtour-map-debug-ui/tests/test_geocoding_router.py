@@ -24,87 +24,79 @@ pytestmark = pytest.mark.unit
 
 
 def _reverse_ok_payload() -> dict[str, object]:
+    """kraddr-geo ``POST /v2/reverse`` OK — road + parcel candidate 2건."""
+    region = {
+        "sig_cd": "11140",
+        "bjd_cd": "1114010300",
+        "sido": "서울특별시",
+        "sigungu": "중구",
+        "legal_dong": "태평로1가",
+        "admin_dong": "명동",
+    }
     return {
-        "service": {
-            "name": "kraddr-geo",
-            "operation": "reverse_geocode",
-            "version": "2.0",
-            "time": "2026-05-30T00:00:00+00:00",
-        },
         "status": "OK",
-        "input": {
-            "point": {"x": 126.9779, "y": 37.5663},
-            "crs": "EPSG:4326",
-            "type": "both",
-            "zipcode": True,
-            "radius_m": 200,
-        },
-        "result": [
+        "candidates": [
             {
-                "type": "road",
-                "text": "서울특별시 중구 세종대로 110",
-                "structure": {
-                    "level0": "대한민국",
-                    "level1": "서울특별시",
-                    "level2": "중구",
-                    "level4L": "태평로1가",
-                    "level4LC": "1114010300",
-                    "level4A": "명동",
-                    "level4AC": "1114055000",
-                    "level5": "세종대로",
-                    "detail": "110",
+                "confidence": 0.66,
+                "match_kind": "road",
+                "address": {
+                    "full": "서울특별시 중구 세종대로 110",
+                    "road_address": "서울특별시 중구 세종대로 110",
+                    "parcel_address": None,
+                    "postal_code": "04524",
+                    "legal_dong_code": "1114010300",
+                    "admin_dong_code": "1114055000",
+                    "road_name": "세종대로",
+                    "road_name_code": "11140RD01",
                 },
                 "point": {"x": 126.97770, "y": 37.56620},
-                "zipcode": "04524",
                 "distance_m": 20.0,
+                "region": region,
             },
             {
-                "type": "parcel",
-                "text": "서울특별시 중구 태평로1가 31",
-                "structure": {
-                    "level0": "대한민국",
-                    "level1": "서울특별시",
-                    "level2": "중구",
-                    "level4L": "태평로1가",
-                    "level4LC": "1114010300",
-                    "level4A": "명동",
-                    "level4AC": "1114055000",
-                    "level5": "세종대로",
-                    "detail": "31",
+                "confidence": 0.6,
+                "match_kind": "parcel",
+                "address": {
+                    "full": "서울특별시 중구 태평로1가 31",
+                    "road_address": None,
+                    "parcel_address": "서울특별시 중구 태평로1가 31",
+                    "postal_code": "04524",
+                    "legal_dong_code": "1114010300",
+                    "admin_dong_code": "1114055000",
+                    "road_name": None,
+                    "road_name_code": None,
                 },
                 "point": {"x": 126.97770, "y": 37.56620},
-                "zipcode": "04524",
                 "distance_m": 20.0,
+                "region": region,
             },
         ],
     }
 
 
 def _geocode_ok_payload() -> dict[str, object]:
+    """kraddr-geo ``POST /v2/geocode`` OK — road candidate 1건 (confidence 0.95)."""
     return {
-        "service": {
-            "name": "kraddr-geo",
-            "operation": "geocode",
-            "version": "2.0",
-            "time": "2026-05-30T00:00:00+00:00",
-        },
         "status": "OK",
-        "input": {
-            "address": "서울특별시 중구 세종대로 110",
-            "type": "road",
-            "crs": "EPSG:4326",
-            "refine": True,
-            "simple": False,
-            "fallback": "local_only",
-        },
-        "result": {"crs": "EPSG:4326", "point": {"x": 126.9777, "y": 37.5662}},
-        "x_extension": {
-            "source": "local",
-            "confidence": 0.95,
-            "bjd_cd": "1114010300",
-            "rncode_full": "11140RD01",
-            "zip_no": "04524",
-        },
+        "candidates": [
+            {
+                "confidence": 0.95,
+                "match_kind": "road",
+                "address": {
+                    "full": "서울특별시 중구 세종대로 110",
+                    "road_address": "서울특별시 중구 세종대로 110",
+                    "parcel_address": None,
+                    "postal_code": "04524",
+                    "legal_dong_code": "1114010300",
+                    "admin_dong_code": "1114055000",
+                    "road_name": "세종대로",
+                    "road_name_code": "11140RD01",
+                },
+                "point": {"x": 126.9777, "y": 37.5662},
+                "distance_m": None,
+                "region": None,
+            }
+        ],
     }
 
 
@@ -182,10 +174,13 @@ def test_health_no_base_url(restore_httpx_init: object) -> None:
 
 
 def test_reverse_ok_maps_to_address(restore_httpx_init: object) -> None:
-    seen: list[tuple[str, dict[str, str]]] = []
+    import json as _json
+
+    seen: list[tuple[str, str, dict[str, object]]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        seen.append((request.url.path, dict(request.url.params)))
+        body = _json.loads(request.content) if request.content else {}
+        seen.append((request.method, request.url.path, body))
         if request.url.path == "/v1/healthz":
             return httpx.Response(200, json={"status": "ok"})
         return httpx.Response(200, json=_reverse_ok_payload())
@@ -193,12 +188,12 @@ def test_reverse_ok_maps_to_address(restore_httpx_init: object) -> None:
     client = _make_client(handler)
     try:
         r = client.get(
-            "/debug/geocoding/reverse?lon=126.9779&lat=37.5663&type=both&radius_m=200"
+            "/debug/geocoding/reverse?lon=126.9779&lat=37.5663&radius_m=200"
         )
         assert r.status_code == 200
         addr = r.json()["address"]
         assert addr is not None
-        # bjd_cd 10자리 → bjd_code + sigungu_code(5) + sido_code(2) 파생.
+        # bjd 10자리 → bjd_code + sigungu_code(5) + sido_code(2) 파생.
         assert addr["bjd_code"] == "1114010300"
         assert addr["sigungu_code"] == "11140"
         assert addr["sido_code"] == "11"
@@ -207,13 +202,13 @@ def test_reverse_ok_maps_to_address(restore_httpx_init: object) -> None:
         assert addr["road"] == "서울특별시 중구 세종대로 110"
         assert addr["legal"] == "서울특별시 중구 태평로1가 31"
         assert addr["zipcode"] == "04524"
-        # 파라미터가 kraddr-geo에 정확히 전달됐는지.
-        params = seen[0][1]
-        assert seen[0][0] == "/v1/address/reverse"
-        assert params["x"] == "126.9779"
-        assert params["y"] == "37.5663"
-        assert params["type"] == "both"
-        assert params["radius_m"] == "200"
+        # v2: POST /v2/reverse + JSON body(lon/lat/radius_m).
+        method, path, body = seen[0]
+        assert method == "POST"
+        assert path == "/v2/reverse"
+        assert body["lon"] == 126.9779
+        assert body["lat"] == 37.5663
+        assert body["radius_m"] == 200
     finally:
         client._patch_restore()  # type: ignore[attr-defined]
 
@@ -229,19 +224,22 @@ def test_reverse_raw_passes_through(restore_httpx_init: object) -> None:
         r = client.get("/debug/geocoding/reverse/raw?lon=126.9&lat=37.5")
         assert r.status_code == 200
         body = r.json()
-        # raw — kraddr-geo 응답 그대로.
+        # raw — kraddr-geo v2 응답 그대로.
         assert body["status"] == "OK"
-        assert body["service"]["version"] == "2.0"
-        assert len(body["result"]) == 2
+        assert len(body["candidates"]) == 2
+        assert body["candidates"][0]["match_kind"] == "road"
     finally:
         client._patch_restore()  # type: ignore[attr-defined]
 
 
 def test_geocode_ok_maps_to_coord(restore_httpx_init: object) -> None:
-    seen: list[tuple[str, dict[str, str]]] = []
+    import json as _json
+
+    seen: list[tuple[str, str, dict[str, object]]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        seen.append((request.url.path, dict(request.url.params)))
+        body = _json.loads(request.content) if request.content else {}
+        seen.append((request.method, request.url.path, body))
         return httpx.Response(200, json=_geocode_ok_payload())
 
     client = _make_client(handler)
@@ -254,14 +252,18 @@ def test_geocode_ok_maps_to_coord(restore_httpx_init: object) -> None:
         assert coord is not None
         assert coord["lon"] == "126.9777"
         assert coord["lat"] == "37.5662"
-        assert seen[0][0] == "/v1/address/geocode"
-        assert seen[0][1]["type"] == "road"
+        # v2: POST /v2/geocode + road_address(JSON body), fallback 기본 none.
+        method, path, body = seen[0]
+        assert method == "POST"
+        assert path == "/v2/geocode"
+        assert body["road_address"] == "서울 중구"
+        assert body["fallback"] == "none"
     finally:
         client._patch_restore()  # type: ignore[attr-defined]
 
 
 def test_geocode_min_confidence_filters(restore_httpx_init: object) -> None:
-    """x_extension.confidence(0.95) < min_confidence(0.99) → coord None."""
+    """candidate.confidence(0.95) < min_confidence(0.99) → coord None."""
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=_geocode_ok_payload())
@@ -279,7 +281,7 @@ def test_geocode_min_confidence_filters(restore_httpx_init: object) -> None:
 
 def test_reverse_not_found_returns_null(restore_httpx_init: object) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"status": "NOT_FOUND", "result": []})
+        return httpx.Response(200, json={"status": "NOT_FOUND", "candidates": []})
 
     client = _make_client(handler)
     try:
@@ -293,8 +295,8 @@ def test_reverse_not_found_returns_null(restore_httpx_init: object) -> None:
 def test_reverse_max_distance_filter(restore_httpx_init: object) -> None:
     """모든 result의 distance_m가 max_distance_m보다 크면 None."""
     payload = _reverse_ok_payload()
-    for item in payload["result"]:  # type: ignore[union-attr]
-        item["distance_m"] = 500.0  # type: ignore[index]
+    for cand in payload["candidates"]:  # type: ignore[union-attr]
+        cand["distance_m"] = 500.0  # type: ignore[index]
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=payload)
@@ -357,10 +359,13 @@ def test_reverse_raw_502_on_upstream_error(restore_httpx_init: object) -> None:
 
 
 def test_geocode_raw_passes_address(restore_httpx_init: object) -> None:
-    seen: list[dict[str, str]] = []
+    import json as _json
+
+    seen: list[tuple[str, str, dict[str, object]]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        seen.append(dict(request.url.params))
+        body = _json.loads(request.content) if request.content else {}
+        seen.append((request.method, request.url.path, body))
         return httpx.Response(200, json=_geocode_ok_payload())
 
     client = _make_client(handler)
@@ -371,9 +376,13 @@ def test_geocode_raw_passes_address(restore_httpx_init: object) -> None:
         assert r.status_code == 200
         body = r.json()
         assert body["status"] == "OK"
-        assert seen[0]["address"] == "test"
-        assert seen[0]["type"] == "parcel"
-        assert seen[0]["fallback"] == "api"
+        # v2: type=parcel → jibun_address(JSON body), fallback 그대로 전달.
+        method, path, sent = seen[0]
+        assert method == "POST"
+        assert path == "/v2/geocode"
+        assert sent["jibun_address"] == "test"
+        assert sent["fallback"] == "api"
+        assert "road_address" not in sent
     finally:
         client._patch_restore()  # type: ignore[attr-defined]
 

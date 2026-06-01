@@ -80,8 +80,8 @@ class DebugUiSettings(BaseSettings):
     kraddr_geo_base_url: str | None = Field(
         default="http://127.0.0.1:8888",
         description=(
-            "kraddr-geo REST 서비스 base URL. ``KraddrGeoRestClient``가 GET "
-            "``{base}/v1/address/reverse``/``geocode``를 호출. 로컬 공식 "
+            "kraddr-geo REST 서비스 base URL. ``KraddrGeoRestClient``가 POST "
+            "``{base}/v2/reverse``/``geocode``(provider-neutral v2)를 호출. 로컬 공식 "
             "FastAPI 백엔드 포트는 ``http://127.0.0.1:8888`` "
             "(``python-kraddr-geo`` ``docs/ports.md``). ``None``이면 ``/debug/geocoding/`` "
             "라우터는 503 응답."

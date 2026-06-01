@@ -53,35 +53,38 @@ def _make_client(
 
 
 def _reverse_item(**overrides: Any) -> dict[str, Any]:
+    """kraddr-geo v2 candidate(기본 parcel) 1건 — overrides로 필드/하위 dict 교체."""
     base: dict[str, Any] = {
-        "type": "parcel",
-        "text": "서울 중구 태평로1가 31",
-        "structure": {
-            "level0": "대한민국",
-            "level1": "서울특별시",
-            "level2": "중구",
-            "level4L": "태평로1가",
-            "level4LC": "1114010300",
-            "level4A": "명동",
-            "level4AC": "1114055000",
-            "level5": "세종대로",
-            "detail": "31",
+        "confidence": 0.66,
+        "match_kind": "parcel",
+        "address": {
+            "full": "서울 중구 태평로1가 31",
+            "road_address": None,
+            "parcel_address": "서울 중구 태평로1가 31",
+            "postal_code": "04524",
+            "legal_dong_code": "1114010300",
+            "admin_dong_code": "1114055000",
+            "road_name": None,
+            "road_name_code": None,
         },
         "point": {"x": 126.977, "y": 37.566},
-        "zipcode": "04524",
         "distance_m": 10.0,
+        "region": {
+            "sig_cd": "11140",
+            "bjd_cd": "1114010300",
+            "sido": "서울특별시",
+            "sigungu": "중구",
+            "legal_dong": "태평로1가",
+            "admin_dong": "명동",
+        },
     }
     base.update(overrides)
     return base
 
 
 def _reverse_envelope(items: list[dict[str, Any]], status: str = "OK") -> dict[str, Any]:
-    return {
-        "service": {"name": "kraddr-geo", "operation": "reverse_geocode", "version": "2.0"},
-        "status": status,
-        "input": {"point": {"x": 0, "y": 0}, "crs": "EPSG:4326"},
-        "result": items,
-    }
+    """kraddr-geo ``POST /v2/reverse`` 응답 envelope (status + candidates)."""
+    return {"status": status, "candidates": items}
 
 
 def _geocode_envelope(
@@ -89,23 +92,30 @@ def _geocode_envelope(
     status: str = "OK",
     point: tuple[float, float] | None = (126.977, 37.566),
     confidence: float | None = 0.9,
-    extension_extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    body: dict[str, Any] = {
-        "service": {"name": "kraddr-geo", "operation": "geocode", "version": "2.0"},
-        "status": status,
-        "input": {"address": "x", "type": "road"},
+    """kraddr-geo ``POST /v2/geocode`` 응답 envelope.
+
+    ``point=None`` → candidate에 ``point`` 없음(좌표 미보유). ``confidence=None``
+    → candidate에 confidence 0.0 (v2는 항상 confidence 필드를 가짐).
+    """
+    candidate: dict[str, Any] = {
+        "confidence": confidence if confidence is not None else 0.0,
+        "match_kind": "road",
+        "address": {
+            "full": "x",
+            "road_address": "x",
+            "parcel_address": None,
+            "postal_code": None,
+            "legal_dong_code": None,
+            "admin_dong_code": None,
+            "road_name": None,
+            "road_name_code": None,
+        },
+        "point": {"x": point[0], "y": point[1]} if point is not None else None,
+        "distance_m": None,
+        "region": None,
     }
-    if point is not None:
-        body["result"] = {"crs": "EPSG:4326", "point": {"x": point[0], "y": point[1]}}
-    else:
-        body["result"] = None
-    if confidence is not None or extension_extra is not None:
-        ext: dict[str, Any] = {"confidence": confidence if confidence is not None else 0.0}
-        if extension_extra:
-            ext.update(extension_extra)
-        body["x_extension"] = ext
-    return body
+    return {"status": status, "candidates": [candidate]}
 
 
 # ── A1. 네트워크 / 직렬화 장애 ──────────────────────────────────────────
@@ -210,7 +220,7 @@ def test_reverse_unknown_status_returns_null(restore_httpx_init: object) -> None
 
 
 def test_reverse_status_ok_but_empty_result(restore_httpx_init: object) -> None:
-    """status='OK' + result=[] → 매핑 None (no items)."""
+    """status='OK' + candidates=[] → 매핑 None (no candidates)."""
 
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=_reverse_envelope([]))
@@ -228,9 +238,10 @@ def test_reverse_status_ok_but_empty_result(restore_httpx_init: object) -> None:
 
 
 def test_reverse_bjd_invalid_length_drops(restore_httpx_init: object) -> None:
-    """level4LC가 비-10자리 → bjd_code/sigungu/sido 모두 None로 떨어뜨림."""
+    """legal_dong_code/region.bjd_cd가 비-10자리 → bjd_code/sigungu/sido 모두 None."""
     item = _reverse_item()
-    item["structure"]["level4LC"] = "1234"  # 4자리 — 비정상
+    item["address"]["legal_dong_code"] = "1234"  # 4자리 — 비정상
+    item["region"]["bjd_cd"] = "1234"  # fallback도 비정상
 
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=_reverse_envelope([item]))
@@ -249,9 +260,9 @@ def test_reverse_bjd_invalid_length_drops(restore_httpx_init: object) -> None:
 
 
 def test_reverse_admin_dong_invalid_length_drops(restore_httpx_init: object) -> None:
-    """level4AC가 9자리 → admin_dong_code None (validator 거부 회피)."""
+    """admin_dong_code가 9자리 → admin_dong_code None (validator 거부 회피)."""
     item = _reverse_item()
-    item["structure"]["level4AC"] = "111405100"  # 9자리
+    item["address"]["admin_dong_code"] = "111405100"  # 9자리
 
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=_reverse_envelope([item]))
@@ -267,9 +278,9 @@ def test_reverse_admin_dong_invalid_length_drops(restore_httpx_init: object) -> 
 
 
 def test_reverse_zipcode_invalid_length_drops(restore_httpx_init: object) -> None:
-    """zipcode가 6자리(과거 형식 등) → None (5자리만 허용)."""
+    """postal_code가 6자리(과거 형식 등) → None (5자리만 허용)."""
     item = _reverse_item()
-    item["zipcode"] = "123456"
+    item["address"]["postal_code"] = "123456"
 
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=_reverse_envelope([item]))
@@ -284,24 +295,24 @@ def test_reverse_zipcode_invalid_length_drops(restore_httpx_init: object) -> Non
         client._patch_restore()  # type: ignore[attr-defined]
 
 
-# ── A4. structure 결손 ───────────────────────────────────────────────────
+# ── A4. address 코드 field 결손 ──────────────────────────────────────────
 
 
 def test_reverse_all_levels_null(restore_httpx_init: object) -> None:
-    """structure의 모든 level이 None — Address 만들어지지만 모두 None."""
+    """address의 모든 코드 field가 None + region None — Address 만들어지지만 코드 모두 None."""
     item = _reverse_item()
-    item["structure"] = {
-        "level0": "대한민국",
-        "level1": None,
-        "level2": None,
-        "level4L": None,
-        "level4LC": None,
-        "level4A": None,
-        "level4AC": None,
-        "level5": None,
-        "detail": None,
+    # parcel_address만 남기고(legal 채우기 위해) 코드/우편번호는 전부 None.
+    item["address"] = {
+        "full": "서울 중구 태평로1가 31",
+        "road_address": None,
+        "parcel_address": "서울 중구 태평로1가 31",
+        "postal_code": None,
+        "legal_dong_code": None,
+        "admin_dong_code": None,
+        "road_name": None,
+        "road_name_code": None,
     }
-    item["zipcode"] = None
+    item["region"] = None
 
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=_reverse_envelope([item]))
@@ -311,7 +322,7 @@ def test_reverse_all_levels_null(restore_httpx_init: object) -> None:
         r = client.get("/debug/geocoding/reverse?lon=126.9&lat=37.5")
         addr = r.json()["address"]
         assert addr is not None
-        # type=parcel + text "..." → legal 채워짐.
+        # match_kind=parcel + parcel_address → legal 채워짐.
         assert addr["legal"] is not None
         # 나머지 코드/이름은 전부 None.
         assert addr["bjd_code"] is None
@@ -321,19 +332,20 @@ def test_reverse_all_levels_null(restore_httpx_init: object) -> None:
         client._patch_restore()  # type: ignore[attr-defined]
 
 
-# ── A5. result 다건 — 최근접 선택 ────────────────────────────────────────
+# ── A5. candidates 다건 — 최근접 선택 ────────────────────────────────────
 
 
 def test_reverse_picks_closest_among_multiple(restore_httpx_init: object) -> None:
-    """distance_m 최소 item이 대표(bjd 추출/구분명) — text는 type별 매칭."""
-    far_item = _reverse_item(type="parcel", distance_m=300.0)
-    far_item["structure"]["level4LC"] = "9999999999"  # 무관한 bjd
-    far_item["text"] = "멈"
-    near_item = _reverse_item(type="parcel", distance_m=5.0)
-    near_item["text"] = "가깝"
-    # near_item의 structure level4LC 그대로 "1114010300".
-    road_item = _reverse_item(type="road", distance_m=20.0)
-    road_item["text"] = "도로명"
+    """distance_m 최소 candidate가 대표(bjd 추출) — road/parcel은 match_kind별 매칭."""
+    far_item = _reverse_item(match_kind="parcel", distance_m=300.0)
+    far_item["address"]["legal_dong_code"] = "9999999999"  # 무관한 bjd
+    far_item["region"]["bjd_cd"] = "9999999999"
+    far_item["address"]["parcel_address"] = "멈"
+    near_item = _reverse_item(match_kind="parcel", distance_m=5.0)
+    near_item["address"]["parcel_address"] = "가깝"
+    # near_item의 legal_dong_code 그대로 "1114010300".
+    road_item = _reverse_item(match_kind="road", distance_m=20.0)
+    road_item["address"]["road_address"] = "도로명"
 
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=_reverse_envelope([far_item, road_item, near_item]))
@@ -345,9 +357,9 @@ def test_reverse_picks_closest_among_multiple(restore_httpx_init: object) -> Non
         assert addr is not None
         # primary = near_item (distance 5.0)이므로 bjd 1114010300.
         assert addr["bjd_code"] == "1114010300"
-        # legal text = 처음 등장하는 parcel item("멈") — 라이브러리 정책: 순서.
-        assert addr["legal"] in ("멈", "가깝")  # 어느쪽이든 parcel text 매칭
-        # road text는 road item에서.
+        # legal = 처음 등장하는 parcel candidate의 parcel_address — 라이브러리 정책: 순서.
+        assert addr["legal"] in ("멈", "가깝")  # 어느쪽이든 parcel 매칭
+        # road는 road candidate의 road_address에서.
         assert addr["road"] == "도로명"
     finally:
         client._patch_restore()  # type: ignore[attr-defined]
@@ -395,9 +407,9 @@ def test_reverse_item_with_null_point(restore_httpx_init: object) -> None:
 
 
 def test_reverse_item_with_null_zipcode(restore_httpx_init: object) -> None:
-    """zipcode=null도 정상 매핑."""
+    """postal_code=null도 정상 매핑."""
     item = _reverse_item()
-    item["zipcode"] = None
+    item["address"]["postal_code"] = None
 
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=_reverse_envelope([item]))
@@ -412,25 +424,25 @@ def test_reverse_item_with_null_zipcode(restore_httpx_init: object) -> None:
         client._patch_restore()  # type: ignore[attr-defined]
 
 
-# ── A7. geocode — x_extension/confidence boundary ──────────────────────
+# ── A7. geocode — confidence boundary ──────────────────────────────────
 
 
-def test_geocode_no_extension_treats_confidence_zero(restore_httpx_init: object) -> None:
-    """x_extension=null → confidence가 없으므로 min_confidence=0.0 boundary만 통과."""
+def test_geocode_missing_confidence_defaults_zero(restore_httpx_init: object) -> None:
+    """confidence 미제공 candidate → v2 파서가 0.0으로 → min 0.0만 통과, 0.99는 탈락."""
 
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=_geocode_envelope(point=(126.9, 37.5), confidence=None))
 
     client = _make_client(handler)
     try:
-        # x_extension 없음 → 매핑 함수는 ext is None → confidence check skip → coord 정상.
+        # confidence=0.0 → min_confidence=0.0 boundary 통과.
         r = client.get("/debug/geocoding/geocode?address=x&min_confidence=0.0")
         assert r.status_code == 200
         assert r.json()["coord"] is not None
-        # 같은 응답에 min_confidence=0.99이면 — ext 없으므로 통과.
+        # min_confidence=0.99 → 0.0 < 0.99 이므로 candidate 탈락 → coord None.
         r2 = client.get("/debug/geocoding/geocode?address=x&min_confidence=0.99")
         assert r2.status_code == 200
-        assert r2.json()["coord"] is not None
+        assert r2.json()["coord"] is None
     finally:
         client._patch_restore()  # type: ignore[attr-defined]
 
@@ -451,7 +463,7 @@ def test_geocode_confidence_zero_passes_min_zero(restore_httpx_init: object) -> 
 
 
 def test_geocode_status_ok_but_result_null(restore_httpx_init: object) -> None:
-    """status=OK이지만 result=None — coord None."""
+    """status=OK이지만 candidate에 point 없음 — coord None."""
 
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=_geocode_envelope(point=None))

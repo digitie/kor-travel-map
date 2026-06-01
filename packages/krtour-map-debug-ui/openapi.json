@@ -958,20 +958,10 @@
           },
           {
             "in": "query",
-            "name": "refine",
-            "required": false,
-            "schema": {
-              "default": true,
-              "title": "Refine",
-              "type": "boolean"
-            }
-          },
-          {
-            "in": "query",
             "name": "fallback",
             "required": false,
             "schema": {
-              "default": "local_only",
+              "default": "none",
               "title": "Fallback",
               "type": "string"
             }
@@ -1019,6 +1009,7 @@
     },
     "/debug/geocoding/geocode/raw": {
       "get": {
+        "description": "v2 ``POST /v2/geocode`` raw — road/parcel에 따라 입력 필드 분기.",
         "operationId": "geocode_raw_debug_geocoding_geocode_raw_get",
         "parameters": [
           {
@@ -1044,20 +1035,10 @@
           },
           {
             "in": "query",
-            "name": "refine",
-            "required": false,
-            "schema": {
-              "default": true,
-              "title": "Refine",
-              "type": "boolean"
-            }
-          },
-          {
-            "in": "query",
             "name": "fallback",
             "required": false,
             "schema": {
-              "default": "local_only",
+              "default": "none",
               "title": "Fallback",
               "type": "string"
             }
@@ -1142,18 +1123,6 @@
             }
           },
           {
-            "description": "road/parcel/both — kraddr-geo 인자 그대로.",
-            "in": "query",
-            "name": "type",
-            "required": false,
-            "schema": {
-              "default": "both",
-              "description": "road/parcel/both — kraddr-geo 인자 그대로.",
-              "title": "Type",
-              "type": "string"
-            }
-          },
-          {
             "description": "우편번호 포함 여부.",
             "in": "query",
             "name": "zipcode",
@@ -1233,7 +1202,7 @@
     },
     "/debug/geocoding/reverse/raw": {
       "get": {
-        "description": "``KraddrGeoRestClient`` 사용하지 않고 raw HTTP 그대로 — 디버그용.",
+        "description": "``KraddrGeoRestClient`` 사용하지 않고 raw HTTP 그대로 — 디버그용 (v2).",
         "operationId": "reverse_raw_debug_geocoding_reverse_raw_get",
         "parameters": [
           {
@@ -1252,16 +1221,6 @@
             "schema": {
               "title": "Lat",
               "type": "number"
-            }
-          },
-          {
-            "in": "query",
-            "name": "type",
-            "required": false,
-            "schema": {
-              "default": "both",
-              "title": "Type",
-              "type": "string"
             }
           },
           {

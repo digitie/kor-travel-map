@@ -133,10 +133,6 @@ async def reverse_geocode(
     settings: Annotated[DebugUiSettings, Depends(get_settings)],
     lon: Annotated[float, Query(description="경도 (WGS84).")],
     lat: Annotated[float, Query(description="위도 (WGS84).")],
-    type_: Annotated[
-        str,
-        Query(alias="type", description="road/parcel/both — kraddr-geo 인자 그대로."),
-    ] = "both",
     zipcode: Annotated[bool, Query(description="우편번호 포함 여부.")] = True,
     radius_m: Annotated[int | None, Query(ge=1, le=2000)] = None,
     max_distance_m: Annotated[
@@ -147,7 +143,7 @@ async def reverse_geocode(
     client = await _get_rest_client(base_url)
     try:
         response = await client.reverse(
-            lon, lat, type_=type_, zipcode=zipcode, radius_m=radius_m  # type: ignore[arg-type]
+            lon, lat, include_zipcode=zipcode, radius_m=radius_m
         )
     finally:
         await client._http.aclose()  # noqa: SLF001 — 단명 디버그 client
@@ -164,23 +160,21 @@ async def reverse_raw(
     settings: Annotated[DebugUiSettings, Depends(get_settings)],
     lon: Annotated[float, Query()],
     lat: Annotated[float, Query()],
-    type_: Annotated[str, Query(alias="type")] = "both",
     zipcode: Annotated[bool, Query()] = True,
     radius_m: Annotated[int | None, Query(ge=1, le=2000)] = None,
 ) -> dict[str, Any]:
-    """``KraddrGeoRestClient`` 사용하지 않고 raw HTTP 그대로 — 디버그용."""
+    """``KraddrGeoRestClient`` 사용하지 않고 raw HTTP 그대로 — 디버그용 (v2)."""
     base_url = _require_base_url(settings)
-    params: dict[str, Any] = {
-        "x": lon,
-        "y": lat,
-        "type": type_,
-        "zipcode": str(zipcode).lower(),
+    body: dict[str, Any] = {
+        "lon": lon,
+        "lat": lat,
+        "include_zipcode": zipcode,
     }
     if radius_m is not None:
-        params["radius_m"] = radius_m
+        body["radius_m"] = radius_m
     try:
         async with httpx.AsyncClient(base_url=base_url, timeout=10.0) as http:
-            r = await http.get("/v1/address/reverse", params=params)
+            r = await http.post("/v2/reverse", json=body)
         r.raise_for_status()
         return r.json()  # type: ignore[no-any-return]
     except httpx.HTTPStatusError as exc:
@@ -203,8 +197,7 @@ async def geocode(
     settings: Annotated[DebugUiSettings, Depends(get_settings)],
     address: Annotated[str, Query(min_length=1, max_length=200)],
     type_: Annotated[str, Query(alias="type")] = "road",
-    refine: Annotated[bool, Query()] = True,
-    fallback: Annotated[str, Query()] = "local_only",
+    fallback: Annotated[str, Query()] = "none",
     min_confidence: Annotated[float, Query(ge=0, le=1.0)] = 0.0,
 ) -> GeocodeResponseSchema:
     base_url = _require_base_url(settings)
@@ -213,7 +206,6 @@ async def geocode(
         response = await client.geocode(
             address,
             type_=type_,  # type: ignore[arg-type]
-            refine=refine,
             fallback=fallback,  # type: ignore[arg-type]
         )
     finally:
@@ -231,19 +223,18 @@ async def geocode_raw(
     settings: Annotated[DebugUiSettings, Depends(get_settings)],
     address: Annotated[str, Query(min_length=1, max_length=200)],
     type_: Annotated[str, Query(alias="type")] = "road",
-    refine: Annotated[bool, Query()] = True,
-    fallback: Annotated[str, Query()] = "local_only",
+    fallback: Annotated[str, Query()] = "none",
 ) -> dict[str, Any]:
+    """v2 ``POST /v2/geocode`` raw — road/parcel에 따라 입력 필드 분기."""
     base_url = _require_base_url(settings)
-    params: dict[str, Any] = {
-        "address": address,
-        "type": type_,
-        "refine": str(refine).lower(),
-        "fallback": fallback,
-    }
+    body: dict[str, Any] = {"fallback": fallback}
+    if type_ == "parcel":
+        body["jibun_address"] = address
+    else:
+        body["road_address"] = address
     try:
         async with httpx.AsyncClient(base_url=base_url, timeout=10.0) as http:
-            r = await http.get("/v1/address/geocode", params=params)
+            r = await http.post("/v2/geocode", json=body)
         r.raise_for_status()
         return r.json()  # type: ignore[no-any-return]
     except httpx.HTTPStatusError as exc:

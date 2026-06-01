@@ -6,7 +6,7 @@
 - 한국 본토 경계 정점 좌표 — Coordinate 유효 + reverse 동작.
 - 산악·도서 좌표 — kraddr-geo NOT_FOUND/거리 큰 결과 graceful.
 - `radius_m` 변동 — 결과 개수/distance.
-- `type=road` vs `parcel` — text·structure 차이.
+- reverse — road/legal candidate 동시 제공.
 - 같은 좌표 N회 idempotency.
 - 정밀(8자리) 좌표.
 - 부산/대전 round-trip.
@@ -102,7 +102,7 @@ def test_reverse_more_korean_cities(
     sigungu_prefix: str,
     sido_name_part: str,
 ) -> None:
-    r = client.get(f"/debug/geocoding/reverse?lon={lon}&lat={lat}&type=both")
+    r = client.get(f"/debug/geocoding/reverse?lon={lon}&lat={lat}")
     assert r.status_code == 200, f"{name}: {r.text[:200]}"
     addr = r.json()["address"]
     assert addr is not None, name
@@ -117,25 +117,17 @@ def test_reverse_more_korean_cities(
     assert sido_name_part in addr["sido_name"]
 
 
-# ── B2. type=road vs parcel 비교 ────────────────────────────────────────
+# ── B2. reverse — road/legal 동시 제공 ──────────────────────────────────
 
 
-def test_type_road_vs_parcel_differ(client: TestClient) -> None:
-    """같은 좌표라도 type 별로 text는 도로명/지번 형식이 달라야."""
+def test_reverse_provides_road_and_legal(client: TestClient) -> None:
+    """v2 reverse(`type` 파라미터 없음)는 좌표에 대해 road/parcel candidate를
+    함께 받아 road·legal을 한 번에 채운다 (도시청 일대면 둘 다 존재)."""
     base = "lon=126.9779&lat=37.5663"
-    r_both = client.get(f"/debug/geocoding/reverse?{base}&type=both").json()["address"]
-    r_road = client.get(f"/debug/geocoding/reverse?{base}&type=road").json()["address"]
-    r_parcel = client.get(f"/debug/geocoding/reverse?{base}&type=parcel").json()["address"]
-
-    # type=road면 road text 있음, type=parcel은 legal text 있음.
-    assert r_road is not None
-    assert r_road["road"] is not None
-    assert r_road["legal"] is None  # parcel item이 응답에 없으므로
-    assert r_parcel is not None
-    assert r_parcel["legal"] is not None
-    # both는 양쪽 가능.
-    assert r_both is not None
-    assert r_both["road"] is not None or r_both["legal"] is not None
+    addr = client.get(f"/debug/geocoding/reverse?{base}").json()["address"]
+    assert addr is not None
+    # 서울 중구 도시청 일대 — road 또는 legal 중 최소 하나는 있어야.
+    assert addr["road"] is not None or addr["legal"] is not None
 
 
 # ── B3. radius_m 변동 ──────────────────────────────────────────────────
@@ -145,15 +137,15 @@ def test_type_road_vs_parcel_differ(client: TestClient) -> None:
 def test_radius_m_variations(client: TestClient, radius: int) -> None:
     """다양한 반경 — distance_m가 radius 이내(원본 응답 기준)."""
     r = client.get(
-        f"/debug/geocoding/reverse/raw?lon=126.9779&lat=37.5663&type=both&radius_m={radius}"
+        f"/debug/geocoding/reverse/raw?lon=126.9779&lat=37.5663&radius_m={radius}"
     )
     assert r.status_code == 200, f"radius={radius}: {r.text[:200]}"
     body = r.json()
     assert body["status"] in ("OK", "NOT_FOUND")
-    if body["result"]:
-        # 반환된 결과는 모두 radius_m 이내(kraddr-geo가 보장).
-        for item in body["result"]:
-            d = item.get("distance_m")
+    if body.get("candidates"):
+        # 반환된 candidate는 모두 radius_m 이내(kraddr-geo가 보장).
+        for cand in body["candidates"]:
+            d = cand.get("distance_m")
             if d is not None:
                 assert d <= radius, f"distance_m={d} > radius_m={radius}"
 
@@ -162,7 +154,7 @@ def test_radius_m_variations(client: TestClient, radius: int) -> None:
 
 
 def test_same_coord_five_calls_idempotent(client: TestClient) -> None:
-    base = "/debug/geocoding/reverse?lon=126.9779&lat=37.5663&type=both"
+    base = "/debug/geocoding/reverse?lon=126.9779&lat=37.5663"
     addrs = [client.get(base).json()["address"] for _ in range(5)]
     first = addrs[0]
     assert first is not None
@@ -179,7 +171,7 @@ def test_same_coord_five_calls_idempotent(client: TestClient) -> None:
 def test_high_precision_coord_handled(client: TestClient) -> None:
     """8자리 소수 좌표 — kraddr-geo가 받아들이고 결과가 동일 지역."""
     r = client.get(
-        "/debug/geocoding/reverse?lon=126.97791234&lat=37.56631234&type=both"
+        "/debug/geocoding/reverse?lon=126.97791234&lat=37.56631234"
     )
     assert r.status_code == 200
     addr = r.json()["address"]
@@ -196,7 +188,7 @@ def test_round_trip_busan(client: TestClient) -> None:
     from urllib.parse import quote
 
     r1 = client.get(
-        "/debug/geocoding/reverse?lon=129.0756&lat=35.1796&type=both"
+        "/debug/geocoding/reverse?lon=129.0756&lat=35.1796"
     )
     assert r1.status_code == 200
     addr = r1.json()["address"]
@@ -234,7 +226,7 @@ def test_boundary_coords_graceful(
     """경계 부근 — 200(매핑 null 또는 정상) 또는 5xx(upstream reject) 둘 다
     허용. 어느 쪽이든 라이브러리 측 예외 누수 없음."""
     r = client.get(
-        f"/debug/geocoding/reverse?lon={lon}&lat={lat}&type=both&radius_m=500"
+        f"/debug/geocoding/reverse?lon={lon}&lat={lat}&radius_m=500"
     )
     assert r.status_code in (200, 502), f"{desc}: unexpected {r.status_code}"
     if r.status_code == 200:
@@ -277,9 +269,9 @@ def test_geocode_address_over_200_returns_422(client: TestClient) -> None:
 # ── B9. 다양한 fallback 모드 ──────────────────────────────────────────
 
 
-@pytest.mark.parametrize("fallback", ["off", "local_only"])
+@pytest.mark.parametrize("fallback", ["none", "api"])
 def test_geocode_fallback_modes(client: TestClient, fallback: str) -> None:
-    """fallback off/local_only — 200 + (NOT_FOUND이면 coord None, OK면 좌표)."""
+    """v2 fallback none/api — 200 + (NOT_FOUND이면 coord None, OK면 좌표)."""
     from urllib.parse import quote
 
     addr = "서울특별시 중구 세종대로 110"

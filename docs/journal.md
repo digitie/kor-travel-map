@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-01 (claude) — geocoding kraddr-geo v1 → v2 전면 전환
+
+**작업**: 사용자 지시 — geocoder API를 v1(`GET /v1/address/*`, vworld level 파싱)
+에서 v2(`POST /v2/{reverse,geocode}`, provider-neutral structured field)로 **완전
+대체**. v2는 `CandidateV2.address.legal_dong_code` 등을 직접 제공해 level4LC 파싱이
+사라진다.
+
+- **산출물**:
+  - `src/krtour/map/geocoding.py` 전면 재작성 — Protocol(`KraddrAddressV2`/`KraddrRegionV2`/`KraddrCandidateV2`/`KraddrReverseV2Response`/`KraddrGeocodeV2Response`) + `reverse_response_to_address`/`geocode_response_to_coordinate`(이름 유지, v2 응답 입력) + `KraddrGeoRestClient`(`base_path='/v2'`, POST body) + 팩토리. v2 reverse도 road_name_code 제공.
+  - debug-ui `routers/geocoding.py` — reverse `type` 파라미터 제거, geocode `refine` 제거·`fallback` 기본 `none`, raw path `GET /v1/address/*`→`POST /v2/*`. `settings.py` 설명 갱신. openapi.json 재생성(drift green).
+  - 테스트: `tests/unit/test_geocoding.py`(41) + debug-ui geocoding router 4파일 v2 wire shape로 재작성(서브에이전트). `docs/address-geocoding.md` §3.1 v2 매핑표.
+- **검증(WSL)**: mypy --strict main 57 + debug-ui 12 / ruff All checks passed / import-linter 4 kept / openapi drift EXIT=0 / 전체 main **756 passed** + debug-ui **158 passed**. v2 실연동(`127.0.0.1:8888`): reverse 종로구 → bjd 1111014700, geocode 왕복 정상.
+
 ## 2026-06-01 (claude) — geocoder 보강 라이브 재검증 (kraddr-geo REST)
 
 **작업**: MOIS 실데이터 라이브 테스트의 미검증 항목(geocoder 보강 실연동)을

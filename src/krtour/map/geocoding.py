@@ -2,26 +2,25 @@
 
 좌표 ↔ 행정구역 보강(정/역지오코딩)을 본 라이브러리 ``Address`` / ``Coordinate``
 DTO로 정규화한다. geocoding 엔진은 별도 서비스 **``kraddr-geo``** (FastAPI,
-``/v1/address/*``)가 담당하고, 본 모듈은 그 **REST 응답**(``ReverseResponse`` /
-``GeocodeResponse``, API version 2.0)을 본 라이브러리 DTO로 옮기는 **순수 변환
-함수** + HTTP 클라이언트 + 비동기 콜러블 어댑터만 둔다.
+provider-neutral ``POST /v2/{reverse,geocode}``)가 담당하고, 본 모듈은 그 **REST
+응답**(``ReverseV2Response`` / ``GeocodeV2Response``)을 본 라이브러리 DTO로 옮기는
+**순수 변환 함수** + HTTP 클라이언트 + 비동기 콜러블 어댑터만 둔다.
 
-전환 배경 (python API → REST API v2)
-------------------------------------
-이전 구현은 ``kraddr-geo`` **in-process python 클라이언트**(``AsyncAddressClient``)의
-``reverse_v2``/``geocode_v2``를 가정했으나, 그 메서드는 현재 ``kraddr-geo``에
-존재하지 않으며(API 미존재), python 클라이언트는 ``kraddr-geo`` **자체 DB
-엔진**을 필요로 해 강한 결합을 만든다. 따라서 ``kraddr-geo``를 **독립 REST
-서비스**로 호출하도록 전환한다 (호출 측은 서비스 URL만 알면 되고, DB/패키지
-의존이 사라진다). 코드 변환 기준은 ``docs/address-geocoding.md`` 참조.
+v2 (provider-neutral) 전환
+--------------------------
+이전 구현은 kraddr-geo ``GET /v1/address/{reverse,geocode}``(JUSO 호환,
+``structure.level4LC`` 파싱)를 호출했으나, 현재 정본은 **``POST /v2/*``**
+(``CandidateV2.address.legal_dong_code`` 등 **structured field 직접 제공** +
+``confidence``/``distance_m``/``match_kind``)다. v2는 vworld level 파싱 없이
+법정동코드를 바로 받으므로 본 모듈은 v2로 전환한다 (kraddr-geo
+``src/kraddr/geo/dto/v2.py`` 정합).
 
 설계 — ADR-006(provider wrapper 금지) 정신 동일
 ------------------------------------------------
 - ``kraddr-geo`` / ``httpx``를 **런타임 import 하지 않는다**. REST 응답
-  (``ReverseResponse``/``GeocodeResponse``/``AddressStructure``/``Point``/
-  ``GeocodeExtension``)의 **structural Protocol**만 정의하고, 호출 측이
-  주입한 ``httpx.AsyncClient``로 HTTP를 친다 (ADR-044 — 정합성 1차 책임은
-  kraddr-geo).
+  (``ReverseV2Response``/``GeocodeV2Response``/``CandidateV2``/``AddressV2``/
+  ``RegionV2``/``Point``)의 **structural Protocol**만 정의하고, 호출 측이 주입한
+  ``httpx.AsyncClient``로 HTTP를 친다 (ADR-044 — 정합성 1차 책임은 kraddr-geo).
 - 변환 함수(``reverse_response_to_address``/``geocode_response_to_coordinate``)는
   동기·순수라 ``kraddr-geo``/HTTP 없이 fake 응답으로 단위 테스트된다.
 - async 콜러블 팩토리(``kraddr_geo_reverse_geocoder``/``kraddr_geo_address_geocoder``)는
@@ -43,9 +42,8 @@ ADR 참조
 from __future__ import annotations
 
 import math
-import re
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
@@ -67,12 +65,11 @@ __all__ = [
     "cached_reverse_geocoder",
     # kraddr-geo REST v2 응답 structural Protocol
     "KraddrPoint",
-    "KraddrAddressStructure",
-    "KraddrReverseResultItem",
-    "KraddrReverseResponse",
-    "KraddrGeocodeResult",
-    "KraddrGeocodeExtension",
-    "KraddrGeocodeResponse",
+    "KraddrAddressV2",
+    "KraddrRegionV2",
+    "KraddrCandidateV2",
+    "KraddrReverseV2Response",
+    "KraddrGeocodeV2Response",
     # 순수 변환 함수
     "reverse_response_to_address",
     "geocode_response_to_coordinate",
@@ -131,10 +128,9 @@ def cached_reverse_geocoder(
 
 # -- kraddr-geo REST v2 응답 structural Protocol ------------------------------
 #
-# kraddr.geo.dto 모델과 필드명 1:1 (kraddr-geo를 import하지 않고 구조만 의존).
-# AddressStructure는 vworld 호환 level 명명: level1=시도 / level2=시군구 /
-# level4L=법정리·읍면동 / level4LC=법정동코드(10) / level4A=행정동 /
-# level4AC=행정동코드(10) / level5=도로명 (kraddr.geo.core.responses 참조).
+# kraddr.geo.dto.v2 모델과 필드명 1:1 (kraddr-geo를 import하지 않고 구조만 의존).
+# CandidateV2.address.legal_dong_code(10) / admin_dong_code(10) / road_name_code /
+# region.bjd_cd / region.sido / region.sigungu (kraddr.geo.dto.v2 참조).
 
 
 @runtime_checkable
@@ -148,207 +144,230 @@ class KraddrPoint(Protocol):
 
 
 @runtime_checkable
-class KraddrAddressStructure(Protocol):
-    """kraddr-geo ``AddressStructure`` — vworld 호환 level 구조."""
+class KraddrAddressV2(Protocol):
+    """kraddr-geo ``AddressV2`` — structured 주소 (코드 직접 제공)."""
 
     @property
-    def level1(self) -> str | None: ...
+    def full(self) -> str: ...
     @property
-    def level2(self) -> str | None: ...
+    def road_address(self) -> str | None: ...
     @property
-    def level4L(self) -> str | None: ...
+    def parcel_address(self) -> str | None: ...
     @property
-    def level4LC(self) -> str | None: ...
+    def postal_code(self) -> str | None: ...
     @property
-    def level4A(self) -> str | None: ...
+    def legal_dong_code(self) -> str | None: ...
     @property
-    def level4AC(self) -> str | None: ...
+    def admin_dong_code(self) -> str | None: ...
     @property
-    def level5(self) -> str | None: ...
+    def road_name(self) -> str | None: ...
     @property
-    def detail(self) -> str | None: ...
-
-
-@runtime_checkable
-class KraddrReverseResultItem(Protocol):
-    """kraddr-geo ``ReverseResultItem`` — reverse 결과 1건 (road 또는 parcel)."""
-
-    @property
-    def type(self) -> str: ...
-    @property
-    def text(self) -> str: ...
-    @property
-    def structure(self) -> KraddrAddressStructure: ...
-    @property
-    def point(self) -> KraddrPoint | None: ...
-    @property
-    def zipcode(self) -> str | None: ...
-    @property
-    def distance_m(self) -> float | None: ...
+    def road_name_code(self) -> str | None: ...
 
 
 @runtime_checkable
-class KraddrReverseResponse(Protocol):
-    """kraddr-geo ``ReverseResponse``."""
+class KraddrRegionV2(Protocol):
+    """kraddr-geo ``RegionV2`` — 행정구역 명칭/코드."""
 
     @property
-    def status(self) -> str: ...
+    def bjd_cd(self) -> str | None: ...
     @property
-    def result(self) -> tuple[KraddrReverseResultItem, ...]: ...
+    def sido(self) -> str | None: ...
+    @property
+    def sigungu(self) -> str | None: ...
+    @property
+    def legal_dong(self) -> str | None: ...
+    @property
+    def admin_dong(self) -> str | None: ...
 
 
 @runtime_checkable
-class KraddrGeocodeResult(Protocol):
-    """kraddr-geo ``GeocodeResult`` — 정지오코딩 좌표."""
-
-    @property
-    def point(self) -> KraddrPoint: ...
-
-
-@runtime_checkable
-class KraddrGeocodeExtension(Protocol):
-    """kraddr-geo ``GeocodeExtension`` — confidence + 코드 보강."""
+class KraddrCandidateV2(Protocol):
+    """kraddr-geo ``CandidateV2`` — reverse/geocode 결과 1건."""
 
     @property
     def confidence(self) -> float: ...
     @property
-    def bjd_cd(self) -> str | None: ...
+    def match_kind(self) -> str: ...
     @property
-    def rncode_full(self) -> str | None: ...
+    def address(self) -> KraddrAddressV2 | None: ...
     @property
-    def zip_no(self) -> str | None: ...
+    def point(self) -> KraddrPoint | None: ...
+    @property
+    def distance_m(self) -> float | None: ...
+    @property
+    def region(self) -> KraddrRegionV2 | None: ...
 
 
 @runtime_checkable
-class KraddrGeocodeResponse(Protocol):
-    """kraddr-geo ``GeocodeResponse``."""
+class KraddrReverseV2Response(Protocol):
+    """kraddr-geo ``ReverseV2Response``."""
 
     @property
     def status(self) -> str: ...
     @property
-    def result(self) -> KraddrGeocodeResult | None: ...
+    def candidates(self) -> tuple[KraddrCandidateV2, ...]: ...
+
+
+@runtime_checkable
+class KraddrGeocodeV2Response(Protocol):
+    """kraddr-geo ``GeocodeV2Response``."""
+
     @property
-    def x_extension(self) -> KraddrGeocodeExtension | None: ...
+    def status(self) -> str: ...
+    @property
+    def candidates(self) -> tuple[KraddrCandidateV2, ...]: ...
 
 
 # -- 내부 helper --------------------------------------------------------------
 
-_FIVE_DIGITS = re.compile(r"^\d{5}$")
-_TEN_DIGITS = re.compile(r"^\d{10}$")
 _STATUS_OK = "OK"
 _TYPE_ROAD = "road"
 _TYPE_PARCEL = "parcel"
 
 
-def _digits_or_none(value: str | None, pattern: re.Pattern[str]) -> str | None:
-    """``value``가 패턴(자릿수)에 맞으면 그대로, 아니면 ``None`` (검증 거부 회피)."""
+def _closest_candidate(
+    candidates: tuple[KraddrCandidateV2, ...],
+) -> KraddrCandidateV2:
+    """``distance_m`` 최소 항목 (None은 뒤로). candidates는 비어있지 않다고 가정."""
+    return min(
+        candidates,
+        key=lambda c: c.distance_m if c.distance_m is not None else math.inf,
+    )
+
+
+def _five_digits_or_none(value: str | None) -> str | None:
     if value is None:
         return None
     text = value.strip()
-    return text if pattern.match(text) else None
-
-
-def _closest_item(
-    items: tuple[KraddrReverseResultItem, ...],
-) -> KraddrReverseResultItem:
-    """``distance_m`` 최소 항목 (None은 뒤로). items는 비어있지 않다고 가정."""
-    return min(
-        items,
-        key=lambda it: it.distance_m if it.distance_m is not None else math.inf,
-    )
+    return text if (len(text) == 5 and text.isdigit()) else None
 
 
 # -- 순수 변환 함수 -----------------------------------------------------------
 
 
 def reverse_response_to_address(
-    response: KraddrReverseResponse,
+    response: KraddrReverseV2Response,
     *,
     max_distance_m: float | None = None,
 ) -> Address | None:
-    """kraddr-geo ``reverse`` 응답 → 본 라이브러리 ``Address``.
+    """kraddr-geo ``POST /v2/reverse`` 응답 → 본 라이브러리 ``Address``.
 
-    ``status != "OK"`` 이거나 (거리 필터 적용 후) 결과가 없으면 ``None``.
-    가장 가까운 항목을 대표(코드·명칭)로, road/parcel 항목 text를 각각
-    ``road``/``legal``에 채운다.
+    ``status != "OK"`` 이거나 (거리 필터 적용 후) candidate가 없으면 ``None``.
+    가장 가까운 candidate를 대표(코드·명칭)로, road/parcel candidate를 각각
+    ``road``/``legal``에 채운다. v2는 ``address.legal_dong_code``/``road_name_code``
+    등을 직접 제공하므로 vworld level 파싱이 없다.
 
-    매핑 (``docs/address-geocoding.md`` / kraddr.geo.core.responses)
-        - ``bjd_code`` ← ``structure.level4LC`` (법정동코드 10자리)
+    매핑 (kraddr.geo.dto.v2)
+        - ``bjd_code`` ← ``address.legal_dong_code`` (또는 ``region.bjd_cd``)
+        - ``admin_dong_code`` ← ``address.admin_dong_code`` (10자리만)
+        - ``road_name_code`` ← ``address.road_name_code``
         - ``sigungu_code`` / ``sido_code`` ← bjd_code에서 파생
-        - ``admin_dong_code`` ← ``structure.level4AC`` (10자리만)
-        - ``road`` ← road 항목 ``text`` (없으면 ``structure.level5`` 도로명)
-        - ``legal`` ← parcel 항목 ``text``
-        - ``admin`` ← ``structure.level4A``(행정동) 또는 ``level4L``
-        - ``zipcode`` ← 대표 항목 ``zipcode`` (5자리만)
-        - ``sido_name``/``sigungu_name`` ← ``structure.level1``/``level2``
+        - ``road`` ← road candidate ``address.road_address`` (없으면 ``address.full``)
+        - ``legal`` ← parcel candidate ``address.parcel_address``
+        - ``admin`` ← ``region.admin_dong`` 또는 ``region.legal_dong``
+        - ``zipcode`` ← 대표 candidate ``address.postal_code`` (5자리만)
+        - ``sido_name``/``sigungu_name`` ← ``region.sido``/``region.sigungu``
 
     Notes
     -----
-    reverse ``AddressStructure``에는 도로명코드가 없어 ``road_name_code``는
-    채우지 않는다 (geocode ``x_extension.rncode_full``에만 존재). 잘못된 자릿수
-    코드/우편번호는 ``None``으로 떨어뜨려 ``Address`` validator 거부를 피한다.
+    잘못된 자릿수 코드/우편번호는 ``None``으로 떨어뜨려 ``Address`` validator 거부를
+    피한다 (kraddr-geo가 비정형 코드를 돌려줘도 reverse 전체가 깨지지 않게).
     """
-    if response.status != _STATUS_OK or not response.result:
+    if response.status != _STATUS_OK or not response.candidates:
         return None
-    items = response.result
+    cands = response.candidates
     if max_distance_m is not None:
-        items = tuple(
-            it
-            for it in items
-            if it.distance_m is None or it.distance_m <= max_distance_m
+        cands = tuple(
+            c
+            for c in cands
+            if c.distance_m is None or c.distance_m <= max_distance_m
         )
-        if not items:
+        if not cands:
             return None
 
-    primary = _closest_item(items)
-    struct = primary.structure
-    road_text = next((it.text for it in items if it.type == _TYPE_ROAD), None)
-    parcel_text = next((it.text for it in items if it.type == _TYPE_PARCEL), None)
+    primary = _closest_candidate(cands)
+    paddr = primary.address
+    region = primary.region
 
-    # `normalize_bjd_code`는 비-10자리 입력에 `ValueError` raise — kraddr-geo가
-    # 어쩌다 비정형 `level4LC`(예: 짧은 임시 코드)를 돌려줘도 reverse 전체가
-    # 깨지지 않도록 graceful drop (None 처리, Address validator도 None 허용).
+    road_addr = next(
+        (
+            c.address.road_address
+            for c in cands
+            if c.match_kind == _TYPE_ROAD and c.address is not None
+        ),
+        None,
+    )
+    parcel_addr = next(
+        (
+            c.address.parcel_address
+            for c in cands
+            if c.match_kind == _TYPE_PARCEL and c.address is not None
+        ),
+        None,
+    )
+
+    # legal_dong_code 우선, 없으면 region.bjd_cd. 비-10자리는 graceful drop.
+    raw_bjd = (paddr.legal_dong_code if paddr else None) or (
+        region.bjd_cd if region else None
+    )
     try:
-        bjd_code = normalize_bjd_code(struct.level4LC)
+        bjd_code = normalize_bjd_code(raw_bjd)
     except ValueError:
         bjd_code = None
+
+    admin_dong_code = paddr.admin_dong_code if paddr else None
+    if admin_dong_code is not None and not (
+        len(admin_dong_code) == 10 and admin_dong_code.isdigit()
+    ):
+        admin_dong_code = None
+
+    road_value = road_addr or (paddr.road_address if paddr else None) or (
+        paddr.full if paddr else None
+    )
+    admin_value = (region.admin_dong or region.legal_dong) if region else None
+
     return Address(
-        road=normalize_korean_text(road_text or struct.level5),
-        legal=normalize_korean_text(parcel_text),
-        admin=normalize_korean_text(struct.level4A or struct.level4L),
+        road=normalize_korean_text(road_value),
+        legal=normalize_korean_text(parcel_addr),
+        admin=normalize_korean_text(admin_value),
         bjd_code=bjd_code,
-        admin_dong_code=_digits_or_none(struct.level4AC, _TEN_DIGITS),
+        admin_dong_code=admin_dong_code,
         sigungu_code=extract_sigungu_code(bjd_code),
         sido_code=extract_sido_code(bjd_code),
-        road_name_code=None,
-        zipcode=_digits_or_none(primary.zipcode, _FIVE_DIGITS),
-        sido_name=normalize_korean_text(struct.level1),
-        sigungu_name=normalize_korean_text(struct.level2),
+        road_name_code=(paddr.road_name_code if paddr else None),
+        zipcode=_five_digits_or_none(paddr.postal_code if paddr else None),
+        sido_name=normalize_korean_text(region.sido if region else None),
+        sigungu_name=normalize_korean_text(region.sigungu if region else None),
     )
 
 
 def geocode_response_to_coordinate(
-    response: KraddrGeocodeResponse,
+    response: KraddrGeocodeV2Response,
     *,
     min_confidence: float = 0.0,
 ) -> Coordinate | None:
-    """kraddr-geo ``geocode`` 응답 → ``Coordinate`` (WGS84).
+    """kraddr-geo ``POST /v2/geocode`` 응답 → ``Coordinate`` (WGS84).
 
-    ``status != "OK"`` 이거나 ``result`` 좌표가 없으면 ``None``.
-    ``x_extension.confidence``가 ``min_confidence`` 미만이면 ``None``.
-    ``result.point.x/y``를 lon/lat으로.
+    ``status != "OK"`` 이거나 좌표 있는 candidate가 없으면 ``None``.
+    ``confidence``가 ``min_confidence`` 미만인 candidate는 제외하고, 남은 것 중
+    confidence 최댓값 candidate의 ``point.x/y``를 lon/lat으로.
     """
-    if response.status != _STATUS_OK or response.result is None:
+    if response.status != _STATUS_OK or not response.candidates:
         return None
-    ext = response.x_extension
-    if ext is not None and ext.confidence < min_confidence:
+    usable = [
+        c
+        for c in response.candidates
+        if c.point is not None and c.confidence >= min_confidence
+    ]
+    if not usable:
         return None
-    point = response.result.point
+    best = max(usable, key=lambda c: c.confidence)
+    point = best.point
+    if point is None:  # pragma: no cover — usable 필터로 보장
+        return None
     try:
-        return Coordinate(
-            lon=Decimal(str(point.x)),
-            lat=Decimal(str(point.y)),
-        )
+        return Coordinate(lon=Decimal(str(point.x)), lat=Decimal(str(point.y)))
     except (InvalidOperation, ValueError):
         return None
 
@@ -363,51 +382,46 @@ class _RestPoint:
 
 
 @dataclass(frozen=True)
-class _RestStructure:
-    level1: str | None = None
-    level2: str | None = None
-    level4L: str | None = None
-    level4LC: str | None = None
-    level4A: str | None = None
-    level4AC: str | None = None
-    level5: str | None = None
-    detail: str | None = None
+class _RestAddressV2:
+    full: str = ""
+    road_address: str | None = None
+    parcel_address: str | None = None
+    postal_code: str | None = None
+    legal_dong_code: str | None = None
+    admin_dong_code: str | None = None
+    road_name: str | None = None
+    road_name_code: str | None = None
 
 
 @dataclass(frozen=True)
-class _RestReverseItem:
-    type: str
-    text: str
-    structure: _RestStructure
-    point: _RestPoint | None = None
-    zipcode: str | None = None
-    distance_m: float | None = None
-
-
-@dataclass(frozen=True)
-class _RestReverseResponse:
-    status: str
-    result: tuple[_RestReverseItem, ...] = ()
-
-
-@dataclass(frozen=True)
-class _RestGeocodeResult:
-    point: _RestPoint
-
-
-@dataclass(frozen=True)
-class _RestGeocodeExtension:
-    confidence: float = 0.0
+class _RestRegionV2:
     bjd_cd: str | None = None
-    rncode_full: str | None = None
-    zip_no: str | None = None
+    sido: str | None = None
+    sigungu: str | None = None
+    legal_dong: str | None = None
+    admin_dong: str | None = None
 
 
 @dataclass(frozen=True)
-class _RestGeocodeResponse:
+class _RestCandidateV2:
+    confidence: float = 0.0
+    match_kind: str = ""
+    address: _RestAddressV2 | None = None
+    point: _RestPoint | None = None
+    distance_m: float | None = None
+    region: _RestRegionV2 | None = None
+
+
+@dataclass(frozen=True)
+class _RestReverseV2Response:
     status: str
-    result: _RestGeocodeResult | None = None
-    x_extension: _RestGeocodeExtension | None = None
+    candidates: tuple[_RestCandidateV2, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True)
+class _RestGeocodeV2Response:
+    status: str
+    candidates: tuple[_RestCandidateV2, ...] = field(default_factory=tuple)
 
 
 def _parse_point(data: dict[str, Any] | None) -> _RestPoint | None:
@@ -416,56 +430,57 @@ def _parse_point(data: dict[str, Any] | None) -> _RestPoint | None:
     return _RestPoint(x=float(data["x"]), y=float(data["y"]))
 
 
-def _parse_structure(data: dict[str, Any] | None) -> _RestStructure:
-    data = data or {}
-    return _RestStructure(
-        level1=data.get("level1"),
-        level2=data.get("level2"),
-        level4L=data.get("level4L"),
-        level4LC=data.get("level4LC"),
-        level4A=data.get("level4A"),
-        level4AC=data.get("level4AC"),
-        level5=data.get("level5"),
-        detail=data.get("detail"),
+def _parse_address_v2(data: dict[str, Any] | None) -> _RestAddressV2 | None:
+    if not data:
+        return None
+    return _RestAddressV2(
+        full=str(data.get("full", "")),
+        road_address=data.get("road_address"),
+        parcel_address=data.get("parcel_address"),
+        postal_code=data.get("postal_code"),
+        legal_dong_code=data.get("legal_dong_code"),
+        admin_dong_code=data.get("admin_dong_code"),
+        road_name=data.get("road_name"),
+        road_name_code=data.get("road_name_code"),
     )
 
 
-def _parse_reverse_response(data: dict[str, Any]) -> _RestReverseResponse:
-    items = tuple(
-        _RestReverseItem(
-            type=str(item.get("type", "")),
-            text=str(item.get("text", "")),
-            structure=_parse_structure(item.get("structure")),
-            point=_parse_point(item.get("point")),
-            zipcode=item.get("zipcode"),
-            distance_m=(
-                float(item["distance_m"]) if item.get("distance_m") is not None else None
-            ),
-        )
-        for item in data.get("result", ())
+def _parse_region_v2(data: dict[str, Any] | None) -> _RestRegionV2 | None:
+    if not data:
+        return None
+    return _RestRegionV2(
+        bjd_cd=data.get("bjd_cd"),
+        sido=data.get("sido"),
+        sigungu=data.get("sigungu"),
+        legal_dong=data.get("legal_dong"),
+        admin_dong=data.get("admin_dong"),
     )
-    return _RestReverseResponse(status=str(data.get("status", "ERROR")), result=items)
 
 
-def _parse_geocode_response(data: dict[str, Any]) -> _RestGeocodeResponse:
-    result_data = data.get("result")
-    point = _parse_point(result_data.get("point")) if result_data else None
-    result = _RestGeocodeResult(point=point) if point is not None else None
-    ext_data = data.get("x_extension")
-    extension = (
-        _RestGeocodeExtension(
-            confidence=float(ext_data.get("confidence", 0.0)),
-            bjd_cd=ext_data.get("bjd_cd"),
-            rncode_full=ext_data.get("rncode_full"),
-            zip_no=ext_data.get("zip_no"),
-        )
-        if ext_data
-        else None
+def _parse_candidate_v2(data: dict[str, Any]) -> _RestCandidateV2:
+    return _RestCandidateV2(
+        confidence=float(data.get("confidence", 0.0)),
+        match_kind=str(data.get("match_kind", "")),
+        address=_parse_address_v2(data.get("address")),
+        point=_parse_point(data.get("point")),
+        distance_m=(
+            float(data["distance_m"]) if data.get("distance_m") is not None else None
+        ),
+        region=_parse_region_v2(data.get("region")),
     )
-    return _RestGeocodeResponse(
-        status=str(data.get("status", "ERROR")),
-        result=result,
-        x_extension=extension,
+
+
+def _parse_reverse_response(data: dict[str, Any]) -> _RestReverseV2Response:
+    cands = tuple(_parse_candidate_v2(c) for c in data.get("candidates", ()))
+    return _RestReverseV2Response(
+        status=str(data.get("status", "ERROR")), candidates=cands
+    )
+
+
+def _parse_geocode_response(data: dict[str, Any]) -> _RestGeocodeV2Response:
+    cands = tuple(_parse_candidate_v2(c) for c in data.get("candidates", ()))
+    return _RestGeocodeV2Response(
+        status=str(data.get("status", "ERROR")), candidates=cands
     )
 
 
@@ -473,17 +488,17 @@ def _parse_geocode_response(data: dict[str, Any]) -> _RestGeocodeResponse:
 
 
 class KraddrGeoRestClient:
-    """kraddr-geo REST API v2 (``/v1/address/*``) 비동기 클라이언트.
+    """kraddr-geo REST API v2 (``POST /v2/{reverse,geocode}``) 비동기 클라이언트.
 
-    ``httpx.AsyncClient``를 주입받아 ``GET /v1/address/reverse`` /
-    ``GET /v1/address/geocode``를 호출하고 JSON을 structural 응답 객체로 파싱한다.
-    호스트는 주입한 ``httpx.AsyncClient``의 ``base_url``로 설정 (로컬 개발 예:
+    ``httpx.AsyncClient``를 주입받아 ``POST /v2/reverse`` / ``POST /v2/geocode``를
+    호출하고 JSON을 structural 응답 객체로 파싱한다. 호스트는 주입한
+    ``httpx.AsyncClient``의 ``base_url``로 설정 (로컬 개발 예:
     ``httpx.AsyncClient(base_url="http://127.0.0.1:8888")``), 경로 prefix는
-    ``base_path`` (기본 ``/v1``). client 수명은 호출자 책임 (ADR-002).
+    ``base_path`` (기본 ``/v2``). client 수명은 호출자 책임 (ADR-002).
     """
 
     def __init__(
-        self, http_client: httpx.AsyncClient, *, base_path: str = "/v1"
+        self, http_client: httpx.AsyncClient, *, base_path: str = "/v2"
     ) -> None:
         self._http = http_client
         self._base = base_path.rstrip("/")
@@ -493,20 +508,20 @@ class KraddrGeoRestClient:
         x: float,
         y: float,
         *,
-        type_: Literal["both", "road", "parcel"] = "both",
-        zipcode: bool = True,
+        include_region: bool = True,
+        include_zipcode: bool = True,
         radius_m: int | None = None,
-    ) -> _RestReverseResponse:
-        """``GET /v1/address/reverse`` — 좌표(x=lon, y=lat) 역지오코딩."""
-        params: dict[str, Any] = {
-            "x": x,
-            "y": y,
-            "type": type_,
-            "zipcode": str(zipcode).lower(),
+    ) -> _RestReverseV2Response:
+        """``POST /v2/reverse`` — 좌표(x=lon, y=lat) 역지오코딩."""
+        body: dict[str, Any] = {
+            "lon": x,
+            "lat": y,
+            "include_region": include_region,
+            "include_zipcode": include_zipcode,
         }
         if radius_m is not None:
-            params["radius_m"] = radius_m
-        resp = await self._http.get(f"{self._base}/address/reverse", params=params)
+            body["radius_m"] = radius_m
+        resp = await self._http.post(f"{self._base}/reverse", json=body)
         resp.raise_for_status()
         return _parse_reverse_response(resp.json())
 
@@ -515,17 +530,19 @@ class KraddrGeoRestClient:
         address: str,
         *,
         type_: Literal["road", "parcel"] = "road",
-        refine: bool = True,
-        fallback: Literal["off", "local_only", "api"] = "local_only",
-    ) -> _RestGeocodeResponse:
-        """``GET /v1/address/geocode`` — 주소 문자열 정지오코딩."""
-        params: dict[str, Any] = {
-            "address": address,
-            "type": type_,
-            "refine": str(refine).lower(),
-            "fallback": fallback,
-        }
-        resp = await self._http.get(f"{self._base}/address/geocode", params=params)
+        fallback: Literal["none", "api"] = "none",
+    ) -> _RestGeocodeV2Response:
+        """``POST /v2/geocode`` — 주소 문자열 정지오코딩.
+
+        ``type_``에 따라 ``road_address``/``jibun_address`` 필드로 보낸다 (v2는
+        provider-neutral structured input).
+        """
+        body: dict[str, Any] = {"fallback": fallback}
+        if type_ == "road":
+            body["road_address"] = address
+        else:
+            body["jibun_address"] = address
+        resp = await self._http.post(f"{self._base}/geocode", json=body)
         resp.raise_for_status()
         return _parse_geocode_response(resp.json())
 
@@ -536,7 +553,6 @@ class KraddrGeoRestClient:
 def kraddr_geo_reverse_geocoder(
     client: KraddrGeoRestClient,
     *,
-    type_: Literal["both", "road", "parcel"] = "both",
     radius_m: int | None = None,
     max_distance_m: float | None = None,
 ) -> ReverseGeocoder:
@@ -553,7 +569,7 @@ def kraddr_geo_reverse_geocoder(
 
     async def _reverse(coord: Coordinate) -> Address | None:
         response = await client.reverse(
-            float(coord.lon), float(coord.lat), type_=type_, radius_m=radius_m
+            float(coord.lon), float(coord.lat), radius_m=radius_m
         )
         return reverse_response_to_address(response, max_distance_m=max_distance_m)
 
@@ -564,7 +580,7 @@ def kraddr_geo_address_geocoder(
     client: KraddrGeoRestClient,
     *,
     min_confidence: float = 0.0,
-    fallback: Literal["off", "local_only", "api"] = "local_only",
+    fallback: Literal["none", "api"] = "none",
 ) -> AddressGeocoder:
     """kraddr-geo REST client → ``AddressGeocoder`` (``Address`` → 좌표) 콜러블.
 

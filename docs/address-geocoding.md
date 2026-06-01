@@ -16,12 +16,12 @@
 - 주소 normalize / 행정코드 parse: **`krtour.map.core.address`** (PR#37) —
   `normalize_bjd_code` / `parse_bjd_code` / `extract_sigungu_code` /
   `extract_sido_code` / `normalize_phone_number` / `normalize_korean_text`.
-- geocoding 엔진: `kraddr-geo` **REST API** (`/v1/address/reverse`,
-  `/v1/address/geocode`, ServiceMeta.version=`"2.0"`). 별도 FastAPI 서비스로 기동
-  하며 본 라이브러리는 **HTTP로만** 호출한다 — python 패키지/DB 의존 없음
-  (PR#90/#123, ADR-006). v1 sqlite store 및 in-process `AsyncAddressClient`는 폐기.
-  주의: 서비스 메타 버전은 2.0이지만 HTTP endpoint prefix는 현재 `/v1/address/*`가
-  정본이다.
+- geocoding 엔진: `kraddr-geo` **REST API v2** (provider-neutral `POST /v2/reverse`,
+  `POST /v2/geocode`). 별도 FastAPI 서비스로 기동하며 본 라이브러리는 **HTTP로만**
+  호출한다 — python 패키지/DB 의존 없음 (ADR-006). v1 sqlite store 및 in-process
+  `AsyncAddressClient`는 폐기. v2 응답은 `CandidateV2.address.legal_dong_code` 등
+  **structured field를 직접 제공**하므로(vworld level 파싱 불필요), 본 모듈은 v2로
+  전환됐다. healthz는 `GET /v1/healthz` 유지.
 - 연동 모듈: **`krtour.map.geocoding`** — kraddr-geo / httpx를 **런타임 import 하지
   않는다**(httpx는 TYPE_CHECKING 전용). REST 응답(`ReverseResponse`/`GeocodeResponse`/
   `AddressStructure`/`GeocodeExtension`) structural Protocol만 의존(ADR-006). 순수
@@ -84,7 +84,7 @@ from krtour.map.geocoding import (
 )
 
 async with httpx.AsyncClient(base_url=settings.kraddr_geo_base_url) as http:
-    client = KraddrGeoRestClient(http)              # GET /v1/address/reverse·geocode
+    client = KraddrGeoRestClient(http)              # POST /v2/reverse·geocode
     reverse = kraddr_geo_reverse_geocoder(client, max_distance_m=50)
     geocode = kraddr_geo_address_geocoder(client, min_confidence=0.5)
 
@@ -96,24 +96,24 @@ async with httpx.AsyncClient(base_url=settings.kraddr_geo_base_url) as http:
 `min_confidence` 미달이면 `None`. 자릿수가 틀린 코드(bjd/sigungu/zipcode/admin_dong)는
 `None`으로 떨어뜨려 `Address` validator 거부를 피한다.
 
-### 3.1 REST 응답 → `Address` level 매핑 (reverse)
+### 3.1 v2 REST 응답 → `Address` 매핑 (reverse)
 
-`ReverseResultItem.structure`는 vworld 호환 level 구조 (kraddr.geo.core.responses 정본):
+v2 `ReverseV2Response.candidates[]`는 structured field를 직접 제공한다 — vworld
+level 파싱이 없다 (kraddr.geo.dto.v2 정본). `distance_m` 최소 candidate가 대표.
 
-| AddressStructure | 원천 컬럼 | `Address` 필드 |
-|------------------|-----------|----------------|
-| `level1`         | `si_nm`   | `sido_name`    |
-| `level2`         | `sgg_nm`  | `sigungu_name` |
-| `level4L`        | `li_nm`/`emd_nm` | `admin`/`legal`(fallback) |
-| `level4LC`       | `bjd_cd` (10자리) | `bjd_code` → `sigungu_code`/`sido_code` 파생 |
-| `level4A`        | `adm_nm`  | `admin`        |
-| `level4AC`       | `adm_cd` (10자리) | `admin_dong_code` |
-| `level5`         | `road_nm` | `road`(road 항목 부재 시 fallback) |
-| (item)`text`     | 전체 주소  | `road`(type=road)/`legal`(type=parcel) |
-| (item)`zipcode`  | 우편번호 5 | `zipcode`      |
+| v2 필드 | `Address` 필드 |
+|---------|----------------|
+| `address.legal_dong_code` (10자리; 없으면 `region.bjd_cd`) | `bjd_code` → `sigungu_code`/`sido_code` 파생 |
+| `address.admin_dong_code` (10자리만) | `admin_dong_code` |
+| `address.road_name_code` | `road_name_code` |
+| `address.road_address` (road candidate; 없으면 `address.full`) | `road` |
+| `address.parcel_address` (parcel candidate) | `legal` |
+| `region.admin_dong`/`region.legal_dong` | `admin` |
+| `address.postal_code` (5자리만) | `zipcode` |
+| `region.sido`/`region.sigungu` | `sido_name`/`sigungu_name` |
 
-reverse `AddressStructure`에는 도로명코드가 없어 `road_name_code`는 채우지 않는다
-(geocode `x_extension.rncode_full`에만 존재).
+v1과 달리 reverse도 `road_name_code`를 제공한다(`address.road_name_code`).
+`candidate.match_kind`(`road`/`parcel`)로 road/parcel을 구분한다(v1 `type` 대체).
 
 ## 4. 코드 변환 기준
 

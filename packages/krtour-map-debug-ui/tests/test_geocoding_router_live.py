@@ -9,7 +9,8 @@ env ``LIVE_KRADDR_GEO_BASE_URL``로 override 가능.
 검증 시나리오:
 - 한국 주요 도시 4개(서울/부산/제주/대전)의 reverse → Address 매핑 + sido/sigungu
   코드 파생 / 시도명 / 도로명 / 우편번호 / 거리.
-- 동일 좌표의 raw 응답 — Protocol 필드(level1~5, level4LC/AC, distance_m, point) 유무.
+- 동일 좌표의 raw 응답 — v2 candidate Protocol 필드(confidence/match_kind/address/
+  point/distance_m, address.legal_dong_code/road_name_code) 유무.
 - geocode(주소 문자열) → Coordinate(WGS84).
 - round-trip — reverse(coord) → text → geocode(text) → coord (60m 이내 재현).
 - 한국 경계 밖(NOT_FOUND/빈 결과) graceful 처리.
@@ -119,7 +120,7 @@ def test_reverse_korean_city(
     sido_name_part: str,
 ) -> None:
     r = client.get(
-        f"/debug/geocoding/reverse?lon={lon}&lat={lat}&type=both"
+        f"/debug/geocoding/reverse?lon={lon}&lat={lat}"
     )
     assert r.status_code == 200, f"{name}: {r.text[:200]}"
     addr = r.json()["address"]
@@ -145,24 +146,23 @@ def test_reverse_korean_city(
 
 
 def test_reverse_raw_has_protocol_fields(client: TestClient) -> None:
-    """kraddr-geo 원본 응답이 `KraddrGeoRestClient` Protocol과 정합."""
+    """kraddr-geo v2 원본 응답이 `KraddrGeoRestClient` Protocol과 정합."""
     r = client.get(
-        "/debug/geocoding/reverse/raw?lon=126.9779&lat=37.5663&type=both"
+        "/debug/geocoding/reverse/raw?lon=126.9779&lat=37.5663"
     )
     assert r.status_code == 200
     body: dict[str, Any] = r.json()
     assert body["status"] == "OK"
-    assert body["service"]["version"] == "2.0"
-    assert len(body["result"]) >= 1
-    item = body["result"][0]
-    for key in ("type", "text", "structure", "point", "zipcode", "distance_m"):
-        assert key in item, f"missing key in result item: {key}"
-    struct = item["structure"]
-    for level in ("level1", "level2", "level4L", "level4LC", "level4A", "level4AC"):
-        assert level in struct, f"missing level: {level}"
-    # 서울 중구 부근이면 level4LC는 10자리 bjd_cd.
-    assert struct["level4LC"] is not None
-    assert struct["level4LC"].startswith("11")
+    assert len(body["candidates"]) >= 1
+    cand = body["candidates"][0]
+    for key in ("confidence", "match_kind", "address", "point", "distance_m"):
+        assert key in cand, f"missing key in candidate: {key}"
+    addr = cand["address"]
+    # v2 응답은 null field를 생략할 수 있으므로 항상 존재하는 코어 필드만 검사.
+    assert "full" in addr
+    # 서울 중구 부근이면 legal_dong_code는 10자리 bjd.
+    assert addr.get("legal_dong_code") is not None
+    assert addr["legal_dong_code"].startswith("11")
 
 
 # ── 4) geocode — 주소 → 좌표 ──────────────────────────────────────────────
@@ -189,7 +189,7 @@ def test_round_trip_seoul_city_hall(client: TestClient) -> None:
     """좌표 → reverse 도로명주소 → geocode → 좌표 (60m 이내 재현)."""
     # Step 1: reverse — 서울시청 일대.
     r1 = client.get(
-        "/debug/geocoding/reverse?lon=126.9779&lat=37.5663&type=both"
+        "/debug/geocoding/reverse?lon=126.9779&lat=37.5663"
     )
     assert r1.status_code == 200
     addr = r1.json()["address"]
@@ -226,7 +226,7 @@ def test_reverse_off_korea_graceful(client: TestClient) -> None:
     """한국 본토 경계 안이지만 도로/지번 데이터가 없을 가능성이 큰 좌표(동해)."""
     # 동해 한가운데 — 좌표 검증은 `Coordinate` 한국 경계(124~132, 33~39.5) 안.
     r = client.get(
-        "/debug/geocoding/reverse?lon=130.5&lat=37.5&type=both&radius_m=200"
+        "/debug/geocoding/reverse?lon=130.5&lat=37.5&radius_m=200"
     )
     # 200 + address None  또는  502(kraddr-geo가 좌표 범위 외 reject) 둘 다 graceful.
     assert r.status_code in (200, 502)
