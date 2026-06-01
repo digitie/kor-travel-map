@@ -1,7 +1,10 @@
 # krtour-map-debug-ui-frontend
 
 `python-krtour-map` 디버그 UI의 **Next.js** 프론트엔드. **ADR-025**에 따라
-`maplibre-vworld-js` (VWorld 지도) 기반.
+`maplibre-vworld-js` (VWorld 지도) 기반. ADR-035에 따라 debug 화면뿐 아니라
+feature 운영, provider 적재, dedup/결측 검토, 오프라인 업로드를 다루는 admin
+운영 콘솔로 확장한다. 상세 화면/워크플로/API 기준은
+`../../../docs/debug-ui-admin-workflows.md`.
 
 > **PR#36 (2026-05-27)**: Sprint 2 §2.5 frontend skeleton 진입. Next.js 15
 > App Router + TanStack Query + Zustand (ADR-037) 최소 골격 박음.
@@ -22,6 +25,10 @@
   `PriceMarker`/`WeatherMarker` 등 마커 13종 + `ClusterLayer`/`RouteLine`.
 - **maplibre-gl** ^5.24.0 — WebGL 지도 엔진 (maplibre-vworld v0.1.2 peer)
 - **zod** ^4.4.3 — 좌표 검증 (maplibre-vworld v0.1.2 peer — schemas 모듈)
+- **React Hook Form** — 수동 feature 추가, provider 실행, offline upload,
+  feature update request form 상태
+- **shadcn/ui** — admin UI primitive(Button/Input/Select/Dialog/Sheet/Tabs/Table/
+  Badge/Toast/Form/DropdownMenu 등)
 - **@tanstack/react-query** — 서버 데이터 페칭/캐시 (ADR-037)
 - **zustand** — UI 클라이언트 상태(map viewport / filter / 선택된 feature
   등). ADR-037 (PR#36에 처음 추가)
@@ -81,6 +88,22 @@ npm run start                # next start — production server
   client-side 페이지는 동작하나 server actions는 disabled — 본 디버그 UI는
   read-mostly이므로 가능. backend가 `.next/` 또는 `out/` static mount.
 
+## React Doctor
+
+frontend 작업이 포함된 PR은 React Doctor 실행과 결과 검토/개선이 필수다.
+
+```bash
+cd packages/krtour-map-debug-ui/frontend
+npm run lint
+npm run type-check
+npm run build
+npm run doctor
+```
+
+`doctor` script가 아직 없으면 첫 frontend PR에서 추가한다. 실행 결과의 실제 위험
+항목은 개선하고, false positive 또는 의도적으로 남기는 항목은 PR 설명이나
+`docs/journal.md`에 근거를 남긴다.
+
 ## e2e (Playwright)
 
 > ⚠️ **Playwright e2e는 Windows 호스트에서 실행한다 (WSL 아님).**
@@ -117,15 +140,27 @@ baseURL은 `E2E_BASE_URL` env로 override 가능(기본 `http://127.0.0.1:8610`)
 
 | Route | 백엔드 API | 비고 |
 |-------|-----------|------|
-| `/` (FeatureMap) | `/features/in-bounds`, `/features/nearby` | VWorld 지도 + MakiMarker + Clusterer |
-| `/features/[id]` | `/features/{id}` | feature detail + sources + files |
-| `/import-jobs` | `/import-jobs` | 작업 큐 상태 |
-| `/dedup-review` | `/dedup-review` | dedup 검토 큐 |
-| `/integrity` | `/integrity-violations` | 정합성 위반 |
+| `/` | `/admin/dashboard` | 운영 홈: job/provider/이슈 요약 |
+| `/features` | `/admin/features`, `/features`, `/features/nearby` | feature 지도/테이블 전환, 검색/소팅/page size |
+| `/features/new` | `/admin/features` | 수동 feature 추가 |
+| `/features/[id]` | `/features/{id}`, `/features/nearby` | 상세 + 위치 + 주변 feature + sources/files |
+| `/admin/providers` | `/admin/providers` | provider 상태 목록 |
+| `/admin/providers/[provider]` | `/admin/providers/{provider}` | dataset sync state + 강제 실행 |
+| `/admin/import-jobs` | `/admin/import-jobs` | 작업 큐 상태 |
+| `/admin/import-jobs/[id]` | `/admin/import-jobs/{job_id}` | 진행률, 로그, 취소 |
+| `/admin/dedup-review` | `/admin/dedup-review` | dedup 검토 큐 |
+| `/admin/issues` | `/admin/issues/features` | 이슈 feature 지도/테이블 |
+| `/admin/offline-imports` | `/admin/offline-uploads` | 파일 업로드/검증/적재 |
+| `/admin/feature-update-requests` | `/admin/feature-update-requests` | 좌표/반경/시군구/provider 업데이트 큐잉 |
+| `/admin/poi-cache-targets` | `/admin/poi-cache-targets`, `/features/nearby/by-target` | 외부 POI key 기반 주변 feature 캐시 |
+| `/admin/provider-refresh-policies` | `/admin/provider-refresh-policies` | provider update 주기/rate limit 정책 |
+| `/ops/error-logs` | `/ops/error-logs` | provider/job 에러 로그 |
+| `/ops/consistency` | `/ops/consistency/reports` | 정합성 보고서 |
 | `/debug/explain` | `/debug/explain` | SQL EXPLAIN viewer (read-only) |
 | `/debug/fixtures` | `/debug/fixtures` | fixture 저장/replay |
 
-자세한 사양: `../../../docs/debug-ui-package.md` §14.
+패키지 경계: `../../../docs/debug-ui-package.md` §14. Admin 상세 구현 사양:
+`../../../docs/debug-ui-admin-workflows.md`.
 
 ## 카테고리 → maki icon 매핑
 

@@ -2,7 +2,17 @@
 
 본 문서는 `python-krtour-map` 저장소 내 별도 Python 패키지
 `krtour-map-debug-ui`의 사양 reference다. 결정 근거는 `docs/decisions.md`의
-ADR-005(인증 없음, 내부망 전용) + ADR-020(별도 패키지 분리).
+ADR-005(인증 없음, 내부망 전용) + ADR-020(별도 패키지 분리) + ADR-045(Docker
+독립 프로그램, 독립 DB/Dagster, TripMate OpenAPI 연동).
+
+운영 콘솔 화면/워크플로/세부 API는 별도 구현 사양
+[`docs/debug-ui-admin-workflows.md`](debug-ui-admin-workflows.md)를 기준으로 한다.
+본 문서는 패키지 경계와 라우터 정책의 정본이고, 구현자가 실제 admin 기능을 추가할
+때는 해당 문서의 화면/엔드포인트/검증 기준을 함께 따른다.
+Admin 우선 OpenAPI와 Dagster feature update queue 계약은
+[`docs/openapi-admin-contract.md`](openapi-admin-contract.md)를 기준으로 한다.
+외부 POI key 기반 주변 feature 캐시 갱신은
+[`docs/poi-cache-update-targets.md`](poi-cache-update-targets.md)를 기준으로 한다.
 
 ## 1. 정체성
 
@@ -14,8 +24,32 @@ ADR-005(인증 없음, 내부망 전용) + ADR-020(별도 패키지 분리).
 | 별도 `pyproject.toml` | 예 |
 | 의존성 | `python-krtour-map`, FastAPI, Uvicorn, Pydantic v2, pydantic-settings |
 | 인증 | **없음** (ADR-005, 내부망 전제) |
-| TripMate 의존 | **없음** — TripMate는 메인 라이브러리만 import |
+| TripMate 의존 | **없음** — ADR-045 이후 TripMate는 OpenAPI client로만 연동 |
+| 운영 형태 | Docker 독립 프로그램의 API/admin UI 패키지 |
+| DB | 독립 PostgreSQL/PostGIS (`krtour_map`) |
+| Dagster | krtour-map 독립 Dagster가 provider sync/feature update queue 실행 |
 | Release | 메인 라이브러리와 동일 version 동기 (monorepo lockstep) |
+
+## 1.1 운영 콘솔 상세 사양
+
+`krtour-map-debug-ui`는 단순 debug 도구가 아니라 ADR-035에 따라 admin/유지보수/
+프로덕션 운영 UI를 겸한다. ADR-045 이후에는 Docker에서 실행되는 독립 krtour-map
+프로그램의 API/admin UI로 본다. 다음 기능의 상세 구현 기준은
+[`debug-ui-admin-workflows.md`](debug-ui-admin-workflows.md)에 둔다.
+
+- 전체 feature 검색/소팅/페이징/지도-테이블 전환.
+- feature 수동 추가, 비활성화, 영구 삭제.
+- feature 상세, source/raw payload, 주변 feature 지도/테이블 검토.
+- provider 상태 확인, 강제 호출, dry-run/load, job progress/cancel.
+- provider 적재 중 발생한 중복 후보와 결측/정합성 이슈 검토.
+- 에러 로그, job event, consistency report 조회.
+- 오프라인 파일 업로드, 검증, 적재, 취소.
+- OpenAPI 기반 feature update request 생성, 즉시 실행/큐잉, Dagster progress 조회.
+- 외부 POI/cache target 등록/삭제, key 기준 주변 feature 조회, provider refresh
+  policy/rate limit 관리.
+
+신규 `/admin/*`, `/ops/*` 라우터와 frontend route를 추가할 때는 이 문서를 먼저
+확인하고, OpenAPI drift gate와 Playwright e2e를 함께 갱신한다.
 
 ## 2. 패키지 디렉토리 (계획)
 
@@ -186,6 +220,10 @@ krtour-map-debug-ui run --host 127.0.0.1 --port 8087
 | `/debug/explain` | POST | body에 SQL (allowlist 적용) → EXPLAIN (FORMAT JSON, ANALYZE) |
 | `/debug/fixtures` | GET, POST | fixture 저장/replay 메타 |
 
+Admin 운영 콘솔에서 새로 도입할 권장 경로는 `debug-ui-admin-workflows.md`가 더
+구체적이다. 특히 기존 `GET /features`는 bbox 지도 조회로 유지하고, 전역 feature
+검색/소팅/페이지네이션은 `GET /admin/features`로 분리한다.
+
 ### 6.1 SQL EXPLAIN 안전 가드
 
 `/debug/explain`은 SELECT/WITH/EXPLAIN으로 시작하는 쿼리만 허용. INSERT/UPDATE/
@@ -266,8 +304,8 @@ type drift 부채 0).
 - 사용자 가시 UI (사용자 대상 지도/POI 보기 등 — TripMate)
 - 인증/세션/권한 (네트워크 계층 책임)
 - SQL write/DDL (`/debug/explain`은 read-only)
-- 백업/복구/DR (운영자 책임)
-- TripMate Admin UI 페이지 — TripMate가 별도 구현
+- 백업/복구/DR 직접 실행은 ADR-040의 별도 admin 기능으로만 다룬다
+- TripMate 사용자/여행계획/POI 도메인 화면
 
 ## 12. 향후 확장 (보류)
 
@@ -278,9 +316,13 @@ type drift 부채 0).
 
 ## 13. 외부 배포
 
-- 본 패키지를 PyPI에 별도 배포하지 않을 가능성이 높다 (내부망 전용 도구).
-- TripMate 운영 노드에서는 git checkout → editable install로 충분.
-- PyPI 배포가 필요해지면 메인 라이브러리와 동일 version으로 lockstep release.
+- ADR-045 이후 기본 배포 단위는 Docker Compose 또는 동등한 container orchestration이다.
+- 본 패키지를 PyPI에 별도 배포하지 않을 가능성이 높다. 운영 이미지는 monorepo checkout
+  또는 build context에서 만든다.
+- TripMate 운영 노드에 editable install하는 모델은 더 이상 표준이 아니다. TripMate는
+  krtour-map OpenAPI endpoint와 generated client만 사용한다.
+- PyPI 배포가 필요해지면 메인 라이브러리와 동일 version으로 lockstep release하되,
+  OpenAPI version과 Docker image tag도 함께 맞춘다.
 
 ## 14. Frontend — `maplibre-vworld-js` on Next.js (ADR-025, 2차 보강)
 
@@ -292,6 +334,8 @@ type drift 부채 0).
 | 라이브러리 | `maplibre-vworld` **v0.1.2** (`github:digitie/maplibre-vworld-js#v0.1.2` — npm 미게시, git URL+tag 핀, ADR-043 패턴) |
 | 의존 | `maplibre-gl` ^5.24.0 (BSD-3), `zod` ^4.4.3 (좌표 검증, v0.1.2 peer), React 19, `@tanstack/react-query` |
 | 공통 마커 | `@krtour/map-marker-react` (workspace, ADR-029) |
+| Form | React Hook Form + Zod resolver |
+| UI primitive | shadcn/ui |
 | 언어 | TypeScript |
 | 라이선스 | MIT (`next`) + ISC (`maplibre-vworld`) + BSD-3 (`maplibre-gl`) + GPL-3.0 (본 저장소) — 호환 |
 | 디렉토리 | `packages/krtour-map-debug-ui/frontend/` |
@@ -418,7 +462,24 @@ CI에서 drift 검증 (kraddr-geo ADR-015 패턴 미러). 자세한 절차는 §
   Next.js 공식 가이드 미러).
 - 통합 e2e (frontend + backend + PostGIS)는 Sprint 5 진입 직전 (T-200 계열).
 
-### 14.8 외부 노출 안전
+### 14.8 React Doctor
+
+frontend 변경이 있는 PR은 마무리 전에 React Doctor를 실행하고 결과를 검토한 뒤
+필요한 개선을 반영한다.
+
+```bash
+cd packages/krtour-map-debug-ui/frontend
+npm run lint
+npm run type-check
+npm run build
+npm run doctor
+```
+
+`doctor` script가 아직 없으면 첫 frontend PR에서 추가한다. React Doctor 결과를
+실행 로그로만 남기지 말고, 실제 위험 항목을 개선한다. false positive 또는 의도적으로
+남기는 항목은 PR 설명이나 `docs/journal.md`에 근거를 적는다.
+
+### 14.9 외부 노출 안전
 
 - frontend는 `127.0.0.1:8610` (Next.js dev/standalone) 또는 `127.0.0.1:8087`
   (FastAPI proxy/static mount, §14.3 옵션 B/C) 만.
@@ -429,10 +490,11 @@ CI에서 drift 검증 (kraddr-geo ADR-015 패턴 미러). 자세한 절차는 §
 
 ## 15. 핵심 메시지
 
-본 패키지의 존재 이유는 **메인 라이브러리(`python-krtour-map`)의 의존성 축소**다.
-TripMate가 본 라이브러리를 import할 때 FastAPI/Uvicorn/React가 딸려 들어오면 안
-된다. 디버그 UI를 쓰고 싶으면 별도로 `pip install -e packages/krtour-map-debug-ui`
-+ `cd frontend && npm ci && npm run build`.
+본 패키지의 존재 이유는 **메인 라이브러리(`python-krtour-map`)의 의존성 축소**와
+ADR-045의 **독립 OpenAPI/admin 프로그램 표면** 제공이다. 메인 라이브러리를 import할
+때 FastAPI/Uvicorn/React가 딸려 들어오면 안 된다. 운영 배포는 Docker를 기본으로 하고,
+개발에서는 별도로 `pip install -e packages/krtour-map-debug-ui` +
+`cd frontend && npm ci && npm run build`로 실행한다.
 
 이 분리는 ADR-020에 박혀 있고, `import-linter` 계약(`pyproject.toml`)이 메인
 패키지의 FastAPI import를 차단한다. 지도 frontend는 ADR-025로 `maplibre-vworld-js`

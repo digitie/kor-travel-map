@@ -1,8 +1,142 @@
-# tripmate-integration.md — TripMate가 본 라이브러리를 사용하는 방법
+# tripmate-integration.md — TripMate와 krtour-map OpenAPI 연동
 
-본 문서는 TripMate(상위 앱)가 `python-krtour-map`을 import해서 사용하는 표준
-패턴이다. ADR-003 (함수 직접 호출) + ADR-020 (디버그 UI 별도 패키지) + ADR-022
-(`krtour.map` namespace) 기준.
+> **ADR-045 supersede 안내 (2026-06-01)**:
+> 본 문서의 예전 본문에는 TripMate가 `python-krtour-map`을 직접 import하고 같은
+> process에서 `AsyncKrtourMapClient`를 호출하는 패턴이 남아 있다. 그 운영 모델은
+> ADR-045로 supersede됐다. 현재 기준은 다음이다.
+>
+> - krtour-map은 Docker에서 실행되는 독립 프로그램이다.
+> - krtour-map은 독립 PostgreSQL/PostGIS DB와 독립 Dagster를 가진다.
+> - TripMate는 krtour-map DB에 직접 접근하지 않는다.
+> - TripMate는 `python-krtour-map`을 운영 코드에서 직접 import하지 않는다.
+> - TripMate는 krtour-map OpenAPI client로 feature 조회와 update request를 호출한다.
+> - OpenAPI는 우선 admin UI 기준으로 작성하고, TripMate 연동 시 필요한 공개 API를
+>   보완·확장한다.
+>
+> 아래 "직접 import" 예시는 ADR-045 이전 legacy 참고 자료다. 새 구현은
+> `docs/openapi-admin-contract.md`를 우선한다.
+
+## 0. 현재 표준: OpenAPI 연동
+
+TripMate 연동의 현재 표준 흐름:
+
+```
+TripMate API/Web
+  → generated krtour-map OpenAPI client
+  → krtour-map API (`/features`, `/features/{id}`, `/admin/feature-update-requests`)
+  → krtour-map 독립 DB/Dagster
+```
+
+초기 TripMate 후보 API:
+
+| API | 목적 |
+|-----|------|
+| `GET /features` | bbox 기반 지도 feature 조회 |
+| `GET /features/{feature_id}` | feature 상세 |
+| `POST /tripmate/features/batch` | 여러 feature_id batch 상세 조회 (후속 확장) |
+| `POST /admin/feature-update-requests` | 특정 feature/좌표 반경/시군구/provider 업데이트 큐잉 |
+| `GET /admin/feature-update-requests/{request_id}` | 업데이트 요청 진행 상태 |
+| `GET /admin/import-jobs/{job_id}` | 실제 Dagster/import job progress |
+
+예: 특정 좌표 중심 반경 5km 안 feature 업데이트 요청.
+
+```http
+POST /admin/feature-update-requests
+Content-Type: application/json
+
+{
+  "scope": {
+    "type": "center_radius",
+    "center": {"lon": 126.978, "lat": 37.5665},
+    "radius_km": 5.0
+  },
+  "providers": [],
+  "dataset_keys": [],
+  "update_policy": {
+    "mode": "refresh_existing",
+    "force_provider_call": true,
+    "dedup_after_load": true,
+    "consistency_check_after_load": true
+  },
+  "run_mode": "queued",
+  "dry_run": false,
+  "operator": "tripmate-admin",
+  "reason": "사용자 신고 지역 데이터 갱신"
+}
+```
+
+예: TripMate POI를 cache target으로 등록. 좌표만으로 식별하지 않고
+`target_key`를 함께 보낸다.
+
+```http
+PUT /admin/poi-cache-targets/tripmate/poi_123
+Content-Type: application/json
+
+{
+  "coord": {"lon": 126.978, "lat": 37.5665},
+  "coord_precision_digits": 6,
+  "radius_km": 5.0,
+  "scope_mode": "center_radius",
+  "update_enabled": true,
+  "refresh_policy": "provider_default",
+  "on_conflict": "reject"
+}
+```
+
+예: 여러 POI key를 기준으로 주변 캐시 갱신을 큐잉. 반경이 겹치는 feature/provider
+scope는 krtour-map이 dedup해 한 번만 업데이트한다.
+
+```http
+POST /admin/feature-update-requests
+Content-Type: application/json
+
+{
+  "scope": {
+    "type": "cache_target_keys",
+    "external_system": "tripmate",
+    "target_keys": ["poi_123", "poi_456"],
+    "radius_km": 5.0,
+    "scope_mode": "center_radius"
+  },
+  "run_mode": "queued",
+  "dry_run": false,
+  "operator": "tripmate",
+  "reason": "저장 POI 주변 캐시 갱신"
+}
+```
+
+예: POI key 기준 주변 feature summary 조회. 목록 응답에는 detail JSON/raw payload가
+포함되지 않고 `last_updated_at`은 항상 포함된다.
+
+```http
+GET /features/nearby/by-target?external_system=tripmate&target_key=poi_123&radius_km=5
+```
+
+예: 특정 좌표 중심 반경 10km와 교차하는 시군구의 feature 업데이트 dry-run.
+
+```http
+POST /admin/feature-update-requests
+Content-Type: application/json
+
+{
+  "scope": {
+    "type": "sigungu_by_radius",
+    "center": {"lon": 126.978, "lat": 37.5665},
+    "radius_km": 10.0,
+    "match": "intersects"
+  },
+  "run_mode": "queued",
+  "dry_run": true,
+  "operator": "tripmate-admin",
+  "reason": "대상 시군구 산정"
+}
+```
+
+## Legacy 참고: ADR-045 이전 직접 import 모델
+
+아래 내용은 TripMate(상위 앱)가 `python-krtour-map`을 import해서 사용하던 ADR-003
+기준 설계다. 새 구현 지침으로 사용하지 말고, 내부 Python API의 의도와 이전 결정
+맥락을 이해하는 참고 자료로만 본다.
 
 ## 1. 개관
 

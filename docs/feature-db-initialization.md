@@ -1,14 +1,14 @@
 # feature-db-initialization.md — feature DB 부트스트랩
 
-본 문서는 `python-krtour-map`을 사용하는 호스트(주로 TripMate, 또는 디버그
-환경)가 PostgreSQL + PostGIS 위의 feature DB를 부트스트랩하고 라이브러리 client를
-초기화하는 절차다.
+본 문서는 krtour-map 독립 프로그램(ADR-045)이 PostgreSQL + PostGIS 위의 feature
+DB를 부트스트랩하고 내부 라이브러리 client를 초기화하는 절차다. TripMate 공유 DB를
+사용하지 않는다.
 
 ## 1. 부트스트랩 순서
 
 ```
 1. PostgreSQL 16 + PostGIS 3.5 컨테이너 기동
-2. DB 생성 (krtour_map 또는 TripMate 공유 DB)
+2. DB 생성 (`krtour_map`)
 3. schema 생성 (feature, provider_sync, ops, x_extension)
 4. 확장 설치 (postgis, postgis_topology, pg_trgm, pgcrypto) — x_extension에
 5. search_path 설정 (public, x_extension)
@@ -33,8 +33,8 @@ docker run -d --name krtour-postgis \
 
 DSN: `postgresql+asyncpg://krtour_map:changeme@localhost:5432/krtour_map`.
 
-운영(TripMate 공유 DB) 환경에서는 DB 이름과 user는 TripMate가 결정. 본
-라이브러리는 schema 격리만 책임 (ADR-008).
+운영 환경에서도 DB는 krtour-map이 소유한다. TripMate는 OpenAPI로만 접근하며
+PostgreSQL에 직접 연결하지 않는다 (ADR-045).
 
 ## 3. Schema 부트스트랩
 
@@ -246,7 +246,7 @@ async with AsyncKrtourMapClient(
 async def bootstrap_from_env() -> AsyncKrtourMapClient:
     """환경변수만으로 client 부트스트랩.
     
-    디버그 / CLI / 단순 스크립트 용. 운영(TripMate)은 직접 의존성 주입.
+    디버그 / CLI / 단순 스크립트 용. 운영 API/Dagster는 명시적 의존성 주입.
     """
     settings = KrtourMapSettings()
     engine = create_feature_engine(settings)
@@ -316,7 +316,8 @@ async def pg_engine(pg_container):
 
 - **dev**: `krtour_map` (로컬 PostgreSQL)
 - **integration test**: testcontainers (자동)
-- **운영**: TripMate 공유 DB (예: `tripmate`) + 본 라이브러리 schema 격리
+- **운영**: krtour-map 독립 DB (`krtour_map`) + Dagster metadata DB
+  (`krtour_map_dagster`)
 
 같은 라이브러리가 세 환경 모두 지원. 차이는 settings (`KRTOUR_MAP_PG_DSN`)만.
 
@@ -345,5 +346,5 @@ graceful degradation:
 - [ ] Alembic at head
 - [ ] 객체 저장소 bucket healthy (RustFS healthcheck)
 - [ ] `KRTOUR_MAP_*` 환경변수 모두 설정
-- [ ] provider API 키 (TripMate 환경)
+- [ ] provider API 키 (krtour-map API/Dagster 환경)
 - [ ] `client.healthz()` 모든 항목 true

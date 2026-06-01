@@ -14,15 +14,18 @@
 
 이 저장소(GitHub 이름 `python-krtour-map`, Python 패키지 `krtour.map` — ADR-022)는 여러 한국
 공공 API 라이브러리(`python-*-api`)에서 올라오는 여행 지도 데이터를 단일 `Feature`
-계약으로 정규화·저장·조회·수정·삭제할 수 있게 하는 **TripMate 하부 라이브러리**다.
+계약으로 정규화·저장·조회·수정·삭제할 수 있게 하는 **krtour-map 독립 프로그램 +
+내부 Python 라이브러리**다.
 
-`python-krtour-map`은 TripMate에 **함수 라이브러리 형태**로 import되어 사용된다.
-TripMate ↔ krtour-map 사이에는 REST API가 없다.
+ADR-045(2026-06-01) 이후 운영 모델은 **Docker 독립 프로그램 + 독립 DB/Dagster +
+TripMate OpenAPI 연동**이다. TripMate는 krtour-map DB에 직접 접근하지 않고,
+`python-krtour-map`을 운영 코드에서 직접 import하지 않는다. TripMate ↔ krtour-map
+사이는 OpenAPI 기반 HTTP 계약으로 연결한다.
 
 디버그 UI/REST는 **별도 Python 패키지** `krtour-map-debug-ui`로 분리되어 있다
-(ADR-020). 본 monorepo 안의 `packages/krtour-map-debug-ui/`에 위치하고, 메인
-라이브러리를 import해서 `AsyncKrtourMapClient`를 함수 호출한다. 별도 인증 키를
-요구하지 않는다(내부망 전용, ADR-005).
+(ADR-020/035/045). 본 monorepo 안의 `packages/krtour-map-debug-ui/`에 위치하고,
+메인 라이브러리를 import해서 API/Dagster 내부에서 `AsyncKrtourMapClient`를 호출한다.
+별도 인증 키를 요구하지 않는다(내부망 전용, ADR-005).
 
 이전(v1) 구현은 `v1` 브랜치에 보존되어 있다. master(main)는 v2 사양으로 처음부터
 다시 구현한다(ADR-001).
@@ -37,15 +40,16 @@ TripMate ↔ krtour-map 사이에는 REST API가 없다.
 | Python import (디버그 UI) | `from krtour.map_debug_ui import ...` (별도 distribution, 같은 `krtour` namespace) |
 | CLI 명령 (있다면) | `krtour-map ...` |
 | 환경변수 prefix | `KRTOUR_MAP_*` (env는 underscore 표준 유지) |
-| PostgreSQL DB 이름 (개발) | `krtour_map` (운영은 TripMate가 호스팅하는 공유 DB) |
-| Postgres schema | `feature`, `provider_sync`, `ops` (TripMate 도메인 테이블과 분리) |
+| PostgreSQL DB 이름 (개발/운영 기본) | `krtour_map` (ADR-045 — TripMate 공유 DB 아님) |
+| Dagster metadata DB 기본 | `krtour_map_dagster` |
+| Postgres schema | `feature`, `provider_sync`, `ops` (krtour-map 내부 schema 분리) |
 | PostGIS extension schema | `x_extension` (ADR-008) |
 | 디버그 UI 패키지 | `krtour-map-debug-ui` (별도 **Python** 패키지, monorepo 내 `packages/krtour-map-debug-ui/`, ADR-020) |
 | Category 모듈 출처 | `krtour.map.category` (구 `kraddr.base.categories`에서 이전, ADR-023) |
 | Address DTO + 행정코드 utility | `krtour.map.dto.Address` + `krtour.map.core.address` (구 `kraddr.base`에서 흡수, ADR-041 — `PlaceCoordinate`는 제외, 좌표는 `Coordinate`로 단일화) |
 | Provider 라이브러리 git URL/sha 핀 status | `docs/provider-contract.md` §12 표 (Sprint별 그룹화, kma/datagokr는 Protocol 박힘) |
-| ADR accepted | 001~044 전부 (text on main). 029는 ADR-043으로 supersede. **035~043 일괄 accepted 전환 PR#33, 2026-05-27** / **030~033 사용자 승인 확정 2026-05-29 (PR#69)**, ADR-033 Phase 1(F1~F3 정합성) 구현 완료. 1차 implement 시점: 038(즉시) / 042(SPRINT-2 §2.1) / 035·037·043(SPRINT-2 §2.5) / 036(SPRINT-3 후반) / 039·040·041(SPRINT-4 prep). |
-| ADR proposed | (없음) — 다음 후보 번호는 ADR-045. |
+| ADR accepted | 001~045 전부 (text on main). 029는 ADR-043으로 supersede. ADR-045는 Docker 독립 프로그램 + OpenAPI 연동으로 ADR-003 운영 모델을 supersede. |
+| ADR proposed | (없음) — 다음 후보 번호는 ADR-046. |
 | Sprint plan | `docs/sprints/SPRINT-1.md` ~ `SPRINT-5.md` |
 | Provider 구현 순서 (ADR-034) | 축제→날씨→유가→휴게소→국립공원/트래킹→국가유산→**MOIS**→휴양림/수목원→박물관/미술관 |
 
@@ -155,9 +159,10 @@ install --print-config <target>`으로 각자 snippet 출력. 자세히는
 
 ### Code Style & Rules — 수정 전 영향도 평가 (필수)
 
-본 라이브러리는 **함수 직접 호출 인터페이스**라서 한 함수/DTO 시그니처 변경이
-호출자 여러 곳을 깨뜨릴 수 있다. 코드 컴포넌트(특히 `Feature` DTO / `make_
-feature_id` / provider 변환 함수 / `core/scoring.py` / `infra/models.py`)를
+본 라이브러리는 krtour-map API/Dagster 내부에서 직접 호출되는 **Python API**를
+제공하므로 한 함수/DTO 시그니처 변경이 호출자 여러 곳을 깨뜨릴 수 있다.
+코드 컴포넌트(특히 `Feature` DTO / `make_feature_id` / provider 변환 함수 /
+`core/scoring.py` / `infra/models.py`)를
 수정하기 **전에** codegraph로 영향도를 평가한다:
 
 - MCP 환경: `codegraph_explore` MCP 도구로 호출자/의존/영향을 한 번에.
@@ -190,19 +195,29 @@ feature_id` / provider 변환 함수 / `core/scoring.py` / `infra/models.py`)를
 6. 기존 코드와 테스트
 7. 최소한의, 되돌릴 수 있는 가정
 
-## TripMate ↔ python-krtour-map 경계
+## TripMate ↔ krtour-map 경계 (ADR-045)
 
-- **TripMate는 본 라이브러리를 `pip install`하고 함수로 호출한다**. HTTP는 사용하지
-  않는다.
-- 라이브러리는 `AsyncKrtourMapClient`(또는 동등 API)를 진입점으로 제공한다.
-  TripMate의 FastAPI 라우터/Admin UI/Dagster asset body는 이 클라이언트의 메서드를
-  직접 호출한다.
-- 라이브러리는 SQLAlchemy 2 async engine과 (있다면) provider client 인스턴스를
-  주입받는다. 라이브러리가 자체적으로 client/engine을 만들지 않는다.
-- 라이브러리는 결과 DTO를 반환한다. 그 DTO를 어떤 HTTP 응답 셰입으로 감쌀지는
-  TripMate 책임이다(SPEC V8의 `{"data": ..., "meta": ...}` 규약 적용은 TripMate).
+- **TripMate는 krtour-map을 OpenAPI로 호출한다**. 운영 코드에서
+  `python-krtour-map`을 직접 import하지 않는다.
+- TripMate는 krtour-map PostgreSQL/PostGIS DB에 직접 연결하지 않는다.
+- krtour-map은 Docker 독립 프로그램으로 실행되며 독립 DB(`krtour_map`)와 독립
+  Dagster metadata DB(`krtour_map_dagster`)를 가진다.
+- OpenAPI는 우선 admin UI 기준으로 작성하고, TripMate 연동 시 필요한 공개/사용자
+  API를 보완·확장한다.
+- `AsyncKrtourMapClient`는 krtour-map API/Dagster 내부 구현과 테스트용 Python API로
+  유지한다.
+- feature 업데이트는 OpenAPI로 요청한다. 예: 특정 좌표 중심 반경 `n` km 안 feature,
+  또는 반경 `n` km와 교차/포함되는 시군구의 feature 업데이트를 즉시 실행하거나
+  queue에 넣는다.
+- 외부 앱 POI 기반 캐시 갱신은 좌표만으로 식별하지 않는다. 반드시
+  `external_system + target_key + 좌표 + radius_km`를 받아 저장하고, target 삭제 시
+  targeted update에서 제외한다. 여러 target 반경의 교집합 feature/provider scope는
+  한 번만 업데이트한다.
+- provider별 update 주기/rate limit은 provider API 프로젝트의 로컬 문서/코드
+  (`F:\dev\python-*-api`, ADR-044)를 근거로 DB/설정에 저장한다. override도 rate
+  limit을 넘을 수 없다.
 
-## 디버그/관리 REST API 정책 (ADR-005 + ADR-020 + ADR-035 + ADR-040)
+## 디버그/관리 REST API 정책 (ADR-005 + ADR-020 + ADR-035 + ADR-040 + ADR-045)
 
 디버그 + admin REST는 **별도 패키지** `krtour-map-debug-ui`에 둔다. 메인
 라이브러리 `python-krtour-map`은 FastAPI/Uvicorn 의존이 없다.
@@ -218,10 +233,10 @@ feature_id` / provider 변환 함수 / `core/scoring.py` / `infra/models.py`)를
   SSO 게이트웨이 / IP allowlist)에서 보호. 코드에 인증 로직 침투 금지.
 - **메인 라이브러리 의존**: `pip install -e packages/krtour-map-debug-ui`만
   설치하면 `python-krtour-map`을 자동으로 의존성으로 가져간다.
-- **TripMate는 의존하지 않는다** — TripMate는 메인 라이브러리만 import해서
-  함수 직접 호출.
+- **TripMate는 Python 의존하지 않는다** — TripMate는 OpenAPI client만 사용한다.
 - `KRTOUR_MAP_DEBUG_UI_HOST` 기본 `127.0.0.1`. `0.0.0.0` 바인드 시 경고 로그.
-- 자세한 사양은 `docs/debug-ui-package.md` + `docs/backup-restore.md`.
+- 자세한 사양은 `docs/debug-ui-package.md`, `docs/debug-ui-admin-workflows.md`,
+  `docs/openapi-admin-contract.md`, `docs/backup-restore.md`.
 
 ### Frontend stack (ADR-025 + ADR-026 + ADR-036 + ADR-037)
 
@@ -234,8 +249,11 @@ feature_id` / provider 변환 함수 / `core/scoring.py` / `infra/models.py`)를
   `/features/...` 응답은 useQuery/useMutation hook으로 래핑 (ADR-037).
 - **클라이언트 상태**: Zustand — map viewport / 카테고리 filter / fixture
   playback 상태 (ADR-037).
+- **Form/검증**: React Hook Form + Zod.
+- **UI primitive**: shadcn/ui.
 - **공통 marker/category 매핑**: `packages/map-marker-react/` (npm 게시는
   보류, ADR-043 — `"private": true`, git URL share만).
+- **Frontend 작업 후 검증**: React Doctor 실행 후 결과 검토 및 개선 필수.
 
 ## Provider API 사용 원칙
 

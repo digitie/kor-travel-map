@@ -2,8 +2,8 @@
 
 `python-krtour-map`은 여러 한국 공공 API 라이브러리(`python-*-api`)에서 올라오는
 여행 지도 데이터를 단일 `Feature` 계약으로 정규화·저장·조회·수정·삭제하는
-**TripMate 하부 라이브러리**다. PostgreSQL + PostGIS + SQLAlchemy 2 async +
-GeoAlchemy2 + GeoPandas 위에서 동작한다.
+**krtour-map 독립 프로그램 + 내부 Python 라이브러리**다. PostgreSQL + PostGIS +
+SQLAlchemy 2 async + GeoAlchemy2 + GeoPandas 위에서 동작한다.
 
 > **현재 상태 (v2 Sprint 3 완료, Sprint 4 진입 준비 — PR#114 기준)**:
 > master/main 브랜치는 v2 사양으로 새로 시작했다. 이전(v1) 구현은 `v1`
@@ -11,7 +11,9 @@ GeoAlchemy2 + GeoPandas 위에서 동작한다.
 > consistency report, dedup queue, `AsyncKrtourMapClient`, debug UI `/features`와
 > geocoding 경로까지 구현했다. 현재 geocoding 정본은 kraddr-geo REST
 > `/v1/address/*` + 로컬 `http://127.0.0.1:8888`, frontend 정본은 Next.js 16 +
-> `maplibre-vworld-js#v0.1.2`다. ADR 현황: **001~044 모두 accepted**. Sprint 계획은
+> `maplibre-vworld-js#v0.1.2`다. 2026-06-01 ADR-045로 운영 모델은 Docker 독립
+> 프로그램 + 독립 DB/Dagster + TripMate OpenAPI 연동으로 전환됐다. ADR 현황:
+> **001~045 모두 accepted**. Sprint 계획은
 > `docs/sprints/`, 다음 작업은 `docs/resume.md` 참조. v1 산출물 요약은
 > `python-krtour-map-spec.docx`(저장소 루트, 약 80쪽) 참고.
 
@@ -20,26 +22,20 @@ GeoAlchemy2 + GeoPandas 위에서 동작한다.
 - **GitHub 저장소**: `python-krtour-map`
 - **Python import**: `from krtour.map import ...` (ADR-022, PEP 420 implicit namespace `krtour`)
 - **환경변수 prefix**: `KRTOUR_MAP_*`
-- **PostgreSQL DB 이름 (개발)**: `krtour_map`
+- **PostgreSQL DB 이름 (개발/운영 기본)**: `krtour_map` (TripMate 공유 DB 아님)
+- **Dagster metadata DB 기본**: `krtour_map_dagster`
 - **스키마 분리**: `feature`, `provider_sync`, `ops`, `x_extension`
 
 ## TripMate와의 연계
 
-`python-krtour-map`은 TripMate에 **함수 라이브러리 형태**로 연결된다.
-HTTP/REST가 아니다.
+ADR-045 이후 TripMate와 krtour-map은 **OpenAPI 기반 HTTP**로 연결된다.
+TripMate는 krtour-map DB에 직접 접근하지 않고, `python-krtour-map`을 운영 코드에서
+직접 import하지 않는다.
 
-```python
-from krtour.map import AsyncKrtourMapClient
-
-async with AsyncKrtourMapClient(engine=tripmate_engine, providers=...) as client:
-    features = await client.features_in_bounds(bbox, kinds=["place", "event"])
-    weather = await client.build_weather_card(feature_id, asof=datetime.utcnow())
-```
-
-디버그 REST/UI는 **별도 Python 패키지** `krtour-map-debug-ui`
-(`packages/krtour-map-debug-ui/`, ADR-020)로 분리되어 있고 **디버그 UI 백엔드 +
-향후 내부 활용 전용**이며 인증 키를 요구하지 않는다(내부망 전제). TripMate ↔
-라이브러리 통신에는 사용하지 않는다. 메인 라이브러리는 FastAPI 의존이 없다.
+`python-krtour-map` 메인 패키지는 krtour-map API/Dagster 내부 구현에서 사용하는
+async 함수 라이브러리다. REST/OpenAPI와 admin UI는 **별도 Python 패키지**
+`krtour-map-debug-ui`(`packages/krtour-map-debug-ui/`, ADR-020/035/045)에 둔다.
+OpenAPI는 우선 admin UI 기준으로 작성하고, TripMate 연동 시 필요한 API를 보완·확장한다.
 
 ## 책임 / 비책임 요약
 
@@ -53,15 +49,15 @@ async with AsyncKrtourMapClient(engine=tripmate_engine, providers=...) as client
 - S3 호환 객체 저장소(RustFS) 연동: 이미지/문서 메타데이터
 - 주소/좌표 정규화: 내장 `Address`/`Coordinate` DTO + `python-kraddr-geo`
   REST 서비스 연동
-- 디버그 REST API (옵션, 인증 없음, 내부망 전용)
-- Dagster asset에서 호출 가능한 collect/load 순수 함수
+- OpenAPI backend/admin UI (별도 패키지, 인증 없음, 내부망/네트워크 계층 보호)
+- 독립 Dagster 기반 provider sync / feature update queue / consistency job
 
 ### 비책임
 
 - 사용자/여행계획/POI 도메인 (TripMate가 소유)
-- TripMate FastAPI 라우터, Admin UI, Alembic migration 직접 실행
+- TripMate FastAPI 라우터, 사용자 UI, 여행계획/POI 도메인
 - provider별 wrapper/adapter/gateway 신규 생성
-- 별도 feature DB 복제 (TripMate는 라이브러리 schema를 import해 사용)
+- TripMate DB migration 또는 TripMate DB 직접 FK
 - 외부 노출용 인증 REST API
 
 자세한 책임 경계는 `docs/architecture.md` 및 `docs/provider-contract.md`.
@@ -134,7 +130,7 @@ npm ci && npm run dev        # http://127.0.0.1:8610
 | 주소/좌표 | `python-kraddr-base`, `python-kraddr-geo` |
 | Provider client | `python-{visitkorea,mois,opinet,krex,kma,khoa,airkorea,krforest,krheritage,kasi,datagokr,mcst,krairport}-api` |
 | 객체 저장소 | S3 호환 (RustFS 우선) |
-| Orchestration | Dagster (TripMate가 wiring; 라이브러리는 collect/load 순수 함수만 제공) |
+| Orchestration | Dagster (krtour-map 독립 프로그램이 소유; OpenAPI로 update request 큐잉/제어) |
 | Lint/Type | ruff, mypy --strict, import-linter |
 | Test | pytest, pytest-asyncio, hypothesis, testcontainers-python, VCR.py |
 
@@ -226,6 +222,9 @@ lint-imports
 - [`docs/data-model.md`](docs/data-model.md) — Postgres 테이블·인덱스 reference
 - [`docs/backend-package.md`](docs/backend-package.md) — 메인 라이브러리 사양
 - [`docs/debug-ui-package.md`](docs/debug-ui-package.md) — `krtour-map-debug-ui` 별도 패키지 사양 (ADR-020)
+- [`docs/debug-ui-admin-workflows.md`](docs/debug-ui-admin-workflows.md) — debug UI/admin 운영 콘솔 상세 구현 사양
+- [`docs/openapi-admin-contract.md`](docs/openapi-admin-contract.md) — Admin 우선 OpenAPI + Dagster feature update queue 계약
+- [`docs/poi-cache-update-targets.md`](docs/poi-cache-update-targets.md) — 외부 POI key 기반 주변 feature 캐시 갱신 타깃
 - [`docs/category.md`](docs/category.md) — `krtour.map.category` 모듈 사양 (kraddr-base에서 이전, ADR-023)
 - [`docs/postgres-schema.md`](docs/postgres-schema.md) — PostgreSQL 스키마 reference 카탈로그 (data-model의 빠른 참조)
 - [`docs/feature-files-rustfs.md`](docs/feature-files-rustfs.md) — S3 호환 객체 저장소 + 파일 메타
@@ -236,7 +235,7 @@ lint-imports
 - [`docs/dagster-boundary.md`](docs/dagster-boundary.md) — Dagster 책임 경계
 - [`docs/debug-fixture-workflow.md`](docs/debug-fixture-workflow.md) — fixture 저장/replay
 - [`docs/feature-db-initialization.md`](docs/feature-db-initialization.md) — DB 부트스트랩
-- [`docs/tripmate-integration.md`](docs/tripmate-integration.md) — TripMate가 본 라이브러리 사용하는 법
+- [`docs/tripmate-integration.md`](docs/tripmate-integration.md) — TripMate ↔ krtour-map OpenAPI 연동
 - [`docs/event-feature-etl.md`](docs/event-feature-etl.md) — VisitKorea 축제 ETL
 - [`docs/mois-feature-etl.md`](docs/mois-feature-etl.md) — `python-mois-api` 활용 feature 적재 full lifecycle (Step A/B/C/D)
 - [`docs/mois-license-feature-etl.md`](docs/mois-license-feature-etl.md) — MOIS 인허가 → place 승격 (Step B 좁은 가이드)
