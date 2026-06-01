@@ -2,6 +2,24 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-02 (claude) — ADR-045 비BLOCKER 의사결정 8건 전부 권고대로 확정
+
+**작업**: 사용자 "모두 권고안대로" → 남은 비BLOCKER 8건 확정 + ADR amendment.
+
+- **확정 (모두 권고안)**: D-1(인증=infra SSO/IP + `X-Krtour-Service-Token` pass-
+  through) / D-3(SemVer + admin·user schema 이원 drift gate) / D-8(deactivate=
+  `prevent_provider_reactivation` 플래그) / D-10(keyset cursor + base64) / D-12
+  (React Doctor 단계적) / D-13(shadcn↔marker 분리 + 핀) / D-15(provider 키 docker
+  env→resource, 누락 시 asset만 실패) / D-16(CHANGELOG `### API` + SemVer 태깅).
+- **ADR amendment**: ADR-005에 D-1 인증 amendment(코드 인증 없음 유지 + infra 계층
+  + 토큰 pass-through), ADR-031에 D-3 amendment(OpenAPI 이원화 + SemVer + drift
+  gate 2개)를 추가.
+- **결정 상태**: `adr045-open-decisions.md` D-1~D-16 **전 항목 결정 완료**(BLOCKER 5
+  + 설계/운영 11). 구현 착수 가능.
+- 후속 amendment(ADR-003 §후속/ADR-034 Dagster 주체/ADR-040 백업/SPRINT-4·5)는
+  해당 구현 시점에 반영(plan §7 표).
+- **docs-only** — 코드/게이트 변경 없음.
+
 ## 2026-06-02 (claude) — 패키지 rename: krtour-map-debug-ui → krtour-map-admin (D-9)
 
 **작업**: D-9 결정(즉시 rename, 이름 `krtour-map-admin`)을 코드로 실행.
