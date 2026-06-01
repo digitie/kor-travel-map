@@ -43,6 +43,7 @@ from sqlalchemy import (
     MetaData,
     Numeric,
     String,
+    Text,
     UniqueConstraint,
     text,
 )
@@ -58,6 +59,7 @@ __all__ = [
     "ProviderSyncStateRow",
     "FeatureConsistencyReportRow",
     "DedupReviewQueueRow",
+    "ImportJobRow",
 ]
 
 
@@ -467,6 +469,70 @@ class DedupReviewQueueRow(Base):
     decision_reason: Mapped[str | None] = mapped_column(String)
     reviewed_by: Mapped[str | None] = mapped_column(String)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
+
+
+# =============================================================================
+# ops.import_jobs  (ADR-011)
+# =============================================================================
+
+
+class ImportJobRow(Base):
+    """``ops.import_jobs`` row mapping — ETL 적재 작업 큐 (data-model.md §9.1).
+
+    프로세스 재시작 시 진행 상황을 잃지 않도록 작업 상태를 영속화한다 (ADR-011).
+    다중 워커는 ``infra/jobs_repo.py``의 ``SELECT ... FOR UPDATE SKIP LOCKED`` +
+    advisory lock으로 직렬화한다. raw SQL은 ``infra/jobs_repo.py`` (ADR-004).
+
+    상태 전이: queued → running → done | failed | cancelled. ``heartbeat_at``은
+    running 워커가 주기적으로 갱신 — lifespan startup 복구가 만료 행을 failed로
+    정리한다.
+    """
+
+    __tablename__ = "import_jobs"
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('queued','running','done','failed','cancelled')",
+            name="ck_import_jobs_state",
+        ),
+        CheckConstraint(
+            "progress BETWEEN 0 AND 100",
+            name="ck_import_jobs_progress",
+        ),
+        Index("idx_import_jobs_state", "state", "created_at"),
+        Index(
+            "idx_import_jobs_kind_state", "kind", "state", text("created_at DESC"),
+        ),
+        Index(
+            "idx_import_jobs_heartbeat", "heartbeat_at",
+            postgresql_where=text("state='running'"),
+        ),
+        {"schema": "ops"},
+    )
+
+    job_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb"),
+    )
+    state: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'queued'"),
+    )
+    progress: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0"),
+    )
+    current_stage: Mapped[str | None] = mapped_column(Text)
+    source_checksum: Mapped[str | None] = mapped_column(Text)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()"),
     )

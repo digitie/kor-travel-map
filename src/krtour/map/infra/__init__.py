@@ -63,15 +63,25 @@ from krtour.map.infra.feature_repo import (
     get_feature_row,
     load_bundle,
     load_bundles,
+    soft_delete_features_not_in_snapshot,
     upsert_feature,
     upsert_source_link,
     upsert_source_record,
+)
+from krtour.map.infra.jobs_repo import (
+    ImportJob,
+    claim_next_import_job,
+    enqueue_import_job,
+    finish_import_job,
+    heartbeat_import_job,
+    recover_stale_running_jobs,
 )
 from krtour.map.infra.models import (
     Base,
     DedupReviewQueueRow,
     FeatureConsistencyReportRow,
     FeatureRow,
+    ImportJobRow,
     ProviderSyncStateRow,
     SourceLinkRow,
     SourceRecordRow,
@@ -103,6 +113,7 @@ __all__ = [
     "ProviderSyncStateRow",
     "FeatureConsistencyReportRow",
     "DedupReviewQueueRow",
+    "ImportJobRow",
     # feature_repo (ADR-004 raw SQL load 경로)
     "FeatureLoadResult",
     "upsert_feature",
@@ -110,6 +121,7 @@ __all__ = [
     "upsert_source_link",
     "load_bundle",
     "load_bundles",
+    "soft_delete_features_not_in_snapshot",
     "get_feature_row",
     "features_in_bbox",
     # dedup_repo (ADR-016 dedup 후보 큐)
@@ -117,4 +129,11 @@ __all__ = [
     "enqueue_dedup_candidate",
     "enqueue_dedup_candidates",
     "pending_dedup_reviews",
+    # jobs_repo (ADR-011 작업 큐)
+    "ImportJob",
+    "enqueue_import_job",
+    "claim_next_import_job",
+    "heartbeat_import_job",
+    "finish_import_job",
+    "recover_stale_running_jobs",
 ]
