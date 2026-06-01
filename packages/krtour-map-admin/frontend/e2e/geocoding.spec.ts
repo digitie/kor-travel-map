@@ -10,7 +10,7 @@ import { expect, test } from "@playwright/test";
  * 두 시나리오 모두 페이지 렌더 + form 구조 + health 카드 노출은 동일.
  */
 test.describe("/geocoding", () => {
-  test("페이지 렌더 + health 카드 + 두 form", async ({ page }) => {
+  test("페이지 렌더 + health 카드 + 세 form", async ({ page }) => {
     await page.goto("/geocoding");
     await expect(
       page.getByRole("heading", { level: 1, name: /kraddr-geo 디버그/ }),
@@ -18,12 +18,16 @@ test.describe("/geocoding", () => {
     await expect(page.getByTestId("geocoding-health")).toBeVisible();
     await expect(page.getByTestId("reverse-form")).toBeVisible();
     await expect(page.getByTestId("geocode-form")).toBeVisible();
-    // 두 실행 버튼 노출(상태에 따라 disabled 가능).
+    await expect(page.getByTestId("regions-form")).toBeVisible();
+    // 세 실행 버튼 노출(상태에 따라 disabled 가능).
     await expect(
       page.getByRole("button", { name: /Reverse 실행/ }),
     ).toBeVisible();
     await expect(
       page.getByRole("button", { name: /Geocode 실행/ }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /Regions 실행/ }),
     ).toBeVisible();
   });
 
@@ -46,5 +50,26 @@ test.describe("/geocoding", () => {
     const typeSelect = form.getByRole("combobox").first();
     await typeSelect.selectOption("road");
     await expect(typeSelect).toHaveValue("road");
+  });
+
+  test("regions form 입력값과 level 토글이 보존됨", async ({ page }) => {
+    await page.goto("/geocoding");
+    const form = page.getByTestId("regions-form");
+    const lonInput = form.locator('input[type="text"]').first();
+    await lonInput.fill("127.0276");
+    await expect(lonInput).toHaveValue("127.0276");
+
+    const radius = form.locator('input[type="number"]').first();
+    await radius.fill("5");
+    await expect(radius).toHaveValue("5");
+
+    const sido = form.getByLabel("sido");
+    const sigungu = form.getByLabel("sigungu");
+    const emd = form.getByLabel("emd");
+    await expect(sido).not.toBeChecked();
+    await expect(sigungu).toBeChecked();
+    await expect(emd).toBeChecked();
+    await sido.check();
+    await expect(sido).toBeChecked();
   });
 });

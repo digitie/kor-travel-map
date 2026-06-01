@@ -23,6 +23,8 @@ import {
   type ReverseGeocodingParams,
 } from "@/api/geocoding";
 
+import { RegionsWithinRadiusSection } from "./regions-within-radius-section";
+
 function HealthCard({ health }: { health: GeocodingHealthResponse | undefined }) {
   if (!health) {
     return <p style={{ color: "#6b7280" }}>upstream health 확인 중…</p>;
@@ -51,7 +53,7 @@ function HealthCard({ health }: { health: GeocodingHealthResponse | undefined })
         <span>(upstream HTTP {health.upstream_status})</span>
       )}
       {health.detail && (
-        <span style={{ marginLeft: 8 }}>— {health.detail}</span>
+        <span style={{ marginLeft: 8 }}>: {health.detail}</span>
       )}
     </div>
   );
@@ -126,7 +128,7 @@ export default function GeocodingPage() {
 
       {/* Reverse */}
       <section style={{ marginTop: 24 }}>
-        <h2 style={{ fontSize: 16, marginBottom: 8 }}>1) Reverse — 좌표 → 주소</h2>
+        <h2 style={{ fontSize: 16, marginBottom: 8 }}>1) Reverse: 좌표 → 주소</h2>
         <form
           data-testid="reverse-form"
           onSubmit={(e) => {
@@ -192,7 +194,7 @@ export default function GeocodingPage() {
             disabled={disabled || reverseMutation.isPending}
             style={{ padding: "6px 14px" }}
           >
-            {reverseMutation.isPending ? "조회 중…" : "Reverse 실행"}
+            {reverseMutation.isPending ? "조회 중..." : "Reverse 실행"}
           </button>
         </form>
         {reverseMutation.isError && (
@@ -218,7 +220,7 @@ export default function GeocodingPage() {
 
       {/* Geocode */}
       <section style={{ marginTop: 24 }}>
-        <h2 style={{ fontSize: 16, marginBottom: 8 }}>2) Geocode — 주소 → 좌표</h2>
+        <h2 style={{ fontSize: 16, marginBottom: 8 }}>2) Geocode: 주소 → 좌표</h2>
         <form
           data-testid="geocode-form"
           onSubmit={(e) => {
@@ -276,7 +278,7 @@ export default function GeocodingPage() {
             disabled={disabled || !geoAddress || geocodeMutation.isPending}
             style={{ padding: "6px 14px" }}
           >
-            {geocodeMutation.isPending ? "조회 중…" : "Geocode 실행"}
+            {geocodeMutation.isPending ? "조회 중..." : "Geocode 실행"}
           </button>
         </form>
         {geocodeMutation.isError && (
@@ -299,6 +301,8 @@ export default function GeocodingPage() {
           </pre>
         )}
       </section>
+
+      <RegionsWithinRadiusSection disabled={disabled} />
     </main>
   );
 }

@@ -1,8 +1,9 @@
 """``krtour.map_admin.routers.geocoding`` — kraddr-geo REST v2 디버그 라우터.
 
 운영자/개발자가 kraddr-geo 연계가 정상인지 브라우저/curl로 즉시 확인할 수 있도록
-``GET /debug/geocoding/{reverse,geocode}``(매핑된 Address/Coordinate) +
-``/raw``(kraddr-geo 응답 그대로) + ``/health``(upstream 도달성) 5경로를 노출한다.
+``GET /debug/geocoding/{reverse,geocode}``(매핑된 Address/Coordinate),
+``/regions/within-radius``(POI 반경 행정구역), 각 ``/raw``(kraddr-geo 응답 그대로),
+``/health``(upstream 도달성)를 노출한다.
 
 설정: ``KRTOUR_MAP_ADMIN_KRADDR_GEO_BASE_URL``(기본 ``http://127.0.0.1:8888``).
 명시적으로 ``None``/빈 값이면 모든 엔드포인트는 503 반환.
@@ -12,14 +13,18 @@ ADR 참조: ADR-006(client 주입 + structural Protocol), ADR-035(/debug 운영 
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from krtour.map.dto import Address, Coordinate
 from krtour.map.geocoding import (
     KraddrGeoRestClient,
+    RegionLevel,
+    RegionsWithinRadiusResponse,
+    RegionWithinRadiusItem,
     geocode_response_to_coordinate,
+    resolve_regions_within_radius,
     reverse_response_to_address,
 )
 from pydantic import BaseModel, ConfigDict
@@ -84,6 +89,79 @@ class GeocodeResponseSchema(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     coord: Coordinate | None
+
+
+class RegionRadiusCenterSchema(BaseModel):
+    """kraddr-geo region 반경 응답의 중심 좌표."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    lon: float
+    lat: float
+
+
+class RegionWithinRadiusItemSchema(BaseModel):
+    """반경과 교차/포함되는 행정구역 1건."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    code: str
+    name: str | None
+    relation: str
+
+
+class RegionsWithinRadiusSchema(BaseModel):
+    """``/debug/geocoding/regions/within-radius`` 응답."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    center: RegionRadiusCenterSchema
+    radius_km: float
+    sido: list[RegionWithinRadiusItemSchema]
+    sigungu: list[RegionWithinRadiusItemSchema]
+    emd: list[RegionWithinRadiusItemSchema]
+
+
+def _region_response_schema(
+    response: RegionsWithinRadiusResponse,
+) -> RegionsWithinRadiusSchema:
+    def _items(
+        items: tuple[RegionWithinRadiusItem, ...],
+    ) -> list[RegionWithinRadiusItemSchema]:
+        return [
+            RegionWithinRadiusItemSchema(
+                code=item.code,
+                name=item.name,
+                relation=item.relation,
+            )
+            for item in items
+        ]
+
+    return RegionsWithinRadiusSchema(
+        center=RegionRadiusCenterSchema(
+            lon=float(response.center.lon),
+            lat=float(response.center.lat),
+        ),
+        radius_km=response.radius_km,
+        sido=_items(response.sido),
+        sigungu=_items(response.sigungu),
+        emd=_items(response.emd),
+    )
+
+
+def _levels_or_default(
+    level: list[Literal["sido", "sigungu", "emd"]] | None,
+) -> tuple[RegionLevel, ...]:
+    if not level:
+        return ("sigungu", "emd")
+    seen: set[str] = set()
+    out: list[RegionLevel] = []
+    for value in level:
+        if value in seen:
+            continue
+        seen.add(value)
+        out.append(value)
+    return tuple(out)
 
 
 # ── 라우터 ─────────────────────────────────────────────────────────────
@@ -235,6 +313,89 @@ async def geocode_raw(
     try:
         async with httpx.AsyncClient(base_url=base_url, timeout=10.0) as http:
             r = await http.post("/v2/geocode", json=body)
+        r.raise_for_status()
+        return r.json()  # type: ignore[no-any-return]
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"kraddr-geo {exc.response.status_code}: {exc.response.text[:300]}",
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502, detail=f"kraddr-geo unreachable: {exc}"
+        ) from exc
+
+
+@router.get(
+    "/regions/within-radius",
+    response_model=RegionsWithinRadiusSchema,
+    summary="POI 좌표 반경 → 시군구/읍면동 행정구역",
+)
+async def regions_within_radius(
+    settings: Annotated[AdminSettings, Depends(get_settings)],
+    lon: Annotated[float, Query(ge=-180, le=180, description="POI 경도 (WGS84).")],
+    lat: Annotated[float, Query(ge=-90, le=90, description="POI 위도 (WGS84).")],
+    radius_km: Annotated[
+        float,
+        Query(gt=0, le=100, description="검색 반경(km)."),
+    ] = 3.0,
+    level: Annotated[
+        list[Literal["sido", "sigungu", "emd"]] | None,
+        Query(
+            description=(
+                "요청 행정구역 level. 반복 가능. 미지정 시 sigungu+emd를 조회."
+            )
+        ),
+    ] = None,
+) -> RegionsWithinRadiusSchema:
+    base_url = _require_base_url(settings)
+    client = await _get_rest_client(base_url)
+    try:
+        response = await resolve_regions_within_radius(
+            client,
+            lon=lon,
+            lat=lat,
+            radius_km=radius_km,
+            levels=_levels_or_default(level),
+        )
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"kraddr-geo {exc.response.status_code}: {exc.response.text[:300]}",
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502, detail=f"kraddr-geo unreachable: {exc}"
+        ) from exc
+    finally:
+        await client._http.aclose()  # noqa: SLF001 — 단명 디버그 client
+    return _region_response_schema(response)
+
+
+@router.get(
+    "/regions/within-radius/raw",
+    summary="POI 좌표 반경 → kraddr-geo region 원본 응답 그대로",
+)
+async def regions_within_radius_raw(
+    settings: Annotated[AdminSettings, Depends(get_settings)],
+    lon: Annotated[float, Query(ge=-180, le=180)],
+    lat: Annotated[float, Query(ge=-90, le=90)],
+    radius_km: Annotated[float, Query(gt=0, le=100)] = 3.0,
+    level: Annotated[
+        list[Literal["sido", "sigungu", "emd"]] | None,
+        Query(description="반복 가능. 미지정 시 sigungu+emd."),
+    ] = None,
+) -> dict[str, Any]:
+    base_url = _require_base_url(settings)
+    body: dict[str, Any] = {
+        "lon": lon,
+        "lat": lat,
+        "radius_km": radius_km,
+        "levels": list(_levels_or_default(level)),
+    }
+    try:
+        async with httpx.AsyncClient(base_url=base_url, timeout=10.0) as http:
+            r = await http.post("/v2/regions/within-radius", json=body)
         r.raise_for_status()
         return r.json()  # type: ignore[no-any-return]
     except httpx.HTTPStatusError as exc:

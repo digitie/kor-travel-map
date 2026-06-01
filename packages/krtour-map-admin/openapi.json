@@ -724,6 +724,101 @@
         "title": "ProvidersResponse",
         "type": "object"
       },
+      "RegionRadiusCenterSchema": {
+        "additionalProperties": false,
+        "description": "kraddr-geo region 반경 응답의 중심 좌표.",
+        "properties": {
+          "lat": {
+            "title": "Lat",
+            "type": "number"
+          },
+          "lon": {
+            "title": "Lon",
+            "type": "number"
+          }
+        },
+        "required": [
+          "lon",
+          "lat"
+        ],
+        "title": "RegionRadiusCenterSchema",
+        "type": "object"
+      },
+      "RegionWithinRadiusItemSchema": {
+        "additionalProperties": false,
+        "description": "반경과 교차/포함되는 행정구역 1건.",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "relation": {
+            "title": "Relation",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "relation"
+        ],
+        "title": "RegionWithinRadiusItemSchema",
+        "type": "object"
+      },
+      "RegionsWithinRadiusSchema": {
+        "additionalProperties": false,
+        "description": "``/debug/geocoding/regions/within-radius`` 응답.",
+        "properties": {
+          "center": {
+            "$ref": "#/components/schemas/RegionRadiusCenterSchema"
+          },
+          "emd": {
+            "items": {
+              "$ref": "#/components/schemas/RegionWithinRadiusItemSchema"
+            },
+            "title": "Emd",
+            "type": "array"
+          },
+          "radius_km": {
+            "title": "Radius Km",
+            "type": "number"
+          },
+          "sido": {
+            "items": {
+              "$ref": "#/components/schemas/RegionWithinRadiusItemSchema"
+            },
+            "title": "Sido",
+            "type": "array"
+          },
+          "sigungu": {
+            "items": {
+              "$ref": "#/components/schemas/RegionWithinRadiusItemSchema"
+            },
+            "title": "Sigungu",
+            "type": "array"
+          }
+        },
+        "required": [
+          "center",
+          "radius_km",
+          "sido",
+          "sigungu",
+          "emd"
+        ],
+        "title": "RegionsWithinRadiusSchema",
+        "type": "object"
+      },
       "ReverseResponseSchema": {
         "additionalProperties": false,
         "description": "매핑된 Address (`reverse_response_to_address` 결과) — None이면 404.",
@@ -1174,6 +1269,200 @@
           }
         },
         "summary": "kraddr-geo upstream 도달성 확인",
+        "tags": [
+          "geocoding"
+        ]
+      }
+    },
+    "/debug/geocoding/regions/within-radius": {
+      "get": {
+        "operationId": "regions_within_radius_debug_geocoding_regions_within_radius_get",
+        "parameters": [
+          {
+            "description": "POI 경도 (WGS84).",
+            "in": "query",
+            "name": "lon",
+            "required": true,
+            "schema": {
+              "description": "POI 경도 (WGS84).",
+              "maximum": 180,
+              "minimum": -180,
+              "title": "Lon",
+              "type": "number"
+            }
+          },
+          {
+            "description": "POI 위도 (WGS84).",
+            "in": "query",
+            "name": "lat",
+            "required": true,
+            "schema": {
+              "description": "POI 위도 (WGS84).",
+              "maximum": 90,
+              "minimum": -90,
+              "title": "Lat",
+              "type": "number"
+            }
+          },
+          {
+            "description": "검색 반경(km).",
+            "in": "query",
+            "name": "radius_km",
+            "required": false,
+            "schema": {
+              "default": 3.0,
+              "description": "검색 반경(km).",
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "title": "Radius Km",
+              "type": "number"
+            }
+          },
+          {
+            "description": "요청 행정구역 level. 반복 가능. 미지정 시 sigungu+emd를 조회.",
+            "in": "query",
+            "name": "level",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": [
+                      "sido",
+                      "sigungu",
+                      "emd"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "요청 행정구역 level. 반복 가능. 미지정 시 sigungu+emd를 조회.",
+              "title": "Level"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegionsWithinRadiusSchema"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "POI 좌표 반경 → 시군구/읍면동 행정구역",
+        "tags": [
+          "geocoding"
+        ]
+      }
+    },
+    "/debug/geocoding/regions/within-radius/raw": {
+      "get": {
+        "operationId": "regions_within_radius_raw_debug_geocoding_regions_within_radius_raw_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "lon",
+            "required": true,
+            "schema": {
+              "maximum": 180,
+              "minimum": -180,
+              "title": "Lon",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "lat",
+            "required": true,
+            "schema": {
+              "maximum": 90,
+              "minimum": -90,
+              "title": "Lat",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "radius_km",
+            "required": false,
+            "schema": {
+              "default": 3.0,
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "title": "Radius Km",
+              "type": "number"
+            }
+          },
+          {
+            "description": "반복 가능. 미지정 시 sigungu+emd.",
+            "in": "query",
+            "name": "level",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": [
+                      "sido",
+                      "sigungu",
+                      "emd"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "반복 가능. 미지정 시 sigungu+emd.",
+              "title": "Level"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Regions Within Radius Raw Debug Geocoding Regions Within Radius Raw Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "POI 좌표 반경 → kraddr-geo region 원본 응답 그대로",
         "tags": [
           "geocoding"
         ]

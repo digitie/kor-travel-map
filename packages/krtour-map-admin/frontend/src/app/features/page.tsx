@@ -122,6 +122,8 @@ export default function FeaturesPage() {
     map.on("moveend", updateBbox);
 
     return () => {
+      map.off("load", updateBbox);
+      map.off("moveend", updateBbox);
       for (const m of markerLayerRef.current) m.remove();
       markerLayerRef.current = [];
       map.remove();

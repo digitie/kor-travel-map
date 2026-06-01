@@ -2,9 +2,10 @@
 
 좌표 ↔ 행정구역 보강(정/역지오코딩)을 본 라이브러리 ``Address`` / ``Coordinate``
 DTO로 정규화한다. geocoding 엔진은 별도 서비스 **``kraddr-geo``** (FastAPI,
-provider-neutral ``POST /v2/{reverse,geocode}``)가 담당하고, 본 모듈은 그 **REST
-응답**(``ReverseV2Response`` / ``GeocodeV2Response``)을 본 라이브러리 DTO로 옮기는
-**순수 변환 함수** + HTTP 클라이언트 + 비동기 콜러블 어댑터만 둔다.
+provider-neutral ``POST /v2/{reverse,geocode,regions/within-radius}``)가 담당하고,
+본 모듈은 그 **REST 응답**(``ReverseV2Response`` / ``GeocodeV2Response`` /
+region 반경 응답)을 본 라이브러리 DTO로 옮기는 **순수 변환 함수** + HTTP
+클라이언트 + 비동기 콜러블 어댑터만 둔다.
 
 v2 (provider-neutral) 전환
 --------------------------
@@ -25,7 +26,8 @@ v2 (provider-neutral) 전환
   동기·순수라 ``kraddr-geo``/HTTP 없이 fake 응답으로 단위 테스트된다.
 - async 콜러블 팩토리(``kraddr_geo_reverse_geocoder``/``kraddr_geo_address_geocoder``)는
   ``KraddrGeoRestClient``를 받아 ``ReverseGeocoder`` / ``AddressGeocoder`` 콜러블을
-  만든다. ``httpx.AsyncClient`` 수명(base_url 설정/close)은 호출자 책임 (ADR-002).
+  만든다. ``regions_within_radius``는 ADR-045 D-11의 시군구/읍면동 반경 조회에
+  사용한다. ``httpx.AsyncClient`` 수명(base_url 설정/close)은 호출자 책임 (ADR-002).
 
 **철칙**: 주소 문자열만으로 법정동코드 추정 금지 — reverse geocoding 결과
 (좌표 기반)만 신뢰.
@@ -42,7 +44,7 @@ ADR 참조
 from __future__ import annotations
 
 import math
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
@@ -70,11 +72,16 @@ __all__ = [
     "KraddrCandidateV2",
     "KraddrReverseV2Response",
     "KraddrGeocodeV2Response",
+    "RegionLevel",
+    "RegionWithinRadiusItem",
+    "RegionsWithinRadiusResponse",
     # 순수 변환 함수
     "reverse_response_to_address",
     "geocode_response_to_coordinate",
     # REST client + 콜러블 팩토리
     "KraddrGeoRestClient",
+    "resolve_regions_within_radius",
+    "resolve_sigungu_by_radius",
     "kraddr_geo_reverse_geocoder",
     "kraddr_geo_address_geocoder",
 ]
@@ -225,6 +232,33 @@ _STATUS_OK = "OK"
 _TYPE_ROAD = "road"
 _TYPE_PARCEL = "parcel"
 
+RegionLevel = Literal["sido", "sigungu", "emd"]
+_DEFAULT_REGION_LEVELS: tuple[RegionLevel, ...] = ("sigungu", "emd")
+
+
+@dataclass(frozen=True, slots=True)
+class RegionWithinRadiusItem:
+    """kraddr-geo ``/v2/regions/within-radius`` level별 region 1건."""
+
+    code: str
+    name: str | None
+    relation: str
+
+
+@dataclass(frozen=True, slots=True)
+class RegionsWithinRadiusResponse:
+    """POI 중심 반경과 교차/포함되는 행정구역 목록.
+
+    ``sigungu.code``는 krtour-map ``feature.sigungu_code``와 같은 5자리 체계다
+    (ADR-045 D-11). ``emd.code``는 kraddr-geo의 읍면동 경계 코드 그대로 보존한다.
+    """
+
+    center: Coordinate
+    radius_km: float
+    sido: tuple[RegionWithinRadiusItem, ...] = ()
+    sigungu: tuple[RegionWithinRadiusItem, ...] = ()
+    emd: tuple[RegionWithinRadiusItem, ...] = ()
+
 
 def _closest_candidate(
     candidates: tuple[KraddrCandidateV2, ...],
@@ -241,6 +275,71 @@ def _five_digits_or_none(value: str | None) -> str | None:
         return None
     text = value.strip()
     return text if (len(text) == 5 and text.isdigit()) else None
+
+
+def _parse_region_items(value: Any) -> tuple[RegionWithinRadiusItem, ...]:
+    if not isinstance(value, list):
+        return ()
+    items: list[RegionWithinRadiusItem] = []
+    for raw in value:
+        if not isinstance(raw, dict):
+            continue
+        code = raw.get("code")
+        if not isinstance(code, str) or not code.strip():
+            continue
+        name = raw.get("name")
+        relation = raw.get("relation")
+        items.append(
+            RegionWithinRadiusItem(
+                code=code.strip(),
+                name=name.strip() if isinstance(name, str) and name.strip() else None,
+                relation=relation.strip()
+                if isinstance(relation, str) and relation.strip()
+                else "unknown",
+            )
+        )
+    return tuple(items)
+
+
+def _parse_center_coordinate(value: Any) -> Coordinate:
+    if not isinstance(value, dict):
+        msg = "regions/within-radius response center must be an object"
+        raise ValueError(msg)
+    raw_lon = value.get("lon", value.get("x"))
+    raw_lat = value.get("lat", value.get("y"))
+    if raw_lon is None or raw_lat is None:
+        msg = "regions/within-radius response center requires lon/lat"
+        raise ValueError(msg)
+    try:
+        return Coordinate(lon=Decimal(str(raw_lon)), lat=Decimal(str(raw_lat)))
+    except (InvalidOperation, ValueError) as exc:
+        msg = "regions/within-radius response center has invalid lon/lat"
+        raise ValueError(msg) from exc
+
+
+def _parse_regions_within_radius_response(
+    data: dict[str, Any],
+) -> RegionsWithinRadiusResponse:
+    """kraddr-geo region 반경 JSON → typed dataclass.
+
+    kraddr-geo가 요청하지 않은 level을 생략해도 빈 tuple로 정규화한다.
+    """
+    radius = data.get("radius_km")
+    if radius is None:
+        msg = "regions/within-radius response requires numeric radius_km"
+        raise ValueError(msg)
+    try:
+        radius_km = float(radius)
+    except (TypeError, ValueError) as exc:
+        msg = "regions/within-radius response requires numeric radius_km"
+        raise ValueError(msg) from exc
+    return RegionsWithinRadiusResponse(
+        center=_parse_center_coordinate(data.get("center")),
+        radius_km=radius_km,
+        sido=_parse_region_items(data.get("sido")),
+        sigungu=_parse_region_items(data.get("sigungu")),
+        emd=_parse_region_items(data.get("emd")),
+    )
 
 
 # -- 순수 변환 함수 -----------------------------------------------------------
@@ -545,6 +644,63 @@ class KraddrGeoRestClient:
         resp = await self._http.post(f"{self._base}/geocode", json=body)
         resp.raise_for_status()
         return _parse_geocode_response(resp.json())
+
+    async def regions_within_radius(
+        self,
+        *,
+        lon: float,
+        lat: float,
+        radius_km: float,
+        levels: Sequence[RegionLevel] = _DEFAULT_REGION_LEVELS,
+    ) -> RegionsWithinRadiusResponse:
+        """``POST /v2/regions/within-radius`` — POI 반경 행정구역 조회.
+
+        ADR-045 D-11에 따라 시군구/읍면동 경계 계산은 kraddr-geo가 담당한다.
+        krtour-map은 좌표, 반경(km), 요청 level을 전달하고 반환된 code를 그대로 쓴다.
+        """
+        body: dict[str, Any] = {
+            "lon": lon,
+            "lat": lat,
+            "radius_km": radius_km,
+            "levels": list(levels),
+        }
+        resp = await self._http.post(
+            f"{self._base}/regions/within-radius", json=body
+        )
+        resp.raise_for_status()
+        return _parse_regions_within_radius_response(resp.json())
+
+
+async def resolve_regions_within_radius(
+    client: KraddrGeoRestClient,
+    *,
+    lon: float,
+    lat: float,
+    radius_km: float,
+    levels: Sequence[RegionLevel] = _DEFAULT_REGION_LEVELS,
+) -> RegionsWithinRadiusResponse:
+    """POI 중심 반경에 포함/교차되는 행정구역을 kraddr-geo REST v2로 조회한다."""
+    return await client.regions_within_radius(
+        lon=lon, lat=lat, radius_km=radius_km, levels=levels
+    )
+
+
+async def resolve_sigungu_by_radius(
+    client: KraddrGeoRestClient,
+    *,
+    lon: float,
+    lat: float,
+    radius_km: float,
+) -> tuple[RegionWithinRadiusItem, ...]:
+    """ADR-045 D-11 convenience: 반경 교차 시군구만 반환한다.
+
+    반환 ``code``는 krtour-map ``feature.sigungu_code``와 같은 5자리 체계라 매핑하지
+    않는다.
+    """
+    result = await client.regions_within_radius(
+        lon=lon, lat=lat, radius_km=radius_km, levels=("sigungu",)
+    )
+    return result.sigungu
 
 
 # -- kraddr-geo REST client → 콜러블 팩토리 -----------------------------------

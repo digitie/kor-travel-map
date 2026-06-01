@@ -100,6 +100,21 @@ def _geocode_ok_payload() -> dict[str, object]:
     }
 
 
+def _regions_ok_payload() -> dict[str, object]:
+    """kraddr-geo ``POST /v2/regions/within-radius`` OK — sigungu + emd."""
+    return {
+        "center": {"lon": 126.978, "lat": 37.5665},
+        "radius_km": 3.0,
+        "sigungu": [
+            {"code": "11110", "name": "종로구", "relation": "contains"},
+            {"code": "11140", "name": "중구", "relation": "overlaps"},
+        ],
+        "emd": [
+            {"code": "1111010100", "name": "청운효자동", "relation": "overlaps"}
+        ],
+    }
+
+
 def _make_client(
     handler: Callable[[httpx.Request], httpx.Response],
     *,
@@ -387,6 +402,134 @@ def test_geocode_raw_passes_address(restore_httpx_init: object) -> None:
         client._patch_restore()  # type: ignore[attr-defined]
 
 
+def test_regions_within_radius_ok_maps_to_schema(
+    restore_httpx_init: object,
+) -> None:
+    import json as _json
+
+    seen: list[tuple[str, str, dict[str, object]]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = _json.loads(request.content) if request.content else {}
+        seen.append((request.method, request.url.path, body))
+        return httpx.Response(200, json=_regions_ok_payload())
+
+    client = _make_client(handler)
+    try:
+        r = client.get(
+            "/debug/geocoding/regions/within-radius"
+            "?lon=126.978&lat=37.5665&radius_km=3"
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["center"] == {"lon": 126.978, "lat": 37.5665}
+        assert body["radius_km"] == 3.0
+        assert [row["code"] for row in body["sigungu"]] == ["11110", "11140"]
+        assert [row["code"] for row in body["emd"]] == ["1111010100"]
+        assert body["sido"] == []
+        method, path, sent = seen[0]
+        assert method == "POST"
+        assert path == "/v2/regions/within-radius"
+        assert sent == {
+            "lon": 126.978,
+            "lat": 37.5665,
+            "radius_km": 3.0,
+            "levels": ["sigungu", "emd"],
+        }
+    finally:
+        client._patch_restore()  # type: ignore[attr-defined]
+
+
+def test_regions_within_radius_repeated_level_query(
+    restore_httpx_init: object,
+) -> None:
+    import json as _json
+
+    seen: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = _json.loads(request.content) if request.content else {}
+        seen.append(body)
+        return httpx.Response(200, json={
+            "center": {"lon": 126.978, "lat": 37.5665},
+            "radius_km": 1.5,
+            "sido": [{"code": "11", "name": "서울특별시", "relation": "contains"}],
+            "emd": [],
+        })
+
+    client = _make_client(handler)
+    try:
+        r = client.get(
+            "/debug/geocoding/regions/within-radius"
+            "?lon=126.978&lat=37.5665&radius_km=1.5&level=sido&level=emd&level=sido"
+        )
+        assert r.status_code == 200
+        assert r.json()["sido"][0]["code"] == "11"
+        assert seen[0]["levels"] == ["sido", "emd"]
+    finally:
+        client._patch_restore()  # type: ignore[attr-defined]
+
+
+def test_regions_within_radius_raw_passes_through(
+    restore_httpx_init: object,
+) -> None:
+    import json as _json
+
+    seen: list[tuple[str, str, dict[str, object]]] = []
+    payload = _regions_ok_payload()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = _json.loads(request.content) if request.content else {}
+        seen.append((request.method, request.url.path, body))
+        return httpx.Response(200, json=payload)
+
+    client = _make_client(handler)
+    try:
+        r = client.get(
+            "/debug/geocoding/regions/within-radius/raw"
+            "?lon=126.978&lat=37.5665&radius_km=3&level=sigungu"
+        )
+        assert r.status_code == 200
+        assert r.json() == payload
+        method, path, sent = seen[0]
+        assert method == "POST"
+        assert path == "/v2/regions/within-radius"
+        assert sent["levels"] == ["sigungu"]
+    finally:
+        client._patch_restore()  # type: ignore[attr-defined]
+
+
+def test_regions_within_radius_503_when_base_url_unset(
+    restore_httpx_init: object,
+) -> None:
+    settings = AdminSettings(kraddr_geo_base_url=None)
+    app = create_app(settings)
+    app.dependency_overrides[get_settings] = lambda: settings
+    client = TestClient(app)
+    r = client.get(
+        "/debug/geocoding/regions/within-radius?lon=126.978&lat=37.5665"
+    )
+    assert r.status_code == 503
+    assert "kraddr-geo" in r.json()["detail"]
+
+
+def test_regions_within_radius_502_on_upstream_error(
+    restore_httpx_init: object,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, text="upstream error")
+
+    client = _make_client(handler)
+    try:
+        r = client.get(
+            "/debug/geocoding/regions/within-radius?lon=126.978&lat=37.5665"
+        )
+        assert r.status_code == 502
+        assert "kraddr-geo" in r.json()["detail"]
+    finally:
+        client._patch_restore()  # type: ignore[attr-defined]
+
+
 def test_routes_registered_in_openapi(restore_httpx_init: object) -> None:
     """OpenAPI 스펙에 5경로 모두 등장."""
     settings = AdminSettings(kraddr_geo_base_url="http://x")
@@ -398,5 +541,7 @@ def test_routes_registered_in_openapi(restore_httpx_init: object) -> None:
         "/debug/geocoding/reverse/raw",
         "/debug/geocoding/geocode",
         "/debug/geocoding/geocode/raw",
+        "/debug/geocoding/regions/within-radius",
+        "/debug/geocoding/regions/within-radius/raw",
     ):
         assert p in paths, f"missing path: {p}"

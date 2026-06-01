@@ -44,6 +44,25 @@ export interface GeocodeResult {
   coord: CoordinatePayload | null;
 }
 
+export type RegionLevel = "sido" | "sigungu" | "emd";
+
+export interface RegionWithinRadiusItem {
+  code: string;
+  name: string | null;
+  relation: string;
+}
+
+export interface RegionsWithinRadiusResult {
+  center: {
+    lon: number;
+    lat: number;
+  };
+  radius_km: number;
+  sido: RegionWithinRadiusItem[];
+  sigungu: RegionWithinRadiusItem[];
+  emd: RegionWithinRadiusItem[];
+}
+
 export interface ReverseGeocodingParams {
   lon: number;
   lat: number;
@@ -59,6 +78,13 @@ export interface GeocodeParams {
   refine?: boolean;
   fallback?: "off" | "local_only" | "api";
   min_confidence?: number;
+}
+
+export interface RegionsWithinRadiusParams {
+  lon: number;
+  lat: number;
+  radius_km: number;
+  levels?: RegionLevel[];
 }
 
 async function getJson<T>(path: string): Promise<T> {
@@ -129,5 +155,34 @@ export function fetchGeocode(p: GeocodeParams): Promise<GeocodeResult> {
 export function fetchGeocodeRaw(p: GeocodeParams): Promise<Record<string, unknown>> {
   return getJson<Record<string, unknown>>(
     `/debug/geocoding/geocode/raw?${_buildGeocodeQuery(p)}`,
+  );
+}
+
+function _buildRegionsWithinRadiusQuery(p: RegionsWithinRadiusParams): string {
+  const q = new URLSearchParams();
+  q.set("lon", String(p.lon));
+  q.set("lat", String(p.lat));
+  q.set("radius_km", String(p.radius_km));
+  if (p.levels) {
+    for (const level of p.levels) {
+      q.append("level", level);
+    }
+  }
+  return q.toString();
+}
+
+export function fetchRegionsWithinRadius(
+  p: RegionsWithinRadiusParams,
+): Promise<RegionsWithinRadiusResult> {
+  return getJson<RegionsWithinRadiusResult>(
+    `/debug/geocoding/regions/within-radius?${_buildRegionsWithinRadiusQuery(p)}`,
+  );
+}
+
+export function fetchRegionsWithinRadiusRaw(
+  p: RegionsWithinRadiusParams,
+): Promise<Record<string, unknown>> {
+  return getJson<Record<string, unknown>>(
+    `/debug/geocoding/regions/within-radius/raw?${_buildRegionsWithinRadiusQuery(p)}`,
   );
 }
