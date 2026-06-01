@@ -30,7 +30,12 @@ from krtour.map.core.scoring import (
 if TYPE_CHECKING:
     from krtour.map.dto.coordinate import Coordinate
 
-__all__ = ["DedupInput", "DedupCandidate", "find_dedup_candidates"]
+__all__ = [
+    "DedupInput",
+    "DedupCandidate",
+    "find_dedup_candidates",
+    "find_sibling_candidates",
+]
 
 
 @runtime_checkable
@@ -108,33 +113,88 @@ def find_dedup_candidates(
     right_list = list(right)
     for a in left:
         for b in right_list:
-            score = score_pair(
-                name_a=a.name,
-                name_b=b.name,
-                coord_a=a.coord,
-                coord_b=b.coord,
-                cat_a={a.category},
-                cat_b={b.category},
-            )
-            decision = classify_decision(score)
-            if decision == DedupDecision.KEEP_SEPARATE:
-                continue
-            if decision == DedupDecision.AUTO_MERGE and not include_auto_merge:
-                continue
-            candidates.append(
-                DedupCandidate(
-                    feature_id_a=a.feature_id,
-                    feature_id_b=b.feature_id,
-                    name_a=a.name,
-                    name_b=b.name,
-                    score=round(score, 4),
-                    decision=decision,
-                    name_score=round(name_similarity(a.name, b.name), 4),
-                    spatial_score=round(spatial_similarity(a.coord, b.coord), 4),
-                    category_score=round(
-                        category_similarity({a.category}, {b.category}), 4
-                    ),
-                )
-            )
+            cand = _score_candidate(a, b, include_auto_merge=include_auto_merge)
+            if cand is not None:
+                candidates.append(cand)
+    candidates.sort(key=lambda c: c.score, reverse=True)
+    return candidates
+
+
+def _score_candidate(
+    a: DedupInput, b: DedupInput, *, include_auto_merge: bool
+) -> DedupCandidate | None:
+    """한 쌍(a, b)을 score → ``DedupCandidate`` 또는 제외 시 ``None``.
+
+    ``KEEP_SEPARATE``(< THRESHOLD_MANUAL)는 ``None``. ``include_auto_merge=False``면
+    ``auto_merge`` 밴드도 ``None``.
+    """
+    score = score_pair(
+        name_a=a.name,
+        name_b=b.name,
+        coord_a=a.coord,
+        coord_b=b.coord,
+        cat_a={a.category},
+        cat_b={b.category},
+    )
+    decision = classify_decision(score)
+    if decision == DedupDecision.KEEP_SEPARATE:
+        return None
+    if decision == DedupDecision.AUTO_MERGE and not include_auto_merge:
+        return None
+    return DedupCandidate(
+        feature_id_a=a.feature_id,
+        feature_id_b=b.feature_id,
+        name_a=a.name,
+        name_b=b.name,
+        score=round(score, 4),
+        decision=decision,
+        name_score=round(name_similarity(a.name, b.name), 4),
+        spatial_score=round(spatial_similarity(a.coord, b.coord), 4),
+        category_score=round(category_similarity({a.category}, {b.category}), 4),
+    )
+
+
+def find_sibling_candidates(
+    features: Iterable[DedupInput],
+    *,
+    include_auto_merge: bool = True,
+) -> list[DedupCandidate]:
+    """**같은 집합 내** 중복 후보 (within-set pairwise) — MOIS 자기 sibling.
+
+    하나의 provider/dataset 안에서 같은 실세계 사업장이 2개 슬러그로 중복 등록된
+    경우(예: MOIS ``general_restaurants`` ↔ ``tourist_restaurants``)를 찾는다.
+    ``find_dedup_candidates``가 두 집합 cross-product인 것과 달리, 본 함수는 한
+    집합의 **고유 쌍**(i < j)만 score한다 — self-pair(같은 feature_id)와 대칭
+    중복(b,a)을 제외.
+
+    Parameters
+    ----------
+    features
+        같은 dataset의 ``DedupInput`` 집합 (``Feature``가 그대로 만족). 동일
+        ``feature_id``가 중복으로 들어와도 self-pair는 건너뛴다.
+    include_auto_merge
+        ``auto_merge`` 후보 포함 여부 (기본 True).
+
+    Returns
+    -------
+    list[DedupCandidate]
+        score 내림차순. ``feature_id_a``/``_b``는 입력 순서를 따른다.
+
+    Notes
+    -----
+    O(n²/2). 대규모 dataset은 후속에 blocking(시군구/grid)으로 후보 축소
+    (``find_dedup_candidates`` Notes와 동일).
+    """
+    items = list(features)
+    candidates: list[DedupCandidate] = []
+    for i in range(len(items)):
+        a = items[i]
+        for j in range(i + 1, len(items)):
+            b = items[j]
+            if a.feature_id == b.feature_id:
+                continue  # self-pair (중복 입력) 제외
+            cand = _score_candidate(a, b, include_auto_merge=include_auto_merge)
+            if cand is not None:
+                candidates.append(cand)
     candidates.sort(key=lambda c: c.score, reverse=True)
     return candidates
