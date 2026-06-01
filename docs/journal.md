@@ -2,6 +2,18 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-01 (claude) — MOIS Step A streaming 배치 적재 (source DB 연결 준비)
+
+**작업**: Step A bulk 적재를 대용량 source DB 스트림 대응 streaming 배치로 전환.
+ADR-006상 mois를 import 안 하므로 iterator는 호출자 주입 — `records`로
+`mois.db.iter_open_place_records(...)`를 그대로 넘기면 Step A가 완성된다.
+
+- **산출물**:
+  - `krtour.map.mois`: `_batched` helper + `DEFAULT_BATCH_SIZE=500`. `sync_mois_license_features_bulk`/`run_mois_license_bulk_job`/client 메서드에 `batch_size` 인자 추가 — `batch_size`개씩 변환·upsert하며 snapshot key만 누적(메모리 바운드), 전체 적재 후 prune.
+  - `infra/feature_repo.py`: `FeatureLoadResult.merge`(배치 결과 누적) + `load_bundles`도 `.merge()`로 정리.
+  - `tests/unit/test_mois_batched.py`(7 — _batched 분할/순서/빈, merge 합산/항등) + `test_mois_loader.py` +1(batch_size=2 streaming 적재+prune 동치).
+- **검증(WSL)**: mypy --strict 53 files / ruff All checks passed / import-linter 4 kept / 신규 unit 7 + integration 1 / 전체 **730 passed, 5 skipped**.
+
 ## 2026-06-01 (claude) — MOIS Step A 작업 통합 (advisory lock + import_jobs)
 
 **작업**: advisory lock + import_jobs(앞 entry들) 위에 MOIS Step A bulk 적재를

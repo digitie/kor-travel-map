@@ -367,3 +367,32 @@ async def test_run_bulk_job_skips_when_lock_held(
     # 작업 row도, feature도 생성 안 됨.
     assert await _job_states(migrated_session) == []
     assert await _active_entity_ids(migrated_session) == set()
+
+
+async def test_sync_bulk_streaming_batches_equivalent(
+    migrated_session: AsyncSession,
+) -> None:
+    # batch_size=2로 5건 PROMOTED snapshot을 streaming 적재 → 전부 적재 + prune 정상.
+    records = [
+        _Record(service_slug="general_restaurants", mng_no=f"b{i}") for i in range(5)
+    ]
+    result = await sync_mois_license_features_bulk(
+        migrated_session, records, fetched_at=_FETCHED, batch_size=2
+    )
+    await migrated_session.flush()
+    assert result.load.bundles_total == 5
+    assert result.load.features_inserted == 5
+    assert await _active_entity_ids(migrated_session) == {
+        f"general_restaurants::b{i}" for i in range(5)
+    }
+
+    # 2차 snapshot(batch_size=2)에서 b0만 유지 → 나머지 4건 prune.
+    result2 = await sync_mois_license_features_bulk(
+        migrated_session,
+        [_Record(service_slug="general_restaurants", mng_no="b0")],
+        fetched_at=_FETCHED,
+        batch_size=2,
+    )
+    await migrated_session.flush()
+    assert result2.deactivated == 4
+    assert await _active_entity_ids(migrated_session) == {"general_restaurants::b0"}
