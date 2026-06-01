@@ -11,6 +11,9 @@ Windows Git + NTFS 정책, Next.js 16 + `maplibre-vworld-js#v0.1.2` 최신화를
 integration 35 / live DB·dedup 5 / full pytest 681 / Windows Playwright e2e
 14/14 / GitHub Actions 전체 green.
 
+에이전트 공용 runbook은 `docs/runbooks/`(인덱스 README + `agent-workflow.md` 표준
+1-PR 흐름 + `agent-failure-patterns.md` 반복 실패 회피) — 작업 전 후자 둘을 훑는다.
+
 개발 환경 문서는 Windows Git(`git.exe`) + NTFS worktree
 (`F:\dev\python-krtour-map*`)를 Git 원본으로 명시한다. WSL ext4는
 테스트/실행 전용 샌드박스이며, 필요 시 NTFS 소스를 `rsync`해서 사용한다.

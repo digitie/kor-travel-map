@@ -16,8 +16,12 @@
 7. 관련 ADR (`docs/decisions.md` — ADR-001~044 전부 accepted, 다음 후보 045)
 8. 직결 docs (provider 추가면 `docs/provider-contract.md`, 현재 sprint면
    `docs/sprints/SPRINT-N.md` 등)
+9. **운영 runbook** (`docs/runbooks/`) — 에이전트 공용. 실제 작업 시작 전
+   [agent-workflow.md](runbooks/agent-workflow.md)(표준 1-PR 흐름)와
+   [agent-failure-patterns.md](runbooks/agent-failure-patterns.md)(반복 실패 회피)는
+   훑고 들어간다. 게이트가 깨지면 failure-patterns부터 본다.
 
-5~10분 안에 위 8개를 훑으면 거의 모든 작업의 정합성 판단이 가능하다.
+5~10분 안에 위 9개를 훑으면 거의 모든 작업의 정합성 판단이 가능하다.
 
 ### 1.1 자기 worktree로 이동
 
