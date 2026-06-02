@@ -2,6 +2,18 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-02 (codex) — Docker Dagster 내부 URL 분리
+
+**작업**: PR#157 머지 후 Docker stack 기동 검증 중 API 컨테이너의
+`/ops/dagster/summary`가 `unavailable`을 반환하는 문제를 확인하고 수정.
+
+- **원인**: `.env`의 로컬 `KRTOUR_MAP_ADMIN_DAGSTER_URL=http://127.0.0.1:9013`이
+  compose interpolation에 그대로 사용되어 API 컨테이너 안에서 자기 자신을 조회.
+- **수정**: Docker compose는 `KRTOUR_MAP_DOCKER_ADMIN_DAGSTER_URL`을 읽어 API 컨테이너
+  내부 `KRTOUR_MAP_ADMIN_DAGSTER_URL`로 주입. 기본값은 `http://dagster:9013`.
+- **문서**: Docker runbook, debug UI env 표, `.env.example`에 로컬/public URL과
+  Docker 내부 URL의 분리 원칙 추가.
+
 ## 2026-06-02 (codex) — admin UI Dagster 운영 화면
 
 **작업**: 사용자 지시 — admin UI를 최신 문서의 ADR-045 독립 Dagster 운영 모델에 맞춰

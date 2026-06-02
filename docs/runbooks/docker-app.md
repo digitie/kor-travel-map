@@ -24,10 +24,13 @@ chmod 600 .env
 
 frontend 컨테이너에는 `NEXT_PUBLIC_*`만 주입한다. 서버용 API 키는 API/Dagster
 프로세스 환경변수로만 둔다. Dagster 임베드용 공개 URL은
-`NEXT_PUBLIC_KRTOUR_MAP_DAGSTER_URL`(기본 `http://127.0.0.1:9013`)이다. API
-컨테이너가 Dagster GraphQL을 조회할 때는 `KRTOUR_MAP_ADMIN_DAGSTER_URL`을 쓰며,
-compose 기본값은 내부 서비스명 기준 `http://dagster:9013`이다. Dagster telemetry는
-embedded 관리 화면의 첫 실행 안내와 외부 telemetry 호출을 피하기 위해
+`NEXT_PUBLIC_KRTOUR_MAP_DAGSTER_URL`(기본 `http://127.0.0.1:9013`)이다. 로컬 API가
+Dagster GraphQL을 조회할 때는 `KRTOUR_MAP_ADMIN_DAGSTER_URL`을 쓴다. Docker API
+컨테이너는 같은 이름의 컨테이너 환경변수를 갖지만, 값은 compose에서
+`KRTOUR_MAP_DOCKER_ADMIN_DAGSTER_URL`(기본 내부 서비스명
+`http://dagster:9013`)로 주입한다. `.env`의 로컬 `127.0.0.1` 값이 컨테이너 안으로
+새지 않게 하기 위한 분리다. Dagster telemetry는 embedded 관리 화면의 첫 실행 안내와
+외부 telemetry 호출을 피하기 위해
 `DAGSTER_DISABLE_TELEMETRY=yes`를 기본값으로 둔다. 로컬 `scripts/run-admin-stack.sh`는
 `DAGSTER_HOME/dagster.yaml`이 없으면 `telemetry.enabled: false` 설정 파일을 만들고,
 Docker Dagster 이미지는 같은 설정 파일을 포함한다.
