@@ -124,6 +124,9 @@ DSN: `postgresql+asyncpg://krtour_map:changeme@localhost:5432/krtour_map`.
 
 ### 4.2 docker-compose
 
+RustFS 로컬 표준 포트는 S3 API `9003`, console `9004`다. 아래 MinIO 예시는
+호환 테스트용이며, MinIO 자체 기본 포트 `9000`/`9001`을 그대로 쓴다.
+
 ```yaml
 # docker-compose.yml (코드 작성 단계에서 추가)
 services:

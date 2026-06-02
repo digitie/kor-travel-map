@@ -126,7 +126,7 @@ class RustfsFileStore:
 ```
 
 backend swap: `s3_client`만 다른 endpoint로 교체.
-- RustFS: `endpoint_url="http://127.0.0.1:9000"` (또는 RustFS 사양 endpoint)
+- RustFS: `endpoint_url="http://127.0.0.1:9003"` (로컬 표준 S3 API 포트)
 - MinIO: `endpoint_url="http://minio:9000"`
 - AWS S3: 기본 endpoint
 - Cloudflare R2: `endpoint_url="https://<account>.r2.cloudflarestorage.com"`
@@ -286,14 +286,17 @@ def khoa_beach_to_file_sources(item, *, feature_id, source_record_key) -> list[F
 ## 8. settings
 
 ```
-KRTOUR_MAP_OBJECT_STORE_ENDPOINT_URL=http://127.0.0.1:9000
+KRTOUR_MAP_OBJECT_STORE_ENDPOINT_URL=http://127.0.0.1:9003
 KRTOUR_MAP_OBJECT_STORE_BUCKET=krtour-map
 KRTOUR_MAP_OBJECT_STORE_REGION=us-east-1
 KRTOUR_MAP_OBJECT_STORE_ACCESS_KEY_ID=...
 KRTOUR_MAP_OBJECT_STORE_SECRET_ACCESS_KEY=...
-KRTOUR_MAP_OBJECT_STORE_PUBLIC_BASE_URL=http://127.0.0.1:9000/krtour-map
+KRTOUR_MAP_OBJECT_STORE_PUBLIC_BASE_URL=http://127.0.0.1:9003/krtour-map
 KRTOUR_MAP_OBJECT_STORE_PREFIX=features
 ```
+
+로컬 RustFS 표준 포트는 S3 API `9003`, console `9004`다. MinIO 호환 테스트
+컨테이너를 쓸 때만 MinIO 기본 `9000`/`9001` 예시를 따른다.
 
 v1 fallback chain (`TRIPMATE_RUSTFS_*`, `RUSTFS_ACCESS_KEY`, `RUSTFS_SECRET_KEY`)도
 optional 지원 (마이그레이션 편의).
@@ -305,8 +308,8 @@ optional 지원 (마이그레이션 편의).
 docker compose -f docker/rustfs/docker-compose.yml up -d rustfs rustfs-init
 ```
 
-bucket 자동 생성 (`rustfs-init` 컨테이너가 `mc mb` 호출). 또는 MinIO console
-(`http://127.0.0.1:9001`)에서 수동 생성.
+bucket 자동 생성 (`rustfs-init` 컨테이너가 `mc mb` 호출). 또는 RustFS console
+(`http://127.0.0.1:9004`)에서 수동 생성.
 
 대안: MinIO testcontainer (`testcontainers-python`의 `MinioContainer`).
 
@@ -380,7 +383,7 @@ async def upload_with_retry(client, src, store, *, max_retries=3):
 
 - bucket policy: public read 옵션 (CDN 사용 시) 또는 private + presigned URL.
 - access_key / secret_key는 `SecretStr`. 로그/Sentry 노출 X.
-- RustFS console (`http://127.0.0.1:9001`)은 인증 필요 + 내부망만.
+- RustFS console (`http://127.0.0.1:9004`)은 인증 필요 + 내부망만.
 
 ## 16. 테스트
 

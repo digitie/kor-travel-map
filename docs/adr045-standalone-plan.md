@@ -96,9 +96,10 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
   - 구현 메모: dry-run은 `FeatureUpdateRequestPreview`로 반환하며 DB row/import job을
     만들지 않는다. 실제 enqueue/claim/start/finish/cancel은 연결 import job 상태를
     같은 transaction 안에서 함께 갱신한다.
-- **T-206c** `AsyncKrtourMapClient` 메서드 — `enqueue_feature_update_request` /
+- **T-206c** ✅ `AsyncKrtourMapClient` 메서드 — `enqueue_feature_update_request` /
   `get_update_request` / `list_update_requests` / `cancel_update_request` (각 자체
-  transaction). 기존 `run_*_job` 패턴 일관.
+  transaction). 기존 `run_*_job` 패턴 일관. Top-level
+  `from krtour.map import AsyncKrtourMapClient` export도 실제 코드와 맞춘다.
 - **T-206d** request 실행 본체 — scope 해석된 feature/provider를 실제 적재하는
   worker 로직. provider_dataset scope는 기존 `run_mois_*_job` 류 재사용; geographic
   scope(center/bbox/sigungu)는 "해당 feature를 소유한 provider/dataset을 역추적 →
@@ -161,7 +162,7 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
 
 - **T-209a** `docker-compose.yml` — 서비스 6종(api/frontend/dagster-webserver/
   dagster-daemon/postgres/선택 rustfs) + 네트워크 + 볼륨 + 포트(`api` 9011,
-  `frontend` 9012, Dagster/Postgres/RustFS 표준 포트) +
+  `frontend` 9012, Dagster 9013, RustFS API 9003/console 9004, Postgres host 15433) +
   env(`KRTOUR_MAP_PG_DSN`/provider keys/RUSTFS). healthcheck + depends_on(기동 순서:
   postgres → migrate → api/dagster).
 - **T-209b** 기동 순서 스크립트 — postgres ready → `alembic upgrade head`(app DB
@@ -217,12 +218,17 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
 
 1. **의사결정 확인**: D-1~D-16은 모두 확정됨 — `adr045-open-decisions.md`.
 2. **Phase 1 T-205a** (feature_update_requests alembic/model) — 완료.
-3. **Phase 2 T-206b/c** (feature_update_repo + client) — 다음 진입점.
-4. **Phase 3 T-207a/d/e** (admin update-requests + ops + features 라우터) — T-206 후.
-5. **Phase 5 T-209a/b** (docker-compose + 기동) — 라우터 동작 후 통합.
-6. **Phase 4 T-208** (Dagster) — T-206/T-209 위, TripMate 이관과 병행.
-7. **Phase 6** TripMate 정리/이관 — Dagster 이관 시점 동기.
-8. Phase 2(F5~F8/poi-cache/refresh policy)·OpenAPI client gen은 운영 안정 후.
+3. **Phase 2 T-206b/c** (feature_update_repo + client) — 완료/진행 중.
+4. **T-206a-geo** (형제 repo `python-kraddr-geo`) — `/v2/regions/within-radius`
+   endpoint와 optional PostGIS 실데이터 테스트를 재검증/보완.
+5. **Phase 2 T-205c** (`provider_refresh_policies`, `poi_cache_targets`,
+   `data_integrity_violations`) — request 실행 본체 선행 스키마.
+6. **Phase 2 T-206d** — request 실행 본체.
+7. **Phase 3 T-207a/d/e** (admin update-requests + ops + features 라우터) — T-206 후.
+8. **Phase 5 T-209a/b** (docker-compose + 기동) — 라우터 동작 후 통합.
+9. **Phase 4 T-208** (Dagster) — T-206/T-209 위, TripMate 이관과 병행.
+10. **Phase 6** TripMate 정리/이관 — Dagster 이관 시점 동기.
+11. OpenAPI client gen은 운영 안정 후.
 
 각 task는 1-PR 단위(`docs/runbooks/agent-workflow.md`), 4 게이트 + 해당 시 alembic/
 OpenAPI drift. 새 테이블·라우터마다 통합 테스트 필수(ADR-014).

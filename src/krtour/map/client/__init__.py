@@ -1,10 +1,11 @@
 """``krtour.map.client`` — ``AsyncKrtourMapClient`` (라이브러리 진입점).
 
-TripMate가 ``pip install`` 후 import하는 단일 진입점. SQLAlchemy 2 async
-``AsyncEngine``을 주입받아 메서드 호출로 사용한다 (ADR-003 함수 직접 호출, HTTP
-없음). 본 client는 **transaction 경계의 소유자**다 — ``infra/*_repo.py``는
-"commit은 호출자 책임"으로 ``session.execute``만 하므로, write 메서드가
-``session.begin()``으로 commit/rollback을 잡는다 (단위 of work).
+krtour-map API/Dagster 내부 구현과 테스트가 사용하는 Python 진입점이다. TripMate
+운영 연동은 ADR-045 이후 OpenAPI HTTP 계약만 사용하고, 이 client를 직접 import하지
+않는다. 본 client는 SQLAlchemy 2 async ``AsyncEngine``을 주입받으며
+**transaction 경계의 소유자**다 — ``infra/*_repo.py``는 "commit은 호출자 책임"으로
+``session.execute``만 하므로, write 메서드가 ``session.begin()``으로
+commit/rollback을 잡는다 (단위 of work).
 
 오케스트레이션 범위 (#122 실 DB 적재):
 - ``load_feature_bundles`` — provider 변환 출력(``FeatureBundle``)을 한
@@ -12,6 +13,9 @@ TripMate가 ``pip install`` 후 import하는 단일 진입점. SQLAlchemy 2 asyn
 - ``sync_dedup_candidates`` — cross-provider 중복 후보 탐지(``core.dedup.
   find_dedup_candidates``, 순수) → ``ops.dedup_review_queue`` 적재
   (``infra.enqueue_dedup_candidates``). 두 feature가 먼저 적재돼 있어야 함(FK).
+- ``enqueue_feature_update_request`` — admin/OpenAPI feature update request를
+  ``ops.feature_update_requests``와 연결 ``ops.import_jobs``에 한 transaction으로
+  적재한다. ``dry_run=True``는 DB write 없이 scope 해석 preview만 반환한다.
 - 읽기: ``features_in_bounds`` / ``get_feature`` / ``pending_dedup_reviews``.
 
 engine 수명은 호출자 소유 (ADR-004 ``infra/db.py`` — ``await engine.dispose()``는
@@ -23,7 +27,7 @@ engine 수명은 호출자 소유 (ADR-004 ``infra/db.py`` — ``await engine.di
 ADR 참조
 --------
 - ADR-002 — async-only (sync 인터페이스 추가 금지)
-- ADR-003 — TripMate 연계는 함수 직접 호출 (REST 없음)
+- ADR-045 — TripMate 연계는 OpenAPI, client는 krtour-map 내부 API/Dagster용
 - ADR-004 — ORM 매핑만, 쿼리는 raw SQL (``infra/*_repo.py``); client가 commit
 - ADR-016 — dedup 후보 ``ops.dedup_review_queue`` 적재
 - ADR-020 — 본 모듈에 FastAPI/Uvicorn import 금지 (디버그 REST는 별도 패키지)
@@ -54,6 +58,23 @@ from krtour.map.infra.feature_repo import (
     get_feature_row,
     load_bundles,
 )
+from krtour.map.infra.feature_update_repo import (
+    FeatureUpdateRequest,
+    FeatureUpdateRequestPage,
+    FeatureUpdateRequestPreview,
+)
+from krtour.map.infra.feature_update_repo import (
+    cancel_update_request as repo_cancel_update_request,
+)
+from krtour.map.infra.feature_update_repo import (
+    enqueue_feature_update_request as repo_enqueue_feature_update_request,
+)
+from krtour.map.infra.feature_update_repo import (
+    get_update_request as repo_get_update_request,
+)
+from krtour.map.infra.feature_update_repo import (
+    list_update_requests as repo_list_update_requests,
+)
 from krtour.map.infra.merge_repo import MergeOutcome, merge_from_review
 from krtour.map.infra.status_repo import StatusCounts, gather_status_counts
 from krtour.map.mois import DEFAULT_BATCH_SIZE as MOIS_DEFAULT_BATCH_SIZE
@@ -73,7 +94,7 @@ from krtour.map.providers.mois import DATASET_KEY_HISTORY as MOIS_DATASET_KEY_HI
 from krtour.map.providers.mois import PROVIDER_NAME as MOIS_PROVIDER_NAME
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Mapping, Sequence
     from datetime import datetime
 
     from sqlalchemy.ext.asyncio import AsyncEngine
@@ -81,6 +102,7 @@ if TYPE_CHECKING:
     from krtour.map.core.dedup import DedupCandidate, DedupInput
     from krtour.map.dto import FeatureBundle
     from krtour.map.geocoding import ReverseGeocoder
+    from krtour.map.infra.scope_repo import SigunguByRadiusResolver
     from krtour.map.providers.mois import MoisLicensePlaceRecord
     from krtour.map.settings import KrtourMapSettings
 
@@ -336,6 +358,68 @@ class AsyncKrtourMapClient:
                 fetched_at=fetched_at,
             )
 
+    async def enqueue_feature_update_request(
+        self,
+        *,
+        scope: Mapping[str, Any],
+        providers: Sequence[str] | None = None,
+        dataset_keys: Sequence[str] | None = None,
+        update_policy: Mapping[str, Any] | None = None,
+        run_mode: str = "queued",
+        priority: int = 50,
+        dry_run: bool = False,
+        operator: str | None = None,
+        reason: str | None = None,
+        sigungu_resolver: SigunguByRadiusResolver | None = None,
+    ) -> FeatureUpdateRequest | FeatureUpdateRequestPreview:
+        """Feature update request를 생성하거나 dry-run preview를 반환한다.
+
+        ``dry_run=True``이면 DB row/import job을 만들지 않고 scope 해석 결과만
+        반환한다. 실제 요청은 ``ops.feature_update_requests``와 연결
+        ``ops.import_jobs``를 한 transaction에 생성한다.
+        """
+        if dry_run:
+            async with self._session_factory() as session:
+                return await repo_enqueue_feature_update_request(
+                    session,
+                    scope=scope,
+                    providers=providers,
+                    dataset_keys=dataset_keys,
+                    update_policy=update_policy,
+                    run_mode=run_mode,
+                    priority=priority,
+                    dry_run=True,
+                    operator=operator,
+                    reason=reason,
+                    sigungu_resolver=sigungu_resolver,
+                )
+        async with self._session_factory() as session, session.begin():
+            return await repo_enqueue_feature_update_request(
+                session,
+                scope=scope,
+                providers=providers,
+                dataset_keys=dataset_keys,
+                update_policy=update_policy,
+                run_mode=run_mode,
+                priority=priority,
+                dry_run=False,
+                operator=operator,
+                reason=reason,
+                sigungu_resolver=sigungu_resolver,
+            )
+
+    async def cancel_update_request(
+        self,
+        request_id: str,
+        *,
+        error_message: str | None = None,
+    ) -> FeatureUpdateRequest | None:
+        """queued/running feature update request를 ``cancelled``로 닫는다."""
+        async with self._session_factory() as session, session.begin():
+            return await repo_cancel_update_request(
+                session, request_id, error_message=error_message
+            )
+
     async def sync_dedup_candidates(
         self,
         left: Iterable[DedupInput],
@@ -452,6 +536,26 @@ class AsyncKrtourMapClient:
         """검토 대기(``status='pending'``) dedup 후보 list — total_score 내림차순."""
         async with self._session_factory() as session:
             return await pending_dedup_reviews(session, limit=limit)
+
+    async def get_update_request(
+        self, request_id: str
+    ) -> FeatureUpdateRequest | None:
+        """Feature update request 단건 조회. 없으면 ``None``."""
+        async with self._session_factory() as session:
+            return await repo_get_update_request(session, request_id)
+
+    async def list_update_requests(
+        self,
+        *,
+        state: str | None = None,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> FeatureUpdateRequestPage:
+        """Feature update request 목록을 keyset cursor로 조회한다."""
+        async with self._session_factory() as session:
+            return await repo_list_update_requests(
+                session, state=state, limit=limit, cursor=cursor
+            )
 
     async def status_counts(self) -> StatusCounts:
         """운영 현황 카운트 스냅샷 (read-only) — ``krtour-map status``용.

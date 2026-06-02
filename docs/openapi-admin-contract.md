@@ -49,7 +49,7 @@ provider별 refresh policy/rate limit 상세는
 | `krtour-map-dagster-webserver` | Dagster UI |
 | `krtour-map-dagster-daemon` | schedules/sensors/runs |
 | `krtour-map-postgres` | 독립 PostgreSQL 16 + PostGIS 3.5 |
-| `krtour-map-rustfs` | 선택 객체 저장소 |
+| `krtour-map-rustfs` | 선택 객체 저장소. 로컬 표준 포트는 S3 API `9003`, console `9004` |
 
 PostgreSQL 기본 DB:
 
@@ -426,8 +426,9 @@ CREATE INDEX idx_feature_update_job
 구현 상태: Alembic `0008_feature_update_requests`와
 `FeatureUpdateRequestRow`가 이 DDL을 반영한다. `infra.feature_update_repo`는
 dry-run preview, request/import job enqueue, priority claim, start/finish/cancel,
-단건 조회, keyset 목록 조회를 구현했다(T-206b). Admin HTTP router와 OpenAPI schema
-export 연결은 T-207a에서 별도 구현한다.
+단건 조회, keyset 목록 조회를 구현했다(T-206b). `AsyncKrtourMapClient`는
+enqueue/get/list/cancel 메서드와 transaction 경계를 노출한다(T-206c). Admin HTTP
+router와 OpenAPI schema export 연결은 T-207a에서 별도 구현한다.
 
 ## 7. Provider 실행 API와의 관계
 

@@ -11,6 +11,7 @@
 | `frontend` | `9012` | Next.js admin UI |
 | `dagster` | `9013` | krtour-map-owned Dagster UI/code location |
 | `postgres` | host `15433`, container `5432` | 독립 `krtour_map` PostGIS DB |
+| `rustfs` | API `9003`, console `9004` | S3 호환 객체 저장소(선택, backup 대상) |
 
 ## 최소 배포 절차
 

@@ -1,5 +1,28 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-03 Codex 작업 메모 — feature update client 표면
+
+ADR-045 T-206c로 `AsyncKrtourMapClient`에 feature update request 메서드 4종을
+추가한다. `enqueue_feature_update_request`는 `infra.feature_update_repo`를 감싸되,
+`dry_run=True`일 때는 DB write 없이 preview만 반환하고 실제 enqueue는
+`ops.feature_update_requests`와 연결 `ops.import_jobs` 생성을 한 transaction으로
+묶는다. `get_update_request`, `list_update_requests`, `cancel_update_request`도 같은
+client 표면으로 노출해 T-207a admin router와 T-208e Dagster sensor가 공유할
+오케스트레이션 경계를 마련한다.
+
+동시에 `from krtour.map import AsyncKrtourMapClient` top-level import를 실제 public
+export로 맞추고, client/module 문서의 TripMate 직접 import 설명을 ADR-045 OpenAPI
+운영 모델 기준으로 정정한다. 통합 테스트는 dry-run preview, enqueue, get/list,
+cancel lifecycle을 PostGIS migrated DB에서 확인한다.
+
+다음 한 작업은 **T-206a-geo**다. 형제 repo `python-kraddr-geo`에서
+`POST /v2/regions/within-radius`와 optional PostGIS 실데이터 테스트를 현재 endpoint
+기준으로 재검증하고, 빠진 부분이 있으면 별도 PR로 보완한다. 그 다음 T-206d request
+실행 본체에 들어가기 전에 **T-205c**로 `ops.provider_refresh_policies`(provider별
+update 주기/rate limit), `ops.poi_cache_targets` + `_feature_links`
+(`cache_target_keys` scope 선행), `ops.data_integrity_violations`(F5~F8 저장 기반)을
+먼저 만든다. 이후 T-206d → T-207a → T-208e 순서로 진행한다.
+
 ## 2026-06-03 Codex 작업 메모 — feature update request 큐 repository
 
 ADR-045 T-206b로 `infra/feature_update_repo.py`를 추가한다. 이 repo는
@@ -274,10 +297,11 @@ Sprint 4(4a+4b)는 아래 체크리스트대로 **전부 완료**(PR#133~#142). 
   `docs/dagster-boundary.md`.
 
 **1차 진입 task**(권장): T-205a(`feature_update_requests`
-alembic 0008, 완료) → T-206a(scope resolver, 본 PR) → T-206b(feature update repo) →
-T-206c(client) →
-T-207a/e(admin update-requests + 사용자 features 라우터) → T-208d/e(Dagster
-schedule/sensor). 그 다음 Sprint 5 provider(MOIS-sibling) + Phase 2 정합성.
+alembic 0008, 완료) → T-206a(scope resolver, 완료) → T-206b(feature update repo,
+완료) → T-206c(client, 본 PR) → **T-206a-geo(형제 repo endpoint 검증/보완)** →
+**T-205c(Phase 2 스키마)** → T-206d(request 실행 본체) → T-207a/e(admin
+update-requests + 사용자 features 라우터) → T-208d/e(Dagster schedule/sensor). 그
+다음 Sprint 5 provider(MOIS-sibling) + Phase 2 정합성.
 세부는 `docs/sprints/SPRINT-5.md`.
 
 ### Sprint 4 (4a+4b) 완료 체크리스트 (PR#133~#142, 2026-06-01)

@@ -1,7 +1,8 @@
 # Docker 독립 app runbook
 
 본 문서는 ADR-045/047 기준 krtour-map 독립 프로그램을 로컬에서 빌드·기동·스모크하는
-절차다. 고정 포트는 API `9011`, admin UI `9012`, Dagster `9013`이다.
+절차다. 고정 포트는 API `9011`, admin UI `9012`, Dagster `9013`이다. RustFS를
+로컬에서 함께 띄우는 경우 S3 API는 `9003`, console은 `9004`를 쓴다.
 
 ## 1. 환경변수
 
@@ -87,6 +88,9 @@ curl -fsS -I http://127.0.0.1:9012/ | sed -n '1,8p'
 curl -fsS -I http://127.0.0.1:9013/ | sed -n '1,8p'
 docker compose ps
 ```
+
+RustFS/object store healthcheck는 후속 T-209e에서 compose 서비스와 backup/restore
+묶음에 붙인다. 현재 로컬 기준 포트는 API `9003`, console `9004`다.
 
 Dagster `definitions`의 일부 asset resource는 운영 구현이 주입되기 전까지 missing
 resource로 남는다. UI와 code location 로딩은 가능하지만 실제 live provider 실행은

@@ -4,9 +4,11 @@
 
 ## 진행 중
 
-**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#160(T-206a scope resolver)까지
-merged. 현재 작업은 T-206b feature update request 큐 repository이며, 후속 작업은
-feature update client/admin API/Dagster sensor와 Sprint 5 provider 구현이다.
+**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#161(T-206b feature update
+request 큐 repository)까지 merged. 현재 작업은 T-206c feature update client
+표면이며, 다음 작업은 T-206a-geo 형제 repo endpoint 검증/보완이다. 그 뒤 T-205c
+(Phase 2 스키마: provider refresh policy / POI cache target / F5~F8 violation 기반),
+T-206d request 실행 본체, admin API/Dagster sensor로 이어간다.
 
 ### 현재 기준 보강 필요 체크포인트 (2026-06-03)
 
@@ -29,20 +31,25 @@ feature update client/admin API/Dagster sensor와 Sprint 5 provider 구현이다
 5. **고정 포트** — krtour-map 독립 프로그램 로컬/standalone 포트는 API `9011`,
    admin UI `9012`, Dagster `9013`이다(ADR-047). 해당 포트를 점유한 프로세스는
    `scripts/stop-fixed-ports.sh`로 종료하고 재기동한다.
-6. **admin Dagster 운영 화면** — `/admin/dagster`는 `GET /ops/dagster/summary` 자체
+6. **RustFS 포트** — 로컬 RustFS 표준은 S3 API `9003`, console `9004`다. 객체
+   저장소 endpoint/public URL 예시는 `9003`을 기준으로 작성하고, console 링크는
+   `9004`만 사용한다.
+7. **admin Dagster 운영 화면** — `/admin/dagster`는 `GET /ops/dagster/summary` 자체
    요약 UI와 Dagster webserver embed를 제공한다. 실제 feature update queue/sensor
    연결은 후속 PR에서 진행한다.
-7. **feature update request 큐** — T-205a에서 `ops.feature_update_requests` 테이블과
-   ORM 매핑을 추가했고, T-206b에서 request/import job lifecycle repo를 추가한다.
-   API/sensor는 T-207/T-208로 분리한다.
-8. **scope resolver** — T-206a에서 `feature_ids`, `center_radius`, `bbox`,
+8. **feature update request 큐** — T-205a에서 `ops.feature_update_requests` 테이블과
+   ORM 매핑을 추가했고, T-206b에서 request/import job lifecycle repo, T-206c에서
+   `AsyncKrtourMapClient` 표면을 추가한다. API/sensor는 T-207/T-208로 분리한다.
+9. **scope resolver** — T-206a에서 `feature_ids`, `center_radius`, `bbox`,
    `sigungu_by_radius`, `provider_dataset` dry-run/count resolver를 구현한다.
    `cache_target_keys`는 `ops.poi_cache_targets` 도입 후 Phase 2로 진행한다.
-9. **검증 기준** — WSL unit/integration/live pytest + Windows Playwright e2e + GitHub
+10. **검증 기준** — WSL unit/integration/live pytest + Windows Playwright e2e + GitHub
    Actions green 후 머지.
 
 ## 최근 완료 (2026-05-31~2026-06-03)
 
+- **PR#161** (merged 2026-06-03): `infra.feature_update_repo` request/import job
+  lifecycle repository + kraddr-geo REST API 로컬 포트 9001 문서/설정 정렬.
 - **PR#160** (merged 2026-06-03): `infra.scope_repo` scope resolver.
 - **PR#159** (merged 2026-06-03): `ops.feature_update_requests` Alembic 0008 +
   ORM 매핑 + DDL 계약 통합 테스트.
@@ -264,8 +271,10 @@ feature update client/admin API/Dagster sensor와 Sprint 5 provider 구현이다
   scope resolver/repository는 T-206에서 분리.
 - [~] T-205b — ~~`feature.sigungu_boundaries`~~ **취소**(D-11: 경계는 kraddr-geo
   소유, krtour-map은 REST 호출). → T-206a-geo로 대체.
-- [ ] T-205c — (Phase 2) `ops.data_integrity_violations`(F5~F8) / `ops.poi_cache_targets`
-  + `_feature_links` / `ops.provider_refresh_policies`.
+- [ ] T-205c — (Phase 2, **T-206c 직후 진행**) `ops.data_integrity_violations`
+  (F5~F8) / `ops.poi_cache_targets` + `_feature_links` /
+  `ops.provider_refresh_policies`. `cache_target_keys` scope와 provider별 update
+  주기/rate limit enforcement의 선행 스키마.
 - [ ] T-205d — `import_jobs` batch 컬럼(`load_batch_id`/`parent_job_id`, T-200 연계, D-6).
 
 **Phase 2 — 로직 (scope resolver + 큐 브리지)**
@@ -274,12 +283,13 @@ feature update client/admin API/Dagster sensor와 Sprint 5 provider 구현이다
   `sigungu_by_radius`는 kraddr-geo `/v2/regions/within-radius` 호출(D-11).
   DB repo는 kraddr-geo client를 직접 import하지 않고 async resolver를 주입받는다.
   `cache_target_keys` resolver는 `ops.poi_cache_targets` 테이블 도입 후 Phase 2.
-- [ ] T-206a-geo — (형제 repo `python-kraddr-geo`, 별도 PR) `POST /v2/regions/
-  within-radius` 엔드포인트(`tl_scco_sig` 교차, D-11; levels=sigungu 우선). 반환
-  sig_cd = krtour-map sigungu_code 동일 체계(매핑 불필요). T-206a 선행 의존.
+- [ ] T-206a-geo — (형제 repo `python-kraddr-geo`, **T-206c 직후 진행**) `POST
+  /v2/regions/within-radius` 엔드포인트와 optional PostGIS 실데이터 테스트를 repo
+  기준으로 재검증한다. 빠진 부분이 있으면 형제 repo PR로 보완하고, krtour-map은
+  REST v2 계약/로컬 포트 `9001`/resolver 주입 경계를 유지한다.
 - [x] T-206b — `infra/feature_update_repo.py` (enqueue/claim/start/finish/get/list/cancel,
   advisory lock + SKIP LOCKED, keyset cursor D-10).
-- [ ] T-206c — `AsyncKrtourMapClient` feature-update 메서드 4종.
+- [x] T-206c — `AsyncKrtourMapClient` feature-update 메서드 4종.
 - [ ] T-206d — request 실행 본체(scope→provider/dataset 역추적 refresh, D-6/D-8).
 
 **Phase 3 — FastAPI 라우터 (`krtour-map-admin` 패키지)**

@@ -64,8 +64,9 @@ class KrtourMapSettings(BaseSettings):
     object_store_endpoint_url: str | None = Field(
         default=None,
         description=(
-            "RustFS/MinIO/Ceph/R2 endpoint URL. ``None``이면 AWS S3 기본 "
-            "endpoint 사용."
+            "RustFS/MinIO/Ceph/R2 endpoint URL. 로컬 RustFS 표준 S3 API 예시는 "
+            "``http://127.0.0.1:9003``이고 console은 ``http://127.0.0.1:9004``. "
+            "``None``이면 AWS S3 기본 endpoint 사용."
         ),
     )
     object_store_bucket: str = Field(

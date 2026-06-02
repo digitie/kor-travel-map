@@ -298,6 +298,7 @@ docs/
   (ADR-046).
 - Geocoding 현재 정본: kraddr-geo REST v2 `POST /v2/{reverse,geocode}`, 로컬 기본
   `http://127.0.0.1:9001`.
+- RustFS 로컬 표준: S3 API `9003`, console `9004`.
 - Frontend 현재 정본: Next.js 16 + React 19 + `maplibre-vworld-js#v0.1.2`,
   Windows Playwright e2e.
 
