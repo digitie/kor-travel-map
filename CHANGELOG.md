@@ -22,6 +22,9 @@
 
 - **NEW**: `docker-compose.yml`과 `docker/{api,frontend,dagster}.Dockerfile`을 추가했다.
   독립 PostGIS, API, admin UI, Dagster를 같은 compose에서 기동한다.
+- **CHANGED**: Docker API 컨테이너는 `.env`의 로컬 Dagster URL 대신
+  `KRTOUR_MAP_DOCKER_ADMIN_DAGSTER_URL` 기본값(`http://dagster:9013`)을 내부
+  `KRTOUR_MAP_ADMIN_DAGSTER_URL`로 사용한다.
 - **CHANGED**: 로컬/standalone 고정 포트를 API `9011`, admin UI `9012`, Dagster
   `9013`으로 표준화했다.
 - **NEW**: `.env`의 provider service key를 `KRTOUR_MAP_ADMIN_*`/`NEXT_PUBLIC_*`
