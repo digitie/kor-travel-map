@@ -13,7 +13,7 @@
 4. `docs/architecture.md` 목차 — 의존 방향, 데이터 흐름
 5. `docs/resume.md` — "다음 한 작업"
 6. `docs/journal.md` 최신 3건 — 직전 컨텍스트
-7. 관련 ADR (`docs/decisions.md` — ADR-001~044 전부 accepted, 다음 후보 045)
+7. 관련 ADR (`docs/decisions.md` — ADR-001~046 전부 accepted, 다음 후보 047)
 8. 직결 docs (provider 추가면 `docs/provider-contract.md`, 현재 sprint면
    `docs/sprints/SPRINT-N.md` 등)
 9. **운영 runbook** (`docs/runbooks/`) — 에이전트 공용. 실제 작업 시작 전
@@ -55,8 +55,8 @@ PR은 불완전하다.
 
 ## 3. ADR 작성 규약
 
-번호: `ADR-NNN` 연번. **현재 다음 번호 = ADR-044** (ADR-035~043 PR#33으로
-일괄 accepted 전환됨, 2026-05-27).
+번호: `ADR-NNN` 연번. **현재 다음 번호 = ADR-047** (ADR-035~043 PR#33으로
+일괄 accepted 전환됨 2026-05-27, ADR-044~046은 2026-06-01~02 accepted).
 
 ```markdown
 ## ADR-NNN: <결정 요약>
