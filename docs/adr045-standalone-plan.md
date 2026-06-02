@@ -24,8 +24,8 @@ update-requests` CRUD + cancel/run-now, 6 scope, provider runs, POI cache),
 **아직 코드/배포 없음 (이 계획의 대상)**:
 1. `ops.feature_update_requests` 등 신규 테이블이 **alembic/models에 없음**.
 2. scope resolver(5~6종) + dry_run count + request→job 브리지 **로직 없음**.
-3. FastAPI admin/ops/features 라우터 **대부분 미구현**(현재 debug-ui는 health/
-   version/etl/features/geocoding/mois-detail만).
+3. FastAPI admin/ops/features 라우터 **대부분 미구현**(현재 admin package는
+   health/version/etl/features/mois-detail만).
 4. **Dagster 프로그램 자체가 없음** (TripMate에서 복사·구체화 필요).
 5. **docker-compose.yml / 배포 매니페스트 없음**.
 6. TripMate 연계 REST의 **params/returns 미확정** → `tripmate-rest-api.md`로 분리.

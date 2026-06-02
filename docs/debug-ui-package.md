@@ -150,7 +150,6 @@ class AdminSettings(BaseSettings):
     cors_allow_origins: list[str] = [         # frontend(8610) cross-origin (PR#68)
         "http://localhost:8610", "http://127.0.0.1:8610",
     ]
-    kraddr_geo_base_url: str | None = "http://127.0.0.1:8888"  # kraddr-geo FastAPI
     # provider API key 8종 (source=live용, PR#47) — SecretStr | None:
     #   kma_service_key / kma_apihub_key / opinet_service_key /
     #   datagokr_service_key / visitkorea_service_key / krex_service_key /

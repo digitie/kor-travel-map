@@ -157,3 +157,164 @@
 2. 결과는 **읽고 나서** 보고한다(§A2).
 3. 머지 전 CI **3 버전** green(§A3) + drift(§A4).
 4. provider 데이터 이슈는 **그 provider 라이브러리**에서 고친다(§C4).
+
+## F. Admin frontend 실행 함정 (WSL Node / Next.js / Playwright)
+
+### F1 — WSL 셸에서 Windows `npm`을 잡음
+
+- **증상**: "WSL에서 실행"했는데 프로세스가 `/mnt/c/Program Files/nodejs/npm` 또는
+  Windows `node.exe`로 떠 있다. `next dev`가 Ready를 찍어도 WSL `ss -ltnp`에
+  `:8610` listener가 없다.
+- **원인**: 비대화 WSL 셸이 nvm을 source하지 않아 `node`는 없고 Windows `npm`만
+  PATH에 남아 있다.
+- **회피**: frontend 명령 전 반드시 확인한다.
+  ```bash
+  command -v node
+  command -v npm
+  ```
+  두 경로 모두 `/home/.../.nvm/...` 같은 **WSL 경로**여야 한다.
+  `/mnt/c/Program Files/nodejs/...`가 나오면 즉시 중단하고 WSL Node를 활성화한다.
+  ```bash
+  export NVM_DIR="$HOME/.nvm"
+  . "$NVM_DIR/nvm.sh"
+  nvm use 20.20.2
+  hash -r
+  command -v node npm
+  ```
+
+### F2 — Windows npm으로 만든 `node_modules` 때문에 Linux optional native package 누락
+
+- **증상**: WSL Node로 `next build` 시 `Cannot find module
+  '../lightningcss.linux-x64-gnu.node'` 또는 `@next/swc` 계열 Linux native binary
+  누락 에러.
+- **원인**: Windows npm 실행으로 `lightningcss-win32-x64-msvc` 같은 Windows optional
+  dependency만 설치되어 있고, WSL/Linux optional dependency가 없다.
+- **복구**: WSL Node가 활성화된 상태에서 install을 다시 수행한다.
+  ```bash
+  export NVM_DIR="$HOME/.nvm"
+  . "$NVM_DIR/nvm.sh"
+  nvm use 20.20.2
+  npm install -w packages/krtour-map-admin/frontend --include=optional
+  npm -w packages/krtour-map-admin/frontend run build
+  ```
+  그래도 native package가 계속 꼬이면 ignored artifact인 `node_modules/`를 WSL에서
+  지우고 WSL npm으로 다시 설치한다. Windows npm으로 frontend 서버를 실행하지 않는다.
+
+### F3 — `npm run dev`의 hardcoded hostname과 `0.0.0.0` 요청 혼동
+
+- **증상**: 사용자가 `0.0.0.0` 바인드를 요구했는데 `npm run dev` 기본 script
+  (`--hostname 127.0.0.1`)를 그대로 실행한다.
+- **회피**: `0.0.0.0`이 필요하면 script에 인자를 덧붙여 중복 hostname을 만들지 말고,
+  WSL Node 활성화 후 Next.js를 명시적으로 실행한다.
+  ```bash
+  cd packages/krtour-map-admin/frontend
+  npx next dev --port 8610 --hostname 0.0.0.0
+  ```
+  production 확인은 다음처럼 한다.
+  ```bash
+  npx next start --port 8610 --hostname 0.0.0.0
+  ```
+
+### F4 — `env PATH=...$PATH`가 Windows 경로 공백에서 깨짐
+
+- **증상**: `env: ‘Files’: No such file or directory`.
+- **원인**: `$PATH` 안의 `/mnt/c/Program Files/...`가 unquoted `env PATH=...$PATH`
+  인자에서 공백 기준으로 쪼개진다.
+- **회피**: Windows PATH를 섞지 말고 WSL 최소 PATH를 명시하거나, nvm을 source하는
+  `bash -lc`를 사용한다.
+  ```bash
+  REPO="/mnt/f/dev/python-krtour-map-codex"  # 자기 에이전트 worktree 경로로 교체
+  export REPO
+  setsid -f bash -lc '
+    cd "$REPO/packages/krtour-map-admin/frontend"
+    export NVM_DIR="$HOME/.nvm"
+    . "$NVM_DIR/nvm.sh"
+    nvm use 20.20.2 >/dev/null
+    exec npx next dev --port 8610 --hostname 0.0.0.0
+  ' > "$REPO/.codex_tmp/krtour-map-admin-frontend.log" 2>&1
+  ```
+
+### F5 — workspace binary 위치 오판
+
+- **증상**: `env: ‘./node_modules/.bin/next’: No such file or directory`.
+- **원인**: npm workspace가 의존성을 루트 `node_modules`로 hoist한다. frontend
+  패키지 내부 `node_modules/.bin/next`가 없을 수 있다.
+- **회피**: frontend 디렉토리에서 `npx next ...`를 쓰거나, 루트 binary를 쓴다.
+  ```bash
+  cd packages/krtour-map-admin/frontend
+  npx next dev --port 8610 --hostname 0.0.0.0
+  # 또는
+  "$(git rev-parse --show-toplevel)/node_modules/.bin/next" dev --port 8610 --hostname 0.0.0.0
+  ```
+
+### F6 — `.next/dev/lock` 권한 에러를 반복 재시도
+
+- **증상**: `An IO error occurred while attempting to create and acquire the
+  lockfile`, `Permission denied (os error 13)`.
+- **원인**: 이전 Next dev/build artifact가 NTFS 위 `.next/dev/lock`에 남아 있거나
+  Windows/WSL Node 실행이 섞였다.
+- **복구**: 반복 재시도하지 말고 dev artifact를 먼저 지운다.
+  ```bash
+  rm -rf packages/krtour-map-admin/frontend/.next
+  ```
+  그 다음 WSL Node 확인(F1) → Linux optional dependency 확인(F2) → 서버 기동(F3).
+
+### F7 — `pkill -f`가 자기 셸까지 죽임
+
+- **증상**: `pkill -f 'next dev --port 8610'`를 포함한 명령 자체가 종료되고 이후
+  명령이 실행되지 않는다.
+- **원인**: `pkill -f`가 현재 shell command line까지 pattern match한다.
+- **회피/복구**: 먼저 port listener PID를 확인하고 정확한 PID만 kill한다.
+  ```bash
+  ss -ltnp | rg ':(8087|8610)\b'
+  kill <pid>
+  ```
+  또는 log/PID 파일을 남긴 경우 그 PID만 종료한다. broad `pkill -f`는 마지막
+  수단으로만, 현재 명령줄에 같은 pattern이 들어가지 않게 분리해 실행한다.
+
+### F8 — 백그라운드 서버 기동 후 검증 없이 보고
+
+- **증상**: PID를 출력했지만 실제로 listener가 없거나 프로세스가 바로 종료됨.
+- **회피**: 서버 기동 보고 전 항상 세 가지를 확인한다.
+  ```bash
+  ss -ltnp | rg ':(8087|8610)\b'
+  curl -fsS http://127.0.0.1:8087/debug/health
+  curl -fsS -I http://127.0.0.1:8610/ | sed -n '1,8p'
+  ```
+  `Ready` 로그만 믿지 않는다. 실제 listener와 HTTP 200/health 응답을 확인한다.
+
+### F9 — Playwright 실행 위치 혼동
+
+- **증상**: WSL에서 `npm run e2e`를 돌리려 하거나, Windows에서 frontend 서버까지
+  띄우려 한다.
+- **정본**: 서버 2개는 WSL, Playwright Chromium만 Windows.
+  - WSL: backend `:8087`, frontend `:8610`.
+  - Windows PowerShell: `cd packages\krtour-map-admin\frontend; npm run e2e`.
+  `playwright.config.ts`에는 `webServer`가 없으므로, Windows e2e 전 WSL 서버가 이미
+  떠 있어야 한다.
+
+### F10 — Windows stale Node가 `:8610`을 점유해 Playwright가 다른 서버를 봄
+
+- **증상**: WSL에서 `curl http://127.0.0.1:8610/`는 200인데, Windows Playwright나
+  Windows `curl.exe http://127.0.0.1:8610/`는 `Internal Server Error` 또는 이전
+  빌드 화면을 본다. e2e가 `/`, `/etl`, `/features`에서 동시에 이상하게 실패한다.
+- **원인**: 과거에 Windows Node(`C:\Program Files\nodejs\node.exe`)로 띄운 Next.js
+  프로세스가 Windows `127.0.0.1:8610`을 직접 점유하고 있다. 이 경우 WSL
+  `0.0.0.0:8610` 서버가 떠 있어도 Windows localhost-forwarding이 붙지 못한다.
+- **확인**:
+  ```bash
+  cmd.exe /c "netstat -ano | findstr :8610"
+  powershell.exe -NoProfile -Command "Get-Process -Id <PID> | Select-Object Id,ProcessName,Path"
+  ```
+  정상 forwarding이면 `ProcessName`이 `wslrelay`다. `node`이고 path가
+  `C:\Program Files\nodejs\node.exe`면 stale Windows 서버다.
+- **복구**:
+  ```bash
+  powershell.exe -NoProfile -Command "Stop-Process -Id <PID> -Force"
+  # 그 다음 WSL에서 frontend를 다시 띄워 wslrelay를 새로 붙인다.
+  ```
+  이후 반드시 Windows에서 직접 확인한다.
+  ```bash
+  cmd.exe /c "curl.exe -sS -D - http://127.0.0.1:8610/ -o NUL"
+  ```
+  Windows `curl.exe`가 200을 보기 전에는 e2e를 돌리지 않는다.

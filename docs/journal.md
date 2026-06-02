@@ -2,6 +2,40 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-02 (codex) — admin frontend stack 전환 + geocoding admin 표면 제거
+
+**작업**: 사용자 지시 — frontend를 문서화된 stack(Next.js 16 + React 19 +
+TanStack Query + Zustand + Zod + React Hook Form + shadcn/ui +
+`maplibre-vworld-js`)으로 전환하고, geocoding 전용 내용은 kraddr-geo 프로젝트에서만
+보도록 krtour-map-admin 표면을 정리.
+
+- **Frontend**: shadcn/ui component registry(`components.json`, `src/components/ui/*`,
+  `globals.css`)를 추가하고 홈/ETL preview/Feature 지도 화면을 새 stack 기준으로
+  재구성. ETL form은 React Hook Form + Zod, API state는 TanStack Query, map/view
+  상태는 Zustand, Feature 지도는 `maplibre-vworld-js` + `@krtour/map-marker-react`.
+- **Geocoding 경계**: krtour-map-admin의 `/debug/geocoding/*` router, frontend
+  `/geocoding` 화면, geocoding 전용 e2e/router/live 테스트 제거. 메인
+  `krtour.map.geocoding` client와 provider 주소 보강 문서는 유지.
+- **React Doctor**: `doctor` script + `doctor.config.json` 추가. MapLibre listener
+  cleanup, page metadata wrapper, `toSorted`, padding 정리, `FieldError` stable key를
+  반영. 잔여 optional warning은 shadcn 생성 컴포넌트 구조 관련.
+- **실행 위치 문서화**: frontend dev/prod 서버는 WSL에서 실행하고, Windows는
+  Playwright e2e 검증용 Chromium 실행에만 사용한다고 README/dev-environment에 명시.
+  `which node`/`which npm`이 `/mnt/c/Program Files/nodejs/...`로 잡히면 안 되며,
+  WSL nvm Node를 활성화해야 한다는 체크도 추가.
+- **검증**: frontend `type-check` / `lint` / `build` 통과, React Doctor error 0
+  (optional warning 6), admin OpenAPI drift check 통과, admin pytest
+  `83 passed`(`--capture=no`, NTFS capture tmpfile 회피), ruff clean. Windows
+  Playwright e2e는 WSL backend `0.0.0.0:8087` + WSL frontend
+  `0.0.0.0:8610` production `next start` 기준 `11 passed`.
+- **회고 보강**: 본 세션에서 반복된 CLI/환경 실수(Windows npm PATH 혼입,
+  Linux optional native dependency 누락, `0.0.0.0` 실행 파라미터, unquoted
+  `env PATH`, workspace binary 위치, `.next/dev/lock`, broad `pkill -f`,
+  검증 없이 Ready 로그만 신뢰, Windows stale Node `:8610` 점유로 Playwright가
+  WSL 서버 대신 오래된 Windows 서버를 보는 문제)를
+  `docs/runbooks/agent-failure-patterns.md` §F와 `docs/dev-environment.md` §8.2,
+  frontend README 체크리스트로 문서화.
+
 ## 2026-06-02 (claude) — ADR-045 문서 정합 2차 패스 (cross-link/stale 정정)
 
 **작업**: 사용자 지시 — 최신 pull 후 문서 전체 재점검, 충돌·보완 반영 후 PR/머지.

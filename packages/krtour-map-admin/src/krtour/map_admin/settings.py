@@ -76,18 +76,6 @@ class AdminSettings(BaseSettings):
         ),
     )
 
-    # ── kraddr-geo REST API v2 (ADR-006/044) ────────────────────────────
-    kraddr_geo_base_url: str | None = Field(
-        default="http://127.0.0.1:8888",
-        description=(
-            "kraddr-geo REST 서비스 base URL. ``KraddrGeoRestClient``가 POST "
-            "``{base}/v2/reverse``/``geocode``(provider-neutral v2)를 호출. 로컬 공식 "
-            "FastAPI 백엔드 포트는 ``http://127.0.0.1:8888`` "
-            "(``python-kraddr-geo`` ``docs/ports.md``). ``None``이면 ``/debug/geocoding/`` "
-            "라우터는 503 응답."
-        ),
-    )
-
     # ── Provider API keys (PR#47, source=live 활성화용) ──────────────────
     #
     # 각 provider repo의 `.env`에 박힌 이름과 동일 (prefix `KRTOUR_MAP_ADMIN_`

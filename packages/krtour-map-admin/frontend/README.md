@@ -61,16 +61,54 @@ feature 운영, provider 적재, dedup/결측 검토, 오프라인 업로드를 
 
 ## 개발
 
+Frontend 개발 서버는 **WSL에서 실행**한다. Windows에서 직접 `npm run dev` /
+`npm run start`를 돌리지 않는다. Windows는 e2e 검증 시 Playwright Chromium 실행
+용도로만 사용한다. `which node`/`which npm`이 `/mnt/c/Program Files/nodejs/...`를
+가리키면 Windows Node가 섞인 상태이므로 WSL nvm Node를 먼저 활성화한다.
+
 ```bash
+# WSL 셸에서 실행
 cd packages/krtour-map-admin/frontend
+which node npm              # /home/.../.nvm/... 등 WSL 경로여야 함
 cp .env.example .env.local
 $EDITOR .env.local
-npm ci
+npm install
 npm run dev                  # http://127.0.0.1:8610
 ```
 
 `next dev`의 기본 포트는 3000이지만, TripMate `apps/web` 개발 충돌 회피를
 위해 `--port 8610`을 강제한다 (`package.json` scripts).
+
+### WSL 실행 실패 방지 체크리스트
+
+같은 명령을 반복하지 말고 이 순서대로 본다.
+
+1. `command -v node npm`이 WSL 경로인지 확인한다. `/mnt/c/Program Files/nodejs/...`
+   가 나오면 WSL nvm Node를 활성화한다.
+2. Windows npm으로 설치한 흔적이 있으면 WSL Node로 optional dependency를 보강한다.
+   ```bash
+   npm install -w packages/krtour-map-admin/frontend --include=optional
+   ```
+3. `Cannot find module '../lightningcss.linux-x64-gnu.node'` 또는 `@next/swc` native
+   binary 누락은 2번 문제다. Windows npm으로 다시 실행하지 않는다.
+4. `An IO error occurred while attempting to create and acquire the lockfile`가 나오면
+   `.next`를 지운 뒤 재시도한다.
+   ```bash
+   rm -rf packages/krtour-map-admin/frontend/.next
+   ```
+5. `0.0.0.0` 바인드가 필요하면 `npm run dev`의 `127.0.0.1` script를 쓰지 말고
+   명시적으로 실행한다.
+   ```bash
+   npx next dev --port 8610 --hostname 0.0.0.0
+   ```
+6. background 실행은 `setsid -f bash -lc 'source ~/.nvm/nvm.sh; nvm use 20.20.2;
+   exec npx next dev ...'` 형태를 쓴다. `env PATH=...$PATH`는 Windows 경로의 공백
+   때문에 깨질 수 있다.
+7. 성공 여부는 로그가 아니라 listener와 HTTP 응답으로 확인한다.
+   ```bash
+   ss -ltnp | rg ':8610\b'
+   curl -fsS -I http://127.0.0.1:8610/ | sed -n '1,8p'
+   ```
 
 ## 빌드 / 배포
 
@@ -121,11 +159,11 @@ npm run doctor
 > 가정한다.)
 
 ```powershell
-# 1) WSL 셸에서 서버 2개 기동
+# 1) WSL 셸에서 서버 2개 기동 (frontend도 WSL에서 실행)
 #    backend : .venv/bin/uvicorn krtour.map_admin.app:create_app --factory --port 8087
 #    frontend: npm run start   # next start :8610
 
-# 2) Windows(PowerShell)에서 frontend 디렉터리로 이동해 Playwright 실행
+# 2) Windows(PowerShell)에서는 Playwright만 실행
 cd packages\krtour-map-admin\frontend
 npm install              # 최초 1회 (workspace deps)
 npm run e2e:install      # chromium 설치 (최초 1회)
@@ -135,6 +173,18 @@ npm run e2e:ui           # --ui 모드
 
 baseURL은 `E2E_BASE_URL` env로 override 가능(기본 `http://127.0.0.1:8610`).
 자세한 실행 모델은 `playwright.config.ts` 상단 주석 참고.
+
+e2e 전 Windows `:8610`을 점유한 프로세스가 `wslrelay`인지 확인한다. 과거에
+Windows Node로 띄운 Next.js가 남아 있으면 Playwright가 WSL 서버 대신 stale
+Windows 서버를 보고 실패한다.
+
+```powershell
+netstat -ano | findstr :8610
+Get-Process -Id <PID> | Select-Object Id,ProcessName,Path
+```
+
+`ProcessName`이 `node`이고 path가 `C:\Program Files\nodejs\node.exe`면 해당
+PID를 종료한 뒤 WSL frontend를 다시 띄운다. 정상은 `wslrelay`다.
 
 ## 주요 페이지 (계획, App Router)
 

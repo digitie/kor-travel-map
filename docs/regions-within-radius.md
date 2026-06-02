@@ -80,24 +80,17 @@ malformed item은 버리고, `center` 또는 `radius_km`가 잘못된 응답은 
 `relation`은 kraddr-geo 원문을 보존한다. krtour-map은 현재 `within`/`intersects`
 해석을 재구현하지 않는다.
 
-## 4. Admin 디버깅
+## 4. 디버깅 위치
 
-backend:
+행정구역 반경 계산 자체의 디버깅은 `python-kraddr-geo` REST/API 문서와 그
+프로젝트의 테스트/UI에서 수행한다. krtour-map-admin은 geocoding 전용 debug 화면이나
+`/debug/geocoding/*` 라우터를 제공하지 않는다.
 
-- `GET /debug/geocoding/regions/within-radius`
-- `GET /debug/geocoding/regions/within-radius/raw`
+krtour-map에서 확인해야 하는 것은 다음 둘이다.
 
-query:
-
-- `lon`, `lat`: WGS84 POI 좌표
-- `radius_km`: 0보다 크고 100 이하, 기본 3.0
-- `level`: 반복 가능. 미지정 시 `sigungu`, `emd`
-
-frontend:
-
-- `/geocoding` 페이지의 `Regions within radius` 폼
-- 기본 level은 `sigungu`, `emd`
-- raw toggle을 켜면 kraddr-geo 원문 JSON을 그대로 확인한다.
+- `KraddrGeoRestClient.regions_within_radius(...)`가 kraddr-geo REST v2
+  `POST /v2/regions/within-radius`를 호출하는지.
+- 반환된 `sigungu.code`/`emd.code`를 feature update scope resolver가 그대로 쓰는지.
 
 ## 5. 테스트 표면
 
@@ -109,6 +102,5 @@ frontend:
 - `resolve_sigungu_by_radius`는 `sigungu`만 요청한다.
 - `center`의 `lon/lat`와 `x/y` fallback을 모두 파싱한다.
 - malformed item은 제외하고, 잘못된 `center`/`radius_km`와 HTTP error는 실패한다.
-- admin router는 schema 변환, 반복 `level` query, raw passthrough, base URL 누락
-  503, upstream error 502를 검증한다.
-- frontend e2e는 세 geocoding form 노출과 level toggle 상태 보존을 확인한다.
+- admin frontend/backend는 geocoding 전용 debug route를 갖지 않는다. 해당 화면
+  검증은 kraddr-geo 프로젝트 책임이다.

@@ -107,7 +107,7 @@ Dagster DB에는 Dagster가 자체 schema를 관리한다.
 | `admin-issues` | `/admin/issues` | 결측/정합성 이슈 |
 | `admin-offline` | `/admin/offline-uploads` | 오프라인 파일 업로드/검증/적재 |
 | `ops` | `/ops` | 에러 로그, metrics, consistency |
-| `debug` | `/debug` | fixture, ETL preview, EXPLAIN, geocoding debug |
+| `debug` | `/debug` | fixture, ETL preview, EXPLAIN |
 
 ### 4.1 Admin issues / 주소 검토
 

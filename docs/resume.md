@@ -2,11 +2,13 @@
 
 ## 2026-06-02 Codex 작업 메모
 
-ADR-045 D-11 기준으로 POI 좌표 반경 내 시군구/읍면동 조회를 구현 중이다.
-`krtour.map.geocoding`은 kraddr-geo REST v2 `POST /v2/regions/within-radius`를
-호출하고, `krtour-map-admin`은 `/debug/geocoding/regions/within-radius` 및
-`/geocoding` UI에서 같은 함수를 디버깅한다. 완료 전 검증 기준은 pytest/ruff/mypy/
-lint-imports, admin OpenAPI drift, frontend lint/type/build/test, React Doctor다.
+Codex는 admin frontend를 문서화된 stack(Next.js 16 + React 19 + TanStack Query +
+Zustand + Zod + React Hook Form + shadcn/ui + maplibre-vworld) 기준으로 전환했다.
+geocoding 전용 디버그 화면/라우터는 kraddr-geo 프로젝트에서만 본다는 사용자 결정에
+따라 krtour-map-admin에서 제거했다. krtour-map에는 provider 주소 보강에 필요한
+`krtour.map.geocoding` client만 남긴다. 검증은 frontend lint/type/build,
+React Doctor, admin OpenAPI drift check, admin pytest, Windows Playwright e2e를
+통과했다.
 
 ## 현재 상태
 
