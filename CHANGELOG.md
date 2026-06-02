@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### 운영 — Feature update scope resolver (2026-06-03)
+
+- **NEW**: `infra.scope_repo`를 추가했다. `feature_ids`, `center_radius`, `bbox`,
+  `sigungu_by_radius`, `provider_dataset` scope를 feature 집합과 `matched_scope`
+  payload로 해석한다.
+- **CHANGED**: `sigungu_by_radius` 해석은 `infra`가 kraddr-geo를 직접 import하지 않고
+  주입받은 async resolver의 5자리 `sigungu_code` 결과를 사용한다.
+
 ### 운영 — Feature update request 큐 스키마 (2026-06-03)
 
 - **NEW**: `ops.feature_update_requests` 테이블과 `FeatureUpdateRequestRow` 매핑을

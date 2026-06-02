@@ -89,6 +89,18 @@ from krtour.map.infra.models import (
     SourceRecordRow,
     metadata,
 )
+from krtour.map.infra.scope_repo import (
+    FeatureScopeRow,
+    ProviderDatasetScope,
+    ScopeResolution,
+    SigunguByRadiusResolver,
+    count_features_matching_scope,
+    resolve_bbox,
+    resolve_center_radius,
+    resolve_feature_ids,
+    resolve_provider_dataset,
+    resolve_sigungu_by_radius,
+)
 from krtour.map.infra.status_repo import StatusCounts, gather_status_counts
 
 __all__ = [
@@ -141,6 +153,17 @@ __all__ = [
     "heartbeat_import_job",
     "finish_import_job",
     "recover_stale_running_jobs",
+    # scope_repo (ADR-045 feature update request dry-run/scope resolver)
+    "FeatureScopeRow",
+    "ProviderDatasetScope",
+    "ScopeResolution",
+    "SigunguByRadiusResolver",
+    "resolve_feature_ids",
+    "resolve_center_radius",
+    "resolve_bbox",
+    "resolve_sigungu_by_radius",
+    "resolve_provider_dataset",
+    "count_features_matching_scope",
     # status_repo (read-only 운영 현황)
     "StatusCounts",
     "gather_status_counts",

@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-03 Codex 작업 메모 — feature update scope resolver
+
+ADR-045 T-206a로 `infra/scope_repo.py`를 추가한다. resolver는
+`feature_ids`, `center_radius`, `bbox`, `sigungu_by_radius`, `provider_dataset` scope를
+read-only raw SQL로 해석하고, dry-run/queue 저장에 쓸 `matched_scope` payload를
+만든다. `center_radius`는 입력 좌표를 CTE에서 한 번만 EPSG:5179로 변환하고
+`feature.features.coord_5179`에 `ST_DWithin`을 직접 적용한다(ADR-012).
+
+`sigungu_by_radius`는 kraddr-geo REST v2 `/v2/regions/within-radius`를 직접 import하지
+않고, 호출자가 주입한 async resolver가 반환한 5자리 `sigungu_code`를 그대로 DB 조회에
+사용한다. 이로써 `infra` → `geocoding` 레이어 역방향 import를 만들지 않는다.
+`cache_target_keys`는 `ops.poi_cache_targets` 테이블이 필요한 Phase 2로 남긴다.
+
 ## 2026-06-03 Codex 작업 메모 — feature update request 스키마
 
 ADR-045 T-205a로 `ops.feature_update_requests`를 Alembic `0008`과
@@ -79,7 +92,7 @@ React Doctor, admin OpenAPI drift check, admin pytest, Windows Playwright e2e를
 ## 현재 상태
 
 **Sprint 4 (4a+4b) ✅ 완료 → Sprint 5 + ADR-045 독립 프로그램화 🟡 진행 중**
-(2026-06-03 기준). main 최신: `PR#158`. Sprint 4a
+(2026-06-03 기준). main 최신: `PR#159`. Sprint 4a
 (MOIS Step A bulk + Step B incremental cursor + `krtour-map dedup-merge` +
 `feature_merge_history` alembic 0007 + dedup FP 측정/운영 통계) + Sprint 4b
 (MOIS Step C/D + ADR-033 F4 + Place phone enrichment + coverage 75→80 + 에이전트
@@ -244,7 +257,8 @@ Sprint 4(4a+4b)는 아래 체크리스트대로 **전부 완료**(PR#133~#142). 
   `docs/dagster-boundary.md`.
 
 **1차 진입 task**(권장): T-205a(`feature_update_requests`
-alembic 0008, 본 PR) → T-206a/b(scope resolver + repo) → T-206c(client) →
+alembic 0008, 완료) → T-206a(scope resolver, 본 PR) → T-206b(feature update repo) →
+T-206c(client) →
 T-207a/e(admin update-requests + 사용자 features 라우터) → T-208d/e(Dagster
 schedule/sensor). 그 다음 Sprint 5 provider(MOIS-sibling) + Phase 2 정합성.
 세부는 `docs/sprints/SPRINT-5.md`.

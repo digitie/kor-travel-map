@@ -4,10 +4,10 @@
 
 ## 진행 중
 
-**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#158(Docker 내부 Dagster URL
-분리)까지 merged. 현재 작업은 T-205a(`ops.feature_update_requests` alembic/ORM)
-이며, 후속 작업은 scope resolver/repository/admin API/Dagster sensor와 Sprint 5
-provider 구현이다.
+**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#159(T-205a
+`ops.feature_update_requests` alembic/ORM)까지 merged. 현재 작업은 T-206a
+scope resolver이며, 후속 작업은 feature update repository/client/admin API/Dagster
+sensor와 Sprint 5 provider 구현이다.
 
 ### 현재 기준 보강 필요 체크포인트 (2026-06-03)
 
@@ -36,11 +36,16 @@ provider 구현이다.
 7. **feature update request 큐** — T-205a에서 `ops.feature_update_requests` 테이블과
    ORM 매핑을 먼저 추가한다. scope resolver/repo/API/sensor는 T-206/T-207/T-208로
    분리한다.
-8. **검증 기준** — WSL unit/integration/live pytest + Windows Playwright e2e + GitHub
+8. **scope resolver** — T-206a에서 `feature_ids`, `center_radius`, `bbox`,
+   `sigungu_by_radius`, `provider_dataset` dry-run/count resolver를 구현한다.
+   `cache_target_keys`는 `ops.poi_cache_targets` 도입 후 Phase 2로 진행한다.
+9. **검증 기준** — WSL unit/integration/live pytest + Windows Playwright e2e + GitHub
    Actions green 후 머지.
 
 ## 최근 완료 (2026-05-31~2026-06-03)
 
+- **PR#159** (merged 2026-06-03): `ops.feature_update_requests` Alembic 0008 +
+  ORM 매핑 + DDL 계약 통합 테스트.
 - **PR#158** (merged 2026-06-02): Docker API 컨테이너의 Dagster URL을
   `KRTOUR_MAP_DOCKER_ADMIN_DAGSTER_URL` 기본값(`http://dagster:9013`)로 분리.
 - **PR#157** (merged 2026-06-02): admin UI `/admin/dagster` + backend
@@ -264,9 +269,11 @@ provider 구현이다.
 - [ ] T-205d — `import_jobs` batch 컬럼(`load_batch_id`/`parent_job_id`, T-200 연계, D-6).
 
 **Phase 2 — 로직 (scope resolver + 큐 브리지)**
-- [ ] T-206a — `infra/scope_repo.py` (resolve feature_ids/center_radius/bbox/
+- [x] T-206a — `infra/scope_repo.py` (resolve feature_ids/center_radius/bbox/
   sigungu_by_radius/provider_dataset + `count_features_matching_scope` dry_run).
   `sigungu_by_radius`는 kraddr-geo `/v2/regions/within-radius` 호출(D-11).
+  DB repo는 kraddr-geo client를 직접 import하지 않고 async resolver를 주입받는다.
+  `cache_target_keys` resolver는 `ops.poi_cache_targets` 테이블 도입 후 Phase 2.
 - [ ] T-206a-geo — (형제 repo `python-kraddr-geo`, 별도 PR) `POST /v2/regions/
   within-radius` 엔드포인트(`tl_scco_sig` 교차, D-11; levels=sigungu 우선). 반환
   sig_cd = krtour-map sigungu_code 동일 체계(매핑 불필요). T-206a 선행 의존.

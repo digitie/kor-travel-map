@@ -2,6 +2,26 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-03 (codex) — feature update scope resolver
+
+**작업**: ADR-045 독립 프로그램화 후속 T-206a. Feature update request의 dry-run과
+후속 queue bridge가 사용할 scope resolver를 추가.
+
+- **Resolver**: `infra/scope_repo.py` 신규. `feature_ids`, `center_radius`, `bbox`,
+  `sigungu_by_radius`, `provider_dataset` scope를 `ScopeResolution`으로 해석하고
+  `matched_scope` JSON payload를 생성.
+- **공간 쿼리**: `center_radius`는 입력 좌표를 CTE에서 한 번만 EPSG:5179로 변환한 뒤
+  `coord_5179`에 `ST_DWithin`을 적용한다(ADR-012). bbox는 `coord && ST_MakeEnvelope`
+  패턴을 따른다.
+- **kraddr-geo 경계**: `sigungu_by_radius`는 `infra`가 kraddr-geo/http client를 직접
+  import하지 않고, 호출자가 주입한 async resolver의 5자리 `sigungu_code` 결과만
+  사용한다. 실제 REST 호출은 `krtour.map.geocoding.resolve_sigungu_by_radius` 또는
+  admin/Dagster resource 책임.
+- **범위 제외**: `cache_target_keys`는 `ops.poi_cache_targets` 테이블이 필요한 Phase 2로
+  남긴다.
+- **검증**: 실제 PostGIS migrated DB에서 FeatureBundle 적재 후 feature id 필터,
+  반경, bbox, provider/dataset, 주입 resolver 기반 시군구 scope를 통합 테스트로 확인.
+
 ## 2026-06-03 (codex) — feature update request 스키마
 
 **작업**: ADR-045 독립 프로그램화 후속 T-205a. OpenAPI/admin UI가 만드는 feature

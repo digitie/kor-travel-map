@@ -331,6 +331,11 @@ feature를 업데이트한다.
 `dry_run=true`이면 대상 수, provider/dataset group, 예상 job만 반환하고 run을 만들지
 않는다.
 
+구현 상태: T-206a에서 `infra.scope_repo.count_features_matching_scope`가
+`feature_ids`, `center_radius`, `bbox`, `sigungu_by_radius`, `provider_dataset`의
+read-only dry-run 해석을 제공한다. `cache_target_keys`는 `ops.poi_cache_targets`
+도입 후 Phase 2에서 구현한다.
+
 ### 5.4 조회
 
 #### `GET /admin/feature-update-requests`
