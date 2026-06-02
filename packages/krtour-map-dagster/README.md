@@ -9,7 +9,7 @@
   적재한다.
 
 ```bash
-dagster dev -m krtour.map_dagster.definitions
+dagster dev -m krtour.map_dagster.definitions -h 0.0.0.0 -p 9013
 ```
 
 ## 1차 resource 계약

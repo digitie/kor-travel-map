@@ -168,7 +168,7 @@ class KrtourMapSettings(BaseSettings):
 
     # admin/API 프로그램 기본 바인드 (패키지 쪽 KRTOUR_MAP_ADMIN_*가 우선)
     admin_host: str = "127.0.0.1"  # 외부 노출 금지 default
-    admin_port: int = 8087
+    admin_port: int = 9011
 
     # 객체 저장소 (boto3 S3 호환)
     object_store_endpoint_url: str = "http://127.0.0.1:9000"

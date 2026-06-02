@@ -155,8 +155,8 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
 > 정본 서비스 목록: `openapi-admin-contract.md §2`. 파일 자체가 없음 → 신규.
 
 - **T-209a** `docker-compose.yml` — 서비스 6종(api/frontend/dagster-webserver/
-  dagster-daemon/postgres/선택 rustfs) + 네트워크 + 볼륨 + 포트(`api` 8087,
-  `frontend` 8610, Dagster/Postgres/RustFS 표준 포트) +
+  dagster-daemon/postgres/선택 rustfs) + 네트워크 + 볼륨 + 포트(`api` 9011,
+  `frontend` 9012, Dagster/Postgres/RustFS 표준 포트) +
   env(`KRTOUR_MAP_PG_DSN`/provider keys/RUSTFS). healthcheck + depends_on(기동 순서:
   postgres → migrate → api/dagster).
 - **T-209b** 기동 순서 스크립트 — postgres ready → `alembic upgrade head`(app DB

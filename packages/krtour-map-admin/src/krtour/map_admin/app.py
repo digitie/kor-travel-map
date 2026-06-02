@@ -11,7 +11,7 @@ ADR 참조
 운영
 ----
 uvicorn 직접 호출:
-    ``uvicorn krtour.map_admin.app:app --host 127.0.0.1 --port 8087``
+    ``uvicorn krtour.map_admin.app:app --host 127.0.0.1 --port 9011``
 
 uvicorn 설정은 ``AdminSettings``(``KRTOUR_MAP_ADMIN_*`` env) 또는 호출자가
 명시. ``host=0.0.0.0`` 직접 노출 금지 — Cloudflare Tunnel/SSO 게이트웨이 뒤에
@@ -72,7 +72,7 @@ def create_app(settings: AdminSettings | None = None) -> FastAPI:
         servers=[],
     )
 
-    # frontend(Next.js dev 8610)가 브라우저에서 backend(8087)로 cross-origin
+    # frontend(Next.js dev/start 9012)가 브라우저에서 backend(9011)로 cross-origin
     # fetch → CORS 필요 (ADR-005: 내부 debug 도구, origin은 localhost frontend로
     # 한정). OpenAPI spec에는 영향 없음(미들웨어, ADR-031 drift gate 무관).
     if settings.cors_allow_origins:

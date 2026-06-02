@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### 운영 — Docker 이미지 + 고정 포트 (2026-06-02)
+
+- **NEW**: `docker-compose.yml`과 `docker/{api,frontend,dagster}.Dockerfile`을 추가했다.
+  독립 PostGIS, API, admin UI, Dagster를 같은 compose에서 기동한다.
+- **CHANGED**: 로컬/standalone 고정 포트를 API `9011`, admin UI `9012`, Dagster
+  `9013`으로 표준화했다.
+- **NEW**: `.env`의 provider service key를 `KRTOUR_MAP_ADMIN_*`/`NEXT_PUBLIC_*`
+  환경변수로 매핑하는 `scripts/load-env.sh`와 포트 종료/로컬 stack/Docker 기동
+  스크립트를 추가했다.
+
 ### Admin UI — frontend stack 전환 + geocoding admin 표면 제거 (2026-06-02)
 
 - **CHANGED**: `krtour-map-admin` frontend를 문서화된 stack 기준으로 재정렬했다.

@@ -1,0 +1,87 @@
+services:
+  postgres:
+    image: postgis/postgis:16-3.5-alpine
+    environment:
+      POSTGRES_DB: ${KRTOUR_MAP_POSTGRES_DB:-krtour_map}
+      POSTGRES_USER: ${KRTOUR_MAP_POSTGRES_USER:-krtour_map}
+      POSTGRES_PASSWORD: ${KRTOUR_MAP_POSTGRES_PASSWORD:-krtour_map}
+    ports:
+      - "${KRTOUR_MAP_POSTGRES_HOST_PORT:-15433}:5432"
+    volumes:
+      - krtour-map-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${KRTOUR_MAP_POSTGRES_USER:-krtour_map} -d ${KRTOUR_MAP_POSTGRES_DB:-krtour_map}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      KRTOUR_MAP_ADMIN_HOST: 0.0.0.0
+      KRTOUR_MAP_ADMIN_PORT: ${KRTOUR_MAP_ADMIN_PORT:-9011}
+      KRTOUR_MAP_ADMIN_CORS_ALLOW_ORIGINS: '["http://localhost:${KRTOUR_MAP_ADMIN_WEB_PORT:-9012}","http://127.0.0.1:${KRTOUR_MAP_ADMIN_WEB_PORT:-9012}"]'
+      KRTOUR_MAP_PG_DSN: ${KRTOUR_MAP_DOCKER_PG_DSN:-postgresql+asyncpg://krtour_map:krtour_map@postgres:5432/krtour_map}
+      KRTOUR_MAP_ADMIN_KMA_SERVICE_KEY: ${KRTOUR_MAP_ADMIN_KMA_SERVICE_KEY:-${DATA_GO_KR_SERVICE_KEY:-${KMA_SERVICE_KEY:-${KMA_API_KEY:-}}}}
+      KRTOUR_MAP_ADMIN_KMA_APIHUB_KEY: ${KRTOUR_MAP_ADMIN_KMA_APIHUB_KEY:-${KMA_APIHUB_AUTH_KEY:-${KMA_APIHUB_KEY:-}}}
+      KRTOUR_MAP_ADMIN_OPINET_SERVICE_KEY: ${KRTOUR_MAP_ADMIN_OPINET_SERVICE_KEY:-${OPINET_API_KEY:-${OPINET_SERVICE_KEY:-}}}
+      KRTOUR_MAP_ADMIN_DATAGOKR_SERVICE_KEY: ${KRTOUR_MAP_ADMIN_DATAGOKR_SERVICE_KEY:-${DATA_GO_KR_SERVICE_KEY:-${DATAGOKR_API_KEY:-${PUBLIC_DATA_SERVICE_KEY:-${SERVICE_KEY:-}}}}}
+      KRTOUR_MAP_ADMIN_VISITKOREA_SERVICE_KEY: ${KRTOUR_MAP_ADMIN_VISITKOREA_SERVICE_KEY:-${KTO_DATA_GO_KR_SERVICE_KEY:-${VISITKOREA_SERVICE_KEY:-${DATA_GO_KR_SERVICE_KEY:-}}}}
+      KRTOUR_MAP_ADMIN_KREX_SERVICE_KEY: ${KRTOUR_MAP_ADMIN_KREX_SERVICE_KEY:-${KEX_GO_API_KEY:-${KREX_API_KEY:-${KREX_SERVICE_KEY:-}}}}
+      KRTOUR_MAP_ADMIN_KNPS_SERVICE_KEY: ${KRTOUR_MAP_ADMIN_KNPS_SERVICE_KEY:-${KNPS_SERVICE_KEY:-${KNPS_API_KEY:-}}}
+      KRTOUR_MAP_ADMIN_AIRKOREA_SERVICE_KEY: ${KRTOUR_MAP_ADMIN_AIRKOREA_SERVICE_KEY:-${AIRKOREA_SERVICE_KEY:-${AIRKOREA_API_KEY:-${DATA_GO_KR_SERVICE_KEY:-}}}}
+      KRTOUR_MAP_ADMIN_KRFOREST_SERVICE_KEY: ${KRTOUR_MAP_ADMIN_KRFOREST_SERVICE_KEY:-${KRFOREST_SERVICE_KEY:-${KRFOREST_API_KEY:-${DATA_GO_KR_SERVICE_KEY:-}}}}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${KRTOUR_MAP_ADMIN_PORT:-9011}:${KRTOUR_MAP_ADMIN_PORT:-9011}"
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+      args:
+        NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API: ${NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API:-http://127.0.0.1:${KRTOUR_MAP_ADMIN_PORT:-9011}}
+        NEXT_PUBLIC_KRTOUR_MAP_DAGSTER_URL: ${NEXT_PUBLIC_KRTOUR_MAP_DAGSTER_URL:-http://127.0.0.1:${KRTOUR_MAP_DAGSTER_PORT:-9013}}
+        NEXT_PUBLIC_VWORLD_API_KEY: ${NEXT_PUBLIC_VWORLD_API_KEY:-${KRADDR_GEO_VWORLD_API_KEY:-${VWORLD_API_KEY:-}}}
+    environment:
+      NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API: ${NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API:-http://127.0.0.1:${KRTOUR_MAP_ADMIN_PORT:-9011}}
+      NEXT_PUBLIC_KRTOUR_MAP_DAGSTER_URL: ${NEXT_PUBLIC_KRTOUR_MAP_DAGSTER_URL:-http://127.0.0.1:${KRTOUR_MAP_DAGSTER_PORT:-9013}}
+      NEXT_PUBLIC_VWORLD_API_KEY: ${NEXT_PUBLIC_VWORLD_API_KEY:-${KRADDR_GEO_VWORLD_API_KEY:-${VWORLD_API_KEY:-}}}
+    depends_on:
+      - api
+    ports:
+      - "${KRTOUR_MAP_ADMIN_WEB_PORT:-9012}:9012"
+
+  dagster:
+    build:
+      context: .
+      dockerfile: docker/dagster.Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      TMPDIR: /tmp
+      TEMP: /tmp
+      TMP: /tmp
+      DAGSTER_HOME: /opt/dagster/dagster_home
+      KRTOUR_MAP_DAGSTER_PORT: ${KRTOUR_MAP_DAGSTER_PORT:-9013}
+      KRTOUR_MAP_PG_DSN: ${KRTOUR_MAP_DOCKER_PG_DSN:-postgresql+asyncpg://krtour_map:krtour_map@postgres:5432/krtour_map}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${KRTOUR_MAP_DAGSTER_PORT:-9013}:${KRTOUR_MAP_DAGSTER_PORT:-9013}"
+
+volumes:
+  krtour-map-postgres:
