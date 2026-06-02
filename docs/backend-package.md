@@ -14,13 +14,11 @@
 
 ## 1. 라이브러리 진입점
 
-> **구현 현황 (2026-05-29)**: 본 절의 `AsyncKrtourMapClient`는 **설계 단계 API**다
-> (`src/krtour/map/client/`는 아직 미구현, Sprint 3~4 예정). 현재 적재/조회는
-> `krtour.map.infra.feature_repo`의 함수(`load_bundles` / `get_feature_row` /
-> `features_in_bbox`)를 직접 호출하는 단계이며, debug-ui `/features` 라우터가 이를
-> 사용한다 (PR#71~#73). client는 이 repo 함수들을 묶는 단일 진입점이 될 예정.
+> **구현 현황 (2026-06-03)**: `AsyncKrtourMapClient`는 구현되어 있으며,
+> krtour-map API/Dagster 내부 구현과 테스트에서 사용하는 public Python 표면이다.
+> TripMate 운영 코드는 이 client를 직접 import하지 않고 OpenAPI를 호출한다.
 
-### 1.1 `AsyncKrtourMapClient` (설계)
+### 1.1 `AsyncKrtourMapClient`
 
 ```python
 from krtour.map import AsyncKrtourMapClient, KrtourMapSettings
@@ -29,25 +27,15 @@ from sqlalchemy.ext.asyncio import create_async_engine
 settings = KrtourMapSettings()  # KRTOUR_MAP_* 환경변수 자동 로드
 engine = create_async_engine(settings.pg_dsn.get_secret_value())
 
-async with AsyncKrtourMapClient(
-    engine=engine,
-    file_store=tripmate_rustfs_store,           # boto3 S3 client 호환
-    kraddr_geo_client=tripmate_kraddr_client,   # 선택, 주소 보강용
-    providers={                                  # provider별 client 주입
-        "visitkorea": visitkorea_async_client,
-        "mois": mois_async_client,
-        "kma": kma_async_client,
-        # ...
-    },
-    settings=settings,
-) as client:
+async with AsyncKrtourMapClient(engine=engine, settings=settings) as client:
     ...
 ```
 
 **책임 분리**:
-- 라이브러리는 어떤 resource(engine, S3 client, provider client)도 스스로
-  생성하지 않는다. 모두 주입받는다.
-- TripMate(또는 디버그 환경)가 lifecycle 관리.
+- 라이브러리는 engine을 스스로 생성하지 않는다. 호출자가 주입하고 lifecycle을
+  관리한다.
+- krtour-map API/Dagster가 필요 resource(provider client, kraddr-geo, RustFS)를
+  구성하고, client에는 DB transaction 경계만 맡긴다.
 - 라이브러리 settings는 자체 환경변수 `KRTOUR_MAP_*`만 읽는다. provider API 키는
   provider 라이브러리가 직접 읽는다.
 
@@ -55,67 +43,47 @@ async with AsyncKrtourMapClient(
 
 ```python
 class AsyncKrtourMapClient:
-    # ─── 조회 ───────────────────────────────────────
-    async def features_in_bounds(self, *, bbox: BBox, kinds: list[FeatureKind] = ...,
-                                  cluster_unit: ClusterUnit | None = None,
-                                  limit: int = 1000) -> list[FeatureSummary]: ...
+    # 조회
+    async def get_feature(self, feature_id: str) -> dict[str, Any] | None: ...
+    async def features_in_bounds(
+        self,
+        *,
+        min_lon: float,
+        min_lat: float,
+        max_lon: float,
+        max_lat: float,
+        kinds: list[str] | None = None,
+        limit: int = 1000,
+    ) -> list[dict[str, Any]]: ...
+    async def pending_dedup_reviews(self, *, limit: int = 100) -> list[dict[str, Any]]: ...
+    async def status_counts(self) -> StatusCounts: ...
 
-    async def features_nearby(self, *, lon: float, lat: float, radius_m: float,
-                               kinds: list[FeatureKind] = ..., limit: int = 100
-                               ) -> list[FeatureNearby]: ...
+    # 적재/운영
+    async def load_feature_bundles(self, bundles: Iterable[FeatureBundle]) -> FeatureLoadResult: ...
+    async def sync_dedup_candidates(
+        self, left: Iterable[DedupInput], right: Iterable[DedupInput], *, include_auto_merge: bool = True
+    ) -> DedupSyncResult: ...
+    async def sync_sibling_candidates(
+        self, features: Iterable[DedupInput], *, include_auto_merge: bool = True
+    ) -> DedupSyncResult: ...
+    async def merge_dedup_review(
+        self, review_key: str, *, merged_by: str | None = None, reason: str | None = None
+    ) -> MergeOutcome: ...
 
-    async def get_feature(self, feature_id: str) -> FeatureFull | None: ...
+    # MOIS lifecycle
+    async def load_mois_license_features_bulk(...): ...
+    async def sync_mois_license_features_bulk(...): ...
+    async def run_mois_license_bulk_job(...): ...
+    async def run_mois_license_incremental_job(...): ...
+    async def run_mois_license_closed_job(...): ...
+    async def find_place_phone_candidates(...): ...
+    async def enrich_place_phone(...): ...
 
-    async def search_by_name(self, *, q: str, kinds: list[FeatureKind] = ...,
-                              limit: int = 50, similarity_threshold: float = 0.3
-                              ) -> list[FeatureSearchHit]: ...
-
-    async def build_weather_card(self, feature_id: str, asof: datetime | None = None
-                                  ) -> WeatherCard: ...
-
-    async def list_sources(self, feature_id: str) -> list[SourceLinkInfo]: ...
-
-    # ─── 적재 (collect → load) ───────────────────────
-    async def load_feature_bundles(self, bundles: Iterable[FeatureBundle],
-                                    *, prune_existing: bool = False
-                                    ) -> FeatureLoadResult: ...
-
-    async def upload_feature_files(self, sources: list[FeatureFileSource]
-                                    ) -> list[FeatureFile]: ...
-
-    # ─── 운영 ───────────────────────────────────────
-    async def soft_delete_feature(self, feature_id: str) -> None: ...
-
-    async def merge_features(self, *, master_id: str, loser_id: str,
-                              decision_reason: str | None = None) -> None: ...
-
-    async def get_sync_state(self, *, provider: str, dataset_key: str,
-                              sync_scope: str = "global") -> ProviderSyncState | None: ...
-
-    async def upsert_sync_state(self, state: ProviderSyncState) -> ProviderSyncState: ...
-
-    # ─── 작업 큐 (ADR-011) ────────────────────────────
-    async def enqueue_import_job(self, kind: str, payload: dict[str, Any]
-                                  ) -> ImportJob: ...
-
-    async def claim_next_import_job(self) -> ImportJob | None: ...  # SKIP LOCKED
-
-    async def update_import_job(self, job_id: UUID, *, state: ImportJobState,
-                                 progress: int | None = None,
-                                 current_stage: str | None = None,
-                                 error_message: str | None = None) -> None: ...
-
-    # ─── provider 변환 (속성) ─────────────────────────
-    @property
-    def providers(self) -> ProvidersFacade:
-        """provider별 변환 함수 모음 (얇은 facade, wrapper 아님).
-
-        Examples:
-            client.providers.visitkorea.festival_to_bundles(items)
-            client.providers.mois.license_record_to_bundle(record, mapping)
-            client.providers.kma.short_forecast_to_weather_values(records, feature_id, coord)
-        """
-        ...
+    # Feature update request (ADR-045 T-206c)
+    async def enqueue_feature_update_request(...) -> FeatureUpdateRequest | FeatureUpdateRequestPreview: ...
+    async def get_update_request(request_id: str) -> FeatureUpdateRequest | None: ...
+    async def list_update_requests(...) -> FeatureUpdateRequestPage: ...
+    async def cancel_update_request(request_id: str, *, error_message: str | None = None) -> FeatureUpdateRequest | None: ...
 ```
 
 ### 1.3 DTO 표
@@ -171,12 +139,12 @@ class KrtourMapSettings(BaseSettings):
     admin_port: int = 9011
 
     # 객체 저장소 (boto3 S3 호환)
-    object_store_endpoint_url: str = "http://127.0.0.1:9000"
+    object_store_endpoint_url: str = "http://127.0.0.1:9003"
     object_store_bucket: str = "krtour-map"
     object_store_region: str = "us-east-1"
     object_store_access_key_id: SecretStr | None = None
     object_store_secret_access_key: SecretStr | None = None
-    object_store_public_base_url: str | None = None
+    object_store_public_base_url: str | None = "http://127.0.0.1:9003/krtour-map"
 
     # 주소 보강 (kraddr-geo REST v2)
     kraddr_geo_base_url: str | None = "http://127.0.0.1:9001"
@@ -232,11 +200,13 @@ async def list_features_in_bounds(
 ):
     cluster_unit = _cluster_unit_from_zoom(zoom)
     features = await krtour_map_client.features_in_bounds(
-        bbox=BBox(min_lon, min_lat, max_lon, max_lat),
-        kinds=[FeatureKind(k) for k in kinds],
-        cluster_unit=cluster_unit,
+        min_lon=min_lon,
+        min_lat=min_lat,
+        max_lon=max_lon,
+        max_lat=max_lat,
+        kinds=kinds,
     )
-    return {"data": features, "meta": {"count": len(features)}}
+    return {"data": features, "meta": {"count": len(features), "cluster_unit": cluster_unit}}
 ```
 
 ### 3.3 디버그 UI (별도 패키지, 인증 없음, localhost)

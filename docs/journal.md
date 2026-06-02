@@ -2,6 +2,30 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-03 (codex) — feature update client 표면
+
+**작업**: ADR-045 독립 프로그램화 후속 T-206c. `infra.feature_update_repo`의 request
+lifecycle을 `AsyncKrtourMapClient` public Python 표면으로 노출해 admin API와 Dagster가
+같은 transaction 경계를 사용하게 준비.
+
+- **Client**: `enqueue_feature_update_request`, `get_update_request`,
+  `list_update_requests`, `cancel_update_request`를 추가. dry-run은 DB row/import job을
+  만들지 않고 preview만 반환하고, 실제 enqueue/cancel은 client가
+  `session.begin()`으로 transaction을 소유한다.
+- **Public export**: 문서에서 사용하던 `from krtour.map import AsyncKrtourMapClient`
+  경로를 실제 top-level export로 맞췄다.
+- **운영 경계 정정**: client/module 설명에서 TripMate 직접 import/ADR-003 함수 호출
+  표현을 ADR-045 기준(OpenAPI 연동, client는 krtour-map API/Dagster 내부용)으로 정리.
+- **검증**: PostGIS migrated DB에서 dry-run preview, enqueue, get/list, cancel
+  lifecycle을 `tests/integration/test_client_orchestration.py`에 추가. smoke import는
+  top-level client export를 확인한다.
+- **문서 정정**: RustFS 로컬 표준 포트를 S3 API `9003`, console `9004`로 반영.
+  `.env.example`, README, AGENTS/SKILL, object store/RustFS/배포/runbook 문서의
+  9000/9001 예시를 정리했다.
+- **다음 순서 조정**: T-206c 다음에는 형제 repo `python-kraddr-geo`의
+  T-206a-geo(`/v2/regions/within-radius`)를 재검증/보완하고, 그 뒤 T-205c Phase 2
+  스키마와 T-206d 실행 본체로 진행한다.
+
 ## 2026-06-03 (codex) — feature update request 큐 repository
 
 **작업**: ADR-045 독립 프로그램화 후속 T-206b. `ops.feature_update_requests` row를

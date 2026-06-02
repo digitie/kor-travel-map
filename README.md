@@ -19,6 +19,7 @@ SQLAlchemy 2 async + GeoAlchemy2 + GeoPandas 위에서 동작한다.
 > Docker 독립 프로그램 + 독립 DB/Dagster + TripMate OpenAPI 연동으로 전환됐다.
 > PR#155에서 krtour-map-owned Dagster Feature ETL 1차를 구현했고, PR#156에서
 > standalone 포트를 API `9011`, admin UI `9012`, Dagster `9013`으로 고정했다.
+> RustFS 로컬 표준 포트는 S3 API `9003`, console `9004`다.
 > admin UI는 `/admin/dagster`에서 Dagster 요약과 webserver embed를 제공한다.
 > ADR 현황: **001~047 모두 accepted** (다음 후보 048). Sprint 계획은
 > `docs/sprints/`, 다음 작업은 `docs/resume.md` 참조. v1 산출물 요약은
@@ -140,7 +141,7 @@ Windows Node/npm(`/mnt/c/Program Files/nodejs/...`)으로 frontend 서버를 띄
 | 마이그레이션 | Alembic |
 | 주소/좌표 | `python-kraddr-base`, `python-kraddr-geo` |
 | Provider client | `python-{visitkorea,mois,opinet,krex,kma,khoa,airkorea,krforest,krheritage,kasi,datagokr,mcst,krairport}-api` |
-| 객체 저장소 | S3 호환 (RustFS 우선) |
+| 객체 저장소 | S3 호환 (RustFS 우선, 로컬 API `9003` / console `9004`) |
 | Orchestration | Dagster (krtour-map 독립 프로그램이 소유; OpenAPI로 update request 큐잉/제어) |
 | Lint/Type | ruff, mypy --strict, import-linter |
 | Test | pytest, pytest-asyncio, hypothesis, testcontainers-python, VCR.py |

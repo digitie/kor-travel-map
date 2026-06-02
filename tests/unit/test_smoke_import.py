@@ -10,12 +10,15 @@ import pytest
 
 @pytest.mark.unit
 def test_krtour_map_import() -> None:
-    """`import krtour.map`이 성공하고 `__version__`이 노출된다."""
-    import krtour.map  # noqa: F401
+    """`import krtour.map`이 성공하고 public 진입점이 노출된다."""
+    import krtour.map
+    from krtour.map.client import AsyncKrtourMapClient
 
     assert hasattr(krtour.map, "__version__")
     assert isinstance(krtour.map.__version__, str)
     assert krtour.map.__version__  # not empty
+    assert krtour.map.AsyncKrtourMapClient is AsyncKrtourMapClient
+    assert "AsyncKrtourMapClient" in krtour.map.__all__
 
 
 @pytest.mark.unit

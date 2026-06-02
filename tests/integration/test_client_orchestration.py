@@ -26,6 +26,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from krtour.map.client import AsyncKrtourMapClient
 from krtour.map.dto.coordinate import Coordinate
+from krtour.map.infra.feature_update_repo import (
+    FeatureUpdateRequest,
+    FeatureUpdateRequestPreview,
+)
 from krtour.map.infra.models import FeatureRow
 from krtour.map.providers.standard_data import cultural_festivals_to_bundles
 
@@ -39,7 +43,8 @@ _TEMPLE_CAT = "01070100"
 
 _TRUNCATE_SQL = (
     "TRUNCATE feature.features, provider_sync.source_records, "
-    "provider_sync.source_links, ops.dedup_review_queue RESTART IDENTITY CASCADE"
+    "provider_sync.source_links, ops.dedup_review_queue, "
+    "ops.feature_update_requests, ops.import_jobs RESTART IDENTITY CASCADE"
 )
 
 
@@ -196,3 +201,50 @@ async def test_sync_dedup_excludes_auto_merge_when_disabled(
     assert sync.candidates == []
     assert sync.queue.inserted == 0
     assert await map_client.pending_dedup_reviews() == []
+
+
+async def test_feature_update_request_client_lifecycle(
+    map_client: AsyncKrtourMapClient,
+) -> None:
+    preview = await map_client.enqueue_feature_update_request(
+        scope={"type": "feature_ids", "feature_ids": []},
+        providers=["python-mois-api"],
+        dry_run=True,
+    )
+    assert isinstance(preview, FeatureUpdateRequestPreview)
+    assert preview.matched_scope == {"feature_count": 0, "sigungu_codes": []}
+
+    request = await map_client.enqueue_feature_update_request(
+        scope={"type": "feature_ids", "feature_ids": []},
+        providers=["python-mois-api"],
+        dataset_keys=["mois_license_features_bulk"],
+        update_policy={"mode": "refresh_existing"},
+        priority=70,
+        operator="integration-test",
+    )
+    assert isinstance(request, FeatureUpdateRequest)
+    assert request.state == "queued"
+    assert request.job_id is not None
+
+    loaded = await map_client.get_update_request(request.request_id)
+    assert loaded is not None
+    assert loaded.request_id == request.request_id
+    assert loaded.providers == ("python-mois-api",)
+
+    page1 = await map_client.list_update_requests(limit=1)
+    assert page1.items == (loaded,)
+    assert page1.next_cursor is None
+
+    cancelled = await map_client.cancel_update_request(
+        request.request_id, error_message="client test cancel"
+    )
+    assert cancelled is not None
+    assert cancelled.state == "cancelled"
+    assert cancelled.error_message == "client test cancel"
+
+    cancelled_page = await map_client.list_update_requests(
+        state="cancelled", limit=10
+    )
+    assert tuple(item.request_id for item in cancelled_page.items) == (
+        request.request_id,
+    )

@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### 운영 — Feature update client 표면 (2026-06-03)
+
+- **NEW**: `AsyncKrtourMapClient`에
+  `enqueue_feature_update_request`, `get_update_request`, `list_update_requests`,
+  `cancel_update_request`를 추가했다. Dry-run은 DB write 없이 preview를 반환하고,
+  실제 enqueue/cancel은 client가 transaction 경계를 소유한다.
+- **CHANGED**: `from krtour.map import AsyncKrtourMapClient` top-level import를 실제
+  public export로 맞추고, TripMate 직접 import 설명을 ADR-045 OpenAPI 운영 모델
+  기준으로 정정했다.
+- **DOCS**: RustFS 로컬 표준 포트를 S3 API `9003`, console `9004`로 정리했다.
+
 ### 운영 — Feature update request 큐 repository (2026-06-03)
 
 - **NEW**: `infra.feature_update_repo`를 추가했다. Dry-run preview, request enqueue,
