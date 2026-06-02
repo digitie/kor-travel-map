@@ -6,7 +6,7 @@
 SQLAlchemy 2 async + GeoAlchemy2 + GeoPandas 위에서 동작한다.
 
 > **현재 상태 (v2 Sprint 4(4a+4b) 완료, Sprint 5 + ADR-045 독립 프로그램화 진행 중
-> — PR#155 이후 기준)**:
+> — PR#156 이후 기준)**:
 > master/main 브랜치는 v2 사양으로 새로 시작했다. 이전(v1) 구현은 `v1`
 > 브랜치에 보존되어 있다. Sprint 2~3에서 provider 변환, PostGIS 적재/조회,
 > consistency report, dedup queue, `AsyncKrtourMapClient`, debug UI `/features`와
@@ -16,9 +16,10 @@ SQLAlchemy 2 async + GeoAlchemy2 + GeoPandas 위에서 동작한다.
 > 94.12%)까지 마쳤다. 현재 geocoding 정본은 kraddr-geo REST v2
 > `POST /v2/{reverse,geocode}` + 로컬 `http://127.0.0.1:8888`, frontend 정본은
 > Next.js 16 + `maplibre-vworld-js#v0.1.2`다. 2026-06-01 ADR-045로 운영 모델은
-> Docker 독립 프로그램 + 독립 DB/Dagster + TripMate OpenAPI 연동으로 전환됐고,
-> PR#155에서 krtour-map-owned Dagster Feature ETL 1차를 구현했다. ADR-047 기준
-> standalone 포트는 API `9011`, admin UI `9012`, Dagster `9013`이다.
+> Docker 독립 프로그램 + 독립 DB/Dagster + TripMate OpenAPI 연동으로 전환됐다.
+> PR#155에서 krtour-map-owned Dagster Feature ETL 1차를 구현했고, PR#156에서
+> standalone 포트를 API `9011`, admin UI `9012`, Dagster `9013`으로 고정했다.
+> admin UI는 `/admin/dagster`에서 Dagster 요약과 webserver embed를 제공한다.
 > ADR 현황: **001~047 모두 accepted** (다음 후보 048). Sprint 계획은
 > `docs/sprints/`, 다음 작업은 `docs/resume.md` 참조. v1 산출물 요약은
 > `python-krtour-map-spec.docx`(저장소 루트, 약 80쪽) 참고.
@@ -169,7 +170,7 @@ packages/krtour-map-admin/      ← 별도 패키지 (ADR-020)
     map_admin/
       __init__.py
       app.py     — FastAPI app factory + uvicorn entrypoint
-      routers/   — 디버그 엔드포인트
+      routers/   — debug/admin/ops 엔드포인트
       deps.py    — AsyncKrtourMapClient 주입
       settings.py
       views/     — (옵션) 정적 UI

@@ -4,9 +4,9 @@
 
 ## 진행 중
 
-**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#155(Dagster Feature ETL 1차)
-까지 merged. 현재 작업은 Docker/포트 표준화와 서버 구동 스크립트 정리이며, 후속
-작업은 admin UI 최신 문서 정합 + Dagster 관리 화면/정보 통합이다.
+**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#156(Docker/고정 포트 표준화)
+까지 merged. 현재 작업은 admin UI Dagster 운영 화면 1차 보강이며, 후속 작업은 독립
+Dagster queue/schedule/sensor와 Sprint 5 provider 구현이다.
 
 ### 현재 기준 보강 필요 체크포인트 (2026-06-02)
 
@@ -16,7 +16,7 @@
 2. ~~**dedup queue 운영화**~~ ✅ 1차 — dedup-merge 명령 + 운영 FP 통계
    (`status_repo.dedup_fp_stats`) + F4 baseline. 실 운영 데이터로 가중치 재조정은
    큐가 채워진 뒤(MOIS bulk 운영 후).
-3. **ADR-045 독립 프로그램 전환 반영** (다음 한 작업) — krtour-map은 Docker 독립
+3. **ADR-045 독립 프로그램 전환 반영** — krtour-map은 Docker 독립
    프로그램 + 독립 DB/Dagster + TripMate OpenAPI 연동을 기준으로 구현한다. D-1~D-16
    의사결정은 전부 완료됐고, 구 모델 호환 shim은 만들지 않는다(ADR-046). Admin API는
    `docs/openapi-admin-contract.md`, POI/cache target은
@@ -29,11 +29,19 @@
 5. **고정 포트** — krtour-map 독립 프로그램 로컬/standalone 포트는 API `9011`,
    admin UI `9012`, Dagster `9013`이다(ADR-047). 해당 포트를 점유한 프로세스는
    `scripts/stop-fixed-ports.sh`로 종료하고 재기동한다.
-6. **검증 기준** — WSL unit/integration/live pytest + Windows Playwright e2e + GitHub
+6. **admin Dagster 운영 화면** — `/admin/dagster`는 `GET /ops/dagster/summary` 자체
+   요약 UI와 Dagster webserver embed를 제공한다. 실제 feature update queue/sensor
+   연결은 후속 PR에서 진행한다.
+7. **검증 기준** — WSL unit/integration/live pytest + Windows Playwright e2e + GitHub
    Actions green 후 머지.
 
-## 최근 완료 (2026-05-31~2026-06-01)
+## 최근 완료 (2026-05-31~2026-06-02)
 
+- **PR#156** (merged 2026-06-02): Docker 이미지/compose, API `9011`, admin UI
+  `9012`, Dagster `9013` 고정 포트, `.env` key mapping, 기동/포트 종료 스크립트.
+- **PR#155** (merged 2026-06-02): krtour-map-owned Dagster Feature ETL 1차.
+  `packages/krtour-map-dagster/` code location과 9개 Feature asset runner, PostGIS
+  적재 통합 테스트.
 - **PR#114** (merged 2026-05-31): geocoding live 기본 포트 8888 정합,
   Next.js 16 + `maplibre-vworld-js#v0.1.2`, GDAL 3.8.4 고정, Windows Playwright
   e2e 14/14, 관련 문서 갱신.

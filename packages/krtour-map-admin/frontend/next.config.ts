@@ -17,6 +17,7 @@ const workspaceRoot = path.resolve(process.cwd(), "../../..");
  */
 const config: NextConfig = {
   reactStrictMode: true,
+  allowedDevOrigins: ["127.0.0.1", "localhost"],
 
   // Next.js 16 production build uses Turbopack by default. In this npm
   // workspace, set the repo root explicitly so Turbopack can resolve the

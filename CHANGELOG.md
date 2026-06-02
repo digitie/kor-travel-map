@@ -5,6 +5,19 @@
 
 ## [Unreleased]
 
+### Admin UI — Dagster 운영 화면 (2026-06-02)
+
+- **NEW**: backend `GET /ops/dagster/summary`를 추가했다. Dagster GraphQL에서
+  version, code location, asset group, schedule/sensor, 최근 run 요약을 읽어 admin
+  UI용 DTO로 정규화한다.
+- **NEW**: frontend `/admin/dagster` 화면을 추가했다. 자체 운영 요약 카드/asset
+  group/recent run 표와 Dagster webserver embed를 한 화면에서 제공한다.
+- **CHANGED**: 홈 화면에서 Dagster 상태 요약과 `/admin/dagster` 진입 링크를 표시한다.
+- **CHANGED**: `GET /ops/dagster/summary`는 성공 시 Dagster `setNuxSeen`을
+  best-effort로 호출해 embedded 관리 화면의 로컬 첫 실행 모달을 접는다.
+- **CHANGED**: 로컬/Docker Dagster 실행 기본값에 `DAGSTER_DISABLE_TELEMETRY=yes`를
+  추가해 embedded 관리 화면의 외부 telemetry 동작을 줄인다.
+
 ### 운영 — Docker 이미지 + 고정 포트 (2026-06-02)
 
 - **NEW**: `docker-compose.yml`과 `docker/{api,frontend,dagster}.Dockerfile`을 추가했다.

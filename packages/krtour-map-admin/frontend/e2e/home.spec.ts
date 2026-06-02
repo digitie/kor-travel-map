@@ -11,6 +11,7 @@ test.describe("home page (/)", () => {
       page.getByRole("heading", { level: 1, name: "krtour-map admin" }),
     ).toBeVisible();
     await expect(page.getByRole("link", { name: /Feature 지도/ })).toBeVisible();
+    await expect(page.getByRole("link", { name: /Dagster 운영/ })).toBeVisible();
     await expect(page.getByRole("link", { name: /ETL preview/ })).toBeVisible();
   });
 
@@ -37,6 +38,14 @@ test.describe("home page (/)", () => {
     await expect(
       versions.locator("dt").filter({ hasText: /^krtour\.map$/ }),
     ).toBeVisible();
+  });
+
+  test("Dagster 요약 카드가 ops summary 결과를 표시", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.getByTestId("dagster-summary-card")).toBeVisible();
+    await expect(page.getByTestId("dagster-summary-card")).toContainText(
+      /assets|Dagster summary 호출 실패/,
+    );
   });
 
   test("Zustand viewport 데모 버튼 동작 (클라이언트 상태)", async ({ page }) => {

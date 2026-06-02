@@ -75,6 +75,26 @@ class AdminSettings(BaseSettings):
             "env override는 JSON 배열."
         ),
     )
+    dagster_url: str = Field(
+        default="http://127.0.0.1:9013",
+        description=(
+            "Dagster webserver base URL. admin UI embed와 backend GraphQL 조회에 "
+            "사용한다. Docker API 컨테이너에서는 보통 ``http://dagster:9013``."
+        ),
+    )
+    dagster_graphql_url: str | None = Field(
+        default=None,
+        description=(
+            "Dagster GraphQL endpoint override. 미설정이면 "
+            "``{dagster_url}/graphql``로 계산한다."
+        ),
+    )
+    dagster_request_timeout_seconds: float = Field(
+        default=3.0,
+        ge=0.2,
+        le=30.0,
+        description="Dagster GraphQL 조회 timeout seconds.",
+    )
 
     # ── Provider API keys (PR#47, source=live 활성화용) ──────────────────
     #

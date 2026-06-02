@@ -20,6 +20,20 @@ DAGSTER_BIN="${DAGSTER_BIN:-"$ROOT_DIR/.venv/bin/dagster"}"
 if [[ ! -x "$DAGSTER_BIN" ]]; then
   DAGSTER_BIN="$(command -v dagster)"
 fi
+DAGSTER_HOME_DIR="${DAGSTER_HOME:-"$ROOT_DIR/.dagster"}"
+mkdir -p "$DAGSTER_HOME_DIR"
+case "${DAGSTER_DISABLE_TELEMETRY,,}" in
+  no | false | 0)
+    ;;
+  *)
+    if [[ ! -f "$DAGSTER_HOME_DIR/dagster.yaml" ]]; then
+      cat >"$DAGSTER_HOME_DIR/dagster.yaml" <<'YAML'
+telemetry:
+  enabled: false
+YAML
+    fi
+    ;;
+esac
 
 ADMIN_BIND_HOST="${KRTOUR_MAP_ADMIN_BIND_HOST:-0.0.0.0}"
 WEB_BIND_HOST="${KRTOUR_MAP_ADMIN_WEB_BIND_HOST:-0.0.0.0}"
@@ -57,7 +71,8 @@ start_bg() {
   cd "$ROOT_DIR"
   start_bg dagster env \
     TMPDIR=/tmp TEMP=/tmp TMP=/tmp \
-    DAGSTER_HOME="${DAGSTER_HOME:-"$ROOT_DIR/.dagster"}" \
+    DAGSTER_HOME="$DAGSTER_HOME_DIR" \
+    DAGSTER_DISABLE_TELEMETRY="$DAGSTER_DISABLE_TELEMETRY" \
     "$DAGSTER_BIN" dev -m krtour.map_dagster.definitions \
     -h "$DAGSTER_BIND_HOST" -p "$KRTOUR_MAP_DAGSTER_PORT"
 )

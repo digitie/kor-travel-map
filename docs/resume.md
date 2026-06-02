@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-02 Codex 작업 메모 — admin UI Dagster 운영 화면
+
+admin UI에 `/admin/dagster`를 추가했다. backend `GET /ops/dagster/summary`는
+Dagster GraphQL을 호출해 version, code location, asset group, schedule/sensor, 최근
+run 상태를 admin UI용 DTO로 정규화한다. frontend는 같은 화면에서 자체 요약 UI와
+Dagster webserver iframe embed를 제공한다. 홈 화면에도 Dagster 상태 요약과 진입
+링크를 추가했다. embedded Dagster webserver의 로컬 첫 실행 커뮤니티 모달은
+`/ops/dagster/summary`가 `setNuxSeen`을 best-effort 호출해 접는다.
+
+이번 범위는 Dagster **관측/관리 화면 1차 수직 슬라이스**다. feature update request
+queue, import job progress, Dagster sensor/worker 연결은 기존 문서의 후속 구현 순서에
+따라 별도 PR에서 진행한다.
+
 ## 2026-06-02 Codex 작업 메모 — Docker/포트 표준화
 
 ADR-047로 krtour-map standalone 로컬 포트를 API `9011`, admin UI `9012`, Dagster
@@ -10,8 +23,7 @@ ADR-047로 krtour-map standalone 로컬 포트를 API `9011`, admin UI `9012`, D
 
 Docker 1차는 `postgres`, `api`, `frontend`, `dagster` 서비스로 구성한다. API는
 Postgres health 이후 `alembic upgrade head`를 실행하고, `.env`의 provider service key는
-`KRTOUR_MAP_ADMIN_*`/`NEXT_PUBLIC_*` 환경변수로 매핑한다. 다음 작업은 admin UI를 최신
-문서 기준으로 보강하고 Dagster 관리 화면/정보를 admin UI에 통합하는 것이다.
+`KRTOUR_MAP_ADMIN_*`/`NEXT_PUBLIC_*` 환경변수로 매핑한다.
 
 ## 2026-06-02 Codex 작업 메모 — krtour-map Dagster Feature ETL 1차 구현
 
@@ -53,7 +65,7 @@ React Doctor, admin OpenAPI drift check, admin pytest, Windows Playwright e2e를
 ## 현재 상태
 
 **Sprint 4 (4a+4b) ✅ 완료 → Sprint 5 + ADR-045 독립 프로그램화 🟡 진행 중**
-(2026-06-02 기준). main 최신: `PR#155`. Sprint 4a
+(2026-06-02 기준). main 최신: `PR#156`. Sprint 4a
 (MOIS Step A bulk + Step B incremental cursor + `krtour-map dedup-merge` +
 `feature_merge_history` alembic 0007 + dedup FP 측정/운영 통계) + Sprint 4b
 (MOIS Step C/D + ADR-033 F4 + Place phone enrichment + coverage 75→80 + 에이전트

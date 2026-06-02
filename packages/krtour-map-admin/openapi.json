@@ -1,6 +1,360 @@
 {
   "components": {
     "schemas": {
+      "DagsterAssetGroup": {
+        "additionalProperties": false,
+        "description": "Dagster asset group 요약.",
+        "properties": {
+          "asset_count": {
+            "title": "Asset Count",
+            "type": "integer"
+          },
+          "assets": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Assets",
+            "type": "array"
+          },
+          "group_name": {
+            "title": "Group Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "group_name",
+          "asset_count",
+          "assets"
+        ],
+        "title": "DagsterAssetGroup",
+        "type": "object"
+      },
+      "DagsterJob": {
+        "additionalProperties": false,
+        "description": "Dagster job/pipeline 요약.",
+        "properties": {
+          "is_job": {
+            "title": "Is Job",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "is_job"
+        ],
+        "title": "DagsterJob",
+        "type": "object"
+      },
+      "DagsterRepository": {
+        "additionalProperties": false,
+        "description": "Dagster code location/repository 요약.",
+        "properties": {
+          "asset_count": {
+            "title": "Asset Count",
+            "type": "integer"
+          },
+          "asset_groups": {
+            "items": {
+              "$ref": "#/components/schemas/DagsterAssetGroup"
+            },
+            "title": "Asset Groups",
+            "type": "array"
+          },
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/DagsterJob"
+            },
+            "title": "Jobs",
+            "type": "array"
+          },
+          "location_name": {
+            "title": "Location Name",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "schedules": {
+            "items": {
+              "$ref": "#/components/schemas/DagsterSchedule"
+            },
+            "title": "Schedules",
+            "type": "array"
+          },
+          "sensors": {
+            "items": {
+              "$ref": "#/components/schemas/DagsterSensor"
+            },
+            "title": "Sensors",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "location_name",
+          "jobs",
+          "schedules",
+          "sensors",
+          "asset_count",
+          "asset_groups"
+        ],
+        "title": "DagsterRepository",
+        "type": "object"
+      },
+      "DagsterRunSummary": {
+        "additionalProperties": false,
+        "description": "최근 Dagster run 요약.",
+        "properties": {
+          "end_time": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Time"
+          },
+          "job_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Name"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "start_time": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Time"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "tags": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "object"
+          },
+          "update_time": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Update Time"
+          }
+        },
+        "required": [
+          "run_id",
+          "status",
+          "tags"
+        ],
+        "title": "DagsterRunSummary",
+        "type": "object"
+      },
+      "DagsterSchedule": {
+        "additionalProperties": false,
+        "description": "Dagster schedule 요약.",
+        "properties": {
+          "cron_schedule": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cron Schedule"
+          },
+          "execution_timezone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Timezone"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "DagsterSchedule",
+        "type": "object"
+      },
+      "DagsterSensor": {
+        "additionalProperties": false,
+        "description": "Dagster sensor 요약.",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "DagsterSensor",
+        "type": "object"
+      },
+      "DagsterSummaryResponse": {
+        "additionalProperties": false,
+        "description": "`GET /ops/dagster/summary` 응답.",
+        "properties": {
+          "asset_count": {
+            "title": "Asset Count",
+            "type": "integer"
+          },
+          "checked_at": {
+            "format": "date-time",
+            "title": "Checked At",
+            "type": "string"
+          },
+          "dagster_url": {
+            "title": "Dagster Url",
+            "type": "string"
+          },
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "graphql_url": {
+            "title": "Graphql Url",
+            "type": "string"
+          },
+          "job_count": {
+            "title": "Job Count",
+            "type": "integer"
+          },
+          "recent_runs": {
+            "items": {
+              "$ref": "#/components/schemas/DagsterRunSummary"
+            },
+            "title": "Recent Runs",
+            "type": "array"
+          },
+          "repositories": {
+            "items": {
+              "$ref": "#/components/schemas/DagsterRepository"
+            },
+            "title": "Repositories",
+            "type": "array"
+          },
+          "repository_count": {
+            "title": "Repository Count",
+            "type": "integer"
+          },
+          "run_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Run Counts",
+            "type": "object"
+          },
+          "schedule_count": {
+            "title": "Schedule Count",
+            "type": "integer"
+          },
+          "sensor_count": {
+            "title": "Sensor Count",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "unavailable",
+              "error"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          }
+        },
+        "required": [
+          "status",
+          "dagster_url",
+          "graphql_url",
+          "checked_at",
+          "repository_count",
+          "job_count",
+          "asset_count",
+          "schedule_count",
+          "sensor_count",
+          "run_counts",
+          "repositories",
+          "recent_runs"
+        ],
+        "title": "DagsterSummaryResponse",
+        "type": "object"
+      },
       "EtlPreviewResponse": {
         "additionalProperties": false,
         "description": "`/debug/etl/{provider}/{dataset}/preview` 응답.",
@@ -999,6 +1353,53 @@
         "summary": "feature 단건 상세",
         "tags": [
           "features"
+        ]
+      }
+    },
+    "/ops/dagster/summary": {
+      "get": {
+        "description": "Dagster GraphQL에서 repository, asset, schedule/sensor, recent run 정보를 읽어 admin UI 요약 DTO로 반환한다. Dagster webserver가 내려가도 200 응답(status=unavailable)으로 UI가 장애 상태를 표시할 수 있게 한다. summary 조회가 성공하면 embedded Dagster 화면의 로컬 첫 실행 NUX를 접기 위해 setNuxSeen mutation을 best-effort로 호출한다.",
+        "operationId": "get_dagster_summary_ops_dagster_summary_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "run_limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Run Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DagsterSummaryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Dagster 운영 요약",
+        "tags": [
+          "ops",
+          "dagster"
         ]
       }
     }

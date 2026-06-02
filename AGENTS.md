@@ -407,7 +407,7 @@ python -m pytest -q
 
 본 저장소는 **T-014 (Sprint 1 진입)** 승인 (2026-05-25, PR#16) 이후
 **코드 작성 단계**다. Sprint 1~4(4a+4b)는 완료되었고, 2026-06-02 현재 main은
-PR#155(krtour-map-owned Dagster Feature ETL 1차)까지 머지된 상태다.
+PR#156(Docker/고정 포트 표준화)까지 머지된 상태다.
 
 **현재 상태 (2026-06-02)**:
 - Sprint 2: ADR-034 ①~④ provider(축제/날씨/유가/휴게소) + ETL live 11/11 dataset.
@@ -424,16 +424,16 @@ PR#155(krtour-map-owned Dagster Feature ETL 1차)까지 머지된 상태다.
   `POST /v2/{reverse,geocode}`를 호출. 로컬 기본 `http://127.0.0.1:8888`.
 - Standalone 포트: API `9011`, admin UI `9012`, Dagster `9013` 고정(ADR-047).
   점유 프로세스는 `scripts/stop-fixed-ports.sh`로 종료 후 재기동.
+- Admin UI: `/admin/dagster`에서 Dagster summary API(`GET /ops/dagster/summary`)와
+  Dagster webserver embed를 제공.
 - Frontend: Next.js 16 + React 19 + `maplibre-vworld-js#v0.1.2`, Windows Playwright e2e.
 - Coverage gate는 Sprint 4 기준 `fail_under=80` (실측 94.12%). 전체 pytest ~835 green.
 - ADR-045 D-1~D-16은 전부 결정 완료. `krtour-map-debug-ui`는 `krtour-map-admin`
   으로 rename 완료(PR#148). 새 작업은 구 이름/env/import와 TripMate 직접 import/
   공유 DB/Dagster 호환 shim을 만들지 않는다(ADR-046).
 
-**다음 단계**: admin UI를 최신 문서 기준으로 보강하고 Dagster 관리 화면 임베드 +
-Dagster 정보 기반 운영 UI를 구현한다. 이어서 독립 Dagster queue/schedule/sensor와
-Sprint 5(MOIS-sibling provider 휴양림/수목원/박물관 + ADR-033 Phase 2 정합성 게이트)를
-진행한다.
+**다음 단계**: 독립 Dagster queue/schedule/sensor와 Sprint 5(MOIS-sibling provider
+휴양림/수목원/박물관 + ADR-033 Phase 2 정합성 게이트)를 진행한다.
 
 **계속 유효한 코드 작성 가이드**:
 - 모든 신규 코드는 `import-linter` 의존 방향 (`category → dto → core →
