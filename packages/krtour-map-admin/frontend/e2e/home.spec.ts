@@ -8,8 +8,9 @@ test.describe("home page (/)", () => {
   test("타이틀 + ETL 내비 링크 렌더", async ({ page }) => {
     await page.goto("/");
     await expect(
-      page.getByRole("heading", { level: 1, name: "krtour-map debug UI" }),
+      page.getByRole("heading", { level: 1, name: "krtour-map admin" }),
     ).toBeVisible();
+    await expect(page.getByRole("link", { name: /Feature 지도/ })).toBeVisible();
     await expect(page.getByRole("link", { name: /ETL preview/ })).toBeVisible();
   });
 
@@ -29,11 +30,12 @@ test.describe("home page (/)", () => {
   test("Versions 섹션이 live /debug/version 결과를 표시", async ({ page }) => {
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "Versions" })).toBeVisible();
+    const versions = page.getByTestId("version-list");
     await expect(
-      page.getByRole("listitem").filter({ hasText: "debug_ui" }),
+      versions.locator("dt").filter({ hasText: /^admin$/ }),
     ).toBeVisible();
     await expect(
-      page.getByRole("listitem").filter({ hasText: "krtour_map" }),
+      versions.locator("dt").filter({ hasText: /^krtour\.map$/ }),
     ).toBeVisible();
   });
 

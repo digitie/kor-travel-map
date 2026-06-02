@@ -32,7 +32,7 @@ test.describe("/etl preview", () => {
     await page.getByRole("button", { name: "Preview 실행" }).click();
 
     // 변환 결과 요약 + JSON.
-    await expect(page.getByText(/count\s*\d+/)).toBeVisible();
+    await expect(page.getByTestId("preview-count")).toContainText(/\d+건/);
     const resultPre = page.locator("pre").last();
     await expect(resultPre).toContainText("feature_id");
     await expect(resultPre).toContainText('"kind": "place"');

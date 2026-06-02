@@ -35,7 +35,7 @@ export interface FeaturesInBboxParams {
   limit?: number;
 }
 
-export async function fetchFeaturesInBbox(
+async function fetchFeaturesInBbox(
   params: FeaturesInBboxParams,
 ): Promise<FeaturesInBboxResponse> {
   const search = new URLSearchParams();
@@ -117,7 +117,7 @@ export interface FeatureDetail {
   sibling_group_id: string | null;
 }
 
-export async function fetchFeatureDetail(featureId: string): Promise<FeatureDetail> {
+async function fetchFeatureDetail(featureId: string): Promise<FeatureDetail> {
   const url = `${BASE_URL}/features/${encodeURIComponent(featureId)}`;
   const response = await fetch(url, {
     method: "GET",

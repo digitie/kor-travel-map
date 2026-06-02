@@ -9,7 +9,14 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
+import { Toaster } from "@/components/ui/sonner";
 import { AppQueryClientProvider } from "@/providers/query-client-provider";
+
+import "./globals.css";
+import { Geist } from "next/font/google";
+import { cn } from "@/lib/utils";
+
+const geist = Geist({subsets:['latin'],variable:'--font-sans'});
 
 export const metadata: Metadata = {
   title: "krtour-map debug UI",
@@ -23,9 +30,12 @@ interface RootLayoutProps {
 
 export default function RootLayout({ children }: RootLayoutProps) {
   return (
-    <html lang="ko">
+    <html lang="ko" className={cn("font-sans", geist.variable)}>
       <body>
-        <AppQueryClientProvider>{children}</AppQueryClientProvider>
+        <AppQueryClientProvider>
+          {children}
+          <Toaster position="top-right" richColors />
+        </AppQueryClientProvider>
       </body>
     </html>
   );

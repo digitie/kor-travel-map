@@ -62,7 +62,7 @@ krtour-map 독립 프로그램의 admin frontend/backend다. TripMate와는 Open
 
 | Prefix | 용도 | 예 |
 |--------|------|----|
-| `/debug/...` | 개발자용 진단, fixture, EXPLAIN, provider preview | `/debug/etl/...`, `/debug/geocoding/...` |
+| `/debug/...` | 개발자용 진단, fixture, EXPLAIN, provider preview | `/debug/etl/...`, `/debug/explain/...` |
 | `/features/...` | 지도/상세에서 공통으로 쓰는 feature 조회 | `/features`, `/features/{feature_id}`, `/features/nearby` |
 | `/admin/...` | 운영자가 데이터를 변경하거나 작업을 실행하는 기능 | `/admin/features`, `/admin/import-jobs`, `/admin/providers/.../runs` |
 | `/ops/...` | 관측, 로그, 지표, consistency report | `/ops/error-logs`, `/ops/consistency`, `/ops/metrics` |
@@ -114,7 +114,6 @@ Frontend 작업 후에는 `react-doctor` 실행, 결과 검토, 개선 반영이
 | `/ops/error-logs` | provider/API/job 에러 로그 | `/ops/error-logs` |
 | `/ops/consistency` | consistency report와 위반 샘플 | `/ops/consistency/reports` |
 | `/debug/etl` | provider 변환 preview | 기존 `/debug/etl/*` |
-| `/debug/geocoding` | kraddr-geo reverse/geocode 점검 | 기존 `/debug/geocoding/*` |
 
 ### 4.2 네비게이션 그룹
 
@@ -123,7 +122,7 @@ Frontend 작업 후에는 `react-doctor` 실행, 결과 검토, 개선 반영이
 - **Jobs**: `/admin/import-jobs`, job 상세, offline upload job.
 - **Review**: `/admin/dedup-review`, missing data queue, consistency samples.
 - **Ops**: `/ops/error-logs`, `/ops/consistency`, `/ops/metrics`.
-- **Debug**: `/debug/etl`, `/debug/geocoding`, `/debug/explain`, `/debug/fixtures`.
+- **Debug**: `/debug/etl`, `/debug/explain`, `/debug/fixtures`.
 
 ## 5. 공통 UX 규칙
 
@@ -1227,7 +1226,7 @@ multipart upload.
 2. format parse.
 3. schema/header 확인.
 4. 좌표 범위 확인.
-5. 주소 파싱/geocoding 가능성 확인.
+5. 주소 파싱과 kraddr-geo 보강 필요성 확인.
 6. provider typed model 또는 structural Protocol 입력 형태로 변환 가능성 확인.
 7. DTO validation.
 8. dedup dry-run.

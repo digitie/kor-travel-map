@@ -5,15 +5,20 @@
 
 ## [Unreleased]
 
-### API/Admin UI — POI 반경 행정구역 조회 (2026-06-02)
+### Admin UI — frontend stack 전환 + geocoding admin 표면 제거 (2026-06-02)
 
-- **NEW**: `KraddrGeoRestClient.regions_within_radius`와
-  `resolve_regions_within_radius`를 추가해 kraddr-geo REST v2
-  `POST /v2/regions/within-radius`로 POI 좌표 기준 반경 내 시군구/읍면동을 조회한다.
-- **NEW**: admin backend `/debug/geocoding/regions/within-radius`와 `/raw`, frontend
-  `/geocoding` 디버깅 폼을 추가했다.
-- **DOCS**: `docs/regions-within-radius.md`에 책임 경계, Python API, REST 계약,
-  admin 디버깅 방법, 테스트 표면을 정리했다.
+- **CHANGED**: `krtour-map-admin` frontend를 문서화된 stack 기준으로 재정렬했다.
+  Next.js 16 + React 19 + TanStack Query + Zustand + Zod + React Hook Form +
+  shadcn/ui + `maplibre-vworld-js`를 기준으로 홈/ETL preview/Feature 지도 화면을
+  구성한다.
+- **REMOVED**: geocoding 전용 admin/debug 라우터, frontend `/geocoding` 화면,
+  관련 e2e/router/live 테스트를 제거했다. geocoding 자체 디버깅은
+  `python-kraddr-geo` 프로젝트 책임으로 둔다.
+- **CHANGED**: `packages/krtour-map-admin/openapi.json`에서 `/debug/geocoding/*` 경로와
+  `GeocodingHealthResponse` schema를 제거했다.
+- **DOCS**: React Doctor 실행/검토 기준에 맞춰 `doctor` script와
+  `doctor.config.json`을 추가하고, 실제 경고를 검토해 앱 metadata, MapLibre cleanup,
+  정렬/폼 오류 표시 코드를 개선했다.
 
 ### 문서 — ADR-046 정본 전환 + kraddr-geo v2 주소 정책 (2026-06-02)
 

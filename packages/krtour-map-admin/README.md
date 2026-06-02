@@ -3,7 +3,7 @@
 `python-krtour-map`의 **디버그 REST API + admin 운영 UI** 별도 Python 패키지.
 
 > **현재 상태 (Sprint 3 완료, Sprint 4 진입 준비)**: health/version, ETL preview,
-> geocoding debug, `/features` bbox 조회와 frontend 지도 화면이 구현되어 있다.
+> `/features` bbox 조회와 frontend 지도 화면이 구현되어 있다.
 > Sprint 4부터는 ADR-035에 따라 provider 적재, dedup 검토, 이슈 처리, 오프라인
 > 업로드를 포함한 admin 운영 콘솔로 확장한다. 패키지 경계는
 > `docs/debug-ui-package.md`, 상세 구현 사양은
@@ -47,13 +47,21 @@ uvicorn krtour.map_admin.app:app --host 127.0.0.1 --port 8087 --reload
 
 ### Frontend (Next.js + React 19 + maplibre-vworld, ADR-025 2차 보강)
 
+Frontend 서버는 **항상 WSL 셸에서 실행**한다. Windows 호스트는 Playwright e2e
+검증 때 Chromium을 실행하는 용도로만 사용한다.
+
 ```bash
+# WSL ext4 작업 디렉토리에서
 cd packages/krtour-map-admin/frontend
+which node npm              # /home/.../.nvm/... 등 WSL 경로여야 함 (/mnt/c/... 금지)
 cp .env.example .env.local
 $EDITOR .env.local           # NEXT_PUBLIC_VWORLD_API_KEY 설정
-npm ci
+npm install
 npm run dev                  # http://127.0.0.1:8610 (next dev)
 ```
+
+`node`/`npm`이 `/mnt/c/Program Files/nodejs/...`를 가리키면 Windows Node가 섞인
+상태다. WSL nvm Node를 활성화한 뒤 설치/실행한다.
 
 VWorld 지도 (Kakao Maps SDK 미사용). Next.js App Router + `maplibre-gl` +
 `maplibre-vworld` + TanStack Query + Zustand + `zod` + React Hook Form +
@@ -77,7 +85,6 @@ shadcn/ui + `@krtour/map-marker-react` (ADR-029). 자세한 사양:
 | `KRTOUR_MAP_ADMIN_PORT` | `8087` | uvicorn 포트 |
 | `KRTOUR_MAP_ADMIN_RELOAD` | `false` | dev 모드 hot-reload |
 | `KRTOUR_MAP_ADMIN_CORS_ALLOW_ORIGINS` | `http://localhost:8610` | Next.js dev 서버 |
-| `KRTOUR_MAP_ADMIN_KRADDR_GEO_BASE_URL` | `http://127.0.0.1:8888` | kraddr-geo FastAPI base URL |
 | `KRTOUR_MAP_ADMIN_FRONTEND_DIST` | (auto) | static export 모드 시 `frontend/out/` 경로 |
 
 ### Frontend (`NEXT_PUBLIC_*` — Next.js 규약)

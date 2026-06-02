@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from krtour.map_admin.routers.etl import router as etl_router
 from krtour.map_admin.routers.features import router as features_router
-from krtour.map_admin.routers.geocoding import router as geocoding_router
 from krtour.map_admin.routers.health import router as health_router
 from krtour.map_admin.routers.mois_detail import router as mois_detail_router
 from krtour.map_admin.routers.version import router as version_router
@@ -23,6 +22,5 @@ __all__ = [
     "version_router",
     "etl_router",
     "features_router",
-    "geocoding_router",
     "mois_detail_router",
 ]

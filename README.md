@@ -111,14 +111,18 @@ uv pip install -e packages/krtour-map-admin
 # (디버그) REST API 기동 — 인증 없음, localhost 전용
 uvicorn krtour.map_admin.app:app --host 127.0.0.1 --port 8087
 
-# (옵션) geocoding live 연동 — python-kraddr-geo FastAPI backend
-export KRTOUR_MAP_ADMIN_KRADDR_GEO_BASE_URL=http://127.0.0.1:8888
-
-# (옵션) 디버그 UI frontend (Next.js + maplibre-vworld, ADR-025 2차 보강)
+# (옵션) 디버그 UI frontend — WSL 셸에서 실행
 cd packages/krtour-map-admin/frontend
+which node npm              # /home/.../.nvm/... 등 WSL 경로여야 함 (/mnt/c/... 금지)
 cp .env.example .env.local  # NEXT_PUBLIC_VWORLD_API_KEY 설정
-npm ci && npm run dev        # http://127.0.0.1:8610
+npm install && npm run dev   # http://127.0.0.1:8610
 ```
+
+Frontend dev/prod 서버(`npm run dev`, `npm run start`)는 **WSL에서 실행**한다.
+Windows Node/npm(`/mnt/c/Program Files/nodejs/...`)으로 frontend 서버를 띄우지
+않는다. `which node`/`which npm`이 `/mnt/c/...`를 가리키면 WSL nvm Node를 먼저
+활성화한다. Windows는 Playwright e2e 검증 시 Chromium 실행용으로만 사용한다
+(`docs/dev-environment.md` §8.1).
 
 ## 의존 스택 (v2 확정)
 

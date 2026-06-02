@@ -11,7 +11,8 @@ test.describe("/features", () => {
     await expect(
       page.getByRole("heading", { level: 1, name: "Feature 지도" }),
     ).toBeVisible();
-    await expect(page.getByTestId("map-canvas-container")).toBeVisible();
+    await expect(page.getByTestId("map-canvas-container")).toBeAttached();
+    await expect(page.getByRole("region", { name: "Map" })).toBeVisible();
     await expect(page.getByRole("link", { name: /홈/ })).toBeVisible();
     // 로딩→데이터 또는 에러 어느 쪽이든 상태 텍스트가 렌더돼야 함.
     await expect(

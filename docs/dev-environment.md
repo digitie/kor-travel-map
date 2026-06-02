@@ -253,9 +253,21 @@ debug UI(`packages/krtour-map-admin`)의 Playwright e2e는 **하이브리드
 | frontend (Next.js) | **WSL ext4** | `npm run start` (`next start :8610`) |
 | **Playwright (chromium)** | **Windows** | `cd packages\krtour-map-admin\frontend; npm run e2e` |
 
+Frontend 실행(`npm run dev`/`npm run start`)은 WSL 고정이다. Windows에서는 frontend
+서버를 띄우지 않고, e2e 검증용 Playwright만 실행한다.
+실행 전 WSL 셸에서 `which node`/`which npm`이 `/home/.../.nvm/...` 같은 WSL 경로를
+가리키는지 확인한다. `/mnt/c/Program Files/nodejs/...`가 나오면 Windows Node가
+섞인 상태라 Linux optional native dependency(`@next/swc`, `lightningcss` 등)가
+틀어질 수 있으므로 WSL nvm Node를 먼저 활성화한다.
+
 WSL2 `localhostForwarding=true`로 Windows의 `http://127.0.0.1:8610` /
 `:8087` 요청이 WSL 서버에 도달한다. `playwright.config.ts`는 `webServer`를
 두지 않으므로 서버 2개는 미리 WSL에 떠 있어야 한다.
+단, Windows에서 과거에 띄운 Node 서버가 `127.0.0.1:8610`을 점유하고 있으면
+Playwright가 WSL 서버가 아니라 stale Windows 서버를 본다. e2e 전 Windows에서
+`netstat -ano | findstr :8610` → `Get-Process -Id <PID>`로 `ProcessName`이
+`wslrelay`인지 확인한다. `node`(`C:\Program Files\nodejs\node.exe`)면 해당 PID를
+종료하고 WSL frontend를 다시 띄운다.
 
 > **왜 Playwright만 Windows인가**: WSL Ubuntu에는 chromium 구동에 필요한
 > system lib(`libasound.so.2` 등)가 없고 `sudo`가 비밀번호를 요구해 WSL 내
@@ -267,6 +279,40 @@ WSL2 `localhostForwarding=true`로 Windows의 `http://127.0.0.1:8610` /
 
 자세히는 `packages/krtour-map-admin/frontend/README.md` §"e2e (Playwright)"
 + `frontend/playwright.config.ts` 상단 주석.
+
+### 8.2 디버그 UI 서버 기동 실패 시 1회 점검표
+
+같은 명령을 여러 번 재시도하지 말고 아래 순서로 확인한다. 반복 실패 패턴과 복구법은
+`docs/runbooks/agent-failure-patterns.md` §F가 정본이다.
+
+1. WSL Node 확인:
+   ```bash
+   command -v node
+   command -v npm
+   ```
+   `/mnt/c/Program Files/nodejs/...`가 나오면 Windows Node가 섞인 상태다.
+   `~/.nvm/nvm.sh`를 source하고 WSL Node를 활성화한다.
+2. Linux optional dependency 확인:
+   ```bash
+   npm install -w packages/krtour-map-admin/frontend --include=optional
+   ```
+3. Next lockfile 권한 에러가 있으면 `.next`를 지운다:
+   ```bash
+   rm -rf packages/krtour-map-admin/frontend/.next
+   ```
+4. `0.0.0.0` 바인드가 필요하면 hardcoded `npm run dev` script 대신 명시 실행:
+   ```bash
+   cd packages/krtour-map-admin/frontend
+   npx next dev --port 8610 --hostname 0.0.0.0
+   ```
+5. 백그라운드 실행 시에는 `setsid -f bash -lc '... nvm use ... exec npx next ...'`
+   형태를 사용하고, unquoted `env PATH=...$PATH`를 쓰지 않는다.
+6. 성공 보고 전 검증:
+   ```bash
+   ss -ltnp | rg ':(8087|8610)\b'
+   curl -fsS http://127.0.0.1:8087/debug/health
+   curl -fsS -I http://127.0.0.1:8610/ | sed -n '1,8p'
+   ```
 
 ## 9. lint / type
 

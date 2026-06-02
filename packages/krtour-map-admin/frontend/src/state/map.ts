@@ -15,9 +15,14 @@ export interface MapViewport {
   zoom: number;
 }
 
+export type FeatureViewMode = "map" | "table";
+
 interface MapStoreState {
   viewport: MapViewport;
+  featureViewMode: FeatureViewMode;
   selectedFeatureId: string | null;
+  /** 활성 feature kind. 빈 set이면 전체 표시. */
+  activeFeatureKinds: ReadonlySet<string>;
   /** 활성 카테고리 8자리 코드 (PlaceCategoryCode). 빈 set이면 전체 표시. */
   activeCategoryCodes: ReadonlySet<string>;
 }
@@ -25,7 +30,10 @@ interface MapStoreState {
 interface MapStoreActions {
   setViewport: (next: Partial<MapViewport>) => void;
   resetViewport: () => void;
+  setFeatureViewMode: (mode: FeatureViewMode) => void;
   setSelectedFeatureId: (id: string | null) => void;
+  toggleFeatureKind: (kind: string) => void;
+  clearFeatureKinds: () => void;
   toggleCategory: (code: string) => void;
   clearCategories: () => void;
 }
@@ -40,7 +48,9 @@ const DEFAULT_VIEWPORT: MapViewport = {
 
 export const useMapStore = create<MapStoreState & MapStoreActions>((set) => ({
   viewport: DEFAULT_VIEWPORT,
+  featureViewMode: "map",
   selectedFeatureId: null,
+  activeFeatureKinds: new Set<string>(),
   activeCategoryCodes: new Set<string>(),
 
   setViewport: (next) =>
@@ -50,7 +60,22 @@ export const useMapStore = create<MapStoreState & MapStoreActions>((set) => ({
 
   resetViewport: () => set({ viewport: DEFAULT_VIEWPORT }),
 
+  setFeatureViewMode: (mode) => set({ featureViewMode: mode }),
+
   setSelectedFeatureId: (id) => set({ selectedFeatureId: id }),
+
+  toggleFeatureKind: (kind) =>
+    set((state) => {
+      const next = new Set(state.activeFeatureKinds);
+      if (next.has(kind)) {
+        next.delete(kind);
+      } else {
+        next.add(kind);
+      }
+      return { activeFeatureKinds: next };
+    }),
+
+  clearFeatureKinds: () => set({ activeFeatureKinds: new Set<string>() }),
 
   toggleCategory: (code) =>
     set((state) => {
