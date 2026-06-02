@@ -2,6 +2,31 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-02 (codex) — kraddr-geo `/v2/regions/within-radius` 재정합
+
+**작업**: 사용자 지시 — kraddr-geo repo의 최신 REST v2 계약을 다시 확인하고,
+krtour-map geocoding client를 실제 구현된 `/v2/regions/within-radius`에 맞춰 보정.
+Sprint 기준 이미 테스트된 geocoding 표면만 수정.
+
+- **kraddr-geo 확인**: `python-kraddr-geo` `origin/main`의
+  `src/kraddr/geo/api/routers/v2.py`, `dto/v2.py`, `client.py`,
+  `tests/integration/test_optional_real_postgres_regions.py`를 기준으로 endpoint와
+  DTO를 재확인. `RegionWithinRadiusLevel=("sido","sigungu","emd")`,
+  `relation=("contains","overlaps")`가 정본.
+- **krtour-map 보정**: `KraddrGeoRestClient.regions_within_radius`,
+  `resolve_regions_within_radius`, `resolve_sigungu_by_radius`를 최신 계약에 맞추고,
+  `RegionV2.sig_cd`/`eup_myeon_dong` 파싱과 bjd 누락 시 `sigungu_code` fallback을
+  추가.
+- **실데이터 확인**: 로컬 kraddr-geo REST `http://127.0.0.1:8888` +
+  T-027 최종 적재 DB(`tl_scco_ctprvn=17`, `tl_scco_sig=255`, `tl_scco_emd=5067`)
+  기준 `POST /v2/regions/within-radius`가 HTTP 200. 샘플
+  `(lon=126.978, lat=37.5665, radius_km=3.0, levels=sigungu+emd)`에서
+  `sigungu` 6건, `emd` 190건을 반환했고, krtour-map parser/helper도 같은 응답을
+  정상 파싱.
+- **검증**: `pytest tests/unit/test_geocoding.py -q -s` 51 passed,
+  `pytest tests/unit -q -s` 744 passed, `ruff check .`, `mypy src/krtour/map`,
+  `lint-imports` 통과.
+
 ## 2026-06-02 (codex) — admin frontend stack 전환 + geocoding admin 표면 제거
 
 **작업**: 사용자 지시 — frontend를 문서화된 stack(Next.js 16 + React 19 +

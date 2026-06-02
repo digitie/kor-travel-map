@@ -26,6 +26,8 @@ from krtour.map.geocoding import (
     geocode_response_to_coordinate,
     kraddr_geo_address_geocoder,
     kraddr_geo_reverse_geocoder,
+    resolve_regions_within_radius,
+    resolve_sigungu_by_radius,
     reverse_response_to_address,
 )
 
@@ -54,9 +56,11 @@ class _AddrV2:
 
 @dataclass(frozen=True)
 class _RegionV2:
+    sig_cd: str | None = None
     bjd_cd: str | None = None
     sido: str | None = None
     sigungu: str | None = None
+    eup_myeon_dong: str | None = None
     legal_dong: str | None = None
     admin_dong: str | None = None
 
@@ -100,9 +104,11 @@ _FULL_ADDR_PARCEL = _AddrV2(
     admin_dong_code="1156051000",
 )
 _FULL_REGION = _RegionV2(
+    sig_cd="11560",
     bjd_cd="1156010100",
     sido="서울특별시",
     sigungu="영등포구",
+    eup_myeon_dong="여의도동",
     legal_dong="여의도동",
     admin_dong="여의동",
 )
@@ -177,6 +183,32 @@ def test_reverse_bjd_falls_back_to_region() -> None:
     addr = reverse_response_to_address(resp)
     assert addr is not None
     assert addr.bjd_code == "1156010100"
+
+
+def test_reverse_sig_cd_fallback_when_bjd_missing() -> None:
+    """kraddr-geo v2 ``RegionV2.sig_cd``를 bjd 없는 응답에서도 보존한다."""
+    resp = _RevResp(
+        candidates=(
+            _CandV2(
+                match_kind="region",
+                address=_AddrV2(full="서울특별시 영등포구"),
+                region=_RegionV2(
+                    sig_cd="11560",
+                    sido="서울특별시",
+                    sigungu="영등포구",
+                    eup_myeon_dong="여의도동",
+                ),
+            ),
+        ),
+    )
+    addr = reverse_response_to_address(resp)
+    assert addr is not None
+    assert addr.bjd_code is None
+    assert addr.sigungu_code == "11560"
+    assert addr.sido_code == "11"
+    assert addr.admin == "여의도동"
+    assert addr.sido_name == "서울특별시"
+    assert addr.sigungu_name == "영등포구"
 
 
 def test_reverse_road_falls_back_to_full() -> None:
@@ -436,7 +468,7 @@ def test_rest_reverse_geocoder_hits_endpoint() -> None:
                         },
                         "point": {"x": 126.924, "y": 37.526},
                         "distance_m": 5.0,
-                        "region": {"bjd_cd": "1156010100"},
+                        "region": {"sig_cd": "11560", "bjd_cd": "1156010100"},
                     }
                 ],
             },
@@ -452,6 +484,7 @@ def test_rest_reverse_geocoder_hits_endpoint() -> None:
             )
             assert addr is not None
             assert addr.bjd_code == "1156010100"
+            assert addr.sigungu_code == "11560"
             assert addr.zipcode == "07237"
 
     asyncio.run(_run())
@@ -742,6 +775,214 @@ def test_rest_client_geocode_raises_on_http_502() -> None:
                 await client.geocode("addr")
 
     asyncio.run(_run())
+
+
+def test_rest_client_regions_within_radius_hits_endpoint() -> None:
+    seen: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(_body(request))
+        assert request.method == "POST"
+        assert request.url.path == "/v2/regions/within-radius"
+        return httpx.Response(
+            200,
+            json={
+                "center": {"lon": 126.978, "lat": 37.5665},
+                "radius_km": 3.0,
+                "sigungu": [
+                    {"code": "11110", "name": "종로구", "relation": "contains"},
+                    {"code": "11140", "name": "중구", "relation": "overlaps"},
+                ],
+                "emd": [
+                    {"code": "11110119", "name": "세종로", "relation": "contains"}
+                ],
+            },
+        )
+
+    async def _run() -> None:
+        async with _mock_client(handler) as http:
+            client = KraddrGeoRestClient(http)
+            response = await client.regions_within_radius(
+                lon=126.978,
+                lat=37.5665,
+                radius_km=3.0,
+                levels=("sigungu", "emd"),
+            )
+            assert response.center.lon == 126.978
+            assert response.center.lat == 37.5665
+            assert response.radius_km == 3.0
+            assert [item.code for item in response.sigungu] == ["11110", "11140"]
+            assert response.sigungu[0].relation == "contains"
+            assert response.sigungu[1].relation == "overlaps"
+            assert response.emd[0].code == "11110119"
+            assert response.sido == ()
+
+    asyncio.run(_run())
+    assert seen == [
+        {
+            "lon": 126.978,
+            "lat": 37.5665,
+            "radius_km": 3.0,
+            "levels": ["sigungu", "emd"],
+        }
+    ]
+
+
+def test_rest_client_regions_within_radius_default_levels() -> None:
+    seen: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(_body(request))
+        return httpx.Response(
+            200,
+            json={
+                "center": {"lon": 126.978, "lat": 37.5665},
+                "radius_km": 3.0,
+            },
+        )
+
+    async def _run() -> None:
+        async with _mock_client(handler) as http:
+            await KraddrGeoRestClient(http).regions_within_radius(
+                lon=126.978,
+                lat=37.5665,
+            )
+
+    asyncio.run(_run())
+    assert seen[0]["levels"] == ["sigungu", "emd"]
+
+
+def test_rest_client_regions_within_radius_center_xy_fallback_and_malformed_items() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "center": {"x": 126.978, "y": 37.5665},
+                "radius_km": "3.0",
+                "sigungu": [
+                    {"code": "11110", "name": "종로구", "relation": "contains"},
+                    {"code": "", "name": "무효", "relation": "contains"},
+                    {"code": "11140", "name": "중구", "relation": "intersects"},
+                    "not-object",
+                ],
+            },
+        )
+
+    async def _run() -> None:
+        async with _mock_client(handler) as http:
+            response = await KraddrGeoRestClient(http).regions_within_radius(
+                lon=126.978,
+                lat=37.5665,
+                radius_km=3.0,
+                levels=("sigungu",),
+            )
+            assert response.center.lon == 126.978
+            assert response.center.lat == 37.5665
+            assert [item.code for item in response.sigungu] == ["11110"]
+
+    asyncio.run(_run())
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"radius_km": 3.0, "sigungu": []},
+        {"center": {"lon": "bad", "lat": 37.5}, "radius_km": 3.0},
+        {"center": {"lon": 126.9, "lat": 37.5}, "radius_km": 0},
+    ],
+)
+def test_rest_client_regions_within_radius_invalid_response_raises(
+    payload: dict[str, Any],
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=payload)
+
+    async def _run() -> None:
+        async with _mock_client(handler) as http:
+            with pytest.raises(ValueError, match="kraddr-geo regions response"):
+                await KraddrGeoRestClient(http).regions_within_radius(
+                    lon=126.978,
+                    lat=37.5665,
+                )
+
+    asyncio.run(_run())
+
+
+def test_rest_client_regions_within_radius_raises_on_http_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, json={"detail": "maintenance"})
+
+    async def _run() -> None:
+        async with _mock_client(handler) as http:
+            with pytest.raises(httpx.HTTPStatusError):
+                await KraddrGeoRestClient(http).regions_within_radius(
+                    lon=126.978,
+                    lat=37.5665,
+                )
+
+    asyncio.run(_run())
+
+
+def test_resolve_sigungu_by_radius_requests_sigungu_only() -> None:
+    seen: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(_body(request))
+        return httpx.Response(
+            200,
+            json={
+                "center": {"lon": 126.978, "lat": 37.5665},
+                "radius_km": 3.0,
+                "sigungu": [
+                    {"code": "11110", "name": "종로구", "relation": "contains"},
+                    {"code": "11140", "name": "중구", "relation": "overlaps"},
+                ],
+            },
+        )
+
+    async def _run() -> None:
+        async with _mock_client(handler) as http:
+            codes = await resolve_sigungu_by_radius(
+                KraddrGeoRestClient(http),
+                lon=126.978,
+                lat=37.5665,
+                radius_km=3.0,
+            )
+            assert codes == ("11110", "11140")
+
+    asyncio.run(_run())
+    assert seen[0]["levels"] == ["sigungu"]
+
+
+def test_resolve_regions_within_radius_passthrough() -> None:
+    seen: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(_body(request))
+        return httpx.Response(
+            200,
+            json={
+                "center": {"lon": 126.978, "lat": 37.5665},
+                "radius_km": 5.0,
+                "sido": [
+                    {"code": "11", "name": "서울특별시", "relation": "contains"}
+                ],
+            },
+        )
+
+    async def _run() -> None:
+        async with _mock_client(handler) as http:
+            response = await resolve_regions_within_radius(
+                KraddrGeoRestClient(http),
+                lon=126.978,
+                lat=37.5665,
+                radius_km=5.0,
+                levels=("sido",),
+            )
+            assert response.sido[0].code == "11"
+
+    asyncio.run(_run())
+    assert seen[0]["levels"] == ["sido"]
 
 
 def test_kraddr_geo_reverse_geocoder_max_distance_filters() -> None:
