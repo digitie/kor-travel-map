@@ -2,7 +2,7 @@
 
 ADR-045 D-11의 구현 사양이다. krtour-map은 행정구역 경계 polygon을 복제하지 않고,
 `python-kraddr-geo` REST v2의 `POST /v2/regions/within-radius`를 호출해 POI 좌표
-기준 `n` km 반경에 포함되거나 교차하는 시군구/읍면동을 얻는다.
+기준 `n` km 반경에 포함되거나 겹치는 시군구/읍면동을 얻는다.
 
 ## 1. 책임 경계
 
@@ -33,7 +33,7 @@ emd_codes = [item.code for item in regions.emd]
 
 공개 타입:
 
-- `RegionLevel`: `"sido" | "sigungu" | "emd"`
+- `RegionWithinRadiusLevel`: `"sido" | "sigungu" | "emd"`
 - `RegionWithinRadiusItem`: `code`, `name`, `relation`
 - `RegionsWithinRadiusResponse`: `center`, `radius_km`, `sido`, `sigungu`, `emd`
 
@@ -69,16 +69,18 @@ malformed item은 버리고, `center` 또는 `radius_km`가 잘못된 응답은 
   "center": {"lon": 126.978, "lat": 37.5665},
   "radius_km": 3.0,
   "sigungu": [
-    {"code": "11110", "name": "종로구", "relation": "intersects"}
+    {"code": "11110", "name": "종로구", "relation": "contains"},
+    {"code": "11140", "name": "중구", "relation": "overlaps"}
   ],
   "emd": [
-    {"code": "1111010100", "name": "청운동", "relation": "within"}
+    {"code": "11110101", "name": "청운동", "relation": "contains"}
   ]
 }
 ```
 
-`relation`은 kraddr-geo 원문을 보존한다. krtour-map은 현재 `within`/`intersects`
-해석을 재구현하지 않는다.
+`relation`은 kraddr-geo 원문을 보존한다. 현재 값은 `contains`(중심점을 포함하는
+행정구역)와 `overlaps`(중심점은 포함하지 않지만 반경에 걸친 행정구역)다.
+krtour-map은 이 판정을 재구현하지 않는다.
 
 ## 4. 디버깅 위치
 
@@ -104,3 +106,11 @@ krtour-map에서 확인해야 하는 것은 다음 둘이다.
 - malformed item은 제외하고, 잘못된 `center`/`radius_km`와 HTTP error는 실패한다.
 - admin frontend/backend는 geocoding 전용 debug route를 갖지 않는다. 해당 화면
   검증은 kraddr-geo 프로젝트 책임이다.
+
+2026-06-02 실제 kraddr-geo 서버(`http://127.0.0.1:8888`) + T-027 최종 적재
+PostGIS DB(`kraddr-geo-t027-final`, `tl_scco_ctprvn=17`, `tl_scco_sig=255`,
+`tl_scco_emd=5067`) 기준으로 같은 요청을 확인했다. 응답은 HTTP 200이었고,
+`sigungu` 6건(`11140` 중구 `contains`, `11110` 종로구 `overlaps` 등)과 `emd`
+190건을 반환했다. krtour-map `KraddrGeoRestClient` parser도 동일 응답을
+`RegionsWithinRadiusResponse`로 파싱했고, `resolve_sigungu_by_radius`는
+`("11140", "11110", "11170", "11290", "11410", "11440")`를 반환했다.

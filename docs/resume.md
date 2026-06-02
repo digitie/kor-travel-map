@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-02 Codex 작업 메모 — kraddr-geo 반경 endpoint 재정합
+
+kraddr-geo `origin/main` 기준 `POST /v2/regions/within-radius`가 구현되어 있음을
+다시 확인하고, krtour-map `KraddrGeoRestClient`/helper/parser를 최신 REST v2 계약에
+맞췄다. 공개 relation 값은 `contains`/`overlaps`이고, `sigungu.code`는 5자리,
+`emd.code`는 8자리 행정구역 코드다. 추가로 `RegionV2.sig_cd`/`eup_myeon_dong`을
+파싱해 bjd 없는 reverse 응답에서도 `sigungu_code`/`sido_code`/admin 이름을 보존한다.
+
+실데이터 확인은 로컬 kraddr-geo REST `http://127.0.0.1:8888` + T-027 최종 적재
+PostGIS DB(`tl_scco_ctprvn=17`, `tl_scco_sig=255`, `tl_scco_emd=5067`)로 수행했다.
+샘플 `(lon=126.978, lat=37.5665, radius_km=3.0, levels=sigungu+emd)`에서 HTTP 200,
+`sigungu` 6건, `emd` 190건을 확인했고, `resolve_sigungu_by_radius`는
+`("11140", "11110", "11170", "11290", "11410", "11440")`를 반환했다.
+
 ## 2026-06-02 Codex 작업 메모
 
 Codex는 admin frontend를 문서화된 stack(Next.js 16 + React 19 + TanStack Query +
