@@ -2,6 +2,28 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-03 (codex) — T-206a-geo 재검증
+
+**작업**: ADR-045 T-206a-geo. 형제 repo `python-kraddr-geo`의
+`POST /v2/regions/within-radius` 구현과 optional 실제 PostGIS 테스트가 현재 main
+기준으로 krtour-map 요구를 만족하는지 재확인.
+
+- **Repo 상태**: `python-kraddr-geo` main을 최신 `origin/main`으로 fast-forward.
+  `/v2/regions/within-radius`, `AsyncAddressClient.regions_within_radius()`,
+  `region_radius_parts` accelerator, `tests/integration/
+  test_optional_real_postgres_regions.py`가 main에 존재함을 확인.
+- **Targeted test**: WSL mirror에서
+  `.venv/bin/python -m pytest tests/unit/test_v2_api.py tests/integration/
+  test_optional_real_postgres_regions.py -q -s` → `15 passed, 1 skipped`.
+  skip은 현재 shell에 `KRADDR_GEO_TEST_PG_DSN`이 없어 optional 실제 DB 테스트가
+  건너뛴 것이다.
+- **Server smoke**: `http://127.0.0.1:9001/v2/regions/within-radius`에
+  `{"lon":127.0,"lat":37.5,"radius_km":1,"levels":["sigungu"]}`를 POST해 `200 OK`,
+  `sigungu[0].code="11650"`, `name="서초구"`, `relation="contains"` 응답 확인.
+- **결론**: 추가 kraddr-geo 코드 PR 없이 T-206a-geo는 이미 구현·노출·테스트 경로가
+  준비된 상태다. krtour-map은 REST v2 계약과 resolver 주입 경계를 유지하고, 다음
+  작업은 T-205c Phase 2 스키마다.
+
 ## 2026-06-03 (codex) — feature update client 표면
 
 **작업**: ADR-045 독립 프로그램화 후속 T-206c. `infra.feature_update_repo`의 request

@@ -78,12 +78,13 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
     `ops.poi_cache_targets` 테이블 도입 후).
   - `count_features_matching_scope(session, scope)` — **dry_run/ matched_scope용**
     (write 없이 count + sigungu_codes).
-- **T-206a-geo** (형제 repo `python-kraddr-geo`, 별도 PR) — `POST /v2/regions/
-  within-radius` 신규 엔드포인트. 요청/응답/구현 정본은 `docs/regions-within-radius.md`
-  (요약은 `adr045-open-decisions.md` D-11).
+- **T-206a-geo** ✅ (형제 repo `python-kraddr-geo`) — `POST /v2/regions/
+  within-radius` 엔드포인트와 optional PostGIS 실데이터 테스트 경로를
+  `python-kraddr-geo` main 기준으로 재검증 완료. 요청/응답/구현 정본은
+  `docs/regions-within-radius.md` (요약은 `adr045-open-decisions.md` D-11).
   `tl_scco_sig`(+ctprvn/emd) PostGIS 교차. 반환 `code`(sig_cd)는 krtour-map
-  `sigungu_code`와 동일 체계(D-11 확인) — 매핑 불필요. T-206a `resolve_sigungu_by_
-  radius`의 선행 의존.
+  `sigungu_code`와 동일 체계(D-11 확인) — 매핑 불필요. 2026-06-03 기준 local
+  API `9001` smoke에서 `sigungu` `11650`(서초구) contains 응답을 확인했다.
 - **T-206b** ✅ `infra/feature_update_repo.py` 신규 — 요청 생명주기:
   - `enqueue_feature_update_request(session, scope, providers, dataset_keys,
     update_policy, run_mode, priority, dry_run, operator, reason) -> FeatureUpdateRequest`
@@ -218,9 +219,9 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
 
 1. **의사결정 확인**: D-1~D-16은 모두 확정됨 — `adr045-open-decisions.md`.
 2. **Phase 1 T-205a** (feature_update_requests alembic/model) — 완료.
-3. **Phase 2 T-206b/c** (feature_update_repo + client) — 완료/진행 중.
+3. **Phase 2 T-206b/c** (feature_update_repo + client) — 완료.
 4. **T-206a-geo** (형제 repo `python-kraddr-geo`) — `/v2/regions/within-radius`
-   endpoint와 optional PostGIS 실데이터 테스트를 재검증/보완.
+   endpoint와 optional PostGIS 실데이터 테스트 경로 재검증 완료.
 5. **Phase 2 T-205c** (`provider_refresh_policies`, `poi_cache_targets`,
    `data_integrity_violations`) — request 실행 본체 선행 스키마.
 6. **Phase 2 T-206d** — request 실행 본체.
