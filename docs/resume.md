@@ -1,5 +1,25 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-03 Codex 작업 메모 — T-206a-geo 검증 완료
+
+형제 repo `python-kraddr-geo` main 기준으로 T-206a-geo를 재검증했다.
+`POST /v2/regions/within-radius`와 `AsyncAddressClient.regions_within_radius()`는 이미
+PR #114/#115 계열로 main에 포함되어 있고, `tests/integration/
+test_optional_real_postgres_regions.py`는 `KRADDR_GEO_TEST_PG_DSN`이 있을 때 실제
+`tl_scco_*`/`region_radius_parts` PostGIS 테이블을 조회하는 optional 테스트로 존재한다.
+
+검증 결과: WSL mirror에서 `tests/unit/test_v2_api.py` +
+`tests/integration/test_optional_real_postgres_regions.py` targeted pytest는
+`15 passed, 1 skipped`였다. skip은 현재 shell에 `KRADDR_GEO_TEST_PG_DSN`이 없어서
+발생했다. 대신 현재 로컬 API `http://127.0.0.1:9001`에
+`POST /v2/regions/within-radius`를 직접 호출해 `sigungu` `11650`(서초구) contains
+응답을 확인했다.
+
+다음 한 작업은 **T-205c**다. `ops.provider_refresh_policies`(provider별 update
+주기/rate limit), `ops.poi_cache_targets` + `_feature_links`(`cache_target_keys`
+scope 선행), `ops.data_integrity_violations`(F5~F8 저장 기반)을 먼저 만들고, 이후
+T-206d request 실행 본체로 넘어간다.
+
 ## 2026-06-03 Codex 작업 메모 — feature update client 표면
 
 ADR-045 T-206c로 `AsyncKrtourMapClient`에 feature update request 메서드 4종을
@@ -15,13 +35,7 @@ export로 맞추고, client/module 문서의 TripMate 직접 import 설명을 AD
 운영 모델 기준으로 정정한다. 통합 테스트는 dry-run preview, enqueue, get/list,
 cancel lifecycle을 PostGIS migrated DB에서 확인한다.
 
-다음 한 작업은 **T-206a-geo**다. 형제 repo `python-kraddr-geo`에서
-`POST /v2/regions/within-radius`와 optional PostGIS 실데이터 테스트를 현재 endpoint
-기준으로 재검증하고, 빠진 부분이 있으면 별도 PR로 보완한다. 그 다음 T-206d request
-실행 본체에 들어가기 전에 **T-205c**로 `ops.provider_refresh_policies`(provider별
-update 주기/rate limit), `ops.poi_cache_targets` + `_feature_links`
-(`cache_target_keys` scope 선행), `ops.data_integrity_violations`(F5~F8 저장 기반)을
-먼저 만든다. 이후 T-206d → T-207a → T-208e 순서로 진행한다.
+이후 T-206a-geo 검증을 완료했으므로 다음 한 작업은 T-205c다.
 
 ## 2026-06-03 Codex 작업 메모 — feature update request 큐 repository
 
@@ -298,7 +312,7 @@ Sprint 4(4a+4b)는 아래 체크리스트대로 **전부 완료**(PR#133~#142). 
 
 **1차 진입 task**(권장): T-205a(`feature_update_requests`
 alembic 0008, 완료) → T-206a(scope resolver, 완료) → T-206b(feature update repo,
-완료) → T-206c(client, 본 PR) → **T-206a-geo(형제 repo endpoint 검증/보완)** →
+완료) → T-206c(client, 완료) → T-206a-geo(형제 repo endpoint 검증 완료) →
 **T-205c(Phase 2 스키마)** → T-206d(request 실행 본체) → T-207a/e(admin
 update-requests + 사용자 features 라우터) → T-208d/e(Dagster schedule/sensor). 그
 다음 Sprint 5 provider(MOIS-sibling) + Phase 2 정합성.

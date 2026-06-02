@@ -4,11 +4,11 @@
 
 ## 진행 중
 
-**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#161(T-206b feature update
-request 큐 repository)까지 merged. 현재 작업은 T-206c feature update client
-표면이며, 다음 작업은 T-206a-geo 형제 repo endpoint 검증/보완이다. 그 뒤 T-205c
-(Phase 2 스키마: provider refresh policy / POI cache target / F5~F8 violation 기반),
-T-206d request 실행 본체, admin API/Dagster sensor로 이어간다.
+**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#162(T-206c feature update
+client 표면)까지 merged. T-206a-geo 형제 repo endpoint는 `python-kraddr-geo`
+main 기준으로 재검증 완료했다. 현재 다음 작업은 T-205c(Phase 2 스키마: provider
+refresh policy / POI cache target / F5~F8 violation 기반)이며, 그 뒤 T-206d request
+실행 본체, admin API/Dagster sensor로 이어간다.
 
 ### 현재 기준 보강 필요 체크포인트 (2026-06-03)
 
@@ -48,6 +48,12 @@ T-206d request 실행 본체, admin API/Dagster sensor로 이어간다.
 
 ## 최근 완료 (2026-05-31~2026-06-03)
 
+- **PR#162** (merged 2026-06-03): `AsyncKrtourMapClient` feature update request
+  메서드 4종 + top-level client export + RustFS 포트 9003/9004 문서 정렬.
+- **T-206a-geo 확인** (2026-06-03): `python-kraddr-geo` main의
+  `/v2/regions/within-radius` 구현과 optional 실제 PostGIS 테스트를 재검증.
+  WSL targeted test `15 passed, 1 skipped`, 로컬 9001 server smoke는 `sigungu`
+  `11650`(서초구) contains 응답 확인.
 - **PR#161** (merged 2026-06-03): `infra.feature_update_repo` request/import job
   lifecycle repository + kraddr-geo REST API 로컬 포트 9001 문서/설정 정렬.
 - **PR#160** (merged 2026-06-03): `infra.scope_repo` scope resolver.
@@ -271,7 +277,7 @@ T-206d request 실행 본체, admin API/Dagster sensor로 이어간다.
   scope resolver/repository는 T-206에서 분리.
 - [~] T-205b — ~~`feature.sigungu_boundaries`~~ **취소**(D-11: 경계는 kraddr-geo
   소유, krtour-map은 REST 호출). → T-206a-geo로 대체.
-- [ ] T-205c — (Phase 2, **T-206c 직후 진행**) `ops.data_integrity_violations`
+- [ ] T-205c — (Phase 2, **T-206a-geo 검증 후 진행**) `ops.data_integrity_violations`
   (F5~F8) / `ops.poi_cache_targets` + `_feature_links` /
   `ops.provider_refresh_policies`. `cache_target_keys` scope와 provider별 update
   주기/rate limit enforcement의 선행 스키마.
@@ -283,9 +289,9 @@ T-206d request 실행 본체, admin API/Dagster sensor로 이어간다.
   `sigungu_by_radius`는 kraddr-geo `/v2/regions/within-radius` 호출(D-11).
   DB repo는 kraddr-geo client를 직접 import하지 않고 async resolver를 주입받는다.
   `cache_target_keys` resolver는 `ops.poi_cache_targets` 테이블 도입 후 Phase 2.
-- [ ] T-206a-geo — (형제 repo `python-kraddr-geo`, **T-206c 직후 진행**) `POST
-  /v2/regions/within-radius` 엔드포인트와 optional PostGIS 실데이터 테스트를 repo
-  기준으로 재검증한다. 빠진 부분이 있으면 형제 repo PR로 보완하고, krtour-map은
+- [x] T-206a-geo — (형제 repo `python-kraddr-geo`) `POST
+  /v2/regions/within-radius` 엔드포인트와 optional PostGIS 실데이터 테스트가
+  `python-kraddr-geo` main(PR #114/#115 계열)에 반영됨을 재검증했다. krtour-map은
   REST v2 계약/로컬 포트 `9001`/resolver 주입 경계를 유지한다.
 - [x] T-206b — `infra/feature_update_repo.py` (enqueue/claim/start/finish/get/list/cancel,
   advisory lock + SKIP LOCKED, keyset cursor D-10).
