@@ -25,6 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from krtour.map_admin import __version__
 from krtour.map_admin.routers import (
+    dagster_router,
     etl_router,
     features_router,
     health_router,
@@ -71,6 +72,7 @@ def create_app(settings: AdminSettings | None = None) -> FastAPI:
         # spec에 포함하지 않는다 (호스트별 차이로 drift 발생 우려).
         servers=[],
     )
+    application.state.settings = settings
 
     # frontend(Next.js dev/start 9012)가 브라우저에서 backend(9011)로 cross-origin
     # fetch → CORS 필요 (ADR-005: 내부 debug 도구, origin은 localhost frontend로
@@ -93,6 +95,8 @@ def create_app(settings: AdminSettings | None = None) -> FastAPI:
         # Step D on-demand 상세는 DB(적재된 raw_data) 필요 → features와 동일 gate.
         if settings.debug_routes_enabled:
             application.include_router(mois_detail_router)
+
+    application.include_router(dagster_router)
 
     return application
 

@@ -107,6 +107,7 @@ Dagster DB에는 Dagster가 자체 schema를 관리한다.
 | `admin-issues` | `/admin/issues` | 결측/정합성 이슈 |
 | `admin-offline` | `/admin/offline-uploads` | 오프라인 파일 업로드/검증/적재 |
 | `ops` | `/ops` | 에러 로그, metrics, consistency |
+| `dagster` | `/ops/dagster` | Dagster webserver GraphQL 기반 운영 요약 |
 | `debug` | `/debug` | fixture, ETL preview, EXPLAIN |
 
 ### 4.1 Admin issues / 주소 검토
@@ -425,7 +426,54 @@ CREATE INDEX idx_feature_update_job
 
 두 API 모두 결과적으로 `ops.import_jobs`와 Dagster run을 사용한다.
 
-## 7.1 POI/cache target API
+## 7.1 Dagster 운영 요약 API
+
+Admin UI는 Dagster webserver 자체 화면을 `/admin/dagster`에서 iframe으로 embed하고,
+같은 화면에 자체 운영 요약 UI를 렌더한다. 자체 요약은 FastAPI가 Dagster GraphQL을
+읽어 정규화한 다음 endpoint를 사용한다. embedded Dagster 화면이 로컬 첫 실행
+커뮤니티 모달로 가려지지 않도록, summary 조회가 성공하면 backend는 Dagster GraphQL
+`setNuxSeen` mutation을 best-effort로 1회 호출한다.
+
+#### `GET /ops/dagster/summary`
+
+Query:
+
+- `run_limit` (`1..50`, 기본 `10`)
+
+응답:
+
+```json
+{
+  "status": "ok",
+  "dagster_url": "http://127.0.0.1:9013",
+  "graphql_url": "http://127.0.0.1:9013/graphql",
+  "version": "1.13.7",
+  "repository_count": 1,
+  "job_count": 1,
+  "asset_count": 9,
+  "schedule_count": 0,
+  "sensor_count": 0,
+  "run_counts": {"SUCCESS": 3},
+  "repositories": [],
+  "recent_runs": [],
+  "errors": []
+}
+```
+
+`status`:
+
+| 값 | 의미 |
+|----|------|
+| `ok` | Dagster GraphQL 조회와 파싱 성공 |
+| `unavailable` | Dagster webserver 연결 실패 또는 HTTP 오류. UI는 장애 상태를 표시 |
+| `error` | GraphQL 응답은 받았지만 repository/run 조회가 오류를 반환 |
+
+이 endpoint는 Dagster run/job을 제어하지 않는다. 단, embedded UI 표시 안정화를 위한
+Dagster NUX seen 처리는 부수효과로 허용한다. feature update request, import job
+progress, cancel은 `/admin/feature-update-requests`와 `/admin/import-jobs` 계약으로
+분리한다.
+
+## 7.2 POI/cache target API
 
 외부 앱은 POI 좌표만 보내지 않고 고유 key와 좌표를 함께 등록한다. 좌표 precision
 차이로 동일 POI가 여러 개 생기는 것을 막기 위해 `external_system + target_key`를

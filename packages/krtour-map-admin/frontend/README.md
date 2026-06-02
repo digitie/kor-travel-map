@@ -205,6 +205,7 @@ PID를 종료한 뒤 WSL frontend를 다시 띄운다. 정상은 `wslrelay`다.
 | `/admin/feature-update-requests` | `/admin/feature-update-requests` | 좌표/반경/시군구/provider 업데이트 큐잉 |
 | `/admin/poi-cache-targets` | `/admin/poi-cache-targets`, `/features/nearby/by-target` | 외부 POI key 기반 주변 feature 캐시 |
 | `/admin/provider-refresh-policies` | `/admin/provider-refresh-policies` | provider update 주기/rate limit 정책 |
+| `/admin/dagster` | `/ops/dagster/summary` | Dagster 운영 요약 + Dagster webserver embed |
 | `/ops/error-logs` | `/ops/error-logs` | provider/job 에러 로그 |
 | `/ops/consistency` | `/ops/consistency/reports` | 정합성 보고서 |
 | `/debug/explain` | `/debug/explain` | SQL EXPLAIN viewer (read-only) |

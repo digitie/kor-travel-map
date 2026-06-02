@@ -2693,7 +2693,8 @@ ADR-045 이후 krtour-map은 Docker 독립 프로그램 + 독립 DB/Dagster + ad
 
 ### 후속
 
-- admin UI는 최신 문서 기준으로 Dagster 관리 화면 임베드와 Dagster 정보 기반 운영
-  화면을 보강한다.
+- admin UI Dagster 관측/관리 화면 1차는 `/admin/dagster` +
+  `GET /ops/dagster/summary`로 보강했다. feature update queue와 sensor/worker 연결은
+  별도 후속으로 둔다.
 - Dagster metadata DB 분리, daemon/schedule/sensor 운영, RustFS/backup compose 확장은
   T-209b/T-209e에서 이어간다.

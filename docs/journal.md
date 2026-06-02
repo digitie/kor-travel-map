@@ -2,6 +2,29 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-02 (codex) — admin UI Dagster 운영 화면
+
+**작업**: 사용자 지시 — admin UI를 최신 문서의 ADR-045 독립 Dagster 운영 모델에 맞춰
+보강하고, Dagster 관리 화면 embed와 자체 요약 UI를 추가.
+
+- **Backend**: `GET /ops/dagster/summary` 추가. `KRTOUR_MAP_ADMIN_DAGSTER_URL`
+  기준 Dagster GraphQL에서 version, repository/code location, asset group,
+  schedule/sensor, 최근 run을 읽어 `DagsterSummaryResponse`로 정규화. summary 성공 시
+  embedded Dagster 화면의 첫 실행 모달을 접기 위해 `setNuxSeen`을 best-effort 호출.
+- **Frontend**: `/admin/dagster` 추가. 좌측은 admin 자체 요약 카드, code location/
+  asset group, recent run 표를 렌더하고 우측은 Dagster webserver를 iframe으로 embed.
+- **홈 보강**: `/`에서 Dagster 상태 요약과 `/admin/dagster` 진입 링크를 표시.
+- **운영 설정**: 로컬 스크립트는 `http://127.0.0.1:9013`, Docker API 컨테이너는
+  `http://dagster:9013`를 기본 Dagster URL로 사용. embedded 관리 화면의 첫 실행
+  telemetry 안내를 피하기 위해 `DAGSTER_DISABLE_TELEMETRY=yes`와 `dagster.yaml`
+  `telemetry.enabled: false` 기본 생성을 추가.
+- **검증**: Dagster router unit test, admin backend 전체 pytest, ruff,
+  `mypy --strict -p krtour.map_admin`, frontend type-check/lint/build 통과. OpenAPI
+  JSON 갱신. Windows Playwright e2e(`dagster.spec.ts`, `home.spec.ts`) 6개 통과.
+  데스크톱/모바일 스크린샷으로 Dagster embed 렌더와 NUX 모달 제거 확인. React Doctor는
+  신규 경고를 해소했으며, 남은 optional warning은 기존 shadcn/base-ui primitive 구조
+  경고와 iframe `sandbox` 속성 false-positive.
+
 ## 2026-06-02 (codex) — Docker/포트 표준화
 
 **작업**: 사용자 지시 — API `9011`, admin UI `9012`, Dagster `9013` 고정 포트 원칙을

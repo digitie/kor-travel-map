@@ -353,6 +353,8 @@ type drift 부채 0).
 | `NEXT_PUBLIC_VWORLD_API_KEY` | VWorld API key. **`KRADDR_GEO_VWORLD_API_KEY`와 동일 값 공유** (ADR-025 사용자 보강 1차 + 2차 2026-05-25). frontend 빌드/런타임 주입. |
 | `NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API` | 백엔드 API base URL (개발: `http://127.0.0.1:9011`) |
 | `NEXT_PUBLIC_KRTOUR_MAP_DAGSTER_URL` | Dagster UI/embed base URL (개발: `http://127.0.0.1:9013`) |
+| `KRTOUR_MAP_ADMIN_DAGSTER_URL` | backend가 Dagster GraphQL을 조회할 때 쓰는 Dagster webserver base URL. 로컬 기본 `http://127.0.0.1:9013`, Docker API 컨테이너 기본 `http://dagster:9013` |
+| `DAGSTER_DISABLE_TELEMETRY` | Dagster dev/webserver telemetry 비활성화 여부. admin UI embed 기본 운영값은 `yes`이며, 로컬 실행 스크립트와 Docker 이미지는 `dagster.yaml`의 `telemetry.enabled: false`도 함께 설정 |
 | `KRTOUR_MAP_ADMIN_FRONTEND_DIST` | (FastAPI 측) Next.js build 산출물 경로 — static export 모드 시에만 사용 (`.next/` 또는 `out/`) |
 
 **VWorld API key 공유 정책 (확정, ADR-025 보강 2026-05-25)**:
