@@ -63,7 +63,7 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
 
 ## 2. Phase 2 — 로직 (scope resolver + 큐 브리지)
 
-- **T-206a** `infra/scope_repo.py` 신규 — scope→feature_id 해석 (읽기):
+- **T-206a** ✅ `infra/scope_repo.py` 신규 — scope→feature_id 해석 (읽기):
   - `resolve_feature_ids(session, ids)` — 존재 검증 통과분만.
   - `resolve_center_radius(session, lon, lat, radius_km)` — `coord_5179` +
     `ST_DWithin`(ADR-012, 입력 1회 ST_Transform). `features_in_bbox` 패턴 재사용.
@@ -74,7 +74,8 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
     sig_cd = sigungu_code 동일 체계(D-11 확인) — 매핑 없이 그대로 사용.
   - `resolve_provider_dataset(session, provider, dataset_key, sync_scope)` —
     `source_links`(primary) JOIN `source_records` 필터.
-  - `resolve_cache_target_keys(...)` — `poi-cache-update-targets.md` (Phase 2).
+  - `resolve_cache_target_keys(...)` — `poi-cache-update-targets.md` (Phase 2,
+    `ops.poi_cache_targets` 테이블 도입 후).
   - `count_features_matching_scope(session, scope)` — **dry_run/ matched_scope용**
     (write 없이 count + sigungu_codes).
 - **T-206a-geo** (형제 repo `python-kraddr-geo`, 별도 PR) — `POST /v2/regions/
@@ -213,7 +214,7 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
 
 1. **의사결정 확인**: D-1~D-16은 모두 확정됨 — `adr045-open-decisions.md`.
 2. **Phase 1 T-205a** (feature_update_requests alembic/model) — 완료.
-3. **Phase 2 T-206a/b/c** (scope resolver + repo + client) — 다음 진입점.
+3. **Phase 2 T-206b/c** (feature_update_repo + client) — 다음 진입점.
 4. **Phase 3 T-207a/d/e** (admin update-requests + ops + features 라우터) — T-206 후.
 5. **Phase 5 T-209a/b** (docker-compose + 기동) — 라우터 동작 후 통합.
 6. **Phase 4 T-208** (Dagster) — T-206/T-209 위, TripMate 이관과 병행.
