@@ -2,6 +2,28 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-02 (codex) — krtour-map Dagster Feature ETL 1차 구현
+
+**작업**: 사용자 지시 — TripMate 구현을 참고하지 않고 krtour-map 자체 Dagster로
+feature update/ETL을 관리하도록 1차 code location과 검증 경로 구현.
+
+- **Dagster 패키지**: `packages/krtour-map-dagster/` 신설. `dagster dev -m
+  krtour.map_dagster.definitions` 진입점과 Feature 적재 asset 9종을 등록. 메인
+  `krtour.map` 패키지는 Dagster import 없음.
+- **ETL 흐름**: provider API wrapper를 새로 만들지 않고, Dagster resource가 제공한
+  provider record iterable을 기존 변환 함수(`cultural_festivals_to_bundles`,
+  `stations_to_bundles`, `rest_areas_to_bundles`, `traffic_notices_to_bundles`,
+  `heritage_*_to_bundles`, `license_records_to_bundles`,
+  `knps_*_records_to_bundles`)에 전달. 이후 주소/좌표 검증을 거쳐
+  `AsyncKrtourMapClient.load_feature_bundles`로 PostGIS 적재.
+- **주소/좌표 검증**: 좌표가 있는 bundle은 kraddr-geo reverse 결과의 `bjd_code`가
+  있어야 하며, provider 주소 문자열과 reverse 행정구역명이 다르면 적재 전 실패.
+- **검증 추가**: Dagster definitions smoke/unit test와 실제 PostGIS 통합 테스트
+  추가. 통합 테스트는 9개 asset runner를 Dagster context로 실행하고 feature/source
+  9건 커밋, `coord_5179` SRID, `legal_dong_code`/`sigungu_code` 적재를 확인.
+- **CI**: `krtour-map-dagster` editable install, package unit pytest, ruff/mypy 대상에
+  Dagster 패키지 추가.
+
 ## 2026-06-02 (codex) — kraddr-geo `/v2/regions/within-radius` 재정합
 
 **작업**: 사용자 지시 — kraddr-geo repo의 최신 REST v2 계약을 다시 확인하고,

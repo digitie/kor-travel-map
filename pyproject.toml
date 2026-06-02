@@ -149,10 +149,10 @@ plugins = ["pydantic.mypy"]
 # ADR-022 — krtour는 PEP 420 implicit namespace이므로 명시적으로 활성화.
 # pip install -e . 후에도 mypy는 namespace package를 자동 인식 못함.
 # PR#35 (2026-05-27) — debug-ui 패키지가 같은 `krtour` namespace를 공유하므로
-# mypy_path에 두 src 트리 모두 등록.
+# mypy_path에 세 src 트리 모두 등록.
 namespace_packages = true
 explicit_package_bases = true
-mypy_path = "src:packages/krtour-map-admin/src"
+mypy_path = "src:packages/krtour-map-admin/src:packages/krtour-map-dagster/src"
 
 # shapely는 type stub를 제공하지 않음 (pyproj와 달리 py.typed 없음).
 # core/geometry.py가 WKT 파싱·centroid에 사용 — import-untyped만 무시.
