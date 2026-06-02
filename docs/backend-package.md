@@ -179,7 +179,7 @@ class KrtourMapSettings(BaseSettings):
     object_store_public_base_url: str | None = None
 
     # 주소 보강 (kraddr-geo REST v2)
-    kraddr_geo_base_url: str | None = "http://127.0.0.1:8888"
+    kraddr_geo_base_url: str | None = "http://127.0.0.1:9001"
 
     # 로그
     log_level: str = "INFO"

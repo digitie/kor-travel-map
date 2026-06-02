@@ -84,7 +84,7 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
   `tl_scco_sig`(+ctprvn/emd) PostGIS 교차. 반환 `code`(sig_cd)는 krtour-map
   `sigungu_code`와 동일 체계(D-11 확인) — 매핑 불필요. T-206a `resolve_sigungu_by_
   radius`의 선행 의존.
-- **T-206b** `infra/feature_update_repo.py` 신규 — 요청 생명주기:
+- **T-206b** ✅ `infra/feature_update_repo.py` 신규 — 요청 생명주기:
   - `enqueue_feature_update_request(session, scope, providers, dataset_keys,
     update_policy, run_mode, priority, dry_run, operator, reason) -> FeatureUpdateRequest`
     — scope 해석(matched_scope 계산) → dry_run이면 거기서 반환, 아니면 row INSERT +
@@ -93,6 +93,9 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
     `FOR UPDATE SKIP LOCKED` + advisory lock(ADR-039). Dagster sensor가 호출.
   - `start/finish_update_request(session, request_id, state, dagster_run_id, error)`.
   - `get/list_update_requests(...)` — keyset cursor 페이지네이션(D-10).
+  - 구현 메모: dry-run은 `FeatureUpdateRequestPreview`로 반환하며 DB row/import job을
+    만들지 않는다. 실제 enqueue/claim/start/finish/cancel은 연결 import job 상태를
+    같은 transaction 안에서 함께 갱신한다.
 - **T-206c** `AsyncKrtourMapClient` 메서드 — `enqueue_feature_update_request` /
   `get_update_request` / `list_update_requests` / `cancel_update_request` (각 자체
   transaction). 기존 `run_*_job` 패턴 일관.

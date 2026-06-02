@@ -1,0 +1,533 @@
+"""``ops.feature_update_requests`` lifecycle repository (ADR-045 T-206b).
+
+Feature update request는 admin/OpenAPI가 만든 지리 범위/provider 범위 갱신
+요청을 Dagster/import job과 연결하는 큐다. 본 모듈은 raw SQL만 사용하고
+commit은 호출자에게 맡긴다(ADR-004).
+
+흐름:
+1. ``enqueue_feature_update_request`` — scope dry-run 해석 후, 실제 요청이면
+   ``ops.import_jobs``와 ``ops.feature_update_requests``를 같은 transaction에 생성.
+2. ``claim_next_update_request`` — priority/created_at 순서로 queued 요청 1건을
+   ``running`` 전이(``FOR UPDATE SKIP LOCKED`` + advisory lock).
+3. ``start_update_request`` / ``finish_update_request`` — Dagster run id와 terminal
+   상태를 request/import job 양쪽에 반영.
+4. ``list_update_requests`` — D-10 keyset cursor(``created_at, request_id``) 기반.
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+from dataclasses import dataclass
+from datetime import datetime
+from typing import TYPE_CHECKING, Any, Final
+from uuid import uuid4
+
+from sqlalchemy import text
+
+from krtour.map.infra.advisory_lock import try_advisory_lock
+from krtour.map.infra.jobs_repo import enqueue_import_job
+from krtour.map.infra.scope_repo import (
+    SigunguByRadiusResolver,
+    count_features_matching_scope,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+__all__ = [
+    "FEATURE_UPDATE_JOB_KIND",
+    "FEATURE_UPDATE_QUEUE_ADVISORY_KEY",
+    "FeatureUpdateRequest",
+    "FeatureUpdateRequestPreview",
+    "FeatureUpdateRequestPage",
+    "enqueue_feature_update_request",
+    "claim_next_update_request",
+    "start_update_request",
+    "finish_update_request",
+    "cancel_update_request",
+    "get_update_request",
+    "list_update_requests",
+]
+
+FEATURE_UPDATE_JOB_KIND: Final[str] = "feature_update_request"
+FEATURE_UPDATE_QUEUE_ADVISORY_KEY: Final[str] = "krtour.map:feature_update:claim"
+
+_RUN_MODES: Final[frozenset[str]] = frozenset({"queued", "now"})
+_TERMINAL_STATES: Final[frozenset[str]] = frozenset(
+    {"done", "failed", "cancelled"}
+)
+_MAX_LIST_LIMIT: Final[int] = 200
+
+_RETURN_COLUMNS: Final[str] = (
+    "request_id, scope_type, scope, providers, dataset_keys, update_policy, "
+    "run_mode, priority, state, dry_run, matched_scope, job_id, dagster_run_id, "
+    "operator, reason, error_message, created_at, started_at, finished_at, updated_at"
+)
+
+
+@dataclass(frozen=True)
+class FeatureUpdateRequest:
+    """DB에 저장된 ``ops.feature_update_requests`` 행."""
+
+    request_id: str
+    scope_type: str
+    scope: dict[str, Any]
+    providers: tuple[str, ...]
+    dataset_keys: tuple[str, ...]
+    update_policy: dict[str, Any]
+    run_mode: str
+    priority: int
+    state: str
+    dry_run: bool
+    matched_scope: dict[str, Any]
+    job_id: str | None
+    dagster_run_id: str | None
+    operator: str | None
+    reason: str | None
+    error_message: str | None
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
+class FeatureUpdateRequestPreview:
+    """Dry-run 결과. DB row/import job을 만들지 않는다."""
+
+    scope_type: str
+    scope: dict[str, Any]
+    providers: tuple[str, ...]
+    dataset_keys: tuple[str, ...]
+    update_policy: dict[str, Any]
+    run_mode: str
+    priority: int
+    matched_scope: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class FeatureUpdateRequestPage:
+    """Keyset cursor 기반 목록 응답."""
+
+    items: tuple[FeatureUpdateRequest, ...]
+    next_cursor: str | None
+
+
+def _json_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, str):
+        value = json.loads(value)
+    return dict(value) if value else {}
+
+
+def _json_str_tuple(value: Any) -> tuple[str, ...]:
+    if isinstance(value, str):
+        value = json.loads(value)
+    if not value:
+        return ()
+    return tuple(str(item) for item in value)
+
+
+def _row_to_request(row: Any) -> FeatureUpdateRequest:
+    return FeatureUpdateRequest(
+        request_id=str(row.request_id),
+        scope_type=str(row.scope_type),
+        scope=_json_dict(row.scope),
+        providers=_json_str_tuple(row.providers),
+        dataset_keys=_json_str_tuple(row.dataset_keys),
+        update_policy=_json_dict(row.update_policy),
+        run_mode=str(row.run_mode),
+        priority=int(row.priority),
+        state=str(row.state),
+        dry_run=bool(row.dry_run),
+        matched_scope=_json_dict(row.matched_scope),
+        job_id=str(row.job_id) if row.job_id is not None else None,
+        dagster_run_id=row.dagster_run_id,
+        operator=row.operator,
+        reason=row.reason,
+        error_message=row.error_message,
+        created_at=row.created_at,
+        started_at=row.started_at,
+        finished_at=row.finished_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _scope_type(scope: Mapping[str, Any]) -> str:
+    scope_type = scope.get("type")
+    if not isinstance(scope_type, str) or not scope_type:
+        raise ValueError("scope requires non-empty type")
+    return scope_type
+
+
+def _normalize_strings(values: Sequence[str] | None) -> tuple[str, ...]:
+    if values is None:
+        return ()
+    return tuple(str(item) for item in values if str(item))
+
+
+def _validate_run_mode(run_mode: str) -> None:
+    if run_mode not in _RUN_MODES:
+        raise ValueError(f"run_mode must be one of {sorted(_RUN_MODES)}")
+
+
+def _json_param(value: Mapping[str, Any] | Sequence[str]) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def _encode_cursor(item: FeatureUpdateRequest) -> str:
+    payload = {
+        "created_at": item.created_at.isoformat(),
+        "request_id": item.request_id,
+    }
+    raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _decode_cursor(cursor: str | None) -> tuple[datetime | None, str | None]:
+    if cursor is None:
+        return None, None
+    padded = cursor + ("=" * (-len(cursor) % 4))
+    try:
+        payload = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
+        created_at = datetime.fromisoformat(str(payload["created_at"]))
+        request_id = str(payload["request_id"])
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("invalid feature update request cursor") from exc
+    return created_at, request_id
+
+
+_INSERT_REQUEST_SQL: Final[str] = f"""
+INSERT INTO ops.feature_update_requests (
+    request_id, scope_type, scope, providers, dataset_keys, update_policy,
+    run_mode, priority, state, dry_run, matched_scope, job_id, operator, reason
+) VALUES (
+    :request_id, :scope_type, CAST(:scope AS jsonb), CAST(:providers AS jsonb),
+    CAST(:dataset_keys AS jsonb), CAST(:update_policy AS jsonb),
+    :run_mode, :priority, 'queued', false, CAST(:matched_scope AS jsonb),
+    :job_id, :operator, :reason
+)
+RETURNING {_RETURN_COLUMNS}
+"""
+
+_GET_REQUEST_SQL: Final[str] = f"""
+SELECT {_RETURN_COLUMNS}
+FROM ops.feature_update_requests
+WHERE request_id = :request_id
+"""
+
+_CLAIM_REQUEST_SQL: Final[str] = f"""
+UPDATE ops.feature_update_requests
+SET state = 'running',
+    started_at = COALESCE(started_at, now()),
+    updated_at = now()
+WHERE request_id = (
+    SELECT request_id
+    FROM ops.feature_update_requests
+    WHERE state = 'queued' AND dry_run IS false
+    ORDER BY priority DESC, created_at, request_id
+    FOR UPDATE SKIP LOCKED
+    LIMIT 1
+)
+RETURNING {_RETURN_COLUMNS}
+"""
+
+_START_REQUEST_SQL: Final[str] = f"""
+UPDATE ops.feature_update_requests
+SET state = 'running',
+    started_at = COALESCE(started_at, now()),
+    dagster_run_id = COALESCE(:dagster_run_id, dagster_run_id),
+    updated_at = now()
+WHERE request_id = :request_id
+  AND state IN ('queued', 'running')
+RETURNING {_RETURN_COLUMNS}
+"""
+
+_FINISH_REQUEST_SQL: Final[str] = f"""
+UPDATE ops.feature_update_requests
+SET state = :state,
+    dagster_run_id = COALESCE(:dagster_run_id, dagster_run_id),
+    error_message = :error_message,
+    finished_at = now(),
+    updated_at = now()
+WHERE request_id = :request_id
+  AND state IN ('queued', 'running')
+RETURNING {_RETURN_COLUMNS}
+"""
+
+_START_IMPORT_JOB_SQL: Final[str] = """
+UPDATE ops.import_jobs
+SET state = 'running',
+    started_at = COALESCE(started_at, now()),
+    heartbeat_at = now(),
+    current_stage = COALESCE(:current_stage, current_stage)
+WHERE job_id = :job_id
+  AND state = 'queued'
+"""
+
+_FINISH_IMPORT_JOB_SQL: Final[str] = """
+UPDATE ops.import_jobs
+SET state = :state,
+    finished_at = now(),
+    heartbeat_at = now(),
+    error_message = :error_message,
+    progress = CASE WHEN :state = 'done' THEN 100 ELSE progress END
+WHERE job_id = :job_id
+  AND state IN ('queued', 'running')
+"""
+
+_LIST_REQUESTS_SQL: Final[str] = f"""
+SELECT {_RETURN_COLUMNS}
+FROM ops.feature_update_requests
+WHERE (CAST(:state AS text) IS NULL OR state = CAST(:state AS text))
+  AND (
+    CAST(:cursor_created_at AS timestamptz) IS NULL
+    OR (created_at, request_id) < (
+        CAST(:cursor_created_at AS timestamptz),
+        CAST(:cursor_request_id AS uuid)
+    )
+  )
+ORDER BY created_at DESC, request_id DESC
+LIMIT :limit_plus_one
+"""
+
+
+async def _start_import_job(
+    session: AsyncSession,
+    *,
+    job_id: str | None,
+    current_stage: str,
+) -> None:
+    if job_id is None:
+        return
+    await session.execute(
+        text(_START_IMPORT_JOB_SQL),
+        {"job_id": job_id, "current_stage": current_stage},
+    )
+
+
+async def _finish_import_job(
+    session: AsyncSession,
+    *,
+    job_id: str | None,
+    state: str,
+    error_message: str | None,
+) -> None:
+    if job_id is None:
+        return
+    await session.execute(
+        text(_FINISH_IMPORT_JOB_SQL),
+        {"job_id": job_id, "state": state, "error_message": error_message},
+    )
+
+
+async def enqueue_feature_update_request(
+    session: AsyncSession,
+    *,
+    scope: Mapping[str, Any],
+    providers: Sequence[str] | None = None,
+    dataset_keys: Sequence[str] | None = None,
+    update_policy: Mapping[str, Any] | None = None,
+    run_mode: str = "queued",
+    priority: int = 50,
+    dry_run: bool = False,
+    operator: str | None = None,
+    reason: str | None = None,
+    sigungu_resolver: SigunguByRadiusResolver | None = None,
+) -> FeatureUpdateRequest | FeatureUpdateRequestPreview:
+    """요청을 해석하고, 실제 실행 요청이면 request/import job row를 생성한다."""
+    _validate_run_mode(run_mode)
+    scope_payload = dict(scope)
+    scope_type = _scope_type(scope_payload)
+    provider_values = _normalize_strings(providers)
+    dataset_values = _normalize_strings(dataset_keys)
+    policy = dict(update_policy) if update_policy else {}
+    resolution = await count_features_matching_scope(
+        session, scope_payload, sigungu_resolver=sigungu_resolver
+    )
+    matched_scope = resolution.matched_scope()
+
+    if dry_run:
+        return FeatureUpdateRequestPreview(
+            scope_type=scope_type,
+            scope=scope_payload,
+            providers=provider_values,
+            dataset_keys=dataset_values,
+            update_policy=policy,
+            run_mode=run_mode,
+            priority=priority,
+            matched_scope=matched_scope,
+        )
+
+    request_id = str(uuid4())
+    job = await enqueue_import_job(
+        session,
+        kind=FEATURE_UPDATE_JOB_KIND,
+        payload={
+            "request_id": request_id,
+            "scope_type": scope_type,
+            "scope": scope_payload,
+            "providers": list(provider_values),
+            "dataset_keys": list(dataset_values),
+            "update_policy": policy,
+            "run_mode": run_mode,
+            "matched_scope": matched_scope,
+        },
+    )
+    row = (
+        await session.execute(
+            text(_INSERT_REQUEST_SQL),
+            {
+                "request_id": request_id,
+                "scope_type": scope_type,
+                "scope": _json_param(scope_payload),
+                "providers": _json_param(list(provider_values)),
+                "dataset_keys": _json_param(list(dataset_values)),
+                "update_policy": _json_param(policy),
+                "run_mode": run_mode,
+                "priority": priority,
+                "matched_scope": _json_param(matched_scope),
+                "job_id": job.job_id,
+                "operator": operator,
+                "reason": reason,
+            },
+        )
+    ).one()
+    return _row_to_request(row)
+
+
+async def claim_next_update_request(
+    session: AsyncSession,
+) -> FeatureUpdateRequest | None:
+    """가장 높은 priority의 queued 요청 1건을 running으로 claim한다."""
+    async with try_advisory_lock(
+        session, FEATURE_UPDATE_QUEUE_ADVISORY_KEY
+    ) as acquired:
+        if not acquired:
+            return None
+        row = (await session.execute(text(_CLAIM_REQUEST_SQL))).one_or_none()
+        if row is None:
+            return None
+        request = _row_to_request(row)
+        await _start_import_job(
+            session, job_id=request.job_id, current_stage="claimed"
+        )
+        return request
+
+
+async def start_update_request(
+    session: AsyncSession,
+    request_id: str,
+    *,
+    dagster_run_id: str | None = None,
+) -> FeatureUpdateRequest | None:
+    """queued/running 요청을 running으로 만들고 Dagster run id를 기록한다."""
+    row = (
+        await session.execute(
+            text(_START_REQUEST_SQL),
+            {"request_id": request_id, "dagster_run_id": dagster_run_id},
+        )
+    ).one_or_none()
+    if row is None:
+        return None
+    request = _row_to_request(row)
+    await _start_import_job(
+        session, job_id=request.job_id, current_stage="started"
+    )
+    return request
+
+
+async def finish_update_request(
+    session: AsyncSession,
+    request_id: str,
+    *,
+    state: str = "done",
+    dagster_run_id: str | None = None,
+    error_message: str | None = None,
+) -> FeatureUpdateRequest | None:
+    """queued/running 요청을 terminal 상태로 닫고 import job도 같은 상태로 닫는다."""
+    if state not in _TERMINAL_STATES:
+        raise ValueError(f"state must be one of {sorted(_TERMINAL_STATES)}")
+    row = (
+        await session.execute(
+            text(_FINISH_REQUEST_SQL),
+            {
+                "request_id": request_id,
+                "state": state,
+                "dagster_run_id": dagster_run_id,
+                "error_message": error_message,
+            },
+        )
+    ).one_or_none()
+    if row is None:
+        return None
+    request = _row_to_request(row)
+    await _finish_import_job(
+        session,
+        job_id=request.job_id,
+        state=state,
+        error_message=error_message,
+    )
+    return request
+
+
+async def cancel_update_request(
+    session: AsyncSession,
+    request_id: str,
+    *,
+    error_message: str | None = None,
+) -> FeatureUpdateRequest | None:
+    """queued/running 요청을 ``cancelled``로 닫는다."""
+    return await finish_update_request(
+        session,
+        request_id,
+        state="cancelled",
+        error_message=error_message,
+    )
+
+
+async def get_update_request(
+    session: AsyncSession,
+    request_id: str,
+) -> FeatureUpdateRequest | None:
+    """request id로 단건 조회."""
+    row = (
+        await session.execute(
+            text(_GET_REQUEST_SQL), {"request_id": request_id}
+        )
+    ).one_or_none()
+    return _row_to_request(row) if row is not None else None
+
+
+async def list_update_requests(
+    session: AsyncSession,
+    *,
+    state: str | None = None,
+    limit: int = 50,
+    cursor: str | None = None,
+) -> FeatureUpdateRequestPage:
+    """``created_at DESC, request_id DESC`` keyset cursor로 요청 목록을 조회한다."""
+    if limit <= 0:
+        raise ValueError("limit must be greater than 0")
+    effective_limit = min(limit, _MAX_LIST_LIMIT)
+    cursor_created_at, cursor_request_id = _decode_cursor(cursor)
+    rows = (
+        await session.execute(
+            text(_LIST_REQUESTS_SQL),
+            {
+                "state": state,
+                "cursor_created_at": cursor_created_at,
+                "cursor_request_id": cursor_request_id,
+                "limit_plus_one": effective_limit + 1,
+            },
+        )
+    ).all()
+    requests = tuple(_row_to_request(row) for row in rows[:effective_limit])
+    next_cursor = (
+        _encode_cursor(requests[-1])
+        if len(rows) > effective_limit and requests
+        else None
+    )
+    return FeatureUpdateRequestPage(items=requests, next_cursor=next_cursor)

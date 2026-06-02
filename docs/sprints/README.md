@@ -13,7 +13,7 @@
 
 > **현 위치 (2026-06-02)**: Sprint 4(4a+4b) 종료 후 PR#149까지 merged.
 > coverage gate `fail_under=80`(실측 94.12%), geocoding live 기본 포트는
-> `http://127.0.0.1:8888`(v2 `POST /v2/{reverse,geocode}`), frontend는 Next.js 16 +
+> `http://127.0.0.1:9001`(v2 `POST /v2/{reverse,geocode}`), frontend는 Next.js 16 +
 > `maplibre-vworld-js#v0.1.2`. 2026-06-01 ADR-045로 운영 모델이 Docker 독립 프로그램
 > + 독립 DB/Dagster + TripMate OpenAPI 연동으로 전환됐고, D-1~D-16 의사결정은
 > 전부 완료됐다. ADR-046에 따라 구 모델 호환 shim은 만들지 않는다. 다음 =
