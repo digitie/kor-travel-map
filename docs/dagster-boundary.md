@@ -4,13 +4,14 @@
 
 핵심 변경:
 
-- Dagster는 더 이상 TripMate `apps/etl/` 책임이 아니다.
+- Dagster는 krtour-map 독립 프로그램 책임이다.
 - krtour-map Docker 프로그램이 자체 Dagster webserver/daemon/metadata DB를 가진다.
-- TripMate는 Dagster를 직접 제어하지 않고 krtour-map OpenAPI를 호출한다.
+- 외부 서비스는 krtour-map Dagster를 직접 제어하지 않고 krtour-map OpenAPI를
+  호출한다. 각 외부 서비스가 자체 Dagster를 운영하더라도 krtour-map Dagster와
+  별개다.
 - FastAPI admin API는 feature update request를 만들고, Dagster가 이를 실행한다.
 - 메인 라이브러리 `krtour.map` 자체는 여전히 Dagster를 import하지 않는다.
-  Dagster 코드는 독립 프로그램 패키지 또는 별도 `packages/krtour-map-dagster/`
-  후보에 둔다.
+  Dagster 코드는 별도 패키지 `packages/krtour-map-dagster/`에 둔다.
 
 ## 1. 책임 매트릭스
 
@@ -36,15 +37,41 @@
 | **import_jobs 큐 관리** | **본 라이브러리 (`infra/jobs_repo.py`)** |
 | Dedup scoring / Record Linkage | 본 라이브러리 (`core/scoring.py`) |
 | 정합성 검증 룰 (F1~F8) | 본 라이브러리 (`core/integrity.py`, T-201) |
-| TripMate 사용자/여행계획/POI 도메인 | TripMate |
-| TripMate에서 feature update 요청 | krtour-map OpenAPI 호출 |
+| 외부 사용자/여행계획/POI 도메인 | 외부 서비스 |
+| 외부 서비스에서 feature update 요청 | krtour-map OpenAPI 호출 |
 
 요약:
 - **본 라이브러리**: 변환 + 저장 + 검증 (Dagster 없이도 호출 가능한 함수)
 - **krtour-map API**: OpenAPI, admin UI, queue 생성, 진행 상태 조회/취소
 - **krtour-map Dagster**: provider sync, feature update, offline upload load,
   consistency/dedup jobs 실행
-- **TripMate**: OpenAPI client 소비자
+- **외부 서비스**: OpenAPI client 소비자
+
+## 1.1 현재 구현된 Feature 적재 asset
+
+`packages/krtour-map-dagster`는 1차로 이미 구현·검증된 provider 변환 함수만
+Dagster asset으로 연결한다. provider API 호출은 resource가 record iterable을
+제공하고, asset은 `raw record → FeatureBundle → 주소/좌표 검증 → PostGIS 적재`
+흐름만 소유한다.
+
+| asset 이름 | resource key | dataset_key | group |
+|-----------|--------------|-------------|-------|
+| `feature_event_datagokr_cultural_festivals` | `datagokr_cultural_festivals` | `datagokr_cultural_festivals` | `features_event` |
+| `feature_place_opinet_stations` | `opinet_stations` | `opinet_fuel_station_details` | `features_place` |
+| `feature_place_krex_rest_areas` | `krex_rest_areas` | `krex_rest_areas` | `features_place` |
+| `feature_notice_krex_traffic_notices` | `krex_traffic_notices` | `krex_traffic_notices` | `features_notice` |
+| `feature_place_krheritage_items` | `krheritage_items` | `krheritage_heritage_features` | `features_place` |
+| `feature_event_krheritage_events` | `krheritage_events` | `krheritage_event_list` | `features_event` |
+| `feature_place_mois_licenses` | `mois_license_records` | `mois_license_features_bulk` 기본 | `features_place` |
+| `feature_place_knps_points` | `knps_point_records` | `knps_point_dataset_key` resource | `features_place` |
+| `feature_geometry_knps_records` | `knps_geometry_records` | `knps_geometry_dataset_key` resource | `features_geometry` |
+
+공통 resource:
+
+- `krtour_map_client`: `AsyncKrtourMapClient`.
+- `reverse_geocoder`: kraddr-geo REST v2 기반 `ReverseGeocoder`.
+- `fetched_at`: batch 기준 aware `datetime`(없으면 KST 현재 시각).
+- `strict_address`: 기본 `True`. 주소/좌표 검증 error가 있으면 적재 전 중단.
 
 ## 2. 표준 Job/Asset 패턴
 
@@ -218,7 +245,7 @@ def visitkorea_resource(init_context):
 
 ## 7.1 OpenAPI 기반 feature update queue
 
-Admin UI 또는 TripMate는 Dagster를 직접 호출하지 않고 다음 OpenAPI를 호출한다.
+Admin UI 또는 외부 서비스는 Dagster를 직접 호출하지 않고 다음 OpenAPI를 호출한다.
 
 ```http
 POST /admin/feature-update-requests

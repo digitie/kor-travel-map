@@ -33,7 +33,10 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-          cache-dependency-path: pyproject.toml
+          cache-dependency-path: |
+            pyproject.toml
+            packages/krtour-map-admin/pyproject.toml
+            packages/krtour-map-dagster/pyproject.toml
 
       - name: Install package + dev/geo extras
         run: |
@@ -48,6 +51,12 @@ jobs:
         run: |
           pip install -e packages/krtour-map-admin
 
+      - name: Install krtour-map-dagster (editable)
+        # ADR-045: Dagster code location은 krtour-map monorepo가 소유한다.
+        # 메인 라이브러리는 Dagster를 import하지 않으므로 별도 패키지로 설치한다.
+        run: |
+          pip install -e packages/krtour-map-dagster
+
       - name: Run unit tests (without integration)
         run: |
           pytest tests/ --ignore=tests/integration -q \
@@ -58,6 +67,10 @@ jobs:
         # 자체 회귀 차단용. fail이면 PR 머지 차단.
         run: |
           pytest packages/krtour-map-admin/tests/ -q
+
+      - name: Run krtour-map-dagster unit tests
+        run: |
+          pytest packages/krtour-map-dagster/tests/ -q
 
       - name: Run integration tests (testcontainers PostGIS via Docker)
         # Docker는 ubuntu-latest runner에서 자동 제공.

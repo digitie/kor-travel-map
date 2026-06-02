@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-02 Codex 작업 메모 — krtour-map Dagster Feature ETL 1차 구현
+
+TripMate 구현을 참고하지 않고 krtour-map 자체 Dagster code location
+`packages/krtour-map-dagster/`를 추가했다. 메인 라이브러리 `krtour.map`은 계속
+Dagster를 import하지 않으며, Dagster 패키지가 provider record resource를 받아 기존
+provider 변환 함수 9종을 호출하고 `FeatureBundle` 주소/좌표 검증 후
+`AsyncKrtourMapClient.load_feature_bundles`로 PostGIS에 적재한다.
+
+1차 asset: datagokr 문화축제, OpiNet 주유소, KREX 휴게소/교통공지, krheritage
+유산/행사, MOIS 인허가, KNPS point/geometry. 통합 테스트는 Dagster context를 통해
+9개 asset runner를 실행하고 `feature.features`/`provider_sync.source_records`
+커밋과 `coord_5179`/행정코드 적재를 검증한다.
+
 ## 2026-06-02 Codex 작업 메모 — kraddr-geo 반경 endpoint 재정합
 
 kraddr-geo `origin/main` 기준 `POST /v2/regions/within-radius`가 구현되어 있음을
