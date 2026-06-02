@@ -77,7 +77,8 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
   - `count_features_matching_scope(session, scope)` — **dry_run/ matched_scope용**
     (write 없이 count + sigungu_codes).
 - **T-206a-geo** (형제 repo `python-kraddr-geo`, 별도 PR) — `POST /v2/regions/
-  within-radius` 신규 엔드포인트. 요청/응답/구현은 `adr045-open-decisions.md` D-11.
+  within-radius` 신규 엔드포인트. 요청/응답/구현 정본은 `docs/regions-within-radius.md`
+  (요약은 `adr045-open-decisions.md` D-11).
   `tl_scco_sig`(+ctprvn/emd) PostGIS 교차. 반환 `code`(sig_cd)는 krtour-map
   `sigungu_code`와 동일 체계(D-11 확인) — 매핑 불필요. T-206a `resolve_sigungu_by_
   radius`의 선행 의존.

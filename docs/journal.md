@@ -2,6 +2,27 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-02 (claude) — ADR-045 문서 정합 2차 패스 (cross-link/stale 정정)
+
+**작업**: 사용자 지시 — 최신 pull 후 문서 전체 재점검, 충돌·보완 반영 후 PR/머지.
+codex `49d11cb`(ADR-045 docs 대규모 정합 + ADR-046 추가 + `regions-within-radius.md`
+신설) 이후 잔여 불일치를 병렬 감사(Explore ×3)로 수집, 실제 항목만 정정.
+
+- **tripmate-rest-api.md**: 헤더·§6의 stale "미확정 D-1/D-3" 제거(전부 결정됨
+  2026-06-02). D-1(infra+`X-Krtour-Service-Token`)/D-3(SemVer+이원 schema)/D-11을
+  결정 목록으로 이동, D-11 정본을 `regions-within-radius.md`로 cross-link.
+- **agent-guide.md**: ADR 카운트 내부 불일치 정정(16행 "001~044/후보 045" →
+  "001~046/후보 047", 58행 "다음 번호 ADR-044" → "ADR-047", 117/124/323행과 정합).
+- **postgres-schema.md §3.3**: `ops.feature_update_requests`(ADR-045 계획, alembic
+  미구현) 카탈로그 행 추가 — DDL 정본은 openapi-admin-contract §6.1 + data-model §9.8.
+- **adr045-open-decisions.md D-11 / adr045-standalone-plan.md T-206a-geo**:
+  kraddr-geo `POST /v2/regions/within-radius` 정본을 `regions-within-radius.md`로 명시.
+- **debug-ui-package.md**: 파일명 legacy(구 krtour-map-debug-ui) 각주 추가, 내용은
+  현 `krtour-map-admin` 정본임을 명기.
+- **확인(수정 불필요)**: Sprint 4 완료 마커·패키지 rename·테스트 카운트·D-1~D-16
+  결정 상태는 모든 entry doc에서 이미 일관. `debug-ui-admin-workflows.md` 존재 확인
+  (감사 false-positive 기각). journal/2026-05-29 report의 옛 ADR 카운트는 역사적 기록.
+
 ## 2026-06-02 (codex) — ADR-045 D-11 POI 반경 행정구역 조회 + admin 디버깅 UI
 
 **작업**: 사용자 지시 — POI 좌표 기준 주변 `n` km에 포함/교차하는 시군구·읍면동을

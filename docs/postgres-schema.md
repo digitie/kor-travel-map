@@ -74,6 +74,7 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 | `data_integrity_violations` | `violation_key UUID` | violation_type, severity (info/warning/error/critical), payload, status |
 | `api_call_log` | `id BIGSERIAL` | provider, endpoint, status, latency_ms, occurred_at; BRIN(occurred_at) |
 | `feature_consistency_reports` | `report_id UUID` | ADR-033 Phase 1; batch_id, started_at/finished_at, severity_max CHECK(OK/WARN/ERROR), cases/summary JSONB |
+| `feature_update_requests` | `request_id UUID` | **계획(ADR-045, alembic 미구현)** — scope_type/scope JSONB, providers·dataset_keys JSONB, run_mode (queued/now), state (queued/running/done/failed/cancelled — import_jobs와 동일 전이), job_id FK, operator, reason, error_message. DDL 정본: `docs/openapi-admin-contract.md` §6.1 + `docs/data-model.md` §9.8 |
 
 ## 4. 인덱스 카탈로그
 

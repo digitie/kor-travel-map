@@ -1,5 +1,9 @@
 # debug-ui-package.md — `krtour-map-admin` 사양
 
+> 파일명 `debug-ui-package.md`는 legacy(구 `krtour-map-debug-ui`, PR#148에서
+> `krtour-map-admin`으로 rename). 파일 경로를 참조하는 문서가 있어 파일명은 유지하며,
+> 내용은 현재 `krtour-map-admin` 패키지 정본이다.
+
 본 문서는 `python-krtour-map` 저장소 내 별도 Python 패키지
 `krtour-map-admin`의 사양 reference다. 결정 근거는 `docs/decisions.md`의
 ADR-005(인증 없음, 내부망 전용) + ADR-020(별도 패키지 분리) + ADR-045(Docker
