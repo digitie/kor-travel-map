@@ -261,9 +261,11 @@ feature를 업데이트한다.
 
 처리:
 
-- 행정경계 polygon 테이블이 준비되어 있으면 polygon과 반경 원을 PostGIS로 교차
-  계산한다.
-- 행정경계 테이블이 없으면 초기 구현은 `feature_sigungu` 방식으로 fallback한다.
+- 행정경계 polygon은 krtour-map DB가 아니라 kraddr-geo가 소유한다.
+- krtour-map은 kraddr-geo REST v2 `POST /v2/regions/within-radius`를 호출해
+  반경과 교차하는 `sigungu.code` 목록을 받는다.
+- kraddr-geo가 반환하는 `sigungu.code`/`sig_cd`는 krtour-map `sigungu_code`와
+  같은 5자리 체계이므로 별도 매핑 없이 사용한다.
 - 계산된 `sigungu_code` 목록을 request payload에 고정 저장해 재실행 시 결과 drift를
   줄인다.
 
@@ -372,7 +374,7 @@ queued 또는 running 요청을 취소 요청 상태로 둔다. running job은 c
 즉시 실행(`run_mode=now`)은 API가 Dagster run을 바로 만들 수 있다. 그래도 request와
 job row는 먼저 저장해 추적성과 취소를 유지한다.
 
-### 6.1 권장 테이블
+### 6.1 테이블
 
 ```sql
 CREATE TABLE ops.feature_update_requests (
@@ -415,6 +417,10 @@ CREATE INDEX idx_feature_update_created
 CREATE INDEX idx_feature_update_job
   ON ops.feature_update_requests (job_id) WHERE job_id IS NOT NULL;
 ```
+
+구현 상태: Alembic `0008_feature_update_requests`와
+`FeatureUpdateRequestRow`가 이 DDL을 반영한다. 요청 생성/조회/claim repository와
+admin API는 T-206/T-207에서 별도 구현한다.
 
 ## 7. Provider 실행 API와의 관계
 

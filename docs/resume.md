@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-03 Codex 작업 메모 — feature update request 스키마
+
+ADR-045 T-205a로 `ops.feature_update_requests`를 Alembic `0008`과
+`FeatureUpdateRequestRow` ORM 매핑에 추가한다. 이 테이블은 OpenAPI/admin UI가 만든
+feature update request를 `ops.import_jobs`/Dagster run과 연결하기 위한 기반이다.
+
+이번 범위는 **스키마/매핑/DDL 검증**이다. `scope_type` 6종(`feature_ids`,
+`center_radius`, `sigungu_by_radius`, `bbox`, `provider_dataset`,
+`cache_target_keys`), `run_mode`(`queued`/`now`), 상태 전이
+(`queued`/`running`/`done`/`failed`/`cancelled`) CHECK, JSONB 기본값,
+`job_id ON DELETE SET NULL`, claim/list용 인덱스를 검증한다. scope resolver,
+enqueue/claim repository, admin API, Dagster sensor는 T-206/T-207/T-208 후속 PR로
+분리한다.
+
 ## 2026-06-02 Codex 작업 메모 — admin UI Dagster 운영 화면
 
 admin UI에 `/admin/dagster`를 추가했다. backend `GET /ops/dagster/summary`는
@@ -65,7 +79,7 @@ React Doctor, admin OpenAPI drift check, admin pytest, Windows Playwright e2e를
 ## 현재 상태
 
 **Sprint 4 (4a+4b) ✅ 완료 → Sprint 5 + ADR-045 독립 프로그램화 🟡 진행 중**
-(2026-06-02 기준). main 최신: `PR#156`. Sprint 4a
+(2026-06-03 기준). main 최신: `PR#158`. Sprint 4a
 (MOIS Step A bulk + Step B incremental cursor + `krtour-map dedup-merge` +
 `feature_merge_history` alembic 0007 + dedup FP 측정/운영 통계) + Sprint 4b
 (MOIS Step C/D + ADR-033 F4 + Place phone enrichment + coverage 75→80 + 에이전트
@@ -230,9 +244,10 @@ Sprint 4(4a+4b)는 아래 체크리스트대로 **전부 완료**(PR#133~#142). 
   `docs/dagster-boundary.md`.
 
 **1차 진입 task**(권장): T-205a(`feature_update_requests`
-alembic 0008) → T-206a/b(scope resolver + repo) → T-207a/e(admin update-requests +
-사용자 features 라우터) → T-209a/b(docker-compose). 그 다음 Sprint 5 provider
-(MOIS-sibling) + Phase 2 정합성. 세부는 `docs/sprints/SPRINT-5.md`.
+alembic 0008, 본 PR) → T-206a/b(scope resolver + repo) → T-206c(client) →
+T-207a/e(admin update-requests + 사용자 features 라우터) → T-208d/e(Dagster
+schedule/sensor). 그 다음 Sprint 5 provider(MOIS-sibling) + Phase 2 정합성.
+세부는 `docs/sprints/SPRINT-5.md`.
 
 ### Sprint 4 (4a+4b) 완료 체크리스트 (PR#133~#142, 2026-06-01)
 

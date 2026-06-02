@@ -45,11 +45,12 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
 > 모두 확정됨 — `adr045-open-decisions.md`. `feature_update_requests`는 §6.1 DDL
 > 그대로 진행한다.
 
-- **T-205a** `alembic 0008` + `FeatureUpdateRequestRow` — `ops.feature_update_requests`
+- **T-205a** ✅ `alembic 0008` + `FeatureUpdateRequestRow` — `ops.feature_update_requests`
   생성. 컬럼/CHECK/인덱스는 `openapi-admin-contract.md §6.1` DDL 그대로
   (scope_type/scope JSONB/providers/dataset_keys/update_policy/run_mode/priority/
   state/dry_run/matched_scope/job_id FK/dagster_run_id/operator/reason/error/
-  타임스탬프). models.py에 ORM row 추가(ImportJobRow 패턴).
+  타임스탬프). models.py에 ORM row 추가(ImportJobRow 패턴). T-205a는 schema/ORM/
+  DDL 검증까지 완료하고, repo/client/API는 T-206/T-207에서 분리한다.
 - **T-205b** ~~`feature.sigungu_boundaries` 테이블~~ **취소** — D-11 결정: 시군구
   경계는 **kraddr-geo가 소유**(`tl_scco_sig`), krtour-map은 REST 호출만(T-206a /
   T-206a-geo). krtour-map에 경계 테이블 신설하지 않는다.
@@ -211,8 +212,8 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
 ## 8. 권장 진행 순서 (의존)
 
 1. **의사결정 확인**: D-1~D-16은 모두 확정됨 — `adr045-open-decisions.md`.
-2. **Phase 1 T-205a** (feature_update_requests alembic/model).
-3. **Phase 2 T-206a/b/c** (scope resolver + repo + client) — T-205a 후.
+2. **Phase 1 T-205a** (feature_update_requests alembic/model) — 완료.
+3. **Phase 2 T-206a/b/c** (scope resolver + repo + client) — 다음 진입점.
 4. **Phase 3 T-207a/d/e** (admin update-requests + ops + features 라우터) — T-206 후.
 5. **Phase 5 T-209a/b** (docker-compose + 기동) — 라우터 동작 후 통합.
 6. **Phase 4 T-208** (Dagster) — T-206/T-209 위, TripMate 이관과 병행.

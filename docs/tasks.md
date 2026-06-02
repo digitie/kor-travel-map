@@ -4,11 +4,12 @@
 
 ## 진행 중
 
-**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#156(Docker/고정 포트 표준화)
-까지 merged. 현재 작업은 admin UI Dagster 운영 화면 1차 보강이며, 후속 작업은 독립
-Dagster queue/schedule/sensor와 Sprint 5 provider 구현이다.
+**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#158(Docker 내부 Dagster URL
+분리)까지 merged. 현재 작업은 T-205a(`ops.feature_update_requests` alembic/ORM)
+이며, 후속 작업은 scope resolver/repository/admin API/Dagster sensor와 Sprint 5
+provider 구현이다.
 
-### 현재 기준 보강 필요 체크포인트 (2026-06-02)
+### 현재 기준 보강 필요 체크포인트 (2026-06-03)
 
 1. ~~**MOIS 4a 진입**~~ ✅ 완료 — MOIS Step A~D lifecycle + dedup-merge +
    `feature_merge_history`(alembic 0007) + dedup 운영 통계 + ADR-033 F4 +
@@ -32,11 +33,18 @@ Dagster queue/schedule/sensor와 Sprint 5 provider 구현이다.
 6. **admin Dagster 운영 화면** — `/admin/dagster`는 `GET /ops/dagster/summary` 자체
    요약 UI와 Dagster webserver embed를 제공한다. 실제 feature update queue/sensor
    연결은 후속 PR에서 진행한다.
-7. **검증 기준** — WSL unit/integration/live pytest + Windows Playwright e2e + GitHub
+7. **feature update request 큐** — T-205a에서 `ops.feature_update_requests` 테이블과
+   ORM 매핑을 먼저 추가한다. scope resolver/repo/API/sensor는 T-206/T-207/T-208로
+   분리한다.
+8. **검증 기준** — WSL unit/integration/live pytest + Windows Playwright e2e + GitHub
    Actions green 후 머지.
 
-## 최근 완료 (2026-05-31~2026-06-02)
+## 최근 완료 (2026-05-31~2026-06-03)
 
+- **PR#158** (merged 2026-06-02): Docker API 컨테이너의 Dagster URL을
+  `KRTOUR_MAP_DOCKER_ADMIN_DAGSTER_URL` 기본값(`http://dagster:9013`)로 분리.
+- **PR#157** (merged 2026-06-02): admin UI `/admin/dagster` + backend
+  `GET /ops/dagster/summary` + Dagster webserver embed.
 - **PR#156** (merged 2026-06-02): Docker 이미지/compose, API `9011`, admin UI
   `9012`, Dagster `9013` 고정 포트, `.env` key mapping, 기동/포트 종료 스크립트.
 - **PR#155** (merged 2026-06-02): krtour-map-owned Dagster Feature ETL 1차.
@@ -246,8 +254,9 @@ Dagster queue/schedule/sensor와 Sprint 5 provider 구현이다.
 > 각 task는 1-PR.
 
 **Phase 1 — DB 스키마 (alembic/models)**
-- [ ] T-205a — `alembic 0008` + `FeatureUpdateRequestRow` (`ops.feature_update_requests`,
-  DDL은 `openapi-admin-contract.md §6.1`). 결정 없이 가능.
+- [x] T-205a — `alembic 0008` + `FeatureUpdateRequestRow` (`ops.feature_update_requests`,
+  DDL은 `openapi-admin-contract.md §6.1`). 본 PR은 schema/ORM/DDL 검증까지만 포함하고
+  scope resolver/repository는 T-206에서 분리.
 - [~] T-205b — ~~`feature.sigungu_boundaries`~~ **취소**(D-11: 경계는 kraddr-geo
   소유, krtour-map은 REST 호출). → T-206a-geo로 대체.
 - [ ] T-205c — (Phase 2) `ops.data_integrity_violations`(F5~F8) / `ops.poi_cache_targets`
