@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-02 Codex 작업 메모 — Docker/포트 표준화
+
+ADR-047로 krtour-map standalone 로컬 포트를 API `9011`, admin UI `9012`, Dagster
+`9013`으로 고정했다. `AdminSettings`, frontend scripts, Playwright 기본 baseURL,
+`.env.example`, runbook 문서를 같은 기준으로 맞추고, `scripts/stop-fixed-ports.sh`,
+`scripts/load-env.sh`, `scripts/run-admin-stack.sh`, `scripts/docker-build.sh`,
+`scripts/docker-up.sh`를 추가했다.
+
+Docker 1차는 `postgres`, `api`, `frontend`, `dagster` 서비스로 구성한다. API는
+Postgres health 이후 `alembic upgrade head`를 실행하고, `.env`의 provider service key는
+`KRTOUR_MAP_ADMIN_*`/`NEXT_PUBLIC_*` 환경변수로 매핑한다. 다음 작업은 admin UI를 최신
+문서 기준으로 보강하고 Dagster 관리 화면/정보를 admin UI에 통합하는 것이다.
+
 ## 2026-06-02 Codex 작업 메모 — krtour-map Dagster Feature ETL 1차 구현
 
 TripMate 구현을 참고하지 않고 krtour-map 자체 Dagster code location
@@ -39,8 +52,8 @@ React Doctor, admin OpenAPI drift check, admin pytest, Windows Playwright e2e를
 
 ## 현재 상태
 
-**Sprint 4 (4a+4b) ✅ 완료 → Sprint 5 + ADR-045 독립 프로그램화 🟡 진입 준비**
-(2026-06-02 기준). main 최신: `PR#149`. Sprint 4a
+**Sprint 4 (4a+4b) ✅ 완료 → Sprint 5 + ADR-045 독립 프로그램화 🟡 진행 중**
+(2026-06-02 기준). main 최신: `PR#155`. Sprint 4a
 (MOIS Step A bulk + Step B incremental cursor + `krtour-map dedup-merge` +
 `feature_merge_history` alembic 0007 + dedup FP 측정/운영 통계) + Sprint 4b
 (MOIS Step C/D + ADR-033 F4 + Place phone enrichment + coverage 75→80 + 에이전트
@@ -74,11 +87,11 @@ ADR-034 9단계 중 ①~④ provider + 디버그 UI + ETL live 11/11 dataset을 
 Sprint 3(PR#60~#95)에서는 DB 적재/조회, consistency report, dedup queue,
 client orchestration, KNPS/krheritage provider, `/features` debug UI까지 완료했다.
 
-ADR **001~046 모두 accepted**. 029→043, 003·035 일부→045로 supersede.
+ADR **001~047 모두 accepted**. 029→043, 003·035 일부→045로 supersede.
 ADR-044 = 관련 라이브러리 `F:\dev\` 로컬 우선 조회 + 데이터 정합성 책임은 각
 provider 라이브러리. ADR-045 = krtour-map Docker 독립 프로그램 + 독립 DB/Dagster +
 TripMate OpenAPI 연동(ADR-003 함수 직접 호출 모델 supersede). ADR-046 = 호환 shim
-없이 정본 방향으로 이행. 다음 후보 번호 = ADR-047.
+없이 정본 방향으로 이행. 다음 후보 번호 = ADR-048.
 
 **Sprint 2 주요 산출물**:
 - Provider ① 축제: `providers/standard_data.py` (datagokr 표준데이터,
@@ -455,12 +468,13 @@ alembic 0008) → T-206a/b(scope resolver + repo) → T-207a/e(admin update-requ
 
 ## 다음 ADR
 
-**accepted (text on main)**: ADR-001 ~ ADR-046 전부.
+**accepted (text on main)**: ADR-001 ~ ADR-047 전부.
 029→043 supersede, 044 (로컬 우선 조회 + 정합성 책임), 045 (krtour-map Docker 독립
-+ OpenAPI, ADR-003 supersede), 046 (호환 shim 금지). 다음 후보 번호 = ADR-047.
++ OpenAPI, ADR-003 supersede), 046 (호환 shim 금지), 047 (고정 포트
+API 9011/admin UI 9012/Dagster 9013). 다음 후보 번호 = ADR-048.
 
 **후보 (미작성)**:
-- ADR-047+ — 신규 provider 추가 절차 표준 (체크리스트)
+- ADR-048+ — 신규 provider 추가 절차 표준 (체크리스트)
 - (필요 시) Sprint 5 MV / pg_prewarm 도입 ADR (T-101/102)
 
 ## 차단 사유 / 결정 대기

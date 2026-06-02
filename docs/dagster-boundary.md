@@ -436,10 +436,10 @@ OpenAPI 계약과 queue/progress를 관리한다. 둘 다 advisory lock으로 ra
 
 ```bash
 # krtour-map Dagster 패키지에서
-dagster dev -m krtour.map_dagster.definitions
+dagster dev -m krtour.map_dagster.definitions -h 0.0.0.0 -p 9013
 
 # 또는 docker compose
-docker compose up krtour-map-dagster-webserver krtour-map-dagster-daemon
+docker compose up dagster
 ```
 
 메인 라이브러리 단독으로는 Dagster를 띄우지 않는다 (의존성 X). Dagster 실행 코드는

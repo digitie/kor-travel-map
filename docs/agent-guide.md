@@ -13,7 +13,7 @@
 4. `docs/architecture.md` 목차 — 의존 방향, 데이터 흐름
 5. `docs/resume.md` — "다음 한 작업"
 6. `docs/journal.md` 최신 3건 — 직전 컨텍스트
-7. 관련 ADR (`docs/decisions.md` — ADR-001~046 전부 accepted, 다음 후보 047)
+7. 관련 ADR (`docs/decisions.md` — ADR-001~047 전부 accepted, 다음 후보 048)
 8. 직결 docs (provider 추가면 `docs/provider-contract.md`, 현재 sprint면
    `docs/sprints/SPRINT-N.md` 등)
 9. **운영 runbook** (`docs/runbooks/`) — 에이전트 공용. 실제 작업 시작 전
@@ -55,8 +55,8 @@ PR은 불완전하다.
 
 ## 3. ADR 작성 규약
 
-번호: `ADR-NNN` 연번. **현재 다음 번호 = ADR-047** (ADR-035~043 PR#33으로
-일괄 accepted 전환됨 2026-05-27, ADR-044~046은 2026-06-01~02 accepted).
+번호: `ADR-NNN` 연번. **현재 다음 번호 = ADR-048** (ADR-035~043 PR#33으로
+일괄 accepted 전환됨 2026-05-27, ADR-044~047은 2026-06-01~02 accepted).
 
 ```markdown
 ## ADR-NNN: <결정 요약>
@@ -114,14 +114,14 @@ PR은 불완전하다.
 
 ## 현재 상태
 Sprint 4(4a+4b) 완료, Sprint 5 + ADR-045 독립 프로그램화 진입 준비.
-ADR 001~046 모두 accepted (다음 후보 047). main 최신은 PR#149 이후.
+ADR 001~047 모두 accepted (다음 후보 048). main 최신은 PR#155 이후.
 
 ## 다음 한 작업
 ADR-045 독립 프로그램화(Docker compose + admin-first OpenAPI + 독립 Dagster).
 
 ## 진척도
 - [x] AGENTS.md / README / SKILL / CLAUDE
-- [x] docs/architecture, decisions(ADR-001~046), data-model
+- [x] docs/architecture, decisions(ADR-001~047), data-model
 - [x] provider 변환, PostGIS 적재/조회, consistency report, dedup queue
 - [x] MOIS Step A~D + dedup-merge + feature_merge_history + phone enrichment
 - [ ] ADR-045 독립 프로그램화 + Sprint 5 MOIS-sibling provider
@@ -320,8 +320,8 @@ GitHub branch protection (운영자 수동 설정):
 
 기본 작업 절차:
 1. 사용자 의도 명확화 (어떤 모듈/계층/메서드인지)
-2. ADR이 필요한지 확인 (`docs/decisions.md` 001~046 모두 accepted, 신규는
-   047+)
+2. ADR이 필요한지 확인 (`docs/decisions.md` 001~047 모두 accepted, 신규는
+   048+)
 3. 테스트 우선 작성 (`docs/test-strategy.md` §12 우선순위)
 4. 구현 (`pytest -q`/`ruff check`/`mypy --strict`/`lint-imports` 통과)
 5. 통합 테스트 + EXPLAIN 검증 (DB 닿는 경우)

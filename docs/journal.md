@@ -2,6 +2,26 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-02 (codex) — Docker/포트 표준화
+
+**작업**: 사용자 지시 — API `9011`, admin UI `9012`, Dagster `9013` 고정 포트 원칙을
+코드/문서/스크립트/Docker에 반영하고, `.env`의 서비스 키를 실행 환경변수로 주입.
+
+- **포트 표준화**: `AdminSettings.port`, CORS origin, frontend `dev/start`,
+  Playwright 기본 baseURL, frontend API client fallback을 `9011`/`9012` 기준으로 수정.
+- **Docker**: `docker-compose.yml`, `docker/api.Dockerfile`,
+  `docker/frontend.Dockerfile`, `docker/dagster.Dockerfile`, `.dockerignore` 추가.
+  compose는 PostGIS + API + frontend + Dagster 1차 구성을 제공하고 API 기동 전
+  `alembic upgrade head`를 실행.
+- **스크립트**: `scripts/load-env.sh`가 `.env`의 provider key를
+  `KRTOUR_MAP_ADMIN_*`/`NEXT_PUBLIC_*`로 매핑. `stop-fixed-ports.sh`,
+  `run-admin-stack.sh`, `docker-build.sh`, `docker-up.sh` 추가.
+- **문서**: ADR-047, Docker runbook, 배포 메모, tasks/resume/changelog와 현재 운영
+  문서의 포트 기준 갱신.
+- **검증**: admin router pytest, ruff, mypy, frontend type/lint, `docker compose config`,
+  Docker image build 3종, compose 기동 스모크(API `9011`, frontend `9012`, Dagster
+  `9013`) 통과.
+
 ## 2026-06-02 (codex) — krtour-map Dagster Feature ETL 1차 구현
 
 **작업**: 사용자 지시 — TripMate 구현을 참고하지 않고 krtour-map 자체 Dagster로

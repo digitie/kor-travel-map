@@ -41,8 +41,8 @@ class AdminSettings(BaseSettings):
         ),
     )
     port: int = Field(
-        default=8087,
-        description="FastAPI bind port. 기본 8087 (메인 lib 다른 서비스와 충돌 회피).",
+        default=9011,
+        description="FastAPI bind port. 기본 9011 (krtour-map 고정 API 포트).",
     )
     log_level: str = Field(
         default="info",
@@ -65,12 +65,12 @@ class AdminSettings(BaseSettings):
     )
     cors_allow_origins: list[str] = Field(
         default=[
-            "http://localhost:8610",
-            "http://127.0.0.1:8610",
+            "http://localhost:9012",
+            "http://127.0.0.1:9012",
         ],
         description=(
-            "CORS 허용 origin 목록. frontend(Next.js dev, 8610)가 브라우저에서 "
-            "backend(8087)로 cross-origin fetch하므로 필요. 내부 debug 도구라 "
+            "CORS 허용 origin 목록. frontend(Next.js dev/start, 9012)가 브라우저에서 "
+            "backend(9011)로 cross-origin fetch하므로 필요. 내부 debug 도구라 "
             "기본은 localhost frontend만 (ADR-005 — 네트워크 계층이 외부 차단). "
             "env override는 JSON 배열."
         ),

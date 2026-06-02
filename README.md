@@ -5,8 +5,8 @@
 **krtour-map 독립 프로그램 + 내부 Python 라이브러리**다. PostgreSQL + PostGIS +
 SQLAlchemy 2 async + GeoAlchemy2 + GeoPandas 위에서 동작한다.
 
-> **현재 상태 (v2 Sprint 4(4a+4b) 완료, Sprint 5 + ADR-045 독립 프로그램화 진입
-> 준비 — PR#149 이후 기준)**:
+> **현재 상태 (v2 Sprint 4(4a+4b) 완료, Sprint 5 + ADR-045 독립 프로그램화 진행 중
+> — PR#155 이후 기준)**:
 > master/main 브랜치는 v2 사양으로 새로 시작했다. 이전(v1) 구현은 `v1`
 > 브랜치에 보존되어 있다. Sprint 2~3에서 provider 변환, PostGIS 적재/조회,
 > consistency report, dedup queue, `AsyncKrtourMapClient`, debug UI `/features`와
@@ -16,8 +16,10 @@ SQLAlchemy 2 async + GeoAlchemy2 + GeoPandas 위에서 동작한다.
 > 94.12%)까지 마쳤다. 현재 geocoding 정본은 kraddr-geo REST v2
 > `POST /v2/{reverse,geocode}` + 로컬 `http://127.0.0.1:8888`, frontend 정본은
 > Next.js 16 + `maplibre-vworld-js#v0.1.2`다. 2026-06-01 ADR-045로 운영 모델은
-> Docker 독립 프로그램 + 독립 DB/Dagster + TripMate OpenAPI 연동으로 전환됐다.
-> ADR 현황: **001~046 모두 accepted** (다음 후보 047). Sprint 계획은
+> Docker 독립 프로그램 + 독립 DB/Dagster + TripMate OpenAPI 연동으로 전환됐고,
+> PR#155에서 krtour-map-owned Dagster Feature ETL 1차를 구현했다. ADR-047 기준
+> standalone 포트는 API `9011`, admin UI `9012`, Dagster `9013`이다.
+> ADR 현황: **001~047 모두 accepted** (다음 후보 048). Sprint 계획은
 > `docs/sprints/`, 다음 작업은 `docs/resume.md` 참조. v1 산출물 요약은
 > `python-krtour-map-spec.docx`(저장소 루트, 약 80쪽) 참고.
 
@@ -109,13 +111,13 @@ alembic upgrade head
 uv pip install -e packages/krtour-map-admin
 
 # (디버그) REST API 기동 — 인증 없음, localhost 전용
-uvicorn krtour.map_admin.app:app --host 127.0.0.1 --port 8087
+uvicorn krtour.map_admin.app:app --host 127.0.0.1 --port 9011
 
 # (옵션) 디버그 UI frontend — WSL 셸에서 실행
 cd packages/krtour-map-admin/frontend
 which node npm              # /home/.../.nvm/... 등 WSL 경로여야 함 (/mnt/c/... 금지)
 cp .env.example .env.local  # NEXT_PUBLIC_VWORLD_API_KEY 설정
-npm install && npm run dev   # http://127.0.0.1:8610
+npm install && npm run dev   # http://127.0.0.1:9012
 ```
 
 Frontend dev/prod 서버(`npm run dev`, `npm run start`)는 **WSL에서 실행**한다.
@@ -223,7 +225,7 @@ lint-imports
 - [`CLAUDE.md`](CLAUDE.md) — Claude(Code/Agent SDK)용 1쪽 진입 요약
 - [`CHANGELOG.md`](CHANGELOG.md) — Keep a Changelog 형식 (Unreleased + ADR-024~034)
 - [`docs/architecture.md`](docs/architecture.md) — 의존 방향, 계층, 데이터 흐름
-- [`docs/decisions.md`](docs/decisions.md) — ADR 누적 (ADR-001~046)
+- [`docs/decisions.md`](docs/decisions.md) — ADR 누적 (ADR-001~047)
 - [`docs/sprints/README.md`](docs/sprints/README.md) — Sprint 1~5 계획 + ADR-034 9단계 구현 순서
   - [`docs/sprints/SPRINT-1.md`](docs/sprints/SPRINT-1.md) — 코드 작성 단계 진입 + scaffolding (provider 없음)
   - [`docs/sprints/SPRINT-2.md`](docs/sprints/SPRINT-2.md) — MOIS-독립 4 provider (축제/날씨/유가/휴게소) + 디버그 UI 첫 라우터

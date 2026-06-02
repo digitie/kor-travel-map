@@ -47,7 +47,8 @@ feature 운영, provider 적재, dedup/결측 검토, 오프라인 업로드를 
 | 변수 | 의미 |
 |------|------|
 | `NEXT_PUBLIC_VWORLD_API_KEY` | VWorld API key. **`python-kraddr-geo`의 `KRADDR_GEO_VWORLD_API_KEY`와 동일 값 공유** (ADR-025 사용자 보강 2026-05-25). 별도 발급 금지. |
-| `NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API` | 백엔드 base URL (`http://127.0.0.1:8087` 기본) |
+| `NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API` | 백엔드 base URL (`http://127.0.0.1:9011` 기본) |
+| `NEXT_PUBLIC_KRTOUR_MAP_DAGSTER_URL` | Dagster UI/embed base URL (`http://127.0.0.1:9013` 기본) |
 
 > **VWorld key 공유 정책**: 본 frontend가 사용하는 VWorld key는
 > `python-kraddr-geo` ADR-019의 `KRADDR_GEO_VWORLD_API_KEY`와 동일하다.
@@ -73,11 +74,11 @@ which node npm              # /home/.../.nvm/... 등 WSL 경로여야 함
 cp .env.example .env.local
 $EDITOR .env.local
 npm install
-npm run dev                  # http://127.0.0.1:8610
+npm run dev                  # http://127.0.0.1:9012
 ```
 
 `next dev`의 기본 포트는 3000이지만, TripMate `apps/web` 개발 충돌 회피를
-위해 `--port 8610`을 강제한다 (`package.json` scripts).
+위해 `--port 9012`을 강제한다 (`package.json` scripts).
 
 ### WSL 실행 실패 방지 체크리스트
 
@@ -99,15 +100,15 @@ npm run dev                  # http://127.0.0.1:8610
 5. `0.0.0.0` 바인드가 필요하면 `npm run dev`의 `127.0.0.1` script를 쓰지 말고
    명시적으로 실행한다.
    ```bash
-   npx next dev --port 8610 --hostname 0.0.0.0
+   npx next dev --port 9012 --hostname 0.0.0.0
    ```
 6. background 실행은 `setsid -f bash -lc 'source ~/.nvm/nvm.sh; nvm use 20.20.2;
    exec npx next dev ...'` 형태를 쓴다. `env PATH=...$PATH`는 Windows 경로의 공백
    때문에 깨질 수 있다.
 7. 성공 여부는 로그가 아니라 listener와 HTTP 응답으로 확인한다.
    ```bash
-   ss -ltnp | rg ':8610\b'
-   curl -fsS -I http://127.0.0.1:8610/ | sed -n '1,8p'
+   ss -ltnp | rg ':9012\b'
+   curl -fsS -I http://127.0.0.1:9012/ | sed -n '1,8p'
    ```
 
 ## 빌드 / 배포
@@ -118,8 +119,8 @@ npm run start                # next start — production server
 ```
 
 운영 옵션:
-- **A. standalone**: `next build` + `next start` — FastAPI(8087)와 별도 포트
-  (8610)로 동일 호스트에서 동작.
+- **A. standalone**: `next build` + `next start` — FastAPI(9011)와 별도 포트
+  (9012)로 동일 호스트에서 동작.
 - **B. FastAPI proxy**: FastAPI가 `/ui/*`로 reverse proxy. Next.js는
   `basePath: '/ui'` 설정.
 - **C. static export (`next export`)**: SSR 미필요 페이지만 가능. App Router의
@@ -145,11 +146,11 @@ npm run doctor
 ## e2e (Playwright)
 
 > ⚠️ **Playwright e2e는 Windows 호스트에서 실행한다 (WSL 아님).**
-> 실행 모델: debug UI 서버(backend `uvicorn … :8087` + frontend
-> `next start :8610`)는 **WSL ext4**에서 띄우고, **Playwright
+> 실행 모델: debug UI 서버(backend `uvicorn … :9011` + frontend
+> `next start :9012`)는 **WSL ext4**에서 띄우고, **Playwright
 > (`npx playwright test`)는 Windows에서** 돌린다. WSL2
-> `localhostForwarding=true` 덕분에 Windows의 `http://127.0.0.1:8610`(frontend)
-> / `:8087`(backend) 요청이 WSL 서버에 그대로 도달한다.
+> `localhostForwarding=true` 덕분에 Windows의 `http://127.0.0.1:9012`(frontend)
+> / `:9011`(backend) 요청이 WSL 서버에 그대로 도달한다.
 >
 > **이유**: WSL Ubuntu에는 Playwright chromium 구동에 필요한 system lib
 > (`libasound.so.2` 등)가 없고, `sudo`가 비밀번호를 요구해 WSL 안에서의
@@ -160,8 +161,8 @@ npm run doctor
 
 ```powershell
 # 1) WSL 셸에서 서버 2개 기동 (frontend도 WSL에서 실행)
-#    backend : .venv/bin/uvicorn krtour.map_admin.app:create_app --factory --port 8087
-#    frontend: npm run start   # next start :8610
+#    backend : .venv/bin/uvicorn krtour.map_admin.app:create_app --factory --port 9011
+#    frontend: npm run start   # next start :9012
 
 # 2) Windows(PowerShell)에서는 Playwright만 실행
 cd packages\krtour-map-admin\frontend
@@ -171,15 +172,15 @@ npm run e2e              # playwright test (servers는 WSL에 떠 있어야 함)
 npm run e2e:ui           # --ui 모드
 ```
 
-baseURL은 `E2E_BASE_URL` env로 override 가능(기본 `http://127.0.0.1:8610`).
+baseURL은 `E2E_BASE_URL` env로 override 가능(기본 `http://127.0.0.1:9012`).
 자세한 실행 모델은 `playwright.config.ts` 상단 주석 참고.
 
-e2e 전 Windows `:8610`을 점유한 프로세스가 `wslrelay`인지 확인한다. 과거에
+e2e 전 Windows `:9012`을 점유한 프로세스가 `wslrelay`인지 확인한다. 과거에
 Windows Node로 띄운 Next.js가 남아 있으면 Playwright가 WSL 서버 대신 stale
 Windows 서버를 보고 실패한다.
 
 ```powershell
-netstat -ano | findstr :8610
+netstat -ano | findstr :9012
 Get-Process -Id <PID> | Select-Object Id,ProcessName,Path
 ```
 

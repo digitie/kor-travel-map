@@ -4,13 +4,13 @@ import { defineConfig, devices } from "@playwright/test";
  * Playwright e2e — krtour-map debug UI frontend (#117).
  *
  * 실행 모델 (사용자 지시): **debug UI는 WSL에서 기동, Playwright는 Windows에서 실행**.
- *   - WSL: backend `uvicorn krtour.map_admin.app:app --port 8087`
- *           + frontend `npm run dev` (next dev :8610).
+ *   - WSL: backend `uvicorn krtour.map_admin.app:app --port 9011`
+ *           + frontend `npm run dev` (next dev :9012).
  *   - Windows: `npm run e2e` (본 config). 브라우저(Windows)의 localhost는 WSL2
- *           localhost-forwarding으로 WSL :8610/:8087에 도달한다.
+ *           localhost-forwarding으로 WSL :9012/:9011에 도달한다.
  *
  * 서버는 외부(WSL)에서 떠 있다고 가정하므로 `webServer`를 두지 않는다.
- * baseURL은 `E2E_BASE_URL` env로 override 가능 (기본 http://127.0.0.1:8610 —
+ * baseURL은 `E2E_BASE_URL` env로 override 가능 (기본 http://127.0.0.1:9012 —
  * backend CORS allow-origin과 일치).
  */
 export default defineConfig({
@@ -22,7 +22,7 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   reporter: [["list"], ["html", { open: "never" }]],
   use: {
-    baseURL: process.env.E2E_BASE_URL ?? "http://127.0.0.1:8610",
+    baseURL: process.env.E2E_BASE_URL ?? "http://127.0.0.1:9012",
     trace: "on-first-retry",
     screenshot: "only-on-failure",
   },

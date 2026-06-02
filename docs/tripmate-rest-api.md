@@ -12,7 +12,7 @@ admin UI 워크플로는 `docs/debug-ui-admin-workflows.md`가 정본 — **본 
 
 ## 1. 공통 규약
 
-- **Base URL**: `https://<krtour-map-host>` (로컬 `http://127.0.0.1:8087`). TripMate는
+- **Base URL**: `https://<krtour-map-host>` (로컬 `http://127.0.0.1:9011`). TripMate는
   `KRTOUR_MAP_API_URL` env로 주입. **직접 DB 연결·라이브러리 import 금지**(ADR-045).
 - **인증**: 코드에 인증 로직 없음(ADR-005). 운영은 network/infra 계층(Cloudflare
   Tunnel SSO / IP allowlist / API key header pass-through, D-1). TripMate는 서비스

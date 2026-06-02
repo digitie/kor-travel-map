@@ -11,7 +11,7 @@ const workspaceRoot = path.resolve(process.cwd(), "../../..");
  * - ADR-029 → ADR-043: @krtour/map-marker-react는 workspace 내부 share (private:true).
  * - ADR-035: 운영 시 Cloudflare Tunnel/SSO 뒤에 둠 (코드에 인증 X).
  *
- * 운영 옵션 A (standalone): 8610 포트로 직접 listen. backend(8087) 별도.
+ * 운영 옵션 A (standalone): 9012 포트로 직접 listen. backend(9011) 별도.
  * 운영 옵션 B (FastAPI proxy): basePath를 `/ui`로 두고 FastAPI가 reverse proxy.
  *   현재는 옵션 A 기본 — basePath 미설정.
  */

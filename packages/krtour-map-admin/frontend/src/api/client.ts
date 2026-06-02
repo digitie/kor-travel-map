@@ -1,7 +1,7 @@
 /**
  * Backend API client (fetch wrapper).
  *
- * `NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API` base URL을 사용해 FastAPI(8087)에
+ * `NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API` base URL을 사용해 FastAPI(9011)에
  * 접근. 응답 schema는 backend Pydantic 모델(`HealthResponse`, `VersionResponse`)
  * 과 일치. PR#36에서는 수동 type 정의 — 향후 `npm run gen:types`로
  * openapi.json에서 자동 생성된 `src/api/types.ts`로 대체 예정.
@@ -10,7 +10,7 @@
  */
 
 const BASE_URL =
-  process.env.NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API ?? "http://127.0.0.1:8087";
+  process.env.NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API ?? "http://127.0.0.1:9011";
 
 export interface HealthResponse {
   status: string;
