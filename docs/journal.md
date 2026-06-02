@@ -2,6 +2,24 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-03 (codex) — feature update request 스키마
+
+**작업**: ADR-045 독립 프로그램화 후속 T-205a. OpenAPI/admin UI가 만드는 feature
+update request를 Dagster/import job과 연결하기 위한 `ops.feature_update_requests`
+테이블 기반을 추가.
+
+- **DB**: Alembic `0008_feature_update_requests` 추가. `scope_type` 6종,
+  `run_mode`(`queued`/`now`), 상태 5종 CHECK, JSONB 기본값, `job_id`
+  `ON DELETE SET NULL`, state/priority/created/job 인덱스를 반영.
+- **ORM**: `FeatureUpdateRequestRow`를 `infra.models`와 `infra.__init__` export에
+  추가. ORM은 매핑만 유지하고 enqueue/claim 로직은 T-206b로 분리.
+- **검증**: PostGIS migrated DB에서 defaults/FK/CHECK/index 계약을 검증하는
+  통합 테스트 추가.
+- **문서**: `openapi-admin-contract.md`, `data-model.md`, `postgres-schema.md`,
+  `tasks.md`, `resume.md`를 T-205a 상태로 갱신. `sigungu_by_radius` 설명은
+  krtour-map 내부 경계 테이블 fallback이 아니라 kraddr-geo REST v2
+  `/v2/regions/within-radius` 호출 기준으로 정리.
+
 ## 2026-06-02 (codex) — Docker Dagster 내부 URL 분리
 
 **작업**: PR#157 머지 후 Docker stack 기동 검증 중 API 컨테이너의

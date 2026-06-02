@@ -659,11 +659,36 @@ CREATE INDEX idx_reports_batch   ON ops.feature_consistency_reports (batch_id);
 CREATE INDEX idx_reports_started ON ops.feature_consistency_reports (started_at DESC);
 ```
 
-### 9.8 `ops.feature_update_requests` (ADR-045 accepted — 테이블 미구현, 계획)
+### 9.8 `ops.feature_update_requests` (ADR-045 accepted — alembic 0008)
 
 OpenAPI로 들어온 feature update request를 저장한다. `center_radius`,
 `sigungu_by_radius`, `provider_dataset`, `cache_target_keys` 같은 scope를 Dagster
 run/import job으로 연결한다. 상세 계약은 `docs/openapi-admin-contract.md`.
+
+핵심 컬럼:
+
+| 컬럼 | 의미 |
+|------|------|
+| `request_id` | UUID PK, `x_extension.gen_random_uuid()` 기본값 |
+| `scope_type` / `scope` | 요청 범위 종류와 JSONB payload |
+| `providers` / `dataset_keys` | 제한할 provider/dataset 목록(JSONB array) |
+| `update_policy` | 재적재/중복/정합성 정책 JSONB |
+| `run_mode` | `queued` 또는 `now` |
+| `priority` | queue 우선순위, 기본 50 |
+| `state` | `queued`/`running`/`done`/`failed`/`cancelled` |
+| `dry_run` | 영향 범위만 계산한 요청 여부 |
+| `matched_scope` | scope resolver가 계산한 feature/provider/sigungu 요약 |
+| `job_id` | `ops.import_jobs(job_id)` FK, job 삭제 시 `NULL` |
+| `dagster_run_id` | Dagster run 추적 id |
+
+인덱스:
+
+- `idx_feature_update_state_priority` — queued/running claim과 목록.
+- `idx_feature_update_created` — 최신 요청 목록.
+- `idx_feature_update_job` — import job에서 request 역추적.
+
+T-205a는 테이블/ORM 매핑까지만 구현한다. scope resolver, enqueue/claim repository,
+admin API, Dagster sensor는 T-206/T-207/T-208 후속이다.
 
 ### 9.9 `ops.poi_cache_targets` / `ops.poi_cache_target_feature_links` (계획)
 

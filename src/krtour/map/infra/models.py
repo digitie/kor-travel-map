@@ -34,6 +34,7 @@ from typing import Any
 
 from geoalchemy2 import Geometry
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Computed,
     DateTime,
@@ -60,6 +61,7 @@ __all__ = [
     "FeatureConsistencyReportRow",
     "DedupReviewQueueRow",
     "ImportJobRow",
+    "FeatureUpdateRequestRow",
     "FeatureMergeHistoryRow",
 ]
 
@@ -535,6 +537,101 @@ class ImportJobRow(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
+
+
+# =============================================================================
+# ops.feature_update_requests  (ADR-045)
+# =============================================================================
+
+
+class FeatureUpdateRequestRow(Base):
+    """``ops.feature_update_requests`` row mapping — Dagster update request 큐.
+
+    Admin/OpenAPI가 만든 지리 범위/provider 범위 업데이트 요청을 저장하고
+    ``ops.import_jobs``/Dagster run과 연결한다. raw SQL repository와 상태 전이는
+    T-206b에서 별도 구현한다.
+    """
+
+    __tablename__ = "feature_update_requests"
+    __table_args__ = (
+        CheckConstraint(
+            "scope_type IN ("
+            "'feature_ids','center_radius','sigungu_by_radius','bbox',"
+            "'provider_dataset','cache_target_keys'"
+            ")",
+            name="ck_feature_update_scope",
+        ),
+        CheckConstraint(
+            "run_mode IN ('queued','now')",
+            name="ck_feature_update_run_mode",
+        ),
+        CheckConstraint(
+            "state IN ('queued','running','done','failed','cancelled')",
+            name="ck_feature_update_state",
+        ),
+        Index(
+            "idx_feature_update_state_priority",
+            "state",
+            text("priority DESC"),
+            "created_at",
+        ),
+        Index(
+            "idx_feature_update_created",
+            text("created_at DESC"),
+        ),
+        Index(
+            "idx_feature_update_job",
+            "job_id",
+            postgresql_where=text("job_id IS NOT NULL"),
+        ),
+        {"schema": "ops"},
+    )
+
+    request_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=text("x_extension.gen_random_uuid()"),
+    )
+    scope_type: Mapped[str] = mapped_column(Text, nullable=False)
+    scope: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    providers: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb"),
+    )
+    dataset_keys: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb"),
+    )
+    update_policy: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb"),
+    )
+    run_mode: Mapped[str] = mapped_column(Text, nullable=False)
+    priority: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("50"),
+    )
+    state: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'queued'"),
+    )
+    dry_run: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false"),
+    )
+    matched_scope: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb"),
+    )
+    job_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("ops.import_jobs.job_id", ondelete="SET NULL"),
+    )
+    dagster_run_id: Mapped[str | None] = mapped_column(Text)
+    operator: Mapped[str | None] = mapped_column(Text)
+    reason: Mapped[str | None] = mapped_column(Text)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()"),
     )
 

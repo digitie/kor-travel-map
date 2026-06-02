@@ -5,6 +5,15 @@
 
 ## [Unreleased]
 
+### 운영 — Feature update request 큐 스키마 (2026-06-03)
+
+- **NEW**: `ops.feature_update_requests` 테이블과 `FeatureUpdateRequestRow` 매핑을
+  추가했다. Admin/OpenAPI feature update request를 `ops.import_jobs`와 Dagster run에
+  연결하기 위한 기반 스키마다.
+- **DOCS**: `sigungu_by_radius` scope 설명을 kraddr-geo REST v2
+  `/v2/regions/within-radius` 기준으로 정리했다. krtour-map 내부에 행정경계 테이블을
+  만들지 않는다.
+
 ### Admin UI — Dagster 운영 화면 (2026-06-02)
 
 - **NEW**: backend `GET /ops/dagster/summary`를 추가했다. Dagster GraphQL에서

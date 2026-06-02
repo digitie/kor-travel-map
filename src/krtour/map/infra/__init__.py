@@ -82,6 +82,7 @@ from krtour.map.infra.models import (
     DedupReviewQueueRow,
     FeatureConsistencyReportRow,
     FeatureRow,
+    FeatureUpdateRequestRow,
     ImportJobRow,
     ProviderSyncStateRow,
     SourceLinkRow,
@@ -116,6 +117,7 @@ __all__ = [
     "FeatureConsistencyReportRow",
     "DedupReviewQueueRow",
     "ImportJobRow",
+    "FeatureUpdateRequestRow",
     # feature_repo (ADR-004 raw SQL load 경로)
     "FeatureLoadResult",
     "upsert_feature",
