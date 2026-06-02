@@ -421,7 +421,7 @@ PR#156(Docker/고정 포트 표준화)까지 머지된 상태다.
   `/debug/mois-license/{id}`) + ADR-033 **F4**(dedup 백로그 WARN) + Place phone
   enrichment(`krtour.map.enrichment`) + 에이전트 공용 runbook(`docs/runbooks/`).
 - Geocoding: `krtour.map.geocoding.KraddrGeoRestClient`가 kraddr-geo REST v2
-  `POST /v2/{reverse,geocode}`를 호출. 로컬 기본 `http://127.0.0.1:8888`.
+  `POST /v2/{reverse,geocode}`를 호출. 로컬 기본 `http://127.0.0.1:9001`.
 - Standalone 포트: API `9011`, admin UI `9012`, Dagster `9013` 고정(ADR-047).
   점유 프로세스는 `scripts/stop-fixed-ports.sh`로 종료 후 재기동.
 - Admin UI: `/admin/dagster`에서 Dagster summary API(`GET /ops/dagster/summary`)와

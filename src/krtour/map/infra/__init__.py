@@ -16,6 +16,7 @@ raw SQL (ADR-004).
 - ``models.py`` — SQLAlchemy 2 매핑 (``Feature``/``PlaceDetail``/...)
 - ``feature_repo.py`` — raw SQL repository (``_SQL`` 상수 + ``text()``)
 - ``source_repo.py``/``sync_repo.py``/``jobs_repo.py``
+- ``scope_repo.py``/``feature_update_repo.py`` — ADR-045 feature update request 해석/큐
 - ``file_store.py`` — S3 호환 객체 저장소 (RustFS)
 
 ADR 참조
@@ -67,6 +68,20 @@ from krtour.map.infra.feature_repo import (
     upsert_feature,
     upsert_source_link,
     upsert_source_record,
+)
+from krtour.map.infra.feature_update_repo import (
+    FEATURE_UPDATE_JOB_KIND,
+    FEATURE_UPDATE_QUEUE_ADVISORY_KEY,
+    FeatureUpdateRequest,
+    FeatureUpdateRequestPage,
+    FeatureUpdateRequestPreview,
+    cancel_update_request,
+    claim_next_update_request,
+    enqueue_feature_update_request,
+    finish_update_request,
+    get_update_request,
+    list_update_requests,
+    start_update_request,
 )
 from krtour.map.infra.jobs_repo import (
     ImportJob,
@@ -153,6 +168,19 @@ __all__ = [
     "heartbeat_import_job",
     "finish_import_job",
     "recover_stale_running_jobs",
+    # feature_update_repo (ADR-045 feature update request queue)
+    "FEATURE_UPDATE_JOB_KIND",
+    "FEATURE_UPDATE_QUEUE_ADVISORY_KEY",
+    "FeatureUpdateRequest",
+    "FeatureUpdateRequestPreview",
+    "FeatureUpdateRequestPage",
+    "enqueue_feature_update_request",
+    "claim_next_update_request",
+    "start_update_request",
+    "finish_update_request",
+    "cancel_update_request",
+    "get_update_request",
+    "list_update_requests",
     # scope_repo (ADR-045 feature update request dry-run/scope resolver)
     "FeatureScopeRow",
     "ProviderDatasetScope",

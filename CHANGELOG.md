@@ -5,6 +5,15 @@
 
 ## [Unreleased]
 
+### 운영 — Feature update request 큐 repository (2026-06-03)
+
+- **NEW**: `infra.feature_update_repo`를 추가했다. Dry-run preview, request enqueue,
+  priority 기반 claim, start/finish/cancel, 단건 조회, keyset cursor 목록 조회를
+  지원한다.
+- **CHANGED**: 실제 실행 request 생성 시 `ops.import_jobs` row를 같은 transaction에
+  만들고, claim/start/finish/cancel 상태 전이를 request와 import job에 함께 반영한다.
+- **DOCS**: kraddr-geo REST API 로컬 포트 기준을 `http://127.0.0.1:9001`로 정정했다.
+
 ### 운영 — Feature update scope resolver (2026-06-03)
 
 - **NEW**: `infra.scope_repo`를 추가했다. `feature_ids`, `center_radius`, `bbox`,

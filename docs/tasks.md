@@ -4,10 +4,9 @@
 
 ## 진행 중
 
-**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#159(T-205a
-`ops.feature_update_requests` alembic/ORM)까지 merged. 현재 작업은 T-206a
-scope resolver이며, 후속 작업은 feature update repository/client/admin API/Dagster
-sensor와 Sprint 5 provider 구현이다.
+**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#160(T-206a scope resolver)까지
+merged. 현재 작업은 T-206b feature update request 큐 repository이며, 후속 작업은
+feature update client/admin API/Dagster sensor와 Sprint 5 provider 구현이다.
 
 ### 현재 기준 보강 필요 체크포인트 (2026-06-03)
 
@@ -24,7 +23,7 @@ sensor와 Sprint 5 provider 구현이다.
    `docs/poi-cache-update-targets.md` 기준.
 4. **문서 최신성 유지** — provider 주소 보강용 geocoding endpoint 정본은
    kraddr-geo REST v2 `POST /v2/reverse`, `POST /v2/geocode`, 로컬 포트는
-   `http://127.0.0.1:8888`. geocoding 전용 디버깅 화면은 kraddr-geo 프로젝트에서
+   `http://127.0.0.1:9001`. geocoding 전용 디버깅 화면은 kraddr-geo 프로젝트에서
    관리하고, krtour-map-admin에는 두지 않는다. frontend 현재 기준은 Next.js 16 +
    `maplibre-vworld-js#v0.1.2`.
 5. **고정 포트** — krtour-map 독립 프로그램 로컬/standalone 포트는 API `9011`,
@@ -34,8 +33,8 @@ sensor와 Sprint 5 provider 구현이다.
    요약 UI와 Dagster webserver embed를 제공한다. 실제 feature update queue/sensor
    연결은 후속 PR에서 진행한다.
 7. **feature update request 큐** — T-205a에서 `ops.feature_update_requests` 테이블과
-   ORM 매핑을 먼저 추가한다. scope resolver/repo/API/sensor는 T-206/T-207/T-208로
-   분리한다.
+   ORM 매핑을 추가했고, T-206b에서 request/import job lifecycle repo를 추가한다.
+   API/sensor는 T-207/T-208로 분리한다.
 8. **scope resolver** — T-206a에서 `feature_ids`, `center_radius`, `bbox`,
    `sigungu_by_radius`, `provider_dataset` dry-run/count resolver를 구현한다.
    `cache_target_keys`는 `ops.poi_cache_targets` 도입 후 Phase 2로 진행한다.
@@ -44,6 +43,7 @@ sensor와 Sprint 5 provider 구현이다.
 
 ## 최근 완료 (2026-05-31~2026-06-03)
 
+- **PR#160** (merged 2026-06-03): `infra.scope_repo` scope resolver.
 - **PR#159** (merged 2026-06-03): `ops.feature_update_requests` Alembic 0008 +
   ORM 매핑 + DDL 계약 통합 테스트.
 - **PR#158** (merged 2026-06-02): Docker API 컨테이너의 Dagster URL을
@@ -55,7 +55,7 @@ sensor와 Sprint 5 provider 구현이다.
 - **PR#155** (merged 2026-06-02): krtour-map-owned Dagster Feature ETL 1차.
   `packages/krtour-map-dagster/` code location과 9개 Feature asset runner, PostGIS
   적재 통합 테스트.
-- **PR#114** (merged 2026-05-31): geocoding live 기본 포트 8888 정합,
+- **PR#114** (merged 2026-05-31): geocoding live 기본 포트 정합(현재 9001),
   Next.js 16 + `maplibre-vworld-js#v0.1.2`, GDAL 3.8.4 고정, Windows Playwright
   e2e 14/14, 관련 문서 갱신.
 - **PR#110~#112**: Windows Git + NTFS source-of-truth 정책, WSL 실행/Playwright
@@ -277,7 +277,7 @@ sensor와 Sprint 5 provider 구현이다.
 - [ ] T-206a-geo — (형제 repo `python-kraddr-geo`, 별도 PR) `POST /v2/regions/
   within-radius` 엔드포인트(`tl_scco_sig` 교차, D-11; levels=sigungu 우선). 반환
   sig_cd = krtour-map sigungu_code 동일 체계(매핑 불필요). T-206a 선행 의존.
-- [ ] T-206b — `infra/feature_update_repo.py` (enqueue/claim/start/finish/get/list,
+- [x] T-206b — `infra/feature_update_repo.py` (enqueue/claim/start/finish/get/list/cancel,
   advisory lock + SKIP LOCKED, keyset cursor D-10).
 - [ ] T-206c — `AsyncKrtourMapClient` feature-update 메서드 4종.
 - [ ] T-206d — request 실행 본체(scope→provider/dataset 역추적 refresh, D-6/D-8).

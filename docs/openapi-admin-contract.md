@@ -424,8 +424,10 @@ CREATE INDEX idx_feature_update_job
 ```
 
 구현 상태: Alembic `0008_feature_update_requests`와
-`FeatureUpdateRequestRow`가 이 DDL을 반영한다. 요청 생성/조회/claim repository와
-admin API는 T-206/T-207에서 별도 구현한다.
+`FeatureUpdateRequestRow`가 이 DDL을 반영한다. `infra.feature_update_repo`는
+dry-run preview, request/import job enqueue, priority claim, start/finish/cancel,
+단건 조회, keyset 목록 조회를 구현했다(T-206b). Admin HTTP router와 OpenAPI schema
+export 연결은 T-207a에서 별도 구현한다.
 
 ## 7. Provider 실행 API와의 관계
 

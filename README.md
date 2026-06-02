@@ -14,7 +14,7 @@ SQLAlchemy 2 async + GeoAlchemy2 + GeoPandas 위에서 동작한다.
 > incremental/closed/detail), `krtour-map dedup-merge` + `feature_merge_history`,
 > dedup 운영 FP 통계, ADR-033 F4, Place phone enrichment, coverage 80% 달성(실측
 > 94.12%)까지 마쳤다. 현재 geocoding 정본은 kraddr-geo REST v2
-> `POST /v2/{reverse,geocode}` + 로컬 `http://127.0.0.1:8888`, frontend 정본은
+> `POST /v2/{reverse,geocode}` + 로컬 `http://127.0.0.1:9001`, frontend 정본은
 > Next.js 16 + `maplibre-vworld-js#v0.1.2`다. 2026-06-01 ADR-045로 운영 모델은
 > Docker 독립 프로그램 + 독립 DB/Dagster + TripMate OpenAPI 연동으로 전환됐다.
 > PR#155에서 krtour-map-owned Dagster Feature ETL 1차를 구현했고, PR#156에서

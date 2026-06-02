@@ -297,7 +297,7 @@ docs/
   TripMate 직접 import, 공유 DB, TripMate-owned Dagster 호환 shim은 만들지 않는다
   (ADR-046).
 - Geocoding 현재 정본: kraddr-geo REST v2 `POST /v2/{reverse,geocode}`, 로컬 기본
-  `http://127.0.0.1:8888`.
+  `http://127.0.0.1:9001`.
 - Frontend 현재 정본: Next.js 16 + React 19 + `maplibre-vworld-js#v0.1.2`,
   Windows Playwright e2e.
 
