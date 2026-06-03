@@ -2,6 +2,29 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-03 (codex) — T-207c admin features/dedup backend
+
+**작업**: ADR-045 Phase 3 T-207c. 운영자가 feature를 검색/검토하고 비활성화, provider
+재활성화 방지 override, dedup review 결정을 수행할 backend API를 추가.
+
+- **Admin features**: `GET /admin/features` 구현. `q`, kind/category/status/provider/
+  dataset_key, coord/issue 여부, issue type, updated range, sort/order, keyset cursor를
+  지원하고 primary source와 열린 issue summary를 반환한다.
+- **Deactivate + override**: `POST /admin/features/{feature_id}/deactivate` 구현.
+  `status='inactive'` 전환, `ops.feature_overrides` active status override 생성,
+  `prevent_provider_reactivation` 플래그를 추가했다.
+- **Provider upsert 보호**: `feature_repo.upsert_feature`가 active status override가
+  있는 feature의 status/deleted_at을 provider payload로 덮지 않도록 수정했다.
+- **Dedup review**: `GET/PATCH /admin/dedup-review` 구현. accepted/rejected/ignored는
+  queue status 전이, merged는 `dedup-merge:{review_key}` advisory lock 안에서 기존
+  `feature_merge_history` merge path를 호출한다.
+- **OpenAPI/DB**: `alembic 0010`으로 `ops.feature_overrides`를 추가하고
+  `packages/krtour-map-admin/openapi.json`을 갱신했다.
+- **검증**: admin features/dedup 라우터 unit `8 passed`, PostGIS admin feature repo
+  통합 `3 passed`, ruff, mypy, OpenAPI `--check` 통과.
+- **후속**: 수동 feature 생성과 영구 삭제는 `ops.admin_audit_log` 설계 후 별도 작업.
+  다음 작업은 T-207d `/ops/*` consistency/jobs/metrics.
+
 ## 2026-06-03 (codex) — T-208e Dagster feature update sensor
 
 **작업**: ADR-045 Phase 4 T-208e. `ops.feature_update_requests` 큐를 krtour-map-owned

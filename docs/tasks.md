@@ -4,10 +4,10 @@
 
 ## 진행 중
 
-**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#167(T-207f
-POI/cache target API)까지 merged. 현재 작업은 T-208e Dagster feature update
-sensor이며, 완료 후 T-207c → T-207d → T-207e 순서로 이어간다. T-207b는 사용자
-결정에 따라 구현하지 않는다.
+**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#168(T-208e Dagster feature
+update sensor)까지 merged. T-207c admin feature review/deactivate/override/dedup
+merge backend를 완료한 뒤 T-207d → T-207e 순서로 이어간다. T-207b는 사용자 결정에
+따라 구현하지 않는다.
 
 ### 현재 기준 보강 필요 체크포인트 (2026-06-03)
 
@@ -51,7 +51,11 @@ sensor이며, 완료 후 T-207c → T-207d → T-207e 순서로 이어간다. T-
 
 ## 최근 완료 (2026-05-31~2026-06-03)
 
-- **T-208e** (본 PR): Dagster `feature_update_request_queue_sensor` +
+- **T-207c** (2026-06-03): `/admin/features` 목록/비활성화, `ops.feature_overrides`
+  `prevent_provider_reactivation`, provider upsert status 보호, `/admin/dedup-review`
+  목록/결정/merge backend를 연결. 수동 feature 생성과 영구 삭제는 audit log 설계 후
+  후속으로 남긴다.
+- **PR#168** (merged 2026-06-03): Dagster `feature_update_request_queue_sensor` +
   `feature_update_request_worker` + failure sensor. queued/now request를
   `AsyncKrtourMapClient.execute_feature_update_request()`로 실행하고, 실패 시
   request/import job 실패 전이와 notifier payload를 보강.
@@ -331,7 +335,11 @@ sensor이며, 완료 후 T-207c → T-207d → T-207e 순서로 이어간다. T-
 - [x] T-207b — `/admin/providers/{p}/datasets/{d}/runs` (§7). 사용자 결정에 따라
   구현하지 않음으로 닫는다. provider run 상세는 T-207d `/ops/*`와 Dagster UI/summary
   경로에서 필요한 만큼 다룬다.
-- [ ] T-207c — `/admin/features` 검토/병합/override/deactivate (D-8). T-208e 이후 보강.
+- [x] T-207c — `/admin/features` 검토/병합/override/deactivate (D-8).
+  `/admin/features` 목록과 deactivate, active status override, provider upsert
+  재활성화 방지, `/admin/dedup-review` 목록/accepted/rejected/ignored/merged 전이를
+  연결했다. `POST /admin/features` 수동 생성과 `DELETE /admin/features/{id}` 영구 삭제는
+  `ops.admin_audit_log` 설계 후 후속 작업으로 남긴다.
 - [ ] T-207d — `/ops/*` consistency/jobs/metrics. T-207c 이후 admin UI polish와 함께 보강.
 - [ ] T-207e — `/features/*` + `/tripmate/features/batch` (사용자, `tripmate-rest-api.md`, D-7).
   TripMate batch 연동 직전 보강.

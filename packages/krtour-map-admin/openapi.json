@@ -1,6 +1,441 @@
 {
   "components": {
     "schemas": {
+      "AdminFeatureDeactivateData": {
+        "additionalProperties": false,
+        "description": "Feature deactivate 결과 data.",
+        "properties": {
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "override": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdminFeatureOverrideRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "override_created": {
+            "title": "Override Created",
+            "type": "boolean"
+          },
+          "previous_status": {
+            "title": "Previous Status",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_id",
+          "previous_status",
+          "status",
+          "override_created"
+        ],
+        "title": "AdminFeatureDeactivateData",
+        "type": "object"
+      },
+      "AdminFeatureDeactivateRequest": {
+        "additionalProperties": false,
+        "description": "``POST /admin/features/{feature_id}/deactivate`` body.",
+        "properties": {
+          "operator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operator"
+          },
+          "prevent_provider_reactivation": {
+            "default": true,
+            "title": "Prevent Provider Reactivation",
+            "type": "boolean"
+          },
+          "reason": {
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "AdminFeatureDeactivateRequest",
+        "type": "object"
+      },
+      "AdminFeatureDeactivateResponse": {
+        "additionalProperties": false,
+        "description": "``POST /admin/features/{feature_id}/deactivate`` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AdminFeatureDeactivateData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/AdminFeatureWriteMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "AdminFeatureDeactivateResponse",
+        "type": "object"
+      },
+      "AdminFeatureIssueRecord": {
+        "additionalProperties": true,
+        "description": "Admin feature 목록 issue summary.",
+        "properties": {
+          "detected_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detected At"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "severity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Severity"
+          },
+          "violation_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Violation Key"
+          },
+          "violation_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Violation Type"
+          }
+        },
+        "title": "AdminFeatureIssueRecord",
+        "type": "object"
+      },
+      "AdminFeatureOverrideRecord": {
+        "additionalProperties": false,
+        "description": "생성/갱신된 feature override.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "field_path": {
+            "title": "Field Path",
+            "type": "string"
+          },
+          "override_key": {
+            "title": "Override Key",
+            "type": "string"
+          },
+          "override_value": {
+            "title": "Override Value"
+          },
+          "prevent_provider_reactivation": {
+            "title": "Prevent Provider Reactivation",
+            "type": "boolean"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "override_key",
+          "feature_id",
+          "field_path",
+          "override_value",
+          "prevent_provider_reactivation",
+          "created_at"
+        ],
+        "title": "AdminFeatureOverrideRecord",
+        "type": "object"
+      },
+      "AdminFeatureRecord": {
+        "additionalProperties": false,
+        "description": "``GET /admin/features`` item.",
+        "properties": {
+          "address_label": {
+            "title": "Address Label",
+            "type": "string"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "issue_count": {
+            "title": "Issue Count",
+            "type": "integer"
+          },
+          "issues": {
+            "items": {
+              "$ref": "#/components/schemas/AdminFeatureIssueRecord"
+            },
+            "title": "Issues",
+            "type": "array"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "lat": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lat"
+          },
+          "lon": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lon"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "primary_dataset_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primary Dataset Key"
+          },
+          "primary_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primary Provider"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_id",
+          "kind",
+          "name",
+          "category",
+          "status",
+          "address_label",
+          "issue_count",
+          "issues",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AdminFeatureRecord",
+        "type": "object"
+      },
+      "AdminFeatureWriteMeta": {
+        "additionalProperties": false,
+        "description": "Admin feature write meta.",
+        "properties": {
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "duration_ms"
+        ],
+        "title": "AdminFeatureWriteMeta",
+        "type": "object"
+      },
+      "AdminFeaturesListData": {
+        "additionalProperties": false,
+        "description": "Admin feature 목록 data.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminFeatureRecord"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "AdminFeaturesListData",
+        "type": "object"
+      },
+      "AdminFeaturesListMeta": {
+        "additionalProperties": false,
+        "description": "Admin feature 목록 meta.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          },
+          "order": {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "title": "Order",
+            "type": "string"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "sort": {
+            "enum": [
+              "name",
+              "updated_at",
+              "created_at",
+              "kind",
+              "status",
+              "provider",
+              "issue_count"
+            ],
+            "title": "Sort",
+            "type": "string"
+          }
+        },
+        "required": [
+          "count",
+          "page_size",
+          "sort",
+          "order",
+          "duration_ms"
+        ],
+        "title": "AdminFeaturesListMeta",
+        "type": "object"
+      },
+      "AdminFeaturesListResponse": {
+        "additionalProperties": false,
+        "description": "``GET /admin/features`` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AdminFeaturesListData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/AdminFeaturesListMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "AdminFeaturesListResponse",
+        "type": "object"
+      },
       "CoordinateBody": {
         "additionalProperties": false,
         "description": "WGS84 좌표. 모든 외부 인터페이스는 lon/lat 순서를 사용한다.",
@@ -377,6 +812,425 @@
           "recent_runs"
         ],
         "title": "DagsterSummaryResponse",
+        "type": "object"
+      },
+      "DedupFeatureRecord": {
+        "additionalProperties": false,
+        "description": "Dedup 후보 한쪽 feature summary.",
+        "properties": {
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "dataset_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset Key"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "lat": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lat"
+          },
+          "lon": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lon"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          }
+        },
+        "required": [
+          "feature_id",
+          "name",
+          "kind",
+          "category"
+        ],
+        "title": "DedupFeatureRecord",
+        "type": "object"
+      },
+      "DedupReviewDecisionData": {
+        "additionalProperties": false,
+        "description": "Dedup decision result data.",
+        "properties": {
+          "changed": {
+            "title": "Changed",
+            "type": "boolean"
+          },
+          "decision": {
+            "enum": [
+              "accepted",
+              "rejected",
+              "merged",
+              "ignored"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "loser_feature_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Loser Feature Id"
+          },
+          "master_feature_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Master Feature Id"
+          },
+          "merge_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Merge Id"
+          },
+          "review_key": {
+            "title": "Review Key",
+            "type": "string"
+          },
+          "source_links_dropped": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Links Dropped"
+          },
+          "source_links_moved": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Links Moved"
+          }
+        },
+        "required": [
+          "review_key",
+          "decision",
+          "changed"
+        ],
+        "title": "DedupReviewDecisionData",
+        "type": "object"
+      },
+      "DedupReviewDecisionMeta": {
+        "additionalProperties": false,
+        "description": "Dedup decision meta.",
+        "properties": {
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "duration_ms"
+        ],
+        "title": "DedupReviewDecisionMeta",
+        "type": "object"
+      },
+      "DedupReviewDecisionRequest": {
+        "additionalProperties": false,
+        "description": "``PATCH /admin/dedup-review/{review_key}`` body.",
+        "properties": {
+          "decision": {
+            "enum": [
+              "accepted",
+              "rejected",
+              "merged",
+              "ignored"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "decision_reason": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Reason"
+          },
+          "master_feature_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Master Feature Id"
+          },
+          "reviewed_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed By"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "title": "DedupReviewDecisionRequest",
+        "type": "object"
+      },
+      "DedupReviewDecisionResponse": {
+        "additionalProperties": false,
+        "description": "``PATCH /admin/dedup-review/{review_key}`` response.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DedupReviewDecisionData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/DedupReviewDecisionMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "DedupReviewDecisionResponse",
+        "type": "object"
+      },
+      "DedupReviewListData": {
+        "additionalProperties": false,
+        "description": "Dedup review list data.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DedupReviewRecord"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "DedupReviewListData",
+        "type": "object"
+      },
+      "DedupReviewListMeta": {
+        "additionalProperties": false,
+        "description": "Dedup review list meta.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "count",
+          "page_size",
+          "duration_ms"
+        ],
+        "title": "DedupReviewListMeta",
+        "type": "object"
+      },
+      "DedupReviewListResponse": {
+        "additionalProperties": false,
+        "description": "``GET /admin/dedup-review`` response.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DedupReviewListData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/DedupReviewListMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "DedupReviewListResponse",
+        "type": "object"
+      },
+      "DedupReviewRecord": {
+        "additionalProperties": false,
+        "description": "``GET /admin/dedup-review`` item.",
+        "properties": {
+          "category_score": {
+            "title": "Category Score",
+            "type": "number"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "decision_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Reason"
+          },
+          "distance_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distance M"
+          },
+          "feature_a": {
+            "$ref": "#/components/schemas/DedupFeatureRecord"
+          },
+          "feature_b": {
+            "$ref": "#/components/schemas/DedupFeatureRecord"
+          },
+          "name_score": {
+            "title": "Name Score",
+            "type": "number"
+          },
+          "review_key": {
+            "title": "Review Key",
+            "type": "string"
+          },
+          "reviewed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed At"
+          },
+          "reviewed_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed By"
+          },
+          "spatial_score": {
+            "title": "Spatial Score",
+            "type": "number"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "total_score": {
+            "title": "Total Score",
+            "type": "number"
+          }
+        },
+        "required": [
+          "review_key",
+          "status",
+          "total_score",
+          "name_score",
+          "spatial_score",
+          "category_score",
+          "feature_a",
+          "feature_b",
+          "created_at"
+        ],
+        "title": "DedupReviewRecord",
         "type": "object"
       },
       "EtlPreviewResponse": {
@@ -1948,6 +2802,281 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/admin/dedup-review": {
+      "get": {
+        "operationId": "list_reviews_admin_dedup_review_get",
+        "parameters": [
+          {
+            "description": "dedup review status 반복 필터",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": [
+                      "pending",
+                      "accepted",
+                      "rejected",
+                      "merged",
+                      "ignored"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "dedup review status 반복 필터",
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Provider"
+            }
+          },
+          {
+            "in": "query",
+            "name": "dataset_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dataset Key"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_score",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Score"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_score",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Max Score"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DedupReviewListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Reviews",
+        "tags": [
+          "admin-dedup"
+        ]
+      }
+    },
+    "/admin/dedup-review/{review_key}": {
+      "patch": {
+        "operationId": "decide_review_admin_dedup_review__review_key__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "review_key",
+            "required": true,
+            "schema": {
+              "title": "Review Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DedupReviewDecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DedupReviewDecisionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "review_key 없음"
+          },
+          "409": {
+            "description": "전이 불가"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Decide Review",
+        "tags": [
+          "admin-dedup"
+        ]
+      }
+    },
     "/admin/feature-update-requests": {
       "get": {
         "operationId": "list_feature_update_requests_admin_feature_update_requests_get",
@@ -2325,6 +3454,369 @@
         "summary": "기존 request payload를 run_mode=now로 재큐잉",
         "tags": [
           "admin-update-requests"
+        ]
+      }
+    },
+    "/admin/features": {
+      "get": {
+        "operationId": "list_features_admin_features_get",
+        "parameters": [
+          {
+            "description": "name/address/feature/source 검색",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "name/address/feature/source 검색",
+              "title": "Q"
+            }
+          },
+          {
+            "description": "feature kind 반복 필터",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "feature kind 반복 필터",
+              "title": "Kind"
+            }
+          },
+          {
+            "description": "category code 반복 필터",
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "category code 반복 필터",
+              "title": "Category"
+            }
+          },
+          {
+            "description": "feature status 반복 필터. 기본 active.",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "feature status 반복 필터. 기본 active.",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "primary provider 반복 필터",
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "primary provider 반복 필터",
+              "title": "Provider"
+            }
+          },
+          {
+            "description": "primary dataset_key 반복 필터",
+            "in": "query",
+            "name": "dataset_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "primary dataset_key 반복 필터",
+              "title": "Dataset Key"
+            }
+          },
+          {
+            "in": "query",
+            "name": "has_coord",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Has Coord"
+            }
+          },
+          {
+            "in": "query",
+            "name": "has_issue",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Has Issue"
+            }
+          },
+          {
+            "in": "query",
+            "name": "issue_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Issue Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "updated_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Updated From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "updated_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Updated To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "name",
+              "enum": [
+                "name",
+                "updated_at",
+                "created_at",
+                "kind",
+                "status",
+                "provider",
+                "issue_count"
+              ],
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "asc",
+                    "desc"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Order"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminFeaturesListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Features",
+        "tags": [
+          "admin-features"
+        ]
+      }
+    },
+    "/admin/features/{feature_id}/deactivate": {
+      "post": {
+        "operationId": "deactivate_feature_route_admin_features__feature_id__deactivate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature_id",
+            "required": true,
+            "schema": {
+              "title": "Feature Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminFeatureDeactivateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminFeatureDeactivateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "feature 없음"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Deactivate Feature Route",
+        "tags": [
+          "admin-features"
         ]
       }
     },
