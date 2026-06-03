@@ -8,6 +8,7 @@ from dagster import Definitions, ResourceDefinition, resource
 
 from .assets import FEATURE_LOAD_ASSETS
 from .maintenance import MAINTENANCE_JOBS, MAINTENANCE_SCHEDULES
+from .offline_uploads import OFFLINE_UPLOAD_JOBS
 from .schedules import FEATURE_LOAD_JOBS, FEATURE_LOAD_SCHEDULES
 from .sensors import FEATURE_UPDATE_JOBS, FEATURE_UPDATE_SENSORS
 
@@ -15,6 +16,7 @@ REQUIRED_RESOURCE_KEYS: Final[tuple[str, ...]] = (
     "krtour_map_client",
     "reverse_geocoder",
     "feature_update_runner",
+    "offline_upload_store",
     "fetched_at",
     "strict_address",
     "datagokr_cultural_festivals",
@@ -64,7 +66,15 @@ def _value_resource(key: str, value: object) -> ResourceDefinition:
 
 defs = Definitions(
     assets=FEATURE_LOAD_ASSETS,
-    jobs=cast("Any", [*FEATURE_LOAD_JOBS, *FEATURE_UPDATE_JOBS, *MAINTENANCE_JOBS]),
+    jobs=cast(
+        "Any",
+        [
+            *FEATURE_LOAD_JOBS,
+            *FEATURE_UPDATE_JOBS,
+            *MAINTENANCE_JOBS,
+            *OFFLINE_UPLOAD_JOBS,
+        ],
+    ),
     schedules=[*FEATURE_LOAD_SCHEDULES, *MAINTENANCE_SCHEDULES],
     sensors=FEATURE_UPDATE_SENSORS,
     resources={

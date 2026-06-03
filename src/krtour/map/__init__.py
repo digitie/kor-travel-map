@@ -33,11 +33,12 @@ ADR 참조
 
 from __future__ import annotations
 
-from krtour.map.client import AsyncKrtourMapClient, DedupSyncResult
+from krtour.map.client import AsyncKrtourMapClient, DedupSyncResult, OfflineUploadLoadResult
 
 __all__ = [
     "AsyncKrtourMapClient",
     "DedupSyncResult",
+    "OfflineUploadLoadResult",
     "__version__",
 ]
 

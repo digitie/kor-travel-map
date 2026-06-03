@@ -25,6 +25,9 @@ dagster dev -m krtour.map_dagster.definitions -h 0.0.0.0 -p 9013
 - `reverse_geocoder`: kraddr-geo REST v2 기반 reverse geocoder.
 - `feature_update_runner`: `ProviderDatasetRefreshRunner`. worker job이 provider/dataset
   refresh를 실행할 때 호출한다.
+- `offline_upload_store`: `OfflineUploadObjectStore`. `offline_upload_load` job이
+  `ops.offline_uploads.storage_key` 원본 bytes를 읽을 때 호출한다. 실제 RustFS/S3
+  wiring은 운영 definitions에서 주입한다.
 - `fetched_at`: batch 기준 aware `datetime`. 기본값은 실행 시점 KST.
 - `strict_address`: 주소/좌표 error 시 적재 전 중단 여부. 기본 `true`.
 - `feature_update_failure_notifier`: 선택 알림 callable. worker run 실패 시
@@ -69,3 +72,13 @@ provider record resource:
 Sensor는 `peek_next_update_request()`로 다음 queued request를 상태 변경 없이 확인한다.
 실제 상태 전이는 worker job 안에서 `AsyncKrtourMapClient.execute_feature_update_request()`
 가 맡는다. 이 구조는 RunRequest 생성 실패가 request를 `running`에 남기는 상황을 피한다.
+
+## Offline upload load
+
+- Job: `offline_upload_load`
+- Op: `load_offline_upload`
+- Config: `ops.load_offline_upload.config.upload_id`
+- Required resources: `krtour_map_client`, `offline_upload_store`
+
+현재 첫 구현은 JSON/JSONL `FeatureBundle` dump만 지원한다. Admin multipart upload,
+validation wizard, CSV/TSV column mapping, 실제 RustFS resource 구현은 후속 task다.

@@ -2,6 +2,32 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-03 (codex) — T-208g offline upload load job
+
+**작업**: admin offline upload API/UI의 선행 DB/job 계약으로, 객체 저장소에 이미
+저장된 원본 파일을 Dagster가 읽어 PostGIS에 적재하는 T-208g를 구현.
+
+- **DB 계약**: `ops.offline_uploads` 테이블(alembic 0011)과
+  `infra.offline_upload_repo`를 추가했다. provider/dataset/scope, storage backend/key,
+  byte size/checksum, detected format/encoding, validation/load `import_jobs` FK,
+  state를 보존한다.
+- **Parser/load orchestration**: `krtour.map.offline_upload`가 JSON/JSONL
+  `FeatureBundle` dump를 읽는다. `Feature.detail` dict 금지(ADR-018)는 kind별 detail
+  DTO hydrate로 지키고, size/checksum 검증 뒤 `load_bundles`를 호출한다.
+- **직렬화/진행 상태**: provider/dataset/scope advisory lock을 잡고,
+  `ops.import_jobs`를 `running → done|failed`로 전이한다. checksum/parser/load 실패는
+  `offline_uploads.state='load_failed'`와 failed job row로 남긴다.
+- **Client/Dagster**: `AsyncKrtourMapClient.run_offline_upload_load_job`와 Dagster
+  `offline_upload_load` job을 추가했다. job은 `upload_id` config와
+  `offline_upload_store` resource를 받는다.
+- **범위 명시**: 실제 RustFS resource wiring, multipart upload/validate/load admin
+  API, CSV/TSV column mapping wizard는 후속이다. 이번 PR은 API/UI가 사용할 영속 DB와
+  Dagster load 경로를 먼저 닫는다.
+- **검증**: parser/Dagster definitions unit `8 passed`, migrated PostGIS integration
+  `2 passed`.
+- **다음**: T-208b 잔여 RustFS/provider 실제 resource wiring 또는
+  `/admin/offline-uploads*` API/UI 선행 task 분리.
+
 ## 2026-06-03 (codex) — T-208f consistency/dedup refresh job
 
 **작업**: T-211b admin UI 최신화 머지 후, 독립 Dagster 운영 완성 선행 task인

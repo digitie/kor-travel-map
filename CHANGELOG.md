@@ -5,6 +5,19 @@
 
 ## [Unreleased]
 
+### 운영 — Dagster offline upload load job (2026-06-03)
+
+- **NEW**: `ops.offline_uploads` 테이블과 repository를 추가했다. RustFS 등 객체
+  저장소의 원본 파일 메타데이터를 보존하고 validation/load `import_jobs`와 연결한다.
+- **NEW**: `AsyncKrtourMapClient.run_offline_upload_load_job()`을 추가했다. 업로드
+  원본 파일을 store resource에서 읽어 size/checksum을 검증하고 JSON/JSONL
+  `FeatureBundle`로 파싱한 뒤 PostGIS에 적재한다.
+- **NEW**: `offline_upload_load` Dagster job을 추가했다. `upload_id` config와
+  `offline_upload_store` resource를 받아 수동 실행한다.
+- **TEST**: parser/Dagster unit test와 migrated PostGIS 통합 테스트를 추가했다.
+  통합 테스트는 성공 적재와 checksum 실패 시 `import_jobs=failed` /
+  `offline_uploads=load_failed` 전이를 검증한다.
+
 ### 운영 — Dagster consistency/dedup refresh job (2026-06-03)
 
 - **NEW**: `consistency_dedup_refresh` Dagster job을 추가했다. DB에 적재된
