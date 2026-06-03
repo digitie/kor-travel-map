@@ -47,7 +47,7 @@ T-211a의 완료 기준은 다음 두 가지다.
 | `/admin/dagster` | 가능 | `useDagsterSummary`, `DAGSTER_UI_URL` iframe | Dagster NUX seen은 backend best-effort 처리. iframe 차단은 배포 환경 header 설정 영향 |
 | `/admin/providers` | 보류 | 없음 | `/admin/providers*` REST 없음 |
 | `/admin/provider-refresh-policies` | 보류 | 없음 | `/admin/provider-refresh-policies*` REST 없음 |
-| `/admin/offline-imports` | 보류 | 없음 | T-208g에서 `ops.offline_uploads` + Dagster `offline_upload_load`는 구현. `/admin/offline-uploads*` REST/UI, validation wizard, CSV/TSV mapping은 후속 |
+| `/admin/offline-imports` | 보류 | 없음 | T-208g에서 `ops.offline_uploads` + Dagster `offline_upload_load`, T-208b 후속에서 RustFS/S3 `offline_upload_store` resource 구현. `/admin/offline-uploads*` REST/UI, validation wizard, CSV/TSV mapping은 후속 |
 | `/ops/error-logs` | 보류 | 없음 | `ops.import_job_events`, `/ops/error-logs` 미구현 |
 
 ## 문서 정정 사항

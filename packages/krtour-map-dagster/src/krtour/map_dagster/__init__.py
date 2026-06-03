@@ -11,6 +11,11 @@ from .maintenance import (
     MAINTENANCE_SCHEDULES,
 )
 from .offline_uploads import OFFLINE_UPLOAD_JOBS
+from .resources import (
+    build_offline_upload_store_from_settings,
+    create_s3_client_from_settings,
+    offline_upload_store_resource,
+)
 from .schedules import FEATURE_LOAD_JOBS, FEATURE_LOAD_SCHEDULES
 from .sensors import FEATURE_UPDATE_JOBS, FEATURE_UPDATE_SENSORS
 from .validation import (
@@ -36,9 +41,12 @@ __all__ = [
     "FeatureAddressIssue",
     "FeatureAddressValidation",
     "FeatureAddressValidationSummary",
+    "build_offline_upload_store_from_settings",
+    "create_s3_client_from_settings",
     "defs",
     "ensure_feature_address_valid",
     "load_feature_bundles_for_dagster",
+    "offline_upload_store_resource",
     "validate_feature_bundle_address",
     "validate_feature_bundles_address",
 ]

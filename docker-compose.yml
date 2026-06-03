@@ -19,6 +19,49 @@ services:
       timeout: 5s
       retries: 20
 
+  rustfs-perms:
+    image: alpine:3.20
+    user: root
+    volumes:
+      - krtour-map-rustfs:/data
+    command: ["sh", "-c", "chown -R 10001:10001 /data"]
+
+  rustfs:
+    image: rustfs/rustfs:latest
+    environment:
+      RUSTFS_ADDRESS: :9000
+      RUSTFS_ACCESS_KEY: ${KRTOUR_MAP_OBJECT_STORE_ACCESS_KEY_ID:-krtour-map-dev-access}
+      RUSTFS_SECRET_KEY: ${KRTOUR_MAP_OBJECT_STORE_SECRET_ACCESS_KEY:-krtour-map-dev-secret}
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_CONSOLE_ADDRESS: 0.0.0.0:9001
+    command: ["/data"]
+    depends_on:
+      rustfs-perms:
+        condition: service_completed_successfully
+    ports:
+      - "${KRTOUR_MAP_RUSTFS_API_PORT:-9003}:9000"
+      - "${KRTOUR_MAP_RUSTFS_CONSOLE_PORT:-9004}:9001"
+    volumes:
+      - krtour-map-rustfs:/data
+
+  rustfs-init:
+    image: minio/mc:latest
+    depends_on:
+      - rustfs
+    environment:
+      KRTOUR_MAP_OBJECT_STORE_BUCKET: ${KRTOUR_MAP_OBJECT_STORE_BUCKET:-krtour-map}
+      KRTOUR_MAP_OFFLINE_UPLOAD_BUCKET: ${KRTOUR_MAP_OFFLINE_UPLOAD_BUCKET:-krtour-uploads}
+      KRTOUR_MAP_OBJECT_STORE_ACCESS_KEY_ID: ${KRTOUR_MAP_OBJECT_STORE_ACCESS_KEY_ID:-krtour-map-dev-access}
+      KRTOUR_MAP_OBJECT_STORE_SECRET_ACCESS_KEY: ${KRTOUR_MAP_OBJECT_STORE_SECRET_ACCESS_KEY:-krtour-map-dev-secret}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        until mc alias set rustfs http://rustfs:9000 "$$KRTOUR_MAP_OBJECT_STORE_ACCESS_KEY_ID" "$$KRTOUR_MAP_OBJECT_STORE_SECRET_ACCESS_KEY"; do
+          sleep 2
+        done
+        mc mb --ignore-existing "rustfs/$$KRTOUR_MAP_OBJECT_STORE_BUCKET"
+        mc mb --ignore-existing "rustfs/$$KRTOUR_MAP_OFFLINE_UPLOAD_BUCKET"
+
   api:
     build:
       context: .
@@ -32,6 +75,13 @@ services:
       KRTOUR_MAP_ADMIN_CORS_ALLOW_ORIGINS: '["http://localhost:${KRTOUR_MAP_ADMIN_WEB_PORT:-9012}","http://127.0.0.1:${KRTOUR_MAP_ADMIN_WEB_PORT:-9012}"]'
       KRTOUR_MAP_ADMIN_DAGSTER_URL: ${KRTOUR_MAP_DOCKER_ADMIN_DAGSTER_URL:-http://dagster:${KRTOUR_MAP_DAGSTER_PORT:-9013}}
       KRTOUR_MAP_PG_DSN: ${KRTOUR_MAP_DOCKER_PG_DSN:-postgresql+asyncpg://krtour_map:krtour_map@postgres:5432/krtour_map}
+      KRTOUR_MAP_OBJECT_STORE_ENDPOINT_URL: ${KRTOUR_MAP_DOCKER_OBJECT_STORE_ENDPOINT_URL:-http://rustfs:9000}
+      KRTOUR_MAP_OBJECT_STORE_BUCKET: ${KRTOUR_MAP_OBJECT_STORE_BUCKET:-krtour-map}
+      KRTOUR_MAP_OBJECT_STORE_REGION: ${KRTOUR_MAP_OBJECT_STORE_REGION:-us-east-1}
+      KRTOUR_MAP_OBJECT_STORE_ACCESS_KEY_ID: ${KRTOUR_MAP_OBJECT_STORE_ACCESS_KEY_ID:-krtour-map-dev-access}
+      KRTOUR_MAP_OBJECT_STORE_SECRET_ACCESS_KEY: ${KRTOUR_MAP_OBJECT_STORE_SECRET_ACCESS_KEY:-krtour-map-dev-secret}
+      KRTOUR_MAP_OBJECT_STORE_PUBLIC_BASE_URL: ${KRTOUR_MAP_OBJECT_STORE_PUBLIC_BASE_URL:-http://127.0.0.1:${KRTOUR_MAP_RUSTFS_API_PORT:-9003}/${KRTOUR_MAP_OBJECT_STORE_BUCKET:-krtour-map}}
+      KRTOUR_MAP_OFFLINE_UPLOAD_BUCKET: ${KRTOUR_MAP_OFFLINE_UPLOAD_BUCKET:-krtour-uploads}
       KRTOUR_MAP_ADMIN_KMA_SERVICE_KEY: ${KRTOUR_MAP_ADMIN_KMA_SERVICE_KEY:-${DATA_GO_KR_SERVICE_KEY:-${KMA_SERVICE_KEY:-${KMA_API_KEY:-}}}}
       KRTOUR_MAP_ADMIN_KMA_APIHUB_KEY: ${KRTOUR_MAP_ADMIN_KMA_APIHUB_KEY:-${KMA_APIHUB_AUTH_KEY:-${KMA_APIHUB_KEY:-}}}
       KRTOUR_MAP_ADMIN_OPINET_SERVICE_KEY: ${KRTOUR_MAP_ADMIN_OPINET_SERVICE_KEY:-${OPINET_API_KEY:-${OPINET_SERVICE_KEY:-}}}
@@ -44,6 +94,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      rustfs-init:
+        condition: service_completed_successfully
     ports:
       - "${KRTOUR_MAP_ADMIN_PORT:-9011}:${KRTOUR_MAP_ADMIN_PORT:-9011}"
 
@@ -79,11 +131,20 @@ services:
       DAGSTER_DISABLE_TELEMETRY: ${DAGSTER_DISABLE_TELEMETRY:-yes}
       KRTOUR_MAP_DAGSTER_PORT: ${KRTOUR_MAP_DAGSTER_PORT:-9013}
       KRTOUR_MAP_PG_DSN: ${KRTOUR_MAP_DOCKER_PG_DSN:-postgresql+asyncpg://krtour_map:krtour_map@postgres:5432/krtour_map}
+      KRTOUR_MAP_OBJECT_STORE_ENDPOINT_URL: ${KRTOUR_MAP_DOCKER_OBJECT_STORE_ENDPOINT_URL:-http://rustfs:9000}
+      KRTOUR_MAP_OBJECT_STORE_BUCKET: ${KRTOUR_MAP_OBJECT_STORE_BUCKET:-krtour-map}
+      KRTOUR_MAP_OBJECT_STORE_REGION: ${KRTOUR_MAP_OBJECT_STORE_REGION:-us-east-1}
+      KRTOUR_MAP_OBJECT_STORE_ACCESS_KEY_ID: ${KRTOUR_MAP_OBJECT_STORE_ACCESS_KEY_ID:-krtour-map-dev-access}
+      KRTOUR_MAP_OBJECT_STORE_SECRET_ACCESS_KEY: ${KRTOUR_MAP_OBJECT_STORE_SECRET_ACCESS_KEY:-krtour-map-dev-secret}
+      KRTOUR_MAP_OFFLINE_UPLOAD_BUCKET: ${KRTOUR_MAP_OFFLINE_UPLOAD_BUCKET:-krtour-uploads}
     depends_on:
       postgres:
         condition: service_healthy
+      rustfs-init:
+        condition: service_completed_successfully
     ports:
       - "${KRTOUR_MAP_DAGSTER_PORT:-9013}:${KRTOUR_MAP_DAGSTER_PORT:-9013}"
 
 volumes:
   krtour-map-postgres:
+  krtour-map-rustfs:

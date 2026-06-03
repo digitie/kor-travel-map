@@ -2,6 +2,34 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-03 (codex) — T-208b RustFS offline upload store wiring
+
+**작업**: admin UI #9 offline upload 화면의 선행조건으로, Dagster
+`offline_upload_load` job이 실제 RustFS/S3 호환 object store에서 원본 파일을 읽을 수
+있도록 T-208b 잔여 resource wiring을 구현.
+
+- **S3 호환 store**: `krtour.map.infra.file_store.S3ObjectStore`를 추가했다.
+  boto3 호환 client의 `get_object`/`put_object`를 `asyncio.to_thread`로 감싸고,
+  읽기/쓰기 실패는 `FileStoreError`로 표준화한다.
+- **설정 정렬**: `KrtourMapSettings`에
+  `KRTOUR_MAP_OBJECT_STORE_{ENDPOINT_URL,BUCKET,REGION,ACCESS_KEY_ID,SECRET_ACCESS_KEY,
+  PUBLIC_BASE_URL,PREFIX}`와 `KRTOUR_MAP_OFFLINE_UPLOAD_{BUCKET,PREFIX}`를 맞췄다.
+  offline upload 기본 bucket은 ADR-045 D-14 정본인 `krtour-uploads`다.
+- **Dagster resource**: `krtour.map_dagster.resources`를 추가하고,
+  `offline_upload_store_resource`가 환경변수 기반 boto3 client와
+  `krtour-uploads` bucket store를 기본 제공하게 했다. 테스트/운영 특수 배포는 기존처럼
+  resource override가 가능하다.
+- **Docker/RustFS**: `docker-compose.yml`에 `rustfs`, `rustfs-perms`,
+  `rustfs-init`를 추가했다. RustFS host port는 API `9003`, console `9004`이고,
+  `rustfs-init`가 `krtour-map`과 `krtour-uploads` bucket을 생성한다.
+- **검증**: `S3ObjectStore`/Dagster resource/definitions/offline upload Dagster unit
+  `8 passed`, targeted `ruff`, targeted `mypy`, `docker compose config --quiet` 통과.
+  Docker RustFS를 실제 기동해 `rustfs-init` bucket 생성(`krtour-map`,
+  `krtour-uploads`)과 `S3ObjectStore.write_bytes/read_bytes` put/get smoke를 확인했다.
+- **다음**: admin UI #9 선행으로 `/admin/offline-uploads*` multipart upload/list/detail/
+  load API와 upload 화면을 먼저 연결한다. CSV/TSV column mapping wizard는 그 다음
+  별도 task로 진행한다.
+
 ## 2026-06-03 (codex) — T-208g offline upload load job
 
 **작업**: admin offline upload API/UI의 선행 DB/job 계약으로, 객체 저장소에 이미
@@ -20,9 +48,9 @@
 - **Client/Dagster**: `AsyncKrtourMapClient.run_offline_upload_load_job`와 Dagster
   `offline_upload_load` job을 추가했다. job은 `upload_id` config와
   `offline_upload_store` resource를 받는다.
-- **범위 명시**: 실제 RustFS resource wiring, multipart upload/validate/load admin
-  API, CSV/TSV column mapping wizard는 후속이다. 이번 PR은 API/UI가 사용할 영속 DB와
-  Dagster load 경로를 먼저 닫는다.
+- **범위 명시**: multipart upload/validate/load admin API, CSV/TSV column mapping
+  wizard는 후속이다. 이번 PR은 API/UI가 사용할 영속 DB와 Dagster load 경로를 먼저
+  닫는다. 실제 RustFS resource wiring은 후속 T-208b에서 처리했다.
 - **검증**: parser/Dagster definitions unit `8 passed`, migrated PostGIS integration
   `2 passed`.
 - **다음**: T-208b 잔여 RustFS/provider 실제 resource wiring 또는

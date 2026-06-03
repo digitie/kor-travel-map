@@ -5,6 +5,20 @@
 
 ## [Unreleased]
 
+### 운영 — RustFS offline upload store wiring (2026-06-03)
+
+- **NEW**: `krtour.map.infra.file_store.S3ObjectStore`를 추가했다. boto3 호환
+  S3 client를 async wrapper로 감싸고, 읽기/쓰기 실패는 `FileStoreError`로 표준화한다.
+- **NEW**: `krtour.map_dagster.resources.offline_upload_store_resource`를 추가했다.
+  Dagster `offline_upload_load` job이 `KRTOUR_MAP_OBJECT_STORE_*`와
+  `KRTOUR_MAP_OFFLINE_UPLOAD_BUCKET` 설정으로 RustFS/S3 호환 bucket을 읽는다.
+- **CHANGED**: `KrtourMapSettings`와 `.env.example`의 object store field/env 이름을
+  정렬했다. offline upload bucket 기본값은 `krtour-uploads`다.
+- **CHANGED**: Docker compose stack에 RustFS API `9003`, console `9004`,
+  `rustfs-init` bucket 생성 경로를 추가했다.
+- **TEST**: S3 store/resource/definitions/offline upload Dagster unit test,
+  `docker compose config --quiet`, 실제 Docker RustFS put/get smoke를 추가했다.
+
 ### 운영 — Dagster offline upload load job (2026-06-03)
 
 - **NEW**: `ops.offline_uploads` 테이블과 repository를 추가했다. RustFS 등 객체

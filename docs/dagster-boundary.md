@@ -359,8 +359,10 @@ offline upload load job은 T-208g 이후 다음 흐름을 따른다.
 5. `AsyncKrtourMapClient.run_offline_upload_load_job()`이 provider/dataset/scope advisory
    lock을 잡고 `ops.import_jobs` + `ops.offline_uploads` 상태 전이와 PostGIS 적재를 한
    transaction으로 처리한다.
-6. CSV/TSV column mapping, validation wizard, multipart `/admin/offline-uploads*` API,
-   실제 RustFS resource wiring은 후속이다.
+6. 기본 `offline_upload_store` resource는 `KRTOUR_MAP_OBJECT_STORE_*`와
+   `KRTOUR_MAP_OFFLINE_UPLOAD_BUCKET`에서 RustFS/S3 호환 client를 만든다.
+7. CSV/TSV column mapping, validation wizard, multipart `/admin/offline-uploads*` API는
+   후속이다.
 
 ## 10. 정기 schedule 구현 (krtour-map Dagster)
 

@@ -7,7 +7,13 @@ source "$ROOT_DIR/scripts/load-env.sh"
 
 ports=("$@")
 if [[ "${#ports[@]}" -eq 0 ]]; then
-  ports=("$KRTOUR_MAP_ADMIN_PORT" "$KRTOUR_MAP_ADMIN_WEB_PORT" "$KRTOUR_MAP_DAGSTER_PORT")
+  ports=(
+    "$KRTOUR_MAP_ADMIN_PORT"
+    "$KRTOUR_MAP_ADMIN_WEB_PORT"
+    "$KRTOUR_MAP_DAGSTER_PORT"
+    "$KRTOUR_MAP_RUSTFS_API_PORT"
+    "$KRTOUR_MAP_RUSTFS_CONSOLE_PORT"
+  )
 fi
 
 find_pids_for_port() {
@@ -36,6 +42,16 @@ find_windows_pids_for_port() {
     "Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess" \
     2>/dev/null \
     | tr -d '\r' \
+    | sed '/^$/d' \
+    | sort -u
+}
+
+find_docker_containers_for_port() {
+  local port="$1"
+  if ! command -v docker >/dev/null 2>&1; then
+    return 0
+  fi
+  docker ps --filter "publish=$port" --format "{{.ID}}" 2>/dev/null \
     | sed '/^$/d' \
     | sort -u
 }
@@ -86,6 +102,12 @@ for port in "${ports[@]}"; do
         kill -9 "$pid" 2>/dev/null || true
       fi
     done
+  fi
+
+  mapfile -t docker_containers < <(find_docker_containers_for_port "$port")
+  if [[ "${#docker_containers[@]}" -gt 0 ]]; then
+    echo "port $port: stopping Docker containers ${docker_containers[*]}"
+    docker stop "${docker_containers[@]}" >/dev/null 2>&1 || true
   fi
 
   mapfile -t root_pids < <(find_wsl_root_pids_for_port "$port")
