@@ -449,7 +449,71 @@ request 실행을 Dagster에 연결했다.
 
 결과적으로 `ops.import_jobs`와 Dagster run을 사용한다.
 
-## 7.1 Dagster 운영 요약 API
+## 7.1 Ops 조회 API
+
+T-207d 구현 상태: `krtour-map-admin`은 운영 화면이 필요한 DB 기반 summary와 목록을
+`/ops/*`로 제공한다. 이 API는 read-only다. import job 취소/재실행 같은 쓰기 작업은
+후속 `/admin/import-jobs` 계약에서 다룬다.
+
+### `GET /ops/metrics`
+
+운영 홈/대시보드용 summary metric을 반환한다.
+
+응답 주요 필드:
+
+- `features_total`, `features_active`, `features_inactive`
+- `features_by_kind`
+- `source_records_by_provider`
+- `import_jobs_by_state`
+- `dedup_queue_by_status`
+- `dedup_fp_stats`
+- `data_integrity_issues`
+- `latest_consistency_report`
+
+### `GET /ops/import-jobs`
+
+`ops.import_jobs` 목록을 `created_at DESC, job_id DESC` keyset cursor로 반환한다.
+
+Query:
+
+- `state`: `queued` / `running` / `done` / `failed` / `cancelled`
+- `kind`
+- `page_size` (`1..200`, 기본 `50`)
+- `cursor`
+
+### `GET /ops/import-jobs/{job_id}`
+
+`ops.import_jobs` 단건을 반환한다. 없으면 `404`.
+
+### `GET /ops/consistency/reports`
+
+`ops.feature_consistency_reports` 목록을 `started_at DESC, report_id DESC` keyset
+cursor로 반환한다. 기존 F1~F4 batch report 조회 표면이다.
+
+Query:
+
+- `severity_max`: `OK` / `WARN` / `ERROR`
+- `page_size` (`1..200`, 기본 `50`)
+- `cursor`
+
+### `GET /ops/consistency/issues`
+
+`ops.data_integrity_violations` 목록을 `detected_at DESC, violation_key DESC` keyset
+cursor로 반환한다. Phase 2 F5~F8 계열과 주소/좌표 매칭 이슈는 이 큐를 통해 운영
+화면에 노출한다.
+
+Query:
+
+- `status`: `open` / `acknowledged` / `resolved` / `ignored` (기본 `open`)
+- `severity`: `info` / `warning` / `error` / `critical`
+- `violation_type`
+- `provider`
+- `dataset_key`
+- `feature_id`
+- `page_size` (`1..200`, 기본 `50`)
+- `cursor`
+
+## 7.2 Dagster 운영 요약 API
 
 Admin UI는 Dagster webserver 자체 화면을 `/admin/dagster`에서 iframe으로 embed하고,
 같은 화면에 자체 운영 요약 UI를 렌더한다. 자체 요약은 FastAPI가 Dagster GraphQL을
@@ -496,7 +560,7 @@ Dagster NUX seen 처리는 부수효과로 허용한다. feature update request,
 progress, cancel은 `/admin/feature-update-requests`와 `/admin/import-jobs` 계약으로
 분리한다.
 
-## 7.2 POI/cache target API
+## 7.3 POI/cache target API
 
 외부 앱은 POI 좌표만 보내지 않고 고유 key와 좌표를 함께 등록한다. 좌표 precision
 차이로 동일 POI가 여러 개 생기는 것을 막기 위해 `external_system + target_key`를

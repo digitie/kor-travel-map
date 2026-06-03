@@ -112,8 +112,10 @@ Frontend 작업 후에는 `react-doctor` 실행, 결과 검토, 개선 반영이
 | `/admin/poi-cache-targets` | 외부 POI/cache target 등록/삭제/정책 관리 | `/admin/poi-cache-targets` |
 | `/admin/provider-refresh-policies` | provider별 update 주기/rate limit 정책 | `/admin/provider-refresh-policies` |
 | `/admin/dagster` | Dagster 운영 요약 + Dagster webserver embed. summary 성공 시 Dagster NUX seen best-effort 처리 | `/ops/dagster/summary` |
-| `/ops/error-logs` | provider/API/job 에러 로그 | `/ops/error-logs` |
-| `/ops/consistency` | consistency report와 위반 샘플 | `/ops/consistency/reports` |
+| `/ops/import-jobs` | import job 진행/실패/완료 목록과 단건 상세 | `/ops/import-jobs`, `/ops/import-jobs/{job_id}` |
+| `/ops/metrics` | feature/source/job/dedup/issue/consistency summary | `/ops/metrics` |
+| `/ops/consistency` | consistency report와 issue 큐 | `/ops/consistency/reports`, `/ops/consistency/issues` |
+| `/ops/error-logs` | provider/API/job 이벤트 로그 | 후속 `ops.import_job_events` 스키마 필요 |
 | `/debug/etl` | provider 변환 preview | 기존 `/debug/etl/*` |
 
 ### 4.2 네비게이션 그룹
