@@ -25,11 +25,12 @@ T-211a의 완료 기준은 다음 두 가지다.
 | `src/api/dedup.ts` | `/admin/dedup-review`, `/admin/dedup-review/{review_key}` | 신규. 결정 mutation 후 feature/ops cache 무효화 |
 | `src/api/updateRequests.ts` | `/admin/feature-update-requests`, cancel, run-now | 신규. queue polling과 request detail polling 포함 |
 | `src/api/poiCacheTargets.ts` | `/admin/poi-cache-targets`, `/features/nearby/by-target` | 신규. 외부 POI target CRUD와 target 기준 주변 feature 조회 |
+| `src/api/offlineUploads.ts` | `/admin/offline-uploads`, `/admin/offline-uploads/{upload_id}`, load 실행 | T-208h 신규. JSON/JSONL upload/list/detail/Dagster load launch |
 | `src/api/dagster.ts` | `/ops/dagster/summary` | 기존 구현 유지. 공통 fetch wrapper 사용으로 정리 |
 
 공통 fetch wrapper는 `src/api/client.ts`에서 `getJson`, `postJson`, `putJson`,
-`patchJson`, `deleteJson`, `pathWithQuery`를 제공한다. 인증 헤더는 계속 없다
-(ADR-005/035).
+`patchJson`, `deleteJson`, `postFormData`, `pathWithQuery`를 제공한다. 인증 헤더는
+계속 없다(ADR-005/035).
 
 ## Route별 구현 가능성
 
@@ -47,7 +48,7 @@ T-211a의 완료 기준은 다음 두 가지다.
 | `/admin/dagster` | 가능 | `useDagsterSummary`, `DAGSTER_UI_URL` iframe | Dagster NUX seen은 backend best-effort 처리. iframe 차단은 배포 환경 header 설정 영향 |
 | `/admin/providers` | 보류 | 없음 | `/admin/providers*` REST 없음 |
 | `/admin/provider-refresh-policies` | 보류 | 없음 | `/admin/provider-refresh-policies*` REST 없음 |
-| `/admin/offline-imports` | 보류 | 없음 | T-208g에서 `ops.offline_uploads` + Dagster `offline_upload_load`, T-208b 후속에서 RustFS/S3 `offline_upload_store` resource 구현. `/admin/offline-uploads*` REST/UI, validation wizard, CSV/TSV mapping은 후속 |
+| `/admin/offline-uploads` | 기본 구현 완료 | `useOfflineUploads`, create/load mutation | T-208h에서 JSON/JSONL `FeatureBundle` upload/list/detail/Dagster load launch 연결. CSV/TSV validation wizard와 column mapping은 T-208i 후속 |
 | `/ops/error-logs` | 보류 | 없음 | `ops.import_job_events`, `/ops/error-logs` 미구현 |
 
 ## 문서 정정 사항
@@ -83,6 +84,24 @@ T-211b는 아래 범위를 구현했다.
 Playwright e2e는 새 home dashboard와 신규 admin/ops route smoke 기준으로 갱신했다.
 React Doctor는 exit code 0이며 남은 optional warning은 기존 shadcn/ui primitive 구조와
 Dagster iframe sandbox rule false positive다.
+
+## T-208h 보강 결과
+
+T-208h는 T-211b 이후 admin UI #9의 offline upload 선행 gap을 닫았다.
+
+- Backend: `POST/GET /admin/offline-uploads`, `GET /admin/offline-uploads/{upload_id}`,
+  `POST /admin/offline-uploads/{upload_id}/load`.
+- Storage: RustFS/S3 `krtour-uploads` bucket에
+  `offline-uploads/{upload_id}/{filename}` key로 JSON/JSONL 원본을 저장.
+- DB: `ops.offline_uploads` row 생성, state/provider/dataset keyset 목록, 상세 조회.
+- Dagster: API가 Dagster GraphQL `launchRun`으로 `offline_upload_load` job을 실행하고
+  run id/status를 반환.
+- Frontend: `/admin/offline-uploads` 화면에서 파일 업로드, 필터, 상세 확인, load 실행.
+- 검증: WSL live smoke에서 upload → Dagster `SUCCESS` → DB `loaded/done/progress=100`,
+  Windows Playwright `admin-ops.spec.ts` 6/6 통과.
+
+남은 offline upload gap은 CSV/TSV validation, column mapping preset, 검증 결과 UI,
+load 전 validation gate다. 이 범위는 T-208i로 분리한다.
 
 ## T-211b 우선 구현 순서 (완료 기준)
 

@@ -220,7 +220,7 @@ PID를 종료한 뒤 WSL frontend를 다시 띄운다. 정상은 `wslrelay`다.
 | `/features/new` | `/admin/features` | 후속. 수동 feature 추가는 audit log/API 필요 |
 | `/features/[id]` | `/features/{id}` | 후속. 별도 route 대신 현재 `/features` 상세 panel 사용 |
 | `/admin/providers` | 없음 | 후속. 별도 provider REST 없음 |
-| `/admin/offline-imports` | 없음 | 후속. T-208g offline upload load job/API 필요 |
+| `/admin/offline-uploads` | `/admin/offline-uploads`, `/admin/offline-uploads/{upload_id}/load` | 구현됨. JSON/JSONL upload/list/detail + Dagster load launch. CSV/TSV wizard는 후속 |
 | `/admin/provider-refresh-policies` | 없음 | 후속. provider policy REST 필요 |
 | `/ops/error-logs` | 없음 | 후속. `ops.import_job_events`/error log API 필요 |
 | `/debug/explain` | 없음 | 후속. SQL EXPLAIN viewer |

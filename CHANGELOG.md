@@ -5,6 +5,21 @@
 
 ## [Unreleased]
 
+### Admin UI — Offline uploads API/UI (2026-06-03)
+
+- **NEW**: `POST /admin/offline-uploads`, `GET /admin/offline-uploads`,
+  `GET /admin/offline-uploads/{upload_id}`,
+  `POST /admin/offline-uploads/{upload_id}/load`를 추가했다.
+- **NEW**: admin frontend `/admin/offline-uploads` 화면을 추가했다. JSON/JSONL
+  `FeatureBundle` 파일 업로드, state/provider/dataset 필터, 상세 panel, Dagster load
+  실행을 지원한다.
+- **CHANGED**: `infra.offline_upload_repo`가 API가 생성한 `upload_id`를 받을 수 있고,
+  `created_at DESC, upload_id DESC` keyset 목록을 제공한다.
+- **CHANGED**: frontend 공통 API client에 `postFormData()`를 추가했다.
+- **TEST**: offline upload router unit test, migrated PostGIS list/load integration,
+  frontend type-check/lint/build, React Doctor, OpenAPI admin/user drift check를
+  수행했다.
+
 ### 운영 — RustFS offline upload store wiring (2026-06-03)
 
 - **NEW**: `krtour.map.infra.file_store.S3ObjectStore`를 추가했다. boto3 호환

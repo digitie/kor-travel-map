@@ -28,7 +28,10 @@ from krtour.map.dto import (
     SourceRecord,
     SourceRole,
 )
-from krtour.map.infra.offline_upload_repo import create_offline_upload
+from krtour.map.infra.offline_upload_repo import (
+    create_offline_upload,
+    list_offline_uploads,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
@@ -160,16 +163,58 @@ async def test_offline_upload_load_job_records_checksum_failure(
     assert int(feature_count) == 0
 
 
+async def test_offline_upload_repo_lists_with_keyset_and_provided_upload_id(
+    migrated_engine: AsyncEngine,
+) -> None:
+    body = _bundle("offline-list-001").model_dump_json().encode("utf-8")
+    first_id = "00000000-0000-0000-0000-000000000001"
+    second_id = "00000000-0000-0000-0000-000000000002"
+    await _create_upload(
+        migrated_engine,
+        body=body,
+        storage_key="offline/list/first.jsonl",
+        upload_id=first_id,
+    )
+    await _create_upload(
+        migrated_engine,
+        body=body,
+        storage_key="offline/list/second.jsonl",
+        upload_id=second_id,
+    )
+
+    async with AsyncSession(migrated_engine) as session:
+        page1 = await list_offline_uploads(
+            session,
+            provider="offline-test-provider",
+            dataset_key="offline_jsonl",
+            limit=1,
+        )
+        assert page1.next_cursor is not None
+        assert page1.items[0].upload_id == second_id
+
+        page2 = await list_offline_uploads(
+            session,
+            provider="offline-test-provider",
+            dataset_key="offline_jsonl",
+            limit=1,
+            cursor=page1.next_cursor,
+        )
+        assert page2.items[0].upload_id == first_id
+        assert page2.next_cursor is None
+
+
 async def _create_upload(
     engine: AsyncEngine,
     *,
     body: bytes,
     storage_key: str,
+    upload_id: str | None = None,
     checksum_sha256: str | None = None,
 ) -> str:
     async with AsyncSession(engine) as session, session.begin():
         upload = await create_offline_upload(
             session,
+            upload_id=upload_id,
             provider="offline-test-provider",
             dataset_key="offline_jsonl",
             sync_scope="default",

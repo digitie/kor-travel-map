@@ -115,7 +115,7 @@ shadcn/ui + `@krtour/map-marker-react` (ADR-029). 자세한 사양:
 - `/providers/{name}/sync-state`
 - `/import-jobs`, `/import-jobs/{job_id}`
 - `/dedup-review`, `/integrity-violations`
-- `/admin/offline-uploads`, `/ops/error-logs`
+- `/admin/offline-uploads` (JSON/JSONL upload/list/detail/Dagster load), `/ops/error-logs`
 - `/debug/explain`, `/debug/fixtures`
 
 모두 인증 없음. 런타임 `OpenAPI` 문서는 `/docs` (Swagger UI), `/openapi.json`.

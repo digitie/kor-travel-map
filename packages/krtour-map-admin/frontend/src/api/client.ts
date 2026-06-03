@@ -101,6 +101,28 @@ export function postJson<T>(path: string, body?: unknown): Promise<T> {
   return requestJson<T>(path, { method: "POST", body });
 }
 
+export async function postFormData<T>(
+  path: string,
+  body: FormData,
+): Promise<T> {
+  const response = await fetch(`${BASE_URL}${path}`, {
+    method: "POST",
+    headers: { Accept: "application/json" },
+    credentials: "omit",
+    cache: "no-store",
+    body,
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new DebugUiApiError(
+      `POST ${path} 실패 (HTTP ${response.status})${detail ? ` ${detail}` : ""}`,
+      response.status,
+      path,
+    );
+  }
+  return (await response.json()) as T;
+}
+
 export function putJson<T>(path: string, body?: unknown): Promise<T> {
   return requestJson<T>(path, { method: "PUT", body });
 }

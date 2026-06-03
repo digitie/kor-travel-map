@@ -4,10 +4,11 @@
 
 ## 진행 중
 
-**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#177(T-208g
-offline upload load job)까지 merged. 현재 작업은 T-208b 잔여 RustFS resource
-wiring이다. T-208b가 머지되면 admin UI #9 선행으로 `ops.offline_uploads` 기반
-`/admin/offline-uploads*` upload API/UI를 우선 진행한다.
+**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#178(T-208b
+RustFS offline upload store wiring)까지 merged. 현재 작업은 admin UI #9 선행
+T-208h(`/admin/offline-uploads*` API + 기본 upload 화면) PR 마감이다. T-208h 머지
+직후에는 9번 admin UI 최신화 우선순위를 최상위로 두고, 남은 선행 task T-208i부터
+진행한다.
 T-207b는 사용자 결정에 따라 구현하지 않는다.
 
 ### 현재 기준 보강 필요 체크포인트 (2026-06-03)
@@ -47,11 +48,25 @@ T-207b는 사용자 결정에 따라 구현하지 않는다.
    `sigungu_by_radius`, `provider_dataset` dry-run/count resolver를 구현했다.
    `cache_target_keys`는 T-206d에서 active POI/cache target 기반 resolver와 target
    link 재계산으로 연결한다.
-10. **검증 기준** — WSL unit/integration/live pytest + Windows Playwright e2e + GitHub
+10. **admin UI #9 우선순위** — T-208h 이후에는 admin UI 최신화 선행 task를 최상위로
+    진행한다. 현재 다음 순서는 T-208i CSV/TSV validation + column mapping wizard →
+    provider refresh policy/provider 상태 REST/UI → 수동 feature 생성 audit log/API →
+    error log/import job event API다.
+11. **검증 기준** — WSL unit/integration/live pytest + Windows Playwright e2e + GitHub
    Actions green 후 머지.
 
 ## 최근 완료 (2026-05-31~2026-06-03)
 
+- **T-208h** (2026-06-03): `/admin/offline-uploads*` backend와 admin UI 기본
+  upload 화면을 추가했다. JSON/JSONL `FeatureBundle` 파일을 RustFS/S3 store에 쓰고,
+  `ops.offline_uploads` row 생성/list/detail, Dagster GraphQL
+  `offline_upload_load` launch까지 연결했다. CSV/TSV validation/column mapping은
+  T-208i로 남긴다. WSL live smoke에서 upload → Dagster `SUCCESS` → DB
+  `loaded/done/progress=100`을 확인했고, Windows Playwright `admin-ops.spec.ts`는 새
+  `/admin/offline-uploads` route 포함 6/6 통과했다.
+- **T-208b 후속** (2026-06-03): RustFS/S3 호환 `offline_upload_store` resource와
+  Docker RustFS bucket init을 구현했다. API `9003`, console `9004`, bucket
+  `krtour-map`/`krtour-uploads` 기준으로 실제 put/get smoke를 확인했다.
 - **T-208f** (2026-06-03): `consistency_dedup_refresh` Dagster maintenance job을
   추가했다. DB에 적재된 provider/dataset scope를 다시 읽어 pair/sibling dedup 후보를
   큐에 upsert하고, 이어서 F1~F4 consistency report를 저장한다. schedule은
@@ -386,8 +401,8 @@ T-207b는 사용자 결정에 따라 구현하지 않는다.
 - [~] T-208b — resources(DB/client/provider 9 + kraddr-geo/rustfs, D-15). 1차:
       `krtour_map_client`, `reverse_geocoder`, `fetched_at`, provider record iterable
       resource 계약 구현. `offline_upload_store` resource key는 T-208g에서 추가한다.
-      이번 후속 작업에서 RustFS/S3 호환 `offline_upload_store` 기본 resource와 Docker
-      RustFS bucket init을 구현한다. 실제 provider client resource wiring은 남는다.
+      RustFS/S3 호환 `offline_upload_store` 기본 resource와 Docker RustFS bucket init은
+      후속 T-208b 작업으로 구현했다. 실제 provider client resource wiring은 남는다.
 - [x] T-208c — provider load asset 9종(이미 구현·검증된 Feature provider 변환 함수
       연결) + 주소/좌표 검증 + `AsyncKrtourMapClient.load_feature_bundles` PostGIS
       적재 통합 테스트.
@@ -405,11 +420,10 @@ T-207b는 사용자 결정에 따라 구현하지 않는다.
       `ops.offline_uploads`(alembic 0011), `infra.offline_upload_repo`,
       `krtour.map.offline_upload` JSON/JSONL `FeatureBundle` parser/load
       orchestration, `AsyncKrtourMapClient.run_offline_upload_load_job`,
-      Dagster `offline_upload_load` job을 추가했다. `/admin/offline-uploads*` API/UI는
-      후속 task로 둔다.
+      Dagster `offline_upload_load` job을 추가했다.
 
 **Phase 4.2 — Offline upload admin UI 선행**
-- [ ] T-208h — `/admin/offline-uploads*` API + 기본 upload 화면.
+- [x] T-208h — `/admin/offline-uploads*` API + 기본 upload 화면.
       RustFS/S3 store에 JSON/JSONL `FeatureBundle` 파일을 저장하고,
       `ops.offline_uploads` row 생성/list/detail/load 실행까지 admin UI에서 연결한다.
 - [ ] T-208i — CSV/TSV validation + column mapping wizard.

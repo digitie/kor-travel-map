@@ -30,6 +30,8 @@ npm run docker:up
 관리한다. git에는 `.env.example`만 둔다. provider key는 기존 provider repo 이름을
 그대로 둘 수 있고, `scripts/load-env.sh`/`docker-compose.yml`이 실행용
 `KRTOUR_MAP_ADMIN_*` 이름으로 매핑한다.
+로컬 Docker/venv 기본 Postgres host 포트는 `15433`이며, `KRTOUR_MAP_PG_DSN`을
+명시하지 않으면 `scripts/load-env.sh`가 `127.0.0.1:15433/krtour_map` DSN을 채운다.
 
 ## 보안 경계
 
@@ -41,4 +43,5 @@ npm run docker:up
 
 - Dagster metadata DB(`krtour_map_dagster`) 분리와 daemon/schedule/sensor 운영.
 - RustFS/객체 저장소를 포함한 backup/restore 묶음 자동화.
-- `/admin/offline-uploads*` API/UI와 CSV/TSV validation wizard.
+- CSV/TSV offline upload validation wizard와 column mapping preset. 기본
+  `/admin/offline-uploads*` JSON/JSONL upload/list/detail/load API/UI는 구현됨.

@@ -32,6 +32,7 @@ dependencies = [
   # PyPI 배포 시점에는 "python-krtour-map>=0.2,<0.3" 같은 핀으로 교체.
   "python-krtour-map",
   "fastapi>=0.115",
+  "python-multipart>=0.0.20",
   # starlette 1.0+ TestClient은 httpx2(httpx 2.x)를 요구 — 본 패키지는 httpx 0.x
   # API(`httpx.AsyncClient`)에 의존하므로 0.x 라인으로 고정 (CI 회귀 방지, PR#60).
   "starlette>=0.40,<1.0",

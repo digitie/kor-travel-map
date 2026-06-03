@@ -28,6 +28,11 @@ chmod 600 .env
 host/browser 공개 URL은 `KRTOUR_MAP_OBJECT_STORE_PUBLIC_BASE_URL`(기본
 `http://127.0.0.1:9003/krtour-map`)을 사용한다. offline upload 원본 bucket은
 `KRTOUR_MAP_OFFLINE_UPLOAD_BUCKET`(기본 `krtour-uploads`)이다.
+로컬 venv stack도 Docker compose와 같은 RustFS 개발 credential 기본값
+`krtour-map-dev-access` / `krtour-map-dev-secret`을 사용한다.
+Postgres host 포트 기본값은 `KRTOUR_MAP_POSTGRES_HOST_PORT=15433`이며,
+`scripts/load-env.sh`는 `KRTOUR_MAP_PG_DSN` 미설정 시
+`postgresql+asyncpg://krtour_map:krtour_map@127.0.0.1:15433/krtour_map`을 쓴다.
 
 frontend 컨테이너에는 `NEXT_PUBLIC_*`만 주입한다. 서버용 API 키는 API/Dagster
 프로세스 환경변수로만 둔다. Dagster 임베드용 공개 URL은
@@ -101,9 +106,10 @@ RustFS console은 `http://127.0.0.1:9004`다. 접근 키는 `.env`의
 `KRTOUR_MAP_OBJECT_STORE_ACCESS_KEY_ID` /
 `KRTOUR_MAP_OBJECT_STORE_SECRET_ACCESS_KEY`를 사용한다.
 
-Dagster `definitions`의 일부 asset resource는 운영 구현이 주입되기 전까지 missing
-resource로 남는다. UI와 code location 로딩은 가능하지만 실제 live provider 실행은
-후속 resource 구현(T-208b 후속) 이후가 정본이다.
+Dagster `definitions`의 일부 provider asset resource는 운영 구현이 주입되기 전까지
+missing resource로 남는다. UI와 code location 로딩은 가능하고,
+`offline_upload_store`는 RustFS/S3 기본 resource가 구현되어 있다. 실제 live provider
+client resource wiring은 후속이다.
 
 ## 7. 중지
 

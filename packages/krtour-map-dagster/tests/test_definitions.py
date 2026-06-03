@@ -51,6 +51,15 @@ def test_feature_update_job_and_sensors_registered() -> None:
     )
 
 
+def test_offline_upload_load_default_resources_registered() -> None:
+    job = defs.get_job_def("offline_upload_load")
+    assert {"krtour_map_client", "offline_upload_store"} <= set(
+        job.required_resource_keys
+    )
+    assert defs.get_repository_def().get_top_level_resources()["krtour_map_client"]
+    assert defs.get_repository_def().get_top_level_resources()["offline_upload_store"]
+
+
 def test_feature_load_schedules_registered_with_kst_cron() -> None:
     expected = {
         spec.schedule_name: spec for spec in FEATURE_LOAD_SCHEDULE_SPECS

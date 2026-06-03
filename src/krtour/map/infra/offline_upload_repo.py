@@ -13,6 +13,8 @@ ADR 참조
 
 from __future__ import annotations
 
+import base64
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Final
@@ -24,9 +26,11 @@ if TYPE_CHECKING:
 
 __all__ = [
     "OfflineUpload",
+    "OfflineUploadPage",
     "create_offline_upload",
     "finish_offline_upload_load",
     "get_offline_upload",
+    "list_offline_uploads",
     "mark_offline_upload_loading",
 ]
 
@@ -40,6 +44,7 @@ _RETURN_COLUMNS: Final[str] = (
 _LOAD_FINISH_STATES: Final[frozenset[str]] = frozenset(
     {"loaded", "load_failed", "cancelled"}
 )
+_MAX_LIST_LIMIT: Final[int] = 200
 
 
 @dataclass(frozen=True)
@@ -84,6 +89,14 @@ class OfflineUpload:
         }
 
 
+@dataclass(frozen=True)
+class OfflineUploadPage:
+    """Keyset cursor 기반 ``ops.offline_uploads`` 목록."""
+
+    items: tuple[OfflineUpload, ...]
+    next_cursor: str | None
+
+
 def _row_to_upload(row: Any) -> OfflineUpload:
     data = row._mapping
     return OfflineUpload(
@@ -111,12 +124,35 @@ def _row_to_upload(row: Any) -> OfflineUpload:
     )
 
 
+def _encode_cursor(item: OfflineUpload) -> str:
+    payload = {
+        "created_at": item.created_at.isoformat(),
+        "upload_id": item.upload_id,
+    }
+    raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _decode_cursor(cursor: str | None) -> tuple[datetime | None, str | None]:
+    if cursor is None:
+        return None, None
+    padded = cursor + ("=" * (-len(cursor) % 4))
+    try:
+        payload = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
+        created_at = datetime.fromisoformat(str(payload["created_at"]))
+        upload_id = str(payload["upload_id"])
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("invalid offline upload cursor") from exc
+    return created_at, upload_id
+
+
 _INSERT_SQL: Final[str] = f"""
 INSERT INTO ops.offline_uploads (
-    provider, dataset_key, sync_scope, original_filename,
+    upload_id, provider, dataset_key, sync_scope, original_filename,
     storage_backend, storage_key, byte_size, checksum_sha256,
     detected_format, detected_encoding, created_by
 ) VALUES (
+    COALESCE(CAST(:upload_id AS uuid), x_extension.gen_random_uuid()),
     :provider, :dataset_key, :sync_scope, :original_filename,
     :storage_backend, :storage_key, :byte_size, :checksum_sha256,
     :detected_format, :detected_encoding, :created_by
@@ -128,6 +164,23 @@ _GET_SQL: Final[str] = f"""
 SELECT {_RETURN_COLUMNS}
 FROM ops.offline_uploads
 WHERE upload_id = :upload_id
+"""
+
+_LIST_SQL: Final[str] = f"""
+SELECT {_RETURN_COLUMNS}
+FROM ops.offline_uploads
+WHERE (CAST(:state AS text) IS NULL OR state = CAST(:state AS text))
+  AND (CAST(:provider AS text) IS NULL OR provider = CAST(:provider AS text))
+  AND (CAST(:dataset_key AS text) IS NULL OR dataset_key = CAST(:dataset_key AS text))
+  AND (
+    CAST(:cursor_created_at AS timestamptz) IS NULL
+    OR (created_at, upload_id) < (
+        CAST(:cursor_created_at AS timestamptz),
+        CAST(:cursor_upload_id AS uuid)
+    )
+  )
+ORDER BY created_at DESC, upload_id DESC
+LIMIT :limit_plus_one
 """
 
 _MARK_LOADING_SQL: Final[str] = f"""
@@ -151,6 +204,7 @@ RETURNING {_RETURN_COLUMNS}
 async def create_offline_upload(
     session: AsyncSession,
     *,
+    upload_id: str | None = None,
     provider: str,
     dataset_key: str,
     original_filename: str,
@@ -167,6 +221,7 @@ async def create_offline_upload(
     result = await session.execute(
         text(_INSERT_SQL),
         {
+            "upload_id": upload_id,
             "provider": provider,
             "dataset_key": dataset_key,
             "sync_scope": sync_scope,
@@ -191,6 +246,42 @@ async def get_offline_upload(
     result = await session.execute(text(_GET_SQL), {"upload_id": upload_id})
     row = result.one_or_none()
     return _row_to_upload(row) if row is not None else None
+
+
+async def list_offline_uploads(
+    session: AsyncSession,
+    *,
+    state: str | None = None,
+    provider: str | None = None,
+    dataset_key: str | None = None,
+    limit: int = 50,
+    cursor: str | None = None,
+) -> OfflineUploadPage:
+    """``created_at DESC, upload_id DESC`` keyset cursor로 업로드 목록을 조회한다."""
+    if limit <= 0:
+        raise ValueError("limit must be greater than 0")
+    effective_limit = min(limit, _MAX_LIST_LIMIT)
+    cursor_created_at, cursor_upload_id = _decode_cursor(cursor)
+    rows = (
+        await session.execute(
+            text(_LIST_SQL),
+            {
+                "state": state,
+                "provider": provider,
+                "dataset_key": dataset_key,
+                "cursor_created_at": cursor_created_at,
+                "cursor_upload_id": cursor_upload_id,
+                "limit_plus_one": effective_limit + 1,
+            },
+        )
+    ).all()
+    uploads = tuple(_row_to_upload(row) for row in rows[:effective_limit])
+    next_cursor = (
+        _encode_cursor(uploads[-1])
+        if len(rows) > effective_limit and uploads
+        else None
+    )
+    return OfflineUploadPage(items=uploads, next_cursor=next_cursor)
 
 
 async def mark_offline_upload_loading(

@@ -436,6 +436,50 @@
         "title": "AdminFeaturesListResponse",
         "type": "object"
       },
+      "Body_create_offline_upload_request_admin_offline_uploads_post": {
+        "properties": {
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "dataset_key": {
+            "minLength": 1,
+            "title": "Dataset Key",
+            "type": "string"
+          },
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "description": "JSON/JSONL FeatureBundle 파일",
+            "title": "File",
+            "type": "string"
+          },
+          "provider": {
+            "minLength": 1,
+            "title": "Provider",
+            "type": "string"
+          },
+          "sync_scope": {
+            "default": "default",
+            "minLength": 1,
+            "title": "Sync Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file",
+          "provider",
+          "dataset_key"
+        ],
+        "title": "Body_create_offline_upload_request_admin_offline_uploads_post",
+        "type": "object"
+      },
       "CoordinateBody": {
         "additionalProperties": false,
         "description": "WGS84 좌표. 모든 외부 인터페이스는 lon/lat 순서를 사용한다.",
@@ -2520,6 +2564,271 @@
           "last_updated_at"
         ],
         "title": "NearbyTargetSummary",
+        "type": "object"
+      },
+      "OfflineUploadLaunchMeta": {
+        "additionalProperties": false,
+        "description": "Dagster load 실행 응답 metadata.",
+        "properties": {
+          "dagster_run_id": {
+            "title": "Dagster Run Id",
+            "type": "string"
+          },
+          "dagster_status": {
+            "title": "Dagster Status",
+            "type": "string"
+          },
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "duration_ms",
+          "dagster_run_id",
+          "dagster_status"
+        ],
+        "title": "OfflineUploadLaunchMeta",
+        "type": "object"
+      },
+      "OfflineUploadLaunchResponse": {
+        "additionalProperties": false,
+        "description": "`POST /admin/offline-uploads/{upload_id}/load` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/OfflineUploadRecord"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/OfflineUploadLaunchMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "OfflineUploadLaunchResponse",
+        "type": "object"
+      },
+      "OfflineUploadListResponse": {
+        "additionalProperties": false,
+        "description": "`GET /admin/offline-uploads` 응답.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OfflineUploadRecord"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "count",
+          "items"
+        ],
+        "title": "OfflineUploadListResponse",
+        "type": "object"
+      },
+      "OfflineUploadRecord": {
+        "additionalProperties": false,
+        "description": "``ops.offline_uploads`` 행의 HTTP 표현.",
+        "properties": {
+          "byte_size": {
+            "title": "Byte Size",
+            "type": "integer"
+          },
+          "checksum_sha256": {
+            "title": "Checksum Sha256",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "dataset_key": {
+            "title": "Dataset Key",
+            "type": "string"
+          },
+          "detected_encoding": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detected Encoding"
+          },
+          "detected_format": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detected Format"
+          },
+          "load_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Load Job Id"
+          },
+          "load_url": {
+            "title": "Load Url",
+            "type": "string"
+          },
+          "original_filename": {
+            "title": "Original Filename",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "status_url": {
+            "title": "Status Url",
+            "type": "string"
+          },
+          "storage_backend": {
+            "title": "Storage Backend",
+            "type": "string"
+          },
+          "storage_key": {
+            "title": "Storage Key",
+            "type": "string"
+          },
+          "sync_scope": {
+            "title": "Sync Scope",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "upload_id": {
+            "title": "Upload Id",
+            "type": "string"
+          },
+          "validation_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validation Job Id"
+          }
+        },
+        "required": [
+          "upload_id",
+          "provider",
+          "dataset_key",
+          "sync_scope",
+          "original_filename",
+          "storage_backend",
+          "storage_key",
+          "byte_size",
+          "checksum_sha256",
+          "detected_format",
+          "detected_encoding",
+          "state",
+          "validation_job_id",
+          "load_job_id",
+          "created_by",
+          "created_at",
+          "updated_at",
+          "status_url",
+          "load_url"
+        ],
+        "title": "OfflineUploadRecord",
+        "type": "object"
+      },
+      "OfflineUploadWriteMeta": {
+        "additionalProperties": false,
+        "description": "업로드 생성 응답 metadata.",
+        "properties": {
+          "bucket": {
+            "title": "Bucket",
+            "type": "string"
+          },
+          "content_type": {
+            "title": "Content Type",
+            "type": "string"
+          },
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          },
+          "object_key": {
+            "title": "Object Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "duration_ms",
+          "bucket",
+          "object_key",
+          "content_type"
+        ],
+        "title": "OfflineUploadWriteMeta",
+        "type": "object"
+      },
+      "OfflineUploadWriteResponse": {
+        "additionalProperties": false,
+        "description": "`POST /admin/offline-uploads` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/OfflineUploadRecord"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/OfflineUploadWriteMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "OfflineUploadWriteResponse",
         "type": "object"
       },
       "OpsConsistencyReportRecord": {
@@ -4681,6 +4990,260 @@
         "summary": "Deactivate Feature Route",
         "tags": [
           "admin-features"
+        ]
+      }
+    },
+    "/admin/offline-uploads": {
+      "get": {
+        "operationId": "list_offline_upload_requests_admin_offline_uploads_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "uploaded",
+                    "validating",
+                    "validated",
+                    "validation_failed",
+                    "loading",
+                    "loaded",
+                    "load_failed",
+                    "cancelled"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Provider"
+            }
+          },
+          {
+            "in": "query",
+            "name": "dataset_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dataset Key"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OfflineUploadListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "오프라인 업로드 목록",
+        "tags": [
+          "admin-offline-uploads"
+        ]
+      },
+      "post": {
+        "operationId": "create_offline_upload_request_admin_offline_uploads_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_create_offline_upload_request_admin_offline_uploads_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OfflineUploadWriteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "오프라인 FeatureBundle 원본 업로드",
+        "tags": [
+          "admin-offline-uploads"
+        ]
+      }
+    },
+    "/admin/offline-uploads/{upload_id}": {
+      "get": {
+        "operationId": "get_offline_upload_request_admin_offline_uploads__upload_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "upload_id",
+            "required": true,
+            "schema": {
+              "title": "Upload Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OfflineUploadRecord"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "upload_id 없음"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "오프라인 업로드 단건 조회",
+        "tags": [
+          "admin-offline-uploads"
+        ]
+      }
+    },
+    "/admin/offline-uploads/{upload_id}/load": {
+      "post": {
+        "operationId": "load_offline_upload_request_admin_offline_uploads__upload_id__load_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "upload_id",
+            "required": true,
+            "schema": {
+              "title": "Upload Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OfflineUploadLaunchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "upload_id 없음"
+          },
+          "409": {
+            "description": "load 가능한 상태 아님"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "description": "Dagster GraphQL launch 실패"
+          }
+        },
+        "summary": "Dagster offline_upload_load job 실행",
+        "tags": [
+          "admin-offline-uploads"
         ]
       }
     },
