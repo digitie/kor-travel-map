@@ -1,6 +1,30 @@
 {
   "components": {
     "schemas": {
+      "CoordinateBody": {
+        "additionalProperties": false,
+        "description": "WGS84 좌표. 모든 외부 인터페이스는 lon/lat 순서를 사용한다.",
+        "properties": {
+          "lat": {
+            "maximum": 39.5,
+            "minimum": 33.0,
+            "title": "Lat",
+            "type": "number"
+          },
+          "lon": {
+            "maximum": 132.0,
+            "minimum": 124.0,
+            "title": "Lon",
+            "type": "number"
+          }
+        },
+        "required": [
+          "lon",
+          "lat"
+        ],
+        "title": "CoordinateBody",
+        "type": "object"
+      },
       "DagsterAssetGroup": {
         "additionalProperties": false,
         "description": "Dagster asset group 요약.",
@@ -1087,6 +1111,77 @@
         "title": "FeaturesInBboxResponse",
         "type": "object"
       },
+      "FeaturesNearbyByTargetData": {
+        "additionalProperties": false,
+        "description": "``GET /features/nearby/by-target`` data payload.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/NearbyFeatureSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "target": {
+            "$ref": "#/components/schemas/NearbyTargetSummary"
+          }
+        },
+        "required": [
+          "target",
+          "items"
+        ],
+        "title": "FeaturesNearbyByTargetData",
+        "type": "object"
+      },
+      "FeaturesNearbyByTargetMeta": {
+        "additionalProperties": false,
+        "description": "주변 feature 목록 메타데이터.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "count",
+          "duration_ms"
+        ],
+        "title": "FeaturesNearbyByTargetMeta",
+        "type": "object"
+      },
+      "FeaturesNearbyByTargetResponse": {
+        "additionalProperties": false,
+        "description": "``GET /features/nearby/by-target`` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/FeaturesNearbyByTargetData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/FeaturesNearbyByTargetMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "FeaturesNearbyByTargetResponse",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1203,6 +1298,489 @@
           "cached"
         ],
         "title": "MoisLicenseDetailResponse",
+        "type": "object"
+      },
+      "NearbyFeatureSummary": {
+        "additionalProperties": false,
+        "description": "POI/cache target 주변 feature summary.",
+        "properties": {
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "distance_m": {
+            "title": "Distance M",
+            "type": "number"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "last_updated_at": {
+            "format": "date-time",
+            "title": "Last Updated At",
+            "type": "string"
+          },
+          "lat": {
+            "title": "Lat",
+            "type": "number"
+          },
+          "lon": {
+            "title": "Lon",
+            "type": "number"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "primary_dataset_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primary Dataset Key"
+          },
+          "primary_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primary Provider"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_id",
+          "kind",
+          "name",
+          "category",
+          "status",
+          "lon",
+          "lat",
+          "distance_m",
+          "last_updated_at"
+        ],
+        "title": "NearbyFeatureSummary",
+        "type": "object"
+      },
+      "NearbyTargetSummary": {
+        "additionalProperties": false,
+        "description": "주변 조회 기준 target summary.",
+        "properties": {
+          "external_system": {
+            "title": "External System",
+            "type": "string"
+          },
+          "last_refreshed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Refreshed At"
+          },
+          "last_updated_at": {
+            "format": "date-time",
+            "title": "Last Updated At",
+            "type": "string"
+          },
+          "lat": {
+            "title": "Lat",
+            "type": "number"
+          },
+          "lon": {
+            "title": "Lon",
+            "type": "number"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "next_eligible_refresh_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Eligible Refresh At"
+          },
+          "radius_km": {
+            "title": "Radius Km",
+            "type": "number"
+          },
+          "refresh_policy": {
+            "title": "Refresh Policy",
+            "type": "string"
+          },
+          "scope_mode": {
+            "title": "Scope Mode",
+            "type": "string"
+          },
+          "target_id": {
+            "title": "Target Id",
+            "type": "string"
+          },
+          "target_key": {
+            "title": "Target Key",
+            "type": "string"
+          },
+          "update_enabled": {
+            "title": "Update Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "target_id",
+          "external_system",
+          "target_key",
+          "lon",
+          "lat",
+          "radius_km",
+          "scope_mode",
+          "update_enabled",
+          "refresh_policy",
+          "last_updated_at"
+        ],
+        "title": "NearbyTargetSummary",
+        "type": "object"
+      },
+      "PoiCacheTargetListResponse": {
+        "additionalProperties": false,
+        "description": "목록 응답.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PoiCacheTargetRecord"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "items"
+        ],
+        "title": "PoiCacheTargetListResponse",
+        "type": "object"
+      },
+      "PoiCacheTargetMeta": {
+        "additionalProperties": false,
+        "description": "쓰기 요청의 간단한 메타데이터.",
+        "properties": {
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "duration_ms"
+        ],
+        "title": "PoiCacheTargetMeta",
+        "type": "object"
+      },
+      "PoiCacheTargetRecord": {
+        "additionalProperties": false,
+        "description": "``ops.poi_cache_targets``의 HTTP 표현.",
+        "properties": {
+          "coord": {
+            "$ref": "#/components/schemas/CoordinateBody"
+          },
+          "coord_key": {
+            "title": "Coord Key",
+            "type": "string"
+          },
+          "coord_precision_digits": {
+            "title": "Coord Precision Digits",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "deleted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deleted At"
+          },
+          "external_system": {
+            "title": "External System",
+            "type": "string"
+          },
+          "last_failed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Failed At"
+          },
+          "last_refreshed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Refreshed At"
+          },
+          "last_requested_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Requested At"
+          },
+          "last_seen_at": {
+            "format": "date-time",
+            "title": "Last Seen At",
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "nearby_url": {
+            "title": "Nearby Url",
+            "type": "string"
+          },
+          "next_eligible_refresh_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Eligible Refresh At"
+          },
+          "provider_overrides": {
+            "additionalProperties": true,
+            "title": "Provider Overrides",
+            "type": "object"
+          },
+          "radius_km": {
+            "title": "Radius Km",
+            "type": "number"
+          },
+          "refresh_policy": {
+            "title": "Refresh Policy",
+            "type": "string"
+          },
+          "scope_mode": {
+            "title": "Scope Mode",
+            "type": "string"
+          },
+          "status_url": {
+            "title": "Status Url",
+            "type": "string"
+          },
+          "target_id": {
+            "title": "Target Id",
+            "type": "string"
+          },
+          "target_key": {
+            "title": "Target Key",
+            "type": "string"
+          },
+          "update_enabled": {
+            "title": "Update Enabled",
+            "type": "boolean"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target_id",
+          "external_system",
+          "target_key",
+          "coord",
+          "coord_precision_digits",
+          "coord_key",
+          "radius_km",
+          "scope_mode",
+          "update_enabled",
+          "refresh_policy",
+          "provider_overrides",
+          "metadata",
+          "last_seen_at",
+          "created_at",
+          "updated_at",
+          "status_url",
+          "nearby_url"
+        ],
+        "title": "PoiCacheTargetRecord",
+        "type": "object"
+      },
+      "PoiCacheTargetResponse": {
+        "additionalProperties": false,
+        "description": "단건 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PoiCacheTargetRecord"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/PoiCacheTargetMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "PoiCacheTargetResponse",
+        "type": "object"
+      },
+      "PoiCacheTargetUpsertRequest": {
+        "additionalProperties": false,
+        "description": "cache target 등록/갱신 요청.",
+        "properties": {
+          "coord": {
+            "$ref": "#/components/schemas/CoordinateBody"
+          },
+          "coord_precision_digits": {
+            "default": 6,
+            "maximum": 8.0,
+            "minimum": 3.0,
+            "title": "Coord Precision Digits",
+            "type": "integer"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "on_conflict": {
+            "default": "reject",
+            "enum": [
+              "reject",
+              "move"
+            ],
+            "title": "On Conflict",
+            "type": "string"
+          },
+          "provider_overrides": {
+            "additionalProperties": true,
+            "title": "Provider Overrides",
+            "type": "object"
+          },
+          "radius_km": {
+            "default": 5.0,
+            "exclusiveMinimum": 0.0,
+            "maximum": 100.0,
+            "title": "Radius Km",
+            "type": "number"
+          },
+          "refresh_policy": {
+            "default": "provider_default",
+            "enum": [
+              "provider_default",
+              "follow_system",
+              "allow_targeted",
+              "disabled"
+            ],
+            "title": "Refresh Policy",
+            "type": "string"
+          },
+          "scope_mode": {
+            "default": "center_radius",
+            "enum": [
+              "center_radius",
+              "sigungu_by_radius"
+            ],
+            "title": "Scope Mode",
+            "type": "string"
+          },
+          "update_enabled": {
+            "default": true,
+            "title": "Update Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "coord"
+        ],
+        "title": "PoiCacheTargetUpsertRequest",
         "type": "object"
       },
       "ProviderDatasetsResponse": {
@@ -1750,6 +2328,271 @@
         ]
       }
     },
+    "/admin/poi-cache-targets": {
+      "get": {
+        "operationId": "list_poi_cache_target_records_admin_poi_cache_targets_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "external_system",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "External System"
+            }
+          },
+          {
+            "in": "query",
+            "name": "update_enabled",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Update Enabled"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_deleted",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Deleted",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PoiCacheTargetListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "POI/cache target 목록",
+        "tags": [
+          "admin-poi-cache-targets"
+        ]
+      }
+    },
+    "/admin/poi-cache-targets/{external_system}/{target_key}": {
+      "delete": {
+        "operationId": "delete_poi_cache_target_record_admin_poi_cache_targets__external_system___target_key__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "external_system",
+            "required": true,
+            "schema": {
+              "title": "External System",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "target_key",
+            "required": true,
+            "schema": {
+              "title": "Target Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PoiCacheTargetResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "target 없음"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "POI/cache target soft delete",
+        "tags": [
+          "admin-poi-cache-targets"
+        ]
+      },
+      "get": {
+        "operationId": "get_poi_cache_target_record_admin_poi_cache_targets__external_system___target_key__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "external_system",
+            "required": true,
+            "schema": {
+              "title": "External System",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "target_key",
+            "required": true,
+            "schema": {
+              "title": "Target Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_deleted",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Deleted",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PoiCacheTargetRecord"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "target 없음"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "POI/cache target 단건 조회",
+        "tags": [
+          "admin-poi-cache-targets"
+        ]
+      },
+      "put": {
+        "operationId": "put_poi_cache_target_admin_poi_cache_targets__external_system___target_key__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "external_system",
+            "required": true,
+            "schema": {
+              "title": "External System",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "target_key",
+            "required": true,
+            "schema": {
+              "title": "Target Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PoiCacheTargetUpsertRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PoiCacheTargetResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "description": "같은 key의 좌표 conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "POI/cache target 등록 또는 갱신",
+        "tags": [
+          "admin-poi-cache-targets"
+        ]
+      }
+    },
     "/debug/etl/providers": {
       "get": {
         "description": "fixture 변환이 등록된 provider/dataset 매트릭스. 추가 변환 함수가 본 lib에 들어오면 `etl_fixtures.FIXTURE_REGISTRY`에 1행 등록 → 본 응답에 자동 반영.",
@@ -2093,6 +2936,204 @@
           }
         },
         "summary": "bbox 안 feature 목록 (지도 뷰포트)",
+        "tags": [
+          "features"
+        ]
+      }
+    },
+    "/features/nearby/by-target": {
+      "get": {
+        "operationId": "list_features_nearby_by_target_features_nearby_by_target_get",
+        "parameters": [
+          {
+            "description": "외부 시스템 이름. 예: tripmate",
+            "in": "query",
+            "name": "external_system",
+            "required": true,
+            "schema": {
+              "description": "외부 시스템 이름. 예: tripmate",
+              "title": "External System",
+              "type": "string"
+            }
+          },
+          {
+            "description": "외부 POI 고유 key.",
+            "in": "query",
+            "name": "target_key",
+            "required": true,
+            "schema": {
+              "description": "외부 POI 고유 key.",
+              "title": "Target Key",
+              "type": "string"
+            }
+          },
+          {
+            "description": "미지정 시 target 기본 radius 사용.",
+            "in": "query",
+            "name": "radius_km",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "exclusiveMinimum": 0,
+                  "maximum": 100,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "미지정 시 target 기본 radius 사용.",
+              "title": "Radius Km"
+            }
+          },
+          {
+            "description": "feature kind 반복 필터.",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "feature kind 반복 필터.",
+              "title": "Kind"
+            }
+          },
+          {
+            "description": "category code 반복 필터.",
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "category code 반복 필터.",
+              "title": "Category"
+            }
+          },
+          {
+            "description": "feature status 반복 필터. 기본 active.",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "feature status 반복 필터. 기본 active.",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "primary provider 반복 필터.",
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "primary provider 반복 필터.",
+              "title": "Provider"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "distance",
+              "enum": [
+                "distance",
+                "name",
+                "last_updated_at"
+              ],
+              "title": "Sort",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeaturesNearbyByTargetResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "target 없음"
+          },
+          "422": {
+            "description": "cursor/sort/radius 오류"
+          }
+        },
+        "summary": "외부 POI/cache target key 기준 주변 feature 목록",
         "tags": [
           "features"
         ]

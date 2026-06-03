@@ -1,0 +1,301 @@
+"""POI/cache target admin API와 by-target feature 조회 라우터 단위 테스트."""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime
+from typing import Any
+
+import pytest
+from fastapi.testclient import TestClient
+from krtour.map.infra.feature_repo import NearbyFeaturePage, NearbyFeatureRow
+from krtour.map.infra.poi_cache_target_repo import (
+    PoiCacheTarget,
+    PoiCacheTargetConflict,
+)
+
+from krtour.map_admin.app import create_app
+from krtour.map_admin.db import get_session
+from krtour.map_admin.settings import AdminSettings
+
+
+class _Tx:
+    async def __aenter__(self) -> None:
+        return None
+
+    async def __aexit__(self, *_exc: object) -> None:
+        return None
+
+
+class _FakeSession:
+    def __init__(self) -> None:
+        self.begin_count = 0
+
+    def begin(self) -> _Tx:
+        self.begin_count += 1
+        return _Tx()
+
+
+@pytest.fixture
+def session() -> _FakeSession:
+    return _FakeSession()
+
+
+@pytest.fixture
+def client(session: _FakeSession) -> TestClient:
+    app = create_app(AdminSettings())
+
+    async def _fake_session() -> AsyncIterator[_FakeSession]:
+        yield session
+
+    app.dependency_overrides[get_session] = _fake_session
+    return TestClient(app)
+
+
+def _target(*, target_key: str = "poi-1") -> PoiCacheTarget:
+    now = datetime(2026, 6, 3, 12, 0, tzinfo=UTC)
+    return PoiCacheTarget(
+        target_id="target-1",
+        external_system="tripmate",
+        target_key=target_key,
+        name="서울시청",
+        lon=126.978,
+        lat=37.5665,
+        coord_precision_digits=6,
+        coord_key="126.978000:37.566500:p6",
+        radius_km=5.0,
+        scope_mode="center_radius",
+        update_enabled=True,
+        refresh_policy="provider_default",
+        provider_overrides={},
+        metadata={"tripmate_poi_id": target_key},
+        last_seen_at=now,
+        last_requested_at=None,
+        last_refreshed_at=None,
+        last_failed_at=None,
+        next_eligible_refresh_at=None,
+        deleted_at=None,
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def _nearby_row() -> NearbyFeatureRow:
+    now = datetime(2026, 6, 3, 12, 5, tzinfo=UTC)
+    return NearbyFeatureRow(
+        feature_id="feature-1",
+        kind="place",
+        name="주변 주유소",
+        category="06020000",
+        status="active",
+        lon=126.98,
+        lat=37.56,
+        distance_m=320.5,
+        primary_provider="python-opinet-api",
+        primary_dataset_key="opinet_stations",
+        last_updated_at=now,
+    )
+
+
+@pytest.mark.unit
+def test_poi_cache_target_routes_mounted_in_openapi(client: TestClient) -> None:
+    spec = client.get("/openapi.json").json()
+    assert "/admin/poi-cache-targets" in spec["paths"]
+    assert "/admin/poi-cache-targets/{external_system}/{target_key}" in spec["paths"]
+    assert "/features/nearby/by-target" in spec["paths"]
+    assert "PoiCacheTargetUpsertRequest" in spec["components"]["schemas"]
+    assert "FeaturesNearbyByTargetResponse" in spec["components"]["schemas"]
+
+
+@pytest.mark.unit
+def test_put_poi_cache_target_uses_transaction(
+    client: TestClient,
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import poi_cache_targets as router_mod
+
+    async def _upsert(_session: Any, **kwargs: Any) -> PoiCacheTarget:
+        assert kwargs["external_system"] == "tripmate"
+        assert kwargs["target_key"] == "poi-1"
+        assert kwargs["lon"] == 126.978
+        assert kwargs["on_conflict"] == "reject"
+        return _target()
+
+    monkeypatch.setattr(router_mod, "upsert_poi_cache_target", _upsert)
+
+    response = client.put(
+        "/admin/poi-cache-targets/tripmate/poi-1",
+        json={
+            "coord": {"lon": 126.978, "lat": 37.5665},
+            "radius_km": 5.0,
+            "metadata": {"tripmate_poi_id": "poi-1"},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["coord_key"] == "126.978000:37.566500:p6"
+    assert session.begin_count == 1
+
+
+@pytest.mark.unit
+def test_put_poi_cache_target_conflict_returns_409(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import poi_cache_targets as router_mod
+
+    async def _conflict(_session: Any, **_kwargs: Any) -> PoiCacheTarget:
+        raise PoiCacheTargetConflict("coord conflict")
+
+    monkeypatch.setattr(router_mod, "upsert_poi_cache_target", _conflict)
+
+    response = client.put(
+        "/admin/poi-cache-targets/tripmate/poi-1",
+        json={"coord": {"lon": 126.978, "lat": 37.5665}},
+    )
+
+    assert response.status_code == 409
+    assert "coord conflict" in response.json()["detail"]
+
+
+@pytest.mark.unit
+def test_list_poi_cache_targets_passes_filters(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import poi_cache_targets as router_mod
+
+    async def _list(_session: Any, **kwargs: Any) -> tuple[PoiCacheTarget, ...]:
+        assert kwargs["external_system"] == "tripmate"
+        assert kwargs["update_enabled"] is True
+        assert kwargs["include_deleted"] is False
+        assert kwargs["limit"] == 25
+        return (_target(),)
+
+    monkeypatch.setattr(router_mod, "list_poi_cache_targets", _list)
+
+    response = client.get(
+        "/admin/poi-cache-targets",
+        params={
+            "external_system": "tripmate",
+            "update_enabled": "true",
+            "page_size": "25",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["count"] == 1
+    assert body["items"][0]["target_key"] == "poi-1"
+
+
+@pytest.mark.unit
+def test_get_poi_cache_target_404_when_missing(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import poi_cache_targets as router_mod
+
+    async def _missing(_session: Any, **_kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr(router_mod, "get_poi_cache_target_by_key", _missing)
+
+    response = client.get("/admin/poi-cache-targets/tripmate/missing")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.unit
+def test_delete_poi_cache_target_uses_transaction(
+    client: TestClient,
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import poi_cache_targets as router_mod
+
+    async def _delete(_session: Any, **kwargs: Any) -> PoiCacheTarget:
+        assert kwargs["external_system"] == "tripmate"
+        assert kwargs["target_key"] == "poi-1"
+        return _target()
+
+    monkeypatch.setattr(router_mod, "delete_poi_cache_target", _delete)
+
+    response = client.delete("/admin/poi-cache-targets/tripmate/poi-1")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["target_id"] == "target-1"
+    assert session.begin_count == 1
+
+
+@pytest.mark.unit
+def test_features_nearby_by_target_passes_filters(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import features as features_mod
+
+    async def _get_target(_session: Any, **kwargs: Any) -> PoiCacheTarget:
+        assert kwargs["external_system"] == "tripmate"
+        assert kwargs["target_key"] == "poi-1"
+        return _target()
+
+    async def _nearby(_session: Any, **kwargs: Any) -> NearbyFeaturePage:
+        assert kwargs["target_id"] == "target-1"
+        assert kwargs["radius_km"] == 3.0
+        assert kwargs["kinds"] == ["place"]
+        assert kwargs["categories"] == ["06020000"]
+        assert kwargs["statuses"] == ["active"]
+        assert kwargs["providers"] == ["python-opinet-api"]
+        assert kwargs["sort"] == "distance"
+        assert kwargs["limit"] == 10
+        return NearbyFeaturePage(items=(_nearby_row(),), next_cursor="next")
+
+    monkeypatch.setattr(features_mod, "get_poi_cache_target_by_key", _get_target)
+    monkeypatch.setattr(
+        features_mod.feature_repo,
+        "features_nearby_poi_cache_target",
+        _nearby,
+    )
+
+    response = client.get(
+        "/features/nearby/by-target",
+        params=[
+            ("external_system", "tripmate"),
+            ("target_key", "poi-1"),
+            ("radius_km", "3.0"),
+            ("kind", "place"),
+            ("category", "06020000"),
+            ("status", "active"),
+            ("provider", "python-opinet-api"),
+            ("page_size", "10"),
+        ],
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data"]["target"]["target_key"] == "poi-1"
+    assert body["data"]["items"][0]["distance_m"] == 320.5
+    assert body["data"]["next_cursor"] == "next"
+    assert body["meta"]["count"] == 1
+
+
+@pytest.mark.unit
+def test_features_nearby_by_target_404_when_missing(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import features as features_mod
+
+    async def _missing(_session: Any, **_kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr(features_mod, "get_poi_cache_target_by_key", _missing)
+
+    response = client.get(
+        "/features/nearby/by-target",
+        params={"external_system": "tripmate", "target_key": "missing"},
+    )
+
+    assert response.status_code == 404

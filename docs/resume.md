@@ -1,12 +1,30 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-03 Codex 작업 메모 — T-207f POI/cache target API
+
+ADR-045 T-207f로 `krtour-map-admin`에 `/admin/poi-cache-targets`와
+`/features/nearby/by-target` API를 추가한다. 외부 앱 POI는 좌표만으로 식별하지 않고
+`external_system + target_key`를 정본 키로 삼는다. target upsert/list/detail/delete는
+`infra.poi_cache_target_repo`를 호출하고, 같은 key + 다른 normalized 좌표는 기본 409로
+막으며 `on_conflict='move'`에서만 이동한다.
+
+주변 feature 조회는 `feature_repo.features_nearby_poi_cache_target`를 통해 target의
+stored `coord_5179`와 feature의 stored `coord_5179`에 직접 `ST_DWithin`/`ST_Distance`를
+적용한다. query filter는 `radius_km`, `kind`, `category`, `status`, `provider`,
+`page_size`, `cursor`, `sort(distance/name/last_updated_at)`다. 목록 응답은 summary만
+반환하고 `feature.detail` JSONB/raw payload는 포함하지 않는다.
+
+검증 범위는 admin router unit test, PostGIS 주변 feature/cursor 통합 테스트,
+OpenAPI export drift check다. 다음 한 작업은 **T-208e**다. Dagster sensor가
+`ops.feature_update_requests` queued/now request를 `infra.feature_update_executor`로
+실행하도록 연결한다.
+
 ## 2026-06-03 Codex 작업 메모 — T-207a admin update-requests 라우터
 
 ADR-045 T-207a로 `krtour-map-admin`에 `/admin/feature-update-requests` 라우터를
-추가한다. 구현 범위는 POST 생성(dry-run/actual), GET 목록, GET 단건, POST cancel,
-POST run-now다. 생성/취소는 `ops.import_jobs`와 연결된
-`infra.feature_update_repo`를 직접 호출하고, OpenAPI schema는
-`packages/krtour-map-admin/openapi.json`에 export한다.
+추가했다. 구현 범위는 POST 생성(dry-run/actual), GET 목록, GET 단건, POST cancel,
+POST run-now다. 생성/취소는 `ops.import_jobs`와 연결된 `infra.feature_update_repo`를
+직접 호출하고, OpenAPI schema는 `packages/krtour-map-admin/openapi.json`에 export한다.
 
 목록 필터는 `state`, `scope_type`, `provider`, `dataset_key`, `created_from`,
 `created_to`, `page_size`, `cursor`다. 이를 위해 `infra.feature_update_repo`와
@@ -15,10 +33,6 @@ POST run-now다. 생성/취소는 `ops.import_jobs`와 연결된
 `run-now`는 현재 API 레이어가 provider runner/Dagster를 직접 실행하지 않고, 기존
 request payload를 `run_mode='now'` 새 request로 재큐잉한다. 실제 Dagster run 즉시
 생성과 queued request polling은 T-208e sensor 연결에서 구현한다.
-
-다음 한 작업은 **T-207f**다. `/admin/poi-cache-targets`와
-`/features/nearby/by-target` 라우터를 추가해 외부 POI key 기반 target 등록/삭제/주변
-feature 조회/targeted update 요청까지 연결한다.
 
 ## 2026-06-03 Codex 작업 메모 — T-206d request 실행 본체
 
@@ -369,8 +383,9 @@ Sprint 4(4a+4b)는 아래 체크리스트대로 **전부 완료**(PR#133~#142). 
 alembic 0008, 완료) → T-206a(scope resolver, 완료) → T-206b(feature update repo,
 완료) → T-206c(client, 완료) → T-206a-geo(형제 repo endpoint 검증 완료) →
 T-205c(Phase 2 스키마, 완료) → T-206d(request 실행 본체, 완료) →
-**T-207a(admin update-requests 라우터)** → T-207f(POI/cache target API) →
-T-207d/e(ops + 사용자 features 라우터) → T-208d/e(Dagster schedule/sensor). 그 다음
+T-207a(admin update-requests 라우터, 완료) → T-207f(POI/cache target API, 완료) →
+**T-208e(Dagster sensor)** → T-207d/e(ops + 사용자 features 라우터) → T-208d
+(Dagster schedule). 그 다음
 Sprint 5 provider(MOIS-sibling) + Phase 2 정합성.
 세부는 `docs/sprints/SPRINT-5.md`.
 

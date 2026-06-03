@@ -2,6 +2,26 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-03 (codex) — T-207f POI/cache target API
+
+**작업**: ADR-045 Phase 3 T-207f. 외부 앱 POI를 `external_system + target_key`
+정본 키로 등록/삭제하고, key 기준 주변 feature summary를 OpenAPI로 조회하는 backend
+API를 추가.
+
+- **Admin router**: `PUT/GET/DELETE /admin/poi-cache-targets/{external_system}/{target_key}`
+  와 `GET /admin/poi-cache-targets` 구현. 같은 normalized 좌표 upsert는 idempotent,
+  다른 좌표는 기본 409이고 `on_conflict='move'`에서 이동한다.
+- **Nearby features**: `GET /features/nearby/by-target` 구현. target 기본 radius 또는
+  query `radius_km`를 사용하고 `kind`, `category`, `status`, `provider`, `sort`,
+  `cursor`, `page_size`를 지원한다.
+- **PostGIS**: 주변 조회는 target/feature의 stored `coord_5179`에 직접
+  `ST_DWithin`/`ST_Distance`를 적용한다. 공간 술어에 `ST_Transform`을 넣지 않았다.
+- **OpenAPI**: `packages/krtour-map-admin/openapi.json`을 재생성했다.
+- **검증**: admin router unit `8 passed`, PostGIS nearby/cursor 통합 테스트
+  `3 passed`, ruff/mypy 통과.
+- **다음**: T-208e Dagster sensor가 `run_mode='now'`/queued request를 실제 실행기로
+  연결한다.
+
 ## 2026-06-03 (codex) — T-207a feature update admin API
 
 **작업**: ADR-045 Phase 3 T-207a. `krtour-map-admin`에 feature update request 운영

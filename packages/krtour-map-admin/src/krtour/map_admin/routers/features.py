@@ -17,10 +17,16 @@ ADR 참조
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from datetime import datetime
+from time import perf_counter
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from krtour.map.infra import feature_repo
+from krtour.map.infra.poi_cache_target_repo import (
+    PoiCacheTarget,
+    get_poi_cache_target_by_key,
+)
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,10 +37,12 @@ __all__ = [
     "FeatureSummary",
     "FeaturesInBboxResponse",
     "FeatureDetailResponse",
+    "FeaturesNearbyByTargetResponse",
 ]
 
 
 router = APIRouter(prefix="/features", tags=["features"])
+NearbySort = Literal["distance", "name", "last_updated_at"]
 
 
 # ── 응답 schema ────────────────────────────────────────────────────────
@@ -93,6 +101,90 @@ class FeatureDetailResponse(BaseModel):
     sibling_group_id: str | None = None
 
 
+class NearbyTargetSummary(BaseModel):
+    """주변 조회 기준 target summary."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    target_id: str
+    external_system: str
+    target_key: str
+    name: str | None = None
+    lon: float
+    lat: float
+    radius_km: float
+    scope_mode: str
+    update_enabled: bool
+    refresh_policy: str
+    last_updated_at: datetime
+    last_refreshed_at: datetime | None = None
+    next_eligible_refresh_at: datetime | None = None
+
+
+class NearbyFeatureSummary(BaseModel):
+    """POI/cache target 주변 feature summary."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    feature_id: str
+    kind: str
+    name: str
+    category: str
+    status: str
+    lon: float
+    lat: float
+    distance_m: float
+    primary_provider: str | None = None
+    primary_dataset_key: str | None = None
+    last_updated_at: datetime
+
+
+class FeaturesNearbyByTargetData(BaseModel):
+    """``GET /features/nearby/by-target`` data payload."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    target: NearbyTargetSummary
+    items: list[NearbyFeatureSummary]
+    next_cursor: str | None = None
+
+
+class FeaturesNearbyByTargetMeta(BaseModel):
+    """주변 feature 목록 메타데이터."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    count: int
+    duration_ms: int
+
+
+class FeaturesNearbyByTargetResponse(BaseModel):
+    """``GET /features/nearby/by-target`` 응답."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: FeaturesNearbyByTargetData
+    meta: FeaturesNearbyByTargetMeta
+
+
+def _nearby_target(target: PoiCacheTarget) -> NearbyTargetSummary:
+    return NearbyTargetSummary(
+        target_id=target.target_id,
+        external_system=target.external_system,
+        target_key=target.target_key,
+        name=target.name,
+        lon=target.lon,
+        lat=target.lat,
+        radius_km=target.radius_km,
+        scope_mode=target.scope_mode,
+        update_enabled=target.update_enabled,
+        refresh_policy=target.refresh_policy,
+        last_updated_at=target.updated_at,
+        last_refreshed_at=target.last_refreshed_at,
+        next_eligible_refresh_at=target.next_eligible_refresh_at,
+    )
+
+
 # ── 라우터 ───────────────────────────────────────────────────────────
 
 
@@ -135,6 +227,95 @@ async def list_features_in_bbox(
     )
     items = [FeatureSummary(**row) for row in rows]
     return FeaturesInBboxResponse(count=len(items), items=items)
+
+
+@router.get(
+    "/nearby/by-target",
+    response_model=FeaturesNearbyByTargetResponse,
+    summary="외부 POI/cache target key 기준 주변 feature 목록",
+    responses={
+        404: {"description": "target 없음"},
+        422: {"description": "cursor/sort/radius 오류"},
+    },
+)
+async def list_features_nearby_by_target(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    external_system: Annotated[str, Query(description="외부 시스템 이름. 예: tripmate")],
+    target_key: Annotated[str, Query(description="외부 POI 고유 key.")],
+    radius_km: Annotated[
+        float | None,
+        Query(gt=0, le=100, description="미지정 시 target 기본 radius 사용."),
+    ] = None,
+    kind: Annotated[list[str] | None, Query(description="feature kind 반복 필터.")] = None,
+    category: Annotated[
+        list[str] | None,
+        Query(description="category code 반복 필터."),
+    ] = None,
+    feature_status: Annotated[
+        list[str] | None,
+        Query(alias="status", description="feature status 반복 필터. 기본 active."),
+    ] = None,
+    provider: Annotated[
+        list[str] | None,
+        Query(description="primary provider 반복 필터."),
+    ] = None,
+    page_size: Annotated[int, Query(ge=1, le=500)] = 100,
+    cursor: Annotated[str | None, Query()] = None,
+    sort: Annotated[NearbySort, Query()] = "distance",
+) -> FeaturesNearbyByTargetResponse:
+    started_at = perf_counter()
+    target = await get_poi_cache_target_by_key(
+        session,
+        external_system=external_system,
+        target_key=target_key,
+    )
+    if target is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"POI/cache target 없음: {external_system!r}/{target_key!r}",
+        )
+    try:
+        page = await feature_repo.features_nearby_poi_cache_target(
+            session,
+            target_id=target.target_id,
+            radius_km=radius_km,
+            kinds=kind,
+            categories=category,
+            statuses=feature_status if feature_status is not None else ("active",),
+            providers=provider,
+            sort=sort,
+            limit=page_size,
+            cursor=cursor,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    items = [
+        NearbyFeatureSummary(
+            feature_id=item.feature_id,
+            kind=item.kind,
+            name=item.name,
+            category=item.category,
+            status=item.status,
+            lon=item.lon,
+            lat=item.lat,
+            distance_m=item.distance_m,
+            primary_provider=item.primary_provider,
+            primary_dataset_key=item.primary_dataset_key,
+            last_updated_at=item.last_updated_at,
+        )
+        for item in page.items
+    ]
+    return FeaturesNearbyByTargetResponse(
+        data=FeaturesNearbyByTargetData(
+            target=_nearby_target(target),
+            items=items,
+            next_cursor=page.next_cursor,
+        ),
+        meta=FeaturesNearbyByTargetMeta(
+            count=len(items),
+            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
+        ),
+    )
 
 
 @router.get(

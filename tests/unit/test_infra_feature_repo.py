@@ -11,6 +11,8 @@ import json
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
+import pytest
+
 from krtour.map.dto import (
     Coordinate,
     Feature,
@@ -22,6 +24,7 @@ from krtour.map.dto._enums import FeatureKind, SourceRole
 from krtour.map.infra import feature_repo
 from krtour.map.infra.feature_repo import (
     FeatureLoadResult,
+    NearbyFeatureRow,
     _feature_params,
     _source_link_params,
     _source_record_params,
@@ -119,5 +122,93 @@ def test_feature_load_result_defaults_zero() -> None:
 
 
 def test_module_exports_load_helpers() -> None:
-    for name in ("load_bundle", "load_bundles", "upsert_feature", "get_feature_row"):
+    for name in (
+        "load_bundle",
+        "load_bundles",
+        "upsert_feature",
+        "get_feature_row",
+        "features_nearby_poi_cache_target",
+    ):
         assert hasattr(feature_repo, name)
+
+
+def test_nearby_cursor_round_trips_distance_name_and_updated_at() -> None:
+    row = NearbyFeatureRow(
+        feature_id="feature-1",
+        kind="place",
+        name="A first",
+        category="06020000",
+        status="active",
+        lon=126.978,
+        lat=37.5665,
+        distance_m=12.5,
+        primary_provider="python-opinet-api",
+        primary_dataset_key="opinet_stations",
+        last_updated_at=_NOW,
+    )
+
+    distance = feature_repo._encode_nearby_cursor(row, sort="distance")
+    assert feature_repo._nearby_cursor_params(distance, sort="distance") == {
+        "cursor_distance_m": 12.5,
+        "cursor_name": None,
+        "cursor_last_updated_at": None,
+        "cursor_feature_id": "feature-1",
+    }
+
+    name = feature_repo._encode_nearby_cursor(row, sort="name")
+    assert feature_repo._nearby_cursor_params(name, sort="name")[
+        "cursor_name"
+    ] == "A first"
+
+    updated = feature_repo._encode_nearby_cursor(row, sort="last_updated_at")
+    assert feature_repo._nearby_cursor_params(updated, sort="last_updated_at")[
+        "cursor_last_updated_at"
+    ] == _NOW
+
+
+def test_nearby_cursor_rejects_malformed_or_wrong_sort() -> None:
+    row = NearbyFeatureRow(
+        feature_id="feature-1",
+        kind="place",
+        name="A first",
+        category="06020000",
+        status="active",
+        lon=126.978,
+        lat=37.5665,
+        distance_m=12.5,
+        primary_provider=None,
+        primary_dataset_key=None,
+        last_updated_at=_NOW,
+    )
+    cursor = feature_repo._encode_nearby_cursor(row, sort="distance")
+
+    with pytest.raises(ValueError, match="invalid nearby cursor"):
+        feature_repo._nearby_cursor_params("not-base64", sort="distance")
+    with pytest.raises(ValueError, match="invalid nearby cursor"):
+        feature_repo._nearby_cursor_params(cursor, sort="name")
+
+
+@pytest.mark.asyncio
+async def test_features_nearby_target_validates_before_db_call() -> None:
+    class _Session:
+        async def execute(self, *_args: object, **_kwargs: object) -> None:
+            raise AssertionError("validation should happen before DB execute")
+
+    with pytest.raises(ValueError, match="sort must be one of"):
+        await feature_repo.features_nearby_poi_cache_target(
+            _Session(),  # type: ignore[arg-type]
+            target_id="target-1",
+            sort="bad",
+        )
+    with pytest.raises(ValueError, match="radius_km must be greater than 0"):
+        await feature_repo.features_nearby_poi_cache_target(
+            _Session(),  # type: ignore[arg-type]
+            target_id="target-1",
+            radius_km=0,
+        )
+    with pytest.raises(ValueError, match="limit must be greater than 0"):
+        await feature_repo.features_nearby_poi_cache_target(
+            _Session(),  # type: ignore[arg-type]
+            target_id="target-1",
+            limit=0,
+        )
