@@ -2,6 +2,27 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-03 (codex) — T-207g OpenAPI admin/user 이원화
+
+**작업**: ADR-045 Phase 3 T-207g. admin 전체 OpenAPI와 TripMate/user-facing subset
+OpenAPI를 별도 산출물로 관리하고 drift gate를 이원화.
+
+- **Export profile**: `packages/krtour-map-admin/scripts/export_openapi.py`에
+  `--profile admin|user|all`을 추가했다. 기본 admin profile은 기존
+  `packages/krtour-map-admin/openapi.json`을 유지한다.
+- **User spec**: `packages/krtour-map-admin/openapi.user.json`을 추가했다. 포함 경로는
+  `/features/in-bounds`, `/features/{feature_id}`, `/features/search`,
+  `/features/nearby/by-target`, `/tripmate/features/batch`,
+  `/admin/feature-update-requests` POST,
+  `/admin/feature-update-requests/{request_id}` GET이다.
+- **Prune**: user spec은 사용되는 `components.schemas`만 재귀적으로 남기고
+  `/debug/*`, `/ops/*`, `/admin/features*` 같은 내부 운영 API schema는 제외한다.
+- **CI**: `.github/workflows/openapi.yml` drift check를 `--profile all --check`로
+  바꿔 admin/user spec을 함께 비교한다.
+- **검증**: OpenAPI export unit `1 passed`, `--profile all --check`, ruff targeted
+  통과.
+- **다음**: T-208d Dagster schedules(KST cron, 부하 분산).
+
 ## 2026-06-03 (codex) — T-207e TripMate/public feature read API
 
 **작업**: ADR-045 Phase 3 T-207e. TripMate와 사용자-facing 지도/상세/검색이 사용할

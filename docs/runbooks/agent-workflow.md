@@ -55,8 +55,9 @@ cd ~/dev/python-krtour-map
 ```
 
 - **debug-ui 라우터/DTO 변경 시** OpenAPI drift 게이트 추가:
-  `python packages/krtour-map-admin/scripts/export_openapi.py --output packages/krtour-map-admin/openapi.json`
-  로 재생성 후 `--check`로 EXIT=0 확인 — 재생성본을 NTFS로 복사해 커밋.
+  `python packages/krtour-map-admin/scripts/export_openapi.py --profile all`
+  로 admin/user spec을 재생성 후 `--profile all --check`로 EXIT=0 확인 —
+  재생성본을 NTFS로 복사해 커밋.
 - **Playwright e2e**는 하이브리드: 서버(backend `:9011` + frontend `:9012`)는 WSL,
   Playwright(chromium)는 **Windows 호스트**에서. `docs/dev-environment.md` §8.1.
 - 로컬 green을 맹신하지 말 것 — WSL venv가 누락된 `[dev]` extra를 가릴 수 있다

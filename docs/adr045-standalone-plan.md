@@ -137,8 +137,9 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
 - **T-207f** ✅ `/admin/poi-cache-targets` + `/features/nearby/by-target` (Phase 2,
   `poi-cache-update-targets.md`) — target CRUD/list/detail/delete + 주변 feature
   summary/cursor 조회 완료.
-- **T-207g** OpenAPI export 이원화(admin schema + 사용자 schema) + drift gate 갱신
-  (ADR-031 amendment, D-3). `scripts/export_openapi.py` 확장.
+- **T-207g** ✅ OpenAPI export 이원화(admin schema + 사용자 schema) + drift gate 갱신
+  (ADR-031 amendment, D-3). `scripts/export_openapi.py --profile all`이
+  `openapi.json`과 `openapi.user.json`을 함께 생성/검증한다.
 
 ## 4. Phase 4 — Dagster (TripMate에서 복사 → 구체화)
 
@@ -238,11 +239,12 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
 8. **Phase 3 T-207f** — POI/cache target admin/features API — 완료.
 9. **Phase 4 T-208e** — 완료. Dagster sensor가 queued/now request를 실행기로 연결.
 10. **Phase 3 T-207e** — 완료. T-207b는 구현하지 않는다.
-11. **Phase 3 T-207g** — admin/user OpenAPI export 이원화 + drift gate.
-12. **Phase 5 T-209a/b** (docker-compose + 기동) — 라우터 동작 후 통합.
+11. **Phase 3 T-207g** — 완료. admin/user OpenAPI export 이원화 + drift gate.
+12. **Phase 4 T-208d** — Dagster schedules(KST cron, 부하 분산).
 13. **Phase 4 T-208 잔여** — provider resources/ops polish, TripMate 이관과 병행.
-14. **Phase 6** TripMate 정리/이관 — Dagster 이관 시점 동기.
-15. OpenAPI client gen은 운영 안정 후.
+14. **Phase 5 T-209a/b** (docker-compose + 기동) — 라우터/Dagster 동작 후 통합.
+15. **Phase 6** TripMate 정리/이관 — Dagster 이관 시점 동기.
+16. OpenAPI client gen은 운영 안정 후.
 
 각 task는 1-PR 단위(`docs/runbooks/agent-workflow.md`), 4 게이트 + 해당 시 alembic/
 OpenAPI drift. 새 테이블·라우터마다 통합 테스트 필수(ADR-014).

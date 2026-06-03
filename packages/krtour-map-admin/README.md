@@ -118,7 +118,9 @@ shadcn/ui + `@krtour/map-marker-react` (ADR-029). 자세한 사양:
 - `/admin/offline-uploads`, `/ops/error-logs`
 - `/debug/explain`, `/debug/fixtures`
 
-모두 인증 없음. `OpenAPI` 문서는 `/docs` (Swagger UI), `/openapi.json`.
+모두 인증 없음. 런타임 `OpenAPI` 문서는 `/docs` (Swagger UI), `/openapi.json`.
+저장소 산출물은 admin 전체 `packages/krtour-map-admin/openapi.json`과
+TripMate/user subset `packages/krtour-map-admin/openapi.user.json`을 함께 관리한다.
 
 ## 라이선스
 

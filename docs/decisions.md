@@ -1077,16 +1077,17 @@
 - **결정**:
   - **첫 FastAPI 라우터 등장 PR부터 즉시 활성화** (Sprint 1, 메인 라이브러리
     코어 ETL이 아직 부분 구현이어도 무관).
-  - `packages/krtour-map-admin/openapi.json`을 저장소에 커밋.
+  - `packages/krtour-map-admin/openapi.json`과
+    `packages/krtour-map-admin/openapi.user.json`을 저장소에 커밋.
   - `packages/krtour-map-admin/scripts/export_openapi.py` 신설 (이미
     `docs/debug-ui-package.md §8`에 사양 박힘).
-  - `.github/workflows/openapi.yml` — `--check` drift 게이트:
+  - `.github/workflows/openapi.yml` — admin/user 이원 `--profile all --check` drift 게이트:
     ```yaml
     - run: python packages/krtour-map-admin/scripts/export_openapi.py \
-             --check --output packages/krtour-map-admin/openapi.json
+             --profile all --check
     ```
-  - 라우터/DTO/디버그 패키지 의존성 변경 PR은 반드시 `openapi.json` diff
-    동반 — 누락 시 CI fail.
+  - 라우터/DTO/디버그 패키지 의존성 변경 PR은 반드시 `openapi.json` 또는
+    `openapi.user.json` diff 동반 — 누락 시 CI fail.
   - 메인 라이브러리(`krtour.map`)는 FastAPI 미의존(ADR-020)이라 본 ADR
     범위에 들어오지 않음. **항상 디버그 패키지 한정**.
 

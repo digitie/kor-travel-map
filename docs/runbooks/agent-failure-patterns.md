@@ -39,9 +39,12 @@
 ### A4 — OpenAPI drift 게이트 red (debug-ui 라우터 변경)
 
 - **증상**: 라우터/DTO 추가 후 CI `openapi-drift` red.
-- **회피/복구**: `scripts/export_openapi.py --output ...openapi.json` 재생성 →
-  `--check`로 EXIT=0 확인 → **재생성본을 NTFS로 복사**해 커밋. WSL에서 재생성했으면
-  그 파일을 NTFS로 cp 해야 커밋에 들어간다.
+- **회피/복구**:
+  `python packages/krtour-map-admin/scripts/export_openapi.py --profile all`로
+  `openapi.json`/`openapi.user.json`을 재생성 →
+  `python packages/krtour-map-admin/scripts/export_openapi.py --profile all --check`로
+  EXIT=0 확인 → **재생성본을 NTFS로 복사**해 커밋. WSL에서 재생성했으면 그 파일을
+  NTFS로 cp 해야 커밋에 들어간다.
 
 ## B. Git / worktree / 브랜치
 

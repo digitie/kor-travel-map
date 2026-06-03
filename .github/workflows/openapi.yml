@@ -6,9 +6,9 @@ name: openapi
 # `continue-on-error: false`로 전환되어 정상 동작 시작.
 #
 # 활성화 후 검증:
-# 1. `--check` 모드 — git working tree의 packages/krtour-map-admin/openapi.json
-#    이 라우터 + DTO의 실제 spec과 일치하는지 비교 (drift 시 exit 1).
-# 2. 라우터/DTO 변경 PR은 반드시 openapi.json 갱신 commit 동반.
+# 1. `--profile all --check` 모드 — git working tree의 admin/user OpenAPI JSON이
+#    라우터 + DTO의 실제 spec과 일치하는지 비교 (drift 시 exit 1).
+# 2. 라우터/DTO 변경 PR은 반드시 openapi.json/openapi.user.json 갱신 commit 동반.
 
 on:
   push:
@@ -51,8 +51,9 @@ jobs:
       - name: OpenAPI drift check (ADR-031)
         # PR#35로 `continue-on-error: true` 제거. drift 시 즉시 머지 차단 — DTO/
         # 라우터 변경 PR은 반드시 `python scripts/export_openapi.py` 재실행 +
-        # `openapi.json` commit을 동반.
+        # `openapi.json`/`openapi.user.json` commit을 동반.
         run: |
           python packages/krtour-map-admin/scripts/export_openapi.py \
+            --profile all \
             --check \
             --output packages/krtour-map-admin/openapi.json
