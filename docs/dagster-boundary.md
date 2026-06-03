@@ -346,6 +346,22 @@ feature update request 큐는 T-208e 이후 다음 흐름을 따른다.
    `fail_update_request()`를 best-effort 호출하고, 선택 notifier resource에 알림
    payload를 전달한다.
 
+offline upload load job은 T-208g 이후 다음 흐름을 따른다.
+
+1. Admin API/UI가 원본 파일을 RustFS 등 객체 저장소에 보존하고
+   `ops.offline_uploads` row를 만든다. D-14 기준 운영 버킷은 `krtour-uploads`이며,
+   원본은 만료 없이 보존한다.
+2. 운영자가 Dagster `offline_upload_load` job을 `upload_id` config로 실행한다.
+3. Op `load_offline_upload`는 `offline_upload_store` resource로 `storage_key` bytes를
+   읽고, `byte_size`와 `checksum_sha256`을 검증한다.
+4. 현재 첫 구현은 JSON/JSONL `FeatureBundle` dump만 지원한다. parser는 kind별 detail
+   DTO hydrate 후 `FeatureBundle` validation을 수행한다.
+5. `AsyncKrtourMapClient.run_offline_upload_load_job()`이 provider/dataset/scope advisory
+   lock을 잡고 `ops.import_jobs` + `ops.offline_uploads` 상태 전이와 PostGIS 적재를 한
+   transaction으로 처리한다.
+6. CSV/TSV column mapping, validation wizard, multipart `/admin/offline-uploads*` API,
+   실제 RustFS resource wiring은 후속이다.
+
 ## 10. 정기 schedule 구현 (krtour-map Dagster)
 
 T-208d 기준 `packages/krtour-map-dagster/src/krtour/map_dagster/schedules.py`가

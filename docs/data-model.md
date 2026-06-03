@@ -496,6 +496,48 @@ CREATE INDEX idx_import_jobs_kind_state    ON ops.import_jobs (kind, state, crea
 CREATE INDEX idx_import_jobs_heartbeat     ON ops.import_jobs (heartbeat_at) WHERE state='running';
 ```
 
+### 9.1.1 `ops.offline_uploads` (ADR-045 D-14 / T-208g)
+
+```sql
+CREATE TABLE ops.offline_uploads (
+  upload_id         UUID PRIMARY KEY DEFAULT x_extension.gen_random_uuid(),
+  provider          TEXT NOT NULL,
+  dataset_key       TEXT NOT NULL,
+  sync_scope        TEXT NOT NULL DEFAULT 'default',
+  original_filename TEXT NOT NULL,
+  storage_backend   TEXT NOT NULL,      -- rustfs / s3 / local-test 등
+  storage_key       TEXT NOT NULL,
+  byte_size         BIGINT NOT NULL,
+  checksum_sha256   CHAR(64) NOT NULL,
+  detected_format   TEXT,
+  detected_encoding TEXT,
+  state             TEXT NOT NULL DEFAULT 'uploaded',
+  validation_job_id UUID REFERENCES ops.import_jobs(job_id) ON DELETE SET NULL,
+  load_job_id       UUID REFERENCES ops.import_jobs(job_id) ON DELETE SET NULL,
+  created_by        TEXT,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT ck_offline_uploads_state CHECK (
+    state IN (
+      'uploaded','validating','validated','validation_failed',
+      'loading','loaded','load_failed','cancelled'
+    )
+  ),
+  CONSTRAINT ck_offline_uploads_byte_size CHECK (byte_size >= 0),
+  CONSTRAINT ck_offline_uploads_checksum_sha256
+    CHECK (checksum_sha256 ~ '^[0-9a-f]{64}$')
+);
+
+CREATE INDEX idx_offline_uploads_provider_dataset
+  ON ops.offline_uploads (provider, dataset_key, created_at DESC);
+CREATE INDEX idx_offline_uploads_state
+  ON ops.offline_uploads (state, created_at DESC);
+```
+
+첫 load job 구현은 JSON/JSONL `FeatureBundle` dump만 지원한다. CSV/TSV column
+mapping과 validation wizard는 admin API/UI 후속에서 같은 테이블과 `import_jobs` 연결을
+사용한다.
+
 ### 9.2 `ops.dedup_review_queue` (ADR-016)
 
 ```sql

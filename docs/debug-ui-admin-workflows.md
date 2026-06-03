@@ -1195,8 +1195,9 @@ multipart upload.
 
 저장 위치:
 
-- 개발 환경: gitignore된 `data/uploads/<upload_id>/`.
-- 운영 환경: RustFS 임시 bucket 또는 `data/uploads`.
+- 개발/운영 공통: RustFS bucket `krtour-uploads` (로컬 S3 API 포트 `9003`,
+  console `9004`).
+- 보존 만료 없음. 자동 cleanup/lifecycle job을 두지 않는다(D-14).
 - 원본 파일은 git에 절대 커밋하지 않는다.
 
 #### `POST /admin/offline-uploads/{upload_id}/validate`
@@ -1259,9 +1260,10 @@ multipart upload.
 upload validation 또는 load job 취소 요청. 실제 취소는 연결된 job cancel API로
 위임한다.
 
-### 16.4 스키마 gap
+### 16.4 스키마
 
-정식 구현 전 다음 테이블 도입을 검토한다.
+T-208g에서 다음 테이블을 도입했다. validation wizard와 `/admin/offline-uploads*`
+REST/UI는 후속이지만, load job과 metadata 계약은 이 테이블을 기준으로 한다.
 
 ```sql
 CREATE TABLE ops.offline_uploads (

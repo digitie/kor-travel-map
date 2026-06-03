@@ -1,5 +1,40 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-03 Codex 작업 메모 — T-208g offline upload load job
+
+T-208g는 admin API/UI가 올린 오프라인 파일을 krtour-map 독립 Dagster가 적재할 수
+있도록 선행 DB/job 계약을 구현하는 작업이다. 이번 범위에서는 업로드 UI와 multipart
+API가 아니라, 이미 객체 저장소에 저장된 원본 파일 메타데이터(`ops.offline_uploads`)
+를 기준으로 Dagster load job이 PostGIS 적재까지 수행하는 경로를 닫았다.
+
+새로 추가한 구성은 다음과 같다.
+
+- `alembic/versions/0011_offline_uploads.py`: `ops.offline_uploads` 테이블. provider,
+  dataset_key, sync_scope, storage_backend/key, byte_size, checksum, detected format,
+  validation/load `import_jobs` FK, state를 저장한다.
+- `krtour.map.infra.offline_upload_repo`: 업로드 메타 생성/조회, load 시작/종료 상태
+  전이 raw SQL repository.
+- `krtour.map.offline_upload`: JSON/JSONL `FeatureBundle` parser, checksum/size 검증,
+  provider/dataset/scope advisory lock, `import_jobs` running/done/failed 전이,
+  `load_bundles` 적재 orchestration.
+- `AsyncKrtourMapClient.run_offline_upload_load_job`: Dagster/admin 내부에서 쓰는
+  client 진입점.
+- `packages/krtour-map-dagster`: `offline_upload_load` job + `offline_upload_store`
+  resource key 등록.
+
+지원 포맷은 첫 단계로 JSON/JSONL `FeatureBundle` dump다. CSV/TSV column mapping,
+validation wizard, 실제 RustFS resource wiring, `/admin/offline-uploads*` API/UI는
+후속이다. parser는 `Feature.detail` dict 금지(ADR-018)를 우회하지 않고, kind별 detail
+모델로 hydrate한 뒤 DTO 검증을 수행한다.
+
+검증은 parser/Dagster definitions unit `8 passed`, migrated PostGIS integration
+`2 passed`로 확인했다. 통합 테스트는 성공 적재와 checksum mismatch 실패 시
+`ops.import_jobs.state='failed'`, `ops.offline_uploads.state='load_failed'` 전이를
+검증한다.
+
+다음 한 작업은 **T-208b 잔여 RustFS/provider 실제 resource wiring 또는
+`/admin/offline-uploads*` API/UI 선행 task 분리**다.
+
 ## 2026-06-03 Codex 작업 메모 — T-208f consistency/dedup refresh job
 
 T-211b admin UI 최신화가 PR#175로 머지된 뒤, 독립 Dagster 운영 완성 선행 task인

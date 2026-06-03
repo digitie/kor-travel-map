@@ -116,6 +116,13 @@ from krtour.map.mois import (
     run_mois_license_incremental_job,
     sync_mois_license_features_bulk,
 )
+from krtour.map.offline_upload import (
+    OfflineUploadLoadResult,
+    OfflineUploadObjectStore,
+)
+from krtour.map.offline_upload import (
+    run_offline_upload_load_job as repo_run_offline_upload_load_job,
+)
 from krtour.map.providers.mois import DATASET_KEY_BULK as MOIS_DATASET_KEY_BULK
 from krtour.map.providers.mois import DATASET_KEY_HISTORY as MOIS_DATASET_KEY_HISTORY
 from krtour.map.providers.mois import PROVIDER_NAME as MOIS_PROVIDER_NAME
@@ -137,6 +144,7 @@ __all__ = [
     "AsyncKrtourMapClient",
     "DedupRefreshResult",
     "DedupSyncResult",
+    "OfflineUploadLoadResult",
 ]
 
 
@@ -377,6 +385,27 @@ class AsyncKrtourMapClient:
                 target_dataset_key=target_dataset_key,
                 sync_scope=sync_scope,
                 source_checksum=source_checksum,
+            )
+
+    async def run_offline_upload_load_job(
+        self,
+        upload_id: str,
+        *,
+        store: OfflineUploadObjectStore,
+        dagster_run_id: str | None = None,
+    ) -> OfflineUploadLoadResult:
+        """오프라인 업로드 파일을 ``FeatureBundle``로 파싱해 적재한다.
+
+        ``ops.offline_uploads`` 메타데이터의 ``storage_key``를 store에서 읽고,
+        checksum/size 검증 후 JSON/JSONL ``FeatureBundle``을 적재한다. 진행 상태는
+        ``ops.import_jobs``와 ``ops.offline_uploads``에 기록된다.
+        """
+        async with self._session_factory() as session, session.begin():
+            return await repo_run_offline_upload_load_job(
+                session,
+                upload_id,
+                store=store,
+                dagster_run_id=dagster_run_id,
             )
 
     async def find_place_phone_candidates(

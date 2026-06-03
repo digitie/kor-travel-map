@@ -10,6 +10,7 @@ from .maintenance import (
     MAINTENANCE_JOBS,
     MAINTENANCE_SCHEDULES,
 )
+from .offline_uploads import OFFLINE_UPLOAD_JOBS
 from .schedules import FEATURE_LOAD_JOBS, FEATURE_LOAD_SCHEDULES
 from .sensors import FEATURE_UPDATE_JOBS, FEATURE_UPDATE_SENSORS
 from .validation import (
@@ -30,6 +31,7 @@ __all__ = [
     "CONSISTENCY_DEDUP_REFRESH_SCHEDULES",
     "MAINTENANCE_JOBS",
     "MAINTENANCE_SCHEDULES",
+    "OFFLINE_UPLOAD_JOBS",
     "DagsterFeatureLoadResult",
     "FeatureAddressIssue",
     "FeatureAddressValidation",

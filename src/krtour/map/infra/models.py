@@ -34,6 +34,7 @@ from typing import Any
 
 from geoalchemy2 import Geometry
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     Computed,
@@ -62,6 +63,7 @@ __all__ = [
     "FeatureConsistencyReportRow",
     "DedupReviewQueueRow",
     "ImportJobRow",
+    "OfflineUploadRow",
     "FeatureOverrideRow",
     "FeatureUpdateRequestRow",
     "DataIntegrityViolationRow",
@@ -616,6 +618,75 @@ class ImportJobRow(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
+
+
+# =============================================================================
+# ops.offline_uploads  (ADR-045 D-14 / T-208g)
+# =============================================================================
+
+
+class OfflineUploadRow(Base):
+    """``ops.offline_uploads`` row mapping — 오프라인 원본 파일 메타데이터."""
+
+    __tablename__ = "offline_uploads"
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ("
+            "'uploaded','validating','validated','validation_failed',"
+            "'loading','loaded','load_failed','cancelled'"
+            ")",
+            name="ck_offline_uploads_state",
+        ),
+        CheckConstraint("byte_size >= 0", name="ck_offline_uploads_byte_size"),
+        CheckConstraint(
+            "checksum_sha256 ~ '^[0-9a-f]{64}$'",
+            name="ck_offline_uploads_checksum_sha256",
+        ),
+        Index(
+            "idx_offline_uploads_provider_dataset",
+            "provider",
+            "dataset_key",
+            text("created_at DESC"),
+        ),
+        Index("idx_offline_uploads_state", "state", text("created_at DESC")),
+        {"schema": "ops"},
+    )
+
+    upload_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=text("x_extension.gen_random_uuid()"),
+    )
+    provider: Mapped[str] = mapped_column(Text, nullable=False)
+    dataset_key: Mapped[str] = mapped_column(Text, nullable=False)
+    sync_scope: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'default'"),
+    )
+    original_filename: Mapped[str] = mapped_column(Text, nullable=False)
+    storage_backend: Mapped[str] = mapped_column(Text, nullable=False)
+    storage_key: Mapped[str] = mapped_column(Text, nullable=False)
+    byte_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    checksum_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    detected_format: Mapped[str | None] = mapped_column(Text)
+    detected_encoding: Mapped[str | None] = mapped_column(Text)
+    state: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'uploaded'"),
+    )
+    validation_job_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("ops.import_jobs.job_id", ondelete="SET NULL"),
+    )
+    load_job_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("ops.import_jobs.job_id", ondelete="SET NULL"),
+    )
+    created_by: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()"),
     )
 

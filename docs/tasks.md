@@ -4,9 +4,10 @@
 
 ## 진행 중
 
-**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#175(T-211b admin UI 최신화)
-까지 merged. T-208f consistency/dedup refresh job까지 완료되면 다음 작업은
-T-208g offline upload load job이다.
+**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#176(T-208f
+consistency/dedup refresh job)까지 merged. 현재 작업은 T-208g offline upload load
+job이다. T-208g가 머지되면 `ops.offline_uploads` 기반 admin upload API/UI와
+T-208b 잔여 RustFS resource wiring을 후속으로 진행한다.
 T-207b는 사용자 결정에 따라 구현하지 않는다.
 
 ### 현재 기준 보강 필요 체크포인트 (2026-06-03)
@@ -384,7 +385,8 @@ T-207b는 사용자 결정에 따라 구현하지 않는다.
       package가 code location을 제공.
 - [~] T-208b — resources(DB/client/provider 9 + kraddr-geo/rustfs, D-15). 1차:
       `krtour_map_client`, `reverse_geocoder`, `fetched_at`, provider record iterable
-      resource 계약 구현. 실제 provider client/RustFS resource는 후속.
+      resource 계약 구현. `offline_upload_store` resource key는 T-208g에서 추가한다.
+      실제 provider client/RustFS resource wiring은 후속.
 - [x] T-208c — provider load asset 9종(이미 구현·검증된 Feature provider 변환 함수
       연결) + 주소/좌표 검증 + `AsyncKrtourMapClient.load_feature_bundles` PostGIS
       적재 통합 테스트.
@@ -398,7 +400,12 @@ T-207b는 사용자 결정에 따라 구현하지 않는다.
       `consistency_dedup_refresh` job이 `refresh_dedup_candidates` →
       `run_consistency_check` 순서로 실행된다. dedup refresh는 pair/sibling scope config를
       받고, consistency report는 `ops.feature_consistency_reports`에 저장한다.
-- [ ] T-208g — offline upload load job (D-14).
+- [x] T-208g — offline upload load job (D-14).
+      `ops.offline_uploads`(alembic 0011), `infra.offline_upload_repo`,
+      `krtour.map.offline_upload` JSON/JSONL `FeatureBundle` parser/load
+      orchestration, `AsyncKrtourMapClient.run_offline_upload_load_job`,
+      Dagster `offline_upload_load` job을 추가했다. 실제 RustFS store 구현과
+      `/admin/offline-uploads*` API/UI는 후속 task로 둔다.
 
 **Phase 4.5 — Admin UI 최신화 (사용자 지시로 T-208d 이후 최우선)**
 - [x] T-211a — admin UI 최신 문서/현재 구현 gap audit + 선행 API/데이터 계약 보강.
