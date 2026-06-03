@@ -1,5 +1,28 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-03 Codex 작업 메모 — T-208f consistency/dedup refresh job
+
+T-211b admin UI 최신화가 PR#175로 머지된 뒤, 독립 Dagster 운영 완성 선행 task인
+T-208f를 진행했다. 새 `krtour.map.infra.dedup_refresh_repo`는 DB에 적재된 활성
+feature를 provider/dataset scope 기준으로 읽어 `core.dedup.DedupInput` 형태로
+제공한다. `AsyncKrtourMapClient`에는 다음 운영 메서드를 추가했다.
+
+- `refresh_dedup_candidates_for_scope_pair`: 두 provider/dataset scope를 cross-score해
+  `ops.dedup_review_queue`를 upsert한다.
+- `refresh_sibling_dedup_candidates`: 단일 scope 내부 sibling 후보를 재계산한다.
+- `run_consistency_report`: F1~F4 consistency report를 실행하고 필요 시
+  `ops.feature_consistency_reports`에 저장한다.
+
+Dagster package에는 `consistency_dedup_refresh` job을 추가했다. 첫 op
+`refresh_dedup_candidates`는 `pairs`와 `sibling_scopes` config를 받고, 두 번째 op
+`run_consistency_check`는 dedup refresh 이후 실행되어 report metadata를 남긴다.
+`consistency_dedup_refresh_daily_schedule`은 `Asia/Seoul` 기준 `45 5 * * *`이며, 외부
+운영자가 명시적으로 켜기 전까지 `STOPPED`다. 이 작업은 ADR-033 Phase 2 gate/swap
+차단이 아니라 관측/refresh job이다.
+
+검증은 Dagster definitions/unit `5 passed`, PostGIS client 경로 integration
+`5 passed`로 확인했다. 다음 한 작업은 **T-208g offline upload load job**이다.
+
 ## 2026-06-03 Codex 작업 메모 — T-211b admin UI 최신화 구현
 
 사용자 지시로 admin UI 최신화 우선순위를 최상위로 올린 뒤, T-211a 선행 API/gap

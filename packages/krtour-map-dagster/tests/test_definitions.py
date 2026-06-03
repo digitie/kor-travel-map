@@ -39,6 +39,9 @@ def test_feature_update_job_and_sensors_registered() -> None:
     assert defs.get_job_def("feature_update_request_worker").name == (
         "feature_update_request_worker"
     )
+    assert defs.get_job_def("consistency_dedup_refresh").name == (
+        "consistency_dedup_refresh"
+    )
     assert defs.resolve_sensor_def("feature_update_request_queue_sensor").name == (
         "feature_update_request_queue_sensor"
     )
@@ -63,3 +66,14 @@ def test_feature_load_schedules_registered_with_kst_cron() -> None:
         assert schedule.tags["krtour_map.schedule_scope"] == "system"
         assert schedule.tags["krtour_map.provider"] == spec.provider
         assert schedule.tags["krtour_map.dataset_key"] == spec.dataset_key
+
+
+def test_consistency_dedup_refresh_schedule_registered() -> None:
+    schedule = defs.resolve_schedule_def("consistency_dedup_refresh_daily_schedule")
+    assert schedule.name == "consistency_dedup_refresh_daily_schedule"
+    assert schedule.cron_schedule == "45 5 * * *"
+    assert schedule.execution_timezone == KST_TIMEZONE
+    assert schedule.default_status == DefaultScheduleStatus.STOPPED
+    assert schedule.job_name == "consistency_dedup_refresh"
+    assert schedule.tags["krtour_map.job_scope"] == "maintenance"
+    assert schedule.tags["krtour_map.job_kind"] == "consistency_dedup_refresh"

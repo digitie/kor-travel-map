@@ -65,6 +65,12 @@ from krtour.map.infra.db import (
     make_async_session_factory,
     normalize_async_dsn,
 )
+from krtour.map.infra.dedup_refresh_repo import (
+    DEDUP_REFRESH_DEFAULT_LIMIT,
+    DedupRefreshFeature,
+    DedupRefreshScope,
+    list_dedup_refresh_features,
+)
 from krtour.map.infra.dedup_repo import (
     DedupQueueResult,
     enqueue_dedup_candidate,
@@ -253,6 +259,11 @@ __all__ = [
     "enqueue_dedup_candidate",
     "enqueue_dedup_candidates",
     "pending_dedup_reviews",
+    # dedup_refresh_repo (ADR-045 T-208f)
+    "DEDUP_REFRESH_DEFAULT_LIMIT",
+    "DedupRefreshFeature",
+    "DedupRefreshScope",
+    "list_dedup_refresh_features",
     # jobs_repo (ADR-011 작업 큐)
     "ImportJob",
     "enqueue_import_job",
