@@ -4,9 +4,9 @@
 
 ## 진행 중
 
-**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#169(T-207c admin feature
-review/deactivate/override/dedup merge backend)까지 merged. T-207d
-ops consistency/jobs/metrics API를 완료한 뒤 T-207e → T-207g 순서로 이어간다.
+**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#170(T-207d ops
+consistency/jobs/metrics API)까지 merged. 현재 작업은 T-207e
+`/features/*` + `/tripmate/features/batch`이며, 완료 후 T-207g로 이어간다.
 T-207b는 사용자 결정에 따라 구현하지 않는다.
 
 ### 현재 기준 보강 필요 체크포인트 (2026-06-03)
@@ -51,6 +51,10 @@ T-207b는 사용자 결정에 따라 구현하지 않는다.
 
 ## 최근 완료 (2026-05-31~2026-06-03)
 
+- **T-207e** (2026-06-03): `GET /features/in-bounds`, `GET /features/search`,
+  `GET /features/{feature_id}` envelope 상세, `POST /tripmate/features/batch`를
+  연결. 기존 `GET /features` bbox raw 응답은 admin frontend 호환용으로 유지하고,
+  TripMate/public 응답은 `{data, meta}` envelope로 분리했다.
 - **T-207d** (2026-06-03): `/ops/metrics`, `/ops/import-jobs`,
   `/ops/import-jobs/{job_id}`, `/ops/consistency/reports`,
   `/ops/consistency/issues` backend를 연결. `infra.ops_repo`는 import job,
@@ -347,8 +351,10 @@ T-207b는 사용자 결정에 따라 구현하지 않는다.
 - [x] T-207d — `/ops/*` consistency/jobs/metrics. `GET /ops/metrics`,
   `GET /ops/import-jobs`, `GET /ops/import-jobs/{job_id}`,
   `GET /ops/consistency/reports`, `GET /ops/consistency/issues`를 연결했다.
-- [ ] T-207e — `/features/*` + `/tripmate/features/batch` (사용자, `tripmate-rest-api.md`, D-7).
-  TripMate batch 연동 직전 보강.
+- [x] T-207e — `/features/*` + `/tripmate/features/batch` (사용자, `tripmate-rest-api.md`, D-7).
+  `GET /features/in-bounds`, `GET /features/search`, envelope 상세, TripMate batch
+  상세 조회를 연결했다. 기존 `GET /features` raw bbox 응답은 admin frontend 호환용으로
+  유지한다.
 - [ ] T-207g — OpenAPI export 이원화(admin/user) + drift gate (ADR-031 amend, D-3).
 
 **Phase 4 — Dagster (krtour-map 독립 구현)**

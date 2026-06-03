@@ -115,6 +115,14 @@ export interface FeatureDetail {
   status: string;
   parent_feature_id: string | null;
   sibling_group_id: string | null;
+  updated_at: string;
+}
+
+interface FeatureDetailEnvelopeResponse {
+  data: FeatureDetail;
+  meta: {
+    duration_ms: number;
+  };
 }
 
 async function fetchFeatureDetail(featureId: string): Promise<FeatureDetail> {
@@ -132,7 +140,8 @@ async function fetchFeatureDetail(featureId: string): Promise<FeatureDetail> {
       `/features/${featureId}`,
     );
   }
-  return (await response.json()) as FeatureDetail;
+  const body = (await response.json()) as FeatureDetailEnvelopeResponse;
+  return body.data;
 }
 
 /** react-query hook — `selectedFeatureId` 변경 시 자동 fetch. */

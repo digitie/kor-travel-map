@@ -18,7 +18,12 @@ from krtour.map_admin.routers.etl import router as etl_router
 from krtour.map_admin.routers.feature_update_requests import (
     router as feature_update_requests_router,
 )
-from krtour.map_admin.routers.features import router as features_router
+from krtour.map_admin.routers.features import (
+    router as features_router,
+)
+from krtour.map_admin.routers.features import (
+    tripmate_router,
+)
 from krtour.map_admin.routers.health import router as health_router
 from krtour.map_admin.routers.mois_detail import router as mois_detail_router
 from krtour.map_admin.routers.ops import router as ops_router
@@ -36,6 +41,7 @@ __all__ = [
     "feature_update_requests_router",
     "poi_cache_targets_router",
     "features_router",
+    "tripmate_router",
     "mois_detail_router",
     "ops_router",
     "dagster_router",

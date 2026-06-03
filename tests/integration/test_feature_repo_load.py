@@ -208,6 +208,15 @@ async def test_features_in_bbox_finds_loaded_feature(
     )
     assert bundle.feature.feature_id not in {r["feature_id"] for r in rows_place}
 
+    # category 필터 mismatch면 제외
+    rows_category = await feature_repo.features_in_bbox(
+        migrated_session,
+        min_lon=lon - 0.1, min_lat=lat - 0.1,
+        max_lon=lon + 0.1, max_lat=lat + 0.1,
+        categories=["does-not-match"],
+    )
+    assert bundle.feature.feature_id not in {r["feature_id"] for r in rows_category}
+
     # feature 밖 bbox면 빈 결과
     rows_far = await feature_repo.features_in_bbox(
         migrated_session,
@@ -215,6 +224,58 @@ async def test_features_in_bbox_finds_loaded_feature(
         max_lon=lon + 1.1, max_lat=lat + 1.1,
     )
     assert bundle.feature.feature_id not in {r["feature_id"] for r in rows_far}
+
+
+async def test_get_feature_rows_by_ids_and_search_features(
+    migrated_session: AsyncSession,
+) -> None:
+    first = await _bundle("FEST-SEARCH-A")
+    second = await _bundle("FEST-SEARCH-B")
+    await feature_repo.load_bundles(migrated_session, [first, second])
+    await migrated_session.flush()
+
+    rows = await feature_repo.get_feature_rows_by_ids(
+        migrated_session,
+        [first.feature.feature_id, "missing"],
+    )
+    assert set(rows) == {first.feature.feature_id}
+    assert rows[first.feature.feature_id]["updated_at"] == first.feature.updated_at
+
+    lon = float(first.feature.coord.lon)
+    lat = float(first.feature.coord.lat)
+    page = await feature_repo.search_features(
+        migrated_session,
+        q="서울 봄꽃 축제",
+        bbox=(lon - 0.1, lat - 0.1, lon + 0.1, lat + 0.1),
+        kinds=["event"],
+        categories=[first.feature.category],
+        limit=1,
+    )
+    assert len(page.items) == 1
+    assert page.items[0].feature_id in {
+        first.feature.feature_id,
+        second.feature.feature_id,
+    }
+    assert page.next_cursor is not None
+
+    next_page = await feature_repo.search_features(
+        migrated_session,
+        q="서울 봄꽃 축제",
+        bbox=(lon - 0.1, lat - 0.1, lon + 0.1, lat + 0.1),
+        kinds=["event"],
+        categories=[first.feature.category],
+        limit=1,
+        cursor=page.next_cursor,
+    )
+    assert len(next_page.items) == 1
+    assert next_page.items[0].feature_id != page.items[0].feature_id
+
+    bbox_only = await feature_repo.search_features(
+        migrated_session,
+        bbox=(lon - 0.1, lat - 0.1, lon + 0.1, lat + 0.1),
+        limit=10,
+    )
+    assert first.feature.feature_id in {item.feature_id for item in bbox_only.items}
 
 
 async def test_area_feature_geom_persists(migrated_session: AsyncSession) -> None:

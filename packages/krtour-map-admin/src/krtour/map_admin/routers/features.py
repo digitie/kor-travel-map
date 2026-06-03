@@ -6,7 +6,10 @@ DTO 매핑만, SQL 미보유.
 
 엔드포인트:
 - ``GET /features`` — bbox 안 feature 경량 표현 list (지도 뷰포트 로드).
+- ``GET /features/in-bounds`` — TripMate/user용 bbox envelope 응답.
+- ``GET /features/search`` — TripMate/user용 이름/bbox 검색.
 - ``GET /features/{feature_id}`` — feature 단건 상세.
+- ``POST /tripmate/features/batch`` — TripMate N+1 방지 batch 상세.
 
 ADR 참조
 --------
@@ -34,14 +37,21 @@ from krtour.map_admin.db import get_session
 
 __all__ = [
     "router",
+    "tripmate_router",
     "FeatureSummary",
     "FeaturesInBboxResponse",
+    "FeaturesInBoundsResponse",
     "FeatureDetailResponse",
+    "FeatureDetailEnvelopeResponse",
+    "FeatureBatchRequest",
+    "FeatureBatchResponse",
+    "FeatureSearchResponse",
     "FeaturesNearbyByTargetResponse",
 ]
 
 
 router = APIRouter(prefix="/features", tags=["features"])
+tripmate_router = APIRouter(prefix="/tripmate", tags=["tripmate"])
 NearbySort = Literal["distance", "name", "last_updated_at"]
 
 
@@ -74,7 +84,7 @@ class FeaturesInBboxResponse(BaseModel):
 
 
 class FeatureDetailResponse(BaseModel):
-    """``GET /features/{feature_id}`` 응답 — 단건 상세 (raw row 기반)."""
+    """feature 단건 상세 data payload."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -99,6 +109,96 @@ class FeatureDetailResponse(BaseModel):
     status: str
     parent_feature_id: str | None = None
     sibling_group_id: str | None = None
+    updated_at: datetime
+
+
+class PublicFeatureListData(BaseModel):
+    """public feature 목록 data payload."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    count: int
+    items: list[FeatureSummary]
+    cluster_unit: str | None = None
+
+
+class FeatureListMeta(BaseModel):
+    """public feature 목록 meta."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    duration_ms: int
+
+
+class FeaturesInBoundsResponse(BaseModel):
+    """``GET /features/in-bounds`` 응답."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: PublicFeatureListData
+    meta: FeatureListMeta
+
+
+class FeatureDetailMeta(BaseModel):
+    """feature 상세 meta."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    duration_ms: int
+
+
+class FeatureDetailEnvelopeResponse(BaseModel):
+    """``GET /features/{feature_id}`` public envelope 응답."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: FeatureDetailResponse
+    meta: FeatureDetailMeta
+
+
+class FeatureBatchRequest(BaseModel):
+    """TripMate batch 상세 조회 요청."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    feature_ids: list[str] = Field(min_length=1, max_length=200)
+
+
+class FeatureBatchData(BaseModel):
+    """TripMate batch 상세 data payload."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: dict[str, FeatureDetailResponse]
+    missing: list[str]
+
+
+class FeatureBatchResponse(BaseModel):
+    """``POST /tripmate/features/batch`` 응답."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: FeatureBatchData
+    meta: FeatureDetailMeta
+
+
+class FeatureSearchData(BaseModel):
+    """사용자 feature 검색 data payload."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[FeatureSummary]
+    next_cursor: str | None = None
+    total_count: int | None = None
+
+
+class FeatureSearchResponse(BaseModel):
+    """``GET /features/search`` 응답."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: FeatureSearchData
+    meta: FeatureListMeta
 
 
 class NearbyTargetSummary(BaseModel):
@@ -185,6 +285,49 @@ def _nearby_target(target: PoiCacheTarget) -> NearbyTargetSummary:
     )
 
 
+def _duration_ms(started_at: float) -> int:
+    return max(0, int((perf_counter() - started_at) * 1000))
+
+
+def _detail_from_row(row: dict[str, Any]) -> FeatureDetailResponse:
+    return FeatureDetailResponse(
+        feature_id=row["feature_id"],
+        kind=row["kind"],
+        name=row["name"],
+        category=row["category"],
+        lon=row["lon"],
+        lat=row["lat"],
+        coord_5179_srid=row["coord_5179_srid"],
+        address=row["address"],
+        detail=row["detail"],
+        urls=row["urls"],
+        legal_dong_code=row["legal_dong_code"],
+        sido_code=row["sido_code"],
+        sigungu_code=row["sigungu_code"],
+        marker_icon=row["marker_icon"],
+        marker_color=row["marker_color"],
+        status=row["status"],
+        parent_feature_id=row["parent_feature_id"],
+        sibling_group_id=row["sibling_group_id"],
+        updated_at=row["updated_at"],
+    )
+
+
+def _parse_bbox_csv(value: str | None) -> tuple[float, float, float, float] | None:
+    if value is None:
+        return None
+    parts = [part.strip() for part in value.split(",")]
+    if len(parts) != 4:
+        raise ValueError("bbox는 min_lon,min_lat,max_lon,max_lat CSV 형식이어야 합니다")
+    try:
+        min_lon, min_lat, max_lon, max_lat = (float(part) for part in parts)
+    except ValueError as exc:
+        raise ValueError("bbox 좌표는 숫자여야 합니다") from exc
+    if min_lon > max_lon or min_lat > max_lat:
+        raise ValueError("bbox min 좌표가 max보다 큽니다")
+    return (min_lon, min_lat, max_lon, max_lat)
+
+
 # ── 라우터 ───────────────────────────────────────────────────────────
 
 
@@ -208,6 +351,10 @@ async def list_features_in_bbox(
         list[str] | None,
         Query(description="feature kind 필터 (반복 가능). 미지정 시 전체."),
     ] = None,
+    category: Annotated[
+        list[str] | None,
+        Query(description="category code 필터 (반복 가능). 미지정 시 전체."),
+    ] = None,
     limit: Annotated[int, Query(ge=1, le=5000, description="최대 반환 수.")] = 1000,
 ) -> FeaturesInBboxResponse:
     if min_lon > max_lon or min_lat > max_lat:
@@ -223,10 +370,116 @@ async def list_features_in_bbox(
         max_lon=max_lon,
         max_lat=max_lat,
         kinds=kind,
+        categories=category,
         limit=limit,
     )
     items = [FeatureSummary(**row) for row in rows]
     return FeaturesInBboxResponse(count=len(items), items=items)
+
+
+@router.get(
+    "/in-bounds",
+    response_model=FeaturesInBoundsResponse,
+    summary="bbox 안 feature 목록 (TripMate/public envelope)",
+)
+async def list_public_features_in_bounds(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    min_lon: Annotated[float, Query(description="bbox 최소 경도 (WGS84).")],
+    min_lat: Annotated[float, Query(description="bbox 최소 위도.")],
+    max_lon: Annotated[float, Query(description="bbox 최대 경도.")],
+    max_lat: Annotated[float, Query(description="bbox 최대 위도.")],
+    kind: Annotated[list[str] | None, Query(description="feature kind 반복 필터.")] = None,
+    category: Annotated[
+        list[str] | None,
+        Query(description="category code 반복 필터."),
+    ] = None,
+    zoom: Annotated[int | None, Query(ge=0, le=24)] = None,
+    limit: Annotated[int, Query(ge=1, le=5000)] = 1000,
+) -> FeaturesInBoundsResponse:
+    started_at = perf_counter()
+    if min_lon > max_lon or min_lat > max_lat:
+        raise HTTPException(
+            status_code=422,
+            detail="bbox min 좌표가 max보다 큽니다 (min_lon≤max_lon, min_lat≤max_lat).",
+        )
+    rows = await feature_repo.features_in_bbox(
+        session,
+        min_lon=min_lon,
+        min_lat=min_lat,
+        max_lon=max_lon,
+        max_lat=max_lat,
+        kinds=kind,
+        categories=category,
+        limit=limit,
+    )
+    items = [FeatureSummary(**row) for row in rows]
+    _ = zoom  # 클러스터링 구현 전까지 OpenAPI query 계약만 유지한다.
+    return FeaturesInBoundsResponse(
+        data=PublicFeatureListData(
+            count=len(items),
+            items=items,
+            cluster_unit=None,
+        ),
+        meta=FeatureListMeta(duration_ms=_duration_ms(started_at)),
+    )
+
+
+@router.get(
+    "/search",
+    response_model=FeatureSearchResponse,
+    summary="feature 검색 (이름 trgm + bbox)",
+    responses={422: {"description": "검색 범위 또는 cursor 오류"}},
+)
+async def search_public_features(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    q: Annotated[str | None, Query(description="name pg_trgm 검색어.")] = None,
+    kind: Annotated[list[str] | None, Query(description="feature kind 반복 필터.")] = None,
+    category: Annotated[
+        list[str] | None,
+        Query(description="category code 반복 필터."),
+    ] = None,
+    bbox: Annotated[
+        str | None,
+        Query(description="min_lon,min_lat,max_lon,max_lat CSV."),
+    ] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    cursor: Annotated[str | None, Query()] = None,
+) -> FeatureSearchResponse:
+    started_at = perf_counter()
+    try:
+        page = await feature_repo.search_features(
+            session,
+            q=q,
+            bbox=_parse_bbox_csv(bbox),
+            kinds=kind,
+            categories=category,
+            limit=limit,
+            cursor=cursor,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    items = [
+        FeatureSummary(
+            feature_id=item.feature_id,
+            kind=item.kind,
+            name=item.name,
+            category=item.category,
+            lon=item.lon,
+            lat=item.lat,
+            marker_icon=item.marker_icon,
+            marker_color=item.marker_color,
+            status=item.status,
+        )
+        for item in page.items
+    ]
+    return FeatureSearchResponse(
+        data=FeatureSearchData(
+            items=items,
+            next_cursor=page.next_cursor,
+            total_count=page.total_count,
+        ),
+        meta=FeatureListMeta(duration_ms=_duration_ms(started_at)),
+    )
 
 
 @router.get(
@@ -313,45 +566,54 @@ async def list_features_nearby_by_target(
         ),
         meta=FeaturesNearbyByTargetMeta(
             count=len(items),
-            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
+            duration_ms=_duration_ms(started_at),
         ),
     )
 
 
 @router.get(
     "/{feature_id}",
-    response_model=FeatureDetailResponse,
+    response_model=FeatureDetailEnvelopeResponse,
     summary="feature 단건 상세",
     responses={404: {"description": "feature_id 없음"}},
 )
 async def get_feature(
     feature_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> FeatureDetailResponse:
+) -> FeatureDetailEnvelopeResponse:
+    started_at = perf_counter()
     row = await feature_repo.get_feature_row(session, feature_id)
-    if row is None:
+    if row is None or row["deleted_at"] is not None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"feature 없음: {feature_id!r}",
         )
-    # raw row에서 응답 schema가 쓰는 필드만 추림 (created_at 등 제외).
-    return FeatureDetailResponse(
-        feature_id=row["feature_id"],
-        kind=row["kind"],
-        name=row["name"],
-        category=row["category"],
-        lon=row["lon"],
-        lat=row["lat"],
-        coord_5179_srid=row["coord_5179_srid"],
-        address=row["address"],
-        detail=row["detail"],
-        urls=row["urls"],
-        legal_dong_code=row["legal_dong_code"],
-        sido_code=row["sido_code"],
-        sigungu_code=row["sigungu_code"],
-        marker_icon=row["marker_icon"],
-        marker_color=row["marker_color"],
-        status=row["status"],
-        parent_feature_id=row["parent_feature_id"],
-        sibling_group_id=row["sibling_group_id"],
+    return FeatureDetailEnvelopeResponse(
+        data=_detail_from_row(row),
+        meta=FeatureDetailMeta(duration_ms=_duration_ms(started_at)),
+    )
+
+
+@tripmate_router.post(
+    "/features/batch",
+    response_model=FeatureBatchResponse,
+    summary="TripMate feature 상세 batch 조회",
+    responses={422: {"description": "feature_ids 1~200개 필요"}},
+)
+async def get_tripmate_features_batch(
+    body: FeatureBatchRequest,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> FeatureBatchResponse:
+    started_at = perf_counter()
+    feature_ids = list(dict.fromkeys(body.feature_ids))
+    rows = await feature_repo.get_feature_rows_by_ids(session, feature_ids)
+    items = {
+        feature_id: _detail_from_row(rows[feature_id])
+        for feature_id in feature_ids
+        if feature_id in rows
+    }
+    missing = [feature_id for feature_id in feature_ids if feature_id not in rows]
+    return FeatureBatchResponse(
+        data=FeatureBatchData(items=items, missing=missing),
+        meta=FeatureDetailMeta(duration_ms=_duration_ms(started_at)),
     )

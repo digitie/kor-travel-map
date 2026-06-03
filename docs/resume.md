@@ -1,5 +1,26 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-03 Codex 작업 메모 — T-207e TripMate/public feature read API
+
+ADR-045 T-207e로 TripMate와 사용자-facing 지도/상세/검색이 사용할 public feature
+read API를 `krtour-map-admin`에 연결했다. 새 endpoint는
+`GET /features/in-bounds`, `GET /features/search`,
+`POST /tripmate/features/batch`다.
+
+기존 `GET /features` bbox raw 응답은 admin frontend 호환용으로 유지했다. 대신
+TripMate/public bbox는 `GET /features/in-bounds`에서 `{data, meta}` envelope를
+반환한다. `GET /features/{feature_id}`는 `{data, meta.duration_ms}` envelope로 전환하고
+`updated_at`을 포함하도록 갱신했으며, admin frontend 상세 fetch는 `body.data`를 읽는다.
+
+`infra.feature_repo`에는 `get_feature_rows_by_ids`와 `search_features`를 추가했다.
+검색은 `q` 또는 `bbox` 중 하나를 필수 scope로 요구하고, `q` 검색은 `pg_trgm` `%`
+연산자와 transaction-local `pg_trgm.similarity_threshold`를 사용한다. bbox 술어는
+stored `coord` 컬럼의 `&& ST_MakeEnvelope` 형태만 사용한다.
+
+검증 범위는 feature router/repo unit, PostGIS feature repo 통합 테스트, OpenAPI export
+갱신, frontend ESLint/type-check다. 다음 한 작업은 **T-207g OpenAPI export 이원화
+(admin/user) + drift gate 갱신**이다.
+
 ## 2026-06-03 Codex 작업 메모 — T-207d ops consistency/jobs/metrics API
 
 ADR-045 T-207d로 `krtour-map-admin`에 운영 조회용 `/ops/*` 라우터를 추가했다.

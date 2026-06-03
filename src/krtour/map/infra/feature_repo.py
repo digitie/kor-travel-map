@@ -47,6 +47,8 @@ if TYPE_CHECKING:
 
 __all__ = [
     "FeatureLoadResult",
+    "FeatureSearchPage",
+    "FeatureSearchRow",
     "NearbyFeaturePage",
     "NearbyFeatureRow",
     "upsert_feature",
@@ -57,10 +59,12 @@ __all__ = [
     "soft_delete_features_not_in_snapshot",
     "inactivate_features_by_source_entity_ids",
     "get_feature_row",
+    "get_feature_rows_by_ids",
     "get_primary_source_detail",
     "find_place_features_without_phone",
     "set_feature_phones",
     "features_in_bbox",
+    "search_features",
     "features_nearby_poi_cache_target",
 ]
 
@@ -191,6 +195,21 @@ FROM feature.features
 WHERE feature_id = :feature_id
 """
 
+_GET_FEATURES_BY_IDS_SQL: Final[str] = """
+SELECT
+    feature_id, kind, name, category,
+    x_extension.ST_X(coord) AS lon, x_extension.ST_Y(coord) AS lat,
+    x_extension.ST_SRID(coord_5179) AS coord_5179_srid,
+    address, detail, urls, raw_refs,
+    legal_dong_code, sido_code, sigungu_code,
+    marker_icon, marker_color, status,
+    parent_feature_id, sibling_group_id,
+    created_at, updated_at, deleted_at
+FROM feature.features
+WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+  AND deleted_at IS NULL
+"""
+
 # primary source 1건의 on-demand 상세 — source_record raw_data(원본 provider payload)
 # + 연결 feature core. Step D(on-demand detail) 등 단건 조회용. ``source_entity_id``로
 # 매칭(provider/dataset/entity_type 한정). primary link 1개만(LIMIT 1).
@@ -230,9 +249,88 @@ WHERE deleted_at IS NULL
         CAST(:min_lon AS double precision), CAST(:min_lat AS double precision),
         CAST(:max_lon AS double precision), CAST(:max_lat AS double precision), 4326)
   AND (CAST(:kinds AS text[]) IS NULL OR kind = ANY(CAST(:kinds AS text[])))
+  AND (
+    CAST(:categories AS text[]) IS NULL
+    OR category = ANY(CAST(:categories AS text[]))
+  )
 ORDER BY feature_id
 LIMIT :limit
 """
+
+_FEATURE_SEARCH_CTE_SQL: Final[str] = """
+WITH candidates AS (
+    SELECT
+        feature_id,
+        kind,
+        name,
+        category,
+        x_extension.ST_X(coord) AS lon,
+        x_extension.ST_Y(coord) AS lat,
+        marker_icon,
+        marker_color,
+        status,
+        CASE
+            WHEN CAST(:q AS text) IS NULL THEN NULL
+            ELSE x_extension.similarity(name, CAST(:q AS text))
+        END AS score
+    FROM feature.features
+    WHERE deleted_at IS NULL
+      AND (
+        CAST(:q AS text) IS NULL
+        OR name % CAST(:q AS text)
+      )
+      AND (
+        CAST(:bbox_enabled AS boolean) IS FALSE
+        OR (
+          coord IS NOT NULL
+          AND coord && x_extension.ST_MakeEnvelope(
+            CAST(:min_lon AS double precision),
+            CAST(:min_lat AS double precision),
+            CAST(:max_lon AS double precision),
+            CAST(:max_lat AS double precision),
+            4326
+          )
+        )
+      )
+      AND (CAST(:kinds AS text[]) IS NULL OR kind = ANY(CAST(:kinds AS text[])))
+      AND (
+        CAST(:categories AS text[]) IS NULL
+        OR category = ANY(CAST(:categories AS text[]))
+      )
+)
+"""
+
+_FEATURE_SEARCH_BY_SCORE_SQL: Final[str] = (
+    _FEATURE_SEARCH_CTE_SQL
+    + """
+SELECT *
+FROM candidates
+WHERE (
+    CAST(:cursor_score AS double precision) IS NULL
+    OR score < CAST(:cursor_score AS double precision)
+    OR (
+        score = CAST(:cursor_score AS double precision)
+        AND feature_id > CAST(:cursor_feature_id AS text)
+    )
+)
+ORDER BY score DESC, feature_id ASC
+LIMIT :limit_plus_one
+"""
+)
+
+_FEATURE_SEARCH_BY_ID_SQL: Final[str] = (
+    _FEATURE_SEARCH_CTE_SQL
+    + """
+SELECT *
+FROM candidates
+WHERE (
+    CAST(:cursor_feature_id AS text) IS NULL
+    OR feature_id > CAST(:cursor_feature_id AS text)
+)
+ORDER BY feature_id ASC
+LIMIT :limit_plus_one
+"""
+)
 
 _NEARBY_TARGET_CTE_SQL: Final[str] = """
 WITH target AS (
@@ -440,6 +538,31 @@ class NearbyFeatureRow:
     primary_provider: str | None
     primary_dataset_key: str | None
     last_updated_at: datetime
+
+
+@dataclass(frozen=True)
+class FeatureSearchRow:
+    """사용자 feature 검색 결과 summary row."""
+
+    feature_id: str
+    kind: str
+    name: str
+    category: str
+    lon: float | None
+    lat: float | None
+    marker_icon: str | None
+    marker_color: str | None
+    status: str
+    score: float | None = None
+
+
+@dataclass(frozen=True)
+class FeatureSearchPage:
+    """사용자 feature 검색 keyset page."""
+
+    items: tuple[FeatureSearchRow, ...]
+    next_cursor: str | None
+    total_count: int | None = None
 
 
 @dataclass(frozen=True)
@@ -708,6 +831,37 @@ async def get_feature_row(
     return data
 
 
+def _deserialize_feature_row(row: Any) -> dict[str, Any]:
+    data = dict(row)
+    for col in _JSONB_COLUMNS:
+        value = data.get(col)
+        if isinstance(value, str):
+            data[col] = json.loads(value)
+    return data
+
+
+async def get_feature_rows_by_ids(
+    session: AsyncSession, feature_ids: Sequence[str]
+) -> dict[str, dict[str, Any]]:
+    """여러 feature 상세 row를 한 번에 조회한다.
+
+    ``feature_ids`` 순서는 반환 dict에서 보장하지 않는다. 호출자는 입력 순서와
+    key 존재 여부를 비교해 missing 목록을 만든다. public/TripMate batch 응답은
+    soft-deleted feature를 missing으로 취급하므로 ``deleted_at IS NULL``만 반환한다.
+    """
+    normalized = _normalized_filter(feature_ids)
+    if normalized is None:
+        return {}
+    result = await session.execute(
+        text(_GET_FEATURES_BY_IDS_SQL), {"feature_ids": normalized}
+    )
+    rows = result.mappings().all()
+    return {
+        str(row["feature_id"]): _deserialize_feature_row(row)
+        for row in rows
+    }
+
+
 async def get_primary_source_detail(
     session: AsyncSession,
     *,
@@ -833,6 +987,7 @@ async def features_in_bbox(
     max_lon: float,
     max_lat: float,
     kinds: list[str] | None = None,
+    categories: Sequence[str] | None = None,
     limit: int = 1000,
 ) -> list[dict[str, Any]]:
     """bbox 안의 feature 경량 표현 list (지도/목록용). 좌표는 ``lon``/``lat`` (4326).
@@ -850,11 +1005,140 @@ async def features_in_bbox(
                 "max_lon": max_lon,
                 "max_lat": max_lat,
                 "kinds": kinds,
+                "categories": _normalized_filter(categories),
                 "limit": limit,
             },
         )
     ).mappings().all()
     return [dict(r) for r in rows]
+
+
+def _search_cursor_payload(cursor: str | None, *, q_enabled: bool) -> dict[str, Any]:
+    if cursor is None:
+        return {}
+    try:
+        padded = cursor + "=" * (-len(cursor) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("invalid feature search cursor") from exc
+    if not isinstance(payload, dict) or bool(payload.get("q_enabled")) != q_enabled:
+        raise ValueError("invalid feature search cursor")
+    feature_id = payload.get("feature_id")
+    if not isinstance(feature_id, str) or not feature_id:
+        raise ValueError("invalid feature search cursor")
+    return payload
+
+
+def _search_cursor_params(cursor: str | None, *, q_enabled: bool) -> dict[str, Any]:
+    payload = _search_cursor_payload(cursor, q_enabled=q_enabled)
+    params: dict[str, Any] = {
+        "cursor_score": None,
+        "cursor_feature_id": None,
+    }
+    if not payload:
+        return params
+    params["cursor_feature_id"] = payload["feature_id"]
+    if q_enabled:
+        try:
+            params["cursor_score"] = float(payload["score"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("invalid feature search cursor") from exc
+    return params
+
+
+def _encode_search_cursor(item: FeatureSearchRow, *, q_enabled: bool) -> str:
+    payload: dict[str, Any] = {
+        "q_enabled": q_enabled,
+        "feature_id": item.feature_id,
+    }
+    if q_enabled:
+        payload["score"] = item.score
+    raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _search_row(row: Any) -> FeatureSearchRow:
+    lon = row["lon"]
+    lat = row["lat"]
+    score = row["score"]
+    return FeatureSearchRow(
+        feature_id=str(row["feature_id"]),
+        kind=str(row["kind"]),
+        name=str(row["name"]),
+        category=str(row["category"]),
+        lon=float(lon) if lon is not None else None,
+        lat=float(lat) if lat is not None else None,
+        marker_icon=row["marker_icon"],
+        marker_color=row["marker_color"],
+        status=str(row["status"]),
+        score=float(score) if score is not None else None,
+    )
+
+
+async def search_features(
+    session: AsyncSession,
+    *,
+    q: str | None = None,
+    bbox: tuple[float, float, float, float] | None = None,
+    kinds: Sequence[str] | None = None,
+    categories: Sequence[str] | None = None,
+    limit: int = 50,
+    cursor: str | None = None,
+) -> FeatureSearchPage:
+    """사용자 feature 검색.
+
+    ``q`` 또는 ``bbox`` 중 하나는 필수다. ``q``는 pg_trgm ``%`` 연산자를 사용하고,
+    threshold는 현재 transaction에만 ``SET LOCAL``로 적용한다(ADR-004/성능 가이드).
+    bbox 술어는 stored ``coord`` 컬럼과 ``ST_MakeEnvelope``만 사용한다.
+    """
+    normalized_q = q.strip() if q is not None else None
+    if normalized_q == "":
+        normalized_q = None
+    if normalized_q is None and bbox is None:
+        raise ValueError("q 또는 bbox 중 하나는 필요합니다")
+    if limit <= 0:
+        raise ValueError("limit must be greater than 0")
+    min_lon: float | None
+    min_lat: float | None
+    max_lon: float | None
+    max_lat: float | None
+    if bbox is not None:
+        min_lon, min_lat, max_lon, max_lat = bbox
+        if min_lon > max_lon or min_lat > max_lat:
+            raise ValueError("invalid bbox")
+    else:
+        min_lon = min_lat = max_lon = max_lat = None
+
+    q_enabled = normalized_q is not None
+    if q_enabled:
+        await session.execute(
+            text("SET LOCAL pg_trgm.similarity_threshold = 0.2")
+        )
+    effective_limit = min(limit, 200)
+    rows = (
+        await session.execute(
+            text(_FEATURE_SEARCH_BY_SCORE_SQL if q_enabled else _FEATURE_SEARCH_BY_ID_SQL),
+            {
+                "q": normalized_q,
+                "bbox_enabled": bbox is not None,
+                "min_lon": min_lon,
+                "min_lat": min_lat,
+                "max_lon": max_lon,
+                "max_lat": max_lat,
+                "kinds": _normalized_filter(kinds),
+                "categories": _normalized_filter(categories),
+                "limit_plus_one": effective_limit + 1,
+                **_search_cursor_params(cursor, q_enabled=q_enabled),
+            },
+        )
+    ).mappings().all()
+    items = tuple(_search_row(row) for row in rows[:effective_limit])
+    next_cursor = (
+        _encode_search_cursor(items[-1], q_enabled=q_enabled)
+        if len(rows) > effective_limit and items
+        else None
+    )
+    return FeatureSearchPage(items=items, next_cursor=next_cursor)
 
 
 _NEARBY_SQL_BY_SORT: Final[dict[str, str]] = {
