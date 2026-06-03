@@ -1,5 +1,36 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-03 Codex 작업 메모 — T-211a admin UI 선행 gap audit/API 계약
+
+사용자 지시로 admin UI 최신화(기존 9번)를 최우선으로 올리고, T-211b 화면 구현 전에
+필요한 선행 작업을 T-211a로 분리했다. 새 문서
+`docs/admin-ui-modernization-gap-audit.md`는 최신 workflow 문서, OpenAPI 계약, 실제
+backend/frontend 구현을 대조해 route별 구현 가능성과 backend gap을 정리한다.
+
+frontend API layer에는 다음 typed hook module을 추가했다.
+
+- `src/api/importJobs.ts`: `/ops/import-jobs`, `/ops/import-jobs/{job_id}`
+- `src/api/ops.ts`: `/ops/metrics`, `/ops/consistency/reports`,
+  `/ops/consistency/issues`
+- `src/api/dedup.ts`: `/admin/dedup-review`
+- `src/api/updateRequests.ts`: `/admin/feature-update-requests`
+- `src/api/poiCacheTargets.ts`: `/admin/poi-cache-targets`,
+  `/features/nearby/by-target`
+- `src/api/features.ts`: `/admin/features` 목록과 deactivate mutation 보강
+
+`client.ts`는 공통 `getJson`/`postJson`/`putJson`/`patchJson`/`deleteJson`과
+`pathWithQuery`를 제공하도록 정리했다. 문서의 과거 `/admin/import-jobs` 표기는 현재
+정본인 `/ops/import-jobs`로 정리했고, 일반 좌표 기준 `/features/nearby`는 아직
+backend가 없으므로 T-211b에서는 target 기반 `/features/nearby/by-target`만 사용한다.
+frontend `npm test`는 Vitest가 Playwright e2e spec을 수집하지 않도록 `e2e/**`를
+제외했다.
+
+검증 범위는 frontend `npm run type-check`, `npm run lint`, `npm test`, `npm run build`,
+Python `ruff`/`mypy`/`lint-imports`, OpenAPI drift check다. 같은 gate를 WSL mirror에서도
+확인했다. React Doctor는 exit code 0이나 optional warning을 보고했다. 경고는 기존
+shadcn/ui primitive 구조와 기존 Dagster iframe sandbox 항목으로, T-211b 화면
+재작업에서 함께 정리한다. 다음 한 작업은 **T-211b admin UI 최신화 구현**이다.
+
 ## 2026-06-03 Codex 작업 메모 — T-208d Dagster schedules
 
 ADR-045 T-208d로 `packages/krtour-map-dagster`에 Feature 적재 asset 9개에 대한

@@ -5,6 +5,21 @@
 
 ## [Unreleased]
 
+### Admin UI — 최신화 선행 API 계약 (2026-06-03)
+
+- **NEW**: `docs/admin-ui-modernization-gap-audit.md`를 추가해 최신 admin UI 요구사항과
+  실제 REST/Dagster/frontend 구현 차이를 route별로 정리했다.
+- **NEW**: admin frontend에 `/ops/import-jobs`, `/ops/metrics`,
+  `/ops/consistency/*`, `/admin/dedup-review`, `/admin/feature-update-requests`,
+  `/admin/poi-cache-targets`, `/features/nearby/by-target` typed hook module을
+  추가했다.
+- **CHANGED**: frontend 공통 API client가 `GET/POST/PUT/PATCH/DELETE` JSON helper와
+  query-string builder를 제공한다.
+- **CHANGED**: frontend `npm test`가 Playwright e2e spec을 Vitest unit test로
+  잘못 수집하지 않도록 `e2e/**`를 제외한다. Playwright는 `npm run e2e`로 실행한다.
+- **CHANGED**: 문서의 과거 `/admin/import-jobs` 기본 API 표기를 현재 정본
+  `/ops/import-jobs`로 정리했다.
+
 ### 운영 — Dagster provider schedules (2026-06-03)
 
 - **NEW**: `packages/krtour-map-dagster`에 Feature 적재 asset 9개의 KST schedule과

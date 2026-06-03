@@ -36,7 +36,7 @@ TripMate API/Web
 | `POST /tripmate/features/batch` | 여러 feature_id batch 상세 조회 (후속 확장) |
 | `POST /admin/feature-update-requests` | 특정 feature/좌표 반경/시군구/provider 업데이트 큐잉 |
 | `GET /admin/feature-update-requests/{request_id}` | 업데이트 요청 진행 상태 |
-| `GET /admin/import-jobs/{job_id}` | 실제 Dagster/import job progress |
+| `GET /ops/import-jobs/{job_id}` | 실제 Dagster/import job progress |
 
 예: 특정 좌표 중심 반경 5km 안 feature 업데이트 요청.
 

@@ -7,7 +7,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 
-import { BASE_URL, DebugUiApiError } from "./client";
+import { getJson, pathWithQuery } from "./client";
 
 export const DAGSTER_UI_URL =
   process.env.NEXT_PUBLIC_KRTOUR_MAP_DAGSTER_URL ?? "http://127.0.0.1:9013";
@@ -72,26 +72,10 @@ export interface DagsterSummaryResponse {
   errors: string[];
 }
 
-async function getJson<T>(path: string): Promise<T> {
-  const response = await fetch(`${BASE_URL}${path}`, {
-    method: "GET",
-    headers: { Accept: "application/json" },
-    credentials: "omit",
-    cache: "no-store",
-  });
-  if (!response.ok) {
-    throw new DebugUiApiError(
-      `GET ${path} 실패 (HTTP ${response.status})`,
-      response.status,
-      path,
-    );
-  }
-  return (await response.json()) as T;
-}
-
 function fetchDagsterSummary(runLimit = 10): Promise<DagsterSummaryResponse> {
-  const search = new URLSearchParams({ run_limit: String(runLimit) });
-  return getJson<DagsterSummaryResponse>(`/ops/dagster/summary?${search}`);
+  return getJson<DagsterSummaryResponse>(
+    pathWithQuery("/ops/dagster/summary", { run_limit: runLimit }),
+  );
 }
 
 export function useDagsterSummary(runLimit = 10) {

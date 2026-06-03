@@ -2,6 +2,30 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-03 (codex) — T-211a admin UI 선행 gap audit/API 계약
+
+**작업**: 사용자 지시로 admin UI 최신화 우선순위를 최고로 올리고, 실제 화면 구현 전
+선행 gap audit과 frontend typed API hook layer를 보강.
+
+- **Gap audit**: `docs/admin-ui-modernization-gap-audit.md` 신규. route별로 T-211b에서
+  바로 구현 가능한 화면, 사용할 API/hook, backend gap을 분리했다.
+- **Frontend API**: `importJobs.ts`, `ops.ts`, `dedup.ts`, `updateRequests.ts`,
+  `poiCacheTargets.ts`를 추가하고 `features.ts`에 `/admin/features` 목록/비활성화
+  hook을 보강했다.
+- **공통 client**: `client.ts`에 `getJson`/`postJson`/`putJson`/`patchJson`/
+  `deleteJson`, `pathWithQuery`를 추가해 admin/ops module의 fetch 동작을 통일했다.
+- **테스트 스크립트**: frontend `npm test`가 Playwright e2e spec을 Vitest로 잘못
+  수집하지 않도록 `e2e/**`를 제외했다. e2e는 기존 `npm run e2e`로 실행한다.
+- **문서 정리**: import job 조회 정본을 `/ops/import-jobs`로 고정했다.
+  `/admin/import-jobs` cancel/events/stream은 후속 쓰기/이벤트 계약으로 분리한다.
+- **검증**: frontend `type-check`, `lint`, `test`, `build`, Python `ruff`/`mypy`/
+  `lint-imports`, OpenAPI drift check 통과. WSL mirror에서도 같은 gate를 확인했다.
+  React Doctor는 exit code 0이나 optional warning을 보고했다. 내용은 기존 shadcn/ui
+  primitive 구조(label, variant export, multi component)와 기존 Dagster iframe
+  sandbox 경고이며, T-211b 화면 재작업에서 함께 정리한다.
+- **다음**: T-211b admin UI 최신화 구현. Dagster iframe embed와 자체 summary UI,
+  feature/update request/ops 화면을 최신 문서 기준으로 보완한다.
+
 ## 2026-06-03 (codex) — T-208d Dagster provider schedules
 
 **작업**: ADR-045 Phase 4 T-208d. krtour-map-owned Dagster code location에 provider별

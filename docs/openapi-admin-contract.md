@@ -102,13 +102,12 @@ Dagster DB에는 Dagster가 자체 schema를 관리한다.
 | `features` | `/features` | 지도/상세 공통 read |
 | `admin-features` | `/admin/features` | feature 검색/비활성화/override. 수동 추가/영구 삭제는 audit log 설계 후 후속 |
 | `admin-providers` | `/admin/providers` | provider 상태/강제 실행 |
-| `admin-jobs` | `/admin/import-jobs` | queue/job 조회/취소 |
 | `admin-update-requests` | `/admin/feature-update-requests` | 지리 범위 기반 feature 업데이트 요청 |
 | `admin-poi-cache-targets` | `/admin/poi-cache-targets` | 외부 POI/cache target 등록, 삭제, 주변 조회 |
 | `admin-dedup` | `/admin/dedup-review` | 중복 검토 |
 | `admin-issues` | `/admin/issues` | 결측/정합성 이슈 |
 | `admin-offline` | `/admin/offline-uploads` | 오프라인 파일 업로드/검증/적재 |
-| `ops` | `/ops` | 에러 로그, metrics, consistency |
+| `ops` | `/ops` | import job 조회, 에러 로그, metrics, consistency |
 | `dagster` | `/ops/dagster` | Dagster webserver GraphQL 기반 운영 요약 |
 | `debug` | `/debug` | fixture, ETL preview, EXPLAIN |
 
@@ -455,7 +454,7 @@ request 실행을 Dagster에 연결했다.
 
 T-207d 구현 상태: `krtour-map-admin`은 운영 화면이 필요한 DB 기반 summary와 목록을
 `/ops/*`로 제공한다. 이 API는 read-only다. import job 취소/재실행 같은 쓰기 작업은
-후속 `/admin/import-jobs` 계약에서 다룬다.
+후속 쓰기 계약에서 다룬다. 현재 import job 조회 정본은 `/ops/import-jobs`다.
 
 ### `GET /ops/metrics`
 
@@ -558,9 +557,9 @@ Query:
 | `error` | GraphQL 응답은 받았지만 repository/run 조회가 오류를 반환 |
 
 이 endpoint는 Dagster run/job을 제어하지 않는다. 단, embedded UI 표시 안정화를 위한
-Dagster NUX seen 처리는 부수효과로 허용한다. feature update request, import job
-progress, cancel은 `/admin/feature-update-requests`와 `/admin/import-jobs` 계약으로
-분리한다.
+Dagster NUX seen 처리는 부수효과로 허용한다. feature update request는
+`/admin/feature-update-requests`, import job progress는 `/ops/import-jobs` 계약으로
+분리한다. job cancel은 아직 별도 backend task가 필요하다.
 
 ## 7.3 POI/cache target API
 

@@ -191,14 +191,14 @@ PID를 종료한 뒤 WSL frontend를 다시 띄운다. 정상은 `wslrelay`다.
 
 | Route | 백엔드 API | 비고 |
 |-------|-----------|------|
-| `/` | `/admin/dashboard` | 운영 홈: job/provider/이슈 요약 |
-| `/features` | `/admin/features`, `/features`, `/features/nearby` | feature 지도/테이블 전환, 검색/소팅/page size |
+| `/` | `/ops/metrics`, `/ops/import-jobs`, `/ops/dagster/summary` | 운영 홈: job/provider/이슈 요약 |
+| `/features` | `/admin/features`, `/features`, `/features/{id}` | feature 지도/테이블 전환, 검색/소팅/page size |
 | `/features/new` | `/admin/features` | 수동 feature 추가 |
-| `/features/[id]` | `/features/{id}`, `/features/nearby` | 상세 + 위치 + 주변 feature + sources/files |
+| `/features/[id]` | `/features/{id}` | 상세 + 위치 + sources/files. 일반 `/features/nearby`는 후속 API 필요 |
 | `/admin/providers` | `/admin/providers` | provider 상태 목록 |
 | `/admin/providers/[provider]` | `/admin/providers/{provider}` | dataset sync state + 강제 실행 |
-| `/admin/import-jobs` | `/admin/import-jobs` | 작업 큐 상태 |
-| `/admin/import-jobs/[id]` | `/admin/import-jobs/{job_id}` | 진행률, 로그, 취소 |
+| `/ops/import-jobs` | `/ops/import-jobs` | 작업 큐 상태 |
+| `/ops/import-jobs/[id]` | `/ops/import-jobs/{job_id}` | 진행률. 로그/취소는 후속 API 필요 |
 | `/admin/dedup-review` | `/admin/dedup-review` | dedup 검토 큐 |
 | `/admin/issues` | `/admin/issues/features` | 이슈 feature 지도/테이블 |
 | `/admin/offline-imports` | `/admin/offline-uploads` | 파일 업로드/검증/적재 |
@@ -206,8 +206,8 @@ PID를 종료한 뒤 WSL frontend를 다시 띄운다. 정상은 `wslrelay`다.
 | `/admin/poi-cache-targets` | `/admin/poi-cache-targets`, `/features/nearby/by-target` | 외부 POI key 기반 주변 feature 캐시 |
 | `/admin/provider-refresh-policies` | `/admin/provider-refresh-policies` | provider update 주기/rate limit 정책 |
 | `/admin/dagster` | `/ops/dagster/summary` | Dagster 운영 요약 + Dagster webserver embed |
-| `/ops/error-logs` | `/ops/error-logs` | provider/job 에러 로그 |
-| `/ops/consistency` | `/ops/consistency/reports` | 정합성 보고서 |
+| `/ops/error-logs` | `/ops/error-logs` | provider/job 에러 로그. backend 후속 |
+| `/ops/consistency` | `/ops/consistency/reports`, `/ops/consistency/issues` | 정합성 보고서/이슈 |
 | `/debug/explain` | `/debug/explain` | SQL EXPLAIN viewer (read-only) |
 | `/debug/fixtures` | `/debug/fixtures` | fixture 저장/replay |
 

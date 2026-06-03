@@ -5,9 +5,9 @@
  * 좌표는 WGS84 (ADR-012). `kind`는 반복 파라미터로 다중 필터.
  */
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { BASE_URL, DebugUiApiError } from "./client";
+import { getJson, pathWithQuery, postJson } from "./client";
 
 export interface FeatureSummary {
   feature_id: string;
@@ -38,34 +38,16 @@ export interface FeaturesInBboxParams {
 async function fetchFeaturesInBbox(
   params: FeaturesInBboxParams,
 ): Promise<FeaturesInBboxResponse> {
-  const search = new URLSearchParams();
-  search.set("min_lon", String(params.min_lon));
-  search.set("min_lat", String(params.min_lat));
-  search.set("max_lon", String(params.max_lon));
-  search.set("max_lat", String(params.max_lat));
-  if (params.limit !== undefined) {
-    search.set("limit", String(params.limit));
-  }
-  if (params.kinds) {
-    for (const kind of params.kinds) {
-      search.append("kind", kind);
-    }
-  }
-  const url = `${BASE_URL}/features?${search.toString()}`;
-  const response = await fetch(url, {
-    method: "GET",
-    headers: { Accept: "application/json" },
-    credentials: "omit",
-    cache: "no-store",
-  });
-  if (!response.ok) {
-    throw new DebugUiApiError(
-      `GET /features 실패 (HTTP ${response.status})`,
-      response.status,
-      "/features",
-    );
-  }
-  return (await response.json()) as FeaturesInBboxResponse;
+  return getJson<FeaturesInBboxResponse>(
+    pathWithQuery("/features", {
+      min_lon: params.min_lon,
+      min_lat: params.min_lat,
+      max_lon: params.max_lon,
+      max_lat: params.max_lat,
+      limit: params.limit,
+      kind: params.kinds,
+    }),
+  );
 }
 
 /**
@@ -126,21 +108,9 @@ interface FeatureDetailEnvelopeResponse {
 }
 
 async function fetchFeatureDetail(featureId: string): Promise<FeatureDetail> {
-  const url = `${BASE_URL}/features/${encodeURIComponent(featureId)}`;
-  const response = await fetch(url, {
-    method: "GET",
-    headers: { Accept: "application/json" },
-    credentials: "omit",
-    cache: "no-store",
-  });
-  if (!response.ok) {
-    throw new DebugUiApiError(
-      `GET /features/{id} 실패 (HTTP ${response.status})`,
-      response.status,
-      `/features/${featureId}`,
-    );
-  }
-  const body = (await response.json()) as FeatureDetailEnvelopeResponse;
+  const body = await getJson<FeatureDetailEnvelopeResponse>(
+    `/features/${encodeURIComponent(featureId)}`,
+  );
   return body.data;
 }
 
@@ -166,3 +136,163 @@ export const FEATURE_KINDS = [
   "area",
 ] as const;
 export type FeatureKind = (typeof FEATURE_KINDS)[number];
+
+// ── admin feature 목록/비활성화 (`/admin/features`) ───────────────────────
+
+export type AdminFeatureSort =
+  | "name"
+  | "updated_at"
+  | "created_at"
+  | "kind"
+  | "status"
+  | "provider"
+  | "issue_count";
+
+export type SortOrder = "asc" | "desc";
+
+export interface AdminFeatureIssue {
+  violation_key?: string | null;
+  violation_type?: string | null;
+  severity?: string | null;
+  message?: string | null;
+  detected_at?: string | null;
+}
+
+export interface AdminFeatureRecord {
+  feature_id: string;
+  kind: string;
+  name: string;
+  category: string;
+  status: string;
+  lon: number | null;
+  lat: number | null;
+  address_label: string;
+  primary_provider: string | null;
+  primary_dataset_key: string | null;
+  issue_count: number;
+  issues: AdminFeatureIssue[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminFeaturesListResponse {
+  data: {
+    items: AdminFeatureRecord[];
+    next_cursor: string | null;
+  };
+  meta: {
+    count: number;
+    page_size: number;
+    sort: AdminFeatureSort;
+    order: SortOrder;
+    duration_ms: number;
+  };
+}
+
+export interface AdminFeaturesListParams {
+  q?: string;
+  kind?: string[];
+  category?: string[];
+  status?: string[];
+  provider?: string[];
+  dataset_key?: string[];
+  has_coord?: boolean;
+  has_issue?: boolean;
+  issue_type?: string[];
+  updated_from?: string | Date;
+  updated_to?: string | Date;
+  page_size?: number;
+  cursor?: string;
+  sort?: AdminFeatureSort;
+  order?: SortOrder;
+}
+
+export interface AdminFeatureDeactivateRequest {
+  reason: string;
+  operator?: string | null;
+  prevent_provider_reactivation?: boolean;
+}
+
+export interface AdminFeatureOverride {
+  override_key: string;
+  feature_id: string;
+  field_path: string;
+  override_value: unknown;
+  prevent_provider_reactivation: boolean;
+  reason: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface AdminFeatureDeactivateResponse {
+  data: {
+    feature_id: string;
+    previous_status: string;
+    status: string;
+    override_created: boolean;
+    override: AdminFeatureOverride | null;
+  };
+  meta: {
+    duration_ms: number;
+  };
+}
+
+export function fetchAdminFeatures(
+  params: AdminFeaturesListParams = {},
+): Promise<AdminFeaturesListResponse> {
+  return getJson<AdminFeaturesListResponse>(
+    pathWithQuery("/admin/features", {
+      q: params.q,
+      kind: params.kind,
+      category: params.category,
+      status: params.status,
+      provider: params.provider,
+      dataset_key: params.dataset_key,
+      has_coord: params.has_coord,
+      has_issue: params.has_issue,
+      issue_type: params.issue_type,
+      updated_from: params.updated_from,
+      updated_to: params.updated_to,
+      page_size: params.page_size,
+      cursor: params.cursor,
+      sort: params.sort,
+      order: params.order,
+    }),
+  );
+}
+
+export function deactivateAdminFeature(
+  featureId: string,
+  body: AdminFeatureDeactivateRequest,
+): Promise<AdminFeatureDeactivateResponse> {
+  return postJson<AdminFeatureDeactivateResponse>(
+    `/admin/features/${encodeURIComponent(featureId)}/deactivate`,
+    body,
+  );
+}
+
+export function useAdminFeatures(params: AdminFeaturesListParams = {}) {
+  return useQuery<AdminFeaturesListResponse, Error>({
+    queryKey: ["admin-features", params],
+    queryFn: () => fetchAdminFeatures(params),
+    staleTime: 30_000,
+  });
+}
+
+export function useDeactivateAdminFeatureMutation() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    AdminFeatureDeactivateResponse,
+    Error,
+    { featureId: string; body: AdminFeatureDeactivateRequest }
+  >({
+    mutationFn: ({ featureId, body }) => deactivateAdminFeature(featureId, body),
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({ queryKey: ["admin-features"] });
+      void queryClient.invalidateQueries({ queryKey: ["features"] });
+      void queryClient.invalidateQueries({
+        queryKey: ["feature", variables.featureId],
+      });
+    },
+  });
+}
