@@ -7,6 +7,7 @@ from typing import Any, Final, cast
 from dagster import Definitions, ResourceDefinition, resource
 
 from .assets import FEATURE_LOAD_ASSETS
+from .maintenance import MAINTENANCE_JOBS, MAINTENANCE_SCHEDULES
 from .schedules import FEATURE_LOAD_JOBS, FEATURE_LOAD_SCHEDULES
 from .sensors import FEATURE_UPDATE_JOBS, FEATURE_UPDATE_SENSORS
 
@@ -63,8 +64,8 @@ def _value_resource(key: str, value: object) -> ResourceDefinition:
 
 defs = Definitions(
     assets=FEATURE_LOAD_ASSETS,
-    jobs=cast("Any", [*FEATURE_LOAD_JOBS, *FEATURE_UPDATE_JOBS]),
-    schedules=FEATURE_LOAD_SCHEDULES,
+    jobs=cast("Any", [*FEATURE_LOAD_JOBS, *FEATURE_UPDATE_JOBS, *MAINTENANCE_JOBS]),
+    schedules=[*FEATURE_LOAD_SCHEDULES, *MAINTENANCE_SCHEDULES],
     sensors=FEATURE_UPDATE_SENSORS,
     resources={
         key: (

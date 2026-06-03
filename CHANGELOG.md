@@ -5,6 +5,18 @@
 
 ## [Unreleased]
 
+### 운영 — Dagster consistency/dedup refresh job (2026-06-03)
+
+- **NEW**: `consistency_dedup_refresh` Dagster job을 추가했다. DB에 적재된
+  provider/dataset scope를 pair/sibling 방식으로 다시 읽어 dedup 후보 큐를 갱신한 뒤
+  F1~F4 consistency report를 저장한다.
+- **NEW**: `AsyncKrtourMapClient`에 DB 기준 dedup pair/sibling refresh와 consistency
+  report 실행 메서드를 추가했다.
+- **NEW**: `consistency_dedup_refresh_daily_schedule`을 추가했다. KST `45 5 * * *`,
+  기본 status는 `STOPPED`다.
+- **TEST**: Dagster job config/metadata unit test와 PostGIS client 경로 integration
+  test를 추가했다.
+
 ### Admin UI — 최신 운영 화면 구현 (2026-06-03)
 
 - **NEW**: admin frontend에 전역 `AdminShell` navigation, 공통 `StatusBadge`, format

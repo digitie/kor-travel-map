@@ -4,10 +4,9 @@
 
 ## 진행 중
 
-**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#174(T-211a admin UI 선행
-gap audit/API 계약)까지 merged. 현재 작업은 사용자 지시로 최우선 승격된
-T-211b admin UI 최신화 구현이다. T-211b 완료 후 독립 Dagster 운영 완성에 필요한
-T-208f consistency/dedup refresh job, T-208g offline upload load job 순서로 진행한다.
+**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#175(T-211b admin UI 최신화)
+까지 merged. T-208f consistency/dedup refresh job까지 완료되면 다음 작업은
+T-208g offline upload load job이다.
 T-207b는 사용자 결정에 따라 구현하지 않는다.
 
 ### 현재 기준 보강 필요 체크포인트 (2026-06-03)
@@ -52,6 +51,10 @@ T-207b는 사용자 결정에 따라 구현하지 않는다.
 
 ## 최근 완료 (2026-05-31~2026-06-03)
 
+- **T-208f** (2026-06-03): `consistency_dedup_refresh` Dagster maintenance job을
+  추가했다. DB에 적재된 provider/dataset scope를 다시 읽어 pair/sibling dedup 후보를
+  큐에 upsert하고, 이어서 F1~F4 consistency report를 저장한다. schedule은
+  `consistency_dedup_refresh_daily_schedule`이며 기본 `STOPPED`다.
 - **T-211b** (2026-06-03): admin frontend 전역 app shell/navigation, 운영 홈
   dashboard, `/ops/import-jobs`, `/ops/consistency`, `/admin/dedup-review`,
   `/admin/feature-update-requests`, `/admin/poi-cache-targets` 화면을 최신 REST/Dagster
@@ -391,7 +394,10 @@ T-207b는 사용자 결정에 따라 구현하지 않는다.
 - [x] T-208e — sensors(feature_update_requests 폴링 + run_failure → 알림, D-6).
       `feature_update_request_queue_sensor`는 `peek_next_update_request()`로 queued/now
       request를 감지하고, `feature_update_request_worker`가 request id별 실행을 맡는다.
-- [ ] T-208f — consistency/dedup refresh job.
+- [x] T-208f — consistency/dedup refresh job.
+      `consistency_dedup_refresh` job이 `refresh_dedup_candidates` →
+      `run_consistency_check` 순서로 실행된다. dedup refresh는 pair/sibling scope config를
+      받고, consistency report는 `ops.feature_consistency_reports`에 저장한다.
 - [ ] T-208g — offline upload load job (D-14).
 
 **Phase 4.5 — Admin UI 최신화 (사용자 지시로 T-208d 이후 최우선)**
@@ -402,7 +408,7 @@ T-207b는 사용자 결정에 따라 구현하지 않는다.
       `/admin/poi-cache-targets`, `/features/nearby/by-target` typed hook layer를
       추가했다. `/admin/import-jobs` 과거 표기는 `/ops/import-jobs` 정본으로
       정리했다.
-- [ ] T-211b — admin UI 최신화 구현. Dagster 관리 화면 embed와 별개로 자체 UI에서
+- [x] T-211b — admin UI 최신화 구현. Dagster 관리 화면 embed와 별개로 자체 UI에서
       schedule/sensor/job/run/asset 상태를 꾸며 보여주고, feature/update request/ops
       화면을 최신 문서 기준으로 보완한다. React Doctor 검증 필수.
 

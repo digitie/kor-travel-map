@@ -2,6 +2,28 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-03 (codex) — T-208f consistency/dedup refresh job
+
+**작업**: T-211b admin UI 최신화 머지 후, 독립 Dagster 운영 완성 선행 task인
+T-208f를 진행.
+
+- **DB 기준 dedup 입력 조회**: `infra.dedup_refresh_repo`를 추가해 활성 feature를
+  primary source의 provider/dataset scope 기준으로 읽고, `Coordinate(lon, lat)`를
+  포함한 `DedupInput` 값 객체로 변환한다.
+- **Client orchestration**: `AsyncKrtourMapClient`에 pair refresh,
+  sibling refresh, consistency report 실행 메서드를 추가했다. 후보 큐 upsert는 기존
+  `enqueue_dedup_candidates`를 그대로 사용하고, 검토 완료 행 보존 규칙도 유지한다.
+- **Dagster job**: `consistency_dedup_refresh` job을 추가했다.
+  `refresh_dedup_candidates` op가 `pairs`/`sibling_scopes` config를 처리하고,
+  `run_consistency_check` op가 이어서 F1~F4 report를 저장한다.
+- **Schedule**: `consistency_dedup_refresh_daily_schedule`을 `Asia/Seoul`
+  `45 5 * * *`, 기본 `STOPPED`로 등록했다. 운영 enable 전까지 자동 실행하지 않는다.
+- **경계 명시**: 이번 작업은 ADR-033 Phase 2 gate/swap 차단이 아니라 관측/refresh
+  job이다. Phase 2의 F5~F8 + swap 차단은 후속으로 유지한다.
+- **검증**: Dagster maintenance/definitions unit `5 passed`, PostGIS client 경로
+  integration `5 passed`.
+- **다음**: T-208g offline upload load job.
+
 ## 2026-06-03 (codex) — T-211b admin UI 최신화 구현
 
 **작업**: admin UI 최신화 우선순위를 최고로 올린 뒤, T-211a의 선행 API/gap 정리를

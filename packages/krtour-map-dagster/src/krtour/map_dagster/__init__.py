@@ -5,6 +5,11 @@ from __future__ import annotations
 from .assets import FEATURE_LOAD_ASSETS
 from .definitions import defs
 from .etl import DagsterFeatureLoadResult, load_feature_bundles_for_dagster
+from .maintenance import (
+    CONSISTENCY_DEDUP_REFRESH_SCHEDULES,
+    MAINTENANCE_JOBS,
+    MAINTENANCE_SCHEDULES,
+)
 from .schedules import FEATURE_LOAD_JOBS, FEATURE_LOAD_SCHEDULES
 from .sensors import FEATURE_UPDATE_JOBS, FEATURE_UPDATE_SENSORS
 from .validation import (
@@ -22,6 +27,9 @@ __all__ = [
     "FEATURE_LOAD_SCHEDULES",
     "FEATURE_UPDATE_JOBS",
     "FEATURE_UPDATE_SENSORS",
+    "CONSISTENCY_DEDUP_REFRESH_SCHEDULES",
+    "MAINTENANCE_JOBS",
+    "MAINTENANCE_SCHEDULES",
     "DagsterFeatureLoadResult",
     "FeatureAddressIssue",
     "FeatureAddressValidation",

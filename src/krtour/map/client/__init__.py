@@ -46,7 +46,18 @@ from krtour.map.enrichment import (
     apply_place_phone_enrichment,
     find_place_phone_candidates,
 )
+from krtour.map.infra.consistency import (
+    DEDUP_PENDING_WARN_THRESHOLD,
+    ConsistencyReport,
+)
+from krtour.map.infra.consistency import (
+    run_consistency_checks as repo_run_consistency_checks,
+)
 from krtour.map.infra.db import make_async_session_factory
+from krtour.map.infra.dedup_refresh_repo import (
+    DedupRefreshScope,
+    list_dedup_refresh_features,
+)
 from krtour.map.infra.dedup_repo import (
     DedupQueueResult,
     enqueue_dedup_candidates,
@@ -122,7 +133,11 @@ if TYPE_CHECKING:
     from krtour.map.providers.mois import MoisLicensePlaceRecord
     from krtour.map.settings import KrtourMapSettings
 
-__all__ = ["AsyncKrtourMapClient", "DedupSyncResult"]
+__all__ = [
+    "AsyncKrtourMapClient",
+    "DedupRefreshResult",
+    "DedupSyncResult",
+]
 
 
 @dataclass(frozen=True)
@@ -136,6 +151,36 @@ class DedupSyncResult:
 
     candidates: list[DedupCandidate]
     queue: DedupQueueResult
+
+
+@dataclass(frozen=True)
+class DedupRefreshResult:
+    """DB 기준 dedup 후보 refresh 결과."""
+
+    mode: str
+    left_scope: DedupRefreshScope
+    right_scope: DedupRefreshScope | None
+    left_count: int
+    right_count: int
+    candidates: list[DedupCandidate]
+    queue: DedupQueueResult
+
+    def as_metadata(self) -> dict[str, object]:
+        """Dagster metadata로 바로 기록할 수 있는 summary."""
+        metadata: dict[str, object] = {
+            "mode": self.mode,
+            "left_scope": self.left_scope.as_metadata(),
+            "right_scope": (
+                self.right_scope.as_metadata() if self.right_scope is not None else None
+            ),
+            "left_count": self.left_count,
+            "right_count": self.right_count,
+            "candidates_total": len(self.candidates),
+            "queue_inserted": self.queue.inserted,
+            "queue_updated": self.queue.updated,
+            "queue_skipped": self.queue.skipped,
+        }
+        return metadata
 
 
 class AsyncKrtourMapClient:
@@ -558,6 +603,80 @@ class AsyncKrtourMapClient:
         async with self._session_factory() as session, session.begin():
             queue = await enqueue_dedup_candidates(session, candidates)
         return DedupSyncResult(candidates=candidates, queue=queue)
+
+    async def refresh_dedup_candidates_for_scope_pair(
+        self,
+        left_scope: DedupRefreshScope,
+        right_scope: DedupRefreshScope,
+        *,
+        include_auto_merge: bool = True,
+    ) -> DedupRefreshResult:
+        """DB에 적재된 두 provider/dataset scope를 다시 score해 큐를 갱신한다."""
+        async with self._session_factory() as session, session.begin():
+            left = await list_dedup_refresh_features(session, left_scope)
+            right = await list_dedup_refresh_features(session, right_scope)
+            candidates = find_dedup_candidates(
+                left, right, include_auto_merge=include_auto_merge
+            )
+            queue = (
+                await enqueue_dedup_candidates(session, candidates)
+                if candidates
+                else DedupQueueResult()
+            )
+        return DedupRefreshResult(
+            mode="pair",
+            left_scope=left_scope,
+            right_scope=right_scope,
+            left_count=len(left),
+            right_count=len(right),
+            candidates=candidates,
+            queue=queue,
+        )
+
+    async def refresh_sibling_dedup_candidates(
+        self,
+        scope: DedupRefreshScope,
+        *,
+        include_auto_merge: bool = True,
+    ) -> DedupRefreshResult:
+        """DB에 적재된 단일 provider/dataset scope 내부 중복 후보를 재계산한다."""
+        async with self._session_factory() as session, session.begin():
+            features = await list_dedup_refresh_features(session, scope)
+            candidates = find_sibling_candidates(
+                features, include_auto_merge=include_auto_merge
+            )
+            queue = (
+                await enqueue_dedup_candidates(session, candidates)
+                if candidates
+                else DedupQueueResult()
+            )
+        return DedupRefreshResult(
+            mode="sibling",
+            left_scope=scope,
+            right_scope=None,
+            left_count=len(features),
+            right_count=0,
+            candidates=candidates,
+            queue=queue,
+        )
+
+    async def run_consistency_report(
+        self,
+        *,
+        batch_id: str | None = None,
+        persist: bool = True,
+        sample_limit: int = 20,
+        dedup_pending_threshold: int = DEDUP_PENDING_WARN_THRESHOLD,
+    ) -> ConsistencyReport:
+        """F1~F4 consistency report를 실행하고 필요 시 DB에 저장한다."""
+        async with self._session_factory() as session, session.begin():
+            return await repo_run_consistency_checks(
+                session,
+                batch_id=batch_id,
+                persist=persist,
+                sample_limit=sample_limit,
+                dedup_pending_threshold=dedup_pending_threshold,
+            )
 
     async def merge_dedup_review(
         self,
