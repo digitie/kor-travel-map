@@ -4,7 +4,16 @@ import { createMarkerElement } from "@krtour/map-marker-react";
 import "maplibre-vworld/style.css";
 import maplibregl, { LngLatBounds, type StyleSpecification } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { ListIcon, MapIcon, XIcon } from "lucide-react";
+import {
+  GitCompareArrowsIcon,
+  ListChecksIcon,
+  ListIcon,
+  MapIcon,
+  RefreshCwIcon,
+  RouteIcon,
+  WorkflowIcon,
+  XIcon,
+} from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -366,6 +375,41 @@ export function FeaturesClient() {
           </div>
           <Link className={cn(buttonVariants({ variant: "outline" }))} href="/">
             홈
+          </Link>
+          <Link
+            className={cn(buttonVariants({ variant: "outline" }))}
+            href="/ops/import-jobs"
+          >
+            <ListChecksIcon data-icon="inline-start" />
+            Jobs
+          </Link>
+          <Link
+            className={cn(buttonVariants({ variant: "outline" }))}
+            href="/admin/feature-update-requests"
+          >
+            <RefreshCwIcon data-icon="inline-start" />
+            Update
+          </Link>
+          <Link
+            className={cn(buttonVariants({ variant: "outline" }))}
+            href="/admin/poi-cache-targets"
+          >
+            <RouteIcon data-icon="inline-start" />
+            Targets
+          </Link>
+          <Link
+            className={cn(buttonVariants({ variant: "outline" }))}
+            href="/admin/dedup-review"
+          >
+            <GitCompareArrowsIcon data-icon="inline-start" />
+            Dedup
+          </Link>
+          <Link
+            className={cn(buttonVariants({ variant: "outline" }))}
+            href="/admin/dagster"
+          >
+            <WorkflowIcon data-icon="inline-start" />
+            Dagster
           </Link>
         </div>
       </header>

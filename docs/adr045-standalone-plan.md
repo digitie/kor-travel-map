@@ -177,9 +177,12 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
   `docs/admin-ui-modernization-gap-audit.md`와 frontend typed hook layer를 추가했다.
   import job 조회 정본은 `/ops/import-jobs`로 정리하고, 일반 `/features/nearby`는
   backend gap으로 명시했다.
-- **T-211b** admin UI 최신화 구현. Dagster webserver embed와 자체 Dagster summary UI를
-  함께 제공하고, schedule/sensor/job/run/asset 정보를 운영자가 읽기 좋은 화면으로
-  꾸민다. React Doctor를 완료 조건으로 둔다.
+- **T-211b** ✅ admin UI 최신화 구현. 전역 app shell/navigation, 운영 홈 dashboard,
+  `/ops/import-jobs`, `/ops/consistency`, `/admin/dedup-review`,
+  `/admin/feature-update-requests`, `/admin/poi-cache-targets` 화면을 구현했다.
+  `/admin/dagster`는 Dagster webserver embed와 자체 Dagster summary UI를 함께 제공하고
+  asset group, recent run, schedules, sensors 정보를 보여준다. React Doctor는 exit
+  code 0 기준으로 확인했다.
 
 ## 5. Phase 5 — Docker Compose / 배포
 

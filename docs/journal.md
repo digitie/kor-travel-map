@@ -2,6 +2,38 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-03 (codex) — T-211b admin UI 최신화 구현
+
+**작업**: admin UI 최신화 우선순위를 최고로 올린 뒤, T-211a의 선행 API/gap 정리를
+바탕으로 실제 운영 화면을 구현.
+
+- **App shell**: `AdminShell`, `StatusBadge`, format helper를 추가해 `/`, `/ops/*`,
+  `/admin/*`, `/admin/dagster`, `/etl`을 같은 운영 navigation 안에서 이동하게 했다.
+- **홈 dashboard**: 기존 health/version 중심 skeleton을 feature/import job/dedup/
+  integrity issue/Dagster summary 중심 운영 홈으로 교체했다.
+- **Dagster 화면**: `/admin/dagster`가 Dagster webserver iframe embed를 유지하면서
+  asset group, recent run, schedules, sensors 정보를 자체 UI로 보여준다.
+- **신규 route**: `/ops/import-jobs`, `/ops/consistency`, `/admin/dedup-review`,
+  `/admin/feature-update-requests`, `/admin/poi-cache-targets`를 추가했다.
+- **Feature 화면 연결**: 기존 `/features` 지도/테이블은 유지하고 jobs/update/target/
+  dedup/Dagster 운영 화면 링크를 header action으로 추가했다.
+- **고정 포트 정리**: WSL 일반 사용자에게 PID가 숨겨진 root listener 또는 Windows
+  `node.exe`/`wslrelay.exe`가 9012를 점유해 stale UI가 보이는 경우가 있어
+  `scripts/stop-fixed-ports.sh`에 WSL root/Windows listener 정리를 추가했다.
+- **WSL IP e2e fallback**: localhost relay가 사라진 상태에서도 Windows Playwright가
+  WSL 서버를 직접 검증할 수 있도록 `scripts/load-env.sh` 기본 CORS origin에
+  `http://<WSL-IP>:9012`를 포함하고, admin FastAPI CORS 응답/preflight 헤더 보강을
+  추가했다.
+- **e2e 갱신**: home e2e를 새 운영 홈 계약에 맞추고, 신규 admin/ops route smoke를
+  추가했다. API 행 수보다 title/filter/form/table 같은 운영 표면을 검증한다.
+- **검증**: source/WSL frontend `type-check`, `lint`, `test`, `build`, React Doctor
+  통과. Windows Playwright e2e는 API/Dagster를 WSL IP로, web을 Windows
+  `127.0.0.1:9012`로 띄운 구성에서 16/16 통과했다. React Doctor optional warning은
+  source 7건(기존 shadcn/ui primitive export/multi component, label false positive,
+  Dagster iframe sandbox rule false positive)이고, `.git` 없는 WSL mirror full scan은
+  미사용 detail hook까지 포함해 12건을 보고한다.
+- **다음**: T-208f consistency/dedup refresh job. 이후 T-208g offline upload load job.
+
 ## 2026-06-03 (codex) — T-211a admin UI 선행 gap audit/API 계약
 
 **작업**: 사용자 지시로 admin UI 최신화 우선순위를 최고로 올리고, 실제 화면 구현 전

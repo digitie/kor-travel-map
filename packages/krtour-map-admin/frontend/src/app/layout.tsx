@@ -7,19 +7,19 @@
  */
 
 import type { Metadata } from "next";
+import { Geist } from "next/font/google";
 import type { ReactNode } from "react";
 
 import { Toaster } from "@/components/ui/sonner";
+import { cn } from "@/lib/utils";
 import { AppQueryClientProvider } from "@/providers/query-client-provider";
 
 import "./globals.css";
-import { Geist } from "next/font/google";
-import { cn } from "@/lib/utils";
 
-const geist = Geist({subsets:['latin'],variable:'--font-sans'});
+const geist = Geist({ subsets: ["latin"], variable: "--font-sans" });
 
 export const metadata: Metadata = {
-  title: "krtour-map debug UI",
+  title: "krtour-map admin",
   description:
     "Debug + admin + ops UI for python-krtour-map. Intranet-only (ADR-005/035).",
 };

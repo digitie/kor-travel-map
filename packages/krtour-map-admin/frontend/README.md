@@ -175,6 +175,23 @@ npm run e2e:ui           # --ui 모드
 baseURL은 `E2E_BASE_URL` env로 override 가능(기본 `http://127.0.0.1:9012`).
 자세한 실행 모델은 `playwright.config.ts` 상단 주석 참고.
 
+Windows localhost relay가 stale listener 정리 뒤 바로 복구되지 않으면 WSL IP와 같은
+고정 포트로 검증한다. 이때 frontend를 띄울 때도 브라우저가 접근할 수 있는 API/
+Dagster URL을 `NEXT_PUBLIC_*`로 넣는다. `scripts/load-env.sh`는 기본 CORS origin에
+WSL IP 기반 `http://<WSL-IP>:9012`를 포함한다.
+
+```bash
+WSL_IP="$(hostname -I | awk '{print $1}')"
+NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API="http://$WSL_IP:9011" \
+NEXT_PUBLIC_KRTOUR_MAP_DAGSTER_URL="http://$WSL_IP:9013" \
+  scripts/run-admin-stack.sh
+```
+
+```powershell
+$env:E2E_BASE_URL = "http://<WSL-IP>:9012"
+npm run e2e
+```
+
 e2e 전 Windows `:9012`을 점유한 프로세스가 `wslrelay`인지 확인한다. 과거에
 Windows Node로 띄운 Next.js가 남아 있으면 Playwright가 WSL 서버 대신 stale
 Windows 서버를 보고 실패한다.
@@ -187,29 +204,27 @@ Get-Process -Id <PID> | Select-Object Id,ProcessName,Path
 `ProcessName`이 `node`이고 path가 `C:\Program Files\nodejs\node.exe`면 해당
 PID를 종료한 뒤 WSL frontend를 다시 띄운다. 정상은 `wslrelay`다.
 
-## 주요 페이지 (계획, App Router)
+## 주요 페이지 (App Router)
 
 | Route | 백엔드 API | 비고 |
 |-------|-----------|------|
-| `/` | `/ops/metrics`, `/ops/import-jobs`, `/ops/dagster/summary` | 운영 홈: job/provider/이슈 요약 |
-| `/features` | `/admin/features`, `/features`, `/features/{id}` | feature 지도/테이블 전환, 검색/소팅/page size |
-| `/features/new` | `/admin/features` | 수동 feature 추가 |
-| `/features/[id]` | `/features/{id}` | 상세 + 위치 + sources/files. 일반 `/features/nearby`는 후속 API 필요 |
-| `/admin/providers` | `/admin/providers` | provider 상태 목록 |
-| `/admin/providers/[provider]` | `/admin/providers/{provider}` | dataset sync state + 강제 실행 |
-| `/ops/import-jobs` | `/ops/import-jobs` | 작업 큐 상태 |
-| `/ops/import-jobs/[id]` | `/ops/import-jobs/{job_id}` | 진행률. 로그/취소는 후속 API 필요 |
-| `/admin/dedup-review` | `/admin/dedup-review` | dedup 검토 큐 |
-| `/admin/issues` | `/admin/issues/features` | 이슈 feature 지도/테이블 |
-| `/admin/offline-imports` | `/admin/offline-uploads` | 파일 업로드/검증/적재 |
-| `/admin/feature-update-requests` | `/admin/feature-update-requests` | 좌표/반경/시군구/provider 업데이트 큐잉 |
-| `/admin/poi-cache-targets` | `/admin/poi-cache-targets`, `/features/nearby/by-target` | 외부 POI key 기반 주변 feature 캐시 |
-| `/admin/provider-refresh-policies` | `/admin/provider-refresh-policies` | provider update 주기/rate limit 정책 |
-| `/admin/dagster` | `/ops/dagster/summary` | Dagster 운영 요약 + Dagster webserver embed |
-| `/ops/error-logs` | `/ops/error-logs` | provider/job 에러 로그. backend 후속 |
-| `/ops/consistency` | `/ops/consistency/reports`, `/ops/consistency/issues` | 정합성 보고서/이슈 |
-| `/debug/explain` | `/debug/explain` | SQL EXPLAIN viewer (read-only) |
-| `/debug/fixtures` | `/debug/fixtures` | fixture 저장/replay |
+| `/` | `/ops/metrics`, `/ops/import-jobs`, `/admin/dedup-review`, `/ops/dagster/summary` | 구현됨. 운영 홈: feature/import job/dedup/이슈/Dagster 요약 |
+| `/features` | `/features`, `/features/{id}` | 구현됨. 지도/테이블/상세 panel + 운영 quick link |
+| `/ops/import-jobs` | `/ops/import-jobs` | 구현됨. 작업 큐 read-only 상태, state/kind filter |
+| `/ops/consistency` | `/ops/metrics`, `/ops/consistency/reports`, `/ops/consistency/issues` | 구현됨. 정합성 보고서/이슈 |
+| `/admin/dedup-review` | `/admin/dedup-review` | 구현됨. dedup 검토 큐와 결정 mutation |
+| `/admin/feature-update-requests` | `/admin/feature-update-requests` | 구현됨. 좌표/반경/provider 업데이트 큐잉, cancel, run-now |
+| `/admin/poi-cache-targets` | `/admin/poi-cache-targets`, `/features/nearby/by-target` | 구현됨. 외부 POI key 기반 주변 feature 캐시 |
+| `/admin/dagster` | `/ops/dagster/summary` | 구현됨. Dagster 운영 요약 + Dagster webserver embed |
+| `/etl` | `/debug/etl/*` | 구현됨. fixture/live ETL preview |
+| `/features/new` | `/admin/features` | 후속. 수동 feature 추가는 audit log/API 필요 |
+| `/features/[id]` | `/features/{id}` | 후속. 별도 route 대신 현재 `/features` 상세 panel 사용 |
+| `/admin/providers` | 없음 | 후속. 별도 provider REST 없음 |
+| `/admin/offline-imports` | 없음 | 후속. T-208g offline upload load job/API 필요 |
+| `/admin/provider-refresh-policies` | 없음 | 후속. provider policy REST 필요 |
+| `/ops/error-logs` | 없음 | 후속. `ops.import_job_events`/error log API 필요 |
+| `/debug/explain` | 없음 | 후속. SQL EXPLAIN viewer |
+| `/debug/fixtures` | 없음 | 후속. fixture 저장/replay |
 
 패키지 경계: `../../../docs/debug-ui-package.md` §14. Admin 상세 구현 사양:
 `../../../docs/debug-ui-admin-workflows.md`.

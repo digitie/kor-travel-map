@@ -55,7 +55,7 @@ export interface ImportJobsListParams {
   cursor?: string;
 }
 
-export function fetchImportJobs(
+function fetchImportJobs(
   params: ImportJobsListParams = {},
 ): Promise<OpsImportJobsListResponse> {
   return getJson<OpsImportJobsListResponse>(
@@ -68,7 +68,7 @@ export function fetchImportJobs(
   );
 }
 
-export function fetchImportJob(jobId: string): Promise<OpsImportJobResponse> {
+function fetchImportJob(jobId: string): Promise<OpsImportJobResponse> {
   return getJson<OpsImportJobResponse>(
     `/ops/import-jobs/${encodeURIComponent(jobId)}`,
   );

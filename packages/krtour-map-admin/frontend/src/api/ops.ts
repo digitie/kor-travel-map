@@ -105,11 +105,11 @@ export interface IntegrityIssuesListParams {
   cursor?: string;
 }
 
-export function fetchOpsMetrics(): Promise<OpsMetricsResponse> {
+function fetchOpsMetrics(): Promise<OpsMetricsResponse> {
   return getJson<OpsMetricsResponse>("/ops/metrics");
 }
 
-export function fetchConsistencyReports(
+function fetchConsistencyReports(
   params: ConsistencyReportsListParams = {},
 ): Promise<OpsConsistencyReportsListResponse> {
   return getJson<OpsConsistencyReportsListResponse>(
@@ -121,7 +121,7 @@ export function fetchConsistencyReports(
   );
 }
 
-export function fetchIntegrityIssues(
+function fetchIntegrityIssues(
   params: IntegrityIssuesListParams = {},
 ): Promise<OpsIntegrityIssuesListResponse> {
   return getJson<OpsIntegrityIssuesListResponse>(

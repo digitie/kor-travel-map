@@ -84,7 +84,7 @@ export interface DedupReviewDecisionResponse {
   };
 }
 
-export function fetchDedupReviews(
+function fetchDedupReviews(
   params: DedupReviewListParams = {},
 ): Promise<DedupReviewListResponse> {
   return getJson<DedupReviewListResponse>(
@@ -103,7 +103,7 @@ export function fetchDedupReviews(
   );
 }
 
-export function decideDedupReview(
+function decideDedupReview(
   reviewKey: string,
   body: DedupReviewDecisionRequest,
 ): Promise<DedupReviewDecisionResponse> {
