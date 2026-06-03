@@ -44,6 +44,7 @@ __all__ = [
     "FeatureUpdateRequestPreview",
     "FeatureUpdateRequestPage",
     "enqueue_feature_update_request",
+    "peek_next_update_request",
     "claim_next_update_request",
     "start_update_request",
     "finish_update_request",
@@ -235,6 +236,14 @@ WHERE request_id = (
 RETURNING {_RETURN_COLUMNS}
 """
 
+_PEEK_REQUEST_SQL: Final[str] = f"""
+SELECT {_RETURN_COLUMNS}
+FROM ops.feature_update_requests
+WHERE state = 'queued' AND dry_run IS false
+ORDER BY priority DESC, created_at, request_id
+LIMIT 1
+"""
+
 _START_REQUEST_SQL: Final[str] = f"""
 UPDATE ops.feature_update_requests
 SET state = 'running',
@@ -423,6 +432,14 @@ async def enqueue_feature_update_request(
         )
     ).one()
     return _row_to_request(row)
+
+
+async def peek_next_update_request(
+    session: AsyncSession,
+) -> FeatureUpdateRequest | None:
+    """claim 순서상 다음 queued request를 상태 변경 없이 조회한다."""
+    row = (await session.execute(text(_PEEK_REQUEST_SQL))).one_or_none()
+    return _row_to_request(row) if row is not None else None
 
 
 async def claim_next_update_request(

@@ -496,7 +496,7 @@ DB 규칙:
    `GET /features/nearby/by-target` API.
 4. ✅ `scope.type='cache_target_keys'` dry-run/실행 scope 해석.
 5. ✅ target feature link 계산과 저장(T-206d executor).
-6. Dagster queue 실행 연결(T-208e sensor).
+6. ✅ Dagster queue 실행 연결(T-208e sensor).
 7. Admin UI target 목록/상세/정책 편집(backend API 완료 후 후속 UI 작업).
 
 ## 12. 테스트 기준

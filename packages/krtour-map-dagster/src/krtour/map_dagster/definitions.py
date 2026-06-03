@@ -7,10 +7,12 @@ from typing import Final
 from dagster import Definitions, ResourceDefinition, resource
 
 from .assets import FEATURE_LOAD_ASSETS
+from .sensors import FEATURE_UPDATE_JOBS, FEATURE_UPDATE_SENSORS
 
 REQUIRED_RESOURCE_KEYS: Final[tuple[str, ...]] = (
     "krtour_map_client",
     "reverse_geocoder",
+    "feature_update_runner",
     "fetched_at",
     "strict_address",
     "datagokr_cultural_festivals",
@@ -31,6 +33,7 @@ REQUIRED_RESOURCE_KEYS: Final[tuple[str, ...]] = (
 DEFAULT_RESOURCE_VALUES: Final[dict[str, object]] = {
     "fetched_at": None,
     "strict_address": True,
+    "feature_update_failure_notifier": None,
     "mois_dataset_key": "mois_license_features_bulk",
     "knps_point_dataset_key": "knps_visitor_centers",
     "knps_geometry_dataset_key": "knps_trails",
@@ -59,13 +62,15 @@ def _value_resource(key: str, value: object) -> ResourceDefinition:
 
 defs = Definitions(
     assets=FEATURE_LOAD_ASSETS,
+    jobs=FEATURE_UPDATE_JOBS,
+    sensors=FEATURE_UPDATE_SENSORS,
     resources={
         key: (
             _value_resource(key, DEFAULT_RESOURCE_VALUES[key])
             if key in DEFAULT_RESOURCE_VALUES
             else _missing_resource(key)
         )
-        for key in REQUIRED_RESOURCE_KEYS
+        for key in REQUIRED_RESOURCE_KEYS + tuple(DEFAULT_RESOURCE_VALUES)
     },
 )
 """``dagster dev -m krtour.map_dagster.definitions`` 진입점."""

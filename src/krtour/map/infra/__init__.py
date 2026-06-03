@@ -95,6 +95,7 @@ from krtour.map.infra.feature_update_repo import (
     finish_update_request,
     get_update_request,
     list_update_requests,
+    peek_next_update_request,
     start_update_request,
 )
 from krtour.map.infra.integrity_violation_repo import (
@@ -232,6 +233,7 @@ __all__ = [
     "FeatureUpdateRequestPreview",
     "FeatureUpdateRequestPage",
     "enqueue_feature_update_request",
+    "peek_next_update_request",
     "claim_next_update_request",
     "start_update_request",
     "finish_update_request",

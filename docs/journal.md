@@ -2,6 +2,29 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-03 (codex) — T-208e Dagster feature update sensor
+
+**작업**: ADR-045 Phase 4 T-208e. `ops.feature_update_requests` 큐를 krtour-map-owned
+Dagster run으로 연결하는 polling sensor와 worker job을 추가.
+
+- **Queue sensor**: `feature_update_request_queue_sensor` 추가. 15초 간격으로
+  `AsyncKrtourMapClient.peek_next_update_request()`를 호출해 다음 queued request를 상태
+  변경 없이 확인하고, request id를 `RunRequest` config/tag에 싣는다.
+- **Worker job**: `feature_update_request_worker` + `execute_feature_update_request` op
+  추가. 기존 `AsyncKrtourMapClient.execute_feature_update_request()`를 호출하며 실제
+  provider refresh는 `feature_update_runner` resource가 담당한다.
+- **Failure path**: executor가 request를 `failed`로 닫은 경우에도 Dagster run을
+  `Failure`로 종료해 Dagster UI와 request/import job 상태가 같이 보이게 했다.
+  `feature_update_request_failure_sensor`는 run tag의 request id를 기준으로
+  `fail_update_request()`를 best-effort 호출하고 선택 notifier resource로 알림 payload를
+  전달한다.
+- **Client/repo**: sensor가 claim race를 만들지 않도록 `peek_next_update_request`를
+  repo/client에 추가하고, failure sensor용 `fail_update_request` client 메서드를 추가했다.
+- **Task 결정**: T-207b는 사용자 결정에 따라 구현하지 않음으로 닫고, T-207c/d/e는
+  T-208e 이후 순서로 진행한다.
+- **검증**: Dagster package unit `9 passed`, feature update repo/client PostGIS 통합
+  `14 passed`, ruff, mypy 통과.
+
 ## 2026-06-03 (codex) — T-207f POI/cache target API
 
 **작업**: ADR-045 Phase 3 T-207f. 외부 앱 POI를 `external_system + target_key`
@@ -29,9 +52,9 @@ REST 라우터를 추가해 OpenAPI 기반 생성/조회/취소/재요청 표면
 
 - **Router**: `/admin/feature-update-requests` POST(dry-run/actual), GET(list),
   `/{request_id}` GET, `/{request_id}/cancel`, `/{request_id}/run-now` 구현.
-- **Run-now**: T-208e Dagster sensor 전까지는 기존 request payload를
-  `run_mode='now'` 새 request로 재큐잉한다. provider runner 직접 실행은 API 레이어가
-  맡지 않는다.
+- **Run-now**: 기존 request payload를 `run_mode='now'` 새 request로 재큐잉한다.
+  provider runner 직접 실행은 API 레이어가 맡지 않고, T-208e 이후 Dagster sensor가
+  queue에서 감지해 실행한다.
 - **kraddr-geo**: `sigungu_by_radius` scope는 `KRTOUR_MAP_KRADDR_GEO_BASE_URL`이 있을
   때 REST v2 `/v2/regions/within-radius` resolver를 주입한다. 설정 누락은 503으로
   명확히 반환한다.

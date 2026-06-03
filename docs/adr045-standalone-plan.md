@@ -120,8 +120,10 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
   GET(list) / GET `{id}`(상세) / POST `{id}/cancel` / POST `{id}/run-now`.
   `feature_update_repo` 호출 + Pydantic schema + OpenAPI tag/export 연결 완료.
   `run-now`는 T-208e 전까지 기존 payload를 `run_mode='now'` request로 재큐잉한다.
-- **T-207b** `/admin/providers/{provider}/datasets/{dataset_key}/runs` (provider 직접
-  실행, §7) — `ops.import_jobs` enqueue. T-208e 이후 보강해도 된다.
+- **T-207b** ✅ **구현하지 않음** — 사용자 결정에 따라 별도
+  `/admin/providers/{provider}/datasets/{dataset_key}/runs` 라우터는 만들지 않는다.
+  provider run 상세는 T-207d `/ops/*`와 Dagster UI/summary 경로에서 필요한 만큼
+  제공한다.
 - **T-207c** `/admin/feature 검토/병합/override/deactivate` 라우터 —
   `debug-ui-admin-workflows.md` 정본. dedup-merge/override/deactivate(기존
   `merge_repo` + 신규 override 로직). D-8 결정에 따라
@@ -155,10 +157,10 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
   `concurrency_key=provider:dataset`(advisory lock, ADR-039) + RetryPolicy.
 - **T-208d** `schedules.py` — provider별 cron(`execution_timezone="Asia/Seoul"`).
   부하 분산(요일/시간 분리).
-- **T-208e** `sensors.py` — (1) `feature_update_requests` 폴링 sensor:
-  `claim_next_update_request` → RunRequest 또는 `import_jobs` claim 실행
-  (cardinality D-6). (2) `run_failure_sensor` → Sentry/알림 + `import_jobs` failed
-  반영. polling 주기 D-6.
+- **T-208e** ✅ `sensors.py` — (1) `feature_update_requests` 폴링 sensor:
+  `peek_next_update_request` → request id별 `RunRequest` → worker job 안에서
+  `execute_feature_update_request` 실행(D-6). (2) `run_failure_sensor` → 선택 notifier
+  알림 + request/import job failed 보강. polling 주기 15초.
 - **T-208f** consistency/dedup refresh job — `run_consistency_checks`(F1~F4) +
   `sync_dedup_candidates` 정기 실행.
 - **T-208g** offline upload load job — admin 업로드 파일(D-14 저장 위치) → 적재
@@ -234,8 +236,9 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
 6. **Phase 2 T-206d** — request 실행 본체 — 완료.
 7. **Phase 3 T-207a** — admin update-requests 라우터 — 완료.
 8. **Phase 3 T-207f** — POI/cache target admin/features API — 완료.
-9. **Phase 4 T-208e** — Dagster sensor가 queued/now request를 실행기로 연결.
-10. **Phase 3 T-207d/e** (ops + features 라우터) — T-208e 후 필요한 조회면 보강.
+9. **Phase 4 T-208e** — 완료. Dagster sensor가 queued/now request를 실행기로 연결.
+10. **Phase 3 T-207c/d/e** (admin features + ops + user features 라우터) — T-207b는
+    구현하지 않는다.
 11. **Phase 5 T-209a/b** (docker-compose + 기동) — 라우터 동작 후 통합.
 12. **Phase 4 T-208 잔여** — provider resources/ops polish, TripMate 이관과 병행.
 13. **Phase 6** TripMate 정리/이관 — Dagster 이관 시점 동기.

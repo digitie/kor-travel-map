@@ -326,7 +326,7 @@ feature를 업데이트한다.
 | 값 | 의미 |
 |----|------|
 | `queued` | queue에 넣고 Dagster worker/sensor가 순서대로 실행 |
-| `now` | 가능한 즉시 Dagster run 생성. lock conflict 시 409 또는 queued fallback |
+| `now` | 높은 우선순위/즉시 실행 의도를 가진 request. Dagster sensor가 같은 queue에서 감지해 worker run을 생성 |
 
 `dry_run=true`이면 대상 수, provider/dataset group, 예상 job만 반환하고 run을 만들지
 않는다.
@@ -372,13 +372,13 @@ queued 또는 running 요청을 취소 요청 상태로 둔다. running job은 c
 권장 기본 방식:
 
 1. API가 `ops.feature_update_requests`와 `ops.import_jobs`를 같은 transaction에 생성.
-2. Dagster sensor가 `state='queued'` request를 읽어 run을 생성.
-3. Dagster run은 `ops.import_jobs`를 `running`으로 바꾸고 progress를 갱신.
+2. Dagster sensor가 `state='queued'` request를 peek해 request id별 run을 생성.
+3. Dagster worker run은 request/import job을 `running`으로 바꾸고 progress를 갱신.
 4. 완료 시 `feature_update_requests.state`와 `import_jobs.state`를 같이 terminal로
    갱신.
 
-즉시 실행(`run_mode=now`)은 API가 Dagster run을 바로 만들 수 있다. 그래도 request와
-job row는 먼저 저장해 추적성과 취소를 유지한다.
+즉시 실행(`run_mode=now`)도 request와 job row를 먼저 저장한다. 현재 구현은 API가
+Dagster run을 직접 만들지 않고, sensor가 같은 queue에서 감지해 worker run을 만든다.
 
 ### 6.1 테이블
 
@@ -430,18 +430,20 @@ dry-run preview, request/import job enqueue, priority claim, start/finish/cancel
 단건 조회, keyset 목록 조회를 구현했다(T-206b). `AsyncKrtourMapClient`는
 enqueue/get/list/cancel 메서드와 transaction 경계를 노출한다(T-206c). T-206d의
 `infra.feature_update_executor`는 runner 주입형 request 실행 본체를 제공한다. T-207a는
-admin HTTP router와 OpenAPI schema export를 연결했다. `run-now`는 T-208e sensor 전까지
-기존 payload를 `run_mode='now'` request로 재큐잉한다.
+admin HTTP router와 OpenAPI schema export를 연결했다. T-208e는
+`feature_update_request_queue_sensor`와 `feature_update_request_worker`로 queued/now
+request 실행을 Dagster에 연결했다.
 
 ## 7. Provider 실행 API와의 관계
 
-`POST /admin/providers/{provider}/datasets/{dataset_key}/runs`는 provider/dataset을
-직접 실행하는 낮은 수준 API다.
+`POST /admin/providers/{provider}/datasets/{dataset_key}/runs`는 T-207b 후보였지만
+사용자 결정에 따라 별도 구현하지 않는다. provider/dataset 직접 실행이 필요하면
+`POST /admin/feature-update-requests`의 `provider_dataset` scope를 사용한다.
 
 `POST /admin/feature-update-requests`는 운영자/TripMate가 쓰기 쉬운 높은 수준 API다.
 지리 scope를 provider/dataset/job으로 분해하고 필요한 Dagster run을 큐잉한다.
 
-두 API 모두 결과적으로 `ops.import_jobs`와 Dagster run을 사용한다.
+결과적으로 `ops.import_jobs`와 Dagster run을 사용한다.
 
 ## 7.1 Dagster 운영 요약 API
 

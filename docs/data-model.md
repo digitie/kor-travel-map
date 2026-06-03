@@ -687,9 +687,9 @@ run/import job으로 연결한다. 상세 계약은 `docs/openapi-admin-contract
 - `idx_feature_update_created` — 최신 요청 목록.
 - `idx_feature_update_job` — import job에서 request 역추적.
 
-T-205a는 테이블/ORM 매핑까지만 구현했다. scope resolver, enqueue/claim repository,
-client 표면은 T-206a/b/c에서 구현했고, admin API와 Dagster sensor는 T-207/T-208
-후속이다.
+T-205a는 테이블/ORM 매핑까지만 구현했다. scope resolver, enqueue/claim/peek
+repository, client 표면은 T-206a/b/c와 T-208e에서 구현했고, admin API와 Dagster
+sensor는 T-207/T-208에서 연결했다.
 
 ### 9.9 `ops.poi_cache_targets` / `ops.poi_cache_target_feature_links` (ADR-045 T-205c, alembic 0009)
 

@@ -5,6 +5,19 @@
 
 ## [Unreleased]
 
+### 운영 — Dagster feature update sensor (2026-06-03)
+
+- **NEW**: `krtour-map-dagster`에 `feature_update_request_queue_sensor`와
+  `feature_update_request_worker` job을 추가했다. sensor는 queued request를 상태 변경
+  없이 peek한 뒤 request id를 Dagster `RunRequest` config/tag로 전달한다.
+- **NEW**: `feature_update_request_failure_sensor`를 추가했다. worker run 실패 시
+  request/import job 실패 전이를 보강하고, 선택 notifier resource로 알림 payload를
+  전달한다.
+- **CHANGED**: `AsyncKrtourMapClient`와 `infra.feature_update_repo`에
+  `peek_next_update_request`를 추가하고, client에 `fail_update_request`를 추가했다.
+- **TEST**: Dagster sensor/job unit test와 feature update repo/client PostGIS 통합
+  테스트를 추가했다.
+
 ### 운영 — POI/cache target admin API (2026-06-03)
 
 - **NEW**: `krtour-map-admin`에 `PUT/GET/DELETE /admin/poi-cache-targets`와

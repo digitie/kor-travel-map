@@ -231,9 +231,30 @@ async def test_feature_update_request_client_lifecycle(
     assert loaded.request_id == request.request_id
     assert loaded.providers == ("python-mois-api",)
 
+    peeked = await map_client.peek_next_update_request()
+    assert peeked is not None
+    assert peeked.request_id == request.request_id
+    assert peeked.state == "queued"
+
     page1 = await map_client.list_update_requests(limit=1)
     assert page1.items == (loaded,)
     assert page1.next_cursor is None
+
+    to_fail = await map_client.enqueue_feature_update_request(
+        scope={"type": "feature_ids", "feature_ids": []},
+        providers=["python-mois-api"],
+        priority=80,
+    )
+    assert isinstance(to_fail, FeatureUpdateRequest)
+    failed = await map_client.fail_update_request(
+        to_fail.request_id,
+        dagster_run_id="dagster-run-client-test",
+        error_message="client test failure",
+    )
+    assert failed is not None
+    assert failed.state == "failed"
+    assert failed.dagster_run_id == "dagster-run-client-test"
+    assert failed.error_message == "client test failure"
 
     cancelled = await map_client.cancel_update_request(
         request.request_id, error_message="client test cancel"
