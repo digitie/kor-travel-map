@@ -133,7 +133,7 @@ export interface NearbyByTargetParams {
   sort?: NearbySort;
 }
 
-export function fetchPoiCacheTargets(
+function fetchPoiCacheTargets(
   params: PoiCacheTargetListParams = {},
 ): Promise<PoiCacheTargetListResponse> {
   return getJson<PoiCacheTargetListResponse>(
@@ -146,7 +146,7 @@ export function fetchPoiCacheTargets(
   );
 }
 
-export function fetchPoiCacheTarget(
+function fetchPoiCacheTarget(
   externalSystem: string,
   targetKey: string,
   includeDeleted = false,
@@ -161,7 +161,7 @@ export function fetchPoiCacheTarget(
   );
 }
 
-export function upsertPoiCacheTarget(
+function upsertPoiCacheTarget(
   externalSystem: string,
   targetKey: string,
   body: PoiCacheTargetUpsertRequest,
@@ -174,7 +174,7 @@ export function upsertPoiCacheTarget(
   );
 }
 
-export function deletePoiCacheTarget(
+function deletePoiCacheTarget(
   externalSystem: string,
   targetKey: string,
 ): Promise<PoiCacheTargetResponse> {
@@ -185,7 +185,7 @@ export function deletePoiCacheTarget(
   );
 }
 
-export function fetchNearbyFeaturesByTarget(
+function fetchNearbyFeaturesByTarget(
   params: NearbyByTargetParams,
 ): Promise<FeaturesNearbyByTargetResponse> {
   return getJson<FeaturesNearbyByTargetResponse>(

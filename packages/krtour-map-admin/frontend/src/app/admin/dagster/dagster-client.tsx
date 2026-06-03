@@ -10,7 +10,6 @@ import {
   RefreshCwIcon,
   WorkflowIcon,
 } from "lucide-react";
-import Link from "next/link";
 
 import {
   DAGSTER_UI_URL,
@@ -18,6 +17,7 @@ import {
   type DagsterRunSummary,
   useDagsterSummary,
 } from "@/api/dagster";
+import { AdminShell } from "@/components/admin-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -183,6 +183,47 @@ function RepositoryList({ repositories }: { repositories: DagsterRepository[] })
               </div>
             ))}
           </div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <div className="rounded-md border bg-muted/30 p-3">
+              <div className="mb-2 text-sm font-medium">Schedules</div>
+              <div className="flex flex-col gap-2">
+                {repository.schedules.length === 0 ? (
+                  <span className="text-xs text-muted-foreground">없음</span>
+                ) : null}
+                {repository.schedules.map((schedule) => (
+                  <div
+                    className="flex items-center justify-between gap-3 text-xs"
+                    key={schedule.name}
+                  >
+                    <span className="truncate font-mono">{schedule.name}</span>
+                    <Badge variant={statusVariant(schedule.status ?? "")}>
+                      {schedule.status ?? "unknown"}
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="rounded-md border bg-muted/30 p-3">
+              <div className="mb-2 text-sm font-medium">Sensors</div>
+              <div className="flex flex-col gap-2">
+                {repository.sensors.length === 0 ? (
+                  <span className="text-xs text-muted-foreground">없음</span>
+                ) : null}
+                {repository.sensors.map((sensor) => (
+                  <div
+                    className="flex items-center justify-between gap-3 text-xs"
+                    key={sensor.name}
+                  >
+                    <span className="truncate font-mono">{sensor.name}</span>
+                    <Badge variant={statusVariant(sensor.status ?? "")}>
+                      {sensor.status ?? "unknown"}
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
       ))}
     </div>
@@ -236,55 +277,40 @@ export function DagsterAdminClient() {
   const failedRuns = data?.run_counts.FAILURE ?? 0;
 
   return (
-    <main className="min-h-screen bg-muted/30">
-      <div className="mx-auto flex w-full max-w-[96rem] flex-col gap-6 p-6">
-        <header className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-          <div className="flex flex-col gap-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="secondary">Ops</Badge>
-              <Badge variant={statusVariant(data?.status ?? "loading")}>
-                {data?.status ?? (summary.isError ? "error" : "loading")}
-              </Badge>
-              {data?.version ? <Badge variant="outline">v{data.version}</Badge> : null}
-            </div>
-            <h1 className="text-2xl font-semibold tracking-tight">
-              Dagster 운영
-            </h1>
-            <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
-              <span>checked {formatCheckedAt(data?.checked_at)}</span>
-              <span className="font-mono">{DAGSTER_UI_URL}</span>
-            </div>
-          </div>
-          <nav className="flex flex-wrap gap-2">
-            <Link className={cn(buttonVariants({ variant: "outline" }))} href="/">
-              홈
-            </Link>
-            <Link
-              className={cn(buttonVariants({ variant: "outline" }))}
-              href="/etl"
-            >
-              ETL preview
-            </Link>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={summary.isFetching}
-              onClick={() => void summary.refetch()}
-            >
-              <RefreshCwIcon data-icon="inline-start" />
-              새로고침
-            </Button>
-            <a
-              className={cn(buttonVariants({ variant: "default" }))}
-              href={DAGSTER_UI_URL}
-              rel="noreferrer"
-              target="_blank"
-            >
-              <ExternalLinkIcon data-icon="inline-start" />
-              Dagster 열기
-            </a>
-          </nav>
-        </header>
+    <AdminShell
+      actions={
+        <>
+          <Button
+            disabled={summary.isFetching}
+            type="button"
+            variant="outline"
+            onClick={() => void summary.refetch()}
+          >
+            <RefreshCwIcon data-icon="inline-start" />
+            새로고침
+          </Button>
+          <a
+            className={cn(buttonVariants({ variant: "default" }))}
+            href={DAGSTER_UI_URL}
+            rel="noreferrer"
+            target="_blank"
+          >
+            <ExternalLinkIcon data-icon="inline-start" />
+            Dagster 열기
+          </a>
+        </>
+      }
+      description={`checked ${formatCheckedAt(data?.checked_at)} · ${DAGSTER_UI_URL}`}
+      section="Ops"
+      title="Dagster 운영"
+    >
+      <div className="flex flex-col gap-5">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant={statusVariant(data?.status ?? "loading")}>
+            {data?.status ?? (summary.isError ? "error" : "loading")}
+          </Badge>
+          {data?.version ? <Badge variant="outline">v{data.version}</Badge> : null}
+        </div>
 
         {summary.isError ? (
           <Alert variant="destructive">
@@ -403,6 +429,6 @@ export function DagsterAdminClient() {
           </Card>
         </section>
       </div>
-    </main>
+    </AdminShell>
   );
 }

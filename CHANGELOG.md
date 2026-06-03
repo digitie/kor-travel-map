@@ -5,6 +5,29 @@
 
 ## [Unreleased]
 
+### Admin UI — 최신 운영 화면 구현 (2026-06-03)
+
+- **NEW**: admin frontend에 전역 `AdminShell` navigation, 공통 `StatusBadge`, format
+  helper를 추가했다.
+- **NEW**: `/ops/import-jobs`, `/ops/consistency`, `/admin/dedup-review`,
+  `/admin/feature-update-requests`, `/admin/poi-cache-targets` 화면을 추가했다.
+- **CHANGED**: 홈(`/`)을 feature/import job/dedup/integrity issue/Dagster 상태를
+  보는 운영 dashboard로 교체했다.
+- **CHANGED**: `/admin/dagster`는 Dagster webserver embed와 자체 summary UI를 함께
+  제공하며 schedules/sensors 정보를 표시한다.
+- **CHANGED**: `/features` header에 jobs/update/target/dedup/Dagster 운영 화면으로
+  이동하는 quick link를 추가했다.
+- **CHANGED**: `scripts/stop-fixed-ports.sh`가 WSL 일반 PID, WSL root listener,
+  Windows `node.exe`/`wslrelay.exe` listener를 감지해 9011/9012/9013 stale 포트를
+  정리한다.
+- **CHANGED**: `scripts/load-env.sh`의 기본 CORS origin에 WSL IP 기반
+  `http://<WSL-IP>:9012`를 포함해, Windows localhost relay가 죽었을 때도
+  `E2E_BASE_URL` WSL IP fallback으로 브라우저 검증이 가능하게 했다.
+- **CHANGED**: `krtour.map_admin.app`이 설정된 CORS origin에 대해 응답과 preflight
+  헤더를 한 번 더 보강해 WSL IP fallback 경로에서도 frontend fetch가 막히지 않게 했다.
+- **TEST**: Playwright e2e를 새 home dashboard와 신규 admin/ops route smoke 기준으로
+  갱신했다.
+
 ### Admin UI — 최신화 선행 API 계약 (2026-06-03)
 
 - **NEW**: `docs/admin-ui-modernization-gap-audit.md`를 추가해 최신 admin UI 요구사항과

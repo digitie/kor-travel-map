@@ -1,61 +1,67 @@
 import { expect, test } from "@playwright/test";
 
 /**
- * 홈(`/`) — frontend skeleton smoke + 실 backend(/debug/health·/debug/version) 연동.
- * react-query가 backend에서 데이터를 받아 렌더링하므로 auto-retry expect로 대기한다.
+ * 홈(`/`) — 운영 홈 대시보드 smoke.
+ * 실 API 데이터가 비어 있거나 일시 실패해도 shell, 주요 metric, 운영 내비게이션은
+ * 렌더되어야 한다.
  */
 test.describe("home page (/)", () => {
-  test("타이틀 + ETL 내비 링크 렌더", async ({ page }) => {
+  test("운영 홈 shell + 주요 운영 내비 링크 렌더", async ({ page }) => {
     await page.goto("/");
+
     await expect(
-      page.getByRole("heading", { level: 1, name: "krtour-map admin" }),
+      page.getByRole("heading", { level: 1, name: "운영 홈" }),
     ).toBeVisible();
-    await expect(page.getByRole("link", { name: /Feature 지도/ })).toBeVisible();
-    await expect(page.getByRole("link", { name: /Dagster 운영/ })).toBeVisible();
-    await expect(page.getByRole("link", { name: /ETL preview/ })).toBeVisible();
+    const navigation = page.getByRole("navigation");
+    for (const linkName of [
+      "Features",
+      "Import jobs",
+      "Consistency",
+      "Dedup review",
+      "Update requests",
+      "POI targets",
+      "Dagster",
+      "ETL preview",
+    ]) {
+      await expect(
+        navigation.getByRole("link", { name: linkName, exact: true }),
+      ).toBeVisible();
+    }
   });
 
-  test("Backend health 섹션이 live /debug/health 결과(status ok)를 표시", async ({
-    page,
-  }) => {
+  test("운영 metric 카드와 상태 카드가 렌더", async ({ page }) => {
     await page.goto("/");
-    await expect(
-      page.getByRole("heading", { name: "Backend health" }),
-    ).toBeVisible();
-    // 헬스 JSON <pre>에 service 이름 + status ok가 보여야 함.
-    const healthPre = page.locator("pre").filter({ hasText: '"status"' });
-    await expect(healthPre).toContainText('"ok"');
-    await expect(healthPre).toContainText("krtour-map-admin");
-  });
 
-  test("Versions 섹션이 live /debug/version 결과를 표시", async ({ page }) => {
-    await page.goto("/");
-    await expect(page.getByRole("heading", { name: "Versions" })).toBeVisible();
-    const versions = page.getByTestId("version-list");
+    for (const heading of [
+      "Features",
+      "Import jobs",
+      "Dedup queue",
+      "Issues",
+      "Backend",
+      "Dagster",
+      "Dedup pending",
+    ]) {
+      await expect(
+        page.getByRole("heading", { name: heading, exact: true }),
+      ).toBeVisible();
+    }
     await expect(
-      versions.locator("dt").filter({ hasText: /^admin$/ }),
-    ).toBeVisible();
-    await expect(
-      versions.locator("dt").filter({ hasText: /^krtour\.map$/ }),
+      page.getByRole("heading", { name: "최근 import jobs" }),
     ).toBeVisible();
   });
 
-  test("Dagster 요약 카드가 ops summary 결과를 표시", async ({ page }) => {
+  test("홈에서 새 운영 화면으로 이동", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByTestId("dagster-summary-card")).toBeVisible();
-    await expect(page.getByTestId("dagster-summary-card")).toContainText(
-      /assets|Dagster summary 호출 실패/,
-    );
-  });
-
-  test("Zustand viewport 데모 버튼 동작 (클라이언트 상태)", async ({ page }) => {
-    await page.goto("/");
+    await page.getByRole("link", { name: "Import jobs" }).click();
+    await expect(page).toHaveURL(/\/ops\/import-jobs$/);
     await expect(
-      page.getByRole("heading", { name: /Map viewport/ }),
+      page.getByRole("heading", { level: 1, name: "Import jobs" }),
     ).toBeVisible();
-    await page.getByRole("button", { name: /미세 이동/ }).click();
-    await page.getByRole("button", { name: /기본값으로 초기화/ }).click();
-    // 크래시 없이 viewport pre가 계속 렌더되는지.
-    await expect(page.getByRole("heading", { name: /Map viewport/ })).toBeVisible();
+
+    await page.getByRole("link", { name: "Update requests" }).click();
+    await expect(page).toHaveURL(/\/admin\/feature-update-requests$/);
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Feature update requests" }),
+    ).toBeVisible();
   });
 });

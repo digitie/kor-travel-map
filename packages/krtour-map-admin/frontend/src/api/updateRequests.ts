@@ -84,7 +84,7 @@ export interface FeatureUpdateRequestRunNowRequest {
   reason?: string | null;
 }
 
-export function fetchFeatureUpdateRequests(
+function fetchFeatureUpdateRequests(
   params: FeatureUpdateRequestListParams = {},
 ): Promise<FeatureUpdateRequestListResponse> {
   return getJson<FeatureUpdateRequestListResponse>(
@@ -101,7 +101,7 @@ export function fetchFeatureUpdateRequests(
   );
 }
 
-export function fetchFeatureUpdateRequest(
+function fetchFeatureUpdateRequest(
   requestId: string,
 ): Promise<FeatureUpdateRequestRecord> {
   return getJson<FeatureUpdateRequestRecord>(
@@ -109,7 +109,7 @@ export function fetchFeatureUpdateRequest(
   );
 }
 
-export function createFeatureUpdateRequest(
+function createFeatureUpdateRequest(
   body: FeatureUpdateRequestCreateRequest,
 ): Promise<FeatureUpdateRequestCreateResponse> {
   return postJson<FeatureUpdateRequestCreateResponse>(
@@ -118,7 +118,7 @@ export function createFeatureUpdateRequest(
   );
 }
 
-export function cancelFeatureUpdateRequest(
+function cancelFeatureUpdateRequest(
   requestId: string,
   body: FeatureUpdateRequestCancelRequest = {},
 ): Promise<FeatureUpdateRequestCreateResponse> {
@@ -128,7 +128,7 @@ export function cancelFeatureUpdateRequest(
   );
 }
 
-export function runFeatureUpdateRequestNow(
+function runFeatureUpdateRequestNow(
   requestId: string,
   body: FeatureUpdateRequestRunNowRequest = {},
 ): Promise<FeatureUpdateRequestCreateResponse> {

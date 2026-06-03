@@ -2,17 +2,25 @@
 
 import {
   ActivityIcon,
+  AlertTriangleIcon,
   DatabaseIcon,
   ExternalLinkIcon,
+  GitCompareArrowsIcon,
+  ListChecksIcon,
   MapIcon,
-  MoveDiagonal2Icon,
-  RotateCcwIcon,
+  RefreshCwIcon,
   WorkflowIcon,
 } from "lucide-react";
 import Link from "next/link";
 
 import { DAGSTER_UI_URL, useDagsterSummary } from "@/api/dagster";
+import { useDedupReviews } from "@/api/dedup";
+import { useImportJobs } from "@/api/importJobs";
+import { useOpsMetrics } from "@/api/ops";
 import { useHealth, useVersion } from "@/api/queries";
+import { AdminShell } from "@/components/admin-shell";
+import { StatusBadge } from "@/components/status-badge";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
@@ -24,220 +32,294 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { formatCount, formatDateTime, shortId } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { useMapStore } from "@/state/map";
 
-function JsonBlock({ value }: { value: unknown }) {
+function MetricCard({
+  title,
+  value,
+  description,
+  icon: Icon,
+}: {
+  title: string;
+  value: string;
+  description: string;
+  icon: typeof ActivityIcon;
+}) {
   return (
-    <pre className="max-h-64 overflow-auto rounded-lg bg-muted p-3 text-xs leading-relaxed">
-      {JSON.stringify(value, null, 2)}
-    </pre>
+    <Card size="sm">
+      <CardHeader>
+        <CardTitle className="text-sm text-muted-foreground">{title}</CardTitle>
+        <CardAction>
+          <Icon className="text-muted-foreground" />
+        </CardAction>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-1">
+        <div className="text-2xl font-semibold tracking-tight">{value}</div>
+        <p className="text-xs text-muted-foreground">{description}</p>
+      </CardContent>
+    </Card>
   );
 }
 
 export function HomePageClient() {
   const health = useHealth();
   const version = useVersion();
-  const dagster = useDagsterSummary(5);
-  const viewport = useMapStore((state) => state.viewport);
-  const resetViewport = useMapStore((state) => state.resetViewport);
-  const setViewport = useMapStore((state) => state.setViewport);
+  const metrics = useOpsMetrics();
+  const importJobs = useImportJobs({ page_size: 8 });
+  const dedup = useDedupReviews({ status: ["pending"], page_size: 6 });
+  const dagster = useDagsterSummary(8);
 
-  const healthState = health.data?.status ?? (health.isError ? "error" : "loading");
-  const dagsterState =
-    dagster.data?.status ?? (dagster.isError ? "error" : "loading");
+  const refreshAll = () => {
+    void health.refetch();
+    void version.refetch();
+    void metrics.refetch();
+    void importJobs.refetch();
+    void dedup.refetch();
+    void dagster.refetch();
+  };
 
   return (
-    <main className="min-h-screen bg-muted/30">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6">
-        <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div className="flex flex-col gap-1">
-            <div className="flex items-center gap-2">
-              <Badge variant="secondary">Admin</Badge>
-              <Badge variant={health.isError ? "destructive" : "outline"}>
-                {healthState}
-              </Badge>
-            </div>
-            <h1 className="text-2xl font-semibold tracking-tight">
-              krtour-map admin
-            </h1>
-            <p className="max-w-2xl text-sm text-muted-foreground">
-              feature 운영과 provider 변환 확인을 위한 내부망 관리 화면입니다.
-            </p>
-          </div>
-          <nav className="flex flex-wrap gap-2">
-            <Link
-              className={cn(buttonVariants({ variant: "outline" }))}
-              href="/features"
-            >
-              <MapIcon data-icon="inline-start" />
-              Feature 지도
-            </Link>
-            <Link
-              className={cn(buttonVariants({ variant: "outline" }))}
-              href="/admin/dagster"
-            >
-              <WorkflowIcon data-icon="inline-start" />
-              Dagster 운영
-            </Link>
-            <Link
-              className={cn(buttonVariants({ variant: "outline" }))}
-              href="/etl"
-            >
-              <DatabaseIcon data-icon="inline-start" />
-              ETL preview
-            </Link>
-          </nav>
-        </header>
+    <AdminShell
+      actions={
+        <>
+          <Button type="button" variant="outline" onClick={refreshAll}>
+            <RefreshCwIcon data-icon="inline-start" />
+            새로고침
+          </Button>
+          <a
+            className={cn(buttonVariants({ variant: "outline" }))}
+            href={DAGSTER_UI_URL}
+            rel="noreferrer"
+            target="_blank"
+          >
+            <ExternalLinkIcon data-icon="inline-start" />
+            Dagster
+          </a>
+        </>
+      }
+      description="feature, import job, consistency, Dagster 상태를 한 화면에서 확인합니다."
+      section="Overview"
+      title="운영 홈"
+    >
+      <div className="flex flex-col gap-5">
+        {(health.isError || metrics.isError || dagster.isError) && (
+          <Alert variant="destructive">
+            <AlertTriangleIcon data-icon="inline-start" />
+            <AlertTitle>운영 summary 확인 필요</AlertTitle>
+            <AlertDescription>
+              {health.error?.message ?? metrics.error?.message ?? dagster.error?.message}
+            </AlertDescription>
+          </Alert>
+        )}
 
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {metrics.isLoading ? (
+            <>
+              <Skeleton className="h-28" />
+              <Skeleton className="h-28" />
+              <Skeleton className="h-28" />
+              <Skeleton className="h-28" />
+            </>
+          ) : (
+            <>
+              <MetricCard
+                description={`${formatCount(metrics.data?.features_active)} active / ${formatCount(metrics.data?.features_inactive)} inactive`}
+                icon={MapIcon}
+                title="Features"
+                value={formatCount(metrics.data?.features_total)}
+              />
+              <MetricCard
+                description="queued, running, done, failed"
+                icon={ListChecksIcon}
+                title="Import jobs"
+                value={formatCount(
+                  Object.values(metrics.data?.import_jobs_by_state ?? {}).reduce(
+                    (sum, count) => sum + count,
+                    0,
+                  ),
+                )}
+              />
+              <MetricCard
+                description={`${formatCount(metrics.data?.dedup_fp_stats.pending)} pending reviews`}
+                icon={GitCompareArrowsIcon}
+                title="Dedup queue"
+                value={formatCount(
+                  Object.values(metrics.data?.dedup_queue_by_status ?? {}).reduce(
+                    (sum, count) => sum + count,
+                    0,
+                  ),
+                )}
+              />
+              <MetricCard
+                description="open data integrity issues"
+                icon={AlertTriangleIcon}
+                title="Issues"
+                value={formatCount(metrics.data?.data_integrity_issues.open_total)}
+              />
+            </>
+          )}
+        </section>
+
+        <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
           <Card>
             <CardHeader>
-              <CardTitle>Backend health</CardTitle>
-              <CardDescription>FastAPI liveness</CardDescription>
+              <CardTitle>최근 import jobs</CardTitle>
+              <CardDescription>ops.import_jobs 상태</CardDescription>
               <CardAction>
-                <ActivityIcon className="text-muted-foreground" />
+                <Link
+                  className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
+                  href="/ops/import-jobs"
+                >
+                  전체
+                </Link>
               </CardAction>
             </CardHeader>
-            <CardContent className="flex flex-col gap-3">
-              {health.isLoading ? <Skeleton className="h-24 w-full" /> : null}
-              {health.isError ? (
+            <CardContent className="overflow-auto">
+              {importJobs.isLoading ? <Skeleton className="h-64" /> : null}
+              {importJobs.isError ? (
                 <p className="text-sm text-destructive">
-                  health 호출 실패: {health.error.message}
+                  {importJobs.error.message}
                 </p>
               ) : null}
-              {health.data ? <JsonBlock value={health.data} /> : null}
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>job</TableHead>
+                    <TableHead>kind</TableHead>
+                    <TableHead>state</TableHead>
+                    <TableHead>progress</TableHead>
+                    <TableHead>updated</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(importJobs.data?.data.items ?? []).map((job) => (
+                    <TableRow key={job.job_id}>
+                      <TableCell className="font-mono text-xs">
+                        {shortId(job.job_id)}
+                      </TableCell>
+                      <TableCell>{job.kind}</TableCell>
+                      <TableCell>
+                        <StatusBadge status={job.state} />
+                      </TableCell>
+                      <TableCell className="font-mono">{job.progress}%</TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {formatDateTime(
+                          job.finished_at ?? job.heartbeat_at ?? job.started_at,
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  {!importJobs.isLoading &&
+                  (importJobs.data?.data.items.length ?? 0) === 0 ? (
+                    <TableRow>
+                      <TableCell
+                        className="h-24 text-center text-muted-foreground"
+                        colSpan={5}
+                      >
+                        import job이 없습니다.
+                      </TableCell>
+                    </TableRow>
+                  ) : null}
+                </TableBody>
+              </Table>
             </CardContent>
           </Card>
 
-          <Card data-testid="dagster-summary-card">
-            <CardHeader>
-              <CardTitle>Dagster</CardTitle>
-              <CardDescription>workflow orchestration</CardDescription>
-              <CardAction>
-                <WorkflowIcon className="text-muted-foreground" />
-              </CardAction>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3">
-              {dagster.isLoading ? <Skeleton className="h-24 w-full" /> : null}
-              {dagster.isError ? (
-                <p className="text-sm text-destructive">
-                  Dagster summary 호출 실패: {dagster.error.message}
-                </p>
-              ) : null}
-              {dagster.data ? (
-                <div className="flex flex-col gap-3 text-sm">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge
-                      variant={
-                        dagsterState === "ok"
-                          ? "secondary"
-                          : dagsterState === "loading"
-                            ? "outline"
-                            : "destructive"
-                      }
-                    >
-                      {dagsterState}
-                    </Badge>
-                    {dagster.data.version ? (
-                      <Badge variant="outline">v{dagster.data.version}</Badge>
-                    ) : null}
-                  </div>
-                  <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2">
-                    <dt className="text-muted-foreground">assets</dt>
-                    <dd className="font-mono">{dagster.data.asset_count}</dd>
-                    <dt className="text-muted-foreground">recent runs</dt>
-                    <dd className="font-mono">{dagster.data.recent_runs.length}</dd>
-                  </dl>
-                  <div className="flex flex-wrap gap-2">
-                    <Link
-                      className={cn(
-                        buttonVariants({ variant: "outline", size: "sm" }),
-                      )}
-                      href="/admin/dagster"
-                    >
-                      <WorkflowIcon data-icon="inline-start" />
-                      관리
-                    </Link>
-                    <a
-                      className={cn(
-                        buttonVariants({ variant: "ghost", size: "sm" }),
-                      )}
-                      href={DAGSTER_UI_URL}
-                      rel="noreferrer"
-                      target="_blank"
-                    >
-                      <ExternalLinkIcon data-icon="inline-start" />
-                      열기
-                    </a>
-                  </div>
+          <div className="flex flex-col gap-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Backend</CardTitle>
+                <CardDescription>health / version</CardDescription>
+                <CardAction>
+                  <DatabaseIcon className="text-muted-foreground" />
+                </CardAction>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-3">
+                <div className="flex flex-wrap gap-2">
+                  <StatusBadge
+                    status={health.data?.status ?? (health.isError ? "error" : "loading")}
+                  />
+                  {version.data ? (
+                    <Badge variant="outline">admin {version.data.debug_ui}</Badge>
+                  ) : null}
+                  {version.data ? (
+                    <Badge variant="outline">map {version.data.krtour_map}</Badge>
+                  ) : null}
                 </div>
-              ) : null}
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Versions</CardTitle>
-              <CardDescription>backend package versions</CardDescription>
-              <CardAction>
-                <DatabaseIcon className="text-muted-foreground" />
-              </CardAction>
-            </CardHeader>
-            <CardContent>
-              {version.isLoading ? <Skeleton className="h-24 w-full" /> : null}
-              {version.isError ? (
-                <p className="text-sm text-destructive">
-                  version 호출 실패: {version.error.message}
-                </p>
-              ) : null}
-              {version.data ? (
-                <dl
-                  className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm"
-                  data-testid="version-list"
+            <Card>
+              <CardHeader>
+                <CardTitle>Dagster</CardTitle>
+                <CardDescription>summary + embed</CardDescription>
+                <CardAction>
+                  <WorkflowIcon className="text-muted-foreground" />
+                </CardAction>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-3">
+                <div className="flex flex-wrap gap-2">
+                  <StatusBadge
+                    status={
+                      dagster.data?.status ?? (dagster.isError ? "error" : "loading")
+                    }
+                  />
+                  <Badge variant="outline">
+                    {formatCount(dagster.data?.asset_count)} assets
+                  </Badge>
+                  <Badge variant="outline">
+                    {formatCount(dagster.data?.schedule_count)} schedules
+                  </Badge>
+                </div>
+                <Link
+                  className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+                  href="/admin/dagster"
                 >
-                  <dt className="text-muted-foreground">admin</dt>
-                  <dd className="font-mono">{version.data.debug_ui}</dd>
-                  <dt className="text-muted-foreground">krtour.map</dt>
-                  <dd className="font-mono">{version.data.krtour_map}</dd>
-                </dl>
-              ) : null}
-            </CardContent>
-          </Card>
+                  <WorkflowIcon data-icon="inline-start" />
+                  Dagster 관리
+                </Link>
+              </CardContent>
+            </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Map viewport</CardTitle>
-              <CardDescription>Zustand UI state</CardDescription>
-              <CardAction>
-                <MapIcon className="text-muted-foreground" />
-              </CardAction>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3">
-              <JsonBlock value={viewport} />
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() =>
-                    setViewport({
-                      lon: viewport.lon + 0.1,
-                      lat: viewport.lat + 0.1,
-                    })
-                  }
-                >
-                  <MoveDiagonal2Icon data-icon="inline-start" />
-                  미세 이동
-                </Button>
-                <Button type="button" variant="ghost" onClick={resetViewport}>
-                  <RotateCcwIcon data-icon="inline-start" />
-                  기본값으로 초기화
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle>Dedup pending</CardTitle>
+                <CardDescription>검토 대기 후보</CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-2">
+                {(dedup.data?.data.items ?? []).slice(0, 4).map((item) => (
+                  <Link
+                    className="rounded-md border px-3 py-2 text-sm hover:bg-muted"
+                    href="/admin/dedup-review"
+                    key={item.review_key}
+                  >
+                    <div className="font-medium">
+                      {item.feature_a.name} / {item.feature_b.name}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      score {item.total_score.toFixed(1)} · {shortId(item.review_key)}
+                    </div>
+                  </Link>
+                ))}
+                {!dedup.isLoading && (dedup.data?.data.items.length ?? 0) === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    pending dedup review가 없습니다.
+                  </p>
+                ) : null}
+              </CardContent>
+            </Card>
+          </div>
         </section>
       </div>
-    </main>
+    </AdminShell>
   );
 }

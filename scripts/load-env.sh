@@ -15,6 +15,34 @@ export KRTOUR_MAP_ADMIN_HOST="${KRTOUR_MAP_ADMIN_HOST:-127.0.0.1}"
 export KRTOUR_MAP_ADMIN_PORT="${KRTOUR_MAP_ADMIN_PORT:-9011}"
 export KRTOUR_MAP_ADMIN_WEB_PORT="${KRTOUR_MAP_ADMIN_WEB_PORT:-9012}"
 export KRTOUR_MAP_DAGSTER_PORT="${KRTOUR_MAP_DAGSTER_PORT:-9013}"
+
+default_admin_cors_allow_origins() {
+  local web_port="$KRTOUR_MAP_ADMIN_WEB_PORT"
+  local origins=(
+    "http://localhost:$web_port"
+    "http://127.0.0.1:$web_port"
+  )
+  local wsl_ip="${KRTOUR_MAP_WSL_HOST_IP:-}"
+  if [[ -z "$wsl_ip" ]] && [[ -n "${WSL_DISTRO_NAME:-}" ]] && command -v hostname >/dev/null 2>&1; then
+    wsl_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  fi
+  if [[ -n "$wsl_ip" ]]; then
+    origins+=("http://$wsl_ip:$web_port")
+  fi
+
+  local json="["
+  local origin
+  for origin in "${origins[@]}"; do
+    if [[ "$json" != "[" ]]; then
+      json+=","
+    fi
+    json+="\"$origin\""
+  done
+  json+="]"
+  printf '%s' "$json"
+}
+
+export KRTOUR_MAP_ADMIN_CORS_ALLOW_ORIGINS="${KRTOUR_MAP_ADMIN_CORS_ALLOW_ORIGINS:-$(default_admin_cors_allow_origins)}"
 export KRTOUR_MAP_ADMIN_KRADDR_GEO_BASE_URL="${KRTOUR_MAP_ADMIN_KRADDR_GEO_BASE_URL:-http://127.0.0.1:9001}"
 export KRTOUR_MAP_ADMIN_DAGSTER_URL="${KRTOUR_MAP_ADMIN_DAGSTER_URL:-http://127.0.0.1:${KRTOUR_MAP_DAGSTER_PORT}}"
 export KRTOUR_MAP_DOCKER_ADMIN_DAGSTER_URL="${KRTOUR_MAP_DOCKER_ADMIN_DAGSTER_URL:-http://dagster:${KRTOUR_MAP_DAGSTER_PORT}}"

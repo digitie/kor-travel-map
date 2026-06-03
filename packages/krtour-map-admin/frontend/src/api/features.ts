@@ -237,7 +237,7 @@ export interface AdminFeatureDeactivateResponse {
   };
 }
 
-export function fetchAdminFeatures(
+function fetchAdminFeatures(
   params: AdminFeaturesListParams = {},
 ): Promise<AdminFeaturesListResponse> {
   return getJson<AdminFeaturesListResponse>(
@@ -261,7 +261,7 @@ export function fetchAdminFeatures(
   );
 }
 
-export function deactivateAdminFeature(
+function deactivateAdminFeature(
   featureId: string,
   body: AdminFeatureDeactivateRequest,
 ): Promise<AdminFeatureDeactivateResponse> {

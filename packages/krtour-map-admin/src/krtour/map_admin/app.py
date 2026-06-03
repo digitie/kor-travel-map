@@ -20,7 +20,9 @@ uvicorn 설정은 ``AdminSettings``(``KRTOUR_MAP_ADMIN_*`` env) 또는 호출자
 
 from __future__ import annotations
 
-from fastapi import FastAPI
+from collections.abc import Awaitable, Callable
+
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from krtour.map_admin import __version__
@@ -90,6 +92,45 @@ def create_app(settings: AdminSettings | None = None) -> FastAPI:
             allow_methods=["*"],
             allow_headers=["*"],
         )
+        allowed_cors_origins = set(settings.cors_allow_origins)
+
+        @application.middleware("http")
+        async def add_configured_cors_headers(
+            request: Request,
+            call_next: Callable[[Request], Awaitable[Response]],
+        ) -> Response:
+            origin = request.headers.get("origin")
+            origin_allowed = origin is not None and (
+                "*" in allowed_cors_origins or origin in allowed_cors_origins
+            )
+            allowed_origin = "*" if "*" in allowed_cors_origins else origin
+            if (
+                origin_allowed
+                and request.method == "OPTIONS"
+                and "access-control-request-method" in request.headers
+            ):
+                assert allowed_origin is not None
+                return Response(
+                    status_code=200,
+                    headers={
+                        "Access-Control-Allow-Origin": allowed_origin,
+                        "Access-Control-Allow-Methods": "*",
+                        "Access-Control-Allow-Headers": (
+                            request.headers.get("access-control-request-headers", "*")
+                        ),
+                        "Vary": "Origin",
+                    },
+                )
+
+            response = await call_next(request)
+            if origin_allowed:
+                assert allowed_origin is not None
+                response.headers.setdefault(
+                    "Access-Control-Allow-Origin",
+                    allowed_origin,
+                )
+                response.headers.setdefault("Vary", "Origin")
+            return response
 
     if settings.debug_routes_enabled:
         application.include_router(health_router)

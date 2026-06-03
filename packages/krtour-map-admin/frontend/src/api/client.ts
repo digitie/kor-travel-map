@@ -39,7 +39,7 @@ export type QueryParams = Record<
   QueryParamValue | readonly QueryParamValue[]
 >;
 
-export function buildQueryString(params: QueryParams): string {
+function buildQueryString(params: QueryParams): string {
   const search = new URLSearchParams();
   for (const [key, rawValue] of Object.entries(params)) {
     const values = Array.isArray(rawValue) ? rawValue : [rawValue];

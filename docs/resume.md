@@ -1,5 +1,39 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-03 Codex 작업 메모 — T-211b admin UI 최신화 구현
+
+사용자 지시로 admin UI 최신화 우선순위를 최상위로 올린 뒤, T-211a 선행 API/gap
+정리를 바탕으로 T-211b 화면 구현을 진행했다. frontend에는 공통 `AdminShell`,
+`StatusBadge`, format helper를 추가하고 홈(`/`)을 운영 dashboard로 교체했다.
+
+새 화면은 다음 최신 계약을 직접 소비한다.
+
+- `/ops/import-jobs`: `ops.import_jobs` read-only 목록, state/kind filter.
+- `/ops/consistency`: `/ops/metrics`, consistency reports, integrity issues 조회.
+- `/admin/dedup-review`: pending/accepted/rejected/ignored/merged 필터와 결정 버튼.
+- `/admin/feature-update-requests`: center radius 기반 request 생성, dry-run, cancel,
+  run-now, request 상태 목록.
+- `/admin/poi-cache-targets`: `external_system + target_key` upsert/delete와
+  `/features/nearby/by-target` 주변 feature 조회.
+- `/admin/dagster`: Dagster summary 자체 UI에 schedules/sensors 상태를 추가하고
+  Dagster webserver iframe embed를 유지.
+
+`/features`는 기존 지도/테이블 workflow를 유지하면서 운영 화면 링크를 헤더에 추가했다.
+Playwright e2e는 새 home dashboard와 신규 admin/ops route smoke 기준으로 갱신했다.
+검증 중 WSL root listener 또는 Windows `node.exe`/`wslrelay.exe`가 9012를 점유하면
+새 WSL 서버 대신 stale UI를 보는 문제가 확인되어, `scripts/stop-fixed-ports.sh`가 WSL
+root/Windows listener도 정리하도록 보강했다. Windows localhost relay가 내려간 경우를
+위해 `scripts/load-env.sh` 기본 CORS origin에는 WSL IP 기반 `http://<WSL-IP>:9012`도
+포함했고, admin FastAPI가 설정된 origin에 대해 CORS 응답/preflight 헤더를 보강한다.
+검증 범위는 source/WSL frontend `npm run type-check`, `npm run lint`, `npm test`,
+`npm run build`, `npm run doctor`, Windows Playwright e2e 16/16, CORS/ETL targeted unit
+25개, Python `ruff`/`mypy`/`lint-imports`/OpenAPI drift check다. React Doctor는 exit
+code 0이며 남은 optional warning은 기존 shadcn/ui primitive 구조와 Dagster iframe
+sandbox rule false positive다.
+
+다음 한 작업은 **T-208f consistency/dedup refresh job**이다. T-208g offline upload
+load job은 그 다음 순서로 진행한다.
+
 ## 2026-06-03 Codex 작업 메모 — T-211a admin UI 선행 gap audit/API 계약
 
 사용자 지시로 admin UI 최신화(기존 9번)를 최우선으로 올리고, T-211b 화면 구현 전에

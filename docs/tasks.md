@@ -4,9 +4,10 @@
 
 ## 진행 중
 
-**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#173(T-208d Dagster
-schedules)까지 merged. 현재 작업은 사용자 지시로 최우선 승격된 admin UI 최신화
-선행 task T-211a다. 완료 후 T-211b admin UI 구현으로 바로 진행한다.
+**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#174(T-211a admin UI 선행
+gap audit/API 계약)까지 merged. 현재 작업은 사용자 지시로 최우선 승격된
+T-211b admin UI 최신화 구현이다. T-211b 완료 후 독립 Dagster 운영 완성에 필요한
+T-208f consistency/dedup refresh job, T-208g offline upload load job 순서로 진행한다.
 T-207b는 사용자 결정에 따라 구현하지 않는다.
 
 ### 현재 기준 보강 필요 체크포인트 (2026-06-03)
@@ -51,6 +52,14 @@ T-207b는 사용자 결정에 따라 구현하지 않는다.
 
 ## 최근 완료 (2026-05-31~2026-06-03)
 
+- **T-211b** (2026-06-03): admin frontend 전역 app shell/navigation, 운영 홈
+  dashboard, `/ops/import-jobs`, `/ops/consistency`, `/admin/dedup-review`,
+  `/admin/feature-update-requests`, `/admin/poi-cache-targets` 화면을 최신 REST/Dagster
+  계약에 맞춰 구현했다. `/admin/dagster`는 Dagster webserver embed와 자체 summary
+  UI를 함께 보여주며 schedules/sensors 정보를 노출한다.
+- **T-211a** (2026-06-03): admin UI 최신화 선행 gap audit과 typed frontend API
+  layer를 추가했다. `/ops/import-jobs` 정본, `/features/nearby/by-target` 범위,
+  backend gap을 문서화하고 화면 구현 선행 조건을 정리했다.
 - **T-208d** (2026-06-03): `packages/krtour-map-dagster`에 Feature 적재 asset 9개의
   KST schedule과 asset job을 등록했다. 모든 schedule은 `Asia/Seoul` 기준이고,
   외부 API 호출 분산을 위해 분/요일을 나눴으며 기본 status는 `STOPPED`다.
