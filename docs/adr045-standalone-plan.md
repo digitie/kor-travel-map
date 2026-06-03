@@ -121,18 +121,20 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
   `feature_update_repo` 호출 + Pydantic schema + OpenAPI tag/export 연결 완료.
   `run-now`는 T-208e 전까지 기존 payload를 `run_mode='now'` request로 재큐잉한다.
 - **T-207b** `/admin/providers/{provider}/datasets/{dataset_key}/runs` (provider 직접
-  실행, §7) — `ops.import_jobs` enqueue.
+  실행, §7) — `ops.import_jobs` enqueue. T-208e 이후 보강해도 된다.
 - **T-207c** `/admin/feature 검토/병합/override/deactivate` 라우터 —
   `debug-ui-admin-workflows.md` 정본. dedup-merge/override/deactivate(기존
   `merge_repo` + 신규 override 로직). D-8 결정에 따라
-  `prevent_provider_reactivation`을 구현한다.
+  `prevent_provider_reactivation`을 구현한다. T-208e 이후 보강해도 된다.
 - **T-207d** `/ops/*` — consistency report 조회(F1~F4 기존 + Phase 2 F5~F8),
-  import_jobs 모니터, metrics. `status_repo` + `consistency` 재사용.
+  import_jobs 모니터, metrics. `status_repo` + `consistency` 재사용. T-208e 이후
+  admin UI polish와 함께 보강한다.
 - **T-207e** `/features/*` 사용자/admin 공용 read 라우터 — in-bounds/{id}/search/
   batch. D-7 결정에 따라 사용자 `/features/*`와 admin `/admin/features/*` 응답을
-  분리한다. `tripmate-rest-api.md` 참고.
-- **T-207f** `/admin/poi-cache-targets` + `/features/nearby/by-target` (Phase 2,
-  `poi-cache-update-targets.md`).
+  분리한다. TripMate batch 연동 직전 보강한다. `tripmate-rest-api.md` 참고.
+- **T-207f** ✅ `/admin/poi-cache-targets` + `/features/nearby/by-target` (Phase 2,
+  `poi-cache-update-targets.md`) — target CRUD/list/detail/delete + 주변 feature
+  summary/cursor 조회 완료.
 - **T-207g** OpenAPI export 이원화(admin schema + 사용자 schema) + drift gate 갱신
   (ADR-031 amendment, D-3). `scripts/export_openapi.py` 확장.
 
@@ -231,11 +233,12 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
    `data_integrity_violations`) — 완료.
 6. **Phase 2 T-206d** — request 실행 본체 — 완료.
 7. **Phase 3 T-207a** — admin update-requests 라우터 — 완료.
-8. **Phase 3 T-207f** — POI/cache target admin/features API.
-9. **Phase 3 T-207d/e** (ops + features 라우터) — T-207a/f 후.
-10. **Phase 5 T-209a/b** (docker-compose + 기동) — 라우터 동작 후 통합.
-11. **Phase 4 T-208** (Dagster) — T-206/T-209 위, TripMate 이관과 병행.
-12. **Phase 6** TripMate 정리/이관 — Dagster 이관 시점 동기.
+8. **Phase 3 T-207f** — POI/cache target admin/features API — 완료.
+9. **Phase 4 T-208e** — Dagster sensor가 queued/now request를 실행기로 연결.
+10. **Phase 3 T-207d/e** (ops + features 라우터) — T-208e 후 필요한 조회면 보강.
+11. **Phase 5 T-209a/b** (docker-compose + 기동) — 라우터 동작 후 통합.
+12. **Phase 4 T-208 잔여** — provider resources/ops polish, TripMate 이관과 병행.
+13. **Phase 6** TripMate 정리/이관 — Dagster 이관 시점 동기.
 13. OpenAPI client gen은 운영 안정 후.
 
 각 task는 1-PR 단위(`docs/runbooks/agent-workflow.md`), 4 게이트 + 해당 시 alembic/

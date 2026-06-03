@@ -30,13 +30,16 @@ ADR 참조
 
 from __future__ import annotations
 
+import base64
+import json
 from dataclasses import dataclass
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Final
 
 from sqlalchemy import text
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Sequence
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -44,6 +47,8 @@ if TYPE_CHECKING:
 
 __all__ = [
     "FeatureLoadResult",
+    "NearbyFeaturePage",
+    "NearbyFeatureRow",
     "upsert_feature",
     "upsert_source_record",
     "upsert_source_link",
@@ -56,6 +61,7 @@ __all__ = [
     "find_place_features_without_phone",
     "set_feature_phones",
     "features_in_bbox",
+    "features_nearby_poi_cache_target",
 ]
 
 
@@ -206,6 +212,113 @@ ORDER BY feature_id
 LIMIT :limit
 """
 
+_NEARBY_TARGET_CTE_SQL: Final[str] = """
+WITH target AS (
+    SELECT target_id, coord_5179,
+           COALESCE(CAST(:radius_km AS double precision), radius_km) * 1000.0
+             AS radius_m
+    FROM ops.poi_cache_targets
+    WHERE target_id::text = :target_id
+      AND deleted_at IS NULL
+      AND coord_5179 IS NOT NULL
+),
+candidates AS (
+    SELECT
+        f.feature_id,
+        f.kind,
+        f.name,
+        f.category,
+        f.status,
+        x_extension.ST_X(f.coord) AS lon,
+        x_extension.ST_Y(f.coord) AS lat,
+        x_extension.ST_Distance(f.coord_5179, t.coord_5179)::double precision
+            AS distance_m,
+        ps.provider AS primary_provider,
+        ps.dataset_key AS primary_dataset_key,
+        f.updated_at AS last_updated_at
+    FROM target AS t
+    JOIN feature.features AS f
+      ON f.deleted_at IS NULL
+     AND f.coord IS NOT NULL
+     AND f.coord_5179 IS NOT NULL
+     AND x_extension.ST_DWithin(f.coord_5179, t.coord_5179, t.radius_m)
+    LEFT JOIN LATERAL (
+        SELECT sr.provider, sr.dataset_key
+        FROM provider_sync.source_links AS sl
+        JOIN provider_sync.source_records AS sr
+          ON sr.source_record_key = sl.source_record_key
+        WHERE sl.feature_id = f.feature_id
+          AND sl.is_primary_source
+        ORDER BY sr.imported_at DESC NULLS LAST, sr.source_record_key
+        LIMIT 1
+    ) AS ps ON TRUE
+    WHERE (CAST(:kinds AS text[]) IS NULL OR f.kind = ANY(CAST(:kinds AS text[])))
+      AND (
+        CAST(:categories AS text[]) IS NULL
+        OR f.category = ANY(CAST(:categories AS text[]))
+      )
+      AND (
+        CAST(:statuses AS text[]) IS NULL
+        OR f.status = ANY(CAST(:statuses AS text[]))
+      )
+      AND (
+        CAST(:providers AS text[]) IS NULL
+        OR ps.provider = ANY(CAST(:providers AS text[]))
+      )
+)
+"""
+
+_NEARBY_DISTANCE_SQL: Final[str] = (
+    _NEARBY_TARGET_CTE_SQL
+    + """
+SELECT *
+FROM candidates
+WHERE (
+    CAST(:cursor_distance_m AS double precision) IS NULL
+    OR (distance_m, feature_id) > (
+        CAST(:cursor_distance_m AS double precision),
+        CAST(:cursor_feature_id AS text)
+    )
+)
+ORDER BY distance_m ASC, feature_id ASC
+LIMIT :limit_plus_one
+"""
+)
+
+_NEARBY_NAME_SQL: Final[str] = (
+    _NEARBY_TARGET_CTE_SQL
+    + """
+SELECT *
+FROM candidates
+WHERE (
+    CAST(:cursor_name AS text) IS NULL
+    OR (name, feature_id) > (
+        CAST(:cursor_name AS text),
+        CAST(:cursor_feature_id AS text)
+    )
+)
+ORDER BY name ASC, feature_id ASC
+LIMIT :limit_plus_one
+"""
+)
+
+_NEARBY_UPDATED_SQL: Final[str] = (
+    _NEARBY_TARGET_CTE_SQL
+    + """
+SELECT *
+FROM candidates
+WHERE (
+    CAST(:cursor_last_updated_at AS timestamptz) IS NULL
+    OR (last_updated_at, feature_id) < (
+        CAST(:cursor_last_updated_at AS timestamptz),
+        CAST(:cursor_feature_id AS text)
+    )
+)
+ORDER BY last_updated_at DESC, feature_id DESC
+LIMIT :limit_plus_one
+"""
+)
+
 # snapshot soft-delete — 주어진 (provider, dataset_key, source_entity_type)의
 # **primary source**로 적재된 feature 중, snapshot source_entity_id 집합에 없는
 # 것을 soft-delete (status='inactive' + deleted_at). 전체 snapshot 적재 후 호출해
@@ -288,6 +401,31 @@ class FeatureLoadResult:
                 self.source_links_updated + other.source_links_updated
             ),
         )
+
+
+@dataclass(frozen=True)
+class NearbyFeatureRow:
+    """외부 POI/cache target 주변 feature summary row."""
+
+    feature_id: str
+    kind: str
+    name: str
+    category: str
+    status: str
+    lon: float
+    lat: float
+    distance_m: float
+    primary_provider: str | None
+    primary_dataset_key: str | None
+    last_updated_at: datetime
+
+
+@dataclass(frozen=True)
+class NearbyFeaturePage:
+    """주변 feature keyset page."""
+
+    items: tuple[NearbyFeatureRow, ...]
+    next_cursor: str | None
 
 
 def _feature_params(feature: Feature) -> dict[str, Any]:
@@ -695,3 +833,146 @@ async def features_in_bbox(
         )
     ).mappings().all()
     return [dict(r) for r in rows]
+
+
+_NEARBY_SQL_BY_SORT: Final[dict[str, str]] = {
+    "distance": _NEARBY_DISTANCE_SQL,
+    "name": _NEARBY_NAME_SQL,
+    "last_updated_at": _NEARBY_UPDATED_SQL,
+}
+
+
+def _nearby_cursor_payload(cursor: str | None, *, sort: str) -> dict[str, Any]:
+    if cursor is None:
+        return {}
+    try:
+        padded = cursor + "=" * (-len(cursor) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("invalid nearby cursor") from exc
+    if not isinstance(payload, dict) or payload.get("sort") != sort:
+        raise ValueError("invalid nearby cursor")
+    feature_id = payload.get("feature_id")
+    if not isinstance(feature_id, str) or not feature_id:
+        raise ValueError("invalid nearby cursor")
+    return payload
+
+
+def _nearby_cursor_params(cursor: str | None, *, sort: str) -> dict[str, Any]:
+    payload = _nearby_cursor_payload(cursor, sort=sort)
+    params: dict[str, Any] = {
+        "cursor_distance_m": None,
+        "cursor_name": None,
+        "cursor_last_updated_at": None,
+        "cursor_feature_id": None,
+    }
+    if not payload:
+        return params
+
+    params["cursor_feature_id"] = payload["feature_id"]
+    if sort == "distance":
+        try:
+            params["cursor_distance_m"] = float(payload["distance_m"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("invalid nearby cursor") from exc
+    elif sort == "name":
+        name = payload.get("name")
+        if not isinstance(name, str):
+            raise ValueError("invalid nearby cursor")
+        params["cursor_name"] = name
+    elif sort == "last_updated_at":
+        try:
+            params["cursor_last_updated_at"] = datetime.fromisoformat(
+                str(payload["last_updated_at"])
+            )
+        except (KeyError, ValueError) as exc:
+            raise ValueError("invalid nearby cursor") from exc
+    return params
+
+
+def _encode_nearby_cursor(item: NearbyFeatureRow, *, sort: str) -> str:
+    payload: dict[str, Any] = {
+        "sort": sort,
+        "feature_id": item.feature_id,
+    }
+    if sort == "distance":
+        payload["distance_m"] = item.distance_m
+    elif sort == "name":
+        payload["name"] = item.name
+    elif sort == "last_updated_at":
+        payload["last_updated_at"] = item.last_updated_at.isoformat()
+    raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _nearby_row(row: Any) -> NearbyFeatureRow:
+    return NearbyFeatureRow(
+        feature_id=str(row["feature_id"]),
+        kind=str(row["kind"]),
+        name=str(row["name"]),
+        category=str(row["category"]),
+        status=str(row["status"]),
+        lon=float(row["lon"]),
+        lat=float(row["lat"]),
+        distance_m=float(row["distance_m"]),
+        primary_provider=row["primary_provider"],
+        primary_dataset_key=row["primary_dataset_key"],
+        last_updated_at=row["last_updated_at"],
+    )
+
+
+def _normalized_filter(values: Sequence[str] | None) -> list[str] | None:
+    if values is None:
+        return None
+    normalized = [str(value) for value in values if str(value)]
+    return normalized or None
+
+
+async def features_nearby_poi_cache_target(
+    session: AsyncSession,
+    *,
+    target_id: str,
+    radius_km: float | None = None,
+    kinds: Sequence[str] | None = None,
+    categories: Sequence[str] | None = None,
+    statuses: Sequence[str] | None = ("active",),
+    providers: Sequence[str] | None = None,
+    sort: str = "distance",
+    limit: int = 100,
+    cursor: str | None = None,
+) -> NearbyFeaturePage:
+    """POI/cache target 주변 feature summary를 keyset cursor로 조회한다.
+
+    ADR-012: 반경 술어는 target과 feature의 STORED ``coord_5179`` 컬럼에 직접
+    적용한다. 입력 좌표 변환이나 ``ST_Transform``은 WHERE 술어에 두지 않는다.
+    """
+    if sort not in _NEARBY_SQL_BY_SORT:
+        raise ValueError("sort must be one of distance, name, last_updated_at")
+    if radius_km is not None and radius_km <= 0:
+        raise ValueError("radius_km must be greater than 0")
+    if limit <= 0:
+        raise ValueError("limit must be greater than 0")
+
+    effective_limit = min(limit, 500)
+    rows = (
+        await session.execute(
+            text(_NEARBY_SQL_BY_SORT[sort]),
+            {
+                "target_id": target_id,
+                "radius_km": radius_km,
+                "kinds": _normalized_filter(kinds),
+                "categories": _normalized_filter(categories),
+                "statuses": _normalized_filter(statuses),
+                "providers": _normalized_filter(providers),
+                "limit_plus_one": effective_limit + 1,
+                **_nearby_cursor_params(cursor, sort=sort),
+            },
+        )
+    ).mappings().all()
+    items = tuple(_nearby_row(row) for row in rows[:effective_limit])
+    next_cursor = (
+        _encode_nearby_cursor(items[-1], sort=sort)
+        if len(rows) > effective_limit and items
+        else None
+    )
+    return NearbyFeaturePage(items=items, next_cursor=next_cursor)

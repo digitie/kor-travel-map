@@ -96,6 +96,20 @@ class AsyncKrtourMapClient:
     async def cancel_update_request(request_id: str, *, error_message: str | None = None) -> FeatureUpdateRequest | None: ...
     async def execute_next_feature_update_request(...) -> FeatureUpdateExecutionResult | None: ...
     async def execute_feature_update_request(request_id: str, ...) -> FeatureUpdateExecutionResult | None: ...
+
+    # POI/cache target 주변 feature 조회 (ADR-045 T-207f)
+    async def features_nearby_poi_cache_target(
+        *,
+        target_id: str,
+        radius_km: float | None = None,
+        kinds: Sequence[str] | None = None,
+        categories: Sequence[str] | None = None,
+        statuses: Sequence[str] | None = ("active",),
+        providers: Sequence[str] | None = None,
+        sort: str = "distance",
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> NearbyFeaturePage: ...
 ```
 
 ### 1.3 DTO 표

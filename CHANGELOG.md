@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### 운영 — POI/cache target admin API (2026-06-03)
+
+- **NEW**: `krtour-map-admin`에 `PUT/GET/DELETE /admin/poi-cache-targets`와
+  `GET /features/nearby/by-target`를 추가했다. 외부 앱 POI는
+  `external_system + target_key + 좌표 + radius`로 식별한다.
+- **NEW**: `feature_repo.features_nearby_poi_cache_target`를 추가했다. target의
+  `coord_5179` 기준 `ST_DWithin` 거리 조회, kind/category/status/provider 필터,
+  `distance`/`name`/`last_updated_at` keyset cursor를 지원한다.
+- **TEST**: admin 라우터 unit test와 PostGIS 주변 feature/cursor 통합 테스트를
+  추가하고 OpenAPI export를 갱신했다.
+
 ### 운영 — Feature update admin API (2026-06-03)
 
 - **NEW**: `krtour-map-admin`에 `POST/GET /admin/feature-update-requests`,

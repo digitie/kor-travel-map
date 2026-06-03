@@ -502,6 +502,16 @@ Cache target을 idempotent하게 등록/갱신한다. 같은 key가 같은 norma
 들어오면 upsert, 다른 normalized 좌표로 들어오면 기본 409다. 이동을 의도한 경우
 `on_conflict="move"`를 명시한다.
 
+### `GET /admin/poi-cache-targets`
+
+Cache target 목록을 반환한다. `external_system`, `update_enabled`,
+`include_deleted`, `page_size` 필터를 지원한다.
+
+### `GET /admin/poi-cache-targets/{external_system}/{target_key}`
+
+Cache target 단건을 반환한다. 기본은 active target만 조회하고,
+`include_deleted=true`에서 soft-deleted target도 조회할 수 있다.
+
 ### `DELETE /admin/poi-cache-targets/{external_system}/{target_key}`
 
 외부 POI 삭제를 반영한다. target을 soft delete하고 이후 targeted update에서 제외한다.
@@ -509,7 +519,9 @@ Cache target을 idempotent하게 등록/갱신한다. 같은 key가 같은 norma
 ### `GET /features/nearby/by-target`
 
 `external_system` + `target_key`를 받아 주변 `n` km feature 목록을 반환한다. 목록 응답은
-summary만 포함하고 `feature.detail` JSONB와 raw payload는 포함하지 않는다.
+summary만 포함하고 `feature.detail` JSONB와 raw payload는 포함하지 않는다. filter는
+`radius_km`, `kind`, `category`, `status`, `provider`, `page_size`, `cursor`,
+`sort(distance|name|last_updated_at)`다.
 
 자세한 요청/응답, DB 스키마, provider refresh policy는
 `docs/poi-cache-update-targets.md`.

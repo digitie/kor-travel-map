@@ -31,6 +31,7 @@ from krtour.map_admin.routers import (
     features_router,
     health_router,
     mois_detail_router,
+    poi_cache_targets_router,
     version_router,
 )
 from krtour.map_admin.settings import AdminSettings
@@ -98,6 +99,7 @@ def create_app(settings: AdminSettings | None = None) -> FastAPI:
             application.include_router(mois_detail_router)
 
     application.include_router(feature_update_requests_router)
+    application.include_router(poi_cache_targets_router)
     application.include_router(dagster_router)
 
     return application
