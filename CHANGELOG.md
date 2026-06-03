@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### 운영 — Feature update admin API (2026-06-03)
+
+- **NEW**: `krtour-map-admin`에 `POST/GET /admin/feature-update-requests`,
+  `GET /admin/feature-update-requests/{request_id}`,
+  `POST /admin/feature-update-requests/{request_id}/cancel`,
+  `POST /admin/feature-update-requests/{request_id}/run-now` 라우터를 추가했다.
+- **CHANGED**: `list_update_requests`와 `AsyncKrtourMapClient.list_update_requests`가
+  `scope_type`, `provider`, `dataset_key`, `created_from`, `created_to` 필터를 받는다.
+- **TEST**: admin 라우터 unit test, OpenAPI export 갱신, provider/dataset JSONB 필터
+  PostGIS 통합 테스트를 추가했다.
+
 ### 운영 — Feature update request 실행 본체 (2026-06-03)
 
 - **NEW**: `infra.feature_update_executor`를 추가했다. queued request claim,

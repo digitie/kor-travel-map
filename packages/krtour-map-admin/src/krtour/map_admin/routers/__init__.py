@@ -13,6 +13,9 @@ from __future__ import annotations
 
 from krtour.map_admin.routers.dagster import router as dagster_router
 from krtour.map_admin.routers.etl import router as etl_router
+from krtour.map_admin.routers.feature_update_requests import (
+    router as feature_update_requests_router,
+)
 from krtour.map_admin.routers.features import router as features_router
 from krtour.map_admin.routers.health import router as health_router
 from krtour.map_admin.routers.mois_detail import router as mois_detail_router
@@ -22,6 +25,7 @@ __all__ = [
     "health_router",
     "version_router",
     "etl_router",
+    "feature_update_requests_router",
     "features_router",
     "mois_detail_router",
     "dagster_router",

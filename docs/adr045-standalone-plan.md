@@ -116,9 +116,10 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
 > 정본: `openapi-admin-contract.md` + `debug-ui-admin-workflows.md`. 라우터 패턴은
 > 기존 `routers/features.py`(get_session 의존성) + `mois_detail.py` 참고.
 
-- **T-207a** `/admin/feature-update-requests` 라우터 — POST(생성, dry_run 분기) /
+- **T-207a** ✅ `/admin/feature-update-requests` 라우터 — POST(생성, dry_run 분기) /
   GET(list) / GET `{id}`(상세) / POST `{id}/cancel` / POST `{id}/run-now`.
-  요청/응답은 §5.1. `feature_update_repo` 호출 + Pydantic schema + OpenAPI tag.
+  `feature_update_repo` 호출 + Pydantic schema + OpenAPI tag/export 연결 완료.
+  `run-now`는 T-208e 전까지 기존 payload를 `run_mode='now'` request로 재큐잉한다.
 - **T-207b** `/admin/providers/{provider}/datasets/{dataset_key}/runs` (provider 직접
   실행, §7) — `ops.import_jobs` enqueue.
 - **T-207c** `/admin/feature 검토/병합/override/deactivate` 라우터 —
@@ -229,7 +230,7 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
 5. **Phase 2 T-205c** (`provider_refresh_policies`, `poi_cache_targets`,
    `data_integrity_violations`) — 완료.
 6. **Phase 2 T-206d** — request 실행 본체 — 완료.
-7. **Phase 3 T-207a** — admin update-requests 라우터.
+7. **Phase 3 T-207a** — admin update-requests 라우터 — 완료.
 8. **Phase 3 T-207f** — POI/cache target admin/features API.
 9. **Phase 3 T-207d/e** (ops + features 라우터) — T-207a/f 후.
 10. **Phase 5 T-209a/b** (docker-compose + 기동) — 라우터 동작 후 통합.

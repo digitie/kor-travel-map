@@ -600,13 +600,26 @@ class AsyncKrtourMapClient:
         self,
         *,
         state: str | None = None,
+        scope_type: str | None = None,
+        provider: str | None = None,
+        dataset_key: str | None = None,
+        created_from: datetime | None = None,
+        created_to: datetime | None = None,
         limit: int = 50,
         cursor: str | None = None,
     ) -> FeatureUpdateRequestPage:
         """Feature update request 목록을 keyset cursor로 조회한다."""
         async with self._session_factory() as session:
             return await repo_list_update_requests(
-                session, state=state, limit=limit, cursor=cursor
+                session,
+                state=state,
+                scope_type=scope_type,
+                provider=provider,
+                dataset_key=dataset_key,
+                created_from=created_from,
+                created_to=created_to,
+                limit=limit,
+                cursor=cursor,
             )
 
     async def status_counts(self) -> StatusCounts:

@@ -2,6 +2,27 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-03 (codex) — T-207a feature update admin API
+
+**작업**: ADR-045 Phase 3 T-207a. `krtour-map-admin`에 feature update request 운영
+REST 라우터를 추가해 OpenAPI 기반 생성/조회/취소/재요청 표면을 연결.
+
+- **Router**: `/admin/feature-update-requests` POST(dry-run/actual), GET(list),
+  `/{request_id}` GET, `/{request_id}/cancel`, `/{request_id}/run-now` 구현.
+- **Run-now**: T-208e Dagster sensor 전까지는 기존 request payload를
+  `run_mode='now'` 새 request로 재큐잉한다. provider runner 직접 실행은 API 레이어가
+  맡지 않는다.
+- **kraddr-geo**: `sigungu_by_radius` scope는 `KRTOUR_MAP_KRADDR_GEO_BASE_URL`이 있을
+  때 REST v2 `/v2/regions/within-radius` resolver를 주입한다. 설정 누락은 503으로
+  명확히 반환한다.
+- **List filter**: `state`, `scope_type`, `provider`, `dataset_key`, 생성일 범위,
+  keyset `cursor`/`page_size`를 지원한다.
+- **OpenAPI**: `packages/krtour-map-admin/openapi.json`을 재생성했다.
+- **검증**: admin router unit `8 passed`, admin package 전체 `94 passed`,
+  `tests/integration/test_feature_update_repo.py` 필터 통합 테스트 포함 targeted
+  `17 passed`, ruff/mypy 통과.
+- **다음**: T-207f `/admin/poi-cache-targets` + `/features/nearby/by-target`.
+
 ## 2026-06-03 (codex) — T-206d feature update request 실행 본체
 
 **작업**: ADR-045 독립 프로그램화 후속 T-206d. `ops.feature_update_requests` queued
