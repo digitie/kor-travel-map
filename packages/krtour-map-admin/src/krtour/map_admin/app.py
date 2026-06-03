@@ -27,6 +27,7 @@ from krtour.map_admin import __version__
 from krtour.map_admin.routers import (
     dagster_router,
     etl_router,
+    feature_update_requests_router,
     features_router,
     health_router,
     mois_detail_router,
@@ -96,6 +97,7 @@ def create_app(settings: AdminSettings | None = None) -> FastAPI:
         if settings.debug_routes_enabled:
             application.include_router(mois_detail_router)
 
+    application.include_router(feature_update_requests_router)
     application.include_router(dagster_router)
 
     return application

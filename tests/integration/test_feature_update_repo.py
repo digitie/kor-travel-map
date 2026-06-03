@@ -268,6 +268,44 @@ async def test_list_update_requests_uses_keyset_cursor(
     assert len(queued_page.items) == 3
 
 
+async def test_list_update_requests_filters_by_scope_provider_dataset_and_time(
+    migrated_session: AsyncSession,
+) -> None:
+    target = await enqueue_feature_update_request(
+        migrated_session,
+        scope={"type": "feature_ids", "feature_ids": []},
+        providers=["python-a-api"],
+        dataset_keys=["dataset-a"],
+    )
+    other_provider = await enqueue_feature_update_request(
+        migrated_session,
+        scope={"type": "feature_ids", "feature_ids": []},
+        providers=["python-b-api"],
+        dataset_keys=["dataset-a"],
+    )
+    other_scope = await enqueue_feature_update_request(
+        migrated_session,
+        scope={"type": "bbox", "min_lon": 126, "min_lat": 37, "max_lon": 127, "max_lat": 38},
+        providers=["python-a-api"],
+        dataset_keys=["dataset-b"],
+    )
+    assert isinstance(target, FeatureUpdateRequest)
+    assert isinstance(other_provider, FeatureUpdateRequest)
+    assert isinstance(other_scope, FeatureUpdateRequest)
+
+    page = await list_update_requests(
+        migrated_session,
+        scope_type="feature_ids",
+        provider="python-a-api",
+        dataset_key="dataset-a",
+        created_from=target.created_at,
+        created_to=target.created_at,
+        limit=10,
+    )
+
+    assert [item.request_id for item in page.items] == [target.request_id]
+
+
 async def test_invalid_cursor_raises(migrated_session: AsyncSession) -> None:
     with pytest.raises(ValueError, match="invalid feature update request cursor"):
         await list_update_requests(migrated_session, cursor="not-base64")

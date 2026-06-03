@@ -292,6 +292,23 @@ _LIST_REQUESTS_SQL: Final[str] = f"""
 SELECT {_RETURN_COLUMNS}
 FROM ops.feature_update_requests
 WHERE (CAST(:state AS text) IS NULL OR state = CAST(:state AS text))
+  AND (CAST(:scope_type AS text) IS NULL OR scope_type = CAST(:scope_type AS text))
+  AND (
+    CAST(:provider_filter AS jsonb) IS NULL
+    OR providers @> CAST(:provider_filter AS jsonb)
+  )
+  AND (
+    CAST(:dataset_key_filter AS jsonb) IS NULL
+    OR dataset_keys @> CAST(:dataset_key_filter AS jsonb)
+  )
+  AND (
+    CAST(:created_from AS timestamptz) IS NULL
+    OR created_at >= CAST(:created_from AS timestamptz)
+  )
+  AND (
+    CAST(:created_to AS timestamptz) IS NULL
+    OR created_at <= CAST(:created_to AS timestamptz)
+  )
   AND (
     CAST(:cursor_created_at AS timestamptz) IS NULL
     OR (created_at, request_id) < (
@@ -534,6 +551,11 @@ async def list_update_requests(
     session: AsyncSession,
     *,
     state: str | None = None,
+    scope_type: str | None = None,
+    provider: str | None = None,
+    dataset_key: str | None = None,
+    created_from: datetime | None = None,
+    created_to: datetime | None = None,
     limit: int = 50,
     cursor: str | None = None,
 ) -> FeatureUpdateRequestPage:
@@ -547,6 +569,13 @@ async def list_update_requests(
             text(_LIST_REQUESTS_SQL),
             {
                 "state": state,
+                "scope_type": scope_type,
+                "provider_filter": _json_param([provider]) if provider else None,
+                "dataset_key_filter": (
+                    _json_param([dataset_key]) if dataset_key else None
+                ),
+                "created_from": created_from,
+                "created_to": created_to,
                 "cursor_created_at": cursor_created_at,
                 "cursor_request_id": cursor_request_id,
                 "limit_plus_one": effective_limit + 1,

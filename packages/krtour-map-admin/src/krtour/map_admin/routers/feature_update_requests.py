@@ -1,0 +1,489 @@
+"""``/admin/feature-update-requests`` 운영 라우터 (ADR-045 T-207a).
+
+OpenAPI로 들어온 지역/provider 갱신 요청을 ``ops.feature_update_requests`` 큐에
+저장하고, 진행 상태 조회/취소/재요청을 제공한다. 실제 provider 실행은 Dagster
+sensor/job(T-208e)이 맡는다.
+"""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator, Mapping, Sequence
+from contextlib import asynccontextmanager
+from datetime import datetime
+from time import perf_counter
+from typing import Annotated, Any, Literal
+
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from krtour.map.geocoding import (
+    KraddrGeoRestClient,
+    resolve_sigungu_by_radius,
+)
+from krtour.map.infra.feature_update_repo import (
+    FeatureUpdateRequest,
+    FeatureUpdateRequestPage,
+    FeatureUpdateRequestPreview,
+    cancel_update_request,
+    enqueue_feature_update_request,
+    get_update_request,
+    list_update_requests,
+)
+from krtour.map.infra.scope_repo import SigunguByRadiusResolver
+from krtour.map.settings import KrtourMapSettings
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from krtour.map_admin.db import get_session
+
+__all__ = [
+    "router",
+    "FeatureUpdateRequestCreateRequest",
+    "FeatureUpdateRequestRecord",
+    "FeatureUpdateRequestCreateResponse",
+    "FeatureUpdateRequestListResponse",
+]
+
+
+router = APIRouter(
+    prefix="/admin/feature-update-requests",
+    tags=["admin-update-requests"],
+)
+
+FeatureUpdateState = Literal["queued", "running", "done", "failed", "cancelled"]
+RunMode = Literal["queued", "now"]
+
+
+class FeatureUpdateRequestCreateRequest(BaseModel):
+    """`POST /admin/feature-update-requests` 요청."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    scope: dict[str, Any] = Field(description="feature update scope payload.")
+    providers: list[str] = Field(default_factory=list)
+    dataset_keys: list[str] = Field(default_factory=list)
+    update_policy: dict[str, Any] = Field(default_factory=dict)
+    run_mode: RunMode = "queued"
+    priority: int = Field(default=50, ge=0, le=1000)
+    dry_run: bool = False
+    operator: str | None = None
+    reason: str | None = None
+
+
+class FeatureUpdateRequestRecord(BaseModel):
+    """feature update request 행/preview의 HTTP 표현."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    request_id: str | None = None
+    scope_type: str
+    scope: dict[str, Any]
+    providers: list[str]
+    dataset_keys: list[str]
+    update_policy: dict[str, Any]
+    run_mode: RunMode
+    priority: int
+    state: str
+    dry_run: bool
+    matched_scope: dict[str, Any]
+    job_id: str | None = None
+    dagster_run_id: str | None = None
+    operator: str | None = None
+    reason: str | None = None
+    error_message: str | None = None
+    created_at: datetime | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    updated_at: datetime | None = None
+    status_url: str | None = None
+
+
+class FeatureUpdateRequestMeta(BaseModel):
+    """쓰기 요청의 간단한 메타데이터."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    duration_ms: int
+
+
+class FeatureUpdateRequestCreateResponse(BaseModel):
+    """생성/취소/run-now 응답."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: FeatureUpdateRequestRecord
+    meta: FeatureUpdateRequestMeta
+
+
+class FeatureUpdateRequestListResponse(BaseModel):
+    """`GET /admin/feature-update-requests` 응답."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    count: int
+    items: list[FeatureUpdateRequestRecord]
+    next_cursor: str | None = None
+
+
+class FeatureUpdateRequestCancelRequest(BaseModel):
+    """취소 요청 body."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    error_message: str | None = Field(
+        default=None,
+        description="취소 사유. 미지정 시 기본 메시지를 저장한다.",
+    )
+
+
+class FeatureUpdateRequestRunNowRequest(BaseModel):
+    """기존 request payload를 run_mode=now로 재큐잉할 때의 override."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    priority: int | None = Field(default=None, ge=0, le=1000)
+    operator: str | None = None
+    reason: str | None = None
+
+
+def _record_from_request(row: FeatureUpdateRequest) -> FeatureUpdateRequestRecord:
+    return FeatureUpdateRequestRecord(
+        request_id=row.request_id,
+        scope_type=row.scope_type,
+        scope=row.scope,
+        providers=list(row.providers),
+        dataset_keys=list(row.dataset_keys),
+        update_policy=row.update_policy,
+        run_mode=row.run_mode,
+        priority=row.priority,
+        state=row.state,
+        dry_run=row.dry_run,
+        matched_scope=row.matched_scope,
+        job_id=row.job_id,
+        dagster_run_id=row.dagster_run_id,
+        operator=row.operator,
+        reason=row.reason,
+        error_message=row.error_message,
+        created_at=row.created_at,
+        started_at=row.started_at,
+        finished_at=row.finished_at,
+        updated_at=row.updated_at,
+        status_url=f"/admin/feature-update-requests/{row.request_id}",
+    )
+
+
+def _record_from_preview(
+    preview: FeatureUpdateRequestPreview,
+) -> FeatureUpdateRequestRecord:
+    return FeatureUpdateRequestRecord(
+        scope_type=preview.scope_type,
+        scope=preview.scope,
+        providers=list(preview.providers),
+        dataset_keys=list(preview.dataset_keys),
+        update_policy=preview.update_policy,
+        run_mode=preview.run_mode,
+        priority=preview.priority,
+        state="dry_run",
+        dry_run=True,
+        matched_scope=preview.matched_scope,
+    )
+
+
+def _create_response(
+    data: FeatureUpdateRequest | FeatureUpdateRequestPreview,
+    *,
+    started_at: float,
+) -> FeatureUpdateRequestCreateResponse:
+    record = (
+        _record_from_request(data)
+        if isinstance(data, FeatureUpdateRequest)
+        else _record_from_preview(data)
+    )
+    return FeatureUpdateRequestCreateResponse(
+        data=record,
+        meta=FeatureUpdateRequestMeta(
+            duration_ms=max(0, int((perf_counter() - started_at) * 1000))
+        ),
+    )
+
+
+def _scope_explicitly_needs_sigungu(scope: Mapping[str, Any]) -> bool:
+    if scope.get("type") == "sigungu_by_radius":
+        return True
+    return (
+        scope.get("type") == "cache_target_keys"
+        and scope.get("scope_mode") == "sigungu_by_radius"
+    )
+
+
+@asynccontextmanager
+async def _sigungu_resolver_for_scope(
+    scope: Mapping[str, Any],
+) -> AsyncIterator[SigunguByRadiusResolver | None]:
+    settings = KrtourMapSettings()
+    base_url = settings.kraddr_geo_base_url
+    if base_url is None:
+        if _scope_explicitly_needs_sigungu(scope):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=(
+                    "sigungu_by_radius scope에는 KRTOUR_MAP_KRADDR_GEO_BASE_URL "
+                    "설정이 필요합니다."
+                ),
+            )
+        yield None
+        return
+
+    async with httpx.AsyncClient(base_url=base_url) as http:
+        client = KraddrGeoRestClient(http)
+
+        async def _resolver(
+            *,
+            lon: float,
+            lat: float,
+            radius_km: float,
+        ) -> tuple[str, ...]:
+            return await resolve_sigungu_by_radius(
+                client, lon=lon, lat=lat, radius_km=radius_km
+            )
+
+        yield _resolver
+
+
+def _handle_enqueue_error(exc: Exception) -> HTTPException:
+    message = str(exc)
+    if "sigungu_resolver" in message:
+        return HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "sigungu_by_radius scope에는 KRTOUR_MAP_KRADDR_GEO_BASE_URL "
+                "설정이 필요합니다."
+            ),
+        )
+    if isinstance(exc, ValueError):
+        return HTTPException(status_code=422, detail=message)
+    if isinstance(exc, httpx.HTTPError):
+        return HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"kraddr-geo 호출 실패: {message}",
+        )
+    return HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail=message,
+    )
+
+
+async def _enqueue(
+    session: AsyncSession,
+    *,
+    scope: Mapping[str, Any],
+    providers: Sequence[str],
+    dataset_keys: Sequence[str],
+    update_policy: Mapping[str, Any],
+    run_mode: str,
+    priority: int,
+    dry_run: bool,
+    operator: str | None,
+    reason: str | None,
+) -> FeatureUpdateRequest | FeatureUpdateRequestPreview:
+    try:
+        async with _sigungu_resolver_for_scope(scope) as sigungu_resolver:
+            return await enqueue_feature_update_request(
+                session,
+                scope=scope,
+                providers=providers,
+                dataset_keys=dataset_keys,
+                update_policy=update_policy,
+                run_mode=run_mode,
+                priority=priority,
+                dry_run=dry_run,
+                operator=operator,
+                reason=reason,
+                sigungu_resolver=sigungu_resolver,
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _handle_enqueue_error(exc) from exc
+
+
+@router.post(
+    "",
+    response_model=FeatureUpdateRequestCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="feature update request 생성 또는 dry-run",
+)
+async def create_feature_update_request(
+    body: FeatureUpdateRequestCreateRequest,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> FeatureUpdateRequestCreateResponse:
+    started_at = perf_counter()
+    if body.dry_run:
+        result = await _enqueue(
+            session,
+            scope=body.scope,
+            providers=body.providers,
+            dataset_keys=body.dataset_keys,
+            update_policy=body.update_policy,
+            run_mode=body.run_mode,
+            priority=body.priority,
+            dry_run=True,
+            operator=body.operator,
+            reason=body.reason,
+        )
+        return _create_response(result, started_at=started_at)
+
+    async with session.begin():
+        result = await _enqueue(
+            session,
+            scope=body.scope,
+            providers=body.providers,
+            dataset_keys=body.dataset_keys,
+            update_policy=body.update_policy,
+            run_mode=body.run_mode,
+            priority=body.priority,
+            dry_run=False,
+            operator=body.operator,
+            reason=body.reason,
+        )
+    return _create_response(result, started_at=started_at)
+
+
+@router.get(
+    "",
+    response_model=FeatureUpdateRequestListResponse,
+    summary="feature update request 목록",
+)
+async def list_feature_update_requests(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    state: Annotated[FeatureUpdateState | None, Query()] = None,
+    scope_type: Annotated[str | None, Query()] = None,
+    provider: Annotated[str | None, Query()] = None,
+    dataset_key: Annotated[str | None, Query()] = None,
+    created_from: Annotated[datetime | None, Query()] = None,
+    created_to: Annotated[datetime | None, Query()] = None,
+    page_size: Annotated[int, Query(ge=1, le=200)] = 50,
+    cursor: Annotated[str | None, Query()] = None,
+) -> FeatureUpdateRequestListResponse:
+    try:
+        page: FeatureUpdateRequestPage = await list_update_requests(
+            session,
+            state=state,
+            scope_type=scope_type,
+            provider=provider,
+            dataset_key=dataset_key,
+            created_from=created_from,
+            created_to=created_to,
+            limit=page_size,
+            cursor=cursor,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return FeatureUpdateRequestListResponse(
+        count=len(page.items),
+        items=[_record_from_request(item) for item in page.items],
+        next_cursor=page.next_cursor,
+    )
+
+
+@router.get(
+    "/{request_id}",
+    response_model=FeatureUpdateRequestRecord,
+    summary="feature update request 단건 조회",
+    responses={404: {"description": "request_id 없음"}},
+)
+async def get_feature_update_request(
+    request_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> FeatureUpdateRequestRecord:
+    row = await get_update_request(session, request_id)
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"feature update request 없음: {request_id!r}",
+        )
+    return _record_from_request(row)
+
+
+@router.post(
+    "/{request_id}/cancel",
+    response_model=FeatureUpdateRequestCreateResponse,
+    summary="feature update request 취소",
+    responses={
+        404: {"description": "request_id 없음"},
+        409: {"description": "이미 terminal 상태라 취소 불가"},
+    },
+)
+async def cancel_feature_update_request(
+    request_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    body: FeatureUpdateRequestCancelRequest | None = None,
+) -> FeatureUpdateRequestCreateResponse:
+    started_at = perf_counter()
+    error_message = (
+        body.error_message
+        if body is not None and body.error_message
+        else "cancelled by admin API"
+    )
+    async with session.begin():
+        cancelled = await cancel_update_request(
+            session, request_id, error_message=error_message
+        )
+        if cancelled is None:
+            existing = await get_update_request(session, request_id)
+            if existing is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"feature update request 없음: {request_id!r}",
+                )
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"취소할 수 없는 상태: {existing.state}",
+            )
+    return _create_response(cancelled, started_at=started_at)
+
+
+@router.post(
+    "/{request_id}/run-now",
+    response_model=FeatureUpdateRequestCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="기존 request payload를 run_mode=now로 재큐잉",
+    responses={
+        404: {"description": "request_id 없음"},
+        409: {"description": "이미 running 상태"},
+    },
+)
+async def run_feature_update_request_now(
+    request_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    body: FeatureUpdateRequestRunNowRequest | None = None,
+) -> FeatureUpdateRequestCreateResponse:
+    started_at = perf_counter()
+    async with session.begin():
+        existing = await get_update_request(session, request_id)
+        if existing is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"feature update request 없음: {request_id!r}",
+            )
+        if existing.state == "running":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="이미 running 상태인 request는 run-now 재요청할 수 없습니다.",
+            )
+        result = await _enqueue(
+            session,
+            scope=existing.scope,
+            providers=existing.providers,
+            dataset_keys=existing.dataset_keys,
+            update_policy=existing.update_policy,
+            run_mode="now",
+            priority=body.priority if body and body.priority is not None else existing.priority,
+            dry_run=False,
+            operator=body.operator if body and body.operator else existing.operator,
+            reason=(
+                body.reason
+                if body and body.reason
+                else f"run-now from {existing.request_id}"
+            ),
+        )
+    return _create_response(result, started_at=started_at)

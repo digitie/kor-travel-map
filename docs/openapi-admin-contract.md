@@ -429,8 +429,9 @@ CREATE INDEX idx_feature_update_job
 dry-run preview, request/import job enqueue, priority claim, start/finish/cancel,
 단건 조회, keyset 목록 조회를 구현했다(T-206b). `AsyncKrtourMapClient`는
 enqueue/get/list/cancel 메서드와 transaction 경계를 노출한다(T-206c). T-206d의
-`infra.feature_update_executor`는 runner 주입형 request 실행 본체를 제공한다. Admin
-HTTP router와 OpenAPI schema export 연결은 T-207a에서 별도 구현한다.
+`infra.feature_update_executor`는 runner 주입형 request 실행 본체를 제공한다. T-207a는
+admin HTTP router와 OpenAPI schema export를 연결했다. `run-now`는 T-208e sensor 전까지
+기존 payload를 `run_mode='now'` request로 재큐잉한다.
 
 ## 7. Provider 실행 API와의 관계
 

@@ -107,7 +107,7 @@ shadcn/ui + `@krtour/map-marker-react` (ADR-029). 자세한 사양:
 - `/features/{id}`, `/features/in-bounds`, `/features/nearby`
 - `/admin/features`, `/admin/features/{id}/deactivate`
 - `/admin/providers`, `/admin/providers/{provider}/datasets/{dataset_key}/runs`
-- `/admin/feature-update-requests` (좌표/반경/시군구/provider 기준 업데이트 즉시 실행/큐잉)
+- `/admin/feature-update-requests` (좌표/반경/시군구/provider 기준 업데이트 생성/조회/취소/run-now 재큐잉)
 - `/admin/poi-cache-targets`, `/features/nearby/by-target` (외부 POI key 기준 주변 feature 캐시)
 - `/admin/provider-refresh-policies` (provider별 update 주기/rate limit 정책)
 - `/features/{id}/weather`, `/features/{id}/sources`, `/features/{id}/files`

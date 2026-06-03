@@ -657,6 +657,413 @@
         "title": "FeatureSummary",
         "type": "object"
       },
+      "FeatureUpdateRequestCancelRequest": {
+        "additionalProperties": false,
+        "description": "취소 요청 body.",
+        "properties": {
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "취소 사유. 미지정 시 기본 메시지를 저장한다.",
+            "title": "Error Message"
+          }
+        },
+        "title": "FeatureUpdateRequestCancelRequest",
+        "type": "object"
+      },
+      "FeatureUpdateRequestCreateRequest": {
+        "additionalProperties": false,
+        "description": "`POST /admin/feature-update-requests` 요청.",
+        "properties": {
+          "dataset_keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Dataset Keys",
+            "type": "array"
+          },
+          "dry_run": {
+            "default": false,
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "operator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operator"
+          },
+          "priority": {
+            "default": 50,
+            "maximum": 1000.0,
+            "minimum": 0.0,
+            "title": "Priority",
+            "type": "integer"
+          },
+          "providers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Providers",
+            "type": "array"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "run_mode": {
+            "default": "queued",
+            "enum": [
+              "queued",
+              "now"
+            ],
+            "title": "Run Mode",
+            "type": "string"
+          },
+          "scope": {
+            "additionalProperties": true,
+            "description": "feature update scope payload.",
+            "title": "Scope",
+            "type": "object"
+          },
+          "update_policy": {
+            "additionalProperties": true,
+            "title": "Update Policy",
+            "type": "object"
+          }
+        },
+        "required": [
+          "scope"
+        ],
+        "title": "FeatureUpdateRequestCreateRequest",
+        "type": "object"
+      },
+      "FeatureUpdateRequestCreateResponse": {
+        "additionalProperties": false,
+        "description": "생성/취소/run-now 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/FeatureUpdateRequestRecord"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/FeatureUpdateRequestMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "FeatureUpdateRequestCreateResponse",
+        "type": "object"
+      },
+      "FeatureUpdateRequestListResponse": {
+        "additionalProperties": false,
+        "description": "`GET /admin/feature-update-requests` 응답.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FeatureUpdateRequestRecord"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "count",
+          "items"
+        ],
+        "title": "FeatureUpdateRequestListResponse",
+        "type": "object"
+      },
+      "FeatureUpdateRequestMeta": {
+        "additionalProperties": false,
+        "description": "쓰기 요청의 간단한 메타데이터.",
+        "properties": {
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "duration_ms"
+        ],
+        "title": "FeatureUpdateRequestMeta",
+        "type": "object"
+      },
+      "FeatureUpdateRequestRecord": {
+        "additionalProperties": false,
+        "description": "feature update request 행/preview의 HTTP 표현.",
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "dagster_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dagster Run Id"
+          },
+          "dataset_keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Dataset Keys",
+            "type": "array"
+          },
+          "dry_run": {
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "matched_scope": {
+            "additionalProperties": true,
+            "title": "Matched Scope",
+            "type": "object"
+          },
+          "operator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operator"
+          },
+          "priority": {
+            "title": "Priority",
+            "type": "integer"
+          },
+          "providers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Providers",
+            "type": "array"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
+          },
+          "run_mode": {
+            "enum": [
+              "queued",
+              "now"
+            ],
+            "title": "Run Mode",
+            "type": "string"
+          },
+          "scope": {
+            "additionalProperties": true,
+            "title": "Scope",
+            "type": "object"
+          },
+          "scope_type": {
+            "title": "Scope Type",
+            "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "status_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Url"
+          },
+          "update_policy": {
+            "additionalProperties": true,
+            "title": "Update Policy",
+            "type": "object"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "scope_type",
+          "scope",
+          "providers",
+          "dataset_keys",
+          "update_policy",
+          "run_mode",
+          "priority",
+          "state",
+          "dry_run",
+          "matched_scope"
+        ],
+        "title": "FeatureUpdateRequestRecord",
+        "type": "object"
+      },
+      "FeatureUpdateRequestRunNowRequest": {
+        "additionalProperties": false,
+        "description": "기존 request payload를 run_mode=now로 재큐잉할 때의 override.",
+        "properties": {
+          "operator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operator"
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "maximum": 1000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "title": "FeatureUpdateRequestRunNowRequest",
+        "type": "object"
+      },
       "FeaturesInBboxResponse": {
         "additionalProperties": false,
         "description": "``GET /features`` 응답 — bbox 안 feature 목록.",
@@ -963,6 +1370,386 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/admin/feature-update-requests": {
+      "get": {
+        "operationId": "list_feature_update_requests_admin_feature_update_requests_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "queued",
+                    "running",
+                    "done",
+                    "failed",
+                    "cancelled"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scope Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Provider"
+            }
+          },
+          {
+            "in": "query",
+            "name": "dataset_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dataset Key"
+            }
+          },
+          {
+            "in": "query",
+            "name": "created_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Created From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "created_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Created To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureUpdateRequestListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "feature update request 목록",
+        "tags": [
+          "admin-update-requests"
+        ]
+      },
+      "post": {
+        "operationId": "create_feature_update_request_admin_feature_update_requests_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeatureUpdateRequestCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureUpdateRequestCreateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "feature update request 생성 또는 dry-run",
+        "tags": [
+          "admin-update-requests"
+        ]
+      }
+    },
+    "/admin/feature-update-requests/{request_id}": {
+      "get": {
+        "operationId": "get_feature_update_request_admin_feature_update_requests__request_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureUpdateRequestRecord"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "request_id 없음"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "feature update request 단건 조회",
+        "tags": [
+          "admin-update-requests"
+        ]
+      }
+    },
+    "/admin/feature-update-requests/{request_id}/cancel": {
+      "post": {
+        "operationId": "cancel_feature_update_request_admin_feature_update_requests__request_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/FeatureUpdateRequestCancelRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureUpdateRequestCreateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "request_id 없음"
+          },
+          "409": {
+            "description": "이미 terminal 상태라 취소 불가"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "feature update request 취소",
+        "tags": [
+          "admin-update-requests"
+        ]
+      }
+    },
+    "/admin/feature-update-requests/{request_id}/run-now": {
+      "post": {
+        "operationId": "run_feature_update_request_now_admin_feature_update_requests__request_id__run_now_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/FeatureUpdateRequestRunNowRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureUpdateRequestCreateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "request_id 없음"
+          },
+          "409": {
+            "description": "이미 running 상태"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "기존 request payload를 run_mode=now로 재큐잉",
+        "tags": [
+          "admin-update-requests"
+        ]
+      }
+    },
     "/debug/etl/providers": {
       "get": {
         "description": "fixture 변환이 등록된 provider/dataset 매트릭스. 추가 변환 함수가 본 lib에 들어오면 `etl_fixtures.FIXTURE_REGISTRY`에 1행 등록 → 본 응답에 자동 반영.",
