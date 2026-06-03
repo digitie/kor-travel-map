@@ -1288,9 +1288,106 @@
         "title": "EtlPreviewResponse",
         "type": "object"
       },
+      "FeatureBatchData": {
+        "additionalProperties": false,
+        "description": "TripMate batch 상세 data payload.",
+        "properties": {
+          "items": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/FeatureDetailResponse"
+            },
+            "title": "Items",
+            "type": "object"
+          },
+          "missing": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "missing"
+        ],
+        "title": "FeatureBatchData",
+        "type": "object"
+      },
+      "FeatureBatchRequest": {
+        "additionalProperties": false,
+        "description": "TripMate batch 상세 조회 요청.",
+        "properties": {
+          "feature_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Feature Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "feature_ids"
+        ],
+        "title": "FeatureBatchRequest",
+        "type": "object"
+      },
+      "FeatureBatchResponse": {
+        "additionalProperties": false,
+        "description": "``POST /tripmate/features/batch`` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/FeatureBatchData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/FeatureDetailMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "FeatureBatchResponse",
+        "type": "object"
+      },
+      "FeatureDetailEnvelopeResponse": {
+        "additionalProperties": false,
+        "description": "``GET /features/{feature_id}`` public envelope 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/FeatureDetailResponse"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/FeatureDetailMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "FeatureDetailEnvelopeResponse",
+        "type": "object"
+      },
+      "FeatureDetailMeta": {
+        "additionalProperties": false,
+        "description": "feature 상세 meta.",
+        "properties": {
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "duration_ms"
+        ],
+        "title": "FeatureDetailMeta",
+        "type": "object"
+      },
       "FeatureDetailResponse": {
         "additionalProperties": false,
-        "description": "``GET /features/{feature_id}`` 응답 — 단건 상세 (raw row 기반).",
+        "description": "feature 단건 상세 data payload.",
         "properties": {
           "address": {
             "additionalProperties": true,
@@ -1433,6 +1530,11 @@
             "title": "Status",
             "type": "string"
           },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
           "urls": {
             "additionalProperties": true,
             "title": "Urls",
@@ -1447,9 +1549,83 @@
           "address",
           "detail",
           "urls",
-          "status"
+          "status",
+          "updated_at"
         ],
         "title": "FeatureDetailResponse",
+        "type": "object"
+      },
+      "FeatureListMeta": {
+        "additionalProperties": false,
+        "description": "public feature 목록 meta.",
+        "properties": {
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "duration_ms"
+        ],
+        "title": "FeatureListMeta",
+        "type": "object"
+      },
+      "FeatureSearchData": {
+        "additionalProperties": false,
+        "description": "사용자 feature 검색 data payload.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FeatureSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "total_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Count"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "FeatureSearchData",
+        "type": "object"
+      },
+      "FeatureSearchResponse": {
+        "additionalProperties": false,
+        "description": "``GET /features/search`` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/FeatureSearchData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/FeatureListMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "FeatureSearchResponse",
         "type": "object"
       },
       "FeatureSummary": {
@@ -1963,6 +2139,24 @@
           "items"
         ],
         "title": "FeaturesInBboxResponse",
+        "type": "object"
+      },
+      "FeaturesInBoundsResponse": {
+        "additionalProperties": false,
+        "description": "``GET /features/in-bounds`` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PublicFeatureListData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/FeatureListMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "FeaturesInBoundsResponse",
         "type": "object"
       },
       "FeaturesNearbyByTargetData": {
@@ -3312,6 +3506,40 @@
           "providers"
         ],
         "title": "ProvidersResponse",
+        "type": "object"
+      },
+      "PublicFeatureListData": {
+        "additionalProperties": false,
+        "description": "public feature 목록 data payload.",
+        "properties": {
+          "cluster_unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cluster Unit"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FeatureSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "items"
+        ],
+        "title": "PublicFeatureListData",
         "type": "object"
       },
       "ValidationError": {
@@ -5027,6 +5255,27 @@
             }
           },
           {
+            "description": "category code 필터 (반복 가능). 미지정 시 전체.",
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "category code 필터 (반복 가능). 미지정 시 전체.",
+              "title": "Category"
+            }
+          },
+          {
             "description": "최대 반환 수.",
             "in": "query",
             "name": "limit",
@@ -5064,6 +5313,155 @@
           }
         },
         "summary": "bbox 안 feature 목록 (지도 뷰포트)",
+        "tags": [
+          "features"
+        ]
+      }
+    },
+    "/features/in-bounds": {
+      "get": {
+        "operationId": "list_public_features_in_bounds_features_in_bounds_get",
+        "parameters": [
+          {
+            "description": "bbox 최소 경도 (WGS84).",
+            "in": "query",
+            "name": "min_lon",
+            "required": true,
+            "schema": {
+              "description": "bbox 최소 경도 (WGS84).",
+              "title": "Min Lon",
+              "type": "number"
+            }
+          },
+          {
+            "description": "bbox 최소 위도.",
+            "in": "query",
+            "name": "min_lat",
+            "required": true,
+            "schema": {
+              "description": "bbox 최소 위도.",
+              "title": "Min Lat",
+              "type": "number"
+            }
+          },
+          {
+            "description": "bbox 최대 경도.",
+            "in": "query",
+            "name": "max_lon",
+            "required": true,
+            "schema": {
+              "description": "bbox 최대 경도.",
+              "title": "Max Lon",
+              "type": "number"
+            }
+          },
+          {
+            "description": "bbox 최대 위도.",
+            "in": "query",
+            "name": "max_lat",
+            "required": true,
+            "schema": {
+              "description": "bbox 최대 위도.",
+              "title": "Max Lat",
+              "type": "number"
+            }
+          },
+          {
+            "description": "feature kind 반복 필터.",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "feature kind 반복 필터.",
+              "title": "Kind"
+            }
+          },
+          {
+            "description": "category code 반복 필터.",
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "category code 반복 필터.",
+              "title": "Category"
+            }
+          },
+          {
+            "in": "query",
+            "name": "zoom",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 24,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Zoom"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 1000,
+              "maximum": 5000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeaturesInBoundsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "bbox 안 feature 목록 (TripMate/public envelope)",
         "tags": [
           "features"
         ]
@@ -5267,6 +5665,138 @@
         ]
       }
     },
+    "/features/search": {
+      "get": {
+        "operationId": "search_public_features_features_search_get",
+        "parameters": [
+          {
+            "description": "name pg_trgm 검색어.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "name pg_trgm 검색어.",
+              "title": "Q"
+            }
+          },
+          {
+            "description": "feature kind 반복 필터.",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "feature kind 반복 필터.",
+              "title": "Kind"
+            }
+          },
+          {
+            "description": "category code 반복 필터.",
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "category code 반복 필터.",
+              "title": "Category"
+            }
+          },
+          {
+            "description": "min_lon,min_lat,max_lon,max_lat CSV.",
+            "in": "query",
+            "name": "bbox",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "min_lon,min_lat,max_lon,max_lat CSV.",
+              "title": "Bbox"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureSearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "검색 범위 또는 cursor 오류"
+          }
+        },
+        "summary": "feature 검색 (이름 trgm + bbox)",
+        "tags": [
+          "features"
+        ]
+      }
+    },
     "/features/{feature_id}": {
       "get": {
         "operationId": "get_feature_features__feature_id__get",
@@ -5286,7 +5816,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FeatureDetailResponse"
+                  "$ref": "#/components/schemas/FeatureDetailEnvelopeResponse"
                 }
               }
             },
@@ -5776,6 +6306,40 @@
         "summary": "Get Ops Metrics",
         "tags": [
           "ops"
+        ]
+      }
+    },
+    "/tripmate/features/batch": {
+      "post": {
+        "operationId": "get_tripmate_features_batch_tripmate_features_batch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeatureBatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureBatchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "feature_ids 1~200개 필요"
+          }
+        },
+        "summary": "TripMate feature 상세 batch 조회",
+        "tags": [
+          "tripmate"
         ]
       }
     }

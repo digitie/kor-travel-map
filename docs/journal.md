@@ -2,6 +2,30 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-03 (codex) — T-207e TripMate/public feature read API
+
+**작업**: ADR-045 Phase 3 T-207e. TripMate와 사용자-facing 지도/상세/검색이 사용할
+public feature read API를 admin OpenAPI에 연결.
+
+- **In-bounds**: `GET /features/in-bounds` 추가. 기존 `GET /features` bbox raw 응답은
+  admin frontend 호환용으로 유지하고, 새 endpoint는 `{data, meta}` envelope와
+  `category` 반복 필터를 제공한다.
+- **Detail**: `GET /features/{feature_id}`를 `{data, meta.duration_ms}` envelope로
+  전환하고 `updated_at`을 포함했다. admin frontend 상세 fetch는 `body.data`를 읽도록
+  갱신했다.
+- **Batch**: `POST /tripmate/features/batch` 추가. `feature_ids` 1~200개를 받아
+  soft-deleted feature를 제외한 상세 dict와 `missing` 목록을 반환한다.
+- **Search**: `GET /features/search` 추가. `q` 또는 `bbox`를 필수 scope로 받고,
+  `q`는 `pg_trgm` `%` 연산자와 transaction-local threshold를 사용한다. bbox 술어는
+  `coord && ST_MakeEnvelope`만 사용한다.
+- **Repo/OpenAPI**: `feature_repo.get_feature_rows_by_ids`,
+  `feature_repo.search_features`를 추가하고 `packages/krtour-map-admin/openapi.json`을
+  재생성했다.
+- **검증**: feature router + repo unit `22 passed`, PostGIS feature repo 통합
+  `7 passed`, 통합 targeted `29 passed`, ruff, mypy targeted, OpenAPI `--check`,
+  frontend ESLint/type-check 통과.
+- **다음**: T-207g admin/user OpenAPI 이원화와 drift gate 갱신.
+
 ## 2026-06-03 (codex) — T-207d ops consistency/jobs/metrics API
 
 **작업**: ADR-045 Phase 3 T-207d. 운영 화면과 admin UI polish가 공통으로 사용할

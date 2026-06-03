@@ -5,6 +5,22 @@
 
 ## [Unreleased]
 
+### 운영 — TripMate/public feature read API (2026-06-03)
+
+- **NEW**: `krtour-map-admin`에 `GET /features/in-bounds`,
+  `GET /features/search`, `POST /tripmate/features/batch`를 추가했다.
+- **CHANGED**: `GET /features/{feature_id}`는 public envelope
+  `{data, meta.duration_ms}` 응답으로 전환하고 `updated_at`을 포함한다. 기존
+  admin frontend 상세 호출은 envelope를 풀어 읽도록 갱신했다.
+- **CHANGED**: `feature_repo.features_in_bbox`에 category filter를 추가하고,
+  `get_feature_rows_by_ids`, `search_features`를 추가했다. 검색은 `pg_trgm`
+  `%` 연산자와 transaction-local similarity threshold를 사용한다.
+- **CHANGED**: `packages/krtour-map-admin/openapi.json`을 T-207e endpoint 기준으로
+  갱신했다.
+- **TEST**: `/features`/`/tripmate` 라우터 unit test, feature repo cursor/validation
+  unit test, PostGIS batch/search/bbox 통합 테스트, frontend lint/type-check를
+  추가·갱신했다.
+
 ### 운영 — `/ops/*` consistency/jobs/metrics API (2026-06-03)
 
 - **NEW**: `krtour-map-admin`에 `GET /ops/metrics`, `GET /ops/import-jobs`,

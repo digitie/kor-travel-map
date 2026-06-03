@@ -31,11 +31,17 @@ def client() -> TestClient:
 def test_features_routes_mounted_in_openapi(client: TestClient) -> None:
     spec = client.get("/openapi.json").json()
     assert "/features" in spec["paths"]
+    assert "/features/in-bounds" in spec["paths"]
+    assert "/features/search" in spec["paths"]
     assert "/features/{feature_id}" in spec["paths"]
+    assert "/tripmate/features/batch" in spec["paths"]
     schemas = spec["components"]["schemas"]
     assert "FeatureSummary" in schemas
     assert "FeaturesInBboxResponse" in schemas
     assert "FeatureDetailResponse" in schemas
+    assert "FeatureDetailEnvelopeResponse" in schemas
+    assert "FeatureBatchResponse" in schemas
+    assert "FeatureSearchResponse" in schemas
 
 
 @pytest.mark.unit
@@ -48,6 +54,7 @@ def test_features_routes_disabled_unmounts() -> None:
     })
     assert r.status_code == 404
     assert c.get("/features/x").status_code == 404
+    assert c.post("/tripmate/features/batch", json={"feature_ids": ["x"]}).status_code == 404
 
 
 @pytest.mark.unit
@@ -141,6 +148,46 @@ def test_list_features_maps_bbox_rows(
 
 
 @pytest.mark.unit
+def test_list_public_features_in_bounds_uses_envelope(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from krtour.map_admin.db import get_session
+    from krtour.map_admin.routers import features as features_mod
+
+    rows = [
+        {
+            "feature_id": "f1", "kind": "place", "name": "장소", "category": "01010100",
+            "lon": 126.97, "lat": 37.56, "marker_icon": "star", "marker_color": "P-03",
+            "status": "active",
+        }
+    ]
+
+    async def _bbox(_session: Any, **_kw: Any) -> list[dict[str, Any]]:
+        assert _kw["categories"] == ["01010100"]
+        return rows
+
+    monkeypatch.setattr(features_mod.feature_repo, "features_in_bbox", _bbox)
+
+    async def _fake_session() -> AsyncIterator[Any]:
+        yield object()
+
+    client.app.dependency_overrides[get_session] = _fake_session
+    try:
+        r = client.get("/features/in-bounds", params={
+            "min_lon": 126, "min_lat": 37, "max_lon": 127, "max_lat": 38,
+            "category": ["01010100"],
+        })
+        assert r.status_code == 200
+        body = r.json()
+        assert body["data"]["count"] == 1
+        assert body["data"]["items"][0]["feature_id"] == "f1"
+        assert body["data"]["cluster_unit"] is None
+        assert "duration_ms" in body["meta"]
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+@pytest.mark.unit
 def test_get_feature_detail_maps_row(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -172,10 +219,132 @@ def test_get_feature_detail_maps_row(
         r = client.get("/features/f1")
         assert r.status_code == 200
         body = r.json()
-        assert body["kind"] == "event"
-        assert body["coord_5179_srid"] == 5179
-        assert body["detail"] == {"event_kind": "festival"}
+        assert body["data"]["kind"] == "event"
+        assert body["data"]["coord_5179_srid"] == 5179
+        assert body["data"]["detail"] == {"event_kind": "festival"}
+        assert body["data"]["updated_at"] == "2026-05-29T00:00:00+09:00"
+        assert "duration_ms" in body["meta"]
         # 응답 schema는 created_at 등 raw 전용 필드를 노출하지 않는다.
-        assert "created_at" not in body
+        assert "created_at" not in body["data"]
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+@pytest.mark.unit
+def test_tripmate_batch_returns_items_and_missing(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from krtour.map_admin.db import get_session
+    from krtour.map_admin.routers import features as features_mod
+
+    row = {
+        "feature_id": "f1", "kind": "event", "name": "축제", "category": "01000000",
+        "lon": 126.92, "lat": 37.52, "coord_5179_srid": 5179,
+        "address": {"road": "서울"}, "detail": {"event_kind": "festival"},
+        "urls": {}, "raw_refs": [],
+        "legal_dong_code": None, "sido_code": "11", "sigungu_code": "11560",
+        "marker_icon": "star", "marker_color": "P-11", "status": "active",
+        "parent_feature_id": None, "sibling_group_id": None,
+        "created_at": "2026-05-29T00:00:00+09:00",
+        "updated_at": "2026-05-29T00:00:00+09:00", "deleted_at": None,
+    }
+
+    async def _get_rows(_session: Any, feature_ids: list[str]) -> dict[str, dict[str, Any]]:
+        assert feature_ids == ["f1", "missing"]
+        return {"f1": row}
+
+    monkeypatch.setattr(features_mod.feature_repo, "get_feature_rows_by_ids", _get_rows)
+
+    async def _fake_session() -> AsyncIterator[Any]:
+        yield object()
+
+    client.app.dependency_overrides[get_session] = _fake_session
+    try:
+        r = client.post(
+            "/tripmate/features/batch",
+            json={"feature_ids": ["f1", "missing", "f1"]},
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["data"]["items"]["f1"]["name"] == "축제"
+        assert body["data"]["missing"] == ["missing"]
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+@pytest.mark.unit
+def test_search_features_maps_page_and_requires_scope(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from krtour.map.infra.feature_repo import FeatureSearchPage, FeatureSearchRow
+
+    from krtour.map_admin.db import get_session
+    from krtour.map_admin.routers import features as features_mod
+
+    async def _search(_session: Any, **_kw: Any) -> FeatureSearchPage:
+        assert _kw["q"] == "경복궁"
+        return FeatureSearchPage(
+            items=(
+                FeatureSearchRow(
+                    feature_id="f1",
+                    kind="place",
+                    name="경복궁",
+                    category="01070100",
+                    lon=126.977,
+                    lat=37.5796,
+                    marker_icon="monument",
+                    marker_color="P-01",
+                    status="active",
+                    score=1.0,
+                ),
+            ),
+            next_cursor=None,
+        )
+
+    monkeypatch.setattr(features_mod.feature_repo, "search_features", _search)
+
+    async def _fake_session() -> AsyncIterator[Any]:
+        yield object()
+
+    client.app.dependency_overrides[get_session] = _fake_session
+    try:
+        r = client.get("/features/search", params={"q": "경복궁"})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["data"]["items"][0]["feature_id"] == "f1"
+        assert body["data"]["total_count"] is None
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+@pytest.mark.unit
+def test_search_features_rejects_bad_bbox(
+    client: TestClient,
+) -> None:
+    r = client.get("/features/search", params={"bbox": "127,37,126,38"})
+    assert r.status_code == 422
+    assert "bbox" in r.json()["detail"]
+
+
+@pytest.mark.unit
+def test_search_features_rejects_missing_scope(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from krtour.map_admin.db import get_session
+    from krtour.map_admin.routers import features as features_mod
+
+    async def _search(_session: Any, **_kw: Any) -> None:
+        raise ValueError("q 또는 bbox 중 하나는 필요합니다")
+
+    monkeypatch.setattr(features_mod.feature_repo, "search_features", _search)
+
+    async def _fake_session() -> AsyncIterator[Any]:
+        yield object()
+
+    client.app.dependency_overrides[get_session] = _fake_session
+    try:
+        r = client.get("/features/search")
+        assert r.status_code == 422
+        assert "q 또는 bbox" in r.json()["detail"]
     finally:
         client.app.dependency_overrides.clear()

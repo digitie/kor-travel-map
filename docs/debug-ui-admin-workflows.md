@@ -63,7 +63,8 @@ krtour-map 독립 프로그램의 admin frontend/backend다. TripMate와는 Open
 | Prefix | 용도 | 예 |
 |--------|------|----|
 | `/debug/...` | 개발자용 진단, fixture, EXPLAIN, provider preview | `/debug/etl/...`, `/debug/explain/...` |
-| `/features/...` | 지도/상세에서 공통으로 쓰는 feature 조회 | `/features`, `/features/{feature_id}`, `/features/nearby` |
+| `/features/...` | 지도/상세에서 공통으로 쓰는 feature 조회 | `/features`, `/features/in-bounds`, `/features/search`, `/features/{feature_id}`, `/features/nearby/by-target` |
+| `/tripmate/...` | TripMate 전용 read helper | `/tripmate/features/batch` |
 | `/admin/...` | 운영자가 데이터를 변경하거나 작업을 실행하는 기능 | `/admin/features`, `/admin/import-jobs`, `/admin/providers/.../runs` |
 | `/ops/...` | 관측, 로그, 지표, consistency report | `/ops/error-logs`, `/ops/consistency`, `/ops/metrics` |
 

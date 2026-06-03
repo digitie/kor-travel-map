@@ -73,13 +73,17 @@ from krtour.map.infra.dedup_repo import (
 )
 from krtour.map.infra.feature_repo import (
     FeatureLoadResult,
+    FeatureSearchPage,
+    FeatureSearchRow,
     NearbyFeaturePage,
     NearbyFeatureRow,
     features_in_bbox,
     features_nearby_poi_cache_target,
     get_feature_row,
+    get_feature_rows_by_ids,
     load_bundle,
     load_bundles,
+    search_features,
     soft_delete_features_not_in_snapshot,
     upsert_feature,
     upsert_source_link,
@@ -217,6 +221,8 @@ __all__ = [
     "ProviderRefreshPolicyRow",
     # feature_repo (ADR-004 raw SQL load 경로)
     "FeatureLoadResult",
+    "FeatureSearchPage",
+    "FeatureSearchRow",
     "NearbyFeaturePage",
     "NearbyFeatureRow",
     "upsert_feature",
@@ -226,7 +232,9 @@ __all__ = [
     "load_bundles",
     "soft_delete_features_not_in_snapshot",
     "get_feature_row",
+    "get_feature_rows_by_ids",
     "features_in_bbox",
+    "search_features",
     "features_nearby_poi_cache_target",
     # admin_feature_repo (ADR-045 T-207c)
     "AdminFeaturePage",

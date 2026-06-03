@@ -24,6 +24,7 @@ from krtour.map.dto._enums import FeatureKind, SourceRole
 from krtour.map.infra import feature_repo
 from krtour.map.infra.feature_repo import (
     FeatureLoadResult,
+    FeatureSearchRow,
     NearbyFeatureRow,
     _feature_params,
     _source_link_params,
@@ -188,6 +189,36 @@ def test_nearby_cursor_rejects_malformed_or_wrong_sort() -> None:
         feature_repo._nearby_cursor_params(cursor, sort="name")
 
 
+def test_feature_search_cursor_round_trips_score_and_id_modes() -> None:
+    row = FeatureSearchRow(
+        feature_id="feature-1",
+        kind="place",
+        name="경복궁",
+        category="01070100",
+        lon=126.977,
+        lat=37.5796,
+        marker_icon="monument",
+        marker_color="P-01",
+        status="active",
+        score=0.95,
+    )
+
+    score_cursor = feature_repo._encode_search_cursor(row, q_enabled=True)
+    assert feature_repo._search_cursor_params(score_cursor, q_enabled=True) == {
+        "cursor_score": 0.95,
+        "cursor_feature_id": "feature-1",
+    }
+
+    id_cursor = feature_repo._encode_search_cursor(row, q_enabled=False)
+    assert feature_repo._search_cursor_params(id_cursor, q_enabled=False) == {
+        "cursor_score": None,
+        "cursor_feature_id": "feature-1",
+    }
+
+    with pytest.raises(ValueError, match="invalid feature search cursor"):
+        feature_repo._search_cursor_params(score_cursor, q_enabled=False)
+
+
 @pytest.mark.asyncio
 async def test_features_nearby_target_validates_before_db_call() -> None:
     class _Session:
@@ -211,4 +242,25 @@ async def test_features_nearby_target_validates_before_db_call() -> None:
             _Session(),  # type: ignore[arg-type]
             target_id="target-1",
             limit=0,
+        )
+
+
+@pytest.mark.asyncio
+async def test_search_features_validates_before_db_call() -> None:
+    class _Session:
+        async def execute(self, *_args: object, **_kwargs: object) -> None:
+            raise AssertionError("validation should happen before DB execute")
+
+    with pytest.raises(ValueError, match="q 또는 bbox"):
+        await feature_repo.search_features(_Session())  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="limit must be greater than 0"):
+        await feature_repo.search_features(
+            _Session(),  # type: ignore[arg-type]
+            q="경복궁",
+            limit=0,
+        )
+    with pytest.raises(ValueError, match="invalid bbox"):
+        await feature_repo.search_features(
+            _Session(),  # type: ignore[arg-type]
+            bbox=(127, 37, 126, 38),
         )
