@@ -34,6 +34,7 @@ dependencies = [
   "pyproj>=3.6",  # ADR-012 좌표 변환 / ADR-030 narrow cache singleton
   "alembic>=1.13",  # ADR-007 schema migration
   "jellyfish>=1.0",  # ADR-016 Record Linkage (jaro_winkler_similarity)
+  "boto3>=1.34",  # ADR-015 S3 호환 객체 저장소(RustFS/MinIO/R2)
 ]
 
 # CLI entry-point (ADR-022 — 명령 이름 `krtour-map`, ADR-039 mutex).

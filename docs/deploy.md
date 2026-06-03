@@ -40,5 +40,5 @@ npm run docker:up
 ## 아직 남은 운영 확장
 
 - Dagster metadata DB(`krtour_map_dagster`) 분리와 daemon/schedule/sensor 운영.
-- RustFS/객체 저장소와 backup/restore 묶음.
-- `/admin/feature-update-requests` queue 기반 즉시 갱신 라우터와 Dagster sensor 연동.
+- RustFS/객체 저장소를 포함한 backup/restore 묶음 자동화.
+- `/admin/offline-uploads*` API/UI와 CSV/TSV validation wizard.

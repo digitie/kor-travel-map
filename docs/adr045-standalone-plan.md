@@ -166,8 +166,10 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
 - **T-208f** ✅ consistency/dedup refresh job — `run_consistency_checks`(F1~F4) +
   DB 기준 dedup 후보 refresh job 구현.
 - **T-208g** ✅ offline upload load job — `ops.offline_uploads` 메타데이터 +
-  JSON/JSONL `FeatureBundle` parser + Dagster `offline_upload_load` job 구현. 실제
-  RustFS resource wiring과 `/admin/offline-uploads*` API/UI는 후속.
+  JSON/JSONL `FeatureBundle` parser + Dagster `offline_upload_load` job 구현.
+- **T-208b 후속** ✅ RustFS offline upload store wiring — 기본
+  `offline_upload_store` resource와 Docker RustFS bucket init 구현.
+  `/admin/offline-uploads*` API/UI는 후속.
 
 ## 4.5 Phase 4.5 — Admin UI 최신화 (T-208d 이후 최우선)
 

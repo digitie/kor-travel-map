@@ -62,7 +62,7 @@ class KrtourMapSettings(BaseSettings):
 
     # ── 객체 저장소 (S3 호환, ADR-015) ─────────────────────────────────
     object_store_endpoint_url: str | None = Field(
-        default=None,
+        default="http://127.0.0.1:9003",
         description=(
             "RustFS/MinIO/Ceph/R2 endpoint URL. 로컬 RustFS 표준 S3 API 예시는 "
             "``http://127.0.0.1:9003``이고 console은 ``http://127.0.0.1:9004``. "
@@ -70,17 +70,47 @@ class KrtourMapSettings(BaseSettings):
         ),
     )
     object_store_bucket: str = Field(
-        default="krtour-map-files",
+        default="krtour-map",
         description="feature_files 저장 bucket 이름.",
     )
-    object_store_access_key: SecretStr | None = Field(
+    object_store_region: str = Field(
+        default="us-east-1",
+        description="S3 호환 client region. RustFS/MinIO 로컬 기본은 ``us-east-1``.",
+    )
+    object_store_access_key_id: SecretStr | None = Field(
         default=None,
         description="S3 호환 access key ID. boto3 표준 chain도 사용 가능.",
     )
-    object_store_secret_key: SecretStr | None = Field(
+    object_store_secret_access_key: SecretStr | None = Field(
         default=None,
         description="S3 호환 secret access key.",
     )
+    object_store_public_base_url: str | None = Field(
+        default="http://127.0.0.1:9003/krtour-map",
+        description="feature_files 공개 URL base. CDN/프록시 사용 시 해당 URL로 교체.",
+    )
+    object_store_prefix: str = Field(
+        default="features",
+        description="feature_files 객체 key prefix.",
+    )
+    offline_upload_bucket: str = Field(
+        default="krtour-uploads",
+        description="admin offline upload 원본 파일 보존 bucket (ADR-045 D-14).",
+    )
+    offline_upload_prefix: str = Field(
+        default="offline-uploads",
+        description="admin offline upload 원본 파일 객체 key prefix.",
+    )
+
+    @property
+    def object_store_access_key(self) -> SecretStr | None:
+        """이전 문서 예시의 짧은 속성명 호환 alias."""
+        return self.object_store_access_key_id
+
+    @property
+    def object_store_secret_key(self) -> SecretStr | None:
+        """이전 문서 예시의 짧은 속성명 호환 alias."""
+        return self.object_store_secret_access_key
 
     # ── kraddr-geo REST API v2 (geocoding, ADR-006/044) ─────────────────
     kraddr_geo_base_url: str | None = Field(

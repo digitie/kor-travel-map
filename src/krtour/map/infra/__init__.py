@@ -121,6 +121,7 @@ from krtour.map.infra.feature_update_repo import (
     peek_next_update_request,
     start_update_request,
 )
+from krtour.map.infra.file_store import S3ObjectStore, StoredObject
 from krtour.map.infra.integrity_violation_repo import (
     DataIntegrityViolation,
     create_data_integrity_violation,
@@ -225,6 +226,9 @@ __all__ = [
     "PoiCacheTargetRow",
     "PoiCacheTargetFeatureLinkRow",
     "ProviderRefreshPolicyRow",
+    # file_store (ADR-015 S3 호환 객체 저장소)
+    "S3ObjectStore",
+    "StoredObject",
     # feature_repo (ADR-004 raw SQL load 경로)
     "FeatureLoadResult",
     "FeatureSearchPage",

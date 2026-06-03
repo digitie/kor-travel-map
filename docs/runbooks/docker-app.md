@@ -1,8 +1,8 @@
 # Docker 독립 app runbook
 
 본 문서는 ADR-045/047 기준 krtour-map 독립 프로그램을 로컬에서 빌드·기동·스모크하는
-절차다. 고정 포트는 API `9011`, admin UI `9012`, Dagster `9013`이다. RustFS를
-로컬에서 함께 띄우는 경우 S3 API는 `9003`, console은 `9004`를 쓴다.
+절차다. 고정 포트는 API `9011`, admin UI `9012`, Dagster `9013`이다. RustFS는
+로컬 compose에 포함하며 S3 API는 `9003`, console은 `9004`를 쓴다.
 
 ## 1. 환경변수
 
@@ -22,6 +22,12 @@ chmod 600 .env
 | `OPINET_API_KEY` | `KRTOUR_MAP_ADMIN_OPINET_SERVICE_KEY` |
 | `KEX_GO_API_KEY`, `KREX_API_KEY` | `KRTOUR_MAP_ADMIN_KREX_SERVICE_KEY` |
 | `KRADDR_GEO_VWORLD_API_KEY`, `VWORLD_API_KEY` | `NEXT_PUBLIC_VWORLD_API_KEY` |
+
+객체 저장소는 `KRTOUR_MAP_OBJECT_STORE_*`를 사용한다. Docker 내부 endpoint는
+`KRTOUR_MAP_DOCKER_OBJECT_STORE_ENDPOINT_URL`(기본 `http://rustfs:9000`)로 주입하고,
+host/browser 공개 URL은 `KRTOUR_MAP_OBJECT_STORE_PUBLIC_BASE_URL`(기본
+`http://127.0.0.1:9003/krtour-map`)을 사용한다. offline upload 원본 bucket은
+`KRTOUR_MAP_OFFLINE_UPLOAD_BUCKET`(기본 `krtour-uploads`)이다.
 
 frontend 컨테이너에는 `NEXT_PUBLIC_*`만 주입한다. 서버용 API 키는 API/Dagster
 프로세스 환경변수로만 둔다. Dagster 임베드용 공개 URL은
@@ -43,7 +49,7 @@ Docker Dagster 이미지는 같은 설정 파일을 포함한다.
 ```bash
 npm run ports:stop
 # 또는
-scripts/stop-fixed-ports.sh 9011 9012 9013
+scripts/stop-fixed-ports.sh 9011 9012 9013 9003 9004
 ```
 
 ## 3. Docker 이미지 빌드
@@ -63,11 +69,12 @@ npm run docker:build
 
 ```bash
 npm run docker:up
-# 내부 실행: docker compose up -d --build postgres api frontend dagster
+# 내부 실행: docker compose up -d --build postgres rustfs rustfs-init api frontend dagster
 ```
 
 API 컨테이너는 Postgres healthcheck 이후 `alembic upgrade head`를 실행하고 uvicorn을
-띄운다. Postgres host 포트 기본값은 `15433`이다.
+띄운다. `rustfs-init`는 `krtour-map`과 `krtour-uploads` bucket을 생성한다. Postgres
+host 포트 기본값은 `15433`이다.
 
 ## 5. 로컬 venv stack 기동
 
@@ -86,11 +93,13 @@ Dagster dev를 백그라운드로 시작한다. 로그는 기본 `.codex_tmp/adm
 curl -fsS http://127.0.0.1:9011/debug/health
 curl -fsS -I http://127.0.0.1:9012/ | sed -n '1,8p'
 curl -fsS -I http://127.0.0.1:9013/ | sed -n '1,8p'
+curl -fsS -I http://127.0.0.1:9003/ | sed -n '1,8p' || true
 docker compose ps
 ```
 
-RustFS/object store healthcheck는 후속 T-209e에서 compose 서비스와 backup/restore
-묶음에 붙인다. 현재 로컬 기준 포트는 API `9003`, console `9004`다.
+RustFS console은 `http://127.0.0.1:9004`다. 접근 키는 `.env`의
+`KRTOUR_MAP_OBJECT_STORE_ACCESS_KEY_ID` /
+`KRTOUR_MAP_OBJECT_STORE_SECRET_ACCESS_KEY`를 사용한다.
 
 Dagster `definitions`의 일부 asset resource는 운영 구현이 주입되기 전까지 missing
 resource로 남는다. UI와 code location 로딩은 가능하지만 실제 live provider 실행은

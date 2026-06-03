@@ -4,10 +4,10 @@
 
 ## 진행 중
 
-**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#176(T-208f
-consistency/dedup refresh job)까지 merged. 현재 작업은 T-208g offline upload load
-job이다. T-208g가 머지되면 `ops.offline_uploads` 기반 admin upload API/UI와
-T-208b 잔여 RustFS resource wiring을 후속으로 진행한다.
+**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#177(T-208g
+offline upload load job)까지 merged. 현재 작업은 T-208b 잔여 RustFS resource
+wiring이다. T-208b가 머지되면 admin UI #9 선행으로 `ops.offline_uploads` 기반
+`/admin/offline-uploads*` upload API/UI를 우선 진행한다.
 T-207b는 사용자 결정에 따라 구현하지 않는다.
 
 ### 현재 기준 보강 필요 체크포인트 (2026-06-03)
@@ -386,7 +386,8 @@ T-207b는 사용자 결정에 따라 구현하지 않는다.
 - [~] T-208b — resources(DB/client/provider 9 + kraddr-geo/rustfs, D-15). 1차:
       `krtour_map_client`, `reverse_geocoder`, `fetched_at`, provider record iterable
       resource 계약 구현. `offline_upload_store` resource key는 T-208g에서 추가한다.
-      실제 provider client/RustFS resource wiring은 후속.
+      이번 후속 작업에서 RustFS/S3 호환 `offline_upload_store` 기본 resource와 Docker
+      RustFS bucket init을 구현한다. 실제 provider client resource wiring은 남는다.
 - [x] T-208c — provider load asset 9종(이미 구현·검증된 Feature provider 변환 함수
       연결) + 주소/좌표 검증 + `AsyncKrtourMapClient.load_feature_bundles` PostGIS
       적재 통합 테스트.
@@ -404,8 +405,16 @@ T-207b는 사용자 결정에 따라 구현하지 않는다.
       `ops.offline_uploads`(alembic 0011), `infra.offline_upload_repo`,
       `krtour.map.offline_upload` JSON/JSONL `FeatureBundle` parser/load
       orchestration, `AsyncKrtourMapClient.run_offline_upload_load_job`,
-      Dagster `offline_upload_load` job을 추가했다. 실제 RustFS store 구현과
-      `/admin/offline-uploads*` API/UI는 후속 task로 둔다.
+      Dagster `offline_upload_load` job을 추가했다. `/admin/offline-uploads*` API/UI는
+      후속 task로 둔다.
+
+**Phase 4.2 — Offline upload admin UI 선행**
+- [ ] T-208h — `/admin/offline-uploads*` API + 기본 upload 화면.
+      RustFS/S3 store에 JSON/JSONL `FeatureBundle` 파일을 저장하고,
+      `ops.offline_uploads` row 생성/list/detail/load 실행까지 admin UI에서 연결한다.
+- [ ] T-208i — CSV/TSV validation + column mapping wizard.
+      업로드 API/UI 기본 경로가 닫힌 뒤 provider/dataset별 mapping preset, preview,
+      validation 결과, `offline_upload_load` job 연계를 확장한다.
 
 **Phase 4.5 — Admin UI 최신화 (사용자 지시로 T-208d 이후 최우선)**
 - [x] T-211a — admin UI 최신 문서/현재 구현 gap audit + 선행 API/데이터 계약 보강.

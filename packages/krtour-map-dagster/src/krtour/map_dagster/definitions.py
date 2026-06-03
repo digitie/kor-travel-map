@@ -9,6 +9,7 @@ from dagster import Definitions, ResourceDefinition, resource
 from .assets import FEATURE_LOAD_ASSETS
 from .maintenance import MAINTENANCE_JOBS, MAINTENANCE_SCHEDULES
 from .offline_uploads import OFFLINE_UPLOAD_JOBS
+from .resources import offline_upload_store_resource
 from .schedules import FEATURE_LOAD_JOBS, FEATURE_LOAD_SCHEDULES
 from .sensors import FEATURE_UPDATE_JOBS, FEATURE_UPDATE_SENSORS
 
@@ -43,6 +44,11 @@ DEFAULT_RESOURCE_VALUES: Final[dict[str, object]] = {
     "knps_geometry_dataset_key": "knps_trails",
 }
 """운영 definitions가 교체하지 않아도 안전한 기본 resource 값."""
+
+DEFAULT_RESOURCE_DEFINITIONS: Final[dict[str, ResourceDefinition]] = {
+    "offline_upload_store": offline_upload_store_resource,
+}
+"""환경변수 기반 실제 구현을 제공하는 기본 Dagster resource."""
 
 
 def _missing_resource(key: str) -> ResourceDefinition:
@@ -81,9 +87,13 @@ defs = Definitions(
         key: (
             _value_resource(key, DEFAULT_RESOURCE_VALUES[key])
             if key in DEFAULT_RESOURCE_VALUES
+            else DEFAULT_RESOURCE_DEFINITIONS[key]
+            if key in DEFAULT_RESOURCE_DEFINITIONS
             else _missing_resource(key)
         )
-        for key in REQUIRED_RESOURCE_KEYS + tuple(DEFAULT_RESOURCE_VALUES)
+        for key in REQUIRED_RESOURCE_KEYS
+        + tuple(DEFAULT_RESOURCE_VALUES)
+        + tuple(DEFAULT_RESOURCE_DEFINITIONS)
     },
 )
 """``dagster dev -m krtour.map_dagster.definitions`` 진입점."""

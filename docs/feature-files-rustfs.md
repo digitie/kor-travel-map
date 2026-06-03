@@ -293,6 +293,9 @@ KRTOUR_MAP_OBJECT_STORE_ACCESS_KEY_ID=...
 KRTOUR_MAP_OBJECT_STORE_SECRET_ACCESS_KEY=...
 KRTOUR_MAP_OBJECT_STORE_PUBLIC_BASE_URL=http://127.0.0.1:9003/krtour-map
 KRTOUR_MAP_OBJECT_STORE_PREFIX=features
+KRTOUR_MAP_OFFLINE_UPLOAD_BUCKET=krtour-uploads
+KRTOUR_MAP_OFFLINE_UPLOAD_PREFIX=offline-uploads
+KRTOUR_MAP_DOCKER_OBJECT_STORE_ENDPOINT_URL=http://rustfs:9000
 ```
 
 로컬 RustFS 표준 포트는 S3 API `9003`, console `9004`다. MinIO 호환 테스트
@@ -304,12 +307,14 @@ optional 지원 (마이그레이션 편의).
 ## 9. 로컬 실행 (RustFS Docker)
 
 ```bash
-# docker compose에 추가 (코드 작성 단계)
-docker compose -f docker/rustfs/docker-compose.yml up -d rustfs rustfs-init
+npm run docker:up
+# 또는
+docker compose up -d --build postgres rustfs rustfs-init api frontend dagster
 ```
 
-bucket 자동 생성 (`rustfs-init` 컨테이너가 `mc mb` 호출). 또는 RustFS console
-(`http://127.0.0.1:9004`)에서 수동 생성.
+bucket 자동 생성 (`rustfs-init` 컨테이너가 `mc mb --ignore-existing` 호출):
+`krtour-map`(feature files)과 `krtour-uploads`(offline upload 원본). 또는 RustFS
+console (`http://127.0.0.1:9004`)에서 수동 생성.
 
 대안: MinIO testcontainer (`testcontainers-python`의 `MinioContainer`).
 
