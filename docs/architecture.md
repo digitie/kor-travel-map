@@ -172,8 +172,10 @@ REST/OpenAPI는 `python-krtour-map`이 아니라 **별도 Python 패키지**
   `feature_weather_values`, `price_points`, `price_values`,
   `feature_merge_history`, `feature_overrides`.
 - `provider_sync` — `source_records`, `source_links`, `provider_sync_state`.
-- `ops` — `import_jobs`, `dedup_review_queue`, `data_integrity_violations`,
-  `api_call_log` (구독 옵션).
+- `ops` — `import_jobs`, `dedup_review_queue`, `feature_merge_history`,
+  `data_integrity_violations`, `feature_update_requests`, `poi_cache_targets`,
+  `poi_cache_target_feature_links`, `provider_refresh_policies`, `api_call_log`
+  (구독 옵션).
 - `x_extension` — `postgis`, `postgis_topology`, `pg_trgm`, `pgcrypto`
   (ADR-008, search_path에 추가).
 

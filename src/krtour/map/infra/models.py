@@ -43,6 +43,7 @@ from sqlalchemy import (
     Integer,
     MetaData,
     Numeric,
+    SmallInteger,
     String,
     Text,
     UniqueConstraint,
@@ -62,6 +63,10 @@ __all__ = [
     "DedupReviewQueueRow",
     "ImportJobRow",
     "FeatureUpdateRequestRow",
+    "DataIntegrityViolationRow",
+    "PoiCacheTargetRow",
+    "PoiCacheTargetFeatureLinkRow",
+    "ProviderRefreshPolicyRow",
     "FeatureMergeHistoryRow",
 ]
 
@@ -631,6 +636,324 @@ class FeatureUpdateRequestRow(Base):
     )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
+
+
+# =============================================================================
+# ops.data_integrity_violations / poi_cache_* / provider_refresh_policies
+# =============================================================================
+
+
+class DataIntegrityViolationRow(Base):
+    """``ops.data_integrity_violations`` row mapping — 이슈 1건 = 운영 큐 1행."""
+
+    __tablename__ = "data_integrity_violations"
+    __table_args__ = (
+        CheckConstraint(
+            "severity IN ('info','warning','error','critical')",
+            name="ck_violations_severity",
+        ),
+        CheckConstraint(
+            "status IN ('open','acknowledged','resolved','ignored')",
+            name="ck_violations_status",
+        ),
+        Index(
+            "idx_violations_type_status",
+            "violation_type",
+            "status",
+        ),
+        Index(
+            "idx_violations_feature",
+            "feature_id",
+            postgresql_where=text("feature_id IS NOT NULL"),
+        ),
+        Index(
+            "idx_violations_source_record",
+            "source_record_key",
+            postgresql_where=text("source_record_key IS NOT NULL"),
+        ),
+        Index(
+            "idx_violations_detected_brin",
+            "detected_at",
+            postgresql_using="brin",
+        ),
+        {"schema": "ops"},
+    )
+
+    violation_key: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=text("x_extension.gen_random_uuid()"),
+    )
+    provider: Mapped[str | None] = mapped_column(Text)
+    dataset_key: Mapped[str | None] = mapped_column(Text)
+    source_record_key: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey(
+            "provider_sync.source_records.source_record_key",
+            ondelete="SET NULL",
+        ),
+    )
+    feature_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("feature.features.feature_id", ondelete="CASCADE"),
+    )
+    violation_type: Mapped[str] = mapped_column(Text, nullable=False)
+    severity: Mapped[str] = mapped_column(Text, nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb"),
+    )
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'open'"),
+    )
+    detected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PoiCacheTargetRow(Base):
+    """``ops.poi_cache_targets`` row mapping — 외부 POI/cache target."""
+
+    __tablename__ = "poi_cache_targets"
+    __table_args__ = (
+        CheckConstraint(
+            "scope_mode IN ('center_radius','sigungu_by_radius')",
+            name="ck_poi_cache_targets_scope_mode",
+        ),
+        CheckConstraint(
+            "refresh_policy IN ("
+            "'provider_default','follow_system','allow_targeted','disabled'"
+            ")",
+            name="ck_poi_cache_targets_refresh_policy",
+        ),
+        CheckConstraint(
+            "radius_km > 0 AND radius_km <= 100",
+            name="ck_poi_cache_targets_radius",
+        ),
+        CheckConstraint(
+            "ST_X(coord) BETWEEN 124.0 AND 132.0 AND "
+            "ST_Y(coord) BETWEEN 33.0 AND 39.5",
+            name="ck_poi_cache_targets_coord",
+        ),
+        CheckConstraint(
+            "coord_precision_digits BETWEEN 3 AND 8",
+            name="ck_poi_cache_targets_precision",
+        ),
+        Index(
+            "uq_poi_cache_targets_active_key",
+            "external_system",
+            "target_key",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
+        Index(
+            "idx_poi_cache_targets_coord_5179",
+            "coord_5179",
+            postgresql_using="gist",
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
+        Index(
+            "idx_poi_cache_targets_next_refresh",
+            "next_eligible_refresh_at",
+            postgresql_where=text("deleted_at IS NULL AND update_enabled"),
+        ),
+        {"schema": "ops"},
+    )
+
+    target_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=text("x_extension.gen_random_uuid()"),
+    )
+    external_system: Mapped[str] = mapped_column(Text, nullable=False)
+    target_key: Mapped[str] = mapped_column(Text, nullable=False)
+    name: Mapped[str | None] = mapped_column(Text)
+    lon: Mapped[Any] = mapped_column(Numeric(12, 8), nullable=False)
+    lat: Mapped[Any] = mapped_column(Numeric(12, 8), nullable=False)
+    coord: Mapped[Any] = mapped_column(
+        Geometry("POINT", srid=4326, spatial_index=False),
+        nullable=False,
+    )
+    coord_5179: Mapped[Any] = mapped_column(
+        Geometry("POINT", srid=5179, spatial_index=False),
+        Computed("ST_Transform(coord, 5179)", persisted=True),
+    )
+    coord_precision_digits: Mapped[int] = mapped_column(
+        SmallInteger, nullable=False, server_default=text("6"),
+    )
+    coord_key: Mapped[str] = mapped_column(Text, nullable=False)
+    radius_km: Mapped[Any] = mapped_column(Numeric(8, 3), nullable=False)
+    scope_mode: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'center_radius'"),
+    )
+    update_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true"),
+    )
+    refresh_policy: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'provider_default'"),
+    )
+    provider_overrides: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb"),
+    )
+    metadata_: Mapped[dict[str, Any]] = mapped_column(
+        "metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb"),
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
+    last_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_refreshed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_failed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    next_eligible_refresh_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
+
+
+class PoiCacheTargetFeatureLinkRow(Base):
+    """``ops.poi_cache_target_feature_links`` row mapping."""
+
+    __tablename__ = "poi_cache_target_feature_links"
+    __table_args__ = (
+        CheckConstraint(
+            "relation IN ('within_radius','same_sigungu','manual')",
+            name="ck_poi_cache_link_relation",
+        ),
+        Index(
+            "idx_poi_cache_links_feature",
+            "feature_id",
+            postgresql_where=text("active"),
+        ),
+        Index(
+            "idx_poi_cache_links_provider_dataset",
+            "provider",
+            "dataset_key",
+            postgresql_where=text("active"),
+        ),
+        {"schema": "ops"},
+    )
+
+    target_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("ops.poi_cache_targets.target_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    feature_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("feature.features.feature_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    provider: Mapped[str | None] = mapped_column(Text)
+    dataset_key: Mapped[str | None] = mapped_column(Text)
+    distance_m: Mapped[Any | None] = mapped_column(Numeric(12, 2))
+    relation: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'within_radius'"),
+    )
+    active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true"),
+    )
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
+    last_refreshed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ProviderRefreshPolicyRow(Base):
+    """``ops.provider_refresh_policies`` row mapping."""
+
+    __tablename__ = "provider_refresh_policies"
+    __table_args__ = (
+        CheckConstraint(
+            "source_kind IN ('openapi','filedata','manual','system')",
+            name="ck_provider_refresh_source_kind",
+        ),
+        CheckConstraint(
+            "targeted_policy IN ('follow_system','allow_targeted','disabled')",
+            name="ck_provider_refresh_targeted_policy",
+        ),
+        CheckConstraint(
+            "max_concurrent > 0",
+            name="ck_provider_refresh_max_concurrent",
+        ),
+        CheckConstraint(
+            "system_interval_seconds IS NULL OR system_interval_seconds > 0",
+            name="ck_provider_refresh_system_interval",
+        ),
+        CheckConstraint(
+            "optimal_interval_seconds IS NULL OR optimal_interval_seconds > 0",
+            name="ck_provider_refresh_optimal_interval",
+        ),
+        CheckConstraint(
+            "min_interval_seconds IS NULL OR min_interval_seconds > 0",
+            name="ck_provider_refresh_min_interval",
+        ),
+        CheckConstraint(
+            "max_requests_per_minute IS NULL OR max_requests_per_minute > 0",
+            name="ck_provider_refresh_rpm",
+        ),
+        CheckConstraint(
+            "max_requests_per_hour IS NULL OR max_requests_per_hour > 0",
+            name="ck_provider_refresh_rph",
+        ),
+        CheckConstraint(
+            "max_requests_per_day IS NULL OR max_requests_per_day > 0",
+            name="ck_provider_refresh_rpd",
+        ),
+        CheckConstraint(
+            "burst_size IS NULL OR burst_size > 0",
+            name="ck_provider_refresh_burst",
+        ),
+        Index(
+            "idx_provider_refresh_enabled",
+            "enabled",
+            "provider",
+            "dataset_key",
+        ),
+        Index("idx_provider_refresh_source_kind", "source_kind"),
+        {"schema": "ops"},
+    )
+
+    provider: Mapped[str] = mapped_column(Text, primary_key=True)
+    dataset_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    source_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    targeted_policy: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'follow_system'"),
+    )
+    system_interval_seconds: Mapped[int | None] = mapped_column(Integer)
+    optimal_interval_seconds: Mapped[int | None] = mapped_column(Integer)
+    min_interval_seconds: Mapped[int | None] = mapped_column(Integer)
+    max_requests_per_minute: Mapped[int | None] = mapped_column(Integer)
+    max_requests_per_hour: Mapped[int | None] = mapped_column(Integer)
+    max_requests_per_day: Mapped[int | None] = mapped_column(Integer)
+    max_concurrent: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("1"),
+    )
+    burst_size: Mapped[int | None] = mapped_column(Integer)
+    rate_limit_source: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb"),
+    )
+    config_source: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'db'"),
+    )
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()"),
     )

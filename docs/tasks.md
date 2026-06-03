@@ -4,11 +4,10 @@
 
 ## 진행 중
 
-**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#162(T-206c feature update
-client 표면)까지 merged. T-206a-geo 형제 repo endpoint는 `python-kraddr-geo`
-main 기준으로 재검증 완료했다. 현재 다음 작업은 T-205c(Phase 2 스키마: provider
-refresh policy / POI cache target / F5~F8 violation 기반)이며, 그 뒤 T-206d request
-실행 본체, admin API/Dagster sensor로 이어간다.
+**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#163(T-206a-geo 재검증 문서)
+까지 merged. 현재 작업은 T-205c(Phase 2 스키마: provider refresh policy / POI cache
+target / F5~F8 violation 기반)이며, 완료 후 T-206d request 실행 본체, admin
+API/Dagster sensor로 이어간다.
 
 ### 현재 기준 보강 필요 체크포인트 (2026-06-03)
 
@@ -42,12 +41,19 @@ refresh policy / POI cache target / F5~F8 violation 기반)이며, 그 뒤 T-206
    `AsyncKrtourMapClient` 표면을 추가한다. API/sensor는 T-207/T-208로 분리한다.
 9. **scope resolver** — T-206a에서 `feature_ids`, `center_radius`, `bbox`,
    `sigungu_by_radius`, `provider_dataset` dry-run/count resolver를 구현한다.
-   `cache_target_keys`는 `ops.poi_cache_targets` 도입 후 Phase 2로 진행한다.
+   `cache_target_keys`는 T-205c `ops.poi_cache_targets` 도입 후 T-206d 실행 본체에서
+   연결한다.
 10. **검증 기준** — WSL unit/integration/live pytest + Windows Playwright e2e + GitHub
    Actions green 후 머지.
 
 ## 최근 완료 (2026-05-31~2026-06-03)
 
+- **T-205c** (본 PR): `alembic 0009`로
+  `ops.data_integrity_violations`, `ops.poi_cache_targets`,
+  `ops.poi_cache_target_feature_links`, `ops.provider_refresh_policies`를 추가하고,
+  ORM row + raw SQL repo + PostGIS 통합 테스트를 구현.
+- **PR#163** (merged 2026-06-03): T-206a-geo 검증 완료 문서화 +
+  RustFS dev compose 예시 host port `9003`/`9004` 정렬.
 - **PR#162** (merged 2026-06-03): `AsyncKrtourMapClient` feature update request
   메서드 4종 + top-level client export + RustFS 포트 9003/9004 문서 정렬.
 - **T-206a-geo 확인** (2026-06-03): `python-kraddr-geo` main의
@@ -277,10 +283,11 @@ refresh policy / POI cache target / F5~F8 violation 기반)이며, 그 뒤 T-206
   scope resolver/repository는 T-206에서 분리.
 - [~] T-205b — ~~`feature.sigungu_boundaries`~~ **취소**(D-11: 경계는 kraddr-geo
   소유, krtour-map은 REST 호출). → T-206a-geo로 대체.
-- [ ] T-205c — (Phase 2, **T-206a-geo 검증 후 진행**) `ops.data_integrity_violations`
+- [x] T-205c — (Phase 2) `ops.data_integrity_violations`
   (F5~F8) / `ops.poi_cache_targets` + `_feature_links` /
-  `ops.provider_refresh_policies`. `cache_target_keys` scope와 provider별 update
-  주기/rate limit enforcement의 선행 스키마.
+  `ops.provider_refresh_policies`. 본 PR에서 `alembic 0009`, ORM row, raw SQL repo,
+  PostGIS schema/repo 통합 테스트를 추가했다. `cache_target_keys` scope와 provider별
+  update 주기/rate limit enforcement는 T-206d 실행 본체에서 사용한다.
 - [ ] T-205d — `import_jobs` batch 컬럼(`load_batch_id`/`parent_job_id`, T-200 연계, D-6).
 
 **Phase 2 — 로직 (scope resolver + 큐 브리지)**

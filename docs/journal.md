@@ -2,6 +2,28 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-03 (codex) — T-205c Phase 2 ops 스키마
+
+**작업**: ADR-045 독립 프로그램화 후속 T-205c. request 실행 본체와 admin/Dagster
+운영 화면이 필요한 Phase 2 ops 테이블을 PostGIS migration + ORM + raw SQL repo로
+구현.
+
+- **Schema**: `alembic 0009_phase2_ops_tables`로
+  `ops.data_integrity_violations`, `ops.poi_cache_targets`,
+  `ops.poi_cache_target_feature_links`, `ops.provider_refresh_policies` 추가.
+- **Repo**: `integrity_violation_repo`, `poi_cache_target_repo`,
+  `provider_refresh_policy_repo` 추가. 각 repo는 raw SQL `text()`만 사용하고 commit은
+  호출자에게 맡긴다.
+- **POI target**: `external_system + target_key` active unique key, generated
+  `coord_5179`, move 시 기존 feature links 비활성화, soft delete 구현.
+- **Integrity queue**: 주소/좌표/F5~F8 이슈 1건 = 1행으로 기록하고
+  `open`/`acknowledged`/`resolved`/`ignored` 상태 전이를 지원.
+- **검증**: targeted PostGIS integration
+  `tests/integration/test_phase2_ops_schema.py tests/integration/test_phase2_ops_repos.py`
+  → `8 passed`.
+- **다음**: T-206d request 실행 본체에서 `cache_target_keys` scope와 provider
+  refresh/rate-limit 정책 적용을 연결한다.
+
 ## 2026-06-03 (codex) — T-206a-geo 재검증
 
 **작업**: ADR-045 T-206a-geo. 형제 repo `python-kraddr-geo`의

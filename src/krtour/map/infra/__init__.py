@@ -83,6 +83,13 @@ from krtour.map.infra.feature_update_repo import (
     list_update_requests,
     start_update_request,
 )
+from krtour.map.infra.integrity_violation_repo import (
+    DataIntegrityViolation,
+    create_data_integrity_violation,
+    get_data_integrity_violation,
+    list_data_integrity_violations,
+    set_data_integrity_violation_status,
+)
 from krtour.map.infra.jobs_repo import (
     ImportJob,
     claim_next_import_job,
@@ -94,15 +101,38 @@ from krtour.map.infra.jobs_repo import (
 )
 from krtour.map.infra.models import (
     Base,
+    DataIntegrityViolationRow,
     DedupReviewQueueRow,
     FeatureConsistencyReportRow,
     FeatureRow,
     FeatureUpdateRequestRow,
     ImportJobRow,
+    PoiCacheTargetFeatureLinkRow,
+    PoiCacheTargetRow,
+    ProviderRefreshPolicyRow,
     ProviderSyncStateRow,
     SourceLinkRow,
     SourceRecordRow,
     metadata,
+)
+from krtour.map.infra.poi_cache_target_repo import (
+    PoiCacheTarget,
+    PoiCacheTargetConflict,
+    PoiCacheTargetFeatureLink,
+    deactivate_poi_cache_target_feature_links,
+    delete_poi_cache_target,
+    get_poi_cache_target,
+    get_poi_cache_target_by_key,
+    list_poi_cache_target_feature_links,
+    list_poi_cache_targets,
+    upsert_poi_cache_target,
+    upsert_poi_cache_target_feature_link,
+)
+from krtour.map.infra.provider_refresh_policy_repo import (
+    ProviderRefreshPolicy,
+    get_provider_refresh_policy,
+    list_provider_refresh_policies,
+    upsert_provider_refresh_policy,
 )
 from krtour.map.infra.scope_repo import (
     FeatureScopeRow,
@@ -145,6 +175,10 @@ __all__ = [
     "DedupReviewQueueRow",
     "ImportJobRow",
     "FeatureUpdateRequestRow",
+    "DataIntegrityViolationRow",
+    "PoiCacheTargetRow",
+    "PoiCacheTargetFeatureLinkRow",
+    "ProviderRefreshPolicyRow",
     # feature_repo (ADR-004 raw SQL load 경로)
     "FeatureLoadResult",
     "upsert_feature",
@@ -181,6 +215,27 @@ __all__ = [
     "cancel_update_request",
     "get_update_request",
     "list_update_requests",
+    # Phase 2 ops repos (ADR-045 T-205c)
+    "DataIntegrityViolation",
+    "create_data_integrity_violation",
+    "get_data_integrity_violation",
+    "list_data_integrity_violations",
+    "set_data_integrity_violation_status",
+    "PoiCacheTarget",
+    "PoiCacheTargetConflict",
+    "PoiCacheTargetFeatureLink",
+    "upsert_poi_cache_target",
+    "get_poi_cache_target",
+    "get_poi_cache_target_by_key",
+    "list_poi_cache_targets",
+    "delete_poi_cache_target",
+    "deactivate_poi_cache_target_feature_links",
+    "upsert_poi_cache_target_feature_link",
+    "list_poi_cache_target_feature_links",
+    "ProviderRefreshPolicy",
+    "upsert_provider_refresh_policy",
+    "get_provider_refresh_policy",
+    "list_provider_refresh_policies",
     # scope_repo (ADR-045 feature update request dry-run/scope resolver)
     "FeatureScopeRow",
     "ProviderDatasetScope",
