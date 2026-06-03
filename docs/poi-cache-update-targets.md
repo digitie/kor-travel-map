@@ -490,13 +490,13 @@ DB 규칙:
 
 ## 11. 구현 순서
 
-1. `ops.provider_refresh_policies` seed와 조회 API.
-2. `ops.poi_cache_targets` + upsert/delete/get/list API.
-3. `GET /features/nearby/by-target`.
-4. `scope.type='cache_target_keys'` dry-run.
-5. target feature link 계산과 저장.
-6. Dagster queue 실행 연결.
-7. Admin UI target 목록/상세/정책 편집.
+1. ✅ `ops.provider_refresh_policies` 스키마/repository.
+2. ✅ `ops.poi_cache_targets` + upsert/delete/get/list repository.
+3. `GET /features/nearby/by-target` API.
+4. ✅ `scope.type='cache_target_keys'` dry-run/실행 scope 해석.
+5. ✅ target feature link 계산과 저장(T-206d executor).
+6. Dagster queue 실행 연결(T-208e sensor).
+7. Admin UI target 목록/상세/정책 편집(T-207f).
 
 ## 12. 테스트 기준
 

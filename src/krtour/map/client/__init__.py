@@ -58,6 +58,16 @@ from krtour.map.infra.feature_repo import (
     get_feature_row,
     load_bundles,
 )
+from krtour.map.infra.feature_update_executor import (
+    FeatureUpdateExecutionResult,
+    ProviderDatasetRefreshRunner,
+)
+from krtour.map.infra.feature_update_executor import (
+    execute_feature_update_request as repo_execute_feature_update_request,
+)
+from krtour.map.infra.feature_update_executor import (
+    execute_next_feature_update_request as repo_execute_next_feature_update_request,
+)
 from krtour.map.infra.feature_update_repo import (
     FeatureUpdateRequest,
     FeatureUpdateRequestPage,
@@ -418,6 +428,48 @@ class AsyncKrtourMapClient:
         async with self._session_factory() as session, session.begin():
             return await repo_cancel_update_request(
                 session, request_id, error_message=error_message
+            )
+
+    async def execute_next_feature_update_request(
+        self,
+        *,
+        runner: ProviderDatasetRefreshRunner,
+        dagster_run_id: str | None = None,
+        sigungu_resolver: SigunguByRadiusResolver | None = None,
+    ) -> FeatureUpdateExecutionResult | None:
+        """queued feature update request 1건을 claim하고 runner로 실행한다.
+
+        provider API 호출/Dagster orchestration은 runner가 담당한다. 본 client는
+        request/import job 상태, scope 재해석, target link 갱신, 성공/실패 전이를
+        한 transaction으로 묶는다.
+        """
+        async with self._session_factory() as session, session.begin():
+            return await repo_execute_next_feature_update_request(
+                session,
+                runner=runner,
+                dagster_run_id=dagster_run_id,
+                sigungu_resolver=sigungu_resolver,
+            )
+
+    async def execute_feature_update_request(
+        self,
+        request_id: str,
+        *,
+        runner: ProviderDatasetRefreshRunner,
+        dagster_run_id: str | None = None,
+        sigungu_resolver: SigunguByRadiusResolver | None = None,
+    ) -> FeatureUpdateExecutionResult | None:
+        """특정 feature update request를 즉시 실행한다. 없으면 ``None``."""
+        async with self._session_factory() as session, session.begin():
+            request = await repo_get_update_request(session, request_id)
+            if request is None:
+                return None
+            return await repo_execute_feature_update_request(
+                session,
+                request,
+                runner=runner,
+                dagster_run_id=dagster_run_id,
+                sigungu_resolver=sigungu_resolver,
             )
 
     async def sync_dedup_candidates(

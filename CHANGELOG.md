@@ -5,6 +5,22 @@
 
 ## [Unreleased]
 
+### 운영 — Feature update request 실행 본체 (2026-06-03)
+
+- **NEW**: `infra.feature_update_executor`를 추가했다. queued request claim,
+  실행 시점 scope 재해석, provider/dataset 실행 계획, provider refresh policy 필터,
+  target link 재계산, request/import job terminal 전이를 한 흐름으로 묶는다.
+- **NEW**: `cache_target_keys` scope resolver를 추가했다. active POI/cache target
+  주변 feature를 PostGIS로 계산하고 missing/deleted/disabled key를 `matched_scope`에
+  기록한다.
+- **CHANGED**: `AsyncKrtourMapClient`에
+  `execute_next_feature_update_request`와 `execute_feature_update_request`를 추가했다.
+  실제 provider 호출은 runner 주입형이며 Dagster sensor 연결은 후속 T-208e에서
+  진행한다.
+- **TEST**: target 기반 request가 runner를 통해 feature를 DB 적재하고
+  `ops.poi_cache_target_feature_links`와 target refresh 타임스탬프를 갱신하는 PostGIS
+  통합 테스트를 추가했다.
+
 ### 운영 — Phase 2 ops 스키마 (2026-06-03)
 
 - **NEW**: `ops.data_integrity_violations`, `ops.poi_cache_targets`,

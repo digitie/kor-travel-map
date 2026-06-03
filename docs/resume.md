@@ -1,5 +1,26 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-03 Codex 작업 메모 — T-206d request 실행 본체
+
+ADR-045 T-206d로 `infra.feature_update_executor`를 추가한다. 실행기는 queued
+`feature_update_requests`를 claim한 뒤 실행 시점 scope를 다시 해석하고, provider/dataset
+단위 refresh 계획을 만든다. 실제 provider 호출은 `ProviderDatasetRefreshRunner`로
+주입받으므로 메인 라이브러리는 Dagster/provider client를 직접 import하지 않는다.
+
+이번 범위에서 `scope.type='cache_target_keys'`도 구현한다. active
+`ops.poi_cache_targets`를 `external_system + target_key`로 읽고, PostGIS
+`coord_5179`로 주변 feature를 계산한다. missing/deleted/disabled key는
+`matched_scope`에 남긴다. 실행 성공 후 target-feature link를 재계산하고 target
+refresh 타임스탬프를 갱신한다.
+
+검증 범위: runner가 실제 `FeatureBundle`을 DB에 적재하는 PostGIS 통합 테스트,
+request/import job `done` 전이, `ops.poi_cache_target_feature_links` 재계산,
+`provider_refresh_policies.targeted_policy='follow_system'` skip을 확인한다.
+
+다음 한 작업은 **T-207a**다. `/admin/feature-update-requests` POST/GET/detail/cancel/
+run-now 라우터를 추가하고, run-now는 이번 PR의
+`AsyncKrtourMapClient.execute_feature_update_request` 표면을 사용한다.
+
 ## 2026-06-03 Codex 작업 메모 — T-205c Phase 2 ops 스키마
 
 ADR-045 T-205c로 `alembic 0009_phase2_ops_tables`를 추가한다. 범위는
@@ -328,9 +349,10 @@ Sprint 4(4a+4b)는 아래 체크리스트대로 **전부 완료**(PR#133~#142). 
 **1차 진입 task**(권장): T-205a(`feature_update_requests`
 alembic 0008, 완료) → T-206a(scope resolver, 완료) → T-206b(feature update repo,
 완료) → T-206c(client, 완료) → T-206a-geo(형제 repo endpoint 검증 완료) →
-**T-205c(Phase 2 스키마)** → T-206d(request 실행 본체) → T-207a/e(admin
-update-requests + 사용자 features 라우터) → T-208d/e(Dagster schedule/sensor). 그
-다음 Sprint 5 provider(MOIS-sibling) + Phase 2 정합성.
+T-205c(Phase 2 스키마, 완료) → T-206d(request 실행 본체, 완료) →
+**T-207a(admin update-requests 라우터)** → T-207f(POI/cache target API) →
+T-207d/e(ops + 사용자 features 라우터) → T-208d/e(Dagster schedule/sensor). 그 다음
+Sprint 5 provider(MOIS-sibling) + Phase 2 정합성.
 세부는 `docs/sprints/SPRINT-5.md`.
 
 ### Sprint 4 (4a+4b) 완료 체크리스트 (PR#133~#142, 2026-06-01)

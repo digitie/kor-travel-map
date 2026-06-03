@@ -74,8 +74,9 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
     sig_cd = sigungu_code 동일 체계(D-11 확인) — 매핑 없이 그대로 사용.
   - `resolve_provider_dataset(session, provider, dataset_key, sync_scope)` —
     `source_links`(primary) JOIN `source_records` 필터.
-  - `resolve_cache_target_keys(...)` — `poi-cache-update-targets.md` (Phase 2,
-    `ops.poi_cache_targets` 테이블 도입 후).
+  - `resolve_cache_target_keys(...)` — ✅ T-206d에서 구현. active
+    `ops.poi_cache_targets` 주변 feature를 계산하고 missing/deleted/disabled key를
+    `matched_scope`에 기록한다.
   - `count_features_matching_scope(session, scope)` — **dry_run/ matched_scope용**
     (write 없이 count + sigungu_codes).
 - **T-206a-geo** ✅ (형제 repo `python-kraddr-geo`) — `POST /v2/regions/
@@ -101,11 +102,14 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
   `get_update_request` / `list_update_requests` / `cancel_update_request` (각 자체
   transaction). 기존 `run_*_job` 패턴 일관. Top-level
   `from krtour.map import AsyncKrtourMapClient` export도 실제 코드와 맞춘다.
-- **T-206d** request 실행 본체 — scope 해석된 feature/provider를 실제 적재하는
-  worker 로직. provider_dataset scope는 기존 `run_mois_*_job` 류 재사용; geographic
-  scope(center/bbox/sigungu)는 "해당 feature를 소유한 provider/dataset을 역추적 →
-  해당 dataset refresh" 정책. D-6(1 request:1 job, `run_mode=now` lock 충돌 시
-  409)과 D-8(`prevent_provider_reactivation`) 결정을 따른다.
+- **T-206d** ✅ request 실행 본체 — scope 해석된 feature/provider를 실제 적재하는
+  worker 로직. `infra.feature_update_executor`는 request claim/start/finish,
+  실행 시점 scope 재해석, provider/dataset 실행 계획, `provider_refresh_policies`
+  targeted policy 적용, POI target link 재계산을 제공한다. 실제 provider 호출은
+  `ProviderDatasetRefreshRunner` 주입형이며 메인 라이브러리는 Dagster/provider
+  client를 import하지 않는다. `AsyncKrtourMapClient`는
+  `execute_next_feature_update_request`/`execute_feature_update_request`를 노출한다.
+  T-208e Dagster sensor는 이 실행기를 호출하는 연결 PR로 남긴다.
 
 ## 3. Phase 3 — FastAPI admin/ops/features 라우터 (debug-ui 패키지)
 
@@ -224,12 +228,14 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
    endpoint와 optional PostGIS 실데이터 테스트 경로 재검증 완료.
 5. **Phase 2 T-205c** (`provider_refresh_policies`, `poi_cache_targets`,
    `data_integrity_violations`) — 완료.
-6. **Phase 2 T-206d** — request 실행 본체.
-7. **Phase 3 T-207a/d/e** (admin update-requests + ops + features 라우터) — T-206 후.
-8. **Phase 5 T-209a/b** (docker-compose + 기동) — 라우터 동작 후 통합.
-9. **Phase 4 T-208** (Dagster) — T-206/T-209 위, TripMate 이관과 병행.
-10. **Phase 6** TripMate 정리/이관 — Dagster 이관 시점 동기.
-11. OpenAPI client gen은 운영 안정 후.
+6. **Phase 2 T-206d** — request 실행 본체 — 완료.
+7. **Phase 3 T-207a** — admin update-requests 라우터.
+8. **Phase 3 T-207f** — POI/cache target admin/features API.
+9. **Phase 3 T-207d/e** (ops + features 라우터) — T-207a/f 후.
+10. **Phase 5 T-209a/b** (docker-compose + 기동) — 라우터 동작 후 통합.
+11. **Phase 4 T-208** (Dagster) — T-206/T-209 위, TripMate 이관과 병행.
+12. **Phase 6** TripMate 정리/이관 — Dagster 이관 시점 동기.
+13. OpenAPI client gen은 운영 안정 후.
 
 각 task는 1-PR 단위(`docs/runbooks/agent-workflow.md`), 4 게이트 + 해당 시 alembic/
 OpenAPI drift. 새 테이블·라우터마다 통합 테스트 필수(ADR-014).

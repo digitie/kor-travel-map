@@ -69,6 +69,17 @@ from krtour.map.infra.feature_repo import (
     upsert_source_link,
     upsert_source_record,
 )
+from krtour.map.infra.feature_update_executor import (
+    FeatureUpdateExecutionPlan,
+    FeatureUpdateExecutionResult,
+    ProviderDatasetRefreshResult,
+    ProviderDatasetRefreshRunner,
+    ProviderDatasetRefreshScope,
+    SkippedProviderDatasetRefresh,
+    build_feature_update_execution_plan,
+    execute_feature_update_request,
+    execute_next_feature_update_request,
+)
 from krtour.map.infra.feature_update_repo import (
     FEATURE_UPDATE_JOB_KIND,
     FEATURE_UPDATE_QUEUE_ADVISORY_KEY,
@@ -125,6 +136,9 @@ from krtour.map.infra.poi_cache_target_repo import (
     get_poi_cache_target_by_key,
     list_poi_cache_target_feature_links,
     list_poi_cache_targets,
+    mark_poi_cache_targets_refresh_failed,
+    mark_poi_cache_targets_refresh_requested,
+    mark_poi_cache_targets_refreshed,
     upsert_poi_cache_target,
     upsert_poi_cache_target_feature_link,
 )
@@ -135,12 +149,15 @@ from krtour.map.infra.provider_refresh_policy_repo import (
     upsert_provider_refresh_policy,
 )
 from krtour.map.infra.scope_repo import (
+    CacheTargetFeatureMatch,
+    CacheTargetScopeTarget,
     FeatureScopeRow,
     ProviderDatasetScope,
     ScopeResolution,
     SigunguByRadiusResolver,
     count_features_matching_scope,
     resolve_bbox,
+    resolve_cache_target_keys,
     resolve_center_radius,
     resolve_feature_ids,
     resolve_provider_dataset,
@@ -215,6 +232,16 @@ __all__ = [
     "cancel_update_request",
     "get_update_request",
     "list_update_requests",
+    # feature_update_executor (ADR-045 T-206d)
+    "FeatureUpdateExecutionPlan",
+    "FeatureUpdateExecutionResult",
+    "ProviderDatasetRefreshResult",
+    "ProviderDatasetRefreshRunner",
+    "ProviderDatasetRefreshScope",
+    "SkippedProviderDatasetRefresh",
+    "build_feature_update_execution_plan",
+    "execute_feature_update_request",
+    "execute_next_feature_update_request",
     # Phase 2 ops repos (ADR-045 T-205c)
     "DataIntegrityViolation",
     "create_data_integrity_violation",
@@ -232,12 +259,17 @@ __all__ = [
     "deactivate_poi_cache_target_feature_links",
     "upsert_poi_cache_target_feature_link",
     "list_poi_cache_target_feature_links",
+    "mark_poi_cache_targets_refresh_requested",
+    "mark_poi_cache_targets_refreshed",
+    "mark_poi_cache_targets_refresh_failed",
     "ProviderRefreshPolicy",
     "upsert_provider_refresh_policy",
     "get_provider_refresh_policy",
     "list_provider_refresh_policies",
     # scope_repo (ADR-045 feature update request dry-run/scope resolver)
     "FeatureScopeRow",
+    "CacheTargetScopeTarget",
+    "CacheTargetFeatureMatch",
     "ProviderDatasetScope",
     "ScopeResolution",
     "SigunguByRadiusResolver",
@@ -246,6 +278,7 @@ __all__ = [
     "resolve_bbox",
     "resolve_sigungu_by_radius",
     "resolve_provider_dataset",
+    "resolve_cache_target_keys",
     "count_features_matching_scope",
     # status_repo (read-only 운영 현황)
     "StatusCounts",

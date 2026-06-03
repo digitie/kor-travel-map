@@ -29,6 +29,9 @@ __all__ = [
     "get_poi_cache_target_by_key",
     "list_poi_cache_target_feature_links",
     "list_poi_cache_targets",
+    "mark_poi_cache_targets_refresh_failed",
+    "mark_poi_cache_targets_refresh_requested",
+    "mark_poi_cache_targets_refreshed",
     "upsert_poi_cache_target",
     "upsert_poi_cache_target_feature_link",
 ]
@@ -313,6 +316,34 @@ ORDER BY active DESC, distance_m NULLS LAST, feature_id
 LIMIT :limit
 """
 
+_MARK_TARGETS_REQUESTED_SQL: Final[str] = """
+UPDATE ops.poi_cache_targets
+SET last_requested_at = now(),
+    updated_at = now()
+WHERE target_id::text = ANY(CAST(:target_ids AS text[]))
+  AND deleted_at IS NULL
+RETURNING 1
+"""
+
+_MARK_TARGETS_REFRESHED_SQL: Final[str] = """
+UPDATE ops.poi_cache_targets
+SET last_refreshed_at = now(),
+    next_eligible_refresh_at = NULL,
+    updated_at = now()
+WHERE target_id::text = ANY(CAST(:target_ids AS text[]))
+  AND deleted_at IS NULL
+RETURNING 1
+"""
+
+_MARK_TARGETS_FAILED_SQL: Final[str] = """
+UPDATE ops.poi_cache_targets
+SET last_failed_at = now(),
+    updated_at = now()
+WHERE target_id::text = ANY(CAST(:target_ids AS text[]))
+  AND deleted_at IS NULL
+RETURNING 1
+"""
+
 
 async def upsert_poi_cache_target(
     session: AsyncSession,
@@ -538,3 +569,45 @@ async def list_poi_cache_target_feature_links(
         )
     ).mappings().all()
     return tuple(_row_to_link(row) for row in rows)
+
+
+async def mark_poi_cache_targets_refresh_requested(
+    session: AsyncSession,
+    target_ids: list[str],
+) -> int:
+    """target 기반 update request가 target을 실행 대상으로 잡았음을 기록한다."""
+    if not target_ids:
+        return 0
+    result = await session.execute(
+        text(_MARK_TARGETS_REQUESTED_SQL),
+        {"target_ids": target_ids},
+    )
+    return len(result.scalars().all())
+
+
+async def mark_poi_cache_targets_refreshed(
+    session: AsyncSession,
+    target_ids: list[str],
+) -> int:
+    """target 기반 update request 성공 시 target refresh 타임스탬프를 갱신한다."""
+    if not target_ids:
+        return 0
+    result = await session.execute(
+        text(_MARK_TARGETS_REFRESHED_SQL),
+        {"target_ids": target_ids},
+    )
+    return len(result.scalars().all())
+
+
+async def mark_poi_cache_targets_refresh_failed(
+    session: AsyncSession,
+    target_ids: list[str],
+) -> int:
+    """target 기반 update request 실패 시 target 실패 타임스탬프를 갱신한다."""
+    if not target_ids:
+        return 0
+    result = await session.execute(
+        text(_MARK_TARGETS_FAILED_SQL),
+        {"target_ids": target_ids},
+    )
+    return len(result.scalars().all())

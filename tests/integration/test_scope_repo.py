@@ -11,6 +11,7 @@ import pytest
 from sqlalchemy import text
 
 from krtour.map.infra import feature_repo, scope_repo
+from krtour.map.infra.poi_cache_target_repo import upsert_poi_cache_target
 from krtour.map.providers.standard_data import cultural_festivals_to_bundles
 
 if TYPE_CHECKING:
@@ -243,7 +244,7 @@ async def test_count_features_matching_scope_dispatches(
     with pytest.raises(ValueError, match="unsupported scope type"):
         await scope_repo.count_features_matching_scope(
             migrated_session,
-            {"type": "cache_target_keys"},
+            {"type": "unknown"},
         )
 
 
@@ -259,3 +260,55 @@ async def test_count_sigungu_scope_requires_resolver(
                 "radius_km": 3.0,
             },
         )
+
+
+async def test_resolve_cache_target_keys_uses_active_targets(
+    migrated_session: AsyncSession,
+) -> None:
+    near = await _load(
+        migrated_session,
+        "SCOPE-TARGET-NEAR",
+        lon="126.9780",
+        lat="37.5665",
+        sigungu_code="11140",
+    )
+    await _load(
+        migrated_session,
+        "SCOPE-TARGET-FAR",
+        lon="129.0756",
+        lat="35.1796",
+        bjd_code="2611010100",
+        sigungu_code="26110",
+    )
+    target = await upsert_poi_cache_target(
+        migrated_session,
+        external_system="tripmate",
+        target_key="poi-1",
+        lon=126.9780,
+        lat=37.5665,
+        radius_km=1.0,
+    )
+    await upsert_poi_cache_target(
+        migrated_session,
+        external_system="tripmate",
+        target_key="poi-disabled",
+        lon=126.9780,
+        lat=37.5665,
+        radius_km=1.0,
+        update_enabled=False,
+    )
+
+    result = await scope_repo.resolve_cache_target_keys(
+        migrated_session,
+        external_system="tripmate",
+        target_keys=["poi-1", "missing", "poi-disabled"],
+    )
+
+    assert result.feature_ids == (near.feature.feature_id,)
+    assert result.cache_targets[0].target_id == target.target_id
+    assert result.cache_target_matches[0].target_id == target.target_id
+    assert result.cache_target_matches[0].relation == "within_radius"
+    assert result.matched_scope()["target_count"] == 3
+    assert result.matched_scope()["active_target_count"] == 1
+    assert result.matched_scope()["skipped_missing_keys"] == ["missing"]
+    assert result.matched_scope()["skipped_disabled_keys"] == ["poi-disabled"]

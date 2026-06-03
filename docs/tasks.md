@@ -4,10 +4,10 @@
 
 ## 진행 중
 
-**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#163(T-206a-geo 재검증 문서)
-까지 merged. 현재 작업은 T-205c(Phase 2 스키마: provider refresh policy / POI cache
-target / F5~F8 violation 기반)이며, 완료 후 T-206d request 실행 본체, admin
-API/Dagster sensor로 이어간다.
+**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#164(T-205c Phase 2 ops
+스키마)까지 merged. 현재 작업은 T-206d(request 실행 본체 + `cache_target_keys`
+scope)이며, 완료 후 T-207a admin API, T-207f POI/cache target API, T-208e Dagster
+sensor로 이어간다.
 
 ### 현재 기준 보강 필요 체크포인트 (2026-06-03)
 
@@ -38,17 +38,20 @@ API/Dagster sensor로 이어간다.
    연결은 후속 PR에서 진행한다.
 8. **feature update request 큐** — T-205a에서 `ops.feature_update_requests` 테이블과
    ORM 매핑을 추가했고, T-206b에서 request/import job lifecycle repo, T-206c에서
-   `AsyncKrtourMapClient` 표면을 추가한다. API/sensor는 T-207/T-208로 분리한다.
+   `AsyncKrtourMapClient` 표면을 추가했다. T-206d는 runner 주입형 실행 본체이며,
+   API/sensor는 T-207/T-208로 분리한다.
 9. **scope resolver** — T-206a에서 `feature_ids`, `center_radius`, `bbox`,
-   `sigungu_by_radius`, `provider_dataset` dry-run/count resolver를 구현한다.
-   `cache_target_keys`는 T-205c `ops.poi_cache_targets` 도입 후 T-206d 실행 본체에서
-   연결한다.
+   `sigungu_by_radius`, `provider_dataset` dry-run/count resolver를 구현했다.
+   `cache_target_keys`는 T-206d에서 active POI/cache target 기반 resolver와 target
+   link 재계산으로 연결한다.
 10. **검증 기준** — WSL unit/integration/live pytest + Windows Playwright e2e + GitHub
    Actions green 후 머지.
 
 ## 최근 완료 (2026-05-31~2026-06-03)
 
-- **T-205c** (본 PR): `alembic 0009`로
+- **T-206d** (본 PR): `infra.feature_update_executor`, `cache_target_keys` resolver,
+  target link 재계산, provider refresh policy skip, runner 기반 DB 적재 통합 테스트.
+- **PR#164** (merged 2026-06-03): `alembic 0009`로
   `ops.data_integrity_violations`, `ops.poi_cache_targets`,
   `ops.poi_cache_target_feature_links`, `ops.provider_refresh_policies`를 추가하고,
   ORM row + raw SQL repo + PostGIS 통합 테스트를 구현.
@@ -295,7 +298,7 @@ API/Dagster sensor로 이어간다.
   sigungu_by_radius/provider_dataset + `count_features_matching_scope` dry_run).
   `sigungu_by_radius`는 kraddr-geo `/v2/regions/within-radius` 호출(D-11).
   DB repo는 kraddr-geo client를 직접 import하지 않고 async resolver를 주입받는다.
-  `cache_target_keys` resolver는 `ops.poi_cache_targets` 테이블 도입 후 Phase 2.
+  `cache_target_keys` resolver는 T-206d에서 `ops.poi_cache_targets` 기반으로 완료.
 - [x] T-206a-geo — (형제 repo `python-kraddr-geo`) `POST
   /v2/regions/within-radius` 엔드포인트와 optional PostGIS 실데이터 테스트가
   `python-kraddr-geo` main(PR #114/#115 계열)에 반영됨을 재검증했다. krtour-map은
@@ -303,7 +306,9 @@ API/Dagster sensor로 이어간다.
 - [x] T-206b — `infra/feature_update_repo.py` (enqueue/claim/start/finish/get/list/cancel,
   advisory lock + SKIP LOCKED, keyset cursor D-10).
 - [x] T-206c — `AsyncKrtourMapClient` feature-update 메서드 4종.
-- [ ] T-206d — request 실행 본체(scope→provider/dataset 역추적 refresh, D-6/D-8).
+- [x] T-206d — request 실행 본체(scope→provider/dataset 역추적 refresh, D-6/D-8).
+  runner 주입형 `infra.feature_update_executor`, `cache_target_keys` resolver, target
+  link 재계산, provider refresh policy skip, `AsyncKrtourMapClient` 실행 메서드.
 
 **Phase 3 — FastAPI 라우터 (`krtour-map-admin` 패키지)**
 - [ ] T-207a — `/admin/feature-update-requests` CRUD + cancel + run-now (§5).

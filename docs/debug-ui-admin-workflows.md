@@ -1567,16 +1567,17 @@ tradeoff 근거를 PR 설명이나 `docs/journal.md`에 남긴다.
     - validation job.
     - load job.
 11. **Feature update request**
-    - `ops.feature_update_requests` migration.
+    - ✅ `ops.feature_update_requests` migration.
     - `POST /admin/feature-update-requests`.
-    - `center_radius`, `sigungu_by_radius` dry-run.
+    - ✅ `center_radius`, `sigungu_by_radius`, `cache_target_keys` dry-run.
+    - ✅ runner 주입형 request 실행 본체.
     - Dagster sensor/worker 연결.
 12. **POI/cache target**
-    - `ops.poi_cache_targets`, `ops.poi_cache_target_feature_links`,
+    - ✅ `ops.poi_cache_targets`, `ops.poi_cache_target_feature_links`,
       `ops.provider_refresh_policies` migration.
     - `PUT/DELETE /admin/poi-cache-targets/{external_system}/{target_key}`.
     - `GET /features/nearby/by-target`.
-    - `scope.type='cache_target_keys'` dry-run/load.
+    - ✅ `scope.type='cache_target_keys'` dry-run/load core.
 
 ## 23. 완료 기준
 
