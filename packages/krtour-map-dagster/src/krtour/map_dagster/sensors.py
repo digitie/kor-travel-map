@@ -92,10 +92,15 @@ def feature_update_request_worker_job() -> None:
 )
 def feature_update_request_queue_sensor(
     context: SensorEvaluationContext,
-    krtour_map_client: object,
+    krtour_map_client: object | None = None,
 ) -> RunRequest | SkipReason:
     """queued/now request가 있으면 worker run 1건을 요청한다."""
-    client = cast("AsyncKrtourMapClient", krtour_map_client)
+    client = cast(
+        "AsyncKrtourMapClient",
+        krtour_map_client
+        if krtour_map_client is not None
+        else _resource_object(context, "krtour_map_client"),
+    )
     request = _run_async(client.peek_next_update_request())
     if request is None:
         return SkipReason("queued feature update request 없음")

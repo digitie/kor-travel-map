@@ -534,9 +534,9 @@ CREATE INDEX idx_offline_uploads_state
   ON ops.offline_uploads (state, created_at DESC);
 ```
 
-첫 load job 구현은 JSON/JSONL `FeatureBundle` dump만 지원한다. CSV/TSV column
-mapping과 validation wizard는 admin API/UI 후속에서 같은 테이블과 `import_jobs` 연결을
-사용한다.
+첫 load job과 기본 admin API/UI 구현은 JSON/JSONL `FeatureBundle` dump만 지원한다.
+CSV/TSV column mapping과 validation wizard는 후속에서 같은 테이블과 `import_jobs`
+연결을 사용한다.
 
 ### 9.2 `ops.dedup_review_queue` (ADR-016)
 

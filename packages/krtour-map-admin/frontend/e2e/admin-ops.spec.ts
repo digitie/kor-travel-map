@@ -77,4 +77,32 @@ test.describe("admin/ops pages", () => {
     await expect(page.getByLabel("scope mode")).toBeVisible();
     await expect(page.getByText("Nearby features")).toBeVisible();
   });
+
+  test("/admin/offline-uploads", async ({ page }) => {
+    await page.goto("/admin/offline-uploads");
+
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Offline uploads" }),
+    ).toBeVisible();
+    await expect(page.getByText("파일 업로드")).toBeVisible();
+    await expect(page.getByTestId("offline-upload-file-input")).toBeVisible();
+    for (const label of ["provider", "dataset key", "sync scope", "created by"]) {
+      await expect(page.getByLabel(label, { exact: true })).toBeVisible();
+    }
+    await expect(page.getByRole("button", { name: "업로드" })).toBeDisabled();
+    await expect(page.getByLabel("offline upload state")).toBeVisible();
+    await expect(page.getByLabel("provider filter")).toBeVisible();
+    await expect(page.getByLabel("dataset filter")).toBeVisible();
+    for (const column of [
+      "upload",
+      "state",
+      "provider/dataset",
+      "file",
+      "size",
+      "updated",
+      "actions",
+    ]) {
+      await expect(page.getByRole("columnheader", { name: column })).toBeVisible();
+    }
+  });
 });

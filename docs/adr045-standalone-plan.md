@@ -169,7 +169,9 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
   JSON/JSONL `FeatureBundle` parser + Dagster `offline_upload_load` job 구현.
 - **T-208b 후속** ✅ RustFS offline upload store wiring — 기본
   `offline_upload_store` resource와 Docker RustFS bucket init 구현.
-  `/admin/offline-uploads*` API/UI는 후속.
+- **T-208h** ✅ `/admin/offline-uploads*` API/UI — JSON/JSONL upload/list/detail,
+  RustFS/S3 object write, Dagster GraphQL `offline_upload_load` launch 구현.
+- **T-208i** CSV/TSV validation + column mapping wizard — 후속.
 
 ## 4.5 Phase 4.5 — Admin UI 최신화 (T-208d 이후 최우선)
 

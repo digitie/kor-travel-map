@@ -14,6 +14,7 @@ from .offline_uploads import OFFLINE_UPLOAD_JOBS
 from .resources import (
     build_offline_upload_store_from_settings,
     create_s3_client_from_settings,
+    krtour_map_client_resource,
     offline_upload_store_resource,
 )
 from .schedules import FEATURE_LOAD_JOBS, FEATURE_LOAD_SCHEDULES
@@ -46,6 +47,7 @@ __all__ = [
     "defs",
     "ensure_feature_address_valid",
     "load_feature_bundles_for_dagster",
+    "krtour_map_client_resource",
     "offline_upload_store_resource",
     "validate_feature_bundle_address",
     "validate_feature_bundles_address",

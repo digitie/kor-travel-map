@@ -144,6 +144,21 @@ T-207c 구현분은 `/admin/features` 목록, deactivate status override, `/admi
 목록/결정/merge다. `POST /admin/features` 수동 생성과 `DELETE /admin/features/{id}`
 영구 삭제는 `ops.admin_audit_log` 설계 후 별도 작업으로 남긴다.
 
+## 4.2 Offline uploads
+
+T-208h 기준 admin UI가 쓰는 기본 offline upload API는 admin 전체 OpenAPI에만 포함한다.
+TripMate/user subset에는 포함하지 않는다.
+
+| Method | Path | 용도 |
+|--------|------|------|
+| POST | `/admin/offline-uploads` | JSON/JSONL `FeatureBundle` 파일을 RustFS/S3 `krtour-uploads` bucket에 저장하고 `ops.offline_uploads` row 생성 |
+| GET | `/admin/offline-uploads` | state/provider/dataset keyset 목록 |
+| GET | `/admin/offline-uploads/{upload_id}` | 단건 metadata 조회 |
+| POST | `/admin/offline-uploads/{upload_id}/load` | Dagster GraphQL `launchRun`으로 `offline_upload_load` job 실행 |
+
+현재 업로드 포맷은 JSON/JSONL `FeatureBundle` dump다. CSV/TSV validation,
+column mapping preset, load 전 validation gate는 T-208i 후속이다.
+
 ## 5. Feature update request
 
 Feature update request는 OpenAPI로 Dagster feature update job을 제어하는 표준

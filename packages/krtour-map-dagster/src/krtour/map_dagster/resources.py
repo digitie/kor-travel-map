@@ -10,12 +10,15 @@ import importlib
 from typing import Any, cast
 
 from dagster import InitResourceContext, resource
+from krtour.map.client import AsyncKrtourMapClient
+from krtour.map.infra.db import make_async_engine
 from krtour.map.infra.file_store import S3ObjectStore
 from krtour.map.settings import KrtourMapSettings
 
 __all__ = [
     "build_offline_upload_store_from_settings",
     "create_s3_client_from_settings",
+    "krtour_map_client_resource",
     "offline_upload_store_resource",
 ]
 
@@ -62,3 +65,11 @@ def create_s3_client_from_settings(settings: KrtourMapSettings) -> Any:
 def offline_upload_store_resource(_context: InitResourceContext) -> S3ObjectStore:
     """Dagster ``offline_upload_store`` 기본 resource."""
     return build_offline_upload_store_from_settings(KrtourMapSettings())
+
+
+@resource(description="krtour-map app DB에 연결된 AsyncKrtourMapClient.")
+def krtour_map_client_resource(_context: InitResourceContext) -> AsyncKrtourMapClient:
+    """Dagster ``krtour_map_client`` 기본 resource."""
+    settings = KrtourMapSettings()
+    engine = make_async_engine(settings.pg_dsn)
+    return AsyncKrtourMapClient(engine, settings=settings)

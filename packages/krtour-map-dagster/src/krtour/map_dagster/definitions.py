@@ -9,7 +9,7 @@ from dagster import Definitions, ResourceDefinition, resource
 from .assets import FEATURE_LOAD_ASSETS
 from .maintenance import MAINTENANCE_JOBS, MAINTENANCE_SCHEDULES
 from .offline_uploads import OFFLINE_UPLOAD_JOBS
-from .resources import offline_upload_store_resource
+from .resources import krtour_map_client_resource, offline_upload_store_resource
 from .schedules import FEATURE_LOAD_JOBS, FEATURE_LOAD_SCHEDULES
 from .sensors import FEATURE_UPDATE_JOBS, FEATURE_UPDATE_SENSORS
 
@@ -46,6 +46,7 @@ DEFAULT_RESOURCE_VALUES: Final[dict[str, object]] = {
 """운영 definitions가 교체하지 않아도 안전한 기본 resource 값."""
 
 DEFAULT_RESOURCE_DEFINITIONS: Final[dict[str, ResourceDefinition]] = {
+    "krtour_map_client": krtour_map_client_resource,
     "offline_upload_store": offline_upload_store_resource,
 }
 """환경변수 기반 실제 구현을 제공하는 기본 Dagster resource."""

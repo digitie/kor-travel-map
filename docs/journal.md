@@ -2,6 +2,39 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-03 (codex) — T-208h offline uploads API/UI
+
+**작업**: admin UI #9의 선행 작업으로 `/admin/offline-uploads*` API와 기본 upload
+화면을 구현.
+
+- **Admin API**: `POST /admin/offline-uploads` multipart upload, `GET` 목록,
+  `GET /{upload_id}` 상세, `POST /{upload_id}/load` Dagster launch를 추가했다.
+  현재 upload 형식은 JSON/JSONL `FeatureBundle` 파일이다.
+- **RustFS 저장**: API가 먼저 `upload_id`를 만들고
+  `offline-uploads/{upload_id}/{filename}` key에 bytes를 저장한 뒤,
+  같은 id로 `ops.offline_uploads` row를 생성한다.
+- **Dagster 실행**: load endpoint는 DB row 상태를 확인한 뒤 Dagster GraphQL
+  `launchRun`으로 `offline_upload_load` job을 실행한다. run id/status를 API 응답
+  metadata로 반환한다.
+- **목록/상세 repo**: `infra.offline_upload_repo`에 keyset list page와 optional
+  `upload_id` insert를 추가했다.
+- **Admin UI**: `/admin/offline-uploads` 화면과 nav 항목, `offlineUploads.ts` typed
+  hook, `FormData` POST helper를 추가했다. 업로드, state/provider/dataset filter,
+  상세 panel, load 버튼을 제공한다.
+- **OpenAPI**: admin/user OpenAPI 산출물을 `--profile all`로 갱신했다. user subset에는
+  내부 offline upload API를 포함하지 않는다.
+- **검증**: backend/admin/Dagster/offline upload focused pytest `21 passed`, targeted
+  `ruff`, 전체 strict `mypy`, `lint-imports`, OpenAPI drift check, frontend
+  `type-check`, `lint`, `build`, React Doctor full scan 통과. React Doctor optional
+  warning 7개는 기존 shadcn/ui primitive와 Dagster iframe rule로 분류했다.
+- **Live smoke**: WSL 실제 서버(API `9011`, web `9012`, Dagster `9013`)에서 multipart
+  upload → RustFS `krtour-uploads` 저장 → Dagster `offline_upload_load` run
+  `SUCCESS` → DB `upload_state=loaded`, `job_state=done`, `progress=100`을 확인했다.
+- **Windows Playwright**: WSL IP fallback으로 `admin-ops.spec.ts` 6/6 통과. 새
+  `/admin/offline-uploads` route smoke를 추가했다.
+- **다음**: 9번 admin UI 최신화 우선순위를 최상위로 두고 T-208i CSV/TSV validation +
+  column mapping wizard부터 진행.
+
 ## 2026-06-03 (codex) — T-208b RustFS offline upload store wiring
 
 **작업**: admin UI #9 offline upload 화면의 선행조건으로, Dagster

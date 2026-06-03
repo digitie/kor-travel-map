@@ -6,6 +6,7 @@ import {
   HomeIcon,
   ListChecksIcon,
   MapIcon,
+  UploadCloudIcon,
   RefreshCwIcon,
   RadarIcon,
   RouteIcon,
@@ -31,6 +32,11 @@ const navItems = [
     icon: RefreshCwIcon,
   },
   { href: "/admin/poi-cache-targets", label: "POI targets", icon: RouteIcon },
+  {
+    href: "/admin/offline-uploads",
+    label: "Offline uploads",
+    icon: UploadCloudIcon,
+  },
   { href: "/admin/dagster", label: "Dagster", icon: WorkflowIcon },
   { href: "/etl", label: "ETL preview", icon: DatabaseIcon },
 ] as const;

@@ -346,12 +346,14 @@ feature update request 큐는 T-208e 이후 다음 흐름을 따른다.
    `fail_update_request()`를 best-effort 호출하고, 선택 notifier resource에 알림
    payload를 전달한다.
 
-offline upload load job은 T-208g 이후 다음 흐름을 따른다.
+offline upload load job은 T-208h 이후 다음 흐름을 따른다.
 
 1. Admin API/UI가 원본 파일을 RustFS 등 객체 저장소에 보존하고
    `ops.offline_uploads` row를 만든다. D-14 기준 운영 버킷은 `krtour-uploads`이며,
    원본은 만료 없이 보존한다.
-2. 운영자가 Dagster `offline_upload_load` job을 `upload_id` config로 실행한다.
+2. 운영자가 admin UI에서 load를 누르면 admin API가 Dagster GraphQL `launchRun`으로
+   `offline_upload_load` job을 `upload_id` config와 함께 실행한다. Dagster UI에서
+   같은 job을 수동 실행할 수도 있다.
 3. Op `load_offline_upload`는 `offline_upload_store` resource로 `storage_key` bytes를
    읽고, `byte_size`와 `checksum_sha256`을 검증한다.
 4. 현재 첫 구현은 JSON/JSONL `FeatureBundle` dump만 지원한다. parser는 kind별 detail
@@ -361,8 +363,8 @@ offline upload load job은 T-208g 이후 다음 흐름을 따른다.
    transaction으로 처리한다.
 6. 기본 `offline_upload_store` resource는 `KRTOUR_MAP_OBJECT_STORE_*`와
    `KRTOUR_MAP_OFFLINE_UPLOAD_BUCKET`에서 RustFS/S3 호환 client를 만든다.
-7. CSV/TSV column mapping, validation wizard, multipart `/admin/offline-uploads*` API는
-   후속이다.
+7. Multipart `/admin/offline-uploads*` 기본 API/UI는 T-208h에서 구현됐다.
+   CSV/TSV column mapping과 validation wizard는 후속 T-208i다.
 
 ## 10. 정기 schedule 구현 (krtour-map Dagster)
 

@@ -147,6 +147,7 @@ from krtour.map.infra.models import (
     FeatureRow,
     FeatureUpdateRequestRow,
     ImportJobRow,
+    OfflineUploadRow,
     PoiCacheTargetFeatureLinkRow,
     PoiCacheTargetRow,
     ProviderRefreshPolicyRow,
@@ -154,6 +155,15 @@ from krtour.map.infra.models import (
     SourceLinkRow,
     SourceRecordRow,
     metadata,
+)
+from krtour.map.infra.offline_upload_repo import (
+    OfflineUpload,
+    OfflineUploadPage,
+    create_offline_upload,
+    finish_offline_upload_load,
+    get_offline_upload,
+    list_offline_uploads,
+    mark_offline_upload_loading,
 )
 from krtour.map.infra.poi_cache_target_repo import (
     PoiCacheTarget,
@@ -226,6 +236,7 @@ __all__ = [
     "PoiCacheTargetRow",
     "PoiCacheTargetFeatureLinkRow",
     "ProviderRefreshPolicyRow",
+    "OfflineUploadRow",
     # file_store (ADR-015 S3 호환 객체 저장소)
     "S3ObjectStore",
     "StoredObject",
@@ -276,6 +287,14 @@ __all__ = [
     "heartbeat_import_job",
     "finish_import_job",
     "recover_stale_running_jobs",
+    # offline_upload_repo (ADR-045 D-14 / T-208h)
+    "OfflineUpload",
+    "OfflineUploadPage",
+    "create_offline_upload",
+    "get_offline_upload",
+    "list_offline_uploads",
+    "mark_offline_upload_loading",
+    "finish_offline_upload_load",
     # feature_update_repo (ADR-045 feature update request queue)
     "FEATURE_UPDATE_JOB_KIND",
     "FEATURE_UPDATE_QUEUE_ADVISORY_KEY",
