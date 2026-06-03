@@ -333,8 +333,9 @@ feature를 업데이트한다.
 
 구현 상태: T-206a에서 `infra.scope_repo.count_features_matching_scope`가
 `feature_ids`, `center_radius`, `bbox`, `sigungu_by_radius`, `provider_dataset`의
-read-only dry-run 해석을 제공한다. `cache_target_keys`는 `ops.poi_cache_targets`
-도입 후 Phase 2에서 구현한다.
+read-only dry-run 해석을 제공한다. T-206d에서 `cache_target_keys`도 active
+`ops.poi_cache_targets` 기반으로 해석하고, missing/deleted/disabled key를
+`matched_scope`에 기록한다.
 
 ### 5.4 조회
 
@@ -427,8 +428,9 @@ CREATE INDEX idx_feature_update_job
 `FeatureUpdateRequestRow`가 이 DDL을 반영한다. `infra.feature_update_repo`는
 dry-run preview, request/import job enqueue, priority claim, start/finish/cancel,
 단건 조회, keyset 목록 조회를 구현했다(T-206b). `AsyncKrtourMapClient`는
-enqueue/get/list/cancel 메서드와 transaction 경계를 노출한다(T-206c). Admin HTTP
-router와 OpenAPI schema export 연결은 T-207a에서 별도 구현한다.
+enqueue/get/list/cancel 메서드와 transaction 경계를 노출한다(T-206c). T-206d의
+`infra.feature_update_executor`는 runner 주입형 request 실행 본체를 제공한다. Admin
+HTTP router와 OpenAPI schema export 연결은 T-207a에서 별도 구현한다.
 
 ## 7. Provider 실행 API와의 관계
 

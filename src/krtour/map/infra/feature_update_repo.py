@@ -47,6 +47,7 @@ __all__ = [
     "claim_next_update_request",
     "start_update_request",
     "finish_update_request",
+    "set_update_request_matched_scope",
     "cancel_update_request",
     "get_update_request",
     "list_update_requests",
@@ -245,6 +246,15 @@ WHERE request_id = :request_id
 RETURNING {_RETURN_COLUMNS}
 """
 
+_SET_MATCHED_SCOPE_SQL: Final[str] = f"""
+UPDATE ops.feature_update_requests
+SET matched_scope = CAST(:matched_scope AS jsonb),
+    updated_at = now()
+WHERE request_id = :request_id
+  AND state IN ('queued', 'running')
+RETURNING {_RETURN_COLUMNS}
+"""
+
 _FINISH_REQUEST_SQL: Final[str] = f"""
 UPDATE ops.feature_update_requests
 SET state = :state,
@@ -264,7 +274,7 @@ SET state = 'running',
     heartbeat_at = now(),
     current_stage = COALESCE(:current_stage, current_stage)
 WHERE job_id = :job_id
-  AND state = 'queued'
+  AND state IN ('queued', 'running')
 """
 
 _FINISH_IMPORT_JOB_SQL: Final[str] = """
@@ -471,6 +481,25 @@ async def finish_update_request(
         error_message=error_message,
     )
     return request
+
+
+async def set_update_request_matched_scope(
+    session: AsyncSession,
+    request_id: str,
+    *,
+    matched_scope: Mapping[str, Any],
+) -> FeatureUpdateRequest | None:
+    """queued/running request의 실행 시점 scope 해석 결과를 저장한다."""
+    row = (
+        await session.execute(
+            text(_SET_MATCHED_SCOPE_SQL),
+            {
+                "request_id": request_id,
+                "matched_scope": _json_param(matched_scope),
+            },
+        )
+    ).one_or_none()
+    return _row_to_request(row) if row is not None else None
 
 
 async def cancel_update_request(

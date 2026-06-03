@@ -2,6 +2,33 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-03 (codex) — T-206d feature update request 실행 본체
+
+**작업**: ADR-045 독립 프로그램화 후속 T-206d. `ops.feature_update_requests` queued
+request를 실제 provider/dataset refresh 실행 계획으로 분해하고, runner 주입형 실행기로
+request/import job 상태 전이와 POI target link 갱신을 연결.
+
+- **Executor**: `infra.feature_update_executor` 신규. `build_feature_update_execution_plan`,
+  `execute_next_feature_update_request`, `execute_feature_update_request`를 제공한다.
+  provider API client/Dagster는 import하지 않고 `ProviderDatasetRefreshRunner`로 주입받는다.
+- **Scope**: `scope.type='cache_target_keys'` resolver 추가. active
+  `ops.poi_cache_targets` 주변 feature를 PostGIS `coord_5179`로 계산하고,
+  missing/deleted/disabled key를 `matched_scope`에 기록한다.
+- **Policy**: `ops.provider_refresh_policies`의 `enabled`, `source_kind`,
+  `targeted_policy`와 target `provider_overrides`를 실행 계획에 적용한다. rate-limit
+  값은 runner/Dagster resource가 provider 호출을 제한할 수 있도록 scope metadata로
+  전달한다.
+- **Target link**: 실행 성공 후 target 주변 feature를 다시 해석해
+  `ops.poi_cache_target_feature_links`를 재계산하고, target
+  `last_requested_at`/`last_refreshed_at`/`last_failed_at`을 갱신한다.
+- **Client**: `AsyncKrtourMapClient.execute_next_feature_update_request` /
+  `execute_feature_update_request` 추가. T-207a admin run-now와 T-208e Dagster sensor가
+  이 표면을 공유한다.
+- **검증**: `tests/integration/test_feature_update_executor.py`와
+  `test_scope_repo.py` target scope 테스트로 runner 기반 DB 적재, request/job `done`,
+  target link/refresh 타임스탬프, `follow_system` skip을 확인했다.
+- **다음**: T-207a `/admin/feature-update-requests` 라우터.
+
 ## 2026-06-03 (codex) — T-205c Phase 2 ops 스키마
 
 **작업**: ADR-045 독립 프로그램화 후속 T-205c. request 실행 본체와 admin/Dagster
