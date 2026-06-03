@@ -25,7 +25,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from krtour.map_admin import __version__
 from krtour.map_admin.routers import (
+    admin_features_router,
     dagster_router,
+    dedup_review_router,
     etl_router,
     feature_update_requests_router,
     features_router,
@@ -98,6 +100,8 @@ def create_app(settings: AdminSettings | None = None) -> FastAPI:
         if settings.debug_routes_enabled:
             application.include_router(mois_detail_router)
 
+    application.include_router(admin_features_router)
+    application.include_router(dedup_review_router)
     application.include_router(feature_update_requests_router)
     application.include_router(poi_cache_targets_router)
     application.include_router(dagster_router)

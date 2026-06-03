@@ -11,7 +11,9 @@ prefix 분리 (ADR-035):
 
 from __future__ import annotations
 
+from krtour.map_admin.routers.admin_features import router as admin_features_router
 from krtour.map_admin.routers.dagster import router as dagster_router
+from krtour.map_admin.routers.dedup_review import router as dedup_review_router
 from krtour.map_admin.routers.etl import router as etl_router
 from krtour.map_admin.routers.feature_update_requests import (
     router as feature_update_requests_router,
@@ -28,6 +30,8 @@ __all__ = [
     "health_router",
     "version_router",
     "etl_router",
+    "admin_features_router",
+    "dedup_review_router",
     "feature_update_requests_router",
     "poi_cache_targets_router",
     "features_router",

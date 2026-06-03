@@ -1,5 +1,29 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-03 Codex 작업 메모 — T-207c admin features/dedup backend
+
+ADR-045 T-207c로 `krtour-map-admin`에 `/admin/features` 운영 목록과
+`POST /admin/features/{feature_id}/deactivate`를 추가했다. 목록은
+name/updated_at/created_at/kind/status/provider/issue_count sort, 반복 filter,
+keyset cursor를 지원하고 primary source와 열린 data integrity issue summary를 함께
+반환한다.
+
+비활성화는 `feature.features.status='inactive'`만 전환하고 `deleted_at`은 건드리지
+않는다. `prevent_provider_reactivation=true`이면 `ops.feature_overrides`에 active
+`field_path='status'` override를 남기며, provider `upsert_feature`는 이 override가
+있는 feature의 status/deleted_at을 덮어쓰지 않는다. 실제 PostGIS 통합 테스트에서
+deactivate 후 provider가 같은 feature를 active로 재적재해도 inactive가 유지됨을 검증했다.
+
+중복 검토 backend로 `/admin/dedup-review` 목록과 `PATCH /admin/dedup-review/{review_key}`를
+추가했다. accepted/rejected/ignored 전이는 queue status만 갱신하고, merged는
+ADR-039 `dedup-merge:{review_key}` advisory lock 안에서 `feature_merge_history`를 남기는
+기존 merge path를 호출한다. 요청 body의 `master_feature_id`가 있으면 그 feature를
+master로 사용하고, 없으면 기존 자동 master 선정 규칙을 따른다.
+
+수동 feature 생성(`POST /admin/features`)과 영구 삭제(`DELETE /admin/features/{id}`)는
+`ops.admin_audit_log` 설계가 선행되어야 하므로 이번 PR에서 구현하지 않았다. 다음 한
+작업은 **T-207d `/ops/*` consistency/jobs/metrics**다.
+
 ## 2026-06-03 Codex 작업 메모 — T-208e Dagster feature update sensor
 
 ADR-045 T-208e로 `packages/krtour-map-dagster`에 feature update request 큐 실행

@@ -1,0 +1,348 @@
+"""``admin_feature_repo`` DB 무관 단위 테스트."""
+
+from __future__ import annotations
+
+import json
+from datetime import UTC, datetime
+from typing import Any
+
+import pytest
+
+from krtour.map.infra import admin_feature_repo as repo
+from krtour.map.infra.merge_repo import MergeError, MergeOutcome
+
+_NOW = datetime(2026, 6, 3, tzinfo=UTC)
+
+
+class _Mappings:
+    def __init__(self, rows: list[dict[str, Any]]) -> None:
+        self._rows = rows
+
+    def all(self) -> list[dict[str, Any]]:
+        return self._rows
+
+    def first(self) -> dict[str, Any] | None:
+        return self._rows[0] if self._rows else None
+
+    def one(self) -> dict[str, Any]:
+        return self._rows[0]
+
+
+class _Result:
+    def __init__(self, rows: list[dict[str, Any]] | None = None) -> None:
+        self._rows = rows or []
+
+    def mappings(self) -> _Mappings:
+        return _Mappings(self._rows)
+
+    def first(self) -> object | None:
+        return object() if self._rows else None
+
+    def one_or_none(self) -> Any:
+        if not self._rows:
+            return None
+        return type("Row", (), self._rows[0])()
+
+
+class _Session:
+    def __init__(self, results: list[_Result]) -> None:
+        self._results = results
+        self.calls: list[dict[str, Any]] = []
+
+    async def execute(self, statement: object, params: dict[str, Any]) -> _Result:
+        self.calls.append({"statement": str(statement), "params": params})
+        return self._results.pop(0)
+
+
+def _feature_row(feature_id: str = "feature-1") -> dict[str, Any]:
+    return {
+        "feature_id": feature_id,
+        "kind": "place",
+        "name": "광화문",
+        "category": "01070300",
+        "status": "active",
+        "lon": 126.9769,
+        "lat": 37.5759,
+        "address_label": "서울특별시 종로구",
+        "primary_provider": "python-mois-api",
+        "primary_dataset_key": "mois_license_features_bulk",
+        "issue_count": 1,
+        "issues": json.dumps(
+            [
+                {
+                    "violation_key": "issue-1",
+                    "violation_type": "missing_address",
+                    "severity": "warning",
+                    "message": "주소 검토 필요",
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        "created_at": _NOW,
+        "updated_at": _NOW,
+    }
+
+
+def _dedup_row(review_key: str = "review-1") -> dict[str, Any]:
+    return {
+        "review_key": review_key,
+        "status": "pending",
+        "total_score": 90,
+        "name_score": 95,
+        "spatial_score": 85,
+        "category_score": 100,
+        "feature_id_a": "feature-a",
+        "name_a": "장소 A",
+        "kind_a": "place",
+        "category_a": "01070300",
+        "lon_a": 126.9,
+        "lat_a": 37.5,
+        "provider_a": "python-mois-api",
+        "dataset_key_a": "mois_license_features_bulk",
+        "feature_id_b": "feature-b",
+        "name_b": "장소 B",
+        "kind_b": "place",
+        "category_b": "01070300",
+        "lon_b": None,
+        "lat_b": None,
+        "provider_b": None,
+        "dataset_key_b": None,
+        "distance_m": None,
+        "decision_reason": "manual_review",
+        "reviewed_by": None,
+        "reviewed_at": None,
+        "created_at": _NOW,
+    }
+
+
+def test_admin_feature_cursor_round_trip_all_sorts() -> None:
+    item = repo._admin_feature_row(_feature_row())
+
+    for sort, order in (
+        ("name", "asc"),
+        ("kind", "asc"),
+        ("status", "desc"),
+        ("provider", "asc"),
+        ("updated_at", "desc"),
+        ("created_at", "asc"),
+        ("issue_count", "desc"),
+    ):
+        cursor = repo._encode_cursor(item, sort=sort, order=order)
+        params = repo._cursor_params(cursor, sort=sort, order=order)
+        assert params["cursor_feature_id"] == "feature-1"
+
+    with pytest.raises(ValueError, match="invalid admin features cursor"):
+        repo._cursor_params("not-base64", sort="name", order="asc")
+    with pytest.raises(ValueError, match="invalid admin features cursor"):
+        repo._cursor_params(cursor, sort="name", order="asc")
+
+
+def test_admin_feature_row_and_json_helpers() -> None:
+    assert repo._normalize_values(["a", "", "b"]) == ["a", "b"]
+    assert repo._normalize_values([]) is None
+    assert repo._normalize_query("  Ａ  ") == "A"
+    assert repo._json_array('[{"a": 1}, 2]') == ({"a": 1},)
+
+    row = repo._admin_feature_row(_feature_row())
+    assert row.feature_id == "feature-1"
+    assert row.lon == 126.9769
+    assert row.issue_count == 1
+    assert row.issues[0]["violation_type"] == "missing_address"
+
+
+@pytest.mark.asyncio
+async def test_list_admin_features_builds_params_and_next_cursor() -> None:
+    session = _Session([_Result([_feature_row("feature-1"), _feature_row("feature-2")])])
+
+    page = await repo.list_admin_features(
+        session,  # type: ignore[arg-type]
+        q=" 광화문 ",
+        providers=["python-mois-api"],
+        has_issue=True,
+        page_size=1,
+        sort="issue_count",
+        order="desc",
+    )
+
+    assert len(page.items) == 1
+    assert page.next_cursor is not None
+    params = session.calls[0]["params"]
+    assert params["q_like"] == "%광화문%"
+    assert params["providers"] == ["python-mois-api"]
+    assert params["has_issue"] is True
+
+
+@pytest.mark.asyncio
+async def test_deactivate_feature_with_and_without_override() -> None:
+    override_row = {
+        "override_key": "override-1",
+        "feature_id": "feature-1",
+        "field_path": "status",
+        "override_value": '"inactive"',
+        "prevent_provider_reactivation": True,
+        "reason": "운영상 제외",
+        "created_by": "local-admin",
+        "created_at": _NOW,
+    }
+    session = _Session(
+        [
+            _Result(
+                [
+                    {
+                        "feature_id": "feature-1",
+                        "previous_status": "active",
+                        "status": "inactive",
+                    }
+                ]
+            ),
+            _Result([override_row]),
+        ]
+    )
+
+    result = await repo.deactivate_feature(
+        session,  # type: ignore[arg-type]
+        "feature-1",
+        reason="운영상 제외",
+        operator="local-admin",
+        prevent_provider_reactivation=True,
+    )
+
+    assert result is not None
+    assert result.override is not None
+    assert result.override.override_value == "inactive"
+    assert result.override_created is True
+
+    no_override = await repo.deactivate_feature(
+        _Session(
+            [
+                _Result(
+                    [
+                        {
+                            "feature_id": "feature-2",
+                            "previous_status": "hidden",
+                            "status": "inactive",
+                        }
+                    ]
+                )
+            ]
+        ),  # type: ignore[arg-type]
+        "feature-2",
+        reason="운영상 제외",
+        prevent_provider_reactivation=False,
+    )
+    assert no_override is not None
+    assert no_override.override_created is False
+
+    missing = await repo.deactivate_feature(
+        _Session([_Result([])]),  # type: ignore[arg-type]
+        "missing",
+        reason="없음",
+    )
+    assert missing is None
+
+
+def test_dedup_cursor_and_row_mapping() -> None:
+    item = repo._dedup_review_row(_dedup_row())
+    cursor = repo._encode_dedup_cursor(item)
+
+    assert repo._dedup_cursor_params(cursor) == {
+        "cursor_score": 90.0,
+        "cursor_review_key": "review-1",
+    }
+    assert item.feature_a.feature_id == "feature-a"
+    assert item.feature_b.lon is None
+    assert item.distance_m is None
+
+    with pytest.raises(ValueError, match="invalid dedup review cursor"):
+        repo._dedup_cursor_params("bad")
+
+
+@pytest.mark.asyncio
+async def test_list_dedup_reviews_and_decision() -> None:
+    session = _Session([_Result([_dedup_row("review-1"), _dedup_row("review-2")])])
+
+    page = await repo.list_dedup_reviews(
+        session,  # type: ignore[arg-type]
+        providers=["python-mois-api"],
+        min_score=80,
+        page_size=1,
+    )
+
+    assert len(page.items) == 1
+    assert page.next_cursor is not None
+    params = session.calls[0]["params"]
+    assert params["providers"] == ["python-mois-api"]
+    assert params["min_score"] == 80
+
+    changed = await repo.set_dedup_review_decision(
+        _Session([_Result([{"review_key": "review-1"}])]),  # type: ignore[arg-type]
+        "review-1",
+        decision="accepted",
+        reviewed_by="local-admin",
+    )
+    assert changed is True
+
+    unchanged = await repo.set_dedup_review_decision(
+        _Session([_Result([])]),  # type: ignore[arg-type]
+        "review-1",
+        decision="ignored",
+    )
+    assert unchanged is False
+
+
+@pytest.mark.asyncio
+async def test_merge_dedup_review_auto_and_explicit_master(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _merge_from_review(
+        _session: object,
+        review_key: str,
+        *,
+        merged_by: str | None = None,
+        reason: str | None = None,
+    ) -> MergeOutcome:
+        assert review_key == "review-1"
+        assert merged_by == "local-admin"
+        assert reason == "dup"
+        return MergeOutcome("feature-a", "feature-b", 1, 0, "merge-1", True)
+
+    async def _apply_feature_merge(
+        _session: object,
+        *,
+        master_id: str,
+        loser_id: str,
+        score: float | None = None,
+        review_key: str | None = None,
+        merged_by: str | None = None,
+        reason: str | None = None,
+    ) -> MergeOutcome:
+        assert master_id == "feature-b"
+        assert loser_id == "feature-a"
+        assert score == 90.0
+        assert review_key == "review-1"
+        return MergeOutcome(master_id, loser_id, 0, 0, "merge-2", True)
+
+    monkeypatch.setattr(repo, "merge_from_review", _merge_from_review)
+    monkeypatch.setattr(repo, "apply_feature_merge", _apply_feature_merge)
+
+    auto = await repo.merge_dedup_review(
+        object(),  # type: ignore[arg-type]
+        "review-1",
+        merged_by="local-admin",
+        reason="dup",
+    )
+    assert auto.merge_id == "merge-1"
+
+    explicit = await repo.merge_dedup_review(
+        _Session([_Result([_dedup_row("review-1")])]),  # type: ignore[arg-type]
+        "review-1",
+        master_feature_id="feature-b",
+    )
+    assert explicit.master_feature_id == "feature-b"
+
+    with pytest.raises(MergeError, match="master_feature_id"):
+        await repo.merge_dedup_review(
+            _Session([_Result([_dedup_row("review-1")])]),  # type: ignore[arg-type]
+            "review-1",
+            master_feature_id="other",
+        )

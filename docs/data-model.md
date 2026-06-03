@@ -527,6 +527,11 @@ CREATE INDEX idx_dedup_status_score ON ops.dedup_review_queue (status, total_sco
 
 ### 9.3 `ops.feature_overrides`
 
+구현됨 — **alembic 0010** + `infra/models.py::FeatureOverrideRow` +
+`infra/admin_feature_repo.py`. 운영자가 비활성화/수동 보정한 field를 provider 재적재가
+덮지 않도록 기록한다. T-207c는 `field_path='status'` +
+`prevent_provider_reactivation=true`를 `feature_repo.upsert_feature`에서 존중한다.
+
 ```sql
 CREATE TABLE ops.feature_overrides (
   override_key         UUID PRIMARY KEY DEFAULT x_extension.gen_random_uuid(),
@@ -535,6 +540,7 @@ CREATE TABLE ops.feature_overrides (
   field_path           TEXT NOT NULL,                 -- 'name', 'detail.phones[0]', ...
   source_value         JSONB,
   override_value       JSONB,
+  prevent_provider_reactivation BOOLEAN NOT NULL DEFAULT false,
   status               TEXT NOT NULL DEFAULT 'active', -- active, inactive, superseded
   reason               TEXT,
   created_by           TEXT,
@@ -544,6 +550,12 @@ CREATE TABLE ops.feature_overrides (
 
 CREATE INDEX idx_overrides_feature  ON ops.feature_overrides (feature_id, status);
 CREATE INDEX idx_overrides_field    ON ops.feature_overrides (field_path);
+CREATE UNIQUE INDEX uq_overrides_active_feature_field
+  ON ops.feature_overrides (feature_id, field_path)
+  WHERE status = 'active';
+CREATE INDEX idx_overrides_prevent_reactivation
+  ON ops.feature_overrides (feature_id, field_path)
+  WHERE status = 'active' AND prevent_provider_reactivation;
 ```
 
 ### 9.4 `ops.feature_merge_history`

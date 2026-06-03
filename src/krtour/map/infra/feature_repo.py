@@ -114,9 +114,31 @@ ON CONFLICT (feature_id) DO UPDATE SET
     sibling_group_id = EXCLUDED.sibling_group_id,
     detail = EXCLUDED.detail,
     raw_refs = EXCLUDED.raw_refs,
-    status = EXCLUDED.status,
+    status = CASE
+        WHEN EXISTS (
+            SELECT 1
+            FROM ops.feature_overrides AS fo
+            WHERE fo.feature_id = EXCLUDED.feature_id
+              AND fo.field_path = 'status'
+              AND fo.status = 'active'
+              AND fo.prevent_provider_reactivation
+        )
+        THEN features.status
+        ELSE EXCLUDED.status
+    END,
     updated_at = EXCLUDED.updated_at,
-    deleted_at = EXCLUDED.deleted_at
+    deleted_at = CASE
+        WHEN EXISTS (
+            SELECT 1
+            FROM ops.feature_overrides AS fo
+            WHERE fo.feature_id = EXCLUDED.feature_id
+              AND fo.field_path = 'status'
+              AND fo.status = 'active'
+              AND fo.prevent_provider_reactivation
+        )
+        THEN features.deleted_at
+        ELSE EXCLUDED.deleted_at
+    END
 RETURNING (xmax = 0) AS inserted
 """
 

@@ -34,6 +34,19 @@ ADR 참조
 
 from __future__ import annotations
 
+from krtour.map.infra.admin_feature_repo import (
+    AdminFeaturePage,
+    AdminFeatureRow,
+    DedupReviewPage,
+    DedupReviewRow,
+    FeatureDeactivateResult,
+    FeatureOverride,
+    deactivate_feature,
+    list_admin_features,
+    list_dedup_reviews,
+    merge_dedup_review,
+    set_dedup_review_decision,
+)
 from krtour.map.infra.advisory_lock import (
     advisory_lock,
     advisory_lock_key,
@@ -119,6 +132,7 @@ from krtour.map.infra.models import (
     DataIntegrityViolationRow,
     DedupReviewQueueRow,
     FeatureConsistencyReportRow,
+    FeatureOverrideRow,
     FeatureRow,
     FeatureUpdateRequestRow,
     ImportJobRow,
@@ -195,6 +209,7 @@ __all__ = [
     "FeatureConsistencyReportRow",
     "DedupReviewQueueRow",
     "ImportJobRow",
+    "FeatureOverrideRow",
     "FeatureUpdateRequestRow",
     "DataIntegrityViolationRow",
     "PoiCacheTargetRow",
@@ -213,6 +228,18 @@ __all__ = [
     "get_feature_row",
     "features_in_bbox",
     "features_nearby_poi_cache_target",
+    # admin_feature_repo (ADR-045 T-207c)
+    "AdminFeaturePage",
+    "AdminFeatureRow",
+    "FeatureDeactivateResult",
+    "FeatureOverride",
+    "DedupReviewPage",
+    "DedupReviewRow",
+    "list_admin_features",
+    "deactivate_feature",
+    "list_dedup_reviews",
+    "merge_dedup_review",
+    "set_dedup_review_decision",
     # dedup_repo (ADR-016 dedup 후보 큐)
     "DedupQueueResult",
     "enqueue_dedup_candidate",

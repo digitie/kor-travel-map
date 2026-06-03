@@ -5,6 +5,19 @@
 
 ## [Unreleased]
 
+### 운영 — Admin feature review/deactivate API (2026-06-03)
+
+- **NEW**: `krtour-map-admin`에 `GET /admin/features`,
+  `POST /admin/features/{feature_id}/deactivate`, `GET/PATCH /admin/dedup-review`를
+  추가했다.
+- **NEW**: `alembic 0010`으로 `ops.feature_overrides`를 추가했다. active
+  `field_path='status'` override는 `prevent_provider_reactivation` 플래그로 provider
+  재적재가 운영자 비활성화를 되살리지 못하게 한다.
+- **CHANGED**: `feature_repo.upsert_feature`가 active status override가 있는 feature의
+  status/deleted_at을 provider payload로 덮지 않는다.
+- **TEST**: admin feature/dedup 라우터 unit test, PostGIS deactivate/override/upsert
+  통합 테스트, OpenAPI export를 추가했다.
+
 ### 운영 — Dagster feature update sensor (2026-06-03)
 
 - **NEW**: `krtour-map-dagster`에 `feature_update_request_queue_sensor`와

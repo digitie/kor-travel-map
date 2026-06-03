@@ -62,6 +62,7 @@ __all__ = [
     "FeatureConsistencyReportRow",
     "DedupReviewQueueRow",
     "ImportJobRow",
+    "FeatureOverrideRow",
     "FeatureUpdateRequestRow",
     "DataIntegrityViolationRow",
     "PoiCacheTargetRow",
@@ -477,6 +478,79 @@ class DedupReviewQueueRow(Base):
     decision_reason: Mapped[str | None] = mapped_column(String)
     reviewed_by: Mapped[str | None] = mapped_column(String)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
+
+
+# =============================================================================
+# ops.feature_overrides  (ADR-045 D-8 / T-207c)
+# =============================================================================
+
+
+class FeatureOverrideRow(Base):
+    """``ops.feature_overrides`` row mapping.
+
+    운영자가 비활성화/수동 보정한 field를 provider 재적재가 되살리지 않도록 보존한다.
+    raw SQL은 ``infra/admin_feature_repo.py``와 ``infra/feature_repo.py``에서 사용한다.
+    """
+
+    __tablename__ = "feature_overrides"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('active','inactive','superseded')",
+            name="ck_overrides_status",
+        ),
+        Index("idx_overrides_feature", "feature_id", "status"),
+        Index("idx_overrides_field", "field_path"),
+        Index(
+            "uq_overrides_active_feature_field",
+            "feature_id",
+            "field_path",
+            unique=True,
+            postgresql_where=text("status = 'active'"),
+        ),
+        Index(
+            "idx_overrides_prevent_reactivation",
+            "feature_id",
+            "field_path",
+            postgresql_where=text(
+                "status = 'active' AND prevent_provider_reactivation"
+            ),
+        ),
+        {"schema": "ops"},
+    )
+
+    override_key: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=text("x_extension.gen_random_uuid()"),
+    )
+    feature_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("feature.features.feature_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    source_record_key: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey(
+            "provider_sync.source_records.source_record_key",
+            ondelete="SET NULL",
+        ),
+    )
+    field_path: Mapped[str] = mapped_column(Text, nullable=False)
+    source_value: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    override_value: Mapped[dict[str, Any] | str | int | float | bool | None] = (
+        mapped_column(JSONB)
+    )
+    prevent_provider_reactivation: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false"),
+    )
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'active'"),
+    )
+    reason: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()"),
     )

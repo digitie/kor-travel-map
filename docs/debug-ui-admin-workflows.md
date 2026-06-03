@@ -431,6 +431,10 @@ Route: `/features/new`
 
 #### `POST /admin/features/{feature_id}/deactivate`
 
+구현됨(T-207c): backend는 status 비활성화와 `status` override 생성까지 제공한다.
+`prevent_provider_reactivation=true`이면 provider `upsert_feature`가 이 feature의
+status/deleted_at을 덮지 않는다.
+
 요청:
 
 ```json
@@ -458,6 +462,9 @@ Route: `/features/new`
 #### `DELETE /admin/features/{feature_id}`
 
 영구 삭제는 되돌리기 어렵다. UI는 두 단계 확인을 요구한다.
+
+구현 상태(T-207c): 미구현. 삭제 이력/audit event가 먼저 필요하므로
+`ops.admin_audit_log` 설계 후 별도 PR에서 구현한다.
 
 1. 확인 모달에서 영향 범위 표시:
    - source_links cascade 수
