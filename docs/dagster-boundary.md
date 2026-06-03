@@ -263,9 +263,9 @@ POST /admin/feature-update-requests
 
 1. API가 scope를 검증하고 대상 feature/provider/dataset을 계산한다.
 2. API가 `ops.feature_update_requests`와 `ops.import_jobs` row를 만든다.
-3. `run_mode=queued`이면 Dagster sensor가 queued request를 claim한다.
-4. `run_mode=now`이면 API가 즉시 Dagster run을 만들 수 있으나 request/job row는
-   먼저 저장한다.
+3. `run_mode=queued`이면 Dagster sensor가 queued request를 peek하고 worker run을
+   만든다. 실제 request/import job 상태 전이는 worker가 수행한다.
+4. `run_mode=now`도 request/job row를 먼저 저장하고, 같은 sensor queue에서 감지한다.
 5. Dagster run은 provider 호출, DTO 변환, 적재, dedup refresh, consistency check를
    수행하고 progress를 `ops.import_jobs`에 갱신한다.
 6. API는 `GET /admin/feature-update-requests/{id}`와
@@ -332,6 +332,19 @@ krtour-map Dagster는 위 spec을 참고해 asset/schedule을 정의 (메인 라
 운영 시 정기 적재와 사용자 트리거 update 모두 Dagster가 실행한다. admin API는
 OpenAPI 계약과 queue/progress를 관리한다. 둘 다 advisory lock으로 race를 방지한다
 (ADR-011/039).
+
+feature update request 큐는 T-208e 이후 다음 흐름을 따른다.
+
+1. `feature_update_request_queue_sensor`가 15초 간격으로
+   `AsyncKrtourMapClient.peek_next_update_request()`를 호출한다.
+2. Sensor는 DB 상태를 바꾸지 않고 request id를 Dagster `RunRequest` config/tag에
+   담아 `feature_update_request_worker`를 요청한다.
+3. Worker op `execute_feature_update_request`가
+   `AsyncKrtourMapClient.execute_feature_update_request()`를 호출해 request/import job
+   상태 전이와 provider refresh runner 실행을 한 흐름으로 처리한다.
+4. Worker run 실패는 `feature_update_request_failure_sensor`가 감지해
+   `fail_update_request()`를 best-effort 호출하고, 선택 notifier resource에 알림
+   payload를 전달한다.
 
 ## 10. 정기 schedule 가이드 (krtour-map Dagster)
 
@@ -445,6 +458,9 @@ docker compose up dagster
 메인 라이브러리 단독으로는 Dagster를 띄우지 않는다 (의존성 X). Dagster 실행 코드는
 krtour-map 독립 프로그램 패키지에 둔다. 디버그 / 적재 검증은 admin API
 (`krtour.map_admin`) 또는 직접 Python 스크립트로도 가능하다.
+
+feature update worker 실행에는 `krtour_map_client`와 `feature_update_runner` resource가
+필수다. 실패 알림은 선택 resource `feature_update_failure_notifier`로 연결한다.
 
 ## 15. 본 라이브러리가 노출하는 helper 요약
 

@@ -1,5 +1,24 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-03 Codex 작업 메모 — T-208e Dagster feature update sensor
+
+ADR-045 T-208e로 `packages/krtour-map-dagster`에 feature update request 큐 실행
+sensor/job을 추가한다. `feature_update_request_queue_sensor`는 15초 간격으로
+`AsyncKrtourMapClient.peek_next_update_request()`를 호출해 queued/now request 후보를
+상태 변경 없이 확인하고, request id를 Dagster `RunRequest` run config/tag에 실어
+`feature_update_request_worker` job을 생성한다.
+
+worker job의 `execute_feature_update_request` op는 기존
+`AsyncKrtourMapClient.execute_feature_update_request()`를 호출한다. 실제 provider 호출은
+`feature_update_runner` resource가 맡고, 메인 라이브러리는 Dagster를 import하지 않는다.
+executor가 request를 `failed`로 닫은 경우에도 op가 Dagster `Failure`를 발생시켜
+Dagster run 상태와 `ops.feature_update_requests` 상태가 같이 관측된다.
+
+`feature_update_request_failure_sensor`는 worker run 실패 시 run tag의 request id를 읽어
+`AsyncKrtourMapClient.fail_update_request()`로 request/import job 실패 전이를 보강하고,
+선택 resource `feature_update_failure_notifier`가 있으면 알림 payload를 전달한다.
+T-207b는 사용자 결정에 따라 구현하지 않는다. 다음 한 작업은 **T-207c**다.
+
 ## 2026-06-03 Codex 작업 메모 — T-207f POI/cache target API
 
 ADR-045 T-207f로 `krtour-map-admin`에 `/admin/poi-cache-targets`와
@@ -384,8 +403,8 @@ alembic 0008, 완료) → T-206a(scope resolver, 완료) → T-206b(feature upda
 완료) → T-206c(client, 완료) → T-206a-geo(형제 repo endpoint 검증 완료) →
 T-205c(Phase 2 스키마, 완료) → T-206d(request 실행 본체, 완료) →
 T-207a(admin update-requests 라우터, 완료) → T-207f(POI/cache target API, 완료) →
-**T-208e(Dagster sensor)** → T-207d/e(ops + 사용자 features 라우터) → T-208d
-(Dagster schedule). 그 다음
+T-208e(Dagster sensor, 완료) → **T-207c(admin features 검토/병합/override/deactivate)** →
+T-207d/e(ops + 사용자 features 라우터) → T-208d(Dagster schedule). 그 다음
 Sprint 5 provider(MOIS-sibling) + Phase 2 정합성.
 세부는 `docs/sprints/SPRINT-5.md`.
 

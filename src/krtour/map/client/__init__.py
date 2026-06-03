@@ -80,10 +80,16 @@ from krtour.map.infra.feature_update_repo import (
     enqueue_feature_update_request as repo_enqueue_feature_update_request,
 )
 from krtour.map.infra.feature_update_repo import (
+    finish_update_request as repo_finish_update_request,
+)
+from krtour.map.infra.feature_update_repo import (
     get_update_request as repo_get_update_request,
 )
 from krtour.map.infra.feature_update_repo import (
     list_update_requests as repo_list_update_requests,
+)
+from krtour.map.infra.feature_update_repo import (
+    peek_next_update_request as repo_peek_next_update_request,
 )
 from krtour.map.infra.merge_repo import MergeOutcome, merge_from_review
 from krtour.map.infra.status_repo import StatusCounts, gather_status_counts
@@ -429,6 +435,28 @@ class AsyncKrtourMapClient:
             return await repo_cancel_update_request(
                 session, request_id, error_message=error_message
             )
+
+    async def fail_update_request(
+        self,
+        request_id: str,
+        *,
+        dagster_run_id: str | None = None,
+        error_message: str | None = None,
+    ) -> FeatureUpdateRequest | None:
+        """queued/running feature update request를 ``failed``로 닫는다."""
+        async with self._session_factory() as session, session.begin():
+            return await repo_finish_update_request(
+                session,
+                request_id,
+                state="failed",
+                dagster_run_id=dagster_run_id,
+                error_message=error_message,
+            )
+
+    async def peek_next_update_request(self) -> FeatureUpdateRequest | None:
+        """Dagster sensor가 다음 queued request를 상태 변경 없이 확인한다."""
+        async with self._session_factory() as session:
+            return await repo_peek_next_update_request(session)
 
     async def execute_next_feature_update_request(
         self,

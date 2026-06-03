@@ -4,10 +4,10 @@
 
 ## 진행 중
 
-**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#166(T-207a
-`/admin/feature-update-requests` admin API)까지 merged. 현재 작업은 T-207f
-POI/cache target API이며, 완료 후 T-208e Dagster sensor로 이어간다.
-T-207b/c/d/e는 queue 실행 검증의 blocker가 아니므로 T-208e 이후로 미룬다.
+**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#167(T-207f
+POI/cache target API)까지 merged. 현재 작업은 T-208e Dagster feature update
+sensor이며, 완료 후 T-207c → T-207d → T-207e 순서로 이어간다. T-207b는 사용자
+결정에 따라 구현하지 않는다.
 
 ### 현재 기준 보강 필요 체크포인트 (2026-06-03)
 
@@ -34,14 +34,14 @@ T-207b/c/d/e는 queue 실행 검증의 blocker가 아니므로 T-208e 이후로 
    저장소 endpoint/public URL 예시는 `9003`을 기준으로 작성하고, console 링크는
    `9004`만 사용한다.
 7. **admin Dagster 운영 화면** — `/admin/dagster`는 `GET /ops/dagster/summary` 자체
-   요약 UI와 Dagster webserver embed를 제공한다. 실제 feature update queue/sensor
-   연결은 후속 PR에서 진행한다.
+   요약 UI와 Dagster webserver embed를 제공한다. T-208e는 queue/sensor 실행 연결을
+   Dagster package에 추가한다.
 8. **feature update request 큐** — T-205a에서 `ops.feature_update_requests` 테이블과
    ORM 매핑을 추가했고, T-206b에서 request/import job lifecycle repo, T-206c에서
    `AsyncKrtourMapClient` 표면을 추가했다. T-206d는 runner 주입형 실행 본체이며,
-   T-207a는 admin REST 생성/조회/취소/run-now 재큐잉을 연결했다. T-207f는
-   POI/cache target REST와 by-target 주변 feature 조회를 연결한다. Sensor는 T-208e로
-   분리한다.
+   T-207a는 admin REST 생성/조회/취소/run-now 재큐잉을 연결했고, T-207f는
+   POI/cache target REST와 by-target 주변 feature 조회를 연결했다. T-208e는
+   Dagster sensor/job으로 request 실행을 연결한다.
 9. **scope resolver** — T-206a에서 `feature_ids`, `center_radius`, `bbox`,
    `sigungu_by_radius`, `provider_dataset` dry-run/count resolver를 구현했다.
    `cache_target_keys`는 T-206d에서 active POI/cache target 기반 resolver와 target
@@ -51,7 +51,11 @@ T-207b/c/d/e는 queue 실행 검증의 blocker가 아니므로 T-208e 이후로 
 
 ## 최근 완료 (2026-05-31~2026-06-03)
 
-- **T-207f** (본 PR): `/admin/poi-cache-targets` admin API와
+- **T-208e** (본 PR): Dagster `feature_update_request_queue_sensor` +
+  `feature_update_request_worker` + failure sensor. queued/now request를
+  `AsyncKrtourMapClient.execute_feature_update_request()`로 실행하고, 실패 시
+  request/import job 실패 전이와 notifier payload를 보강.
+- **PR#167** (merged 2026-06-03): `/admin/poi-cache-targets` admin API와
   `/features/nearby/by-target` summary 조회. target CRUD/list/detail/delete,
   PostGIS `coord_5179` 거리 조회, filter/sort/cursor, OpenAPI export, unit/integration
   테스트.
@@ -323,10 +327,12 @@ T-207b/c/d/e는 queue 실행 검증의 blocker가 아니므로 T-208e 이후로 
 - [x] T-207a — `/admin/feature-update-requests` CRUD + cancel + run-now (§5).
   실제 provider/Dagster 직접 실행 대신 `run_mode='now'` request 재큐잉까지 연결했다.
 - [x] T-207f — `/admin/poi-cache-targets` + `/features/nearby/by-target` (Phase 2,
-  본 PR). target CRUD/list/detail/delete와 by-target summary/cursor 조회를 연결했다.
-- [ ] T-207b — `/admin/providers/{p}/datasets/{d}/runs` (§7). T-208e 이후 보강.
+  PR#167). target CRUD/list/detail/delete와 by-target summary/cursor 조회를 연결했다.
+- [x] T-207b — `/admin/providers/{p}/datasets/{d}/runs` (§7). 사용자 결정에 따라
+  구현하지 않음으로 닫는다. provider run 상세는 T-207d `/ops/*`와 Dagster UI/summary
+  경로에서 필요한 만큼 다룬다.
 - [ ] T-207c — `/admin/features` 검토/병합/override/deactivate (D-8). T-208e 이후 보강.
-- [ ] T-207d — `/ops/*` consistency/jobs/metrics. T-208e 이후 admin UI polish와 함께 보강.
+- [ ] T-207d — `/ops/*` consistency/jobs/metrics. T-207c 이후 admin UI polish와 함께 보강.
 - [ ] T-207e — `/features/*` + `/tripmate/features/batch` (사용자, `tripmate-rest-api.md`, D-7).
   TripMate batch 연동 직전 보강.
 - [ ] T-207g — OpenAPI export 이원화(admin/user) + drift gate (ADR-031 amend, D-3).
@@ -342,7 +348,9 @@ T-207b/c/d/e는 queue 실행 검증의 blocker가 아니므로 T-208e 이후로 
       연결) + 주소/좌표 검증 + `AsyncKrtourMapClient.load_feature_bundles` PostGIS
       적재 통합 테스트.
 - [ ] T-208d — schedules(KST cron, 부하 분산).
-- [ ] T-208e — sensors(feature_update_requests 폴링 + run_failure → 알림, D-6).
+- [x] T-208e — sensors(feature_update_requests 폴링 + run_failure → 알림, D-6).
+      `feature_update_request_queue_sensor`는 `peek_next_update_request()`로 queued/now
+      request를 감지하고, `feature_update_request_worker`가 request id별 실행을 맡는다.
 - [ ] T-208f — consistency/dedup refresh job.
 - [ ] T-208g — offline upload load job (D-14).
 

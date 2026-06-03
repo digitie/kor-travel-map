@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
+import pytest
+
 from krtour.map_dagster.definitions import defs
+
+pytestmark = pytest.mark.filterwarnings(
+    "ignore:Parameter `owners` of initializer `SensorDefinition.__init__`"
+    ".*:dagster_shared.utils.warnings.BetaWarning"
+)
 
 
 def test_feature_load_asset_keys_registered() -> None:
@@ -20,3 +27,15 @@ def test_feature_load_asset_keys_registered() -> None:
         "feature_place_knps_points",
         "feature_geometry_knps_records",
     } <= asset_keys
+
+
+def test_feature_update_job_and_sensors_registered() -> None:
+    assert defs.get_job_def("feature_update_request_worker").name == (
+        "feature_update_request_worker"
+    )
+    assert defs.resolve_sensor_def("feature_update_request_queue_sensor").name == (
+        "feature_update_request_queue_sensor"
+    )
+    assert defs.resolve_sensor_def("feature_update_request_failure_sensor").name == (
+        "feature_update_request_failure_sensor"
+    )

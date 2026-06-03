@@ -28,6 +28,7 @@ from krtour.map.infra.feature_update_repo import (
     finish_update_request,
     get_update_request,
     list_update_requests,
+    peek_next_update_request,
     start_update_request,
 )
 
@@ -145,6 +146,34 @@ async def test_claim_uses_priority_and_starts_linked_job(
     assert claimed_next is not None
     assert claimed_next.request_id == low.request_id
     assert await claim_next_update_request(migrated_session) is None
+
+
+async def test_peek_next_update_request_does_not_claim(
+    migrated_session: AsyncSession,
+) -> None:
+    low = await enqueue_feature_update_request(
+        migrated_session,
+        scope={"type": "feature_ids", "feature_ids": []},
+        priority=10,
+    )
+    high = await enqueue_feature_update_request(
+        migrated_session,
+        scope={"type": "feature_ids", "feature_ids": []},
+        priority=90,
+    )
+    assert isinstance(low, FeatureUpdateRequest)
+    assert isinstance(high, FeatureUpdateRequest)
+
+    peeked = await peek_next_update_request(migrated_session)
+    assert peeked is not None
+    assert peeked.request_id == high.request_id
+    assert peeked.state == "queued"
+    assert peeked.job_id is not None
+    assert (await _job_row(migrated_session, peeked.job_id))["state"] == "queued"
+
+    claimed = await claim_next_update_request(migrated_session)
+    assert claimed is not None
+    assert claimed.request_id == high.request_id
 
 
 async def test_claim_returns_none_when_queue_lock_is_held(
