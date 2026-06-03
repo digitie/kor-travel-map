@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### 운영 — Dagster provider schedules (2026-06-03)
+
+- **NEW**: `packages/krtour-map-dagster`에 Feature 적재 asset 9개의 KST schedule과
+  asset job을 등록했다.
+- **CHANGED**: 모든 provider schedule은 `execution_timezone="Asia/Seoul"`을 사용하고,
+  외부 API 호출이 몰리지 않도록 분/요일을 분산한다. 기본 status는 운영자가 명시적으로
+  켜기 전까지 `STOPPED`다.
+- **TEST**: Dagster `Definitions`에 schedule/job이 등록되고 cron/timezone/tag가
+  일치하는지 검증하는 smoke test를 추가했다.
+
 ### 운영 — OpenAPI admin/user 이원화 (2026-06-03)
 
 - **NEW**: `packages/krtour-map-admin/openapi.user.json`을 추가했다. TripMate/user

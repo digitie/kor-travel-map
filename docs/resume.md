@@ -1,5 +1,22 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-03 Codex 작업 메모 — T-208d Dagster schedules
+
+ADR-045 T-208d로 `packages/krtour-map-dagster`에 Feature 적재 asset 9개에 대한
+provider별 KST schedule과 asset job을 등록했다. 새 모듈
+`krtour.map_dagster.schedules`는 `FEATURE_LOAD_SCHEDULE_SPECS`,
+`FEATURE_LOAD_JOBS`, `FEATURE_LOAD_SCHEDULES`를 제공하고,
+`definitions.py`는 이를 `Definitions(jobs=..., schedules=...)`에 포함한다.
+
+모든 schedule은 `execution_timezone="Asia/Seoul"`이고, 외부 API 호출이 같은 시각에
+몰리지 않도록 분/요일을 분산한다. 기본 status는 `STOPPED`다. 운영 배포에서 필요한
+schedule만 enable하고, queue 기반 targeted update는 기존
+`feature_update_request_queue_sensor`가 계속 담당한다.
+
+검증 범위는 Dagster definitions smoke, schedule cron/timezone/tag 등록 테스트,
+targeted ruff/mypy다. 사용자 지시에 따라 다음 한 작업은 **T-211a admin UI 최신화
+선행 gap audit/API 계약 보강**이다. T-208f/T-208g는 admin UI 선행 작업 뒤로 미룬다.
+
 ## 2026-06-03 Codex 작업 메모 — T-207g OpenAPI admin/user 이원화
 
 ADR-045 T-207g로 `packages/krtour-map-admin/scripts/export_openapi.py`를 admin/user

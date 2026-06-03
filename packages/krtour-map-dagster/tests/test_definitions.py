@@ -3,8 +3,14 @@
 from __future__ import annotations
 
 import pytest
+from dagster import DefaultScheduleStatus
 
 from krtour.map_dagster.definitions import defs
+from krtour.map_dagster.schedules import (
+    FEATURE_LOAD_SCHEDULE_SPECS,
+    FEATURE_LOAD_SCHEDULES,
+    KST_TIMEZONE,
+)
 
 pytestmark = pytest.mark.filterwarnings(
     "ignore:Parameter `owners` of initializer `SensorDefinition.__init__`"
@@ -39,3 +45,21 @@ def test_feature_update_job_and_sensors_registered() -> None:
     assert defs.resolve_sensor_def("feature_update_request_failure_sensor").name == (
         "feature_update_request_failure_sensor"
     )
+
+
+def test_feature_load_schedules_registered_with_kst_cron() -> None:
+    expected = {
+        spec.schedule_name: spec for spec in FEATURE_LOAD_SCHEDULE_SPECS
+    }
+    assert len(FEATURE_LOAD_SCHEDULES) == len(expected)
+
+    for schedule_name, spec in expected.items():
+        schedule = defs.resolve_schedule_def(schedule_name)
+        assert schedule.name == schedule_name
+        assert schedule.cron_schedule == spec.cron_schedule
+        assert schedule.execution_timezone == KST_TIMEZONE
+        assert schedule.default_status == DefaultScheduleStatus.STOPPED
+        assert schedule.job_name == spec.job_name
+        assert schedule.tags["krtour_map.schedule_scope"] == "system"
+        assert schedule.tags["krtour_map.provider"] == spec.provider
+        assert schedule.tags["krtour_map.dataset_key"] == spec.dataset_key
