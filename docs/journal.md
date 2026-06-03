@@ -2,6 +2,28 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-03 (codex) — T-207d ops consistency/jobs/metrics API
+
+**작업**: ADR-045 Phase 3 T-207d. 운영 화면과 admin UI polish가 공통으로 사용할
+`/ops/*` 조회 API를 추가.
+
+- **Ops repo**: `infra.ops_repo` 추가. `ops.import_jobs`,
+  `ops.feature_consistency_reports`, `ops.data_integrity_violations`를 read-only raw SQL로
+  조회하고 `created_at`/`started_at`/`detected_at` 기준 keyset cursor를 제공한다.
+- **Metrics**: `GET /ops/metrics` 구현. feature/source/import job/dedup 상태 집계,
+  dedup FP 통계, 열린 data integrity issue 집계, 최근 consistency report를 반환한다.
+- **Jobs**: `GET /ops/import-jobs`, `GET /ops/import-jobs/{job_id}` 구현. Dagster
+  worker와 feature update request가 남긴 `ops.import_jobs` 상태를 운영 UI가 직접 볼 수
+  있게 했다.
+- **Consistency**: `GET /ops/consistency/reports`,
+  `GET /ops/consistency/issues` 구현. 기존 batch report(F1~F4)와 Phase 2 issue 큐를
+  같은 ops namespace에서 조회한다.
+- **OpenAPI**: `packages/krtour-map-admin/openapi.json`을 재생성하고 계약 문서를
+  갱신했다.
+- **검증**: `/ops` 라우터 unit `5 passed`, PostGIS ops repo 통합 `3 passed`, ruff,
+  mypy targeted 통과.
+- **다음**: T-207e `/features/*` + `/tripmate/features/batch`.
+
 ## 2026-06-03 (codex) — T-207c admin features/dedup backend
 
 **작업**: ADR-045 Phase 3 T-207c. 운영자가 feature를 검색/검토하고 비활성화, provider

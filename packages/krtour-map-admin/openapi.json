@@ -2328,6 +2328,642 @@
         "title": "NearbyTargetSummary",
         "type": "object"
       },
+      "OpsConsistencyReportRecord": {
+        "additionalProperties": false,
+        "description": "consistency report HTTP 표현.",
+        "properties": {
+          "batch_id": {
+            "title": "Batch Id",
+            "type": "string"
+          },
+          "cases": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Cases",
+            "type": "array"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "report_id": {
+            "title": "Report Id",
+            "type": "string"
+          },
+          "severity_max": {
+            "title": "Severity Max",
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "summary": {
+            "additionalProperties": true,
+            "title": "Summary",
+            "type": "object"
+          }
+        },
+        "required": [
+          "report_id",
+          "batch_id",
+          "started_at",
+          "severity_max",
+          "cases",
+          "summary"
+        ],
+        "title": "OpsConsistencyReportRecord",
+        "type": "object"
+      },
+      "OpsConsistencyReportsData": {
+        "additionalProperties": false,
+        "description": "consistency report 목록 data.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OpsConsistencyReportRecord"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "OpsConsistencyReportsData",
+        "type": "object"
+      },
+      "OpsConsistencyReportsListResponse": {
+        "additionalProperties": false,
+        "description": "``GET /ops/consistency/reports`` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/OpsConsistencyReportsData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/OpsListMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "OpsConsistencyReportsListResponse",
+        "type": "object"
+      },
+      "OpsDedupFpStatsRecord": {
+        "additionalProperties": false,
+        "description": "dedup 검토 큐 FP 통계.",
+        "properties": {
+          "confirmed": {
+            "title": "Confirmed",
+            "type": "integer"
+          },
+          "fp_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fp Rate"
+          },
+          "ignored": {
+            "title": "Ignored",
+            "type": "integer"
+          },
+          "pending": {
+            "title": "Pending",
+            "type": "integer"
+          },
+          "precision": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Precision"
+          },
+          "rejected": {
+            "title": "Rejected",
+            "type": "integer"
+          },
+          "resolved": {
+            "title": "Resolved",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "resolved",
+          "confirmed",
+          "rejected",
+          "ignored",
+          "pending",
+          "precision",
+          "fp_rate"
+        ],
+        "title": "OpsDedupFpStatsRecord",
+        "type": "object"
+      },
+      "OpsImportJobRecord": {
+        "additionalProperties": false,
+        "description": "``ops.import_jobs`` HTTP 표현.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "current_stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Stage"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "heartbeat_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heartbeat At"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "progress": {
+            "title": "Progress",
+            "type": "integer"
+          },
+          "source_checksum": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Checksum"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "status_url": {
+            "title": "Status Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "kind",
+          "payload",
+          "state",
+          "progress",
+          "created_at",
+          "status_url"
+        ],
+        "title": "OpsImportJobRecord",
+        "type": "object"
+      },
+      "OpsImportJobResponse": {
+        "additionalProperties": false,
+        "description": "``GET /ops/import-jobs/{job_id}`` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/OpsImportJobRecord"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "OpsImportJobResponse",
+        "type": "object"
+      },
+      "OpsImportJobsData": {
+        "additionalProperties": false,
+        "description": "import job 목록 data.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OpsImportJobRecord"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "OpsImportJobsData",
+        "type": "object"
+      },
+      "OpsImportJobsListResponse": {
+        "additionalProperties": false,
+        "description": "``GET /ops/import-jobs`` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/OpsImportJobsData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/OpsListMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "OpsImportJobsListResponse",
+        "type": "object"
+      },
+      "OpsIntegrityIssueCountsRecord": {
+        "additionalProperties": false,
+        "description": "운영 issue 집계.",
+        "properties": {
+          "by_severity": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By Severity",
+            "type": "object"
+          },
+          "by_status": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By Status",
+            "type": "object"
+          },
+          "by_type": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By Type",
+            "type": "object"
+          },
+          "open_total": {
+            "title": "Open Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "open_total",
+          "by_status",
+          "by_severity",
+          "by_type"
+        ],
+        "title": "OpsIntegrityIssueCountsRecord",
+        "type": "object"
+      },
+      "OpsIntegrityIssueRecord": {
+        "additionalProperties": false,
+        "description": "data integrity issue HTTP 표현.",
+        "properties": {
+          "dataset_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset Key"
+          },
+          "detected_at": {
+            "format": "date-time",
+            "title": "Detected At",
+            "type": "string"
+          },
+          "feature_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feature Id"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "severity": {
+            "title": "Severity",
+            "type": "string"
+          },
+          "source_record_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Record Key"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "violation_key": {
+            "title": "Violation Key",
+            "type": "string"
+          },
+          "violation_type": {
+            "title": "Violation Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "violation_key",
+          "violation_type",
+          "severity",
+          "message",
+          "payload",
+          "status",
+          "detected_at"
+        ],
+        "title": "OpsIntegrityIssueRecord",
+        "type": "object"
+      },
+      "OpsIntegrityIssuesData": {
+        "additionalProperties": false,
+        "description": "data integrity issue 목록 data.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OpsIntegrityIssueRecord"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "OpsIntegrityIssuesData",
+        "type": "object"
+      },
+      "OpsIntegrityIssuesListResponse": {
+        "additionalProperties": false,
+        "description": "``GET /ops/consistency/issues`` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/OpsIntegrityIssuesData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/OpsListMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "OpsIntegrityIssuesListResponse",
+        "type": "object"
+      },
+      "OpsListMeta": {
+        "additionalProperties": false,
+        "description": "목록 공통 meta.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "count",
+          "page_size",
+          "duration_ms"
+        ],
+        "title": "OpsListMeta",
+        "type": "object"
+      },
+      "OpsMetricsResponse": {
+        "additionalProperties": false,
+        "description": "``GET /ops/metrics`` 응답.",
+        "properties": {
+          "checked_at": {
+            "format": "date-time",
+            "title": "Checked At",
+            "type": "string"
+          },
+          "data_integrity_issues": {
+            "$ref": "#/components/schemas/OpsIntegrityIssueCountsRecord"
+          },
+          "dedup_fp_stats": {
+            "$ref": "#/components/schemas/OpsDedupFpStatsRecord"
+          },
+          "dedup_queue_by_status": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Dedup Queue By Status",
+            "type": "object"
+          },
+          "features_active": {
+            "title": "Features Active",
+            "type": "integer"
+          },
+          "features_by_kind": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Features By Kind",
+            "type": "object"
+          },
+          "features_inactive": {
+            "title": "Features Inactive",
+            "type": "integer"
+          },
+          "features_total": {
+            "title": "Features Total",
+            "type": "integer"
+          },
+          "import_jobs_by_state": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Import Jobs By State",
+            "type": "object"
+          },
+          "latest_consistency_report": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OpsConsistencyReportRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source_records_by_provider": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Source Records By Provider",
+            "type": "object"
+          }
+        },
+        "required": [
+          "checked_at",
+          "features_total",
+          "features_active",
+          "features_inactive",
+          "features_by_kind",
+          "source_records_by_provider",
+          "import_jobs_by_state",
+          "dedup_queue_by_status",
+          "dedup_fp_stats",
+          "data_integrity_issues"
+        ],
+        "title": "OpsMetricsResponse",
+        "type": "object"
+      },
       "PoiCacheTargetListResponse": {
         "additionalProperties": false,
         "description": "목록 응답.",
@@ -4676,6 +5312,260 @@
         ]
       }
     },
+    "/ops/consistency/issues": {
+      "get": {
+        "description": "열린 data integrity issue 목록.",
+        "operationId": "list_integrity_issues_ops_consistency_issues_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "open",
+                    "acknowledged",
+                    "resolved",
+                    "ignored"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": "open",
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "severity",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "info",
+                    "warning",
+                    "error",
+                    "critical"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Severity"
+            }
+          },
+          {
+            "in": "query",
+            "name": "violation_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Violation Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Provider"
+            }
+          },
+          {
+            "in": "query",
+            "name": "dataset_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dataset Key"
+            }
+          },
+          {
+            "in": "query",
+            "name": "feature_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Feature Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpsIntegrityIssuesListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Integrity Issues",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
+    "/ops/consistency/reports": {
+      "get": {
+        "description": "최근 consistency report 목록.",
+        "operationId": "list_consistency_reports_ops_consistency_reports_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "severity_max",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "OK",
+                    "WARN",
+                    "ERROR"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Severity Max"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpsConsistencyReportsListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Consistency Reports",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
     "/ops/dagster/summary": {
       "get": {
         "description": "Dagster GraphQL에서 repository, asset, schedule/sensor, recent run 정보를 읽어 admin UI 요약 DTO로 반환한다. Dagster webserver가 내려가도 200 응답(status=unavailable)으로 UI가 장애 상태를 표시할 수 있게 한다. summary 조회가 성공하면 embedded Dagster 화면의 로컬 첫 실행 NUX를 접기 위해 setNuxSeen mutation을 best-effort로 호출한다.",
@@ -4720,6 +5610,172 @@
         "tags": [
           "ops",
           "dagster"
+        ]
+      }
+    },
+    "/ops/import-jobs": {
+      "get": {
+        "description": "``ops.import_jobs`` 작업 목록.",
+        "operationId": "list_import_jobs_ops_import_jobs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "queued",
+                    "running",
+                    "done",
+                    "failed",
+                    "cancelled"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpsImportJobsListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Import Jobs",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
+    "/ops/import-jobs/{job_id}": {
+      "get": {
+        "description": "``ops.import_jobs`` 작업 단건.",
+        "operationId": "get_import_job_ops_import_jobs__job_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpsImportJobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Import Job",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
+    "/ops/metrics": {
+      "get": {
+        "description": "운영 홈/대시보드가 쓰는 DB 기반 summary metric.",
+        "operationId": "get_ops_metrics_ops_metrics_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpsMetricsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Ops Metrics",
+        "tags": [
+          "ops"
         ]
       }
     }

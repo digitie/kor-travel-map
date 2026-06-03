@@ -1,5 +1,26 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-03 Codex 작업 메모 — T-207d ops consistency/jobs/metrics API
+
+ADR-045 T-207d로 `krtour-map-admin`에 운영 조회용 `/ops/*` 라우터를 추가했다.
+새 endpoint는 `GET /ops/metrics`, `GET /ops/import-jobs`,
+`GET /ops/import-jobs/{job_id}`, `GET /ops/consistency/reports`,
+`GET /ops/consistency/issues`다.
+
+`infra.ops_repo`는 `ops.import_jobs`, `ops.feature_consistency_reports`,
+`ops.data_integrity_violations`를 read-only raw SQL로 조회한다. 목록은 각각
+`created_at`, `started_at`, `detected_at` 내림차순 keyset cursor를 사용하며, 기존
+`jobs_repo`의 lifecycle 전이 함수는 건드리지 않는다.
+
+`/ops/metrics`는 `status_repo.gather_status_counts`, dedup FP 통계, 열린
+data integrity issue 집계, 최근 consistency report를 한 번에 반환한다. `/ops/import-jobs`
+는 Dagster worker/feature update request가 남긴 `ops.import_jobs` 진행 상태를
+운영 UI가 직접 조회하는 표면이고, `/ops/consistency/*`는 기존 batch report(F1~F4)와
+Phase 2 issue 큐를 조회한다.
+
+검증 범위는 `/ops` 라우터 unit test, PostGIS ops repository 통합 테스트, OpenAPI export
+갱신이다. 다음 한 작업은 **T-207e `/features/*` + `/tripmate/features/batch`**다.
+
 ## 2026-06-03 Codex 작업 메모 — T-207c admin features/dedup backend
 
 ADR-045 T-207c로 `krtour-map-admin`에 `/admin/features` 운영 목록과

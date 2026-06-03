@@ -124,13 +124,12 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
   `/admin/providers/{provider}/datasets/{dataset_key}/runs` 라우터는 만들지 않는다.
   provider run 상세는 T-207d `/ops/*`와 Dagster UI/summary 경로에서 필요한 만큼
   제공한다.
-- **T-207c** `/admin/feature 검토/병합/override/deactivate` 라우터 —
-  `debug-ui-admin-workflows.md` 정본. dedup-merge/override/deactivate(기존
-  `merge_repo` + 신규 override 로직). D-8 결정에 따라
-  `prevent_provider_reactivation`을 구현한다. T-208e 이후 보강해도 된다.
-- **T-207d** `/ops/*` — consistency report 조회(F1~F4 기존 + Phase 2 F5~F8),
-  import_jobs 모니터, metrics. `status_repo` + `consistency` 재사용. T-208e 이후
-  admin UI polish와 함께 보강한다.
+- **T-207c** ✅ `/admin/feature 검토/병합/override/deactivate` 라우터 —
+  `/admin/features` 목록/비활성화, `ops.feature_overrides` 기반
+  `prevent_provider_reactivation`, `/admin/dedup-review` 결정/merge backend 완료.
+- **T-207d** ✅ `/ops/*` — consistency report 조회(F1~F4 기존 + Phase 2 issue 큐),
+  import_jobs 모니터, metrics. `GET /ops/metrics`, `/ops/import-jobs`,
+  `/ops/consistency/reports`, `/ops/consistency/issues` 완료.
 - **T-207e** `/features/*` 사용자/admin 공용 read 라우터 — in-bounds/{id}/search/
   batch. D-7 결정에 따라 사용자 `/features/*`와 admin `/admin/features/*` 응답을
   분리한다. TripMate batch 연동 직전 보강한다. `tripmate-rest-api.md` 참고.
@@ -237,7 +236,7 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
 7. **Phase 3 T-207a** — admin update-requests 라우터 — 완료.
 8. **Phase 3 T-207f** — POI/cache target admin/features API — 완료.
 9. **Phase 4 T-208e** — 완료. Dagster sensor가 queued/now request를 실행기로 연결.
-10. **Phase 3 T-207c/d/e** (admin features + ops + user features 라우터) — T-207b는
+10. **Phase 3 T-207e** (user/admin feature read + TripMate batch 라우터) — T-207b는
     구현하지 않는다.
 11. **Phase 5 T-209a/b** (docker-compose + 기동) — 라우터 동작 후 통합.
 12. **Phase 4 T-208 잔여** — provider resources/ops polish, TripMate 이관과 병행.

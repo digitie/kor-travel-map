@@ -5,6 +5,18 @@
 
 ## [Unreleased]
 
+### 운영 — `/ops/*` consistency/jobs/metrics API (2026-06-03)
+
+- **NEW**: `krtour-map-admin`에 `GET /ops/metrics`, `GET /ops/import-jobs`,
+  `GET /ops/import-jobs/{job_id}`, `GET /ops/consistency/reports`,
+  `GET /ops/consistency/issues`를 추가했다.
+- **NEW**: `infra.ops_repo`를 추가했다. `ops.import_jobs`,
+  `ops.feature_consistency_reports`, `ops.data_integrity_violations`를 read-only
+  keyset cursor로 조회하고, 열린 issue 집계를 제공한다.
+- **CHANGED**: `packages/krtour-map-admin/openapi.json`을 T-207d endpoint 기준으로
+  갱신했다.
+- **TEST**: `/ops` 라우터 unit test와 PostGIS ops repository 통합 테스트를 추가했다.
+
 ### 운영 — Admin feature review/deactivate API (2026-06-03)
 
 - **NEW**: `krtour-map-admin`에 `GET /admin/features`,
