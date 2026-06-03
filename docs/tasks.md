@@ -4,9 +4,9 @@
 
 ## 진행 중
 
-**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#171(T-207e
-TripMate/public feature read API)까지 merged. 현재 작업은 T-207g
-OpenAPI admin/user 이원화이며, 완료 후 T-208d Dagster schedules로 이어간다.
+**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#172(T-207g OpenAPI
+admin/user 이원화)까지 merged. 현재 작업은 T-208d Dagster schedules다. 완료 후
+사용자 지시에 따라 admin UI 최신화 선행 task(T-211a)를 최우선으로 진행한다.
 T-207b는 사용자 결정에 따라 구현하지 않는다.
 
 ### 현재 기준 보강 필요 체크포인트 (2026-06-03)
@@ -51,6 +51,9 @@ T-207b는 사용자 결정에 따라 구현하지 않는다.
 
 ## 최근 완료 (2026-05-31~2026-06-03)
 
+- **T-208d** (2026-06-03): `packages/krtour-map-dagster`에 Feature 적재 asset 9개의
+  KST schedule과 asset job을 등록했다. 모든 schedule은 `Asia/Seoul` 기준이고,
+  외부 API 호출 분산을 위해 분/요일을 나눴으며 기본 status는 `STOPPED`다.
 - **T-207g** (2026-06-03): OpenAPI export를 admin 전체
   `packages/krtour-map-admin/openapi.json`과 TripMate/user subset
   `packages/krtour-map-admin/openapi.user.json`으로 이원화했다. CI drift gate는
@@ -373,12 +376,23 @@ T-207b는 사용자 결정에 따라 구현하지 않는다.
 - [x] T-208c — provider load asset 9종(이미 구현·검증된 Feature provider 변환 함수
       연결) + 주소/좌표 검증 + `AsyncKrtourMapClient.load_feature_bundles` PostGIS
       적재 통합 테스트.
-- [ ] T-208d — schedules(KST cron, 부하 분산).
+- [x] T-208d — schedules(KST cron, 부하 분산).
+      현재 구현된 Feature 적재 asset 9개의 provider별 `ScheduleDefinition`과 asset job을
+      등록했다. 기본 status는 `STOPPED`.
 - [x] T-208e — sensors(feature_update_requests 폴링 + run_failure → 알림, D-6).
       `feature_update_request_queue_sensor`는 `peek_next_update_request()`로 queued/now
       request를 감지하고, `feature_update_request_worker`가 request id별 실행을 맡는다.
 - [ ] T-208f — consistency/dedup refresh job.
 - [ ] T-208g — offline upload load job (D-14).
+
+**Phase 4.5 — Admin UI 최신화 (사용자 지시로 T-208d 이후 최우선)**
+- [ ] T-211a — admin UI 최신 문서/현재 구현 gap audit + 선행 API/데이터 계약 보강.
+      `docs/debug-ui-admin-workflows.md`, `docs/openapi-admin-contract.md`, 현재
+      `/admin/*`·`/ops/*`·Dagster GraphQL summary를 대조해 UI가 즉시 쓸 수 없는
+      필드/엔드포인트/상태를 문서화하고, 필요한 backend 보강을 먼저 구현한다.
+- [ ] T-211b — admin UI 최신화 구현. Dagster 관리 화면 embed와 별개로 자체 UI에서
+      schedule/sensor/job/run/asset 상태를 꾸며 보여주고, feature/update request/ops
+      화면을 최신 문서 기준으로 보완한다. React Doctor 검증 필수.
 
 **Phase 5 — Docker / 배포**
 - [x] T-209a — `docker-compose.yml` 1차(api/frontend/dagster/postgres) + 고정 포트

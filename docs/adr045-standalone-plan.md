@@ -156,8 +156,9 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
 - **T-208c** provider load asset 9종 — thin wrapper(provider fetch → lib 변환 →
   `client.load_feature_bundles` → `sync_state` 갱신). ADR-034 9단계 순서. 각 asset
   `concurrency_key=provider:dataset`(advisory lock, ADR-039) + RetryPolicy.
-- **T-208d** `schedules.py` — provider별 cron(`execution_timezone="Asia/Seoul"`).
-  부하 분산(요일/시간 분리).
+- **T-208d** ✅ `schedules.py` — provider별 cron(`execution_timezone="Asia/Seoul"`).
+  Feature 적재 asset 9개의 asset job/schedule을 등록했고, 부하 분산을 위해 분/요일을
+  나눴다. 기본 status는 `STOPPED`.
 - **T-208e** ✅ `sensors.py` — (1) `feature_update_requests` 폴링 sensor:
   `peek_next_update_request` → request id별 `RunRequest` → worker job 안에서
   `execute_feature_update_request` 실행(D-6). (2) `run_failure_sensor` → 선택 notifier
@@ -166,6 +167,18 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
   `sync_dedup_candidates` 정기 실행.
 - **T-208g** offline upload load job — admin 업로드 파일(D-14 저장 위치) → 적재
   `import_jobs`.
+
+## 4.5 Phase 4.5 — Admin UI 최신화 (T-208d 이후 최우선)
+
+> 사용자 지시(2026-06-03): 기존 9번 admin UI 최신화의 우선순위를 최고로 올린다.
+> T-208d 완료 후 admin UI를 위해 선행해야 할 task부터 먼저 진행한다.
+
+- **T-211a** admin UI 최신 문서/현재 구현 gap audit + 선행 API/데이터 계약 보강.
+  `debug-ui-admin-workflows.md`, `openapi-admin-contract.md`, 구현된 admin/ops/Dagster
+  API를 대조해 UI가 바로 쓸 수 없는 필드·엔드포인트·상태를 먼저 닫는다.
+- **T-211b** admin UI 최신화 구현. Dagster webserver embed와 자체 Dagster summary UI를
+  함께 제공하고, schedule/sensor/job/run/asset 정보를 운영자가 읽기 좋은 화면으로
+  꾸민다. React Doctor를 완료 조건으로 둔다.
 
 ## 5. Phase 5 — Docker Compose / 배포
 
@@ -240,11 +253,13 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
 9. **Phase 4 T-208e** — 완료. Dagster sensor가 queued/now request를 실행기로 연결.
 10. **Phase 3 T-207e** — 완료. T-207b는 구현하지 않는다.
 11. **Phase 3 T-207g** — 완료. admin/user OpenAPI export 이원화 + drift gate.
-12. **Phase 4 T-208d** — Dagster schedules(KST cron, 부하 분산).
-13. **Phase 4 T-208 잔여** — provider resources/ops polish, TripMate 이관과 병행.
-14. **Phase 5 T-209a/b** (docker-compose + 기동) — 라우터/Dagster 동작 후 통합.
-15. **Phase 6** TripMate 정리/이관 — Dagster 이관 시점 동기.
-16. OpenAPI client gen은 운영 안정 후.
+12. **Phase 4 T-208d** — 완료. Dagster schedules(KST cron, 부하 분산).
+13. **Phase 4.5 T-211a** — admin UI 최신화 선행 gap audit/API 계약 보강.
+14. **Phase 4.5 T-211b** — admin UI 최신화 구현.
+15. **Phase 4 T-208 잔여** — provider resources/ops polish, TripMate 이관과 병행.
+16. **Phase 5 T-209a/b** (docker-compose + 기동) — 라우터/Dagster 동작 후 통합.
+17. **Phase 6** TripMate 정리/이관 — Dagster 이관 시점 동기.
+18. OpenAPI client gen은 운영 안정 후.
 
 각 task는 1-PR 단위(`docs/runbooks/agent-workflow.md`), 4 게이트 + 해당 시 alembic/
 OpenAPI drift. 새 테이블·라우터마다 통합 테스트 필수(ADR-014).

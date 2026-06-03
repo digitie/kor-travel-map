@@ -2,6 +2,26 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-03 (codex) — T-208d Dagster provider schedules
+
+**작업**: ADR-045 Phase 4 T-208d. krtour-map-owned Dagster code location에 provider별
+Feature 적재 schedule을 등록.
+
+- **Schedules**: `krtour.map_dagster.schedules` 신규. 현재 구현된 Feature 적재 asset
+  9개에 대해 `define_asset_job` + `ScheduleDefinition`을 만든다.
+- **Timezone/분산**: 모든 schedule은 `execution_timezone="Asia/Seoul"`이고, 외부 API
+  호출이 같은 분에 몰리지 않도록 분/요일을 분산했다.
+- **운영 기본값**: schedule `default_status`는 `STOPPED`다. 로컬 개발 중 실 provider
+  호출을 막고, 운영 배포에서 필요한 schedule만 enable한다.
+- **Definitions**: `Definitions`에 Feature load jobs/schedules를 등록했다. 기존
+  `feature_update_request_worker` job과 queue/failure sensor는 유지한다.
+- **문서**: Dagster README, `dagster-boundary.md`, ADR-045 task 계획, tasks/resume,
+  admin OpenAPI 예시 count를 갱신했다.
+- **검증**: Dagster definitions smoke + schedule 등록 테스트 targeted `3 passed`,
+  targeted ruff/mypy 통과.
+- **다음**: 사용자 지시에 따라 admin UI 최신화 선행 task를 최우선으로 진행한다.
+  다음 task는 T-211a admin UI gap audit/API 계약 보강.
+
 ## 2026-06-03 (codex) — T-207g OpenAPI admin/user 이원화
 
 **작업**: ADR-045 Phase 3 T-207g. admin 전체 OpenAPI와 TripMate/user-facing subset

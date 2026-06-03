@@ -346,38 +346,25 @@ feature update request 큐는 T-208e 이후 다음 흐름을 따른다.
    `fail_update_request()`를 best-effort 호출하고, 선택 notifier resource에 알림
    payload를 전달한다.
 
-## 10. 정기 schedule 가이드 (krtour-map Dagster)
+## 10. 정기 schedule 구현 (krtour-map Dagster)
 
-| asset group | suggested cron | 비고 |
-|-------------|---------------|------|
-| KMA short forecast | `*/30 * * * *` | 30분 간격 |
-| KMA ultra short nowcast | `*/10 * * * *` | 10분 간격 |
-| KMA mid forecast | `0 6,18 * * *` | 일 2회 |
-| KMA weather alerts | `*/10 * * * *` | 10분 |
-| KREX traffic notices | `*/5 * * * *` | 5분 |
-| KREX rest area weather | `0 * * * *` | 시간 |
-| KREX rest area prices | `0 6,14,22 * * *` | 일 3회 |
-| KREX rest area places | `0 2 1 * *` | 월 1회 |
-| AirKorea | `0 * * * *` | 시간 |
-| KHOA beach info | `0 2 10 * *` | 월 1회 (해수욕장 신규/변경 드물다) |
-| KHOA coastal notices | `0 * * * *` | 시간 |
-| KHOA marine index | `0 * * * *` | 시간 |
-| VisitKorea festivals | `0 3 * * *` | 일 1회 |
-| MOIS license bulk (full) | `0 2 5 * *` | 월 1회 (주간 운영 시 0 2 * * 1) |
-| MOIS license incremental | `0 3 * * *` | 일 1회 (이력조회 기반) |
-| OpiNet stations | `0 3 1 * *` | 월 1회 |
-| OpiNet prices | `0 6,14,22 * * *` | 일 3회 |
-| KRforest recreation forests | `0 2 1 * *` | 월 1회 |
-| KRforest trails | `0 2 1 * *` | 월 1회 |
-| KRforest mountain weather | `0 * * * *` | 시간 |
-| KRforest safety notices | `*/30 * * * *` | 30분 |
-| KRheritage heritage | `0 2 * * 1` | 주 1회 |
-| KRheritage event | `0 3 * * *` | 일 1회 |
-| KRheritage GIS spca | `0 2 1 * *` | 월 1회 |
-| data.go.kr standard 5종 | `0 2 1 * *` | 월 1회 |
-| dedup review enqueue | `0 4 * * *` | 일 1회 |
-| consistency reports (T-201) | `0 5 * * *` | 일 1회 |
-| purge weather old (>30d) | `0 6 * * *` | 일 1회 |
+T-208d 기준 `packages/krtour-map-dagster/src/krtour/map_dagster/schedules.py`가
+현재 구현된 Feature 적재 asset 9개의 provider별 schedule을 등록한다. 모든 schedule은
+`execution_timezone="Asia/Seoul"`이고, 같은 시각에 외부 API 호출이 몰리지 않도록
+분/요일을 분산한다. 기본 status는 로컬 개발 중 실 provider 호출을 막기 위해
+`STOPPED`이며, 운영 배포에서 필요한 schedule만 enable한다.
+
+| schedule | asset job | cron | 비고 |
+|----------|-----------|------|------|
+| `feature_event_datagokr_cultural_festivals_daily_schedule` | `feature_event_datagokr_cultural_festivals_job` | `10 3 * * *` | 전국문화축제 일 1회 |
+| `feature_place_opinet_stations_monthly_schedule` | `feature_place_opinet_stations_job` | `5 3 1 * *` | OpiNet 주유소 월 1회 |
+| `feature_place_krex_rest_areas_monthly_schedule` | `feature_place_krex_rest_areas_job` | `20 2 1 * *` | KREX 휴게소 월 1회 |
+| `feature_notice_krex_traffic_notices_quarter_hour_schedule` | `feature_notice_krex_traffic_notices_job` | `7,22,37,52 * * * *` | KREX 교통공지 15분 |
+| `feature_place_krheritage_items_weekly_schedule` | `feature_place_krheritage_items_job` | `15 2 * * 1` | 국가유산 item 주 1회 |
+| `feature_event_krheritage_events_daily_schedule` | `feature_event_krheritage_events_job` | `25 3 * * *` | 국가유산 행사 일 1회 |
+| `feature_place_mois_licenses_weekly_schedule` | `feature_place_mois_licenses_job` | `35 4 * * 1` | MOIS bulk 주 1회 |
+| `feature_place_knps_points_semiannual_schedule` | `feature_place_knps_points_job` | `45 3 1 1,7 *` | KNPS point 반기 1회 |
+| `feature_geometry_knps_records_semiannual_schedule` | `feature_geometry_knps_records_job` | `15 4 1 1,7 *` | KNPS geometry 반기 1회 |
 | purge notice old (>1y) | `0 6 * * 0` | 주 1회 |
 
 운영 임계값은 SPEC V8 v8_0 + 실제 부하 기반으로 krtour-map 운영자가 조정한다.

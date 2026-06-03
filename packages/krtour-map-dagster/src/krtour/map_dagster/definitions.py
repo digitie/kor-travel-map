@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Final
+from typing import Any, Final, cast
 
 from dagster import Definitions, ResourceDefinition, resource
 
 from .assets import FEATURE_LOAD_ASSETS
+from .schedules import FEATURE_LOAD_JOBS, FEATURE_LOAD_SCHEDULES
 from .sensors import FEATURE_UPDATE_JOBS, FEATURE_UPDATE_SENSORS
 
 REQUIRED_RESOURCE_KEYS: Final[tuple[str, ...]] = (
@@ -62,7 +63,8 @@ def _value_resource(key: str, value: object) -> ResourceDefinition:
 
 defs = Definitions(
     assets=FEATURE_LOAD_ASSETS,
-    jobs=FEATURE_UPDATE_JOBS,
+    jobs=cast("Any", [*FEATURE_LOAD_JOBS, *FEATURE_UPDATE_JOBS]),
+    schedules=FEATURE_LOAD_SCHEDULES,
     sensors=FEATURE_UPDATE_SENSORS,
     resources={
         key: (
