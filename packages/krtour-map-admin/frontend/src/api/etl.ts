@@ -8,7 +8,7 @@
 
 import { useMutation, useQuery } from "@tanstack/react-query";
 
-import { BASE_URL, DebugUiApiError } from "./client";
+import { getJson, postJson } from "./client";
 
 export interface DatasetEntry {
   dataset: string;
@@ -33,42 +33,6 @@ export interface EtlPreviewResponse {
   description: string;
   count: number;
   items: Array<Record<string, unknown>>;
-}
-
-async function getJson<T>(path: string): Promise<T> {
-  const url = `${BASE_URL}${path}`;
-  const response = await fetch(url, {
-    method: "GET",
-    headers: { Accept: "application/json" },
-    credentials: "omit",
-    cache: "no-store",
-  });
-  if (!response.ok) {
-    throw new DebugUiApiError(
-      `GET ${path} 실패 (HTTP ${response.status})`,
-      response.status,
-      path,
-    );
-  }
-  return (await response.json()) as T;
-}
-
-async function postJson<T>(path: string): Promise<T> {
-  const url = `${BASE_URL}${path}`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { Accept: "application/json" },
-    credentials: "omit",
-  });
-  if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    throw new DebugUiApiError(
-      `POST ${path} 실패 (HTTP ${response.status}) ${detail}`,
-      response.status,
-      path,
-    );
-  }
-  return (await response.json()) as T;
 }
 
 export function useProviders() {

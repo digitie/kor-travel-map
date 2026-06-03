@@ -33,23 +33,84 @@ class DebugUiApiError extends Error {
   }
 }
 
-async function getJson<T>(path: string): Promise<T> {
+export type QueryParamValue = string | number | boolean | Date | null | undefined;
+export type QueryParams = Record<
+  string,
+  QueryParamValue | readonly QueryParamValue[]
+>;
+
+export function buildQueryString(params: QueryParams): string {
+  const search = new URLSearchParams();
+  for (const [key, rawValue] of Object.entries(params)) {
+    const values = Array.isArray(rawValue) ? rawValue : [rawValue];
+    for (const value of values) {
+      if (value === null || value === undefined) {
+        continue;
+      }
+      search.append(
+        key,
+        value instanceof Date ? value.toISOString() : String(value),
+      );
+    }
+  }
+  return search.toString();
+}
+
+export function pathWithQuery(path: string, params: QueryParams): string {
+  const query = buildQueryString(params);
+  return query.length > 0 ? `${path}?${query}` : path;
+}
+
+async function requestJson<T>(
+  path: string,
+  options: {
+    method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+    body?: unknown;
+    cache?: RequestCache;
+  } = {},
+): Promise<T> {
+  const method = options.method ?? "GET";
   const url = `${BASE_URL}${path}`;
   const response = await fetch(url, {
-    method: "GET",
-    headers: { Accept: "application/json" },
+    method,
+    headers: {
+      Accept: "application/json",
+      ...(options.body !== undefined ? { "Content-Type": "application/json" } : {}),
+    },
     // ADR-005: 내부망 전용 — credentials 미포함.
     credentials: "omit",
-    cache: "no-store",
+    cache: options.cache ?? "no-store",
+    ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
   });
   if (!response.ok) {
+    const detail = await response.text().catch(() => "");
     throw new DebugUiApiError(
-      `GET ${path} 실패 (HTTP ${response.status})`,
+      `${method} ${path} 실패 (HTTP ${response.status})${detail ? ` ${detail}` : ""}`,
       response.status,
       path,
     );
   }
   return (await response.json()) as T;
+}
+
+export function getJson<T>(path: string): Promise<T> {
+  return requestJson<T>(path);
+}
+
+export function postJson<T>(path: string, body?: unknown): Promise<T> {
+  return requestJson<T>(path, { method: "POST", body });
+}
+
+export function putJson<T>(path: string, body?: unknown): Promise<T> {
+  return requestJson<T>(path, { method: "PUT", body });
+}
+
+export function patchJson<T>(path: string, body?: unknown): Promise<T> {
+  return requestJson<T>(path, { method: "PATCH", body });
+}
+
+export function deleteJson<T>(path: string): Promise<T> {
+  return requestJson<T>(path, { method: "DELETE" });
 }
 
 /** `GET /debug/health` — backend liveness probe (PR#35). */

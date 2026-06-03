@@ -4,9 +4,9 @@
 
 ## 진행 중
 
-**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#172(T-207g OpenAPI
-admin/user 이원화)까지 merged. 현재 작업은 T-208d Dagster schedules다. 완료 후
-사용자 지시에 따라 admin UI 최신화 선행 task(T-211a)를 최우선으로 진행한다.
+**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#173(T-208d Dagster
+schedules)까지 merged. 현재 작업은 사용자 지시로 최우선 승격된 admin UI 최신화
+선행 task T-211a다. 완료 후 T-211b admin UI 구현으로 바로 진행한다.
 T-207b는 사용자 결정에 따라 구현하지 않는다.
 
 ### 현재 기준 보강 필요 체크포인트 (2026-06-03)
@@ -386,10 +386,13 @@ T-207b는 사용자 결정에 따라 구현하지 않는다.
 - [ ] T-208g — offline upload load job (D-14).
 
 **Phase 4.5 — Admin UI 최신화 (사용자 지시로 T-208d 이후 최우선)**
-- [ ] T-211a — admin UI 최신 문서/현재 구현 gap audit + 선행 API/데이터 계약 보강.
-      `docs/debug-ui-admin-workflows.md`, `docs/openapi-admin-contract.md`, 현재
-      `/admin/*`·`/ops/*`·Dagster GraphQL summary를 대조해 UI가 즉시 쓸 수 없는
-      필드/엔드포인트/상태를 문서화하고, 필요한 backend 보강을 먼저 구현한다.
+- [x] T-211a — admin UI 최신 문서/현재 구현 gap audit + 선행 API/데이터 계약 보강.
+      `docs/admin-ui-modernization-gap-audit.md`를 추가하고, frontend에
+      `/admin/features`, `/ops/import-jobs`, `/ops/metrics`, `/ops/consistency`,
+      `/admin/dedup-review`, `/admin/feature-update-requests`,
+      `/admin/poi-cache-targets`, `/features/nearby/by-target` typed hook layer를
+      추가했다. `/admin/import-jobs` 과거 표기는 `/ops/import-jobs` 정본으로
+      정리했다.
 - [ ] T-211b — admin UI 최신화 구현. Dagster 관리 화면 embed와 별개로 자체 UI에서
       schedule/sensor/job/run/asset 상태를 꾸며 보여주고, feature/update request/ops
       화면을 최신 문서 기준으로 보완한다. React Doctor 검증 필수.

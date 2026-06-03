@@ -269,7 +269,7 @@ POST /admin/feature-update-requests
 5. Dagster run은 provider 호출, DTO 변환, 적재, dedup refresh, consistency check를
    수행하고 progress를 `ops.import_jobs`에 갱신한다.
 6. API는 `GET /admin/feature-update-requests/{id}`와
-   `GET /admin/import-jobs/{job_id}`로 진행 상태를 제공한다.
+   `GET /ops/import-jobs/{job_id}`로 진행 상태를 제공한다.
 
 세부 OpenAPI 계약은 `docs/openapi-admin-contract.md`.
 
