@@ -5,6 +5,19 @@
 
 ## [Unreleased]
 
+### 운영 — OpenAPI admin/user 이원화 (2026-06-03)
+
+- **NEW**: `packages/krtour-map-admin/openapi.user.json`을 추가했다. TripMate/user
+  client가 사용하는 `/features/*`, `/tripmate/features/batch`,
+  `/admin/feature-update-requests` 일부 method만 포함한다.
+- **CHANGED**: `packages/krtour-map-admin/scripts/export_openapi.py`에
+  `--profile admin|user|all`과 `--user-output`을 추가했다. 기본 admin export는 기존
+  `openapi.json` 경로/동작을 유지한다.
+- **CHANGED**: `.github/workflows/openapi.yml` drift gate가
+  `--profile all --check`로 admin/user OpenAPI 산출물을 함께 검증한다.
+- **TEST**: user profile route filtering, method filtering, schema pruning을 검증하는
+  export script unit test를 추가했다.
+
 ### 운영 — TripMate/public feature read API (2026-06-03)
 
 - **NEW**: `krtour-map-admin`에 `GET /features/in-bounds`,

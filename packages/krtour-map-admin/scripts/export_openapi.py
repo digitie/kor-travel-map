@@ -11,21 +11,47 @@ ADR-031 — Export/Drift gate 정책:
 krtour.map_admin.app 모듈이 생성된 시점부터 동작한다 (Sprint 1).
 
 Usage:
-    # 1. spec 생성 + 저장
+    # 1. admin spec 생성 + 저장
     python packages/krtour-map-admin/scripts/export_openapi.py \\
         --output packages/krtour-map-admin/openapi.json
 
-    # 2. CI drift 검증 (변경 있으면 exit 1)
+    # 2. user/TripMate spec 생성 + 저장
     python packages/krtour-map-admin/scripts/export_openapi.py \\
-        --check --output packages/krtour-map-admin/openapi.json
+        --profile user \\
+        --output packages/krtour-map-admin/openapi.user.json
+
+    # 3. CI drift 검증 (변경 있으면 exit 1)
+    python packages/krtour-map-admin/scripts/export_openapi.py \\
+        --profile all --check
 """
 
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import sys
 from pathlib import Path
+from typing import Any, Literal, cast
+
+OpenApiProfile = Literal["admin", "user"]
+
+ADMIN_OPENAPI_PATH = Path("packages/krtour-map-admin/openapi.json")
+USER_OPENAPI_PATH = Path("packages/krtour-map-admin/openapi.user.json")
+
+USER_OPERATIONS: dict[str, frozenset[str]] = {
+    "/features/in-bounds": frozenset({"get"}),
+    "/features/{feature_id}": frozenset({"get"}),
+    "/features/search": frozenset({"get"}),
+    "/features/nearby/by-target": frozenset({"get"}),
+    "/tripmate/features/batch": frozenset({"post"}),
+    "/admin/feature-update-requests": frozenset({"post"}),
+    "/admin/feature-update-requests/{request_id}": frozenset({"get"}),
+}
+
+HTTP_METHODS: frozenset[str] = frozenset(
+    {"get", "put", "post", "delete", "options", "head", "patch", "trace"}
+)
 
 
 def _load_app():
@@ -45,10 +71,78 @@ def _load_app():
     return app
 
 
-def export(output: Path) -> dict:
-    """Generate the FastAPI OpenAPI spec and write to `output`."""
+def _collect_schema_refs(value: Any) -> set[str]:
+    refs: set[str] = set()
+    if isinstance(value, dict):
+        ref = value.get("$ref")
+        if isinstance(ref, str) and ref.startswith("#/components/schemas/"):
+            refs.add(ref.rsplit("/", 1)[-1])
+        for child in value.values():
+            refs.update(_collect_schema_refs(child))
+    elif isinstance(value, list):
+        for child in value:
+            refs.update(_collect_schema_refs(child))
+    return refs
+
+
+def _prune_schemas(spec: dict[str, Any]) -> dict[str, Any]:
+    schemas = spec.get("components", {}).get("schemas", {})
+    if not isinstance(schemas, dict):
+        return spec
+
+    required = _collect_schema_refs(spec.get("paths", {}))
+    seen: set[str] = set()
+    pending = set(required)
+    while pending:
+        name = pending.pop()
+        if name in seen or name not in schemas:
+            continue
+        seen.add(name)
+        pending.update(_collect_schema_refs(schemas[name]) - seen)
+
+    spec.setdefault("components", {})["schemas"] = {
+        name: schemas[name] for name in sorted(seen) if name in schemas
+    }
+    return spec
+
+
+def user_openapi_spec(spec: dict[str, Any]) -> dict[str, Any]:
+    """Return TripMate/user-facing subset spec from the full admin spec."""
+    out = copy.deepcopy(spec)
+    out["info"] = {
+        **out.get("info", {}),
+        "title": "krtour-map-user",
+        "description": (
+            "TripMate/user-facing subset of krtour-map OpenAPI. "
+            "Internal admin/debug/ops routes are intentionally excluded."
+        ),
+    }
+    filtered_paths: dict[str, Any] = {}
+    for path, allowed_methods in USER_OPERATIONS.items():
+        path_item = spec.get("paths", {}).get(path)
+        if not isinstance(path_item, dict):
+            continue
+        filtered_item: dict[str, Any] = {}
+        for key, value in path_item.items():
+            if key in HTTP_METHODS and key not in allowed_methods:
+                continue
+            filtered_item[key] = value
+        if any(method in filtered_item for method in allowed_methods):
+            filtered_paths[path] = filtered_item
+    out["paths"] = filtered_paths
+    return _prune_schemas(out)
+
+
+def _profile_spec(spec: dict[str, Any], profile: OpenApiProfile) -> dict[str, Any]:
+    if profile == "admin":
+        return spec
+    return user_openapi_spec(spec)
+
+
+def export(output: Path, *, profile: OpenApiProfile = "admin") -> dict[str, Any]:
+    """Generate the selected OpenAPI spec and write it to `output`."""
     app = _load_app()
-    spec = app.openapi()
+    spec = _profile_spec(app.openapi(), profile)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(
         json.dumps(spec, indent=2, sort_keys=True, ensure_ascii=False),
@@ -57,14 +151,19 @@ def export(output: Path) -> dict:
     return spec
 
 
-def check(output: Path) -> int:
-    """Compare current FastAPI spec against `output`. Exit 1 if drift."""
+def check(output: Path, *, profile: OpenApiProfile = "admin") -> int:
+    """Compare selected OpenAPI spec against `output`. Exit 1 if drift."""
     if not output.exists():
         print(f"missing: {output}", file=sys.stderr)
         print("hint: run without --check to generate first.", file=sys.stderr)
         return 1
     app = _load_app()
-    current = json.dumps(app.openapi(), indent=2, sort_keys=True, ensure_ascii=False)
+    current = json.dumps(
+        _profile_spec(app.openapi(), profile),
+        indent=2,
+        sort_keys=True,
+        ensure_ascii=False,
+    )
     saved = output.read_text(encoding="utf-8")
     if current.strip() == saved.strip():
         return 0
@@ -76,13 +175,31 @@ def check(output: Path) -> int:
     return 1
 
 
+def _output_for_profile(args: argparse.Namespace, profile: OpenApiProfile) -> Path:
+    if profile == "admin":
+        return args.output
+    return args.user_output
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
+        "--profile",
+        choices=("admin", "user", "all"),
+        default="admin",
+        help="export 대상 spec profile. all은 admin/user를 모두 처리.",
+    )
+    parser.add_argument(
         "--output",
         type=Path,
-        default=Path("packages/krtour-map-admin/openapi.json"),
-        help="OpenAPI 저장/비교 대상 경로 (default: packages/krtour-map-admin/openapi.json)",
+        default=ADMIN_OPENAPI_PATH,
+        help="admin OpenAPI 저장/비교 대상 경로.",
+    )
+    parser.add_argument(
+        "--user-output",
+        type=Path,
+        default=USER_OPENAPI_PATH,
+        help="user/TripMate OpenAPI 저장/비교 대상 경로.",
     )
     parser.add_argument(
         "--check",
@@ -91,10 +208,23 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    profiles: tuple[OpenApiProfile, ...] = (
+        ("admin", "user")
+        if args.profile == "all"
+        else (cast(OpenApiProfile, args.profile),)
+    )
     if args.check:
-        return check(args.output)
-    export(args.output)
-    print(f"wrote {args.output}")
+        failed = False
+        for profile in profiles:
+            failed = (
+                bool(check(_output_for_profile(args, profile), profile=profile))
+                or failed
+            )
+        return int(failed)
+    for profile in profiles:
+        output = _output_for_profile(args, profile)
+        export(output, profile=profile)
+        print(f"wrote {output}")
     return 0
 
 

@@ -1515,10 +1515,10 @@ Windows Playwright 표준 실행 모델을 따른다.
 
 ```bash
 python packages/krtour-map-admin/scripts/export_openapi.py \
-  --output packages/krtour-map-admin/openapi.json
+  --profile all
 
 python packages/krtour-map-admin/scripts/export_openapi.py \
-  --check --output packages/krtour-map-admin/openapi.json
+  --profile all --check
 ```
 
 frontend type generation이 도입된 라우터는 `npm run gen:types`도 함께 실행한다.

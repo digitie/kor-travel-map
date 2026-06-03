@@ -61,10 +61,12 @@ Dagster DB에는 Dagster가 자체 schema를 관리한다.
 
 ## 3. OpenAPI 작성 원칙
 
-- OpenAPI는 `packages/krtour-map-admin/openapi.json`을 정본 산출물로 둔다.
-- 1차 scope는 admin UI가 쓰는 `/features`, `/admin`, `/ops`, `/debug` API다.
-- TripMate 연동 시 같은 OpenAPI에 `/public` 또는 `/tripmate` prefix를 추가할지,
-  기존 `/features` read API를 안정화할지는 실제 소비 요구가 생길 때 결정한다.
+- OpenAPI 산출물은 admin/debug/ops를 포함한 전체 admin spec
+  `packages/krtour-map-admin/openapi.json`과 TripMate/user-facing subset spec
+  `packages/krtour-map-admin/openapi.user.json` 두 개다.
+- admin 전체 scope는 admin UI가 쓰는 `/features`, `/admin`, `/ops`, `/debug` API다.
+- user subset은 TripMate가 호출하는 `/features/*`, `/tripmate/*`,
+  `/admin/feature-update-requests` 일부 method만 포함한다.
 - 모든 응답은 debug/admin backend의 HTTP 응답 셰입을 쓴다.
 
 성공:
@@ -676,10 +678,19 @@ Backend 변경 후:
 
 ```bash
 python packages/krtour-map-admin/scripts/export_openapi.py \
-  --output packages/krtour-map-admin/openapi.json
+  --profile all
 
 python packages/krtour-map-admin/scripts/export_openapi.py \
-  --check --output packages/krtour-map-admin/openapi.json
+  --profile all --check
+```
+
+기본 `--profile admin`은 기존 `packages/krtour-map-admin/openapi.json`만 생성/검증한다.
+TripMate/user subset만 갱신할 때는 다음을 쓴다.
+
+```bash
+python packages/krtour-map-admin/scripts/export_openapi.py \
+  --profile user \
+  --output packages/krtour-map-admin/openapi.user.json
 ```
 
 Frontend 타입 생성:
@@ -690,4 +701,5 @@ npm run gen:types
 ```
 
 TripMate client 생성은 TripMate 저장소에서 별도 관리한다. krtour-map은
-OpenAPI version, changelog, backward compatibility note를 제공한다.
+`openapi.user.json`, OpenAPI version, changelog, backward compatibility note를
+제공한다.

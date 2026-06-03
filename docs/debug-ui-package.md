@@ -262,16 +262,16 @@ DELETE/DDL은 거부. `READ ONLY` transaction에서 실행.
 ```bash
 # packages/krtour-map-admin/scripts/export_openapi.py
 python packages/krtour-map-admin/scripts/export_openapi.py \
-    --output packages/krtour-map-admin/openapi.json
+    --profile all
 
 # CI drift 검증
 python packages/krtour-map-admin/scripts/export_openapi.py \
-    --check --output packages/krtour-map-admin/openapi.json
+    --profile all --check
 ```
 
 `.github/workflows/openapi.yml`에 본 패키지용 step 추가. DTO/라우터 변경 시
-`openapi.json` 갱신 강제. 정식 결정은 **ADR-031** (accepted) — 첫 FastAPI
-라우터 등장 PR부터 즉시 활성화 (frontend 도입 전부터 drift gate 가동 →
+`openapi.json`/`openapi.user.json` 갱신 강제. 정식 결정은 **ADR-031** (accepted) —
+첫 FastAPI 라우터 등장 PR부터 즉시 활성화 (frontend 도입 전부터 drift gate 가동 →
 type drift 부채 0).
 
 향후 Next.js bridge를 두는 경우 `npm run gen:types`에 본 openapi.json을
@@ -453,7 +453,7 @@ export const CATEGORY_COLOR: Record<string, string> = {
 
 ```bash
 # 백엔드에서 OpenAPI export
-python scripts/export_openapi.py --output frontend/openapi.json
+python packages/krtour-map-admin/scripts/export_openapi.py --profile all
 
 # frontend에서 타입 생성
 cd packages/krtour-map-admin/frontend

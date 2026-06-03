@@ -1,5 +1,25 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-03 Codex 작업 메모 — T-207g OpenAPI admin/user 이원화
+
+ADR-045 T-207g로 `packages/krtour-map-admin/scripts/export_openapi.py`를 admin/user
+profile 기반 export로 확장했다. 기본 `--profile admin`은 기존
+`packages/krtour-map-admin/openapi.json` 전체 admin spec을 유지하고,
+`--profile user`는 TripMate/user-facing API subset을
+`packages/krtour-map-admin/openapi.user.json`으로 생성한다. `--profile all`은 두
+산출물을 함께 생성/검증한다.
+
+user spec에는 `GET /features/in-bounds`, `GET /features/{feature_id}`,
+`GET /features/search`, `GET /features/nearby/by-target`,
+`POST /tripmate/features/batch`, `POST /admin/feature-update-requests`,
+`GET /admin/feature-update-requests/{request_id}`만 포함한다. `/debug/*`,
+`/ops/*`, `/admin/features*`와 내부 provider/admin 조회 API는 제외하고, 사용되는
+schema만 재귀적으로 남기도록 `components.schemas`를 prune한다.
+
+CI OpenAPI workflow는 `--profile all --check`로 admin/user 산출물 drift를 같이 막는다.
+검증 범위는 export script unit, admin/user drift check, ruff다. 다음 한 작업은
+**T-208d Dagster schedules(KST cron, 부하 분산)**다.
+
 ## 2026-06-03 Codex 작업 메모 — T-207e TripMate/public feature read API
 
 ADR-045 T-207e로 TripMate와 사용자-facing 지도/상세/검색이 사용할 public feature
