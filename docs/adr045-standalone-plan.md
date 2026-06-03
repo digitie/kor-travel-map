@@ -54,9 +54,9 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
 - **T-205b** ~~`feature.sigungu_boundaries` 테이블~~ **취소** — D-11 결정: 시군구
   경계는 **kraddr-geo가 소유**(`tl_scco_sig`), krtour-map은 REST 호출만(T-206a /
   T-206a-geo). krtour-map에 경계 테이블 신설하지 않는다.
-- **T-205c** (Phase 2) `ops.data_integrity_violations`(F5~F8) / `ops.poi_cache_targets`
+- **T-205c** ✅ (Phase 2) `ops.data_integrity_violations`(F5~F8) / `ops.poi_cache_targets`
   + `ops.poi_cache_target_feature_links`(`poi-cache-update-targets.md` 정본) /
-  `ops.provider_refresh_policies` — MVP 차단 아님. 각 alembic + model + repo.
+  `ops.provider_refresh_policies` — `alembic 0009` + model + repo + integration test.
 - **T-205d** `feature_consistency_reports`/`import_jobs` 기존 테이블에 `load_batch_id`
   /`parent_job_id` 등 batch DAG 컬럼 필요 여부 확인(SPRINT-5 T-200) — D-6 결정
   (request:job=1:1, 큰 scope는 job 내부 배치)를 따른다.
@@ -223,7 +223,7 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
 4. **T-206a-geo** (형제 repo `python-kraddr-geo`) — `/v2/regions/within-radius`
    endpoint와 optional PostGIS 실데이터 테스트 경로 재검증 완료.
 5. **Phase 2 T-205c** (`provider_refresh_policies`, `poi_cache_targets`,
-   `data_integrity_violations`) — request 실행 본체 선행 스키마.
+   `data_integrity_violations`) — 완료.
 6. **Phase 2 T-206d** — request 실행 본체.
 7. **Phase 3 T-207a/d/e** (admin update-requests + ops + features 라우터) — T-206 후.
 8. **Phase 5 T-209a/b** (docker-compose + 기동) — 라우터 동작 후 통합.

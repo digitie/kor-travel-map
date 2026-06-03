@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### 운영 — Phase 2 ops 스키마 (2026-06-03)
+
+- **NEW**: `ops.data_integrity_violations`, `ops.poi_cache_targets`,
+  `ops.poi_cache_target_feature_links`, `ops.provider_refresh_policies` 테이블을
+  `alembic 0009`로 추가했다.
+- **NEW**: `infra.integrity_violation_repo`, `infra.poi_cache_target_repo`,
+  `infra.provider_refresh_policy_repo`를 추가했다. 후속 admin API/Dagster 실행 본체가
+  공유할 raw SQL repository 표면이다.
+- **TEST**: Phase 2 ops schema/repository PostGIS 통합 테스트를 추가했다.
+
 ### 운영 — Feature update client 표면 (2026-06-03)
 
 - **NEW**: `AsyncKrtourMapClient`에
