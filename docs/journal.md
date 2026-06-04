@@ -19,6 +19,8 @@
 - **범위 유보**: S3 multipart streaming, object orphan 보상, upload store 재사용은
   store protocol/API 상태전이를 건드리는 T-RV-22/23/25와 함께 후속 처리한다. 이번 PR은
   무제한 read/OOM surface를 닫는 최소 운영 안전장치다.
+- **사용자 결정**: T-RV-27(admin API `0.0.0.0` bind/노출)은 production 레벨 외부 노출
+  전까지 구현하지 않고 deferred로 문서 추적한다. 다음 구현 후보는 T-RV-06/07/08이다.
 
 ## 2026-06-04 (codex) — T-200 Batch DAG + 정합성 게이트
 
