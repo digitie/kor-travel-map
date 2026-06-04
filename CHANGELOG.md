@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### Public API — Response field hardening (2026-06-04)
+
+- **CHANGED**: public `FeatureDetailResponse`에서 `coord_5179_srid`,
+  `parent_feature_id`, `sibling_group_id`를 제거했다.
+- **CHANGED**: `GET /features/nearby/by-target` 응답에서 target 내부 id/refresh policy와
+  주변 feature의 `primary_provider`, `primary_dataset_key`를 제거했다. user OpenAPI
+  profile도 같은 fieldset으로 갱신했다.
+- **TEST**: router 응답과 `openapi.user.json` schema에 내부 필드가 남지 않는 회귀
+  테스트를 추가했다.
+
 ### Admin API — Route gates (2026-06-04)
 
 - **NEW**: `KRTOUR_MAP_ADMIN_ADMIN_ROUTES_ENABLED`와

@@ -40,6 +40,13 @@ def _refs(value: Any) -> set[str]:
     return found
 
 
+def _schema_properties(spec: dict[str, Any], name: str) -> set[str]:
+    schema = spec["components"]["schemas"][name]
+    properties = schema.get("properties", {})
+    assert isinstance(properties, dict)
+    return set(properties)
+
+
 @pytest.mark.unit
 def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
     module = _load_script_module()
@@ -68,4 +75,18 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
     assert "OpsMetricsResponse" not in schemas
     assert "AdminFeatureListResponse" not in schemas
     assert _refs(user["paths"]) <= set(schemas)
-
+    assert {
+        "coord_5179_srid",
+        "parent_feature_id",
+        "sibling_group_id",
+    }.isdisjoint(_schema_properties(user, "FeatureDetailResponse"))
+    assert {
+        "target_id",
+        "update_enabled",
+        "refresh_policy",
+        "next_eligible_refresh_at",
+    }.isdisjoint(_schema_properties(user, "NearbyTargetSummary"))
+    assert {
+        "primary_provider",
+        "primary_dataset_key",
+    }.isdisjoint(_schema_properties(user, "NearbyFeatureSummary"))

@@ -276,7 +276,15 @@ def test_features_nearby_by_target_passes_filters(
     assert response.status_code == 200
     body = response.json()
     assert body["data"]["target"]["target_key"] == "poi-1"
+    assert set(body["data"]["target"]) == {
+        "external_system",
+        "target_key",
+        "lon",
+        "lat",
+    }
     assert body["data"]["items"][0]["distance_m"] == 320.5
+    assert "primary_provider" not in body["data"]["items"][0]
+    assert "primary_dataset_key" not in body["data"]["items"][0]
     assert body["data"]["next_cursor"] == "next"
     assert body["meta"]["count"] == 1
 
