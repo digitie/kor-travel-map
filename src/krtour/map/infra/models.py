@@ -593,6 +593,20 @@ class ImportJobRow(Base):
             "idx_import_jobs_heartbeat", "heartbeat_at",
             postgresql_where=text("state='running'"),
         ),
+        Index(
+            "idx_import_jobs_load_batch_created",
+            "load_batch_id",
+            text("created_at DESC"),
+            text("job_id DESC"),
+            postgresql_where=text("load_batch_id IS NOT NULL"),
+        ),
+        Index(
+            "idx_import_jobs_parent_created",
+            "parent_job_id",
+            text("created_at DESC"),
+            text("job_id DESC"),
+            postgresql_where=text("parent_job_id IS NOT NULL"),
+        ),
         {"schema": "ops"},
     )
 
@@ -602,6 +616,11 @@ class ImportJobRow(Base):
         server_default=text("gen_random_uuid()"),
     )
     kind: Mapped[str] = mapped_column(Text, nullable=False)
+    load_batch_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    parent_job_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("ops.import_jobs.job_id", ondelete="SET NULL"),
+    )
     payload: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb"),
     )

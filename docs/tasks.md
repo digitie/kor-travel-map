@@ -345,6 +345,7 @@ sensor 멱등/retry, asset materialize/RetryPolicy, dagster deps. (리포트 §2
   - **ADR-045**: Dagster는 **krtour-map 소유**(TripMate 아님). asset 작성은
     krtour-map, TripMate는 OpenAPI queue 제어만. 상세 T-208(`adr045-standalone-plan.md`).
   - `ops.import_jobs`에 `load_batch_id UUID`, `parent_job_id UUID` 컬럼 추가
+    (T-205d 완료, alembic `0012_import_jobs_batch_columns`)
   - root job → child source loads → consistency_check gate → severity!=ERROR →
     mv_refresh (`strategy='swap'`)
   - phase별 중단/재개 (`PLAN_ONLY=1` preflight 포함)
@@ -382,7 +383,9 @@ sensor 멱등/retry, asset materialize/RetryPolicy, dagster deps. (리포트 §2
   `ops.provider_refresh_policies`. 본 PR에서 `alembic 0009`, ORM row, raw SQL repo,
   PostGIS schema/repo 통합 테스트를 추가했다. `cache_target_keys` scope와 provider별
   update 주기/rate limit enforcement는 T-206d 실행 본체에서 사용한다.
-- [ ] T-205d — `import_jobs` batch 컬럼(`load_batch_id`/`parent_job_id`, T-200 연계, D-6).
+- [x] T-205d — `import_jobs` batch 컬럼(`load_batch_id`/`parent_job_id`, T-200 연계, D-6).
+  `alembic 0012`, ORM, `jobs_repo`, `/ops/import-jobs` 조회·필터, admin UI 목록
+  표시, migrated PostGIS 통합 테스트를 추가했다.
 
 **Phase 2 — 로직 (scope resolver + 큐 브리지)**
 - [x] T-206a — `infra/scope_repo.py` (resolve feature_ids/center_radius/bbox/

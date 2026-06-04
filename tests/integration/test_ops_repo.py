@@ -31,15 +31,26 @@ _KST = timezone(timedelta(hours=9))
 async def test_ops_import_jobs_list_detail_and_cursor(
     migrated_session: AsyncSession,
 ) -> None:
+    batch_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    root_job = await start_import_job(
+        migrated_session,
+        kind="full_load_batch",
+        payload={"mode": "full"},
+        load_batch_id=batch_id,
+    )
     old_job = await enqueue_import_job(
         migrated_session,
         kind="feature_update_request",
         payload={"request_id": "old"},
+        load_batch_id=batch_id,
+        parent_job_id=root_job.job_id,
     )
     new_job = await start_import_job(
         migrated_session,
         kind="feature_update_request",
         payload={"request_id": "new"},
+        load_batch_id=batch_id,
+        parent_job_id=root_job.job_id,
     )
     await migrated_session.execute(
         text(
@@ -72,6 +83,8 @@ async def test_ops_import_jobs_list_detail_and_cursor(
     page1 = await list_ops_import_jobs(
         migrated_session,
         kind="feature_update_request",
+        load_batch_id=batch_id,
+        parent_job_id=root_job.job_id,
         limit=1,
     )
     assert [item.job_id for item in page1.items] == [new_job.job_id]
@@ -80,6 +93,8 @@ async def test_ops_import_jobs_list_detail_and_cursor(
     page2 = await list_ops_import_jobs(
         migrated_session,
         kind="feature_update_request",
+        load_batch_id=batch_id,
+        parent_job_id=root_job.job_id,
         limit=1,
         cursor=page1.next_cursor,
     )
@@ -87,6 +102,8 @@ async def test_ops_import_jobs_list_detail_and_cursor(
 
     loaded = await get_ops_import_job(migrated_session, new_job.job_id)
     assert loaded is not None
+    assert loaded.load_batch_id == batch_id
+    assert loaded.parent_job_id == root_job.job_id
     assert loaded.payload == {"request_id": "new"}
     assert loaded.started_at is not None
     assert loaded.heartbeat_at is not None

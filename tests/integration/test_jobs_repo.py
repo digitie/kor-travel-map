@@ -22,6 +22,7 @@ from krtour.map.infra.jobs_repo import (
     finish_import_job,
     heartbeat_import_job,
     recover_stale_running_jobs,
+    start_import_job,
 )
 
 if TYPE_CHECKING:
@@ -51,6 +52,37 @@ async def test_enqueue_creates_queued_job(migrated_session: AsyncSession) -> Non
     assert job.payload == {"dataset_key": "mois_license_features_bulk"}
     assert job.progress == 0
     assert await _state(migrated_session, job.job_id) == "queued"
+
+
+async def test_batch_columns_preserved_across_start_enqueue_and_claim(
+    migrated_session: AsyncSession,
+) -> None:
+    batch_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    root = await start_import_job(
+        migrated_session,
+        kind="full_load_batch",
+        payload={"mode": "full"},
+        load_batch_id=batch_id,
+    )
+    child = await enqueue_import_job(
+        migrated_session,
+        kind="feature_event_visitkorea_festivals",
+        payload={"provider": "python-visitkorea-api"},
+        load_batch_id=batch_id,
+        parent_job_id=root.job_id,
+    )
+    await migrated_session.flush()
+
+    assert root.load_batch_id == batch_id
+    assert root.parent_job_id is None
+    assert child.load_batch_id == batch_id
+    assert child.parent_job_id == root.job_id
+
+    claimed = await claim_next_import_job(migrated_session)
+    assert claimed is not None
+    assert claimed.job_id == child.job_id
+    assert claimed.load_batch_id == batch_id
+    assert claimed.parent_job_id == root.job_id
 
 
 async def test_claim_fifo_and_transition_running(migrated_session: AsyncSession) -> None:

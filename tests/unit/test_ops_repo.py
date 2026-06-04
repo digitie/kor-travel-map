@@ -49,6 +49,8 @@ def _job_row(job_id: str, *, at: datetime) -> SimpleNamespace:
     return SimpleNamespace(
         job_id=job_id,
         kind="feature_update_request",
+        load_batch_id="33333333-3333-3333-3333-333333333333",
+        parent_job_id="44444444-4444-4444-4444-444444444444",
         payload='{"request_id":"req-1"}',
         state="running",
         progress=42,
@@ -107,14 +109,23 @@ async def test_import_job_list_detail_and_cursor() -> None:
     db = cast(Any, session)
 
     page = await list_ops_import_jobs(
-        db, state="running", kind="feature_update_request", limit=1
+        db,
+        state="running",
+        kind="feature_update_request",
+        load_batch_id="33333333-3333-3333-3333-333333333333",
+        parent_job_id="44444444-4444-4444-4444-444444444444",
+        limit=1,
     )
     assert len(page.items) == 1
     assert isinstance(page.items[0], OpsImportJob)
+    assert page.items[0].load_batch_id == "33333333-3333-3333-3333-333333333333"
+    assert page.items[0].parent_job_id == "44444444-4444-4444-4444-444444444444"
     assert page.items[0].payload == {"request_id": "req-1"}
     assert page.next_cursor is not None
 
     page2 = await list_ops_import_jobs(db, limit=1, cursor=page.next_cursor)
+    assert session.params[0]["load_batch_id"] == "33333333-3333-3333-3333-333333333333"
+    assert session.params[0]["parent_job_id"] == "44444444-4444-4444-4444-444444444444"
     assert session.params[1]["cursor_created_at"] == at
     assert session.params[1]["cursor_job_id"] == "11111111-1111-1111-1111-111111111111"
     assert len(page2.items) == 1

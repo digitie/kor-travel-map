@@ -66,8 +66,9 @@ DEFAULT_STALE_AFTER: Final[timedelta] = timedelta(minutes=5)
 _FINISHED_STATES: Final[frozenset[str]] = frozenset({"done", "failed", "cancelled"})
 
 _RETURN_COLUMNS: Final[str] = (
-    "job_id, kind, payload, state, progress, current_stage, source_checksum, "
-    "error_message, started_at, finished_at, heartbeat_at, created_at"
+    "job_id, kind, load_batch_id, parent_job_id, payload, state, progress, "
+    "current_stage, source_checksum, error_message, started_at, finished_at, "
+    "heartbeat_at, created_at"
 )
 
 
@@ -83,6 +84,8 @@ class ImportJob:
     current_stage: str | None
     source_checksum: str | None
     error_message: str | None
+    load_batch_id: str | None = None
+    parent_job_id: str | None = None
 
 
 def _row_to_job(row: Any) -> ImportJob:
@@ -92,6 +95,8 @@ def _row_to_job(row: Any) -> ImportJob:
     return ImportJob(
         job_id=str(row.job_id),
         kind=row.kind,
+        load_batch_id=str(row.load_batch_id) if row.load_batch_id else None,
+        parent_job_id=str(row.parent_job_id) if row.parent_job_id else None,
         payload=dict(payload) if payload else {},
         state=row.state,
         progress=row.progress,
@@ -102,16 +107,28 @@ def _row_to_job(row: Any) -> ImportJob:
 
 
 _INSERT_JOB_SQL: Final[str] = f"""
-INSERT INTO ops.import_jobs (kind, payload, source_checksum)
-VALUES (:kind, CAST(:payload AS jsonb), :source_checksum)
+INSERT INTO ops.import_jobs (
+    kind, payload, source_checksum, load_batch_id, parent_job_id
+)
+VALUES (
+    :kind, CAST(:payload AS jsonb), :source_checksum,
+    CAST(:load_batch_id AS uuid), CAST(:parent_job_id AS uuid)
+)
 RETURNING {_RETURN_COLUMNS}
 """
 
 # self-driven 작업 — queue를 거치지 않고 곧바로 running으로 INSERT (호출자가 직접
 # 수행하는 inline job, 예: advisory lock 보유 중인 단일 워커 적재).
 _START_JOB_SQL: Final[str] = f"""
-INSERT INTO ops.import_jobs (kind, payload, source_checksum, state, started_at, heartbeat_at)
-VALUES (:kind, CAST(:payload AS jsonb), :source_checksum, 'running', now(), now())
+INSERT INTO ops.import_jobs (
+    kind, payload, source_checksum, load_batch_id, parent_job_id,
+    state, started_at, heartbeat_at
+)
+VALUES (
+    :kind, CAST(:payload AS jsonb), :source_checksum,
+    CAST(:load_batch_id AS uuid), CAST(:parent_job_id AS uuid),
+    'running', now(), now()
+)
 RETURNING {_RETURN_COLUMNS}
 """
 
@@ -187,6 +204,8 @@ async def enqueue_import_job(
     kind: str,
     payload: Mapping[str, Any] | None = None,
     source_checksum: str | None = None,
+    load_batch_id: str | None = None,
+    parent_job_id: str | None = None,
 ) -> ImportJob:
     """``state='queued'`` 작업 1건 INSERT. commit은 호출자 책임."""
     result = await session.execute(
@@ -195,6 +214,8 @@ async def enqueue_import_job(
             "kind": kind,
             "payload": json.dumps(dict(payload) if payload else {}),
             "source_checksum": source_checksum,
+            "load_batch_id": load_batch_id,
+            "parent_job_id": parent_job_id,
         },
     )
     return _row_to_job(result.one())
@@ -206,6 +227,8 @@ async def start_import_job(
     kind: str,
     payload: Mapping[str, Any] | None = None,
     source_checksum: str | None = None,
+    load_batch_id: str | None = None,
+    parent_job_id: str | None = None,
 ) -> ImportJob:
     """곧바로 ``state='running'``인 작업 1건 INSERT (self-driven inline job).
 
@@ -220,6 +243,8 @@ async def start_import_job(
             "kind": kind,
             "payload": json.dumps(dict(payload) if payload else {}),
             "source_checksum": source_checksum,
+            "load_batch_id": load_batch_id,
+            "parent_job_id": parent_job_id,
         },
     )
     return _row_to_job(result.one())

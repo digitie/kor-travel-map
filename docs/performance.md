@@ -287,6 +287,15 @@ CREATE INDEX idx_import_jobs_heartbeat
   ON ops.import_jobs (heartbeat_at)
   WHERE state='running';
 
+-- batch DAG root/child 조회
+CREATE INDEX idx_import_jobs_load_batch_created
+  ON ops.import_jobs (load_batch_id, created_at DESC, job_id DESC)
+  WHERE load_batch_id IS NOT NULL;
+
+CREATE INDEX idx_import_jobs_parent_created
+  ON ops.import_jobs (parent_job_id, created_at DESC, job_id DESC)
+  WHERE parent_job_id IS NOT NULL;
+
 -- pending dedup
 CREATE INDEX idx_dedup_pending_score
   ON ops.dedup_review_queue (total_score DESC)

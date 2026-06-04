@@ -57,9 +57,10 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
 - **T-205c** ✅ (Phase 2) `ops.data_integrity_violations`(F5~F8) / `ops.poi_cache_targets`
   + `ops.poi_cache_target_feature_links`(`poi-cache-update-targets.md` 정본) /
   `ops.provider_refresh_policies` — `alembic 0009` + model + repo + integration test.
-- **T-205d** `feature_consistency_reports`/`import_jobs` 기존 테이블에 `load_batch_id`
-  /`parent_job_id` 등 batch DAG 컬럼 필요 여부 확인(SPRINT-5 T-200) — D-6 결정
-  (request:job=1:1, 큰 scope는 job 내부 배치)를 따른다.
+- **T-205d** ✅ `import_jobs`에 `load_batch_id`/`parent_job_id` batch DAG 컬럼 추가
+  (`alembic 0012`). `feature_consistency_reports.batch_id`와 함께 T-200 root job →
+  child loads → consistency gate를 연결한다. D-6 결정(request:job=1:1, 큰 scope는 job
+  내부 배치)은 유지한다.
 
 ## 2. Phase 2 — 로직 (scope resolver + 큐 브리지)
 

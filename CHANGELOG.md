@@ -5,6 +5,19 @@
 
 ## [Unreleased]
 
+### Ops — import_jobs batch DAG 컬럼 (2026-06-04)
+
+- **NEW**: `ops.import_jobs`에 `load_batch_id`와 `parent_job_id` self-FK를 추가했다.
+  T-200 full-load root/child/gate job을 같은 batch로 묶기 위한 선행 스키마다.
+- **NEW**: `/ops/import-jobs` 목록/상세 응답에 `load_batch_id`와 `parent_job_id`를
+  포함하고, 두 UUID query filter를 추가했다.
+- **CHANGED**: admin frontend `/ops/import-jobs` 목록에서 batch/parent id를 표시하고
+  필터링할 수 있다.
+- **TEST**: unit coverage `792 passed` / `80.56%`, admin package `132 passed`, Dagster
+  package `15 passed`, migrated PostGIS integration `13 passed`, `ruff`/`mypy`/
+  import-linter, OpenAPI drift, frontend `type-check`/`lint`/`build`, React Doctor를
+  확인했다.
+
 ### Admin UI — Offline CSV/TSV validation + kraddr-geo bjd 보강 (2026-06-04)
 
 - **NEW**: `GET /admin/offline-uploads/{upload_id}/preview`,

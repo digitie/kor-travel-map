@@ -49,6 +49,8 @@ def _job(job_id: str = "11111111-1111-1111-1111-111111111111") -> OpsImportJob:
     return OpsImportJob(
         job_id=job_id,
         kind="feature_update_request",
+        load_batch_id="33333333-3333-3333-3333-333333333333",
+        parent_job_id="44444444-4444-4444-4444-444444444444",
         payload={"request_id": "req-1"},
         state="running",
         progress=40,
@@ -172,6 +174,8 @@ def test_import_jobs_list_passes_filters(
         assert kwargs == {
             "state": "running",
             "kind": "feature_update_request",
+            "load_batch_id": "33333333-3333-3333-3333-333333333333",
+            "parent_job_id": "44444444-4444-4444-4444-444444444444",
             "limit": 25,
             "cursor": "cursor-1",
         }
@@ -181,12 +185,17 @@ def test_import_jobs_list_passes_filters(
 
     response = client.get(
         "/ops/import-jobs?"
-        "state=running&kind=feature_update_request&page_size=25&cursor=cursor-1"
+        "state=running&kind=feature_update_request"
+        "&load_batch_id=33333333-3333-3333-3333-333333333333"
+        "&parent_job_id=44444444-4444-4444-4444-444444444444"
+        "&page_size=25&cursor=cursor-1"
     )
 
     assert response.status_code == 200
     body = response.json()
     assert body["data"]["items"][0]["job_id"] == _job().job_id
+    assert body["data"]["items"][0]["load_batch_id"] == _job().load_batch_id
+    assert body["data"]["items"][0]["parent_job_id"] == _job().parent_job_id
     assert body["data"]["next_cursor"] == "cursor-2"
     assert body["meta"]["count"] == 1
 

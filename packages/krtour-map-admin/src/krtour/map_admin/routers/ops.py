@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from time import perf_counter
 from typing import Annotated, Any, Literal
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from krtour.map.infra.ops_repo import (
@@ -54,6 +55,8 @@ class OpsImportJobRecord(BaseModel):
 
     job_id: str
     kind: str
+    load_batch_id: str | None = None
+    parent_job_id: str | None = None
     payload: dict[str, Any]
     state: str
     progress: int
@@ -219,6 +222,8 @@ def _job(row: OpsImportJob) -> OpsImportJobRecord:
     return OpsImportJobRecord(
         job_id=row.job_id,
         kind=row.kind,
+        load_batch_id=row.load_batch_id,
+        parent_job_id=row.parent_job_id,
         payload=row.payload,
         state=row.state,
         progress=row.progress,
@@ -321,6 +326,8 @@ async def list_import_jobs(
     session: Annotated[AsyncSession, Depends(get_session)],
     state: Annotated[ImportJobState | None, Query()] = None,
     kind: Annotated[str | None, Query()] = None,
+    load_batch_id: Annotated[UUID | None, Query()] = None,
+    parent_job_id: Annotated[UUID | None, Query()] = None,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
     cursor: Annotated[str | None, Query()] = None,
 ) -> OpsImportJobsListResponse:
@@ -331,6 +338,8 @@ async def list_import_jobs(
             session,
             state=state,
             kind=kind,
+            load_batch_id=str(load_batch_id) if load_batch_id is not None else None,
+            parent_job_id=str(parent_job_id) if parent_job_id is not None else None,
             limit=page_size,
             cursor=cursor,
         )

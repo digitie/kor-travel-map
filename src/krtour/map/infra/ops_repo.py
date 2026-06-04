@@ -43,6 +43,8 @@ class OpsImportJob:
 
     job_id: str
     kind: str
+    load_batch_id: str | None
+    parent_job_id: str | None
     payload: dict[str, Any]
     state: str
     progress: int
@@ -162,8 +164,9 @@ def _decode_cursor(cursor: str | None, *, kind: str) -> tuple[datetime | None, s
 
 
 _IMPORT_JOB_COLUMNS: Final[str] = (
-    "job_id, kind, payload, state, progress, current_stage, source_checksum, "
-    "error_message, created_at, started_at, finished_at, heartbeat_at"
+    "job_id, kind, load_batch_id, parent_job_id, payload, state, progress, "
+    "current_stage, source_checksum, error_message, created_at, started_at, "
+    "finished_at, heartbeat_at"
 )
 
 _LIST_IMPORT_JOBS_SQL: Final[str] = f"""
@@ -171,6 +174,14 @@ SELECT {_IMPORT_JOB_COLUMNS}
 FROM ops.import_jobs
 WHERE (CAST(:state AS text) IS NULL OR state = CAST(:state AS text))
   AND (CAST(:kind AS text) IS NULL OR kind = CAST(:kind AS text))
+  AND (
+    CAST(:load_batch_id AS uuid) IS NULL
+    OR load_batch_id = CAST(:load_batch_id AS uuid)
+  )
+  AND (
+    CAST(:parent_job_id AS uuid) IS NULL
+    OR parent_job_id = CAST(:parent_job_id AS uuid)
+  )
   AND (
     CAST(:cursor_created_at AS timestamptz) IS NULL
     OR (created_at, job_id) < (
@@ -285,6 +296,8 @@ def _row_to_import_job(row: Any) -> OpsImportJob:
     return OpsImportJob(
         job_id=str(row.job_id),
         kind=str(row.kind),
+        load_batch_id=str(row.load_batch_id) if row.load_batch_id else None,
+        parent_job_id=str(row.parent_job_id) if row.parent_job_id else None,
         payload=_json_dict(row.payload),
         state=str(row.state),
         progress=int(row.progress),
@@ -332,6 +345,8 @@ async def list_ops_import_jobs(
     *,
     state: str | None = None,
     kind: str | None = None,
+    load_batch_id: str | None = None,
+    parent_job_id: str | None = None,
     limit: int = 50,
     cursor: str | None = None,
 ) -> OpsImportJobPage:
@@ -344,6 +359,8 @@ async def list_ops_import_jobs(
             {
                 "state": state,
                 "kind": kind,
+                "load_batch_id": load_batch_id,
+                "parent_job_id": parent_job_id,
                 "cursor_created_at": cursor_created_at,
                 "cursor_job_id": cursor_job_id,
                 "limit": page_size + 1,
