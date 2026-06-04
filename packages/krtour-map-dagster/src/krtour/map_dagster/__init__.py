@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .assets import FEATURE_LOAD_ASSETS
+from .batch_dag import BATCH_DAG_JOBS
 from .definitions import defs
 from .etl import DagsterFeatureLoadResult, load_feature_bundles_for_dagster
 from .maintenance import (
@@ -30,6 +31,7 @@ from .validation import (
 
 __all__ = [
     "FEATURE_LOAD_ASSETS",
+    "BATCH_DAG_JOBS",
     "FEATURE_LOAD_JOBS",
     "FEATURE_LOAD_SCHEDULES",
     "FEATURE_UPDATE_JOBS",

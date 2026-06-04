@@ -80,9 +80,14 @@
 
 ### 2.4 T-200 — Batch DAG + 정합성 게이트 (kraddr-geo ADR-017 미러)
 
-- `ops.import_jobs`에 `load_batch_id UUID`, `parent_job_id UUID` 컬럼 추가
-- root job → child source loads → consistency_check gate → mv_refresh swap
-- phase별 중단/재개 (`PLAN_ONLY=1` preflight 포함)
+- ✅ T-205d: `ops.import_jobs`에 `load_batch_id UUID`, `parent_job_id UUID` 컬럼 추가.
+- ✅ T-200: `infra.batch_dag` + Dagster `full_load_batch_consistency_gate` job 구현.
+- 기존 실제 source load import job id를 `child_job_ids`로 받아 root batch에 연결하고,
+  child가 모두 `done`일 때만 `consistency_check`를 실행한다.
+- `severity_max=ERROR`이면 `mv_refresh`를 차단한다. 현재 운영 MV 카탈로그가 없으므로
+  OK/WARN 뒤 `mv_refresh` 단계는 `skipped:no_materialized_views`로 명시 기록한다.
+- phase별 중단/재개 UI/API(`PLAN_ONLY=1` preflight 포함)는 T-212 admin 전체점검에서
+  운영 UX와 함께 보강한다.
 - krtour-map Dagster asset 작성. TripMate는 OpenAPI로 update request를 생성하고,
   provider 적재 asset/worker는 krtour-map이 소유한다(ADR-045/046).
 
@@ -139,7 +144,7 @@
 |------|---------------|-------------------------------|
 | ADR-033 (정합성 단계 도입) | accepted (Sprint 1) | Phase 2 (F4~F8 + Dagster 게이트) 적용 + swap 차단 동작 |
 | ADR-017 (보관 정책) | accepted (Sprint 1) | place 무기한, event +20y, notice +1y, weather +30d purge 동작 |
-| T-200 (batch DAG + 게이트) | pending | Dagster batch + consistency_check + mv_refresh swap |
+| T-200 (batch DAG + 게이트) | done (2026-06-04) | Dagster batch + consistency_check + mv_refresh 차단/추적 |
 | T-201b (Phase 2) | pending | F4~F8 + dry-run report |
 | T-202~204 | pending | pre-commit hook + CI full + branch protection 매뉴얼 |
 | ADR-016 (Record Linkage 가중치) | accepted | 5 sprint 전체 검증 후 가중치 조정 PR (필요 시) |
@@ -151,7 +156,7 @@
 
 - [ ] 14+ provider 모두 적재 안정 (실 fixture 통합 테스트 green)
 - [ ] ADR-033 Phase 2 (F4~F8 + Dagster 게이트) 동작
-- [ ] T-200~T-204 모두 완료
+- [ ] T-201b~T-204 모두 완료 (T-200은 완료)
 - [ ] Coverage bar 80% 유지 (회귀 0)
 - [ ] dedup_review_queue 운영 안정 (운영자 검토 routine)
 - [ ] `ops.api_call_log` Grafana 패널 가동 (TripMate 측)

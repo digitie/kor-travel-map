@@ -61,6 +61,11 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
   (`alembic 0012`). `feature_consistency_reports.batch_id`와 함께 T-200 root job →
   child loads → consistency gate를 연결한다. D-6 결정(request:job=1:1, 큰 scope는 job
   내부 배치)은 유지한다.
+- **T-200** ✅ Batch DAG + 정합성 게이트. `infra.batch_dag`와 Dagster
+  `full_load_batch_consistency_gate` job이 기존 실제 source load import job id를
+  root batch에 연결하고, child `done` 확인 뒤 `run_consistency_checks`를 실행한다.
+  `severity_max=ERROR`이면 `mv_refresh`를 차단하고, OK/WARN이면 `mv_refresh` 추적 job을
+  기록한다. 현재 운영 MV 카탈로그가 없으면 `skipped:no_materialized_views`로 명시한다.
 
 ## 2. Phase 2 — 로직 (scope resolver + 큐 브리지)
 
@@ -264,10 +269,12 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
 10. **Phase 3 T-207e** — 완료. T-207b는 구현하지 않는다.
 11. **Phase 3 T-207g** — 완료. admin/user OpenAPI export 이원화 + drift gate.
 12. **Phase 4 T-208d** — 완료. Dagster schedules(KST cron, 부하 분산).
-13. **Phase 4.5 T-211a** — admin UI 최신화 선행 gap audit/API 계약 보강.
-14. **Phase 4.5 T-211b** — admin UI 최신화 구현.
-15. **Phase 4 T-208 잔여** — provider resources/ops polish, TripMate 이관과 병행.
-16. **Phase 5 T-209a/b** (docker-compose + 기동) — 라우터/Dagster 동작 후 통합.
+13. **T-200** — 완료. Batch DAG root/child/gate + `mv_refresh` 추적 job.
+14. **T-201b** — F5~F8 gate와 실제 운영 MV 카탈로그/refresh 정책.
+15. **Phase 4.5 T-211a/b** — admin UI 최신화 gap audit/API 계약 보강/구현 — 완료된
+   부분은 유지하고, T-212 전체점검에서 운영 완결성 기준으로 재평가.
+16. **Phase 4 T-208 잔여** — provider resources/ops polish, TripMate 이관과 병행.
+17. **Phase 5 T-209a/b** (docker-compose + 기동) — 라우터/Dagster 동작 후 통합.
 17. **Phase 6** TripMate 정리/이관 — Dagster 이관 시점 동기.
 18. OpenAPI client gen은 운영 안정 후.
 

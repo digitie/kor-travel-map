@@ -17,10 +17,12 @@ import pytest
 from sqlalchemy import text
 
 from krtour.map.infra.jobs_repo import (
+    attach_import_jobs_to_batch,
     claim_next_import_job,
     enqueue_import_job,
     finish_import_job,
     heartbeat_import_job,
+    list_import_jobs_by_ids,
     recover_stale_running_jobs,
     start_import_job,
 )
@@ -83,6 +85,40 @@ async def test_batch_columns_preserved_across_start_enqueue_and_claim(
     assert claimed.job_id == child.job_id
     assert claimed.load_batch_id == batch_id
     assert claimed.parent_job_id == root.job_id
+
+    listed = await list_import_jobs_by_ids(migrated_session, [child.job_id])
+    assert listed[0].load_batch_id == batch_id
+    assert listed[0].parent_job_id == root.job_id
+
+
+async def test_attach_existing_jobs_to_batch(
+    migrated_session: AsyncSession,
+) -> None:
+    batch_id = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+    root = await start_import_job(
+        migrated_session,
+        kind="full_load_batch",
+        payload={"mode": "full"},
+        load_batch_id=batch_id,
+    )
+    child = await start_import_job(
+        migrated_session,
+        kind="offline_upload_load",
+        payload={"upload_id": "u1"},
+    )
+    child = await finish_import_job(migrated_session, child.job_id, state="done") or child
+
+    attached = await attach_import_jobs_to_batch(
+        migrated_session,
+        [child.job_id],
+        load_batch_id=batch_id,
+        parent_job_id=root.job_id,
+    )
+
+    assert attached[0].job_id == child.job_id
+    assert attached[0].state == "done"
+    assert attached[0].load_batch_id == batch_id
+    assert attached[0].parent_job_id == root.job_id
 
 
 async def test_claim_fifo_and_transition_running(migrated_session: AsyncSession) -> None:

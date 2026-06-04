@@ -2,6 +2,26 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-04 (codex) — T-200 Batch DAG + 정합성 게이트
+
+**작업**: T-205d batch 컬럼 위에 root/child/gate orchestration을 추가했다.
+
+- **Core/Repo**: `infra.jobs_repo`에 기존 import job batch 연결/목록 조회 유틸을
+  추가하고, `infra.batch_dag.run_batch_dag_consistency_gate`를 새로 만들었다.
+- **Gate**: 기존 실제 적재 job id를 `child_job_ids`로 받아 root `full_load_batch`
+  아래 연결한다. child가 모두 `done`이면 `consistency_check`를 실행하고,
+  `severity_max=ERROR`이면 `mv_refresh`를 차단한다.
+- **MV refresh**: `OK/WARN`이면 `mv_refresh` import job을 기록한다. 현재 운영
+  materialized view 카탈로그가 없으면 `skipped:no_materialized_views` payload로 남긴다.
+- **Dagster**: `full_load_batch_consistency_gate` job/op를 추가하고 definitions에 등록했다.
+- **문서**: `tasks`, `dagster-boundary`, `adr045-standalone-plan`, `SPRINT-5`,
+  `resume`, `CHANGELOG`를 T-200 완료 범위로 갱신했다.
+- **검증**: unit coverage 재현 `800 passed` / `80.59%`, Dagster package `17 passed`,
+  PostGIS integration `tests/integration/test_batch_dag.py tests/integration/test_jobs_repo.py`
+  `14 passed`, repo-wide `ruff`/`mypy`/import-linter, `git diff --check` 통과.
+- **다음**: T-201b Phase 2(F5~F8 gate + 운영 MV 카탈로그/정책)와 T-209 잔여를 닫은 뒤
+  T-212 전체점검으로 이동한다.
+
 ## 2026-06-04 (codex) — T-209b run-admin-stack 안정화
 
 **작업**: PR#182 머지 후 서버 재기동에서 `scripts/run-admin-stack.sh`가 Next ready

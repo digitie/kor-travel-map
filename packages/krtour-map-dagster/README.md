@@ -74,6 +74,22 @@ Sensor는 `peek_next_update_request()`로 다음 queued request를 상태 변경
 실제 상태 전이는 worker job 안에서 `AsyncKrtourMapClient.execute_feature_update_request()`
 가 맡는다. 이 구조는 RunRequest 생성 실패가 request를 `running`에 남기는 상황을 피한다.
 
+## Batch consistency gate
+
+- Job: `full_load_batch_consistency_gate`
+- Op: `run_full_load_batch_consistency_gate`
+- Config:
+  - `child_job_ids`: 기존 실제 source load import job id 목록.
+  - `load_batch_id`: 선택 UUID. 없으면 생성.
+  - `plan_only`: `true`면 DB write 없이 child job 존재 여부만 확인.
+  - `materialized_views`: gate 통과 후 refresh할 `schema.view` 목록.
+  - `mv_refresh_strategy`: 기본 `swap`.
+
+child job이 모두 `done`이면 `run_consistency_checks(batch_id=load_batch_id)`를 실행한다.
+`severity_max=ERROR`이면 `mv_refresh`를 차단하고 root/gate import job을 `failed`로 닫는다.
+현재 운영 materialized view 카탈로그가 없으므로 `materialized_views=[]` 기본 실행은
+`skipped:no_materialized_views` payload를 남긴다.
+
 ## Offline upload load
 
 - Job: `offline_upload_load`

@@ -5,6 +5,19 @@
 
 ## [Unreleased]
 
+### Ops — Batch DAG + consistency gate (2026-06-04)
+
+- **NEW**: `krtour.map.infra.batch_dag.run_batch_dag_consistency_gate`와
+  `AsyncKrtourMapClient.run_batch_dag_consistency_gate(...)`를 추가했다.
+- **NEW**: Dagster `full_load_batch_consistency_gate` job을 추가했다. 기존 실제 source
+  load import job을 root batch에 연결하고, child `done` 확인 뒤 consistency gate를
+  실행한다.
+- **CHANGED**: `severity_max=ERROR`이면 `mv_refresh`를 차단하고 root/gate import job을
+  `failed`로 기록한다. OK/WARN이면 `mv_refresh` job을 기록하며, 현재 MV 카탈로그가
+  없으면 `skipped:no_materialized_views`로 남긴다.
+- **TEST**: unit coverage `800 passed` / `80.59%`, Dagster package `17 passed`, PostGIS
+  integration `14 passed`, repo-wide `ruff`/`mypy`/import-linter를 확인했다.
+
 ### Ops — admin stack runner 안정화 (2026-06-04)
 
 - **FIX**: `scripts/run-admin-stack.sh`가 시작 전 `alembic upgrade head`를 실행하고,
