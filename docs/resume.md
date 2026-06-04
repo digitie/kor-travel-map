@@ -1,5 +1,24 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-05 Codex 작업 메모 — T-RV-15 scope resolver count/preview 분리
+
+T-RV-15를 처리한다. `count_features_matching_scope`는 더 이상 dry-run/count 용도로
+전체 feature row를 materialize하지 않는다. `center_radius`, `bbox`,
+`sigungu_by_radius`, `provider_dataset`, `feature_ids`는 전체 match 수를 `count(*)`
+계열 SQL로 계산하고, provider/dataset fanout과 sigungu code도 전체 scope 기준 별도
+집계 SQL로 계산한다.
+
+`ScopeResolution.feature_count`는 optional `matched_feature_count`를 우선 사용한다.
+feature 목록은 기본 `DEFAULT_SCOPE_PREVIEW_LIMIT=1000`까지만 보존하며, preview가
+잘리면 matched scope에 `feature_preview_count`, `feature_preview_limit`,
+`feature_preview_truncated`를 기록한다. cache target scope는 provider별 target id
+fanout이 필요하므로 이번 PR에서는 기존 full match 동작을 유지하고, T-RV-19/20 계열
+scope validation/cursor 보강에서 별도 상한을 다룬다.
+
+다음 한 작업은 **T-RV-16(dedup refresh master 선정 신호 보강)**, **T-RV-17(상태전이
+가드)**, 또는 **T-RV-04b(provider public client live fetch wiring)** 다.
+**T-RV-27은 production 레벨 hardening 전까지 계속 skip/deferred**다.
+
 ## 2026-06-04 Codex 작업 메모 — T-RV-14 dedup merge review row 잠금
 
 T-RV-14를 처리한다. `merge_from_review`는 자동 master 선정 전에

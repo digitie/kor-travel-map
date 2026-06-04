@@ -206,20 +206,79 @@ async def test_count_features_matching_scope_dispatches_to_resolvers(
 ) -> None:
     calls: list[tuple[str, dict[str, object]]] = []
 
+    class FakeExecuteResult:
+        def mappings(self) -> FakeExecuteResult:
+            return self
+
+        def all(self) -> list[dict[str, object]]:
+            return [{"feature_id": "feature-sigungu", "sigungu_code": "11110"}]
+
+    class FakeSession:
+        async def execute(self, *_args: object, **_kwargs: object) -> FakeExecuteResult:
+            calls.append(("execute_preview", {}))
+            return FakeExecuteResult()
+
     def result(scope_type: str) -> ScopeResolution:
         return ScopeResolution(scope_type=scope_type, features=())
 
-    async def fake_feature_ids(session: object, feature_ids: list[str]) -> ScopeResolution:
-        calls.append(("feature_ids", {"session": session, "feature_ids": feature_ids}))
+    async def fake_count(
+        session: object, sql: str, params: dict[str, object]
+    ) -> int:
+        calls.append(("count", {"session": session, "sql": sql, "params": params}))
+        return 3
+
+    async def fake_provider_datasets(
+        session: object, sql: str, params: dict[str, object]
+    ) -> tuple[ProviderDatasetScope, ...]:
+        calls.append(
+            ("provider_datasets", {"session": session, "sql": sql, "params": params})
+        )
+        return (ProviderDatasetScope("python-a-api", "dataset-a", 3),)
+
+    async def fake_provider_datasets_for_ids(
+        session: object, feature_ids: list[str] | tuple[str, ...]
+    ) -> tuple[ProviderDatasetScope, ...]:
+        calls.append(
+            (
+                "provider_datasets_for_ids",
+                {"session": session, "feature_ids": tuple(feature_ids)},
+            )
+        )
+        return (ProviderDatasetScope("python-a-api", "dataset-a", 2),)
+
+    async def fake_sigungu_codes(
+        session: object, sql: str, params: dict[str, object]
+    ) -> tuple[str, ...]:
+        calls.append(("sigungu_codes", {"session": session, "sql": sql, "params": params}))
+        return ("11110",)
+
+    async def fake_feature_ids(
+        session: object,
+        feature_ids: list[str] | tuple[str, ...],
+        *,
+        limit: int,
+    ) -> ScopeResolution:
+        calls.append(
+            (
+                "feature_ids",
+                {"session": session, "feature_ids": tuple(feature_ids), "limit": limit},
+            )
+        )
         return result("feature_ids")
 
     async def fake_center_radius(
-        session: object, *, lon: float, lat: float, radius_km: float
+        session: object, *, lon: float, lat: float, radius_km: float, limit: int
     ) -> ScopeResolution:
         calls.append(
             (
                 "center_radius",
-                {"session": session, "lon": lon, "lat": lat, "radius_km": radius_km},
+                {
+                    "session": session,
+                    "lon": lon,
+                    "lat": lat,
+                    "radius_km": radius_km,
+                    "limit": limit,
+                },
             )
         )
         return result("center_radius")
@@ -231,6 +290,7 @@ async def test_count_features_matching_scope_dispatches_to_resolvers(
         min_lat: float,
         max_lon: float,
         max_lat: float,
+        limit: int,
     ) -> ScopeResolution:
         calls.append(
             (
@@ -241,13 +301,14 @@ async def test_count_features_matching_scope_dispatches_to_resolvers(
                     "min_lat": min_lat,
                     "max_lon": max_lon,
                     "max_lat": max_lat,
+                    "limit": limit,
                 },
             )
         )
         return result("bbox")
 
     async def fake_provider_dataset(
-        session: object, *, provider: str, dataset_key: str
+        session: object, *, provider: str, dataset_key: str, limit: int
     ) -> ScopeResolution:
         calls.append(
             (
@@ -256,6 +317,7 @@ async def test_count_features_matching_scope_dispatches_to_resolvers(
                     "session": session,
                     "provider": provider,
                     "dataset_key": dataset_key,
+                    "limit": limit,
                 },
             )
         )
@@ -285,37 +347,25 @@ async def test_count_features_matching_scope_dispatches_to_resolvers(
         )
         return result("cache_target_keys")
 
-    async def fake_sigungu_by_radius(
-        session: object,
-        *,
-        lon: float,
-        lat: float,
-        radius_km: float,
-        sigungu_resolver: object,
-    ) -> ScopeResolution:
-        calls.append(
-            (
-                "sigungu_by_radius",
-                {
-                    "session": session,
-                    "lon": lon,
-                    "lat": lat,
-                    "radius_km": radius_km,
-                    "sigungu_resolver": sigungu_resolver,
-                },
-            )
-        )
-        return result("sigungu_by_radius")
-
+    monkeypatch.setattr(scope_repo, "_count_scalar", fake_count)
+    monkeypatch.setattr(scope_repo, "_provider_datasets_from_sql", fake_provider_datasets)
+    monkeypatch.setattr(
+        scope_repo,
+        "_provider_datasets_for_feature_ids",
+        fake_provider_datasets_for_ids,
+    )
+    monkeypatch.setattr(scope_repo, "_sigungu_codes_from_sql", fake_sigungu_codes)
     monkeypatch.setattr(scope_repo, "resolve_feature_ids", fake_feature_ids)
     monkeypatch.setattr(scope_repo, "resolve_center_radius", fake_center_radius)
     monkeypatch.setattr(scope_repo, "resolve_bbox", fake_bbox)
     monkeypatch.setattr(scope_repo, "resolve_provider_dataset", fake_provider_dataset)
     monkeypatch.setattr(scope_repo, "resolve_cache_target_keys", fake_cache_target_keys)
-    monkeypatch.setattr(scope_repo, "resolve_sigungu_by_radius", fake_sigungu_by_radius)
 
-    session = object()
-    resolver = object()
+    session = FakeSession()
+
+    async def resolver(**_kwargs: object) -> tuple[str, ...]:
+        return ("11110", "11110")
+
     scopes = [
         {"type": "feature_ids", "feature_ids": [1, "two"]},
         {"type": "center_radius", "center": {"lon": "127.0", "lat": "37.0"}, "radius_km": "3"},
@@ -346,17 +396,28 @@ async def test_count_features_matching_scope_dispatches_to_resolvers(
             session, scope, sigungu_resolver=resolver
         )
 
-    assert [call[0] for call in calls] == [
-        "feature_ids",
-        "center_radius",
-        "bbox",
-        "provider_dataset",
-        "cache_target_keys",
-        "sigungu_by_radius",
-    ]
-    assert calls[0][1]["feature_ids"] == ["1", "two"]
-    assert calls[4][1]["target_keys"] == ["poi-1", "2"]
-    assert calls[5][1]["sigungu_resolver"] is resolver
+    call_names = [name for name, _payload in calls]
+    assert call_names.count("count") == 5
+    assert call_names.count("sigungu_codes") == 5
+    assert "provider_datasets_for_ids" in call_names
+    assert "execute_preview" in call_names
+    feature_id_payload = next(
+        payload for name, payload in calls if name == "feature_ids"
+    )
+    assert feature_id_payload["feature_ids"] == ("1", "two")
+    assert feature_id_payload["limit"] == scope_repo.DEFAULT_SCOPE_PREVIEW_LIMIT
+    preview_calls = {
+        name: payload
+        for name, payload in calls
+        if name in {"center_radius", "bbox", "provider_dataset"}
+    }
+    assert preview_calls["center_radius"]["limit"] == scope_repo.DEFAULT_SCOPE_PREVIEW_LIMIT
+    assert preview_calls["bbox"]["limit"] == scope_repo.DEFAULT_SCOPE_PREVIEW_LIMIT
+    assert preview_calls["provider_dataset"]["limit"] == scope_repo.DEFAULT_SCOPE_PREVIEW_LIMIT
+    assert any(
+        name == "cache_target_keys" and payload["target_keys"] == ["poi-1", "2"]
+        for name, payload in calls
+    )
 
 
 async def test_count_features_matching_scope_validation_errors() -> None:

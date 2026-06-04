@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### Infra — scope resolver count/preview 분리 (2026-06-05)
+
+- **FIXED**: `count_features_matching_scope`가 `center_radius`, `bbox`,
+  `sigungu_by_radius`, `provider_dataset`, `feature_ids` dry-run에서 전체 feature row를
+  materialize하지 않고 `count(*)`/provider 집계/sigungu 집계를 별도 SQL로 계산한다.
+- **FIXED**: dry-run matched scope는 기본 1000개 preview만 보존하고,
+  `feature_preview_count`, `feature_preview_limit`, `feature_preview_truncated`로
+  truncation 여부를 기록한다.
+- **TEST**: PostGIS integration test로 preview가 1개로 제한되어도 전체
+  `feature_count`와 provider/dataset 집계가 3개를 유지하는지 검증한다.
+
 ### Infra — dedup merge review row 잠금 (2026-06-04)
 
 - **FIXED**: `merge_from_review`와 admin `merge_dedup_review`가

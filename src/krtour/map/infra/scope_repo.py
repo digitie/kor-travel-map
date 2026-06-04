@@ -39,6 +39,8 @@ __all__ = [
     "count_features_matching_scope",
 ]
 
+DEFAULT_SCOPE_PREVIEW_LIMIT: Final[int] = 1000
+
 ScopeType = Literal[
     "feature_ids",
     "center_radius",
@@ -104,6 +106,7 @@ class ScopeResolution:
     cache_targets: tuple[CacheTargetScopeTarget, ...] = ()
     cache_target_matches: tuple[CacheTargetFeatureMatch, ...] = ()
     extra_matched_scope: Mapping[str, Any] = field(default_factory=dict)
+    matched_feature_count: int | None = None
 
     @property
     def feature_ids(self) -> tuple[str, ...]:
@@ -111,7 +114,11 @@ class ScopeResolution:
 
     @property
     def feature_count(self) -> int:
-        return len(self.features)
+        return (
+            self.matched_feature_count
+            if self.matched_feature_count is not None
+            else len(self.features)
+        )
 
     def matched_scope(self) -> dict[str, Any]:
         """``ops.feature_update_requests.matched_scope``에 저장할 JSONB payload."""
@@ -159,6 +166,33 @@ JOIN feature.features AS f
   ON f.feature_id = r.feature_id
 WHERE f.deleted_at IS NULL
 ORDER BY r.ord
+LIMIT CAST(:limit AS integer)
+"""
+
+_COUNT_FEATURE_IDS_SQL: Final[str] = """
+WITH requested AS (
+    SELECT feature_id
+    FROM unnest(CAST(:feature_ids AS text[])) AS r(feature_id)
+)
+SELECT count(*)::int
+FROM requested AS r
+JOIN feature.features AS f
+  ON f.feature_id = r.feature_id
+WHERE f.deleted_at IS NULL
+"""
+
+_MATCHED_SIGUNGU_FEATURE_IDS_SQL: Final[str] = """
+WITH requested AS (
+    SELECT feature_id
+    FROM unnest(CAST(:feature_ids AS text[])) AS r(feature_id)
+)
+SELECT DISTINCT f.sigungu_code
+FROM requested AS r
+JOIN feature.features AS f
+  ON f.feature_id = r.feature_id
+WHERE f.deleted_at IS NULL
+  AND f.sigungu_code IS NOT NULL
+ORDER BY f.sigungu_code
 """
 
 _RESOLVE_CENTER_RADIUS_SQL: Final[str] = """
@@ -184,6 +218,92 @@ WHERE f.deleted_at IS NULL
         CAST(:radius_m AS double precision)
       )
 ORDER BY f.coord_5179 <-> i.pt, f.feature_id
+LIMIT CAST(:limit AS integer)
+"""
+
+_COUNT_CENTER_RADIUS_SQL: Final[str] = """
+WITH input AS (
+    SELECT x_extension.ST_Transform(
+        x_extension.ST_SetSRID(
+            x_extension.ST_MakePoint(
+                CAST(:lon AS double precision),
+                CAST(:lat AS double precision)
+            ),
+            4326
+        ),
+        5179
+    ) AS pt
+)
+SELECT count(*)::int
+FROM feature.features AS f, input AS i
+WHERE f.deleted_at IS NULL
+  AND f.coord_5179 IS NOT NULL
+  AND x_extension.ST_DWithin(
+        f.coord_5179,
+        i.pt,
+        CAST(:radius_m AS double precision)
+      )
+"""
+
+_PROVIDER_DATASETS_CENTER_RADIUS_SQL: Final[str] = """
+WITH input AS (
+    SELECT x_extension.ST_Transform(
+        x_extension.ST_SetSRID(
+            x_extension.ST_MakePoint(
+                CAST(:lon AS double precision),
+                CAST(:lat AS double precision)
+            ),
+            4326
+        ),
+        5179
+    ) AS pt
+),
+matched AS (
+    SELECT f.feature_id
+    FROM feature.features AS f, input AS i
+    WHERE f.deleted_at IS NULL
+      AND f.coord_5179 IS NOT NULL
+      AND x_extension.ST_DWithin(
+            f.coord_5179,
+            i.pt,
+            CAST(:radius_m AS double precision)
+          )
+)
+SELECT sr.provider, sr.dataset_key, count(DISTINCT m.feature_id)::int AS feature_count
+FROM matched AS m
+JOIN provider_sync.source_links AS sl
+  ON sl.feature_id = m.feature_id
+ AND sl.is_primary_source
+JOIN provider_sync.source_records AS sr
+  ON sr.source_record_key = sl.source_record_key
+GROUP BY sr.provider, sr.dataset_key
+ORDER BY sr.provider, sr.dataset_key
+"""
+
+_MATCHED_SIGUNGU_CENTER_RADIUS_SQL: Final[str] = """
+WITH input AS (
+    SELECT x_extension.ST_Transform(
+        x_extension.ST_SetSRID(
+            x_extension.ST_MakePoint(
+                CAST(:lon AS double precision),
+                CAST(:lat AS double precision)
+            ),
+            4326
+        ),
+        5179
+    ) AS pt
+)
+SELECT DISTINCT f.sigungu_code
+FROM feature.features AS f, input AS i
+WHERE f.deleted_at IS NULL
+  AND f.coord_5179 IS NOT NULL
+  AND f.sigungu_code IS NOT NULL
+  AND x_extension.ST_DWithin(
+        f.coord_5179,
+        i.pt,
+        CAST(:radius_m AS double precision)
+      )
+ORDER BY f.sigungu_code
 """
 
 _RESOLVE_BBOX_SQL: Final[str] = """
@@ -199,6 +319,62 @@ WHERE f.deleted_at IS NULL
         4326
       )
 ORDER BY f.feature_id
+LIMIT CAST(:limit AS integer)
+"""
+
+_COUNT_BBOX_SQL: Final[str] = """
+SELECT count(*)::int
+FROM feature.features AS f
+WHERE f.deleted_at IS NULL
+  AND f.coord IS NOT NULL
+  AND f.coord && x_extension.ST_MakeEnvelope(
+        CAST(:min_lon AS double precision),
+        CAST(:min_lat AS double precision),
+        CAST(:max_lon AS double precision),
+        CAST(:max_lat AS double precision),
+        4326
+      )
+"""
+
+_PROVIDER_DATASETS_BBOX_SQL: Final[str] = """
+WITH matched AS (
+    SELECT f.feature_id
+    FROM feature.features AS f
+    WHERE f.deleted_at IS NULL
+      AND f.coord IS NOT NULL
+      AND f.coord && x_extension.ST_MakeEnvelope(
+            CAST(:min_lon AS double precision),
+            CAST(:min_lat AS double precision),
+            CAST(:max_lon AS double precision),
+            CAST(:max_lat AS double precision),
+            4326
+          )
+)
+SELECT sr.provider, sr.dataset_key, count(DISTINCT m.feature_id)::int AS feature_count
+FROM matched AS m
+JOIN provider_sync.source_links AS sl
+  ON sl.feature_id = m.feature_id
+ AND sl.is_primary_source
+JOIN provider_sync.source_records AS sr
+  ON sr.source_record_key = sl.source_record_key
+GROUP BY sr.provider, sr.dataset_key
+ORDER BY sr.provider, sr.dataset_key
+"""
+
+_MATCHED_SIGUNGU_BBOX_SQL: Final[str] = """
+SELECT DISTINCT f.sigungu_code
+FROM feature.features AS f
+WHERE f.deleted_at IS NULL
+  AND f.coord IS NOT NULL
+  AND f.sigungu_code IS NOT NULL
+  AND f.coord && x_extension.ST_MakeEnvelope(
+        CAST(:min_lon AS double precision),
+        CAST(:min_lat AS double precision),
+        CAST(:max_lon AS double precision),
+        CAST(:max_lat AS double precision),
+        4326
+      )
+ORDER BY f.sigungu_code
 """
 
 _RESOLVE_SIGUNGU_CODES_SQL: Final[str] = """
@@ -207,6 +383,41 @@ FROM feature.features AS f
 WHERE f.deleted_at IS NULL
   AND f.sigungu_code = ANY(CAST(:sigungu_codes AS text[]))
 ORDER BY f.feature_id
+LIMIT CAST(:limit AS integer)
+"""
+
+_COUNT_SIGUNGU_CODES_SQL: Final[str] = """
+SELECT count(*)::int
+FROM feature.features AS f
+WHERE f.deleted_at IS NULL
+  AND f.sigungu_code = ANY(CAST(:sigungu_codes AS text[]))
+"""
+
+_MATCHED_SIGUNGU_CODES_SQL: Final[str] = """
+SELECT DISTINCT f.sigungu_code
+FROM feature.features AS f
+WHERE f.deleted_at IS NULL
+  AND f.sigungu_code = ANY(CAST(:sigungu_codes AS text[]))
+  AND f.sigungu_code IS NOT NULL
+ORDER BY f.sigungu_code
+"""
+
+_PROVIDER_DATASETS_SIGUNGU_CODES_SQL: Final[str] = """
+WITH matched AS (
+    SELECT f.feature_id
+    FROM feature.features AS f
+    WHERE f.deleted_at IS NULL
+      AND f.sigungu_code = ANY(CAST(:sigungu_codes AS text[]))
+)
+SELECT sr.provider, sr.dataset_key, count(DISTINCT m.feature_id)::int AS feature_count
+FROM matched AS m
+JOIN provider_sync.source_links AS sl
+  ON sl.feature_id = m.feature_id
+ AND sl.is_primary_source
+JOIN provider_sync.source_records AS sr
+  ON sr.source_record_key = sl.source_record_key
+GROUP BY sr.provider, sr.dataset_key
+ORDER BY sr.provider, sr.dataset_key
 """
 
 _RESOLVE_PROVIDER_DATASET_SQL: Final[str] = """
@@ -221,11 +432,43 @@ WHERE f.deleted_at IS NULL
   AND sr.provider = :provider
   AND sr.dataset_key = :dataset_key
 ORDER BY f.feature_id
+LIMIT CAST(:limit AS integer)
+"""
+
+_COUNT_PROVIDER_DATASET_SQL: Final[str] = """
+SELECT count(DISTINCT f.feature_id)::int
+FROM feature.features AS f
+JOIN provider_sync.source_links AS sl
+  ON sl.feature_id = f.feature_id
+JOIN provider_sync.source_records AS sr
+  ON sr.source_record_key = sl.source_record_key
+WHERE f.deleted_at IS NULL
+  AND sl.is_primary_source
+  AND sr.provider = :provider
+  AND sr.dataset_key = :dataset_key
+"""
+
+_MATCHED_SIGUNGU_PROVIDER_DATASET_SQL: Final[str] = """
+SELECT DISTINCT f.sigungu_code
+FROM feature.features AS f
+JOIN provider_sync.source_links AS sl
+  ON sl.feature_id = f.feature_id
+JOIN provider_sync.source_records AS sr
+  ON sr.source_record_key = sl.source_record_key
+WHERE f.deleted_at IS NULL
+  AND f.sigungu_code IS NOT NULL
+  AND sl.is_primary_source
+  AND sr.provider = :provider
+  AND sr.dataset_key = :dataset_key
+ORDER BY f.sigungu_code
 """
 
 _PROVIDER_DATASETS_FOR_FEATURE_IDS_SQL: Final[str] = """
 SELECT sr.provider, sr.dataset_key, count(DISTINCT sl.feature_id)::int AS feature_count
 FROM provider_sync.source_links AS sl
+JOIN feature.features AS f
+  ON f.feature_id = sl.feature_id
+ AND f.deleted_at IS NULL
 JOIN provider_sync.source_records AS sr
   ON sr.source_record_key = sl.source_record_key
 WHERE sl.is_primary_source
@@ -393,6 +636,77 @@ def _sigungu_codes(features: Sequence[FeatureScopeRow]) -> tuple[str, ...]:
     )
 
 
+def _limit_value(limit: int | None) -> int | None:
+    if limit is not None and limit <= 0:
+        raise ValueError("limit must be greater than 0")
+    return limit
+
+
+async def _count_scalar(
+    session: AsyncSession,
+    sql: str,
+    params: Mapping[str, Any],
+) -> int:
+    value = (await session.execute(text(sql), dict(params))).scalar_one()
+    return int(value)
+
+
+async def _provider_datasets_from_sql(
+    session: AsyncSession,
+    sql: str,
+    params: Mapping[str, Any],
+) -> tuple[ProviderDatasetScope, ...]:
+    rows = (
+        await session.execute(text(sql), dict(params))
+    ).mappings().all()
+    return tuple(
+        ProviderDatasetScope(
+            provider=str(row["provider"]),
+            dataset_key=str(row["dataset_key"]),
+            feature_count=int(row["feature_count"]),
+        )
+        for row in rows
+    )
+
+
+async def _sigungu_codes_from_sql(
+    session: AsyncSession,
+    sql: str,
+    params: Mapping[str, Any],
+) -> tuple[str, ...]:
+    rows = (await session.execute(text(sql), dict(params))).scalars().all()
+    return tuple(str(row) for row in rows if row is not None)
+
+
+def _counted_resolution(
+    preview: ScopeResolution,
+    *,
+    matched_feature_count: int,
+    provider_datasets: tuple[ProviderDatasetScope, ...],
+    preview_limit: int,
+    sigungu_codes: tuple[str, ...] | None = None,
+) -> ScopeResolution:
+    extra = dict(preview.extra_matched_scope)
+    if matched_feature_count > len(preview.features):
+        extra.update(
+            {
+                "feature_preview_count": len(preview.features),
+                "feature_preview_limit": preview_limit,
+                "feature_preview_truncated": True,
+            }
+        )
+    return ScopeResolution(
+        scope_type=preview.scope_type,
+        features=preview.features,
+        provider_datasets=provider_datasets,
+        sigungu_codes=sigungu_codes if sigungu_codes is not None else preview.sigungu_codes,
+        cache_targets=preview.cache_targets,
+        cache_target_matches=preview.cache_target_matches,
+        extra_matched_scope=extra,
+        matched_feature_count=matched_feature_count,
+    )
+
+
 async def _provider_datasets_for_feature_ids(
     session: AsyncSession,
     feature_ids: Sequence[str],
@@ -471,6 +785,8 @@ async def _resolution(
 async def resolve_feature_ids(
     session: AsyncSession,
     feature_ids: Sequence[str],
+    *,
+    limit: int | None = None,
 ) -> ScopeResolution:
     """존재하는 feature id만 입력 순서대로 해석한다."""
     unique_ids = _unique_preserve_order(feature_ids)
@@ -479,7 +795,7 @@ async def resolve_feature_ids(
     rows = (
         await session.execute(
             text(_RESOLVE_FEATURE_IDS_SQL),
-            {"feature_ids": list(unique_ids)},
+            {"feature_ids": list(unique_ids), "limit": _limit_value(limit)},
         )
     ).mappings().all()
     return await _resolution(session, "feature_ids", _rows_to_features(rows))
@@ -491,6 +807,7 @@ async def resolve_center_radius(
     lon: float,
     lat: float,
     radius_km: float,
+    limit: int | None = None,
 ) -> ScopeResolution:
     """좌표 중심 반경 안 feature를 ``coord_5179`` + ``ST_DWithin``으로 해석한다."""
     if radius_km <= 0:
@@ -502,6 +819,7 @@ async def resolve_center_radius(
                 "lon": lon,
                 "lat": lat,
                 "radius_m": radius_km * 1000.0,
+                "limit": _limit_value(limit),
             },
         )
     ).mappings().all()
@@ -515,6 +833,7 @@ async def resolve_bbox(
     min_lat: float,
     max_lon: float,
     max_lat: float,
+    limit: int | None = None,
 ) -> ScopeResolution:
     """bbox 안 feature를 해석한다. 입력 좌표계는 WGS84 lon/lat."""
     if min_lon > max_lon or min_lat > max_lat:
@@ -527,6 +846,7 @@ async def resolve_bbox(
                 "min_lat": min_lat,
                 "max_lon": max_lon,
                 "max_lat": max_lat,
+                "limit": _limit_value(limit),
             },
         )
     ).mappings().all()
@@ -540,6 +860,7 @@ async def resolve_sigungu_by_radius(
     lat: float,
     radius_km: float,
     sigungu_resolver: SigunguByRadiusResolver,
+    limit: int | None = None,
 ) -> ScopeResolution:
     """kraddr-geo가 계산한 반경 교차 시군구 코드로 feature를 해석한다."""
     if radius_km <= 0:
@@ -552,7 +873,7 @@ async def resolve_sigungu_by_radius(
     rows = (
         await session.execute(
             text(_RESOLVE_SIGUNGU_CODES_SQL),
-            {"sigungu_codes": list(sigungu_codes)},
+            {"sigungu_codes": list(sigungu_codes), "limit": _limit_value(limit)},
         )
     ).mappings().all()
     resolution = await _resolution(
@@ -574,12 +895,17 @@ async def resolve_provider_dataset(
     *,
     provider: str,
     dataset_key: str,
+    limit: int | None = None,
 ) -> ScopeResolution:
     """primary source가 특정 provider/dataset인 feature를 해석한다."""
     rows = (
         await session.execute(
             text(_RESOLVE_PROVIDER_DATASET_SQL),
-            {"provider": provider, "dataset_key": dataset_key},
+            {
+                "provider": provider,
+                "dataset_key": dataset_key,
+                "limit": _limit_value(limit),
+            },
         )
     ).mappings().all()
     return await _resolution(session, "provider_dataset", _rows_to_features(rows))
@@ -714,37 +1040,131 @@ async def count_features_matching_scope(
     scope: dict[str, Any],
     *,
     sigungu_resolver: SigunguByRadiusResolver | None = None,
+    preview_limit: int = DEFAULT_SCOPE_PREVIEW_LIMIT,
 ) -> ScopeResolution:
     """OpenAPI scope payload를 해석해 dry-run용 count/matched_scope를 반환한다."""
+    limit = _limit_value(preview_limit)
+    if limit is None:
+        raise ValueError("preview_limit must be greater than 0")
     scope_type = scope.get("type")
     if scope_type == "feature_ids":
         raw_ids = scope.get("feature_ids", ())
         if not isinstance(raw_ids, list):
             raise ValueError("feature_ids scope requires feature_ids list")
-        return await resolve_feature_ids(session, [str(item) for item in raw_ids])
+        unique_ids = _unique_preserve_order([str(item) for item in raw_ids])
+        if not unique_ids:
+            return ScopeResolution(scope_type="feature_ids", features=())
+        feature_id_params: dict[str, Any] = {"feature_ids": list(unique_ids)}
+        total_count = await _count_scalar(
+            session, _COUNT_FEATURE_IDS_SQL, feature_id_params
+        )
+        provider_datasets = await _provider_datasets_for_feature_ids(session, unique_ids)
+        sigungu_codes = await _sigungu_codes_from_sql(
+            session, _MATCHED_SIGUNGU_FEATURE_IDS_SQL, feature_id_params
+        )
+        preview = await resolve_feature_ids(session, unique_ids, limit=limit)
+        return _counted_resolution(
+            preview,
+            matched_feature_count=total_count,
+            provider_datasets=provider_datasets,
+            preview_limit=limit,
+            sigungu_codes=sigungu_codes,
+        )
     if scope_type == "center_radius":
         center = scope.get("center")
         if not isinstance(center, dict):
             raise ValueError("center_radius scope requires center")
-        return await resolve_center_radius(
+        center_params: dict[str, Any] = {
+            "lon": float(center["lon"]),
+            "lat": float(center["lat"]),
+            "radius_m": float(scope["radius_km"]) * 1000.0,
+        }
+        total_count = await _count_scalar(
+            session, _COUNT_CENTER_RADIUS_SQL, center_params
+        )
+        provider_datasets = await _provider_datasets_from_sql(
+            session, _PROVIDER_DATASETS_CENTER_RADIUS_SQL, center_params
+        )
+        sigungu_codes = await _sigungu_codes_from_sql(
+            session, _MATCHED_SIGUNGU_CENTER_RADIUS_SQL, center_params
+        )
+        preview = await resolve_center_radius(
             session,
-            lon=float(center["lon"]),
-            lat=float(center["lat"]),
+            lon=float(center_params["lon"]),
+            lat=float(center_params["lat"]),
             radius_km=float(scope["radius_km"]),
+            limit=limit,
+        )
+        return _counted_resolution(
+            preview,
+            matched_feature_count=total_count,
+            provider_datasets=provider_datasets,
+            preview_limit=limit,
+            sigungu_codes=sigungu_codes,
         )
     if scope_type == "bbox":
-        return await resolve_bbox(
+        bbox_params: dict[str, Any] = {
+            "min_lon": float(scope["min_lon"]),
+            "min_lat": float(scope["min_lat"]),
+            "max_lon": float(scope["max_lon"]),
+            "max_lat": float(scope["max_lat"]),
+        }
+        total_count = await _count_scalar(session, _COUNT_BBOX_SQL, bbox_params)
+        provider_datasets = await _provider_datasets_from_sql(
+            session, _PROVIDER_DATASETS_BBOX_SQL, bbox_params
+        )
+        sigungu_codes = await _sigungu_codes_from_sql(
+            session, _MATCHED_SIGUNGU_BBOX_SQL, bbox_params
+        )
+        preview = await resolve_bbox(
             session,
-            min_lon=float(scope["min_lon"]),
-            min_lat=float(scope["min_lat"]),
-            max_lon=float(scope["max_lon"]),
-            max_lat=float(scope["max_lat"]),
+            min_lon=float(bbox_params["min_lon"]),
+            min_lat=float(bbox_params["min_lat"]),
+            max_lon=float(bbox_params["max_lon"]),
+            max_lat=float(bbox_params["max_lat"]),
+            limit=limit,
+        )
+        return _counted_resolution(
+            preview,
+            matched_feature_count=total_count,
+            provider_datasets=provider_datasets,
+            preview_limit=limit,
+            sigungu_codes=sigungu_codes,
         )
     if scope_type == "provider_dataset":
-        return await resolve_provider_dataset(
+        provider_params: dict[str, Any] = {
+            "provider": str(scope["provider"]),
+            "dataset_key": str(scope["dataset_key"]),
+        }
+        total_count = await _count_scalar(
+            session, _COUNT_PROVIDER_DATASET_SQL, provider_params
+        )
+        provider_datasets = (
+            (
+                ProviderDatasetScope(
+                    provider=str(provider_params["provider"]),
+                    dataset_key=str(provider_params["dataset_key"]),
+                    feature_count=total_count,
+                ),
+            )
+            if total_count > 0
+            else ()
+        )
+        sigungu_codes = await _sigungu_codes_from_sql(
+            session, _MATCHED_SIGUNGU_PROVIDER_DATASET_SQL, provider_params
+        )
+        preview = await resolve_provider_dataset(
             session,
-            provider=str(scope["provider"]),
-            dataset_key=str(scope["dataset_key"]),
+            provider=str(provider_params["provider"]),
+            dataset_key=str(provider_params["dataset_key"]),
+            limit=limit,
+        )
+        return _counted_resolution(
+            preview,
+            matched_feature_count=total_count,
+            provider_datasets=provider_datasets,
+            preview_limit=limit,
+            sigungu_codes=sigungu_codes,
         )
     if scope_type == "cache_target_keys":
         raw_keys = scope.get("target_keys", ())
@@ -768,11 +1188,40 @@ async def count_features_matching_scope(
         center = scope.get("center")
         if not isinstance(center, dict):
             raise ValueError("sigungu_by_radius scope requires center")
-        return await resolve_sigungu_by_radius(
-            session,
-            lon=float(center["lon"]),
-            lat=float(center["lat"]),
-            radius_km=float(scope["radius_km"]),
-            sigungu_resolver=sigungu_resolver,
+        sigungu_codes = _unique_preserve_order(
+            await sigungu_resolver(
+                lon=float(center["lon"]),
+                lat=float(center["lat"]),
+                radius_km=float(scope["radius_km"]),
+            )
+        )
+        if not sigungu_codes:
+            return ScopeResolution(scope_type="sigungu_by_radius", features=())
+        params = {"sigungu_codes": list(sigungu_codes)}
+        total_count = await _count_scalar(session, _COUNT_SIGUNGU_CODES_SQL, params)
+        provider_datasets = await _provider_datasets_from_sql(
+            session, _PROVIDER_DATASETS_SIGUNGU_CODES_SQL, params
+        )
+        matched_sigungu_codes = await _sigungu_codes_from_sql(
+            session, _MATCHED_SIGUNGU_CODES_SQL, params
+        )
+        rows = (
+            await session.execute(
+                text(_RESOLVE_SIGUNGU_CODES_SQL),
+                {**params, "limit": limit},
+            )
+        ).mappings().all()
+        preview = ScopeResolution(
+            scope_type="sigungu_by_radius",
+            features=_rows_to_features(rows),
+            provider_datasets=provider_datasets,
+            sigungu_codes=matched_sigungu_codes,
+        )
+        return _counted_resolution(
+            preview,
+            matched_feature_count=total_count,
+            provider_datasets=provider_datasets,
+            preview_limit=limit,
+            sigungu_codes=matched_sigungu_codes,
         )
     raise ValueError(f"unsupported scope type: {scope_type!r}")
