@@ -94,10 +94,6 @@ class FeatureDetailResponse(BaseModel):
     category: str
     lon: float | None = None
     lat: float | None = None
-    coord_5179_srid: int | None = Field(
-        default=None,
-        description="coord_5179 STORED generated column의 SRID (ADR-012 검증용).",
-    )
     address: dict[str, Any]
     detail: dict[str, Any]
     urls: dict[str, Any]
@@ -107,8 +103,6 @@ class FeatureDetailResponse(BaseModel):
     marker_icon: str | None = None
     marker_color: str | None = None
     status: str
-    parent_feature_id: str | None = None
-    sibling_group_id: str | None = None
     updated_at: datetime
 
 
@@ -202,27 +196,18 @@ class FeatureSearchResponse(BaseModel):
 
 
 class NearbyTargetSummary(BaseModel):
-    """주변 조회 기준 target summary."""
+    """주변 조회 기준 public target summary."""
 
     model_config = ConfigDict(extra="forbid")
 
-    target_id: str
     external_system: str
     target_key: str
-    name: str | None = None
     lon: float
     lat: float
-    radius_km: float
-    scope_mode: str
-    update_enabled: bool
-    refresh_policy: str
-    last_updated_at: datetime
-    last_refreshed_at: datetime | None = None
-    next_eligible_refresh_at: datetime | None = None
 
 
 class NearbyFeatureSummary(BaseModel):
-    """POI/cache target 주변 feature summary."""
+    """POI/cache target 주변 public feature summary."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -234,9 +219,6 @@ class NearbyFeatureSummary(BaseModel):
     lon: float
     lat: float
     distance_m: float
-    primary_provider: str | None = None
-    primary_dataset_key: str | None = None
-    last_updated_at: datetime
 
 
 class FeaturesNearbyByTargetData(BaseModel):
@@ -269,19 +251,10 @@ class FeaturesNearbyByTargetResponse(BaseModel):
 
 def _nearby_target(target: PoiCacheTarget) -> NearbyTargetSummary:
     return NearbyTargetSummary(
-        target_id=target.target_id,
         external_system=target.external_system,
         target_key=target.target_key,
-        name=target.name,
         lon=target.lon,
         lat=target.lat,
-        radius_km=target.radius_km,
-        scope_mode=target.scope_mode,
-        update_enabled=target.update_enabled,
-        refresh_policy=target.refresh_policy,
-        last_updated_at=target.updated_at,
-        last_refreshed_at=target.last_refreshed_at,
-        next_eligible_refresh_at=target.next_eligible_refresh_at,
     )
 
 
@@ -297,7 +270,6 @@ def _detail_from_row(row: dict[str, Any]) -> FeatureDetailResponse:
         category=row["category"],
         lon=row["lon"],
         lat=row["lat"],
-        coord_5179_srid=row["coord_5179_srid"],
         address=row["address"],
         detail=row["detail"],
         urls=row["urls"],
@@ -307,8 +279,6 @@ def _detail_from_row(row: dict[str, Any]) -> FeatureDetailResponse:
         marker_icon=row["marker_icon"],
         marker_color=row["marker_color"],
         status=row["status"],
-        parent_feature_id=row["parent_feature_id"],
-        sibling_group_id=row["sibling_group_id"],
         updated_at=row["updated_at"],
     )
 
@@ -552,9 +522,6 @@ async def list_features_nearby_by_target(
             lon=item.lon,
             lat=item.lat,
             distance_m=item.distance_m,
-            primary_provider=item.primary_provider,
-            primary_dataset_key=item.primary_dataset_key,
-            last_updated_at=item.last_updated_at,
         )
         for item in page.items
     ]

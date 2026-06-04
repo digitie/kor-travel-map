@@ -220,12 +220,14 @@ def test_get_feature_detail_maps_row(
         assert r.status_code == 200
         body = r.json()
         assert body["data"]["kind"] == "event"
-        assert body["data"]["coord_5179_srid"] == 5179
         assert body["data"]["detail"] == {"event_kind": "festival"}
         assert body["data"]["updated_at"] == "2026-05-29T00:00:00+09:00"
         assert "duration_ms" in body["meta"]
-        # 응답 schema는 created_at 등 raw 전용 필드를 노출하지 않는다.
+        # 공개 응답 schema는 raw/infra/dedup 전용 필드를 노출하지 않는다.
         assert "created_at" not in body["data"]
+        assert "coord_5179_srid" not in body["data"]
+        assert "parent_feature_id" not in body["data"]
+        assert "sibling_group_id" not in body["data"]
     finally:
         client.app.dependency_overrides.clear()
 
@@ -267,6 +269,9 @@ def test_tripmate_batch_returns_items_and_missing(
         assert r.status_code == 200
         body = r.json()
         assert body["data"]["items"]["f1"]["name"] == "축제"
+        assert "coord_5179_srid" not in body["data"]["items"]["f1"]
+        assert "parent_feature_id" not in body["data"]["items"]["f1"]
+        assert "sibling_group_id" not in body["data"]["items"]["f1"]
         assert body["data"]["missing"] == ["missing"]
     finally:
         client.app.dependency_overrides.clear()

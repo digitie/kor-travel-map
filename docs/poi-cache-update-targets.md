@@ -352,7 +352,10 @@ Query:
 | `sort` | string | `distance`, `name`, `last_updated_at` |
 
 응답 item은 summary만 반환한다. `feature.detail` JSONB, provider raw payload,
-source raw data는 목록 응답에 포함하지 않는다.
+source raw data와 provider/dataset 내부 식별자는 목록 응답에 포함하지 않는다.
+Target summary도 외부 key와 좌표만 반환하며 `target_id`, `refresh_policy`,
+`update_enabled`, `next_eligible_refresh_at` 같은 운영 필드는
+`/admin/poi-cache-targets*`에서만 조회한다(D-7).
 
 ```json
 {
@@ -360,9 +363,8 @@ source raw data는 목록 응답에 포함하지 않는다.
     "target": {
       "external_system": "tripmate",
       "target_key": "poi_123",
-      "coord": {"lon": 126.978, "lat": 37.5665},
-      "radius_km": 5.0,
-      "last_updated_at": "2026-06-01T12:10:00+09:00"
+      "lon": 126.978,
+      "lat": 37.5665
     },
     "items": [
       {
@@ -373,9 +375,7 @@ source raw data는 목록 응답에 포함하지 않는다.
         "status": "active",
         "lon": 126.98,
         "lat": 37.56,
-        "distance_m": 320.5,
-        "primary_provider": "python-opinet-api",
-        "last_updated_at": "2026-06-01T11:55:00+09:00"
+        "distance_m": 320.5
       }
     ],
     "next_cursor": null

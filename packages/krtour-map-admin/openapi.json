@@ -1442,18 +1442,6 @@
             "title": "Category",
             "type": "string"
           },
-          "coord_5179_srid": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "coord_5179 STORED generated column의 SRID (ADR-012 검증용).",
-            "title": "Coord 5179 Srid"
-          },
           "detail": {
             "additionalProperties": true,
             "title": "Detail",
@@ -1525,28 +1513,6 @@
           "name": {
             "title": "Name",
             "type": "string"
-          },
-          "parent_feature_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Parent Feature Id"
-          },
-          "sibling_group_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Sibling Group Id"
           },
           "sido_code": {
             "anyOf": [
@@ -2394,7 +2360,7 @@
       },
       "NearbyFeatureSummary": {
         "additionalProperties": false,
-        "description": "POI/cache target 주변 feature summary.",
+        "description": "POI/cache target 주변 public feature summary.",
         "properties": {
           "category": {
             "title": "Category",
@@ -2412,11 +2378,6 @@
             "title": "Kind",
             "type": "string"
           },
-          "last_updated_at": {
-            "format": "date-time",
-            "title": "Last Updated At",
-            "type": "string"
-          },
           "lat": {
             "title": "Lat",
             "type": "number"
@@ -2428,28 +2389,6 @@
           "name": {
             "title": "Name",
             "type": "string"
-          },
-          "primary_dataset_key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Primary Dataset Key"
-          },
-          "primary_provider": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Primary Provider"
           },
           "status": {
             "title": "Status",
@@ -2464,35 +2403,17 @@
           "status",
           "lon",
           "lat",
-          "distance_m",
-          "last_updated_at"
+          "distance_m"
         ],
         "title": "NearbyFeatureSummary",
         "type": "object"
       },
       "NearbyTargetSummary": {
         "additionalProperties": false,
-        "description": "주변 조회 기준 target summary.",
+        "description": "주변 조회 기준 public target summary.",
         "properties": {
           "external_system": {
             "title": "External System",
-            "type": "string"
-          },
-          "last_refreshed_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Refreshed At"
-          },
-          "last_updated_at": {
-            "format": "date-time",
-            "title": "Last Updated At",
             "type": "string"
           },
           "lat": {
@@ -2503,65 +2424,16 @@
             "title": "Lon",
             "type": "number"
           },
-          "name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
-          },
-          "next_eligible_refresh_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Eligible Refresh At"
-          },
-          "radius_km": {
-            "title": "Radius Km",
-            "type": "number"
-          },
-          "refresh_policy": {
-            "title": "Refresh Policy",
-            "type": "string"
-          },
-          "scope_mode": {
-            "title": "Scope Mode",
-            "type": "string"
-          },
-          "target_id": {
-            "title": "Target Id",
-            "type": "string"
-          },
           "target_key": {
             "title": "Target Key",
             "type": "string"
-          },
-          "update_enabled": {
-            "title": "Update Enabled",
-            "type": "boolean"
           }
         },
         "required": [
-          "target_id",
           "external_system",
           "target_key",
           "lon",
-          "lat",
-          "radius_km",
-          "scope_mode",
-          "update_enabled",
-          "refresh_policy",
-          "last_updated_at"
+          "lat"
         ],
         "title": "NearbyTargetSummary",
         "type": "object"

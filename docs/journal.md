@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-04 (codex) — T-RV-08 public response field hardening
+
+**작업**: PR#153~#179 리뷰 후속 HIGH 항목 중 T-RV-08을 반영한다.
+
+- **Feature detail**: public `FeatureDetailResponse`에서 `coord_5179_srid`,
+  `parent_feature_id`, `sibling_group_id`를 제거했다.
+- **By-target**: `/features/nearby/by-target` 응답에서 target `target_id`,
+  `refresh_policy`, `update_enabled`, `next_eligible_refresh_at`과 item
+  `primary_provider`, `primary_dataset_key`를 제거했다.
+- **OpenAPI**: `packages/krtour-map-admin/openapi.json`과 `openapi.user.json`을
+  재생성했고, user spec schema 누출 회귀 테스트를 추가했다.
+- **문서**: `docs/tripmate-rest-api.md`, `docs/poi-cache-update-targets.md`,
+  `docs/openapi-admin-contract.md`를 public fieldset 기준으로 정렬했다.
+
 ## 2026-06-04 (codex) — T-RV-07 admin/ops router gate
 
 **작업**: PR#153~#179 리뷰 후속 HIGH 항목 중 T-RV-07을 반영한다.

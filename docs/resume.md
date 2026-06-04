@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-04 Codex 작업 메모 — T-RV-08 public response field hardening
+
+T-RV-08을 처리한다. public `FeatureDetailResponse`에서 `coord_5179_srid`,
+`parent_feature_id`, `sibling_group_id`를 제거했고, `/features/nearby/by-target`의
+target summary는 `external_system`, `target_key`, `lon`, `lat`만 남겼다. 주변 feature
+item에서도 `primary_provider`, `primary_dataset_key`를 제거했다. admin 전용
+`/admin/poi-cache-targets*` 응답은 운영 필드를 그대로 제공한다.
+
+`openapi.user.json`을 재생성했고, `test_export_openapi.py`가 user spec schema에 내부
+필드가 남지 않는지 직접 검사한다. 다음 한 작업은 **T-RV-01/02(Dagster metadata DB/
+webserver/daemon 운영 형상)** 또는 **T-RV-05/11(run-now lock/claim 락경합)** 중 HIGH
+운영 형상 보강이다. **T-RV-27은 production 레벨 hardening 전까지 계속 skip/deferred**다.
+
 ## 2026-06-04 Codex 작업 메모 — T-RV-07 admin/ops router gate
 
 T-RV-07을 처리한다. `AdminSettings`에 `admin_routes_enabled`와
