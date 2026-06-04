@@ -2,6 +2,26 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-04 (claude) — PR#153~#179 ADR-045 구현 배치 상세 코드 리뷰
+
+**작업**: 사용자 지시 — 최신 레포 재독 후 리뷰 없이 머지된 PR 전부 상세 리뷰,
+반영 항목을 task로 문서화 후 PR/머지. 대상은 ADR-045 독립 프로그램화 구현 배치
+27건(#153~#179, `9720ca8..62e8a68`, 225파일 +39885). 영역별 병렬 리뷰
+에이전트 6개(infra repo / Dagster / admin router / offline-upload /
+geocoding·alembic·client / docker·OpenAPI·frontend)로 수집.
+
+- **산출**: `docs/reports/pr-153-179-review-2026-06-04.md` 신설 — HIGH 11 +
+  MED 25 + LOW 묶음 1을 `T-RV-NN` task로 정리(파일위치·근거·권장 fix·처리 순서).
+  `docs/tasks.md`에 "코드 리뷰 후속 백로그" 섹션으로 HIGH/MED 요약 + 리포트 링크.
+- **HIGH 핵심**: D-2 Dagster 별도 DB/daemon 미구현(SQLite 폴백), D-15 provider
+  resource 미구현(feature-load asset 실행 불가), D-6 run-now 409 락 미구현,
+  에러 envelope 전무, admin 라우터 무조건 mount, D-7 공개 응답 누출, offline
+  업로드 크기 상한 부재(OOM), keyset cursor float 정밀도, admin API 0.0.0.0 노출.
+- **검증된 정상**: geocoding 라우터 제거 clean(dangling 없음), alembic 0007~0011
+  단일 head·ADR-012 준수, D-14 무제한 보존 준수, core offline 레이어 청결,
+  ADR-022/006 위반 0. (리포트 §4)
+- **문서 전용 PR**(코드 미변경) — 후속 구현은 T-RV-NN로 분리 진행.
+
 ## 2026-06-03 (codex) — T-208h offline uploads API/UI
 
 **작업**: admin UI #9의 선행 작업으로 `/admin/offline-uploads*` API와 기본 upload

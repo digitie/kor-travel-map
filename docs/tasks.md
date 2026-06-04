@@ -55,6 +55,35 @@ T-207b는 사용자 결정에 따라 구현하지 않는다.
 11. **검증 기준** — WSL unit/integration/live pytest + Windows Playwright e2e + GitHub
    Actions green 후 머지.
 
+## 코드 리뷰 후속 백로그 (PR#153~#179, 2026-06-04)
+
+리뷰 없이 머지된 ADR-045 구현 배치(#153~#179)를 영역별 상세 리뷰한 결과.
+전체 지적·근거·파일위치는 **`docs/reports/pr-153-179-review-2026-06-04.md`** 가
+정본. task id는 `T-RV-NN`. 권장 처리 순서는 리포트 §5.
+
+**HIGH (운영/계약/보안 — 선반영):**
+- **T-RV-01/02** Dagster 운영 형상 (D-2): metadata를 별도 `krtour_map_dagster`
+  Postgres DB로 (현재 SQLite 폴백) + `dagster dev`→webserver/daemon 분리.
+- **T-RV-03/04** Dagster resource: engine dispose 누수 + provider 서비스키
+  resource 미구현(D-15, feature-load asset 현재 실행 불가).
+- **T-RV-05/11** D-6 run-now 409 LOCK_BUSY+retry_after 미구현 + claim 락경합/
+  빈 큐 미구분(run-now 작업 조용히 누락).
+- **T-RV-06** 에러 envelope `{error:{code,message}}` 전무(테스트가 `detail` 고착).
+- **T-RV-07** admin/ops 라우터 무조건 mount(DB 없는 부팅에서 write 노출).
+- **T-RV-08** D-7 공개 응답 내부 필드 누출(nearby/by-target, FeatureDetail).
+- **T-RV-09** offline-upload 업로드 크기 상한 없음 + 전체 버퍼링(OOM/DoS).
+- **T-RV-10** keyset cursor float/decimal 정밀도·정렬축 불일치(행 skip/dup).
+- **T-RV-27** admin API `0.0.0.0` 노출(ADR-005/.env 모순).
+
+**MED (정확성/일관성):** T-RV-12~T-RV-36 — dedup pair 순서독립 unique, UUID
+default 스키마 표준화, merge `FOR UPDATE`, scope resolver 무한정, ADR-016 master
+신호 부재, 상태전이 가드, substring 기반 status 매핑, poi-cache list cursor/무한정
+JSON, scope/policy 검증, dagster GET 부수효과/SSRF, offline orphan/멱등/상태 drift,
+healthcheck/노출, npm lockfile, user OpenAPI 누출, D-4 codegen 미채택, savepoint,
+sensor 멱등/retry, asset materialize/RetryPolicy, dagster deps. (리포트 §2)
+
+**LOW:** T-RV-37 묶음 cleanup (리포트 §3).
+
 ## 최근 완료 (2026-05-31~2026-06-03)
 
 - **T-208h** (2026-06-03): `/admin/offline-uploads*` backend와 admin UI 기본
