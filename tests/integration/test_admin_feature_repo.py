@@ -9,12 +9,15 @@ from typing import TYPE_CHECKING
 import pytest
 from geoalchemy2 import WKTElement
 from sqlalchemy import select, text
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from krtour.map.dto import Address, Coordinate, Feature, PlaceDetail
 from krtour.map.infra.admin_feature_repo import (
     deactivate_feature,
     list_admin_features,
     list_dedup_reviews,
+    merge_dedup_review,
     set_dedup_review_decision,
 )
 from krtour.map.infra.feature_repo import upsert_feature
@@ -26,7 +29,7 @@ from krtour.map.infra.models import (
 )
 
 if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.ext.asyncio import AsyncEngine
 
 pytestmark = pytest.mark.integration
 
@@ -114,6 +117,17 @@ async def _seed_feature(
     await session.flush()
     session.add(_source_link(feature_id, f"sr-{feature_id}"))
     await session.flush()
+
+
+async def _merge_dedup_review_with_short_lock_timeout(
+    session: AsyncSession, review_key: str
+) -> None:
+    await session.execute(text("SET LOCAL lock_timeout = '100ms'"))
+    await merge_dedup_review(
+        session,
+        review_key,
+        master_feature_id="feature-admin-lock-a",
+    )
 
 
 async def test_deactivate_creates_override_and_provider_upsert_preserves_status(
@@ -228,6 +242,42 @@ async def test_dedup_review_decision_updates_pending_only(
         decision="ignored",
     )
     assert unchanged is False
+
+
+async def test_merge_dedup_review_explicit_master_locks_review_row(
+    migrated_engine: AsyncEngine,
+) -> None:
+    async with AsyncSession(migrated_engine) as session, session.begin():
+        session.add(_feature_row("feature-admin-lock-a", name="잠금 A"))
+        session.add(_feature_row("feature-admin-lock-b", name="잠금 B"))
+        await session.flush()
+        review = DedupReviewQueueRow(
+            feature_id_a="feature-admin-lock-a",
+            feature_id_b="feature-admin-lock-b",
+            total_score=90,
+            name_score=95,
+            spatial_score=80,
+            category_score=100,
+            status="rejected",
+        )
+        session.add(review)
+        await session.flush()
+        review_key = str(review.review_key)
+
+    async with AsyncSession(migrated_engine) as holder, holder.begin():
+        await holder.execute(
+            text(
+                "SELECT review_key FROM ops.dedup_review_queue "
+                "WHERE review_key = :review_key FOR UPDATE"
+            ),
+            {"review_key": review_key},
+        )
+
+        async with AsyncSession(migrated_engine) as contender:
+            with pytest.raises(DBAPIError):
+                await _merge_dedup_review_with_short_lock_timeout(
+                    contender, review_key
+                )
 
 
 async def test_list_dedup_reviews_cursor_walks_same_score_without_gaps(

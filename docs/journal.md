@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-04 (codex) — T-RV-14 dedup merge review row 잠금
+
+**작업**: PR#153~#179 리뷰 후속 MED 항목 중 T-RV-14를 반영한다.
+
+- **저장소 동작**: `merge_from_review`와 admin `merge_dedup_review`가
+  `ops.dedup_review_queue` review row를 `FOR UPDATE`로 잠근 뒤 pending 상태를
+  확인한다.
+- **경합 차단**: 자동 master 선정 경로와 수동 master 지정 경로 모두 같은 row lock
+  규칙을 사용해 동시 merge TOCTOU를 차단한다.
+- **테스트**: Postgres `lock_timeout` 기반 integration test로 기존 row lock 보유 시
+  두 merge 경로가 대기/실패하는지 검증한다.
+- **정책**: T-RV-27(admin API bind/노출)은 production 레벨 hardening 전까지 구현하지
+  않고 skip/deferred로 문서 추적만 유지한다.
+
 ## 2026-06-04 (codex) — T-RV-13 UUID default 스키마 한정
 
 **작업**: PR#153~#179 리뷰 후속 MED 항목 중 T-RV-13을 반영한다.

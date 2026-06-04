@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### Infra — dedup merge review row 잠금 (2026-06-04)
+
+- **FIXED**: `merge_from_review`와 admin `merge_dedup_review`가
+  `ops.dedup_review_queue` review row를 `FOR UPDATE`로 잠근 뒤 pending 상태를
+  확인하도록 바꿔 동시 merge TOCTOU를 차단했다.
+- **TEST**: 자동 master 선정 경로와 수동 master 지정 경로가 기존 row lock을
+  기다리는지 Postgres `lock_timeout` 기반 integration test를 추가했다.
+
 ### Infra — UUID default schema qualification (2026-06-04)
 
 - **FIXED**: `ops.feature_consistency_reports`, `ops.dedup_review_queue`,

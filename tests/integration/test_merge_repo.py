@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from sqlalchemy import func, select, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from krtour.map.infra.merge_repo import (
@@ -123,6 +124,13 @@ async def _feature_status(engine: AsyncEngine, feature_id: str) -> tuple[str, bo
         return (row[0], row[1] is not None)
 
 
+async def _merge_from_review_with_short_lock_timeout(
+    session: AsyncSession, review_key: str
+) -> None:
+    await session.execute(text("SET LOCAL lock_timeout = '100ms'"))
+    await merge_from_review(session, review_key)
+
+
 @pytest.fixture
 async def seeded(
     pg_container: object, migrated_engine: AsyncEngine
@@ -214,6 +222,26 @@ async def test_merge_from_review_already_merged_raises(
     async with AsyncSession(migrated_engine) as session, session.begin():
         with pytest.raises(MergeError, match="이미 검토"):
             await merge_from_review(session, review_key)
+
+
+async def test_merge_from_review_locks_review_row(
+    seeded: str, migrated_engine: AsyncEngine
+) -> None:
+    review_key = seeded
+    async with AsyncSession(migrated_engine) as holder, holder.begin():
+        await holder.execute(
+            text(
+                "SELECT review_key FROM ops.dedup_review_queue "
+                "WHERE review_key = :review_key FOR UPDATE"
+            ),
+            {"review_key": review_key},
+        )
+
+        async with AsyncSession(migrated_engine) as contender:
+            with pytest.raises(DBAPIError):
+                await _merge_from_review_with_short_lock_timeout(
+                    contender, review_key
+                )
 
 
 async def test_apply_feature_merge_distinct_guard(
