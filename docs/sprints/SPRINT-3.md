@@ -80,7 +80,7 @@
 - `ops.feature_consistency_reports` 테이블 alembic migration:
   ```sql
   CREATE TABLE ops.feature_consistency_reports (
-    report_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    report_id UUID PRIMARY KEY DEFAULT x_extension.gen_random_uuid(),
     batch_id UUID NOT NULL,
     started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     finished_at TIMESTAMPTZ,

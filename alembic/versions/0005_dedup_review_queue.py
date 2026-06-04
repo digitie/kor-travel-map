@@ -8,8 +8,8 @@ cross-provider 중복 후보(예: knps 사찰 ↔ krheritage temple)를 ``score_
 (ADR-016 Record Linkage)로 cross-score한 결과 중 ``manual_review``(및 옵션
 ``auto_merge``)를 운영자 검토 큐로 영속화한다. ``infra/models.py``의
 ``DedupReviewQueueRow``와 1:1 (ADR-004 ORM=매핑, 쿼리는 raw SQL
-``infra/dedup_repo.py``). ``gen_random_uuid()``는 pgcrypto(x_extension,
-search_path 포함)로 호출 가능.
+``infra/dedup_repo.py``). UUID 기본값은 pgcrypto를 격리한
+``x_extension.gen_random_uuid()``를 스키마 한정으로 호출한다.
 
 점수는 0~100 ``NUMERIC(5,2)`` (core.scoring의 0.0~1.0 점수 ×100). ``status``는
 운영자 검토 워크플로(pending→accepted/rejected/merged/ignored)이며
@@ -42,7 +42,7 @@ def upgrade() -> None:
             "review_key",
             postgresql.UUID(as_uuid=False),
             primary_key=True,
-            server_default=sa.text("gen_random_uuid()"),
+            server_default=sa.text("x_extension.gen_random_uuid()"),
         ),
         sa.Column(
             "feature_id_a",

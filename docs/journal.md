@@ -2,6 +2,18 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-04 (codex) — T-RV-13 UUID default 스키마 한정
+
+**작업**: PR#153~#179 리뷰 후속 MED 항목 중 T-RV-13을 반영한다.
+
+- **Model/migration source**: bare `gen_random_uuid()`가 남아 있던
+  `feature_consistency_reports`, `dedup_review_queue`, `import_jobs`,
+  `feature_merge_history` default를 `x_extension.gen_random_uuid()`로 통일했다.
+- **Migration**: `0014_uuid_default_schema`는 기존 DB의 네 default를
+  schema-qualified expression으로 변경한다.
+- **Tests**: alembic head 적용 후 Postgres catalog의 ops UUID default expression이
+  모두 `x_extension.gen_random_uuid()`인지 검증한다.
+
 ## 2026-06-04 (codex) — T-RV-12 dedup pair 순서 독립 unique
 
 **작업**: PR#153~#179 리뷰 후속 MED 항목 중 T-RV-12를 반영한다.

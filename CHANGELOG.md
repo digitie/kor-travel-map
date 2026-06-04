@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### Infra — UUID default schema qualification (2026-06-04)
+
+- **FIXED**: `ops.feature_consistency_reports`, `ops.dedup_review_queue`,
+  `ops.import_jobs`, `ops.feature_merge_history`의 UUID default를
+  `x_extension.gen_random_uuid()`로 스키마 한정해 search_path 의존을 제거했다.
+- **MIGRATION**: alembic `0014_uuid_default_schema`가 기존 DB default를
+  schema-qualified expression으로 갱신한다.
+- **TEST**: Postgres catalog에서 ops UUID default expression이 모두
+  `x_extension.gen_random_uuid()`인지 검증하는 integration test를 추가했다.
+
 ### Infra — Dedup pair order invariant (2026-06-04)
 
 - **FIXED**: `ops.dedup_review_queue`가 `feature_id_a < feature_id_b` check와
