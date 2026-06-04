@@ -433,6 +433,8 @@ class ImportJobState(str, Enum):
 class ImportJob(BaseModel):
     job_id: UUID
     kind: str                            # 'visitkorea_festival_full_scan', ...
+    load_batch_id: UUID | None = None    # T-200 full-load batch id
+    parent_job_id: UUID | None = None    # root import job self-FK
     payload: dict[str, Any] = Field(default_factory=dict)
     state: ImportJobState = ImportJobState.QUEUED
     progress: int = Field(default=0, ge=0, le=100)

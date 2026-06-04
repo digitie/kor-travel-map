@@ -33,9 +33,13 @@ const states: Array<ImportJobState | "all"> = [
 export function ImportJobsClient() {
   const [state, setState] = useState<ImportJobState | "all">("all");
   const [kind, setKind] = useState("");
+  const [loadBatchId, setLoadBatchId] = useState("");
+  const [parentJobId, setParentJobId] = useState("");
   const jobs = useImportJobs({
     state: state === "all" ? undefined : state,
     kind: kind.trim() || undefined,
+    load_batch_id: loadBatchId.trim() || undefined,
+    parent_job_id: parentJobId.trim() || undefined,
     page_size: 100,
   });
 
@@ -84,6 +88,18 @@ export function ImportJobsClient() {
             value={kind}
             onChange={(event) => setKind(event.target.value)}
           />
+          <Input
+            className="max-w-80"
+            placeholder="load_batch_id"
+            value={loadBatchId}
+            onChange={(event) => setLoadBatchId(event.target.value)}
+          />
+          <Input
+            className="max-w-80"
+            placeholder="parent_job_id"
+            value={parentJobId}
+            onChange={(event) => setParentJobId(event.target.value)}
+          />
         </div>
 
         {jobs.isLoading ? <Skeleton className="h-96" /> : null}
@@ -92,6 +108,8 @@ export function ImportJobsClient() {
             <TableHeader>
               <TableRow>
                 <TableHead>job</TableHead>
+                <TableHead>batch</TableHead>
+                <TableHead>parent</TableHead>
                 <TableHead>kind</TableHead>
                 <TableHead>state</TableHead>
                 <TableHead>progress</TableHead>
@@ -106,6 +124,12 @@ export function ImportJobsClient() {
                 <TableRow key={job.job_id}>
                   <TableCell className="font-mono text-xs">
                     {shortId(job.job_id)}
+                  </TableCell>
+                  <TableCell className="font-mono text-xs">
+                    {job.load_batch_id ? shortId(job.load_batch_id) : "-"}
+                  </TableCell>
+                  <TableCell className="font-mono text-xs">
+                    {job.parent_job_id ? shortId(job.parent_job_id) : "-"}
                   </TableCell>
                   <TableCell>{job.kind}</TableCell>
                   <TableCell>
@@ -128,7 +152,7 @@ export function ImportJobsClient() {
                 <TableRow>
                   <TableCell
                     className="h-32 text-center text-muted-foreground"
-                    colSpan={8}
+                    colSpan={10}
                   >
                     import job이 없습니다.
                   </TableCell>

@@ -2,6 +2,28 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-04 (codex) — T-205d import_jobs batch 컬럼
+
+**작업**: T-200 Batch DAG 선행 스키마로 `ops.import_jobs`에 `load_batch_id`와
+`parent_job_id` self-FK를 추가했다.
+
+- **DB/Repo**: `alembic 0012_import_jobs_batch_columns`, `ImportJobRow`,
+  `infra.jobs_repo`에 batch/parent 생성·반환 경로를 추가했다. batch/parent 조회용
+  partial index `idx_import_jobs_load_batch_created`, `idx_import_jobs_parent_created`도
+  함께 추가했다.
+- **Ops API/UI**: `/ops/import-jobs` 목록/상세 응답에 `load_batch_id`와
+  `parent_job_id`를 포함하고, query filter를 추가했다. admin UI 목록에는 batch/parent
+  필터와 축약 id 컬럼을 노출했다.
+- **문서**: `docs/tasks.md`, `docs/data-model.md`, `docs/postgres-schema.md`,
+  `docs/dagster-boundary.md`, `docs/openapi-admin-contract.md`,
+  `docs/debug-ui-admin-workflows.md`, `docs/resume.md`, `CHANGELOG.md`를 갱신했다.
+- **검증**: unit coverage 재현 `792 passed` / `80.56%`, admin package `132 passed`,
+  Dagster package `15 passed`, targeted migrated PostGIS integration `13 passed`, mixed
+  unit/integration `22 passed`, repo-wide `ruff`/`mypy`/import-linter, OpenAPI
+  `--profile all --check`, frontend `type-check`/`lint`/`build`, React Doctor full scan
+  (기존 optional warning 7개) 통과.
+- **다음**: T-200 Batch DAG + consistency gate 구현으로 이동한다.
+
 ## 2026-06-04 (codex) — T-208i offline CSV/TSV validation + bjd 보강
 
 **작업**: admin UI #9의 offline upload 선행 task를 CSV/TSV까지 확장했다. 업로드 API는

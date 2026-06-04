@@ -477,6 +477,8 @@ DESC` (특정 종목 최신 가격 조회).
 CREATE TABLE ops.import_jobs (
   job_id            UUID PRIMARY KEY DEFAULT x_extension.gen_random_uuid(),
   kind              TEXT NOT NULL,                    -- 'visitkorea_festival_full_scan', 'mois_license_full_update', ...
+  load_batch_id     UUID,                             -- full-load root/child batch id
+  parent_job_id     UUID REFERENCES ops.import_jobs(job_id) ON DELETE SET NULL,
   payload           JSONB NOT NULL DEFAULT '{}'::jsonb,
   state             TEXT NOT NULL DEFAULT 'queued',   -- queued, running, done, failed, cancelled
   progress          INTEGER NOT NULL DEFAULT 0,       -- 0~100
@@ -494,7 +496,17 @@ CREATE TABLE ops.import_jobs (
 CREATE INDEX idx_import_jobs_state         ON ops.import_jobs (state, created_at);
 CREATE INDEX idx_import_jobs_kind_state    ON ops.import_jobs (kind, state, created_at DESC);
 CREATE INDEX idx_import_jobs_heartbeat     ON ops.import_jobs (heartbeat_at) WHERE state='running';
+CREATE INDEX idx_import_jobs_load_batch_created
+  ON ops.import_jobs (load_batch_id, created_at DESC, job_id DESC)
+  WHERE load_batch_id IS NOT NULL;
+CREATE INDEX idx_import_jobs_parent_created
+  ON ops.import_jobs (parent_job_id, created_at DESC, job_id DESC)
+  WHERE parent_job_id IS NOT NULL;
 ```
+
+`load_batch_id`/`parent_job_id`는 ADR-045 T-205d에서 추가했다. T-200 Batch DAG는
+root import job에 `load_batch_id`를 만들고, provider별 child job과
+`consistency_check` job이 같은 `load_batch_id`와 root `parent_job_id`를 공유한다.
 
 ### 9.1.1 `ops.offline_uploads` (ADR-045 D-14 / T-208g)
 

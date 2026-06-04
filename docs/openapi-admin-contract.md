@@ -500,8 +500,14 @@ Query:
 
 - `state`: `queued` / `running` / `done` / `failed` / `cancelled`
 - `kind`
+- `load_batch_id`: UUID. T-200 full-load batch 단위 조회.
+- `parent_job_id`: UUID. root import job 아래 child job 조회.
 - `page_size` (`1..200`, 기본 `50`)
 - `cursor`
+
+각 item은 `job_id`, `kind`, `load_batch_id`, `parent_job_id`, `payload`, `state`,
+`progress`, `current_stage`, `source_checksum`, `error_message`, timestamp 4종,
+`status_url`을 포함한다.
 
 ### `GET /ops/import-jobs/{job_id}`
 

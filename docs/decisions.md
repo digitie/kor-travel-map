@@ -239,6 +239,8 @@
   - `import_jobs(job_id UUID PK, kind, payload JSONB, state, progress,
     current_stage, source_checksum, error_message, started_at, finished_at,
     heartbeat_at, created_at)` 영속 테이블.
+    ADR-045 T-205d 이후 batch DAG 연결용 `load_batch_id`, `parent_job_id` self-FK를
+    추가했다.
   - 상태 전이: `queued → running → done | failed | cancelled`.
   - lifespan startup 복구: `state='running'` 잔존 행 → 무조건 `failed` (heartbeat
     만료 가정). `state='queued'` → 자원 있으면 재큐잉, 없으면 `failed`.

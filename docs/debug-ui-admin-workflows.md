@@ -764,12 +764,15 @@ Query:
 
 - `state`
 - `kind`
+- `load_batch_id`
+- `parent_job_id`
 - `page_size`
 - `cursor`
 
 현재 구현은 `ops.import_jobs`의 read-only 목록이다. 기본 정렬은
-`created_at desc, job_id desc`이고, provider/dataset/date/sort/order 필터는 후속
-확장이다.
+`created_at desc, job_id desc`이고, `load_batch_id`와 `parent_job_id`로
+T-200 full-load root/child job을 좁혀볼 수 있다. provider/dataset/date/sort/order
+필터는 후속 확장이다.
 
 ### 12.3 Job 상세
 
@@ -782,6 +785,8 @@ Query:
   "data": {
     "job_id": "c2ef3a84-...",
     "kind": "provider_import",
+    "load_batch_id": "35e8999f-...",
+    "parent_job_id": "6aeff02d-...",
     "state": "running",
     "progress": 37,
     "current_stage": "fetching",

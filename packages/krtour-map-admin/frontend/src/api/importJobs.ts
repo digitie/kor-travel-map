@@ -19,6 +19,8 @@ export type ImportJobState =
 export interface OpsImportJobRecord {
   job_id: string;
   kind: string;
+  load_batch_id: string | null;
+  parent_job_id: string | null;
   payload: Record<string, unknown>;
   state: string;
   progress: number;
@@ -51,6 +53,8 @@ export interface OpsImportJobResponse {
 export interface ImportJobsListParams {
   state?: ImportJobState;
   kind?: string;
+  load_batch_id?: string;
+  parent_job_id?: string;
   page_size?: number;
   cursor?: string;
 }
@@ -62,6 +66,8 @@ function fetchImportJobs(
     pathWithQuery("/ops/import-jobs", {
       state: params.state,
       kind: params.kind,
+      load_batch_id: params.load_batch_id,
+      parent_job_id: params.parent_job_id,
       page_size: params.page_size,
       cursor: params.cursor,
     }),
