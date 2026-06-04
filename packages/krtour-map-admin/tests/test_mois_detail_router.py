@@ -70,7 +70,7 @@ def test_mois_detail_404_when_missing(
     try:
         r = client.get("/debug/mois-license/general_restaurants::nope")
         assert r.status_code == 404
-        assert "nope" in r.json()["detail"]
+        assert "nope" in r.json()["error"]["message"]
     finally:
         client.app.dependency_overrides.clear()
 

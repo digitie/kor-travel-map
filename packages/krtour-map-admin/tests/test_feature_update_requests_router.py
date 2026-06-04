@@ -196,7 +196,7 @@ def test_create_sigungu_scope_without_kraddr_geo_returns_503(
     )
 
     assert response.status_code == 503
-    assert "KRTOUR_MAP_KRADDR_GEO_BASE_URL" in response.json()["detail"]
+    assert "KRTOUR_MAP_KRADDR_GEO_BASE_URL" in response.json()["error"]["message"]
 
 
 @pytest.mark.unit

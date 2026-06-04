@@ -156,7 +156,7 @@ def test_put_poi_cache_target_conflict_returns_409(
     )
 
     assert response.status_code == 409
-    assert "coord conflict" in response.json()["detail"]
+    assert "coord conflict" in response.json()["error"]["message"]
 
 
 @pytest.mark.unit

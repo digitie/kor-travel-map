@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-04 (codex) — T-RV-06 admin API error envelope
+
+**작업**: PR#153~#179 리뷰 후속 HIGH 항목 중 T-RV-06을 반영했다.
+
+- **Admin API**: `create_app()`에 `StarletteHTTPException`과 `RequestValidationError`
+  handler를 등록해 에러 응답을 `{error:{code,message,details,request_id}}`로 통일했다.
+- **Request ID**: `X-Request-ID` 요청 헤더가 있으면 같은 값을 응답 헤더와 envelope에
+  되돌리고, 없으면 UUID를 생성한다.
+- **Validation**: FastAPI 기본 422를 `VALIDATION_ERROR` code와 `details.errors`로
+  변환한다.
+- **Tests**: `test_error_envelope.py`를 추가하고, admin router 테스트의 `detail`
+  고착 assertion을 `error.message` 기준으로 교정했다.
+
 ## 2026-06-04 (codex) — T-RV-09 offline upload 크기 상한
 
 **작업**: PR#153~#179 리뷰 후속 HIGH 항목 중 첫 처리 순서인 T-RV-09를 반영했다.
