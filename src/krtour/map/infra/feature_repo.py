@@ -75,7 +75,7 @@ __all__ = [
 _UPSERT_FEATURE_SQL: Final[str] = """
 INSERT INTO feature.features (
     feature_id, kind, name, category,
-    coord, geom,
+    coord, coord_precision_digits, geom,
     address, legal_dong_code, road_name_code, road_address_management_no,
     admin_dong_code, sido_code, sigungu_code,
     urls, marker_icon, marker_color,
@@ -88,6 +88,7 @@ INSERT INTO feature.features (
          ELSE x_extension.ST_SetSRID(
              x_extension.ST_MakePoint(CAST(:lon AS double precision),
                           CAST(:lat AS double precision)), 4326) END,
+    :coord_precision_digits,
     CASE WHEN CAST(:geom_wkt AS text) IS NULL THEN NULL
          ELSE x_extension.ST_SetSRID(
              x_extension.ST_GeomFromText(CAST(:geom_wkt AS text)), 4326) END,
@@ -103,6 +104,7 @@ ON CONFLICT (feature_id) DO UPDATE SET
     name = EXCLUDED.name,
     category = EXCLUDED.category,
     coord = EXCLUDED.coord,
+    coord_precision_digits = EXCLUDED.coord_precision_digits,
     geom = EXCLUDED.geom,
     address = EXCLUDED.address,
     legal_dong_code = EXCLUDED.legal_dong_code,
@@ -185,6 +187,7 @@ _GET_FEATURE_SQL: Final[str] = """
 SELECT
     feature_id, kind, name, category,
     x_extension.ST_X(coord) AS lon, x_extension.ST_Y(coord) AS lat,
+    coord_precision_digits,
     x_extension.ST_SRID(coord_5179) AS coord_5179_srid,
     address, detail, urls, raw_refs,
     legal_dong_code, sido_code, sigungu_code,
@@ -199,6 +202,7 @@ _GET_FEATURES_BY_IDS_SQL: Final[str] = """
 SELECT
     feature_id, kind, name, category,
     x_extension.ST_X(coord) AS lon, x_extension.ST_Y(coord) AS lat,
+    coord_precision_digits,
     x_extension.ST_SRID(coord_5179) AS coord_5179_srid,
     address, detail, urls, raw_refs,
     legal_dong_code, sido_code, sigungu_code,
@@ -584,6 +588,7 @@ def _feature_params(feature: Feature) -> dict[str, Any]:
         "category": feature.category,
         "lon": float(coord.lon) if coord is not None else None,
         "lat": float(coord.lat) if coord is not None else None,
+        "coord_precision_digits": feature.coord_precision_digits,
         "geom_wkt": feature.geom,
         "address": addr.model_dump_json(),
         "legal_dong_code": addr.bjd_code,

@@ -8,11 +8,13 @@ Dagster 운영 job이 provider 적재 후 이미 DB에 들어간 ``feature.featu
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Final
 
 from sqlalchemy import text
 
+from krtour.map.core.scoring import MasterCandidate
 from krtour.map.dto import Coordinate
 
 if TYPE_CHECKING:
@@ -40,16 +42,23 @@ class DedupRefreshScope:
     kinds: tuple[str, ...] = ()
     categories: tuple[str, ...] = ()
     limit: int = DEDUP_REFRESH_DEFAULT_LIMIT
+    cursor_updated_at: datetime | None = None
+    cursor_feature_id: str | None = None
 
     def as_metadata(self) -> dict[str, object]:
         """Dagster metadata/문서화를 위한 직렬화 가능한 표현."""
-        return {
+        metadata: dict[str, object] = {
             "provider": self.provider,
             "dataset_key": self.dataset_key,
             "kinds": list(self.kinds),
             "categories": list(self.categories),
             "limit": self.limit,
         }
+        if self.cursor_updated_at is not None:
+            metadata["cursor_updated_at"] = self.cursor_updated_at.isoformat()
+        if self.cursor_feature_id is not None:
+            metadata["cursor_feature_id"] = self.cursor_feature_id
+        return metadata
 
 
 @dataclass(frozen=True)
@@ -59,44 +68,87 @@ class DedupRefreshFeature:
     feature_id: str
     name: str
     coord: Coordinate | None
+    coord_precision_digits: int | None
     category: str
     provider: str
     dataset_key: str
+    updated_at: datetime
+
+    @property
+    def has_coord(self) -> bool:
+        """ADR-016 master 선정 입력으로 쓰는 좌표 보유 신호."""
+        return self.coord is not None
+
+    def as_master_candidate(self) -> MasterCandidate:
+        """``core.scoring.select_master``에 넘길 수 있는 master 선정 입력."""
+        return MasterCandidate(
+            feature_id=self.feature_id,
+            has_coord=self.has_coord,
+            updated_at=self.updated_at,
+            provider=self.provider,
+        )
 
 
 _LIST_DEDUP_FEATURES_SQL: Final[str] = """
-SELECT DISTINCT ON (f.feature_id)
+WITH ranked AS (
+  SELECT
     f.feature_id,
     f.name,
     f.category,
+    f.updated_at,
+    f.coord_precision_digits,
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
     sr.provider,
-    sr.dataset_key
-FROM feature.features AS f
-JOIN provider_sync.source_links AS sl
-  ON sl.feature_id = f.feature_id
- AND sl.is_primary_source
-JOIN provider_sync.source_records AS sr
-  ON sr.source_record_key = sl.source_record_key
-WHERE f.deleted_at IS NULL
-  AND f.status = 'active'
-  AND f.coord IS NOT NULL
-  AND sr.provider = :provider
-  AND (
-    CAST(:dataset_key AS text) IS NULL
-    OR sr.dataset_key = CAST(:dataset_key AS text)
-  )
-  AND (
-    CAST(:kinds AS text[]) IS NULL
-    OR f.kind = ANY(CAST(:kinds AS text[]))
-  )
-  AND (
-    CAST(:categories AS text[]) IS NULL
-    OR f.category = ANY(CAST(:categories AS text[]))
-  )
-ORDER BY f.feature_id, sr.imported_at DESC NULLS LAST, sr.source_record_key
-LIMIT :limit
+    sr.dataset_key,
+    row_number() OVER (
+      PARTITION BY f.feature_id
+      ORDER BY sr.imported_at DESC NULLS LAST, sr.source_record_key
+    ) AS rn
+  FROM feature.features AS f
+  JOIN provider_sync.source_links AS sl
+    ON sl.feature_id = f.feature_id
+   AND sl.is_primary_source
+  JOIN provider_sync.source_records AS sr
+    ON sr.source_record_key = sl.source_record_key
+  WHERE f.deleted_at IS NULL
+    AND f.status = 'active'
+    AND f.coord IS NOT NULL
+    AND sr.provider = :provider
+    AND (
+      CAST(:dataset_key AS text) IS NULL
+      OR sr.dataset_key = CAST(:dataset_key AS text)
+    )
+    AND (
+      CAST(:kinds AS text[]) IS NULL
+      OR f.kind = ANY(CAST(:kinds AS text[]))
+    )
+    AND (
+      CAST(:categories AS text[]) IS NULL
+      OR f.category = ANY(CAST(:categories AS text[]))
+    )
+    AND (
+      CAST(:cursor_updated_at AS timestamptz) IS NULL
+      OR (f.updated_at, f.feature_id) < (
+        CAST(:cursor_updated_at AS timestamptz),
+        CAST(:cursor_feature_id AS text)
+      )
+    )
+)
+SELECT
+    feature_id,
+    name,
+    category,
+    updated_at,
+    coord_precision_digits,
+    lon,
+    lat,
+    provider,
+    dataset_key
+FROM ranked
+WHERE rn = 1
+ORDER BY updated_at DESC, feature_id DESC
+LIMIT CAST(:limit AS integer)
 """
 
 
@@ -105,6 +157,7 @@ async def list_dedup_refresh_features(
     scope: DedupRefreshScope,
 ) -> list[DedupRefreshFeature]:
     """provider/dataset scope의 활성 feature를 dedup 입력으로 조회한다."""
+    _validate_scope(scope)
     rows = (
         await session.execute(
             text(_LIST_DEDUP_FEATURES_SQL),
@@ -114,10 +167,21 @@ async def list_dedup_refresh_features(
                 "kinds": _array_or_none(scope.kinds),
                 "categories": _array_or_none(scope.categories),
                 "limit": scope.limit,
+                "cursor_updated_at": scope.cursor_updated_at,
+                "cursor_feature_id": scope.cursor_feature_id,
             },
         )
     ).mappings().all()
     return [_row_to_feature(row) for row in rows]
+
+
+def _validate_scope(scope: DedupRefreshScope) -> None:
+    if scope.limit <= 0:
+        raise ValueError("dedup refresh scope.limit must be greater than 0")
+    if (scope.cursor_updated_at is None) != (scope.cursor_feature_id is None):
+        raise ValueError(
+            "cursor_updated_at and cursor_feature_id must be provided together"
+        )
 
 
 def _array_or_none(values: Sequence[str]) -> list[str] | None:
@@ -136,7 +200,13 @@ def _row_to_feature(row: Any) -> DedupRefreshFeature:
         feature_id=str(row["feature_id"]),
         name=str(row["name"]),
         coord=coord,
+        coord_precision_digits=(
+            int(row["coord_precision_digits"])
+            if row["coord_precision_digits"] is not None
+            else None
+        ),
         category=str(row["category"]),
         provider=str(row["provider"]),
         dataset_key=str(row["dataset_key"]),
+        updated_at=row["updated_at"],
     )

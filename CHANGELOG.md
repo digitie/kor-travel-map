@@ -5,6 +5,21 @@
 
 ## [Unreleased]
 
+### Infra — dedup refresh master 신호와 keyset paging (2026-06-05)
+
+- **NEW**: `Feature`/`feature.features`에 `coord_precision_digits`를 추가하고,
+  DB trigger가 좌표 보유 row의 기본 precision을 6으로 보강하며 좌표 제거 시
+  precision을 `NULL`로 정리한다.
+- **FIXED**: `list_dedup_refresh_features`가 `updated_at DESC, feature_id DESC`
+  keyset cursor를 사용해 `LIMIT` 재실행 시 같은 사전식 앞부분만 반복 조회하지 않는다.
+- **NEW**: `DedupRefreshFeature`가 `updated_at`, `coord_precision_digits`,
+  `as_master_candidate()`를 노출해 ADR-016 master 선정과 admin 검토 UI가 같은 신호를
+  사용할 수 있게 했다.
+- **MIGRATION**: alembic `0015_feature_coord_precision`이 컬럼, trigger, check
+  constraint, dedup refresh keyset partial index를 추가한다.
+- **TEST**: DTO validator, migration trigger, feature load round-trip, dedup refresh
+  keyset paging, Dagster config cursor parsing을 검증한다.
+
 ### Infra — scope resolver count/preview 분리 (2026-06-05)
 
 - **FIXED**: `count_features_matching_scope`가 `center_radius`, `bbox`,

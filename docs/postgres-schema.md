@@ -42,7 +42,7 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 
 | 테이블 | PK | 핵심 컬럼 / 비고 |
 |--------|----|---------------|
-| `features` | `feature_id` | kind/name/category/coord/coord_5179(generated)/geom/address/legal_dong_code/marker_*/parent/sibling_group_id/detail/raw_refs/status |
+| `features` | `feature_id` | kind/name/category/coord/coord_precision_digits/coord_5179(generated)/geom/address/legal_dong_code/marker_*/parent/sibling_group_id/detail/raw_refs/status |
 | `feature_files` | `file_id` | feature_id FK CASCADE; UNIQUE (storage_backend,bucket,object_key); file_type CHECK |
 | `feature_place_details` | `feature_id` | place_kind, phones (≤3), reviews_link, business_hours, facility_info, license_date, biz_number |
 | `feature_event_details` | `feature_id` | event_kind, starts_on/ends_on (CHECK), venue_name, content_id, area_code |
@@ -90,6 +90,7 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 | `idx_features_geom_gist` | GIST(geom) | route/area LINESTRING/MULTIPOLYGON |
 | `idx_features_kind_category` | (kind, category) | partial active |
 | `idx_features_status_updated` | (status, updated_at) | admin |
+| `idx_features_dedup_refresh_keyset` | (updated_at DESC, feature_id DESC) | partial active+coord, dedup refresh paging |
 | `idx_features_legal_dong_code` | (legal_dong_code) | 행정구역 필터 |
 | `idx_features_sigungu` | (sigungu_code, kind) | partial active |
 | `idx_features_parent` | (parent_feature_id) | partial NOT NULL |
@@ -195,6 +196,7 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 | `dedup_review_queue` | `ck_dedup_scores` | 각 점수 0-100 |
 | `feature_overrides` | `ck_overrides_status` | active/inactive/superseded |
 | `feature_overrides` | `uq_overrides_active_feature_field` | active override는 feature_id+field_path당 1건 |
+| `features` | `ck_features_coord_precision` | coord 없으면 NULL, coord 있으면 3-8 |
 | `data_integrity_violations` | `ck_violations_severity` | info/warning/error/critical |
 | `data_integrity_violations` | `ck_violations_status` | open/acknowledged/resolved/ignored |
 | `poi_cache_targets` | `ck_poi_cache_targets_scope_mode` | center_radius/sigungu_by_radius |

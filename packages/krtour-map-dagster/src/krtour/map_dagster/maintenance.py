@@ -1,6 +1,7 @@
 """Dagster consistency/dedup refresh 운영 job."""
 
 from collections.abc import Mapping, Sequence
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Final, cast
 
 from dagster import (
@@ -226,6 +227,8 @@ def _scope_from_config(
         kinds=_string_tuple(value.get("kinds")),
         categories=_string_tuple(value.get("categories")),
         limit=_int_config(limit_value, default=default_limit),
+        cursor_updated_at=_datetime_config(value.get("cursor_updated_at")),
+        cursor_feature_id=_optional_string(value.get("cursor_feature_id")),
     )
 
 
@@ -247,6 +250,24 @@ def _int_config(value: object, *, default: int) -> int:
     if isinstance(value, int | str):
         return int(value)
     raise TypeError("정수 config 값이어야 함")
+
+
+def _datetime_config(value: object) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        return datetime.fromisoformat(value)
+    raise TypeError("datetime config 값은 ISO 문자열이어야 함")
+
+
+def _optional_string(value: object) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise TypeError("문자열 config 값이어야 함")
+    return value
 
 
 def _dedup_metadata(
