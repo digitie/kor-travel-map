@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib
 import mimetypes
 from pathlib import PurePath
@@ -27,7 +28,13 @@ from fastapi import (
     status,
 )
 from krtour.map.core.exceptions import FileStoreError
+from krtour.map.geocoding import (
+    KraddrGeoRestClient,
+    kraddr_geo_address_resolver,
+    kraddr_geo_reverse_geocoder,
+)
 from krtour.map.infra.file_store import S3ObjectStore
+from krtour.map.infra.jobs_repo import get_import_job
 from krtour.map.infra.offline_upload_repo import (
     OfflineUpload,
     OfflineUploadPage,
@@ -35,8 +42,12 @@ from krtour.map.infra.offline_upload_repo import (
     get_offline_upload,
     list_offline_uploads,
 )
+from krtour.map.offline_upload import (
+    preview_offline_tabular_upload,
+    run_offline_upload_validation_job,
+)
 from krtour.map.settings import KrtourMapSettings
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from krtour.map_admin.db import get_session
@@ -47,6 +58,8 @@ __all__ = [
     "OfflineUploadRecord",
     "OfflineUploadListResponse",
     "OfflineUploadWriteResponse",
+    "OfflineUploadPreviewResponse",
+    "OfflineUploadValidationResponse",
     "OfflineUploadLaunchResponse",
 ]
 
@@ -67,7 +80,10 @@ OfflineUploadState = Literal[
 _LOADABLE_STATES: Final[frozenset[str]] = frozenset(
     {"uploaded", "validated", "loaded", "load_failed"}
 )
-_WRITEABLE_FORMATS: Final[frozenset[str]] = frozenset({"json", "jsonl"})
+_TABULAR_FORMATS: Final[frozenset[str]] = frozenset({"csv", "tsv"})
+_WRITEABLE_FORMATS: Final[frozenset[str]] = frozenset(
+    {"json", "jsonl", *_TABULAR_FORMATS}
+)
 _DAGSTER_REPOSITORY_NAME: Final[str] = "__repository__"
 _DAGSTER_REPOSITORY_LOCATION_NAME: Final[str] = "krtour.map_dagster.definitions"
 _DAGSTER_OFFLINE_UPLOAD_JOB_NAME: Final[str] = "offline_upload_load"
@@ -162,6 +178,74 @@ class OfflineUploadLaunchMeta(BaseModel):
     dagster_status: str
 
 
+class OfflineUploadColumnMappingRecord(BaseModel):
+    """CSV/TSV column mapping HTTP 표현."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1)
+    lon: str = Field(min_length=1)
+    lat: str = Field(min_length=1)
+    address: str | None = None
+    source_id: str | None = None
+    bjd_code: str | None = None
+    category: str | None = None
+    default_category: str = "02020101"
+    default_marker_icon: str = "marker"
+    default_marker_color: str = "P-01"
+    default_place_kind: str = "offline_upload"
+
+
+class OfflineUploadPreviewMeta(BaseModel):
+    """CSV/TSV preview metadata."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    duration_ms: int
+    parsed_format: str
+    encoding: str
+    delimiter: str
+    headers: list[str]
+    sample_rows: list[dict[str, str]]
+    rows_total: int
+    rows_sampled: int
+    bytes_read: int
+    checksum_sha256_actual: str
+
+
+class OfflineUploadValidationIssueRecord(BaseModel):
+    """CSV/TSV validation issue HTTP 표현."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    severity: str
+    code: str
+    message: str
+    row_number: int | None = None
+    column: str | None = None
+
+
+class OfflineUploadValidationRequest(BaseModel):
+    """`POST /admin/offline-uploads/{upload_id}/validate` 요청."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    sample_size: int = Field(default=1000, ge=1, le=10_000)
+    column_mapping: OfflineUploadColumnMappingRecord
+    operator: str | None = None
+
+
+class OfflineUploadValidationMeta(OfflineUploadPreviewMeta):
+    """CSV/TSV validation response metadata."""
+
+    job_id: str | None
+    job_state: str | None
+    column_mapping: OfflineUploadColumnMappingRecord
+    valid_rows: int
+    error_rows: int
+    issues: list[OfflineUploadValidationIssueRecord]
+
+
 class OfflineUploadWriteResponse(BaseModel):
     """`POST /admin/offline-uploads` 응답."""
 
@@ -169,6 +253,24 @@ class OfflineUploadWriteResponse(BaseModel):
 
     data: OfflineUploadRecord
     meta: OfflineUploadWriteMeta
+
+
+class OfflineUploadPreviewResponse(BaseModel):
+    """`GET /admin/offline-uploads/{upload_id}/preview` 응답."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: OfflineUploadRecord
+    meta: OfflineUploadPreviewMeta
+
+
+class OfflineUploadValidationResponse(BaseModel):
+    """`POST/GET /admin/offline-uploads/{upload_id}/validation` 응답."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: OfflineUploadRecord
+    meta: OfflineUploadValidationMeta
 
 
 class OfflineUploadLaunchResponse(BaseModel):
@@ -218,6 +320,136 @@ def _record_from_upload(row: OfflineUpload) -> OfflineUploadRecord:
         updated_at=row.updated_at.isoformat(),
         status_url=f"/admin/offline-uploads/{row.upload_id}",
         load_url=f"/admin/offline-uploads/{row.upload_id}/load",
+    )
+
+
+def _is_tabular_upload(row: OfflineUpload) -> bool:
+    detected = (row.detected_format or _detected_format(row.original_filename) or "").lower()
+    return detected in _TABULAR_FORMATS
+
+
+def _can_load(row: OfflineUpload) -> bool:
+    if row.state not in _LOADABLE_STATES:
+        return False
+    if _is_tabular_upload(row):
+        return row.validation_job_id is not None and row.state in {
+            "validated",
+            "loaded",
+            "load_failed",
+        }
+    return True
+
+
+def _load_reject_detail(row: OfflineUpload) -> str:
+    if _is_tabular_upload(row) and row.validation_job_id is None:
+        return "CSV/TSV offline upload은 load 전 validate가 필요합니다."
+    return f"load 가능한 상태가 아닙니다: {row.state}"
+
+
+def _require_tabular(row: OfflineUpload) -> None:
+    if not _is_tabular_upload(row):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"CSV/TSV 업로드가 아닙니다: {row.detected_format}",
+        )
+
+
+def _validate_stored_body(row: OfflineUpload, body: bytes) -> tuple[int, str]:
+    checksum_actual = hashlib.sha256(body).hexdigest()
+    if len(body) != row.byte_size:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "offline upload size mismatch: "
+                f"expected={row.byte_size}, actual={len(body)}"
+            ),
+        )
+    if checksum_actual.lower() != row.checksum_sha256.lower():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "offline upload checksum mismatch: "
+                f"expected={row.checksum_sha256}, actual={checksum_actual}"
+            ),
+        )
+    return len(body), checksum_actual
+
+
+def _int(value: object, default: int = 0) -> int:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.isdecimal():
+        return int(value)
+    return default
+
+
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value]
+
+
+def _sample_rows(value: object) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+    rows: list[dict[str, str]] = []
+    for item in value:
+        if isinstance(item, dict):
+            rows.append({str(key): str(raw) for key, raw in item.items()})
+    return rows
+
+
+def _issues(value: object) -> list[OfflineUploadValidationIssueRecord]:
+    return [
+        OfflineUploadValidationIssueRecord(
+            severity=_string(_dict(item).get("severity"), "error"),
+            code=_string(_dict(item).get("code"), "unknown"),
+            message=_string(_dict(item).get("message")),
+            row_number=(
+                _int(_dict(item).get("row_number"))
+                if _dict(item).get("row_number") is not None
+                else None
+            ),
+            column=(
+                _string(_dict(item).get("column"))
+                if _dict(item).get("column") is not None
+                else None
+            ),
+        )
+        for item in _list(value)
+    ]
+
+
+def _validation_meta_from_payload(
+    payload: dict[str, Any],
+    *,
+    duration_ms: int,
+) -> OfflineUploadValidationMeta:
+    return OfflineUploadValidationMeta(
+        duration_ms=duration_ms,
+        parsed_format=_string(payload.get("parsed_format")),
+        encoding=_string(payload.get("encoding")),
+        delimiter=_string(payload.get("delimiter"), ","),
+        headers=_string_list(payload.get("headers")),
+        sample_rows=_sample_rows(payload.get("sample_rows")),
+        rows_total=_int(payload.get("rows_total")),
+        rows_sampled=_int(payload.get("rows_sampled")),
+        bytes_read=_int(payload.get("bytes_read")),
+        checksum_sha256_actual=_string(payload.get("checksum_sha256_actual")),
+        job_id=(
+            _string(payload.get("job_id")) if payload.get("job_id") is not None else None
+        ),
+        job_state=(
+            _string(payload.get("job_state"))
+            if payload.get("job_state") is not None
+            else None
+        ),
+        column_mapping=OfflineUploadColumnMappingRecord.model_validate(
+            _dict(payload.get("column_mapping"))
+        ),
+        valid_rows=_int(payload.get("valid_rows")),
+        error_rows=_int(payload.get("error_rows")),
+        issues=_issues(payload.get("issues")),
     )
 
 
@@ -273,6 +505,10 @@ def _content_type(filename: str, detected_format: str | None) -> str:
         return "application/x-ndjson"
     if detected_format == "json":
         return "application/json"
+    if detected_format == "csv":
+        return "text/csv; charset=utf-8"
+    if detected_format == "tsv":
+        return "text/tab-separated-values; charset=utf-8"
     guessed, _encoding = mimetypes.guess_type(filename)
     return guessed or "application/octet-stream"
 
@@ -416,11 +652,14 @@ async def launch_offline_upload_load(
     "",
     response_model=OfflineUploadWriteResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="오프라인 FeatureBundle 원본 업로드",
+    summary="오프라인 원본 업로드",
 )
 async def create_offline_upload_request(
     session: Annotated[AsyncSession, Depends(get_session)],
-    file: Annotated[UploadFile, File(description="JSON/JSONL FeatureBundle 파일")],
+    file: Annotated[
+        UploadFile,
+        File(description="JSON/JSONL FeatureBundle 또는 CSV/TSV tabular 파일"),
+    ],
     provider: Annotated[str, Form(min_length=1)],
     dataset_key: Annotated[str, Form(min_length=1)],
     sync_scope: Annotated[str, Form(min_length=1)] = "default",
@@ -434,7 +673,7 @@ async def create_offline_upload_request(
     if detected_format not in _WRITEABLE_FORMATS:
         raise HTTPException(
             status_code=422,
-            detail="offline upload은 현재 JSON/JSONL FeatureBundle 파일만 지원합니다.",
+            detail="offline upload은 JSON/JSONL FeatureBundle 또는 CSV/TSV 파일만 지원합니다.",
         )
     body = await file.read()
     if not body:
@@ -541,6 +780,202 @@ async def get_offline_upload_request(
     return _record_from_upload(row)
 
 
+@router.get(
+    "/{upload_id}/preview",
+    response_model=OfflineUploadPreviewResponse,
+    summary="CSV/TSV 오프라인 업로드 header/sample preview",
+    responses={
+        404: {"description": "upload_id 없음"},
+        409: {"description": "CSV/TSV 업로드가 아니거나 저장 원본 불일치"},
+        502: {"description": "객체 저장소 읽기 실패"},
+    },
+)
+async def preview_offline_upload_request(
+    upload_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    sample_size: Annotated[int, Query(ge=1, le=200)] = 20,
+) -> OfflineUploadPreviewResponse:
+    started_at = perf_counter()
+    row = await get_offline_upload(session, upload_id)
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"offline upload 없음: {upload_id!r}",
+        )
+    _require_tabular(row)
+
+    store = build_offline_upload_store(KrtourMapSettings())
+    try:
+        body = await store.read_bytes(row.storage_key)
+    except FileStoreError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
+    bytes_read, checksum_actual = _validate_stored_body(row, body)
+    try:
+        preview = preview_offline_tabular_upload(
+            body,
+            detected_format=row.detected_format,
+            detected_encoding=row.detected_encoding,
+            original_filename=row.original_filename,
+            sample_size=sample_size,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    payload = preview.as_payload()
+    return OfflineUploadPreviewResponse(
+        data=_record_from_upload(row),
+        meta=OfflineUploadPreviewMeta(
+            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
+            parsed_format=_string(payload.get("parsed_format")),
+            encoding=_string(payload.get("encoding")),
+            delimiter=_string(payload.get("delimiter"), ","),
+            headers=_string_list(payload.get("headers")),
+            sample_rows=_sample_rows(payload.get("sample_rows")),
+            rows_total=_int(payload.get("rows_total")),
+            rows_sampled=_int(payload.get("rows_sampled")),
+            bytes_read=bytes_read,
+            checksum_sha256_actual=checksum_actual,
+        ),
+    )
+
+
+@router.post(
+    "/{upload_id}/validate",
+    response_model=OfflineUploadValidationResponse,
+    summary="CSV/TSV 오프라인 업로드 column mapping 검증",
+    responses={
+        404: {"description": "upload_id 없음"},
+        409: {"description": "validation 가능한 상태 아님"},
+        502: {"description": "객체 저장소 읽기 실패"},
+    },
+)
+async def validate_offline_upload_request(
+    upload_id: str,
+    request_body: OfflineUploadValidationRequest,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> OfflineUploadValidationResponse:
+    started_at = perf_counter()
+    settings = KrtourMapSettings()
+    store = build_offline_upload_store(settings)
+    try:
+        if settings.kraddr_geo_base_url:
+            async with httpx.AsyncClient(
+                base_url=settings.kraddr_geo_base_url,
+                timeout=10.0,
+            ) as http:
+                kraddr = KraddrGeoRestClient(http)
+                async with session.begin():
+                    row = await get_offline_upload(session, upload_id)
+                    if row is None:
+                        raise HTTPException(
+                            status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"offline upload 없음: {upload_id!r}",
+                        )
+                    _require_tabular(row)
+                    result = await run_offline_upload_validation_job(
+                        session,
+                        upload_id,
+                        store=store,
+                        column_mapping=request_body.column_mapping.model_dump(),
+                        sample_size=request_body.sample_size,
+                        operator=request_body.operator,
+                        address_resolver=kraddr_geo_address_resolver(
+                            kraddr, fallback="api"
+                        ),
+                        reverse_geocoder=kraddr_geo_reverse_geocoder(kraddr),
+                    )
+        else:
+            async with session.begin():
+                row = await get_offline_upload(session, upload_id)
+                if row is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"offline upload 없음: {upload_id!r}",
+                    )
+                _require_tabular(row)
+                result = await run_offline_upload_validation_job(
+                    session,
+                    upload_id,
+                    store=store,
+                    column_mapping=request_body.column_mapping.model_dump(),
+                    sample_size=request_body.sample_size,
+                    operator=request_body.operator,
+                )
+    except HTTPException:
+        raise
+    except FileStoreError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"kraddr-geo geocode 호출 실패: {exc}",
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+
+    return OfflineUploadValidationResponse(
+        data=_record_from_upload(result.upload),
+        meta=_validation_meta_from_payload(
+            result.as_payload(),
+            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
+        ),
+    )
+
+
+@router.get(
+    "/{upload_id}/validation",
+    response_model=OfflineUploadValidationResponse,
+    summary="CSV/TSV 오프라인 업로드 최근 validation 결과 조회",
+    responses={
+        404: {"description": "upload_id 또는 validation job 없음"},
+        409: {"description": "validation payload 없음"},
+    },
+)
+async def get_offline_upload_validation_request(
+    upload_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> OfflineUploadValidationResponse:
+    started_at = perf_counter()
+    row = await get_offline_upload(session, upload_id)
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"offline upload 없음: {upload_id!r}",
+        )
+    _require_tabular(row)
+    if row.validation_job_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="validation job이 아직 없습니다.",
+        )
+    job = await get_import_job(session, row.validation_job_id)
+    if job is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"validation job 없음: {row.validation_job_id!r}",
+        )
+    if "column_mapping" not in job.payload:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="validation job payload에 column_mapping이 없습니다.",
+        )
+    return OfflineUploadValidationResponse(
+        data=_record_from_upload(row),
+        meta=_validation_meta_from_payload(
+            job.payload,
+            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
+        ),
+    )
+
+
 @router.post(
     "/{upload_id}/load",
     response_model=OfflineUploadLaunchResponse,
@@ -563,10 +998,10 @@ async def load_offline_upload_request(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"offline upload 없음: {upload_id!r}",
         )
-    if row.state not in _LOADABLE_STATES:
+    if not _can_load(row):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"load 가능한 상태가 아닙니다: {row.state}",
+            detail=_load_reject_detail(row),
         )
 
     launch = await launch_offline_upload_load(request, upload_id)

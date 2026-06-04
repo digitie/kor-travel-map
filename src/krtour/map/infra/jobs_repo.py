@@ -49,6 +49,8 @@ __all__ = [
     "DEFAULT_STALE_AFTER",
     "enqueue_import_job",
     "start_import_job",
+    "get_import_job",
+    "update_import_job_payload",
     "claim_next_import_job",
     "heartbeat_import_job",
     "finish_import_job",
@@ -110,6 +112,19 @@ RETURNING {_RETURN_COLUMNS}
 _START_JOB_SQL: Final[str] = f"""
 INSERT INTO ops.import_jobs (kind, payload, source_checksum, state, started_at, heartbeat_at)
 VALUES (:kind, CAST(:payload AS jsonb), :source_checksum, 'running', now(), now())
+RETURNING {_RETURN_COLUMNS}
+"""
+
+_GET_JOB_SQL: Final[str] = f"""
+SELECT {_RETURN_COLUMNS}
+FROM ops.import_jobs
+WHERE job_id = CAST(:job_id AS uuid)
+"""
+
+_UPDATE_PAYLOAD_SQL: Final[str] = f"""
+UPDATE ops.import_jobs
+SET payload = CAST(:payload AS jsonb)
+WHERE job_id = CAST(:job_id AS uuid)
 RETURNING {_RETURN_COLUMNS}
 """
 
@@ -208,6 +223,28 @@ async def start_import_job(
         },
     )
     return _row_to_job(result.one())
+
+
+async def get_import_job(session: AsyncSession, job_id: str) -> ImportJob | None:
+    """``job_id``로 import job을 조회한다."""
+    result = await session.execute(text(_GET_JOB_SQL), {"job_id": job_id})
+    row = result.one_or_none()
+    return _row_to_job(row) if row is not None else None
+
+
+async def update_import_job_payload(
+    session: AsyncSession,
+    job_id: str,
+    *,
+    payload: Mapping[str, Any],
+) -> ImportJob | None:
+    """import job payload를 교체한다. validation summary 보존에 사용한다."""
+    result = await session.execute(
+        text(_UPDATE_PAYLOAD_SQL),
+        {"job_id": job_id, "payload": json.dumps(dict(payload))},
+    )
+    row = result.one_or_none()
+    return _row_to_job(row) if row is not None else None
 
 
 async def claim_next_import_job(session: AsyncSession) -> ImportJob | None:

@@ -134,9 +134,11 @@ from krtour.map.infra.jobs_repo import (
     claim_next_import_job,
     enqueue_import_job,
     finish_import_job,
+    get_import_job,
     heartbeat_import_job,
     recover_stale_running_jobs,
     start_import_job,
+    update_import_job_payload,
 )
 from krtour.map.infra.models import (
     Base,
@@ -161,9 +163,11 @@ from krtour.map.infra.offline_upload_repo import (
     OfflineUploadPage,
     create_offline_upload,
     finish_offline_upload_load,
+    finish_offline_upload_validation,
     get_offline_upload,
     list_offline_uploads,
     mark_offline_upload_loading,
+    mark_offline_upload_validating,
 )
 from krtour.map.infra.poi_cache_target_repo import (
     PoiCacheTarget,
@@ -283,6 +287,8 @@ __all__ = [
     "ImportJob",
     "enqueue_import_job",
     "start_import_job",
+    "get_import_job",
+    "update_import_job_payload",
     "claim_next_import_job",
     "heartbeat_import_job",
     "finish_import_job",
@@ -294,6 +300,8 @@ __all__ = [
     "get_offline_upload",
     "list_offline_uploads",
     "mark_offline_upload_loading",
+    "mark_offline_upload_validating",
+    "finish_offline_upload_validation",
     "finish_offline_upload_load",
     # feature_update_repo (ADR-045 feature update request queue)
     "FEATURE_UPDATE_JOB_KIND",

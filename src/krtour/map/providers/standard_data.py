@@ -31,11 +31,11 @@ ADR 참조
 하도록 필드 이름을 맞추거나, 호출자가 가벼운 dict→model adapter를 자기
 영역에서 만든다.
 
-``reverse_geocoder``는 좌표 → ``Address``(법정동코드 등) async 역지오코더
-(``krtour.map.geocoding.ReverseGeocoder``, 예: ``kraddr_geo_reverse_geocoder``).
-feature_id가 bjd_code에 의존하므로(ADR-009) 변환 함수는 **async**이고 feature_id
-계산 전에 ``await``한다. ``None``이면 ``Feature.address.bjd_code``는 비고
-feature_id는 'global' bucket으로 떨어진다.
+``reverse_geocoder``는 좌표 → ``Address``(법정동코드 등) async 역지오코더이고,
+``address_resolver``는 주소 문자열 → 행정코드 보강 geocoder다. feature_id가
+bjd_code에 의존하므로(ADR-009) 변환 함수는 **async**이고 feature_id 계산 전에
+``await``한다. 좌표 reverse가 없거나 실패해도 주소가 있으면 kraddr-geo
+``/v2/geocode`` structured ``legal_dong_code``로 보강한다.
 """
 
 from __future__ import annotations
@@ -68,7 +68,12 @@ from krtour.map.dto import (
     SourceRecord,
     SourceRole,
 )
-from krtour.map.geocoding import ReverseGeocoder, cached_reverse_geocoder
+from krtour.map.geocoding import (
+    AddressResolver,
+    ReverseGeocoder,
+    cached_address_resolver,
+    cached_reverse_geocoder,
+)
 
 __all__ = [
     "CulturalFestivalItem",
@@ -176,6 +181,7 @@ async def _item_to_bundle(
     *,
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None,
+    address_resolver: AddressResolver | None,
 ) -> FeatureBundle:
     """한 row → 한 ``FeatureBundle``. 본 함수는 모듈 private.
 
@@ -191,11 +197,18 @@ async def _item_to_bundle(
     else:
         coord = None
 
-    # 2) Reverse geocoding (있으면, 좌표 있을 때만) — geocoding이 이미 정규화·검증한
-    #    Address. sigungu/sido는 geocoder가 안 채워줘도 bjd_code에서 자동 추출.
+    road_text = normalize_korean_text(item.road_address)
+    legal_text = normalize_korean_text(item.jibun_address)
+
+    # 2) Geocoding 보강. 좌표 reverse를 먼저 쓰고, bjd_code가 없으면 주소
+    #    geocode 결과의 structured legal_dong_code를 사용한다.
     geo: Address | None = None
     if coord is not None and reverse_geocoder is not None:
         geo = await reverse_geocoder(coord)
+    if (geo is None or geo.bjd_code is None) and address_resolver is not None:
+        resolved = await address_resolver(Address(road=road_text, legal=legal_text))
+        if resolved is not None and resolved.bjd_code is not None:
+            geo = resolved
     bjd_code = geo.bjd_code if geo is not None else None
     sigungu_code = (
         (geo.sigungu_code if geo is not None else None)
@@ -209,8 +222,8 @@ async def _item_to_bundle(
     #    행정코드/행정동명/우편번호 등은 reverse lookup 결과(geo)에서 채운다.
     #    nullable 필드는 None 유지 — Address(extra='forbid') validator 통과.
     address = Address(
-        road=normalize_korean_text(item.road_address),
-        legal=normalize_korean_text(item.jibun_address),
+        road=road_text,
+        legal=legal_text,
         admin=geo.admin if geo is not None else None,
         bjd_code=bjd_code,
         admin_dong_code=geo.admin_dong_code if geo is not None else None,
@@ -331,6 +344,7 @@ async def cultural_festivals_to_bundles(
     *,
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None = None,
+    address_resolver: AddressResolver | None = None,
 ) -> list[FeatureBundle]:
     """전국문화축제표준데이터 items → ``list[FeatureBundle]`` (ADR-042 1차 source).
 
@@ -347,8 +361,11 @@ async def cultural_festivals_to_bundles(
         ReverseGeocoder``, 예: ``kraddr_geo_reverse_geocoder(client)``).
         feature_id가 bjd_code에 의존하므로(ADR-009) feature_id 계산 전에 await해
         채운다. 중복 좌표는 내부에서 ``cached_reverse_geocoder``로 1회만 호출.
-        ``None``이면 ``Feature.address.bjd_code``는 비고 feature_id는 'global'
-        bucket으로 떨어진다.
+    address_resolver
+        주소 → ``Address`` async 보강 geocoder. 좌표가 없거나 reverse 결과에
+        bjd_code가 없을 때 road/jibun 주소로 ``/v2/geocode``를 호출해
+        ``legal_dong_code``를 채운다. 중복 주소는 ``cached_address_resolver``로
+        1회만 호출.
 
     Returns
     -------
@@ -387,8 +404,8 @@ async def cultural_festivals_to_bundles(
     - 좌표 nullable: 본 표준데이터는 좌표 없는 row가 종종 있음. 좌표 없으면
       ``Feature.coord=None``으로 적재되고 ``features_in_bounds`` 쿼리에서
       자연히 제외된다 (ADR-012).
-    - reverse_geocoder가 ``None``이고 좌표가 있어도 ``bjd_code``는 채워지지
-      않는다 — 호출자가 역지오코더를 주입하면 batch 보강된다.
+    - reverse_geocoder/address_resolver가 모두 ``None``이면 ``bjd_code``는 채워지지
+      않는다 — 호출자가 kraddr-geo resolver를 주입하면 batch 보강된다.
     - visitkorea enrichment(이미지 / 상세설명 / contentId)는 Sprint 2 끝물
       별도 PR — `festival_to_enrichment_links`에서 처리.
     """
@@ -397,7 +414,17 @@ async def cultural_festivals_to_bundles(
         if reverse_geocoder is not None
         else None
     )
+    resolver = (
+        cached_address_resolver(address_resolver)
+        if address_resolver is not None
+        else None
+    )
     return [
-        await _item_to_bundle(item, fetched_at=fetched_at, reverse_geocoder=geocoder)
+        await _item_to_bundle(
+            item,
+            fetched_at=fetched_at,
+            reverse_geocoder=geocoder,
+            address_resolver=resolver,
+        )
         for item in items
     ]

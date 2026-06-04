@@ -25,6 +25,7 @@ dependencies = [
   "python-krtour-map",
   "dagster>=1.9,<2",
   "dagster-webserver>=1.9,<2",
+  "httpx>=0.27,<1.0",
 ]
 
 [project.optional-dependencies]

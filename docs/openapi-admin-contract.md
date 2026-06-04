@@ -146,18 +146,24 @@ T-207c 구현분은 `/admin/features` 목록, deactivate status override, `/admi
 
 ## 4.2 Offline uploads
 
-T-208h 기준 admin UI가 쓰는 기본 offline upload API는 admin 전체 OpenAPI에만 포함한다.
+T-208i 기준 admin UI가 쓰는 offline upload API는 admin 전체 OpenAPI에만 포함한다.
 TripMate/user subset에는 포함하지 않는다.
 
 | Method | Path | 용도 |
 |--------|------|------|
-| POST | `/admin/offline-uploads` | JSON/JSONL `FeatureBundle` 파일을 RustFS/S3 `krtour-uploads` bucket에 저장하고 `ops.offline_uploads` row 생성 |
+| POST | `/admin/offline-uploads` | JSON/JSONL `FeatureBundle` 또는 CSV/TSV tabular 파일을 RustFS/S3 `krtour-uploads` bucket에 저장하고 `ops.offline_uploads` row 생성 |
 | GET | `/admin/offline-uploads` | state/provider/dataset keyset 목록 |
 | GET | `/admin/offline-uploads/{upload_id}` | 단건 metadata 조회 |
+| GET | `/admin/offline-uploads/{upload_id}/preview` | CSV/TSV header/sample preview |
+| POST | `/admin/offline-uploads/{upload_id}/validate` | CSV/TSV column mapping validation job 실행 |
+| GET | `/admin/offline-uploads/{upload_id}/validation` | validation job payload 조회 |
 | POST | `/admin/offline-uploads/{upload_id}/load` | Dagster GraphQL `launchRun`으로 `offline_upload_load` job 실행 |
 
-현재 업로드 포맷은 JSON/JSONL `FeatureBundle` dump다. CSV/TSV validation,
-column mapping preset, load 전 validation gate는 T-208i 후속이다.
+지원 업로드 포맷은 JSON/JSONL `FeatureBundle` dump와 CSV/TSV tabular 원본이다.
+CSV/TSV는 load 전에 validation job이 저장한 column mapping과 성공 상태가 필요하다.
+행에 `bjd_code`가 없으면 `KRTOUR_MAP_KRADDR_GEO_BASE_URL`로 주입한 kraddr-geo REST v2
+`POST /v2/geocode` 또는 좌표 reverse 결과를 사용해 법정동코드를 보강한다. resolver가
+없거나 결과에도 법정동코드가 없으면 validation issue로 남기고 load를 막는다.
 
 ## 5. Feature update request
 

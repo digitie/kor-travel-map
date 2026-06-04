@@ -19,6 +19,7 @@ from krtour.map.core.ids import (
     make_source_record_key,
 )
 from krtour.map.dto import (
+    Address,
     Coordinate,
     Feature,
     FeatureBundle,
@@ -105,6 +106,80 @@ async def test_offline_upload_load_job_persists_feature_and_job(
     assert row.feature_id == bundle.feature.feature_id
     assert row.upload_state == "loaded"
     assert row.job_state == "done"
+
+
+async def test_offline_upload_validate_then_load_csv(
+    migrated_engine: AsyncEngine,
+) -> None:
+    body = (
+        "name,lon,lat,address,source_id\n"
+        "오프라인 CSV 통합 장소,126.9780,37.5665,서울특별시 중구 세종대로,csv-live-001\n"
+    ).encode()
+    storage_key = "offline/offline-csv-001/features.csv"
+    upload_id = await _create_upload(
+        migrated_engine,
+        body=body,
+        storage_key=storage_key,
+        original_filename="features.csv",
+        detected_format="csv",
+        dataset_key="offline_csv",
+    )
+    store = _MemoryStore({storage_key: body})
+
+    client = AsyncKrtourMapClient(migrated_engine)
+    validation = await client.run_offline_upload_validation_job(
+        upload_id,
+        store=store,
+        column_mapping={
+            "name": "name",
+            "lon": "lon",
+            "lat": "lat",
+            "address": "address",
+            "source_id": "source_id",
+        },
+        sample_size=100,
+        operator="pytest",
+        address_resolver=_fake_address_resolver,
+    )
+    assert validation.has_errors is False
+    assert validation.valid_rows == 1
+    assert validation.upload.state == "validated"
+    assert validation.job is not None
+    assert validation.job.state == "done"
+
+    loaded = await client.run_offline_upload_load_job(
+        upload_id,
+        store=store,
+        dagster_run_id="dagster-run-offline-csv",
+        address_resolver=_fake_address_resolver,
+    )
+
+    assert loaded.error_message is None
+    assert loaded.load is not None
+    assert loaded.load.bundles_total == 1
+    assert loaded.upload is not None
+    assert loaded.upload.state == "loaded"
+
+    async with AsyncSession(migrated_engine) as session:
+        row = (
+            await session.execute(
+                text(
+                    "SELECT f.name, sr.source_entity_id, ou.state AS upload_state "
+                    "FROM feature.features AS f "
+                    "JOIN provider_sync.source_links AS sl "
+                    "  ON sl.feature_id = f.feature_id "
+                    "JOIN provider_sync.source_records AS sr "
+                    "  ON sr.source_record_key = sl.source_record_key "
+                    "JOIN ops.offline_uploads AS ou ON ou.upload_id = :upload_id "
+                    "WHERE sr.source_entity_id = :source_entity_id"
+                ),
+                {"upload_id": upload_id, "source_entity_id": "csv-live-001"},
+            )
+        ).one()
+
+    assert row.name == "오프라인 CSV 통합 장소"
+    assert row.source_entity_id == "csv-live-001"
+    assert row.upload_state == "loaded"
 
 
 async def test_offline_upload_load_job_records_checksum_failure(
@@ -210,20 +285,23 @@ async def _create_upload(
     storage_key: str,
     upload_id: str | None = None,
     checksum_sha256: str | None = None,
+    original_filename: str = "features.jsonl",
+    detected_format: str = "jsonl",
+    dataset_key: str = "offline_jsonl",
 ) -> str:
     async with AsyncSession(engine) as session, session.begin():
         upload = await create_offline_upload(
             session,
             upload_id=upload_id,
             provider="offline-test-provider",
-            dataset_key="offline_jsonl",
+            dataset_key=dataset_key,
             sync_scope="default",
-            original_filename="features.jsonl",
+            original_filename=original_filename,
             storage_backend="rustfs",
             storage_key=storage_key,
             byte_size=len(body),
             checksum_sha256=checksum_sha256 or hashlib.sha256(body).hexdigest(),
-            detected_format="jsonl",
+            detected_format=detected_format,
             detected_encoding="utf-8",
             created_by="pytest",
         )
@@ -233,6 +311,16 @@ async def _create_upload(
 async def _truncate(engine: AsyncEngine) -> None:
     async with AsyncSession(engine) as session, session.begin():
         await session.execute(text(_TRUNCATE_SQL))
+
+
+async def _fake_address_resolver(address: Address) -> Address | None:
+    return Address(
+        road=address.road,
+        legal=address.legal,
+        bjd_code="1114010100",
+        sigungu_code="11140",
+        sido_code="11",
+    )
 
 
 def _bundle(source_id: str) -> FeatureBundle:

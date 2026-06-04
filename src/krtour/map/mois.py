@@ -59,7 +59,7 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from krtour.map.geocoding import ReverseGeocoder
+    from krtour.map.geocoding import AddressResolver, ReverseGeocoder
     from krtour.map.providers.mois import MoisLicensePlaceRecord
 
 # providers.mois의 source_entity_type (license_place). 변환 모듈 내부 상수와 동일.
@@ -177,6 +177,7 @@ async def load_mois_license_features_bulk(
     fetched_at: datetime,
     dataset_key: str = DATASET_KEY_BULK,
     reverse_geocoder: ReverseGeocoder | None = None,
+    address_resolver: AddressResolver | None = None,
 ) -> FeatureLoadResult:
     """MOIS 인허가 ``PlaceRecord`` 묶음을 변환 → 적재 (소량 batch UPSERT).
 
@@ -201,6 +202,9 @@ async def load_mois_license_features_bulk(
         좌표 → ``Address`` async 역지오코더. ``legal_dong_code`` 부재 시에만
         호출되어 bjd_code를 보강한다 (ADR-009). 중복 좌표는 변환 함수 내부에서
         ``cached_reverse_geocoder``로 1회만 호출.
+    address_resolver
+        주소 → ``Address`` async 보강 geocoder. 좌표 reverse로 bjd_code를 못 채운
+        경우 road/lot 주소 기반 kraddr-geo geocode를 사용한다.
 
     Returns
     -------
@@ -213,6 +217,7 @@ async def load_mois_license_features_bulk(
         fetched_at=fetched_at,
         dataset_key=dataset_key,
         reverse_geocoder=reverse_geocoder,
+        address_resolver=address_resolver,
     )
     return await load_bundles(session, bundles)
 
@@ -258,6 +263,7 @@ async def sync_mois_license_features_bulk(
     fetched_at: datetime,
     dataset_key: str = DATASET_KEY_BULK,
     reverse_geocoder: ReverseGeocoder | None = None,
+    address_resolver: AddressResolver | None = None,
     batch_size: int = DEFAULT_BATCH_SIZE,
 ) -> MoisBulkSyncResult:
     """전체 영업중 snapshot 적재 + snapshot 부재 feature soft-delete (Step A bulk).
@@ -281,6 +287,7 @@ async def sync_mois_license_features_bulk(
             fetched_at=fetched_at,
             dataset_key=dataset_key,
             reverse_geocoder=reverse_geocoder,
+            address_resolver=address_resolver,
         )
         load_result = load_result.merge(await load_bundles(session, bundles))
         snapshot_keys.update(b.source_record.source_entity_id for b in bundles)
@@ -301,6 +308,7 @@ async def run_mois_license_bulk_job(
     fetched_at: datetime,
     dataset_key: str = DATASET_KEY_BULK,
     reverse_geocoder: ReverseGeocoder | None = None,
+    address_resolver: AddressResolver | None = None,
     source_checksum: str | None = None,
     batch_size: int = DEFAULT_BATCH_SIZE,
 ) -> MoisBulkJobResult:
@@ -335,6 +343,7 @@ async def run_mois_license_bulk_job(
                 fetched_at=fetched_at,
                 dataset_key=dataset_key,
                 reverse_geocoder=reverse_geocoder,
+                address_resolver=address_resolver,
                 batch_size=batch_size,
             )
         except Exception as exc:
@@ -358,6 +367,7 @@ async def load_mois_license_features_incremental(
     fetched_at: datetime,
     dataset_key: str = DATASET_KEY_HISTORY,
     reverse_geocoder: ReverseGeocoder | None = None,
+    address_resolver: AddressResolver | None = None,
     batch_size: int = DEFAULT_BATCH_SIZE,
 ) -> FeatureLoadResult:
     """증분(변경분) record를 batched upsert (Step B — **snapshot prune 없음**).
@@ -374,6 +384,7 @@ async def load_mois_license_features_incremental(
             fetched_at=fetched_at,
             dataset_key=dataset_key,
             reverse_geocoder=reverse_geocoder,
+            address_resolver=address_resolver,
         )
         load_result = load_result.merge(await load_bundles(session, bundles))
     return load_result
@@ -388,6 +399,7 @@ async def run_mois_license_incremental_job(
     dataset_key: str = DATASET_KEY_HISTORY,
     sync_scope: str = "default",
     reverse_geocoder: ReverseGeocoder | None = None,
+    address_resolver: AddressResolver | None = None,
     source_checksum: str | None = None,
     batch_size: int = DEFAULT_BATCH_SIZE,
 ) -> MoisIncrementalJobResult:
@@ -421,6 +433,7 @@ async def run_mois_license_incremental_job(
                 fetched_at=fetched_at,
                 dataset_key=dataset_key,
                 reverse_geocoder=reverse_geocoder,
+                address_resolver=address_resolver,
                 batch_size=batch_size,
             )
         except Exception as exc:

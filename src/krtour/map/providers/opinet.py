@@ -59,7 +59,12 @@ from krtour.map.dto import (
     SourceRecord,
     SourceRole,
 )
-from krtour.map.geocoding import ReverseGeocoder, cached_reverse_geocoder
+from krtour.map.geocoding import (
+    AddressResolver,
+    ReverseGeocoder,
+    cached_address_resolver,
+    cached_reverse_geocoder,
+)
 
 __all__ = [
     "OpinetPriceItem",
@@ -306,6 +311,7 @@ async def _station_item_to_bundle(
     *,
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None,
+    address_resolver: AddressResolver | None,
 ) -> FeatureBundle:
     """OpiNet 주유소 row 한 건 → 한 ``FeatureBundle`` (place kind).
 
@@ -319,11 +325,12 @@ async def _station_item_to_bundle(
     else:
         coord = None
 
-    # 2) Reverse geocoding (있으면, 좌표 있을 때만) — geocoding이 정규화·검증한 Address.
+    # 2) Geocoding 보강. 좌표 reverse가 우선이고, bjd_code가 없으면 주소 geocode를 쓴다.
     bjd_code: str | None = None
     sigungu_code: str | None = None
     sido_code: str | None = None
     admin_address: str | None = None
+    road_name_code: str | None = None
     if coord is not None and reverse_geocoder is not None:
         geo = await reverse_geocoder(coord)
         if geo is not None:
@@ -331,6 +338,15 @@ async def _station_item_to_bundle(
             sigungu_code = geo.sigungu_code or extract_sigungu_code(bjd_code)
             sido_code = geo.sido_code or extract_sido_code(bjd_code)
             admin_address = geo.admin
+            road_name_code = geo.road_name_code
+    if bjd_code is None and address_resolver is not None:
+        resolved = await address_resolver(Address(road=normalize_korean_text(item.address)))
+        if resolved is not None and resolved.bjd_code is not None:
+            bjd_code = resolved.bjd_code
+            sigungu_code = resolved.sigungu_code or extract_sigungu_code(bjd_code)
+            sido_code = resolved.sido_code or extract_sido_code(bjd_code)
+            admin_address = resolved.admin
+            road_name_code = resolved.road_name_code
 
     # 3) Address — 한 column으로 들어오는 raw address를 road 슬롯에 둠.
     #    legal은 reverse_geocoder가 제공하지 않으면 None.
@@ -340,6 +356,7 @@ async def _station_item_to_bundle(
         bjd_code=bjd_code,
         sigungu_code=sigungu_code,
         sido_code=sido_code,
+        road_name_code=road_name_code,
     )
 
     # 4) Raw payload (canonical JSON 직렬화 가능).
@@ -456,6 +473,7 @@ async def stations_to_bundles(
     *,
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None = None,
+    address_resolver: AddressResolver | None = None,
 ) -> list[FeatureBundle]:
     """OpiNet 주유소 items → ``list[FeatureBundle]`` (place kind, 1차 source).
 
@@ -470,6 +488,9 @@ async def stations_to_bundles(
         좌표 → ``Address`` async 역지오코더 (있으면). feature_id가 bjd_code에
         의존하므로(ADR-009) feature_id 계산 전에 await해 보강. 중복 좌표는
         ``cached_reverse_geocoder``로 1회만 호출.
+    address_resolver
+        주소 → ``Address`` async 보강 geocoder. 좌표 reverse 결과에 bjd_code가 없을
+        때 주소 문자열로 kraddr-geo ``/v2/geocode``를 호출한다.
 
     Returns
     -------
@@ -491,11 +512,17 @@ async def stations_to_bundles(
         if reverse_geocoder is not None
         else None
     )
+    resolver = (
+        cached_address_resolver(address_resolver)
+        if address_resolver is not None
+        else None
+    )
     return [
         await _station_item_to_bundle(
             item,
             fetched_at=fetched_at,
             reverse_geocoder=geocoder,
+            address_resolver=resolver,
         )
         for item in items
     ]

@@ -70,6 +70,67 @@ export interface OfflineUploadWriteResponse {
   };
 }
 
+export interface OfflineUploadColumnMapping {
+  name: string;
+  lon: string;
+  lat: string;
+  address?: string | null;
+  source_id?: string | null;
+  bjd_code?: string | null;
+  category?: string | null;
+  default_category?: string;
+  default_marker_icon?: string;
+  default_marker_color?: string;
+  default_place_kind?: string;
+}
+
+export interface OfflineUploadPreviewMeta {
+  duration_ms: number;
+  parsed_format: string;
+  encoding: string;
+  delimiter: string;
+  headers: string[];
+  sample_rows: Array<Record<string, string>>;
+  rows_total: number;
+  rows_sampled: number;
+  bytes_read: number;
+  checksum_sha256_actual: string;
+}
+
+export interface OfflineUploadPreviewResponse {
+  data: OfflineUploadRecord;
+  meta: OfflineUploadPreviewMeta;
+}
+
+export interface OfflineUploadValidationIssue {
+  severity: string;
+  code: string;
+  message: string;
+  row_number: number | null;
+  column: string | null;
+}
+
+export interface OfflineUploadValidationMeta extends OfflineUploadPreviewMeta {
+  job_id: string | null;
+  job_state: string | null;
+  column_mapping: Required<OfflineUploadColumnMapping>;
+  valid_rows: number;
+  error_rows: number;
+  issues: OfflineUploadValidationIssue[];
+}
+
+export interface OfflineUploadValidationResponse {
+  data: OfflineUploadRecord;
+  meta: OfflineUploadValidationMeta;
+}
+
+export interface OfflineUploadValidateRequest {
+  uploadId: string;
+  sampleSize?: number;
+  columnMapping: OfflineUploadColumnMapping;
+  operator?: string;
+}
+
 export interface OfflineUploadLaunchResponse {
   data: OfflineUploadRecord;
   meta: {
@@ -99,6 +160,25 @@ function fetchOfflineUpload(uploadId: string): Promise<OfflineUploadRecord> {
   );
 }
 
+function fetchOfflineUploadPreview(
+  uploadId: string,
+  sampleSize: number,
+): Promise<OfflineUploadPreviewResponse> {
+  return getJson<OfflineUploadPreviewResponse>(
+    pathWithQuery(`/admin/offline-uploads/${encodeURIComponent(uploadId)}/preview`, {
+      sample_size: sampleSize,
+    }),
+  );
+}
+
+function fetchOfflineUploadValidation(
+  uploadId: string,
+): Promise<OfflineUploadValidationResponse> {
+  return getJson<OfflineUploadValidationResponse>(
+    `/admin/offline-uploads/${encodeURIComponent(uploadId)}/validation`,
+  );
+}
+
 function createOfflineUpload(
   body: OfflineUploadCreateRequest,
 ): Promise<OfflineUploadWriteResponse> {
@@ -111,6 +191,19 @@ function createOfflineUpload(
     form.append("created_by", body.createdBy);
   }
   return postFormData<OfflineUploadWriteResponse>("/admin/offline-uploads", form);
+}
+
+function validateOfflineUpload(
+  body: OfflineUploadValidateRequest,
+): Promise<OfflineUploadValidationResponse> {
+  return postJson<OfflineUploadValidationResponse>(
+    `/admin/offline-uploads/${encodeURIComponent(body.uploadId)}/validate`,
+    {
+      sample_size: body.sampleSize ?? 1000,
+      operator: body.operator,
+      column_mapping: body.columnMapping,
+    },
+  );
 }
 
 function launchOfflineUploadLoad(
@@ -149,6 +242,28 @@ export function useOfflineUpload(uploadId: string | null) {
   });
 }
 
+export function useOfflineUploadPreview(
+  uploadId: string | null,
+  sampleSize = 20,
+  enabled = true,
+) {
+  return useQuery<OfflineUploadPreviewResponse, Error>({
+    queryKey: ["offline-upload-preview", uploadId, sampleSize],
+    queryFn: () => fetchOfflineUploadPreview(uploadId as string, sampleSize),
+    enabled: enabled && uploadId !== null && uploadId.length > 0,
+    staleTime: 10_000,
+  });
+}
+
+export function useOfflineUploadValidation(uploadId: string | null, enabled = true) {
+  return useQuery<OfflineUploadValidationResponse, Error>({
+    queryKey: ["offline-upload-validation", uploadId],
+    queryFn: () => fetchOfflineUploadValidation(uploadId as string),
+    enabled: enabled && uploadId !== null && uploadId.length > 0,
+    staleTime: 2_000,
+  });
+}
+
 export function useCreateOfflineUploadMutation() {
   const queryClient = useQueryClient();
   return useMutation<OfflineUploadWriteResponse, Error, OfflineUploadCreateRequest>({
@@ -159,6 +274,32 @@ export function useCreateOfflineUploadMutation() {
         queryKey: ["offline-upload", data.data.upload_id],
       });
       void queryClient.invalidateQueries({ queryKey: ["ops", "metrics"] });
+    },
+  });
+}
+
+export function useValidateOfflineUploadMutation() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    OfflineUploadValidationResponse,
+    Error,
+    OfflineUploadValidateRequest
+  >({
+    mutationFn: validateOfflineUpload,
+    onSuccess: (data, request) => {
+      void queryClient.invalidateQueries({ queryKey: ["offline-uploads"] });
+      void queryClient.invalidateQueries({
+        queryKey: ["offline-upload", request.uploadId],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["offline-upload-validation", request.uploadId],
+      });
+      void queryClient.invalidateQueries({ queryKey: ["import-jobs"] });
+      if (data.meta.job_id) {
+        void queryClient.invalidateQueries({
+          queryKey: ["import-job", data.meta.job_id],
+        });
+      }
     },
   });
 }

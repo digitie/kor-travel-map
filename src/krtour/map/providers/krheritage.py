@@ -17,8 +17,9 @@ geometry는 GIS(`gis_spca`/`gis_3070426`)에서 보강된 **WGS84 WKT**(MultiPol
 item에 실어 넘기면 ``area``로 적재(centroid는 대표 좌표). 파싱/좌표계 변환은 GIS
 응답 제공 측 책임 (ADR-044) — 본 모듈은 WKT만 받는다.
 
-feature_id는 bjd_code 의존(ADR-009)이라 변환 함수는 async이고 reverse_geocoder가
-주입되면 feature_id 계산 전에 await해 ``Address``(bjd_code)를 채운다.
+feature_id는 bjd_code 의존(ADR-009)이라 변환 함수는 async이고 reverse_geocoder 또는
+address_resolver가 주입되면 feature_id 계산 전에 await해 ``Address``(bjd_code)를
+채운다.
 
 ADR 참조
 --------
@@ -65,7 +66,12 @@ from krtour.map.dto import (
     SourceRecord,
     SourceRole,
 )
-from krtour.map.geocoding import ReverseGeocoder, cached_reverse_geocoder
+from krtour.map.geocoding import (
+    AddressResolver,
+    ReverseGeocoder,
+    cached_address_resolver,
+    cached_reverse_geocoder,
+)
 
 __all__ = [
     "KrHeritageItem",
@@ -372,6 +378,7 @@ async def _heritage_item_to_bundle(
     *,
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None,
+    address_resolver: AddressResolver | None,
 ) -> FeatureBundle:
     kind = classify_heritage_kind(item)
     category = resolve_heritage_category(item)
@@ -395,6 +402,10 @@ async def _heritage_item_to_bundle(
     geo: Address | None = None
     if coord is not None and reverse_geocoder is not None:
         geo = await reverse_geocoder(coord)
+    if (geo is None or geo.bjd_code is None) and address_resolver is not None:
+        resolved = await address_resolver(Address(legal=normalize_korean_text(item.location_text)))
+        if resolved is not None and resolved.bjd_code is not None:
+            geo = resolved
     address = _merge_address(geo, item.location_text)
     bjd_code = address.bjd_code
 
@@ -498,6 +509,7 @@ async def heritage_items_to_bundles(
     *,
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None = None,
+    address_resolver: AddressResolver | None = None,
 ) -> list[FeatureBundle]:
     """국가유산 items → place/area ``FeatureBundle`` 리스트.
 
@@ -511,6 +523,9 @@ async def heritage_items_to_bundles(
         좌표 → ``Address`` async 역지오코더 (``krtour.map.geocoding``). 주입하면
         feature_id 계산 전에 bjd_code를 채워 'global' bucket을 벗어난다 (ADR-009).
         중복 좌표는 ``cached_reverse_geocoder``로 1회만 호출.
+    address_resolver
+        주소 → ``Address`` async 보강 geocoder. 좌표 reverse 결과에 bjd_code가 없을
+        때 소재지 텍스트로 kraddr-geo ``/v2/geocode``를 호출한다.
 
     Returns
     -------
@@ -522,9 +537,17 @@ async def heritage_items_to_bundles(
         if reverse_geocoder is not None
         else None
     )
+    resolver = (
+        cached_address_resolver(address_resolver)
+        if address_resolver is not None
+        else None
+    )
     return [
         await _heritage_item_to_bundle(
-            item, fetched_at=fetched_at, reverse_geocoder=geocoder
+            item,
+            fetched_at=fetched_at,
+            reverse_geocoder=geocoder,
+            address_resolver=resolver,
         )
         for item in items
     ]
@@ -538,12 +561,17 @@ async def _event_to_bundle(
     *,
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None,
+    address_resolver: AddressResolver | None,
 ) -> FeatureBundle:
     raw_data = dict(event.raw)
     coord = _coord_from(event.longitude, event.latitude)
     geo: Address | None = None
     if coord is not None and reverse_geocoder is not None:
         geo = await reverse_geocoder(coord)
+    if (geo is None or geo.bjd_code is None) and address_resolver is not None:
+        resolved = await address_resolver(Address(legal=normalize_korean_text(event.location_text)))
+        if resolved is not None and resolved.bjd_code is not None:
+            geo = resolved
     address = _merge_address(geo, event.location_text)
     bjd_code = address.bjd_code
 
@@ -627,20 +655,30 @@ async def heritage_events_to_bundles(
     *,
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None = None,
+    address_resolver: AddressResolver | None = None,
 ) -> list[FeatureBundle]:
     """무형유산/행사 events → event ``FeatureBundle`` 리스트.
 
     ``EventDetail.event_kind='heritage_event'``. 자연키는 provider event id (`sn`).
-    좌표가 있으면 reverse_geocoder로 bjd_code 보강 (ADR-009).
+    좌표가 있으면 reverse_geocoder로 bjd_code 보강하고, 없거나 실패하면
+    address_resolver로 소재지 기반 보강을 시도한다 (ADR-009).
     """
     geocoder = (
         cached_reverse_geocoder(reverse_geocoder)
         if reverse_geocoder is not None
         else None
     )
+    resolver = (
+        cached_address_resolver(address_resolver)
+        if address_resolver is not None
+        else None
+    )
     return [
         await _event_to_bundle(
-            event, fetched_at=fetched_at, reverse_geocoder=geocoder
+            event,
+            fetched_at=fetched_at,
+            reverse_geocoder=geocoder,
+            address_resolver=resolver,
         )
         for event in events
     ]

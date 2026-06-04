@@ -72,7 +72,12 @@ from krtour.map.dto import (
     WeatherDomain,
     WeatherValue,
 )
-from krtour.map.geocoding import ReverseGeocoder, cached_reverse_geocoder
+from krtour.map.geocoding import (
+    AddressResolver,
+    ReverseGeocoder,
+    cached_address_resolver,
+    cached_reverse_geocoder,
+)
 
 __all__ = [
     # Protocols
@@ -290,16 +295,28 @@ async def _rest_area_item_to_bundle(
     *,
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None,
+    address_resolver: AddressResolver | None,
 ) -> FeatureBundle:
     coord = _coord_or_none(item.latitude, item.longitude)
     bjd_code, sigungu, sido, admin = await _reverse_geocode(coord, reverse_geocoder)
+    road_text = normalize_korean_text(item.address)
+    road_name_code: str | None = None
+    if bjd_code is None and address_resolver is not None:
+        resolved = await address_resolver(Address(road=road_text))
+        if resolved is not None and resolved.bjd_code is not None:
+            bjd_code = resolved.bjd_code
+            sigungu = resolved.sigungu_code or extract_sigungu_code(bjd_code)
+            sido = resolved.sido_code or extract_sido_code(bjd_code)
+            admin = resolved.admin
+            road_name_code = resolved.road_name_code
 
     address = Address(
-        road=normalize_korean_text(item.address),
+        road=road_text,
         admin=admin,
         bjd_code=bjd_code,
         sigungu_code=sigungu,
         sido_code=sido,
+        road_name_code=road_name_code,
     )
 
     raw_data: dict[str, Any] = {
@@ -387,6 +404,7 @@ async def rest_areas_to_bundles(
     *,
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None = None,
+    address_resolver: AddressResolver | None = None,
 ) -> list[FeatureBundle]:
     """krex 휴게소 items → ``list[FeatureBundle]`` (place kind, 1차 source).
 
@@ -406,13 +424,21 @@ async def rest_areas_to_bundles(
         if reverse_geocoder is not None
         else None
     )
+    resolver = (
+        cached_address_resolver(address_resolver)
+        if address_resolver is not None
+        else None
+    )
     bundles: list[FeatureBundle] = []
     for item in items:
         if not (item.name or "").strip() or not (item.uni_id or "").strip():
             continue
         bundles.append(
             await _rest_area_item_to_bundle(
-                item, fetched_at=fetched_at, reverse_geocoder=geocoder
+                item,
+                fetched_at=fetched_at,
+                reverse_geocoder=geocoder,
+                address_resolver=resolver,
             )
         )
     return bundles

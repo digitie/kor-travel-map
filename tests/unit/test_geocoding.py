@@ -22,9 +22,12 @@ import pytest
 from krtour.map.dto import Address, Coordinate
 from krtour.map.geocoding import (
     KraddrGeoRestClient,
+    cached_address_resolver,
     cached_reverse_geocoder,
+    geocode_response_to_address,
     geocode_response_to_coordinate,
     kraddr_geo_address_geocoder,
+    kraddr_geo_address_resolver,
     kraddr_geo_reverse_geocoder,
     resolve_regions_within_radius,
     resolve_sigungu_by_radius,
@@ -389,6 +392,42 @@ def test_geocode_point_to_coordinate() -> None:
     assert coord is not None
     assert coord.lon == Decimal("127.05")
     assert coord.lat == Decimal("37.55")
+
+
+def test_geocode_response_to_address_uses_structured_legal_dong_code() -> None:
+    resp = _GeoResp(
+        candidates=(
+            _CandV2(
+                confidence=0.92,
+                match_kind="road",
+                address=_FULL_ADDR_ROAD,
+                region=_FULL_REGION,
+            ),
+        )
+    )
+
+    address = geocode_response_to_address(resp, min_confidence=0.8)
+
+    assert address is not None
+    assert address.road == "서울특별시 영등포구 여의공원로 120"
+    assert address.bjd_code == "1156010100"
+    assert address.sigungu_code == "11560"
+    assert address.sido_code == "11"
+
+
+def test_geocode_response_to_address_filters_low_confidence() -> None:
+    resp = _GeoResp(
+        candidates=(
+            _CandV2(
+                confidence=0.3,
+                match_kind="road",
+                address=_FULL_ADDR_ROAD,
+                region=_FULL_REGION,
+            ),
+        )
+    )
+
+    assert geocode_response_to_address(resp, min_confidence=0.8) is None
 
 
 def test_geocode_picks_max_confidence() -> None:
@@ -1082,6 +1121,76 @@ def test_kraddr_geo_address_geocoder_fallback_passed() -> None:
 
     asyncio.run(_run())
     assert seen[0]["fallback"] == "api"
+
+
+def test_kraddr_geo_address_resolver_falls_back_to_parcel() -> None:
+    seen: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = _body(request)
+        seen.append(body)
+        if "road_address" in body:
+            return httpx.Response(200, json={"status": "OK", "candidates": []})
+        return httpx.Response(
+            200,
+            json={
+                "status": "OK",
+                "candidates": [
+                    {
+                        "confidence": 0.95,
+                        "match_kind": "parcel",
+                        "address": {
+                            "full": "서울특별시 영등포구 여의도동 8",
+                            "parcel_address": "서울특별시 영등포구 여의도동 8",
+                            "legal_dong_code": "1156010100",
+                        },
+                        "region": {
+                            "sig_cd": "11560",
+                            "bjd_cd": "1156010100",
+                            "sido": "서울특별시",
+                            "sigungu": "영등포구",
+                        },
+                    }
+                ],
+            },
+        )
+
+    async def _run() -> None:
+        async with _mock_client(handler) as http:
+            client = KraddrGeoRestClient(http)
+            resolver = kraddr_geo_address_resolver(client, fallback="api")
+            resolved = await resolver(
+                Address(
+                    road="서울특별시 영등포구 여의공원로 120",
+                    legal="서울특별시 영등포구 여의도동 8",
+                )
+            )
+            assert resolved is not None
+            assert resolved.bjd_code == "1156010100"
+
+    asyncio.run(_run())
+    assert "road_address" in seen[0]
+    assert "jibun_address" in seen[1]
+
+
+def test_cached_address_resolver_dedupes_by_display_address() -> None:
+    calls = 0
+
+    async def _resolver(address: Address) -> Address | None:
+        nonlocal calls
+        calls += 1
+        return Address(road=address.road, bjd_code="1156010100")
+
+    cached = cached_address_resolver(_resolver)
+
+    async def _run() -> None:
+        a1 = await cached(Address(road="서울특별시 영등포구 여의공원로 120"))
+        a2 = await cached(Address(road="서울특별시 영등포구 여의공원로 120"))
+        assert a1 is not None
+        assert a1 is a2
+
+    asyncio.run(_run())
+    assert calls == 1
 
 
 # -- cached_reverse_geocoder --------------------------------------------------

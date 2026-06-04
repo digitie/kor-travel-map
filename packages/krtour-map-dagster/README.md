@@ -81,5 +81,7 @@ Sensor는 `peek_next_update_request()`로 다음 queued request를 상태 변경
 - Config: `ops.load_offline_upload.config.upload_id`
 - Required resources: `krtour_map_client`, `offline_upload_store`
 
-현재 첫 구현은 JSON/JSONL `FeatureBundle` dump만 지원한다. Admin multipart upload,
-validation wizard, CSV/TSV column mapping은 후속 task다.
+`offline_upload_load`는 JSON/JSONL `FeatureBundle` dump와 CSV/TSV tabular 원본을
+지원한다. CSV/TSV는 admin validation job이 `ops.import_jobs.payload`에 저장한 column
+mapping을 재사용하며, 행에 `bjd_code`가 없으면 `KRTOUR_MAP_KRADDR_GEO_BASE_URL`
+kraddr-geo REST v2 geocode/reverse 결과로 보강한다.

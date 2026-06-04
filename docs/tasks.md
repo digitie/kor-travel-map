@@ -4,11 +4,11 @@
 
 ## 진행 중
 
-**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#178(T-208b
-RustFS offline upload store wiring)까지 merged. 현재 작업은 admin UI #9 선행
-T-208h(`/admin/offline-uploads*` API + 기본 upload 화면) PR 마감이다. T-208h 머지
-직후에는 9번 admin UI 최신화 우선순위를 최상위로 두고, 남은 선행 task T-208i부터
-진행한다.
+**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#180(다중 agent review
+T-RV 백로그 문서화 + main RED 보정)까지 merged. 현재 작업은 admin UI #9 선행
+T-208i(CSV/TSV offline upload validation + column mapping wizard)다. T-208i 머지
+후에는 ADR-045 후속 중 batch/root job 기반을 막는 T-205d → T-200/T-201b 순으로
+진행하고, ADR-045 관련 잔여 task가 닫히면 T-212 전체점검 묶음으로 넘어간다.
 T-207b는 사용자 결정에 따라 구현하지 않는다.
 
 ### 현재 기준 보강 필요 체크포인트 (2026-06-03)
@@ -48,11 +48,13 @@ T-207b는 사용자 결정에 따라 구현하지 않는다.
    `sigungu_by_radius`, `provider_dataset` dry-run/count resolver를 구현했다.
    `cache_target_keys`는 T-206d에서 active POI/cache target 기반 resolver와 target
    link 재계산으로 연결한다.
-10. **admin UI #9 우선순위** — T-208h 이후에는 admin UI 최신화 선행 task를 최상위로
-    진행한다. 현재 다음 순서는 T-208i CSV/TSV validation + column mapping wizard →
-    provider refresh policy/provider 상태 REST/UI → 수동 feature 생성 audit log/API →
-    error log/import job event API다.
-11. **검증 기준** — WSL unit/integration/live pytest + Windows Playwright e2e + GitHub
+10. **admin UI #9 우선순위** — T-208i는 CSV/TSV preview/validation/load gate를 닫는
+    마지막 offline upload 선행 task다. 이후 admin UI 완성도 보강은 T-212 전체점검
+    묶음에서 table CRUD, 지도뷰, 이슈 승인/거절, API debug/test, Dagster 모니터링,
+    시스템 로그까지 한 번에 gap audit한다.
+11. **CI 기준** — PR 생성 후 GitHub Actions 결과를 확인하고, 실패가 있으면 같은
+    브랜치에서 원인/수정/재검증을 반영한 뒤 머지한다.
+12. **검증 기준** — WSL unit/integration/live pytest + Windows Playwright e2e + GitHub
    Actions green 후 머지.
 
 ## 코드 리뷰 후속 백로그 (PR#153~#179, 2026-06-04)
@@ -455,9 +457,12 @@ sensor 멱등/retry, asset materialize/RetryPolicy, dagster deps. (리포트 §2
 - [x] T-208h — `/admin/offline-uploads*` API + 기본 upload 화면.
       RustFS/S3 store에 JSON/JSONL `FeatureBundle` 파일을 저장하고,
       `ops.offline_uploads` row 생성/list/detail/load 실행까지 admin UI에서 연결한다.
-- [ ] T-208i — CSV/TSV validation + column mapping wizard.
-      업로드 API/UI 기본 경로가 닫힌 뒤 provider/dataset별 mapping preset, preview,
-      validation 결과, `offline_upload_load` job 연계를 확장한다.
+- [x] T-208i — CSV/TSV validation + column mapping wizard.
+      CSV/TSV 업로드 허용, preview/header/sample endpoint, validation import job,
+      column mapping, kraddr-geo address geocode/reverse 보강, load 전 validation gate,
+      admin UI validation panel, Dagster load parser 연계를 추가했다. `bjd_code`가 없는
+      provider/offline row는 resolver가 있으면 kraddr-geo REST v2 geocode/reverse 결과로
+      보강한다.
 
 **Phase 4.5 — Admin UI 최신화 (사용자 지시로 T-208d 이후 최우선)**
 - [x] T-211a — admin UI 최신 문서/현재 구현 gap audit + 선행 API/데이터 계약 보강.
@@ -487,6 +492,29 @@ sensor 멱등/retry, asset materialize/RetryPolicy, dagster deps. (리포트 §2
       krtour-map-owned Dagster(T-208)로 이관하거나 삭제.
 - [ ] T-210d — TripMate httpx OpenAPI client 신규(직접 import 제거, TripMate repo).
 - [ ] T-210e — `openapi-typescript` client 생성 (D-4 timing).
+
+**Phase 7 — ADR-045 전체점검/튜닝 (ADR-045 잔여 task 완료 후 시작)**
+
+상세 실행 계획은 `docs/reports/adr-045-overall-audit-plan-2026-06-04.md`를 정본으로
+한다. 각 항목은 1-PR 단위로 진행하고, 성능 튜닝은 PR 본문과 문서에 튜닝 전/후
+측정값, 변경한 인덱스/쿼리/프론트 렌더링 포인트, 남은 병목을 기록한다.
+
+- [ ] T-212a — 전체점검 inventory + Playwright/e2e gap matrix.
+      admin UI route, REST endpoint, Dagster job/sensor/schedule, DB query, 운영 로그
+      표면을 최신 코드 기준으로 재분류하고 빠진 테스트를 목록화한다.
+- [ ] T-212b — admin UI 완결성 보강.
+      table 기반 CRUD, 지도뷰 검토, 이슈 승인/거절, API debug/test, Dagster monitoring
+      summary/scraping, 시스템/이슈 로그 확인 화면을 운영자 workflow 기준으로 보완한다.
+- [ ] T-212c — API endpoint/error/log contract 정리.
+      admin/user endpoint shape, error envelope, debug/test endpoint, import job event,
+      system log API, route mount 정책을 점검하고 필요한 backend를 구현한다.
+- [ ] T-212d — DB/API/frontend 성능 튜닝.
+      PostGIS/pg_trgm/ops table EXPLAIN, keyset cursor, index 추가/수정, frontend
+      table/map 렌더링 병목을 측정하고 개선 결과를 문서화한다.
+- [ ] T-212e — 실데이터 full reload + offline upload 실데이터 검증 + 최종 리포트.
+      DB를 비운 뒤 처음부터 다시 로드하고, provider 실데이터와 offline upload
+      CSV/TSV/JSONL 실데이터 적재, kraddr-geo bjd 보강, Playwright e2e, API smoke,
+      Dagster 상태를 모두 확인한다.
 
 ## 완료
 

@@ -18,9 +18,10 @@
 - 좌표는 **이미 WGS84** (``record.lon``/``record.lat``). EPSG:5174 → WGS84 변환은
   mois가 수행하므로 본 모듈은 좌표계 변환을 하지 않는다 (ADR-012/044). 원본
   EPSG:5174 ``source_x``/``source_y``는 payload에 보존만.
-- 변환 함수는 ``async`` + ``reverse_geocoder`` — ``legal_dong_code``(mois 직접
-  제공)를 1차 bjd_code로 쓰고, 없으면 좌표 역지오코딩으로 보강한다 (ADR-009 —
-  feature_id 계산 전에 bjd_code 확정해 'global' bucket을 벗어남).
+- 변환 함수는 ``async`` + geocoder 주입 — ``legal_dong_code``(mois 직접 제공)를
+  1차 bjd_code로 쓰고, 없으면 좌표 역지오코딩, 그래도 없으면 주소 geocode로
+  보강한다 (ADR-009 — feature_id 계산 전에 bjd_code 확정해 'global' bucket을
+  벗어남).
 
 ADR 참조
 --------
@@ -64,7 +65,12 @@ from krtour.map.dto import (
     SourceRecord,
     SourceRole,
 )
-from krtour.map.geocoding import ReverseGeocoder, cached_reverse_geocoder
+from krtour.map.geocoding import (
+    AddressResolver,
+    ReverseGeocoder,
+    cached_address_resolver,
+    cached_reverse_geocoder,
+)
 
 __all__ = [
     "MoisLicensePlaceRecord",
@@ -640,6 +646,7 @@ async def license_record_to_bundle(
     fetched_at: datetime,
     dataset_key: str = DATASET_KEY_BULK,
     reverse_geocoder: ReverseGeocoder | None = None,
+    address_resolver: AddressResolver | None = None,
 ) -> FeatureBundle:
     """단일 PROMOTED 인허가 ``PlaceRecord`` → place ``FeatureBundle``.
 
@@ -663,6 +670,16 @@ async def license_record_to_bundle(
     if bjd_code is None and coord is not None and reverse_geocoder is not None:
         geo = await reverse_geocoder(coord)
         bjd_code = geo.bjd_code if geo is not None else None
+    if bjd_code is None and address_resolver is not None:
+        resolved = await address_resolver(
+            Address(
+                road=normalize_korean_text(record.road_address),
+                legal=normalize_korean_text(record.lot_address),
+            )
+        )
+        if resolved is not None and resolved.bjd_code is not None:
+            geo = resolved
+            bjd_code = resolved.bjd_code
     address = _build_address(record, geo=geo, bjd_code=bjd_code)
 
     raw_data = _raw_data(record, category=category)
@@ -752,6 +769,7 @@ async def license_records_to_bundles(
     fetched_at: datetime,
     dataset_key: str = DATASET_KEY_BULK,
     reverse_geocoder: ReverseGeocoder | None = None,
+    address_resolver: AddressResolver | None = None,
 ) -> list[FeatureBundle]:
     """인허가 ``PlaceRecord`` iterable → place ``FeatureBundle`` 리스트.
 
@@ -771,10 +789,19 @@ async def license_records_to_bundles(
         좌표 → ``Address`` async 역지오코더. ``legal_dong_code`` 부재 시에만
         호출되어 bjd_code를 보강한다 (ADR-009). 중복 좌표는
         ``cached_reverse_geocoder``로 1회만 호출.
+    address_resolver
+        주소 → ``Address`` async 보강 geocoder. ``legal_dong_code``와 좌표 reverse
+        결과가 모두 없을 때 road/lot 주소로 ``/v2/geocode``를 호출한다. 중복 주소는
+        ``cached_address_resolver``로 1회만 호출.
     """
     geocoder = (
         cached_reverse_geocoder(reverse_geocoder)
         if reverse_geocoder is not None
+        else None
+    )
+    resolver = (
+        cached_address_resolver(address_resolver)
+        if address_resolver is not None
         else None
     )
     bundles: list[FeatureBundle] = []
@@ -792,6 +819,7 @@ async def license_records_to_bundles(
                 fetched_at=fetched_at,
                 dataset_key=dataset_key,
                 reverse_geocoder=geocoder,
+                address_resolver=resolver,
             )
         )
     return bundles

@@ -54,7 +54,7 @@ from krtour.map.settings import KrtourMapSettings
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
 
-    from krtour.map.geocoding import ReverseGeocoder
+    from krtour.map.geocoding import AddressResolver, ReverseGeocoder
     from krtour.map.infra.merge_repo import MergeOutcome
     from krtour.map.infra.status_repo import StatusCounts
     from krtour.map.mois import (
@@ -238,26 +238,31 @@ async def _cmd_status(args: argparse.Namespace) -> int:
 
 
 @asynccontextmanager
-async def _reverse_geocoder_for(
+async def _geocoders_for(
     base_url: str | None,
-) -> AsyncIterator[ReverseGeocoder | None]:
-    """``--geocoder-url`` → kraddr-geo ``ReverseGeocoder`` (없으면 ``None``).
+) -> AsyncIterator[tuple[ReverseGeocoder | None, AddressResolver | None]]:
+    """``--geocoder-url`` → kraddr-geo geocoder 콜러블들 (없으면 ``None``).
 
     httpx client 수명은 본 컨텍스트가 소유한다(ADR-002). ``base_url``엔 ``/v2``를
     붙이지 않는다 — ``KraddrGeoRestClient``가 ``base_path``로 붙인다.
     """
     if base_url is None:
-        yield None
+        yield None, None
         return
     import httpx
 
     from krtour.map.geocoding import (
         KraddrGeoRestClient,
+        kraddr_geo_address_resolver,
         kraddr_geo_reverse_geocoder,
     )
 
     async with httpx.AsyncClient(base_url=base_url, timeout=10.0) as http:
-        yield kraddr_geo_reverse_geocoder(KraddrGeoRestClient(http))
+        client = KraddrGeoRestClient(http)
+        yield (
+            kraddr_geo_reverse_geocoder(client),
+            kraddr_geo_address_resolver(client, fallback="api"),
+        )
 
 
 def _format_bulk_result(result: MoisBulkJobResult) -> str:
@@ -336,9 +341,10 @@ async def _cmd_import_mois(args: argparse.Namespace) -> int:
     try:
         records = iter_mois_license_records(records_path)
         async with (
-            _reverse_geocoder_for(args.geocoder_url) as geocoder,
+            _geocoders_for(args.geocoder_url) as geocoders,
             AsyncKrtourMapClient(engine) as client,
         ):
+            reverse_geocoder, address_resolver = geocoders
             if closed:
                 cl = await client.run_mois_license_closed_job(
                     records,
@@ -356,7 +362,8 @@ async def _cmd_import_mois(args: argparse.Namespace) -> int:
                     new_cursor={"last_modified_date": args.cursor},
                     dataset_key=dataset_key,
                     sync_scope=args.sync_scope,
-                    reverse_geocoder=geocoder,
+                    reverse_geocoder=reverse_geocoder,
+                    address_resolver=address_resolver,
                     source_checksum=args.source_checksum,
                     batch_size=args.batch_size,
                 )
@@ -366,7 +373,8 @@ async def _cmd_import_mois(args: argparse.Namespace) -> int:
                 records,
                 fetched_at=datetime.now(UTC),
                 dataset_key=dataset_key,
-                reverse_geocoder=geocoder,
+                reverse_geocoder=reverse_geocoder,
+                address_resolver=address_resolver,
                 source_checksum=args.source_checksum,
                 batch_size=args.batch_size,
             )
