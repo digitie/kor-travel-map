@@ -567,6 +567,7 @@ CREATE TABLE ops.dedup_review_queue (
   reviewed_at        TIMESTAMPTZ,
   created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT uq_dedup_pair UNIQUE (feature_id_a, feature_id_b),
+  CONSTRAINT ck_dedup_pair_order CHECK (feature_id_a < feature_id_b),
   CONSTRAINT ck_dedup_status CHECK (status IN ('pending','accepted','rejected','merged','ignored')),
   CONSTRAINT ck_dedup_scores CHECK (
     total_score BETWEEN 0 AND 100 AND
@@ -578,6 +579,9 @@ CREATE TABLE ops.dedup_review_queue (
 
 CREATE INDEX idx_dedup_status_score ON ops.dedup_review_queue (status, total_score DESC);
 ```
+
+`feature_id_a`/`feature_id_b`는 항상 lexicographic canonical 방향으로 저장한다.
+`dedup_repo`는 upsert 전에 pair를 정렬하고, self-pair는 검토 큐에 넣지 않는다.
 
 ### 9.3 `ops.feature_overrides`
 

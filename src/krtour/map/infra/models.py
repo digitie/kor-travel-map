@@ -432,12 +432,14 @@ class DedupReviewQueueRow(Base):
     점수는 0~100 ``NUMERIC(5,2)`` (core.scoring의 0.0~1.0 ×100). ``status``는
     운영자 검토 워크플로(pending→accepted/rejected/merged/ignored),
     ``decision_reason``에 알고리즘 제안(auto_merge/manual_review)을 보관.
-    ``(feature_id_a, feature_id_b)`` UNIQUE — 재스캔은 pending 행 점수만 갱신.
+    ``feature_id_a < feature_id_b`` 정규화 + ``(feature_id_a, feature_id_b)``
+    UNIQUE — 재스캔은 pending 행 점수만 갱신.
     """
 
     __tablename__ = "dedup_review_queue"
     __table_args__ = (
         UniqueConstraint("feature_id_a", "feature_id_b", name="uq_dedup_pair"),
+        CheckConstraint("feature_id_a < feature_id_b", name="ck_dedup_pair_order"),
         CheckConstraint(
             "status IN ('pending','accepted','rejected','merged','ignored')",
             name="ck_dedup_status",

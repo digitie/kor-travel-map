@@ -89,8 +89,8 @@ async def _seed_pair(engine: AsyncEngine) -> str:
         session.add(_link("f_loser", "SR1", primary=False))  # 충돌 — master 보유
         session.add(_link("f_loser", "SR2"))  # loser 전용 — 이동 대상
         row = DedupReviewQueueRow(
-            feature_id_a="f_master",
-            feature_id_b="f_loser",
+            feature_id_a="f_loser",
+            feature_id_b="f_master",
             total_score=90,
             name_score=95,
             spatial_score=88,

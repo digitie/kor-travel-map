@@ -68,7 +68,7 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 | 테이블 | PK | 핵심 컬럼 / 비고 |
 |--------|----|---------------|
 | `import_jobs` | `job_id UUID` | kind, `load_batch_id`, `parent_job_id` self-FK, payload, state (queued/running/done/failed/cancelled), progress (0-100), heartbeat_at |
-| `dedup_review_queue` | `review_key UUID` | (feature_id_a, feature_id_b) UNIQUE, total_score/name/spatial/category (0-100), status, decision_reason |
+| `dedup_review_queue` | `review_key UUID` | feature_id_a < feature_id_b canonical pair UNIQUE, total_score/name/spatial/category (0-100), status, decision_reason |
 | `feature_overrides` | `override_key UUID` | **구현됨(alembic 0010, ADR-045 T-207c)** — feature_id FK, field_path, source_value/override_value JSONB, prevent_provider_reactivation, status |
 | `feature_merge_history` | `merge_id UUID` | master_feature_id FK, loser_feature_id FK (둘 다 CASCADE), score, review_key FK (SET NULL), merged_by, reason, merged_at (alembic 0007, ADR-016) |
 | `data_integrity_violations` | `violation_key UUID` | **구현됨(alembic 0009, ADR-045 T-205c)** — provider/dataset/source_record/feature 연결, violation_type, severity (info/warning/error/critical), payload, status |
@@ -191,6 +191,7 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 | `import_jobs` | `ck_import_jobs_state` | queued/running/done/failed/cancelled |
 | `import_jobs` | `ck_import_jobs_progress` | 0-100 |
 | `dedup_review_queue` | `ck_dedup_status` | pending/accepted/rejected/merged/ignored |
+| `dedup_review_queue` | `ck_dedup_pair_order` | feature_id_a < feature_id_b |
 | `dedup_review_queue` | `ck_dedup_scores` | 각 점수 0-100 |
 | `feature_overrides` | `ck_overrides_status` | active/inactive/superseded |
 | `feature_overrides` | `uq_overrides_active_feature_field` | active override는 feature_id+field_path당 1건 |

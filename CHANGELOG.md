@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### Infra — Dedup pair order invariant (2026-06-04)
+
+- **FIXED**: `ops.dedup_review_queue`가 `feature_id_a < feature_id_b` check와
+  canonical upsert를 사용해 `(a,b)`/`(b,a)` 대칭 중복을 DB·repo 양쪽에서 차단한다.
+- **FIXED**: self-pair dedup 후보는 검토 큐에 넣지 않고 `skipped`로 처리한다.
+- **MIGRATION**: alembic `0013_dedup_pair_order_invariant`가 기존 self-pair를 제거하고,
+  unordered duplicate pair는 검토 완료 행 우선으로 정리한 뒤 check constraint를
+  추가한다.
+- **TEST**: reversed pair upsert, self-pair skip, DB check constraint integration
+  test를 추가했다.
+
 ### Admin/User API — Keyset cursor hardening (2026-06-04)
 
 - **FIXED**: `/features/search` score cursor가 DB score text를 보존하고,

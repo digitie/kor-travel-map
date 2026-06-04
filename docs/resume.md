@@ -1,5 +1,22 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-04 Codex 작업 메모 — T-RV-12 dedup pair 순서 독립 unique
+
+T-RV-12를 처리한다. `ops.dedup_review_queue`는 이제 `feature_id_a < feature_id_b`
+check(`ck_dedup_pair_order`)를 갖고, `(feature_id_a, feature_id_b)` unique가 canonical
+방향에서만 적용된다. `alembic/versions/0013_dedup_pair_order_invariant.py`는 기존
+self-pair를 제거하고, unordered duplicate pair는 검토 완료 행을 우선 보존한 뒤 하나만
+남겨 canonical 방향으로 정규화한다.
+
+`dedup_repo`는 `DedupCandidate` upsert 전에 pair를 정렬해 `(a,b)`와 `(b,a)`를 같은
+row로 수렴시킨다. self-pair는 검토 큐 의미가 없으므로 DB에 넣지 않고 `skipped`로
+처리한다. integration test는 reversed pair update, self-pair skip, 직접 insert의
+check 위반을 검증한다.
+
+다음 한 작업은 **T-RV-13(UUID default schema qualification)** 또는
+**T-RV-14(dedup merge FOR UPDATE)** 다. **T-RV-27은 production 레벨 hardening 전까지
+계속 skip/deferred**다.
+
 ## 2026-06-04 Codex 작업 메모 — T-RV-10 keyset cursor 정밀도
 
 T-RV-10을 처리한다. `/features/search`는 q 검색 cursor에 DB에서 받은
