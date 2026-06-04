@@ -5,6 +5,13 @@
 
 ## [Unreleased]
 
+### Ops — admin stack runner 안정화 (2026-06-04)
+
+- **FIX**: `scripts/run-admin-stack.sh`가 시작 전 `alembic upgrade head`를 실행하고,
+  API/frontend/Dagster를 `setsid` detached process로 기동하도록 수정했다.
+- **FIX**: frontend wrapper PID가 먼저 종료되어도 URL readiness가 성공하면 정상 기동으로
+  판단하도록 readiness 검사를 보정했다.
+
 ### Ops — import_jobs batch DAG 컬럼 (2026-06-04)
 
 - **NEW**: `ops.import_jobs`에 `load_batch_id`와 `parent_job_id` self-FK를 추가했다.

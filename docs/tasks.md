@@ -483,7 +483,10 @@ sensor 멱등/retry, asset materialize/RetryPolicy, dagster deps. (리포트 §2
 - [x] T-209a — `docker-compose.yml` 1차(api/frontend/dagster/postgres) + 고정 포트
   API `9011`, frontend `9012`, Dagster `9013`, Postgres host `15433`.
 - [~] T-209b — 기동 순서 1차(postgres health → API `alembic upgrade head` →
-  api/frontend/dagster). Dagster metadata DB 분리/init와 daemon/schedule 운영은 후속.
+  api/frontend/dagster). 2026-06-04 Codex 후속으로 `scripts/run-admin-stack.sh`가
+  시작 전 `alembic upgrade head`를 실행하고, `setsid` detached 실행 + URL 기준
+  readiness로 API/frontend/Dagster를 유지하도록 보정했다. Dagster metadata DB 분리/init와
+  daemon/schedule 운영은 후속.
 - [x] T-209c — Dockerfile 3종(api/frontend/dagster).
 - [x] T-209d — `docs/runbooks/docker-app.md` + `docs/deploy.md`.
 - [ ] T-209e — backup/restore 독립 DB 묶음(ADR-040 amend, D-5).
