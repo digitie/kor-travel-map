@@ -101,6 +101,14 @@ class KrtourMapSettings(BaseSettings):
         default="offline-uploads",
         description="admin offline upload 원본 파일 객체 key prefix.",
     )
+    offline_upload_max_bytes: int = Field(
+        default=100 * 1024 * 1024,
+        gt=0,
+        description=(
+            "admin offline upload 1개 파일 최대 크기(bytes). 라우터는 "
+            "Content-Length 사전 차단과 실제 read 상한으로 이 값을 강제한다."
+        ),
+    )
 
     @property
     def object_store_access_key(self) -> SecretStr | None:

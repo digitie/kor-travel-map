@@ -45,6 +45,7 @@ def test_settings_default_values() -> None:
     )
     # 객체 저장소 기본 bucket
     assert settings.object_store_bucket == "krtour-map"
+    assert settings.offline_upload_max_bytes == 100 * 1024 * 1024
     # 로깅
     assert settings.log_level == "INFO"
     assert settings.log_format == "json"
@@ -59,12 +60,14 @@ def test_settings_env_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setenv("KRTOUR_MAP_LOG_LEVEL", "DEBUG")
     monkeypatch.setenv("KRTOUR_MAP_OBJECT_STORE_BUCKET", "custom-bucket")
+    monkeypatch.setenv("KRTOUR_MAP_OFFLINE_UPLOAD_MAX_BYTES", "2048")
     monkeypatch.setenv("KRTOUR_MAP_LOG_API_CALLS", "true")
 
     settings = KrtourMapSettings()
 
     assert settings.log_level == "DEBUG"
     assert settings.object_store_bucket == "custom-bucket"
+    assert settings.offline_upload_max_bytes == 2048
     assert settings.log_api_calls is True
 
 

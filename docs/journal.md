@@ -2,6 +2,26 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-04 (codex) — T-RV-09 offline upload 크기 상한
+
+**작업**: PR#153~#179 리뷰 후속 HIGH 항목 중 첫 처리 순서인 T-RV-09를 반영했다.
+
+- **Settings**: `KRTOUR_MAP_OFFLINE_UPLOAD_MAX_BYTES`를 추가했다. 기본값은
+  `104857600` bytes(100 MiB)다.
+- **Admin API**: `POST /admin/offline-uploads`가 `Content-Length`로 명백히 큰 multipart
+  요청을 먼저 `413`으로 차단하고, 실제 `UploadFile.read()`도 `max_bytes + 1`까지만
+  수행해 무제한 메모리 read를 막는다.
+- **환경 전파**: `.env.example`, `scripts/load-env.sh`, `docker-compose.yml`의 API/
+  Dagster 환경에 같은 키를 추가했다.
+- **문서**: `docs/tasks.md`, `docs/openapi-admin-contract.md`,
+  `docs/debug-ui-admin-workflows.md`, `docs/feature-files-rustfs.md`, `CHANGELOG.md`에
+  상한 정책과 `413` 계약을 기록했다.
+- **범위 유보**: S3 multipart streaming, object orphan 보상, upload store 재사용은
+  store protocol/API 상태전이를 건드리는 T-RV-22/23/25와 함께 후속 처리한다. 이번 PR은
+  무제한 read/OOM surface를 닫는 최소 운영 안전장치다.
+- **사용자 결정**: T-RV-27(admin API `0.0.0.0` bind/노출)은 production 레벨 외부 노출
+  전까지 구현하지 않고 deferred로 문서 추적한다. 다음 구현 후보는 T-RV-06/07/08이다.
+
 ## 2026-06-04 (codex) — T-200 Batch DAG + 정합성 게이트
 
 **작업**: T-205d batch 컬럼 위에 root/child/gate orchestration을 추가했다.

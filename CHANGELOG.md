@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### Admin API — Offline upload 크기 상한 (2026-06-04)
+
+- **NEW**: `KRTOUR_MAP_OFFLINE_UPLOAD_MAX_BYTES` 설정을 추가했다. 기본값은
+  `104857600` bytes(100 MiB)다.
+- **CHANGED**: `POST /admin/offline-uploads`는 설정 상한을 초과한 파일을 `413`으로
+  거절한다. `Content-Length` 선차단과 `UploadFile.read(max_bytes + 1)` bounded read를
+  함께 적용해 무제한 메모리 read를 막는다.
+- **TEST**: oversize upload가 객체 저장소/DB 경로로 내려가지 않는 router unit
+  regression test와 settings env override test를 추가했다.
+
 ### Ops — Batch DAG + consistency gate (2026-06-04)
 
 - **NEW**: `krtour.map.infra.batch_dag.run_batch_dag_consistency_gate`와

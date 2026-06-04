@@ -1185,6 +1185,13 @@ multipart upload.
 - `sync_scope`: optional. 기본 `default`.
 - `created_by`: optional.
 
+크기 제한:
+
+- `KRTOUR_MAP_OFFLINE_UPLOAD_MAX_BYTES`를 넘는 파일은 `413`으로 거절한다.
+- 기본값은 `104857600` bytes(100 MiB)다.
+- 라우터는 `Content-Length`로 명백히 큰 요청을 먼저 차단하고, 실제 `file.read()`도
+  `max_bytes + 1`까지만 수행해 무제한 메모리 버퍼링을 막는다.
+
 응답:
 
 ```json

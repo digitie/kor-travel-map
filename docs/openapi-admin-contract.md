@@ -160,6 +160,9 @@ TripMate/user subset에는 포함하지 않는다.
 | POST | `/admin/offline-uploads/{upload_id}/load` | Dagster GraphQL `launchRun`으로 `offline_upload_load` job 실행 |
 
 지원 업로드 포맷은 JSON/JSONL `FeatureBundle` dump와 CSV/TSV tabular 원본이다.
+`POST /admin/offline-uploads`는 `KRTOUR_MAP_OFFLINE_UPLOAD_MAX_BYTES` 상한을
+초과하면 `413`을 반환한다. 기본값은 `104857600` bytes(100 MiB)이며,
+`Content-Length` 선차단과 실제 file read 상한을 함께 적용한다.
 CSV/TSV는 load 전에 validation job이 저장한 column mapping과 성공 상태가 필요하다.
 행에 `bjd_code`가 없으면 `KRTOUR_MAP_KRADDR_GEO_BASE_URL`로 주입한 kraddr-geo REST v2
 `POST /v2/geocode` 또는 좌표 reverse 결과를 사용해 법정동코드를 보강한다. resolver가
