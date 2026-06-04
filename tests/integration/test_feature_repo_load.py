@@ -231,7 +231,8 @@ async def test_get_feature_rows_by_ids_and_search_features(
 ) -> None:
     first = await _bundle("FEST-SEARCH-A")
     second = await _bundle("FEST-SEARCH-B")
-    await feature_repo.load_bundles(migrated_session, [first, second])
+    third = await _bundle("FEST-SEARCH-C")
+    await feature_repo.load_bundles(migrated_session, [first, second, third])
     await migrated_session.flush()
 
     rows = await feature_repo.get_feature_rows_by_ids(
@@ -243,32 +244,31 @@ async def test_get_feature_rows_by_ids_and_search_features(
 
     lon = float(first.feature.coord.lon)
     lat = float(first.feature.coord.lat)
-    page = await feature_repo.search_features(
-        migrated_session,
-        q="서울 봄꽃 축제",
-        bbox=(lon - 0.1, lat - 0.1, lon + 0.1, lat + 0.1),
-        kinds=["event"],
-        categories=[first.feature.category],
-        limit=1,
-    )
-    assert len(page.items) == 1
-    assert page.items[0].feature_id in {
-        first.feature.feature_id,
-        second.feature.feature_id,
-    }
-    assert page.next_cursor is not None
+    seen: list[str] = []
+    cursor: str | None = None
+    for _ in range(3):
+        page = await feature_repo.search_features(
+            migrated_session,
+            q="서울 봄꽃 축제",
+            bbox=(lon - 0.1, lat - 0.1, lon + 0.1, lat + 0.1),
+            kinds=["event"],
+            categories=[first.feature.category],
+            limit=1,
+            cursor=cursor,
+        )
+        assert len(page.items) == 1
+        assert page.items[0].score_cursor is not None
+        seen.append(page.items[0].feature_id)
+        cursor = page.next_cursor
 
-    next_page = await feature_repo.search_features(
-        migrated_session,
-        q="서울 봄꽃 축제",
-        bbox=(lon - 0.1, lat - 0.1, lon + 0.1, lat + 0.1),
-        kinds=["event"],
-        categories=[first.feature.category],
-        limit=1,
-        cursor=page.next_cursor,
+    assert seen == sorted(
+        [
+            first.feature.feature_id,
+            second.feature.feature_id,
+            third.feature.feature_id,
+        ]
     )
-    assert len(next_page.items) == 1
-    assert next_page.items[0].feature_id != page.items[0].feature_id
+    assert cursor is None
 
     bbox_only = await feature_repo.search_features(
         migrated_session,

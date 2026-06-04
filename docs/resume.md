@@ -1,5 +1,22 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-04 Codex 작업 메모 — T-RV-10 keyset cursor 정밀도
+
+T-RV-10을 처리한다. `/features/search`는 q 검색 cursor에 DB에서 받은
+`score::text`를 저장하고, 다음 페이지 predicate를 `(-score, feature_id) >
+(-cursor_score, cursor_feature_id)`로 바꿔 `ORDER BY score DESC, feature_id ASC`와
+같은 정렬축을 사용한다. 사용자 응답의 `score`는 계속 float로 내려가지만 cursor
+비교는 DB score text 기반이다.
+
+`/admin/dedup-review`는 `total_score` `NUMERIC` cursor를 float가 아니라 문자열로
+운반하고, predicate와 `ORDER BY` 모두 `review_key::text`를 사용하도록 통일했다. 같은
+score/total_score 여러 행을 `page_size=1`로 끝까지 넘기는 PostGIS integration test를
+추가했다.
+
+다음 한 작업은 **T-RV-04b(provider public client live fetch wiring)** 또는
+**T-RV MED 묶음 중 운영 영향이 큰 항목(T-RV-12/13/14 등)** 이다. **T-RV-27은
+production 레벨 hardening 전까지 계속 skip/deferred**다.
+
 ## 2026-06-04 Codex 작업 메모 — T-RV-05/11 run-now/claim lock
 
 T-RV-05/11을 처리한다. `run_mode=now` feature update request 생성과 기존 request

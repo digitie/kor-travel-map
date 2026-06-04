@@ -303,14 +303,13 @@ WITH candidates AS (
 _FEATURE_SEARCH_BY_SCORE_SQL: Final[str] = (
     _FEATURE_SEARCH_CTE_SQL
     + """
-SELECT *
+SELECT candidates.*, score::text AS score_cursor
 FROM candidates
 WHERE (
-    CAST(:cursor_score AS double precision) IS NULL
-    OR score < CAST(:cursor_score AS double precision)
-    OR (
-        score = CAST(:cursor_score AS double precision)
-        AND feature_id > CAST(:cursor_feature_id AS text)
+    CAST(:cursor_score AS text) IS NULL
+    OR (-score, feature_id) > (
+        -CAST(:cursor_score AS double precision),
+        CAST(:cursor_feature_id AS text)
     )
 )
 ORDER BY score DESC, feature_id ASC
@@ -554,6 +553,7 @@ class FeatureSearchRow:
     marker_color: str | None
     status: str
     score: float | None = None
+    score_cursor: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1040,7 +1040,9 @@ def _search_cursor_params(cursor: str | None, *, q_enabled: bool) -> dict[str, A
     params["cursor_feature_id"] = payload["feature_id"]
     if q_enabled:
         try:
-            params["cursor_score"] = float(payload["score"])
+            score = str(payload["score"])
+            float(score)
+            params["cursor_score"] = score
         except (KeyError, TypeError, ValueError) as exc:
             raise ValueError("invalid feature search cursor") from exc
     return params
@@ -1052,7 +1054,11 @@ def _encode_search_cursor(item: FeatureSearchRow, *, q_enabled: bool) -> str:
         "feature_id": item.feature_id,
     }
     if q_enabled:
-        payload["score"] = item.score
+        payload["score"] = (
+            item.score_cursor
+            if item.score_cursor is not None
+            else str(item.score)
+        )
     raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
     return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
 
@@ -1061,6 +1067,7 @@ def _search_row(row: Any) -> FeatureSearchRow:
     lon = row["lon"]
     lat = row["lat"]
     score = row["score"]
+    score_cursor = row.get("score_cursor")
     return FeatureSearchRow(
         feature_id=str(row["feature_id"]),
         kind=str(row["kind"]),
@@ -1072,6 +1079,7 @@ def _search_row(row: Any) -> FeatureSearchRow:
         marker_color=row["marker_color"],
         status=str(row["status"]),
         score=float(score) if score is not None else None,
+        score_cursor=str(score_cursor) if score_cursor is not None else None,
     )
 
 

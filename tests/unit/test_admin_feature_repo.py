@@ -246,9 +246,10 @@ def test_dedup_cursor_and_row_mapping() -> None:
     cursor = repo._encode_dedup_cursor(item)
 
     assert repo._dedup_cursor_params(cursor) == {
-        "cursor_score": 90.0,
+        "cursor_score": "90",
         "cursor_review_key": "review-1",
     }
+    assert item.total_score_cursor == "90"
     assert item.feature_a.feature_id == "feature-a"
     assert item.feature_b.lon is None
     assert item.distance_m is None

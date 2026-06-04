@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### Admin/User API — Keyset cursor hardening (2026-06-04)
+
+- **FIXED**: `/features/search` score cursor가 DB score text를 보존하고,
+  `ORDER BY score DESC, feature_id ASC`와 같은 `(-score, feature_id)` 축으로 keyset
+  비교하도록 바꿨다.
+- **FIXED**: `/admin/dedup-review` cursor가 `NUMERIC` score를 문자열로 운반하고,
+  predicate와 `ORDER BY` 모두 `review_key::text`를 사용하도록 정렬축을 통일했다.
+- **TEST**: 같은 score/total_score를 가진 여러 행을 `page_size=1`로 끝까지 넘기는
+  PostGIS integration test를 추가했다.
+
 ### Admin API — Feature update lock handling (2026-06-04)
 
 - **FIXED**: `run_mode=now` feature update request 생성/재큐잉 시 동일 scope

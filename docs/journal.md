@@ -2,6 +2,18 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-04 (codex) — T-RV-10 keyset cursor 정밀도
+
+**작업**: PR#153~#179 리뷰 후속 HIGH 항목 중 T-RV-10을 반영한다.
+
+- **Feature search cursor**: q 검색 cursor는 DB `score::text`를 보존하고,
+  `(-score, feature_id)` row-tuple 비교로 `ORDER BY score DESC, feature_id ASC`와
+  같은 축을 사용한다.
+- **Dedup review cursor**: `total_score` `NUMERIC` cursor를 string으로 운반하고,
+  predicate와 `ORDER BY`의 review key 축을 모두 `review_key::text`로 통일했다.
+- **Tests**: 같은 score/total_score를 가진 여러 행을 `page_size=1`로 끝까지 넘기는
+  PostGIS integration test를 추가해 skip/dup 회귀를 잠갔다.
+
 ## 2026-06-04 (codex) — T-RV-05/11 feature update lock 경합
 
 **작업**: PR#153~#179 리뷰 후속 HIGH 항목 중 T-RV-05/11을 반영한다.
