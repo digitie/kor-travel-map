@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-04 (codex) — T-RV-07 admin/ops router gate
+
+**작업**: PR#153~#179 리뷰 후속 HIGH 항목 중 T-RV-07을 반영한다.
+
+- **Settings**: `AdminSettings.admin_routes_enabled`와 `ops_routes_enabled`를 추가했다.
+  둘 다 unset이면 `features_routes_enabled`를 따른다.
+- **Admin API**: DB 없는 부팅 검증에서 `features_routes_enabled=False`를 주면
+  `/features/*`뿐 아니라 DB 의존 `/admin/*`, `/ops/*`, `/ops/dagster/*` 라우터도 함께
+  mount하지 않는다.
+- **Tests**: `test_routers.py`에 OpenAPI path 제거와 404 회귀 테스트, admin/ops 명시
+  opt-in 테스트를 추가했다.
+- **사용자 결정**: T-RV-27(admin API `0.0.0.0` bind/노출)은 production 레벨 hardening
+  전까지 구현하지 않고 deferred/skip으로 문서 추적한다.
+
 ## 2026-06-04 (codex) — T-RV-06 admin API error envelope
 
 **작업**: PR#153~#179 리뷰 후속 HIGH 항목 중 T-RV-06을 반영했다.

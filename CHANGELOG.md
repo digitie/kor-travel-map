@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### Admin API — Route gates (2026-06-04)
+
+- **NEW**: `KRTOUR_MAP_ADMIN_ADMIN_ROUTES_ENABLED`와
+  `KRTOUR_MAP_ADMIN_OPS_ROUTES_ENABLED` 설정을 추가했다. unset이면 둘 다
+  `KRTOUR_MAP_ADMIN_FEATURES_ROUTES_ENABLED`를 따른다.
+- **CHANGED**: DB 없는 부팅 검증에서 `features_routes_enabled=False`를 주면
+  `/features/*`뿐 아니라 DB 의존 `/admin/*`, `/ops/*`, `/ops/dagster/*` 라우터도 함께
+  mount하지 않는다. 필요하면 admin/ops flag를 명시해 별도로 다시 열 수 있다.
+- **DOCS**: T-RV-27(admin API bind/노출)은 production 레벨 hardening 전까지 구현하지
+  않고 deferred/skip으로 문서 추적한다.
+
 ### Admin API — Error envelope (2026-06-04)
 
 - **CHANGED**: admin API의 `HTTPException`과 request validation error 응답을

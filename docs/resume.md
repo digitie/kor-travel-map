@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-04 Codex 작업 메모 — T-RV-07 admin/ops router gate
+
+T-RV-07을 처리한다. `AdminSettings`에 `admin_routes_enabled`와
+`ops_routes_enabled`를 추가했고, 값이 `None`이면 기존 `features_routes_enabled`를
+따르게 했다. 기본 운영 동작은 유지하지만, DB 없는 부팅 검증에서
+`features_routes_enabled=False`를 주면 `/features/*`와 함께 DB 의존 `/admin/*`,
+`/ops/*`, `/ops/dagster/*` 라우터도 mount하지 않는다. 특수 검증에서 admin/ops만
+열어야 할 때는 새 flag로 명시 opt-in한다.
+
+`test_routers.py`에 OpenAPI path와 404 회귀 테스트를 추가했다. 사용자 결정에 따라
+**T-RV-27 admin API bind 노출 정정은 production 레벨 hardening 전까지 구현하지 않고
+deferred/skip으로 문서 추적만 유지**한다. 다음 한 작업은 **T-RV-08(public response
+field leak)** 이다.
+
 ## 2026-06-04 Codex 작업 메모 — T-RV-06 error envelope
 
 T-RV-06을 처리한다. `packages/krtour-map-admin/src/krtour/map_admin/app.py`에
