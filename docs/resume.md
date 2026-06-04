@@ -1,5 +1,20 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-04 Codex 작업 메모 — T-RV-13 UUID default 스키마 한정
+
+T-RV-13을 처리한다. ADR-008에 따라 pgcrypto는 `x_extension` schema에 격리되어
+있으므로, 운영 테이블 UUID default가 search_path에 의존하지 않도록
+`x_extension.gen_random_uuid()`로 표준화한다.
+
+대상은 bare default가 남아 있던 `ops.feature_consistency_reports.report_id`,
+`ops.dedup_review_queue.review_key`, `ops.import_jobs.job_id`,
+`ops.feature_merge_history.merge_id`다. 모델과 기존 migration source를 정리하고,
+`alembic/versions/0014_uuid_default_schema.py`로 기존 DB default도 ALTER한다.
+integration test는 Postgres catalog의 ops UUID default expression을 직접 검증한다.
+
+다음 한 작업은 **T-RV-14(dedup merge FOR UPDATE)** 또는 **T-RV-15(scope resolver
+count/limit)** 다. **T-RV-27은 production 레벨 hardening 전까지 계속 skip/deferred**다.
+
 ## 2026-06-04 Codex 작업 메모 — T-RV-12 dedup pair 순서 독립 unique
 
 T-RV-12를 처리한다. `ops.dedup_review_queue`는 이제 `feature_id_a < feature_id_b`

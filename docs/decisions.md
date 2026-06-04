@@ -1194,7 +1194,7 @@
   - `ops.feature_consistency_reports` 테이블 마이그레이션:
     ```sql
     CREATE TABLE ops.feature_consistency_reports (
-      report_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      report_id UUID PRIMARY KEY DEFAULT x_extension.gen_random_uuid(),
       batch_id UUID NOT NULL,
       started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       finished_at TIMESTAMPTZ,
@@ -1261,8 +1261,8 @@
 
 - **Amendment (2026-05-29, Sprint 3) — Phase 1 (T-201a) 구현 완료**:
   - `alembic 0003_feature_consistency_reports` — `ops.feature_consistency_reports`
-    테이블 + `idx_reports_batch` / `idx_reports_started` (PK `gen_random_uuid()`,
-    pgcrypto는 `x_extension`에 격리되어 있고 search_path 포함 → unqualified 호출).
+    테이블 + `idx_reports_batch` / `idx_reports_started` (PK
+    `x_extension.gen_random_uuid()`; T-RV-13에서 schema-qualified default로 정정).
   - `infra/models.py` `FeatureConsistencyReportRow` (Alembic target_metadata).
   - `infra/consistency.py` — F1~F3 raw SQL(ADR-004) + `build_report`(순수 집계) +
     `run_consistency_checks(session, *, batch_id, persist)`. **Dagster 게이트

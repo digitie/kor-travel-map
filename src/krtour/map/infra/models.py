@@ -405,7 +405,7 @@ class FeatureConsistencyReportRow(Base):
     report_id: Mapped[str] = mapped_column(
         UUID(as_uuid=False),
         primary_key=True,
-        server_default=text("gen_random_uuid()"),
+        server_default=text("x_extension.gen_random_uuid()"),
     )
     batch_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
     started_at: Mapped[datetime] = mapped_column(
@@ -460,7 +460,7 @@ class DedupReviewQueueRow(Base):
     review_key: Mapped[str] = mapped_column(
         UUID(as_uuid=False),
         primary_key=True,
-        server_default=text("gen_random_uuid()"),
+        server_default=text("x_extension.gen_random_uuid()"),
     )
     feature_id_a: Mapped[str] = mapped_column(
         String,
@@ -615,7 +615,7 @@ class ImportJobRow(Base):
     job_id: Mapped[str] = mapped_column(
         UUID(as_uuid=False),
         primary_key=True,
-        server_default=text("gen_random_uuid()"),
+        server_default=text("x_extension.gen_random_uuid()"),
     )
     kind: Mapped[str] = mapped_column(Text, nullable=False)
     load_batch_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
@@ -1153,7 +1153,7 @@ class FeatureMergeHistoryRow(Base):
     merge_id: Mapped[str] = mapped_column(
         UUID(as_uuid=False),
         primary_key=True,
-        server_default=text("gen_random_uuid()"),
+        server_default=text("x_extension.gen_random_uuid()"),
     )
     master_feature_id: Mapped[str] = mapped_column(
         Text,

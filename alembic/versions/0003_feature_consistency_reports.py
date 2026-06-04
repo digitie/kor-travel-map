@@ -6,8 +6,9 @@ Create Date: 2026-05-29
 
 ``infra/models.py``의 ``FeatureConsistencyReportRow``와 1:1 (ADR-004 ORM=매핑,
 쿼리는 raw SQL ``infra/consistency.py``). ADR-033 Phase 1 — F1~F3 정합성 배치
-결과 영속화. ``gen_random_uuid()``는 pgcrypto(x_extension, search_path 포함)로
-호출 가능. Dagster 게이트(swap 차단)는 Phase 2(Sprint 5)에서.
+결과 영속화. UUID 기본값은 pgcrypto를 격리한
+``x_extension.gen_random_uuid()``를 스키마 한정으로 호출한다. Dagster 게이트(swap
+차단)는 Phase 2(Sprint 5)에서.
 
 ADR 참조: ADR-004 / ADR-008 / ADR-017(미러) / ADR-033.
 """
@@ -34,7 +35,7 @@ def upgrade() -> None:
             "report_id",
             postgresql.UUID(as_uuid=False),
             primary_key=True,
-            server_default=sa.text("gen_random_uuid()"),
+            server_default=sa.text("x_extension.gen_random_uuid()"),
         ),
         sa.Column("batch_id", postgresql.UUID(as_uuid=False), nullable=False),
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=False,
