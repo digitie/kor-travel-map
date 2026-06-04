@@ -94,6 +94,14 @@ Cursor / opencode / Hermes는 `codegraph install --print-config <target>`로
 <sym>` 조합. 신규 파일만 추가하고 기존 심볼 시그니처가 그대로면 생략 가능.
 자세히는 `docs/codegraph-worktree.md` §7.
 
+#### 코드 수정 우선순위
+
+코드 작성·수정은 **최소 코드 변경**이나 **구 모델 호환성**보다 완성도, 최적 구조,
+확장성, 안정성을 우선한다. 리뷰 후속이나 부분 결함을 고칠 때도 증상만 덮는
+adapter/shim/파생 계산으로 끝내지 말고, 데이터 모델·migration·repo·DTO·테스트가
+같은 계약을 공유하는 구조로 정리한다. 단, scope는 task/PR 단위로 작게 유지하고,
+큰 구조 변경이 필요하면 문서와 후속 task로 명시한다.
+
 ## 2. 빠른 시작
 
 ```bash

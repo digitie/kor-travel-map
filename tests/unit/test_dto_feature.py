@@ -89,6 +89,21 @@ def test_feature_coord_optional() -> None:
     """coord=None 허용 (예: 좌표 없는 축제)."""
     feature = _make_place_feature(coord=None)
     assert feature.coord is None
+    assert feature.coord_precision_digits is None
+
+
+@pytest.mark.unit
+def test_feature_coord_precision_defaults_when_coord_present() -> None:
+    """좌표가 있으면 원천 precision 기본값 6을 보존한다."""
+    feature = _make_place_feature()
+    assert feature.coord_precision_digits == 6
+
+
+@pytest.mark.unit
+def test_feature_coord_precision_rejects_without_coord() -> None:
+    """좌표가 없으면 precision 신호도 없어야 한다."""
+    with pytest.raises(ValidationError, match="coord_precision_digits"):
+        _make_place_feature(coord=None, coord_precision_digits=6)
 
 
 # ── ADR-018: detail discriminator ────────────────────────────────────────

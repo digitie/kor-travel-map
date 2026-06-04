@@ -84,7 +84,7 @@ async def test_consistency_dedup_refresh_client_updates_queue_and_report(
 
     assert len(dedup.candidates) == 1
     assert dedup.queue.inserted == 1
-    assert report.severity_max == "WARN"
+    assert report.severity_max == "WARN", report.cases_json()
     assert report.summary["by_code"]["F4"] == 1
 
     async with AsyncSession(migrated_engine) as session:

@@ -85,6 +85,14 @@ class Feature(BaseModel):
     kind: FeatureKind
     name: str = Field(min_length=1)
     coord: Coordinate | None = None
+    coord_precision_digits: int | None = Field(
+        default=None,
+        ge=3,
+        le=8,
+        description=(
+            "좌표 원천 precision. coord가 있으면 기본 6자리, coord가 없으면 None."
+        ),
+    )
     geom: str | None = Field(
         default=None,
         description=(
@@ -171,6 +179,11 @@ class Feature(BaseModel):
     @model_validator(mode="after")
     def _check_detail_matches_kind(self) -> Feature:
         """ADR-018 — ``detail``은 ``kind``에 맞는 모델만 허용."""
+        if self.coord is None:
+            if self.coord_precision_digits is not None:
+                raise ValueError("coord가 없으면 coord_precision_digits도 None이어야 한다.")
+        elif self.coord_precision_digits is None:
+            self.coord_precision_digits = 6
         if self.detail is None:
             # price/weather는 detail=None 허용. 나머지는 detail 필수가 아닌 권장.
             return self

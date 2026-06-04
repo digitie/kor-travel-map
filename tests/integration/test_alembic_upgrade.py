@@ -116,7 +116,8 @@ async def test_alembic_creates_features_table(
     # 핵심 컬럼 존재 확인.
     for required in (
         "feature_id", "kind", "name", "category", "coord", "coord_5179",
-        "geom", "address", "detail", "status", "created_at", "updated_at",
+        "coord_precision_digits", "geom", "address", "detail", "status",
+        "created_at", "updated_at",
     ):
         assert required in columns, f"missing column: {required}"
 
@@ -140,6 +141,45 @@ async def test_alembic_coord_5179_is_generated_stored(
     # 스키마 한정으로 정규화한다 (예: ``x_extension.st_transform(coord, 5179)``).
     # 따라서 대소문자 무시하고 ``st_transform`` 참조만 확인 (ADR-008 + ADR-012).
     assert "st_transform" in (row.generation_expression or "").lower()
+
+
+async def test_alembic_coord_precision_trigger_defaults_for_coord(
+    pg_engine_with_migrations: AsyncEngine,
+) -> None:
+    """T-RV-16 — coord가 있으면 DB trigger가 precision 기본값을 보강."""
+    async with pg_engine_with_migrations.connect() as conn:
+        tx = await conn.begin()
+        try:
+            await conn.execute(
+                text(
+                    """
+                    INSERT INTO feature.features (
+                        feature_id, kind, name, category, coord
+                    ) VALUES (
+                        'feature:precision-trigger',
+                        'place',
+                        'precision trigger',
+                        '01070100',
+                        x_extension.ST_SetSRID(
+                            x_extension.ST_MakePoint(129.3320, 35.7900),
+                            4326
+                        )
+                    )
+                    """
+                )
+            )
+            row = (
+                await conn.execute(
+                    text(
+                        "SELECT coord_precision_digits "
+                        "FROM feature.features "
+                        "WHERE feature_id = 'feature:precision-trigger'"
+                    )
+                )
+            ).one()
+        finally:
+            await tx.rollback()
+    assert row.coord_precision_digits == 6
 
 
 async def test_alembic_creates_source_tables(

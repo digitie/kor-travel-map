@@ -300,7 +300,28 @@ CREATE INDEX idx_import_jobs_parent_created
 CREATE INDEX idx_dedup_pending_score
   ON ops.dedup_review_queue (total_score DESC)
   WHERE status='pending';
+
+-- dedup refresh 입력 keyset (T-RV-16)
+CREATE INDEX idx_features_dedup_refresh_keyset
+  ON feature.features (updated_at DESC, feature_id DESC)
+  WHERE deleted_at IS NULL AND status='active' AND coord IS NOT NULL;
 ```
+
+### 6.1 dedup refresh keyset
+
+T-RV-16 이전 dedup refresh 입력 조회는 `DISTINCT ON (feature_id)` 뒤
+`ORDER BY feature_id ... LIMIT :limit` 구조라, 같은 provider/dataset scope를 limit으로
+반복 실행하면 사전식 앞부분만 계속 재조회할 수 있었다. 이후 구조는
+`updated_at DESC, feature_id DESC` 정렬과 `(cursor_updated_at, cursor_feature_id)`
+row-tuple cursor를 사용한다.
+
+개선 효과:
+- **진행성**: 다음 페이지 조건이 `(updated_at, feature_id) < (:cursor_updated_at,
+  :cursor_feature_id)`라 같은 앞부분 반복 스캔을 피한다.
+- **master 선정 신호 보존**: `updated_at`과 `coord_precision_digits`를 함께 읽어
+  ADR-016 master 선정/운영 검토가 같은 입력을 쓴다.
+- **인덱스 보조**: `idx_features_dedup_refresh_keyset` partial index가 active,
+  좌표 보유 feature만 keyset 순서로 훑도록 돕는다.
 
 ## 7. JSONB 인덱싱
 

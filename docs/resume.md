@@ -1,5 +1,28 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-05 Codex 작업 메모 — T-RV-16 dedup refresh master 신호/keyset
+
+T-RV-16을 처리한다. `Feature` DTO와 `feature.features`에
+`coord_precision_digits`를 정식 계약으로 추가한다. 좌표가 있는 `Feature`는 기본
+precision 6을 갖고, 좌표가 없으면 precision도 `None`이어야 한다. DB는
+`feature.set_feature_coord_precision()` trigger와 `ck_features_coord_precision`으로
+같은 의미를 보강한다. 기존 좌표 row는 migration에서 6으로 backfill한다.
+
+`list_dedup_refresh_features`는 이제 `updated_at DESC, feature_id DESC` keyset cursor를
+받고, `idx_features_dedup_refresh_keyset` partial index를 사용하도록 설계한다.
+`DedupRefreshFeature`는 `updated_at`, `coord_precision_digits`,
+`as_master_candidate()`를 노출해 ADR-016 master 선정과 admin dedup 검토 UI가 같은
+신호를 공유할 수 있게 한다. Dagster maintenance config도
+`cursor_updated_at`/`cursor_feature_id`를 받을 수 있다.
+
+이번 작업 중 사용자 지시에 따라 코드 수정 원칙도 명시했다. 앞으로는 최소 코드 수정
+또는 임시 호환성보다 완성도, 최적 구조, 확장성, 안정성을 우선한다. 이 원칙은
+`SKILL.md`와 `docs/agent-guide.md`에 반영했다.
+
+다음 한 작업은 **T-RV-17(상태전이 가드)**, **T-RV-18/20(router error/schema
+정리)**, 또는 **T-RV-19/21(admin UI 지도/Dagster 선행 안정화)** 다.
+**T-RV-27은 production 레벨 hardening 전까지 계속 skip/deferred**다.
+
 ## 2026-06-05 Codex 작업 메모 — T-RV-15 scope resolver count/preview 분리
 
 T-RV-15를 처리한다. `count_features_matching_scope`는 더 이상 dry-run/count 용도로

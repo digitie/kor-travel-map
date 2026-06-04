@@ -104,6 +104,7 @@ async def test_load_bundle_inserts_and_roundtrips(
 
     # coord_5179 STORED generated (ADR-012) — 좌표 4326 일치
     assert row["coord_5179_srid"] == 5179
+    assert row["coord_precision_digits"] == bundle.feature.coord_precision_digits == 6
     assert abs(float(row["lon"]) - float(bundle.feature.coord.lon)) < 1e-6
     assert abs(float(row["lat"]) - float(bundle.feature.coord.lat)) < 1e-6
 

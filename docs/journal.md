@@ -2,6 +2,22 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-05 (codex) — T-RV-16 dedup refresh master 신호/keyset
+
+**작업**: PR#153~#179 리뷰 후속 MED 항목 중 T-RV-16을 반영한다.
+
+- **Schema/DTO**: `Feature.coord_precision_digits`와
+  `feature.features.coord_precision_digits`를 추가했다. DB trigger가 coord 보유 row의
+  기본 precision을 6으로 보강하고, coord가 없으면 precision을 `NULL`로 정리한다.
+- **Dedup refresh**: `DedupRefreshFeature`가 `updated_at`, `coord_precision_digits`,
+  `as_master_candidate()`를 노출한다.
+- **Keyset**: dedup refresh 조회는 `updated_at DESC, feature_id DESC` cursor와
+  `idx_features_dedup_refresh_keyset` partial index를 사용해 limit 반복 스캔을 피한다.
+- **Dagster config**: maintenance dedup refresh scope에서
+  `cursor_updated_at`/`cursor_feature_id`를 받을 수 있게 했다.
+- **정책 문서화**: 최소 수정/호환성보다 완성도, 최적 구조, 확장성, 안정성을 우선하는
+  코드 수정 원칙을 `SKILL.md`와 `docs/agent-guide.md`에 명시했다.
+
 ## 2026-06-05 (codex) — T-RV-15 scope resolver count/preview 분리
 
 **작업**: PR#153~#179 리뷰 후속 MED 항목 중 T-RV-15를 반영한다.

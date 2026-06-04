@@ -37,6 +37,7 @@ CREATE TABLE feature.features (
 
   -- 좌표 (양 좌표계 보유, ADR-012)
   coord                        geometry(Point, 4326),
+  coord_precision_digits       SMALLINT,               -- 원천 좌표 precision, coord 있으면 3~8
   coord_5179                   geometry(Point, 5179)
     GENERATED ALWAYS AS (
       CASE WHEN coord IS NULL THEN NULL
@@ -78,8 +79,29 @@ CREATE TABLE feature.features (
     coord IS NULL OR (
       ST_X(coord) BETWEEN 124.0 AND 132.0 AND ST_Y(coord) BETWEEN 33.0 AND 39.5
     )
+  ),
+  CONSTRAINT ck_features_coord_precision CHECK (
+    (coord IS NULL AND coord_precision_digits IS NULL)
+    OR (coord IS NOT NULL AND coord_precision_digits BETWEEN 3 AND 8)
   )
 );
+
+CREATE FUNCTION feature.set_feature_coord_precision() RETURNS trigger AS $$
+BEGIN
+  IF NEW.coord IS NULL THEN
+    NEW.coord_precision_digits := NULL;
+  ELSIF NEW.coord_precision_digits IS NULL THEN
+    NEW.coord_precision_digits := 6;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_features_coord_precision
+  BEFORE INSERT OR UPDATE OF coord, coord_precision_digits
+  ON feature.features
+  FOR EACH ROW
+  EXECUTE FUNCTION feature.set_feature_coord_precision();
 
 -- 표준 인덱스 (성능 설계 — docs/performance.md 참고)
 CREATE INDEX idx_features_coord_gist        ON feature.features USING GIST (coord)       WHERE deleted_at IS NULL;
@@ -87,6 +109,9 @@ CREATE INDEX idx_features_coord_5179_gist   ON feature.features USING GIST (coor
 CREATE INDEX idx_features_geom_gist         ON feature.features USING GIST (geom)        WHERE deleted_at IS NULL AND geom IS NOT NULL;
 CREATE INDEX idx_features_kind_category     ON feature.features (kind, category)         WHERE deleted_at IS NULL;
 CREATE INDEX idx_features_status_updated    ON feature.features (status, updated_at);
+CREATE INDEX idx_features_dedup_refresh_keyset
+  ON feature.features (updated_at DESC, feature_id DESC)
+  WHERE deleted_at IS NULL AND status='active' AND coord IS NOT NULL;
 CREATE INDEX idx_features_legal_dong_code   ON feature.features (legal_dong_code);
 CREATE INDEX idx_features_sigungu           ON feature.features (sigungu_code, kind)     WHERE deleted_at IS NULL;
 CREATE INDEX idx_features_parent            ON feature.features (parent_feature_id)      WHERE parent_feature_id IS NOT NULL;
@@ -105,8 +130,12 @@ CREATE INDEX idx_features_notice_valid
 **인덱스 설계 근거**:
 - `coord_gist` — 응답 직렬화용 좌표 추출, in-bounds 빠른 필터링.
 - `coord_5179_gist` — 반경 검색 핵심 인덱스 (ADR-012).
+- `coord_precision_digits` — provider 원천 좌표 신뢰도/정밀도 신호. `Feature` DTO와
+  trigger가 coord 보유 row의 기본값을 6으로 맞추고, coord 제거 시 NULL로 정리한다.
 - `geom_gist` — route LINESTRING / area MULTIPOLYGON 교차/포함 검색.
 - `kind_category WHERE deleted_at IS NULL` — `/features/in-bounds` 주된 필터.
+- `idx_features_dedup_refresh_keyset` — dedup refresh가 `(updated_at, feature_id)`
+  keyset으로 진행하며 같은 앞부분만 반복 조회하지 않도록 한다.
 - `name_trgm GIN` — pg_trgm 부분 문자열 검색 (검색 페이지).
 - 부분 인덱스 `(event_end)`, `(notice_valid)` — 진행중/유효 필터를 자주 사용.
 

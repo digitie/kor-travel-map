@@ -99,6 +99,8 @@ def test_consistency_dedup_refresh_job_executes_configured_scopes() -> None:
                                     "provider": "krheritage",
                                     "dataset_key": "krheritage_heritage_features",
                                     "limit": 50,
+                                    "cursor_updated_at": "2026-06-05T10:00:00+00:00",
+                                    "cursor_feature_id": "feature:cursor",
                                 },
                             }
                         ],
@@ -128,6 +130,8 @@ def test_consistency_dedup_refresh_job_executes_configured_scopes() -> None:
     assert client.pairs[0][0].provider == "knps"
     assert client.pairs[0][0].categories == ("01070100",)
     assert client.pairs[0][1].limit == 50
+    assert client.pairs[0][1].cursor_updated_at is not None
+    assert client.pairs[0][1].cursor_feature_id == "feature:cursor"
     assert client.pairs[0][2] is False
     assert client.siblings[0][0].provider == "mois"
     assert client.consistency_calls == [

@@ -122,6 +122,14 @@ class FeatureRow(Base):
             "ST_Y(coord) BETWEEN 33.0 AND 39.5)",
             name="features_coord_pair",
         ),
+        CheckConstraint(
+            "("
+            "coord IS NULL AND coord_precision_digits IS NULL"
+            ") OR ("
+            "coord IS NOT NULL AND coord_precision_digits BETWEEN 3 AND 8"
+            ")",
+            name="coord_precision",
+        ),
         Index("idx_features_coord_gist", "coord", postgresql_using="gist",
               postgresql_where=text("deleted_at IS NULL")),
         Index("idx_features_coord_5179_gist", "coord_5179",
@@ -151,6 +159,7 @@ class FeatureRow(Base):
 
     # 좌표 (ADR-012 — 양 좌표계 보유, coord_5179는 STORED generated).
     coord: Mapped[Any | None] = mapped_column(Geometry("POINT", srid=4326))
+    coord_precision_digits: Mapped[int | None] = mapped_column(SmallInteger)
     coord_5179: Mapped[Any | None] = mapped_column(
         Geometry("POINT", srid=5179),
         Computed(
