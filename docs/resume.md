@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-04 Codex 작업 메모 — T-RV-03 Dagster resource lifecycle
+
+T-RV-03을 처리한다. `krtour_map_client_resource`를 일반 return resource에서
+generator resource로 전환해 Dagster run/tick 종료 후 `AsyncEngine.dispose()`가
+반드시 호출되게 했다. Dagster resource teardown은 sync generator 경로이므로,
+teardown 지점에 이미 running event loop가 있으면 별도 thread에서 `asyncio.run()`으로
+`engine.dispose()`를 실행하고 예외를 호출자에게 다시 올린다.
+
+`packages/krtour-map-dagster/tests/test_resources.py`가 fake engine/fake client로
+DB 없이 lifecycle만 검증한다. 다음 한 작업은 **T-RV-04(Dagster provider public
+client/service key resource wiring)** 또는 **T-RV-05/11(D-6 run-now/claim lock)** 이다.
+**T-RV-27은 production 레벨 hardening 전까지 계속 skip/deferred**다.
+
 ## 2026-06-04 Codex 작업 메모 — T-RV-01/02 Dagster 운영 형상
 
 T-RV-01/02를 처리한다. Docker compose의 `dagster` 서비스는

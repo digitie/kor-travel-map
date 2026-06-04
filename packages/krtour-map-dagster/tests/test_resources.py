@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
 from io import BytesIO
+from typing import cast
 
 import pytest
+from dagster import build_init_resource_context
 from krtour.map.settings import KrtourMapSettings
 from pydantic import SecretStr
 
+from krtour.map_dagster import resources
 from krtour.map_dagster.resources import build_offline_upload_store_from_settings
 
 pytestmark = pytest.mark.filterwarnings(
@@ -19,6 +23,20 @@ pytestmark = pytest.mark.filterwarnings(
 class _FakeS3Client:
     def get_object(self, *, Bucket: str, Key: str) -> dict[str, BytesIO]:
         return {"Body": BytesIO(f"{Bucket}:{Key}".encode())}
+
+
+class _FakeEngine:
+    def __init__(self) -> None:
+        self.disposed = False
+
+    async def dispose(self) -> None:
+        self.disposed = True
+
+
+class _FakeClient:
+    def __init__(self, engine: _FakeEngine, *, settings: KrtourMapSettings) -> None:
+        self.engine = engine
+        self.settings = settings
 
 
 async def test_build_offline_upload_store_uses_offline_upload_bucket() -> None:
@@ -35,3 +53,24 @@ async def test_build_offline_upload_store_uses_offline_upload_bucket() -> None:
 
     assert store.bucket == "krtour-uploads"
     assert body == b"krtour-uploads:offline-uploads/u1/features.jsonl"
+
+
+async def test_krtour_map_client_resource_disposes_engine(monkeypatch: pytest.MonkeyPatch) -> None:
+    engine = _FakeEngine()
+    monkeypatch.setattr(resources, "make_async_engine", lambda _dsn: engine)
+    monkeypatch.setattr(resources, "AsyncKrtourMapClient", _FakeClient)
+
+    resource_fn = cast(
+        "Callable[[object], Iterator[_FakeClient]]",
+        resources.krtour_map_client_resource.resource_fn,
+    )
+    resource_iter = resource_fn(build_init_resource_context())
+    client = next(resource_iter)
+
+    assert client.engine is engine
+    assert engine.disposed is False
+
+    with pytest.raises(StopIteration):
+        next(resource_iter)
+
+    assert engine.disposed is True

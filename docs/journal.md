@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-04 (codex) — T-RV-03 Dagster resource lifecycle
+
+**작업**: PR#153~#179 리뷰 후속 HIGH 항목 중 T-RV-03을 반영한다.
+
+- **Resource lifecycle**: `krtour_map_client_resource`를 generator resource로 전환해
+  Dagster run/tick 종료 후 `AsyncEngine.dispose()`를 호출한다.
+- **Async teardown**: Dagster sync resource teardown 지점에 이미 event loop가 있으면
+  별도 thread에서 async dispose를 실행하고 예외를 다시 올린다.
+- **Tests**: fake engine/fake client 기반으로 DB 없이 resource 종료 시 dispose 호출을
+  검증한다.
+- **잔여**: T-RV-04 provider public client/service key resource wiring은 다음 Dagster
+  resource PR 후보로 남긴다.
+
 ## 2026-06-04 (codex) — T-RV-01/02 Dagster metadata DB + daemon split
 
 **작업**: PR#153~#179 리뷰 후속 HIGH 항목 중 T-RV-01/02를 반영한다.

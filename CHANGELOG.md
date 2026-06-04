@@ -5,6 +5,12 @@
 
 ## [Unreleased]
 
+### Ops — Dagster resource lifecycle (2026-06-04)
+
+- **FIXED**: `krtour_map_client` Dagster resource가 생성한 SQLAlchemy `AsyncEngine`을
+  run/tick 종료 후 `dispose()`하도록 generator resource로 전환했다.
+- **TEST**: fake engine/fake client 기반 resource teardown unit test를 추가했다.
+
 ### Ops — Dagster metadata DB and daemon split (2026-06-04)
 
 - **CHANGED**: Docker Dagster runtime을 단일 `dagster dev`에서 `dagster` webserver와

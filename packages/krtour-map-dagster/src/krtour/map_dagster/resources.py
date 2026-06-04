@@ -6,7 +6,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib
+import inspect
+import threading
+from collections.abc import Awaitable, Iterator
 from typing import Any, cast
 
 from dagster import InitResourceContext, resource
@@ -61,6 +65,42 @@ def create_s3_client_from_settings(settings: KrtourMapSettings) -> Any:
     return boto3.client("s3", **kwargs)
 
 
+async def _await_resource_teardown(awaitable: Awaitable[object]) -> None:
+    await awaitable
+
+
+def _run_async_resource_teardown(awaitable: Awaitable[object]) -> None:
+    """Dagster sync generator resource teardown에서 async cleanup을 실행한다."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        asyncio.run(_await_resource_teardown(awaitable))
+        return
+
+    raised: list[BaseException] = []
+
+    def _runner() -> None:
+        try:
+            asyncio.run(_await_resource_teardown(awaitable))
+        except BaseException as exc:  # pragma: no cover - 아래 re-raise 경로 검증
+            raised.append(exc)
+
+    thread = threading.Thread(
+        target=_runner,
+        name="krtour-map-dagster-resource-teardown",
+    )
+    thread.start()
+    thread.join()
+    if raised:
+        raise raised[0]
+
+
+def _dispose_async_engine(engine: Any) -> None:
+    dispose_result = engine.dispose()
+    if inspect.isawaitable(dispose_result):
+        _run_async_resource_teardown(cast("Awaitable[object]", dispose_result))
+
+
 @resource(description="admin offline upload 원본 파일을 읽는 RustFS/S3 store.")
 def offline_upload_store_resource(_context: InitResourceContext) -> S3ObjectStore:
     """Dagster ``offline_upload_store`` 기본 resource."""
@@ -68,8 +108,13 @@ def offline_upload_store_resource(_context: InitResourceContext) -> S3ObjectStor
 
 
 @resource(description="krtour-map app DB에 연결된 AsyncKrtourMapClient.")
-def krtour_map_client_resource(_context: InitResourceContext) -> AsyncKrtourMapClient:
+def krtour_map_client_resource(
+    _context: InitResourceContext,
+) -> Iterator[AsyncKrtourMapClient]:
     """Dagster ``krtour_map_client`` 기본 resource."""
     settings = KrtourMapSettings()
     engine = make_async_engine(settings.pg_dsn)
-    return AsyncKrtourMapClient(engine, settings=settings)
+    try:
+        yield AsyncKrtourMapClient(engine, settings=settings)
+    finally:
+        _dispose_async_engine(engine)
