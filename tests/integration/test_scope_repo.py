@@ -136,6 +136,47 @@ async def test_resolve_feature_ids_filters_existing_and_preserves_order(
     assert result.provider_datasets[0].feature_count == 2
 
 
+async def test_count_feature_ids_excludes_deleted_features_from_provider_counts(
+    migrated_session: AsyncSession,
+) -> None:
+    active = await _load(migrated_session, "SCOPE-ID-COUNT-ACTIVE", sigungu_code="11110")
+    deleted = await _load(migrated_session, "SCOPE-ID-COUNT-DELETED", sigungu_code="11140")
+    await migrated_session.execute(
+        text(
+            """
+            UPDATE feature.features
+            SET status = 'inactive',
+                deleted_at = now()
+            WHERE feature_id = :feature_id
+            """
+        ),
+        {"feature_id": deleted.feature.feature_id},
+    )
+    await migrated_session.flush()
+
+    result = await scope_repo.count_features_matching_scope(
+        migrated_session,
+        {
+            "type": "feature_ids",
+            "feature_ids": [
+                active.feature.feature_id,
+                deleted.feature.feature_id,
+            ],
+        },
+        preview_limit=10,
+    )
+
+    assert result.feature_ids == (active.feature.feature_id,)
+    assert result.feature_count == 1
+    assert result.provider_datasets == (
+        scope_repo.ProviderDatasetScope(
+            provider=active.source_record.provider,
+            dataset_key=active.source_record.dataset_key,
+            feature_count=1,
+        ),
+    )
+
+
 async def test_resolve_center_radius_uses_coord_5179_distance(
     migrated_session: AsyncSession,
 ) -> None:
@@ -167,6 +208,49 @@ async def test_resolve_center_radius_uses_coord_5179_distance(
     assert result.matched_scope()["provider_datasets"][0]["feature_count"] == 1
 
 
+async def test_count_center_radius_uses_limited_preview_and_full_counts(
+    migrated_session: AsyncSession,
+) -> None:
+    bundles = [
+        await _load(
+            migrated_session,
+            f"SCOPE-RADIUS-COUNT-{index}",
+            lon="126.9239",
+            lat="37.5263",
+            sigungu_code="11560",
+        )
+        for index in range(3)
+    ]
+
+    result = await scope_repo.count_features_matching_scope(
+        migrated_session,
+        {
+            "type": "center_radius",
+            "center": {"lon": 126.9239, "lat": 37.5263},
+            "radius_km": 1.0,
+        },
+        preview_limit=1,
+    )
+
+    assert result.feature_count == 3
+    assert len(result.feature_ids) == 1
+    assert set(result.feature_ids) <= {
+        bundle.feature.feature_id for bundle in bundles
+    }
+    assert result.provider_datasets == (
+        scope_repo.ProviderDatasetScope(
+            provider=bundles[0].source_record.provider,
+            dataset_key=bundles[0].source_record.dataset_key,
+            feature_count=3,
+        ),
+    )
+    matched = result.matched_scope()
+    assert matched["feature_count"] == 3
+    assert matched["feature_preview_count"] == 1
+    assert matched["feature_preview_limit"] == 1
+    assert matched["feature_preview_truncated"] is True
+
+
 async def test_resolve_bbox_and_provider_dataset(
     migrated_session: AsyncSession,
 ) -> None:
@@ -194,6 +278,45 @@ async def test_resolve_bbox_and_provider_dataset(
             feature_count=1,
         ),
     )
+
+
+async def test_count_provider_dataset_uses_limited_preview_and_full_count(
+    migrated_session: AsyncSession,
+) -> None:
+    bundles = [
+        await _load(
+            migrated_session,
+            f"SCOPE-PROVIDER-COUNT-{index}",
+            sigungu_code="11560",
+        )
+        for index in range(3)
+    ]
+    provider = bundles[0].source_record.provider
+    dataset_key = bundles[0].source_record.dataset_key
+
+    result = await scope_repo.count_features_matching_scope(
+        migrated_session,
+        {
+            "type": "provider_dataset",
+            "provider": provider,
+            "dataset_key": dataset_key,
+        },
+        preview_limit=1,
+    )
+
+    assert result.feature_count == 3
+    assert len(result.feature_ids) == 1
+    assert set(result.feature_ids) <= {
+        bundle.feature.feature_id for bundle in bundles
+    }
+    assert result.provider_datasets == (
+        scope_repo.ProviderDatasetScope(
+            provider=provider,
+            dataset_key=dataset_key,
+            feature_count=3,
+        ),
+    )
+    assert result.matched_scope()["feature_preview_truncated"] is True
 
 
 async def test_resolve_sigungu_by_radius_uses_injected_kraddr_resolver(

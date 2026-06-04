@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-05 (codex) — T-RV-15 scope resolver count/preview 분리
+
+**작업**: PR#153~#179 리뷰 후속 MED 항목 중 T-RV-15를 반영한다.
+
+- **Dry-run count**: `count_features_matching_scope`가 공간/시군구/provider/feature id
+  scope에서 전체 feature row 대신 `count(*)` 계열 SQL로 총 match 수를 계산한다.
+- **Preview 상한**: dry-run matched scope는 기본 1000개 feature preview만 보존하고,
+  잘린 경우 `feature_preview_count`, `feature_preview_limit`,
+  `feature_preview_truncated`를 기록한다.
+- **전체 집계 유지**: provider/dataset fanout과 sigungu code는 preview가 아니라 전체
+  scope 기준 별도 SQL로 집계한다.
+- **테스트**: `preview_limit=1`에서도 전체 `feature_count`와 provider/dataset
+  집계가 3개를 유지하는 PostGIS integration test를 추가한다.
+
 ## 2026-06-04 (codex) — T-RV-14 dedup merge review row 잠금
 
 **작업**: PR#153~#179 리뷰 후속 MED 항목 중 T-RV-14를 반영한다.
