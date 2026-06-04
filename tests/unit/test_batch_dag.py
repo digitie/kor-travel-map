@@ -301,7 +301,7 @@ def _job(
     )
 
 
-def _session() -> "AsyncSession":
+def _session() -> AsyncSession:
     return cast("AsyncSession", object())
 
 
