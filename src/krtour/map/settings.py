@@ -131,6 +131,32 @@ class KrtourMapSettings(BaseSettings):
         ),
     )
 
+    # ── Provider API credentials (Dagster resource wiring, ADR-044/045) ──
+    data_go_kr_service_key: SecretStr | None = Field(
+        default=None,
+        description=(
+            "data.go.kr gateway 공통 service key. source env는 "
+            "``DATA_GO_KR_SERVICE_KEY``이며 datagokr/krheritage/MOIS 계열 provider "
+            "resource가 참조한다."
+        ),
+    )
+    opinet_api_key: SecretStr | None = Field(
+        default=None,
+        description="OpiNet certkey. source env는 ``OPINET_API_KEY``.",
+    )
+    krex_ex_api_key: SecretStr | None = Field(
+        default=None,
+        description="한국도로공사 EX OpenAPI key. source env는 ``KEX_GO_API_KEY``.",
+    )
+    krex_go_api_key: SecretStr | None = Field(
+        default=None,
+        description=(
+            "KREX data.go.kr standard/openapi key. source env는 "
+            "``DATA_GO_KR_SERVICE_KEY``이며 ``data_go_kr_service_key``와 같은 값일 수 "
+            "있다."
+        ),
+    )
+
     # ── 로깅 ─────────────────────────────────────────────────────────────
     log_level: str = Field(
         default="INFO",
@@ -154,8 +180,5 @@ class KrtourMapSettings(BaseSettings):
     )
 
     # Sprint 2~5에서 추가될 필드 (현 시점 미정의):
-    #   - provider API keys (KMA_API_KEY, VISITKOREA_SERVICE_KEY,
-    #     KNPS_SERVICE_KEY, MOIS_*, KAKAO_LOCAL_REST_API_KEY, ...)
-    #     자세히는 ``docs/external-apis.md §2 환경변수 카탈로그``.
     #   - settings for Record Linkage 임계값 override (ADR-016).
     #   - settings for opening_hours 시간대 정책 (ADR-019).

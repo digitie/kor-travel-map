@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### Ops — Dagster provider resource guard (2026-06-04)
+
+- **NEW**: feature-load provider record key 9개에 기본 guard resource를 등록했다.
+  guard는 provider package, dataset, `KRTOUR_MAP_*` credential env, source env를
+  안내하고 secret 값은 노출하지 않는다.
+- **NEW**: `KrtourMapSettings`에 Dagster provider resource용
+  `KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY`, `KRTOUR_MAP_OPINET_API_KEY`,
+  `KRTOUR_MAP_KREX_EX_API_KEY`, `KRTOUR_MAP_KREX_GO_API_KEY` 설정을 추가했다.
+- **DOCS**: 실제 provider public client live fetch wiring은 T-RV-04b 후속으로 남기고,
+  현재 기본 guard는 비실행 상태임을 `krtour-map-dagster` README에 명시했다.
+
 ### Ops — Dagster resource lifecycle (2026-06-04)
 
 - **FIXED**: `krtour_map_client` Dagster resource가 생성한 SQLAlchemy `AsyncEngine`을

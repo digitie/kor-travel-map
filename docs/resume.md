@@ -1,5 +1,21 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-04 Codex 작업 메모 — T-RV-04a Dagster provider resource guard
+
+T-RV-04의 1차 guard를 처리한다. provider record resource key 9개에 대해 기본
+`defs`가 generic `_missing_resource`를 등록하던 상태를 제거하고, provider package,
+dataset, `KRTOUR_MAP_*` credential env, source env를 설명하는 guard resource를
+등록한다. guard는 resource materialize 시 명확한 `RuntimeError`를 내며, secret 값은
+메시지에 포함하지 않는다.
+
+`KrtourMapSettings`에는 `data_go_kr_service_key`, `opinet_api_key`,
+`krex_ex_api_key`, `krex_go_api_key`를 추가했다. `.env.example`, `scripts/load-env.sh`,
+`docker-compose.yml`은 기존 provider repo env(`DATA_GO_KR_SERVICE_KEY`,
+`OPINET_API_KEY`, `KEX_GO_API_KEY` 등)를 main settings env로 전달한다. 다음 한 작업은
+**T-RV-04b(provider public client live fetch wiring)** 또는 **T-RV-05/11(D-6
+run-now/claim lock)** 이다. **T-RV-27은 production 레벨 hardening 전까지 계속
+skip/deferred**다.
+
 ## 2026-06-04 Codex 작업 메모 — T-RV-03 Dagster resource lifecycle
 
 T-RV-03을 처리한다. `krtour_map_client_resource`를 일반 return resource에서

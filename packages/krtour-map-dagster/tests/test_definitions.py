@@ -6,6 +6,7 @@ import pytest
 from dagster import DefaultScheduleStatus
 
 from krtour.map_dagster.definitions import defs
+from krtour.map_dagster.resources import PROVIDER_RECORD_RESOURCE_SPECS
 from krtour.map_dagster.schedules import (
     FEATURE_LOAD_SCHEDULE_SPECS,
     FEATURE_LOAD_SCHEDULES,
@@ -61,6 +62,17 @@ def test_offline_upload_load_default_resources_registered() -> None:
     )
     assert defs.get_repository_def().get_top_level_resources()["krtour_map_client"]
     assert defs.get_repository_def().get_top_level_resources()["offline_upload_store"]
+
+
+def test_feature_load_provider_guard_resources_registered() -> None:
+    top_level_resources = defs.get_repository_def().get_top_level_resources()
+
+    for spec in PROVIDER_RECORD_RESOURCE_SPECS:
+        resource_def = top_level_resources[spec.resource_key]
+        assert resource_def.description
+        assert "provider record guard" in resource_def.description
+
+    assert top_level_resources["reverse_geocoder"]
 
 
 def test_feature_load_schedules_registered_with_kst_cron() -> None:
