@@ -12,6 +12,7 @@ import unicodedata
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any, Final, Literal
 
 from sqlalchemy import text
@@ -140,6 +141,7 @@ class DedupReviewRow:
     reviewed_by: str | None
     reviewed_at: datetime | None
     created_at: datetime
+    total_score_cursor: str | None = None
 
 
 @dataclass(frozen=True)
@@ -699,7 +701,7 @@ WHERE (
         CAST(:cursor_review_key AS text)
     )
   )
-ORDER BY total_score DESC, review_key DESC
+ORDER BY total_score DESC, review_key::text DESC
 LIMIT :limit_plus_one
 """
 
@@ -724,8 +726,9 @@ def _dedup_cursor_params(cursor: str | None) -> dict[str, Any]:
     if not payload:
         return {"cursor_score": None, "cursor_review_key": None}
     try:
-        score = float(payload["total_score"])
-    except (KeyError, TypeError, ValueError) as exc:
+        score = str(payload["total_score"])
+        Decimal(score)
+    except (KeyError, TypeError, ValueError, InvalidOperation) as exc:
         raise ValueError("invalid dedup review cursor") from exc
     return {"cursor_score": score, "cursor_review_key": payload["review_key"]}
 
@@ -734,7 +737,11 @@ def _encode_dedup_cursor(item: DedupReviewRow) -> str:
     raw = json.dumps(
         {
             "review_key": item.review_key,
-            "total_score": item.total_score,
+            "total_score": (
+                item.total_score_cursor
+                if item.total_score_cursor is not None
+                else str(Decimal(str(item.total_score)))
+            ),
         },
         separators=(",", ":"),
     ).encode("utf-8")
@@ -766,6 +773,7 @@ def _dedup_review_row(row: Any) -> DedupReviewRow:
         name_score=_score(row["name_score"]),
         spatial_score=_score(row["spatial_score"]),
         category_score=_score(row["category_score"]),
+        total_score_cursor=str(row["total_score"]),
         feature_a=_dedup_feature(row, "a"),
         feature_b=_dedup_feature(row, "b"),
         distance_m=(

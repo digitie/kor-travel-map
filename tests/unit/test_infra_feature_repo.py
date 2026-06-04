@@ -201,11 +201,12 @@ def test_feature_search_cursor_round_trips_score_and_id_modes() -> None:
         marker_color="P-01",
         status="active",
         score=0.95,
+        score_cursor="0.9500000476837158",
     )
 
     score_cursor = feature_repo._encode_search_cursor(row, q_enabled=True)
     assert feature_repo._search_cursor_params(score_cursor, q_enabled=True) == {
-        "cursor_score": 0.95,
+        "cursor_score": "0.9500000476837158",
         "cursor_feature_id": "feature-1",
     }
 

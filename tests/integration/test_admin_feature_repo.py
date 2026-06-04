@@ -14,6 +14,7 @@ from krtour.map.dto import Address, Coordinate, Feature, PlaceDetail
 from krtour.map.infra.admin_feature_repo import (
     deactivate_feature,
     list_admin_features,
+    list_dedup_reviews,
     set_dedup_review_decision,
 )
 from krtour.map.infra.feature_repo import upsert_feature
@@ -227,3 +228,64 @@ async def test_dedup_review_decision_updates_pending_only(
         decision="ignored",
     )
     assert unchanged is False
+
+
+async def test_list_dedup_reviews_cursor_walks_same_score_without_gaps(
+    migrated_session: AsyncSession,
+) -> None:
+    session = migrated_session
+    for feature_id in (
+        "feature-admin-cursor-a",
+        "feature-admin-cursor-b",
+        "feature-admin-cursor-c",
+        "feature-admin-cursor-d",
+    ):
+        session.add(_feature_row(feature_id, name=feature_id))
+    await session.flush()
+    reviews = [
+        DedupReviewQueueRow(
+            review_key="00000000-0000-0000-0000-000000000003",
+            feature_id_a="feature-admin-cursor-a",
+            feature_id_b="feature-admin-cursor-b",
+            total_score=Decimal("90.01"),
+            name_score=95,
+            spatial_score=80,
+            category_score=100,
+        ),
+        DedupReviewQueueRow(
+            review_key="00000000-0000-0000-0000-000000000002",
+            feature_id_a="feature-admin-cursor-a",
+            feature_id_b="feature-admin-cursor-c",
+            total_score=Decimal("90.01"),
+            name_score=94,
+            spatial_score=80,
+            category_score=100,
+        ),
+        DedupReviewQueueRow(
+            review_key="00000000-0000-0000-0000-000000000001",
+            feature_id_a="feature-admin-cursor-a",
+            feature_id_b="feature-admin-cursor-d",
+            total_score=Decimal("90.01"),
+            name_score=93,
+            spatial_score=80,
+            category_score=100,
+        ),
+    ]
+    session.add_all(reviews)
+    await session.flush()
+
+    seen: list[str] = []
+    cursor: str | None = None
+    for _ in range(3):
+        page = await list_dedup_reviews(session, page_size=1, cursor=cursor)
+        assert len(page.items) == 1
+        assert page.items[0].total_score_cursor == "90.01"
+        seen.append(page.items[0].review_key)
+        cursor = page.next_cursor
+
+    assert seen == [
+        "00000000-0000-0000-0000-000000000003",
+        "00000000-0000-0000-0000-000000000002",
+        "00000000-0000-0000-0000-000000000001",
+    ]
+    assert cursor is None
