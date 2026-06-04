@@ -39,7 +39,7 @@ from sqlalchemy import text
 from krtour.map.infra.advisory_lock import try_advisory_lock
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -53,6 +53,8 @@ __all__ = [
     "update_import_job_payload",
     "claim_next_import_job",
     "heartbeat_import_job",
+    "attach_import_jobs_to_batch",
+    "list_import_jobs_by_ids",
     "finish_import_job",
     "recover_stale_running_jobs",
 ]
@@ -138,10 +140,32 @@ FROM ops.import_jobs
 WHERE job_id = CAST(:job_id AS uuid)
 """
 
+_LIST_JOBS_BY_IDS_SQL: Final[str] = f"""
+WITH ids AS (
+    SELECT value::uuid AS job_id
+    FROM jsonb_array_elements_text(CAST(:job_ids AS jsonb))
+)
+SELECT {_RETURN_COLUMNS}
+FROM ops.import_jobs
+WHERE job_id IN (SELECT job_id FROM ids)
+"""
+
 _UPDATE_PAYLOAD_SQL: Final[str] = f"""
 UPDATE ops.import_jobs
 SET payload = CAST(:payload AS jsonb)
 WHERE job_id = CAST(:job_id AS uuid)
+RETURNING {_RETURN_COLUMNS}
+"""
+
+_ATTACH_BATCH_SQL: Final[str] = f"""
+WITH ids AS (
+    SELECT value::uuid AS job_id
+    FROM jsonb_array_elements_text(CAST(:job_ids AS jsonb))
+)
+UPDATE ops.import_jobs
+SET load_batch_id = CAST(:load_batch_id AS uuid),
+    parent_job_id = CAST(:parent_job_id AS uuid)
+WHERE job_id IN (SELECT job_id FROM ids)
 RETURNING {_RETURN_COLUMNS}
 """
 
@@ -257,6 +281,23 @@ async def get_import_job(session: AsyncSession, job_id: str) -> ImportJob | None
     return _row_to_job(row) if row is not None else None
 
 
+async def list_import_jobs_by_ids(
+    session: AsyncSession,
+    job_ids: Sequence[str],
+) -> tuple[ImportJob, ...]:
+    """``job_ids``에 해당하는 import job 목록을 조회한다.
+
+    DB 반환 순서는 보장하지 않으므로 호출자가 필요 시 입력 순서로 재정렬한다.
+    """
+    if not job_ids:
+        return ()
+    result = await session.execute(
+        text(_LIST_JOBS_BY_IDS_SQL),
+        {"job_ids": json.dumps(list(job_ids))},
+    )
+    return tuple(_row_to_job(row) for row in result)
+
+
 async def update_import_job_payload(
     session: AsyncSession,
     job_id: str,
@@ -270,6 +311,27 @@ async def update_import_job_payload(
     )
     row = result.one_or_none()
     return _row_to_job(row) if row is not None else None
+
+
+async def attach_import_jobs_to_batch(
+    session: AsyncSession,
+    job_ids: Sequence[str],
+    *,
+    load_batch_id: str,
+    parent_job_id: str,
+) -> tuple[ImportJob, ...]:
+    """기존 import job들을 T-200 load batch root 아래 child로 연결한다."""
+    if not job_ids:
+        return ()
+    result = await session.execute(
+        text(_ATTACH_BATCH_SQL),
+        {
+            "job_ids": json.dumps(list(job_ids)),
+            "load_batch_id": load_batch_id,
+            "parent_job_id": parent_job_id,
+        },
+    )
+    return tuple(_row_to_job(row) for row in result)
 
 
 async def claim_next_import_job(session: AsyncSession) -> ImportJob | None:

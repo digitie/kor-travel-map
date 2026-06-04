@@ -7,6 +7,7 @@ from typing import Any, Final, cast
 from dagster import Definitions, ResourceDefinition, resource
 
 from .assets import FEATURE_LOAD_ASSETS
+from .batch_dag import BATCH_DAG_JOBS
 from .maintenance import MAINTENANCE_JOBS, MAINTENANCE_SCHEDULES
 from .offline_uploads import OFFLINE_UPLOAD_JOBS
 from .resources import krtour_map_client_resource, offline_upload_store_resource
@@ -78,6 +79,7 @@ defs = Definitions(
         [
             *FEATURE_LOAD_JOBS,
             *FEATURE_UPDATE_JOBS,
+            *BATCH_DAG_JOBS,
             *MAINTENANCE_JOBS,
             *OFFLINE_UPLOAD_JOBS,
         ],

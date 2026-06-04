@@ -1,5 +1,22 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-04 Codex 작업 메모 — T-200 Batch DAG + 정합성 게이트
+
+T-205d의 `load_batch_id`/`parent_job_id` 컬럼 위에 T-200 batch gate를 연결했다.
+`src/krtour/map/infra/batch_dag.py`는 기존 provider/offline 적재가 만든 실제
+`ops.import_jobs.job_id`를 `child_job_ids`로 받아 root `full_load_batch` 아래 묶고,
+child가 모두 `done`일 때만 `consistency_check`를 실행한다. `severity_max=ERROR`이면
+root/gate job을 `failed`로 닫고 `mv_refresh`를 만들지 않는다. `OK/WARN`이면
+`mv_refresh` 추적 job을 만들며, 현재 운영 MV 카탈로그가 없으면
+`skipped:no_materialized_views`로 명확히 기록한다.
+
+Dagster package에는 `full_load_batch_consistency_gate` job을 추가했고,
+`AsyncKrtourMapClient.run_batch_dag_consistency_gate(...)`로 DB transaction을 소유한다.
+검증은 Dagster unit/definitions `7 passed`, PostGIS integration
+`tests/integration/test_batch_dag.py tests/integration/test_jobs_repo.py` `14 passed`,
+targeted `ruff`, targeted `mypy`로 확인했다. 다음 한 작업은 **T-201b 정합성 Phase 2
+범위 재정의/구현**이며, ADR-045 잔여가 닫히면 T-212 전체점검으로 넘어간다.
+
 ## 2026-06-04 Codex 작업 메모 — T-209b run-admin-stack 안정화
 
 PR#182 머지 후 서버를 재기동하는 과정에서 `scripts/run-admin-stack.sh`가 Next ready

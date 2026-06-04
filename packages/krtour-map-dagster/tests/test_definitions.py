@@ -42,6 +42,9 @@ def test_feature_update_job_and_sensors_registered() -> None:
     assert defs.get_job_def("consistency_dedup_refresh").name == (
         "consistency_dedup_refresh"
     )
+    assert defs.get_job_def("full_load_batch_consistency_gate").name == (
+        "full_load_batch_consistency_gate"
+    )
     assert defs.get_job_def("offline_upload_load").name == "offline_upload_load"
     assert defs.resolve_sensor_def("feature_update_request_queue_sensor").name == (
         "feature_update_request_queue_sensor"

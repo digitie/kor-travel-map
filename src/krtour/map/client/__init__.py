@@ -46,6 +46,12 @@ from krtour.map.enrichment import (
     apply_place_phone_enrichment,
     find_place_phone_candidates,
 )
+from krtour.map.infra.batch_dag import (
+    BatchDagRunResult,
+)
+from krtour.map.infra.batch_dag import (
+    run_batch_dag_consistency_gate as repo_run_batch_dag_consistency_gate,
+)
 from krtour.map.infra.consistency import (
     DEDUP_PENDING_WARN_THRESHOLD,
     ConsistencyReport,
@@ -147,6 +153,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "AsyncKrtourMapClient",
+    "BatchDagRunResult",
     "DedupRefreshResult",
     "DedupSyncResult",
     "OfflineUploadColumnMapping",
@@ -748,6 +755,38 @@ class AsyncKrtourMapClient:
                 persist=persist,
                 sample_limit=sample_limit,
                 dedup_pending_threshold=dedup_pending_threshold,
+            )
+
+    async def run_batch_dag_consistency_gate(
+        self,
+        *,
+        child_job_ids: Sequence[str] = (),
+        load_batch_id: str | None = None,
+        root_kind: str = "full_load_batch",
+        root_payload: Mapping[str, Any] | None = None,
+        dagster_run_id: str | None = None,
+        plan_only: bool = False,
+        consistency_persist: bool = True,
+        sample_limit: int = 20,
+        dedup_pending_threshold: int = DEDUP_PENDING_WARN_THRESHOLD,
+        materialized_views: Sequence[str] = (),
+        mv_refresh_strategy: str = "swap",
+    ) -> BatchDagRunResult:
+        """T-200 root/child import job batch와 consistency gate를 실행한다."""
+        async with self._session_factory() as session, session.begin():
+            return await repo_run_batch_dag_consistency_gate(
+                session,
+                child_job_ids=child_job_ids,
+                load_batch_id=load_batch_id,
+                root_kind=root_kind,
+                root_payload=root_payload,
+                dagster_run_id=dagster_run_id,
+                plan_only=plan_only,
+                consistency_persist=consistency_persist,
+                sample_limit=sample_limit,
+                dedup_pending_threshold=dedup_pending_threshold,
+                materialized_views=materialized_views,
+                mv_refresh_strategy=mv_refresh_strategy,
             )
 
     async def merge_dedup_review(

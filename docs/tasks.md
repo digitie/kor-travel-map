@@ -4,12 +4,11 @@
 
 ## 진행 중
 
-**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#180(다중 agent review
-T-RV 백로그 문서화 + main RED 보정)까지 merged. 현재 작업은 admin UI #9 선행
-T-208i(CSV/TSV offline upload validation + column mapping wizard)다. T-208i 머지
-후에는 ADR-045 후속 중 batch/root job 기반을 막는 T-205d → T-200/T-201b 순으로
-진행하고, ADR-045 관련 잔여 task가 닫히면 T-212 전체점검 묶음으로 넘어간다.
-T-207b는 사용자 결정에 따라 구현하지 않는다.
+**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#183(T-209b admin stack runner
+안정화)까지 merged. 현재 작업은 T-200 Batch DAG + 정합성 게이트다. T-200 머지 후
+ADR-045 잔여(T-201b 정합성 Phase 2, T-209b Dagster metadata DB 분리/init, T-209
+Docker/daemon polish)를 닫고, ADR-045 관련 잔여 task가 닫히면 T-212 전체점검 묶음으로
+넘어간다. T-207b는 사용자 결정에 따라 구현하지 않는다.
 
 ### 현재 기준 보강 필요 체크포인트 (2026-06-03)
 
@@ -341,14 +340,20 @@ sensor 멱등/retry, asset materialize/RetryPolicy, dagster deps. (리포트 §2
 
 ## Sprint 5 운영 진입 직전 (kraddr-geo 패턴 미러)
 
-- [ ] T-200 — **Batch DAG + 정합성 게이트** (kraddr-geo ADR-017 미러)
+- [x] T-200 — **Batch DAG + 정합성 게이트** (kraddr-geo ADR-017 미러)
   - **ADR-045**: Dagster는 **krtour-map 소유**(TripMate 아님). asset 작성은
     krtour-map, TripMate는 OpenAPI queue 제어만. 상세 T-208(`adr045-standalone-plan.md`).
   - `ops.import_jobs`에 `load_batch_id UUID`, `parent_job_id UUID` 컬럼 추가
     (T-205d 완료, alembic `0012_import_jobs_batch_columns`)
-  - root job → child source loads → consistency_check gate → severity!=ERROR →
-    mv_refresh (`strategy='swap'`)
-  - phase별 중단/재개 (`PLAN_ONLY=1` preflight 포함)
+  - `infra.batch_dag.run_batch_dag_consistency_gate` + Dagster
+    `full_load_batch_consistency_gate` job 구현. 기존 provider/offline 적재가 만든
+    실제 import job id를 `child_job_ids`로 받아 root batch 아래 연결하고, child가 모두
+    `done`일 때만 `consistency_check`를 실행한다.
+  - `severity_max=ERROR`이면 `mv_refresh`를 만들지 않고 root/gate job을 `failed`로
+    닫는다. `OK/WARN`이면 `mv_refresh` job을 만들고, 현재 MV 카탈로그가 없으면
+    `skipped:no_materialized_views` payload로 명시 기록한다.
+  - `plan_only=true`는 DB write 없이 child job 존재 여부를 확인한다. 실제 phase stop/resume
+    UI/API는 T-212 admin 전체점검에서 화면/운영 UX와 함께 보강한다.
 - [~] T-201 — **`ops.feature_consistency_reports` 도입** (T-201a Phase 1 ✅ 2026-05-29: alembic 0003 + `infra/consistency.py` F1~F3 관측; T-201b Phase 2 = F4~F8 + Dagster 게이트, Sprint 5)
   - 컬럼: `report_id UUID PK, batch_id UUID, started_at, finished_at,
     severity_max TEXT, cases JSONB, summary JSONB`
