@@ -11,9 +11,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
+from krtour.map.infra.advisory_lock import try_advisory_lock
 from krtour.map.infra.feature_update_repo import (
+    FeatureUpdateLockBusy,
     FeatureUpdateRequest,
     claim_next_update_request,
+    feature_update_scope_advisory_key,
     finish_update_request,
     set_update_request_matched_scope,
     start_update_request,
@@ -431,6 +434,32 @@ async def execute_feature_update_request(
     sigungu_resolver: SigunguByRadiusResolver | None = None,
 ) -> FeatureUpdateExecutionResult:
     """이미 claim됐거나 queued인 request 1건을 실행한다."""
+    scope_lock_key = feature_update_scope_advisory_key(
+        scope_type=request.scope_type,
+        scope=request.scope,
+        providers=request.providers,
+        dataset_keys=request.dataset_keys,
+    )
+    async with try_advisory_lock(session, scope_lock_key) as acquired:
+        if not acquired:
+            raise FeatureUpdateLockBusy(lock_key=scope_lock_key)
+        return await _execute_feature_update_request_locked(
+            session,
+            request,
+            runner=runner,
+            dagster_run_id=dagster_run_id,
+            sigungu_resolver=sigungu_resolver,
+        )
+
+
+async def _execute_feature_update_request_locked(
+    session: AsyncSession,
+    request: FeatureUpdateRequest,
+    *,
+    runner: ProviderDatasetRefreshRunner,
+    dagster_run_id: str | None,
+    sigungu_resolver: SigunguByRadiusResolver | None,
+) -> FeatureUpdateExecutionResult:
     started = await start_update_request(
         session, request.request_id, dagster_run_id=dagster_run_id
     )

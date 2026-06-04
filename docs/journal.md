@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-04 (codex) — T-RV-05/11 feature update lock 경합
+
+**작업**: PR#153~#179 리뷰 후속 HIGH 항목 중 T-RV-05/11을 반영한다.
+
+- **run-now lock**: `run_mode=now` 생성/재큐잉이 동일 scope advisory lock 점유를
+  감지하면 `409 LOCK_BUSY`로 응답한다. 응답에는 `Retry-After: 15`와
+  `details.retry_after_seconds=15`를 포함한다.
+- **Executor scope lock**: feature update executor가 실행 중
+  `feature_update_scope_advisory_key(...)` 기반 scope lock을 보유해 API preflight가
+  실제 실행 경합을 감지한다.
+- **Queue claim**: `claim_next_update_request`가 queue advisory lock 경합을
+  `FeatureUpdateQueueLockBusy` 예외로 올려 빈 큐 `None`과 구분한다.
+- **Tests**: admin router unit, PostGIS queue/scope lock integration, executor scope
+  lock 보유 integration test로 회귀를 잠갔다.
+
 ## 2026-06-04 (codex) — T-RV-04a Dagster provider resource guard
 
 **작업**: PR#153~#179 리뷰 후속 HIGH 항목 중 T-RV-04의 1차 guard를 반영한다.

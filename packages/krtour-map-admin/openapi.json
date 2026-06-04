@@ -4723,6 +4723,9 @@
             },
             "description": "Successful Response"
           },
+          "409": {
+            "description": "run_mode=now 요청의 동일 scope advisory lock 경합"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -4896,7 +4899,7 @@
             "description": "request_id 없음"
           },
           "409": {
-            "description": "이미 running 상태"
+            "description": "이미 running 상태 또는 동일 scope lock 경합"
           },
           "422": {
             "content": {

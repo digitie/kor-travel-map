@@ -20,6 +20,7 @@ from krtour.map.geocoding import (
     resolve_sigungu_by_radius,
 )
 from krtour.map.infra.feature_update_repo import (
+    FeatureUpdateLockBusy,
     FeatureUpdateRequest,
     FeatureUpdateRequestPage,
     FeatureUpdateRequestPreview,
@@ -250,6 +251,18 @@ async def _sigungu_resolver_for_scope(
 
 
 def _handle_enqueue_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, FeatureUpdateLockBusy):
+        return HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": exc.code,
+                "message": str(exc),
+                "details": {
+                    "retry_after_seconds": exc.retry_after_seconds,
+                },
+            },
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        )
     message = str(exc)
     if "sigungu_resolver" in message:
         return HTTPException(
@@ -311,6 +324,13 @@ async def _enqueue(
     response_model=FeatureUpdateRequestCreateResponse,
     status_code=status.HTTP_201_CREATED,
     summary="feature update request 생성 또는 dry-run",
+    responses={
+        409: {
+            "description": (
+                "run_mode=now 요청의 동일 scope advisory lock 경합"
+            )
+        }
+    },
 )
 async def create_feature_update_request(
     body: FeatureUpdateRequestCreateRequest,
@@ -449,7 +469,7 @@ async def cancel_feature_update_request(
     summary="기존 request payload를 run_mode=now로 재큐잉",
     responses={
         404: {"description": "request_id 없음"},
-        409: {"description": "이미 running 상태"},
+        409: {"description": "이미 running 상태 또는 동일 scope lock 경합"},
     },
 )
 async def run_feature_update_request_now(

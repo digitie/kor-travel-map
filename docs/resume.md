@@ -1,5 +1,22 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-04 Codex 작업 메모 — T-RV-05/11 run-now/claim lock
+
+T-RV-05/11을 처리한다. `run_mode=now` feature update request 생성과 기존 request
+`run-now` 재큐잉은 동일 scope advisory lock이 이미 점유되어 있으면 queued fallback
+없이 `409 LOCK_BUSY`로 거절한다. 응답은 공통 error envelope의
+`error.code="LOCK_BUSY"`, `details.retry_after_seconds=15`, HTTP `Retry-After: 15`
+헤더를 포함한다.
+
+`feature_update_scope_advisory_key(...)`는 scope/provider/dataset filter를 canonical
+JSON으로 정규화해 같은 scope key를 만들고, executor는 실제 실행 중 이 scope lock을
+보유한다. `claim_next_update_request`는 queue claim advisory lock 경합 시 더 이상
+`None`을 반환하지 않고 `FeatureUpdateQueueLockBusy`를 올려 빈 큐와 구분한다.
+
+다음 한 작업은 **T-RV-10(keyset cursor float/decimal 정밀도·정렬축 보강)** 또는
+**T-RV-04b(provider public client live fetch wiring)** 이다. **T-RV-27은 production
+레벨 hardening 전까지 계속 skip/deferred**다.
+
 ## 2026-06-04 Codex 작업 메모 — T-RV-04a Dagster provider resource guard
 
 T-RV-04의 1차 guard를 처리한다. provider record resource key 9개에 대해 기본
