@@ -2,6 +2,22 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-04 (codex) — T-209b run-admin-stack 안정화
+
+**작업**: PR#182 머지 후 서버 재기동에서 `scripts/run-admin-stack.sh`가 Next ready
+로그를 남겼는데도 wrapper PID/readiness false negative로 실패하고, shell 종료 뒤
+background 프로세스가 내려가는 문제를 재현했다.
+
+- **수정**: `run-admin-stack.sh`가 서비스 시작 전 `alembic upgrade head`를 실행한다.
+- **수정**: API/frontend/Dagster background 실행을 `setsid` + `nohup`으로 분리한다.
+- **수정**: readiness는 wrapper PID 생존 여부보다 URL 응답을 우선한다. launcher PID가
+  먼저 종료돼도 timeout 전까지 URL readiness를 계속 확인한다.
+- **검증**: `bash -n`, 수정된 `scripts/run-admin-stack.sh` 실제 실행(API `9011`,
+  Web `9012`, Dagster `9013` readiness 통과), API/Web/Dagster smoke HTTP 200,
+  `git diff --check` 통과.
+- **범위**: Dagster metadata DB 분리/init와 daemon/schedule 운영은 T-209b 후속으로
+  계속 남긴다.
+
 ## 2026-06-04 (codex) — T-205d import_jobs batch 컬럼
 
 **작업**: T-200 Batch DAG 선행 스키마로 `ops.import_jobs`에 `load_batch_id`와

@@ -20,6 +20,13 @@ DAGSTER_BIN="${DAGSTER_BIN:-"$ROOT_DIR/.venv/bin/dagster"}"
 if [[ ! -x "$DAGSTER_BIN" ]]; then
   DAGSTER_BIN="$(command -v dagster)"
 fi
+
+echo "alembic upgrade head"
+(
+  cd "$ROOT_DIR"
+  "$PYTHON_BIN" -m alembic upgrade head
+)
+
 DAGSTER_HOME_DIR="${DAGSTER_HOME:-"$ROOT_DIR/.dagster"}"
 mkdir -p "$DAGSTER_HOME_DIR"
 case "${DAGSTER_DISABLE_TELEMETRY,,}" in
@@ -43,7 +50,11 @@ start_bg() {
   local name="$1"
   shift
   local log_file="$LOG_DIR/$name.log"
-  nohup "$@" >"$log_file" 2>&1 &
+  if command -v setsid >/dev/null 2>&1; then
+    nohup setsid "$@" >"$log_file" 2>&1 </dev/null &
+  else
+    nohup "$@" >"$log_file" 2>&1 </dev/null &
+  fi
   local pid="$!"
   echo "$pid" >"$LOG_DIR/$name.pid"
   echo "$name pid=$pid log=$log_file"
@@ -84,20 +95,33 @@ wait_url() {
   local log_file="$LOG_DIR/$name.log"
   local pid
   pid="$(cat "$pid_file")"
+  local pid_exited=""
   for _ in $(seq 1 60); do
-    if curl -fsS "$url" >/dev/null 2>&1; then
+    if url_ready "$url"; then
       echo "$name ready: $url"
       return 0
     fi
     if ! kill -0 "$pid" 2>/dev/null; then
-      echo "$name exited before readiness. log: $log_file" >&2
-      tail -n 80 "$log_file" >&2 || true
-      return 1
+      pid_exited="yes"
     fi
     sleep 1
   done
   echo "$name did not become ready. log: $log_file" >&2
+  if [[ "$pid_exited" == "yes" ]]; then
+    echo "$name launcher pid $pid exited before readiness." >&2
+  fi
   tail -n 80 "$log_file" >&2 || true
+  return 1
+}
+
+url_ready() {
+  local url="$1"
+  if curl -fsS "$url" >/dev/null 2>&1; then
+    return 0
+  fi
+  if command -v cmd.exe >/dev/null 2>&1; then
+    cmd.exe /c curl.exe -fsS "$url" -o NUL >/dev/null 2>&1 && return 0
+  fi
   return 1
 }
 

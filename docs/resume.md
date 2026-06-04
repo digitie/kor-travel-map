@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-04 Codex 작업 메모 — T-209b run-admin-stack 안정화
+
+PR#182 머지 후 서버를 재기동하는 과정에서 `scripts/run-admin-stack.sh`가 Next ready
+로그를 남긴 뒤에도 wrapper PID/readiness 판단 때문에 실패하고, shell 종료와 함께
+background 프로세스가 내려가는 문제가 재현됐다. 스크립트를 시작 전
+`alembic upgrade head` 실행, `setsid` detached background 실행, URL 기준 readiness
+판단으로 보정했다.
+
+이 PR은 venv/로컬 admin stack runner 안정화 범위다. T-209b의 남은 부분인 Dagster
+metadata DB 분리/init와 daemon/schedule 운영은 후속으로 유지한다. 다음 한 작업은
+T-200 Batch DAG + 정합성 게이트다. 검증은 `bash -n`, 수정된
+`scripts/run-admin-stack.sh` 실제 실행(API `9011`, Web `9012`, Dagster `9013`
+readiness 통과), API/Web/Dagster smoke HTTP 200, `git diff --check`로 확인했다.
+
 ## 2026-06-04 Codex 작업 메모 — T-205d import_jobs batch 컬럼
 
 T-200 Batch DAG 선행 조건으로 `ops.import_jobs`에 `load_batch_id`와 `parent_job_id`
