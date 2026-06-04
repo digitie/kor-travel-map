@@ -11,7 +11,9 @@
 - **commit은 호출자 책임** — transaction 경계는 오케스트레이션(client)이 잡는다.
 - **점수 0~100 변환** — core.scoring 점수는 0.0~1.0, 큐 컬럼은 ``NUMERIC(5,2)``
   0~100 (``ck_dedup_scores``). ``round(score * 100, 2)``로 변환.
-- **재스캔 안전 (검토 보존)** — ``(feature_id_a, feature_id_b)`` 충돌 시
+- **순서 독립 pair** — ``feature_id_a < feature_id_b``로 canonicalize해 ``(a,b)``와
+  ``(b,a)``가 같은 큐 행으로 수렴한다. self-pair는 큐에 넣지 않는다.
+- **재스캔 안전 (검토 보존)** — canonical ``(feature_id_a, feature_id_b)`` 충돌 시
   ``status='pending'`` 행만 점수/제안 갱신. 운영자가 이미 accepted/rejected/
   merged/ignored한 행은 건드리지 않는다 (``DO UPDATE ... WHERE status='pending'``).
 - **FK 선결** — ``feature_id_a/b``는 ``feature.features`` FK(CASCADE)라, 두 feature가
@@ -108,15 +110,30 @@ class DedupQueueResult:
     skipped: int = 0
 
 
-def _candidate_params(candidate: DedupCandidate) -> dict[str, Any]:
+def _canonical_pair(feature_id_a: str, feature_id_b: str) -> tuple[str, str] | None:
+    """검토 큐 저장용 feature pair를 순서 독립 key로 정규화한다."""
+    if feature_id_a == feature_id_b:
+        return None
+    return (
+        (feature_id_a, feature_id_b)
+        if feature_id_a < feature_id_b
+        else (feature_id_b, feature_id_a)
+    )
+
+
+def _candidate_params(candidate: DedupCandidate) -> dict[str, Any] | None:
     """``DedupCandidate`` → ``_UPSERT_DEDUP_SQL`` bind params.
 
     core.scoring 점수(0.0~1.0)를 큐 컬럼(0~100 NUMERIC)으로 ``×100`` 변환.
     ``decision_reason``에는 알고리즘 제안(auto_merge/manual_review)을 보관.
     """
+    pair = _canonical_pair(candidate.feature_id_a, candidate.feature_id_b)
+    if pair is None:
+        return None
+    feature_id_a, feature_id_b = pair
     return {
-        "feature_id_a": candidate.feature_id_a,
-        "feature_id_b": candidate.feature_id_b,
+        "feature_id_a": feature_id_a,
+        "feature_id_b": feature_id_b,
         "total_score": round(candidate.score * 100, 2),
         "name_score": round(candidate.name_score * 100, 2),
         "spatial_score": round(candidate.spatial_score * 100, 2),
@@ -136,9 +153,10 @@ async def enqueue_dedup_candidate(
         ``"inserted"`` (신규) / ``"updated"`` (pending 행 점수 갱신) /
         ``"skipped"`` (이미 검토 완료된 행이라 보존).
     """
-    result = await session.execute(
-        text(_UPSERT_DEDUP_SQL), _candidate_params(candidate)
-    )
+    params = _candidate_params(candidate)
+    if params is None:
+        return "skipped"
+    result = await session.execute(text(_UPSERT_DEDUP_SQL), params)
     row = result.first()
     if row is None:
         return "skipped"

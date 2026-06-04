@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-04 (codex) — T-RV-12 dedup pair 순서 독립 unique
+
+**작업**: PR#153~#179 리뷰 후속 MED 항목 중 T-RV-12를 반영한다.
+
+- **Schema invariant**: `ops.dedup_review_queue`에 `ck_dedup_pair_order`
+  (`feature_id_a < feature_id_b`)를 추가해 canonical 방향만 저장한다.
+- **Migration**: `0013_dedup_pair_order_invariant`는 기존 self-pair를 제거하고,
+  unordered duplicate는 검토 완료 행 우선으로 하나만 남긴 뒤 canonical 방향으로
+  정규화한다.
+- **Repo behavior**: `dedup_repo`가 후보 pair를 upsert 전에 canonicalize하고,
+  self-pair는 큐에 적재하지 않고 `skipped`로 처리한다.
+- **Tests**: reversed pair upsert가 기존 canonical row를 갱신하는지, self-pair가
+  skip되는지, DB check가 비정규 방향 직접 insert를 막는지 검증한다.
+
 ## 2026-06-04 (codex) — T-RV-10 keyset cursor 정밀도
 
 **작업**: PR#153~#179 리뷰 후속 HIGH 항목 중 T-RV-10을 반영한다.

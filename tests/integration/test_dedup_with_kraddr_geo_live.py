@@ -50,6 +50,14 @@ _FETCHED_AT = datetime(2026, 5, 28, 12, 0, tzinfo=_KST)
 _DEFAULT_BASE_URL = "http://127.0.0.1:9001"
 
 
+def _canonical_pair(feature_id_a: str, feature_id_b: str) -> tuple[str, str]:
+    return (
+        (feature_id_a, feature_id_b)
+        if feature_id_a < feature_id_b
+        else (feature_id_b, feature_id_a)
+    )
+
+
 def _resolve_base_url() -> str:
     return os.environ.get("LIVE_KRADDR_GEO_BASE_URL", _DEFAULT_BASE_URL)
 
@@ -203,8 +211,10 @@ async def test_dedup_auto_merge_with_real_geocoder(
     row = reviews[0]
     assert row["decision_reason"] == "auto_merge"
     assert row["total_score"] >= 85.0
-    assert row["feature_id_a"] == feat_a.feature_id
-    assert row["feature_id_b"] == feat_b.feature_id
+    assert (row["feature_id_a"], row["feature_id_b"]) == _canonical_pair(
+        feat_a.feature_id,
+        feat_b.feature_id,
+    )
 
 
 # ── 2) 같은 이름 + 먼 좌표 → KEEP_SEPARATE → 큐 비어있음 ─────────────────
@@ -294,13 +304,14 @@ async def test_dedup_rerun_updates_pending_preserves_reviewed(
     assert s2.queue.inserted == 0
 
     # 운영자가 accepted로 표기 (commit 격리).
+    canonical_a, canonical_b = _canonical_pair(feat_a.feature_id, feat_b.feature_id)
     async with AsyncSession(migrated_engine) as session, session.begin():
         await session.execute(
             text(
                 "UPDATE ops.dedup_review_queue SET status='accepted' "
                 "WHERE feature_id_a=:a AND feature_id_b=:b"
             ),
-            {"a": feat_a.feature_id, "b": feat_b.feature_id},
+            {"a": canonical_a, "b": canonical_b},
         )
 
     # 세 번째 sync — accepted 행이라 skipped.
