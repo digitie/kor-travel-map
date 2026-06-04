@@ -2,6 +2,38 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-04 (codex) — T-208i offline CSV/TSV validation + bjd 보강
+
+**작업**: admin UI #9의 offline upload 선행 task를 CSV/TSV까지 확장했다. 업로드 API는
+JSON/JSONL 외 CSV/TSV를 허용하고, tabular 원본은 preview → validation job → Dagster
+load 순서로 처리한다.
+
+- **Core/API**: `krtour.map.offline_upload`에 column mapping, preview, validation issue,
+  validation import job, validation payload 기반 CSV/TSV parser/load를 추가했다.
+  `GET /admin/offline-uploads/{upload_id}/preview`,
+  `POST /admin/offline-uploads/{upload_id}/validate`,
+  `GET /admin/offline-uploads/{upload_id}/validation`을 admin OpenAPI에 노출했다.
+- **법정동코드 보강**: `AddressResolver`와 kraddr-geo REST v2 geocode response → `Address`
+  변환을 추가했다. offline CSV/TSV, MOIS, datagokr 표준데이터, OpiNet, KREX,
+  krheritage 변환 경로에서 `bjd_code`가 없으면 주소 geocode 또는 좌표 reverse로
+  보강한다.
+- **Dagster**: `offline_upload_load` op가 `KRTOUR_MAP_KRADDR_GEO_BASE_URL` 설정 시
+  kraddr-geo resolver/reverse geocoder를 열어 CSV/TSV load에 주입한다.
+- **Admin UI**: `/admin/offline-uploads`에 CSV/TSV mapping form, header/sample preview,
+  validation issue table, validation 완료 전 load gate를 추가했다.
+- **문서**: OpenAPI/admin workflow/README/changelog/resume/tasks를 T-208i 기준으로
+  갱신했다. ADR-045 전체점검은 `T-212a`~`T-212e`와
+  `docs/reports/adr-045-overall-audit-plan-2026-06-04.md`로 분리했다.
+- **검증**: unit-only coverage `792 passed` / `80.54%`, integration/admin/dagster
+  `293 passed`, targeted backend/provider/router unit `114 passed`, offline upload
+  PostGIS integration `4 passed`, repo-wide `ruff`/`mypy`/import-linter, frontend
+  `type-check`/`lint`/`build`, React Doctor full scan(기존 optional warning 7개),
+  Windows Next dev server + WSL API 조합의 admin/ops Playwright e2e `6 passed`,
+  OpenAPI admin/user drift check를 확인했다. 전체 integration에서 발견한 기존 PostGIS
+  extension CASCADE fixture 충돌도 함께 보정했다.
+- **다음**: PR 생성 후 GitHub Actions 결과를 확인하고 실패를 반영한다. 머지 후
+  T-205d → T-200/T-201b 순서로 진행한다.
+
 ## 2026-06-04 (claude) — PR#153~#179 ADR-045 구현 배치 상세 코드 리뷰
 
 **작업**: 사용자 지시 — 최신 레포 재독 후 리뷰 없이 머지된 PR 전부 상세 리뷰,

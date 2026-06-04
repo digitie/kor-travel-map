@@ -456,7 +456,7 @@
           },
           "file": {
             "contentMediaType": "application/octet-stream",
-            "description": "JSON/JSONL FeatureBundle 파일",
+            "description": "JSON/JSONL FeatureBundle 또는 CSV/TSV tabular 파일",
             "title": "File",
             "type": "string"
           },
@@ -2566,6 +2566,98 @@
         "title": "NearbyTargetSummary",
         "type": "object"
       },
+      "OfflineUploadColumnMappingRecord": {
+        "additionalProperties": false,
+        "description": "CSV/TSV column mapping HTTP 표현.",
+        "properties": {
+          "address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address"
+          },
+          "bjd_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bjd Code"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "default_category": {
+            "default": "02020101",
+            "title": "Default Category",
+            "type": "string"
+          },
+          "default_marker_color": {
+            "default": "P-01",
+            "title": "Default Marker Color",
+            "type": "string"
+          },
+          "default_marker_icon": {
+            "default": "marker",
+            "title": "Default Marker Icon",
+            "type": "string"
+          },
+          "default_place_kind": {
+            "default": "offline_upload",
+            "title": "Default Place Kind",
+            "type": "string"
+          },
+          "lat": {
+            "minLength": 1,
+            "title": "Lat",
+            "type": "string"
+          },
+          "lon": {
+            "minLength": 1,
+            "title": "Lon",
+            "type": "string"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "source_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Id"
+          }
+        },
+        "required": [
+          "name",
+          "lon",
+          "lat"
+        ],
+        "title": "OfflineUploadColumnMappingRecord",
+        "type": "object"
+      },
       "OfflineUploadLaunchMeta": {
         "additionalProperties": false,
         "description": "Dagster load 실행 응답 metadata.",
@@ -2641,6 +2733,93 @@
           "items"
         ],
         "title": "OfflineUploadListResponse",
+        "type": "object"
+      },
+      "OfflineUploadPreviewMeta": {
+        "additionalProperties": false,
+        "description": "CSV/TSV preview metadata.",
+        "properties": {
+          "bytes_read": {
+            "title": "Bytes Read",
+            "type": "integer"
+          },
+          "checksum_sha256_actual": {
+            "title": "Checksum Sha256 Actual",
+            "type": "string"
+          },
+          "delimiter": {
+            "title": "Delimiter",
+            "type": "string"
+          },
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          },
+          "encoding": {
+            "title": "Encoding",
+            "type": "string"
+          },
+          "headers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Headers",
+            "type": "array"
+          },
+          "parsed_format": {
+            "title": "Parsed Format",
+            "type": "string"
+          },
+          "rows_sampled": {
+            "title": "Rows Sampled",
+            "type": "integer"
+          },
+          "rows_total": {
+            "title": "Rows Total",
+            "type": "integer"
+          },
+          "sample_rows": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Sample Rows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "duration_ms",
+          "parsed_format",
+          "encoding",
+          "delimiter",
+          "headers",
+          "sample_rows",
+          "rows_total",
+          "rows_sampled",
+          "bytes_read",
+          "checksum_sha256_actual"
+        ],
+        "title": "OfflineUploadPreviewMeta",
+        "type": "object"
+      },
+      "OfflineUploadPreviewResponse": {
+        "additionalProperties": false,
+        "description": "`GET /admin/offline-uploads/{upload_id}/preview` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/OfflineUploadRecord"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/OfflineUploadPreviewMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "OfflineUploadPreviewResponse",
         "type": "object"
       },
       "OfflineUploadRecord": {
@@ -2781,6 +2960,218 @@
           "load_url"
         ],
         "title": "OfflineUploadRecord",
+        "type": "object"
+      },
+      "OfflineUploadValidationIssueRecord": {
+        "additionalProperties": false,
+        "description": "CSV/TSV validation issue HTTP 표현.",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Column"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "row_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Row Number"
+          },
+          "severity": {
+            "title": "Severity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "severity",
+          "code",
+          "message"
+        ],
+        "title": "OfflineUploadValidationIssueRecord",
+        "type": "object"
+      },
+      "OfflineUploadValidationMeta": {
+        "additionalProperties": false,
+        "description": "CSV/TSV validation response metadata.",
+        "properties": {
+          "bytes_read": {
+            "title": "Bytes Read",
+            "type": "integer"
+          },
+          "checksum_sha256_actual": {
+            "title": "Checksum Sha256 Actual",
+            "type": "string"
+          },
+          "column_mapping": {
+            "$ref": "#/components/schemas/OfflineUploadColumnMappingRecord"
+          },
+          "delimiter": {
+            "title": "Delimiter",
+            "type": "string"
+          },
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          },
+          "encoding": {
+            "title": "Encoding",
+            "type": "string"
+          },
+          "error_rows": {
+            "title": "Error Rows",
+            "type": "integer"
+          },
+          "headers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Headers",
+            "type": "array"
+          },
+          "issues": {
+            "items": {
+              "$ref": "#/components/schemas/OfflineUploadValidationIssueRecord"
+            },
+            "title": "Issues",
+            "type": "array"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "job_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job State"
+          },
+          "parsed_format": {
+            "title": "Parsed Format",
+            "type": "string"
+          },
+          "rows_sampled": {
+            "title": "Rows Sampled",
+            "type": "integer"
+          },
+          "rows_total": {
+            "title": "Rows Total",
+            "type": "integer"
+          },
+          "sample_rows": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Sample Rows",
+            "type": "array"
+          },
+          "valid_rows": {
+            "title": "Valid Rows",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "duration_ms",
+          "parsed_format",
+          "encoding",
+          "delimiter",
+          "headers",
+          "sample_rows",
+          "rows_total",
+          "rows_sampled",
+          "bytes_read",
+          "checksum_sha256_actual",
+          "job_id",
+          "job_state",
+          "column_mapping",
+          "valid_rows",
+          "error_rows",
+          "issues"
+        ],
+        "title": "OfflineUploadValidationMeta",
+        "type": "object"
+      },
+      "OfflineUploadValidationRequest": {
+        "additionalProperties": false,
+        "description": "`POST /admin/offline-uploads/{upload_id}/validate` 요청.",
+        "properties": {
+          "column_mapping": {
+            "$ref": "#/components/schemas/OfflineUploadColumnMappingRecord"
+          },
+          "operator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operator"
+          },
+          "sample_size": {
+            "default": 1000,
+            "maximum": 10000.0,
+            "minimum": 1.0,
+            "title": "Sample Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "column_mapping"
+        ],
+        "title": "OfflineUploadValidationRequest",
+        "type": "object"
+      },
+      "OfflineUploadValidationResponse": {
+        "additionalProperties": false,
+        "description": "`POST/GET /admin/offline-uploads/{upload_id}/validation` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/OfflineUploadRecord"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/OfflineUploadValidationMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "OfflineUploadValidationResponse",
         "type": "object"
       },
       "OfflineUploadWriteMeta": {
@@ -5145,7 +5536,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "오프라인 FeatureBundle 원본 업로드",
+        "summary": "오프라인 원본 업로드",
         "tags": [
           "admin-offline-uploads"
         ]
@@ -5242,6 +5633,178 @@
           }
         },
         "summary": "Dagster offline_upload_load job 실행",
+        "tags": [
+          "admin-offline-uploads"
+        ]
+      }
+    },
+    "/admin/offline-uploads/{upload_id}/preview": {
+      "get": {
+        "operationId": "preview_offline_upload_request_admin_offline_uploads__upload_id__preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "upload_id",
+            "required": true,
+            "schema": {
+              "title": "Upload Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sample_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Sample Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OfflineUploadPreviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "upload_id 없음"
+          },
+          "409": {
+            "description": "CSV/TSV 업로드가 아니거나 저장 원본 불일치"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "description": "객체 저장소 읽기 실패"
+          }
+        },
+        "summary": "CSV/TSV 오프라인 업로드 header/sample preview",
+        "tags": [
+          "admin-offline-uploads"
+        ]
+      }
+    },
+    "/admin/offline-uploads/{upload_id}/validate": {
+      "post": {
+        "operationId": "validate_offline_upload_request_admin_offline_uploads__upload_id__validate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "upload_id",
+            "required": true,
+            "schema": {
+              "title": "Upload Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OfflineUploadValidationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OfflineUploadValidationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "upload_id 없음"
+          },
+          "409": {
+            "description": "validation 가능한 상태 아님"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "description": "객체 저장소 읽기 실패"
+          }
+        },
+        "summary": "CSV/TSV 오프라인 업로드 column mapping 검증",
+        "tags": [
+          "admin-offline-uploads"
+        ]
+      }
+    },
+    "/admin/offline-uploads/{upload_id}/validation": {
+      "get": {
+        "operationId": "get_offline_upload_validation_request_admin_offline_uploads__upload_id__validation_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "upload_id",
+            "required": true,
+            "schema": {
+              "title": "Upload Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OfflineUploadValidationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "upload_id 또는 validation job 없음"
+          },
+          "409": {
+            "description": "validation payload 없음"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "CSV/TSV 오프라인 업로드 최근 validation 결과 조회",
         "tags": [
           "admin-offline-uploads"
         ]

@@ -261,6 +261,40 @@ async def test_reverse_geocoder_fills_and_dedupes() -> None:
     assert geo.calls == 1  # 동일 좌표 → cached_reverse_geocoder로 1회만
 
 
+async def test_address_resolver_fills_bjd_without_legal_code_or_coord() -> None:
+    calls: list[Address] = []
+
+    async def _resolver(address: Address) -> Address | None:
+        calls.append(address)
+        return Address(
+            road=address.road,
+            legal=address.legal,
+            bjd_code="1114010100",
+            sigungu_code="11140",
+            sido_code="11",
+            admin="서울특별시 중구 태평로1가",
+        )
+
+    rec = _Record(
+        service_slug="bakeries",
+        legal_dong_code=None,
+        lon=None,
+        lat=None,
+        road_address="서울특별시 중구 세종대로 110",
+        lot_address="서울특별시 중구 태평로1가 31",
+    )
+
+    [bundle] = await _bundles([rec], address_resolver=_resolver)
+
+    assert len(calls) == 1
+    assert calls[0].road == "서울특별시 중구 세종대로 110"
+    assert calls[0].legal == "서울특별시 중구 태평로1가 31"
+    assert bundle.feature.address.bjd_code == "1114010100"
+    assert bundle.feature.address.sigungu_code == "11140"
+    assert bundle.feature.address.sido_code == "11"
+    assert bundle.feature.feature_id.startswith("f_1114010100_p_")
+
+
 async def test_opn_authority_code_not_used_as_bjd() -> None:
     rec = _Record(
         service_slug="bakeries",

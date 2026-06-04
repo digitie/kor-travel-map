@@ -29,9 +29,11 @@ __all__ = [
     "OfflineUploadPage",
     "create_offline_upload",
     "finish_offline_upload_load",
+    "finish_offline_upload_validation",
     "get_offline_upload",
     "list_offline_uploads",
     "mark_offline_upload_loading",
+    "mark_offline_upload_validating",
 ]
 
 _RETURN_COLUMNS: Final[str] = (
@@ -192,6 +194,23 @@ WHERE upload_id = :upload_id
 RETURNING {_RETURN_COLUMNS}
 """
 
+_MARK_VALIDATING_SQL: Final[str] = f"""
+UPDATE ops.offline_uploads
+SET state = 'validating',
+    validation_job_id = :validation_job_id,
+    updated_at = now()
+WHERE upload_id = :upload_id
+RETURNING {_RETURN_COLUMNS}
+"""
+
+_FINISH_VALIDATION_SQL: Final[str] = f"""
+UPDATE ops.offline_uploads
+SET state = :state,
+    updated_at = now()
+WHERE upload_id = :upload_id
+RETURNING {_RETURN_COLUMNS}
+"""
+
 _FINISH_LOAD_SQL: Final[str] = f"""
 UPDATE ops.offline_uploads
 SET state = :state,
@@ -294,6 +313,41 @@ async def mark_offline_upload_loading(
     result = await session.execute(
         text(_MARK_LOADING_SQL),
         {"upload_id": upload_id, "load_job_id": load_job_id},
+    )
+    row = result.one_or_none()
+    return _row_to_upload(row) if row is not None else None
+
+
+async def mark_offline_upload_validating(
+    session: AsyncSession,
+    *,
+    upload_id: str,
+    validation_job_id: str,
+) -> OfflineUpload | None:
+    """validation import job과 연결하고 ``state='validating'``으로 전이한다."""
+    result = await session.execute(
+        text(_MARK_VALIDATING_SQL),
+        {"upload_id": upload_id, "validation_job_id": validation_job_id},
+    )
+    row = result.one_or_none()
+    return _row_to_upload(row) if row is not None else None
+
+
+async def finish_offline_upload_validation(
+    session: AsyncSession,
+    *,
+    upload_id: str,
+    state: str,
+) -> OfflineUpload | None:
+    """validation 종료 상태를 기록한다. ``validated``/``validation_failed``만 허용."""
+    if state not in {"validated", "validation_failed"}:
+        raise ValueError(
+            "offline upload validation state는 ['validated', 'validation_failed'] "
+            f"중 하나여야 함, got {state!r}."
+        )
+    result = await session.execute(
+        text(_FINISH_VALIDATION_SQL),
+        {"upload_id": upload_id, "state": state},
     )
     row = result.one_or_none()
     return _row_to_upload(row) if row is not None else None

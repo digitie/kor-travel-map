@@ -3,6 +3,12 @@
 from typing import TYPE_CHECKING, Any, Final, cast
 
 from dagster import Failure, OpExecutionContext, job, op
+from krtour.map.geocoding import (
+    KraddrGeoRestClient,
+    kraddr_geo_address_resolver,
+    kraddr_geo_reverse_geocoder,
+)
+from krtour.map.settings import KrtourMapSettings
 
 if TYPE_CHECKING:
     from krtour.map.client import AsyncKrtourMapClient
@@ -36,11 +42,28 @@ async def load_offline_upload_op(context: OpExecutionContext) -> dict[str, objec
         _resource_object(context, "offline_upload_store"),
     )
 
-    result = await client.run_offline_upload_load_job(
-        upload_id,
-        store=store,
-        dagster_run_id=context.run_id,
-    )
+    settings = KrtourMapSettings()
+    if settings.kraddr_geo_base_url:
+        import httpx
+
+        async with httpx.AsyncClient(
+            base_url=settings.kraddr_geo_base_url,
+            timeout=10.0,
+        ) as http:
+            kraddr = KraddrGeoRestClient(http)
+            result = await client.run_offline_upload_load_job(
+                upload_id,
+                store=store,
+                dagster_run_id=context.run_id,
+                address_resolver=kraddr_geo_address_resolver(kraddr, fallback="api"),
+                reverse_geocoder=kraddr_geo_reverse_geocoder(kraddr),
+            )
+    else:
+        result = await client.run_offline_upload_load_job(
+            upload_id,
+            store=store,
+            dagster_run_id=context.run_id,
+        )
     metadata = result.as_metadata()
     context.add_output_metadata(metadata)
     if result.error_message:

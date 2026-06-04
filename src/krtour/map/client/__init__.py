@@ -117,11 +117,16 @@ from krtour.map.mois import (
     sync_mois_license_features_bulk,
 )
 from krtour.map.offline_upload import (
+    OfflineUploadColumnMapping,
     OfflineUploadLoadResult,
     OfflineUploadObjectStore,
+    OfflineUploadValidationResult,
 )
 from krtour.map.offline_upload import (
     run_offline_upload_load_job as repo_run_offline_upload_load_job,
+)
+from krtour.map.offline_upload import (
+    run_offline_upload_validation_job as repo_run_offline_upload_validation_job,
 )
 from krtour.map.providers.mois import DATASET_KEY_BULK as MOIS_DATASET_KEY_BULK
 from krtour.map.providers.mois import DATASET_KEY_HISTORY as MOIS_DATASET_KEY_HISTORY
@@ -135,7 +140,7 @@ if TYPE_CHECKING:
 
     from krtour.map.core.dedup import DedupCandidate, DedupInput
     from krtour.map.dto import FeatureBundle
-    from krtour.map.geocoding import ReverseGeocoder
+    from krtour.map.geocoding import AddressResolver, ReverseGeocoder
     from krtour.map.infra.scope_repo import SigunguByRadiusResolver
     from krtour.map.providers.mois import MoisLicensePlaceRecord
     from krtour.map.settings import KrtourMapSettings
@@ -144,7 +149,9 @@ __all__ = [
     "AsyncKrtourMapClient",
     "DedupRefreshResult",
     "DedupSyncResult",
+    "OfflineUploadColumnMapping",
     "OfflineUploadLoadResult",
+    "OfflineUploadValidationResult",
 ]
 
 
@@ -251,6 +258,7 @@ class AsyncKrtourMapClient:
         fetched_at: datetime,
         dataset_key: str = MOIS_DATASET_KEY_BULK,
         reverse_geocoder: ReverseGeocoder | None = None,
+        address_resolver: AddressResolver | None = None,
     ) -> FeatureLoadResult:
         """MOIS 인허가 ``PlaceRecord`` 묶음을 변환 → 적재 (한 transaction).
 
@@ -267,6 +275,7 @@ class AsyncKrtourMapClient:
                 fetched_at=fetched_at,
                 dataset_key=dataset_key,
                 reverse_geocoder=reverse_geocoder,
+                address_resolver=address_resolver,
             )
 
     async def sync_mois_license_features_bulk(
@@ -276,6 +285,7 @@ class AsyncKrtourMapClient:
         fetched_at: datetime,
         dataset_key: str = MOIS_DATASET_KEY_BULK,
         reverse_geocoder: ReverseGeocoder | None = None,
+        address_resolver: AddressResolver | None = None,
         batch_size: int = MOIS_DEFAULT_BATCH_SIZE,
     ) -> MoisBulkSyncResult:
         """MOIS 인허가 전체 snapshot 적재 + 부재 feature soft-delete (한 transaction).
@@ -293,6 +303,7 @@ class AsyncKrtourMapClient:
                 fetched_at=fetched_at,
                 dataset_key=dataset_key,
                 reverse_geocoder=reverse_geocoder,
+                address_resolver=address_resolver,
                 batch_size=batch_size,
             )
 
@@ -303,6 +314,7 @@ class AsyncKrtourMapClient:
         fetched_at: datetime,
         dataset_key: str = MOIS_DATASET_KEY_BULK,
         reverse_geocoder: ReverseGeocoder | None = None,
+        address_resolver: AddressResolver | None = None,
         source_checksum: str | None = None,
         batch_size: int = MOIS_DEFAULT_BATCH_SIZE,
     ) -> MoisBulkJobResult:
@@ -323,6 +335,7 @@ class AsyncKrtourMapClient:
                 fetched_at=fetched_at,
                 dataset_key=dataset_key,
                 reverse_geocoder=reverse_geocoder,
+                address_resolver=address_resolver,
                 source_checksum=source_checksum,
                 batch_size=batch_size,
             )
@@ -336,6 +349,7 @@ class AsyncKrtourMapClient:
         dataset_key: str = MOIS_DATASET_KEY_HISTORY,
         sync_scope: str = "default",
         reverse_geocoder: ReverseGeocoder | None = None,
+        address_resolver: AddressResolver | None = None,
         source_checksum: str | None = None,
         batch_size: int = MOIS_DEFAULT_BATCH_SIZE,
     ) -> MoisIncrementalJobResult:
@@ -356,6 +370,7 @@ class AsyncKrtourMapClient:
                 dataset_key=dataset_key,
                 sync_scope=sync_scope,
                 reverse_geocoder=reverse_geocoder,
+                address_resolver=address_resolver,
                 source_checksum=source_checksum,
                 batch_size=batch_size,
             )
@@ -393,6 +408,8 @@ class AsyncKrtourMapClient:
         *,
         store: OfflineUploadObjectStore,
         dagster_run_id: str | None = None,
+        address_resolver: AddressResolver | None = None,
+        reverse_geocoder: ReverseGeocoder | None = None,
     ) -> OfflineUploadLoadResult:
         """오프라인 업로드 파일을 ``FeatureBundle``로 파싱해 적재한다.
 
@@ -406,6 +423,32 @@ class AsyncKrtourMapClient:
                 upload_id,
                 store=store,
                 dagster_run_id=dagster_run_id,
+                address_resolver=address_resolver,
+                reverse_geocoder=reverse_geocoder,
+            )
+
+    async def run_offline_upload_validation_job(
+        self,
+        upload_id: str,
+        *,
+        store: OfflineUploadObjectStore,
+        column_mapping: OfflineUploadColumnMapping | Mapping[str, object],
+        sample_size: int = 1000,
+        operator: str | None = None,
+        address_resolver: AddressResolver | None = None,
+        reverse_geocoder: ReverseGeocoder | None = None,
+    ) -> OfflineUploadValidationResult:
+        """CSV/TSV 오프라인 업로드를 load 전에 검증하고 mapping payload를 저장한다."""
+        async with self._session_factory() as session, session.begin():
+            return await repo_run_offline_upload_validation_job(
+                session,
+                upload_id,
+                store=store,
+                column_mapping=column_mapping,
+                sample_size=sample_size,
+                operator=operator,
+                address_resolver=address_resolver,
+                reverse_geocoder=reverse_geocoder,
             )
 
     async def find_place_phone_candidates(

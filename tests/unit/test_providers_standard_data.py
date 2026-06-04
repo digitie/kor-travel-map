@@ -394,3 +394,33 @@ def test_reverse_geocoder_skipped_when_no_coord() -> None:
     assert calls == []  # 좌표 없으니 호출 안 됨
     assert bundles[0].feature.coord is None
     assert bundles[0].feature.address.bjd_code is None
+
+
+@pytest.mark.unit
+def test_address_resolver_fills_bjd_when_coord_missing() -> None:
+    """좌표/bjd가 없으면 주소 geocode resolver가 법정동코드를 보강한다."""
+    calls: list[Address] = []
+
+    async def _resolver(address: Address) -> Address | None:
+        calls.append(address)
+        return Address(
+            road=address.road,
+            legal=address.legal,
+            bjd_code="2920010100",
+            sigungu_code="29200",
+            sido_code="29",
+            admin="광주광역시 광산구 송정동",
+        )
+
+    bundles = cultural_festivals_to_bundles(
+        [_F4_NO_COORD], fetched_at=_now(), address_resolver=_resolver
+    )
+
+    assert len(calls) == 1
+    assert calls[0].road == "광주광역시 광산구 광산로 29번길 15"
+    addr = bundles[0].feature.address
+    assert addr.bjd_code == "2920010100"
+    assert addr.sigungu_code == "29200"
+    assert addr.sido_code == "29"
+    assert addr.admin == "광주광역시 광산구 송정동"
+    assert bundles[0].feature.feature_id.startswith("f_2920010100_e_")

@@ -21,14 +21,15 @@ v2 (provider-neutral) 전환
   (``ReverseV2Response``/``GeocodeV2Response``/``CandidateV2``/``AddressV2``/
   ``RegionV2``/``Point``)의 **structural Protocol**만 정의하고, 호출 측이 주입한
   ``httpx.AsyncClient``로 HTTP를 친다 (ADR-044 — 정합성 1차 책임은 kraddr-geo).
-- 변환 함수(``reverse_response_to_address``/``geocode_response_to_coordinate``)는
+- 변환 함수(``reverse_response_to_address``/``geocode_response_to_coordinate``/
+  ``geocode_response_to_address``)는
   동기·순수라 ``kraddr-geo``/HTTP 없이 fake 응답으로 단위 테스트된다.
 - async 콜러블 팩토리(``kraddr_geo_reverse_geocoder``/``kraddr_geo_address_geocoder``)는
   ``KraddrGeoRestClient``를 받아 ``ReverseGeocoder`` / ``AddressGeocoder`` 콜러블을
   만든다. ``httpx.AsyncClient`` 수명(base_url 설정/close)은 호출자 책임 (ADR-002).
 
-**철칙**: 주소 문자열만으로 법정동코드 추정 금지 — reverse geocoding 결과
-(좌표 기반)만 신뢰.
+**철칙**: 주소 문자열을 직접 파싱해 법정동코드를 추정하지 않는다. 법정동코드는
+kraddr-geo v2가 반환한 structured ``legal_dong_code``/``region.bjd_cd``만 신뢰한다.
 
 ADR 참조
 --------
@@ -61,7 +62,9 @@ if TYPE_CHECKING:
 __all__ = [
     # 비동기 콜러블 계약 (docs/address-geocoding.md §2)
     "AddressGeocoder",
+    "AddressResolver",
     "ReverseGeocoder",
+    "cached_address_resolver",
     "cached_reverse_geocoder",
     # kraddr-geo REST v2 응답 structural Protocol
     "KraddrPoint",
@@ -77,11 +80,13 @@ __all__ = [
     "RegionsWithinRadiusResponse",
     # 순수 변환 함수
     "reverse_response_to_address",
+    "geocode_response_to_address",
     "geocode_response_to_coordinate",
     # REST client + 콜러블 팩토리
     "KraddrGeoRestClient",
     "kraddr_geo_reverse_geocoder",
     "kraddr_geo_address_geocoder",
+    "kraddr_geo_address_resolver",
     "resolve_regions_within_radius",
     "resolve_sigungu_by_radius",
 ]
@@ -95,6 +100,9 @@ __all__ = [
 
 AddressGeocoder = Callable[[Address], Awaitable[Coordinate | None]]
 """정지오코딩: ``Address`` → ``Coordinate | None`` (await)."""
+
+AddressResolver = Callable[[Address], Awaitable[Address | None]]
+"""주소 보강: ``Address`` → 행정코드가 채워진 ``Address | None`` (await)."""
 
 ReverseGeocoder = Callable[[Coordinate], Awaitable[Address | None]]
 """역지오코딩: ``Coordinate`` → ``Address | None`` (await)."""
@@ -128,6 +136,25 @@ def cached_reverse_geocoder(
         key = (f"{coord.lon:.{precision}f}", f"{coord.lat:.{precision}f}")
         if key not in cache:
             cache[key] = await geocoder(coord)
+        return cache[key]
+
+    return _cached
+
+
+def cached_address_resolver(resolver: AddressResolver) -> AddressResolver:
+    """``AddressResolver``를 표시 주소 문자열 기준으로 메모이즈한다.
+
+    CSV/TSV나 provider batch에는 같은 도로명/지번 주소가 반복될 수 있다. ``None``
+    결과도 캐시해 같은 실패 주소를 반복 호출하지 않는다.
+    """
+    cache: dict[str, Address | None] = {}
+
+    async def _cached(address: Address) -> Address | None:
+        key = (address.road or address.legal or address.admin or "").strip()
+        if not key:
+            return None
+        if key not in cache:
+            cache[key] = await resolver(address)
         return cache[key]
 
     return _cached
@@ -438,6 +465,69 @@ def geocode_response_to_coordinate(
         return None
 
 
+def geocode_response_to_address(
+    response: KraddrGeocodeV2Response,
+    *,
+    min_confidence: float = 0.0,
+) -> Address | None:
+    """kraddr-geo ``POST /v2/geocode`` 응답 → 행정코드 보강 ``Address``.
+
+    주소 문자열을 파싱하지 않고, confidence 필터를 통과한 최상위 candidate의
+    structured ``address.legal_dong_code``/``region.bjd_cd``만 사용한다. 좌표만
+    필요하면 ``geocode_response_to_coordinate``를 사용한다.
+    """
+    if response.status != _STATUS_OK or not response.candidates:
+        return None
+    usable = [
+        c
+        for c in response.candidates
+        if c.address is not None and c.confidence >= min_confidence
+    ]
+    if not usable:
+        return None
+    best = max(usable, key=lambda c: c.confidence)
+    addr = best.address
+    region = best.region
+    if addr is None:  # pragma: no cover — usable 필터로 보장
+        return None
+
+    raw_bjd = addr.legal_dong_code or (region.bjd_cd if region else None)
+    try:
+        bjd_code = normalize_bjd_code(raw_bjd)
+    except ValueError:
+        bjd_code = None
+
+    admin_dong_code = addr.admin_dong_code
+    if admin_dong_code is not None and not (
+        len(admin_dong_code) == 10 and admin_dong_code.isdigit()
+    ):
+        admin_dong_code = None
+
+    region_sigungu_code = _five_digits_or_none(region.sig_cd if region else None)
+    sigungu_code = extract_sigungu_code(bjd_code) or region_sigungu_code
+    sido_code = extract_sido_code(bjd_code) or _two_digits_or_none(
+        sigungu_code[:2] if sigungu_code else None
+    )
+    admin_value = (
+        (region.admin_dong or region.legal_dong or region.eup_myeon_dong)
+        if region
+        else None
+    )
+    return Address(
+        road=normalize_korean_text(addr.road_address or addr.full),
+        legal=normalize_korean_text(addr.parcel_address),
+        admin=normalize_korean_text(admin_value),
+        bjd_code=bjd_code,
+        admin_dong_code=admin_dong_code,
+        sigungu_code=sigungu_code,
+        sido_code=sido_code,
+        road_name_code=addr.road_name_code,
+        zipcode=_five_digits_or_none(addr.postal_code),
+        sido_name=normalize_korean_text(region.sido if region else None),
+        sigungu_name=normalize_korean_text(region.sigungu if region else None),
+    )
+
+
 # -- kraddr-geo REST 응답 파싱용 frozen dataclass (Protocol 만족) ---------------
 
 
@@ -746,6 +836,38 @@ def kraddr_geo_address_geocoder(
         return geocode_response_to_coordinate(response, min_confidence=min_confidence)
 
     return _geocode
+
+
+def kraddr_geo_address_resolver(
+    client: KraddrGeoRestClient,
+    *,
+    min_confidence: float = 0.0,
+    fallback: Literal["none", "api"] = "none",
+) -> AddressResolver:
+    """kraddr-geo REST client → ``AddressResolver`` (주소 → 행정코드 보강) 콜러블.
+
+    ``Address.road``가 있으면 road geocode를 먼저 시도하고, ``Address.legal``이
+    있으면 parcel geocode를 fallback으로 시도한다. 둘 다 없으면 ``None``.
+    """
+
+    async def _resolve(address: Address) -> Address | None:
+        queries: list[tuple[str, Literal["road", "parcel"]]] = []
+        if address.road:
+            queries.append((address.road, "road"))
+        if address.legal and address.legal != address.road:
+            queries.append((address.legal, "parcel"))
+        if not queries:
+            return None
+        for query, addr_type in queries:
+            response = await client.geocode(query, type_=addr_type, fallback=fallback)
+            resolved = geocode_response_to_address(
+                response, min_confidence=min_confidence
+            )
+            if resolved is not None and resolved.bjd_code is not None:
+                return resolved
+        return None
+
+    return _resolve
 
 
 async def resolve_regions_within_radius(

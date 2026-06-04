@@ -1,5 +1,51 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-04 Codex 작업 메모 — T-208i offline CSV/TSV validation
+
+T-208h가 닫은 `/admin/offline-uploads*` 기본 업로드 경로를 CSV/TSV tabular 원본까지
+확장했다. JSON/JSONL은 기존처럼 `FeatureBundle` dump를 바로 load할 수 있고, CSV/TSV는
+preview → column mapping validation → Dagster `offline_upload_load` 순서로 적재한다.
+
+새로 추가한 구성은 다음과 같다.
+
+- `krtour.map.offline_upload`: CSV/TSV preview, validation result/issue DTO, validation
+  import job, validation payload 재사용 load parser. CSV/TSV load는 `validation_job_id`가
+  있는 `validated` 상태만 허용한다.
+- `infra.jobs_repo`/`infra.offline_upload_repo`: validation job payload 조회/갱신과
+  `validating`/`validated`/`validation_failed` 상태 전이.
+- `krtour.map.geocoding`: `AddressResolver`, geocode response → `Address` 변환,
+  kraddr-geo REST v2 address resolver, cached resolver. `bjd_code`가 없으면 주소
+  geocode, 필요 시 좌표 reverse로 법정동코드를 보강한다.
+- provider 변환기: datagokr 표준데이터, MOIS, OpiNet, KREX, krheritage 변환 경로에
+  `address_resolver`를 주입할 수 있게 했다. 원천 `bjd_code`/좌표 reverse가 없거나
+  실패해도 주소가 있으면 kraddr-geo geocode 결과로 feature_id 계산 전 보강한다.
+- admin backend: `GET /admin/offline-uploads/{upload_id}/preview`,
+  `POST /admin/offline-uploads/{upload_id}/validate`,
+  `GET /admin/offline-uploads/{upload_id}/validation`.
+- admin frontend: `/admin/offline-uploads` 화면에 CSV/TSV mapping form, preview table,
+  validation issue table, validation 전 load 비활성화를 추가했다.
+- Dagster: `offline_upload_load` op가 `KRTOUR_MAP_KRADDR_GEO_BASE_URL`이 있으면
+  kraddr-geo REST v2 resolver/reverse geocoder를 열고 CSV/TSV load에도 주입한다.
+
+검증은 unit-only coverage `792 passed` / `80.54%`, integration/admin/dagster 묶음
+`293 passed`, targeted backend/provider/router unit `114 passed`, offline upload PostGIS
+integration `4 passed`, repo-wide `ruff`, `mypy`, import-linter, frontend
+`npm run type-check`, `npm run lint`, `npm run build`, React Doctor full scan(기존
+optional warning 7개), Windows Next dev server + WSL API 조합의 admin/ops Playwright
+e2e `6 passed`, OpenAPI admin/user drift check로 확인했다. 전체 integration 실행 중 기존
+fixture가 PostGIS extension을 `DROP ... CASCADE`하면서 geometry 컬럼을 지우는 CI RED
+원인도 `tests/integration/conftest.py`에서 함께 보정했다. PR 생성 후에는 GitHub Actions
+결과를 확인하고 실패가 있으면 같은 브랜치에서 수정한다.
+
+사용자 추가 지시에 따라 ADR-045 관련 잔여 task 완료 후 수행할 전체점검은
+`docs/reports/adr-045-overall-audit-plan-2026-06-04.md`에 `T-212a`~`T-212e`로
+분리했다. 전체점검은 admin UI 완결성, DB/API/frontend 성능, endpoint shape,
+Dagster/log 모니터링, 실데이터 offline upload, DB 초기화 후 full reload까지 포함한다.
+
+다음 한 작업은 **T-205d import_jobs batch 컬럼**이다. 이후 T-200 Batch DAG +
+T-201b Phase 2 consistency gate를 이어서 진행하고, ADR-045 잔여 task가 닫히면 T-212
+전체점검 묶음으로 넘어간다.
+
 ## 2026-06-03 Codex 작업 메모 — T-208h offline uploads API/UI
 
 admin UI #9의 offline upload 경로를 실제 API/UI로 연결했다. T-208g의

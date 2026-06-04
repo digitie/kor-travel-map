@@ -36,12 +36,16 @@ class _Client:
         *,
         store: object,
         dagster_run_id: str | None = None,
+        address_resolver: object | None = None,
+        reverse_geocoder: object | None = None,
     ) -> OfflineUploadLoadResult:
         self.calls.append(
             {
                 "upload_id": upload_id,
                 "store": store,
                 "dagster_run_id": dagster_run_id,
+                "address_resolver": address_resolver,
+                "reverse_geocoder": reverse_geocoder,
             }
         )
         return OfflineUploadLoadResult(

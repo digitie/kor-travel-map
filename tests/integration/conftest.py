@@ -103,9 +103,25 @@ async def pg_engine(pg_container: Any) -> AsyncIterator[AsyncEngine]:
             await conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema}"))
         # postgis/postgis Docker image는 initdb 단계에서 postgis + postgis_topology를
         # `public` schema에 자동 설치한다. ADR-008에 따라 `x_extension` schema로
-        # 재배치 — DROP CASCADE 후 재생성 (테스트 시작 시점이므로 안전).
-        await conn.execute(text("DROP EXTENSION IF EXISTS postgis_topology CASCADE"))
-        await conn.execute(text("DROP EXTENSION IF EXISTS postgis CASCADE"))
+        # 재배치한다. 이미 Alembic fixture가 같은 container DB에 테이블을 만든 뒤라면
+        # postgis를 CASCADE drop하면 geometry 컬럼이 삭제되므로, public에 있을 때만
+        # drop한다.
+        existing_extensions = {
+            row.extname: row.nspname
+            for row in (
+                await conn.execute(
+                    text(
+                        "SELECT e.extname, n.nspname FROM pg_extension e "
+                        "JOIN pg_namespace n ON e.extnamespace = n.oid "
+                        "WHERE e.extname IN ('postgis','postgis_topology')"
+                    )
+                )
+            )
+        }
+        if existing_extensions.get("postgis_topology") not in {None, "x_extension"}:
+            await conn.execute(text("DROP EXTENSION IF EXISTS postgis_topology CASCADE"))
+        if existing_extensions.get("postgis") not in {None, "x_extension"}:
+            await conn.execute(text("DROP EXTENSION IF EXISTS postgis CASCADE"))
         for ext in _EXTENSIONS:
             await conn.execute(
                 text(f"CREATE EXTENSION IF NOT EXISTS {ext} WITH SCHEMA x_extension")

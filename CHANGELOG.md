@@ -5,6 +5,30 @@
 
 ## [Unreleased]
 
+### Admin UI — Offline CSV/TSV validation + kraddr-geo bjd 보강 (2026-06-04)
+
+- **NEW**: `GET /admin/offline-uploads/{upload_id}/preview`,
+  `POST /admin/offline-uploads/{upload_id}/validate`,
+  `GET /admin/offline-uploads/{upload_id}/validation`을 추가했다.
+- **NEW**: CSV/TSV offline upload column mapping, header/sample preview, validation
+  issue, validation job payload 저장, load 전 validation gate를 추가했다.
+- **NEW**: admin frontend `/admin/offline-uploads`에 CSV/TSV mapping/preview/validation
+  panel을 추가했다.
+- **CHANGED**: `bjd_code`가 없는 offline/provider 행은 kraddr-geo REST v2 geocode 또는
+  reverse 결과로 법정동코드를 보강한다. resolver가 없거나 결과가 없으면 validation
+  issue로 남긴다.
+- **CHANGED**: Dagster `offline_upload_load`가 validation job의 column mapping을
+  재사용해 CSV/TSV 원본을 PostGIS에 적재한다.
+- **FIX**: integration shared testcontainer DB에서 PostGIS extension을 `DROP ... CASCADE`
+  해 `feature.features` geometry 컬럼을 지우던 fixture 순서 의존 문제를 수정했다.
+- **DOCS**: ADR-045 전체점검 task를 `T-212a`~`T-212e`로 분리하고 실행 계획 문서를
+  추가했다.
+- **TEST**: unit-only coverage `792 passed` / `80.54%`, integration/admin/dagster
+  `293 passed`, targeted backend/provider/router unit `114 passed`, offline upload
+  PostGIS integration `4 passed`, repo-wide `ruff`/`mypy`/import-linter, frontend
+  `type-check`/`lint`/`build`, React Doctor, admin/ops Playwright e2e `6 passed`,
+  OpenAPI drift check를 확인했다.
+
 ### Admin UI — Offline uploads API/UI (2026-06-03)
 
 - **NEW**: `POST /admin/offline-uploads`, `GET /admin/offline-uploads`,

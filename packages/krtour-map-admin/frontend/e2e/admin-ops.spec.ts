@@ -90,12 +90,14 @@ test.describe("admin/ops pages", () => {
       await expect(page.getByLabel(label, { exact: true })).toBeVisible();
     }
     await expect(page.getByRole("button", { name: "업로드" })).toBeDisabled();
+    await expect(page.getByText("CSV/TSV 업로드를 선택하면")).toBeVisible();
     await expect(page.getByLabel("offline upload state")).toBeVisible();
     await expect(page.getByLabel("provider filter")).toBeVisible();
     await expect(page.getByLabel("dataset filter")).toBeVisible();
     for (const column of [
       "upload",
       "state",
+      "format",
       "provider/dataset",
       "file",
       "size",
