@@ -20,11 +20,14 @@ from krtour.map.infra.advisory_lock import advisory_lock
 from krtour.map.infra.feature_update_repo import (
     FEATURE_UPDATE_JOB_KIND,
     FEATURE_UPDATE_QUEUE_ADVISORY_KEY,
+    FeatureUpdateLockBusy,
+    FeatureUpdateQueueLockBusy,
     FeatureUpdateRequest,
     FeatureUpdateRequestPreview,
     cancel_update_request,
     claim_next_update_request,
     enqueue_feature_update_request,
+    feature_update_scope_advisory_key,
     finish_update_request,
     get_update_request,
     list_update_requests,
@@ -176,7 +179,7 @@ async def test_peek_next_update_request_does_not_claim(
     assert claimed.request_id == high.request_id
 
 
-async def test_claim_returns_none_when_queue_lock_is_held(
+async def test_claim_raises_when_queue_lock_is_held(
     migrated_engine: AsyncEngine,
     migrated_session: AsyncSession,
 ) -> None:
@@ -193,11 +196,45 @@ async def test_claim_returns_none_when_queue_lock_is_held(
         holder.begin(),
         advisory_lock(holder, FEATURE_UPDATE_QUEUE_ADVISORY_KEY),
     ):
-        assert await claim_next_update_request(migrated_session) is None
+        with pytest.raises(FeatureUpdateQueueLockBusy):
+            await claim_next_update_request(migrated_session)
 
     still_queued = await get_update_request(migrated_session, request.request_id)
     assert still_queued is not None
     assert still_queued.state == "queued"
+
+
+async def test_enqueue_now_raises_when_scope_lock_is_held(
+    migrated_engine: AsyncEngine,
+    migrated_session: AsyncSession,
+) -> None:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    scope = {"type": "feature_ids", "feature_ids": ["feature-1", "feature-2"]}
+    lock_key = feature_update_scope_advisory_key(
+        scope_type="feature_ids",
+        scope=scope,
+        providers=["python-a-api"],
+        dataset_keys=["dataset-a"],
+    )
+
+    async with (
+        AsyncSession(migrated_engine, expire_on_commit=False) as holder,
+        holder.begin(),
+        advisory_lock(holder, lock_key),
+    ):
+        with pytest.raises(FeatureUpdateLockBusy) as exc_info:
+            await enqueue_feature_update_request(
+                migrated_session,
+                scope=scope,
+                providers=["python-a-api"],
+                dataset_keys=["dataset-a"],
+                run_mode="now",
+            )
+
+    assert exc_info.value.retry_after_seconds == 15
+    assert await _count_rows(migrated_session, "ops.feature_update_requests") == 0
+    assert await _count_rows(migrated_session, "ops.import_jobs") == 0
 
 
 async def test_start_finish_and_cancel_update_linked_import_job(

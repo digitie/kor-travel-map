@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 from krtour.map.infra.feature_update_repo import (
+    FeatureUpdateLockBusy,
     FeatureUpdateRequest,
     FeatureUpdateRequestPage,
     FeatureUpdateRequestPreview,
@@ -307,3 +308,30 @@ def test_run_now_requeues_existing_request(
     body = response.json()
     assert body["data"]["request_id"] == "req-2"
     assert body["data"]["run_mode"] == "now"
+
+
+@pytest.mark.unit
+def test_create_run_now_lock_busy_returns_retry_after(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import feature_update_requests as router_mod
+
+    async def _enqueue(_session: Any, **_kwargs: Any) -> FeatureUpdateRequest:
+        raise FeatureUpdateLockBusy(retry_after_seconds=15)
+
+    monkeypatch.setattr(router_mod, "enqueue_feature_update_request", _enqueue)
+
+    response = client.post(
+        "/admin/feature-update-requests",
+        json={
+            "scope": {"type": "feature_ids", "feature_ids": ["feature-1"]},
+            "run_mode": "now",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.headers["retry-after"] == "15"
+    body = response.json()
+    assert body["error"]["code"] == "LOCK_BUSY"
+    assert body["error"]["details"]["retry_after_seconds"] == 15

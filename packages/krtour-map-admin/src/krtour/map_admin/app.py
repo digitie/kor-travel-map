@@ -81,12 +81,25 @@ def _status_error_code(status_code: int) -> str:
     return "ERROR"
 
 
-def _http_error_message(detail: object, *, status_code: int) -> tuple[str, object]:
+def _http_error_payload(
+    detail: object,
+    *,
+    status_code: int,
+) -> tuple[str, str, object]:
+    if isinstance(detail, Mapping):
+        code = detail.get("code")
+        message = detail.get("message")
+        if isinstance(code, str) and isinstance(message, str):
+            return code, message, detail.get("details", {})
     if isinstance(detail, str):
-        return detail, {}
+        return _status_error_code(status_code), detail, {}
     if detail is None:
-        return "요청 처리 중 오류가 발생했습니다.", {}
-    return f"HTTP {status_code} error", detail
+        return (
+            _status_error_code(status_code),
+            "요청 처리 중 오류가 발생했습니다.",
+            {},
+        )
+    return _status_error_code(status_code), f"HTTP {status_code} error", detail
 
 
 def _error_response(
@@ -169,13 +182,13 @@ def create_app(settings: AdminSettings | None = None) -> FastAPI:
         exc: StarletteHTTPException,
     ) -> JSONResponse:
         request_id = _request_id(request)
-        message, details = _http_error_message(
+        code, message, details = _http_error_payload(
             exc.detail,
             status_code=exc.status_code,
         )
         return _error_response(
             status_code=exc.status_code,
-            code=_status_error_code(exc.status_code),
+            code=code,
             message=message,
             details=details,
             request_id=request_id,

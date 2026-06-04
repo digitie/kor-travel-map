@@ -11,6 +11,7 @@ import pytest
 from sqlalchemy import text
 
 from krtour.map.infra import feature_repo
+from krtour.map.infra.advisory_lock import try_advisory_lock
 from krtour.map.infra.feature_update_executor import (
     ProviderDatasetRefreshResult,
     ProviderDatasetRefreshScope,
@@ -19,6 +20,7 @@ from krtour.map.infra.feature_update_executor import (
 from krtour.map.infra.feature_update_repo import (
     FeatureUpdateRequest,
     enqueue_feature_update_request,
+    feature_update_scope_advisory_key,
     get_update_request,
 )
 from krtour.map.infra.poi_cache_target_repo import (
@@ -32,7 +34,7 @@ from krtour.map.infra.provider_refresh_policy_repo import (
 from krtour.map.providers.standard_data import cultural_festivals_to_bundles
 
 if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 pytestmark = pytest.mark.integration
 
@@ -138,6 +140,7 @@ async def _job_state(session: AsyncSession, job_id: str) -> dict[str, object]:
 
 
 async def test_execute_next_request_runs_provider_and_syncs_target_links(
+    migrated_engine: AsyncEngine,
     migrated_session: AsyncSession,
 ) -> None:
     seed = await _load_seed(migrated_session, "EXEC-SEED")
@@ -168,6 +171,13 @@ async def test_execute_next_request_runs_provider_and_syncs_target_links(
     )
     assert isinstance(request, FeatureUpdateRequest)
     assert request.job_id is not None
+    scope_lock_key = feature_update_scope_advisory_key(
+        scope_type=request.scope_type,
+        scope=request.scope,
+        providers=request.providers,
+        dataset_keys=request.dataset_keys,
+    )
+    competing_lock_results: list[bool] = []
 
     async def runner(
         session: AsyncSession,
@@ -176,6 +186,14 @@ async def test_execute_next_request_runs_provider_and_syncs_target_links(
         assert scope.provider == seed.source_record.provider
         assert scope.dataset_key == seed.source_record.dataset_key
         assert scope.target_ids == (target.target_id,)
+        from sqlalchemy.ext.asyncio import AsyncSession
+
+        async with (
+            AsyncSession(migrated_engine, expire_on_commit=False) as competitor,
+            competitor.begin(),
+            try_advisory_lock(competitor, scope_lock_key) as acquired,
+        ):
+            competing_lock_results.append(acquired)
         loaded = await _bundle("EXEC-LOADED")
         await feature_repo.load_bundle(session, loaded)
         return ProviderDatasetRefreshResult(
@@ -195,6 +213,7 @@ async def test_execute_next_request_runs_provider_and_syncs_target_links(
     assert result.request.state == "done"
     assert result.request.dagster_run_id == "dagster-run-1"
     assert result.results[0].loaded_count == 1
+    assert competing_lock_results == [False]
     assert result.plan.matched_scope["executed_provider_scopes"][0][
         "loaded_count"
     ] == 1

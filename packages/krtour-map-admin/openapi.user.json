@@ -989,6 +989,9 @@
             },
             "description": "Successful Response"
           },
+          "409": {
+            "description": "run_mode=now 요청의 동일 scope advisory lock 경합"
+          },
           "422": {
             "content": {
               "application/json": {

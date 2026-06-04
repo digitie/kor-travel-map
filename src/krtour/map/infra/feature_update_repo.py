@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import base64
 import json
+from collections.abc import Mapping as MappingABC
+from collections.abc import Sequence as SequenceABC
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Final
@@ -43,9 +45,12 @@ __all__ = [
     "FeatureUpdateRequest",
     "FeatureUpdateRequestPreview",
     "FeatureUpdateRequestPage",
+    "FeatureUpdateLockBusy",
+    "FeatureUpdateQueueLockBusy",
     "enqueue_feature_update_request",
     "peek_next_update_request",
     "claim_next_update_request",
+    "feature_update_scope_advisory_key",
     "start_update_request",
     "finish_update_request",
     "set_update_request_matched_scope",
@@ -56,6 +61,7 @@ __all__ = [
 
 FEATURE_UPDATE_JOB_KIND: Final[str] = "feature_update_request"
 FEATURE_UPDATE_QUEUE_ADVISORY_KEY: Final[str] = "krtour.map:feature_update:claim"
+FEATURE_UPDATE_LOCK_RETRY_AFTER_SECONDS: Final[int] = 15
 
 _RUN_MODES: Final[frozenset[str]] = frozenset({"queued", "now"})
 _TERMINAL_STATES: Final[frozenset[str]] = frozenset(
@@ -118,6 +124,35 @@ class FeatureUpdateRequestPage:
     next_cursor: str | None
 
 
+class FeatureUpdateLockBusy(RuntimeError):
+    """동일 feature update scope가 이미 실행 중임을 나타낸다."""
+
+    code: str = "LOCK_BUSY"
+
+    def __init__(
+        self,
+        message: str = "동일 feature update scope가 이미 실행 중입니다.",
+        *,
+        retry_after_seconds: int = FEATURE_UPDATE_LOCK_RETRY_AFTER_SECONDS,
+        lock_key: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
+        self.lock_key = lock_key
+
+
+class FeatureUpdateQueueLockBusy(FeatureUpdateLockBusy):
+    """feature update queue claim lock이 다른 worker에 점유되어 있다."""
+
+    def __init__(
+        self,
+        message: str = "feature update queue claim lock이 이미 점유되어 있습니다.",
+        *,
+        retry_after_seconds: int = FEATURE_UPDATE_LOCK_RETRY_AFTER_SECONDS,
+    ) -> None:
+        super().__init__(message, retry_after_seconds=retry_after_seconds)
+
+
 def _json_dict(value: Any) -> dict[str, Any]:
     if isinstance(value, str):
         value = json.loads(value)
@@ -177,6 +212,51 @@ def _validate_run_mode(run_mode: str) -> None:
 
 def _json_param(value: Mapping[str, Any] | Sequence[str]) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def _canonical_jsonable(value: Any) -> Any:
+    if isinstance(value, MappingABC):
+        return {
+            str(key): _canonical_jsonable(value[key])
+            for key in sorted(value, key=lambda item: str(item))
+        }
+    if isinstance(value, SequenceABC) and not isinstance(
+        value, (str, bytes, bytearray)
+    ):
+        items = [_canonical_jsonable(item) for item in value]
+        return sorted(
+            items,
+            key=lambda item: json.dumps(
+                item,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        )
+    return value
+
+
+def feature_update_scope_advisory_key(
+    *,
+    scope_type: str,
+    scope: Mapping[str, Any],
+    providers: Sequence[str] | None = None,
+    dataset_keys: Sequence[str] | None = None,
+) -> str:
+    """동일 update scope를 판정하는 advisory lock key를 만든다."""
+    payload = {
+        "scope_type": scope_type,
+        "scope": _canonical_jsonable(scope),
+        "providers": sorted(_normalize_strings(providers)),
+        "dataset_keys": sorted(_normalize_strings(dataset_keys)),
+    }
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return f"krtour.map:feature_update:scope:{encoded}"
 
 
 def _encode_cursor(item: FeatureUpdateRequest) -> str:
@@ -397,6 +477,17 @@ async def enqueue_feature_update_request(
             matched_scope=matched_scope,
         )
 
+    scope_lock_key = feature_update_scope_advisory_key(
+        scope_type=scope_type,
+        scope=scope_payload,
+        providers=provider_values,
+        dataset_keys=dataset_values,
+    )
+    if run_mode == "now":
+        async with try_advisory_lock(session, scope_lock_key) as acquired:
+            if not acquired:
+                raise FeatureUpdateLockBusy(lock_key=scope_lock_key)
+
     request_id = str(uuid4())
     job = await enqueue_import_job(
         session,
@@ -450,7 +541,7 @@ async def claim_next_update_request(
         session, FEATURE_UPDATE_QUEUE_ADVISORY_KEY
     ) as acquired:
         if not acquired:
-            return None
+            raise FeatureUpdateQueueLockBusy()
         row = (await session.execute(text(_CLAIM_REQUEST_SQL))).one_or_none()
         if row is None:
             return None

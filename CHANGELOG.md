@@ -5,6 +5,18 @@
 
 ## [Unreleased]
 
+### Admin API — Feature update lock handling (2026-06-04)
+
+- **FIXED**: `run_mode=now` feature update request 생성/재큐잉 시 동일 scope
+  advisory lock이 이미 점유되어 있으면 `409 LOCK_BUSY`와 `Retry-After` 헤더를
+  반환한다.
+- **FIXED**: feature update executor가 실행 중 scope lock을 보유해 API preflight가
+  실제 실행 경합을 감지할 수 있게 했다.
+- **FIXED**: `claim_next_update_request`가 queue lock 경합과 빈 큐를 모두 `None`으로
+  반환하던 동작을 분리해, lock 경합은 `FeatureUpdateQueueLockBusy` 예외로 드러낸다.
+- **TEST**: admin router unit, PostGIS queue/scope advisory lock integration,
+  executor scope lock 보유 integration test를 추가했다.
+
 ### Ops — Dagster provider resource guard (2026-06-04)
 
 - **NEW**: feature-load provider record key 9개에 기본 guard resource를 등록했다.
