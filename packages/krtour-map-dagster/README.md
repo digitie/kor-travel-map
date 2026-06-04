@@ -14,8 +14,17 @@
   schedule만 enable한다.
 
 ```bash
-dagster dev -m krtour.map_dagster.definitions -h 0.0.0.0 -p 9013
+# Docker 운영 기본: webserver + daemon 분리
+docker compose up dagster dagster-daemon
+
+# 로컬 venv 직접 실행
+dagster-webserver -m krtour.map_dagster.definitions -h 0.0.0.0 -p 9013
+dagster-daemon run -m krtour.map_dagster.definitions
 ```
+
+Docker 이미지는 `docker/dagster.yaml`을 `DAGSTER_HOME`에 포함한다. 이 설정은
+`KRTOUR_MAP_DAGSTER_PG_URL`을 읽어 같은 Postgres container 안의 별도 DB
+`krtour_map_dagster`에 Dagster run/event/schedule metadata를 저장한다.
 
 ## 1차 resource 계약
 

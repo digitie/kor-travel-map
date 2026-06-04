@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-04 (codex) — T-RV-01/02 Dagster metadata DB + daemon split
+
+**작업**: PR#153~#179 리뷰 후속 HIGH 항목 중 T-RV-01/02를 반영한다.
+
+- **Docker**: `dagster` 서비스를 `dagster-webserver` 실행으로 명시하고,
+  `dagster-daemon` 서비스를 추가했다.
+- **Metadata DB**: `dagster-db-init` 서비스가 같은 Postgres container 안에
+  `krtour_map_dagster` DB 존재를 보장한다.
+- **Dagster storage**: `docker/dagster.yaml`을 추가해 `KRTOUR_MAP_DAGSTER_PG_URL` 기반
+  `storage.postgres`를 설정하고, `krtour-map-dagster`에 `dagster-postgres` 의존성을
+  추가했다.
+- **Tests**: `tests/unit/test_docker_dagster_runtime.py`가 compose split, Postgres
+  storage 설정, dependency를 고정한다.
+
 ## 2026-06-04 (codex) — T-RV-08 public response field hardening
 
 **작업**: PR#153~#179 리뷰 후속 HIGH 항목 중 T-RV-08을 반영한다.

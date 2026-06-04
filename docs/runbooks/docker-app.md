@@ -33,6 +33,10 @@ host/browser 공개 URL은 `KRTOUR_MAP_OBJECT_STORE_PUBLIC_BASE_URL`(기본
 Postgres host 포트 기본값은 `KRTOUR_MAP_POSTGRES_HOST_PORT=15433`이며,
 `scripts/load-env.sh`는 `KRTOUR_MAP_PG_DSN` 미설정 시
 `postgresql+asyncpg://krtour_map:krtour_map@127.0.0.1:15433/krtour_map`을 쓴다.
+Dagster metadata는 같은 Postgres container 안의 별도 DB `krtour_map_dagster`를 쓴다.
+`dagster-db-init` 서비스가 기동 때마다 DB 존재를 보장하고, Dagster webserver/daemon은
+`KRTOUR_MAP_DAGSTER_PG_URL`(`KRTOUR_MAP_DOCKER_DAGSTER_PG_URL`)을 통해
+`dagster-postgres` storage에 연결한다.
 
 frontend 컨테이너에는 `NEXT_PUBLIC_*`만 주입한다. 서버용 API 키는 API/Dagster
 프로세스 환경변수로만 둔다. Dagster 임베드용 공개 URL은
@@ -43,9 +47,9 @@ Dagster GraphQL을 조회할 때는 `KRTOUR_MAP_ADMIN_DAGSTER_URL`을 쓴다. Do
 `http://dagster:9013`)로 주입한다. `.env`의 로컬 `127.0.0.1` 값이 컨테이너 안으로
 새지 않게 하기 위한 분리다. Dagster telemetry는 embedded 관리 화면의 첫 실행 안내와
 외부 telemetry 호출을 피하기 위해
-`DAGSTER_DISABLE_TELEMETRY=yes`를 기본값으로 둔다. 로컬 `scripts/run-admin-stack.sh`는
-`DAGSTER_HOME/dagster.yaml`이 없으면 `telemetry.enabled: false` 설정 파일을 만들고,
-Docker Dagster 이미지는 같은 설정 파일을 포함한다.
+`DAGSTER_DISABLE_TELEMETRY=yes`를 기본값으로 둔다. Docker Dagster 이미지는
+`docker/dagster.yaml`을 포함하며, 이 파일은 telemetry 비활성화와 Postgres metadata
+storage를 함께 설정한다.
 
 ## 2. 포트 정리
 
@@ -61,7 +65,7 @@ scripts/stop-fixed-ports.sh 9011 9012 9013 9003 9004
 
 ```bash
 npm run docker:build
-# 내부 실행: docker compose build api frontend dagster
+# 내부 실행: docker compose build api frontend dagster dagster-daemon
 ```
 
 이미지는 다음 파일에서 만든다.
@@ -74,12 +78,14 @@ npm run docker:build
 
 ```bash
 npm run docker:up
-# 내부 실행: docker compose up -d --build postgres rustfs rustfs-init api frontend dagster
+# 내부 실행: docker compose up -d --build postgres dagster-db-init rustfs rustfs-init api frontend dagster dagster-daemon
 ```
 
 API 컨테이너는 Postgres healthcheck 이후 `alembic upgrade head`를 실행하고 uvicorn을
-띄운다. `rustfs-init`는 `krtour-map`과 `krtour-uploads` bucket을 생성한다. Postgres
-host 포트 기본값은 `15433`이다.
+띄운다. `dagster-db-init`는 `krtour_map_dagster` DB 존재를 보장한다. `dagster`는
+Dagster webserver, `dagster-daemon`은 schedule/sensor daemon이다. `rustfs-init`는
+`krtour-map`과 `krtour-uploads` bucket을 생성한다. Postgres host 포트 기본값은
+`15433`이다.
 
 ## 5. 로컬 venv stack 기동
 

@@ -12,8 +12,9 @@ WORKDIR /app
 RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential curl \
     && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p "$DAGSTER_HOME" \
-    && printf "telemetry:\n  enabled: false\n" > "$DAGSTER_HOME/dagster.yaml"
+    && mkdir -p "$DAGSTER_HOME"
+
+COPY docker/dagster.yaml /opt/dagster/dagster_home/dagster.yaml
 
 COPY pyproject.toml README.md ./
 COPY src ./src
@@ -24,4 +25,4 @@ RUN python -m pip install --no-cache-dir --upgrade pip \
 
 EXPOSE 9013
 
-CMD ["sh", "-c", "dagster dev -m krtour.map_dagster.definitions -h 0.0.0.0 -p ${KRTOUR_MAP_DAGSTER_PORT:-9013}"]
+CMD ["sh", "-c", "dagster-webserver -m krtour.map_dagster.definitions -h 0.0.0.0 -p ${KRTOUR_MAP_DAGSTER_PORT:-9013}"]

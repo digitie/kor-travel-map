@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### Ops — Dagster metadata DB and daemon split (2026-06-04)
+
+- **CHANGED**: Docker Dagster runtime을 단일 `dagster dev`에서 `dagster` webserver와
+  `dagster-daemon` 서비스로 분리했다.
+- **NEW**: `dagster-db-init` 서비스가 같은 Postgres container 안의
+  `krtour_map_dagster` DB 존재를 보장한다.
+- **NEW**: `docker/dagster.yaml`을 추가해 Dagster run/event/schedule metadata를
+  `KRTOUR_MAP_DAGSTER_PG_URL` 기반 `dagster-postgres` storage에 저장한다.
+- **TEST**: compose 서비스 분리, Postgres storage 설정, `dagster-postgres` 의존성을
+  고정하는 unit test를 추가했다.
+
 ### Public API — Response field hardening (2026-06-04)
 
 - **CHANGED**: public `FeatureDetailResponse`에서 `coord_5179_srid`,

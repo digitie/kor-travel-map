@@ -6,4 +6,4 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT_DIR/scripts/load-env.sh"
 
 cd "$ROOT_DIR"
-docker compose build api frontend dagster
+docker compose build api frontend dagster dagster-daemon
