@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-04 (codex) — T-RV-04a Dagster provider resource guard
+
+**작업**: PR#153~#179 리뷰 후속 HIGH 항목 중 T-RV-04의 1차 guard를 반영한다.
+
+- **Provider resource guard**: feature-load provider record key 9개에 기본 guard
+  resource를 등록했다. code location은 로드되고, materialize 시 provider/package/env
+  안내가 포함된 명확한 `RuntimeError`를 낸다.
+- **Settings/env**: `KrtourMapSettings`에 `data_go_kr_service_key`, `opinet_api_key`,
+  `krex_ex_api_key`, `krex_go_api_key`를 추가하고 `.env.example`,
+  `scripts/load-env.sh`, `docker-compose.yml`에 전달 매핑을 추가했다.
+- **Tests**: provider env mapping과 secret 값 미노출, definitions guard 등록을 검증한다.
+- **잔여**: T-RV-04b에서 provider별 public client live fetcher를 실제 record iterable로
+  연결한다.
+
 ## 2026-06-04 (codex) — T-RV-03 Dagster resource lifecycle
 
 **작업**: PR#153~#179 리뷰 후속 HIGH 항목 중 T-RV-03을 반영한다.

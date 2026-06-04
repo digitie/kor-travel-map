@@ -12,7 +12,11 @@ from krtour.map.settings import KrtourMapSettings
 from pydantic import SecretStr
 
 from krtour.map_dagster import resources
-from krtour.map_dagster.resources import build_offline_upload_store_from_settings
+from krtour.map_dagster.resources import (
+    PROVIDER_RECORD_RESOURCE_SPECS,
+    build_offline_upload_store_from_settings,
+    build_provider_record_guard_resource,
+)
 
 pytestmark = pytest.mark.filterwarnings(
     "ignore:Parameter `owners` of initializer `SensorDefinition.__init__`"
@@ -74,3 +78,38 @@ async def test_krtour_map_client_resource_disposes_engine(monkeypatch: pytest.Mo
         next(resource_iter)
 
     assert engine.disposed is True
+
+
+def test_provider_record_resource_env_mapping() -> None:
+    specs = {spec.resource_key: spec for spec in PROVIDER_RECORD_RESOURCE_SPECS}
+
+    assert specs["datagokr_cultural_festivals"].krtour_map_env_names == (
+        "KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY",
+    )
+    assert specs["opinet_stations"].krtour_map_env_names == (
+        "KRTOUR_MAP_OPINET_API_KEY",
+    )
+    assert specs["krex_traffic_notices"].krtour_map_env_names == (
+        "KRTOUR_MAP_KREX_EX_API_KEY",
+    )
+    assert specs["knps_point_records"].source_env_names == ()
+
+
+def test_provider_record_guard_message_hides_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY", "super-secret-value")
+    spec = {
+        item.resource_key: item for item in PROVIDER_RECORD_RESOURCE_SPECS
+    }["datagokr_cultural_festivals"]
+    resource_def = build_provider_record_guard_resource(spec)
+    resource_fn = cast("Callable[[object], object]", resource_def.resource_fn)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        resource_fn(build_init_resource_context())
+
+    message = str(exc_info.value)
+    assert "KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY" in message
+    assert "DATA_GO_KR_SERVICE_KEY" in message
+    assert "super-secret-value" not in message
+    assert "provider public client wiring PR" in message

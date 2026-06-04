@@ -55,6 +55,27 @@ provider record resource:
 - `knps_point_records`
 - `knps_geometry_records`
 
+현재 기본 `defs`는 위 provider record key마다 **guard resource**를 등록한다. code
+location과 schedule/job 정의는 로드되지만, provider record resource를 실제로
+materialize하면 명확한 `RuntimeError`를 낸다. 이는 `_missing_resource`로 어느 key가
+왜 비어 있는지 알 수 없던 상태를 막기 위한 임시 운영 guard다.
+
+실제 provider live fetch는 provider public client wiring PR에서 provider별로 닫는다.
+그 전 운영 실행은 `Definitions(..., resources={...})` override로 record iterable을
+주입해야 한다. 기본 guard가 안내하는 env 매핑은 다음과 같다.
+
+| resource | provider package | krtour-map env | source env |
+|----------|------------------|----------------|------------|
+| `datagokr_cultural_festivals` | `python-datagokr-api` | `KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
+| `opinet_stations` | `python-opinet-api` | `KRTOUR_MAP_OPINET_API_KEY` | `OPINET_API_KEY` |
+| `krex_rest_areas` | `python-krex-api` | `KRTOUR_MAP_KREX_GO_API_KEY`, `KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY` | `KEX_GO_API_KEY`, `DATA_GO_KR_SERVICE_KEY` |
+| `krex_traffic_notices` | `python-krex-api` | `KRTOUR_MAP_KREX_EX_API_KEY` | `KEX_GO_API_KEY` |
+| `krheritage_items` | `python-krheritage-api` | `KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
+| `krheritage_events` | `python-krheritage-api` | `KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
+| `mois_license_records` | `python-mois-api` | `KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
+| `knps_point_records` | `python-knps-api` | 없음 | 없음 |
+| `knps_geometry_records` | `python-knps-api` | 없음 | 없음 |
+
 ## Feature load schedules
 
 모든 schedule은 `execution_timezone="Asia/Seoul"`이며, 같은 시각에 외부 API 호출이

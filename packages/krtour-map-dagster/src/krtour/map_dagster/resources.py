@@ -11,20 +11,161 @@ import importlib
 import inspect
 import threading
 from collections.abc import Awaitable, Iterator
+from dataclasses import dataclass
 from typing import Any, cast
 
-from dagster import InitResourceContext, resource
+from dagster import InitResourceContext, ResourceDefinition, resource
 from krtour.map.client import AsyncKrtourMapClient
 from krtour.map.infra.db import make_async_engine
 from krtour.map.infra.file_store import S3ObjectStore
 from krtour.map.settings import KrtourMapSettings
 
 __all__ = [
+    "PROVIDER_RECORD_RESOURCE_DEFINITIONS",
+    "PROVIDER_RECORD_RESOURCE_SPECS",
+    "ProviderRecordResourceSpec",
     "build_offline_upload_store_from_settings",
+    "build_provider_record_guard_resource",
     "create_s3_client_from_settings",
     "krtour_map_client_resource",
     "offline_upload_store_resource",
 ]
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderRecordResourceSpec:
+    """Feature load asset용 provider record resource guard 사양."""
+
+    resource_key: str
+    provider_package: str
+    dataset_key: str
+    setting_names: tuple[str, ...] = ()
+    source_env_names: tuple[str, ...] = ()
+    note: str = ""
+
+    @property
+    def krtour_map_env_names(self) -> tuple[str, ...]:
+        return tuple(f"KRTOUR_MAP_{name.upper()}" for name in self.setting_names)
+
+
+PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
+    ProviderRecordResourceSpec(
+        resource_key="datagokr_cultural_festivals",
+        provider_package="python-datagokr-api",
+        dataset_key="datagokr_cultural_festivals",
+        setting_names=("data_go_kr_service_key",),
+        source_env_names=("DATA_GO_KR_SERVICE_KEY",),
+    ),
+    ProviderRecordResourceSpec(
+        resource_key="opinet_stations",
+        provider_package="python-opinet-api",
+        dataset_key="opinet_fuel_station_details",
+        setting_names=("opinet_api_key",),
+        source_env_names=("OPINET_API_KEY",),
+        note="OpiNet은 전체 station dump endpoint가 없어 지역/좌표 scope 정책이 필요하다.",
+    ),
+    ProviderRecordResourceSpec(
+        resource_key="krex_rest_areas",
+        provider_package="python-krex-api",
+        dataset_key="krex_rest_areas",
+        setting_names=("krex_go_api_key", "data_go_kr_service_key"),
+        source_env_names=("KEX_GO_API_KEY", "DATA_GO_KR_SERVICE_KEY"),
+    ),
+    ProviderRecordResourceSpec(
+        resource_key="krex_traffic_notices",
+        provider_package="python-krex-api",
+        dataset_key="krex_traffic_notices",
+        setting_names=("krex_ex_api_key",),
+        source_env_names=("KEX_GO_API_KEY",),
+    ),
+    ProviderRecordResourceSpec(
+        resource_key="krheritage_items",
+        provider_package="python-krheritage-api",
+        dataset_key="krheritage_heritage_features",
+        setting_names=("data_go_kr_service_key",),
+        source_env_names=("DATA_GO_KR_SERVICE_KEY",),
+    ),
+    ProviderRecordResourceSpec(
+        resource_key="krheritage_events",
+        provider_package="python-krheritage-api",
+        dataset_key="krheritage_event_list",
+        setting_names=("data_go_kr_service_key",),
+        source_env_names=("DATA_GO_KR_SERVICE_KEY",),
+    ),
+    ProviderRecordResourceSpec(
+        resource_key="mois_license_records",
+        provider_package="python-mois-api",
+        dataset_key="mois_license_features_bulk",
+        setting_names=("data_go_kr_service_key",),
+        source_env_names=("DATA_GO_KR_SERVICE_KEY",),
+        note="MOIS는 LOCALDATA file download/source DB refresh 후 PlaceRecord stream이 필요하다.",
+    ),
+    ProviderRecordResourceSpec(
+        resource_key="knps_point_records",
+        provider_package="python-knps-api",
+        dataset_key="knps_visitor_centers",
+        note="KNPS는 keyless file dataset이며 parser/typed record resource wiring이 필요하다.",
+    ),
+    ProviderRecordResourceSpec(
+        resource_key="knps_geometry_records",
+        provider_package="python-knps-api",
+        dataset_key="knps_trails",
+        note="KNPS geometry는 SHP/CSV parser가 WGS84 WKT typed record를 제공해야 한다.",
+    ),
+)
+"""Feature load asset provider record resource별 env/package 매핑."""
+
+
+def _provider_guard_message(
+    spec: ProviderRecordResourceSpec,
+    *,
+    has_required_settings: bool,
+) -> str:
+    krtour_env = ", ".join(spec.krtour_map_env_names) or "auth env 없음"
+    source_env = ", ".join(spec.source_env_names) or "auth env 없음"
+    reason = (
+        "credential 환경변수가 설정되지 않았음"
+        if spec.setting_names and not has_required_settings
+        else "provider public client live fetcher가 아직 연결되지 않았음"
+    )
+    note = f" {spec.note}" if spec.note else ""
+    return (
+        f"Dagster provider record resource {spec.resource_key!r}는 기본 실행 비활성 상태: "
+        f"{reason}. provider={spec.provider_package}, dataset={spec.dataset_key}. "
+        f"krtour-map env: {krtour_env}; source env: {source_env}. "
+        "운영 실행은 provider public client wiring PR 또는 Definitions resource override가 "
+        f"필요하다.{note}"
+    )
+
+
+def build_provider_record_guard_resource(
+    spec: ProviderRecordResourceSpec,
+) -> ResourceDefinition:
+    """Provider record resource의 env 매핑을 보존하는 비실행 guard."""
+
+    @resource(
+        description=(
+            f"{spec.resource_key} provider record guard "
+            f"({spec.provider_package}, {spec.dataset_key})."
+        )
+    )
+    def _resource(_context: InitResourceContext) -> object:
+        settings = KrtourMapSettings()
+        has_required_settings = all(
+            getattr(settings, setting_name) is not None for setting_name in spec.setting_names
+        )
+        raise RuntimeError(
+            _provider_guard_message(spec, has_required_settings=has_required_settings)
+        )
+
+    return _resource
+
+
+PROVIDER_RECORD_RESOURCE_DEFINITIONS: dict[str, ResourceDefinition] = {
+    spec.resource_key: build_provider_record_guard_resource(spec)
+    for spec in PROVIDER_RECORD_RESOURCE_SPECS
+}
+"""기본 code location에서 provider key별로 등록되는 guarded resource 정의."""
 
 
 def build_offline_upload_store_from_settings(
