@@ -20,10 +20,15 @@ uvicorn 설정은 ``AdminSettings``(``KRTOUR_MAP_ADMIN_*`` env) 또는 호출자
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
+from uuid import uuid4
 
 from fastapi import FastAPI, Request, Response
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.responses import JSONResponse
 
 from krtour.map_admin import __version__
 from krtour.map_admin.routers import (
@@ -44,6 +49,71 @@ from krtour.map_admin.routers import (
 from krtour.map_admin.settings import AdminSettings
 
 __all__ = ["app", "create_app"]
+
+
+_ERROR_CODE_BY_STATUS: dict[int, str] = {
+    400: "BAD_REQUEST",
+    401: "UNAUTHORIZED",
+    403: "FORBIDDEN",
+    404: "NOT_FOUND",
+    409: "CONFLICT",
+    413: "PAYLOAD_TOO_LARGE",
+    422: "VALIDATION_ERROR",
+    500: "INTERNAL_ERROR",
+    501: "NOT_IMPLEMENTED",
+    502: "BAD_GATEWAY",
+    503: "SERVICE_UNAVAILABLE",
+}
+
+
+def _request_id(request: Request) -> str:
+    value = request.headers.get("x-request-id")
+    return value if value else str(uuid4())
+
+
+def _status_error_code(status_code: int) -> str:
+    if status_code in _ERROR_CODE_BY_STATUS:
+        return _ERROR_CODE_BY_STATUS[status_code]
+    if 400 <= status_code < 500:
+        return "BAD_REQUEST"
+    if status_code >= 500:
+        return "INTERNAL_ERROR"
+    return "ERROR"
+
+
+def _http_error_message(detail: object, *, status_code: int) -> tuple[str, object]:
+    if isinstance(detail, str):
+        return detail, {}
+    if detail is None:
+        return "요청 처리 중 오류가 발생했습니다.", {}
+    return f"HTTP {status_code} error", detail
+
+
+def _error_response(
+    *,
+    status_code: int,
+    code: str,
+    message: str,
+    details: object,
+    request_id: str,
+    headers: Mapping[str, str] | None = None,
+) -> JSONResponse:
+    response_headers = dict(headers or {})
+    response_headers.setdefault("X-Request-ID", request_id)
+    return JSONResponse(
+        status_code=status_code,
+        headers=response_headers,
+        content=jsonable_encoder(
+            {
+                "error": {
+                    "code": code,
+                    "message": message,
+                    "details": details if details is not None else {},
+                    "request_id": request_id,
+                }
+            }
+        ),
+    )
 
 
 def create_app(settings: AdminSettings | None = None) -> FastAPI:
@@ -82,6 +152,39 @@ def create_app(settings: AdminSettings | None = None) -> FastAPI:
         servers=[],
     )
     application.state.settings = settings
+
+    @application.exception_handler(StarletteHTTPException)
+    async def http_exception_handler(
+        request: Request,
+        exc: StarletteHTTPException,
+    ) -> JSONResponse:
+        request_id = _request_id(request)
+        message, details = _http_error_message(
+            exc.detail,
+            status_code=exc.status_code,
+        )
+        return _error_response(
+            status_code=exc.status_code,
+            code=_status_error_code(exc.status_code),
+            message=message,
+            details=details,
+            request_id=request_id,
+            headers=exc.headers,
+        )
+
+    @application.exception_handler(RequestValidationError)
+    async def validation_exception_handler(
+        request: Request,
+        exc: RequestValidationError,
+    ) -> JSONResponse:
+        request_id = _request_id(request)
+        return _error_response(
+            status_code=422,
+            code="VALIDATION_ERROR",
+            message="요청 값이 올바르지 않습니다.",
+            details={"errors": exc.errors()},
+            request_id=request_id,
+        )
 
     # frontend(Next.js dev/start 9012)가 브라우저에서 backend(9011)로 cross-origin
     # fetch → CORS 필요 (ADR-005: 내부 debug 도구, origin은 localhost frontend로

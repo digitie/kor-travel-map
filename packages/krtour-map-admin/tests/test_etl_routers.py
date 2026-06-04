@@ -63,7 +63,7 @@ def test_provider_datasets_unknown_404(client: TestClient) -> None:
     response = client.get("/debug/etl/unknown-provider/datasets")
     assert response.status_code == 404
     body = response.json()
-    assert "등록된 provider 아님" in body["detail"]
+    assert "등록된 provider 아님" in body["error"]["message"]
 
 
 # ── /debug/etl/{provider}/{dataset}/preview ───────────────────────────
@@ -152,7 +152,7 @@ def test_preview_unknown_dataset_404(client: TestClient) -> None:
     )
     assert response.status_code == 404
     body = response.json()
-    assert "등록되지 않은" in body["detail"]
+    assert "등록되지 않은" in body["error"]["message"]
 
 
 @pytest.mark.unit
@@ -174,7 +174,7 @@ def test_preview_live_source_501_when_loader_missing(
     )
     assert response.status_code == 501
     body = response.json()
-    assert "source=live 미구현" in body["detail"]
+    assert "source=live 미구현" in body["error"]["message"]
 
 
 @pytest.mark.unit
@@ -185,7 +185,7 @@ def test_preview_live_kma_503_when_key_missing(client: TestClient) -> None:
     )
     assert response.status_code == 503
     body = response.json()
-    assert "KMA_SERVICE_KEY 미설정" in body["detail"]
+    assert "KMA_SERVICE_KEY 미설정" in body["error"]["message"]
 
 
 @pytest.mark.unit
@@ -223,7 +223,7 @@ def test_preview_live_krex_503_when_key_missing(client: TestClient) -> None:
     )
     assert response.status_code == 503
     body = response.json()
-    assert "KREX_SERVICE_KEY 미설정" in body["detail"]
+    assert "KREX_SERVICE_KEY 미설정" in body["error"]["message"]
 
 
 @pytest.mark.unit
@@ -245,7 +245,7 @@ def test_preview_live_opinet_503_when_key_missing(client: TestClient) -> None:
     )
     assert response.status_code == 503
     body = response.json()
-    assert "OPINET_SERVICE_KEY 미설정" in body["detail"]
+    assert "OPINET_SERVICE_KEY 미설정" in body["error"]["message"]
 
 
 @pytest.mark.unit
@@ -268,7 +268,7 @@ def test_preview_live_datagokr_503_when_key_missing(client: TestClient) -> None:
     )
     assert response.status_code == 503
     body = response.json()
-    assert "DATAGOKR_SERVICE_KEY 미설정" in body["detail"]
+    assert "DATAGOKR_SERVICE_KEY 미설정" in body["error"]["message"]
 
 
 @pytest.mark.unit
@@ -293,8 +293,8 @@ def test_preview_live_kma_alerts_503_when_both_keys_missing(
     )
     assert response.status_code == 503
     body = response.json()
-    assert "KMA_APIHUB_KEY 미설정" in body["detail"]
-    assert "KMA_SERVICE_KEY" in body["detail"]
+    assert "KMA_APIHUB_KEY 미설정" in body["error"]["message"]
+    assert "KMA_SERVICE_KEY" in body["error"]["message"]
 
 
 @pytest.mark.unit

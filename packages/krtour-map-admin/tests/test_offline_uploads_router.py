@@ -235,7 +235,7 @@ def test_create_rejects_file_over_configured_max_bytes(
     )
 
     assert response.status_code == 413
-    assert "최대 8 bytes" in response.json()["detail"]
+    assert "최대 8 bytes" in response.json()["error"]["message"]
 
 
 @pytest.mark.unit
@@ -247,7 +247,7 @@ def test_create_rejects_unsupported_format(client: TestClient) -> None:
     )
 
     assert response.status_code == 422
-    assert "CSV/TSV" in response.json()["detail"]
+    assert "CSV/TSV" in response.json()["error"]["message"]
 
 
 @pytest.mark.unit
@@ -491,7 +491,7 @@ def test_load_offline_upload_rejects_unloadable_state(
     )
 
     assert response.status_code == 409
-    assert "loading" in response.json()["detail"]
+    assert "loading" in response.json()["error"]["message"]
 
 
 @pytest.mark.unit
@@ -516,4 +516,4 @@ def test_load_offline_upload_rejects_csv_without_validation(
     )
 
     assert response.status_code == 409
-    assert "validate" in response.json()["detail"]
+    assert "validate" in response.json()["error"]["message"]

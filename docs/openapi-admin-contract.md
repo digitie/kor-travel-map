@@ -87,13 +87,16 @@ Dagster DB에는 Dagster가 자체 schema를 관리한다.
   "error": {
     "code": "VALIDATION_ERROR",
     "message": "요청 값이 올바르지 않습니다.",
-    "details": {}
+    "details": {},
+    "request_id": "uuid"
   }
 }
 ```
 
 메인 라이브러리 DTO에는 `data/meta/error` 래핑을 넣지 않는다. 래핑은 API 패키지
-책임이다.
+책임이다. admin API는 `X-Request-ID` 요청 헤더가 있으면 같은 값을 error
+envelope의 `request_id`와 응답 헤더 `X-Request-ID`로 되돌려주고, 없으면 UUID를
+생성한다.
 
 ## 4. API tag 구조
 

@@ -5,6 +5,15 @@
 
 ## [Unreleased]
 
+### Admin API — Error envelope (2026-06-04)
+
+- **CHANGED**: admin API의 `HTTPException`과 request validation error 응답을
+  `{error:{code,message,details,request_id}}` envelope로 통일했다.
+- **CHANGED**: `X-Request-ID` 요청 헤더가 있으면 같은 값을 응답 헤더와 envelope에
+  되돌리고, 없으면 UUID를 생성한다.
+- **TEST**: 공통 error envelope unit test를 추가하고, 기존 router error assertion을
+  `detail`에서 `error.message` 기준으로 교정했다.
+
 ### Admin API — Offline upload 크기 상한 (2026-06-04)
 
 - **NEW**: `KRTOUR_MAP_OFFLINE_UPLOAD_MAX_BYTES` 설정을 추가했다. 기본값은

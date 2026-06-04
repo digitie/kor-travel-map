@@ -72,7 +72,7 @@ def test_bbox_min_greater_than_max_returns_422(client: TestClient) -> None:
             "min_lon": 128, "min_lat": 37, "max_lon": 127, "max_lat": 38,
         })
         assert r.status_code == 422
-        assert "bbox" in r.json()["detail"]
+        assert "bbox" in r.json()["error"]["message"]
     finally:
         client.app.dependency_overrides.clear()
 
@@ -104,7 +104,7 @@ def test_get_feature_404_when_missing(
     try:
         r = client.get("/features/nonexistent")
         assert r.status_code == 404
-        assert "nonexistent" in r.json()["detail"]
+        assert "nonexistent" in r.json()["error"]["message"]
     finally:
         client.app.dependency_overrides.clear()
 
@@ -323,7 +323,7 @@ def test_search_features_rejects_bad_bbox(
 ) -> None:
     r = client.get("/features/search", params={"bbox": "127,37,126,38"})
     assert r.status_code == 422
-    assert "bbox" in r.json()["detail"]
+    assert "bbox" in r.json()["error"]["message"]
 
 
 @pytest.mark.unit
@@ -345,6 +345,6 @@ def test_search_features_rejects_missing_scope(
     try:
         r = client.get("/features/search")
         assert r.status_code == 422
-        assert "q 또는 bbox" in r.json()["detail"]
+        assert "q 또는 bbox" in r.json()["error"]["message"]
     finally:
         client.app.dependency_overrides.clear()
