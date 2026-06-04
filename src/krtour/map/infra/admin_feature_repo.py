@@ -847,6 +847,7 @@ _SELECT_DEDUP_PAIR_SQL: Final[str] = """
 SELECT feature_id_a, feature_id_b, total_score, status
 FROM ops.dedup_review_queue
 WHERE review_key = :review_key
+FOR UPDATE
 """
 
 

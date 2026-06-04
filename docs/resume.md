@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-04 Codex 작업 메모 — T-RV-14 dedup merge review row 잠금
+
+T-RV-14를 처리한다. `merge_from_review`는 자동 master 선정 전에
+`ops.dedup_review_queue` review row를 `FOR UPDATE`로 잠그고 pending 상태를 확인한다.
+admin `merge_dedup_review`의 수동 master 지정 경로도 같은 row lock을 사용해 자동/수동
+merge 경로의 TOCTOU 차이를 없앤다.
+
+integration test는 한 트랜잭션이 review row를 `FOR UPDATE`로 보유한 동안 다른
+트랜잭션의 자동 merge와 수동 merge가 `lock_timeout`까지 대기하는지 검증한다.
+
+다음 한 작업은 **T-RV-15(scope resolver count/limit)**, **T-RV-04b(provider public
+client live fetch wiring)**, 또는 **T-RV-16(dedup refresh master 선정 신호 보강)** 다.
+**T-RV-27은 production 레벨 hardening 전까지 계속 skip/deferred**다.
+
 ## 2026-06-04 Codex 작업 메모 — T-RV-13 UUID default 스키마 한정
 
 T-RV-13을 처리한다. ADR-008에 따라 pgcrypto는 `x_extension` schema에 격리되어
