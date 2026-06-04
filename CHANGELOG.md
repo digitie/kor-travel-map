@@ -15,8 +15,8 @@
 - **CHANGED**: `severity_max=ERROR`이면 `mv_refresh`를 차단하고 root/gate import job을
   `failed`로 기록한다. OK/WARN이면 `mv_refresh` job을 기록하며, 현재 MV 카탈로그가
   없으면 `skipped:no_materialized_views`로 남긴다.
-- **TEST**: Dagster unit/definitions `7 passed`, PostGIS integration `14 passed`,
-  targeted `ruff`/`mypy`를 확인했다.
+- **TEST**: unit coverage `800 passed` / `80.59%`, Dagster package `17 passed`, PostGIS
+  integration `14 passed`, repo-wide `ruff`/`mypy`/import-linter를 확인했다.
 
 ### Ops — admin stack runner 안정화 (2026-06-04)
 

@@ -12,10 +12,11 @@ root/gate job을 `failed`로 닫고 `mv_refresh`를 만들지 않는다. `OK/WAR
 
 Dagster package에는 `full_load_batch_consistency_gate` job을 추가했고,
 `AsyncKrtourMapClient.run_batch_dag_consistency_gate(...)`로 DB transaction을 소유한다.
-검증은 Dagster unit/definitions `7 passed`, PostGIS integration
-`tests/integration/test_batch_dag.py tests/integration/test_jobs_repo.py` `14 passed`,
-targeted `ruff`, targeted `mypy`로 확인했다. 다음 한 작업은 **T-201b 정합성 Phase 2
-범위 재정의/구현**이며, ADR-045 잔여가 닫히면 T-212 전체점검으로 넘어간다.
+검증은 unit coverage 재현 `800 passed` / `80.59%`, Dagster package `17 passed`,
+PostGIS integration `tests/integration/test_batch_dag.py tests/integration/test_jobs_repo.py`
+`14 passed`, targeted `ruff`, targeted `mypy`, import-linter로 확인했다. 다음 한 작업은
+**T-201b 정합성 Phase 2 범위 재정의/구현**이며, ADR-045 잔여가 닫히면 T-212
+전체점검으로 넘어간다.
 
 ## 2026-06-04 Codex 작업 메모 — T-209b run-admin-stack 안정화
 

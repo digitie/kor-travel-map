@@ -16,9 +16,9 @@
 - **Dagster**: `full_load_batch_consistency_gate` job/op를 추가하고 definitions에 등록했다.
 - **문서**: `tasks`, `dagster-boundary`, `adr045-standalone-plan`, `SPRINT-5`,
   `resume`, `CHANGELOG`를 T-200 완료 범위로 갱신했다.
-- **검증**: Dagster unit/definitions `7 passed`, PostGIS integration
-  `tests/integration/test_batch_dag.py tests/integration/test_jobs_repo.py` `14 passed`,
-  targeted `ruff`, targeted `mypy` 통과.
+- **검증**: unit coverage 재현 `800 passed` / `80.59%`, Dagster package `17 passed`,
+  PostGIS integration `tests/integration/test_batch_dag.py tests/integration/test_jobs_repo.py`
+  `14 passed`, repo-wide `ruff`/`mypy`/import-linter, `git diff --check` 통과.
 - **다음**: T-201b Phase 2(F5~F8 gate + 운영 MV 카탈로그/정책)와 T-209 잔여를 닫은 뒤
   T-212 전체점검으로 이동한다.
 
