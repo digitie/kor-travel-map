@@ -84,6 +84,7 @@ _TABULAR_FORMATS: Final[frozenset[str]] = frozenset({"csv", "tsv"})
 _WRITEABLE_FORMATS: Final[frozenset[str]] = frozenset(
     {"json", "jsonl", *_TABULAR_FORMATS}
 )
+_MULTIPART_CONTENT_LENGTH_MARGIN_BYTES: Final[int] = 64 * 1024
 _DAGSTER_REPOSITORY_NAME: Final[str] = "__repository__"
 _DAGSTER_REPOSITORY_LOCATION_NAME: Final[str] = "krtour.map_dagster.definitions"
 _DAGSTER_OFFLINE_UPLOAD_JOB_NAME: Final[str] = "offline_upload_load"
@@ -513,6 +514,41 @@ def _content_type(filename: str, detected_format: str | None) -> str:
     return guessed or "application/octet-stream"
 
 
+def _content_length(request: Request) -> int | None:
+    value = request.headers.get("content-length")
+    if value is None:
+        return None
+    try:
+        content_length = int(value)
+    except ValueError:
+        return None
+    return content_length if content_length >= 0 else None
+
+
+def _upload_too_large(max_bytes: int) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+        detail=f"offline upload 파일은 최대 {max_bytes} bytes까지 허용합니다.",
+    )
+
+
+def _guard_upload_content_length(request: Request, *, max_bytes: int) -> None:
+    content_length = _content_length(request)
+    if content_length is None:
+        return
+    # multipart/form-data의 field/header overhead 때문에 실제 파일 상한보다 약간 큰
+    # request body는 실제 read 상한에서 다시 판정한다.
+    if content_length > max_bytes + _MULTIPART_CONTENT_LENGTH_MARGIN_BYTES:
+        raise _upload_too_large(max_bytes)
+
+
+async def _read_upload_body(file: UploadFile, *, max_bytes: int) -> bytes:
+    body = await file.read(max_bytes + 1)
+    if len(body) > max_bytes:
+        raise _upload_too_large(max_bytes)
+    return body
+
+
 def _storage_key(settings: KrtourMapSettings, upload_id: str, filename: str) -> str:
     prefix = settings.offline_upload_prefix.strip("/")
     if prefix:
@@ -653,8 +689,12 @@ async def launch_offline_upload_load(
     response_model=OfflineUploadWriteResponse,
     status_code=status.HTTP_201_CREATED,
     summary="오프라인 원본 업로드",
+    responses={
+        413: {"description": "offline upload 파일 크기 상한 초과"},
+    },
 )
 async def create_offline_upload_request(
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
     file: Annotated[
         UploadFile,
@@ -667,6 +707,8 @@ async def create_offline_upload_request(
 ) -> OfflineUploadWriteResponse:
     started_at = perf_counter()
     settings = KrtourMapSettings()
+    max_bytes = settings.offline_upload_max_bytes
+    _guard_upload_content_length(request, max_bytes=max_bytes)
     upload_id = str(uuid4())
     filename = _safe_filename(file.filename)
     detected_format = _detected_format(filename)
@@ -675,7 +717,7 @@ async def create_offline_upload_request(
             status_code=422,
             detail="offline upload은 JSON/JSONL FeatureBundle 또는 CSV/TSV 파일만 지원합니다.",
         )
-    body = await file.read()
+    body = await _read_upload_body(file, max_bytes=max_bytes)
     if not body:
         raise HTTPException(
             status_code=422,

@@ -1,5 +1,20 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-04 Codex 작업 메모 — T-RV-09 offline upload 크기 상한
+
+PR#153~#179 리뷰 후속 HIGH 선반영 순서에 따라 T-RV-09를 처리한다.
+`KrtourMapSettings.offline_upload_max_bytes`/`KRTOUR_MAP_OFFLINE_UPLOAD_MAX_BYTES`를
+추가했고 기본값은 `104857600` bytes(100 MiB)다. `POST /admin/offline-uploads`는
+`Content-Length`로 명백히 큰 multipart 요청을 `413`으로 선차단하고, 실제 파일 read도
+`max_bytes + 1`까지만 수행해 무제한 메모리 read를 막는다.
+
+환경 전파는 `.env.example`, `scripts/load-env.sh`, `docker-compose.yml`에 반영했다.
+문서는 OpenAPI/admin workflow/RustFS/tasks/journal/changelog를 갱신했다. 이번 범위는
+무제한 read/OOM surface 차단이며, S3 multipart streaming·object orphan 보상·store
+client 재사용은 T-RV-22/23/25에서 별도 처리한다. 다음 한 작업은 T-RV 권장 순서상
+**T-RV-27 admin API bind 노출 정정**이며, 이어서 T-RV-06/07/08과 Dagster D-2/D-15
+형상 항목을 닫는다.
+
 ## 2026-06-04 Codex 작업 메모 — T-200 Batch DAG + 정합성 게이트
 
 T-205d의 `load_batch_id`/`parent_job_id` 컬럼 위에 T-200 batch gate를 연결했다.

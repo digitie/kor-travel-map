@@ -216,6 +216,29 @@ def test_create_offline_upload_accepts_csv(
 
 
 @pytest.mark.unit
+def test_create_rejects_file_over_configured_max_bytes(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import offline_uploads as router_mod
+
+    def _build_store(_settings: Any) -> _FakeStore:
+        raise AssertionError("oversized upload must be rejected before object store")
+
+    monkeypatch.setenv("KRTOUR_MAP_OFFLINE_UPLOAD_MAX_BYTES", "8")
+    monkeypatch.setattr(router_mod, "build_offline_upload_store", _build_store)
+
+    response = client.post(
+        "/admin/offline-uploads",
+        data={"provider": "p", "dataset_key": "d"},
+        files={"file": ("features.jsonl", b"123456789", "application/x-ndjson")},
+    )
+
+    assert response.status_code == 413
+    assert "최대 8 bytes" in response.json()["detail"]
+
+
+@pytest.mark.unit
 def test_create_rejects_unsupported_format(client: TestClient) -> None:
     response = client.post(
         "/admin/offline-uploads",

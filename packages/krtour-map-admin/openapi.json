@@ -5547,6 +5547,9 @@
             },
             "description": "Successful Response"
           },
+          "413": {
+            "description": "offline upload 파일 크기 상한 초과"
+          },
           "422": {
             "content": {
               "application/json": {
