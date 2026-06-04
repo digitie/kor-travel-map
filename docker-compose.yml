@@ -5,6 +5,7 @@ services:
       POSTGRES_DB: ${KRTOUR_MAP_POSTGRES_DB:-krtour_map}
       POSTGRES_USER: ${KRTOUR_MAP_POSTGRES_USER:-krtour_map}
       POSTGRES_PASSWORD: ${KRTOUR_MAP_POSTGRES_PASSWORD:-krtour_map}
+      KRTOUR_MAP_DAGSTER_POSTGRES_DB: ${KRTOUR_MAP_DAGSTER_POSTGRES_DB:-krtour_map_dagster}
     ports:
       - "${KRTOUR_MAP_POSTGRES_HOST_PORT:-15433}:5432"
     volumes:
@@ -18,6 +19,32 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+
+  dagster-db-init:
+    image: postgres:16-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      KRTOUR_MAP_POSTGRES_DB: ${KRTOUR_MAP_POSTGRES_DB:-krtour_map}
+      KRTOUR_MAP_POSTGRES_USER: ${KRTOUR_MAP_POSTGRES_USER:-krtour_map}
+      KRTOUR_MAP_POSTGRES_PASSWORD: ${KRTOUR_MAP_POSTGRES_PASSWORD:-krtour_map}
+      KRTOUR_MAP_DAGSTER_POSTGRES_DB: ${KRTOUR_MAP_DAGSTER_POSTGRES_DB:-krtour_map_dagster}
+      PGPASSWORD: ${KRTOUR_MAP_POSTGRES_PASSWORD:-krtour_map}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        if ! echo "$$KRTOUR_MAP_DAGSTER_POSTGRES_DB" | grep -Eq '^[A-Za-z_][A-Za-z0-9_]*$$'; then
+          echo "invalid KRTOUR_MAP_DAGSTER_POSTGRES_DB=$$KRTOUR_MAP_DAGSTER_POSTGRES_DB" >&2
+          exit 1
+        fi
+        if psql -h postgres -U "$$KRTOUR_MAP_POSTGRES_USER" -d "$$KRTOUR_MAP_POSTGRES_DB" -tAc "SELECT 1 FROM pg_database WHERE datname = '$$KRTOUR_MAP_DAGSTER_POSTGRES_DB'" | grep -q 1; then
+          echo "Dagster metadata DB exists: $$KRTOUR_MAP_DAGSTER_POSTGRES_DB"
+        else
+          createdb -h postgres -U "$$KRTOUR_MAP_POSTGRES_USER" "$$KRTOUR_MAP_DAGSTER_POSTGRES_DB"
+          echo "Dagster metadata DB created: $$KRTOUR_MAP_DAGSTER_POSTGRES_DB"
+        fi
 
   rustfs-perms:
     image: alpine:3.20
@@ -121,6 +148,10 @@ services:
     build:
       context: .
       dockerfile: docker/dagster.Dockerfile
+    command:
+      - /bin/sh
+      - -c
+      - dagster-webserver -m krtour.map_dagster.definitions -h 0.0.0.0 -p "$${KRTOUR_MAP_DAGSTER_PORT:-9013}"
     env_file:
       - path: .env
         required: false
@@ -131,6 +162,7 @@ services:
       DAGSTER_HOME: /opt/dagster/dagster_home
       DAGSTER_DISABLE_TELEMETRY: ${DAGSTER_DISABLE_TELEMETRY:-yes}
       KRTOUR_MAP_DAGSTER_PORT: ${KRTOUR_MAP_DAGSTER_PORT:-9013}
+      KRTOUR_MAP_DAGSTER_PG_URL: ${KRTOUR_MAP_DOCKER_DAGSTER_PG_URL:-postgresql://krtour_map:krtour_map@postgres:5432/krtour_map_dagster}
       KRTOUR_MAP_PG_DSN: ${KRTOUR_MAP_DOCKER_PG_DSN:-postgresql+asyncpg://krtour_map:krtour_map@postgres:5432/krtour_map}
       KRTOUR_MAP_OBJECT_STORE_ENDPOINT_URL: ${KRTOUR_MAP_DOCKER_OBJECT_STORE_ENDPOINT_URL:-http://rustfs:9000}
       KRTOUR_MAP_OBJECT_STORE_BUCKET: ${KRTOUR_MAP_OBJECT_STORE_BUCKET:-krtour-map}
@@ -140,12 +172,45 @@ services:
       KRTOUR_MAP_OFFLINE_UPLOAD_BUCKET: ${KRTOUR_MAP_OFFLINE_UPLOAD_BUCKET:-krtour-uploads}
       KRTOUR_MAP_OFFLINE_UPLOAD_MAX_BYTES: ${KRTOUR_MAP_OFFLINE_UPLOAD_MAX_BYTES:-104857600}
     depends_on:
+      dagster-db-init:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       rustfs-init:
         condition: service_completed_successfully
     ports:
       - "${KRTOUR_MAP_DAGSTER_PORT:-9013}:${KRTOUR_MAP_DAGSTER_PORT:-9013}"
+
+  dagster-daemon:
+    build:
+      context: .
+      dockerfile: docker/dagster.Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      TMPDIR: /tmp
+      TEMP: /tmp
+      TMP: /tmp
+      DAGSTER_HOME: /opt/dagster/dagster_home
+      DAGSTER_DISABLE_TELEMETRY: ${DAGSTER_DISABLE_TELEMETRY:-yes}
+      KRTOUR_MAP_DAGSTER_PG_URL: ${KRTOUR_MAP_DOCKER_DAGSTER_PG_URL:-postgresql://krtour_map:krtour_map@postgres:5432/krtour_map_dagster}
+      KRTOUR_MAP_PG_DSN: ${KRTOUR_MAP_DOCKER_PG_DSN:-postgresql+asyncpg://krtour_map:krtour_map@postgres:5432/krtour_map}
+      KRTOUR_MAP_OBJECT_STORE_ENDPOINT_URL: ${KRTOUR_MAP_DOCKER_OBJECT_STORE_ENDPOINT_URL:-http://rustfs:9000}
+      KRTOUR_MAP_OBJECT_STORE_BUCKET: ${KRTOUR_MAP_OBJECT_STORE_BUCKET:-krtour-map}
+      KRTOUR_MAP_OBJECT_STORE_REGION: ${KRTOUR_MAP_OBJECT_STORE_REGION:-us-east-1}
+      KRTOUR_MAP_OBJECT_STORE_ACCESS_KEY_ID: ${KRTOUR_MAP_OBJECT_STORE_ACCESS_KEY_ID:-krtour-map-dev-access}
+      KRTOUR_MAP_OBJECT_STORE_SECRET_ACCESS_KEY: ${KRTOUR_MAP_OBJECT_STORE_SECRET_ACCESS_KEY:-krtour-map-dev-secret}
+      KRTOUR_MAP_OFFLINE_UPLOAD_BUCKET: ${KRTOUR_MAP_OFFLINE_UPLOAD_BUCKET:-krtour-uploads}
+      KRTOUR_MAP_OFFLINE_UPLOAD_MAX_BYTES: ${KRTOUR_MAP_OFFLINE_UPLOAD_MAX_BYTES:-104857600}
+    depends_on:
+      dagster-db-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      rustfs-init:
+        condition: service_completed_successfully
+    command: ["dagster-daemon", "run", "-m", "krtour.map_dagster.definitions"]
 
 volumes:
   krtour-map-postgres:

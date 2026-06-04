@@ -41,7 +41,8 @@ npm run docker:up
 
 ## 아직 남은 운영 확장
 
-- Dagster metadata DB(`krtour_map_dagster`) 분리와 daemon/schedule/sensor 운영.
+- Dagster provider resource 실제 키 주입/engine lifecycle 보강(T-RV-03/04)과
+  run-now lock/claim 경합 보강(T-RV-05/11).
 - RustFS/객체 저장소를 포함한 backup/restore 묶음 자동화.
 - CSV/TSV offline upload validation wizard와 column mapping preset. 기본
   `/admin/offline-uploads*` JSON/JSONL upload/list/detail/load API/UI는 구현됨.

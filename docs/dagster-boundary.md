@@ -478,19 +478,27 @@ T-205d 이후 `ops.import_jobs`는 `load_batch_id`와 self-FK `parent_job_id`를
 
 본 라이브러리는 위 테이블/로그만 충실히 기록.
 
-## 14. 로컬 디버그 (Dagster dev)
+## 14. 로컬/운영 Dagster 기동
 
 ```bash
-# krtour-map Dagster 패키지에서
-dagster dev -m krtour.map_dagster.definitions -h 0.0.0.0 -p 9013
+# 운영/Docker compose 기준
+docker compose up dagster dagster-daemon
 
-# 또는 docker compose
-docker compose up dagster
+# 로컬 venv에서 webserver/daemon을 직접 나누어 띄울 때
+export DAGSTER_HOME=.dagster
+export KRTOUR_MAP_DAGSTER_PG_URL=postgresql://krtour_map:krtour_map@127.0.0.1:15433/krtour_map_dagster
+dagster-webserver -m krtour.map_dagster.definitions -h 0.0.0.0 -p 9013
+dagster-daemon run -m krtour.map_dagster.definitions
 ```
 
 메인 라이브러리 단독으로는 Dagster를 띄우지 않는다 (의존성 X). Dagster 실행 코드는
 krtour-map 독립 프로그램 패키지에 둔다. 디버그 / 적재 검증은 admin API
 (`krtour.map_admin`) 또는 직접 Python 스크립트로도 가능하다.
+
+Docker compose는 `dagster-db-init`로 같은 Postgres container 안에
+`krtour_map_dagster` DB를 보장하고, `docker/dagster.yaml`의 `storage.postgres` 설정으로
+run/event/schedule metadata를 영속화한다. `dagster dev`는 로컬 단일 프로세스 편의
+명령으로만 사용할 수 있고 운영 compose에서는 사용하지 않는다.
 
 feature update worker 실행에는 `krtour_map_client`와 `feature_update_runner` resource가
 필수다. 실패 알림은 선택 resource `feature_update_failure_notifier`로 연결한다.

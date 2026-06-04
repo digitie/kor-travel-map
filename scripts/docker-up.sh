@@ -10,5 +10,5 @@ source "$ROOT_DIR/scripts/load-env.sh"
   "$KRTOUR_MAP_RUSTFS_API_PORT" "$KRTOUR_MAP_RUSTFS_CONSOLE_PORT"
 
 cd "$ROOT_DIR"
-docker compose up -d --build postgres rustfs rustfs-init api frontend dagster
+docker compose up -d --build postgres dagster-db-init rustfs rustfs-init api frontend dagster dagster-daemon
 docker compose ps

@@ -1,5 +1,20 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-04 Codex 작업 메모 — T-RV-01/02 Dagster 운영 형상
+
+T-RV-01/02를 처리한다. Docker compose의 `dagster` 서비스는
+`dagster-webserver`로 명시하고, 별도 `dagster-daemon` 서비스를 추가했다.
+`dagster-db-init` 서비스는 같은 Postgres container 안에 `krtour_map_dagster` DB가
+없으면 생성한다. `docker/dagster.yaml`은 `KRTOUR_MAP_DAGSTER_PG_URL` 기반
+`storage.postgres`를 설정하고, `krtour-map-dagster` 패키지에 `dagster-postgres`
+의존성을 추가했다.
+
+`tests/unit/test_docker_dagster_runtime.py`가 compose split, Postgres storage 설정,
+`dagster-postgres` dependency를 회귀 테스트한다. 다음 한 작업은 **T-RV-03/04(Dagster
+resource engine lifecycle + provider service key resource)** 또는 **T-RV-05/11(D-6
+run-now/claim lock)** 이다. **T-RV-27은 production 레벨 hardening 전까지 계속
+skip/deferred**다.
+
 ## 2026-06-04 Codex 작업 메모 — T-RV-08 public response field hardening
 
 T-RV-08을 처리한다. public `FeatureDetailResponse`에서 `coord_5179_srid`,
