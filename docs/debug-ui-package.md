@@ -147,6 +147,8 @@ class AdminSettings(BaseSettings):
     log_level: str = "info"
     debug_routes_enabled: bool = True         # /debug/* 활성
     features_routes_enabled: bool = True      # /features/* 활성 (DB 필요, PR#73)
+    admin_routes_enabled: bool | None = None  # /admin/* 활성. None이면 features flag 추종
+    ops_routes_enabled: bool | None = None    # /ops/* + /ops/dagster/* 활성. None이면 features flag 추종
     cors_allow_origins: list[str] = [         # frontend(9012) cross-origin (PR#68)
         "http://localhost:9012", "http://127.0.0.1:9012",
     ]
@@ -201,7 +203,11 @@ krtour-map-admin run --host 127.0.0.1 --port 9011
 >
 > 나머지 행(`/features/nearby`, `/{id}/weather`, `/sources`, `/import-jobs`,
 > `/dedup-review`, `/debug/explain` 등)은 **Sprint 3~5 예정**. 활성 라우터는
-> `settings.debug_routes_enabled` / `settings.features_routes_enabled` flag로 제어.
+> `settings.debug_routes_enabled` / `settings.features_routes_enabled` /
+> `settings.admin_routes_enabled` / `settings.ops_routes_enabled` flag로 제어.
+> `admin_routes_enabled`와 `ops_routes_enabled`가 `None`이면
+> `features_routes_enabled`를 따른다. DB 없는 부팅 검증에서는 features/admin/ops를
+> 함께 `False`로 내려 DB 의존 surface를 닫는다.
 
 | Path | 메서드 | 설명 |
 |------|--------|------|

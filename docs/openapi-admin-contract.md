@@ -114,6 +114,14 @@ envelope의 `request_id`와 응답 헤더 `X-Request-ID`로 되돌려주고, 없
 | `dagster` | `/ops/dagster` | Dagster webserver GraphQL 기반 운영 요약 |
 | `debug` | `/debug` | fixture, ETL preview, EXPLAIN |
 
+라우터 노출은 `AdminSettings` flag로 제어한다. `/debug/*`는
+`debug_routes_enabled`, `/features/*`는 `features_routes_enabled`,
+`/admin/*`는 `admin_routes_enabled`, `/ops/*`와 `/ops/dagster/*`는
+`ops_routes_enabled`가 담당한다. `admin_routes_enabled`와
+`ops_routes_enabled`가 `None`이면 `features_routes_enabled` 값을 따른다. 따라서 DB 없는
+부팅 검증에서는 `features_routes_enabled=False`만으로 features/admin/ops surface가 함께
+닫히며, admin/ops만 따로 열어야 하는 특수 검증은 명시 flag로 opt-in한다.
+
 ### 4.1 Admin issues / 주소 검토
 
 `/admin/issues`는 결측/정합성 이슈를 한 건 단위로 처리하는 운영 API다. 특히

@@ -138,6 +138,16 @@ def create_app(settings: AdminSettings | None = None) -> FastAPI:
     """
     if settings is None:
         settings = AdminSettings()
+    admin_routes_enabled = (
+        settings.features_routes_enabled
+        if settings.admin_routes_enabled is None
+        else settings.admin_routes_enabled
+    )
+    ops_routes_enabled = (
+        settings.features_routes_enabled
+        if settings.ops_routes_enabled is None
+        else settings.ops_routes_enabled
+    )
 
     application = FastAPI(
         title="krtour-map-admin",
@@ -248,13 +258,16 @@ def create_app(settings: AdminSettings | None = None) -> FastAPI:
         if settings.debug_routes_enabled:
             application.include_router(mois_detail_router)
 
-    application.include_router(admin_features_router)
-    application.include_router(dedup_review_router)
-    application.include_router(feature_update_requests_router)
-    application.include_router(poi_cache_targets_router)
-    application.include_router(offline_uploads_router)
-    application.include_router(ops_router)
-    application.include_router(dagster_router)
+    if admin_routes_enabled:
+        application.include_router(admin_features_router)
+        application.include_router(dedup_review_router)
+        application.include_router(feature_update_requests_router)
+        application.include_router(poi_cache_targets_router)
+        application.include_router(offline_uploads_router)
+
+    if ops_routes_enabled:
+        application.include_router(ops_router)
+        application.include_router(dagster_router)
 
     return application
 

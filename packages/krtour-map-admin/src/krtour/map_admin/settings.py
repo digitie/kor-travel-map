@@ -63,6 +63,22 @@ class AdminSettings(BaseSettings):
             "환경에서는 False로 내려 import/기동만 검증."
         ),
     )
+    admin_routes_enabled: bool | None = Field(
+        default=None,
+        description=(
+            "``/admin/...`` 운영 라우터 활성 여부. None이면 "
+            "``features_routes_enabled`` 값을 따른다. DB 없는 부팅 검증에서는 "
+            "features/admin을 함께 False로 내려 write surface를 닫는다."
+        ),
+    )
+    ops_routes_enabled: bool | None = Field(
+        default=None,
+        description=(
+            "``/ops/...``와 Dagster summary 라우터 활성 여부. None이면 "
+            "``features_routes_enabled`` 값을 따른다. DB 없는 부팅 검증에서는 "
+            "ops/dagster 조회도 함께 닫는다."
+        ),
+    )
     cors_allow_origins: list[str] = Field(
         default=[
             "http://localhost:9012",

@@ -4,6 +4,7 @@
 - ``GET /debug/health`` 정적 200 OK + schema 정합
 - ``GET /debug/version`` debug_ui + krtour_map version 응답
 - ``debug_routes_enabled=False`` 시 라우터 unregister 검증
+- ``features_routes_enabled=False`` 시 DB 의존 features/admin/ops unregister 검증
 - ``app.openapi()``가 ``HealthResponse`` + ``VersionResponse`` 스키마를 노출
 """
 
@@ -64,6 +65,41 @@ def test_debug_routes_disabled_unmounts_health_and_version() -> None:
     client = TestClient(app)
     assert client.get("/debug/health").status_code == 404
     assert client.get("/debug/version").status_code == 404
+
+
+@pytest.mark.unit
+def test_db_dependent_routes_follow_features_gate_by_default() -> None:
+    """DB 없는 부팅 검증 모드에서는 features/admin/ops surface를 함께 닫는다."""
+    app = create_app(AdminSettings(features_routes_enabled=False))
+    client = TestClient(app)
+    spec = client.get("/openapi.json").json()
+
+    assert "/features" not in spec["paths"]
+    assert "/admin/features" not in spec["paths"]
+    assert "/admin/offline-uploads" not in spec["paths"]
+    assert "/ops/import-jobs" not in spec["paths"]
+    assert "/ops/dagster/summary" not in spec["paths"]
+    assert client.get("/admin/offline-uploads").status_code == 404
+    assert client.get("/ops/import-jobs").status_code == 404
+
+
+@pytest.mark.unit
+def test_admin_ops_route_gates_can_be_enabled_explicitly() -> None:
+    """features를 닫아도 명시 flag로 admin/ops 라우터만 다시 열 수 있다."""
+    app = create_app(
+        AdminSettings(
+            features_routes_enabled=False,
+            admin_routes_enabled=True,
+            ops_routes_enabled=True,
+        )
+    )
+    spec = app.openapi()
+
+    assert "/features" not in spec["paths"]
+    assert "/admin/features" in spec["paths"]
+    assert "/admin/offline-uploads" in spec["paths"]
+    assert "/ops/import-jobs" in spec["paths"]
+    assert "/ops/dagster/summary" in spec["paths"]
 
 
 @pytest.mark.unit
