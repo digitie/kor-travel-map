@@ -44,7 +44,7 @@ def test_settings_default_values() -> None:
         "postgresql+asyncpg://"
     )
     # 객체 저장소 기본 bucket
-    assert settings.object_store_bucket == "krtour-map-files"
+    assert settings.object_store_bucket == "krtour-map"
     # 로깅
     assert settings.log_level == "INFO"
     assert settings.log_format == "json"
