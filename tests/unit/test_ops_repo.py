@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import json
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, cast
@@ -93,6 +95,11 @@ def _issue_row(key: str, *, at: datetime) -> SimpleNamespace:
     )
 
 
+def _cursor(payload: object) -> str:
+    raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
 @pytest.mark.unit
 async def test_import_job_list_detail_and_cursor() -> None:
     at = datetime(2026, 6, 3, tzinfo=UTC)
@@ -138,11 +145,29 @@ async def test_import_job_list_detail_and_cursor() -> None:
 
 
 @pytest.mark.unit
-async def test_invalid_cursor_rejected() -> None:
+@pytest.mark.parametrize(
+    "cursor",
+    [
+        "not-base64",
+        _cursor(
+            {
+                "v": 1,
+                "kind": "consistency_reports",
+                "at": "2026-06-03T00:00:00+00:00",
+                "key": "k",
+            }
+        ),
+        _cursor({"v": 1, "kind": "import_jobs", "key": "k"}),
+        _cursor({"v": 1, "kind": "import_jobs", "at": "not-datetime", "key": "k"}),
+        _cursor(["not", "mapping"]),
+    ],
+)
+async def test_invalid_cursor_rejected(cursor: str) -> None:
     session = _Session()
     db = cast(Any, session)
     with pytest.raises(ValueError, match="invalid import_jobs cursor"):
-        await list_ops_import_jobs(db, cursor="not-base64")
+        await list_ops_import_jobs(db, cursor=cursor)
+    assert session.params == []
 
 
 @pytest.mark.unit
