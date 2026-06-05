@@ -294,10 +294,18 @@ CREATE TABLE ops.provider_refresh_policies (
   },
   "on_conflict": "reject",
   "metadata": {
-    "tripmate_poi_id": "poi_123"
+    "tripmate_poi_id": "poi_123",
+    "labels": ["hotel"]
   }
 }
 ```
+
+`provider_overrides`는 provider 또는 `provider:dataset_key` key를 최대 64개까지
+받는다. 각 override 값은 `targeted_policy`, `min_interval_seconds`,
+`max_requests_per_minute`, `max_requests_per_hour`, `max_requests_per_day`,
+`max_concurrent`, `note`만 허용하며 unknown key는 `422`다. `metadata`는 외부 JSON
+필드명으로 유지하지만 서버 모델 내부에서는 `metadata_` alias로 다룬다. 허용
+metadata key는 `tripmate_poi_id`, `external_ref`, `source_url`, `labels`, `note`다.
 
 `on_conflict`:
 
@@ -321,7 +329,40 @@ CREATE TABLE ops.provider_refresh_policies (
 }
 ```
 
-### 7.2 Cache target 삭제
+### 7.2 Cache target 목록
+
+#### `GET /admin/poi-cache-targets`
+
+Query:
+
+| 이름 | 타입 | 설명 |
+|------|------|------|
+| `external_system` | string | 선택. 특정 외부 시스템만 조회 |
+| `update_enabled` | boolean | 선택. targeted update 활성/비활성 필터 |
+| `include_deleted` | boolean | 기본 `false`. soft-deleted target 포함 |
+| `page_size` | int | 기본 200, 최대 500 |
+| `cursor` | string | 이전 응답의 `next_cursor` |
+
+응답은 `updated_at DESC, target_id DESC` keyset cursor를 사용한다. 다음 페이지가 있으면
+`next_cursor`가 채워지고, 잘못된 cursor는 DB 조회 전에 `422`로 거절한다.
+
+```json
+{
+  "count": 1,
+  "items": [
+    {
+      "target_id": "uuid",
+      "external_system": "tripmate",
+      "target_key": "poi_123",
+      "coord_key": "126.978000:37.566500:p6",
+      "metadata": {"tripmate_poi_id": "poi_123"}
+    }
+  ],
+  "next_cursor": null
+}
+```
+
+### 7.3 Cache target 삭제
 
 #### `DELETE /admin/poi-cache-targets/{external_system}/{target_key}`
 
@@ -332,7 +373,7 @@ CREATE TABLE ops.provider_refresh_policies (
 - 이후 targeted update request에서 제외한다.
 - feature 자체는 삭제하지 않는다.
 
-### 7.3 주변 feature 목록
+### 7.4 주변 feature 목록
 
 #### `GET /features/nearby/by-target`
 

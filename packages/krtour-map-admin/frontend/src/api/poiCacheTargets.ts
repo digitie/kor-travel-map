@@ -12,12 +12,34 @@ export type PoiCacheTargetRefreshPolicy =
   | "follow_system"
   | "allow_targeted"
   | "disabled";
+export type PoiCacheTargetTargetedPolicy =
+  | "follow_system"
+  | "allow_targeted"
+  | "disabled";
 export type PoiCacheTargetConflictMode = "reject" | "move";
 export type NearbySort = "distance" | "name" | "last_updated_at";
 
 export interface CoordinateBody {
   lon: number;
   lat: number;
+}
+
+export interface PoiCacheTargetProviderOverride {
+  targeted_policy?: PoiCacheTargetTargetedPolicy | null;
+  min_interval_seconds?: number | null;
+  max_requests_per_minute?: number | null;
+  max_requests_per_hour?: number | null;
+  max_requests_per_day?: number | null;
+  max_concurrent?: number | null;
+  note?: string | null;
+}
+
+export interface PoiCacheTargetMetadata {
+  tripmate_poi_id?: string | null;
+  external_ref?: string | null;
+  source_url?: string | null;
+  labels?: string[];
+  note?: string | null;
 }
 
 export interface PoiCacheTargetUpsertRequest {
@@ -28,8 +50,8 @@ export interface PoiCacheTargetUpsertRequest {
   scope_mode?: PoiCacheTargetScopeMode;
   update_enabled?: boolean;
   refresh_policy?: PoiCacheTargetRefreshPolicy;
-  provider_overrides?: Record<string, unknown>;
-  metadata?: Record<string, unknown>;
+  provider_overrides?: Record<string, PoiCacheTargetProviderOverride>;
+  metadata?: PoiCacheTargetMetadata;
   on_conflict?: PoiCacheTargetConflictMode;
 }
 
@@ -45,8 +67,8 @@ export interface PoiCacheTargetRecord {
   scope_mode: string;
   update_enabled: boolean;
   refresh_policy: string;
-  provider_overrides: Record<string, unknown>;
-  metadata: Record<string, unknown>;
+  provider_overrides: Record<string, PoiCacheTargetProviderOverride>;
+  metadata: PoiCacheTargetMetadata;
   last_seen_at: string;
   last_requested_at: string | null;
   last_refreshed_at: string | null;
@@ -69,6 +91,7 @@ export interface PoiCacheTargetResponse {
 export interface PoiCacheTargetListResponse {
   count: number;
   items: PoiCacheTargetRecord[];
+  next_cursor: string | null;
 }
 
 export interface PoiCacheTargetListParams {
@@ -76,6 +99,7 @@ export interface PoiCacheTargetListParams {
   update_enabled?: boolean;
   include_deleted?: boolean;
   page_size?: number;
+  cursor?: string;
 }
 
 export interface NearbyTargetSummary {
@@ -142,6 +166,7 @@ function fetchPoiCacheTargets(
       update_enabled: params.update_enabled,
       include_deleted: params.include_deleted,
       page_size: params.page_size,
+      cursor: params.cursor,
     }),
   );
 }

@@ -125,9 +125,12 @@ async def test_provider_refresh_policy_upsert_get_list(
     assert await list_provider_refresh_policies(
         migrated_session, provider="python-kma-api", enabled=False
     ) == (updated,)
-    assert await list_provider_refresh_policies(
-        migrated_session, provider="python-kma-api", enabled=True
-    ) == ()
+    assert (
+        await list_provider_refresh_policies(
+            migrated_session, provider="python-kma-api", enabled=True
+        )
+        == ()
+    )
 
 
 async def test_poi_cache_target_upsert_move_delete_and_links(
@@ -144,16 +147,15 @@ async def test_poi_cache_target_upsert_move_delete_and_links(
         lat=37.5665,
         radius_km=3.0,
         provider_overrides={
-            "python-kma-api:kma_weather_alerts": {
-                "targeted_policy": "allow_targeted"
-            }
+            "python-kma-api:kma_weather_alerts": {"targeted_policy": "allow_targeted"}
         },
         metadata={"tripmate_poi_id": "poi-1"},
     )
     assert target.coord_key == "126.978000:37.566500:p6"
-    assert target.provider_overrides["python-kma-api:kma_weather_alerts"][
-        "targeted_policy"
-    ] == "allow_targeted"
+    assert (
+        target.provider_overrides["python-kma-api:kma_weather_alerts"]["targeted_policy"]
+        == "allow_targeted"
+    )
 
     same = await upsert_poi_cache_target(
         migrated_session,
@@ -199,9 +201,7 @@ async def test_poi_cache_target_upsert_move_delete_and_links(
     assert moved.target_id == target.target_id
     assert moved.coord_key == "126.990000:37.570000:p6"
     assert moved.radius_km == 4.0
-    assert await list_poi_cache_target_feature_links(
-        migrated_session, target.target_id
-    ) == ()
+    assert await list_poi_cache_target_feature_links(migrated_session, target.target_id) == ()
     assert (
         await list_poi_cache_target_feature_links(
             migrated_session, target.target_id, active_only=False
@@ -216,14 +216,19 @@ async def test_poi_cache_target_upsert_move_delete_and_links(
     assert deleted is not None
     assert deleted.deleted_at is not None
     assert deleted.update_enabled is False
-    assert await get_poi_cache_target_by_key(
-        migrated_session,
-        external_system="tripmate",
-        target_key="poi-1",
-    ) is None
-    assert await list_poi_cache_targets(
+    assert (
+        await get_poi_cache_target_by_key(
+            migrated_session,
+            external_system="tripmate",
+            target_key="poi-1",
+        )
+        is None
+    )
+    target_page = await list_poi_cache_targets(
         migrated_session, external_system="tripmate", include_deleted=True
-    ) == (deleted,)
+    )
+    assert target_page.items == (deleted,)
+    assert target_page.next_cursor is None
 
 
 async def test_data_integrity_violation_lifecycle_and_fk_behavior(
@@ -250,9 +255,7 @@ async def test_data_integrity_violation_lifecycle_and_fk_behavior(
     assert violation.status == "open"
     assert violation.payload["distance_m"] == 120.0
 
-    loaded = await get_data_integrity_violation(
-        migrated_session, violation.violation_key
-    )
+    loaded = await get_data_integrity_violation(migrated_session, violation.violation_key)
     assert loaded == violation
     assert await list_data_integrity_violations(
         migrated_session,
@@ -291,18 +294,13 @@ async def test_data_integrity_violation_lifecycle_and_fk_behavior(
             status="open",
         )
     assert exc_info.value.current_status == "resolved"
-    still_resolved = await get_data_integrity_violation(
-        migrated_session, violation.violation_key
-    )
+    still_resolved = await get_data_integrity_violation(migrated_session, violation.violation_key)
     assert still_resolved is not None
     assert still_resolved.status == "resolved"
     assert still_resolved.resolved_at == resolved.resolved_at
 
     await migrated_session.execute(
-        text(
-            "DELETE FROM provider_sync.source_records "
-            "WHERE source_record_key = 'src:violation:1'"
-        )
+        text("DELETE FROM provider_sync.source_records WHERE source_record_key = 'src:violation:1'")
     )
     after_source_delete = await get_data_integrity_violation(
         migrated_session, violation.violation_key
@@ -313,6 +311,4 @@ async def test_data_integrity_violation_lifecycle_and_fk_behavior(
     await migrated_session.execute(
         text("DELETE FROM feature.features WHERE feature_id = 'feature:violation:1'")
     )
-    assert await get_data_integrity_violation(
-        migrated_session, violation.violation_key
-    ) is None
+    assert await get_data_integrity_violation(migrated_session, violation.violation_key) is None

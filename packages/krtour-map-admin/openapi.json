@@ -4100,6 +4100,17 @@
             },
             "title": "Items",
             "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
           }
         },
         "required": [
@@ -4122,6 +4133,181 @@
           "duration_ms"
         ],
         "title": "PoiCacheTargetMeta",
+        "type": "object"
+      },
+      "PoiCacheTargetMetadata-Input": {
+        "additionalProperties": false,
+        "description": "target 운영 메타데이터. 임의 key 대신 명시 필드만 받는다.",
+        "properties": {
+          "external_ref": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Ref"
+          },
+          "labels": {
+            "items": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Labels",
+            "type": "array"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "tripmate_poi_id": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tripmate Poi Id"
+          }
+        },
+        "title": "PoiCacheTargetMetadata",
+        "type": "object"
+      },
+      "PoiCacheTargetMetadata-Output": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "PoiCacheTargetProviderOverride-Input": {
+        "additionalProperties": false,
+        "description": "target별 provider/dataset targeted update override.",
+        "properties": {
+          "max_concurrent": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Concurrent"
+          },
+          "max_requests_per_day": {
+            "anyOf": [
+              {
+                "maximum": 10000000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Requests Per Day"
+          },
+          "max_requests_per_hour": {
+            "anyOf": [
+              {
+                "maximum": 1000000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Requests Per Hour"
+          },
+          "max_requests_per_minute": {
+            "anyOf": [
+              {
+                "maximum": 60000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Requests Per Minute"
+          },
+          "min_interval_seconds": {
+            "anyOf": [
+              {
+                "maximum": 86400.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Interval Seconds"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "targeted_policy": {
+            "anyOf": [
+              {
+                "enum": [
+                  "follow_system",
+                  "allow_targeted",
+                  "disabled"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Targeted Policy"
+          }
+        },
+        "title": "PoiCacheTargetProviderOverride",
+        "type": "object"
+      },
+      "PoiCacheTargetProviderOverride-Output": {
+        "additionalProperties": true,
         "type": "object"
       },
       "PoiCacheTargetRecord": {
@@ -4202,9 +4388,7 @@
             "type": "string"
           },
           "metadata": {
-            "additionalProperties": true,
-            "title": "Metadata",
-            "type": "object"
+            "$ref": "#/components/schemas/PoiCacheTargetMetadata-Output"
           },
           "name": {
             "anyOf": [
@@ -4234,7 +4418,14 @@
             "title": "Next Eligible Refresh At"
           },
           "provider_overrides": {
-            "additionalProperties": true,
+            "additionalProperties": {
+              "$ref": "#/components/schemas/PoiCacheTargetProviderOverride-Output"
+            },
+            "maxProperties": 64,
+            "propertyNames": {
+              "maxLength": 128,
+              "minLength": 1
+            },
             "title": "Provider Overrides",
             "type": "object"
           },
@@ -4327,13 +4518,12 @@
             "type": "integer"
           },
           "metadata": {
-            "additionalProperties": true,
-            "title": "Metadata",
-            "type": "object"
+            "$ref": "#/components/schemas/PoiCacheTargetMetadata-Input"
           },
           "name": {
             "anyOf": [
               {
+                "maxLength": 200,
                 "type": "string"
               },
               {
@@ -4352,7 +4542,14 @@
             "type": "string"
           },
           "provider_overrides": {
-            "additionalProperties": true,
+            "additionalProperties": {
+              "$ref": "#/components/schemas/PoiCacheTargetProviderOverride-Input"
+            },
+            "maxProperties": 64,
+            "propertyNames": {
+              "maxLength": 128,
+              "minLength": 1
+            },
             "title": "Provider Overrides",
             "type": "object"
           },
@@ -6183,6 +6380,22 @@
               "minimum": 1,
               "title": "Page Size",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
             }
           }
         ],

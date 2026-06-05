@@ -674,10 +674,19 @@ Cache target을 idempotent하게 등록/갱신한다. 같은 key가 같은 norma
 들어오면 upsert, 다른 normalized 좌표로 들어오면 기본 409다. 이동을 의도한 경우
 `on_conflict="move"`를 명시한다.
 
+요청 body의 `provider_overrides`는 provider 또는 `provider:dataset_key` 문자열 key
+최대 64개만 허용한다. 각 값은 `targeted_policy`, interval/rate-limit 계열 숫자,
+`max_concurrent`, `note`만 받을 수 있고 unknown key는 `422`다. `metadata`는 Pydantic
+내부에서 `metadata_` 필드+alias로 다루며, 외부 JSON 필드명은 계속 `metadata`다.
+허용 metadata key는 `tripmate_poi_id`, `external_ref`, `source_url`, `labels`, `note`
+뿐이다.
+
 ### `GET /admin/poi-cache-targets`
 
 Cache target 목록을 반환한다. `external_system`, `update_enabled`,
-`include_deleted`, `page_size` 필터를 지원한다.
+`include_deleted`, `page_size`, `cursor` 필터를 지원한다. 목록 정렬은
+`updated_at DESC, target_id DESC`이며 응답의 `next_cursor`를 다음 요청 `cursor`로
+전달하는 keyset pagination이다. cursor decode 실패는 DB 조회 전에 `422`로 응답한다.
 
 ### `GET /admin/poi-cache-targets/{external_system}/{target_key}`
 

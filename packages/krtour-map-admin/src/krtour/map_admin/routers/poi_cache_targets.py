@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from time import perf_counter
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from krtour.map.infra.poi_cache_target_repo import (
@@ -15,7 +15,7 @@ from krtour.map.infra.poi_cache_target_repo import (
     list_poi_cache_targets,
     upsert_poi_cache_target,
 )
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_serializer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from krtour.map_admin.db import get_session
@@ -36,6 +36,15 @@ RefreshPolicy = Literal[
     "allow_targeted",
     "disabled",
 ]
+TargetedPolicy = Literal["follow_system", "allow_targeted", "disabled"]
+ProviderOverrideKey = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=128),
+]
+MetadataLabel = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=64),
+]
 
 router = APIRouter(
     prefix="/admin/poi-cache-targets",
@@ -52,27 +61,92 @@ class CoordinateBody(BaseModel):
     lat: float = Field(ge=33.0, le=39.5)
 
 
+class PoiCacheTargetProviderOverride(BaseModel):
+    """target별 provider/dataset targeted update override."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    targeted_policy: TargetedPolicy | None = None
+    min_interval_seconds: int | None = Field(default=None, ge=1, le=86_400)
+    max_requests_per_minute: int | None = Field(default=None, ge=1, le=60_000)
+    max_requests_per_hour: int | None = Field(default=None, ge=1, le=1_000_000)
+    max_requests_per_day: int | None = Field(default=None, ge=1, le=10_000_000)
+    max_concurrent: int | None = Field(default=None, ge=1, le=100)
+    note: str | None = Field(default=None, max_length=512)
+
+    @model_serializer
+    def _serialize(self) -> dict[str, object]:
+        payload: dict[str, object] = {}
+        if self.targeted_policy is not None:
+            payload["targeted_policy"] = self.targeted_policy
+        if self.min_interval_seconds is not None:
+            payload["min_interval_seconds"] = self.min_interval_seconds
+        if self.max_requests_per_minute is not None:
+            payload["max_requests_per_minute"] = self.max_requests_per_minute
+        if self.max_requests_per_hour is not None:
+            payload["max_requests_per_hour"] = self.max_requests_per_hour
+        if self.max_requests_per_day is not None:
+            payload["max_requests_per_day"] = self.max_requests_per_day
+        if self.max_concurrent is not None:
+            payload["max_concurrent"] = self.max_concurrent
+        if self.note is not None:
+            payload["note"] = self.note
+        return payload
+
+
+class PoiCacheTargetMetadata(BaseModel):
+    """target 운영 메타데이터. 임의 key 대신 명시 필드만 받는다."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tripmate_poi_id: str | None = Field(default=None, max_length=256)
+    external_ref: str | None = Field(default=None, max_length=256)
+    source_url: str | None = Field(default=None, max_length=2048)
+    labels: list[MetadataLabel] = Field(default_factory=list, max_length=32)
+    note: str | None = Field(default=None, max_length=1000)
+
+    @model_serializer
+    def _serialize(self) -> dict[str, object]:
+        payload: dict[str, object] = {}
+        if self.tripmate_poi_id is not None:
+            payload["tripmate_poi_id"] = self.tripmate_poi_id
+        if self.external_ref is not None:
+            payload["external_ref"] = self.external_ref
+        if self.source_url is not None:
+            payload["source_url"] = self.source_url
+        if self.labels:
+            payload["labels"] = self.labels
+        if self.note is not None:
+            payload["note"] = self.note
+        return payload
+
+
 class PoiCacheTargetUpsertRequest(BaseModel):
     """cache target 등록/갱신 요청."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     coord: CoordinateBody
     coord_precision_digits: int = Field(default=6, ge=3, le=8)
     radius_km: float = Field(default=5.0, gt=0, le=100)
-    name: str | None = None
+    name: str | None = Field(default=None, max_length=200)
     scope_mode: ScopeMode = "center_radius"
     update_enabled: bool = True
     refresh_policy: RefreshPolicy = "provider_default"
-    provider_overrides: dict[str, Any] = Field(default_factory=dict)
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    provider_overrides: dict[ProviderOverrideKey, PoiCacheTargetProviderOverride] = Field(
+        default_factory=dict, max_length=64
+    )
+    metadata_: PoiCacheTargetMetadata = Field(
+        default_factory=PoiCacheTargetMetadata,
+        alias="metadata",
+    )
     on_conflict: OnConflict = "reject"
 
 
 class PoiCacheTargetRecord(BaseModel):
     """``ops.poi_cache_targets``의 HTTP 표현."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     target_id: str
     external_system: str
@@ -85,8 +159,10 @@ class PoiCacheTargetRecord(BaseModel):
     scope_mode: str
     update_enabled: bool
     refresh_policy: str
-    provider_overrides: dict[str, Any]
-    metadata: dict[str, Any]
+    provider_overrides: dict[ProviderOverrideKey, PoiCacheTargetProviderOverride] = Field(
+        max_length=64
+    )
+    metadata_: PoiCacheTargetMetadata = Field(alias="metadata")
     last_seen_at: datetime
     last_requested_at: datetime | None = None
     last_refreshed_at: datetime | None = None
@@ -123,6 +199,19 @@ class PoiCacheTargetListResponse(BaseModel):
 
     count: int
     items: list[PoiCacheTargetRecord]
+    next_cursor: str | None = None
+
+
+def _provider_overrides_payload(
+    overrides: dict[ProviderOverrideKey, PoiCacheTargetProviderOverride],
+) -> dict[str, dict[str, object]]:
+    return {
+        key: value.model_dump(mode="json", exclude_none=True) for key, value in overrides.items()
+    }
+
+
+def _metadata_payload(metadata: PoiCacheTargetMetadata) -> dict[str, object]:
+    return metadata.model_dump(mode="json")
 
 
 def _record_from_target(target: PoiCacheTarget) -> PoiCacheTargetRecord:
@@ -139,7 +228,7 @@ def _record_from_target(target: PoiCacheTarget) -> PoiCacheTargetRecord:
         update_enabled=target.update_enabled,
         refresh_policy=target.refresh_policy,
         provider_overrides=target.provider_overrides,
-        metadata=target.metadata,
+        metadata_=target.metadata,
         last_seen_at=target.last_seen_at,
         last_requested_at=target.last_requested_at,
         last_refreshed_at=target.last_refreshed_at,
@@ -148,9 +237,7 @@ def _record_from_target(target: PoiCacheTarget) -> PoiCacheTargetRecord:
         deleted_at=target.deleted_at,
         created_at=target.created_at,
         updated_at=target.updated_at,
-        status_url=(
-            f"/admin/poi-cache-targets/{target.external_system}/{target.target_key}"
-        ),
+        status_url=(f"/admin/poi-cache-targets/{target.external_system}/{target.target_key}"),
         nearby_url=(
             "/features/nearby/by-target?"
             f"external_system={target.external_system}&target_key={target.target_key}"
@@ -165,9 +252,7 @@ def _response(
 ) -> PoiCacheTargetResponse:
     return PoiCacheTargetResponse(
         data=_record_from_target(target),
-        meta=PoiCacheTargetMeta(
-            duration_ms=max(0, int((perf_counter() - started_at) * 1000))
-        ),
+        meta=PoiCacheTargetMeta(duration_ms=max(0, int((perf_counter() - started_at) * 1000))),
     )
 
 
@@ -202,8 +287,8 @@ async def put_poi_cache_target(
                 scope_mode=body.scope_mode,
                 update_enabled=body.update_enabled,
                 refresh_policy=body.refresh_policy,
-                provider_overrides=body.provider_overrides,
-                metadata=body.metadata,
+                provider_overrides=_provider_overrides_payload(body.provider_overrides),
+                metadata=_metadata_payload(body.metadata_),
                 on_conflict=body.on_conflict,
             )
     except PoiCacheTargetConflict as exc:
@@ -227,17 +312,23 @@ async def list_poi_cache_target_records(
     update_enabled: Annotated[bool | None, Query()] = None,
     include_deleted: Annotated[bool, Query()] = False,
     page_size: Annotated[int, Query(ge=1, le=500)] = 200,
+    cursor: Annotated[str | None, Query()] = None,
 ) -> PoiCacheTargetListResponse:
-    targets = await list_poi_cache_targets(
-        session,
-        external_system=external_system,
-        update_enabled=update_enabled,
-        include_deleted=include_deleted,
-        limit=page_size,
-    )
+    try:
+        page = await list_poi_cache_targets(
+            session,
+            external_system=external_system,
+            update_enabled=update_enabled,
+            include_deleted=include_deleted,
+            limit=page_size,
+            cursor=cursor,
+        )
+    except ValueError as exc:
+        raise _unprocessable(exc) from exc
     return PoiCacheTargetListResponse(
-        count=len(targets),
-        items=[_record_from_target(target) for target in targets],
+        count=len(page.items),
+        items=[_record_from_target(target) for target in page.items],
+        next_cursor=page.next_cursor,
     )
 
 

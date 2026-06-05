@@ -7,10 +7,13 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Final, Literal
+from uuid import UUID
 
 from sqlalchemy import text
 
@@ -23,6 +26,7 @@ __all__ = [
     "PoiCacheTarget",
     "PoiCacheTargetConflict",
     "PoiCacheTargetFeatureLink",
+    "PoiCacheTargetPage",
     "deactivate_poi_cache_target_feature_links",
     "delete_poi_cache_target",
     "get_poi_cache_target",
@@ -38,15 +42,11 @@ __all__ = [
 
 OnConflict = Literal["reject", "move"]
 
-_SCOPE_MODES: Final[frozenset[str]] = frozenset(
-    {"center_radius", "sigungu_by_radius"}
-)
+_SCOPE_MODES: Final[frozenset[str]] = frozenset({"center_radius", "sigungu_by_radius"})
 _REFRESH_POLICIES: Final[frozenset[str]] = frozenset(
     {"provider_default", "follow_system", "allow_targeted", "disabled"}
 )
-_LINK_RELATIONS: Final[frozenset[str]] = frozenset(
-    {"within_radius", "same_sigungu", "manual"}
-)
+_LINK_RELATIONS: Final[frozenset[str]] = frozenset({"within_radius", "same_sigungu", "manual"})
 _MAX_LIST_LIMIT: Final[int] = 500
 
 _TARGET_COLUMNS: Final[str] = (
@@ -96,6 +96,14 @@ class PoiCacheTarget:
 
 
 @dataclass(frozen=True)
+class PoiCacheTargetPage:
+    """Keyset cursor 기반 POI/cache target 목록."""
+
+    items: tuple[PoiCacheTarget, ...]
+    next_cursor: str | None
+
+
+@dataclass(frozen=True)
 class PoiCacheTargetFeatureLink:
     """``ops.poi_cache_target_feature_links`` row."""
 
@@ -115,6 +123,45 @@ def _json_dict(value: Any) -> dict[str, Any]:
     if isinstance(value, str):
         value = json.loads(value)
     return dict(value) if value else {}
+
+
+def _limit(value: int) -> int:
+    if value <= 0:
+        raise ValueError("limit must be greater than 0")
+    return min(value, _MAX_LIST_LIMIT)
+
+
+def _encode_cursor(item: PoiCacheTarget) -> str:
+    raw = json.dumps(
+        {
+            "v": 1,
+            "kind": "poi_cache_targets",
+            "updated_at": item.updated_at.isoformat(),
+            "target_id": item.target_id,
+        },
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _decode_cursor(cursor: str | None) -> tuple[datetime | None, str | None]:
+    if cursor is None:
+        return None, None
+    padded = cursor + ("=" * (-len(cursor) % 4))
+    try:
+        payload = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
+    except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("invalid poi cache target cursor") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("invalid poi cache target cursor")
+    if payload.get("v") != 1 or payload.get("kind") != "poi_cache_targets":
+        raise ValueError("invalid poi cache target cursor")
+    try:
+        updated_at = datetime.fromisoformat(str(payload["updated_at"]))
+        target_id = str(UUID(str(payload["target_id"])))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("invalid poi cache target cursor") from exc
+    return updated_at, target_id
 
 
 def _row_to_target(row: Any) -> PoiCacheTarget:
@@ -189,9 +236,7 @@ def _validate_target(
     if scope_mode not in _SCOPE_MODES:
         raise ValueError(f"scope_mode must be one of {sorted(_SCOPE_MODES)}")
     if refresh_policy not in _REFRESH_POLICIES:
-        raise ValueError(
-            f"refresh_policy must be one of {sorted(_REFRESH_POLICIES)}"
-        )
+        raise ValueError(f"refresh_policy must be one of {sorted(_REFRESH_POLICIES)}")
     if on_conflict not in ("reject", "move"):
         raise ValueError("on_conflict must be 'reject' or 'move'")
 
@@ -265,8 +310,15 @@ WHERE (CAST(:external_system AS text) IS NULL
   AND (CAST(:include_deleted AS boolean) OR deleted_at IS NULL)
   AND (CAST(:update_enabled AS boolean) IS NULL
        OR update_enabled = CAST(:update_enabled AS boolean))
-ORDER BY updated_at DESC, target_id
-LIMIT :limit
+  AND (
+    CAST(:cursor_updated_at AS timestamptz) IS NULL
+    OR (updated_at, target_id) < (
+        CAST(:cursor_updated_at AS timestamptz),
+        CAST(:cursor_target_id AS uuid)
+    )
+  )
+ORDER BY updated_at DESC, target_id DESC
+LIMIT :limit_plus_one
 """
 
 _DELETE_TARGET_SQL: Final[str] = f"""
@@ -381,11 +433,15 @@ async def upsert_poi_cache_target(
     )
     coord_key = _coord_key(lon=lon, lat=lat, precision=coord_precision_digits)
     existing = (
-        await session.execute(
-            text(_EXISTING_BY_KEY_SQL),
-            {"external_system": external_system, "target_key": target_key},
+        (
+            await session.execute(
+                text(_EXISTING_BY_KEY_SQL),
+                {"external_system": external_system, "target_key": target_key},
+            )
         )
-    ).mappings().one_or_none()
+        .mappings()
+        .one_or_none()
+    )
     moved = existing is not None and existing["coord_key"] != coord_key
     if moved and on_conflict == "reject":
         raise PoiCacheTargetConflict(
@@ -422,7 +478,9 @@ async def upsert_poi_cache_target(
                     ),
                 },
             )
-        ).mappings().one()
+        )
+        .mappings()
+        .one()
     )
     if moved:
         await deactivate_poi_cache_target_feature_links(session, target.target_id)
@@ -437,11 +495,15 @@ async def get_poi_cache_target(
 ) -> PoiCacheTarget | None:
     """target id로 POI/cache target 조회."""
     row = (
-        await session.execute(
-            text(_GET_TARGET_SQL),
-            {"target_id": target_id, "include_deleted": include_deleted},
+        (
+            await session.execute(
+                text(_GET_TARGET_SQL),
+                {"target_id": target_id, "include_deleted": include_deleted},
+            )
         )
-    ).mappings().one_or_none()
+        .mappings()
+        .one_or_none()
+    )
     return _row_to_target(row) if row is not None else None
 
 
@@ -454,15 +516,19 @@ async def get_poi_cache_target_by_key(
 ) -> PoiCacheTarget | None:
     """``external_system + target_key``로 target 조회."""
     row = (
-        await session.execute(
-            text(_GET_TARGET_BY_KEY_SQL),
-            {
-                "external_system": external_system,
-                "target_key": target_key,
-                "include_deleted": include_deleted,
-            },
+        (
+            await session.execute(
+                text(_GET_TARGET_BY_KEY_SQL),
+                {
+                    "external_system": external_system,
+                    "target_key": target_key,
+                    "include_deleted": include_deleted,
+                },
+            )
         )
-    ).mappings().one_or_none()
+        .mappings()
+        .one_or_none()
+    )
     return _row_to_target(row) if row is not None else None
 
 
@@ -473,20 +539,31 @@ async def list_poi_cache_targets(
     update_enabled: bool | None = None,
     include_deleted: bool = False,
     limit: int = 200,
-) -> tuple[PoiCacheTarget, ...]:
-    """POI/cache target 목록 조회."""
+    cursor: str | None = None,
+) -> PoiCacheTargetPage:
+    """``updated_at DESC, target_id DESC`` keyset cursor로 target 목록 조회."""
+    effective_limit = _limit(limit)
+    cursor_updated_at, cursor_target_id = _decode_cursor(cursor)
     rows = (
-        await session.execute(
-            text(_LIST_TARGETS_SQL),
-            {
-                "external_system": external_system,
-                "update_enabled": update_enabled,
-                "include_deleted": include_deleted,
-                "limit": max(1, min(limit, _MAX_LIST_LIMIT)),
-            },
+        (
+            await session.execute(
+                text(_LIST_TARGETS_SQL),
+                {
+                    "external_system": external_system,
+                    "update_enabled": update_enabled,
+                    "include_deleted": include_deleted,
+                    "cursor_updated_at": cursor_updated_at,
+                    "cursor_target_id": cursor_target_id,
+                    "limit_plus_one": effective_limit + 1,
+                },
+            )
         )
-    ).mappings().all()
-    return tuple(_row_to_target(row) for row in rows)
+        .mappings()
+        .all()
+    )
+    items = tuple(_row_to_target(row) for row in rows[:effective_limit])
+    next_cursor = _encode_cursor(items[-1]) if len(rows) > effective_limit and items else None
+    return PoiCacheTargetPage(items=items, next_cursor=next_cursor)
 
 
 async def delete_poi_cache_target(
@@ -497,11 +574,15 @@ async def delete_poi_cache_target(
 ) -> PoiCacheTarget | None:
     """target을 soft-delete하고 active feature links를 비활성화한다."""
     row = (
-        await session.execute(
-            text(_DELETE_TARGET_SQL),
-            {"external_system": external_system, "target_key": target_key},
+        (
+            await session.execute(
+                text(_DELETE_TARGET_SQL),
+                {"external_system": external_system, "target_key": target_key},
+            )
         )
-    ).mappings().one_or_none()
+        .mappings()
+        .one_or_none()
+    )
     if row is None:
         return None
     target = _row_to_target(row)
@@ -535,18 +616,22 @@ async def upsert_poi_cache_target_feature_link(
     if relation not in _LINK_RELATIONS:
         raise ValueError(f"relation must be one of {sorted(_LINK_RELATIONS)}")
     row = (
-        await session.execute(
-            text(_UPSERT_LINK_SQL),
-            {
-                "target_id": target_id,
-                "feature_id": feature_id,
-                "provider": provider,
-                "dataset_key": dataset_key,
-                "distance_m": distance_m,
-                "relation": relation,
-            },
+        (
+            await session.execute(
+                text(_UPSERT_LINK_SQL),
+                {
+                    "target_id": target_id,
+                    "feature_id": feature_id,
+                    "provider": provider,
+                    "dataset_key": dataset_key,
+                    "distance_m": distance_m,
+                    "relation": relation,
+                },
+            )
         )
-    ).mappings().one()
+        .mappings()
+        .one()
+    )
     return _row_to_link(row)
 
 
@@ -559,15 +644,19 @@ async def list_poi_cache_target_feature_links(
 ) -> tuple[PoiCacheTargetFeatureLink, ...]:
     """target-feature link 목록 조회."""
     rows = (
-        await session.execute(
-            text(_LIST_LINKS_SQL),
-            {
-                "target_id": target_id,
-                "active_only": active_only,
-                "limit": max(1, min(limit, _MAX_LIST_LIMIT)),
-            },
+        (
+            await session.execute(
+                text(_LIST_LINKS_SQL),
+                {
+                    "target_id": target_id,
+                    "active_only": active_only,
+                    "limit": max(1, min(limit, _MAX_LIST_LIMIT)),
+                },
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     return tuple(_row_to_link(row) for row in rows)
 
 
