@@ -1,10 +1,11 @@
 name: ci
 
-# pytest unit + integration (testcontainers PostGIS via Docker-in-Docker) + coverage.
-# - unit: 모든 environment에서 실행 (Docker 불필요).
-# - integration: tests/integration/ — testcontainers가 PostGIS 컨테이너 자동 부팅
-#   (`postgis/postgis:16-3.5-alpine`, ADR-007). GHA runner는 Docker daemon 자동 제공.
-# - coverage: ADR-032 단계적 상향 schedule, 현재 fail_under=50 (pyproject.toml).
+# pytest unit + integration + fixture replay + coverage.
+# - unit: Python 3.11/3.12/3.13 matrix. Docker 불필요.
+# - integration: Python 3.13 단일 job. testcontainers가 PostGIS 컨테이너 자동 부팅
+#   (`postgis/postgis:16-3.5-alpine`, ADR-007).
+# - fixture replay: `tests/fixtures/`가 생기면 항상 별도 job에서 실행한다.
+# - coverage: ADR-032 단계적 상향 schedule, 현재 fail_under=80 (pyproject.toml).
 
 on:
   push:
@@ -18,7 +19,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
+  unit:
     name: pytest (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
@@ -57,9 +58,9 @@ jobs:
         run: |
           pip install -e packages/krtour-map-dagster
 
-      - name: Run unit tests (without integration)
+      - name: Run unit + lint tests
         run: |
-          pytest tests/ --ignore=tests/integration -q \
+          pytest tests/unit tests/lint -q \
             --cov=src/krtour/map --cov-report=term-missing --cov-report=xml
 
       - name: Run krtour-map-admin unit tests
@@ -72,12 +73,6 @@ jobs:
         run: |
           pytest packages/krtour-map-dagster/tests/ -q
 
-      - name: Run integration tests (testcontainers PostGIS via Docker)
-        # Docker는 ubuntu-latest runner에서 자동 제공.
-        # 통합 테스트는 conftest의 pg_container fixture가 PostGIS 컨테이너 자동 부팅.
-        run: |
-          pytest tests/integration -q --no-cov
-
       - name: Upload coverage XML (latest Python only)
         if: matrix.python-version == '3.13'
         uses: actions/upload-artifact@v4
@@ -85,3 +80,69 @@ jobs:
           name: coverage-xml
           path: coverage.xml
           retention-days: 7
+
+  integration:
+    name: pytest integration (PostGIS)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            packages/krtour-map-admin/pyproject.toml
+            packages/krtour-map-dagster/pyproject.toml
+
+      - name: Install package + dev/geo extras
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Install krtour-map-admin (editable)
+        run: |
+          pip install -e packages/krtour-map-admin
+
+      - name: Install krtour-map-dagster (editable)
+        run: |
+          pip install -e packages/krtour-map-dagster
+
+      - name: Run integration tests (testcontainers PostGIS via Docker)
+        # Docker는 ubuntu-latest runner에서 자동 제공.
+        # 통합 테스트는 conftest의 pg_container fixture가 PostGIS 컨테이너 자동 부팅.
+        run: |
+          pytest tests/integration -q --no-cov
+
+  fixture-replay:
+    name: pytest fixture replay
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            packages/krtour-map-admin/pyproject.toml
+            packages/krtour-map-dagster/pyproject.toml
+
+      - name: Install package + dev extras
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install -e packages/krtour-map-admin
+          pip install -e packages/krtour-map-dagster
+
+      - name: Run fixture replay tests
+        run: |
+          if [ -d tests/fixtures ]; then
+            pytest tests/fixtures -q --no-cov
+          else
+            echo "tests/fixtures is absent; fixture replay gate is ready but has no replay suite yet."
+          fi

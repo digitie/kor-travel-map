@@ -5,23 +5,15 @@ name: frontend
 # 빌드가 깨졌으나 frontend가 한 번도 컴파일된 적 없어 잠복했다. 본 게이트는
 # 그런 잠복 syntax/타입 오류를 PR 머지 전에 차단한다.
 #
-# Trigger paths: workspace 루트 + map-marker-react + debug-ui frontend + 본 워크플로.
+# T-203 이후 모든 PR에서 check를 생성한다. branch protection에서
+# `type-check + next build (Node 20)`을 required로 승격해도 문서/백엔드 PR이
+# missing check 때문에 막히지 않게 하기 위함이다.
 
 on:
   push:
     branches: [main]
-    paths:
-      - "package.json"
-      - "packages/map-marker-react/**"
-      - "packages/krtour-map-admin/frontend/**"
-      - ".github/workflows/frontend.yml"
   pull_request:
     branches: [main]
-    paths:
-      - "package.json"
-      - "packages/map-marker-react/**"
-      - "packages/krtour-map-admin/frontend/**"
-      - ".github/workflows/frontend.yml"
 
 concurrency:
   group: frontend-${{ github.workflow }}-${{ github.ref }}

@@ -107,6 +107,9 @@
   (Sprint 1부터 일부 가동 중이지만 Sprint 5에서 full matrix 완성)
 - `.github/workflows/openapi.yml` — Sprint 2부터 가동
 - `.github/workflows/lint.yml` — Sprint 1부터 가동
+- 완료 기준: 기존 `pytest (Python X)` check 이름은 유지하되 unit job으로 좁히고,
+  PostGIS integration과 fixture replay를 별도 always-on job으로 분리한다.
+  `openapi-drift`와 frontend build check는 path filter를 제거해 모든 PR에서 생성한다.
 
 ### 2.7 T-204 — GitHub branch protection 설정 가이드
 
@@ -151,7 +154,7 @@
 | ADR-017 (보관 정책) | accepted (Sprint 1) | place 무기한, event +20y, notice +1y, weather +30d purge 동작 |
 | T-200 (batch DAG + 게이트) | done (2026-06-04) | Dagster batch + consistency_check + mv_refresh 차단/추적 |
 | T-201b (Phase 2) | pending | F4~F8 + dry-run report |
-| T-202~204 | partial | T-202 pre-commit hook + T-204 branch protection 매뉴얼 완료. T-203 CI full 남음 |
+| T-202~204 | done | T-202 pre-commit hook + T-203 CI full matrix + T-204 branch protection 매뉴얼 완료 |
 | ADR-016 (Record Linkage 가중치) | accepted | 5 sprint 전체 검증 후 가중치 조정 PR (필요 시) |
 
 ## 4. 운영 진입 게이트 (DoD of Sprint 5)

@@ -80,7 +80,7 @@ gh pr create --base main --head feat/<topic> --title ... --body ...
 ## 6. CI green → 머지
 
 ```
-gh pr checks <N> --watch              # lint + pytest 3.11/3.12/3.13 (+ openapi-drift)
+gh pr checks <N> --watch              # lint + pytest unit/integration/fixture + openapi/frontend
 gh pr merge <N> --merge --delete-branch
 ```
 
@@ -106,7 +106,7 @@ git -C <worktree> push origin sandbox/<agent>
 ## 8. 1-PR 체크리스트
 
 - [ ] feature 브랜치(`sandbox/*` 아님)에서 작업
-- [ ] 4 게이트 WSL에서 실제 실행, 전부 green (debug-ui면 openapi-drift도)
+- [ ] 4 게이트 WSL에서 실제 실행, 전부 green (DTO/admin/frontend 변경이면 OpenAPI/frontend도)
 - [ ] 결정·기록 5종 중 관련 문서 갱신 (CHANGELOG는 사용자 가시 변경 시)
 - [ ] 무관 파일(claude.json 등) 스테이징 제외
 - [ ] PR 본문에 실측 게이트 수치
