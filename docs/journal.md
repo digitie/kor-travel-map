@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-05 (codex) — T-RV-37e Docker image hygiene
+
+**작업**: T-RV-37 cleanup 중 Docker 이미지 multi-stage/non-root/standalone 항목을
+처리한다.
+
+- **Python images**: `api`와 `dagster` Dockerfile을 builder/runtime stage로 분리하고,
+  runtime stage는 `appuser`로 실행한다. editable install 대신 builder stage에서
+  package install 결과만 runtime으로 복사한다.
+- **Frontend image**: Next.js `output: "standalone"`을 활성화하고 runner stage에서
+  `.next/standalone` `server.js`를 `nextjs` 사용자로 실행한다.
+- **문서/테스트**: Docker runbook에 runtime image 기준을 추가하고, Dockerfile 정적 회귀
+  테스트로 multi-stage/non-root/standalone 조건을 고정한다.
+
 ## 2026-06-05 (codex) — T-RV-37d ops cursor decode 예외 축소
 
 **작업**: T-RV-37 cleanup 중 `infra.ops_repo._decode_cursor`의 broad exception catch를

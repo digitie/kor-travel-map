@@ -26,6 +26,11 @@ const config: NextConfig = {
     root: workspaceRoot,
   },
 
+  // Docker runtime image runs the traced standalone server instead of
+  // `next start` with the full workspace dependency tree.
+  output: "standalone",
+  outputFileTracingRoot: workspaceRoot,
+
   // monorepo workspace의 @krtour/map-marker-react (ADR-029, ADR-043 — private:
   // true, registry 게시 X)를 transpile.
   transpilePackages: ["@krtour/map-marker-react"],

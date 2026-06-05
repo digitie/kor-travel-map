@@ -1,5 +1,16 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-05 Codex 작업 메모 — T-RV-37e Docker image hygiene
+
+T-RV-37 cleanup 묶음 중 Docker 이미지 multi-stage/non-root/standalone 항목을 처리한다.
+`docker/api.Dockerfile`과 `docker/dagster.Dockerfile`은 builder stage에서 패키지를
+설치하고 runtime stage에서 `appuser`로 실행한다. frontend는 Next.js
+`output: "standalone"`과 `outputFileTracingRoot`를 사용해 `.next/standalone` 서버만
+runner 이미지에 복사하고 `nextjs`로 실행한다.
+
+회귀 테스트는 Dockerfile이 multi-stage/non-root인지, frontend가 `next start` 대신
+standalone `server.js`를 실행하는지 정적으로 검증한다.
+
 ## 2026-06-05 Codex 작업 메모 — T-RV-37d ops cursor decode 예외 축소
 
 T-RV-37 cleanup 묶음 중 `src/krtour/map/infra/ops_repo.py`의 `_decode_cursor` broad
