@@ -1,5 +1,21 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-05 Codex 작업 메모 — T-RV-22 offline upload write rollback
+
+T-RV-22를 처리한다. `POST /admin/offline-uploads`는 RustFS/S3 object write 성공 후
+`ops.offline_uploads` metadata insert가 실패하면 같은 요청에서 방금 쓴 object를
+보상 삭제한다. 정상 등록된 offline upload 원본은 ADR-045 D-14 기준 그대로 무기한
+보존하며, 이번 삭제는 DB row가 없는 write-rollback 전용 예외다.
+
+`S3ObjectStore`에는 boto3 S3 호환 `delete_object` async wrapper를 추가했다. fake S3
+단위 테스트와 admin router metadata insert 실패 회귀 테스트로 object orphan 방지
+경로를 고정한다.
+
+다음 한 작업은 **T-RV-23(offline upload checksum/idempotency + load TOCTOU)** 또는
+**T-RV-25(upload store app.state 재사용)** 다. T-RV-24 상태 상수 단일화는 이 두 작업
+사이에 작게 분리할 수 있다. **T-RV-27은 production 레벨 hardening 전까지 계속
+skip/deferred**다.
+
 ## 2026-06-05 Codex 작업 메모 — PR#153~#179 리뷰 리포트 상태 동기화
 
 `docs/reports/pr-153-179-review-2026-06-04.md`의 표와 권장 처리 순서를
@@ -10,7 +26,7 @@ T-RV-26, T-RV-28, T-RV-36, T-RV-37a~37e를 완료 표시로 정리했다.
 T-RV-04는 `T-RV-04a` guard resource/env mapping 완료와 `T-RV-04b` provider
 public client live fetcher 잔여로 분리했다. 다음 구현 후보는 계속
 **T-201b-d F8(file object orphan WARN)** 또는
-**T-RV-22/23/25(offline upload orphan/idempotency/store reuse)** 다.
+**T-RV-23/25(offline upload idempotency/store reuse)** 다.
 
 ## 2026-06-05 Codex 작업 메모 — T-201b-c F7 dedup score 회귀
 

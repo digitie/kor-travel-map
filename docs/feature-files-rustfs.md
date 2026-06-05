@@ -384,6 +384,9 @@ async def upload_with_retry(client, src, store, *, max_retries=3):
 - feature soft-delete (`status='deleted'`) → 객체 삭제는 별도 purge job (운영자
   결정, ADR-017 보관 정책과 동기).
 - 30일 grace period 권장 (사용자 복구 요청 대비).
+- offline upload는 정상 등록 후 원본을 무기한 보존한다(ADR-045 D-14). 예외적으로
+  object write는 성공했지만 같은 요청의 DB metadata row 생성이 실패한 경우에만,
+  방금 쓴 object를 write-rollback 보상 삭제한다.
 
 ## 15. 보안
 

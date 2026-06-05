@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import logging
 import mimetypes
 from pathlib import PurePath
 from time import perf_counter
@@ -65,6 +66,7 @@ __all__ = [
 
 
 router = APIRouter(prefix="/admin/offline-uploads", tags=["admin-offline-uploads"])
+_LOG = logging.getLogger(__name__)
 
 OfflineUploadState = Literal[
     "uploaded",
@@ -77,13 +79,9 @@ OfflineUploadState = Literal[
     "cancelled",
 ]
 
-_LOADABLE_STATES: Final[frozenset[str]] = frozenset(
-    {"uploaded", "validated", "load_failed"}
-)
+_LOADABLE_STATES: Final[frozenset[str]] = frozenset({"uploaded", "validated", "load_failed"})
 _TABULAR_FORMATS: Final[frozenset[str]] = frozenset({"csv", "tsv"})
-_WRITEABLE_FORMATS: Final[frozenset[str]] = frozenset(
-    {"json", "jsonl", *_TABULAR_FORMATS}
-)
+_WRITEABLE_FORMATS: Final[frozenset[str]] = frozenset({"json", "jsonl", *_TABULAR_FORMATS})
 _MULTIPART_CONTENT_LENGTH_MARGIN_BYTES: Final[int] = 64 * 1024
 _DAGSTER_REPOSITORY_NAME: Final[str] = "__repository__"
 _DAGSTER_REPOSITORY_LOCATION_NAME: Final[str] = "krtour.map_dagster.definitions"
@@ -359,10 +357,7 @@ def _validate_stored_body(row: OfflineUpload, body: bytes) -> tuple[int, str]:
     if len(body) != row.byte_size:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "offline upload size mismatch: "
-                f"expected={row.byte_size}, actual={len(body)}"
-            ),
+            detail=(f"offline upload size mismatch: expected={row.byte_size}, actual={len(body)}"),
         )
     if checksum_actual.lower() != row.checksum_sha256.lower():
         raise HTTPException(
@@ -436,13 +431,9 @@ def _validation_meta_from_payload(
         rows_sampled=_int(payload.get("rows_sampled")),
         bytes_read=_int(payload.get("bytes_read")),
         checksum_sha256_actual=_string(payload.get("checksum_sha256_actual")),
-        job_id=(
-            _string(payload.get("job_id")) if payload.get("job_id") is not None else None
-        ),
+        job_id=(_string(payload.get("job_id")) if payload.get("job_id") is not None else None),
         job_state=(
-            _string(payload.get("job_state"))
-            if payload.get("job_state") is not None
-            else None
+            _string(payload.get("job_state")) if payload.get("job_state") is not None else None
         ),
         column_mapping=OfflineUploadColumnMappingRecord.model_validate(
             _dict(payload.get("column_mapping"))
@@ -481,8 +472,7 @@ def _string(value: object, default: str = "") -> str:
 def _safe_filename(filename: str | None) -> str:
     raw = PurePath(filename or "offline-upload.jsonl").name.replace("\\", "_").strip()
     safe = "".join(
-        char if char.isalnum() or char in {" ", ".", "_", "-"} else "_"
-        for char in raw
+        char if char.isalnum() or char in {" ", ".", "_", "-"} else "_" for char in raw
     ).strip()
     return safe[:160] or "offline-upload.jsonl"
 
@@ -582,6 +572,20 @@ def build_offline_upload_store(settings: KrtourMapSettings) -> S3ObjectStore:
         bucket=settings.offline_upload_bucket,
         public_base_url=None,
     )
+
+
+async def _rollback_uploaded_object(
+    store: S3ObjectStore,
+    object_key: str,
+) -> None:
+    """DB metadata 생성 실패 시 방금 쓴 offline upload object만 보상 삭제한다."""
+    try:
+        await store.delete_object(object_key)
+    except FileStoreError:
+        _LOG.exception(
+            "offline upload object rollback delete failed: object_key=%s",
+            object_key,
+        )
 
 
 async def _post_graphql(
@@ -744,22 +748,26 @@ async def create_offline_upload_request(
             detail=str(exc),
         ) from exc
 
-    async with session.begin():
-        upload = await create_offline_upload(
-            session,
-            upload_id=upload_id,
-            provider=provider,
-            dataset_key=dataset_key,
-            sync_scope=sync_scope,
-            original_filename=filename,
-            storage_backend="rustfs",
-            storage_key=stored.object_key,
-            byte_size=stored.byte_size,
-            checksum_sha256=stored.checksum_sha256,
-            detected_format=detected_format,
-            detected_encoding="utf-8",
-            created_by=created_by,
-        )
+    try:
+        async with session.begin():
+            upload = await create_offline_upload(
+                session,
+                upload_id=upload_id,
+                provider=provider,
+                dataset_key=dataset_key,
+                sync_scope=sync_scope,
+                original_filename=filename,
+                storage_backend="rustfs",
+                storage_key=stored.object_key,
+                byte_size=stored.byte_size,
+                checksum_sha256=stored.checksum_sha256,
+                detected_format=detected_format,
+                detected_encoding="utf-8",
+                created_by=created_by,
+            )
+    except Exception:  # noqa: BLE001 - DB 원인 보존 + object 보상 삭제
+        await _rollback_uploaded_object(store, stored.object_key)
+        raise
     return OfflineUploadWriteResponse(
         data=_record_from_upload(upload),
         meta=OfflineUploadWriteMeta(
@@ -922,9 +930,7 @@ async def validate_offline_upload_request(
                         column_mapping=request_body.column_mapping.model_dump(),
                         sample_size=request_body.sample_size,
                         operator=request_body.operator,
-                        address_resolver=kraddr_geo_address_resolver(
-                            kraddr, fallback="api"
-                        ),
+                        address_resolver=kraddr_geo_address_resolver(kraddr, fallback="api"),
                         reverse_geocoder=kraddr_geo_reverse_geocoder(kraddr),
                     )
         else:

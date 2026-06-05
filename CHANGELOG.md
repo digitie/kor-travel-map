@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### Admin API — offline upload write rollback (2026-06-05)
+
+- **FIXED**: `POST /admin/offline-uploads`가 RustFS/S3 object write 이후
+  `ops.offline_uploads` row 생성에 실패하면, 같은 요청에서 방금 쓴 object를 보상
+  삭제해 DB metadata 없는 orphan object를 남기지 않는다.
+- **TEST**: `S3ObjectStore.delete_object()`와 metadata insert 실패 시 rollback delete
+  경로를 단위 테스트로 고정했다.
+
 ### Integrity — F7 dedup score regression consistency (2026-06-05)
 
 - **NEW**: ADR-033 Phase 2의 `F7` cross-provider dedup score regression WARN 검사를

@@ -1225,6 +1225,9 @@ multipart upload.
 - 개발/운영 공통: RustFS bucket `krtour-uploads` (로컬 S3 API 포트 `9003`,
   console `9004`).
 - 보존 만료 없음. 자동 cleanup/lifecycle job을 두지 않는다(D-14).
+- 단, object write 후 DB metadata row 생성이 실패한 같은 요청 안에서는 방금 쓴
+  object를 보상 삭제한다. 이 write-rollback 예외는 등록 완료된 원본의 보존 정책이나
+  purge/lifecycle job을 의미하지 않는다.
 - 원본 파일은 git에 절대 커밋하지 않는다.
 
 #### `GET /admin/offline-uploads`
