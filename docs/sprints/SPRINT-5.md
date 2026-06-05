@@ -97,6 +97,9 @@
   우회)
 - `lint-imports` / `ruff format --check` / `mypy --strict` 자동 실행
 - (Sprint 5 진입 시점에 코드 base가 안정 → pre-commit hook 정착 적절)
+- 완료 기준: `.pre-commit-config.yaml` local hook + `scripts/check_journal_update.py`
+  + `scripts/run-precommit-check.sh`. Python code/test 변경에는 journal gate와
+  static gate를 pre-commit에서 실행한다.
 
 ### 2.6 T-203 — PR CI 워크플로
 
@@ -146,7 +149,7 @@
 | ADR-017 (보관 정책) | accepted (Sprint 1) | place 무기한, event +20y, notice +1y, weather +30d purge 동작 |
 | T-200 (batch DAG + 게이트) | done (2026-06-04) | Dagster batch + consistency_check + mv_refresh 차단/추적 |
 | T-201b (Phase 2) | pending | F4~F8 + dry-run report |
-| T-202~204 | pending | pre-commit hook + CI full + branch protection 매뉴얼 |
+| T-202~204 | partial | T-202 pre-commit hook 완료. T-203 CI full + T-204 branch protection 매뉴얼 남음 |
 | ADR-016 (Record Linkage 가중치) | accepted | 5 sprint 전체 검증 후 가중치 조정 PR (필요 시) |
 
 ## 4. 운영 진입 게이트 (DoD of Sprint 5)

@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-05 (codex) — T-202 pre-commit hook 정착
+
+**작업**: Sprint 5 운영 진입 gate 중 pre-commit hook을 정착한다.
+
+- **Journal gate**: `scripts/check_journal_update.py`가 staged `src/` 또는 `tests/`
+  계열 변경을 감지하고 `docs/journal.md`가 함께 staged되지 않았으면 commit을 막는다.
+  `BYPASS=1`은 의도적 1회 우회로만 허용한다.
+- **Static gate**: `scripts/run-precommit-check.sh`가 `.venv` Python을 우선 사용해
+  staged Python 파일 대상 `ruff format --check`, `mypy --strict`, `lint-imports`를
+  실행한다. 전체 ruff format baseline 정리는 충돌 위험 때문에 별도 PR로 남긴다.
+- **설정/문서**: `.pre-commit-config.yaml`과 개발환경 문서에 `pre-commit install`,
+  `pre-commit run`, journal gate 우회 기준을 추가했다. hook 설치는 WSL `/mnt/f`가
+  아니라 Windows Git/Git Bash 기준으로 한다.
+
 ## 2026-06-05 (codex) — T-RV-20 feature update request schema 검증
 
 **작업**: PR#153~#179 리뷰 후속 MED 항목 중 T-RV-20을 반영한다.

@@ -1,5 +1,24 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-05 Codex 작업 메모 — T-202 pre-commit hook 정착
+
+Sprint 5 운영 진입 gate 중 `T-202`를 처리한다. `.pre-commit-config.yaml`은 local
+hook 4개를 등록한다. `krtour-map-journal-required`는 staged `src/` 또는 `tests/` 계열
+변경에 대해 `docs/journal.md` 갱신을 요구하고, 운영자가 명시적으로
+`BYPASS=1`을 준 경우에만 한 번 우회한다.
+
+Python code/test 변경 시 `scripts/run-precommit-check.sh`가 `.venv` Python을 우선
+찾아 staged Python 파일 대상 `ruff format --check`, `mypy --strict -p krtour.map`,
+`mypy --strict -p krtour.map_dagster`, `lint-imports`를 실행한다.
+전체 codebase는 아직 ruff format baseline이 아니므로 all-files 리포맷은 별도 PR로
+남기고, 개발환경 문서에는 `pre-commit install`, `pre-commit run`, journal gate
+우회 기준을 추가한다. hook 설치 위치는 WSL `/mnt/f`가 아니라 Git metadata가 있는 NTFS
+worktree의 Windows Git/Git Bash 기준으로 문서화한다.
+
+다음 한 작업은 **T-203(PR CI workflow full matrix 정리)** 또는
+**T-204(branch protection 설정 가이드)** 다. 충돌 위험이 더 낮은 문서 작업을 우선하면
+T-204가 적합하다.
+
 ## 2026-06-05 Codex 작업 메모 — T-RV-20 feature update request schema 검증
 
 T-RV-20을 처리한다. `POST /admin/feature-update-requests` request body의 `scope`는

@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### Dev Env — pre-commit hooks (2026-06-05)
+
+- **NEW**: `.pre-commit-config.yaml`을 추가해 staged source/test 변경 시
+  `docs/journal.md` 갱신을 요구하고, Python code/test 변경에는 `ruff format --check`,
+  `mypy --strict`, `lint-imports`를 실행한다.
+- **NEW**: `scripts/check_journal_update.py`와 `scripts/run-precommit-check.sh`를 추가해
+  journal gate와 static gate를 repo-local 명령으로 고정했다.
+- **DOCS**: 개발환경 문서에 `pre-commit install`, `pre-commit run`,
+  `BYPASS=1` 일회 우회 기준과 Windows Git/Git Bash 설치 위치를 추가했다.
+
 ### Admin API/UI — feature update request schema 검증 (2026-06-05)
 
 - **FIXED**: `POST /admin/feature-update-requests`의 `scope`를 `type`
