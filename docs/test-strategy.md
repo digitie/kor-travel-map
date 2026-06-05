@@ -165,10 +165,10 @@ def test_korean_coord_validates_bounds(coord):
 | F1 | orphan source_record (`source_links` 없음) | ERROR | 1 ✅ |
 | F2 | detail-bearing kind인데 `detail` JSONB 비어있음 (ADR-018) | ERROR | 1 ✅ |
 | F3 | `coord_5179` ≠ `ST_Transform(coord,5179)` (ADR-012) | ERROR | 1 ✅ |
-| F4 | `dedup_review_queue` 미해소 초과 | WARN | 2 |
-| F5 | provider `last_success` SLA 초과 | WARN | 2 |
-| F6 | `opening_hours` 모순 (ADR-019) | ERROR | 2 |
-| F7 | cross-provider dedup mismatch | WARN | 2 |
+| F4 | `dedup_review_queue` 미해소 초과 | WARN | 2 ✅ |
+| F5 | provider `last_success` SLA 초과 | WARN | 2 ✅ |
+| F6 | `opening_hours` 모순 (ADR-019) | ERROR | 2 ✅ |
+| F7 | cross-provider dedup baseline score regression | WARN | 2 ✅ |
 | F8 | `file_object` orphan (RustFS↔DB) | WARN | 2 |
 
 집계(`build_report`): `severity_max` = 위반 케이스 최고 severity, 없으면 `OK`.

@@ -25,10 +25,13 @@ F1~F4 + Phase 2 일부 케이스를 raw SQL(ADR-004)로 검사하고 결과를
 - **F6** opening_hours 모순 — 같은 요일 안에서 ``open.time > close.time``인
   period. severity=ERROR. 다음 요일로 넘어가는 자정 통과 구간과 close 없는 24/7
   표현은 허용한다.
+- **F7** cross-provider dedup score 회귀 — unresolved cross-provider 후보의 현재
+  ``core.scoring`` 재계산 점수가 큐 저장 baseline보다 기본 10점 이상 낮아지면
+  severity=**WARN**.
 
-F7/F8은 Phase 2 후속 PR에서 추가한다. F1/F2/F3/F6은
-``CONSISTENCY_CASES``(행별 정적 SQL)로, F4/F5는 ``run_consistency_checks``의
-임계/정책 분기로 추가된다.
+F8은 Phase 2 후속 PR에서 추가한다. F1/F2/F3/F6은
+``CONSISTENCY_CASES``(행별 정적 SQL)로, F4/F5/F7은 ``run_consistency_checks``의
+임계/정책/재계산 분기로 추가된다.
 
 ADR 참조: ADR-002(async) / ADR-004(raw SQL) / ADR-012 / ADR-018 / ADR-033.
 """
@@ -37,10 +40,14 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Final
 from uuid import uuid4
 
 from sqlalchemy import text
+
+from krtour.map.core.scoring import score_pair
+from krtour.map.dto import Coordinate
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -51,6 +58,7 @@ __all__ = [
     "ConsistencyReport",
     "CONSISTENCY_CASES",
     "DEDUP_PENDING_WARN_THRESHOLD",
+    "DEDUP_SCORE_REGRESSION_WARN_POINTS",
     "PROVIDER_LAST_SUCCESS_WARN_SECONDS",
     "build_report",
     "run_consistency_checks",
@@ -72,6 +80,10 @@ DEDUP_PENDING_WARN_THRESHOLD: Final[int] = 1000
 # F5 기본 SLA — provider별 refresh policy가 없으면 active sync cursor가 24h 넘게
 # 성공하지 못한 상태를 WARN으로 본다(ADR-033 Phase 2 observe-only).
 PROVIDER_LAST_SUCCESS_WARN_SECONDS: Final[int] = 24 * 60 * 60
+
+# F7 기본 허용 회귀폭 — dedup_review_queue에 저장된 baseline total_score(0~100) 대비
+# 현재 core.scoring 재계산 점수가 이 점수 이상 낮아지면 WARN으로 본다.
+DEDUP_SCORE_REGRESSION_WARN_POINTS: Final[float] = 10.0
 
 # detail-bearing kind (DETAIL_MODELS 매핑 — price/weather 제외, ADR-018).
 _DETAIL_KINDS_SQL: Final[str] = "'place','event','notice','route','area'"
@@ -285,6 +297,52 @@ _F5_PROVIDER_LAST_SUCCESS_SAMPLE_SQL: Final[str] = (
     "LIMIT :lim"
 )
 
+_F7_DEDUP_SCORE_ROWS_SQL: Final[str] = """
+WITH primary_sources AS (
+  SELECT feature_id, provider, dataset_key
+  FROM (
+    SELECT
+      sl.feature_id,
+      sr.provider,
+      sr.dataset_key,
+      row_number() OVER (
+        PARTITION BY sl.feature_id
+        ORDER BY sr.imported_at DESC NULLS LAST, sr.source_record_key
+      ) AS rn
+    FROM provider_sync.source_links AS sl
+    JOIN provider_sync.source_records AS sr
+      ON sr.source_record_key = sl.source_record_key
+    WHERE sl.is_primary_source
+  ) AS ranked
+  WHERE rn = 1
+)
+SELECT
+  dq.review_key,
+  dq.feature_id_a,
+  dq.feature_id_b,
+  dq.total_score::float AS baseline_score,
+  fa.name AS name_a,
+  fb.name AS name_b,
+  fa.category AS category_a,
+  fb.category AS category_b,
+  x_extension.ST_X(fa.coord) AS lon_a,
+  x_extension.ST_Y(fa.coord) AS lat_a,
+  x_extension.ST_X(fb.coord) AS lon_b,
+  x_extension.ST_Y(fb.coord) AS lat_b
+FROM ops.dedup_review_queue AS dq
+JOIN feature.features AS fa
+  ON fa.feature_id = dq.feature_id_a
+JOIN feature.features AS fb
+  ON fb.feature_id = dq.feature_id_b
+JOIN primary_sources AS psa
+  ON psa.feature_id = dq.feature_id_a
+JOIN primary_sources AS psb
+  ON psb.feature_id = dq.feature_id_b
+WHERE dq.status = 'pending'
+  AND psa.provider <> psb.provider
+ORDER BY dq.total_score DESC, dq.review_key
+"""
+
 
 async def _check_f4_dedup_backlog(
     session: AsyncSession, *, threshold: int, sample_limit: int
@@ -346,6 +404,55 @@ async def _check_f5_provider_last_success_sla(
     )
 
 
+def _coord_from_row(row: Any, lon_key: str, lat_key: str) -> Coordinate | None:
+    lon = row[lon_key]
+    lat = row[lat_key]
+    if lon is None or lat is None:
+        return None
+    return Coordinate(lon=Decimal(str(lon)), lat=Decimal(str(lat)))
+
+
+async def _check_f7_dedup_score_regression(
+    session: AsyncSession, *, regression_points: float, sample_limit: int
+) -> CaseResult:
+    """F7 — unresolved cross-provider dedup 후보의 score baseline 회귀 WARN."""
+    rows = (await session.execute(text(_F7_DEDUP_SCORE_ROWS_SQL))).mappings().all()
+    sample_ids: list[str] = []
+    count = 0
+    for row in rows:
+        current_score = round(
+            score_pair(
+                name_a=str(row["name_a"]),
+                name_b=str(row["name_b"]),
+                coord_a=_coord_from_row(row, "lon_a", "lat_a"),
+                coord_b=_coord_from_row(row, "lon_b", "lat_b"),
+                cat_a={str(row["category_a"])},
+                cat_b={str(row["category_b"])},
+            )
+            * 100,
+            2,
+        )
+        baseline_score = float(row["baseline_score"])
+        drop = round(baseline_score - current_score, 2)
+        if drop >= regression_points:
+            count += 1
+            if len(sample_ids) < sample_limit:
+                sample_ids.append(
+                    f"{row['review_key']}:{row['feature_id_a']}:{row['feature_id_b']}:"
+                    f"{baseline_score:.2f}->{current_score:.2f}"
+                )
+    return CaseResult(
+        code="F7",
+        severity="WARN",
+        description=(
+            "cross-provider dedup score baseline 대비 현재 score 회귀 "
+            f"({regression_points:g}점 이상 하락, ADR-033 F7)"
+        ),
+        count=count,
+        sample_ids=sample_ids,
+    )
+
+
 async def run_consistency_checks(
     session: AsyncSession,
     *,
@@ -354,8 +461,9 @@ async def run_consistency_checks(
     sample_limit: int = _SAMPLE_LIMIT,
     dedup_pending_threshold: int = DEDUP_PENDING_WARN_THRESHOLD,
     provider_last_success_sla_seconds: int = PROVIDER_LAST_SUCCESS_WARN_SECONDS,
+    dedup_score_regression_warn_points: float = DEDUP_SCORE_REGRESSION_WARN_POINTS,
 ) -> ConsistencyReport:
-    """F1~F6 정합성 검사 실행 + (옵션) ``ops.feature_consistency_reports`` 적재.
+    """F1~F7 정합성 검사 실행 + (옵션) ``ops.feature_consistency_reports`` 적재.
 
     Parameters
     ----------
@@ -374,6 +482,9 @@ async def run_consistency_checks(
     provider_last_success_sla_seconds:
         F5 기본 SLA. ``ops.provider_refresh_policies.system_interval_seconds``가 있는
         provider/dataset은 policy 값을 우선 사용한다.
+    dedup_score_regression_warn_points:
+        F7 기본 허용 회귀폭. ``ops.dedup_review_queue.total_score`` baseline 대비 현재
+        ``core.scoring`` 재계산 점수가 이 점수 이상 낮아지면 WARN으로 본다.
 
     Returns
     -------
@@ -413,7 +524,7 @@ async def run_consistency_checks(
             )
         )
 
-    # F4/F5 — 정적 SQL이 아닌 임계/정책 케이스.
+    # F4/F5/F7 — 정적 SQL이 아닌 임계/정책/source join 케이스.
     cases.append(
         await _check_f4_dedup_backlog(
             session, threshold=dedup_pending_threshold, sample_limit=sample_limit
@@ -423,6 +534,13 @@ async def run_consistency_checks(
         await _check_f5_provider_last_success_sla(
             session,
             sla_seconds=provider_last_success_sla_seconds,
+            sample_limit=sample_limit,
+        )
+    )
+    cases.append(
+        await _check_f7_dedup_score_regression(
+            session,
+            regression_points=dedup_score_regression_warn_points,
             sample_limit=sample_limit,
         )
     )

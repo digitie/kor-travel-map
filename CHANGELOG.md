@@ -5,6 +5,13 @@
 
 ## [Unreleased]
 
+### Integrity — F7 dedup score regression consistency (2026-06-05)
+
+- **NEW**: ADR-033 Phase 2의 `F7` cross-provider dedup score regression WARN 검사를
+  `run_consistency_checks()`에 추가했다.
+- **TEST**: 큐 저장 `total_score` baseline 대비 현재 `core.scoring` 재계산 score 하락,
+  같은 provider 제외, stable score 경계를 검증하는 PostGIS 회귀 테스트를 추가했다.
+
 ### Integrity — F5 provider last_success SLA consistency (2026-06-05)
 
 - **NEW**: ADR-033 Phase 2의 `F5` provider `last_success_at` SLA WARN 검사를
