@@ -1,5 +1,21 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-05 Codex 작업 메모 — T-RV-28 frontend Docker npm ci
+
+T-RV-28을 처리한다. frontend Docker image는 더 이상 floating dependency를
+`npm install`로 해석하지 않는다. 루트 `package-lock.json`을 정식 커밋 대상으로
+전환하고, `docker/frontend.Dockerfile`은 workspace package manifest와 lockfile을
+먼저 복사한 뒤 `npm ci --workspaces --include=optional`로 설치한다.
+
+`.gitignore`와 `.dockerignore`에서 `package-lock.json` 제외를 제거해 Docker build
+context와 git 추적 기준이 일치하게 했다. Docker runbook과 deploy 메모는 frontend
+Docker build가 lockfile 기반임을 명시한다.
+
+다음 한 작업은 **T-RV-20(router scope/update_policy schema 검증)**,
+**T-RV-19/21(admin UI 지도/Dagster 선행 안정화)**, 또는
+**T-RV-22/23/25(offline upload orphan/idempotency/store reuse)** 다.
+**T-RV-27은 production 레벨 hardening 전까지 계속 skip/deferred**다.
+
 ## 2026-06-05 Codex 작업 메모 — T-RV-18 router typed error mapping
 
 T-RV-18을 처리한다. feature update request 라우터는 더 이상

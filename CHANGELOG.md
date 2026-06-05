@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### Docker — frontend dependency reproducibility (2026-06-05)
+
+- **FIXED**: frontend Docker image가 `npm install`로 floating dependency를 다시
+  해석하지 않고, root `package-lock.json` 기반 `npm ci --workspaces --include=optional`
+  로 설치한다.
+- **DOCS**: Docker runbook과 deploy 메모에 frontend lockfile 갱신/빌드 기준을
+  명시했다.
+
 ### Admin API — typed error mapping (2026-06-05)
 
 - **FIXED**: feature update request의 kraddr-geo resolver 설정 누락을 substring

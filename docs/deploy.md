@@ -23,6 +23,8 @@ npm run docker:up
 ```
 
 스모크는 `docs/runbooks/docker-app.md` §6을 따른다.
+frontend 이미지는 루트 `package-lock.json`과 `npm ci`로 재현 가능한 workspace
+의존성 설치를 사용한다.
 
 ## 환경변수
 
@@ -41,8 +43,7 @@ npm run docker:up
 
 ## 아직 남은 운영 확장
 
-- Dagster provider resource 실제 키 주입/engine lifecycle 보강(T-RV-03/04)과
-  run-now lock/claim 경합 보강(T-RV-05/11).
+- Dagster provider public client live fetcher 실제 연결(T-RV-04b).
 - RustFS/객체 저장소를 포함한 backup/restore 묶음 자동화.
-- CSV/TSV offline upload validation wizard와 column mapping preset. 기본
-  `/admin/offline-uploads*` JSON/JSONL upload/list/detail/load API/UI는 구현됨.
+- T-RV-19/20/21 및 offline-upload 후속처럼 router/schema/운영 hardening에 남은
+  항목.

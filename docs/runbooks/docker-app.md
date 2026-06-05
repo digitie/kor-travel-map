@@ -68,6 +68,11 @@ npm run docker:build
 # 내부 실행: docker compose build api frontend dagster dagster-daemon
 ```
 
+frontend 이미지는 루트 `package-lock.json`을 build context에 포함하고
+`npm ci --workspaces --include=optional`로 의존성을 설치한다. `package.json` 또는
+workspace `package.json`을 바꾼 PR은 WSL Node/npm으로 lockfile을 함께 갱신한 뒤
+Docker 빌드를 검증한다.
+
 이미지는 다음 파일에서 만든다.
 
 - `docker/api.Dockerfile`
