@@ -2,6 +2,18 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-05 (codex) — PR#153~#179 리뷰 리포트 상태 동기화
+
+**작업**: `docs/reports/pr-153-179-review-2026-06-04.md`에서 실제 반영됐지만 표에
+미반영으로 남은 항목을 2026-06-05 `origin/main` 기준으로 정리한다.
+
+- **완료 표시**: T-RV-01/02/03, T-RV-05~21, T-RV-26, T-RV-28, T-RV-36,
+  T-RV-37a~37e를 취소선+`✅ 반영` 상태로 맞췄다.
+- **부분 완료 분리**: T-RV-04는 `T-RV-04a` guard resource/env mapping 완료와
+  `T-RV-04b` provider public client live fetcher 잔여로 분리했다.
+- **처리 순서**: 완료된 HIGH 항목을 권장 순서에서 제거하고, 남은 T-RV-04b,
+  T-RV-22~25, T-RV-29~35, T-RV-37 잔여 hygiene 중심으로 재정렬했다.
+
 ## 2026-06-05 (codex) — T-201b-c F7 dedup score 회귀 정합성 검사
 
 **작업**: ADR-033 Phase 2 중 cross-provider dedup score regression을 관측하는 `F7`
