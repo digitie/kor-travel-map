@@ -13,6 +13,9 @@
 | `postgres` | host `15433`, container `5432` | 독립 `krtour_map` PostGIS DB |
 | `rustfs` | API `9003`, console `9004` | S3 호환 객체 저장소(선택, backup 대상) |
 
+`api`, `frontend`, `dagster`는 Docker compose healthcheck를 가진다. `frontend`는
+`api`의 `service_healthy` 이후 시작한다.
+
 ## 최소 배포 절차
 
 ```bash

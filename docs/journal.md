@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-05 (codex) — T-RV-26 Docker healthcheck/readiness
+
+**작업**: PR#153~#179 리뷰 후속 Docker 항목 중 T-RV-26을 반영한다.
+
+- **API healthcheck**: `api` 컨테이너가 내부 `http://127.0.0.1:{port}/debug/health`를
+  확인하도록 했다.
+- **Frontend healthcheck**: `frontend` 컨테이너가 Node `fetch()`로 Next root `:9012`를
+  확인하도록 했다.
+- **Dagster healthcheck**: `dagster` webserver가 내부 root URL을 응답하는지 확인한다.
+- **Readiness order**: `frontend.depends_on`을 `api: condition: service_healthy`로
+  전환했다.
+- **테스트**: compose 회귀 테스트가 세 healthcheck와 frontend readiness dependency를
+  검증한다.
+
 ## 2026-06-05 (codex) — T-RV-28 frontend Docker npm ci
 
 **작업**: PR#153~#179 리뷰 후속 Docker 항목 중 T-RV-28을 반영한다.

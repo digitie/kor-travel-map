@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### Docker — compose healthcheck/readiness (2026-06-05)
+
+- **FIXED**: Docker compose의 `api`, `frontend`, `dagster` 서비스에 runtime
+  healthcheck를 추가했다.
+- **FIXED**: `frontend`가 short-form `depends_on` 대신 `api: service_healthy` 이후
+  시작하도록 readiness 순서를 명시했다.
+- **TEST**: compose healthcheck와 readiness dependency 회귀 테스트를 추가했다.
+
 ### Docker — frontend dependency reproducibility (2026-06-05)
 
 - **FIXED**: frontend Docker image가 `npm install`로 floating dependency를 다시
