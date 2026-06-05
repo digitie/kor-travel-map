@@ -26,7 +26,7 @@ T-211a의 완료 기준은 다음 두 가지다.
 | `src/api/updateRequests.ts` | `/admin/feature-update-requests`, cancel, run-now | 신규. queue polling과 request detail polling 포함 |
 | `src/api/poiCacheTargets.ts` | `/admin/poi-cache-targets`, `/features/nearby/by-target` | 신규. 외부 POI target CRUD와 target 기준 주변 feature 조회 |
 | `src/api/offlineUploads.ts` | `/admin/offline-uploads`, `/admin/offline-uploads/{upload_id}`, load 실행 | T-208h 신규. JSON/JSONL upload/list/detail/Dagster load launch |
-| `src/api/dagster.ts` | `/ops/dagster/summary` | 기존 구현 유지. 공통 fetch wrapper 사용으로 정리 |
+| `src/api/dagster.ts` | `/ops/dagster/summary`, `/ops/dagster/nux-seen` | summary 조회와 NUX seen POST를 분리. 공통 fetch wrapper 사용 |
 
 공통 fetch wrapper는 `src/api/client.ts`에서 `getJson`, `postJson`, `putJson`,
 `patchJson`, `deleteJson`, `postFormData`, `pathWithQuery`를 제공한다. 인증 헤더는
@@ -45,7 +45,7 @@ T-211a의 완료 기준은 다음 두 가지다.
 | `/ops/consistency` | 가능 | `useConsistencyReports`, `useIntegrityIssues` | issue resolve/ignore mutation 없음 |
 | `/admin/feature-update-requests` | 가능 | `useFeatureUpdateRequests`, create/cancel/run-now mutation | 실제 Dagster 실행 연결은 T-208e 구현분 사용. provider별 세부 rate-limit UI는 후속 |
 | `/admin/poi-cache-targets` | 가능 | `usePoiCacheTargets`, `usePoiCacheTarget`, upsert/delete, `useNearbyFeaturesByTarget` | 없음 |
-| `/admin/dagster` | 가능 | `useDagsterSummary`, `DAGSTER_UI_URL` iframe | Dagster NUX seen은 backend best-effort 처리. iframe 차단은 배포 환경 header 설정 영향 |
+| `/admin/dagster` | 가능 | `useDagsterSummary`, `useMarkDagsterNuxSeen`, `DAGSTER_UI_URL` iframe | Dagster NUX seen은 summary 성공 후 POST로 best-effort 처리. iframe 차단은 배포 환경 header 설정 영향 |
 | `/admin/providers` | 보류 | 없음 | `/admin/providers*` REST 없음 |
 | `/admin/provider-refresh-policies` | 보류 | 없음 | `/admin/provider-refresh-policies*` REST 없음 |
 | `/admin/offline-uploads` | 기본 구현 완료 | `useOfflineUploads`, create/load mutation | T-208h에서 JSON/JSONL `FeatureBundle` upload/list/detail/Dagster load launch 연결. CSV/TSV validation wizard와 column mapping은 T-208i 후속 |

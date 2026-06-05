@@ -20,9 +20,11 @@ uvicorn 설정은 ``AdminSettings``(``KRTOUR_MAP_ADMIN_*`` env) 또는 호출자
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from contextlib import asynccontextmanager
 from uuid import uuid4
 
+import httpx
 from fastapi import FastAPI, Request, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
@@ -162,6 +164,15 @@ def create_app(settings: AdminSettings | None = None) -> FastAPI:
         else settings.ops_routes_enabled
     )
 
+    @asynccontextmanager
+    async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+        try:
+            yield
+        finally:
+            client = getattr(application.state, "dagster_http_client", None)
+            if isinstance(client, httpx.AsyncClient):
+                await client.aclose()
+
     application = FastAPI(
         title="krtour-map-admin",
         version=__version__,
@@ -173,6 +184,7 @@ def create_app(settings: AdminSettings | None = None) -> FastAPI:
         # ADR-031 — `--check` mode drift gate 안정성을 위해 ``servers``는 OpenAPI
         # spec에 포함하지 않는다 (호스트별 차이로 drift 발생 우려).
         servers=[],
+        lifespan=lifespan,
     )
     application.state.settings = settings
 

@@ -360,7 +360,9 @@ type drift 부채 0).
 | `NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API` | 백엔드 API base URL (개발: `http://127.0.0.1:9011`) |
 | `NEXT_PUBLIC_KRTOUR_MAP_DAGSTER_URL` | Dagster UI/embed base URL (개발: `http://127.0.0.1:9013`) |
 | `KRTOUR_MAP_ADMIN_DAGSTER_URL` | backend가 Dagster GraphQL을 조회할 때 쓰는 Dagster webserver base URL. 로컬 기본 `http://127.0.0.1:9013`, Docker API 컨테이너 기본 `http://dagster:9013` |
+| `KRTOUR_MAP_ADMIN_DAGSTER_ALLOWED_HOSTS` | backend Dagster GraphQL 호출 host allowlist. 기본은 `["127.0.0.1","localhost","::1","dagster"]`이며, 운영 Dagster host를 별도로 쓰면 URL과 함께 명시한다 |
 | `KRTOUR_MAP_DOCKER_ADMIN_DAGSTER_URL` | Docker compose가 API 컨테이너의 `KRTOUR_MAP_ADMIN_DAGSTER_URL`로 주입하는 내부 Dagster URL. `.env`의 로컬 `127.0.0.1` 값과 분리 |
+| `KRTOUR_MAP_DOCKER_ADMIN_DAGSTER_ALLOWED_HOSTS` | Docker compose가 API 컨테이너에 주입하는 Dagster host allowlist. 기본은 `["dagster","127.0.0.1","localhost","::1"]` |
 | `KRTOUR_MAP_DAGSTER_PG_URL` | Dagster metadata Postgres URL. Docker에서는 `KRTOUR_MAP_DOCKER_DAGSTER_PG_URL` 기본값(`postgres:5432/krtour_map_dagster`)을 `dagster`/`dagster-daemon`에 주입 |
 | `DAGSTER_DISABLE_TELEMETRY` | Dagster dev/webserver telemetry 비활성화 여부. admin UI embed 기본 운영값은 `yes`이며, 로컬 실행 스크립트와 Docker 이미지는 `dagster.yaml`의 `telemetry.enabled: false`도 함께 설정 |
 | `KRTOUR_MAP_ADMIN_FRONTEND_DIST` | (FastAPI 측) Next.js build 산출물 경로 — static export 모드 시에만 사용 (`.next/` 또는 `out/`) |

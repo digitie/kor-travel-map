@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### Admin API/UI — Dagster router hardening (2026-06-05)
+
+- **FIXED**: `GET /ops/dagster/summary`가 더 이상 Dagster `setNuxSeen` mutation을
+  호출하지 않는다. NUX 처리는 `POST /ops/dagster/nux-seen`으로 분리했다.
+- **SECURITY**: `KRTOUR_MAP_ADMIN_DAGSTER_ALLOWED_HOSTS` allowlist와 http/https scheme,
+  GraphQL path 검증으로 Dagster GraphQL URL SSRF 위험을 줄였다.
+- **CHANGED**: Dagster GraphQL 호출은 FastAPI app state의 공유 `httpx.AsyncClient`를
+  사용한다.
+- **TEST**: Dagster router unit test와 OpenAPI schema를 새 계약에 맞춰 갱신했다.
+
 ### Docs — Dagster purge schedule cleanup (2026-06-05)
 
 - **DOCS**: 실제 구현 없는 `feature_purge_*` asset/job 후보와 `purge notice old`

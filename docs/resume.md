@@ -1,5 +1,27 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-05 Codex 작업 메모 — T-RV-21 Dagster router hardening
+
+T-RV-21을 처리한다. `GET /ops/dagster/summary`는 이제 repository, asset,
+schedule/sensor, recent run 정보를 읽기만 하며 Dagster `setNuxSeen` mutation을 호출하지
+않는다. embedded Dagster UI의 NUX 처리는 `POST /ops/dagster/nux-seen`으로 분리했고,
+frontend `/admin/dagster`는 summary가 정상 조회되면 이 POST를 한 번 호출한다.
+
+backend Dagster GraphQL 대상은 `KRTOUR_MAP_ADMIN_DAGSTER_ALLOWED_HOSTS` allowlist를
+통과해야 한다. 기본 허용 host는 로컬/Docker 내부(`127.0.0.1`, `localhost`, `::1`,
+`dagster`)이며, URL scheme은 `http`/`https`, GraphQL endpoint path는 `/graphql`이어야
+한다. 설정 오류는 Dagster로 네트워크 호출을 보내기 전에 `status="error"` 응답으로
+표시한다.
+
+Dagster GraphQL HTTP 호출은 요청마다 `httpx.AsyncClient`를 새로 만들지 않고 FastAPI
+lifespan/app state의 공유 client를 사용한다. TestClient나 특수 실행 경로에서 lifespan이
+없는 경우에도 router가 lazy fallback으로 app state client를 만든다.
+
+다음 한 작업은 **T-RV-20(router scope/update_policy schema 검증)**,
+**T-RV-19(admin UI 지도 선행 안정화)**, 또는
+**T-RV-22/23/25(offline upload orphan/idempotency/store reuse)** 다.
+**T-RV-27은 production 레벨 hardening 전까지 계속 skip/deferred**다.
+
 ## 2026-06-05 Codex 작업 메모 — T-RV-37b Dagster purge schedule 문서 정리
 
 T-RV-37 cleanup 묶음 중 `dagster-boundary.md` stale purge job/schedule 문서를

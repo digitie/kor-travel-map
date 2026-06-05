@@ -88,6 +88,7 @@ shadcn/ui + `@krtour/map-marker-react` (ADR-029). 자세한 사양:
 | `KRTOUR_MAP_ADMIN_FEATURES_ROUTES_ENABLED` | `true` | `/features/*` 조회 라우터 활성화 |
 | `KRTOUR_MAP_ADMIN_ADMIN_ROUTES_ENABLED` | unset | `/admin/*` 운영 라우터 활성화. unset이면 features flag를 따름 |
 | `KRTOUR_MAP_ADMIN_OPS_ROUTES_ENABLED` | unset | `/ops/*`, `/ops/dagster/*` 라우터 활성화. unset이면 features flag를 따름 |
+| `KRTOUR_MAP_ADMIN_DAGSTER_ALLOWED_HOSTS` | `["127.0.0.1","localhost","::1","dagster"]` | Dagster GraphQL 호출 host allowlist. `KRTOUR_MAP_ADMIN_DAGSTER_URL`/override host가 이 목록에 있어야 함 |
 | `KRTOUR_MAP_ADMIN_FRONTEND_DIST` | (auto) | static export 모드 시 `frontend/out/` 경로 |
 
 ### Frontend (`NEXT_PUBLIC_*` — Next.js 규약)

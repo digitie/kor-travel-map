@@ -8,8 +8,10 @@ TripMate나 외부 서비스가 Dagster를 직접 제어하지 않는다는 ADR-
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 from fastapi import APIRouter, Query, Request
@@ -19,6 +21,7 @@ from krtour.map_admin.settings import AdminSettings
 
 __all__ = [
     "router",
+    "DagsterNuxSeenResponse",
     "DagsterSummaryResponse",
 ]
 
@@ -26,6 +29,7 @@ __all__ = [
 router = APIRouter(prefix="/ops/dagster", tags=["ops", "dagster"])
 
 JsonDict = dict[str, Any]
+_ALLOWED_DAGSTER_SCHEMES = {"http", "https"}
 
 _DAGSTER_SUMMARY_QUERY = """
 query KrtourMapDagsterSummary($limit: Int!) {
@@ -173,10 +177,93 @@ class DagsterSummaryResponse(BaseModel):
     errors: list[str] = Field(default_factory=list)
 
 
-def _graphql_url(settings: AdminSettings) -> str:
+class DagsterNuxSeenResponse(BaseModel):
+    """`POST /ops/dagster/nux-seen` 응답."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["ok", "unavailable", "error"]
+    dagster_url: str
+    graphql_url: str
+    checked_at: datetime
+    seen: bool
+    errors: list[str] = Field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class _DagsterUrls:
+    dagster_url: str
+    graphql_url: str
+
+
+class DagsterUrlConfigurationError(ValueError):
+    """Dagster URL 설정이 backend allowlist를 통과하지 못했다."""
+
+
+def _candidate_graphql_url(settings: AdminSettings) -> str:
     if settings.dagster_graphql_url:
         return settings.dagster_graphql_url
     return f"{settings.dagster_url.rstrip('/')}/graphql"
+
+
+def _normalised_allowed_hosts(settings: AdminSettings) -> set[str]:
+    return {
+        host.strip().lower().rstrip(".")
+        for host in settings.dagster_allowed_hosts
+        if host.strip()
+    }
+
+
+def _validated_http_url(
+    raw_url: str,
+    *,
+    setting_name: str,
+    allowed_hosts: set[str],
+    require_graphql_path: bool = False,
+) -> str:
+    value = raw_url.strip()
+    parsed = urlsplit(value)
+    scheme = parsed.scheme.lower()
+    if scheme not in _ALLOWED_DAGSTER_SCHEMES:
+        raise DagsterUrlConfigurationError(
+            f"{setting_name} scheme must be http or https"
+        )
+    if parsed.username is not None or parsed.password is not None:
+        raise DagsterUrlConfigurationError(
+            f"{setting_name} must not include userinfo"
+        )
+    hostname = parsed.hostname
+    if hostname is None:
+        raise DagsterUrlConfigurationError(f"{setting_name} host is required")
+    if hostname.lower().rstrip(".") not in allowed_hosts:
+        raise DagsterUrlConfigurationError(
+            f"{setting_name} host is not in dagster_allowed_hosts"
+        )
+    if parsed.query or parsed.fragment:
+        raise DagsterUrlConfigurationError(
+            f"{setting_name} must not include query or fragment"
+        )
+    if require_graphql_path and not parsed.path.rstrip("/").endswith("/graphql"):
+        raise DagsterUrlConfigurationError(
+            f"{setting_name} path must end with /graphql"
+        )
+    return urlunsplit((scheme, parsed.netloc, parsed.path, "", ""))
+
+
+def _dagster_urls(settings: AdminSettings) -> _DagsterUrls:
+    allowed_hosts = _normalised_allowed_hosts(settings)
+    dagster_url = _validated_http_url(
+        settings.dagster_url,
+        setting_name="dagster_url",
+        allowed_hosts=allowed_hosts,
+    )
+    graphql_url = _validated_http_url(
+        _candidate_graphql_url(settings),
+        setting_name="dagster_graphql_url",
+        allowed_hosts=allowed_hosts,
+        require_graphql_path=True,
+    )
+    return _DagsterUrls(dagster_url=dagster_url.rstrip("/"), graphql_url=graphql_url)
 
 
 def _dict(value: object) -> JsonDict:
@@ -325,32 +412,18 @@ def _parse_runs(raw_runs: JsonDict) -> tuple[list[DagsterRunSummary], dict[str, 
 
 
 async def _post_graphql(
+    client: httpx.AsyncClient,
     graphql_url: str,
     variables: dict[str, object],
-    timeout_seconds: float,
     query: str = _DAGSTER_SUMMARY_QUERY,
 ) -> JsonDict:
-    async with httpx.AsyncClient(timeout=timeout_seconds) as client:
-        response = await client.post(
-            graphql_url,
-            json={"query": query, "variables": variables},
-        )
-        response.raise_for_status()
-        payload = response.json()
+    response = await client.post(
+        graphql_url,
+        json={"query": query, "variables": variables},
+    )
+    response.raise_for_status()
+    payload = response.json()
     return _dict(payload)
-
-
-async def _mark_nux_seen(settings: AdminSettings, graphql_url: str) -> None:
-    try:
-        await _post_graphql(
-            graphql_url=graphql_url,
-            variables={},
-            timeout_seconds=settings.dagster_request_timeout_seconds,
-            query=_DAGSTER_SET_NUX_SEEN_MUTATION,
-        )
-    except (httpx.HTTPError, ValueError):
-        # Dagster summary is the contract. NUX hiding is best-effort UI polish.
-        return
 
 
 def _settings_from_request(request: Request) -> AdminSettings:
@@ -358,6 +431,18 @@ def _settings_from_request(request: Request) -> AdminSettings:
     if isinstance(settings, AdminSettings):
         return settings
     return AdminSettings()
+
+
+def _http_client_from_request(
+    request: Request,
+    settings: AdminSettings,
+) -> httpx.AsyncClient:
+    client = getattr(request.app.state, "dagster_http_client", None)
+    if isinstance(client, httpx.AsyncClient) and not client.is_closed:
+        return client
+    client = httpx.AsyncClient(timeout=settings.dagster_request_timeout_seconds)
+    request.app.state.dagster_http_client = client
+    return client
 
 
 @router.get(
@@ -368,8 +453,7 @@ def _settings_from_request(request: Request) -> AdminSettings:
         "Dagster GraphQL에서 repository, asset, schedule/sensor, recent run 정보를 "
         "읽어 admin UI 요약 DTO로 반환한다. Dagster webserver가 내려가도 200 "
         "응답(status=unavailable)으로 UI가 장애 상태를 표시할 수 있게 한다. "
-        "summary 조회가 성공하면 embedded Dagster 화면의 로컬 첫 실행 NUX를 접기 "
-        "위해 setNuxSeen mutation을 best-effort로 호출한다."
+        "GET은 조회 전용이며 Dagster mutation은 호출하지 않는다."
     ),
 )
 async def get_dagster_summary(
@@ -377,20 +461,41 @@ async def get_dagster_summary(
     run_limit: int = Query(default=10, ge=1, le=50),
 ) -> DagsterSummaryResponse:
     settings = _settings_from_request(request)
-    graphql_url = _graphql_url(settings)
     checked_at = datetime.now(UTC)
+    raw_graphql_url = _candidate_graphql_url(settings)
+
+    try:
+        dagster_urls = _dagster_urls(settings)
+    except DagsterUrlConfigurationError as exc:
+        return DagsterSummaryResponse(
+            status="error",
+            dagster_url=settings.dagster_url,
+            graphql_url=raw_graphql_url,
+            checked_at=checked_at,
+            repository_count=0,
+            job_count=0,
+            asset_count=0,
+            schedule_count=0,
+            sensor_count=0,
+            run_counts={},
+            repositories=[],
+            recent_runs=[],
+            errors=[str(exc)],
+        )
+
+    client = _http_client_from_request(request, settings)
 
     try:
         payload = await _post_graphql(
-            graphql_url=graphql_url,
+            client=client,
+            graphql_url=dagster_urls.graphql_url,
             variables={"limit": run_limit},
-            timeout_seconds=settings.dagster_request_timeout_seconds,
         )
     except (httpx.HTTPError, ValueError) as exc:
         return DagsterSummaryResponse(
             status="unavailable",
-            dagster_url=settings.dagster_url,
-            graphql_url=graphql_url,
+            dagster_url=dagster_urls.dagster_url,
+            graphql_url=dagster_urls.graphql_url,
             checked_at=checked_at,
             repository_count=0,
             job_count=0,
@@ -407,8 +512,8 @@ async def get_dagster_summary(
     if isinstance(graphql_errors, list) and graphql_errors:
         return DagsterSummaryResponse(
             status="error",
-            dagster_url=settings.dagster_url,
-            graphql_url=graphql_url,
+            dagster_url=dagster_urls.dagster_url,
+            graphql_url=dagster_urls.graphql_url,
             checked_at=checked_at,
             repository_count=0,
             job_count=0,
@@ -427,12 +532,11 @@ async def get_dagster_summary(
     )
     recent_runs, run_counts, run_errors = _parse_runs(_dict(data.get("runsOrError")))
     errors = [*repository_errors, *run_errors]
-    await _mark_nux_seen(settings, graphql_url)
 
     return DagsterSummaryResponse(
         status="error" if errors else "ok",
-        dagster_url=settings.dagster_url,
-        graphql_url=graphql_url,
+        dagster_url=dagster_urls.dagster_url,
+        graphql_url=dagster_urls.graphql_url,
         version=_optional_string(data.get("version")),
         checked_at=checked_at,
         repository_count=len(repositories),
@@ -444,4 +548,71 @@ async def get_dagster_summary(
         repositories=repositories,
         recent_runs=recent_runs,
         errors=errors,
+    )
+
+
+@router.post(
+    "/nux-seen",
+    response_model=DagsterNuxSeenResponse,
+    summary="Dagster NUX seen 처리",
+    description=(
+        "embedded Dagster 화면의 로컬 첫 실행 NUX를 접기 위해 Dagster GraphQL "
+        "setNuxSeen mutation을 호출한다. GET summary의 부수효과를 제거하기 위해 "
+        "명시 POST endpoint로 분리했다."
+    ),
+)
+async def mark_dagster_nux_seen(request: Request) -> DagsterNuxSeenResponse:
+    settings = _settings_from_request(request)
+    checked_at = datetime.now(UTC)
+    raw_graphql_url = _candidate_graphql_url(settings)
+
+    try:
+        dagster_urls = _dagster_urls(settings)
+    except DagsterUrlConfigurationError as exc:
+        return DagsterNuxSeenResponse(
+            status="error",
+            dagster_url=settings.dagster_url,
+            graphql_url=raw_graphql_url,
+            checked_at=checked_at,
+            seen=False,
+            errors=[str(exc)],
+        )
+
+    client = _http_client_from_request(request, settings)
+    try:
+        payload = await _post_graphql(
+            client=client,
+            graphql_url=dagster_urls.graphql_url,
+            variables={},
+            query=_DAGSTER_SET_NUX_SEEN_MUTATION,
+        )
+    except (httpx.HTTPError, ValueError) as exc:
+        return DagsterNuxSeenResponse(
+            status="unavailable",
+            dagster_url=dagster_urls.dagster_url,
+            graphql_url=dagster_urls.graphql_url,
+            checked_at=checked_at,
+            seen=False,
+            errors=[str(exc)],
+        )
+
+    graphql_errors = payload.get("errors")
+    if isinstance(graphql_errors, list) and graphql_errors:
+        return DagsterNuxSeenResponse(
+            status="error",
+            dagster_url=dagster_urls.dagster_url,
+            graphql_url=dagster_urls.graphql_url,
+            checked_at=checked_at,
+            seen=False,
+            errors=[str(error) for error in graphql_errors],
+        )
+
+    seen = _dict(payload.get("data")).get("setNuxSeen") is True
+    return DagsterNuxSeenResponse(
+        status="ok" if seen else "error",
+        dagster_url=dagster_urls.dagster_url,
+        graphql_url=dagster_urls.graphql_url,
+        checked_at=checked_at,
+        seen=seen,
+        errors=[] if seen else ["Dagster setNuxSeen mutation did not return true"],
     )

@@ -552,6 +552,54 @@
         "title": "DagsterJob",
         "type": "object"
       },
+      "DagsterNuxSeenResponse": {
+        "additionalProperties": false,
+        "description": "`POST /ops/dagster/nux-seen` 응답.",
+        "properties": {
+          "checked_at": {
+            "format": "date-time",
+            "title": "Checked At",
+            "type": "string"
+          },
+          "dagster_url": {
+            "title": "Dagster Url",
+            "type": "string"
+          },
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "graphql_url": {
+            "title": "Graphql Url",
+            "type": "string"
+          },
+          "seen": {
+            "title": "Seen",
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "unavailable",
+              "error"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "dagster_url",
+          "graphql_url",
+          "checked_at",
+          "seen"
+        ],
+        "title": "DagsterNuxSeenResponse",
+        "type": "object"
+      },
       "DagsterRepository": {
         "additionalProperties": false,
         "description": "Dagster code location/repository 요약.",
@@ -7125,9 +7173,32 @@
         ]
       }
     },
+    "/ops/dagster/nux-seen": {
+      "post": {
+        "description": "embedded Dagster 화면의 로컬 첫 실행 NUX를 접기 위해 Dagster GraphQL setNuxSeen mutation을 호출한다. GET summary의 부수효과를 제거하기 위해 명시 POST endpoint로 분리했다.",
+        "operationId": "mark_dagster_nux_seen_ops_dagster_nux_seen_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DagsterNuxSeenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Dagster NUX seen 처리",
+        "tags": [
+          "ops",
+          "dagster"
+        ]
+      }
+    },
     "/ops/dagster/summary": {
       "get": {
-        "description": "Dagster GraphQL에서 repository, asset, schedule/sensor, recent run 정보를 읽어 admin UI 요약 DTO로 반환한다. Dagster webserver가 내려가도 200 응답(status=unavailable)으로 UI가 장애 상태를 표시할 수 있게 한다. summary 조회가 성공하면 embedded Dagster 화면의 로컬 첫 실행 NUX를 접기 위해 setNuxSeen mutation을 best-effort로 호출한다.",
+        "description": "Dagster GraphQL에서 repository, asset, schedule/sensor, recent run 정보를 읽어 admin UI 요약 DTO로 반환한다. Dagster webserver가 내려가도 200 응답(status=unavailable)으로 UI가 장애 상태를 표시할 수 있게 한다. GET은 조회 전용이며 Dagster mutation은 호출하지 않는다.",
         "operationId": "get_dagster_summary_ops_dagster_summary_get",
         "parameters": [
           {
