@@ -1,5 +1,24 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-06 Codex 작업 메모 — T-209b-a Dagster SQLite schedule storage 제거 task 등록
+
+운영 확인 중 Dagster가 `DAGSTER_HOME` 아래 `.dagster/schedules/schedules.db-*`
+SQLite 파일을 내부 schedule storage로 생성하는 경로가 남아 있음을 확인했다. ADR-045
+운영 모델은 독립 PostgreSQL `krtour_map_dagster`를 Dagster metadata DB로 둔다고
+정했으므로, schedule/run/event storage가 로컬 SQLite에 남아 있으면 webserver/daemon
+분리 운영과 백업/복구 범위가 깨진다.
+
+`docs/tasks.md`에 즉시 실행 task **T-209b-a**를 추가했다. 범위는 Docker standalone과
+로컬 admin-stack의 Dagster instance config를 PostgreSQL-backed storage로 맞추고,
+`schedule_storage`, `run_storage`, `event_log_storage`가 모두
+`KRTOUR_MAP_DAGSTER_PG_URL`/`krtour_map_dagster`를 쓰게 하는 것이다. DoD는 schedule
+state toggle의 PostgreSQL 지속성, webserver/daemon 동일 config 공유,
+`$DAGSTER_HOME/.dagster/schedules/schedules.db-*` 미생성 확인, compose/runbook 회귀
+테스트다.
+
+다음 한 작업은 **T-209b-a 구현**이다. T-201b-d F8, T-RV-29/30, T-212 전체점검은
+이 SQLite schedule storage 제거가 끝난 뒤 진행한다.
+
 ## 2026-06-06 claude 작업 메모 — 문서 전수 정합성 감사(T-DA)
 
 `origin/main`(PR#225) 기준 문서 전체를 감사해

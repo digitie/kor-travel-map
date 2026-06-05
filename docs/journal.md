@@ -2,6 +2,22 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-06 (codex) — T-209b-a Dagster schedule storage PostgreSQL 전환 task 등록
+
+**작업**: Dagster가 `.dagster/schedules/schedules.db-*` SQLite 파일을 내부 schedule
+storage로 쓰는 경로를 PostgreSQL로 전환하는 즉시 실행 task를 추가한다.
+
+- **Task**: `docs/tasks.md`에 `T-209b-a`를 추가했다. 기존 `T-209b`의 후속 범위를
+  쪼개 Docker standalone과 로컬 admin-stack의 Dagster instance storage를
+  `krtour_map_dagster` PostgreSQL로 강제 전환하는 작업으로 정의했다.
+- **범위**: `schedule_storage`, `run_storage`, `event_log_storage` 모두
+  `dagster_postgres`/`KRTOUR_MAP_DAGSTER_PG_URL` 기반으로 맞추고, webserver와 daemon이
+  같은 config/DB를 공유해야 한다.
+- **DoD**: schedule state toggle의 PostgreSQL 지속성, `dagster instance info` 또는
+  동등 smoke, `$DAGSTER_HOME/.dagster/schedules/schedules.db-*` 미생성 확인,
+  compose/runbook 회귀 테스트.
+- **다음**: 즉시 `T-209b-a` 구현. T-201b-d F8과 T-RV-29/30은 그 뒤로 미룬다.
+
 ## 2026-06-06 (claude) — 문서 전수 정합성 감사 + drift 수정 (T-DA)
 
 **작업**: 사용자 지시로 `origin/main`(PR#225) 기준 문서 전체를 읽고 논리적

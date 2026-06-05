@@ -207,6 +207,10 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
 - **T-209b** 기동 순서 스크립트 — postgres ready → `alembic upgrade head`(app DB
   `krtour_map`) → `krtour_map_dagster` DB 생성 + Dagster 자체 schema init → api/
   dagster 기동. entrypoint/Makefile.
+  - **T-209b-a (즉시)**: Dagster가 `.dagster/schedules/schedules.db-*` SQLite 파일을
+    schedule storage로 생성하는 경로를 제거한다. `schedule_storage`/`run_storage`/
+    `event_log_storage`는 모두 PostgreSQL `krtour_map_dagster`를 사용하고, webserver와
+    daemon은 같은 Dagster instance config를 공유해야 한다.
 - **T-209c** Dockerfile 3종(api/frontend/dagster) 또는 멀티스테이지. GDAL/PostGIS
   client lib 포함(WSL libgdal 3.8.4 정합).
 - **T-209d** `docs/runbooks/`에 `docker-app.md`(standalone 기동/스모크) +
