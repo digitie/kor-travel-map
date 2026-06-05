@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### Admin API/UI — POI cache target cursor/schema 안정화 (2026-06-05)
+
+- **FIXED**: `GET /admin/poi-cache-targets` 목록을 `updated_at DESC, target_id DESC`
+  keyset cursor로 바꾸고 `cursor`/`next_cursor` 계약을 추가했다.
+- **FIXED**: `PUT /admin/poi-cache-targets/{external_system}/{target_key}`의
+  `provider_overrides`와 `metadata`를 typed/상한 schema로 검증한다.
+- **CHANGED**: admin UI의 POI cache target 목록이 cursor 기반 이전/다음 pagination을
+  사용한다.
+- **TEST**: repo cursor unit test와 router validation/list cursor 회귀 테스트를
+  추가했다.
+
 ### Integrity — F6 opening hours consistency (2026-06-05)
 
 - **NEW**: ADR-033 Phase 2의 `F6` opening hours 모순 검사를

@@ -1,6 +1,11 @@
 "use client";
 
-import { RefreshCwIcon, Trash2Icon } from "lucide-react";
+import {
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  RefreshCwIcon,
+  Trash2Icon,
+} from "lucide-react";
 import { useState } from "react";
 
 import {
@@ -40,8 +45,11 @@ export function PoiCacheTargetsClient() {
   const [selectedTarget, setSelectedTarget] = useState<PoiCacheTargetRecord | null>(
     null,
   );
+  const [cursorStack, setCursorStack] = useState<string[]>([]);
+  const currentCursor =
+    cursorStack.length > 0 ? cursorStack[cursorStack.length - 1] : undefined;
 
-  const targets = usePoiCacheTargets({ page_size: 300 });
+  const targets = usePoiCacheTargets({ page_size: 100, cursor: currentCursor });
   const upsert = useUpsertPoiCacheTargetMutation();
   const remove = useDeletePoiCacheTargetMutation();
   const nearby = useNearbyFeaturesByTarget(
@@ -55,17 +63,35 @@ export function PoiCacheTargetsClient() {
   );
 
   const submit = () => {
-    upsert.mutate({
-      externalSystem,
-      targetKey,
-      body: {
-        coord: { lon: Number(lon), lat: Number(lat) },
-        name: name.trim() || null,
-        radius_km: Number(radiusKm),
-        scope_mode: scopeMode,
-        on_conflict: "move",
+    const normalizedExternalSystem = externalSystem.trim();
+    const normalizedTargetKey = targetKey.trim();
+    upsert.mutate(
+      {
+        externalSystem: normalizedExternalSystem,
+        targetKey: normalizedTargetKey,
+        body: {
+          coord: { lon: Number(lon), lat: Number(lat) },
+          name: name.trim() || null,
+          radius_km: Number(radiusKm),
+          scope_mode: scopeMode,
+          on_conflict: "move",
+        },
       },
-    });
+      {
+        onSuccess: () => setCursorStack([]),
+      },
+    );
+  };
+
+  const goToNextPage = () => {
+    const nextCursor = targets.data?.next_cursor;
+    if (nextCursor) {
+      setCursorStack((value) => [...value, nextCursor]);
+    }
+  };
+
+  const goToPreviousPage = () => {
+    setCursorStack((value) => value.slice(0, -1));
   };
 
   return (
@@ -133,7 +159,11 @@ export function PoiCacheTargetsClient() {
               </NativeSelectOption>
             </NativeSelect>
             <Button
-              disabled={upsert.isPending || targetKey.trim().length === 0}
+              disabled={
+                upsert.isPending ||
+                externalSystem.trim().length === 0 ||
+                targetKey.trim().length === 0
+              }
               type="button"
               onClick={submit}
             >
@@ -153,65 +183,101 @@ export function PoiCacheTargetsClient() {
         </div>
 
         <div className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_minmax(28rem,0.8fr)]">
-          <div className="overflow-auto rounded-lg border bg-background">
+          <div className="rounded-lg border bg-background">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3">
+              <div>
+                <div className="font-medium">Targets</div>
+                <div className="text-sm text-muted-foreground">
+                  page {cursorStack.length + 1} · {targets.data?.count ?? 0} rows
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  disabled={cursorStack.length === 0 || targets.isFetching}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                  onClick={goToPreviousPage}
+                >
+                  <ChevronLeftIcon data-icon="inline-start" />
+                  이전
+                </Button>
+                <Button
+                  disabled={!targets.data?.next_cursor || targets.isFetching}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                  onClick={goToNextPage}
+                >
+                  다음
+                  <ChevronRightIcon data-icon="inline-end" />
+                </Button>
+              </div>
+            </div>
             {targets.isLoading ? <Skeleton className="m-4 h-96" /> : null}
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>target</TableHead>
-                  <TableHead>coord</TableHead>
-                  <TableHead>scope</TableHead>
-                  <TableHead>enabled</TableHead>
-                  <TableHead>refresh</TableHead>
-                  <TableHead>updated</TableHead>
-                  <TableHead>actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(targets.data?.items ?? []).map((target) => (
-                  <TableRow
-                    className="cursor-pointer"
-                    key={target.target_id}
-                    onClick={() => setSelectedTarget(target)}
-                  >
-                    <TableCell>
-                      <div className="font-medium">{target.name ?? target.target_key}</div>
-                      <div className="font-mono text-xs text-muted-foreground">
-                        {target.external_system}/{shortId(target.target_key, 18)}
-                      </div>
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">
-                      {target.coord.lon.toFixed(5)}, {target.coord.lat.toFixed(5)}
-                    </TableCell>
-                    <TableCell>{target.scope_mode}</TableCell>
-                    <TableCell>
-                      <StatusBadge status={target.update_enabled ? "active" : "disabled"} />
-                    </TableCell>
-                    <TableCell>{target.refresh_policy}</TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {formatDateTime(target.updated_at)}
-                    </TableCell>
-                    <TableCell>
-                      <Button
-                        size="sm"
-                        type="button"
-                        variant="ghost"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          remove.mutate({
-                            externalSystem: target.external_system,
-                            targetKey: target.target_key,
-                          });
-                        }}
-                      >
-                        <Trash2Icon data-icon="inline-start" />
-                        삭제
-                      </Button>
-                    </TableCell>
+            <div className="overflow-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>target</TableHead>
+                    <TableHead>coord</TableHead>
+                    <TableHead>scope</TableHead>
+                    <TableHead>enabled</TableHead>
+                    <TableHead>refresh</TableHead>
+                    <TableHead>updated</TableHead>
+                    <TableHead>actions</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {(targets.data?.items ?? []).map((target) => (
+                    <TableRow
+                      className="cursor-pointer"
+                      key={target.target_id}
+                      onClick={() => setSelectedTarget(target)}
+                    >
+                      <TableCell>
+                        <div className="font-medium">
+                          {target.name ?? target.target_key}
+                        </div>
+                        <div className="font-mono text-xs text-muted-foreground">
+                          {target.external_system}/{shortId(target.target_key, 18)}
+                        </div>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs">
+                        {target.coord.lon.toFixed(5)}, {target.coord.lat.toFixed(5)}
+                      </TableCell>
+                      <TableCell>{target.scope_mode}</TableCell>
+                      <TableCell>
+                        <StatusBadge
+                          status={target.update_enabled ? "active" : "disabled"}
+                        />
+                      </TableCell>
+                      <TableCell>{target.refresh_policy}</TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {formatDateTime(target.updated_at)}
+                      </TableCell>
+                      <TableCell>
+                        <Button
+                          size="sm"
+                          type="button"
+                          variant="ghost"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            remove.mutate({
+                              externalSystem: target.external_system,
+                              targetKey: target.target_key,
+                            });
+                          }}
+                        >
+                          <Trash2Icon data-icon="inline-start" />
+                          삭제
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           </div>
 
           <div className="rounded-lg border bg-background">

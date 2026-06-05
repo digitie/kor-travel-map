@@ -12,6 +12,7 @@ from krtour.map.infra.feature_repo import NearbyFeaturePage, NearbyFeatureRow
 from krtour.map.infra.poi_cache_target_repo import (
     PoiCacheTarget,
     PoiCacheTargetConflict,
+    PoiCacheTargetPage,
 )
 
 from krtour.map_admin.app import create_app
@@ -103,8 +104,14 @@ def test_poi_cache_target_routes_mounted_in_openapi(client: TestClient) -> None:
     assert "/admin/poi-cache-targets" in spec["paths"]
     assert "/admin/poi-cache-targets/{external_system}/{target_key}" in spec["paths"]
     assert "/features/nearby/by-target" in spec["paths"]
-    assert "PoiCacheTargetUpsertRequest" in spec["components"]["schemas"]
-    assert "FeaturesNearbyByTargetResponse" in spec["components"]["schemas"]
+    schemas = spec["components"]["schemas"]
+    assert "PoiCacheTargetUpsertRequest" in schemas
+    assert "FeaturesNearbyByTargetResponse" in schemas
+    assert "next_cursor" in schemas["PoiCacheTargetListResponse"]["properties"]
+    upsert_props = schemas["PoiCacheTargetUpsertRequest"]["properties"]
+    assert "metadata" in upsert_props
+    assert "metadata_" not in upsert_props
+    assert upsert_props["provider_overrides"]["maxProperties"] == 64
 
 
 @pytest.mark.unit
@@ -120,6 +127,16 @@ def test_put_poi_cache_target_uses_transaction(
         assert kwargs["target_key"] == "poi-1"
         assert kwargs["lon"] == 126.978
         assert kwargs["on_conflict"] == "reject"
+        assert kwargs["provider_overrides"] == {
+            "python-kma-api:kma_weather_alerts": {
+                "targeted_policy": "allow_targeted",
+                "min_interval_seconds": 300,
+            }
+        }
+        assert kwargs["metadata"] == {
+            "tripmate_poi_id": "poi-1",
+            "labels": ["city"],
+        }
         return _target()
 
     monkeypatch.setattr(router_mod, "upsert_poi_cache_target", _upsert)
@@ -129,13 +146,48 @@ def test_put_poi_cache_target_uses_transaction(
         json={
             "coord": {"lon": 126.978, "lat": 37.5665},
             "radius_km": 5.0,
-            "metadata": {"tripmate_poi_id": "poi-1"},
+            "provider_overrides": {
+                "python-kma-api:kma_weather_alerts": {
+                    "targeted_policy": "allow_targeted",
+                    "min_interval_seconds": 300,
+                }
+            },
+            "metadata": {"tripmate_poi_id": "poi-1", "labels": ["city"]},
         },
     )
 
     assert response.status_code == 200
     assert response.json()["data"]["coord_key"] == "126.978000:37.566500:p6"
+    assert response.json()["data"]["metadata"] == {"tripmate_poi_id": "poi-1"}
     assert session.begin_count == 1
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"metadata": {"unknown": True}},
+        {"provider_overrides": {"python-a-api": {"unknown": True}}},
+        {
+            "provider_overrides": {
+                f"python-provider-{index}": {"targeted_policy": "allow_targeted"}
+                for index in range(65)
+            }
+        },
+    ],
+)
+def test_put_poi_cache_target_rejects_unbounded_payloads_before_transaction(
+    client: TestClient,
+    session: _FakeSession,
+    payload: dict[str, Any],
+) -> None:
+    body: dict[str, Any] = {"coord": {"lon": 126.978, "lat": 37.5665}}
+    body.update(payload)
+
+    response = client.put("/admin/poi-cache-targets/tripmate/poi-1", json=body)
+
+    assert response.status_code == 422
+    assert session.begin_count == 0
 
 
 @pytest.mark.unit
@@ -166,12 +218,13 @@ def test_list_poi_cache_targets_passes_filters(
 ) -> None:
     from krtour.map_admin.routers import poi_cache_targets as router_mod
 
-    async def _list(_session: Any, **kwargs: Any) -> tuple[PoiCacheTarget, ...]:
+    async def _list(_session: Any, **kwargs: Any) -> PoiCacheTargetPage:
         assert kwargs["external_system"] == "tripmate"
         assert kwargs["update_enabled"] is True
         assert kwargs["include_deleted"] is False
         assert kwargs["limit"] == 25
-        return (_target(),)
+        assert kwargs["cursor"] == "cursor-1"
+        return PoiCacheTargetPage(items=(_target(),), next_cursor="cursor-2")
 
     monkeypatch.setattr(router_mod, "list_poi_cache_targets", _list)
 
@@ -181,6 +234,7 @@ def test_list_poi_cache_targets_passes_filters(
             "external_system": "tripmate",
             "update_enabled": "true",
             "page_size": "25",
+            "cursor": "cursor-1",
         },
     )
 
@@ -188,6 +242,25 @@ def test_list_poi_cache_targets_passes_filters(
     body = response.json()
     assert body["count"] == 1
     assert body["items"][0]["target_key"] == "poi-1"
+    assert body["next_cursor"] == "cursor-2"
+
+
+@pytest.mark.unit
+def test_list_poi_cache_targets_rejects_invalid_cursor(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import poi_cache_targets as router_mod
+
+    async def _list(_session: Any, **_kwargs: Any) -> PoiCacheTargetPage:
+        raise ValueError("invalid poi cache target cursor")
+
+    monkeypatch.setattr(router_mod, "list_poi_cache_targets", _list)
+
+    response = client.get("/admin/poi-cache-targets", params={"cursor": "bad"})
+
+    assert response.status_code == 422
+    assert "invalid poi cache target cursor" in response.json()["error"]["message"]
 
 
 @pytest.mark.unit

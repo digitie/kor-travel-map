@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-05 (codex) — T-RV-19 POI/cache target cursor/schema 안정화
+
+**작업**: PR#153~#179 리뷰 후속 MED 항목 중 T-RV-19를 반영한다.
+
+- **List cursor**: `list_poi_cache_targets`를 `updated_at DESC, target_id DESC`
+  keyset page로 바꾸고, admin REST `GET /admin/poi-cache-targets`에 `cursor`와
+  `next_cursor`를 추가했다.
+- **Request schema**: `PUT /admin/poi-cache-targets/{external_system}/{target_key}`의
+  `provider_overrides`와 `metadata`를 typed/상한 schema로 좁히고, Pydantic reserved
+  field 충돌을 피하도록 내부 필드는 `metadata_`+alias로 다룬다.
+- **Admin UI**: `/admin/poi-cache-targets` 목록 hook과 화면에 cursor 전달, 이전/다음
+  pagination, 저장 후 첫 페이지 복귀를 반영했다.
+- **테스트/문서**: repo cursor unit test, router validation/list cursor test,
+  OpenAPI/POI target 계약 문서와 T-RV 리뷰 리포트를 갱신했다.
+
 ## 2026-06-05 (codex) — T-201b-a F6 opening_hours 정합성 검사
 
 **작업**: ADR-033 Phase 2 중 DB 외부 의존이 없는 `F6` opening hours 모순 검사를 먼저

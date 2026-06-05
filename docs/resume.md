@@ -1,5 +1,25 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-05 Codex 작업 메모 — T-RV-19 POI/cache target cursor/schema
+
+T-RV-19를 처리한다. `GET /admin/poi-cache-targets`는 이제 단순 `LIMIT` 목록이 아니라
+`updated_at DESC, target_id DESC` keyset pagination을 사용하며, query `cursor`와 응답
+`next_cursor`를 제공한다. cursor payload는 repo에서 base64 JSON으로 검증하고,
+decode/schema 오류는 DB 조회 전에 `422`로 반환한다.
+
+`PUT /admin/poi-cache-targets/{external_system}/{target_key}` request body의
+`provider_overrides`는 최대 64개 provider/dataset key와 typed override 필드만 허용한다.
+`metadata`도 `tripmate_poi_id`, `external_ref`, `source_url`, `labels`, `note`로
+한정했다. Pydantic 내부 필드는 reserved name 충돌을 피하려고 `metadata_`를 쓰고,
+외부 JSON/OpenAPI는 계속 `metadata` alias를 노출한다.
+
+admin frontend의 `/admin/poi-cache-targets` typed hook과 화면은 cursor를 전달하고,
+이전/다음 pagination과 저장 후 첫 페이지 복귀를 지원한다. 다음 한 작업은
+**T-201b-b F5(provider last_success SLA WARN)** 또는
+**T-RV-22/23/25(offline upload orphan/idempotency/store reuse)** 다.
+**T-RV-27은 production 레벨 hardening 전까지 계속 skip/deferred**다. 병행 에이전트가
+다른 PR을 머지할 수 있으므로, 다음 작업 시작 전 `origin/main`을 다시 fetch/rebase한다.
+
 ## 2026-06-05 Codex 작업 메모 — T-201b-a F6 opening_hours 정합성 검사
 
 ADR-033 Phase 2를 한 번에 끝내지 않고, DB 외부 의존이 없는 `F6`부터 분리한다.
