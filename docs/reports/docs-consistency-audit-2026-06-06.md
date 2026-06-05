@@ -33,8 +33,15 @@
   이미 144였다. 실제 문제는 §3.1/§3.4/§4 헤더/§4.4/§8의 **개수 라벨만 "141"로
   stale**한 것이라, 라벨을 144로 통일했다(데이터 행 추가 불필요). ✅ 적용.
 
-> 따라서 본 리포트의 T-DA-01~10은 모두 **본 PR에서 반영 완료**다. T-DA-11(endpoint
-> 전수 대조)만 T-212a/T-212c 후속으로 남는다.
+> 따라서 본 리포트의 T-DA-01~10/12는 모두 **본 PR에서 반영 완료**다.
+>
+> **외부 노출 API 점검 추가(사용자 요청, §8)**: 생성 spec(`openapi.json` 35 path /
+> `openapi.user.json` 7 path) ↔ contract 대조로 T-DA-13~17 + DA-D-03/04를 추가했다.
+> - **DA-D-03 = 전면 통일** — 모든 admin 응답 `{data, meta}` 표준. 본 PR은 contract
+>   §3.1에 표준+현행예외 명시(문서). 코드 전환(T-DA-15/16)은 **별도 PR**.
+> - **DA-D-04 = T-212 묶음** — `/admin/issues`(T-DA-13) 미구현은 contract §4·§4.1에
+>   "미구현(계획)" 배지(문서). 구현은 T-212b/c.
+> - T-DA-14/17(문서 표기)은 본 PR 반영 완료.
 
 ---
 
@@ -211,5 +218,79 @@
   idempotency). 문서가 인용한 0007/0008/0009/0011/0012 등과 일치.
 - `.env.example` 포트(API 9011 / web 9012 / Dagster 9013 / Postgres 15433 /
   kraddr-geo 9001 / RustFS 9003·9004)는 ADR-047 및 `AGENTS.md` 식별자 표와 일치.
+
+---
+
+## 8. 외부 노출 API 일관성/완결성 점검 (2026-06-06 추가, 사용자 요청)
+
+기준: 생성 산출물 `packages/krtour-map-admin/openapi.json`(admin 전체, **35 path**)
++ `openapi.user.json`(TripMate/user subset, **7 path**)을 정본으로,
+`docs/openapi-admin-contract.md` + `docs/tripmate-rest-api.md`와 대조했다.
+
+### 8.1 빠진 기능 (문서엔 있으나 미구현)
+
+- [ ] **T-DA-13** (MED, **missing feature**) — `/admin/issues` 운영 API 전부 미구현.
+  - **근거**: `openapi-admin-contract.md §4.1`(125~152)이 `GET /admin/issues`,
+    `GET /admin/issues/{issue_key}`, `PATCH /admin/issues/{issue_key}`(`resolve`/
+    `ignore`/`reopen`/`retry_geocode`/`retry_reverse_geocode`/
+    `apply_kraddr_geo_address`/`manual_override`)를 **"필수 엔드포인트"**로 명세하지만,
+    `openapi.json` 35 path에 `/admin/issues*`가 **없다**(라우터 파일도 없음). 읽기 측
+    `GET /ops/consistency/issues`만 존재.
+  - **영향**: ADR-046의 핵심인 **주소/좌표 정합성 이슈를 운영자가 admin UI에서 수동
+    처리**(재지오코딩/override/채택/ignore)하는 write/action 경로가 통째로 비어 있다.
+    정합성 검사(F5~F7)는 `ops.data_integrity_violations`에 이슈를 *쌓지만*, 그걸
+    *해소*하는 API가 없다. ADR-046 결정 §4 "결측/불일치는 admin issue로 수동 처리"가
+    미이행.
+  - **조치**: `/admin/issues` 라우터 구현을 별도 task로 신설(또는 `T-212c`에 명시
+    편입)하고, 그 전까지 contract 문서에 **"미구현(계획)"** 배지를 단다.
+
+- [ ] **T-DA-14** (LOW, doc 불일치) — `admin-providers` `/admin/providers`가 contract
+  §4 tag 표(106줄)에 캐비엇 없이 올라 있으나 **미구현**(T-207b 사용자 결정으로 취소,
+  `feature-update-requests`의 `provider_dataset` scope로 대체). 같은 문서 513줄은
+  이 취소를 설명하지만 §4 표는 그대로 → 표 행에 "(미구현 — T-207b 취소)" 표기.
+
+### 8.2 일관성 (응답 셰입)
+
+생성 spec에서 실측한 셰입 분포:
+
+- **list 응답이 두 갈래로 갈림**:
+  - `{data, meta}`(envelope, cursor는 meta): `/admin/dedup-review`,
+    `/admin/features`, `/features/search`, `/features/nearby/by-target`,
+    `/ops/consistency/{issues,reports}`, `/ops/import-jobs` (7)
+  - `{count, items, next_cursor}`(flat): `/admin/feature-update-requests`,
+    `/admin/offline-uploads`, `/admin/poi-cache-targets` (3)
+  - `{count, items}`(cursor 없음, 의도된 admin-compat): `/features` (1)
+- **단건/detail 응답도 갈림**: `/features/{id}` = `{data, meta}`,
+  `/ops/import-jobs/{job_id}` = `{data}`(meta 없음), 나머지 단건
+  (`/admin/feature-update-requests/{id}`, `/admin/offline-uploads/{id}`,
+  `/admin/poi-cache-targets/{id}`, `/ops/dagster/summary`, `/ops/metrics`,
+  `/debug/mois-license/{id}`) = **bare object**.
+- **mutation(POST/PATCH/PUT)은 일관**되게 `{data, meta}`다 — 양호.
+
+- [ ] **T-DA-15** (MED, API consistency) — list 응답 셰입 이원화
+  (`{data,meta}` vs `{count,items,next_cursor}`). 외부에 노출되는 단일 OpenAPI
+  계약 안에서 페이지네이션 표면이 둘로 갈려 client(특히 generated TS type)가
+  resource마다 다른 모양을 다뤄야 한다. → 표준 envelope로 통일(DA-D-03).
+- [ ] **T-DA-16** (MED, API consistency) — 단건 응답 envelope 불일치. **특히
+  user subset 영향**: `openapi.user.json` 7 path 중 `/admin/feature-update-requests/
+  {request_id}`만 **bare object**이고 나머지(`/features/*`, `/tripmate/features/batch`)는
+  `{data, meta}` → TripMate에 노출되는 사용자 API 안에서 단건만 모양이 다르다. →
+  통일(DA-D-03).
+- **T-DA-17** (INFO) — `openapi-admin-contract.md`가 구현/미구현 endpoint를 한 표에
+  섞어 제시한다. `T-212c` 정리 시 endpoint별 상태(구현/계획) 표기를 권장.
+
+### 8.3 의사결정 (확정, 2026-06-06)
+
+- **DA-D-03 = 전면 통일** — 모든 admin 성공 응답을 `{data, meta}`로 통일(list는
+  `meta.next_cursor`+`count`). 본 문서 PR에는 **목표 표준을 contract §3.1에 명시**하고
+  현행 예외 목록을 적었다. 실제 코드 전환(3 flat list + 6 bare 단건 + admin frontend
+  hook + `openapi.*.json` 재생성)은 **별도 코드 PR**로 진행 — T-DA-15/16.
+- **DA-D-04 = T-212 묶음** — `/admin/issues`(T-DA-13)는 admin UI 이슈 승인/거절
+  화면(T-212b)과 write/action API(T-212c)를 함께 구현. 본 PR에서는 contract §4 표와
+  §4.1에 **"미구현(계획)" 배지**만 반영했다.
+
+> 본 문서 PR 반영분: contract §3.1(표준 + 현행 예외), §4 표·§4.1(미구현 배지),
+> T-DA-14 doc 표기. **코드 변경(T-DA-15/16 envelope 통일, T-DA-13 /admin/issues
+> 구현)은 후속 PR**.
 </content>
 </invoke>

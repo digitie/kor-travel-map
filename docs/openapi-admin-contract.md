@@ -98,17 +98,37 @@ Dagster DB에는 Dagster가 자체 schema를 관리한다.
 envelope의 `request_id`와 응답 헤더 `X-Request-ID`로 되돌려주고, 없으면 UUID를
 생성한다.
 
+### 3.1 응답 셰입 표준 — 전면 통일 (DA-D-03, 2026-06-06)
+
+모든 성공 응답(list / 단건 / mutation)은 위 `{data, meta}` envelope를 **단일
+표준**으로 쓴다. **예외 없음.** list는 `meta`에 `next_cursor`(keyset)와 `count`를
+담는다. 외부 노출 API 일관성을 위해 `{count, items, next_cursor}` flat 셰입과 bare
+object 단건은 모두 envelope로 수렴시킨다.
+
+> **현행 코드 정합 상태(2026-06-06)**: 위 표준은 목표 상태이고, 일부 endpoint가 아직
+> 옛 셰입을 들고 있어 **전면 통일 작업이 진행 예정**이다(감사 리포트
+> `reports/docs-consistency-audit-2026-06-06.md` T-DA-15/16, 별도 코드 PR). 통일
+> 전까지 산출물(`openapi.json`)에 남아 있는 예외 — client는 한시적으로 감안:
+> - **list `{count, items, next_cursor}`**(통일 대상): `/admin/feature-update-requests`,
+>   `/admin/offline-uploads`, `/admin/poi-cache-targets`.
+> - **단건 bare object**(통일 대상): `/admin/feature-update-requests/{id}`,
+>   `/admin/offline-uploads/{id}`, `/admin/poi-cache-targets/{id}`,
+>   `/ops/dagster/summary`, `/ops/metrics`, `/debug/mois-license/{id}`,
+>   `/ops/import-jobs/{job_id}`(`{data}`만, meta 없음).
+> - `GET /features`(raw `{count, items}`, cursor 없음)는 admin-frontend 호환용으로
+>   유지하되, 사용자/TripMate 지도 정본은 `GET /features/in-bounds` envelope다.
+
 ## 4. API tag 구조
 
 | Tag | Prefix | 용도 |
 |-----|--------|------|
 | `features` | `/features` | 지도/상세 공통 read |
 | `admin-features` | `/admin/features` | feature 검색/비활성화/override. 수동 추가/영구 삭제는 audit log 설계 후 후속 |
-| `admin-providers` | `/admin/providers` | provider 상태/강제 실행 |
+| `admin-providers` | `/admin/providers` | **미구현** — T-207b 취소. provider 강제 실행은 `/admin/feature-update-requests`의 `provider_dataset` scope로 대체(§ 아래) |
 | `admin-update-requests` | `/admin/feature-update-requests` | 지리 범위 기반 feature 업데이트 요청 |
 | `admin-poi-cache-targets` | `/admin/poi-cache-targets` | 외부 POI/cache target 등록, 삭제, 주변 조회 |
 | `admin-dedup` | `/admin/dedup-review` | 중복 검토 |
-| `admin-issues` | `/admin/issues` | 결측/정합성 이슈 |
+| `admin-issues` | `/admin/issues` | **미구현(계획 — T-212/DA-D-04)**. 현재 읽기 `GET /ops/consistency/issues`만 존재. write/action(§4.1)은 admin UI와 함께 후속 |
 | `admin-offline` | `/admin/offline-uploads` | 오프라인 파일 업로드/검증/적재 |
 | `ops` | `/ops` | import job 조회, 에러 로그, metrics, consistency |
 | `dagster` | `/ops/dagster` | Dagster webserver GraphQL 기반 운영 요약 |
@@ -123,6 +143,12 @@ envelope의 `request_id`와 응답 헤더 `X-Request-ID`로 되돌려주고, 없
 닫히며, admin/ops만 따로 열어야 하는 특수 검증은 명시 flag로 opt-in한다.
 
 ### 4.1 Admin issues / 주소 검토
+
+> **상태: 미구현(계획 — T-212 묶음, DA-D-04 2026-06-06).** 아래 "필수 엔드포인트"는
+> ADR-046 주소/좌표 이슈 운영자 수동 처리 워크플로의 **목표 계약**이며 아직
+> 라우터가 없다. 현재 구현된 것은 읽기 전용 `GET /ops/consistency/issues`뿐이다.
+> 정합성 검사(F5~F7)가 `ops.data_integrity_violations`에 이슈를 적재하므로 데이터는
+> 준비돼 있고, write/action API와 admin UI를 `T-212`(전체점검)에서 함께 구현한다.
 
 `/admin/issues`는 결측/정합성 이슈를 한 건 단위로 처리하는 운영 API다. 특히
 kraddr-geo REST v2 적용 중 발생한 주소/좌표 이슈를 admin UI에서 수동 처리할 수

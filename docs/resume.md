@@ -13,9 +13,16 @@ AGENTS.md "코드 작성 단계" / sprints/README "현 위치"의 PR 번호·스
 `001~047/다음 048`, category 개수 라벨 `141`→`144`(코드 실측), architecture 의존체인
 `category` 추가, decisions.md ADR-002/025/036 현행 기준 교차참조.
 
-다음 한 작업 후보는 감사 전 백로그 그대로 **T-201b-d F8(file object orphan WARN)**
-또는 **T-RV-29/30(OpenAPI/user spec + generated frontend types)**, 그리고 감사 후속
-**T-DA-11**(openapi-admin-contract ↔ 구현 endpoint 전수 대조 = T-212a/T-212c)다.
+사용자 추가 요청으로 **외부 노출 API 일관성/완결성**도 점검했다(감사 §8). 생성 spec
+↔ contract 대조 결과: `/admin/issues`(ADR-046 주소 이슈 수동 처리) 미구현(T-DA-13),
+`/admin/providers` 미구현 표기 누락(T-DA-14), list/단건 응답 셰입 이원화(T-DA-15/16).
+사용자 결정: **DA-D-03 = 전면 통일**(모든 admin 응답 `{data,meta}` — 코드 전환은 별도
+PR), **DA-D-04 = T-212 묶음**(`/admin/issues`는 T-212b/c). 본 PR에는 contract §3.1
+표준화 명시 + §4 미구현 배지(문서)만 반영했다.
+
+다음 한 작업 후보: ① **T-DA-15/16 envelope 전면 통일**(별도 코드 PR — 3 flat list +
+6 bare 단건 + admin frontend hook + openapi 재생성), ② **T-DA-13 `/admin/issues`
+구현**(T-212b/c), ③ 감사 전 백로그 **T-201b-d F8** 또는 **T-RV-29/30**.
 
 ## 2026-06-06 Codex 작업 메모 — T-RV-23 offline upload idempotency/load TOCTOU
 

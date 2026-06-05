@@ -20,11 +20,20 @@
   category.md·debug-ui-package.md·decisions.md ADR-030 개수 라벨 141→**144** /
   architecture.md 큰그림 의존체인에 `category` 추가 / decisions.md ADR-002·025·036에
   현행 기준 교차참조 note(역사 본문 보존).
-- **후속**: T-DA-11(openapi-admin-contract ↔ 구현 endpoint 전수 대조)은 미수행 —
-  `T-212a`/`T-212c`로 위임.
+- **외부 노출 API 점검(사용자 요청, §8)**: 생성 spec `openapi.json`(35 path)/
+  `openapi.user.json`(7 path) ↔ contract 대조. 발견: ① `/admin/issues`(ADR-046 주소
+  이슈 수동 처리 write/action)가 contract §4.1 "필수 엔드포인트"로 명세됐으나 미구현
+  (읽기 `/ops/consistency/issues`만)=T-DA-13. ② `/admin/providers` 미구현(T-207b
+  취소)인데 §4 표에 캐비엇 없음=T-DA-14. ③ list 응답 셰입 이원화 `{data,meta}`(7) vs
+  `{count,items,next_cursor}`(3)=T-DA-15, 단건 envelope 불일치(user subset
+  feature-update-requests/{id}만 bare)=T-DA-16.
+- **추가 의사결정**: DA-D-03 = **전면 통일**(모든 admin 응답 `{data,meta}`) — 본 PR은
+  contract §3.1에 표준+현행예외 명시(문서), 코드 전환은 별도 PR(T-DA-15/16).
+  DA-D-04 = **T-212 묶음** — `/admin/issues`는 contract §4·§4.1 "미구현(계획)" 배지만
+  반영, 구현은 T-212b/c.
 - **검증**: 본 배치는 문서/주석만 수정(코드·스키마 무변경). 변경 파일:
-  CLAUDE.md, AGENTS.md, docs/{tasks,journal,resume,category,architecture,decisions,
-  debug-ui-package,sprints/README}.md + 신규 리포트.
+  CLAUDE.md, AGENTS.md, SKILL.md, docs/{tasks,journal,resume,category,architecture,
+  decisions,debug-ui-package,openapi-admin-contract,sprints/README}.md + 신규 리포트.
 
 ## 2026-06-06 (codex) — T-RV-23 후속 offline upload ORM unique constraint 동기화
 
