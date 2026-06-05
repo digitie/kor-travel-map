@@ -24,6 +24,10 @@ def _command_text(command: object) -> str:
     return ""
 
 
+def _dockerfile(path: str) -> str:
+    return (ROOT / "docker" / path).read_text(encoding="utf-8")
+
+
 @pytest.mark.unit
 def test_docker_compose_uses_persistent_dagster_storage_and_daemon() -> None:
     services = _compose()["services"]
@@ -80,3 +84,40 @@ def test_dagster_package_installs_postgres_storage_plugin() -> None:
 
     dependencies = pyproject["project"]["dependencies"]
     assert any(dep.startswith("dagster-postgres") for dep in dependencies)
+
+
+@pytest.mark.unit
+def test_runtime_docker_images_are_multistage_and_non_root() -> None:
+    api = _dockerfile("api.Dockerfile")
+    dagster = _dockerfile("dagster.Dockerfile")
+    frontend = _dockerfile("frontend.Dockerfile")
+
+    assert "FROM python:3.12-slim AS builder" in api
+    assert "FROM python:3.12-slim AS runtime" in api
+    assert "USER appuser" in api
+    assert "-e ." not in api
+
+    assert "FROM python:3.12-slim AS builder" in dagster
+    assert "FROM python:3.12-slim AS runtime" in dagster
+    assert "USER appuser" in dagster
+    assert "-e ." not in dagster
+
+    assert "FROM node:22-bookworm-slim AS deps" in frontend
+    assert "FROM node:22-bookworm-slim AS builder" in frontend
+    assert "FROM node:22-bookworm-slim AS runner" in frontend
+    assert "COPY --from=deps /app/package.json ./package.json" in frontend
+    assert "USER nextjs" in frontend
+
+
+@pytest.mark.unit
+def test_frontend_docker_image_uses_next_standalone_server() -> None:
+    dockerfile = _dockerfile("frontend.Dockerfile")
+    next_config = (
+        ROOT / "packages" / "krtour-map-admin" / "frontend" / "next.config.ts"
+    ).read_text(encoding="utf-8")
+
+    assert 'output: "standalone"' in next_config
+    assert "outputFileTracingRoot: workspaceRoot" in next_config
+    assert ".next/standalone" in dockerfile
+    assert 'CMD ["node", "packages/krtour-map-admin/frontend/server.js"]' in dockerfile
+    assert "next start" not in dockerfile

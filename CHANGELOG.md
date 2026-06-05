@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### Docker — runtime image hygiene (2026-06-05)
+
+- **CHANGED**: `api`와 `dagster` Docker image를 builder/runtime stage로 분리하고
+  runtime stage를 non-root `appuser`로 실행한다.
+- **CHANGED**: frontend Docker image는 Next.js standalone server 산출물을 runner stage에
+  복사하고 non-root `nextjs` 사용자로 실행한다.
+- **TEST**: Dockerfile multi-stage/non-root/standalone 회귀 테스트를 추가했다.
+
 ### Infra — ops cursor decode hygiene (2026-06-05)
 
 - **FIXED**: `infra.ops_repo` keyset cursor decode가 broad `Exception` catch 대신

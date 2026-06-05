@@ -1,4 +1,4 @@
-FROM node:22-bookworm-slim
+FROM node:22-bookworm-slim AS deps
 
 ENV PUPPETEER_SKIP_DOWNLOAD=1 \
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
@@ -16,6 +16,19 @@ COPY packages/krtour-map-admin/frontend/package.json ./packages/krtour-map-admin
 
 RUN npm ci --workspaces --include=optional
 
+FROM node:22-bookworm-slim AS builder
+
+ENV PUPPETEER_SKIP_DOWNLOAD=1 \
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+
+WORKDIR /app
+
+COPY --from=deps /app/package.json ./package.json
+COPY --from=deps /app/package-lock.json ./package-lock.json
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/packages/map-marker-react/package.json ./packages/map-marker-react/package.json
+COPY --from=deps /app/packages/krtour-map-admin/frontend/package.json ./packages/krtour-map-admin/frontend/package.json
+
 COPY packages/map-marker-react ./packages/map-marker-react
 COPY packages/krtour-map-admin/frontend ./packages/krtour-map-admin/frontend
 
@@ -29,7 +42,23 @@ ENV NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API=$NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API \
 
 RUN npm -w packages/krtour-map-admin/frontend run build
 
-WORKDIR /app/packages/krtour-map-admin/frontend
+FROM node:22-bookworm-slim AS runner
+
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    PORT=9012 \
+    HOSTNAME=0.0.0.0
+
+WORKDIR /app
+
+RUN groupadd --system nodejs \
+    && useradd --system --gid nodejs --home-dir /app --shell /usr/sbin/nologin nextjs
+
+COPY --from=builder --chown=nextjs:nodejs /app/packages/krtour-map-admin/frontend/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/packages/krtour-map-admin/frontend/.next/static ./packages/krtour-map-admin/frontend/.next/static
+
+USER nextjs
+
 EXPOSE 9012
 
-CMD ["npx", "next", "start", "--port", "9012", "--hostname", "0.0.0.0"]
+CMD ["node", "packages/krtour-map-admin/frontend/server.js"]
