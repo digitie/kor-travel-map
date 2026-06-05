@@ -11,6 +11,7 @@
     "admin:dev": "npm -w packages/krtour-map-admin/frontend run dev",
     "admin:e2e": "npm -w packages/krtour-map-admin/frontend run e2e",
     "admin:stack": "bash scripts/run-admin-stack.sh",
+    "docker:backup": "bash scripts/docker-backup.sh",
     "docker:build": "bash scripts/docker-build.sh",
     "docker:up": "bash scripts/docker-up.sh",
     "ports:stop": "bash scripts/stop-fixed-ports.sh"
