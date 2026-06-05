@@ -36,6 +36,7 @@ __all__ = [
     "DedupReviewRow",
     "DedupFeatureSummary",
     "FeatureDeactivateResult",
+    "FeatureStateConflict",
     "FeatureOverride",
     "deactivate_feature",
     "list_admin_features",
@@ -108,6 +109,29 @@ class FeatureDeactivateResult:
     status: str
     override_created: bool
     override: FeatureOverride | None
+
+
+class FeatureStateConflict(ValueError):
+    """feature 상태가 요청한 admin 전이를 허용하지 않을 때 발생."""
+
+    def __init__(
+        self,
+        *,
+        feature_id: str,
+        current_status: str,
+        deleted_at: datetime | None,
+        target_status: str,
+    ) -> None:
+        self.feature_id = feature_id
+        self.current_status = current_status
+        self.deleted_at = deleted_at
+        self.target_status = target_status
+        reason = f"status={current_status!r}"
+        if deleted_at is not None:
+            reason = f"{reason}, deleted_at={deleted_at.isoformat()}"
+        super().__init__(
+            f"feature {feature_id!r}는 {target_status!r} 전이를 허용하지 않음: {reason}"
+        )
 
 
 @dataclass(frozen=True)
@@ -486,7 +510,7 @@ async def list_admin_features(
 
 _DEACTIVATE_FEATURE_SQL: Final[str] = """
 WITH locked AS (
-    SELECT feature_id, status
+    SELECT feature_id, status, deleted_at
     FROM feature.features
     WHERE feature_id = :feature_id
     FOR UPDATE
@@ -496,10 +520,19 @@ updated AS (
     SET status = 'inactive', updated_at = now()
     FROM locked
     WHERE f.feature_id = locked.feature_id
+      AND locked.deleted_at IS NULL
+      AND locked.status <> 'deleted'
     RETURNING f.feature_id, locked.status AS previous_status, f.status
 )
 SELECT feature_id, previous_status, status
 FROM updated
+"""
+
+_DEACTIVATE_FEATURE_STATE_SQL: Final[str] = """
+SELECT feature_id, status, deleted_at
+FROM feature.features
+WHERE feature_id = :feature_id
+FOR UPDATE
 """
 
 _UPSERT_STATUS_OVERRIDE_SQL: Final[str] = """
@@ -567,6 +600,19 @@ async def deactivate_feature(
         )
     ).mappings().first()
     if row is None:
+        state_row = (
+            await session.execute(
+                text(_DEACTIVATE_FEATURE_STATE_SQL),
+                {"feature_id": feature_id},
+            )
+        ).mappings().first()
+        if state_row is not None:
+            raise FeatureStateConflict(
+                feature_id=str(state_row["feature_id"]),
+                current_status=str(state_row["status"]),
+                deleted_at=state_row["deleted_at"],
+                target_status="inactive",
+            )
         return None
 
     override = None

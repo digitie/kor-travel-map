@@ -88,7 +88,7 @@ OFFLINE_UPLOAD_LOAD_JOB_KIND: Final[str] = "offline_upload_load"
 OFFLINE_UPLOAD_VALIDATE_JOB_KIND: Final[str] = "offline_upload_validate"
 
 _LOADABLE_STATES: Final[frozenset[str]] = frozenset(
-    {"uploaded", "validated", "loaded", "load_failed"}
+    {"uploaded", "validated", "load_failed"}
 )
 _VALIDATABLE_STATES: Final[frozenset[str]] = frozenset(
     {"uploaded", "validated", "validation_failed", "load_failed"}
@@ -298,14 +298,14 @@ async def run_offline_upload_validation_job(
             },
             source_checksum=upload.checksum_sha256,
         )
-        upload = (
-            await mark_offline_upload_validating(
-                session,
-                upload_id=upload.upload_id,
-                validation_job_id=job.job_id,
-            )
-            or upload
+        marked_validation = await mark_offline_upload_validating(
+            session,
+            upload_id=upload.upload_id,
+            validation_job_id=job.job_id,
         )
+        if marked_validation is None:
+            raise ValueError(f"offline upload 없음: {upload.upload_id!r}")
+        upload = marked_validation
 
         body = b""
         checksum_actual: str | None = None
@@ -357,24 +357,24 @@ async def run_offline_upload_validation_job(
                 )
                 or job
             )
-            upload = (
-                await finish_offline_upload_validation(
-                    session,
-                    upload_id=upload.upload_id,
-                    state="validation_failed",
-                )
-                or upload
+            failed_upload = await finish_offline_upload_validation(
+                session,
+                upload_id=upload.upload_id,
+                state="validation_failed",
             )
+            if failed_upload is None:
+                raise ValueError(f"offline upload 없음: {upload.upload_id!r}")
+            upload = failed_upload
         else:
             finished = await finish_import_job(session, job.job_id, state="done") or job
-            upload = (
-                await finish_offline_upload_validation(
-                    session,
-                    upload_id=upload.upload_id,
-                    state="validated",
-                )
-                or upload
+            validated_upload = await finish_offline_upload_validation(
+                session,
+                upload_id=upload.upload_id,
+                state="validated",
             )
+            if validated_upload is None:
+                raise ValueError(f"offline upload 없음: {upload.upload_id!r}")
+            upload = validated_upload
         final_result = OfflineUploadValidationResult(
             upload=upload,
             job=finished,
@@ -445,14 +445,14 @@ async def run_offline_upload_load_job(
             },
             source_checksum=upload.checksum_sha256,
         )
-        upload = (
-            await mark_offline_upload_loading(
-                session,
-                upload_id=upload.upload_id,
-                load_job_id=job.job_id,
-            )
-            or upload
+        marked_load = await mark_offline_upload_loading(
+            session,
+            upload_id=upload.upload_id,
+            load_job_id=job.job_id,
         )
+        if marked_load is None:
+            raise ValueError(f"offline upload 없음: {upload.upload_id!r}")
+        upload = marked_load
 
         body = b""
         checksum_actual: str | None = None
@@ -516,14 +516,14 @@ async def run_offline_upload_load_job(
                 )
                 or job
             )
-            upload = (
-                await finish_offline_upload_load(
-                    session,
-                    upload_id=upload.upload_id,
-                    state="load_failed",
-                )
-                or upload
+            failed_upload = await finish_offline_upload_load(
+                session,
+                upload_id=upload.upload_id,
+                state="load_failed",
             )
+            if failed_upload is None:
+                raise ValueError(f"offline upload 없음: {upload.upload_id!r}") from exc
+            upload = failed_upload
             return OfflineUploadLoadResult(
                 acquired=True,
                 upload=upload,
@@ -536,14 +536,14 @@ async def run_offline_upload_load_job(
             )
 
         finished = await finish_import_job(session, job.job_id, state="done") or job
-        upload = (
-            await finish_offline_upload_load(
-                session,
-                upload_id=upload.upload_id,
-                state="loaded",
-            )
-            or upload
+        loaded_upload = await finish_offline_upload_load(
+            session,
+            upload_id=upload.upload_id,
+            state="loaded",
         )
+        if loaded_upload is None:
+            raise ValueError(f"offline upload 없음: {upload.upload_id!r}")
+        upload = loaded_upload
         return OfflineUploadLoadResult(
             acquired=True,
             upload=upload,

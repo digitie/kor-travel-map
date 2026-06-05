@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### Infra/Admin API — 상태전이 guard (2026-06-05)
+
+- **FIXED**: admin feature deactivate가 deleted/soft-deleted feature를 inactive로
+  되살리지 않고 `409` conflict로 거절한다.
+- **FIXED**: data integrity issue의 `resolved`/`ignored` terminal 상태가 다시
+  `open`/`acknowledged`로 돌아가거나 `resolved_at`을 잃지 않도록 막았다.
+- **FIXED**: offline upload validation/load mark/finish가 source-state guard를 사용해
+  잘못된 완료 처리와 `loaded -> loading` 중복 Dagster 실행 경로를 차단한다.
+- **TEST**: admin feature repo/router, integrity issue lifecycle, offline upload
+  repo/router/load orchestration focused unit/integration test를 추가했다.
+
 ### Infra — dedup refresh master 신호와 keyset paging (2026-06-05)
 
 - **NEW**: `Feature`/`feature.features`에 `coord_precision_digits`를 추가하고,

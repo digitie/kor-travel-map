@@ -78,7 +78,7 @@ OfflineUploadState = Literal[
 ]
 
 _LOADABLE_STATES: Final[frozenset[str]] = frozenset(
-    {"uploaded", "validated", "loaded", "load_failed"}
+    {"uploaded", "validated", "load_failed"}
 )
 _TABULAR_FORMATS: Final[frozenset[str]] = frozenset({"csv", "tsv"})
 _WRITEABLE_FORMATS: Final[frozenset[str]] = frozenset(
@@ -335,7 +335,6 @@ def _can_load(row: OfflineUpload) -> bool:
     if _is_tabular_upload(row):
         return row.validation_job_id is not None and row.state in {
             "validated",
-            "loaded",
             "load_failed",
         }
     return True

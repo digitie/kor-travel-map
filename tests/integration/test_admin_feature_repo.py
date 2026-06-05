@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from krtour.map.dto import Address, Coordinate, Feature, PlaceDetail
 from krtour.map.infra.admin_feature_repo import (
+    FeatureStateConflict,
     deactivate_feature,
     list_admin_features,
     list_dedup_reviews,
@@ -172,6 +173,44 @@ async def test_deactivate_creates_override_and_provider_upsert_preserves_status(
         )
     ).scalar_one()
     assert override_count == 1
+
+
+async def test_deactivate_rejects_deleted_feature(
+    migrated_session: AsyncSession,
+) -> None:
+    feature_id = "feature-admin-deleted"
+    await _seed_feature(migrated_session, feature_id)
+    await migrated_session.execute(
+        text(
+            """
+            UPDATE feature.features
+            SET status = 'deleted',
+                deleted_at = now(),
+                updated_at = now()
+            WHERE feature_id = :feature_id
+            """
+        ),
+        {"feature_id": feature_id},
+    )
+
+    with pytest.raises(FeatureStateConflict) as exc_info:
+        await deactivate_feature(
+            migrated_session,
+            feature_id,
+            reason="삭제 feature 부활 방지",
+            operator="local-admin",
+        )
+
+    assert exc_info.value.current_status == "deleted"
+    row = (
+        await migrated_session.execute(
+            select(FeatureRow.status, FeatureRow.deleted_at).where(
+                FeatureRow.feature_id == feature_id
+            )
+        )
+    ).one()
+    assert row.status == "deleted"
+    assert row.deleted_at is not None
 
 
 async def test_list_admin_features_filters_issue_and_primary_source(

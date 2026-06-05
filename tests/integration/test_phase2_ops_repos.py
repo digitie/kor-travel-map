@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy import text
 
 from krtour.map.infra.integrity_violation_repo import (
+    DataIntegrityViolationStateConflict,
     create_data_integrity_violation,
     get_data_integrity_violation,
     list_data_integrity_violations,
@@ -273,6 +274,29 @@ async def test_data_integrity_violation_lifecycle_and_fk_behavior(
     assert resolved.status == "resolved"
     assert resolved.resolved_at is not None
     assert resolved.payload["resolution"]["operator"] == "local-admin"
+
+    same_resolved = await set_data_integrity_violation_status(
+        migrated_session,
+        violation.violation_key,
+        status="resolved",
+    )
+    assert same_resolved is not None
+    assert same_resolved.status == "resolved"
+    assert same_resolved.resolved_at == resolved.resolved_at
+
+    with pytest.raises(DataIntegrityViolationStateConflict) as exc_info:
+        await set_data_integrity_violation_status(
+            migrated_session,
+            violation.violation_key,
+            status="open",
+        )
+    assert exc_info.value.current_status == "resolved"
+    still_resolved = await get_data_integrity_violation(
+        migrated_session, violation.violation_key
+    )
+    assert still_resolved is not None
+    assert still_resolved.status == "resolved"
+    assert still_resolved.resolved_at == resolved.resolved_at
 
     await migrated_session.execute(
         text(

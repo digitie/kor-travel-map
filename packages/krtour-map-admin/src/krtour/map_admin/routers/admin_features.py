@@ -12,6 +12,7 @@ from krtour.map.infra.admin_feature_repo import (
     AdminFeatureRow,
     FeatureDeactivateResult,
     FeatureOverride,
+    FeatureStateConflict,
     deactivate_feature,
     list_admin_features,
 )
@@ -287,7 +288,10 @@ async def list_features(
 @router.post(
     "/{feature_id}/deactivate",
     response_model=AdminFeatureDeactivateResponse,
-    responses={404: {"description": "feature 없음"}},
+    responses={
+        404: {"description": "feature 없음"},
+        409: {"description": "feature 상태 전이 불가"},
+    },
 )
 async def deactivate_feature_route(
     feature_id: str,
@@ -296,13 +300,19 @@ async def deactivate_feature_route(
 ) -> AdminFeatureDeactivateResponse:
     started_at = perf_counter()
     async with session.begin():
-        result = await deactivate_feature(
-            session,
-            feature_id,
-            reason=body.reason,
-            operator=body.operator,
-            prevent_provider_reactivation=body.prevent_provider_reactivation,
-        )
+        try:
+            result = await deactivate_feature(
+                session,
+                feature_id,
+                reason=body.reason,
+                operator=body.operator,
+                prevent_provider_reactivation=body.prevent_provider_reactivation,
+            )
+        except FeatureStateConflict as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=str(exc),
+            ) from exc
     if result is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

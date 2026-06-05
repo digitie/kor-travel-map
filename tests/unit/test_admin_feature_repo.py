@@ -234,11 +234,33 @@ async def test_deactivate_feature_with_and_without_override() -> None:
     assert no_override.override_created is False
 
     missing = await repo.deactivate_feature(
-        _Session([_Result([])]),  # type: ignore[arg-type]
+        _Session([_Result([]), _Result([])]),  # type: ignore[arg-type]
         "missing",
         reason="없음",
     )
     assert missing is None
+
+    with pytest.raises(repo.FeatureStateConflict) as exc_info:
+        await repo.deactivate_feature(
+            _Session(
+                [
+                    _Result([]),
+                    _Result(
+                        [
+                            {
+                                "feature_id": "feature-deleted",
+                                "status": "deleted",
+                                "deleted_at": _NOW,
+                            }
+                        ]
+                    ),
+                ]
+            ),  # type: ignore[arg-type]
+            "feature-deleted",
+            reason="삭제됨",
+        )
+    assert exc_info.value.current_status == "deleted"
+    assert exc_info.value.target_status == "inactive"
 
 
 def test_dedup_cursor_and_row_mapping() -> None:
