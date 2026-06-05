@@ -1,5 +1,17 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-05 Codex 작업 메모 — T-201b-a F6 opening_hours 정합성 검사
+
+ADR-033 Phase 2를 한 번에 끝내지 않고, DB 외부 의존이 없는 `F6`부터 분리한다.
+`run_consistency_checks()`는 이제 F1/F2/F3/F6 정적 SQL 케이스와 F4 dedup backlog
+threshold 케이스를 함께 평가한다. F6는 `detail.business_hours` 또는
+`detail.opening_hours`의 `periods`/`special_days[].periods` 중 같은 요일에서
+`open.time > close.time`인 period를 ERROR로 보고한다. 다음 요일로 넘어가는
+overnight period와 close가 없는 24/7 표현은 허용한다.
+
+다음 한 작업은 **T-201b-b F5(provider last_success SLA WARN)** 다. 이후 F7(dedup score
+회귀), F8(file object orphan), dry-run report를 각각 작은 PR로 닫는다.
+
 ## 2026-06-05 Codex 작업 메모 — T-203 PR CI workflow full matrix
 
 Sprint 5 운영 진입 gate 중 `T-203`을 처리한다. `.github/workflows/ci.yml`은 기존

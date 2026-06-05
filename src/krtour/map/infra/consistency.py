@@ -1,12 +1,12 @@
-"""``krtour.map.infra.consistency`` — feature 정합성 검사 (ADR-033 Phase 1).
+"""``krtour.map.infra.consistency`` — feature 정합성 검사 (ADR-033).
 
-F1~F3 critical 케이스를 raw SQL(ADR-004)로 검사하고 결과를
+F1~F4 + Phase 2 일부 케이스를 raw SQL(ADR-004)로 검사하고 결과를
 ``ops.feature_consistency_reports``에 1 배치 = 1 행으로 영속화한다. Dagster
-게이트(``mv_refresh`` swap 차단)는 Phase 2(Sprint 5, ADR-033) — 본 모듈은
-**관측만** 한다 (검사 결과를 보이게 만들 뿐, 적재를 차단하지 않음).
+게이트(``mv_refresh`` swap 차단)는 ``infra.batch_dag``가 ``severity_max``를 보고
+처리한다.
 
-검사 케이스 (Phase 1)
----------------------
+검사 케이스
+-----------
 - **F1** orphan source_record — ``source_links``가 하나도 없는
   ``provider_sync.source_records`` (ETL transform 누수 → Feature 미생성).
   severity=ERROR.
@@ -19,9 +19,13 @@ F1~F3 critical 케이스를 raw SQL(ADR-004)로 검사하고 결과를
   ``DEDUP_PENDING_WARN_THRESHOLD``(baseline) 초과. severity=**WARN**(observe-only,
   적재 차단 안 함). F1~F3과 달리 행별 위반이 아니라 **임계 초과 집계** — 초과 시
   count=pending 수, 이하면 OK. (SPRINT-4 §2.3, Sprint 4b.)
+- **F6** opening_hours 모순 — 같은 요일 안에서 ``open.time > close.time``인
+  period. severity=ERROR. 다음 요일로 넘어가는 자정 통과 구간과 close 없는 24/7
+  표현은 허용한다.
 
-F5~F8 + Dagster 게이트는 Phase 2(ADR-033). F1~F3은 ``CONSISTENCY_CASES``(행별 정적
-SQL)로, F4는 ``run_consistency_checks``의 임계 분기로 추가된다.
+F5/F7/F8은 Phase 2 후속 PR에서 추가한다. F1/F2/F3/F6은
+``CONSISTENCY_CASES``(행별 정적 SQL)로, F4는 ``run_consistency_checks``의 임계
+분기로 추가된다.
 
 ADR 참조: ADR-002(async) / ADR-004(raw SQL) / ADR-012 / ADR-018 / ADR-033.
 """
@@ -75,7 +79,7 @@ class CaseSpec:
     sql: str
 
 
-# F1~F3 (ADR-033 Phase 1). 각 SQL은 위반 식별자를 ``AS id``로 반환.
+# F1/F2/F3/F6. 각 SQL은 위반 식별자를 ``AS id``로 반환.
 CONSISTENCY_CASES: Final[tuple[CaseSpec, ...]] = (
     CaseSpec(
         code="F1",
@@ -112,6 +116,50 @@ CONSISTENCY_CASES: Final[tuple[CaseSpec, ...]] = (
             "  AND (f.coord_5179 IS NULL "
             "       OR ST_SRID(f.coord_5179) <> 5179 "
             "       OR NOT ST_DWithin(f.coord_5179, ST_Transform(f.coord, 5179), 0.01))"
+        ),
+    ),
+    CaseSpec(
+        code="F6",
+        severity="ERROR",
+        description=("opening_hours 모순 (같은 요일 period에서 open.time > close.time, ADR-019)"),
+        sql=(
+            "WITH opening_periods AS ("
+            "  SELECT f.feature_id, period "
+            "  FROM feature.features f "
+            "  CROSS JOIN LATERAL jsonb_path_query("
+            "    f.detail, '$.business_hours.periods[*] ? (@.close != null)'"
+            "  ) AS period "
+            "  WHERE f.deleted_at IS NULL "
+            "  UNION ALL "
+            "  SELECT f.feature_id, period "
+            "  FROM feature.features f "
+            "  CROSS JOIN LATERAL jsonb_path_query("
+            "    f.detail, '$.opening_hours.periods[*] ? (@.close != null)'"
+            "  ) AS period "
+            "  WHERE f.deleted_at IS NULL "
+            "  UNION ALL "
+            "  SELECT f.feature_id, period "
+            "  FROM feature.features f "
+            "  CROSS JOIN LATERAL jsonb_path_query("
+            "    f.detail, '$.business_hours.special_days[*].periods[*] ? (@.close != null)'"
+            "  ) AS period "
+            "  WHERE f.deleted_at IS NULL "
+            "  UNION ALL "
+            "  SELECT f.feature_id, period "
+            "  FROM feature.features f "
+            "  CROSS JOIN LATERAL jsonb_path_query("
+            "    f.detail, '$.opening_hours.special_days[*].periods[*] ? (@.close != null)'"
+            "  ) AS period "
+            "  WHERE f.deleted_at IS NULL "
+            ") "
+            "SELECT DISTINCT feature_id AS id "
+            "FROM opening_periods "
+            "WHERE COALESCE(period->'open'->>'day', '') ~ '^[0-6]$' "
+            "  AND COALESCE(period->'close'->>'day', '') ~ '^[0-6]$' "
+            "  AND COALESCE(period->'open'->>'time', '') ~ '^([01][0-9]|2[0-3])[0-5][0-9]$' "
+            "  AND COALESCE(period->'close'->>'time', '') ~ '^([01][0-9]|2[0-3])[0-5][0-9]$' "
+            "  AND (period->'open'->>'day')::int = (period->'close'->>'day')::int "
+            "  AND (period->'open'->>'time') > (period->'close'->>'time')"
         ),
     ),
 )
@@ -161,9 +209,7 @@ def build_report(batch_id: str, cases: list[CaseResult]) -> ConsistencyReport:
     ``severity_max``는 위반(count>0)이 있는 케이스의 최고 severity, 없으면 ``OK``.
     """
     violated = [c.severity for c in cases if c.count > 0]
-    severity_max = (
-        max(violated, key=_SEVERITY_ORDER.__getitem__) if violated else "OK"
-    )
+    severity_max = max(violated, key=_SEVERITY_ORDER.__getitem__) if violated else "OK"
     total = sum(c.count for c in cases)
     summary: dict[str, Any] = {
         "total_violations": total,
@@ -195,17 +241,15 @@ async def _check_f4_dedup_backlog(
     session: AsyncSession, *, threshold: int, sample_limit: int
 ) -> CaseResult:
     """F4 — pending dedup 백로그가 baseline 초과 시 WARN (임계 집계 케이스)."""
-    pending = int(
-        (await session.execute(text(_F4_PENDING_COUNT_SQL))).scalar_one()
-    )
+    pending = int((await session.execute(text(_F4_PENDING_COUNT_SQL))).scalar_one())
     over = pending > threshold
     sample_ids: list[str] = []
     if over:
         rows = (
-            await session.execute(
-                text(_F4_PENDING_SAMPLE_SQL), {"lim": sample_limit}
-            )
-        ).scalars().all()
+            (await session.execute(text(_F4_PENDING_SAMPLE_SQL), {"lim": sample_limit}))
+            .scalars()
+            .all()
+        )
         sample_ids = [str(r) for r in rows]
     return CaseResult(
         code="F4",
@@ -228,7 +272,7 @@ async def run_consistency_checks(
     sample_limit: int = _SAMPLE_LIMIT,
     dedup_pending_threshold: int = DEDUP_PENDING_WARN_THRESHOLD,
 ) -> ConsistencyReport:
-    """F1~F4 정합성 검사 실행 + (옵션) ``ops.feature_consistency_reports`` 적재.
+    """F1~F4/F6 정합성 검사 실행 + (옵션) ``ops.feature_consistency_reports`` 적재.
 
     Parameters
     ----------
@@ -263,11 +307,15 @@ async def run_consistency_checks(
         sample_ids: list[str] = []
         if count:
             rows = (
-                await session.execute(
-                    text(f"SELECT id FROM ({spec.sql}) AS v LIMIT :lim"),  # noqa: S608
-                    {"lim": sample_limit},
+                (
+                    await session.execute(
+                        text(f"SELECT id FROM ({spec.sql}) AS v LIMIT :lim"),  # noqa: S608
+                        {"lim": sample_limit},
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             sample_ids = [str(r) for r in rows]
         cases.append(
             CaseResult(

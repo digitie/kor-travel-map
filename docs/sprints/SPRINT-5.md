@@ -71,6 +71,8 @@
   하락) — severity=WARN.
 - **F8** (`file_object` orphan: RustFS object 존재 + DB feature 없음 / 그
   반대) — severity=WARN.
+- 진행 메모(2026-06-05): `F6`는 `run_consistency_checks()`의 정적 SQL 케이스로
+  먼저 구현했다. 남은 Phase 2 범위는 F5/F7/F8 + dry-run report다.
 - **Dagster 게이트 적용** (`docs/dagster-boundary.md §12`):
   - root → child 적재 → `consistency_check` 실행
   - `severity_max != ERROR` 시 `mv_refresh strategy='swap'`
@@ -153,7 +155,7 @@
 | ADR-033 (정합성 단계 도입) | accepted (Sprint 1) | Phase 2 (F4~F8 + Dagster 게이트) 적용 + swap 차단 동작 |
 | ADR-017 (보관 정책) | accepted (Sprint 1) | place 무기한, event +20y, notice +1y, weather +30d purge 동작 |
 | T-200 (batch DAG + 게이트) | done (2026-06-04) | Dagster batch + consistency_check + mv_refresh 차단/추적 |
-| T-201b (Phase 2) | pending | F4~F8 + dry-run report |
+| T-201b (Phase 2) | partial | F4 완료, F6 구현. 남은 F5/F7/F8 + dry-run report |
 | T-202~204 | done | T-202 pre-commit hook + T-203 CI full matrix + T-204 branch protection 매뉴얼 완료 |
 | ADR-016 (Record Linkage 가중치) | accepted | 5 sprint 전체 검증 후 가중치 조정 PR (필요 시) |
 
