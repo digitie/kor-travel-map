@@ -53,6 +53,8 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from krtour.map.core.offline_upload_states import OFFLINE_UPLOAD_STATE_VALUES
+
 __all__ = [
     "metadata",
     "Base",
@@ -82,6 +84,12 @@ _NAMING_CONVENTION = {
     "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
     "pk": "pk_%(table_name)s",
 }
+
+
+def _sql_text_literals(values: tuple[str, ...]) -> str:
+    """SQLAlchemy ``CheckConstraint`` 문자열용 quoted literal 목록."""
+
+    return ",".join(f"'{value}'" for value in values)
 
 
 class Base(DeclarativeBase):
@@ -663,10 +671,7 @@ class OfflineUploadRow(Base):
     __tablename__ = "offline_uploads"
     __table_args__ = (
         CheckConstraint(
-            "state IN ("
-            "'uploaded','validating','validated','validation_failed',"
-            "'loading','loaded','load_failed','cancelled'"
-            ")",
+            f"state IN ({_sql_text_literals(OFFLINE_UPLOAD_STATE_VALUES)})",
             name="ck_offline_uploads_state",
         ),
         CheckConstraint("byte_size >= 0", name="ck_offline_uploads_byte_size"),

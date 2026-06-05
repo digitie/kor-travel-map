@@ -11,6 +11,7 @@ from typing import Final, Literal
 
 __all__ = [
     "OfflineUploadState",
+    "OFFLINE_UPLOAD_STATE_VALUES",
     "OFFLINE_UPLOAD_STATES",
     "OFFLINE_UPLOAD_LOADABLE_STATES",
     "OFFLINE_UPLOAD_LOAD_FINISH_STATES",
@@ -35,18 +36,17 @@ OfflineUploadState = Literal[
     "cancelled",
 ]
 
-OFFLINE_UPLOAD_STATES: Final[frozenset[OfflineUploadState]] = frozenset(
-    {
-        "uploaded",
-        "validating",
-        "validated",
-        "validation_failed",
-        "loading",
-        "loaded",
-        "load_failed",
-        "cancelled",
-    }
+OFFLINE_UPLOAD_STATE_VALUES: Final[tuple[OfflineUploadState, ...]] = (
+    "uploaded",
+    "validating",
+    "validated",
+    "validation_failed",
+    "loading",
+    "loaded",
+    "load_failed",
+    "cancelled",
 )
+OFFLINE_UPLOAD_STATES: Final[frozenset[OfflineUploadState]] = frozenset(OFFLINE_UPLOAD_STATE_VALUES)
 OFFLINE_UPLOAD_VALIDATABLE_STATES: Final[frozenset[OfflineUploadState]] = frozenset(
     {"uploaded", "validated", "validation_failed", "load_failed"}
 )

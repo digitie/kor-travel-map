@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-05 (codex) — T-RV-24 후속 offline upload ORM state check 동기화
+
+**작업**: T-RV-24에서 만든 offline upload 상태 단일 계약을 ORM check constraint까지
+확장한다.
+
+- **ORM sync**: `OfflineUploadRow`의 `ck_offline_uploads_state`가
+  `OFFLINE_UPLOAD_STATE_VALUES`를 참조하게 해 core 상태 tuple과 SQLAlchemy 모델의
+  상태 목록 drift를 줄인다.
+- **Test**: 상태 tuple 순서/집합과 ORM check constraint 포함 값을 단위 테스트로
+  고정한다.
+- **범위 제한**: DB migration은 추가하지 않는다. 현재 enum-like check 값은 기존
+  migration과 동일하며, 이번 변경은 Python ORM 모델의 single-source 정렬이다.
+- **남은 범위**: T-RV-23(checksum/idempotency + load TOCTOU)과 T-RV-25(store reuse)는
+  아직 남아 있다.
+
 ## 2026-06-05 (codex) — T-RV-24 offline upload 상태 계약 단일화
 
 **작업**: PR#153~#179 리뷰 후속 MED 항목 중 offline upload state/format set drift를

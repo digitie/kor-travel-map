@@ -1,5 +1,20 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-05 Codex 작업 메모 — T-RV-24 후속 offline upload ORM state check 동기화
+
+T-RV-24 후속으로 offline upload 상태 단일 계약을 ORM 모델까지 확장한다.
+`OFFLINE_UPLOAD_STATE_VALUES` tuple을 추가하고, `OfflineUploadRow`의
+`ck_offline_uploads_state`가 이 tuple을 참조하게 했다. 상태 tuple/집합과 ORM check
+constraint 문자열에 모든 상태가 포함되는지 단위 테스트로 고정한다.
+
+DB migration은 추가하지 않는다. 실제 check 값은 기존 migration과 동일하며, 이번
+변경은 Python ORM 모델의 상태 목록을 core 계약에 맞추는 정렬이다.
+
+다음 한 작업은 **T-RV-25(upload store app.state 재사용)** 또는
+**T-RV-23(offline upload checksum/idempotency + load TOCTOU)** 다. 둘은 같은
+offline upload router/store 경계에 걸려 있으므로 먼저 T-RV-25를 작은 PR로 닫는 편이
+충돌 위험이 낮다. **T-RV-27은 production 레벨 hardening 전까지 계속 skip/deferred**다.
+
 ## 2026-06-05 Codex 작업 메모 — T-RV-24 offline upload 상태 계약 단일화
 
 T-RV-24를 처리한다. offline upload 상태와 포맷 집합을

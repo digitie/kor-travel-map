@@ -10,10 +10,12 @@
 - **CHANGED**: offline upload 상태/포맷 집합을 `krtour.map.core.offline_upload_states`
   단일 계약으로 분리해 router, repository, load/validation orchestration이 같은 값을
   사용하게 했다.
+- **CHANGED**: `ops.offline_uploads.state` ORM check constraint도 같은 상태 tuple을
+  참조하게 해 DB 모델과 core 상태 계약의 drift를 줄였다.
 - **DOCS**: `cancelled`는 현재 offline upload cancel producer가 없는 reserved terminal
   state로 명시하고, load 가능 상태 문서를 실제 API 동작과 맞췄다.
-- **TEST**: 상태 집합 단위 테스트를 추가하고 기존 offline upload unit/integration/router
-  회귀 테스트를 유지했다.
+- **TEST**: 상태 집합과 ORM check constraint 단위 테스트를 추가하고 기존 offline upload
+  unit/integration/router 회귀 테스트를 유지했다.
 
 ### Admin API — offline upload write rollback (2026-06-05)
 

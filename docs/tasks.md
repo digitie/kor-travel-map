@@ -4,9 +4,9 @@
 
 ## 진행 중
 
-**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#221(T-RV-22 offline upload
-write rollback)까지 merged. 이번 PR은 `T-RV-24` offline upload 상태 계약 단일화를
-닫는다.
+**진행 중**: ADR-045 독립 프로그램화 후속. main은 PR#222(T-RV-24 offline upload
+상태 계약 단일화)까지 merged. 이번 PR은 `T-RV-24` 후속으로 offline upload ORM state
+check constraint도 core 상태 tuple을 참조하게 정렬한다.
 `T-RV-27`(admin API bind 노출 정정)은 사용자 결정에 따라 production 레벨 hardening
 전까지 구현하지 않고 문서 추적만 유지한다. 다음 구현 작업은
 `T-201b-d` F8 file object orphan 정합성 또는 `T-RV-23/25` offline upload 후속이다.
