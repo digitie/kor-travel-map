@@ -26,6 +26,22 @@ Docker 이미지는 `docker/dagster.yaml`을 `DAGSTER_HOME`에 포함한다. 이
 `KRTOUR_MAP_DAGSTER_PG_URL`을 읽어 같은 Postgres container 안의 별도 DB
 `krtour_map_dagster`에 Dagster run/event/schedule metadata를 저장한다.
 
+## 패키지 설치 기준
+
+`krtour-map-dagster`는 독립 code location으로 clean install될 수 있어야 한다.
+따라서 `pyproject.toml`의 runtime dependencies는 Dagster 실행 중 직접 import하는
+라이브러리를 직접 선언한다.
+
+- `python-krtour-map==0.2.0-dev`: 같은 릴리스의 메인 라이브러리와 함께 배포한다.
+- `dagster`, `dagster-webserver`, `dagster-postgres`: webserver, daemon, Postgres
+  metadata storage 런타임.
+- `boto3`, `botocore`: `offline_upload_store` resource가 RustFS/S3 호환 client를
+  만들 때 직접 import한다.
+- `httpx`: kraddr-geo REST resource와 Dagster summary 연동에서 사용한다.
+
+패키지 로컬 테스트도 루트 `pyproject.toml`에만 의존하지 않도록
+`[tool.pytest.ini_options] asyncio_mode="auto"`를 가진다.
+
 ## 1차 resource 계약
 
 공통 resource:
