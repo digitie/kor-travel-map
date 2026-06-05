@@ -1,5 +1,17 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-05 Codex 작업 메모 — PR#153~#179 리뷰 리포트 상태 동기화
+
+`docs/reports/pr-153-179-review-2026-06-04.md`의 표와 권장 처리 순서를
+2026-06-05 `origin/main` 기준으로 다시 맞췄다. 처리 로그와 `docs/tasks.md`에는
+반영되어 있었지만 표에 미반영으로 남아 있던 T-RV-01/02/03, T-RV-05~21,
+T-RV-26, T-RV-28, T-RV-36, T-RV-37a~37e를 완료 표시로 정리했다.
+
+T-RV-04는 `T-RV-04a` guard resource/env mapping 완료와 `T-RV-04b` provider
+public client live fetcher 잔여로 분리했다. 다음 구현 후보는 계속
+**T-201b-d F8(file object orphan WARN)** 또는
+**T-RV-22/23/25(offline upload orphan/idempotency/store reuse)** 다.
+
 ## 2026-06-05 Codex 작업 메모 — T-201b-c F7 dedup score 회귀
 
 ADR-033 Phase 2의 `F7`를 `run_consistency_checks()`에 WARN 케이스로 추가한다.
