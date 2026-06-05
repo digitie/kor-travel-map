@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-05 (codex) — T-RV-28 frontend Docker npm ci
+
+**작업**: PR#153~#179 리뷰 후속 Docker 항목 중 T-RV-28을 반영한다.
+
+- **Lockfile**: 루트 `package-lock.json`을 커밋 대상으로 전환해 frontend workspace
+  의존성 해석을 고정한다.
+- **Docker build**: `docker/frontend.Dockerfile`은 lockfile을 build context에 포함하고
+  `npm install` 대신 `npm ci --workspaces --include=optional`을 사용한다.
+- **Ignore 정리**: `.gitignore`와 `.dockerignore`에서 `package-lock.json` 제외를 제거해
+  git과 Docker build context 기준을 맞춘다.
+- **문서화**: Docker runbook, 배포 메모, review report, tasks/resume를 lockfile 기반
+  build 기준으로 갱신한다.
+- **검증**: `docker compose build frontend`가 `npm ci`와 Next production build까지
+  통과했고, `docker compose config --quiet`와 `git diff --check`도 통과했다.
+
 ## 2026-06-05 (codex) — T-RV-18 router typed error mapping
 
 **작업**: PR#153~#179 리뷰 후속 MED 항목 중 T-RV-18을 반영한다.

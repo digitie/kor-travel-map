@@ -18,7 +18,6 @@ data/
 dist/
 htmlcov/
 node_modules/
-package-lock.json
 packages/**/node_modules/
 packages/**/.next/
 packages/**/coverage/

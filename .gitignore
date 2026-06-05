@@ -62,7 +62,5 @@ alembic/__pycache__/
 
 # Node / npm workspace (frontend debug UI — ADR-025/029/043)
 node_modules/
-# npm 자동 생성 lockfile — 본 저장소는 lockfile 미 commit (workspace 가벼움 유지)
-package-lock.json
 # Windows-side Playwright e2e scratch (frontend WSL + Playwright Windows, #117)
 .e2e-win/

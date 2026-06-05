@@ -10,10 +10,11 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY package.json ./
+COPY package-lock.json ./
 COPY packages/map-marker-react/package.json ./packages/map-marker-react/package.json
 COPY packages/krtour-map-admin/frontend/package.json ./packages/krtour-map-admin/frontend/package.json
 
-RUN npm install --workspaces --include=optional
+RUN npm ci --workspaces --include=optional
 
 COPY packages/map-marker-react ./packages/map-marker-react
 COPY packages/krtour-map-admin/frontend ./packages/krtour-map-admin/frontend
