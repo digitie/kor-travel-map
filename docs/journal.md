@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-05 (codex) — T-203 PR CI workflow full matrix
+
+**작업**: Sprint 5 운영 진입 gate 중 PR CI workflow를 required check 친화 구조로
+분리한다.
+
+- **CI**: `.github/workflows/ci.yml`에서 기존 `pytest (Python X)` matrix check 이름은
+  유지하되 unit/lint/admin/dagster unit test만 실행하게 좁혔다.
+- **CI**: PostGIS 통합 테스트는 `pytest integration (PostGIS)`, fixture replay는
+  `pytest fixture replay` 별도 always-on job으로 분리했다.
+- **CI**: `openapi-drift`와 frontend `type-check + next build (Node 20)` workflow의
+  path filter를 제거해 모든 PR에서 check가 생성되도록 했다.
+- **Docs/Test**: branch protection/runbook/task/sprint 문서를 T-203 이후 required check
+  기준으로 갱신하고, workflow 구조 회귀 테스트를 추가했다.
+
 ## 2026-06-05 (codex) — T-204 branch protection 설정 가이드
 
 **작업**: Sprint 5 운영 진입 gate 중 GitHub `main` branch protection 운영자 매뉴얼을

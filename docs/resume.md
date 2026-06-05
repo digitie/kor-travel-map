@@ -1,5 +1,21 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-05 Codex 작업 메모 — T-203 PR CI workflow full matrix
+
+Sprint 5 운영 진입 gate 중 `T-203`을 처리한다. `.github/workflows/ci.yml`은 기존
+branch protection 호환을 위해 `pytest (Python X)` check 이름을 유지하되, 해당 matrix는
+unit/lint/admin/dagster unit test만 실행한다. PostGIS 통합 테스트는
+`pytest integration (PostGIS)`, fixture replay는 `pytest fixture replay` 별도 always-on
+job으로 분리한다.
+
+`openapi-drift`와 `type-check + next build (Node 20)`은 path filter를 제거해 문서-only
+PR에서도 check가 생성되도록 한다. 이 상태에서 `docs/runbooks/branch-protection.md`의
+required check 목록을 T-203 이후 기준으로 승격한다.
+
+다음 한 작업은 **T-201b(ADR-033 Phase 2 F4~F8 + Dagster 게이트)** 다. 충돌 위험을 낮게
+유지하려면 먼저 F5/F6 같은 단일 consistency case 또는 dry-run report 문서/테스트부터
+분리한다.
+
 ## 2026-06-05 Codex 작업 메모 — T-204 branch protection 설정 가이드
 
 Sprint 5 운영 진입 gate 중 `T-204`를 처리한다. `docs/runbooks/branch-protection.md`는

@@ -9,16 +9,14 @@ name: openapi
 # 1. `--profile all --check` 모드 — git working tree의 admin/user OpenAPI JSON이
 #    라우터 + DTO의 실제 spec과 일치하는지 비교 (drift 시 exit 1).
 # 2. 라우터/DTO 변경 PR은 반드시 openapi.json/openapi.user.json 갱신 commit 동반.
+# T-203 이후 모든 PR에서 check를 생성한다. branch protection에서 `openapi-drift`를
+# required로 승격해도 path filter 누락으로 문서/백엔드 PR이 막히지 않게 하기 위함이다.
 
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
-    paths:
-      - 'src/krtour/map/dto/**'
-      - 'packages/krtour-map-admin/**'
-      - '.github/workflows/openapi.yml'
 
 concurrency:
   group: openapi-${{ github.workflow }}-${{ github.ref }}

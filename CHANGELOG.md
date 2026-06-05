@@ -5,6 +5,15 @@
 
 ## [Unreleased]
 
+### CI — PR full matrix (2026-06-05)
+
+- **CI**: `ci.yml`의 기존 Python matrix check 이름을 유지하면서 unit/lint/admin/dagster
+  unit test job으로 좁히고, PostGIS integration과 fixture replay를 별도 job으로 분리했다.
+- **CI**: `openapi-drift`와 frontend build check의 path filter를 제거해 모든 PR에서
+  required check 후보가 생성되도록 했다.
+- **DOCS/TEST**: T-203 이후 branch protection required check 기준을 문서화하고 workflow
+  구조 회귀 테스트를 추가했다.
+
 ### Docs — branch protection 운영 절차 (2026-06-05)
 
 - **DOCS**: `docs/runbooks/branch-protection.md`를 추가해 GitHub `main` branch
