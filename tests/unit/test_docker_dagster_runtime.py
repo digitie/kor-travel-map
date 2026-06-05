@@ -45,6 +45,22 @@ def test_docker_compose_uses_persistent_dagster_storage_and_daemon() -> None:
 
 
 @pytest.mark.unit
+def test_docker_compose_has_runtime_healthchecks_and_readiness_order() -> None:
+    services = _compose()["services"]
+
+    api = services["api"]
+    frontend = services["frontend"]
+    dagster = services["dagster"]
+
+    assert "debug/health" in _command_text(api["healthcheck"]["test"])
+    assert "node -e" in _command_text(frontend["healthcheck"]["test"])
+    assert "9012" in _command_text(frontend["healthcheck"]["test"])
+    assert "KRTOUR_MAP_DAGSTER_PORT" in _command_text(dagster["healthcheck"]["test"])
+
+    assert frontend["depends_on"]["api"]["condition"] == "service_healthy"
+
+
+@pytest.mark.unit
 def test_dagster_image_config_points_storage_to_postgres() -> None:
     config = yaml.safe_load((ROOT / "docker" / "dagster.yaml").read_text(encoding="utf-8"))
 

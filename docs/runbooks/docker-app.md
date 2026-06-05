@@ -92,6 +92,15 @@ Dagster webserver, `dagster-daemon`은 schedule/sensor daemon이다. `rustfs-ini
 `krtour-map`과 `krtour-uploads` bucket을 생성한다. Postgres host 포트 기본값은
 `15433`이다.
 
+Compose healthcheck 기준은 다음과 같다.
+
+- `api`: 컨테이너 내부 `GET /debug/health`
+- `frontend`: 컨테이너 내부 Next.js root(`:9012`)
+- `dagster`: 컨테이너 내부 Dagster webserver root
+
+`frontend`는 `api`가 `service_healthy`가 된 뒤 시작한다. `docker compose ps`에서
+`api`, `frontend`, `dagster`가 `healthy`인지 확인한 뒤 smoke를 진행한다.
+
 ## 5. 로컬 venv stack 기동
 
 Docker 대신 현재 `.venv`와 npm workspace로 띄울 때는 다음을 사용한다.

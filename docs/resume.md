@@ -1,5 +1,21 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-05 Codex 작업 메모 — T-RV-26 Docker healthcheck/readiness
+
+T-RV-26을 처리한다. Docker compose의 `api`, `frontend`, `dagster` 서비스에 runtime
+healthcheck를 추가했다. API는 컨테이너 내부에서 `/debug/health`, frontend는 Next.js
+root(`:9012`), Dagster는 webserver root(`KRTOUR_MAP_DAGSTER_PORT`, 기본 `9013`)를
+확인한다.
+
+`frontend.depends_on`은 short form에서 `api: condition: service_healthy`로 전환해
+API readiness 전 frontend가 먼저 healthy로 오판되는 경로를 줄였다. compose 회귀
+테스트는 세 healthcheck와 frontend readiness dependency를 고정한다.
+
+다음 한 작업은 **T-RV-20(router scope/update_policy schema 검증)**,
+**T-RV-19/21(admin UI 지도/Dagster 선행 안정화)**, 또는
+**T-RV-22/23/25(offline upload orphan/idempotency/store reuse)** 다.
+**T-RV-27은 production 레벨 hardening 전까지 계속 skip/deferred**다.
+
 ## 2026-06-05 Codex 작업 메모 — T-RV-28 frontend Docker npm ci
 
 T-RV-28을 처리한다. frontend Docker image는 더 이상 floating dependency를
