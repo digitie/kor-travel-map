@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import CheckConstraint
+from sqlalchemy import CheckConstraint, UniqueConstraint
 
 from krtour.map.core.offline_upload_states import (
     OFFLINE_UPLOAD_LOADABLE_STATES,
@@ -68,3 +68,20 @@ def test_offline_upload_orm_state_check_uses_core_contract() -> None:
     state_check = state_checks[0]
     for state in OFFLINE_UPLOAD_STATE_VALUES:
         assert f"'{state}'" in state_check
+
+
+def test_offline_upload_orm_checksum_idempotency_constraint_matches_migration() -> None:
+    constraints = [
+        constraint
+        for constraint in OfflineUploadRow.__table__.constraints
+        if isinstance(constraint, UniqueConstraint)
+        and constraint.name == "uq_offline_uploads_provider_dataset_scope_checksum"
+    ]
+
+    assert len(constraints) == 1
+    assert [column.name for column in constraints[0].columns] == [
+        "provider",
+        "dataset_key",
+        "sync_scope",
+        "checksum_sha256",
+    ]
