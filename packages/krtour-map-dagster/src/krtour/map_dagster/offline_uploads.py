@@ -66,6 +66,8 @@ async def load_offline_upload_op(context: OpExecutionContext) -> dict[str, objec
         )
     metadata = result.as_metadata()
     context.add_output_metadata(metadata)
+    if not result.acquired:
+        raise Failure(description=result.error_message or "offline upload load lock busy")
     if result.error_message:
         raise Failure(description=result.error_message)
     return metadata

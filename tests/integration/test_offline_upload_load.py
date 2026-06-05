@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from krtour.map.client import AsyncKrtourMapClient
@@ -34,8 +35,10 @@ from krtour.map.infra.offline_upload_repo import (
     OfflineUploadStateConflict,
     create_offline_upload,
     finish_offline_upload_load,
+    get_offline_upload_by_checksum,
     list_offline_uploads,
     mark_offline_upload_loading,
+    reserve_offline_upload_load,
 )
 
 if TYPE_CHECKING:
@@ -110,6 +113,47 @@ async def test_offline_upload_load_job_persists_feature_and_job(
     assert row.feature_id == bundle.feature.feature_id
     assert row.upload_state == "loaded"
     assert row.job_state == "done"
+
+
+async def test_offline_upload_load_job_uses_preclaimed_load_job(
+    migrated_engine: AsyncEngine,
+) -> None:
+    bundle = _bundle("offline-preclaim-001")
+    body = bundle.model_dump_json().encode("utf-8")
+    storage_key = "offline/offline-preclaim-001/features.jsonl"
+    upload_id = await _create_upload(migrated_engine, body=body, storage_key=storage_key)
+
+    async with AsyncSession(migrated_engine) as session, session.begin():
+        job = await start_import_job(
+            session,
+            kind="offline_upload_load",
+            payload={"upload_id": upload_id, "dagster_run_id": None},
+            source_checksum=hashlib.sha256(body).hexdigest(),
+        )
+        loading = await mark_offline_upload_loading(
+            session,
+            upload_id=upload_id,
+            load_job_id=job.job_id,
+        )
+        assert loading is not None
+        assert loading.state == "loading"
+        assert loading.load_job_id == job.job_id
+
+    client = AsyncKrtourMapClient(migrated_engine)
+    result = await client.run_offline_upload_load_job(
+        upload_id,
+        store=_MemoryStore({storage_key: body}),
+        dagster_run_id="dagster-run-preclaimed",
+    )
+
+    assert result.acquired is True
+    assert result.error_message is None
+    assert result.job is not None
+    assert result.job.job_id == job.job_id
+    assert result.job.state == "done"
+    assert result.job.payload["dagster_run_id"] == "dagster-run-preclaimed"
+    assert result.upload is not None
+    assert result.upload.state == "loaded"
 
 
 async def test_offline_upload_validate_then_load_csv(
@@ -229,9 +273,7 @@ async def test_offline_upload_load_job_records_checksum_failure(
         ).one()
         feature_count = (
             await session.execute(
-                text(
-                    "SELECT count(*) FROM feature.features WHERE feature_id = :feature_id"
-                ),
+                text("SELECT count(*) FROM feature.features WHERE feature_id = :feature_id"),
                 {"feature_id": bundle.feature.feature_id},
             )
         ).scalar_one()
@@ -289,10 +331,90 @@ async def test_offline_upload_repo_rejects_invalid_state_transitions(
         assert reload_conflict.value.target_state == "loading"
 
 
+async def test_offline_upload_repo_reserves_load_job_transactionally(
+    migrated_engine: AsyncEngine,
+) -> None:
+    body = _bundle("offline-reserve-001").model_dump_json().encode("utf-8")
+    upload_id = await _create_upload(
+        migrated_engine,
+        body=body,
+        storage_key="offline/offline-reserve-001/features.jsonl",
+    )
+
+    async with AsyncSession(migrated_engine) as session, session.begin():
+        loading = await reserve_offline_upload_load(session, upload_id=upload_id)
+        assert loading is not None
+        assert loading.state == "loading"
+        assert loading.load_job_id is not None
+
+    async with AsyncSession(migrated_engine) as session:
+        row = (
+            await session.execute(
+                text(
+                    "SELECT ou.state AS upload_state, ou.load_job_id, "
+                    "ij.state AS job_state, ij.kind, ij.source_checksum "
+                    "FROM ops.offline_uploads AS ou "
+                    "JOIN ops.import_jobs AS ij ON ij.job_id = ou.load_job_id "
+                    "WHERE ou.upload_id = :upload_id"
+                ),
+                {"upload_id": upload_id},
+            )
+        ).one()
+
+    assert row.upload_state == "loading"
+    assert row.job_state == "running"
+    assert row.kind == "offline_upload_load"
+    assert row.source_checksum == hashlib.sha256(body).hexdigest()
+
+
+async def test_offline_upload_repo_enforces_checksum_idempotency(
+    migrated_engine: AsyncEngine,
+) -> None:
+    body = _bundle("offline-idempotent-001").model_dump_json().encode("utf-8")
+    checksum = hashlib.sha256(body).hexdigest()
+    first_id = await _create_upload(
+        migrated_engine,
+        body=body,
+        storage_key="offline/idempotent/first.jsonl",
+        checksum_sha256=checksum,
+    )
+
+    with pytest.raises(IntegrityError):
+        async with AsyncSession(migrated_engine) as session, session.begin():
+            await create_offline_upload(
+                session,
+                upload_id="00000000-0000-0000-0000-000000000099",
+                provider="offline-test-provider",
+                dataset_key="offline_jsonl",
+                sync_scope="default",
+                original_filename="features.jsonl",
+                storage_backend="rustfs",
+                storage_key="offline/idempotent/duplicate.jsonl",
+                byte_size=len(body),
+                checksum_sha256=checksum,
+                detected_format="jsonl",
+                detected_encoding="utf-8",
+                created_by="pytest",
+            )
+
+    async with AsyncSession(migrated_engine) as session:
+        existing = await get_offline_upload_by_checksum(
+            session,
+            provider="offline-test-provider",
+            dataset_key="offline_jsonl",
+            sync_scope="default",
+            checksum_sha256=checksum,
+        )
+
+    assert existing is not None
+    assert existing.upload_id == first_id
+
+
 async def test_offline_upload_repo_lists_with_keyset_and_provided_upload_id(
     migrated_engine: AsyncEngine,
 ) -> None:
     body = _bundle("offline-list-001").model_dump_json().encode("utf-8")
+    second_body = _bundle("offline-list-002").model_dump_json().encode("utf-8")
     first_id = "00000000-0000-0000-0000-000000000001"
     second_id = "00000000-0000-0000-0000-000000000002"
     await _create_upload(
@@ -303,7 +425,7 @@ async def test_offline_upload_repo_lists_with_keyset_and_provided_upload_id(
     )
     await _create_upload(
         migrated_engine,
-        body=body,
+        body=second_body,
         storage_key="offline/list/second.jsonl",
         upload_id=second_id,
     )

@@ -58,9 +58,7 @@ def test_parse_offline_feature_bundles_jsonl() -> None:
 
     assert len(parsed) == 1
     assert parsed[0].feature.feature_id == bundle.feature.feature_id
-    assert parsed[0].source_link.source_record_key == (
-        bundle.source_record.source_record_key
-    )
+    assert parsed[0].source_link.source_record_key == (bundle.source_record.source_record_key)
 
 
 def test_parse_offline_feature_bundles_json_items() -> None:
@@ -98,9 +96,7 @@ def test_parse_offline_feature_bundles_csv_with_column_mapping() -> None:
 
     assert len(parsed) == 1
     assert parsed[0].feature.name == "오프라인 CSV 장소"
-    assert parsed[0].feature.coord == Coordinate(
-        lon=Decimal("126.9780"), lat=Decimal("37.5665")
-    )
+    assert parsed[0].feature.coord == Coordinate(lon=Decimal("126.9780"), lat=Decimal("37.5665"))
     assert parsed[0].source_record.source_entity_id == "csv-001"
     assert parsed[0].source_record.raw_address == "서울특별시 중구 세종대로"
 
@@ -288,6 +284,87 @@ async def test_run_offline_upload_load_job_records_parser_failure(
     assert calls.load_state == "load_failed"
 
 
+@pytest.mark.asyncio
+async def test_run_offline_upload_load_job_uses_preclaimed_loading_job(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body = (
+        "name,lon,lat,address,source_id,bjd_code\n"
+        "오프라인 선전이 장소,126.9780,37.5665,서울특별시 중구 세종대로,csv-preclaim,1114010300\n"
+    ).encode()
+    upload = _csv_upload(
+        body,
+        state="loading",
+        validation_job_id="job-validation",
+        load_job_id="job-load-preclaimed",
+    )
+    calls = _FakeOfflineUploadCalls(upload)
+    calls.jobs["job-load-preclaimed"] = ImportJob(
+        job_id="job-load-preclaimed",
+        kind="offline_upload_load",
+        payload={"upload_id": upload.upload_id},
+        state="running",
+        progress=0,
+        current_stage=None,
+        source_checksum=upload.checksum_sha256,
+        error_message=None,
+    )
+    calls.validation_payload = {
+        "column_mapping": {
+            "name": "name",
+            "lon": "lon",
+            "lat": "lat",
+            "address": "address",
+            "source_id": "source_id",
+            "bjd_code": "bjd_code",
+        }
+    }
+    _patch_offline_job_repos(monkeypatch, calls)
+
+    async def _load_bundles(_session: object, bundles: list[FeatureBundle]) -> FeatureLoadResult:
+        return FeatureLoadResult(
+            bundles_total=len(bundles),
+            features_inserted=len(bundles),
+            source_records_inserted=len(bundles),
+            source_links_inserted=len(bundles),
+        )
+
+    monkeypatch.setattr(offline_upload_mod, "load_bundles", _load_bundles)
+
+    result = await run_offline_upload_load_job(
+        _NestedSession(),
+        upload.upload_id,
+        store=_MemoryStore({upload.storage_key: body}),
+        dagster_run_id="run-preclaimed",
+    )
+
+    assert result.acquired is True
+    assert result.job is not None
+    assert result.job.job_id == "job-load-preclaimed"
+    assert calls.updated_payloads[-1]["dagster_run_id"] == "run-preclaimed"
+    assert result.upload.state == "loaded"
+
+
+@pytest.mark.asyncio
+async def test_run_offline_upload_load_job_reports_lock_busy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body = b"name,lon,lat\nA,126.9,37.5\n"
+    upload = _csv_upload(body, state="validated", validation_job_id="job-validation")
+    calls = _FakeOfflineUploadCalls(upload)
+    _patch_offline_job_repos(monkeypatch, calls, lock_acquired=False)
+
+    result = await run_offline_upload_load_job(
+        _NestedSession(),
+        upload.upload_id,
+        store=_MemoryStore({upload.storage_key: body}),
+    )
+
+    assert result.acquired is False
+    assert result.error_message == "offline upload load advisory lock busy"
+    assert calls.jobs == {}
+
+
 def _bundle(source_id: str) -> FeatureBundle:
     raw_payload = {
         "source_id": source_id,
@@ -353,6 +430,7 @@ def _csv_upload(
     *,
     state: str = "uploaded",
     validation_job_id: str | None = None,
+    load_job_id: str | None = None,
 ) -> OfflineUpload:
     checksum = hashlib.sha256(body).hexdigest()
     return OfflineUpload(
@@ -369,7 +447,7 @@ def _csv_upload(
         detected_encoding="utf-8",
         state=state,
         validation_job_id=validation_job_id,
-        load_job_id=None,
+        load_job_id=load_job_id,
         created_by="pytest",
         created_at=_FETCHED_AT,
         updated_at=_FETCHED_AT,
@@ -508,9 +586,7 @@ def _patch_offline_job_repos(
         validation_job_id: str,
     ) -> OfflineUpload:
         assert upload_id == calls.upload.upload_id
-        return calls._replace_upload(
-            state="validating", validation_job_id=validation_job_id
-        )
+        return calls._replace_upload(state="validating", validation_job_id=validation_job_id)
 
     async def _finish_validation(
         _session: object,
@@ -546,13 +622,9 @@ def _patch_offline_job_repos(
     monkeypatch.setattr(offline_upload_mod, "start_import_job", _start_import_job)
     monkeypatch.setattr(offline_upload_mod, "heartbeat_import_job", _heartbeat_import_job)
     monkeypatch.setattr(offline_upload_mod, "finish_import_job", _finish_import_job)
-    monkeypatch.setattr(
-        offline_upload_mod, "update_import_job_payload", _update_import_job_payload
-    )
+    monkeypatch.setattr(offline_upload_mod, "update_import_job_payload", _update_import_job_payload)
     monkeypatch.setattr(offline_upload_mod, "get_import_job", _get_import_job)
     monkeypatch.setattr(offline_upload_mod, "mark_offline_upload_validating", _mark_validating)
-    monkeypatch.setattr(
-        offline_upload_mod, "finish_offline_upload_validation", _finish_validation
-    )
+    monkeypatch.setattr(offline_upload_mod, "finish_offline_upload_validation", _finish_validation)
     monkeypatch.setattr(offline_upload_mod, "mark_offline_upload_loading", _mark_loading)
     monkeypatch.setattr(offline_upload_mod, "finish_offline_upload_load", _finish_load)

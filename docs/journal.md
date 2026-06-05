@@ -2,6 +2,26 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-06 (codex) — T-RV-23 offline upload idempotency/load TOCTOU
+
+**작업**: PR#153~#179 리뷰 후속 MED 항목 중 offline upload checksum idempotency와
+load 중복 실행 TOCTOU를 닫는다.
+
+- **Checksum idempotency**: upload body 기준 SHA-256을 DB metadata에 저장하고,
+  `provider/dataset_key/sync_scope/checksum_sha256` unique constraint를 추가했다.
+  중복 생성 시 방금 쓴 object는 보상 삭제하고 `OFFLINE_UPLOAD_DUPLICATE` 409 envelope로
+  기존 upload metadata를 반환한다.
+- **Load preclaim**: `/load`는 Dagster launch 전에 `ops.import_jobs`를 생성하고
+  `offline_uploads.state='loading'`, `load_job_id=<job_id>`를 같은 트랜잭션에서
+  선점한다. launch 실패 시 job/upload 상태를 각각 `failed`/`load_failed`로 닫는다.
+- **Dagster semantics**: `offline_upload_load` op는 advisory lock busy를 성공 no-op로
+  처리하지 않고 `Failure`로 기록한다. 이미 preclaimed된 `loading + load_job_id` row는
+  기존 job을 재사용한다.
+- **테스트**: offline upload router/Dagster/core/PostGIS 묶음 `42 passed`, `ruff check`,
+  `mypy --strict`, `lint-imports`, OpenAPI all profile check를 수행했다.
+- **남은 범위**: T-RV-27은 production hardening 전까지 skip/deferred다. 다음 후보는
+  T-201b-d F8 또는 T-RV-29/30이다.
+
 ## 2026-06-05 (codex) — T-RV-25 offline upload store 재사용
 
 **작업**: PR#153~#179 리뷰 후속 MED 항목 중 offline upload store client 재사용 계약을

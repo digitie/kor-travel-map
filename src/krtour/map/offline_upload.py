@@ -416,7 +416,8 @@ async def run_offline_upload_load_job(
     upload = await get_offline_upload(session, upload_id)
     if upload is None:
         raise ValueError(f"offline upload 없음: {upload_id!r}")
-    if upload.state not in OFFLINE_UPLOAD_LOADABLE_STATES:
+    preclaimed = upload.state == "loading" and upload.load_job_id is not None
+    if upload.state not in OFFLINE_UPLOAD_LOADABLE_STATES and not preclaimed:
         raise ValueError(
             f"offline upload {upload_id!r}는 load 가능한 상태가 아님: {upload.state!r}"
         )
@@ -426,30 +427,69 @@ async def run_offline_upload_load_job(
 
     async with try_advisory_lock(session, _advisory_key(upload)) as acquired:
         if not acquired:
-            return OfflineUploadLoadResult(acquired=False, upload=upload)
+            if preclaimed and upload.load_job_id is not None:
+                lock_error_message = "offline upload load advisory lock busy"
+                finished = await finish_import_job(
+                    session,
+                    upload.load_job_id,
+                    state="failed",
+                    error_message=lock_error_message,
+                ) or await get_import_job(session, upload.load_job_id)
+                failed_upload = await finish_offline_upload_load(
+                    session,
+                    upload_id=upload.upload_id,
+                    state="load_failed",
+                )
+                upload = failed_upload or upload
+                return OfflineUploadLoadResult(
+                    acquired=False,
+                    upload=upload,
+                    job=finished,
+                    error_message=lock_error_message,
+                )
+            return OfflineUploadLoadResult(
+                acquired=False,
+                upload=upload,
+                error_message="offline upload load advisory lock busy",
+            )
 
-        job = await start_import_job(
-            session,
-            kind=OFFLINE_UPLOAD_LOAD_JOB_KIND,
-            payload={
-                "upload_id": upload.upload_id,
-                "provider": upload.provider,
-                "dataset_key": upload.dataset_key,
-                "sync_scope": upload.sync_scope,
-                "storage_backend": upload.storage_backend,
-                "storage_key": upload.storage_key,
-                "dagster_run_id": dagster_run_id,
-            },
-            source_checksum=upload.checksum_sha256,
-        )
-        marked_load = await mark_offline_upload_loading(
-            session,
-            upload_id=upload.upload_id,
-            load_job_id=job.job_id,
-        )
-        if marked_load is None:
-            raise ValueError(f"offline upload 없음: {upload.upload_id!r}")
-        upload = marked_load
+        if preclaimed:
+            assert upload.load_job_id is not None
+            job = await get_import_job(session, upload.load_job_id)
+            if job is None:
+                raise ValueError(f"offline upload load job 없음: {upload.load_job_id!r}")
+            if dagster_run_id:
+                job = (
+                    await update_import_job_payload(
+                        session,
+                        job.job_id,
+                        payload={**job.payload, "dagster_run_id": dagster_run_id},
+                    )
+                    or job
+                )
+        else:
+            job = await start_import_job(
+                session,
+                kind=OFFLINE_UPLOAD_LOAD_JOB_KIND,
+                payload={
+                    "upload_id": upload.upload_id,
+                    "provider": upload.provider,
+                    "dataset_key": upload.dataset_key,
+                    "sync_scope": upload.sync_scope,
+                    "storage_backend": upload.storage_backend,
+                    "storage_key": upload.storage_key,
+                    "dagster_run_id": dagster_run_id,
+                },
+                source_checksum=upload.checksum_sha256,
+            )
+            marked_load = await mark_offline_upload_loading(
+                session,
+                upload_id=upload.upload_id,
+                load_job_id=job.job_id,
+            )
+            if marked_load is None:
+                raise ValueError(f"offline upload 없음: {upload.upload_id!r}")
+            upload = marked_load
 
         body = b""
         checksum_actual: str | None = None
