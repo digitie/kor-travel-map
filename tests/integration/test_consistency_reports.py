@@ -1,9 +1,10 @@
-"""``test_consistency_reports`` — ADR-033 Phase 1 F1~F3 정합성 검사 (testcontainers).
+"""``test_consistency_reports`` — ADR-033 F1~F4/F6 정합성 검사 (testcontainers).
 
 ``run_consistency_checks``를 실 PostGIS(migrated_session, alembic head)에서 돌려
 F1(orphan source_record)/F2(detail 누락)/F3(CRS drift) 검출 + ``ops.
 feature_consistency_reports`` 영속화를 검증한다. F3는 STORED generated column이라
-정상 데이터에서 위반 0건이어야 함을 확인한다.
+정상 데이터에서 위반 0건이어야 함을 확인한다. F6는 같은 요일 영업시간 period에서
+open.time > close.time인 경우만 ERROR로 잡는다.
 """
 
 from __future__ import annotations
@@ -130,9 +131,7 @@ async def test_clean_data_reports_ok(migrated_session: AsyncSession) -> None:
 
     # persist=False면 행 없음.
     cnt = (
-        await migrated_session.execute(
-            text("SELECT count(*) FROM ops.feature_consistency_reports")
-        )
+        await migrated_session.execute(text("SELECT count(*) FROM ops.feature_consistency_reports"))
     ).scalar_one()
     assert cnt == 0
 
@@ -140,9 +139,7 @@ async def test_clean_data_reports_ok(migrated_session: AsyncSession) -> None:
 # ── F4: dedup 백로그 baseline WARN (ADR-033 §2.3, Sprint 4b) ──────────────
 
 
-async def _seed_pending_dedup(
-    session: AsyncSession, n: int
-) -> None:
+async def _seed_pending_dedup(session: AsyncSession, n: int) -> None:
     """정상 feature 2건 + pending dedup_review_queue n쌍 적재(서로 다른 pair)."""
     session.add(_clean_place("f4-a"))
     session.add(_clean_place("f4-b"))
@@ -212,3 +209,84 @@ async def test_f4_warn_does_not_block_errors(migrated_session: AsyncSession) -> 
     assert by_code["F4"].count == 3
     assert by_code["F1"].count >= 1
     assert report.severity_max == "ERROR"
+
+
+# ── F6: opening_hours 모순 ERROR (ADR-033 Phase 2) ───────────────────────
+
+
+async def test_f6_detects_same_day_opening_hours_conflict(
+    migrated_session: AsyncSession,
+) -> None:
+    migrated_session.add(
+        FeatureRow(
+            feature_id="f6-violation",
+            kind="place",
+            name="영업시간 모순 장소",
+            category="EAT.RESTAURANT",
+            detail={
+                "business_hours": {
+                    "periods": [
+                        {
+                            "open": {"day": 1, "time": "1800"},
+                            "close": {"day": 1, "time": "0900"},
+                        }
+                    ]
+                }
+            },
+        )
+    )
+    await migrated_session.flush()
+
+    report = await run_consistency_checks(migrated_session, persist=False)
+
+    by_code = {c.code: c for c in report.cases}
+    assert by_code["F6"].severity == "ERROR"
+    assert by_code["F6"].count >= 1
+    assert "f6-violation" in by_code["F6"].sample_ids
+    assert report.severity_max == "ERROR"
+
+
+async def test_f6_allows_normal_247_and_overnight_periods(
+    migrated_session: AsyncSession,
+) -> None:
+    migrated_session.add(
+        FeatureRow(
+            feature_id="f6-clean",
+            kind="place",
+            name="정상 영업시간 장소",
+            category="EAT.RESTAURANT",
+            detail={
+                "business_hours": {
+                    "periods": [
+                        {
+                            "open": {"day": 1, "time": "0900"},
+                            "close": {"day": 1, "time": "1800"},
+                        },
+                        {
+                            "open": {"day": 5, "time": "2200"},
+                            "close": {"day": 6, "time": "0200"},
+                        },
+                        {"open": {"day": 0, "time": "0000"}, "close": None},
+                    ],
+                    "special_days": [
+                        {
+                            "date": "2026-06-05",
+                            "periods": [
+                                {
+                                    "open": {"day": 5, "time": "1000"},
+                                    "close": {"day": 5, "time": "1200"},
+                                }
+                            ],
+                        }
+                    ],
+                }
+            },
+        )
+    )
+    await migrated_session.flush()
+
+    report = await run_consistency_checks(migrated_session, persist=False)
+
+    by_code = {c.code: c for c in report.cases}
+    assert by_code["F6"].count == 0
+    assert report.severity_max == "OK"

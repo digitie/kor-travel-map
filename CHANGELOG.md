@@ -5,6 +5,13 @@
 
 ## [Unreleased]
 
+### Integrity — F6 opening hours consistency (2026-06-05)
+
+- **NEW**: ADR-033 Phase 2의 `F6` opening hours 모순 검사를
+  `run_consistency_checks()`에 추가했다.
+- **TEST**: 같은 요일에서 `open.time > close.time`인 period는 ERROR로 검출하고,
+  24/7 표현과 다음 요일로 넘어가는 영업 구간은 허용하는 PostGIS 회귀 테스트를 추가했다.
+
 ### CI — PR full matrix (2026-06-05)
 
 - **CI**: `ci.yml`의 기존 Python matrix check 이름을 유지하면서 unit/lint/admin/dagster

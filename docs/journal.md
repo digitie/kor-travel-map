@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-05 (codex) — T-201b-a F6 opening_hours 정합성 검사
+
+**작업**: ADR-033 Phase 2 중 DB 외부 의존이 없는 `F6` opening hours 모순 검사를 먼저
+분리한다.
+
+- **Integrity**: `run_consistency_checks()`의 정적 SQL 케이스에 `F6`를 추가했다.
+  같은 요일 period에서 `open.time > close.time`이면 severity=`ERROR`로 보고한다.
+- **허용 경계**: 다음 요일로 넘어가는 자정 통과 구간과 close가 없는 24/7 표현은 위반으로
+  보지 않는다.
+- **Test**: unit 케이스 목록과 PostGIS integration에서 F6 위반/정상 구간을 검증한다.
+- **남은 범위**: T-201b 전체 완료까지 F5(provider SLA), F7(dedup score 회귀),
+  F8(file object orphan)과 dry-run report 보강이 남아 있다.
+
 ## 2026-06-05 (codex) — T-203 PR CI workflow full matrix
 
 **작업**: Sprint 5 운영 진입 gate 중 PR CI workflow를 required check 친화 구조로

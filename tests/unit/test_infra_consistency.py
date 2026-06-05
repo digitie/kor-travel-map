@@ -1,4 +1,4 @@
-"""``test_consistency`` — ``build_report`` 순수 집계 로직 (DB 무관, ADR-033 Phase 1).
+"""``test_consistency`` — ``build_report`` 순수 집계 로직 (DB 무관, ADR-033).
 
 ``run_consistency_checks``의 DB 경로는 ``tests/integration/test_consistency_reports.py``
 (testcontainers)에서 검증. 본 모듈은 severity_max / summary 집계 규칙만 단위 검증.
@@ -23,9 +23,9 @@ def _case(code: str, severity: str, count: int) -> CaseResult:
     )
 
 
-def test_phase1_declares_f1_f2_f3_all_error() -> None:
+def test_static_cases_declares_f1_f2_f3_f6_all_error() -> None:
     codes = [c.code for c in CONSISTENCY_CASES]
-    assert codes == ["F1", "F2", "F3"]
+    assert codes == ["F1", "F2", "F3", "F6"]
     assert all(c.severity == "ERROR" for c in CONSISTENCY_CASES)
 
 
