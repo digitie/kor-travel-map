@@ -39,6 +39,7 @@ ADR 참조: ADR-002(async) / ADR-004(raw SQL) / ADR-012 / ADR-018 / ADR-033.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Final
@@ -412,11 +413,10 @@ def _coord_from_row(row: Any, lon_key: str, lat_key: str) -> Coordinate | None:
     return Coordinate(lon=Decimal(str(lon)), lat=Decimal(str(lat)))
 
 
-async def _check_f7_dedup_score_regression(
-    session: AsyncSession, *, regression_points: float, sample_limit: int
+def _build_f7_dedup_score_result(
+    rows: Iterable[Any], *, regression_points: float, sample_limit: int
 ) -> CaseResult:
-    """F7 — unresolved cross-provider dedup 후보의 score baseline 회귀 WARN."""
-    rows = (await session.execute(text(_F7_DEDUP_SCORE_ROWS_SQL))).mappings().all()
+    """F7 SQL row를 현재 scoring 결과와 비교해 ``CaseResult``로 집계한다."""
     sample_ids: list[str] = []
     count = 0
     for row in rows:
@@ -450,6 +450,16 @@ async def _check_f7_dedup_score_regression(
         ),
         count=count,
         sample_ids=sample_ids,
+    )
+
+
+async def _check_f7_dedup_score_regression(
+    session: AsyncSession, *, regression_points: float, sample_limit: int
+) -> CaseResult:
+    """F7 — unresolved cross-provider dedup 후보의 score baseline 회귀 WARN."""
+    rows = (await session.execute(text(_F7_DEDUP_SCORE_ROWS_SQL))).mappings().all()
+    return _build_f7_dedup_score_result(
+        rows, regression_points=regression_points, sample_limit=sample_limit
     )
 
 

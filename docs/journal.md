@@ -15,6 +15,8 @@ WARN 케이스를 분리한다.
 - **Scope**: 같은 provider/sibling 후보와 이미 검토 완료된 행은 F7 대상에서 제외한다.
 - **Test**: PostGIS integration에서 baseline 대비 현재 score 회귀, 같은 provider 제외,
   baseline delta OK 경계를 검증한다.
+- **CI 보강**: F7 row 집계를 순수 helper로 분리하고 `run_consistency_checks()`의
+  F1~F7 + persist 단위 경로를 추가 검증해 unit coverage gate를 안정화했다.
 - **남은 범위**: T-201b 전체 완료까지 F8(file object orphan)과 dry-run report 보강이
   남아 있다.
 
