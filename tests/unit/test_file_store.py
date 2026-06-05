@@ -15,6 +15,7 @@ pytestmark = pytest.mark.unit
 class _FakeS3Client:
     def __init__(self) -> None:
         self.objects: dict[tuple[str, str], bytes] = {}
+        self.deleted: list[tuple[str, str]] = []
 
     def put_object(
         self,
@@ -32,6 +33,11 @@ class _FakeS3Client:
 
     def get_object(self, *, Bucket: str, Key: str) -> dict[str, BytesIO]:
         return {"Body": BytesIO(self.objects[(Bucket, Key)])}
+
+    def delete_object(self, *, Bucket: str, Key: str) -> dict[str, str]:
+        self.deleted.append((Bucket, Key))
+        self.objects.pop((Bucket, Key), None)
+        return {}
 
 
 async def test_s3_object_store_write_and_read_bytes() -> None:
@@ -58,6 +64,11 @@ async def test_s3_object_store_write_and_read_bytes() -> None:
         "http://127.0.0.1:9003/krtour-uploads/offline-uploads/u1/features.jsonl"
     )
     assert stored.etag == '"etag-1"'
+
+    await store.delete_object("offline-uploads/u1/features.jsonl")
+    assert client.deleted == [("krtour-uploads", "offline-uploads/u1/features.jsonl")]
+    with pytest.raises(FileStoreError, match="객체 저장소 읽기 실패"):
+        await store.read_bytes("offline-uploads/u1/features.jsonl")
 
 
 async def test_s3_object_store_wraps_read_errors() -> None:

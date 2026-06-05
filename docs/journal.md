@@ -2,6 +2,23 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-05 (codex) — T-RV-22 offline upload write rollback
+
+**작업**: PR#153~#179 리뷰 후속 MED 항목 중 offline upload object orphan 방지
+경로를 분리한다.
+
+- **Rollback**: `POST /admin/offline-uploads`에서 RustFS/S3 object write가 성공한 뒤
+  `ops.offline_uploads` metadata insert가 실패하면 같은 요청에서 방금 쓴 object만
+  보상 삭제한다.
+- **D-14 경계**: 정상 등록된 offline upload 원본은 계속 무기한 보존한다. 이번 삭제는
+  DB row가 만들어지지 않은 write-rollback 전용 예외이며 lifecycle cleanup/purge가 아니다.
+- **Store API**: `S3ObjectStore.delete_object()`를 추가해 boto3 S3 호환
+  `delete_object`를 async wrapper로 제공한다.
+- **테스트**: fake S3 store 삭제 단위 테스트와 router metadata insert 실패 rollback
+  테스트를 추가했다.
+- **남은 범위**: T-RV offline upload 묶음 중 T-RV-23(idempotency/load TOCTOU),
+  T-RV-24(state constant drift), T-RV-25(store reuse)가 남아 있다.
+
 ## 2026-06-05 (codex) — PR#153~#179 리뷰 리포트 상태 동기화
 
 **작업**: `docs/reports/pr-153-179-review-2026-06-04.md`에서 실제 반영됐지만 표에
@@ -12,7 +29,7 @@
 - **부분 완료 분리**: T-RV-04는 `T-RV-04a` guard resource/env mapping 완료와
   `T-RV-04b` provider public client live fetcher 잔여로 분리했다.
 - **처리 순서**: 완료된 HIGH 항목을 권장 순서에서 제거하고, 남은 T-RV-04b,
-  T-RV-22~25, T-RV-29~35, T-RV-37 잔여 hygiene 중심으로 재정렬했다.
+  T-RV-23~25, T-RV-29~35, T-RV-37 잔여 hygiene 중심으로 재정렬했다.
 
 ## 2026-06-05 (codex) — T-201b-c F7 dedup score 회귀 정합성 검사
 

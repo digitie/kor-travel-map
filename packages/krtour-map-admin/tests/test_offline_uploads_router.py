@@ -39,6 +39,7 @@ class _FakeSession:
 class _FakeStore:
     def __init__(self, objects: dict[str, bytes] | None = None) -> None:
         self.calls: list[dict[str, Any]] = []
+        self.deleted: list[str] = []
         self.objects = objects or {}
 
     async def read_bytes(self, storage_key: str) -> bytes:
@@ -60,12 +61,17 @@ class _FakeStore:
                 "metadata": metadata,
             }
         )
+        self.objects[storage_key] = body
         return StoredObject(
             bucket="krtour-uploads",
             object_key=storage_key,
             byte_size=len(body),
             checksum_sha256="a" * 64,
         )
+
+    async def delete_object(self, storage_key: str) -> None:
+        self.deleted.append(storage_key)
+        self.objects.pop(storage_key, None)
 
 
 @pytest.fixture
@@ -216,6 +222,39 @@ def test_create_offline_upload_accepts_csv(
 
 
 @pytest.mark.unit
+def test_create_offline_upload_deletes_object_when_metadata_insert_fails(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import offline_uploads as router_mod
+
+    store = _FakeStore()
+
+    async def _create(_session: Any, **_kwargs: Any) -> OfflineUpload:
+        raise RuntimeError("metadata insert failed")
+
+    monkeypatch.setattr(router_mod, "build_offline_upload_store", lambda _settings: store)
+    monkeypatch.setattr(router_mod, "create_offline_upload", _create)
+
+    with pytest.raises(RuntimeError, match="metadata insert failed"):
+        client.post(
+            "/admin/offline-uploads",
+            data={"provider": "p", "dataset_key": "d"},
+            files={
+                "file": (
+                    "features.jsonl",
+                    b'{"feature":{"feature_id":"f1"}}\n',
+                    "application/x-ndjson",
+                )
+            },
+        )
+
+    assert store.calls
+    assert store.deleted == [store.calls[0]["storage_key"]]
+    assert store.objects == {}
+
+
+@pytest.mark.unit
 def test_create_rejects_file_over_configured_max_bytes(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -300,9 +339,7 @@ def test_load_offline_upload_launches_dagster(
     monkeypatch.setattr(router_mod, "get_offline_upload", _get)
     monkeypatch.setattr(router_mod, "launch_offline_upload_load", _launch)
 
-    response = client.post(
-        "/admin/offline-uploads/00000000-0000-0000-0000-000000000001/load"
-    )
+    response = client.post("/admin/offline-uploads/00000000-0000-0000-0000-000000000001/load")
 
     assert response.status_code == 200
     body = response.json()
@@ -486,9 +523,7 @@ def test_load_offline_upload_rejects_unloadable_state(
 
     monkeypatch.setattr(router_mod, "get_offline_upload", _get)
 
-    response = client.post(
-        "/admin/offline-uploads/00000000-0000-0000-0000-000000000001/load"
-    )
+    response = client.post("/admin/offline-uploads/00000000-0000-0000-0000-000000000001/load")
 
     assert response.status_code == 409
     assert "loading" in response.json()["error"]["message"]
@@ -510,9 +545,7 @@ def test_load_offline_upload_rejects_loaded_state(
     monkeypatch.setattr(router_mod, "get_offline_upload", _get)
     monkeypatch.setattr(router_mod, "launch_offline_upload_load", _launch)
 
-    response = client.post(
-        "/admin/offline-uploads/00000000-0000-0000-0000-000000000001/load"
-    )
+    response = client.post("/admin/offline-uploads/00000000-0000-0000-0000-000000000001/load")
 
     assert response.status_code == 409
     assert "loaded" in response.json()["error"]["message"]
@@ -535,9 +568,7 @@ def test_load_offline_upload_rejects_csv_without_validation(
 
     monkeypatch.setattr(router_mod, "get_offline_upload", _get)
 
-    response = client.post(
-        "/admin/offline-uploads/00000000-0000-0000-0000-000000000001/load"
-    )
+    response = client.post("/admin/offline-uploads/00000000-0000-0000-0000-000000000001/load")
 
     assert response.status_code == 409
     assert "validate" in response.json()["error"]["message"]

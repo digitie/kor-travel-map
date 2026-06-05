@@ -91,6 +91,19 @@ class S3ObjectStore:
             etag=str(etag) if etag is not None else None,
         )
 
+    async def delete_object(self, storage_key: str) -> None:
+        """``storage_key`` 객체를 삭제한다."""
+        try:
+            await asyncio.to_thread(
+                self.s3_client.delete_object,
+                Bucket=self.bucket,
+                Key=storage_key,
+            )
+        except Exception as exc:
+            raise FileStoreError(
+                f"객체 저장소 삭제 실패: bucket={self.bucket!r}, key={storage_key!r}"
+            ) from exc
+
     def public_url(self, storage_key: str) -> str | None:
         """공개 base URL이 설정된 경우 객체 접근 URL을 만든다."""
         if not self.public_base_url:
@@ -101,9 +114,7 @@ class S3ObjectStore:
         response = self.s3_client.get_object(Bucket=self.bucket, Key=storage_key)
         body = response.get("Body") if isinstance(response, dict) else None
         if body is None or not hasattr(body, "read"):
-            raise FileStoreError(
-                f"S3 get_object 응답에 Body.read()가 없음: key={storage_key!r}"
-            )
+            raise FileStoreError(f"S3 get_object 응답에 Body.read()가 없음: key={storage_key!r}")
         data = body.read()
         if isinstance(data, bytes):
             return data
