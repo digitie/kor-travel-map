@@ -5,6 +5,13 @@
 
 ## [Unreleased]
 
+### Integrity — F5 provider last_success SLA consistency (2026-06-05)
+
+- **NEW**: ADR-033 Phase 2의 `F5` provider `last_success_at` SLA WARN 검사를
+  `run_consistency_checks()`에 추가했다.
+- **TEST**: 기본 24시간 SLA 초과, provider refresh policy interval 적용,
+  disabled policy 제외를 검증하는 PostGIS 회귀 테스트를 추가했다.
+
 ### Admin API/UI — POI cache target cursor/schema 안정화 (2026-06-05)
 
 - **FIXED**: `GET /admin/poi-cache-targets` 목록을 `updated_at DESC, target_id DESC`

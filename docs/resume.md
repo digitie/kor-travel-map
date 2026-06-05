@@ -1,5 +1,16 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-05 Codex 작업 메모 — T-201b-b F5 provider last_success SLA
+
+ADR-033 Phase 2의 `F5`를 `run_consistency_checks()`에 WARN 케이스로 추가한다. active
+`provider_sync.provider_sync_state` cursor 중 `last_success_at`이 SLA를 넘겼거나 아직
+성공 기록이 없는 row를 provider/dataset/scope 단위로 샘플링한다. 기본 SLA는 24시간이고,
+`ops.provider_refresh_policies.system_interval_seconds`가 있으면 provider 정책값을 우선한다.
+`enabled=false` policy는 관측 대상에서 제외한다.
+
+다음 한 작업은 **T-201b-c F7(cross-provider dedup score 회귀 WARN)** 다. 이후
+F8(file object orphan)과 Phase 2 dry-run report를 작은 PR로 닫는다.
+
 ## 2026-06-05 Codex 작업 메모 — T-RV-19 POI/cache target cursor/schema
 
 T-RV-19를 처리한다. `GET /admin/poi-cache-targets`는 이제 단순 `LIMIT` 목록이 아니라

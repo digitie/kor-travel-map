@@ -19,13 +19,16 @@ F1~F4 + Phase 2 일부 케이스를 raw SQL(ADR-004)로 검사하고 결과를
   ``DEDUP_PENDING_WARN_THRESHOLD``(baseline) 초과. severity=**WARN**(observe-only,
   적재 차단 안 함). F1~F3과 달리 행별 위반이 아니라 **임계 초과 집계** — 초과 시
   count=pending 수, 이하면 OK. (SPRINT-4 §2.3, Sprint 4b.)
+- **F5** provider last_success SLA — active provider sync cursor의 마지막 성공 시각이
+  SLA를 넘겼거나 아직 성공 기록이 없으면 severity=**WARN**. 기본 SLA는 24h이고,
+  ``ops.provider_refresh_policies.system_interval_seconds``가 있으면 그 값을 우선한다.
 - **F6** opening_hours 모순 — 같은 요일 안에서 ``open.time > close.time``인
   period. severity=ERROR. 다음 요일로 넘어가는 자정 통과 구간과 close 없는 24/7
   표현은 허용한다.
 
-F5/F7/F8은 Phase 2 후속 PR에서 추가한다. F1/F2/F3/F6은
-``CONSISTENCY_CASES``(행별 정적 SQL)로, F4는 ``run_consistency_checks``의 임계
-분기로 추가된다.
+F7/F8은 Phase 2 후속 PR에서 추가한다. F1/F2/F3/F6은
+``CONSISTENCY_CASES``(행별 정적 SQL)로, F4/F5는 ``run_consistency_checks``의
+임계/정책 분기로 추가된다.
 
 ADR 참조: ADR-002(async) / ADR-004(raw SQL) / ADR-012 / ADR-018 / ADR-033.
 """
@@ -48,6 +51,7 @@ __all__ = [
     "ConsistencyReport",
     "CONSISTENCY_CASES",
     "DEDUP_PENDING_WARN_THRESHOLD",
+    "PROVIDER_LAST_SUCCESS_WARN_SECONDS",
     "build_report",
     "run_consistency_checks",
 ]
@@ -64,6 +68,10 @@ _SAMPLE_LIMIT: Final[int] = 20
 # "후반에 baseline 조정"). 운영 시 호출자가 ``dedup_pending_threshold`` 인자로 덮어쓸
 # 수 있다.
 DEDUP_PENDING_WARN_THRESHOLD: Final[int] = 1000
+
+# F5 기본 SLA — provider별 refresh policy가 없으면 active sync cursor가 24h 넘게
+# 성공하지 못한 상태를 WARN으로 본다(ADR-033 Phase 2 observe-only).
+PROVIDER_LAST_SUCCESS_WARN_SECONDS: Final[int] = 24 * 60 * 60
 
 # detail-bearing kind (DETAIL_MODELS 매핑 — price/weather 제외, ADR-018).
 _DETAIL_KINDS_SQL: Final[str] = "'place','event','notice','route','area'"
@@ -236,6 +244,47 @@ _F4_PENDING_SAMPLE_SQL: Final[str] = (
     "ORDER BY total_score DESC LIMIT :lim"
 )
 
+_F5_PROVIDER_LAST_SUCCESS_COUNT_SQL: Final[str] = (
+    "WITH stale_provider_sync AS ("
+    "  SELECT s.provider, s.dataset_key, s.sync_scope "
+    "  FROM provider_sync.provider_sync_state s "
+    "  LEFT JOIN ops.provider_refresh_policies p "
+    "    ON p.provider = s.provider AND p.dataset_key = s.dataset_key "
+    "  WHERE s.status = 'active' "
+    "    AND COALESCE(p.enabled, true) "
+    "    AND ("
+    "      s.last_success_at IS NULL "
+    "      OR s.last_success_at < now() - ("
+    "        COALESCE(p.system_interval_seconds, :sla_seconds)::double precision "
+    "        * interval '1 second'"
+    "      )"
+    "    )"
+    ") "
+    "SELECT count(*) FROM stale_provider_sync"
+)
+_F5_PROVIDER_LAST_SUCCESS_SAMPLE_SQL: Final[str] = (
+    "WITH stale_provider_sync AS ("
+    "  SELECT "
+    "    s.provider || ':' || s.dataset_key || ':' || s.sync_scope AS id, "
+    "    s.provider, s.dataset_key, s.sync_scope "
+    "  FROM provider_sync.provider_sync_state s "
+    "  LEFT JOIN ops.provider_refresh_policies p "
+    "    ON p.provider = s.provider AND p.dataset_key = s.dataset_key "
+    "  WHERE s.status = 'active' "
+    "    AND COALESCE(p.enabled, true) "
+    "    AND ("
+    "      s.last_success_at IS NULL "
+    "      OR s.last_success_at < now() - ("
+    "        COALESCE(p.system_interval_seconds, :sla_seconds)::double precision "
+    "        * interval '1 second'"
+    "      )"
+    "    )"
+    ") "
+    "SELECT id FROM stale_provider_sync "
+    "ORDER BY provider, dataset_key, sync_scope "
+    "LIMIT :lim"
+)
+
 
 async def _check_f4_dedup_backlog(
     session: AsyncSession, *, threshold: int, sample_limit: int
@@ -264,6 +313,39 @@ async def _check_f4_dedup_backlog(
     )
 
 
+async def _check_f5_provider_last_success_sla(
+    session: AsyncSession, *, sla_seconds: int, sample_limit: int
+) -> CaseResult:
+    """F5 — active provider cursor가 SLA 안에 성공하지 못하면 WARN."""
+    params = {"sla_seconds": sla_seconds}
+    count = int(
+        (await session.execute(text(_F5_PROVIDER_LAST_SUCCESS_COUNT_SQL), params)).scalar_one()
+    )
+    sample_ids: list[str] = []
+    if count:
+        rows = (
+            (
+                await session.execute(
+                    text(_F5_PROVIDER_LAST_SUCCESS_SAMPLE_SQL),
+                    {"sla_seconds": sla_seconds, "lim": sample_limit},
+                )
+            )
+            .scalars()
+            .all()
+        )
+        sample_ids = [str(r) for r in rows]
+    return CaseResult(
+        code="F5",
+        severity="WARN",
+        description=(
+            "provider_sync_state active cursor last_success SLA 초과 "
+            f"(기본 {sla_seconds}s, provider policy interval 우선, ADR-033 F5)"
+        ),
+        count=count,
+        sample_ids=sample_ids,
+    )
+
+
 async def run_consistency_checks(
     session: AsyncSession,
     *,
@@ -271,8 +353,9 @@ async def run_consistency_checks(
     persist: bool = True,
     sample_limit: int = _SAMPLE_LIMIT,
     dedup_pending_threshold: int = DEDUP_PENDING_WARN_THRESHOLD,
+    provider_last_success_sla_seconds: int = PROVIDER_LAST_SUCCESS_WARN_SECONDS,
 ) -> ConsistencyReport:
-    """F1~F4/F6 정합성 검사 실행 + (옵션) ``ops.feature_consistency_reports`` 적재.
+    """F1~F6 정합성 검사 실행 + (옵션) ``ops.feature_consistency_reports`` 적재.
 
     Parameters
     ----------
@@ -288,6 +371,9 @@ async def run_consistency_checks(
     dedup_pending_threshold:
         F4 baseline — pending dedup 백로그가 이 수를 초과하면 WARN. 기본
         ``DEDUP_PENDING_WARN_THRESHOLD``(provisional).
+    provider_last_success_sla_seconds:
+        F5 기본 SLA. ``ops.provider_refresh_policies.system_interval_seconds``가 있는
+        provider/dataset은 policy 값을 우선 사용한다.
 
     Returns
     -------
@@ -327,10 +413,17 @@ async def run_consistency_checks(
             )
         )
 
-    # F4 — 임계 집계 케이스(행별 정적 SQL 아님). F1~F3 뒤에 append.
+    # F4/F5 — 정적 SQL이 아닌 임계/정책 케이스.
     cases.append(
         await _check_f4_dedup_backlog(
             session, threshold=dedup_pending_threshold, sample_limit=sample_limit
+        )
+    )
+    cases.append(
+        await _check_f5_provider_last_success_sla(
+            session,
+            sla_seconds=provider_last_success_sla_seconds,
+            sample_limit=sample_limit,
         )
     )
 
