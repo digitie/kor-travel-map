@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### Admin API — offline upload store reuse (2026-06-06)
+
+- **FIXED**: offline upload `create`/`preview`/`validate` 경로가 요청마다
+  `KrtourMapSettings()`와 boto3 S3 client를 새로 만들지 않고,
+  `request.app.state.offline_upload_store`를 우선 재사용한다.
+- **CHANGED**: cached offline upload store가 만들어진 경우 FastAPI lifespan 종료 시
+  내부 S3 client의 `close()`를 호출한다.
+- **TEST**: 같은 app에서 연속 upload 요청이 store를 1회만 생성하는지, shutdown 시
+  cached client가 닫히는지 router 단위 테스트로 고정했다.
+
 ### Admin API — offline upload state contract (2026-06-05)
 
 - **CHANGED**: offline upload 상태/포맷 집합을 `krtour.map.core.offline_upload_states`

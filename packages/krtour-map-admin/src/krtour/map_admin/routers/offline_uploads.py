@@ -567,6 +567,24 @@ def build_offline_upload_store(settings: KrtourMapSettings) -> S3ObjectStore:
     )
 
 
+def _krtour_map_settings_from_request(request: Request) -> KrtourMapSettings:
+    settings = getattr(request.app.state, "krtour_map_settings", None)
+    if isinstance(settings, KrtourMapSettings):
+        return settings
+    settings = KrtourMapSettings()
+    request.app.state.krtour_map_settings = settings
+    return settings
+
+
+def _offline_upload_store_from_request(request: Request) -> S3ObjectStore:
+    store = getattr(request.app.state, "offline_upload_store", None)
+    if store is not None:
+        return cast(S3ObjectStore, store)
+    store = build_offline_upload_store(_krtour_map_settings_from_request(request))
+    request.app.state.offline_upload_store = store
+    return store
+
+
 async def _rollback_uploaded_object(
     store: S3ObjectStore,
     object_key: str,
@@ -702,7 +720,7 @@ async def create_offline_upload_request(
     created_by: Annotated[str | None, Form()] = None,
 ) -> OfflineUploadWriteResponse:
     started_at = perf_counter()
-    settings = KrtourMapSettings()
+    settings = _krtour_map_settings_from_request(request)
     max_bytes = settings.offline_upload_max_bytes
     _guard_upload_content_length(request, max_bytes=max_bytes)
     upload_id = str(uuid4())
@@ -722,7 +740,7 @@ async def create_offline_upload_request(
 
     content_type = file.content_type or _content_type(filename, detected_format)
     storage_key = _storage_key(settings, upload_id, filename)
-    store = build_offline_upload_store(settings)
+    store = _offline_upload_store_from_request(request)
     try:
         stored = await store.write_bytes(
             storage_key,
@@ -834,6 +852,7 @@ async def get_offline_upload_request(
 )
 async def preview_offline_upload_request(
     upload_id: str,
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
     sample_size: Annotated[int, Query(ge=1, le=200)] = 20,
 ) -> OfflineUploadPreviewResponse:
@@ -846,7 +865,7 @@ async def preview_offline_upload_request(
         )
     _require_tabular(row)
 
-    store = build_offline_upload_store(KrtourMapSettings())
+    store = _offline_upload_store_from_request(request)
     try:
         body = await store.read_bytes(row.storage_key)
     except FileStoreError as exc:
@@ -895,12 +914,13 @@ async def preview_offline_upload_request(
 )
 async def validate_offline_upload_request(
     upload_id: str,
+    request: Request,
     request_body: OfflineUploadValidationRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> OfflineUploadValidationResponse:
     started_at = perf_counter()
-    settings = KrtourMapSettings()
-    store = build_offline_upload_store(settings)
+    settings = _krtour_map_settings_from_request(request)
+    store = _offline_upload_store_from_request(request)
     try:
         if settings.kraddr_geo_base_url:
             async with httpx.AsyncClient(

@@ -1,5 +1,22 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-06 Codex 작업 메모 — T-RV-25 offline upload store 재사용
+
+T-RV-25를 닫는다. offline upload router는 이제
+`_offline_upload_store_from_request()`를 통해 `request.app.state.offline_upload_store`를
+우선 재사용하고, 없을 때만 `KrtourMapSettings()`/S3 client를 lazy 1회 생성해
+`app.state`에 캐시한다. `create` 경로뿐 아니라 `preview`/`validate` 경로도 같은
+cached app-state store를 우선한다.
+
+FastAPI lifespan 종료 시 cached store가 boto3-like `s3_client.close()`를 제공하면
+닫는다. 같은 app에서 연속 upload 요청이 store builder를 한 번만 호출하는지와 shutdown
+close를 router 단위 테스트로 고정했다.
+
+남은 offline upload 리뷰 후속은 **T-RV-23(checksum/idempotency + load TOCTOU)** 다.
+그 다음 작은 후보는 T-RV-29/30(OpenAPI/user spec + generated frontend types) 또는
+T-201b-d F8(file object orphan WARN)다. **T-RV-27은 production 레벨 hardening 전까지
+계속 skip/deferred**다.
+
 ## 2026-06-05 Codex 작업 메모 — T-RV-24 후속 offline upload ORM state check 동기화
 
 T-RV-24 후속으로 offline upload 상태 단일 계약을 ORM 모델까지 확장한다.

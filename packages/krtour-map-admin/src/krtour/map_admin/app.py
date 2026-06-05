@@ -169,6 +169,11 @@ def create_app(settings: AdminSettings | None = None) -> FastAPI:
         try:
             yield
         finally:
+            offline_upload_store = getattr(application.state, "offline_upload_store", None)
+            offline_upload_s3_client = getattr(offline_upload_store, "s3_client", None)
+            offline_upload_close = getattr(offline_upload_s3_client, "close", None)
+            if callable(offline_upload_close):
+                offline_upload_close()
             client = getattr(application.state, "dagster_http_client", None)
             if isinstance(client, httpx.AsyncClient):
                 await client.aclose()

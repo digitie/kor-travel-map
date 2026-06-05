@@ -222,6 +222,175 @@ def test_create_offline_upload_accepts_csv(
 
 
 @pytest.mark.unit
+def test_offline_upload_store_is_reused_from_app_state(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import offline_uploads as router_mod
+
+    store = _FakeStore()
+    build_count = 0
+
+    def _build_store(_settings: Any) -> _FakeStore:
+        nonlocal build_count
+        build_count += 1
+        return store
+
+    async def _create(_session: Any, **kwargs: Any) -> OfflineUpload:
+        return _upload(
+            upload_id=kwargs["upload_id"],
+            storage_key=kwargs["storage_key"],
+            dataset_key=kwargs["dataset_key"],
+            byte_size=kwargs["byte_size"],
+            checksum_sha256=kwargs["checksum_sha256"],
+        )
+
+    monkeypatch.setattr(router_mod, "build_offline_upload_store", _build_store)
+    monkeypatch.setattr(router_mod, "create_offline_upload", _create)
+
+    for filename in ("features-a.jsonl", "features-b.jsonl"):
+        response = client.post(
+            "/admin/offline-uploads",
+            data={"provider": "p", "dataset_key": "d"},
+            files={
+                "file": (filename, b'{"feature":{"feature_id":"f1"}}\n', "application/x-ndjson")
+            },
+        )
+        assert response.status_code == 201
+
+    assert build_count == 1
+    assert len(store.calls) == 2
+
+
+@pytest.mark.unit
+def test_preview_offline_upload_prefers_app_state_store(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import offline_uploads as router_mod
+
+    body = b"name,lon,lat\nA,126.9,37.5\n"
+    storage_key = "offline/features.csv"
+    upload = _upload(
+        storage_key=storage_key,
+        original_filename="features.csv",
+        detected_format="csv",
+        dataset_key="offline_csv",
+        byte_size=len(body),
+        checksum_sha256=hashlib.sha256(body).hexdigest(),
+    )
+    store = _FakeStore({storage_key: body})
+    client.app.state.offline_upload_store = store
+
+    async def _get(_session: Any, upload_id: str) -> OfflineUpload:
+        assert upload_id == upload.upload_id
+        return upload
+
+    def _build_store(_settings: Any) -> _FakeStore:
+        raise AssertionError("cached app.state store must be reused")
+
+    monkeypatch.setattr(router_mod, "get_offline_upload", _get)
+    monkeypatch.setattr(router_mod, "build_offline_upload_store", _build_store)
+
+    response = client.get(f"/admin/offline-uploads/{upload.upload_id}/preview")
+
+    assert response.status_code == 200
+    assert response.json()["meta"]["headers"] == ["name", "lon", "lat"]
+
+
+@pytest.mark.unit
+def test_validate_offline_upload_prefers_app_state_store(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import offline_uploads as router_mod
+
+    body = b"name,lon,lat,address\nA,126.9,37.5,\n"
+    storage_key = "offline/features.csv"
+    checksum = hashlib.sha256(body).hexdigest()
+    upload = _upload(
+        storage_key=storage_key,
+        original_filename="features.csv",
+        detected_format="csv",
+        dataset_key="offline_csv",
+        byte_size=len(body),
+        checksum_sha256=checksum,
+    )
+    validated_upload = _upload(
+        state="validated",
+        storage_key=storage_key,
+        original_filename="features.csv",
+        detected_format="csv",
+        dataset_key="offline_csv",
+        byte_size=len(body),
+        checksum_sha256=checksum,
+        validation_job_id="00000000-0000-0000-0000-000000000101",
+    )
+    store = _FakeStore({storage_key: body})
+    client.app.state.offline_upload_store = store
+
+    async def _get(_session: Any, upload_id: str) -> OfflineUpload:
+        assert upload_id == upload.upload_id
+        return upload
+
+    async def _run(_session: Any, upload_id: str, **kwargs: Any) -> Any:
+        assert upload_id == upload.upload_id
+        assert kwargs["store"] is store
+        return validate_offline_tabular_upload(
+            validated_upload,
+            body,
+            column_mapping=kwargs["column_mapping"],
+            sample_size=kwargs["sample_size"],
+            checksum_sha256=checksum,
+        )
+
+    def _build_store(_settings: Any) -> _FakeStore:
+        raise AssertionError("cached app.state store must be reused")
+
+    monkeypatch.setattr(router_mod, "get_offline_upload", _get)
+    monkeypatch.setattr(router_mod, "run_offline_upload_validation_job", _run)
+    monkeypatch.setattr(router_mod, "build_offline_upload_store", _build_store)
+
+    response = client.post(
+        f"/admin/offline-uploads/{upload.upload_id}/validate",
+        json={
+            "sample_size": 100,
+            "column_mapping": {
+                "name": "name",
+                "lon": "lon",
+                "lat": "lat",
+                "address": "address",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["state"] == "validated"
+
+
+@pytest.mark.unit
+def test_create_app_lifespan_closes_cached_offline_upload_s3_client() -> None:
+    class _ClosableS3Client:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    class _Store:
+        def __init__(self, s3_client: _ClosableS3Client) -> None:
+            self.s3_client = s3_client
+
+    s3_client = _ClosableS3Client()
+    app = create_app(AdminSettings())
+
+    with TestClient(app) as live_client:
+        live_client.app.state.offline_upload_store = _Store(s3_client)
+
+    assert s3_client.closed is True
+
+
+@pytest.mark.unit
 def test_create_offline_upload_deletes_object_when_metadata_insert_fails(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
