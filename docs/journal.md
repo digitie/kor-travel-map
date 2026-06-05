@@ -2,7 +2,7 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
-## 2026-06-06 (codex) — T-RV-25 offline upload store 재사용
+## 2026-06-05 (codex) — T-RV-25 offline upload store 재사용
 
 **작업**: PR#153~#179 리뷰 후속 MED 항목 중 offline upload store client 재사용 계약을
 닫는다.

@@ -5,7 +5,7 @@
 
 ## [Unreleased]
 
-### Admin API — offline upload store reuse (2026-06-06)
+### Admin API — offline upload store reuse (2026-06-05)
 
 - **FIXED**: offline upload `create`/`preview`/`validate` 경로가 요청마다
   `KrtourMapSettings()`와 boto3 S3 client를 새로 만들지 않고,

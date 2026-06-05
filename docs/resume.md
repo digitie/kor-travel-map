@@ -1,6 +1,6 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-06-06 Codex 작업 메모 — T-RV-25 offline upload store 재사용
+## 2026-06-05 Codex 작업 메모 — T-RV-25 offline upload store 재사용
 
 T-RV-25를 닫는다. offline upload router는 이제
 `_offline_upload_store_from_request()`를 통해 `request.app.state.offline_upload_store`를
