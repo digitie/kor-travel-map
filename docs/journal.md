@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-05 (codex) — T-RV-20 feature update request schema 검증
+
+**작업**: PR#153~#179 리뷰 후속 MED 항목 중 T-RV-20을 반영한다.
+
+- **Scope schema**: `POST /admin/feature-update-requests`의 `scope`를 `type`
+  discriminator 기반 `feature_ids`, `center_radius`, `sigungu_by_radius`, `bbox`,
+  `provider_dataset`, `cache_target_keys` union으로 검증한다.
+- **Policy/list guard**: `update_policy`는 알려진 필드만 허용하고,
+  `providers`/`dataset_keys`는 list 상한을 둔다.
+- **Frontend 계약 정렬**: admin frontend 생성 payload가 legacy root `lon`/`lat`가 아니라
+  `center: {lon, lat}` 형태의 `center_radius` scope를 보내도록 맞췄다.
+- **OpenAPI/test**: admin/user OpenAPI 산출물을 재생성하고, legacy scope shape,
+  unknown policy key, 과도한 provider filter list가 enqueue 전에 `422`로 거절되는지
+  라우터 unit test로 고정했다.
+
 ## 2026-06-05 (codex) — T-209e-a standalone cold backup
 
 **작업**: T-209e backup/restore 독립 DB 묶음 중 충돌 가능성이 낮은 cold backup

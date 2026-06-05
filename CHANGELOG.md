@@ -5,6 +5,18 @@
 
 ## [Unreleased]
 
+### Admin API/UI — feature update request schema 검증 (2026-06-05)
+
+- **FIXED**: `POST /admin/feature-update-requests`의 `scope`를 `type`
+  discriminator 기반 6개 scope 모델로 검증하고, legacy root `lon`/`lat`
+  `center_radius` payload를 `422`로 거절한다.
+- **FIXED**: `update_policy`를 알려진 필드만 허용하는 모델로 고정하고,
+  `providers`/`dataset_keys` list 상한을 추가했다.
+- **FIXED**: admin frontend 생성 payload를 OpenAPI 계약의
+  `center: {lon, lat}` 형태로 맞췄다.
+- **TEST**: 라우터 schema/validation 회귀 테스트와 admin/user OpenAPI 산출물을
+  갱신했다.
+
 ### Ops — standalone cold backup runbook (2026-06-05)
 
 - **NEW**: `npm run docker:backup`이 standalone Docker app의 `krtour_map`,
