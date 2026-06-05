@@ -5,6 +5,15 @@
 
 ## [Unreleased]
 
+### Map Marker React — dependency metadata hygiene (2026-06-05)
+
+- **FIXED**: `@krtour/map-marker-react`의 `maplibre-vworld` peer dependency를
+  `0.1.2`로 고정해 workspace devDependency의 git tag pin(`v0.1.2`)과 맞췄다.
+- **FIXED**: skeleton 패키지의 `npm run test`가 테스트 파일 없음 상태를 성공으로
+  처리하도록 `vitest run --passWithNoTests`를 사용한다.
+- **DOCS**: `@krtour/map-marker-react` README의 npm registry 게시 설명을 ADR-043의
+  registry 게시 보류 정책에 맞췄다.
+
 ### Admin API/UI — Dagster router hardening (2026-06-05)
 
 - **FIXED**: `GET /ops/dagster/summary`가 더 이상 Dagster `setNuxSeen` mutation을

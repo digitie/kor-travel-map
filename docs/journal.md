@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-05 (codex) — T-RV-37c map-marker-react dependency metadata 정합
+
+**작업**: T-RV-37 cleanup 중 `@krtour/map-marker-react`의 `maplibre-vworld`
+peer dependency와 배포 설명을 정리한다.
+
+- **Peer dependency**: `maplibre-vworld` peer range를 `^0.1.2`에서 `0.1.2`로 고정해
+  workspace devDependency의 git tag pin(`github:digitie/maplibre-vworld-js#v0.1.2`)과
+  의미를 맞췄다.
+- **Lockfile**: root `package-lock.json`의 workspace package entry도 같은 peer range로
+  갱신했다.
+- **Skeleton test**: 아직 테스트 파일이 없는 skeleton 패키지의 `npm run test`가
+  `--passWithNoTests`로 성공 종료되도록 했다.
+- **README**: ADR-043 기준 npm registry 게시 보류와 git URL/workspace 공유 기준을
+  명시했다.
+
 ## 2026-06-05 (codex) — T-RV-21 Dagster router hardening
 
 **작업**: PR#153~#179 리뷰 후속 MED 항목 중 T-RV-21을 반영한다.

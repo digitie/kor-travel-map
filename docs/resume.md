@@ -1,5 +1,22 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-05 Codex 작업 메모 — T-RV-37c map-marker-react dependency metadata
+
+T-RV-37 cleanup 묶음 중 `@krtour/map-marker-react` dependency metadata를 정리했다.
+`maplibre-vworld` peer dependency는 더 이상 floating range `^0.1.2`가 아니라 정확히
+`0.1.2`를 요구한다. 실제 설치 spec은 workspace devDependency와 lockfile의
+`github:digitie/maplibre-vworld-js#v0.1.2`가 담당한다.
+
+패키지가 아직 skeleton이라 test file이 없으므로, `npm run test`는
+`vitest run --passWithNoTests`로 성공 종료하게 했다. README는 ADR-043에 맞춰 npm
+registry 게시가 보류되어 있고 현재 공유는 monorepo workspace 또는 git URL 기준임을
+명시한다.
+
+다음 한 작업은 **T-RV-20(router scope/update_policy schema 검증)**,
+**T-RV-19(admin UI 지도 선행 안정화)**, 또는
+**T-RV-22/23/25(offline upload orphan/idempotency/store reuse)** 다.
+**T-RV-27은 production 레벨 hardening 전까지 계속 skip/deferred**다.
+
 ## 2026-06-05 Codex 작업 메모 — T-RV-21 Dagster router hardening
 
 T-RV-21을 처리한다. `GET /ops/dagster/summary`는 이제 repository, asset,
