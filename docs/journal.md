@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-05 (codex) — T-201b-b F5 provider last_success SLA 정합성 검사
+
+**작업**: ADR-033 Phase 2 중 provider sync cursor 지연을 관측하는 `F5` WARN 케이스를
+분리한다.
+
+- **Integrity**: `run_consistency_checks()`가 active `provider_sync_state`의
+  `last_success_at`을 검사한다. 성공 기록이 없거나 SLA를 넘기면 severity=`WARN`으로
+  보고한다.
+- **Policy**: 기본 SLA는 24시간이고, `ops.provider_refresh_policies.system_interval_seconds`
+  가 있으면 provider/dataset 정책값을 우선한다. `enabled=false` policy는 대상에서 제외한다.
+- **Test**: PostGIS integration에서 기본 24시간 SLA 초과, provider policy interval 적용,
+  disabled policy 제외를 검증한다.
+- **남은 범위**: T-201b 전체 완료까지 F7(dedup score 회귀), F8(file object orphan),
+  dry-run report 보강이 남아 있다.
+
 ## 2026-06-05 (codex) — T-RV-19 POI/cache target cursor/schema 안정화
 
 **작업**: PR#153~#179 리뷰 후속 MED 항목 중 T-RV-19를 반영한다.

@@ -1,15 +1,15 @@
-"""``test_consistency_reports`` — ADR-033 F1~F4/F6 정합성 검사 (testcontainers).
+"""``test_consistency_reports`` — ADR-033 F1~F6 정합성 검사 (testcontainers).
 
 ``run_consistency_checks``를 실 PostGIS(migrated_session, alembic head)에서 돌려
 F1(orphan source_record)/F2(detail 누락)/F3(CRS drift) 검출 + ``ops.
 feature_consistency_reports`` 영속화를 검증한다. F3는 STORED generated column이라
-정상 데이터에서 위반 0건이어야 함을 확인한다. F6는 같은 요일 영업시간 period에서
-open.time > close.time인 경우만 ERROR로 잡는다.
+정상 데이터에서 위반 0건이어야 함을 확인한다. F5는 provider sync last_success SLA,
+F6는 같은 요일 영업시간 period에서 open.time > close.time인 경우만 잡는다.
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 import pytest
@@ -209,6 +209,101 @@ async def test_f4_warn_does_not_block_errors(migrated_session: AsyncSession) -> 
     assert by_code["F4"].count == 3
     assert by_code["F1"].count >= 1
     assert report.severity_max == "ERROR"
+
+
+# ── F5: provider last_success SLA WARN (ADR-033 Phase 2) ─────────────────
+
+
+async def _seed_provider_sync_state(
+    session: AsyncSession,
+    *,
+    provider: str,
+    dataset_key: str,
+    sync_scope: str = "system",
+    last_success_at: datetime | None,
+    status: str = "active",
+) -> None:
+    await session.execute(
+        text(
+            "INSERT INTO provider_sync.provider_sync_state "
+            "(provider, dataset_key, sync_scope, status, last_success_at) "
+            "VALUES (:provider, :dataset_key, :sync_scope, :status, :last_success_at)"
+        ),
+        {
+            "provider": provider,
+            "dataset_key": dataset_key,
+            "sync_scope": sync_scope,
+            "status": status,
+            "last_success_at": last_success_at,
+        },
+    )
+    await session.flush()
+
+
+async def test_f5_warns_when_provider_last_success_sla_exceeded(
+    migrated_session: AsyncSession,
+) -> None:
+    await _seed_provider_sync_state(
+        migrated_session,
+        provider="f5_never",
+        dataset_key="dataset",
+        last_success_at=None,
+    )
+    await _seed_provider_sync_state(
+        migrated_session,
+        provider="f5_stale",
+        dataset_key="dataset",
+        last_success_at=datetime.now(UTC) - timedelta(days=2),
+    )
+    await _seed_provider_sync_state(
+        migrated_session,
+        provider="f5_fresh",
+        dataset_key="dataset",
+        last_success_at=datetime.now(UTC),
+    )
+
+    report = await run_consistency_checks(migrated_session, persist=False)
+
+    by_code = {c.code: c for c in report.cases}
+    f5 = by_code["F5"]
+    assert f5.severity == "WARN"
+    assert f5.count == 2
+    assert f5.sample_ids == ["f5_never:dataset:system", "f5_stale:dataset:system"]
+    assert report.severity_max == "WARN"
+
+
+async def test_f5_uses_policy_interval_and_skips_disabled_policy(
+    migrated_session: AsyncSession,
+) -> None:
+    await migrated_session.execute(
+        text(
+            "INSERT INTO ops.provider_refresh_policies "
+            "(provider, dataset_key, source_kind, system_interval_seconds, enabled) "
+            "VALUES "
+            "('f5_policy_stale', 'dataset', 'openapi', 3600, true), "
+            "('f5_policy_disabled', 'dataset', 'openapi', 3600, false)"
+        )
+    )
+    await _seed_provider_sync_state(
+        migrated_session,
+        provider="f5_policy_stale",
+        dataset_key="dataset",
+        last_success_at=datetime.now(UTC) - timedelta(hours=2),
+    )
+    await _seed_provider_sync_state(
+        migrated_session,
+        provider="f5_policy_disabled",
+        dataset_key="dataset",
+        last_success_at=datetime.now(UTC) - timedelta(hours=2),
+    )
+
+    report = await run_consistency_checks(migrated_session, persist=False)
+
+    by_code = {c.code: c for c in report.cases}
+    f5 = by_code["F5"]
+    assert f5.count == 1
+    assert f5.sample_ids == ["f5_policy_stale:dataset:system"]
+    assert report.severity_max == "WARN"
 
 
 # ── F6: opening_hours 모순 ERROR (ADR-033 Phase 2) ───────────────────────
