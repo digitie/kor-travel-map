@@ -55,6 +55,36 @@ rsync -a --delete \
 
 `data/`와 `.git`은 NTFS가 원본(Source of Truth)이므로 sync에서 제외합니다.
 
+### 2.3 `scripts/*.sh` 실행 셸
+
+루트 `package.json`의 운영 스크립트(`docker:build`, `docker:up`, `admin:stack`,
+`ports:stop`)는 모두 `bash scripts/*.sh`를 호출한다. 이 파일들은
+`#!/usr/bin/env bash`, `source`, Bash array, `BASH_SOURCE`를 전제로 하므로
+Windows PowerShell에서 `.sh` 파일을 직접 실행하지 않는다.
+
+표준 실행 위치:
+
+- **WSL 셸**: 권장 경로. Docker Desktop WSL2 backend, WSL Node/npm, Linux optional
+  dependency와 가장 잘 맞는다.
+- **Git Bash**: Windows에서 npm script만 실행해야 할 때의 보조 경로. `bash`가
+  `PATH`에 있어야 하며, Docker Desktop CLI가 같은 셸에서 보여야 한다.
+- **PowerShell**: Playwright e2e처럼 Windows에서 실행해야 하는 명령만 사용한다.
+  Docker/admin stack 스크립트는 PowerShell에서 직접 호출하지 말고 WSL 또는 Git Bash
+  셸에서 실행한다.
+
+예:
+
+```bash
+# WSL 셸
+cd /mnt/f/dev/python-krtour-map-codex
+npm run docker:build
+```
+
+```powershell
+# PowerShell에서 WSL 셸로 넘길 때
+wsl bash -lc "cd /mnt/f/dev/python-krtour-map-codex && npm run docker:build"
+```
+
 ## 3. 초기 셋업 (코드 작성 단계 진입 시)
 
 ```bash

@@ -4,6 +4,24 @@
 절차다. 고정 포트는 API `9011`, admin UI `9012`, Dagster `9013`이다. RustFS는
 로컬 compose에 포함하며 S3 API는 `9003`, console은 `9004`를 쓴다.
 
+## 0. 실행 셸
+
+이 runbook의 `npm run docker:build`, `npm run docker:up`, `npm run admin:stack`,
+`npm run ports:stop`은 루트 `package.json`에서 `bash scripts/*.sh`를 실행한다.
+`scripts/*.sh`는 Bash 전용 문법(`source`, array, `BASH_SOURCE`)을 사용하므로
+PowerShell에서 `.sh` 파일을 직접 실행하지 않는다.
+
+권장 순서:
+
+1. WSL 셸에서 실행한다.
+2. Windows에서 실행해야 한다면 Git Bash를 사용하고, `bash`, `docker`, `npm`이 같은
+   셸에서 보이는지 확인한다.
+3. PowerShell에서는 다음처럼 WSL에 위임한다.
+
+```powershell
+wsl bash -lc "cd /mnt/f/dev/python-krtour-map-codex && npm run docker:up"
+```
+
 ## 1. 환경변수
 
 실제 키는 루트 `.env`에 둔다. `.env`는 git에 커밋하지 않는다.

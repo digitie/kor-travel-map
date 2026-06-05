@@ -1,5 +1,22 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-05 Codex 작업 메모 — T-RV-37a shell script 실행 셸 문서화
+
+T-RV-37 cleanup 묶음 중 `scripts/*.sh` Bash 전용 실행 셸 문서화를 처리한다.
+루트 `package.json`의 `docker:build`, `docker:up`, `admin:stack`, `ports:stop`은 모두
+`bash scripts/*.sh`를 호출하고, 실제 스크립트도 `source`, Bash array,
+`BASH_SOURCE`를 사용한다.
+
+`docs/dev-environment.md`와 Docker runbook은 이제 이 스크립트들을 WSL 또는 Git Bash
+에서 실행해야 하며, PowerShell에서는 직접 `.sh`를 실행하지 않고 `wsl bash -lc ...`
+형태로 위임한다고 명시한다. PS 래퍼는 이번 범위에서 만들지 않고, 문서화된 실행
+경로로 drift를 줄인다.
+
+다음 한 작업은 **T-RV-20(router scope/update_policy schema 검증)**,
+**T-RV-19/21(admin UI 지도/Dagster 선행 안정화)**, 또는
+**T-RV-22/23/25(offline upload orphan/idempotency/store reuse)** 다.
+**T-RV-27은 production 레벨 hardening 전까지 계속 skip/deferred**다.
+
 ## 2026-06-05 Codex 작업 메모 — T-RV-36 Dagster dependency hygiene
 
 T-RV-36을 처리한다. `packages/krtour-map-dagster/pyproject.toml`은 더 이상
