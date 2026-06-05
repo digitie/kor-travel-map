@@ -2,6 +2,18 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-05 (codex) — T-204 branch protection 설정 가이드
+
+**작업**: Sprint 5 운영 진입 gate 중 GitHub `main` branch protection 운영자 매뉴얼을
+분리한다.
+
+- **Runbook**: `docs/runbooks/branch-protection.md`를 추가해 PR 필수, approval 1개,
+  branch up-to-date, force-push/delete 차단, squash merge 기준을 문서화한다.
+- **Required checks**: 현재 always-on check(`lint`, Python 3.11/3.12/3.13 pytest)와
+  path-filtered check(`openapi-drift`, frontend build)를 분리했다.
+- **T-203 경계**: path-filtered check는 T-203에서 모든 PR에 neutral/success check가
+  생성되도록 바꾼 뒤 branch protection required check로 승격한다고 명시한다.
+
 ## 2026-06-05 (codex) — T-202 pre-commit hook 정착
 
 **작업**: Sprint 5 운영 진입 gate 중 pre-commit hook을 정착한다.

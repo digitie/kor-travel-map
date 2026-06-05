@@ -5,6 +5,15 @@
 
 ## [Unreleased]
 
+### Docs — branch protection 운영 절차 (2026-06-05)
+
+- **DOCS**: `docs/runbooks/branch-protection.md`를 추가해 GitHub `main` branch
+  protection 설정값과 운영 체크리스트를 문서화했다.
+- **DOCS**: 현재 always-on required check와 T-203 이후 승격할 path-filtered
+  OpenAPI/frontend check를 분리했다.
+- **TEST**: branch protection runbook의 required check와 deferred check 문구를 정적
+  회귀 테스트로 고정했다.
+
 ### Dev Env — pre-commit hooks (2026-06-05)
 
 - **NEW**: `.pre-commit-config.yaml`을 추가해 staged source/test 변경 시
