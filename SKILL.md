@@ -286,36 +286,25 @@ docs/
 4. `docs/architecture.md` — 의존 방향, 데이터 흐름
 5. `docs/resume.md` — "다음 한 작업"
 6. `docs/journal.md` 최신 3건 — 직전 컨텍스트
-7. 관련 ADR (`docs/decisions.md` 001~046 모두 accepted; 다음 후보 047)
+7. 관련 ADR (`docs/decisions.md` 001~047 모두 accepted; 다음 후보 048)
 8. 직결 docs (provider 추가면 `docs/provider-contract.md`, 현재 sprint면
    `docs/sprints/SPRINT-N.md` 등)
 
-## 9. 코드 작성 단계 (Sprint 4 완료 / Sprint 5 + ADR-045 진입 준비)
+## 9. 코드 작성 단계
 
 본 저장소는 T-014 승인 (2026-05-25, PR#16) 이후 **코드 작성 단계**다.
-2026-06-02 현재 main은 PR#149까지 머지되었고 Sprint 4(4a+4b) 완료 상태다.
 
-- Sprint 2 완료: 축제/날씨/유가/휴게소 provider + ETL live 11/11 dataset.
-- Sprint 3 완료: KNPS/krheritage, PostGIS 적재/조회, consistency report,
-  dedup queue, `AsyncKrtourMapClient`, `/features` debug UI.
-- Sprint 4 완료: MOIS Step A~D lifecycle(bulk/incremental/closed/detail),
-  `krtour-map dedup-merge` + `ops.feature_merge_history`(alembic 0007),
-  dedup 운영 FP 통계, ADR-033 F4, Place phone enrichment, coverage 80% 달성.
-- ADR-045 D-1~D-16 결정 완료. `krtour-map-debug-ui` 호환 경로/env/import,
-  TripMate 직접 import, 공유 DB, TripMate-owned Dagster 호환 shim은 만들지 않는다
-  (ADR-046).
-- Geocoding 현재 정본: kraddr-geo REST v2 `POST /v2/{reverse,geocode}`, 로컬 기본
-  `http://127.0.0.1:9001`.
-- RustFS 로컬 표준: S3 API `9003`, console `9004`.
-- Frontend 현재 정본: Next.js 16 + React 19 + `maplibre-vworld-js#v0.1.2`,
-  Windows Playwright e2e.
+> **진척/스프린트 상태·"다음 한 작업"의 단일 정본은 `docs/resume.md` + 백로그
+> `docs/tasks.md`다.** 이 문서에는 자주 바뀌는 PR 번호/완료여부를 박지 않는다
+> (반복 drift 회피 — `docs/reports/docs-consistency-audit-2026-06-06.md` DA-D-01).
+> 운영 모델·ADR·포트·frontend stack 같은 불변 기준값은 §1 식별자 매핑,
+> `CLAUDE.md §2`, `docs/decisions.md`를 정본으로 본다. 패키지
+> `krtour-map-debug-ui` → `krtour-map-admin` rename 완료, 구 이름/env/import 호환
+> shim 금지(ADR-046). geocoding 로컬 `:9001`, RustFS `:9003`/`:9004`, frontend
+> Next.js 16 + `maplibre-vworld-js#v0.1.2`.
 
 신규 코드는 항상 PR로 (ADR-021). 각 PR은 `pytest -q` + `ruff check` +
 `mypy --strict` + `lint-imports` + `docs/journal.md` + `docs/resume.md`
 업데이트 (해당 시 ADR/CHANGELOG/OpenAPI 동기). `python-krtour-map-spec.docx`
 (루트, 약 80쪽)는 v1 + SPEC V8 정합 reference로만 사용 — 새 코드의 입력
 아닌 *참고용*.
-
-**다음 단계**: ADR-045 독립 프로그램화(Docker compose + admin-first OpenAPI +
-독립 Dagster) + Sprint 5 (MOIS-sibling provider + Phase 2 게이트). 자세히는
-`docs/sprints/SPRINT-5.md` + `docs/resume.md` + ADR-045.

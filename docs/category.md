@@ -41,7 +41,7 @@ from krtour.map.category import (
 
 ### 3.1 `PlaceCategoryCode` (StrEnum)
 
-8자리 코드 `AABBCCDD` 형식. 총 141개 enum member.
+8자리 코드 `AABBCCDD` 형식. 총 144개 enum member (원본 141 + ADR-027 신규 3).
 
 ```
 AA — Tier 1 (대분류, 예: "01" 관광, "02" 음식, "03" 숙박)
@@ -90,7 +90,7 @@ class PlaceCategory:
 
 | 이름 | 타입 | 의미 |
 |------|------|------|
-| `PLACE_CATEGORY_DEFINITIONS` | `tuple[PlaceCategory, ...]` | 141개 정의 |
+| `PLACE_CATEGORY_DEFINITIONS` | `tuple[PlaceCategory, ...]` | 144개 정의 |
 | `PLACE_CATEGORY_BY_CODE` | `dict[PlaceCategoryCode, PlaceCategory]` | 코드 → 정의 |
 | `PLACE_CATEGORY_CODES` | `tuple[PlaceCategoryCode, ...]` | 모든 코드 (sort_order 순) |
 | `PLACE_CATEGORY_TIER1_NAMES` | `dict[PlaceCategoryTier1Code, str]` | 예: `"01"→"관광"` |
@@ -112,11 +112,12 @@ class PlaceCategory:
 | `format_category_tree(root_code=None, include_codes=True, active_only=True) -> str` | 트리 문자열 |
 | `print_category_tree(...)` | 위 결과 print |
 
-## 4. Tier 1~4 카탈로그 (141건 전체)
+## 4. Tier 1~4 카탈로그 (144건 전체)
 
 > 소스: `python-kraddr-base/src/kraddr/base/categories.py` (sync date
-> `2026-05-12`, ADR-023으로 본 저장소 이전 예정). 총 141건 = sentinel 1 +
-> Tier 1 7개 + Tier 2 29개 + Tier 3 71개 + Tier 4 33개.
+> `2026-05-12`, ADR-023으로 본 저장소 이전 완료 PR#18). 총 **144건** = sentinel 1 +
+> Tier 1 7개 + Tier 2 34개 + Tier 3 73개 + Tier 4 29개 (원본 141 + ADR-027 신규 3:
+> `03.08 LODGING_MOUNTAIN_SHELTER` + `03.08.01/02`). depth별 정확한 통계는 §4.3.
 
 ### 4.1 Tier 1 (대분류, 8개)
 
@@ -290,7 +291,7 @@ dict가 한국어 라벨 제공.
     07.02.01 일반 약국 (..._GENERAL) [maki: pharmacy]
 ```
 
-### 4.3 표 형식 (전체 141 rows)
+### 4.3 표 형식 (전체 144 rows)
 
 전체 표는 `src/krtour/map/category/_definitions.py`의 `PLACE_CATEGORY_DEFINITIONS`
 tuple에서 자동 생성된다 (ADR-023으로 본 라이브러리로 이전, PR#18). depth별
@@ -313,7 +314,7 @@ depth 1 = 1 + 7). Tier 1 enum 자체는 ADR-027에서 변경 없음.
 
 ### 4.4 maki icon 분포
 
-`PLACE_CATEGORY_MAPBOX_MAKI_ICONS` (55 unique icons → 141 rows):
+`PLACE_CATEGORY_MAPBOX_MAKI_ICONS` (55 unique icons → 144 rows):
 
 | maki icon | 사용 코드 수 | 주 사용 카테고리 |
 |-----------|------------:|-----------------|
@@ -455,7 +456,7 @@ ADR-023 결정으로 본 저장소에 이전. 변경 이력은 git log 참조.
 
 `tests/unit/test_category.py` (코드 작성 단계에서 추가):
 
-- 141개 seed의 결정성: `PLACE_CATEGORY_DEFINITIONS` 길이 + `PLACE_CATEGORY_BY_CODE`
+- 144개 seed의 결정성: `PLACE_CATEGORY_DEFINITIONS` 길이 + `PLACE_CATEGORY_BY_CODE`
   key 집합 일치.
 - `category_path("01050100")` → `("관광", "자연", "해변", ...)`
 - `mapbox_maki_icon_for_category` fallback (unknown → "marker")

@@ -1,5 +1,22 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-06 claude 작업 메모 — 문서 전수 정합성 감사(T-DA)
+
+`origin/main`(PR#225) 기준 문서 전체를 감사해
+`docs/reports/docs-consistency-audit-2026-06-06.md`(T-DA-01~11, DA-D-01/02)로 정리하고
+무쟁점 drift를 같은 PR에서 수정했다. 사용자 결정 DA-D-01에 따라 CLAUDE.md §2 /
+AGENTS.md "코드 작성 단계" / sprints/README "현 위치"의 PR 번호·스프린트 완료여부
+서술을 제거하고 **진척의 단일 정본은 본 `resume.md` + `tasks.md`**라고 못박았다.
+앞으로 이 두 파일이 진척 정본이므로, entry/정책 문서에 PR 번호를 다시 박지 않는다.
+
+같은 PR에서 고친 사실오류: CLAUDE.md geocoding 포트 `8888`→`9001`, ADR 현황
+`001~047/다음 048`, category 개수 라벨 `141`→`144`(코드 실측), architecture 의존체인
+`category` 추가, decisions.md ADR-002/025/036 현행 기준 교차참조.
+
+다음 한 작업 후보는 감사 전 백로그 그대로 **T-201b-d F8(file object orphan WARN)**
+또는 **T-RV-29/30(OpenAPI/user spec + generated frontend types)**, 그리고 감사 후속
+**T-DA-11**(openapi-admin-contract ↔ 구현 endpoint 전수 대조 = T-212a/T-212c)다.
+
 ## 2026-06-06 Codex 작업 메모 — T-RV-23 offline upload idempotency/load TOCTOU
 
 T-RV-23을 닫는다. offline upload 생성은 이제 업로드 body SHA-256 checksum을
