@@ -21,6 +21,15 @@ from typing import TYPE_CHECKING, Any, Final
 
 from sqlalchemy import text
 
+from krtour.map.core.offline_upload_states import (
+    OFFLINE_UPLOAD_LOAD_FINISH_SOURCE_STATES,
+    OFFLINE_UPLOAD_LOAD_FINISH_STATES,
+    OFFLINE_UPLOAD_LOADABLE_STATES,
+    OFFLINE_UPLOAD_VALIDATABLE_STATES,
+    OFFLINE_UPLOAD_VALIDATION_FINISH_SOURCE_STATES,
+    OFFLINE_UPLOAD_VALIDATION_FINISH_STATES,
+)
+
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -44,17 +53,6 @@ _RETURN_COLUMNS: Final[str] = (
     "created_at, updated_at"
 )
 
-_LOAD_FINISH_STATES: Final[frozenset[str]] = frozenset(
-    {"loaded", "load_failed", "cancelled"}
-)
-_VALIDATION_START_STATES: Final[frozenset[str]] = frozenset(
-    {"uploaded", "validated", "validation_failed", "load_failed"}
-)
-_VALIDATION_FINISH_SOURCE_STATES: Final[frozenset[str]] = frozenset({"validating"})
-_LOAD_START_STATES: Final[frozenset[str]] = frozenset(
-    {"uploaded", "validated", "load_failed"}
-)
-_LOAD_FINISH_SOURCE_STATES: Final[frozenset[str]] = frozenset({"loading"})
 _MAX_LIST_LIMIT: Final[int] = 200
 
 
@@ -145,9 +143,7 @@ def _row_to_upload(row: Any) -> OfflineUpload:
         detected_encoding=data["detected_encoding"],
         state=str(data["state"]),
         validation_job_id=(
-            str(data["validation_job_id"])
-            if data["validation_job_id"] is not None
-            else None
+            str(data["validation_job_id"]) if data["validation_job_id"] is not None else None
         ),
         load_job_id=str(data["load_job_id"]) if data["load_job_id"] is not None else None,
         created_by=data["created_by"],
@@ -269,11 +265,15 @@ async def _missing_or_state_conflict(
     allowed_states: frozenset[str],
 ) -> None:
     row = (
-        await session.execute(
-            text(_GET_STATE_SQL),
-            {"upload_id": upload_id},
+        (
+            await session.execute(
+                text(_GET_STATE_SQL),
+                {"upload_id": upload_id},
+            )
         )
-    ).mappings().first()
+        .mappings()
+        .first()
+    )
     if row is None:
         return
     raise OfflineUploadStateConflict(
@@ -359,11 +359,7 @@ async def list_offline_uploads(
         )
     ).all()
     uploads = tuple(_row_to_upload(row) for row in rows[:effective_limit])
-    next_cursor = (
-        _encode_cursor(uploads[-1])
-        if len(rows) > effective_limit and uploads
-        else None
-    )
+    next_cursor = _encode_cursor(uploads[-1]) if len(rows) > effective_limit and uploads else None
     return OfflineUploadPage(items=uploads, next_cursor=next_cursor)
 
 
@@ -379,7 +375,7 @@ async def mark_offline_upload_loading(
         {
             "upload_id": upload_id,
             "load_job_id": load_job_id,
-            "allowed_states": list(_LOAD_START_STATES),
+            "allowed_states": list(OFFLINE_UPLOAD_LOADABLE_STATES),
         },
     )
     row = result.one_or_none()
@@ -389,7 +385,7 @@ async def mark_offline_upload_loading(
         session,
         upload_id=upload_id,
         target_state="loading",
-        allowed_states=_LOAD_START_STATES,
+        allowed_states=OFFLINE_UPLOAD_LOADABLE_STATES,
     )
     return None
 
@@ -406,7 +402,7 @@ async def mark_offline_upload_validating(
         {
             "upload_id": upload_id,
             "validation_job_id": validation_job_id,
-            "allowed_states": list(_VALIDATION_START_STATES),
+            "allowed_states": list(OFFLINE_UPLOAD_VALIDATABLE_STATES),
         },
     )
     row = result.one_or_none()
@@ -416,7 +412,7 @@ async def mark_offline_upload_validating(
         session,
         upload_id=upload_id,
         target_state="validating",
-        allowed_states=_VALIDATION_START_STATES,
+        allowed_states=OFFLINE_UPLOAD_VALIDATABLE_STATES,
     )
     return None
 
@@ -428,7 +424,7 @@ async def finish_offline_upload_validation(
     state: str,
 ) -> OfflineUpload | None:
     """validation 종료 상태를 기록한다. ``validated``/``validation_failed``만 허용."""
-    if state not in {"validated", "validation_failed"}:
+    if state not in OFFLINE_UPLOAD_VALIDATION_FINISH_STATES:
         raise ValueError(
             "offline upload validation state는 ['validated', 'validation_failed'] "
             f"중 하나여야 함, got {state!r}."
@@ -438,7 +434,7 @@ async def finish_offline_upload_validation(
         {
             "upload_id": upload_id,
             "state": state,
-            "allowed_states": list(_VALIDATION_FINISH_SOURCE_STATES),
+            "allowed_states": list(OFFLINE_UPLOAD_VALIDATION_FINISH_SOURCE_STATES),
         },
     )
     row = result.one_or_none()
@@ -448,7 +444,7 @@ async def finish_offline_upload_validation(
         session,
         upload_id=upload_id,
         target_state=state,
-        allowed_states=_VALIDATION_FINISH_SOURCE_STATES,
+        allowed_states=OFFLINE_UPLOAD_VALIDATION_FINISH_SOURCE_STATES,
     )
     return None
 
@@ -460,17 +456,17 @@ async def finish_offline_upload_load(
     state: str,
 ) -> OfflineUpload | None:
     """load 종료 상태를 기록한다. ``loaded``/``load_failed``/``cancelled``만 허용."""
-    if state not in _LOAD_FINISH_STATES:
+    if state not in OFFLINE_UPLOAD_LOAD_FINISH_STATES:
         raise ValueError(
-            f"offline upload load state는 {sorted(_LOAD_FINISH_STATES)} 중 하나여야 함, "
-            f"got {state!r}."
+            "offline upload load state는 "
+            f"{sorted(OFFLINE_UPLOAD_LOAD_FINISH_STATES)} 중 하나여야 함, got {state!r}."
         )
     result = await session.execute(
         text(_FINISH_LOAD_SQL),
         {
             "upload_id": upload_id,
             "state": state,
-            "allowed_states": list(_LOAD_FINISH_SOURCE_STATES),
+            "allowed_states": list(OFFLINE_UPLOAD_LOAD_FINISH_SOURCE_STATES),
         },
     )
     row = result.one_or_none()
@@ -480,6 +476,6 @@ async def finish_offline_upload_load(
         session,
         upload_id=upload_id,
         target_state=state,
-        allowed_states=_LOAD_FINISH_SOURCE_STATES,
+        allowed_states=OFFLINE_UPLOAD_LOAD_FINISH_SOURCE_STATES,
     )
     return None

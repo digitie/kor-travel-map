@@ -2,6 +2,24 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-05 (codex) — T-RV-24 offline upload 상태 계약 단일화
+
+**작업**: PR#153~#179 리뷰 후속 MED 항목 중 offline upload state/format set drift를
+줄인다.
+
+- **State contract**: `krtour.map.core.offline_upload_states`를 추가해
+  `uploaded`/`validating`/`validated`/`validation_failed`/`loading`/`loaded`/
+  `load_failed`/`cancelled` 전체 상태와 load/validation 전이 set을 한 곳에 둔다.
+- **Layer sync**: admin router, `krtour.map.offline_upload`, `infra.offline_upload_repo`가
+  더 이상 각자 `LOADABLE_STATES`/tabular format set을 복붙하지 않는다.
+- **Reserved state**: validation 상태는 이미 validate API/job producer가 있으므로 dead
+  상태가 아니다. `cancelled`만 offline upload cancel API가 붙기 전까지 reserved terminal
+  state로 문서화한다.
+- **테스트**: 상태 집합 단위 테스트를 추가하고 offline upload unit/integration/router
+  회귀 테스트로 기존 전이 동작을 확인한다.
+- **남은 범위**: T-RV-23(checksum/idempotency + load TOCTOU)과 T-RV-25(store reuse)가
+  offline upload 묶음의 다음 후보로 남아 있다.
+
 ## 2026-06-05 (codex) — T-RV-22 offline upload write rollback
 
 **작업**: PR#153~#179 리뷰 후속 MED 항목 중 offline upload object orphan 방지

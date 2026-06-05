@@ -13,7 +13,7 @@ import logging
 import mimetypes
 from pathlib import PurePath
 from time import perf_counter
-from typing import Annotated, Any, Final, Literal, cast
+from typing import Annotated, Any, Final, cast
 from uuid import uuid4
 
 import httpx
@@ -29,6 +29,13 @@ from fastapi import (
     status,
 )
 from krtour.map.core.exceptions import FileStoreError
+from krtour.map.core.offline_upload_states import (
+    OFFLINE_UPLOAD_LOADABLE_STATES,
+    OFFLINE_UPLOAD_TABULAR_FORMATS,
+    OFFLINE_UPLOAD_TABULAR_LOADABLE_STATES,
+    OFFLINE_UPLOAD_WRITEABLE_FORMATS,
+    OfflineUploadState,
+)
 from krtour.map.geocoding import (
     KraddrGeoRestClient,
     kraddr_geo_address_resolver,
@@ -68,20 +75,6 @@ __all__ = [
 router = APIRouter(prefix="/admin/offline-uploads", tags=["admin-offline-uploads"])
 _LOG = logging.getLogger(__name__)
 
-OfflineUploadState = Literal[
-    "uploaded",
-    "validating",
-    "validated",
-    "validation_failed",
-    "loading",
-    "loaded",
-    "load_failed",
-    "cancelled",
-]
-
-_LOADABLE_STATES: Final[frozenset[str]] = frozenset({"uploaded", "validated", "load_failed"})
-_TABULAR_FORMATS: Final[frozenset[str]] = frozenset({"csv", "tsv"})
-_WRITEABLE_FORMATS: Final[frozenset[str]] = frozenset({"json", "jsonl", *_TABULAR_FORMATS})
 _MULTIPART_CONTENT_LENGTH_MARGIN_BYTES: Final[int] = 64 * 1024
 _DAGSTER_REPOSITORY_NAME: Final[str] = "__repository__"
 _DAGSTER_REPOSITORY_LOCATION_NAME: Final[str] = "krtour.map_dagster.definitions"
@@ -324,17 +317,17 @@ def _record_from_upload(row: OfflineUpload) -> OfflineUploadRecord:
 
 def _is_tabular_upload(row: OfflineUpload) -> bool:
     detected = (row.detected_format or _detected_format(row.original_filename) or "").lower()
-    return detected in _TABULAR_FORMATS
+    return detected in OFFLINE_UPLOAD_TABULAR_FORMATS
 
 
 def _can_load(row: OfflineUpload) -> bool:
-    if row.state not in _LOADABLE_STATES:
+    if row.state not in OFFLINE_UPLOAD_LOADABLE_STATES:
         return False
     if _is_tabular_upload(row):
-        return row.validation_job_id is not None and row.state in {
-            "validated",
-            "load_failed",
-        }
+        return (
+            row.validation_job_id is not None
+            and row.state in OFFLINE_UPLOAD_TABULAR_LOADABLE_STATES
+        )
     return True
 
 
@@ -715,7 +708,7 @@ async def create_offline_upload_request(
     upload_id = str(uuid4())
     filename = _safe_filename(file.filename)
     detected_format = _detected_format(filename)
-    if detected_format not in _WRITEABLE_FORMATS:
+    if detected_format not in OFFLINE_UPLOAD_WRITEABLE_FORMATS:
         raise HTTPException(
             status_code=422,
             detail="offline upload은 JSON/JSONL FeatureBundle 또는 CSV/TSV 파일만 지원합니다.",

@@ -27,6 +27,11 @@ from krtour.map.core.ids import (
     make_payload_hash,
     make_source_record_key,
 )
+from krtour.map.core.offline_upload_states import (
+    OFFLINE_UPLOAD_LOADABLE_STATES,
+    OFFLINE_UPLOAD_TABULAR_FORMATS,
+    OFFLINE_UPLOAD_VALIDATABLE_STATES,
+)
 from krtour.map.dto import (
     Address,
     AreaDetail,
@@ -87,13 +92,6 @@ __all__ = [
 OFFLINE_UPLOAD_LOAD_JOB_KIND: Final[str] = "offline_upload_load"
 OFFLINE_UPLOAD_VALIDATE_JOB_KIND: Final[str] = "offline_upload_validate"
 
-_LOADABLE_STATES: Final[frozenset[str]] = frozenset(
-    {"uploaded", "validated", "load_failed"}
-)
-_VALIDATABLE_STATES: Final[frozenset[str]] = frozenset(
-    {"uploaded", "validated", "validation_failed", "load_failed"}
-)
-_TABULAR_FORMATS: Final[frozenset[str]] = frozenset({"csv", "tsv"})
 _DETAIL_MODELS: Final[dict[str, type[BaseModel]]] = {
     "place": PlaceDetail,
     "event": EventDetail,
@@ -269,10 +267,9 @@ async def run_offline_upload_validation_job(
     upload = await get_offline_upload(session, upload_id)
     if upload is None:
         raise ValueError(f"offline upload 없음: {upload_id!r}")
-    if upload.state not in _VALIDATABLE_STATES:
+    if upload.state not in OFFLINE_UPLOAD_VALIDATABLE_STATES:
         raise ValueError(
-            f"offline upload {upload_id!r}는 validation 가능한 상태가 아님: "
-            f"{upload.state!r}"
+            f"offline upload {upload_id!r}는 validation 가능한 상태가 아님: {upload.state!r}"
         )
     mapping = normalize_offline_upload_column_mapping(column_mapping)
 
@@ -419,12 +416,12 @@ async def run_offline_upload_load_job(
     upload = await get_offline_upload(session, upload_id)
     if upload is None:
         raise ValueError(f"offline upload 없음: {upload_id!r}")
-    if upload.state not in _LOADABLE_STATES:
+    if upload.state not in OFFLINE_UPLOAD_LOADABLE_STATES:
         raise ValueError(
             f"offline upload {upload_id!r}는 load 가능한 상태가 아님: {upload.state!r}"
         )
     upload_format = _detected_format(upload.detected_format, upload.original_filename)
-    if upload_format in _TABULAR_FORMATS and upload.validation_job_id is None:
+    if upload_format in OFFLINE_UPLOAD_TABULAR_FORMATS and upload.validation_job_id is None:
         raise ValueError("CSV/TSV offline upload은 load 전 validation이 필요함.")
 
     async with try_advisory_lock(session, _advisory_key(upload)) as acquired:
@@ -473,7 +470,7 @@ async def run_offline_upload_load_job(
                 session, job.job_id, progress=30, current_stage="parse_feature_bundles"
             )
             column_mapping = await _load_column_mapping_for_upload(session, upload)
-            if parsed_format in _TABULAR_FORMATS:
+            if parsed_format in OFFLINE_UPLOAD_TABULAR_FORMATS:
                 if column_mapping is None:
                     raise ValueError(
                         "CSV/TSV offline upload load에는 validation column mapping이 필요함."
@@ -570,14 +567,12 @@ def parse_offline_feature_bundles(
     text = _decode_bytes(data, detected_encoding)
     if fmt == "jsonl":
         bundles = [
-            _bundle_from_payload(json.loads(line))
-            for line in text.splitlines()
-            if line.strip()
+            _bundle_from_payload(json.loads(line)) for line in text.splitlines() if line.strip()
         ]
     elif fmt == "json":
         payload = json.loads(text)
         bundles = _bundles_from_json_payload(payload)
-    elif fmt in _TABULAR_FORMATS:
+    elif fmt in OFFLINE_UPLOAD_TABULAR_FORMATS:
         if provider is None or dataset_key is None:
             raise ValueError("CSV/TSV offline upload load에는 provider/dataset_key가 필요함.")
         if column_mapping is None:
@@ -957,7 +952,7 @@ def _parse_tabular(
     sample_size: int | None,
 ) -> _ParsedTabular:
     fmt = _detected_format(detected_format, original_filename)
-    if fmt not in _TABULAR_FORMATS:
+    if fmt not in OFFLINE_UPLOAD_TABULAR_FORMATS:
         raise ValueError(
             f"CSV/TSV validation은 csv/tsv만 지원함 "
             f"(detected={detected_format!r}, filename={original_filename!r})."
@@ -1191,12 +1186,8 @@ async def _resolve_missing_tabular_bjd_code(
         if resolved is not None and resolved.bjd_code is not None:
             return resolved
     if address_text:
-        raise ValueError(
-            f"row {row_number}: bjd_code가 없고 kraddr-geo geocode 보강에 실패함"
-        )
-    raise ValueError(
-        f"row {row_number}: bjd_code가 없고 address/reverse geocoder 보강 경로가 없음"
-    )
+        raise ValueError(f"row {row_number}: bjd_code가 없고 kraddr-geo geocode 보강에 실패함")
+    raise ValueError(f"row {row_number}: bjd_code가 없고 address/reverse geocoder 보강 경로가 없음")
 
 
 def _tabular_feature_address(
@@ -1271,15 +1262,13 @@ async def _load_column_mapping_for_upload(
     upload: OfflineUpload,
 ) -> OfflineUploadColumnMapping | None:
     fmt = _detected_format(upload.detected_format, upload.original_filename)
-    if fmt not in _TABULAR_FORMATS:
+    if fmt not in OFFLINE_UPLOAD_TABULAR_FORMATS:
         return None
     if upload.validation_job_id is None:
         raise ValueError("CSV/TSV offline upload은 load 전 validation이 필요함.")
     job = await get_import_job(session, upload.validation_job_id)
     if job is None:
-        raise ValueError(
-            f"offline upload validation job 없음: {upload.validation_job_id!r}"
-        )
+        raise ValueError(f"offline upload validation job 없음: {upload.validation_job_id!r}")
     raw_mapping = job.payload.get("column_mapping")
     if not isinstance(raw_mapping, Mapping):
         raise ValueError("offline upload validation job payload에 column_mapping이 없음.")
@@ -1317,9 +1306,7 @@ def _decode_bytes_with_encoding(
         except UnicodeDecodeError as exc:
             last_error = exc
     if last_error is not None:
-        raise ValueError(f"offline upload 파일 인코딩을 해석할 수 없음: {tried}") from (
-            last_error
-        )
+        raise ValueError(f"offline upload 파일 인코딩을 해석할 수 없음: {tried}") from (last_error)
     return data.decode(), "default"
 
 
@@ -1343,8 +1330,7 @@ def _detected_format(
 def _verify_size(upload: OfflineUpload, body: bytes) -> None:
     if upload.byte_size != len(body):
         raise ValueError(
-            f"offline upload size mismatch: expected={upload.byte_size}, "
-            f"actual={len(body)}"
+            f"offline upload size mismatch: expected={upload.byte_size}, actual={len(body)}"
         )
 
 

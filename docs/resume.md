@@ -1,5 +1,23 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-05 Codex 작업 메모 — T-RV-24 offline upload 상태 계약 단일화
+
+T-RV-24를 처리한다. offline upload 상태와 포맷 집합을
+`krtour.map.core.offline_upload_states`로 분리해 admin router,
+`krtour.map.offline_upload`, `infra.offline_upload_repo`가 같은 계약을 공유하게 한다.
+`LOADABLE_STATES`와 tabular format set 복붙을 제거했고, 상태 집합 단위 테스트를
+추가했다.
+
+validation 상태(`validating`/`validated`/`validation_failed`)는 이미 validate API/job이
+producer이므로 dead state가 아니다. `cancelled`는 DB terminal state로 유지하되, 현재
+offline upload cancel API가 없으므로 reserved state로 문서화한다.
+
+다음 한 작업은 **T-RV-25(upload store app.state 재사용)** 또는
+**T-RV-23(offline upload checksum/idempotency + load TOCTOU)** 다. 둘은 같은
+offline upload router/store 경계에 걸려 있으므로 PR을 합치거나, 먼저 T-RV-25를 작은
+PR로 닫는 편이 충돌 위험이 낮다. **T-RV-27은 production 레벨 hardening 전까지 계속
+skip/deferred**다.
+
 ## 2026-06-05 Codex 작업 메모 — T-RV-22 offline upload write rollback
 
 T-RV-22를 처리한다. `POST /admin/offline-uploads`는 RustFS/S3 object write 성공 후
