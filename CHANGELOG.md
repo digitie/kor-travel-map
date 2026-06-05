@@ -5,6 +5,15 @@
 
 ## [Unreleased]
 
+### Ops — standalone cold backup runbook (2026-06-05)
+
+- **NEW**: `npm run docker:backup`이 standalone Docker app의 `krtour_map`,
+  `krtour_map_dagster`, RustFS volume을 하나의 backup bundle로 저장한다.
+- **DOCS**: `docs/backup-restore.md`에 산출물 구조, checksum/restore dry-check,
+  수동 cold restore 경계를 문서화했다.
+- **TEST**: backup script와 runbook의 3종 백업 대상, 비파괴 범위, npm script 연결을
+  정적 회귀 테스트로 고정했다.
+
 ### Docker — runtime image hygiene (2026-06-05)
 
 - **CHANGED**: `api`와 `dagster` Docker image를 builder/runtime stage로 분리하고

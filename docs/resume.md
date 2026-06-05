@@ -1,5 +1,23 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-05 Codex 작업 메모 — T-209e-a standalone cold backup
+
+T-209e를 restore/admin router/hot-swap까지 한 번에 다루지 않고, 먼저 충돌 가능성이
+낮은 cold backup 단위로 분리한다. `npm run docker:backup`은
+`scripts/docker-backup.sh`를 호출해 standalone Docker compose의 `krtour_map` app DB,
+`krtour_map_dagster` Dagster metadata DB, RustFS volume을
+`data/backups/<backup_id>/` 아래에 저장한다.
+
+스크립트는 API/frontend/Dagster/RustFS writer service가 실행 중이면 기본 중단하고,
+운영자가 명시적으로 `KRTOUR_MAP_BACKUP_ALLOW_RUNNING=1`을 준 경우에만 best-effort
+snapshot을 허용한다. restore는 아직 자동 실행하지 않으며, `docs/backup-restore.md`는
+checksum 검증, `pg_restore --list`, RustFS tar 목록 확인, 수동 cold restore 경계를
+문서화한다.
+
+다음 한 작업은 **T-209e-b(restore/admin router/hot-swap 설계 분리)** 또는 기존
+리뷰 후속인 **T-RV-20(router scope/update_policy schema 검증)**,
+**T-RV-19(admin UI 지도 선행 안정화)**, **T-RV-22/23/25(offline upload 후속)** 다.
+
 ## 2026-06-05 Codex 작업 메모 — T-RV-37e Docker image hygiene
 
 T-RV-37 cleanup 묶음 중 Docker 이미지 multi-stage/non-root/standalone 항목을 처리한다.

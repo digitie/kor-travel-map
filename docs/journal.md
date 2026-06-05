@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-05 (codex) — T-209e-a standalone cold backup
+
+**작업**: T-209e backup/restore 독립 DB 묶음 중 충돌 가능성이 낮은 cold backup
+단위를 먼저 분리한다.
+
+- **백업 스크립트**: `npm run docker:backup`이 `scripts/docker-backup.sh`를 실행해
+  `krtour_map` app DB, `krtour_map_dagster` Dagster metadata DB, RustFS volume을
+  `data/backups/<backup_id>/` 아래에 저장한다.
+- **안전 경계**: API/frontend/Dagster/RustFS writer service가 실행 중이면 기본 중단하고,
+  운영자가 `KRTOUR_MAP_BACKUP_ALLOW_RUNNING=1`로 opt-in한 경우에만 best-effort
+  snapshot을 허용한다. restore는 이번 PR에서 실행하지 않는다.
+- **문서/테스트**: `docs/backup-restore.md`와 Docker/deploy runbook에 산출물 구조,
+  checksum 검증, 수동 cold restore 경계를 적고, 정적 회귀 테스트로 3종 백업 대상과
+  비파괴 범위를 고정한다.
+
 ## 2026-06-05 (codex) — T-RV-37e Docker image hygiene
 
 **작업**: T-RV-37 cleanup 중 Docker 이미지 multi-stage/non-root/standalone 항목을
