@@ -335,3 +335,26 @@ def test_create_run_now_lock_busy_returns_retry_after(
     body = response.json()
     assert body["error"]["code"] == "LOCK_BUSY"
     assert body["error"]["details"]["retry_after_seconds"] == 15
+
+
+@pytest.mark.unit
+def test_create_unknown_enqueue_error_hides_internal_message(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import feature_update_requests as router_mod
+
+    async def _enqueue(_session: Any, **_kwargs: Any) -> FeatureUpdateRequest:
+        raise RuntimeError("secret DSN leaked")
+
+    monkeypatch.setattr(router_mod, "enqueue_feature_update_request", _enqueue)
+
+    response = client.post(
+        "/admin/feature-update-requests",
+        json={"scope": {"type": "feature_ids", "feature_ids": ["feature-1"]}},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["error"]["message"] == (
+        "feature update request enqueue failed"
+    )

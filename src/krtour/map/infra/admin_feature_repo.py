@@ -18,7 +18,8 @@ from typing import TYPE_CHECKING, Any, Final, Literal
 from sqlalchemy import text
 
 from krtour.map.infra.merge_repo import (
-    MergeError,
+    MergeConflictError,
+    MergeNotFoundError,
     MergeOutcome,
     apply_feature_merge,
     merge_from_review,
@@ -938,15 +939,17 @@ async def merge_dedup_review(
         await session.execute(text(_SELECT_DEDUP_PAIR_SQL), {"review_key": review_key})
     ).one_or_none()
     if row is None:
-        raise MergeError(f"review_key 없음 — {review_key!r}")
+        raise MergeNotFoundError(f"review_key 없음 — {review_key!r}")
     if row.status != "pending":
-        raise MergeError(f"이미 검토된 후보(status={row.status!r}) — {review_key!r}")
+        raise MergeConflictError(
+            f"이미 검토된 후보(status={row.status!r}) — {review_key!r}"
+        )
     if master_feature_id == row.feature_id_a:
         loser_id = row.feature_id_b
     elif master_feature_id == row.feature_id_b:
         loser_id = row.feature_id_a
     else:
-        raise MergeError(
+        raise MergeConflictError(
             "master_feature_id가 review 후보 쌍에 없음 — "
             f"{master_feature_id!r}"
         )

@@ -16,7 +16,8 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from krtour.map.infra.merge_repo import (
-    MergeError,
+    MergeConflictError,
+    MergeNotFoundError,
     apply_feature_merge,
     merge_from_review,
 )
@@ -206,7 +207,7 @@ async def test_merge_from_review_unknown_key_raises(
     seeded: str, migrated_engine: AsyncEngine
 ) -> None:
     async with AsyncSession(migrated_engine) as session, session.begin():
-        with pytest.raises(MergeError, match="review_key 없음"):
+        with pytest.raises(MergeNotFoundError, match="review_key 없음"):
             await merge_from_review(
                 session, "00000000-0000-0000-0000-000000000000"
             )
@@ -220,7 +221,7 @@ async def test_merge_from_review_already_merged_raises(
         await merge_from_review(session, review_key)
     # 두 번째 시도 — 이미 merged.
     async with AsyncSession(migrated_engine) as session, session.begin():
-        with pytest.raises(MergeError, match="이미 검토"):
+        with pytest.raises(MergeConflictError, match="이미 검토"):
             await merge_from_review(session, review_key)
 
 
@@ -248,7 +249,7 @@ async def test_apply_feature_merge_distinct_guard(
     seeded: str, migrated_engine: AsyncEngine
 ) -> None:
     async with AsyncSession(migrated_engine) as session, session.begin():
-        with pytest.raises(MergeError, match="master와 loser가 같음"):
+        with pytest.raises(MergeConflictError, match="master와 loser가 같음"):
             await apply_feature_merge(
                 session, master_id="f_master", loser_id="f_master"
             )
