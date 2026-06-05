@@ -30,47 +30,29 @@ rename 완료(PR#148). 역할은 "debug UI"를 넘어 krtour-map **admin/API 프
 (ADR-020/045). 메인 라이브러리(`krtour.map`)는 FastAPI 의존이 없고, FastAPI는 이
 패키지가 진다.
 
-## 2. 현 단계
+## 2. 현재 기준
 
-**v2 Sprint 4 (4a+4b) 완료 / Sprint 5 + ADR-045 독립 프로그램화 진입 준비**. v1은
-`v1` 브랜치 보존, main은 orphan으로 v2 새로 시작. 2026-06-02 현재 main은 PR#149
-까지 머지됨:
-- Sprint 2~3: provider 변환, PostGIS 적재/조회, consistency report, dedup queue,
-  `AsyncKrtourMapClient`, KNPS/krheritage, debug UI `/features` 구현 완료
-- Sprint 4a: MOIS Step A bulk + Step B incremental(`provider_sync_state` cursor) +
-  dedup-merge 명령 + `feature_merge_history`(alembic 0007, ADR-016 master 선정) +
-  dedup FP 측정/운영 통계
-- Sprint 4b: MOIS Step C(폐업→inactive) + Step D(on-demand 상세) + ADR-033 F4
-  (dedup 백로그 WARN) + Place phone enrichment(`krtour.map.enrichment`) +
-  coverage 게이트 75→**80**(실측 94.12%) + 에이전트 공용 runbook(`docs/runbooks/`)
-- geocoding 정본: kraddr-geo REST(v2 `POST /v2/{reverse,geocode}`), 로컬 기본
-  `http://127.0.0.1:8888`
-- frontend 정본: Next.js 16 + React 19 + `maplibre-vworld-js#v0.1.2`, Windows
-  Playwright e2e
-- ADR-045 D-1~D-16 의사결정 전부 완료. 다음 작업: ADR-045 독립 프로그램화
-  (Docker compose / admin-first OpenAPI / 독립 Dagster) + Sprint 5
-  (MOIS-sibling provider + Phase 2 정합성 게이트)
+> **진척/스프린트 상태·"다음 한 작업"의 단일 정본은 `docs/resume.md` + 백로그
+> `docs/tasks.md`다.** 이 1쪽 요약에는 자주 바뀌는 PR 번호·스프린트 완료여부를
+> 박지 않는다(반복 drift 회피 — `docs/reports/docs-consistency-audit-2026-06-06.md`
+> DA-D-01). 아래는 잘 바뀌지 않는 기준값만 둔다.
 
-ADR 현황: **001~046 모두 accepted** (029→043, 003·035 일부→**045**로 supersede).
-045 = krtour-map Docker 독립 프로그램 + 독립 DB/Dagster + TripMate OpenAPI 연동
-(2026-06-01). 046 = ADR-045 이행 시 구 모델 호환 shim 금지. 035~043은
-**PR#33 (2026-05-27) 일괄 accepted 전환** — 운영 단계 진입에 따른 9건:
-- 035 REST API admin 운영 확장 / 036 maplibre-vworld-js 분리 (현재 본 저장소 핀 v0.1.2)
-- 037 frontend TanStack Query + Zustand / 038 GitHub Actions CI/CD 재활성화
-- 039 CLI mutex (advisory lock) / 040 Backup/Restore + 핫스왑 UI
-- 041 kraddr-base 코드 흡수 + 폐기 / 042 datagokr 표준데이터 축제 1차 source
-- 043 `@krtour/map-marker-react` npm 게시 보류 (ADR-029 supersede)
-- 044 관련 라이브러리 로컬(`F:\dev\`, WSL `~/dev/`) 우선 조회 + 데이터 정합성 책임 분계
-
-다음 후보 번호 = **ADR-047**. ADR-030~033은 2026-05-29 사용자 승인 확정,
-ADR-033 Phase 1(F1~F3) + **F4(dedup 백로그 WARN, Sprint 4b)** 구현 완료.
-implementation 시점: 038 즉시 / 042 SPRINT-2 §2.1 / 035·037·043 SPRINT-2 §2.5 /
-036 SPRINT-3 후반 / 039·040·041 Sprint 4a / 045 독립 프로그램화는 Sprint 5 진입.
-
-Sprint 1~5 plan은 `docs/sprints/` 참조. **provider 9단계 구현 순서**
-(ADR-034): 축제 → 날씨 → 유가 → 휴게소 → 국립공원/트래킹 → 국가유산 →
-**MOIS 인허가** → 휴양림/수목원 → 박물관/미술관. MOIS-독립 먼저, dedup 룰
-검증 후 MOIS bulk, 마지막에 MOIS-sibling.
+- v1은 `v1` 브랜치 보존, main은 orphan으로 v2 재시작(ADR-001).
+- **ADR 현황**: ADR-001~047 모두 accepted, **다음 후보 번호 = ADR-048**
+  (`docs/decisions.md`). 045 = Docker 독립 프로그램 + 독립 DB/Dagster + TripMate
+  OpenAPI 연동(ADR-003 운영 모델 supersede). 046 = 이행 시 구 모델 호환 shim 금지
+  + 주소는 kraddr-geo REST v2로 통일. 047 = standalone 고정 포트.
+- **고정 포트(ADR-047)**: API `9011` · admin UI `9012` · Dagster `9013` ·
+  Postgres host `15433` · RustFS S3 `9003`/console `9004`.
+- **geocoding 정본**: kraddr-geo REST v2 `POST /v2/{reverse,geocode}`, 로컬 기본
+  `http://127.0.0.1:9001`(ADR-046).
+- **frontend 정본**: Next.js 16 + React 19 + `maplibre-vworld-js#v0.1.2`(ADR-036),
+  Windows Playwright e2e.
+- **coverage gate**: ADR-032 단계 상향 일정(Sprint 4 기준 `fail_under=80`).
+- **provider 9단계 구현 순서**(ADR-034): 축제 → 날씨 → 유가 → 휴게소 →
+  국립공원/트래킹 → 국가유산 → **MOIS 인허가** → 휴양림/수목원 → 박물관/미술관.
+  MOIS-독립 먼저, dedup 룰 검증 후 MOIS bulk, 마지막에 MOIS-sibling.
+- Sprint 1~5 plan은 `docs/sprints/` 참조.
 
 v1 산출물 요약: 저장소 루트 `python-krtour-map-spec.docx` (약 80쪽).
 
@@ -136,7 +118,7 @@ worktree.md` §7).
    `krtour.map.api` 없음 (ADR-020).
 5. 공간 쿼리 술어에서 `ST_Transform` 금지 (인덱스 무효화, ADR-012).
 
-전체 22개 룰은 `SKILL.md` §4 (ADR-039 CLI mutex / ADR-041 PlaceCoordinate
+전체 26개 룰은 `SKILL.md` §4 (ADR-039 CLI mutex / ADR-041 PlaceCoordinate
 import 금지 / ADR-043 npm 게시 금지 포함).
 
 ## 6. 작업 후 체크리스트 (1줄)

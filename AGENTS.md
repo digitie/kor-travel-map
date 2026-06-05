@@ -403,38 +403,19 @@ python -m pytest tests/integration -q
 python -m pytest -q
 ```
 
-## 코드 작성 단계 (Sprint 4 완료 / Sprint 5 + ADR-045 진입 준비)
+## 코드 작성 단계
 
 본 저장소는 **T-014 (Sprint 1 진입)** 승인 (2026-05-25, PR#16) 이후
-**코드 작성 단계**다. Sprint 1~4(4a+4b)는 완료되었고, 2026-06-02 현재 main은
-PR#156(Docker/고정 포트 표준화)까지 머지된 상태다.
+**코드 작성 단계**다.
 
-**현재 상태 (2026-06-02)**:
-- Sprint 2: ADR-034 ①~④ provider(축제/날씨/유가/휴게소) + ETL live 11/11 dataset.
-- Sprint 3: KNPS + krheritage provider, PostGIS 적재/조회, consistency report,
-  dedup queue, `AsyncKrtourMapClient`, `/features` debug UI.
-- Sprint 4a: MOIS Step A bulk + Step B incremental(`provider_sync_state` cursor,
-  `infra/sync_state_repo.py`) + `krtour-map dedup-merge`(`infra/merge_repo.py` +
-  `core.scoring.select_master`) + `ops.feature_merge_history`(alembic 0007) +
-  dedup FP 측정/운영 통계(`status_repo.dedup_fp_stats`).
-- Sprint 4b: MOIS Step C(폐업→inactive) + Step D(on-demand 상세, debug-ui
-  `/debug/mois-license/{id}`) + ADR-033 **F4**(dedup 백로그 WARN) + Place phone
-  enrichment(`krtour.map.enrichment`) + 에이전트 공용 runbook(`docs/runbooks/`).
-- Geocoding: `krtour.map.geocoding.KraddrGeoRestClient`가 kraddr-geo REST v2
-  `POST /v2/{reverse,geocode}`를 호출. 로컬 기본 `http://127.0.0.1:9001`.
-- Standalone 포트: API `9011`, admin UI `9012`, Dagster `9013` 고정(ADR-047).
-  점유 프로세스는 `scripts/stop-fixed-ports.sh`로 종료 후 재기동.
-- RustFS 로컬 포트: S3 API `9003`, console `9004`.
-- Admin UI: `/admin/dagster`에서 Dagster summary API(`GET /ops/dagster/summary`)와
-  Dagster webserver embed를 제공.
-- Frontend: Next.js 16 + React 19 + `maplibre-vworld-js#v0.1.2`, Windows Playwright e2e.
-- Coverage gate는 Sprint 4 기준 `fail_under=80` (실측 94.12%). 전체 pytest ~835 green.
-- ADR-045 D-1~D-16은 전부 결정 완료. `krtour-map-debug-ui`는 `krtour-map-admin`
-  으로 rename 완료(PR#148). 새 작업은 구 이름/env/import와 TripMate 직접 import/
-  공유 DB/Dagster 호환 shim을 만들지 않는다(ADR-046).
-
-**다음 단계**: 독립 Dagster queue/schedule/sensor와 Sprint 5(MOIS-sibling provider
-휴양림/수목원/박물관 + ADR-033 Phase 2 정합성 게이트)를 진행한다.
+> **현재 진척·스프린트 상태·"다음 한 작업"의 단일 정본은 `docs/resume.md`,
+> 백로그는 `docs/tasks.md`다.** 이 문서에는 자주 바뀌는 PR 번호/완료여부를 박지
+> 않는다(반복 drift 회피 — `docs/reports/docs-consistency-audit-2026-06-06.md`
+> DA-D-01). 운영 모델·ADR·포트·frontend stack 같은 **불변 사실**은 위 "TripMate
+> ↔ krtour-map 경계" / "디버그·관리 REST API 정책" / "Frontend stack" 절,
+> `CLAUDE.md §2`, `docs/decisions.md`를 정본으로 본다. 패키지는
+> `krtour-map-debug-ui` → `krtour-map-admin` rename 완료(ADR-020 amendment), 구
+> 이름/env/import 호환 shim은 만들지 않는다(ADR-046).
 
 **계속 유효한 코드 작성 가이드**:
 - 모든 신규 코드는 `import-linter` 의존 방향 (`category → dto → core →

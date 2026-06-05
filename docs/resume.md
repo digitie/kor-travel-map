@@ -1,5 +1,29 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-06 claude 작업 메모 — 문서 전수 정합성 감사(T-DA)
+
+`origin/main`(PR#225) 기준 문서 전체를 감사해
+`docs/reports/docs-consistency-audit-2026-06-06.md`(T-DA-01~11, DA-D-01/02)로 정리하고
+무쟁점 drift를 같은 PR에서 수정했다. 사용자 결정 DA-D-01에 따라 CLAUDE.md §2 /
+AGENTS.md "코드 작성 단계" / sprints/README "현 위치"의 PR 번호·스프린트 완료여부
+서술을 제거하고 **진척의 단일 정본은 본 `resume.md` + `tasks.md`**라고 못박았다.
+앞으로 이 두 파일이 진척 정본이므로, entry/정책 문서에 PR 번호를 다시 박지 않는다.
+
+같은 PR에서 고친 사실오류: CLAUDE.md geocoding 포트 `8888`→`9001`, ADR 현황
+`001~047/다음 048`, category 개수 라벨 `141`→`144`(코드 실측), architecture 의존체인
+`category` 추가, decisions.md ADR-002/025/036 현행 기준 교차참조.
+
+사용자 추가 요청으로 **외부 노출 API 일관성/완결성**도 점검했다(감사 §8). 생성 spec
+↔ contract 대조 결과: `/admin/issues`(ADR-046 주소 이슈 수동 처리) 미구현(T-DA-13),
+`/admin/providers` 미구현 표기 누락(T-DA-14), list/단건 응답 셰입 이원화(T-DA-15/16).
+사용자 결정: **DA-D-03 = 전면 통일**(모든 admin 응답 `{data,meta}` — 코드 전환은 별도
+PR), **DA-D-04 = T-212 묶음**(`/admin/issues`는 T-212b/c). 본 PR에는 contract §3.1
+표준화 명시 + §4 미구현 배지(문서)만 반영했다.
+
+다음 한 작업 후보: ① **T-DA-15/16 envelope 전면 통일**(별도 코드 PR — 3 flat list +
+6 bare 단건 + admin frontend hook + openapi 재생성), ② **T-DA-13 `/admin/issues`
+구현**(T-212b/c), ③ 감사 전 백로그 **T-201b-d F8** 또는 **T-RV-29/30**.
+
 ## 2026-06-06 Codex 작업 메모 — T-RV-23 offline upload idempotency/load TOCTOU
 
 T-RV-23을 닫는다. offline upload 생성은 이제 업로드 body SHA-256 checksum을

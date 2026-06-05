@@ -443,7 +443,7 @@ export const CATEGORY_MAKI: Record<string, string> = {
   "03030101": "park",         // 휴양림 (산림청)
   "06020000": "fuel",         // 주유소 (OpiNet)
   "06040101": "highway-rest-area",    // 휴게소 (KREX)
-  // ... (전체 141건은 docs/category.md §4)
+  // ... (전체 144건은 docs/category.md §4)
 };
 
 export const CATEGORY_COLOR: Record<string, string> = {

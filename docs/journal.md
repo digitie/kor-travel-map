@@ -2,6 +2,39 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-06 (claude) — 문서 전수 정합성 감사 + drift 수정 (T-DA)
+
+**작업**: 사용자 지시로 `origin/main`(PR#225) 기준 문서 전체를 읽고 논리적
+불일치·Task 문서 불일치·stale·빠진 부분을 감사. 결과를
+`docs/reports/docs-consistency-audit-2026-06-06.md`(T-DA-01~11, DA-D-01/02)로 정리하고
+무쟁점 항목을 같은 PR에서 수정.
+
+- **감사 방식**: 문서 주장(claim)을 코드 ground truth(`.env.example`,
+  `docker-compose.yml`, `alembic/versions/*`=0001~0016, `src/krtour/map/category`)와
+  대조. 예: category 개수는 `len(PLACE_CATEGORY_DEFINITIONS)=144`로 실측.
+- **의사결정**: DA-D-01 = "현 단계/현 위치" 상태 블록을 `resume.md`/`tasks.md`
+  포인터로 대체(반복 drift 원인 제거). DA-D-02 = 무쟁점 수정까지 한 PR로 반영.
+- **수정(반영 완료)**: CLAUDE.md §2 전면 갱신(8888→9001, ADR 001~047/다음 048,
+  PR#149 narrative 제거 → 포인터) / AGENTS.md "코드 작성 단계"(PR#156) 포인터화 /
+  sprints/README "현 위치"(PR#149) 포인터화 + Sprint5 "🟢 진행 중" /
+  category.md·debug-ui-package.md·decisions.md ADR-030 개수 라벨 141→**144** /
+  architecture.md 큰그림 의존체인에 `category` 추가 / decisions.md ADR-002·025·036에
+  현행 기준 교차참조 note(역사 본문 보존).
+- **외부 노출 API 점검(사용자 요청, §8)**: 생성 spec `openapi.json`(35 path)/
+  `openapi.user.json`(7 path) ↔ contract 대조. 발견: ① `/admin/issues`(ADR-046 주소
+  이슈 수동 처리 write/action)가 contract §4.1 "필수 엔드포인트"로 명세됐으나 미구현
+  (읽기 `/ops/consistency/issues`만)=T-DA-13. ② `/admin/providers` 미구현(T-207b
+  취소)인데 §4 표에 캐비엇 없음=T-DA-14. ③ list 응답 셰입 이원화 `{data,meta}`(7) vs
+  `{count,items,next_cursor}`(3)=T-DA-15, 단건 envelope 불일치(user subset
+  feature-update-requests/{id}만 bare)=T-DA-16.
+- **추가 의사결정**: DA-D-03 = **전면 통일**(모든 admin 응답 `{data,meta}`) — 본 PR은
+  contract §3.1에 표준+현행예외 명시(문서), 코드 전환은 별도 PR(T-DA-15/16).
+  DA-D-04 = **T-212 묶음** — `/admin/issues`는 contract §4·§4.1 "미구현(계획)" 배지만
+  반영, 구현은 T-212b/c.
+- **검증**: 본 배치는 문서/주석만 수정(코드·스키마 무변경). 변경 파일:
+  CLAUDE.md, AGENTS.md, SKILL.md, docs/{tasks,journal,resume,category,architecture,
+  decisions,debug-ui-package,openapi-admin-contract,sprints/README}.md + 신규 리포트.
+
 ## 2026-06-06 (codex) — T-RV-23 후속 offline upload ORM unique constraint 동기화
 
 **작업**: PR#225에서 추가한 `ops.offline_uploads` checksum idempotency migration과

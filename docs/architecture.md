@@ -51,7 +51,7 @@
 ┌──────────────────────────────────────────────────────────────────────┐
 │ python-krtour-map (메인 패키지, FastAPI 의존 없음)                       │
 │                                                                      │
-│  dto → core → infra → providers → client → cli                        │
+│  category → dto → core → infra → providers → client → cli              │
 │  AsyncKrtourMapClient / raw SQL repo / provider 변환 함수               │
 └──────────────────────────────────────────────────────────────────────┘
 ```

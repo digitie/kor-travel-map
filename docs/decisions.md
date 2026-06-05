@@ -37,6 +37,9 @@
   순환 import가 일부 발생했다. 동기/비동기 인터페이스도 혼재했다.
 - **결정**:
   - 의존 방향 `dto → core → infra → providers → client → api/cli` 한 방향.
+    (현행 체인은 ADR-020으로 `api` 제거 + ADR-023으로 최하단 `category` 추가 →
+    `category → dto → core → infra → providers → client → cli`. 본문은 채택 당시
+    표기.)
   - `import-linter` 계약으로 CI에서 강제.
   - 동기 인터페이스 신규 추가 금지. `AsyncKrtourMapClient`만. 호출자가
     `asyncio.run`으로 감싸야 하면 호출자가 책임.
@@ -683,6 +686,10 @@
 
 ## ADR-025: 디버그 UI frontend는 `maplibre-vworld-js` 채택
 
+> **현행 기준(2026-06-06)**: frontend는 **Next.js 16**(ADR-036 amendment 2026-05-31),
+> dev 포트는 admin UI **9012**(ADR-047). 본문의 "Next.js 15"·"`next dev --port 8610`"
+> 은 채택/2차 보강 당시 값이며 위 ADR이 정본이다.
+
 - **상태**: accepted
 - **날짜**: 2026-05-25
 - **결정자**: 사용자
@@ -1016,7 +1023,7 @@
     / `infra/` / `providers/` / `client/` 어디에도 `cachetools` /
     `async-lru` / `aiocache` / 수동 `dict` 캐시 금지.
   - **Narrow 예외 (모듈 레벨 `functools.cache` 한정 허용)**:
-    1. `krtour.map.category` Tier 1~4 PlaceCategoryCode 카탈로그 (141건,
+    1. `krtour.map.category` Tier 1~4 PlaceCategoryCode 카탈로그 (144건,
        릴리스 단위 immutable).
     2. `pyproj.Transformer` CRS 변환 인스턴스 — `Transformer.from_crs(...)`
        는 본질적으로 immutable + thread-safe, 모듈 레벨 singleton 보관.
@@ -1811,6 +1818,10 @@ ADR-005/ADR-020에서 `krtour-map-admin` 패키지는 "디버그 + 내부망 전
 ---
 
 ## ADR-036: `maplibre-vworld-js` 라이브러리 분리 + v0.1.0 — 공통 기능은 상류, TripMate 전용만 본 저장소
+
+> **현행 핀(2026-06-06 기준)**: `maplibre-vworld-js#v0.1.2` + Next.js 16. 본 ADR
+> 제목/초기 본문의 `v0.1.0`은 채택 당시 값이며, v0.1.2 + Next.js 16 정합은 아래
+> "Amendment (2026-05-31, PR#114)"가 정본이다.
 
 - **상태**: accepted (PR#33, 2026-05-27)
 - **날짜**: 2026-05-27
