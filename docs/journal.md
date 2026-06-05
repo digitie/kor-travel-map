@@ -2,6 +2,24 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-05 (codex) — T-RV-25 offline upload store 재사용
+
+**작업**: PR#153~#179 리뷰 후속 MED 항목 중 offline upload store client 재사용 계약을
+닫는다.
+
+- **Store cache**: offline upload router는 `request.app.state.offline_upload_store`를
+  우선 사용하고, 없을 때만
+  `KrtourMapSettings()`와 S3 client를 1회 생성해 `app.state`에 캐시한다.
+- **Route coverage**: `create`, `preview`, `validate` 경로가 같은 cached store를
+  사용한다. `load`는 Dagster launch만 수행하므로 store를 만들지 않는다.
+- **Shutdown**: cached store가 boto3-like `s3_client.close()`를 제공하면 FastAPI
+  lifespan 종료 시 닫는다.
+- **Regression**: 같은 app에서 연속 upload 요청이 store builder를 1회만 호출하는지와
+  shutdown close를 단위 테스트로 고정한다.
+- **문서**: `docs/tasks.md`, PR#153~#179 리뷰 리포트, `docs/resume.md`에서 T-RV-25를
+  완료 상태로 맞추고, 남은 offline upload 후속을 T-RV-23(checksum/idempotency + load
+  TOCTOU)로 좁힌다.
+
 ## 2026-06-05 (codex) — T-RV-24 후속 offline upload ORM state check 동기화
 
 **작업**: T-RV-24에서 만든 offline upload 상태 단일 계약을 ORM check constraint까지
