@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-06 (codex) — T-RV-23 후속 offline upload ORM unique constraint 동기화
+
+**작업**: PR#225에서 추가한 `ops.offline_uploads` checksum idempotency migration과
+SQLAlchemy ORM 모델 정의를 맞춘다.
+
+- **ORM sync**: `OfflineUploadRow`에
+  `uq_offline_uploads_provider_dataset_scope_checksum` unique constraint를 추가해
+  migration과 모델 metadata의 drift를 제거했다.
+- **Regression**: ORM metadata가 해당 unique constraint 이름과 컬럼 순서를 유지하는지
+  단위 테스트로 고정했다.
+- **범위 제한**: DB migration, API behavior, OpenAPI schema는 PR#225 범위 그대로
+  유지한다. 이번 변경은 ORM mapping 보완만 포함한다.
+
 ## 2026-06-06 (codex) — T-RV-23 offline upload idempotency/load TOCTOU
 
 **작업**: PR#153~#179 리뷰 후속 MED 항목 중 offline upload checksum idempotency와

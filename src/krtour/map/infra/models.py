@@ -679,6 +679,13 @@ class OfflineUploadRow(Base):
             "checksum_sha256 ~ '^[0-9a-f]{64}$'",
             name="ck_offline_uploads_checksum_sha256",
         ),
+        UniqueConstraint(
+            "provider",
+            "dataset_key",
+            "sync_scope",
+            "checksum_sha256",
+            name="uq_offline_uploads_provider_dataset_scope_checksum",
+        ),
         Index(
             "idx_offline_uploads_provider_dataset",
             "provider",
