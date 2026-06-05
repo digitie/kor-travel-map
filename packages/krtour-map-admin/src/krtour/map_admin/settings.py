@@ -105,6 +105,15 @@ class AdminSettings(BaseSettings):
             "``{dagster_url}/graphql``로 계산한다."
         ),
     )
+    dagster_allowed_hosts: list[str] = Field(
+        default=["127.0.0.1", "localhost", "::1", "dagster"],
+        description=(
+            "Backend가 Dagster GraphQL을 호출할 수 있는 host allowlist. "
+            "SSRF 방지를 위해 ``dagster_url``과 ``dagster_graphql_url``의 scheme은 "
+            "http/https, host는 이 목록 안의 값이어야 한다. Docker 기본 host는 "
+            "``dagster``이고 로컬 기본은 ``127.0.0.1``."
+        ),
+    )
     dagster_request_timeout_seconds: float = Field(
         default=3.0,
         ge=0.2,

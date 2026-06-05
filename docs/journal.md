@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-05 (codex) — T-RV-21 Dagster router hardening
+
+**작업**: PR#153~#179 리뷰 후속 MED 항목 중 T-RV-21을 반영한다.
+
+- **GET safety**: `GET /ops/dagster/summary`에서 Dagster `setNuxSeen` mutation을
+  제거했다. NUX 처리는 명시적인 `POST /ops/dagster/nux-seen` endpoint로 분리했다.
+- **SSRF guard**: `KRTOUR_MAP_ADMIN_DAGSTER_ALLOWED_HOSTS` allowlist를 추가하고
+  Dagster URL scheme/userinfo/query/fragment/host와 GraphQL `/graphql` path를
+  네트워크 호출 전에 검증한다.
+- **Client lifecycle**: Dagster GraphQL 호출은 FastAPI lifespan/app state에서 공유하는
+  `httpx.AsyncClient`를 사용한다.
+- **Frontend**: `/admin/dagster`는 summary가 정상 조회되면 POST endpoint를 한 번 호출해
+  iframe NUX 처리를 유지한다.
+- **테스트**: Dagster router unit test와 OpenAPI schema를 새 계약으로 갱신했다.
+
 ## 2026-06-05 (codex) — T-RV-37b Dagster purge schedule 문서 정리
 
 **작업**: T-RV-37 cleanup 중 실제 구현과 어긋난 `dagster-boundary.md` purge

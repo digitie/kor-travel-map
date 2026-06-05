@@ -575,11 +575,19 @@ Query:
 
 Admin UI는 Dagster webserver 자체 화면을 `/admin/dagster`에서 iframe으로 embed하고,
 같은 화면에 자체 운영 요약 UI를 렌더한다. 자체 요약은 FastAPI가 Dagster GraphQL을
-읽어 정규화한 다음 endpoint를 사용한다. embedded Dagster 화면이 로컬 첫 실행
-커뮤니티 모달로 가려지지 않도록, summary 조회가 성공하면 backend는 Dagster GraphQL
-`setNuxSeen` mutation을 best-effort로 1회 호출한다.
+읽어 정규화한 다음 endpoint를 사용한다.
+
+Dagster GraphQL 호출 대상은 SSRF 방지를 위해 backend 설정에서 검증한다.
+`KRTOUR_MAP_ADMIN_DAGSTER_URL`과 `KRTOUR_MAP_ADMIN_DAGSTER_GRAPHQL_URL`은
+`http`/`https` scheme만 허용하고, host는
+`KRTOUR_MAP_ADMIN_DAGSTER_ALLOWED_HOSTS` allowlist에 있어야 한다. 기본 allowlist는
+로컬/Docker 내부 host(`127.0.0.1`, `localhost`, `::1`, `dagster`)다.
+GraphQL endpoint는 `/graphql` path로 끝나야 한다.
 
 #### `GET /ops/dagster/summary`
+
+Dagster repository, asset, schedule/sensor, recent run 정보를 조회한다. 이 endpoint는
+GET 안전성을 지키기 위해 Dagster mutation을 호출하지 않는다.
 
 Query:
 
@@ -613,10 +621,32 @@ Query:
 | `unavailable` | Dagster webserver 연결 실패 또는 HTTP 오류. UI는 장애 상태를 표시 |
 | `error` | GraphQL 응답은 받았지만 repository/run 조회가 오류를 반환 |
 
-이 endpoint는 Dagster run/job을 제어하지 않는다. 단, embedded UI 표시 안정화를 위한
-Dagster NUX seen 처리는 부수효과로 허용한다. feature update request는
+이 endpoint는 Dagster run/job을 제어하지 않는다. feature update request는
 `/admin/feature-update-requests`, import job progress는 `/ops/import-jobs` 계약으로
 분리한다. job cancel은 아직 별도 backend task가 필요하다.
+
+#### `POST /ops/dagster/nux-seen`
+
+embedded Dagster 화면이 로컬 첫 실행 커뮤니티 모달로 가려지지 않도록 Dagster GraphQL
+`setNuxSeen` mutation을 호출한다. summary GET의 부수효과를 없애기 위해 명시 POST로
+분리했다. Admin UI는 `/admin/dagster` summary가 정상 조회되면 이 endpoint를 한 번
+호출한다.
+
+응답:
+
+```json
+{
+  "status": "ok",
+  "dagster_url": "http://127.0.0.1:9013",
+  "graphql_url": "http://127.0.0.1:9013/graphql",
+  "checked_at": "2026-06-05T09:00:00Z",
+  "seen": true,
+  "errors": []
+}
+```
+
+`status` 의미는 summary와 동일하다. 설정 오류나 GraphQL 오류는 `error`, 연결 실패는
+`unavailable`이다.
 
 ## 7.3 POI/cache target API
 

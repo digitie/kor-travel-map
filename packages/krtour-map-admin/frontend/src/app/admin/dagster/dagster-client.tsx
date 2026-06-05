@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect } from "react";
+
 import {
   ActivityIcon,
   AlertTriangleIcon,
@@ -15,6 +17,7 @@ import {
   DAGSTER_UI_URL,
   type DagsterRepository,
   type DagsterRunSummary,
+  useMarkDagsterNuxSeen,
   useDagsterSummary,
 } from "@/api/dagster";
 import { AdminShell } from "@/components/admin-shell";
@@ -271,10 +274,19 @@ function RunsTable({ runs }: { runs: DagsterRunSummary[] }) {
 
 export function DagsterAdminClient() {
   const summary = useDagsterSummary(12);
+  const { mutate: markNuxSeen, status: markNuxSeenStatus } =
+    useMarkDagsterNuxSeen();
   const data = summary.data;
   const activeRuns =
     data?.recent_runs.filter((run) => !terminalStatus.has(run.status)).length ?? 0;
   const failedRuns = data?.run_counts.FAILURE ?? 0;
+
+  useEffect(() => {
+    if (data?.status !== "ok" || markNuxSeenStatus !== "idle") {
+      return;
+    }
+    markNuxSeen();
+  }, [data?.status, markNuxSeen, markNuxSeenStatus]);
 
   return (
     <AdminShell

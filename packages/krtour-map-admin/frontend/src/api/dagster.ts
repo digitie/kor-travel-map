@@ -5,9 +5,9 @@
  * 정규화한 응답이다. iframe embed에는 public Dagster URL을 직접 사용한다.
  */
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 
-import { getJson, pathWithQuery } from "./client";
+import { getJson, pathWithQuery, postJson } from "./client";
 
 export const DAGSTER_UI_URL =
   process.env.NEXT_PUBLIC_KRTOUR_MAP_DAGSTER_URL ?? "http://127.0.0.1:9013";
@@ -72,10 +72,23 @@ export interface DagsterSummaryResponse {
   errors: string[];
 }
 
+export interface DagsterNuxSeenResponse {
+  status: "ok" | "unavailable" | "error";
+  dagster_url: string;
+  graphql_url: string;
+  checked_at: string;
+  seen: boolean;
+  errors: string[];
+}
+
 function fetchDagsterSummary(runLimit = 10): Promise<DagsterSummaryResponse> {
   return getJson<DagsterSummaryResponse>(
     pathWithQuery("/ops/dagster/summary", { run_limit: runLimit }),
   );
+}
+
+function markDagsterNuxSeen(): Promise<DagsterNuxSeenResponse> {
+  return postJson<DagsterNuxSeenResponse>("/ops/dagster/nux-seen");
 }
 
 export function useDagsterSummary(runLimit = 10) {
@@ -84,5 +97,11 @@ export function useDagsterSummary(runLimit = 10) {
     queryFn: () => fetchDagsterSummary(runLimit),
     refetchInterval: 10_000,
     staleTime: 8_000,
+  });
+}
+
+export function useMarkDagsterNuxSeen() {
+  return useMutation<DagsterNuxSeenResponse, Error>({
+    mutationFn: markDagsterNuxSeen,
   });
 }
