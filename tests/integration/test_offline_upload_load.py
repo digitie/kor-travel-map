@@ -29,9 +29,13 @@ from krtour.map.dto import (
     SourceRecord,
     SourceRole,
 )
+from krtour.map.infra.jobs_repo import start_import_job
 from krtour.map.infra.offline_upload_repo import (
+    OfflineUploadStateConflict,
     create_offline_upload,
+    finish_offline_upload_load,
     list_offline_uploads,
+    mark_offline_upload_loading,
 )
 
 if TYPE_CHECKING:
@@ -236,6 +240,53 @@ async def test_offline_upload_load_job_records_checksum_failure(
     assert row.job_state == "failed"
     assert "checksum mismatch" in row.error_message
     assert int(feature_count) == 0
+
+
+async def test_offline_upload_repo_rejects_invalid_state_transitions(
+    migrated_engine: AsyncEngine,
+) -> None:
+    body = _bundle("offline-state-guard-001").model_dump_json().encode("utf-8")
+    upload_id = await _create_upload(
+        migrated_engine,
+        body=body,
+        storage_key="offline/offline-state-guard-001/features.jsonl",
+    )
+
+    async with AsyncSession(migrated_engine) as session, session.begin():
+        with pytest.raises(OfflineUploadStateConflict) as finish_conflict:
+            await finish_offline_upload_load(
+                session,
+                upload_id=upload_id,
+                state="loaded",
+            )
+        assert finish_conflict.value.current_state == "uploaded"
+        assert finish_conflict.value.allowed_states == frozenset({"loading"})
+
+        job = await start_import_job(session, kind="offline_upload_load")
+        loading = await mark_offline_upload_loading(
+            session,
+            upload_id=upload_id,
+            load_job_id=job.job_id,
+        )
+        assert loading is not None
+        assert loading.state == "loading"
+
+        loaded = await finish_offline_upload_load(
+            session,
+            upload_id=upload_id,
+            state="loaded",
+        )
+        assert loaded is not None
+        assert loaded.state == "loaded"
+
+        with pytest.raises(OfflineUploadStateConflict) as reload_conflict:
+            await mark_offline_upload_loading(
+                session,
+                upload_id=upload_id,
+                load_job_id=job.job_id,
+            )
+        assert reload_conflict.value.current_state == "loaded"
+        assert reload_conflict.value.target_state == "loading"
 
 
 async def test_offline_upload_repo_lists_with_keyset_and_provided_upload_id(

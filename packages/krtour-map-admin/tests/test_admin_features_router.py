@@ -13,6 +13,7 @@ from krtour.map.infra.admin_feature_repo import (
     AdminFeatureRow,
     FeatureDeactivateResult,
     FeatureOverride,
+    FeatureStateConflict,
 )
 
 from krtour.map_admin.app import create_app
@@ -193,3 +194,29 @@ def test_deactivate_missing_feature_returns_404(
     )
 
     assert response.status_code == 404
+
+
+@pytest.mark.unit
+def test_deactivate_state_conflict_returns_409(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import admin_features as router_mod
+
+    async def _conflict(_session: Any, _feature_id: str, **_kwargs: Any) -> None:
+        raise FeatureStateConflict(
+            feature_id="feature-deleted",
+            current_status="deleted",
+            deleted_at=datetime(2026, 6, 3, tzinfo=UTC),
+            target_status="inactive",
+        )
+
+    monkeypatch.setattr(router_mod, "deactivate_feature", _conflict)
+
+    response = client.post(
+        "/admin/features/feature-deleted/deactivate",
+        json={"reason": "삭제됨"},
+    )
+
+    assert response.status_code == 409
+    assert "deleted" in response.json()["error"]["message"]

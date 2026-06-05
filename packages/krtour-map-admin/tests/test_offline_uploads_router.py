@@ -495,6 +495,30 @@ def test_load_offline_upload_rejects_unloadable_state(
 
 
 @pytest.mark.unit
+def test_load_offline_upload_rejects_loaded_state(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import offline_uploads as router_mod
+
+    async def _get(_session: Any, upload_id: str) -> OfflineUpload:
+        return _upload(upload_id=upload_id, state="loaded")
+
+    async def _launch(_request: Any, _upload_id: str) -> object:
+        raise AssertionError("loaded upload must not launch a Dagster run")
+
+    monkeypatch.setattr(router_mod, "get_offline_upload", _get)
+    monkeypatch.setattr(router_mod, "launch_offline_upload_load", _launch)
+
+    response = client.post(
+        "/admin/offline-uploads/00000000-0000-0000-0000-000000000001/load"
+    )
+
+    assert response.status_code == 409
+    assert "loaded" in response.json()["error"]["message"]
+
+
+@pytest.mark.unit
 def test_load_offline_upload_rejects_csv_without_validation(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

@@ -2,6 +2,22 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-05 (codex) — T-RV-17 상태전이 guard
+
+**작업**: PR#153~#179 리뷰 후속 MED 항목 중 T-RV-17을 반영한다.
+
+- **Admin feature**: `deactivate_feature`가 `status='deleted'` 또는 `deleted_at IS NOT
+  NULL` feature를 inactive로 되살리지 않고 `FeatureStateConflict`를 올린다. 라우터는
+  이 예외를 HTTP `409`로 매핑한다.
+- **Integrity issue**: `set_data_integrity_violation_status`가
+  `resolved`/`ignored` terminal 상태를 다른 상태로 되돌리지 않으며, 같은 terminal
+  상태 재호출 시 기존 `resolved_at`을 보존한다.
+- **Offline upload**: validation/load mark/finish 쿼리에 source-state guard를 추가했다.
+  `loaded` 상태는 더 이상 loadable로 취급하지 않아 중복 Dagster launch와
+  `loaded -> loading` 역전이를 차단한다.
+- **테스트**: admin feature repo/router, integrity issue lifecycle, offline upload
+  repo/router/load orchestration focused unit/integration test를 추가·갱신했다.
+
 ## 2026-06-05 (codex) — T-RV-16 dedup refresh master 신호/keyset
 
 **작업**: PR#153~#179 리뷰 후속 MED 항목 중 T-RV-16을 반영한다.

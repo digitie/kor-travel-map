@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "DataIntegrityViolation",
+    "DataIntegrityViolationStateConflict",
     "create_data_integrity_violation",
     "get_data_integrity_violation",
     "list_data_integrity_violations",
@@ -40,6 +41,11 @@ _RETURN_COLUMNS: Final[str] = (
     "violation_key, provider, dataset_key, source_record_key, feature_id, "
     "violation_type, severity, message, payload, status, detected_at, resolved_at"
 )
+_RETURN_COLUMNS_V: Final[str] = (
+    "v.violation_key, v.provider, v.dataset_key, v.source_record_key, v.feature_id, "
+    "v.violation_type, v.severity, v.message, v.payload, v.status, v.detected_at, "
+    "v.resolved_at"
+)
 
 
 @dataclass(frozen=True)
@@ -58,6 +64,26 @@ class DataIntegrityViolation:
     status: str
     detected_at: datetime
     resolved_at: datetime | None
+
+
+class DataIntegrityViolationStateConflict(ValueError):
+    """data integrity issue가 요청한 상태 전이를 허용하지 않을 때 발생."""
+
+    def __init__(
+        self,
+        *,
+        violation_key: str,
+        current_status: str,
+        target_status: str,
+    ) -> None:
+        self.violation_key = violation_key
+        self.current_status = current_status
+        self.target_status = target_status
+        super().__init__(
+            "data integrity violation "
+            f"{violation_key!r}는 {target_status!r} 전이를 허용하지 않음: "
+            f"status={current_status!r}"
+        )
 
 
 def _json_dict(value: Any) -> dict[str, Any]:
@@ -115,18 +141,37 @@ WHERE violation_key = :violation_key
 """
 
 _SET_STATUS_SQL: Final[str] = f"""
-UPDATE ops.data_integrity_violations
-SET status = :status,
-    resolved_at = CASE
-        WHEN :status = ANY(CAST(:resolved_statuses AS text[])) THEN now()
-        ELSE NULL
-    END,
-    payload = CASE
-        WHEN CAST(:resolution_payload AS jsonb) = '{{}}'::jsonb THEN payload
-        ELSE payload || jsonb_build_object('resolution', CAST(:resolution_payload AS jsonb))
-    END
-WHERE violation_key = :violation_key
-RETURNING {_RETURN_COLUMNS}
+WITH locked AS (
+    SELECT violation_key, status
+    FROM ops.data_integrity_violations
+    WHERE violation_key = :violation_key
+    FOR UPDATE
+),
+updated AS (
+    UPDATE ops.data_integrity_violations AS v
+    SET status = :status,
+        resolved_at = CASE
+            WHEN locked.status = :status THEN v.resolved_at
+            WHEN :status = ANY(CAST(:resolved_statuses AS text[])) THEN now()
+            ELSE NULL
+        END,
+        payload = CASE
+            WHEN CAST(:resolution_payload AS jsonb) = '{{}}'::jsonb THEN v.payload
+            ELSE v.payload || jsonb_build_object(
+                'resolution',
+                CAST(:resolution_payload AS jsonb)
+            )
+        END
+    FROM locked
+    WHERE v.violation_key = locked.violation_key
+      AND (
+        locked.status = :status
+        OR locked.status <> ALL(CAST(:resolved_statuses AS text[]))
+      )
+    RETURNING {_RETURN_COLUMNS_V}
+)
+SELECT {_RETURN_COLUMNS}
+FROM updated
 """
 
 _LIST_SQL: Final[str] = f"""
@@ -223,7 +268,16 @@ async def set_data_integrity_violation_status(
             },
         )
     ).one_or_none()
-    return _row_to_violation(row) if row is not None else None
+    if row is not None:
+        return _row_to_violation(row)
+    existing = await get_data_integrity_violation(session, violation_key)
+    if existing is None:
+        return None
+    raise DataIntegrityViolationStateConflict(
+        violation_key=existing.violation_key,
+        current_status=existing.status,
+        target_status=status,
+    )
 
 
 async def list_data_integrity_violations(

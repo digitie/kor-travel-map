@@ -5264,6 +5264,9 @@
           "404": {
             "description": "feature 없음"
           },
+          "409": {
+            "description": "feature 상태 전이 불가"
+          },
           "422": {
             "content": {
               "application/json": {

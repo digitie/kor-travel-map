@@ -1,5 +1,24 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-05 Codex 작업 메모 — T-RV-17 상태전이 guard
+
+T-RV-17을 처리한다. `admin_feature_repo.deactivate_feature`는 이제 deleted 또는
+soft-deleted feature를 inactive로 되살리지 않고 `FeatureStateConflict`를 올린다.
+admin 라우터는 이를 HTTP `409`로 매핑해 404(없음)와 상태 충돌을 분리한다.
+
+`integrity_violation_repo.set_data_integrity_violation_status`는
+`resolved`/`ignored` terminal issue를 다른 상태로 되돌리지 않는다. 같은 terminal
+상태로 재호출하면 멱등 처리로 보고 기존 `resolved_at`을 보존한다.
+
+`offline_upload_repo`는 validation/load mark/finish 쿼리에 source-state guard를
+추가했다. `loaded` 상태는 더 이상 loadable 상태가 아니며, admin load API와 core
+오케스트레이터 모두 `loaded -> loading` 역전이/중복 Dagster launch를 허용하지 않는다.
+
+다음 한 작업은 **T-RV-18/20(router typed error/schema 검증)**,
+**T-RV-19/21(admin UI 지도/Dagster 선행 안정화)**, 또는 **T-RV-04b(provider public
+client live fetch wiring)** 다. **T-RV-27은 production 레벨 hardening 전까지 계속
+skip/deferred**다.
+
 ## 2026-06-05 Codex 작업 메모 — T-RV-16 dedup refresh master 신호/keyset
 
 T-RV-16을 처리한다. `Feature` DTO와 `feature.features`에
