@@ -5,6 +5,13 @@
 
 ## [Unreleased]
 
+### Docs — Dagster purge schedule cleanup (2026-06-05)
+
+- **DOCS**: 실제 구현 없는 `feature_purge_*` asset/job 후보와 `purge notice old`
+  schedule 행을 `docs/dagster-boundary.md`에서 제거했다.
+- **DOCS**: purge는 TTL·삭제 정책과 실제 Dagster job이 함께 구현되기 전까지 schedule
+  표에 추가하지 않는다고 명시했다.
+
 ### Docs — shell script execution context (2026-06-05)
 
 - **DOCS**: `scripts/*.sh` 운영 스크립트가 WSL/Git Bash용 Bash script임을
