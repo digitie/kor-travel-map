@@ -5,6 +5,13 @@
 
 ## [Unreleased]
 
+### Docs — shell script execution context (2026-06-05)
+
+- **DOCS**: `scripts/*.sh` 운영 스크립트가 WSL/Git Bash용 Bash script임을
+  `docs/dev-environment.md`와 Docker runbook에 명시했다.
+- **DOCS**: PowerShell에서는 `.sh`를 직접 실행하지 않고 `wsl bash -lc ...`로
+  위임하는 예시를 추가했다.
+
 ### Dagster — package dependency hygiene (2026-06-05)
 
 - **FIXED**: `krtour-map-dagster`가 `python-krtour-map==0.2.0-dev`를 명시적으로

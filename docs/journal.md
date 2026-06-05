@@ -2,6 +2,17 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-05 (codex) — T-RV-37a shell script 실행 셸 문서화
+
+**작업**: T-RV-37 cleanup 중 `scripts/*.sh` Bash 전용 실행 셸 문서화를 반영한다.
+
+- **개발환경 문서**: `docs/dev-environment.md`에 WSL/Git Bash 실행 기준과
+  PowerShell WSL 위임 예시를 추가했다.
+- **Docker runbook**: `npm run docker:*`, `admin:stack`, `ports:stop`이 Bash script를
+  호출한다는 점과 직접 PowerShell 실행 금지를 명시했다.
+- **Runbook 인덱스**: 공통 정책 표에 `scripts/*.sh` 실행 셸 기준을 추가했다.
+- **범위 제한**: PS 래퍼는 만들지 않고 문서화만으로 T-RV-37a를 닫는다.
+
 ## 2026-06-05 (codex) — T-RV-36 Dagster dependency hygiene
 
 **작업**: PR#153~#179 리뷰 후속 Dagster 패키지 위생 항목 중 T-RV-36을 반영한다.
