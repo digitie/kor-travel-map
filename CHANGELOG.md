@@ -5,6 +5,15 @@
 
 ## [Unreleased]
 
+### Dagster — package dependency hygiene (2026-06-05)
+
+- **FIXED**: `krtour-map-dagster`가 `python-krtour-map==0.2.0-dev`를 명시적으로
+  요구해 같은 릴리스의 메인 라이브러리와 함께 설치되도록 했다.
+- **FIXED**: Dagster `offline_upload_store` resource가 직접 import하는
+  `boto3`/`botocore`를 runtime dependencies에 추가했다.
+- **TEST**: Dagster 패키지 로컬 `asyncio_mode="auto"`와 dependency metadata 회귀
+  테스트를 추가했다.
+
 ### Docker — compose healthcheck/readiness (2026-06-05)
 
 - **FIXED**: Docker compose의 `api`, `frontend`, `dagster` 서비스에 runtime

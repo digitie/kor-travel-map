@@ -1,5 +1,22 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-05 Codex 작업 메모 — T-RV-36 Dagster dependency hygiene
+
+T-RV-36을 처리한다. `packages/krtour-map-dagster/pyproject.toml`은 더 이상
+`python-krtour-map`을 무핀으로 두지 않고 같은 릴리스인
+`python-krtour-map==0.2.0-dev`에 맞춘다.
+
+Dagster `offline_upload_store` resource는 `resources.py`에서 `boto3`와
+`botocore.config`를 직접 import하므로, clean install에서도 ImportError가 나지 않게
+`boto3`/`botocore`를 runtime dependency로 선언한다. 패키지 로컬 pytest 설정에는
+`asyncio_mode="auto"`를 추가했고, pyproject 회귀 테스트가 세 의존성과 async 설정을
+고정한다.
+
+다음 한 작업은 **T-RV-20(router scope/update_policy schema 검증)**,
+**T-RV-19/21(admin UI 지도/Dagster 선행 안정화)**, 또는
+**T-RV-22/23/25(offline upload orphan/idempotency/store reuse)** 다.
+**T-RV-27은 production 레벨 hardening 전까지 계속 skip/deferred**다.
+
 ## 2026-06-05 Codex 작업 메모 — T-RV-26 Docker healthcheck/readiness
 
 T-RV-26을 처리한다. Docker compose의 `api`, `frontend`, `dagster` 서비스에 runtime

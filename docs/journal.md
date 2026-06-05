@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-05 (codex) — T-RV-36 Dagster dependency hygiene
+
+**작업**: PR#153~#179 리뷰 후속 Dagster 패키지 위생 항목 중 T-RV-36을 반영한다.
+
+- **메인 패키지 핀**: `krtour-map-dagster` runtime dependency를
+  `python-krtour-map==0.2.0-dev`로 고정해 같은 릴리스 조합을 명시했다.
+- **S3 의존성**: `offline_upload_store` resource가 직접 import하는
+  `boto3`/`botocore`를 Dagster 패키지 runtime dependencies에 추가했다.
+- **pytest 설정**: 패키지 로컬 `pyproject.toml`에도 `asyncio_mode="auto"`를 추가해
+  루트 설정에만 의존하지 않게 했다.
+- **테스트/문서화**: pyproject metadata 회귀 테스트와 패키지 README 설치 기준을
+  추가했다.
+
 ## 2026-06-05 (codex) — T-RV-26 Docker healthcheck/readiness
 
 **작업**: PR#153~#179 리뷰 후속 Docker 항목 중 T-RV-26을 반영한다.
