@@ -57,8 +57,8 @@ rsync -a --delete \
 
 ### 2.3 `scripts/*.sh` 실행 셸
 
-루트 `package.json`의 운영 스크립트(`docker:build`, `docker:up`, `admin:stack`,
-`ports:stop`)는 모두 `bash scripts/*.sh`를 호출한다. 이 파일들은
+루트 `package.json`의 운영 스크립트(`docker:build`, `docker:up`, `docker:backup`,
+`admin:stack`, `ports:stop`)는 모두 `bash scripts/*.sh`를 호출한다. 이 파일들은
 `#!/usr/bin/env bash`, `source`, Bash array, `BASH_SOURCE`를 전제로 하므로
 Windows PowerShell에서 `.sh` 파일을 직접 실행하지 않는다.
 
@@ -348,6 +348,45 @@ Playwright가 WSL 서버가 아니라 stale Windows 서버를 본다. e2e 전 Wi
    ```
 
 ## 9. lint / type
+
+Sprint 5부터 local commit에는 `.pre-commit-config.yaml`을 사용한다. hook 설치는
+Git metadata가 있는 NTFS worktree에서 **Windows Git/Git Bash 기준**으로 실행한다.
+WSL `/mnt/f/...` 경로에서 WSL `git`으로 실행하면 worktree를 repo로 인식하지 못할 수
+있고, WSL ext4 rsync sandbox는 `.git`을 제외하므로 설치 대상이 아니다.
+
+Git Bash 또는 Windows shell에서 pre-commit CLI가 보이는 상태로 다음을 한 번 실행한다.
+
+```bash
+pre-commit install
+```
+
+hook은 staged `src/` 또는 `tests/` 계열 변경에 대해 `docs/journal.md` 갱신을 요구하고,
+Python 코드 변경 시 `ruff format --check`, `mypy --strict`, `lint-imports`를 실행한다.
+의도적으로 journal gate를 한 번 우회할 때만 다음처럼 명시한다.
+
+```bash
+BYPASS=1 git commit -m "..."
+```
+
+staged 파일 기준으로 hook을 수동 검증할 때는 다음을 사용한다.
+
+```bash
+pre-commit run
+```
+
+WSL에서 hook 내부 static gate만 검증할 때는 repo-local runner를 직접 호출한다.
+
+```bash
+bash scripts/run-precommit-check.sh ruff-format tests/unit/test_pre_commit_config.py
+bash scripts/run-precommit-check.sh mypy
+bash scripts/run-precommit-check.sh lint-imports
+```
+
+현재 main 전체는 아직 `pre-commit run --all-files`의 ruff format 기준으로 정리된 상태가
+아니므로, all-files 리포맷은 별도 PR로만 진행한다. `T-202` hook은 충돌을 줄이기 위해
+commit에 포함된 Python 파일만 format check한다.
+
+개별 명령은 다음과 같다.
 
 ```bash
 ruff check .                    # 코드 스타일 + 일부 오류
