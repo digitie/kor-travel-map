@@ -1,5 +1,17 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-05 Codex 작업 메모 — T-201b-c F7 dedup score 회귀
+
+ADR-033 Phase 2의 `F7`를 `run_consistency_checks()`에 WARN 케이스로 추가한다.
+`ops.dedup_review_queue`의 pending 후보 중 양쪽 feature의 primary source provider가
+서로 다른 cross-provider 후보만 검사한다. 큐에 저장된 `total_score`를
+baseline으로 삼고, 현재 feature의 이름/좌표/카테고리를 `core.scoring.score_pair()`로
+재계산한 점수가 baseline보다 기본 10점 이상 낮아지면 회귀로 보고한다. 같은
+provider/sibling 후보와 이미 검토 완료된 행은 F7 대상이 아니다.
+
+다음 한 작업은 **T-201b-d F8(file object orphan WARN)** 다. 이후 Phase 2 dry-run
+report를 붙여 T-201b를 닫는다.
+
 ## 2026-06-05 Codex 작업 메모 — T-201b-b F5 provider last_success SLA
 
 ADR-033 Phase 2의 `F5`를 `run_consistency_checks()`에 WARN 케이스로 추가한다. active

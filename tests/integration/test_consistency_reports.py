@@ -1,10 +1,11 @@
-"""``test_consistency_reports`` — ADR-033 F1~F6 정합성 검사 (testcontainers).
+"""``test_consistency_reports`` — ADR-033 F1~F7 정합성 검사 (testcontainers).
 
 ``run_consistency_checks``를 실 PostGIS(migrated_session, alembic head)에서 돌려
 F1(orphan source_record)/F2(detail 누락)/F3(CRS drift) 검출 + ``ops.
 feature_consistency_reports`` 영속화를 검증한다. F3는 STORED generated column이라
 정상 데이터에서 위반 0건이어야 함을 확인한다. F5는 provider sync last_success SLA,
-F6는 같은 요일 영업시간 period에서 open.time > close.time인 경우만 잡는다.
+F6는 같은 요일 영업시간 period에서 open.time > close.time인 경우만 잡는다. F7은
+dedup queue baseline 대비 현재 ``core.scoring`` 점수 회귀를 WARN으로 관측한다.
 """
 
 from __future__ import annotations
@@ -304,6 +305,172 @@ async def test_f5_uses_policy_interval_and_skips_disabled_policy(
     assert f5.count == 1
     assert f5.sample_ids == ["f5_policy_stale:dataset:system"]
     assert report.severity_max == "WARN"
+
+
+# ── F7: cross-provider dedup score regression WARN (ADR-033 Phase 2) ──────
+
+
+async def _seed_feature_with_primary_source(
+    session: AsyncSession,
+    *,
+    feature_id: str,
+    provider: str,
+    dataset_key: str = "f7_dataset",
+    name: str | None = None,
+    category: str = "EAT.RESTAURANT",
+    coord_wkt: str = "POINT(126.9784 37.5665)",
+) -> None:
+    from geoalchemy2 import WKTElement
+
+    session.add(
+        FeatureRow(
+            feature_id=feature_id,
+            kind="place",
+            name=name or f"정상 장소 {feature_id}",
+            category=category,
+            coord=WKTElement(coord_wkt, srid=4326),
+            detail={"summary": "ok"},
+        )
+    )
+    source_record_key = f"sr-{feature_id}"
+    session.add(
+        SourceRecordRow(
+            source_record_key=source_record_key,
+            provider=provider,
+            dataset_key=dataset_key,
+            source_entity_type="place",
+            source_entity_id=feature_id,
+            raw_payload_hash=f"hash-{feature_id}",
+            fetched_at=_FETCHED,
+        )
+    )
+    await session.flush()
+    await session.execute(
+        text(
+            "INSERT INTO provider_sync.source_links "
+            "(feature_id, source_record_key, source_role, match_method, "
+            " confidence, is_primary_source) "
+            "VALUES (:feature_id, :source_record_key, 'primary', 'exact', 100, true)"
+        ),
+        {"feature_id": feature_id, "source_record_key": source_record_key},
+    )
+    await session.flush()
+
+
+async def _seed_dedup_review(
+    session: AsyncSession,
+    *,
+    feature_id_a: str,
+    feature_id_b: str,
+    total_score: float,
+    status: str = "pending",
+) -> str:
+    row = (
+        await session.execute(
+            text(
+                "INSERT INTO ops.dedup_review_queue "
+                "(feature_id_a, feature_id_b, total_score, name_score, "
+                " spatial_score, category_score, status) "
+                "VALUES (:feature_id_a, :feature_id_b, :score, :score, "
+                " :score, :score, :status) "
+                "RETURNING review_key::text"
+            ),
+            {
+                "feature_id_a": feature_id_a,
+                "feature_id_b": feature_id_b,
+                "score": total_score,
+                "status": status,
+            },
+        )
+    ).scalar_one()
+    await session.flush()
+    return str(row)
+
+
+async def test_f7_warns_when_current_cross_provider_score_regresses_from_baseline(
+    migrated_session: AsyncSession,
+) -> None:
+    await _seed_feature_with_primary_source(
+        migrated_session,
+        feature_id="f7-a",
+        provider="provider-a",
+        name="가나다",
+        category="CAT.A",
+    )
+    await _seed_feature_with_primary_source(
+        migrated_session,
+        feature_id="f7-b",
+        provider="provider-b",
+        name="XYZ",
+        category="CAT.B",
+    )
+    await _seed_feature_with_primary_source(
+        migrated_session,
+        feature_id="f7-c",
+        provider="provider-a",
+        name="가나다",
+        category="CAT.A",
+    )
+    await _seed_feature_with_primary_source(
+        migrated_session,
+        feature_id="f7-d",
+        provider="provider-a",
+        name="XYZ",
+        category="CAT.B",
+    )
+    regressed_key = await _seed_dedup_review(
+        migrated_session,
+        feature_id_a="f7-a",
+        feature_id_b="f7-b",
+        total_score=95.0,
+    )
+    await _seed_dedup_review(
+        migrated_session,
+        feature_id_a="f7-c",
+        feature_id_b="f7-d",
+        total_score=95.0,
+    )
+
+    report = await run_consistency_checks(migrated_session, persist=False)
+
+    by_code = {c.code: c for c in report.cases}
+    f7 = by_code["F7"]
+    assert f7.severity == "WARN"
+    assert f7.count == 1
+    assert len(f7.sample_ids) == 1
+    assert f7.sample_ids[0].startswith(f"{regressed_key}:f7-a:f7-b:95.00->")
+    assert report.severity_max == "WARN"
+
+
+async def test_f7_allows_current_score_within_baseline_delta(
+    migrated_session: AsyncSession,
+) -> None:
+    await _seed_feature_with_primary_source(
+        migrated_session,
+        feature_id="f7-e",
+        provider="provider-a",
+        name="서울특별시청",
+        category="CAT.A",
+    )
+    await _seed_feature_with_primary_source(
+        migrated_session,
+        feature_id="f7-f",
+        provider="provider-b",
+        name="서울특별시청",
+        category="CAT.A",
+    )
+    await _seed_dedup_review(
+        migrated_session,
+        feature_id_a="f7-e",
+        feature_id_b="f7-f",
+        total_score=95.0,
+    )
+
+    report = await run_consistency_checks(migrated_session, persist=False)
+
+    by_code = {c.code: c for c in report.cases}
+    assert by_code["F7"].count == 0
+    assert report.severity_max == "OK"
 
 
 # ── F6: opening_hours 모순 ERROR (ADR-033 Phase 2) ───────────────────────

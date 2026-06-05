@@ -2,6 +2,24 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-05 (codex) — T-201b-c F7 dedup score 회귀 정합성 검사
+
+**작업**: ADR-033 Phase 2 중 cross-provider dedup score regression을 관측하는 `F7`
+WARN 케이스를 분리한다.
+
+- **Integrity**: `run_consistency_checks()`가 pending `dedup_review_queue` 후보 중
+  양쪽 feature의 primary source provider가 서로 다른 pair만 검사한다.
+- **Baseline**: 큐에 저장된 `total_score`를 baseline으로 삼고, 현재 feature의
+  이름/좌표/카테고리를 `core.scoring.score_pair()`로 재계산한 점수가 baseline보다
+  기본 10점 이상 낮아지면 WARN으로 보고한다.
+- **Scope**: 같은 provider/sibling 후보와 이미 검토 완료된 행은 F7 대상에서 제외한다.
+- **Test**: PostGIS integration에서 baseline 대비 현재 score 회귀, 같은 provider 제외,
+  baseline delta OK 경계를 검증한다.
+- **CI 보강**: F7 row 집계를 순수 helper로 분리하고 `run_consistency_checks()`의
+  F1~F7 + persist 단위 경로를 추가 검증해 unit coverage gate를 안정화했다.
+- **남은 범위**: T-201b 전체 완료까지 F8(file object orphan)과 dry-run report 보강이
+  남아 있다.
+
 ## 2026-06-05 (codex) — T-201b-b F5 provider last_success SLA 정합성 검사
 
 **작업**: ADR-033 Phase 2 중 provider sync cursor 지연을 관측하는 `F5` WARN 케이스를
