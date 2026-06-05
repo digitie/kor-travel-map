@@ -5,6 +5,13 @@
 
 ## [Unreleased]
 
+### Infra — ops cursor decode hygiene (2026-06-05)
+
+- **FIXED**: `infra.ops_repo` keyset cursor decode가 broad `Exception` catch 대신
+  base64/UTF-8/JSON/schema/datetime 오류를 구체적으로 처리한다.
+- **TEST**: import job cursor의 wrong-kind, missing field, invalid datetime,
+  non-object payload 회귀 테스트를 추가했다.
+
 ### Map Marker React — dependency metadata hygiene (2026-06-05)
 
 - **FIXED**: `@krtour/map-marker-react`의 `maplibre-vworld` peer dependency를

@@ -8,6 +8,7 @@ lifecycle 전이를 책임지고, 이 모듈은 admin UI/운영 API가 필요한
 from __future__ import annotations
 
 import base64
+import binascii
 import json
 from dataclasses import dataclass
 from datetime import datetime
@@ -153,12 +154,18 @@ def _decode_cursor(cursor: str | None, *, kind: str) -> tuple[datetime | None, s
         return None, None
     padded = cursor + "=" * (-len(cursor) % 4)
     try:
-        payload = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
-        if payload.get("v") != 1 or payload.get("kind") != kind:
-            raise ValueError
+        decoded = base64.urlsafe_b64decode(padded).decode("utf-8")
+        payload = json.loads(decoded)
+    except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"invalid {kind} cursor") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"invalid {kind} cursor")
+    if payload.get("v") != 1 or payload.get("kind") != kind:
+        raise ValueError(f"invalid {kind} cursor")
+    try:
         at = datetime.fromisoformat(str(payload["at"]))
         key = str(payload["key"])
-    except Exception as exc:
+    except (KeyError, TypeError, ValueError) as exc:
         raise ValueError(f"invalid {kind} cursor") from exc
     return at, key
 

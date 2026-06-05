@@ -2,6 +2,17 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-05 (codex) — T-RV-37d ops cursor decode 예외 축소
+
+**작업**: T-RV-37 cleanup 중 `infra.ops_repo._decode_cursor`의 broad exception catch를
+구체 예외 처리로 바꾼다.
+
+- **예외 범위**: base64 decode, UTF-8 decode, JSON parse, payload shape,
+  `datetime.fromisoformat` 실패를 구체적으로 구분해 `ValueError("invalid ... cursor")`로
+  감싼다.
+- **회귀 테스트**: wrong-kind cursor, `at` 누락, invalid datetime, non-object payload가
+  DB query 실행 전에 거절되는지 unit test로 고정했다.
+
 ## 2026-06-05 (codex) — T-RV-37c map-marker-react dependency metadata 정합
 
 **작업**: T-RV-37 cleanup 중 `@krtour/map-marker-react`의 `maplibre-vworld`

@@ -1,5 +1,20 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-05 Codex 작업 메모 — T-RV-37d ops cursor decode 예외 축소
+
+T-RV-37 cleanup 묶음 중 `src/krtour/map/infra/ops_repo.py`의 `_decode_cursor` broad
+exception catch를 줄였다. cursor base64/UTF-8/JSON parse 단계는
+`binascii.Error`, `UnicodeDecodeError`, `json.JSONDecodeError`만 잡고, payload shape와
+`datetime.fromisoformat` 오류는 별도 `ValueError("invalid {kind} cursor")`로 감싼다.
+
+unit test는 import job cursor의 wrong-kind, `at` 누락, invalid datetime, non-object
+payload를 추가해 DB query 실행 전에 거절되는지 검증한다.
+
+다음 한 작업은 **T-RV-20(router scope/update_policy schema 검증)**,
+**T-RV-19(admin UI 지도 선행 안정화)**, 또는
+**T-RV-22/23/25(offline upload orphan/idempotency/store reuse)** 다.
+**T-RV-27은 production 레벨 hardening 전까지 계속 skip/deferred**다.
+
 ## 2026-06-05 Codex 작업 메모 — T-RV-37c map-marker-react dependency metadata
 
 T-RV-37 cleanup 묶음 중 `@krtour/map-marker-react` dependency metadata를 정리했다.
