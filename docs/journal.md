@@ -2,6 +2,17 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-05 (codex) — T-RV-37b Dagster purge schedule 문서 정리
+
+**작업**: T-RV-37 cleanup 중 실제 구현과 어긋난 `dagster-boundary.md` purge
+job/schedule 문서를 제거한다.
+
+- **Asset/job 표**: 구현 없는 `feature_purge_weather_old`,
+  `feature_purge_notice_old` 행을 제거했다.
+- **Schedule 표**: 구현 없는 `purge notice old (>1y)` 정기 schedule 행을 제거했다.
+- **정책 명시**: ADR-045 D-14의 무기한 보존 기준에 맞춰 purge는 TTL·삭제 정책과 실제
+  Dagster job이 같이 들어오기 전까지 schedule 표에 추가하지 않는다고 적었다.
+
 ## 2026-06-05 (codex) — T-RV-37a shell script 실행 셸 문서화
 
 **작업**: T-RV-37 cleanup 중 `scripts/*.sh` Bash 전용 실행 셸 문서화를 반영한다.

@@ -1,5 +1,21 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-05 Codex 작업 메모 — T-RV-37b Dagster purge schedule 문서 정리
+
+T-RV-37 cleanup 묶음 중 `dagster-boundary.md` stale purge job/schedule 문서를
+정리한다. 실제 `packages/krtour-map-dagster` 구현은 provider 적재 schedule 9개와
+`consistency_dedup_refresh_daily_schedule`만 등록하며, purge job 또는 schedule은 없다.
+
+`docs/dagster-boundary.md`에서 `feature_purge_weather_old`,
+`feature_purge_notice_old`, `purge notice old (>1y)` 행을 제거했다. ADR-045 D-14
+기준 offline upload/RustFS 원본은 만료 없이 보존하므로, purge는 TTL·삭제 정책과
+실제 Dagster job 구현이 함께 들어오기 전까지 schedule 표에 추가하지 않는다고 명시한다.
+
+다음 한 작업은 **T-RV-20(router scope/update_policy schema 검증)**,
+**T-RV-19/21(admin UI 지도/Dagster 선행 안정화)**, 또는
+**T-RV-22/23/25(offline upload orphan/idempotency/store reuse)** 다.
+**T-RV-27은 production 레벨 hardening 전까지 계속 skip/deferred**다.
+
 ## 2026-06-05 Codex 작업 메모 — T-RV-37a shell script 실행 셸 문서화
 
 T-RV-37 cleanup 묶음 중 `scripts/*.sh` Bash 전용 실행 셸 문서화를 처리한다.
