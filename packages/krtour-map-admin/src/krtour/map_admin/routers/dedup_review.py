@@ -16,7 +16,12 @@ from krtour.map.infra.admin_feature_repo import (
     set_dedup_review_decision,
 )
 from krtour.map.infra.advisory_lock import advisory_lock
-from krtour.map.infra.merge_repo import MergeError, MergeOutcome
+from krtour.map.infra.merge_repo import (
+    MergeConflictError,
+    MergeError,
+    MergeNotFoundError,
+    MergeOutcome,
+)
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -271,13 +276,20 @@ async def decide_review(
                     reason=body.decision_reason,
                 )
         except MergeError as exc:
-            message = str(exc)
-            code = (
-                status.HTTP_404_NOT_FOUND
-                if "review_key 없음" in message
-                else status.HTTP_409_CONFLICT
-            )
-            raise HTTPException(status_code=code, detail=message) from exc
+            if isinstance(exc, MergeNotFoundError):
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=str(exc),
+                ) from exc
+            if isinstance(exc, MergeConflictError):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=str(exc),
+                ) from exc
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="dedup review merge failed",
+            ) from exc
         return _decision_response(
             review_key=review_key,
             decision=body.decision,

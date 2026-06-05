@@ -1,5 +1,23 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-05 Codex 작업 메모 — T-RV-18 router typed error mapping
+
+T-RV-18을 처리한다. feature update request 라우터는 더 이상
+`"sigungu_resolver" in message` 같은 substring으로 503을 판단하지 않는다.
+kraddr-geo resolver 설정 누락은 `SigunguResolverUnavailable` 타입으로 표현하고
+`_handle_enqueue_error`에서 HTTP `503`으로 매핑한다. 알 수 없는 enqueue 예외는 내부
+메시지를 응답에 노출하지 않고 `feature update request enqueue failed`만 반환한다.
+
+dedup merge 경로는 `MergeError` 하위 타입인 `MergeNotFoundError`와
+`MergeConflictError`를 추가했다. `/admin/dedup-review` merge 라우터는 not found를
+404, 상태/입력 충돌을 409로 매핑하고, 알 수 없는 `MergeError`는 generic 500으로
+숨긴다. 기존 CLI와 repo 호출자는 상위 `MergeError` catch로 계속 처리된다.
+
+다음 한 작업은 **T-RV-20(router scope/update_policy schema 검증)**,
+**T-RV-19/21(admin UI 지도/Dagster 선행 안정화)**, 또는 **T-RV-04b(provider public
+client live fetch wiring)** 다. **T-RV-27은 production 레벨 hardening 전까지 계속
+skip/deferred**다.
+
 ## 2026-06-05 Codex 작업 메모 — T-RV-17 상태전이 guard
 
 T-RV-17을 처리한다. `admin_feature_repo.deactivate_feature`는 이제 deleted 또는

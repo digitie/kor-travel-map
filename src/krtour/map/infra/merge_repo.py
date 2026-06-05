@@ -36,7 +36,9 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
+    "MergeConflictError",
     "MergeError",
+    "MergeNotFoundError",
     "MergeOutcome",
     "apply_feature_merge",
     "merge_from_review",
@@ -45,6 +47,14 @@ __all__ = [
 
 class MergeError(ValueError):
     """병합 불가(후보 미존재 / 이미 검토 완료 / feature 부재 등)."""
+
+
+class MergeNotFoundError(MergeError):
+    """병합 대상 review/feature를 찾을 수 없을 때 발생."""
+
+
+class MergeConflictError(MergeError):
+    """병합 대상은 있으나 현재 상태/입력이 병합을 허용하지 않을 때 발생."""
 
 
 @dataclass(frozen=True)
@@ -150,7 +160,7 @@ async def _master_candidate(
         )
     ).one_or_none()
     if row is None:
-        raise MergeError(f"feature 없음 — {feature_id!r}")
+        raise MergeConflictError(f"feature 없음 — {feature_id!r}")
     return MasterCandidate(
         feature_id=row.feature_id,
         has_coord=bool(row.has_coord),
@@ -174,7 +184,7 @@ async def apply_feature_merge(
     commit은 호출자 책임. ``master_id == loser_id``는 ``MergeError``.
     """
     if master_id == loser_id:
-        raise MergeError(f"master와 loser가 같음 — {master_id!r}")
+        raise MergeConflictError(f"master와 loser가 같음 — {master_id!r}")
 
     moved = len(
         (
@@ -240,9 +250,9 @@ async def merge_from_review(
         )
     ).one_or_none()
     if row is None:
-        raise MergeError(f"review_key 없음 — {review_key!r}")
+        raise MergeNotFoundError(f"review_key 없음 — {review_key!r}")
     if row.status != "pending":
-        raise MergeError(
+        raise MergeConflictError(
             f"이미 검토된 후보(status={row.status!r}) — {review_key!r}"
         )
 

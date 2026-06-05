@@ -14,7 +14,12 @@ from krtour.map.infra.admin_feature_repo import (
     DedupReviewPage,
     DedupReviewRow,
 )
-from krtour.map.infra.merge_repo import MergeOutcome
+from krtour.map.infra.merge_repo import (
+    MergeConflictError,
+    MergeError,
+    MergeNotFoundError,
+    MergeOutcome,
+)
 
 from krtour.map_admin.app import create_app
 from krtour.map_admin.db import get_session
@@ -207,3 +212,81 @@ def test_patch_merged_uses_advisory_lock(
     assert response.json()["data"]["merge_id"] == "merge-1"
     assert seen_lock == ["dedup-merge:review-1"]
     assert session.begin_count == 1
+
+
+@pytest.mark.unit
+def test_patch_merged_not_found_returns_404(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import dedup_review as router_mod
+
+    @asynccontextmanager
+    async def _lock(_session: Any, _key: str) -> AsyncIterator[None]:
+        yield None
+
+    async def _merge(_session: Any, review_key: str, **_kwargs: Any) -> MergeOutcome:
+        raise MergeNotFoundError(f"review_key 없음 — {review_key!r}")
+
+    monkeypatch.setattr(router_mod, "advisory_lock", _lock)
+    monkeypatch.setattr(router_mod, "merge_dedup_review", _merge)
+
+    response = client.patch(
+        "/admin/dedup-review/missing",
+        json={"decision": "merged", "master_feature_id": "feature-a"},
+    )
+
+    assert response.status_code == 404
+    assert "review_key 없음" in response.json()["error"]["message"]
+
+
+@pytest.mark.unit
+def test_patch_merged_conflict_returns_409(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import dedup_review as router_mod
+
+    @asynccontextmanager
+    async def _lock(_session: Any, _key: str) -> AsyncIterator[None]:
+        yield None
+
+    async def _merge(_session: Any, _review_key: str, **_kwargs: Any) -> MergeOutcome:
+        raise MergeConflictError("이미 검토된 후보(status='merged')")
+
+    monkeypatch.setattr(router_mod, "advisory_lock", _lock)
+    monkeypatch.setattr(router_mod, "merge_dedup_review", _merge)
+
+    response = client.patch(
+        "/admin/dedup-review/review-1",
+        json={"decision": "merged", "master_feature_id": "feature-a"},
+    )
+
+    assert response.status_code == 409
+    assert "이미 검토" in response.json()["error"]["message"]
+
+
+@pytest.mark.unit
+def test_patch_merged_unknown_merge_error_hides_internal_message(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import dedup_review as router_mod
+
+    @asynccontextmanager
+    async def _lock(_session: Any, _key: str) -> AsyncIterator[None]:
+        yield None
+
+    async def _merge(_session: Any, _review_key: str, **_kwargs: Any) -> MergeOutcome:
+        raise MergeError("internal merge detail")
+
+    monkeypatch.setattr(router_mod, "advisory_lock", _lock)
+    monkeypatch.setattr(router_mod, "merge_dedup_review", _merge)
+
+    response = client.patch(
+        "/admin/dedup-review/review-1",
+        json={"decision": "merged", "master_feature_id": "feature-a"},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["error"]["message"] == "dedup review merge failed"

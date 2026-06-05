@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### Admin API — typed error mapping (2026-06-05)
+
+- **FIXED**: feature update request의 kraddr-geo resolver 설정 누락을 substring
+  matching이 아니라 `SigunguResolverUnavailable` 타입으로 `503` 매핑한다.
+- **FIXED**: dedup review merge의 not found/conflict를
+  `MergeNotFoundError`/`MergeConflictError` 타입으로 `404`/`409` 매핑한다.
+- **FIXED**: 알 수 없는 enqueue/merge 예외의 내부 메시지를 admin API `500` 응답에
+  그대로 노출하지 않는다.
+- **TEST**: feature update/dedup review 라우터 unit test와 merge repo integration
+  test를 보강했다.
+
 ### Infra/Admin API — 상태전이 guard (2026-06-05)
 
 - **FIXED**: admin feature deactivate가 deleted/soft-deleted feature를 inactive로

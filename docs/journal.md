@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-05 (codex) — T-RV-18 router typed error mapping
+
+**작업**: PR#153~#179 리뷰 후속 MED 항목 중 T-RV-18을 반영한다.
+
+- **Feature update request**: `SigunguResolverUnavailable`을 추가해 kraddr-geo resolver
+  설정 누락을 타입으로 표현하고 HTTP `503`으로 매핑한다. 미분류 enqueue 예외는
+  generic 500 메시지로 숨긴다.
+- **Dedup merge**: `MergeNotFoundError`와 `MergeConflictError`를 `MergeError` 하위
+  타입으로 추가했다. dedup review merge 라우터는 404/409를 문구 substring이 아니라
+  타입으로 결정한다.
+- **오류 노출 방지**: 알 수 없는 `MergeError`와 enqueue exception은 내부 메시지를
+  API 응답에 그대로 노출하지 않는다.
+- **테스트**: feature update/dedup review 라우터 unit test와 merge repo integration
+  test를 보강했다.
+
 ## 2026-06-05 (codex) — T-RV-17 상태전이 guard
 
 **작업**: PR#153~#179 리뷰 후속 MED 항목 중 T-RV-17을 반영한다.

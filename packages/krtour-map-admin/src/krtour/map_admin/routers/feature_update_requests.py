@@ -52,6 +52,13 @@ router = APIRouter(
 
 FeatureUpdateState = Literal["queued", "running", "done", "failed", "cancelled"]
 RunMode = Literal["queued", "now"]
+_SIGUNGU_RESOLVER_REQUIRED_MESSAGE = (
+    "sigungu_by_radius scope에는 KRTOUR_MAP_KRADDR_GEO_BASE_URL 설정이 필요합니다."
+)
+
+
+class SigunguResolverUnavailable(RuntimeError):
+    """시군구 반경 scope에 필요한 kraddr-geo resolver 설정이 없을 때 발생."""
 
 
 class FeatureUpdateRequestCreateRequest(BaseModel):
@@ -224,13 +231,7 @@ async def _sigungu_resolver_for_scope(
     base_url = settings.kraddr_geo_base_url
     if base_url is None:
         if _scope_explicitly_needs_sigungu(scope):
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=(
-                    "sigungu_by_radius scope에는 KRTOUR_MAP_KRADDR_GEO_BASE_URL "
-                    "설정이 필요합니다."
-                ),
-            )
+            raise SigunguResolverUnavailable(_SIGUNGU_RESOLVER_REQUIRED_MESSAGE)
         yield None
         return
 
@@ -263,15 +264,12 @@ def _handle_enqueue_error(exc: Exception) -> HTTPException:
             },
             headers={"Retry-After": str(exc.retry_after_seconds)},
         )
-    message = str(exc)
-    if "sigungu_resolver" in message:
+    if isinstance(exc, SigunguResolverUnavailable):
         return HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=(
-                "sigungu_by_radius scope에는 KRTOUR_MAP_KRADDR_GEO_BASE_URL "
-                "설정이 필요합니다."
-            ),
+            detail=str(exc),
         )
+    message = str(exc)
     if isinstance(exc, ValueError):
         return HTTPException(status_code=422, detail=message)
     if isinstance(exc, httpx.HTTPError):
@@ -281,7 +279,7 @@ def _handle_enqueue_error(exc: Exception) -> HTTPException:
         )
     return HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail=message,
+        detail="feature update request enqueue failed",
     )
 
 
