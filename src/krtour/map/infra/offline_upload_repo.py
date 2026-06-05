@@ -29,6 +29,7 @@ from krtour.map.core.offline_upload_states import (
     OFFLINE_UPLOAD_VALIDATION_FINISH_SOURCE_STATES,
     OFFLINE_UPLOAD_VALIDATION_FINISH_STATES,
 )
+from krtour.map.infra.jobs_repo import start_import_job
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,13 +38,16 @@ __all__ = [
     "OfflineUpload",
     "OfflineUploadPage",
     "OfflineUploadStateConflict",
+    "attach_offline_upload_load_job",
     "create_offline_upload",
     "finish_offline_upload_load",
     "finish_offline_upload_validation",
     "get_offline_upload",
+    "get_offline_upload_by_checksum",
     "list_offline_uploads",
     "mark_offline_upload_loading",
     "mark_offline_upload_validating",
+    "reserve_offline_upload_load",
 ]
 
 _RETURN_COLUMNS: Final[str] = (
@@ -201,6 +205,17 @@ WHERE upload_id = :upload_id
 FOR UPDATE
 """
 
+_GET_BY_CHECKSUM_SQL: Final[str] = f"""
+SELECT {_RETURN_COLUMNS}
+FROM ops.offline_uploads
+WHERE provider = :provider
+  AND dataset_key = :dataset_key
+  AND sync_scope = :sync_scope
+  AND checksum_sha256 = :checksum_sha256
+ORDER BY created_at DESC, upload_id DESC
+LIMIT 1
+"""
+
 _LIST_SQL: Final[str] = f"""
 SELECT {_RETURN_COLUMNS}
 FROM ops.offline_uploads
@@ -225,6 +240,16 @@ SET state = 'loading',
     updated_at = now()
 WHERE upload_id = :upload_id
   AND state = ANY(CAST(:allowed_states AS text[]))
+RETURNING {_RETURN_COLUMNS}
+"""
+
+_ATTACH_LOAD_JOB_SQL: Final[str] = f"""
+UPDATE ops.offline_uploads
+SET load_job_id = :load_job_id,
+    updated_at = now()
+WHERE upload_id = :upload_id
+  AND state = 'loading'
+  AND load_job_id IS NULL
 RETURNING {_RETURN_COLUMNS}
 """
 
@@ -331,6 +356,28 @@ async def get_offline_upload(
     return _row_to_upload(row) if row is not None else None
 
 
+async def get_offline_upload_by_checksum(
+    session: AsyncSession,
+    *,
+    provider: str,
+    dataset_key: str,
+    sync_scope: str,
+    checksum_sha256: str,
+) -> OfflineUpload | None:
+    """provider/dataset/scope/checksum 조합으로 기존 업로드를 조회한다."""
+    result = await session.execute(
+        text(_GET_BY_CHECKSUM_SQL),
+        {
+            "provider": provider,
+            "dataset_key": dataset_key,
+            "sync_scope": sync_scope,
+            "checksum_sha256": checksum_sha256,
+        },
+    )
+    row = result.one_or_none()
+    return _row_to_upload(row) if row is not None else None
+
+
 async def list_offline_uploads(
     session: AsyncSession,
     *,
@@ -386,6 +433,64 @@ async def mark_offline_upload_loading(
         upload_id=upload_id,
         target_state="loading",
         allowed_states=OFFLINE_UPLOAD_LOADABLE_STATES,
+    )
+    return None
+
+
+async def reserve_offline_upload_load(
+    session: AsyncSession,
+    *,
+    upload_id: str,
+    job_kind: str = "offline_upload_load",
+) -> OfflineUpload | None:
+    """Dagster launch 전에 load job과 upload row를 같은 트랜잭션에서 선점한다."""
+    upload = await get_offline_upload(session, upload_id)
+    if upload is None:
+        return None
+
+    job = await start_import_job(
+        session,
+        kind=job_kind,
+        payload={
+            "upload_id": upload.upload_id,
+            "provider": upload.provider,
+            "dataset_key": upload.dataset_key,
+            "sync_scope": upload.sync_scope,
+            "storage_backend": upload.storage_backend,
+            "storage_key": upload.storage_key,
+            "dagster_run_id": None,
+        },
+        source_checksum=upload.checksum_sha256,
+    )
+    return await mark_offline_upload_loading(
+        session,
+        upload_id=upload.upload_id,
+        load_job_id=job.job_id,
+    )
+
+
+async def attach_offline_upload_load_job(
+    session: AsyncSession,
+    *,
+    upload_id: str,
+    load_job_id: str,
+) -> OfflineUpload | None:
+    """이미 ``loading``으로 선점된 upload row에 load job id를 연결한다."""
+    result = await session.execute(
+        text(_ATTACH_LOAD_JOB_SQL),
+        {
+            "upload_id": upload_id,
+            "load_job_id": load_job_id,
+        },
+    )
+    row = result.one_or_none()
+    if row is not None:
+        return _row_to_upload(row)
+    await _missing_or_state_conflict(
+        session,
+        upload_id=upload_id,
+        target_state="loading",
+        allowed_states=frozenset({"loading"}),
     )
     return None
 

@@ -11,8 +11,13 @@ import pytest
 from fastapi.testclient import TestClient
 from krtour.map.infra.file_store import StoredObject
 from krtour.map.infra.jobs_repo import ImportJob
-from krtour.map.infra.offline_upload_repo import OfflineUpload, OfflineUploadPage
+from krtour.map.infra.offline_upload_repo import (
+    OfflineUpload,
+    OfflineUploadPage,
+    OfflineUploadStateConflict,
+)
 from krtour.map.offline_upload import validate_offline_tabular_upload
+from sqlalchemy.exc import IntegrityError
 
 from krtour.map_admin.app import create_app
 from krtour.map_admin.db import get_session
@@ -101,6 +106,7 @@ def _upload(
     byte_size: int = 123,
     checksum_sha256: str = "a" * 64,
     validation_job_id: str | None = None,
+    load_job_id: str | None = None,
 ) -> OfflineUpload:
     now = datetime(2026, 6, 3, tzinfo=UTC)
     return OfflineUpload(
@@ -117,10 +123,30 @@ def _upload(
         detected_encoding="utf-8",
         state=state,
         validation_job_id=validation_job_id,
-        load_job_id=None,
+        load_job_id=load_job_id,
         created_by="pytest",
         created_at=now,
         updated_at=now,
+    )
+
+
+def _import_job(
+    *,
+    job_id: str = "10000000-0000-0000-0000-000000000001",
+    payload: dict[str, Any] | None = None,
+    state: str = "running",
+    source_checksum: str | None = "a" * 64,
+    error_message: str | None = None,
+) -> ImportJob:
+    return ImportJob(
+        job_id=job_id,
+        kind="offline_upload_load",
+        payload=payload or {},
+        state=state,
+        progress=0 if state == "running" else 100,
+        current_stage=None,
+        source_checksum=source_checksum,
+        error_message=error_message,
     )
 
 
@@ -145,16 +171,19 @@ def test_create_offline_upload_writes_object_and_metadata(
     from krtour.map_admin.routers import offline_uploads as router_mod
 
     store = _FakeStore()
+    upload_body = b'{"feature":{"feature_id":"f1"}}\n'
+    expected_checksum = hashlib.sha256(upload_body).hexdigest()
 
     async def _create(_session: Any, **kwargs: Any) -> OfflineUpload:
         assert kwargs["provider"] == "offline-test-provider"
         assert kwargs["dataset_key"] == "offline_jsonl"
         assert kwargs["storage_backend"] == "rustfs"
         assert kwargs["detected_format"] == "jsonl"
-        assert kwargs["checksum_sha256"] == "a" * 64
+        assert kwargs["checksum_sha256"] == expected_checksum
         return _upload(
             upload_id=kwargs["upload_id"],
             storage_key=kwargs["storage_key"],
+            checksum_sha256=kwargs["checksum_sha256"],
         )
 
     monkeypatch.setattr(router_mod, "build_offline_upload_store", lambda _settings: store)
@@ -171,7 +200,7 @@ def test_create_offline_upload_writes_object_and_metadata(
         files={
             "file": (
                 "features.jsonl",
-                b'{"feature":{"feature_id":"f1"}}\n',
+                upload_body,
                 "application/x-ndjson",
             )
         },
@@ -185,6 +214,48 @@ def test_create_offline_upload_writes_object_and_metadata(
     assert store.calls[0]["body"] == b'{"feature":{"feature_id":"f1"}}\n'
     assert store.calls[0]["metadata"]["provider"] == "offline-test-provider"
     assert session.begin_count == 1
+
+
+@pytest.mark.unit
+def test_create_offline_upload_duplicate_checksum_rolls_back_object(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import offline_uploads as router_mod
+
+    store = _FakeStore()
+    existing = _upload(upload_id="00000000-0000-0000-0000-000000000099")
+
+    async def _create(_session: Any, **_kwargs: Any) -> OfflineUpload:
+        raise IntegrityError("insert offline upload", {}, Exception("duplicate"))
+
+    async def _duplicate(_session: Any, **kwargs: Any) -> OfflineUpload:
+        assert kwargs["provider"] == "p"
+        assert kwargs["dataset_key"] == "d"
+        assert kwargs["sync_scope"] == "default"
+        return existing
+
+    monkeypatch.setattr(router_mod, "build_offline_upload_store", lambda _settings: store)
+    monkeypatch.setattr(router_mod, "create_offline_upload", _create)
+    monkeypatch.setattr(router_mod, "get_offline_upload_by_checksum", _duplicate)
+
+    response = client.post(
+        "/admin/offline-uploads",
+        data={"provider": "p", "dataset_key": "d"},
+        files={
+            "file": (
+                "features.jsonl",
+                b'{"feature":{"feature_id":"f1"}}\n',
+                "application/x-ndjson",
+            )
+        },
+    )
+
+    assert response.status_code == 409
+    error = response.json()["error"]
+    assert error["code"] == "OFFLINE_UPLOAD_DUPLICATE"
+    assert error["details"]["upload_id"] == existing.upload_id
+    assert store.deleted == [store.calls[0]["storage_key"]]
 
 
 @pytest.mark.unit
@@ -498,14 +569,30 @@ def test_load_offline_upload_launches_dagster(
 ) -> None:
     from krtour.map_admin.routers import offline_uploads as router_mod
 
+    order: list[str] = []
+    upload = _upload(upload_id="00000000-0000-0000-0000-000000000001")
+    reserved = _upload(
+        upload_id=upload.upload_id,
+        state="loading",
+        load_job_id="10000000-0000-0000-0000-000000000001",
+    )
+
     async def _get(_session: Any, upload_id: str) -> OfflineUpload:
-        return _upload(upload_id=upload_id)
+        assert upload_id == upload.upload_id
+        return upload
+
+    async def _reserve(_session: Any, **kwargs: Any) -> OfflineUpload:
+        order.append("reserve")
+        assert kwargs["upload_id"] == upload.upload_id
+        return reserved
 
     async def _launch(_request: Any, upload_id: str) -> Any:
-        assert upload_id == "00000000-0000-0000-0000-000000000001"
+        order.append("launch")
+        assert upload_id == upload.upload_id
         return router_mod._DagsterLaunch(run_id="dagster-run-1", status="QUEUED")
 
     monkeypatch.setattr(router_mod, "get_offline_upload", _get)
+    monkeypatch.setattr(router_mod, "reserve_offline_upload_load", _reserve)
     monkeypatch.setattr(router_mod, "launch_offline_upload_load", _launch)
 
     response = client.post("/admin/offline-uploads/00000000-0000-0000-0000-000000000001/load")
@@ -513,7 +600,105 @@ def test_load_offline_upload_launches_dagster(
     assert response.status_code == 200
     body = response.json()
     assert body["data"]["upload_id"] == "00000000-0000-0000-0000-000000000001"
+    assert body["data"]["state"] == "loading"
+    assert body["data"]["load_job_id"] == "10000000-0000-0000-0000-000000000001"
     assert body["meta"]["dagster_run_id"] == "dagster-run-1"
+    assert order == ["reserve", "launch"]
+
+
+@pytest.mark.unit
+def test_load_offline_upload_rejects_concurrent_reserve(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import offline_uploads as router_mod
+
+    async def _get(_session: Any, upload_id: str) -> OfflineUpload:
+        return _upload(upload_id=upload_id)
+
+    async def _reserve(_session: Any, *, upload_id: str) -> OfflineUpload:
+        raise OfflineUploadStateConflict(
+            upload_id=upload_id,
+            current_state="loading",
+            target_state="loading",
+            allowed_states=frozenset({"uploaded", "validated", "load_failed"}),
+        )
+
+    async def _launch(_request: Any, _upload_id: str) -> Any:
+        raise AssertionError("conflicting reserve must not launch Dagster")
+
+    monkeypatch.setattr(router_mod, "get_offline_upload", _get)
+    monkeypatch.setattr(router_mod, "reserve_offline_upload_load", _reserve)
+    monkeypatch.setattr(router_mod, "launch_offline_upload_load", _launch)
+
+    response = client.post("/admin/offline-uploads/00000000-0000-0000-0000-000000000001/load")
+
+    assert response.status_code == 409
+    assert "loading" in response.json()["error"]["message"]
+
+
+@pytest.mark.unit
+def test_load_offline_upload_marks_failed_when_launch_fails(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fastapi import HTTPException
+
+    from krtour.map_admin.routers import offline_uploads as router_mod
+
+    finished_jobs: list[dict[str, str]] = []
+    finished_upload_states: list[str] = []
+
+    async def _get(_session: Any, upload_id: str) -> OfflineUpload:
+        return _upload(upload_id=upload_id)
+
+    async def _reserve(_session: Any, *, upload_id: str) -> OfflineUpload:
+        return _upload(
+            upload_id=upload_id,
+            state="loading",
+            load_job_id="10000000-0000-0000-0000-000000000001",
+        )
+
+    async def _launch(_request: Any, _upload_id: str) -> Any:
+        raise HTTPException(status_code=502, detail="Dagster launch failed")
+
+    async def _finish(_session: Any, *, upload_id: str, state: str) -> OfflineUpload:
+        finished_upload_states.append(state)
+        return _upload(upload_id=upload_id, state=state)
+
+    async def _finish_import_job(
+        _session: Any,
+        job_id: str,
+        *,
+        state: str,
+        error_message: str | None = None,
+    ) -> ImportJob:
+        finished_jobs.append(
+            {
+                "job_id": job_id,
+                "state": state,
+                "error_message": error_message or "",
+            }
+        )
+        return _import_job(job_id=job_id, state=state, error_message=error_message)
+
+    monkeypatch.setattr(router_mod, "get_offline_upload", _get)
+    monkeypatch.setattr(router_mod, "reserve_offline_upload_load", _reserve)
+    monkeypatch.setattr(router_mod, "launch_offline_upload_load", _launch)
+    monkeypatch.setattr(router_mod, "finish_import_job", _finish_import_job)
+    monkeypatch.setattr(router_mod, "finish_offline_upload_load", _finish)
+
+    response = client.post("/admin/offline-uploads/00000000-0000-0000-0000-000000000001/load")
+
+    assert response.status_code == 502
+    assert finished_jobs == [
+        {
+            "job_id": "10000000-0000-0000-0000-000000000001",
+            "state": "failed",
+            "error_message": "Dagster launch failed",
+        }
+    ]
+    assert finished_upload_states == ["load_failed"]
 
 
 @pytest.mark.unit

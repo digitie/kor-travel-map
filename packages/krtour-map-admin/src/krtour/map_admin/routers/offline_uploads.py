@@ -42,13 +42,17 @@ from krtour.map.geocoding import (
     kraddr_geo_reverse_geocoder,
 )
 from krtour.map.infra.file_store import S3ObjectStore
-from krtour.map.infra.jobs_repo import get_import_job
+from krtour.map.infra.jobs_repo import finish_import_job, get_import_job
 from krtour.map.infra.offline_upload_repo import (
     OfflineUpload,
     OfflineUploadPage,
+    OfflineUploadStateConflict,
     create_offline_upload,
+    finish_offline_upload_load,
     get_offline_upload,
+    get_offline_upload_by_checksum,
     list_offline_uploads,
+    reserve_offline_upload_load,
 )
 from krtour.map.offline_upload import (
     preview_offline_tabular_upload,
@@ -56,6 +60,7 @@ from krtour.map.offline_upload import (
 )
 from krtour.map.settings import KrtourMapSettings
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from krtour.map_admin.db import get_session
@@ -538,6 +543,23 @@ def _storage_key(settings: KrtourMapSettings, upload_id: str, filename: str) -> 
     return f"{upload_id}/{filename}"
 
 
+def _duplicate_upload_conflict(upload: OfflineUpload) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": "OFFLINE_UPLOAD_DUPLICATE",
+            "message": "동일 provider/dataset/scope/checksum offline upload가 이미 있습니다.",
+            "details": {
+                "upload_id": upload.upload_id,
+                "provider": upload.provider,
+                "dataset_key": upload.dataset_key,
+                "sync_scope": upload.sync_scope,
+                "checksum_sha256": upload.checksum_sha256,
+            },
+        },
+    )
+
+
 def build_offline_upload_store(settings: KrtourMapSettings) -> S3ObjectStore:
     """admin upload API용 RustFS/S3 store를 설정에서 만든다."""
     access_key = settings.object_store_access_key_id
@@ -739,6 +761,7 @@ async def create_offline_upload_request(
         )
 
     content_type = file.content_type or _content_type(filename, detected_format)
+    checksum_sha256 = hashlib.sha256(body).hexdigest()
     storage_key = _storage_key(settings, upload_id, filename)
     store = _offline_upload_store_from_request(request)
     try:
@@ -771,11 +794,23 @@ async def create_offline_upload_request(
                 storage_backend="rustfs",
                 storage_key=stored.object_key,
                 byte_size=stored.byte_size,
-                checksum_sha256=stored.checksum_sha256,
+                checksum_sha256=checksum_sha256,
                 detected_format=detected_format,
                 detected_encoding="utf-8",
                 created_by=created_by,
             )
+    except IntegrityError as exc:
+        await _rollback_uploaded_object(store, stored.object_key)
+        duplicate = await get_offline_upload_by_checksum(
+            session,
+            provider=provider,
+            dataset_key=dataset_key,
+            sync_scope=sync_scope,
+            checksum_sha256=checksum_sha256,
+        )
+        if duplicate is not None:
+            raise _duplicate_upload_conflict(duplicate) from exc
+        raise
     except Exception:  # noqa: BLE001 - DB 원인 보존 + object 보상 삭제
         await _rollback_uploaded_object(store, stored.object_key)
         raise
@@ -1052,21 +1087,46 @@ async def load_offline_upload_request(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> OfflineUploadLaunchResponse:
     started_at = perf_counter()
-    row = await get_offline_upload(session, upload_id)
-    if row is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"offline upload 없음: {upload_id!r}",
-        )
-    if not _can_load(row):
+    try:
+        async with session.begin():
+            row = await get_offline_upload(session, upload_id)
+            if row is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"offline upload 없음: {upload_id!r}",
+                )
+            if not _can_load(row):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=_load_reject_detail(row),
+                )
+            loading = await reserve_offline_upload_load(session, upload_id=upload_id)
+            if loading is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"offline upload 없음: {upload_id!r}",
+                )
+    except OfflineUploadStateConflict as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=_load_reject_detail(row),
-        )
+            detail=str(exc),
+        ) from exc
 
-    launch = await launch_offline_upload_load(request, upload_id)
+    try:
+        launch = await launch_offline_upload_load(request, upload_id)
+    except HTTPException as exc:
+        async with session.begin():
+            if loading.load_job_id is not None:
+                await finish_import_job(
+                    session,
+                    loading.load_job_id,
+                    state="failed",
+                    error_message=str(exc.detail),
+                )
+            await finish_offline_upload_load(session, upload_id=upload_id, state="load_failed")
+        raise
     return OfflineUploadLaunchResponse(
-        data=_record_from_upload(row),
+        data=_record_from_upload(loading),
         meta=OfflineUploadLaunchMeta(
             duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
             dagster_run_id=launch.run_id,

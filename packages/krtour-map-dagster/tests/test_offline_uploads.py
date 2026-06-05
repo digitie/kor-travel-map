@@ -64,6 +64,32 @@ class _Client:
         )
 
 
+class _LockBusyClient(_Client):
+    async def run_offline_upload_load_job(
+        self,
+        upload_id: str,
+        *,
+        store: object,
+        dagster_run_id: str | None = None,
+        address_resolver: object | None = None,
+        reverse_geocoder: object | None = None,
+    ) -> OfflineUploadLoadResult:
+        self.calls.append(
+            {
+                "upload_id": upload_id,
+                "store": store,
+                "dagster_run_id": dagster_run_id,
+                "address_resolver": address_resolver,
+                "reverse_geocoder": reverse_geocoder,
+            }
+        )
+        return OfflineUploadLoadResult(
+            acquired=False,
+            upload=_upload(upload_id),
+            error_message="offline upload load advisory lock busy",
+        )
+
+
 def test_offline_upload_load_job_executes_client() -> None:
     client = _Client()
     store = _Store()
@@ -88,6 +114,26 @@ def test_offline_upload_load_job_executes_client() -> None:
     assert output["job_state"] == "done"
     assert output["bundles_total"] == 2
     assert output["features_inserted"] == 2
+
+
+def test_offline_upload_load_job_fails_on_lock_busy_skip() -> None:
+    client = _LockBusyClient()
+    store = _Store()
+
+    result = offline_upload_load_job.execute_in_process(
+        run_config={
+            "ops": {
+                "load_offline_upload": {
+                    "config": {"upload_id": "00000000-0000-0000-0000-000000000001"}
+                }
+            }
+        },
+        resources={"krtour_map_client": client, "offline_upload_store": store},
+        raise_on_error=False,
+    )
+
+    assert result.success is False
+    assert client.calls
 
 
 def _upload(upload_id: str) -> OfflineUpload:

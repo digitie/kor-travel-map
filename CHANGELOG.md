@@ -5,6 +5,22 @@
 
 ## [Unreleased]
 
+### Admin API/Dagster — offline upload idempotency + load preclaim (2026-06-06)
+
+- **FIXED**: `POST /admin/offline-uploads`가 요청 body 기준 SHA-256 checksum을
+  `ops.offline_uploads`에 저장하고, 같은 `provider/dataset_key/sync_scope/checksum`
+  조합은 DB unique constraint로 409 중복 응답을 반환한다.
+- **FIXED**: `/admin/offline-uploads/{upload_id}/load`는 Dagster launch 전에
+  `ops.import_jobs` row를 만들고 `offline_uploads.load_job_id`와 `loading` 상태를
+  같은 트랜잭션에서 선점한다. Dagster launch 실패 시 job은 `failed`, upload는
+  `load_failed`로 닫힌다.
+- **CHANGED**: Dagster `offline_upload_load` op는 advisory lock 미획득을 성공 no-op로
+  보지 않고 `Failure`로 기록한다. 이미 `loading + load_job_id`인 preclaimed load는
+  기존 job을 재사용한다.
+- **TEST**: router 단위, Dagster op 단위, core orchestration 단위와 PostGIS 통합
+  테스트로 checksum idempotency, preclaimed job 재사용, 중복 load/lock busy 경로를
+  검증했다.
+
 ### Admin API — offline upload store reuse (2026-06-05)
 
 - **FIXED**: offline upload `create`/`preview`/`validate` 경로가 요청마다

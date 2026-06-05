@@ -165,13 +165,16 @@ from krtour.map.infra.models import (
 from krtour.map.infra.offline_upload_repo import (
     OfflineUpload,
     OfflineUploadPage,
+    attach_offline_upload_load_job,
     create_offline_upload,
     finish_offline_upload_load,
     finish_offline_upload_validation,
     get_offline_upload,
+    get_offline_upload_by_checksum,
     list_offline_uploads,
     mark_offline_upload_loading,
     mark_offline_upload_validating,
+    reserve_offline_upload_load,
 )
 from krtour.map.infra.poi_cache_target_repo import (
     PoiCacheTarget,
@@ -301,11 +304,14 @@ __all__ = [
     # offline_upload_repo (ADR-045 D-14 / T-208h)
     "OfflineUpload",
     "OfflineUploadPage",
+    "attach_offline_upload_load_job",
     "create_offline_upload",
     "get_offline_upload",
+    "get_offline_upload_by_checksum",
     "list_offline_uploads",
     "mark_offline_upload_loading",
     "mark_offline_upload_validating",
+    "reserve_offline_upload_load",
     "finish_offline_upload_validation",
     "finish_offline_upload_load",
     # feature_update_repo (ADR-045 feature update request queue)

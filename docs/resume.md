@@ -1,5 +1,26 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-06 Codex 작업 메모 — T-RV-23 offline upload idempotency/load TOCTOU
+
+T-RV-23을 닫는다. offline upload 생성은 이제 업로드 body SHA-256 checksum을
+metadata 기준값으로 저장하고, `provider + dataset_key + sync_scope + checksum_sha256`
+unique constraint(`alembic 0016`)로 같은 파일 재업로드를 멱등 충돌로 처리한다.
+중복 시 방금 쓴 object는 보상 삭제하고, 응답은 `OFFLINE_UPLOAD_DUPLICATE` 코드와
+기존 `upload_id` details를 담은 409 error envelope를 반환한다.
+
+`/admin/offline-uploads/{upload_id}/load`는 Dagster launch 전에 `ops.import_jobs`를
+만들고 같은 트랜잭션에서 `offline_uploads.state='loading'`,
+`load_job_id=<job_id>`를 선점한다. Dagster launch 실패 시 job은 `failed`, upload는
+`load_failed`로 닫는다. Dagster op는 advisory lock 미획득을 성공 no-op로 보지 않고
+`Failure`로 기록하며, 이미 `loading + load_job_id`인 preclaimed load는 기존 job을
+재사용한다.
+
+검증은 `TMPDIR=/tmp pytest -s` 기준 offline upload router/Dagster/core/PostGIS 묶음
+`42 passed`, `ruff check .`, `mypy --strict`, `lint-imports`, OpenAPI all profile
+check로 진행했다. 다음 한 작업 후보는 **T-201b-d F8(file object orphan WARN)** 또는
+**T-RV-29/30(OpenAPI/user spec + generated frontend types)** 다. **T-RV-27은
+production 레벨 hardening 전까지 계속 skip/deferred**다.
+
 ## 2026-06-05 Codex 작업 메모 — T-RV-25 offline upload store 재사용
 
 T-RV-25를 닫는다. offline upload router는 이제
