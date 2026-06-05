@@ -13,12 +13,64 @@ export type FeatureUpdateState =
   | "failed"
   | "cancelled";
 export type FeatureUpdateRunMode = "queued" | "now";
+export type FeatureUpdateScopeMode = "center_radius" | "sigungu_by_radius";
+
+export interface FeatureUpdatePoint {
+  lon: number;
+  lat: number;
+}
+
+export type FeatureUpdateScope =
+  | {
+      type: "feature_ids";
+      feature_ids: string[];
+    }
+  | {
+      type: "center_radius";
+      center: FeatureUpdatePoint;
+      radius_km: number;
+    }
+  | {
+      type: "sigungu_by_radius";
+      center: FeatureUpdatePoint;
+      radius_km: number;
+      match?: "intersects" | "contains_center" | "feature_sigungu";
+    }
+  | {
+      type: "bbox";
+      min_lon: number;
+      min_lat: number;
+      max_lon: number;
+      max_lat: number;
+    }
+  | {
+      type: "provider_dataset";
+      provider: string;
+      dataset_key: string;
+      sync_scope?: string | null;
+    }
+  | {
+      type: "cache_target_keys";
+      external_system: string;
+      target_keys: string[];
+      radius_km?: number | null;
+      scope_mode?: FeatureUpdateScopeMode;
+    };
+
+export interface FeatureUpdatePolicy {
+  mode?: "refresh_existing" | null;
+  include_inactive?: boolean | null;
+  force_provider_call?: boolean | null;
+  dedup_after_load?: boolean | null;
+  consistency_check_after_load?: boolean | null;
+  prevent_provider_reactivation?: boolean | null;
+}
 
 export interface FeatureUpdateRequestCreateRequest {
-  scope: Record<string, unknown>;
+  scope: FeatureUpdateScope;
   providers?: string[];
   dataset_keys?: string[];
-  update_policy?: Record<string, unknown>;
+  update_policy?: FeatureUpdatePolicy;
   run_mode?: FeatureUpdateRunMode;
   priority?: number;
   dry_run?: boolean;

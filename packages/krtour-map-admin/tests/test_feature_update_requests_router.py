@@ -106,6 +106,15 @@ def test_update_request_routes_mounted_in_openapi(client: TestClient) -> None:
     assert "/admin/feature-update-requests/{request_id}/run-now" in spec["paths"]
     assert "FeatureUpdateRequestCreateRequest" in spec["components"]["schemas"]
     assert "FeatureUpdateRequestRecord" in spec["components"]["schemas"]
+    request_schema = spec["components"]["schemas"][
+        "FeatureUpdateRequestCreateRequest"
+    ]
+    scope_schema = request_schema["properties"]["scope"]
+    assert scope_schema["discriminator"]["propertyName"] == "type"
+    assert len(scope_schema["oneOf"]) == 6
+    assert request_schema["properties"]["providers"]["maxItems"] == 32
+    update_policy_schema = spec["components"]["schemas"]["FeatureUpdatePolicy"]
+    assert update_policy_schema["additionalProperties"] is False
 
 
 @pytest.mark.unit
@@ -170,6 +179,79 @@ def test_create_actual_request_uses_transaction(
         "/admin/feature-update-requests/req-1"
     )
     assert session.begin_count == 1
+
+
+@pytest.mark.unit
+def test_create_rejects_legacy_center_radius_shape_before_enqueue(
+    client: TestClient,
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import feature_update_requests as router_mod
+
+    async def _unexpected_enqueue(
+        _session: Any, **_kwargs: Any
+    ) -> FeatureUpdateRequest:
+        raise AssertionError("validation should run before enqueue")
+
+    monkeypatch.setattr(
+        router_mod, "enqueue_feature_update_request", _unexpected_enqueue
+    )
+
+    response = client.post(
+        "/admin/feature-update-requests",
+        json={
+            "scope": {
+                "type": "center_radius",
+                "lon": 127.0,
+                "lat": 37.0,
+                "radius_km": 5,
+            },
+            "dry_run": True,
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert session.begin_count == 0
+
+
+@pytest.mark.unit
+def test_create_rejects_unknown_update_policy_key(
+    client: TestClient,
+    session: _FakeSession,
+) -> None:
+    response = client.post(
+        "/admin/feature-update-requests",
+        json={
+            "scope": {"type": "feature_ids", "feature_ids": ["feature-1"]},
+            "update_policy": {"surprise": True},
+        },
+    )
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["error"]["code"] == "VALIDATION_ERROR"
+    assert "surprise" in str(body["error"]["details"])
+    assert session.begin_count == 0
+
+
+@pytest.mark.unit
+def test_create_rejects_unbounded_provider_filter_list(
+    client: TestClient,
+    session: _FakeSession,
+) -> None:
+    response = client.post(
+        "/admin/feature-update-requests",
+        json={
+            "scope": {"type": "feature_ids", "feature_ids": ["feature-1"]},
+            "providers": [f"python-provider-{index}-api" for index in range(33)],
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert session.begin_count == 0
 
 
 @pytest.mark.unit

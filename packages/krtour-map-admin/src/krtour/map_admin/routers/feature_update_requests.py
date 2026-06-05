@@ -31,7 +31,13 @@ from krtour.map.infra.feature_update_repo import (
 )
 from krtour.map.infra.scope_repo import SigunguByRadiusResolver
 from krtour.map.settings import KrtourMapSettings
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    model_validator,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from krtour.map_admin.db import get_session
@@ -52,6 +58,23 @@ router = APIRouter(
 
 FeatureUpdateState = Literal["queued", "running", "done", "failed", "cancelled"]
 RunMode = Literal["queued", "now"]
+ScopeMode = Literal["center_radius", "sigungu_by_radius"]
+SigunguRadiusMatch = Literal["intersects", "contains_center", "feature_sigungu"]
+FeatureUpdatePolicyMode = Literal["refresh_existing"]
+NonEmptyString = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)
+]
+FeatureIdString = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=256)
+]
+TargetKeyString = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=256)
+]
+MAX_PROVIDER_FILTERS = 32
+MAX_DATASET_FILTERS = 64
+MAX_SCOPE_FEATURE_IDS = 1000
+MAX_SCOPE_TARGET_KEYS = 500
+MAX_RADIUS_KM = 500.0
 _SIGUNGU_RESOLVER_REQUIRED_MESSAGE = (
     "sigungu_by_radius scope에는 KRTOUR_MAP_KRADDR_GEO_BASE_URL 설정이 필요합니다."
 )
@@ -61,15 +84,127 @@ class SigunguResolverUnavailable(RuntimeError):
     """시군구 반경 scope에 필요한 kraddr-geo resolver 설정이 없을 때 발생."""
 
 
+class FeatureUpdatePoint(BaseModel):
+    """WGS84 lon/lat 좌표."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    lon: float = Field(ge=-180, le=180)
+    lat: float = Field(ge=-90, le=90)
+
+
+class FeatureIdsScope(BaseModel):
+    """특정 feature id 목록 갱신 scope."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["feature_ids"]
+    feature_ids: list[FeatureIdString] = Field(max_length=MAX_SCOPE_FEATURE_IDS)
+
+
+class CenterRadiusScope(BaseModel):
+    """좌표 중심 반경 갱신 scope."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["center_radius"]
+    center: FeatureUpdatePoint
+    radius_km: float = Field(gt=0, le=MAX_RADIUS_KM)
+
+
+class SigunguByRadiusScope(BaseModel):
+    """kraddr-geo가 계산한 반경 교차 시군구 기준 갱신 scope."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["sigungu_by_radius"]
+    center: FeatureUpdatePoint
+    radius_km: float = Field(gt=0, le=MAX_RADIUS_KM)
+    match: SigunguRadiusMatch = "intersects"
+
+
+class BboxScope(BaseModel):
+    """WGS84 bbox 안 feature 갱신 scope."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["bbox"]
+    min_lon: float = Field(ge=-180, le=180)
+    min_lat: float = Field(ge=-90, le=90)
+    max_lon: float = Field(ge=-180, le=180)
+    max_lat: float = Field(ge=-90, le=90)
+
+    @model_validator(mode="after")
+    def _validate_order(self) -> BboxScope:
+        if self.min_lon > self.max_lon or self.min_lat > self.max_lat:
+            raise ValueError(
+                "bbox min values must be less than or equal to max values"
+            )
+        return self
+
+
+class ProviderDatasetScope(BaseModel):
+    """특정 provider/dataset 자체 갱신 scope."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["provider_dataset"]
+    provider: NonEmptyString
+    dataset_key: NonEmptyString
+    sync_scope: NonEmptyString | None = None
+
+
+class CacheTargetKeysScope(BaseModel):
+    """외부 POI/cache target key 목록 기반 갱신 scope."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["cache_target_keys"]
+    external_system: NonEmptyString
+    target_keys: list[TargetKeyString] = Field(max_length=MAX_SCOPE_TARGET_KEYS)
+    radius_km: float | None = Field(default=None, gt=0, le=MAX_RADIUS_KM)
+    scope_mode: ScopeMode = "center_radius"
+
+
+FeatureUpdateScope = Annotated[
+    FeatureIdsScope
+    | CenterRadiusScope
+    | SigunguByRadiusScope
+    | BboxScope
+    | ProviderDatasetScope
+    | CacheTargetKeysScope,
+    Field(discriminator="type"),
+]
+
+
+class FeatureUpdatePolicy(BaseModel):
+    """Provider refresh 실행 정책 override."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: FeatureUpdatePolicyMode | None = None
+    include_inactive: bool | None = None
+    force_provider_call: bool | None = None
+    dedup_after_load: bool | None = None
+    consistency_check_after_load: bool | None = None
+    prevent_provider_reactivation: bool | None = None
+
+
 class FeatureUpdateRequestCreateRequest(BaseModel):
     """`POST /admin/feature-update-requests` 요청."""
 
     model_config = ConfigDict(extra="forbid")
 
-    scope: dict[str, Any] = Field(description="feature update scope payload.")
-    providers: list[str] = Field(default_factory=list)
-    dataset_keys: list[str] = Field(default_factory=list)
-    update_policy: dict[str, Any] = Field(default_factory=dict)
+    scope: FeatureUpdateScope = Field(description="feature update scope payload.")
+    providers: list[NonEmptyString] = Field(
+        default_factory=list,
+        max_length=MAX_PROVIDER_FILTERS,
+    )
+    dataset_keys: list[NonEmptyString] = Field(
+        default_factory=list,
+        max_length=MAX_DATASET_FILTERS,
+    )
+    update_policy: FeatureUpdatePolicy = Field(default_factory=FeatureUpdatePolicy)
     run_mode: RunMode = "queued"
     priority: int = Field(default=50, ge=0, le=1000)
     dry_run: bool = False
@@ -151,6 +286,14 @@ class FeatureUpdateRequestRunNowRequest(BaseModel):
     priority: int | None = Field(default=None, ge=0, le=1000)
     operator: str | None = None
     reason: str | None = None
+
+
+def _scope_payload(scope: FeatureUpdateScope) -> dict[str, Any]:
+    return scope.model_dump(mode="json", exclude_none=True)
+
+
+def _update_policy_payload(policy: FeatureUpdatePolicy) -> dict[str, Any]:
+    return policy.model_dump(mode="json", exclude_none=True, exclude_unset=True)
 
 
 def _record_from_request(row: FeatureUpdateRequest) -> FeatureUpdateRequestRecord:
@@ -335,13 +478,15 @@ async def create_feature_update_request(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> FeatureUpdateRequestCreateResponse:
     started_at = perf_counter()
+    scope = _scope_payload(body.scope)
+    update_policy = _update_policy_payload(body.update_policy)
     if body.dry_run:
         result = await _enqueue(
             session,
-            scope=body.scope,
+            scope=scope,
             providers=body.providers,
             dataset_keys=body.dataset_keys,
-            update_policy=body.update_policy,
+            update_policy=update_policy,
             run_mode=body.run_mode,
             priority=body.priority,
             dry_run=True,
@@ -353,10 +498,10 @@ async def create_feature_update_request(
     async with session.begin():
         result = await _enqueue(
             session,
-            scope=body.scope,
+            scope=scope,
             providers=body.providers,
             dataset_keys=body.dataset_keys,
-            update_policy=body.update_policy,
+            update_policy=update_policy,
             run_mode=body.run_mode,
             priority=body.priority,
             dry_run=False,

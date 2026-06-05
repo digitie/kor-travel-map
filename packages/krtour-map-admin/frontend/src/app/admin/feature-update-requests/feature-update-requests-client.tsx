@@ -66,8 +66,10 @@ export function FeatureUpdateRequestsClient() {
     createRequest.mutate({
       scope: {
         type: "center_radius",
-        lon: Number(lon),
-        lat: Number(lat),
+        center: {
+          lon: Number(lon),
+          lat: Number(lat),
+        },
         radius_km: Number(radiusKm),
       },
       providers: commaSeparatedValues(providers),

@@ -1,5 +1,27 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-05 Codex 작업 메모 — T-RV-20 feature update request schema 검증
+
+T-RV-20을 처리한다. `POST /admin/feature-update-requests` request body의 `scope`는
+이제 `scope.type` discriminator를 기준으로 6개 scope 모델
+(`feature_ids`, `center_radius`, `sigungu_by_radius`, `bbox`, `provider_dataset`,
+`cache_target_keys`) 중 하나로 검증된다. `center_radius`와 `sigungu_by_radius`는
+OpenAPI 계약처럼 `center: {lon, lat}`를 요구하며, legacy root `lon`/`lat` payload는
+enqueue 전에 `422`로 거절된다.
+
+`update_policy`는 알려진 필드만 허용하는 모델로 바꿨고,
+`providers`/`dataset_keys`에는 list 상한을 추가했다. admin frontend 생성 화면도 같은
+`center` payload를 보내도록 정렬했다. admin/user OpenAPI 산출물은 재생성했으며,
+legacy scope shape, unknown policy key, 과도한 provider filter list 회귀 테스트를
+추가했다.
+
+다음 한 작업은 **T-209e-b(restore/admin router/hot-swap 설계 분리)**,
+**T-RV-19(admin UI 지도 선행 안정화)**, 또는
+**T-RV-22/23/25(offline upload orphan/idempotency/store reuse)** 다.
+**T-RV-27은 production 레벨 hardening 전까지 계속 skip/deferred**다. 병행 에이전트가
+다른 PR을 머지할 수 있으므로, 다음 작업 시작 전 `origin/main`을 fetch/rebase한 뒤
+충돌 위험이 낮은 파일 범위만 잡는다.
+
 ## 2026-06-05 Codex 작업 메모 — T-209e-a standalone cold backup
 
 T-209e를 restore/admin router/hot-swap까지 한 번에 다루지 않고, 먼저 충돌 가능성이
@@ -14,9 +36,6 @@ snapshot을 허용한다. restore는 아직 자동 실행하지 않으며, `docs
 checksum 검증, `pg_restore --list`, RustFS tar 목록 확인, 수동 cold restore 경계를
 문서화한다.
 
-다음 한 작업은 **T-209e-b(restore/admin router/hot-swap 설계 분리)** 또는 기존
-리뷰 후속인 **T-RV-20(router scope/update_policy schema 검증)**,
-**T-RV-19(admin UI 지도 선행 안정화)**, **T-RV-22/23/25(offline upload 후속)** 다.
 
 ## 2026-06-05 Codex 작업 메모 — T-RV-37e Docker image hygiene
 

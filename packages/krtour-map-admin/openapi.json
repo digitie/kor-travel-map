@@ -436,6 +436,50 @@
         "title": "AdminFeaturesListResponse",
         "type": "object"
       },
+      "BboxScope": {
+        "additionalProperties": false,
+        "description": "WGS84 bbox 안 feature 갱신 scope.",
+        "properties": {
+          "max_lat": {
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Max Lat",
+            "type": "number"
+          },
+          "max_lon": {
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Max Lon",
+            "type": "number"
+          },
+          "min_lat": {
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Min Lat",
+            "type": "number"
+          },
+          "min_lon": {
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Min Lon",
+            "type": "number"
+          },
+          "type": {
+            "const": "bbox",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "min_lon",
+          "min_lat",
+          "max_lon",
+          "max_lat"
+        ],
+        "title": "BboxScope",
+        "type": "object"
+      },
       "Body_create_offline_upload_request_admin_offline_uploads_post": {
         "properties": {
           "created_by": {
@@ -478,6 +522,89 @@
           "dataset_key"
         ],
         "title": "Body_create_offline_upload_request_admin_offline_uploads_post",
+        "type": "object"
+      },
+      "CacheTargetKeysScope": {
+        "additionalProperties": false,
+        "description": "외부 POI/cache target key 목록 기반 갱신 scope.",
+        "properties": {
+          "external_system": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "External System",
+            "type": "string"
+          },
+          "radius_km": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 500.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Radius Km"
+          },
+          "scope_mode": {
+            "default": "center_radius",
+            "enum": [
+              "center_radius",
+              "sigungu_by_radius"
+            ],
+            "title": "Scope Mode",
+            "type": "string"
+          },
+          "target_keys": {
+            "items": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 500,
+            "title": "Target Keys",
+            "type": "array"
+          },
+          "type": {
+            "const": "cache_target_keys",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "external_system",
+          "target_keys"
+        ],
+        "title": "CacheTargetKeysScope",
+        "type": "object"
+      },
+      "CenterRadiusScope": {
+        "additionalProperties": false,
+        "description": "좌표 중심 반경 갱신 scope.",
+        "properties": {
+          "center": {
+            "$ref": "#/components/schemas/FeatureUpdatePoint"
+          },
+          "radius_km": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 500.0,
+            "title": "Radius Km",
+            "type": "number"
+          },
+          "type": {
+            "const": "center_radius",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "center",
+          "radius_km"
+        ],
+        "title": "CenterRadiusScope",
         "type": "object"
       },
       "CoordinateBody": {
@@ -1613,6 +1740,33 @@
         "title": "FeatureDetailResponse",
         "type": "object"
       },
+      "FeatureIdsScope": {
+        "additionalProperties": false,
+        "description": "특정 feature id 목록 갱신 scope.",
+        "properties": {
+          "feature_ids": {
+            "items": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 1000,
+            "title": "Feature Ids",
+            "type": "array"
+          },
+          "type": {
+            "const": "feature_ids",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "feature_ids"
+        ],
+        "title": "FeatureIdsScope",
+        "type": "object"
+      },
       "FeatureListMeta": {
         "additionalProperties": false,
         "description": "public feature 목록 meta.",
@@ -1769,6 +1923,105 @@
         "title": "FeatureSummary",
         "type": "object"
       },
+      "FeatureUpdatePoint": {
+        "additionalProperties": false,
+        "description": "WGS84 lon/lat 좌표.",
+        "properties": {
+          "lat": {
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Lat",
+            "type": "number"
+          },
+          "lon": {
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Lon",
+            "type": "number"
+          }
+        },
+        "required": [
+          "lon",
+          "lat"
+        ],
+        "title": "FeatureUpdatePoint",
+        "type": "object"
+      },
+      "FeatureUpdatePolicy": {
+        "additionalProperties": false,
+        "description": "Provider refresh 실행 정책 override.",
+        "properties": {
+          "consistency_check_after_load": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consistency Check After Load"
+          },
+          "dedup_after_load": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dedup After Load"
+          },
+          "force_provider_call": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Force Provider Call"
+          },
+          "include_inactive": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Include Inactive"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "const": "refresh_existing",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mode"
+          },
+          "prevent_provider_reactivation": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prevent Provider Reactivation"
+          }
+        },
+        "title": "FeatureUpdatePolicy",
+        "type": "object"
+      },
       "FeatureUpdateRequestCancelRequest": {
         "additionalProperties": false,
         "description": "취소 요청 body.",
@@ -1795,8 +2048,11 @@
         "properties": {
           "dataset_keys": {
             "items": {
+              "maxLength": 128,
+              "minLength": 1,
               "type": "string"
             },
+            "maxItems": 64,
             "title": "Dataset Keys",
             "type": "array"
           },
@@ -1825,8 +2081,11 @@
           },
           "providers": {
             "items": {
+              "maxLength": 128,
+              "minLength": 1,
               "type": "string"
             },
+            "maxItems": 32,
             "title": "Providers",
             "type": "array"
           },
@@ -1851,15 +2110,42 @@
             "type": "string"
           },
           "scope": {
-            "additionalProperties": true,
             "description": "feature update scope payload.",
-            "title": "Scope",
-            "type": "object"
+            "discriminator": {
+              "mapping": {
+                "bbox": "#/components/schemas/BboxScope",
+                "cache_target_keys": "#/components/schemas/CacheTargetKeysScope",
+                "center_radius": "#/components/schemas/CenterRadiusScope",
+                "feature_ids": "#/components/schemas/FeatureIdsScope",
+                "provider_dataset": "#/components/schemas/ProviderDatasetScope",
+                "sigungu_by_radius": "#/components/schemas/SigunguByRadiusScope"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FeatureIdsScope"
+              },
+              {
+                "$ref": "#/components/schemas/CenterRadiusScope"
+              },
+              {
+                "$ref": "#/components/schemas/SigunguByRadiusScope"
+              },
+              {
+                "$ref": "#/components/schemas/BboxScope"
+              },
+              {
+                "$ref": "#/components/schemas/ProviderDatasetScope"
+              },
+              {
+                "$ref": "#/components/schemas/CacheTargetKeysScope"
+              }
+            ],
+            "title": "Scope"
           },
           "update_policy": {
-            "additionalProperties": true,
-            "title": "Update Policy",
-            "type": "object"
+            "$ref": "#/components/schemas/FeatureUpdatePolicy"
           }
         },
         "required": [
@@ -4109,6 +4395,49 @@
         "title": "PoiCacheTargetUpsertRequest",
         "type": "object"
       },
+      "ProviderDatasetScope": {
+        "additionalProperties": false,
+        "description": "특정 provider/dataset 자체 갱신 scope.",
+        "properties": {
+          "dataset_key": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Dataset Key",
+            "type": "string"
+          },
+          "provider": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Provider",
+            "type": "string"
+          },
+          "sync_scope": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sync Scope"
+          },
+          "type": {
+            "const": "provider_dataset",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "provider",
+          "dataset_key"
+        ],
+        "title": "ProviderDatasetScope",
+        "type": "object"
+      },
       "ProviderDatasetsResponse": {
         "additionalProperties": false,
         "description": "`/debug/etl/{provider}/datasets` 응답.",
@@ -4182,6 +4511,43 @@
           "items"
         ],
         "title": "PublicFeatureListData",
+        "type": "object"
+      },
+      "SigunguByRadiusScope": {
+        "additionalProperties": false,
+        "description": "kraddr-geo가 계산한 반경 교차 시군구 기준 갱신 scope.",
+        "properties": {
+          "center": {
+            "$ref": "#/components/schemas/FeatureUpdatePoint"
+          },
+          "match": {
+            "default": "intersects",
+            "enum": [
+              "intersects",
+              "contains_center",
+              "feature_sigungu"
+            ],
+            "title": "Match",
+            "type": "string"
+          },
+          "radius_km": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 500.0,
+            "title": "Radius Km",
+            "type": "number"
+          },
+          "type": {
+            "const": "sigungu_by_radius",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "center",
+          "radius_km"
+        ],
+        "title": "SigunguByRadiusScope",
         "type": "object"
       },
       "ValidationError": {
