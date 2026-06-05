@@ -24,7 +24,7 @@
 | 위치 | `packages/map-marker-react/` (`python-krtour-map` monorepo) |
 | import | `import { MakiMarker, categoryMakiIcon } from "@krtour/map-marker-react"` |
 | 라이선스 | MIT |
-| peer deps | `react@^19.2`, `maplibre-gl@^5.24`, `maplibre-vworld@^0.1.2` (git URL+tag, npm 미게시), `zod@^4.4` |
+| peer deps | `react@^19.2`, `maplibre-gl@^5.24`, `maplibre-vworld@0.1.2` (설치는 `github:digitie/maplibre-vworld-js#v0.1.2`, npm 미게시), `zod@^4.4` |
 
 ## 포함 항목 (계획)
 
@@ -65,7 +65,8 @@ import { MakiMarker, categoryMakiIcon } from "@krtour/map-marker-react";
 ## 배포
 
 - 빌드: `npm run build` → `dist/` ESM + CJS + d.ts (Vite library mode).
-- 게시: GitHub Packages (npm) 또는 npm public. **공개 npm 권고** (ADR-029).
+- 게시: ADR-043에 따라 npm registry 게시 보류. 현재 공유는 monorepo workspace 또는
+  git URL 기준이다.
 - 버저닝: SemVer 0.x로 시작 (breaking change 자유), 본 라이브러리
   `krtour.map.category` 변경 시 minor bump. 1.0.0은 Sprint 5 운영 진입과
   함께.
