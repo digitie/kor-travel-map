@@ -113,6 +113,8 @@
 - main: require PR + 1 approval + status checks + restrict force-push
 - ADR-021 §결정의 운영 정책을 별도 매뉴얼로
 - Sprint 5 진입 시점에 운영자 매뉴얼로 박음
+- 완료 기준: `docs/runbooks/branch-protection.md`. 현재 always-on required check와
+  path-filtered `openapi`/frontend check의 T-203 이후 승격 조건을 분리해 문서화한다.
 
 ### 2.8 T-101 MV 시범 도입 (선택)
 
@@ -149,7 +151,7 @@
 | ADR-017 (보관 정책) | accepted (Sprint 1) | place 무기한, event +20y, notice +1y, weather +30d purge 동작 |
 | T-200 (batch DAG + 게이트) | done (2026-06-04) | Dagster batch + consistency_check + mv_refresh 차단/추적 |
 | T-201b (Phase 2) | pending | F4~F8 + dry-run report |
-| T-202~204 | partial | T-202 pre-commit hook 완료. T-203 CI full + T-204 branch protection 매뉴얼 남음 |
+| T-202~204 | partial | T-202 pre-commit hook + T-204 branch protection 매뉴얼 완료. T-203 CI full 남음 |
 | ADR-016 (Record Linkage 가중치) | accepted | 5 sprint 전체 검증 후 가중치 조정 PR (필요 시) |
 
 ## 4. 운영 진입 게이트 (DoD of Sprint 5)

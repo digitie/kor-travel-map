@@ -1,5 +1,20 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-05 Codex 작업 메모 — T-204 branch protection 설정 가이드
+
+Sprint 5 운영 진입 gate 중 `T-204`를 처리한다. `docs/runbooks/branch-protection.md`는
+GitHub `main` branch protection 설정값을 운영자용으로 분리한다. 필수 설정은 PR 기반
+merge, approval 1개, branch 최신화 요구, force-push/delete 차단, squash merge 기준이다.
+
+현재 모든 PR에서 항상 생성되는 required check는 `lint`, `pytest (Python 3.11)`,
+`pytest (Python 3.12)`, `pytest (Python 3.13)`로 문서화한다. `openapi-drift`와
+`type-check + next build (Node 20)`은 path-filtered workflow라 지금 바로 required로
+고정하면 check가 생성되지 않은 PR이 막힐 수 있다. 이 둘은 T-203에서 neutral/success
+check를 모든 PR에 만들도록 바꾼 뒤 required로 승격한다.
+
+다음 한 작업은 **T-203(PR CI workflow full matrix 정리)** 다. 그 외 병행 가능성이 낮은
+문서 작업을 고르면 `docs/runbooks/agent-workflow.md`의 T-202/T-204 반영 여부를 점검한다.
+
 ## 2026-06-05 Codex 작업 메모 — T-202 pre-commit hook 정착
 
 Sprint 5 운영 진입 gate 중 `T-202`를 처리한다. `.pre-commit-config.yaml`은 local
