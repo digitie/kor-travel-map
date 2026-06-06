@@ -1,11 +1,11 @@
 """krtour-map 소유 provider Feature 적재 Dagster asset."""
 
 import inspect
-from collections.abc import AsyncIterable, Awaitable, Iterable
+from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Iterable
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Final, cast
 
-from dagster import AssetExecutionContext, asset
+from dagster import AssetExecutionContext, Backoff, RetryPolicy, asset
 from krtour.map.geocoding import ReverseGeocoder
 from krtour.map.providers.knps import (
     KNPS_GEOMETRY_DATASETS,
@@ -63,6 +63,16 @@ if TYPE_CHECKING:
 DATAGOKR_STANDARD_PROVIDER_NAME: Final[str] = "data.go.kr-standard"
 """전국 표준데이터 provider canonical name."""
 
+FEATURE_LOAD_RETRY_POLICY: Final[RetryPolicy] = RetryPolicy(
+    max_retries=3,
+    delay=60,
+    backoff=Backoff.EXPONENTIAL,
+)
+"""provider Feature load asset 공통 retry policy."""
+
+MOIS_RECORD_BATCH_SIZE: Final[int] = 1000
+"""MOIS bulk record를 FeatureBundle로 변환하기 전에 끊어 읽는 record batch 크기."""
+
 _KST = timezone(timedelta(hours=9))
 _MISSING: Final = object()
 _COMMON_RESOURCE_KEYS: Final[set[str]] = {
@@ -95,6 +105,7 @@ async def run_feature_event_datagokr_cultural_festivals(
 @asset(
     group_name="features_event",
     required_resource_keys=_COMMON_RESOURCE_KEYS | {"datagokr_cultural_festivals"},
+    retry_policy=FEATURE_LOAD_RETRY_POLICY,
 )
 async def feature_event_datagokr_cultural_festivals(
     context: AssetExecutionContext,
@@ -124,6 +135,7 @@ async def run_feature_place_opinet_stations(
 @asset(
     group_name="features_place",
     required_resource_keys=_COMMON_RESOURCE_KEYS | {"opinet_stations"},
+    retry_policy=FEATURE_LOAD_RETRY_POLICY,
 )
 async def feature_place_opinet_stations(
     context: AssetExecutionContext,
@@ -153,6 +165,7 @@ async def run_feature_place_krex_rest_areas(
 @asset(
     group_name="features_place",
     required_resource_keys=_COMMON_RESOURCE_KEYS | {"krex_rest_areas"},
+    retry_policy=FEATURE_LOAD_RETRY_POLICY,
 )
 async def feature_place_krex_rest_areas(
     context: AssetExecutionContext,
@@ -182,6 +195,7 @@ async def run_feature_notice_krex_traffic_notices(
 @asset(
     group_name="features_notice",
     required_resource_keys=_COMMON_RESOURCE_KEYS | {"krex_traffic_notices"},
+    retry_policy=FEATURE_LOAD_RETRY_POLICY,
 )
 async def feature_notice_krex_traffic_notices(
     context: AssetExecutionContext,
@@ -211,6 +225,7 @@ async def run_feature_place_krheritage_items(
 @asset(
     group_name="features_place",
     required_resource_keys=_COMMON_RESOURCE_KEYS | {"krheritage_items"},
+    retry_policy=FEATURE_LOAD_RETRY_POLICY,
 )
 async def feature_place_krheritage_items(
     context: AssetExecutionContext,
@@ -240,6 +255,7 @@ async def run_feature_event_krheritage_events(
 @asset(
     group_name="features_event",
     required_resource_keys=_COMMON_RESOURCE_KEYS | {"krheritage_events"},
+    retry_policy=FEATURE_LOAD_RETRY_POLICY,
 )
 async def feature_event_krheritage_events(
     context: AssetExecutionContext,
@@ -251,22 +267,35 @@ async def run_feature_place_mois_licenses(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
     """MOIS 인허가 record를 place Feature로 적재한다."""
-    records = await _record_list(context, "mois_license_records")
     fetched_at = await _fetched_at(context)
     dataset_key = await _resource_value(
         context, "mois_dataset_key", default=MOIS_BULK_DATASET_KEY
     )
-    bundles = await license_records_to_bundles(
-        records,
-        fetched_at=fetched_at,
-        dataset_key=str(dataset_key),
-        reverse_geocoder=_reverse_geocoder(context),
-    )
+    result: DagsterFeatureLoadResult | None = None
+    async for records in _record_batches(
+        context, "mois_license_records", batch_size=MOIS_RECORD_BATCH_SIZE
+    ):
+        bundles = await license_records_to_bundles(
+            records,
+            fetched_at=fetched_at,
+            dataset_key=str(dataset_key),
+            reverse_geocoder=_reverse_geocoder(context),
+        )
+        batch_result = await _load(
+            context,
+            provider=MOIS_PROVIDER_NAME,
+            dataset_key=str(dataset_key),
+            bundles=bundles,
+        )
+        result = batch_result if result is None else result.merge(batch_result)
+
+    if result is not None:
+        return result
     return await _load(
         context,
         provider=MOIS_PROVIDER_NAME,
         dataset_key=str(dataset_key),
-        bundles=bundles,
+        bundles=[],
     )
 
 
@@ -274,6 +303,7 @@ async def run_feature_place_mois_licenses(
     group_name="features_place",
     required_resource_keys=_COMMON_RESOURCE_KEYS
     | {"mois_license_records", "mois_dataset_key"},
+    retry_policy=FEATURE_LOAD_RETRY_POLICY,
 )
 async def feature_place_mois_licenses(
     context: AssetExecutionContext,
@@ -312,6 +342,7 @@ async def run_feature_place_knps_points(
     group_name="features_place",
     required_resource_keys=_COMMON_RESOURCE_KEYS
     | {"knps_point_records", "knps_point_dataset_key"},
+    retry_policy=FEATURE_LOAD_RETRY_POLICY,
 )
 async def feature_place_knps_points(
     context: AssetExecutionContext,
@@ -348,6 +379,7 @@ async def run_feature_geometry_knps_records(
     group_name="features_geometry",
     required_resource_keys=_COMMON_RESOURCE_KEYS
     | {"knps_geometry_records", "knps_geometry_dataset_key"},
+    retry_policy=FEATURE_LOAD_RETRY_POLICY,
 )
 async def feature_geometry_knps_records(
     context: AssetExecutionContext,
@@ -389,13 +421,43 @@ async def _load(
 
 
 async def _record_list(context: AssetExecutionContext, resource_key: str) -> list[Any]:
+    records: list[Any] = []
+    async for batch in _record_batches(context, resource_key):
+        records.extend(batch)
+    return records
+
+
+async def _record_batches(
+    context: AssetExecutionContext,
+    resource_key: str,
+    *,
+    batch_size: int = MOIS_RECORD_BATCH_SIZE,
+) -> AsyncIterator[list[Any]]:
+    if batch_size <= 0:
+        raise ValueError("batch_size must be positive")
     value = await _resource_value(context, resource_key)
     if isinstance(value, str | bytes):
         raise TypeError(f"{resource_key} resource는 문자열이 아니라 record iterable이어야 함.")
     if isinstance(value, AsyncIterable):
-        return [item async for item in value]
+        batch: list[Any] = []
+        async for item in value:
+            batch.append(item)
+            if len(batch) >= batch_size:
+                yield batch
+                batch = []
+        if batch:
+            yield batch
+        return
     if isinstance(value, Iterable):
-        return list(value)
+        batch = []
+        for item in value:
+            batch.append(item)
+            if len(batch) >= batch_size:
+                yield batch
+                batch = []
+        if batch:
+            yield batch
+        return
     raise TypeError(f"{resource_key} resource는 iterable이어야 함.")
 
 

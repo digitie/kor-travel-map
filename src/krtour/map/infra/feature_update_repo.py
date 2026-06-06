@@ -48,6 +48,7 @@ __all__ = [
     "FeatureUpdateLockBusy",
     "FeatureUpdateQueueLockBusy",
     "enqueue_feature_update_request",
+    "peek_update_requests",
     "peek_next_update_request",
     "claim_next_update_request",
     "feature_update_scope_advisory_key",
@@ -68,6 +69,7 @@ _TERMINAL_STATES: Final[frozenset[str]] = frozenset(
     {"done", "failed", "cancelled"}
 )
 _MAX_LIST_LIMIT: Final[int] = 200
+_MAX_PEEK_LIMIT: Final[int] = 50
 
 _RETURN_COLUMNS: Final[str] = (
     "request_id, scope_type, scope, providers, dataset_keys, update_policy, "
@@ -321,7 +323,7 @@ SELECT {_RETURN_COLUMNS}
 FROM ops.feature_update_requests
 WHERE state = 'queued' AND dry_run IS false
 ORDER BY priority DESC, created_at, request_id
-LIMIT 1
+LIMIT :limit
 """
 
 _START_REQUEST_SQL: Final[str] = f"""
@@ -525,12 +527,29 @@ async def enqueue_feature_update_request(
     return _row_to_request(row)
 
 
+async def peek_update_requests(
+    session: AsyncSession,
+    *,
+    limit: int = 10,
+) -> tuple[FeatureUpdateRequest, ...]:
+    """claim 순서상 queued request 여러 건을 상태 변경 없이 조회한다."""
+    if limit <= 0:
+        raise ValueError("limit must be positive")
+    rows = (
+        await session.execute(
+            text(_PEEK_REQUEST_SQL), {"limit": min(limit, _MAX_PEEK_LIMIT)}
+        )
+    ).all()
+    return tuple(_row_to_request(row) for row in rows)
+
+
 async def peek_next_update_request(
     session: AsyncSession,
 ) -> FeatureUpdateRequest | None:
     """claim 순서상 다음 queued request를 상태 변경 없이 조회한다."""
-    row = (await session.execute(text(_PEEK_REQUEST_SQL))).one_or_none()
-    return _row_to_request(row) if row is not None else None
+    requests = await peek_update_requests(session, limit=1)
+    return requests[0] if requests else None
+
 
 
 async def claim_next_update_request(

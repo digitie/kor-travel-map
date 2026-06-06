@@ -236,6 +236,10 @@ async def test_feature_update_request_client_lifecycle(
     assert peeked.request_id == request.request_id
     assert peeked.state == "queued"
 
+    peeked_batch = await map_client.peek_update_requests(limit=5)
+    assert [item.request_id for item in peeked_batch] == [request.request_id]
+    assert peeked_batch[0].state == "queued"
+
     page1 = await map_client.list_update_requests(limit=1)
     assert page1.items == (loaded,)
     assert page1.next_cursor is None

@@ -120,6 +120,9 @@ from krtour.map.infra.feature_update_repo import (
 from krtour.map.infra.feature_update_repo import (
     peek_next_update_request as repo_peek_next_update_request,
 )
+from krtour.map.infra.feature_update_repo import (
+    peek_update_requests as repo_peek_update_requests,
+)
 from krtour.map.infra.merge_repo import MergeOutcome, merge_from_review
 from krtour.map.infra.status_repo import StatusCounts, gather_status_counts
 from krtour.map.infra.sync_state_repo import (
@@ -608,6 +611,13 @@ class AsyncKrtourMapClient:
         """Dagster sensor가 다음 queued request를 상태 변경 없이 확인한다."""
         async with self._session_factory() as session:
             return await repo_peek_next_update_request(session)
+
+    async def peek_update_requests(
+        self, *, limit: int = 10
+    ) -> tuple[FeatureUpdateRequest, ...]:
+        """Dagster sensor가 queued request batch를 상태 변경 없이 확인한다."""
+        async with self._session_factory() as session:
+            return await repo_peek_update_requests(session, limit=limit)
 
     async def execute_next_feature_update_request(
         self,

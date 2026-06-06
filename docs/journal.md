@@ -2,6 +2,24 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-06 (codex) — T-RV-34/35 Dagster sensor/asset 실행 품질
+
+**작업**: PR#153~#179 리뷰 후속 중 Dagster sensor drain/failure hardening과
+feature-load/maintenance retry·chunk 적재를 닫는다.
+
+- **Sensor drain**: `feature_update_request_queue_sensor`가 dead cursor를 갱신하지 않고,
+  queued request를 batch peek해 tick 1회에 최대 10개 worker run을 요청한다.
+- **Failure hardening**: failure sensor는 request 실패 상태 반영이나 notifier 호출이
+  실패해도 sensor 자체를 실패시키지 않고 로그를 남긴 뒤 원래 실패 메시지를 반환한다.
+- **MOIS bulk**: MOIS record resource는 batch 단위로 FeatureBundle 변환/DB load를 수행해
+  대용량 record를 한 번에 materialize하지 않는다.
+- **RetryPolicy**: 모든 feature-load asset과 consistency/dedup maintenance op에 exponential
+  retry policy를 추가했다.
+- **검증**: Dagster unit 19 passed, feature update/client/Dagster ETL integration 16 passed,
+  `ruff`, `mypy --strict`, `lint-imports` 통과.
+- **다음**: T-RV 잔여는 `T-RV-04b`, 새 백로그 `T-RV-38~41`, T-RV-37 잔여 hygiene이다.
+  `T-RV-27`은 production hardening 전까지 deferred 유지.
+
 ## 2026-06-06 (claude) — T-213g provider export + `/providers/{provider}/last-sync`
 
 **작업**: T-213 묶음 다섯 번째. provider 데이터 신선도 표면 + client/provider helper.

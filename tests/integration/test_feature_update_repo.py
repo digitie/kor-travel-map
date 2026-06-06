@@ -32,6 +32,7 @@ from krtour.map.infra.feature_update_repo import (
     get_update_request,
     list_update_requests,
     peek_next_update_request,
+    peek_update_requests,
     start_update_request,
 )
 
@@ -173,6 +174,13 @@ async def test_peek_next_update_request_does_not_claim(
     assert peeked.state == "queued"
     assert peeked.job_id is not None
     assert (await _job_row(migrated_session, peeked.job_id))["state"] == "queued"
+
+    peeked_batch = await peek_update_requests(migrated_session, limit=2)
+    assert [item.request_id for item in peeked_batch] == [
+        high.request_id,
+        low.request_id,
+    ]
+    assert all(item.state == "queued" for item in peeked_batch)
 
     claimed = await claim_next_update_request(migrated_session)
     assert claimed is not None

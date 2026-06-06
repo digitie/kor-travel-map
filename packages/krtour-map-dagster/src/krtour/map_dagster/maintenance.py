@@ -6,12 +6,14 @@ from typing import TYPE_CHECKING, Any, Final, cast
 
 from dagster import (
     Array,
+    Backoff,
     Bool,
     DefaultScheduleStatus,
     Field,
     Int,
     OpExecutionContext,
     Permissive,
+    RetryPolicy,
     ScheduleDefinition,
     job,
     op,
@@ -33,6 +35,7 @@ _PERMISSIVE_CONFIG = cast(Any, Permissive)
 __all__ = [
     "CONSISTENCY_DEDUP_REFRESH_JOB_TAGS",
     "CONSISTENCY_DEDUP_REFRESH_SCHEDULES",
+    "MAINTENANCE_RETRY_POLICY",
     "MAINTENANCE_JOBS",
     "MAINTENANCE_SCHEDULES",
     "consistency_dedup_refresh_job",
@@ -46,6 +49,13 @@ CONSISTENCY_DEDUP_REFRESH_JOB_TAGS: Final[dict[str, str]] = {
     "krtour_map.timezone": KST_TIMEZONE,
 }
 """consistency/dedup refresh Dagster job 공통 tag."""
+
+MAINTENANCE_RETRY_POLICY: Final[RetryPolicy] = RetryPolicy(
+    max_retries=3,
+    delay=60,
+    backoff=Backoff.EXPONENTIAL,
+)
+"""consistency/dedup maintenance op 공통 retry policy."""
 
 _DEDUP_REFRESH_CONFIG_SCHEMA: Final[dict[str, object]] = {
     "pairs": Field(
@@ -96,6 +106,7 @@ _CONSISTENCY_CONFIG_SCHEMA: Final[dict[str, object]] = {
     name="refresh_dedup_candidates",
     required_resource_keys={"krtour_map_client"},
     config_schema=_DEDUP_REFRESH_CONFIG_SCHEMA,
+    retry_policy=MAINTENANCE_RETRY_POLICY,
 )
 async def refresh_dedup_candidates_op(
     context: OpExecutionContext,
@@ -139,6 +150,7 @@ async def refresh_dedup_candidates_op(
     name="run_consistency_check",
     required_resource_keys={"krtour_map_client"},
     config_schema=_CONSISTENCY_CONFIG_SCHEMA,
+    retry_policy=MAINTENANCE_RETRY_POLICY,
 )
 async def run_consistency_check_op(
     context: OpExecutionContext,
