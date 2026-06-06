@@ -122,6 +122,21 @@ from krtour.map.infra.feature_update_repo import (
 )
 from krtour.map.infra.merge_repo import MergeOutcome, merge_from_review
 from krtour.map.infra.status_repo import StatusCounts, gather_status_counts
+from krtour.map.infra.sync_state_repo import (
+    SyncState,
+)
+from krtour.map.infra.sync_state_repo import (
+    get_sync_state as repo_get_sync_state,
+)
+from krtour.map.infra.sync_state_repo import (
+    list_sync_states as repo_list_sync_states,
+)
+from krtour.map.infra.sync_state_repo import (
+    record_sync_failure as repo_record_sync_failure,
+)
+from krtour.map.infra.sync_state_repo import (
+    record_sync_success as repo_record_sync_success,
+)
 from krtour.map.mois import DEFAULT_BATCH_SIZE as MOIS_DEFAULT_BATCH_SIZE
 from krtour.map.mois import (
     MoisBulkJobResult,
@@ -969,6 +984,74 @@ class AsyncKrtourMapClient:
         """검토 대기(``status='pending'``) dedup 후보 list — total_score 내림차순."""
         async with self._session_factory() as session:
             return await pending_dedup_reviews(session, limit=limit)
+
+    # ─── provider sync state (T-213g) ───────────────────────────────────────
+
+    async def get_sync_state(
+        self, *, provider: str, dataset_key: str, sync_scope: str = "default"
+    ) -> SyncState | None:
+        """provider/dataset/scope 1건 sync state. 없으면 ``None`` (read)."""
+        async with self._session_factory() as session:
+            return await repo_get_sync_state(
+                session,
+                provider=provider,
+                dataset_key=dataset_key,
+                sync_scope=sync_scope,
+            )
+
+    async def list_sync_states(
+        self,
+        *,
+        provider: str,
+        dataset_key: str | None = None,
+        sync_scope: str | None = None,
+    ) -> list[SyncState]:
+        """provider sync state 목록(데이터 신선도). filter optional (read, T-213g)."""
+        async with self._session_factory() as session:
+            return await repo_list_sync_states(
+                session,
+                provider=provider,
+                dataset_key=dataset_key,
+                sync_scope=sync_scope,
+            )
+
+    async def record_sync_success(
+        self,
+        *,
+        provider: str,
+        dataset_key: str,
+        sync_scope: str = "default",
+        cursor: dict[str, Any],
+        next_run_after: datetime | None = None,
+    ) -> SyncState:
+        """적재 성공 기록 — cursor 전진 + last_success_at (write, 1 transaction)."""
+        async with self._session_factory() as session, session.begin():
+            return await repo_record_sync_success(
+                session,
+                provider=provider,
+                dataset_key=dataset_key,
+                sync_scope=sync_scope,
+                cursor=cursor,
+                next_run_after=next_run_after,
+            )
+
+    async def record_sync_failure(
+        self,
+        *,
+        provider: str,
+        dataset_key: str,
+        sync_scope: str = "default",
+        next_run_after: datetime | None = None,
+    ) -> SyncState:
+        """적재 실패 기록 — cursor 미전진 + last_failure_at + 연속 실패 +1 (write)."""
+        async with self._session_factory() as session, session.begin():
+            return await repo_record_sync_failure(
+                session,
+                provider=provider,
+                dataset_key=dataset_key,
+                sync_scope=sync_scope,
+                next_run_after=next_run_after,
+            )
 
     async def get_update_request(
         self, request_id: str

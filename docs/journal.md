@@ -2,6 +2,25 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-06 (claude) — T-213g provider export + `/providers/{provider}/last-sync`
+
+**작업**: T-213 묶음 다섯 번째. provider 데이터 신선도 표면 + client/provider helper.
+
+- **repo**: `sync_state_repo.list_sync_states(provider, dataset_key=None,
+  sync_scope=None)` 추가(기존 `get_sync_state`는 단건).
+- **endpoint** `GET /providers/{provider}/last-sync`(`routers/providers.py`, 신규):
+  `items[]`(dataset_key/sync_scope/status/last_success_at/last_failure_at/
+  consecutive_failures) + count. **내부 cursor는 비노출**(provider 증분 상태).
+  provider/dataset/scope 필터, 매칭 0건이면 **404**. features gate 하 mount, user spec 포함.
+- **client**: `get_sync_state`/`list_sync_states`(read) + `record_sync_success`/
+  `record_sync_failure`(write, session.begin()) helper 4종.
+- **provider re-export**: `krtour.map.providers`에 knps(point/geometry 변환, dataset,
+  PROVIDER_NAME)/krheritage(items/events 변환, classify/resolve, dataset, PROVIDER_NAME,
+  MARKER_COLOR) 추가.
+- 테스트: providers router 3(spec/404/200 cursor-exclude), providers export 1,
+  PostGIS list 통합 1, client unit. OpenAPI drift/frontend types/ruff/mypy/lint-imports
+  green. 다음: **T-213c**(bbox clustering — 마지막 전, 설계 결정 동반).
+
 ## 2026-06-06 (claude) — T-213h public `GET /health` / `GET /version`
 
 **작업**: T-213 묶음 네 번째. TripMate liveness/version 표면을 루트 경로에 추가.

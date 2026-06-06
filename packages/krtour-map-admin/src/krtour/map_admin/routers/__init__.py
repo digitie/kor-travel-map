@@ -35,6 +35,7 @@ from krtour.map_admin.routers.ops import router as ops_router
 from krtour.map_admin.routers.poi_cache_targets import (
     router as poi_cache_targets_router,
 )
+from krtour.map_admin.routers.providers import router as providers_router
 from krtour.map_admin.routers.public_status import router as public_status_router
 from krtour.map_admin.routers.version import router as version_router
 
@@ -55,4 +56,5 @@ __all__ = [
     "ops_router",
     "dagster_router",
     "public_status_router",
+    "providers_router",
 ]

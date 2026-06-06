@@ -676,6 +676,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/providers/{provider}/last-sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** provider 데이터 신선도(last-sync) */
+        get: operations["get_provider_last_sync_providers__provider__last_sync_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tripmate/feature-update-requests": {
         parameters: {
             query?: never;
@@ -2627,6 +2644,23 @@ export interface components {
             /** Provider */
             provider: string;
         };
+        /** ProviderLastSyncData */
+        ProviderLastSyncData: {
+            /** Count */
+            count: number;
+            /** Items */
+            items: components["schemas"]["SyncStateSummary"][];
+            /** Provider */
+            provider: string;
+        };
+        /**
+         * ProviderLastSyncResponse
+         * @description ``GET /providers/{provider}/last-sync`` 응답.
+         */
+        ProviderLastSyncResponse: {
+            data: components["schemas"]["ProviderLastSyncData"];
+            meta: components["schemas"]["krtour__map_admin__routers__providers___Meta"];
+        };
         /**
          * ProvidersResponse
          * @description `/debug/etl/providers` 응답.
@@ -2653,7 +2687,7 @@ export interface components {
          */
         PublicHealthResponse: {
             data: components["schemas"]["HealthData"];
-            meta: components["schemas"]["_Meta"];
+            meta: components["schemas"]["krtour__map_admin__routers__public_status___Meta"];
         };
         /**
          * PublicVersionResponse
@@ -2661,7 +2695,7 @@ export interface components {
          */
         PublicVersionResponse: {
             data: components["schemas"]["VersionData"];
-            meta: components["schemas"]["_Meta"];
+            meta: components["schemas"]["krtour__map_admin__routers__public_status___Meta"];
         };
         /**
          * SigunguByRadiusScope
@@ -2682,6 +2716,24 @@ export interface components {
              * @enum {string}
              */
             type: "sigungu_by_radius";
+        };
+        /**
+         * SyncStateSummary
+         * @description provider 1 (dataset_key, sync_scope) 신선도 — cursor 제외.
+         */
+        SyncStateSummary: {
+            /** Consecutive Failures */
+            consecutive_failures: number;
+            /** Dataset Key */
+            dataset_key: string;
+            /** Last Failure At */
+            last_failure_at: string | null;
+            /** Last Success At */
+            last_success_at: string | null;
+            /** Status */
+            status: string;
+            /** Sync Scope */
+            sync_scope: string;
         };
         /** ValidationError */
         ValidationError: {
@@ -2741,17 +2793,24 @@ export interface components {
              */
             variant: string;
         };
-        /** _Meta */
-        _Meta: {
-            /** Duration Ms */
-            duration_ms: number;
-        };
         /** _ProviderEntry */
         _ProviderEntry: {
             /** Datasets */
             datasets: components["schemas"]["_DatasetEntry"][];
             /** Provider */
             provider: string;
+        };
+        /** _Meta */
+        krtour__map_admin__routers__providers___Meta: {
+            /** Count */
+            count: number;
+            /** Duration Ms */
+            duration_ms: number;
+        };
+        /** _Meta */
+        krtour__map_admin__routers__public_status___Meta: {
+            /** Duration Ms */
+            duration_ms: number;
         };
     };
     responses: never;
@@ -4355,6 +4414,49 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OpsMetricsResponse"];
+                };
+            };
+        };
+    };
+    get_provider_last_sync_providers__provider__last_sync_get: {
+        parameters: {
+            query?: {
+                /** @description dataset_key 필터 */
+                dataset_key?: string | null;
+                /** @description sync_scope 필터 */
+                sync_scope?: string | null;
+            };
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderLastSyncResponse"];
+                };
+            };
+            /** @description provider sync state 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

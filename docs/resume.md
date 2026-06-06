@@ -1,5 +1,16 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-06 claude 작업 메모 — T-213g(provider last-sync) 완료
+
+T-213 묶음 5번째 완료. `GET /providers/{provider}/last-sync`(provider_sync_state
+기반, items[] + 필터 + 404, **내부 cursor 비노출**) + client read/write sync-state
+helper 4종 + `krtour.map.providers` knps/krheritage re-export.
+
+진행 순서: T-213d ✅ → T-213b ✅ → T-213f ✅ → T-213h ✅ → **T-213g ✅** → 남음
+**T-213c**(bbox clustering — `/features/in-bounds` `cluster_unit` 서버 집계 설계/구현)
+→ **T-213e**(weather card / 시계열 — 가장 큼). 각 subtask 작은 독립 PR + rebase +
+격리 sandbox + frontend types 재생성.
+
 ## 2026-06-06 claude 작업 메모 — T-213h(public `/health`,`/version`) 완료
 
 T-213 묶음 4번째 완료. public `GET /health`(liveness, DB-free, 항상 mount) +
