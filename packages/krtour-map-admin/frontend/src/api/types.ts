@@ -152,8 +152,9 @@ export interface paths {
          * List Admin Issues
          * @description 운영 이슈 목록 (keyset cursor).
          *
-         *     ``bbox``/free-text ``q`` 필터는 ``ops_repo``가 지원하지 않아 범위 밖이다
-         *     (deferred — 추후 repo 확장 시 추가).
+         *     ``q``는 message/feature_id/source_record_key 부분일치, ``bbox``는 연결 feature
+         *     좌표가 범위 안에 드는 이슈만 남긴다(ADR-012 STORED coord 4326 GiST; feature_id
+         *     없는 이슈는 bbox 적용 시 제외).
          */
         get: operations["list_admin_issues_admin_issues_get"];
         put?: never;
@@ -3679,6 +3680,10 @@ export interface operations {
                 dataset_key?: string | null;
                 severity?: ("info" | "warning" | "error" | "critical") | null;
                 feature_id?: string | null;
+                /** @description message/feature_id/source_record_key 부분일치(ILIKE). */
+                q?: string | null;
+                /** @description 연결 feature 좌표 bbox: min_lon,min_lat,max_lon,max_lat (WGS84). */
+                bbox?: string | null;
                 page_size?: number;
                 cursor?: string | null;
             };

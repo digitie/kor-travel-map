@@ -140,6 +140,8 @@ def test_list_issues_passes_filters_and_envelope(
         assert kwargs["dataset_key"] == "mois_license_features_bulk"
         assert kwargs["severity"] == "error"
         assert kwargs["feature_id"] == "feature-1"
+        assert kwargs["q"] == "종로"
+        assert kwargs["bbox"] == (126.97, 37.57, 126.98, 37.58)
         assert kwargs["limit"] == 25
         assert kwargs["cursor"] == "cursor-1"
         return OpsIntegrityIssuePage(items=(_ops_issue(),), next_cursor="cursor-2")
@@ -155,6 +157,8 @@ def test_list_issues_passes_filters_and_envelope(
             "dataset_key": "mois_license_features_bulk",
             "severity": "error",
             "feature_id": "feature-1",
+            "q": "종로",
+            "bbox": "126.97,37.57,126.98,37.58",
             "page_size": "25",
             "cursor": "cursor-1",
         },
@@ -166,6 +170,12 @@ def test_list_issues_passes_filters_and_envelope(
     assert body["meta"]["count"] == 1
     assert body["data"]["items"][0]["violation_key"] == _VIOLATION_KEY
     assert body["data"]["next_cursor"] == "cursor-2"
+
+
+@pytest.mark.unit
+def test_list_issues_invalid_bbox_returns_422(client: TestClient) -> None:
+    response = client.get("/admin/issues", params={"bbox": "126.97,37.57,126.98"})
+    assert response.status_code == 422
 
 
 @pytest.mark.unit

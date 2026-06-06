@@ -6,16 +6,13 @@ DA-D-03 envelope 전면 통일(T-DA-15/16/18, #250~#255) **완료**. 이어서 *
 `/admin/issues`(DA-D-04 = T-212 핵심 API) 구현 완료** — `routers/admin_issues.py`
 (GET 목록 keyset cursor + GET 단건 + PATCH 7 action) + 신규 `infra/feature_address_repo.py`
 (feature.features UPDATE + `ops.feature_overrides` upsert) + kraddr-geo 정/역지오코딩.
-`{data, meta}` envelope. 단위 14 + PostGIS 통합 3. 목록 bbox/q 필터는 `ops_repo`
-미지원이라 deferred.
+`{data, meta}` envelope. 단위 14 + PostGIS 통합 3. **목록 `q`/`bbox` 필터도 마무리**
+(`ops_repo` 확장: q ILIKE + bbox EXISTS 4326 GiST `&&`, PostGIS 통합 테스트).
 
 **다음 한 작업 후보(우선순위 순):**
-1. **bbox/q 목록 필터**(T-DA-13 deferred 잔여) — `ops_repo.list_ops_integrity_issues`에
-   `q`(message/feature_id ILIKE) + `bbox`(feature.coord && ST_MakeEnvelope, ADR-012:
-   coord 4326 직접, ST_Transform 금지) 추가 후 `/admin/issues` 라우터에 노출. 소~중규모.
-2. **T-212c** API error/log contract 정렬 + `/ops/health-deep` + provider/system/API
+1. **T-212c** API error/log contract 정렬 + `/ops/health-deep` + provider/system/API
    call log 조회 표면(T-212a gap T-212c-API-03/04). envelope는 이미 통일됨.
-3. **T-RV-37 잔여 hygiene** 또는 **T-RV-04b(provider public client live fetcher
+2. **T-RV-37 잔여 hygiene** 또는 **T-RV-04b(provider public client live fetcher
    wiring)**.
 
 **조율**: codex가 T-209e-c(backup/restore)/T-212b(admin UI, `/admin/issues` 화면 포함)를
