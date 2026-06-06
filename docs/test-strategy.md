@@ -169,7 +169,7 @@ def test_korean_coord_validates_bounds(coord):
 | F5 | provider `last_success` SLA 초과 | WARN | 2 ✅ |
 | F6 | `opening_hours` 모순 (ADR-019) | ERROR | 2 ✅ |
 | F7 | cross-provider dedup baseline score regression | WARN | 2 ✅ |
-| F8 | `file_object` orphan (RustFS↔DB) | WARN | 2 |
+| F8 | `file_object` orphan (RustFS↔DB) | WARN | 2 ✅ |
 
 집계(`build_report`): `severity_max` = 위반 케이스 최고 severity, 없으면 `OK`.
 Phase 1은 **관측만**(Dagster swap 차단 없음).

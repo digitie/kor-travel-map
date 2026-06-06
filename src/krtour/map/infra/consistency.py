@@ -1,6 +1,6 @@
 """``krtour.map.infra.consistency`` — feature 정합성 검사 (ADR-033).
 
-F1~F4 + Phase 2 일부 케이스를 raw SQL(ADR-004)로 검사하고 결과를
+F1~F4 + Phase 2 케이스를 raw SQL(ADR-004)로 검사하고 결과를
 ``ops.feature_consistency_reports``에 1 배치 = 1 행으로 영속화한다. Dagster
 게이트(``mv_refresh`` swap 차단)는 ``infra.batch_dag``가 ``severity_max``를 보고
 처리한다.
@@ -28,10 +28,13 @@ F1~F4 + Phase 2 일부 케이스를 raw SQL(ADR-004)로 검사하고 결과를
 - **F7** cross-provider dedup score 회귀 — unresolved cross-provider 후보의 현재
   ``core.scoring`` 재계산 점수가 큐 저장 baseline보다 기본 10점 이상 낮아지면
   severity=**WARN**.
+- **F8** file object orphan — 객체 저장소 스냅샷(``known_file_objects``)과
+  ``feature.feature_files`` 메타데이터가 서로 어긋나면 severity=**WARN**.
+  ``feature_files`` 테이블이 아직 없거나 스냅샷이 제공되지 않은 방향은 검사하지
+  않고 OK로 둔다.
 
-F8은 Phase 2 후속 PR에서 추가한다. F1/F2/F3/F6은
-``CONSISTENCY_CASES``(행별 정적 SQL)로, F4/F5/F7은 ``run_consistency_checks``의
-임계/정책/재계산 분기로 추가된다.
+F1/F2/F3/F6은 ``CONSISTENCY_CASES``(행별 정적 SQL)로, F4/F5/F7/F8은
+``run_consistency_checks``의 임계/정책/재계산/객체 스냅샷 분기로 추가된다.
 
 ADR 참조: ADR-002(async) / ADR-004(raw SQL) / ADR-012 / ADR-018 / ADR-033.
 """
@@ -57,6 +60,7 @@ __all__ = [
     "CaseSpec",
     "CaseResult",
     "ConsistencyReport",
+    "FileObjectRef",
     "CONSISTENCY_CASES",
     "DEDUP_PENDING_WARN_THRESHOLD",
     "DEDUP_SCORE_REGRESSION_WARN_POINTS",
@@ -88,6 +92,23 @@ DEDUP_SCORE_REGRESSION_WARN_POINTS: Final[float] = 10.0
 
 # detail-bearing kind (DETAIL_MODELS 매핑 — price/weather 제외, ADR-018).
 _DETAIL_KINDS_SQL: Final[str] = "'place','event','notice','route','area'"
+_FileObjectKey = tuple[str, str, str]
+
+
+@dataclass(frozen=True)
+class FileObjectRef:
+    """F8 비교에 사용하는 객체 저장소 스냅샷 항목."""
+
+    storage_backend: str
+    bucket: str
+    object_key: str
+
+    @property
+    def key(self) -> _FileObjectKey:
+        return (self.storage_backend, self.bucket, self.object_key)
+
+    def sample_id(self) -> str:
+        return f"{self.storage_backend}:{self.bucket}:{self.object_key}"
 
 
 @dataclass(frozen=True)
@@ -344,6 +365,23 @@ WHERE dq.status = 'pending'
 ORDER BY dq.total_score DESC, dq.review_key
 """
 
+_F8_FEATURE_FILES_TABLE_EXISTS_SQL: Final[str] = (
+    "SELECT to_regclass('feature.feature_files') IS NOT NULL"
+)
+_F8_FEATURE_FILE_METADATA_ROWS_SQL: Final[str] = """
+SELECT
+  ff.file_id,
+  ff.feature_id,
+  ff.storage_backend,
+  ff.bucket,
+  ff.object_key,
+  (f.feature_id IS NULL OR f.deleted_at IS NOT NULL) AS feature_missing
+FROM feature.feature_files AS ff
+LEFT JOIN feature.features AS f
+  ON f.feature_id = ff.feature_id
+ORDER BY ff.storage_backend, ff.bucket, ff.object_key, ff.file_id
+"""
+
 
 async def _check_f4_dedup_backlog(
     session: AsyncSession, *, threshold: int, sample_limit: int
@@ -463,6 +501,97 @@ async def _check_f7_dedup_score_regression(
     )
 
 
+def _append_limited_sample(samples: list[str], sample: str, *, sample_limit: int) -> None:
+    if len(samples) < sample_limit:
+        samples.append(sample)
+
+
+def _normalize_file_object_refs(
+    known_file_objects: Iterable[FileObjectRef] | None,
+) -> set[_FileObjectKey] | None:
+    if known_file_objects is None:
+        return None
+    return {obj.key for obj in known_file_objects}
+
+
+def _build_f8_file_object_orphan_result(
+    rows: Iterable[Any],
+    *,
+    known_file_objects: Iterable[FileObjectRef] | None,
+    sample_limit: int,
+) -> CaseResult:
+    """F8 metadata row와 객체 저장소 스냅샷을 비교해 orphan을 집계한다."""
+    known_keys = _normalize_file_object_refs(known_file_objects)
+    metadata_keys: set[_FileObjectKey] = set()
+    count = 0
+    sample_ids: list[str] = []
+
+    for row in rows:
+        key = (str(row["storage_backend"]), str(row["bucket"]), str(row["object_key"]))
+        metadata_keys.add(key)
+        key_sample = ":".join(key)
+        if row["feature_missing"]:
+            count += 1
+            _append_limited_sample(
+                sample_ids,
+                f"metadata_without_active_feature:{key_sample}:{row['file_id']}:"
+                f"{row['feature_id']}",
+                sample_limit=sample_limit,
+            )
+        if known_keys is not None and key not in known_keys:
+            count += 1
+            _append_limited_sample(
+                sample_ids,
+                f"metadata_missing_object:{key_sample}:{row['file_id']}:"
+                f"{row['feature_id']}",
+                sample_limit=sample_limit,
+            )
+
+    if known_keys is not None:
+        for key in sorted(known_keys - metadata_keys):
+            count += 1
+            _append_limited_sample(
+                sample_ids,
+                "object_missing_metadata:" + ":".join(key),
+                sample_limit=sample_limit,
+            )
+
+    return CaseResult(
+        code="F8",
+        severity="WARN",
+        description=(
+            "file object orphan (feature_files metadata ↔ 객체 저장소 스냅샷 불일치, "
+            "ADR-033 F8)"
+        ),
+        count=count,
+        sample_ids=sample_ids,
+    )
+
+
+async def _check_f8_file_object_orphans(
+    session: AsyncSession,
+    *,
+    known_file_objects: Iterable[FileObjectRef] | None,
+    sample_limit: int,
+) -> CaseResult:
+    """F8 — feature_files metadata와 객체 저장소 스냅샷 불일치 WARN."""
+    table_exists = bool(
+        (await session.execute(text(_F8_FEATURE_FILES_TABLE_EXISTS_SQL))).scalar_one()
+    )
+    rows: Iterable[Any] = []
+    if table_exists:
+        rows = (
+            (await session.execute(text(_F8_FEATURE_FILE_METADATA_ROWS_SQL)))
+            .mappings()
+            .all()
+        )
+    return _build_f8_file_object_orphan_result(
+        rows,
+        known_file_objects=known_file_objects,
+        sample_limit=sample_limit,
+    )
+
+
 async def run_consistency_checks(
     session: AsyncSession,
     *,
@@ -472,8 +601,9 @@ async def run_consistency_checks(
     dedup_pending_threshold: int = DEDUP_PENDING_WARN_THRESHOLD,
     provider_last_success_sla_seconds: int = PROVIDER_LAST_SUCCESS_WARN_SECONDS,
     dedup_score_regression_warn_points: float = DEDUP_SCORE_REGRESSION_WARN_POINTS,
+    known_file_objects: Iterable[FileObjectRef] | None = None,
 ) -> ConsistencyReport:
-    """F1~F7 정합성 검사 실행 + (옵션) ``ops.feature_consistency_reports`` 적재.
+    """F1~F8 정합성 검사 실행 + (옵션) ``ops.feature_consistency_reports`` 적재.
 
     Parameters
     ----------
@@ -495,6 +625,9 @@ async def run_consistency_checks(
     dedup_score_regression_warn_points:
         F7 기본 허용 회귀폭. ``ops.dedup_review_queue.total_score`` baseline 대비 현재
         ``core.scoring`` 재계산 점수가 이 점수 이상 낮아지면 WARN으로 본다.
+    known_file_objects:
+        F8 객체 저장소 스냅샷. 제공되면 ``feature.feature_files`` metadata와 양방향
+        비교한다. 미제공 시 DB metadata가 참조하는 feature 활성 여부만 검사한다.
 
     Returns
     -------
@@ -534,7 +667,7 @@ async def run_consistency_checks(
             )
         )
 
-    # F4/F5/F7 — 정적 SQL이 아닌 임계/정책/source join 케이스.
+    # F4/F5/F7/F8 — 정적 SQL이 아닌 임계/정책/source join/object snapshot 케이스.
     cases.append(
         await _check_f4_dedup_backlog(
             session, threshold=dedup_pending_threshold, sample_limit=sample_limit
@@ -551,6 +684,13 @@ async def run_consistency_checks(
         await _check_f7_dedup_score_regression(
             session,
             regression_points=dedup_score_regression_warn_points,
+            sample_limit=sample_limit,
+        )
+    )
+    cases.append(
+        await _check_f8_file_object_orphans(
+            session,
+            known_file_objects=known_file_objects,
             sample_limit=sample_limit,
         )
     )

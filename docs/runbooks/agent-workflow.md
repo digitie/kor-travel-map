@@ -76,6 +76,10 @@ gh pr create --base main --head feat/<topic> --title ... --body ...
   4 kept / M passed`)를 적되, **반드시 실행해서 본 수치만**. 안 돌린 결과를 적지
   않는다([failure-patterns §A2](./agent-failure-patterns.md)).
 - 커밋 trailer: `Co-Authored-By:` 한 줄. PR 본문 끝: `🤖 Generated with ...`.
+- Windows Git을 WSL 비대화 세션에서 쓸 때 `rebase --continue`/`merge --continue`는
+  Vim이 열려 멈출 수 있다. 항상 명령 단위 editor 우회 옵션을 붙인다:
+  `git.exe -C <worktree> -c core.editor=true rebase --continue`
+  ([failure-patterns §B4](./agent-failure-patterns.md)).
 
 ## 6. CI green → 머지
 
