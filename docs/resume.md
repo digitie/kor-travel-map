@@ -38,14 +38,19 @@ fetch)`로 해당 resource_key만 guard→live 교체. dagster 테스트는 prov
 검증(실 키 불요), 실 fetch 검증은 키 있는 환경(T-212e)에서.
 
 - [x] **① datagokr_cultural_festivals**(festival, #261) — clean match.
+- [x] **② krheritage_events**(2026-06-07) — ADR-044 cross-repo 재조정: upstream
+  `python-krheritage-api#4`(HeritageEvent.raw 주입, merged) + krtour `KrHeritageEvent`
+  Protocol/transform을 provider 필드명(starts_on/place/address)에 재정렬 + fetcher
+  (`event.iter_months()` rolling window).
 - **적합성 감사(`docs/reports/t-rv-04b-provider-fetcher-audit-2026-06-07.md`): datagokr
-  외 6종 전부 설계 결정 선행 필요 — 단순 wiring 아님.**
-  - **다음 후보 = krheritage_events**(가장 깨끗, `select_event_list` 페이지). 착수 전
-    `python-krheritage-api` EventService model의 `KrHeritageEvent` Protocol 충족 실검증.
+  외는 전부 model↔Protocol 실검증 필수(감사 "ASSUMED CLEAN" 신뢰 불가).**
   - **krex_rest_areas/traffic**: model 불일치(uni_id/address/좌표 없음) → ADR-044 재조정
-    (upstream PR 또는 krtour Protocol+transform 재정렬 + uni_id 자연키 결정). 데이터 모델 결정.
+    (upstream PR 또는 krtour 재정렬 + **uni_id 자연키 결정** — krheritage는 sn이 있었으나
+    krex는 자연키 부재가 추가 난점). 데이터 모델 결정.
   - **opinet**: bulk 없음 → grid 검색 커버리지 정책. **mois**: SpatiaLite DB파일 refresh
     정책. **knps**: keyless 파일셋 SHP/CSV 파서 어댑터.
+  - **사용자 승인**: sibling `python-*-api` 레포 편집 in scope(2026-06-07) — cross-repo
+    재조정 가능.
 - **원칙**: provider 착수 전 (1) 이미 구현됐는지 grep, (2) provider model이 krtour
   Protocol을 실제로 만족하는지 검증(미검증 wiring은 런타임 AttributeError).
 

@@ -62,11 +62,11 @@ class _Event:
 
     sn: str
     title: str
-    start_date: date | None = None
-    end_date: date | None = None
-    venue_name: str | None = None
-    tel: str | None = None
-    location_text: str | None = None
+    starts_on: date | None = None
+    ends_on: date | None = None
+    place: str | None = None
+    tel_name: str | None = None
+    address: str | None = None
     longitude: Decimal | float | None = None
     latitude: Decimal | float | None = None
     main_image: str | None = None
@@ -256,11 +256,11 @@ async def test_event_bundle_mapping() -> None:
     event = _Event(
         sn="EVT-2026-001",
         title="종묘제례악 공연",
-        start_date=date(2026, 5, 1),
-        end_date=date(2026, 5, 3),
-        venue_name="종묘",
-        tel="02-765-0195",
-        location_text="서울특별시 종로구 종로 157",
+        starts_on=date(2026, 5, 1),
+        ends_on=date(2026, 5, 3),
+        place="종묘",
+        tel_name="02-765-0195",
+        address="서울특별시 종로구 종로 157",
         longitude=Decimal("126.994"),
         latitude=Decimal("37.574"),
     )

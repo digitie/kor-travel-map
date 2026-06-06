@@ -71,7 +71,7 @@ def test_offline_upload_load_default_resources_registered() -> None:
 
 
 # T-RV-04b: provider별 live fetcher가 연결된 resource key. 나머지는 guard.
-_LIVE_PROVIDER_RESOURCE_KEYS = {"datagokr_cultural_festivals"}
+_LIVE_PROVIDER_RESOURCE_KEYS = {"datagokr_cultural_festivals", "krheritage_events"}
 
 
 def test_feature_load_provider_guard_resources_registered() -> None:

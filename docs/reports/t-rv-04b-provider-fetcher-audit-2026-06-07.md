@@ -24,14 +24,16 @@ clean bulk 페이지네이션을 제공했다.
 | `krex_rest_areas` | ❌ 8필드 중 2 일치 | 메서드는 있음(`restarea.list_all` Page) | `RestArea`에 `uni_id`·`address` 없음, `tel→phone_number`/`highway_name→route_name`/`lon/lat` rename. **Protocol 재조정(ADR-044)** |
 | `krex_traffic_notices` | ❌ 모델 빈약 | `traffic.get_incidents` 페이지 | `Incident`에 notice_id·좌표·severity·valid_from/until 없음. **Protocol 재조정** |
 | `krheritage_items` | ⚠️ 미확인(@property 기반) | search 페이지 + **GIS 보강 루프 필요** | `geom_wkt`는 별도 GIS 호출. **fetch 정책(dual-phase)** |
-| `krheritage_events` | ⚠️ 미확인 | `select_event_list` 페이지(clean으로 보임) | provider model 실검증 필요 → 통과 시 **다음 wiring 후보** |
+| `krheritage_events` | ❌→✅ **재조정 완료** | `event.iter_months()` rolling window | **검증 결과 mismatch**(HeritageEvent=starts_on/place/address, `raw` 부재). ADR-044 재조정 완료: upstream `python-krheritage-api#4`(raw 주입) + krtour Protocol/transform 재정렬. **wiring 완료 2026-06-07.** |
 | `mois_license_records` | ✅ 일치(`PlaceRecord`) | ❌ live API 아님 | MOIS 원천이 SpatiaLite **DB 파일**. LOCALDATA ZIP 다운로드+CSV 파싱+적재 또는 DB 스냅샷 동기. **정책 결정** |
 | `knps_point_records` / `knps_geometry_records` | ❌ 사전 파싱 record 없음 | ❌ keyless 파일셋 | provider는 SHP/CSV 원본 + `GeoFeatureCollection`만 제공. **SHP/CSV→Protocol 어댑터 + 파일 다운로드 정책** |
 
 ## 결정 필요 항목 (우선순위)
 
-1. **krheritage_events** — provider model이 Protocol을 만족하면 datagokr처럼 즉시 wiring
-   가능(가장 깨끗한 다음 후보). 착수 전 `python-krheritage-api` EventService model 실검증.
+1. ~~**krheritage_events**~~ — **완료(2026-06-07).** 실검증 결과 mismatch였고, ADR-044
+   재조정(upstream `python-krheritage-api#4` raw 주입 + krtour Protocol/transform 재정렬)으로
+   해결 후 wiring. **교훈: "ASSUMED CLEAN"은 신뢰 불가 — 모든 provider는 wiring 전
+   model↔Protocol 실검증 필수.** datagokr 외 전부 mismatch로 드러날 가능성 높음.
 2. **krex_rest_areas / krex_traffic_notices** (ADR-044 Protocol 재조정) — 택1:
    (a) `python-krex-api`에 누락 필드(uni_id/address/좌표 등) 추가 upstream PR, 또는
    (b) krtour `KrexRestAreaItem`/traffic Protocol + transform을 실제 model에 맞춰 재정렬
