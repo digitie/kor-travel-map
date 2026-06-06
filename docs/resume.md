@@ -1,5 +1,23 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-06 Codex 작업 메모 — TripMate 요구사항 대조 task 반영
+
+TripMate `docs/krtour-map-requirements.md`를 현재 krtour-map `origin/main`
+(`ae67a88`, PR#232 이후)과 대조했다. TripMate 문서의 기준선은 `b775c74`라 OpenAPI
+HTTP 모델, `krtour-map-admin`, user OpenAPI, feature update request 큐 구현 이전
+상태가 섞여 있었으므로 그대로 복사하지 않고
+`docs/reports/tripmate-requirements-reconcile-2026-06-06.md`로 K-1~K-14를 재분류했다.
+
+`docs/tasks.md`에는 후속 묶음 `T-213a~h`를 추가했다. 핵심 잔여는 일반 좌표 기준
+`/features/nearby`(`T-213b`), bbox clustering(`T-213c`), `AsyncKrtourMapClient`
+read parity(`T-213d`), weather card(`T-213e`), category catalog(`T-213f`), provider
+export/sync state/last-sync(`T-213g`), public health/version(`T-213h`)다. #232의
+`/tripmate/feature-update-requests*` 공개 경로 분리도 반영했다. 최신 사용자 지시대로
+단순 호환성·최소 수정이 아니라 완성도, 안정성, 확장성, 성능을 기준으로 task를
+정의했다.
+
+즉시 다음 한 작업은 기존 순서대로 **T-209b-a 구현**이다.
+
 ## 2026-06-06 Codex 작업 메모 — T-RV-29/30 OpenAPI user spec + frontend generated types
 
 T-RV-29/30을 닫는다. TripMate/user OpenAPI에서 admin write/read path가 노출되지

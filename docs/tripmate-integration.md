@@ -23,7 +23,7 @@ TripMate 연동의 현재 표준 흐름:
 ```
 TripMate API/Web
   → generated krtour-map OpenAPI client
-  → krtour-map API (`/features`, `/features/{id}`, `/tripmate/feature-update-requests`)
+  → krtour-map API (`/features/in-bounds`, `/features/{id}`, `/tripmate/feature-update-requests`)
   → krtour-map 독립 DB/Dagster
 ```
 
@@ -31,12 +31,19 @@ TripMate API/Web
 
 | API | 목적 |
 |-----|------|
-| `GET /features` | bbox 기반 지도 feature 조회 |
+| `GET /features/in-bounds` | bbox 기반 지도 feature 조회 |
 | `GET /features/{feature_id}` | feature 상세 |
-| `POST /tripmate/features/batch` | 여러 feature_id batch 상세 조회 (후속 확장) |
+| `GET /features/search` | 이름/bbox 기반 feature 검색 |
+| `GET /features/nearby/by-target` | 외부 POI/cache target key 기준 주변 feature 조회 |
+| `POST /tripmate/features/batch` | 여러 feature_id batch 상세 조회 |
 | `POST /tripmate/feature-update-requests` | 특정 feature/좌표 반경/시군구/provider 업데이트 큐잉 |
 | `GET /tripmate/feature-update-requests/{request_id}` | 업데이트 요청 진행 상태 |
 | `GET /ops/import-jobs/{job_id}` | 실제 Dagster/import job progress |
+
+후속 후보는 `docs/reports/tripmate-requirements-reconcile-2026-06-06.md`와
+`docs/tasks.md` `T-213a~h`를 따른다. 특히 일반 좌표 기준 `/features/nearby`,
+provider last-sync, public `/health`/`/version`, weather card, category catalog는
+아직 user OpenAPI 표면이 아니다.
 
 예: 특정 좌표 중심 반경 5km 안 feature 업데이트 요청.
 
