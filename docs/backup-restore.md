@@ -8,9 +8,11 @@
 - RustFS 객체 저장소 볼륨: feature file bucket `krtour-map`, offline upload bucket
   `krtour-uploads`
 
-현재 구현 범위는 `T-209e-a` cold backup 스크립트와 `T-209e-b` staging cold restore
-자동화다. admin router(`/admin/backups`, `/admin/restore/*`)와 hot-swap UI는 후속
-`T-209e-c`에서 구현한다.
+현재 구현 범위는 `T-209e-a` cold backup 스크립트, `T-209e-b` staging cold restore
+자동화, `T-209e-c` admin router/UI다. Admin UI는 `/admin/backups`에서 artifact 목록,
+backup/restore command plan, staging restore 후 hot-swap 수동 승인 경계를 보여준다.
+host command 실행은 기본 비활성(`KRTOUR_MAP_ADMIN_BACKUP_COMMAND_ENABLED=false`)이며,
+운영자가 명시 opt-in할 때만 API에서 스크립트를 실행한다.
 
 ## 1. 전제
 
@@ -152,13 +154,24 @@ docker run --rm -v krtour-map-rustfs-restore:/data alpine:3.20 \
   sh -c "find /data -maxdepth 2 -type f | sed -n '1,40p'"
 ```
 
-## 7. 구현 잔여
+## 7. Admin API/UI
+
+Admin API는 다음 경로를 제공한다.
+
+- `GET /admin/backups` — `data/backups/<backup_id>` artifact + manifest 목록.
+- `GET /admin/backups/{backup_id}` — artifact 단건 상세.
+- `POST /admin/backups` — backup command plan 생성. `execute=true`는
+  `KRTOUR_MAP_ADMIN_BACKUP_COMMAND_ENABLED=true`일 때만 실행.
+- `POST /admin/restore/{backup_id}` — staging restore command plan 생성. 기본 target은
+  `krtour_map_restore`, `krtour_map_dagster_restore`,
+  `krtour-map-rustfs-restore`.
+- `POST /admin/restore/{backup_id}/swap` — 자동 switch를 수행하지 않고 수동 hot-swap
+  승인 경계를 반환한다.
+
+## 8. 구현 잔여
 
 다음 항목은 아직 구현하지 않았다.
 
-- `src/krtour/map/infra/backup.py`와 ADR-039 advisory lock 기반 `backup`/`restore`
-  critical section.
-- `packages/krtour-map-admin/src/krtour/map_admin/routers/admin_backups.py`.
-- `GET /admin/backups`, `POST /admin/backups`, `POST /admin/restore/{backup_id}`,
-  `POST /admin/restore/{backup_id}/swap`.
-- staging DB restore 후 API smoke/count check 자동화와 hot-swap UI.
+- ADR-039 advisory lock 기반 `backup`/`restore` critical section.
+- staging DB restore 후 API smoke/count check 자동화.
+- 운영 DSN/volume hot-swap 자동 실행. 현재는 UI/API에서 manual-required 상태만 반환한다.

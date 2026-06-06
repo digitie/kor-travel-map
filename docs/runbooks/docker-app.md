@@ -215,7 +215,7 @@ meta/SHA256SUMS
 ```
 
 검증과 수동 cold restore 경계는 `docs/backup-restore.md`를 따른다. admin router와
-hot-swap restore UI는 후속 T-209e 작업이다.
+plan-only hot-swap restore UI는 `/admin/backups`에서 제공한다.
 
 staging cold restore는 운영 DB와 운영 RustFS volume에 직접 쓰지 않고 기본 staging
 대상(`krtour_map_restore`, `krtour_map_dagster_restore`,

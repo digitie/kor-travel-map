@@ -363,6 +363,12 @@ type drift 부채 0).
 | `KRTOUR_MAP_ADMIN_DAGSTER_ALLOWED_HOSTS` | backend Dagster GraphQL 호출 host allowlist. 기본은 `["127.0.0.1","localhost","::1","dagster"]`이며, 운영 Dagster host를 별도로 쓰면 URL과 함께 명시한다 |
 | `KRTOUR_MAP_ADMIN_DAGSTER_REPOSITORY_NAME` | offline upload load GraphQL launch selector의 repositoryName. 기본 `__repository__` |
 | `KRTOUR_MAP_ADMIN_DAGSTER_REPOSITORY_LOCATION_NAME` | offline upload load GraphQL launch selector의 repositoryLocationName. 기본 `krtour.map_dagster.definitions` |
+| `KRTOUR_MAP_ADMIN_BACKUP_ROOT` | backup artifact root. 기본 `data/backups` |
+| `KRTOUR_MAP_ADMIN_BACKUP_PROJECT_ROOT` | backup/restore script 상대 경로를 해석하고 command를 실행할 project root. 기본 `.` |
+| `KRTOUR_MAP_ADMIN_BACKUP_SCRIPT_PATH` / `KRTOUR_MAP_ADMIN_RESTORE_SCRIPT_PATH` | backup/restore command plan이 호출하는 script path. 기본 `scripts/docker-backup.sh`, `scripts/docker-restore.sh` |
+| `KRTOUR_MAP_ADMIN_BACKUP_COMMAND_ENABLED` | backup/restore host command 실행 허용 여부. 기본 `false`라 `/admin/backups` UI는 command plan만 생성한다 |
+| `KRTOUR_MAP_ADMIN_BACKUP_COMMAND_TIMEOUT_SECONDS` | opt-in host command 실행 timeout. 기본 `1800` |
+| `KRTOUR_MAP_ADMIN_RESTORE_APP_DB` / `KRTOUR_MAP_ADMIN_RESTORE_DAGSTER_DB` / `KRTOUR_MAP_ADMIN_RESTORE_RUSTFS_VOLUME` | staging restore target 기본값 |
 | `KRTOUR_MAP_DOCKER_ADMIN_DAGSTER_URL` | Docker compose가 API 컨테이너의 `KRTOUR_MAP_ADMIN_DAGSTER_URL`로 주입하는 내부 Dagster URL. `.env`의 로컬 `127.0.0.1` 값과 분리 |
 | `KRTOUR_MAP_DOCKER_ADMIN_DAGSTER_ALLOWED_HOSTS` | Docker compose가 API 컨테이너에 주입하는 Dagster host allowlist. 기본은 `["dagster","127.0.0.1","localhost","::1"]` |
 | `KRTOUR_MAP_DAGSTER_PG_URL` | Dagster metadata Postgres URL. Docker에서는 `KRTOUR_MAP_DOCKER_DAGSTER_PG_URL` 기본값(`postgres:5432/krtour_map_dagster`)을 `dagster`/`dagster-daemon`에 주입 |

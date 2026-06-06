@@ -1036,6 +1036,397 @@
         "title": "ApiCallLogsResponse",
         "type": "object"
       },
+      "BackupCommandPlan": {
+        "additionalProperties": false,
+        "description": "Command plan returned by backup/restore endpoints.",
+        "properties": {
+          "command": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Command",
+            "type": "array"
+          },
+          "cwd": {
+            "title": "Cwd",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "env": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Env",
+            "type": "object"
+          }
+        },
+        "required": [
+          "cwd",
+          "command",
+          "env",
+          "enabled"
+        ],
+        "title": "BackupCommandPlan",
+        "type": "object"
+      },
+      "BackupDetailMeta": {
+        "additionalProperties": false,
+        "description": "Backup detail metadata.",
+        "properties": {
+          "backup_root": {
+            "title": "Backup Root",
+            "type": "string"
+          },
+          "command_enabled": {
+            "title": "Command Enabled",
+            "type": "boolean"
+          },
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "backup_root",
+          "command_enabled",
+          "duration_ms"
+        ],
+        "title": "BackupDetailMeta",
+        "type": "object"
+      },
+      "BackupDetailResponse": {
+        "additionalProperties": false,
+        "description": "``GET /admin/backups/{backup_id}`` response.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/BackupRecord"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/BackupDetailMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "BackupDetailResponse",
+        "type": "object"
+      },
+      "BackupListData": {
+        "additionalProperties": false,
+        "description": "Backup list data.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BackupRecord"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "BackupListData",
+        "type": "object"
+      },
+      "BackupListMeta": {
+        "additionalProperties": false,
+        "description": "Backup list metadata.",
+        "properties": {
+          "backup_root": {
+            "title": "Backup Root",
+            "type": "string"
+          },
+          "command_enabled": {
+            "title": "Command Enabled",
+            "type": "boolean"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "count",
+          "backup_root",
+          "command_enabled",
+          "duration_ms"
+        ],
+        "title": "BackupListMeta",
+        "type": "object"
+      },
+      "BackupListResponse": {
+        "additionalProperties": false,
+        "description": "``GET /admin/backups`` response.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/BackupListData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/BackupListMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "BackupListResponse",
+        "type": "object"
+      },
+      "BackupOperationData": {
+        "additionalProperties": false,
+        "description": "Backup/restore/swap operation response data.",
+        "properties": {
+          "artifact": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BackupRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "backup_id": {
+            "title": "Backup Id",
+            "type": "string"
+          },
+          "command": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BackupCommandPlan"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "operation": {
+            "enum": [
+              "backup",
+              "restore",
+              "swap"
+            ],
+            "title": "Operation",
+            "type": "string"
+          },
+          "restore_targets": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RestoreTargets"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "enum": [
+              "planned",
+              "completed",
+              "failed",
+              "manual_required"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "stderr": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stderr"
+          },
+          "stdout": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stdout"
+          }
+        },
+        "required": [
+          "operation",
+          "status",
+          "backup_id",
+          "message"
+        ],
+        "title": "BackupOperationData",
+        "type": "object"
+      },
+      "BackupOperationMeta": {
+        "additionalProperties": false,
+        "description": "Backup operation metadata.",
+        "properties": {
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "duration_ms"
+        ],
+        "title": "BackupOperationMeta",
+        "type": "object"
+      },
+      "BackupOperationResponse": {
+        "additionalProperties": false,
+        "description": "Backup/restore/swap operation response.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/BackupOperationData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/BackupOperationMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "BackupOperationResponse",
+        "type": "object"
+      },
+      "BackupRecord": {
+        "additionalProperties": false,
+        "description": "Backup artifact HTTP representation.",
+        "properties": {
+          "backup_id": {
+            "title": "Backup Id",
+            "type": "string"
+          },
+          "byte_size": {
+            "title": "Byte Size",
+            "type": "integer"
+          },
+          "checksum_count": {
+            "title": "Checksum Count",
+            "type": "integer"
+          },
+          "components": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Components",
+            "type": "object"
+          },
+          "created_at_utc": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At Utc"
+          },
+          "databases": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Databases",
+            "type": "object"
+          },
+          "detail_url": {
+            "title": "Detail Url",
+            "type": "string"
+          },
+          "manifest_status": {
+            "title": "Manifest Status",
+            "type": "string"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mode"
+          },
+          "object_storage": {
+            "additionalProperties": true,
+            "title": "Object Storage",
+            "type": "object"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "restore_url": {
+            "title": "Restore Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "backup_id",
+          "path",
+          "manifest_status",
+          "components",
+          "databases",
+          "object_storage",
+          "byte_size",
+          "checksum_count",
+          "detail_url",
+          "restore_url"
+        ],
+        "title": "BackupRecord",
+        "type": "object"
+      },
+      "BackupRunRequest": {
+        "additionalProperties": false,
+        "description": "Backup command request.\n\n``execute`` defaults to false. The API first returns an auditable command\nplan; actual host command execution needs explicit request + enabled\nserver setting.",
+        "properties": {
+          "allow_running": {
+            "default": false,
+            "title": "Allow Running",
+            "type": "boolean"
+          },
+          "backup_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backup Id"
+          },
+          "execute": {
+            "default": false,
+            "title": "Execute",
+            "type": "boolean"
+          }
+        },
+        "title": "BackupRunRequest",
+        "type": "object"
+      },
       "BboxScope": {
         "additionalProperties": false,
         "description": "WGS84 bbox 안 feature 갱신 scope.",
@@ -6145,6 +6536,126 @@
         "title": "PublicVersionResponse",
         "type": "object"
       },
+      "RestoreRunRequest": {
+        "additionalProperties": false,
+        "description": "Staging restore command request.",
+        "properties": {
+          "app_db": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "App Db"
+          },
+          "dagster_db": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dagster Db"
+          },
+          "execute": {
+            "default": false,
+            "title": "Execute",
+            "type": "boolean"
+          },
+          "recreate": {
+            "default": false,
+            "title": "Recreate",
+            "type": "boolean"
+          },
+          "rustfs_volume": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rustfs Volume"
+          },
+          "skip_checksum": {
+            "default": false,
+            "title": "Skip Checksum",
+            "type": "boolean"
+          },
+          "skip_rustfs": {
+            "default": false,
+            "title": "Skip Rustfs",
+            "type": "boolean"
+          }
+        },
+        "title": "RestoreRunRequest",
+        "type": "object"
+      },
+      "RestoreSwapRequest": {
+        "additionalProperties": false,
+        "description": "Manual hot-swap boundary request.",
+        "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "operator": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operator"
+          }
+        },
+        "title": "RestoreSwapRequest",
+        "type": "object"
+      },
+      "RestoreTargets": {
+        "additionalProperties": false,
+        "description": "Staging restore targets.",
+        "properties": {
+          "app_db": {
+            "title": "App Db",
+            "type": "string"
+          },
+          "dagster_db": {
+            "title": "Dagster Db",
+            "type": "string"
+          },
+          "rustfs_volume": {
+            "title": "Rustfs Volume",
+            "type": "string"
+          }
+        },
+        "required": [
+          "app_db",
+          "dagster_db",
+          "rustfs_volume"
+        ],
+        "title": "RestoreTargets",
+        "type": "object"
+      },
       "SigunguByRadiusScope": {
         "additionalProperties": false,
         "description": "kraddr-geo가 계산한 반경 교차 시군구 기준 갱신 scope.",
@@ -6717,6 +7228,118 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/admin/backups": {
+      "get": {
+        "description": "List local backup artifacts.",
+        "operationId": "list_backups_admin_backups_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Backups",
+        "tags": [
+          "admin-backups"
+        ]
+      },
+      "post": {
+        "description": "Plan or run a cold backup command.",
+        "operationId": "create_backup_admin_backups_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/BackupRunRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupOperationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Backup",
+        "tags": [
+          "admin-backups"
+        ]
+      }
+    },
+    "/admin/backups/{backup_id}": {
+      "get": {
+        "description": "Return one backup artifact.",
+        "operationId": "get_backup_admin_backups__backup_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "backup_id",
+            "required": true,
+            "schema": {
+              "title": "Backup Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Backup",
+        "tags": [
+          "admin-backups"
+        ]
+      }
+    },
     "/admin/dedup-review": {
       "get": {
         "operationId": "list_reviews_admin_dedup_review_get",
@@ -8761,6 +9384,126 @@
         "summary": "POI/cache target 등록 또는 갱신",
         "tags": [
           "admin-poi-cache-targets"
+        ]
+      }
+    },
+    "/admin/restore/{backup_id}": {
+      "post": {
+        "description": "Plan or run a staging restore command.",
+        "operationId": "restore_backup_admin_restore__backup_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "backup_id",
+            "required": true,
+            "schema": {
+              "title": "Backup Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/RestoreRunRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupOperationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Restore Backup",
+        "tags": [
+          "admin-backups"
+        ]
+      }
+    },
+    "/admin/restore/{backup_id}/swap": {
+      "post": {
+        "description": "Return the manual hot-swap boundary for a restored backup.",
+        "operationId": "plan_restore_swap_admin_restore__backup_id__swap_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "backup_id",
+            "required": true,
+            "schema": {
+              "title": "Backup Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/RestoreSwapRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupOperationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Plan Restore Swap",
+        "tags": [
+          "admin-backups"
         ]
       }
     },

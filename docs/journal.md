@@ -2,6 +2,26 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-07 (codex) — T-209e-c backup/restore admin surface
+
+**작업**: T-209e backup/restore 묶음의 admin router/UI 표면을 추가한다. T-212 계열과
+T-RV-04b는 Claude Code 진행 범위라 제외한다.
+
+- **Artifact helper**: `krtour.map.infra.backup`이 `data/backups/<backup_id>` manifest,
+  checksum count, directory size를 읽어 최신순으로 정렬한다.
+- **Admin API**: `/admin/backups`, `/admin/backups/{backup_id}`,
+  `/admin/restore/{backup_id}`, `/admin/restore/{backup_id}/swap`을 추가한다. backup/restore
+  실행은 기본 plan-only이며 `KRTOUR_MAP_ADMIN_BACKUP_COMMAND_ENABLED=true` opt-in에서만
+  host command를 실행한다.
+- **Admin UI**: `/admin/backups`에서 artifact 목록, manifest 요약, backup/restore command
+  plan, manual-required hot-swap 경계를 보여준다.
+- **검증**: NTFS `ruff check .`, OpenAPI `--profile all --check`, frontend
+  `gen:types:check`/`type-check`/`lint`, React Doctor verbose(새 파일 경고 없음),
+  production build 통과. ext4 `ruff check .`, OpenAPI check, `lint-imports`,
+  `mypy --strict`, admin package 전체 `214 passed`, unit 전체 `894 passed`.
+- **잔여**: ADR-039 advisory lock critical section, staging restore 후 smoke/count check
+  자동화, 운영 DSN/volume hot-swap 자동 실행은 후속으로 남긴다.
+
 ## 2026-06-07 (codex) — T-RV-37 잔여 hygiene
 
 **작업**: PR 리뷰 후속 LOW 묶음 `T-RV-37` 잔여 hygiene을 정리한다.

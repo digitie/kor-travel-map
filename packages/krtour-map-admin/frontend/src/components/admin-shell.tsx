@@ -2,6 +2,7 @@
 
 import {
   DatabaseIcon,
+  ArchiveIcon,
   GitCompareArrowsIcon,
   HomeIcon,
   ListChecksIcon,
@@ -37,6 +38,7 @@ const navItems = [
     label: "Offline uploads",
     icon: UploadCloudIcon,
   },
+  { href: "/admin/backups", label: "Backups", icon: ArchiveIcon },
   { href: "/admin/dagster", label: "Dagster", icon: WorkflowIcon },
   { href: "/etl", label: "ETL preview", icon: DatabaseIcon },
 ] as const;

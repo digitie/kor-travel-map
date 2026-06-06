@@ -1,5 +1,21 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-07 Codex 작업 메모 — T-209e-c backup/restore admin surface
+
+사용자 지시에 따라 T-212 계열과 T-RV-04b는 Claude Code 진행 범위로 두고, Codex는
+T-209 계열로 이동한다. 이번 범위는 `T-209e-c` admin backup/restore router +
+hot-swap UI다. `/admin/backups`는 `data/backups/<backup_id>` artifact와 manifest를
+읽고, `POST /admin/backups`는 cold backup command plan을 만든다.
+`/admin/restore/{backup_id}`는 staging restore command plan을 만들며, host command
+실행은 `KRTOUR_MAP_ADMIN_BACKUP_COMMAND_ENABLED=true` opt-in과 요청별
+`execute=true`가 모두 있어야 한다. `/admin/restore/{backup_id}/swap`은 운영
+DSN/volume switch를 자동 실행하지 않고 manual-required 승인 경계만 반환한다.
+
+**다음 한 작업**: T-209e-c 이후 남은 T-209e 범위는 ADR-039 advisory lock critical
+section, staging restore 후 smoke/count check 자동화, 운영 DSN/volume hot-swap 자동
+실행이다. 후속 착수 전 사용자 지시와 Claude lane을 다시 확인하고 T-212/T-RV-04b
+파생은 피한다.
+
 ## 2026-06-07 Codex 작업 메모 — T-RV-37 잔여 hygiene 마무리
 
 남은 PR 리뷰 후속 중 `T-RV-37` 잔여 hygiene을 한 PR로 닫는다. 범위는
@@ -59,9 +75,9 @@ DA-D-03 envelope 전면 통일(T-DA-15/16/18, #250~#255) **완료**. 이어서 *
 **다음 한 작업 후보**: T-212d perf baseline 문서(EXPLAIN 수집 가능한 쿼리부터) 또는
 T-RV-40 F6 인덱스, 그 외 codex와 lane 조율(b/e).
 
-**조율**: codex가 T-209e-c(backup/restore)/T-212b(admin UI, `/admin/issues` 화면 포함)를
-잡고 있다. `/admin/issues` **API**는 완료됐으므로 codex는 UI에서 이 API를 소비하면 된다
-(envelope/필드 계약은 openapi.json 정본). API lane만 건드리고 UI/backup lane은 codex.
+**조율 갱신**: Codex는 사용자 지시에 따라 T-209e-c(backup/restore)만 잡고,
+T-212 계열은 Claude Code 진행 범위로 둔다. `/admin/issues` API 계약은
+`openapi.json` 정본을 따른다.
 
 ## 2026-06-06 Codex 작업 메모 — T-RV-27/40/41 운영 hardening + F6 성능 전제
 

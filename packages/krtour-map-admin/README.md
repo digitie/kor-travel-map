@@ -91,6 +91,15 @@ shadcn/ui + `@krtour/map-marker-react` (ADR-029). 자세한 사양:
 | `KRTOUR_MAP_ADMIN_DAGSTER_ALLOWED_HOSTS` | `["127.0.0.1","localhost","::1","dagster"]` | Dagster GraphQL 호출 host allowlist. `KRTOUR_MAP_ADMIN_DAGSTER_URL`/override host가 이 목록에 있어야 함 |
 | `KRTOUR_MAP_ADMIN_DAGSTER_REPOSITORY_NAME` | `__repository__` | offline upload load GraphQL launch selector의 repositoryName |
 | `KRTOUR_MAP_ADMIN_DAGSTER_REPOSITORY_LOCATION_NAME` | `krtour.map_dagster.definitions` | offline upload load GraphQL launch selector의 repositoryLocationName |
+| `KRTOUR_MAP_ADMIN_BACKUP_ROOT` | `data/backups` | `/admin/backups`가 조회하는 backup artifact root |
+| `KRTOUR_MAP_ADMIN_BACKUP_PROJECT_ROOT` | `.` | backup/restore script 상대 경로를 해석하고 command를 실행할 project root |
+| `KRTOUR_MAP_ADMIN_BACKUP_SCRIPT_PATH` | `scripts/docker-backup.sh` | backup command plan이 호출하는 script path |
+| `KRTOUR_MAP_ADMIN_RESTORE_SCRIPT_PATH` | `scripts/docker-restore.sh` | restore command plan이 호출하는 script path |
+| `KRTOUR_MAP_ADMIN_BACKUP_COMMAND_ENABLED` | `false` | `POST /admin/backups`, `POST /admin/restore/{backup_id}`의 host command 실행 허용 여부. false면 plan-only |
+| `KRTOUR_MAP_ADMIN_BACKUP_COMMAND_TIMEOUT_SECONDS` | `1800` | opt-in host command 실행 timeout |
+| `KRTOUR_MAP_ADMIN_RESTORE_APP_DB` | `krtour_map_restore` | staging restore app DB 기본값 |
+| `KRTOUR_MAP_ADMIN_RESTORE_DAGSTER_DB` | `krtour_map_dagster_restore` | staging restore Dagster DB 기본값 |
+| `KRTOUR_MAP_ADMIN_RESTORE_RUSTFS_VOLUME` | `krtour-map-rustfs-restore` | staging restore RustFS volume 기본값 |
 | `KRTOUR_MAP_ADMIN_FRONTEND_DIST` | (auto) | static export 모드 시 `frontend/out/` 경로 |
 
 ### Frontend (`NEXT_PUBLIC_*` — Next.js 규약)
