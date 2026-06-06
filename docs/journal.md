@@ -2,6 +2,26 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-07 (claude) — T-RV-04b ① datagokr 축제 live fetcher
+
+**작업**: provider live fetcher wiring을 provider 순차로 시작. 첫 provider =
+datagokr 전국문화축제표준데이터.
+
+- **패턴 확립**: `provider_fetchers.py` 신설 — `fetch_datagokr_cultural_festivals(settings)`
+  (sync 제너레이터, `importlib.import_module("datagokr")` lazy import로 provider 패키지를
+  하드 의존/`mypy` 노출에서 분리[ADR-006/044], credential 없으면 `ProviderCredentialMissing`).
+  `resources.build_provider_record_live_resource(spec, fetch)` — guard와 동일 shape이나
+  credential 있으면 `fetch(settings)` iterable 반환, 없으면 guard 메시지 그대로 raise(무해 degrade).
+- **wiring**: `PROVIDER_RECORD_RESOURCE_DEFINITIONS["datagokr_cultural_festivals"]`만
+  guard→live 교체(opinet/krex/krheritage/mois/knps는 guard 유지 — 후속 provider).
+  `DataGoKrClient.festival.iter_all()`이 `CulturalFestivalItem` Protocol 충족 record yield.
+- **검증**: dagster 단위(fake DataGoKrClient: yield + close, credential-missing, live/guard
+  resource) + `test_definitions` guard→live 반영. ruff + `mypy --strict -p krtour.map_dagster`
+  + dagster suite 37 passed. provider 패키지 키 없이도(테스트 fake) 통과.
+- **확인**: 다른 provider에 기존 live fetcher 구현 없음(중복 아님). 다음 provider부터도
+  "이미 구현됐는지 확인 후 추가" 원칙 유지.
+- **다음**: opinet(area scope + station detail fetch 정책) → krex → krheritage → mois → knps.
+
 ## 2026-06-07 (claude) — 운영 로그 조회 표면 (T-212c-API-04 → T-212c 완료)
 
 **작업**: T-212c 마지막 조각인 system/API-call 로그 조회 표면을 구현. 백킹 테이블이

@@ -10,7 +10,7 @@ import asyncio
 import importlib
 import inspect
 import threading
-from collections.abc import Awaitable, Iterator
+from collections.abc import Awaitable, Callable, Iterable, Iterator
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -20,12 +20,15 @@ from krtour.map.infra.db import make_async_engine
 from krtour.map.infra.file_store import S3ObjectStore
 from krtour.map.settings import KrtourMapSettings
 
+from .provider_fetchers import fetch_datagokr_cultural_festivals
+
 __all__ = [
     "PROVIDER_RECORD_RESOURCE_DEFINITIONS",
     "PROVIDER_RECORD_RESOURCE_SPECS",
     "ProviderRecordResourceSpec",
     "build_offline_upload_store_from_settings",
     "build_provider_record_guard_resource",
+    "build_provider_record_live_resource",
     "create_s3_client_from_settings",
     "krtour_map_client_resource",
     "offline_upload_store_resource",
@@ -161,11 +164,61 @@ def build_provider_record_guard_resource(
     return _resource
 
 
+def build_provider_record_live_resource(
+    spec: ProviderRecordResourceSpec,
+    fetch: Callable[[KrtourMapSettings], Iterable[Any]],
+) -> ResourceDefinition:
+    """provider public client live fetcher를 resource value로 노출한다.
+
+    credential이 없으면 guard와 동일한 helpful message로 ``RuntimeError``를
+    던져 missing-credential 동작을 graceful하게 유지한다. credential이 있으면
+    ``fetch(settings)``가 반환한 record iterable을 그대로 돌려준다(여기서
+    소비하지 않음 — asset의 ``_record_batches``가 lazy하게 iterate).
+    """
+
+    @resource(
+        description=(
+            f"{spec.resource_key} provider record live fetcher "
+            f"({spec.provider_package}, {spec.dataset_key})."
+        )
+    )
+    def _resource(_context: InitResourceContext) -> Iterable[Any]:
+        settings = KrtourMapSettings()
+        has_required_settings = all(
+            getattr(settings, setting_name) is not None for setting_name in spec.setting_names
+        )
+        if not has_required_settings:
+            raise RuntimeError(
+                _provider_guard_message(spec, has_required_settings=False)
+            )
+        return fetch(settings)
+
+    return _resource
+
+
 PROVIDER_RECORD_RESOURCE_DEFINITIONS: dict[str, ResourceDefinition] = {
     spec.resource_key: build_provider_record_guard_resource(spec)
     for spec in PROVIDER_RECORD_RESOURCE_SPECS
 }
-"""기본 code location에서 provider key별로 등록되는 guarded resource 정의."""
+"""기본 code location에서 provider key별로 등록되는 resource 정의.
+
+live fetcher가 연결된 provider는 아래에서 guard를 live resource로 교체한다;
+나머지는 비실행 guard로 남는다(later PR에서 점진 연결).
+"""
+
+_DATAGOKR_CULTURAL_FESTIVALS_SPEC: ProviderRecordResourceSpec = next(
+    spec
+    for spec in PROVIDER_RECORD_RESOURCE_SPECS
+    if spec.resource_key == "datagokr_cultural_festivals"
+)
+"""datagokr 축제 spec 참조 (live resource override용)."""
+
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["datagokr_cultural_festivals"] = (
+    build_provider_record_live_resource(
+        _DATAGOKR_CULTURAL_FESTIVALS_SPEC,
+        fetch_datagokr_cultural_festivals,
+    )
+)
 
 
 def build_offline_upload_store_from_settings(
