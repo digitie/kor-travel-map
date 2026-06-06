@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-06 (codex) — T-212a 전체점검 inventory + e2e gap matrix
+
+**작업**: ADR-045 전체점검(T-212) 진입을 위해 최신 main 기준 API/UI/Dagster/DB/e2e
+표면을 inventory로 재분류한다.
+
+- **Report**: `docs/reports/t-212a-inventory-gap-matrix-2026-06-06.md`를 추가했다.
+- **Inventory**: admin OpenAPI 43 path, user OpenAPI 13 path, frontend route 10개,
+  Dagster assets/jobs/sensors/schedules/resources, PostGIS/성능 검증 표면을 정리했다.
+- **Gap matrix**: `/admin/features`, `/admin/issues`, backup/restore admin UI,
+  weather card UI, admin envelope/error/log contract, EXPLAIN/React Doctor baseline,
+  full reload 실데이터 검증을 T-209e-c/T-212b~e 후속으로 분리했다.
+- **다음**: T-209e-c admin backup/restore router + hot-swap UI 또는 T-212b admin UI
+  완결성 보강.
+
 ## 2026-06-06 (codex) — T-RV-38/39 consistency count semantics
 
 **작업**: PR#181~#233 리뷰 후속 중 consistency 관측 metrics의 count 의미를 정리한다.

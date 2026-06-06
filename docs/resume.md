@@ -1,5 +1,16 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-06 Codex 작업 메모 — T-212a inventory + e2e gap matrix
+
+T-212a를 완료한다. `docs/reports/t-212a-inventory-gap-matrix-2026-06-06.md`에 최신
+main 기준 admin OpenAPI 43 path, user OpenAPI 13 path, frontend route 10개, Dagster
+assets/jobs/sensors/schedules/resources, DB/API/frontend/e2e gap을 재분류했다.
+
+핵심 후속은 **T-209e-c**(backup/restore admin router + hot-swap UI), **T-212b**
+(`/admin/features`, `/admin/issues`, weather card UI, admin workflow e2e), **T-212c**
+(admin envelope/error/log contract + `/ops/health-deep`), **T-212d**(EXPLAIN/React
+Doctor/Playwright 성능 baseline), **T-212e**(full reload + 실데이터 최종 검증)다.
+
 ## 2026-06-06 Codex 작업 메모 — T-RV-38/39 consistency count 의미 정리
 
 T-RV-38/39를 한 묶음으로 닫는다. F4 dedup backlog WARN은 더 이상 pending row 수를
