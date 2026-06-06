@@ -1,5 +1,15 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-06 claude 작업 메모 — T-213c(bbox clustering) 완료
+
+T-213 묶음 6번째 완료. `/features/in-bounds` 서버 클러스터링 — **설계 결정: 행정구역
+rollup**(client/grid 대신, feature의 sido/sigungu/legal_dong 코드 GROUP BY).
+`cluster_unit`(sido|sigungu|eupmyeondong) 쿼리 + zoom 유도. 응답 `data.clusters[]`.
+
+진행 순서: d✅ b✅ f✅ h✅ g✅ → **T-213c ✅** → 마지막 **T-213e**(weather card/시계열:
+weather value 테이블·쿼리 + `build_weather_card` + `GET /features/{id}/weather`). 가장
+크고 schema/쿼리 동반. 각 subtask 작은 독립 PR + rebase + 격리 sandbox + frontend types 재생성.
+
 ## 2026-06-06 Codex 작업 메모 — T-201b Phase 2 dry-run report
 
 T-201b의 마지막 잔여인 Phase 2 dry-run report 산출 경로를 구현한다.

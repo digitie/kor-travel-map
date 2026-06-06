@@ -261,6 +261,95 @@ ORDER BY feature_id
 LIMIT :limit
 """
 
+
+# bbox 내 region rollup 클러스터링 (T-213c). cluster_unit → 고정 행정코드 컬럼
+# (allowlist — SQL injection 불가). bbox 술어는 STORED coord의 GIST 인덱스(&&)를
+# 그대로 쓰고(ADR-012, 변환 없음), 행정코드별 count + 평균 좌표(대표 마커 위치)를
+# 집계한다. ``ST_Transform``을 술어에 넣지 않는다.
+def _cluster_bbox_sql(code_col: str) -> str:
+    return f"""
+SELECT
+    {code_col} AS cluster_key,
+    count(*) AS feature_count,
+    avg(x_extension.ST_X(coord)) AS lon,
+    avg(x_extension.ST_Y(coord)) AS lat
+FROM feature.features
+WHERE deleted_at IS NULL
+  AND coord IS NOT NULL
+  AND {code_col} IS NOT NULL
+  AND coord && x_extension.ST_MakeEnvelope(
+        CAST(:min_lon AS double precision), CAST(:min_lat AS double precision),
+        CAST(:max_lon AS double precision), CAST(:max_lat AS double precision), 4326)
+  AND (CAST(:kinds AS text[]) IS NULL OR kind = ANY(CAST(:kinds AS text[])))
+  AND (
+    CAST(:categories AS text[]) IS NULL
+    OR category = ANY(CAST(:categories AS text[]))
+  )
+GROUP BY {code_col}
+ORDER BY feature_count DESC, cluster_key
+LIMIT :limit
+"""
+
+
+# cluster_unit → 행정코드 컬럼 (allowlist).
+_CLUSTER_CODE_COL: Final[dict[str, str]] = {
+    "sido": "sido_code",
+    "sigungu": "sigungu_code",
+    "eupmyeondong": "legal_dong_code",
+}
+_CLUSTER_BBOX_SQL_BY_UNIT: Final[dict[str, str]] = {
+    unit: _cluster_bbox_sql(col) for unit, col in _CLUSTER_CODE_COL.items()
+}
+
+
+async def cluster_features_in_bbox(
+    session: AsyncSession,
+    *,
+    min_lon: float,
+    min_lat: float,
+    max_lon: float,
+    max_lat: float,
+    cluster_unit: str,
+    kinds: Sequence[str] | None = None,
+    categories: Sequence[str] | None = None,
+    limit: int = 2000,
+) -> list[dict[str, Any]]:
+    """bbox 내 feature를 행정구역(``cluster_unit``) 단위로 rollup한다 (T-213c).
+
+    ``cluster_unit`` ∈ {sido, sigungu, eupmyeondong} → 각 region code별
+    ``{cluster_key, feature_count, lon, lat}``(lon/lat=region 내 feature 평균 좌표).
+    bbox 술어는 STORED ``coord``의 GIST 인덱스를 사용(ADR-012). region code가 없는
+    feature는 제외된다(주소 미보강 등).
+    """
+    if cluster_unit not in _CLUSTER_BBOX_SQL_BY_UNIT:
+        raise ValueError("cluster_unit must be one of sido, sigungu, eupmyeondong")
+    if min_lon > max_lon or min_lat > max_lat:
+        raise ValueError("invalid bbox")
+    rows = (
+        await session.execute(
+            text(_CLUSTER_BBOX_SQL_BY_UNIT[cluster_unit]),
+            {
+                "min_lon": min_lon,
+                "min_lat": min_lat,
+                "max_lon": max_lon,
+                "max_lat": max_lat,
+                "kinds": _normalized_filter(kinds),
+                "categories": _normalized_filter(categories),
+                "limit": limit,
+            },
+        )
+    ).mappings().all()
+    return [
+        {
+            "cluster_key": str(row["cluster_key"]),
+            "feature_count": int(row["feature_count"]),
+            "lon": float(row["lon"]),
+            "lat": float(row["lat"]),
+        }
+        for row in rows
+    ]
+
+
 _FEATURE_SEARCH_CTE_SQL: Final[str] = """
 WITH candidates AS (
     SELECT

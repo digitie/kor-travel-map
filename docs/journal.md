@@ -2,6 +2,23 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-06 (claude) — T-213c bbox clustering (server region rollup)
+
+**작업**: T-213 묶음 여섯 번째. `/features/in-bounds` 서버 클러스터링.
+
+- **설계 결정**: client-side·grid bucket 대신 **행정구역 rollup**. feature에 이미
+  있는 `sido_code`/`sigungu_code`/`legal_dong_code`를 GROUP BY → geometry 계산 없이
+  region별 count + 평균 좌표(대표 마커). 한국 행정구역 수가 bounded라 row 폭주 없음.
+- **repo** `cluster_features_in_bbox(bbox, cluster_unit, kinds, categories, limit)`:
+  cluster_unit allowlist→고정 코드 컬럼(injection 불가), bbox는 stored `coord` GIST
+  `&&`(ADR-012, 술어 변환 없음), `avg(ST_X/ST_Y)` 대표 좌표.
+- **endpoint**: `/features/in-bounds`에 `cluster_unit`(sido|sigungu|eupmyeondong) 쿼리.
+  미지정 시 `zoom`으로 유도(≤7 sido/≤10 sigungu/≤13 eupmyeondong/≥14 개별). 응답에
+  `clusters[]` 추가(`cluster_unit` None이면 `items`, 아니면 `clusters`+`items=[]`).
+- 테스트: router unit 4(cluster/zoom 유도/고줌 개별/invalid 422), PostGIS rollup 2.
+  OpenAPI drift/frontend types/ruff/mypy/lint-imports green. 다음: **T-213e**(weather
+  card — T-213 마지막).
+
 ## 2026-06-06 (codex) — T-201b Phase 2 dry-run report CLI
 
 **작업**: ADR-033 Phase 2(F1~F8 + Dagster gate)를 운영 enable 전에 dry-run으로
