@@ -125,7 +125,7 @@ object 단건은 모두 envelope로 수렴시킨다.
 | `admin-update-requests` | `/admin/feature-update-requests` | 지리 범위 기반 feature 업데이트 요청 |
 | `admin-poi-cache-targets` | `/admin/poi-cache-targets` | 외부 POI/cache target 등록, 삭제, 주변 조회 |
 | `admin-dedup` | `/admin/dedup-review` | 중복 검토 |
-| `admin-issues` | `/admin/issues` | **미구현(계획 — T-212/DA-D-04)**. 현재 읽기 `GET /ops/consistency/issues`만 존재. write/action(§4.1)은 admin UI와 함께 후속 |
+| `admin-issues` | `/admin/issues` | 주소/정합성 이슈 운영 처리(목록/단건/PATCH 7 action). T-DA-13 구현 완료. admin UI는 T-212b 후속 |
 | `admin-offline` | `/admin/offline-uploads` | 오프라인 파일 업로드/검증/적재 |
 | `ops` | `/ops` | import job 조회, 에러 로그, metrics, consistency |
 | `dagster` | `/ops/dagster` | Dagster webserver GraphQL 기반 운영 요약 |
@@ -141,11 +141,13 @@ object 단건은 모두 envelope로 수렴시킨다.
 
 ### 4.1 Admin issues / 주소 검토
 
-> **상태: 미구현(계획 — T-212 묶음, DA-D-04 2026-06-06).** 아래 "필수 엔드포인트"는
-> ADR-046 주소/좌표 이슈 운영자 수동 처리 워크플로의 **목표 계약**이며 아직
-> 라우터가 없다. 현재 구현된 것은 읽기 전용 `GET /ops/consistency/issues`뿐이다.
-> 정합성 검사(F5~F7)가 `ops.data_integrity_violations`에 이슈를 적재하므로 데이터는
-> 준비돼 있고, write/action API와 admin UI를 `T-212`(전체점검)에서 함께 구현한다.
+> **상태: 구현 완료(T-DA-13, 2026-06-07).** `routers/admin_issues.py`가 아래
+> 엔드포인트를 모두 제공한다. 목록/단건 읽기는 `ops_repo`/`integrity_violation_repo`,
+> kraddr-geo 정/역지오코딩 + 주소·좌표 덮어쓰기는 `geocoding` + 신규
+> `feature_address_repo`(feature.features UPDATE + `ops.feature_overrides` upsert)를
+> 쓴다. 모든 성공 응답은 `{data, meta}` envelope. admin UI(승인/거절 화면)는 T-212b
+> 후속. **참고**: 목록 `bbox`/free-text `q` 필터는 `ops_repo`가 아직 미지원이라
+> 범위 밖(추후 repo 확장 시 추가).
 
 `/admin/issues`는 결측/정합성 이슈를 한 건 단위로 처리하는 운영 API다. 특히
 kraddr-geo REST v2 적용 중 발생한 주소/좌표 이슈를 admin UI에서 수동 처리할 수

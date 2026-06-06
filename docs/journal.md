@@ -2,6 +2,35 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-07 (claude) — T-DA-13 `/admin/issues` 구현 (DA-D-04 = T-212)
+
+**작업**: ADR-046 주소/좌표 이슈 운영자 수동 처리 API `/admin/issues`를 구현. T-DA-15/16/18
+envelope 통일을 사전작업으로 끝낸 뒤 T-212 핵심을 착수했다(사용자 결정: 전체 액션 한 번에).
+
+- **신규 `routers/admin_issues.py`**: GET 목록(`ops_repo.list_ops_integrity_issues`
+  keyset cursor, 필터 issue_type/provider/dataset_key/severity/status/feature_id), GET 단건
+  (`integrity_violation_repo` + feature 주소/좌표 스냅샷), PATCH 7 action —
+  resolve/ignore/reopen(`set_data_integrity_violation_status`),
+  retry_geocode/retry_reverse_geocode(kraddr-geo 정/역지오코딩 candidate 반환, 상태 무변),
+  apply_kraddr_geo_address(역지오코딩 결과를 정본 주소로 적용 + resolve),
+  manual_override(요청 address/coord/행정코드 적용 + resolve). 모두 `{data, meta}` envelope.
+  kraddr-geo 호출은 `_forward_geocode`/`_reverse_geocode` 모듈 헬퍼 뒤(base URL 미설정 503,
+  httpx 오류 502). 상태충돌 409, 검증 422, 미존재 404.
+- **신규 `infra/feature_address_repo.py`**(ADR-004 raw SQL): `get_feature_address_snapshot`
+  + `apply_feature_address_override`(FOR UPDATE 잠금 → 제공 필드만 `feature.features` UPDATE,
+  좌표는 `ST_SetSRID(ST_MakePoint())` 4326 → 변경 field_path별 `ops.feature_overrides`
+  active upsert, source_value=직전 값, ON CONFLICT (feature_id, field_path) WHERE status='active').
+- **검증**: 라우터 단위 14(repo monkeypatch) + **PostGIS 통합 3**(override SQL 실측 —
+  단위는 repo를 mock하므로 SQL은 통합 테스트에서만 실행). CI ruff(src tests) green,
+  `mypy --strict -p krtour.map`(78 files) green, lint-imports green, 전체 admin pytest
+  196 + 신규 17 green. openapi.json에 `/admin/issues` 2 path 추가(admin-only,
+  user spec 무변), types.ts 재생성, frontend type-check/gen:types:check green.
+- **문서**: contract §4 표 + §4.1 "구현 완료"로 갱신(bbox/q 필터 deferred 명시), tasks
+  T-DA-13 ✅. **DA-D-04 = T-212 핵심 API 완료.**
+- **다음**: admin UI(승인/거절/지도 검토)는 **T-212b**(codex lane) — 겹치지 않게 조율.
+  남은 T-212: b(UI)/c(error·log contract)/d(성능)/e(실데이터). bbox/q 목록 필터는
+  `ops_repo` 확장 후속.
+
 ## 2026-06-06 (claude) — T-DA-18 nux-seen envelope (DA-D-03 코드 전환 완료)
 
 **작업**: T-DA-16 중 발견한 `POST /ops/dagster/nux-seen` flat bare를 `{data, meta}`로
