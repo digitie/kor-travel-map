@@ -1,5 +1,21 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-06 claude 작업 메모 — T-213 진행 시작: T-213d(read parity) 완료
+
+사용자 지시로 T-213(TripMate 요구사항 후속) 묶음을 하나씩, 적합한 순서로 진행한다.
+codex가 Dagster/T-RV/T-209 쪽을 작업 중이라 충돌 회피를 위해 **각 subtask를 작은
+독립 PR + 매번 origin/main rebase + 격리 WSL sandbox(`~/dev/python-krtour-map-claude`)**
+로 진행한다.
+
+진행 순서(저위험·선행 먼저): **T-213d(✅ 선행/client read parity)** → T-213b
+(좌표 `/features/nearby`) → T-213f(`/categories`) → T-213h(public health/version)
+→ T-213g(provider last-sync) → T-213c(bbox clustering) → T-213e(weather card).
+
+**T-213d 완료**: `AsyncKrtourMapClient.get_features` / `search_features` /
+`features_nearby_poi_cache_target` 추가(기존 repo 위임, 새 SQL 없음) + unit 3건.
+다음 한 작업은 **T-213b**(좌표 기준 `/features/nearby` repo+endpoint+client+EXPLAIN
+통합테스트).
+
 ## 2026-06-06 Codex 작업 메모 — T-209b-a Dagster Postgres instance storage 고정
 
 T-209b-a를 구현한다. Docker와 로컬 admin-stack 모두 `docker/dagster.yaml`의 unified

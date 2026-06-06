@@ -71,9 +71,18 @@ from krtour.map.infra.dedup_repo import (
 )
 from krtour.map.infra.feature_repo import (
     FeatureLoadResult,
+    FeatureSearchPage,
+    NearbyFeaturePage,
     features_in_bbox,
     get_feature_row,
+    get_feature_rows_by_ids,
     load_bundles,
+)
+from krtour.map.infra.feature_repo import (
+    features_nearby_poi_cache_target as repo_features_nearby_poi_cache_target,
+)
+from krtour.map.infra.feature_repo import (
+    search_features as repo_search_features,
 )
 from krtour.map.infra.feature_update_executor import (
     FeatureUpdateExecutionResult,
@@ -838,6 +847,81 @@ class AsyncKrtourMapClient:
                 max_lat=max_lat,
                 kinds=kinds,
                 limit=limit,
+            )
+
+    async def get_features(
+        self, feature_ids: Sequence[str]
+    ) -> dict[str, dict[str, Any]]:
+        """여러 feature 상세 row를 한 번에 조회 (``feature_id`` → row dict).
+
+        ``infra.feature_repo.get_feature_rows_by_ids`` 위임. soft-deleted feature는
+        제외되므로 입력 순서/누락은 호출자가 key 존재로 판단한다(TripMate batch 계약).
+        API/Dagster 내부 read path가 admin batch 라우터와 같은 repo를 재사용하도록
+        client 표면으로 노출한다(T-213d).
+        """
+        async with self._session_factory() as session:
+            return await get_feature_rows_by_ids(session, feature_ids)
+
+    async def search_features(
+        self,
+        *,
+        q: str | None = None,
+        bbox: tuple[float, float, float, float] | None = None,
+        kinds: Sequence[str] | None = None,
+        categories: Sequence[str] | None = None,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> FeatureSearchPage:
+        """사용자 feature 검색(pg_trgm ``q`` 또는 ``bbox``) — keyset cursor.
+
+        ``infra.feature_repo.search_features`` 위임. ``q``/``bbox`` 중 하나는 필수
+        (둘 다 없으면 ``ValueError``). ``q``는 ``SET LOCAL`` threshold로만 적용한다
+        (ADR-004). T-213d로 admin ``/features/search``와 같은 read path를 client에서도
+        재사용한다.
+        """
+        async with self._session_factory() as session:
+            return await repo_search_features(
+                session,
+                q=q,
+                bbox=bbox,
+                kinds=kinds,
+                categories=categories,
+                limit=limit,
+                cursor=cursor,
+            )
+
+    async def features_nearby_poi_cache_target(
+        self,
+        *,
+        target_id: str,
+        radius_km: float | None = None,
+        kinds: Sequence[str] | None = None,
+        categories: Sequence[str] | None = None,
+        statuses: Sequence[str] | None = ("active",),
+        providers: Sequence[str] | None = None,
+        sort: str = "distance",
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> NearbyFeaturePage:
+        """POI/cache target(``target_id``) 주변 feature summary — keyset cursor.
+
+        ``infra.feature_repo.features_nearby_poi_cache_target`` 위임. 반경 술어는
+        STORED ``coord_5179``에 직접 적용한다(ADR-012). ``sort`` ∈
+        {distance, name, last_updated_at}. T-213d로 by-target nearby read path를
+        client 표면으로 노출한다(좌표 기준 ``/features/nearby``는 T-213b).
+        """
+        async with self._session_factory() as session:
+            return await repo_features_nearby_poi_cache_target(
+                session,
+                target_id=target_id,
+                radius_km=radius_km,
+                kinds=kinds,
+                categories=categories,
+                statuses=statuses,
+                providers=providers,
+                sort=sort,
+                limit=limit,
+                cursor=cursor,
             )
 
     async def pending_dedup_reviews(

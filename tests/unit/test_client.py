@@ -59,3 +59,90 @@ async def test_client_constructs_with_engine() -> None:
             assert c is client
     finally:
         await engine.dispose()
+
+
+# ── T-213d: client read parity 위임 (DB 미접근 — repo/session monkeypatch) ──
+
+
+class _FakeSessionCM:
+    """``self._session_factory()`` 대체 — 실제 DB 세션 없이 sentinel 반환."""
+
+    async def __aenter__(self) -> object:
+        return object()
+
+    async def __aexit__(self, *exc: object) -> bool:
+        return False
+
+
+def _fake_session_factory() -> _FakeSessionCM:
+    return _FakeSessionCM()
+
+
+def _read_client(monkeypatch: pytest.MonkeyPatch) -> AsyncKrtourMapClient:
+    engine = make_async_engine("postgresql+asyncpg://u:p@localhost:5432/nodb")
+    client = AsyncKrtourMapClient(engine)
+    # DB 미접근: 세션 팩토리를 sentinel CM으로 교체 (engine 미사용).
+    monkeypatch.setattr(client, "_session_factory", _fake_session_factory)
+    return client
+
+
+async def test_get_features_delegates_to_repo(monkeypatch: pytest.MonkeyPatch) -> None:
+    import krtour.map.client as client_mod
+
+    recorded: dict[str, object] = {}
+
+    async def _fake(session: object, feature_ids: object) -> dict[str, dict[str, str]]:
+        recorded["feature_ids"] = list(feature_ids)  # type: ignore[arg-type]
+        return {"f1": {"feature_id": "f1"}}
+
+    monkeypatch.setattr(client_mod, "get_feature_rows_by_ids", _fake)
+    client = _read_client(monkeypatch)
+    out = await client.get_features(["f1", "f2"])
+    assert out == {"f1": {"feature_id": "f1"}}
+    assert recorded["feature_ids"] == ["f1", "f2"]
+
+
+async def test_search_features_delegates_to_repo(monkeypatch: pytest.MonkeyPatch) -> None:
+    import krtour.map.client as client_mod
+
+    sentinel = object()
+    recorded: dict[str, object] = {}
+
+    async def _fake(session: object, **kwargs: object) -> object:
+        recorded.update(kwargs)
+        return sentinel
+
+    monkeypatch.setattr(client_mod, "repo_search_features", _fake)
+    client = _read_client(monkeypatch)
+    out = await client.search_features(q="불국사", kinds=["place"], limit=10)
+    assert out is sentinel
+    assert recorded["q"] == "불국사"
+    assert recorded["kinds"] == ["place"]
+    assert recorded["limit"] == 10
+    assert recorded["bbox"] is None
+    assert recorded["cursor"] is None
+
+
+async def test_features_nearby_target_delegates_to_repo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import krtour.map.client as client_mod
+
+    sentinel = object()
+    recorded: dict[str, object] = {}
+
+    async def _fake(session: object, **kwargs: object) -> object:
+        recorded.update(kwargs)
+        return sentinel
+
+    monkeypatch.setattr(client_mod, "repo_features_nearby_poi_cache_target", _fake)
+    client = _read_client(monkeypatch)
+    out = await client.features_nearby_poi_cache_target(
+        target_id="t1", radius_km=2.0, sort="name", limit=20
+    )
+    assert out is sentinel
+    assert recorded["target_id"] == "t1"
+    assert recorded["radius_km"] == 2.0
+    assert recorded["sort"] == "name"
+    assert recorded["limit"] == 20
+    assert recorded["statuses"] == ("active",)

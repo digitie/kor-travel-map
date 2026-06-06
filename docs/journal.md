@@ -2,6 +2,25 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-06 (claude) — T-213d AsyncKrtourMapClient read parity (TripMate 후속 선행)
+
+**작업**: 사용자 지시로 T-213 묶음을 하나씩 진행. **선행/prereq인 T-213d**부터 처리.
+`AsyncKrtourMapClient`에 read 메서드 3개를 추가해 admin 라우터/repo가 쓰던 read path를
+client 표면으로도 노출했다(API/Dagster 내부·테스트가 같은 path 재사용).
+
+- `get_features(feature_ids)` → `infra.feature_repo.get_feature_rows_by_ids`
+  (soft-deleted 제외, TripMate batch 계약).
+- `search_features(q|bbox, kinds, categories, limit, cursor)` → repo `search_features`
+  (`FeatureSearchPage`).
+- `features_nearby_poi_cache_target(target_id, radius_km, …, sort, cursor)` → repo
+  동명 함수(`NearbyFeaturePage`, ADR-012 STORED `coord_5179` 술어).
+- **위임만**이라 새 SQL/스키마/endpoint 없음. 의존 방향(client → infra) 정상.
+- 테스트: DB 미접근 unit 3건(repo/세션 monkeypatch로 pass-through 검증). 격리 WSL
+  sandbox(`~/dev/python-krtour-map-claude`, codex 공유 sandbox와 분리)에서
+  ruff/pytest(5 passed)/mypy/lint-imports green.
+- 좌표 기준 `/features/nearby`(T-213b), weather card(T-213e), provider last-sync
+  (T-213g)가 이 client 표면을 재사용한다. 다음: **T-213b**.
+
 ## 2026-06-06 (codex) — T-209b-a Dagster Postgres instance storage 고정
 
 **작업**: Dagster schedule/run/event storage가 `$DAGSTER_HOME` SQLite로 폴백하지 않도록
