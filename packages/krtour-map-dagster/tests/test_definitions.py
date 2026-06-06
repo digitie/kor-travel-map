@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from dagster import DefaultScheduleStatus
 
+from krtour.map_dagster.assets import FEATURE_LOAD_ASSETS, FEATURE_LOAD_RETRY_POLICY
 from krtour.map_dagster.definitions import defs
 from krtour.map_dagster.resources import PROVIDER_RECORD_RESOURCE_SPECS
 from krtour.map_dagster.schedules import (
@@ -34,6 +35,11 @@ def test_feature_load_asset_keys_registered() -> None:
         "feature_place_knps_points",
         "feature_geometry_knps_records",
     } <= asset_keys
+
+
+def test_feature_load_assets_have_retry_policy() -> None:
+    for asset_def in FEATURE_LOAD_ASSETS:
+        assert asset_def.op.retry_policy == FEATURE_LOAD_RETRY_POLICY
 
 
 def test_feature_update_job_and_sensors_registered() -> None:

@@ -28,6 +28,7 @@ from krtour.map.infra.scope_repo import (
 
 from krtour.map_dagster.sensors import (
     FEATURE_UPDATE_REQUEST_ID_TAG,
+    FEATURE_UPDATE_SENSOR_MAX_RUN_REQUESTS,
     feature_update_request_failure_sensor,
     feature_update_request_queue_sensor,
     feature_update_request_worker_job,
@@ -39,12 +40,25 @@ _NOW = datetime(2026, 6, 3, 12, 0, tzinfo=UTC)
 @dataclass
 class _Client:
     request: FeatureUpdateRequest | None = None
+    requests: tuple[FeatureUpdateRequest, ...] | None = None
     result: FeatureUpdateExecutionResult | None = None
     executed: list[dict[str, Any]] = field(default_factory=list)
     failed: list[dict[str, Any]] = field(default_factory=list)
+    peek_limits: list[int] = field(default_factory=list)
+    fail_raises: Exception | None = None
 
     async def peek_next_update_request(self) -> FeatureUpdateRequest | None:
         return self.request
+
+    async def peek_update_requests(
+        self, *, limit: int = 10
+    ) -> tuple[FeatureUpdateRequest, ...]:
+        self.peek_limits.append(limit)
+        if self.requests is not None:
+            return self.requests[:limit]
+        if self.request is None:
+            return ()
+        return (self.request,)
 
     async def execute_feature_update_request(
         self,
@@ -71,6 +85,8 @@ class _Client:
         dagster_run_id: str | None = None,
         error_message: str | None = None,
     ) -> FeatureUpdateRequest | None:
+        if self.fail_raises is not None:
+            raise self.fail_raises
         self.failed.append(
             {
                 "request_id": request_id,
@@ -164,17 +180,20 @@ def _execution_result(
 
 
 def test_queue_sensor_skips_empty_queue() -> None:
-    context = build_sensor_context(resources={"krtour_map_client": _Client()})
+    client = _Client()
+    context = build_sensor_context(resources={"krtour_map_client": client})
 
     result = feature_update_request_queue_sensor(context)
 
     assert isinstance(result, SkipReason)
     assert result.skip_message == "queued feature update request 없음"
+    assert client.peek_limits == [FEATURE_UPDATE_SENSOR_MAX_RUN_REQUESTS]
 
 
 def test_queue_sensor_emits_request_run_config_and_tags() -> None:
     request = _request(run_mode="now")
-    context = build_sensor_context(resources={"krtour_map_client": _Client(request)})
+    client = _Client(request)
+    context = build_sensor_context(resources={"krtour_map_client": client})
 
     result = feature_update_request_queue_sensor(context)
 
@@ -189,6 +208,29 @@ def test_queue_sensor_emits_request_run_config_and_tags() -> None:
     }
     assert result.tags[FEATURE_UPDATE_REQUEST_ID_TAG] == request.request_id
     assert result.tags["krtour_map.feature_update_run_mode"] == "now"
+    assert client.peek_limits == [FEATURE_UPDATE_SENSOR_MAX_RUN_REQUESTS]
+
+
+def test_queue_sensor_emits_batch_run_requests() -> None:
+    first = _request(request_id="11111111-1111-4111-8111-111111111111")
+    second = _request(request_id="22222222-2222-4222-8222-222222222222")
+    client = _Client(requests=(first, second))
+    context = build_sensor_context(resources={"krtour_map_client": client})
+
+    result = feature_update_request_queue_sensor(context)
+
+    assert isinstance(result, list)
+    assert [item.run_key for item in result] == [
+        f"feature-update:{first.request_id}",
+        f"feature-update:{second.request_id}",
+    ]
+    assert [
+        item.run_config["ops"]["execute_feature_update_request"]["config"][
+            "request_id"
+        ]
+        for item in result
+    ] == [first.request_id, second.request_id]
+    assert client.peek_limits == [FEATURE_UPDATE_SENSOR_MAX_RUN_REQUESTS]
 
 
 def test_worker_job_executes_configured_request() -> None:
@@ -285,6 +327,66 @@ def test_failure_sensor_marks_request_failed() -> None:
             "request_id": request.request_id,
             "dagster_run_id": failed_run.run_id,
             "error_message": (
+                "Dagster feature update worker failed: "
+                f"run_id={failed_run.run_id} request_id={request.request_id}"
+            ),
+        }
+    ]
+
+
+def test_failure_sensor_notifies_even_when_fail_update_request_fails() -> None:
+    request = _request()
+    client = _Client(request=request, fail_raises=RuntimeError("db unavailable"))
+    notifications: list[dict[str, str | None]] = []
+
+    def notifier(payload: dict[str, str | None]) -> None:
+        notifications.append(dict(payload))
+
+    with DagsterInstance.ephemeral() as instance:
+        failed_run = feature_update_request_worker_job.execute_in_process(
+            run_config={
+                "ops": {
+                    "execute_feature_update_request": {
+                        "config": {"request_id": request.request_id}
+                    }
+                }
+            },
+            tags={FEATURE_UPDATE_REQUEST_ID_TAG: request.request_id},
+            resources={
+                "krtour_map_client": _Client(
+                    request=request,
+                    result=_execution_result(
+                        request, state="failed", error_message="provider down"
+                    ),
+                ),
+                "feature_update_runner": object(),
+            },
+            instance=instance,
+            raise_on_error=False,
+        )
+        assert not failed_run.success
+
+        context = build_run_status_sensor_context(
+            sensor_name="feature_update_request_failure_sensor",
+            dagster_instance=instance,
+            dagster_run=failed_run.dagster_run,
+            dagster_event=failed_run.get_run_failure_event(),
+            resources={
+                "krtour_map_client": client,
+                "feature_update_failure_notifier": notifier,
+            },
+        )
+
+        result = feature_update_request_failure_sensor(context)
+
+    assert isinstance(result, SkipReason)
+    assert client.failed == []
+    assert notifications == [
+        {
+            "request_id": request.request_id,
+            "run_id": failed_run.run_id,
+            "job_name": "feature_update_request_worker",
+            "message": (
                 "Dagster feature update worker failed: "
                 f"run_id={failed_run.run_id} request_id={request.request_id}"
             ),

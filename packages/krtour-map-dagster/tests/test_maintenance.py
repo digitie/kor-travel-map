@@ -11,7 +11,10 @@ from krtour.map.infra.consistency import CaseResult, ConsistencyReport
 from krtour.map.infra.dedup_refresh_repo import DedupRefreshScope
 from krtour.map.infra.dedup_repo import DedupQueueResult
 
-from krtour.map_dagster.maintenance import consistency_dedup_refresh_job
+from krtour.map_dagster.maintenance import (
+    MAINTENANCE_RETRY_POLICY,
+    consistency_dedup_refresh_job,
+)
 
 pytestmark = pytest.mark.filterwarnings(
     "ignore:Parameter `owners` of initializer `SensorDefinition.__init__`"
@@ -151,6 +154,16 @@ def test_consistency_dedup_refresh_job_executes_configured_scopes() -> None:
     consistency_output = result.output_for_node("run_consistency_check")
     assert consistency_output["severity_max"] == "WARN"
     assert consistency_output["dedup_queue_inserted"] == 2
+
+
+def test_consistency_dedup_refresh_ops_have_retry_policy() -> None:
+    retry_by_name = {
+        node_def.name: node_def.retry_policy
+        for node_def in consistency_dedup_refresh_job.all_node_defs
+    }
+
+    assert retry_by_name["refresh_dedup_candidates"] == MAINTENANCE_RETRY_POLICY
+    assert retry_by_name["run_consistency_check"] == MAINTENANCE_RETRY_POLICY
 
 
 def _refresh_result(

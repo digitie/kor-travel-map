@@ -31,6 +31,9 @@ if TYPE_CHECKING:
 FEATURE_UPDATE_SENSOR_INTERVAL_SECONDS: Final[int] = 15
 """ADR-045 D-6 feature update queue polling interval."""
 
+FEATURE_UPDATE_SENSOR_MAX_RUN_REQUESTS: Final[int] = 10
+"""sensor tick 1회에 요청할 feature update worker run 상한."""
+
 FEATURE_UPDATE_REQUEST_ID_TAG: Final[str] = "krtour_map.feature_update_request_id"
 FEATURE_UPDATE_RUN_MODE_TAG: Final[str] = "krtour_map.feature_update_run_mode"
 FEATURE_UPDATE_SCOPE_TYPE_TAG: Final[str] = "krtour_map.feature_update_scope_type"
@@ -93,24 +96,22 @@ def feature_update_request_worker_job() -> None:
 def feature_update_request_queue_sensor(
     context: SensorEvaluationContext,
     krtour_map_client: object | None = None,
-) -> RunRequest | SkipReason:
-    """queued/now request가 있으면 worker run 1건을 요청한다."""
+) -> RunRequest | list[RunRequest] | SkipReason:
+    """queued/now request가 있으면 worker run을 batch로 요청한다."""
     client = cast(
         "AsyncKrtourMapClient",
         krtour_map_client
         if krtour_map_client is not None
         else _resource_object(context, "krtour_map_client"),
     )
-    request = _run_async(client.peek_next_update_request())
-    if request is None:
+    requests = _run_async(
+        client.peek_update_requests(limit=FEATURE_UPDATE_SENSOR_MAX_RUN_REQUESTS)
+    )
+    if not requests:
         return SkipReason("queued feature update request 없음")
 
-    context.update_cursor(request.request_id)
-    return RunRequest(
-        run_key=f"feature-update:{request.request_id}",
-        run_config=_run_config_for_request(request),
-        tags=_tags_for_request(request),
-    )
+    run_requests = [_run_request_for_request(request) for request in requests]
+    return run_requests[0] if len(run_requests) == 1 else run_requests
 
 
 @run_failure_sensor(
@@ -124,20 +125,7 @@ def feature_update_request_failure_sensor(
     """worker run 실패를 request/import job 상태와 운영 알림 sink에 반영한다."""
     request_id = context.dagster_run.tags.get(FEATURE_UPDATE_REQUEST_ID_TAG)
     message = _failure_message(context)
-    if request_id:
-        client = cast(
-            "AsyncKrtourMapClient | None",
-            _resource_object(context, "krtour_map_client", default=None),
-        )
-        if client is not None:
-            _run_async(
-                client.fail_update_request(
-                    request_id,
-                    dagster_run_id=context.dagster_run.run_id,
-                    error_message=message,
-                )
-            )
-    _notify_failure(context, request_id=request_id, message=message)
+    _run_async(_handle_failure_side_effects(context, request_id, message))
     context.log.error(message)
     return SkipReason(message)
 
@@ -188,6 +176,14 @@ def _run_config_for_request(request: "FeatureUpdateRequest") -> dict[str, object
     }
 
 
+def _run_request_for_request(request: "FeatureUpdateRequest") -> RunRequest:
+    return RunRequest(
+        run_key=f"feature-update:{request.request_id}",
+        run_config=_run_config_for_request(request),
+        tags=_tags_for_request(request),
+    )
+
+
 def _tags_for_request(request: "FeatureUpdateRequest") -> dict[str, str]:
     return {
         FEATURE_UPDATE_REQUEST_ID_TAG: request.request_id,
@@ -223,7 +219,33 @@ def _failure_message(context: RunFailureSensorContext) -> str:
     return f"Dagster feature update worker failed: run_id={run.run_id}{suffix}"
 
 
-def _notify_failure(
+async def _handle_failure_side_effects(
+    context: RunFailureSensorContext,
+    request_id: str | None,
+    message: str,
+) -> None:
+    if request_id:
+        client = cast(
+            "AsyncKrtourMapClient | None",
+            _resource_object(context, "krtour_map_client", default=None),
+        )
+        if client is not None:
+            try:
+                await client.fail_update_request(
+                    request_id,
+                    dagster_run_id=context.dagster_run.run_id,
+                    error_message=message,
+                )
+            except Exception as exc:
+                context.log.error(
+                    "feature update request 실패 상태 반영 실패: request_id=%s error=%s",
+                    request_id,
+                    exc,
+                )
+    await _notify_failure(context, request_id=request_id, message=message)
+
+
+async def _notify_failure(
     context: RunFailureSensorContext,
     *,
     request_id: str | None,
@@ -240,6 +262,9 @@ def _notify_failure(
         "job_name": context.dagster_run.job_name,
         "message": message,
     }
-    result = cast(Callable[[Mapping[str, str | None]], object], notifier)(payload)
-    if inspect.isawaitable(result):
-        _run_async(cast(Awaitable[object], result))
+    try:
+        result = cast(Callable[[Mapping[str, str | None]], object], notifier)(payload)
+        if inspect.isawaitable(result):
+            await cast(Awaitable[object], result)
+    except Exception as exc:
+        context.log.error("feature update 실패 알림 전송 실패: %s", exc)

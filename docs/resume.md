@@ -1,5 +1,25 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-06 Codex 작업 메모 — T-RV-34/35 Dagster 실행 품질
+
+T-RV-34/35를 한 묶음으로 닫는다. `feature_update_request_queue_sensor`는 더 이상
+읽지 않는 cursor를 갱신하지 않고, `peek_update_requests(limit=10)`로 queued request를
+batch 조회해 tick 1회에 최대 10개 `RunRequest`를 낸다. 실행 멱등성은 기존처럼
+`run_key`와 request 상태전이/claim 계약이 담당한다. failure sensor는
+`fail_update_request`나 운영 notifier가 실패해도 sensor 자체가 다시 실패하지 않게
+예외를 흡수하고 로그만 남긴다.
+
+MOIS bulk feature-load asset은 provider record resource를 한 번에 list로 만들지 않고
+`MOIS_RECORD_BATCH_SIZE` 단위로 변환/적재한다. 공통 Dagster load helper도
+`FEATURE_LOAD_CHUNK_SIZE` 단위 DB load를 수행하며, chunk 결과는 `FeatureLoadResult.merge()`
+기준으로 합산한다. 모든 feature-load asset과 consistency/dedup maintenance op에는
+exponential `RetryPolicy(max_retries=3, delay=60)`를 붙였다.
+
+검증은 Dagster sensor/asset/maintenance/ETL unit 19개, feature update repo/client 및
+Dagster ETL integration 16개, `ruff`, `mypy --strict`, `lint-imports`로 진행했다. 다음
+T-RV 후보는 **T-RV-04b(provider live fetcher wiring)** 또는 새 리뷰 백로그
+**T-RV-38~41**이다. **T-RV-27은 production hardening 전까지 계속 skip/deferred**다.
+
 ## 2026-06-06 claude 작업 메모 — T-213g(provider last-sync) 완료
 
 T-213 묶음 5번째 완료. `GET /providers/{provider}/last-sync`(provider_sync_state
