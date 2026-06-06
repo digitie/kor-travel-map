@@ -4673,6 +4673,86 @@
         "title": "OpsDetailMeta",
         "type": "object"
       },
+      "OpsHealthCheck": {
+        "additionalProperties": false,
+        "description": "deep readiness 개별 컴포넌트 점검 결과.",
+        "properties": {
+          "component": {
+            "title": "Component",
+            "type": "string"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "error"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "component",
+          "status"
+        ],
+        "title": "OpsHealthCheck",
+        "type": "object"
+      },
+      "OpsHealthDeepData": {
+        "additionalProperties": false,
+        "description": "``GET /ops/health-deep`` data — 전체 readiness + 컴포넌트별 점검.",
+        "properties": {
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/OpsHealthCheck"
+            },
+            "title": "Checks",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "degraded"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "checks"
+        ],
+        "title": "OpsHealthDeepData",
+        "type": "object"
+      },
+      "OpsHealthDeepResponse": {
+        "additionalProperties": false,
+        "description": "``GET /ops/health-deep`` 응답 (DA-D-03 envelope).",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/OpsHealthDeepData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/OpsDetailMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "OpsHealthDeepResponse",
+        "type": "object"
+      },
       "OpsImportJobRecord": {
         "additionalProperties": false,
         "description": "``ops.import_jobs`` HTTP 표현.",
@@ -10018,6 +10098,28 @@
         "tags": [
           "ops",
           "dagster"
+        ]
+      }
+    },
+    "/ops/health-deep": {
+      "get": {
+        "description": "DB 연결 + PostGIS 확장 readiness를 점검한다. liveness용 public ``/health``(DB-free 정적 200)와 달리 실제 DB를 친다. 한 컴포넌트라도 error면 전체 ``status=degraded`` + HTTP 503(모니터링이 body로 컴포넌트별 상태를 읽음).",
+        "operationId": "get_ops_health_deep_ops_health_deep_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpsHealthDeepResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "deep readiness (DB/PostGIS)",
+        "tags": [
+          "ops"
         ]
       }
     },

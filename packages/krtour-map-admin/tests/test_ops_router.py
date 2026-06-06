@@ -258,3 +258,59 @@ def test_consistency_and_issue_lists_pass_filters(
     assert reports.json()["data"]["items"][0]["summary"]["by_code"] == {"F4": 3}
     assert issues.status_code == 200
     assert issues.json()["data"]["items"][0]["message"] == "좌표 없음"
+
+
+@pytest.mark.unit
+def test_health_deep_ok(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import ops as router_mod
+    from krtour.map_admin.routers.ops import OpsHealthCheck
+
+    async def _db(_session: Any) -> OpsHealthCheck:
+        return OpsHealthCheck(component="database", status="ok")
+
+    async def _postgis(_session: Any) -> OpsHealthCheck:
+        return OpsHealthCheck(component="postgis", status="ok", detail="3.5")
+
+    monkeypatch.setattr(router_mod, "_check_database", _db)
+    monkeypatch.setattr(router_mod, "_check_postgis", _postgis)
+
+    response = client.get("/ops/health-deep")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body) == {"data", "meta"}
+    assert body["data"]["status"] == "ok"
+    components = {c["component"]: c["status"] for c in body["data"]["checks"]}
+    assert components == {"database": "ok", "postgis": "ok"}
+    assert "duration_ms" in body["meta"]
+
+
+@pytest.mark.unit
+def test_health_deep_degraded_returns_503(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import ops as router_mod
+    from krtour.map_admin.routers.ops import OpsHealthCheck
+
+    async def _db(_session: Any) -> OpsHealthCheck:
+        return OpsHealthCheck(
+            component="database", status="error", detail="connection refused"
+        )
+
+    async def _postgis(_session: Any) -> OpsHealthCheck:
+        return OpsHealthCheck(component="postgis", status="ok", detail="3.5")
+
+    monkeypatch.setattr(router_mod, "_check_database", _db)
+    monkeypatch.setattr(router_mod, "_check_postgis", _postgis)
+
+    response = client.get("/ops/health-deep")
+
+    assert response.status_code == 503
+    body = response.json()
+    assert body["data"]["status"] == "degraded"
+    db_check = next(c for c in body["data"]["checks"] if c["component"] == "database")
+    assert db_check["status"] == "error"

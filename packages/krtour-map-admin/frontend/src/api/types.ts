@@ -681,6 +681,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/ops/health-deep": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * deep readiness (DB/PostGIS)
+         * @description DB 연결 + PostGIS 확장 readiness를 점검한다. liveness용 public ``/health``(DB-free 정적 200)와 달리 실제 DB를 친다. 한 컴포넌트라도 error면 전체 ``status=degraded`` + HTTP 503(모니터링이 body로 컴포넌트별 상태를 읽음).
+         */
+        get: operations["get_ops_health_deep_ops_health_deep_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/ops/import-jobs": {
         parameters: {
             query?: never;
@@ -2618,6 +2638,42 @@ export interface components {
         OpsDetailMeta: {
             /** Duration Ms */
             duration_ms: number;
+        };
+        /**
+         * OpsHealthCheck
+         * @description deep readiness 개별 컴포넌트 점검 결과.
+         */
+        OpsHealthCheck: {
+            /** Component */
+            component: string;
+            /** Detail */
+            detail?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "error";
+        };
+        /**
+         * OpsHealthDeepData
+         * @description ``GET /ops/health-deep`` data — 전체 readiness + 컴포넌트별 점검.
+         */
+        OpsHealthDeepData: {
+            /** Checks */
+            checks: components["schemas"]["OpsHealthCheck"][];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "degraded";
+        };
+        /**
+         * OpsHealthDeepResponse
+         * @description ``GET /ops/health-deep`` 응답 (DA-D-03 envelope).
+         */
+        OpsHealthDeepResponse: {
+            data: components["schemas"]["OpsHealthDeepData"];
+            meta: components["schemas"]["OpsDetailMeta"];
         };
         /**
          * OpsImportJobRecord
@@ -4945,6 +5001,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_ops_health_deep_ops_health_deep_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpsHealthDeepResponse"];
                 };
             };
         };

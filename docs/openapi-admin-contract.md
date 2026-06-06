@@ -127,7 +127,7 @@ object 단건은 모두 envelope로 수렴시킨다.
 | `admin-dedup` | `/admin/dedup-review` | 중복 검토 |
 | `admin-issues` | `/admin/issues` | 주소/정합성 이슈 운영 처리(목록/단건/PATCH 7 action). T-DA-13 구현 완료. admin UI는 T-212b 후속 |
 | `admin-offline` | `/admin/offline-uploads` | 오프라인 파일 업로드/검증/적재 |
-| `ops` | `/ops` | import job 조회, 에러 로그, metrics, consistency |
+| `ops` | `/ops` | import job 조회, metrics, consistency, `GET /ops/health-deep`(DB/PostGIS readiness; public `/health` liveness와 분리). system/API call log 조회는 백킹 스키마 설계 후속(T-212c-API-04) |
 | `dagster` | `/ops/dagster` | Dagster webserver GraphQL 기반 운영 요약 |
 | `debug` | `/debug` | fixture, ETL preview, EXPLAIN |
 
