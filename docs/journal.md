@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-06 (claude) — 문서 정합성 후속: README 상태 블록 포인터화 (T-DA 마감)
+
+**작업**: PR#227(T-DA 감사) 후속. 1차 감사에서 누락했던 `README.md`도 entry doc
+이므로 DA-D-01(A)를 동일 적용한다.
+
+- README 상단 "현재 상태 (… PR#156 이후 기준)" 블록이 PR#155/#156 번호 + "Sprint 4
+  완료 / Sprint 5 진행 중" narrative를 박고 있었다(반복 drift 클래스). → 잘 바뀌지
+  않는 기준값(고정 포트/ADR 현황/frontend/운영 모델)만 남기고, 진척 정본은
+  `docs/resume.md`+`docs/tasks.md`를 가리키는 포인터로 대체.
+- "## 빠른 시작 (Sprint 4 완료 — …)" 헤더의 sprint 스냅샷도 제거.
+- 이로써 entry doc 4종(CLAUDE/AGENTS/SKILL/README) 상태 블록 drift 정리 완료.
+- 검증: 문서만 수정(코드 무변경). 변경 파일: README.md, docs/{tasks,journal}.md.
+
 ## 2026-06-06 (codex) — T-209b-a Dagster schedule storage PostgreSQL 전환 task 등록
 
 **작업**: Dagster가 `.dagster/schedules/schedules.db-*` SQLite 파일을 내부 schedule
