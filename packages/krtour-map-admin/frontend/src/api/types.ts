@@ -1080,6 +1080,20 @@ export interface components {
             type: "center_radius";
         };
         /**
+         * ClusterSummary
+         * @description 행정구역 rollup 클러스터 1건 (T-213c).
+         */
+        ClusterSummary: {
+            /** Cluster Key */
+            cluster_key: string;
+            /** Feature Count */
+            feature_count: number;
+            /** Lat */
+            lat: number;
+            /** Lon */
+            lon: number;
+        };
+        /**
          * CoordinateBody
          * @description WGS84 좌표. 모든 외부 인터페이스는 lon/lat 순서를 사용한다.
          */
@@ -2672,10 +2686,18 @@ export interface components {
         /**
          * PublicFeatureListData
          * @description public feature 목록 data payload.
+         *
+         *     ``cluster_unit``이 None이면 ``items``(개별 feature), 아니면 ``clusters``
+         *     (행정구역 rollup)를 채운다(T-213c).
          */
         PublicFeatureListData: {
             /** Cluster Unit */
             cluster_unit?: string | null;
+            /**
+             * Clusters
+             * @default []
+             */
+            clusters: components["schemas"]["ClusterSummary"][];
             /** Count */
             count: number;
             /** Items */
@@ -3988,6 +4010,8 @@ export interface operations {
                 /** @description category code 반복 필터. */
                 category?: string[] | null;
                 zoom?: number | null;
+                /** @description 행정구역 rollup 단위. 미지정 시 zoom으로 유도. */
+                cluster_unit?: ("sido" | "sigungu" | "eupmyeondong") | null;
                 limit?: number;
             };
             header?: never;

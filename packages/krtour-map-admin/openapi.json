@@ -815,6 +815,36 @@
         "title": "CenterRadiusScope",
         "type": "object"
       },
+      "ClusterSummary": {
+        "additionalProperties": false,
+        "description": "행정구역 rollup 클러스터 1건 (T-213c).",
+        "properties": {
+          "cluster_key": {
+            "title": "Cluster Key",
+            "type": "string"
+          },
+          "feature_count": {
+            "title": "Feature Count",
+            "type": "integer"
+          },
+          "lat": {
+            "title": "Lat",
+            "type": "number"
+          },
+          "lon": {
+            "title": "Lon",
+            "type": "number"
+          }
+        },
+        "required": [
+          "cluster_key",
+          "feature_count",
+          "lon",
+          "lat"
+        ],
+        "title": "ClusterSummary",
+        "type": "object"
+      },
       "CoordinateBody": {
         "additionalProperties": false,
         "description": "WGS84 좌표. 모든 외부 인터페이스는 lon/lat 순서를 사용한다.",
@@ -5026,7 +5056,7 @@
       },
       "PublicFeatureListData": {
         "additionalProperties": false,
-        "description": "public feature 목록 data payload.",
+        "description": "public feature 목록 data payload.\n\n``cluster_unit``이 None이면 ``items``(개별 feature), 아니면 ``clusters``\n(행정구역 rollup)를 채운다(T-213c).",
         "properties": {
           "cluster_unit": {
             "anyOf": [
@@ -5038,6 +5068,14 @@
               }
             ],
             "title": "Cluster Unit"
+          },
+          "clusters": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ClusterSummary"
+            },
+            "title": "Clusters",
+            "type": "array"
           },
           "count": {
             "title": "Count",
@@ -7645,6 +7683,29 @@
                 }
               ],
               "title": "Zoom"
+            }
+          },
+          {
+            "description": "행정구역 rollup 단위. 미지정 시 zoom으로 유도.",
+            "in": "query",
+            "name": "cluster_unit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "sido",
+                    "sigungu",
+                    "eupmyeondong"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "행정구역 rollup 단위. 미지정 시 zoom으로 유도.",
+              "title": "Cluster Unit"
             }
           },
           {

@@ -106,13 +106,32 @@ class FeatureDetailResponse(BaseModel):
     updated_at: datetime
 
 
+ClusterUnit = Literal["sido", "sigungu", "eupmyeondong"]
+
+
+class ClusterSummary(BaseModel):
+    """행정구역 rollup 클러스터 1건 (T-213c)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    cluster_key: str
+    feature_count: int
+    lon: float
+    lat: float
+
+
 class PublicFeatureListData(BaseModel):
-    """public feature 목록 data payload."""
+    """public feature 목록 data payload.
+
+    ``cluster_unit``이 None이면 ``items``(개별 feature), 아니면 ``clusters``
+    (행정구역 rollup)를 채운다(T-213c).
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     count: int
     items: list[FeatureSummary]
+    clusters: list[ClusterSummary] = []
     cluster_unit: str | None = None
 
 
@@ -291,6 +310,26 @@ def _duration_ms(started_at: float) -> int:
     return max(0, int((perf_counter() - started_at) * 1000))
 
 
+def _resolve_cluster_unit(
+    cluster_unit: ClusterUnit | None, zoom: int | None
+) -> ClusterUnit | None:
+    """명시 ``cluster_unit``이 우선. 없으면 ``zoom``으로 유도(T-213c).
+
+    zoom ≤7=sido / ≤10=sigungu / ≤13=eupmyeondong / ≥14=개별 feature(None).
+    """
+    if cluster_unit is not None:
+        return cluster_unit
+    if zoom is None:
+        return None
+    if zoom <= 7:
+        return "sido"
+    if zoom <= 10:
+        return "sigungu"
+    if zoom <= 13:
+        return "eupmyeondong"
+    return None
+
+
 def _detail_from_row(row: dict[str, Any]) -> FeatureDetailResponse:
     return FeatureDetailResponse(
         feature_id=row["feature_id"],
@@ -393,6 +432,10 @@ async def list_public_features_in_bounds(
         Query(description="category code 반복 필터."),
     ] = None,
     zoom: Annotated[int | None, Query(ge=0, le=24)] = None,
+    cluster_unit: Annotated[
+        ClusterUnit | None,
+        Query(description="행정구역 rollup 단위. 미지정 시 zoom으로 유도."),
+    ] = None,
     limit: Annotated[int, Query(ge=1, le=5000)] = 1000,
 ) -> FeaturesInBoundsResponse:
     started_at = perf_counter()
@@ -400,6 +443,29 @@ async def list_public_features_in_bounds(
         raise HTTPException(
             status_code=422,
             detail="bbox min 좌표가 max보다 큽니다 (min_lon≤max_lon, min_lat≤max_lat).",
+        )
+    resolved_unit = _resolve_cluster_unit(cluster_unit, zoom)
+    if resolved_unit is not None:
+        clusters_raw = await feature_repo.cluster_features_in_bbox(
+            session,
+            min_lon=min_lon,
+            min_lat=min_lat,
+            max_lon=max_lon,
+            max_lat=max_lat,
+            cluster_unit=resolved_unit,
+            kinds=kind,
+            categories=category,
+            limit=limit,
+        )
+        clusters = [ClusterSummary(**c) for c in clusters_raw]
+        return FeaturesInBoundsResponse(
+            data=PublicFeatureListData(
+                count=len(clusters),
+                items=[],
+                clusters=clusters,
+                cluster_unit=resolved_unit,
+            ),
+            meta=FeatureListMeta(duration_ms=_duration_ms(started_at)),
         )
     rows = await feature_repo.features_in_bbox(
         session,
@@ -412,7 +478,6 @@ async def list_public_features_in_bounds(
         limit=limit,
     )
     items = [FeatureSummary(**row) for row in rows]
-    _ = zoom  # 클러스터링 구현 전까지 OpenAPI query 계약만 유지한다.
     return FeaturesInBoundsResponse(
         data=PublicFeatureListData(
             count=len(items),
