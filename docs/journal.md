@@ -2,6 +2,25 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-07 (claude) — T-RV-04b provider 적합성 감사 (datagokr 외 전부 결정 선행)
+
+**작업**: datagokr(#261) 이후 provider를 순차 wiring하려다, krex_rest_areas에서
+`RestArea` model이 `KrexRestAreaItem` Protocol을 2/8만 만족(uni_id·address 없음)함을
+발견. 사용자 지시("이미 구현됐는지 확인하면서")에 따라 나머지 provider 전수 적합성 감사
+수행.
+
+- **리포트**: `docs/reports/t-rv-04b-provider-fetcher-audit-2026-06-07.md` — provider별
+  Protocol↔model 일치 + bulk fetch 가능 여부 매트릭스.
+- **결론**: datagokr만 clean. 나머지 6종은 설계 결정 선행:
+  - krex_rest_areas/traffic = Protocol↔model 불일치(ADR-044 재조정: upstream PR 또는
+    krtour Protocol 재정렬 + uni_id 자연키 결정).
+  - opinet = bulk 없음(grid 검색 정책), mois = SpatiaLite DB파일 refresh 정책,
+    knps = keyless 파일셋 파서 어댑터, krheritage = GIS 보강 루프(events는 비교적 깨끗).
+- **미수행(의도적)**: 불일치 Protocol에 wiring(런타임 AttributeError) / krtour Protocol·
+  transform 무단 재작성(정규화 계약 변경 — dedup/idempotency 영향) / opinet·mois 정책
+  무단 결정 — 전부 설계 결정이라 사용자에게 상신.
+- **다음**: 결정 후 krheritage_events(모델 실검증)부터, 이어 krex 재조정/opinet 정책 등.
+
 ## 2026-06-07 (claude) — T-RV-04b ① datagokr 축제 live fetcher
 
 **작업**: provider live fetcher wiring을 provider 순차로 시작. 첫 provider =

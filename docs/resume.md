@@ -8,14 +8,17 @@ credential 없으면 guard 메시지) + `resources.build_provider_record_live_re
 fetch)`로 해당 resource_key만 guard→live 교체. dagster 테스트는 provider 패키지 fake로
 검증(실 키 불요), 실 fetch 검증은 키 있는 환경(T-212e)에서.
 
-- [x] **① datagokr_cultural_festivals**(festival) — `DataGoKrClient.festival.iter_all()`.
-- [ ] **② opinet_stations** ⭐다음 — `OpinetClient`(sync, `search_stations_around`/
-  `get_station_detail`). **정책 결정 필요**: area scope(전국 area code 순회) + station
-  detail N+1 fetch. transform=`stations_to_bundles`(`OpinetStationItem` Protocol).
-  설정 키 `opinet_api_key`.
-- [ ] ③ krex_rest_areas/traffic ④ krheritage items/events ⑤ mois_license_records
-  (source DB refresh) ⑥ knps point/geometry(file parser) — 순차.
-- **원칙**: 각 provider 착수 전 "이미 구현됐는지" grep 확인(중복/codex 충돌 회피).
+- [x] **① datagokr_cultural_festivals**(festival, #261) — clean match.
+- **적합성 감사(`docs/reports/t-rv-04b-provider-fetcher-audit-2026-06-07.md`): datagokr
+  외 6종 전부 설계 결정 선행 필요 — 단순 wiring 아님.**
+  - **다음 후보 = krheritage_events**(가장 깨끗, `select_event_list` 페이지). 착수 전
+    `python-krheritage-api` EventService model의 `KrHeritageEvent` Protocol 충족 실검증.
+  - **krex_rest_areas/traffic**: model 불일치(uni_id/address/좌표 없음) → ADR-044 재조정
+    (upstream PR 또는 krtour Protocol+transform 재정렬 + uni_id 자연키 결정). 데이터 모델 결정.
+  - **opinet**: bulk 없음 → grid 검색 커버리지 정책. **mois**: SpatiaLite DB파일 refresh
+    정책. **knps**: keyless 파일셋 SHP/CSV 파서 어댑터.
+- **원칙**: provider 착수 전 (1) 이미 구현됐는지 grep, (2) provider model이 krtour
+  Protocol을 실제로 만족하는지 검증(미검증 wiring은 런타임 AttributeError).
 
 ## 2026-06-07 Claude 작업 메모 — T-DA-13 `/admin/issues` 완료 → 다음 T-212 후속
 
