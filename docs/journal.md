@@ -2,6 +2,24 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-06 (claude) — T-DA-18 nux-seen envelope (DA-D-03 코드 전환 완료)
+
+**작업**: T-DA-16 중 발견한 `POST /ops/dagster/nux-seen` flat bare를 `{data, meta}`로
+통일. 이로써 **DA-D-03 전면 통일(T-DA-15/16/18) 코드 전환 완료**.
+
+- **`/ops/dagster/nux-seen`**: `DagsterNuxSeenData` 분리 + envelope. 4개 return
+  (error/unavailable/graphql-error/ok)을 `_nux_seen_response` 헬퍼로 wrap
+  (`meta.duration_ms`, summary와 동일 `DagsterDetailMeta` 재사용).
+- **frontend**: `useMarkDagsterNuxSeen`는 응답 본문 미소비 → 소비측 무변, types만 재생성.
+- **test**: nux-seen 2개(`posts_mutation`, `rejects_invalid_graphql_override`)를
+  `body["data"]`/`meta`로 갱신.
+- **gate**: drift green, ruff/mypy --strict green, dagster+export_openapi pytest
+  8 passed, frontend type-check/gen:types:check/eslint green.
+- **문서**: contract §3.1을 "전면 통일 완료(예외=GET /features 호환 1건)"로 갱신,
+  tasks T-DA-18 ✅.
+- **다음**: **T-DA-13 `/admin/issues`**(DA-D-04 = T-212) — `ops.data_integrity_violations`
+  기반 GET 목록/GET 단건/PATCH(action) 운영 워크플로 구현.
+
 ## 2026-06-06 (claude) — T-DA-16 envelope 통일 ⑤ dagster summary + mois detail (T-DA-16 완료)
 
 **작업**: T-DA-16 마지막 enumerated 단건 bare 2건을 `{data, meta}`로 통일 →

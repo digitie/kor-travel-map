@@ -1151,10 +1151,10 @@ export interface components {
             name: string;
         };
         /**
-         * DagsterNuxSeenResponse
-         * @description `POST /ops/dagster/nux-seen` 응답.
+         * DagsterNuxSeenData
+         * @description `POST /ops/dagster/nux-seen` data.
          */
-        DagsterNuxSeenResponse: {
+        DagsterNuxSeenData: {
             /**
              * Checked At
              * Format: date-time
@@ -1173,6 +1173,14 @@ export interface components {
              * @enum {string}
              */
             status: "ok" | "unavailable" | "error";
+        };
+        /**
+         * DagsterNuxSeenResponse
+         * @description `POST /ops/dagster/nux-seen` 응답 (DA-D-03 envelope).
+         */
+        DagsterNuxSeenResponse: {
+            data: components["schemas"]["DagsterNuxSeenData"];
+            meta: components["schemas"]["DagsterDetailMeta"];
         };
         /**
          * DagsterRepository
