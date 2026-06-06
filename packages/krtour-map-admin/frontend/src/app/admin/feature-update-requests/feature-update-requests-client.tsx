@@ -193,7 +193,7 @@ export function FeatureUpdateRequestsClient() {
                 </NativeSelectOption>
               ))}
             </NativeSelect>
-            <Badge variant="outline">{requests.data?.count ?? 0} rows</Badge>
+            <Badge variant="outline">{requests.data?.meta.count ?? 0} rows</Badge>
           </div>
           {requests.isLoading ? <Skeleton className="h-96" /> : null}
           <div className="overflow-auto rounded-lg border bg-background">
@@ -211,7 +211,7 @@ export function FeatureUpdateRequestsClient() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(requests.data?.items ?? []).map((request) => (
+                {(requests.data?.data.items ?? []).map((request) => (
                   <TableRow key={request.request_id ?? JSON.stringify(request.scope)}>
                     <TableCell className="font-mono text-xs">
                       {shortId(request.request_id)}

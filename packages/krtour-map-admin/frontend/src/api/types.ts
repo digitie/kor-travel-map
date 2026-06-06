@@ -1694,16 +1694,40 @@ export interface components {
             meta: components["schemas"]["FeatureUpdateRequestMeta"];
         };
         /**
-         * FeatureUpdateRequestListResponse
-         * @description feature update request 목록 응답.
+         * FeatureUpdateRequestDetailResponse
+         * @description feature update request 단건 조회 응답 (DA-D-03 envelope).
          */
-        FeatureUpdateRequestListResponse: {
-            /** Count */
-            count: number;
+        FeatureUpdateRequestDetailResponse: {
+            data: components["schemas"]["FeatureUpdateRequestRecord"];
+            meta: components["schemas"]["FeatureUpdateRequestMeta"];
+        };
+        /**
+         * FeatureUpdateRequestListData
+         * @description feature update request 목록 data.
+         */
+        FeatureUpdateRequestListData: {
             /** Items */
             items: components["schemas"]["FeatureUpdateRequestRecord"][];
             /** Next Cursor */
             next_cursor?: string | null;
+        };
+        /**
+         * FeatureUpdateRequestListMeta
+         * @description feature update request 목록 meta.
+         */
+        FeatureUpdateRequestListMeta: {
+            /** Count */
+            count: number;
+            /** Duration Ms */
+            duration_ms: number;
+        };
+        /**
+         * FeatureUpdateRequestListResponse
+         * @description feature update request 목록 응답 (DA-D-03 envelope).
+         */
+        FeatureUpdateRequestListResponse: {
+            data: components["schemas"]["FeatureUpdateRequestListData"];
+            meta: components["schemas"]["FeatureUpdateRequestListMeta"];
         };
         /**
          * FeatureUpdateRequestMeta
@@ -3099,7 +3123,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["FeatureUpdateRequestRecord"];
+                    "application/json": components["schemas"]["FeatureUpdateRequestDetailResponse"];
                 };
             };
             /** @description request_id 없음 */
@@ -4647,7 +4671,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["FeatureUpdateRequestRecord"];
+                    "application/json": components["schemas"]["FeatureUpdateRequestDetailResponse"];
                 };
             };
             /** @description request_id 없음 */

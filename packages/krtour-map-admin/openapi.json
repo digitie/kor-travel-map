@@ -2410,14 +2410,28 @@
         "title": "FeatureUpdateRequestCreateResponse",
         "type": "object"
       },
-      "FeatureUpdateRequestListResponse": {
+      "FeatureUpdateRequestDetailResponse": {
         "additionalProperties": false,
-        "description": "feature update request 목록 응답.",
+        "description": "feature update request 단건 조회 응답 (DA-D-03 envelope).",
         "properties": {
-          "count": {
-            "title": "Count",
-            "type": "integer"
+          "data": {
+            "$ref": "#/components/schemas/FeatureUpdateRequestRecord"
           },
+          "meta": {
+            "$ref": "#/components/schemas/FeatureUpdateRequestMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "FeatureUpdateRequestDetailResponse",
+        "type": "object"
+      },
+      "FeatureUpdateRequestListData": {
+        "additionalProperties": false,
+        "description": "feature update request 목록 data.",
+        "properties": {
           "items": {
             "items": {
               "$ref": "#/components/schemas/FeatureUpdateRequestRecord"
@@ -2438,8 +2452,45 @@
           }
         },
         "required": [
-          "count",
           "items"
+        ],
+        "title": "FeatureUpdateRequestListData",
+        "type": "object"
+      },
+      "FeatureUpdateRequestListMeta": {
+        "additionalProperties": false,
+        "description": "feature update request 목록 meta.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "count",
+          "duration_ms"
+        ],
+        "title": "FeatureUpdateRequestListMeta",
+        "type": "object"
+      },
+      "FeatureUpdateRequestListResponse": {
+        "additionalProperties": false,
+        "description": "feature update request 목록 응답 (DA-D-03 envelope).",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/FeatureUpdateRequestListData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/FeatureUpdateRequestListMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
         ],
         "title": "FeatureUpdateRequestListResponse",
         "type": "object"
@@ -6119,7 +6170,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FeatureUpdateRequestRecord"
+                  "$ref": "#/components/schemas/FeatureUpdateRequestDetailResponse"
                 }
               }
             },
@@ -9267,7 +9318,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FeatureUpdateRequestRecord"
+                  "$ref": "#/components/schemas/FeatureUpdateRequestDetailResponse"
                 }
               }
             },

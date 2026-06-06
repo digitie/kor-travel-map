@@ -41,6 +41,8 @@ export type FeatureUpdateRequestCreateResponse =
   FeatureUpdateSchemas["FeatureUpdateRequestCreateResponse"];
 export type FeatureUpdateRequestListResponse =
   FeatureUpdateSchemas["FeatureUpdateRequestListResponse"];
+export type FeatureUpdateRequestDetailResponse =
+  FeatureUpdateSchemas["FeatureUpdateRequestDetailResponse"];
 export type FeatureUpdateRequestListParams = Omit<
   FeatureUpdateListQuery,
   "created_from" | "created_to"
@@ -72,8 +74,8 @@ function fetchFeatureUpdateRequests(
 
 function fetchFeatureUpdateRequest(
   requestId: string,
-): Promise<FeatureUpdateRequestRecord> {
-  return getJson<FeatureUpdateRequestRecord>(
+): Promise<FeatureUpdateRequestDetailResponse> {
+  return getJson<FeatureUpdateRequestDetailResponse>(
     `/admin/feature-update-requests/${encodeURIComponent(requestId)}`,
   );
 }
@@ -114,7 +116,7 @@ export function useFeatureUpdateRequests(
     queryKey: ["feature-update-requests", params],
     queryFn: () => fetchFeatureUpdateRequests(params),
     refetchInterval: (query) => {
-      const hasActiveRequest = query.state.data?.items.some((item) =>
+      const hasActiveRequest = query.state.data?.data.items.some((item) =>
         ["queued", "running"].includes(item.state),
       );
       return hasActiveRequest ? 2_000 : false;
@@ -124,12 +126,12 @@ export function useFeatureUpdateRequests(
 }
 
 export function useFeatureUpdateRequest(requestId: string | null) {
-  return useQuery<FeatureUpdateRequestRecord, Error>({
+  return useQuery<FeatureUpdateRequestDetailResponse, Error>({
     queryKey: ["feature-update-request", requestId],
     queryFn: () => fetchFeatureUpdateRequest(requestId as string),
     enabled: requestId !== null && requestId.length > 0,
     refetchInterval: (query) => {
-      const state = query.state.data?.state;
+      const state = query.state.data?.data.state;
       return state === "queued" || state === "running" ? 2_000 : false;
     },
     staleTime: 2_000,
