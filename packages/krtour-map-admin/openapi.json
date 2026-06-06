@@ -897,6 +897,21 @@
         "title": "DagsterAssetGroup",
         "type": "object"
       },
+      "DagsterDetailMeta": {
+        "additionalProperties": false,
+        "description": "단건 요약 응답 meta.",
+        "properties": {
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "duration_ms"
+        ],
+        "title": "DagsterDetailMeta",
+        "type": "object"
+      },
       "DagsterJob": {
         "additionalProperties": false,
         "description": "Dagster job/pipeline 요약.",
@@ -1168,9 +1183,9 @@
         "title": "DagsterSensor",
         "type": "object"
       },
-      "DagsterSummaryResponse": {
+      "DagsterSummaryData": {
         "additionalProperties": false,
-        "description": "`GET /ops/dagster/summary` 응답.",
+        "description": "`GET /ops/dagster/summary` data.",
         "properties": {
           "asset_count": {
             "title": "Asset Count",
@@ -1267,6 +1282,24 @@
           "run_counts",
           "repositories",
           "recent_runs"
+        ],
+        "title": "DagsterSummaryData",
+        "type": "object"
+      },
+      "DagsterSummaryResponse": {
+        "additionalProperties": false,
+        "description": "`GET /ops/dagster/summary` 응답 (DA-D-03 envelope).",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DagsterSummaryData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/DagsterDetailMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
         ],
         "title": "DagsterSummaryResponse",
         "type": "object"
@@ -2986,19 +3019,14 @@
         "title": "HealthResponse",
         "type": "object"
       },
-      "MoisLicenseDetailResponse": {
+      "MoisLicenseDetailData": {
         "additionalProperties": false,
-        "description": "``GET /debug/mois-license/{license_id}`` 응답 — 단건 on-demand 상세.",
+        "description": "``GET /debug/mois-license/{license_id}`` data — 단건 on-demand 상세.",
         "properties": {
           "address": {
             "additionalProperties": true,
             "title": "Address",
             "type": "object"
-          },
-          "cached": {
-            "description": "프로세스 캐시 히트 여부.",
-            "title": "Cached",
-            "type": "boolean"
           },
           "category": {
             "title": "Category",
@@ -3063,8 +3091,46 @@
           "status",
           "address",
           "detail",
-          "raw",
-          "cached"
+          "raw"
+        ],
+        "title": "MoisLicenseDetailData",
+        "type": "object"
+      },
+      "MoisLicenseDetailMeta": {
+        "additionalProperties": false,
+        "description": "단건 상세 meta — 캐시 히트 여부 + 처리 시간.",
+        "properties": {
+          "cached": {
+            "description": "프로세스 캐시 히트 여부.",
+            "title": "Cached",
+            "type": "boolean"
+          },
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cached",
+          "duration_ms"
+        ],
+        "title": "MoisLicenseDetailMeta",
+        "type": "object"
+      },
+      "MoisLicenseDetailResponse": {
+        "additionalProperties": false,
+        "description": "``GET /debug/mois-license/{license_id}`` 응답 (DA-D-03 envelope).",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MoisLicenseDetailData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/MoisLicenseDetailMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
         ],
         "title": "MoisLicenseDetailResponse",
         "type": "object"

@@ -2,6 +2,30 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-06 (claude) — T-DA-16 envelope 통일 ⑤ dagster summary + mois detail (T-DA-16 완료)
+
+**작업**: T-DA-16 마지막 enumerated 단건 bare 2건을 `{data, meta}`로 통일 →
+**T-DA-16 완료**.
+
+- **`/ops/dagster/summary`**: flat `DagsterSummaryResponse` → `DagsterSummaryData`로
+  분리하고 envelope. 3개 return(error/unavailable/ok) 전부 `_summary_response`
+  헬퍼로 감쌈(`meta.duration_ms`).
+- **`/debug/mois-license/{id}`**: `MoisLicenseDetailData`(record) + `meta.{cached,
+  duration_ms}`로 분리. 프로세스 캐시는 Data를 저장하고 hit/miss에 따라 `meta.cached`
+  설정(기존 `model_copy(cached=True)` 대체).
+- **frontend**: `dagster-client.tsx` `const data = summary.data?.data` 한 줄로 하위
+  `data?.X` 전체 흡수, `home-client.tsx`는 `dagsterData` alias 도입. mois는 프런트
+  소비처 없음. openapi/types 재생성.
+- **test**: dagster summary 3개 + mois 1개를 `body["data"]`/`meta`로 갱신.
+  nux-seen 테스트는 그대로(아직 bare).
+- **추가 발견**: `POST /ops/dagster/nux-seen`도 flat bare → DA-D-03 "예외 없음"에
+  걸리나 감사 미열거. 스코프 유지 위해 envelope 미적용하고 **T-DA-18**로 분리 기록.
+- **gate**: drift green, ruff/mypy --strict green, dagster+mois+export_openapi
+  pytest 12 passed, frontend type-check/gen:types:check/eslint green.
+- **문서**: contract §3.1 단건 bare 예외를 nux-seen만 남김, tasks T-DA-16 ✅ +
+  T-DA-18 신설.
+- **다음**: (소) T-DA-18 nux-seen → **T-DA-13 `/admin/issues`**(DA-D-04 = T-212).
+
 ## 2026-06-06 (claude) — T-DA-16 envelope 통일 ④ ops metrics/import-job 단건
 
 **작업**: T-DA-16 잔여 단건 bare 중 ops 라우터 2건을 `{data, meta}`로 통일.

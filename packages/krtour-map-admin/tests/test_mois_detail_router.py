@@ -110,15 +110,15 @@ def test_mois_detail_returns_and_caches(
         r1 = client.get(f"/debug/mois-license/{lid}")
         assert r1.status_code == 200
         body = r1.json()
-        assert body["license_id"] == lid
-        assert body["feature_id"] == "f_x"
-        assert body["raw"]["BPLC_NM"] == "한식당 가나다"
-        assert body["cached"] is False
+        assert body["data"]["license_id"] == lid
+        assert body["data"]["feature_id"] == "f_x"
+        assert body["data"]["raw"]["BPLC_NM"] == "한식당 가나다"
+        assert body["meta"]["cached"] is False
 
         # 2회차 — 프로세스 캐시 히트 (DB 재조회 없음).
         r2 = client.get(f"/debug/mois-license/{lid}")
         assert r2.status_code == 200
-        assert r2.json()["cached"] is True
+        assert r2.json()["meta"]["cached"] is True
         assert calls["n"] == 1  # repo는 1회만 호출
     finally:
         client.app.dependency_overrides.clear()

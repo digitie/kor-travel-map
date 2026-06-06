@@ -1133,6 +1133,14 @@ export interface components {
             group_name: string;
         };
         /**
+         * DagsterDetailMeta
+         * @description 단건 요약 응답 meta.
+         */
+        DagsterDetailMeta: {
+            /** Duration Ms */
+            duration_ms: number;
+        };
+        /**
          * DagsterJob
          * @description Dagster job/pipeline 요약.
          */
@@ -1233,10 +1241,10 @@ export interface components {
             status?: string | null;
         };
         /**
-         * DagsterSummaryResponse
-         * @description `GET /ops/dagster/summary` 응답.
+         * DagsterSummaryData
+         * @description `GET /ops/dagster/summary` data.
          */
-        DagsterSummaryResponse: {
+        DagsterSummaryData: {
             /** Asset Count */
             asset_count: number;
             /**
@@ -1273,6 +1281,14 @@ export interface components {
             status: "ok" | "unavailable" | "error";
             /** Version */
             version?: string | null;
+        };
+        /**
+         * DagsterSummaryResponse
+         * @description `GET /ops/dagster/summary` 응답 (DA-D-03 envelope).
+         */
+        DagsterSummaryResponse: {
+            data: components["schemas"]["DagsterSummaryData"];
+            meta: components["schemas"]["DagsterDetailMeta"];
         };
         /**
          * DedupFeatureRecord
@@ -1909,19 +1925,14 @@ export interface components {
             status: string;
         };
         /**
-         * MoisLicenseDetailResponse
-         * @description ``GET /debug/mois-license/{license_id}`` 응답 — 단건 on-demand 상세.
+         * MoisLicenseDetailData
+         * @description ``GET /debug/mois-license/{license_id}`` data — 단건 on-demand 상세.
          */
-        MoisLicenseDetailResponse: {
+        MoisLicenseDetailData: {
             /** Address */
             address: {
                 [key: string]: unknown;
             };
-            /**
-             * Cached
-             * @description 프로세스 캐시 히트 여부.
-             */
-            cached: boolean;
             /** Category */
             category: string;
             /** Detail */
@@ -1950,6 +1961,27 @@ export interface components {
             };
             /** Status */
             status: string;
+        };
+        /**
+         * MoisLicenseDetailMeta
+         * @description 단건 상세 meta — 캐시 히트 여부 + 처리 시간.
+         */
+        MoisLicenseDetailMeta: {
+            /**
+             * Cached
+             * @description 프로세스 캐시 히트 여부.
+             */
+            cached: boolean;
+            /** Duration Ms */
+            duration_ms: number;
+        };
+        /**
+         * MoisLicenseDetailResponse
+         * @description ``GET /debug/mois-license/{license_id}`` 응답 (DA-D-03 envelope).
+         */
+        MoisLicenseDetailResponse: {
+            data: components["schemas"]["MoisLicenseDetailData"];
+            meta: components["schemas"]["MoisLicenseDetailMeta"];
         };
         /**
          * NearbyFeatureSummary

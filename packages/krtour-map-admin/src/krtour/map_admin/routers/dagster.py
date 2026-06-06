@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from time import perf_counter
 from typing import Any, Literal
 from urllib.parse import urlsplit, urlunsplit
 
@@ -156,8 +157,8 @@ class DagsterRunSummary(BaseModel):
     tags: dict[str, str]
 
 
-class DagsterSummaryResponse(BaseModel):
-    """`GET /ops/dagster/summary` 응답."""
+class DagsterSummaryData(BaseModel):
+    """`GET /ops/dagster/summary` data."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -175,6 +176,23 @@ class DagsterSummaryResponse(BaseModel):
     repositories: list[DagsterRepository]
     recent_runs: list[DagsterRunSummary]
     errors: list[str] = Field(default_factory=list)
+
+
+class DagsterDetailMeta(BaseModel):
+    """단건 요약 응답 meta."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    duration_ms: int
+
+
+class DagsterSummaryResponse(BaseModel):
+    """`GET /ops/dagster/summary` 응답 (DA-D-03 envelope)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: DagsterSummaryData
+    meta: DagsterDetailMeta
 
 
 class DagsterNuxSeenResponse(BaseModel):
@@ -445,6 +463,17 @@ def _http_client_from_request(
     return client
 
 
+def _summary_response(
+    data: DagsterSummaryData, *, started_at: float
+) -> DagsterSummaryResponse:
+    return DagsterSummaryResponse(
+        data=data,
+        meta=DagsterDetailMeta(
+            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
+        ),
+    )
+
+
 @router.get(
     "/summary",
     response_model=DagsterSummaryResponse,
@@ -460,6 +489,7 @@ async def get_dagster_summary(
     request: Request,
     run_limit: int = Query(default=10, ge=1, le=50),
 ) -> DagsterSummaryResponse:
+    started_at = perf_counter()
     settings = _settings_from_request(request)
     checked_at = datetime.now(UTC)
     raw_graphql_url = _candidate_graphql_url(settings)
@@ -467,20 +497,23 @@ async def get_dagster_summary(
     try:
         dagster_urls = _dagster_urls(settings)
     except DagsterUrlConfigurationError as exc:
-        return DagsterSummaryResponse(
-            status="error",
-            dagster_url=settings.dagster_url,
-            graphql_url=raw_graphql_url,
-            checked_at=checked_at,
-            repository_count=0,
-            job_count=0,
-            asset_count=0,
-            schedule_count=0,
-            sensor_count=0,
-            run_counts={},
-            repositories=[],
-            recent_runs=[],
-            errors=[str(exc)],
+        return _summary_response(
+            DagsterSummaryData(
+                status="error",
+                dagster_url=settings.dagster_url,
+                graphql_url=raw_graphql_url,
+                checked_at=checked_at,
+                repository_count=0,
+                job_count=0,
+                asset_count=0,
+                schedule_count=0,
+                sensor_count=0,
+                run_counts={},
+                repositories=[],
+                recent_runs=[],
+                errors=[str(exc)],
+            ),
+            started_at=started_at,
         )
 
     client = _http_client_from_request(request, settings)
@@ -492,38 +525,44 @@ async def get_dagster_summary(
             variables={"limit": run_limit},
         )
     except (httpx.HTTPError, ValueError) as exc:
-        return DagsterSummaryResponse(
-            status="unavailable",
-            dagster_url=dagster_urls.dagster_url,
-            graphql_url=dagster_urls.graphql_url,
-            checked_at=checked_at,
-            repository_count=0,
-            job_count=0,
-            asset_count=0,
-            schedule_count=0,
-            sensor_count=0,
-            run_counts={},
-            repositories=[],
-            recent_runs=[],
-            errors=[str(exc)],
+        return _summary_response(
+            DagsterSummaryData(
+                status="unavailable",
+                dagster_url=dagster_urls.dagster_url,
+                graphql_url=dagster_urls.graphql_url,
+                checked_at=checked_at,
+                repository_count=0,
+                job_count=0,
+                asset_count=0,
+                schedule_count=0,
+                sensor_count=0,
+                run_counts={},
+                repositories=[],
+                recent_runs=[],
+                errors=[str(exc)],
+            ),
+            started_at=started_at,
         )
 
     graphql_errors = payload.get("errors")
     if isinstance(graphql_errors, list) and graphql_errors:
-        return DagsterSummaryResponse(
-            status="error",
-            dagster_url=dagster_urls.dagster_url,
-            graphql_url=dagster_urls.graphql_url,
-            checked_at=checked_at,
-            repository_count=0,
-            job_count=0,
-            asset_count=0,
-            schedule_count=0,
-            sensor_count=0,
-            run_counts={},
-            repositories=[],
-            recent_runs=[],
-            errors=[str(error) for error in graphql_errors],
+        return _summary_response(
+            DagsterSummaryData(
+                status="error",
+                dagster_url=dagster_urls.dagster_url,
+                graphql_url=dagster_urls.graphql_url,
+                checked_at=checked_at,
+                repository_count=0,
+                job_count=0,
+                asset_count=0,
+                schedule_count=0,
+                sensor_count=0,
+                run_counts={},
+                repositories=[],
+                recent_runs=[],
+                errors=[str(error) for error in graphql_errors],
+            ),
+            started_at=started_at,
         )
 
     data = _dict(payload.get("data"))
@@ -533,21 +572,24 @@ async def get_dagster_summary(
     recent_runs, run_counts, run_errors = _parse_runs(_dict(data.get("runsOrError")))
     errors = [*repository_errors, *run_errors]
 
-    return DagsterSummaryResponse(
-        status="error" if errors else "ok",
-        dagster_url=dagster_urls.dagster_url,
-        graphql_url=dagster_urls.graphql_url,
-        version=_optional_string(data.get("version")),
-        checked_at=checked_at,
-        repository_count=len(repositories),
-        job_count=sum(len(repository.jobs) for repository in repositories),
-        asset_count=sum(repository.asset_count for repository in repositories),
-        schedule_count=sum(len(repository.schedules) for repository in repositories),
-        sensor_count=sum(len(repository.sensors) for repository in repositories),
-        run_counts=run_counts,
-        repositories=repositories,
-        recent_runs=recent_runs,
-        errors=errors,
+    return _summary_response(
+        DagsterSummaryData(
+            status="error" if errors else "ok",
+            dagster_url=dagster_urls.dagster_url,
+            graphql_url=dagster_urls.graphql_url,
+            version=_optional_string(data.get("version")),
+            checked_at=checked_at,
+            repository_count=len(repositories),
+            job_count=sum(len(repository.jobs) for repository in repositories),
+            asset_count=sum(repository.asset_count for repository in repositories),
+            schedule_count=sum(len(repository.schedules) for repository in repositories),
+            sensor_count=sum(len(repository.sensors) for repository in repositories),
+            run_counts=run_counts,
+            repositories=repositories,
+            recent_runs=recent_runs,
+            errors=errors,
+        ),
+        started_at=started_at,
     )
 
 
