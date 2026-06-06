@@ -5,136 +5,53 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { getJson, pathWithQuery, postJson } from "./client";
+import type { components, paths } from "./types";
 
-export type FeatureUpdateState =
-  | "queued"
-  | "running"
-  | "done"
-  | "failed"
-  | "cancelled";
-export type FeatureUpdateRunMode = "queued" | "now";
-export type FeatureUpdateScopeMode = "center_radius" | "sigungu_by_radius";
+type FeatureUpdateSchemas = components["schemas"];
+type FeatureUpdateListQuery = NonNullable<
+  paths["/admin/feature-update-requests"]["get"]["parameters"]["query"]
+>;
+type GeneratedFeatureUpdateRequestCreateRequest =
+  paths["/admin/feature-update-requests"]["post"]["requestBody"]["content"]["application/json"];
 
-export interface FeatureUpdatePoint {
-  lon: number;
-  lat: number;
-}
-
-export type FeatureUpdateScope =
-  | {
-      type: "feature_ids";
-      feature_ids: string[];
-    }
-  | {
-      type: "center_radius";
-      center: FeatureUpdatePoint;
-      radius_km: number;
-    }
-  | {
-      type: "sigungu_by_radius";
-      center: FeatureUpdatePoint;
-      radius_km: number;
-      match?: "intersects" | "contains_center" | "feature_sigungu";
-    }
-  | {
-      type: "bbox";
-      min_lon: number;
-      min_lat: number;
-      max_lon: number;
-      max_lat: number;
-    }
-  | {
-      type: "provider_dataset";
-      provider: string;
-      dataset_key: string;
-      sync_scope?: string | null;
-    }
-  | {
-      type: "cache_target_keys";
-      external_system: string;
-      target_keys: string[];
-      radius_km?: number | null;
-      scope_mode?: FeatureUpdateScopeMode;
-    };
-
-export interface FeatureUpdatePolicy {
-  mode?: "refresh_existing" | null;
-  include_inactive?: boolean | null;
-  force_provider_call?: boolean | null;
-  dedup_after_load?: boolean | null;
-  consistency_check_after_load?: boolean | null;
-  prevent_provider_reactivation?: boolean | null;
-}
-
-export interface FeatureUpdateRequestCreateRequest {
-  scope: FeatureUpdateScope;
-  providers?: string[];
-  dataset_keys?: string[];
-  update_policy?: FeatureUpdatePolicy;
-  run_mode?: FeatureUpdateRunMode;
-  priority?: number;
-  dry_run?: boolean;
-  operator?: string | null;
-  reason?: string | null;
-}
-
-export interface FeatureUpdateRequestRecord {
-  request_id: string | null;
-  scope_type: string;
-  scope: Record<string, unknown>;
-  providers: string[];
-  dataset_keys: string[];
-  update_policy: Record<string, unknown>;
-  run_mode: FeatureUpdateRunMode;
-  priority: number;
-  state: string;
-  dry_run: boolean;
-  matched_scope: Record<string, unknown>;
-  job_id: string | null;
-  dagster_run_id: string | null;
-  operator: string | null;
-  reason: string | null;
-  error_message: string | null;
-  created_at: string | null;
-  started_at: string | null;
-  finished_at: string | null;
-  updated_at: string | null;
-  status_url: string | null;
-}
-
-export interface FeatureUpdateRequestCreateResponse {
-  data: FeatureUpdateRequestRecord;
-  meta: {
-    duration_ms: number;
-  };
-}
-
-export interface FeatureUpdateRequestListResponse {
-  count: number;
-  items: FeatureUpdateRequestRecord[];
-  next_cursor: string | null;
-}
-
-export interface FeatureUpdateRequestListParams {
-  state?: FeatureUpdateState;
-  scope_type?: string;
-  provider?: string;
-  dataset_key?: string;
+export type FeatureUpdateState = Exclude<
+  FeatureUpdateListQuery["state"],
+  null | undefined
+>;
+export type FeatureUpdateRunMode =
+  FeatureUpdateSchemas["FeatureUpdateRequestRecord"]["run_mode"];
+export type FeatureUpdateScopeMode =
+  FeatureUpdateSchemas["CacheTargetKeysScope"]["scope_mode"];
+export type FeatureUpdatePoint = FeatureUpdateSchemas["FeatureUpdatePoint"];
+export type FeatureUpdateScope = GeneratedFeatureUpdateRequestCreateRequest["scope"];
+export type FeatureUpdatePolicy = FeatureUpdateSchemas["FeatureUpdatePolicy"];
+export type FeatureUpdateRequestCreateRequest = Omit<
+  GeneratedFeatureUpdateRequestCreateRequest,
+  "dry_run" | "priority" | "run_mode"
+> &
+  Partial<
+    Pick<
+      GeneratedFeatureUpdateRequestCreateRequest,
+      "dry_run" | "priority" | "run_mode"
+    >
+  >;
+export type FeatureUpdateRequestRecord =
+  FeatureUpdateSchemas["FeatureUpdateRequestRecord"];
+export type FeatureUpdateRequestCreateResponse =
+  FeatureUpdateSchemas["FeatureUpdateRequestCreateResponse"];
+export type FeatureUpdateRequestListResponse =
+  FeatureUpdateSchemas["FeatureUpdateRequestListResponse"];
+export type FeatureUpdateRequestListParams = Omit<
+  FeatureUpdateListQuery,
+  "created_from" | "created_to"
+> & {
   created_from?: string | Date;
   created_to?: string | Date;
-  page_size?: number;
-  cursor?: string;
-}
-
-export interface FeatureUpdateRequestCancelRequest {
-  error_message?: string | null;
-}
-
-export interface FeatureUpdateRequestRunNowRequest {
-  priority?: number | null;
-  operator?: string | null;
-  reason?: string | null;
-}
+};
+export type FeatureUpdateRequestCancelRequest =
+  FeatureUpdateSchemas["FeatureUpdateRequestCancelRequest"];
+export type FeatureUpdateRequestRunNowRequest =
+  FeatureUpdateSchemas["FeatureUpdateRequestRunNowRequest"];
 
 function fetchFeatureUpdateRequests(
   params: FeatureUpdateRequestListParams = {},

@@ -427,7 +427,7 @@ Target summary도 외부 key와 좌표만 반환하며 `target_id`, `refresh_pol
 
 ### 7.4 Target 기반 update request
 
-#### `POST /admin/feature-update-requests`
+#### `POST /tripmate/feature-update-requests`
 
 scope에 `cache_target_keys`를 추가한다.
 

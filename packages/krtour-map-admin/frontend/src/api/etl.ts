@@ -9,31 +9,14 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 
 import { getJson, postJson } from "./client";
+import type { components } from "./types";
 
-export interface DatasetEntry {
-  dataset: string;
-  variant: "FeatureBundle" | "WeatherValue" | "PriceValue" | string;
-  description: string;
-}
+type EtlSchemas = components["schemas"];
 
-export interface ProviderEntry {
-  provider: string;
-  datasets: DatasetEntry[];
-}
-
-export interface ProvidersResponse {
-  providers: ProviderEntry[];
-}
-
-export interface EtlPreviewResponse {
-  provider: string;
-  dataset: string;
-  source: "fixture" | "live";
-  variant: string;
-  description: string;
-  count: number;
-  items: Array<Record<string, unknown>>;
-}
+export type DatasetEntry = EtlSchemas["_DatasetEntry"];
+export type ProviderEntry = EtlSchemas["_ProviderEntry"];
+export type ProvidersResponse = EtlSchemas["ProvidersResponse"];
+export type EtlPreviewResponse = EtlSchemas["EtlPreviewResponse"];
 
 export function useProviders() {
   return useQuery<ProvidersResponse, Error>({

@@ -1,5 +1,29 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-06 Codex 작업 메모 — T-RV-29/30 OpenAPI user spec + frontend generated types
+
+T-RV-29/30을 닫는다. TripMate/user OpenAPI에서 admin write/read path가 노출되지
+않도록 feature update request 공개 경로를 `/tripmate/feature-update-requests`와
+`/tripmate/feature-update-requests/{request_id}`로 분리했다. 기존 admin UI 경로
+`/admin/feature-update-requests*`는 admin spec에 그대로 남고, 두 경로는 같은
+`ops.feature_update_requests` queue와 repo 함수를 사용한다. user profile 생성 시
+`USER_OPERATIONS`에 지정된 경로/메서드가 실제 full OpenAPI에 없으면 실패하도록
+drift 가드를 추가했다.
+
+Frontend는 `openapi-typescript` 생성물
+`packages/krtour-map-admin/frontend/src/api/types.ts`를 커밋하고,
+`src/api/*` DTO를 `paths`/`components` 파생 타입으로 전환했다. `gen:types`는
+`../openapi.json`을 읽고, `gen:types:check`가 frontend CI에서 drift를 차단한다.
+generated 타입이 더 정확히 표현한 optional nullable 필드에 맞춰 Dagster/dedup/features
+화면 렌더링도 보정했다.
+
+검증은 frontend `type-check`, `gen:types:check`, OpenAPI all profile check, 관련 admin
+router/export unit test, ruff/mypy/lint-imports를 기준으로 진행했다. React Doctor
+optional warning 7건은 기존 shadcn/ui primitive export 구조와 Dagster iframe sandbox
+false positive 성격으로 확인했다. 다음 T-RV 영역은
+**T-RV-31/32/33(router/executor 정확성)** 이며, **T-RV-27은 production hardening
+전까지 계속 skip/deferred**다.
+
 ## 2026-06-06 Codex 작업 메모 — T-201b-d F8 file object orphan 정합성 검사
 
 ADR-033 Phase 2의 마지막 정합성 케이스인 `F8`을 `run_consistency_checks()`에 WARN

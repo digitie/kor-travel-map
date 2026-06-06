@@ -8,56 +8,24 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { getJson, pathWithQuery } from "./client";
+import type { components, paths } from "./types";
 
-export type ImportJobState =
-  | "queued"
-  | "running"
-  | "done"
-  | "failed"
-  | "cancelled";
+type ImportJobSchemas = components["schemas"];
+type ImportJobsListQuery = NonNullable<
+  paths["/ops/import-jobs"]["get"]["parameters"]["query"]
+>;
 
-export interface OpsImportJobRecord {
-  job_id: string;
-  kind: string;
-  load_batch_id: string | null;
-  parent_job_id: string | null;
-  payload: Record<string, unknown>;
-  state: string;
-  progress: number;
-  current_stage: string | null;
-  source_checksum: string | null;
-  error_message: string | null;
-  created_at: string;
-  started_at: string | null;
-  finished_at: string | null;
-  heartbeat_at: string | null;
-  status_url: string;
-}
-
-export interface OpsImportJobsListResponse {
-  data: {
-    items: OpsImportJobRecord[];
-    next_cursor: string | null;
-  };
-  meta: {
-    count: number;
-    page_size: number;
-    duration_ms: number;
-  };
-}
-
-export interface OpsImportJobResponse {
-  data: OpsImportJobRecord;
-}
-
-export interface ImportJobsListParams {
-  state?: ImportJobState;
-  kind?: string;
-  load_batch_id?: string;
-  parent_job_id?: string;
-  page_size?: number;
+export type ImportJobState = Exclude<
+  ImportJobsListQuery["state"],
+  null | undefined
+>;
+export type OpsImportJobRecord = ImportJobSchemas["OpsImportJobRecord"];
+export type OpsImportJobsListResponse =
+  ImportJobSchemas["OpsImportJobsListResponse"];
+export type OpsImportJobResponse = ImportJobSchemas["OpsImportJobResponse"];
+export type ImportJobsListParams = Omit<ImportJobsListQuery, "cursor"> & {
   cursor?: string;
-}
+};
 
 function fetchImportJobs(
   params: ImportJobsListParams = {},

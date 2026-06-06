@@ -8,23 +8,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { getJson, pathWithQuery, postJson } from "./client";
+import type { components, paths } from "./types";
 
-export interface FeatureSummary {
-  feature_id: string;
-  kind: string;
-  name: string;
-  category: string;
-  lon: number | null;
-  lat: number | null;
-  marker_icon: string | null;
-  marker_color: string | null;
-  status: string;
-}
+type FeatureSchemas = components["schemas"];
 
-export interface FeaturesInBboxResponse {
-  count: number;
-  items: FeatureSummary[];
-}
+export type FeatureSummary = FeatureSchemas["FeatureSummary"];
+export type FeaturesInBboxResponse = FeatureSchemas["FeaturesInBboxResponse"];
 
 export interface FeaturesInBboxParams {
   min_lon: number;
@@ -78,34 +67,9 @@ export function useFeaturesInBbox(
 
 // ── feature 단건 상세 (`GET /features/{feature_id}`) ────────────────────────
 
-export interface FeatureDetail {
-  feature_id: string;
-  kind: string;
-  name: string;
-  category: string;
-  lon: number | null;
-  lat: number | null;
-  coord_5179_srid: number | null;
-  address: Record<string, unknown>;
-  detail: Record<string, unknown>;
-  urls: Record<string, unknown>;
-  legal_dong_code: string | null;
-  sido_code: string | null;
-  sigungu_code: string | null;
-  marker_icon: string | null;
-  marker_color: string | null;
-  status: string;
-  parent_feature_id: string | null;
-  sibling_group_id: string | null;
-  updated_at: string;
-}
-
-interface FeatureDetailEnvelopeResponse {
-  data: FeatureDetail;
-  meta: {
-    duration_ms: number;
-  };
-}
+export type FeatureDetail = FeatureSchemas["FeatureDetailResponse"];
+type FeatureDetailEnvelopeResponse =
+  FeatureSchemas["FeatureDetailEnvelopeResponse"];
 
 async function fetchFeatureDetail(featureId: string): Promise<FeatureDetail> {
   const body = await getJson<FeatureDetailEnvelopeResponse>(
@@ -139,103 +103,32 @@ export type FeatureKind = (typeof FEATURE_KINDS)[number];
 
 // ── admin feature 목록/비활성화 (`/admin/features`) ───────────────────────
 
-export type AdminFeatureSort =
-  | "name"
-  | "updated_at"
-  | "created_at"
-  | "kind"
-  | "status"
-  | "provider"
-  | "issue_count";
+type AdminFeaturesListQuery = NonNullable<
+  paths["/admin/features"]["get"]["parameters"]["query"]
+>;
 
-export type SortOrder = "asc" | "desc";
-
-export interface AdminFeatureIssue {
-  violation_key?: string | null;
-  violation_type?: string | null;
-  severity?: string | null;
-  message?: string | null;
-  detected_at?: string | null;
-}
-
-export interface AdminFeatureRecord {
-  feature_id: string;
-  kind: string;
-  name: string;
-  category: string;
-  status: string;
-  lon: number | null;
-  lat: number | null;
-  address_label: string;
-  primary_provider: string | null;
-  primary_dataset_key: string | null;
-  issue_count: number;
-  issues: AdminFeatureIssue[];
-  created_at: string;
-  updated_at: string;
-}
-
-export interface AdminFeaturesListResponse {
-  data: {
-    items: AdminFeatureRecord[];
-    next_cursor: string | null;
-  };
-  meta: {
-    count: number;
-    page_size: number;
-    sort: AdminFeatureSort;
-    order: SortOrder;
-    duration_ms: number;
-  };
-}
-
-export interface AdminFeaturesListParams {
-  q?: string;
-  kind?: string[];
-  category?: string[];
-  status?: string[];
-  provider?: string[];
-  dataset_key?: string[];
-  has_coord?: boolean;
-  has_issue?: boolean;
-  issue_type?: string[];
+export type AdminFeatureSort = NonNullable<AdminFeaturesListQuery["sort"]>;
+export type SortOrder = Exclude<
+  AdminFeaturesListQuery["order"],
+  null | undefined
+>;
+export type AdminFeatureIssue = FeatureSchemas["AdminFeatureIssueRecord"];
+export type AdminFeatureRecord = FeatureSchemas["AdminFeatureRecord"];
+export type AdminFeaturesListResponse =
+  FeatureSchemas["AdminFeaturesListResponse"];
+export type AdminFeaturesListParams = Omit<
+  AdminFeaturesListQuery,
+  "cursor" | "updated_from" | "updated_to"
+> & {
+  cursor?: string;
   updated_from?: string | Date;
   updated_to?: string | Date;
-  page_size?: number;
-  cursor?: string;
-  sort?: AdminFeatureSort;
-  order?: SortOrder;
-}
-
-export interface AdminFeatureDeactivateRequest {
-  reason: string;
-  operator?: string | null;
-  prevent_provider_reactivation?: boolean;
-}
-
-export interface AdminFeatureOverride {
-  override_key: string;
-  feature_id: string;
-  field_path: string;
-  override_value: unknown;
-  prevent_provider_reactivation: boolean;
-  reason: string | null;
-  created_by: string | null;
-  created_at: string;
-}
-
-export interface AdminFeatureDeactivateResponse {
-  data: {
-    feature_id: string;
-    previous_status: string;
-    status: string;
-    override_created: boolean;
-    override: AdminFeatureOverride | null;
-  };
-  meta: {
-    duration_ms: number;
-  };
-}
+};
+export type AdminFeatureDeactivateRequest =
+  FeatureSchemas["AdminFeatureDeactivateRequest"];
+export type AdminFeatureOverride = FeatureSchemas["AdminFeatureOverrideRecord"];
+export type AdminFeatureDeactivateResponse =
+  FeatureSchemas["AdminFeatureDeactivateResponse"];
 
 function fetchAdminFeatures(
   params: AdminFeaturesListParams = {},

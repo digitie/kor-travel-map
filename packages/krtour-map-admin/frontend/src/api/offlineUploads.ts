@@ -5,52 +5,23 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { getJson, pathWithQuery, postFormData, postJson } from "./client";
+import type { components, paths } from "./types";
 
-export type OfflineUploadState =
-  | "uploaded"
-  | "validating"
-  | "validated"
-  | "validation_failed"
-  | "loading"
-  | "loaded"
-  | "load_failed"
-  | "cancelled";
+type OfflineUploadSchemas = components["schemas"];
+type OfflineUploadListQuery = NonNullable<
+  paths["/admin/offline-uploads"]["get"]["parameters"]["query"]
+>;
 
-export interface OfflineUploadRecord {
-  upload_id: string;
-  provider: string;
-  dataset_key: string;
-  sync_scope: string;
-  original_filename: string;
-  storage_backend: string;
-  storage_key: string;
-  byte_size: number;
-  checksum_sha256: string;
-  detected_format: string | null;
-  detected_encoding: string | null;
-  state: string;
-  validation_job_id: string | null;
-  load_job_id: string | null;
-  created_by: string | null;
-  created_at: string;
-  updated_at: string;
-  status_url: string;
-  load_url: string;
-}
-
-export interface OfflineUploadListParams {
-  state?: OfflineUploadState;
-  provider?: string;
-  dataset_key?: string;
-  page_size?: number;
+export type OfflineUploadState = Exclude<
+  OfflineUploadListQuery["state"],
+  null | undefined
+>;
+export type OfflineUploadRecord = OfflineUploadSchemas["OfflineUploadRecord"];
+export type OfflineUploadListParams = Omit<OfflineUploadListQuery, "cursor"> & {
   cursor?: string;
-}
-
-export interface OfflineUploadListResponse {
-  count: number;
-  items: OfflineUploadRecord[];
-  next_cursor: string | null;
-}
+};
+export type OfflineUploadListResponse =
+  OfflineUploadSchemas["OfflineUploadListResponse"];
 
 export interface OfflineUploadCreateRequest {
   file: File;
@@ -60,69 +31,20 @@ export interface OfflineUploadCreateRequest {
   createdBy?: string;
 }
 
-export interface OfflineUploadWriteResponse {
-  data: OfflineUploadRecord;
-  meta: {
-    duration_ms: number;
-    bucket: string;
-    object_key: string;
-    content_type: string;
-  };
-}
-
-export interface OfflineUploadColumnMapping {
-  name: string;
-  lon: string;
-  lat: string;
-  address?: string | null;
-  source_id?: string | null;
-  bjd_code?: string | null;
-  category?: string | null;
-  default_category?: string;
-  default_marker_icon?: string;
-  default_marker_color?: string;
-  default_place_kind?: string;
-}
-
-export interface OfflineUploadPreviewMeta {
-  duration_ms: number;
-  parsed_format: string;
-  encoding: string;
-  delimiter: string;
-  headers: string[];
-  sample_rows: Array<Record<string, string>>;
-  rows_total: number;
-  rows_sampled: number;
-  bytes_read: number;
-  checksum_sha256_actual: string;
-}
-
-export interface OfflineUploadPreviewResponse {
-  data: OfflineUploadRecord;
-  meta: OfflineUploadPreviewMeta;
-}
-
-export interface OfflineUploadValidationIssue {
-  severity: string;
-  code: string;
-  message: string;
-  row_number: number | null;
-  column: string | null;
-}
-
-export interface OfflineUploadValidationMeta extends OfflineUploadPreviewMeta {
-  job_id: string | null;
-  job_state: string | null;
-  column_mapping: Required<OfflineUploadColumnMapping>;
-  valid_rows: number;
-  error_rows: number;
-  issues: OfflineUploadValidationIssue[];
-}
-
-export interface OfflineUploadValidationResponse {
-  data: OfflineUploadRecord;
-  meta: OfflineUploadValidationMeta;
-}
+export type OfflineUploadWriteResponse =
+  OfflineUploadSchemas["OfflineUploadWriteResponse"];
+export type OfflineUploadColumnMapping =
+  OfflineUploadSchemas["OfflineUploadColumnMappingRecord"];
+export type OfflineUploadPreviewMeta =
+  OfflineUploadSchemas["OfflineUploadPreviewMeta"];
+export type OfflineUploadPreviewResponse =
+  OfflineUploadSchemas["OfflineUploadPreviewResponse"];
+export type OfflineUploadValidationIssue =
+  OfflineUploadSchemas["OfflineUploadValidationIssueRecord"];
+export type OfflineUploadValidationMeta =
+  OfflineUploadSchemas["OfflineUploadValidationMeta"];
+export type OfflineUploadValidationResponse =
+  OfflineUploadSchemas["OfflineUploadValidationResponse"];
 
 export interface OfflineUploadValidateRequest {
   uploadId: string;
@@ -131,14 +53,8 @@ export interface OfflineUploadValidateRequest {
   operator?: string;
 }
 
-export interface OfflineUploadLaunchResponse {
-  data: OfflineUploadRecord;
-  meta: {
-    duration_ms: number;
-    dagster_run_id: string;
-    dagster_status: string;
-  };
-}
+export type OfflineUploadLaunchResponse =
+  OfflineUploadSchemas["OfflineUploadLaunchResponse"];
 
 function fetchOfflineUploads(
   params: OfflineUploadListParams = {},

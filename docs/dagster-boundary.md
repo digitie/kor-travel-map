@@ -247,6 +247,7 @@ Admin UI 또는 외부 서비스는 Dagster를 직접 호출하지 않고 다음
 
 ```http
 POST /admin/feature-update-requests
+POST /tripmate/feature-update-requests
 ```
 
 대표 scope:
@@ -266,7 +267,8 @@ POST /admin/feature-update-requests
 4. `run_mode=now`도 request/job row를 먼저 저장하고, 같은 sensor queue에서 감지한다.
 5. Dagster run은 provider 호출, DTO 변환, 적재, dedup refresh, consistency check를
    수행하고 progress를 `ops.import_jobs`에 갱신한다.
-6. API는 `GET /admin/feature-update-requests/{id}`와
+6. API는 admin `GET /admin/feature-update-requests/{id}` 또는 TripMate
+   `GET /tripmate/feature-update-requests/{id}`와
    `GET /ops/import-jobs/{job_id}`로 진행 상태를 제공한다.
 
 세부 OpenAPI 계약은 `docs/openapi-admin-contract.md`.

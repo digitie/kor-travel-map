@@ -69,8 +69,8 @@ function statusVariant(status: string) {
   return "outline" as const;
 }
 
-function formatEpoch(seconds: number | null) {
-  if (seconds === null) {
+function formatEpoch(seconds: number | null | undefined) {
+  if (seconds === null || seconds === undefined) {
     return "-";
   }
   return runTimeFormatter.format(new Date(seconds * 1000));
@@ -332,7 +332,7 @@ export function DagsterAdminClient() {
           </Alert>
         ) : null}
 
-        {data?.errors.length ? (
+        {data?.errors?.length ? (
           <Alert variant={data.status === "unavailable" ? "destructive" : "default"}>
             <AlertTriangleIcon data-icon="inline-start" />
             <AlertTitle>Dagster 상태 확인 필요</AlertTitle>

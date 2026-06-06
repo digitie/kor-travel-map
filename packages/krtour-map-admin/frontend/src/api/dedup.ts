@@ -5,84 +5,45 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { getJson, patchJson, pathWithQuery } from "./client";
+import type { components, paths } from "./types";
 
-export type DedupStatus = "pending" | "accepted" | "rejected" | "merged" | "ignored";
-export type DedupDecision = "accepted" | "rejected" | "merged" | "ignored";
+type DedupSchemas = components["schemas"];
+type DedupReviewListQuery = NonNullable<
+  paths["/admin/dedup-review"]["get"]["parameters"]["query"]
+>;
 
-export interface DedupFeatureRecord {
-  feature_id: string;
-  name: string;
-  kind: string;
-  category: string;
-  lon: number | null;
-  lat: number | null;
-  provider: string | null;
-  dataset_key: string | null;
-}
-
-export interface DedupReviewRecord {
-  review_key: string;
-  status: string;
-  total_score: number;
-  name_score: number;
-  spatial_score: number;
-  category_score: number;
-  feature_a: DedupFeatureRecord;
-  feature_b: DedupFeatureRecord;
-  distance_m: number | null;
-  decision_reason: string | null;
-  reviewed_by: string | null;
-  reviewed_at: string | null;
-  created_at: string;
-}
-
-export interface DedupReviewListResponse {
-  data: {
-    items: DedupReviewRecord[];
-    next_cursor: string | null;
-  };
-  meta: {
-    count: number;
-    page_size: number;
-    duration_ms: number;
-  };
-}
-
-export interface DedupReviewListParams {
-  status?: DedupStatus[];
-  provider?: string[];
+export type DedupStatus = Exclude<
+  NonNullable<DedupReviewListQuery["status"]>[number],
+  null | undefined
+>;
+export type DedupDecision =
+  DedupSchemas["DedupReviewDecisionRequest"]["decision"];
+export type DedupFeatureRecord = DedupSchemas["DedupFeatureRecord"];
+export type DedupReviewRecord = DedupSchemas["DedupReviewRecord"];
+export type DedupReviewListResponse =
+  DedupSchemas["DedupReviewListResponse"];
+export type DedupReviewListParams = Omit<
+  DedupReviewListQuery,
+  | "category"
+  | "cursor"
+  | "dataset_key"
+  | "kind"
+  | "provider"
+  | "q"
+  | "status"
+> & {
+  category?: string[];
+  cursor?: string;
   dataset_key?: string[];
   kind?: string[];
-  category?: string[];
-  min_score?: number;
-  max_score?: number;
+  provider?: string[];
   q?: string;
-  page_size?: number;
-  cursor?: string;
-}
-
-export interface DedupReviewDecisionRequest {
-  decision: DedupDecision;
-  master_feature_id?: string | null;
-  decision_reason?: string | null;
-  reviewed_by?: string | null;
-}
-
-export interface DedupReviewDecisionResponse {
-  data: {
-    review_key: string;
-    decision: DedupDecision;
-    changed: boolean;
-    master_feature_id: string | null;
-    loser_feature_id: string | null;
-    merge_id: string | null;
-    source_links_moved: number | null;
-    source_links_dropped: number | null;
-  };
-  meta: {
-    duration_ms: number;
-  };
-}
+  status?: DedupStatus[];
+};
+export type DedupReviewDecisionRequest =
+  DedupSchemas["DedupReviewDecisionRequest"];
+export type DedupReviewDecisionResponse =
+  DedupSchemas["DedupReviewDecisionResponse"];
 
 function fetchDedupReviews(
   params: DedupReviewListParams = {},

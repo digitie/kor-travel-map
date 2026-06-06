@@ -23,7 +23,7 @@ TripMate 연동의 현재 표준 흐름:
 ```
 TripMate API/Web
   → generated krtour-map OpenAPI client
-  → krtour-map API (`/features`, `/features/{id}`, `/admin/feature-update-requests`)
+  → krtour-map API (`/features`, `/features/{id}`, `/tripmate/feature-update-requests`)
   → krtour-map 독립 DB/Dagster
 ```
 
@@ -34,14 +34,14 @@ TripMate API/Web
 | `GET /features` | bbox 기반 지도 feature 조회 |
 | `GET /features/{feature_id}` | feature 상세 |
 | `POST /tripmate/features/batch` | 여러 feature_id batch 상세 조회 (후속 확장) |
-| `POST /admin/feature-update-requests` | 특정 feature/좌표 반경/시군구/provider 업데이트 큐잉 |
-| `GET /admin/feature-update-requests/{request_id}` | 업데이트 요청 진행 상태 |
+| `POST /tripmate/feature-update-requests` | 특정 feature/좌표 반경/시군구/provider 업데이트 큐잉 |
+| `GET /tripmate/feature-update-requests/{request_id}` | 업데이트 요청 진행 상태 |
 | `GET /ops/import-jobs/{job_id}` | 실제 Dagster/import job progress |
 
 예: 특정 좌표 중심 반경 5km 안 feature 업데이트 요청.
 
 ```http
-POST /admin/feature-update-requests
+POST /tripmate/feature-update-requests
 Content-Type: application/json
 
 {
@@ -87,7 +87,7 @@ Content-Type: application/json
 scope는 krtour-map이 dedup해 한 번만 업데이트한다.
 
 ```http
-POST /admin/feature-update-requests
+POST /tripmate/feature-update-requests
 Content-Type: application/json
 
 {
@@ -115,7 +115,7 @@ GET /features/nearby/by-target?external_system=tripmate&target_key=poi_123&radiu
 예: 특정 좌표 중심 반경 10km와 교차하는 시군구의 feature 업데이트 dry-run.
 
 ```http
-POST /admin/feature-update-requests
+POST /tripmate/feature-update-requests
 Content-Type: application/json
 
 {

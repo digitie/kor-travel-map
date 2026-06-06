@@ -74,8 +74,13 @@ which node npm              # /home/.../.nvm/... 등 WSL 경로여야 함
 cp .env.example .env.local
 $EDITOR .env.local
 npm install
+npm run gen:types           # ../openapi.json -> src/api/types.ts
 npm run dev                  # http://127.0.0.1:9012
 ```
+
+`src/api/types.ts`는 `openapi-typescript` 자동 생성 파일이다. 라우터/DTO 변경으로
+`../openapi.json`을 갱신했다면 `npm run gen:types`를 함께 실행하고,
+`npm run gen:types:check`로 drift가 없는지 확인한다.
 
 `next dev`의 기본 포트는 3000이지만, TripMate `apps/web` 개발 충돌 회피를
 위해 `--port 9012`을 강제한다 (`package.json` scripts).

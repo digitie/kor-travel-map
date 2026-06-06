@@ -129,7 +129,9 @@ export function DedupReviewClient() {
                     </div>
                   </TableCell>
                   <TableCell className="font-mono">
-                    {item.distance_m === null ? "-" : `${item.distance_m.toFixed(1)}m`}
+                    {typeof item.distance_m === "number"
+                      ? `${item.distance_m.toFixed(1)}m`
+                      : "-"}
                   </TableCell>
                   <TableCell>
                     <StatusBadge status={item.status} />

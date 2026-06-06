@@ -45,8 +45,8 @@ USER_OPERATIONS: dict[str, frozenset[str]] = {
     "/features/search": frozenset({"get"}),
     "/features/nearby/by-target": frozenset({"get"}),
     "/tripmate/features/batch": frozenset({"post"}),
-    "/admin/feature-update-requests": frozenset({"post"}),
-    "/admin/feature-update-requests/{request_id}": frozenset({"get"}),
+    "/tripmate/feature-update-requests": frozenset({"post"}),
+    "/tripmate/feature-update-requests/{request_id}": frozenset({"get"}),
 }
 
 HTTP_METHODS: frozenset[str] = frozenset(
@@ -106,8 +106,31 @@ def _prune_schemas(spec: dict[str, Any]) -> dict[str, Any]:
     return spec
 
 
+def _validate_user_operations(spec: dict[str, Any]) -> None:
+    paths = spec.get("paths", {})
+    if not isinstance(paths, dict):
+        raise ValueError("OpenAPI spec paths must be an object.")
+
+    missing: list[str] = []
+    for path, allowed_methods in USER_OPERATIONS.items():
+        path_item = paths.get(path)
+        if not isinstance(path_item, dict):
+            missing.append(path)
+            continue
+        available_methods = {
+            method for method in path_item if method in HTTP_METHODS
+        }
+        missing_methods = sorted(allowed_methods - available_methods)
+        if missing_methods:
+            missing.append(f"{path} [{', '.join(missing_methods)}]")
+    if missing:
+        details = "; ".join(sorted(missing))
+        raise ValueError(f"USER_OPERATIONS drift: missing {details}")
+
+
 def user_openapi_spec(spec: dict[str, Any]) -> dict[str, Any]:
     """Return TripMate/user-facing subset spec from the full admin spec."""
+    _validate_user_operations(spec)
     out = copy.deepcopy(spec)
     out["info"] = {
         **out.get("info", {}),

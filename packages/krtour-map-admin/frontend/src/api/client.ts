@@ -2,25 +2,21 @@
  * Backend API client (fetch wrapper).
  *
  * `NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API` base URL을 사용해 FastAPI(9011)에
- * 접근. 응답 schema는 backend Pydantic 모델(`HealthResponse`, `VersionResponse`)
- * 과 일치. PR#36에서는 수동 type 정의 — 향후 `npm run gen:types`로
- * openapi.json에서 자동 생성된 `src/api/types.ts`로 대체 예정.
+ * 접근. API 모듈의 DTO는 가능한 한 `npm run gen:types`로 생성한
+ * `src/api/types.ts`의 OpenAPI 타입에서 파생한다.
  *
  * 인증/세션 헤더 없음 (ADR-005 + ADR-035 — 네트워크 계층 책임).
  */
 
+import type { components } from "./types";
+
 const BASE_URL =
   process.env.NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API ?? "http://127.0.0.1:9011";
 
-export interface HealthResponse {
-  status: string;
-  service: string;
-}
+type ClientSchemas = components["schemas"];
 
-export interface VersionResponse {
-  debug_ui: string;
-  krtour_map: string;
-}
+export type HealthResponse = ClientSchemas["HealthResponse"];
+export type VersionResponse = ClientSchemas["VersionResponse"];
 
 class DebugUiApiError extends Error {
   constructor(
