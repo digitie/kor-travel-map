@@ -202,7 +202,8 @@ function FeatureDetailPanel({
             <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
               <dt className="text-muted-foreground">coord</dt>
               <dd className="font-mono">
-                {detailQuery.data.lon !== null && detailQuery.data.lat !== null
+                {typeof detailQuery.data.lon === "number" &&
+                typeof detailQuery.data.lat === "number"
                   ? `${detailQuery.data.lon.toFixed(5)}, ${detailQuery.data.lat.toFixed(5)}`
                   : "없음"}
               </dd>
@@ -298,7 +299,9 @@ export function FeaturesClient() {
     for (const marker of markerLayerRef.current) marker.remove();
     markerLayerRef.current = [];
     for (const feature of data) {
-      if (feature.lon === null || feature.lat === null) continue;
+      if (typeof feature.lon !== "number" || typeof feature.lat !== "number") {
+        continue;
+      }
       const element = createMarkerElement({
         markerIcon: feature.marker_icon,
         markerColor: feature.marker_color,
@@ -491,7 +494,8 @@ export function FeaturesClient() {
                       </TableCell>
                       <TableCell>{feature.status}</TableCell>
                       <TableCell className="font-mono text-xs text-muted-foreground">
-                        {feature.lon !== null && feature.lat !== null
+                        {typeof feature.lon === "number" &&
+                        typeof feature.lat === "number"
                           ? `${feature.lon.toFixed(5)}, ${feature.lat.toFixed(5)}`
                           : "없음"}
                       </TableCell>

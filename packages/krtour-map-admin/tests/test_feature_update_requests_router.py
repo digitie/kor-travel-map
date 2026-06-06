@@ -104,6 +104,8 @@ def test_update_request_routes_mounted_in_openapi(client: TestClient) -> None:
     assert "/admin/feature-update-requests/{request_id}" in spec["paths"]
     assert "/admin/feature-update-requests/{request_id}/cancel" in spec["paths"]
     assert "/admin/feature-update-requests/{request_id}/run-now" in spec["paths"]
+    assert "/tripmate/feature-update-requests" in spec["paths"]
+    assert "/tripmate/feature-update-requests/{request_id}" in spec["paths"]
     assert "FeatureUpdateRequestCreateRequest" in spec["components"]["schemas"]
     assert "FeatureUpdateRequestRecord" in spec["components"]["schemas"]
     request_schema = spec["components"]["schemas"][
@@ -177,6 +179,35 @@ def test_create_actual_request_uses_transaction(
     assert response.status_code == 201
     assert response.json()["data"]["status_url"] == (
         "/admin/feature-update-requests/req-1"
+    )
+    assert session.begin_count == 1
+
+
+@pytest.mark.unit
+def test_create_tripmate_request_uses_tripmate_status_url(
+    client: TestClient,
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import feature_update_requests as router_mod
+
+    async def _enqueue(_session: Any, **kwargs: Any) -> FeatureUpdateRequest:
+        assert kwargs["dry_run"] is False
+        return _request()
+
+    monkeypatch.setattr(router_mod, "enqueue_feature_update_request", _enqueue)
+
+    response = client.post(
+        "/tripmate/feature-update-requests",
+        json={
+            "scope": {"type": "feature_ids", "feature_ids": ["feature-1"]},
+            "run_mode": "queued",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["data"]["status_url"] == (
+        "/tripmate/feature-update-requests/req-1"
     )
     assert session.begin_count == 1
 

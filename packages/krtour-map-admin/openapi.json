@@ -2044,7 +2044,7 @@
       },
       "FeatureUpdateRequestCreateRequest": {
         "additionalProperties": false,
-        "description": "`POST /admin/feature-update-requests` 요청.",
+        "description": "feature update request 생성 요청.",
         "properties": {
           "dataset_keys": {
             "items": {
@@ -2174,7 +2174,7 @@
       },
       "FeatureUpdateRequestListResponse": {
         "additionalProperties": false,
-        "description": "`GET /admin/feature-update-requests` 응답.",
+        "description": "feature update request 목록 응답.",
         "properties": {
           "count": {
             "title": "Count",
@@ -8019,6 +8019,95 @@
         "summary": "Get Ops Metrics",
         "tags": [
           "ops"
+        ]
+      }
+    },
+    "/tripmate/feature-update-requests": {
+      "post": {
+        "operationId": "create_tripmate_feature_update_request_tripmate_feature_update_requests_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeatureUpdateRequestCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureUpdateRequestCreateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "description": "run_mode=now 요청의 동일 scope advisory lock 경합"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "TripMate feature update request 생성 또는 dry-run",
+        "tags": [
+          "tripmate-update-requests"
+        ]
+      }
+    },
+    "/tripmate/feature-update-requests/{request_id}": {
+      "get": {
+        "operationId": "get_tripmate_feature_update_request_tripmate_feature_update_requests__request_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureUpdateRequestRecord"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "request_id 없음"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "TripMate feature update request 단건 조회",
+        "tags": [
+          "tripmate-update-requests"
         ]
       }
     },

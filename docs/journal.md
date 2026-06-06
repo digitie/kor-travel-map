@@ -2,6 +2,23 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-06 (codex) — T-RV-29/30 user OpenAPI + generated frontend types
+
+**작업**: PR#153~#179 리뷰 후속 중 공개 OpenAPI/admin frontend 계약 drift를 닫는다.
+
+- **User OpenAPI**: TripMate/user spec에서 `/admin/feature-update-requests*`를 제거하고
+  `/tripmate/feature-update-requests*` 전용 경로를 추가했다. admin UI 경로는 admin spec에
+  그대로 유지한다.
+- **Drift guard**: `USER_OPERATIONS` 경로/메서드가 full OpenAPI에 없으면 user profile
+  생성이 실패하도록 하고, export unit test로 고정했다.
+- **Frontend types**: `openapi-typescript` 생성물 `src/api/types.ts`를 커밋하고
+  `src/api/*` DTO를 `paths`/`components` 파생 타입으로 전환했다. frontend CI에
+  `npm run gen:types:check`를 추가했다.
+- **UI safety**: generated 타입의 optional nullable 표현에 맞춰 Dagster run timestamp,
+  Dagster errors, dedup distance, feature 좌표 렌더링을 안전하게 처리한다.
+- **React Doctor**: optional warning 7건은 기존 shadcn/ui primitive export 구조와
+  Dagster iframe sandbox false positive 성격으로 확인했다.
+
 ## 2026-06-06 (codex) — T-201b-d F8 file object orphan 정합성 검사
 
 **작업**: ADR-033 Phase 2의 마지막 케이스인 `F8` file object orphan WARN을

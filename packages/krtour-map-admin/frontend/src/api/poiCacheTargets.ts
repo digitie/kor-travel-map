@@ -5,94 +5,56 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { deleteJson, getJson, pathWithQuery, putJson } from "./client";
+import type { components, paths } from "./types";
 
-export type PoiCacheTargetScopeMode = "center_radius" | "sigungu_by_radius";
+type PoiCacheTargetSchemas = components["schemas"];
+type GeneratedPoiCacheTargetUpsertRequest =
+  paths["/admin/poi-cache-targets/{external_system}/{target_key}"]["put"]["requestBody"]["content"]["application/json"];
+
+export type PoiCacheTargetScopeMode =
+  PoiCacheTargetSchemas["PoiCacheTargetUpsertRequest"]["scope_mode"];
 export type PoiCacheTargetRefreshPolicy =
-  | "provider_default"
-  | "follow_system"
-  | "allow_targeted"
-  | "disabled";
+  PoiCacheTargetSchemas["PoiCacheTargetUpsertRequest"]["refresh_policy"];
 export type PoiCacheTargetTargetedPolicy =
   | "follow_system"
   | "allow_targeted"
   | "disabled";
-export type PoiCacheTargetConflictMode = "reject" | "move";
-export type NearbySort = "distance" | "name" | "last_updated_at";
+export type PoiCacheTargetConflictMode =
+  PoiCacheTargetSchemas["PoiCacheTargetUpsertRequest"]["on_conflict"];
+export type NearbySort =
+  paths["/features/nearby/by-target"]["get"]["parameters"]["query"]["sort"];
 
-export interface CoordinateBody {
-  lon: number;
-  lat: number;
-}
-
-export interface PoiCacheTargetProviderOverride {
-  targeted_policy?: PoiCacheTargetTargetedPolicy | null;
-  min_interval_seconds?: number | null;
-  max_requests_per_minute?: number | null;
-  max_requests_per_hour?: number | null;
-  max_requests_per_day?: number | null;
-  max_concurrent?: number | null;
-  note?: string | null;
-}
-
-export interface PoiCacheTargetMetadata {
-  tripmate_poi_id?: string | null;
-  external_ref?: string | null;
-  source_url?: string | null;
-  labels?: string[];
-  note?: string | null;
-}
-
-export interface PoiCacheTargetUpsertRequest {
-  coord: CoordinateBody;
-  coord_precision_digits?: number;
-  radius_km?: number;
-  name?: string | null;
-  scope_mode?: PoiCacheTargetScopeMode;
-  update_enabled?: boolean;
-  refresh_policy?: PoiCacheTargetRefreshPolicy;
-  provider_overrides?: Record<string, PoiCacheTargetProviderOverride>;
-  metadata?: PoiCacheTargetMetadata;
-  on_conflict?: PoiCacheTargetConflictMode;
-}
-
-export interface PoiCacheTargetRecord {
-  target_id: string;
-  external_system: string;
-  target_key: string;
-  name: string | null;
-  coord: CoordinateBody;
-  coord_precision_digits: number;
-  coord_key: string;
-  radius_km: number;
-  scope_mode: string;
-  update_enabled: boolean;
-  refresh_policy: string;
-  provider_overrides: Record<string, PoiCacheTargetProviderOverride>;
-  metadata: PoiCacheTargetMetadata;
-  last_seen_at: string;
-  last_requested_at: string | null;
-  last_refreshed_at: string | null;
-  last_failed_at: string | null;
-  next_eligible_refresh_at: string | null;
-  deleted_at: string | null;
-  created_at: string;
-  updated_at: string;
-  status_url: string;
-  nearby_url: string;
-}
-
-export interface PoiCacheTargetResponse {
-  data: PoiCacheTargetRecord;
-  meta: {
-    duration_ms: number;
-  };
-}
-
-export interface PoiCacheTargetListResponse {
-  count: number;
-  items: PoiCacheTargetRecord[];
-  next_cursor: string | null;
-}
+export type CoordinateBody = PoiCacheTargetSchemas["CoordinateBody"];
+export type PoiCacheTargetProviderOverride =
+  PoiCacheTargetSchemas["PoiCacheTargetProviderOverride-Input"];
+export type PoiCacheTargetMetadata =
+  PoiCacheTargetSchemas["PoiCacheTargetMetadata-Input"];
+export type PoiCacheTargetUpsertRequest = Omit<
+  GeneratedPoiCacheTargetUpsertRequest,
+  | "coord_precision_digits"
+  | "on_conflict"
+  | "radius_km"
+  | "refresh_policy"
+  | "scope_mode"
+  | "update_enabled"
+> &
+  Partial<
+    Pick<
+      GeneratedPoiCacheTargetUpsertRequest,
+      | "coord_precision_digits"
+      | "on_conflict"
+      | "radius_km"
+      | "refresh_policy"
+      | "scope_mode"
+      | "update_enabled"
+    >
+  >;
+export type PoiCacheTargetRecord =
+  PoiCacheTargetSchemas["PoiCacheTargetRecord"];
+export type PoiCacheTargetResponse =
+  PoiCacheTargetSchemas["PoiCacheTargetResponse"];
+export type PoiCacheTargetListResponse =
+  PoiCacheTargetSchemas["PoiCacheTargetListResponse"];
 
 export interface PoiCacheTargetListParams {
   external_system?: string;
@@ -102,47 +64,11 @@ export interface PoiCacheTargetListParams {
   cursor?: string;
 }
 
-export interface NearbyTargetSummary {
-  target_id: string;
-  external_system: string;
-  target_key: string;
-  name: string | null;
-  lon: number;
-  lat: number;
-  radius_km: number;
-  scope_mode: string;
-  update_enabled: boolean;
-  refresh_policy: string;
-  last_updated_at: string;
-  last_refreshed_at: string | null;
-  next_eligible_refresh_at: string | null;
-}
-
-export interface NearbyFeatureSummary {
-  feature_id: string;
-  kind: string;
-  name: string;
-  category: string;
-  status: string;
-  lon: number;
-  lat: number;
-  distance_m: number;
-  primary_provider: string | null;
-  primary_dataset_key: string | null;
-  last_updated_at: string;
-}
-
-export interface FeaturesNearbyByTargetResponse {
-  data: {
-    target: NearbyTargetSummary;
-    items: NearbyFeatureSummary[];
-    next_cursor: string | null;
-  };
-  meta: {
-    count: number;
-    duration_ms: number;
-  };
-}
+export type NearbyTargetSummary = PoiCacheTargetSchemas["NearbyTargetSummary"];
+export type NearbyFeatureSummary =
+  PoiCacheTargetSchemas["NearbyFeatureSummary"];
+export type FeaturesNearbyByTargetResponse =
+  PoiCacheTargetSchemas["FeaturesNearbyByTargetResponse"];
 
 export interface NearbyByTargetParams {
   external_system: string;

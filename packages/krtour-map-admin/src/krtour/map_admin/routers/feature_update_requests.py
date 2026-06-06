@@ -1,4 +1,4 @@
-"""``/admin/feature-update-requests`` 운영 라우터 (ADR-045 T-207a).
+"""Feature update request 운영/TripMate 라우터 (ADR-045 T-207a).
 
 OpenAPI로 들어온 지역/provider 갱신 요청을 ``ops.feature_update_requests`` 큐에
 저장하고, 진행 상태 조회/취소/재요청을 제공한다. 실제 provider 실행은 Dagster
@@ -44,6 +44,7 @@ from krtour.map_admin.db import get_session
 
 __all__ = [
     "router",
+    "tripmate_router",
     "FeatureUpdateRequestCreateRequest",
     "FeatureUpdateRequestRecord",
     "FeatureUpdateRequestCreateResponse",
@@ -51,9 +52,16 @@ __all__ = [
 ]
 
 
+ADMIN_FEATURE_UPDATE_REQUESTS_PREFIX = "/admin/feature-update-requests"
+TRIPMATE_FEATURE_UPDATE_REQUESTS_PREFIX = "/tripmate/feature-update-requests"
+
 router = APIRouter(
-    prefix="/admin/feature-update-requests",
+    prefix=ADMIN_FEATURE_UPDATE_REQUESTS_PREFIX,
     tags=["admin-update-requests"],
+)
+tripmate_router = APIRouter(
+    prefix=TRIPMATE_FEATURE_UPDATE_REQUESTS_PREFIX,
+    tags=["tripmate-update-requests"],
 )
 
 FeatureUpdateState = Literal["queued", "running", "done", "failed", "cancelled"]
@@ -191,7 +199,7 @@ class FeatureUpdatePolicy(BaseModel):
 
 
 class FeatureUpdateRequestCreateRequest(BaseModel):
-    """`POST /admin/feature-update-requests` 요청."""
+    """feature update request 생성 요청."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -258,7 +266,7 @@ class FeatureUpdateRequestCreateResponse(BaseModel):
 
 
 class FeatureUpdateRequestListResponse(BaseModel):
-    """`GET /admin/feature-update-requests` 응답."""
+    """feature update request 목록 응답."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -296,7 +304,11 @@ def _update_policy_payload(policy: FeatureUpdatePolicy) -> dict[str, Any]:
     return policy.model_dump(mode="json", exclude_none=True, exclude_unset=True)
 
 
-def _record_from_request(row: FeatureUpdateRequest) -> FeatureUpdateRequestRecord:
+def _record_from_request(
+    row: FeatureUpdateRequest,
+    *,
+    status_url_prefix: str = ADMIN_FEATURE_UPDATE_REQUESTS_PREFIX,
+) -> FeatureUpdateRequestRecord:
     return FeatureUpdateRequestRecord(
         request_id=row.request_id,
         scope_type=row.scope_type,
@@ -318,7 +330,7 @@ def _record_from_request(row: FeatureUpdateRequest) -> FeatureUpdateRequestRecor
         started_at=row.started_at,
         finished_at=row.finished_at,
         updated_at=row.updated_at,
-        status_url=f"/admin/feature-update-requests/{row.request_id}",
+        status_url=f"{status_url_prefix}/{row.request_id}",
     )
 
 
@@ -343,9 +355,10 @@ def _create_response(
     data: FeatureUpdateRequest | FeatureUpdateRequestPreview,
     *,
     started_at: float,
+    status_url_prefix: str = ADMIN_FEATURE_UPDATE_REQUESTS_PREFIX,
 ) -> FeatureUpdateRequestCreateResponse:
     record = (
-        _record_from_request(data)
+        _record_from_request(data, status_url_prefix=status_url_prefix)
         if isinstance(data, FeatureUpdateRequest)
         else _record_from_preview(data)
     )
@@ -460,22 +473,11 @@ async def _enqueue(
         raise _handle_enqueue_error(exc) from exc
 
 
-@router.post(
-    "",
-    response_model=FeatureUpdateRequestCreateResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="feature update request 생성 또는 dry-run",
-    responses={
-        409: {
-            "description": (
-                "run_mode=now 요청의 동일 scope advisory lock 경합"
-            )
-        }
-    },
-)
-async def create_feature_update_request(
+async def _create_feature_update_request_response(
     body: FeatureUpdateRequestCreateRequest,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: AsyncSession,
+    *,
+    status_url_prefix: str,
 ) -> FeatureUpdateRequestCreateResponse:
     started_at = perf_counter()
     scope = _scope_payload(body.scope)
@@ -493,7 +495,11 @@ async def create_feature_update_request(
             operator=body.operator,
             reason=body.reason,
         )
-        return _create_response(result, started_at=started_at)
+        return _create_response(
+            result,
+            started_at=started_at,
+            status_url_prefix=status_url_prefix,
+        )
 
     async with session.begin():
         result = await _enqueue(
@@ -508,7 +514,59 @@ async def create_feature_update_request(
             operator=body.operator,
             reason=body.reason,
         )
-    return _create_response(result, started_at=started_at)
+    return _create_response(
+        result,
+        started_at=started_at,
+        status_url_prefix=status_url_prefix,
+    )
+
+
+@router.post(
+    "",
+    response_model=FeatureUpdateRequestCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="feature update request 생성 또는 dry-run",
+    responses={
+        409: {
+            "description": (
+                "run_mode=now 요청의 동일 scope advisory lock 경합"
+            )
+        }
+    },
+)
+async def create_feature_update_request(
+    body: FeatureUpdateRequestCreateRequest,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> FeatureUpdateRequestCreateResponse:
+    return await _create_feature_update_request_response(
+        body,
+        session,
+        status_url_prefix=ADMIN_FEATURE_UPDATE_REQUESTS_PREFIX,
+    )
+
+
+@tripmate_router.post(
+    "",
+    response_model=FeatureUpdateRequestCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="TripMate feature update request 생성 또는 dry-run",
+    responses={
+        409: {
+            "description": (
+                "run_mode=now 요청의 동일 scope advisory lock 경합"
+            )
+        }
+    },
+)
+async def create_tripmate_feature_update_request(
+    body: FeatureUpdateRequestCreateRequest,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> FeatureUpdateRequestCreateResponse:
+    return await _create_feature_update_request_response(
+        body,
+        session,
+        status_url_prefix=TRIPMATE_FEATURE_UPDATE_REQUESTS_PREFIX,
+    )
 
 
 @router.get(
@@ -565,6 +623,28 @@ async def get_feature_update_request(
             detail=f"feature update request 없음: {request_id!r}",
         )
     return _record_from_request(row)
+
+
+@tripmate_router.get(
+    "/{request_id}",
+    response_model=FeatureUpdateRequestRecord,
+    summary="TripMate feature update request 단건 조회",
+    responses={404: {"description": "request_id 없음"}},
+)
+async def get_tripmate_feature_update_request(
+    request_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> FeatureUpdateRequestRecord:
+    row = await get_update_request(session, request_id)
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"feature update request 없음: {request_id!r}",
+        )
+    return _record_from_request(
+        row,
+        status_url_prefix=TRIPMATE_FEATURE_UPDATE_REQUESTS_PREFIX,
+    )
 
 
 @router.post(

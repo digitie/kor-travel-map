@@ -56,19 +56,19 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
 
     assert user["info"]["title"] == "krtour-map-user"
     assert set(user["paths"]) == {
-        "/admin/feature-update-requests",
-        "/admin/feature-update-requests/{request_id}",
         "/features/in-bounds",
         "/features/nearby/by-target",
         "/features/search",
         "/features/{feature_id}",
+        "/tripmate/feature-update-requests",
+        "/tripmate/feature-update-requests/{request_id}",
         "/tripmate/features/batch",
     }
-    assert set(user["paths"]["/admin/feature-update-requests"]) >= {"post"}
-    assert "get" not in user["paths"]["/admin/feature-update-requests"]
+    assert set(user["paths"]["/tripmate/feature-update-requests"]) >= {"post"}
+    assert "get" not in user["paths"]["/tripmate/feature-update-requests"]
+    assert not any(path.startswith("/admin") for path in user["paths"])
     assert not any(path.startswith("/ops") for path in user["paths"])
     assert not any(path.startswith("/debug") for path in user["paths"])
-    assert "/admin/features" not in user["paths"]
 
     schemas = user["components"]["schemas"]
     assert "FeatureBatchResponse" in schemas
@@ -90,3 +90,17 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
         "primary_provider",
         "primary_dataset_key",
     }.isdisjoint(_schema_properties(user, "NearbyFeatureSummary"))
+
+
+@pytest.mark.unit
+def test_user_operations_are_present_in_full_openapi() -> None:
+    module = _load_script_module()
+    full = create_app(AdminSettings()).openapi()
+
+    for path, methods in module.USER_OPERATIONS.items():
+        assert not path.startswith("/admin")
+        assert path in full["paths"]
+        path_item = full["paths"][path]
+        assert methods <= {
+            key for key in path_item if key in module.HTTP_METHODS
+        }

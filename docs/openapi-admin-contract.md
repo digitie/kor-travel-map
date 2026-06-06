@@ -65,8 +65,8 @@ Dagster DB에는 Dagster가 자체 schema를 관리한다.
   `packages/krtour-map-admin/openapi.json`과 TripMate/user-facing subset spec
   `packages/krtour-map-admin/openapi.user.json` 두 개다.
 - admin 전체 scope는 admin UI가 쓰는 `/features`, `/admin`, `/ops`, `/debug` API다.
-- user subset은 TripMate가 호출하는 `/features/*`, `/tripmate/*`,
-  `/admin/feature-update-requests` 일부 method만 포함한다.
+- user subset은 TripMate가 호출하는 `/features/*`, `/tripmate/*`만 포함한다.
+  admin write/read 경로(`/admin/*`)는 admin 전체 spec에만 남긴다.
 - 모든 응답은 debug/admin backend의 HTTP 응답 셰입을 쓴다.
 
 성공:
@@ -538,9 +538,10 @@ request 실행을 Dagster에 연결했다.
 
 `POST /admin/providers/{provider}/datasets/{dataset_key}/runs`는 T-207b 후보였지만
 사용자 결정에 따라 별도 구현하지 않는다. provider/dataset 직접 실행이 필요하면
-`POST /admin/feature-update-requests`의 `provider_dataset` scope를 사용한다.
+운영자는 `POST /admin/feature-update-requests`, TripMate는
+`POST /tripmate/feature-update-requests`의 `provider_dataset` scope를 사용한다.
 
-`POST /admin/feature-update-requests`는 운영자/TripMate가 쓰기 쉬운 높은 수준 API다.
+feature update request는 운영자/TripMate가 쓰기 쉬운 높은 수준 API다.
 지리 scope를 provider/dataset/job으로 분해하고 필요한 Dagster run을 큐잉한다.
 
 결과적으로 `ops.import_jobs`와 Dagster run을 사용한다.
@@ -754,11 +755,11 @@ T-207e 구현 상태: TripMate에는 다음 public/read API를 제공한다. 기
 | `GET /features/{feature_id}` | feature 상세 envelope. `updated_at` 포함 |
 | `GET /features/search` | `q`(pg_trgm) 또는 `bbox` 기반 검색. keyset cursor |
 | `POST /tripmate/features/batch` | 여러 feature_id 상세 batch 조회. `feature_ids<=200`, missing 목록 반환 |
-| `POST /admin/feature-update-requests` | 운영/관리 화면에서 특정 지역 refresh 요청 |
+| `POST /tripmate/feature-update-requests` | TripMate에서 특정 지역 refresh 요청 |
 | `PUT /admin/poi-cache-targets/{external_system}/{target_key}` | 외부 POI cache target 등록/갱신 |
 | `DELETE /admin/poi-cache-targets/{external_system}/{target_key}` | 외부 POI 삭제 반영 |
 | `GET /features/nearby/by-target` | 외부 POI key 기준 주변 feature summary 조회 |
-| `GET /admin/feature-update-requests/{id}` | refresh 진행 상태 표시 |
+| `GET /tripmate/feature-update-requests/{id}` | refresh 진행 상태 표시 |
 
 TripMate 사용자-facing 응답에는 raw payload, provider key 상태, provider/dataset 내부
 식별자, dedup/sibling linkage, target refresh policy, 내부 error detail, admin audit log를

@@ -36,6 +36,11 @@ jobs:
         # github git dep `maplibre-vworld#v0.1.0` 포함 (PR#92 검증).
         run: npm install --no-audit --no-fund
 
+      - name: openapi-typescript drift check
+        # T-RV-30: admin frontend가 사용하는 generated OpenAPI 타입 산출물이
+        # packages/krtour-map-admin/openapi.json과 drift 나지 않게 고정한다.
+        run: npm -w packages/krtour-map-admin/frontend run gen:types:check
+
       - name: tsc --noEmit (frontend type-check)
         # 빠른 1차 게이트. JSDoc 주석 안의 `*/`(comment terminator) 같은 잠복
         # syntax 오류도 검출 (PR#92 회고).

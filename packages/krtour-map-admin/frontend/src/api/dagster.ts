@@ -8,78 +8,21 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 
 import { getJson, pathWithQuery, postJson } from "./client";
+import type { components } from "./types";
 
 export const DAGSTER_UI_URL =
   process.env.NEXT_PUBLIC_KRTOUR_MAP_DAGSTER_URL ?? "http://127.0.0.1:9013";
 
-export interface DagsterAssetGroup {
-  group_name: string;
-  asset_count: number;
-  assets: string[];
-}
+type DagsterSchemas = components["schemas"];
 
-export interface DagsterJob {
-  name: string;
-  is_job: boolean;
-}
-
-export interface DagsterSchedule {
-  name: string;
-  cron_schedule: string | null;
-  execution_timezone: string | null;
-  status: string | null;
-}
-
-export interface DagsterSensor {
-  name: string;
-  status: string | null;
-}
-
-export interface DagsterRepository {
-  name: string;
-  location_name: string;
-  jobs: DagsterJob[];
-  schedules: DagsterSchedule[];
-  sensors: DagsterSensor[];
-  asset_count: number;
-  asset_groups: DagsterAssetGroup[];
-}
-
-export interface DagsterRunSummary {
-  run_id: string;
-  job_name: string | null;
-  status: string;
-  start_time: number | null;
-  end_time: number | null;
-  update_time: number | null;
-  tags: Record<string, string>;
-}
-
-export interface DagsterSummaryResponse {
-  status: "ok" | "unavailable" | "error";
-  dagster_url: string;
-  graphql_url: string;
-  version: string | null;
-  checked_at: string;
-  repository_count: number;
-  job_count: number;
-  asset_count: number;
-  schedule_count: number;
-  sensor_count: number;
-  run_counts: Record<string, number>;
-  repositories: DagsterRepository[];
-  recent_runs: DagsterRunSummary[];
-  errors: string[];
-}
-
-export interface DagsterNuxSeenResponse {
-  status: "ok" | "unavailable" | "error";
-  dagster_url: string;
-  graphql_url: string;
-  checked_at: string;
-  seen: boolean;
-  errors: string[];
-}
+export type DagsterAssetGroup = DagsterSchemas["DagsterAssetGroup"];
+export type DagsterJob = DagsterSchemas["DagsterJob"];
+export type DagsterSchedule = DagsterSchemas["DagsterSchedule"];
+export type DagsterSensor = DagsterSchemas["DagsterSensor"];
+export type DagsterRepository = DagsterSchemas["DagsterRepository"];
+export type DagsterRunSummary = DagsterSchemas["DagsterRunSummary"];
+export type DagsterSummaryResponse = DagsterSchemas["DagsterSummaryResponse"];
+export type DagsterNuxSeenResponse = DagsterSchemas["DagsterNuxSeenResponse"];
 
 function fetchDagsterSummary(runLimit = 10): Promise<DagsterSummaryResponse> {
   return getJson<DagsterSummaryResponse>(

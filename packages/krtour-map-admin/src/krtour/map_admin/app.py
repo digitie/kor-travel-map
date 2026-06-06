@@ -45,6 +45,7 @@ from krtour.map_admin.routers import (
     offline_uploads_router,
     ops_router,
     poi_cache_targets_router,
+    tripmate_feature_update_requests_router,
     tripmate_router,
     version_router,
 )
@@ -284,6 +285,7 @@ def create_app(settings: AdminSettings | None = None) -> FastAPI:
     if settings.features_routes_enabled:
         application.include_router(features_router)
         application.include_router(tripmate_router)
+        application.include_router(tripmate_feature_update_requests_router)
         # Step D on-demand 상세는 DB(적재된 raw_data) 필요 → features와 동일 gate.
         if settings.debug_routes_enabled:
             application.include_router(mois_detail_router)

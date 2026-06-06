@@ -466,7 +466,8 @@ python packages/krtour-map-admin/scripts/export_openapi.py --profile all
 
 # frontend에서 타입 생성
 cd packages/krtour-map-admin/frontend
-npm run gen:types            # openapi-typescript openapi.json -o src/api/types.ts
+npm run gen:types            # openapi-typescript ../openapi.json -o src/api/types.ts
+npm run gen:types:check
 ```
 
 CI에서 drift 검증 (kraddr-geo ADR-015 패턴 미러). 자세한 절차는 §8 OpenAPI export.
