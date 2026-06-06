@@ -1,5 +1,20 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-06 Codex 작업 메모 — T-209b-a Dagster Postgres instance storage 고정
+
+T-209b-a를 구현한다. Docker와 로컬 admin-stack 모두 `docker/dagster.yaml`의 unified
+`storage.postgres` 설정을 `KRTOUR_MAP_DAGSTER_PG_URL` 기준으로 사용한다. Dagster
+instance config에서 이 key는 run/event/schedule-sensor tick metadata를 함께
+PostgreSQL에 저장하므로, local/Docker 모두 `krtour_map_dagster`가 단일 metadata DB다.
+
+`scripts/run-admin-stack.sh`는 시작 전 `krtour_map_dagster` DB 존재를 확인/생성하고,
+`docker/dagster.yaml`을 `$DAGSTER_HOME/dagster.yaml`로 설치한다. 또한 `dagster dev`
+대신 `dagster-webserver`와 `dagster-daemon`을 분리 실행하고, daemon pid 생존 여부를
+readiness 뒤 확인한다. `$DAGSTER_HOME/schedules/schedules.db*` 생성은 회귀로 문서화했다.
+
+다음 한 작업 후보는 **T-201b Phase 2 dry-run report** 또는 **T-209 Docker/daemon
+polish**다. T-RV 잔여 실행 품질 묶음은 별도 T-RV 백로그에서 계속 추적한다.
+
 ## 2026-06-06 Codex 작업 메모 — T-RV-31/32/33 router/executor 정확성
 
 T-RV-31/32/33을 한 묶음으로 닫는다. `execute_feature_update_request()`의 provider

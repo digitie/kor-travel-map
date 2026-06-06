@@ -135,7 +135,13 @@ npm run admin:stack
 ```
 
 이 명령도 먼저 `9011`, `9012`, `9013` 점유 프로세스를 종료한 뒤 API, Next.js dev,
-Dagster dev를 백그라운드로 시작한다. 로그는 기본 `.codex_tmp/admin-stack/`에 남는다.
+Dagster webserver, Dagster daemon을 백그라운드로 시작한다. 로컬 `DAGSTER_HOME`
+기본값은 `.dagster`이며, 실행 때마다 `docker/dagster.yaml`을
+`$DAGSTER_HOME/dagster.yaml`로 설치해 Docker와 같은 `storage.postgres`
+(`KRTOUR_MAP_DAGSTER_PG_URL`) instance config를 공유한다. 시작 전에
+`krtour_map_dagster` DB 존재도 확인/생성하므로 schedule/run/event metadata가
+`$DAGSTER_HOME` 아래 SQLite로 폴백하면 회귀다. 로그는 기본 `.codex_tmp/admin-stack/`에
+남는다.
 
 ## 6. 스모크
 
@@ -161,6 +167,15 @@ client resource wiring은 후속이다.
 ```bash
 docker compose down
 npm run ports:stop
+```
+
+로컬 `npm run admin:stack`으로 띄운 `dagster-daemon`은 포트를 열지 않으므로 필요하면
+pid 파일로 종료한다. 다음 `admin:stack` 실행도 같은 pid 파일을 보고 이전 daemon을
+먼저 정리한다.
+
+```bash
+kill "$(cat .codex_tmp/admin-stack/dagster-daemon.pid)" 2>/dev/null || true
+rm -f .codex_tmp/admin-stack/dagster-daemon.pid
 ```
 
 볼륨까지 지울 때만 다음을 사용한다.

@@ -504,6 +504,11 @@ Docker compose는 `dagster-db-init`로 같은 Postgres container 안에
 run/event/schedule metadata를 영속화한다. `dagster dev`는 로컬 단일 프로세스 편의
 명령으로만 사용할 수 있고 운영 compose에서는 사용하지 않는다.
 
+로컬 `npm run admin:stack`도 같은 기준을 따른다. 시작 전 `krtour_map_dagster` DB
+존재를 확인/생성하고, `docker/dagster.yaml`을 `$DAGSTER_HOME/dagster.yaml`로 설치한 뒤
+`dagster-webserver`와 `dagster-daemon`을 별도 프로세스로 띄운다. `$DAGSTER_HOME`에
+`schedules/schedules.db*`가 생기면 Postgres instance config를 읽지 못한 회귀로 본다.
+
 feature update worker 실행에는 `krtour_map_client`와 `feature_update_runner` resource가
 필수다. 실패 알림은 선택 resource `feature_update_failure_notifier`로 연결한다.
 
