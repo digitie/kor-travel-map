@@ -58,6 +58,13 @@ Dagster metadata는 같은 Postgres container 안의 별도 DB `krtour_map_dagst
 `KRTOUR_MAP_DAGSTER_PG_URL`(`KRTOUR_MAP_DOCKER_DAGSTER_PG_URL`)을 통해
 `dagster-postgres` storage에 연결한다.
 
+`docker-compose.yml`의 host publish는 기본
+`KRTOUR_MAP_DOCKER_BIND_HOST=127.0.0.1`이다. API/frontend/Dagster/Postgres/RustFS
+컨테이너 내부 프로세스는 컨테이너 네트워크 접근을 위해 `0.0.0.0`에 listen할 수
+있지만, host의 모든 interface로 publish하지 않는다. 외부 접근이 필요하면 VPN,
+SSO 게이트웨이, Cloudflare Tunnel, IP allowlist 같은 네트워크 보호를 먼저 구성한 뒤
+`KRTOUR_MAP_DOCKER_BIND_HOST=0.0.0.0`을 명시한다.
+
 frontend 컨테이너에는 `NEXT_PUBLIC_*`만 주입한다. 서버용 API 키는 API/Dagster
 프로세스 환경변수로만 둔다. Dagster 임베드용 공개 URL은
 `NEXT_PUBLIC_KRTOUR_MAP_DAGSTER_URL`(기본 `http://127.0.0.1:9013`)이다. 로컬 API가

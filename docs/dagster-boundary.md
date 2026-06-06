@@ -445,6 +445,10 @@ T-205d 이후 `ops.import_jobs`는 `load_batch_id`와 self-FK `parent_job_id`를
   없으므로 `materialized_views=[]` 기본 실행은 `skipped:no_materialized_views` payload를
   남긴다. `materialized_views=["schema.view"]`를 주면 `swap`은 현재
   `REFRESH MATERIALIZED VIEW CONCURRENTLY`로 매핑된다.
+- `swap`/`concurrently` 전략으로 넘기는 MV는 refresh identity `UNIQUE` 인덱스와 최초
+  비-concurrent populate가 끝난 상태여야 한다. T-101로 실제 MV를 도입할 때 migration
+  체크리스트에 `CREATE UNIQUE INDEX`와 최초 `REFRESH MATERIALIZED VIEW schema.view`를
+  포함한다.
 - `plan_only=true`는 DB write 없이 child job 존재 여부만 확인한다.
 
 **도입 시점은 ADR-033** (accepted, T-014에 묶어 전환) — 두 단계로 분할:

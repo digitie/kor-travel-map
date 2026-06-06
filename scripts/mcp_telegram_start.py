@@ -8,7 +8,6 @@ import shutil
 import sys
 from pathlib import Path
 
-
 ENV_FILE = ".env.mcp-telegram"
 REQUIRED_ENV = ("API_ID", "API_HASH")
 

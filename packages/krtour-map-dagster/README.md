@@ -139,6 +139,11 @@ child job이 모두 `done`이면 `run_consistency_checks(batch_id=load_batch_id)
 현재 운영 materialized view 카탈로그가 없으므로 `materialized_views=[]` 기본 실행은
 `skipped:no_materialized_views` payload를 남긴다.
 
+`mv_refresh_strategy=swap` 또는 `concurrently`로 실제 MV를 넘기려면 대상 MV에 refresh
+identity `UNIQUE` 인덱스가 있어야 하고, 생성 직후 최초 1회는 비-concurrent
+`REFRESH MATERIALIZED VIEW schema.view`로 populate한 뒤 연결한다. 이 전제는 T-101 MV
+도입 migration 체크리스트에서 보장한다.
+
 ## Offline upload load
 
 - Job: `offline_upload_load`

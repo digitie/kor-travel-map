@@ -15,11 +15,30 @@ DA-D-03 envelope 전면 통일(T-DA-15/16/18, #250~#255) **완료**. 이어서 *
    coord 4326 직접, ST_Transform 금지) 추가 후 `/admin/issues` 라우터에 노출. 소~중규모.
 2. **T-212c** API error/log contract 정렬 + `/ops/health-deep` + provider/system/API
    call log 조회 표면(T-212a gap T-212c-API-03/04). envelope는 이미 통일됨.
-3. **T-RV-40**(F6 perf, T-212d 편입) / **T-RV-41**(MV CONCURRENTLY 전제, T-101).
+3. **T-RV-37 잔여 hygiene** 또는 **T-RV-04b(provider public client live fetcher
+   wiring)**.
 
 **조율**: codex가 T-209e-c(backup/restore)/T-212b(admin UI, `/admin/issues` 화면 포함)를
 잡고 있다. `/admin/issues` **API**는 완료됐으므로 codex는 UI에서 이 API를 소비하면 된다
 (envelope/필드 계약은 openapi.json 정본). API lane만 건드리고 UI/backup lane은 codex.
+
+## 2026-06-06 Codex 작업 메모 — T-RV-27/40/41 운영 hardening + F6 성능 전제
+
+PR 리뷰 후속 중 같은 운영 hardening/performance 범위인 `T-RV-27`, `T-RV-40`,
+`T-RV-41`을 한 묶음으로 닫는다. Docker compose host publish 기본값은
+`KRTOUR_MAP_DOCKER_BIND_HOST=127.0.0.1`로 제한하고, 컨테이너 내부 `0.0.0.0` listen은
+유지한다. host 모든 interface 노출은 `KRTOUR_MAP_DOCKER_BIND_HOST=0.0.0.0` 명시
+opt-in과 네트워크 보호 전제로만 문서화한다.
+
+F6 opening_hours consistency SQL은 `feature.features`를 4회 풀스캔하지 않도록
+`candidate_features` CTE로 feature table을 한 번만 읽고, 4개 JSONPath period 추출을
+단일 `CROSS JOIN LATERAL` 내부로 모은다. MV `CONCURRENTLY` 전제는 `T-101`
+체크리스트와 performance/Dagster 문서에 `UNIQUE` 인덱스 + 최초 비-concurrent populate
+후 전환으로 고정한다.
+
+다음 리뷰 후속은 **T-RV-37 잔여 hygiene** 또는 **T-RV-04b(provider public client
+live fetcher wiring)** 이다. `T-RV-04b`는 provider별 정책(OpiNet scope, MOIS source
+DB refresh, KNPS file parser)을 함께 정해야 하므로 별도 PR로 분리한다.
 
 ## 2026-06-06 Codex 작업 메모 — T-212a inventory + e2e gap matrix
 
