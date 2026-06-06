@@ -2,6 +2,26 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-06 (claude) — T-DA-15/16 envelope 통일 ③ poi-cache-targets (T-DA-15 완료)
+
+**작업**: DA-D-03 세 번째 family로 `/admin/poi-cache-targets` list/detail 응답을
+`{data, meta}` envelope로 수렴. 이로써 **T-DA-15(3 flat list 통일) 완료**.
+
+- **list**: `{count,items,next_cursor}` → `data.{items,next_cursor}` +
+  `meta.{count,duration_ms}`. **detail GET**: bare `PoiCacheTargetRecord` →
+  기존 `PoiCacheTargetResponse{data, meta}` 재사용(put/delete와 동일 envelope).
+- **frontend**: `poiCacheTargets.ts` `fetchPoiCacheTarget`/`usePoiCacheTarget`
+  반환형 → `PoiCacheTargetResponse`, `poi-cache-targets-client.tsx` list accessor
+  (`.meta.count`, `.data.items`, `.data.next_cursor`). `openapi.json`/`types.ts`
+  재생성(admin-only → `openapi.user.json` 무변).
+- **test**: openapi schema 검증 `PoiCacheTargetListResponse.properties == {data, meta}`
+  + `PoiCacheTargetListData.next_cursor`로 갱신.
+- **gate**: drift green, ruff/mypy --strict green, poi router+export_openapi pytest
+  14 passed, frontend type-check/gen:types:check/eslint green.
+- **문서**: contract §3.1 list 예외 비움(전부 완료), T-DA-15 ✅ 마킹.
+- **다음**: T-DA-16 잔여 단건 bare(`/ops/metrics`·`/ops/dagster/summary`·
+  `/debug/mois-license/{id}`·`/ops/import-jobs/{id}` meta) → T-DA-13 `/admin/issues`.
+
 ## 2026-06-06 (claude) — T-DA-15/16 envelope 통일 ② offline-uploads
 
 **작업**: DA-D-03 두 번째 family로 `/admin/offline-uploads` list/detail 응답을

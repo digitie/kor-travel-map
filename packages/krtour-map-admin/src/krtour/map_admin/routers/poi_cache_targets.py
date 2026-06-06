@@ -192,14 +192,31 @@ class PoiCacheTargetResponse(BaseModel):
     meta: PoiCacheTargetMeta
 
 
-class PoiCacheTargetListResponse(BaseModel):
-    """목록 응답."""
+class PoiCacheTargetListData(BaseModel):
+    """POI/cache target 목록 data."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[PoiCacheTargetRecord]
+    next_cursor: str | None = None
+
+
+class PoiCacheTargetListMeta(BaseModel):
+    """POI/cache target 목록 meta."""
 
     model_config = ConfigDict(extra="forbid")
 
     count: int
-    items: list[PoiCacheTargetRecord]
-    next_cursor: str | None = None
+    duration_ms: int
+
+
+class PoiCacheTargetListResponse(BaseModel):
+    """목록 응답 (DA-D-03 envelope)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: PoiCacheTargetListData
+    meta: PoiCacheTargetListMeta
 
 
 def _provider_overrides_payload(
@@ -314,6 +331,7 @@ async def list_poi_cache_target_records(
     page_size: Annotated[int, Query(ge=1, le=500)] = 200,
     cursor: Annotated[str | None, Query()] = None,
 ) -> PoiCacheTargetListResponse:
+    started_at = perf_counter()
     try:
         page = await list_poi_cache_targets(
             session,
@@ -326,15 +344,20 @@ async def list_poi_cache_target_records(
     except ValueError as exc:
         raise _unprocessable(exc) from exc
     return PoiCacheTargetListResponse(
-        count=len(page.items),
-        items=[_record_from_target(target) for target in page.items],
-        next_cursor=page.next_cursor,
+        data=PoiCacheTargetListData(
+            items=[_record_from_target(target) for target in page.items],
+            next_cursor=page.next_cursor,
+        ),
+        meta=PoiCacheTargetListMeta(
+            count=len(page.items),
+            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
+        ),
     )
 
 
 @router.get(
     "/{external_system}/{target_key}",
-    response_model=PoiCacheTargetRecord,
+    response_model=PoiCacheTargetResponse,
     summary="POI/cache target 단건 조회",
     responses={404: {"description": "target 없음"}},
 )
@@ -343,7 +366,8 @@ async def get_poi_cache_target_record(
     target_key: str,
     session: Annotated[AsyncSession, Depends(get_session)],
     include_deleted: Annotated[bool, Query()] = False,
-) -> PoiCacheTargetRecord:
+) -> PoiCacheTargetResponse:
+    started_at = perf_counter()
     target = await get_poi_cache_target_by_key(
         session,
         external_system=external_system,
@@ -355,7 +379,7 @@ async def get_poi_cache_target_record(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"POI/cache target 없음: {external_system!r}/{target_key!r}",
         )
-    return _record_from_target(target)
+    return _response(target, started_at=started_at)
 
 
 @router.delete(

@@ -4554,14 +4554,10 @@
         "title": "OpsMetricsResponse",
         "type": "object"
       },
-      "PoiCacheTargetListResponse": {
+      "PoiCacheTargetListData": {
         "additionalProperties": false,
-        "description": "목록 응답.",
+        "description": "POI/cache target 목록 data.",
         "properties": {
-          "count": {
-            "title": "Count",
-            "type": "integer"
-          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/PoiCacheTargetRecord"
@@ -4582,8 +4578,45 @@
           }
         },
         "required": [
-          "count",
           "items"
+        ],
+        "title": "PoiCacheTargetListData",
+        "type": "object"
+      },
+      "PoiCacheTargetListMeta": {
+        "additionalProperties": false,
+        "description": "POI/cache target 목록 meta.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "count",
+          "duration_ms"
+        ],
+        "title": "PoiCacheTargetListMeta",
+        "type": "object"
+      },
+      "PoiCacheTargetListResponse": {
+        "additionalProperties": false,
+        "description": "목록 응답 (DA-D-03 envelope).",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PoiCacheTargetListData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/PoiCacheTargetListMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
         ],
         "title": "PoiCacheTargetListResponse",
         "type": "object"
@@ -7380,7 +7413,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PoiCacheTargetRecord"
+                  "$ref": "#/components/schemas/PoiCacheTargetResponse"
                 }
               }
             },
