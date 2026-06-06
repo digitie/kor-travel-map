@@ -1011,6 +1011,24 @@
         "title": "FeatureUpdateRequestCreateResponse",
         "type": "object"
       },
+      "FeatureUpdateRequestDetailResponse": {
+        "additionalProperties": false,
+        "description": "feature update request 단건 조회 응답 (DA-D-03 envelope).",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/FeatureUpdateRequestRecord"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/FeatureUpdateRequestMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "FeatureUpdateRequestDetailResponse",
+        "type": "object"
+      },
       "FeatureUpdateRequestMeta": {
         "additionalProperties": false,
         "description": "쓰기 요청의 간단한 메타데이터.",
@@ -3100,7 +3118,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FeatureUpdateRequestRecord"
+                  "$ref": "#/components/schemas/FeatureUpdateRequestDetailResponse"
                 }
               }
             },

@@ -265,14 +265,40 @@ class FeatureUpdateRequestCreateResponse(BaseModel):
     meta: FeatureUpdateRequestMeta
 
 
-class FeatureUpdateRequestListResponse(BaseModel):
-    """feature update request 목록 응답."""
+class FeatureUpdateRequestDetailResponse(BaseModel):
+    """feature update request 단건 조회 응답 (DA-D-03 envelope)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: FeatureUpdateRequestRecord
+    meta: FeatureUpdateRequestMeta
+
+
+class FeatureUpdateRequestListData(BaseModel):
+    """feature update request 목록 data."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[FeatureUpdateRequestRecord]
+    next_cursor: str | None = None
+
+
+class FeatureUpdateRequestListMeta(BaseModel):
+    """feature update request 목록 meta."""
 
     model_config = ConfigDict(extra="forbid")
 
     count: int
-    items: list[FeatureUpdateRequestRecord]
-    next_cursor: str | None = None
+    duration_ms: int
+
+
+class FeatureUpdateRequestListResponse(BaseModel):
+    """feature update request 목록 응답 (DA-D-03 envelope)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: FeatureUpdateRequestListData
+    meta: FeatureUpdateRequestListMeta
 
 
 class FeatureUpdateRequestCancelRequest(BaseModel):
@@ -585,6 +611,7 @@ async def list_feature_update_requests(
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
     cursor: Annotated[str | None, Query()] = None,
 ) -> FeatureUpdateRequestListResponse:
+    started_at = perf_counter()
     try:
         page: FeatureUpdateRequestPage = await list_update_requests(
             session,
@@ -600,50 +627,67 @@ async def list_feature_update_requests(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return FeatureUpdateRequestListResponse(
-        count=len(page.items),
-        items=[_record_from_request(item) for item in page.items],
-        next_cursor=page.next_cursor,
+        data=FeatureUpdateRequestListData(
+            items=[_record_from_request(item) for item in page.items],
+            next_cursor=page.next_cursor,
+        ),
+        meta=FeatureUpdateRequestListMeta(
+            count=len(page.items),
+            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
+        ),
     )
 
 
 @router.get(
     "/{request_id}",
-    response_model=FeatureUpdateRequestRecord,
+    response_model=FeatureUpdateRequestDetailResponse,
     summary="feature update request 단건 조회",
     responses={404: {"description": "request_id 없음"}},
 )
 async def get_feature_update_request(
     request_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> FeatureUpdateRequestRecord:
+) -> FeatureUpdateRequestDetailResponse:
+    started_at = perf_counter()
     row = await get_update_request(session, request_id)
     if row is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"feature update request 없음: {request_id!r}",
         )
-    return _record_from_request(row)
+    return FeatureUpdateRequestDetailResponse(
+        data=_record_from_request(row),
+        meta=FeatureUpdateRequestMeta(
+            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
+        ),
+    )
 
 
 @tripmate_router.get(
     "/{request_id}",
-    response_model=FeatureUpdateRequestRecord,
+    response_model=FeatureUpdateRequestDetailResponse,
     summary="TripMate feature update request 단건 조회",
     responses={404: {"description": "request_id 없음"}},
 )
 async def get_tripmate_feature_update_request(
     request_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> FeatureUpdateRequestRecord:
+) -> FeatureUpdateRequestDetailResponse:
+    started_at = perf_counter()
     row = await get_update_request(session, request_id)
     if row is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"feature update request 없음: {request_id!r}",
         )
-    return _record_from_request(
-        row,
-        status_url_prefix=TRIPMATE_FEATURE_UPDATE_REQUESTS_PREFIX,
+    return FeatureUpdateRequestDetailResponse(
+        data=_record_from_request(
+            row,
+            status_url_prefix=TRIPMATE_FEATURE_UPDATE_REQUESTS_PREFIX,
+        ),
+        meta=FeatureUpdateRequestMeta(
+            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
+        ),
     )
 
 

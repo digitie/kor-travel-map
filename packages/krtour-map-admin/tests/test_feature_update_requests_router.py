@@ -343,9 +343,9 @@ def test_list_requests_passes_filters(
 
     assert response.status_code == 200
     body = response.json()
-    assert body["count"] == 1
-    assert body["next_cursor"] == "next"
-    assert body["items"][0]["request_id"] == "req-1"
+    assert body["meta"]["count"] == 1
+    assert body["data"]["next_cursor"] == "next"
+    assert body["data"]["items"][0]["request_id"] == "req-1"
 
 
 @pytest.mark.unit

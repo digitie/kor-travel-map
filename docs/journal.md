@@ -2,6 +2,27 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-06 (claude) — T-DA-15/16 envelope 통일 ① feature-update-requests
+
+**작업**: DA-D-03 전면 통일의 첫 family로 `/admin/feature-update-requests`와
+`/tripmate/feature-update-requests` 응답 셰입을 `{data, meta}` envelope로 수렴.
+
+- **list**: `{count, items, next_cursor}` flat → `data.{items,next_cursor}` +
+  `meta.{count,duration_ms}` (기존 enveloped 라우터 admin-features/ops-import-jobs와
+  동일 패턴). detail GET 2종(admin/tripmate): bare `FeatureUpdateRequestRecord` →
+  `FeatureUpdateRequestDetailResponse{data, meta}`.
+- **frontend**: `updateRequests.ts` hook 반환형/accessor(`.data.items`,
+  `.data.state`), `feature-update-requests-client.tsx`(`.meta.count`,
+  `.data.items`) 갱신. `openapi.json`/`openapi.user.json`/`types.ts` 재생성.
+- **gate**: drift `--profile all --check` green, ruff/mypy --strict green, admin
+  router+export_openapi pytest 16 passed, frontend `type-check`/`gen:types:check`/
+  eslint green.
+- **문서**: contract §3.1 현행 예외 목록에서 feature-update-requests 제거, tasks.md
+  T-DA-15/16 family 진행 체크.
+- **다음**: 잔여 family `/admin/offline-uploads`, `/admin/poi-cache-targets`, 이후
+  단건 bare(`/ops/metrics`·`/ops/dagster/summary`·`/debug/mois-license/{id}`·
+  `/ops/import-jobs/{id}` meta 추가) 통일 → T-DA-13 `/admin/issues`.
+
 ## 2026-06-06 (codex) — T-212a 전체점검 inventory + e2e gap matrix
 
 **작업**: ADR-045 전체점검(T-212) 진입을 위해 최신 main 기준 API/UI/Dagster/DB/e2e
