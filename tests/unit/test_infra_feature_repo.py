@@ -133,6 +133,15 @@ def test_module_exports_load_helpers() -> None:
         assert hasattr(feature_repo, name)
 
 
+def test_nearby_feature_sql_guards_required_lon_lat_contract() -> None:
+    sql = feature_repo._NEARBY_TARGET_CTE_SQL
+
+    assert "x_extension.ST_X(f.coord) AS lon" in sql
+    assert "x_extension.ST_Y(f.coord) AS lat" in sql
+    assert "f.coord IS NOT NULL" in sql
+    assert "f.coord_5179 IS NOT NULL" in sql
+
+
 def test_nearby_cursor_round_trips_distance_name_and_updated_at() -> None:
     row = NearbyFeatureRow(
         feature_id="feature-1",

@@ -425,6 +425,17 @@ async def _heartbeat_request_job(
     )
 
 
+async def _run_refresh_scope(
+    session: AsyncSession,
+    *,
+    runner: ProviderDatasetRefreshRunner,
+    scope: ProviderDatasetRefreshScope,
+) -> ProviderDatasetRefreshResult:
+    """runner 1회의 DB write를 savepoint 안에 격리한다."""
+    async with session.begin_nested():
+        return await runner(session, scope)
+
+
 async def execute_feature_update_request(
     session: AsyncSession,
     request: FeatureUpdateRequest,
@@ -500,7 +511,9 @@ async def _execute_feature_update_request_locked(
                 progress=10 + int((index - 1) * 80 / total),
                 current_stage=f"refreshing:{scope.provider}:{scope.dataset_key}",
             )
-            results.append(await runner(session, scope))
+            results.append(
+                await _run_refresh_scope(session, runner=runner, scope=scope)
+            )
 
         final_resolution = plan.resolution
         if started.scope_type == "cache_target_keys":

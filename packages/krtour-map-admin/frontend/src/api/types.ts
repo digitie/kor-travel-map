@@ -730,8 +730,6 @@ export interface components {
             violation_key?: string | null;
             /** Violation Type */
             violation_type?: string | null;
-        } & {
-            [key: string]: unknown;
         };
         /**
          * AdminFeatureOverrideRecord
