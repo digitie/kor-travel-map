@@ -19,6 +19,7 @@ def test_root_package_exposes_docker_backup_script() -> None:
     package_json = json.loads(_read("package.json"))
 
     assert package_json["scripts"]["docker:backup"] == "bash scripts/docker-backup.sh"
+    assert package_json["scripts"]["docker:restore"] == "bash scripts/docker-restore.sh"
 
 
 @pytest.mark.unit
@@ -49,6 +50,44 @@ def test_docker_backup_script_is_non_destructive() -> None:
 
 
 @pytest.mark.unit
+def test_docker_restore_script_restores_backup_into_staging_targets() -> None:
+    script = _read("scripts/docker-restore.sh")
+
+    assert 'source "$ROOT_DIR/scripts/load-env.sh"' in script
+    assert "KRTOUR_MAP_RESTORE_BACKUP_ID" in script
+    assert "KRTOUR_MAP_RESTORE_BACKUP_DIR" in script
+    assert (
+        'KRTOUR_MAP_RESTORE_APP_DB="${KRTOUR_MAP_RESTORE_APP_DB:-'
+        '${KRTOUR_MAP_POSTGRES_DB}_restore}"'
+    ) in script
+    assert (
+        'KRTOUR_MAP_RESTORE_DAGSTER_DB="${KRTOUR_MAP_RESTORE_DAGSTER_DB:-'
+        '${KRTOUR_MAP_DAGSTER_POSTGRES_DB}_restore}"'
+    ) in script
+    assert "KRTOUR_MAP_RESTORE_RUSTFS_VOLUME" in script
+    assert "sha256sum -c meta/SHA256SUMS" in script
+    assert "pg_restore" in script
+    assert "--clean" in script
+    assert "--if-exists" in script
+    assert "--no-owner" in script
+    assert "--no-privileges" in script
+    assert "rustfs-data.tar.gz" in script
+    assert "docker run --rm" in script
+
+
+@pytest.mark.unit
+def test_docker_restore_script_refuses_production_targets_by_default() -> None:
+    script = _read("scripts/docker-restore.sh")
+
+    assert "refusing to restore into production app DB" in script
+    assert "refusing to restore into production Dagster DB" in script
+    assert "KRTOUR_MAP_RESTORE_RECREATE" in script
+    assert "set KRTOUR_MAP_RESTORE_RECREATE=1" in script
+    assert "docker compose down" not in script
+    assert "KRTOUR_MAP_RESTORE_ALLOW_PRODUCTION" not in script
+
+
+@pytest.mark.unit
 def test_backup_restore_runbook_documents_three_part_bundle_and_restore_boundary() -> None:
     runbook = _read("docs/backup-restore.md")
 
@@ -61,4 +100,7 @@ def test_backup_restore_runbook_documents_three_part_bundle_and_restore_boundary
     assert "meta/manifest.json" in runbook
     assert "meta/SHA256SUMS" in runbook
     assert "TripMate" in runbook
-    assert "T-209e-b/c" in runbook
+    assert "npm run docker:restore" in runbook
+    assert "krtour_map_restore" in runbook
+    assert "krtour_map_dagster_restore" in runbook
+    assert "T-209e-c" in runbook

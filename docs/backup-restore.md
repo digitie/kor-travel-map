@@ -8,9 +8,9 @@
 - RustFS 객체 저장소 볼륨: feature file bucket `krtour-map`, offline upload bucket
   `krtour-uploads`
 
-현재 구현 범위는 `T-209e-a` cold backup 스크립트와 검증 절차다. restore 자동화,
-admin router(`/admin/backups`, `/admin/restore/*`), hot-swap UI는 후속
-`T-209e-b/c`에서 구현한다.
+현재 구현 범위는 `T-209e-a` cold backup 스크립트와 `T-209e-b` staging cold restore
+자동화다. admin router(`/admin/backups`, `/admin/restore/*`)와 hot-swap UI는 후속
+`T-209e-c`에서 구현한다.
 
 ## 1. 전제
 
@@ -95,22 +95,64 @@ RustFS archive는 파일 목록을 열어 확인한다.
 tar tzf rustfs/rustfs-data.tar.gz | sed -n '1,40p'
 ```
 
-## 5. 수동 cold restore 절차
+## 5. staging cold restore 자동화
 
-restore 자동화가 들어오기 전에는 운영 환경에 바로 덮어쓰지 않는다. 새 staging 환경이나
-비어 있는 로컬 compose volume에서 먼저 복원한 뒤 smoke를 수행한다.
+`npm run docker:restore`는 백업 산출물을 운영 대상이 아닌 staging 대상에 복원한다.
+기본 대상은 다음과 같다.
 
-1. API, frontend, Dagster daemon/webserver, RustFS를 모두 멈춘다.
-2. Postgres에 접속해 대상 DB를 새로 만든다. 기존 운영 DB에 직접 `--clean` restore를
-   실행하지 않는다.
-3. `pg_restore --clean --if-exists --no-owner --no-privileges`로
-   `postgres/krtour_map.dump`와 `postgres/krtour_map_dagster.dump`를 각각 복원한다.
-4. RustFS named volume을 비운 staging container에
-   `tar xzf rustfs/rustfs-data.tar.gz -C /data`로 풀어 넣는다.
-5. `docker compose up -d postgres rustfs rustfs-init api frontend dagster
-   dagster-daemon`으로 기동하고 `docs/runbooks/docker-app.md` §6 smoke를 실행한다.
+| 구성요소 | 기본 restore 대상 |
+|----------|-------------------|
+| app DB | `krtour_map_restore` |
+| Dagster metadata DB | `krtour_map_dagster_restore` |
+| RustFS data | Docker volume `krtour-map-rustfs-restore` |
 
-## 6. 구현 잔여
+```bash
+npm run docker:restore -- <backup_id>
+# 또는
+KRTOUR_MAP_RESTORE_BACKUP_ID=<backup_id> npm run docker:restore
+```
+
+스크립트는 먼저 `meta/SHA256SUMS`를 검증한 뒤 `pg_restore --clean --if-exists
+--no-owner --no-privileges`로 두 DB를 복원하고, `rustfs/rustfs-data.tar.gz`를 staging
+Docker volume에 푼다. 기존 staging 대상이 있으면 기본적으로 중단한다. 의도적으로
+새로 만들 때만 다음 opt-in을 사용한다.
+
+```bash
+KRTOUR_MAP_RESTORE_BACKUP_ID=<backup_id> \
+KRTOUR_MAP_RESTORE_RECREATE=1 \
+npm run docker:restore
+```
+
+대상 이름은 staging 환경별로 바꿀 수 있다.
+
+```bash
+KRTOUR_MAP_RESTORE_BACKUP_ID=<backup_id> \
+KRTOUR_MAP_RESTORE_APP_DB=krtour_map_restore_20260606 \
+KRTOUR_MAP_RESTORE_DAGSTER_DB=krtour_map_dagster_restore_20260606 \
+KRTOUR_MAP_RESTORE_RUSTFS_VOLUME=krtour-map-rustfs-restore-20260606 \
+npm run docker:restore
+```
+
+스크립트는 `KRTOUR_MAP_RESTORE_APP_DB == KRTOUR_MAP_POSTGRES_DB` 또는
+`KRTOUR_MAP_RESTORE_DAGSTER_DB == KRTOUR_MAP_DAGSTER_POSTGRES_DB`이면 즉시 실패한다.
+운영 DB에 직접 `--clean` restore를 실행하는 경로는 제공하지 않는다.
+
+## 6. staging restore 검증
+
+복원 뒤에는 staging DB/volume을 사용하는 별도 env 파일이나 compose project에서 API를
+띄운 뒤 `docs/runbooks/docker-app.md` §6 smoke를 수행한다. 운영 stack의 DSN/volume을
+staging 대상으로 바꾸기 전까지 TripMate는 영향받지 않는다.
+
+간단한 DB 검증 예:
+
+```bash
+docker compose exec -T postgres psql -U krtour_map -d krtour_map_restore -c '\dt feature.*'
+docker compose exec -T postgres psql -U krtour_map -d krtour_map_dagster_restore -c '\dt'
+docker run --rm -v krtour-map-rustfs-restore:/data alpine:3.20 \
+  sh -c "find /data -maxdepth 2 -type f | sed -n '1,40p'"
+```
+
+## 7. 구현 잔여
 
 다음 항목은 아직 구현하지 않았다.
 
@@ -119,4 +161,4 @@ restore 자동화가 들어오기 전에는 운영 환경에 바로 덮어쓰지
 - `packages/krtour-map-admin/src/krtour/map_admin/routers/admin_backups.py`.
 - `GET /admin/backups`, `POST /admin/backups`, `POST /admin/restore/{backup_id}`,
   `POST /admin/restore/{backup_id}/swap`.
-- staging DB restore 후 API smoke/count check와 hot-swap UI.
+- staging DB restore 후 API smoke/count check 자동화와 hot-swap UI.

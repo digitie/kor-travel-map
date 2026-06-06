@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-06 (codex) — T-209e-b staging cold restore 자동화
+
+**작업**: T-209e backup/restore 독립 DB 묶음에서 cold backup 산출물을 비파괴 staging
+대상으로 복원하는 자동화 경로를 추가한다.
+
+- **Restore script**: `npm run docker:restore -- <backup_id>`가
+  `scripts/docker-restore.sh`를 실행해 app DB는 `krtour_map_restore`, Dagster metadata
+  DB는 `krtour_map_dagster_restore`, RustFS archive는 `krtour-map-rustfs-restore`
+  Docker volume에 복원한다.
+- **Safety**: 운영 DB 이름(`krtour_map`, `krtour_map_dagster`)으로 직접 restore하면 즉시
+  실패한다. 기존 staging 대상 재생성도 `KRTOUR_MAP_RESTORE_RECREATE=1` opt-in을 요구한다.
+- **Verification**: restore 전 `meta/SHA256SUMS`를 검증하고, static unit test로 script
+  contract와 runbook 문구를 고정한다.
+- **다음**: T-209e-c admin backup/restore router + hot-swap UI 또는 T-212 전체점검.
+
 ## 2026-06-06 (claude) — T-213e weather card (T-213 완료 7/7)
 
 **작업**: T-213 묶음 마지막. weather value 적재/조회 + weather card 전체 스택.
