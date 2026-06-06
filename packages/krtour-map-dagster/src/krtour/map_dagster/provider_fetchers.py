@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 __all__ = [
     "ProviderCredentialMissing",
     "fetch_datagokr_cultural_festivals",
+    "fetch_krheritage_events",
 ]
 
 
@@ -59,5 +60,39 @@ def fetch_datagokr_cultural_festivals(
     client = datagokr.DataGoKrClient(api_key=api_key)
     try:
         yield from client.festival.iter_all()
+    finally:
+        client.close()
+
+
+def fetch_krheritage_events(
+    settings: KrtourMapSettings,
+) -> Iterator[Any]:
+    """국가유산 행사(event) record를 krheritage public client로 stream한다.
+
+    ``settings.data_go_kr_service_key``에서 service key를 읽어
+    ``HeritageClient(api_key=...)``를 열고 ``client.event.iter_months()``의
+    record(``HeritageEvent``, ``KrHeritageEvent`` Protocol 충족)를 lazily yield
+    한다. ``iter_months``는 provider 내장 rolling window(기본 ``months_back=1,
+    months_ahead=12``)를 그대로 정책으로 쓴다 — custom 인자를 넘기지 않는다.
+    generator가 살아 있는 동안 client는 열려 있고, 소비 종료(또는 close)시
+    ``finally``에서 ``client.close()``로 닫는다.
+    """
+    secret = settings.data_go_kr_service_key
+    if secret is None:
+        raise ProviderCredentialMissing(
+            "krheritage events live fetch에는 "
+            "KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY (source DATA_GO_KR_SERVICE_KEY)가 "
+            "필요하다."
+        )
+    api_key = secret.get_secret_value()
+
+    # provider public client는 ADR-044 로컬 체크아웃이며 hard dependency가
+    # 아니므로(부재 가능), datagokr와 동일하게 import time이 아닌 호출 시점에
+    # ``importlib`` + ``cast(Any, ...)``로 lazy resolve한다.
+    krheritage = cast(Any, importlib.import_module("krheritage"))
+
+    client = krheritage.HeritageClient(api_key=api_key)
+    try:
+        yield from client.event.iter_months()
     finally:
         client.close()

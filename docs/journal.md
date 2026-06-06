@@ -2,6 +2,29 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-07 (claude) — T-RV-04b ② krheritage_events (ADR-044 재조정 + cross-repo)
+
+**작업**: krheritage_events live fetcher. 검증 결과 provider model `HeritageEvent`이
+krtour `KrHeritageEvent` Protocol과 불일치(필드명 starts_on/place/address ≠
+start_date/venue_name/location_text, `raw` 부재)임을 발견 → ADR-044 cross-repo 재조정.
+
+- **upstream PR `python-krheritage-api#4`(merged)**: `HeritageEvent.raw` 주입(sibling
+  IntangibleRecord/legacy/research 모델과 정합, downstream source_records.raw_data용).
+  provider repo ruff/mypy/pytest(25) green.
+- **krtour 재조정**: `KrHeritageEvent` Protocol property를 provider 실제 필드명으로 재정렬
+  (start_date→starts_on, end_date→ends_on, venue_name→place, tel→tel_name,
+  location_text→address). `_event_to_bundle` 입력 read 5곳 갱신(출력 EventDetail 계약 불변).
+  `test_providers_krheritage.py` fake event 필드명 갱신.
+- **wiring**: `fetch_krheritage_events`(`HeritageClient.event.iter_months()` provider 기본
+  rolling window) + resource guard→live. dagster fetcher 단위(fake) + test_definitions
+  live key.
+- **gate**: ruff + mypy --strict(krtour.map 79 / krtour.map_dagster 12) green, krheritage
+  transform+dagster 43 + 39 dagster suite green, unit coverage 80.23%(krheritage.py 83%).
+- **교훈**: 감사의 "ASSUMED CLEAN"은 신뢰 불가 — provider는 wiring 전 model↔Protocol
+  실검증 필수. datagokr 외 전부 mismatch 가능성. 사용자 승인으로 provider 레포 편집 가능.
+- **다음**: krex(2)/opinet/mois/knps — 각 provider model 실검증 + 재조정/정책. 동일 cross-repo
+  패턴 적용 가능.
+
 ## 2026-06-07 (codex) — T-209e-c backup/restore admin surface
 
 **작업**: T-209e backup/restore 묶음의 admin router/UI 표면을 추가한다. T-212 계열과

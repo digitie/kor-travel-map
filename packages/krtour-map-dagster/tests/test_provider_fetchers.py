@@ -15,6 +15,7 @@ from pydantic import SecretStr
 from krtour.map_dagster.provider_fetchers import (
     ProviderCredentialMissing,
     fetch_datagokr_cultural_festivals,
+    fetch_krheritage_events,
 )
 from krtour.map_dagster.resources import (
     PROVIDER_RECORD_RESOURCE_DEFINITIONS,
@@ -63,6 +64,35 @@ def _install_fake_datagokr(monkeypatch: pytest.MonkeyPatch) -> type[_FakeDataGoK
     return _FakeDataGoKrClient
 
 
+class _FakeEventService:
+    def __init__(self, records: list[object]) -> None:
+        self._records = records
+
+    def iter_months(self, **_filters: Any) -> Iterator[object]:
+        yield from self._records
+
+
+class _FakeHeritageClient:
+    instances: list[_FakeHeritageClient] = []
+
+    def __init__(self, *, api_key: str | None = None, **_kwargs: Any) -> None:
+        self.api_key = api_key
+        self.closed = False
+        self.event = _FakeEventService([object(), object()])
+        _FakeHeritageClient.instances.append(self)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _install_fake_krheritage(monkeypatch: pytest.MonkeyPatch) -> type[_FakeHeritageClient]:
+    _FakeHeritageClient.instances = []
+    module = ModuleType("krheritage")
+    module.__dict__["HeritageClient"] = _FakeHeritageClient
+    monkeypatch.setitem(sys.modules, "krheritage", module)
+    return _FakeHeritageClient
+
+
 def test_fetch_raises_when_credential_missing() -> None:
     settings = KrtourMapSettings(data_go_kr_service_key=None)
 
@@ -98,6 +128,29 @@ def test_fetch_closes_client_on_partial_consumption(
     generator.close()
 
     assert fake.instances[0].closed is True
+
+
+def test_krheritage_fetch_raises_when_credential_missing() -> None:
+    settings = KrtourMapSettings(data_go_kr_service_key=None)
+
+    generator = fetch_krheritage_events(settings)
+    with pytest.raises(ProviderCredentialMissing):
+        next(generator)
+
+
+def test_krheritage_fetch_yields_records_and_closes_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _install_fake_krheritage(monkeypatch)
+    settings = KrtourMapSettings(data_go_kr_service_key=SecretStr("service-key"))
+
+    records = list(fetch_krheritage_events(settings))
+
+    assert len(records) == 2
+    assert len(fake.instances) == 1
+    client = fake.instances[0]
+    assert client.api_key == "service-key"
+    assert client.closed is True
 
 
 def test_live_resource_returns_iterable_when_credentials_present(

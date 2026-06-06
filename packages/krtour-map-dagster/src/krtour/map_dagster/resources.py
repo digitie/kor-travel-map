@@ -23,7 +23,10 @@ from krtour.map.infra.file_store import (
 )
 from krtour.map.settings import KrtourMapSettings
 
-from .provider_fetchers import fetch_datagokr_cultural_festivals
+from .provider_fetchers import (
+    fetch_datagokr_cultural_festivals,
+    fetch_krheritage_events,
+)
 
 __all__ = [
     "PROVIDER_RECORD_RESOURCE_DEFINITIONS",
@@ -220,6 +223,20 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["datagokr_cultural_festivals"] = (
     build_provider_record_live_resource(
         _DATAGOKR_CULTURAL_FESTIVALS_SPEC,
         fetch_datagokr_cultural_festivals,
+    )
+)
+
+_KRHERITAGE_EVENTS_SPEC: ProviderRecordResourceSpec = next(
+    spec
+    for spec in PROVIDER_RECORD_RESOURCE_SPECS
+    if spec.resource_key == "krheritage_events"
+)
+"""krheritage 행사 spec 참조 (live resource override용)."""
+
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["krheritage_events"] = (
+    build_provider_record_live_resource(
+        _KRHERITAGE_EVENTS_SPEC,
+        fetch_krheritage_events,
     )
 )
 

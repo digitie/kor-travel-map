@@ -203,27 +203,27 @@ class KrHeritageEvent(Protocol):
         ...
 
     @property
-    def start_date(self) -> date | None:
+    def starts_on(self) -> date | None:
         """행사 시작일."""
         ...
 
     @property
-    def end_date(self) -> date | None:
+    def ends_on(self) -> date | None:
         """행사 종료일."""
         ...
 
     @property
-    def venue_name(self) -> str | None:
+    def place(self) -> str | None:
         """개최 장소."""
         ...
 
     @property
-    def tel(self) -> str | None:
+    def tel_name(self) -> str | None:
         """문의 전화."""
         ...
 
     @property
-    def location_text(self) -> str | None:
+    def address(self) -> str | None:
         """장소 주소 텍스트."""
         ...
 
@@ -569,10 +569,10 @@ async def _event_to_bundle(
     if coord is not None and reverse_geocoder is not None:
         geo = await reverse_geocoder(coord)
     if (geo is None or geo.bjd_code is None) and address_resolver is not None:
-        resolved = await address_resolver(Address(legal=normalize_korean_text(event.location_text)))
+        resolved = await address_resolver(Address(legal=normalize_korean_text(event.address)))
         if resolved is not None and resolved.bjd_code is not None:
             geo = resolved
-    address = _merge_address(geo, event.location_text)
+    address = _merge_address(geo, event.address)
     bjd_code = address.bjd_code
 
     payload_hash = make_payload_hash(raw_data)
@@ -604,10 +604,10 @@ async def _event_to_bundle(
         detail=EventDetail(
             feature_id=feature_id,
             event_kind="heritage_event",
-            starts_on=event.start_date,
-            ends_on=event.end_date,
-            venue_name=normalize_korean_text(event.venue_name),
-            tel=normalize_phone_number(event.tel),
+            starts_on=event.starts_on,
+            ends_on=event.ends_on,
+            venue_name=normalize_korean_text(event.place),
+            tel=normalize_phone_number(event.tel_name),
             content_id=event.sn,
         ),
     )
@@ -618,7 +618,7 @@ async def _event_to_bundle(
         source_entity_id=event.sn,
         raw_payload_hash=payload_hash,
         raw_name=event.title,
-        raw_address=event.location_text,
+        raw_address=event.address,
         raw_longitude=Decimal(str(event.longitude))
         if event.longitude is not None
         else None,
