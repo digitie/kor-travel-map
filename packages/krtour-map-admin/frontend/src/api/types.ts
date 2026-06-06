@@ -431,6 +431,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/features/nearby": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 좌표 중심 반경 주변 feature 목록 */
+        get: operations["list_features_nearby_features_nearby_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/features/nearby/by-target": {
         parameters: {
             query?: never;
@@ -1638,6 +1655,25 @@ export interface components {
             data: components["schemas"]["FeaturesNearbyByTargetData"];
             meta: components["schemas"]["FeaturesNearbyByTargetMeta"];
         };
+        /**
+         * FeaturesNearbyData
+         * @description ``GET /features/nearby`` data payload.
+         */
+        FeaturesNearbyData: {
+            /** Items */
+            items: components["schemas"]["NearbyFeatureSummary"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+            origin: components["schemas"]["NearbyOriginSummary"];
+        };
+        /**
+         * FeaturesNearbyResponse
+         * @description ``GET /features/nearby`` 응답 (좌표 중심 반경).
+         */
+        FeaturesNearbyResponse: {
+            data: components["schemas"]["FeaturesNearbyData"];
+            meta: components["schemas"]["FeaturesNearbyByTargetMeta"];
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -1723,6 +1759,18 @@ export interface components {
             name: string;
             /** Status */
             status: string;
+        };
+        /**
+         * NearbyOriginSummary
+         * @description 좌표 기준 주변 조회 origin summary (입력 echo, T-213b).
+         */
+        NearbyOriginSummary: {
+            /** Lat */
+            lat: number;
+            /** Lon */
+            lon: number;
+            /** Radius M */
+            radius_m: number;
         };
         /**
          * NearbyTargetSummary
@@ -3707,6 +3755,51 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    list_features_nearby_features_nearby_get: {
+        parameters: {
+            query: {
+                /** @description 중심 경도(4326). */
+                lon: number;
+                /** @description 중심 위도(4326). */
+                lat: number;
+                /** @description 반경(m). 최대 100km. */
+                radius_m: number;
+                /** @description feature kind 반복 필터. */
+                kind?: string[] | null;
+                /** @description category code 반복 필터. */
+                category?: string[] | null;
+                /** @description feature status 반복 필터. 기본 active. */
+                status?: string[] | null;
+                /** @description primary provider 반복 필터. */
+                provider?: string[] | null;
+                page_size?: number;
+                cursor?: string | null;
+                sort?: "distance" | "name" | "last_updated_at";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeaturesNearbyResponse"];
+                };
+            };
+            /** @description cursor/sort/radius/좌표 오류 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

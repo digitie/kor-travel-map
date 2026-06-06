@@ -33,6 +33,7 @@ def test_features_routes_mounted_in_openapi(client: TestClient) -> None:
     assert "/features" in spec["paths"]
     assert "/features/in-bounds" in spec["paths"]
     assert "/features/search" in spec["paths"]
+    assert "/features/nearby" in spec["paths"]
     assert "/features/{feature_id}" in spec["paths"]
     assert "/tripmate/features/batch" in spec["paths"]
     schemas = spec["components"]["schemas"]
@@ -42,6 +43,28 @@ def test_features_routes_mounted_in_openapi(client: TestClient) -> None:
     assert "FeatureDetailEnvelopeResponse" in schemas
     assert "FeatureBatchResponse" in schemas
     assert "FeatureSearchResponse" in schemas
+    assert "FeaturesNearbyResponse" in schemas
+
+
+@pytest.mark.unit
+def test_features_nearby_validation(client: TestClient) -> None:
+    # radius_m 필수 — 누락 시 DB 도달 전 422.
+    assert client.get(
+        "/features/nearby", params={"lon": 127.0, "lat": 37.5}
+    ).status_code == 422
+    # lon 범위 초과 → 422.
+    assert client.get(
+        "/features/nearby", params={"lon": 200.0, "lat": 37.5, "radius_m": 1000}
+    ).status_code == 422
+    # radius_m must be > 0 → 422.
+    assert client.get(
+        "/features/nearby", params={"lon": 127.0, "lat": 37.5, "radius_m": 0}
+    ).status_code == 422
+    # invalid sort → 422.
+    assert client.get(
+        "/features/nearby",
+        params={"lon": 127.0, "lat": 37.5, "radius_m": 1000, "sort": "bogus"},
+    ).status_code == 422
 
 
 @pytest.mark.unit

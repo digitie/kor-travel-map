@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-06 claude 작업 메모 — T-213b(좌표 `/features/nearby`) 완료
+
+T-213 묶음 2번째 완료. `GET /features/nearby`(좌표 중심 반경) repo+client+endpoint+
+OpenAPI(user subset 포함)를 추가했다. ADR-012로 입력 좌표만 CTE에서 1회 5179 변환하고
+술어는 stored `coord_5179`에 적용(by-target nearby와 동일 candidates CTE 재사용).
+PostGIS 통합 4건(필터/거리·cursor·invalid·EXPLAIN ADR-012)·router/client unit·OpenAPI
+drift 모두 격리 sandbox에서 green.
+
+진행 순서: T-213d ✅ → **T-213b ✅** → 다음 **T-213f**(`/categories` 카탈로그 HTTP
+표면 + marker drift gate) → T-213h(public health/version) → T-213g(provider last-sync)
+→ T-213c(bbox clustering) → T-213e(weather card). 각 subtask는 작은 독립 PR + 매번
+origin/main rebase + 격리 WSL sandbox(codex 충돌 회피).
+
 ## 2026-06-06 claude 작업 메모 — T-213 진행 시작: T-213d(read parity) 완료
 
 사용자 지시로 T-213(TripMate 요구사항 후속) 묶음을 하나씩, 적합한 순서로 진행한다.

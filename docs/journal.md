@@ -2,6 +2,28 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-06 (claude) — T-213b 좌표 기준 `/features/nearby` 구현
+
+**작업**: T-213 묶음 두 번째. 사용자 현재 위치/추천용 좌표 기준 주변 feature 조회를
+repo→client→endpoint→OpenAPI까지 추가했다(T-213d read parity 위에).
+
+- **repo**: `features_nearby(lon, lat, radius_m, kinds, categories, statuses,
+  providers, sort, limit, cursor)` + `_NEARBY_COORD_CTE_SQL`. ADR-012: 입력 좌표를
+  `origin` CTE에서 **1회만** 5179 변환(`ST_Transform(ST_SetSRID(ST_MakePoint))`)하고
+  술어는 STORED `coord_5179`에 `ST_DWithin`. candidates 컬럼/cursor/정렬은 by-target
+  nearby와 동일 → `_nearby_row`/`_nearby_cursor_params`/`_encode_nearby_cursor`/
+  `NearbyFeaturePage` 재사용(additive, 기존 target SQL 무수정).
+- **client**: `AsyncKrtourMapClient.features_nearby` 위임.
+- **endpoint**: `GET /features/nearby` — public `NearbyFeatureSummary`(내부 필드 누출
+  없음, T-RV-08 정합) + `origin` echo. `radius_m`≤100km, lon/lat 범위, sort enum 검증.
+  user OpenAPI subset에 추가(`USER_OPERATIONS`), `openapi.json`/`openapi.user.json` 재생성.
+- **테스트**: PostGIS 통합 4건(필터/거리·cursor 페이징·invalid·EXPLAIN ADR-012 stored
+  coord_5179 술어/ per-row transform 부재) + admin router unit(422 검증 + spec presence)
+  + client unit + export user-paths 갱신. 격리 WSL sandbox에서 OpenAPI drift green,
+  ruff/mypy/lint-imports green, 통합 4 passed(Docker).
+- **메모**: 소량 데이터에서 planner가 GiST 대신 seqscan을 골라 인덱스 *이름* 단언은
+  fragile → ADR-012 본질(술어 대상=stored 5179, 입력만 1회 변환)로 검증. 다음: **T-213f**.
+
 ## 2026-06-06 (claude) — T-213d AsyncKrtourMapClient read parity (TripMate 후속 선행)
 
 **작업**: 사용자 지시로 T-213 묶음을 하나씩 진행. **선행/prereq인 T-213d**부터 처리.

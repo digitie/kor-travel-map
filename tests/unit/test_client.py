@@ -146,3 +146,26 @@ async def test_features_nearby_target_delegates_to_repo(
     assert recorded["sort"] == "name"
     assert recorded["limit"] == 20
     assert recorded["statuses"] == ("active",)
+
+
+async def test_features_nearby_coord_delegates_to_repo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import krtour.map.client as client_mod
+
+    sentinel = object()
+    recorded: dict[str, object] = {}
+
+    async def _fake(session: object, **kwargs: object) -> object:
+        recorded.update(kwargs)
+        return sentinel
+
+    monkeypatch.setattr(client_mod, "repo_features_nearby", _fake)
+    client = _read_client(monkeypatch)
+    out = await client.features_nearby(lon=127.0, lat=37.5, radius_m=1500.0)
+    assert out is sentinel
+    assert recorded["lon"] == 127.0
+    assert recorded["lat"] == 37.5
+    assert recorded["radius_m"] == 1500.0
+    assert recorded["sort"] == "distance"
+    assert recorded["statuses"] == ("active",)
