@@ -7,7 +7,7 @@ from time import perf_counter
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from krtour.map.infra.ops_repo import (
     OpsConsistencyReport,
     OpsImportJob,
@@ -26,6 +26,8 @@ from krtour.map.infra.status_repo import (
     gather_status_counts,
 )
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from krtour.map_admin.db import get_session
@@ -344,6 +346,92 @@ async def get_ops_metrics(
         ),
         latest_report=_report(await get_latest_consistency_report(session)),
         started_at=started_at,
+    )
+
+
+class OpsHealthCheck(BaseModel):
+    """deep readiness 개별 컴포넌트 점검 결과."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    component: str
+    status: Literal["ok", "error"]
+    detail: str | None = None
+
+
+class OpsHealthDeepData(BaseModel):
+    """``GET /ops/health-deep`` data — 전체 readiness + 컴포넌트별 점검."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["ok", "degraded"]
+    checks: list[OpsHealthCheck]
+
+
+class OpsHealthDeepResponse(BaseModel):
+    """``GET /ops/health-deep`` 응답 (DA-D-03 envelope)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: OpsHealthDeepData
+    meta: OpsDetailMeta
+
+
+async def _check_database(session: AsyncSession) -> OpsHealthCheck:
+    try:
+        await session.execute(text("SELECT 1"))
+    except SQLAlchemyError as exc:
+        return OpsHealthCheck(
+            component="database", status="error", detail=str(exc)[:200]
+        )
+    return OpsHealthCheck(component="database", status="ok")
+
+
+async def _check_postgis(session: AsyncSession) -> OpsHealthCheck:
+    try:
+        version = (
+            await session.execute(
+                text("SELECT extversion FROM pg_extension WHERE extname = 'postgis'")
+            )
+        ).scalar_one_or_none()
+    except SQLAlchemyError as exc:
+        return OpsHealthCheck(
+            component="postgis", status="error", detail=str(exc)[:200]
+        )
+    if version is None:
+        return OpsHealthCheck(
+            component="postgis", status="error", detail="postgis extension 미설치"
+        )
+    return OpsHealthCheck(component="postgis", status="ok", detail=str(version))
+
+
+@router.get(
+    "/health-deep",
+    response_model=OpsHealthDeepResponse,
+    summary="deep readiness (DB/PostGIS)",
+    description=(
+        "DB 연결 + PostGIS 확장 readiness를 점검한다. liveness용 public ``/health``"
+        "(DB-free 정적 200)와 달리 실제 DB를 친다. 한 컴포넌트라도 error면 전체"
+        " ``status=degraded`` + HTTP 503(모니터링이 body로 컴포넌트별 상태를 읽음)."
+    ),
+)
+async def get_ops_health_deep(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    response: Response,
+) -> OpsHealthDeepResponse:
+    started_at = perf_counter()
+    checks = [
+        await _check_database(session),
+        await _check_postgis(session),
+    ]
+    overall = "ok" if all(check.status == "ok" for check in checks) else "degraded"
+    if overall != "ok":
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    return OpsHealthDeepResponse(
+        data=OpsHealthDeepData(status=overall, checks=checks),
+        meta=OpsDetailMeta(
+            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
+        ),
     )
 
 

@@ -2,6 +2,22 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-07 (claude) — `/ops/health-deep` deep readiness (T-212c-API-03)
+
+**작업**: T-212c 중 deep readiness 엔드포인트를 구현. liveness용 public `/health`
+(DB-free 정적 200)와 분리해 실제 DB/PostGIS를 친다.
+
+- **`GET /ops/health-deep`**(ops tag, `ops_routes_enabled`): `_check_database`(`SELECT 1`)
+  + `_check_postgis`(`pg_extension` 버전) 점검 → `{data:{status, checks[{component,
+  status, detail}]}, meta:{duration_ms}}` envelope. 한 컴포넌트라도 error면 전체
+  `status=degraded` + HTTP 503(body는 그대로, 모니터링이 컴포넌트별 상태를 읽음).
+  `SQLAlchemyError`만 잡아 detail에 축약 보존.
+- **검증**: ops 단위 2(ok 200 / degraded 503, 헬퍼 monkeypatch) + PostGIS 통합 2
+  (`_check_database`/`_check_postgis` 실측). admin-only → openapi.json만, types.ts 재생성.
+- **문서**: contract §4 ops tag + tasks T-212c 체크. **T-212c-API-04(system/API call
+  log 조회)는 백킹 테이블 부재 → 스키마 설계 선행 필요로 분리**.
+- **다음**: T-212c error envelope 전수 점검 또는 log 스키마 설계, 그 외 T-212d/e.
+
 ## 2026-06-07 (claude) — `/admin/issues` 목록 q/bbox 필터 (T-DA-13 deferred 마무리)
 
 **작업**: T-DA-13에서 미뤘던 목록 `q`/`bbox` 필터를 `ops_repo` 확장으로 구현.

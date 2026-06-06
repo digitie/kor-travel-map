@@ -9,11 +9,17 @@ DA-D-03 envelope 전면 통일(T-DA-15/16/18, #250~#255) **완료**. 이어서 *
 `{data, meta}` envelope. 단위 14 + PostGIS 통합 3. **목록 `q`/`bbox` 필터도 마무리**
 (`ops_repo` 확장: q ILIKE + bbox EXISTS 4326 GiST `&&`, PostGIS 통합 테스트).
 
+**T-212c 진행 중**: envelope 통일(완료) + **`/ops/health-deep`**(DB/PostGIS readiness,
+degraded 503, 완료). 잔여: **T-212c-API-04(system/provider/API call log 조회)** — 백킹
+테이블이 없어 **`ops.api_call_log`/`ops.system_log` 마이그레이션 설계 선행 필요**(별도
+task), error envelope `error.code` 전수 표준화 점검.
+
 **다음 한 작업 후보(우선순위 순):**
-1. **T-212c** API error/log contract 정렬 + `/ops/health-deep` + provider/system/API
-   call log 조회 표면(T-212a gap T-212c-API-03/04). envelope는 이미 통일됨.
-2. **T-RV-37 잔여 hygiene** 또는 **T-RV-04b(provider public client live fetcher
-   wiring)**.
+1. **error envelope 전수 점검**(T-212c) — 라우터별 `HTTPException` → 공통 error
+   envelope/`error.code` 매핑 일관성(작은 hygiene, API lane).
+2. **log 스키마 설계**(T-212c-API-04) — `ops.api_call_log`/`ops.system_log` 마이그레이션 +
+   적재 지점 + 조회 API. 중규모, 설계 결정 포함.
+3. **T-RV-37 잔여 hygiene** 또는 **T-RV-04b(provider public client live fetcher wiring)**.
 
 **조율**: codex가 T-209e-c(backup/restore)/T-212b(admin UI, `/admin/issues` 화면 포함)를
 잡고 있다. `/admin/issues` **API**는 완료됐으므로 codex는 UI에서 이 API를 소비하면 된다
