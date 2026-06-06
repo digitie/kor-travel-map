@@ -2,6 +2,22 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-06 (codex) — T-209b-a Dagster Postgres instance storage 고정
+
+**작업**: Dagster schedule/run/event storage가 `$DAGSTER_HOME` SQLite로 폴백하지 않도록
+Docker와 로컬 admin-stack의 instance config를 같은 PostgreSQL 기준으로 고정했다.
+
+- **Shared config**: `docker/dagster.yaml`의 unified `storage.postgres` 설정을
+  `KRTOUR_MAP_DAGSTER_PG_URL` 기준으로 유지하고, 로컬 `run-admin-stack.sh`도 같은 파일을
+  `$DAGSTER_HOME/dagster.yaml`로 설치하게 했다.
+- **Local DB init**: `run-admin-stack.sh`가 시작 전 `krtour_map_dagster` DB 존재를
+  확인하고 없으면 생성한다.
+- **Daemon split**: 로컬 stack도 `dagster dev` 대신 `dagster-webserver`와
+  `dagster-daemon`을 분리 실행하고, daemon pid 생존 여부를 readiness 뒤 확인한다.
+- **Docs/tests**: Docker runbook, Dagster boundary, Dagster package README를 갱신하고
+  `tests/unit/test_docker_dagster_runtime.py`에 local admin-stack 회귀 테스트를 추가했다.
+- **다음**: T-201b Phase 2 dry-run report 또는 T-209 Docker/daemon polish.
+
 ## 2026-06-06 (codex) — T-RV-31/32/33 router/executor 정확성
 
 **작업**: PR#153~#179 리뷰 후속 중 runner savepoint와 router DTO 정확성을 닫는다.

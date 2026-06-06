@@ -24,7 +24,10 @@ dagster-daemon run -m krtour.map_dagster.definitions
 
 Docker 이미지는 `docker/dagster.yaml`을 `DAGSTER_HOME`에 포함한다. 이 설정은
 `KRTOUR_MAP_DAGSTER_PG_URL`을 읽어 같은 Postgres container 안의 별도 DB
-`krtour_map_dagster`에 Dagster run/event/schedule metadata를 저장한다.
+`krtour_map_dagster`에 Dagster run/event/schedule metadata를 저장한다. 로컬
+`npm run admin:stack`도 같은 파일을 `$DAGSTER_HOME/dagster.yaml`로 설치하고
+`dagster-webserver`와 `dagster-daemon`을 분리 실행하므로, local/Docker 모두 같은
+PostgreSQL-backed instance config를 쓴다.
 
 ## 패키지 설치 기준
 

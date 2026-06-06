@@ -28,6 +28,10 @@ def _dockerfile(path: str) -> str:
     return (ROOT / "docker" / path).read_text(encoding="utf-8")
 
 
+def _script(path: str) -> str:
+    return (ROOT / path).read_text(encoding="utf-8")
+
+
 @pytest.mark.unit
 def test_docker_compose_uses_persistent_dagster_storage_and_daemon() -> None:
     services = _compose()["services"]
@@ -72,6 +76,23 @@ def test_dagster_image_config_points_storage_to_postgres() -> None:
     assert config["storage"]["postgres"]["postgres_url"] == {
         "env": "KRTOUR_MAP_DAGSTER_PG_URL"
     }
+    assert "run_storage" not in config
+    assert "event_log_storage" not in config
+    assert "schedule_storage" not in config
+
+
+@pytest.mark.unit
+def test_local_admin_stack_uses_same_dagster_postgres_config_and_daemon() -> None:
+    script = _script("scripts/run-admin-stack.sh")
+
+    assert 'install -m 0644 "$ROOT_DIR/docker/dagster.yaml"' in script
+    assert "CREATE DATABASE" in script
+    assert "dagster-webserver" in script
+    assert "dagster-daemon" in script
+    assert "dagster dev" not in script
+    assert 'KRTOUR_MAP_DAGSTER_PG_URL="$KRTOUR_MAP_DAGSTER_PG_URL"' in script
+    assert "start_bg dagster-daemon env" in script
+    assert "ensure_bg_alive dagster-daemon" in script
 
 
 @pytest.mark.unit
