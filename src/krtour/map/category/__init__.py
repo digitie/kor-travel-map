@@ -4,7 +4,7 @@
 카테고리 분류 체계를 제공한다. ADR-023에 따라 본 라이브러리로 이전, ADR-027
 에 따라 ``LODGING_MOUNTAIN_SHELTER`` Tier 2 + KNPS/KFS Tier 3 (3행) 추가.
 
-총 144건 (sentinel 1 + Tier 1 7 + Tier 2 30 + Tier 3 73 + Tier 4 33).
+총 144건 (sentinel 1 + Tier 1 7 + Tier 2 34 + Tier 3 73 + Tier 4 29).
 
 ADR 참조
 --------

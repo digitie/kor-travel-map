@@ -56,6 +56,7 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
 
     assert user["info"]["title"] == "krtour-map-user"
     assert set(user["paths"]) == {
+        "/categories",
         "/features/in-bounds",
         "/features/nearby",
         "/features/nearby/by-target",

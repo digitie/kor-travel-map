@@ -314,7 +314,7 @@ depth 1 = 1 + 7). Tier 1 enum 자체는 ADR-027에서 변경 없음.
 
 ### 4.4 maki icon 분포
 
-`PLACE_CATEGORY_MAPBOX_MAKI_ICONS` (55 unique icons → 144 rows):
+`PLACE_CATEGORY_MAPBOX_MAKI_ICONS` (57 unique icons → 144 rows):
 
 | maki icon | 사용 코드 수 | 주 사용 카테고리 |
 |-----------|------------:|-----------------|

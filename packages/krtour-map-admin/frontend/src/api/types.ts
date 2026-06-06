@@ -280,6 +280,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/categories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** PlaceCategory 정적 카탈로그(144건, 선택적 DB 분포) */
+        get: operations["list_categories_categories_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/debug/etl/providers": {
         parameters: {
             query?: never;
@@ -921,6 +938,75 @@ export interface components {
              * @enum {string}
              */
             type: "cache_target_keys";
+        };
+        /**
+         * CategoriesData
+         * @description ``GET /categories`` data payload.
+         */
+        CategoriesData: {
+            /** Count */
+            count: number;
+            /** Include Counts */
+            include_counts: boolean;
+            /** Items */
+            items: components["schemas"]["CategorySummary"][];
+        };
+        /** CategoriesMeta */
+        CategoriesMeta: {
+            /** Count */
+            count: number;
+            /** Duration Ms */
+            duration_ms: number;
+        };
+        /**
+         * CategoriesResponse
+         * @description ``GET /categories`` 응답.
+         */
+        CategoriesResponse: {
+            data: components["schemas"]["CategoriesData"];
+            meta: components["schemas"]["CategoriesMeta"];
+        };
+        /**
+         * CategorySummary
+         * @description 정적 카탈로그 1건 (+ 선택적 DB 분포).
+         */
+        CategorySummary: {
+            /** Code */
+            code: string;
+            /** Db Active */
+            db_active?: boolean | null;
+            /** Db Feature Count */
+            db_feature_count?: number | null;
+            /** Depth */
+            depth: number;
+            /** Is Active */
+            is_active: boolean;
+            /** Label */
+            label: string;
+            /** Maki Icon */
+            maki_icon: string;
+            /** Parent Code */
+            parent_code: string | null;
+            /** Path */
+            path: string[];
+            /** Sort Order */
+            sort_order: number;
+            /** Tier1 Code */
+            tier1_code: string;
+            /** Tier1 Name */
+            tier1_name: string;
+            /** Tier2 Code */
+            tier2_code: string;
+            /** Tier2 Name */
+            tier2_name: string | null;
+            /** Tier3 Code */
+            tier3_code: string;
+            /** Tier3 Name */
+            tier3_name: string | null;
+            /** Tier4 Code */
+            tier4_code: string;
+            /** Tier4 Name */
+            tier4_name: string | null;
         };
         /**
          * CenterRadiusScope
@@ -3467,6 +3553,40 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_categories_categories_get: {
+        parameters: {
+            query?: {
+                /** @description 현재 DB feature 분포(category별 수)를 포함 */
+                include_counts?: boolean;
+                /** @description counts를 status='active' feature만으로 집계 */
+                active_only?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CategoriesResponse"];
+                };
             };
             /** @description Validation Error */
             422: {

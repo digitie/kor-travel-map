@@ -1471,3 +1471,30 @@ async def features_nearby(
         else None
     )
     return NearbyFeaturePage(items=items, next_cursor=next_cursor)
+
+
+_CATEGORY_FEATURE_COUNTS_SQL: Final[str] = """
+SELECT category, count(*) AS n
+FROM feature.features
+WHERE deleted_at IS NULL
+  AND (NOT CAST(:active_only AS boolean) OR status = 'active')
+GROUP BY category
+"""
+
+
+async def category_feature_counts(
+    session: AsyncSession, *, active_only: bool = False
+) -> dict[str, int]:
+    """category code → 적재 feature 수 (soft-deleted 제외).
+
+    ``active_only=True``면 ``status='active'``만 센다. ``GET /categories?include_counts``
+    (T-213f)에서 정적 카탈로그(144건)에 현재 DB 분포를 합쳐 보여주기 위한 집계.
+    카탈로그에 없는(미지정/legacy) category code도 그대로 반환하므로 호출자가
+    카탈로그와 교차한다.
+    """
+    rows = (
+        await session.execute(
+            text(_CATEGORY_FEATURE_COUNTS_SQL), {"active_only": active_only}
+        )
+    ).all()
+    return {str(row[0]): int(row[1]) for row in rows}

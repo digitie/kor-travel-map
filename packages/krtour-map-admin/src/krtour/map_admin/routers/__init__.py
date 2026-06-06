@@ -12,6 +12,7 @@ prefix 분리 (ADR-035):
 from __future__ import annotations
 
 from krtour.map_admin.routers.admin_features import router as admin_features_router
+from krtour.map_admin.routers.categories import router as categories_router
 from krtour.map_admin.routers.dagster import router as dagster_router
 from krtour.map_admin.routers.dedup_review import router as dedup_review_router
 from krtour.map_admin.routers.etl import router as etl_router
@@ -47,6 +48,7 @@ __all__ = [
     "poi_cache_targets_router",
     "features_router",
     "tripmate_router",
+    "categories_router",
     "mois_detail_router",
     "offline_uploads_router",
     "ops_router",
