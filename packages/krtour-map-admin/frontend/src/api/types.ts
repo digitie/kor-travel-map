@@ -516,6 +516,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/features/{feature_id}/weather": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** feature weather card (forecast_style별 최신값 + freshness) */
+        get: operations["get_feature_weather_features__feature_id__weather_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -1766,6 +1783,14 @@ export interface components {
             reason?: string | null;
         };
         /**
+         * FeatureWeatherResponse
+         * @description ``GET /features/{feature_id}/weather`` 응답.
+         */
+        FeatureWeatherResponse: {
+            data: components["schemas"]["WeatherCardData"];
+            meta: components["schemas"]["FeatureDetailMeta"];
+        };
+        /**
          * FeaturesInBboxResponse
          * @description ``GET /features`` 응답 — bbox 안 feature 목록.
          */
@@ -2796,6 +2821,52 @@ export interface components {
              * @description ``python-krtour-map`` (메인) distribution version.
              */
             krtour_map: string;
+        };
+        /**
+         * WeatherCardData
+         * @description ``GET /features/{feature_id}/weather`` data payload.
+         */
+        WeatherCardData: {
+            /** Asof */
+            asof?: string | null;
+            /** Feature Id */
+            feature_id: string;
+            /** Is Stale */
+            is_stale: boolean;
+            /** Latest At */
+            latest_at?: string | null;
+            /** Metrics */
+            metrics: components["schemas"]["WeatherMetricOut"][];
+            /** Source Styles */
+            source_styles: string[];
+        };
+        /**
+         * WeatherMetricOut
+         * @description weather card metric 1건 (forecast_style × metric_key 최신값, T-213e).
+         */
+        WeatherMetricOut: {
+            /** Forecast Style */
+            forecast_style: string;
+            /** Issued At */
+            issued_at?: string | null;
+            /** Metric Key */
+            metric_key: string;
+            /** Metric Name */
+            metric_name?: string | null;
+            /** Observed At */
+            observed_at?: string | null;
+            /** Severity */
+            severity?: string | null;
+            /** Timeline Bucket */
+            timeline_bucket?: string | null;
+            /** Unit */
+            unit?: string | null;
+            /** Valid At */
+            valid_at?: string | null;
+            /** Value Number */
+            value_number?: number | null;
+            /** Value Text */
+            value_text?: string | null;
         };
         /** _DatasetEntry */
         _DatasetEntry: {
@@ -4201,6 +4272,40 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_feature_weather_features__feature_id__weather_get: {
+        parameters: {
+            query?: {
+                /** @description 이 시점 이하 weather만(미래 예보 제외). */
+                asof?: string | null;
+            };
+            header?: never;
+            path: {
+                feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureWeatherResponse"];
+                };
             };
             /** @description Validation Error */
             422: {

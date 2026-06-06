@@ -42,6 +42,7 @@ USER_OPENAPI_PATH = Path("packages/krtour-map-admin/openapi.user.json")
 USER_OPERATIONS: dict[str, frozenset[str]] = {
     "/features/in-bounds": frozenset({"get"}),
     "/features/{feature_id}": frozenset({"get"}),
+    "/features/{feature_id}/weather": frozenset({"get"}),
     "/features/search": frozenset({"get"}),
     "/features/nearby": frozenset({"get"}),
     "/features/nearby/by-target": frozenset({"get"}),

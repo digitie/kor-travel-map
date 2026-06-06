@@ -2700,6 +2700,24 @@
         "title": "FeatureUpdateRequestRunNowRequest",
         "type": "object"
       },
+      "FeatureWeatherResponse": {
+        "additionalProperties": false,
+        "description": "``GET /features/{feature_id}/weather`` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/WeatherCardData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/FeatureDetailMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "FeatureWeatherResponse",
+        "type": "object"
+      },
       "FeaturesInBboxResponse": {
         "additionalProperties": false,
         "description": "``GET /features`` 응답 — bbox 안 feature 목록.",
@@ -5320,6 +5338,188 @@
           "krtour_map"
         ],
         "title": "VersionResponse",
+        "type": "object"
+      },
+      "WeatherCardData": {
+        "additionalProperties": false,
+        "description": "``GET /features/{feature_id}/weather`` data payload.",
+        "properties": {
+          "asof": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asof"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "is_stale": {
+            "title": "Is Stale",
+            "type": "boolean"
+          },
+          "latest_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest At"
+          },
+          "metrics": {
+            "items": {
+              "$ref": "#/components/schemas/WeatherMetricOut"
+            },
+            "title": "Metrics",
+            "type": "array"
+          },
+          "source_styles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Styles",
+            "type": "array"
+          }
+        },
+        "required": [
+          "feature_id",
+          "source_styles",
+          "metrics",
+          "is_stale"
+        ],
+        "title": "WeatherCardData",
+        "type": "object"
+      },
+      "WeatherMetricOut": {
+        "additionalProperties": false,
+        "description": "weather card metric 1건 (forecast_style × metric_key 최신값, T-213e).",
+        "properties": {
+          "forecast_style": {
+            "title": "Forecast Style",
+            "type": "string"
+          },
+          "issued_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issued At"
+          },
+          "metric_key": {
+            "title": "Metric Key",
+            "type": "string"
+          },
+          "metric_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metric Name"
+          },
+          "observed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          },
+          "severity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Severity"
+          },
+          "timeline_bucket": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeline Bucket"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "valid_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid At"
+          },
+          "value_number": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Number"
+          },
+          "value_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Text"
+          }
+        },
+        "required": [
+          "forecast_style",
+          "metric_key"
+        ],
+        "title": "WeatherMetricOut",
         "type": "object"
       },
       "_DatasetEntry": {
@@ -8311,6 +8511,67 @@
           }
         },
         "summary": "feature 단건 상세",
+        "tags": [
+          "features"
+        ]
+      }
+    },
+    "/features/{feature_id}/weather": {
+      "get": {
+        "operationId": "get_feature_weather_features__feature_id__weather_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature_id",
+            "required": true,
+            "schema": {
+              "title": "Feature Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "이 시점 이하 weather만(미래 예보 제외).",
+            "in": "query",
+            "name": "asof",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "이 시점 이하 weather만(미래 예보 제외).",
+              "title": "Asof"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureWeatherResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "feature weather card (forecast_style별 최신값 + freshness)",
         "tags": [
           "features"
         ]

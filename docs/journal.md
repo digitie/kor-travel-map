@@ -2,6 +2,24 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-06 (claude) — T-213e weather card (T-213 완료 7/7)
+
+**작업**: T-213 묶음 마지막. weather value 적재/조회 + weather card 전체 스택.
+
+- **migration** alembic `0017_feature_weather_values`: `feature.feature_weather_values`
+  (PK 결정적 `weather_value_key`=ADR-010 identity, feature FK CASCADE, card 복합 인덱스
+  `(feature_id, forecast_style, metric_key, valid_at DESC)` + `valid_at` BRIN=ADR-013).
+- **repo** `infra/weather_repo.py`: `load_weather_values`(멱등 upsert),
+  `build_weather_card(feature_id, asof, freshness_seconds)` — (forecast_style,
+  metric_key)별 `COALESCE(valid_at,observed_at,issued_at)` 최신 DISTINCT ON + asof 필터
+  + `source_styles` source trace + `is_stale`(기본 6h).
+- **endpoint** `GET /features/{feature_id}/weather`(user spec) + **client**
+  `build_weather_card`/`load_weather_values`.
+- 검증: PostGIS 통합 2(load/card/asof/freshness/idempotent + empty), alembic upgrade
+  0017 체인, router unit 2(Decimal→float). 격리 sandbox에서 OpenAPI drift/frontend
+  types/ruff/mypy/lint-imports green.
+- **T-213a~h 전부 완료** — TripMate 요구사항 후속 묶음 종료.
+
 ## 2026-06-06 (claude) — T-213c bbox clustering (server region rollup)
 
 **작업**: T-213 묶음 여섯 번째. `/features/in-bounds` 서버 클러스터링.

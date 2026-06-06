@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-06 claude 작업 메모 — T-213e(weather card) 완료 → T-213a~h 전부 완료
+
+T-213 묶음 마지막(7/7) 완료. weather 적재/조회 전체 스택: `feature_weather_values`
+테이블(**alembic 0017**), `weather_repo`(load + `build_weather_card`),
+`GET /features/{feature_id}/weather`(user spec), client helper.
+
+**T-213(TripMate 요구사항 후속) a~h 전부 완료**: a(리포트) b(`/features/nearby`)
+c(clustering) d(client read parity) e(weather card) f(`/categories`) g(provider
+last-sync) h(public health/version). 다음 비-T-213 후보는 감사 전 백로그
+**T-DA-15/16**(응답 envelope 전면 통일, DA-D-03) 또는 **T-DA-13**(`/admin/issues`,
+T-212) 또는 codex 진행 외 잔여(T-209 Docker polish 등). 각 작업은 작은 독립 PR +
+origin/main rebase + 격리 sandbox + (endpoint 추가 시) frontend types 재생성.
+
 ## 2026-06-06 claude 작업 메모 — T-213c(bbox clustering) 완료
 
 T-213 묶음 6번째 완료. `/features/in-bounds` 서버 클러스터링 — **설계 결정: 행정구역
