@@ -78,6 +78,16 @@ def test_f3_postgis_functions_are_schema_qualified() -> None:
     assert "x_extension.ST_Transform" in f3.sql
 
 
+def test_f6_scans_feature_table_once_before_lateral_period_expansion() -> None:
+    f6 = next(case for case in CONSISTENCY_CASES if case.code == "F6")
+
+    assert f6.sql.count("FROM feature.features f") == 1
+    assert "WITH candidate_features AS" in f6.sql
+    assert "FROM candidate_features f" in f6.sql
+    assert "CROSS JOIN LATERAL (" in f6.sql
+    assert f6.sql.count("jsonb_path_query(") == 4
+
+
 def test_build_report_all_clean_is_ok() -> None:
     cases = [_case("F1", "ERROR", 0), _case("F2", "ERROR", 0), _case("F3", "ERROR", 0)]
     report = build_report("batch-1", cases)

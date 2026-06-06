@@ -407,6 +407,10 @@ detail kind union)는 MV로. `REFRESH MATERIALIZED VIEW CONCURRENTLY`로 lock
 - 디스크 사용량 ×2 수용 (Odroid SSD 여유 확인).
 - 일관성 게이트 (ADR-033 Phase 2)가 이미 swap 직전에 적용되어 있을 것 —
   비정상 데이터가 MV로 새는 것을 차단해야 함.
+- `REFRESH MATERIALIZED VIEW CONCURRENTLY` 대상 MV마다 refresh identity를 보장하는
+  `UNIQUE` 인덱스가 있을 것. 최초 생성 직후에는 비-concurrent
+  `REFRESH MATERIALIZED VIEW schema.view`로 1회 populate한 뒤 concurrent refresh로
+  전환한다.
 
 **도입 시 부작용**:
 - `REFRESH CONCURRENTLY`는 UNIQUE 인덱스 필수 → MV 정의에 `feature_id`
@@ -419,9 +423,13 @@ detail kind union)는 MV로. `REFRESH MATERIALIZED VIEW CONCURRENTLY`로 lock
 
 **도입 절차 (예상)**:
 1. 하나의 hot path만 시범 도입 (예: `mv_features_place_with_detail`).
-2. 1주일 운영 + EXPLAIN diff 비교 → 회귀 추적.
-3. 다른 kind 확장 여부 판단.
-4. ADR 신설 — `feature_*` MV 카탈로그 + refresh schedule + DDL 정책.
+2. MV `CREATE`와 같은 migration에 `UNIQUE` 인덱스를 함께 정의한다.
+3. 배포 직후 최초 populate는 비-concurrent `REFRESH MATERIALIZED VIEW`로 실행한다.
+4. 최초 populate 성공 후 batch gate/Dagster `swap` 또는 `concurrently` 전략에
+   `materialized_views`를 연결한다.
+5. 1주일 운영 + EXPLAIN diff 비교 → 회귀 추적.
+6. 다른 kind 확장 여부 판단.
+7. ADR 신설 — `feature_*` MV 카탈로그 + refresh schedule + DDL 정책.
 
 ### 9.4 별도 streaming ETL (Kafka/Redpanda) — T-103
 

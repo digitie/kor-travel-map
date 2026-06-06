@@ -60,6 +60,11 @@ restore 기본 대상은 `krtour_map_restore`, `krtour_map_dagster_restore`,
 필요하면 Cloudflare Tunnel, SSO 게이트웨이, VPN, IP allowlist 같은 네트워크 계층에서
 보호한다.
 
+Docker compose의 host publish는 기본 `KRTOUR_MAP_DOCKER_BIND_HOST=127.0.0.1`로
+localhost에만 열린다. API, Dagster, RustFS console처럼 코드 인증이 없는 운영 surface를
+외부 interface에 열어야 하는 배포는 위 네트워크 보호가 먼저 완료된 뒤
+`KRTOUR_MAP_DOCKER_BIND_HOST=0.0.0.0`을 명시한다.
+
 ## 아직 남은 운영 확장
 
 - Dagster provider public client live fetcher 실제 연결(T-RV-04b).

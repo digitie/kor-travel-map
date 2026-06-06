@@ -69,6 +69,19 @@ def test_docker_compose_has_runtime_healthchecks_and_readiness_order() -> None:
 
 
 @pytest.mark.unit
+def test_docker_compose_publishes_host_ports_on_localhost_by_default() -> None:
+    services = _compose()["services"]
+    bind_prefix = "${KRTOUR_MAP_DOCKER_BIND_HOST:-127.0.0.1}:"
+
+    exposed_services = ["postgres", "rustfs", "api", "frontend", "dagster"]
+    for service_name in exposed_services:
+        for port_mapping in services[service_name]["ports"]:
+            assert port_mapping.startswith(bind_prefix), (service_name, port_mapping)
+
+    assert services["api"]["environment"]["KRTOUR_MAP_ADMIN_HOST"] == "0.0.0.0"
+
+
+@pytest.mark.unit
 def test_dagster_image_config_points_storage_to_postgres() -> None:
     config = yaml.safe_load((ROOT / "docker" / "dagster.yaml").read_text(encoding="utf-8"))
 

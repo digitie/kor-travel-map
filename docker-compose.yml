@@ -7,7 +7,7 @@ services:
       POSTGRES_PASSWORD: ${KRTOUR_MAP_POSTGRES_PASSWORD:-krtour_map}
       KRTOUR_MAP_DAGSTER_POSTGRES_DB: ${KRTOUR_MAP_DAGSTER_POSTGRES_DB:-krtour_map_dagster}
     ports:
-      - "${KRTOUR_MAP_POSTGRES_HOST_PORT:-15433}:5432"
+      - "${KRTOUR_MAP_DOCKER_BIND_HOST:-127.0.0.1}:${KRTOUR_MAP_POSTGRES_HOST_PORT:-15433}:5432"
     volumes:
       - krtour-map-postgres:/var/lib/postgresql/data
     healthcheck:
@@ -66,8 +66,8 @@ services:
       rustfs-perms:
         condition: service_completed_successfully
     ports:
-      - "${KRTOUR_MAP_RUSTFS_API_PORT:-9003}:9000"
-      - "${KRTOUR_MAP_RUSTFS_CONSOLE_PORT:-9004}:9001"
+      - "${KRTOUR_MAP_DOCKER_BIND_HOST:-127.0.0.1}:${KRTOUR_MAP_RUSTFS_API_PORT:-9003}:9000"
+      - "${KRTOUR_MAP_DOCKER_BIND_HOST:-127.0.0.1}:${KRTOUR_MAP_RUSTFS_CONSOLE_PORT:-9004}:9001"
     volumes:
       - krtour-map-rustfs:/data
 
@@ -130,7 +130,7 @@ services:
       rustfs-init:
         condition: service_completed_successfully
     ports:
-      - "${KRTOUR_MAP_ADMIN_PORT:-9011}:${KRTOUR_MAP_ADMIN_PORT:-9011}"
+      - "${KRTOUR_MAP_DOCKER_BIND_HOST:-127.0.0.1}:${KRTOUR_MAP_ADMIN_PORT:-9011}:${KRTOUR_MAP_ADMIN_PORT:-9011}"
     healthcheck:
       test:
         [
@@ -158,7 +158,7 @@ services:
       api:
         condition: service_healthy
     ports:
-      - "${KRTOUR_MAP_ADMIN_WEB_PORT:-9012}:9012"
+      - "${KRTOUR_MAP_DOCKER_BIND_HOST:-127.0.0.1}:${KRTOUR_MAP_ADMIN_WEB_PORT:-9012}:9012"
     healthcheck:
       test:
         [
@@ -209,7 +209,7 @@ services:
       rustfs-init:
         condition: service_completed_successfully
     ports:
-      - "${KRTOUR_MAP_DAGSTER_PORT:-9013}:${KRTOUR_MAP_DAGSTER_PORT:-9013}"
+      - "${KRTOUR_MAP_DOCKER_BIND_HOST:-127.0.0.1}:${KRTOUR_MAP_DAGSTER_PORT:-9013}:${KRTOUR_MAP_DAGSTER_PORT:-9013}"
     healthcheck:
       test:
         [
