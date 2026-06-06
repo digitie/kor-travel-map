@@ -580,6 +580,214 @@
         "title": "CacheTargetKeysScope",
         "type": "object"
       },
+      "CategoriesData": {
+        "additionalProperties": false,
+        "description": "``GET /categories`` data payload.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "include_counts": {
+            "title": "Include Counts",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CategorySummary"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "count",
+          "include_counts"
+        ],
+        "title": "CategoriesData",
+        "type": "object"
+      },
+      "CategoriesMeta": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "count",
+          "duration_ms"
+        ],
+        "title": "CategoriesMeta",
+        "type": "object"
+      },
+      "CategoriesResponse": {
+        "additionalProperties": false,
+        "description": "``GET /categories`` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CategoriesData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/CategoriesMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "CategoriesResponse",
+        "type": "object"
+      },
+      "CategorySummary": {
+        "additionalProperties": false,
+        "description": "정적 카탈로그 1건 (+ 선택적 DB 분포).",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "db_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Db Active"
+          },
+          "db_feature_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Db Feature Count"
+          },
+          "depth": {
+            "title": "Depth",
+            "type": "integer"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "maki_icon": {
+            "title": "Maki Icon",
+            "type": "string"
+          },
+          "parent_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Code"
+          },
+          "path": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Path",
+            "type": "array"
+          },
+          "sort_order": {
+            "title": "Sort Order",
+            "type": "integer"
+          },
+          "tier1_code": {
+            "title": "Tier1 Code",
+            "type": "string"
+          },
+          "tier1_name": {
+            "title": "Tier1 Name",
+            "type": "string"
+          },
+          "tier2_code": {
+            "title": "Tier2 Code",
+            "type": "string"
+          },
+          "tier2_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tier2 Name"
+          },
+          "tier3_code": {
+            "title": "Tier3 Code",
+            "type": "string"
+          },
+          "tier3_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tier3 Name"
+          },
+          "tier4_code": {
+            "title": "Tier4 Code",
+            "type": "string"
+          },
+          "tier4_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tier4 Name"
+          }
+        },
+        "required": [
+          "code",
+          "depth",
+          "tier1_code",
+          "tier1_name",
+          "tier2_code",
+          "tier2_name",
+          "tier3_code",
+          "tier3_name",
+          "tier4_code",
+          "tier4_name",
+          "label",
+          "path",
+          "parent_code",
+          "sort_order",
+          "is_active",
+          "maki_icon"
+        ],
+        "title": "CategorySummary",
+        "type": "object"
+      },
       "CenterRadiusScope": {
         "additionalProperties": false,
         "description": "좌표 중심 반경 갱신 scope.",
@@ -6678,6 +6886,63 @@
         "summary": "POI/cache target 등록 또는 갱신",
         "tags": [
           "admin-poi-cache-targets"
+        ]
+      }
+    },
+    "/categories": {
+      "get": {
+        "operationId": "list_categories_categories_get",
+        "parameters": [
+          {
+            "description": "현재 DB feature 분포(category별 수)를 포함",
+            "in": "query",
+            "name": "include_counts",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "현재 DB feature 분포(category별 수)를 포함",
+              "title": "Include Counts",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "counts를 status='active' feature만으로 집계",
+            "in": "query",
+            "name": "active_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "counts를 status='active' feature만으로 집계",
+              "title": "Active Only",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CategoriesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "PlaceCategory 정적 카탈로그(144건, 선택적 DB 분포)",
+        "tags": [
+          "categories"
         ]
       }
     },

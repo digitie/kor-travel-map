@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-06 claude 작업 메모 — T-213f(`GET /categories`) 완료
+
+T-213 묶음 3번째 완료. `GET /categories`로 144건 정적 카탈로그(+선택적 DB 분포)를
+노출했다. drift gate는 marker-react `maki.ts`가 name→glyph 구조라 ADR-029 원안
+1:1이 아닌 완화형(self-consistency + TS kebab 유효성 + 핵심 maki 커버)으로 적용.
+docstring/category.md tier·icon 개수도 코드 기준 reconcile.
+
+진행 순서: T-213d ✅ → T-213b ✅ → **T-213f ✅** → 다음 **T-213h**(public
+`/health`/`/version` user spec) → T-213g(provider last-sync) → T-213c(bbox
+clustering) → T-213e(weather card). 각 subtask는 작은 독립 PR + 매 PR 전
+origin/main rebase + 격리 WSL sandbox(codex 충돌 회피). **OpenAPI endpoint 추가 시
+프론트 `types.ts`(`openapi-typescript@7.13.0`) 재생성 필수**(drift gate).
+
 ## 2026-06-06 claude 작업 메모 — T-213b(좌표 `/features/nearby`) 완료
 
 T-213 묶음 2번째 완료. `GET /features/nearby`(좌표 중심 반경) repo+client+endpoint+

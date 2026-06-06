@@ -35,6 +35,7 @@ from starlette.responses import JSONResponse
 from krtour.map_admin import __version__
 from krtour.map_admin.routers import (
     admin_features_router,
+    categories_router,
     dagster_router,
     dedup_review_router,
     etl_router,
@@ -284,6 +285,7 @@ def create_app(settings: AdminSettings | None = None) -> FastAPI:
 
     if settings.features_routes_enabled:
         application.include_router(features_router)
+        application.include_router(categories_router)
         application.include_router(tripmate_router)
         application.include_router(tripmate_feature_update_requests_router)
         # Step D on-demand 상세는 DB(적재된 raw_data) 필요 → features와 동일 gate.

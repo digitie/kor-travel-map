@@ -2,6 +2,27 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-06 (claude) — T-213f `GET /categories` 카탈로그 표면
+
+**작업**: T-213 묶음 세 번째. `krtour.map.category` 144건 정적 카탈로그를 HTTP로 노출.
+
+- **endpoint** `GET /categories`(`routers/categories.py`, 신규) — code/depth/tier
+  1~4/label/path/parent/sort_order/is_active/maki_icon. `include_counts`/`active_only`
+  면 repo `category_feature_counts`(GROUP BY count)로 `db_feature_count`/`db_active`
+  합침. 정적 카탈로그는 모듈 로드 시 1회 구성(ADR-030). `features_routes_enabled`
+  gate, user OpenAPI subset(`USER_OPERATIONS`)에 추가 + `openapi.*.json`/frontend
+  `types.ts` 재생성.
+- **drift gate**: `@krtour/map-marker-react`의 `maki.ts`가 **name→glyph**(category→maki
+  아님)라 ADR-029 원안의 category↔TS 1:1 게이트가 그대로 안 맞음 → 완화형으로 적용:
+  (1) Python 카탈로그 self-consistency(maki∈values, 144), (2) TS maki name kebab 유효성,
+  (3) 핵심 provider maki(fuel/restaurant/cafe/park/monument/shelter/star/marker)
+  글리프 커버. (`tests/unit/test_category_catalog_contract.py`)
+- **doc reconcile**: 코드 실측으로 `category/__init__.py` docstring tier 개수
+  (Tier2 30→**34**, Tier4 33→**29**)와 `category.md` icon 개수(55→**57**)를 정정.
+- **테스트**: admin router 3(spec/static 144/counts merge), main contract 3, PostGIS
+  counts 통합 1. 격리 sandbox에서 OpenAPI drift/frontend types/ruff/mypy/lint-imports
+  green. 다음: **T-213h**(public health/version).
+
 ## 2026-06-06 (claude) — T-213b 좌표 기준 `/features/nearby` 구현
 
 **작업**: T-213 묶음 두 번째. 사용자 현재 위치/추천용 좌표 기준 주변 feature 조회를
