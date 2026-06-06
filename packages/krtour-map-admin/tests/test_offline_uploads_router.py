@@ -557,9 +557,11 @@ def test_list_offline_uploads_passes_filters(
 
     assert response.status_code == 200
     body = response.json()
-    assert body["count"] == 1
-    assert body["items"][0]["upload_id"] == "00000000-0000-0000-0000-000000000001"
-    assert body["next_cursor"] == "next"
+    assert body["meta"]["count"] == 1
+    assert body["data"]["items"][0]["upload_id"] == (
+        "00000000-0000-0000-0000-000000000001"
+    )
+    assert body["data"]["next_cursor"] == "next"
 
 
 @pytest.mark.unit

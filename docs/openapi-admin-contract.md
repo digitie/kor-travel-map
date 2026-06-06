@@ -109,15 +109,14 @@ object 단건은 모두 envelope로 수렴시킨다.
 > 옛 셰입을 들고 있어 **전면 통일 작업이 진행 예정**이다(감사 리포트
 > `reports/docs-consistency-audit-2026-06-06.md` T-DA-15/16, 별도 코드 PR). 통일
 > 전까지 산출물(`openapi.json`)에 남아 있는 예외 — client는 한시적으로 감안:
-> - **list `{count, items, next_cursor}`**(통일 대상): `/admin/offline-uploads`,
->   `/admin/poi-cache-targets`.
->   (`/admin/feature-update-requests`는 envelope로 통일 완료 — `data.{items,next_cursor}`
->   + `meta.{count,duration_ms}`.)
-> - **단건 bare object**(통일 대상): `/admin/offline-uploads/{id}`,
->   `/admin/poi-cache-targets/{id}`, `/ops/dagster/summary`, `/ops/metrics`,
->   `/debug/mois-license/{id}`, `/ops/import-jobs/{job_id}`(`{data}`만, meta 없음).
->   (`/admin/feature-update-requests/{id}`·`/tripmate/feature-update-requests/{id}`는
->   `{data, meta}` 통일 완료.)
+> - **list `{count, items, next_cursor}`**(통일 대상): `/admin/poi-cache-targets`.
+>   (`/admin/feature-update-requests`·`/admin/offline-uploads`는 envelope로 통일 완료 —
+>   `data.{items,next_cursor}` + `meta.{count,duration_ms}`.)
+> - **단건 bare object**(통일 대상): `/admin/poi-cache-targets/{id}`,
+>   `/ops/dagster/summary`, `/ops/metrics`, `/debug/mois-license/{id}`,
+>   `/ops/import-jobs/{job_id}`(`{data}`만, meta 없음).
+>   (`/admin/feature-update-requests/{id}`·`/tripmate/feature-update-requests/{id}`·
+>   `/admin/offline-uploads/{id}`는 `{data, meta}` 통일 완료.)
 > - `GET /features`(raw `{count, items}`, cursor 없음)는 admin-frontend 호환용으로
 >   유지하되, 사용자/TripMate 지도 정본은 `GET /features/in-bounds` envelope다.
 

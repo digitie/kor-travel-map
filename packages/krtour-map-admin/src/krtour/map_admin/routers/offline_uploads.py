@@ -279,14 +279,48 @@ class OfflineUploadLaunchResponse(BaseModel):
     meta: OfflineUploadLaunchMeta
 
 
-class OfflineUploadListResponse(BaseModel):
-    """`GET /admin/offline-uploads` 응답."""
+class OfflineUploadDetailMeta(BaseModel):
+    """단건 조회 응답 metadata."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    duration_ms: int
+
+
+class OfflineUploadDetailResponse(BaseModel):
+    """`GET /admin/offline-uploads/{upload_id}` 응답 (DA-D-03 envelope)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: OfflineUploadRecord
+    meta: OfflineUploadDetailMeta
+
+
+class OfflineUploadListData(BaseModel):
+    """오프라인 업로드 목록 data."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[OfflineUploadRecord]
+    next_cursor: str | None = None
+
+
+class OfflineUploadListMeta(BaseModel):
+    """오프라인 업로드 목록 meta."""
 
     model_config = ConfigDict(extra="forbid")
 
     count: int
-    items: list[OfflineUploadRecord]
-    next_cursor: str | None = None
+    duration_ms: int
+
+
+class OfflineUploadListResponse(BaseModel):
+    """`GET /admin/offline-uploads` 응답 (DA-D-03 envelope)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: OfflineUploadListData
+    meta: OfflineUploadListMeta
 
 
 class _DagsterLaunch(BaseModel):
@@ -838,6 +872,7 @@ async def list_offline_upload_requests(
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
     cursor: Annotated[str | None, Query()] = None,
 ) -> OfflineUploadListResponse:
+    started_at = perf_counter()
     try:
         page: OfflineUploadPage = await list_offline_uploads(
             session,
@@ -850,29 +885,40 @@ async def list_offline_upload_requests(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return OfflineUploadListResponse(
-        count=len(page.items),
-        items=[_record_from_upload(item) for item in page.items],
-        next_cursor=page.next_cursor,
+        data=OfflineUploadListData(
+            items=[_record_from_upload(item) for item in page.items],
+            next_cursor=page.next_cursor,
+        ),
+        meta=OfflineUploadListMeta(
+            count=len(page.items),
+            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
+        ),
     )
 
 
 @router.get(
     "/{upload_id}",
-    response_model=OfflineUploadRecord,
+    response_model=OfflineUploadDetailResponse,
     summary="오프라인 업로드 단건 조회",
     responses={404: {"description": "upload_id 없음"}},
 )
 async def get_offline_upload_request(
     upload_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> OfflineUploadRecord:
+) -> OfflineUploadDetailResponse:
+    started_at = perf_counter()
     row = await get_offline_upload(session, upload_id)
     if row is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"offline upload 없음: {upload_id!r}",
         )
-    return _record_from_upload(row)
+    return OfflineUploadDetailResponse(
+        data=_record_from_upload(row),
+        meta=OfflineUploadDetailMeta(
+            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
+        ),
+    )
 
 
 @router.get(
