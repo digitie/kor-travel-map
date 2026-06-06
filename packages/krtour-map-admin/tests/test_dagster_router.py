@@ -152,9 +152,11 @@ def test_mark_dagster_nux_seen_posts_mutation(
 
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "ok"
-    assert body["seen"] is True
-    assert body["errors"] == []
+    assert "duration_ms" in body["meta"]
+    data = body["data"]
+    assert data["status"] == "ok"
+    assert data["seen"] is True
+    assert data["errors"] == []
     assert calls == [
         {"query": dagster_mod._DAGSTER_SET_NUX_SEEN_MUTATION, "variables": {}}
     ]
@@ -244,9 +246,10 @@ def test_dagster_nux_seen_rejects_invalid_graphql_override(
 
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "error"
-    assert body["seen"] is False
-    assert body["errors"] == ["dagster_graphql_url path must end with /graphql"]
+    data = body["data"]
+    assert data["status"] == "error"
+    assert data["seen"] is False
+    assert data["errors"] == ["dagster_graphql_url path must end with /graphql"]
 
 
 @pytest.mark.unit

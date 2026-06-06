@@ -932,9 +932,9 @@
         "title": "DagsterJob",
         "type": "object"
       },
-      "DagsterNuxSeenResponse": {
+      "DagsterNuxSeenData": {
         "additionalProperties": false,
-        "description": "`POST /ops/dagster/nux-seen` 응답.",
+        "description": "`POST /ops/dagster/nux-seen` data.",
         "properties": {
           "checked_at": {
             "format": "date-time",
@@ -976,6 +976,24 @@
           "graphql_url",
           "checked_at",
           "seen"
+        ],
+        "title": "DagsterNuxSeenData",
+        "type": "object"
+      },
+      "DagsterNuxSeenResponse": {
+        "additionalProperties": false,
+        "description": "`POST /ops/dagster/nux-seen` 응답 (DA-D-03 envelope).",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DagsterNuxSeenData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/DagsterDetailMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
         ],
         "title": "DagsterNuxSeenResponse",
         "type": "object"

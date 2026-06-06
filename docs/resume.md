@@ -1,19 +1,28 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-06-06 Claude 작업 메모 — T-DA-15/16 envelope 통일 (family별 진행)
+## 2026-06-06 Claude 작업 메모 — DA-D-03 envelope 전면 통일 완료 → 다음 T-DA-13
 
-DA-D-03 전면 통일 완료 추적. ① feature-update-requests(#250) ② offline-uploads
-(#251) ③ poi-cache-targets(#252) → **T-DA-15 완료**. ④ ops metrics/import-job
-(#253) ⑤ dagster summary + mois detail → **T-DA-16 완료**. 구현 중 발견한
-`POST /ops/dagster/nux-seen` flat bare는 **T-DA-18**(LOW)로 분리. 다음 한 작업:
-**T-DA-18 nux-seen**(`DagsterNuxSeenResponse` → `{data, meta}`, 프런트
-`useMarkDagsterNuxSeen`는 본문 미소비라 영향 작음, 소규모 PR) → 끝나면
-**T-DA-13 `/admin/issues`**(DA-D-04 = T-212, `ops.data_integrity_violations` 기반
-GET 목록/GET 단건/PATCH action: resolve/ignore/reopen/retry_geocode/
-retry_reverse_geocode/apply_kraddr_geo_address/manual_override). 단건 envelope 표준
-= `{data: record, meta:{duration_ms}}`, list = `data.{items,next_cursor}` +
-`meta.{count,duration_ms}`. 다른 agent(codex)가 T-209e-c/T-212b를 잡고 있으므로
-envelope/issues lane만 건드린다.
+DA-D-03 전면 통일 **코드 전환 완료**. ① feature-update-requests(#250) ②
+offline-uploads(#251) ③ poi-cache-targets(#252) → T-DA-15. ④ ops metrics/import-job
+(#253) ⑤ dagster summary + mois detail(#254) → T-DA-16. ⑥ nux-seen → T-DA-18.
+이제 모든 admin/ops/debug/tripmate 성공 응답이 `{data, meta}`(list는 `data.{items,
+next_cursor}` + `meta.{count,duration_ms}`, 단건은 `data` + `meta.{duration_ms,…}`).
+잔존 예외는 `GET /features` 호환 1건뿐.
+
+**다음 한 작업 = T-DA-13 `/admin/issues`(DA-D-04 = T-212).** ADR-046 주소/좌표 이슈
+운영자 수동 처리 워크플로. 데이터는 `ops.data_integrity_violations`(F5~F7 적재).
+- 구현: `routers/admin_issues.py` 신설(admin tag `admin-issues`, prefix `/admin/issues`,
+  `admin_routes_enabled` flag). GET 목록(필터 `issue_type/provider/dataset_key/severity/
+  status/bbox/q/cursor`, list envelope), GET 단건(provider raw 주소 + kraddr-geo 후보 +
+  좌표 + 지도 데이터, 단건 envelope), PATCH action(resolve/ignore/reopen/retry_geocode/
+  retry_reverse_geocode/apply_kraddr_geo_address/manual_override).
+- `manual_override`는 `feature.features` address/coord/행정코드 갱신 + `ops.feature_overrides`
+  기록(provider 재적재 방지). `apply_kraddr_geo_address`는 좌표 기준 reverse 결과 채택.
+- 먼저 repo 계층(`krtour.map.infra`에 data_integrity_violations 조회/액션 repo가 있는지)
+  + contract §4.1 목표 계약 + ADR-046 확인. 기존 읽기 `GET /ops/consistency/issues`
+  (OpsIntegrityIssue*) 재사용 여부 판단. write/action은 admin UI(T-212b)와 함께지만
+  본 lane은 **API(T-212c) 우선**, UI는 codex T-212b와 겹치지 않게 조율.
+- 다른 agent(codex)가 T-209e-c/T-212b를 잡고 있으므로 issues **API** lane만 건드린다.
 
 ## 2026-06-06 Codex 작업 메모 — T-212a inventory + e2e gap matrix
 
