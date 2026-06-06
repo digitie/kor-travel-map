@@ -155,12 +155,14 @@ def test_ops_metrics_maps_counts(
 
     assert response.status_code == 200
     body = response.json()
-    assert body["features_total"] == 10
-    assert body["import_jobs_by_state"] == {"running": 1}
-    assert body["dedup_fp_stats"]["confirmed"] == 1
-    assert body["dedup_fp_stats"]["rejected"] == 1
-    assert body["data_integrity_issues"]["open_total"] == 3
-    assert body["latest_consistency_report"]["severity_max"] == "WARN"
+    assert "duration_ms" in body["meta"]
+    data = body["data"]
+    assert data["features_total"] == 10
+    assert data["import_jobs_by_state"] == {"running": 1}
+    assert data["dedup_fp_stats"]["confirmed"] == 1
+    assert data["dedup_fp_stats"]["rejected"] == 1
+    assert data["data_integrity_issues"]["open_total"] == 3
+    assert data["latest_consistency_report"]["severity_max"] == "WARN"
 
 
 @pytest.mark.unit

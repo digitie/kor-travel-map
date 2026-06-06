@@ -113,11 +113,11 @@ object 단건은 모두 envelope로 수렴시킨다.
 >   (`/admin/feature-update-requests`·`/admin/offline-uploads`·
 >   `/admin/poi-cache-targets`) 모두 envelope로 통일 완료 —
 >   `data.{items,next_cursor}` + `meta.{count,duration_ms}` (T-DA-15 완료).
-> - **단건 bare object**(통일 대상): `/ops/dagster/summary`, `/ops/metrics`,
->   `/debug/mois-license/{id}`, `/ops/import-jobs/{job_id}`(`{data}`만, meta 없음).
+> - **단건 bare object**(통일 대상): `/ops/dagster/summary`, `/debug/mois-license/{id}`.
 >   (`/admin/feature-update-requests/{id}`·`/tripmate/feature-update-requests/{id}`·
->   `/admin/offline-uploads/{id}`·`/admin/poi-cache-targets/{id}`는 `{data, meta}`
->   통일 완료.)
+>   `/admin/offline-uploads/{id}`·`/admin/poi-cache-targets/{id}`·`/ops/metrics`·
+>   `/ops/import-jobs/{job_id}`는 `{data, meta}` 통일 완료. `/ops/metrics`는
+>   metric 본문이 `data`, `meta.duration_ms` 추가.)
 > - `GET /features`(raw `{count, items}`, cursor 없음)는 admin-frontend 호환용으로
 >   유지하되, 사용자/TripMate 지도 정본은 `GET /features/in-bounds` envelope다.
 

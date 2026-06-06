@@ -74,6 +74,7 @@ export function HomePageClient() {
   const health = useHealth();
   const version = useVersion();
   const metrics = useOpsMetrics();
+  const metricsData = metrics.data?.data;
   const importJobs = useImportJobs({ page_size: 8 });
   const dedup = useDedupReviews({ status: ["pending"], page_size: 6 });
   const dagster = useDagsterSummary(8);
@@ -132,28 +133,28 @@ export function HomePageClient() {
           ) : (
             <>
               <MetricCard
-                description={`${formatCount(metrics.data?.features_active)} active / ${formatCount(metrics.data?.features_inactive)} inactive`}
+                description={`${formatCount(metricsData?.features_active)} active / ${formatCount(metricsData?.features_inactive)} inactive`}
                 icon={MapIcon}
                 title="Features"
-                value={formatCount(metrics.data?.features_total)}
+                value={formatCount(metricsData?.features_total)}
               />
               <MetricCard
                 description="queued, running, done, failed"
                 icon={ListChecksIcon}
                 title="Import jobs"
                 value={formatCount(
-                  Object.values(metrics.data?.import_jobs_by_state ?? {}).reduce(
+                  Object.values(metricsData?.import_jobs_by_state ?? {}).reduce(
                     (sum, count) => sum + count,
                     0,
                   ),
                 )}
               />
               <MetricCard
-                description={`${formatCount(metrics.data?.dedup_fp_stats.pending)} pending reviews`}
+                description={`${formatCount(metricsData?.dedup_fp_stats.pending)} pending reviews`}
                 icon={GitCompareArrowsIcon}
                 title="Dedup queue"
                 value={formatCount(
-                  Object.values(metrics.data?.dedup_queue_by_status ?? {}).reduce(
+                  Object.values(metricsData?.dedup_queue_by_status ?? {}).reduce(
                     (sum, count) => sum + count,
                     0,
                   ),
@@ -163,7 +164,7 @@ export function HomePageClient() {
                 description="open data integrity issues"
                 icon={AlertTriangleIcon}
                 title="Issues"
-                value={formatCount(metrics.data?.data_integrity_issues.open_total)}
+                value={formatCount(metricsData?.data_integrity_issues.open_total)}
               />
             </>
           )}

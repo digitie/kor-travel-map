@@ -89,6 +89,14 @@ class OpsListMeta(BaseModel):
     duration_ms: int
 
 
+class OpsDetailMeta(BaseModel):
+    """단건 응답 공통 meta."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    duration_ms: int
+
+
 class OpsImportJobsListResponse(BaseModel):
     """``GET /ops/import-jobs`` 응답."""
 
@@ -99,11 +107,12 @@ class OpsImportJobsListResponse(BaseModel):
 
 
 class OpsImportJobResponse(BaseModel):
-    """``GET /ops/import-jobs/{job_id}`` 응답."""
+    """``GET /ops/import-jobs/{job_id}`` 응답 (DA-D-03 envelope)."""
 
     model_config = ConfigDict(extra="forbid")
 
     data: OpsImportJobRecord
+    meta: OpsDetailMeta
 
 
 class OpsConsistencyReportRecord(BaseModel):
@@ -200,8 +209,8 @@ class OpsIntegrityIssueCountsRecord(BaseModel):
     by_type: dict[str, int]
 
 
-class OpsMetricsResponse(BaseModel):
-    """``GET /ops/metrics`` 응답."""
+class OpsMetricsData(BaseModel):
+    """``GET /ops/metrics`` data."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -216,6 +225,15 @@ class OpsMetricsResponse(BaseModel):
     dedup_fp_stats: OpsDedupFpStatsRecord
     data_integrity_issues: OpsIntegrityIssueCountsRecord
     latest_consistency_report: OpsConsistencyReportRecord | None = None
+
+
+class OpsMetricsResponse(BaseModel):
+    """``GET /ops/metrics`` 응답 (DA-D-03 envelope)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: OpsMetricsData
+    meta: OpsDetailMeta
 
 
 def _job(row: OpsImportJob) -> OpsImportJobRecord:
@@ -286,19 +304,25 @@ def _metrics_response(
     *,
     issue_counts: OpsIntegrityIssueCountsRecord,
     latest_report: OpsConsistencyReportRecord | None,
+    started_at: float,
 ) -> OpsMetricsResponse:
     return OpsMetricsResponse(
-        checked_at=datetime.now(UTC),
-        features_total=counts.features_total,
-        features_active=counts.features_active,
-        features_inactive=counts.features_inactive,
-        features_by_kind=counts.features_by_kind,
-        source_records_by_provider=counts.source_records_by_provider,
-        import_jobs_by_state=counts.import_jobs_by_state,
-        dedup_queue_by_status=counts.dedup_queue_by_status,
-        dedup_fp_stats=_dedup_stats(dedup_fp_stats(counts.dedup_queue_by_status)),
-        data_integrity_issues=issue_counts,
-        latest_consistency_report=latest_report,
+        data=OpsMetricsData(
+            checked_at=datetime.now(UTC),
+            features_total=counts.features_total,
+            features_active=counts.features_active,
+            features_inactive=counts.features_inactive,
+            features_by_kind=counts.features_by_kind,
+            source_records_by_provider=counts.source_records_by_provider,
+            import_jobs_by_state=counts.import_jobs_by_state,
+            dedup_queue_by_status=counts.dedup_queue_by_status,
+            dedup_fp_stats=_dedup_stats(dedup_fp_stats(counts.dedup_queue_by_status)),
+            data_integrity_issues=issue_counts,
+            latest_consistency_report=latest_report,
+        ),
+        meta=OpsDetailMeta(
+            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
+        ),
     )
 
 
@@ -307,6 +331,7 @@ async def get_ops_metrics(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> OpsMetricsResponse:
     """운영 홈/대시보드가 쓰는 DB 기반 summary metric."""
+    started_at = perf_counter()
     counts = await gather_status_counts(session)
     issue_counts = await get_ops_integrity_issue_counts(session)
     return _metrics_response(
@@ -318,6 +343,7 @@ async def get_ops_metrics(
             by_type=issue_counts.by_type,
         ),
         latest_report=_report(await get_latest_consistency_report(session)),
+        started_at=started_at,
     )
 
 
@@ -364,13 +390,19 @@ async def get_import_job(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> OpsImportJobResponse:
     """``ops.import_jobs`` 작업 단건."""
+    started_at = perf_counter()
     row = await get_ops_import_job(session, job_id)
     if row is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"import job not found: {job_id}",
         )
-    return OpsImportJobResponse(data=_job(row))
+    return OpsImportJobResponse(
+        data=_job(row),
+        meta=OpsDetailMeta(
+            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
+        ),
+    )
 
 
 @router.get(
