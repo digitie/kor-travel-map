@@ -8,7 +8,8 @@ admin UI 워크플로는 `docs/debug-ui-admin-workflows.md`가 정본 — **본 
 > 상태: **1차 계약 구현됨 (2026-06-03, T-207e/T-207g)** — TripMate/user-facing
 > 정본 spec은 `packages/krtour-map-admin/openapi.user.json`이다. `GET
 > /features/in-bounds`, `GET /features/{feature_id}`, `GET /features/search`,
-> `GET /features/nearby/by-target`, `POST /tripmate/features/batch`,
+> `GET /features/nearby`(T-213b), `GET /features/nearby/by-target`,
+> `POST /tripmate/features/batch`,
 > `POST /tripmate/feature-update-requests`,
 > `GET /tripmate/feature-update-requests/{request_id}`가
 > user spec과 동기화됐다. D-1~D-16은 전부 확정됨
@@ -16,8 +17,9 @@ admin UI 워크플로는 `docs/debug-ui-admin-workflows.md`가 정본 — **본 
 > `POST /v2/regions/within-radius` 정본은 `docs/regions-within-radius.md`.
 > TripMate `docs/krtour-map-requirements.md` 대조 후속은
 > `docs/reports/tripmate-requirements-reconcile-2026-06-06.md`와 `docs/tasks.md`
-> `T-213a~h`에 등록했다. 일반 좌표 기준 `/features/nearby`, provider last-sync,
-> public `/health`/`/version`, weather card, category catalog는 아직 user spec에 없다.
+> `T-213a~h`에 등록했다. 일반 좌표 기준 `/features/nearby`는 **구현됨(T-213b)**.
+> 남은 미구현: provider last-sync(`T-213g`), public `/health`/`/version`(`T-213h`),
+> weather card(`T-213e`), category catalog(`T-213f`)는 아직 user spec에 없다.
 
 ## 1. 공통 규약
 
