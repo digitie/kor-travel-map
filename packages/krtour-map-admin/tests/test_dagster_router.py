@@ -100,15 +100,17 @@ def test_dagster_summary_parses_graphql_response(
 
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "ok"
-    assert body["dagster_url"] == "http://dagster.example:9013"
-    assert body["graphql_url"] == "http://dagster.example:9013/graphql"
-    assert body["version"] == "1.13.7"
-    assert body["repository_count"] == 1
-    assert body["job_count"] == 1
-    assert body["asset_count"] == 2
-    assert body["run_counts"] == {"SUCCESS": 1}
-    assert body["repositories"][0]["asset_groups"] == [
+    assert "duration_ms" in body["meta"]
+    data = body["data"]
+    assert data["status"] == "ok"
+    assert data["dagster_url"] == "http://dagster.example:9013"
+    assert data["graphql_url"] == "http://dagster.example:9013/graphql"
+    assert data["version"] == "1.13.7"
+    assert data["repository_count"] == 1
+    assert data["job_count"] == 1
+    assert data["asset_count"] == 2
+    assert data["run_counts"] == {"SUCCESS": 1}
+    assert data["repositories"][0]["asset_groups"] == [
         {
             "group_name": "features_event",
             "asset_count": 1,
@@ -120,7 +122,7 @@ def test_dagster_summary_parses_graphql_response(
             "assets": ["feature_place_mois_licenses"],
         },
     ]
-    assert body["recent_runs"][0]["run_id"] == "run-1"
+    assert data["recent_runs"][0]["run_id"] == "run-1"
     assert calls == [
         {"query": dagster_mod._DAGSTER_SUMMARY_QUERY, "variables": {"limit": 3}},
     ]
@@ -176,10 +178,11 @@ def test_dagster_summary_returns_unavailable_when_graphql_fails(
 
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "unavailable"
-    assert body["repository_count"] == 0
-    assert body["recent_runs"] == []
-    assert body["errors"]
+    data = body["data"]
+    assert data["status"] == "unavailable"
+    assert data["repository_count"] == 0
+    assert data["recent_runs"] == []
+    assert data["errors"]
 
 
 @pytest.mark.unit
@@ -208,9 +211,10 @@ def test_dagster_summary_rejects_disallowed_url_before_http_call(
 
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "error"
-    assert body["repository_count"] == 0
-    assert body["errors"] == ["dagster_url host is not in dagster_allowed_hosts"]
+    data = body["data"]
+    assert data["status"] == "error"
+    assert data["repository_count"] == 0
+    assert data["errors"] == ["dagster_url host is not in dagster_allowed_hosts"]
 
 
 @pytest.mark.unit

@@ -78,6 +78,7 @@ export function HomePageClient() {
   const importJobs = useImportJobs({ page_size: 8 });
   const dedup = useDedupReviews({ status: ["pending"], page_size: 6 });
   const dagster = useDagsterSummary(8);
+  const dagsterData = dagster.data?.data;
 
   const refreshAll = () => {
     void health.refetch();
@@ -271,14 +272,14 @@ export function HomePageClient() {
                 <div className="flex flex-wrap gap-2">
                   <StatusBadge
                     status={
-                      dagster.data?.status ?? (dagster.isError ? "error" : "loading")
+                      dagsterData?.status ?? (dagster.isError ? "error" : "loading")
                     }
                   />
                   <Badge variant="outline">
-                    {formatCount(dagster.data?.asset_count)} assets
+                    {formatCount(dagsterData?.asset_count)} assets
                   </Badge>
                   <Badge variant="outline">
-                    {formatCount(dagster.data?.schedule_count)} schedules
+                    {formatCount(dagsterData?.schedule_count)} schedules
                   </Badge>
                 </div>
                 <Link

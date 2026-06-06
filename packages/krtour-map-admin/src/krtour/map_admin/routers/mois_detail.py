@@ -34,14 +34,14 @@ __all__ = ["router", "MoisLicenseDetailResponse", "clear_detail_cache"]
 _MOIS_ENTITY_TYPE = "license_place"
 
 _CACHE_TTL_SECONDS = 300.0
-# 프로세스 내 캐시(적재 아님) — license_id → (만료 monotonic, 응답).
-_CACHE: dict[str, tuple[float, MoisLicenseDetailResponse]] = {}
+# 프로세스 내 캐시(적재 아님) — license_id → (만료 monotonic, data).
+_CACHE: dict[str, tuple[float, MoisLicenseDetailData]] = {}
 
 router = APIRouter(prefix="/debug/mois-license", tags=["debug", "mois"])
 
 
-class MoisLicenseDetailResponse(BaseModel):
-    """``GET /debug/mois-license/{license_id}`` 응답 — 단건 on-demand 상세."""
+class MoisLicenseDetailData(BaseModel):
+    """``GET /debug/mois-license/{license_id}`` data — 단건 on-demand 상세."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -55,7 +55,24 @@ class MoisLicenseDetailResponse(BaseModel):
     address: dict[str, Any]
     detail: dict[str, Any]
     raw: dict[str, Any] = Field(description="원본 MOIS payload (source_records.raw_data).")
+
+
+class MoisLicenseDetailMeta(BaseModel):
+    """단건 상세 meta — 캐시 히트 여부 + 처리 시간."""
+
+    model_config = ConfigDict(extra="forbid")
+
     cached: bool = Field(description="프로세스 캐시 히트 여부.")
+    duration_ms: int
+
+
+class MoisLicenseDetailResponse(BaseModel):
+    """``GET /debug/mois-license/{license_id}`` 응답 (DA-D-03 envelope)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: MoisLicenseDetailData
+    meta: MoisLicenseDetailMeta
 
 
 def clear_detail_cache() -> None:
@@ -63,7 +80,7 @@ def clear_detail_cache() -> None:
     _CACHE.clear()
 
 
-def _cache_get(license_id: str) -> MoisLicenseDetailResponse | None:
+def _cache_get(license_id: str) -> MoisLicenseDetailData | None:
     hit = _CACHE.get(license_id)
     if hit is not None and hit[0] > time.monotonic():
         return hit[1]
@@ -80,9 +97,16 @@ async def get_mois_license_detail(
     license_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> MoisLicenseDetailResponse:
+    started_at = time.perf_counter()
     cached = _cache_get(license_id)
     if cached is not None:
-        return cached.model_copy(update={"cached": True})
+        return MoisLicenseDetailResponse(
+            data=cached,
+            meta=MoisLicenseDetailMeta(
+                cached=True,
+                duration_ms=max(0, int((time.perf_counter() - started_at) * 1000)),
+            ),
+        )
 
     row = await feature_repo.get_primary_source_detail(
         session,
@@ -96,7 +120,7 @@ async def get_mois_license_detail(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"MOIS 인허가 미적재: {license_id!r}",
         )
-    resp = MoisLicenseDetailResponse(
+    data = MoisLicenseDetailData(
         license_id=license_id,
         feature_id=row["feature_id"],
         name=row["name"],
@@ -107,7 +131,12 @@ async def get_mois_license_detail(
         address=row["address"],
         detail=row["detail"],
         raw=row["raw_data"],
-        cached=False,
     )
-    _CACHE[license_id] = (time.monotonic() + _CACHE_TTL_SECONDS, resp)
-    return resp
+    _CACHE[license_id] = (time.monotonic() + _CACHE_TTL_SECONDS, data)
+    return MoisLicenseDetailResponse(
+        data=data,
+        meta=MoisLicenseDetailMeta(
+            cached=False,
+            duration_ms=max(0, int((time.perf_counter() - started_at) * 1000)),
+        ),
+    )

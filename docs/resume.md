@@ -2,16 +2,18 @@
 
 ## 2026-06-06 Claude 작업 메모 — T-DA-15/16 envelope 통일 (family별 진행)
 
-DA-D-03 전면 통일을 family 단위 PR로 진행 중. ① `/admin/feature-update-requests`
-(#250) ② `/admin/offline-uploads`(#251) ③ `/admin/poi-cache-targets`(#252) →
-**T-DA-15 완료**. ④ `/ops/metrics` + `/ops/import-jobs/{job_id}` 단건 → `{data, meta}`
-완료. 다음 한 작업: **T-DA-16 잔여 2건** — `/ops/dagster/summary`
-(`DagsterSummaryResponse` 셰입 확인 후 envelope), `/debug/mois-license/{id}`
-(`MoisLicenseDetailResponse` bare → `{data, meta}`). 각 라우터 + frontend
-hook(dagster.ts / mois) + page + openapi/types 재생성. envelope 표준 = 단건
-`{data: record, meta:{duration_ms}}`. 전부 끝나면 **T-DA-13 `/admin/issues`**
-(DA-D-04 = T-212, `ops.data_integrity_violations` 기반 GET/GET{id}/PATCH). 다른
-agent(codex)가 T-209e-c/T-212b를 잡고 있으므로 envelope/issues lane만 건드린다.
+DA-D-03 전면 통일 완료 추적. ① feature-update-requests(#250) ② offline-uploads
+(#251) ③ poi-cache-targets(#252) → **T-DA-15 완료**. ④ ops metrics/import-job
+(#253) ⑤ dagster summary + mois detail → **T-DA-16 완료**. 구현 중 발견한
+`POST /ops/dagster/nux-seen` flat bare는 **T-DA-18**(LOW)로 분리. 다음 한 작업:
+**T-DA-18 nux-seen**(`DagsterNuxSeenResponse` → `{data, meta}`, 프런트
+`useMarkDagsterNuxSeen`는 본문 미소비라 영향 작음, 소규모 PR) → 끝나면
+**T-DA-13 `/admin/issues`**(DA-D-04 = T-212, `ops.data_integrity_violations` 기반
+GET 목록/GET 단건/PATCH action: resolve/ignore/reopen/retry_geocode/
+retry_reverse_geocode/apply_kraddr_geo_address/manual_override). 단건 envelope 표준
+= `{data: record, meta:{duration_ms}}`, list = `data.{items,next_cursor}` +
+`meta.{count,duration_ms}`. 다른 agent(codex)가 T-209e-c/T-212b를 잡고 있으므로
+envelope/issues lane만 건드린다.
 
 ## 2026-06-06 Codex 작업 메모 — T-212a inventory + e2e gap matrix
 

@@ -276,7 +276,7 @@ export function DagsterAdminClient() {
   const summary = useDagsterSummary(12);
   const { mutate: markNuxSeen, status: markNuxSeenStatus } =
     useMarkDagsterNuxSeen();
-  const data = summary.data;
+  const data = summary.data?.data;
   const activeRuns =
     data?.recent_runs.filter((run) => !terminalStatus.has(run.status)).length ?? 0;
   const failedRuns = data?.run_counts.FAILURE ?? 0;
