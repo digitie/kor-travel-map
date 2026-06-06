@@ -1,5 +1,17 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-06 claude 작업 메모 — T-213h(public `/health`,`/version`) 완료
+
+T-213 묶음 4번째 완료. public `GET /health`(liveness, DB-free, 항상 mount) +
+`GET /version`(admin/lib/commit)을 `routers/public_status.py`로 추가, user spec 포함.
+deep readiness(DB/RustFS/Dagster)는 후속 `/ops/health-deep`로 분리.
+
+진행 순서: T-213d ✅ → T-213b ✅ → T-213f ✅ → **T-213h ✅** → 다음 **T-213g**
+(provider export + `GET /providers/{provider}/last-sync`) → T-213c(bbox clustering) →
+T-213e(weather card). 각 subtask는 작은 독립 PR + 매 PR 전 origin/main rebase +
+격리 WSL sandbox. **OpenAPI endpoint 추가 시 frontend `types.ts`
+(`openapi-typescript@7.13.0`) 재생성 필수**.
+
 ## 2026-06-06 claude 작업 메모 — T-213f(`GET /categories`) 완료
 
 T-213 묶음 3번째 완료. `GET /categories`로 144건 정적 카탈로그(+선택적 DB 분포)를

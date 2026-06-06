@@ -46,6 +46,8 @@ USER_OPERATIONS: dict[str, frozenset[str]] = {
     "/features/nearby": frozenset({"get"}),
     "/features/nearby/by-target": frozenset({"get"}),
     "/categories": frozenset({"get"}),
+    "/health": frozenset({"get"}),
+    "/version": frozenset({"get"}),
     "/tripmate/features/batch": frozenset({"post"}),
     "/tripmate/feature-update-requests": frozenset({"post"}),
     "/tripmate/feature-update-requests/{request_id}": frozenset({"get"}),

@@ -2846,6 +2846,25 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "HealthData": {
+        "additionalProperties": false,
+        "properties": {
+          "service": {
+            "title": "Service",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "service"
+        ],
+        "title": "HealthData",
+        "type": "object"
+      },
       "HealthResponse": {
         "additionalProperties": false,
         "description": "`/debug/health` 응답 schema.",
@@ -4994,6 +5013,42 @@
         "title": "PublicFeatureListData",
         "type": "object"
       },
+      "PublicHealthResponse": {
+        "additionalProperties": false,
+        "description": "``GET /health`` 응답 (liveness).",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/HealthData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/_Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "PublicHealthResponse",
+        "type": "object"
+      },
+      "PublicVersionResponse": {
+        "additionalProperties": false,
+        "description": "``GET /version`` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/VersionData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/_Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "PublicVersionResponse",
+        "type": "object"
+      },
       "SigunguByRadiusScope": {
         "additionalProperties": false,
         "description": "kraddr-geo가 계산한 반경 교차 시군구 기준 갱신 scope.",
@@ -5071,6 +5126,41 @@
         "title": "ValidationError",
         "type": "object"
       },
+      "VersionData": {
+        "additionalProperties": false,
+        "properties": {
+          "commit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit"
+          },
+          "krtour_map_version": {
+            "title": "Krtour Map Version",
+            "type": "string"
+          },
+          "openapi_version": {
+            "title": "Openapi Version",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "krtour_map_version",
+          "openapi_version"
+        ],
+        "title": "VersionData",
+        "type": "object"
+      },
       "VersionResponse": {
         "additionalProperties": false,
         "description": "``/debug/version`` 응답 schema.",
@@ -5122,6 +5212,20 @@
           "description"
         ],
         "title": "_DatasetEntry",
+        "type": "object"
+      },
+      "_Meta": {
+        "additionalProperties": false,
+        "properties": {
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "duration_ms"
+        ],
+        "title": "_Meta",
         "type": "object"
       },
       "_ProviderEntry": {
@@ -8031,6 +8135,28 @@
         ]
       }
     },
+    "/health": {
+      "get": {
+        "description": "liveness — 의존 없이 항상 ``status='ok'`` 200. deep readiness는 후속.",
+        "operationId": "get_public_health_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicHealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "public liveness probe",
+        "tags": [
+          "public"
+        ]
+      }
+    },
     "/ops/consistency/issues": {
       "get": {
         "description": "열린 data integrity issue 목록.",
@@ -8675,6 +8801,28 @@
         "summary": "TripMate feature 상세 batch 조회",
         "tags": [
           "tripmate"
+        ]
+      }
+    },
+    "/version": {
+      "get": {
+        "description": "배포 프로그램(admin)/메인 lib 버전 + commit(env ``KRTOUR_MAP_GIT_COMMIT``).",
+        "operationId": "get_public_version_version_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicVersionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "public version",
+        "tags": [
+          "public"
         ]
       }
     }
