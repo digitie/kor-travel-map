@@ -601,6 +601,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/ops/api-call-logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Api Call Logs
+         * @description ``ops.api_call_log`` 호출 로그 목록.
+         */
+        get: operations["get_api_call_logs_ops_api_call_logs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/ops/consistency/issues": {
         parameters: {
             query?: never;
@@ -753,6 +773,26 @@ export interface paths {
          * @description 운영 홈/대시보드가 쓰는 DB 기반 summary metric.
          */
         get: operations["get_ops_metrics_ops_metrics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ops/system-logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get System Logs
+         * @description ``ops.system_log`` 운영 로그 목록.
+         */
+        get: operations["get_system_logs_ops_system_logs_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1185,6 +1225,49 @@ export interface components {
             violation_key: string;
             /** Violation Type */
             violation_type: string;
+        };
+        /**
+         * ApiCallLogRecord
+         * @description ``ops.api_call_log`` HTTP 표현.
+         */
+        ApiCallLogRecord: {
+            /** Api Call Log Key */
+            api_call_log_key: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Duration Ms */
+            duration_ms: number;
+            /** Error Code */
+            error_code?: string | null;
+            /** Method */
+            method: string;
+            /** Path */
+            path: string;
+            /** Request Id */
+            request_id?: string | null;
+            /** Status Code */
+            status_code: number;
+        };
+        /**
+         * ApiCallLogsListData
+         * @description api call log 목록 data.
+         */
+        ApiCallLogsListData: {
+            /** Items */
+            items: components["schemas"]["ApiCallLogRecord"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+        };
+        /**
+         * ApiCallLogsResponse
+         * @description ``GET /ops/api-call-logs`` 응답 (DA-D-03 envelope).
+         */
+        ApiCallLogsResponse: {
+            data: components["schemas"]["ApiCallLogsListData"];
+            meta: components["schemas"]["LogListMeta"];
         };
         /**
          * BboxScope
@@ -2175,6 +2258,16 @@ export interface components {
             lat: number;
             /** Lon */
             lon: number;
+        };
+        /**
+         * LogListMeta
+         * @description 로그 목록 공통 meta.
+         */
+        LogListMeta: {
+            /** Count */
+            count: number;
+            /** Duration Ms */
+            duration_ms: number;
         };
         /**
          * MoisLicenseDetailData
@@ -3190,6 +3283,51 @@ export interface components {
             status: string;
             /** Sync Scope */
             sync_scope: string;
+        };
+        /**
+         * SystemLogRecord
+         * @description ``ops.system_log`` HTTP 표현.
+         */
+        SystemLogRecord: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Detail */
+            detail: {
+                [key: string]: unknown;
+            };
+            /** Event */
+            event: string;
+            /** Level */
+            level: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id?: string | null;
+            /** Source */
+            source: string;
+            /** System Log Key */
+            system_log_key: string;
+        };
+        /**
+         * SystemLogsListData
+         * @description system log 목록 data.
+         */
+        SystemLogsListData: {
+            /** Items */
+            items: components["schemas"]["SystemLogRecord"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+        };
+        /**
+         * SystemLogsResponse
+         * @description ``GET /ops/system-logs`` 응답 (DA-D-03 envelope).
+         */
+        SystemLogsResponse: {
+            data: components["schemas"]["SystemLogsListData"];
+            meta: components["schemas"]["LogListMeta"];
         };
         /** ValidationError */
         ValidationError: {
@@ -4883,6 +5021,41 @@ export interface operations {
             };
         };
     };
+    get_api_call_logs_ops_api_call_logs_get: {
+        parameters: {
+            query?: {
+                method?: string | null;
+                min_status?: number | null;
+                path?: string | null;
+                page_size?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiCallLogsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_integrity_issues_ops_consistency_issues_get: {
         parameters: {
             query?: {
@@ -5108,6 +5281,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OpsMetricsResponse"];
+                };
+            };
+        };
+    };
+    get_system_logs_ops_system_logs_get: {
+        parameters: {
+            query?: {
+                level?: ("debug" | "info" | "warning" | "error" | "critical") | null;
+                source?: string | null;
+                q?: string | null;
+                page_size?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemLogsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

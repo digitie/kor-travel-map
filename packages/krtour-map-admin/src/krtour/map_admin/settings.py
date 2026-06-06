@@ -79,6 +79,13 @@ class AdminSettings(BaseSettings):
             "ops/dagster 조회도 함께 닫는다."
         ),
     )
+    api_call_log_enabled: bool = Field(
+        default=False,
+        description=(
+            "True면 모든 API 호출을 ops.api_call_log에 best-effort 기록"
+            "(opt-in, 기본 off)."
+        ),
+    )
     cors_allow_origins: list[str] = Field(
         default=[
             "http://localhost:9012",

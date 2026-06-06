@@ -2,6 +2,32 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-07 (claude) — 운영 로그 조회 표면 (T-212c-API-04 → T-212c 완료)
+
+**작업**: T-212c 마지막 조각인 system/API-call 로그 조회 표면을 구현. 백킹 테이블이
+없어 스키마부터 신설.
+
+- **마이그레이션 `0018_ops_logs`**: `ops.system_log`(level CHECK/source/event/message/
+  detail jsonb/request_id) + `ops.api_call_log`(method/path/status_code/duration_ms/
+  request_id/error_code). PK `x_extension.gen_random_uuid()`(ADR-008 schema-isolated),
+  keyset/필터 인덱스. down_revision=0017, 단일 head.
+- **`infra/log_repo.py`**(ADR-004 raw SQL): `record_system_log`/`record_api_call`(INSERT
+  RETURNING, commit은 호출자) + `list_system_logs`/`list_api_call_logs`(ops_repo와 동일
+  base64 keyset cursor, level/source/q·method/min_status/path 필터).
+- **`routers/ops_logs.py`**: `GET /ops/system-logs`·`GET /ops/api-call-logs`(ops tag,
+  `ops_routes_enabled`, `{data:{items,next_cursor}, meta:{count,duration_ms}}`).
+- **opt-in 미들웨어**: `AdminSettings.api_call_log_enabled`(기본 off) True일 때만 등록.
+  요청마다 method/path/status/duration/request_id를 best-effort 적재(`_record_api_call_safe`
+  가 단기 세션 열어 INSERT, 모든 예외 swallow → 요청 절대 안 깨짐). 기본 off라 오버헤드 0.
+- **error envelope**: `app.py` 중앙 handler가 이미 모든 오류를 `{error:{code,message,
+  details,request_id}}` + `X-Request-ID`로 통일(T-212c error contract = 기구현 확인).
+- **검증**: log_repo 단위(96%) + ops_logs 라우터 단위 + 미들웨어 단위 + PostGIS 통합
+  (마이그레이션 0018 적용 + record/list/cursor/filter 실측). drift green, ruff/mypy
+  --strict -p krtour.map green, unit coverage 80.23%, admin pytest 206, lint-imports green,
+  frontend type-check/gen:types:check green. admin-only → openapi.json만.
+- **→ T-212c 완료.** 다음: T-212d(성능 baseline)/T-212e(실데이터)는 라이브 스택/실데이터
+  필요, T-212b admin UI는 codex lane.
+
 ## 2026-06-07 (claude) — `/ops/health-deep` deep readiness (T-212c-API-03)
 
 **작업**: T-212c 중 deep readiness 엔드포인트를 구현. liveness용 public `/health`
