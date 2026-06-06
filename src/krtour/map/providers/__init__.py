@@ -48,6 +48,18 @@ from krtour.map.providers.kma import (
     ultra_short_nowcast_to_weather_values,
     weather_alerts_to_notice_bundles,
 )
+from krtour.map.providers.knps import (
+    KNPS_GEOMETRY_DATASETS,
+    KNPS_PLACE_DATASETS,
+    KnpsGeometryRecord,
+    KnpsPointRecord,
+    knps_geometry_records_to_bundles,
+    knps_point_records_to_bundles,
+    resolve_cultural_resource_category,
+)
+from krtour.map.providers.knps import (
+    PROVIDER_NAME as KNPS_PROVIDER_NAME,
+)
 from krtour.map.providers.krex import (
     KREX_PROVIDER_NAME,
     REST_AREA_CATEGORY,
@@ -68,6 +80,24 @@ from krtour.map.providers.krex import (
     rest_area_weather_to_values,
     rest_areas_to_bundles,
     traffic_notices_to_bundles,
+)
+from krtour.map.providers.krheritage import (
+    DATASET_KEY_EVENT as KRHERITAGE_DATASET_KEY_EVENT,
+)
+from krtour.map.providers.krheritage import (
+    DATASET_KEY_HERITAGE as KRHERITAGE_DATASET_KEY_HERITAGE,
+)
+from krtour.map.providers.krheritage import (
+    HERITAGE_MARKER_COLOR,
+    KrHeritageEvent,
+    KrHeritageItem,
+    classify_heritage_kind,
+    heritage_events_to_bundles,
+    heritage_items_to_bundles,
+    resolve_heritage_category,
+)
+from krtour.map.providers.krheritage import (
+    PROVIDER_NAME as KRHERITAGE_PROVIDER_NAME,
 )
 from krtour.map.providers.mois import (
     DATASET_KEY_BULK as MOIS_DATASET_KEY_BULK,
@@ -215,4 +245,24 @@ __all__ = [
     "MOIS_DATASET_KEY_CLOSED",
     "MOIS_DATASET_KEY_DETAIL",
     "MOIS_MARKER_COLOR",
+    # knps (Sprint 3 — 국립공원공단, ADR-028/034 ⑤)
+    "KnpsPointRecord",
+    "KnpsGeometryRecord",
+    "knps_point_records_to_bundles",
+    "knps_geometry_records_to_bundles",
+    "resolve_cultural_resource_category",
+    "KNPS_PLACE_DATASETS",
+    "KNPS_GEOMETRY_DATASETS",
+    "KNPS_PROVIDER_NAME",
+    # krheritage (Sprint 3 — 국가유산청, ADR-024/034 ⑥)
+    "KrHeritageItem",
+    "KrHeritageEvent",
+    "heritage_items_to_bundles",
+    "heritage_events_to_bundles",
+    "classify_heritage_kind",
+    "resolve_heritage_category",
+    "KRHERITAGE_PROVIDER_NAME",
+    "KRHERITAGE_DATASET_KEY_HERITAGE",
+    "KRHERITAGE_DATASET_KEY_EVENT",
+    "HERITAGE_MARKER_COLOR",
 ]

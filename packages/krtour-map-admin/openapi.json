@@ -4961,6 +4961,51 @@
         "title": "ProviderDatasetsResponse",
         "type": "object"
       },
+      "ProviderLastSyncData": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SyncStateSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "items",
+          "count"
+        ],
+        "title": "ProviderLastSyncData",
+        "type": "object"
+      },
+      "ProviderLastSyncResponse": {
+        "additionalProperties": false,
+        "description": "``GET /providers/{provider}/last-sync`` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ProviderLastSyncData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/krtour__map_admin__routers__providers___Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ProviderLastSyncResponse",
+        "type": "object"
+      },
       "ProvidersResponse": {
         "additionalProperties": false,
         "description": "`/debug/etl/providers` 응답.",
@@ -5021,7 +5066,7 @@
             "$ref": "#/components/schemas/HealthData"
           },
           "meta": {
-            "$ref": "#/components/schemas/_Meta"
+            "$ref": "#/components/schemas/krtour__map_admin__routers__public_status___Meta"
           }
         },
         "required": [
@@ -5039,7 +5084,7 @@
             "$ref": "#/components/schemas/VersionData"
           },
           "meta": {
-            "$ref": "#/components/schemas/_Meta"
+            "$ref": "#/components/schemas/krtour__map_admin__routers__public_status___Meta"
           }
         },
         "required": [
@@ -5084,6 +5129,62 @@
           "radius_km"
         ],
         "title": "SigunguByRadiusScope",
+        "type": "object"
+      },
+      "SyncStateSummary": {
+        "additionalProperties": false,
+        "description": "provider 1 (dataset_key, sync_scope) 신선도 — cursor 제외.",
+        "properties": {
+          "consecutive_failures": {
+            "title": "Consecutive Failures",
+            "type": "integer"
+          },
+          "dataset_key": {
+            "title": "Dataset Key",
+            "type": "string"
+          },
+          "last_failure_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Failure At"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "sync_scope": {
+            "title": "Sync Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dataset_key",
+          "sync_scope",
+          "status",
+          "last_success_at",
+          "last_failure_at",
+          "consecutive_failures"
+        ],
+        "title": "SyncStateSummary",
         "type": "object"
       },
       "ValidationError": {
@@ -5214,20 +5315,6 @@
         "title": "_DatasetEntry",
         "type": "object"
       },
-      "_Meta": {
-        "additionalProperties": false,
-        "properties": {
-          "duration_ms": {
-            "title": "Duration Ms",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "duration_ms"
-        ],
-        "title": "_Meta",
-        "type": "object"
-      },
       "_ProviderEntry": {
         "additionalProperties": false,
         "properties": {
@@ -5248,6 +5335,39 @@
           "datasets"
         ],
         "title": "_ProviderEntry",
+        "type": "object"
+      },
+      "krtour__map_admin__routers__providers___Meta": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "count",
+          "duration_ms"
+        ],
+        "title": "_Meta",
+        "type": "object"
+      },
+      "krtour__map_admin__routers__public_status___Meta": {
+        "additionalProperties": false,
+        "properties": {
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "duration_ms"
+        ],
+        "title": "_Meta",
         "type": "object"
       }
     }
@@ -8678,6 +8798,87 @@
         "summary": "Get Ops Metrics",
         "tags": [
           "ops"
+        ]
+      }
+    },
+    "/providers/{provider}/last-sync": {
+      "get": {
+        "operationId": "get_provider_last_sync_providers__provider__last_sync_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          },
+          {
+            "description": "dataset_key 필터",
+            "in": "query",
+            "name": "dataset_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "dataset_key 필터",
+              "title": "Dataset Key"
+            }
+          },
+          {
+            "description": "sync_scope 필터",
+            "in": "query",
+            "name": "sync_scope",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "sync_scope 필터",
+              "title": "Sync Scope"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderLastSyncResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "provider sync state 없음"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "provider 데이터 신선도(last-sync)",
+        "tags": [
+          "providers"
         ]
       }
     },

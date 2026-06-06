@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 __all__ = [
     "SyncState",
     "get_sync_state",
+    "list_sync_states",
     "record_sync_success",
     "record_sync_failure",
 ]
@@ -137,6 +138,38 @@ async def get_sync_state(
         )
     ).one_or_none()
     return _row_to_state(row) if row is not None else None
+
+
+_LIST_SQL: Final[str] = f"""
+SELECT {_RETURN_COLS}
+FROM provider_sync.provider_sync_state
+WHERE provider = :provider
+  AND (CAST(:dataset_key AS text) IS NULL OR dataset_key = :dataset_key)
+  AND (CAST(:sync_scope AS text) IS NULL OR sync_scope = :sync_scope)
+ORDER BY dataset_key, sync_scope
+"""
+
+
+async def list_sync_states(
+    session: AsyncSession,
+    *,
+    provider: str,
+    dataset_key: str | None = None,
+    sync_scope: str | None = None,
+) -> list[SyncState]:
+    """provider의 sync state 목록(데이터 신선도). ``dataset_key``/``sync_scope``로
+    좁힐 수 있다. 매칭 행이 없으면 빈 list — 404 판단은 호출자(라우터) 책임(T-213g)."""
+    rows = (
+        await session.execute(
+            text(_LIST_SQL),
+            {
+                "provider": provider,
+                "dataset_key": dataset_key,
+                "sync_scope": sync_scope,
+            },
+        )
+    ).all()
+    return [_row_to_state(row) for row in rows]
 
 
 async def record_sync_success(
