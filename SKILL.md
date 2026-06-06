@@ -85,6 +85,15 @@ worktree + codegraph".
 Cursor / opencode / Hermes는 `codegraph install --print-config <target>`로
 각자 snippet 출력. 자세히는 `docs/codegraph-worktree.md` §6.
 
+#### Telegram 완료 알림
+
+각 worktree에는 `mcp-telegram` MCP 설정과 로컬 `.env.mcp-telegram` credential
+파일을 둔다. credential은 커밋하지 않는다. 단위 작업 완료 후 PR을 만들면
+Telegram으로 **짧은 작업 요약 + PR 링크**를 보낸 뒤 사용자에게 최종 보고한다.
+PR이 없는 로컬 셋업이면 "PR 없음"과 적용 위치를 적는다. 셋업 세부 절차는
+`docs/codegraph-worktree.md` §6.5, 발송 시점은
+`docs/runbooks/agent-workflow.md` §5를 따른다.
+
 #### 수정 전 영향도 평가 (DO 룰)
 
 코드 컴포넌트(특히 `Feature` DTO / `make_feature_id` / provider 변환 함수 /

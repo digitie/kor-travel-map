@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-06 (codex) — mcp-telegram 작업 완료 알림 셋업
+
+**작업**: 단위 작업이 완료될 때마다 Telegram으로 짧은 요약과 PR 링크를 보낼 수
+있도록 `mcp-telegram` MCP 설정과 문서를 추가한다.
+
+- **MCP 설정**: `.codex/config.toml`, `claude.json`, `antigravity.json`,
+  `.gemini/mcp.json`에 `mcp-telegram` 서버를 추가했다.
+- **Secret handling**: Telegram credential은 tracked 설정/문서에 쓰지 않고,
+  각 worktree 루트의 로컬 `.env.mcp-telegram`에만 둔다.
+- **Wrapper**: `scripts/mcp_telegram_start.py`가 `.env.mcp-telegram`을 읽은 뒤
+  `mcp-telegram start` 또는 `login` 같은 하위 명령을 실행한다.
+- **문서**: `AGENTS.md`, `SKILL.md`, `docs/codegraph-worktree.md`,
+  `docs/runbooks/agent-workflow.md`, `docs/resume.md`에 완료 알림 원칙과 셋업을
+  명시했다.
+
 ## 2026-06-06 (codex) — T-209e-b staging cold restore 자동화
 
 **작업**: T-209e backup/restore 독립 DB 묶음에서 cold backup 산출물을 비파괴 staging
@@ -303,7 +318,6 @@ PR(#227/#230, T-DA)은 리뷰 생략**. 정본: `docs/reports/pr-181-233-review-
 - "## 빠른 시작 (Sprint 4 완료 — …)" 헤더의 sprint 스냅샷도 제거.
 - 이로써 entry doc 4종(CLAUDE/AGENTS/SKILL/README) 상태 블록 drift 정리 완료.
 - 검증: 문서만 수정(코드 무변경). 변경 파일: README.md, docs/{tasks,journal}.md.
-
 ## 2026-06-06 (codex) — T-209b-a Dagster schedule storage PostgreSQL 전환 task 등록
 
 **작업**: Dagster가 `.dagster/schedules/schedules.db-*` SQLite 파일을 내부 schedule
