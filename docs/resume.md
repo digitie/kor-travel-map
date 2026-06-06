@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-06 Codex 작업 메모 — T-209e-b staging cold restore 자동화
+
+T-209e-b를 구현한다. `npm run docker:restore -- <backup_id>`는 `T-209e-a` cold backup
+산출물을 staging app DB(`krtour_map_restore`), staging Dagster DB
+(`krtour_map_dagster_restore`), staging RustFS Docker volume
+(`krtour-map-rustfs-restore`)으로 복원한다. script는 `meta/SHA256SUMS`를 먼저 검증하고,
+운영 DB 이름으로 restore하려는 경우 즉시 실패한다. 기존 staging 대상 재사용/삭제도
+기본 금지이며 `KRTOUR_MAP_RESTORE_RECREATE=1`을 명시해야 한다.
+
+이번 PR은 restore 자동화와 문서/정적 회귀 테스트를 닫는다. 다음 비 T-RV/T-213 후보는
+**T-209e-c admin backup/restore router + hot-swap UI** 또는 ADR-045 잔여 정리 후
+**T-212 전체점검**이다.
+
 ## 2026-06-06 claude 작업 메모 — T-213e(weather card) 완료 → T-213a~h 전부 완료
 
 T-213 묶음 마지막(7/7) 완료. weather 적재/조회 전체 스택: `feature_weather_values`

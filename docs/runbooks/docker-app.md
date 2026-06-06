@@ -7,7 +7,8 @@
 ## 0. 실행 셸
 
 이 runbook의 `npm run docker:build`, `npm run docker:up`, `npm run docker:backup`,
-`npm run admin:stack`, `npm run ports:stop`은 루트 `package.json`에서
+`npm run docker:restore`, `npm run admin:stack`, `npm run ports:stop`은 루트
+`package.json`에서
 `bash scripts/*.sh`를 실행한다.
 `scripts/*.sh`는 Bash 전용 문법(`source`, array, `BASH_SOURCE`)을 사용하므로
 PowerShell에서 `.sh` 파일을 직접 실행하지 않는다.
@@ -184,11 +185,10 @@ rm -f .codex_tmp/admin-stack/dagster-daemon.pid
 docker compose down -v
 ```
 
-## 8. Cold backup
+## 8. Cold backup / staging restore
 
 ADR-045 D-5 기준 백업 대상은 `krtour_map` app DB, `krtour_map_dagster` Dagster
-metadata DB, RustFS volume의 3종 묶음이다. `T-209e-a` 현재 구현은 restore를 실행하지
-않는 cold backup script와 검증 절차까지다.
+metadata DB, RustFS volume의 3종 묶음이다.
 
 일관된 RustFS snapshot을 위해 write path를 먼저 멈추고 Postgres는 실행 상태로 둔다.
 
@@ -209,3 +209,15 @@ meta/SHA256SUMS
 
 검증과 수동 cold restore 경계는 `docs/backup-restore.md`를 따른다. admin router와
 hot-swap restore UI는 후속 T-209e 작업이다.
+
+staging cold restore는 운영 DB와 운영 RustFS volume에 직접 쓰지 않고 기본 staging
+대상(`krtour_map_restore`, `krtour_map_dagster_restore`,
+`krtour-map-rustfs-restore`)으로 복원한다.
+
+```bash
+npm run docker:restore -- <backup_id>
+```
+
+기존 staging 대상이 있으면 중단한다. 다시 만드는 것이 의도라면
+`KRTOUR_MAP_RESTORE_RECREATE=1`을 명시한다. 자세한 대상 override와 검증 절차는
+`docs/backup-restore.md`를 따른다.
