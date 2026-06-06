@@ -141,6 +141,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/issues": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Admin Issues
+         * @description 운영 이슈 목록 (keyset cursor).
+         *
+         *     ``bbox``/free-text ``q`` 필터는 ``ops_repo``가 지원하지 않아 범위 밖이다
+         *     (deferred — 추후 repo 확장 시 추가).
+         */
+        get: operations["list_admin_issues_admin_issues_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/issues/{violation_key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Admin Issue
+         * @description 운영 이슈 단건 + 연결 feature 주소/좌표 스냅샷.
+         */
+        get: operations["get_admin_issue_admin_issues__violation_key__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Patch Admin Issue
+         * @description 이슈 상태 전이 + kraddr-geo 재지오코딩/주소 덮어쓰기.
+         */
+        patch: operations["patch_admin_issue_admin_issues__violation_key__patch"];
+        trace?: never;
+    };
     "/admin/offline-uploads": {
         parameters: {
             query?: never;
@@ -951,6 +998,172 @@ export interface components {
         AdminFeaturesListResponse: {
             data: components["schemas"]["AdminFeaturesListData"];
             meta: components["schemas"]["AdminFeaturesListMeta"];
+        };
+        /**
+         * AdminIssueActionData
+         * @description ``PATCH /admin/issues/{violation_key}`` data.
+         */
+        AdminIssueActionData: {
+            feature?: components["schemas"]["AdminIssueFeatureSnapshot"] | null;
+            /** Geocode Candidate */
+            geocode_candidate?: {
+                [key: string]: unknown;
+            } | null;
+            issue: components["schemas"]["AdminIssueRecord"];
+        };
+        /**
+         * AdminIssueActionResponse
+         * @description ``PATCH /admin/issues/{violation_key}`` 응답.
+         */
+        AdminIssueActionResponse: {
+            data: components["schemas"]["AdminIssueActionData"];
+            meta: components["schemas"]["AdminIssueDetailMeta"];
+        };
+        /**
+         * AdminIssueDetailData
+         * @description 이슈 단건 data.
+         */
+        AdminIssueDetailData: {
+            feature?: components["schemas"]["AdminIssueFeatureSnapshot"] | null;
+            issue: components["schemas"]["AdminIssueRecord"];
+        };
+        /**
+         * AdminIssueDetailMeta
+         * @description 단건 응답 meta.
+         */
+        AdminIssueDetailMeta: {
+            /** Duration Ms */
+            duration_ms: number;
+        };
+        /**
+         * AdminIssueDetailResponse
+         * @description ``GET /admin/issues/{violation_key}`` 응답.
+         */
+        AdminIssueDetailResponse: {
+            data: components["schemas"]["AdminIssueDetailData"];
+            meta: components["schemas"]["AdminIssueDetailMeta"];
+        };
+        /**
+         * AdminIssueFeatureSnapshot
+         * @description 이슈에 연결된 feature 주소/좌표 스냅샷.
+         */
+        AdminIssueFeatureSnapshot: {
+            /** Address */
+            address: {
+                [key: string]: unknown;
+            };
+            /** Feature Id */
+            feature_id: string;
+            /** Lat */
+            lat?: number | null;
+            /** Legal Dong Code */
+            legal_dong_code?: string | null;
+            /** Lon */
+            lon?: number | null;
+            /** Road Address Management No */
+            road_address_management_no?: string | null;
+            /** Sido Code */
+            sido_code?: string | null;
+            /** Sigungu Code */
+            sigungu_code?: string | null;
+            /** Status */
+            status: string;
+        };
+        /**
+         * AdminIssueListData
+         * @description 이슈 목록 data.
+         */
+        AdminIssueListData: {
+            /** Items */
+            items: components["schemas"]["AdminIssueRecord"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+        };
+        /**
+         * AdminIssueListMeta
+         * @description 이슈 목록 meta.
+         */
+        AdminIssueListMeta: {
+            /** Count */
+            count: number;
+            /** Duration Ms */
+            duration_ms: number;
+        };
+        /**
+         * AdminIssueListResponse
+         * @description ``GET /admin/issues`` 응답 (DA-D-03 envelope).
+         */
+        AdminIssueListResponse: {
+            data: components["schemas"]["AdminIssueListData"];
+            meta: components["schemas"]["AdminIssueListMeta"];
+        };
+        /**
+         * AdminIssuePatchRequest
+         * @description 이슈 조치 요청. ``action``에 따라 필요한 필드가 다르다.
+         */
+        AdminIssuePatchRequest: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "resolve" | "ignore" | "reopen" | "retry_geocode" | "retry_reverse_geocode" | "apply_kraddr_geo_address" | "manual_override";
+            /** Address */
+            address?: {
+                [key: string]: unknown;
+            } | null;
+            coord?: components["schemas"]["IssueCoordBody"] | null;
+            /** Legal Dong Code */
+            legal_dong_code?: string | null;
+            /** Operator */
+            operator?: string | null;
+            /**
+             * Prevent Provider Reactivation
+             * @default true
+             */
+            prevent_provider_reactivation: boolean;
+            /** Reason */
+            reason?: string | null;
+            /** Road Address Management No */
+            road_address_management_no?: string | null;
+            /** Sido Code */
+            sido_code?: string | null;
+            /** Sigungu Code */
+            sigungu_code?: string | null;
+        };
+        /**
+         * AdminIssueRecord
+         * @description ``ops.data_integrity_violations`` HTTP 표현.
+         */
+        AdminIssueRecord: {
+            /** Dataset Key */
+            dataset_key?: string | null;
+            /**
+             * Detected At
+             * Format: date-time
+             */
+            detected_at: string;
+            /** Feature Id */
+            feature_id?: string | null;
+            /** Message */
+            message: string;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+            /** Provider */
+            provider?: string | null;
+            /** Resolved At */
+            resolved_at?: string | null;
+            /** Severity */
+            severity: string;
+            /** Source Record Key */
+            source_record_key?: string | null;
+            /** Status */
+            status: string;
+            /** Violation Key */
+            violation_key: string;
+            /** Violation Type */
+            violation_type: string;
         };
         /**
          * BboxScope
@@ -1931,6 +2144,16 @@ export interface components {
              * @description 항상 ``'ok'``. unhealthy면 본 라우터에 도달 X.
              */
             status: string;
+        };
+        /**
+         * IssueCoordBody
+         * @description WGS84 좌표. 외부 인터페이스는 lon/lat 순서 (SKILL.md DO NOT #5).
+         */
+        IssueCoordBody: {
+            /** Lat */
+            lat: number;
+            /** Lon */
+            lon: number;
         };
         /**
          * MoisLicenseDetailData
@@ -3444,6 +3667,138 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    list_admin_issues_admin_issues_get: {
+        parameters: {
+            query?: {
+                status?: ("open" | "acknowledged" | "resolved" | "ignored") | null;
+                issue_type?: string | null;
+                provider?: string | null;
+                dataset_key?: string | null;
+                severity?: ("info" | "warning" | "error" | "critical") | null;
+                feature_id?: string | null;
+                page_size?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminIssueListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_admin_issue_admin_issues__violation_key__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                violation_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminIssueDetailResponse"];
+                };
+            };
+            /** @description 이슈 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_admin_issue_admin_issues__violation_key__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                violation_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminIssuePatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminIssueActionResponse"];
+                };
+            };
+            /** @description 이슈/feature 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 상태 전이 충돌 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description kraddr-geo 미설정 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

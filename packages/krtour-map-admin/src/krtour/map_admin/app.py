@@ -35,6 +35,7 @@ from starlette.responses import JSONResponse
 from krtour.map_admin import __version__
 from krtour.map_admin.routers import (
     admin_features_router,
+    admin_issues_router,
     categories_router,
     dagster_router,
     dedup_review_router,
@@ -300,6 +301,7 @@ def create_app(settings: AdminSettings | None = None) -> FastAPI:
 
     if admin_routes_enabled:
         application.include_router(admin_features_router)
+        application.include_router(admin_issues_router)
         application.include_router(dedup_review_router)
         application.include_router(feature_update_requests_router)
         application.include_router(poi_cache_targets_router)

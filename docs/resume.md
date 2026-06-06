@@ -1,28 +1,25 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-06-06 Claude 작업 메모 — DA-D-03 envelope 전면 통일 완료 → 다음 T-DA-13
+## 2026-06-07 Claude 작업 메모 — T-DA-13 `/admin/issues` 완료 → 다음 T-212 후속
 
-DA-D-03 전면 통일 **코드 전환 완료**. ① feature-update-requests(#250) ②
-offline-uploads(#251) ③ poi-cache-targets(#252) → T-DA-15. ④ ops metrics/import-job
-(#253) ⑤ dagster summary + mois detail(#254) → T-DA-16. ⑥ nux-seen → T-DA-18.
-이제 모든 admin/ops/debug/tripmate 성공 응답이 `{data, meta}`(list는 `data.{items,
-next_cursor}` + `meta.{count,duration_ms}`, 단건은 `data` + `meta.{duration_ms,…}`).
-잔존 예외는 `GET /features` 호환 1건뿐.
+DA-D-03 envelope 전면 통일(T-DA-15/16/18, #250~#255) **완료**. 이어서 **T-DA-13
+`/admin/issues`(DA-D-04 = T-212 핵심 API) 구현 완료** — `routers/admin_issues.py`
+(GET 목록 keyset cursor + GET 단건 + PATCH 7 action) + 신규 `infra/feature_address_repo.py`
+(feature.features UPDATE + `ops.feature_overrides` upsert) + kraddr-geo 정/역지오코딩.
+`{data, meta}` envelope. 단위 14 + PostGIS 통합 3. 목록 bbox/q 필터는 `ops_repo`
+미지원이라 deferred.
 
-**다음 한 작업 = T-DA-13 `/admin/issues`(DA-D-04 = T-212).** ADR-046 주소/좌표 이슈
-운영자 수동 처리 워크플로. 데이터는 `ops.data_integrity_violations`(F5~F7 적재).
-- 구현: `routers/admin_issues.py` 신설(admin tag `admin-issues`, prefix `/admin/issues`,
-  `admin_routes_enabled` flag). GET 목록(필터 `issue_type/provider/dataset_key/severity/
-  status/bbox/q/cursor`, list envelope), GET 단건(provider raw 주소 + kraddr-geo 후보 +
-  좌표 + 지도 데이터, 단건 envelope), PATCH action(resolve/ignore/reopen/retry_geocode/
-  retry_reverse_geocode/apply_kraddr_geo_address/manual_override).
-- `manual_override`는 `feature.features` address/coord/행정코드 갱신 + `ops.feature_overrides`
-  기록(provider 재적재 방지). `apply_kraddr_geo_address`는 좌표 기준 reverse 결과 채택.
-- 먼저 repo 계층(`krtour.map.infra`에 data_integrity_violations 조회/액션 repo가 있는지)
-  + contract §4.1 목표 계약 + ADR-046 확인. 기존 읽기 `GET /ops/consistency/issues`
-  (OpsIntegrityIssue*) 재사용 여부 판단. write/action은 admin UI(T-212b)와 함께지만
-  본 lane은 **API(T-212c) 우선**, UI는 codex T-212b와 겹치지 않게 조율.
-- 다른 agent(codex)가 T-209e-c/T-212b를 잡고 있으므로 issues **API** lane만 건드린다.
+**다음 한 작업 후보(우선순위 순):**
+1. **bbox/q 목록 필터**(T-DA-13 deferred 잔여) — `ops_repo.list_ops_integrity_issues`에
+   `q`(message/feature_id ILIKE) + `bbox`(feature.coord && ST_MakeEnvelope, ADR-012:
+   coord 4326 직접, ST_Transform 금지) 추가 후 `/admin/issues` 라우터에 노출. 소~중규모.
+2. **T-212c** API error/log contract 정렬 + `/ops/health-deep` + provider/system/API
+   call log 조회 표면(T-212a gap T-212c-API-03/04). envelope는 이미 통일됨.
+3. **T-RV-40**(F6 perf, T-212d 편입) / **T-RV-41**(MV CONCURRENTLY 전제, T-101).
+
+**조율**: codex가 T-209e-c(backup/restore)/T-212b(admin UI, `/admin/issues` 화면 포함)를
+잡고 있다. `/admin/issues` **API**는 완료됐으므로 codex는 UI에서 이 API를 소비하면 된다
+(envelope/필드 계약은 openapi.json 정본). API lane만 건드리고 UI/backup lane은 codex.
 
 ## 2026-06-06 Codex 작업 메모 — T-212a inventory + e2e gap matrix
 

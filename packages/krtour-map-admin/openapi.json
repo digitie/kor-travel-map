@@ -436,6 +436,496 @@
         "title": "AdminFeaturesListResponse",
         "type": "object"
       },
+      "AdminIssueActionData": {
+        "additionalProperties": false,
+        "description": "``PATCH /admin/issues/{violation_key}`` data.",
+        "properties": {
+          "feature": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdminIssueFeatureSnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "geocode_candidate": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Geocode Candidate"
+          },
+          "issue": {
+            "$ref": "#/components/schemas/AdminIssueRecord"
+          }
+        },
+        "required": [
+          "issue"
+        ],
+        "title": "AdminIssueActionData",
+        "type": "object"
+      },
+      "AdminIssueActionResponse": {
+        "additionalProperties": false,
+        "description": "``PATCH /admin/issues/{violation_key}`` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AdminIssueActionData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/AdminIssueDetailMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "AdminIssueActionResponse",
+        "type": "object"
+      },
+      "AdminIssueDetailData": {
+        "additionalProperties": false,
+        "description": "이슈 단건 data.",
+        "properties": {
+          "feature": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdminIssueFeatureSnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "issue": {
+            "$ref": "#/components/schemas/AdminIssueRecord"
+          }
+        },
+        "required": [
+          "issue"
+        ],
+        "title": "AdminIssueDetailData",
+        "type": "object"
+      },
+      "AdminIssueDetailMeta": {
+        "additionalProperties": false,
+        "description": "단건 응답 meta.",
+        "properties": {
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "duration_ms"
+        ],
+        "title": "AdminIssueDetailMeta",
+        "type": "object"
+      },
+      "AdminIssueDetailResponse": {
+        "additionalProperties": false,
+        "description": "``GET /admin/issues/{violation_key}`` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AdminIssueDetailData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/AdminIssueDetailMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "AdminIssueDetailResponse",
+        "type": "object"
+      },
+      "AdminIssueFeatureSnapshot": {
+        "additionalProperties": false,
+        "description": "이슈에 연결된 feature 주소/좌표 스냅샷.",
+        "properties": {
+          "address": {
+            "additionalProperties": true,
+            "title": "Address",
+            "type": "object"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "lat": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lat"
+          },
+          "legal_dong_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legal Dong Code"
+          },
+          "lon": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lon"
+          },
+          "road_address_management_no": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Road Address Management No"
+          },
+          "sido_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sido Code"
+          },
+          "sigungu_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sigungu Code"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_id",
+          "address",
+          "status"
+        ],
+        "title": "AdminIssueFeatureSnapshot",
+        "type": "object"
+      },
+      "AdminIssueListData": {
+        "additionalProperties": false,
+        "description": "이슈 목록 data.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminIssueRecord"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "AdminIssueListData",
+        "type": "object"
+      },
+      "AdminIssueListMeta": {
+        "additionalProperties": false,
+        "description": "이슈 목록 meta.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "count",
+          "duration_ms"
+        ],
+        "title": "AdminIssueListMeta",
+        "type": "object"
+      },
+      "AdminIssueListResponse": {
+        "additionalProperties": false,
+        "description": "``GET /admin/issues`` 응답 (DA-D-03 envelope).",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AdminIssueListData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/AdminIssueListMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "AdminIssueListResponse",
+        "type": "object"
+      },
+      "AdminIssuePatchRequest": {
+        "additionalProperties": false,
+        "description": "이슈 조치 요청. ``action``에 따라 필요한 필드가 다르다.",
+        "properties": {
+          "action": {
+            "enum": [
+              "resolve",
+              "ignore",
+              "reopen",
+              "retry_geocode",
+              "retry_reverse_geocode",
+              "apply_kraddr_geo_address",
+              "manual_override"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "address": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address"
+          },
+          "coord": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IssueCoordBody"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "legal_dong_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legal Dong Code"
+          },
+          "operator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operator"
+          },
+          "prevent_provider_reactivation": {
+            "default": true,
+            "title": "Prevent Provider Reactivation",
+            "type": "boolean"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "road_address_management_no": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Road Address Management No"
+          },
+          "sido_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sido Code"
+          },
+          "sigungu_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sigungu Code"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "AdminIssuePatchRequest",
+        "type": "object"
+      },
+      "AdminIssueRecord": {
+        "additionalProperties": false,
+        "description": "``ops.data_integrity_violations`` HTTP 표현.",
+        "properties": {
+          "dataset_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset Key"
+          },
+          "detected_at": {
+            "format": "date-time",
+            "title": "Detected At",
+            "type": "string"
+          },
+          "feature_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feature Id"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "severity": {
+            "title": "Severity",
+            "type": "string"
+          },
+          "source_record_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Record Key"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "violation_key": {
+            "title": "Violation Key",
+            "type": "string"
+          },
+          "violation_type": {
+            "title": "Violation Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "violation_key",
+          "violation_type",
+          "severity",
+          "message",
+          "payload",
+          "status",
+          "detected_at"
+        ],
+        "title": "AdminIssueRecord",
+        "type": "object"
+      },
       "BboxScope": {
         "additionalProperties": false,
         "description": "WGS84 bbox 안 feature 갱신 scope.",
@@ -3035,6 +3525,30 @@
           "service"
         ],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "IssueCoordBody": {
+        "additionalProperties": false,
+        "description": "WGS84 좌표. 외부 인터페이스는 lon/lat 순서 (SKILL.md DO NOT #5).",
+        "properties": {
+          "lat": {
+            "maximum": 39.5,
+            "minimum": 33.0,
+            "title": "Lat",
+            "type": "number"
+          },
+          "lon": {
+            "maximum": 132.0,
+            "minimum": 124.0,
+            "title": "Lon",
+            "type": "number"
+          }
+        },
+        "required": [
+          "lon",
+          "lat"
+        ],
+        "title": "IssueCoordBody",
         "type": "object"
       },
       "MoisLicenseDetailData": {
@@ -6909,6 +7423,283 @@
         "summary": "Deactivate Feature Route",
         "tags": [
           "admin-features"
+        ]
+      }
+    },
+    "/admin/issues": {
+      "get": {
+        "description": "운영 이슈 목록 (keyset cursor).\n\n``bbox``/free-text ``q`` 필터는 ``ops_repo``가 지원하지 않아 범위 밖이다\n(deferred — 추후 repo 확장 시 추가).",
+        "operationId": "list_admin_issues_admin_issues_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "open",
+                    "acknowledged",
+                    "resolved",
+                    "ignored"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": "open",
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "issue_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Issue Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Provider"
+            }
+          },
+          {
+            "in": "query",
+            "name": "dataset_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dataset Key"
+            }
+          },
+          {
+            "in": "query",
+            "name": "severity",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "info",
+                    "warning",
+                    "error",
+                    "critical"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Severity"
+            }
+          },
+          {
+            "in": "query",
+            "name": "feature_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Feature Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminIssueListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Admin Issues",
+        "tags": [
+          "admin-issues"
+        ]
+      }
+    },
+    "/admin/issues/{violation_key}": {
+      "get": {
+        "description": "운영 이슈 단건 + 연결 feature 주소/좌표 스냅샷.",
+        "operationId": "get_admin_issue_admin_issues__violation_key__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "violation_key",
+            "required": true,
+            "schema": {
+              "title": "Violation Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminIssueDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "이슈 없음"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Admin Issue",
+        "tags": [
+          "admin-issues"
+        ]
+      },
+      "patch": {
+        "description": "이슈 상태 전이 + kraddr-geo 재지오코딩/주소 덮어쓰기.",
+        "operationId": "patch_admin_issue_admin_issues__violation_key__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "violation_key",
+            "required": true,
+            "schema": {
+              "title": "Violation Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminIssuePatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminIssueActionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "이슈/feature 없음"
+          },
+          "409": {
+            "description": "상태 전이 충돌"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "description": "kraddr-geo 미설정"
+          }
+        },
+        "summary": "Patch Admin Issue",
+        "tags": [
+          "admin-issues"
         ]
       }
     },
