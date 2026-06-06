@@ -169,6 +169,7 @@ async def test_f4_ok_below_threshold(migrated_session: AsyncSession) -> None:
     by_code = {c.code: c for c in report.cases}
     assert "F4" in by_code
     assert by_code["F4"].count == 0  # 3 ≤ 10 → OK
+    assert by_code["F4"].metadata["pending_count"] == 3
     assert by_code["F4"].ok is True
     assert report.severity_max == "OK"
 
@@ -181,11 +182,17 @@ async def test_f4_warn_over_threshold(migrated_session: AsyncSession) -> None:
     by_code = {c.code: c for c in report.cases}
     f4 = by_code["F4"]
     assert f4.severity == "WARN"
-    assert f4.count == 5  # 5 > 2 → 위반(count=pending 수)
+    assert f4.count == 1  # 5 > 2 → 임계 초과 이벤트 1건
+    assert f4.metadata == {
+        "pending_count": 5,
+        "threshold": 2,
+        "over_threshold": True,
+    }
     assert len(f4.sample_ids) == 5  # pending review_key 샘플
     # 다른 위반(F1~F3) 없으면 severity_max는 WARN.
     assert report.severity_max == "WARN"
-    assert report.summary["by_severity"]["WARN"] == 5
+    assert report.summary["by_severity"]["WARN"] == 1
+    assert report.summary["case_metadata"]["F4"]["pending_count"] == 5
 
 
 async def test_f4_warn_does_not_block_errors(migrated_session: AsyncSession) -> None:
@@ -208,7 +215,8 @@ async def test_f4_warn_does_not_block_errors(migrated_session: AsyncSession) -> 
     )
     by_code = {c.code: c for c in report.cases}
     assert by_code["F4"].severity == "WARN"
-    assert by_code["F4"].count == 3
+    assert by_code["F4"].count == 1
+    assert by_code["F4"].metadata["pending_count"] == 3
     assert by_code["F1"].count >= 1
     assert report.severity_max == "ERROR"
 
@@ -615,6 +623,10 @@ async def test_f8_warns_for_feature_file_metadata_and_object_snapshot_mismatch(
     f8 = by_code["F8"]
     assert f8.severity == "WARN"
     assert f8.count == 3
+    assert f8.metadata == {
+        "metadata_file_issue_count": 2,
+        "object_missing_metadata_count": 1,
+    }
     assert any(sample.startswith("metadata_missing_object:") for sample in f8.sample_ids)
     assert any(sample.startswith("metadata_without_active_feature:") for sample in f8.sample_ids)
     assert any(sample.startswith("object_missing_metadata:") for sample in f8.sample_ids)

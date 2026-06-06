@@ -2,6 +2,23 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-06 (codex) — T-RV-38/39 consistency count semantics
+
+**작업**: PR#181~#233 리뷰 후속 중 consistency 관측 metrics의 count 의미를 정리한다.
+
+- **F4**: dedup backlog WARN은 임계 초과 이벤트로 `count=1`만 기록하고, 실제 pending
+  수와 threshold는 `metadata.pending_count`/`metadata.threshold` 및
+  `summary.case_metadata.F4`에 분리했다.
+- **F8**: `feature_files` row 하나가 active feature 누락과 object snapshot 누락을
+  동시에 만족해도 distinct metadata row 1건으로만 count한다. 유형별 `sample_ids`는
+  유지하고 metadata breakdown을 추가했다.
+- **문서**: `docs/tasks.md`와 `docs/reports/pr-181-233-review-2026-06-06.md`에서
+  T-RV-38/39를 완료 표시하고, 남은 T-RV-40/41의 추적 위치를 유지했다.
+- **검증**: `TMPDIR=/tmp .venv/bin/python -m pytest tests/unit/test_infra_consistency.py tests/integration/test_consistency_reports.py tests/unit/test_cli_consistency_report.py packages/krtour-map-dagster/tests/test_maintenance.py -q`,
+  `ruff check .`, `mypy --strict`, `lint-imports` 통과.
+- **다음**: T-RV 잔여는 `T-RV-40`(F6 perf → T-212d), `T-RV-41`(MV CONCURRENTLY 전제
+  → T-101), `T-RV-04b`다.
+
 ## 2026-06-06 (codex) — mcp-telegram 작업 완료 알림 셋업
 
 **작업**: 단위 작업이 완료될 때마다 Telegram으로 짧은 요약과 PR 링크를 보낼 수

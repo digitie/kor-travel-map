@@ -71,14 +71,26 @@ class _Client:
                     code="F4",
                     severity="WARN",
                     description="dedup backlog",
-                    count=3,
+                    count=1,
                     sample_ids=["rk-1"],
+                    metadata={
+                        "pending_count": 3,
+                        "threshold": dedup_pending_threshold,
+                        "over_threshold": True,
+                    },
                 )
             ],
             summary={
-                "total_violations": 3,
+                "total_violations": 1,
                 "cases_evaluated": 4,
-                "by_code": {"F1": 0, "F2": 0, "F3": 0, "F4": 3},
+                "by_code": {"F1": 0, "F2": 0, "F3": 0, "F4": 1},
+                "case_metadata": {
+                    "F4": {
+                        "pending_count": 3,
+                        "threshold": dedup_pending_threshold,
+                        "over_threshold": True,
+                    }
+                },
             },
         )
 

@@ -18,7 +18,8 @@ F1~F4 + Phase 2 케이스를 raw SQL(ADR-004)로 검사하고 결과를
 - **F4** dedup 백로그 — ``ops.dedup_review_queue`` 미해소(pending) 수가
   ``DEDUP_PENDING_WARN_THRESHOLD``(baseline) 초과. severity=**WARN**(observe-only,
   적재 차단 안 함). F1~F3과 달리 행별 위반이 아니라 **임계 초과 집계** — 초과 시
-  count=pending 수, 이하면 OK. (SPRINT-4 §2.3, Sprint 4b.)
+  count=1, 실제 pending 수는 ``metadata.pending_count``에 둔다. 이하면 OK.
+  (SPRINT-4 §2.3, Sprint 4b.)
 - **F5** provider last_success SLA — active provider sync cursor의 마지막 성공 시각이
   SLA를 넘겼거나 아직 성공 기록이 없으면 severity=**WARN**. 기본 SLA는 24h이고,
   ``ops.provider_refresh_policies.system_interval_seconds``가 있으면 그 값을 우선한다.
@@ -43,7 +44,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Final
 from uuid import uuid4
@@ -211,13 +212,14 @@ CONSISTENCY_CASES: Final[tuple[CaseSpec, ...]] = (
 
 @dataclass(frozen=True)
 class CaseResult:
-    """1 케이스 검사 결과 (count + sample)."""
+    """1 케이스 검사 결과 (count + sample + optional metadata)."""
 
     code: str
     severity: str
     description: str
     count: int
     sample_ids: list[str]
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
@@ -225,13 +227,16 @@ class CaseResult:
 
     def to_dict(self) -> dict[str, Any]:
         # 위반 0건이면 effective severity는 OK.
-        return {
+        payload: dict[str, Any] = {
             "code": self.code,
             "severity": self.severity if self.count else "OK",
             "description": self.description,
             "count": self.count,
             "sample_ids": self.sample_ids,
         }
+        if self.metadata:
+            payload["metadata"] = self.metadata
+        return payload
 
 
 @dataclass(frozen=True)
@@ -264,6 +269,9 @@ def build_report(batch_id: str, cases: list[CaseResult]) -> ConsistencyReport:
         },
         "by_code": {c.code: c.count for c in cases},
     }
+    case_metadata = {c.code: c.metadata for c in cases if c.metadata}
+    if case_metadata:
+        summary["case_metadata"] = case_metadata
     return ConsistencyReport(
         batch_id=batch_id,
         severity_max=severity_max,
@@ -406,9 +414,14 @@ async def _check_f4_dedup_backlog(
             f"dedup_review_queue 미해소(pending) 백로그 baseline {threshold} 초과 "
             f"(현재 {pending}, ADR-033 F4 — observe-only)"
         ),
-        # 초과 시에만 위반(count>0) — 이하면 OK. count는 현재 pending 수.
-        count=pending if over else 0,
+        # F4는 행별 위반이 아니라 임계 초과 이벤트다. pending 규모는 metadata에 둔다.
+        count=1 if over else 0,
         sample_ids=sample_ids,
+        metadata={
+            "pending_count": pending,
+            "threshold": threshold,
+            "over_threshold": over,
+        },
     )
 
 
@@ -525,48 +538,58 @@ def _build_f8_file_object_orphan_result(
     """F8 metadata row와 객체 저장소 스냅샷을 비교해 orphan을 집계한다."""
     known_keys = _normalize_file_object_refs(known_file_objects)
     metadata_keys: set[_FileObjectKey] = set()
-    count = 0
+    metadata_file_issue_ids: set[str] = set()
+    object_missing_metadata_count = 0
     sample_ids: list[str] = []
 
     for row in rows:
         key = (str(row["storage_backend"]), str(row["bucket"]), str(row["object_key"]))
         metadata_keys.add(key)
         key_sample = ":".join(key)
+        file_id = str(row["file_id"])
+        row_has_issue = False
         if row["feature_missing"]:
-            count += 1
+            row_has_issue = True
             _append_limited_sample(
                 sample_ids,
-                f"metadata_without_active_feature:{key_sample}:{row['file_id']}:"
+                f"metadata_without_active_feature:{key_sample}:{file_id}:"
                 f"{row['feature_id']}",
                 sample_limit=sample_limit,
             )
         if known_keys is not None and key not in known_keys:
-            count += 1
+            row_has_issue = True
             _append_limited_sample(
                 sample_ids,
-                f"metadata_missing_object:{key_sample}:{row['file_id']}:"
+                f"metadata_missing_object:{key_sample}:{file_id}:"
                 f"{row['feature_id']}",
                 sample_limit=sample_limit,
             )
+        if row_has_issue:
+            metadata_file_issue_ids.add(file_id)
 
     if known_keys is not None:
         for key in sorted(known_keys - metadata_keys):
-            count += 1
+            object_missing_metadata_count += 1
             _append_limited_sample(
                 sample_ids,
                 "object_missing_metadata:" + ":".join(key),
                 sample_limit=sample_limit,
             )
+    count = len(metadata_file_issue_ids) + object_missing_metadata_count
 
     return CaseResult(
         code="F8",
         severity="WARN",
         description=(
             "file object orphan (feature_files metadata ↔ 객체 저장소 스냅샷 불일치, "
-            "ADR-033 F8)"
+            "distinct metadata/object row 기준, ADR-033 F8)"
         ),
         count=count,
         sample_ids=sample_ids,
+        metadata={
+            "metadata_file_issue_count": len(metadata_file_issue_ids),
+            "object_missing_metadata_count": object_missing_metadata_count,
+        },
     )
 
 

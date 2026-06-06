@@ -37,12 +37,31 @@ def _report() -> ConsistencyReport:
                 count=2,
                 sample_ids=["provider:a:default", "provider:b:default"],
             ),
+            CaseResult(
+                code="F4",
+                severity="WARN",
+                description="dedup backlog",
+                count=1,
+                sample_ids=["rk-pending"],
+                metadata={
+                    "pending_count": 42,
+                    "threshold": 10,
+                    "over_threshold": True,
+                },
+            ),
         ],
         summary={
-            "total_violations": 2,
-            "cases_evaluated": 2,
-            "by_severity": {"ERROR": 0, "WARN": 2},
-            "by_code": {"F1": 0, "F5": 2},
+            "total_violations": 3,
+            "cases_evaluated": 3,
+            "by_severity": {"ERROR": 0, "WARN": 3},
+            "by_code": {"F1": 0, "F5": 2, "F4": 1},
+            "case_metadata": {
+                "F4": {
+                    "pending_count": 42,
+                    "threshold": 10,
+                    "over_threshold": True,
+                }
+            },
         },
     )
 
@@ -83,6 +102,8 @@ def test_render_consistency_report_json() -> None:
         "provider:a:default",
         "provider:b:default",
     ]
+    assert payload["report"]["cases"][2]["metadata"]["pending_count"] == 42
+    assert payload["report"]["summary"]["case_metadata"]["F4"]["threshold"] == 10
 
 
 def test_load_file_object_refs_jsonl(tmp_path: Path) -> None:
