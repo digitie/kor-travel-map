@@ -2,6 +2,27 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-06 (codex) — TripMate 요구사항 대조 task 반영
+
+**작업**: TripMate `docs/krtour-map-requirements.md`를 현재 krtour-map `origin/main`
+(`ae67a88`, PR#232 이후) 기준으로 재대조하고 후속 task를 등록했다.
+
+- **리포트**: `docs/reports/tripmate-requirements-reconcile-2026-06-06.md`를 추가해
+  TripMate K-1~K-14를 이미 충족/부분 충족/신규 task로 재분류했다. TripMate 문서의
+  기준선 `b775c74`는 ADR-045 OpenAPI 독립 프로그램화 이전 상태라 그대로 백로그화하지
+  않았다.
+- **Tasks**: `docs/tasks.md`에 `T-213a~h`를 추가했다. 일반 좌표 기준
+  `/features/nearby`, bbox clustering, client read parity, weather card, category
+  catalog, provider export/sync state/last-sync, public health/version을 후속으로 분리했다.
+- **Contract 정리**: `docs/tripmate-rest-api.md`와 `docs/tripmate-integration.md`에서
+  현재 user OpenAPI 7개 path와 아직 미구현인 last-sync/health/weather/category/nearby
+  일반 좌표 표면을 task ID와 함께 명시했다. #232의
+  `/tripmate/feature-update-requests*` 공개 경로 분리도 반영했다.
+- **원칙**: 최신 사용자 지시대로 호환성/최소 수정이 아니라 완성도, 안정성, 확장성,
+  성능을 우선하는 기준을 T-213 설명에 반영했다.
+- **다음**: 기존 순서대로 `T-209b-a` Dagster schedule/run/event storage PostgreSQL
+  강제 전환 구현을 진행한다.
+
 ## 2026-06-06 (codex) — T-RV-29/30 user OpenAPI + generated frontend types
 
 **작업**: PR#153~#179 리뷰 후속 중 공개 OpenAPI/admin frontend 계약 drift를 닫는다.
