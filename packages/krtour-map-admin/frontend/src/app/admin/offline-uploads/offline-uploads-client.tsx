@@ -493,8 +493,8 @@ export function OfflineUploadsClient() {
   const launchLoad = useLaunchOfflineUploadLoadMutation();
 
   const selected =
-    selectedUpload.data ??
-    uploads.data?.items.find((item) => item.upload_id === selectedUploadId) ??
+    selectedUpload.data?.data ??
+    uploads.data?.data.items.find((item) => item.upload_id === selectedUploadId) ??
     null;
 
   const submitUpload = () => {
@@ -666,7 +666,7 @@ export function OfflineUploadsClient() {
               value={datasetFilter}
               onChange={(event) => setDatasetFilter(event.target.value)}
             />
-            <Badge variant="outline">{uploads.data?.count ?? 0} rows</Badge>
+            <Badge variant="outline">{uploads.data?.meta.count ?? 0} rows</Badge>
           </div>
 
           {uploads.isLoading ? <Skeleton className="h-96" /> : null}
@@ -685,7 +685,7 @@ export function OfflineUploadsClient() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(uploads.data?.items ?? []).map((upload) => {
+                {(uploads.data?.data.items ?? []).map((upload) => {
                   const loadEnabled = canLoad(upload);
                   return (
                     <TableRow
@@ -744,7 +744,7 @@ export function OfflineUploadsClient() {
                     </TableRow>
                   );
                 })}
-                {!uploads.isLoading && (uploads.data?.items.length ?? 0) === 0 ? (
+                {!uploads.isLoading && (uploads.data?.data.items.length ?? 0) === 0 ? (
                   <TableRow>
                     <TableCell
                       className="h-32 text-center text-muted-foreground"

@@ -2,6 +2,25 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-06 (claude) — T-DA-15/16 envelope 통일 ② offline-uploads
+
+**작업**: DA-D-03 두 번째 family로 `/admin/offline-uploads` list/detail 응답을
+`{data, meta}` envelope로 수렴(write/preview/validation/load는 이미 enveloped).
+
+- **list**: `{count,items,next_cursor}` → `data.{items,next_cursor}` +
+  `meta.{count,duration_ms}`. **detail GET**: bare `OfflineUploadRecord` →
+  `OfflineUploadDetailResponse{data, meta(duration_ms)}`.
+- **frontend**: `offlineUploads.ts` hook 반환형/accessor(`.data.items`,
+  `.data.state`), `offline-uploads-client.tsx`(`selectedUpload.data?.data`,
+  `.meta.count`, `.data.items`). `openapi.json`/`types.ts` 재생성(offline-uploads는
+  admin-only라 `openapi.user.json` 무변).
+- **gate**: drift green, ruff/mypy --strict green, offline router+export_openapi
+  pytest 23 passed, frontend type-check/gen:types:check/eslint green.
+- **문서**: contract §3.1 예외에서 offline-uploads 제거, tasks.md family 체크.
+- **다음**: 잔여 family `/admin/poi-cache-targets`(list+detail) → 단건 bare
+  (`/ops/metrics`·`/ops/dagster/summary`·`/debug/mois-license/{id}`·
+  `/ops/import-jobs/{id}` meta) → T-DA-13 `/admin/issues`.
+
 ## 2026-06-06 (claude) — T-DA-15/16 envelope 통일 ① feature-update-requests
 
 **작업**: DA-D-03 전면 통일의 첫 family로 `/admin/feature-update-requests`와

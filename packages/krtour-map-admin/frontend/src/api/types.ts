@@ -2040,6 +2040,22 @@ export interface components {
             source_id?: string | null;
         };
         /**
+         * OfflineUploadDetailMeta
+         * @description 단건 조회 응답 metadata.
+         */
+        OfflineUploadDetailMeta: {
+            /** Duration Ms */
+            duration_ms: number;
+        };
+        /**
+         * OfflineUploadDetailResponse
+         * @description `GET /admin/offline-uploads/{upload_id}` 응답 (DA-D-03 envelope).
+         */
+        OfflineUploadDetailResponse: {
+            data: components["schemas"]["OfflineUploadRecord"];
+            meta: components["schemas"]["OfflineUploadDetailMeta"];
+        };
+        /**
          * OfflineUploadLaunchMeta
          * @description Dagster load 실행 응답 metadata.
          */
@@ -2060,16 +2076,32 @@ export interface components {
             meta: components["schemas"]["OfflineUploadLaunchMeta"];
         };
         /**
-         * OfflineUploadListResponse
-         * @description `GET /admin/offline-uploads` 응답.
+         * OfflineUploadListData
+         * @description 오프라인 업로드 목록 data.
          */
-        OfflineUploadListResponse: {
-            /** Count */
-            count: number;
+        OfflineUploadListData: {
             /** Items */
             items: components["schemas"]["OfflineUploadRecord"][];
             /** Next Cursor */
             next_cursor?: string | null;
+        };
+        /**
+         * OfflineUploadListMeta
+         * @description 오프라인 업로드 목록 meta.
+         */
+        OfflineUploadListMeta: {
+            /** Count */
+            count: number;
+            /** Duration Ms */
+            duration_ms: number;
+        };
+        /**
+         * OfflineUploadListResponse
+         * @description `GET /admin/offline-uploads` 응답 (DA-D-03 envelope).
+         */
+        OfflineUploadListResponse: {
+            data: components["schemas"]["OfflineUploadListData"];
+            meta: components["schemas"]["OfflineUploadListMeta"];
         };
         /**
          * OfflineUploadPreviewMeta
@@ -3434,7 +3466,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["OfflineUploadRecord"];
+                    "application/json": components["schemas"]["OfflineUploadDetailResponse"];
                 };
             };
             /** @description upload_id 없음 */

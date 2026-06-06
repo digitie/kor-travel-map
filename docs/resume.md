@@ -3,11 +3,11 @@
 ## 2026-06-06 Claude 작업 메모 — T-DA-15/16 envelope 통일 (family별 진행)
 
 DA-D-03 전면 통일을 family 단위 PR로 진행 중. ① `/admin/feature-update-requests`
-list+detail(admin/tripmate) → `{data, meta}` 완료(PR 분리, frontend hook+page +
-openapi/types 재생성, gate green). 다음 한 작업: 같은 패턴으로 **②
-`/admin/offline-uploads`**(list `OfflineUploadListResponse` + detail
-`OfflineUploadRecord`) → **③ `/admin/poi-cache-targets`**(list
-`PoiCacheTargetListResponse` + detail `PoiCacheTargetRecord`). 그 다음 단건 bare
+list+detail(admin/tripmate) 완료(#250). ② `/admin/offline-uploads` list+detail →
+`{data, meta}` 완료(PR 분리, frontend hook+page + openapi/types 재생성, gate
+green). 다음 한 작업: 같은 패턴으로 **③ `/admin/poi-cache-targets`**(list
+`PoiCacheTargetListResponse` + detail `PoiCacheTargetRecord`,
+`frontend/src/api/poiCacheTargets.ts` + client page). 그 다음 단건 bare
 잔여(`/ops/metrics`, `/ops/dagster/summary`, `/debug/mois-license/{id}`,
 `/ops/import-jobs/{id}` meta 추가). list envelope 표준 = `data.{items,next_cursor}`
 + `meta.{count,duration_ms,...}` (admin-features/ops 패턴). 전부 끝나면 **T-DA-13

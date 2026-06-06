@@ -3266,6 +3266,39 @@
         "title": "OfflineUploadColumnMappingRecord",
         "type": "object"
       },
+      "OfflineUploadDetailMeta": {
+        "additionalProperties": false,
+        "description": "단건 조회 응답 metadata.",
+        "properties": {
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "duration_ms"
+        ],
+        "title": "OfflineUploadDetailMeta",
+        "type": "object"
+      },
+      "OfflineUploadDetailResponse": {
+        "additionalProperties": false,
+        "description": "`GET /admin/offline-uploads/{upload_id}` 응답 (DA-D-03 envelope).",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/OfflineUploadRecord"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/OfflineUploadDetailMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "OfflineUploadDetailResponse",
+        "type": "object"
+      },
       "OfflineUploadLaunchMeta": {
         "additionalProperties": false,
         "description": "Dagster load 실행 응답 metadata.",
@@ -3309,14 +3342,10 @@
         "title": "OfflineUploadLaunchResponse",
         "type": "object"
       },
-      "OfflineUploadListResponse": {
+      "OfflineUploadListData": {
         "additionalProperties": false,
-        "description": "`GET /admin/offline-uploads` 응답.",
+        "description": "오프라인 업로드 목록 data.",
         "properties": {
-          "count": {
-            "title": "Count",
-            "type": "integer"
-          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/OfflineUploadRecord"
@@ -3337,8 +3366,45 @@
           }
         },
         "required": [
-          "count",
           "items"
+        ],
+        "title": "OfflineUploadListData",
+        "type": "object"
+      },
+      "OfflineUploadListMeta": {
+        "additionalProperties": false,
+        "description": "오프라인 업로드 목록 meta.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "count",
+          "duration_ms"
+        ],
+        "title": "OfflineUploadListMeta",
+        "type": "object"
+      },
+      "OfflineUploadListResponse": {
+        "additionalProperties": false,
+        "description": "`GET /admin/offline-uploads` 응답 (DA-D-03 envelope).",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/OfflineUploadListData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/OfflineUploadListMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
         ],
         "title": "OfflineUploadListResponse",
         "type": "object"
@@ -6872,7 +6938,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OfflineUploadRecord"
+                  "$ref": "#/components/schemas/OfflineUploadDetailResponse"
                 }
               }
             },

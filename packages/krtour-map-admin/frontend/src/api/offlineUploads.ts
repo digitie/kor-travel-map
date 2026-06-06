@@ -22,6 +22,8 @@ export type OfflineUploadListParams = Omit<OfflineUploadListQuery, "cursor"> & {
 };
 export type OfflineUploadListResponse =
   OfflineUploadSchemas["OfflineUploadListResponse"];
+export type OfflineUploadDetailResponse =
+  OfflineUploadSchemas["OfflineUploadDetailResponse"];
 
 export interface OfflineUploadCreateRequest {
   file: File;
@@ -70,8 +72,10 @@ function fetchOfflineUploads(
   );
 }
 
-function fetchOfflineUpload(uploadId: string): Promise<OfflineUploadRecord> {
-  return getJson<OfflineUploadRecord>(
+function fetchOfflineUpload(
+  uploadId: string,
+): Promise<OfflineUploadDetailResponse> {
+  return getJson<OfflineUploadDetailResponse>(
     `/admin/offline-uploads/${encodeURIComponent(uploadId)}`,
   );
 }
@@ -136,7 +140,7 @@ export function useOfflineUploads(params: OfflineUploadListParams = {}) {
     queryKey: ["offline-uploads", params],
     queryFn: () => fetchOfflineUploads(params),
     refetchInterval: (query) => {
-      const hasActiveUpload = query.state.data?.items.some((item) =>
+      const hasActiveUpload = query.state.data?.data.items.some((item) =>
         ["validating", "loading"].includes(item.state),
       );
       return hasActiveUpload ? 2_000 : false;
@@ -146,12 +150,12 @@ export function useOfflineUploads(params: OfflineUploadListParams = {}) {
 }
 
 export function useOfflineUpload(uploadId: string | null) {
-  return useQuery<OfflineUploadRecord, Error>({
+  return useQuery<OfflineUploadDetailResponse, Error>({
     queryKey: ["offline-upload", uploadId],
     queryFn: () => fetchOfflineUpload(uploadId as string),
     enabled: uploadId !== null && uploadId.length > 0,
     refetchInterval: (query) => {
-      const state = query.state.data?.state;
+      const state = query.state.data?.data.state;
       return state === "validating" || state === "loading" ? 2_000 : false;
     },
     staleTime: 2_000,
