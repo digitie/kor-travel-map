@@ -2535,16 +2535,32 @@ export interface components {
             };
         };
         /**
-         * PoiCacheTargetListResponse
-         * @description 목록 응답.
+         * PoiCacheTargetListData
+         * @description POI/cache target 목록 data.
          */
-        PoiCacheTargetListResponse: {
-            /** Count */
-            count: number;
+        PoiCacheTargetListData: {
             /** Items */
             items: components["schemas"]["PoiCacheTargetRecord"][];
             /** Next Cursor */
             next_cursor?: string | null;
+        };
+        /**
+         * PoiCacheTargetListMeta
+         * @description POI/cache target 목록 meta.
+         */
+        PoiCacheTargetListMeta: {
+            /** Count */
+            count: number;
+            /** Duration Ms */
+            duration_ms: number;
+        };
+        /**
+         * PoiCacheTargetListResponse
+         * @description 목록 응답 (DA-D-03 envelope).
+         */
+        PoiCacheTargetListResponse: {
+            data: components["schemas"]["PoiCacheTargetListData"];
+            meta: components["schemas"]["PoiCacheTargetListMeta"];
         };
         /**
          * PoiCacheTargetMeta
@@ -3749,7 +3765,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PoiCacheTargetRecord"];
+                    "application/json": components["schemas"]["PoiCacheTargetResponse"];
                 };
             };
             /** @description target 없음 */

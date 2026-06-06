@@ -107,7 +107,8 @@ def test_poi_cache_target_routes_mounted_in_openapi(client: TestClient) -> None:
     schemas = spec["components"]["schemas"]
     assert "PoiCacheTargetUpsertRequest" in schemas
     assert "FeaturesNearbyByTargetResponse" in schemas
-    assert "next_cursor" in schemas["PoiCacheTargetListResponse"]["properties"]
+    assert set(schemas["PoiCacheTargetListResponse"]["properties"]) == {"data", "meta"}
+    assert "next_cursor" in schemas["PoiCacheTargetListData"]["properties"]
     upsert_props = schemas["PoiCacheTargetUpsertRequest"]["properties"]
     assert "metadata" in upsert_props
     assert "metadata_" not in upsert_props
@@ -240,9 +241,9 @@ def test_list_poi_cache_targets_passes_filters(
 
     assert response.status_code == 200
     body = response.json()
-    assert body["count"] == 1
-    assert body["items"][0]["target_key"] == "poi-1"
-    assert body["next_cursor"] == "cursor-2"
+    assert body["meta"]["count"] == 1
+    assert body["data"]["items"][0]["target_key"] == "poi-1"
+    assert body["data"]["next_cursor"] == "cursor-2"
 
 
 @pytest.mark.unit

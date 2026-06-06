@@ -101,8 +101,8 @@ function fetchPoiCacheTarget(
   externalSystem: string,
   targetKey: string,
   includeDeleted = false,
-): Promise<PoiCacheTargetRecord> {
-  return getJson<PoiCacheTargetRecord>(
+): Promise<PoiCacheTargetResponse> {
+  return getJson<PoiCacheTargetResponse>(
     pathWithQuery(
       `/admin/poi-cache-targets/${encodeURIComponent(
         externalSystem,
@@ -168,7 +168,7 @@ export function usePoiCacheTarget(
   targetKey: string | null,
   includeDeleted = false,
 ) {
-  return useQuery<PoiCacheTargetRecord, Error>({
+  return useQuery<PoiCacheTargetResponse, Error>({
     queryKey: ["poi-cache-target", externalSystem, targetKey, includeDeleted],
     queryFn: () =>
       fetchPoiCacheTarget(externalSystem as string, targetKey as string, includeDeleted),
