@@ -51,4 +51,5 @@ jobs:
         # NEXT_PUBLIC_* 는 build-time inline이므로 임의 값으로 진행 (실 호출 없음).
         env:
           NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API: http://127.0.0.1:8087
+          NEXT_PUBLIC_KRTOUR_MAP_DAGSTER_URL: http://127.0.0.1:9013
         run: npm -w packages/krtour-map-admin/frontend run build

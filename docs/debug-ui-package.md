@@ -361,6 +361,8 @@ type drift 부채 0).
 | `NEXT_PUBLIC_KRTOUR_MAP_DAGSTER_URL` | Dagster UI/embed base URL (개발: `http://127.0.0.1:9013`) |
 | `KRTOUR_MAP_ADMIN_DAGSTER_URL` | backend가 Dagster GraphQL을 조회할 때 쓰는 Dagster webserver base URL. 로컬 기본 `http://127.0.0.1:9013`, Docker API 컨테이너 기본 `http://dagster:9013` |
 | `KRTOUR_MAP_ADMIN_DAGSTER_ALLOWED_HOSTS` | backend Dagster GraphQL 호출 host allowlist. 기본은 `["127.0.0.1","localhost","::1","dagster"]`이며, 운영 Dagster host를 별도로 쓰면 URL과 함께 명시한다 |
+| `KRTOUR_MAP_ADMIN_DAGSTER_REPOSITORY_NAME` | offline upload load GraphQL launch selector의 repositoryName. 기본 `__repository__` |
+| `KRTOUR_MAP_ADMIN_DAGSTER_REPOSITORY_LOCATION_NAME` | offline upload load GraphQL launch selector의 repositoryLocationName. 기본 `krtour.map_dagster.definitions` |
 | `KRTOUR_MAP_DOCKER_ADMIN_DAGSTER_URL` | Docker compose가 API 컨테이너의 `KRTOUR_MAP_ADMIN_DAGSTER_URL`로 주입하는 내부 Dagster URL. `.env`의 로컬 `127.0.0.1` 값과 분리 |
 | `KRTOUR_MAP_DOCKER_ADMIN_DAGSTER_ALLOWED_HOSTS` | Docker compose가 API 컨테이너에 주입하는 Dagster host allowlist. 기본은 `["dagster","127.0.0.1","localhost","::1"]` |
 | `KRTOUR_MAP_DAGSTER_PG_URL` | Dagster metadata Postgres URL. Docker에서는 `KRTOUR_MAP_DOCKER_DAGSTER_PG_URL` 기본값(`postgres:5432/krtour_map_dagster`)을 `dagster`/`dagster-daemon`에 주입 |

@@ -179,6 +179,7 @@ def test_create_offline_upload_writes_object_and_metadata(
         assert kwargs["dataset_key"] == "offline_jsonl"
         assert kwargs["storage_backend"] == "rustfs"
         assert kwargs["detected_format"] == "jsonl"
+        assert kwargs["detected_encoding"] is None
         assert kwargs["checksum_sha256"] == expected_checksum
         return _upload(
             upload_id=kwargs["upload_id"],
@@ -606,6 +607,29 @@ def test_load_offline_upload_launches_dagster(
     assert body["data"]["load_job_id"] == "10000000-0000-0000-0000-000000000001"
     assert body["meta"]["dagster_run_id"] == "dagster-run-1"
     assert order == ["reserve", "launch"]
+
+
+@pytest.mark.unit
+def test_dagster_launch_variables_use_settings() -> None:
+    from krtour.map_admin.routers import offline_uploads as router_mod
+
+    settings = AdminSettings(
+        dagster_repository_name="admin-repo",
+        dagster_repository_location_name="krtour.map_dagster.custom",
+    )
+
+    variables = router_mod._launch_variables(
+        settings,
+        "00000000-0000-0000-0000-000000000001",
+    )
+
+    selector = variables["executionParams"]["selector"]
+    run_config = variables["executionParams"]["runConfigData"]
+    assert selector["repositoryName"] == "admin-repo"
+    assert selector["repositoryLocationName"] == "krtour.map_dagster.custom"
+    assert run_config["ops"]["load_offline_upload"]["config"]["upload_id"] == (
+        "00000000-0000-0000-0000-000000000001"
+    )
 
 
 @pytest.mark.unit

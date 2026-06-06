@@ -251,7 +251,7 @@ export function HomePageClient() {
                     status={health.data?.status ?? (health.isError ? "error" : "loading")}
                   />
                   {version.data ? (
-                    <Badge variant="outline">admin {version.data.debug_ui}</Badge>
+                    <Badge variant="outline">admin {version.data.admin}</Badge>
                   ) : null}
                   {version.data ? (
                     <Badge variant="outline">map {version.data.krtour_map}</Badge>

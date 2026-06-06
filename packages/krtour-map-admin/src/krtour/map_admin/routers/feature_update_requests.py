@@ -417,7 +417,10 @@ async def _sigungu_resolver_for_scope(
         yield None
         return
 
-    async with httpx.AsyncClient(base_url=base_url) as http:
+    async with httpx.AsyncClient(
+        base_url=base_url,
+        timeout=settings.kraddr_geo_timeout_seconds,
+    ) as http:
         client = KraddrGeoRestClient(http)
 
         async def _resolver(

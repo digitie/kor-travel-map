@@ -10,14 +10,17 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import importlib
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from krtour.map.core.exceptions import FileStoreError
 
 __all__ = [
     "S3ObjectStore",
     "StoredObject",
+    "build_s3_object_store",
+    "create_s3_client",
 ]
 
 
@@ -114,8 +117,66 @@ class S3ObjectStore:
         response = self.s3_client.get_object(Bucket=self.bucket, Key=storage_key)
         body = response.get("Body") if isinstance(response, dict) else None
         if body is None or not hasattr(body, "read"):
-            raise FileStoreError(f"S3 get_object 응답에 Body.read()가 없음: key={storage_key!r}")
+            raise FileStoreError(
+                f"S3 get_object 응답에 Body.read()가 없음: key={storage_key!r}"
+            )
         data = body.read()
         if isinstance(data, bytes):
             return data
         raise FileStoreError(f"S3 Body.read() 결과가 bytes가 아님: key={storage_key!r}")
+
+
+def create_s3_client(
+    *,
+    region_name: str,
+    endpoint_url: str | None = None,
+    access_key_id: str | None = None,
+    secret_access_key: str | None = None,
+) -> Any:
+    """설정 값으로 boto3 S3 호환 client를 만든다."""
+    if (access_key_id is None) != (secret_access_key is None):
+        raise RuntimeError(
+            "KRTOUR_MAP_OBJECT_STORE_ACCESS_KEY_ID와 "
+            "KRTOUR_MAP_OBJECT_STORE_SECRET_ACCESS_KEY는 함께 설정해야 함."
+        )
+
+    boto3 = cast(Any, importlib.import_module("boto3"))
+    botocore_config = cast(Any, importlib.import_module("botocore.config"))
+    kwargs: dict[str, Any] = {
+        "region_name": region_name,
+        "config": botocore_config.Config(signature_version="s3v4"),
+    }
+    if endpoint_url:
+        kwargs["endpoint_url"] = endpoint_url
+    if access_key_id is not None and secret_access_key is not None:
+        kwargs["aws_access_key_id"] = access_key_id
+        kwargs["aws_secret_access_key"] = secret_access_key
+    return boto3.client("s3", **kwargs)
+
+
+def build_s3_object_store(
+    *,
+    bucket: str,
+    region_name: str,
+    endpoint_url: str | None = None,
+    access_key_id: str | None = None,
+    secret_access_key: str | None = None,
+    public_base_url: str | None = None,
+    s3_client: Any | None = None,
+) -> S3ObjectStore:
+    """설정 값 또는 주입 client로 ``S3ObjectStore``를 만든다."""
+    client = (
+        s3_client
+        if s3_client is not None
+        else create_s3_client(
+            region_name=region_name,
+            endpoint_url=endpoint_url,
+            access_key_id=access_key_id,
+            secret_access_key=secret_access_key,
+        )
+    )
+    return S3ObjectStore(
+        s3_client=client,
+        bucket=bucket,
+        public_base_url=public_base_url,
+    )

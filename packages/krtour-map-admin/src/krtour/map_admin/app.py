@@ -27,13 +27,13 @@ from time import perf_counter
 from uuid import uuid4
 
 import httpx
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from krtour.map.infra.log_repo import record_api_call
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 
 from krtour.map_admin import __version__
 from krtour.map_admin.routers import (
@@ -281,45 +281,6 @@ def create_app(settings: AdminSettings | None = None) -> FastAPI:
             allow_methods=["*"],
             allow_headers=["*"],
         )
-        allowed_cors_origins = set(settings.cors_allow_origins)
-
-        @application.middleware("http")
-        async def add_configured_cors_headers(
-            request: Request,
-            call_next: Callable[[Request], Awaitable[Response]],
-        ) -> Response:
-            origin = request.headers.get("origin")
-            origin_allowed = origin is not None and (
-                "*" in allowed_cors_origins or origin in allowed_cors_origins
-            )
-            allowed_origin = "*" if "*" in allowed_cors_origins else origin
-            if (
-                origin_allowed
-                and request.method == "OPTIONS"
-                and "access-control-request-method" in request.headers
-            ):
-                assert allowed_origin is not None
-                return Response(
-                    status_code=200,
-                    headers={
-                        "Access-Control-Allow-Origin": allowed_origin,
-                        "Access-Control-Allow-Methods": "*",
-                        "Access-Control-Allow-Headers": (
-                            request.headers.get("access-control-request-headers", "*")
-                        ),
-                        "Vary": "Origin",
-                    },
-                )
-
-            response = await call_next(request)
-            if origin_allowed:
-                assert allowed_origin is not None
-                response.headers.setdefault(
-                    "Access-Control-Allow-Origin",
-                    allowed_origin,
-                )
-                response.headers.setdefault("Vary", "Origin")
-            return response
 
     # opt-in API 호출 로그 (T-212c). 기본 off → 등록 안 하면 zero overhead.
     # OpenAPI spec에는 영향 없음(미들웨어, ADR-031 drift gate 무관).

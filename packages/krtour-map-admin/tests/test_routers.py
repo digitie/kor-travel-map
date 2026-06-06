@@ -1,8 +1,8 @@
-"""``test_routers`` — debug-ui 첫 라우터 health/version (PR#35, ADR-031/035).
+"""``test_routers`` — admin 첫 라우터 health/version (PR#35, ADR-031/035).
 
 본 PR 테스트 범위:
 - ``GET /debug/health`` 정적 200 OK + schema 정합
-- ``GET /debug/version`` debug_ui + krtour_map version 응답
+- ``GET /debug/version`` admin + krtour_map version 응답
 - ``debug_routes_enabled=False`` 시 라우터 unregister 검증
 - ``features_routes_enabled=False`` 시 DB 의존 features/admin/ops unregister 검증
 - ``app.openapi()``가 ``HealthResponse`` + ``VersionResponse`` 스키마를 노출
@@ -14,7 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 from krtour.map import __version__ as KRTOUR_MAP_VERSION
 
-from krtour.map_admin import __version__ as DEBUG_UI_VERSION
+from krtour.map_admin import __version__ as ADMIN_VERSION
 from krtour.map_admin.app import create_app
 from krtour.map_admin.settings import AdminSettings
 
@@ -45,16 +45,16 @@ def test_health_extra_fields_rejected_on_response_schema(client: TestClient) -> 
 
 @pytest.mark.unit
 def test_version_returns_both_versions(client: TestClient) -> None:
-    """``GET /debug/version`` — debug_ui + krtour_map version 모두 응답."""
+    """``GET /debug/version`` — admin + krtour_map version 모두 응답."""
     response = client.get("/debug/version")
     assert response.status_code == 200
     body = response.json()
     assert body == {
-        "debug_ui": DEBUG_UI_VERSION,
+        "admin": ADMIN_VERSION,
         "krtour_map": KRTOUR_MAP_VERSION,
     }
     # 둘 다 비어 있지 않다.
-    assert body["debug_ui"]
+    assert body["admin"]
     assert body["krtour_map"]
 
 
@@ -119,4 +119,4 @@ def test_openapi_title_and_version_match_package() -> None:
     app = create_app(AdminSettings())
     spec = app.openapi()
     assert spec["info"]["title"] == "krtour-map-admin"
-    assert spec["info"]["version"] == DEBUG_UI_VERSION
+    assert spec["info"]["version"] == ADMIN_VERSION

@@ -326,6 +326,7 @@ def test_search_features_maps_page_and_requires_scope(
                     score=1.0,
                 ),
             ),
+            total_count=1,
             next_cursor=None,
         )
 
@@ -340,7 +341,7 @@ def test_search_features_maps_page_and_requires_scope(
         assert r.status_code == 200
         body = r.json()
         assert body["data"]["items"][0]["feature_id"] == "f1"
-        assert body["data"]["total_count"] is None
+        assert body["data"]["total_count"] == 1
     finally:
         client.app.dependency_overrides.clear()
 

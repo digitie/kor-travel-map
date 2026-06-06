@@ -130,6 +130,12 @@ class KrtourMapSettings(BaseSettings):
             "``KraddrGeoRestClient``에 주입한다 (python 패키지/DB 의존 없음)."
         ),
     )
+    kraddr_geo_timeout_seconds: float = Field(
+        default=10.0,
+        ge=0.2,
+        le=30.0,
+        description="kraddr-geo REST 호출 timeout seconds.",
+    )
 
     # ── Provider API credentials (Dagster resource wiring, ADR-044/045) ──
     data_go_kr_service_key: SecretStr | None = Field(

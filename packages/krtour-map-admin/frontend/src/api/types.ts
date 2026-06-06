@@ -3359,10 +3359,10 @@ export interface components {
          */
         VersionResponse: {
             /**
-             * Debug Ui
+             * Admin
              * @description ``krtour-map-admin`` distribution version.
              */
-            debug_ui: string;
+            admin: string;
             /**
              * Krtour Map
              * @description ``python-krtour-map`` (메인) distribution version.

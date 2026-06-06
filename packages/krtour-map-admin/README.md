@@ -89,6 +89,8 @@ shadcn/ui + `@krtour/map-marker-react` (ADR-029). 자세한 사양:
 | `KRTOUR_MAP_ADMIN_ADMIN_ROUTES_ENABLED` | unset | `/admin/*` 운영 라우터 활성화. unset이면 features flag를 따름 |
 | `KRTOUR_MAP_ADMIN_OPS_ROUTES_ENABLED` | unset | `/ops/*`, `/ops/dagster/*` 라우터 활성화. unset이면 features flag를 따름 |
 | `KRTOUR_MAP_ADMIN_DAGSTER_ALLOWED_HOSTS` | `["127.0.0.1","localhost","::1","dagster"]` | Dagster GraphQL 호출 host allowlist. `KRTOUR_MAP_ADMIN_DAGSTER_URL`/override host가 이 목록에 있어야 함 |
+| `KRTOUR_MAP_ADMIN_DAGSTER_REPOSITORY_NAME` | `__repository__` | offline upload load GraphQL launch selector의 repositoryName |
+| `KRTOUR_MAP_ADMIN_DAGSTER_REPOSITORY_LOCATION_NAME` | `krtour.map_dagster.definitions` | offline upload load GraphQL launch selector의 repositoryLocationName |
 | `KRTOUR_MAP_ADMIN_FRONTEND_DIST` | (auto) | static export 모드 시 `frontend/out/` 경로 |
 
 ### Frontend (`NEXT_PUBLIC_*` — Next.js 규약)
@@ -96,8 +98,8 @@ shadcn/ui + `@krtour/map-marker-react` (ADR-029). 자세한 사양:
 | 변수 | 기본값 | 설명 |
 |------|--------|------|
 | `NEXT_PUBLIC_VWORLD_API_KEY` | (필수) | VWorld API key. `KRADDR_GEO_VWORLD_API_KEY` 공유 (ADR-025 보강). |
-| `NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API` | `http://127.0.0.1:9011` | 백엔드 base URL |
-| `NEXT_PUBLIC_KRTOUR_MAP_DAGSTER_URL` | `http://127.0.0.1:9013` | Dagster UI/embed base URL |
+| `NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API` | 개발 기본 `http://127.0.0.1:9011` | 백엔드 base URL. production에서는 명시 필수 |
+| `NEXT_PUBLIC_KRTOUR_MAP_DAGSTER_URL` | 개발 기본 `http://127.0.0.1:9013` | Dagster UI/embed base URL. production에서는 명시 필수 |
 
 메인 라이브러리 환경변수(`KRTOUR_MAP_PG_DSN`, `KRTOUR_MAP_OBJECT_STORE_*` 등)는
 그대로 사용한다. 디버그 UI는 메인 라이브러리의 settings를 상속한다.
