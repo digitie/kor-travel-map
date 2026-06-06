@@ -128,7 +128,12 @@ async def test_check_f4_dedup_backlog_warns_over_threshold() -> None:
 
     assert result.code == "F4"
     assert result.severity == "WARN"
-    assert result.count == 3
+    assert result.count == 1
+    assert result.metadata == {
+        "pending_count": 3,
+        "threshold": 2,
+        "over_threshold": True,
+    }
     assert result.sample_ids == ["rk-high", "rk-low"]
     assert len(session.calls) == 2
 
@@ -141,6 +146,11 @@ async def test_check_f4_dedup_backlog_ok_below_threshold_skips_sample_query() ->
 
     assert result.code == "F4"
     assert result.count == 0
+    assert result.metadata == {
+        "pending_count": 1,
+        "threshold": 2,
+        "over_threshold": False,
+    }
     assert result.sample_ids == []
     assert len(session.calls) == 1
 
@@ -313,11 +323,47 @@ def test_build_f8_file_object_orphan_result_compares_metadata_and_objects() -> N
     assert result.code == "F8"
     assert result.severity == "WARN"
     assert result.count == 3
+    assert result.metadata == {
+        "metadata_file_issue_count": 2,
+        "object_missing_metadata_count": 1,
+    }
     assert result.sample_ids == [
         "metadata_missing_object:s3:krtour-map:missing-object.jpg:"
         "file-missing-object:feature-active",
         "metadata_without_active_feature:s3:krtour-map:deleted-feature.jpg:"
         "file-missing-feature:feature-deleted",
+    ]
+
+
+def test_build_f8_file_object_orphan_result_counts_same_file_once_for_multiple_issues() -> None:
+    rows = [
+        {
+            "file_id": "file-double-issue",
+            "feature_id": "feature-deleted",
+            "storage_backend": "s3",
+            "bucket": "krtour-map",
+            "object_key": "missing-and-deleted.jpg",
+            "feature_missing": True,
+        }
+    ]
+
+    result = _build_f8_file_object_orphan_result(
+        rows,
+        known_file_objects=[],
+        sample_limit=5,
+    )
+
+    assert result.code == "F8"
+    assert result.count == 1
+    assert result.metadata == {
+        "metadata_file_issue_count": 1,
+        "object_missing_metadata_count": 0,
+    }
+    assert result.sample_ids == [
+        "metadata_without_active_feature:s3:krtour-map:missing-and-deleted.jpg:"
+        "file-double-issue:feature-deleted",
+        "metadata_missing_object:s3:krtour-map:missing-and-deleted.jpg:"
+        "file-double-issue:feature-deleted",
     ]
 
 
@@ -387,20 +433,26 @@ async def test_run_consistency_checks_evaluates_dynamic_cases_and_persists() -> 
 
     assert report.batch_id == "batch-unit"
     assert report.severity_max == "ERROR"
-    assert report.summary["total_violations"] == 5
+    assert report.summary["total_violations"] == 4
     assert report.summary["cases_evaluated"] == 8
     assert report.summary["by_code"] == {
         "F1": 0,
         "F2": 1,
         "F3": 0,
         "F6": 0,
-        "F4": 2,
+        "F4": 1,
         "F5": 1,
         "F7": 1,
         "F8": 0,
     }
+    assert report.summary["case_metadata"]["F4"] == {
+        "pending_count": 2,
+        "threshold": 1,
+        "over_threshold": True,
+    }
     assert report.cases_json()[1]["sample_ids"] == ["feature-missing-detail"]
     by_code = {case["code"]: case for case in report.cases_json()}
+    assert by_code["F4"]["metadata"]["pending_count"] == 2
     assert by_code["F7"]["sample_ids"][0].startswith("rk-regressed:f7-a:f7-b:95.00->")
     assert len(session.calls) == 12
     assert session.calls[-1][1]["batch_id"] == "batch-unit"

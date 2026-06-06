@@ -5,15 +5,12 @@
 ## 진행 중
 
 **진행 중**: ADR-045 독립 프로그램화 후속. main은 T-209b-a(Dagster PostgreSQL
-instance storage), T-201b dry-run report, T-RV-34/35(Dagster 실행 품질), T-213a~h
-TripMate 요구사항 후속 전체까지 merged했고, 이번 PR은 `T-209e-b` staging cold restore
-자동화를 닫는다.
+instance storage), T-201b dry-run report, T-RV-34/35(Dagster 실행 품질),
+T-213a~h(TripMate 요구사항 후속 전체), T-209e-b staging cold restore 자동화까지
+merged했고, 이번 PR은 consistency count 의미 정리 묶음(`T-RV-38/39`)을 닫는다.
 `T-RV-27`(admin API bind 노출 정정)은 사용자 결정에 따라 production 레벨 hardening
-전까지 구현하지 않고 문서 추적만 유지한다. 남은 T-RV 계열은 별도 에이전트의
-T-RV 백로그에서 계속 추적한다.
-TripMate `docs/krtour-map-requirements.md` 대조 후속 `T-213a~h`는 별도 에이전트가
-완료했다(`docs/reports/tripmate-requirements-reconcile-2026-06-06.md`). Codex 현재
-다음 후보는 **T-209e-c admin backup/restore router + hot-swap UI** 또는
+전까지 구현하지 않고 문서 추적만 유지한다. Codex 현재 다음 후보는 **T-RV-40/41**,
+**T-RV-04b**, **T-209e-c admin backup/restore router + hot-swap UI**, 또는
 **T-212 전체점검**이다.
 ADR-045 관련 잔여 task가 닫히면 T-212 전체점검 묶음으로 넘어간다. T-207b는 사용자
 결정에 따라 구현하지 않는다.
@@ -136,12 +133,14 @@ PR과 T-DA 문서 PR(#227/#230)은 리뷰 생략. 정본은
 전용 WARN 케이스의 count 의미/성능) — 운영 진입을 막지 않는다. (검토 중 세운 F5
 join fan-out·F7 score 스케일 risk는 schema PK/CHECK로 해소 = 결함 아님.)
 
-- [ ] **T-RV-38** (LOW, consistency F8) `infra/consistency.py:529-557` — file row가
+- ~~**T-RV-38** (LOW, consistency F8) `infra/consistency.py:529-557` — file row가
   `feature_missing` + `metadata_missing_object` 동시 충족 시 count 2 증가(distinct
-  orphan보다 과다). count file_id dedup 또는 "(파일×문제유형)" 명시.
-- [ ] **T-RV-39** (LOW, consistency F4/WARN) `infra/consistency.py:400-410` — F4 임계
+  orphan보다 과다).~~ ✅ `count`는 distinct metadata/object row 기준으로 dedup하고,
+  세부 문제유형은 `sample_ids`와 `metadata`에 보존한다.
+- ~~**T-RV-39** (LOW, consistency F4/WARN) `infra/consistency.py:400-410` — F4 임계
   초과 시 `count=pending`(백로그 전체 수)이 `total_violations`/`by_severity.WARN`에
-  혼입. 임계초과형은 count=1/boolean, 백로그 수는 별도 필드 검토.
+  혼입.~~ ✅ 임계 초과형 `count=1`, 실제 pending/threshold는
+  `metadata.pending_count`/`summary.case_metadata.F4`에 분리한다.
 - [ ] **T-RV-40** (LOW perf, consistency F6) `infra/consistency.py:146-185` — F6가
   `feature.features`를 LATERAL `jsonb_path_query`로 4회 풀스캔. `T-212d` 성능 튜닝에서
   partial 조건/인덱스 또는 단일 LATERAL 통합 검토(EXPLAIN 후).

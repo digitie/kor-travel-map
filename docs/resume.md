@@ -1,5 +1,25 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-06 Codex 작업 메모 — T-RV-38/39 consistency count 의미 정리
+
+T-RV-38/39를 한 묶음으로 닫는다. F4 dedup backlog WARN은 더 이상 pending row 수를
+`count`에 직접 넣지 않는다. 임계 초과형 케이스로 `count=1`만 기록하고, 실제
+백로그 수와 기준값은 `CaseResult.metadata` 및 `summary.case_metadata.F4`의
+`pending_count`/`threshold`/`over_threshold`에 둔다. 따라서
+`summary.total_violations`와 `by_severity.WARN`은 행 위반 수와 백로그 규모를 섞지
+않는다.
+
+F8 file object orphan은 같은 `feature_files.file_id`가
+`metadata_without_active_feature`와 `metadata_missing_object`를 동시에 만족해도
+count는 distinct metadata row 1건으로 센다. 문제 유형별 `sample_ids`는 그대로 남기고,
+`metadata.metadata_file_issue_count`와 `metadata.object_missing_metadata_count`로
+breakdown을 보존한다.
+
+검증은 `TMPDIR=/tmp .venv/bin/python -m pytest tests/unit/test_infra_consistency.py tests/integration/test_consistency_reports.py tests/unit/test_cli_consistency_report.py packages/krtour-map-dagster/tests/test_maintenance.py -q`,
+`ruff check .`, `mypy --strict`, `lint-imports`로 진행했다. 다음 T-RV 후보는
+**T-RV-40(F6 perf, T-212d 편입)**, **T-RV-41(MV CONCURRENTLY 전제, T-101 체크리스트)**,
+또는 **T-RV-04b(provider live fetcher wiring)** 이다.
+
 ## 2026-06-06 Codex 작업 메모 — mcp-telegram 완료 알림 셋업
 
 각 agent worktree의 MCP 설정에 `mcp-telegram`을 추가한다. Codex는
