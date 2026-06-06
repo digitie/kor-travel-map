@@ -306,3 +306,78 @@ async def test_execute_next_request_applies_follow_system_policy_skip(
             migrated_session, target.target_id
         )
     )[0].feature_id == seed.feature.feature_id
+
+
+async def test_failed_runner_rolls_back_refresh_writes(
+    migrated_session: AsyncSession,
+) -> None:
+    seed = await _load_seed(migrated_session, "EXEC-ROLLBACK-SEED")
+    await upsert_provider_refresh_policy(
+        migrated_session,
+        provider=seed.source_record.provider,
+        dataset_key=seed.source_record.dataset_key,
+        source_kind="openapi",
+        targeted_policy="allow_targeted",
+    )
+    target = await upsert_poi_cache_target(
+        migrated_session,
+        external_system="tripmate",
+        target_key="poi-rollback",
+        lon=126.9780,
+        lat=37.5665,
+        radius_km=1.0,
+    )
+    request = await enqueue_feature_update_request(
+        migrated_session,
+        scope={
+            "type": "cache_target_keys",
+            "external_system": "tripmate",
+            "target_keys": ["poi-rollback"],
+        },
+    )
+    assert isinstance(request, FeatureUpdateRequest)
+    loaded_feature_id: str | None = None
+
+    async def runner(
+        session: AsyncSession,
+        scope: ProviderDatasetRefreshScope,
+    ) -> ProviderDatasetRefreshResult:
+        nonlocal loaded_feature_id
+        assert scope.target_ids == (target.target_id,)
+        loaded = await _bundle("EXEC-ROLLBACK-LOADED")
+        loaded_feature_id = loaded.feature.feature_id
+        await feature_repo.load_bundle(session, loaded)
+        raise RuntimeError("provider refresh failed after partial write")
+
+    result = await execute_next_feature_update_request(
+        migrated_session, runner=runner
+    )
+
+    assert result is not None
+    assert result.state == "failed"
+    assert result.results == ()
+    assert result.error_message is not None
+    assert "RuntimeError" in result.error_message
+    assert loaded_feature_id is not None
+    persisted = (
+        await migrated_session.execute(
+            text("SELECT 1 FROM feature.features WHERE feature_id = :feature_id"),
+            {"feature_id": loaded_feature_id},
+        )
+    ).first()
+    assert persisted is None
+
+    stored = await get_update_request(migrated_session, request.request_id)
+    assert stored is not None
+    assert stored.state == "failed"
+    assert stored.error_message is not None
+    assert "RuntimeError" in stored.error_message
+
+    failed_target = await get_poi_cache_target_by_key(
+        migrated_session,
+        external_system="tripmate",
+        target_key="poi-rollback",
+    )
+    assert failed_target is not None
+    assert failed_target.last_failed_at is not None
+    assert failed_target.last_refreshed_at is None

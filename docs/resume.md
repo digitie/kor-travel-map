@@ -1,5 +1,25 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-06 Codex 작업 메모 — T-RV-31/32/33 router/executor 정확성
+
+T-RV-31/32/33을 한 묶음으로 닫는다. `execute_feature_update_request()`의 provider
+runner 1회 호출을 `session.begin_nested()` savepoint 안에 격리해 runner가 DB write를
+일부 수행한 뒤 실패해도 해당 write가 rollback되도록 했다. 요청 상태, matched scope,
+target failure timestamp 같은 executor 메타데이터는 바깥 트랜잭션에서 `failed`로
+기록된다. PostGIS 통합 테스트는 runner가 feature/source record를 적재한 뒤 예외를
+던지는 경우 loaded feature가 남지 않는지 검증한다.
+
+Admin feature issue summary는 `AdminFeatureIssueRecord.extra="allow"`를
+`extra="forbid"`로 바꿔 OpenAPI open object drift를 닫았다. 생성 spec의
+`additionalProperties=false`와 frontend generated type에서 index signature가 제거되는
+것을 테스트/생성물로 고정했다.
+
+`/features/nearby/by-target`의 `NearbyFeatureSummary.lon/lat`는 public 계약상 필수
+`float`를 유지한다. repo SQL이 이미 `f.coord IS NOT NULL`과 `f.coord_5179 IS NOT NULL`을
+동시에 필터링하므로 nullable DTO로 느슨하게 만들지 않고, 이 non-null 보장을 단위
+테스트로 고정했다. 다음 T-RV 영역은 **T-RV-34/35(Dagster sensor/asset 실행 품질)** 이며,
+**T-RV-27은 production hardening 전까지 계속 skip/deferred**다.
+
 ## 2026-06-06 Codex 작업 메모 — TripMate 요구사항 대조 task 반영
 
 TripMate `docs/krtour-map-requirements.md`를 현재 krtour-map `origin/main`

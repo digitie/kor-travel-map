@@ -88,6 +88,12 @@ def test_admin_features_routes_mounted_in_openapi(client: TestClient) -> None:
     assert "/admin/features" in spec["paths"]
     assert "/admin/features/{feature_id}/deactivate" in spec["paths"]
     assert "AdminFeatureRecord" in spec["components"]["schemas"]
+    assert (
+        spec["components"]["schemas"]["AdminFeatureIssueRecord"][
+            "additionalProperties"
+        ]
+        is False
+    )
 
 
 @pytest.mark.unit

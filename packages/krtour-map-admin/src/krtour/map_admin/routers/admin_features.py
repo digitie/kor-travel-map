@@ -47,7 +47,7 @@ SortOrder = Literal["asc", "desc"]
 class AdminFeatureIssueRecord(BaseModel):
     """Admin feature 목록 issue summary."""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     violation_key: str | None = None
     violation_type: str | None = None

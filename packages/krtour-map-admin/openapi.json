@@ -92,7 +92,7 @@
         "type": "object"
       },
       "AdminFeatureIssueRecord": {
-        "additionalProperties": true,
+        "additionalProperties": false,
         "description": "Admin feature 목록 issue summary.",
         "properties": {
           "detected_at": {

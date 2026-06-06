@@ -2,6 +2,23 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-06 (codex) — T-RV-31/32/33 router/executor 정확성
+
+**작업**: PR#153~#179 리뷰 후속 중 runner savepoint와 router DTO 정확성을 닫는다.
+
+- **Executor savepoint**: provider runner 1회 실행을 `session.begin_nested()`로 감싸,
+  runner가 일부 DB write 뒤 실패해도 해당 write는 rollback되고 request/job/target 실패
+  메타데이터만 바깥 트랜잭션에서 기록되게 했다.
+- **Regression**: PostGIS 통합 테스트에서 runner가 feature/source record를 적재한 뒤
+  예외를 던지는 경로를 검증하고, 적재 feature가 남지 않는지 확인했다.
+- **Admin issue schema**: `AdminFeatureIssueRecord`를 `extra="forbid"`로 전환해 OpenAPI
+  `additionalProperties=false`와 frontend generated type index signature 제거를 반영했다.
+- **Nearby 좌표 계약**: `/features/nearby/by-target`은 repo SQL의 `f.coord IS NOT NULL` +
+  `f.coord_5179 IS NOT NULL` 필터로 `lon/lat` 필수 public DTO 계약을 유지한다. 해당 SQL
+  보장을 단위 테스트로 고정했다.
+- **다음**: 남은 T-RV 실행 품질 묶음은 `T-RV-34/35`다. `T-RV-27`은 production
+  hardening 전까지 deferred 유지.
+
 ## 2026-06-06 (claude) — PR #181~#233 코드 리뷰 (비-T-RV 실질 PR)
 
 **작업**: 직전 리뷰(`pr-153-179-review-2026-06-04.md`) 이후 머지 PR을 상세 리뷰.
