@@ -2,6 +2,25 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-06 (claude) — T-DA-16 envelope 통일 ④ ops metrics/import-job 단건
+
+**작업**: T-DA-16 잔여 단건 bare 중 ops 라우터 2건을 `{data, meta}`로 통일.
+
+- **`/ops/metrics`**: flat 본문 → `OpsMetricsData`로 분리하고
+  `OpsMetricsResponse{data, meta(duration_ms)}`로 감쌈. `_metrics_response`에
+  `started_at` 전달.
+- **`/ops/import-jobs/{job_id}`**: `{data}`만 있던 응답에 `meta.duration_ms` 추가
+  (`OpsDetailMeta` 신설, list `OpsListMeta`와 별개).
+- **frontend**: `home-client.tsx`·`consistency-client.tsx`에서 `metrics.data?.X` →
+  지역 alias `metricsData = metrics.data?.data` 도입 후 `metricsData?.X`로 정리.
+  import-job 단건은 `meta` 추가가 가산적이라 소비측 무변. openapi/types 재생성.
+- **test**: `test_ops_router` metrics 검증을 `body["data"]`/`meta.duration_ms`로 갱신.
+- **gate**: drift green, ruff/mypy --strict green, ops+export_openapi pytest 7 passed,
+  frontend type-check/gen:types:check/eslint green.
+- **문서**: contract §3.1 bare 예외에서 metrics/import-jobs 제거.
+- **다음**: T-DA-16 잔여 `/ops/dagster/summary` + `/debug/mois-license/{id}` →
+  T-DA-13 `/admin/issues`.
+
 ## 2026-06-06 (claude) — T-DA-15/16 envelope 통일 ③ poi-cache-targets (T-DA-15 완료)
 
 **작업**: DA-D-03 세 번째 family로 `/admin/poi-cache-targets` list/detail 응답을

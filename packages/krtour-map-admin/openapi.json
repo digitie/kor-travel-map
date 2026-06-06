@@ -4060,6 +4060,21 @@
         "title": "OpsDedupFpStatsRecord",
         "type": "object"
       },
+      "OpsDetailMeta": {
+        "additionalProperties": false,
+        "description": "단건 응답 공통 meta.",
+        "properties": {
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "duration_ms"
+        ],
+        "title": "OpsDetailMeta",
+        "type": "object"
+      },
       "OpsImportJobRecord": {
         "additionalProperties": false,
         "description": "``ops.import_jobs`` HTTP 표현.",
@@ -4200,14 +4215,18 @@
       },
       "OpsImportJobResponse": {
         "additionalProperties": false,
-        "description": "``GET /ops/import-jobs/{job_id}`` 응답.",
+        "description": "``GET /ops/import-jobs/{job_id}`` 응답 (DA-D-03 envelope).",
         "properties": {
           "data": {
             "$ref": "#/components/schemas/OpsImportJobRecord"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/OpsDetailMeta"
           }
         },
         "required": [
-          "data"
+          "data",
+          "meta"
         ],
         "title": "OpsImportJobResponse",
         "type": "object"
@@ -4473,9 +4492,9 @@
         "title": "OpsListMeta",
         "type": "object"
       },
-      "OpsMetricsResponse": {
+      "OpsMetricsData": {
         "additionalProperties": false,
-        "description": "``GET /ops/metrics`` 응답.",
+        "description": "``GET /ops/metrics`` data.",
         "properties": {
           "checked_at": {
             "format": "date-time",
@@ -4550,6 +4569,24 @@
           "dedup_queue_by_status",
           "dedup_fp_stats",
           "data_integrity_issues"
+        ],
+        "title": "OpsMetricsData",
+        "type": "object"
+      },
+      "OpsMetricsResponse": {
+        "additionalProperties": false,
+        "description": "``GET /ops/metrics`` 응답 (DA-D-03 envelope).",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/OpsMetricsData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/OpsDetailMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
         ],
         "title": "OpsMetricsResponse",
         "type": "object"

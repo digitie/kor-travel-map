@@ -2348,6 +2348,14 @@ export interface components {
             resolved: number;
         };
         /**
+         * OpsDetailMeta
+         * @description 단건 응답 공통 meta.
+         */
+        OpsDetailMeta: {
+            /** Duration Ms */
+            duration_ms: number;
+        };
+        /**
          * OpsImportJobRecord
          * @description ``ops.import_jobs`` HTTP 표현.
          */
@@ -2390,10 +2398,11 @@ export interface components {
         };
         /**
          * OpsImportJobResponse
-         * @description ``GET /ops/import-jobs/{job_id}`` 응답.
+         * @description ``GET /ops/import-jobs/{job_id}`` 응답 (DA-D-03 envelope).
          */
         OpsImportJobResponse: {
             data: components["schemas"]["OpsImportJobRecord"];
+            meta: components["schemas"]["OpsDetailMeta"];
         };
         /**
          * OpsImportJobsData
@@ -2499,10 +2508,10 @@ export interface components {
             page_size: number;
         };
         /**
-         * OpsMetricsResponse
-         * @description ``GET /ops/metrics`` 응답.
+         * OpsMetricsData
+         * @description ``GET /ops/metrics`` data.
          */
-        OpsMetricsResponse: {
+        OpsMetricsData: {
             /**
              * Checked At
              * Format: date-time
@@ -2533,6 +2542,14 @@ export interface components {
             source_records_by_provider: {
                 [key: string]: number;
             };
+        };
+        /**
+         * OpsMetricsResponse
+         * @description ``GET /ops/metrics`` 응답 (DA-D-03 envelope).
+         */
+        OpsMetricsResponse: {
+            data: components["schemas"]["OpsMetricsData"];
+            meta: components["schemas"]["OpsDetailMeta"];
         };
         /**
          * PoiCacheTargetListData

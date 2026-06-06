@@ -37,6 +37,7 @@ const issueStatuses: Array<IntegrityIssueStatus | "all"> = [
 export function ConsistencyClient() {
   const [status, setStatus] = useState<IntegrityIssueStatus | "all">("open");
   const metrics = useOpsMetrics();
+  const metricsData = metrics.data?.data;
   const reports = useConsistencyReports({ page_size: 20 });
   const issues = useIntegrityIssues({
     status: status === "all" ? undefined : status,
@@ -75,21 +76,21 @@ export function ConsistencyClient() {
           <div className="rounded-lg border bg-background p-4">
             <div className="text-sm text-muted-foreground">Open issues</div>
             <div className="mt-1 text-2xl font-semibold">
-              {formatCount(metrics.data?.data_integrity_issues.open_total)}
+              {formatCount(metricsData?.data_integrity_issues.open_total)}
             </div>
           </div>
           <div className="rounded-lg border bg-background p-4">
             <div className="text-sm text-muted-foreground">Latest severity</div>
             <div className="mt-2">
               <StatusBadge
-                status={metrics.data?.latest_consistency_report?.severity_max ?? "none"}
+                status={metricsData?.latest_consistency_report?.severity_max ?? "none"}
               />
             </div>
           </div>
           <div className="rounded-lg border bg-background p-4">
             <div className="text-sm text-muted-foreground">Checked at</div>
             <div className="mt-1 font-mono text-sm">
-              {formatDateTime(metrics.data?.checked_at)}
+              {formatDateTime(metricsData?.checked_at)}
             </div>
           </div>
         </section>
