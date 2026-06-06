@@ -1,0 +1,89 @@
+/**
+ * `/admin/backups/*` backup/restore hooks.
+ */
+
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+
+import { getJson, postJson } from "./client";
+import type { components } from "./types";
+
+type BackupSchemas = components["schemas"];
+
+export type BackupRecord = BackupSchemas["BackupRecord"];
+export type BackupListResponse = BackupSchemas["BackupListResponse"];
+export type BackupOperationResponse = BackupSchemas["BackupOperationResponse"];
+export type BackupRunRequest = BackupSchemas["BackupRunRequest"];
+export type RestoreRunRequest = BackupSchemas["RestoreRunRequest"];
+export type RestoreSwapRequest = BackupSchemas["RestoreSwapRequest"];
+
+function fetchBackups(): Promise<BackupListResponse> {
+  return getJson<BackupListResponse>("/admin/backups");
+}
+
+function createBackup(body: BackupRunRequest): Promise<BackupOperationResponse> {
+  return postJson<BackupOperationResponse>("/admin/backups", body);
+}
+
+function restoreBackup({
+  backupId,
+  body,
+}: {
+  backupId: string;
+  body: RestoreRunRequest;
+}): Promise<BackupOperationResponse> {
+  return postJson<BackupOperationResponse>(
+    `/admin/restore/${encodeURIComponent(backupId)}`,
+    body,
+  );
+}
+
+function planRestoreSwap({
+  backupId,
+  body,
+}: {
+  backupId: string;
+  body: RestoreSwapRequest;
+}): Promise<BackupOperationResponse> {
+  return postJson<BackupOperationResponse>(
+    `/admin/restore/${encodeURIComponent(backupId)}/swap`,
+    body,
+  );
+}
+
+export function useBackups() {
+  return useQuery<BackupListResponse, Error>({
+    queryKey: ["admin", "backups"],
+    queryFn: fetchBackups,
+    staleTime: 10_000,
+  });
+}
+
+export function useCreateBackupMutation() {
+  const queryClient = useQueryClient();
+  return useMutation<BackupOperationResponse, Error, BackupRunRequest>({
+    mutationFn: createBackup,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["admin", "backups"] });
+    },
+  });
+}
+
+export function useRestoreBackupMutation() {
+  return useMutation<
+    BackupOperationResponse,
+    Error,
+    { backupId: string; body: RestoreRunRequest }
+  >({
+    mutationFn: restoreBackup,
+  });
+}
+
+export function useRestoreSwapMutation() {
+  return useMutation<
+    BackupOperationResponse,
+    Error,
+    { backupId: string; body: RestoreSwapRequest }
+  >({
+    mutationFn: planRestoreSwap,
+  });
+}

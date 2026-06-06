@@ -12,6 +12,8 @@ PR#47 (2026-05-28) — provider raw API 키 8 종 추가. ETL preview의
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -136,6 +138,50 @@ class AdminSettings(BaseSettings):
         default="krtour.map_dagster.definitions",
         min_length=1,
         description="Dagster GraphQL launch selector repositoryLocationName.",
+    )
+    backup_root: Path = Field(
+        default=Path("data/backups"),
+        description="Standalone backup artifact root directory.",
+    )
+    backup_project_root: Path = Field(
+        default=Path("."),
+        description="Host project root used as cwd for backup/restore command execution.",
+    )
+    backup_script_path: Path = Field(
+        default=Path("scripts/docker-backup.sh"),
+        description="Backup script path. Relative paths are resolved from backup_project_root.",
+    )
+    restore_script_path: Path = Field(
+        default=Path("scripts/docker-restore.sh"),
+        description="Restore script path. Relative paths are resolved from backup_project_root.",
+    )
+    backup_command_enabled: bool = Field(
+        default=False,
+        description=(
+            "True면 /admin/backups command execution을 허용한다. 기본 False는 "
+            "plan-only 모드."
+        ),
+    )
+    backup_command_timeout_seconds: float = Field(
+        default=1800.0,
+        ge=1.0,
+        le=21600.0,
+        description="Backup/restore command execution timeout seconds.",
+    )
+    restore_app_db: str = Field(
+        default="krtour_map_restore",
+        min_length=1,
+        description="Default staging app DB name for restore command plans.",
+    )
+    restore_dagster_db: str = Field(
+        default="krtour_map_dagster_restore",
+        min_length=1,
+        description="Default staging Dagster DB name for restore command plans.",
+    )
+    restore_rustfs_volume: str = Field(
+        default="krtour-map-rustfs-restore",
+        min_length=1,
+        description="Default staging RustFS Docker volume for restore command plans.",
     )
 
     # ── Provider API keys (PR#47, source=live 활성화용) ──────────────────

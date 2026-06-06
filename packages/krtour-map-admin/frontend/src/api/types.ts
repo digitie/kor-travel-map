@@ -4,6 +4,50 @@
  */
 
 export interface paths {
+    "/admin/backups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Backups
+         * @description List local backup artifacts.
+         */
+        get: operations["list_backups_admin_backups_get"];
+        put?: never;
+        /**
+         * Create Backup
+         * @description Plan or run a cold backup command.
+         */
+        post: operations["create_backup_admin_backups_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/backups/{backup_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Backup
+         * @description Return one backup artifact.
+         */
+        get: operations["get_backup_admin_backups__backup_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/dedup-review": {
         parameters: {
             query?: never;
@@ -323,6 +367,46 @@ export interface paths {
         post?: never;
         /** POI/cache target soft delete */
         delete: operations["delete_poi_cache_target_record_admin_poi_cache_targets__external_system___target_key__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/restore/{backup_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore Backup
+         * @description Plan or run a staging restore command.
+         */
+        post: operations["restore_backup_admin_restore__backup_id__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/restore/{backup_id}/swap": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Plan Restore Swap
+         * @description Return the manual hot-swap boundary for a restored backup.
+         */
+        post: operations["plan_restore_swap_admin_restore__backup_id__swap_post"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1268,6 +1352,173 @@ export interface components {
         ApiCallLogsResponse: {
             data: components["schemas"]["ApiCallLogsListData"];
             meta: components["schemas"]["LogListMeta"];
+        };
+        /**
+         * BackupCommandPlan
+         * @description Command plan returned by backup/restore endpoints.
+         */
+        BackupCommandPlan: {
+            /** Command */
+            command: string[];
+            /** Cwd */
+            cwd: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Env */
+            env: {
+                [key: string]: string;
+            };
+        };
+        /**
+         * BackupDetailMeta
+         * @description Backup detail metadata.
+         */
+        BackupDetailMeta: {
+            /** Backup Root */
+            backup_root: string;
+            /** Command Enabled */
+            command_enabled: boolean;
+            /** Duration Ms */
+            duration_ms: number;
+        };
+        /**
+         * BackupDetailResponse
+         * @description ``GET /admin/backups/{backup_id}`` response.
+         */
+        BackupDetailResponse: {
+            data: components["schemas"]["BackupRecord"];
+            meta: components["schemas"]["BackupDetailMeta"];
+        };
+        /**
+         * BackupListData
+         * @description Backup list data.
+         */
+        BackupListData: {
+            /** Items */
+            items: components["schemas"]["BackupRecord"][];
+        };
+        /**
+         * BackupListMeta
+         * @description Backup list metadata.
+         */
+        BackupListMeta: {
+            /** Backup Root */
+            backup_root: string;
+            /** Command Enabled */
+            command_enabled: boolean;
+            /** Count */
+            count: number;
+            /** Duration Ms */
+            duration_ms: number;
+        };
+        /**
+         * BackupListResponse
+         * @description ``GET /admin/backups`` response.
+         */
+        BackupListResponse: {
+            data: components["schemas"]["BackupListData"];
+            meta: components["schemas"]["BackupListMeta"];
+        };
+        /**
+         * BackupOperationData
+         * @description Backup/restore/swap operation response data.
+         */
+        BackupOperationData: {
+            artifact?: components["schemas"]["BackupRecord"] | null;
+            /** Backup Id */
+            backup_id: string;
+            command?: components["schemas"]["BackupCommandPlan"] | null;
+            /** Message */
+            message: string;
+            /**
+             * Operation
+             * @enum {string}
+             */
+            operation: "backup" | "restore" | "swap";
+            restore_targets?: components["schemas"]["RestoreTargets"] | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "planned" | "completed" | "failed" | "manual_required";
+            /** Stderr */
+            stderr?: string | null;
+            /** Stdout */
+            stdout?: string | null;
+        };
+        /**
+         * BackupOperationMeta
+         * @description Backup operation metadata.
+         */
+        BackupOperationMeta: {
+            /** Duration Ms */
+            duration_ms: number;
+        };
+        /**
+         * BackupOperationResponse
+         * @description Backup/restore/swap operation response.
+         */
+        BackupOperationResponse: {
+            data: components["schemas"]["BackupOperationData"];
+            meta: components["schemas"]["BackupOperationMeta"];
+        };
+        /**
+         * BackupRecord
+         * @description Backup artifact HTTP representation.
+         */
+        BackupRecord: {
+            /** Backup Id */
+            backup_id: string;
+            /** Byte Size */
+            byte_size: number;
+            /** Checksum Count */
+            checksum_count: number;
+            /** Components */
+            components: {
+                [key: string]: string;
+            };
+            /** Created At Utc */
+            created_at_utc?: string | null;
+            /** Databases */
+            databases: {
+                [key: string]: string;
+            };
+            /** Detail Url */
+            detail_url: string;
+            /** Manifest Status */
+            manifest_status: string;
+            /** Mode */
+            mode?: string | null;
+            /** Object Storage */
+            object_storage: {
+                [key: string]: unknown;
+            };
+            /** Path */
+            path: string;
+            /** Restore Url */
+            restore_url: string;
+        };
+        /**
+         * BackupRunRequest
+         * @description Backup command request.
+         *
+         *     ``execute`` defaults to false. The API first returns an auditable command
+         *     plan; actual host command execution needs explicit request + enabled
+         *     server setting.
+         */
+        BackupRunRequest: {
+            /**
+             * Allow Running
+             * @default false
+             */
+            allow_running: boolean;
+            /** Backup Id */
+            backup_id?: string | null;
+            /**
+             * Execute
+             * @default false
+             */
+            execute: boolean;
         };
         /**
          * BboxScope
@@ -3247,6 +3498,60 @@ export interface components {
             meta: components["schemas"]["krtour__map_admin__routers__public_status___Meta"];
         };
         /**
+         * RestoreRunRequest
+         * @description Staging restore command request.
+         */
+        RestoreRunRequest: {
+            /** App Db */
+            app_db?: string | null;
+            /** Dagster Db */
+            dagster_db?: string | null;
+            /**
+             * Execute
+             * @default false
+             */
+            execute: boolean;
+            /**
+             * Recreate
+             * @default false
+             */
+            recreate: boolean;
+            /** Rustfs Volume */
+            rustfs_volume?: string | null;
+            /**
+             * Skip Checksum
+             * @default false
+             */
+            skip_checksum: boolean;
+            /**
+             * Skip Rustfs
+             * @default false
+             */
+            skip_rustfs: boolean;
+        };
+        /**
+         * RestoreSwapRequest
+         * @description Manual hot-swap boundary request.
+         */
+        RestoreSwapRequest: {
+            /** Note */
+            note?: string | null;
+            /** Operator */
+            operator?: string | null;
+        };
+        /**
+         * RestoreTargets
+         * @description Staging restore targets.
+         */
+        RestoreTargets: {
+            /** App Db */
+            app_db: string;
+            /** Dagster Db */
+            dagster_db: string;
+            /** Rustfs Volume */
+            rustfs_volume: string;
+        };
+        /**
          * SigunguByRadiusScope
          * @description kraddr-geo가 계산한 반경 교차 시군구 기준 갱신 scope.
          */
@@ -3461,6 +3766,90 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    list_backups_admin_backups_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupListResponse"];
+                };
+            };
+        };
+    };
+    create_backup_admin_backups_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["BackupRunRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupOperationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_backup_admin_backups__backup_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                backup_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_reviews_admin_dedup_review_get: {
         parameters: {
             query?: {
@@ -4467,6 +4856,76 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_backup_admin_restore__backup_id__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                backup_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RestoreRunRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupOperationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    plan_restore_swap_admin_restore__backup_id__swap_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                backup_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RestoreSwapRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupOperationResponse"];
+                };
             };
             /** @description Validation Error */
             422: {
