@@ -6,6 +6,8 @@ Sprint 4 §2.8 CLI. read-only ``status`` + mutate ``import``(MOIS Step A bulk �
 명령
 ----
 - ``krtour-map status`` — 운영 현황 카운트 출력 (read-only, mutex 없음).
+- ``krtour-map consistency-report`` — ADR-033 F1~F8 정합성 dry-run Markdown/JSON
+  리포트 출력 (read-only 기본, mutex 없음).
 - ``krtour-map import mois <records-file>`` — provider가 export한 NDJSON snapshot을
   읽어 MOIS 인허가 feature를 적재한다 (Step A bulk). ``run_mois_license_bulk_job``이
   ``import:python-mois-api:<dataset>`` advisory lock으로 단일 워커 직렬화(ADR-039)
@@ -40,9 +42,21 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from krtour.map.cli.consistency_report import (
+    ConsistencyReportOptions,
+    load_file_object_refs,
+    render_consistency_report_json,
+    render_consistency_report_markdown,
+)
 from krtour.map.cli.mutex import dedup_merge_lock_key, try_mutex_lock
 from krtour.map.cli.records import iter_mois_license_records
 from krtour.map.client import AsyncKrtourMapClient
+from krtour.map.core import kst_now
+from krtour.map.infra.consistency import (
+    DEDUP_PENDING_WARN_THRESHOLD,
+    DEDUP_SCORE_REGRESSION_WARN_POINTS,
+    PROVIDER_LAST_SUCCESS_WARN_SECONDS,
+)
 from krtour.map.infra.db import make_async_engine
 from krtour.map.infra.merge_repo import MergeError
 from krtour.map.infra.status_repo import dedup_fp_stats
@@ -89,6 +103,73 @@ def build_parser() -> argparse.ArgumentParser:
         "status", help="운영 현황 카운트 출력 (read-only)."
     )
     status_p.set_defaults(func=_cmd_status)
+
+    consistency_p = sub.add_parser(
+        "consistency-report",
+        help="ADR-033 F1~F8 정합성 dry-run report 출력 (read-only 기본).",
+    )
+    consistency_p.add_argument(
+        "--batch-id",
+        default=None,
+        help="리포트 batch_id. 미지정 시 새 UUID 생성.",
+    )
+    consistency_p.add_argument(
+        "--persist",
+        action="store_true",
+        help="dry-run 대신 ops.feature_consistency_reports에 리포트를 저장한다.",
+    )
+    consistency_p.add_argument(
+        "--format",
+        choices=["markdown", "json"],
+        default="markdown",
+        help="출력 형식. 기본 markdown.",
+    )
+    consistency_p.add_argument(
+        "--output",
+        default=None,
+        help="출력 파일 경로. 미지정 시 stdout.",
+    )
+    consistency_p.add_argument(
+        "--sample-limit",
+        type=int,
+        default=20,
+        help="케이스별 sample id 최대 개수. 기본 20.",
+    )
+    consistency_p.add_argument(
+        "--dedup-pending-threshold",
+        type=int,
+        default=DEDUP_PENDING_WARN_THRESHOLD,
+        help=f"F4 pending dedup WARN threshold. 기본 {DEDUP_PENDING_WARN_THRESHOLD}.",
+    )
+    consistency_p.add_argument(
+        "--provider-last-success-sla-seconds",
+        type=int,
+        default=PROVIDER_LAST_SUCCESS_WARN_SECONDS,
+        help=(
+            "F5 provider last_success 기본 SLA seconds. "
+            f"기본 {PROVIDER_LAST_SUCCESS_WARN_SECONDS}."
+        ),
+    )
+    consistency_p.add_argument(
+        "--dedup-score-regression-warn-points",
+        type=float,
+        default=DEDUP_SCORE_REGRESSION_WARN_POINTS,
+        help=f"F7 score regression WARN points. 기본 {DEDUP_SCORE_REGRESSION_WARN_POINTS:g}.",
+    )
+    consistency_p.add_argument(
+        "--known-file-objects",
+        default=None,
+        help=(
+            "F8 객체 저장소 snapshot JSON/JSONL 경로. 각 항목은 storage_backend, bucket, "
+            "object_key를 가진다."
+        ),
+    )
+    consistency_p.add_argument(
+        "--fail-on-error",
+        action="store_true",
+        help="severity_max=ERROR이면 report 출력 후 exit 1.",
+    )
+    consistency_p.set_defaults(func=_cmd_consistency_report)
 
     import_p = sub.add_parser(
         "import",
@@ -235,6 +316,63 @@ async def _cmd_status(args: argparse.Namespace) -> int:
     finally:
         await engine.dispose()
     return 0
+
+
+async def _cmd_consistency_report(args: argparse.Namespace) -> int:
+    known_file_objects = None
+    known_source = None
+    known_count = None
+    if args.known_file_objects is not None:
+        path = Path(args.known_file_objects)
+        if not path.is_file():  # noqa: ASYNC240  # CLI 진입 1회 stat
+            print(f"consistency-report: snapshot 파일 없음 — {path}", file=sys.stderr)
+            return _EXIT_INVALID
+        try:
+            known_file_objects = load_file_object_refs(path)
+        except ValueError as exc:
+            print(f"consistency-report: {exc}", file=sys.stderr)
+            return _EXIT_INVALID
+        known_source = str(path)
+        known_count = len(known_file_objects)
+
+    engine = make_async_engine(_resolve_dsn(args))
+    try:
+        async with AsyncKrtourMapClient(engine) as client:
+            report = await client.run_consistency_report(
+                batch_id=args.batch_id,
+                persist=bool(args.persist),
+                sample_limit=args.sample_limit,
+                dedup_pending_threshold=args.dedup_pending_threshold,
+                provider_last_success_sla_seconds=args.provider_last_success_sla_seconds,
+                dedup_score_regression_warn_points=args.dedup_score_regression_warn_points,
+                known_file_objects=known_file_objects,
+            )
+    finally:
+        await engine.dispose()
+
+    options = ConsistencyReportOptions(
+        generated_at=kst_now(),
+        persisted=bool(args.persist),
+        sample_limit=args.sample_limit,
+        dedup_pending_threshold=args.dedup_pending_threshold,
+        provider_last_success_sla_seconds=args.provider_last_success_sla_seconds,
+        dedup_score_regression_warn_points=args.dedup_score_regression_warn_points,
+        known_file_objects_source=known_source,
+        known_file_objects_count=known_count,
+    )
+    output = (
+        render_consistency_report_json(report, options=options)
+        if args.format == "json"
+        else render_consistency_report_markdown(report, options=options)
+    )
+    if args.output is None:
+        print(output, end="")
+    else:
+        output_path = Path(args.output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(output, encoding="utf-8")  # noqa: ASYNC240  # CLI 1회 출력
+        print(f"consistency-report: wrote {output_path}")
+    return 1 if args.fail_on_error and report.severity_max == "ERROR" else 0
 
 
 @asynccontextmanager

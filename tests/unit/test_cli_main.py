@@ -42,6 +42,62 @@ def test_parser_status_command() -> None:
     assert hasattr(args, "func")
 
 
+def test_parser_consistency_report_defaults() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["consistency-report"])
+
+    assert args.command == "consistency-report"
+    assert args.batch_id is None
+    assert args.persist is False
+    assert args.format == "markdown"
+    assert args.output is None
+    assert args.sample_limit == 20
+    assert args.dedup_pending_threshold == 1000
+    assert args.provider_last_success_sla_seconds == 86400
+    assert args.dedup_score_regression_warn_points == 10.0
+    assert args.known_file_objects is None
+    assert args.fail_on_error is False
+    assert hasattr(args, "func")
+
+
+def test_parser_consistency_report_options() -> None:
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "consistency-report",
+            "--batch-id",
+            "batch-1",
+            "--persist",
+            "--format",
+            "json",
+            "--output",
+            "docs/reports/r.md",
+            "--sample-limit",
+            "5",
+            "--dedup-pending-threshold",
+            "10",
+            "--provider-last-success-sla-seconds",
+            "3600",
+            "--dedup-score-regression-warn-points",
+            "7.5",
+            "--known-file-objects",
+            "objects.jsonl",
+            "--fail-on-error",
+        ]
+    )
+
+    assert args.batch_id == "batch-1"
+    assert args.persist is True
+    assert args.format == "json"
+    assert args.output == "docs/reports/r.md"
+    assert args.sample_limit == 5
+    assert args.dedup_pending_threshold == 10
+    assert args.provider_last_success_sla_seconds == 3600
+    assert args.dedup_score_regression_warn_points == 7.5
+    assert args.known_file_objects == "objects.jsonl"
+    assert args.fail_on_error is True
+
+
 def test_parser_dsn_option() -> None:
     parser = build_parser()
     args = parser.parse_args(["--dsn", "postgresql+asyncpg://x/y", "status"])

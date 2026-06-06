@@ -70,6 +70,14 @@ def test_static_cases_declares_f1_f2_f3_f6_all_error() -> None:
     assert all(c.severity == "ERROR" for c in CONSISTENCY_CASES)
 
 
+def test_f3_postgis_functions_are_schema_qualified() -> None:
+    f3 = next(case for case in CONSISTENCY_CASES if case.code == "F3")
+
+    assert "x_extension.ST_SRID" in f3.sql
+    assert "x_extension.ST_DWithin" in f3.sql
+    assert "x_extension.ST_Transform" in f3.sql
+
+
 def test_build_report_all_clean_is_ok() -> None:
     cases = [_case("F1", "ERROR", 0), _case("F2", "ERROR", 0), _case("F3", "ERROR", 0)]
     report = build_report("batch-1", cases)
