@@ -33,6 +33,7 @@ from krtour.map_admin.routers.health import router as health_router
 from krtour.map_admin.routers.mois_detail import router as mois_detail_router
 from krtour.map_admin.routers.offline_uploads import router as offline_uploads_router
 from krtour.map_admin.routers.ops import router as ops_router
+from krtour.map_admin.routers.ops_logs import router as ops_logs_router
 from krtour.map_admin.routers.poi_cache_targets import (
     router as poi_cache_targets_router,
 )
@@ -56,6 +57,7 @@ __all__ = [
     "mois_detail_router",
     "offline_uploads_router",
     "ops_router",
+    "ops_logs_router",
     "dagster_router",
     "public_status_router",
     "providers_router",

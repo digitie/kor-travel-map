@@ -926,6 +926,116 @@
         "title": "AdminIssueRecord",
         "type": "object"
       },
+      "ApiCallLogRecord": {
+        "additionalProperties": false,
+        "description": "``ops.api_call_log`` HTTP 표현.",
+        "properties": {
+          "api_call_log_key": {
+            "title": "Api Call Log Key",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
+          },
+          "status_code": {
+            "title": "Status Code",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "api_call_log_key",
+          "method",
+          "path",
+          "status_code",
+          "duration_ms",
+          "created_at"
+        ],
+        "title": "ApiCallLogRecord",
+        "type": "object"
+      },
+      "ApiCallLogsListData": {
+        "additionalProperties": false,
+        "description": "api call log 목록 data.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ApiCallLogRecord"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "ApiCallLogsListData",
+        "type": "object"
+      },
+      "ApiCallLogsResponse": {
+        "additionalProperties": false,
+        "description": "``GET /ops/api-call-logs`` 응답 (DA-D-03 envelope).",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ApiCallLogsListData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/LogListMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ApiCallLogsResponse",
+        "type": "object"
+      },
       "BboxScope": {
         "additionalProperties": false,
         "description": "WGS84 bbox 안 feature 갱신 scope.",
@@ -3551,6 +3661,26 @@
         "title": "IssueCoordBody",
         "type": "object"
       },
+      "LogListMeta": {
+        "additionalProperties": false,
+        "description": "로그 목록 공통 meta.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "count",
+          "duration_ms"
+        ],
+        "title": "LogListMeta",
+        "type": "object"
+      },
       "MoisLicenseDetailData": {
         "additionalProperties": false,
         "description": "``GET /debug/mois-license/{license_id}`` data — 단건 on-demand 상세.",
@@ -6106,6 +6236,111 @@
           "consecutive_failures"
         ],
         "title": "SyncStateSummary",
+        "type": "object"
+      },
+      "SystemLogRecord": {
+        "additionalProperties": false,
+        "description": "``ops.system_log`` HTTP 표현.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "detail": {
+            "additionalProperties": true,
+            "title": "Detail",
+            "type": "object"
+          },
+          "event": {
+            "title": "Event",
+            "type": "string"
+          },
+          "level": {
+            "title": "Level",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "system_log_key": {
+            "title": "System Log Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "system_log_key",
+          "level",
+          "source",
+          "event",
+          "message",
+          "detail",
+          "created_at"
+        ],
+        "title": "SystemLogRecord",
+        "type": "object"
+      },
+      "SystemLogsListData": {
+        "additionalProperties": false,
+        "description": "system log 목록 data.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SystemLogRecord"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "SystemLogsListData",
+        "type": "object"
+      },
+      "SystemLogsResponse": {
+        "additionalProperties": false,
+        "description": "``GET /ops/system-logs`` 응답 (DA-D-03 envelope).",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SystemLogsListData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/LogListMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "SystemLogsResponse",
         "type": "object"
       },
       "ValidationError": {
@@ -9777,6 +10012,118 @@
         ]
       }
     },
+    "/ops/api-call-logs": {
+      "get": {
+        "description": "``ops.api_call_log`` 호출 로그 목록.",
+        "operationId": "get_api_call_logs_ops_api_call_logs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "method",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Method"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 599,
+                  "minimum": 100,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "path",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Path"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiCallLogsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Api Call Logs",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
     "/ops/consistency/issues": {
       "get": {
         "description": "열린 data integrity issue 목록.",
@@ -10318,6 +10665,123 @@
           }
         },
         "summary": "Get Ops Metrics",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
+    "/ops/system-logs": {
+      "get": {
+        "description": "``ops.system_log`` 운영 로그 목록.",
+        "operationId": "get_system_logs_ops_system_logs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "level",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "debug",
+                    "info",
+                    "warning",
+                    "error",
+                    "critical"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Level"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemLogsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get System Logs",
         "tags": [
           "ops"
         ]

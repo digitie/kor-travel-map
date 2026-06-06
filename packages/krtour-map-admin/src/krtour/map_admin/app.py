@@ -20,8 +20,10 @@ uvicorn 설정은 ``AdminSettings``(``KRTOUR_MAP_ADMIN_*`` env) 또는 호출자
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
+from time import perf_counter
 from uuid import uuid4
 
 import httpx
@@ -29,6 +31,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from krtour.map.infra.log_repo import record_api_call
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse
 
@@ -45,6 +48,7 @@ from krtour.map_admin.routers import (
     health_router,
     mois_detail_router,
     offline_uploads_router,
+    ops_logs_router,
     ops_router,
     poi_cache_targets_router,
     providers_router,
@@ -56,6 +60,8 @@ from krtour.map_admin.routers import (
 from krtour.map_admin.settings import AdminSettings
 
 __all__ = ["app", "create_app"]
+
+_logger = logging.getLogger(__name__)
 
 
 _ERROR_CODE_BY_STATUS: dict[int, str] = {
@@ -76,6 +82,40 @@ _ERROR_CODE_BY_STATUS: dict[int, str] = {
 def _request_id(request: Request) -> str:
     value = request.headers.get("x-request-id")
     return value if value else str(uuid4())
+
+
+async def _record_api_call_safe(
+    *,
+    method: str,
+    path: str,
+    status_code: int,
+    duration_ms: int,
+    request_id: str | None,
+) -> None:
+    """``ops.api_call_log``에 호출 1건을 best-effort로 기록한다 (T-212c).
+
+    opt-in ``api_call_log_enabled`` 미들웨어에서만 호출된다. 짧게 사는 세션을 app
+    DB engine으로 열어 INSERT + commit하고, **모든 예외를 삼킨다** — 로그 기록
+    실패가 실제 요청을 절대 깨뜨리지 않게 한다(디버그 레벨로만 흘린다).
+    """
+    try:
+        from sqlalchemy.ext.asyncio import AsyncSession
+
+        from krtour.map_admin.db import _get_engine
+
+        async with AsyncSession(_get_engine(), expire_on_commit=False) as session:
+            await record_api_call(
+                session,
+                method=method,
+                path=path,
+                status_code=status_code,
+                duration_ms=duration_ms,
+                request_id=request_id,
+                error_code=None,
+            )
+            await session.commit()
+    except Exception:  # noqa: BLE001 — best-effort, 요청을 절대 깨뜨리지 않는다.
+        _logger.debug("api_call_log 기록 실패 (무시)", exc_info=True)
 
 
 def _status_error_code(status_code: int) -> str:
@@ -281,6 +321,26 @@ def create_app(settings: AdminSettings | None = None) -> FastAPI:
                 response.headers.setdefault("Vary", "Origin")
             return response
 
+    # opt-in API 호출 로그 (T-212c). 기본 off → 등록 안 하면 zero overhead.
+    # OpenAPI spec에는 영향 없음(미들웨어, ADR-031 drift gate 무관).
+    if settings.api_call_log_enabled:
+
+        @application.middleware("http")
+        async def record_api_call_log(
+            request: Request,
+            call_next: Callable[[Request], Awaitable[Response]],
+        ) -> Response:
+            started_at = perf_counter()
+            response = await call_next(request)
+            await _record_api_call_safe(
+                method=request.method,
+                path=request.url.path,
+                status_code=response.status_code,
+                duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
+                request_id=_request_id(request),
+            )
+            return response
+
     # public liveness/version은 의존 없는 정적 응답 — 항상 mount (T-213h).
     application.include_router(public_status_router)
 
@@ -309,6 +369,7 @@ def create_app(settings: AdminSettings | None = None) -> FastAPI:
 
     if ops_routes_enabled:
         application.include_router(ops_router)
+        application.include_router(ops_logs_router)
         application.include_router(dagster_router)
 
     return application
