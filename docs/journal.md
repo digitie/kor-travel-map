@@ -2,6 +2,22 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-07 (claude) — `/admin/issues` 목록 q/bbox 필터 (T-DA-13 deferred 마무리)
+
+**작업**: T-DA-13에서 미뤘던 목록 `q`/`bbox` 필터를 `ops_repo` 확장으로 구현.
+
+- **`ops_repo.list_ops_integrity_issues`**: `q`(message/feature_id/source_record_key
+  ILIKE) + `bbox`(연결 feature 좌표 EXISTS 서브쿼리, ADR-012 STORED `coord` 4326
+  GiST `&&` + `x_extension.ST_MakeEnvelope`; feature_id 없는 이슈는 bbox 시 제외) 파라미터
+  추가.
+- **`routers/admin_issues.py`**: `q` 쿼리 + `bbox` CSV(`min_lon,min_lat,max_lon,max_lat`,
+  `_parse_bbox_csv` 검증 → 422) 노출, repo로 전달. openapi/types 재생성.
+- **검증**: ops_repo 통합 테스트 신설(bbox 포함/제외 + 다른 지역 0건 + q message/feature_id
+  매칭, PostGIS 실측), 라우터 단위(q/bbox passthrough + bbox 422) 추가. ruff/mypy/
+  lint-imports green, 단위 coverage ≥80%, drift green, frontend gates green.
+- **문서**: contract §4.1 필터 목록 갱신(bbox/q deferred 제거), tasks T-DA-13.
+- **다음**: T-212c(API error/log contract + `/ops/health-deep` + log 조회 표면).
+
 ## 2026-06-07 (claude) — T-DA-13 `/admin/issues` 구현 (DA-D-04 = T-212)
 
 **작업**: ADR-046 주소/좌표 이슈 운영자 수동 처리 API `/admin/issues`를 구현. T-DA-15/16/18

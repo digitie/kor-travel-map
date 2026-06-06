@@ -310,6 +310,22 @@ async def _reverse_geocode(lon: float, lat: float) -> dict[str, Any] | None:
     }
 
 
+def _parse_bbox_csv(value: str | None) -> tuple[float, float, float, float] | None:
+    """``min_lon,min_lat,max_lon,max_lat`` CSV → 튜플. 형식 오류는 ``ValueError``."""
+    if value is None:
+        return None
+    parts = [part.strip() for part in value.split(",")]
+    if len(parts) != 4:
+        raise ValueError("bbox는 min_lon,min_lat,max_lon,max_lat CSV 형식이어야 합니다")
+    try:
+        min_lon, min_lat, max_lon, max_lat = (float(part) for part in parts)
+    except ValueError as exc:
+        raise ValueError("bbox 좌표는 숫자여야 합니다") from exc
+    if min_lon > max_lon or min_lat > max_lat:
+        raise ValueError("bbox min 좌표가 max보다 큽니다")
+    return (min_lon, min_lat, max_lon, max_lat)
+
+
 def _geocode_query(
     feature: FeatureAddressSnapshot | None,
     payload: dict[str, Any],
@@ -345,16 +361,26 @@ async def list_admin_issues(
     dataset_key: Annotated[str | None, Query()] = None,
     severity: Annotated[IssueSeverity | None, Query()] = None,
     feature_id: Annotated[str | None, Query()] = None,
+    q: Annotated[
+        str | None,
+        Query(description="message/feature_id/source_record_key 부분일치(ILIKE)."),
+    ] = None,
+    bbox: Annotated[
+        str | None,
+        Query(description="연결 feature 좌표 bbox: min_lon,min_lat,max_lon,max_lat (WGS84)."),
+    ] = None,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
     cursor: Annotated[str | None, Query()] = None,
 ) -> AdminIssueListResponse:
     """운영 이슈 목록 (keyset cursor).
 
-    ``bbox``/free-text ``q`` 필터는 ``ops_repo``가 지원하지 않아 범위 밖이다
-    (deferred — 추후 repo 확장 시 추가).
+    ``q``는 message/feature_id/source_record_key 부분일치, ``bbox``는 연결 feature
+    좌표가 범위 안에 드는 이슈만 남긴다(ADR-012 STORED coord 4326 GiST; feature_id
+    없는 이슈는 bbox 적용 시 제외).
     """
     started_at = perf_counter()
     try:
+        bbox_tuple = _parse_bbox_csv(bbox)
         page = await list_ops_integrity_issues(
             session,
             status=issue_status,
@@ -363,6 +389,8 @@ async def list_admin_issues(
             provider=provider,
             dataset_key=dataset_key,
             feature_id=feature_id,
+            q=q,
+            bbox=bbox_tuple,
             limit=page_size,
             cursor=cursor,
         )

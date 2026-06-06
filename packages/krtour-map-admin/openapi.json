@@ -7428,7 +7428,7 @@
     },
     "/admin/issues": {
       "get": {
-        "description": "운영 이슈 목록 (keyset cursor).\n\n``bbox``/free-text ``q`` 필터는 ``ops_repo``가 지원하지 않아 범위 밖이다\n(deferred — 추후 repo 확장 시 추가).",
+        "description": "운영 이슈 목록 (keyset cursor).\n\n``q``는 message/feature_id/source_record_key 부분일치, ``bbox``는 연결 feature\n좌표가 범위 안에 드는 이슈만 남긴다(ADR-012 STORED coord 4326 GiST; feature_id\n없는 이슈는 bbox 적용 시 제외).",
         "operationId": "list_admin_issues_admin_issues_get",
         "parameters": [
           {
@@ -7538,6 +7538,42 @@
                 }
               ],
               "title": "Feature Id"
+            }
+          },
+          {
+            "description": "message/feature_id/source_record_key 부분일치(ILIKE).",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "message/feature_id/source_record_key 부분일치(ILIKE).",
+              "title": "Q"
+            }
+          },
+          {
+            "description": "연결 feature 좌표 bbox: min_lon,min_lat,max_lon,max_lat (WGS84).",
+            "in": "query",
+            "name": "bbox",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "연결 feature 좌표 bbox: min_lon,min_lat,max_lon,max_lat (WGS84).",
+              "title": "Bbox"
             }
           },
           {

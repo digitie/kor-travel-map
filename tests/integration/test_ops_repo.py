@@ -201,3 +201,82 @@ async def test_ops_integrity_issues_list_cursor_and_counts(
     assert counts.by_status == {"open": 2}
     assert counts.by_severity == {"error": 1, "warning": 1}
     assert counts.by_type == {"missing_address": 1, "missing_coordinate": 1}
+
+
+async def test_ops_integrity_issues_q_and_bbox_filters(
+    migrated_session: AsyncSession,
+) -> None:
+    from geoalchemy2 import WKTElement
+
+    from krtour.map.infra.models import FeatureRow
+
+    fid = "f_issue_bbox"
+    migrated_session.add(
+        FeatureRow(
+            feature_id=fid,
+            kind="place",
+            name="광화문",
+            category="01070300",
+            coord=WKTElement("POINT(126.9769 37.5759)", srid=4326),
+            address={"road": "서울특별시 종로구 세종대로 1"},
+            detail={},
+            urls={},
+            raw_refs=[],
+            status="active",
+        )
+    )
+    await migrated_session.flush()
+
+    in_bbox = await create_data_integrity_violation(
+        migrated_session,
+        provider="python-mois-api",
+        dataset_key="mois_license_features_bulk",
+        feature_id=fid,
+        violation_type="provider_address_mismatch",
+        severity="warning",
+        message="주소 불일치: 서울 종로",
+    )
+    no_feature = await create_data_integrity_violation(
+        migrated_session,
+        provider="python-mois-api",
+        dataset_key="mois_license_features_bulk",
+        violation_type="missing_address",
+        severity="warning",
+        message="좌표만 있음",
+    )
+    await migrated_session.flush()
+
+    # bbox: 광화문 포함 → feature 연결 이슈만(미연결 이슈 제외).
+    seoul = await list_ops_integrity_issues(
+        migrated_session,
+        provider="python-mois-api",
+        bbox=(126.97, 37.57, 126.98, 37.58),
+    )
+    keys = {item.violation_key for item in seoul.items}
+    assert in_bbox.violation_key in keys
+    assert no_feature.violation_key not in keys
+
+    # bbox: 다른 지역(부산) → 매칭 없음.
+    busan = await list_ops_integrity_issues(
+        migrated_session,
+        provider="python-mois-api",
+        bbox=(129.0, 35.0, 129.2, 35.2),
+    )
+    assert in_bbox.violation_key not in {item.violation_key for item in busan.items}
+
+    # q: message 부분일치.
+    matched = await list_ops_integrity_issues(
+        migrated_session,
+        provider="python-mois-api",
+        q="불일치",
+    )
+    assert {item.violation_key for item in matched.items} == {in_bbox.violation_key}
+
+    # q: feature_id 부분일치.
+    by_fid = await list_ops_integrity_issues(
+        migrated_session,
+        provider="python-mois-api",
+        q="issue_bbox",
+    )
+    assert by_fid.items
+    assert all(item.feature_id == fid for item in by_fid.items)

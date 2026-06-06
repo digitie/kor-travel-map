@@ -253,6 +253,25 @@ WHERE (CAST(:status AS text) IS NULL OR status = CAST(:status AS text))
   AND (CAST(:dataset_key AS text) IS NULL OR dataset_key = CAST(:dataset_key AS text))
   AND (CAST(:feature_id AS text) IS NULL OR feature_id = CAST(:feature_id AS text))
   AND (
+    CAST(:q_like AS text) IS NULL
+    OR message ILIKE CAST(:q_like AS text)
+    OR feature_id ILIKE CAST(:q_like AS text)
+    OR source_record_key ILIKE CAST(:q_like AS text)
+  )
+  AND (
+    CAST(:bbox_min_lon AS double precision) IS NULL
+    OR EXISTS (
+        SELECT 1
+        FROM feature.features AS f
+        WHERE f.feature_id = data_integrity_violations.feature_id
+          AND f.coord && x_extension.ST_MakeEnvelope(
+              CAST(:bbox_min_lon AS double precision),
+              CAST(:bbox_min_lat AS double precision),
+              CAST(:bbox_max_lon AS double precision),
+              CAST(:bbox_max_lat AS double precision), 4326)
+    )
+  )
+  AND (
     CAST(:cursor_detected_at AS timestamptz) IS NULL
     OR (detected_at, violation_key) < (
         CAST(:cursor_detected_at AS timestamptz),
@@ -445,13 +464,25 @@ async def list_ops_integrity_issues(
     provider: str | None = None,
     dataset_key: str | None = None,
     feature_id: str | None = None,
+    q: str | None = None,
+    bbox: tuple[float, float, float, float] | None = None,
     limit: int = 50,
     cursor: str | None = None,
 ) -> OpsIntegrityIssuePage:
-    """``ops.data_integrity_violations`` issue 목록을 조회한다."""
+    """``ops.data_integrity_violations`` issue 목록을 조회한다.
+
+    ``q``는 message/feature_id/source_record_key의 부분일치(ILIKE),
+    ``bbox``는 연결 feature 좌표가 ``(min_lon, min_lat, max_lon, max_lat)``
+    안에 드는 이슈만 남긴다(ADR-012: STORED ``coord`` 4326 GiST ``&&``, feature_id가
+    없는 이슈는 제외). 둘 다 ``None``이면 필터하지 않는다.
+    """
     page_size = _limit(limit)
     cursor_detected_at, cursor_violation_key = _decode_cursor(
         cursor, kind="integrity_issues"
+    )
+    q_like = f"%{q}%" if q else None
+    bbox_min_lon, bbox_min_lat, bbox_max_lon, bbox_max_lat = (
+        bbox if bbox is not None else (None, None, None, None)
     )
     rows = (
         await session.execute(
@@ -463,6 +494,11 @@ async def list_ops_integrity_issues(
                 "provider": provider,
                 "dataset_key": dataset_key,
                 "feature_id": feature_id,
+                "q_like": q_like,
+                "bbox_min_lon": bbox_min_lon,
+                "bbox_min_lat": bbox_min_lat,
+                "bbox_max_lon": bbox_max_lon,
+                "bbox_max_lat": bbox_max_lat,
                 "cursor_detected_at": cursor_detected_at,
                 "cursor_violation_key": cursor_violation_key,
                 "limit": page_size + 1,

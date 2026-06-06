@@ -145,9 +145,11 @@ object 단건은 모두 envelope로 수렴시킨다.
 > 엔드포인트를 모두 제공한다. 목록/단건 읽기는 `ops_repo`/`integrity_violation_repo`,
 > kraddr-geo 정/역지오코딩 + 주소·좌표 덮어쓰기는 `geocoding` + 신규
 > `feature_address_repo`(feature.features UPDATE + `ops.feature_overrides` upsert)를
-> 쓴다. 모든 성공 응답은 `{data, meta}` envelope. admin UI(승인/거절 화면)는 T-212b
-> 후속. **참고**: 목록 `bbox`/free-text `q` 필터는 `ops_repo`가 아직 미지원이라
-> 범위 밖(추후 repo 확장 시 추가).
+> 쓴다. 모든 성공 응답은 `{data, meta}` envelope. 목록 필터는 `issue_type`/`provider`/
+> `dataset_key`/`severity`/`status`/`feature_id` + **`q`**(message/feature_id/
+> source_record_key ILIKE) + **`bbox`**(연결 feature 좌표 4326 GiST `&&`, CSV
+> `min_lon,min_lat,max_lon,max_lat`; feature_id 없는 이슈는 bbox 적용 시 제외) +
+> keyset `cursor`를 지원한다. admin UI(승인/거절 화면)는 T-212b 후속.
 
 `/admin/issues`는 결측/정합성 이슈를 한 건 단위로 처리하는 운영 API다. 특히
 kraddr-geo REST v2 적용 중 발생한 주소/좌표 이슈를 admin UI에서 수동 처리할 수
