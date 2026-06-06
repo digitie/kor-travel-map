@@ -115,11 +115,11 @@ class _HeritageItem:
 class _HeritageEvent:
     sn: str
     title: str
-    start_date: date | None = None
-    end_date: date | None = None
-    venue_name: str | None = None
-    tel: str | None = None
-    location_text: str | None = None
+    starts_on: date | None = None
+    ends_on: date | None = None
+    place: str | None = None
+    tel_name: str | None = None
+    address: str | None = None
     longitude: Decimal | float | None = None
     latitude: Decimal | float | None = None
     main_image: str | None = None
@@ -321,10 +321,10 @@ async def test_dagster_assets_validate_coordinates_and_load_to_postgis(
                 _HeritageEvent(
                     sn="DAGSTER-HERITAGE-EVENT-001",
                     title="경주 전통문화 행사",
-                    start_date=date(2026, 9, 1),
-                    end_date=date(2026, 9, 2),
-                    venue_name="경주 문화마당",
-                    location_text="경상북도 경주시 교동",
+                    starts_on=date(2026, 9, 1),
+                    ends_on=date(2026, 9, 2),
+                    place="경주 문화마당",
+                    address="경상북도 경주시 교동",
                     longitude=Decimal("129.350"),
                     latitude=Decimal("35.796"),
                 )
