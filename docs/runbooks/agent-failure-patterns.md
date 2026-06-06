@@ -72,6 +72,30 @@
 - **회피**: `git add`에 **관련 파일만 명시**(`git add -A` 지양). 커밋 전 `git status -sb`
   확인.
 
+### B4 — Windows Git rebase/merge continue가 Vim을 열고 멈춤
+
+- **증상**: WSL 비대화 세션에서 `git.exe ... rebase --continue` 또는
+  `merge --continue` 실행 후 `Vim: Warning: Output is not to a terminal` 메시지가
+  나오고 프로세스가 대기한다.
+- **원인**: Windows Git의 editor 설정이 비대화 환경에서도 실행된다. 단순
+  `GIT_EDITOR=true git.exe ...`는 Windows Git/셸 경계에서 기대대로 적용되지 않을 수
+  있다.
+- **회피**: continue류 명령은 처음부터 editor를 명령 단위로 우회한다.
+  ```
+  git.exe -C F:/dev/python-krtour-map-codex -c core.editor=true rebase --continue
+  git.exe -C F:/dev/python-krtour-map-codex -c core.editor=true merge --continue
+  ```
+- **복구**: 이미 멈췄으면 해당 `git.exe ... rebase --continue` 프로세스를 종료한 뒤
+  위 명령으로 재실행한다.
+  ```
+  ps -ef | rg "git.exe .*rebase --continue|git.exe .*merge --continue"
+  kill <pid>
+  git.exe -C F:/dev/python-krtour-map-codex -c core.editor=true rebase --continue
+  ```
+- **원칙**: AI agent는 rebase/merge continue에서 항상 `-c core.editor=true`를 붙인다.
+  커밋 메시지를 바꿀 필요가 없으면 `commit --amend --no-edit`,
+  `merge --no-edit`처럼 non-interactive 옵션을 우선한다.
+
 ## C. 도메인 계약 (자연키 / 스키마 / upstream)
 
 ### C1 — 자연키에 `|` 사용 → make_feature_id 거부

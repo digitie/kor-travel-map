@@ -2,6 +2,28 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-06 (codex) — T-201b-d F8 file object orphan 정합성 검사
+
+**작업**: ADR-033 Phase 2의 마지막 케이스인 `F8` file object orphan WARN을
+`run_consistency_checks()`에 추가한다.
+
+- **Integrity**: `feature.feature_files` metadata와 객체 저장소 snapshot
+  (`known_file_objects`)을 비교해 metadata-only/object-only/삭제 feature 연결을
+  WARN으로 보고한다.
+- **호환 경계**: 현재 Alembic head에는 `feature.feature_files` 테이블이 아직 없으므로
+  테이블 부재 시 기존 호출은 OK로 유지한다. 객체 snapshot이 주입되면 object-only
+  orphan은 `object_missing_metadata`로 보고한다.
+- **테스트**: F8 비교 helper와 table-missing 경계를 unit test로 고정하고, PostGIS
+  integration에서 임시 `feature.feature_files` metadata와 snapshot mismatch 3종을
+  검증했다.
+- **검증**: `TMPDIR=/tmp pytest -s tests/unit/test_infra_consistency.py -q` 14 passed,
+  `TMPDIR=/tmp pytest -s tests/integration/test_consistency_reports.py -q` 12 passed.
+- **Runbook**: Windows Git rebase/merge continue가 Vim을 열고 멈추는 패턴을
+  `docs/runbooks/agent-failure-patterns.md` B4와 `agent-workflow.md`에 추가했다.
+  앞으로 continue류 명령은 `git.exe -c core.editor=true ... --continue`를 표준으로 쓴다.
+- **다음**: 사용자 지시에 따라 `T-209b-a`를 바로 진행한다. T-201b Phase 2에서 남은
+  범위는 dry-run report다.
+
 ## 2026-06-06 (claude) — 문서 정합성 후속: README 상태 블록 포인터화 (T-DA 마감)
 
 **작업**: PR#227(T-DA 감사) 후속. 1차 감사에서 누락했던 `README.md`도 entry doc

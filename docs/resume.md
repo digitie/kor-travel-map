@@ -1,5 +1,23 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-06 Codex 작업 메모 — T-201b-d F8 file object orphan 정합성 검사
+
+ADR-033 Phase 2의 마지막 정합성 케이스인 `F8`을 `run_consistency_checks()`에 WARN
+케이스로 추가한다. `feature.feature_files` metadata와 객체 저장소 snapshot
+(`known_file_objects`)을 비교해 DB metadata만 있고 실제 object가 없는 경우,
+object만 있고 DB metadata가 없는 경우, 삭제/누락 feature에 연결된 file metadata를
+각각 `metadata_missing_object` / `object_missing_metadata` /
+`metadata_without_active_feature` sample로 보고한다.
+
+현재 Alembic head에는 `feature.feature_files` 테이블이 아직 없으므로, F8은 테이블
+부재 시 기존 호출에서는 OK로 남고, 객체 snapshot이 주입된 경우 object-only orphan만
+WARN으로 보고한다. 향후 `feature_files` 정식 migration/업로드 경로가 들어오면 같은
+검사 계약을 그대로 사용한다.
+
+검증은 `TMPDIR=/tmp pytest -s tests/unit/test_infra_consistency.py -q` 14 passed,
+`TMPDIR=/tmp pytest -s tests/integration/test_consistency_reports.py -q` 12 passed로
+진행했다. 다음 한 작업은 사용자 지시에 따라 **T-209b-a 구현**이다.
+
 ## 2026-06-06 Codex 작업 메모 — T-209b-a Dagster SQLite schedule storage 제거 task 등록
 
 운영 확인 중 Dagster가 `DAGSTER_HOME` 아래 `.dagster/schedules/schedules.db-*`

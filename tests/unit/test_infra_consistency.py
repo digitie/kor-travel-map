@@ -13,10 +13,13 @@ import pytest
 from krtour.map.infra.consistency import (
     CONSISTENCY_CASES,
     CaseResult,
+    FileObjectRef,
     _build_f7_dedup_score_result,
+    _build_f8_file_object_orphan_result,
     _check_f4_dedup_backlog,
     _check_f5_provider_last_success_sla,
     _check_f7_dedup_score_regression,
+    _check_f8_file_object_orphans,
     build_report,
     run_consistency_checks,
 )
@@ -261,6 +264,73 @@ async def test_check_f7_dedup_score_regression_delegates_sql_rows() -> None:
     assert len(session.calls) == 1
 
 
+def test_build_f8_file_object_orphan_result_compares_metadata_and_objects() -> None:
+    rows = [
+        {
+            "file_id": "file-missing-object",
+            "feature_id": "feature-active",
+            "storage_backend": "s3",
+            "bucket": "krtour-map",
+            "object_key": "missing-object.jpg",
+            "feature_missing": False,
+        },
+        {
+            "file_id": "file-missing-feature",
+            "feature_id": "feature-deleted",
+            "storage_backend": "s3",
+            "bucket": "krtour-map",
+            "object_key": "deleted-feature.jpg",
+            "feature_missing": True,
+        },
+    ]
+    known_objects = [
+        FileObjectRef(
+            storage_backend="s3",
+            bucket="krtour-map",
+            object_key="deleted-feature.jpg",
+        ),
+        FileObjectRef(
+            storage_backend="s3",
+            bucket="krtour-map",
+            object_key="object-without-metadata.jpg",
+        ),
+    ]
+
+    result = _build_f8_file_object_orphan_result(
+        rows,
+        known_file_objects=known_objects,
+        sample_limit=2,
+    )
+
+    assert result.code == "F8"
+    assert result.severity == "WARN"
+    assert result.count == 3
+    assert result.sample_ids == [
+        "metadata_missing_object:s3:krtour-map:missing-object.jpg:"
+        "file-missing-object:feature-active",
+        "metadata_without_active_feature:s3:krtour-map:deleted-feature.jpg:"
+        "file-missing-feature:feature-deleted",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_check_f8_file_object_orphans_missing_table_still_flags_known_objects() -> None:
+    session = _FakeSession([_FakeResult(scalar=0)])
+
+    result = await _check_f8_file_object_orphans(
+        session,
+        known_file_objects=[
+            FileObjectRef(storage_backend="s3", bucket="krtour-map", object_key="orphan.jpg")
+        ],
+        sample_limit=5,  # type: ignore[arg-type]
+    )
+
+    assert result.code == "F8"
+    assert result.count == 1
+    assert result.sample_ids == ["object_missing_metadata:s3:krtour-map:orphan.jpg"]
+    assert len(session.calls) == 1
+
+
 @pytest.mark.asyncio
 async def test_run_consistency_checks_evaluates_dynamic_cases_and_persists() -> None:
     session: Any = _FakeSession(
@@ -292,6 +362,7 @@ async def test_run_consistency_checks_evaluates_dynamic_cases_and_persists() -> 
                     }
                 ]
             ),
+            _FakeResult(scalar=0),  # F8 feature_files table exists
             _FakeResult(),  # persist insert
         ]
     )
@@ -309,7 +380,7 @@ async def test_run_consistency_checks_evaluates_dynamic_cases_and_persists() -> 
     assert report.batch_id == "batch-unit"
     assert report.severity_max == "ERROR"
     assert report.summary["total_violations"] == 5
-    assert report.summary["cases_evaluated"] == 7
+    assert report.summary["cases_evaluated"] == 8
     assert report.summary["by_code"] == {
         "F1": 0,
         "F2": 1,
@@ -318,9 +389,11 @@ async def test_run_consistency_checks_evaluates_dynamic_cases_and_persists() -> 
         "F4": 2,
         "F5": 1,
         "F7": 1,
+        "F8": 0,
     }
     assert report.cases_json()[1]["sample_ids"] == ["feature-missing-detail"]
-    assert report.cases_json()[-1]["sample_ids"][0].startswith("rk-regressed:f7-a:f7-b:95.00->")
-    assert len(session.calls) == 11
+    by_code = {case["code"]: case for case in report.cases_json()}
+    assert by_code["F7"]["sample_ids"][0].startswith("rk-regressed:f7-a:f7-b:95.00->")
+    assert len(session.calls) == 12
     assert session.calls[-1][1]["batch_id"] == "batch-unit"
     assert session.calls[-1][1]["severity_max"] == "ERROR"

@@ -1,11 +1,12 @@
-"""``test_consistency_reports`` — ADR-033 F1~F7 정합성 검사 (testcontainers).
+"""``test_consistency_reports`` — ADR-033 F1~F8 정합성 검사 (testcontainers).
 
 ``run_consistency_checks``를 실 PostGIS(migrated_session, alembic head)에서 돌려
 F1(orphan source_record)/F2(detail 누락)/F3(CRS drift) 검출 + ``ops.
 feature_consistency_reports`` 영속화를 검증한다. F3는 STORED generated column이라
 정상 데이터에서 위반 0건이어야 함을 확인한다. F5는 provider sync last_success SLA,
 F6는 같은 요일 영업시간 period에서 open.time > close.time인 경우만 잡는다. F7은
-dedup queue baseline 대비 현재 ``core.scoring`` 점수 회귀를 WARN으로 관측한다.
+dedup queue baseline 대비 현재 ``core.scoring`` 점수 회귀를 WARN으로 관측한다. F8은
+``feature_files`` metadata와 객체 저장소 스냅샷 불일치를 WARN으로 관측한다.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from typing import TYPE_CHECKING
 import pytest
 from sqlalchemy import text
 
-from krtour.map.infra.consistency import run_consistency_checks
+from krtour.map.infra.consistency import FileObjectRef, run_consistency_checks
 from krtour.map.infra.models import FeatureRow, SourceRecordRow
 
 if TYPE_CHECKING:
@@ -552,3 +553,69 @@ async def test_f6_allows_normal_247_and_overnight_periods(
     by_code = {c.code: c for c in report.cases}
     assert by_code["F6"].count == 0
     assert report.severity_max == "OK"
+
+
+# ── F8: file object orphan WARN (ADR-033 Phase 2) ────────────────────────
+
+
+async def test_f8_warns_for_feature_file_metadata_and_object_snapshot_mismatch(
+    migrated_session: AsyncSession,
+) -> None:
+    active_feature = _clean_place("f8-active")
+    deleted_feature = _clean_place("f8-deleted")
+    deleted_feature.deleted_at = datetime.now(UTC)
+    migrated_session.add(active_feature)
+    migrated_session.add(deleted_feature)
+    await migrated_session.flush()
+    await migrated_session.execute(
+        text(
+            "CREATE TABLE IF NOT EXISTS feature.feature_files ("
+            "file_id TEXT PRIMARY KEY, "
+            "feature_id TEXT NOT NULL, "
+            "file_type TEXT NOT NULL DEFAULT 'image', "
+            "storage_backend TEXT NOT NULL DEFAULT 's3', "
+            "bucket TEXT NOT NULL, "
+            "object_key TEXT NOT NULL, "
+            "role TEXT NOT NULL DEFAULT 'gallery', "
+            "display_order INTEGER NOT NULL DEFAULT 0"
+            ")"
+        )
+    )
+    await migrated_session.execute(
+        text(
+            "INSERT INTO feature.feature_files "
+            "(file_id, feature_id, file_type, storage_backend, bucket, object_key, role) "
+            "VALUES "
+            "('f8-missing-object', 'f8-active', 'image', 's3', 'krtour-map', "
+            " 'missing-object.jpg', 'gallery'), "
+            "('f8-deleted-feature', 'f8-deleted', 'image', 's3', 'krtour-map', "
+            " 'deleted-feature.jpg', 'gallery')"
+        )
+    )
+    await migrated_session.flush()
+
+    report = await run_consistency_checks(
+        migrated_session,
+        persist=False,
+        known_file_objects=[
+            FileObjectRef(
+                storage_backend="s3",
+                bucket="krtour-map",
+                object_key="deleted-feature.jpg",
+            ),
+            FileObjectRef(
+                storage_backend="s3",
+                bucket="krtour-map",
+                object_key="object-without-metadata.jpg",
+            ),
+        ],
+    )
+
+    by_code = {c.code: c for c in report.cases}
+    f8 = by_code["F8"]
+    assert f8.severity == "WARN"
+    assert f8.count == 3
+    assert any(sample.startswith("metadata_missing_object:") for sample in f8.sample_ids)
+    assert any(sample.startswith("metadata_without_active_feature:") for sample in f8.sample_ids)
+    assert any(sample.startswith("object_missing_metadata:") for sample in f8.sample_ids)
+    assert report.severity_max == "WARN"
