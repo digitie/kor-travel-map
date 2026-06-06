@@ -25,7 +25,7 @@ from time import perf_counter
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from krtour.map.infra import feature_repo
+from krtour.map.infra import feature_repo, weather_repo
 from krtour.map.infra.poi_cache_target_repo import (
     PoiCacheTarget,
     get_poi_cache_target_by_key,
@@ -725,6 +725,92 @@ async def get_feature(
         )
     return FeatureDetailEnvelopeResponse(
         data=_detail_from_row(row),
+        meta=FeatureDetailMeta(duration_ms=_duration_ms(started_at)),
+    )
+
+
+class WeatherMetricOut(BaseModel):
+    """weather card metric 1건 (forecast_style × metric_key 최신값, T-213e)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    forecast_style: str
+    metric_key: str
+    metric_name: str | None = None
+    timeline_bucket: str | None = None
+    value_number: float | None = None
+    value_text: str | None = None
+    unit: str | None = None
+    severity: str | None = None
+    issued_at: datetime | None = None
+    valid_at: datetime | None = None
+    observed_at: datetime | None = None
+
+
+class WeatherCardData(BaseModel):
+    """``GET /features/{feature_id}/weather`` data payload."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    feature_id: str
+    asof: datetime | None = None
+    source_styles: list[str]
+    metrics: list[WeatherMetricOut]
+    latest_at: datetime | None = None
+    is_stale: bool
+
+
+class FeatureWeatherResponse(BaseModel):
+    """``GET /features/{feature_id}/weather`` 응답."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: WeatherCardData
+    meta: FeatureDetailMeta
+
+
+@router.get(
+    "/{feature_id}/weather",
+    response_model=FeatureWeatherResponse,
+    summary="feature weather card (forecast_style별 최신값 + freshness)",
+)
+async def get_feature_weather(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    feature_id: str,
+    asof: Annotated[
+        datetime | None,
+        Query(description="이 시점 이하 weather만(미래 예보 제외)."),
+    ] = None,
+) -> FeatureWeatherResponse:
+    started_at = perf_counter()
+    card = await weather_repo.build_weather_card(
+        session, feature_id=feature_id, asof=asof
+    )
+    metrics = [
+        WeatherMetricOut(
+            forecast_style=m.forecast_style,
+            metric_key=m.metric_key,
+            metric_name=m.metric_name,
+            timeline_bucket=m.timeline_bucket,
+            value_number=float(m.value_number) if m.value_number is not None else None,
+            value_text=m.value_text,
+            unit=m.unit,
+            severity=m.severity,
+            issued_at=m.issued_at,
+            valid_at=m.valid_at,
+            observed_at=m.observed_at,
+        )
+        for m in card.metrics
+    ]
+    return FeatureWeatherResponse(
+        data=WeatherCardData(
+            feature_id=card.feature_id,
+            asof=card.asof,
+            source_styles=card.source_styles,
+            metrics=metrics,
+            latest_at=card.latest_at,
+            is_stale=card.is_stale,
+        ),
         meta=FeatureDetailMeta(duration_ms=_duration_ms(started_at)),
     )
 

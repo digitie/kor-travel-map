@@ -143,6 +143,15 @@ from krtour.map.infra.sync_state_repo import (
 from krtour.map.infra.sync_state_repo import (
     record_sync_success as repo_record_sync_success,
 )
+from krtour.map.infra.weather_repo import (
+    WeatherCard,
+)
+from krtour.map.infra.weather_repo import (
+    build_weather_card as repo_build_weather_card,
+)
+from krtour.map.infra.weather_repo import (
+    load_weather_values as repo_load_weather_values,
+)
 from krtour.map.mois import DEFAULT_BATCH_SIZE as MOIS_DEFAULT_BATCH_SIZE
 from krtour.map.mois import (
     MoisBulkJobResult,
@@ -179,6 +188,7 @@ if TYPE_CHECKING:
 
     from krtour.map.core.dedup import DedupCandidate, DedupInput
     from krtour.map.dto import FeatureBundle
+    from krtour.map.dto.weather import WeatherValue
     from krtour.map.geocoding import AddressResolver, ReverseGeocoder
     from krtour.map.infra.scope_repo import SigunguByRadiusResolver
     from krtour.map.providers.mois import MoisLicensePlaceRecord
@@ -1070,6 +1080,36 @@ class AsyncKrtourMapClient:
                 dataset_key=dataset_key,
                 sync_scope=sync_scope,
                 next_run_after=next_run_after,
+            )
+
+    # ─── weather card (T-213e) ───────────────────────────────────────────────
+
+    async def load_weather_values(self, values: Iterable[WeatherValue]) -> int:
+        """``WeatherValue`` 들을 ``feature_weather_values``에 멱등 upsert (write)."""
+        async with self._session_factory() as session, session.begin():
+            return await repo_load_weather_values(session, values)
+
+    async def build_weather_card(
+        self,
+        *,
+        feature_id: str,
+        asof: datetime | None = None,
+        freshness_seconds: int | None = None,
+    ) -> WeatherCard:
+        """feature weather card — forecast_style×metric_key 최신값 + freshness (read).
+
+        ``infra.weather_repo.build_weather_card`` 위임(T-213e).
+        """
+        from krtour.map.infra.weather_repo import DEFAULT_WEATHER_FRESHNESS_SECONDS
+
+        fresh = (
+            freshness_seconds
+            if freshness_seconds is not None
+            else DEFAULT_WEATHER_FRESHNESS_SECONDS
+        )
+        async with self._session_factory() as session:
+            return await repo_build_weather_card(
+                session, feature_id=feature_id, asof=asof, freshness_seconds=fresh
             )
 
     async def get_update_request(

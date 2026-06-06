@@ -65,6 +65,7 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
         "/features/nearby/by-target",
         "/features/search",
         "/features/{feature_id}",
+        "/features/{feature_id}/weather",
         "/tripmate/feature-update-requests",
         "/tripmate/feature-update-requests/{request_id}",
         "/tripmate/features/batch",
