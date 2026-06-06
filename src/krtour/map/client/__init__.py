@@ -79,6 +79,9 @@ from krtour.map.infra.feature_repo import (
     load_bundles,
 )
 from krtour.map.infra.feature_repo import (
+    features_nearby as repo_features_nearby,
+)
+from krtour.map.infra.feature_repo import (
     features_nearby_poi_cache_target as repo_features_nearby_poi_cache_target,
 )
 from krtour.map.infra.feature_repo import (
@@ -886,6 +889,42 @@ class AsyncKrtourMapClient:
                 bbox=bbox,
                 kinds=kinds,
                 categories=categories,
+                limit=limit,
+                cursor=cursor,
+            )
+
+    async def features_nearby(
+        self,
+        *,
+        lon: float,
+        lat: float,
+        radius_m: float,
+        kinds: Sequence[str] | None = None,
+        categories: Sequence[str] | None = None,
+        statuses: Sequence[str] | None = ("active",),
+        providers: Sequence[str] | None = None,
+        sort: str = "distance",
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> NearbyFeaturePage:
+        """일반 좌표(``lon``/``lat``) 중심 반경 ``radius_m`` 안 feature summary (T-213b).
+
+        ``infra.feature_repo.features_nearby`` 위임. 입력 좌표는 CTE에서 1회만 5179로
+        변환하고 술어는 STORED ``coord_5179``에 직접 적용한다(ADR-012). 응답/커서는
+        by-target nearby와 동일(``NearbyFeaturePage``). ``sort`` ∈
+        {distance, name, last_updated_at}.
+        """
+        async with self._session_factory() as session:
+            return await repo_features_nearby(
+                session,
+                lon=lon,
+                lat=lat,
+                radius_m=radius_m,
+                kinds=kinds,
+                categories=categories,
+                statuses=statuses,
+                providers=providers,
+                sort=sort,
                 limit=limit,
                 cursor=cursor,
             )

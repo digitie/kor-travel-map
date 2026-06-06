@@ -442,6 +442,127 @@ LIMIT :limit_plus_one
 """
 )
 
+# 좌표 기준 nearby (T-213b) — target CTE 대신 입력 좌표(4326)를 5179로 **CTE에서
+# 1회만** 변환해 상수로 굳히고(ADR-012), 술어는 STORED ``coord_5179``에 직접
+# ``ST_DWithin``한다. candidates 컬럼/cursor/정렬은 by-target nearby와 동일하므로
+# ``_nearby_row``/``_nearby_cursor_params``/``_encode_nearby_cursor``를 그대로 재사용한다.
+_NEARBY_COORD_CTE_SQL: Final[str] = """
+WITH origin AS (
+    SELECT
+        x_extension.ST_Transform(
+            x_extension.ST_SetSRID(
+                x_extension.ST_MakePoint(
+                    CAST(:lon AS double precision), CAST(:lat AS double precision)
+                ),
+                4326
+            ),
+            5179
+        ) AS pt_5179,
+        CAST(:radius_m AS double precision) AS radius_m
+),
+candidates AS (
+    SELECT
+        f.feature_id,
+        f.kind,
+        f.name,
+        f.category,
+        f.status,
+        x_extension.ST_X(f.coord) AS lon,
+        x_extension.ST_Y(f.coord) AS lat,
+        x_extension.ST_Distance(f.coord_5179, o.pt_5179)::double precision
+            AS distance_m,
+        ps.provider AS primary_provider,
+        ps.dataset_key AS primary_dataset_key,
+        f.updated_at AS last_updated_at
+    FROM origin AS o
+    JOIN feature.features AS f
+      ON f.deleted_at IS NULL
+     AND f.coord IS NOT NULL
+     AND f.coord_5179 IS NOT NULL
+     AND x_extension.ST_DWithin(f.coord_5179, o.pt_5179, o.radius_m)
+    LEFT JOIN LATERAL (
+        SELECT sr.provider, sr.dataset_key
+        FROM provider_sync.source_links AS sl
+        JOIN provider_sync.source_records AS sr
+          ON sr.source_record_key = sl.source_record_key
+        WHERE sl.feature_id = f.feature_id
+          AND sl.is_primary_source
+        ORDER BY sr.imported_at DESC NULLS LAST, sr.source_record_key
+        LIMIT 1
+    ) AS ps ON TRUE
+    WHERE (CAST(:kinds AS text[]) IS NULL OR f.kind = ANY(CAST(:kinds AS text[])))
+      AND (
+        CAST(:categories AS text[]) IS NULL
+        OR f.category = ANY(CAST(:categories AS text[]))
+      )
+      AND (
+        CAST(:statuses AS text[]) IS NULL
+        OR f.status = ANY(CAST(:statuses AS text[]))
+      )
+      AND (
+        CAST(:providers AS text[]) IS NULL
+        OR ps.provider = ANY(CAST(:providers AS text[]))
+      )
+)
+"""
+
+_NEARBY_COORD_DISTANCE_SQL: Final[str] = (
+    _NEARBY_COORD_CTE_SQL
+    + """
+SELECT *
+FROM candidates
+WHERE (
+    CAST(:cursor_distance_m AS double precision) IS NULL
+    OR (distance_m, feature_id) > (
+        CAST(:cursor_distance_m AS double precision),
+        CAST(:cursor_feature_id AS text)
+    )
+)
+ORDER BY distance_m ASC, feature_id ASC
+LIMIT :limit_plus_one
+"""
+)
+
+_NEARBY_COORD_NAME_SQL: Final[str] = (
+    _NEARBY_COORD_CTE_SQL
+    + """
+SELECT *
+FROM candidates
+WHERE (
+    CAST(:cursor_name AS text) IS NULL
+    OR (name, feature_id) > (
+        CAST(:cursor_name AS text),
+        CAST(:cursor_feature_id AS text)
+    )
+)
+ORDER BY name ASC, feature_id ASC
+LIMIT :limit_plus_one
+"""
+)
+
+_NEARBY_COORD_UPDATED_SQL: Final[str] = (
+    _NEARBY_COORD_CTE_SQL
+    + """
+SELECT *
+FROM candidates
+WHERE (
+    CAST(:cursor_last_updated_at AS timestamptz) IS NULL
+    OR (last_updated_at, feature_id) < (
+        CAST(:cursor_last_updated_at AS timestamptz),
+        CAST(:cursor_feature_id AS text)
+    )
+)
+ORDER BY last_updated_at DESC, feature_id DESC
+LIMIT :limit_plus_one
+"""
+)
+
+_NEARBY_COORD_SQL_BY_SORT: Final[dict[str, str]] = {
+    "distance": _NEARBY_COORD_DISTANCE_SQL,
+    "name": _NEARBY_COORD_NAME_SQL,
+    "last_updated_at": _NEARBY_COORD_UPDATED_SQL,
+}
+
 # snapshot soft-delete — 주어진 (provider, dataset_key, source_entity_type)의
 # **primary source**로 적재된 feature 중, snapshot source_entity_id 집합에 없는
 # 것을 soft-delete (status='inactive' + deleted_at). 전체 snapshot 적재 후 호출해
@@ -1279,6 +1400,61 @@ async def features_nearby_poi_cache_target(
             {
                 "target_id": target_id,
                 "radius_km": radius_km,
+                "kinds": _normalized_filter(kinds),
+                "categories": _normalized_filter(categories),
+                "statuses": _normalized_filter(statuses),
+                "providers": _normalized_filter(providers),
+                "limit_plus_one": effective_limit + 1,
+                **_nearby_cursor_params(cursor, sort=sort),
+            },
+        )
+    ).mappings().all()
+    items = tuple(_nearby_row(row) for row in rows[:effective_limit])
+    next_cursor = (
+        _encode_nearby_cursor(items[-1], sort=sort)
+        if len(rows) > effective_limit and items
+        else None
+    )
+    return NearbyFeaturePage(items=items, next_cursor=next_cursor)
+
+
+async def features_nearby(
+    session: AsyncSession,
+    *,
+    lon: float,
+    lat: float,
+    radius_m: float,
+    kinds: Sequence[str] | None = None,
+    categories: Sequence[str] | None = None,
+    statuses: Sequence[str] | None = ("active",),
+    providers: Sequence[str] | None = None,
+    sort: str = "distance",
+    limit: int = 100,
+    cursor: str | None = None,
+) -> NearbyFeaturePage:
+    """일반 좌표(``lon``/``lat``, 4326) 중심 반경 ``radius_m`` 안 feature summary.
+
+    사용자 현재 위치/추천 흐름용(T-213b). ADR-012: 입력 좌표는 ``origin`` CTE에서
+    한 번만 5179로 변환해 상수로 굳히고, 술어는 STORED ``feature.features.coord_5179``에
+    직접 ``ST_DWithin``/``ST_Distance``를 적용한다(GiST ``idx_features_coord_5179_gist``).
+    cursor/정렬/응답 shape는 ``features_nearby_poi_cache_target``과 동일
+    (``NearbyFeaturePage``). ``sort`` ∈ {distance, name, last_updated_at}.
+    """
+    if sort not in _NEARBY_COORD_SQL_BY_SORT:
+        raise ValueError("sort must be one of distance, name, last_updated_at")
+    if radius_m <= 0:
+        raise ValueError("radius_m must be greater than 0")
+    if limit <= 0:
+        raise ValueError("limit must be greater than 0")
+
+    effective_limit = min(limit, 500)
+    rows = (
+        await session.execute(
+            text(_NEARBY_COORD_SQL_BY_SORT[sort]),
+            {
+                "lon": lon,
+                "lat": lat,
+                "radius_m": radius_m,
                 "kinds": _normalized_filter(kinds),
                 "categories": _normalized_filter(categories),
                 "statuses": _normalized_filter(statuses),

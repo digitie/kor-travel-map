@@ -249,6 +249,35 @@ class FeaturesNearbyByTargetResponse(BaseModel):
     meta: FeaturesNearbyByTargetMeta
 
 
+class NearbyOriginSummary(BaseModel):
+    """좌표 기준 주변 조회 origin summary (입력 echo, T-213b)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    lon: float
+    lat: float
+    radius_m: float
+
+
+class FeaturesNearbyData(BaseModel):
+    """``GET /features/nearby`` data payload."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    origin: NearbyOriginSummary
+    items: list[NearbyFeatureSummary]
+    next_cursor: str | None = None
+
+
+class FeaturesNearbyResponse(BaseModel):
+    """``GET /features/nearby`` 응답 (좌표 중심 반경)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: FeaturesNearbyData
+    meta: FeaturesNearbyByTargetMeta
+
+
 def _nearby_target(target: PoiCacheTarget) -> NearbyTargetSummary:
     return NearbyTargetSummary(
         external_system=target.external_system,
@@ -449,6 +478,80 @@ async def search_public_features(
             total_count=page.total_count,
         ),
         meta=FeatureListMeta(duration_ms=_duration_ms(started_at)),
+    )
+
+
+@router.get(
+    "/nearby",
+    response_model=FeaturesNearbyResponse,
+    summary="좌표 중심 반경 주변 feature 목록",
+    responses={422: {"description": "cursor/sort/radius/좌표 오류"}},
+)
+async def list_features_nearby(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    lon: Annotated[float, Query(ge=-180, le=180, description="중심 경도(4326).")],
+    lat: Annotated[float, Query(ge=-90, le=90, description="중심 위도(4326).")],
+    radius_m: Annotated[
+        float,
+        Query(gt=0, le=100000, description="반경(m). 최대 100km."),
+    ],
+    kind: Annotated[list[str] | None, Query(description="feature kind 반복 필터.")] = None,
+    category: Annotated[
+        list[str] | None,
+        Query(description="category code 반복 필터."),
+    ] = None,
+    feature_status: Annotated[
+        list[str] | None,
+        Query(alias="status", description="feature status 반복 필터. 기본 active."),
+    ] = None,
+    provider: Annotated[
+        list[str] | None,
+        Query(description="primary provider 반복 필터."),
+    ] = None,
+    page_size: Annotated[int, Query(ge=1, le=500)] = 100,
+    cursor: Annotated[str | None, Query()] = None,
+    sort: Annotated[NearbySort, Query()] = "distance",
+) -> FeaturesNearbyResponse:
+    started_at = perf_counter()
+    try:
+        page = await feature_repo.features_nearby(
+            session,
+            lon=lon,
+            lat=lat,
+            radius_m=radius_m,
+            kinds=kind,
+            categories=category,
+            statuses=feature_status if feature_status is not None else ("active",),
+            providers=provider,
+            sort=sort,
+            limit=page_size,
+            cursor=cursor,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    items = [
+        NearbyFeatureSummary(
+            feature_id=item.feature_id,
+            kind=item.kind,
+            name=item.name,
+            category=item.category,
+            status=item.status,
+            lon=item.lon,
+            lat=item.lat,
+            distance_m=item.distance_m,
+        )
+        for item in page.items
+    ]
+    return FeaturesNearbyResponse(
+        data=FeaturesNearbyData(
+            origin=NearbyOriginSummary(lon=lon, lat=lat, radius_m=radius_m),
+            items=items,
+            next_cursor=page.next_cursor,
+        ),
+        meta=FeaturesNearbyByTargetMeta(
+            count=len(items),
+            duration_ms=_duration_ms(started_at),
+        ),
     )
 
 

@@ -1075,6 +1075,57 @@
         "title": "FeaturesNearbyByTargetResponse",
         "type": "object"
       },
+      "FeaturesNearbyData": {
+        "additionalProperties": false,
+        "description": "``GET /features/nearby`` data payload.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/NearbyFeatureSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/NearbyOriginSummary"
+          }
+        },
+        "required": [
+          "origin",
+          "items"
+        ],
+        "title": "FeaturesNearbyData",
+        "type": "object"
+      },
+      "FeaturesNearbyResponse": {
+        "additionalProperties": false,
+        "description": "``GET /features/nearby`` 응답 (좌표 중심 반경).",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/FeaturesNearbyData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/FeaturesNearbyByTargetMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "FeaturesNearbyResponse",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1136,6 +1187,31 @@
           "distance_m"
         ],
         "title": "NearbyFeatureSummary",
+        "type": "object"
+      },
+      "NearbyOriginSummary": {
+        "additionalProperties": false,
+        "description": "좌표 기준 주변 조회 origin summary (입력 echo, T-213b).",
+        "properties": {
+          "lat": {
+            "title": "Lat",
+            "type": "number"
+          },
+          "lon": {
+            "title": "Lon",
+            "type": "number"
+          },
+          "radius_m": {
+            "title": "Radius M",
+            "type": "number"
+          }
+        },
+        "required": [
+          "lon",
+          "lat",
+          "radius_m"
+        ],
+        "title": "NearbyOriginSummary",
         "type": "object"
       },
       "NearbyTargetSummary": {
@@ -1475,6 +1551,198 @@
           }
         },
         "summary": "bbox 안 feature 목록 (TripMate/public envelope)",
+        "tags": [
+          "features"
+        ]
+      }
+    },
+    "/features/nearby": {
+      "get": {
+        "operationId": "list_features_nearby_features_nearby_get",
+        "parameters": [
+          {
+            "description": "중심 경도(4326).",
+            "in": "query",
+            "name": "lon",
+            "required": true,
+            "schema": {
+              "description": "중심 경도(4326).",
+              "maximum": 180,
+              "minimum": -180,
+              "title": "Lon",
+              "type": "number"
+            }
+          },
+          {
+            "description": "중심 위도(4326).",
+            "in": "query",
+            "name": "lat",
+            "required": true,
+            "schema": {
+              "description": "중심 위도(4326).",
+              "maximum": 90,
+              "minimum": -90,
+              "title": "Lat",
+              "type": "number"
+            }
+          },
+          {
+            "description": "반경(m). 최대 100km.",
+            "in": "query",
+            "name": "radius_m",
+            "required": true,
+            "schema": {
+              "description": "반경(m). 최대 100km.",
+              "exclusiveMinimum": 0,
+              "maximum": 100000,
+              "title": "Radius M",
+              "type": "number"
+            }
+          },
+          {
+            "description": "feature kind 반복 필터.",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "feature kind 반복 필터.",
+              "title": "Kind"
+            }
+          },
+          {
+            "description": "category code 반복 필터.",
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "category code 반복 필터.",
+              "title": "Category"
+            }
+          },
+          {
+            "description": "feature status 반복 필터. 기본 active.",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "feature status 반복 필터. 기본 active.",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "primary provider 반복 필터.",
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "primary provider 반복 필터.",
+              "title": "Provider"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "distance",
+              "enum": [
+                "distance",
+                "name",
+                "last_updated_at"
+              ],
+              "title": "Sort",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeaturesNearbyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "cursor/sort/radius/좌표 오류"
+          }
+        },
+        "summary": "좌표 중심 반경 주변 feature 목록",
         "tags": [
           "features"
         ]
