@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 import hashlib
-import importlib
 import logging
 import mimetypes
 from pathlib import PurePath
@@ -41,7 +40,7 @@ from krtour.map.geocoding import (
     kraddr_geo_address_resolver,
     kraddr_geo_reverse_geocoder,
 )
-from krtour.map.infra.file_store import S3ObjectStore
+from krtour.map.infra.file_store import S3ObjectStore, build_s3_object_store
 from krtour.map.infra.jobs_repo import finish_import_job, get_import_job
 from krtour.map.infra.offline_upload_repo import (
     OfflineUpload,
@@ -81,8 +80,6 @@ router = APIRouter(prefix="/admin/offline-uploads", tags=["admin-offline-uploads
 _LOG = logging.getLogger(__name__)
 
 _MULTIPART_CONTENT_LENGTH_MARGIN_BYTES: Final[int] = 64 * 1024
-_DAGSTER_REPOSITORY_NAME: Final[str] = "__repository__"
-_DAGSTER_REPOSITORY_LOCATION_NAME: Final[str] = "krtour.map_dagster.definitions"
 _DAGSTER_OFFLINE_UPLOAD_JOB_NAME: Final[str] = "offline_upload_load"
 _DAGSTER_LAUNCH_MUTATION: Final[str] = """
 mutation KrtourMapLaunchOfflineUploadLoad($executionParams: ExecutionParams!) {
@@ -596,29 +593,20 @@ def _duplicate_upload_conflict(upload: OfflineUpload) -> HTTPException:
 
 def build_offline_upload_store(settings: KrtourMapSettings) -> S3ObjectStore:
     """admin upload API용 RustFS/S3 store를 설정에서 만든다."""
-    access_key = settings.object_store_access_key_id
-    secret_key = settings.object_store_secret_access_key
-    if (access_key is None) != (secret_key is None):
-        raise RuntimeError(
-            "KRTOUR_MAP_OBJECT_STORE_ACCESS_KEY_ID와 "
-            "KRTOUR_MAP_OBJECT_STORE_SECRET_ACCESS_KEY는 함께 설정해야 함."
-        )
-
-    boto3 = cast(Any, importlib.import_module("boto3"))
-    botocore_config = cast(Any, importlib.import_module("botocore.config"))
-    kwargs: dict[str, Any] = {
-        "region_name": settings.object_store_region,
-        "config": botocore_config.Config(signature_version="s3v4"),
-    }
-    if settings.object_store_endpoint_url:
-        kwargs["endpoint_url"] = settings.object_store_endpoint_url
-    if access_key is not None and secret_key is not None:
-        kwargs["aws_access_key_id"] = access_key.get_secret_value()
-        kwargs["aws_secret_access_key"] = secret_key.get_secret_value()
-
-    return S3ObjectStore(
-        s3_client=boto3.client("s3", **kwargs),
+    return build_s3_object_store(
         bucket=settings.offline_upload_bucket,
+        region_name=settings.object_store_region,
+        endpoint_url=settings.object_store_endpoint_url,
+        access_key_id=(
+            settings.object_store_access_key_id.get_secret_value()
+            if settings.object_store_access_key_id is not None
+            else None
+        ),
+        secret_access_key=(
+            settings.object_store_secret_access_key.get_secret_value()
+            if settings.object_store_secret_access_key is not None
+            else None
+        ),
         public_base_url=None,
     )
 
@@ -672,13 +660,13 @@ async def _post_graphql(
     return _dict(payload)
 
 
-def _launch_variables(upload_id: str) -> dict[str, object]:
+def _launch_variables(settings: AdminSettings, upload_id: str) -> dict[str, object]:
     return {
         "executionParams": {
             "selector": {
                 "jobName": _DAGSTER_OFFLINE_UPLOAD_JOB_NAME,
-                "repositoryName": _DAGSTER_REPOSITORY_NAME,
-                "repositoryLocationName": _DAGSTER_REPOSITORY_LOCATION_NAME,
+                "repositoryName": settings.dagster_repository_name,
+                "repositoryLocationName": settings.dagster_repository_location_name,
             },
             "runConfigData": {
                 "ops": {
@@ -724,7 +712,7 @@ async def launch_offline_upload_load(
         payload = await _post_graphql(
             graphql_url,
             query=_DAGSTER_LAUNCH_MUTATION,
-            variables=_launch_variables(upload_id),
+            variables=_launch_variables(settings, upload_id),
             timeout_seconds=settings.dagster_request_timeout_seconds,
         )
     except (httpx.HTTPError, ValueError) as exc:
@@ -830,7 +818,7 @@ async def create_offline_upload_request(
                 byte_size=stored.byte_size,
                 checksum_sha256=checksum_sha256,
                 detected_format=detected_format,
-                detected_encoding="utf-8",
+                detected_encoding=None,
                 created_by=created_by,
             )
     except IntegrityError as exc:
@@ -1006,7 +994,7 @@ async def validate_offline_upload_request(
         if settings.kraddr_geo_base_url:
             async with httpx.AsyncClient(
                 base_url=settings.kraddr_geo_base_url,
-                timeout=10.0,
+                timeout=settings.kraddr_geo_timeout_seconds,
             ) as http:
                 kraddr = KraddrGeoRestClient(http)
                 async with session.begin():

@@ -258,6 +258,7 @@ async def test_get_feature_rows_by_ids_and_search_features(
             cursor=cursor,
         )
         assert len(page.items) == 1
+        assert page.total_count == 3
         assert page.items[0].score_cursor is not None
         seen.append(page.items[0].feature_id)
         cursor = page.next_cursor
@@ -276,6 +277,7 @@ async def test_get_feature_rows_by_ids_and_search_features(
         bbox=(lon - 0.1, lat - 0.1, lon + 0.1, lat + 0.1),
         limit=10,
     )
+    assert bbox_only.total_count == 3
     assert first.feature.feature_id in {item.feature_id for item in bbox_only.items}
 
 

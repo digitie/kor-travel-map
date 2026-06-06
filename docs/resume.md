@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-07 Codex 작업 메모 — T-RV-37 잔여 hygiene 마무리
+
+남은 PR 리뷰 후속 중 `T-RV-37` 잔여 hygiene을 한 PR로 닫는다. 범위는
+frontend `DebugUi*`/`debug_ui` → `Admin*`/`admin`, `/features/search` 실제
+`total_count`, offline upload encoding fallback, CORS 일원화, Dagster repository
+selector 설정화, router/Dagster S3 store factory 공유, production
+`NEXT_PUBLIC_*` fail-fast, kraddr-geo timeout 설정화다. `admin_issues.py` timeout은
+T-212 범위라 제외하고, `T-RV-04b` provider live fetcher wiring도 Claude Code 진행
+범위라 Codex에서 건드리지 않는다.
+
+**다음 한 작업**: 사용자 지시에 따라 `T-209` 계열로 이동한다. 현재 남은 후보는
+**T-209e-c admin backup/restore router + hot-swap UI**다.
+
 ## 2026-06-07 Claude 작업 메모 — T-RV-04b provider live fetcher (순차 진행 중)
 
 T-212c 완료 후 **T-RV-04b**(provider public client live fetcher wiring)를 provider

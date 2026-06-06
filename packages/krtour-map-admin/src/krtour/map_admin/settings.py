@@ -127,6 +127,16 @@ class AdminSettings(BaseSettings):
         le=30.0,
         description="Dagster GraphQL 조회 timeout seconds.",
     )
+    dagster_repository_name: str = Field(
+        default="__repository__",
+        min_length=1,
+        description="Dagster GraphQL launch selector repositoryName.",
+    )
+    dagster_repository_location_name: str = Field(
+        default="krtour.map_dagster.definitions",
+        min_length=1,
+        description="Dagster GraphQL launch selector repositoryLocationName.",
+    )
 
     # ── Provider API keys (PR#47, source=live 활성화용) ──────────────────
     #

@@ -6422,9 +6422,9 @@
         "additionalProperties": false,
         "description": "``/debug/version`` 응답 schema.",
         "properties": {
-          "debug_ui": {
+          "admin": {
             "description": "``krtour-map-admin`` distribution version.",
-            "title": "Debug Ui",
+            "title": "Admin",
             "type": "string"
           },
           "krtour_map": {
@@ -6434,7 +6434,7 @@
           }
         },
         "required": [
-          "debug_ui",
+          "admin",
           "krtour_map"
         ],
         "title": "VersionResponse",

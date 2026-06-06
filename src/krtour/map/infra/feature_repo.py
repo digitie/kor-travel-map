@@ -424,6 +424,14 @@ LIMIT :limit_plus_one
 """
 )
 
+_FEATURE_SEARCH_COUNT_SQL: Final[str] = (
+    _FEATURE_SEARCH_CTE_SQL
+    + """
+SELECT count(*) AS total_count
+FROM candidates
+"""
+)
+
 _NEARBY_TARGET_CTE_SQL: Final[str] = """
 WITH target AS (
     SELECT target_id, coord_5179,
@@ -1355,13 +1363,30 @@ async def search_features(
             },
         )
     ).mappings().all()
+    count_result = await session.execute(
+        text(_FEATURE_SEARCH_COUNT_SQL),
+        {
+            "q": normalized_q,
+            "bbox_enabled": bbox is not None,
+            "min_lon": min_lon,
+            "min_lat": min_lat,
+            "max_lon": max_lon,
+            "max_lat": max_lat,
+            "kinds": _normalized_filter(kinds),
+            "categories": _normalized_filter(categories),
+        },
+    )
     items = tuple(_search_row(row) for row in rows[:effective_limit])
     next_cursor = (
         _encode_search_cursor(items[-1], q_enabled=q_enabled)
         if len(rows) > effective_limit and items
         else None
     )
-    return FeatureSearchPage(items=items, next_cursor=next_cursor)
+    return FeatureSearchPage(
+        items=items,
+        next_cursor=next_cursor,
+        total_count=int(count_result.scalar_one()),
+    )
 
 
 _NEARBY_SQL_BY_SORT: Final[dict[str, str]] = {

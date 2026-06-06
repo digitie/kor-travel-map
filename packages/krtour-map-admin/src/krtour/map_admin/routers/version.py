@@ -10,7 +10,7 @@ from fastapi import APIRouter
 from krtour.map import __version__ as KRTOUR_MAP_VERSION
 from pydantic import BaseModel, ConfigDict, Field
 
-from krtour.map_admin import __version__ as DEBUG_UI_VERSION
+from krtour.map_admin import __version__ as ADMIN_VERSION
 
 __all__ = ["router", "VersionResponse"]
 
@@ -23,7 +23,7 @@ class VersionResponse(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    debug_ui: str = Field(description="``krtour-map-admin`` distribution version.")
+    admin: str = Field(description="``krtour-map-admin`` distribution version.")
     krtour_map: str = Field(description="``python-krtour-map`` (메인) distribution version.")
 
 
@@ -39,6 +39,6 @@ class VersionResponse(BaseModel):
 async def get_version() -> VersionResponse:
     """본 패키지 + 메인 lib version."""
     return VersionResponse(
-        debug_ui=DEBUG_UI_VERSION,
+        admin=ADMIN_VERSION,
         krtour_map=KRTOUR_MAP_VERSION,
     )

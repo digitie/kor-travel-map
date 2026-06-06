@@ -9,23 +9,27 @@
  */
 
 import type { components } from "./types";
+import { publicUrlEnv } from "./env";
 
-const BASE_URL =
-  process.env.NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API ?? "http://127.0.0.1:9011";
+const BASE_URL = publicUrlEnv(
+  process.env.NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API,
+  "NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API",
+  "http://127.0.0.1:9011",
+);
 
 type ClientSchemas = components["schemas"];
 
 export type HealthResponse = ClientSchemas["HealthResponse"];
 export type VersionResponse = ClientSchemas["VersionResponse"];
 
-class DebugUiApiError extends Error {
+class AdminApiError extends Error {
   constructor(
     message: string,
     public status: number,
     public path: string,
   ) {
     super(message);
-    this.name = "DebugUiApiError";
+    this.name = "AdminApiError";
   }
 }
 
@@ -80,7 +84,7 @@ async function requestJson<T>(
   });
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
-    throw new DebugUiApiError(
+    throw new AdminApiError(
       `${method} ${path} 실패 (HTTP ${response.status})${detail ? ` ${detail}` : ""}`,
       response.status,
       path,
@@ -110,7 +114,7 @@ export async function postFormData<T>(
   });
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
-    throw new DebugUiApiError(
+    throw new AdminApiError(
       `POST ${path} 실패 (HTTP ${response.status})${detail ? ` ${detail}` : ""}`,
       response.status,
       path,
@@ -141,4 +145,4 @@ export function fetchVersion(): Promise<VersionResponse> {
   return getJson<VersionResponse>("/debug/version");
 }
 
-export { BASE_URL, DebugUiApiError };
+export { AdminApiError, BASE_URL };

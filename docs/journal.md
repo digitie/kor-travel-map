@@ -2,6 +2,25 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-07 (codex) — T-RV-37 잔여 hygiene
+
+**작업**: PR 리뷰 후속 LOW 묶음 `T-RV-37` 잔여 hygiene을 정리한다.
+
+- **Admin naming**: frontend `DebugUiApiError`와 `/version`의 `debug_ui` 필드를
+  `AdminApiError`/`admin`으로 rename하고 OpenAPI/frontend type drift를 갱신한다.
+- **Search count**: `FeatureSearchPage.total_count`를 실제 검색 조건 전체 매칭 수로
+  채우도록 repo SQL과 router/integration 테스트를 보강한다.
+- **Offline upload**: upload create의 `detected_encoding`은 `None`으로 저장해 parser
+  fallback에 맡기고, Dagster launch repository selector는
+  `KRTOUR_MAP_ADMIN_DAGSTER_REPOSITORY_NAME` /
+  `KRTOUR_MAP_ADMIN_DAGSTER_REPOSITORY_LOCATION_NAME` 설정으로 이동한다.
+- **Runtime hygiene**: custom CORS middleware를 제거해 `CORSMiddleware`로 일원화,
+  router/Dagster의 S3 store factory 중복을 main infra helper로 통합, kraddr-geo
+  timeout을 설정화, frontend production `NEXT_PUBLIC_*` 누락은 fail-fast 처리한다.
+- **제외**: `admin_issues.py` timeout은 T-212, `T-RV-04b` provider live fetcher wiring은
+  별도 Claude Code 범위라 이번 PR에서 건드리지 않는다.
+- **다음**: T-RV-37 PR/CI/merge 후 사용자 지시에 따라 `T-209e-c`로 이동한다.
+
 ## 2026-06-07 (claude) — T-RV-04b provider 적합성 감사 (datagokr 외 전부 결정 선행)
 
 **작업**: datagokr(#261) 이후 provider를 순차 wiring하려다, krex_rest_areas에서
