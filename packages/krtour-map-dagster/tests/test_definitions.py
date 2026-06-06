@@ -70,13 +70,20 @@ def test_offline_upload_load_default_resources_registered() -> None:
     assert defs.get_repository_def().get_top_level_resources()["offline_upload_store"]
 
 
+# T-RV-04b: provider별 live fetcher가 연결된 resource key. 나머지는 guard.
+_LIVE_PROVIDER_RESOURCE_KEYS = {"datagokr_cultural_festivals"}
+
+
 def test_feature_load_provider_guard_resources_registered() -> None:
     top_level_resources = defs.get_repository_def().get_top_level_resources()
 
     for spec in PROVIDER_RECORD_RESOURCE_SPECS:
         resource_def = top_level_resources[spec.resource_key]
         assert resource_def.description
-        assert "provider record guard" in resource_def.description
+        if spec.resource_key in _LIVE_PROVIDER_RESOURCE_KEYS:
+            assert "live fetcher" in resource_def.description
+        else:
+            assert "provider record guard" in resource_def.description
 
     assert top_level_resources["reverse_geocoder"]
 

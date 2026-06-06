@@ -1,5 +1,22 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-07 Claude 작업 메모 — T-RV-04b provider live fetcher (순차 진행 중)
+
+T-212c 완료 후 **T-RV-04b**(provider public client live fetcher wiring)를 provider
+순차로 진행. 패턴: `provider_fetchers.fetch_<provider>(settings)`(lazy provider import,
+credential 없으면 guard 메시지) + `resources.build_provider_record_live_resource(spec,
+fetch)`로 해당 resource_key만 guard→live 교체. dagster 테스트는 provider 패키지 fake로
+검증(실 키 불요), 실 fetch 검증은 키 있는 환경(T-212e)에서.
+
+- [x] **① datagokr_cultural_festivals**(festival) — `DataGoKrClient.festival.iter_all()`.
+- [ ] **② opinet_stations** ⭐다음 — `OpinetClient`(sync, `search_stations_around`/
+  `get_station_detail`). **정책 결정 필요**: area scope(전국 area code 순회) + station
+  detail N+1 fetch. transform=`stations_to_bundles`(`OpinetStationItem` Protocol).
+  설정 키 `opinet_api_key`.
+- [ ] ③ krex_rest_areas/traffic ④ krheritage items/events ⑤ mois_license_records
+  (source DB refresh) ⑥ knps point/geometry(file parser) — 순차.
+- **원칙**: 각 provider 착수 전 "이미 구현됐는지" grep 확인(중복/codex 충돌 회피).
+
 ## 2026-06-07 Claude 작업 메모 — T-DA-13 `/admin/issues` 완료 → 다음 T-212 후속
 
 DA-D-03 envelope 전면 통일(T-DA-15/16/18, #250~#255) **완료**. 이어서 **T-DA-13
