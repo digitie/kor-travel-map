@@ -77,13 +77,16 @@
   `total_score`를 baseline으로 삼고, 현재 feature 이름/좌표/카테고리로 재계산한
   score가 baseline보다 기본 10점 이상 낮아지면 WARN으로 보고한다. `F8`은
   `feature_files` metadata와 객체 저장소 snapshot을 비교해 metadata-only/object-only/
-  삭제 feature 연결을 WARN으로 보고한다. 남은 Phase 2 범위는 dry-run report다.
+  삭제 feature 연결을 WARN으로 보고한다. dry-run report는
+  `krtour-map consistency-report` CLI와
+  `docs/reports/t-201b-phase2-dry-run-report-2026-06-06.md`로 산출한다.
 - **Dagster 게이트 적용** (`docs/dagster-boundary.md §12`):
   - root → child 적재 → `consistency_check` 실행
   - `severity_max != ERROR` 시 `mv_refresh strategy='swap'`
   - ERROR 시 알림 + swap 차단
 - **dry-run report 첨부**: Phase 2 도입 PR은 반드시 첫 dry-run report 첨부
-  후 점진 enable (ADR-033 §결과 부정).
+  후 점진 enable (ADR-033 §결과 부정). 운영 데이터 enable 전에는 같은 CLI를 실제
+  DB/RustFS snapshot 대상으로 다시 실행해 report를 갱신한다.
 
 ### 2.4 T-200 — Batch DAG + 정합성 게이트 (kraddr-geo ADR-017 미러)
 
@@ -160,7 +163,7 @@
 | ADR-033 (정합성 단계 도입) | accepted (Sprint 1) | Phase 2 (F4~F8 + Dagster 게이트) 적용 + swap 차단 동작 |
 | ADR-017 (보관 정책) | accepted (Sprint 1) | place 무기한, event +20y, notice +1y, weather +30d purge 동작 |
 | T-200 (batch DAG + 게이트) | done (2026-06-04) | Dagster batch + consistency_check + mv_refresh 차단/추적 |
-| T-201b (Phase 2) | partial | F4/F5/F6/F7/F8 구현. 남은 dry-run report |
+| T-201b (Phase 2) | done (2026-06-06) | F4/F5/F6/F7/F8 구현 + dry-run report CLI/첨부 |
 | T-202~204 | done | T-202 pre-commit hook + T-203 CI full matrix + T-204 branch protection 매뉴얼 완료 |
 | ADR-016 (Record Linkage 가중치) | accepted | 5 sprint 전체 검증 후 가중치 조정 PR (필요 시) |
 

@@ -464,7 +464,20 @@ T-205d 이후 `ops.import_jobs`는 `load_batch_id`와 self-FK `parent_job_id`를
   차단, `mv_refresh` 추적 job을 구현했다. F5~F8 violation gate와 실제 MV 카탈로그는
   아직 별도다.
 - **Phase 2 (Sprint 5 운영 진입 직전, T-201b)**: F5~F8 + 실제 운영 MV 카탈로그/refresh
-  정책, dry-run report 첨부, admin UI 승인/거절/재시도 UX를 붙인다.
+  정책, dry-run report 첨부, admin UI 승인/거절/재시도 UX를 붙인다. dry-run report
+  산출 경로는 `krtour-map consistency-report`이며, 기본은 `persist=false`라 DB에
+  report row를 쓰지 않는다.
+
+운영 enable 전 report 산출 예:
+
+```bash
+krtour-map --dsn "$KRTOUR_MAP_PG_DSN" consistency-report \
+  --known-file-objects /path/to/rustfs-objects.jsonl \
+  --output docs/reports/t-201b-phase2-dry-run-report-YYYY-MM-DD.md
+```
+
+`--persist`를 붙이면 같은 결과를 `ops.feature_consistency_reports`에도 저장한다.
+`--fail-on-error`는 CI/운영 preflight에서 `severity_max=ERROR`일 때 exit 1로 실패시킨다.
 
 구현 위치:
 

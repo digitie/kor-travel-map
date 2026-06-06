@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-06 Codex 작업 메모 — T-201b Phase 2 dry-run report
+
+T-201b의 마지막 잔여인 Phase 2 dry-run report 산출 경로를 구현한다.
+`krtour-map consistency-report` CLI는 `run_consistency_checks()` F1~F8을 기본
+`persist=false`로 실행하고 Markdown/JSON report를 출력한다. `--known-file-objects`
+JSON/JSONL로 RustFS/S3 object snapshot을 받아 F8 양방향 검사를 실제 운영 preflight에
+포함할 수 있다. `--persist`는 같은 report를 `ops.feature_consistency_reports`에도
+저장하고, `--fail-on-error`는 gate enable 전 CI/운영 preflight에서 ERROR를 실패로
+전환한다.
+
+이번 PR은 CLI contract와 `docs/reports/t-201b-phase2-dry-run-report-2026-06-06.md`를
+첨부해 T-201b를 닫는다. T-213 계열은 별도 에이전트가 진행 중이므로 다음 비 T-RV
+후보는 **T-209 Docker/daemon polish**다.
+
 ## 2026-06-06 Codex 작업 메모 — T-RV-34/35 Dagster 실행 품질
 
 T-RV-34/35를 한 묶음으로 닫는다. `feature_update_request_queue_sensor`는 더 이상

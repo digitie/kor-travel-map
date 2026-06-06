@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-06 (codex) — T-201b Phase 2 dry-run report CLI
+
+**작업**: ADR-033 Phase 2(F1~F8 + Dagster gate)를 운영 enable 전에 dry-run으로
+검증하고 첨부할 수 있는 report 경로를 추가한다.
+
+- **CLI**: `krtour-map consistency-report`를 추가했다. 기본은 `persist=false` dry-run이며,
+  Markdown/JSON 출력, `--persist`, `--fail-on-error`, F4/F5/F7 threshold override를
+  지원한다.
+- **F8 snapshot**: `--known-file-objects` JSON/JSONL로 RustFS/S3 object snapshot을 받아
+  `feature_files` metadata와 양방향 비교한다.
+- **Client**: `AsyncKrtourMapClient.run_consistency_report()`가 F5/F7/F8 옵션을 전달한다.
+- **Report**: `docs/reports/t-201b-phase2-dry-run-report-2026-06-06.md`를 첨부한다.
+- **다음**: T-213 계열은 별도 에이전트가 진행 중이므로 비 T-RV 후보는 T-209
+  Docker/daemon polish.
+
 ## 2026-06-06 (codex) — T-RV-34/35 Dagster sensor/asset 실행 품질
 
 **작업**: PR#153~#179 리뷰 후속 중 Dagster sensor drain/failure hardening과

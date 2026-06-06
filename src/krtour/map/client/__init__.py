@@ -54,7 +54,10 @@ from krtour.map.infra.batch_dag import (
 )
 from krtour.map.infra.consistency import (
     DEDUP_PENDING_WARN_THRESHOLD,
+    DEDUP_SCORE_REGRESSION_WARN_POINTS,
+    PROVIDER_LAST_SUCCESS_WARN_SECONDS,
     ConsistencyReport,
+    FileObjectRef,
 )
 from krtour.map.infra.consistency import (
     run_consistency_checks as repo_run_consistency_checks,
@@ -783,8 +786,11 @@ class AsyncKrtourMapClient:
         persist: bool = True,
         sample_limit: int = 20,
         dedup_pending_threshold: int = DEDUP_PENDING_WARN_THRESHOLD,
+        provider_last_success_sla_seconds: int = PROVIDER_LAST_SUCCESS_WARN_SECONDS,
+        dedup_score_regression_warn_points: float = DEDUP_SCORE_REGRESSION_WARN_POINTS,
+        known_file_objects: Iterable[FileObjectRef] | None = None,
     ) -> ConsistencyReport:
-        """F1~F4 consistency report를 실행하고 필요 시 DB에 저장한다."""
+        """F1~F8 consistency report를 실행하고 필요 시 DB에 저장한다."""
         async with self._session_factory() as session, session.begin():
             return await repo_run_consistency_checks(
                 session,
@@ -792,6 +798,9 @@ class AsyncKrtourMapClient:
                 persist=persist,
                 sample_limit=sample_limit,
                 dedup_pending_threshold=dedup_pending_threshold,
+                provider_last_success_sla_seconds=provider_last_success_sla_seconds,
+                dedup_score_regression_warn_points=dedup_score_regression_warn_points,
+                known_file_objects=known_file_objects,
             )
 
     async def run_batch_dag_consistency_gate(

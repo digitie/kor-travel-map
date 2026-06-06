@@ -156,8 +156,10 @@ CONSISTENCY_CASES: Final[tuple[CaseSpec, ...]] = (
             "FROM feature.features f "
             "WHERE f.coord IS NOT NULL "
             "  AND (f.coord_5179 IS NULL "
-            "       OR ST_SRID(f.coord_5179) <> 5179 "
-            "       OR NOT ST_DWithin(f.coord_5179, ST_Transform(f.coord, 5179), 0.01))"
+            "       OR x_extension.ST_SRID(f.coord_5179) <> 5179 "
+            "       OR NOT x_extension.ST_DWithin("
+            "         f.coord_5179, x_extension.ST_Transform(f.coord, 5179), 0.01"
+            "       ))"
         ),
     ),
     CaseSpec(
@@ -608,7 +610,8 @@ async def run_consistency_checks(
     Parameters
     ----------
     session:
-        async DB 세션. search_path에 ``x_extension`` 포함 필요 (ST_* 호출, ADR-008).
+        async DB 세션. PostGIS 함수는 ``x_extension.``으로 schema-qualified 호출한다
+        (ADR-008).
     batch_id:
         배치 식별자. 미지정 시 새 UUID 생성.
     persist:
