@@ -46,6 +46,7 @@ from krtour.map_admin.routers import (
     offline_uploads_router,
     ops_router,
     poi_cache_targets_router,
+    public_status_router,
     tripmate_feature_update_requests_router,
     tripmate_router,
     version_router,
@@ -277,6 +278,9 @@ def create_app(settings: AdminSettings | None = None) -> FastAPI:
                 )
                 response.headers.setdefault("Vary", "Origin")
             return response
+
+    # public liveness/version은 의존 없는 정적 응답 — 항상 mount (T-213h).
+    application.include_router(public_status_router)
 
     if settings.debug_routes_enabled:
         application.include_router(health_router)

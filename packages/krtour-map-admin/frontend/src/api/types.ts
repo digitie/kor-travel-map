@@ -516,6 +516,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * public liveness probe
+         * @description liveness — 의존 없이 항상 ``status='ok'`` 200. deep readiness는 후속.
+         */
+        get: operations["get_public_health_health_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/ops/consistency/issues": {
         parameters: {
             query?: never;
@@ -701,6 +721,26 @@ export interface paths {
         put?: never;
         /** TripMate feature 상세 batch 조회 */
         post: operations["get_tripmate_features_batch_tripmate_features_batch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/version": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * public version
+         * @description 배포 프로그램(admin)/메인 lib 버전 + commit(env ``KRTOUR_MAP_GIT_COMMIT``).
+         */
+        get: operations["get_public_version_version_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1765,6 +1805,13 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** HealthData */
+        HealthData: {
+            /** Service */
+            service: string;
+            /** Status */
+            status: string;
+        };
         /**
          * HealthResponse
          * @description `/debug/health` 응답 schema.
@@ -2601,6 +2648,22 @@ export interface components {
             items: components["schemas"]["FeatureSummary"][];
         };
         /**
+         * PublicHealthResponse
+         * @description ``GET /health`` 응답 (liveness).
+         */
+        PublicHealthResponse: {
+            data: components["schemas"]["HealthData"];
+            meta: components["schemas"]["_Meta"];
+        };
+        /**
+         * PublicVersionResponse
+         * @description ``GET /version`` 응답.
+         */
+        PublicVersionResponse: {
+            data: components["schemas"]["VersionData"];
+            meta: components["schemas"]["_Meta"];
+        };
+        /**
          * SigunguByRadiusScope
          * @description kraddr-geo가 계산한 반경 교차 시군구 기준 갱신 scope.
          */
@@ -2632,6 +2695,17 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+        };
+        /** VersionData */
+        VersionData: {
+            /** Commit */
+            commit?: string | null;
+            /** Krtour Map Version */
+            krtour_map_version: string;
+            /** Openapi Version */
+            openapi_version: string;
+            /** Version */
+            version: string;
         };
         /**
          * VersionResponse
@@ -2666,6 +2740,11 @@ export interface components {
              * @description `FeatureBundle` / `WeatherValue` / `PriceValue`.
              */
             variant: string;
+        };
+        /** _Meta */
+        _Meta: {
+            /** Duration Ms */
+            duration_ms: number;
         };
         /** _ProviderEntry */
         _ProviderEntry: {
@@ -4051,6 +4130,26 @@ export interface operations {
             };
         };
     };
+    get_public_health_health_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicHealthResponse"];
+                };
+            };
+        };
+    };
     list_integrity_issues_ops_consistency_issues_get: {
         parameters: {
             query?: {
@@ -4366,6 +4465,26 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    get_public_version_version_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicVersionResponse"];
+                };
             };
         };
     };

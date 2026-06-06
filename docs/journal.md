@@ -2,6 +2,22 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-06 (claude) — T-213h public `GET /health` / `GET /version`
+
+**작업**: T-213 묶음 네 번째. TripMate liveness/version 표면을 루트 경로에 추가.
+
+- `routers/public_status.py`(신규): `GET /health`(liveness — 의존 없는 정적 200,
+  `{data:{status:"ok",service:"krtour-map"},meta}`) + `GET /version`
+  (`{data:{version(admin), krtour_map_version(lib), openapi_version, commit},meta}`,
+  commit=env `KRTOUR_MAP_GIT_COMMIT`).
+- **항상 mount**(features gate 무관) — liveness probe가 DB 없는 부팅·DB 장애에도
+  동작해야 하므로. DB/RustFS/Dagster **deep readiness**는 후속(`/ops/health-deep`)로
+  분리(liveness를 DB-free로 유지). 기존 `/debug/health`·`/debug/version`은 그대로.
+- user OpenAPI subset(`/health`,`/version`) + `openapi.*.json`/frontend `types.ts`
+  재생성. router unit 5(spec presence/liveness/version/env commit/feature-off mount).
+- 격리 sandbox에서 OpenAPI drift/frontend types/ruff/mypy/lint-imports green.
+  다음: **T-213g**(provider export + last-sync).
+
 ## 2026-06-06 (claude) — T-213f `GET /categories` 카탈로그 표면
 
 **작업**: T-213 묶음 세 번째. `krtour.map.category` 144건 정적 카탈로그를 HTTP로 노출.
