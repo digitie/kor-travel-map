@@ -2,6 +2,22 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-06 (claude) — PR #181~#233 코드 리뷰 (비-T-RV 실질 PR)
+
+**작업**: 직전 리뷰(`pr-153-179-review-2026-06-04.md`) 이후 머지 PR을 상세 리뷰.
+사용자 지시대로 **Claude Code 리뷰 backlog 구현 PR(`fix/t-rv-*`)과 본인 문서 감사
+PR(#227/#230, T-DA)은 리뷰 생략**. 정본: `docs/reports/pr-181-233-review-2026-06-06.md`.
+
+- **대상**: #181 T-208i / #182 T-205d / #183 T-209b / #184 T-200 batch gate /
+  #213 T-202 / #215 T-203 / #216 F6 / #218 F5 / #219 F7 / #231 F8 + 문서 PR.
+- **결과**: 신규 지적 **전부 LOW**(관측 전용 WARN 케이스 count 의미/성능). HIGH/MED
+  결함 없음. 검토 중 세운 risk 2개(F5 join fan-out, F7 score 스케일)는 schema
+  ground truth(`provider_refresh_policies` 복합 PK / `dedup_review_queue.total_score`
+  `Numeric(5,2)` CHECK 0~100)로 **결함 아님** 확정. F6 `HHMM` 가정도 DTO와 일치.
+- **신규 task**: `T-RV-38`(F8 double-count), `T-RV-39`(F4 count 혼입),
+  `T-RV-40`(F6 4× 풀스캔 perf → T-212d), `T-RV-41`(MV CONCURRENTLY 전제 → T-101).
+- 검증: 리뷰/문서만 추가(코드 무변경). 변경: docs/reports 신규 + docs/{tasks,journal}.md.
+
 ## 2026-06-06 (codex) — TripMate 요구사항 대조 task 반영
 
 **작업**: TripMate `docs/krtour-map-requirements.md`를 현재 krtour-map `origin/main`
