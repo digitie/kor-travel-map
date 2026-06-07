@@ -82,6 +82,40 @@ export interface paths {
         patch: operations["decide_review_admin_dedup_review__review_key__patch"];
         trace?: never;
     };
+    "/admin/enrichment-review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Reviews */
+        get: operations["list_reviews_admin_enrichment_review_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/enrichment-review/{review_key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Decide Review */
+        patch: operations["decide_review_admin_enrichment_review__review_key__patch"];
+        trace?: never;
+    };
     "/admin/feature-update-requests": {
         parameters: {
             query?: never;
@@ -2008,6 +2042,131 @@ export interface components {
             status: string;
             /** Total Score */
             total_score: number;
+        };
+        /**
+         * EnrichmentReviewDecisionData
+         * @description Enrichment decision result data.
+         */
+        EnrichmentReviewDecisionData: {
+            /** Applied */
+            applied: boolean;
+            /** Changed */
+            changed: boolean;
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "accepted" | "rejected" | "ignored";
+            /** Review Key */
+            review_key: string;
+            /** Source Links Inserted */
+            source_links_inserted?: number | null;
+            /** Source Links Updated */
+            source_links_updated?: number | null;
+        };
+        /**
+         * EnrichmentReviewDecisionMeta
+         * @description Enrichment decision meta.
+         */
+        EnrichmentReviewDecisionMeta: {
+            /** Duration Ms */
+            duration_ms: number;
+        };
+        /**
+         * EnrichmentReviewDecisionRequest
+         * @description ``PATCH /admin/enrichment-review/{review_key}`` body.
+         */
+        EnrichmentReviewDecisionRequest: {
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "accepted" | "rejected" | "ignored";
+            /** Decision Reason */
+            decision_reason?: string | null;
+            /** Reviewed By */
+            reviewed_by?: string | null;
+        };
+        /**
+         * EnrichmentReviewDecisionResponse
+         * @description ``PATCH /admin/enrichment-review/{review_key}`` response.
+         */
+        EnrichmentReviewDecisionResponse: {
+            data: components["schemas"]["EnrichmentReviewDecisionData"];
+            meta: components["schemas"]["EnrichmentReviewDecisionMeta"];
+        };
+        /**
+         * EnrichmentReviewListData
+         * @description Enrichment review list data.
+         */
+        EnrichmentReviewListData: {
+            /** Items */
+            items: components["schemas"]["EnrichmentReviewRecord"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+        };
+        /**
+         * EnrichmentReviewListMeta
+         * @description Enrichment review list meta.
+         */
+        EnrichmentReviewListMeta: {
+            /** Count */
+            count: number;
+            /** Duration Ms */
+            duration_ms: number;
+            /** Page Size */
+            page_size: number;
+        };
+        /**
+         * EnrichmentReviewListResponse
+         * @description ``GET /admin/enrichment-review`` response.
+         */
+        EnrichmentReviewListResponse: {
+            data: components["schemas"]["EnrichmentReviewListData"];
+            meta: components["schemas"]["EnrichmentReviewListMeta"];
+        };
+        /**
+         * EnrichmentReviewRecord
+         * @description ``GET /admin/enrichment-review`` item.
+         */
+        EnrichmentReviewRecord: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Decision Reason */
+            decision_reason?: string | null;
+            /** Name Score */
+            name_score: number;
+            /** Review Key */
+            review_key: string;
+            /** Reviewed At */
+            reviewed_at?: string | null;
+            /** Reviewed By */
+            reviewed_by?: string | null;
+            /** Source Dataset Key */
+            source_dataset_key: string;
+            /** Source Entity Id */
+            source_entity_id: string;
+            /** Source Name */
+            source_name: string;
+            /** Source Provider */
+            source_provider: string;
+            /** Status */
+            status: string;
+            /** Target Category */
+            target_category?: string | null;
+            /** Target Feature Id */
+            target_feature_id: string;
+            /** Target Kind */
+            target_kind?: string | null;
+            /** Target Lat */
+            target_lat?: number | null;
+            /** Target Lon */
+            target_lon?: number | null;
+            /** Target Name */
+            target_name: string;
         };
         /**
          * EtlPreviewResponse
@@ -3946,6 +4105,86 @@ export interface operations {
                 content?: never;
             };
             /** @description 전이 불가 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_reviews_admin_enrichment_review_get: {
+        parameters: {
+            query?: {
+                /** @description enrichment review status 반복 필터 */
+                status?: ("pending" | "accepted" | "rejected" | "ignored")[] | null;
+                provider?: string[] | null;
+                min_score?: number | null;
+                max_score?: number | null;
+                q?: string | null;
+                page_size?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnrichmentReviewListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    decide_review_admin_enrichment_review__review_key__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                review_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnrichmentReviewDecisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnrichmentReviewDecisionResponse"];
+                };
+            };
+            /** @description 이미 검토됨/없음 */
             409: {
                 headers: {
                     [name: string]: unknown;
