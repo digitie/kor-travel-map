@@ -18,6 +18,7 @@ KRTOUR_MAP_RESTORE_RUSTFS_VOLUME="${KRTOUR_MAP_RESTORE_RUSTFS_VOLUME:-krtour-map
 KRTOUR_MAP_RESTORE_RECREATE="${KRTOUR_MAP_RESTORE_RECREATE:-0}"
 KRTOUR_MAP_RESTORE_SKIP_CHECKSUM="${KRTOUR_MAP_RESTORE_SKIP_CHECKSUM:-0}"
 KRTOUR_MAP_RESTORE_SKIP_RUSTFS="${KRTOUR_MAP_RESTORE_SKIP_RUSTFS:-0}"
+KRTOUR_MAP_RESTORE_SKIP_VERIFY="${KRTOUR_MAP_RESTORE_SKIP_VERIFY:-0}"
 
 usage() {
   cat >&2 <<EOF
@@ -68,6 +69,32 @@ require_command() {
   fi
 }
 
+select_python() {
+  if [[ -n "${PYTHON_BIN:-}" ]]; then
+    echo "$PYTHON_BIN"
+  elif [[ -x "$ROOT_DIR/.venv/bin/python" ]]; then
+    echo "$ROOT_DIR/.venv/bin/python"
+  elif command -v python3 >/dev/null 2>&1; then
+    command -v python3
+  elif command -v python >/dev/null 2>&1; then
+    command -v python
+  else
+    echo "required command not found: python3" >&2
+    exit 127
+  fi
+}
+
+with_maintenance_lock() {
+  if [[ "${KRTOUR_MAP_MAINTENANCE_LOCK_HELD:-0}" == "1" || "${KRTOUR_MAP_MAINTENANCE_LOCK_DISABLED:-0}" == "1" ]]; then
+    return 0
+  fi
+  local python_bin
+  python_bin="$(select_python)"
+  exec "$python_bin" "$ROOT_DIR/scripts/with-pg-advisory-lock.py" \
+    --key "maintenance:backup-restore" \
+    -- "$ROOT_DIR/scripts/docker-restore.sh" "$@"
+}
+
 if (( $# > 1 )); then
   usage
   exit 1
@@ -112,6 +139,7 @@ checksums="$backup_dir/meta/SHA256SUMS"
 
 require_command docker
 require_command sha256sum
+with_maintenance_lock "$@"
 
 for required_path in "$app_dump" "$dagster_dump" "$rustfs_archive" "$manifest" "$checksums"; do
   if [[ ! -f "$required_path" ]]; then
@@ -206,4 +234,12 @@ echo "app DB: $KRTOUR_MAP_RESTORE_APP_DB"
 echo "Dagster DB: $KRTOUR_MAP_RESTORE_DAGSTER_DB"
 if [[ "$KRTOUR_MAP_RESTORE_SKIP_RUSTFS" != "1" ]]; then
   echo "RustFS volume: $KRTOUR_MAP_RESTORE_RUSTFS_VOLUME"
+fi
+
+if [[ "$KRTOUR_MAP_RESTORE_SKIP_VERIFY" != "1" ]]; then
+  KRTOUR_MAP_RESTORE_APP_DB="$KRTOUR_MAP_RESTORE_APP_DB" \
+    KRTOUR_MAP_RESTORE_DAGSTER_DB="$KRTOUR_MAP_RESTORE_DAGSTER_DB" \
+    KRTOUR_MAP_RESTORE_RUSTFS_VOLUME="$KRTOUR_MAP_RESTORE_RUSTFS_VOLUME" \
+    KRTOUR_MAP_RESTORE_SKIP_RUSTFS="$KRTOUR_MAP_RESTORE_SKIP_RUSTFS" \
+    bash "$ROOT_DIR/scripts/docker-restore-verify.sh"
 fi

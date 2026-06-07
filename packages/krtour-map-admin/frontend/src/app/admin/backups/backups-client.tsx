@@ -159,6 +159,8 @@ export function BackupsClient() {
   const [backupId, setBackupId] = useState("");
   const [executeBackup, setExecuteBackup] = useState(false);
   const [executeRestore, setExecuteRestore] = useState(false);
+  const [executeSwap, setExecuteSwap] = useState(false);
+  const [applySwap, setApplySwap] = useState(false);
   const [recreateRestore, setRecreateRestore] = useState(false);
   const [lastResult, setLastResult] = useState<BackupOperationResponse | null>(null);
 
@@ -203,7 +205,20 @@ export function BackupsClient() {
 
   const submitSwap = (backup: BackupRecord) => {
     swapRestore.mutate(
-      { backupId: backup.backup_id, body: { operator: null, note: null } },
+      {
+        backupId: backup.backup_id,
+        body: {
+          app_db: null,
+          dagster_db: null,
+          rustfs_volume: null,
+          env_file: null,
+          apply: applySwap,
+          execute: executeSwap,
+          skip_verify: false,
+          operator: null,
+          note: null,
+        },
+      },
       { onSuccess: setLastResult },
     );
   };
@@ -363,6 +378,22 @@ export function BackupsClient() {
                     onChange={(event) => setRecreateRestore(event.target.checked)}
                   />
                   staging 대상 재생성
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    checked={executeSwap}
+                    type="checkbox"
+                    onChange={(event) => setExecuteSwap(event.target.checked)}
+                  />
+                  swap command 실행
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    checked={applySwap}
+                    type="checkbox"
+                    onChange={(event) => setApplySwap(event.target.checked)}
+                  />
+                  swap 즉시 적용
                 </label>
               </CardContent>
             </Card>

@@ -145,10 +145,17 @@ class RestoreRunRequest(BaseModel):
 
 
 class RestoreSwapRequest(BaseModel):
-    """Manual hot-swap boundary request."""
+    """Restore hot-swap command request."""
 
     model_config = ConfigDict(extra="forbid")
 
+    app_db: str | None = Field(default=None, min_length=1)
+    dagster_db: str | None = Field(default=None, min_length=1)
+    rustfs_volume: str | None = Field(default=None, min_length=1)
+    env_file: str | None = Field(default=None, min_length=1)
+    apply: bool = False
+    skip_verify: bool = False
+    execute: bool = False
     operator: str | None = Field(default=None, min_length=1)
     note: str | None = None
 
@@ -438,13 +445,17 @@ async def create_backup(
     )
 
 
-def _restore_targets(settings: AdminSettings, body: RestoreRunRequest) -> RestoreTargets:
+def _restore_targets_from_values(
+    settings: AdminSettings,
+    *,
+    app_db: str | None,
+    dagster_db: str | None,
+    rustfs_volume: str | None,
+) -> RestoreTargets:
     return RestoreTargets(
-        app_db=validate_backup_id(body.app_db or settings.restore_app_db),
-        dagster_db=validate_backup_id(body.dagster_db or settings.restore_dagster_db),
-        rustfs_volume=validate_backup_id(
-            body.rustfs_volume or settings.restore_rustfs_volume
-        ),
+        app_db=validate_backup_id(app_db or settings.restore_app_db),
+        dagster_db=validate_backup_id(dagster_db or settings.restore_dagster_db),
+        rustfs_volume=validate_backup_id(rustfs_volume or settings.restore_rustfs_volume),
     )
 
 
@@ -467,7 +478,12 @@ async def restore_backup(
     except BackupArtifactError as exc:
         raise _backup_error(exc) from exc
     try:
-        targets = _restore_targets(settings, payload)
+        targets = _restore_targets_from_values(
+            settings,
+            app_db=payload.app_db,
+            dagster_db=payload.dagster_db,
+            rustfs_volume=payload.rustfs_volume,
+        )
     except BackupArtifactError as exc:
         raise _invalid_backup_id(exc) from exc
     env = {
@@ -536,34 +552,82 @@ async def plan_restore_swap(
     backup_id: str,
     body: RestoreSwapRequest | None = None,
 ) -> BackupOperationResponse:
-    """Return the manual hot-swap boundary for a restored backup."""
+    """Plan or run the restore hot-swap env switch."""
     started_at = perf_counter()
     settings = _settings(request)
     try:
         safe_id = validate_backup_id(backup_id)
     except BackupArtifactError as exc:
         raise _invalid_backup_id(exc) from exc
-    _ = body or RestoreSwapRequest()
+    payload = body or RestoreSwapRequest()
     try:
         artifact = _record(backup_artifact(settings.backup_root, safe_id))
     except BackupArtifactError as exc:
         raise _backup_error(exc) from exc
-    targets = RestoreTargets(
-        app_db=settings.restore_app_db,
-        dagster_db=settings.restore_dagster_db,
-        rustfs_volume=settings.restore_rustfs_volume,
+    try:
+        targets = _restore_targets_from_values(
+            settings,
+            app_db=payload.app_db,
+            dagster_db=payload.dagster_db,
+            rustfs_volume=payload.rustfs_volume,
+        )
+    except BackupArtifactError as exc:
+        raise _invalid_backup_id(exc) from exc
+    env = {
+        "KRTOUR_MAP_BACKUP_ROOT": str(settings.backup_root),
+        "KRTOUR_MAP_RESTORE_BACKUP_ID": safe_id,
+        "KRTOUR_MAP_RESTORE_APP_DB": targets.app_db,
+        "KRTOUR_MAP_RESTORE_DAGSTER_DB": targets.dagster_db,
+        "KRTOUR_MAP_RESTORE_RUSTFS_VOLUME": targets.rustfs_volume,
+        "KRTOUR_MAP_RESTORE_SWAP_APPLY": "1" if payload.apply else "0",
+        "KRTOUR_MAP_RESTORE_SWAP_SKIP_VERIFY": "1" if payload.skip_verify else "0",
+    }
+    if payload.env_file:
+        env["KRTOUR_MAP_RESTORE_SWAP_ENV_FILE"] = payload.env_file
+    plan = _command_plan(
+        settings=settings,
+        script=settings.restore_swap_script_path,
+        env=env,
     )
+    if not payload.execute:
+        return BackupOperationResponse(
+            data=BackupOperationData(
+                operation="swap",
+                status="planned",
+                backup_id=safe_id,
+                message="restore hot-swap command plan을 생성했습니다.",
+                artifact=artifact,
+                restore_targets=targets,
+                command=plan,
+            ),
+            meta=BackupOperationMeta(duration_ms=_duration_ms(started_at)),
+        )
+    if not settings.backup_command_enabled:
+        raise _command_disabled()
+    result = await _run_command(
+        plan,
+        timeout_seconds=settings.backup_command_timeout_seconds,
+    )
+    if result.returncode != 0:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "code": "RESTORE_SWAP_COMMAND_FAILED",
+                "message": "restore hot-swap command 실행이 실패했습니다.",
+                "details": {"stderr": result.stderr, "stdout": result.stdout},
+            },
+        )
     return BackupOperationResponse(
         data=BackupOperationData(
             operation="swap",
-            status="manual_required",
+            status="completed",
             backup_id=safe_id,
-            message=(
-                "hot-swap은 아직 자동 실행하지 않습니다. staging restore smoke/count "
-                "검증 후 운영 DSN/volume switch는 operator가 수동 승인해야 합니다."
-            ),
+            message="restore hot-swap command 실행이 완료됐습니다.",
             artifact=artifact,
             restore_targets=targets,
+            command=plan,
+            stdout=result.stdout,
+            stderr=result.stderr,
         ),
         meta=BackupOperationMeta(duration_ms=_duration_ms(started_at)),
     )

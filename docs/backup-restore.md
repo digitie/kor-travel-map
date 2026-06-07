@@ -8,11 +8,11 @@
 - RustFS 객체 저장소 볼륨: feature file bucket `krtour-map`, offline upload bucket
   `krtour-uploads`
 
-현재 구현 범위는 `T-209e-a` cold backup 스크립트, `T-209e-b` staging cold restore
-자동화, `T-209e-c` admin router/UI다. Admin UI는 `/admin/backups`에서 artifact 목록,
-backup/restore command plan, staging restore 후 hot-swap 수동 승인 경계를 보여준다.
-host command 실행은 기본 비활성(`KRTOUR_MAP_ADMIN_BACKUP_COMMAND_ENABLED=false`)이며,
-운영자가 명시 opt-in할 때만 API에서 스크립트를 실행한다.
+현재 구현 범위는 `T-209e` cold backup, staging restore, smoke/count 검증,
+admin router/UI, restore hot-swap env 전환 자동화다. Admin UI는 `/admin/backups`에서
+artifact 목록, backup/restore/swap command plan을 보여준다. host command 실행은 기본
+비활성(`KRTOUR_MAP_ADMIN_BACKUP_COMMAND_ENABLED=false`)이며, 운영자가 명시 opt-in할
+때만 API에서 스크립트를 실행한다.
 
 ## 1. 전제
 
@@ -58,6 +58,12 @@ best-effort snapshot을 남길 때만 다음 opt-in을 사용한다.
 ```bash
 KRTOUR_MAP_BACKUP_ALLOW_RUNNING=1 npm run docker:backup
 ```
+
+`scripts/docker-backup.sh`, `scripts/docker-restore.sh`,
+`scripts/docker-restore-swap.sh`는 `scripts/with-pg-advisory-lock.py`를 통해
+PostgreSQL advisory lock `maintenance:backup-restore`를 잡고 실행된다. lock이 이미
+잡혀 있으면 실행은 실패한다. 로컬 실험에서만 mutex를 의도적으로 끄려면
+`KRTOUR_MAP_MAINTENANCE_LOCK_DISABLED=1`을 사용한다.
 
 ## 3. 산출물 구조
 
@@ -116,8 +122,9 @@ KRTOUR_MAP_RESTORE_BACKUP_ID=<backup_id> npm run docker:restore
 
 스크립트는 먼저 `meta/SHA256SUMS`를 검증한 뒤 `pg_restore --clean --if-exists
 --no-owner --no-privileges`로 두 DB를 복원하고, `rustfs/rustfs-data.tar.gz`를 staging
-Docker volume에 푼다. 기존 staging 대상이 있으면 기본적으로 중단한다. 의도적으로
-새로 만들 때만 다음 opt-in을 사용한다.
+Docker volume에 푼다. 복원이 끝나면 기본적으로 `scripts/docker-restore-verify.sh`를
+호출해 staging DB/volume smoke/count를 확인한다. 기존 staging 대상이 있으면
+기본적으로 중단한다. 의도적으로 새로 만들 때만 다음 opt-in을 사용한다.
 
 ```bash
 KRTOUR_MAP_RESTORE_BACKUP_ID=<backup_id> \
@@ -141,20 +148,51 @@ npm run docker:restore
 
 ## 6. staging restore 검증
 
-복원 뒤에는 staging DB/volume을 사용하는 별도 env 파일이나 compose project에서 API를
-띄운 뒤 `docs/runbooks/docker-app.md` §6 smoke를 수행한다. 운영 stack의 DSN/volume을
-staging 대상으로 바꾸기 전까지 TripMate는 영향받지 않는다.
-
-간단한 DB 검증 예:
+`scripts/docker-restore-verify.sh`는 staging app DB의 `feature.features` row count,
+staging Dagster DB의 사용자 table count, staging RustFS volume file count를 출력한다.
+restore script가 기본 호출하므로 별도 재검증이나 수동 restore 후 확인에만 직접 실행한다.
 
 ```bash
-docker compose exec -T postgres psql -U krtour_map -d krtour_map_restore -c '\dt feature.*'
-docker compose exec -T postgres psql -U krtour_map -d krtour_map_dagster_restore -c '\dt'
-docker run --rm -v krtour-map-rustfs-restore:/data alpine:3.20 \
-  sh -c "find /data -maxdepth 2 -type f | sed -n '1,40p'"
+KRTOUR_MAP_RESTORE_APP_DB=krtour_map_restore \
+KRTOUR_MAP_RESTORE_DAGSTER_DB=krtour_map_dagster_restore \
+KRTOUR_MAP_RESTORE_RUSTFS_VOLUME=krtour-map-rustfs-restore \
+bash scripts/docker-restore-verify.sh
 ```
 
-## 7. Admin API/UI
+추가 API smoke는 staging DB/volume을 사용하는 env 파일이나 별도 compose project에서
+API를 띄운 뒤 `docs/runbooks/docker-app.md` §6 절차를 수행한다. 운영 stack의 DSN/volume을
+staging 대상으로 바꾸기 전까지 TripMate는 영향받지 않는다.
+
+## 7. restore hot-swap env 전환
+
+hot-swap은 운영 DB/volume을 삭제하거나 rename하지 않는다. 검증된 staging 대상 이름을
+서비스 env override로 쓰는 `.env.restore-swap` 파일을 생성한 뒤, 필요하면 compose
+서비스를 그 env로 다시 띄운다.
+
+```bash
+KRTOUR_MAP_RESTORE_APP_DB=krtour_map_restore \
+KRTOUR_MAP_RESTORE_DAGSTER_DB=krtour_map_dagster_restore \
+KRTOUR_MAP_RESTORE_RUSTFS_VOLUME=krtour-map-rustfs-restore \
+bash scripts/docker-restore-swap.sh
+```
+
+기본 실행은 `.env.restore-swap`만 만든다. 즉시 적용하려면 다음 opt-in을 사용한다.
+
+```bash
+KRTOUR_MAP_RESTORE_SWAP_APPLY=1 bash scripts/docker-restore-swap.sh
+```
+
+생성되는 env는 다음 세 값을 덮어쓴다.
+
+- `KRTOUR_MAP_DOCKER_PG_DSN`
+- `KRTOUR_MAP_DOCKER_DAGSTER_PG_URL`
+- `KRTOUR_MAP_RUSTFS_VOLUME`
+
+`docker-compose.yml`의 RustFS named volume은 `KRTOUR_MAP_RUSTFS_VOLUME`으로 실제
+Docker volume name을 바꿀 수 있게 되어 있다. 기본값은 기존
+`krtour-map-rustfs`라서 일반 기동은 그대로 동작한다.
+
+## 8. Admin API/UI
 
 Admin API는 다음 경로를 제공한다.
 
@@ -165,13 +203,9 @@ Admin API는 다음 경로를 제공한다.
 - `POST /admin/restore/{backup_id}` — staging restore command plan 생성. 기본 target은
   `krtour_map_restore`, `krtour_map_dagster_restore`,
   `krtour-map-rustfs-restore`.
-- `POST /admin/restore/{backup_id}/swap` — 자동 switch를 수행하지 않고 수동 hot-swap
-  승인 경계를 반환한다.
+- `POST /admin/restore/{backup_id}/swap` — restore swap command plan 생성.
+  `execute=true`, `apply=true`를 함께 쓰면 검증 후 env 전환과 compose 재기동까지 실행한다.
 
-## 8. 구현 잔여
-
-다음 항목은 아직 구현하지 않았다.
-
-- ADR-039 advisory lock 기반 `backup`/`restore` critical section.
-- staging DB restore 후 API smoke/count check 자동화.
-- 운영 DSN/volume hot-swap 자동 실행. 현재는 UI/API에서 manual-required 상태만 반환한다.
+Admin API의 command 실행은 `KRTOUR_MAP_ADMIN_BACKUP_COMMAND_ENABLED=true`와 요청별
+`execute=true`가 모두 있어야 한다. 따라서 기본 UI/API 사용은 plan-only이며, 운영자가
+command/env를 확인한 뒤 명시적으로 실행한다.

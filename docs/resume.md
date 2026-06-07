@@ -30,6 +30,26 @@ best-guess 컬럼 매핑(구 `KnpsPointColumnMap` 등, dead) 대신 provider typ
 op/스케줄(Phase B fetcher는 이미 그 DB를 읽음). network + `data_go_kr_service_key`
 필요, 실검증은 T-212e. 그 다음 잔여 T-RV-04b는 opinet(차단, `python-opinet-api#7` 대기).
 
+## 2026-06-07 Codex 작업 메모 — T-209 final backup/restore safety automation
+
+사용자 지시에 따라 T-209 계열을 마무리한다. T-212 계열과 T-RV-04b는 Claude Code
+진행 범위라 건드리지 않는다. 이번 범위는 `T-209e-c` 이후 잔여였던 ADR-039 mutex,
+staging restore smoke/count 검증, restore hot-swap env 전환 자동화다.
+
+`scripts/docker-backup.sh`, `scripts/docker-restore.sh`,
+`scripts/docker-restore-swap.sh`는 `scripts/with-pg-advisory-lock.py`로 PostgreSQL
+advisory lock `maintenance:backup-restore`를 잡고 실행된다. `docker-restore.sh`는
+복원 뒤 기본으로 `scripts/docker-restore-verify.sh`를 호출해 staging app DB
+`feature.features` count, Dagster table count, RustFS file count를 확인한다.
+`scripts/docker-restore-swap.sh`는 검증된 staging DB/volume을 가리키는
+`.env.restore-swap`을 만들고, `KRTOUR_MAP_RESTORE_SWAP_APPLY=1`일 때만 compose
+서비스를 해당 env로 재기동한다. `docker-compose.yml`은 기본 RustFS volume name은
+유지하되 `KRTOUR_MAP_RUSTFS_VOLUME` override를 지원한다.
+
+**다음 한 작업**: T-209 계열은 이번 PR로 닫는다. 후속 선택 시 사용자 조율상
+T-212/T-RV-04b는 피하고, 새 리뷰 코멘트나 비충돌 백로그를 최신 main 기준으로 다시
+확인한다.
+
 ## 2026-06-07 Codex 작업 메모 — T-209e-c backup/restore admin surface
 
 사용자 지시에 따라 T-212 계열과 T-RV-04b는 Claude Code 진행 범위로 두고, Codex는
