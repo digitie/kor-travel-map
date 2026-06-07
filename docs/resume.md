@@ -1,5 +1,27 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-07 Claude 작업 메모 — T-RV-50 시리즈 착수 (T-RV-04b 완전 마무리 + 후속 프로그램)
+
+사용자 지시(T-RV-04b 및 후속 관련 모든 task 완료까지 진행)에 따라 `docs/tasks.md`에
+**T-RV-50 시리즈** 프로그램을 구체화했다(7개 요구사항 → PR 단위 분해). provider 라이브러리
+surface 전수 조사 완료. 미구현 데이터소스 = **휴양림/수목원(krforest, 모듈 없음)** · **박물관/미술관
+(standard_data festival만)** · **visitkorea 축제 enrichment(모듈 있음, 미wiring)**. dedup 인프라는
+성숙(scoring/queue/admin router+page)하나 **merge master 선택 UI 미완 + 기본 scope 미설정**.
+
+**프로그램(tasks.md T-RV-50~55)**:
+- T-RV-50 maplibre-vworld-js 최신화(point 6) — frontend는 이미 최신 태그 v0.1.2 핀, main untagged
+  후속 커밋 확인 필요(기능 변경 시 신규 태그 릴리스).
+- T-RV-51 dedup 수동처리 UI 완성 + 기본 scope(point 4 기반).
+- T-RV-52 visitkorea 축제 enrichment(points 1·5·5.1, provider+krtour+UI; provider TourItem에
+  eventstart/end date promote 보강 필요).
+- T-RV-53 krforest 휴양림/수목원(points 1·2·3·4; `ForestClient.travel.standard_recreation_forests`,
+  READY).
+- T-RV-54 standard_data 박물관/미술관(points 1·3·4; `datagokr.museum_art.iter_all`, READY).
+- T-RV-55 point-7 후속(관광지/주차장/khoa/airkorea/krairport) 평가.
+
+**다음 한 작업**: T-RV-50부터 순차 PR. 각 PR = 격리 sandbox + 게이트 전수 + (provider 수정 시
+해당 repo PR+머지 선행) + (frontend는 type-check/Windows Playwright e2e). 실데이터 검증은 T-212e.
+
 ## 2026-06-07 Codex 작업 메모 — Sprint 5 운영 진입 잔여 task 상세화
 
 사용자 지시 “sprint 5 관련 테스크 상세화 하고 pr 후 머지”에 따라 Sprint 5 최종
