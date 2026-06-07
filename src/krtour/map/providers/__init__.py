@@ -153,20 +153,25 @@ from krtour.map.providers.opinet import (
 from krtour.map.providers.standard_data import (
     DATASET_KEY_CULTURAL_FESTIVALS,
     DATASET_KEY_MUSEUMS,
+    DATASET_KEY_PARKING_LOTS,
     DATASET_KEY_TOURIST_ATTRACTIONS,
     FESTIVAL_CATEGORY,
     FESTIVAL_MARKER_COLOR,
     FESTIVAL_MARKER_ICON,
     MUSEUM_CATEGORY,
     MUSEUM_MARKER_COLOR,
+    PARKING_CATEGORY,
+    PARKING_MARKER_COLOR,
     STANDARD_DATA_PROVIDER_NAME,
     TOURIST_ATTRACTION_CATEGORY,
     TOURIST_MARKER_COLOR,
     CulturalFestivalItem,
     PublicMuseumArtItem,
+    PublicParkingLotItem,
     PublicTouristAttractionItem,
     cultural_festivals_to_bundles,
     museums_to_bundles,
+    parking_lots_to_bundles,
     tourist_attractions_to_bundles,
 )
 from krtour.map.providers.visitkorea import (
@@ -202,6 +207,12 @@ __all__ = [
     "DATASET_KEY_TOURIST_ATTRACTIONS",
     "TOURIST_ATTRACTION_CATEGORY",
     "TOURIST_MARKER_COLOR",
+    # standard_data 주차장 (T-RV-55, ADR-034 보조)
+    "PublicParkingLotItem",
+    "parking_lots_to_bundles",
+    "DATASET_KEY_PARKING_LOTS",
+    "PARKING_CATEGORY",
+    "PARKING_MARKER_COLOR",
     # visitkorea (PR#51, ADR-042 — TourAPI enrichment 2차)
     "VisitKoreaFestivalItem",
     "FestivalMatch",

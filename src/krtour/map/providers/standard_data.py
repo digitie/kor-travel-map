@@ -83,9 +83,11 @@ from krtour.map.geocoding import (
 __all__ = [
     "CulturalFestivalItem",
     "PublicMuseumArtItem",
+    "PublicParkingLotItem",
     "PublicTouristAttractionItem",
     "cultural_festivals_to_bundles",
     "museums_to_bundles",
+    "parking_lots_to_bundles",
     "tourist_attractions_to_bundles",
     # 상수 (호출자가 source_role/marker 등 변경하고 싶을 때 참조)
     "DATASET_KEY_CULTURAL_FESTIVALS",
@@ -99,6 +101,9 @@ __all__ = [
     "DATASET_KEY_TOURIST_ATTRACTIONS",
     "TOURIST_ATTRACTION_CATEGORY",
     "TOURIST_MARKER_COLOR",
+    "DATASET_KEY_PARKING_LOTS",
+    "PARKING_CATEGORY",
+    "PARKING_MARKER_COLOR",
 ]
 
 
@@ -899,6 +904,122 @@ async def tourist_attractions_to_bundles(
     )
     return [
         await _tourist_to_bundle(
+            item,
+            fetched_at=fetched_at,
+            reverse_geocoder=geocoder,
+            address_resolver=resolver,
+        )
+        for item in items
+    ]
+
+
+# -- 주차장 (place, ADR-034 보조) -----------------------------------------
+
+DATASET_KEY_PARKING_LOTS: Final[str] = "datagokr_parking_lots"
+"""``source_records.dataset_key`` — 전국주차장표준데이터."""
+
+_PARKING_ENTITY_TYPE: Final[str] = "parking_lot"
+PARKING_CATEGORY: Final[str] = PlaceCategoryCode.TRANSPORT_PARKING.value
+"""``Feature.category`` — 주차장 06010000."""
+PARKING_PLACE_KIND: Final[str] = "parking"
+PARKING_MARKER_COLOR: Final[str] = "P-13"
+_DEFAULT_PARKING_ICON: Final[str] = "parking"
+
+
+@runtime_checkable
+class PublicParkingLotItem(Protocol):
+    """전국주차장표준데이터 1 row 입력 shape (``PublicParkingLot``)."""
+
+    prkplce_no: str | None
+    prkplce_nm: str | None
+    prkplce_se: str | None
+    rdnmadr: str | None
+    lnmadr: str | None
+    prkcmprt: int | None
+    parkingchrge_info: str | None
+    latitude: float | None
+    longitude: float | None
+    phone_number: str | None
+    instt_code: str | None
+    raw: Any
+
+
+async def _parking_to_bundle(
+    item: PublicParkingLotItem,
+    *,
+    fetched_at: datetime,
+    reverse_geocoder: ReverseGeocoder | None,
+    address_resolver: AddressResolver | None,
+) -> FeatureBundle:
+    name = item.prkplce_nm or ""
+    road_text = normalize_korean_text(item.rdnmadr)
+    legal_text = normalize_korean_text(item.lnmadr)
+    natural_key = item.prkplce_no or item.instt_code or "::".join(
+        [normalize_korean_text(name) or name, road_text or ""]
+    )
+    raw_data: dict[str, Any] = {
+        "prkplce_no": item.prkplce_no,
+        "prkplce_nm": item.prkplce_nm,
+        "prkplce_se": item.prkplce_se,
+        "rdnmadr": item.rdnmadr,
+        "lnmadr": item.lnmadr,
+        "prkcmprt": item.prkcmprt,
+        "parkingchrge_info": item.parkingchrge_info,
+        "latitude": str(item.latitude) if item.latitude is not None else None,
+        "longitude": str(item.longitude) if item.longitude is not None else None,
+        "phone_number": item.phone_number,
+        "instt_code": item.instt_code,
+    }
+    return await _standard_place_to_bundle(
+        name=name,
+        natural_key=natural_key,
+        dataset_key=DATASET_KEY_PARKING_LOTS,
+        entity_type=_PARKING_ENTITY_TYPE,
+        category=PARKING_CATEGORY,
+        place_kind=PARKING_PLACE_KIND,
+        road_text=road_text,
+        legal_text=legal_text,
+        latitude=item.latitude,
+        longitude=item.longitude,
+        phone_raw=item.phone_number,
+        facility_info={
+            "prkplce_se": normalize_korean_text(item.prkplce_se),
+            "prkcmprt": item.prkcmprt,
+            "parkingchrge_info": normalize_korean_text(item.parkingchrge_info),
+        },
+        raw_data=raw_data,
+        raw_name=item.prkplce_nm,
+        default_icon=_DEFAULT_PARKING_ICON,
+        marker_color=PARKING_MARKER_COLOR,
+        fetched_at=fetched_at,
+        reverse_geocoder=reverse_geocoder,
+        address_resolver=address_resolver,
+    )
+
+
+async def parking_lots_to_bundles(
+    items: Iterable[PublicParkingLotItem],
+    *,
+    fetched_at: datetime,
+    reverse_geocoder: ReverseGeocoder | None = None,
+    address_resolver: AddressResolver | None = None,
+) -> list[FeatureBundle]:
+    """전국주차장표준데이터 items → ``list[FeatureBundle]`` (place, category 06010000).
+
+    안정키 ``prkplce_no``(없으면 ``instt_code``, 그것도 없으면 ``name::road`` 파생).
+    """
+    geocoder = (
+        cached_reverse_geocoder(reverse_geocoder)
+        if reverse_geocoder is not None
+        else None
+    )
+    resolver = (
+        cached_address_resolver(address_resolver)
+        if address_resolver is not None
+        else None
+    )
+    return [
+        await _parking_to_bundle(
             item,
             fetched_at=fetched_at,
             reverse_geocoder=geocoder,

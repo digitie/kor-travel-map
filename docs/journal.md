@@ -2,6 +2,23 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-08 (claude) — T-RV-55b 주차장(parking) 풀스택
+
+**작업**: ADR-034 보조 dataset 2번째 — 전국주차장표준데이터(datagokr). tourist와 동일 4-step,
+공용 `_standard_place_to_bundle` helper 재사용.
+
+- `parking_lots_to_bundles`(place, category `TRANSPORT_PARKING 06010000`, place_kind `parking`) +
+  `PublicParkingLotItem` Protocol. 안정키 `prkplce_no`(없으면 instt_code→name::road 파생).
+  facility_info에 prkplce_se/prkcmprt/parkingchrge_info 보존.
+- `fetch_standard_parking_lots`(sync, `parking.iter_all()`) + `feature_place_standard_parking_lots`
+  asset + resource spec/guard→live + definitions + ETL preview entry.
+- **MOIS dedup 없음**: MOIS PROMOTED 42 슬러그에 주차장이 없어 dedup 후보 없음 → pair 미추가.
+- **검증**: ruff + mypy --strict(map 81/dagster 13/admin 25) + lint-imports + unit 939(coverage
+  80.81%) + dagster 70 + parking preview(cat 06010000) green.
+
+**다음(T-RV-55)**: 55c khoa 해수욕장(조사 선행) → 55d airkorea 대기질(측정값, place 아님 — 별도
+설계) → 55e krairport 공항. (52c enrichment UI는 trailing.)
+
 ## 2026-06-08 (claude) — T-RV-55a 관광지(tourist_attraction) 풀스택
 
 **작업**: ADR-034 보조 dataset 1번째 — 전국관광지표준데이터(datagokr). museum과 동일 4-step.

@@ -51,6 +51,7 @@ from krtour.map.providers.opinet import (
 from krtour.map.providers.standard_data import (
     cultural_festivals_to_bundles,
     museums_to_bundles,
+    parking_lots_to_bundles,
     tourist_attractions_to_bundles,
 )
 
@@ -760,6 +761,47 @@ async def _convert_tourist(items: Sequence[Any]) -> list[Any]:
     return [b.model_dump(mode="json") for b in bundles]
 
 
+@dataclass(frozen=True)
+class _Parking:
+    """`PublicParkingLotItem` Protocol 준수 (provider `PublicParkingLot`)."""
+
+    prkplce_no: str | None
+    prkplce_nm: str | None
+    prkplce_se: str | None
+    rdnmadr: str | None
+    lnmadr: str | None
+    prkcmprt: int | None
+    parkingchrge_info: str | None
+    latitude: float | None
+    longitude: float | None
+    phone_number: str | None
+    instt_code: str | None
+    raw: Any = None
+
+
+def _parking_fixture() -> Sequence[_Parking]:
+    return [
+        _Parking(
+            prkplce_no="PK-0001",
+            prkplce_nm="시청 공영주차장",
+            prkplce_se="공영",
+            rdnmadr="서울특별시 중구 세종대로 110",
+            lnmadr=None,
+            prkcmprt=120,
+            parkingchrge_info="유료",
+            latitude=37.5663,
+            longitude=126.9779,
+            phone_number="02-120",
+            instt_code="PK-INSTT",
+        ),
+    ]
+
+
+async def _convert_parking(items: Sequence[Any]) -> list[Any]:
+    bundles = await parking_lots_to_bundles(items, fetched_at=_now())
+    return [b.model_dump(mode="json") for b in bundles]
+
+
 # ── Registry ──────────────────────────────────────────────────────────
 
 
@@ -900,6 +942,14 @@ FIXTURE_REGISTRY: Final[tuple[EtlFixtureEntry, ...]] = (
         description="전국관광지표준데이터 → place Feature (ADR-034 보조). T-RV-55.",
         build_fixture=_tourist_fixture,
         convert=_convert_tourist,
+    ),
+    EtlFixtureEntry(
+        provider="data.go.kr-standard",
+        dataset="datagokr_parking_lots",
+        variant="FeatureBundle",
+        description="전국주차장표준데이터 → place Feature (ADR-034 보조). T-RV-55.",
+        build_fixture=_parking_fixture,
+        convert=_convert_parking,
     ),
 )
 
