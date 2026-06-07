@@ -2,6 +2,22 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-07 (claude) — T-RV-53d krforest ETL preview 등록 → T-RV-53 완료
+
+**작업**: krforest를 admin 디버그 ETL preview 레지스트리에 등록(데이터소스별 debug UI surface).
+
+- `etl_fixtures.FIXTURE_REGISTRY`에 `krforest_recreation_forests`/`krforest_arboretums` 2 entry +
+  fixture dataclass(`_RecreationForest`/`_Arboretum`) + builder + `*_to_bundles` convert 추가 →
+  `/debug/etl/providers`·`/debug/etl/{provider}/{dataset}/preview`에 자동 노출(dry-run place
+  FeatureBundle, DB write 없음). dedup은 dedup-review UI(T-RV-51a)에 자동 노출.
+- **검증**: ruff + mypy --strict admin(25 files) + etl router 25 passed + `run_fixture_preview`
+  실행(recreation 2건·arboretum 1건, kind=place) 확인.
+- **NOTE**: ETL preview 레지스트리는 Sprint-2 provider(datagokr/kma/opinet/krex)만 있었고
+  knps/krheritage/mois도 미등록 상태 — 후속 정리 후보로 tasks에 기록.
+
+**T-RV-53 완료**(53a transform / 53b asset+fetcher / 53c MOIS dedup / 53d ETL preview).
+**다음**: T-RV-54 박물관/미술관(standard_data, datagokr museum_art) — 동일 4-step.
+
 ## 2026-06-07 (claude) — T-RV-53c 자연휴양림↔MOIS dedup scope
 
 **작업**: 휴양림이 MOIS 콘도/관광숙박과 중복 가능(ADR-034 8단계) → `DEFAULT_DEDUP_SCOPE_PAIRS`에

@@ -40,6 +40,10 @@ from krtour.map.providers.krex import (
     rest_areas_to_bundles,
     traffic_notices_to_bundles,
 )
+from krtour.map.providers.krforest import (
+    arboretums_to_bundles,
+    recreation_forests_to_bundles,
+)
 from krtour.map.providers.opinet import (
     prices_to_values,
     stations_to_bundles,
@@ -584,6 +588,91 @@ async def _convert_krex_traffic_notices(items: Sequence[Any]) -> list[Any]:
     return [b.model_dump(mode="json") for b in bundles]
 
 
+@dataclass(frozen=True)
+class _RecreationForest:
+    """`RecreationForestItem` Protocol 준수 (provider `StandardRecreationForest` 정합)."""
+
+    name: str | None
+    sido_name: str | None
+    forest_type: str | None
+    address: str | None
+    phone_number: str | None
+    homepage_url: str | None
+    latitude: float | None
+    longitude: float | None
+    institution_code: str | None
+    raw: Any = None
+
+
+def _krforest_recreation_forests_fixture() -> Sequence[_RecreationForest]:
+    return [
+        _RecreationForest(
+            name="유명산자연휴양림",
+            sido_name="경기도",
+            forest_type="국립",
+            address="경기도 가평군 설악면 유명산길 79-53",
+            phone_number="031-589-5487",
+            homepage_url="https://www.foresttrip.go.kr",
+            latitude=37.6042,
+            longitude=127.4831,
+            institution_code="KFS-0001",
+        ),
+        _RecreationForest(
+            name="대관령자연휴양림",
+            sido_name="강원특별자치도",
+            forest_type="국립",
+            address="강원특별자치도 강릉시 성산면 대관령옛길 999",
+            phone_number="033-641-9990",
+            homepage_url=None,
+            latitude=37.6810,
+            longitude=128.7510,
+            institution_code="KFS-0002",
+        ),
+    ]
+
+
+async def _convert_krforest_recreation_forests(items: Sequence[Any]) -> list[Any]:
+    bundles = await recreation_forests_to_bundles(items, fetched_at=_now())
+    return [b.model_dump(mode="json") for b in bundles]
+
+
+@dataclass(frozen=True)
+class _Arboretum:
+    """`ForestSpatialItem` Protocol 준수 (provider `ForestSpatialPoint` 정합)."""
+
+    name: str | None
+    category: str | None
+    address: str | None
+    phone_number: str | None
+    homepage_url: str | None
+    latitude: float | None
+    longitude: float | None
+    region_code: str | None
+    region_name: str | None
+    raw: Any = None
+
+
+def _krforest_arboretums_fixture() -> Sequence[_Arboretum]:
+    return [
+        _Arboretum(
+            name="국립세종수목원",
+            category="국립수목원",
+            address="세종특별자치시 수목원로 136",
+            phone_number="044-251-0001",
+            homepage_url="https://www.sjna.or.kr",
+            latitude=36.4978,
+            longitude=127.2895,
+            region_code="36110",
+            region_name="세종특별자치시",
+        ),
+    ]
+
+
+async def _convert_krforest_arboretums(items: Sequence[Any]) -> list[Any]:
+    bundles = await arboretums_to_bundles(items, fetched_at=_now())
+    return [b.model_dump(mode="json") for b in bundles]
+
+
 # ── Registry ──────────────────────────────────────────────────────────
 
 
@@ -692,6 +781,22 @@ FIXTURE_REGISTRY: Final[tuple[EtlFixtureEntry, ...]] = (
         description="krex 교통 공지 → notice FeatureBundle. PR#45.",
         build_fixture=_krex_traffic_notices_fixture,
         convert=_convert_krex_traffic_notices,
+    ),
+    EtlFixtureEntry(
+        provider="python-krforest-api",
+        dataset="krforest_recreation_forests",
+        variant="FeatureBundle",
+        description="자연휴양림 표준데이터 → place Feature (ADR-034 8단계). T-RV-53.",
+        build_fixture=_krforest_recreation_forests_fixture,
+        convert=_convert_krforest_recreation_forests,
+    ),
+    EtlFixtureEntry(
+        provider="python-krforest-api",
+        dataset="krforest_arboretums",
+        variant="FeatureBundle",
+        description="수목원/식물원(SHP) → place Feature (ADR-034 8단계). T-RV-53.",
+        build_fixture=_krforest_arboretums_fixture,
+        convert=_convert_krforest_arboretums,
     ),
 )
 
