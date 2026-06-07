@@ -24,6 +24,7 @@ import {
   type FeatureKind,
   type FeatureSummary,
 } from "@/api/features";
+import { FeatureWeatherPanel } from "@/components/feature-weather-panel";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -222,6 +223,7 @@ function FeatureDetailPanel({
               <summary className="cursor-pointer text-sm font-medium">urls</summary>
               <JsonBlock value={detailQuery.data.urls} />
             </details>
+            <FeatureWeatherPanel compact featureId={featureId} />
           </>
         ) : null}
       </CardContent>

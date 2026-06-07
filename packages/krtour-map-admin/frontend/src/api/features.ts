@@ -70,6 +70,9 @@ export function useFeaturesInBbox(
 export type FeatureDetail = FeatureSchemas["FeatureDetailResponse"];
 type FeatureDetailEnvelopeResponse =
   FeatureSchemas["FeatureDetailEnvelopeResponse"];
+export type FeatureWeatherResponse = FeatureSchemas["FeatureWeatherResponse"];
+export type WeatherCardData = FeatureSchemas["WeatherCardData"];
+export type WeatherMetric = FeatureSchemas["WeatherMetricOut"];
 
 async function fetchFeatureDetail(featureId: string): Promise<FeatureDetail> {
   const body = await getJson<FeatureDetailEnvelopeResponse>(
@@ -83,6 +86,29 @@ export function useFeatureDetail(featureId: string | null) {
   return useQuery({
     queryKey: ["feature", featureId] as const,
     queryFn: () => fetchFeatureDetail(featureId as string),
+    enabled: featureId !== null && featureId.length > 0,
+    staleTime: 60_000,
+  });
+}
+
+async function fetchFeatureWeather(
+  featureId: string,
+  params: { asof?: string | Date | null } = {},
+): Promise<FeatureWeatherResponse> {
+  return getJson<FeatureWeatherResponse>(
+    pathWithQuery(`/features/${encodeURIComponent(featureId)}/weather`, {
+      asof: params.asof,
+    }),
+  );
+}
+
+export function useFeatureWeather(
+  featureId: string | null,
+  params: { asof?: string | Date | null } = {},
+) {
+  return useQuery<FeatureWeatherResponse, Error>({
+    queryKey: ["feature", featureId, "weather", params.asof ?? null] as const,
+    queryFn: () => fetchFeatureWeather(featureId as string, params),
     enabled: featureId !== null && featureId.length > 0,
     staleTime: 60_000,
   });

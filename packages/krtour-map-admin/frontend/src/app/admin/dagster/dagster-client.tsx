@@ -107,7 +107,7 @@ function shortRunId(runId: string) {
 }
 
 function dagsterRunUrl(runId: string) {
-  return `${DAGSTER_UI_URL.replace(/\/$/, "")}/runs/${encodeURIComponent(runId)}`;
+  return `${DAGSTER_UI_URL.replace(/\/+$/, "")}/runs/${encodeURIComponent(runId)}`;
 }
 
 function graphqlErrorText(error: DagsterGraphqlError | null | undefined) {

@@ -1,6 +1,8 @@
 "use client";
 
 import {
+  ActivityIcon,
+  AlertTriangleIcon,
   DatabaseIcon,
   ArchiveIcon,
   GitCompareArrowsIcon,
@@ -25,8 +27,11 @@ import { cn } from "@/lib/utils";
 const navItems = [
   { href: "/", label: "홈", icon: HomeIcon },
   { href: "/features", label: "Features", icon: MapIcon },
+  { href: "/admin/features", label: "Admin features", icon: DatabaseIcon },
+  { href: "/admin/issues", label: "Issues", icon: AlertTriangleIcon },
   { href: "/ops/import-jobs", label: "Import jobs", icon: ListChecksIcon },
   { href: "/ops/consistency", label: "Consistency", icon: RadarIcon },
+  { href: "/ops/logs", label: "Logs", icon: ActivityIcon },
   { href: "/admin/dedup-review", label: "Dedup review", icon: GitCompareArrowsIcon },
   {
     href: "/admin/enrichment-review",

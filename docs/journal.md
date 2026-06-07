@@ -486,6 +486,34 @@ provider 라이브러리 surface 전수 조사 후 `docs/tasks.md`에 **T-RV-50~
 
 **다음**: T-RV-50부터 순차 PR(격리 sandbox + 게이트 전수, provider 수정은 해당 repo PR+머지 선행).
 
+## 2026-06-07 (codex) — T-212b admin UI 핵심 화면 보강
+
+**작업**: T-212b admin UI lane 착수. 이미 T-212c에서 backend 계약이 닫힌 표면을
+frontend 운영 화면으로 연결했다.
+
+- **Admin features**: `/admin/features` route 추가. `GET /admin/features` 기반 검색/
+  status/kind/issue/sort/page size/cursor table, 선택 상세(`GET /features/{id}`),
+  weather panel(`GET /features/{id}/weather`), 단건 deactivate mutation.
+- **Admin issues**: `/admin/issues` route 추가. 목록 필터(q/status/severity/type/
+  provider/dataset/bbox), 상세 payload/feature snapshot, resolve/ignore/reopen/
+  retry_geocode/retry_reverse_geocode/apply_kraddr_geo_address/manual_override action.
+- **Ops logs**: `/ops/logs` route 추가. `GET /ops/system-logs`와
+  `GET /ops/api-call-logs` 조회 탭, 필터, cursor.
+- 기존 `/features` 상세 panel에 weather card 노출. sidebar nav, frontend README,
+  `admin-ops.spec.ts` smoke 추가.
+- 기존 `/admin/dagster` Recent runs의 run id를 Dagster webserver run detail 링크로
+  연결.
+
+**검증**: WSL Node 20.20.2. `npm run type-check` ✅, `npm run lint` ✅, env 명시
+`npm run build` ✅, `npm run doctor` 실행 및 diff 확인(잔여 10건은 기존 shadcn/ui
+primitive/기존 Dagster iframe 탐지/기존 unused detail hook), `npm run test` ✅
+(테스트 파일 없음). `http://127.0.0.1:9014` dev server에서 `/admin/features`,
+`/admin/issues`, `/ops/logs`, `/features` HTTP 200 확인. Windows 호스트 Playwright
+`admin-ops.spec.ts` 9 passed.
+
+**다음**: T-212b 잔여는 Dagster schedule/sensor tick history/backend-backed failure
+detail API/UX 후속.
+
 ## 2026-06-07 (codex) — Sprint 5 운영 진입 잔여 task 상세화
 
 **작업**: 사용자 지시로 Sprint 5 최종 운영 진입까지 남은 작업을 1-PR 단위로 상세화.
