@@ -296,9 +296,11 @@ enrichment(모듈 있음, 미wiring)**. dedup 인프라(scoring/queue/admin rout
     **krforest↔MOIS·museum↔MOIS pair는 해당 데이터소스 PR에서 이 tuple에 append.**
 - [ ] **T-RV-52 visitkorea 축제 enrichment wiring**(points 1·5·5.1): datagokr 축제(1차)에
   visitkorea(2차) 이미지/overview/homepage enrichment.
-  - [ ] **T-RV-52a (provider)** `python-visitkorea-api` 보강 PR — `search_festival()`→`TourItem`이
-    `eventstartdate`/`eventenddate`/`overview`/`homepage` 미노출(detail_common N+1 필요). 축제용
-    필드 promote(eventstart/end date) + 가능하면 `iter_festivals_with_detail()` 헬퍼 추가. PR+머지.
+  - [x] **T-RV-52a (provider)**(2026-06-07) `python-visitkorea-api#17`(merged, **v0.2.0**) — `TourItem`에
+    `event_start_date`/`event_end_date`(searchFestival `eventstartdate`/`eventenddate` promote, str
+    YYYYMMDD) + `overview`/`homepage`(detailCommon 보강용, list 응답엔 None) 필드 추가 → krtour
+    `VisitKoreaFestivalItem` Protocol 4필드 속성 존재 충족. ruff/mypy/pytest 96 passed. **overview/
+    homepage는 detailCommon에서만 오므로 52b 매칭 item에 한해 N+1 detail 호출로 보강.**
   - [ ] **T-RV-52b (krtour)** `fetch_visitkorea_festival_events` fetcher + `FestivalMatcher` 구현
     (datagokr 축제 feature를 name+region fuzzy 매칭, ADR-016 재사용) + `feature_event_visitkorea_
     enrichment` asset(`festival_to_enrichment_links` → SourceRecord/enrichment SourceLink) + resource.
