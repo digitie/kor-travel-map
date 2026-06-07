@@ -22,6 +22,11 @@ from krtour.map.providers.knps import (
 from krtour.map.providers.knps import (
     PROVIDER_NAME as KNPS_PROVIDER_NAME,
 )
+from krtour.map.providers.krairport import (
+    DATASET_KEY_AIRPORTS,
+    KRAIRPORT_PROVIDER_NAME,
+    airports_to_bundles,
+)
 from krtour.map.providers.krex import (
     KREX_PROVIDER_NAME,
     REST_AREA_DATASET_KEY,
@@ -591,6 +596,36 @@ async def feature_place_khoa_beaches(
     return await run_feature_place_khoa_beaches(context)
 
 
+async def run_feature_place_krairport_airports(
+    context: AssetExecutionContext,
+) -> DagsterFeatureLoadResult:
+    """공항 메타데이터 record를 place Feature로 적재한다(ADR-034 보조)."""
+    records = await _record_list(context, "krairport_airports")
+    fetched_at = await _fetched_at(context)
+    bundles = await airports_to_bundles(
+        records,
+        fetched_at=fetched_at,
+        reverse_geocoder=_reverse_geocoder(context),
+    )
+    return await _load(
+        context,
+        provider=KRAIRPORT_PROVIDER_NAME,
+        dataset_key=DATASET_KEY_AIRPORTS,
+        bundles=bundles,
+    )
+
+
+@asset(
+    group_name="features_place",
+    required_resource_keys=_COMMON_RESOURCE_KEYS | {"krairport_airports"},
+    retry_policy=FEATURE_LOAD_RETRY_POLICY,
+)
+async def feature_place_krairport_airports(
+    context: AssetExecutionContext,
+) -> DagsterFeatureLoadResult:
+    return await run_feature_place_krairport_airports(context)
+
+
 async def run_feature_event_visitkorea_enrichment(
     context: AssetExecutionContext,
 ) -> EnrichmentLoadResult:
@@ -641,6 +676,7 @@ FEATURE_LOAD_ASSETS: Final = [
     feature_place_standard_tourist_attractions,
     feature_place_standard_parking_lots,
     feature_place_khoa_beaches,
+    feature_place_krairport_airports,
     feature_event_visitkorea_enrichment,
 ]
 """현재 구현 완료된 Feature provider 적재 asset 목록."""

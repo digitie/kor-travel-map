@@ -384,8 +384,15 @@ enrichment(모듈 있음, 미wiring)**. dedup 인프라(scoring/queue/admin rout
     unit 942(coverage 80.92%)/dagster 72 + khoa preview(01020300/beach) green. (해양공지는 후속.)
   - [ ] **T-RV-55d airkorea 대기질** — **place feature 아님**(측정값, weather-like) → WeatherValue/
     별도 DTO 패턴 검토 필요(feature-load와 다름). 조사+설계 선행.
-  - [ ] **T-RV-55e krairport 공항** — provider `python-krairport-api` 조사(place, category
-    `TRANSPORT_AIRPORT 06050000`).
+  - [x] **T-RV-55e krairport 공항**(2026-06-08) — provider `python-krairport-api`
+    `KrairportClient.airports(active=True)`(번들 정적 메타데이터, **keyless**)→`AirportMetadata`.
+    신규 `providers/krairport.py`(`airports_to_bundles`, place, category `TRANSPORT_AIRPORT
+    06050000`, place_kind `airport`) + `AirportMetadataItem` Protocol. 좌표 = provider
+    `Coordinate`(`.lat`/`.lon`) 중첩 객체 `_coord_of` 추출(None 안전), 도로명 주소 없어 좌표
+    reverse로 bjd 보강, 안정키 = 공항 코드(IATA). fetcher(keyless, key 있으면 kac/iiac 주입)/
+    asset/resource(setting_names 없음→항상 live)/definitions/ETL preview. MOIS dedup 없음(공항
+    슬러그 없음). 게이트: ruff/mypy(map 83/dagster 13/admin 25)/lint-imports/unit 951(coverage
+    81%, krairport.py 97%)/dagster 73 + krairport preview(06050000/airport) green.
 
 각 task는 작은 독립 PR + origin/main rebase + 격리 WSL sandbox + (provider 수정 시 해당 repo
 PR+머지 선행) + (endpoint/OpenAPI 추가 시 frontend `types.ts` 재생성) + 게이트 전수(ruff/mypy/

@@ -1,5 +1,23 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-08 Claude 작업 메모 — T-RV-55 place 보조 dataset 5종 완료(55a~55e)
+
+T-RV-55 ADR-034 보조 dataset 중 **place feature 5종 전부 풀스택 완료**:
+55a 관광지 · 55b 주차장 · 55c khoa 해수욕장 · 55e krairport 공항(keyless, 신규 모듈).
+각 = transform + asset/fetcher/resource/definitions + ETL preview + 단위/dagster 테스트 +
+게이트 전수(coverage 81%). MOIS dedup은 PROMOTED 슬러그에 후보가 있는 source만 추가했고
+(tourist↔mois) 해수욕장/공항/주차장은 후보 없음.
+
+**남은 작업(우선순위順)**:
+1. **T-RV-55d airkorea 대기질** — **place feature가 아님**(측정값, weather-like). feature-load
+   4-step과 근본적으로 다름 → **설계 결정 선행 필요**: (a) WeatherValue류 별도 value 패턴,
+   (b) 별도 측정 DTO, (c) 본 스코프에서 제외. **사용자 결정 대기**(의사결정 사항).
+2. **T-RV-52c** visitkorea↔datagokr 축제 enrichment **매칭 review UI**(dedup-review와 유사한
+   신규 API+UI surface) — enrichment wiring(52a/52b)은 완료, 수동 review UI만 trailing.
+
+**다음 한 작업**: 위 1(55d) 설계 결정을 사용자에게 surface → 결정 후 진행. 그 전까지는 2(52c)
+enrichment review UI를 진행 가능.
+
 ## 2026-06-07 Claude 작업 메모 — T-RV-50 시리즈 착수 (T-RV-04b 완전 마무리 + 후속 프로그램)
 
 사용자 지시(T-RV-04b 및 후속 관련 모든 task 완료까지 진행)에 따라 `docs/tasks.md`에

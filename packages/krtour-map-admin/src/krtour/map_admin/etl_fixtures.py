@@ -35,6 +35,7 @@ from krtour.map.providers.kma import (
     ultra_short_nowcast_to_weather_values,
     weather_alerts_to_notice_bundles,
 )
+from krtour.map.providers.krairport import airports_to_bundles
 from krtour.map.providers.krex import (
     rest_area_prices_to_values,
     rest_area_weather_to_values,
@@ -836,6 +837,44 @@ async def _convert_beaches(items: Sequence[Any]) -> list[Any]:
     return [b.model_dump(mode="json") for b in bundles]
 
 
+@dataclass(frozen=True)
+class _AirportCoordinate:
+    """provider `Coordinate`(`.lat`/`.lon` float) 중첩 객체 흉내."""
+
+    lat: float
+    lon: float
+
+
+@dataclass(frozen=True)
+class _Airport:
+    """`AirportMetadataItem` Protocol 준수 (provider `AirportMetadata`)."""
+
+    code: str
+    name_korean: str | None
+    name_english: str
+    icao_code: str | None
+    municipality: str | None
+    coordinate: Any
+
+
+def _airport_fixture() -> Sequence[_Airport]:
+    return [
+        _Airport(
+            code="ICN",
+            name_korean="인천국제공항",
+            name_english="Incheon International Airport",
+            icao_code="RKSI",
+            municipality="인천광역시",
+            coordinate=_AirportCoordinate(lat=37.4602, lon=126.4407),
+        ),
+    ]
+
+
+async def _convert_airports(items: Sequence[Any]) -> list[Any]:
+    bundles = await airports_to_bundles(items, fetched_at=_now())
+    return [b.model_dump(mode="json") for b in bundles]
+
+
 # ── Registry ──────────────────────────────────────────────────────────
 
 
@@ -992,6 +1031,14 @@ FIXTURE_REGISTRY: Final[tuple[EtlFixtureEntry, ...]] = (
         description="해양수산부 해수욕장정보 → place Feature (ADR-034 보조). T-RV-55.",
         build_fixture=_beach_fixture,
         convert=_convert_beaches,
+    ),
+    EtlFixtureEntry(
+        provider="python-krairport-api",
+        dataset="krairport_airports",
+        variant="FeatureBundle",
+        description="공항 메타데이터(번들 정적) → place Feature (ADR-034 보조). T-RV-55.",
+        build_fixture=_airport_fixture,
+        convert=_convert_airports,
     ),
 )
 
