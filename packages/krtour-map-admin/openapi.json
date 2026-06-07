@@ -2732,6 +2732,350 @@
         "title": "DedupReviewRecord",
         "type": "object"
       },
+      "EnrichmentReviewDecisionData": {
+        "additionalProperties": false,
+        "description": "Enrichment decision result data.",
+        "properties": {
+          "applied": {
+            "title": "Applied",
+            "type": "boolean"
+          },
+          "changed": {
+            "title": "Changed",
+            "type": "boolean"
+          },
+          "decision": {
+            "enum": [
+              "accepted",
+              "rejected",
+              "ignored"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "review_key": {
+            "title": "Review Key",
+            "type": "string"
+          },
+          "source_links_inserted": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Links Inserted"
+          },
+          "source_links_updated": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Links Updated"
+          }
+        },
+        "required": [
+          "review_key",
+          "decision",
+          "changed",
+          "applied"
+        ],
+        "title": "EnrichmentReviewDecisionData",
+        "type": "object"
+      },
+      "EnrichmentReviewDecisionMeta": {
+        "additionalProperties": false,
+        "description": "Enrichment decision meta.",
+        "properties": {
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "duration_ms"
+        ],
+        "title": "EnrichmentReviewDecisionMeta",
+        "type": "object"
+      },
+      "EnrichmentReviewDecisionRequest": {
+        "additionalProperties": false,
+        "description": "``PATCH /admin/enrichment-review/{review_key}`` body.",
+        "properties": {
+          "decision": {
+            "enum": [
+              "accepted",
+              "rejected",
+              "ignored"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "decision_reason": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Reason"
+          },
+          "reviewed_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed By"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "title": "EnrichmentReviewDecisionRequest",
+        "type": "object"
+      },
+      "EnrichmentReviewDecisionResponse": {
+        "additionalProperties": false,
+        "description": "``PATCH /admin/enrichment-review/{review_key}`` response.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/EnrichmentReviewDecisionData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/EnrichmentReviewDecisionMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "EnrichmentReviewDecisionResponse",
+        "type": "object"
+      },
+      "EnrichmentReviewListData": {
+        "additionalProperties": false,
+        "description": "Enrichment review list data.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EnrichmentReviewRecord"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "EnrichmentReviewListData",
+        "type": "object"
+      },
+      "EnrichmentReviewListMeta": {
+        "additionalProperties": false,
+        "description": "Enrichment review list meta.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "count",
+          "page_size",
+          "duration_ms"
+        ],
+        "title": "EnrichmentReviewListMeta",
+        "type": "object"
+      },
+      "EnrichmentReviewListResponse": {
+        "additionalProperties": false,
+        "description": "``GET /admin/enrichment-review`` response.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/EnrichmentReviewListData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/EnrichmentReviewListMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "EnrichmentReviewListResponse",
+        "type": "object"
+      },
+      "EnrichmentReviewRecord": {
+        "additionalProperties": false,
+        "description": "``GET /admin/enrichment-review`` item.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "decision_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Reason"
+          },
+          "name_score": {
+            "title": "Name Score",
+            "type": "number"
+          },
+          "review_key": {
+            "title": "Review Key",
+            "type": "string"
+          },
+          "reviewed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed At"
+          },
+          "reviewed_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed By"
+          },
+          "source_dataset_key": {
+            "title": "Source Dataset Key",
+            "type": "string"
+          },
+          "source_entity_id": {
+            "title": "Source Entity Id",
+            "type": "string"
+          },
+          "source_name": {
+            "title": "Source Name",
+            "type": "string"
+          },
+          "source_provider": {
+            "title": "Source Provider",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "target_category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Category"
+          },
+          "target_feature_id": {
+            "title": "Target Feature Id",
+            "type": "string"
+          },
+          "target_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Kind"
+          },
+          "target_lat": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Lat"
+          },
+          "target_lon": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Lon"
+          },
+          "target_name": {
+            "title": "Target Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "review_key",
+          "status",
+          "name_score",
+          "target_feature_id",
+          "target_name",
+          "source_provider",
+          "source_dataset_key",
+          "source_entity_id",
+          "source_name",
+          "created_at"
+        ],
+        "title": "EnrichmentReviewRecord",
+        "type": "object"
+      },
       "EtlPreviewResponse": {
         "additionalProperties": false,
         "description": "`/debug/etl/{provider}/{dataset}/preview` 응답.",
@@ -7675,6 +8019,220 @@
         "summary": "Decide Review",
         "tags": [
           "admin-dedup"
+        ]
+      }
+    },
+    "/admin/enrichment-review": {
+      "get": {
+        "operationId": "list_reviews_admin_enrichment_review_get",
+        "parameters": [
+          {
+            "description": "enrichment review status 반복 필터",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": [
+                      "pending",
+                      "accepted",
+                      "rejected",
+                      "ignored"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "enrichment review status 반복 필터",
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Provider"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_score",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Score"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_score",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Max Score"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrichmentReviewListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Reviews",
+        "tags": [
+          "admin-enrichment"
+        ]
+      }
+    },
+    "/admin/enrichment-review/{review_key}": {
+      "patch": {
+        "operationId": "decide_review_admin_enrichment_review__review_key__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "review_key",
+            "required": true,
+            "schema": {
+              "title": "Review Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnrichmentReviewDecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrichmentReviewDecisionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "description": "이미 검토됨/없음"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Decide Review",
+        "tags": [
+          "admin-enrichment"
         ]
       }
     },

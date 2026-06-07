@@ -36,12 +36,15 @@ __all__ = [
     "DedupReviewPage",
     "DedupReviewRow",
     "DedupFeatureSummary",
+    "EnrichmentReviewPage",
+    "EnrichmentReviewRow",
     "FeatureDeactivateResult",
     "FeatureStateConflict",
     "FeatureOverride",
     "deactivate_feature",
     "list_admin_features",
     "list_dedup_reviews",
+    "list_enrichment_reviews",
     "merge_dedup_review",
     "set_dedup_review_decision",
 ]
@@ -962,3 +965,190 @@ async def merge_dedup_review(
         merged_by=merged_by,
         reason=reason,
     )
+
+
+# =============================================================================
+# 축제 enrichment review (T-RV-52c) — ops.enrichment_review_queue 조회
+# =============================================================================
+
+
+@dataclass(frozen=True)
+class EnrichmentReviewRow:
+    """``GET /admin/enrichment-review`` item.
+
+    enrichment은 두 번째 feature/병합이 없어 dedup보다 단순하다 — 1차(target) feature를
+    join해 표시하고, source(2차, visitkorea)는 큐에 보관된 식별/이름만 노출한다.
+    """
+
+    review_key: str
+    status: str
+    name_score: float
+    target_feature_id: str
+    target_name: str
+    target_kind: str | None
+    target_category: str | None
+    target_lon: float | None
+    target_lat: float | None
+    source_provider: str
+    source_dataset_key: str
+    source_entity_id: str
+    source_name: str
+    decision_reason: str | None
+    reviewed_by: str | None
+    reviewed_at: datetime | None
+    created_at: datetime
+    name_score_cursor: str | None = None
+
+
+@dataclass(frozen=True)
+class EnrichmentReviewPage:
+    """Enrichment review page."""
+
+    items: tuple[EnrichmentReviewRow, ...]
+    next_cursor: str | None
+
+
+_ENRICHMENT_REVIEW_SQL: Final[str] = """
+SELECT
+    q.review_key,
+    q.status,
+    q.name_score,
+    q.target_feature_id,
+    q.target_name,
+    q.source_provider,
+    q.source_dataset_key,
+    q.source_entity_id,
+    q.source_name,
+    q.decision_reason,
+    q.reviewed_by,
+    q.reviewed_at,
+    q.created_at,
+    f.kind AS target_kind,
+    f.category AS target_category,
+    x_extension.ST_X(f.coord) AS target_lon,
+    x_extension.ST_Y(f.coord) AS target_lat
+FROM ops.enrichment_review_queue AS q
+LEFT JOIN feature.features AS f ON f.feature_id = q.target_feature_id
+WHERE (CAST(:statuses AS text[]) IS NULL OR q.status = ANY(CAST(:statuses AS text[])))
+  AND (
+    CAST(:min_score AS numeric) IS NULL
+    OR q.name_score >= CAST(:min_score AS numeric)
+  )
+  AND (
+    CAST(:max_score AS numeric) IS NULL
+    OR q.name_score <= CAST(:max_score AS numeric)
+  )
+  AND (
+    CAST(:providers AS text[]) IS NULL
+    OR q.source_provider = ANY(CAST(:providers AS text[]))
+  )
+  AND (
+    CAST(:q_like AS text) IS NULL
+    OR q.target_feature_id ILIKE CAST(:q_like AS text)
+    OR q.target_name ILIKE CAST(:q_like AS text)
+    OR q.source_name ILIKE CAST(:q_like AS text)
+    OR q.source_entity_id ILIKE CAST(:q_like AS text)
+  )
+  AND (
+    CAST(:cursor_score AS numeric) IS NULL
+    OR (q.name_score, q.review_key::text) < (
+        CAST(:cursor_score AS numeric),
+        CAST(:cursor_review_key AS text)
+    )
+  )
+ORDER BY q.name_score DESC, q.review_key::text DESC
+LIMIT :limit_plus_one
+"""
+
+
+def _enrichment_cursor_params(cursor: str | None) -> dict[str, Any]:
+    payload = _dedup_cursor_payload(cursor)
+    if not payload:
+        return {"cursor_score": None, "cursor_review_key": None}
+    try:
+        score = str(payload["name_score"])
+        Decimal(score)
+    except (KeyError, TypeError, ValueError, InvalidOperation) as exc:
+        raise ValueError("invalid enrichment review cursor") from exc
+    return {"cursor_score": score, "cursor_review_key": payload["review_key"]}
+
+
+def _encode_enrichment_cursor(item: EnrichmentReviewRow) -> str:
+    raw = json.dumps(
+        {
+            "review_key": item.review_key,
+            "name_score": (
+                item.name_score_cursor
+                if item.name_score_cursor is not None
+                else str(Decimal(str(item.name_score)))
+            ),
+        },
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _enrichment_review_row(row: Any) -> EnrichmentReviewRow:
+    return EnrichmentReviewRow(
+        review_key=str(row["review_key"]),
+        status=str(row["status"]),
+        name_score=_score(row["name_score"]),
+        name_score_cursor=str(row["name_score"]),
+        target_feature_id=str(row["target_feature_id"]),
+        target_name=str(row["target_name"]),
+        target_kind=row["target_kind"],
+        target_category=row["target_category"],
+        target_lon=(
+            float(row["target_lon"]) if row["target_lon"] is not None else None
+        ),
+        target_lat=(
+            float(row["target_lat"]) if row["target_lat"] is not None else None
+        ),
+        source_provider=str(row["source_provider"]),
+        source_dataset_key=str(row["source_dataset_key"]),
+        source_entity_id=str(row["source_entity_id"]),
+        source_name=str(row["source_name"]),
+        decision_reason=row["decision_reason"],
+        reviewed_by=row["reviewed_by"],
+        reviewed_at=row["reviewed_at"],
+        created_at=row["created_at"],
+    )
+
+
+async def list_enrichment_reviews(
+    session: AsyncSession,
+    *,
+    statuses: Sequence[str] | None = ("pending",),
+    providers: Sequence[str] | None = None,
+    min_score: float | None = None,
+    max_score: float | None = None,
+    q: str | None = None,
+    page_size: int = 50,
+    cursor: str | None = None,
+) -> EnrichmentReviewPage:
+    """축제 enrichment review 목록을 name_score 내림차순 cursor로 조회한다."""
+    if page_size <= 0:
+        raise ValueError("page_size must be greater than 0")
+    effective_limit = min(page_size, 500)
+    normalized_q = _normalize_query(q)
+    rows = (
+        await session.execute(
+            text(_ENRICHMENT_REVIEW_SQL),
+            {
+                "statuses": _normalize_values(statuses),
+                "providers": _normalize_values(providers),
+                "min_score": min_score,
+                "max_score": max_score,
+                "q_like": f"%{normalized_q}%" if normalized_q is not None else None,
+                "limit_plus_one": effective_limit + 1,
+                **_enrichment_cursor_params(cursor),
+            },
+        )
+    ).mappings().all()
+    items = tuple(_enrichment_review_row(row) for row in rows[:effective_limit])
+    next_cursor = (
+        _encode_enrichment_cursor(items[-1])
+        if len(rows) > effective_limit and items
+        else None
+    )
+    return EnrichmentReviewPage(items=items, next_cursor=next_cursor)
