@@ -20,6 +20,7 @@ from krtour.map_dagster.provider_fetchers import (
     fetch_khoa_beaches,
     fetch_knps_geometry_records,
     fetch_knps_point_records,
+    fetch_krairport_airports,
     fetch_krex_rest_areas,
     fetch_krex_traffic_notices,
     fetch_krforest_arboretums,
@@ -794,6 +795,93 @@ def test_khoa_beaches_fetch_iterates_sido_and_closes(
     client = fake.instances[0]
     assert client.calls == ["부산광역시", "강원특별자치도"]
     assert client.closed is True
+
+
+class _FakeKrairportClient:
+    instances: list[_FakeKrairportClient] = []
+    airports_data: list[object] = []
+
+    def __init__(
+        self,
+        *,
+        kac_service_key: str | None = None,
+        iiac_service_key: str | None = None,
+        **_kwargs: Any,
+    ) -> None:
+        self.kac_service_key = kac_service_key
+        self.iiac_service_key = iiac_service_key
+        self.closed = False
+        self.active_calls: list[bool] = []
+        _FakeKrairportClient.instances.append(self)
+
+    def airports(self, *, active: bool = True) -> list[object]:
+        self.active_calls.append(active)
+        return list(type(self).airports_data)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _install_fake_krairport(
+    monkeypatch: pytest.MonkeyPatch, *, airports: list[object]
+) -> type[_FakeKrairportClient]:
+    _FakeKrairportClient.instances = []
+    _FakeKrairportClient.airports_data = airports
+    module = ModuleType("krairport")
+    module.__dict__["KrairportClient"] = _FakeKrairportClient
+    monkeypatch.setitem(sys.modules, "krairport", module)
+    return _FakeKrairportClient
+
+
+def test_krairport_airports_fetch_yields_and_closes_keyless(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # keyless: credential 없이도 번들 정적 메타데이터를 yield 해야 한다.
+    fake = _install_fake_krairport(
+        monkeypatch, airports=[object(), object(), object()]
+    )
+    settings = KrtourMapSettings(data_go_kr_service_key=None)
+
+    records = list(fetch_krairport_airports(settings))
+
+    assert len(records) == 3
+    assert len(fake.instances) == 1
+    client = fake.instances[0]
+    assert client.kac_service_key is None
+    assert client.iiac_service_key is None
+    assert client.active_calls == [True]
+    assert client.closed is True
+
+
+def test_krairport_airports_fetch_passes_key_when_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _install_fake_krairport(monkeypatch, airports=[object()])
+    settings = KrtourMapSettings(data_go_kr_service_key=SecretStr("airport-key"))
+
+    records = list(fetch_krairport_airports(settings))
+
+    assert len(records) == 1
+    client = fake.instances[0]
+    assert client.kac_service_key == "airport-key"
+    assert client.iiac_service_key == "airport-key"
+    assert client.closed is True
+
+
+def test_krairport_airports_fetch_closes_on_partial_consumption(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _install_fake_krairport(
+        monkeypatch, airports=[object(), object(), object()]
+    )
+    settings = KrtourMapSettings(data_go_kr_service_key=None)
+
+    generator = fetch_krairport_airports(settings)
+    first = next(generator)
+    assert first is not None
+    generator.close()
+
+    assert fake.instances[0].closed is True
 
 
 def test_standard_tourist_attractions_raises_when_credential_missing() -> None:

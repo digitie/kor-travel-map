@@ -68,6 +68,14 @@ from krtour.map.providers.knps import (
 from krtour.map.providers.knps import (
     PROVIDER_NAME as KNPS_PROVIDER_NAME,
 )
+from krtour.map.providers.krairport import (
+    AIRPORT_CATEGORY,
+    AIRPORT_MARKER_COLOR,
+    DATASET_KEY_AIRPORTS,
+    KRAIRPORT_PROVIDER_NAME,
+    AirportMetadataItem,
+    airports_to_bundles,
+)
 from krtour.map.providers.krex import (
     KREX_PROVIDER_NAME,
     REST_AREA_CATEGORY,
@@ -228,6 +236,13 @@ __all__ = [
     "DATASET_KEY_BEACHES",
     "BEACH_CATEGORY",
     "BEACH_MARKER_COLOR",
+    # krairport 공항 (T-RV-55, ADR-034 보조)
+    "AirportMetadataItem",
+    "airports_to_bundles",
+    "KRAIRPORT_PROVIDER_NAME",
+    "DATASET_KEY_AIRPORTS",
+    "AIRPORT_CATEGORY",
+    "AIRPORT_MARKER_COLOR",
     # visitkorea (PR#51, ADR-042 — TourAPI enrichment 2차)
     "VisitKoreaFestivalItem",
     "FestivalMatch",

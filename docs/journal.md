@@ -2,6 +2,27 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-08 (claude) — T-RV-55e krairport 공항 풀스택 (신규 provider 모듈, keyless)
+
+**작업**: ADR-034 보조 dataset 4번째 — 공항 메타데이터(python-krairport-api). 신규
+`providers/krairport.py`.
+
+- `airports_to_bundles`(place, category `TRANSPORT_AIRPORT 06050000`, place_kind `airport`) +
+  `AirportMetadataItem` Protocol. 좌표는 provider `Coordinate`(`.lat`/`.lon` float) 중첩 객체로
+  와서 `_coord_of`가 getattr로 추출(None 안전). 도로명 주소 없어 좌표 reverse로 bjd 보강,
+  안정키 = 공항 코드(IATA `code`). facility_info에 icao_code/name_english 보존.
+- `fetch_krairport_airports`(sync, **keyless** — `client.airports(active=True)`는 번들 정적
+  메타데이터라 credential 없이 동작. key 있으면 kac/iiac에 주입하되 본 fetcher는 bundled만
+  yield) + `feature_place_krairport_airports` asset + resource spec(setting_names 없음 → 항상
+  live)/guard→live + definitions + ETL preview entry.
+- **MOIS dedup 없음**(MOIS PROMOTED 42 슬러그에 공항 없음).
+- **검증**: ruff + mypy --strict(map 83/dagster 13/admin 25) + lint-imports + unit 951(coverage
+  81%, krairport.py 97%) + dagster 73 + krairport preview(06050000/airport) green.
+
+**다음(T-RV-55)**: 55d airkorea 대기질은 **측정값이라 place feature 아님 — 설계 결정 선행**
+(WeatherValue 패턴 vs 별도 vs skip). 55a~55e place 보조 dataset 5종 완료. (52c enrichment UI
+trailing.)
+
 ## 2026-06-08 (claude) — T-RV-55c khoa 해수욕장 풀스택 (신규 provider 모듈)
 
 **작업**: ADR-034 보조 dataset 3번째 — 해양수산부 해수욕장정보(python-khoa-api). 신규

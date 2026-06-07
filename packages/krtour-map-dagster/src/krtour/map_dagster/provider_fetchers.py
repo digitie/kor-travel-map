@@ -32,6 +32,7 @@ __all__ = [
     "fetch_khoa_beaches",
     "fetch_knps_geometry_records",
     "fetch_knps_point_records",
+    "fetch_krairport_airports",
     "fetch_krex_rest_areas",
     "fetch_krex_traffic_notices",
     "fetch_krforest_arboretums",
@@ -425,6 +426,32 @@ def fetch_standard_tourist_attractions(
         yield from client.tourist_attraction.iter_all()
     finally:
         client.close()
+
+
+def fetch_krairport_airports(
+    settings: KrtourMapSettings,
+) -> Iterator[Any]:
+    """공항 메타데이터 record를 krairport public client로 stream한다.
+
+    ``client.airports(active=True)``는 **번들 정적 데이터**라 credential 없이도 동작
+    한다(keyless). key가 있으면 network-backed 메서드용으로 주입하되, 본 fetcher는
+    bundled metadata만 yield한다(``AirportMetadata``, krtour ``AirportMetadataItem``
+    Protocol 충족). sync generator, finally close.
+    """
+    krairport = cast(Any, importlib.import_module("krairport"))
+    secret = settings.data_go_kr_service_key
+    kwargs: dict[str, str] = {}
+    if secret is not None:
+        key = secret.get_secret_value()
+        kwargs["kac_service_key"] = key
+        kwargs["iiac_service_key"] = key
+    client = krairport.KrairportClient(**kwargs)
+    try:
+        yield from client.airports(active=True)
+    finally:
+        close = getattr(client, "close", None)
+        if callable(close):
+            close()
 
 
 def fetch_khoa_beaches(
