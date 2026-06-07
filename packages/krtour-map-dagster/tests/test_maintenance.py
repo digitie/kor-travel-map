@@ -187,6 +187,11 @@ def test_refresh_dedup_uses_default_scopes_when_config_empty() -> None:
     assert client.pairs[1][0].dataset_key == "krforest_recreation_forests"
     assert client.pairs[1][1].provider == "python-mois-api"
     assert client.pairs[1][1].categories == ("03010100", "03020100", "03020200")
+    # 박물관/미술관 ↔ MOIS museums_and_art_galleries(01040000).
+    assert client.pairs[2][0].provider == "data.go.kr-standard"
+    assert client.pairs[2][0].dataset_key == "datagokr_museums"
+    assert client.pairs[2][1].provider == "python-mois-api"
+    assert client.pairs[2][1].categories == ("01040000",)
     assert client.siblings == []
 
     dedup_output = result.output_for_node("refresh_dedup_candidates")

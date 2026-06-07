@@ -48,7 +48,10 @@ from krtour.map.providers.opinet import (
     prices_to_values,
     stations_to_bundles,
 )
-from krtour.map.providers.standard_data import cultural_festivals_to_bundles
+from krtour.map.providers.standard_data import (
+    cultural_festivals_to_bundles,
+    museums_to_bundles,
+)
 
 __all__ = [
     "EtlFixtureEntry",
@@ -673,6 +676,54 @@ async def _convert_krforest_arboretums(items: Sequence[Any]) -> list[Any]:
     return [b.model_dump(mode="json") for b in bundles]
 
 
+@dataclass(frozen=True)
+class _Museum:
+    """`PublicMuseumArtItem` Protocol 준수 (provider `PublicMuseumArtGallery` 정합)."""
+
+    fclty_nm: str | None
+    fclty_type: str | None
+    rdnmadr: str | None
+    lnmadr: str | None
+    latitude: float | None
+    longitude: float | None
+    oper_phone_number: str | None
+    homepage_url: str | None
+    instt_code: str | None
+    raw: Any = None
+
+
+def _museums_fixture() -> Sequence[_Museum]:
+    return [
+        _Museum(
+            fclty_nm="국립중앙박물관",
+            fclty_type="박물관",
+            rdnmadr="서울특별시 용산구 서빙고로 137",
+            lnmadr="서울특별시 용산구 용산동6가 168-6",
+            latitude=37.5240,
+            longitude=126.9803,
+            oper_phone_number="02-2077-9000",
+            homepage_url="https://www.museum.go.kr",
+            instt_code="MUS-0001",
+        ),
+        _Museum(
+            fclty_nm="국립현대미술관 서울",
+            fclty_type="미술관",
+            rdnmadr="서울특별시 종로구 삼청로 30",
+            lnmadr=None,
+            latitude=37.5790,
+            longitude=126.9800,
+            oper_phone_number="02-3701-9500",
+            homepage_url="https://www.mmca.go.kr",
+            instt_code="MUS-0002",
+        ),
+    ]
+
+
+async def _convert_museums(items: Sequence[Any]) -> list[Any]:
+    bundles = await museums_to_bundles(items, fetched_at=_now())
+    return [b.model_dump(mode="json") for b in bundles]
+
+
 # ── Registry ──────────────────────────────────────────────────────────
 
 
@@ -797,6 +848,14 @@ FIXTURE_REGISTRY: Final[tuple[EtlFixtureEntry, ...]] = (
         description="수목원/식물원(SHP) → place Feature (ADR-034 8단계). T-RV-53.",
         build_fixture=_krforest_arboretums_fixture,
         convert=_convert_krforest_arboretums,
+    ),
+    EtlFixtureEntry(
+        provider="data.go.kr-standard",
+        dataset="datagokr_museums",
+        variant="FeatureBundle",
+        description="전국박물관미술관표준데이터 → place Feature (ADR-034 9단계). T-RV-54.",
+        build_fixture=_museums_fixture,
+        convert=_convert_museums,
     ),
 )
 
