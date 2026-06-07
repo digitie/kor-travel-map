@@ -80,16 +80,16 @@ class _RestArea:
 
 @dataclass(frozen=True)
 class _Notice:
-    notice_id: str
-    title: str
-    notice_type: str
-    description: str | None
-    longitude: Decimal | None
-    latitude: Decimal | None
-    valid_from: datetime | None
-    valid_until: datetime | None
-    severity: int | None
-    source_agency: str | None
+    """`KrexTrafficNoticeItem` Protocol 준수 (provider ``krex.models.Incident`` 정합)."""
+
+    route_no: str | None
+    route_name: str | None
+    direction: str | None
+    incident_type: str | None
+    message: str | None
+    started_at: str | None
+    ended_at: str | None
+    raw: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -279,16 +279,19 @@ async def test_dagster_assets_validate_coordinates_and_load_to_postgis(
             map_client,
             krex_traffic_notices=[
                 _Notice(
-                    notice_id="DAGSTER-KREX-NOTICE-001",
-                    title="서해안고속도로 105km 지점 도로공사",
-                    notice_type="roadwork",
-                    description="야간 차로 변경.",
-                    longitude=Decimal("126.6500"),
-                    latitude=Decimal("36.7800"),
-                    valid_from=_FETCHED,
-                    valid_until=_FETCHED + timedelta(days=1),
-                    severity=2,
-                    source_agency="한국도로공사",
+                    route_no="0150",
+                    route_name="서해안고속도로",
+                    direction="부산방향",
+                    incident_type="공사",  # → roadwork
+                    message="서해안고속도로 105km 지점 도로공사",
+                    started_at="20260528",
+                    ended_at="20260530",
+                    raw={
+                        "routeNo": "0150",
+                        "incidentType": "공사",
+                        "message": "서해안고속도로 105km 지점 도로공사",
+                        "startDate": "20260528",
+                    },
                 )
             ],
         ),
@@ -365,9 +368,18 @@ async def test_dagster_assets_validate_coordinates_and_load_to_postgis(
     feature_ids = [feature_id for result in results for feature_id in result.feature_ids]
     assert len(feature_ids) == 9
 
+    # krex 교통 공지는 provider Incident에 좌표가 없어 coordless로 적재된다
+    # (ADR-044) — 좌표/행정코드 보강 단언에서 제외하고 별도로 검증한다.
+    notice_feature_ids = set(results[3].feature_ids)
+
     for feature_id in feature_ids:
         row = await map_client.get_feature(feature_id)
         assert row is not None
+        if feature_id in notice_feature_ids:
+            # coordless notice: 좌표·법정동코드 없이 적재됨.
+            assert row["coord_5179_srid"] is None
+            assert row["legal_dong_code"] is None
+            continue
         assert row["coord_5179_srid"] == 5179
         assert row["legal_dong_code"] is not None
         assert row["sigungu_code"] is not None

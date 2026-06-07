@@ -74,6 +74,7 @@ def test_offline_upload_load_default_resources_registered() -> None:
 _LIVE_PROVIDER_RESOURCE_KEYS = {
     "datagokr_cultural_festivals",
     "krex_rest_areas",
+    "krex_traffic_notices",
     "krheritage_events",
 }
 

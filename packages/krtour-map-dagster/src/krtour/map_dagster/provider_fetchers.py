@@ -25,6 +25,7 @@ __all__ = [
     "ProviderCredentialMissing",
     "fetch_datagokr_cultural_festivals",
     "fetch_krex_rest_areas",
+    "fetch_krex_traffic_notices",
     "fetch_krheritage_events",
 ]
 
@@ -137,6 +138,59 @@ def fetch_krex_rest_areas(
         seen = 0
         while True:
             page = client.restarea.list_all(
+                num_of_rows=num_of_rows, page_no=page_no
+            )
+            items = list(page.items)
+            if not items:
+                break
+            yield from items
+            seen += len(items)
+            total_count = page.total_count
+            if len(items) < num_of_rows:
+                break
+            if total_count is not None and seen >= total_count:
+                break
+            page_no += 1
+    finally:
+        client.close()
+
+
+def fetch_krex_traffic_notices(
+    settings: KrtourMapSettings,
+) -> Iterator[Any]:
+    """고속도로 교통 공지(돌발 incident) record를 krex public client로 stream한다.
+
+    ``settings.krex_ex_api_key``(source ``KEX_GO_API_KEY``)에서 EX OpenAPI key를
+    읽어 ``KrexClient(ex_api_key=...)``를 열고 ``client.traffic.incident(
+    num_of_rows=1000, page_no=N)``을 페이지네이션하며 record(``krex.models.
+    Incident``, ``KrexTrafficNoticeItem`` Protocol 충족)를 lazily yield한다.
+    rest_areas와 달리 EX endpoint이므로 go key가 아닌 **ex key**를 쓴다.
+
+    EX 돌발 feed는 휘발성(transient) — 해소된 사건은 사라진다(ADR-044). 페이지
+    네이션은 빈 페이지 / 마지막 페이지(``len(items) < num_of_rows``) /
+    ``total_count`` 도달 중 먼저 만나는 조건에서 멈춘다. generator 소비 종료
+    (또는 close)시 ``finally``에서 ``client.close()``.
+    """
+    secret = settings.krex_ex_api_key
+    if secret is None:
+        raise ProviderCredentialMissing(
+            "krex traffic_notices live fetch에는 "
+            "KRTOUR_MAP_KREX_EX_API_KEY (source KEX_GO_API_KEY)가 필요하다."
+        )
+    api_key = secret.get_secret_value()
+
+    # provider public client는 ADR-044 로컬 체크아웃이며 hard dependency가
+    # 아니므로(부재 가능), datagokr와 동일하게 import time이 아닌 호출 시점에
+    # ``importlib`` + ``cast(Any, ...)``로 lazy resolve한다.
+    krex = cast(Any, importlib.import_module("krex"))
+
+    client = krex.KrexClient(ex_api_key=api_key)
+    num_of_rows = 1000
+    try:
+        page_no = 1
+        seen = 0
+        while True:
+            page = client.traffic.incident(
                 num_of_rows=num_of_rows, page_no=page_no
             )
             items = list(page.items)

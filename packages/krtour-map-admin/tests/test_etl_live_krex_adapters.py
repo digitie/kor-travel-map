@@ -162,31 +162,44 @@ def test_weather_adapter_passes_transform() -> None:
 
 
 @pytest.mark.unit
-def test_adapt_notice_synthesizes_id_and_agency() -> None:
+def test_adapt_notice_mirrors_incident_fields() -> None:
+    """adapter는 provider ``Incident`` shape으로 raw 필드만 mirror (ADR-044) —
+    notice_type 매핑·id/title 합성·효력기간 파싱은 변환부 책임."""
     raw = {
-        "incidentType": "사고",
+        "routeNo": "0010",
+        "routeName": "경부선",
+        "dirType": "0",
+        "incidentType": "공사",
         "message": "경부선 양방향 정체",
         "startDate": "20260528",
-        "startTime": "0930",
+        "endDate": "20260529",
     }
     n = _adapt_krex_notice(raw)
-    assert n.notice_id  # 합성됨 (raw에 안정 id 없음)
-    assert n.source_agency == "한국도로공사"
-    assert n.title == "경부선 양방향 정체"
-    assert n.valid_from == datetime(2026, 5, 28, 9, 30, tzinfo=KST)
-
-
-@pytest.mark.unit
-def test_adapt_notice_uses_explicit_id() -> None:
-    n = _adapt_krex_notice({"incidentId": "INC-1", "message": "x", "incidentType": "공사"})
-    assert n.notice_id == "INC-1"
+    assert n.route_no == "0010"
+    assert n.route_name == "경부선"
+    assert n.incident_type == "공사"
+    assert n.message == "경부선 양방향 정체"
+    assert n.started_at == "20260528"
+    assert n.ended_at == "20260529"
+    assert n.raw is raw
 
 
 @pytest.mark.unit
 async def test_notice_adapter_passes_transform() -> None:
-    raw = {"incidentType": "사고", "message": "정체", "startDate": "20260528"}
+    """adapter 결과가 변환부를 통과 → notice Feature + 파생값(source_agency)."""
+    raw = {
+        "routeName": "경부선",
+        "incidentType": "공사",
+        "message": "정체",
+        "startDate": "20260528",
+    }
     bundles = await traffic_notices_to_bundles(
         [_adapt_krex_notice(raw)], fetched_at=_OBS  # type: ignore[list-item]
     )
     assert len(bundles) == 1
-    assert bundles[0].feature.kind.value == "notice"
+    feature = bundles[0].feature
+    assert feature.kind.value == "notice"
+    detail = feature.detail
+    assert detail is not None
+    assert detail.notice_type == "roadwork"  # type: ignore[union-attr]
+    assert detail.source_agency == "한국도로공사"  # type: ignore[union-attr]
