@@ -415,9 +415,14 @@ enrichment(모듈 있음, 미wiring)**. dedup 인프라(scoring/queue/admin rout
       grade→severity, KMA value 변환 미러) + `AirQualityMeasurementItem` Protocol. 결측 오염물질/
       미매핑 측정소 skip. 게이트: ruff/mypy(map 85/dagster 13/admin 26)/lint-imports/unit+lint 965
       (coverage 81%, airkorea.py 96%) green.
-    - [ ] **55d-2 (orchestration)** client `load_air_quality`(station bundle 적재→station_name→
-      feature_id 매핑→weather value 적재) + dagster fetcher/asset/resource/definitions + ETL preview
-      + 테스트.
+    - [x] **55d-2 (orchestration)**(2026-06-08) client `load_air_quality`(측정소 bundle +
+      WeatherValue를 한 transaction에 적재, FK 선결) + `AirQualityLoadResult`(infra/feature_repo) +
+      dagster `fetch_airkorea_stations`/`fetch_airkorea_air_quality`(시도별 17개 순회) +
+      `feature_weather_airkorea_air_quality` asset(measurements×stations 조인 → load) + resource
+      spec×2/guard→live + definitions + ETL preview×2(stations FeatureBundle / air_quality
+      WeatherValue). 게이트: ruff/mypy(map 85/dagster 13/admin 26)/lint-imports/unit+lint 965
+      (coverage 81%)/full 1168/admin 224/dagster 79 + airkorea preview(weather kind/air_quality)
+      green. **→ T-RV-55 + T-RV-04b 후속 program 전체 완료.**
   - [x] **T-RV-55e krairport 공항**(2026-06-08) — provider `python-krairport-api`
     `KrairportClient.airports(active=True)`(번들 정적 메타데이터, **keyless**)→`AirportMetadata`.
     신규 `providers/krairport.py`(`airports_to_bundles`, place, category `TRANSPORT_AIRPORT

@@ -2,6 +2,27 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-08 (claude) — T-RV-55d-2 airkorea 대기질 orchestration (→ T-RV 후속 program 완료)
+
+**작업**: 55d-1 provider 위에 적재 orchestration(2 PR 중 2번째, 마지막). 측정소 weather feature +
+오염물질별 WeatherValue를 한 transaction에 적재.
+
+- client `load_air_quality(station_bundles, weather_values)`: load_bundles(측정소 weather feature,
+  FK 선결) → load_weather_values(air_quality 값)를 한 transaction에. `AirQualityLoadResult`
+  (infra/feature_repo, FeatureLoadResult + 값 카운트) — assets가 client 무거운 import 없이 쓰도록
+  infra에 둠.
+- dagster: `fetch_airkorea_stations`(stations 페이지네이션) + `fetch_airkorea_air_quality`(17개
+  시도 `sido_measurements` 순회) + `feature_weather_airkorea_air_quality` asset(stations+measurements
+  두 stream → 측정소 bundle 변환·station_name→feature_id 매핑 → WeatherValue 변환 → load_air_quality)
+  + resource spec×2/guard→live + definitions REQUIRED_RESOURCE_KEYS + ETL preview×2.
+- **검증**: ruff + mypy --strict(map 85/dagster 13/admin 26) + lint-imports + unit+lint 965
+  (coverage 81%) + full 1168 + admin 224 + dagster 79 + airkorea ETL preview(weather kind /
+  air_quality WeatherValue) + load_air_quality integration green.
+
+**→ T-RV-55(보조 dataset) + T-RV-04b 후속 program(T-RV-50~55) 전체 완료.** place 5종(55a~e) +
+대기질 측정값(55d) + enrichment review(52) + dedup 수동 UI(51) + maplibre(50) + krforest(53)/
+박물관미술관(54) 모두 머지. **남은 미해결 항목 없음.**
+
 ## 2026-06-08 (claude) — T-RV-55d-1 airkorea 대기질 provider (station=weather feature)
 
 **작업**: 사용자 결정(대기질을 지금 구현, 측정소=weather feature)에 따라 `providers/airkorea.py`

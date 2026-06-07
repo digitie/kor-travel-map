@@ -146,6 +146,36 @@ def test_preview_opinet_prices(client: TestClient) -> None:
 
 
 @pytest.mark.unit
+def test_preview_airkorea_stations(client: TestClient) -> None:
+    response = client.post(
+        "/debug/etl/python-airkorea-api/airkorea_stations/preview"
+    )
+    body = response.json()
+    assert body["variant"] == "FeatureBundle"
+    assert body["count"] == 1
+    item0 = body["items"][0]
+    # 측정소는 weather kind feature (place 아님).
+    assert item0["feature"]["kind"] == "weather"
+    assert item0["feature"]["category"] == "99000000"
+
+
+@pytest.mark.unit
+def test_preview_airkorea_air_quality(client: TestClient) -> None:
+    response = client.post(
+        "/debug/etl/python-airkorea-api/airkorea_air_quality/preview"
+    )
+    body = response.json()
+    assert body["variant"] == "WeatherValue"
+    # PM10/PM2_5/O3/CAI 4종(결측 제외).
+    assert body["count"] == 4
+    metric_keys = {item["metric_key"] for item in body["items"]}
+    assert metric_keys == {"PM10", "PM2_5", "O3", "CAI"}
+    item0 = body["items"][0]
+    assert item0["weather_domain"] == "air_quality"
+    assert item0["forecast_style"] == "observed"
+
+
+@pytest.mark.unit
 def test_preview_unknown_dataset_404(client: TestClient) -> None:
     response = client.post(
         "/debug/etl/python-kma-api/unknown_dataset/preview"

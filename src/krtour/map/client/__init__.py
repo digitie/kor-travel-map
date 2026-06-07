@@ -85,6 +85,7 @@ from krtour.map.infra.enrichment_review_repo import (
     pending_enrichment_reviews as repo_pending_enrichment_reviews,
 )
 from krtour.map.infra.feature_repo import (
+    AirQualityLoadResult,
     EnrichmentLoadResult,
     FeatureLoadResult,
     FeatureSearchPage,
@@ -223,6 +224,7 @@ if TYPE_CHECKING:
     from krtour.map.settings import KrtourMapSettings
 
 __all__ = [
+    "AirQualityLoadResult",
     "AsyncKrtourMapClient",
     "BatchDagRunResult",
     "DedupRefreshResult",
@@ -1288,6 +1290,28 @@ class AsyncKrtourMapClient:
         """``WeatherValue`` 들을 ``feature_weather_values``에 멱등 upsert (write)."""
         async with self._session_factory() as session, session.begin():
             return await repo_load_weather_values(session, values)
+
+    async def load_air_quality(
+        self,
+        station_bundles: Iterable[FeatureBundle],
+        weather_values: Iterable[WeatherValue],
+    ) -> AirQualityLoadResult:
+        """대기질 측정소 weather feature + 측정값을 **한 transaction**으로 적재(T-RV-55d).
+
+        ① 측정소 weather-kind ``FeatureBundle``을 ``load_bundles``로 적재(FK 선결),
+        ② 같은 transaction에서 air_quality ``WeatherValue``를 ``load_weather_values``로
+        upsert한다. weather value의 ``feature_id``는 같은 transaction에서 막 적재된
+        측정소 feature를 참조하므로 FK가 충족된다. 하나라도 실패하면 전체 rollback.
+
+        변환(측정소→bundle, 측정값→value)은 호출자(dagster asset) 책임 —
+        ``air_quality_stations_to_bundles`` / ``air_quality_to_weather_values``.
+        """
+        bundles = list(station_bundles)
+        values = list(weather_values)
+        async with self._session_factory() as session, session.begin():
+            stations = await load_bundles(session, bundles)
+            value_count = await repo_load_weather_values(session, values)
+        return AirQualityLoadResult(stations=stations, weather_values=value_count)
 
     async def build_weather_card(
         self,

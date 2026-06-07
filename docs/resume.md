@@ -1,5 +1,20 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-08 Claude 작업 메모 — T-RV-04b 후속 program 전체 완료
+
+T-RV-55d-2(airkorea orchestration)까지 완료·머지하며 **T-RV-04b 후속 program(T-RV-50~55) 전체
+종료**. 이번 세션에서 머지한 PR: #296(55e krairport) · #297/#298/#299(52c enrichment review
+backend/API/frontend) · #300(55d-1 airkorea provider) · 55d-2(airkorea orchestration).
+
+**완료 상태 요약**:
+- 50 maplibre 최신화 · 51 dedup 수동 UI · 52 visitkorea 축제 enrichment(provider+wiring+review UI)
+- 53 krforest · 54 박물관/미술관 · 55a~e place 보조 dataset 5종 · 55d 대기질(weather value)
+- 모든 데이터소스 MOIS dedup(후보 있는 source만) + 자동 매칭 실패분 수동 처리 UI(dedup-review,
+  enrichment-review) 구현.
+
+**다음 한 작업**: T-RV-04b 후속 program에 남은 항목 없음. 새 지시 대기. (참고: 실데이터 full
+reload 최종 검증은 T-212e, perf baseline은 T-212d로 별도 트랙 — `docs/tasks.md` Phase 6/7.)
+
 ## 2026-06-08 Claude 작업 메모 — T-RV-55d-1 airkorea 대기질 provider 완료
 
 사용자 결정(대기질 지금 구현, 측정소=weather feature)에 따라 마지막 남은 항목 T-RV-55d 착수.

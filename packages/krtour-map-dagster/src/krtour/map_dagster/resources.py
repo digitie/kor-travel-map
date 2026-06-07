@@ -24,6 +24,8 @@ from krtour.map.infra.file_store import (
 from krtour.map.settings import KrtourMapSettings
 
 from .provider_fetchers import (
+    fetch_airkorea_air_quality,
+    fetch_airkorea_stations,
     fetch_datagokr_cultural_festivals,
     fetch_khoa_beaches,
     fetch_knps_geometry_records,
@@ -183,6 +185,22 @@ PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
         provider_package="python-krairport-api",
         dataset_key="krairport_airports",
         note="공항 메타데이터는 번들 정적 데이터(keyless).",
+    ),
+    ProviderRecordResourceSpec(
+        resource_key="airkorea_stations",
+        provider_package="python-airkorea-api",
+        dataset_key="airkorea_stations",
+        setting_names=("data_go_kr_service_key",),
+        source_env_names=("DATA_GO_KR_SERVICE_KEY",),
+        note="대기질 측정소(weather-kind feature) — 측정값과 station_name으로 조인.",
+    ),
+    ProviderRecordResourceSpec(
+        resource_key="airkorea_air_quality",
+        provider_package="python-airkorea-api",
+        dataset_key="airkorea_air_quality",
+        setting_names=("data_go_kr_service_key",),
+        source_env_names=("DATA_GO_KR_SERVICE_KEY",),
+        note="대기질 실시간 측정값 → 오염물질별 WeatherValue(시도별 전국 순회).",
     ),
     ProviderRecordResourceSpec(
         resource_key="visitkorea_festival_events",
@@ -468,6 +486,30 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["krairport_airports"] = (
     build_provider_record_live_resource(
         _KRAIRPORT_AIRPORTS_SPEC,
         fetch_krairport_airports,
+    )
+)
+
+_AIRKOREA_STATIONS_SPEC: ProviderRecordResourceSpec = next(
+    spec
+    for spec in PROVIDER_RECORD_RESOURCE_SPECS
+    if spec.resource_key == "airkorea_stations"
+)
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["airkorea_stations"] = (
+    build_provider_record_live_resource(
+        _AIRKOREA_STATIONS_SPEC,
+        fetch_airkorea_stations,
+    )
+)
+
+_AIRKOREA_AIR_QUALITY_SPEC: ProviderRecordResourceSpec = next(
+    spec
+    for spec in PROVIDER_RECORD_RESOURCE_SPECS
+    if spec.resource_key == "airkorea_air_quality"
+)
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["airkorea_air_quality"] = (
+    build_provider_record_live_resource(
+        _AIRKOREA_AIR_QUALITY_SPEC,
+        fetch_airkorea_air_quality,
     )
 )
 
