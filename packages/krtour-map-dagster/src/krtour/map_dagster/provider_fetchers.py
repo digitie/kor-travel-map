@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import importlib
 import pathlib
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Iterable, Iterator
 from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Final, cast
 
@@ -41,6 +41,7 @@ __all__ = [
     "fetch_krforest_recreation_forests",
     "fetch_krheritage_events",
     "fetch_mois_license_records",
+    "fetch_opinet_stations",
     "fetch_standard_museums",
     "fetch_standard_parking_lots",
     "fetch_standard_tourist_attractions",
@@ -575,6 +576,102 @@ def fetch_airkorea_air_quality(
                 page_no += 1
     finally:
         _airkorea_close(client)
+
+
+def _parse_opinet_bbox(raw: str) -> tuple[float, float, float, float]:
+    """``"min_lon,min_lat,max_lon,max_lat"`` → 4-float tuple (검증 포함)."""
+    parts = [p.strip() for p in raw.split(",")]
+    if len(parts) != 4:
+        raise ProviderCredentialMissing(
+            "opinet_scope_bbox는 'min_lon,min_lat,max_lon,max_lat' 4개 값이어야 한다."
+        )
+    try:
+        min_lon, min_lat, max_lon, max_lat = (float(p) for p in parts)
+    except ValueError as exc:
+        raise ProviderCredentialMissing(
+            f"opinet_scope_bbox 숫자 파싱 실패: {raw!r}"
+        ) from exc
+    if not (min_lon < max_lon and min_lat < max_lat):
+        raise ProviderCredentialMissing(
+            "opinet_scope_bbox는 min_lon<max_lon, min_lat<max_lat 여야 한다."
+        )
+    return (min_lon, min_lat, max_lon, max_lat)
+
+
+def _enumerate_opinet_stations(
+    client: Any,
+    bboxes: Iterable[tuple[float, float, float, float]],
+    *,
+    radius_m: int,
+) -> Iterator[Any]:
+    """여러 bbox를 ``iter_stations_in_bbox``로 enumerate하며 ``uni_id`` dedup.
+
+    bbox 단위로는 provider가 격자 내부 dedup하나, bbox 간 겹침은 여기서 제거한다.
+    """
+    seen: set[str] = set()
+    for min_lon, min_lat, max_lon, max_lat in bboxes:
+        for station in client.iter_stations_in_bbox(
+            min_lon=min_lon,
+            min_lat=min_lat,
+            max_lon=max_lon,
+            max_lat=max_lat,
+            radius_m=radius_m,
+        ):
+            uni_id = getattr(station, "uni_id", None)
+            if isinstance(uni_id, str):
+                if uni_id in seen:
+                    continue
+                seen.add(uni_id)
+            yield station
+
+
+def fetch_opinet_stations(
+    settings: KrtourMapSettings,
+) -> Iterator[Any]:
+    """OpiNet 주유소 record를 scope(bbox/POI-타깃)별로 stream한다(T-RV-04b).
+
+    OpiNet은 전국 dump endpoint가 없어 ``iter_stations_in_bbox``(aroundAll 격자
+    근사)로 영역을 enumerate한다. scope는 ``settings.opinet_scope_mode``:
+
+    - ``disabled`` — 미적재(guard).
+    - ``bbox`` — ``opinet_scope_bbox`` 영역 1개 enumerate.
+    - ``poi_cache_target`` — opinet POI cache target 주변(후속 opinet-3에서 연결).
+
+    sync generator, finally close. ``uni_id`` dedup.
+    """
+    mode = settings.opinet_scope_mode
+    if mode == "disabled":
+        raise ProviderCredentialMissing(
+            "opinet 적재 비활성(opinet_scope_mode=disabled). "
+            "OPINET_SCOPE_MODE=bbox|poi_cache_target 설정이 필요하다."
+        )
+    secret = settings.opinet_api_key
+    if secret is None:
+        raise ProviderCredentialMissing(
+            "opinet live fetch에는 KRTOUR_MAP_OPINET_API_KEY (source OPINET_API_KEY)가 "
+            "필요하다."
+        )
+    if mode == "poi_cache_target":
+        raise ProviderCredentialMissing(
+            "opinet poi_cache_target scope는 후속(T-RV-04b opinet-3)에서 연결된다."
+        )
+    if settings.opinet_scope_bbox is None:
+        raise ProviderCredentialMissing(
+            "opinet bbox scope에는 OPINET_SCOPE_BBOX "
+            "(min_lon,min_lat,max_lon,max_lat)가 필요하다."
+        )
+    bbox = _parse_opinet_bbox(settings.opinet_scope_bbox)
+
+    opinet = cast(Any, importlib.import_module("opinet"))
+    client = opinet.OpinetClient(api_key=secret.get_secret_value())
+    try:
+        yield from _enumerate_opinet_stations(
+            client, [bbox], radius_m=settings.opinet_scope_radius_m
+        )
+    finally:
+        close = getattr(client, "close", None)
+        if callable(close):
+            close()
 
 
 def fetch_standard_parking_lots(
