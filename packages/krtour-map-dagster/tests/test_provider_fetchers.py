@@ -21,6 +21,8 @@ from krtour.map_dagster.provider_fetchers import (
     fetch_knps_point_records,
     fetch_krex_rest_areas,
     fetch_krex_traffic_notices,
+    fetch_krforest_arboretums,
+    fetch_krforest_recreation_forests,
     fetch_krheritage_events,
     fetch_mois_license_records,
 )
@@ -490,6 +492,103 @@ def test_knps_point_records_fetch_closes_on_partial_consumption(
 
     asyncio.run(_take_one_then_close())
 
+    assert fake.instances[0].closed is True
+
+
+class _FakeForestPage:
+    def __init__(self, items: list[object]) -> None:
+        self.items = tuple(items)
+
+
+class _FakeForestTravel:
+    def __init__(self, forests: list[object], arboretums: list[object]) -> None:
+        self._forests = forests
+        self._arboretums = arboretums
+
+    async def standard_recreation_forests(
+        self, *, page_no: int = 1, num_of_rows: int = 10, **_kwargs: Any
+    ) -> _FakeForestPage:
+        return _FakeForestPage(self._forests)
+
+    async def recreation_forest_arboretums(
+        self, *, name: str | None = None
+    ) -> tuple[object, ...]:
+        return tuple(self._arboretums)
+
+
+class _FakeForestClient:
+    instances: list[_FakeForestClient] = []
+    forests: list[object] = []
+    arboretums: list[object] = []
+
+    def __init__(self, *, api_key: str | None = None, **_kwargs: Any) -> None:
+        self.api_key = api_key
+        self.closed = False
+        self.travel = _FakeForestTravel(
+            list(type(self).forests), list(type(self).arboretums)
+        )
+        _FakeForestClient.instances.append(self)
+
+    async def iter_pages(
+        self, fetch_page: Any, *, page_no: int = 1, num_of_rows: int = 10, **kwargs: Any
+    ) -> AsyncIterator[_FakeForestPage]:
+        # 단일 페이지(테스트). 실제 has_next_page 페이지네이션은 provider 책임.
+        yield await fetch_page(page_no=page_no, num_of_rows=num_of_rows, **kwargs)
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+def _install_fake_krforest(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    forests: list[object],
+    arboretums: list[object],
+) -> type[_FakeForestClient]:
+    _FakeForestClient.instances = []
+    _FakeForestClient.forests = forests
+    _FakeForestClient.arboretums = arboretums
+    module = ModuleType("krforest")
+    module.__dict__["ForestClient"] = _FakeForestClient
+    monkeypatch.setitem(sys.modules, "krforest", module)
+    return _FakeForestClient
+
+
+def test_krforest_recreation_forests_raises_when_credential_missing() -> None:
+    settings = KrtourMapSettings(data_go_kr_service_key=None)
+
+    agen = fetch_krforest_recreation_forests(settings)
+    with pytest.raises(ProviderCredentialMissing):
+        asyncio.run(agen.__anext__())
+
+
+def test_krforest_recreation_forests_fetch_yields_and_closes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _install_fake_krforest(
+        monkeypatch, forests=[object(), object()], arboretums=[]
+    )
+    settings = KrtourMapSettings(data_go_kr_service_key=SecretStr("forest-key"))
+
+    records = asyncio.run(_acollect(fetch_krforest_recreation_forests(settings)))
+
+    assert len(records) == 2
+    client = fake.instances[0]
+    assert client.api_key == "forest-key"
+    assert client.closed is True
+
+
+def test_krforest_arboretums_fetch_yields_and_closes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _install_fake_krforest(
+        monkeypatch, forests=[], arboretums=[object(), object(), object()]
+    )
+    settings = KrtourMapSettings(data_go_kr_service_key=SecretStr("forest-key"))
+
+    records = asyncio.run(_acollect(fetch_krforest_arboretums(settings)))
+
+    assert len(records) == 3
     assert fake.instances[0].closed is True
 
 

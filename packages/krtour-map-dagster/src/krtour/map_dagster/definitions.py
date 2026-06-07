@@ -39,6 +39,8 @@ REQUIRED_RESOURCE_KEYS: Final[tuple[str, ...]] = (
     "knps_point_dataset_key",
     "knps_geometry_records",
     "knps_geometry_dataset_key",
+    "krforest_recreation_forests",
+    "krforest_arboretums",
 )
 """Feature 적재 asset이 요구하는 Dagster resource key."""
 

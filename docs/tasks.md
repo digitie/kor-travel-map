@@ -317,8 +317,12 @@ enrichment(모듈 있음, 미wiring)**. dedup 인프라(scoring/queue/admin rout
     파생, ADR-009 `::`). `PlaceDetail`(phones/facility_info). `providers/__init__` re-export.
     단위 9건(happy/derived-key/arboretum/PRIMARY/결정성/naive reject/reverse bjd) green.
     게이트: ruff/mypy(81 files)/lint-imports/unit 914 passed/coverage 80.53%.
-  - [ ] **T-RV-53b (krtour)** `fetch_krforest_*` fetcher + `feature_place_krforest_*` asset + resource.
-    arboretum은 SHP file이라 knps geometry처럼 file dataset 경로(필요 시 provider 보강 PR).
+  - [x] **T-RV-53b (krtour)**(2026-06-07) `fetch_krforest_recreation_forests`/`fetch_krforest_arboretums`
+    (async generator — `ForestClient`는 async, recreation은 `iter_pages` 페이지네이션, arboretum은
+    `travel.recreation_forest_arboretums()` SHP) + `feature_place_krforest_recreation_forests`/
+    `feature_place_krforest_arboretums` asset + resource spec/guard→live override + definitions 등록.
+    credential = `data_go_kr_service_key`. dagster 단위(fake ForestClient 3 + asset 등록 + live key)
+    green(62 passed). arboretum SHP는 provider geo extra 의존 — 실 fetch 검증 T-212e.
   - [ ] **T-RV-53c (dedup)** krforest↔MOIS sibling dedup scope: 휴양림 ≅ MOIS
     `condo_resorts`/`tourist_accommodations`, 수목원 ≅ MOIS `botanical_gardens`. scope pair 설정 +
     큐 적재 검증(SOURCE_PRIORITY krforest=45 이미 placeholder).
