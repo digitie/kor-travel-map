@@ -1,5 +1,22 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-07 Codex 작업 메모 — Sprint 5 운영 진입 잔여 task 상세화
+
+사용자 지시 “sprint 5 관련 테스크 상세화 하고 pr 후 머지”에 따라 Sprint 5 최종
+운영 진입까지 남은 작업을 1-PR 단위로 실행 가능한 형태로 정리한다. 새 정본 리포트는
+`docs/reports/sprint5-final-task-breakdown-2026-06-07.md`다.
+
+- 남은 큰 축: **T-RV-04b-opinet krtour wiring**, **T-212b admin UI 완결성**,
+  **T-212d perf baseline/tuning**, **T-212e live full reload 최종 검증**,
+  **T-210 TripMate 연계 정리**, **Sprint 5 closure 문서/gate 전환**.
+- `tasks.md` Phase 6/7와 `SPRINT-5.md` §4.1에 같은 순서와 DoD를 연결했다.
+- 현재 main 기준 `python-opinet-api#8` 보강은 merged이며, opinet은 전국 nightly가 아니라
+  bounded bbox 또는 POI-target scope 결정 후 krtour Dagster resource에 연결해야 한다.
+
+**다음 한 작업 후보**: 실데이터/운영 scope 결정 없이 바로 진행 가능한 **T-212d seeded
+PostGIS perf baseline**. T-RV-04b-opinet은 bounded bbox vs POI-target 결정이 먼저 필요하고,
+T-212b는 admin UI 변경 폭이 커 별도 작업 브랜치와 충돌 여부를 확인한 뒤 진행한다.
+
 ## 2026-06-07 Claude 작업 메모 — T-RV-04b opinet provider 보강(#8) + 다음=T-212d perf
 
 사용자 결정(“opinet: AI agent로 라이브러리 직접 보강”)대로 `python-opinet-api`를 보강.

@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-07 (codex) — Sprint 5 운영 진입 잔여 task 상세화
+
+**작업**: 사용자 지시로 Sprint 5 최종 운영 진입까지 남은 작업을 1-PR 단위로 상세화.
+
+- 신규 리포트 `docs/reports/sprint5-final-task-breakdown-2026-06-07.md` 추가.
+- 잔여 축을 `T-RV-04b-opinet-krtour-wiring`, `T-212b-admin-ui-completion`,
+  `T-212d-perf-baseline-and-tuning`, `T-212e-live-full-reload-final-verification`,
+  `T-210-tripmate-integration-cleanup`, `Sprint 5 closure`로 정리.
+- `docs/tasks.md`는 진행 중 요약과 Phase 6/7 하위 task를 최신 main 기준으로 상세화.
+- `docs/sprints/SPRINT-5.md`는 상태를 최종 운영 진입 진행 중으로 갱신하고 §4.1에
+  잔여 task 순서와 DoD 링크를 추가.
+- 다음 구현 후보는 실데이터 없이 시작 가능한 `T-212d` seeded PostGIS perf baseline.
+
 ## 2026-06-07 (claude) — T-RV-04b opinet provider 라이브러리 보강(#8) + 조사 결론
 
 **작업**: opinet(주유소/유가) wiring 차단 해소를 위해 사용자 지시(“AI agent로 라이브러리
