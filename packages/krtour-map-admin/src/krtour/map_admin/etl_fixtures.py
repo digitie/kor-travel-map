@@ -418,39 +418,37 @@ async def _convert_kma_weather_alerts(items: Sequence[Any]) -> list[Any]:
 
 @dataclass(frozen=True)
 class _RestArea:
-    """`KrexRestAreaItem` Protocol 준수."""
+    """`KrexRestAreaItem` Protocol 준수 (provider ``krex.models.RestArea`` 정합).
 
-    uni_id: str
+    안정 식별자·주소 컬럼 없음 — 자연키는 변환부에서
+    name+route_name+direction으로 파생 (ADR-044). lat/lon은 provider처럼 float.
+    """
+
     name: str
+    route_name: str | None
     direction: str | None
-    highway_name: str | None
-    address: str | None
-    longitude: Decimal | None
-    latitude: Decimal | None
-    tel: str | None
+    lat: float | None
+    lon: float | None
+    phone_number: str | None
 
 
 def _krex_rest_areas_fixture() -> Sequence[_RestArea]:
     return [
         _RestArea(
-            uni_id="RA-001",
             name="서산휴게소",
+            route_name="서해안고속도로",
             direction="부산방향",
-            highway_name="서해안고속도로",
-            address="충청남도 서산시 운산면 서해로 100",
-            longitude=Decimal("126.6500"),
-            latitude=Decimal("36.7800"),
-            tel="041-1234-5678",
+            lat=36.7800,
+            lon=126.6500,
+            phone_number="041-1234-5678",
         ),
         _RestArea(
-            uni_id="RA-002",
             name="경주휴게소",
+            route_name="경부고속도로",
             direction="서울방향",
-            highway_name="경부고속도로",
-            address="경상북도 경주시 외동읍 동해남부로 200",
-            longitude=Decimal("129.2200"),
-            latitude=Decimal("35.8400"),
-            tel="054-7491234",
+            lat=35.8400,
+            lon=129.2200,
+            phone_number="054-7491234",
         ),
     ]
 

@@ -70,14 +70,12 @@ class _Station:
 
 @dataclass(frozen=True)
 class _RestArea:
-    uni_id: str
     name: str
+    route_name: str | None
     direction: str | None
-    highway_name: str | None
-    address: str | None
-    longitude: Decimal | None
-    latitude: Decimal | None
-    tel: str | None
+    lat: float | None
+    lon: float | None
+    phone_number: str | None
 
 
 @dataclass(frozen=True)
@@ -267,14 +265,12 @@ async def test_dagster_assets_validate_coordinates_and_load_to_postgis(
             map_client,
             krex_rest_areas=[
                 _RestArea(
-                    uni_id="DAGSTER-KREX-RA-001",
                     name="서산휴게소",
+                    route_name="서해안고속도로",
                     direction="부산방향",
-                    highway_name="서해안고속도로",
-                    address="충청남도 서산시 운산면 서해로 100",
-                    longitude=Decimal("126.6500"),
-                    latitude=Decimal("36.7800"),
-                    tel="041-1234-5678",
+                    lat=36.7800,
+                    lon=126.6500,
+                    phone_number="041-1234-5678",
                 )
             ],
         ),

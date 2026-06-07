@@ -57,36 +57,40 @@ def traffic_notices_to_bundles(
 
 @dataclass(frozen=True)
 class _RestArea:
-    uni_id: str
+    """`KrexRestAreaItem` Protocol 준수 (provider ``krex.models.RestArea`` 정합).
+
+    안정 식별자(uni_id)·주소 컬럼 없음 — 자연키는 변환부에서
+    name+route_name+direction으로 파생(ADR-044). lat/lon은 provider처럼 float.
+    """
+
     name: str
+    route_name: str | None
     direction: str | None
-    highway_name: str | None
-    address: str | None
-    longitude: Decimal | None
-    latitude: Decimal | None
-    tel: str | None
+    lat: float | None
+    lon: float | None
+    phone_number: str | None
 
 
 _RA_SEOSAN = _RestArea(
-    uni_id="RA-001",
     name="서산휴게소",
+    route_name="서해안고속도로",
     direction="부산방향",
-    highway_name="서해안고속도로",
-    address="충청남도 서산시 운산면 서해로 100",
-    longitude=Decimal("126.6500"),
-    latitude=Decimal("36.7800"),
-    tel="041-1234-5678",
+    lat=36.7800,
+    lon=126.6500,
+    phone_number="041-1234-5678",
 )
 _RA_GYEONGJU = _RestArea(
-    uni_id="RA-002",
     name="경주휴게소",
+    route_name="경부고속도로",
     direction="서울방향",
-    highway_name="경부고속도로",
-    address="경상북도 경주시 외동읍 동해남부로 200",
-    longitude=Decimal("129.2200"),
-    latitude=Decimal("35.8400"),
-    tel="054-7491234",
+    lat=35.8400,
+    lon=129.2200,
+    phone_number="054-7491234",
 )
+
+# 파생 자연키 = name::route_name::direction (strip→lower→'::' join, ADR-009 '|' 예약 회피).
+_NK_SEOSAN = "서산휴게소::서해안고속도로::부산방향"
+_NK_GYEONGJU = "경주휴게소::경부고속도로::서울방향"
 
 
 @pytest.mark.unit
@@ -94,35 +98,69 @@ def test_rest_areas_bundle_count_and_order() -> None:
     bundles = rest_areas_to_bundles([_RA_SEOSAN, _RA_GYEONGJU], fetched_at=_NOW)
     assert len(bundles) == 2
     assert [b.source_record.source_entity_id for b in bundles] == [
-        "RA-001",
-        "RA-002",
+        _NK_SEOSAN,
+        _NK_GYEONGJU,
     ]
 
 
 @pytest.mark.unit
 def test_rest_areas_skips_blank_name_record() -> None:
-    """EX serviceAreaRoute placeholder(모든 표시필드 null) 행은 skip (PR#61).
+    """placeholder(표시필드 null) 행은 skip (PR#61).
 
-    실측: serviceAreaRoute가 ``serviceAreaName=null``인 행을 반환 → name="" →
-    이전엔 Feature(name 1자 이상) ValidationError. 이제 방어적으로 거른다.
+    실측: source가 ``name=null``인 행을 반환 → name="" → 이전엔 Feature(name 1자
+    이상) ValidationError + 파생 자연키도 의미 없음. 이제 방어적으로 거른다.
     """
     blank = _RestArea(
-        uni_id="A00195", name="", direction=None, highway_name=None,
-        address=None, longitude=None, latitude=None, tel=None,
+        name="", route_name=None, direction=None,
+        lat=None, lon=None, phone_number=None,
     )
     bundles = rest_areas_to_bundles([blank, _RA_SEOSAN], fetched_at=_NOW)
     assert len(bundles) == 1
-    assert bundles[0].source_record.source_entity_id == "RA-001"
+    assert bundles[0].source_record.source_entity_id == _NK_SEOSAN
 
 
 @pytest.mark.unit
-def test_rest_areas_skips_blank_uni_id_record() -> None:
-    """uni_id 빈 행도 skip (source key 구성 불가)."""
-    blank_id = _RestArea(
-        uni_id="  ", name="이름있음휴게소", direction=None, highway_name=None,
-        address=None, longitude=None, latitude=None, tel=None,
+def test_rest_areas_derived_natural_key_collision_and_stability() -> None:
+    """파생 자연키(name+route+direction)는 결정적 — strip/lower 정규화 후 동일
+    3필드는 좌표·전화가 달라도 같은 feature_id로 충돌, 다른 휴게소는 분리
+    (ADR-044 승인 tradeoff)."""
+    twin = _RestArea(
+        name="  서산휴게소 ",  # strip/lower 정규화 → _RA_SEOSAN과 동일 자연키.
+        route_name="서해안고속도로",
+        direction="부산방향",
+        lat=None,  # 좌표가 달라도 자연키 기반 identity는 동일.
+        lon=None,
+        phone_number=None,
     )
-    assert rest_areas_to_bundles([blank_id], fetched_at=_NOW) == []
+    [b_seosan, b_twin, b_gyeongju] = rest_areas_to_bundles(
+        [_RA_SEOSAN, twin, _RA_GYEONGJU], fetched_at=_NOW
+    )
+    # 동일 name+route+direction → 동일 feature_id + 동일 source_entity_id(자연키).
+    assert b_twin.feature.feature_id == b_seosan.feature.feature_id
+    assert b_twin.source_record.source_entity_id == _NK_SEOSAN
+    assert b_seosan.source_record.source_entity_id == _NK_SEOSAN
+    # 서로 다른 휴게소는 분리.
+    assert b_gyeongju.feature.feature_id != b_seosan.feature.feature_id
+
+
+@pytest.mark.unit
+def test_rest_areas_identical_payload_same_source_record_key() -> None:
+    """byte-identical payload → 동일 source_record_key (payload_hash 포함) +
+    동일 feature_id."""
+    dup = _RestArea(
+        name="서산휴게소",
+        route_name="서해안고속도로",
+        direction="부산방향",
+        lat=36.7800,
+        lon=126.6500,
+        phone_number="041-1234-5678",
+    )
+    [b1, b2] = rest_areas_to_bundles([_RA_SEOSAN, dup], fetched_at=_NOW)
+    assert (
+        b1.source_record.source_record_key
+        == b2.source_record.source_record_key
+    )
+    assert b1.feature.feature_id == b2.feature.feature_id
 
 
 @pytest.mark.unit

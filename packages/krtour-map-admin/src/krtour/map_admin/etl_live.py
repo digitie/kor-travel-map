@@ -340,16 +340,18 @@ _KREX_INCIDENT_TYPE_MAP: Final[dict[str, str]] = {
 
 @dataclass(frozen=True)
 class _KrexRestAreaAdapter:
-    """`KrexRestAreaItem` Protocol 만족. serviceAreaRoute는 좌표 없음 → None."""
+    """`KrexRestAreaItem` Protocol 만족 (provider ``RestArea`` 정합, ADR-044).
 
-    uni_id: str
+    자연키는 변환부에서 name+route_name+direction으로 파생(uni_id 컬럼 없음),
+    Protocol에 주소 필드도 없다. serviceAreaRoute 응답엔 좌표가 없어 lat/lon=None.
+    """
+
     name: str
+    route_name: str | None
     direction: str | None
-    highway_name: str | None
-    address: str | None
-    longitude: Decimal | None
-    latitude: Decimal | None
-    tel: str | None
+    lat: float | Decimal | None
+    lon: float | Decimal | None
+    phone_number: str | None
 
 
 @dataclass(frozen=True)
@@ -444,15 +446,15 @@ async def _krex_call(
 
 
 def _adapt_krex_rest_area(raw: dict[str, Any]) -> _KrexRestAreaAdapter:
+    # uni_id/address는 신 Protocol에 없음 — 자연키는 변환부가
+    # name+route_name+direction으로 파생(ADR-044). serviceAreaRoute는 좌표 없음.
     return _KrexRestAreaAdapter(
-        uni_id=_first_str(raw, "serviceAreaCode", "unitCode", "uni_id") or "",
         name=_first_str(raw, "serviceAreaName", "unitName", "name") or "",
+        route_name=_first_str(raw, "routeName", "highway_name"),
         direction=_first_str(raw, "direction", "gffDivCd"),
-        highway_name=_first_str(raw, "routeName", "highway_name"),
-        address=_first_str(raw, "svarAddr", "addr", "address"),
-        longitude=None,  # serviceAreaRoute 응답에 좌표 없음 (조사 결과).
-        latitude=None,
-        tel=_first_str(raw, "telNo", "phoneNumber", "tel"),
+        lat=None,
+        lon=None,
+        phone_number=_first_str(raw, "telNo", "phoneNumber", "tel"),
     )
 
 
