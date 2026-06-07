@@ -2,6 +2,25 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-08 (claude) — T-RV-55d-1 airkorea 대기질 provider (station=weather feature)
+
+**작업**: 사용자 결정(대기질을 지금 구현, 측정소=weather feature)에 따라 `providers/airkorea.py`
+신규(2 PR 중 1번째). 대기질은 장소가 아니라 측정값이라 기존 WeatherValue 패턴 재사용.
+
+- `air_quality_stations_to_bundles`(측정소 → **weather kind** FeatureBundle): category `99000000`
+  (KMA 특보와 동일 비-place placeholder, ADR-018상 weather=detail 없음), 좌표 reverse로 bjd 보강,
+  안정키 = 측정소명. `AirQualityStationItem` Protocol.
+- `air_quality_to_weather_values`(측정 row → 오염물질별 `WeatherValue`): `weather_domain=air_quality`
+  (기존 enum), `forecast_style=observed`, metric PM10/PM2_5/O3/NO2/SO2/CO/CAI(단위 μg/m³·ppm·score),
+  grade(1~4)→severity(좋음~매우나쁨), `observed_at`=data_time(naive면 KST 보정). KMA value 변환
+  미러(`station_feature_ids` 매핑, source_record_key param). 결측 오염물질/미매핑 측정소 skip.
+  `AirQualityMeasurementItem` Protocol.
+- **검증**: ruff + mypy --strict(map 85/dagster 13/admin 26) + lint-imports + unit+lint 965
+  (coverage 81%, airkorea.py 96%) green.
+
+**다음**: 55d-2 orchestration(client `load_air_quality` + dagster fetcher/asset/resource/definitions
++ ETL preview + 테스트) → **T-RV 후속 program 전체 완료**.
+
 ## 2026-06-08 (claude) — T-RV-52c-3 축제 enrichment 검토 frontend (→ T-RV-52 완료)
 
 **작업**: 52c admin API 위에 운영자 검토 UI(3 PR 중 3번째, 마지막). dedup-review 페이지 미러
