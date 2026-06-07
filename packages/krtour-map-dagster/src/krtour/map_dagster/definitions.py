@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Final, cast
 
 from dagster import Definitions, ResourceDefinition, resource
+from krtour.map.settings import KrtourMapSettings
 
 from .assets import FEATURE_LOAD_ASSETS
 from .batch_dag import BATCH_DAG_JOBS
@@ -46,10 +47,16 @@ DEFAULT_RESOURCE_VALUES: Final[dict[str, object]] = {
     "strict_address": True,
     "feature_update_failure_notifier": None,
     "mois_dataset_key": "mois_license_features_bulk",
-    "knps_point_dataset_key": "knps_visitor_centers",
-    "knps_geometry_dataset_key": "knps_trails",
 }
 """운영 definitions가 교체하지 않아도 안전한 기본 resource 값."""
+
+# KNPS dataset key는 ``KrtourMapSettings``에서 읽어 fetcher(``fetch_knps_*_records``)와
+# asset의 ``knps_*_dataset_key`` resource가 같은 dataset을 보게 한다(불일치 방지).
+SETTINGS_VALUE_RESOURCES: Final[dict[str, str]] = {
+    "knps_point_dataset_key": "knps_point_dataset_key",
+    "knps_geometry_dataset_key": "knps_geometry_dataset_key",
+}
+"""resource key → 같은 값을 제공하는 ``KrtourMapSettings`` 속성명."""
 
 DEFAULT_RESOURCE_DEFINITIONS: Final[dict[str, ResourceDefinition]] = {
     "krtour_map_client": krtour_map_client_resource,
@@ -78,6 +85,14 @@ def _value_resource(key: str, value: object) -> ResourceDefinition:
     return _resource
 
 
+def _settings_value_resource(key: str, attr: str) -> ResourceDefinition:
+    @resource(description=f"{key} resource 값을 ``KrtourMapSettings.{attr}``에서 읽는다.")
+    def _resource() -> object:
+        return getattr(KrtourMapSettings(), attr)
+
+    return _resource
+
+
 defs = Definitions(
     assets=FEATURE_LOAD_ASSETS,
     jobs=cast(
@@ -96,12 +111,15 @@ defs = Definitions(
         key: (
             _value_resource(key, DEFAULT_RESOURCE_VALUES[key])
             if key in DEFAULT_RESOURCE_VALUES
+            else _settings_value_resource(key, SETTINGS_VALUE_RESOURCES[key])
+            if key in SETTINGS_VALUE_RESOURCES
             else DEFAULT_RESOURCE_DEFINITIONS[key]
             if key in DEFAULT_RESOURCE_DEFINITIONS
             else _missing_resource(key)
         )
         for key in REQUIRED_RESOURCE_KEYS
         + tuple(DEFAULT_RESOURCE_VALUES)
+        + tuple(SETTINGS_VALUE_RESOURCES)
         + tuple(DEFAULT_RESOURCE_DEFINITIONS)
     },
 )

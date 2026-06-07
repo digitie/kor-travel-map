@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import threading
-from collections.abc import Awaitable, Callable, Iterable, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterator
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -25,6 +25,8 @@ from krtour.map.settings import KrtourMapSettings
 
 from .provider_fetchers import (
     fetch_datagokr_cultural_festivals,
+    fetch_knps_geometry_records,
+    fetch_knps_point_records,
     fetch_krex_rest_areas,
     fetch_krex_traffic_notices,
     fetch_krheritage_events,
@@ -175,14 +177,15 @@ def build_provider_record_guard_resource(
 
 def build_provider_record_live_resource(
     spec: ProviderRecordResourceSpec,
-    fetch: Callable[[KrtourMapSettings], Iterable[Any]],
+    fetch: Callable[[KrtourMapSettings], Iterable[Any] | AsyncIterator[Any]],
 ) -> ResourceDefinition:
     """provider public client live fetcher를 resource value로 노출한다.
 
     credential이 없으면 guard와 동일한 helpful message로 ``RuntimeError``를
     던져 missing-credential 동작을 graceful하게 유지한다. credential이 있으면
-    ``fetch(settings)``가 반환한 record iterable을 그대로 돌려준다(여기서
-    소비하지 않음 — asset의 ``_record_batches``가 lazy하게 iterate).
+    ``fetch(settings)``가 반환한 record iterable(sync ``Iterable`` 또는 async
+    generator)을 그대로 돌려준다(여기서 소비하지 않음 — asset의
+    ``_record_batches``가 sync/async 모두 lazy하게 iterate).
     """
 
     @resource(
@@ -191,7 +194,7 @@ def build_provider_record_live_resource(
             f"({spec.provider_package}, {spec.dataset_key})."
         )
     )
-    def _resource(_context: InitResourceContext) -> Iterable[Any]:
+    def _resource(_context: InitResourceContext) -> Iterable[Any] | AsyncIterator[Any]:
         settings = KrtourMapSettings()
         has_required_settings = all(
             getattr(settings, setting_name) is not None for setting_name in spec.setting_names
@@ -289,6 +292,33 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["mois_license_records"] = (
     build_provider_record_live_resource(
         _MOIS_LICENSE_RECORDS_SPEC,
         fetch_mois_license_records,
+    )
+)
+
+_KNPS_POINT_RECORDS_SPEC: ProviderRecordResourceSpec = next(
+    spec
+    for spec in PROVIDER_RECORD_RESOURCE_SPECS
+    if spec.resource_key == "knps_point_records"
+)
+_KNPS_GEOMETRY_RECORDS_SPEC: ProviderRecordResourceSpec = next(
+    spec
+    for spec in PROVIDER_RECORD_RESOURCE_SPECS
+    if spec.resource_key == "knps_geometry_records"
+)
+# KNPS file dataset은 keyless(공개) — spec.setting_names가 비어 있어 live guard
+# 활성 판정(all(...) over empty)은 항상 True. provider(python-knps-api>=0.2)가
+# 헤더 정규화 typed record(KnpsPlaceRecord/KnpsGeoRecord)를 노출하므로 krtour는
+# best-guess 컬럼 매핑 없이 그대로 소비한다.
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["knps_point_records"] = (
+    build_provider_record_live_resource(
+        _KNPS_POINT_RECORDS_SPEC,
+        fetch_knps_point_records,
+    )
+)
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["knps_geometry_records"] = (
+    build_provider_record_live_resource(
+        _KNPS_GEOMETRY_RECORDS_SPEC,
+        fetch_knps_geometry_records,
     )
 )
 

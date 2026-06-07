@@ -2,6 +2,41 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-07 (claude) — T-RV-04b ⑥ knps point/geometry live fetcher (provider 보강)
+
+**작업**: KNPS(국립공원/트래킹) point + geometry live fetcher wiring. krtour의
+best-guess 컬럼 매핑이 실 헤더(`명칭_한글(KOR_NM)`, `경도(LONGITUDE)` 등)와 어긋나는
+문제를, 사용자 지시(“knps는 미완성… 적극적으로 python-knps-api를 수정하며 진행”)에
+따라 **provider 라이브러리를 보강**해 해결했다.
+
+- **provider** `python-knps-api#7`(merged, **v0.2.0**): 헤더 정규화 typed record
+  `KnpsPlaceRecord`/`KnpsGeoRecord` + read 메서드 `client.files.read_place_records(key)`·
+  `read_geo_records(key)` 추가. source_id 우선순위
+  `ID_CD→STN_ID→OBJECTID→SEQNO→NO→row-hash`. 실 스키마 3종(standard `(CODE)` 헤더 /
+  weather_stations / trails 한글 props)을 라이브로 확인 후 정규화. krtour `KnpsPointRecord`/
+  `KnpsGeometryRecord` Protocol을 구조적으로 충족 → krtour transform 무변, best-guess
+  컬럼 매핑은 dead.
+- **fetcher** `fetch_knps_point_records`/`fetch_knps_geometry_records`: **async
+  generator**(다운로드/파싱이 async). `KnpsClient().files.read_*(dataset_key)` await 후
+  record yield, `finally: await client.aclose()`. keyless 공개 파일셋이라 credential 불요.
+- **resources**: `build_provider_record_live_resource` 시그니처를
+  `Iterable[Any] | AsyncIterator[Any]`로 확장(asset `_record_batches`는 이미 sync/async
+  iterable 모두 지원). `knps_point_records`/`knps_geometry_records` guard→live 교체.
+- **settings/definitions**: `knps_point_dataset_key`(기본 `knps_visitor_centers`)·
+  `knps_geometry_dataset_key`(기본 `knps_trails`) 추가. `SETTINGS_VALUE_RESOURCES` +
+  `_settings_value_resource`로 fetcher와 asset의 `knps_*_dataset_key` resource가 같은
+  `KrtourMapSettings` 값을 보게 해 불일치 제거.
+
+**테스트**: dagster `test_provider_fetchers.py`에 fake knps client(async
+`read_place_records`/`read_geo_records` + `aclose`) 기반 yield/close/dataset-key 검증 3건,
+`test_definitions.py` `_LIVE_PROVIDER_RESOURCE_KEYS`에 knps 2키 추가. 게이트:
+`ruff` · `mypy --strict`(krtour.map 80 files / krtour.map_dagster 12 files) ·
+`lint-imports`(4 kept) · dagster+unit `952 passed, 1 skipped`(mois optional) ·
+coverage `80.31% ≥ 80`. 실 fetch 검증은 T-212e.
+
+**다음**: mois 마무리(Phase A — LOCALDATA download + `sync_localdata_source_db`
+Dagster op/스케줄). 이후 잔여 T-RV-04b는 opinet(차단, `python-opinet-api#7` 대기).
+
 ## 2026-06-07 (claude) — T-RV-04b ⑤ mois_license_records (Phase B fetcher)
 
 **작업**: MOIS 인허가 live fetcher(Phase B). provider `mois.db.PlaceRecord`이 krtour

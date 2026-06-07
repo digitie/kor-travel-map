@@ -169,6 +169,20 @@ class KrtourMapSettings(BaseSettings):
             "부재 시 fetcher가 명확히 실패. env ``KRTOUR_MAP_MOIS_SOURCE_DB_PATH``."
         ),
     )
+    knps_point_dataset_key: str = Field(
+        default="knps_visitor_centers",
+        description=(
+            "KNPS point feature-load asset이 적재할 file dataset key "
+            "(``knps.file_datasets()`` 카탈로그 key). fetcher와 asset의 "
+            "``knps_point_dataset_key`` resource가 같은 값을 쓰도록 한다."
+        ),
+    )
+    knps_geometry_dataset_key: str = Field(
+        default="knps_trails",
+        description=(
+            "KNPS geometry(route/area) feature-load asset이 적재할 file dataset key."
+        ),
+    )
 
     # ── 로깅 ─────────────────────────────────────────────────────────────
     log_level: str = Field(

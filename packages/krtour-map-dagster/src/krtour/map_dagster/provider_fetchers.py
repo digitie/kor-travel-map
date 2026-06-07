@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import importlib
 import pathlib
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from typing import TYPE_CHECKING, Any, cast
 
 from sqlalchemy import create_engine
@@ -28,6 +28,8 @@ if TYPE_CHECKING:
 __all__ = [
     "ProviderCredentialMissing",
     "fetch_datagokr_cultural_festivals",
+    "fetch_knps_geometry_records",
+    "fetch_knps_point_records",
     "fetch_krex_rest_areas",
     "fetch_krex_traffic_notices",
     "fetch_krheritage_events",
@@ -256,3 +258,47 @@ def fetch_krex_traffic_notices(
             page_no += 1
     finally:
         client.close()
+
+
+async def fetch_knps_point_records(
+    settings: KrtourMapSettings,
+) -> AsyncIterator[Any]:
+    """KNPS point file dataset record를 knps public client로 stream한다.
+
+    ``settings.knps_point_dataset_key``의 keyless file dataset을 받아
+    ``client.files.read_place_records(key)``의 typed record(``KnpsPlaceRecord``,
+    krtour ``KnpsPointRecord`` Protocol 충족 — provider가 헤더 정규화)를 yield한다.
+    krtour 측 best-guess 컬럼 매핑이 아니라 provider(python-knps-api>=0.2)의 typed
+    record를 직접 소비한다(ADR-044). 다운로드/파싱은 async이므로 async generator다.
+    dataset key가 카탈로그에 없으면 명확히 실패한다(keyless라 credential은 없음).
+    """
+    dataset_key = settings.knps_point_dataset_key
+    knps = cast(Any, importlib.import_module("knps"))
+    client = knps.KnpsClient()
+    try:
+        records = await client.files.read_place_records(dataset_key)
+        for record in records:
+            yield record
+    finally:
+        await client.aclose()
+
+
+async def fetch_knps_geometry_records(
+    settings: KrtourMapSettings,
+) -> AsyncIterator[Any]:
+    """KNPS geometry(route/area) file dataset record를 stream한다.
+
+    ``settings.knps_geometry_dataset_key`` dataset을
+    ``client.files.read_geo_records(key)``로 받아 typed record(``KnpsGeoRecord``,
+    krtour ``KnpsGeometryRecord`` Protocol 충족, geometry는 WGS84 WKT)를 yield한다.
+    SHP polygon dataset은 provider의 ``geo`` extra가 필요할 수 있다.
+    """
+    dataset_key = settings.knps_geometry_dataset_key
+    knps = cast(Any, importlib.import_module("knps"))
+    client = knps.KnpsClient()
+    try:
+        records = await client.files.read_geo_records(dataset_key)
+        for record in records:
+            yield record
+    finally:
+        await client.aclose()

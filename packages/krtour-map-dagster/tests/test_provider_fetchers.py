@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import sys
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterable, Iterator
 from types import ModuleType
 from typing import Any, cast
 
@@ -16,6 +17,8 @@ import krtour.map_dagster.provider_fetchers as provider_fetchers
 from krtour.map_dagster.provider_fetchers import (
     ProviderCredentialMissing,
     fetch_datagokr_cultural_festivals,
+    fetch_knps_geometry_records,
+    fetch_knps_point_records,
     fetch_krex_rest_areas,
     fetch_krex_traffic_notices,
     fetch_krheritage_events,
@@ -393,6 +396,101 @@ def test_mois_fetch_yields_open_records_and_cleans_up(
     assert records[0].mng_no == "MNG-0001"
     assert closed == [True]
     assert disposed == [True]
+
+
+async def _acollect(agen: AsyncIterator[Any]) -> list[Any]:
+    out: list[Any] = []
+    async for item in agen:
+        out.append(item)
+    return out
+
+
+class _FakeKnpsFiles:
+    def __init__(self, records: list[object]) -> None:
+        self._records = records
+        self.place_calls: list[str] = []
+        self.geo_calls: list[str] = []
+
+    async def read_place_records(
+        self, key: str, **_kwargs: Any
+    ) -> tuple[object, ...]:
+        self.place_calls.append(key)
+        return tuple(self._records)
+
+    async def read_geo_records(self, key: str, **_kwargs: Any) -> tuple[object, ...]:
+        self.geo_calls.append(key)
+        return tuple(self._records)
+
+
+class _FakeKnpsClient:
+    instances: list[_FakeKnpsClient] = []
+    records: list[object] = []
+
+    def __init__(self, **_kwargs: Any) -> None:
+        self.closed = False
+        self.files = _FakeKnpsFiles(list(type(self).records))
+        _FakeKnpsClient.instances.append(self)
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+def _install_fake_knps(
+    monkeypatch: pytest.MonkeyPatch, *, records: list[object]
+) -> type[_FakeKnpsClient]:
+    _FakeKnpsClient.instances = []
+    _FakeKnpsClient.records = records
+    module = ModuleType("knps")
+    module.__dict__["KnpsClient"] = _FakeKnpsClient
+    monkeypatch.setitem(sys.modules, "knps", module)
+    return _FakeKnpsClient
+
+
+def test_knps_point_records_fetch_yields_and_closes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _install_fake_knps(monkeypatch, records=[object(), object(), object()])
+    settings = KrtourMapSettings(knps_point_dataset_key="knps_visitor_centers")
+
+    records = asyncio.run(_acollect(fetch_knps_point_records(settings)))
+
+    assert len(records) == 3
+    assert len(fake.instances) == 1
+    client = fake.instances[0]
+    assert client.files.place_calls == ["knps_visitor_centers"]
+    assert client.closed is True
+
+
+def test_knps_geometry_records_fetch_yields_and_closes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _install_fake_knps(monkeypatch, records=[object(), object()])
+    settings = KrtourMapSettings(knps_geometry_dataset_key="knps_trails")
+
+    records = asyncio.run(_acollect(fetch_knps_geometry_records(settings)))
+
+    assert len(records) == 2
+    client = fake.instances[0]
+    assert client.files.geo_calls == ["knps_trails"]
+    assert client.closed is True
+
+
+def test_knps_point_records_fetch_closes_on_partial_consumption(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _install_fake_knps(monkeypatch, records=[object(), object(), object()])
+    settings = KrtourMapSettings(knps_point_dataset_key="knps_visitor_centers")
+
+    async def _take_one_then_close() -> None:
+        agen = fetch_knps_point_records(settings)
+        first = await agen.__anext__()
+        assert first is not None
+        # 조기 종료 시에도 finally의 ``aclose()``가 실행되어 client가 닫혀야 한다.
+        await agen.aclose()
+
+    asyncio.run(_take_one_then_close())
+
+    assert fake.instances[0].closed is True
 
 
 def test_fetch_raises_when_credential_missing() -> None:
