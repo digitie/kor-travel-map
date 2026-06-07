@@ -20,6 +20,7 @@ from krtour.map_dagster.assets import (
     run_feature_place_krheritage_items,
     run_feature_place_mois_licenses,
     run_feature_place_opinet_stations,
+    run_feature_weather_airkorea_air_quality,
 )
 from krtour.map_dagster.etl import DagsterFeatureLoadResult
 from sqlalchemy import text
@@ -409,6 +410,78 @@ async def _run_asset(
         }
     )
     return await runner(context)
+
+
+@dataclass(frozen=True)
+class _AirStation:
+    station_name: str
+    addr: str | None
+    lat: float | None
+    lon: float | None
+
+
+@dataclass(frozen=True)
+class _AirMeasurement:
+    station_name: str
+    sido_name: str | None
+    data_time: datetime
+    pm10_value: float | None = None
+    pm10_grade: int | None = None
+    khai_value: int | None = None
+    khai_grade: int | None = None
+    pm25_value: float | None = None
+    pm25_grade: int | None = None
+    o3_value: float | None = None
+    o3_grade: int | None = None
+    no2_value: float | None = None
+    no2_grade: int | None = None
+    so2_value: float | None = None
+    so2_grade: int | None = None
+    co_value: float | None = None
+    co_grade: int | None = None
+
+
+async def test_airkorea_asset_distinct_features_for_same_station_name(
+    map_client: AsyncKrtourMapClient,
+    migrated_engine: Any,
+) -> None:
+    """동명 측정소(서울/대구 ``중구``)가 asset join에서 별개 feature로 분리(#301)."""
+    stations = [
+        _AirStation("중구", "서울 중구 덕수궁길 15", 37.5640, 126.9750),
+        _AirStation("중구", "대구광역시 중구 공평로 88", 35.8690, 128.5940),
+    ]
+    measurements = [
+        _AirMeasurement("중구", "서울", _FETCHED, pm10_value=40.0, pm10_grade=2),
+        _AirMeasurement("중구", "대구", _FETCHED, pm10_value=85.0, pm10_grade=3),
+    ]
+    context = build_asset_context(
+        resources={
+            "krtour_map_client": map_client,
+            "reverse_geocoder": _ReverseGeocoder(),
+            "fetched_at": _FETCHED,
+            "airkorea_stations": stations,
+            "airkorea_air_quality": measurements,
+        }
+    )
+    result = await run_feature_weather_airkorea_air_quality(context)
+    assert result.stations.features_inserted == 2  # 두 측정소 별개.
+    assert result.weather_values == 2  # 각 PM10 1개.
+
+    async with AsyncSession(migrated_engine) as session:
+        # 두 측정값이 서로 다른 feature_id에 붙고, 값이 뒤섞이지 않았는지.
+        rows = (
+            await session.execute(
+                text(
+                    "SELECT v.feature_id, v.value_number "
+                    "FROM feature.feature_weather_values AS v "
+                    "WHERE v.weather_domain = 'air_quality' AND v.metric_key = 'PM10'"
+                )
+            )
+        ).all()
+    assert len(rows) == 2
+    by_feature = {fid: float(val) for fid, val in rows}
+    assert len(by_feature) == 2  # 서로 다른 feature 2개.
+    assert sorted(by_feature.values()) == [40.0, 85.0]
 
 
 def _address(
