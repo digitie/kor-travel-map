@@ -2,6 +2,25 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-07 (claude) — T-RV-51b 기본 dedup scope baked (config 없이 cross-provider dedup)
+
+**작업**: `refresh_dedup_candidates_op`이 그동안 Dagster run config의 `pairs`/`sibling_scopes`로만
+scope를 받아(기본 빈 목록) 운영자가 매번 config를 넘겨야 했다 → 기본 scope를 코드에 baked.
+
+- `maintenance.py`: `DEFAULT_DEDUP_SCOPE_PAIRS`(현재 **knps↔krheritage** 1쌍 — 동일 사찰/문화재가
+  양 provider에 중복 적재 가능, ADR-034 6단계) + `DEFAULT_DEDUP_SIBLING_SCOPES`(현재 없음) 상수.
+  op은 `pairs`/`sibling_scopes`가 **둘 다 비면** 기본값 적용 → run config 없이도 cross-provider
+  dedup이 돈다. canonical provider name(`python-knps-api`/`python-krheritage-api`) 사용. 실제 중복만
+  threshold(0.65) 이상 큐 적재되므로 비중복은 노이즈 안 됨.
+- **확장 규약**: 신규 MOIS-sibling provider(krforest 휴양림/수목원·standard_data 박물관/미술관)는
+  해당 feature-load PR에서 `{left:{provider:<new>}, right:{provider:python-mois-api}}` pair를
+  `DEFAULT_DEDUP_SCOPE_PAIRS`에 append(ADR-034 8/9단계).
+- **검증**: ruff + mypy --strict(13 files) + lint-imports + dagster suite 59 passed/1 skip(빈
+  config→기본 pair 적용 단위 추가).
+
+**T-RV-51 완료**(51a merge UI + 51b 기본 scope). **다음**: T-RV-53 krforest(휴양림/수목원)
+feature-load — transform→asset→MOIS dedup→admin UI 세분화 PR.
+
 ## 2026-06-07 (claude) — T-RV-51a dedup merge master 선택 UI (수동 처리)
 
 **작업**: dedup 수동처리 UI 완성(point 4). `dedup-review` 화면이 그동안 accept/reject/ignore만
