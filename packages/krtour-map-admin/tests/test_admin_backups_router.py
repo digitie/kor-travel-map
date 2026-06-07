@@ -159,4 +159,53 @@ def test_restore_plan_and_swap_boundary(client: TestClient) -> None:
     assert swap.status_code == 200
     swap_body = swap.json()
     assert swap_body["data"]["operation"] == "swap"
-    assert swap_body["data"]["status"] == "manual_required"
+    assert swap_body["data"]["status"] == "planned"
+    assert swap_body["data"]["command"]["env"]["KRTOUR_MAP_RESTORE_SWAP_APPLY"] == "0"
+    assert swap_body["data"]["command"]["env"]["KRTOUR_MAP_RESTORE_SWAP_SKIP_VERIFY"] == "0"
+
+
+@pytest.mark.unit
+def test_execute_restore_swap_requires_opt_in(client: TestClient) -> None:
+    response = client.post(
+        "/admin/restore/backup-1/swap",
+        json={"execute": True, "apply": True},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "BACKUP_COMMAND_DISABLED"
+
+
+@pytest.mark.unit
+def test_execute_restore_swap_uses_command_runner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import admin_backups as router_mod
+
+    _write_artifact(tmp_path, "backup-1")
+    app = create_app(
+        AdminSettings(
+            backup_root=tmp_path,
+            backup_project_root=tmp_path,
+            backup_command_enabled=True,
+        )
+    )
+    seen: dict[str, Any] = {}
+
+    async def _fake_run(plan: Any, *, timeout_seconds: float) -> Any:
+        seen["plan"] = plan
+        seen["timeout_seconds"] = timeout_seconds
+        return router_mod._CommandResult(returncode=0, stdout="swapped", stderr="")
+
+    monkeypatch.setattr(router_mod, "_run_command", _fake_run)
+    response = TestClient(app).post(
+        "/admin/restore/backup-1/swap",
+        json={"execute": True, "apply": True, "skip_verify": True},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data"]["status"] == "completed"
+    assert body["data"]["stdout"] == "swapped"
+    assert seen["plan"].env["KRTOUR_MAP_RESTORE_SWAP_APPLY"] == "1"
+    assert seen["plan"].env["KRTOUR_MAP_RESTORE_SWAP_SKIP_VERIFY"] == "1"

@@ -39,6 +39,32 @@ require_command() {
   fi
 }
 
+select_python() {
+  if [[ -n "${PYTHON_BIN:-}" ]]; then
+    echo "$PYTHON_BIN"
+  elif [[ -x "$ROOT_DIR/.venv/bin/python" ]]; then
+    echo "$ROOT_DIR/.venv/bin/python"
+  elif command -v python3 >/dev/null 2>&1; then
+    command -v python3
+  elif command -v python >/dev/null 2>&1; then
+    command -v python
+  else
+    echo "required command not found: python3" >&2
+    exit 127
+  fi
+}
+
+with_maintenance_lock() {
+  if [[ "${KRTOUR_MAP_MAINTENANCE_LOCK_HELD:-0}" == "1" || "${KRTOUR_MAP_MAINTENANCE_LOCK_DISABLED:-0}" == "1" ]]; then
+    return 0
+  fi
+  local python_bin
+  python_bin="$(select_python)"
+  exec "$python_bin" "$ROOT_DIR/scripts/with-pg-advisory-lock.py" \
+    --key "maintenance:backup-restore" \
+    -- "$ROOT_DIR/scripts/docker-backup.sh" "$@"
+}
+
 validate_identifier KRTOUR_MAP_POSTGRES_DB "$KRTOUR_MAP_POSTGRES_DB"
 validate_identifier KRTOUR_MAP_POSTGRES_USER "$KRTOUR_MAP_POSTGRES_USER"
 validate_identifier KRTOUR_MAP_DAGSTER_POSTGRES_DB "$KRTOUR_MAP_DAGSTER_POSTGRES_DB"
@@ -48,6 +74,7 @@ validate_path_component KRTOUR_MAP_OFFLINE_UPLOAD_BUCKET "$KRTOUR_MAP_OFFLINE_UP
 
 require_command docker
 require_command sha256sum
+with_maintenance_lock "$@"
 
 compose=(docker compose)
 writer_services=(api frontend dagster dagster-daemon rustfs)

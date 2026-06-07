@@ -2,6 +2,25 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-07 (codex) — T-209 final backup/restore safety automation
+
+**작업**: 사용자 지시에 따라 T-209 계열을 마무리한다. T-212 계열과 T-RV-04b는 Claude
+Code 진행 범위라 제외한다.
+
+- **Mutex**: `scripts/with-pg-advisory-lock.py`를 추가하고 backup/restore/swap script가
+  PostgreSQL advisory lock `maintenance:backup-restore`를 잡도록 보강한다.
+- **Restore verification**: `scripts/docker-restore-verify.sh`가 staging app DB
+  `feature.features` count, Dagster table count, RustFS file count를 확인한다.
+  `scripts/docker-restore.sh`는 restore 완료 후 기본으로 이 검증을 실행한다.
+- **Hot-swap env switch**: `scripts/docker-restore-swap.sh`가 검증된 staging DB/volume을
+  가리키는 `.env.restore-swap`을 생성하고, `KRTOUR_MAP_RESTORE_SWAP_APPLY=1`에서만
+  compose 서비스를 재기동한다. `docker-compose.yml`은 RustFS volume name override를
+  지원한다.
+- **Admin API**: `/admin/restore/{backup_id}/swap`은 manual-required 응답 대신 command
+  plan을 반환하고, `execute=true` + command enabled일 때 swap script를 실행한다.
+- **문서/테스트**: `docs/backup-restore.md`, `docs/tasks.md`, `docs/resume.md`를
+  T-209 완료 상태로 갱신하고 script/admin router 회귀 테스트를 보강한다.
+
 ## 2026-06-07 (claude) — T-RV-04b ⑤ mois_license_records (Phase B fetcher)
 
 **작업**: MOIS 인허가 live fetcher(Phase B). provider `mois.db.PlaceRecord`이 krtour

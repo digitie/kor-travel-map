@@ -37,6 +37,8 @@ def test_docker_backup_script_captures_standalone_backup_bundle() -> None:
     assert "rustfs-data.tar.gz" in script
     assert "manifest.json" in script
     assert "SHA256SUMS" in script
+    assert "with-pg-advisory-lock.py" in script
+    assert "maintenance:backup-restore" in script
 
 
 @pytest.mark.unit
@@ -73,6 +75,10 @@ def test_docker_restore_script_restores_backup_into_staging_targets() -> None:
     assert "--no-privileges" in script
     assert "rustfs-data.tar.gz" in script
     assert "docker run --rm" in script
+    assert "KRTOUR_MAP_RESTORE_SKIP_VERIFY" in script
+    assert "docker-restore-verify.sh" in script
+    assert "with-pg-advisory-lock.py" in script
+    assert "maintenance:backup-restore" in script
 
 
 @pytest.mark.unit
@@ -85,6 +91,37 @@ def test_docker_restore_script_refuses_production_targets_by_default() -> None:
     assert "set KRTOUR_MAP_RESTORE_RECREATE=1" in script
     assert "docker compose down" not in script
     assert "KRTOUR_MAP_RESTORE_ALLOW_PRODUCTION" not in script
+
+
+@pytest.mark.unit
+def test_restore_verify_script_checks_staging_counts() -> None:
+    script = _read("scripts/docker-restore-verify.sh")
+
+    assert "feature.features" in script
+    assert "information_schema.tables" in script
+    assert "docker volume inspect" in script
+    assert "file_count" in script
+
+
+@pytest.mark.unit
+def test_restore_swap_script_generates_env_switch_and_can_apply() -> None:
+    script = _read("scripts/docker-restore-swap.sh")
+
+    assert "docker-restore-verify.sh" in script
+    assert "KRTOUR_MAP_DOCKER_PG_DSN" in script
+    assert "KRTOUR_MAP_DOCKER_DAGSTER_PG_URL" in script
+    assert "KRTOUR_MAP_RUSTFS_VOLUME" in script
+    assert "KRTOUR_MAP_RESTORE_SWAP_APPLY" in script
+    assert "docker compose" in script
+    assert "with-pg-advisory-lock.py" in script
+
+
+@pytest.mark.unit
+def test_docker_compose_supports_restore_rustfs_volume_swap() -> None:
+    compose = _read("docker-compose.yml")
+
+    assert "krtour-map-rustfs-data:/data" in compose
+    assert "name: ${KRTOUR_MAP_RUSTFS_VOLUME:-krtour-map-rustfs}" in compose
 
 
 @pytest.mark.unit
@@ -103,4 +140,6 @@ def test_backup_restore_runbook_documents_three_part_bundle_and_restore_boundary
     assert "npm run docker:restore" in runbook
     assert "krtour_map_restore" in runbook
     assert "krtour_map_dagster_restore" in runbook
-    assert "T-209e-c" in runbook
+    assert "docker-restore-verify.sh" in runbook
+    assert "docker-restore-swap.sh" in runbook
+    assert "T-209e" in runbook

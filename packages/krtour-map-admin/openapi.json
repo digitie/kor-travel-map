@@ -6602,8 +6602,54 @@
       },
       "RestoreSwapRequest": {
         "additionalProperties": false,
-        "description": "Manual hot-swap boundary request.",
+        "description": "Restore hot-swap command request.",
         "properties": {
+          "app_db": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "App Db"
+          },
+          "apply": {
+            "default": false,
+            "title": "Apply",
+            "type": "boolean"
+          },
+          "dagster_db": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dagster Db"
+          },
+          "env_file": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Env File"
+          },
+          "execute": {
+            "default": false,
+            "title": "Execute",
+            "type": "boolean"
+          },
           "note": {
             "anyOf": [
               {
@@ -6626,6 +6672,23 @@
               }
             ],
             "title": "Operator"
+          },
+          "rustfs_volume": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rustfs Volume"
+          },
+          "skip_verify": {
+            "default": false,
+            "title": "Skip Verify",
+            "type": "boolean"
           }
         },
         "title": "RestoreSwapRequest",
@@ -9449,7 +9512,7 @@
     },
     "/admin/restore/{backup_id}/swap": {
       "post": {
-        "description": "Return the manual hot-swap boundary for a restored backup.",
+        "description": "Plan or run the restore hot-swap env switch.",
         "operationId": "plan_restore_swap_admin_restore__backup_id__swap_post",
         "parameters": [
           {
