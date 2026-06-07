@@ -24,6 +24,18 @@ ADR 참조
 
 from __future__ import annotations
 
+from krtour.map.providers.airkorea import (
+    AIR_QUALITY_MARKER_COLOR,
+    AIR_QUALITY_STATION_CATEGORY,
+    AIRKOREA_NORMALIZATION_VERSION,
+    AIRKOREA_PROVIDER_NAME,
+    DATASET_KEY_AIR_QUALITY,
+    DATASET_KEY_STATIONS,
+    AirQualityMeasurementItem,
+    AirQualityStationItem,
+    air_quality_stations_to_bundles,
+    air_quality_to_weather_values,
+)
 from krtour.map.providers.khoa import (
     BEACH_CATEGORY,
     BEACH_MARKER_COLOR,
@@ -229,6 +241,17 @@ __all__ = [
     "DATASET_KEY_PARKING_LOTS",
     "PARKING_CATEGORY",
     "PARKING_MARKER_COLOR",
+    # airkorea 대기질 (T-RV-55d, ADR-034 보조 — weather kind + WeatherValue)
+    "AirQualityStationItem",
+    "AirQualityMeasurementItem",
+    "air_quality_stations_to_bundles",
+    "air_quality_to_weather_values",
+    "AIRKOREA_PROVIDER_NAME",
+    "DATASET_KEY_STATIONS",
+    "DATASET_KEY_AIR_QUALITY",
+    "AIR_QUALITY_STATION_CATEGORY",
+    "AIR_QUALITY_MARKER_COLOR",
+    "AIRKOREA_NORMALIZATION_VERSION",
     # khoa 해수욕장 (T-RV-55, ADR-034 보조)
     "OceanBeachInfoItem",
     "beaches_to_bundles",

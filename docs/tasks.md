@@ -405,8 +405,19 @@ enrichment(모듈 있음, 미wiring)**. dedup 인프라(scoring/queue/admin rout
     `OCEANS_BEACH_INFO_DEFAULT_SIDO_NAMES` 순회 페이지네이션)/asset/resource/definitions/ETL preview.
     MOIS dedup 없음(해수욕장 슬러그 없음). 게이트: ruff/mypy(map 82/dagster 13/admin 25)/lint-imports/
     unit 942(coverage 80.92%)/dagster 72 + khoa preview(01020300/beach) green. (해양공지는 후속.)
-  - [ ] **T-RV-55d airkorea 대기질** — **place feature 아님**(측정값, weather-like) → WeatherValue/
-    별도 DTO 패턴 검토 필요(feature-load와 다름). 조사+설계 선행.
+  - **T-RV-55d airkorea 대기질** — place feature 아님(측정값) → **사용자 결정(2026-06-08): 지금
+    구현, station=weather feature**. 기존 WeatherValue 패턴 재사용(`WeatherDomain.AIR_QUALITY` 기존
+    정의, `feature.feature_weather_values` 재사용). 2 PR:
+    - [x] **55d-1 (provider)**(2026-06-08) `providers/airkorea.py`: `air_quality_stations_to_bundles`
+      (측정소→**weather kind** FeatureBundle, category `99000000`=KMA 특보와 동일 비place placeholder,
+      detail 없음) + `AirQualityStationItem` Protocol; `air_quality_to_weather_values`(측정 row→오염
+      물질별 `WeatherValue`, domain `air_quality`/style `observed`, PM10/PM2_5/O3/NO2/SO2/CO/CAI,
+      grade→severity, KMA value 변환 미러) + `AirQualityMeasurementItem` Protocol. 결측 오염물질/
+      미매핑 측정소 skip. 게이트: ruff/mypy(map 85/dagster 13/admin 26)/lint-imports/unit+lint 965
+      (coverage 81%, airkorea.py 96%) green.
+    - [ ] **55d-2 (orchestration)** client `load_air_quality`(station bundle 적재→station_name→
+      feature_id 매핑→weather value 적재) + dagster fetcher/asset/resource/definitions + ETL preview
+      + 테스트.
   - [x] **T-RV-55e krairport 공항**(2026-06-08) — provider `python-krairport-api`
     `KrairportClient.airports(active=True)`(번들 정적 메타데이터, **keyless**)→`AirportMetadata`.
     신규 `providers/krairport.py`(`airports_to_bundles`, place, category `TRANSPORT_AIRPORT

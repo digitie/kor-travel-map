@@ -1,5 +1,21 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-08 Claude 작업 메모 — T-RV-55d-1 airkorea 대기질 provider 완료
+
+사용자 결정(대기질 지금 구현, 측정소=weather feature)에 따라 마지막 남은 항목 T-RV-55d 착수.
+2 PR 중 1번째(provider) 완료·머지 대기.
+
+- `providers/airkorea.py`: `air_quality_stations_to_bundles`(측정소→weather-kind FeatureBundle,
+  category 99000000) + `air_quality_to_weather_values`(측정 row→오염물질별 WeatherValue,
+  domain=air_quality/style=observed). 기존 WeatherValue 패턴(`feature.feature_weather_values`,
+  weather_repo) 재사용 — 신규 테이블 없음. unit+lint 965/coverage 81% green.
+
+**다음 한 작업**: **T-RV-55d-2 orchestration** — client `load_air_quality`(① station bundle을
+`load_feature_bundles`로 적재 → ② station_name→feature_id 매핑 → ③ `air_quality_to_weather_values`
+→ `load_weather_values`) + dagster fetcher(`AirKoreaClient.stations()`+`sido_measurements`/
+`station_measurements`)/asset/resource/definitions + ETL preview + 테스트. 완료 시 T-RV-04b 후속
+program(T-RV-50~55) 전체 종료.
+
 ## 2026-06-08 Claude 작업 메모 — T-RV-52c-1 enrichment 검토 큐 backend 완료
 
 축제 enrichment(visitkorea 2차 ↔ datagokr 1차) 수동 검토를 dedup-review처럼 만드는 작업
