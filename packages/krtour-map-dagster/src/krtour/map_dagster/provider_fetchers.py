@@ -17,6 +17,7 @@ from __future__ import annotations
 import importlib
 import pathlib
 from collections.abc import AsyncIterator, Iterator
+from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, cast
 
 from sqlalchemy import create_engine
@@ -37,6 +38,7 @@ __all__ = [
     "fetch_krheritage_events",
     "fetch_mois_license_records",
     "fetch_standard_museums",
+    "fetch_visitkorea_festival_events",
 ]
 
 
@@ -391,5 +393,38 @@ def fetch_standard_museums(
     client = datagokr.DataGoKrClient(api_key=api_key)
     try:
         yield from client.museum_art.iter_all()
+    finally:
+        client.close()
+
+
+def fetch_visitkorea_festival_events(
+    settings: KrtourMapSettings,
+) -> Iterator[Any]:
+    """VisitKorea TourAPI 축제(searchFestival) record를 visitkorea client로 stream한다.
+
+    ``settings.data_go_kr_service_key``로 ``KrTourApiClient(service_key=...)``를 열고
+    ``search_festival(event_start_date=<올해 1월 1일 KST>)``을 ``iter_pages``로
+    페이지네이션하며 ``TourItem``(krtour ``VisitKoreaFestivalItem`` Protocol 충족)을
+    yield한다. enrichment 2차 source라 1차(datagokr) 적재 후 매칭에 쓰인다(ADR-042).
+    visitkorea client는 sync이므로 sync generator. 소비 종료/close 시 ``close()``.
+    """
+    secret = settings.data_go_kr_service_key
+    if secret is None:
+        raise ProviderCredentialMissing(
+            "visitkorea festival events live fetch에는 "
+            "KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY (source DATA_GO_KR_SERVICE_KEY)가 "
+            "필요하다."
+        )
+    api_key = secret.get_secret_value()
+
+    visitkorea = cast(Any, importlib.import_module("visitkorea"))
+    client = visitkorea.KrTourApiClient(service_key=api_key)
+    kst = timezone(timedelta(hours=9))
+    start = date(datetime.now(kst).year, 1, 1)
+    try:
+        for page in client.iter_pages(
+            client.search_festival, start, num_of_rows=100
+        ):
+            yield from page.items
     finally:
         client.close()

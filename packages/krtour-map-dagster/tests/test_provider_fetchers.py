@@ -26,6 +26,7 @@ from krtour.map_dagster.provider_fetchers import (
     fetch_krheritage_events,
     fetch_mois_license_records,
     fetch_standard_museums,
+    fetch_visitkorea_festival_events,
 )
 from krtour.map_dagster.resources import (
     PROVIDER_RECORD_RESOURCE_DEFINITIONS,
@@ -659,6 +660,72 @@ def test_standard_museums_fetch_yields_and_closes(
     client = fake.instances[0]
     assert client.api_key == "service-key"
     assert client.closed is True
+
+
+class _FakeFestivalPage:
+    def __init__(self, items: list[object]) -> None:
+        self.items = tuple(items)
+
+
+class _FakeVisitKoreaClient:
+    instances: list[_FakeVisitKoreaClient] = []
+    items: list[object] = []
+
+    def __init__(self, *, service_key: str | None = None, **_kwargs: Any) -> None:
+        self.service_key = service_key
+        self.closed = False
+        self.search_calls: list[Any] = []
+        _FakeVisitKoreaClient.instances.append(self)
+
+    def search_festival(
+        self, event_start_date: Any, *, page_no: int = 1, num_of_rows: int = 10, **_kw: Any
+    ) -> _FakeFestivalPage:
+        self.search_calls.append(event_start_date)
+        return _FakeFestivalPage(type(self).items)
+
+    def iter_pages(
+        self, fetch_page: Any, *args: Any, page_no: int = 1, num_of_rows: int = 10, **kw: Any
+    ) -> Iterator[_FakeFestivalPage]:
+        yield fetch_page(*args, page_no=page_no, num_of_rows=num_of_rows, **kw)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _install_fake_visitkorea(
+    monkeypatch: pytest.MonkeyPatch, *, items: list[object]
+) -> type[_FakeVisitKoreaClient]:
+    _FakeVisitKoreaClient.instances = []
+    _FakeVisitKoreaClient.items = items
+    module = ModuleType("visitkorea")
+    module.__dict__["KrTourApiClient"] = _FakeVisitKoreaClient
+    monkeypatch.setitem(sys.modules, "visitkorea", module)
+    return _FakeVisitKoreaClient
+
+
+def test_visitkorea_festival_events_raises_when_credential_missing() -> None:
+    settings = KrtourMapSettings(data_go_kr_service_key=None)
+
+    generator = fetch_visitkorea_festival_events(settings)
+    with pytest.raises(ProviderCredentialMissing):
+        next(generator)
+
+
+def test_visitkorea_festival_events_fetch_yields_and_closes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _install_fake_visitkorea(monkeypatch, items=[object(), object()])
+    settings = KrtourMapSettings(data_go_kr_service_key=SecretStr("service-key"))
+
+    records = list(fetch_visitkorea_festival_events(settings))
+
+    assert len(records) == 2
+    client = fake.instances[0]
+    assert client.service_key == "service-key"
+    assert client.closed is True
+    # search_festival에 event_start_date(올해 1월 1일)를 넘긴다.
+    assert client.search_calls
+    assert client.search_calls[0].month == 1
 
 
 def test_krheritage_fetch_raises_when_credential_missing() -> None:

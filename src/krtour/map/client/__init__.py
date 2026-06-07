@@ -181,7 +181,16 @@ from krtour.map.offline_upload import (
 from krtour.map.providers.mois import DATASET_KEY_BULK as MOIS_DATASET_KEY_BULK
 from krtour.map.providers.mois import DATASET_KEY_HISTORY as MOIS_DATASET_KEY_HISTORY
 from krtour.map.providers.mois import PROVIDER_NAME as MOIS_PROVIDER_NAME
-from krtour.map.providers.visitkorea import FestivalEnrichment
+from krtour.map.providers.standard_data import (
+    DATASET_KEY_CULTURAL_FESTIVALS,
+    STANDARD_DATA_PROVIDER_NAME,
+)
+from krtour.map.providers.visitkorea import (
+    FestivalCandidate,
+    FestivalEnrichment,
+    ScoringFestivalMatcher,
+    festival_to_enrichment_links,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
@@ -195,6 +204,7 @@ if TYPE_CHECKING:
     from krtour.map.geocoding import AddressResolver, ReverseGeocoder
     from krtour.map.infra.scope_repo import SigunguByRadiusResolver
     from krtour.map.providers.mois import MoisLicensePlaceRecord
+    from krtour.map.providers.visitkorea import VisitKoreaFestivalItem
     from krtour.map.settings import KrtourMapSettings
 
 __all__ = [
@@ -316,6 +326,46 @@ class AsyncKrtourMapClient:
         """
         pairs = [(e.source_record, e.source_link) for e in enrichments]
         async with self._session_factory() as session, session.begin():
+            return await load_source_record_links(session, pairs)
+
+    async def load_festival_enrichment(
+        self,
+        items: Iterable[VisitKoreaFestivalItem],
+        *,
+        fetched_at: datetime,
+        name_threshold: float = 0.90,
+    ) -> EnrichmentLoadResult:
+        """visitkorea 축제 items를 적재된 datagokr 축제(1차)에 매칭해 enrichment 적재.
+
+        한 transaction에서 (1) 적재된 datagokr 축제(``data.go.kr-standard`` /
+        ``datagokr_cultural_festivals`` / kind ``event``)를 candidate로 읽고
+        (2) ``ScoringFestivalMatcher``(이름 Jaro-Winkler 유사도, ADR-016)로 각
+        visitkorea item을 매칭, (3) ``festival_to_enrichment_links``로 enrichment
+        link를 만들고 (4) ``load_source_record_links``로 적재한다(ADR-042). 매칭
+        실패 item은 제외. 1차 festival이 아직 없으면 candidate가 비어 enrichment도 0.
+        """
+        items_list = list(items)
+        async with self._session_factory() as session, session.begin():
+            candidate_rows = await list_dedup_refresh_features(
+                session,
+                DedupRefreshScope(
+                    provider=STANDARD_DATA_PROVIDER_NAME,
+                    dataset_key=DATASET_KEY_CULTURAL_FESTIVALS,
+                    kinds=("event",),
+                    limit=50_000,
+                ),
+            )
+            matcher = ScoringFestivalMatcher(
+                [
+                    FestivalCandidate(feature_id=row.feature_id, name=row.name)
+                    for row in candidate_rows
+                ],
+                name_threshold=name_threshold,
+            )
+            links = festival_to_enrichment_links(
+                items_list, matcher=matcher, fetched_at=fetched_at
+            )
+            pairs = [(link.source_record, link.source_link) for link in links]
             return await load_source_record_links(session, pairs)
 
     async def load_mois_license_features_bulk(

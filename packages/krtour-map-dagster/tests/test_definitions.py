@@ -37,6 +37,7 @@ def test_feature_load_asset_keys_registered() -> None:
         "feature_place_krforest_recreation_forests",
         "feature_place_krforest_arboretums",
         "feature_place_standard_museums",
+        "feature_event_visitkorea_enrichment",
     } <= asset_keys
 
 
@@ -88,6 +89,7 @@ _LIVE_PROVIDER_RESOURCE_KEYS = {
     "krforest_recreation_forests",
     "krforest_arboretums",
     "standard_museums",
+    "visitkorea_festival_events",
 }
 
 

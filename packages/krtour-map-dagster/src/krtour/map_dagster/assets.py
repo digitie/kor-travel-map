@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Final, cast
 
 from dagster import AssetExecutionContext, Backoff, RetryPolicy, asset
 from krtour.map.geocoding import ReverseGeocoder
+from krtour.map.infra.feature_repo import EnrichmentLoadResult
 from krtour.map.providers.knps import (
     KNPS_GEOMETRY_DATASETS,
     KNPS_PLACE_DATASETS,
@@ -491,6 +492,40 @@ async def feature_place_standard_museums(
     return await run_feature_place_standard_museums(context)
 
 
+async def run_feature_event_visitkorea_enrichment(
+    context: AssetExecutionContext,
+) -> EnrichmentLoadResult:
+    """VisitKorea 축제 record를 적재된 datagokr 축제에 매칭해 enrichment를 적재한다.
+
+    feature를 만들지 않는 2차 enrichment(ADR-042) — ``client.load_festival_enrichment``
+    가 한 transaction에서 candidate 로드 → 이름 매칭 → enrichment link 적재를 수행.
+    """
+    records = await _record_list(context, "visitkorea_festival_events")
+    fetched_at = await _fetched_at(context)
+    client = cast("AsyncKrtourMapClient", _resource_object(context, "krtour_map_client"))
+    result = await client.load_festival_enrichment(records, fetched_at=fetched_at)
+    context.add_output_metadata(
+        {
+            "enrichments_total": result.enrichments_total,
+            "source_records_inserted": result.source_records_inserted,
+            "source_links_inserted": result.source_links_inserted,
+            "source_links_updated": result.source_links_updated,
+        }
+    )
+    return result
+
+
+@asset(
+    group_name="features_event",
+    required_resource_keys=_COMMON_RESOURCE_KEYS | {"visitkorea_festival_events"},
+    retry_policy=FEATURE_LOAD_RETRY_POLICY,
+)
+async def feature_event_visitkorea_enrichment(
+    context: AssetExecutionContext,
+) -> EnrichmentLoadResult:
+    return await run_feature_event_visitkorea_enrichment(context)
+
+
 FEATURE_LOAD_ASSETS: Final = [
     feature_event_datagokr_cultural_festivals,
     feature_place_opinet_stations,
@@ -504,6 +539,7 @@ FEATURE_LOAD_ASSETS: Final = [
     feature_place_krforest_recreation_forests,
     feature_place_krforest_arboretums,
     feature_place_standard_museums,
+    feature_event_visitkorea_enrichment,
 ]
 """현재 구현 완료된 Feature provider 적재 asset 목록."""
 

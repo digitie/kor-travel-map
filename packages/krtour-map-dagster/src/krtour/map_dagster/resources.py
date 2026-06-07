@@ -34,6 +34,7 @@ from .provider_fetchers import (
     fetch_krheritage_events,
     fetch_mois_license_records,
     fetch_standard_museums,
+    fetch_visitkorea_festival_events,
 )
 
 __all__ = [
@@ -150,6 +151,14 @@ PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
         dataset_key="datagokr_museums",
         setting_names=("data_go_kr_service_key",),
         source_env_names=("DATA_GO_KR_SERVICE_KEY",),
+    ),
+    ProviderRecordResourceSpec(
+        resource_key="visitkorea_festival_events",
+        provider_package="python-visitkorea-api",
+        dataset_key="visitkorea_festival_events",
+        setting_names=("data_go_kr_service_key",),
+        source_env_names=("DATA_GO_KR_SERVICE_KEY",),
+        note="visitkorea는 datagokr 축제(1차) 적재 후 enrichment(2차)로 매칭/적재된다.",
     ),
 )
 """Feature load asset provider record resource별 env/package 매핑."""
@@ -379,6 +388,18 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["standard_museums"] = (
     build_provider_record_live_resource(
         _STANDARD_MUSEUMS_SPEC,
         fetch_standard_museums,
+    )
+)
+
+_VISITKOREA_FESTIVAL_EVENTS_SPEC: ProviderRecordResourceSpec = next(
+    spec
+    for spec in PROVIDER_RECORD_RESOURCE_SPECS
+    if spec.resource_key == "visitkorea_festival_events"
+)
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["visitkorea_festival_events"] = (
+    build_provider_record_live_resource(
+        _VISITKOREA_FESTIVAL_EVENTS_SPEC,
+        fetch_visitkorea_festival_events,
     )
 )
 
