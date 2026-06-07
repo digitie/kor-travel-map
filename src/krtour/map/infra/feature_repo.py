@@ -46,11 +46,13 @@ if TYPE_CHECKING:
     from krtour.map.dto import Feature, FeatureBundle, SourceLink, SourceRecord
 
 __all__ = [
+    "EnrichmentLoadResult",
     "FeatureLoadResult",
     "FeatureSearchPage",
     "FeatureSearchRow",
     "NearbyFeaturePage",
     "NearbyFeatureRow",
+    "load_source_record_links",
     "upsert_feature",
     "upsert_source_record",
     "upsert_source_link",
@@ -742,6 +744,59 @@ class FeatureLoadResult:
                 self.source_links_updated + other.source_links_updated
             ),
         )
+
+
+@dataclass(frozen=True)
+class EnrichmentLoadResult:
+    """enrichment(``SourceRecord`` + ``SourceLink``) 적재 카운트.
+
+    feature를 만들지 않는 2차 enrichment(visitkorea 등)용. ``load_bundles``의
+    ``FeatureLoadResult``와 달리 feature 카운트가 없다.
+    """
+
+    enrichments_total: int = 0
+    source_records_inserted: int = 0
+    source_links_inserted: int = 0
+    source_links_updated: int = 0
+
+    def merge(self, other: EnrichmentLoadResult) -> EnrichmentLoadResult:
+        return EnrichmentLoadResult(
+            enrichments_total=self.enrichments_total + other.enrichments_total,
+            source_records_inserted=(
+                self.source_records_inserted + other.source_records_inserted
+            ),
+            source_links_inserted=(
+                self.source_links_inserted + other.source_links_inserted
+            ),
+            source_links_updated=(
+                self.source_links_updated + other.source_links_updated
+            ),
+        )
+
+
+async def load_source_record_links(
+    session: AsyncSession,
+    pairs: Iterable[tuple[SourceRecord, SourceLink]],
+) -> EnrichmentLoadResult:
+    """``(SourceRecord, SourceLink)`` 쌍을 적재한다(enrichment 등 — feature 미생성).
+
+    각 쌍은 ``upsert_source_record`` → ``upsert_source_link`` 순. ``source_link``의
+    ``feature_id`` FK가 **이미 존재**해야 한다(1차 source가 먼저 적재돼 있어야 함).
+    commit/rollback은 호출자(`AsyncKrtourMapClient.load_enrichment_links`) 책임.
+    """
+    result = EnrichmentLoadResult()
+    for record, link in pairs:
+        record_inserted = await upsert_source_record(session, record)
+        link_inserted = await upsert_source_link(session, link)
+        result = result.merge(
+            EnrichmentLoadResult(
+                enrichments_total=1,
+                source_records_inserted=int(record_inserted),
+                source_links_inserted=int(link_inserted),
+                source_links_updated=int(not link_inserted),
+            )
+        )
+    return result
 
 
 @dataclass(frozen=True)

@@ -2,6 +2,24 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-07 (claude) — T-RV-52b-2 load_enrichment_links client/repo
+
+**작업**: 축제 enrichment 적재 인프라(2부). enrichment는 feature를 만들지 않고 기존 1차
+feature(datagokr 축제)에 `SourceRecord`+`SourceLink`(enrichment role)만 잇는다.
+
+- `infra/feature_repo.py`: `EnrichmentLoadResult`(counts+merge) + `load_source_record_links(
+  session, pairs: Iterable[tuple[SourceRecord, SourceLink]])` — 의존 방향(infra가 providers 미의존)
+  때문에 generic dto 쌍을 받아 `upsert_source_record`+`upsert_source_link` 순 적재.
+- `client`: `load_enrichment_links(enrichments: Iterable[FestivalEnrichment])` — providers의
+  `FestivalEnrichment`를 `(source_record, source_link)`로 unpack해 한 transaction(session.begin)으로
+  적재. `source_link.feature_id` FK(1차 적재 선행) 필요, 실패 시 rollback.
+- **검증**: ruff + mypy --strict(81 files) + lint-imports(4 kept) + 단위 3건(merge/insert·update
+  카운트/empty, mock upsert로 DB 없이).
+
+**다음(52b-3)**: `fetch_visitkorea_festival_events` fetcher + `feature_event_visitkorea_enrichment`
+asset(datagokr 축제 candidate 로드 → `ScoringFestivalMatcher` → `festival_to_enrichment_links` →
+`load_enrichment_links`).
+
 ## 2026-06-07 (antigravity) — TripMate 연계 REST API 분석 및 버전 prefix/추천 API 제안 문서화
 
 **작업**: TripMate와의 안정적 연계 및 버전 독립성을 위해 REST API를 정리하고 일관성·확장성·유지보수성 측면의 개선점을 문서화.
