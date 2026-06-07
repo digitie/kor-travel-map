@@ -16,6 +16,8 @@ from pydantic import SecretStr
 import krtour.map_dagster.provider_fetchers as provider_fetchers
 from krtour.map_dagster.provider_fetchers import (
     ProviderCredentialMissing,
+    fetch_airkorea_air_quality,
+    fetch_airkorea_stations,
     fetch_datagokr_cultural_festivals,
     fetch_khoa_beaches,
     fetch_knps_geometry_records,
@@ -882,6 +884,102 @@ def test_krairport_airports_fetch_closes_on_partial_consumption(
     generator.close()
 
     assert fake.instances[0].closed is True
+
+
+class _FakeAirKoreaClient:
+    instances: list[_FakeAirKoreaClient] = []
+    stations_total: int = 0
+    per_sido: list[object] = []
+
+    def __init__(self, *, service_key: str | None = None, **_kwargs: Any) -> None:
+        self.service_key = service_key
+        self.closed = False
+        self.station_calls: list[int] = []
+        self.sido_calls: list[str] = []
+        _FakeAirKoreaClient.instances.append(self)
+
+    def stations(
+        self, *, page_no: int = 1, num_of_rows: int = 100, **_kw: Any
+    ) -> list[object]:
+        self.station_calls.append(page_no)
+        start = (page_no - 1) * num_of_rows
+        end = min(start + num_of_rows, type(self).stations_total)
+        return [object() for _ in range(max(0, end - start))]
+
+    def sido_measurements(
+        self, sido_name: str, *, page_no: int = 1, num_of_rows: int = 100, **_kw: Any
+    ) -> list[object]:
+        self.sido_calls.append(sido_name)
+        # 시도별 단일 페이지(short)만 반환 → 페이지네이션 stop.
+        return list(type(self).per_sido) if page_no == 1 else []
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _install_fake_airkorea(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    stations_total: int = 0,
+    per_sido: list[object] | None = None,
+) -> type[_FakeAirKoreaClient]:
+    _FakeAirKoreaClient.instances = []
+    _FakeAirKoreaClient.stations_total = stations_total
+    _FakeAirKoreaClient.per_sido = per_sido or []
+    module = ModuleType("airkorea")
+    module.__dict__["AirKoreaClient"] = _FakeAirKoreaClient
+    monkeypatch.setitem(sys.modules, "airkorea", module)
+    return _FakeAirKoreaClient
+
+
+def test_airkorea_stations_raises_when_credential_missing() -> None:
+    settings = KrtourMapSettings(data_go_kr_service_key=None)
+
+    generator = fetch_airkorea_stations(settings)
+    with pytest.raises(ProviderCredentialMissing):
+        next(generator)
+
+
+def test_airkorea_stations_paginates_and_closes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # total 103 → page1=100(full)·page2=3(short) → 2 pages, short-page stop.
+    fake = _install_fake_airkorea(monkeypatch, stations_total=103)
+    settings = KrtourMapSettings(data_go_kr_service_key=SecretStr("svc"))
+
+    records = list(fetch_airkorea_stations(settings))
+
+    assert len(records) == 103
+    client = fake.instances[0]
+    assert client.service_key == "svc"
+    assert client.station_calls == [1, 2]
+    assert client.closed is True
+
+
+def test_airkorea_air_quality_raises_when_credential_missing() -> None:
+    settings = KrtourMapSettings(data_go_kr_service_key=None)
+
+    generator = fetch_airkorea_air_quality(settings)
+    with pytest.raises(ProviderCredentialMissing):
+        next(generator)
+
+
+def test_airkorea_air_quality_iterates_all_sido_and_closes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _install_fake_airkorea(
+        monkeypatch, per_sido=[object(), object()]
+    )
+    settings = KrtourMapSettings(data_go_kr_service_key=SecretStr("svc"))
+
+    records = list(fetch_airkorea_air_quality(settings))
+
+    # 17 시도 × 2 record = 34.
+    assert len(records) == 34
+    client = fake.instances[0]
+    assert len(client.sido_calls) == 17
+    assert client.sido_calls[0] == "서울"
+    assert client.closed is True
 
 
 def test_standard_tourist_attractions_raises_when_credential_missing() -> None:

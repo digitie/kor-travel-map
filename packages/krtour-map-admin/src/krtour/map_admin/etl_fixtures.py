@@ -28,6 +28,10 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Final
 
+from krtour.map.providers.airkorea import (
+    air_quality_stations_to_bundles,
+    air_quality_to_weather_values,
+)
 from krtour.map.providers.khoa import beaches_to_bundles
 from krtour.map.providers.kma import (
     short_forecast_to_weather_values,
@@ -875,6 +879,87 @@ async def _convert_airports(items: Sequence[Any]) -> list[Any]:
     return [b.model_dump(mode="json") for b in bundles]
 
 
+@dataclass(frozen=True)
+class _AirStation:
+    """`AirQualityStationItem` Protocol 준수 (provider `Station`)."""
+
+    station_name: str
+    addr: str | None
+    lat: float | None
+    lon: float | None
+
+
+def _airkorea_station_fixture() -> Sequence[_AirStation]:
+    return [
+        _AirStation(
+            station_name="중구",
+            addr="서울 중구 덕수궁길 15",
+            lat=37.5640,
+            lon=126.9750,
+        ),
+    ]
+
+
+async def _convert_airkorea_stations(items: Sequence[Any]) -> list[Any]:
+    bundles = await air_quality_stations_to_bundles(items, fetched_at=_now())
+    return [b.model_dump(mode="json") for b in bundles]
+
+
+@dataclass(frozen=True)
+class _AirMeasurement:
+    """`AirQualityMeasurementItem` Protocol 준수 (provider `AirQualityMeasurement`)."""
+
+    station_name: str
+    data_time: datetime | None
+    khai_value: int | None = None
+    khai_grade: int | None = None
+    pm10_value: float | None = None
+    pm10_grade: int | None = None
+    pm25_value: float | None = None
+    pm25_grade: int | None = None
+    o3_value: float | None = None
+    o3_grade: int | None = None
+    no2_value: float | None = None
+    no2_grade: int | None = None
+    so2_value: float | None = None
+    so2_grade: int | None = None
+    co_value: float | None = None
+    co_grade: int | None = None
+
+
+def _airkorea_air_quality_fixture() -> Sequence[_AirMeasurement]:
+    return [
+        _AirMeasurement(
+            station_name="중구",
+            data_time=_now(),
+            khai_value=75,
+            khai_grade=2,
+            pm10_value=45.0,
+            pm10_grade=2,
+            pm25_value=18.0,
+            pm25_grade=1,
+            o3_value=0.035,
+            o3_grade=2,
+        ),
+    ]
+
+
+async def _convert_airkorea_air_quality(items: Sequence[Any]) -> list[Any]:
+    # 측정값 변환에는 측정소→feature_id 매핑이 필요 — 데모용 station fixture로 구성.
+    stations: Sequence[Any] = _airkorea_station_fixture()
+    station_bundles = await air_quality_stations_to_bundles(
+        stations, fetched_at=_now()
+    )
+    station_feature_ids = {
+        bundle.source_record.source_entity_id: bundle.feature.feature_id
+        for bundle in station_bundles
+    }
+    values = air_quality_to_weather_values(
+        items, station_feature_ids=station_feature_ids
+    )
+    return [v.model_dump(mode="json") for v in values]
+
+
 # ── Registry ──────────────────────────────────────────────────────────
 
 
@@ -1039,6 +1124,22 @@ FIXTURE_REGISTRY: Final[tuple[EtlFixtureEntry, ...]] = (
         description="공항 메타데이터(번들 정적) → place Feature (ADR-034 보조). T-RV-55.",
         build_fixture=_airport_fixture,
         convert=_convert_airports,
+    ),
+    EtlFixtureEntry(
+        provider="python-airkorea-api",
+        dataset="airkorea_stations",
+        variant="FeatureBundle",
+        description="대기질 측정소 → weather kind Feature (ADR-034 보조). T-RV-55d.",
+        build_fixture=_airkorea_station_fixture,
+        convert=_convert_airkorea_stations,
+    ),
+    EtlFixtureEntry(
+        provider="python-airkorea-api",
+        dataset="airkorea_air_quality",
+        variant="WeatherValue",
+        description="대기질 측정값 → 오염물질별 WeatherValue (observed). T-RV-55d.",
+        build_fixture=_airkorea_air_quality_fixture,
+        convert=_convert_airkorea_air_quality,
     ),
 )
 

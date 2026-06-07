@@ -18,7 +18,7 @@ import importlib
 import pathlib
 from collections.abc import AsyncIterator, Iterator
 from datetime import date, datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Final, cast
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -28,6 +28,8 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ProviderCredentialMissing",
+    "fetch_airkorea_air_quality",
+    "fetch_airkorea_stations",
     "fetch_datagokr_cultural_festivals",
     "fetch_khoa_beaches",
     "fetch_knps_geometry_records",
@@ -492,6 +494,87 @@ def fetch_khoa_beaches(
                 page_no += 1
     finally:
         client.close()
+
+
+_AIRKOREA_SIDO_NAMES: Final[tuple[str, ...]] = (
+    "서울", "부산", "대구", "인천", "광주", "대전", "울산", "경기", "강원",
+    "충북", "충남", "전북", "전남", "경북", "경남", "제주", "세종",
+)
+"""airkorea ``sido_measurements`` 전국 순회용 17개 시도명(``SidoName`` 값)."""
+
+
+def _airkorea_client(settings: KrtourMapSettings, *, label: str) -> Any:
+    secret = settings.data_go_kr_service_key
+    if secret is None:
+        raise ProviderCredentialMissing(
+            f"airkorea {label} live fetch에는 "
+            "KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY (source DATA_GO_KR_SERVICE_KEY)가 "
+            "필요하다."
+        )
+    airkorea = cast(Any, importlib.import_module("airkorea"))
+    return airkorea.AirKoreaClient(service_key=secret.get_secret_value())
+
+
+def _airkorea_close(client: Any) -> None:
+    close = getattr(client, "close", None)
+    if callable(close):
+        close()
+
+
+def fetch_airkorea_stations(
+    settings: KrtourMapSettings,
+) -> Iterator[Any]:
+    """대기질 측정소 메타데이터를 airkorea public client로 stream한다.
+
+    ``settings.data_go_kr_service_key``로 ``AirKoreaClient(service_key=...)``를 열고
+    ``stations(page_no=N)``을 페이지네이션하며 ``Station``(krtour
+    ``AirQualityStationItem`` Protocol 충족, station_name/addr/lat/lon)을 yield.
+    측정소는 weather-kind feature가 되고 측정값은 별도 fetcher가 가져온다.
+    """
+    client = _airkorea_client(settings, label="stations")
+    num_of_rows = 100
+    page_no = 1
+    try:
+        while True:
+            items = list(client.stations(page_no=page_no, num_of_rows=num_of_rows))
+            if not items:
+                break
+            yield from items
+            if len(items) < num_of_rows:
+                break
+            page_no += 1
+    finally:
+        _airkorea_close(client)
+
+
+def fetch_airkorea_air_quality(
+    settings: KrtourMapSettings,
+) -> Iterator[Any]:
+    """대기질 실시간 측정값을 airkorea public client로 stream한다.
+
+    시도별(``_AIRKOREA_SIDO_NAMES``) ``sido_measurements(sido, page_no=N)``을
+    페이지네이션하며 ``AirQualityMeasurement``(krtour ``AirQualityMeasurementItem``
+    Protocol 충족)를 yield한다. 측정소명으로 station feature에 조인된다.
+    """
+    client = _airkorea_client(settings, label="air_quality")
+    num_of_rows = 100
+    try:
+        for sido in _AIRKOREA_SIDO_NAMES:
+            page_no = 1
+            while True:
+                items = list(
+                    client.sido_measurements(
+                        sido, page_no=page_no, num_of_rows=num_of_rows
+                    )
+                )
+                if not items:
+                    break
+                yield from items
+                if len(items) < num_of_rows:
+                    break
+                page_no += 1
+    finally:
+        _airkorea_close(client)
 
 
 def fetch_standard_parking_lots(

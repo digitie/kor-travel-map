@@ -31,6 +31,10 @@ from krtour.map.infra.feature_update_repo import (
     FeatureUpdateRequestPreview,
 )
 from krtour.map.infra.models import FeatureRow
+from krtour.map.providers.airkorea import (
+    air_quality_stations_to_bundles,
+    air_quality_to_weather_values,
+)
 from krtour.map.providers.standard_data import cultural_festivals_to_bundles
 
 if TYPE_CHECKING:
@@ -42,7 +46,8 @@ _KST = timezone(timedelta(hours=9))
 _TEMPLE_CAT = "01070100"
 
 _TRUNCATE_SQL = (
-    "TRUNCATE feature.features, provider_sync.source_records, "
+    "TRUNCATE feature.features, feature.feature_weather_values, "
+    "provider_sync.source_records, "
     "provider_sync.source_links, ops.dedup_review_queue, "
     "ops.enrichment_review_queue, "
     "ops.feature_update_requests, ops.import_jobs RESTART IDENTITY CASCADE"
@@ -367,3 +372,88 @@ async def test_resolve_enrichment_review_reject_keeps_no_link(
             )
         ).scalar_one()
     assert enrichment_links == 0
+
+
+# -- T-RV-55d: air quality (station weather feature + weather values) ----------
+
+
+@dataclass(frozen=True)
+class _AirStation:
+    """``AirQualityStationItem`` Protocol 만족."""
+
+    station_name: str
+    addr: str | None
+    lat: float | None
+    lon: float | None
+
+
+@dataclass(frozen=True)
+class _AirMeasurement:
+    """``AirQualityMeasurementItem`` Protocol 만족."""
+
+    station_name: str
+    data_time: datetime
+    khai_value: int | None = None
+    khai_grade: int | None = None
+    pm10_value: float | None = None
+    pm10_grade: int | None = None
+    pm25_value: float | None = None
+    pm25_grade: int | None = None
+    o3_value: float | None = None
+    o3_grade: int | None = None
+    no2_value: float | None = None
+    no2_grade: int | None = None
+    so2_value: float | None = None
+    so2_grade: int | None = None
+    co_value: float | None = None
+    co_grade: int | None = None
+
+
+async def test_load_air_quality_commits_station_and_values(
+    map_client: AsyncKrtourMapClient, migrated_engine: AsyncEngine
+) -> None:
+    fetched = datetime(2026, 6, 8, 9, 0, tzinfo=_KST)
+    station = _AirStation(
+        station_name="중구", addr="서울 중구", lat=37.5640, lon=126.9750
+    )
+    bundles = await air_quality_stations_to_bundles([station], fetched_at=fetched)
+    station_feature_ids = {
+        b.source_record.source_entity_id: b.feature.feature_id for b in bundles
+    }
+    measurement = _AirMeasurement(
+        station_name="중구",
+        data_time=datetime(2026, 6, 8, 8, 0, tzinfo=_KST),
+        pm10_value=45.0,
+        pm10_grade=2,
+        pm25_value=18.0,
+        pm25_grade=1,
+    )
+    values = air_quality_to_weather_values(
+        [measurement], station_feature_ids=station_feature_ids
+    )
+
+    result = await map_client.load_air_quality(bundles, values)
+    assert result.stations.features_inserted == 1
+    assert result.weather_values == 2  # PM10 + PM2_5
+
+    # 측정소는 weather feature로, 측정값은 feature_weather_values로 commit됐는지.
+    async with AsyncSession(migrated_engine) as session:
+        kind = (
+            await session.execute(
+                text(
+                    "SELECT kind FROM feature.features WHERE feature_id = :f"
+                ),
+                {"f": bundles[0].feature.feature_id},
+            )
+        ).scalar_one()
+        assert kind == "weather"
+        value_count = (
+            await session.execute(
+                text(
+                    "SELECT count(*) FROM feature.feature_weather_values "
+                    "WHERE feature_id = :f"
+                ),
+                {"f": bundles[0].feature.feature_id},
+            )
+        ).scalar_one()
+        assert value_count == 2

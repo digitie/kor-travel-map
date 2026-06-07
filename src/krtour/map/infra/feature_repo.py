@@ -46,6 +46,7 @@ if TYPE_CHECKING:
     from krtour.map.dto import Feature, FeatureBundle, SourceLink, SourceRecord
 
 __all__ = [
+    "AirQualityLoadResult",
     "EnrichmentLoadResult",
     "FeatureLoadResult",
     "FeatureSearchPage",
@@ -744,6 +745,27 @@ class FeatureLoadResult:
                 self.source_links_updated + other.source_links_updated
             ),
         )
+
+
+@dataclass(frozen=True)
+class AirQualityLoadResult:
+    """``client.load_air_quality`` 결과 — 측정소 feature + 측정값 적재 카운트(T-RV-55d).
+
+    - ``stations`` — 측정소 weather feature ``FeatureLoadResult``.
+    - ``weather_values`` — ``feature_weather_values``에 upsert된 air_quality 값 수.
+    """
+
+    stations: FeatureLoadResult
+    weather_values: int
+
+    def as_metadata(self) -> dict[str, object]:
+        """Dagster metadata로 바로 기록할 수 있는 summary."""
+        return {
+            "stations_total": self.stations.bundles_total,
+            "stations_features_inserted": self.stations.features_inserted,
+            "stations_features_updated": self.stations.features_updated,
+            "weather_values_loaded": self.weather_values,
+        }
 
 
 @dataclass(frozen=True)

@@ -7,7 +7,13 @@ from typing import TYPE_CHECKING, Any, Final, cast
 
 from dagster import AssetExecutionContext, Backoff, RetryPolicy, asset
 from krtour.map.geocoding import ReverseGeocoder
-from krtour.map.infra.feature_repo import EnrichmentLoadResult
+from krtour.map.infra.feature_repo import AirQualityLoadResult, EnrichmentLoadResult
+from krtour.map.providers.airkorea import (
+    AIRKOREA_PROVIDER_NAME,
+    DATASET_KEY_AIR_QUALITY,
+    air_quality_stations_to_bundles,
+    air_quality_to_weather_values,
+)
 from krtour.map.providers.khoa import (
     DATASET_KEY_BEACHES,
     KHOA_PROVIDER_NAME,
@@ -660,6 +666,56 @@ async def feature_event_visitkorea_enrichment(
     return await run_feature_event_visitkorea_enrichment(context)
 
 
+async def run_feature_weather_airkorea_air_quality(
+    context: AssetExecutionContext,
+) -> AirQualityLoadResult:
+    """대기질 측정소를 weather feature로, 측정값을 air_quality WeatherValue로 적재한다.
+
+    측정소(``airkorea_stations``)와 측정값(``airkorea_air_quality``) 두 record stream을
+    읽어 (1) 측정소를 weather-kind ``FeatureBundle``로 변환·매핑(station_name→feature_id),
+    (2) 측정값을 오염물질별 ``WeatherValue``로 변환, (3) ``client.load_air_quality``로
+    한 transaction에 적재한다(ADR-010 — 대기질은 place가 아니라 측정값).
+    """
+    stations = await _record_list(context, "airkorea_stations")
+    measurements = await _record_list(context, "airkorea_air_quality")
+    fetched_at = await _fetched_at(context)
+    bundles = await air_quality_stations_to_bundles(
+        stations,
+        fetched_at=fetched_at,
+        reverse_geocoder=_reverse_geocoder(context),
+    )
+    station_feature_ids = {
+        bundle.source_record.source_entity_id: bundle.feature.feature_id
+        for bundle in bundles
+    }
+    values = air_quality_to_weather_values(
+        measurements, station_feature_ids=station_feature_ids
+    )
+    client = cast("AsyncKrtourMapClient", _resource_object(context, "krtour_map_client"))
+    result = await client.load_air_quality(bundles, values)
+    context.add_output_metadata(
+        {
+            "provider": AIRKOREA_PROVIDER_NAME,
+            "dataset_key": DATASET_KEY_AIR_QUALITY,
+            **result.as_metadata(),
+        }
+    )
+    return result
+
+
+@asset(
+    group_name="features_weather",
+    required_resource_keys=(
+        _COMMON_RESOURCE_KEYS | {"airkorea_stations", "airkorea_air_quality"}
+    ),
+    retry_policy=FEATURE_LOAD_RETRY_POLICY,
+)
+async def feature_weather_airkorea_air_quality(
+    context: AssetExecutionContext,
+) -> AirQualityLoadResult:
+    return await run_feature_weather_airkorea_air_quality(context)
+
+
 FEATURE_LOAD_ASSETS: Final = [
     feature_event_datagokr_cultural_festivals,
     feature_place_opinet_stations,
@@ -677,6 +733,7 @@ FEATURE_LOAD_ASSETS: Final = [
     feature_place_standard_parking_lots,
     feature_place_khoa_beaches,
     feature_place_krairport_airports,
+    feature_weather_airkorea_air_quality,
     feature_event_visitkorea_enrichment,
 ]
 """현재 구현 완료된 Feature provider 적재 asset 목록."""
