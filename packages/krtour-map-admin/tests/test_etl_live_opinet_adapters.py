@@ -101,22 +101,23 @@ def test_adapt_station_maps_fields_and_coords() -> None:
     }
     a = _adapt_opinet_station(raw)
     assert a.uni_id == "A0019314"
-    assert a.station_name == "서울주유소"
-    assert a.brand_code == "SKE"
-    assert a.address == "서울특별시 중구 ..."  # NEW_ADR(road) 우선
+    assert a.name == "서울주유소"
+    assert a.brand == "SKE"
+    assert a.address_road == "서울특별시 중구 ..."  # NEW_ADR(road)
+    assert a.address_jibun == "서울특별시 중구 ... 지번"  # VAN_ADR(jibun)
     assert a.tel == "02-000-0000"
     assert a.lpg_yn == "N"
-    assert a.longitude is not None
-    assert a.latitude is not None
-    assert abs(float(a.longitude) - 127.0) < 0.001
-    assert abs(float(a.latitude) - 37.5) < 0.001
+    assert a.lon is not None
+    assert a.lat is not None
+    assert abs(a.lon - 127.0) < 0.001
+    assert abs(a.lat - 37.5) < 0.001
 
 
 @pytest.mark.unit
 def test_adapt_station_no_coords_when_missing() -> None:
     a = _adapt_opinet_station({"UNI_ID": "X", "OS_NM": "좌표없음주유소"})
-    assert a.longitude is None
-    assert a.latitude is None
+    assert a.lon is None
+    assert a.lat is None
 
 
 @pytest.mark.unit

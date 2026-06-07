@@ -2,6 +2,25 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-08 (claude) — T-RV-04b opinet-1 ADR-044 Protocol 재정렬
+
+**작업**: T-RV-04b 마지막 1건(opinet wiring) 착수. 사용자 결정 = bbox + POI-타깃 둘 다 지원(3 PR
+중 1번째 = ADR-044 재정렬). `iter_stations_in_bbox`가 yield하는 provider `Station`을 krtour
+Protocol이 그대로 만족하도록 정렬.
+
+- `OpinetStationItem` Protocol을 provider `Station` 필드명에 정렬: station_name→`name`,
+  brand_code→`brand`(BrandCode enum), 단일 address→`address_road`/`address_jibun`, Decimal
+  longitude/latitude→`lon`/`lat`(float). `tel`/`lpg_yn`은 `StationDetail`에만 있어 Protocol 필수에서
+  제외 → transform이 `getattr`로 보강(있을 때만, N+1 detail은 후속).
+- `stations_to_bundles`/`_station_item_to_bundle`(`_brand_code` 헬퍼 추가) + ETL fixture(`_Station`)
+  + `etl_live._OpinetStationAdapter`/`_adapt_opinet_station`(NEW_ADR→road, VAN_ADR→jibun, KATEC→
+  WGS84 float) + 단위(opinet_stations 16)·통합(dagster_feature_etl)·live adapter 테스트 갱신.
+- **검증**: ruff + mypy --strict(map 85/admin 26) + lint-imports + unit+lint 965(coverage 81%,
+  opinet.py 80%) + full 1168 + admin/dagster 303 green.
+
+**다음**: opinet-2 settings+bbox fetcher+bespoke asset → opinet-3 POI-타깃 모드. 완료 시 T-RV-04b
+완전 종료.
+
 ## 2026-06-08 (claude) — T-RV-55d-2 airkorea 대기질 orchestration (→ T-RV 후속 program 완료)
 
 **작업**: 55d-1 provider 위에 적재 orchestration(2 PR 중 2번째, 마지막). 측정소 weather feature +

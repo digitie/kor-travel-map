@@ -59,13 +59,14 @@ class _Festival:
 @dataclass(frozen=True)
 class _Station:
     uni_id: str
-    station_name: str
-    brand_code: str | None
-    address: str | None
-    longitude: Decimal | None
-    latitude: Decimal | None
-    tel: str | None
-    lpg_yn: str | bool | None
+    name: str
+    brand: object | None
+    address_road: str | None
+    address_jibun: str | None
+    lon: float | None
+    lat: float | None
+    tel: str | None = None
+    lpg_yn: str | bool | None = None
 
 
 @dataclass(frozen=True)
@@ -250,11 +251,12 @@ async def test_dagster_assets_validate_coordinates_and_load_to_postgis(
             opinet_stations=[
                 _Station(
                     uni_id="DAGSTER-OPINET-001",
-                    station_name="SK주유소 강남점",
-                    brand_code="SKE",
-                    address="서울특별시 강남구 테헤란로 100",
-                    longitude=Decimal("127.0376"),
-                    latitude=Decimal("37.4979"),
+                    name="SK주유소 강남점",
+                    brand="SKE",
+                    address_road="서울특별시 강남구 테헤란로 100",
+                    address_jibun=None,
+                    lon=127.0376,
+                    lat=37.4979,
                     tel="02-1234-5678",
                     lpg_yn="Y",
                 )

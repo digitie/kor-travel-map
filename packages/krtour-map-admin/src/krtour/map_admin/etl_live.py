@@ -661,14 +661,19 @@ _DEFAULT_STATION_FEATURE_ID: Final[str] = "f_global_p_opinet_demo"
 
 @dataclass(frozen=True)
 class _OpinetStationAdapter:
-    """`OpinetStationItem` Protocol 만족."""
+    """`OpinetStationItem` Protocol 만족 (provider `Station` 정렬, ADR-044).
+
+    ``tel``/``lpg_yn``은 detailById 응답에만 있어 Protocol 필수는 아니나, 변환이
+    ``getattr``로 보강하므로 그대로 노출한다.
+    """
 
     uni_id: str
-    station_name: str
-    brand_code: str | None
-    address: str | None
-    longitude: Decimal | None
-    latitude: Decimal | None
+    name: str
+    brand: object | None
+    address_road: str | None
+    address_jibun: str | None
+    lon: float | None
+    lat: float | None
     tel: str | None
     lpg_yn: str | None
 
@@ -743,15 +748,16 @@ def _adapt_opinet_station(raw: dict[str, Any]) -> _OpinetStationAdapter:
             lon_lat = _opinet_katec_to_wgs84(float(gis_x), float(gis_y))
         except (ValueError, TypeError):
             lon_lat = None
-    lon = lon_lat[0] if lon_lat else None
-    lat = lon_lat[1] if lon_lat else None
+    lon = float(lon_lat[0]) if lon_lat else None
+    lat = float(lon_lat[1]) if lon_lat else None
     return _OpinetStationAdapter(
         uni_id=str(raw.get("UNI_ID", "")),
-        station_name=_first_str(raw, "OS_NM") or "",
-        brand_code=_first_str(raw, "POLL_DIV_CO", "POLL_DIV_CD"),
-        address=_first_str(raw, "NEW_ADR", "VAN_ADR"),
-        longitude=lon,
-        latitude=lat,
+        name=_first_str(raw, "OS_NM") or "",
+        brand=_first_str(raw, "POLL_DIV_CO", "POLL_DIV_CD"),
+        address_road=_first_str(raw, "NEW_ADR"),
+        address_jibun=_first_str(raw, "VAN_ADR"),
+        lon=lon,
+        lat=lat,
         tel=_first_str(raw, "TEL"),
         lpg_yn=_first_str(raw, "LPG_YN"),
     )

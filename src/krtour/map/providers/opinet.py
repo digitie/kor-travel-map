@@ -127,42 +127,41 @@ OPINET_PRODUCT_NAME_KO: Final[dict[str, str]] = {
 
 @runtime_checkable
 class OpinetStationItem(Protocol):
-    """OpiNet 주유소 상세 row 1건의 입력 shape (place Feature 생성용).
+    """OpiNet 주유소 row 1건의 입력 shape (place Feature 생성용, ADR-044 정렬).
 
-    OpiNet API의 `getStationsByZone`/`getDetailById` 응답 typed model이 본
-    Protocol을 만족해야 한다. 좌표는 KATEC (EPSG:5181)에서 들어올 수도 있는데
-    호출자가 WGS84로 변환 후 전달해야 한다 (본 lib는 WGS84만 받음, ADR-012).
+    ``python-opinet-api``의 ``Station``(``iter_stations_in_bbox``/``search_stations_
+    around`` 반환) typed model 필드명에 정렬한다. ``Station``은 좌표를 KATEC에서
+    WGS84(``lon``/``lat`` float)로 이미 변환해 노출한다(본 lib는 WGS84만, ADR-012).
 
     Notes
     -----
-    실제 OpiNet API는 brand_code/lpg_yn 등 부가 필드 다수 — 본 Protocol은
-    필수 필드만 정의. 추가 필드는 호출자가 `payload`에 넣어 SourceRecord에서
-    보존.
+    - ``tel``/``lpg_yn``은 ``Station``엔 **없고** ``StationDetail``(단건 상세)에만
+      있다. 변환은 ``getattr``로 있을 때만 보강(N+1 detail 호출은 후속) — Protocol
+      필수에서 제외해 ``Station``이 그대로 만족하게 한다.
+    - ``brand``는 provider ``BrandCode`` enum(또는 None) — 변환에서 코드 문자열로
+      정규화해 보존.
     """
 
     uni_id: str
     """OpiNet 주유소 자연키 (예: ``"A0019186"``). source_entity_id 매핑."""
 
-    station_name: str
+    name: str
     """주유소 상호명. Feature.name 매핑."""
 
-    brand_code: str | None
-    """브랜드 코드 (예: ``"SKE"``=SK에너지, ``"GSC"``=GS칼텍스). payload 보존."""
+    brand: Any
+    """브랜드 (provider ``BrandCode`` enum | None). 코드 문자열로 정규화 보존."""
 
-    address: str | None
-    """전체 주소 (도로명 우선, 없으면 지번)."""
+    address_road: str | None
+    """도로명 주소 (우선)."""
 
-    longitude: Decimal | None
-    """경도 (WGS84). KATEC 입력 시 호출자가 변환."""
+    address_jibun: str | None
+    """지번 주소 (도로명 없을 때 fallback)."""
 
-    latitude: Decimal | None
+    lon: float
+    """경도 (WGS84, provider가 KATEC에서 변환)."""
+
+    lat: float
     """위도 (WGS84)."""
-
-    tel: str | None
-    """대표 전화번호."""
-
-    lpg_yn: str | bool | None
-    """LPG 판매 여부 (Y/N)."""
 
 
 @runtime_checkable
@@ -318,10 +317,18 @@ async def _station_item_to_bundle(
     PR#34 datagokr `cultural_festivals_to_bundles`의 9-step 패턴과 동일.
     """
 
-    # 1) Coordinate (한 쪽이라도 None이면 좌표 미상).
+    # 0) provider 필드 정규화 — 주소(도로명 우선), 브랜드 코드, tel/lpg(Detail 한정).
+    road_address = normalize_korean_text(item.address_road)
+    jibun_address = normalize_korean_text(item.address_jibun)
+    display_address = road_address or jibun_address
+    brand_code = _brand_code(item.brand)
+    tel = getattr(item, "tel", None)
+    lpg_yn = getattr(item, "lpg_yn", None)
+
+    # 1) Coordinate — Station은 lon/lat(WGS84 float)을 항상 노출.
     coord: Coordinate | None
-    if item.latitude is not None and item.longitude is not None:
-        coord = Coordinate(lon=item.longitude, lat=item.latitude)
+    if item.lon is not None and item.lat is not None:
+        coord = Coordinate(lon=Decimal(str(item.lon)), lat=Decimal(str(item.lat)))
     else:
         coord = None
 
@@ -340,7 +347,7 @@ async def _station_item_to_bundle(
             admin_address = geo.admin
             road_name_code = geo.road_name_code
     if bjd_code is None and address_resolver is not None:
-        resolved = await address_resolver(Address(road=normalize_korean_text(item.address)))
+        resolved = await address_resolver(Address(road=display_address))
         if resolved is not None and resolved.bjd_code is not None:
             bjd_code = resolved.bjd_code
             sigungu_code = resolved.sigungu_code or extract_sigungu_code(bjd_code)
@@ -348,10 +355,10 @@ async def _station_item_to_bundle(
             admin_address = resolved.admin
             road_name_code = resolved.road_name_code
 
-    # 3) Address — 한 column으로 들어오는 raw address를 road 슬롯에 둠.
+    # 3) Address — 도로명 주소를 road 슬롯에 둠.
     #    legal은 reverse_geocoder가 제공하지 않으면 None.
     address = Address(
-        road=normalize_korean_text(item.address),
+        road=road_address or jibun_address,
         admin=admin_address,
         bjd_code=bjd_code,
         sigungu_code=sigungu_code,
@@ -362,13 +369,14 @@ async def _station_item_to_bundle(
     # 4) Raw payload (canonical JSON 직렬화 가능).
     raw_data: dict[str, Any] = {
         "uni_id": item.uni_id,
-        "station_name": item.station_name,
-        "brand_code": item.brand_code,
-        "address": item.address,
-        "longitude": str(item.longitude) if item.longitude is not None else None,
-        "latitude": str(item.latitude) if item.latitude is not None else None,
-        "tel": item.tel,
-        "lpg_yn": _coerce_bool_str(item.lpg_yn),
+        "name": item.name,
+        "brand": brand_code,
+        "address_road": item.address_road,
+        "address_jibun": item.address_jibun,
+        "lon": str(item.lon) if item.lon is not None else None,
+        "lat": str(item.lat) if item.lat is not None else None,
+        "tel": tel,
+        "lpg_yn": _coerce_bool_str(lpg_yn),
     }
     payload_hash = make_payload_hash(raw_data)
 
@@ -391,12 +399,10 @@ async def _station_item_to_bundle(
     )
 
     # 7) Feature 본체 + PlaceDetail.
-    normalized_name = (
-        normalize_korean_text(item.station_name) or item.station_name
-    )
+    normalized_name = normalize_korean_text(item.name) or item.name
     phones: list[str] = []
-    if item.tel:
-        normalized_tel = normalize_phone_number(item.tel)
+    if tel:
+        normalized_tel = normalize_phone_number(tel)
         if normalized_tel:
             phones.append(normalized_tel)
 
@@ -414,8 +420,8 @@ async def _station_item_to_bundle(
             place_kind="gas_station",
             phones=phones,
             facility_info={
-                "brand_code": item.brand_code,
-                "lpg_yn": _coerce_bool_str(item.lpg_yn),
+                "brand_code": brand_code,
+                "lpg_yn": _coerce_bool_str(lpg_yn),
             },
         ),
     )
@@ -428,10 +434,10 @@ async def _station_item_to_bundle(
         source_entity_id=item.uni_id,
         raw_payload_hash=payload_hash,
         source_version=None,
-        raw_name=item.station_name,
-        raw_address=item.address,
-        raw_longitude=item.longitude,
-        raw_latitude=item.latitude,
+        raw_name=item.name,
+        raw_address=display_address,
+        raw_longitude=coord.lon if coord is not None else None,
+        raw_latitude=coord.lat if coord is not None else None,
         raw_data=raw_data,
         fetched_at=fetched_at,
         source_record_key=source_record_key,
@@ -452,6 +458,20 @@ async def _station_item_to_bundle(
         source_record=source_record,
         source_link=source_link,
     )
+
+
+def _brand_code(brand: Any) -> str | None:
+    """provider ``BrandCode`` enum(또는 str/None)을 코드 문자열로 정규화.
+
+    ``BrandCode``는 StrEnum이라 ``.value``가 코드(예: ``"SKE"``). 이미 str이면 그대로.
+    """
+    if brand is None:
+        return None
+    value = getattr(brand, "value", None)
+    if isinstance(value, str):
+        return value
+    text = str(brand).strip()
+    return text or None
 
 
 def _coerce_bool_str(value: str | bool | None) -> bool | None:
