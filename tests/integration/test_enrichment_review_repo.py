@@ -13,12 +13,14 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession
 
 from krtour.map.infra.admin_feature_repo import list_enrichment_reviews
 from krtour.map.infra.enrichment_review_repo import (
@@ -38,7 +40,7 @@ from krtour.map.providers.visitkorea import (
 )
 
 if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 pytestmark = pytest.mark.integration
 
@@ -306,3 +308,71 @@ async def test_fk_requires_existing_target_feature(
     with pytest.raises(IntegrityError):  # noqa: PT012 — savepoint 격리 필요
         async with migrated_session.begin_nested():
             await enqueue_review_candidate(migrated_session, candidate)
+
+
+_RACE_TRUNCATE = (
+    "TRUNCATE feature.features, provider_sync.source_records, "
+    "provider_sync.source_links, ops.enrichment_review_queue "
+    "RESTART IDENTITY CASCADE"
+)
+
+
+async def test_concurrent_decide_no_accepted_link_leak(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """동시 accept/reject 결정 시 FOR UPDATE 직렬화로 link 누수가 없어야 한다(#297).
+
+    같은 pending 행에 accept와 reject를 동시 실행하면 정확히 하나만 점유(changed=True)
+    하고, 최종 ENRICHMENT link 존재 여부가 최종 status와 정합해야 한다(reject가
+    이기면 link 0, accept가 이기면 link 1). 버그(점유 전 side-effect)면 reject가
+    status를 잡아도 accept가 link를 새겨 link=1·status=rejected 불일치가 난다.
+    """
+    try:
+        # 1) feature + pending 후보를 commit 적재.
+        async with _AsyncSession(migrated_engine) as session, session.begin():
+            session.add(_festival_feature())
+            await session.flush()
+            await enqueue_review_candidate(
+                session, _as_input(_review_candidate("서울 봄꽃"))
+            )
+        async with _AsyncSession(migrated_engine) as session:
+            review_key = (
+                await session.execute(
+                    text("SELECT review_key FROM ops.enrichment_review_queue LIMIT 1")
+                )
+            ).scalar_one()
+
+        # 2) accept / reject 동시 결정 (각 자기 transaction).
+        async def _decide(decision: str) -> object:
+            async with _AsyncSession(migrated_engine) as session, session.begin():
+                return await decide_enrichment_review(session, review_key, decision)
+
+        results = await asyncio.gather(
+            _decide("accepted"), _decide("rejected")
+        )
+        changed = [r for r in results if r.changed]
+        assert len(changed) == 1  # 정확히 하나만 점유.
+
+        # 3) 최종 status ↔ ENRICHMENT link 정합.
+        async with _AsyncSession(migrated_engine) as session:
+            status = (
+                await session.execute(
+                    text(
+                        "SELECT status FROM ops.enrichment_review_queue "
+                        "WHERE review_key = :k"
+                    ),
+                    {"k": review_key},
+                )
+            ).scalar_one()
+            link_count = (
+                await session.execute(
+                    text(
+                        "SELECT count(*) FROM provider_sync.source_links "
+                        "WHERE source_role = 'enrichment'"
+                    )
+                )
+            ).scalar_one()
+        assert (link_count == 1) == (status == "accepted")
+    finally:
+        async with _AsyncSession(migrated_engine) as session, session.begin():
+            await session.execute(text(_RACE_TRUNCATE))
