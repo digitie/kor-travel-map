@@ -35,6 +35,8 @@ _PERMISSIVE_CONFIG = cast(Any, Permissive)
 __all__ = [
     "CONSISTENCY_DEDUP_REFRESH_JOB_TAGS",
     "CONSISTENCY_DEDUP_REFRESH_SCHEDULES",
+    "DEFAULT_DEDUP_SCOPE_PAIRS",
+    "DEFAULT_DEDUP_SIBLING_SCOPES",
     "MAINTENANCE_RETRY_POLICY",
     "MAINTENANCE_JOBS",
     "MAINTENANCE_SCHEDULES",
@@ -102,6 +104,26 @@ _CONSISTENCY_CONFIG_SCHEMA: Final[dict[str, object]] = {
 }
 
 
+DEFAULT_DEDUP_SCOPE_PAIRS: Final[tuple[Mapping[str, object], ...]] = (
+    # KNPS 문화시설/사찰(cultural_resources) ↔ 국가유산(krheritage) — 동일 사찰·문화재가
+    # 양 provider에 중복 적재될 수 있다(ADR-034 6단계 메모). 실제 중복만 threshold(0.65)
+    # 이상으로 큐에 적재되므로 비중복은 노이즈가 되지 않는다.
+    {
+        "left": {"provider": "python-knps-api"},
+        "right": {"provider": "python-krheritage-api"},
+    },
+)
+"""op_config가 비었을 때 적용하는 기본 cross-provider dedup scope pair.
+
+신규 MOIS-sibling provider(krforest 휴양림/수목원·standard_data 박물관/미술관)는 해당
+feature-load PR에서 ``{left: {provider: <new>}, right: {provider: python-mois-api, ...}}``
+pair를 본 tuple에 추가한다(ADR-034 8/9단계).
+"""
+
+DEFAULT_DEDUP_SIBLING_SCOPES: Final[tuple[Mapping[str, object], ...]] = ()
+"""op_config가 비었을 때 적용하는 기본 within-provider sibling dedup scope (현재 없음)."""
+
+
 @op(
     name="refresh_dedup_candidates",
     required_resource_keys={"krtour_map_client"},
@@ -111,7 +133,12 @@ _CONSISTENCY_CONFIG_SCHEMA: Final[dict[str, object]] = {
 async def refresh_dedup_candidates_op(
     context: OpExecutionContext,
 ) -> dict[str, object]:
-    """DB 기준 provider/dataset scope의 dedup 후보 큐를 갱신한다."""
+    """DB 기준 provider/dataset scope의 dedup 후보 큐를 갱신한다.
+
+    ``pairs``/``sibling_scopes`` op_config가 둘 다 비어 있으면 ``DEFAULT_DEDUP_SCOPE_PAIRS``
+    /``DEFAULT_DEDUP_SIBLING_SCOPES``를 적용한다 — 운영자가 Dagster run config를 매번 넘기지
+    않아도 기본 cross-provider dedup이 돈다(신규 데이터소스는 기본 pair에 합류).
+    """
     client = cast("AsyncKrtourMapClient", _resource_object(context, "krtour_map_client"))
     config = cast(Mapping[str, object], context.op_config)
     include_auto_merge = bool(config.get("include_auto_merge", True))
@@ -119,8 +146,14 @@ async def refresh_dedup_candidates_op(
         config.get("limit"), default=DEDUP_REFRESH_DEFAULT_LIMIT
     )
 
+    pairs = _mapping_list(config.get("pairs"))
+    sibling_scopes = _mapping_list(config.get("sibling_scopes"))
+    if not pairs and not sibling_scopes:
+        pairs = list(DEFAULT_DEDUP_SCOPE_PAIRS)
+        sibling_scopes = list(DEFAULT_DEDUP_SIBLING_SCOPES)
+
     pair_results: list[DedupRefreshResult] = []
-    for pair in _mapping_list(config.get("pairs")):
+    for pair in pairs:
         left = _scope_from_config(pair.get("left"), default_limit=default_limit)
         right = _scope_from_config(pair.get("right"), default_limit=default_limit)
         pair_results.append(
@@ -130,7 +163,7 @@ async def refresh_dedup_candidates_op(
         )
 
     sibling_results: list[DedupRefreshResult] = []
-    for scope_config in _mapping_list(config.get("sibling_scopes")):
+    for scope_config in sibling_scopes:
         scope = _scope_from_config(scope_config, default_limit=default_limit)
         sibling_results.append(
             await client.refresh_sibling_dedup_candidates(

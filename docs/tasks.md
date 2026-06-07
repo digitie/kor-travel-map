@@ -288,9 +288,12 @@ enrichment(모듈 있음, 미wiring)**. dedup 인프라(scoring/queue/admin rout
     `master_feature_id` 미전달 → backend `select_master`(좌표→updated_at→provider 우선순위). 수동
     선택 시 feature A/B의 `feature_id` 전달. API/types 변경 없음(계약 기구현). type-check/eslint/
     next build green. 기존 e2e(render smoke) 유지.
-  - [ ] **T-RV-51b (backend) 기본 dedup scope baked**: maintenance.py에 기본 cross-provider/sibling
-    dedup scope를 설정값으로(현재 Dagster UI 동적만) → 후속 데이터소스가 바로 큐 적재. dagster 단위.
-    (krforest↔MOIS·museum↔MOIS scope는 해당 데이터소스 PR에서 추가.)
+  - [x] **T-RV-51b (backend) 기본 dedup scope baked**(2026-06-07): maintenance.py에
+    `DEFAULT_DEDUP_SCOPE_PAIRS`(현재 **knps↔krheritage** 1쌍 — 동일 사찰/문화재 중복) +
+    `DEFAULT_DEDUP_SIBLING_SCOPES`(현재 없음) 추가. `refresh_dedup_candidates_op`은 op_config의
+    pairs/sibling_scopes가 **둘 다 비면** 기본값을 적용 → Dagster run config 없이도 cross-provider
+    dedup 실행. canonical provider name 사용. dagster 단위(빈 config→기본 pair 적용) green.
+    **krforest↔MOIS·museum↔MOIS pair는 해당 데이터소스 PR에서 이 tuple에 append.**
 - [ ] **T-RV-52 visitkorea 축제 enrichment wiring**(points 1·5·5.1): datagokr 축제(1차)에
   visitkorea(2차) 이미지/overview/homepage enrichment.
   - [ ] **T-RV-52a (provider)** `python-visitkorea-api` 보강 PR — `search_festival()`→`TourItem`이

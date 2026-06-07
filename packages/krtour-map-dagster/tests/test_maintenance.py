@@ -12,6 +12,7 @@ from krtour.map.infra.dedup_refresh_repo import DedupRefreshScope
 from krtour.map.infra.dedup_repo import DedupQueueResult
 
 from krtour.map_dagster.maintenance import (
+    DEFAULT_DEDUP_SCOPE_PAIRS,
     MAINTENANCE_RETRY_POLICY,
     consistency_dedup_refresh_job,
 )
@@ -166,6 +167,26 @@ def test_consistency_dedup_refresh_job_executes_configured_scopes() -> None:
     consistency_output = result.output_for_node("run_consistency_check")
     assert consistency_output["severity_max"] == "WARN"
     assert consistency_output["dedup_queue_inserted"] == 2
+
+
+def test_refresh_dedup_uses_default_scopes_when_config_empty() -> None:
+    # pairs/sibling_scopes op_config 미지정 → DEFAULT_DEDUP_SCOPE_PAIRS 적용.
+    client = _Client()
+
+    result = consistency_dedup_refresh_job.execute_in_process(
+        resources={"krtour_map_client": client},
+    )
+
+    assert result.success
+    assert len(client.pairs) == len(DEFAULT_DEDUP_SCOPE_PAIRS)
+    # 기본 cross-provider pair: KNPS 문화시설/사찰 ↔ 국가유산(canonical provider name).
+    assert client.pairs[0][0].provider == "python-knps-api"
+    assert client.pairs[0][1].provider == "python-krheritage-api"
+    assert client.siblings == []
+
+    dedup_output = result.output_for_node("refresh_dedup_candidates")
+    assert dedup_output["pair_scope_count"] == len(DEFAULT_DEDUP_SCOPE_PAIRS)
+    assert dedup_output["sibling_scope_count"] == 0
 
 
 def test_consistency_dedup_refresh_ops_have_retry_policy() -> None:
