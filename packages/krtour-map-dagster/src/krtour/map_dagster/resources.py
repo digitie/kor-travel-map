@@ -34,6 +34,7 @@ from .provider_fetchers import (
     fetch_krheritage_events,
     fetch_mois_license_records,
     fetch_standard_museums,
+    fetch_standard_parking_lots,
     fetch_standard_tourist_attractions,
     fetch_visitkorea_festival_events,
 )
@@ -157,6 +158,13 @@ PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
         resource_key="standard_tourist_attractions",
         provider_package="python-datagokr-api",
         dataset_key="datagokr_tourist_attractions",
+        setting_names=("data_go_kr_service_key",),
+        source_env_names=("DATA_GO_KR_SERVICE_KEY",),
+    ),
+    ProviderRecordResourceSpec(
+        resource_key="standard_parking_lots",
+        provider_package="python-datagokr-api",
+        dataset_key="datagokr_parking_lots",
         setting_names=("data_go_kr_service_key",),
         source_env_names=("DATA_GO_KR_SERVICE_KEY",),
     ),
@@ -408,6 +416,18 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["standard_tourist_attractions"] = (
     build_provider_record_live_resource(
         _STANDARD_TOURIST_SPEC,
         fetch_standard_tourist_attractions,
+    )
+)
+
+_STANDARD_PARKING_SPEC: ProviderRecordResourceSpec = next(
+    spec
+    for spec in PROVIDER_RECORD_RESOURCE_SPECS
+    if spec.resource_key == "standard_parking_lots"
+)
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["standard_parking_lots"] = (
+    build_provider_record_live_resource(
+        _STANDARD_PARKING_SPEC,
+        fetch_standard_parking_lots,
     )
 )
 

@@ -65,10 +65,12 @@ from krtour.map.providers.opinet import (
 from krtour.map.providers.standard_data import (
     DATASET_KEY_CULTURAL_FESTIVALS,
     DATASET_KEY_MUSEUMS,
+    DATASET_KEY_PARKING_LOTS,
     DATASET_KEY_TOURIST_ATTRACTIONS,
     STANDARD_DATA_PROVIDER_NAME,
     cultural_festivals_to_bundles,
     museums_to_bundles,
+    parking_lots_to_bundles,
     tourist_attractions_to_bundles,
 )
 
@@ -524,6 +526,36 @@ async def feature_place_standard_tourist_attractions(
     return await run_feature_place_standard_tourist_attractions(context)
 
 
+async def run_feature_place_standard_parking_lots(
+    context: AssetExecutionContext,
+) -> DagsterFeatureLoadResult:
+    """전국주차장표준데이터 record를 place Feature로 적재한다(ADR-034 보조)."""
+    records = await _record_list(context, "standard_parking_lots")
+    fetched_at = await _fetched_at(context)
+    bundles = await parking_lots_to_bundles(
+        records,
+        fetched_at=fetched_at,
+        reverse_geocoder=_reverse_geocoder(context),
+    )
+    return await _load(
+        context,
+        provider=STANDARD_DATA_PROVIDER_NAME,
+        dataset_key=DATASET_KEY_PARKING_LOTS,
+        bundles=bundles,
+    )
+
+
+@asset(
+    group_name="features_place",
+    required_resource_keys=_COMMON_RESOURCE_KEYS | {"standard_parking_lots"},
+    retry_policy=FEATURE_LOAD_RETRY_POLICY,
+)
+async def feature_place_standard_parking_lots(
+    context: AssetExecutionContext,
+) -> DagsterFeatureLoadResult:
+    return await run_feature_place_standard_parking_lots(context)
+
+
 async def run_feature_event_visitkorea_enrichment(
     context: AssetExecutionContext,
 ) -> EnrichmentLoadResult:
@@ -572,6 +604,7 @@ FEATURE_LOAD_ASSETS: Final = [
     feature_place_krforest_arboretums,
     feature_place_standard_museums,
     feature_place_standard_tourist_attractions,
+    feature_place_standard_parking_lots,
     feature_event_visitkorea_enrichment,
 ]
 """현재 구현 완료된 Feature provider 적재 asset 목록."""

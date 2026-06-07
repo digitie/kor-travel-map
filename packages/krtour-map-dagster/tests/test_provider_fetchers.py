@@ -26,6 +26,7 @@ from krtour.map_dagster.provider_fetchers import (
     fetch_krheritage_events,
     fetch_mois_license_records,
     fetch_standard_museums,
+    fetch_standard_parking_lots,
     fetch_standard_tourist_attractions,
     fetch_visitkorea_festival_events,
 )
@@ -72,6 +73,7 @@ class _FakeDataGoKrClient:
         self.festival = _FakeFestivalService([object(), object()])
         self.museum_art = _FakeMuseumArtService([object(), object(), object()])
         self.tourist_attraction = _FakeMuseumArtService([object(), object()])
+        self.parking = _FakeMuseumArtService([object(), object(), object(), object()])
         _FakeDataGoKrClient.instances.append(self)
 
     def close(self) -> None:
@@ -747,6 +749,26 @@ def test_standard_tourist_attractions_fetch_yields_and_closes(
     records = list(fetch_standard_tourist_attractions(settings))
 
     assert len(records) == 2
+    assert fake.instances[0].closed is True
+
+
+def test_standard_parking_lots_raises_when_credential_missing() -> None:
+    settings = KrtourMapSettings(data_go_kr_service_key=None)
+
+    generator = fetch_standard_parking_lots(settings)
+    with pytest.raises(ProviderCredentialMissing):
+        next(generator)
+
+
+def test_standard_parking_lots_fetch_yields_and_closes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _install_fake_datagokr(monkeypatch)
+    settings = KrtourMapSettings(data_go_kr_service_key=SecretStr("service-key"))
+
+    records = list(fetch_standard_parking_lots(settings))
+
+    assert len(records) == 4
     assert fake.instances[0].closed is True
 
 

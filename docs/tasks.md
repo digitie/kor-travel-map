@@ -369,8 +369,12 @@ enrichment(모듈 있음, 미wiring)**. dedup 인프라(scoring/queue/admin rout
     `tourist_attraction`) + `PublicTouristAttractionItem` Protocol. fetcher/asset/resource/definitions
     + tourist↔MOIS dedup(left datagokr_tourist_attractions ↔ MOIS `tourism_businesses` 01000000) +
     ETL preview 등록. 게이트: ruff/mypy(3 pkg)/lint-imports/unit 936+coverage 80.74%/dagster 68 green.
-  - [ ] **T-RV-55b 주차장(parking)** — datagokr `parking.iter_all()`→`PublicParkingLot`(prkplce_no
-    stable id), category `TRANSPORT_PARKING 06010000`. tourist와 동일 4-step(공용 helper 재사용).
+  - [x] **T-RV-55b 주차장(parking)**(2026-06-08) — datagokr `parking.iter_all()`→`PublicParkingLot`.
+    `parking_lots_to_bundles`(place, category `TRANSPORT_PARKING 06010000`, place_kind `parking`,
+    공용 `_standard_place_to_bundle` 재사용) + `PublicParkingLotItem` Protocol. 안정키 `prkplce_no`
+    (없으면 instt_code→name::road). fetcher/asset/resource/definitions + ETL preview. **MOIS dedup
+    없음**(MOIS PROMOTED에 주차장 슬러그 없음). 게이트: ruff/mypy(3pkg)/lint-imports/unit 939
+    (coverage 80.81%)/dagster 70 green + parking preview(cat 06010000) 확인.
   - [ ] **T-RV-55c khoa 해수욕장 + 해양공지** — provider `python-khoa-api` 조사 선행(place + notice).
   - [ ] **T-RV-55d airkorea 대기질** — **place feature 아님**(측정값, weather-like) → WeatherValue/
     별도 DTO 패턴 검토 필요(feature-load와 다름). 조사+설계 선행.
