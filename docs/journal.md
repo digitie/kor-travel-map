@@ -2,6 +2,30 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-08 (claude) — T-RV-52c-1 축제 enrichment 검토 큐 backend (matcher 밴드 + infra)
+
+**작업**: visitkorea↔datagokr 축제 enrichment 매칭을 dedup-review처럼 **수동 검토**하기 위한
+backend 도메인/infra slice(3 PR 중 1번째). 자동 확정 임계(0.90) 미만·검토 하한(0.70) 이상의
+**모호한 밴드**를 큐로 영속화.
+
+- **matcher**(providers/visitkorea): `ScoringFestivalMatcher.best_match`(임계 비의존 최고점)
+  추출로 `match()` 리팩터 + `festival_to_review_candidates`(auto/review/drop 3분류,
+  `FestivalMatchPlan`/`FestivalReviewCandidate`). 자동 적재 동작은 기존과 동치(임계만 명시).
+- **infra**: migration `0019_enrichment_review_queue`(`ops.enrichment_review_queue`, UNIQUE
+  (target_feature_id, source_provider, source_dataset_key, source_entity_id), JSONB source_record)
+  + `EnrichmentReviewQueueRow`(models) + `infra/enrichment_review_repo.py`(enqueue/pending/decide).
+  accept는 보관된 `SourceRecord` 복원 → ENRICHMENT `SourceLink` 적재. **ADR-020**: infra가
+  providers를 import하지 않도록 enqueue 입력은 generic `EnrichmentReviewInput`(SourceRecord dto만),
+  client가 `FestivalReviewCandidate`→input 매핑(`load_source_record_links` 패턴).
+- **client**: `refresh_festival_enrichment_reviews`(한 transaction: candidate 로드→밴드 분류→auto
+  적재+review 큐 upsert) + `list_pending_enrichment_reviews` + `resolve_enrichment_review`.
+- **검증**: ruff + mypy --strict(map 84/dagster 13/admin 25) + lint-imports + unit+lint 959
+  (coverage 81%, visitkorea 97%) + integration(enrichment_review_repo 7 + client_orchestration 6)
+  + full 1160 green.
+
+**다음**: 52c-2 admin API(`/admin/enrichment-review` list + decide) → 52c-3 frontend(dedup-review와
+유사 페이지 + OpenAPI 재생성 + Playwright). (55d airkorea 설계 결정은 사용자 대기.)
+
 ## 2026-06-08 (claude) — T-RV-55e krairport 공항 풀스택 (신규 provider 모듈, keyless)
 
 **작업**: ADR-034 보조 dataset 4번째 — 공항 메타데이터(python-krairport-api). 신규

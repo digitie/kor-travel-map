@@ -72,6 +72,18 @@ from krtour.map.infra.dedup_repo import (
     enqueue_dedup_candidates,
     pending_dedup_reviews,
 )
+from krtour.map.infra.enrichment_review_repo import (
+    EnrichmentDecisionResult,
+    EnrichmentQueueResult,
+    EnrichmentReviewInput,
+    enqueue_review_candidates,
+)
+from krtour.map.infra.enrichment_review_repo import (
+    decide_enrichment_review as repo_decide_enrichment_review,
+)
+from krtour.map.infra.enrichment_review_repo import (
+    pending_enrichment_reviews as repo_pending_enrichment_reviews,
+)
 from krtour.map.infra.feature_repo import (
     EnrichmentLoadResult,
     FeatureLoadResult,
@@ -186,10 +198,13 @@ from krtour.map.providers.standard_data import (
     STANDARD_DATA_PROVIDER_NAME,
 )
 from krtour.map.providers.visitkorea import (
+    DEFAULT_ACCEPT_THRESHOLD,
+    DEFAULT_REVIEW_FLOOR,
     FestivalCandidate,
     FestivalEnrichment,
     ScoringFestivalMatcher,
     festival_to_enrichment_links,
+    festival_to_review_candidates,
 )
 
 if TYPE_CHECKING:
@@ -212,6 +227,7 @@ __all__ = [
     "BatchDagRunResult",
     "DedupRefreshResult",
     "DedupSyncResult",
+    "FestivalEnrichmentReviewRefreshResult",
     "OfflineUploadColumnMapping",
     "OfflineUploadLoadResult",
     "OfflineUploadValidationResult",
@@ -259,6 +275,32 @@ class DedupRefreshResult:
             "queue_skipped": self.queue.skipped,
         }
         return metadata
+
+
+@dataclass(frozen=True)
+class FestivalEnrichmentReviewRefreshResult:
+    """``refresh_festival_enrichment_reviews`` 결과 — 자동 적재 + 검토 큐 적재.
+
+    - ``auto`` — ≥ accept_threshold라 즉시 적재된 enrichment 카운트.
+    - ``review_queue`` — review-band를 ``ops.enrichment_review_queue``에 upsert한
+      카운트(inserted/updated/skipped).
+    """
+
+    auto: EnrichmentLoadResult
+    review_queue: EnrichmentQueueResult
+
+    def as_metadata(self) -> dict[str, object]:
+        """Dagster metadata로 바로 기록할 수 있는 summary."""
+        return {
+            "auto_enrichments_total": self.auto.enrichments_total,
+            "auto_source_records_inserted": self.auto.source_records_inserted,
+            "auto_source_links_inserted": self.auto.source_links_inserted,
+            "auto_source_links_updated": self.auto.source_links_updated,
+            "review_candidates_total": self.review_queue.candidates_total,
+            "review_inserted": self.review_queue.inserted,
+            "review_updated": self.review_queue.updated,
+            "review_skipped": self.review_queue.skipped,
+        }
 
 
 class AsyncKrtourMapClient:
@@ -367,6 +409,97 @@ class AsyncKrtourMapClient:
             )
             pairs = [(link.source_record, link.source_link) for link in links]
             return await load_source_record_links(session, pairs)
+
+    async def refresh_festival_enrichment_reviews(
+        self,
+        items: Iterable[VisitKoreaFestivalItem],
+        *,
+        fetched_at: datetime,
+        accept_threshold: float = DEFAULT_ACCEPT_THRESHOLD,
+        review_floor: float = DEFAULT_REVIEW_FLOOR,
+    ) -> FestivalEnrichmentReviewRefreshResult:
+        """visitkorea 축제 items를 점수 밴드로 자동 적재 + 수동 검토 큐로 분류한다(T-RV-52c).
+
+        한 transaction에서 (1) 적재된 datagokr 축제(1차)를 candidate로 읽고 (2)
+        ``festival_to_review_candidates``로 ``accept_threshold`` 이상은 즉시 enrichment
+        적재, ``[review_floor, accept_threshold)`` 모호 밴드는 ``ops.enrichment_review_queue``
+        로 upsert한다. ``review_floor`` 미만은 버린다. 자동 적재 동작은 기존
+        ``load_festival_enrichment``과 동치(임계값만 명시적). commit/rollback 소유.
+        """
+        items_list = list(items)
+        async with self._session_factory() as session, session.begin():
+            candidate_rows = await list_dedup_refresh_features(
+                session,
+                DedupRefreshScope(
+                    provider=STANDARD_DATA_PROVIDER_NAME,
+                    dataset_key=DATASET_KEY_CULTURAL_FESTIVALS,
+                    kinds=("event",),
+                    limit=50_000,
+                ),
+            )
+            matcher = ScoringFestivalMatcher(
+                [
+                    FestivalCandidate(feature_id=row.feature_id, name=row.name)
+                    for row in candidate_rows
+                ],
+            )
+            plan = festival_to_review_candidates(
+                items_list,
+                matcher=matcher,
+                fetched_at=fetched_at,
+                accept_threshold=accept_threshold,
+                review_floor=review_floor,
+            )
+            auto = await load_source_record_links(
+                session,
+                [(e.source_record, e.source_link) for e in plan.auto],
+            )
+            review_inputs = [
+                EnrichmentReviewInput(
+                    target_feature_id=candidate.target_feature_id,
+                    target_name=candidate.target_name,
+                    source_name=candidate.source_name,
+                    name_score=candidate.name_score,
+                    source_record=candidate.enrichment.source_record,
+                )
+                for candidate in plan.review
+            ]
+            review_queue = await enqueue_review_candidates(session, review_inputs)
+            return FestivalEnrichmentReviewRefreshResult(
+                auto=auto, review_queue=review_queue
+            )
+
+    async def list_pending_enrichment_reviews(
+        self, *, limit: int = 100
+    ) -> list[dict[str, object]]:
+        """검토 대기(``status='pending'``) 축제 enrichment 후보 list (name_score 내림차순).
+
+        admin UI/디버깅용 raw row(점수 float 변환). DTO 매핑은 상위 책임.
+        """
+        async with self._session_factory() as session:
+            return await repo_pending_enrichment_reviews(session, limit=limit)
+
+    async def resolve_enrichment_review(
+        self,
+        review_key: str,
+        decision: str,
+        *,
+        reviewed_by: str | None = None,
+        reason: str | None = None,
+    ) -> EnrichmentDecisionResult:
+        """축제 enrichment 검토 행에 운영자 결정을 한 transaction으로 반영한다(T-RV-52c).
+
+        ``decision='accepted'``이면 보관된 ``SourceRecord``를 복원해 ENRICHMENT link과
+        함께 적재한다. reject/ignore는 상태만 갱신. 이미 검토된 행은 ``changed=False``.
+        """
+        async with self._session_factory() as session, session.begin():
+            return await repo_decide_enrichment_review(
+                session,
+                review_key,
+                decision,
+                reviewed_by=reviewed_by,
+                reason=reason,
+            )
 
     async def load_mois_license_features_bulk(
         self,

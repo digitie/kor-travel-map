@@ -44,6 +44,7 @@ _TEMPLE_CAT = "01070100"
 _TRUNCATE_SQL = (
     "TRUNCATE feature.features, provider_sync.source_records, "
     "provider_sync.source_links, ops.dedup_review_queue, "
+    "ops.enrichment_review_queue, "
     "ops.feature_update_requests, ops.import_jobs RESTART IDENTITY CASCADE"
 )
 
@@ -273,3 +274,96 @@ async def test_feature_update_request_client_lifecycle(
     assert tuple(item.request_id for item in cancelled_page.items) == (
         request.request_id,
     )
+
+
+# -- T-RV-52c: festival enrichment review --------------------------------------
+
+
+@dataclass(frozen=True)
+class _VkItem:
+    """``VisitKoreaFestivalItem`` Protocol 만족 (enrichment 입력)."""
+
+    content_id: str
+    title: str | None
+    overview: str | None = None
+    first_image: str | None = None
+    first_image2: str | None = None
+    addr1: str | None = "서울특별시 영등포구"
+    area_code: str | None = "1"
+    sigungu_code: str | None = "19"
+    event_start_date: str | None = "20260405"
+    event_end_date: str | None = "20260412"
+    tel: str | None = None
+    homepage: str | None = None
+    modified_time: str | None = "20260301120000"
+
+
+async def _seed_primary_festival(map_client: AsyncKrtourMapClient) -> None:
+    """datagokr 1차 축제(event) feature를 commit 적재 (matcher 후보 대상)."""
+    bundles = await cultural_festivals_to_bundles(
+        [_FEST], fetched_at=datetime(2026, 3, 1, 9, 0, tzinfo=_KST)
+    )
+    await map_client.load_feature_bundles(bundles)
+
+
+async def test_refresh_festival_enrichment_reviews_classifies(
+    map_client: AsyncKrtourMapClient,
+) -> None:
+    await _seed_primary_festival(map_client)
+    fetched = datetime(2026, 5, 28, 10, 0, tzinfo=_KST)
+
+    # 부분 일치 → review-band, 완전 일치 → auto. 밴드를 넓혀 분류를 강제.
+    items = [
+        _VkItem(content_id="vk-review", title="서울 봄꽃"),
+        _VkItem(content_id="vk-auto", title="서울 봄꽃 축제"),
+    ]
+    result = await map_client.refresh_festival_enrichment_reviews(
+        items, fetched_at=fetched, accept_threshold=0.99, review_floor=0.5
+    )
+    assert result.auto.source_links_inserted == 1
+    assert result.review_queue.inserted == 1
+
+    pending = await map_client.list_pending_enrichment_reviews()
+    assert len(pending) == 1
+    assert pending[0]["source_name"] == "서울 봄꽃"
+    review_key = pending[0]["review_key"]
+
+    decision = await map_client.resolve_enrichment_review(
+        review_key, "accepted", reviewed_by="tester"
+    )
+    assert decision.changed is True
+    assert decision.applied is True
+
+    # accept 후 더 이상 pending 없음.
+    assert await map_client.list_pending_enrichment_reviews() == []
+
+
+async def test_resolve_enrichment_review_reject_keeps_no_link(
+    map_client: AsyncKrtourMapClient, migrated_engine: AsyncEngine
+) -> None:
+    await _seed_primary_festival(map_client)
+    fetched = datetime(2026, 5, 28, 10, 0, tzinfo=_KST)
+    await map_client.refresh_festival_enrichment_reviews(
+        [_VkItem(content_id="vk-review", title="서울 봄꽃")],
+        fetched_at=fetched,
+        accept_threshold=0.99,
+        review_floor=0.5,
+    )
+    pending = await map_client.list_pending_enrichment_reviews()
+    review_key = pending[0]["review_key"]
+
+    decision = await map_client.resolve_enrichment_review(review_key, "rejected")
+    assert decision.changed is True
+    assert decision.applied is False
+
+    # reject는 enrichment link을 만들지 않는다.
+    async with AsyncSession(migrated_engine) as session:
+        enrichment_links = (
+            await session.execute(
+                text(
+                    "SELECT count(*) FROM provider_sync.source_links "
+                    "WHERE source_role = 'enrichment'"
+                )
+            )
+        ).scalar_one()
+    assert enrichment_links == 0

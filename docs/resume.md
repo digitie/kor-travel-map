@@ -1,5 +1,23 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-08 Claude 작업 메모 — T-RV-52c-1 enrichment 검토 큐 backend 완료
+
+축제 enrichment(visitkorea 2차 ↔ datagokr 1차) 수동 검토를 dedup-review처럼 만드는 작업
+(T-RV-52c)을 3 PR로 분해해 **1번째(backend 도메인/infra)를 완료·머지 대기**.
+
+- 점수 밴드 분류(`festival_to_review_candidates`: auto ≥0.90 / review [0.70,0.90) / drop) +
+  `ops.enrichment_review_queue`(migration 0019) + `infra/enrichment_review_repo.py`(enqueue/
+  pending/decide, accept→ENRICHMENT link) + client 3메서드(`refresh_festival_enrichment_reviews`/
+  `list_pending_enrichment_reviews`/`resolve_enrichment_review`). 게이트 전수 green(unit+lint 959
+  coverage 81%, integration 13건).
+
+**다음 한 작업**: **T-RV-52c-2 admin API** — `GET /admin/enrichment-review`(pending list) +
+`PATCH /admin/enrichment-review/{review_key}`(accept/reject/ignore). dedup_review router를
+미러(admin_feature_repo 조회 + Pydantic 모델 + OpenAPI). 그 다음 52c-3 frontend.
+
+**병행 대기**: **T-RV-55d airkorea 대기질**은 place feature가 아니라(측정값) **설계 결정 선행**
+필요 — 사용자 결정 대기(WeatherValue 패턴 vs 별도 DTO vs 제외).
+
 ## 2026-06-08 Claude 작업 메모 — T-RV-55 place 보조 dataset 5종 완료(55a~55e)
 
 T-RV-55 ADR-034 보조 dataset 중 **place feature 5종 전부 풀스택 완료**:
