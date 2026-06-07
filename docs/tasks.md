@@ -323,9 +323,11 @@ enrichment(모듈 있음, 미wiring)**. dedup 인프라(scoring/queue/admin rout
     `feature_place_krforest_arboretums` asset + resource spec/guard→live override + definitions 등록.
     credential = `data_go_kr_service_key`. dagster 단위(fake ForestClient 3 + asset 등록 + live key)
     green(62 passed). arboretum SHP는 provider geo extra 의존 — 실 fetch 검증 T-212e.
-  - [ ] **T-RV-53c (dedup)** krforest↔MOIS sibling dedup scope: 휴양림 ≅ MOIS
-    `condo_resorts`/`tourist_accommodations`, 수목원 ≅ MOIS `botanical_gardens`. scope pair 설정 +
-    큐 적재 검증(SOURCE_PRIORITY krforest=45 이미 placeholder).
+  - [x] **T-RV-53c (dedup)**(2026-06-07) `DEFAULT_DEDUP_SCOPE_PAIRS`에 자연휴양림↔MOIS pair 추가:
+    left `{krforest, krforest_recreation_forests}` ↔ right `{mois, categories 03010100(관광숙박)/
+    03020100(전문리조트)/03020200(종합리조트)}`로 MOIS side를 LODGING 카테고리로 좁혀 대규모 비교 회피.
+    **수목원(arboretum)은 MOIS PROMOTED 슬러그에 식물원/수목원이 없어 dedup 후보가 없으므로 pair
+    미추가**(SOURCE_PRIORITY krforest=45 기존). dagster 단위(기본 pair 2건 검증) green.
   - [ ] **T-RV-53d (UI)** krforest admin 상세 UI(ETL preview + feature 상세) + dedup 노출.
 - [ ] **T-RV-54 박물관/미술관(standard_data) feature-load**(points 1·3·4): provider `datagokr`
   `client.museum_art.iter_all()`→`PublicMuseumArtGallery`(instt_code / fclty_nm / fclty_type /

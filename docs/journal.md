@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-07 (claude) — T-RV-53c 자연휴양림↔MOIS dedup scope
+
+**작업**: 휴양림이 MOIS 콘도/관광숙박과 중복 가능(ADR-034 8단계) → `DEFAULT_DEDUP_SCOPE_PAIRS`에
+pair 추가. left `{python-krforest-api, krforest_recreation_forests}` ↔ right `{python-mois-api,
+categories [03010100 관광숙박, 03020100 전문리조트, 03020200 종합리조트]}`로 MOIS side를 관련
+LODGING 카테고리로 좁혀 대규모 MOIS 전체 비교를 회피. 기본 dedup 실행 시 자동 큐 적재.
+
+- **수목원(arboretum) 제외 근거**: MOIS PROMOTED 42 슬러그에 식물원/수목원이 없어(`mois.py`
+  PROMOTED_CATEGORY_BY_SLUG 확인) dedup 후보가 없다 → arboretum↔MOIS pair 미추가.
+- **검증**: ruff + mypy --strict(13 files) + dagster 단위(기본 pair 2건: knps↔krheritage,
+  krforest↔mois) green.
+
+**다음**: T-RV-53d(krforest admin UI: ETL preview + feature 상세 + dedup 노출).
+
 ## 2026-06-07 (claude) — T-RV-53b krforest feature-load asset + fetcher wiring
 
 **작업**: 휴양림/수목원 Dagster feature-load asset 연결(53a transform 소비).
