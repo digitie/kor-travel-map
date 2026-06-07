@@ -321,9 +321,13 @@ enrichment(모듈 있음, 미wiring)**. dedup 인프라(scoring/queue/admin rout
       client `refresh_festival_enrichment_reviews`/`list_pending_enrichment_reviews`/
       `resolve_enrichment_review`. 게이트: ruff/mypy(map 84/dagster 13/admin 25)/lint-imports/unit+lint
       959(coverage 81%)/integration(enrichment_review_repo 7 + client 6) green.
-    - [ ] **52c-2 (admin API)** `GET /admin/enrichment-review`(pending list) +
-      `PATCH /admin/enrichment-review/{review_key}`(accept/reject/ignore). admin_feature_repo 조회 +
-      router + Pydantic 모델 + OpenAPI.
+    - [x] **52c-2 (admin API)**(2026-06-08) `GET /admin/enrichment-review`(pending list, status/
+      provider/score/q 필터 + name_score cursor) + `PATCH /admin/enrichment-review/{review_key}`
+      (accept→enrichment 적재/reject/ignore, 이미 검토 시 409). `list_enrichment_reviews`
+      (admin_feature_repo, 1차 feature join) + `enrichment_review` router(app/routers 등록) +
+      Pydantic 모델 + OpenAPI 재생성(openapi.json만, /admin은 user profile 제외). 게이트:
+      ruff/mypy(map 84/dagster 13/admin 26)/lint-imports/unit+lint 959(coverage 81%)/admin 220/
+      dagster 75 + drift-check + integration(list_enrichment_reviews) green.
     - [ ] **52c-3 (frontend)** dedup-review와 유사한 `admin/enrichment-review` 페이지 + api 훅 +
       `types.ts` 재생성 + Windows Playwright e2e.
 - [ ] **T-RV-53 휴양림/수목원(krforest) feature-load**(points 1·2·3·4): provider `python-krforest-api`

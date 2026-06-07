@@ -2,6 +2,27 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-08 (claude) — T-RV-52c-2 축제 enrichment 검토 admin API
+
+**작업**: 52c-1 backend 위에 운영자 검토 HTTP surface(3 PR 중 2번째). dedup-review 라우터
+미러(단, 병합 아님 → advisory lock/merge 분기 없음).
+
+- `list_enrichment_reviews`(infra/admin_feature_repo): `ops.enrichment_review_queue` + 1차
+  target feature LEFT JOIN(kind/category/coord), status/provider/name_score/q 필터 +
+  name_score DESC cursor 페이지네이션. `EnrichmentReviewRow`/`EnrichmentReviewPage`.
+- `enrichment_review` router(packages/krtour-map-admin): `GET /admin/enrichment-review`(list) +
+  `PATCH /admin/enrichment-review/{review_key}`(decision accepted/rejected/ignored — accept는
+  `decide_enrichment_review`로 ENRICHMENT link 적재, 이미 검토 시 409). routers/__init__ + app
+  등록.
+- OpenAPI 재생성(`export_openapi.py --profile all`): openapi.json만 +558(enrichment-review
+  경로/스키마), openapi.user.json은 /admin 제외라 변동 없음. drift-check green.
+- **검증**: ruff + mypy --strict(map 84/dagster 13/admin 26) + lint-imports + unit+lint 959
+  (coverage 81%, admin_feature_repo 85%) + admin 220 + dagster 75 + integration
+  (list_enrichment_reviews + router 4) green.
+
+**다음**: 52c-3 frontend(`admin/enrichment-review` 페이지 + api 훅 + `types.ts` 재생성 +
+Windows Playwright e2e). (55d airkorea 설계 결정은 사용자 대기.)
+
 ## 2026-06-08 (claude) — T-RV-52c-1 축제 enrichment 검토 큐 backend (matcher 밴드 + infra)
 
 **작업**: visitkorea↔datagokr 축제 enrichment 매칭을 dedup-review처럼 **수동 검토**하기 위한

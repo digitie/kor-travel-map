@@ -20,6 +20,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
+from krtour.map.infra.admin_feature_repo import list_enrichment_reviews
 from krtour.map.infra.enrichment_review_repo import (
     EnrichmentQueueResult,
     EnrichmentReviewInput,
@@ -255,6 +256,47 @@ async def test_decide_rejects_invalid_decision(
 ) -> None:
     with pytest.raises(ValueError, match="decision"):
         await decide_enrichment_review(migrated_session, "no-such-key", "bogus")
+
+
+async def test_list_enrichment_reviews_admin_query(
+    migrated_session: AsyncSession,
+) -> None:
+    migrated_session.add(_festival_feature("f_a_evt", "가나다 축제"))
+    migrated_session.add(_festival_feature("f_b_evt", "서울 봄꽃 축제"))
+    await migrated_session.flush()
+    await enqueue_review_candidates(
+        migrated_session,
+        [
+            _as_input(
+                _review_candidate("가나", target="f_a_evt", target_name="가나다 축제")
+            ),
+            _as_input(
+                _review_candidate(
+                    "서울 봄꽃 축", target="f_b_evt", target_name="서울 봄꽃 축제"
+                )
+            ),
+        ],
+    )
+
+    page = await list_enrichment_reviews(migrated_session, statuses=("pending",))
+    assert len(page.items) == 2
+    # name_score 내림차순.
+    assert page.items[0].name_score >= page.items[1].name_score
+    top = page.items[0]
+    # 1차 feature를 join해 kind/category를 채운다.
+    assert top.target_kind == "event"
+    assert top.target_category == _FESTIVAL_CAT
+    assert top.source_provider == "python-visitkorea-api"
+
+    # provider 필터.
+    filtered = await list_enrichment_reviews(
+        migrated_session, providers=("python-visitkorea-api",)
+    )
+    assert len(filtered.items) == 2
+    none_match = await list_enrichment_reviews(
+        migrated_session, providers=("python-knps-api",)
+    )
+    assert none_match.items == ()
 
 
 async def test_fk_requires_existing_target_feature(

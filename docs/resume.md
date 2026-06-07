@@ -11,9 +11,13 @@
   `list_pending_enrichment_reviews`/`resolve_enrichment_review`). 게이트 전수 green(unit+lint 959
   coverage 81%, integration 13건).
 
-**다음 한 작업**: **T-RV-52c-2 admin API** — `GET /admin/enrichment-review`(pending list) +
-`PATCH /admin/enrichment-review/{review_key}`(accept/reject/ignore). dedup_review router를
-미러(admin_feature_repo 조회 + Pydantic 모델 + OpenAPI). 그 다음 52c-3 frontend.
+52c-2 admin API(`GET/PATCH /admin/enrichment-review`)도 완료·머지: `list_enrichment_reviews`
+(admin_feature_repo) + `enrichment_review` router + OpenAPI 재생성.
+
+**다음 한 작업**: **T-RV-52c-3 frontend** — dedup-review와 유사한 `admin/enrichment-review`
+페이지(pending list + accept/reject/ignore 액션) + `src/api/enrichment.ts` 훅 + `types.ts`
+재생성(`npm run gen:types`) + Windows Playwright e2e. dedup-review-client.tsx + src/api/dedup.ts +
+app/admin/dedup-review/ 구조를 미러.
 
 **병행 대기**: **T-RV-55d airkorea 대기질**은 place feature가 아니라(측정값) **설계 결정 선행**
 필요 — 사용자 결정 대기(WeatherValue 패턴 vs 별도 DTO vs 제외).
