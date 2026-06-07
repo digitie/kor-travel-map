@@ -73,6 +73,7 @@ from krtour.map.infra.dedup_repo import (
     pending_dedup_reviews,
 )
 from krtour.map.infra.feature_repo import (
+    EnrichmentLoadResult,
     FeatureLoadResult,
     FeatureSearchPage,
     NearbyFeaturePage,
@@ -80,6 +81,7 @@ from krtour.map.infra.feature_repo import (
     get_feature_row,
     get_feature_rows_by_ids,
     load_bundles,
+    load_source_record_links,
 )
 from krtour.map.infra.feature_repo import (
     features_nearby as repo_features_nearby,
@@ -179,6 +181,7 @@ from krtour.map.offline_upload import (
 from krtour.map.providers.mois import DATASET_KEY_BULK as MOIS_DATASET_KEY_BULK
 from krtour.map.providers.mois import DATASET_KEY_HISTORY as MOIS_DATASET_KEY_HISTORY
 from krtour.map.providers.mois import PROVIDER_NAME as MOIS_PROVIDER_NAME
+from krtour.map.providers.visitkorea import FestivalEnrichment
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
@@ -300,6 +303,20 @@ class AsyncKrtourMapClient:
         """
         async with self._session_factory() as session, session.begin():
             return await load_bundles(session, bundles)
+
+    async def load_enrichment_links(
+        self, enrichments: Iterable[FestivalEnrichment]
+    ) -> EnrichmentLoadResult:
+        """visitkorea 등 2차 enrichment(``FestivalEnrichment``)를 한 transaction으로 적재.
+
+        각 enrichment의 ``source_record`` → ``source_link``(enrichment role) 순
+        idempotent upsert (``infra.load_source_record_links``). **새 Feature는 만들지
+        않으며**, ``source_link.feature_id``가 가리키는 1차 feature(datagokr 축제)가
+        이미 적재돼 있어야 한다(FK). 하나라도 실패하면 전체 rollback.
+        """
+        pairs = [(e.source_record, e.source_link) for e in enrichments]
+        async with self._session_factory() as session, session.begin():
+            return await load_source_record_links(session, pairs)
 
     async def load_mois_license_features_bulk(
         self,
