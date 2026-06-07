@@ -28,6 +28,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Final
 
+from krtour.map.providers.khoa import beaches_to_bundles
 from krtour.map.providers.kma import (
     short_forecast_to_weather_values,
     ultra_short_forecast_to_weather_values,
@@ -802,6 +803,39 @@ async def _convert_parking(items: Sequence[Any]) -> list[Any]:
     return [b.model_dump(mode="json") for b in bundles]
 
 
+@dataclass(frozen=True)
+class _Beach:
+    """`OceanBeachInfoItem` Protocol 준수 (provider `OceanBeachInfo`)."""
+
+    name: str
+    sido_name: str
+    gugun_name: str | None
+    latitude: float | None
+    longitude: float | None
+    beach_kind: str | None
+    image_url: str | None
+    raw: Any = None
+
+
+def _beach_fixture() -> Sequence[_Beach]:
+    return [
+        _Beach(
+            name="해운대해수욕장",
+            sido_name="부산광역시",
+            gugun_name="해운대구",
+            latitude=35.1587,
+            longitude=129.1604,
+            beach_kind="해수욕장",
+            image_url="https://example.com/haeundae.jpg",
+        ),
+    ]
+
+
+async def _convert_beaches(items: Sequence[Any]) -> list[Any]:
+    bundles = await beaches_to_bundles(items, fetched_at=_now())
+    return [b.model_dump(mode="json") for b in bundles]
+
+
 # ── Registry ──────────────────────────────────────────────────────────
 
 
@@ -950,6 +984,14 @@ FIXTURE_REGISTRY: Final[tuple[EtlFixtureEntry, ...]] = (
         description="전국주차장표준데이터 → place Feature (ADR-034 보조). T-RV-55.",
         build_fixture=_parking_fixture,
         convert=_convert_parking,
+    ),
+    EtlFixtureEntry(
+        provider="python-khoa-api",
+        dataset="khoa_beaches",
+        variant="FeatureBundle",
+        description="해양수산부 해수욕장정보 → place Feature (ADR-034 보조). T-RV-55.",
+        build_fixture=_beach_fixture,
+        convert=_convert_beaches,
     ),
 )
 

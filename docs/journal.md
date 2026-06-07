@@ -2,6 +2,25 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-08 (claude) — T-RV-55c khoa 해수욕장 풀스택 (신규 provider 모듈)
+
+**작업**: ADR-034 보조 dataset 3번째 — 해양수산부 해수욕장정보(python-khoa-api). 신규
+`providers/khoa.py`.
+
+- `beaches_to_bundles`(place, category `TOURISM_NATURAL_LANDSCAPE_COAST_ISLAND 01020300`,
+  place_kind `beach`) + `OceanBeachInfoItem` Protocol. provider `OceanBeachInfo`는 도로명 주소가
+  없어 좌표 reverse만으로 bjd 보강(주소 geocode 경로 미사용), admin=sido+gugun, 안정키
+  `name::sido::gugun` 파생.
+- `fetch_khoa_beaches`(sync — `OCEANS_BEACH_INFO_DEFAULT_SIDO_NAMES` 시도 순회 + 시도별
+  `oceans_beach_info(sido, page_no)` 페이지네이션) + `feature_place_khoa_beaches` asset + resource
+  spec/guard→live + definitions + ETL preview entry.
+- **MOIS dedup 없음**(MOIS PROMOTED에 해수욕장 슬러그 없음).
+- **검증**: ruff + mypy --strict(map 82/dagster 13/admin 25) + lint-imports + unit 942(coverage
+  80.92%) + dagster 72 + khoa preview(01020300/beach) green.
+
+**다음(T-RV-55)**: 55d airkorea 대기질(측정값이라 place 아님 — 설계 선행) → 55e krairport 공항.
+(52c enrichment UI trailing.)
+
 ## 2026-06-08 (claude) — T-RV-55b 주차장(parking) 풀스택
 
 **작업**: ADR-034 보조 dataset 2번째 — 전국주차장표준데이터(datagokr). tourist와 동일 4-step,

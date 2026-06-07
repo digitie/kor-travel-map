@@ -17,6 +17,7 @@ import krtour.map_dagster.provider_fetchers as provider_fetchers
 from krtour.map_dagster.provider_fetchers import (
     ProviderCredentialMissing,
     fetch_datagokr_cultural_festivals,
+    fetch_khoa_beaches,
     fetch_knps_geometry_records,
     fetch_knps_point_records,
     fetch_krex_rest_areas,
@@ -730,6 +731,69 @@ def test_visitkorea_festival_events_fetch_yields_and_closes(
     # search_festival에 event_start_date(올해 1월 1일)를 넘긴다.
     assert client.search_calls
     assert client.search_calls[0].month == 1
+
+
+class _FakeBeachPage:
+    def __init__(self, items: list[object]) -> None:
+        self.items = tuple(items)
+
+
+class _FakeKhoaClient:
+    instances: list[_FakeKhoaClient] = []
+    per_sido: list[object] = []
+
+    def __init__(self, *, api_key: str | None = None, **_kwargs: Any) -> None:
+        self.api_key = api_key
+        self.closed = False
+        self.calls: list[str] = []
+        _FakeKhoaClient.instances.append(self)
+
+    def oceans_beach_info(
+        self, sido_nm: str, *, page_no: int = 1, num_of_rows: int = 100, **_kw: Any
+    ) -> _FakeBeachPage:
+        self.calls.append(sido_nm)
+        # 단일 페이지(short)만 반환 → 페이지네이션 stop.
+        return _FakeBeachPage(list(type(self).per_sido) if page_no == 1 else [])
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _install_fake_khoa(
+    monkeypatch: pytest.MonkeyPatch, *, sidos: tuple[str, ...], per_sido: list[object]
+) -> type[_FakeKhoaClient]:
+    _FakeKhoaClient.instances = []
+    _FakeKhoaClient.per_sido = per_sido
+    module = ModuleType("khoa")
+    module.__dict__["KhoaClient"] = _FakeKhoaClient
+    module.__dict__["OCEANS_BEACH_INFO_DEFAULT_SIDO_NAMES"] = sidos
+    monkeypatch.setitem(sys.modules, "khoa", module)
+    return _FakeKhoaClient
+
+
+def test_khoa_beaches_raises_when_credential_missing() -> None:
+    settings = KrtourMapSettings(data_go_kr_service_key=None)
+
+    generator = fetch_khoa_beaches(settings)
+    with pytest.raises(ProviderCredentialMissing):
+        next(generator)
+
+
+def test_khoa_beaches_fetch_iterates_sido_and_closes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _install_fake_khoa(
+        monkeypatch, sidos=("부산광역시", "강원특별자치도"), per_sido=[object(), object()]
+    )
+    settings = KrtourMapSettings(data_go_kr_service_key=SecretStr("service-key"))
+
+    records = list(fetch_khoa_beaches(settings))
+
+    # 2 sido × 2 record = 4.
+    assert len(records) == 4
+    client = fake.instances[0]
+    assert client.calls == ["부산광역시", "강원특별자치도"]
+    assert client.closed is True
 
 
 def test_standard_tourist_attractions_raises_when_credential_missing() -> None:

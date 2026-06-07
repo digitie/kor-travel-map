@@ -8,6 +8,11 @@ from typing import TYPE_CHECKING, Any, Final, cast
 from dagster import AssetExecutionContext, Backoff, RetryPolicy, asset
 from krtour.map.geocoding import ReverseGeocoder
 from krtour.map.infra.feature_repo import EnrichmentLoadResult
+from krtour.map.providers.khoa import (
+    DATASET_KEY_BEACHES,
+    KHOA_PROVIDER_NAME,
+    beaches_to_bundles,
+)
 from krtour.map.providers.knps import (
     KNPS_GEOMETRY_DATASETS,
     KNPS_PLACE_DATASETS,
@@ -556,6 +561,36 @@ async def feature_place_standard_parking_lots(
     return await run_feature_place_standard_parking_lots(context)
 
 
+async def run_feature_place_khoa_beaches(
+    context: AssetExecutionContext,
+) -> DagsterFeatureLoadResult:
+    """해양수산부 해수욕장정보 record를 place Feature로 적재한다(ADR-034 보조)."""
+    records = await _record_list(context, "khoa_beaches")
+    fetched_at = await _fetched_at(context)
+    bundles = await beaches_to_bundles(
+        records,
+        fetched_at=fetched_at,
+        reverse_geocoder=_reverse_geocoder(context),
+    )
+    return await _load(
+        context,
+        provider=KHOA_PROVIDER_NAME,
+        dataset_key=DATASET_KEY_BEACHES,
+        bundles=bundles,
+    )
+
+
+@asset(
+    group_name="features_place",
+    required_resource_keys=_COMMON_RESOURCE_KEYS | {"khoa_beaches"},
+    retry_policy=FEATURE_LOAD_RETRY_POLICY,
+)
+async def feature_place_khoa_beaches(
+    context: AssetExecutionContext,
+) -> DagsterFeatureLoadResult:
+    return await run_feature_place_khoa_beaches(context)
+
+
 async def run_feature_event_visitkorea_enrichment(
     context: AssetExecutionContext,
 ) -> EnrichmentLoadResult:
@@ -605,6 +640,7 @@ FEATURE_LOAD_ASSETS: Final = [
     feature_place_standard_museums,
     feature_place_standard_tourist_attractions,
     feature_place_standard_parking_lots,
+    feature_place_khoa_beaches,
     feature_event_visitkorea_enrichment,
 ]
 """현재 구현 완료된 Feature provider 적재 asset 목록."""

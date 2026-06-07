@@ -25,6 +25,7 @@ from krtour.map.settings import KrtourMapSettings
 
 from .provider_fetchers import (
     fetch_datagokr_cultural_festivals,
+    fetch_khoa_beaches,
     fetch_knps_geometry_records,
     fetch_knps_point_records,
     fetch_krex_rest_areas,
@@ -167,6 +168,14 @@ PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
         dataset_key="datagokr_parking_lots",
         setting_names=("data_go_kr_service_key",),
         source_env_names=("DATA_GO_KR_SERVICE_KEY",),
+    ),
+    ProviderRecordResourceSpec(
+        resource_key="khoa_beaches",
+        provider_package="python-khoa-api",
+        dataset_key="khoa_beaches",
+        setting_names=("data_go_kr_service_key",),
+        source_env_names=("DATA_GO_KR_SERVICE_KEY",),
+        note="khoa 해수욕장정보는 시도별 페이지네이션으로 전국을 순회한다.",
     ),
     ProviderRecordResourceSpec(
         resource_key="visitkorea_festival_events",
@@ -428,6 +437,18 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["standard_parking_lots"] = (
     build_provider_record_live_resource(
         _STANDARD_PARKING_SPEC,
         fetch_standard_parking_lots,
+    )
+)
+
+_KHOA_BEACHES_SPEC: ProviderRecordResourceSpec = next(
+    spec
+    for spec in PROVIDER_RECORD_RESOURCE_SPECS
+    if spec.resource_key == "khoa_beaches"
+)
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["khoa_beaches"] = (
+    build_provider_record_live_resource(
+        _KHOA_BEACHES_SPEC,
+        fetch_khoa_beaches,
     )
 )
 
