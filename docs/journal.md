@@ -2,6 +2,26 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-07 (claude) — T-RV-52a visitkorea provider 보강(TourItem festival/detail 필드)
+
+**작업**: 축제 enrichment(point 5)를 위한 provider 보강(cross-repo). krtour
+`VisitKoreaFestivalItem` Protocol은 `event_start_date`/`event_end_date`/`overview`/`homepage`
+속성을 요구하나 provider `TourItem`에 없어 구조적 미충족이었다.
+
+- **`python-visitkorea-api#17`(merged, v0.2.0)**: `TourItem`에 4필드 추가 —
+  `event_start_date`/`event_end_date`(searchFestival `eventstartdate`/`eventenddate`를 `_tour_item`
+  에서 promote, str YYYYMMDD, 비축제는 None) + `overview`/`homepage`(detailCommon 보강용, list
+  응답엔 보통 None, raw에 있으면 채움). 기존 API 호환(필드 추가만). ruff/mypy --strict/pytest 96
+  passed(신규 2). origin/main 이동으로 rebase(AGENTS.md/.codegraph 정리) 후 머지.
+- **설계 메모**: `overview`/`homepage`는 detailCommon에서만 오므로, 52b 매칭된 축제 item에 한해
+  N+1 `detail_common(content_id)` 호출로 보강한다(전체 축제 N+1 회피).
+
+**다음(52b — krtour)**: `fetch_visitkorea_festival_events` fetcher + DB-coupled `FestivalMatcher`
+(로드된 datagokr 축제와 name+region fuzzy 매칭, ADR-016) + enrichment asset
+(`festival_to_enrichment_links`) + client `load_enrichment_links`. 52c는 dedup-review와 동일 UI에서
+매칭/enrichment 검토. **enrichment는 feature-load와 달리 DB-coupled(1차 datagokr 적재 선행)이라
+별도 설계 — 다음 턴 집중 구현.**
+
 ## 2026-06-07 (claude) — T-RV-54c+54d 박물관/미술관 MOIS dedup + ETL preview → T-RV-54 완료
 
 **작업**: 박물관/미술관 MOIS dedup scope + admin ETL preview 등록(54c+54d 묶음 PR).
