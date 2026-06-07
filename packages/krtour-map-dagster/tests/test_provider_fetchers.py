@@ -15,6 +15,7 @@ from pydantic import SecretStr
 from krtour.map_dagster.provider_fetchers import (
     ProviderCredentialMissing,
     fetch_datagokr_cultural_festivals,
+    fetch_krex_rest_areas,
     fetch_krheritage_events,
 )
 from krtour.map_dagster.resources import (
@@ -91,6 +92,109 @@ def _install_fake_krheritage(monkeypatch: pytest.MonkeyPatch) -> type[_FakeHerit
     module.__dict__["HeritageClient"] = _FakeHeritageClient
     monkeypatch.setitem(sys.modules, "krheritage", module)
     return _FakeHeritageClient
+
+
+class _FakePage:
+    def __init__(
+        self, *, items: tuple[object, ...], total_count: int, page_no: int
+    ) -> None:
+        self.items = items
+        self.total_count = total_count
+        self.page_no = page_no
+
+
+class _FakeRestareaService:
+    def __init__(self, total: int) -> None:
+        self.total = total
+        self.calls: list[tuple[int, int]] = []
+
+    def list_all(
+        self, *, num_of_rows: int = 1000, page_no: int = 1, **_kwargs: Any
+    ) -> _FakePage:
+        self.calls.append((num_of_rows, page_no))
+        start = (page_no - 1) * num_of_rows
+        end = min(start + num_of_rows, self.total)
+        items = tuple(object() for _ in range(max(0, end - start)))
+        return _FakePage(items=items, total_count=self.total, page_no=page_no)
+
+
+class _FakeKrexClient:
+    instances: list[_FakeKrexClient] = []
+    total: int = 0
+
+    def __init__(self, *, go_api_key: str | None = None, **_kwargs: Any) -> None:
+        self.go_api_key = go_api_key
+        self.closed = False
+        self.restarea = _FakeRestareaService(type(self).total)
+        _FakeKrexClient.instances.append(self)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _install_fake_krex(
+    monkeypatch: pytest.MonkeyPatch, *, total: int
+) -> type[_FakeKrexClient]:
+    _FakeKrexClient.instances = []
+    _FakeKrexClient.total = total
+    module = ModuleType("krex")
+    module.__dict__["KrexClient"] = _FakeKrexClient
+    monkeypatch.setitem(sys.modules, "krex", module)
+    return _FakeKrexClient
+
+
+def test_krex_rest_areas_fetch_raises_when_credential_missing() -> None:
+    settings = KrtourMapSettings(krex_go_api_key=None)
+
+    generator = fetch_krex_rest_areas(settings)
+    with pytest.raises(ProviderCredentialMissing):
+        next(generator)
+
+
+def test_krex_rest_areas_fetch_paginates_yields_and_closes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # total 1003 → page1=1000(full)·page2=3(short) → 2 pages, short-page stop.
+    fake = _install_fake_krex(monkeypatch, total=1003)
+    settings = KrtourMapSettings(krex_go_api_key=SecretStr("go-key"))
+
+    records = list(fetch_krex_rest_areas(settings))
+
+    assert len(records) == 1003
+    assert len(fake.instances) == 1
+    client = fake.instances[0]
+    assert client.go_api_key == "go-key"
+    assert client.closed is True
+    # 페이지네이션: page_no 1,2 만 호출(빈 3페이지 미호출), num_of_rows=1000.
+    assert client.restarea.calls == [(1000, 1), (1000, 2)]
+
+
+def test_krex_rest_areas_fetch_stops_on_total_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # total 2000 = 정확히 2 페이지(각 1000) → total_count 도달로 stop(빈 페이지 X).
+    fake = _install_fake_krex(monkeypatch, total=2000)
+    settings = KrtourMapSettings(krex_go_api_key=SecretStr("go-key"))
+
+    records = list(fetch_krex_rest_areas(settings))
+
+    assert len(records) == 2000
+    assert fake.instances[0].restarea.calls == [(1000, 1), (1000, 2)]
+    assert fake.instances[0].closed is True
+
+
+def test_krex_rest_areas_fetch_closes_on_partial_consumption(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _install_fake_krex(monkeypatch, total=1003)
+    settings = KrtourMapSettings(krex_go_api_key=SecretStr("go-key"))
+
+    generator = fetch_krex_rest_areas(settings)
+    first = next(generator)
+    assert first is not None
+    generator.close()
+
+    assert fake.instances[0].closed is True
 
 
 def test_fetch_raises_when_credential_missing() -> None:

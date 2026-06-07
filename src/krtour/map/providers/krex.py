@@ -26,9 +26,12 @@ ADR 참조
 
 설계 메모
 --------
-- rest_area Feature의 `uni_id`(휴게소 식별자) → `feature_id` 매핑은 본 함수가
+- rest_area dataset(`tn_pubr_public_rest_area_api`)에는 안정 식별자가 없어
+  (ADR-044 실측) 자연키를 krtour 측에서 `name`+`route_name`+`direction`으로
+  파생한다(`_rest_area_natural_key`). 이 파생키 → `feature_id` 매핑은 본 함수가
   결정. 호출자는 prices/weather 변환 시 동일 `feature_id`를 전달
-  (`KrexRestAreaCatalog` 같은 캐시 책임).
+  (`KrexRestAreaCatalog` 같은 캐시 책임). prices/weather row의 `uni_id`는 별도
+  dataset의 자연키로 본 reconciliation 범위 밖이다.
 - 가격은 `REST_AREA_FOOD`(식음료) 또는 `REST_AREA_FUEL`(주유) — 입력 row의
   category 필드로 분기.
 - 교통 공지는 휴게소가 아닌 도로 구간 단위 — `feature_id`는 notice 자체에
@@ -75,7 +78,6 @@ from krtour.map.dto import (
 from krtour.map.geocoding import (
     AddressResolver,
     ReverseGeocoder,
-    cached_address_resolver,
     cached_reverse_geocoder,
 )
 
@@ -139,31 +141,38 @@ TRAFFIC_NOTICE_MARKER_COLOR: Final[str] = "P-13"
 
 @runtime_checkable
 class KrexRestAreaItem(Protocol):
-    """krex 휴게소 정보 row shape (place Feature 생성용)."""
+    """krex 휴게소 정보 row shape (place Feature 생성용).
 
-    uni_id: str
-    """휴게소 자연키 (provider 내 unique)."""
+    provider model ``krex.models.RestArea`` 정합 (ADR-024/044). 이 dataset
+    (``tn_pubr_public_rest_area_api``, ``KrexClient.restarea.list_all``)은
+    **안정 식별자(uni_id)도 주소 컬럼도 없다**. 따라서 자연키는 krtour 측에서
+    ``name``+``route_name``+``direction`` 조합으로 파생한다
+    (``_rest_area_natural_key``).
+
+    파생 자연키 tradeoff (사용자 승인, ADR-009/016)
+    - **충돌**: 같은 name+route_name+direction을 가진 서로 다른 휴게소는 동일
+      키로 묶여 dedup된다.
+    - **rename 단절**: 휴게소명/노선/방향 표기가 바뀌면 키가 달라져 기존
+      Feature와의 dedup이 끊긴다(신규 Feature로 적재).
+    """
 
     name: str
-    """휴게소명. Feature.name."""
+    """휴게소명. Feature.name. (provider ``RestArea.name``)"""
+
+    route_name: str | None
+    """고속도로 노선명 (예: '경부고속도로'). (provider ``RestArea.route_name``)"""
 
     direction: str | None
-    """방향 (예: '서울방향'/'부산방향')."""
+    """방향 (예: '서울방향'/'부산방향'). (provider ``RestArea.direction``)"""
 
-    highway_name: str | None
-    """고속도로 노선명 (예: '경부고속도로')."""
+    lon: float | Decimal | None
+    """경도 WGS84. provider는 ``float`` — 변환부에서 ``Decimal(str(...))`` 강제."""
 
-    address: str | None
-    """전체 주소."""
+    lat: float | Decimal | None
+    """위도 WGS84. provider는 ``float`` — 변환부에서 ``Decimal(str(...))`` 강제."""
 
-    longitude: Decimal | None
-    """경도 WGS84."""
-
-    latitude: Decimal | None
-    """위도 WGS84."""
-
-    tel: str | None
-    """대표 전화번호."""
+    phone_number: str | None
+    """대표 전화번호. (provider ``RestArea.phone_number``)"""
 
 
 @runtime_checkable
@@ -255,6 +264,36 @@ def _coord_or_none(
     return Coordinate(lon=lon, lat=lat)
 
 
+def _to_decimal_or_none(value: float | Decimal | None) -> Decimal | None:
+    """provider 좌표(``float``)를 deterministic하게 ``Decimal``로 강제.
+
+    ``Decimal(str(...))``로 float repr의 이진 잡음 없이 변환한다(ADR-044 —
+    provider ``RestArea.lat/lon``은 ``float``).
+    """
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        return value
+    return Decimal(str(value))
+
+
+def _rest_area_natural_key(item: KrexRestAreaItem) -> str:
+    """krtour 측 파생 자연키 — ``name``+``route_name``+``direction``.
+
+    source(``tn_pubr_public_rest_area_api``)에 안정 식별자가 없어
+    (option 2, 사용자 결정) 세 필드를 normalize(strip→lower)해 ``::``로 잇는다
+    (None은 ``""``). 구분자는 mois(``{slug}::{mng_no}``)와 동일 ``::`` — ID 시스템이
+    예약한 ``|``를 피한다(ADR-009 `_validate_component`). 충돌·rename 단절 tradeoff는
+    ``KrexRestAreaItem`` docstring 참조(ADR-009/016).
+    """
+    parts = (
+        (item.name or "").strip().lower(),
+        (item.route_name or "").strip().lower(),
+        (item.direction or "").strip().lower(),
+    )
+    return "::".join(parts)
+
+
 def _parse_numeric(raw: str | Decimal | int | float | None) -> Decimal | None:
     """가격/관측값 입력을 Decimal로 정규화 (천 단위 ',' 흡수, None pass-through)."""
     if raw is None:
@@ -295,23 +334,18 @@ async def _rest_area_item_to_bundle(
     *,
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None,
-    address_resolver: AddressResolver | None,
 ) -> FeatureBundle:
-    coord = _coord_or_none(item.latitude, item.longitude)
+    lon = _to_decimal_or_none(item.lon)
+    lat = _to_decimal_or_none(item.lat)
+    coord = _coord_or_none(lat, lon)
     bjd_code, sigungu, sido, admin = await _reverse_geocode(coord, reverse_geocoder)
-    road_text = normalize_korean_text(item.address)
+    # source(tn_pubr_public_rest_area_api)에 주소 컬럼이 없어 road는 항상 None
+    # (좌표 reverse geocoding만으로 행정구역을 채운다). address_resolver fallback은
+    # 입력 주소가 없으므로 적용 불가 — 좌표가 없으면 bjd_code 미상으로 남는다.
     road_name_code: str | None = None
-    if bjd_code is None and address_resolver is not None:
-        resolved = await address_resolver(Address(road=road_text))
-        if resolved is not None and resolved.bjd_code is not None:
-            bjd_code = resolved.bjd_code
-            sigungu = resolved.sigungu_code or extract_sigungu_code(bjd_code)
-            sido = resolved.sido_code or extract_sido_code(bjd_code)
-            admin = resolved.admin
-            road_name_code = resolved.road_name_code
 
     address = Address(
-        road=road_text,
+        road=None,
         admin=admin,
         bjd_code=bjd_code,
         sigungu_code=sigungu,
@@ -319,22 +353,22 @@ async def _rest_area_item_to_bundle(
         road_name_code=road_name_code,
     )
 
+    natural_key = _rest_area_natural_key(item)
     raw_data: dict[str, Any] = {
-        "uni_id": item.uni_id,
+        "natural_key": natural_key,
         "name": item.name,
+        "route_name": item.route_name,
         "direction": item.direction,
-        "highway_name": item.highway_name,
-        "address": item.address,
-        "longitude": str(item.longitude) if item.longitude is not None else None,
-        "latitude": str(item.latitude) if item.latitude is not None else None,
-        "tel": item.tel,
+        "lon": str(lon) if lon is not None else None,
+        "lat": str(lat) if lat is not None else None,
+        "phone_number": item.phone_number,
     }
     payload_hash = make_payload_hash(raw_data)
     source_record_key = make_source_record_key(
         provider=KREX_PROVIDER_NAME,
         dataset_key=REST_AREA_DATASET_KEY,
         source_entity_type=_REST_AREA_ENTITY_TYPE,
-        source_entity_id=item.uni_id,
+        source_entity_id=natural_key,
         raw_payload_hash=payload_hash,
     )
     feature_id = make_feature_id(
@@ -342,13 +376,13 @@ async def _rest_area_item_to_bundle(
         kind=FeatureKind.PLACE.value,
         category=REST_AREA_CATEGORY,
         source_type=f"{KREX_PROVIDER_NAME}:{REST_AREA_DATASET_KEY}",
-        source_natural_key=item.uni_id,
+        source_natural_key=natural_key,
     )
 
     name_normalized = normalize_korean_text(item.name) or item.name
     phones: list[str] = []
-    if item.tel:
-        normalized_tel = normalize_phone_number(item.tel)
+    if item.phone_number:
+        normalized_tel = normalize_phone_number(item.phone_number)
         if normalized_tel:
             phones.append(normalized_tel)
 
@@ -366,8 +400,10 @@ async def _rest_area_item_to_bundle(
             place_kind="rest_area",
             phones=phones,
             facility_info={
+                # 출력 키 "highway_name"은 PlaceDetail 계약 유지 — 값은 provider
+                # ``RestArea.route_name``에서 읽는다(입력 reconciliation, ADR-044).
                 "direction": item.direction,
-                "highway_name": item.highway_name,
+                "highway_name": item.route_name,
             },
         ),
     )
@@ -376,12 +412,12 @@ async def _rest_area_item_to_bundle(
         provider=normalize_provider_name(KREX_PROVIDER_NAME),
         dataset_key=REST_AREA_DATASET_KEY,
         source_entity_type=_REST_AREA_ENTITY_TYPE,
-        source_entity_id=item.uni_id,
+        source_entity_id=natural_key,
         raw_payload_hash=payload_hash,
         raw_name=item.name,
-        raw_address=item.address,
-        raw_longitude=item.longitude,
-        raw_latitude=item.latitude,
+        raw_address=None,
+        raw_longitude=lon,
+        raw_latitude=lat,
         raw_data=raw_data,
         fetched_at=fetched_at,
         source_record_key=source_record_key,
@@ -408,37 +444,36 @@ async def rest_areas_to_bundles(
 ) -> list[FeatureBundle]:
     """krex 휴게소 items → ``list[FeatureBundle]`` (place kind, 1차 source).
 
-    호출자는 결과 bundle의 `feature_id`를 캐시(uni_id → feature_id)로 두고
+    호출자는 결과 bundle의 `feature_id`를 캐시(파생 자연키 → feature_id)로 두고
     `rest_area_prices_to_values`/`rest_area_weather_to_values` 호출 시 동일
     `feature_id`를 전달.
 
+    `address_resolver`는 다른 provider와의 호출 시그니처 호환을 위해 받지만,
+    이 dataset에는 주소 컬럼이 없어(ADR-044) **사용되지 않는다** — 행정구역은
+    `reverse_geocoder`(좌표 기반)로만 채운다.
+
     Notes
     -----
-    휴게소명(`name`) 또는 `uni_id`가 빈 레코드는 유효 `Feature`(name 1자 이상,
-    source key 필요)를 구성할 수 없어 **skip**한다. EX OpenAPI
-    ``serviceAreaRoute``가 간혹 모든 표시 필드가 ``null``인 placeholder 행을
-    반환하므로(실측, ADR-044) 방어적으로 거른다.
+    휴게소명(`name`)이 빈 레코드는 유효 `Feature`(name 1자 이상)도 의미 있는
+    파생 자연키도 만들 수 없어 **skip**한다. data.go.kr
+    ``tn_pubr_public_rest_area_api``가 간혹 표시 필드가 ``null``인 placeholder
+    행을 반환하므로(실측, ADR-044) 방어적으로 거른다.
     """
+    _ = address_resolver  # 호환용 — 본 dataset은 주소가 없어 미사용 (위 docstring).
     geocoder = (
         cached_reverse_geocoder(reverse_geocoder)
         if reverse_geocoder is not None
         else None
     )
-    resolver = (
-        cached_address_resolver(address_resolver)
-        if address_resolver is not None
-        else None
-    )
     bundles: list[FeatureBundle] = []
     for item in items:
-        if not (item.name or "").strip() or not (item.uni_id or "").strip():
+        if not (item.name or "").strip():
             continue
         bundles.append(
             await _rest_area_item_to_bundle(
                 item,
                 fetched_at=fetched_at,
                 reverse_geocoder=geocoder,
-                address_resolver=resolver,
             )
         )
     return bundles

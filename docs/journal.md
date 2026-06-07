@@ -2,6 +2,27 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-07 (claude) — T-RV-04b ③ krex_rest_areas (ADR-044 재정렬 + 파생 자연키)
+
+**작업**: krex 휴게소 live fetcher. `RestArea` model에 안정 식별자·주소가 없음을 확인
+(provider 파서/fixture 모두 부재) → 사용자 결정대로 **option 2(krtour 파생 자연키)**.
+
+- **자연키**: `_rest_area_natural_key` = `name::route_name::direction`(normalize). 처음
+  `|` join으로 했다가 ADR-009 `_validate_component`이 `|`를 예약(ID 구분자)해 거부 →
+  mois(`{slug}::{mng_no}`)와 동일 `::`로 수정.
+- **Protocol 재정렬(ADR-044)**: `KrexRestAreaItem`을 `RestArea` 실제 필드명으로
+  (highway_name→route_name, tel→phone_number, longitude/latitude→lon/lat), uni_id·address
+  제거. `_rest_area_item_to_bundle` 입력 read + 자연키 사용처 전부 갱신(출력 DTO 계약 불변,
+  address=None). admin `etl_fixtures.py`/`etl_live.py` krex 어댑터 + 그 테스트도 갱신.
+- **wiring**: `fetch_krex_rest_areas`(`KrexClient(go_api_key=krex_go_api_key).restarea.
+  list_all` 페이지네이션) + resource guard→live + dagster 단위(fake) + test_definitions.
+- **provider upstream**: `RestArea`에 안정 id·address 노출은 직접 수정 대신 **상세
+  GitHub 이슈 `python-krex-api#7`**로 등록(사용자 지시: 라이브러리 수정 건은 AI agent
+  작업용 이슈로). 노출되면 파생키→안정키 교체 가능.
+- **gate**: ruff + mypy --strict(krtour.map 80 / dagster 12) green, krex unit + admin etl +
+  dagster(78) + 통합 dagster etl green, unit coverage 80.22%(krex.py 91%).
+- **다음**: krex_traffic_notices(Incident 대거 미충족 — provider 이슈 필요), opinet/mois/knps.
+
 ## 2026-06-07 (claude) — T-RV-04b ② krheritage_events (ADR-044 재조정 + cross-repo)
 
 **작업**: krheritage_events live fetcher. 검증 결과 provider model `HeritageEvent`이

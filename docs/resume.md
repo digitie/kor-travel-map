@@ -42,17 +42,19 @@ fetch)`로 해당 resource_key만 guard→live 교체. dagster 테스트는 prov
   `python-krheritage-api#4`(HeritageEvent.raw 주입, merged) + krtour `KrHeritageEvent`
   Protocol/transform을 provider 필드명(starts_on/place/address)에 재정렬 + fetcher
   (`event.iter_months()` rolling window).
+- [x] **③ krex_rest_areas**(2026-06-07) — ADR-044 재정렬 + **option 2 파생 자연키**
+  (`name::route_name::direction`, `|`는 ADR-009 예약→`::`). Protocol을 RestArea 필드명으로
+  재정렬(uni_id/address 제거). provider 안정 id/address는 **이슈 `python-krex-api#7`**로 분리.
 - **적합성 감사(`docs/reports/t-rv-04b-provider-fetcher-audit-2026-06-07.md`): datagokr
   외는 전부 model↔Protocol 실검증 필수(감사 "ASSUMED CLEAN" 신뢰 불가).**
-  - **krex_rest_areas/traffic**: model 불일치(uni_id/address/좌표 없음) → ADR-044 재조정
-    (upstream PR 또는 krtour 재정렬 + **uni_id 자연키 결정** — krheritage는 sn이 있었으나
-    krex는 자연키 부재가 추가 난점). 데이터 모델 결정.
+  - **krex_traffic_notices**: `Incident` model이 notice_id/좌표/severity/valid_from·until
+    대거 미충족 → 재조정 + provider 이슈 필요. 미착수.
   - **opinet**: bulk 없음 → grid 검색 커버리지 정책. **mois**: SpatiaLite DB파일 refresh
     정책. **knps**: keyless 파일셋 SHP/CSV 파서 어댑터.
-  - **사용자 승인**: sibling `python-*-api` 레포 편집 in scope(2026-06-07) — cross-repo
-    재조정 가능.
-- **원칙**: provider 착수 전 (1) 이미 구현됐는지 grep, (2) provider model이 krtour
-  Protocol을 실제로 만족하는지 검증(미검증 wiring은 런타임 AttributeError).
+- **원칙(업데이트)**: provider 착수 전 (1) 이미 구현됐는지 grep, (2) provider model이
+  krtour Protocol을 실제로 만족하는지 검증(미검증 wiring은 런타임 AttributeError),
+  (3) **provider 라이브러리 수정이 필요하면 직접 편집 대신 해당 repo에 AI agent용 상세
+  GitHub 이슈 생성**(사용자 지시 2026-06-07). 자연키 파생 시 `|` 금지(ADR-009)·`::` 사용.
 
 ## 2026-06-07 Claude 작업 메모 — T-DA-13 `/admin/issues` 완료 → 다음 T-212 후속
 

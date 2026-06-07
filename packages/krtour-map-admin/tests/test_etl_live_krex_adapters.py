@@ -46,15 +46,14 @@ def test_adapt_rest_area_maps_fields() -> None:
         "telNo": "031-000-0000",
     }
     a = _adapt_krex_rest_area(raw)
-    assert a.uni_id == "0010"
+    # 신 Protocol: uni_id/address 없음, 자연키는 변환부 파생(name+route+direction).
     assert a.name == "안성휴게소(서울방향)"
     assert a.direction == "서울"
-    assert a.highway_name == "경부선"
-    assert a.address == "경기도 안성시 ..."
-    assert a.tel == "031-000-0000"
+    assert a.route_name == "경부선"
+    assert a.phone_number == "031-000-0000"
     # serviceAreaRoute 응답에 좌표 없음.
-    assert a.longitude is None
-    assert a.latitude is None
+    assert a.lon is None
+    assert a.lat is None
 
 
 @pytest.mark.unit
