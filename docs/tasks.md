@@ -310,8 +310,22 @@ enrichment(모듈 있음, 미wiring)**. dedup 인프라(scoring/queue/admin rout
       `feature_event_visitkorea_enrichment` asset(EnrichmentLoadResult 반환) + resource + definitions.
       dagster 66 + unit 932 + coverage 80.68% green. **overview/homepage N+1 detail 보강은 후속**
       (현재 list 기반 enrichment = 이미지+content_id+event date; matched feature에 SourceRecord/Link).
-  - [ ] **T-RV-52c (UI)** 축제 datagokr↔visitkorea 매칭/enrichment를 dedup-review와 **같은 UI**에서
-    검토·수동 link/unlink(enrichment review 탭 또는 통합). 자동 매칭 실패분 수동 처리.
+  - **T-RV-52c (review 큐+UI)** 축제 datagokr↔visitkorea 매칭/enrichment를 dedup-review와 **같은
+    방식**으로 수동 검토. 3 PR로 세분:
+    - [x] **52c-1 (backend domain/infra)**(2026-06-08) 이름 유사도 점수 밴드 분류 +
+      `ops.enrichment_review_queue` 영속화. `ScoringFestivalMatcher.best_match`(임계 비의존) +
+      `festival_to_review_candidates`(auto ≥0.90 / review-band [0.70,0.90) / drop <0.70,
+      `FestivalMatchPlan`) (providers/visitkorea). migration `0019_enrichment_review_queue` +
+      `EnrichmentReviewQueueRow`(models) + `infra/enrichment_review_repo.py`(enqueue/pending/decide,
+      accept→ENRICHMENT link 적재, ADR-020상 generic `EnrichmentReviewInput`로 provider 비의존) +
+      client `refresh_festival_enrichment_reviews`/`list_pending_enrichment_reviews`/
+      `resolve_enrichment_review`. 게이트: ruff/mypy(map 84/dagster 13/admin 25)/lint-imports/unit+lint
+      959(coverage 81%)/integration(enrichment_review_repo 7 + client 6) green.
+    - [ ] **52c-2 (admin API)** `GET /admin/enrichment-review`(pending list) +
+      `PATCH /admin/enrichment-review/{review_key}`(accept/reject/ignore). admin_feature_repo 조회 +
+      router + Pydantic 모델 + OpenAPI.
+    - [ ] **52c-3 (frontend)** dedup-review와 유사한 `admin/enrichment-review` 페이지 + api 훅 +
+      `types.ts` 재생성 + Windows Playwright e2e.
 - [ ] **T-RV-53 휴양림/수목원(krforest) feature-load**(points 1·2·3·4): provider `python-krforest-api`
   `ForestClient().travel.standard_recreation_forests()`→`StandardRecreationForest`(institution_code
   stable id / name / address / lat·lon WGS84 / phone / homepage), 수목원/식물원은 SHP file

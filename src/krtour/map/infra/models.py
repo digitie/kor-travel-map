@@ -64,6 +64,7 @@ __all__ = [
     "ProviderSyncStateRow",
     "FeatureConsistencyReportRow",
     "DedupReviewQueueRow",
+    "EnrichmentReviewQueueRow",
     "ImportJobRow",
     "OfflineUploadRow",
     "FeatureOverrideRow",
@@ -493,6 +494,78 @@ class DedupReviewQueueRow(Base):
     name_score: Mapped[Any] = mapped_column(Numeric(5, 2), nullable=False)
     spatial_score: Mapped[Any] = mapped_column(Numeric(5, 2), nullable=False)
     category_score: Mapped[Any] = mapped_column(Numeric(5, 2), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String, nullable=False, server_default=text("'pending'"),
+    )
+    decision_reason: Mapped[str | None] = mapped_column(String)
+    reviewed_by: Mapped[str | None] = mapped_column(String)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
+
+
+# =============================================================================
+# ops.enrichment_review_queue  (ADR-042 / T-RV-52c)
+# =============================================================================
+
+
+class EnrichmentReviewQueueRow(Base):
+    """``ops.enrichment_review_queue`` row mapping — 축제 enrichment 수동 검토 큐.
+
+    visitkorea(2차)↔datagokr(1차) 축제 이름 유사도가 자동 확정 임계 미만·검토 하한
+    이상인 모호한 매칭을 영속화한다(``providers/visitkorea.festival_to_review_candidates``).
+    raw SQL은 ``infra/enrichment_review_repo.py``의 ``_SQL`` 상수에서 (ADR-004).
+
+    dedup_review_queue와 달리 두 번째 feature/병합이 없다 — 기존 1차 feature
+    (``target_feature_id``)에 ``source_record``(직렬화 ``SourceRecord``)를 ENRICHMENT
+    link으로 잇는다. ``status``: pending→accepted/rejected/ignored. ``name_score``는
+    0~100 ``NUMERIC(5,2)``. ``(target_feature_id, source_provider, source_dataset_key,
+    source_entity_id)`` UNIQUE — 재스캔은 pending 행 점수만 갱신.
+    """
+
+    __tablename__ = "enrichment_review_queue"
+    __table_args__ = (
+        UniqueConstraint(
+            "target_feature_id",
+            "source_provider",
+            "source_dataset_key",
+            "source_entity_id",
+            name="uq_enrichment_review_candidate",
+        ),
+        CheckConstraint(
+            "status IN ('pending','accepted','rejected','ignored')",
+            name="ck_enrichment_review_status",
+        ),
+        CheckConstraint(
+            "name_score BETWEEN 0 AND 100",
+            name="ck_enrichment_review_name_score",
+        ),
+        Index(
+            "idx_enrichment_review_status_score",
+            "status",
+            text("name_score DESC"),
+        ),
+        {"schema": "ops"},
+    )
+
+    review_key: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=text("x_extension.gen_random_uuid()"),
+    )
+    target_feature_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("feature.features.feature_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    source_provider: Mapped[str] = mapped_column(String, nullable=False)
+    source_dataset_key: Mapped[str] = mapped_column(String, nullable=False)
+    source_entity_id: Mapped[str] = mapped_column(String, nullable=False)
+    source_name: Mapped[str] = mapped_column(String, nullable=False)
+    target_name: Mapped[str] = mapped_column(String, nullable=False)
+    name_score: Mapped[Any] = mapped_column(Numeric(5, 2), nullable=False)
+    source_record: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     status: Mapped[str] = mapped_column(
         String, nullable=False, server_default=text("'pending'"),
     )
