@@ -2,6 +2,23 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-07 (claude) — T-RV-54a 박물관/미술관(standard_data) transform
+
+**작업**: ADR-034 9단계 박물관/미술관 변환(`standard_data.py` 확장, provider datagokr `museum_art`
+READY).
+
+- `museums_to_bundles`(place) + `PublicMuseumArtItem` Protocol(`PublicMuseumArtGallery` 정합:
+  fclty_nm/fclty_type/rdnmadr/lnmadr/lat·lon float/oper_phone_number/homepage_url/instt_code).
+- category는 `fclty_type` 기준 박물관(`01040100`)/미술관(`01040200`) 분기(`_resolve_museum_category`),
+  미상 시 부모 문화시설(`01040000`). place_kind `museum`, marker = category maki(or `museum`) +
+  `MUSEUM_MARKER_COLOR`(P-09). 좌표 float→Decimal, 안정키 `instt_code`(없으면 `name::road` 파생).
+  `STANDARD_DATA_PROVIDER_NAME` 공개 alias 추가. `providers/__init__` re-export.
+- **검증**: ruff + mypy --strict(81 files) + lint-imports(4 kept) + 단위 7건 + 전체 unit 921 +
+  coverage 80.64%.
+
+**다음**: T-RV-54b(`fetch_standard_museums` fetcher + `feature_place_standard_museums` asset +
+resource) → 54c(museum↔MOIS dedup pair) → 54d(ETL preview).
+
 ## 2026-06-07 (claude) — T-RV-53d krforest ETL preview 등록 → T-RV-53 완료
 
 **작업**: krforest를 admin 디버그 ETL preview 레지스트리에 등록(데이터소스별 debug UI surface).

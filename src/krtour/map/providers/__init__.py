@@ -152,11 +152,17 @@ from krtour.map.providers.opinet import (
 )
 from krtour.map.providers.standard_data import (
     DATASET_KEY_CULTURAL_FESTIVALS,
+    DATASET_KEY_MUSEUMS,
     FESTIVAL_CATEGORY,
     FESTIVAL_MARKER_COLOR,
     FESTIVAL_MARKER_ICON,
+    MUSEUM_CATEGORY,
+    MUSEUM_MARKER_COLOR,
+    STANDARD_DATA_PROVIDER_NAME,
     CulturalFestivalItem,
+    PublicMuseumArtItem,
     cultural_festivals_to_bundles,
+    museums_to_bundles,
 )
 from krtour.map.providers.visitkorea import (
     DATASET_KEY_FESTIVAL_EVENTS,
@@ -176,6 +182,13 @@ __all__ = [
     "FESTIVAL_CATEGORY",
     "FESTIVAL_MARKER_ICON",
     "FESTIVAL_MARKER_COLOR",
+    # standard_data 박물관/미술관 (T-RV-54, ADR-034 9단계 — MOIS-sibling)
+    "PublicMuseumArtItem",
+    "museums_to_bundles",
+    "DATASET_KEY_MUSEUMS",
+    "MUSEUM_CATEGORY",
+    "MUSEUM_MARKER_COLOR",
+    "STANDARD_DATA_PROVIDER_NAME",
     # visitkorea (PR#51, ADR-042 — TourAPI enrichment 2차)
     "VisitKoreaFestivalItem",
     "FestivalMatch",
