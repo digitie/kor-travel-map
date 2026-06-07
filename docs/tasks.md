@@ -338,8 +338,12 @@ enrichment(모듈 있음, 미wiring)**. dedup 인프라(scoring/queue/admin rout
 - [ ] **T-RV-54 박물관/미술관(standard_data) feature-load**(points 1·3·4): provider `datagokr`
   `client.museum_art.iter_all()`→`PublicMuseumArtGallery`(instt_code / fclty_nm / fclty_type /
   rdnmadr·lnmadr / lat·lon / phone / homepage). (READY 판정.)
-  - [ ] **T-RV-54a (krtour)** `standard_data.py` 확장 — `museums_to_bundles`(place, category
-    `01.04.01 박물관`/미술관) + Protocol. 단위 테스트.
+  - [x] **T-RV-54a (krtour)**(2026-06-07) `standard_data.py` 확장 — `museums_to_bundles`(place) +
+    `PublicMuseumArtItem` Protocol. category는 `fclty_type`으로 박물관(`01040100`)/미술관(`01040200`)
+    분기, 미상 시 부모 `01040000`. place_kind `museum`, 좌표 float→Decimal, 안정키 `instt_code`
+    (없으면 `name::road` 파생). `providers/__init__` re-export. 단위 7건(박물관/미술관 category 분기/
+    파생키/미상 fallback/PRIMARY/결정성/naive/reverse) green. ruff/mypy(81)/lint-imports/unit 921/
+    coverage 80.64%.
   - [ ] **T-RV-54b (krtour)** `fetch_standard_museums` fetcher + `feature_place_standard_museums`
     asset + resource.
   - [ ] **T-RV-54c (dedup)** museum↔MOIS dedup: `standard_museums` ≅ MOIS `museums_art_galleries`

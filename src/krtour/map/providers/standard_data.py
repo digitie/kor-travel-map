@@ -45,6 +45,10 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Final, Protocol, runtime_checkable
 
+from krtour.map.category import (
+    PlaceCategoryCode,
+    mapbox_maki_icon_or_none,
+)
 from krtour.map.core.address import (
     extract_sido_code,
     extract_sigungu_code,
@@ -64,6 +68,7 @@ from krtour.map.dto import (
     Feature,
     FeatureBundle,
     FeatureKind,
+    PlaceDetail,
     SourceLink,
     SourceRecord,
     SourceRole,
@@ -77,12 +82,18 @@ from krtour.map.geocoding import (
 
 __all__ = [
     "CulturalFestivalItem",
+    "PublicMuseumArtItem",
     "cultural_festivals_to_bundles",
+    "museums_to_bundles",
     # 상수 (호출자가 source_role/marker 등 변경하고 싶을 때 참조)
     "DATASET_KEY_CULTURAL_FESTIVALS",
+    "DATASET_KEY_MUSEUMS",
     "FESTIVAL_CATEGORY",
     "FESTIVAL_MARKER_ICON",
     "FESTIVAL_MARKER_COLOR",
+    "MUSEUM_CATEGORY",
+    "MUSEUM_MARKER_COLOR",
+    "STANDARD_DATA_PROVIDER_NAME",
 ]
 
 
@@ -108,6 +119,28 @@ FESTIVAL_MARKER_ICON: Final[str] = "star"
 
 FESTIVAL_MARKER_COLOR: Final[str] = "P-11"
 """축제 marker color palette (자홍 계열). ``docs/event-feature-etl.md §4`` 표."""
+
+STANDARD_DATA_PROVIDER_NAME: Final[str] = _PROVIDER_NAME
+"""``data.go.kr-standard`` canonical provider name 공개 alias(asset/fetcher 참조용)."""
+
+DATASET_KEY_MUSEUMS: Final[str] = "datagokr_museums"
+"""``source_records.dataset_key`` — 전국박물관미술관표준데이터(ADR-034 9단계)."""
+
+_MUSEUM_ENTITY_TYPE: Final[str] = "museum_art_gallery"
+"""provider 내 entity 종류 — ``source_records.source_entity_type``."""
+
+MUSEUM_CATEGORY: Final[str] = PlaceCategoryCode.TOURISM_CULTURAL_FACILITY.value
+"""``Feature.category`` 기본값 — 문화시설 01040000. fclty_type으로 박물관(01040100)/
+미술관(01040200) sub-code로 정밀화한다."""
+
+MUSEUM_PLACE_KIND: Final[str] = "museum"
+"""``PlaceDetail.place_kind``."""
+
+MUSEUM_MARKER_COLOR: Final[str] = "P-09"
+"""박물관/미술관 marker color (ADR-029 P-01~P-16 범위)."""
+
+_DEFAULT_MUSEUM_ICON: Final[str] = "museum"
+"""category maki 매핑이 없을 때 fallback Maki icon."""
 
 
 # -- 입력 Protocol --------------------------------------------------------
@@ -421,6 +454,218 @@ async def cultural_festivals_to_bundles(
     )
     return [
         await _item_to_bundle(
+            item,
+            fetched_at=fetched_at,
+            reverse_geocoder=geocoder,
+            address_resolver=resolver,
+        )
+        for item in items
+    ]
+
+
+# -- 박물관/미술관 (place, ADR-034 9단계) ---------------------------------
+
+
+@runtime_checkable
+class PublicMuseumArtItem(Protocol):
+    """전국박물관미술관표준데이터 1 row 입력 shape (``PublicMuseumArtGallery``).
+
+    ``python-datagokr-api``의 ``museum_art.iter_all()`` 결과 model이 본 Protocol을
+    만족한다(필드명 동일). 좌표는 WGS84 ``float``.
+    """
+
+    fclty_nm: str | None
+    """시설명(박물관/미술관명) — ``Feature.name``."""
+
+    fclty_type: str | None
+    """시설 구분(박물관/미술관) — category sub-code 분기 + ``facility_info``."""
+
+    rdnmadr: str | None
+    """도로명주소 — ``Feature.address.road``."""
+
+    lnmadr: str | None
+    """지번주소 — ``Feature.address.legal``."""
+
+    latitude: float | None
+    longitude: float | None
+
+    oper_phone_number: str | None
+    """운영기관 전화번호 — ``PlaceDetail.phones``."""
+
+    homepage_url: str | None
+
+    instt_code: str | None
+    """제공기관코드 — 안정 식별자(``source_entity_id``). 없으면 name::road 파생."""
+
+    raw: Any
+    """provider 원천 dict."""
+
+
+def _resolve_museum_category(fclty_type: str | None) -> str:
+    """``fclty_type``으로 박물관(01040100)/미술관(01040200) 분기. 미상이면 01040000."""
+    text = normalize_korean_text(fclty_type) or ""
+    if "미술" in text:
+        return PlaceCategoryCode.TOURISM_CULTURAL_FACILITY_ART.value
+    if "박물" in text:
+        return PlaceCategoryCode.TOURISM_CULTURAL_FACILITY_MUSEUM.value
+    return MUSEUM_CATEGORY
+
+
+async def _museum_to_bundle(
+    item: PublicMuseumArtItem,
+    *,
+    fetched_at: datetime,
+    reverse_geocoder: ReverseGeocoder | None,
+    address_resolver: AddressResolver | None,
+) -> FeatureBundle:
+    """박물관/미술관 1 row → place ``FeatureBundle``."""
+    name = item.fclty_nm or ""
+    coord: Coordinate | None
+    if item.latitude is not None and item.longitude is not None:
+        coord = Coordinate(lon=Decimal(str(item.longitude)), lat=Decimal(str(item.latitude)))
+    else:
+        coord = None
+
+    road_text = normalize_korean_text(item.rdnmadr)
+    legal_text = normalize_korean_text(item.lnmadr)
+
+    geo: Address | None = None
+    if coord is not None and reverse_geocoder is not None:
+        geo = await reverse_geocoder(coord)
+    if (geo is None or geo.bjd_code is None) and address_resolver is not None:
+        resolved = await address_resolver(Address(road=road_text, legal=legal_text))
+        if resolved is not None and resolved.bjd_code is not None:
+            geo = resolved
+    bjd_code = geo.bjd_code if geo is not None else None
+    sigungu_code = (
+        (geo.sigungu_code if geo is not None else None)
+        or extract_sigungu_code(bjd_code)
+    )
+    sido_code = (
+        (geo.sido_code if geo is not None else None) or extract_sido_code(bjd_code)
+    )
+    address = Address(
+        road=road_text,
+        legal=legal_text,
+        admin=geo.admin if geo is not None else None,
+        bjd_code=bjd_code,
+        admin_dong_code=geo.admin_dong_code if geo is not None else None,
+        sigungu_code=sigungu_code,
+        sido_code=sido_code,
+        road_name_code=geo.road_name_code if geo is not None else None,
+        zipcode=geo.zipcode if geo is not None else None,
+        sido_name=geo.sido_name if geo is not None else None,
+        sigungu_name=geo.sigungu_name if geo is not None else None,
+    )
+
+    natural_key = item.instt_code or "::".join(
+        [normalize_korean_text(name) or name, road_text or ""]
+    )
+    category = _resolve_museum_category(item.fclty_type)
+    raw_data: dict[str, Any] = {
+        "fclty_nm": item.fclty_nm,
+        "fclty_type": item.fclty_type,
+        "rdnmadr": item.rdnmadr,
+        "lnmadr": item.lnmadr,
+        "latitude": str(item.latitude) if item.latitude is not None else None,
+        "longitude": str(item.longitude) if item.longitude is not None else None,
+        "oper_phone_number": item.oper_phone_number,
+        "homepage_url": item.homepage_url,
+        "instt_code": item.instt_code,
+    }
+    payload_hash = make_payload_hash(raw_data)
+    source_record_key = make_source_record_key(
+        provider=_PROVIDER_NAME,
+        dataset_key=DATASET_KEY_MUSEUMS,
+        source_entity_type=_MUSEUM_ENTITY_TYPE,
+        source_entity_id=natural_key,
+        raw_payload_hash=payload_hash,
+    )
+    feature_id = make_feature_id(
+        bjd_code=bjd_code,
+        kind=FeatureKind.PLACE.value,
+        category=category,
+        source_type=f"{_PROVIDER_NAME}:{DATASET_KEY_MUSEUMS}",
+        source_natural_key=natural_key,
+    )
+    phone = normalize_phone_number(item.oper_phone_number)
+    feature = Feature(
+        feature_id=feature_id,
+        kind=FeatureKind.PLACE,
+        name=normalize_korean_text(name) or name,
+        coord=coord,
+        address=address,
+        category=category,
+        marker_icon=mapbox_maki_icon_or_none(category) or _DEFAULT_MUSEUM_ICON,
+        marker_color=MUSEUM_MARKER_COLOR,
+        detail=PlaceDetail(
+            feature_id=feature_id,
+            place_kind=MUSEUM_PLACE_KIND,
+            phones=[phone] if phone else [],
+            facility_info={
+                k: v
+                for k, v in {
+                    "fclty_type": normalize_korean_text(item.fclty_type),
+                    "homepage_url": item.homepage_url,
+                }.items()
+                if v is not None
+            },
+        ),
+    )
+    source_record = SourceRecord(
+        provider=normalize_provider_name(_PROVIDER_NAME),
+        dataset_key=DATASET_KEY_MUSEUMS,
+        source_entity_type=_MUSEUM_ENTITY_TYPE,
+        source_entity_id=natural_key,
+        raw_payload_hash=payload_hash,
+        source_version=None,
+        raw_name=item.fclty_nm,
+        raw_address=item.rdnmadr or item.lnmadr,
+        raw_longitude=coord.lon if coord is not None else None,
+        raw_latitude=coord.lat if coord is not None else None,
+        raw_data=raw_data,
+        fetched_at=fetched_at,
+        source_record_key=source_record_key,
+    )
+    source_link = SourceLink(
+        feature_id=feature_id,
+        source_record_key=source_record_key,
+        source_role=SourceRole.PRIMARY,
+        match_method="natural_key",
+        confidence=100,
+        is_primary_source=True,
+    )
+    return FeatureBundle(
+        feature=feature,
+        source_record=source_record,
+        source_link=source_link,
+    )
+
+
+async def museums_to_bundles(
+    items: Iterable[PublicMuseumArtItem],
+    *,
+    fetched_at: datetime,
+    reverse_geocoder: ReverseGeocoder | None = None,
+    address_resolver: AddressResolver | None = None,
+) -> list[FeatureBundle]:
+    """전국박물관미술관표준데이터 items → ``list[FeatureBundle]`` (place, ADR-034 9단계).
+
+    각 bundle은 박물관/미술관 place Feature(category 0104xxxx) + SourceRecord + PRIMARY
+    SourceLink. ``instt_code``가 없으면 ``name::road`` 파생키(ADR-009 ``::``).
+    """
+    geocoder = (
+        cached_reverse_geocoder(reverse_geocoder)
+        if reverse_geocoder is not None
+        else None
+    )
+    resolver = (
+        cached_address_resolver(address_resolver)
+        if address_resolver is not None
+        else None
+    )
+    return [
+        await _museum_to_bundle(
             item,
             fetched_at=fetched_at,
             reverse_geocoder=geocoder,
