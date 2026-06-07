@@ -167,9 +167,11 @@ from krtour.map.providers.standard_data import (
 from krtour.map.providers.visitkorea import (
     DATASET_KEY_FESTIVAL_EVENTS,
     VISITKOREA_PROVIDER_NAME,
+    FestivalCandidate,
     FestivalEnrichment,
     FestivalMatch,
     FestivalMatcher,
+    ScoringFestivalMatcher,
     VisitKoreaFestivalItem,
     festival_to_enrichment_links,
 )
@@ -193,6 +195,8 @@ __all__ = [
     "VisitKoreaFestivalItem",
     "FestivalMatch",
     "FestivalMatcher",
+    "FestivalCandidate",
+    "ScoringFestivalMatcher",
     "FestivalEnrichment",
     "festival_to_enrichment_links",
     "VISITKOREA_PROVIDER_NAME",

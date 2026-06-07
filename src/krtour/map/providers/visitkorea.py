@@ -41,6 +41,7 @@ ADR 참조
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Final, Protocol, Self, runtime_checkable
 
@@ -49,12 +50,15 @@ from pydantic import BaseModel, ConfigDict, model_validator
 from krtour.map.core.address import normalize_korean_text, normalize_phone_number
 from krtour.map.core.ids import make_payload_hash, make_source_record_key
 from krtour.map.core.providers import normalize_provider_name
+from krtour.map.core.scoring import name_similarity
 from krtour.map.dto import SourceLink, SourceRecord, SourceRole
 
 __all__ = [
     "VisitKoreaFestivalItem",
     "FestivalMatch",
     "FestivalMatcher",
+    "FestivalCandidate",
+    "ScoringFestivalMatcher",
     "FestivalEnrichment",
     "festival_to_enrichment_links",
     "VISITKOREA_PROVIDER_NAME",
@@ -155,6 +159,80 @@ class FestivalMatcher(Protocol):
     """
 
     def match(self, item: VisitKoreaFestivalItem) -> FestivalMatch | None: ...
+
+
+# -- 기본 매칭 구현 (이름 유사도, ADR-016) --------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class FestivalCandidate:
+    """``ScoringFestivalMatcher`` 후보 — 이미 적재된 datagokr 축제 1건.
+
+    ``feature_id``는 ``make_feature_id(...)`` 결과(1차 datagokr festival),
+    ``name``은 ``Feature.name``. 호출자(Dagster asset)가 DB에서 적재된 festival을
+    읽어 candidate list를 만든다.
+    """
+
+    feature_id: str
+    name: str
+
+
+@dataclass(slots=True)
+class _FestivalMatch:
+    """``FestivalMatch`` Protocol 구현.
+
+    ``FestivalMatch`` Protocol이 mutable 속성을 선언하므로 frozen이 아니다(frozen이면
+    read-only라 mypy structural 매칭 실패). 내부 사용은 read-only로만 한다.
+    """
+
+    feature_id: str
+    confidence: int
+    match_method: str
+
+
+class ScoringFestivalMatcher:
+    """``FestivalMatcher`` 기본 구현 — 이름 Jaro-Winkler 유사도(ADR-016)로 매칭.
+
+    ``VisitKoreaFestivalItem`` Protocol은 좌표/법정동코드를 노출하지 않으므로(area_code/
+    sigungu_code는 TourAPI 자체 코드라 datagokr bjd와 직접 비교 불가) **이름 유사도만**
+    쓴다. ``name_threshold`` 이상이면서 최고점인 후보를 매칭한다(동점이면 먼저 등장한
+    후보). 매칭 실패 시 ``None``.
+
+    축제명은 보통 변별력이 높아 이름-only 매칭으로도 정밀도가 충분하다. 기본 임계값은
+    보수적으로 0.90(false positive 회피). 좌표 기반 보강은 Protocol 확장 후속.
+    """
+
+    def __init__(
+        self,
+        candidates: Iterable[FestivalCandidate],
+        *,
+        name_threshold: float = 0.90,
+        match_method: str = "name_match",
+    ) -> None:
+        if not 0.0 <= name_threshold <= 1.0:
+            raise ValueError("name_threshold must be in [0, 1]")
+        self._candidates = [c for c in candidates if c.name and c.name.strip()]
+        self._threshold = name_threshold
+        self._match_method = match_method
+
+    def match(self, item: VisitKoreaFestivalItem) -> FestivalMatch | None:
+        title = item.title or ""
+        if not title.strip():
+            return None
+        best: FestivalCandidate | None = None
+        best_score = 0.0
+        for candidate in self._candidates:
+            score = name_similarity(title, candidate.name)
+            if score > best_score:
+                best_score = score
+                best = candidate
+        if best is None or best_score < self._threshold:
+            return None
+        return _FestivalMatch(
+            feature_id=best.feature_id,
+            confidence=round(best_score * 100),
+            match_method=self._match_method,
+        )
 
 
 # -- 결과 DTO -------------------------------------------------------------

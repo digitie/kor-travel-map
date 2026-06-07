@@ -10,6 +10,23 @@
 - **정본 문서 반영**: `docs/tripmate-rest-api.md`에 향후 개선 및 리팩토링 검토 사항 섹션(§7)을 추가하여 상기 제안 사항(v1 prefix 도입 계획 등)을 명문화.
 - **아티팩트 생성**: 동일한 내용의 분석 보고서 [tripmate_api_analysis.md](file:///C:/Users/digit/.gemini/antigravity/brain/ee4a8fca-db00-4d2a-8cb0-6795335d5022/tripmate_api_analysis.md)를 conversation artifacts 폴더에 작성.
 
+## 2026-06-07 (claude) — T-RV-52b-1 ScoringFestivalMatcher (축제 enrichment 매칭)
+
+**작업**: 축제 enrichment(point 5)의 DB-coupled 매칭 1부 — visitkorea 축제를 적재된 datagokr
+축제에 매칭하는 기본 `FestivalMatcher` 구현.
+
+- `providers/visitkorea.py`: `FestivalCandidate`(feature_id+name) + `ScoringFestivalMatcher` —
+  이름 Jaro-Winkler 유사도(ADR-016 `core.scoring.name_similarity`)로 최고점·임계값(기본 0.90,
+  보수적) 이상 후보 매칭. `VisitKoreaFestivalItem` Protocol이 좌표/bjd를 노출 안 해 **이름-only**
+  (축제명 변별력 높음). 매칭 결과는 `_FestivalMatch`(FestivalMatch Protocol 구현, frozen 아님 —
+  Protocol mutable 속성). `providers/__init__` re-export.
+- **검증**: ruff + mypy --strict(81 files) + lint-imports + 단위 8건(정확매칭/임계값 미달/빈 title/
+  최고점 선택/blank 후보/임계값 검증) + 전체 unit 929 + coverage 80.72%.
+
+**다음(52b-2/3)**: `load_enrichment_links` client/repo(`upsert_source_record`+`upsert_source_link`
+재사용) → `fetch_visitkorea_festival_events` fetcher + `feature_event_visitkorea_enrichment` asset
+(datagokr 축제 candidate 로드 → matcher → `festival_to_enrichment_links` → load).
+
 ## 2026-06-07 (claude) — T-RV-52a visitkorea provider 보강(TourItem festival/detail 필드)
 
 **작업**: 축제 enrichment(point 5)를 위한 provider 보강(cross-repo). krtour
