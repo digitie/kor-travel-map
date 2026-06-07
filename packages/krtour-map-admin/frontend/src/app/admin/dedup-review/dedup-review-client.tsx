@@ -1,10 +1,11 @@
 "use client";
 
-import { CheckIcon, RefreshCwIcon, XIcon } from "lucide-react";
+import { CheckIcon, MergeIcon, RefreshCwIcon, XIcon } from "lucide-react";
 import { useState } from "react";
 
 import {
   type DedupDecision,
+  type DedupFeatureRecord,
   type DedupStatus,
   useDedupDecisionMutation,
   useDedupReviews,
@@ -34,8 +35,18 @@ const statuses: Array<DedupStatus | "all"> = [
   "all",
 ];
 
+/**
+ * master 자동 선정 추천(`core.scoring.select_master` 1순위 = 좌표 보유)의 클라이언트
+ * 힌트. backend가 좌표→updated_at→provider 우선순위로 최종 결정하므로 여기서는 운영자
+ * 판단을 돕는 좌표 보유 여부만 노출한다.
+ */
+function hasCoord(feature: DedupFeatureRecord): boolean {
+  return typeof feature.lon === "number" && typeof feature.lat === "number";
+}
+
 export function DedupReviewClient() {
   const [status, setStatus] = useState<DedupStatus | "all">("pending");
+  const [mergeKey, setMergeKey] = useState<string | null>(null);
   const reviews = useDedupReviews({
     status: status === "all" ? undefined : [status],
     page_size: 100,
@@ -53,6 +64,27 @@ export function DedupReviewClient() {
     });
   };
 
+  /**
+   * merge 확정. ``masterFeatureId``가 없으면 backend가 ``select_master``로 자동 선정한다.
+   * 성공/실패와 무관하게 inline master 선택 패널을 닫는다.
+   */
+  const merge = (reviewKey: string, masterFeatureId?: string) => {
+    decision.mutate(
+      {
+        reviewKey,
+        body: {
+          decision: "merged",
+          master_feature_id: masterFeatureId,
+          decision_reason: masterFeatureId
+            ? "admin-ui merge (master 수동 선택)"
+            : "admin-ui merge (master 자동 선정)",
+          reviewed_by: "local-admin",
+        },
+      },
+      { onSettled: () => setMergeKey(null) },
+    );
+  };
+
   return (
     <AdminShell
       actions={
@@ -66,7 +98,7 @@ export function DedupReviewClient() {
           새로고침
         </Button>
       }
-      description="중복 후보를 운영자가 검토합니다. merge는 master 선택 UI가 필요한 후속 조치입니다."
+      description="중복 후보를 운영자가 검토합니다. accept/reject/ignore 또는 merge(master 수동 선택 또는 자동 선정)로 처리합니다."
       section="Admin"
       title="Dedup review"
     >
@@ -141,37 +173,99 @@ export function DedupReviewClient() {
                   </TableCell>
                   <TableCell>
                     {item.status === "pending" ? (
-                      <div className="flex flex-wrap gap-1">
-                        <Button
-                          disabled={decision.isPending}
-                          size="sm"
-                          type="button"
-                          variant="outline"
-                          onClick={() => decide(item.review_key, "accepted")}
-                        >
-                          <CheckIcon data-icon="inline-start" />
-                          accept
-                        </Button>
-                        <Button
-                          disabled={decision.isPending}
-                          size="sm"
-                          type="button"
-                          variant="outline"
-                          onClick={() => decide(item.review_key, "rejected")}
-                        >
-                          <XIcon data-icon="inline-start" />
-                          reject
-                        </Button>
-                        <Button
-                          disabled={decision.isPending}
-                          size="sm"
-                          type="button"
-                          variant="ghost"
-                          onClick={() => decide(item.review_key, "ignored")}
-                        >
-                          ignore
-                        </Button>
-                      </div>
+                      mergeKey === item.review_key ? (
+                        <div className="flex flex-col gap-1">
+                          <span className="text-xs text-muted-foreground">
+                            master 선택 (병합 시 나머지는 master로 흡수)
+                          </span>
+                          <div className="flex flex-wrap gap-1">
+                            <Button
+                              disabled={decision.isPending}
+                              size="sm"
+                              type="button"
+                              variant="outline"
+                              onClick={() =>
+                                merge(item.review_key, item.feature_a.feature_id)
+                              }
+                            >
+                              A: {item.feature_a.name}
+                              {hasCoord(item.feature_a) ? " · 좌표✓" : ""}
+                            </Button>
+                            <Button
+                              disabled={decision.isPending}
+                              size="sm"
+                              type="button"
+                              variant="outline"
+                              onClick={() =>
+                                merge(item.review_key, item.feature_b.feature_id)
+                              }
+                            >
+                              B: {item.feature_b.name}
+                              {hasCoord(item.feature_b) ? " · 좌표✓" : ""}
+                            </Button>
+                            <Button
+                              disabled={decision.isPending}
+                              size="sm"
+                              type="button"
+                              variant="secondary"
+                              onClick={() => merge(item.review_key)}
+                            >
+                              자동 선정
+                            </Button>
+                            <Button
+                              disabled={decision.isPending}
+                              size="sm"
+                              type="button"
+                              variant="ghost"
+                              onClick={() => setMergeKey(null)}
+                            >
+                              취소
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap gap-1">
+                          <Button
+                            disabled={decision.isPending}
+                            size="sm"
+                            type="button"
+                            variant="outline"
+                            onClick={() => decide(item.review_key, "accepted")}
+                          >
+                            <CheckIcon data-icon="inline-start" />
+                            accept
+                          </Button>
+                          <Button
+                            disabled={decision.isPending}
+                            size="sm"
+                            type="button"
+                            variant="outline"
+                            onClick={() => decide(item.review_key, "rejected")}
+                          >
+                            <XIcon data-icon="inline-start" />
+                            reject
+                          </Button>
+                          <Button
+                            disabled={decision.isPending}
+                            size="sm"
+                            type="button"
+                            variant="default"
+                            onClick={() => setMergeKey(item.review_key)}
+                          >
+                            <MergeIcon data-icon="inline-start" />
+                            merge
+                          </Button>
+                          <Button
+                            disabled={decision.isPending}
+                            size="sm"
+                            type="button"
+                            variant="ghost"
+                            onClick={() => decide(item.review_key, "ignored")}
+                          >
+                            ignore
+                          </Button>
+                        </div>
+                      )
                     ) : (
                       <span className="text-sm text-muted-foreground">완료</span>
                     )}
