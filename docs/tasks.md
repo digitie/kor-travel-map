@@ -328,7 +328,13 @@ enrichment(모듈 있음, 미wiring)**. dedup 인프라(scoring/queue/admin rout
     03020100(전문리조트)/03020200(종합리조트)}`로 MOIS side를 LODGING 카테고리로 좁혀 대규모 비교 회피.
     **수목원(arboretum)은 MOIS PROMOTED 슬러그에 식물원/수목원이 없어 dedup 후보가 없으므로 pair
     미추가**(SOURCE_PRIORITY krforest=45 기존). dagster 단위(기본 pair 2건 검증) green.
-  - [ ] **T-RV-53d (UI)** krforest admin 상세 UI(ETL preview + feature 상세) + dedup 노출.
+  - [x] **T-RV-53d (admin debug UI)**(2026-06-07) krforest를 ETL preview 레지스트리에 등록 —
+    `etl_fixtures.FIXTURE_REGISTRY`에 `krforest_recreation_forests`/`krforest_arboretums` 2 entry
+    (fixture dataclass + builder + `*_to_bundles` convert) 추가 → `/debug/etl/providers`·
+    `/debug/etl/{provider}/{dataset}/preview`에 자동 노출(dry-run place FeatureBundle). admin mypy
+    25 files + etl router 25 passed + preview 실행(count 2/1, kind place) 확인. dedup은 dedup-review
+    UI(T-RV-51a)에 자동 노출(53c scope). **NOTE: ETL preview 레지스트리는 Sprint-2 provider만 있었고
+    knps/krheritage/mois도 미등록 — 후속 정리 후보.**
 - [ ] **T-RV-54 박물관/미술관(standard_data) feature-load**(points 1·3·4): provider `datagokr`
   `client.museum_art.iter_all()`→`PublicMuseumArtGallery`(instt_code / fclty_nm / fclty_type /
   rdnmadr·lnmadr / lat·lon / phone / homepage). (READY 판정.)
