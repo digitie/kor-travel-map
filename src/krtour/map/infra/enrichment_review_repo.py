@@ -89,11 +89,16 @@ ORDER BY name_score DESC, review_key
 LIMIT :limit
 """
 
+# ``FOR UPDATE`` — 동시 결정 race 방지(#297). 같은 review_key를 두 운영자가 동시에
+# 결정하면 한 transaction이 행 잠금을 먼저 잡고, 다른 쪽은 commit까지 대기했다가
+# 갱신된 status(이미 non-pending)를 보고 side-effect 없이 changed=False를 반환한다.
+# 이렇게 "상태 점유 → side-effect" 순서를 보장해 accepted link가 새는 것을 막는다.
 _SELECT_ROW_SQL: Final[str] = """
 SELECT
     review_key, target_feature_id, source_record, name_score, status
 FROM ops.enrichment_review_queue
 WHERE review_key = :review_key
+FOR UPDATE
 """
 
 _MARK_DECISION_SQL: Final[str] = """
@@ -265,6 +270,12 @@ async def decide_enrichment_review(
     pending 행에 한해 ``status``를 갱신한다(이미 검토된 행은 ``changed=False``).
     ``decision='accepted'``이면 보관된 ``SourceRecord``를 복원해 ENRICHMENT link과
     함께 적재한 뒤 상태를 갱신한다. commit은 호출자 책임.
+
+    동시성(#297): 행을 ``SELECT ... FOR UPDATE``로 잠가 같은 review_key의 동시 결정을
+    직렬화한다. 잠금을 먼저 잡은 transaction이 끝날 때까지 다른 결정은 대기하므로,
+    "상태 점유 → side-effect" 순서가 보장되어 changed=False면 link도 적재되지 않는다
+    (accepted link 누수 방지). accepted link 적재가 실패하면 같은 transaction이라
+    상태 변경도 함께 rollback된다.
 
     Raises
     ------

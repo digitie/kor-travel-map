@@ -2,6 +2,22 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-08 (claude) — 리뷰 후속: enrichment 결정 race 수정 (#297/#298)
+
+**작업**: PR #297 리뷰(digitie) actionable finding — `decide_enrichment_review()`가 SELECT 후
+accepted면 link 적재→UPDATE 순서라, 동시 결정 시 reject가 status를 잡아도 accept가 link를 새겨
+`changed=False`(409)인데 link는 커밋될 수 있음. #298 API도 같은 root cause.
+
+- 수정: `_SELECT_ROW_SQL`에 `FOR UPDATE` 추가 → 같은 review_key 동시 결정을 행 잠금으로 직렬화.
+  먼저 잠근 transaction이 commit할 때까지 다른 결정은 대기 후 갱신된 status(non-pending)를 보고
+  side-effect 없이 changed=False 반환("상태 점유 → side-effect" 순서). accepted link 적재 실패
+  시 같은 transaction이라 상태 변경도 rollback.
+- 통합 테스트 `test_concurrent_decide_no_accepted_link_leak`: 같은 pending 행에 accept/reject
+  동시(asyncio.gather, 2 세션) → 정확히 하나만 changed, 최종 ENRICHMENT link 존재 ↔ 최종
+  status='accepted' 정합 검증.
+- **검증**: ruff + mypy --strict(map 85) + lint-imports + unit+lint 965(coverage 81%) +
+  enrichment_review_repo 9(race 포함) + admin router 5 green.
+
 ## 2026-06-08 (claude) — T-RV-04b opinet-3 POI-타깃 scope (→ T-RV-04b 완전 종료)
 
 **작업**: opinet wiring 3/3 = POI-타깃 모드. `fetch_opinet_stations`의 `poi_cache_target` 분기 연결.
