@@ -83,8 +83,10 @@ from krtour.map.geocoding import (
 __all__ = [
     "CulturalFestivalItem",
     "PublicMuseumArtItem",
+    "PublicTouristAttractionItem",
     "cultural_festivals_to_bundles",
     "museums_to_bundles",
+    "tourist_attractions_to_bundles",
     # 상수 (호출자가 source_role/marker 등 변경하고 싶을 때 참조)
     "DATASET_KEY_CULTURAL_FESTIVALS",
     "DATASET_KEY_MUSEUMS",
@@ -94,6 +96,9 @@ __all__ = [
     "MUSEUM_CATEGORY",
     "MUSEUM_MARKER_COLOR",
     "STANDARD_DATA_PROVIDER_NAME",
+    "DATASET_KEY_TOURIST_ATTRACTIONS",
+    "TOURIST_ATTRACTION_CATEGORY",
+    "TOURIST_MARKER_COLOR",
 ]
 
 
@@ -666,6 +671,234 @@ async def museums_to_bundles(
     )
     return [
         await _museum_to_bundle(
+            item,
+            fetched_at=fetched_at,
+            reverse_geocoder=geocoder,
+            address_resolver=resolver,
+        )
+        for item in items
+    ]
+
+
+# -- 관광지/주차장 공용 place 조립 helper (ADR-034 보조 dataset) -----------
+
+
+async def _standard_place_to_bundle(
+    *,
+    name: str,
+    natural_key: str,
+    dataset_key: str,
+    entity_type: str,
+    category: str,
+    place_kind: str,
+    road_text: str | None,
+    legal_text: str | None,
+    latitude: float | None,
+    longitude: float | None,
+    phone_raw: str | None,
+    facility_info: dict[str, Any],
+    raw_data: dict[str, Any],
+    raw_name: str | None,
+    default_icon: str,
+    marker_color: str,
+    fetched_at: datetime,
+    reverse_geocoder: ReverseGeocoder | None,
+    address_resolver: AddressResolver | None,
+) -> FeatureBundle:
+    """data.go.kr 표준데이터 place 1건 → ``FeatureBundle`` 공용 조립(관광지/주차장)."""
+    coord: Coordinate | None
+    if latitude is not None and longitude is not None:
+        coord = Coordinate(lon=Decimal(str(longitude)), lat=Decimal(str(latitude)))
+    else:
+        coord = None
+
+    geo: Address | None = None
+    if coord is not None and reverse_geocoder is not None:
+        geo = await reverse_geocoder(coord)
+    if (geo is None or geo.bjd_code is None) and address_resolver is not None:
+        resolved = await address_resolver(Address(road=road_text, legal=legal_text))
+        if resolved is not None and resolved.bjd_code is not None:
+            geo = resolved
+    bjd_code = geo.bjd_code if geo is not None else None
+    sigungu_code = (
+        (geo.sigungu_code if geo is not None else None)
+        or extract_sigungu_code(bjd_code)
+    )
+    sido_code = (
+        (geo.sido_code if geo is not None else None) or extract_sido_code(bjd_code)
+    )
+    address = Address(
+        road=road_text,
+        legal=legal_text,
+        admin=geo.admin if geo is not None else None,
+        bjd_code=bjd_code,
+        admin_dong_code=geo.admin_dong_code if geo is not None else None,
+        sigungu_code=sigungu_code,
+        sido_code=sido_code,
+        road_name_code=geo.road_name_code if geo is not None else None,
+        zipcode=geo.zipcode if geo is not None else None,
+        sido_name=geo.sido_name if geo is not None else None,
+        sigungu_name=geo.sigungu_name if geo is not None else None,
+    )
+
+    payload_hash = make_payload_hash(raw_data)
+    source_record_key = make_source_record_key(
+        provider=_PROVIDER_NAME,
+        dataset_key=dataset_key,
+        source_entity_type=entity_type,
+        source_entity_id=natural_key,
+        raw_payload_hash=payload_hash,
+    )
+    feature_id = make_feature_id(
+        bjd_code=bjd_code,
+        kind=FeatureKind.PLACE.value,
+        category=category,
+        source_type=f"{_PROVIDER_NAME}:{dataset_key}",
+        source_natural_key=natural_key,
+    )
+    phone = normalize_phone_number(phone_raw)
+    feature = Feature(
+        feature_id=feature_id,
+        kind=FeatureKind.PLACE,
+        name=normalize_korean_text(name) or name,
+        coord=coord,
+        address=address,
+        category=category,
+        marker_icon=mapbox_maki_icon_or_none(category) or default_icon,
+        marker_color=marker_color,
+        detail=PlaceDetail(
+            feature_id=feature_id,
+            place_kind=place_kind,
+            phones=[phone] if phone else [],
+            facility_info={k: v for k, v in facility_info.items() if v is not None},
+        ),
+    )
+    source_record = SourceRecord(
+        provider=normalize_provider_name(_PROVIDER_NAME),
+        dataset_key=dataset_key,
+        source_entity_type=entity_type,
+        source_entity_id=natural_key,
+        raw_payload_hash=payload_hash,
+        source_version=None,
+        raw_name=raw_name,
+        raw_address=road_text or legal_text,
+        raw_longitude=coord.lon if coord is not None else None,
+        raw_latitude=coord.lat if coord is not None else None,
+        raw_data=raw_data,
+        fetched_at=fetched_at,
+        source_record_key=source_record_key,
+    )
+    source_link = SourceLink(
+        feature_id=feature_id,
+        source_record_key=source_record_key,
+        source_role=SourceRole.PRIMARY,
+        match_method="natural_key",
+        confidence=100,
+        is_primary_source=True,
+    )
+    return FeatureBundle(
+        feature=feature, source_record=source_record, source_link=source_link
+    )
+
+
+# -- 관광지 (place, ADR-034 보조) -----------------------------------------
+
+DATASET_KEY_TOURIST_ATTRACTIONS: Final[str] = "datagokr_tourist_attractions"
+"""``source_records.dataset_key`` — 전국관광지표준데이터."""
+
+_TOURIST_ENTITY_TYPE: Final[str] = "tourist_attraction"
+TOURIST_ATTRACTION_CATEGORY: Final[str] = PlaceCategoryCode.TOURISM.value
+"""``Feature.category`` — 관광 01000000(일반 관광지). 세부는 trrsrt_se(facility_info)."""
+TOURIST_PLACE_KIND: Final[str] = "tourist_attraction"
+TOURIST_MARKER_COLOR: Final[str] = "P-02"
+_DEFAULT_TOURIST_ICON: Final[str] = "attraction"
+
+
+@runtime_checkable
+class PublicTouristAttractionItem(Protocol):
+    """전국관광지표준데이터 1 row 입력 shape (``PublicTouristAttraction``)."""
+
+    trrsrt_nm: str | None
+    trrsrt_se: str | None
+    rdnmadr: str | None
+    lnmadr: str | None
+    latitude: float | None
+    longitude: float | None
+    phone_number: str | None
+    instt_code: str | None
+    raw: Any
+
+
+async def _tourist_to_bundle(
+    item: PublicTouristAttractionItem,
+    *,
+    fetched_at: datetime,
+    reverse_geocoder: ReverseGeocoder | None,
+    address_resolver: AddressResolver | None,
+) -> FeatureBundle:
+    name = item.trrsrt_nm or ""
+    road_text = normalize_korean_text(item.rdnmadr)
+    legal_text = normalize_korean_text(item.lnmadr)
+    natural_key = item.instt_code or "::".join(
+        [normalize_korean_text(name) or name, road_text or ""]
+    )
+    raw_data: dict[str, Any] = {
+        "trrsrt_nm": item.trrsrt_nm,
+        "trrsrt_se": item.trrsrt_se,
+        "rdnmadr": item.rdnmadr,
+        "lnmadr": item.lnmadr,
+        "latitude": str(item.latitude) if item.latitude is not None else None,
+        "longitude": str(item.longitude) if item.longitude is not None else None,
+        "phone_number": item.phone_number,
+        "instt_code": item.instt_code,
+    }
+    return await _standard_place_to_bundle(
+        name=name,
+        natural_key=natural_key,
+        dataset_key=DATASET_KEY_TOURIST_ATTRACTIONS,
+        entity_type=_TOURIST_ENTITY_TYPE,
+        category=TOURIST_ATTRACTION_CATEGORY,
+        place_kind=TOURIST_PLACE_KIND,
+        road_text=road_text,
+        legal_text=legal_text,
+        latitude=item.latitude,
+        longitude=item.longitude,
+        phone_raw=item.phone_number,
+        facility_info={"trrsrt_se": normalize_korean_text(item.trrsrt_se)},
+        raw_data=raw_data,
+        raw_name=item.trrsrt_nm,
+        default_icon=_DEFAULT_TOURIST_ICON,
+        marker_color=TOURIST_MARKER_COLOR,
+        fetched_at=fetched_at,
+        reverse_geocoder=reverse_geocoder,
+        address_resolver=address_resolver,
+    )
+
+
+async def tourist_attractions_to_bundles(
+    items: Iterable[PublicTouristAttractionItem],
+    *,
+    fetched_at: datetime,
+    reverse_geocoder: ReverseGeocoder | None = None,
+    address_resolver: AddressResolver | None = None,
+) -> list[FeatureBundle]:
+    """전국관광지표준데이터 items → ``list[FeatureBundle]`` (place, ADR-034 보조).
+
+    각 bundle은 관광지 place Feature(category 01000000) + SourceRecord + PRIMARY
+    SourceLink. ``instt_code``가 없으면 ``name::road`` 파생키(ADR-009 ``::``).
+    """
+    geocoder = (
+        cached_reverse_geocoder(reverse_geocoder)
+        if reverse_geocoder is not None
+        else None
+    )
+    resolver = (
+        cached_address_resolver(address_resolver)
+        if address_resolver is not None
+        else None
+    )
+    return [
+        await _tourist_to_bundle(
             item,
             fetched_at=fetched_at,
             reverse_geocoder=geocoder,

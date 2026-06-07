@@ -26,6 +26,7 @@ from krtour.map_dagster.provider_fetchers import (
     fetch_krheritage_events,
     fetch_mois_license_records,
     fetch_standard_museums,
+    fetch_standard_tourist_attractions,
     fetch_visitkorea_festival_events,
 )
 from krtour.map_dagster.resources import (
@@ -70,6 +71,7 @@ class _FakeDataGoKrClient:
         self.closed = False
         self.festival = _FakeFestivalService([object(), object()])
         self.museum_art = _FakeMuseumArtService([object(), object(), object()])
+        self.tourist_attraction = _FakeMuseumArtService([object(), object()])
         _FakeDataGoKrClient.instances.append(self)
 
     def close(self) -> None:
@@ -726,6 +728,26 @@ def test_visitkorea_festival_events_fetch_yields_and_closes(
     # search_festival에 event_start_date(올해 1월 1일)를 넘긴다.
     assert client.search_calls
     assert client.search_calls[0].month == 1
+
+
+def test_standard_tourist_attractions_raises_when_credential_missing() -> None:
+    settings = KrtourMapSettings(data_go_kr_service_key=None)
+
+    generator = fetch_standard_tourist_attractions(settings)
+    with pytest.raises(ProviderCredentialMissing):
+        next(generator)
+
+
+def test_standard_tourist_attractions_fetch_yields_and_closes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _install_fake_datagokr(monkeypatch)
+    settings = KrtourMapSettings(data_go_kr_service_key=SecretStr("service-key"))
+
+    records = list(fetch_standard_tourist_attractions(settings))
+
+    assert len(records) == 2
+    assert fake.instances[0].closed is True
 
 
 def test_krheritage_fetch_raises_when_credential_missing() -> None:

@@ -51,6 +51,7 @@ from krtour.map.providers.opinet import (
 from krtour.map.providers.standard_data import (
     cultural_festivals_to_bundles,
     museums_to_bundles,
+    tourist_attractions_to_bundles,
 )
 
 __all__ = [
@@ -724,6 +725,41 @@ async def _convert_museums(items: Sequence[Any]) -> list[Any]:
     return [b.model_dump(mode="json") for b in bundles]
 
 
+@dataclass(frozen=True)
+class _Tourist:
+    """`PublicTouristAttractionItem` Protocol 준수 (provider `PublicTouristAttraction`)."""
+
+    trrsrt_nm: str | None
+    trrsrt_se: str | None
+    rdnmadr: str | None
+    lnmadr: str | None
+    latitude: float | None
+    longitude: float | None
+    phone_number: str | None
+    instt_code: str | None
+    raw: Any = None
+
+
+def _tourist_fixture() -> Sequence[_Tourist]:
+    return [
+        _Tourist(
+            trrsrt_nm="에버랜드",
+            trrsrt_se="테마파크",
+            rdnmadr="경기도 용인시 처인구 포곡읍 에버랜드로 199",
+            lnmadr=None,
+            latitude=37.2940,
+            longitude=127.2020,
+            phone_number="031-320-5000",
+            instt_code="TR-0001",
+        ),
+    ]
+
+
+async def _convert_tourist(items: Sequence[Any]) -> list[Any]:
+    bundles = await tourist_attractions_to_bundles(items, fetched_at=_now())
+    return [b.model_dump(mode="json") for b in bundles]
+
+
 # ── Registry ──────────────────────────────────────────────────────────
 
 
@@ -856,6 +892,14 @@ FIXTURE_REGISTRY: Final[tuple[EtlFixtureEntry, ...]] = (
         description="전국박물관미술관표준데이터 → place Feature (ADR-034 9단계). T-RV-54.",
         build_fixture=_museums_fixture,
         convert=_convert_museums,
+    ),
+    EtlFixtureEntry(
+        provider="data.go.kr-standard",
+        dataset="datagokr_tourist_attractions",
+        variant="FeatureBundle",
+        description="전국관광지표준데이터 → place Feature (ADR-034 보조). T-RV-55.",
+        build_fixture=_tourist_fixture,
+        convert=_convert_tourist,
     ),
 )
 

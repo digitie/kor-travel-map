@@ -192,6 +192,9 @@ def test_refresh_dedup_uses_default_scopes_when_config_empty() -> None:
     assert client.pairs[2][0].dataset_key == "datagokr_museums"
     assert client.pairs[2][1].provider == "python-mois-api"
     assert client.pairs[2][1].categories == ("01040000",)
+    # 관광지 ↔ MOIS 관광사업체(01000000).
+    assert client.pairs[3][0].dataset_key == "datagokr_tourist_attractions"
+    assert client.pairs[3][1].categories == ("01000000",)
     assert client.siblings == []
 
     dedup_output = result.output_for_node("refresh_dedup_candidates")
