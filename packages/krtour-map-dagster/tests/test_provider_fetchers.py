@@ -1043,11 +1043,54 @@ def test_opinet_stations_missing_key_raises() -> None:
         next(fetch_opinet_stations(settings))
 
 
-def test_opinet_stations_poi_mode_not_yet_wired() -> None:
+def test_center_radius_to_bbox_math() -> None:
+    from krtour.map_dagster.provider_fetchers import _center_radius_to_bbox
+
+    min_lon, min_lat, max_lon, max_lat = _center_radius_to_bbox(127.0, 37.5, 5.0)
+    # 대칭 + 위경도 폭(위도 5km≈0.045°, 경도는 cos(37.5)로 더 넓음).
+    assert min_lon < 127.0 < max_lon
+    assert min_lat < 37.5 < max_lat
+    assert abs((37.5 - min_lat) - 5.0 / 111.0) < 1e-6
+    assert (max_lon - 127.0) > (max_lat - 37.5)  # 경도 폭 > 위도 폭
+
+
+def test_opinet_stations_poi_mode_enumerates_and_dedups(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _install_fake_opinet(
+        monkeypatch, stations=[_FakeStation("P1"), _FakeStation("P2")]
+    )
+    monkeypatch.setattr(
+        provider_fetchers,
+        "_opinet_poi_target_bboxes",
+        lambda _settings: [
+            (126.9, 37.4, 127.1, 37.6),
+            (129.0, 35.1, 129.3, 35.3),
+        ],
+    )
     settings = KrtourMapSettings(
         opinet_api_key=SecretStr("k"), opinet_scope_mode="poi_cache_target"
     )
-    with pytest.raises(ProviderCredentialMissing, match="poi_cache_target"):
+
+    records = list(fetch_opinet_stations(settings))
+
+    # 2 target bbox 각각 동일 2 station 반환 → uni_id dedup → P1, P2.
+    assert [r.uni_id for r in records] == ["P1", "P2"]
+    client = fake.instances[0]
+    assert len(client.bbox_calls) == 2
+    assert client.closed is True
+
+
+def test_opinet_stations_poi_mode_empty_targets_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        provider_fetchers, "_opinet_poi_target_bboxes", lambda _settings: []
+    )
+    settings = KrtourMapSettings(
+        opinet_api_key=SecretStr("k"), opinet_scope_mode="poi_cache_target"
+    )
+    with pytest.raises(ProviderCredentialMissing, match="활성 target"):
         next(fetch_opinet_stations(settings))
 
 

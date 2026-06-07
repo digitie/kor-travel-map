@@ -2,6 +2,26 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-08 (claude) — T-RV-04b opinet-3 POI-타깃 scope (→ T-RV-04b 완전 종료)
+
+**작업**: opinet wiring 3/3 = POI-타깃 모드. `fetch_opinet_stations`의 `poi_cache_target` 분기 연결.
+
+- `_opinet_poi_target_bboxes(settings)`: sync fetcher라 `settings.pg_dsn`(async)을 sync psycopg
+  DSN(`+asyncpg`→`+psycopg`)으로 바꿔 `ops.poi_cache_targets`에서 `external_system='opinet'` +
+  `update_enabled` + non-deleted target(lon/lat/radius_km) 조회 → `_center_radius_to_bbox`(위도 1°
+  ≈111km, 경도 cos(lat) 근사)로 bbox 변환. 짧은 connect/dispose.
+- `fetch_opinet_stations` poi 분기: target bbox들을 기존 `_enumerate_opinet_stations`로 enumerate
+  (target 간 겹침 uni_id dedup). 활성 target 없으면 명확 guard.
+- 테스트: 단위(`_center_radius_to_bbox` math / poi enumerate via monkeypatched bboxes + fake opinet
+  dedup / empty targets guard) + 통합(`test_opinet_poi_scope`: 실 PostGIS에 opinet target seed→
+  commit→sync 조회로 bbox 반환, 비활성/타 시스템 제외 검증).
+- **검증**: ruff + mypy --strict(map 85/dagster 13/admin 26) + lint-imports + unit+lint 965
+  (coverage 81%) + full 1169 + dagster 87 green.
+
+**→ T-RV-04b 완전 종료**: provider 8종(datagokr/krheritage/krex×2/mois/knps×2/opinet) live wiring
+완료. opinet은 bbox + POI-타깃 2 scope(settings 선택). T-RV-04b 및 후속 program(T-RV-50~55) 모두
+종결.
+
 ## 2026-06-08 (claude) — T-RV-04b opinet-2 bbox fetcher + scope settings
 
 **작업**: opinet wiring 2/3 = bbox 모드. OpiNet은 전국 dump가 없어 `iter_stations_in_bbox`

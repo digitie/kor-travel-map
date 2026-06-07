@@ -15,12 +15,13 @@ lazy import**한다 — 본 모듈 import만으로 provider 패키지를 hard-re
 from __future__ import annotations
 
 import importlib
+import math
 import pathlib
 from collections.abc import AsyncIterator, Iterable, Iterator
 from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Final, cast
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
 if TYPE_CHECKING:
@@ -625,6 +626,50 @@ def _enumerate_opinet_stations(
             yield station
 
 
+def _center_radius_to_bbox(
+    lon: float, lat: float, radius_km: float
+) -> tuple[float, float, float, float]:
+    """중심(lon/lat) + 반경(km) → WGS84 bbox(min_lon,min_lat,max_lon,max_lat).
+
+    위도 1° ≈ 111km, 경도 1° ≈ 111·cos(lat)km 근사. 극단 위도 방어를 위해
+    cos는 최소값으로 clamp한다.
+    """
+    dlat = radius_km / 111.0
+    cos_lat = max(math.cos(math.radians(lat)), 0.01)
+    dlon = radius_km / (111.0 * cos_lat)
+    return (lon - dlon, lat - dlat, lon + dlon, lat + dlat)
+
+
+_OPINET_POI_TARGETS_SQL: Final[str] = """
+SELECT lon, lat, radius_km
+FROM ops.poi_cache_targets
+WHERE external_system = 'opinet'
+  AND update_enabled
+  AND deleted_at IS NULL
+"""
+
+
+def _opinet_poi_target_bboxes(
+    settings: KrtourMapSettings,
+) -> list[tuple[float, float, float, float]]:
+    """``ops.poi_cache_targets``의 opinet 활성 target(중심+반경) → bbox 목록.
+
+    fetcher는 sync라 ``settings.pg_dsn``(async driver)을 sync psycopg DSN으로 바꿔
+    짧게 조회한다(``+asyncpg`` → ``+psycopg``). DB 미가용은 호출 시점 오류로 표면화.
+    """
+    dsn = settings.pg_dsn.get_secret_value().replace("+asyncpg", "+psycopg")
+    engine = create_engine(dsn)
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(text(_OPINET_POI_TARGETS_SQL)).all()
+    finally:
+        engine.dispose()
+    return [
+        _center_radius_to_bbox(float(lon), float(lat), float(radius_km))
+        for lon, lat, radius_km in rows
+    ]
+
+
 def fetch_opinet_stations(
     settings: KrtourMapSettings,
 ) -> Iterator[Any]:
@@ -635,9 +680,10 @@ def fetch_opinet_stations(
 
     - ``disabled`` — 미적재(guard).
     - ``bbox`` — ``opinet_scope_bbox`` 영역 1개 enumerate.
-    - ``poi_cache_target`` — opinet POI cache target 주변(후속 opinet-3에서 연결).
+    - ``poi_cache_target`` — ``ops.poi_cache_targets``의 opinet 활성 target(중심+반경)을
+      bbox로 변환해 enumerate(여러 target 간 ``uni_id`` dedup).
 
-    sync generator, finally close. ``uni_id`` dedup.
+    sync generator, finally close.
     """
     mode = settings.opinet_scope_mode
     if mode == "disabled":
@@ -651,22 +697,28 @@ def fetch_opinet_stations(
             "opinet live fetch에는 KRTOUR_MAP_OPINET_API_KEY (source OPINET_API_KEY)가 "
             "필요하다."
         )
-    if mode == "poi_cache_target":
-        raise ProviderCredentialMissing(
-            "opinet poi_cache_target scope는 후속(T-RV-04b opinet-3)에서 연결된다."
-        )
-    if settings.opinet_scope_bbox is None:
-        raise ProviderCredentialMissing(
-            "opinet bbox scope에는 OPINET_SCOPE_BBOX "
-            "(min_lon,min_lat,max_lon,max_lat)가 필요하다."
-        )
-    bbox = _parse_opinet_bbox(settings.opinet_scope_bbox)
+
+    bboxes: list[tuple[float, float, float, float]]
+    if mode == "bbox":
+        if settings.opinet_scope_bbox is None:
+            raise ProviderCredentialMissing(
+                "opinet bbox scope에는 OPINET_SCOPE_BBOX "
+                "(min_lon,min_lat,max_lon,max_lat)가 필요하다."
+            )
+        bboxes = [_parse_opinet_bbox(settings.opinet_scope_bbox)]
+    else:  # poi_cache_target
+        bboxes = _opinet_poi_target_bboxes(settings)
+        if not bboxes:
+            raise ProviderCredentialMissing(
+                "opinet poi_cache_target scope: ops.poi_cache_targets에 "
+                "external_system='opinet' 활성 target이 없다."
+            )
 
     opinet = cast(Any, importlib.import_module("opinet"))
     client = opinet.OpinetClient(api_key=secret.get_secret_value())
     try:
         yield from _enumerate_opinet_stations(
-            client, [bbox], radius_m=settings.opinet_scope_radius_m
+            client, bboxes, radius_m=settings.opinet_scope_radius_m
         )
     finally:
         close = getattr(client, "close", None)
