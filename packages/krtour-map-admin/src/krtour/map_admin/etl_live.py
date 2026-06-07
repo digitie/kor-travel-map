@@ -323,21 +323,6 @@ _KREX_WEATHER_METRICS: Final[tuple[tuple[str, str, str], ...]] = (
     ("rainfallValue", "RN1", "mm"),
 )
 
-# EX 돌발(incident) type 코드/한글 → 본 lib 표준 notice_type (NOTICE_TYPES).
-# EX incidentType: 1=사고 / 2=공사 / 3=기상 / 4=기타.
-_KREX_INCIDENT_TYPE_MAP: Final[dict[str, str]] = {
-    "1": "traffic_accident",
-    "사고": "traffic_accident",
-    "교통사고": "traffic_accident",
-    "2": "roadwork",
-    "공사": "roadwork",
-    "3": "weather_alert",
-    "기상": "weather_alert",
-    "4": "traffic",
-    "기타": "traffic",
-}
-
-
 @dataclass(frozen=True)
 class _KrexRestAreaAdapter:
     """`KrexRestAreaItem` Protocol 만족 (provider ``RestArea`` 정합, ADR-044).
@@ -379,18 +364,21 @@ class _KrexWeatherAdapter:
 
 @dataclass(frozen=True)
 class _KrexNoticeAdapter:
-    """`KrexTrafficNoticeItem` Protocol 만족."""
+    """`KrexTrafficNoticeItem` Protocol 만족 (provider ``krex.models.Incident`` mirror).
 
-    notice_id: str
-    title: str
-    notice_type: str
-    description: str | None
-    longitude: Decimal | None
-    latitude: Decimal | None
-    valid_from: datetime | None
-    valid_until: datetime | None
-    severity: int | None
-    source_agency: str | None
+    ADR-044: notice_id/title/notice_type/효력기간/severity/source_agency 등 파생은
+    본 lib 변환부(`traffic_notices_to_bundles`)가 전담한다 — adapter는 provider
+    ``_incident`` 파서와 동일하게 raw 필드만 mirror한다.
+    """
+
+    route_no: str | None
+    route_name: str | None
+    direction: str | None
+    incident_type: str | None
+    message: str | None
+    started_at: str | None
+    ended_at: str | None
+    raw: dict[str, Any]
 
 
 def _first_str(item: dict[str, Any], *keys: str) -> str | None:
@@ -400,18 +388,6 @@ def _first_str(item: dict[str, Any], *keys: str) -> str | None:
         if value is not None and str(value).strip():
             return str(value).strip()
     return None
-
-
-def _krex_parse_dt(date_str: str | None, time_str: str | None) -> datetime | None:
-    """EX 날짜(YYYYMMDD) + 시각(HHMM/HHMMSS) → KST aware datetime. 실패 시 None."""
-    if not date_str or len(date_str) != 8 or not date_str.isdigit():
-        return None
-    hh, mm = 0, 0
-    if time_str and time_str.isdigit() and len(time_str) >= 4:
-        hh, mm = int(time_str[:2]), int(time_str[2:4])
-    return datetime(
-        int(date_str[:4]), int(date_str[4:6]), int(date_str[6:8]), hh, mm, tzinfo=KST
-    )
 
 
 async def _krex_call(
@@ -543,25 +519,21 @@ def _adapt_krex_weather_row(
 
 
 def _adapt_krex_notice(raw: dict[str, Any]) -> _KrexNoticeAdapter:
-    raw_type = _first_str(raw, "incidentType", "eventType", "notice_type") or "4"
-    # EX 코드/한글 → 표준 notice_type. 매핑 없으면 generic 'traffic'.
-    notice_type = _KREX_INCIDENT_TYPE_MAP.get(raw_type, "traffic")
-    message = _first_str(raw, "message", "contents", "incidentContent", "title") or ""
-    notice_id = _first_str(raw, "incidentId", "eventId", "notice_id")
-    if notice_id is None:
-        # EX incident는 안정 id가 없을 수 있음 → 결정적 합성.
-        notice_id = f"{notice_type}:{_first_str(raw, 'startDate') or ''}:{message[:40]}"
+    """raw EX incident dict → provider ``Incident`` shape mirror (ADR-044).
+
+    provider ``krex.client._incident`` 파서와 동일한 raw 키를 읽어 그대로 옮긴다.
+    notice_type 매핑·id/title 합성·효력기간 파싱·source_agency 부여 등 모든 파생은
+    본 lib 변환부(`traffic_notices_to_bundles`)가 전담하므로 adapter는 mirror만 한다.
+    """
     return _KrexNoticeAdapter(
-        notice_id=notice_id,
-        title=message or notice_type,
-        notice_type=notice_type,
-        description=message or None,
-        longitude=None,
-        latitude=None,
-        valid_from=_krex_parse_dt(raw.get("startDate"), raw.get("startTime")),
-        valid_until=_krex_parse_dt(raw.get("endDate"), raw.get("endTime")),
-        severity=None,
-        source_agency="한국도로공사",
+        route_no=_first_str(raw, "routeNo"),
+        route_name=_first_str(raw, "routeName"),
+        direction=_first_str(raw, "dirType", "directionCode"),
+        incident_type=_first_str(raw, "incidentType", "eventType"),
+        message=_first_str(raw, "message", "contents", "incidentContent"),
+        started_at=_first_str(raw, "startDate", "startTime"),
+        ended_at=_first_str(raw, "endDate", "endTime"),
+        raw=raw,
     )
 
 

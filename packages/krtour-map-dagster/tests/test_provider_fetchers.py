@@ -16,6 +16,7 @@ from krtour.map_dagster.provider_fetchers import (
     ProviderCredentialMissing,
     fetch_datagokr_cultural_festivals,
     fetch_krex_rest_areas,
+    fetch_krex_traffic_notices,
     fetch_krheritage_events,
 )
 from krtour.map_dagster.resources import (
@@ -190,6 +191,100 @@ def test_krex_rest_areas_fetch_closes_on_partial_consumption(
     settings = KrtourMapSettings(krex_go_api_key=SecretStr("go-key"))
 
     generator = fetch_krex_rest_areas(settings)
+    first = next(generator)
+    assert first is not None
+    generator.close()
+
+    assert fake.instances[0].closed is True
+
+
+class _FakeIncidentService:
+    def __init__(self, total: int) -> None:
+        self.total = total
+        self.calls: list[tuple[int, int]] = []
+
+    def incident(
+        self, *, num_of_rows: int = 1000, page_no: int = 1, **_kwargs: Any
+    ) -> _FakePage:
+        self.calls.append((num_of_rows, page_no))
+        start = (page_no - 1) * num_of_rows
+        end = min(start + num_of_rows, self.total)
+        items = tuple(object() for _ in range(max(0, end - start)))
+        return _FakePage(items=items, total_count=self.total, page_no=page_no)
+
+
+class _FakeKrexTrafficClient:
+    instances: list[_FakeKrexTrafficClient] = []
+    total: int = 0
+
+    def __init__(self, *, ex_api_key: str | None = None, **_kwargs: Any) -> None:
+        self.ex_api_key = ex_api_key
+        self.closed = False
+        self.traffic = _FakeIncidentService(type(self).total)
+        _FakeKrexTrafficClient.instances.append(self)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _install_fake_krex_traffic(
+    monkeypatch: pytest.MonkeyPatch, *, total: int
+) -> type[_FakeKrexTrafficClient]:
+    _FakeKrexTrafficClient.instances = []
+    _FakeKrexTrafficClient.total = total
+    module = ModuleType("krex")
+    module.__dict__["KrexClient"] = _FakeKrexTrafficClient
+    monkeypatch.setitem(sys.modules, "krex", module)
+    return _FakeKrexTrafficClient
+
+
+def test_krex_traffic_notices_fetch_raises_when_credential_missing() -> None:
+    settings = KrtourMapSettings(krex_ex_api_key=None)
+
+    generator = fetch_krex_traffic_notices(settings)
+    with pytest.raises(ProviderCredentialMissing):
+        next(generator)
+
+
+def test_krex_traffic_notices_fetch_paginates_yields_and_closes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # total 1003 → page1=1000(full)·page2=3(short) → 2 pages, short-page stop.
+    fake = _install_fake_krex_traffic(monkeypatch, total=1003)
+    settings = KrtourMapSettings(krex_ex_api_key=SecretStr("ex-key"))
+
+    records = list(fetch_krex_traffic_notices(settings))
+
+    assert len(records) == 1003
+    assert len(fake.instances) == 1
+    client = fake.instances[0]
+    assert client.ex_api_key == "ex-key"
+    assert client.closed is True
+    # 페이지네이션: page_no 1,2 만 호출(빈 3페이지 미호출), num_of_rows=1000.
+    assert client.traffic.calls == [(1000, 1), (1000, 2)]
+
+
+def test_krex_traffic_notices_fetch_stops_on_total_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # total 2000 = 정확히 2 페이지(각 1000) → total_count 도달로 stop(빈 페이지 X).
+    fake = _install_fake_krex_traffic(monkeypatch, total=2000)
+    settings = KrtourMapSettings(krex_ex_api_key=SecretStr("ex-key"))
+
+    records = list(fetch_krex_traffic_notices(settings))
+
+    assert len(records) == 2000
+    assert fake.instances[0].traffic.calls == [(1000, 1), (1000, 2)]
+    assert fake.instances[0].closed is True
+
+
+def test_krex_traffic_notices_fetch_closes_on_partial_consumption(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _install_fake_krex_traffic(monkeypatch, total=1003)
+    settings = KrtourMapSettings(krex_ex_api_key=SecretStr("ex-key"))
+
+    generator = fetch_krex_traffic_notices(settings)
     first = next(generator)
     assert first is not None
     generator.close()

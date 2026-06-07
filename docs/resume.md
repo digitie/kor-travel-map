@@ -47,10 +47,14 @@ fetch)`로 해당 resource_key만 guard→live 교체. dagster 테스트는 prov
   재정렬(uni_id/address 제거). provider 안정 id/address는 **이슈 `python-krex-api#7`**로 분리.
 - **적합성 감사(`docs/reports/t-rv-04b-provider-fetcher-audit-2026-06-07.md`): datagokr
   외는 전부 model↔Protocol 실검증 필수(감사 "ASSUMED CLEAN" 신뢰 불가).**
-  - **krex_traffic_notices**: `Incident` model이 notice_id/좌표/severity/valid_from·until
-    대거 미충족 → 재조정 + provider 이슈 필요. 미착수.
-  - **opinet**: bulk 없음 → grid 검색 커버리지 정책. **mois**: SpatiaLite DB파일 refresh
-    정책. **knps**: keyless 파일셋 SHP/CSV 파서 어댑터.
+  - [x] **④ krex_traffic_notices**(2026-06-07) — ADR-044 재정렬(Protocol→Incident shape) +
+    krtour-side 파생(notice_id `::` 복합키, title 합성, valid 파싱, source_agency 기본,
+    coordless). 잔여: EX incidentType 코드 매핑(krtour follow-up).
+  - **opinet**: ⏸ provider 차단 — bulk/지역 엔드포인트 없음(aroundAll 5km만) → 이슈
+    `python-opinet-api#7`. 라이브러리 보강 대기 또는 POI 타깃 모델 전환(product 결정).
+  - **mois**: ⭐다음 — Phase B fetcher(미리 sync된 MOIS 소스 SQLite DB →
+    `iter_open_place_records(PROMOTED_SERVICE_SLUGS)`) + Phase A sync op + 신규 설정
+    `mois_source_db_path`(정책 설명 완료). **knps**: keyless 파일셋 SHP/CSV 파서 어댑터.
 - **원칙(업데이트)**: provider 착수 전 (1) 이미 구현됐는지 grep, (2) provider model이
   krtour Protocol을 실제로 만족하는지 검증(미검증 wiring은 런타임 AttributeError),
   (3) **provider 라이브러리 수정이 필요하면 직접 편집 대신 해당 repo에 AI agent용 상세

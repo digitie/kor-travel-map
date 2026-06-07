@@ -26,6 +26,7 @@ from krtour.map.settings import KrtourMapSettings
 from .provider_fetchers import (
     fetch_datagokr_cultural_festivals,
     fetch_krex_rest_areas,
+    fetch_krex_traffic_notices,
     fetch_krheritage_events,
 )
 
@@ -238,6 +239,20 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["krex_rest_areas"] = (
     build_provider_record_live_resource(
         _KREX_REST_AREAS_SPEC,
         fetch_krex_rest_areas,
+    )
+)
+
+_KREX_TRAFFIC_NOTICES_SPEC: ProviderRecordResourceSpec = next(
+    spec
+    for spec in PROVIDER_RECORD_RESOURCE_SPECS
+    if spec.resource_key == "krex_traffic_notices"
+)
+"""krex 교통 공지 spec 참조 (live resource override용)."""
+
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["krex_traffic_notices"] = (
+    build_provider_record_live_resource(
+        _KREX_TRAFFIC_NOTICES_SPEC,
+        fetch_krex_traffic_notices,
     )
 )
 

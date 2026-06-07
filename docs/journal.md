@@ -2,6 +2,30 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-07 (claude) — T-RV-04b ④ krex_traffic_notices + opinet 차단
+
+**krex_traffic_notices**(ADR-044 재정렬, 사용자 재량 기본값): `KrexTrafficNoticeItem`
+Protocol을 provider `Incident` 실제 shape로 재정렬, krtour-side 파생을 transform으로:
+notice_id=`::` 복합키(route_no/incident_type/started_at + payload_hash), title 합성
+(`[노선] incident_type`), notice_type=`normalize_notice_type`(미매핑 시 "traffic"),
+valid_from/until=`_parse_krex_datetime`(다중 포맷 방어적, KST), severity=None,
+source_agency="한국도로공사", coord=None(coordless notice — raw_address=route로 strict
+검증 통과). fetcher=`KrexClient(ex_api_key).traffic.incident` 페이지네이션. 단위+통합+
+admin etl 테스트 갱신. **잔여**: EX incidentType 숫자코드 매핑 테이블(krtour follow-up),
+일시적 incident의 영속화는 재실행 갱신+valid_until 만료로 처리(설계 메모).
+
+**opinet 차단**: `aroundAll`(반경 5km)만 있고 bulk/지역 station 목록 엔드포인트 없음 →
+전국 enumeration ~2만 호출 비현실. **provider 이슈 `python-opinet-api#7`** 등록(지역/bulk
+엔드포인트 래핑 요청). 라이브러리 보강 전까지 wiring 보류(또는 POI 주변 타깃 모델 전환은
+product 결정).
+
+**gate**: ruff + mypy --strict(krtour.map 80 / dagster 12) green, krex+admin+dagster 86 +
+통합 dagster etl green, unit coverage 80.31%(krex.py 91%).
+
+**다음(사용자 순서 1→2→3 중)**: mois(Phase B fetcher: 미리 sync된 MOIS 소스 SQLite DB →
+`iter_open_place_records(PROMOTED_SERVICE_SLUGS)`; Phase A sync op + `mois_source_db_path`
+설정). knps(파일 파서).
+
 ## 2026-06-07 (claude) — T-RV-04b ③ krex_rest_areas (ADR-044 재정렬 + 파생 자연키)
 
 **작업**: krex 휴게소 live fetcher. `RestArea` model에 안정 식별자·주소가 없음을 확인
