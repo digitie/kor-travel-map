@@ -23,6 +23,7 @@ from krtour.map_admin.settings import AdminSettings
 __all__ = [
     "router",
     "DagsterNuxSeenResponse",
+    "DagsterRunDetailResponse",
     "DagsterSummaryResponse",
 ]
 
@@ -46,11 +47,37 @@ query KrtourMapDagsterSummary($limit: Int!) {
           name
           cronSchedule
           executionTimezone
-          scheduleState { status }
+          scheduleState {
+            status
+            ticks(limit: 3) {
+              tickId
+              status
+              timestamp
+              endTimestamp
+              runIds
+              runKeys
+              skipReason
+              cursor
+              error { message stack className }
+            }
+          }
         }
         sensors {
           name
-          sensorState { status }
+          sensorState {
+            status
+            ticks(limit: 3) {
+              tickId
+              status
+              timestamp
+              endTimestamp
+              runIds
+              runKeys
+              skipReason
+              cursor
+              error { message stack className }
+            }
+          }
         }
         assetNodes {
           id
@@ -83,6 +110,49 @@ query KrtourMapDagsterSummary($limit: Int!) {
 }
 """
 
+_DAGSTER_RUN_DETAIL_QUERY = """
+query KrtourMapDagsterRunDetail($runId: ID!, $eventLimit: Int!) {
+  runOrError(runId: $runId) {
+    __typename
+    ... on Run {
+      runId
+      jobName
+      status
+      startTime
+      endTime
+      updateTime
+      tags { key value }
+      eventConnection(limit: $eventLimit) {
+        cursor
+        hasMore
+        events {
+          __typename
+          ... on MessageEvent {
+            message
+            timestamp
+            level
+            stepKey
+            eventType
+          }
+          ... on ErrorEvent {
+            error { message stack className }
+          }
+        }
+      }
+    }
+    ... on RunNotFoundError {
+      message
+      runId
+    }
+    ... on PythonError {
+      message
+      stack
+      className
+    }
+  }
+}
+"""
+
 _DAGSTER_SET_NUX_SEEN_MUTATION = """
 mutation KrtourMapSetNuxSeen {
   setNuxSeen
@@ -109,6 +179,32 @@ class DagsterJob(BaseModel):
     is_job: bool
 
 
+class DagsterGraphqlError(BaseModel):
+    """Dagster GraphQL PythonError 요약."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    message: str | None = None
+    stack: list[str] = Field(default_factory=list)
+    class_name: str | None = None
+
+
+class DagsterInstigationTick(BaseModel):
+    """Dagster schedule/sensor tick 요약."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tick_id: str
+    status: str
+    timestamp: float
+    end_timestamp: float | None = None
+    run_ids: list[str] = Field(default_factory=list)
+    run_keys: list[str] = Field(default_factory=list)
+    skip_reason: str | None = None
+    cursor: str | None = None
+    error: DagsterGraphqlError | None = None
+
+
 class DagsterSchedule(BaseModel):
     """Dagster schedule 요약."""
 
@@ -118,6 +214,7 @@ class DagsterSchedule(BaseModel):
     cron_schedule: str | None = None
     execution_timezone: str | None = None
     status: str | None = None
+    recent_ticks: list[DagsterInstigationTick] = Field(default_factory=list)
 
 
 class DagsterSensor(BaseModel):
@@ -127,6 +224,7 @@ class DagsterSensor(BaseModel):
 
     name: str
     status: str | None = None
+    recent_ticks: list[DagsterInstigationTick] = Field(default_factory=list)
 
 
 class DagsterRepository(BaseModel):
@@ -214,6 +312,45 @@ class DagsterNuxSeenResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: DagsterNuxSeenData
+    meta: DagsterDetailMeta
+
+
+class DagsterRunEvent(BaseModel):
+    """Dagster run event/failure 요약."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    event_type: str
+    message: str | None = None
+    timestamp: str | None = None
+    level: str | None = None
+    step_key: str | None = None
+    dagster_event_type: str | None = None
+    error: DagsterGraphqlError | None = None
+
+
+class DagsterRunDetailData(BaseModel):
+    """`GET /ops/dagster/runs/{run_id}` data."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["ok", "not_found", "unavailable", "error"]
+    dagster_url: str
+    graphql_url: str
+    checked_at: datetime
+    run: DagsterRunSummary | None = None
+    events: list[DagsterRunEvent] = Field(default_factory=list)
+    event_cursor: str | None = None
+    event_has_more: bool = False
+    errors: list[str] = Field(default_factory=list)
+
+
+class DagsterRunDetailResponse(BaseModel):
+    """`GET /ops/dagster/runs/{run_id}` 응답 (DA-D-03 envelope)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: DagsterRunDetailData
     meta: DagsterDetailMeta
 
 
@@ -315,6 +452,10 @@ def _optional_float(value: object) -> float | None:
     return None
 
 
+def _string_list(value: object) -> list[str]:
+    return [item for item in _list(value) if isinstance(item, str)]
+
+
 def _asset_name(asset_node: JsonDict) -> str:
     asset_key = _dict(asset_node.get("assetKey"))
     path = [part for part in _list(asset_key.get("path")) if isinstance(part, str)]
@@ -336,6 +477,40 @@ def _parse_jobs(raw_jobs: list[object]) -> list[DagsterJob]:
     return jobs
 
 
+def _parse_graphql_error(raw_error: object) -> DagsterGraphqlError | None:
+    error = _dict(raw_error)
+    if not error:
+        return None
+    return DagsterGraphqlError(
+        message=_optional_string(error.get("message")),
+        stack=_string_list(error.get("stack")),
+        class_name=_optional_string(error.get("className")),
+    )
+
+
+def _parse_ticks(raw_ticks: object) -> list[DagsterInstigationTick]:
+    ticks: list[DagsterInstigationTick] = []
+    for raw in _list(raw_ticks):
+        entry = _dict(raw)
+        tick_id = _string(entry.get("tickId"))
+        if not tick_id:
+            continue
+        ticks.append(
+            DagsterInstigationTick(
+                tick_id=tick_id,
+                status=_string(entry.get("status"), "UNKNOWN"),
+                timestamp=_optional_float(entry.get("timestamp")) or 0.0,
+                end_timestamp=_optional_float(entry.get("endTimestamp")),
+                run_ids=_string_list(entry.get("runIds")),
+                run_keys=_string_list(entry.get("runKeys")),
+                skip_reason=_optional_string(entry.get("skipReason")),
+                cursor=_optional_string(entry.get("cursor")),
+                error=_parse_graphql_error(entry.get("error")),
+            )
+        )
+    return ticks
+
+
 def _parse_schedules(raw_schedules: list[object]) -> list[DagsterSchedule]:
     schedules: list[DagsterSchedule] = []
     for raw in raw_schedules:
@@ -347,6 +522,7 @@ def _parse_schedules(raw_schedules: list[object]) -> list[DagsterSchedule]:
                 cron_schedule=_optional_string(entry.get("cronSchedule")),
                 execution_timezone=_optional_string(entry.get("executionTimezone")),
                 status=_optional_string(state.get("status")),
+                recent_ticks=_parse_ticks(state.get("ticks")),
             )
         )
     return schedules
@@ -361,6 +537,7 @@ def _parse_sensors(raw_sensors: list[object]) -> list[DagsterSensor]:
             DagsterSensor(
                 name=_string(entry.get("name"), "unknown_sensor"),
                 status=_optional_string(state.get("status")),
+                recent_ticks=_parse_ticks(state.get("ticks")),
             )
         )
     return sensors
@@ -438,6 +615,84 @@ def _parse_runs(raw_runs: JsonDict) -> tuple[list[DagsterRunSummary], dict[str, 
     return runs, dict(counts), []
 
 
+def _parse_run_summary(entry: JsonDict) -> DagsterRunSummary:
+    tags = {
+        _string(_dict(tag).get("key")): _string(_dict(tag).get("value"))
+        for tag in _list(entry.get("tags"))
+        if _string(_dict(tag).get("key"))
+    }
+    return DagsterRunSummary(
+        run_id=_string(entry.get("runId"), "unknown_run"),
+        job_name=_optional_string(entry.get("jobName")),
+        status=_string(entry.get("status"), "UNKNOWN"),
+        start_time=_optional_float(entry.get("startTime")),
+        end_time=_optional_float(entry.get("endTime")),
+        update_time=_optional_float(entry.get("updateTime")),
+        tags=tags,
+    )
+
+
+def _parse_run_event(raw_event: object) -> DagsterRunEvent:
+    event = _dict(raw_event)
+    return DagsterRunEvent(
+        event_type=_string(event.get("__typename"), "DagsterEvent"),
+        message=_optional_string(event.get("message")),
+        timestamp=_optional_string(event.get("timestamp")),
+        level=_optional_string(event.get("level")),
+        step_key=_optional_string(event.get("stepKey")),
+        dagster_event_type=_optional_string(event.get("eventType")),
+        error=_parse_graphql_error(event.get("error")),
+    )
+
+
+def _parse_run_detail(
+    raw_run: JsonDict,
+    *,
+    dagster_urls: _DagsterUrls,
+    checked_at: datetime,
+) -> DagsterRunDetailData:
+    typename = _string(raw_run.get("__typename"))
+    if typename == "Run":
+        event_connection = _dict(raw_run.get("eventConnection"))
+        return DagsterRunDetailData(
+            status="ok",
+            dagster_url=dagster_urls.dagster_url,
+            graphql_url=dagster_urls.graphql_url,
+            checked_at=checked_at,
+            run=_parse_run_summary(raw_run),
+            events=[
+                _parse_run_event(raw_event)
+                for raw_event in _list(event_connection.get("events"))
+            ],
+            event_cursor=_optional_string(event_connection.get("cursor")),
+            event_has_more=bool(event_connection.get("hasMore")),
+        )
+    if typename == "RunNotFoundError":
+        return DagsterRunDetailData(
+            status="not_found",
+            dagster_url=dagster_urls.dagster_url,
+            graphql_url=dagster_urls.graphql_url,
+            checked_at=checked_at,
+            errors=[_string(raw_run.get("message"), "Dagster run을 찾을 수 없습니다.")],
+        )
+    if typename == "PythonError":
+        message = _optional_string(raw_run.get("message")) or "Dagster run 상세 조회 실패"
+        return DagsterRunDetailData(
+            status="error",
+            dagster_url=dagster_urls.dagster_url,
+            graphql_url=dagster_urls.graphql_url,
+            checked_at=checked_at,
+            errors=[message],
+        )
+    return DagsterRunDetailData(
+        status="error",
+        dagster_url=dagster_urls.dagster_url,
+        graphql_url=dagster_urls.graphql_url,
+        checked_at=checked_at,
+        errors=[f"알 수 없는 Dagster run 응답 타입: {typename or 'unknown'}"],
+    )
+
+
 async def _post_graphql(
     client: httpx.AsyncClient,
     graphql_url: str,
@@ -487,6 +742,17 @@ def _nux_seen_response(
     data: DagsterNuxSeenData, *, started_at: float
 ) -> DagsterNuxSeenResponse:
     return DagsterNuxSeenResponse(
+        data=data,
+        meta=DagsterDetailMeta(
+            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
+        ),
+    )
+
+
+def _run_detail_response(
+    data: DagsterRunDetailData, *, started_at: float
+) -> DagsterRunDetailResponse:
+    return DagsterRunDetailResponse(
         data=data,
         meta=DagsterDetailMeta(
             duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
@@ -608,6 +874,84 @@ async def get_dagster_summary(
             repositories=repositories,
             recent_runs=recent_runs,
             errors=errors,
+        ),
+        started_at=started_at,
+    )
+
+
+@router.get(
+    "/runs/{run_id}",
+    response_model=DagsterRunDetailResponse,
+    summary="Dagster run 상세",
+    description=(
+        "Dagster GraphQL runOrError를 조회해 최근 event log와 실패 error payload를 "
+        "admin UI용 DTO로 반환한다. 조회 전용이며 Dagster run을 재실행하거나 "
+        "상태를 변경하지 않는다."
+    ),
+)
+async def get_dagster_run_detail(
+    request: Request,
+    run_id: str,
+    event_limit: int = Query(default=50, ge=1, le=200),
+) -> DagsterRunDetailResponse:
+    started_at = perf_counter()
+    settings = _settings_from_request(request)
+    checked_at = datetime.now(UTC)
+    raw_graphql_url = _candidate_graphql_url(settings)
+
+    try:
+        dagster_urls = _dagster_urls(settings)
+    except DagsterUrlConfigurationError as exc:
+        return _run_detail_response(
+            DagsterRunDetailData(
+                status="error",
+                dagster_url=settings.dagster_url,
+                graphql_url=raw_graphql_url,
+                checked_at=checked_at,
+                errors=[str(exc)],
+            ),
+            started_at=started_at,
+        )
+
+    client = _http_client_from_request(request, settings)
+    try:
+        payload = await _post_graphql(
+            client=client,
+            graphql_url=dagster_urls.graphql_url,
+            variables={"runId": run_id, "eventLimit": event_limit},
+            query=_DAGSTER_RUN_DETAIL_QUERY,
+        )
+    except (httpx.HTTPError, ValueError) as exc:
+        return _run_detail_response(
+            DagsterRunDetailData(
+                status="unavailable",
+                dagster_url=dagster_urls.dagster_url,
+                graphql_url=dagster_urls.graphql_url,
+                checked_at=checked_at,
+                errors=[str(exc)],
+            ),
+            started_at=started_at,
+        )
+
+    graphql_errors = payload.get("errors")
+    if isinstance(graphql_errors, list) and graphql_errors:
+        return _run_detail_response(
+            DagsterRunDetailData(
+                status="error",
+                dagster_url=dagster_urls.dagster_url,
+                graphql_url=dagster_urls.graphql_url,
+                checked_at=checked_at,
+                errors=[str(error) for error in graphql_errors],
+            ),
+            started_at=started_at,
+        )
+
+    data = _dict(payload.get("data"))
+    return _run_detail_response(
+        _parse_run_detail(
+            _dict(data.get("runOrError")),
+            dagster_urls=dagster_urls,
+            checked_at=checked_at,
         ),
         started_at=started_at,
     )

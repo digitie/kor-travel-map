@@ -667,25 +667,53 @@ Query:
 
 - `run_limit` (`1..50`, 기본 `10`)
 
-응답:
+응답(`data` 발췌):
 
 ```json
 {
-  "status": "ok",
-  "dagster_url": "http://127.0.0.1:9013",
-  "graphql_url": "http://127.0.0.1:9013/graphql",
-  "version": "1.13.7",
-  "repository_count": 1,
-  "job_count": 10,
-  "asset_count": 9,
-  "schedule_count": 9,
-  "sensor_count": 2,
-  "run_counts": {"SUCCESS": 3},
-  "repositories": [],
-  "recent_runs": [],
-  "errors": []
+  "data": {
+    "status": "ok",
+    "dagster_url": "http://127.0.0.1:9013",
+    "graphql_url": "http://127.0.0.1:9013/graphql",
+    "version": "1.13.7",
+    "repository_count": 1,
+    "job_count": 10,
+    "asset_count": 9,
+    "schedule_count": 9,
+    "sensor_count": 2,
+    "run_counts": {"SUCCESS": 3},
+    "repositories": [
+      {
+        "name": "__repository__",
+        "location_name": "krtour.map_dagster.definitions",
+        "schedules": [
+          {
+            "name": "nightly_feature_refresh",
+            "status": "RUNNING",
+            "recent_ticks": [
+              {
+                "tick_id": "1",
+                "status": "SUCCESS",
+                "timestamp": 1710000000.0,
+                "run_ids": ["run-1"]
+              }
+            ]
+          }
+        ],
+        "sensors": []
+      }
+    ],
+    "recent_runs": [],
+    "errors": []
+  },
+  "meta": {"duration_ms": 12}
 }
 ```
+
+`repositories[].schedules[].recent_ticks`와 `repositories[].sensors[].recent_ticks`는
+Dagster schedule/sensor tick history의 최근 3건이다. tick은 `status`, `timestamp`,
+`run_ids`, `run_keys`, `skip_reason`, `error`를 포함할 수 있고, run id가 있으면
+`GET /ops/dagster/runs/{run_id}`로 실패 상세를 조회한다.
 
 `status`:
 
@@ -698,6 +726,54 @@ Query:
 이 endpoint는 Dagster run/job을 제어하지 않는다. feature update request는
 `/admin/feature-update-requests`, import job progress는 `/ops/import-jobs` 계약으로
 분리한다. job cancel은 아직 별도 backend task가 필요하다.
+
+#### `GET /ops/dagster/runs/{run_id}`
+
+Dagster `runOrError`와 event log를 조회한다. schedule/sensor tick 또는 recent run에서
+선택한 run의 실패 원인과 최근 event를 admin UI에 표시하기 위한 읽기 전용 endpoint다.
+
+Path:
+
+- `run_id`
+
+Query:
+
+- `event_limit` (`1..200`, 기본 `50`)
+
+응답(`data` 발췌):
+
+```json
+{
+  "data": {
+    "status": "ok",
+    "dagster_url": "http://127.0.0.1:9013",
+    "graphql_url": "http://127.0.0.1:9013/graphql",
+    "checked_at": "2026-06-07T09:00:00Z",
+    "run": {
+      "run_id": "run-1",
+      "job_name": "__ASSET_JOB",
+      "status": "FAILURE",
+      "tags": {"dagster/job": "__ASSET_JOB"}
+    },
+    "events": [
+      {
+        "event_type": "RunFailureEvent",
+        "dagster_event_type": "RUN_FAILURE",
+        "message": "run failed",
+        "level": "ERROR",
+        "error": {"message": "boom", "stack": [], "class_name": "RuntimeError"}
+      }
+    ],
+    "event_cursor": "cursor",
+    "event_has_more": false,
+    "errors": []
+  },
+  "meta": {"duration_ms": 15}
+}
+```
+
+`status`는 `ok`, `not_found`, `unavailable`, `error` 중 하나다. 이 endpoint도
+Dagster run 재실행, cancel, mutation을 수행하지 않는다.
 
 #### `POST /ops/dagster/nux-seen`
 

@@ -1903,6 +1903,125 @@
         "title": "DagsterDetailMeta",
         "type": "object"
       },
+      "DagsterGraphqlError": {
+        "additionalProperties": false,
+        "description": "Dagster GraphQL PythonError 요약.",
+        "properties": {
+          "class_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Class Name"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "stack": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Stack",
+            "type": "array"
+          }
+        },
+        "title": "DagsterGraphqlError",
+        "type": "object"
+      },
+      "DagsterInstigationTick": {
+        "additionalProperties": false,
+        "description": "Dagster schedule/sensor tick 요약.",
+        "properties": {
+          "cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cursor"
+          },
+          "end_timestamp": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Timestamp"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DagsterGraphqlError"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "run_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Run Ids",
+            "type": "array"
+          },
+          "run_keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Run Keys",
+            "type": "array"
+          },
+          "skip_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skip Reason"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "tick_id": {
+            "title": "Tick Id",
+            "type": "string"
+          },
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "number"
+          }
+        },
+        "required": [
+          "tick_id",
+          "status",
+          "timestamp"
+        ],
+        "title": "DagsterInstigationTick",
+        "type": "object"
+      },
       "DagsterJob": {
         "additionalProperties": false,
         "description": "Dagster job/pipeline 요약.",
@@ -2046,6 +2165,181 @@
         "title": "DagsterRepository",
         "type": "object"
       },
+      "DagsterRunDetailData": {
+        "additionalProperties": false,
+        "description": "`GET /ops/dagster/runs/{run_id}` data.",
+        "properties": {
+          "checked_at": {
+            "format": "date-time",
+            "title": "Checked At",
+            "type": "string"
+          },
+          "dagster_url": {
+            "title": "Dagster Url",
+            "type": "string"
+          },
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "event_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Cursor"
+          },
+          "event_has_more": {
+            "default": false,
+            "title": "Event Has More",
+            "type": "boolean"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/DagsterRunEvent"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "graphql_url": {
+            "title": "Graphql Url",
+            "type": "string"
+          },
+          "run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DagsterRunSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "not_found",
+              "unavailable",
+              "error"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "dagster_url",
+          "graphql_url",
+          "checked_at"
+        ],
+        "title": "DagsterRunDetailData",
+        "type": "object"
+      },
+      "DagsterRunDetailResponse": {
+        "additionalProperties": false,
+        "description": "`GET /ops/dagster/runs/{run_id}` 응답 (DA-D-03 envelope).",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DagsterRunDetailData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/DagsterDetailMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "DagsterRunDetailResponse",
+        "type": "object"
+      },
+      "DagsterRunEvent": {
+        "additionalProperties": false,
+        "description": "Dagster run event/failure 요약.",
+        "properties": {
+          "dagster_event_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dagster Event Type"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DagsterGraphqlError"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "event_type": {
+            "title": "Event Type",
+            "type": "string"
+          },
+          "level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Level"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "step_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Key"
+          },
+          "timestamp": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timestamp"
+          }
+        },
+        "required": [
+          "event_type"
+        ],
+        "title": "DagsterRunEvent",
+        "type": "object"
+      },
       "DagsterRunSummary": {
         "additionalProperties": false,
         "description": "최근 Dagster run 요약.",
@@ -2148,6 +2442,13 @@
             "title": "Name",
             "type": "string"
           },
+          "recent_ticks": {
+            "items": {
+              "$ref": "#/components/schemas/DagsterInstigationTick"
+            },
+            "title": "Recent Ticks",
+            "type": "array"
+          },
           "status": {
             "anyOf": [
               {
@@ -2173,6 +2474,13 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "recent_ticks": {
+            "items": {
+              "$ref": "#/components/schemas/DagsterInstigationTick"
+            },
+            "title": "Recent Ticks",
+            "type": "array"
           },
           "status": {
             "anyOf": [
@@ -11759,6 +12067,62 @@
           }
         },
         "summary": "Dagster NUX seen 처리",
+        "tags": [
+          "ops",
+          "dagster"
+        ]
+      }
+    },
+    "/ops/dagster/runs/{run_id}": {
+      "get": {
+        "description": "Dagster GraphQL runOrError를 조회해 최근 event log와 실패 error payload를 admin UI용 DTO로 반환한다. 조회 전용이며 Dagster run을 재실행하거나 상태를 변경하지 않는다.",
+        "operationId": "get_dagster_run_detail_ops_dagster_runs__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "event_limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Event Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DagsterRunDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Dagster run 상세",
         "tags": [
           "ops",
           "dagster"

@@ -112,7 +112,7 @@ Frontend 작업 후에는 `react-doctor` 실행, 결과 검토, 개선 반영이
 | `/admin/feature-update-requests` | 좌표/반경/시군구/provider 기준 업데이트 요청 | `/admin/feature-update-requests` |
 | `/admin/poi-cache-targets` | 외부 POI/cache target 등록/삭제/정책 관리 | `/admin/poi-cache-targets` |
 | `/admin/provider-refresh-policies` | provider별 update 주기/rate limit 정책 | `/admin/provider-refresh-policies` |
-| `/admin/dagster` | Dagster 운영 요약 + Dagster webserver embed. summary 성공 시 POST로 Dagster NUX seen best-effort 처리 | `/ops/dagster/summary`, `/ops/dagster/nux-seen` |
+| `/admin/dagster` | Dagster 운영 요약 + tick/run 실패 드릴다운 + Dagster webserver embed. summary 성공 시 POST로 Dagster NUX seen best-effort 처리 | `/ops/dagster/summary`, `/ops/dagster/runs/{run_id}`, `/ops/dagster/nux-seen` |
 | `/ops/metrics` | feature/source/job/dedup/issue/consistency summary | `/ops/metrics` |
 | `/ops/consistency` | consistency report와 issue 큐 | `/ops/consistency/reports`, `/ops/consistency/issues` |
 | `/ops/error-logs` | provider/API/job 이벤트 로그 | 후속 `ops.import_job_events` 스키마 필요 |
@@ -1640,8 +1640,9 @@ Windows Playwright 표준 실행 모델을 따른다.
 13. 반경 내 시군구 feature update request dry-run 결과 확인.
 14. poi cache target 등록, key 기준 주변 feature 조회, target 삭제 후 update 제외 확인.
 15. provider refresh policy 수정 시 rate limit 초과 validation 확인.
-16. `/admin/dagster`에서 자체 요약 UI와 Dagster iframe embed 확인. 로컬 첫 실행 Dagster
-    커뮤니티 모달은 `POST /ops/dagster/nux-seen` 처리 후 표시되지 않아야 한다.
+16. `/admin/dagster`에서 자체 요약 UI, schedule/sensor tick, recent run 선택 시
+    failure/event detail, Dagster iframe embed를 확인. 로컬 첫 실행 Dagster 커뮤니티
+    모달은 `POST /ops/dagster/nux-seen` 처리 후 표시되지 않아야 한다.
 17. API error 발생 시 error toast와 로그 링크 표시.
 
 ### 21.4 OpenAPI drift

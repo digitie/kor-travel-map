@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 import {
   ActivityIcon,
@@ -15,8 +15,12 @@ import {
 
 import {
   DAGSTER_UI_URL,
+  type DagsterGraphqlError,
+  type DagsterInstigationTick,
   type DagsterRepository,
+  type DagsterRunEvent,
   type DagsterRunSummary,
+  useDagsterRunDetail,
   useMarkDagsterNuxSeen,
   useDagsterSummary,
 } from "@/api/dagster";
@@ -83,8 +87,37 @@ function formatCheckedAt(value: string | undefined) {
   return checkedAtFormatter.format(new Date(value));
 }
 
+function formatEventTimestamp(value: string | null | undefined) {
+  if (!value) {
+    return "-";
+  }
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) {
+    return formatEpoch(numeric);
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return runTimeFormatter.format(date);
+}
+
 function shortRunId(runId: string) {
   return runId.length > 12 ? `${runId.slice(0, 12)}...` : runId;
+}
+
+function dagsterRunUrl(runId: string) {
+  return `${DAGSTER_UI_URL.replace(/\/$/, "")}/runs/${encodeURIComponent(runId)}`;
+}
+
+function graphqlErrorText(error: DagsterGraphqlError | null | undefined) {
+  if (!error) {
+    return null;
+  }
+  if (error.class_name && error.message) {
+    return `${error.class_name}: ${error.message}`;
+  }
+  return error.message ?? error.class_name ?? error.stack?.[0] ?? "Dagster error";
 }
 
 function SummaryCard({
@@ -125,14 +158,128 @@ function SummaryCard({
         </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-1">
-        <div className="text-2xl font-semibold tracking-tight">{value}</div>
+        <div className="text-2xl font-semibold">{value}</div>
         <p className="text-xs text-muted-foreground">{description}</p>
       </CardContent>
     </Card>
   );
 }
 
-function RepositoryList({ repositories }: { repositories: DagsterRepository[] }) {
+function TickRows({
+  ticks,
+  onSelectRun,
+}: {
+  ticks: DagsterInstigationTick[];
+  onSelectRun: (runId: string) => void;
+}) {
+  if (ticks.length === 0) {
+    return <span className="text-xs text-muted-foreground">최근 tick 없음</span>;
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      {ticks.map((tick) => (
+        <div
+          className="rounded-md bg-background p-2 text-xs"
+          key={tick.tick_id}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-2">
+              <Badge variant={statusVariant(tick.status)}>{tick.status}</Badge>
+              <span className="truncate font-mono text-muted-foreground">
+                {tick.tick_id}
+              </span>
+            </div>
+            <span className="text-muted-foreground">
+              {formatEpoch(tick.timestamp)}
+            </span>
+          </div>
+          {tick.skip_reason ? (
+            <p className="mt-2 break-words text-muted-foreground">
+              {tick.skip_reason}
+            </p>
+          ) : null}
+          {graphqlErrorText(tick.error) ? (
+            <p className="mt-2 break-words text-destructive">
+              {graphqlErrorText(tick.error)}
+            </p>
+          ) : null}
+          {tick.run_ids?.length ? (
+            <div className="mt-2 flex flex-wrap gap-1">
+              {tick.run_ids.map((runId) => (
+                <Button
+                  className="font-mono"
+                  key={runId}
+                  size="xs"
+                  type="button"
+                  variant="ghost"
+                  onClick={() => onSelectRun(runId)}
+                >
+                  {shortRunId(runId)}
+                </Button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function InstigationList({
+  title,
+  items,
+  onSelectRun,
+}: {
+  title: "Schedules" | "Sensors";
+  items: Array<{
+    name: string;
+    status?: string | null;
+    cron_schedule?: string | null;
+    execution_timezone?: string | null;
+    recent_ticks?: DagsterInstigationTick[];
+  }>;
+  onSelectRun: (runId: string) => void;
+}) {
+  return (
+    <div className="rounded-md border bg-muted/30 p-3">
+      <div className="mb-2 text-sm font-medium">{title}</div>
+      <div className="flex flex-col gap-3">
+        {items.length === 0 ? (
+          <span className="text-xs text-muted-foreground">없음</span>
+        ) : null}
+        {items.map((item) => (
+          <div className="flex flex-col gap-2" key={item.name}>
+            <div className="flex items-center justify-between gap-3 text-xs">
+              <span className="truncate font-mono">{item.name}</span>
+              <Badge variant={statusVariant(item.status ?? "")}>
+                {item.status ?? "unknown"}
+              </Badge>
+            </div>
+            {item.cron_schedule ? (
+              <div className="text-xs text-muted-foreground">
+                {item.cron_schedule}
+                {item.execution_timezone ? ` · ${item.execution_timezone}` : ""}
+              </div>
+            ) : null}
+            <TickRows
+              ticks={item.recent_ticks ?? []}
+              onSelectRun={onSelectRun}
+            />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RepositoryList({
+  repositories,
+  onSelectRun,
+}: {
+  repositories: DagsterRepository[];
+  onSelectRun: (runId: string) => void;
+}) {
   if (repositories.length === 0) {
     return (
       <div className="rounded-md border border-dashed p-5 text-sm text-muted-foreground">
@@ -188,44 +335,16 @@ function RepositoryList({ repositories }: { repositories: DagsterRepository[] })
           </div>
 
           <div className="mt-4 grid gap-3 md:grid-cols-2">
-            <div className="rounded-md border bg-muted/30 p-3">
-              <div className="mb-2 text-sm font-medium">Schedules</div>
-              <div className="flex flex-col gap-2">
-                {repository.schedules.length === 0 ? (
-                  <span className="text-xs text-muted-foreground">없음</span>
-                ) : null}
-                {repository.schedules.map((schedule) => (
-                  <div
-                    className="flex items-center justify-between gap-3 text-xs"
-                    key={schedule.name}
-                  >
-                    <span className="truncate font-mono">{schedule.name}</span>
-                    <Badge variant={statusVariant(schedule.status ?? "")}>
-                      {schedule.status ?? "unknown"}
-                    </Badge>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="rounded-md border bg-muted/30 p-3">
-              <div className="mb-2 text-sm font-medium">Sensors</div>
-              <div className="flex flex-col gap-2">
-                {repository.sensors.length === 0 ? (
-                  <span className="text-xs text-muted-foreground">없음</span>
-                ) : null}
-                {repository.sensors.map((sensor) => (
-                  <div
-                    className="flex items-center justify-between gap-3 text-xs"
-                    key={sensor.name}
-                  >
-                    <span className="truncate font-mono">{sensor.name}</span>
-                    <Badge variant={statusVariant(sensor.status ?? "")}>
-                      {sensor.status ?? "unknown"}
-                    </Badge>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <InstigationList
+              items={repository.schedules}
+              title="Schedules"
+              onSelectRun={onSelectRun}
+            />
+            <InstigationList
+              items={repository.sensors}
+              title="Sensors"
+              onSelectRun={onSelectRun}
+            />
           </div>
         </div>
       ))}
@@ -233,7 +352,15 @@ function RepositoryList({ repositories }: { repositories: DagsterRepository[] })
   );
 }
 
-function RunsTable({ runs }: { runs: DagsterRunSummary[] }) {
+function RunsTable({
+  runs,
+  selectedRunId,
+  onSelectRun,
+}: {
+  runs: DagsterRunSummary[];
+  selectedRunId: string | null;
+  onSelectRun: (runId: string) => void;
+}) {
   if (runs.length === 0) {
     return (
       <div className="rounded-md border border-dashed p-5 text-sm text-muted-foreground">
@@ -250,25 +377,225 @@ function RunsTable({ runs }: { runs: DagsterRunSummary[] }) {
           <TableHead>job</TableHead>
           <TableHead>status</TableHead>
           <TableHead>updated</TableHead>
+          <TableHead className="w-10">
+            <span className="sr-only">Dagster link</span>
+          </TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
-        {runs.map((run) => (
-          <TableRow key={run.run_id}>
-            <TableCell className="font-mono text-xs">
-              {shortRunId(run.run_id)}
-            </TableCell>
-            <TableCell>{run.job_name ?? "-"}</TableCell>
-            <TableCell>
-              <Badge variant={statusVariant(run.status)}>{run.status}</Badge>
-            </TableCell>
-            <TableCell className="text-muted-foreground">
-              {formatEpoch(run.update_time ?? run.end_time ?? run.start_time)}
-            </TableCell>
-          </TableRow>
-        ))}
+        {runs.map((run) => {
+          const selected = run.run_id === selectedRunId;
+          return (
+            <TableRow
+              className={cn("cursor-pointer", selected ? "bg-muted/70" : "")}
+              data-state={selected ? "selected" : undefined}
+              key={run.run_id}
+              onClick={() => onSelectRun(run.run_id)}
+            >
+              <TableCell className="font-mono text-xs">
+                <Button
+                  className="font-mono"
+                  size="xs"
+                  type="button"
+                  variant={selected ? "secondary" : "ghost"}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onSelectRun(run.run_id);
+                  }}
+                >
+                  {shortRunId(run.run_id)}
+                </Button>
+              </TableCell>
+              <TableCell>{run.job_name ?? "-"}</TableCell>
+              <TableCell>
+                <Badge variant={statusVariant(run.status)}>{run.status}</Badge>
+              </TableCell>
+              <TableCell className="text-muted-foreground">
+                {formatEpoch(run.update_time ?? run.end_time ?? run.start_time)}
+              </TableCell>
+              <TableCell>
+                <a
+                  className={cn(buttonVariants({ variant: "ghost", size: "icon-xs" }))}
+                  href={dagsterRunUrl(run.run_id)}
+                  rel="noreferrer"
+                  target="_blank"
+                  title="Dagster run 열기"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <ExternalLinkIcon />
+                  <span className="sr-only">Dagster run 열기</span>
+                </a>
+              </TableCell>
+            </TableRow>
+          );
+        })}
       </TableBody>
     </Table>
+  );
+}
+
+function RunEventsTable({ events }: { events: DagsterRunEvent[] }) {
+  if (events.length === 0) {
+    return (
+      <div className="rounded-md border border-dashed p-5 text-sm text-muted-foreground">
+        표시할 Dagster event가 없습니다.
+      </div>
+    );
+  }
+
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>time</TableHead>
+          <TableHead>event</TableHead>
+          <TableHead>step</TableHead>
+          <TableHead>message</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {events.map((event, index) => {
+          const errorText = graphqlErrorText(event.error);
+          return (
+            <TableRow key={`${event.event_type}:${event.timestamp ?? index}`}>
+              <TableCell className="whitespace-nowrap text-muted-foreground">
+                {formatEventTimestamp(event.timestamp)}
+              </TableCell>
+              <TableCell>
+                <div className="flex flex-col gap-1">
+                  <Badge variant={event.level === "ERROR" ? "destructive" : "outline"}>
+                    {event.dagster_event_type ?? event.event_type}
+                  </Badge>
+                  {event.level ? (
+                    <span className="text-xs text-muted-foreground">
+                      {event.level}
+                    </span>
+                  ) : null}
+                </div>
+              </TableCell>
+              <TableCell className="font-mono text-xs">
+                {event.step_key ?? "-"}
+              </TableCell>
+              <TableCell>
+                <div className="max-w-[34rem] whitespace-normal break-words text-sm">
+                  {errorText ? (
+                    <span className="text-destructive">{errorText}</span>
+                  ) : (
+                    (event.message ?? "-")
+                  )}
+                </div>
+              </TableCell>
+            </TableRow>
+          );
+        })}
+      </TableBody>
+    </Table>
+  );
+}
+
+function RunDetailCard({ runId }: { runId: string | null }) {
+  const detail = useDagsterRunDetail(runId, 80);
+  const data = detail.data?.data;
+  const run = data?.run;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Run detail</CardTitle>
+        <CardDescription>backend GraphQL event log</CardDescription>
+        <CardAction>
+          {runId ? (
+            <a
+              className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }))}
+              href={dagsterRunUrl(runId)}
+              rel="noreferrer"
+              target="_blank"
+              title="Dagster run 열기"
+            >
+              <ExternalLinkIcon />
+              <span className="sr-only">Dagster run 열기</span>
+            </a>
+          ) : (
+            <ActivityIcon className="text-muted-foreground" />
+          )}
+        </CardAction>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        {!runId ? (
+          <div className="rounded-md border border-dashed p-5 text-sm text-muted-foreground">
+            최근 run을 선택하면 event log와 실패 원인이 표시됩니다.
+          </div>
+        ) : null}
+
+        {detail.isLoading ? <Skeleton className="h-72 w-full" /> : null}
+
+        {detail.isError ? (
+          <Alert variant="destructive">
+            <AlertTriangleIcon data-icon="inline-start" />
+            <AlertTitle>Dagster run 상세 호출 실패</AlertTitle>
+            <AlertDescription>{detail.error.message}</AlertDescription>
+          </Alert>
+        ) : null}
+
+        {data?.errors?.length ? (
+          <Alert variant={data.status === "not_found" ? "default" : "destructive"}>
+            <AlertTriangleIcon data-icon="inline-start" />
+            <AlertTitle>Run detail 상태 확인 필요</AlertTitle>
+            <AlertDescription>{data.errors.join(" / ")}</AlertDescription>
+          </Alert>
+        ) : null}
+
+        {data ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant={statusVariant(data.status)}>{data.status}</Badge>
+            {run ? <Badge variant={statusVariant(run.status)}>{run.status}</Badge> : null}
+            {data.event_has_more ? (
+              <Badge variant="outline">events more</Badge>
+            ) : null}
+          </div>
+        ) : null}
+
+        {run ? (
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="rounded-md bg-muted/50 p-3">
+              <div className="text-xs text-muted-foreground">run id</div>
+              <div className="mt-1 break-all font-mono text-xs">{run.run_id}</div>
+            </div>
+            <div className="rounded-md bg-muted/50 p-3">
+              <div className="text-xs text-muted-foreground">job</div>
+              <div className="mt-1 text-sm">{run.job_name ?? "-"}</div>
+            </div>
+            <div className="rounded-md bg-muted/50 p-3">
+              <div className="text-xs text-muted-foreground">started</div>
+              <div className="mt-1 text-sm">{formatEpoch(run.start_time)}</div>
+            </div>
+            <div className="rounded-md bg-muted/50 p-3">
+              <div className="text-xs text-muted-foreground">updated</div>
+              <div className="mt-1 text-sm">
+                {formatEpoch(run.update_time ?? run.end_time)}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {run && Object.keys(run.tags).length > 0 ? (
+          <div className="rounded-md border bg-background p-3">
+            <div className="mb-2 text-sm font-medium">Tags</div>
+            <div className="flex flex-wrap gap-2">
+              {Object.entries(run.tags).map(([key, value]) => (
+                <Badge className="max-w-full" key={key} variant="outline">
+                  <span className="truncate">
+                    {key}: {value}
+                  </span>
+                </Badge>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {data ? <RunEventsTable events={data.events ?? []} /> : null}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -276,10 +603,15 @@ export function DagsterAdminClient() {
   const summary = useDagsterSummary(12);
   const { mutate: markNuxSeen, status: markNuxSeenStatus } =
     useMarkDagsterNuxSeen();
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const data = summary.data?.data;
-  const activeRuns =
-    data?.recent_runs.filter((run) => !terminalStatus.has(run.status)).length ?? 0;
+  const recentRuns = data?.recent_runs ?? [];
+  const activeRuns = recentRuns.filter(
+    (run) => !terminalStatus.has(run.status),
+  ).length;
   const failedRuns = data?.run_counts.FAILURE ?? 0;
+  const fallbackRun = recentRuns.find((run) => run.status === "FAILURE") ?? recentRuns[0];
+  const effectiveSelectedRunId = selectedRunId ?? fallbackRun?.run_id ?? null;
 
   useEffect(() => {
     if (data?.status !== "ok" || markNuxSeenStatus !== "idle") {
@@ -396,7 +728,10 @@ export function DagsterAdminClient() {
                 {summary.isLoading ? (
                   <Skeleton className="h-72 w-full" />
                 ) : (
-                  <RepositoryList repositories={data?.repositories ?? []} />
+                  <RepositoryList
+                    repositories={data?.repositories ?? []}
+                    onSelectRun={setSelectedRunId}
+                  />
                 )}
               </CardContent>
             </Card>
@@ -413,10 +748,16 @@ export function DagsterAdminClient() {
                 {summary.isLoading ? (
                   <Skeleton className="h-56 w-full" />
                 ) : (
-                  <RunsTable runs={data?.recent_runs ?? []} />
+                  <RunsTable
+                    runs={recentRuns}
+                    selectedRunId={effectiveSelectedRunId}
+                    onSelectRun={setSelectedRunId}
+                  />
                 )}
               </CardContent>
             </Card>
+
+            <RunDetailCard runId={effectiveSelectedRunId} />
           </div>
 
           <Card className="min-h-[48rem]">
