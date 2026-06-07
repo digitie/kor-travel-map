@@ -38,6 +38,7 @@ __all__ = [
     "fetch_krheritage_events",
     "fetch_mois_license_records",
     "fetch_standard_museums",
+    "fetch_standard_tourist_attractions",
     "fetch_visitkorea_festival_events",
 ]
 
@@ -393,6 +394,33 @@ def fetch_standard_museums(
     client = datagokr.DataGoKrClient(api_key=api_key)
     try:
         yield from client.museum_art.iter_all()
+    finally:
+        client.close()
+
+
+def fetch_standard_tourist_attractions(
+    settings: KrtourMapSettings,
+) -> Iterator[Any]:
+    """전국관광지표준데이터 record를 datagokr public client로 stream한다.
+
+    ``settings.data_go_kr_service_key``로 ``DataGoKrClient``를 열고
+    ``client.tourist_attraction.iter_all()``의 record(``PublicTouristAttraction``,
+    krtour ``PublicTouristAttractionItem`` Protocol 충족)를 lazily yield한다.
+    sync client → sync generator, ``finally``에서 ``close()``.
+    """
+    secret = settings.data_go_kr_service_key
+    if secret is None:
+        raise ProviderCredentialMissing(
+            "standard tourist attractions live fetch에는 "
+            "KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY (source DATA_GO_KR_SERVICE_KEY)가 "
+            "필요하다."
+        )
+    api_key = secret.get_secret_value()
+
+    datagokr = cast(Any, importlib.import_module("datagokr"))
+    client = datagokr.DataGoKrClient(api_key=api_key)
+    try:
+        yield from client.tourist_attraction.iter_all()
     finally:
         client.close()
 

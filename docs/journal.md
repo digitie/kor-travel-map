@@ -2,6 +2,23 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-08 (claude) — T-RV-55a 관광지(tourist_attraction) 풀스택
+
+**작업**: ADR-034 보조 dataset 1번째 — 전국관광지표준데이터(datagokr). museum과 동일 4-step.
+
+- **transform**: `standard_data`에 공용 `_standard_place_to_bundle` helper(관광지/주차장 공유) +
+  `tourist_attractions_to_bundles`(place, category `TOURISM 01000000`, place_kind `tourist_attraction`)
+  + `PublicTouristAttractionItem` Protocol. 안정키 `instt_code`(없으면 `name::road` 파생).
+- **asset/fetcher**: `fetch_standard_tourist_attractions`(sync, `tourist_attraction.iter_all()`) +
+  `feature_place_standard_tourist_attractions` asset + resource spec/guard→live + definitions.
+- **dedup**: `DEFAULT_DEDUP_SCOPE_PAIRS`에 관광지↔MOIS `tourism_businesses`(01000000) pair(기본 4건).
+- **ETL preview**: `etl_fixtures`에 `datagokr_tourist_attractions` entry.
+- **검증**: ruff + mypy --strict(map 81/dagster 13/admin 25) + lint-imports + unit 936(coverage
+  80.74%) + dagster 68 green.
+
+**다음(T-RV-55)**: 55b 주차장(parking, 동일 패턴) → 55c khoa 해수욕장 → 55d airkorea 대기질(측정값
+이라 place 아님, 별도 설계) → 55e krairport 공항. (52c enrichment UI는 별도 trailing.)
+
 ## 2026-06-07 (claude) — T-RV-52b-3 visitkorea enrichment asset → T-RV-52b 완료
 
 **작업**: 축제 enrichment 통합(3부, 52b 완료) — visitkorea fetcher + DB-coupled orchestration +

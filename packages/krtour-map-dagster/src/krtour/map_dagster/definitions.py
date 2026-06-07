@@ -42,6 +42,7 @@ REQUIRED_RESOURCE_KEYS: Final[tuple[str, ...]] = (
     "krforest_recreation_forests",
     "krforest_arboretums",
     "standard_museums",
+    "standard_tourist_attractions",
     "visitkorea_festival_events",
 )
 """Feature 적재 asset이 요구하는 Dagster resource key."""

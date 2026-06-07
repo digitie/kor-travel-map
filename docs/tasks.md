@@ -362,10 +362,20 @@ enrichment(모듈 있음, 미wiring)**. dedup 인프라(scoring/queue/admin rout
   - [x] **T-RV-54d (admin debug UI)**(2026-06-07) `etl_fixtures.FIXTURE_REGISTRY`에
     `data.go.kr-standard/datagokr_museums` entry(fixture+convert) 추가 → ETL preview 노출.
     admin mypy 25 + etl router 25 passed + preview 실행(count 2, cats 01040100/01040200) 확인.
-- [ ] **T-RV-55 우선순위 가이드 후속(point 7) 평가/구체화**: ADR-034 보조 dataset 중 T-RV-04b
-  관련 — datagokr-standard **관광지(tourist_attraction)**·**주차장(parking)**(museum과 동일 패턴,
-  저비용), khoa 해수욕장, airkorea 대기질, krairport 공항. 각각 task화 후 진행 여부 판단(범위 관리:
-  핵심 3종 = visitkorea/krforest/museum 완료 후 착수). datagokr tourist/parking은 museum 직후 묶음 가능.
+- **T-RV-55 우선순위 가이드 후속(point 7, 사용자 결정: 보조까지 전부)**: ADR-034 보조 dataset.
+  - [x] **T-RV-55a 관광지(tourist_attraction)**(2026-06-07) — datagokr `tourist_attraction.iter_all()`
+    →`PublicTouristAttraction`. `standard_data`에 공용 `_standard_place_to_bundle` helper +
+    `tourist_attractions_to_bundles`(place, category `TOURISM 01000000`, place_kind
+    `tourist_attraction`) + `PublicTouristAttractionItem` Protocol. fetcher/asset/resource/definitions
+    + tourist↔MOIS dedup(left datagokr_tourist_attractions ↔ MOIS `tourism_businesses` 01000000) +
+    ETL preview 등록. 게이트: ruff/mypy(3 pkg)/lint-imports/unit 936+coverage 80.74%/dagster 68 green.
+  - [ ] **T-RV-55b 주차장(parking)** — datagokr `parking.iter_all()`→`PublicParkingLot`(prkplce_no
+    stable id), category `TRANSPORT_PARKING 06010000`. tourist와 동일 4-step(공용 helper 재사용).
+  - [ ] **T-RV-55c khoa 해수욕장 + 해양공지** — provider `python-khoa-api` 조사 선행(place + notice).
+  - [ ] **T-RV-55d airkorea 대기질** — **place feature 아님**(측정값, weather-like) → WeatherValue/
+    별도 DTO 패턴 검토 필요(feature-load와 다름). 조사+설계 선행.
+  - [ ] **T-RV-55e krairport 공항** — provider `python-krairport-api` 조사(place, category
+    `TRANSPORT_AIRPORT 06050000`).
 
 각 task는 작은 독립 PR + origin/main rebase + 격리 WSL sandbox + (provider 수정 시 해당 repo
 PR+머지 선행) + (endpoint/OpenAPI 추가 시 frontend `types.ts` 재생성) + 게이트 전수(ruff/mypy/

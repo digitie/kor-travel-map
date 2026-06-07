@@ -139,6 +139,18 @@ DEFAULT_DEDUP_SCOPE_PAIRS: Final[tuple[Mapping[str, object], ...]] = (
             "categories": ["01040000"],
         },
     },
+    # 관광지(data.go.kr-standard) ↔ MOIS 관광사업체(tourism_businesses, 01000000)
+    # — 동일 관광지가 양쪽에 적재될 수 있다(ADR-034 보조).
+    {
+        "left": {
+            "provider": "data.go.kr-standard",
+            "dataset_key": "datagokr_tourist_attractions",
+        },
+        "right": {
+            "provider": "python-mois-api",
+            "categories": ["01000000"],
+        },
+    },
 )
 """op_config가 비었을 때 적용하는 기본 cross-provider dedup scope pair.
 
