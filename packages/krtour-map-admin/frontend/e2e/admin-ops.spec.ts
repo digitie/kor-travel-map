@@ -18,6 +18,69 @@ test.describe("admin/ops pages", () => {
     }
   });
 
+  test("/admin/features", async ({ page }) => {
+    await page.goto("/admin/features");
+
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Admin features" }),
+    ).toBeVisible();
+    await expect(page.getByLabel("feature search")).toBeVisible();
+    await expect(page.getByLabel("feature kind")).toBeVisible();
+    await expect(page.getByLabel("feature status")).toBeVisible();
+    await expect(page.getByLabel("has issue")).toBeVisible();
+    await expect(page.getByLabel("feature sort")).toBeVisible();
+    await expect(page.getByLabel("feature page size")).toBeVisible();
+    for (const column of [
+      "feature",
+      "kind/status",
+      "provider",
+      "issues",
+      "coord/address",
+      "updated",
+      "actions",
+    ]) {
+      await expect(page.getByRole("columnheader", { name: column })).toBeVisible();
+    }
+    await expect(page.getByText("table에서 feature를 선택하면")).toBeVisible();
+  });
+
+  test("/admin/issues", async ({ page }) => {
+    await page.goto("/admin/issues");
+
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Admin issues" }),
+    ).toBeVisible();
+    await expect(page.getByLabel("issue search")).toBeVisible();
+    await expect(page.getByLabel("issue status")).toBeVisible();
+    await expect(page.getByLabel("issue severity")).toBeVisible();
+    await expect(page.getByLabel("issue page size")).toBeVisible();
+    await expect(page.getByLabel("issue type")).toBeVisible();
+    await expect(page.getByLabel("issue provider")).toBeVisible();
+    await expect(page.getByLabel("issue dataset")).toBeVisible();
+    await expect(page.getByLabel("bbox")).toBeVisible();
+    for (const column of [
+      "issue",
+      "severity",
+      "status",
+      "provider",
+      "message",
+      "feature",
+      "detected",
+      "actions",
+    ]) {
+      await expect(page.getByRole("columnheader", { name: column })).toBeVisible();
+    }
+    const firstIssue = page.getByRole("row").nth(1);
+    if (await firstIssue.isVisible()) {
+      await firstIssue.click();
+      await expect(page.getByLabel("address JSON")).toBeVisible();
+      await expect(page.getByLabel("manual lon")).toBeVisible();
+      await expect(page.getByLabel("manual lat")).toBeVisible();
+    } else {
+      await expect(page.getByText("table에서 issue를 선택하면")).toBeVisible();
+    }
+  });
+
   test("/ops/consistency", async ({ page }) => {
     await page.goto("/ops/consistency");
 
@@ -28,6 +91,47 @@ test.describe("admin/ops pages", () => {
     await expect(page.getByText("Reports")).toBeVisible();
     await expect(page.getByText("Integrity issues")).toBeVisible();
     await expect(page.getByLabel("issue status")).toBeVisible();
+  });
+
+  test("/ops/logs", async ({ page }) => {
+    await page.goto("/ops/logs");
+
+    await expect(page.getByRole("heading", { level: 1, name: "Logs" })).toBeVisible();
+    await expect(page.getByLabel("log page size")).toBeVisible();
+    await expect(page.getByRole("tab", { name: "System logs" })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "API call logs" })).toBeVisible();
+    await expect(page.getByLabel("system log search")).toBeVisible();
+    await expect(page.getByLabel("system log level")).toBeVisible();
+    await expect(page.getByLabel("system log source")).toBeVisible();
+    for (const column of [
+      "created",
+      "level",
+      "source",
+      "event",
+      "message",
+      "request",
+    ]) {
+      await expect(page.getByRole("columnheader", { name: column })).toBeVisible();
+    }
+    await page.getByRole("tab", { name: "API call logs" }).click();
+    await expect(page.getByRole("tab", { name: "API call logs" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await expect(page.getByLabel("api log method")).toBeVisible();
+    await expect(page.getByLabel("api log path")).toBeVisible();
+    await expect(page.getByLabel("api log min status")).toBeVisible();
+    for (const column of [
+      "created",
+      "method",
+      "status",
+      "duration",
+      "path",
+      "request",
+      "error",
+    ]) {
+      await expect(page.getByRole("columnheader", { name: column })).toBeVisible();
+    }
   });
 
   test("/admin/dedup-review", async ({ page }) => {

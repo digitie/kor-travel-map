@@ -215,8 +215,11 @@ PID를 종료한 뒤 WSL frontend를 다시 띄운다. 정상은 `wslrelay`다.
 |-------|-----------|------|
 | `/` | `/ops/metrics`, `/ops/import-jobs`, `/admin/dedup-review`, `/ops/dagster/summary` | 구현됨. 운영 홈: feature/import job/dedup/이슈/Dagster 요약 |
 | `/features` | `/features`, `/features/{id}` | 구현됨. 지도/테이블/상세 panel + 운영 quick link |
+| `/admin/features` | `/admin/features`, `/admin/features/{id}/deactivate`, `/features/{id}`, `/features/{id}/weather` | 구현됨. 운영자용 table 목록, 상세/weather panel, 단건 비활성화 |
+| `/admin/issues` | `/admin/issues`, `/admin/issues/{violation_key}` | 구현됨. 이슈 목록/상세, resolve/ignore/reopen/retry/apply/manual override |
 | `/ops/import-jobs` | `/ops/import-jobs` | 구현됨. 작업 큐 read-only 상태, state/kind filter |
 | `/ops/consistency` | `/ops/metrics`, `/ops/consistency/reports`, `/ops/consistency/issues` | 구현됨. 정합성 보고서/이슈 |
+| `/ops/logs` | `/ops/system-logs`, `/ops/api-call-logs` | 구현됨. system log와 opt-in API call log 조회 |
 | `/admin/dedup-review` | `/admin/dedup-review` | 구현됨. dedup 검토 큐와 결정 mutation |
 | `/admin/feature-update-requests` | `/admin/feature-update-requests` | 구현됨. 좌표/반경/provider 업데이트 큐잉, cancel, run-now |
 | `/admin/poi-cache-targets` | `/admin/poi-cache-targets`, `/features/nearby/by-target` | 구현됨. 외부 POI key 기반 주변 feature 캐시 |

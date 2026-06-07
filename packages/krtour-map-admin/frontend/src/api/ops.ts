@@ -14,6 +14,12 @@ type ConsistencyReportsQuery = NonNullable<
 type IntegrityIssuesQuery = NonNullable<
   paths["/ops/consistency/issues"]["get"]["parameters"]["query"]
 >;
+type SystemLogsQuery = NonNullable<
+  paths["/ops/system-logs"]["get"]["parameters"]["query"]
+>;
+type ApiCallLogsQuery = NonNullable<
+  paths["/ops/api-call-logs"]["get"]["parameters"]["query"]
+>;
 
 export type ConsistencySeverity = Exclude<
   ConsistencyReportsQuery["severity_max"],
@@ -25,6 +31,10 @@ export type IntegrityIssueStatus = Exclude<
 >;
 export type IntegrityIssueSeverity = Exclude<
   IntegrityIssuesQuery["severity"],
+  null | undefined
+>;
+export type SystemLogLevel = Exclude<
+  SystemLogsQuery["level"],
   null | undefined
 >;
 export type OpsListMeta = OpsSchemas["OpsListMeta"];
@@ -40,6 +50,10 @@ export type OpsDedupFpStatsRecord = OpsSchemas["OpsDedupFpStatsRecord"];
 export type OpsIntegrityIssueCountsRecord =
   OpsSchemas["OpsIntegrityIssueCountsRecord"];
 export type OpsMetricsResponse = OpsSchemas["OpsMetricsResponse"];
+export type SystemLogRecord = OpsSchemas["SystemLogRecord"];
+export type SystemLogsResponse = OpsSchemas["SystemLogsResponse"];
+export type ApiCallLogRecord = OpsSchemas["ApiCallLogRecord"];
+export type ApiCallLogsResponse = OpsSchemas["ApiCallLogsResponse"];
 export type ConsistencyReportsListParams = Omit<
   ConsistencyReportsQuery,
   "cursor"
@@ -50,6 +64,12 @@ export type IntegrityIssuesListParams = Omit<
   IntegrityIssuesQuery,
   "cursor"
 > & {
+  cursor?: string;
+};
+export type SystemLogsListParams = Omit<SystemLogsQuery, "cursor"> & {
+  cursor?: string;
+};
+export type ApiCallLogsListParams = Omit<ApiCallLogsQuery, "cursor"> & {
   cursor?: string;
 };
 
@@ -86,6 +106,34 @@ function fetchIntegrityIssues(
   );
 }
 
+function fetchSystemLogs(
+  params: SystemLogsListParams = {},
+): Promise<SystemLogsResponse> {
+  return getJson<SystemLogsResponse>(
+    pathWithQuery("/ops/system-logs", {
+      level: params.level,
+      source: params.source,
+      q: params.q,
+      page_size: params.page_size,
+      cursor: params.cursor,
+    }),
+  );
+}
+
+function fetchApiCallLogs(
+  params: ApiCallLogsListParams = {},
+): Promise<ApiCallLogsResponse> {
+  return getJson<ApiCallLogsResponse>(
+    pathWithQuery("/ops/api-call-logs", {
+      method: params.method,
+      min_status: params.min_status,
+      path: params.path,
+      page_size: params.page_size,
+      cursor: params.cursor,
+    }),
+  );
+}
+
 export function useOpsMetrics() {
   return useQuery<OpsMetricsResponse, Error>({
     queryKey: ["ops", "metrics"],
@@ -109,6 +157,22 @@ export function useIntegrityIssues(params: IntegrityIssuesListParams = {}) {
   return useQuery<OpsIntegrityIssuesListResponse, Error>({
     queryKey: ["ops", "consistency", "issues", params],
     queryFn: () => fetchIntegrityIssues(params),
+    staleTime: 15_000,
+  });
+}
+
+export function useSystemLogs(params: SystemLogsListParams = {}) {
+  return useQuery<SystemLogsResponse, Error>({
+    queryKey: ["ops", "system-logs", params],
+    queryFn: () => fetchSystemLogs(params),
+    staleTime: 15_000,
+  });
+}
+
+export function useApiCallLogs(params: ApiCallLogsListParams = {}) {
+  return useQuery<ApiCallLogsResponse, Error>({
+    queryKey: ["ops", "api-call-logs", params],
+    queryFn: () => fetchApiCallLogs(params),
     staleTime: 15_000,
   });
 }

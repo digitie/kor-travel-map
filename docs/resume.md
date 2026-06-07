@@ -80,6 +80,38 @@ surface 전수 조사 완료. 미구현 데이터소스 = **휴양림/수목원(
 **다음 한 작업**: T-RV-50부터 순차 PR. 각 PR = 격리 sandbox + 게이트 전수 + (provider 수정 시
 해당 repo PR+머지 선행) + (frontend는 type-check/Windows Playwright e2e). 실데이터 검증은 T-212e.
 
+## 2026-06-07 Codex 작업 메모 — T-212b admin UI 핵심 화면 보강
+
+사용자 지시 “t212b 진행”에 따라 T-212b admin UI lane을 착수했다. 이번 PR 범위는
+backend 계약이 이미 있는 화면을 frontend에 붙이는 데 한정했다.
+
+- **`/admin/features`**: 운영자용 table 목록(`GET /admin/features`) + 검색/상태/kind/
+  이슈/정렬/page size/cursor, 선택 상세(`GET /features/{id}`), weather panel
+  (`GET /features/{id}/weather`), 단건 deactivate mutation을 추가했다.
+- **`/admin/issues`**: `GET /admin/issues` 목록 필터(q/status/severity/type/provider/
+  dataset/bbox), 단건 상세, resolve/ignore/reopen/retry geocode/retry reverse/apply
+  kraddr/manual override action UI를 추가했다.
+- **`/ops/logs`**: T-212c에서 추가된 `GET /ops/system-logs`와
+  `GET /ops/api-call-logs` 조회 UI를 추가했다.
+- 기존 `/features` 상세 panel에도 weather card를 노출했고, sidebar nav/README/e2e
+  smoke를 갱신했다.
+- 기존 `/admin/dagster` recent runs table의 run id를 Dagster webserver run detail로
+  바로 열 수 있게 연결했다.
+
+**검증**: WSL Node 20.20.2로 `npm run type-check`, `npm run lint`, env 명시
+`npm run build`, `npm run doctor`, `npm run test` 통과. `React Doctor --verbose --diff`
+잔여 10건은 기존 shadcn/ui primitive non-component export/multi component, 기존
+Dagster iframe sandbox 탐지 false positive(이미 sandbox 있음), 기존 unused detail hook이다.
+`http://127.0.0.1:9014` dev server에서 `/admin/features`, `/admin/issues`,
+`/ops/logs`, `/features` HTTP 200 확인. Windows 호스트 Playwright로
+`npm -w packages/krtour-map-admin/frontend run e2e -- e2e/admin-ops.spec.ts --reporter=line`
+실행해 9 passed.
+
+**남은 T-212b**: Dagster schedule/sensor tick history와 backend-backed failure detail은
+summary/embed 중심 계약을 확장하는 후속 API/UX 필요.
+
+**다음 한 작업**: Dagster tick/backend detail API/UX를 별도 작은 PR로 설계·구현.
+
 ## 2026-06-07 Codex 작업 메모 — Sprint 5 운영 진입 잔여 task 상세화
 
 사용자 지시 “sprint 5 관련 테스크 상세화 하고 pr 후 머지”에 따라 Sprint 5 최종

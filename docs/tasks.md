@@ -1149,10 +1149,18 @@ lint-imports/pytest/coverage, frontend type-check/e2e). 실데이터 검증은 T
       - `T-212b-2`: `/admin/issues` 처리 workflow + `/ops/logs` system/API call log 화면.
       - `T-212b-3`: Dagster schedule/sensor tick/failure 드릴다운 + offline upload/POI
         cache target 주요 mutation e2e.
-        - [x] Dagster summary에 schedule/sensor recent tick을 포함하고,
-          `/ops/dagster/runs/{run_id}` event/failure detail API와 `/admin/dagster`
-          선택 panel을 연결(2026-06-07 Codex).
-        - [ ] offline upload/POI cache target 주요 mutation e2e.
+      - [x] 2026-06-07 Codex: `/admin/features` 운영 table + 상세/weather panel +
+        단건 deactivate, `/admin/issues` 목록/상세 + resolve/ignore/reopen/retry/
+        apply/manual override, `/ops/logs` system/API-call log 조회 UI, nav/README/e2e
+        smoke 추가. `npm run type-check`, `npm run lint`, env 명시 `npm run build`,
+        React Doctor 실행 완료.
+      - [x] Windows 호스트 Playwright 확인(2026-06-07 Codex):
+        `E2E_BASE_URL=http://127.0.0.1:9014 npm -w packages/krtour-map-admin/frontend run e2e -- e2e/admin-ops.spec.ts --reporter=line`
+        9 passed.
+      - [x] Dagster summary에 schedule/sensor recent tick을 포함하고,
+        `/ops/dagster/runs/{run_id}` event/failure detail API와 `/admin/dagster`
+        선택 panel을 연결(2026-06-07 Codex).
+      - [ ] offline upload/POI cache target 주요 mutation e2e.
 - [x] T-212c — API endpoint/error/log contract 정리 (2026-06-07 완료).
       admin/user endpoint shape, error envelope, debug/test endpoint, import job event,
       system log API, route mount 정책을 점검하고 필요한 backend를 구현한다.
