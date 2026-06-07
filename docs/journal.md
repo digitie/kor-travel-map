@@ -2,6 +2,14 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-07 (antigravity) — TripMate 연계 REST API 분석 및 버전 prefix/추천 API 제안 문서화
+
+**작업**: TripMate와의 안정적 연계 및 버전 독립성을 위해 REST API를 정리하고 일관성·확장성·유지보수성 측면의 개선점을 문서화.
+
+- **신규 리포트 추가**: `docs/reports/tripmate-api-improvement-analysis-2026-06-07.md`에 API 목록과 일관성(cache target prefix tripmate 이전, GET /features 셰입 비일관성), 확장성(prices/paths/autocomplete API 및 batch 조회 다변화), 유지보수성(v1 prefix 도입) 관점의 분석 내용을 기록.
+- **정본 문서 반영**: `docs/tripmate-rest-api.md`에 향후 개선 및 리팩토링 검토 사항 섹션(§7)을 추가하여 상기 제안 사항(v1 prefix 도입 계획 등)을 명문화.
+- **아티팩트 생성**: 동일한 내용의 분석 보고서 [tripmate_api_analysis.md](file:///C:/Users/digit/.gemini/antigravity/brain/ee4a8fca-db00-4d2a-8cb0-6795335d5022/tripmate_api_analysis.md)를 conversation artifacts 폴더에 작성.
+
 ## 2026-06-07 (claude) — T-RV-52a visitkorea provider 보강(TourItem festival/detail 필드)
 
 **작업**: 축제 enrichment(point 5)를 위한 provider 보강(cross-repo). krtour
