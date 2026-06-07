@@ -81,6 +81,17 @@ from krtour.map.providers.krex import (
     rest_areas_to_bundles,
     traffic_notices_to_bundles,
 )
+from krtour.map.providers.krforest import (
+    ARBORETUM_CATEGORY,
+    DATASET_KEY_ARBORETUMS,
+    DATASET_KEY_RECREATION_FORESTS,
+    KRFOREST_MARKER_COLOR,
+    RECREATION_FOREST_CATEGORY,
+    ForestSpatialItem,
+    RecreationForestItem,
+    arboretums_to_bundles,
+    recreation_forests_to_bundles,
+)
 from krtour.map.providers.krheritage import (
     DATASET_KEY_EVENT as KRHERITAGE_DATASET_KEY_EVENT,
 )
@@ -173,6 +184,16 @@ __all__ = [
     "festival_to_enrichment_links",
     "VISITKOREA_PROVIDER_NAME",
     "DATASET_KEY_FESTIVAL_EVENTS",
+    # krforest (T-RV-53, ADR-034 8단계 — 휴양림/수목원, MOIS-sibling)
+    "RecreationForestItem",
+    "ForestSpatialItem",
+    "recreation_forests_to_bundles",
+    "arboretums_to_bundles",
+    "DATASET_KEY_RECREATION_FORESTS",
+    "DATASET_KEY_ARBORETUMS",
+    "RECREATION_FOREST_CATEGORY",
+    "ARBORETUM_CATEGORY",
+    "KRFOREST_MARKER_COLOR",
     # kma (PR#38 short, PR#39 nowcast, PR#41 ultra_short, PR#46 alerts —
     # ADR-010)
     "KmaShortForecastItem",
