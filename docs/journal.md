@@ -2,6 +2,22 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-07 (claude) — T-RV-50 maplibre-vworld-js v0.1.3 최신화
+
+**작업**: maplibre-vworld-js 최신 dependency 업데이트(point 6). frontend 핀이 이미 최신 **태그**
+v0.1.2였고, `v0.1.2..main` diff는 **docs-only**(consumer feature catalog #46 + tasks #45, `src/`·
+`dist`·public API 동일).
+
+- **maplibre repo**: v0.1.2 이후 docs 커밋을 캡처하는 **v0.1.3** patch 릴리스 cut
+  (`maplibre-vworld-js#47` merged → `v0.1.3` 태그 push). 기능 변경 없음.
+- **krtour frontend**: `package.json` 핀 `#v0.1.2`→`#v0.1.3`. public API 불변이라 **map wrapper
+  코드 수정 불필요**(features-client.tsx 등 그대로).
+- **검증**: `npm ls maplibre-vworld` → `0.1.3 (git+...#2a13ce0)` resolve 확인 + `tsc --noEmit`
+  green + `next build` 13 페이지(/features의 maplibre 렌더 포함) green. 기능 동일이라 Windows
+  Playwright e2e 거동 불변(CI type-check+build 게이트가 권위 검증).
+
+**다음**: T-RV-51 dedup 수동처리 UI 완성 + 기본 scope.
+
 ## 2026-06-07 (claude) — T-RV-50 시리즈 프로그램 구체화 (데이터소스 전수 + dedup UI + maplibre)
 
 **작업**: 사용자 지시(T-RV-04b 및 후속 관련 모든 task 완료까지 진행, 7개 요구사항)에 따라
