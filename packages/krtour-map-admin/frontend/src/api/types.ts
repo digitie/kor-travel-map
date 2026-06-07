@@ -403,7 +403,7 @@ export interface paths {
         put?: never;
         /**
          * Plan Restore Swap
-         * @description Return the manual hot-swap boundary for a restored backup.
+         * @description Plan or run the restore hot-swap env switch.
          */
         post: operations["plan_restore_swap_admin_restore__backup_id__swap_post"];
         delete?: never;
@@ -3531,13 +3531,36 @@ export interface components {
         };
         /**
          * RestoreSwapRequest
-         * @description Manual hot-swap boundary request.
+         * @description Restore hot-swap command request.
          */
         RestoreSwapRequest: {
+            /** App Db */
+            app_db?: string | null;
+            /**
+             * Apply
+             * @default false
+             */
+            apply: boolean;
+            /** Dagster Db */
+            dagster_db?: string | null;
+            /** Env File */
+            env_file?: string | null;
+            /**
+             * Execute
+             * @default false
+             */
+            execute: boolean;
             /** Note */
             note?: string | null;
             /** Operator */
             operator?: string | null;
+            /** Rustfs Volume */
+            rustfs_volume?: string | null;
+            /**
+             * Skip Verify
+             * @default false
+             */
+            skip_verify: boolean;
         };
         /**
          * RestoreTargets

@@ -155,6 +155,12 @@ class AdminSettings(BaseSettings):
         default=Path("scripts/docker-restore.sh"),
         description="Restore script path. Relative paths are resolved from backup_project_root.",
     )
+    restore_swap_script_path: Path = Field(
+        default=Path("scripts/docker-restore-swap.sh"),
+        description=(
+            "Restore hot-swap script path. Relative paths are resolved from backup_project_root."
+        ),
+    )
     backup_command_enabled: bool = Field(
         default=False,
         description=(

@@ -50,7 +50,7 @@ services:
     image: alpine:3.20
     user: root
     volumes:
-      - krtour-map-rustfs:/data
+      - krtour-map-rustfs-data:/data
     command: ["sh", "-c", "chown -R 10001:10001 /data"]
 
   rustfs:
@@ -69,7 +69,7 @@ services:
       - "${KRTOUR_MAP_DOCKER_BIND_HOST:-127.0.0.1}:${KRTOUR_MAP_RUSTFS_API_PORT:-9003}:9000"
       - "${KRTOUR_MAP_DOCKER_BIND_HOST:-127.0.0.1}:${KRTOUR_MAP_RUSTFS_CONSOLE_PORT:-9004}:9001"
     volumes:
-      - krtour-map-rustfs:/data
+      - krtour-map-rustfs-data:/data
 
   rustfs-init:
     image: minio/mc:latest
@@ -258,4 +258,5 @@ services:
 
 volumes:
   krtour-map-postgres:
-  krtour-map-rustfs:
+  krtour-map-rustfs-data:
+    name: ${KRTOUR_MAP_RUSTFS_VOLUME:-krtour-map-rustfs}
