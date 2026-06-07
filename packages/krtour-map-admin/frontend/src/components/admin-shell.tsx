@@ -5,6 +5,7 @@ import {
   ArchiveIcon,
   GitCompareArrowsIcon,
   HomeIcon,
+  LinkIcon,
   ListChecksIcon,
   MapIcon,
   UploadCloudIcon,
@@ -27,6 +28,11 @@ const navItems = [
   { href: "/ops/import-jobs", label: "Import jobs", icon: ListChecksIcon },
   { href: "/ops/consistency", label: "Consistency", icon: RadarIcon },
   { href: "/admin/dedup-review", label: "Dedup review", icon: GitCompareArrowsIcon },
+  {
+    href: "/admin/enrichment-review",
+    label: "Enrichment review",
+    icon: LinkIcon,
+  },
   {
     href: "/admin/feature-update-requests",
     label: "Update requests",

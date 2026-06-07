@@ -294,8 +294,9 @@ enrichment(모듈 있음, 미wiring)**. dedup 인프라(scoring/queue/admin rout
     pairs/sibling_scopes가 **둘 다 비면** 기본값을 적용 → Dagster run config 없이도 cross-provider
     dedup 실행. canonical provider name 사용. dagster 단위(빈 config→기본 pair 적용) green.
     **krforest↔MOIS·museum↔MOIS pair는 해당 데이터소스 PR에서 이 tuple에 append.**
-- [ ] **T-RV-52 visitkorea 축제 enrichment wiring**(points 1·5·5.1): datagokr 축제(1차)에
-  visitkorea(2차) 이미지/overview/homepage enrichment.
+- [x] **T-RV-52 visitkorea 축제 enrichment wiring**(points 1·5·5.1)(2026-06-08 완료): datagokr
+  축제(1차)에 visitkorea(2차) 이미지/overview/homepage enrichment. 52a provider + 52b krtour
+  wiring + 52c review 큐/admin API/frontend(자동 매칭 실패분 수동 검토) 전부 완료.
   - [x] **T-RV-52a (provider)**(2026-06-07) `python-visitkorea-api#17`(merged, **v0.2.0**) — `TourItem`에
     `event_start_date`/`event_end_date`(searchFestival `eventstartdate`/`eventenddate` promote, str
     YYYYMMDD) + `overview`/`homepage`(detailCommon 보강용, list 응답엔 None) 필드 추가 → krtour
@@ -328,8 +329,11 @@ enrichment(모듈 있음, 미wiring)**. dedup 인프라(scoring/queue/admin rout
       Pydantic 모델 + OpenAPI 재생성(openapi.json만, /admin은 user profile 제외). 게이트:
       ruff/mypy(map 84/dagster 13/admin 26)/lint-imports/unit+lint 959(coverage 81%)/admin 220/
       dagster 75 + drift-check + integration(list_enrichment_reviews) green.
-    - [ ] **52c-3 (frontend)** dedup-review와 유사한 `admin/enrichment-review` 페이지 + api 훅 +
-      `types.ts` 재생성 + Windows Playwright e2e.
+    - [x] **52c-3 (frontend)**(2026-06-08) dedup-review와 유사한 `admin/enrichment-review` 페이지
+      (pending list + accept/reject/ignore; 병합 없으니 master 선택 UI 없음, 1차/2차 양측 표시) +
+      `src/api/enrichment.ts` 훅(`useEnrichmentReviews`/`useEnrichmentDecisionMutation`) + nav 항목
+      (admin-shell) + e2e smoke(admin-ops.spec). 게이트: gen:types:check(drift 0)/tsc/next build
+      (route 등록 확인)/eslint green. **→ T-RV-52c 전체 완료.**
 - [ ] **T-RV-53 휴양림/수목원(krforest) feature-load**(points 1·2·3·4): provider `python-krforest-api`
   `ForestClient().travel.standard_recreation_forests()`→`StandardRecreationForest`(institution_code
   stable id / name / address / lat·lon WGS84 / phone / homepage), 수목원/식물원은 SHP file
