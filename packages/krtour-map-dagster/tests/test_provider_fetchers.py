@@ -29,6 +29,7 @@ from krtour.map_dagster.provider_fetchers import (
     fetch_krforest_recreation_forests,
     fetch_krheritage_events,
     fetch_mois_license_records,
+    fetch_opinet_stations,
     fetch_standard_museums,
     fetch_standard_parking_lots,
     fetch_standard_tourist_attractions,
@@ -982,6 +983,116 @@ def test_airkorea_air_quality_iterates_all_sido_and_closes(
     assert client.closed is True
 
 
+class _FakeStation:
+    def __init__(self, uni_id: str) -> None:
+        self.uni_id = uni_id
+
+
+class _FakeOpinetClient:
+    instances: list[_FakeOpinetClient] = []
+    stations: list[object] = []
+
+    def __init__(self, *, api_key: str | None = None, **_kwargs: Any) -> None:
+        self.api_key = api_key
+        self.closed = False
+        self.bbox_calls: list[tuple[float, float, float, float, int]] = []
+        _FakeOpinetClient.instances.append(self)
+
+    def iter_stations_in_bbox(
+        self,
+        *,
+        min_lon: float,
+        min_lat: float,
+        max_lon: float,
+        max_lat: float,
+        radius_m: int = 5000,
+        **_kw: Any,
+    ) -> Iterator[object]:
+        self.bbox_calls.append((min_lon, min_lat, max_lon, max_lat, radius_m))
+        yield from type(self).stations
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _install_fake_opinet(
+    monkeypatch: pytest.MonkeyPatch, *, stations: list[object]
+) -> type[_FakeOpinetClient]:
+    _FakeOpinetClient.instances = []
+    _FakeOpinetClient.stations = stations
+    module = ModuleType("opinet")
+    module.__dict__["OpinetClient"] = _FakeOpinetClient
+    monkeypatch.setitem(sys.modules, "opinet", module)
+    return _FakeOpinetClient
+
+
+def test_opinet_stations_disabled_raises() -> None:
+    settings = KrtourMapSettings(
+        opinet_api_key=SecretStr("k"), opinet_scope_mode="disabled"
+    )
+    with pytest.raises(ProviderCredentialMissing, match="disabled"):
+        next(fetch_opinet_stations(settings))
+
+
+def test_opinet_stations_missing_key_raises() -> None:
+    settings = KrtourMapSettings(
+        opinet_api_key=None, opinet_scope_mode="bbox",
+        opinet_scope_bbox="126.0,37.0,127.0,38.0",
+    )
+    with pytest.raises(ProviderCredentialMissing, match="OPINET_API_KEY"):
+        next(fetch_opinet_stations(settings))
+
+
+def test_opinet_stations_poi_mode_not_yet_wired() -> None:
+    settings = KrtourMapSettings(
+        opinet_api_key=SecretStr("k"), opinet_scope_mode="poi_cache_target"
+    )
+    with pytest.raises(ProviderCredentialMissing, match="poi_cache_target"):
+        next(fetch_opinet_stations(settings))
+
+
+def test_opinet_stations_bbox_missing_raises() -> None:
+    settings = KrtourMapSettings(
+        opinet_api_key=SecretStr("k"), opinet_scope_mode="bbox", opinet_scope_bbox=None
+    )
+    with pytest.raises(ProviderCredentialMissing, match="OPINET_SCOPE_BBOX"):
+        next(fetch_opinet_stations(settings))
+
+
+def test_opinet_stations_bbox_invalid_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_opinet(monkeypatch, stations=[])
+    settings = KrtourMapSettings(
+        opinet_api_key=SecretStr("k"), opinet_scope_mode="bbox",
+        opinet_scope_bbox="126.0,37.0,127.0",  # 3개만
+    )
+    with pytest.raises(ProviderCredentialMissing, match="4개 값"):
+        next(fetch_opinet_stations(settings))
+
+
+def test_opinet_stations_bbox_enumerates_dedups_closes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _install_fake_opinet(
+        monkeypatch,
+        stations=[_FakeStation("A1"), _FakeStation("A2"), _FakeStation("A1")],
+    )
+    settings = KrtourMapSettings(
+        opinet_api_key=SecretStr("certkey"), opinet_scope_mode="bbox",
+        opinet_scope_bbox="126.0,37.0,127.0,38.0", opinet_scope_radius_m=3000,
+    )
+
+    records = list(fetch_opinet_stations(settings))
+
+    # uni_id dedup → A1, A2.
+    assert [r.uni_id for r in records] == ["A1", "A2"]
+    client = fake.instances[0]
+    assert client.api_key == "certkey"
+    assert client.bbox_calls == [(126.0, 37.0, 127.0, 38.0, 3000)]
+    assert client.closed is True
+
+
 def test_standard_tourist_attractions_raises_when_credential_missing() -> None:
     settings = KrtourMapSettings(data_go_kr_service_key=None)
 
@@ -1088,6 +1199,6 @@ def test_datagokr_resource_definition_is_live_not_guard() -> None:
     assert live.description is not None
     assert "live fetcher" in live.description
     assert "live fetcher" not in (guard.description or "")
-    # 다른 provider는 여전히 guard로 남는다.
-    opinet = PROVIDER_RECORD_RESOURCE_DEFINITIONS["opinet_stations"]
-    assert "guard" in (opinet.description or "")
+    # 아직 wiring 안 된 provider(krheritage_items)는 guard로 남는다.
+    heritage_items = PROVIDER_RECORD_RESOURCE_DEFINITIONS["krheritage_items"]
+    assert "guard" in (heritage_items.description or "")

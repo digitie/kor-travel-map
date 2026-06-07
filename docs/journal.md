@@ -2,6 +2,24 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-08 (claude) — T-RV-04b opinet-2 bbox fetcher + scope settings
+
+**작업**: opinet wiring 2/3 = bbox 모드. OpiNet은 전국 dump가 없어 `iter_stations_in_bbox`
+(aroundAll 격자 근사)로 영역 enumerate.
+
+- settings: `opinet_scope_mode`(disabled/bbox/poi_cache_target) + `opinet_scope_bbox`
+  (`min_lon,min_lat,max_lon,max_lat`) + `opinet_scope_radius_m`(≤5km).
+- `fetch_opinet_stations`(provider_fetchers): `disabled`→guard, `bbox`→`OpinetClient.
+  iter_stations_in_bbox` 1영역 enumerate(`_enumerate_opinet_stations`로 uni_id dedup, finally
+  close), `poi_cache_target`→opinet-3 대기 guard. `_parse_opinet_bbox` 검증(4값/숫자/min<max).
+- resource `opinet_stations` guard→live override(기존 `feature_place_opinet_stations` asset이
+  그대로 record 소비). 가드 예시 테스트는 아직 미wiring인 `krheritage_items`로 교체.
+- **검증**: ruff + mypy --strict(map 85/dagster 13/admin 26) + lint-imports + unit+lint 965
+  (coverage 81%) + full 1168 + dagster 85(opinet fetcher 6 케이스) green.
+
+**다음**: opinet-3 POI-타깃 모드(설정 DSN 동기 DB로 opinet POI cache target 읽어 bbox enumerate).
+완료 시 **T-RV-04b 완전 종료**.
+
 ## 2026-06-08 (claude) — T-RV-04b opinet-1 ADR-044 Protocol 재정렬
 
 **작업**: T-RV-04b 마지막 1건(opinet wiring) 착수. 사용자 결정 = bbox + POI-타깃 둘 다 지원(3 PR

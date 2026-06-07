@@ -37,6 +37,7 @@ from .provider_fetchers import (
     fetch_krforest_recreation_forests,
     fetch_krheritage_events,
     fetch_mois_license_records,
+    fetch_opinet_stations,
     fetch_standard_museums,
     fetch_standard_parking_lots,
     fetch_standard_tourist_attractions,
@@ -313,6 +314,18 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["datagokr_cultural_festivals"] = (
     build_provider_record_live_resource(
         _DATAGOKR_CULTURAL_FESTIVALS_SPEC,
         fetch_datagokr_cultural_festivals,
+    )
+)
+
+_OPINET_STATIONS_SPEC: ProviderRecordResourceSpec = next(
+    spec
+    for spec in PROVIDER_RECORD_RESOURCE_SPECS
+    if spec.resource_key == "opinet_stations"
+)
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["opinet_stations"] = (
+    build_provider_record_live_resource(
+        _OPINET_STATIONS_SPEC,
+        fetch_opinet_stations,
     )
 )
 

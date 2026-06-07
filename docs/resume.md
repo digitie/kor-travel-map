@@ -1,6 +1,20 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-06-08 Claude 작업 메모 — T-RV-04b 후속 program 전체 완료
+## 2026-06-08 Claude 작업 메모 — T-RV-04b opinet wiring 2/3 (bbox) 완료
+
+T-RV-04b 본체 마지막 1건(opinet) 진행 중. 사용자 결정 = bbox + POI-타깃 둘 다 지원, 3 PR:
+- [x] opinet-1 ADR-044 Protocol 재정렬(#302 merged) — `Station` 필드명 정렬.
+- [x] opinet-2 bbox fetcher(머지 대기) — settings `opinet_scope_*` + `fetch_opinet_stations`
+  (bbox enumerate + uni_id dedup) + resource guard→live.
+- [ ] opinet-3 POI-타깃 모드.
+
+**다음 한 작업**: **T-RV-04b opinet-3** — `fetch_opinet_stations`의 `poi_cache_target` 분기 구현.
+설정 DSN(`pg_dsn`)으로 **동기** DB 연결을 열어 `ops.poi_cache_targets`에서 `external_system=
+'opinet'` 활성 target(lon/lat/radius_km) 조회 → 각 center±radius를 bbox로 변환 → 기존
+`_enumerate_opinet_stations`로 enumerate(uni_id dedup). 단위 테스트(fake target + fake opinet).
+완료 시 **T-RV-04b 완전 종료**. (POI 인프라: `infra/scope_repo.py`/`PoiCacheTargetRow`.)
+
+## 2026-06-08 Claude 작업 메모 — T-RV-04b 후속 program(T-RV-50~55) 전체 완료
 
 T-RV-55d-2(airkorea orchestration)까지 완료·머지하며 **T-RV-04b 후속 program(T-RV-50~55) 전체
 종료**. 이번 세션에서 머지한 PR: #296(55e krairport) · #297/#298/#299(52c enrichment review

@@ -150,6 +150,30 @@ class KrtourMapSettings(BaseSettings):
         default=None,
         description="OpiNet certkey. source env는 ``OPINET_API_KEY``.",
     )
+    opinet_scope_mode: Literal["disabled", "bbox", "poi_cache_target"] = Field(
+        default="disabled",
+        description=(
+            "OpiNet 주유소 적재 scope (전국 dump endpoint 부재). ``disabled``(미적재) / "
+            "``bbox``(operator bbox 1개) / ``poi_cache_target``(opinet POI cache target "
+            "주변 enumerate). env ``OPINET_SCOPE_MODE``."
+        ),
+    )
+    opinet_scope_bbox: str | None = Field(
+        default=None,
+        description=(
+            "``bbox`` 모드 영역 ``min_lon,min_lat,max_lon,max_lat`` (WGS84, 콤마 구분). "
+            "env ``OPINET_SCOPE_BBOX``."
+        ),
+    )
+    opinet_scope_radius_m: int = Field(
+        default=5000,
+        ge=500,
+        le=5000,
+        description=(
+            "``iter_stations_in_bbox`` aroundAll 격자 반경(m, ≤5km OpiNet 한계). "
+            "env ``OPINET_SCOPE_RADIUS_M``."
+        ),
+    )
     krex_ex_api_key: SecretStr | None = Field(
         default=None,
         description="한국도로공사 EX OpenAPI key. source env는 ``KEX_GO_API_KEY``.",
