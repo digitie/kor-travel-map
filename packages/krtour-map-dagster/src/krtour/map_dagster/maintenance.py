@@ -112,12 +112,26 @@ DEFAULT_DEDUP_SCOPE_PAIRS: Final[tuple[Mapping[str, object], ...]] = (
         "left": {"provider": "python-knps-api"},
         "right": {"provider": "python-krheritage-api"},
     },
+    # 자연휴양림(krforest, category 03030000) ↔ MOIS 관광숙박/리조트(ADR-034 8단계 —
+    # 휴양림은 콘도/관광숙박과 중복 가능). MOIS side는 관련 LODGING 카테고리로 좁혀
+    # 대규모 MOIS 전체 비교를 피한다. 수목원(arboretum)은 MOIS PROMOTED 슬러그에 식물원/
+    # 수목원이 없어 dedup 후보가 없으므로 pair를 추가하지 않는다.
+    {
+        "left": {
+            "provider": "python-krforest-api",
+            "dataset_key": "krforest_recreation_forests",
+        },
+        "right": {
+            "provider": "python-mois-api",
+            "categories": ["03010100", "03020100", "03020200"],
+        },
+    },
 )
 """op_config가 비었을 때 적용하는 기본 cross-provider dedup scope pair.
 
-신규 MOIS-sibling provider(krforest 휴양림/수목원·standard_data 박물관/미술관)는 해당
-feature-load PR에서 ``{left: {provider: <new>}, right: {provider: python-mois-api, ...}}``
-pair를 본 tuple에 추가한다(ADR-034 8/9단계).
+신규 MOIS-sibling provider(standard_data 박물관/미술관 등)는 해당 feature-load PR에서
+``{left: {provider: <new>}, right: {provider: python-mois-api, categories: [...]}}`` pair를
+본 tuple에 추가한다(ADR-034 9단계).
 """
 
 DEFAULT_DEDUP_SIBLING_SCOPES: Final[tuple[Mapping[str, object], ...]] = ()
