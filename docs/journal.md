@@ -2,6 +2,24 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-07 (claude) — T-RV-50 시리즈 프로그램 구체화 (데이터소스 전수 + dedup UI + maplibre)
+
+**작업**: 사용자 지시(T-RV-04b 및 후속 관련 모든 task 완료까지 진행, 7개 요구사항)에 따라
+provider 라이브러리 surface 전수 조사 후 `docs/tasks.md`에 **T-RV-50~55** 프로그램을 PR 단위로
+구체화했다(이 PR은 plan-only).
+
+- **조사 결론**: ADR-034 9단계 중 1~7 완료. 미구현 = krforest(휴양림/수목원, 모듈 없음) /
+  standard_data 박물관·미술관(festival만) / visitkorea 축제 enrichment(모듈 있음·미wiring).
+  dedup 인프라 성숙(scoring/queue/admin router+`dedup-review` page)하나 merge master 선택 UI 미완
+  + 기본 scope 미설정. provider READY 판정: krforest(`ForestClient.travel.standard_recreation_forests`
+  →`StandardRecreationForest`), datagokr museum(`museum_art.iter_all`→`PublicMuseumArtGallery`).
+  visitkorea NEEDS-FIX: `search_festival`→`TourItem`에 eventstart/end date·overview·homepage 미노출
+  (detail_common N+1) → provider 보강 PR 예정.
+- **프로그램**: T-RV-50 maplibre 최신화 / T-RV-51 dedup 수동 UI+기본 scope / T-RV-52 visitkorea
+  enrichment(provider+krtour+UI) / T-RV-53 krforest / T-RV-54 museum / T-RV-55 point-7 후속.
+
+**다음**: T-RV-50부터 순차 PR(격리 sandbox + 게이트 전수, provider 수정은 해당 repo PR+머지 선행).
+
 ## 2026-06-07 (codex) — Sprint 5 운영 진입 잔여 task 상세화
 
 **작업**: 사용자 지시로 Sprint 5 최종 운영 진입까지 남은 작업을 1-PR 단위로 상세화.
