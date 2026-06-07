@@ -32,6 +32,8 @@ __all__ = [
     "fetch_knps_point_records",
     "fetch_krex_rest_areas",
     "fetch_krex_traffic_notices",
+    "fetch_krforest_arboretums",
+    "fetch_krforest_recreation_forests",
     "fetch_krheritage_events",
     "fetch_mois_license_records",
 ]
@@ -298,6 +300,67 @@ async def fetch_knps_geometry_records(
     client = knps.KnpsClient()
     try:
         records = await client.files.read_geo_records(dataset_key)
+        for record in records:
+            yield record
+    finally:
+        await client.aclose()
+
+
+async def fetch_krforest_recreation_forests(
+    settings: KrtourMapSettings,
+) -> AsyncIterator[Any]:
+    """전국자연휴양림 표준데이터 record를 krforest public client로 stream한다.
+
+    ``settings.data_go_kr_service_key``(source ``DATA_GO_KR_SERVICE_KEY``)로
+    ``ForestClient(api_key=...)``를 열고 ``travel.standard_recreation_forests``를
+    ``iter_pages``로 페이지네이션하며 record(``StandardRecreationForest``, krtour
+    ``RecreationForestItem`` Protocol 충족)를 yield한다. krforest client는 async라
+    async generator다. 소비 종료/조기 close 시 ``finally``에서 ``aclose()``.
+    """
+    secret = settings.data_go_kr_service_key
+    if secret is None:
+        raise ProviderCredentialMissing(
+            "krforest recreation forests live fetch에는 "
+            "KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY (source DATA_GO_KR_SERVICE_KEY)가 "
+            "필요하다."
+        )
+    api_key = secret.get_secret_value()
+
+    krforest = cast(Any, importlib.import_module("krforest"))
+    client = krforest.ForestClient(api_key=api_key)
+    try:
+        async for page in client.iter_pages(
+            client.travel.standard_recreation_forests, num_of_rows=1000
+        ):
+            for record in page.items:
+                yield record
+    finally:
+        await client.aclose()
+
+
+async def fetch_krforest_arboretums(
+    settings: KrtourMapSettings,
+) -> AsyncIterator[Any]:
+    """휴양림 수목원 SHP record를 krforest public client로 stream한다.
+
+    ``ForestClient.travel.recreation_forest_arboretums()``(SHP 다운로드+파싱, WGS84
+    point)의 record(``ForestSpatialPoint``, krtour ``ForestSpatialItem`` Protocol
+    충족)를 yield한다. SHP 파싱은 provider의 ``geo`` extra가 필요할 수 있다(배포
+    환경 의존, 실 fetch 검증은 T-212e). file 다운로드도 data.go.kr key를 쓴다.
+    """
+    secret = settings.data_go_kr_service_key
+    if secret is None:
+        raise ProviderCredentialMissing(
+            "krforest arboretums live fetch에는 "
+            "KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY (source DATA_GO_KR_SERVICE_KEY)가 "
+            "필요하다."
+        )
+    api_key = secret.get_secret_value()
+
+    krforest = cast(Any, importlib.import_module("krforest"))
+    client = krforest.ForestClient(api_key=api_key)
+    try:
+        records = await client.travel.recreation_forest_arboretums()
         for record in records:
             yield record
     finally:

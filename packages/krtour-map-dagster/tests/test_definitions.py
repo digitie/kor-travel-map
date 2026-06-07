@@ -34,6 +34,8 @@ def test_feature_load_asset_keys_registered() -> None:
         "feature_place_mois_licenses",
         "feature_place_knps_points",
         "feature_geometry_knps_records",
+        "feature_place_krforest_recreation_forests",
+        "feature_place_krforest_arboretums",
     } <= asset_keys
 
 
@@ -82,6 +84,8 @@ _LIVE_PROVIDER_RESOURCE_KEYS = {
     "mois_license_records",
     "knps_point_records",
     "knps_geometry_records",
+    "krforest_recreation_forests",
+    "krforest_arboretums",
 }
 
 

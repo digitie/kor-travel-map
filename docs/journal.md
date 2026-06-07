@@ -2,6 +2,25 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-07 (claude) — T-RV-53b krforest feature-load asset + fetcher wiring
+
+**작업**: 휴양림/수목원 Dagster feature-load asset 연결(53a transform 소비).
+
+- **fetcher**(`provider_fetchers.py`, async generator — `ForestClient`가 async):
+  - `fetch_krforest_recreation_forests` — `client.iter_pages(client.travel.standard_recreation_forests,
+    num_of_rows=1000)` 페이지네이션, `StandardRecreationForest` yield.
+  - `fetch_krforest_arboretums` — `client.travel.recreation_forest_arboretums()`(SHP→tuple) yield.
+  - credential = `data_go_kr_service_key`(env `DATA_GO_KR_SERVICE_KEY`), `finally: aclose()`.
+- **resources**: `krforest_recreation_forests`/`krforest_arboretums` spec + guard→live override.
+- **assets**: `feature_place_krforest_recreation_forests`/`feature_place_krforest_arboretums`
+  (`recreation_forests_to_bundles`/`arboretums_to_bundles` 소비) + `FEATURE_LOAD_ASSETS` 등록.
+- **definitions**: REQUIRED_RESOURCE_KEYS에 2키 추가.
+- **검증**: ruff + mypy --strict(map 81 / dagster 13) + lint-imports + dagster 62 passed(fake
+  ForestClient fetcher 3 + asset 등록 + live key). arboretum SHP는 provider geo extra 의존(실 fetch
+  검증 T-212e).
+
+**다음**: T-RV-53c(krforest↔MOIS dedup pair를 `DEFAULT_DEDUP_SCOPE_PAIRS`에 append) → 53d(admin UI).
+
 ## 2026-06-07 (claude) — T-RV-53a krforest(휴양림/수목원) transform 신설
 
 **작업**: ADR-034 8단계 휴양림/수목원 데이터소스의 변환 계층(`providers/krforest.py`) 신설

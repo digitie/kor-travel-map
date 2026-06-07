@@ -23,6 +23,17 @@ from krtour.map.providers.krex import (
     rest_areas_to_bundles,
     traffic_notices_to_bundles,
 )
+from krtour.map.providers.krforest import (
+    DATASET_KEY_ARBORETUMS as KRFOREST_ARBORETUMS_DATASET_KEY,
+)
+from krtour.map.providers.krforest import (
+    DATASET_KEY_RECREATION_FORESTS as KRFOREST_RECREATION_FORESTS_DATASET_KEY,
+)
+from krtour.map.providers.krforest import (
+    KRFOREST_PROVIDER_NAME,
+    arboretums_to_bundles,
+    recreation_forests_to_bundles,
+)
 from krtour.map.providers.krheritage import (
     DATASET_KEY_EVENT as KRHERITAGE_EVENT_DATASET_KEY,
 )
@@ -387,6 +398,66 @@ async def feature_geometry_knps_records(
     return await run_feature_geometry_knps_records(context)
 
 
+async def run_feature_place_krforest_recreation_forests(
+    context: AssetExecutionContext,
+) -> DagsterFeatureLoadResult:
+    """전국자연휴양림 record를 place Feature로 적재한다(ADR-034 8단계)."""
+    records = await _record_list(context, "krforest_recreation_forests")
+    fetched_at = await _fetched_at(context)
+    bundles = await recreation_forests_to_bundles(
+        records,
+        fetched_at=fetched_at,
+        reverse_geocoder=_reverse_geocoder(context),
+    )
+    return await _load(
+        context,
+        provider=KRFOREST_PROVIDER_NAME,
+        dataset_key=KRFOREST_RECREATION_FORESTS_DATASET_KEY,
+        bundles=bundles,
+    )
+
+
+@asset(
+    group_name="features_place",
+    required_resource_keys=_COMMON_RESOURCE_KEYS | {"krforest_recreation_forests"},
+    retry_policy=FEATURE_LOAD_RETRY_POLICY,
+)
+async def feature_place_krforest_recreation_forests(
+    context: AssetExecutionContext,
+) -> DagsterFeatureLoadResult:
+    return await run_feature_place_krforest_recreation_forests(context)
+
+
+async def run_feature_place_krforest_arboretums(
+    context: AssetExecutionContext,
+) -> DagsterFeatureLoadResult:
+    """휴양림 수목원(SHP) record를 place Feature로 적재한다."""
+    records = await _record_list(context, "krforest_arboretums")
+    fetched_at = await _fetched_at(context)
+    bundles = await arboretums_to_bundles(
+        records,
+        fetched_at=fetched_at,
+        reverse_geocoder=_reverse_geocoder(context),
+    )
+    return await _load(
+        context,
+        provider=KRFOREST_PROVIDER_NAME,
+        dataset_key=KRFOREST_ARBORETUMS_DATASET_KEY,
+        bundles=bundles,
+    )
+
+
+@asset(
+    group_name="features_place",
+    required_resource_keys=_COMMON_RESOURCE_KEYS | {"krforest_arboretums"},
+    retry_policy=FEATURE_LOAD_RETRY_POLICY,
+)
+async def feature_place_krforest_arboretums(
+    context: AssetExecutionContext,
+) -> DagsterFeatureLoadResult:
+    return await run_feature_place_krforest_arboretums(context)
+
+
 FEATURE_LOAD_ASSETS: Final = [
     feature_event_datagokr_cultural_festivals,
     feature_place_opinet_stations,
@@ -397,6 +468,8 @@ FEATURE_LOAD_ASSETS: Final = [
     feature_place_mois_licenses,
     feature_place_knps_points,
     feature_geometry_knps_records,
+    feature_place_krforest_recreation_forests,
+    feature_place_krforest_arboretums,
 ]
 """현재 구현 완료된 Feature provider 적재 asset 목록."""
 

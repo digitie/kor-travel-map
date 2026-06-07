@@ -29,6 +29,8 @@ from .provider_fetchers import (
     fetch_knps_point_records,
     fetch_krex_rest_areas,
     fetch_krex_traffic_notices,
+    fetch_krforest_arboretums,
+    fetch_krforest_recreation_forests,
     fetch_krheritage_events,
     fetch_mois_license_records,
 )
@@ -125,6 +127,21 @@ PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
         provider_package="python-knps-api",
         dataset_key="knps_trails",
         note="KNPS geometry는 SHP/CSV parser가 WGS84 WKT typed record를 제공해야 한다.",
+    ),
+    ProviderRecordResourceSpec(
+        resource_key="krforest_recreation_forests",
+        provider_package="python-krforest-api",
+        dataset_key="krforest_recreation_forests",
+        setting_names=("data_go_kr_service_key",),
+        source_env_names=("DATA_GO_KR_SERVICE_KEY",),
+    ),
+    ProviderRecordResourceSpec(
+        resource_key="krforest_arboretums",
+        provider_package="python-krforest-api",
+        dataset_key="krforest_arboretums",
+        setting_names=("data_go_kr_service_key",),
+        source_env_names=("DATA_GO_KR_SERVICE_KEY",),
+        note="수목원은 SHP file 다운로드/파싱(provider geo extra 필요할 수 있음).",
     ),
 )
 """Feature load asset provider record resource별 env/package 매핑."""
@@ -319,6 +336,29 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["knps_geometry_records"] = (
     build_provider_record_live_resource(
         _KNPS_GEOMETRY_RECORDS_SPEC,
         fetch_knps_geometry_records,
+    )
+)
+
+_KRFOREST_RECREATION_FORESTS_SPEC: ProviderRecordResourceSpec = next(
+    spec
+    for spec in PROVIDER_RECORD_RESOURCE_SPECS
+    if spec.resource_key == "krforest_recreation_forests"
+)
+_KRFOREST_ARBORETUMS_SPEC: ProviderRecordResourceSpec = next(
+    spec
+    for spec in PROVIDER_RECORD_RESOURCE_SPECS
+    if spec.resource_key == "krforest_arboretums"
+)
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["krforest_recreation_forests"] = (
+    build_provider_record_live_resource(
+        _KRFOREST_RECREATION_FORESTS_SPEC,
+        fetch_krforest_recreation_forests,
+    )
+)
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["krforest_arboretums"] = (
+    build_provider_record_live_resource(
+        _KRFOREST_ARBORETUMS_SPEC,
+        fetch_krforest_arboretums,
     )
 )
 
