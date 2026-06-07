@@ -42,6 +42,21 @@ T-RV-55 ADR-034 보조 dataset 중 **place feature 5종 전부 풀스택 완료*
 
 **다음 한 작업**: 위 1(55d) 설계 결정을 사용자에게 surface → 결정 후 진행. 그 전까지는 2(52c)
 enrichment review UI를 진행 가능.
+## 2026-06-07 Codex 작업 메모 — T-212b Dagster 드릴다운
+
+T-212b-3의 Dagster monitoring 일부를 닫았다. backend `GET /ops/dagster/summary`는
+schedule/sensor 최근 tick을 포함하고, 신규 `GET /ops/dagster/runs/{run_id}`는 run summary,
+event log, failure/PythonError payload를 `{data, meta}` envelope로 반환한다. frontend
+`/admin/dagster`는 recent run row 또는 tick run id 선택 시 `Run detail` panel에서 event/failure를
+조회한다. Dagster GraphQL이 500이어도 summary는 `unavailable` alert와 empty state로 유지된다.
+
+검증: admin Dagster router unit 8, ruff, mypy(라우터), OpenAPI all drift check, frontend
+generated type check/type-check/lint/build, React Doctor(exit 0, 기존 optional warning만), Windows
+Playwright `/admin/dagster` smoke 1 passed.
+
+**다음 한 작업 후보**: T-212b-3 잔여인 offline upload/POI cache target 주요 mutation e2e,
+또는 T-212d seeded PostGIS perf baseline. 다른 T-RV-52 계열은 최신 `origin/main`에 이미
+진행분이 있으므로 새 브랜치 시작 전 반드시 fetch/rebase 상태를 확인한다.
 
 ## 2026-06-07 Claude 작업 메모 — T-RV-50 시리즈 착수 (T-RV-04b 완전 마무리 + 후속 프로그램)
 

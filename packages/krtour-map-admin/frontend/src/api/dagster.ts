@@ -24,7 +24,12 @@ export type DagsterJob = DagsterSchemas["DagsterJob"];
 export type DagsterSchedule = DagsterSchemas["DagsterSchedule"];
 export type DagsterSensor = DagsterSchemas["DagsterSensor"];
 export type DagsterRepository = DagsterSchemas["DagsterRepository"];
+export type DagsterGraphqlError = DagsterSchemas["DagsterGraphqlError"];
+export type DagsterInstigationTick = DagsterSchemas["DagsterInstigationTick"];
 export type DagsterRunSummary = DagsterSchemas["DagsterRunSummary"];
+export type DagsterRunEvent = DagsterSchemas["DagsterRunEvent"];
+export type DagsterRunDetailResponse =
+  DagsterSchemas["DagsterRunDetailResponse"];
 export type DagsterSummaryResponse = DagsterSchemas["DagsterSummaryResponse"];
 export type DagsterNuxSeenResponse = DagsterSchemas["DagsterNuxSeenResponse"];
 
@@ -36,6 +41,17 @@ function fetchDagsterSummary(runLimit = 10): Promise<DagsterSummaryResponse> {
 
 function markDagsterNuxSeen(): Promise<DagsterNuxSeenResponse> {
   return postJson<DagsterNuxSeenResponse>("/ops/dagster/nux-seen");
+}
+
+function fetchDagsterRunDetail(
+  runId: string,
+  eventLimit = 50,
+): Promise<DagsterRunDetailResponse> {
+  return getJson<DagsterRunDetailResponse>(
+    pathWithQuery(`/ops/dagster/runs/${encodeURIComponent(runId)}`, {
+      event_limit: eventLimit,
+    }),
+  );
 }
 
 export function useDagsterSummary(runLimit = 10) {
@@ -50,5 +66,15 @@ export function useDagsterSummary(runLimit = 10) {
 export function useMarkDagsterNuxSeen() {
   return useMutation<DagsterNuxSeenResponse, Error>({
     mutationFn: markDagsterNuxSeen,
+  });
+}
+
+export function useDagsterRunDetail(runId: string | null, eventLimit = 50) {
+  return useQuery<DagsterRunDetailResponse, Error>({
+    queryKey: ["ops", "dagster", "runs", runId, eventLimit],
+    queryFn: () => fetchDagsterRunDetail(runId ?? "", eventLimit),
+    enabled: Boolean(runId),
+    refetchInterval: runId ? 10_000 : false,
+    staleTime: 8_000,
   });
 }

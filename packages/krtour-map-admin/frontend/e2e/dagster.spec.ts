@@ -10,6 +10,10 @@ test.describe("admin dagster page (/admin/dagster)", () => {
     await expect(page.getByRole("link", { name: /Dagster 열기/ })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Code locations" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Recent runs" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Run detail" })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Dagster webserver" }),
+    ).toBeVisible();
     await expect(page.getByTestId("dagster-embed")).toBeVisible();
   });
 });

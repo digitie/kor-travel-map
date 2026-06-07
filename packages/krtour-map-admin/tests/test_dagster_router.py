@@ -54,8 +54,54 @@ def test_dagster_summary_parses_graphql_response(
                                 "name": "krtour.map_dagster.definitions",
                             },
                             "pipelines": [{"name": "__ASSET_JOB", "isJob": True}],
-                            "schedules": [],
-                            "sensors": [],
+                            "schedules": [
+                                {
+                                    "name": "nightly_feature_refresh",
+                                    "cronSchedule": "0 2 * * *",
+                                    "executionTimezone": "Asia/Seoul",
+                                    "scheduleState": {
+                                        "status": "RUNNING",
+                                        "ticks": [
+                                            {
+                                                "tickId": "schedule-tick-1",
+                                                "status": "SUCCESS",
+                                                "timestamp": 1710000000.0,
+                                                "endTimestamp": 1710000010.0,
+                                                "runIds": ["run-1"],
+                                                "runKeys": ["nightly"],
+                                                "skipReason": None,
+                                                "cursor": "cursor-1",
+                                                "error": None,
+                                            }
+                                        ],
+                                    },
+                                }
+                            ],
+                            "sensors": [
+                                {
+                                    "name": "provider_failure_sensor",
+                                    "sensorState": {
+                                        "status": "STOPPED",
+                                        "ticks": [
+                                            {
+                                                "tickId": "sensor-tick-1",
+                                                "status": "FAILURE",
+                                                "timestamp": 1710000200.0,
+                                                "endTimestamp": None,
+                                                "runIds": [],
+                                                "runKeys": [],
+                                                "skipReason": None,
+                                                "cursor": None,
+                                                "error": {
+                                                    "message": "sensor failed",
+                                                    "stack": ["frame 1"],
+                                                    "className": "SensorFailure",
+                                                },
+                                            }
+                                        ],
+                                    },
+                                }
+                            ],
                             "assetNodes": [
                                 {
                                     "id": "asset-1",
@@ -109,7 +155,28 @@ def test_dagster_summary_parses_graphql_response(
     assert data["repository_count"] == 1
     assert data["job_count"] == 1
     assert data["asset_count"] == 2
+    assert data["schedule_count"] == 1
+    assert data["sensor_count"] == 1
     assert data["run_counts"] == {"SUCCESS": 1}
+    repository = data["repositories"][0]
+    assert repository["schedules"][0]["recent_ticks"] == [
+        {
+            "tick_id": "schedule-tick-1",
+            "status": "SUCCESS",
+            "timestamp": 1710000000.0,
+            "end_timestamp": 1710000010.0,
+            "run_ids": ["run-1"],
+            "run_keys": ["nightly"],
+            "skip_reason": None,
+            "cursor": "cursor-1",
+            "error": None,
+        }
+    ]
+    assert repository["sensors"][0]["recent_ticks"][0]["error"] == {
+        "message": "sensor failed",
+        "stack": ["frame 1"],
+        "class_name": "SensorFailure",
+    }
     assert data["repositories"][0]["asset_groups"] == [
         {
             "group_name": "features_event",
@@ -126,6 +193,125 @@ def test_dagster_summary_parses_graphql_response(
     assert calls == [
         {"query": dagster_mod._DAGSTER_SUMMARY_QUERY, "variables": {"limit": 3}},
     ]
+
+
+@pytest.mark.unit
+def test_dagster_run_detail_parses_graphql_response(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    async def _fake_post_graphql(
+        client: httpx.AsyncClient,
+        graphql_url: str,
+        variables: dict[str, object],
+        query: str = dagster_mod._DAGSTER_SUMMARY_QUERY,
+    ) -> dict[str, object]:
+        assert graphql_url == "http://dagster.example:9013/graphql"
+        calls.append({"query": query, "variables": variables})
+        assert query == dagster_mod._DAGSTER_RUN_DETAIL_QUERY
+        assert variables == {"runId": "run-1", "eventLimit": 5}
+        return {
+            "data": {
+                "runOrError": {
+                    "__typename": "Run",
+                    "runId": "run-1",
+                    "jobName": "__ASSET_JOB",
+                    "status": "FAILURE",
+                    "startTime": 1710000000.0,
+                    "endTime": 1710000030.0,
+                    "updateTime": 1710000030.0,
+                    "tags": [{"key": "dagster/job", "value": "__ASSET_JOB"}],
+                    "eventConnection": {
+                        "cursor": "event-cursor-1",
+                        "hasMore": True,
+                        "events": [
+                            {
+                                "__typename": "StepStartEvent",
+                                "message": "step started",
+                                "timestamp": "1710000001.0",
+                                "level": "INFO",
+                                "stepKey": "load_features",
+                                "eventType": "STEP_START",
+                            },
+                            {
+                                "__typename": "RunFailureEvent",
+                                "message": "run failed",
+                                "timestamp": "1710000030.0",
+                                "level": "ERROR",
+                                "stepKey": None,
+                                "eventType": "RUN_FAILURE",
+                                "error": {
+                                    "message": "boom",
+                                    "stack": ["traceback"],
+                                    "className": "RuntimeError",
+                                },
+                            },
+                        ],
+                    },
+                }
+            }
+        }
+
+    monkeypatch.setattr(dagster_mod, "_post_graphql", _fake_post_graphql)
+
+    response = client.get("/ops/dagster/runs/run-1?event_limit=5")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "duration_ms" in body["meta"]
+    data = body["data"]
+    assert data["status"] == "ok"
+    assert data["dagster_url"] == "http://dagster.example:9013"
+    assert data["graphql_url"] == "http://dagster.example:9013/graphql"
+    assert data["run"]["run_id"] == "run-1"
+    assert data["run"]["status"] == "FAILURE"
+    assert data["event_cursor"] == "event-cursor-1"
+    assert data["event_has_more"] is True
+    assert data["events"][0]["dagster_event_type"] == "STEP_START"
+    assert data["events"][1]["error"] == {
+        "message": "boom",
+        "stack": ["traceback"],
+        "class_name": "RuntimeError",
+    }
+    assert calls == [
+        {
+            "query": dagster_mod._DAGSTER_RUN_DETAIL_QUERY,
+            "variables": {"runId": "run-1", "eventLimit": 5},
+        },
+    ]
+
+
+@pytest.mark.unit
+def test_dagster_run_detail_returns_not_found(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def _fake_post_graphql(
+        client: httpx.AsyncClient,
+        graphql_url: str,
+        variables: dict[str, object],
+        query: str = dagster_mod._DAGSTER_SUMMARY_QUERY,
+    ) -> dict[str, object]:
+        return {
+            "data": {
+                "runOrError": {
+                    "__typename": "RunNotFoundError",
+                    "message": "Run not found",
+                    "runId": "missing-run",
+                }
+            }
+        }
+
+    monkeypatch.setattr(dagster_mod, "_post_graphql", _fake_post_graphql)
+
+    response = client.get("/ops/dagster/runs/missing-run")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["status"] == "not_found"
+    assert data["run"] is None
+    assert data["events"] == []
+    assert data["errors"] == ["Run not found"]
 
 
 @pytest.mark.unit
@@ -255,7 +441,9 @@ def test_dagster_nux_seen_rejects_invalid_graphql_override(
 @pytest.mark.unit
 def test_dagster_summary_openapi_path_is_mounted(client: TestClient) -> None:
     spec = client.get("/openapi.json").json()
+    assert "/ops/dagster/runs/{run_id}" in spec["paths"]
     assert "/ops/dagster/summary" in spec["paths"]
     assert "/ops/dagster/nux-seen" in spec["paths"]
+    assert "DagsterRunDetailResponse" in spec["components"]["schemas"]
     assert "DagsterSummaryResponse" in spec["components"]["schemas"]
     assert "DagsterNuxSeenResponse" in spec["components"]["schemas"]

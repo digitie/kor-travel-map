@@ -162,6 +162,32 @@ asset.
 
 **T-RV-52b 완료**(b-1 matcher / b-2 load infra / b-3 asset). **다음**: T-RV-52c(매칭/enrichment 검토
 UI) → T-RV-55(보조 5종).
+## 2026-06-07 (codex) — T-212b Dagster tick/run 실패 드릴다운
+
+**작업**: `/admin/dagster`의 자체 운영 요약을 Dagster tick/run 실패 원인까지 drilldown할
+수 있게 보강했다. 기존 Dagster webserver iframe은 유지하고, backend는 Dagster GraphQL을
+읽기 전용으로만 호출한다.
+
+- **backend**: `GET /ops/dagster/summary`에 schedule/sensor 최근 tick 3건을 추가하고,
+  `GET /ops/dagster/runs/{run_id}`를 추가했다. run detail은 `runOrError`의 run summary,
+  event log, PythonError payload를 `{data, meta}` envelope로 반환한다. SSRF allowlist와
+  `unavailable/error/not_found` 응답 패턴은 기존 Dagster 라우터와 동일하게 유지.
+- **frontend**: `src/api/dagster.ts`에 generated type 기반 `useDagsterRunDetail` hook을 추가.
+  `/admin/dagster`는 schedule/sensor tick의 run id와 recent run row를 선택해 `Run detail`
+  panel에서 event/failure를 조회한다. run이 없거나 Dagster GraphQL이 500이어도 summary alert,
+  empty state, iframe이 유지된다.
+- **OpenAPI/docs**: `openapi.json`/`types.ts` 재생성, `openapi-admin-contract.md`,
+  `debug-ui-admin-workflows.md`, frontend README, `tasks.md` T-212b-3 체크리스트 갱신.
+- **검증**: `pytest -s packages/krtour-map-admin/tests/test_dagster_router.py -q` 8 passed,
+  `ruff check` green, `mypy packages/.../dagster.py` green, OpenAPI `--profile all --check`
+  green, frontend `gen:types:check`/`type-check`/`lint`/`build` green. React Doctor는 exit 0,
+  optional warning만 남음(기존 shadcn/ui export·label/native-select, Dagster iframe sandbox
+  false positive). Windows Playwright:
+  `E2E_BASE_URL=http://172.26.51.35:9014 npm -w packages/krtour-map-admin/frontend run e2e -- e2e/dagster.spec.ts`
+  1 passed. 스크린샷은 `C:\Users\digit\AppData\Local\Temp\krtour-dagster-drilldown-9014-ready.png`.
+
+**다음**: T-212b-3 잔여인 offline upload/POI cache target 주요 mutation e2e 또는 T-212d
+perf baseline.
 
 ## 2026-06-07 (claude) — T-RV-52b-2 load_enrichment_links client/repo
 

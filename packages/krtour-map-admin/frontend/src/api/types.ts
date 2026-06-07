@@ -799,6 +799,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/ops/dagster/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Dagster run 상세
+         * @description Dagster GraphQL runOrError를 조회해 최근 event log와 실패 error payload를 admin UI용 DTO로 반환한다. 조회 전용이며 Dagster run을 재실행하거나 상태를 변경하지 않는다.
+         */
+        get: operations["get_dagster_run_detail_ops_dagster_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/ops/dagster/summary": {
         parameters: {
             query?: never;
@@ -1743,6 +1763,41 @@ export interface components {
             duration_ms: number;
         };
         /**
+         * DagsterGraphqlError
+         * @description Dagster GraphQL PythonError 요약.
+         */
+        DagsterGraphqlError: {
+            /** Class Name */
+            class_name?: string | null;
+            /** Message */
+            message?: string | null;
+            /** Stack */
+            stack?: string[];
+        };
+        /**
+         * DagsterInstigationTick
+         * @description Dagster schedule/sensor tick 요약.
+         */
+        DagsterInstigationTick: {
+            /** Cursor */
+            cursor?: string | null;
+            /** End Timestamp */
+            end_timestamp?: number | null;
+            error?: components["schemas"]["DagsterGraphqlError"] | null;
+            /** Run Ids */
+            run_ids?: string[];
+            /** Run Keys */
+            run_keys?: string[];
+            /** Skip Reason */
+            skip_reason?: string | null;
+            /** Status */
+            status: string;
+            /** Tick Id */
+            tick_id: string;
+            /** Timestamp */
+            timestamp: number;
+        };
+        /**
          * DagsterJob
          * @description Dagster job/pipeline 요약.
          */
@@ -1805,6 +1860,65 @@ export interface components {
             sensors: components["schemas"]["DagsterSensor"][];
         };
         /**
+         * DagsterRunDetailData
+         * @description `GET /ops/dagster/runs/{run_id}` data.
+         */
+        DagsterRunDetailData: {
+            /**
+             * Checked At
+             * Format: date-time
+             */
+            checked_at: string;
+            /** Dagster Url */
+            dagster_url: string;
+            /** Errors */
+            errors?: string[];
+            /** Event Cursor */
+            event_cursor?: string | null;
+            /**
+             * Event Has More
+             * @default false
+             */
+            event_has_more: boolean;
+            /** Events */
+            events?: components["schemas"]["DagsterRunEvent"][];
+            /** Graphql Url */
+            graphql_url: string;
+            run?: components["schemas"]["DagsterRunSummary"] | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "not_found" | "unavailable" | "error";
+        };
+        /**
+         * DagsterRunDetailResponse
+         * @description `GET /ops/dagster/runs/{run_id}` 응답 (DA-D-03 envelope).
+         */
+        DagsterRunDetailResponse: {
+            data: components["schemas"]["DagsterRunDetailData"];
+            meta: components["schemas"]["DagsterDetailMeta"];
+        };
+        /**
+         * DagsterRunEvent
+         * @description Dagster run event/failure 요약.
+         */
+        DagsterRunEvent: {
+            /** Dagster Event Type */
+            dagster_event_type?: string | null;
+            error?: components["schemas"]["DagsterGraphqlError"] | null;
+            /** Event Type */
+            event_type: string;
+            /** Level */
+            level?: string | null;
+            /** Message */
+            message?: string | null;
+            /** Step Key */
+            step_key?: string | null;
+            /** Timestamp */
+            timestamp?: string | null;
+        };
+        /**
          * DagsterRunSummary
          * @description 최근 Dagster run 요약.
          */
@@ -1837,6 +1951,8 @@ export interface components {
             execution_timezone?: string | null;
             /** Name */
             name: string;
+            /** Recent Ticks */
+            recent_ticks?: components["schemas"]["DagsterInstigationTick"][];
             /** Status */
             status?: string | null;
         };
@@ -1847,6 +1963,8 @@ export interface components {
         DagsterSensor: {
             /** Name */
             name: string;
+            /** Recent Ticks */
+            recent_ticks?: components["schemas"]["DagsterInstigationTick"][];
             /** Status */
             status?: string | null;
         };
@@ -5864,6 +5982,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DagsterNuxSeenResponse"];
+                };
+            };
+        };
+    };
+    get_dagster_run_detail_ops_dagster_runs__run_id__get: {
+        parameters: {
+            query?: {
+                event_limit?: number;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DagsterRunDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

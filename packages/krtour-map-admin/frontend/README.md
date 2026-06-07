@@ -220,7 +220,7 @@ PID를 종료한 뒤 WSL frontend를 다시 띄운다. 정상은 `wslrelay`다.
 | `/admin/dedup-review` | `/admin/dedup-review` | 구현됨. dedup 검토 큐와 결정 mutation |
 | `/admin/feature-update-requests` | `/admin/feature-update-requests` | 구현됨. 좌표/반경/provider 업데이트 큐잉, cancel, run-now |
 | `/admin/poi-cache-targets` | `/admin/poi-cache-targets`, `/features/nearby/by-target` | 구현됨. 외부 POI key 기반 주변 feature 캐시 |
-| `/admin/dagster` | `/ops/dagster/summary` | 구현됨. Dagster 운영 요약 + Dagster webserver embed |
+| `/admin/dagster` | `/ops/dagster/summary`, `/ops/dagster/runs/{run_id}`, `/ops/dagster/nux-seen` | 구현됨. Dagster 운영 요약 + tick/run 실패 드릴다운 + Dagster webserver embed |
 | `/etl` | `/debug/etl/*` | 구현됨. fixture/live ETL preview |
 | `/features/new` | `/admin/features` | 후속. 수동 feature 추가는 audit log/API 필요 |
 | `/features/[id]` | `/features/{id}` | 후속. 별도 route 대신 현재 `/features` 상세 panel 사용 |

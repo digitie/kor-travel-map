@@ -43,7 +43,8 @@ PostGIS perf baseline**이다. T-207b는 사용자 결정에 따라 구현하지
    저장소 endpoint/public URL 예시는 `9003`을 기준으로 작성하고, console 링크는
    `9004`만 사용한다.
 7. **admin Dagster 운영 화면** — `/admin/dagster`는 `GET /ops/dagster/summary` 자체
-   요약 UI와 Dagster webserver embed를 제공한다. Dagster NUX 처리는
+   요약 UI, schedule/sensor tick history, `GET /ops/dagster/runs/{run_id}` failure
+   drilldown, Dagster webserver embed를 제공한다. Dagster NUX 처리는
    `POST /ops/dagster/nux-seen`으로 분리해 GET 부수효과를 만들지 않는다. T-208e는
    queue/sensor 실행 연결을 Dagster package에 추가한다.
 8. **feature update request 큐** — T-205a에서 `ops.feature_update_requests` 테이블과
@@ -1146,8 +1147,12 @@ lint-imports/pytest/coverage, frontend type-check/e2e). 실데이터 검증은 T
       상세 분해:
       - `T-212b-1`: `/admin/features` table/detail/map review + weather panel.
       - `T-212b-2`: `/admin/issues` 처리 workflow + `/ops/logs` system/API call log 화면.
-      - `T-212b-3`: Dagster schedule/sensor tick/failure drilldown + offline upload/POI
+      - `T-212b-3`: Dagster schedule/sensor tick/failure 드릴다운 + offline upload/POI
         cache target 주요 mutation e2e.
+        - [x] Dagster summary에 schedule/sensor recent tick을 포함하고,
+          `/ops/dagster/runs/{run_id}` event/failure detail API와 `/admin/dagster`
+          선택 panel을 연결(2026-06-07 Codex).
+        - [ ] offline upload/POI cache target 주요 mutation e2e.
 - [x] T-212c — API endpoint/error/log contract 정리 (2026-06-07 완료).
       admin/user endpoint shape, error envelope, debug/test endpoint, import job event,
       system log API, route mount 정책을 점검하고 필요한 backend를 구현한다.
