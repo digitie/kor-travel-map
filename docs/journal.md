@@ -2,6 +2,28 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-07 (claude) — T-RV-52b-3 visitkorea enrichment asset → T-RV-52b 완료
+
+**작업**: 축제 enrichment 통합(3부, 52b 완료) — visitkorea fetcher + DB-coupled orchestration +
+asset.
+
+- **fetcher** `fetch_visitkorea_festival_events`(sync — `KrTourApiClient`도 sync):
+  `iter_pages(search_festival, <올해 1/1 KST>, num_of_rows=100)` 페이지네이션, `TourItem` yield.
+  credential `data_go_kr_service_key`, finally `close()`.
+- **client** `load_festival_enrichment(items, *, fetched_at, name_threshold=0.9)`: 한 transaction에서
+  적재된 datagokr 축제(`STANDARD_DATA_PROVIDER_NAME`/`datagokr_cultural_festivals`/kind event)를
+  `list_dedup_refresh_features`(limit 50k)로 candidate 로드 → `ScoringFestivalMatcher` → `festival_to_
+  enrichment_links` → `load_source_record_links`. 1차 미적재면 candidate 0 → enrichment 0.
+- **asset** `feature_event_visitkorea_enrichment`(`EnrichmentLoadResult` 반환, feature 미생성) +
+  resource spec(`visitkorea_festival_events`)/guard→live + definitions 등록.
+- **검증**: ruff + mypy --strict(map 81/dagster 13) + lint-imports + dagster 66 + unit 932 +
+  coverage 80.68%. fetcher fake(KrTourApiClient) + asset 등록 + live key 단위.
+- **후속**: overview/homepage는 detailCommon에서만 → matched item N+1 detail 보강은 후속(현재
+  enrichment = 이미지/content_id/event date + SourceRecord/Link).
+
+**T-RV-52b 완료**(b-1 matcher / b-2 load infra / b-3 asset). **다음**: T-RV-52c(매칭/enrichment 검토
+UI) → T-RV-55(보조 5종).
+
 ## 2026-06-07 (claude) — T-RV-52b-2 load_enrichment_links client/repo
 
 **작업**: 축제 enrichment 적재 인프라(2부). enrichment는 feature를 만들지 않고 기존 1차

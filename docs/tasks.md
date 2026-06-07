@@ -301,10 +301,15 @@ enrichment(모듈 있음, 미wiring)**. dedup 인프라(scoring/queue/admin rout
     YYYYMMDD) + `overview`/`homepage`(detailCommon 보강용, list 응답엔 None) 필드 추가 → krtour
     `VisitKoreaFestivalItem` Protocol 4필드 속성 존재 충족. ruff/mypy/pytest 96 passed. **overview/
     homepage는 detailCommon에서만 오므로 52b 매칭 item에 한해 N+1 detail 호출로 보강.**
-  - [ ] **T-RV-52b (krtour)** `fetch_visitkorea_festival_events` fetcher + `FestivalMatcher` 구현
-    (datagokr 축제 feature를 name+region fuzzy 매칭, ADR-016 재사용) + `feature_event_visitkorea_
-    enrichment` asset(`festival_to_enrichment_links` → SourceRecord/enrichment SourceLink) + resource.
-    이미지 URL은 `SourceRecord.raw_data` 보존.
+  - [x] **T-RV-52b (krtour)**(2026-06-07) 3 PR로 세분:
+    - **52b-1** `ScoringFestivalMatcher`+`FestivalCandidate`(providers/visitkorea, 이름 Jaro-Winkler
+      유사도 임계 0.90). - **52b-2** `EnrichmentLoadResult`+`load_source_record_links`(infra) +
+      `client.load_enrichment_links`. - **52b-3** `fetch_visitkorea_festival_events`(sync, KrTourApiClient
+      iter_pages, 올해 1월~) + `client.load_festival_enrichment`(한 transaction: datagokr 축제 candidate
+      `list_dedup_refresh_features` 로드 → matcher → `festival_to_enrichment_links` → load) +
+      `feature_event_visitkorea_enrichment` asset(EnrichmentLoadResult 반환) + resource + definitions.
+      dagster 66 + unit 932 + coverage 80.68% green. **overview/homepage N+1 detail 보강은 후속**
+      (현재 list 기반 enrichment = 이미지+content_id+event date; matched feature에 SourceRecord/Link).
   - [ ] **T-RV-52c (UI)** 축제 datagokr↔visitkorea 매칭/enrichment를 dedup-review와 **같은 UI**에서
     검토·수동 link/unlink(enrichment review 탭 또는 통합). 자동 매칭 실패분 수동 처리.
 - [ ] **T-RV-53 휴양림/수목원(krforest) feature-load**(points 1·2·3·4): provider `python-krforest-api`
