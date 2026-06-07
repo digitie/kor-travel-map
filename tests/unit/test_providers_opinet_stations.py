@@ -6,7 +6,6 @@ import asyncio
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -34,16 +33,22 @@ def stations_to_bundles(
 
 @dataclass(frozen=True)
 class _StationItem:
-    """``OpinetStationItem`` Protocol 만족."""
+    """``OpinetStationItem`` Protocol 만족 (provider ``Station`` 정렬, ADR-044).
+
+    ``tel``/``lpg_yn``은 ``Station``엔 없고 ``StationDetail``에만 있으나, 변환이
+    ``getattr``로 보강하므로 테스트 dataclass엔 둔다(있을 때 보강 검증). ``lon``/
+    ``lat``은 no-coord 케이스 검증용으로 ``None`` 허용(실 ``Station``은 항상 보유).
+    """
 
     uni_id: str
-    station_name: str
-    brand_code: str | None
-    address: str | None
-    longitude: Decimal | None
-    latitude: Decimal | None
-    tel: str | None
-    lpg_yn: str | bool | None
+    name: str
+    brand: object | None
+    address_road: str | None
+    address_jibun: str | None
+    lon: float | None
+    lat: float | None
+    tel: str | None = None
+    lpg_yn: str | bool | None = None
 
 
 _NOW = datetime(2026, 5, 28, 4, 0, tzinfo=KST)
@@ -51,35 +56,36 @@ _NOW = datetime(2026, 5, 28, 4, 0, tzinfo=KST)
 
 _S1 = _StationItem(
     uni_id="A0000001",
-    station_name="SK주유소 강남점",
-    brand_code="SKE",
-    address="서울특별시 강남구 테헤란로 100",
-    longitude=Decimal("127.0376"),
-    latitude=Decimal("37.4979"),
+    name="SK주유소 강남점",
+    brand="SKE",
+    address_road="서울특별시 강남구 테헤란로 100",
+    address_jibun=None,
+    lon=127.0376,
+    lat=37.4979,
     tel="02-1234-5678",
     lpg_yn="Y",
 )
 
 _S2 = _StationItem(
     uni_id="A0000002",
-    station_name="GS칼텍스 부산점",
-    brand_code="GSC",
-    address="부산광역시 해운대구 해운대로 200",
-    longitude=Decimal("129.1604"),
-    latitude=Decimal("35.1587"),
+    name="GS칼텍스 부산점",
+    brand="GSC",
+    address_road="부산광역시 해운대구 해운대로 200",
+    address_jibun=None,
+    lon=129.1604,
+    lat=35.1587,
     tel="0517491234",
     lpg_yn="N",
 )
 
 _S3_NO_COORD = _StationItem(
     uni_id="A0000003",
-    station_name="현대오일뱅크 ㅈㅓ주점",
-    brand_code="HDO",
-    address="제주특별자치도 제주시 노형로 100",
-    longitude=None,
-    latitude=None,
-    tel=None,
-    lpg_yn=None,
+    name="현대오일뱅크 ㅈㅓ주점",
+    brand="HDO",
+    address_road=None,
+    address_jibun="제주특별자치도 제주시 노형로 100",
+    lon=None,
+    lat=None,
 )
 
 
@@ -215,13 +221,12 @@ def test_address_normalize_korean() -> None:
     """raw 주소의 다중 공백/전각 공백 흡수."""
     weird = _StationItem(
         uni_id="A_W",
-        station_name="이상한 주유소",
-        brand_code="X",
-        address="서울특별시  강남구   테헤란로  100",  # 다중 공백
-        longitude=Decimal("127.0"),
-        latitude=Decimal("37.5"),
-        tel=None,
-        lpg_yn=None,
+        name="이상한 주유소",
+        brand="X",
+        address_road="서울특별시  강남구   테헤란로  100",  # 다중 공백
+        address_jibun=None,
+        lon=127.0,
+        lat=37.5,
     )
     [bundle] = stations_to_bundles([weird], fetched_at=_NOW)
     assert bundle.feature.address.road == "서울특별시 강남구 테헤란로 100"

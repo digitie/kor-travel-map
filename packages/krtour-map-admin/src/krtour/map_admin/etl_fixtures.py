@@ -290,37 +290,40 @@ async def _convert_kma_ultra_short_forecast(items: Sequence[Any]) -> list[Any]:
 
 @dataclass(frozen=True)
 class _Station:
-    """`OpinetStationItem` Protocol 준수."""
+    """`OpinetStationItem` Protocol 준수 (provider `Station` 정렬, ADR-044)."""
 
     uni_id: str
-    station_name: str
-    brand_code: str | None
-    address: str | None
-    longitude: Decimal | None
-    latitude: Decimal | None
-    tel: str | None
-    lpg_yn: str | bool | None
+    name: str
+    brand: object | None
+    address_road: str | None
+    address_jibun: str | None
+    lon: float | None
+    lat: float | None
+    tel: str | None = None
+    lpg_yn: str | bool | None = None
 
 
 def _opinet_stations_fixture() -> Sequence[_Station]:
     return [
         _Station(
             uni_id="A0000001",
-            station_name="SK주유소 강남점",
-            brand_code="SKE",
-            address="서울특별시 강남구 테헤란로 100",
-            longitude=Decimal("127.0376"),
-            latitude=Decimal("37.4979"),
+            name="SK주유소 강남점",
+            brand="SKE",
+            address_road="서울특별시 강남구 테헤란로 100",
+            address_jibun=None,
+            lon=127.0376,
+            lat=37.4979,
             tel="02-1234-5678",
             lpg_yn="Y",
         ),
         _Station(
             uni_id="A0000002",
-            station_name="GS칼텍스 부산점",
-            brand_code="GSC",
-            address="부산광역시 해운대구 해운대로 200",
-            longitude=Decimal("129.1604"),
-            latitude=Decimal("35.1587"),
+            name="GS칼텍스 부산점",
+            brand="GSC",
+            address_road="부산광역시 해운대구 해운대로 200",
+            address_jibun=None,
+            lon=129.1604,
+            lat=35.1587,
             tel="0517491234",
             lpg_yn="N",
         ),
