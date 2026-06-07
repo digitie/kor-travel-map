@@ -12,12 +12,14 @@ from dagster import build_init_resource_context
 from krtour.map.settings import KrtourMapSettings
 from pydantic import SecretStr
 
+import krtour.map_dagster.provider_fetchers as provider_fetchers
 from krtour.map_dagster.provider_fetchers import (
     ProviderCredentialMissing,
     fetch_datagokr_cultural_festivals,
     fetch_krex_rest_areas,
     fetch_krex_traffic_notices,
     fetch_krheritage_events,
+    fetch_mois_license_records,
 )
 from krtour.map_dagster.resources import (
     PROVIDER_RECORD_RESOURCE_DEFINITIONS,
@@ -290,6 +292,107 @@ def test_krex_traffic_notices_fetch_closes_on_partial_consumption(
     generator.close()
 
     assert fake.instances[0].closed is True
+
+
+def test_mois_fetch_raises_when_source_db_unset() -> None:
+    settings = KrtourMapSettings(mois_source_db_path=None)
+
+    generator = fetch_mois_license_records(settings)
+    with pytest.raises(ProviderCredentialMissing):
+        next(generator)
+
+
+def test_mois_fetch_raises_when_source_db_file_missing(tmp_path: Any) -> None:
+    missing = tmp_path / "does-not-exist.sqlite"
+    settings = KrtourMapSettings(mois_source_db_path=str(missing))
+
+    generator = fetch_mois_license_records(settings)
+    with pytest.raises(ProviderCredentialMissing):
+        next(generator)
+
+
+def test_mois_fetch_yields_open_records_and_cleans_up(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mois_db = pytest.importorskip("mois.db")
+    from krtour.map.providers.mois import PROMOTED_SERVICE_SLUGS
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+
+    slug = sorted(PROMOTED_SERVICE_SLUGS)[0]
+    db_file = tmp_path / "mois-source.sqlite"
+
+    # 미리 sync된 Phase A 소스 DB를 흉내: provider 스키마 생성 + open 1행.
+    setup_engine = create_engine(f"sqlite:///{db_file}")
+    mois_db.Base.metadata.create_all(setup_engine)
+    with Session(setup_engine) as setup_session:
+        setup_session.add(
+            mois_db.PlaceMaster(
+                service_slug=slug,
+                mng_no="MNG-0001",
+                place_name="테스트 업소",
+                is_open=True,
+            )
+        )
+        # 영업중이 아닌 행은 iter_open_place_records에서 제외되어야 한다.
+        setup_session.add(
+            mois_db.PlaceMaster(
+                service_slug=slug,
+                mng_no="MNG-0002",
+                place_name="폐업 업소",
+                is_open=False,
+            )
+        )
+        setup_session.commit()
+    setup_engine.dispose()
+
+    # engine/session lifecycle을 관찰하기 위해 fetcher가 쓰는 심볼을 delegating
+    # proxy로 감싼다(실 query는 그대로 real engine/session에 위임).
+    disposed: list[bool] = []
+    closed: list[bool] = []
+    real_create_engine = provider_fetchers.create_engine
+    real_session_cls = provider_fetchers.Session
+
+    class _EngineProxy:
+        def __init__(self, engine: Any) -> None:
+            self._engine = engine
+
+        def dispose(self, *args: Any, **kwargs: Any) -> Any:
+            disposed.append(True)
+            return self._engine.dispose(*args, **kwargs)
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self._engine, name)
+
+    class _SessionProxy:
+        def __init__(self, session: Any) -> None:
+            self._session = session
+
+        def close(self, *args: Any, **kwargs: Any) -> Any:
+            closed.append(True)
+            return self._session.close(*args, **kwargs)
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self._session, name)
+
+    def _spy_create_engine(url: str, *args: Any, **kwargs: Any) -> Any:
+        return _EngineProxy(real_create_engine(url, *args, **kwargs))
+
+    def _spy_session(engine: Any, *args: Any, **kwargs: Any) -> Any:
+        target = engine._engine if isinstance(engine, _EngineProxy) else engine
+        return _SessionProxy(real_session_cls(target, *args, **kwargs))
+
+    monkeypatch.setattr(provider_fetchers, "create_engine", _spy_create_engine)
+    monkeypatch.setattr(provider_fetchers, "Session", _spy_session)
+
+    settings = KrtourMapSettings(mois_source_db_path=str(db_file))
+    records = list(fetch_mois_license_records(settings))
+
+    assert len(records) == 1
+    assert records[0].service_slug == slug
+    assert records[0].mng_no == "MNG-0001"
+    assert closed == [True]
+    assert disposed == [True]
 
 
 def test_fetch_raises_when_credential_missing() -> None:

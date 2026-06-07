@@ -52,9 +52,13 @@ fetch)`로 해당 resource_key만 guard→live 교체. dagster 테스트는 prov
     coordless). 잔여: EX incidentType 코드 매핑(krtour follow-up).
   - **opinet**: ⏸ provider 차단 — bulk/지역 엔드포인트 없음(aroundAll 5km만) → 이슈
     `python-opinet-api#7`. 라이브러리 보강 대기 또는 POI 타깃 모델 전환(product 결정).
-  - **mois**: ⭐다음 — Phase B fetcher(미리 sync된 MOIS 소스 SQLite DB →
-    `iter_open_place_records(PROMOTED_SERVICE_SLUGS)`) + Phase A sync op + 신규 설정
-    `mois_source_db_path`(정책 설명 완료). **knps**: keyless 파일셋 SHP/CSV 파서 어댑터.
+  - [x] **⑤ mois_license_records**(Phase B, 2026-06-07) — clean match. fetcher가
+    `mois_source_db_path`(env `KRTOUR_MAP_MOIS_SOURCE_DB_PATH`)의 미리 sync된 MOIS 소스
+    SQLite DB → `iter_open_place_records(PROMOTED_SERVICE_SLUGS)` stream.
+    **잔여 mois Phase A**: LOCALDATA 다운로드+`sync_localdata_source_db` Dagster op/스케줄.
+  - **knps**: ⭐다음 — keyless 파일셋(SHP/CSV) download→파싱→record 어댑터. provider
+    `python-knps-api`가 사전 파싱 record를 안 주면(파일 bytes만) krtour 어댑터 또는
+    provider 이슈 필요(실검증 선행).
 - **원칙(업데이트)**: provider 착수 전 (1) 이미 구현됐는지 grep, (2) provider model이
   krtour Protocol을 실제로 만족하는지 검증(미검증 wiring은 런타임 AttributeError),
   (3) **provider 라이브러리 수정이 필요하면 직접 편집 대신 해당 repo에 AI agent용 상세

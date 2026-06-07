@@ -162,6 +162,13 @@ class KrtourMapSettings(BaseSettings):
             "있다."
         ),
     )
+    mois_source_db_path: str | None = Field(
+        default=None,
+        description=(
+            "미리 sync된 MOIS 소스 SQLite DB 경로(Phase A 산출물). 미설정/파일 "
+            "부재 시 fetcher가 명확히 실패. env ``KRTOUR_MAP_MOIS_SOURCE_DB_PATH``."
+        ),
+    )
 
     # ── 로깅 ─────────────────────────────────────────────────────────────
     log_level: str = Field(

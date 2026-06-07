@@ -15,8 +15,12 @@ lazy import**한다 — 본 모듈 import만으로 provider 패키지를 hard-re
 from __future__ import annotations
 
 import importlib
+import pathlib
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, cast
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 
 if TYPE_CHECKING:
     from krtour.map.settings import KrtourMapSettings
@@ -27,6 +31,7 @@ __all__ = [
     "fetch_krex_rest_areas",
     "fetch_krex_traffic_notices",
     "fetch_krheritage_events",
+    "fetch_mois_license_records",
 ]
 
 
@@ -153,6 +158,51 @@ def fetch_krex_rest_areas(
             page_no += 1
     finally:
         client.close()
+
+
+def fetch_mois_license_records(
+    settings: KrtourMapSettings,
+) -> Iterator[Any]:
+    """미리 sync된 MOIS 소스 SQLite DB에서 영업중 인허가 record를 stream한다.
+
+    MOIS 인허가는 live REST가 아니라 별도 sync step(Phase A — LOCALDATA
+    download/적재, **본 task scope 밖**)이 채워둔 SQLite 소스 DB를 읽는다.
+    본 fetcher(Phase B)는 그 DB를 **읽기만** 한다.
+
+    ``settings.mois_source_db_path``(env ``KRTOUR_MAP_MOIS_SOURCE_DB_PATH``)에서
+    소스 DB 경로를 읽어, 미설정/파일 부재 시 ``ProviderCredentialMissing``으로
+    명확히 실패한다. 경로가 유효하면 sqlite engine + ``Session``을 열고
+    ``mois.db.iter_open_place_records(session, service_slugs=...)``의 record
+    (``mois.db.PlaceRecord``, krtour ``MoisLicensePlaceRecord`` Protocol 충족)를
+    lazily yield한다. scope는 krtour ``PROMOTED_SERVICE_SLUGS``(42 업종)로 좁힌다.
+    generator가 살아 있는 동안 session은 열려 있고, 소비 종료(또는 close)시
+    ``finally``에서 ``session.close()`` + ``engine.dispose()``로 정리한다.
+    """
+    db_path = settings.mois_source_db_path
+    if db_path is None or not pathlib.Path(db_path).is_file():
+        raise ProviderCredentialMissing(
+            "MOIS 인허가 live fetch에는 미리 sync된 MOIS 소스 SQLite DB가 "
+            "필요하다. Phase A sync(LOCALDATA download/적재)를 먼저 실행하고 "
+            "DB 경로를 설정하라. (KRTOUR_MAP_MOIS_SOURCE_DB_PATH)"
+        )
+
+    # provider record 모델/streaming 함수는 ADR-044 로컬 체크아웃이며 hard
+    # dependency가 아니므로(부재 가능), datagokr와 동일하게 import time이 아닌
+    # 호출 시점에 ``importlib`` + ``cast(Any, ...)``로 lazy resolve한다.
+    mois_db = cast(Any, importlib.import_module("mois.db"))
+    # PROMOTED_SERVICE_SLUGS는 krtour(본 repo)이므로 top-level import으로 충분.
+    from krtour.map.providers.mois import PROMOTED_SERVICE_SLUGS
+
+    engine = create_engine(f"sqlite:///{db_path}")
+    session = Session(engine)
+    try:
+        yield from mois_db.iter_open_place_records(
+            session,
+            service_slugs=tuple(sorted(PROMOTED_SERVICE_SLUGS)),
+        )
+    finally:
+        session.close()
+        engine.dispose()
 
 
 def fetch_krex_traffic_notices(

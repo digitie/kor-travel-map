@@ -28,6 +28,7 @@ from .provider_fetchers import (
     fetch_krex_rest_areas,
     fetch_krex_traffic_notices,
     fetch_krheritage_events,
+    fetch_mois_license_records,
 )
 
 __all__ = [
@@ -267,6 +268,27 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["krheritage_events"] = (
     build_provider_record_live_resource(
         _KRHERITAGE_EVENTS_SPEC,
         fetch_krheritage_events,
+    )
+)
+
+_MOIS_LICENSE_RECORDS_SPEC: ProviderRecordResourceSpec = next(
+    spec
+    for spec in PROVIDER_RECORD_RESOURCE_SPECS
+    if spec.resource_key == "mois_license_records"
+)
+"""MOIS 인허가 spec 참조 (live resource override용).
+
+NOTE: spec의 ``setting_names``는 Phase A download용 ``data_go_kr_service_key``를
+가리키며, live builder의 guard 활성 판정도 이 값을 본다. Phase B fetcher가 실제로
+필요로 하는 것은 ``mois_source_db_path``(소스 DB 경로)이며, fetcher 내부에서 이를
+검증해 부재 시 ``ProviderCredentialMissing``으로 실패한다. ``setting_names``는 guard
+메시지/env 매핑 보존을 위해 그대로 둔다(변경하지 않음).
+"""
+
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["mois_license_records"] = (
+    build_provider_record_live_resource(
+        _MOIS_LICENSE_RECORDS_SPEC,
+        fetch_mois_license_records,
     )
 )
 
