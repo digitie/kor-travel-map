@@ -1,5 +1,35 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-07 Claude 작업 메모 — T-RV-04b ⑥ knps live fetcher (provider 보강) 완료
+
+**knps**(국립공원/트래킹)를 T-RV-04b 여섯 번째로 닫는다. 사용자 지시(“knps는
+미완성이거나 빠진 부분이 많아. 적극적으로 python-knps-api를 수정하며 진행”)에 따라
+**provider 라이브러리 자체를 보강**했다: `python-knps-api#7`(merged, **v0.2.0**)로
+헤더 정규화 typed record(`KnpsPlaceRecord`/`KnpsGeoRecord`)와 read 메서드
+(`client.files.read_place_records(key)`·`read_geo_records(key)`)를 추가했다. krtour는
+best-guess 컬럼 매핑(구 `KnpsPointColumnMap` 등, dead) 대신 provider typed record를
+**직접 소비**(ADR-044).
+
+- 실 스키마 3종(standard `(CODE)` 헤더 / weather_stations / trails 한글 props)을
+  라이브 다운로드로 확인 후 provider에서 정규화. source_id 우선순위
+  `ID_CD→STN_ID→OBJECTID→SEQNO→NO→row-hash`.
+- krtour 측: `provider_fetchers.fetch_knps_point_records`/`fetch_knps_geometry_records`
+  (**async generator** — 다운로드/파싱이 async, `KnpsClient().files.read_*` await 후
+  yield, `finally: await client.aclose()`). `resources.build_provider_record_live_resource`
+  시그니처를 `Iterable | AsyncIterator`로 확장, asset `_record_batches`는 이미
+  `AsyncIterable` 지원.
+- dataset key는 `KrtourMapSettings.knps_point_dataset_key`(기본 `knps_visitor_centers`)
+  /`knps_geometry_dataset_key`(기본 `knps_trails`)로 두고, `definitions.py`
+  `SETTINGS_VALUE_RESOURCES` + `_settings_value_resource`로 fetcher와 asset의
+  `knps_*_dataset_key` resource가 **같은 settings 값**을 보게 해 불일치 제거.
+- keyless 공개 파일셋이라 credential guard 불요(`setting_names` 비어 live guard 항상
+  활성). 실 fetch 검증은 T-212e.
+
+**다음 한 작업: mois 마무리(Phase A)** — LOCALDATA download +
+`sync_localdata_source_db(PROMOTED_SERVICE_SLUGS)` → SQLite 소스 DB를 만드는 Dagster
+op/스케줄(Phase B fetcher는 이미 그 DB를 읽음). network + `data_go_kr_service_key`
+필요, 실검증은 T-212e. 그 다음 잔여 T-RV-04b는 opinet(차단, `python-opinet-api#7` 대기).
+
 ## 2026-06-07 Codex 작업 메모 — T-209 final backup/restore safety automation
 
 사용자 지시에 따라 T-209 계열을 마무리한다. T-212 계열과 T-RV-04b는 Claude Code
@@ -76,9 +106,11 @@ fetch)`로 해당 resource_key만 guard→live 교체. dagster 테스트는 prov
     `mois_source_db_path`(env `KRTOUR_MAP_MOIS_SOURCE_DB_PATH`)의 미리 sync된 MOIS 소스
     SQLite DB → `iter_open_place_records(PROMOTED_SERVICE_SLUGS)` stream.
     **잔여 mois Phase A**: LOCALDATA 다운로드+`sync_localdata_source_db` Dagster op/스케줄.
-  - **knps**: ⭐다음 — keyless 파일셋(SHP/CSV) download→파싱→record 어댑터. provider
-    `python-knps-api`가 사전 파싱 record를 안 주면(파일 bytes만) krtour 어댑터 또는
-    provider 이슈 필요(실검증 선행).
+  - [x] **⑥ knps**(point + geometry, 2026-06-07) — provider 보강(`python-knps-api#7`,
+    v0.2.0)으로 헤더 정규화 typed record + `read_place_records`/`read_geo_records` 추가,
+    krtour는 직접 소비(best-guess 컬럼 매핑 폐기). fetcher는 async generator(다운로드/
+    파싱 async), live builder는 `Iterable | AsyncIterator`로 확장. dataset key는 settings
+    값을 fetcher/asset이 공유(`SETTINGS_VALUE_RESOURCES`). keyless라 credential 불요.
 - **원칙(업데이트)**: provider 착수 전 (1) 이미 구현됐는지 grep, (2) provider model이
   krtour Protocol을 실제로 만족하는지 검증(미검증 wiring은 런타임 AttributeError),
   (3) **provider 라이브러리 수정이 필요하면 직접 편집 대신 해당 repo에 AI agent용 상세
