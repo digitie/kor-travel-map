@@ -76,6 +76,7 @@ _LIVE_PROVIDER_RESOURCE_KEYS = {
     "krex_rest_areas",
     "krex_traffic_notices",
     "krheritage_events",
+    "mois_license_records",
 }
 
 

@@ -2,6 +2,29 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-07 (claude) — T-RV-04b ⑤ mois_license_records (Phase B fetcher)
+
+**작업**: MOIS 인허가 live fetcher(Phase B). provider `mois.db.PlaceRecord`이 krtour
+`MoisLicensePlaceRecord` Protocol(~45필드)을 **전부 충족**(clean match, datagokr류) —
+재조정 불요. mois 본체 transform 무변.
+
+- **fetcher** `fetch_mois_license_records`: 신규 설정 `mois_source_db_path`(env
+  `KRTOUR_MAP_MOIS_SOURCE_DB_PATH`)의 **미리 sync된 MOIS 소스 SQLite DB**에 sqlite
+  engine+Session 열고 `mois.db.iter_open_place_records(session,
+  service_slugs=PROMOTED_SERVICE_SLUGS)` stream, finally close/dispose. DB 미설정/부재 시
+  `ProviderCredentialMissing` 명확 실패. resource guard→live.
+- **test**: temp sqlite DB에 `mois.db.Base.create_all` + PlaceMaster row(open/closed) 삽입해
+  실제 `iter_open_place_records` 실측(영업중만 yield) + engine/session cleanup proxy 검증,
+  DB 미설정/부재 guard. test_definitions live key.
+- **설정 단순화**: 서브에이전트가 env 이름 맞추려 쓴 `AliasChoices`를 컨벤션(prefix+필드명
+  =`KRTOUR_MAP_MOIS_SOURCE_DB_PATH`)으로 교체(일관성).
+- **Phase A(잔여)**: LOCALDATA 다운로드→소스 DB 적재(`LocalDataFileClient` +
+  `sync_localdata_source_db`) Dagster op/스케줄은 별도. 네트워크+키 필요, 실데이터=T-212e.
+- **gate**: ruff + mypy --strict(krtour.map 80 / dagster 12) green, drift green, dagster
+  fetcher 19 green, unit coverage 80.31%.
+- **현황**: T-RV-04b 5/7 provider wiring 완료(datagokr/krheritage/krex×2/mois). opinet
+  ⏸(provider 이슈 #7), knps 잔여, mois Phase A 잔여.
+
 ## 2026-06-07 (claude) — T-RV-04b ④ krex_traffic_notices + opinet 차단
 
 **krex_traffic_notices**(ADR-044 재정렬, 사용자 재량 기본값): `KrexTrafficNoticeItem`
