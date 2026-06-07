@@ -2,6 +2,29 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-07 (claude) — T-RV-53a krforest(휴양림/수목원) transform 신설
+
+**작업**: ADR-034 8단계 휴양림/수목원 데이터소스의 변환 계층(`providers/krforest.py`) 신설
+(provider `python-krforest-api` READY).
+
+- **transforms**(place, `standard_data` 패턴 미러):
+  - `recreation_forests_to_bundles` — 휴양림, category `LODGING_RECREATION_FOREST`(03030000),
+    place_kind `recreation_forest`. provider `StandardRecreationForest`(institution_code/name/
+    address/lat·lon float/phone/homepage/forest_type) 소비.
+  - `arboretums_to_bundles` — 수목원/식물원, category `TOURISM_BOTANICAL`(01030000), place_kind
+    `arboretum`. provider `ForestSpatialPoint`(SHP point) 소비.
+- **Protocol** `RecreationForestItem`/`ForestSpatialItem`. 좌표 WGS84 float→`Decimal(str)` 변환
+  (Coordinate는 Decimal). 안정키 `institution_code`(없으면 `name::sido`/`name::region` 파생,
+  ADR-009 `::`). `PlaceDetail`(phones≤3 / facility_info에 forest_type·homepage 보존).
+  marker는 category maki(`mapbox_maki_icon_or_none` or `park`) + `KRFOREST_MARKER_COLOR`(P-05).
+- `providers/__init__` re-export(import 알파벳 순 krex→krforest→krheritage).
+- **검증**: ruff + mypy --strict(81 files) + lint-imports(4 kept) + 단위 9건 + 전체 unit 914
+  passed + coverage 80.53%.
+
+**다음**: T-RV-53b(`fetch_krforest_*` fetcher + `feature_place_krforest_*` asset + resource;
+arboretum SHP file 경로) → 53c(krforest↔MOIS dedup pair를 `DEFAULT_DEDUP_SCOPE_PAIRS`에 append)
+→ 53d(admin UI).
+
 ## 2026-06-07 (claude) — T-RV-51b 기본 dedup scope baked (config 없이 cross-provider dedup)
 
 **작업**: `refresh_dedup_candidates_op`이 그동안 Dagster run config의 `pairs`/`sibling_scopes`로만

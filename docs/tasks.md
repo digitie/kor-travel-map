@@ -309,9 +309,14 @@ enrichment(모듈 있음, 미wiring)**. dedup 인프라(scoring/queue/admin rout
   `ForestClient().travel.standard_recreation_forests()`→`StandardRecreationForest`(institution_code
   stable id / name / address / lat·lon WGS84 / phone / homepage), 수목원/식물원은 SHP file
   (`recreation_forest_arboretums()`→`ForestSpatialPoint`). env `DATA_GO_KR_SERVICE_KEY`. (READY 판정.)
-  - [ ] **T-RV-53a (krtour)** `providers/krforest.py` — Protocol + `recreation_forests_to_bundles`
-    (place, category `LODGING_RECREATION_FOREST` 계열) + 수목원 `arboretums_to_bundles`
-    (`TOURISM_BOTANICAL`). geometry 폴리곤 없음(point only). 단위 테스트.
+  - [x] **T-RV-53a (krtour)**(2026-06-07) `providers/krforest.py` 신설 — Protocol
+    `RecreationForestItem`/`ForestSpatialItem` + `recreation_forests_to_bundles`(place,
+    category `LODGING_RECREATION_FOREST` 03030000, place_kind `recreation_forest`) +
+    `arboretums_to_bundles`(category `TOURISM_BOTANICAL` 01030000, place_kind `arboretum`).
+    좌표 float→`Decimal` 변환, 안정키 `institution_code`(없으면 `name::sido` 또는 `name::region`
+    파생, ADR-009 `::`). `PlaceDetail`(phones/facility_info). `providers/__init__` re-export.
+    단위 9건(happy/derived-key/arboretum/PRIMARY/결정성/naive reject/reverse bjd) green.
+    게이트: ruff/mypy(81 files)/lint-imports/unit 914 passed/coverage 80.53%.
   - [ ] **T-RV-53b (krtour)** `fetch_krforest_*` fetcher + `feature_place_krforest_*` asset + resource.
     arboretum은 SHP file이라 knps geometry처럼 file dataset 경로(필요 시 provider 보강 PR).
   - [ ] **T-RV-53c (dedup)** krforest↔MOIS sibling dedup scope: 휴양림 ≅ MOIS
