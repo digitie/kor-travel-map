@@ -2,6 +2,41 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-07 (claude) — T-RV-04b mois Phase A LOCALDATA 소스 DB sync (mois 마무리)
+
+**작업**: MOIS 인허가 **Phase A**(LOCALDATA 다운로드→소스 DB 적재) 구현. Phase B
+fetcher(`fetch_mois_license_records`)가 읽는 SQLite 소스 DB를 채우는 단계로, mois를
+완결한다.
+
+- **신규 모듈** `mois_source_sync.py`:
+  - 순수 helper `sync_mois_source_db(settings, *, service_slugs=None, org_code=None,
+    batch_size=1000) -> MoisSourceSyncSummary`. lazy `import mois`(ADR-044). 대상 DB는
+    `settings.mois_source_db_path`(미설정 시 `ProviderCredentialMissing`, Phase B와 동일
+    계약, 부모 디렉터리 자동 생성). `mois.create_sqlite_schema(engine)` →
+    keyless `mois.LocalDataFileClient()` → `mois.sync_localdata_source_db(session, client,
+    service_slugs=sorted(PROMOTED_SERVICE_SLUGS), commit=True)`. provider 결과를 krtour
+    경계 dataclass `MoisSourceSyncSummary`(scanned/upserted/open/closed/unknown count)로
+    복사. engine/session/client finally 정리.
+  - Dagster `@op mois_localdata_source_sync`(config: service_slugs/org_code/batch_size,
+    `MAINTENANCE_RETRY_POLICY`) + `@job` + 주간 `ScheduleDefinition`
+    (`mois_localdata_source_sync_weekly_schedule`, `0 4 * * 1` KST, **STOPPED**).
+  - `definitions.py`에 job/schedule 등록.
+- **정정(ADR-044)**: 기존 문서가 Phase A에 `data_go_kr_service_key`가 필요하다고
+  적었으나, provider `LocalDataFileClient`는 공개 파일 포털(`file.localdata.go.kr`)에서
+  받으며 **생성자에 API key 파라미터가 없다 — keyless**. Phase A는 네트워크만 필요.
+- **future-import 주의**: Dagster `@op`는 `context` 타입힌트를 런타임 class로 검증하므로
+  본 모듈은 `from __future__ import annotations`를 쓰지 않는다(maintenance.py와 동일).
+
+**테스트**: `test_mois_source_sync.py` — fake `mois` 모듈(create_sqlite_schema/
+LocalDataFileClient/sync_localdata_source_db) 기반 helper 검증 5건(기본 slug 정렬+commit+
+close, custom slug/org/batch 전달, parent dir 생성, db_path 미설정 raise) + op 메타데이터
+1건. `test_definitions.py`에 job/schedule 등록 2건 추가. 게이트: `ruff` ·
+`mypy --strict krtour.map_dagster`(13 files) · `lint-imports`(4 kept) · dagster+unit
+`963 passed, 1 skipped`(mois optional). 실데이터 검증은 T-212e.
+
+**다음**: T-RV-04b 잔여는 opinet(차단, `python-opinet-api#7` bulk/region endpoint 대기).
+mois는 Phase A/B 모두 완료.
+
 ## 2026-06-07 (claude) — T-RV-04b ⑥ knps point/geometry live fetcher (provider 보강)
 
 **작업**: KNPS(국립공원/트래킹) point + geometry live fetcher wiring. krtour의

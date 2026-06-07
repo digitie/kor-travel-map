@@ -10,6 +10,7 @@ from krtour.map.settings import KrtourMapSettings
 from .assets import FEATURE_LOAD_ASSETS
 from .batch_dag import BATCH_DAG_JOBS
 from .maintenance import MAINTENANCE_JOBS, MAINTENANCE_SCHEDULES
+from .mois_source_sync import MOIS_SOURCE_SYNC_JOBS, MOIS_SOURCE_SYNC_SCHEDULES
 from .offline_uploads import OFFLINE_UPLOAD_JOBS
 from .resources import (
     PROVIDER_RECORD_RESOURCE_DEFINITIONS,
@@ -102,10 +103,15 @@ defs = Definitions(
             *FEATURE_UPDATE_JOBS,
             *BATCH_DAG_JOBS,
             *MAINTENANCE_JOBS,
+            *MOIS_SOURCE_SYNC_JOBS,
             *OFFLINE_UPLOAD_JOBS,
         ],
     ),
-    schedules=[*FEATURE_LOAD_SCHEDULES, *MAINTENANCE_SCHEDULES],
+    schedules=[
+        *FEATURE_LOAD_SCHEDULES,
+        *MAINTENANCE_SCHEDULES,
+        *MOIS_SOURCE_SYNC_SCHEDULES,
+    ],
     sensors=FEATURE_UPDATE_SENSORS,
     resources={
         key: (

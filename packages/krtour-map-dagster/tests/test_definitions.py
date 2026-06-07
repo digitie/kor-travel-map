@@ -53,6 +53,9 @@ def test_feature_update_job_and_sensors_registered() -> None:
         "full_load_batch_consistency_gate"
     )
     assert defs.get_job_def("offline_upload_load").name == "offline_upload_load"
+    assert defs.get_job_def("mois_localdata_source_sync").name == (
+        "mois_localdata_source_sync"
+    )
     assert defs.resolve_sensor_def("feature_update_request_queue_sensor").name == (
         "feature_update_request_queue_sensor"
     )
@@ -112,6 +115,17 @@ def test_feature_load_schedules_registered_with_kst_cron() -> None:
         assert schedule.tags["krtour_map.schedule_scope"] == "system"
         assert schedule.tags["krtour_map.provider"] == spec.provider
         assert schedule.tags["krtour_map.dataset_key"] == spec.dataset_key
+
+
+def test_mois_localdata_source_sync_schedule_registered() -> None:
+    schedule = defs.resolve_schedule_def("mois_localdata_source_sync_weekly_schedule")
+    assert schedule.name == "mois_localdata_source_sync_weekly_schedule"
+    assert schedule.cron_schedule == "0 4 * * 1"
+    assert schedule.execution_timezone == KST_TIMEZONE
+    assert schedule.default_status == DefaultScheduleStatus.STOPPED
+    assert schedule.job_name == "mois_localdata_source_sync"
+    assert schedule.tags["krtour_map.job_kind"] == "mois_localdata_source_sync"
+    assert schedule.tags["krtour_map.provider"] == "python-mois-api"
 
 
 def test_consistency_dedup_refresh_schedule_registered() -> None:

@@ -1,5 +1,27 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-07 Claude 작업 메모 — T-RV-04b mois Phase A 소스 DB sync (mois 마무리)
+
+사용자 지시 “knps 후 mois 마무리”에 따라 MOIS **Phase A**(LOCALDATA 다운로드→소스 DB
+적재)를 구현해 mois를 완결했다. Phase B fetcher가 읽는 SQLite 소스 DB를 채우는 단계다.
+
+- **신규** `mois_source_sync.py`: 순수 helper `sync_mois_source_db(settings,
+  service_slugs=None)`(lazy `import mois`, `create_sqlite_schema` → keyless
+  `LocalDataFileClient` → `sync_localdata_source_db(PROMOTED_SERVICE_SLUGS, commit=True)`,
+  결과를 `MoisSourceSyncSummary`로 복사) + Dagster op `mois_localdata_source_sync` + job +
+  주간 schedule(STOPPED, `0 4 * * 1` KST). `definitions.py` 등록.
+- **정정**: Phase A는 공개 파일 포털(`file.localdata.go.kr`)에서 받으므로 **API key
+  불요(네트워크만)** — provider `LocalDataFileClient` 생성자에 key 파라미터 없음. 기존
+  문서의 `data_go_kr_service_key` 필요 서술을 정정.
+- db_path는 `settings.mois_source_db_path`(미설정 시 `ProviderCredentialMissing`, Phase B와
+  동일 계약). 실데이터(실 다운로드) 검증은 T-212e.
+
+**다음 한 작업**: T-RV-04b 잔여는 **opinet 1건뿐**(차단 — bulk/region station endpoint
+없음, `python-opinet-api#7` 보강 대기 또는 POI-타깃 모델 전환 product 결정). opinet을
+제외하면 provider live fetcher wiring은 datagokr/krheritage/krex(rest+traffic)/mois(A+B)/
+knps(point+geometry) 전부 완료. 그 외 T-212 잔여(b: codex UI lane, d: perf baseline,
+e: 실데이터 full reload)는 lane 조율/실 스택 필요.
+
 ## 2026-06-07 Claude 작업 메모 — T-RV-04b ⑥ knps live fetcher (provider 보강) 완료
 
 **knps**(국립공원/트래킹)를 T-RV-04b 여섯 번째로 닫는다. 사용자 지시(“knps는
