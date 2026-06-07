@@ -24,6 +24,14 @@ ADR 참조
 
 from __future__ import annotations
 
+from krtour.map.providers.khoa import (
+    BEACH_CATEGORY,
+    BEACH_MARKER_COLOR,
+    DATASET_KEY_BEACHES,
+    KHOA_PROVIDER_NAME,
+    OceanBeachInfoItem,
+    beaches_to_bundles,
+)
 from krtour.map.providers.kma import (
     KMA_ALERT_LEVEL_SEVERITY,
     KMA_METRIC_NAMES,
@@ -213,6 +221,13 @@ __all__ = [
     "DATASET_KEY_PARKING_LOTS",
     "PARKING_CATEGORY",
     "PARKING_MARKER_COLOR",
+    # khoa 해수욕장 (T-RV-55, ADR-034 보조)
+    "OceanBeachInfoItem",
+    "beaches_to_bundles",
+    "KHOA_PROVIDER_NAME",
+    "DATASET_KEY_BEACHES",
+    "BEACH_CATEGORY",
+    "BEACH_MARKER_COLOR",
     # visitkorea (PR#51, ADR-042 — TourAPI enrichment 2차)
     "VisitKoreaFestivalItem",
     "FestivalMatch",

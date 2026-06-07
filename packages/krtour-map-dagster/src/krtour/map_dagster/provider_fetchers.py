@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 __all__ = [
     "ProviderCredentialMissing",
     "fetch_datagokr_cultural_festivals",
+    "fetch_khoa_beaches",
     "fetch_knps_geometry_records",
     "fetch_knps_point_records",
     "fetch_krex_rest_areas",
@@ -422,6 +423,46 @@ def fetch_standard_tourist_attractions(
     client = datagokr.DataGoKrClient(api_key=api_key)
     try:
         yield from client.tourist_attraction.iter_all()
+    finally:
+        client.close()
+
+
+def fetch_khoa_beaches(
+    settings: KrtourMapSettings,
+) -> Iterator[Any]:
+    """해양수산부 해수욕장정보 record를 khoa public client로 stream한다.
+
+    ``settings.data_go_kr_service_key``로 ``KhoaClient(api_key=...)``를 열고
+    시도별(``OCEANS_BEACH_INFO_DEFAULT_SIDO_NAMES``) ``oceans_beach_info(sido,
+    page_no=N)``을 페이지네이션하며 record(``OceanBeachInfo``, krtour
+    ``OceanBeachInfoItem`` Protocol 충족)를 yield한다. sync generator, finally close.
+    """
+    secret = settings.data_go_kr_service_key
+    if secret is None:
+        raise ProviderCredentialMissing(
+            "khoa beaches live fetch에는 "
+            "KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY (source DATA_GO_KR_SERVICE_KEY)가 "
+            "필요하다."
+        )
+    api_key = secret.get_secret_value()
+
+    khoa = cast(Any, importlib.import_module("khoa"))
+    client = khoa.KhoaClient(api_key=api_key)
+    num_of_rows = 100
+    try:
+        for sido in khoa.OCEANS_BEACH_INFO_DEFAULT_SIDO_NAMES:
+            page_no = 1
+            while True:
+                page = client.oceans_beach_info(
+                    sido, page_no=page_no, num_of_rows=num_of_rows
+                )
+                items = list(page.items)
+                if not items:
+                    break
+                yield from items
+                if len(items) < num_of_rows:
+                    break
+                page_no += 1
     finally:
         client.close()
 

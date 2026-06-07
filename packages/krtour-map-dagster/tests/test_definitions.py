@@ -39,6 +39,7 @@ def test_feature_load_asset_keys_registered() -> None:
         "feature_place_standard_museums",
         "feature_place_standard_tourist_attractions",
         "feature_place_standard_parking_lots",
+        "feature_place_khoa_beaches",
         "feature_event_visitkorea_enrichment",
     } <= asset_keys
 
@@ -93,6 +94,7 @@ _LIVE_PROVIDER_RESOURCE_KEYS = {
     "standard_museums",
     "standard_tourist_attractions",
     "standard_parking_lots",
+    "khoa_beaches",
     "visitkorea_festival_events",
 }
 

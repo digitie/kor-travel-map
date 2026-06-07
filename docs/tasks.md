@@ -375,7 +375,13 @@ enrichment(모듈 있음, 미wiring)**. dedup 인프라(scoring/queue/admin rout
     (없으면 instt_code→name::road). fetcher/asset/resource/definitions + ETL preview. **MOIS dedup
     없음**(MOIS PROMOTED에 주차장 슬러그 없음). 게이트: ruff/mypy(3pkg)/lint-imports/unit 939
     (coverage 80.81%)/dagster 70 green + parking preview(cat 06010000) 확인.
-  - [ ] **T-RV-55c khoa 해수욕장 + 해양공지** — provider `python-khoa-api` 조사 선행(place + notice).
+  - [x] **T-RV-55c khoa 해수욕장**(2026-06-08) — provider `python-khoa-api` `KhoaClient.oceans_beach_info
+    (sido)`→`OceanBeachInfo`. 신규 `providers/khoa.py`(`beaches_to_bundles`, place, category
+    `COAST_ISLAND 01020300`, place_kind `beach`) + `OceanBeachInfoItem` Protocol. 도로명 주소 없어
+    좌표 reverse만으로 bjd 보강, admin=sido+gugun, 안정키 `name::sido::gugun` 파생. fetcher(시도별
+    `OCEANS_BEACH_INFO_DEFAULT_SIDO_NAMES` 순회 페이지네이션)/asset/resource/definitions/ETL preview.
+    MOIS dedup 없음(해수욕장 슬러그 없음). 게이트: ruff/mypy(map 82/dagster 13/admin 25)/lint-imports/
+    unit 942(coverage 80.92%)/dagster 72 + khoa preview(01020300/beach) green. (해양공지는 후속.)
   - [ ] **T-RV-55d airkorea 대기질** — **place feature 아님**(측정값, weather-like) → WeatherValue/
     별도 DTO 패턴 검토 필요(feature-load와 다름). 조사+설계 선행.
   - [ ] **T-RV-55e krairport 공항** — provider `python-krairport-api` 조사(place, category
