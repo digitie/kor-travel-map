@@ -42,6 +42,24 @@ test.describe("admin/ops pages", () => {
     }
   });
 
+  test("/admin/enrichment-review", async ({ page }) => {
+    await page.goto("/admin/enrichment-review");
+
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Enrichment review" }),
+    ).toBeVisible();
+    await expect(page.getByLabel("enrichment status")).toBeVisible();
+    for (const column of [
+      "review",
+      "score",
+      "1차 (datagokr)",
+      "2차 (visitkorea)",
+      "actions",
+    ]) {
+      await expect(page.getByRole("columnheader", { name: column })).toBeVisible();
+    }
+  });
+
   test("/admin/feature-update-requests", async ({ page }) => {
     await page.goto("/admin/feature-update-requests");
 

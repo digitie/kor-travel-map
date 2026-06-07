@@ -2,6 +2,26 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-08 (claude) — T-RV-52c-3 축제 enrichment 검토 frontend (→ T-RV-52 완료)
+
+**작업**: 52c admin API 위에 운영자 검토 UI(3 PR 중 3번째, 마지막). dedup-review 페이지 미러
+(단, enrichment은 병합 아님 → master 선택 UI 없이 accept/reject/ignore만).
+
+- `src/api/enrichment.ts`: `useEnrichmentReviews`(list) + `useEnrichmentDecisionMutation`
+  (accept→applied 시 feature 캐시 무효화). 타입은 생성된 `types.ts`의 `EnrichmentReview*` 스키마.
+- `app/admin/enrichment-review/`(page + client): status 필터 + 1차(datagokr)/2차(visitkorea)
+  양측 + name_score + accept/reject/ignore. nav 항목(admin-shell `LinkIcon`) + e2e smoke
+  (admin-ops.spec, 헤딩/필터/컬럼 검증).
+- **검증**(Windows Node): `gen:types:check`(drift 0) + `tsc --noEmit` + `next build`(route
+  `/admin/enrichment-review` 등록 확인) + `eslint` green.
+
+**→ T-RV-52(visitkorea 축제 enrichment) 전체 완료**: 52a provider + 52b krtour wiring + 52c
+review 큐/admin API/frontend. 자동 매칭(≥0.90)은 즉시 적재, 모호 밴드는 운영자 수동 검토.
+
+**다음(우선순위 가이드 후속)**: 남은 큰 항목은 **55d airkorea 대기질**(place feature 아님 — 설계
+결정 사용자 대기). 그 외 T-RV-04b 후속 program(T-RV-50~55) place dataset/enrichment/dedup UI는
+전부 완료.
+
 ## 2026-06-08 (claude) — T-RV-52c-2 축제 enrichment 검토 admin API
 
 **작업**: 52c-1 backend 위에 운영자 검토 HTTP surface(3 PR 중 2번째). dedup-review 라우터

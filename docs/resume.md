@@ -11,13 +11,16 @@
   `list_pending_enrichment_reviews`/`resolve_enrichment_review`). 게이트 전수 green(unit+lint 959
   coverage 81%, integration 13건).
 
-52c-2 admin API(`GET/PATCH /admin/enrichment-review`)도 완료·머지: `list_enrichment_reviews`
-(admin_feature_repo) + `enrichment_review` router + OpenAPI 재생성.
+52c-2 admin API + 52c-3 frontend 모두 완료·머지 → **T-RV-52(visitkorea 축제 enrichment) 전체
+완료**. frontend = `admin/enrichment-review` 페이지(accept/reject/ignore) + `src/api/enrichment.ts`
+훅 + nav + e2e smoke. gen:types:check/tsc/next build/eslint green.
 
-**다음 한 작업**: **T-RV-52c-3 frontend** — dedup-review와 유사한 `admin/enrichment-review`
-페이지(pending list + accept/reject/ignore 액션) + `src/api/enrichment.ts` 훅 + `types.ts`
-재생성(`npm run gen:types`) + Windows Playwright e2e. dedup-review-client.tsx + src/api/dedup.ts +
-app/admin/dedup-review/ 구조를 미러.
+**현재 상태**: T-RV-04b 후속 program(T-RV-50~55)에서 place dataset 5종(55a~e) + enrichment review
+UI(52) + dedup 수동 UI(51) + maplibre 최신화(50) + krforest(53)/박물관미술관(54) 전부 완료.
+
+**다음 한 작업(유일하게 남은 항목)**: **T-RV-55d airkorea 대기질** — place feature가 아니라
+측정값(weather-like)이라 feature-load 4-step과 다름. **설계 결정 선행 필요**(WeatherValue 패턴 vs
+별도 측정 DTO vs 본 스코프 제외) → 사용자 결정 대기. 결정 전까지 T-RV 후속 program은 사실상 완료.
 
 **병행 대기**: **T-RV-55d airkorea 대기질**은 place feature가 아니라(측정값) **설계 결정 선행**
 필요 — 사용자 결정 대기(WeatherValue 패턴 vs 별도 DTO vs 제외).
