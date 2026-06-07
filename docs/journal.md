@@ -2,6 +2,31 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-07 (claude) — T-RV-04b opinet provider 라이브러리 보강(#8) + 조사 결론
+
+**작업**: opinet(주유소/유가) wiring 차단 해소를 위해 사용자 지시(“AI agent로 라이브러리
+직접 보강”)대로 **provider `python-opinet-api`를 직접 보강**(cross-repo).
+
+- **조사 결론**: OpiNet OpenAPI에 지역/전국 단위 주유소 목록(bulk) 엔드포인트가
+  **물리적으로 없음**. station 반환 공개 API는 `aroundAll`(반경≤5km)/`lowTop10`(top20)/
+  `detailById`(단건)뿐, `areaCode`는 코드만·`avg*`는 가격 집계만. PDF 미검증 17종도 전부
+  가격 집계/이름 검색. `python-opinet-api#7`에 코멘트로 기록.
+- **provider 보강**(`python-opinet-api#8` merged, **v0.2.0**): `iter_stations_in_bbox()`
+  (sync+async) 추가 — WGS84 bbox를 `aroundAll` 반경 원 격자(간격 `radius*√2`로 셀 모서리까지
+  덮음)로 호출하고 `uni_id` dedup하는 **근사 enumeration**. 빈 셀(`OpinetNoDataError`) skip.
+  한계(면적 비례 호출수 급증→bounded 권장, `tel`/`lpg_yn` 부재→`get_station_detail` N+1)를
+  README/docstring 명시. test(격자 coverage 수학/√2 간격/invalid/dedup/empty-skip/async) +
+  ruff + mypy --strict + 전체 pytest 183 passed. pre-existing 미사용 `import os` 제거.
+- **krtour 영향**: opinet은 전국 nightly bulk가 비현실이므로 **bounded bbox 또는 POI-타깃**
+  모델로 wiring해야 한다(후속). krtour `OpinetStationItem` Protocol을 provider `Station`
+  (name/brand enum/lon·lat float, tel·lpg_yn 없음)에 ADR-044 재정렬 + settings-gated bbox
+  fetcher가 남은 작업. docs(tasks)에 후속으로 기록.
+
+**상태**: 이로써 T-RV-04b provider live fetcher wiring은 **opinet krtour-side wiring 1건만
+후속**으로 남고(datagokr/krheritage/krex×2/mois A+B/knps×2 전부 merged), opinet provider
+라이브러리 보강은 완료. **다음 자율 작업: T-212d perf 부분 진행**(seeded PostGIS EXPLAIN
+수집 + 인덱스 후보 분석/문서화; 실 볼륨 측정은 T-212e).
+
 ## 2026-06-07 (claude) — T-RV-04b mois Phase A LOCALDATA 소스 DB sync (mois 마무리)
 
 **작업**: MOIS 인허가 **Phase A**(LOCALDATA 다운로드→소스 DB 적재) 구현. Phase B

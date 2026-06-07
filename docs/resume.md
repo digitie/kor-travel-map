@@ -1,5 +1,25 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-07 Claude 작업 메모 — T-RV-04b opinet provider 보강(#8) + 다음=T-212d perf
+
+사용자 결정(“opinet: AI agent로 라이브러리 직접 보강”)대로 `python-opinet-api`를 보강.
+**조사 결론: OpiNet OpenAPI에 지역/전국 bulk 주유소 목록 엔드포인트가 물리적으로 없음**
+(station 반환은 aroundAll≤5km/lowTop10 top20/detailById 단건뿐). `python-opinet-api#7`에 결론
+코멘트.
+
+- **`python-opinet-api#8` merged(v0.2.0)**: `iter_stations_in_bbox()`(sync+async) — bbox를
+  aroundAll 반경 격자(`radius*√2`)로 덮고 `uni_id` dedup하는 근사 enumeration. 한계(면적 비례
+  호출수 급증→bounded 권장, tel/lpg_yn 부재→detail N+1) 문서화. ruff/mypy/183 pytest green.
+- **krtour-opinet wiring = 후속(scope 결정 필요)**: 전국 nightly는 쿼터 비현실 → bounded
+  bbox(operator 설정) 또는 POI-타깃 모델. krtour `OpinetStationItem` Protocol을 provider
+  `Station`에 ADR-044 재정렬 + settings-gated bbox fetcher 필요. (이 1건 외 T-RV-04b provider
+  wiring 전부 완료: datagokr/krheritage/krex×2/mois A+B/knps×2.)
+
+**다음 한 작업(사용자 지시): T-212d perf 부분 진행** — 실데이터 없이 가능한 범위부터:
+seeded PostGIS(testcontainers, WSL)로 hot read 쿼리(nearby/in-bounds/search/ops cursor/F-checks)
+EXPLAIN 수집 + 기존 인덱스 vs 쿼리 커버리지 분석 + 인덱스 후보 문서화
+(`docs/reports/t-212d-perf-baseline-*.md`). 실 볼륨 측정/프런트 프로파일링은 T-212e/codex lane.
+
 ## 2026-06-07 Claude 작업 메모 — T-RV-04b mois Phase A 소스 DB sync (mois 마무리)
 
 사용자 지시 “knps 후 mois 마무리”에 따라 MOIS **Phase A**(LOCALDATA 다운로드→소스 DB
