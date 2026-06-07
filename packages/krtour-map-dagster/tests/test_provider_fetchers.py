@@ -25,6 +25,7 @@ from krtour.map_dagster.provider_fetchers import (
     fetch_krforest_recreation_forests,
     fetch_krheritage_events,
     fetch_mois_license_records,
+    fetch_standard_museums,
 )
 from krtour.map_dagster.resources import (
     PROVIDER_RECORD_RESOURCE_DEFINITIONS,
@@ -52,6 +53,14 @@ class _FakeFestivalService:
         yield from self._records
 
 
+class _FakeMuseumArtService:
+    def __init__(self, records: list[object]) -> None:
+        self._records = records
+
+    def iter_all(self, **_filters: Any) -> Iterator[object]:
+        yield from self._records
+
+
 class _FakeDataGoKrClient:
     instances: list[_FakeDataGoKrClient] = []
 
@@ -59,6 +68,7 @@ class _FakeDataGoKrClient:
         self.api_key = api_key
         self.closed = False
         self.festival = _FakeFestivalService([object(), object()])
+        self.museum_art = _FakeMuseumArtService([object(), object(), object()])
         _FakeDataGoKrClient.instances.append(self)
 
     def close(self) -> None:
@@ -627,6 +637,28 @@ def test_fetch_closes_client_on_partial_consumption(
     generator.close()
 
     assert fake.instances[0].closed is True
+
+
+def test_standard_museums_raises_when_credential_missing() -> None:
+    settings = KrtourMapSettings(data_go_kr_service_key=None)
+
+    generator = fetch_standard_museums(settings)
+    with pytest.raises(ProviderCredentialMissing):
+        next(generator)
+
+
+def test_standard_museums_fetch_yields_and_closes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _install_fake_datagokr(monkeypatch)
+    settings = KrtourMapSettings(data_go_kr_service_key=SecretStr("service-key"))
+
+    records = list(fetch_standard_museums(settings))
+
+    assert len(records) == 3
+    client = fake.instances[0]
+    assert client.api_key == "service-key"
+    assert client.closed is True
 
 
 def test_krheritage_fetch_raises_when_credential_missing() -> None:

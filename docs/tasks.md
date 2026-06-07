@@ -344,8 +344,10 @@ enrichment(모듈 있음, 미wiring)**. dedup 인프라(scoring/queue/admin rout
     (없으면 `name::road` 파생). `providers/__init__` re-export. 단위 7건(박물관/미술관 category 분기/
     파생키/미상 fallback/PRIMARY/결정성/naive/reverse) green. ruff/mypy(81)/lint-imports/unit 921/
     coverage 80.64%.
-  - [ ] **T-RV-54b (krtour)** `fetch_standard_museums` fetcher + `feature_place_standard_museums`
-    asset + resource.
+  - [x] **T-RV-54b (krtour)**(2026-06-07) `fetch_standard_museums`(sync generator —
+    `DataGoKrClient.museum_art.iter_all()`, datagokr client sync) + `feature_place_standard_museums`
+    asset(`museums_to_bundles` 소비) + resource spec/guard→live + definitions 등록. credential
+    `data_go_kr_service_key`. dagster 단위(fake museum_art 2 + asset 등록 + live key) green(64 passed).
   - [ ] **T-RV-54c (dedup)** museum↔MOIS dedup: `standard_museums` ≅ MOIS `museums_art_galleries`
     scope pair + 큐 검증.
   - [ ] **T-RV-54d (UI)** museum admin 상세 UI + dedup 노출.

@@ -33,6 +33,7 @@ from .provider_fetchers import (
     fetch_krforest_recreation_forests,
     fetch_krheritage_events,
     fetch_mois_license_records,
+    fetch_standard_museums,
 )
 
 __all__ = [
@@ -142,6 +143,13 @@ PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
         setting_names=("data_go_kr_service_key",),
         source_env_names=("DATA_GO_KR_SERVICE_KEY",),
         note="수목원은 SHP file 다운로드/파싱(provider geo extra 필요할 수 있음).",
+    ),
+    ProviderRecordResourceSpec(
+        resource_key="standard_museums",
+        provider_package="python-datagokr-api",
+        dataset_key="datagokr_museums",
+        setting_names=("data_go_kr_service_key",),
+        source_env_names=("DATA_GO_KR_SERVICE_KEY",),
     ),
 )
 """Feature load asset provider record resource별 env/package 매핑."""
@@ -359,6 +367,18 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["krforest_arboretums"] = (
     build_provider_record_live_resource(
         _KRFOREST_ARBORETUMS_SPEC,
         fetch_krforest_arboretums,
+    )
+)
+
+_STANDARD_MUSEUMS_SPEC: ProviderRecordResourceSpec = next(
+    spec
+    for spec in PROVIDER_RECORD_RESOURCE_SPECS
+    if spec.resource_key == "standard_museums"
+)
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["standard_museums"] = (
+    build_provider_record_live_resource(
+        _STANDARD_MUSEUMS_SPEC,
+        fetch_standard_museums,
     )
 )
 
