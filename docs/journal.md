@@ -2,6 +2,24 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-07 (claude) — T-RV-51a dedup merge master 선택 UI (수동 처리)
+
+**작업**: dedup 수동처리 UI 완성(point 4). `dedup-review` 화면이 그동안 accept/reject/ignore만
+지원하고 merge는 "master 선택 UI 필요한 후속"으로 비워져 있었다 → merge 액션을 추가했다.
+
+- **frontend-only**(backend PATCH `decision=merged`+`master_feature_id` + `merge_dedup_review`의
+  `select_master` 자동 선정은 기구현, API/types 무변): `dedup-review-client.tsx`에 merge 버튼 +
+  inline master 선택 패널(`A: <name>·좌표✓` / `B: <name>·좌표✓` / **자동 선정** / 취소).
+  - 자동 선정: `master_feature_id` 미전달 → backend `select_master`(좌표→updated_at→provider
+    우선순위, ADR-016).
+  - 수동: feature A/B의 `feature_id`를 master로 전달. 좌표 보유 여부(`select_master` 1순위)를
+    버튼에 힌트로 표기.
+- **검증**: `tsc --noEmit` + `eslint .` + `next build`(/admin/dedup-review 포함 13페이지) green.
+  기존 e2e(render smoke: heading + status select) 유지.
+
+**다음**: T-RV-51b(maintenance.py 기본 dedup scope baked) → 이후 데이터소스(krforest/museum/
+visitkorea)에서 소스별 MOIS dedup scope 추가.
+
 ## 2026-06-07 (claude) — T-RV-50 maplibre-vworld-js v0.1.3 최신화
 
 **작업**: maplibre-vworld-js 최신 dependency 업데이트(point 6). frontend 핀이 이미 최신 **태그**

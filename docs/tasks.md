@@ -282,12 +282,15 @@ enrichment(모듈 있음, 미wiring)**. dedup 인프라(scoring/queue/admin rout
   `#v0.1.2`→`#v0.1.3`. **코드 수정 불필요**(public API 동일). 로컬 검증: `npm ls`로 v0.1.3 resolve
   확인 + `tsc --noEmit` + `next build` 13 페이지(/features maplibre 포함) green. 기능 동일이라
   e2e 거동 불변(CI type-check+build 게이트로 검증).
-- [ ] **T-RV-51 dedup 수동처리 UI 완성 + 기본 scope**(point 4 foundation): (a) frontend
-  `dedup-review` merge 시 **master feature 선택 UI**(현재 미구현 — PATCH `decision=merged` +
-  `master_feature_id`는 backend 기구현). (b) feature A/B 좌표·provider·category 비교 패널 +
-  `select_master` 추천 표시. (c) maintenance.py에 **기본 cross-provider/sibling dedup scope**를
-  설정값으로 baked(현재 Dagster UI 동적만) → 후속 데이터소스가 바로 큐에 적재. (d) admin/dagster
-  단위 + frontend type-check/e2e.
+- **T-RV-51 dedup 수동처리 UI 완성 + 기본 scope**(point 4 foundation, 세분화):
+  - [x] **T-RV-51a (frontend) merge master 선택 UI**(2026-06-07): `dedup-review`에 merge 액션 추가 —
+    inline master 선택 패널(`A: <name>·좌표✓` / `B: <name>·좌표✓` / **자동 선정** / 취소). 자동 선정은
+    `master_feature_id` 미전달 → backend `select_master`(좌표→updated_at→provider 우선순위). 수동
+    선택 시 feature A/B의 `feature_id` 전달. API/types 변경 없음(계약 기구현). type-check/eslint/
+    next build green. 기존 e2e(render smoke) 유지.
+  - [ ] **T-RV-51b (backend) 기본 dedup scope baked**: maintenance.py에 기본 cross-provider/sibling
+    dedup scope를 설정값으로(현재 Dagster UI 동적만) → 후속 데이터소스가 바로 큐 적재. dagster 단위.
+    (krforest↔MOIS·museum↔MOIS scope는 해당 데이터소스 PR에서 추가.)
 - [ ] **T-RV-52 visitkorea 축제 enrichment wiring**(points 1·5·5.1): datagokr 축제(1차)에
   visitkorea(2차) 이미지/overview/homepage enrichment.
   - [ ] **T-RV-52a (provider)** `python-visitkorea-api` 보강 PR — `search_festival()`→`TourItem`이
