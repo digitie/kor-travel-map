@@ -36,6 +36,7 @@ __all__ = [
     "fetch_krforest_recreation_forests",
     "fetch_krheritage_events",
     "fetch_mois_license_records",
+    "fetch_standard_museums",
 ]
 
 
@@ -365,3 +366,30 @@ async def fetch_krforest_arboretums(
             yield record
     finally:
         await client.aclose()
+
+
+def fetch_standard_museums(
+    settings: KrtourMapSettings,
+) -> Iterator[Any]:
+    """전국박물관미술관표준데이터 record를 datagokr public client로 stream한다.
+
+    ``settings.data_go_kr_service_key``로 ``DataGoKrClient(api_key=...)``를 열고
+    ``client.museum_art.iter_all()``의 record(``PublicMuseumArtGallery``, krtour
+    ``PublicMuseumArtItem`` Protocol 충족)를 lazily yield한다. datagokr client는
+    sync이므로 sync generator다. 소비 종료/close 시 ``finally``에서 ``close()``.
+    """
+    secret = settings.data_go_kr_service_key
+    if secret is None:
+        raise ProviderCredentialMissing(
+            "standard museums live fetch에는 "
+            "KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY (source DATA_GO_KR_SERVICE_KEY)가 "
+            "필요하다."
+        )
+    api_key = secret.get_secret_value()
+
+    datagokr = cast(Any, importlib.import_module("datagokr"))
+    client = datagokr.DataGoKrClient(api_key=api_key)
+    try:
+        yield from client.museum_art.iter_all()
+    finally:
+        client.close()

@@ -63,7 +63,10 @@ from krtour.map.providers.opinet import (
 )
 from krtour.map.providers.standard_data import (
     DATASET_KEY_CULTURAL_FESTIVALS,
+    DATASET_KEY_MUSEUMS,
+    STANDARD_DATA_PROVIDER_NAME,
     cultural_festivals_to_bundles,
+    museums_to_bundles,
 )
 
 from .etl import DagsterFeatureLoadResult, load_feature_bundles_for_dagster
@@ -458,6 +461,36 @@ async def feature_place_krforest_arboretums(
     return await run_feature_place_krforest_arboretums(context)
 
 
+async def run_feature_place_standard_museums(
+    context: AssetExecutionContext,
+) -> DagsterFeatureLoadResult:
+    """전국박물관미술관표준데이터 record를 place Feature로 적재한다(ADR-034 9단계)."""
+    records = await _record_list(context, "standard_museums")
+    fetched_at = await _fetched_at(context)
+    bundles = await museums_to_bundles(
+        records,
+        fetched_at=fetched_at,
+        reverse_geocoder=_reverse_geocoder(context),
+    )
+    return await _load(
+        context,
+        provider=STANDARD_DATA_PROVIDER_NAME,
+        dataset_key=DATASET_KEY_MUSEUMS,
+        bundles=bundles,
+    )
+
+
+@asset(
+    group_name="features_place",
+    required_resource_keys=_COMMON_RESOURCE_KEYS | {"standard_museums"},
+    retry_policy=FEATURE_LOAD_RETRY_POLICY,
+)
+async def feature_place_standard_museums(
+    context: AssetExecutionContext,
+) -> DagsterFeatureLoadResult:
+    return await run_feature_place_standard_museums(context)
+
+
 FEATURE_LOAD_ASSETS: Final = [
     feature_event_datagokr_cultural_festivals,
     feature_place_opinet_stations,
@@ -470,6 +503,7 @@ FEATURE_LOAD_ASSETS: Final = [
     feature_geometry_knps_records,
     feature_place_krforest_recreation_forests,
     feature_place_krforest_arboretums,
+    feature_place_standard_museums,
 ]
 """현재 구현 완료된 Feature provider 적재 asset 목록."""
 

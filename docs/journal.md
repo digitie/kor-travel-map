@@ -2,6 +2,24 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-07 (claude) — T-RV-54b 박물관/미술관 feature-load asset + fetcher
+
+**작업**: 박물관/미술관 Dagster feature-load asset 연결(54a transform 소비).
+
+- **fetcher** `fetch_standard_museums`(sync generator — datagokr client는 sync):
+  `DataGoKrClient(api_key).museum_art.iter_all()` yield, credential `data_go_kr_service_key`,
+  `finally: close()`.
+- **resources**: `standard_museums` spec(provider python-datagokr-api, dataset datagokr_museums) +
+  guard→live override.
+- **assets**: `feature_place_standard_museums`(`museums_to_bundles` 소비, provider data.go.kr-standard)
+  + `FEATURE_LOAD_ASSETS` 등록.
+- **definitions**: REQUIRED_RESOURCE_KEYS에 standard_museums 추가.
+- **검증**: ruff + mypy --strict(13 files) + lint-imports + dagster 64 passed(fake museum_art 2 +
+  asset 등록 + live key).
+
+**다음**: T-RV-54c(museum↔MOIS dedup pair `01040000`/`01040100`/`01040200` ↔ MOIS
+museums_and_art_galleries 01040000) → 54d(ETL preview).
+
 ## 2026-06-07 (claude) — T-RV-54a 박물관/미술관(standard_data) transform
 
 **작업**: ADR-034 9단계 박물관/미술관 변환(`standard_data.py` 확장, provider datagokr `museum_art`

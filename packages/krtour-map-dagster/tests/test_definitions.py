@@ -36,6 +36,7 @@ def test_feature_load_asset_keys_registered() -> None:
         "feature_geometry_knps_records",
         "feature_place_krforest_recreation_forests",
         "feature_place_krforest_arboretums",
+        "feature_place_standard_museums",
     } <= asset_keys
 
 
@@ -86,6 +87,7 @@ _LIVE_PROVIDER_RESOURCE_KEYS = {
     "knps_geometry_records",
     "krforest_recreation_forests",
     "krforest_arboretums",
+    "standard_museums",
 }
 
 
