@@ -1,5 +1,17 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-08 Claude 작업 메모 — T-RV-04b 완전 종료 (opinet 3/3 POI-타깃 완료)
+
+opinet wiring 3 PR 전부 머지(또는 머지 대기): opinet-1 ADR-044 재정렬(#302) · opinet-2 bbox(#303)
+· opinet-3 POI-타깃(머지 대기). `fetch_opinet_stations`가 settings.opinet_scope_mode로 bbox /
+poi_cache_target(DSN sync DB 조회로 opinet POI target→bbox) 둘 다 지원.
+
+**→ T-RV-04b 완전 종료**: provider 8종 live wiring 완료. T-RV-04b 및 후속 program(T-RV-50~55)
+전부 종결.
+
+**다음 한 작업**: T-RV-04b 관련 남은 항목 없음. 새 지시 대기. (별도 트랙: T-212d perf baseline,
+T-212e 실데이터 full reload 최종 검증 — `docs/tasks.md` Phase 6/7.)
+
 ## 2026-06-08 Claude 작업 메모 — T-RV-04b opinet wiring 2/3 (bbox) 완료
 
 T-RV-04b 본체 마지막 1건(opinet) 진행 중. 사용자 결정 = bbox + POI-타깃 둘 다 지원, 3 PR:
