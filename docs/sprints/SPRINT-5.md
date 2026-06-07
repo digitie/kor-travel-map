@@ -1,8 +1,9 @@
 # SPRINT-5.md — MOIS-sibling provider + 정합성 Phase 2 + 운영 진입
 
-> **상태**: 🟡 진입 준비 (Sprint 4 종료 2026-06-01). **ADR-045 독립 프로그램화**
-> (Docker compose + admin-first OpenAPI + 독립 Dagster)가 Sprint 5 핵심 트랙으로
-> 추가됨 — F5~F8 + Dagster 게이트는 ADR-045의 krtour-map-owned Dagster 위에서 구현.
+> **상태**: 🟢 진행 중 (최종 운영 진입 task 상세화, 2026-06-07). **ADR-045 독립
+> 프로그램화**(Docker compose + admin-first OpenAPI + 독립 Dagster)는 핵심 기반 구현을
+> 대부분 마쳤고, 남은 범위는 T-RV-04b-opinet, T-212b/d/e, T-210 TripMate 연계 정리,
+> Sprint 5 closure다.
 >
 > **목적**: ADR-034 9단계의 ⑧⑨ — 휴양림/수목원 (`python-krforest-api`) +
 > 박물관/미술관 (`data.go.kr-standard`). MOIS와 sibling 가능한 provider를
@@ -183,6 +184,27 @@
       대상으로 갱신
 - [ ] `docs/journal.md` Sprint 5 종료 회고 + 운영 진입 entry
 - [ ] `docs/resume.md` "현재 상태" → "운영 단계 (Sprint 5 완료)" 갱신
+
+### 4.1 운영 진입 잔여 task 상세화 (2026-06-07)
+
+상세 실행 순서와 DoD는
+`docs/reports/sprint5-final-task-breakdown-2026-06-07.md`를 따른다.
+
+1. **T-RV-04b-opinet-krtour-wiring** — `python-opinet-api#8`의 bounded bbox
+   enumeration을 krtour Dagster live resource에 연결한다. 전국 nightly는 API quota상
+   기본값으로 두지 않는다.
+2. **T-212b-admin-ui-completion** — `/admin/features`, `/admin/issues`, weather panel,
+   logs, Dagster drilldown, offline upload/POI 주요 e2e를 운영자 workflow 기준으로 닫는다.
+3. **T-212d-perf-baseline-and-tuning** — seeded PostGIS 기준 hot read/F-check SQL
+   EXPLAIN과 frontend rendering baseline을 먼저 문서화하고, 실 볼륨 측정은 T-212e에서
+   보강한다.
+4. **T-212e-live-full-reload-final-verification** — provider full reload, offline upload,
+   kraddr-geo 보강, consistency gate, API smoke, Playwright, backup/restore smoke를 한
+   리포트로 묶는다.
+5. **T-210-tripmate-integration-cleanup** — TripMate 문서/ETL skeleton/backend client/
+   frontend generated type을 ADR-045 OpenAPI 모델로 정리한다.
+6. **Sprint 5 closure** — 본 §4 체크리스트를 실제 결과 기준으로 `[x]` 갱신하고,
+   `journal`/`resume`/agent entry 문서를 운영 단계로 전환한다.
 
 ## 5. 비목표 (Sprint 5)
 
