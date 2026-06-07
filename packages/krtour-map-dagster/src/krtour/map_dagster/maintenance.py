@@ -126,6 +126,19 @@ DEFAULT_DEDUP_SCOPE_PAIRS: Final[tuple[Mapping[str, object], ...]] = (
             "categories": ["03010100", "03020100", "03020200"],
         },
     },
+    # 박물관/미술관(data.go.kr-standard) ↔ MOIS museums_and_art_galleries(ADR-034 9단계).
+    # MOIS museums_and_art_galleries는 category 01040000(문화시설)으로 적재되므로 그 한
+    # 카테고리로 좁힌다. standard 박물관/미술관은 01040000/01040100/01040200 모두 가능.
+    {
+        "left": {
+            "provider": "data.go.kr-standard",
+            "dataset_key": "datagokr_museums",
+        },
+        "right": {
+            "provider": "python-mois-api",
+            "categories": ["01040000"],
+        },
+    },
 )
 """op_config가 비었을 때 적용하는 기본 cross-provider dedup scope pair.
 

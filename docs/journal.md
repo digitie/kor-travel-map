@@ -2,6 +2,22 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-07 (claude) — T-RV-54c+54d 박물관/미술관 MOIS dedup + ETL preview → T-RV-54 완료
+
+**작업**: 박물관/미술관 MOIS dedup scope + admin ETL preview 등록(54c+54d 묶음 PR).
+
+- **54c dedup**: `DEFAULT_DEDUP_SCOPE_PAIRS`에 left `{data.go.kr-standard, datagokr_museums}` ↔
+  right `{python-mois-api, categories [01040000]}` pair 추가. MOIS `museums_and_art_galleries`는
+  `01040000`(문화시설)으로 적재되므로 그 카테고리로 좁힘. 기본 pair 3건(knps↔krheritage,
+  krforest↔mois, museum↔mois).
+- **54d ETL preview**: `etl_fixtures.FIXTURE_REGISTRY`에 `data.go.kr-standard/datagokr_museums`
+  entry(`_Museum` fixture + `museums_to_bundles` convert) 추가 → `/debug/etl` 노출.
+- **검증**: ruff + mypy --strict(dagster 13 / admin 25) + dagster maintenance 3 + etl router 25 +
+  `run_fixture_preview`(count 2, cats 01040100 박물관/01040200 미술관) 확인.
+
+**T-RV-54 완료**(54a transform / 54b asset+fetcher / 54c MOIS dedup / 54d ETL preview).
+**다음**: T-RV-52 visitkorea 축제 enrichment(provider 보강 선행) 또는 T-RV-55 보조 데이터소스.
+
 ## 2026-06-07 (claude) — T-RV-54b 박물관/미술관 feature-load asset + fetcher
 
 **작업**: 박물관/미술관 Dagster feature-load asset 연결(54a transform 소비).

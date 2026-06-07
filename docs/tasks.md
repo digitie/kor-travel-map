@@ -348,9 +348,13 @@ enrichment(모듈 있음, 미wiring)**. dedup 인프라(scoring/queue/admin rout
     `DataGoKrClient.museum_art.iter_all()`, datagokr client sync) + `feature_place_standard_museums`
     asset(`museums_to_bundles` 소비) + resource spec/guard→live + definitions 등록. credential
     `data_go_kr_service_key`. dagster 단위(fake museum_art 2 + asset 등록 + live key) green(64 passed).
-  - [ ] **T-RV-54c (dedup)** museum↔MOIS dedup: `standard_museums` ≅ MOIS `museums_art_galleries`
-    scope pair + 큐 검증.
-  - [ ] **T-RV-54d (UI)** museum admin 상세 UI + dedup 노출.
+  - [x] **T-RV-54c (dedup)**(2026-06-07) `DEFAULT_DEDUP_SCOPE_PAIRS`에 박물관/미술관↔MOIS pair 추가:
+    left `{data.go.kr-standard, datagokr_museums}` ↔ right `{mois, categories [01040000]}`. MOIS
+    `museums_and_art_galleries`는 `01040000`으로 적재되므로 그 카테고리로 좁힘. dagster 단위(기본
+    pair 3건) green.
+  - [x] **T-RV-54d (admin debug UI)**(2026-06-07) `etl_fixtures.FIXTURE_REGISTRY`에
+    `data.go.kr-standard/datagokr_museums` entry(fixture+convert) 추가 → ETL preview 노출.
+    admin mypy 25 + etl router 25 passed + preview 실행(count 2, cats 01040100/01040200) 확인.
 - [ ] **T-RV-55 우선순위 가이드 후속(point 7) 평가/구체화**: ADR-034 보조 dataset 중 T-RV-04b
   관련 — datagokr-standard **관광지(tourist_attraction)**·**주차장(parking)**(museum과 동일 패턴,
   저비용), khoa 해수욕장, airkorea 대기질, krairport 공항. 각각 task화 후 진행 여부 판단(범위 관리:
