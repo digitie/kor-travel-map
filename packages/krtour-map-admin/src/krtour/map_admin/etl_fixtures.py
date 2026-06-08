@@ -914,6 +914,7 @@ class _AirMeasurement:
 
     station_name: str
     data_time: datetime | None
+    sido_name: str | None = "서울"
     khai_value: int | None = None
     khai_grade: int | None = None
     pm10_value: float | None = None

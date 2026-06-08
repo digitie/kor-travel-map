@@ -2,6 +2,25 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-08 (claude) — 리뷰 후속: airkorea 측정소 composite key (#300/#301)
+
+**작업**: PR #300/#301 리뷰(digitie) actionable finding — 대기질 측정소 identity/측정값 join이
+`station_name` 단독이라 전국 비유일(`중구`가 여러 시도). 같은 이름 측정소가 한 feature로 접히거나
+측정값이 다른 지역 feature에 붙을 수 있음(asset의 `{source_entity_id: feature_id}` dict가 동명을
+덮어씀, #301).
+
+- `providers/airkorea.py`: `_canonical_sido`(주소/시도명 첫 토큰 → 약식 시도, `_SIDO_CANONICAL`
+  전체/약식 매핑) + `_station_key`(`station_name::<sido>` composite, ADR-009 `::`). station bundle
+  natural key = composite(addr 시도), measurement Protocol에 `sido_name` 추가 +
+  `air_quality_to_weather_values`가 `(sido_name, station_name)` composite로 조회. dagster asset은
+  source_entity_id 기반 map이라 자동 composite-key화(코드 변경 불필요).
+- 테스트: 단위 `test_same_station_name_in_different_sido_are_distinct`(서울/대구 `중구` 별개 feature
+  + 측정값 정확 join) + 통합 `test_airkorea_asset_distinct_features_for_same_station_name`(asset
+  레벨, 동명 2 측정소 → 2 feature/2 WeatherValue 값 안 섞임). asset metadata는 `_add_output_metadata`
+  guard 헬퍼로 직접 호출 호환.
+- **검증**: ruff + mypy --strict(map 85/dagster 13/admin 26) + lint-imports + unit+lint 966
+  (coverage 81%, airkorea.py 93%) + full 1172 + admin/dagster 311 green.
+
 ## 2026-06-08 (claude) — 리뷰 후속: enrichment 결정 race 수정 (#297/#298)
 
 **작업**: PR #297 리뷰(digitie) actionable finding — `decide_enrichment_review()`가 SELECT 후

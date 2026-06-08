@@ -49,6 +49,7 @@ class _Station:
 class _Measurement:
     station_name: str
     data_time: datetime | None
+    sido_name: str | None = "서울"
     khai_value: int | None = None
     khai_grade: int | None = None
     pm10_value: float | None = None
@@ -87,7 +88,8 @@ def test_station_is_weather_kind_without_detail() -> None:
     assert feature.marker_color == AIR_QUALITY_MARKER_COLOR
     assert feature.detail is None  # weather kind는 detail 불가.
     assert feature.coord is not None
-    assert bundle.source_record.source_entity_id == "중구"
+    # composite 안정키: station_name::<sido(addr 첫 토큰)>.
+    assert bundle.source_record.source_entity_id == "중구::서울"
     assert bundle.source_record.source_entity_type == "air_quality_station"
     assert bundle.source_link.source_role == SourceRole.PRIMARY
 
@@ -119,7 +121,7 @@ def test_air_quality_values_expand_per_pollutant() -> None:
     )
     values = air_quality_to_weather_values(
         [measurement],
-        station_feature_ids={"중구": "f_1114000000_w_abc"},
+        station_feature_ids={"중구::서울": "f_1114000000_w_abc"},
         source_record_key="sr_air",
     )
     # 4 오염물질 (PM10/PM2_5/O3/CAI) — 결측(NO2/SO2/CO)은 제외.
@@ -150,7 +152,7 @@ def test_air_quality_naive_data_time_made_kst_aware() -> None:
         pm10_value=30.0,
     )
     [value] = air_quality_to_weather_values(
-        [measurement], station_feature_ids={"중구": "f_x_w_1"}
+        [measurement], station_feature_ids={"중구::서울": "f_x_w_1"}
     )
     assert value.observed_at is not None
     assert value.observed_at.tzinfo is not None
@@ -165,7 +167,7 @@ def test_air_quality_unmapped_station_skipped() -> None:
         pm10_value=30.0,
     )
     values = air_quality_to_weather_values(
-        [measurement], station_feature_ids={"중구": "f_x_w_1"}
+        [measurement], station_feature_ids={"중구::서울": "f_x_w_1"}
     )
     assert values == []
 
@@ -174,6 +176,38 @@ def test_air_quality_unmapped_station_skipped() -> None:
 def test_air_quality_all_missing_yields_nothing() -> None:
     measurement = _Measurement(station_name="중구", data_time=_now())
     values = air_quality_to_weather_values(
-        [measurement], station_feature_ids={"중구": "f_x_w_1"}
+        [measurement], station_feature_ids={"중구::서울": "f_x_w_1"}
     )
     assert values == []
+
+
+@pytest.mark.unit
+def test_same_station_name_in_different_sido_are_distinct() -> None:
+    """``중구`` 측정소가 서울/대구에 둘 다 있어도 별개 feature + 정확한 join(#300)."""
+    seoul = _Station(station_name="중구", addr="서울 중구 덕수궁길 15", lat=37.564, lon=126.975)
+    daegu = _Station(station_name="중구", addr="대구광역시 중구 공평로 88", lat=35.869, lon=128.594)
+    bundles = stations_to_bundles([seoul, daegu], fetched_at=_now())
+
+    ids = {b.source_record.source_entity_id for b in bundles}
+    assert ids == {"중구::서울", "중구::대구"}
+    # feature_id도 서로 다르다(같은 이름이 한 feature로 접히지 않음).
+    assert bundles[0].feature.feature_id != bundles[1].feature.feature_id
+
+    station_map = {
+        b.source_record.source_entity_id: b.feature.feature_id for b in bundles
+    }
+    measurements = [
+        _Measurement(
+            station_name="중구", sido_name="서울", data_time=_now(), pm10_value=45.0
+        ),
+        _Measurement(
+            station_name="중구", sido_name="대구", data_time=_now(), pm10_value=80.0
+        ),
+    ]
+    values = air_quality_to_weather_values(
+        measurements, station_feature_ids=station_map
+    )
+    by_feature = {v.feature_id: v.value_number for v in values}
+    # 서울 중구 45 / 대구 중구 80 — 각자 올바른 feature에 붙는다.
+    assert by_feature[station_map["중구::서울"]] == Decimal("45.0")
+    assert by_feature[station_map["중구::대구"]] == Decimal("80.0")

@@ -90,7 +90,11 @@ from krtour.map.providers.standard_data import (
     tourist_attractions_to_bundles,
 )
 
-from .etl import DagsterFeatureLoadResult, load_feature_bundles_for_dagster
+from .etl import (
+    DagsterFeatureLoadResult,
+    _add_output_metadata,
+    load_feature_bundles_for_dagster,
+)
 
 if TYPE_CHECKING:
     from krtour.map.client import AsyncKrtourMapClient
@@ -693,12 +697,13 @@ async def run_feature_weather_airkorea_air_quality(
     )
     client = cast("AsyncKrtourMapClient", _resource_object(context, "krtour_map_client"))
     result = await client.load_air_quality(bundles, values)
-    context.add_output_metadata(
+    _add_output_metadata(
+        context,
         {
             "provider": AIRKOREA_PROVIDER_NAME,
             "dataset_key": DATASET_KEY_AIR_QUALITY,
             **result.as_metadata(),
-        }
+        },
     )
     return result
 

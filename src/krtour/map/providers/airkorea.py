@@ -91,16 +91,67 @@ _GRADE_LABELS: Final[dict[int, str]] = {
     4: "매우나쁨",
 }
 
+# 시도명 정규화 — station ``addr`` 첫 토큰(전체/약식)과 measurement ``sido_name``
+# (약식)을 같은 canonical 시도로 모은다. composite 안정키 충돌 방지(#300).
+_SIDO_CANONICAL: Final[dict[str, str]] = {
+    "서울": "서울", "서울특별시": "서울",
+    "부산": "부산", "부산광역시": "부산",
+    "대구": "대구", "대구광역시": "대구",
+    "인천": "인천", "인천광역시": "인천",
+    "광주": "광주", "광주광역시": "광주",
+    "대전": "대전", "대전광역시": "대전",
+    "울산": "울산", "울산광역시": "울산",
+    "세종": "세종", "세종시": "세종", "세종특별자치시": "세종",
+    "경기": "경기", "경기도": "경기",
+    "강원": "강원", "강원도": "강원", "강원특별자치도": "강원",
+    "충북": "충북", "충청북도": "충북",
+    "충남": "충남", "충청남도": "충남",
+    "전북": "전북", "전라북도": "전북", "전북특별자치도": "전북",
+    "전남": "전남", "전라남도": "전남",
+    "경북": "경북", "경상북도": "경북",
+    "경남": "경남", "경상남도": "경남",
+    "제주": "제주", "제주도": "제주", "제주특별자치도": "제주",
+}
+
+
+def _canonical_sido(value: str | None) -> str | None:
+    """주소/시도명 문자열 → canonical 약식 시도(예: ``"서울특별시 중구" → "서울"``).
+
+    첫 토큰을 ``_SIDO_CANONICAL``로 매핑. 미지의 형태는 첫 토큰을 그대로 쓴다.
+    """
+    if not value:
+        return None
+    stripped = value.strip()
+    if not stripped:
+        return None
+    first = stripped.split()[0]
+    return _SIDO_CANONICAL.get(first, first)
+
+
+def _station_key(station_name: str, sido: str | None) -> str:
+    """측정소 composite 안정키 ``station_name::<sido>`` (sido 없으면 이름 단독).
+
+    ``::``는 ADR-009 derived key separator(``|`` 예약 회피).
+    """
+    name = (station_name or "").strip()
+    if sido:
+        return f"{name}::{sido}"
+    return name
+
 
 @runtime_checkable
 class AirQualityStationItem(Protocol):
-    """대기질 측정소 1건 입력 shape (``airkorea`` ``Station``)."""
+    """대기질 측정소 1건 입력 shape (``airkorea`` ``Station``).
+
+    ``station_name``은 전국적으로 유일하지 않다(예: ``중구``가 여러 시도에 존재).
+    안정키는 ``addr``에서 추출한 시도와의 composite(``station_name::<sido>``)다.
+    """
 
     station_name: str
-    """측정소명 — 안정 식별자(``source_entity_id``) + measurement 조인 키."""
+    """측정소명(시도 내 식별)."""
 
     addr: str | None
-    """측정소 주소(raw)."""
+    """측정소 주소(raw) — 첫 토큰에서 시도를 추출해 composite key/조인에 쓴다."""
 
     lat: float | None
     lon: float | None
@@ -112,9 +163,12 @@ class AirQualityMeasurementItem(Protocol):
 
     한 row에 오염물질별 값이 컬럼으로 들어있다(PM10/PM2.5/O3/NO2/SO2/CO/CAI). 변환
     시 오염물질당 ``WeatherValue`` 1행으로 펼친다. ``data_time``은 관측 시각.
+    ``(sido_name, station_name)`` composite로 측정소 feature에 조인한다(이름 충돌 방지).
     """
 
     station_name: str
+    sido_name: str | None
+    """시도명 — station ``addr`` 시도와 함께 composite 조인 키를 이룬다."""
     data_time: datetime | None
 
     khai_value: int | None
@@ -226,9 +280,12 @@ async def _station_to_bundle(
         sigungu_name=geo.sigungu_name if geo is not None else None,
     )
 
-    natural_key = item.station_name
+    # composite 안정키 — station_name은 전국 비유일이라 addr 시도와 묶는다(#300).
+    sido = _canonical_sido(item.addr)
+    natural_key = _station_key(item.station_name, sido)
     raw_data: dict[str, Any] = {
         "station_name": item.station_name,
+        "sido": sido,
         "addr": item.addr,
         "latitude": str(coord.lat) if coord is not None else None,
         "longitude": str(coord.lon) if coord is not None else None,
@@ -385,8 +442,11 @@ def air_quality_to_weather_values(
     items
         ``AirQualityMeasurementItem`` Protocol iterable(측정소×시각별 1 row).
     station_feature_ids
-        측정소명 → weather feature_id 매핑(``air_quality_stations_to_bundles``
-        적재 결과). 매핑에 없는 측정소 row는 건너뛴다(feature 미적재).
+        **composite 키**(``station_name::<sido>``, ``air_quality_stations_to_bundles``의
+        ``source_entity_id``) → weather feature_id 매핑. 측정값은 ``(sido_name,
+        station_name)``로 같은 composite를 만들어 조회한다 — 측정소명이 전국 비유일이라
+        시도를 함께 봐야 다른 지역 feature에 값이 잘못 붙지 않는다(#300). 매핑에 없는
+        측정소 row는 건너뛴다.
     source_record_key
         provider raw 추적용(권장). KMA value 변환과 동일.
 
@@ -398,7 +458,8 @@ def air_quality_to_weather_values(
     """
     out: list[WeatherValue] = []
     for item in items:
-        feature_id = station_feature_ids.get(item.station_name)
+        key = _station_key(item.station_name, _canonical_sido(item.sido_name))
+        feature_id = station_feature_ids.get(key)
         if feature_id is None:
             continue
         out.extend(
