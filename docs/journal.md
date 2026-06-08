@@ -17,6 +17,11 @@
   `docs/tripmate-rest-api.md`(#317)로 위임, §2.1 versioning 문구를 ADR-048로 갱신.
 - **#317 reconcile**: tripmate-alias 제거·feature CRUD(K-15)·version 0/1을 카탈로그에 반영.
   내가 앞서 만든 Phase 8/T-214a~l(중복 충돌)을 폐기하고 **Phase 6.8 / T-216a~f**로 재정의.
+- **#316 TripMate-소비자 리뷰 반영**: 외부 dual-support 전환 창(구 unprefixed alias +
+  `deprecated`/`Sunset`), problem+json `code`/`request_id` top-level 확장 멤버 + enum 고정,
+  **외부 소비 read 필드 동결**(`feature_id`/`cluster_key`/`target_key`/FeatureSummary —
+  `*_key`→`*_id`는 내부 ops/admin만), 반영 순서(외부 `/v1` 먼저→admin `/v1`은 외부 무영향)를
+  ADR-048 "소비자 안전" 절 + rest-api.md + T-216에 명시.
 - **검증**: 문서 전용(코드 없음).
 
 ## 2026-06-08 (codex) — REST API v1 계약 정리 + feature CRUD admin API

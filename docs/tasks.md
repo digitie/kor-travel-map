@@ -1230,7 +1230,9 @@ lint-imports/pytest/coverage, frontend type-check/e2e). 실데이터 검증은 T
 
 T-214/T-215(#317)의 `/v1` 1차 정리 위에 ADR-048 delta를 얹는다. 정본 = `docs/rest-api.md`
 (전 표면) + `docs/tripmate-rest-api.md`(외부). 각 항목 1-PR, OpenAPI drift + frontend
-gen:types 동반.
+gen:types 동반. **소비자 안전(#316 리뷰)**: 외부 표면 변경은 구 경로 dual-support +
+`deprecated`/`Sunset`로 무중단 전환, 외부 소비 read 필드(`feature_id`/`cluster_key`/
+`target_key`/FeatureSummary)는 동결, problem+json `code`/`request_id`는 top-level 확장 멤버.
 
 - [ ] **T-216a — admin/ops/debug `/v1` prefix 도입.** 사용자 지시(admin도 versioning).
   #317 T-214b가 비버저닝으로 둔 `/admin`·`/ops`·`/debug`를 `/v1` 아래로 mount(liveness
@@ -1247,7 +1249,9 @@ gen:types 동반.
   `application/problem+json`(`code`/`request_id`/`errors[]`). T-214e/g 심화.
 - [ ] **T-216e — 명명 통일(경로+응답 본문).** `dedup-review`→`dedup-reviews`,
   `enrichment-review`→`enrichment-reviews`, `{review_key}`→`{review_id}`,
-  `/admin/issues/{violation_key}`→`{issue_id}`. 응답 UUID 단일식별자 `*_key`→`*_id`. T-214h 심화.
+  `/admin/issues/{violation_key}`→`{issue_id}`. 응답 UUID 단일식별자 `*_key`→`*_id`(내부
+  ops/admin만 — 외부 소비 read 필드 `feature_id`/`cluster_key`/`target_key`/FeatureSummary
+  동결). T-214h 심화.
 - [ ] **T-216f — 코드/DB 명명 전파(내부 소유).** REST 개명을 물리 컬럼·ORM·repo까지
   end-to-end(테이블별 1-PR migration, codegraph impact 선행): `review_key`→`review_id`,
   `violation_key`→`issue_id`, ops 로그/내부 키 `*_key`→`*_id`, `state`→`status`(import_jobs/

@@ -2771,9 +2771,16 @@ bbox 인코딩 2종, `status`↔`state`, 응답 `*_key`↔`*_id`)가 #317의 고
    개명; `severity` 별개 축 유지). issue/violation noun은 외부 표면에서 `issue_*`로 통일.
 5. **에러 problem+json(T-214g 보강).** `{error:{…}}`를 RFC 7807 `application/problem+json`
    (`type`/`title`/`status`/`detail` + 확장 `code`/`request_id`/`errors[]`)으로 발전.
+   `code`·`request_id`는 problem+json 객체의 **top-level 확장 멤버**로 두고(소비자 파싱 위치
+   고정), 코드 enum(`FEATURE_NOT_FOUND`/`INVALID_BBOX`/`TOO_MANY_IDS`/`VALIDATION_ERROR`/
+   `RATE_LIMITED`/`LOCK_BUSY`/`DESTRUCTIVE_DISABLED`/`UNAUTHORIZED`/`UPSTREAM_UNAVAILABLE`)을
+   확장 `code`로 유지한다.
 6. **응답 식별자 접미사 규약(응답 본문까지).** 시스템 단일 식별자 `*_id`, 복합/자연키만
    `*_key`. 응답의 UUID 단일 식별자(`review_key`/`violation_key`/`system_log_key`/
-   `api_call_log_key`/`coord_key`/`override_key`/`step_key`)는 `*_id`로 개명.
+   `api_call_log_key`/`override_key`/`step_key`)는 `*_id`로 개명. **단 외부 소비 read 응답
+   필드는 동결(개명 제외)**: `feature_id`·`cluster_key`·`target_key` 및 FeatureSummary 필드
+   (`lon`/`lat`/`name`/`category`/`marker_icon`/`marker_color`/`status`). 즉 `*_key`→`*_id`는
+   **내부 ops/admin 식별자에만** 적용하고 TripMate가 소비하는 read 계약은 바꾸지 않는다.
 7. **명명 통일을 코드/DB 레벨까지 전파(내부 소유에 한함).** REST 단 개명을 영구 edge 매핑으로
    두면 ADR-046(무-shim)과 어긋나므로, **krtour 내부 소유 식별자/상태 컬럼은 물리 컬럼·ORM
    속성·repo 함수/변수까지 end-to-end 정렬**(테이블별 1-PR migration, codegraph impact 선행).
@@ -2805,8 +2812,26 @@ bbox 인코딩 2종, `status`↔`state`, 응답 `*_key`↔`*_id`)가 #317의 고
 - 내부 식별자 물리 개명은 테이블별 migration + 큰 mechanical churn(`review_key` 291·
   `violation_key` 118건)을 동반 — codegraph impact 후 단계화.
 
+### 소비자 안전 (TripMate, #316 리뷰 반영)
+
+외부 표면 변경(`/v1`·problem+json·파라미터 개명)은 TripMate httpx client(T-170, 머지됨)에
+직접 닿으므로 무중단 전환을 보장한다.
+
+1. **dual-support 전환 창**: 외부 `/v1` 도입 시 구 unprefixed 경로를 호환 alias로 한동안
+   **동시 지원**하고 OpenAPI에 `deprecated: true` + `Deprecation`/`Sunset` 헤더로 예고한다
+   (#317 T-214b 정책). `openapi.user.json`에 `/v1`이 반영되는 commit을 공지한다.
+2. **machine 정본 + drift gate**: `openapi.user.json`을 기계 정본으로 유지하고, `/v1` 안정
+   commit에서 TripMate가 codegen(T-210e) + httpx 계약 테스트를 그 spec에 pin한다.
+3. **에러 `code` 고정**: 위 #5대로 problem+json top-level 확장 `code`/`request_id` + enum 유지.
+4. **외부 read 필드 동결**: 위 #6대로 `feature_id`/`cluster_key`/`target_key` 및 FeatureSummary
+   필드 개명 제외 — TripMate 소비 read 계약 불변.
+5. **admin/ops `/v1`은 외부 무영향**: admin client는 TripMate 미구현(T-180)이라 최신 spec
+   기준으로 만들면 되며, 본 ADR의 내부 개명/admin versioning은 외부 소비자를 깨지 않는다.
+
 ### 후속
 
 - 실행은 `docs/tasks.md` **Phase 6.8 / T-216a~f**로 분해(#317의 T-214/T-215와 별도 번호).
   `docs/tripmate-rest-api.md` §2.1의 "admin/ops 비버저닝" 문구는 본 ADR로 갱신했다.
-- API shape가 `/v1`로 안정된 commit에서 T-210e(openapi-typescript codegen)를 진행한다.
+- **반영 순서**: 외부 `/v1`(#317 T-214b/d)을 dual-support로 먼저 고정 → TripMate가 base/
+  에러파싱/파라미터 갱신(소비자측 T-181) → admin/ops `/v1`(T-216a, 외부 무영향)·내부 명명
+  전파(T-216e/f)는 병행. API shape `/v1` 안정 commit에서 T-210e(codegen) 진행.

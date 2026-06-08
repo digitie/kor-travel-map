@@ -41,6 +41,10 @@
   **+ `/v1/admin/*`·`/v1/ops/*`·`/v1/debug/*`**(ADR-048이 #317의 admin 비버저닝을 supersede).
 - **비버저닝 고정**: `/health`·`/version`. breaking은 `/v1`→`/v2`. deprecate 시
   `Deprecation`/`Sunset` 헤더, 경로별 shim 금지(ADR-046) — mount 1곳 전환.
+- **외부 dual-support 전환 창(소비자 안전)**: 외부 `/v1` 도입 시 구 unprefixed 경로를 호환
+  alias로 동시 지원하고 `deprecated: true`로 예고(#317 T-214b). `openapi.user.json`에 `/v1`
+  반영 commit을 공지 → TripMate(T-170 client)는 base만 바꿔 무중단 전환. admin/ops `/v1`은
+  외부 소비자 무영향(admin client 미구현).
 
 ### 1.3 인증 (ADR-005 / ADR-045 D-1, #314)
 - `/v1/tripmate/*`: `ServiceToken`(`X-Krtour-Service-Token`, 미설정 시 비강제, 상수시간).
@@ -62,7 +66,8 @@
   "errors":[{"field":"feature_id","message":"…"}] }
 ```
 - `Content-Type: application/problem+json` + `X-Request-ID`. 중앙 핸들러(`app.py`
-  `_error_response`)가 통일.
+  `_error_response`)가 통일. `code`·`request_id`는 **top-level 확장 멤버**(소비자 파싱 위치
+  고정), 코드 enum(§4)을 확장 `code`로 유지.
 
 ### 1.6 페이지네이션 (🔁 ADR-048, T-214e 심화)
 **실측 불일치**: page-size 파라미터 3종(`limit` features 평면/in-bounds/search ·
@@ -187,6 +192,9 @@ POST /v1/debug/etl/{provider}/{dataset}/preview
 - **식별자**: 시스템 단일 `*_id`(feature_id/request_id/upload_id/backup_id/job_id/run_id/
   report_id/신규 review_id/issue_id), 복합/자연키만 `*_key`(`target_key`+`external_system`,
   `dataset_key`, provider/source 어휘 ADR-044). 응답 UUID `*_key`→`*_id`(T-216f).
+  **외부 소비 read 필드는 동결(개명 제외)**: `feature_id`/`cluster_key`/`target_key` 및
+  FeatureSummary(`lon`/`lat`/`name`/`category`/`marker_*`/`status`). `*_key`→`*_id`는 내부
+  ops/admin 식별자에만 적용 — TripMate 소비 read 계약 불변.
 - **상태**: `status`로 통일(`state` 개명). `severity` 별개 축.
 - **timestamp**: `*_at`(ISO 8601 KST). `count`(페이지 길이)/`total_count`(전체, opt-in) 분리.
 
@@ -236,6 +244,7 @@ ORM·repo까지 end-to-end 정렬**(ADR-046 무-shim), provider/복합키는 경
 | `state`(import_jobs/offline_uploads/feature_update_requests) | 내부 | ✅ | `status` | 3 테이블 |
 | `dataset_key`/`source_record_key`/`source_entity_id` | provider/source(ADR-044) | ❌ | 유지 | 859/398/234 |
 | `target_key`(+`external_system`) | 복합 자연키 | ❌ | 유지 | 130 |
+| `cluster_key`/FeatureSummary 필드 | 외부 소비 read 계약 | ❌ | 동결 | — |
 | `feature_id` | canonical | ❌ | 불변 | — |
 
 전략: edge projection(`AS …`) / ORM attr 개명 / **물리 컬럼 개명(migration)** 중, 내부 소유는
