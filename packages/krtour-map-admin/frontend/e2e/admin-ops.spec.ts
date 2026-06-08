@@ -1,4 +1,392 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Page, type Route, test } from "@playwright/test";
+
+type OfflineUploadRecord = {
+  byte_size: number;
+  checksum_sha256: string;
+  created_at: string;
+  created_by: string | null;
+  dataset_key: string;
+  detected_encoding: string | null;
+  detected_format: string | null;
+  load_job_id: string | null;
+  load_url: string;
+  original_filename: string;
+  provider: string;
+  state: string;
+  status_url: string;
+  storage_backend: string;
+  storage_key: string;
+  sync_scope: string;
+  updated_at: string;
+  upload_id: string;
+  validation_job_id: string | null;
+};
+
+type PoiCacheTargetRecord = {
+  coord: { lat: number; lon: number };
+  coord_key: string;
+  coord_precision_digits: number;
+  created_at: string;
+  deleted_at?: string | null;
+  external_system: string;
+  last_failed_at?: string | null;
+  last_refreshed_at?: string | null;
+  last_requested_at?: string | null;
+  last_seen_at: string;
+  metadata: Record<string, unknown>;
+  name?: string | null;
+  nearby_url: string;
+  next_eligible_refresh_at?: string | null;
+  provider_overrides: Record<string, Record<string, unknown>>;
+  radius_km: number;
+  refresh_policy: string;
+  scope_mode: string;
+  status_url: string;
+  target_id: string;
+  target_key: string;
+  update_enabled: boolean;
+  updated_at: string;
+};
+
+const MOCK_NOW = "2026-06-08T00:00:00.000Z";
+const OFFLINE_UPLOAD_ID = "11111111-1111-4111-8111-111111111111";
+const OFFLINE_VALIDATION_JOB_ID = "22222222-2222-4222-8222-222222222222";
+const OFFLINE_LOAD_JOB_ID = "33333333-3333-4333-8333-333333333333";
+const OFFLINE_DAGSTER_RUN_ID = "dagster-run-offline-upload-001";
+const POI_TARGET_ID = "44444444-4444-4444-8444-444444444444";
+
+function makeOfflineUpload(
+  overrides: Partial<OfflineUploadRecord> = {},
+): OfflineUploadRecord {
+  return {
+    byte_size: 46,
+    checksum_sha256:
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    created_at: MOCK_NOW,
+    created_by: "local-admin",
+    dataset_key: "offline_csv",
+    detected_encoding: "utf-8",
+    detected_format: "csv",
+    load_job_id: null,
+    load_url: `/admin/offline-uploads/${OFFLINE_UPLOAD_ID}/load`,
+    original_filename: "offline.csv",
+    provider: "offline-test-provider",
+    state: "uploaded",
+    status_url: `/admin/offline-uploads/${OFFLINE_UPLOAD_ID}`,
+    storage_backend: "rustfs",
+    storage_key: `offline-uploads/${OFFLINE_UPLOAD_ID}/offline.csv`,
+    sync_scope: "default",
+    updated_at: MOCK_NOW,
+    upload_id: OFFLINE_UPLOAD_ID,
+    validation_job_id: null,
+    ...overrides,
+  };
+}
+
+function makePoiTarget(
+  overrides: Partial<PoiCacheTargetRecord> = {},
+): PoiCacheTargetRecord {
+  return {
+    coord: { lon: 126.978, lat: 37.5665 },
+    coord_key: "126.978000:37.566500",
+    coord_precision_digits: 6,
+    created_at: MOCK_NOW,
+    deleted_at: null,
+    external_system: "tripmate",
+    last_failed_at: null,
+    last_refreshed_at: null,
+    last_requested_at: null,
+    last_seen_at: MOCK_NOW,
+    metadata: {},
+    name: "Mock target",
+    nearby_url:
+      "/features/nearby/by-target?external_system=tripmate&target_key=mock-target-1",
+    next_eligible_refresh_at: null,
+    provider_overrides: {},
+    radius_km: 5,
+    refresh_policy: "provider_default",
+    scope_mode: "center_radius",
+    status_url: "/admin/poi-cache-targets/tripmate/mock-target-1",
+    target_id: POI_TARGET_ID,
+    target_key: "mock-target-1",
+    update_enabled: true,
+    updated_at: MOCK_NOW,
+    ...overrides,
+  };
+}
+
+async function fulfillJson(route: Route, body: unknown, status = 200) {
+  await route.fulfill({
+    body: JSON.stringify(body),
+    contentType: "application/json",
+    status,
+  });
+}
+
+async function mockOfflineUploadMutations(page: Page) {
+  let upload = makeOfflineUpload();
+  let uploads: OfflineUploadRecord[] = [];
+  const requests = { create: 0, load: 0, preview: 0, validate: 0 };
+
+  await page.route("**/admin/offline-uploads**", async (route) => {
+    const request = route.request();
+    if (request.resourceType() === "document") {
+      await route.continue();
+      return;
+    }
+    const url = new URL(request.url());
+    const uploadPath = `/admin/offline-uploads/${OFFLINE_UPLOAD_ID}`;
+
+    if (request.method() === "GET" && url.pathname === "/admin/offline-uploads") {
+      const state = url.searchParams.get("state");
+      const items = state
+        ? uploads.filter((item) => item.state === state)
+        : uploads;
+      await fulfillJson(route, {
+        data: { items, next_cursor: null },
+        meta: { count: items.length, duration_ms: 1 },
+      });
+      return;
+    }
+
+    if (request.method() === "POST" && url.pathname === "/admin/offline-uploads") {
+      requests.create += 1;
+      expect(request.headers()["content-type"]).toContain("multipart/form-data");
+      uploads = [upload];
+      await fulfillJson(route, {
+        data: upload,
+        meta: {
+          bucket: "krtour-uploads",
+          content_type: "text/csv",
+          duration_ms: 1,
+          object_key: upload.storage_key,
+        },
+      });
+      return;
+    }
+
+    if (request.method() === "GET" && url.pathname === uploadPath) {
+      await fulfillJson(route, { data: upload, meta: { duration_ms: 1 } });
+      return;
+    }
+
+    if (request.method() === "GET" && url.pathname === `${uploadPath}/preview`) {
+      requests.preview += 1;
+      await fulfillJson(route, {
+        data: upload,
+        meta: {
+          bytes_read: upload.byte_size,
+          checksum_sha256_actual: upload.checksum_sha256,
+          delimiter: ",",
+          duration_ms: 1,
+          encoding: "utf-8",
+          headers: ["name", "lon", "lat"],
+          parsed_format: "csv",
+          rows_sampled: 1,
+          rows_total: 1,
+          sample_rows: [
+            { name: "Seoul Test POI", lon: "126.978", lat: "37.5665" },
+          ],
+        },
+      });
+      return;
+    }
+
+    if (request.method() === "POST" && url.pathname === `${uploadPath}/validate`) {
+      requests.validate += 1;
+      expect(request.postData()).toContain("column_mapping");
+      upload = {
+        ...upload,
+        state: "validated",
+        updated_at: "2026-06-08T00:01:00.000Z",
+        validation_job_id: OFFLINE_VALIDATION_JOB_ID,
+      };
+      uploads = [upload];
+      await fulfillJson(route, {
+        data: upload,
+        meta: {
+          bytes_read: upload.byte_size,
+          checksum_sha256_actual: upload.checksum_sha256,
+          column_mapping: {
+            address: "address",
+            bjd_code: "bjd_code",
+            category: "category",
+            default_category: "02020101",
+            default_marker_color: "P-01",
+            default_marker_icon: "marker",
+            default_place_kind: "offline_upload",
+            lat: "lat",
+            lon: "lon",
+            name: "name",
+            source_id: "source_id",
+          },
+          delimiter: ",",
+          duration_ms: 1,
+          encoding: "utf-8",
+          error_rows: 0,
+          headers: ["name", "lon", "lat"],
+          issues: [],
+          job_id: OFFLINE_VALIDATION_JOB_ID,
+          job_state: "done",
+          parsed_format: "csv",
+          rows_sampled: 1,
+          rows_total: 1,
+          sample_rows: [
+            { name: "Seoul Test POI", lon: "126.978", lat: "37.5665" },
+          ],
+          valid_rows: 1,
+        },
+      });
+      return;
+    }
+
+    if (request.method() === "GET" && url.pathname === `${uploadPath}/validation`) {
+      await fulfillJson(route, {
+        data: upload,
+        meta: {
+          bytes_read: upload.byte_size,
+          checksum_sha256_actual: upload.checksum_sha256,
+          column_mapping: {
+            lat: "lat",
+            lon: "lon",
+            name: "name",
+          },
+          delimiter: ",",
+          duration_ms: 1,
+          encoding: "utf-8",
+          error_rows: 0,
+          headers: ["name", "lon", "lat"],
+          issues: [],
+          job_id: OFFLINE_VALIDATION_JOB_ID,
+          job_state: "done",
+          parsed_format: "csv",
+          rows_sampled: 1,
+          rows_total: 1,
+          sample_rows: [
+            { name: "Seoul Test POI", lon: "126.978", lat: "37.5665" },
+          ],
+          valid_rows: 1,
+        },
+      });
+      return;
+    }
+
+    if (request.method() === "POST" && url.pathname === `${uploadPath}/load`) {
+      requests.load += 1;
+      upload = {
+        ...upload,
+        load_job_id: OFFLINE_LOAD_JOB_ID,
+        state: "loading",
+        updated_at: "2026-06-08T00:02:00.000Z",
+      };
+      uploads = [upload];
+      await fulfillJson(route, {
+        data: upload,
+        meta: {
+          dagster_run_id: OFFLINE_DAGSTER_RUN_ID,
+          dagster_status: "STARTED",
+          duration_ms: 1,
+        },
+      });
+      return;
+    }
+
+    throw new Error(`Unhandled offline upload route: ${request.method()} ${url}`);
+  });
+
+  return requests;
+}
+
+async function mockPoiCacheTargetMutations(page: Page) {
+  let targets: PoiCacheTargetRecord[] = [];
+  const requests = { delete: 0, nearby: 0, upsert: 0 };
+
+  await page.route("**/admin/poi-cache-targets**", async (route) => {
+    const request = route.request();
+    if (request.resourceType() === "document") {
+      await route.continue();
+      return;
+    }
+    const url = new URL(request.url());
+    const targetPath = "/admin/poi-cache-targets/tripmate/mock-target-1";
+
+    if (request.method() === "GET" && url.pathname === "/admin/poi-cache-targets") {
+      await fulfillJson(route, {
+        data: { items: targets, next_cursor: null },
+        meta: { count: targets.length, duration_ms: 1 },
+      });
+      return;
+    }
+
+    if (request.method() === "PUT" && url.pathname === targetPath) {
+      requests.upsert += 1;
+      expect(request.postDataJSON()).toMatchObject({
+        coord: { lon: 126.978, lat: 37.5665 },
+        name: "Mock target",
+        on_conflict: "move",
+        radius_km: 5,
+        scope_mode: "center_radius",
+      });
+      const target = makePoiTarget();
+      targets = [target];
+      await fulfillJson(route, {
+        data: target,
+        meta: { duration_ms: 1 },
+      });
+      return;
+    }
+
+    if (request.method() === "DELETE" && url.pathname === targetPath) {
+      requests.delete += 1;
+      targets = [];
+      await fulfillJson(route, {
+        data: makePoiTarget({
+          deleted_at: "2026-06-08T00:03:00.000Z",
+          update_enabled: false,
+          updated_at: "2026-06-08T00:03:00.000Z",
+        }),
+        meta: { duration_ms: 1 },
+      });
+      return;
+    }
+
+    throw new Error(`Unhandled POI cache target route: ${request.method()} ${url}`);
+  });
+
+  await page.route("**/features/nearby/by-target**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    requests.nearby += 1;
+    expect(url.searchParams.get("external_system")).toBe("tripmate");
+    expect(url.searchParams.get("target_key")).toBe("mock-target-1");
+    await fulfillJson(route, {
+      data: {
+        items: [
+          {
+            category: "02020101",
+            distance_m: 42.5,
+            feature_id: "mock-provider::mock-dataset::nearby-1",
+            kind: "place",
+            lat: 37.5667,
+            lon: 126.9782,
+            name: "Mock nearby feature",
+            status: "active",
+          },
+        ],
+        next_cursor: null,
+        target: {
+          external_system: "tripmate",
+          lat: 37.5665,
+          lon: 126.978,
+          target_key: "mock-target-1",
+        },
+      },
+      meta: { count: 1, duration_ms: 1 },
+    });
+  });
+
+  return requests;
+}
 
 /**
  * 신규 admin/ops 화면 smoke.
@@ -203,6 +591,27 @@ test.describe("admin/ops pages", () => {
     await expect(page.getByText("Nearby features")).toBeVisible();
   });
 
+  test("/admin/poi-cache-targets mutation flow", async ({ page }) => {
+    const requests = await mockPoiCacheTargetMutations(page);
+
+    await page.goto("/admin/poi-cache-targets");
+    await page.getByLabel("target key").fill("mock-target-1");
+    await page.getByLabel("target name").fill("Mock target");
+    await page.getByRole("button", { name: "저장" }).click();
+
+    await expect.poll(() => requests.upsert).toBe(1);
+    const targetRow = page.getByRole("row", { name: /Mock target/ });
+    await expect(targetRow).toBeVisible();
+
+    await targetRow.click();
+    await expect(page.getByText("Mock nearby feature")).toBeVisible();
+    await expect.poll(() => requests.nearby).toBeGreaterThanOrEqual(1);
+
+    await targetRow.getByRole("button", { name: "삭제" }).click();
+    await expect.poll(() => requests.delete).toBe(1);
+    await expect(page.getByRole("row", { name: /Mock target/ })).toHaveCount(0);
+  });
+
   test("/admin/offline-uploads", async ({ page }) => {
     await page.goto("/admin/offline-uploads");
 
@@ -231,5 +640,35 @@ test.describe("admin/ops pages", () => {
     ]) {
       await expect(page.getByRole("columnheader", { name: column })).toBeVisible();
     }
+  });
+
+  test("/admin/offline-uploads mutation flow", async ({ page }) => {
+    const requests = await mockOfflineUploadMutations(page);
+
+    await page.goto("/admin/offline-uploads");
+    await page.getByTestId("offline-upload-file-input").setInputFiles({
+      buffer: Buffer.from("name,lon,lat\nSeoul Test POI,126.978,37.5665\n"),
+      mimeType: "text/csv",
+      name: "offline.csv",
+    });
+    await page.getByRole("button", { name: "업로드" }).click();
+
+    await expect.poll(() => requests.create).toBe(1);
+    await expect(page.getByText("업로드 완료")).toBeVisible();
+    await expect(page.getByText("Seoul Test POI")).toBeVisible();
+    await expect.poll(() => requests.preview).toBeGreaterThanOrEqual(1);
+
+    await page.getByTestId("offline-upload-validate").click();
+    await expect.poll(() => requests.validate).toBe(1);
+    await expect(page.getByText("1 valid / 0 error")).toBeVisible();
+
+    await page.getByLabel("offline upload state").selectOption("validated");
+    const loadButton = page.getByTestId("offline-upload-load");
+    await expect(loadButton).toBeEnabled();
+    await loadButton.click();
+
+    await expect.poll(() => requests.load).toBe(1);
+    await expect(page.getByText("Dagster load 실행됨")).toBeVisible();
+    await expect(page.getByText("STARTED")).toBeVisible();
   });
 });
