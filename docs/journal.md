@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-08 (claude) — 리뷰 후속: enrichment-review 페이지네이션 UI (#299)
+
+**작업**: PR #299 리뷰(digitie) non-blocker 메모 — enrichment-review 프론트가 `page_size 100`까지만
+보고 cursor/next UI 없음. 대량 검토 시 다음 페이지 접근 필요.
+
+- `enrichment-review-client.tsx`: cursor stack 상태(2페이지부터 cursor 누적) + `page_size 50` +
+  `이전`/`다음` 버튼(다음은 응답 `next_cursor` 있을 때만 활성, 이전은 stack pop) + 페이지 인덱스/
+  건수 표시. status 필터 변경 시 1페이지로 reset. 기존 `useEnrichmentReviews`의 `cursor` 파라미터
+  활용(API 변경 없음).
+- e2e smoke(admin-ops.spec)에 `이전 페이지`/`다음 페이지` 버튼 가시성 assertion 추가.
+- **검증**(Windows Node): gen:types:check(drift 0) + eslint + tsc --noEmit + next build
+  (/admin/enrichment-review prerender) green.
+
 ## 2026-06-08 (claude) — 리뷰 후속: airkorea 측정소 composite key (#300/#301)
 
 **작업**: PR #300/#301 리뷰(digitie) actionable finding — 대기질 측정소 identity/측정값 join이

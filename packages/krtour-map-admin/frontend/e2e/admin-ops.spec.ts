@@ -162,6 +162,9 @@ test.describe("admin/ops pages", () => {
     ]) {
       await expect(page.getByRole("columnheader", { name: column })).toBeVisible();
     }
+    // cursor 페이지네이션 컨트롤(#299).
+    await expect(page.getByLabel("이전 페이지")).toBeVisible();
+    await expect(page.getByLabel("다음 페이지")).toBeVisible();
   });
 
   test("/admin/feature-update-requests", async ({ page }) => {
