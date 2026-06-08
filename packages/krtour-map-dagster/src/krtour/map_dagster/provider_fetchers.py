@@ -21,6 +21,10 @@ from collections.abc import AsyncIterator, Iterable, Iterator
 from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Final, cast
 
+from krtour.map.providers.opinet import (
+    OPINET_PROVIDER_NAME,
+    OPINET_STATION_DATASET_KEY,
+)
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
@@ -640,28 +644,47 @@ def _center_radius_to_bbox(
     return (lon - dlon, lat - dlat, lon + dlon, lat + dlat)
 
 
+# OpiNet POI-타깃 enumeration 대상 = **모든 외부 시스템**의 활성 target.
+# ``external_system``은 provider명이 아니라 외부 호출자(예: tripmate)다(POI 모델,
+# docs/poi-cache-update-targets.md) — provider명으로 재해석하면 실제 등록 target을
+# 전부 놓친다. active 정의는 scope_repo.resolve_cache_target_keys와 동일:
+# deleted_at IS NULL + update_enabled + refresh_policy<>'disabled'. 추가로 해당 target이
+# provider_overrides에서 opinet dataset을 targeted_policy='disabled'로 옵트아웃했으면 제외.
 _OPINET_POI_TARGETS_SQL: Final[str] = """
 SELECT lon, lat, radius_km
 FROM ops.poi_cache_targets
-WHERE external_system = 'opinet'
+WHERE deleted_at IS NULL
   AND update_enabled
-  AND deleted_at IS NULL
+  AND refresh_policy <> 'disabled'
+  AND COALESCE(
+        (provider_overrides -> :opinet_key) ->> 'targeted_policy', ''
+      ) <> 'disabled'
 """
+
+_OPINET_PROVIDER_OVERRIDE_KEY: Final[str] = (
+    f"{OPINET_PROVIDER_NAME}:{OPINET_STATION_DATASET_KEY}"
+)
+"""``provider_overrides`` JSONB 키(``<provider>:<dataset_key>``)."""
 
 
 def _opinet_poi_target_bboxes(
     settings: KrtourMapSettings,
 ) -> list[tuple[float, float, float, float]]:
-    """``ops.poi_cache_targets``의 opinet 활성 target(중심+반경) → bbox 목록.
+    """``ops.poi_cache_targets``의 활성 target(중심+반경) → bbox 목록(OpiNet enumeration).
 
-    fetcher는 sync라 ``settings.pg_dsn``(async driver)을 sync psycopg DSN으로 바꿔
-    짧게 조회한다(``+asyncpg`` → ``+psycopg``). DB 미가용은 호출 시점 오류로 표면화.
+    ``external_system``으로 필터하지 않는다(provider 아님). active target = deleted_at
+    없음 + update_enabled + refresh_policy<>'disabled'(scope_repo와 동일), opinet을
+    targeted_policy='disabled'로 옵트아웃한 target 제외. fetcher는 sync라
+    ``settings.pg_dsn``(async driver)을 sync psycopg DSN으로 바꿔 짧게 조회한다.
     """
     dsn = settings.pg_dsn.get_secret_value().replace("+asyncpg", "+psycopg")
     engine = create_engine(dsn)
     try:
         with engine.connect() as conn:
-            rows = conn.execute(text(_OPINET_POI_TARGETS_SQL)).all()
+            rows = conn.execute(
+                text(_OPINET_POI_TARGETS_SQL),
+                {"opinet_key": _OPINET_PROVIDER_OVERRIDE_KEY},
+            ).all()
     finally:
         engine.dispose()
     return [

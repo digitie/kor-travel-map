@@ -2,6 +2,25 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-08 (claude) — 리뷰 후속: opinet POI-타깃 scope 계약 수정 (#304)
+
+**작업**: PR #304 리뷰(codex) actionable finding — `_opinet_poi_target_bboxes`의 POI target
+선택 SQL이 잘못됨.
+
+- **P1**: `external_system='opinet'` 필터는 틀림. `external_system`은 provider명이 아니라 **외부
+  호출자**(tripmate 등, `docs/poi-cache-update-targets.md`). 이대로면 실제 TripMate 등록 target이
+  전부 무시되고 poi_cache_target 모드가 "활성 target 없음"으로 실패. → external_system 필터 제거,
+  **모든** 외부 시스템의 활성 target을 대상으로.
+- **P2**: active 정의 누락. `scope_repo.resolve_cache_target_keys`는 `deleted_at IS NULL` +
+  `update_enabled` + `refresh_policy<>'disabled'`를 모두 본다. 새 fetcher는 `update_enabled`만
+  봐서 disabled target도 enumeration에 들어감. → `refresh_policy<>'disabled'` 추가.
+- 추가: target이 `provider_overrides`에서 opinet dataset(`python-opinet-api:opinet_fuel_station_details`)
+  을 `targeted_policy='disabled'`로 옵트아웃했으면 제외(파라미터 바인딩 JSONB 조회).
+- 통합 테스트 회귀 보강: external_system=`tripmate`/`kakao`(둘 다 포함) + disabled-policy/update-off/
+  deleted/opinet-optout(모두 제외) seed로 계약 위반 방지.
+- **검증**: ruff + mypy --strict(map 85/dagster 13) + lint-imports + dagster 87 + unit+lint 966
+  (coverage 81%) + `test_opinet_poi_scope` 실 PostGIS green.
+
 ## 2026-06-08 (codex) — T-212b admin UI mutation e2e 완료
 
 **작업**: PR#291(Dagster 드릴다운)과 PR#277(admin UI 핵심 화면)을 머지한 뒤, T-212b 마지막
