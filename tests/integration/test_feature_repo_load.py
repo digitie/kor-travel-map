@@ -227,6 +227,31 @@ async def test_features_in_bbox_finds_loaded_feature(
     assert bundle.feature.feature_id not in {r["feature_id"] for r in rows_far}
 
 
+async def test_features_in_bbox_returns_stable_feature_id_subset(
+    migrated_session: AsyncSession,
+) -> None:
+    bundles = [await _bundle(f"FEST-BBOX-STABLE-{idx}") for idx in range(4)]
+    result = await feature_repo.load_bundles(migrated_session, bundles)
+    await migrated_session.flush()
+    assert result.bundles_total == 4
+
+    lon = float(bundles[0].feature.coord.lon)
+    lat = float(bundles[0].feature.coord.lat)
+    params = {
+        "min_lon": lon - 0.1,
+        "min_lat": lat - 0.1,
+        "max_lon": lon + 0.1,
+        "max_lat": lat + 0.1,
+        "limit": 2,
+    }
+
+    first = await feature_repo.features_in_bbox(migrated_session, **params)
+    second = await feature_repo.features_in_bbox(migrated_session, **params)
+    expected = sorted(bundle.feature.feature_id for bundle in bundles)[:2]
+    assert [row["feature_id"] for row in first] == expected
+    assert [row["feature_id"] for row in second] == expected
+
+
 async def test_get_feature_rows_by_ids_and_search_features(
     migrated_session: AsyncSession,
 ) -> None:

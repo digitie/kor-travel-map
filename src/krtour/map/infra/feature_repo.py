@@ -266,6 +266,7 @@ WHERE (CAST(:kinds AS text[]) IS NULL OR kind = ANY(CAST(:kinds AS text[])))
     CAST(:categories AS text[]) IS NULL
     OR category = ANY(CAST(:categories AS text[]))
   )
+ORDER BY feature_id ASC
 LIMIT :limit
 """
 

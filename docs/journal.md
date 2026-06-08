@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-08 (codex) — T-212d 사후 리뷰 반영
+
+**작업**: PR #313 머지 후 PR issue comment로 달린 T-212d 사후 상세리뷰를 확인하고 후속 보강.
+
+- `/features/in-bounds`: 공간 후보 CTE는 유지하면서 `LIMIT` subset 안정성을 위해
+  `feature_id ASC` 결정적 정렬을 복구.
+- `test_t212d_perf_explain.py`: 대표 bbox/admin sort=name 경로를 `enable_seqscan=on` 상태로
+  검증해 planner가 base table `Seq Scan`을 선택하지 않는지 확인하고, sort=name 인덱스
+  (`idx_features_lower_name_keyset`) EXPLAIN 케이스 추가.
+- dedup/enrichment review cursor는 첫 두 page disjoint를 넘어 전체 순회 결과가 DB 정렬셋과
+  1:1로 일치하는지 검증.
+- 성능 문서/리포트에 `feature_files` 임시 DDL, Alembic 일반 `CREATE INDEX` 잠금 유의 사항,
+  `idx_import_jobs_state` 대량화 재검토 포인트를 명시.
+
 ## 2026-06-08 (codex) — T-212d seeded PostGIS 성능 baseline
 
 **작업**: 사용자 지시대로 main 재동기화 후 T-212d DB/API 성능 baseline과 hot path 튜닝을 진행.

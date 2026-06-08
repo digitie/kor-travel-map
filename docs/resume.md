@@ -1,5 +1,21 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-08 Codex 작업 메모 — T-212d 사후 리뷰 반영
+
+PR #313 머지 후 달린 사후 상세리뷰를 확인하고 T-212d 후속 보강을 진행했다. GitHub
+review thread는 없었지만 PR issue comment에 조치 가능한 리뷰가 있어 이를 기준으로 반영했다.
+
+- `/features/in-bounds`: 공간 후보 CTE는 유지하되 `LIMIT` subset 안정성을 위해 후보 materialize
+  뒤 `feature_id ASC` 정렬을 복구했다.
+- T-212d EXPLAIN 테스트: 기존 `enable_seqscan=off` 인덱스 적격성 검증에 더해 대표 bbox/admin
+  sort=name 경로는 seqscan hint 없이 planner가 base table `Seq Scan`을 고르지 않는지 확인한다.
+- `/admin/features sort=name`은 `idx_features_lower_name_keyset` 사용을 별도 검증한다.
+- dedup/enrichment review cursor는 끝까지 순회해 전체 정렬셋과 1:1로 맞는지 검증한다.
+- 리포트/성능 문서에 `feature_files` 임시 DDL, 일반 index DDL 잠금 유의 사항,
+  `idx_import_jobs_state` 대량화 재검토 포인트를 명시했다.
+
+**다음 한 작업 후보**: **T-212e 실데이터 full reload + offline upload 실데이터 검증 + 최종 리포트**.
+
 ## 2026-06-08 Codex 작업 메모 — T-212d seeded PostGIS 성능 baseline 완료
 
 사용자 지시대로 main을 다시 동기화한 뒤 T-212d 성능 baseline/tuning을 진행했다. 로컬 live

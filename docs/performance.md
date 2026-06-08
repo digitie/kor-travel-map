@@ -589,8 +589,8 @@ PostGIS/testcontainers baseline으로 고정했다. 로컬 live DB 확인 결과
 ### 14.2 쿼리 패턴 변경
 
 - `/features/in-bounds`: bbox 조건을 `spatial_candidates AS MATERIALIZED` CTE에 먼저
-  적용해 `idx_features_coord_gist` 사용을 고정한다. API 응답 순서 보장은 없으므로
-  `ORDER BY feature_id`를 제거했다.
+  적용해 `idx_features_coord_gist` 사용을 고정한다. `LIMIT`으로 잘리는 subset이 호출마다
+  흔들리지 않도록 후보 materialize 뒤 `feature_id ASC`로 결정적 정렬을 유지한다.
 - `/features/search`: q 검색 경로는 `name % :q` 후보를 먼저 materialize해 기존
   `idx_features_name_trgm` full GIN을 탄 뒤, `deleted_at`/bbox/kind/category 필터와
   score keyset을 적용한다. count query도 같은 q 전용 CTE를 사용한다.
@@ -603,12 +603,24 @@ PostGIS/testcontainers baseline으로 고정했다. 로컬 live DB 확인 결과
 
 `tests/integration/test_t212d_perf_explain.py`는 3,200 feature, source/link, import job,
 consistency report/violation, dedup/enrichment review queue를 live-like 분포로 seed한다.
-EXPLAIN JSON에서 다음 hot path가 기대 인덱스를 쓰는지 검증한다.
+EXPLAIN JSON에서 다음 hot path가 기대 인덱스를 쓰는지 검증한다. 기본 케이스는
+`enable_seqscan=off`로 인덱스 적격성을 고정하고, 대표 hot path는 seqscan hint 없이도
+planner가 base table `Seq Scan`을 선택하지 않는지 별도 가드한다.
 
 - `/features/nearby`, `/features/in-bounds`, `/features/search`
 - `/admin/features`, `/ops/import-jobs`, consistency report/issue 목록
 - dedup refresh, dedup/enrichment review list
 - consistency F4/F6/F7/F8
+- `/admin/features` `sort=name`의 `idx_features_lower_name_keyset`
+- dedup/enrichment review cursor 전체 순회 gap/중복 없음
+
+제약: `feature.feature_files`는 아직 Alembic 테이블이 없으므로 F8 테스트는 임시 DDL로
+실행 계획 형태만 확인한다. `0020`의 `CREATE INDEX`는 일반 Alembic transaction DDL이며,
+T-212e empty reload 전제에서는 무해하지만 데이터가 찬 운영 DB에 직접 적용하면 쓰기 잠금을
+동반할 수 있다. `idx_import_jobs_state(state, created_at, queue_sequence)`는 FIFO queue
+claim에 맞춘 인덱스이고 list keyset의 `job_id` tie-breaker와 완전히 같지는 않으므로,
+import job 대량화 뒤 `idx_import_jobs_state_created_keyset(state, created_at DESC, job_id DESC)`
+필요성을 다시 EXPLAIN으로 확인한다.
 
 ## 15. 운영 체크리스트 (Sprint 5 진입 전)
 

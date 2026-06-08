@@ -1231,6 +1231,8 @@ lint-imports/pytest/coverage, frontend type-check/e2e). 실데이터 검증은 T
         provider/source/ops/review live-like seed로 `/features/search`, `/features/in-bounds`,
         `/features/nearby`, `/admin/features`, `/ops/import-jobs`, consistency F4/F6/F7/F8,
         dedup/enrichment review list EXPLAIN 인덱스 사용을 검증한다.
+      - 사후 리뷰 보강으로 `/features/in-bounds` `LIMIT` subset 안정성, seqscan hint 없는
+        대표 planner 가드, admin sort=name EXPLAIN, review cursor 전체 순회 완전성을 추가했다.
       - 상세 리포트: `docs/reports/t-212d-perf-baseline-2026-06-08.md`.
 - [ ] T-212e — 실데이터 full reload + offline upload 실데이터 검증 + 최종 리포트.
       DB를 비운 뒤 처음부터 다시 로드하고, provider 실데이터와 offline upload
