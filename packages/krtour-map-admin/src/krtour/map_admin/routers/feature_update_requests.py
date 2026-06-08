@@ -1,4 +1,4 @@
-"""Feature update request 운영/TripMate 라우터 (ADR-045 T-207a).
+"""Feature update request 운영 라우터 (ADR-045 T-207a).
 
 OpenAPI로 들어온 지역/provider 갱신 요청을 ``ops.feature_update_requests`` 큐에
 저장하고, 진행 상태 조회/취소/재요청을 제공한다. 실제 provider 실행은 Dagster
@@ -44,7 +44,6 @@ from krtour.map_admin.db import get_session
 
 __all__ = [
     "router",
-    "tripmate_router",
     "FeatureUpdateRequestCreateRequest",
     "FeatureUpdateRequestRecord",
     "FeatureUpdateRequestCreateResponse",
@@ -53,15 +52,10 @@ __all__ = [
 
 
 ADMIN_FEATURE_UPDATE_REQUESTS_PREFIX = "/admin/feature-update-requests"
-TRIPMATE_FEATURE_UPDATE_REQUESTS_PREFIX = "/tripmate/feature-update-requests"
 
 router = APIRouter(
     prefix=ADMIN_FEATURE_UPDATE_REQUESTS_PREFIX,
     tags=["admin-update-requests"],
-)
-tripmate_router = APIRouter(
-    prefix=TRIPMATE_FEATURE_UPDATE_REQUESTS_PREFIX,
-    tags=["tripmate-update-requests"],
 )
 
 FeatureUpdateState = Literal["queued", "running", "done", "failed", "cancelled"]
@@ -574,30 +568,6 @@ async def create_feature_update_request(
     )
 
 
-@tripmate_router.post(
-    "",
-    response_model=FeatureUpdateRequestCreateResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="TripMate feature update request 생성 또는 dry-run",
-    responses={
-        409: {
-            "description": (
-                "run_mode=now 요청의 동일 scope advisory lock 경합"
-            )
-        }
-    },
-)
-async def create_tripmate_feature_update_request(
-    body: FeatureUpdateRequestCreateRequest,
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> FeatureUpdateRequestCreateResponse:
-    return await _create_feature_update_request_response(
-        body,
-        session,
-        status_url_prefix=TRIPMATE_FEATURE_UPDATE_REQUESTS_PREFIX,
-    )
-
-
 @router.get(
     "",
     response_model=FeatureUpdateRequestListResponse,
@@ -660,34 +630,6 @@ async def get_feature_update_request(
         )
     return FeatureUpdateRequestDetailResponse(
         data=_record_from_request(row),
-        meta=FeatureUpdateRequestMeta(
-            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
-        ),
-    )
-
-
-@tripmate_router.get(
-    "/{request_id}",
-    response_model=FeatureUpdateRequestDetailResponse,
-    summary="TripMate feature update request 단건 조회",
-    responses={404: {"description": "request_id 없음"}},
-)
-async def get_tripmate_feature_update_request(
-    request_id: str,
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> FeatureUpdateRequestDetailResponse:
-    started_at = perf_counter()
-    row = await get_update_request(session, request_id)
-    if row is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"feature update request 없음: {request_id!r}",
-        )
-    return FeatureUpdateRequestDetailResponse(
-        data=_record_from_request(
-            row,
-            status_url_prefix=TRIPMATE_FEATURE_UPDATE_REQUESTS_PREFIX,
-        ),
         meta=FeatureUpdateRequestMeta(
             duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
         ),

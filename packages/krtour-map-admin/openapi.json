@@ -1,6 +1,494 @@
 {
   "components": {
     "schemas": {
+      "AdminFeatureChangeData": {
+        "additionalProperties": false,
+        "description": "단건 feature change response data.",
+        "properties": {
+          "request": {
+            "$ref": "#/components/schemas/AdminFeatureChangeRequestRecord"
+          }
+        },
+        "required": [
+          "request"
+        ],
+        "title": "AdminFeatureChangeData",
+        "type": "object"
+      },
+      "AdminFeatureChangeListData": {
+        "additionalProperties": false,
+        "description": "feature change request list data.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminFeatureChangeRequestRecord"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "AdminFeatureChangeListData",
+        "type": "object"
+      },
+      "AdminFeatureChangeListMeta": {
+        "additionalProperties": false,
+        "description": "feature change request list meta.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "count",
+          "limit",
+          "duration_ms"
+        ],
+        "title": "AdminFeatureChangeListMeta",
+        "type": "object"
+      },
+      "AdminFeatureChangeListResponse": {
+        "additionalProperties": false,
+        "description": "``GET /admin/features/change-requests`` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AdminFeatureChangeListData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/AdminFeatureChangeListMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "AdminFeatureChangeListResponse",
+        "type": "object"
+      },
+      "AdminFeatureChangeRequestRecord": {
+        "additionalProperties": false,
+        "description": "feature add/update/delete request 응답 data.",
+        "properties": {
+          "action": {
+            "enum": [
+              "add",
+              "update",
+              "delete"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "applied_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applied At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          },
+          "requested_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested By"
+          },
+          "review_mode": {
+            "enum": [
+              "require_review",
+              "immediate"
+            ],
+            "title": "Review Mode",
+            "type": "string"
+          },
+          "reviewed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed At"
+          },
+          "reviewed_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed By"
+          },
+          "state": {
+            "enum": [
+              "pending",
+              "applied",
+              "rejected"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "feature_id",
+          "action",
+          "state",
+          "review_mode",
+          "payload",
+          "created_at"
+        ],
+        "title": "AdminFeatureChangeRequestRecord",
+        "type": "object"
+      },
+      "AdminFeatureChangeResponse": {
+        "additionalProperties": false,
+        "description": "feature add/update/delete/approve/reject 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AdminFeatureChangeData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/AdminFeatureWriteMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "AdminFeatureChangeResponse",
+        "type": "object"
+      },
+      "AdminFeatureCoordInput": {
+        "additionalProperties": false,
+        "description": "Feature mutation 좌표 입력.",
+        "properties": {
+          "lat": {
+            "maximum": 39.5,
+            "minimum": 33.0,
+            "title": "Lat",
+            "type": "number"
+          },
+          "lon": {
+            "maximum": 132.0,
+            "minimum": 124.0,
+            "title": "Lon",
+            "type": "number"
+          }
+        },
+        "required": [
+          "lon",
+          "lat"
+        ],
+        "title": "AdminFeatureCoordInput",
+        "type": "object"
+      },
+      "AdminFeatureCreateRequest": {
+        "additionalProperties": false,
+        "description": "``POST /admin/features`` body.",
+        "properties": {
+          "address": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address"
+          },
+          "admin_dong_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Admin Dong Code"
+          },
+          "category": {
+            "pattern": "^\\d{8}$",
+            "title": "Category",
+            "type": "string"
+          },
+          "coord": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdminFeatureCoordInput"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "coord_precision_digits": {
+            "anyOf": [
+              {
+                "maximum": 8.0,
+                "minimum": 3.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coord Precision Digits"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "feature_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "기존 provider feature와 겹치는 사용자 version을 만들 때 명시한다. 미지정 시 user_request 자연키로 새 feature_id를 생성한다.",
+            "title": "Feature Id"
+          },
+          "geom": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Geom"
+          },
+          "idempotency_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "feature_id 미지정 시 source_natural_key로 쓰는 caller-provided key.",
+            "title": "Idempotency Key"
+          },
+          "kind": {
+            "enum": [
+              "place",
+              "event"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "legal_dong_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legal Dong Code"
+          },
+          "marker_color": {
+            "pattern": "^P-(0[1-9]|1[0-6])$",
+            "title": "Marker Color",
+            "type": "string"
+          },
+          "marker_icon": {
+            "minLength": 1,
+            "title": "Marker Icon",
+            "type": "string"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "operator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operator"
+          },
+          "parent_feature_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Feature Id"
+          },
+          "reason": {
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "road_address_management_no": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Road Address Management No"
+          },
+          "road_name_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Road Name Code"
+          },
+          "sibling_group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sibling Group Id"
+          },
+          "sido_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sido Code"
+          },
+          "sigungu_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sigungu Code"
+          },
+          "status": {
+            "default": "active",
+            "enum": [
+              "draft",
+              "active",
+              "inactive",
+              "hidden"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "urls": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Urls"
+          }
+        },
+        "required": [
+          "name",
+          "category",
+          "marker_icon",
+          "marker_color",
+          "kind",
+          "reason"
+        ],
+        "title": "AdminFeatureCreateRequest",
+        "type": "object"
+      },
       "AdminFeatureDeactivateData": {
         "additionalProperties": false,
         "description": "Feature deactivate 결과 data.",
@@ -89,6 +577,33 @@
           "meta"
         ],
         "title": "AdminFeatureDeactivateResponse",
+        "type": "object"
+      },
+      "AdminFeatureDeleteRequest": {
+        "additionalProperties": false,
+        "description": "``DELETE /admin/features/{feature_id}`` body.",
+        "properties": {
+          "operator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operator"
+          },
+          "reason": {
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "AdminFeatureDeleteRequest",
         "type": "object"
       },
       "AdminFeatureIssueRecord": {
@@ -217,6 +732,239 @@
         "title": "AdminFeatureOverrideRecord",
         "type": "object"
       },
+      "AdminFeaturePatchRequest": {
+        "additionalProperties": false,
+        "description": "``PATCH /admin/features/{feature_id}`` body.",
+        "properties": {
+          "address": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address"
+          },
+          "admin_dong_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Admin Dong Code"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "pattern": "^\\d{8}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "coord": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdminFeatureCoordInput"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "coord_precision_digits": {
+            "anyOf": [
+              {
+                "maximum": 8.0,
+                "minimum": 3.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coord Precision Digits"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "geom": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Geom"
+          },
+          "legal_dong_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legal Dong Code"
+          },
+          "marker_color": {
+            "anyOf": [
+              {
+                "pattern": "^P-(0[1-9]|1[0-6])$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Marker Color"
+          },
+          "marker_icon": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Marker Icon"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "operator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operator"
+          },
+          "parent_feature_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Feature Id"
+          },
+          "reason": {
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "road_address_management_no": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Road Address Management No"
+          },
+          "road_name_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Road Name Code"
+          },
+          "sibling_group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sibling Group Id"
+          },
+          "sido_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sido Code"
+          },
+          "sigungu_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sigungu Code"
+          },
+          "urls": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Urls"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "AdminFeaturePatchRequest",
+        "type": "object"
+      },
       "AdminFeatureRecord": {
         "additionalProperties": false,
         "description": "``GET /admin/features`` item.",
@@ -324,6 +1072,36 @@
           "updated_at"
         ],
         "title": "AdminFeatureRecord",
+        "type": "object"
+      },
+      "AdminFeatureReviewActionRequest": {
+        "additionalProperties": false,
+        "description": "approve/reject body.",
+        "properties": {
+          "operator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operator"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "title": "AdminFeatureReviewActionRequest",
         "type": "object"
       },
       "AdminFeatureWriteMeta": {
@@ -9241,6 +10019,381 @@
         "tags": [
           "admin-features"
         ]
+      },
+      "post": {
+        "operationId": "create_feature_route_admin_features_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminFeatureCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminFeatureChangeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Feature Route",
+        "tags": [
+          "admin-features"
+        ]
+      }
+    },
+    "/admin/features/change-requests": {
+      "get": {
+        "operationId": "list_feature_change_request_route_admin_features_change_requests_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": [
+                      "pending",
+                      "applied",
+                      "rejected"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "action",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": [
+                      "add",
+                      "update",
+                      "delete"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Action"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminFeatureChangeListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Feature Change Request Route",
+        "tags": [
+          "admin-features"
+        ]
+      }
+    },
+    "/admin/features/change-requests/{request_id}/approve": {
+      "post": {
+        "operationId": "approve_feature_change_request_route_admin_features_change_requests__request_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminFeatureReviewActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminFeatureChangeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "request 없음"
+          },
+          "409": {
+            "description": "승인 불가"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Approve Feature Change Request Route",
+        "tags": [
+          "admin-features"
+        ]
+      }
+    },
+    "/admin/features/change-requests/{request_id}/reject": {
+      "post": {
+        "operationId": "reject_feature_change_request_route_admin_features_change_requests__request_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminFeatureReviewActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminFeatureChangeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "request 없음"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reject Feature Change Request Route",
+        "tags": [
+          "admin-features"
+        ]
+      }
+    },
+    "/admin/features/{feature_id}": {
+      "delete": {
+        "operationId": "delete_feature_route_admin_features__feature_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature_id",
+            "required": true,
+            "schema": {
+              "title": "Feature Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminFeatureDeleteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminFeatureChangeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "feature 없음"
+          },
+          "409": {
+            "description": "삭제 불가"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Feature Route",
+        "tags": [
+          "admin-features"
+        ]
+      },
+      "patch": {
+        "operationId": "patch_feature_route_admin_features__feature_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature_id",
+            "required": true,
+            "schema": {
+              "title": "Feature Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminFeaturePatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminFeatureChangeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "feature 없음"
+          },
+          "409": {
+            "description": "변경 불가"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Feature Route",
+        "tags": [
+          "admin-features"
+        ]
       }
     },
     "/admin/features/{feature_id}/deactivate": {
@@ -12625,105 +13778,6 @@
         "summary": "provider 데이터 신선도(last-sync)",
         "tags": [
           "providers"
-        ]
-      }
-    },
-    "/tripmate/feature-update-requests": {
-      "post": {
-        "operationId": "create_tripmate_feature_update_request_tripmate_feature_update_requests_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FeatureUpdateRequestCreateRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FeatureUpdateRequestCreateResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "409": {
-            "description": "run_mode=now 요청의 동일 scope advisory lock 경합"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "ServiceToken": []
-          }
-        ],
-        "summary": "TripMate feature update request 생성 또는 dry-run",
-        "tags": [
-          "tripmate-update-requests"
-        ]
-      }
-    },
-    "/tripmate/feature-update-requests/{request_id}": {
-      "get": {
-        "operationId": "get_tripmate_feature_update_request_tripmate_feature_update_requests__request_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "request_id",
-            "required": true,
-            "schema": {
-              "title": "Request Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FeatureUpdateRequestDetailResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "404": {
-            "description": "request_id 없음"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "ServiceToken": []
-          }
-        ],
-        "summary": "TripMate feature update request 단건 조회",
-        "tags": [
-          "tripmate-update-requests"
         ]
       }
     },

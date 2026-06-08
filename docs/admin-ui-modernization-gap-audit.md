@@ -37,7 +37,7 @@ T-211a의 완료 기준은 다음 두 가지다.
 | UI route | T-211b 구현 가능성 | 사용할 API/hook | 남은 backend gap |
 |----------|-------------------|-----------------|------------------|
 | `/` | 가능 | `useOpsMetrics`, `useImportJobs`, `useDedupReviews`, `useDagsterSummary` | `/ops/error-logs`는 아직 없음. 홈의 provider 실패는 metrics/import job 실패 중심으로 표시 |
-| `/features` | 가능 | `useAdminFeatures`, `useFeaturesInBbox`, `useFeatureDetail`, `useDeactivateAdminFeatureMutation` | 수동 feature 생성/영구 삭제는 후속 audit log/API 필요 |
+| `/features` | 가능 | `useAdminFeatures`, `useFeaturesInBbox`, `useFeatureDetail`, `useDeactivateAdminFeatureMutation`, feature change request mutation hooks(T-215b) | place/event 추가·수정·soft delete backend는 T-215a 구현. admin UI queue 화면과 hard delete/audit는 후속 |
 | `/features/[feature_id]` | 부분 가능 | `useFeatureDetail` | 일반 좌표 기준 `/features/nearby` endpoint 없음. target 기반 주변 조회는 `/features/nearby/by-target`만 사용 가능 |
 | `/ops/import-jobs` | 가능 | `useImportJobs`, `useImportJob` | job cancel, events, SSE stream endpoint 없음 |
 | `/admin/dedup-review` | 가능 | `useDedupReviews`, `useDedupDecisionMutation` | decision 이유/작성자 UI validation만 프론트에서 보강 |

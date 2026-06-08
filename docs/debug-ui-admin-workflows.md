@@ -461,52 +461,43 @@ status/deleted_at을 덮지 않는다.
 
 응답에는 변경 전/후 status와 override 생성 여부를 포함한다.
 
-### 9.2 영구 삭제
+### 9.2 사용자 요청 soft delete
 
 #### `DELETE /admin/features/{feature_id}`
 
-영구 삭제는 되돌리기 어렵다. UI는 두 단계 확인을 요구한다.
+`DELETE /admin/features/{feature_id}`는 영구 삭제가 아니라 사용자 요청 soft delete다.
+대상 kind는 `place`, `event`만 허용한다. 처리 모드는
+`KRTOUR_MAP_ADMIN_FEATURE_CHANGE_REVIEW_MODE`에 따라 `require_review`면 pending,
+`immediate`면 같은 transaction에서 applied가 된다.
 
-구현 상태(T-207c): 미구현. 삭제 이력/audit event가 먼저 필요하므로
-`ops.admin_audit_log` 설계 후 별도 PR에서 구현한다.
+구현 상태(T-215a): backend 구현 완료. admin UI queue 화면과 approve/reject workflow는
+T-215b 후속이다. hard delete는 별도 audit log 설계 후 후속으로만 다룬다.
 
-1. 확인 모달에서 영향 범위 표시:
-   - source_links cascade 수
-   - feature_files 수
-   - weather/price/detail rows 수
-   - dedup queue references 수
-2. `feature_id` 전체를 입력해야 삭제 버튼 활성화.
-
-Query:
-
-| 이름 | 타입 | 기본값 | 설명 |
-|------|------|--------|------|
-| `dry_run` | boolean | `true` | true면 영향 범위만 반환 |
+UI는 실수 방지를 위해 삭제 사유와 `feature_id` 확인을 요구한다. `require_review` 모드에서는
+삭제 요청이 승인되기 전까지 지도/목록 effective row는 바뀌지 않는다.
 
 요청 body:
 
 ```json
 {
   "operator": "local-admin",
-  "reason": "잘못 등록된 테스트 데이터 영구 제거",
-  "confirm_feature_id": "f_1111010100_p_..."
+  "reason": "사용자 삭제 요청 승인"
 }
 ```
 
 처리 규칙:
 
-- `dry_run=true`가 기본이다. frontend는 dry-run 결과를 먼저 보여준 뒤 실제 삭제를
-  다시 호출한다.
-- active feature 삭제는 extra confirmation을 요구한다. 가능하면 먼저 inactive로
-  전환하도록 안내한다.
-- 실제 삭제는 `feature.features` row delete를 기준으로 하며 FK cascade 정책을 따른다.
-- `provider_sync.source_records`는 삭제하지 않는다. 원천 row 보존이 필요하다.
-- 삭제 이력은 `ops.feature_merge_history`가 아니라 별도 audit/event log가 필요하다.
-  구현 전 `ops.admin_audit_log` 테이블 추가를 검토한다.
+- 요청은 `ops.feature_change_requests(action='delete')`에 저장된다.
+- 적용 시 `feature.features.status='deleted'`, `deleted_at`, `user_deleted_at`,
+  `user_deleted_by`, `user_change_request_id`, `user_change_reason`을 기록한다.
+- `feature.feature_versions(version=1, origin='user_request', change_kind='delete')`에
+  삭제 후 effective snapshot을 남긴다.
+- provider 재적재와 snapshot 누락 정리는 이 row를 되살리지 않는다.
+- `provider_sync.source_records`, `source_links`, `feature_files`는 hard delete하지 않는다.
 
 스키마 gap:
 
-- 현재 data model에는 일반 admin audit log가 없다. destructive action 구현 전
+- hard delete용 일반 admin audit log는 아직 없다. destructive action 구현 전
   `ops.admin_audit_log` 추가가 권장된다.
 
 ## 10. Feature 상세

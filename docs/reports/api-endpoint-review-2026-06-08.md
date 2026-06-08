@@ -8,6 +8,12 @@
 > `openapi.user.json`(user/TripMate, **13 paths**). 두 spec 모두 `info.version = 0.2.0-dev`.
 > 소비 측 = `tripmate/apps/api/app/etl_bridge/krtour_map.py`(`KrtourMapClient` Protocol).
 
+> **후속 결정(2026-06-08)**: 본 리포트는 당시 spec 기준으로
+> `/tripmate/feature-update-requests*`를 TripMate 외부 계약으로 분류했지만, 이후 사용자
+> 결정으로 feature update request는 **admin 영역으로 이동**한다. 정본 정리 문서는
+> `docs/tripmate-rest-api.md`이며, 목표 경로는 `/admin/feature-update-requests*`다.
+> TripMate 사용자 제안 큐는 TripMate app DB가 소유한다.
+
 ---
 
 ## 1. 엔드포인트 인벤토리 (namespace별)

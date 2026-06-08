@@ -195,11 +195,81 @@ export interface paths {
         /** List Features */
         get: operations["list_features_admin_features_get"];
         put?: never;
+        /** Create Feature Route */
+        post: operations["create_feature_route_admin_features_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/features/change-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Feature Change Request Route */
+        get: operations["list_feature_change_request_route_admin_features_change_requests_get"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/admin/features/change-requests/{request_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve Feature Change Request Route */
+        post: operations["approve_feature_change_request_route_admin_features_change_requests__request_id__approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/features/change-requests/{request_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject Feature Change Request Route */
+        post: operations["reject_feature_change_request_route_admin_features_change_requests__request_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/features/{feature_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Feature Route */
+        delete: operations["delete_feature_route_admin_features__feature_id__delete"];
+        options?: never;
+        head?: never;
+        /** Patch Feature Route */
+        patch: operations["patch_feature_route_admin_features__feature_id__patch"];
         trace?: never;
     };
     "/admin/features/{feature_id}/deactivate": {
@@ -956,40 +1026,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/tripmate/feature-update-requests": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** TripMate feature update request 생성 또는 dry-run */
-        post: operations["create_tripmate_feature_update_request_tripmate_feature_update_requests_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/tripmate/feature-update-requests/{request_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** TripMate feature update request 단건 조회 */
-        get: operations["get_tripmate_feature_update_request_tripmate_feature_update_requests__request_id__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/tripmate/features/batch": {
         parameters: {
             query?: never;
@@ -1032,6 +1068,175 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * AdminFeatureChangeData
+         * @description 단건 feature change response data.
+         */
+        AdminFeatureChangeData: {
+            request: components["schemas"]["AdminFeatureChangeRequestRecord"];
+        };
+        /**
+         * AdminFeatureChangeListData
+         * @description feature change request list data.
+         */
+        AdminFeatureChangeListData: {
+            /** Items */
+            items: components["schemas"]["AdminFeatureChangeRequestRecord"][];
+        };
+        /**
+         * AdminFeatureChangeListMeta
+         * @description feature change request list meta.
+         */
+        AdminFeatureChangeListMeta: {
+            /** Count */
+            count: number;
+            /** Duration Ms */
+            duration_ms: number;
+            /** Limit */
+            limit: number;
+        };
+        /**
+         * AdminFeatureChangeListResponse
+         * @description ``GET /admin/features/change-requests`` 응답.
+         */
+        AdminFeatureChangeListResponse: {
+            data: components["schemas"]["AdminFeatureChangeListData"];
+            meta: components["schemas"]["AdminFeatureChangeListMeta"];
+        };
+        /**
+         * AdminFeatureChangeRequestRecord
+         * @description feature add/update/delete request 응답 data.
+         */
+        AdminFeatureChangeRequestRecord: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "add" | "update" | "delete";
+            /** Applied At */
+            applied_at?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Feature Id */
+            feature_id: string;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+            /** Reason */
+            reason?: string | null;
+            /** Request Id */
+            request_id: string;
+            /** Requested By */
+            requested_by?: string | null;
+            /**
+             * Review Mode
+             * @enum {string}
+             */
+            review_mode: "require_review" | "immediate";
+            /** Reviewed At */
+            reviewed_at?: string | null;
+            /** Reviewed By */
+            reviewed_by?: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "pending" | "applied" | "rejected";
+        };
+        /**
+         * AdminFeatureChangeResponse
+         * @description feature add/update/delete/approve/reject 응답.
+         */
+        AdminFeatureChangeResponse: {
+            data: components["schemas"]["AdminFeatureChangeData"];
+            meta: components["schemas"]["AdminFeatureWriteMeta"];
+        };
+        /**
+         * AdminFeatureCoordInput
+         * @description Feature mutation 좌표 입력.
+         */
+        AdminFeatureCoordInput: {
+            /** Lat */
+            lat: number;
+            /** Lon */
+            lon: number;
+        };
+        /**
+         * AdminFeatureCreateRequest
+         * @description ``POST /admin/features`` body.
+         */
+        AdminFeatureCreateRequest: {
+            /** Address */
+            address?: {
+                [key: string]: unknown;
+            } | null;
+            /** Admin Dong Code */
+            admin_dong_code?: string | null;
+            /** Category */
+            category: string;
+            coord?: components["schemas"]["AdminFeatureCoordInput"] | null;
+            /** Coord Precision Digits */
+            coord_precision_digits?: number | null;
+            /** Detail */
+            detail?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Feature Id
+             * @description 기존 provider feature와 겹치는 사용자 version을 만들 때 명시한다. 미지정 시 user_request 자연키로 새 feature_id를 생성한다.
+             */
+            feature_id?: string | null;
+            /** Geom */
+            geom?: string | null;
+            /**
+             * Idempotency Key
+             * @description feature_id 미지정 시 source_natural_key로 쓰는 caller-provided key.
+             */
+            idempotency_key?: string | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "place" | "event";
+            /** Legal Dong Code */
+            legal_dong_code?: string | null;
+            /** Marker Color */
+            marker_color: string;
+            /** Marker Icon */
+            marker_icon: string;
+            /** Name */
+            name: string;
+            /** Operator */
+            operator?: string | null;
+            /** Parent Feature Id */
+            parent_feature_id?: string | null;
+            /** Reason */
+            reason: string;
+            /** Road Address Management No */
+            road_address_management_no?: string | null;
+            /** Road Name Code */
+            road_name_code?: string | null;
+            /** Sibling Group Id */
+            sibling_group_id?: string | null;
+            /** Sido Code */
+            sido_code?: string | null;
+            /** Sigungu Code */
+            sigungu_code?: string | null;
+            /**
+             * Status
+             * @default active
+             * @enum {string}
+             */
+            status: "draft" | "active" | "inactive" | "hidden";
+            /** Urls */
+            urls?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /**
          * AdminFeatureDeactivateData
          * @description Feature deactivate 결과 data.
          */
@@ -1068,6 +1273,16 @@ export interface components {
         AdminFeatureDeactivateResponse: {
             data: components["schemas"]["AdminFeatureDeactivateData"];
             meta: components["schemas"]["AdminFeatureWriteMeta"];
+        };
+        /**
+         * AdminFeatureDeleteRequest
+         * @description ``DELETE /admin/features/{feature_id}`` body.
+         */
+        AdminFeatureDeleteRequest: {
+            /** Operator */
+            operator?: string | null;
+            /** Reason */
+            reason: string;
         };
         /**
          * AdminFeatureIssueRecord
@@ -1111,6 +1326,57 @@ export interface components {
             reason?: string | null;
         };
         /**
+         * AdminFeaturePatchRequest
+         * @description ``PATCH /admin/features/{feature_id}`` body.
+         */
+        AdminFeaturePatchRequest: {
+            /** Address */
+            address?: {
+                [key: string]: unknown;
+            } | null;
+            /** Admin Dong Code */
+            admin_dong_code?: string | null;
+            /** Category */
+            category?: string | null;
+            coord?: components["schemas"]["AdminFeatureCoordInput"] | null;
+            /** Coord Precision Digits */
+            coord_precision_digits?: number | null;
+            /** Detail */
+            detail?: {
+                [key: string]: unknown;
+            } | null;
+            /** Geom */
+            geom?: string | null;
+            /** Legal Dong Code */
+            legal_dong_code?: string | null;
+            /** Marker Color */
+            marker_color?: string | null;
+            /** Marker Icon */
+            marker_icon?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Operator */
+            operator?: string | null;
+            /** Parent Feature Id */
+            parent_feature_id?: string | null;
+            /** Reason */
+            reason: string;
+            /** Road Address Management No */
+            road_address_management_no?: string | null;
+            /** Road Name Code */
+            road_name_code?: string | null;
+            /** Sibling Group Id */
+            sibling_group_id?: string | null;
+            /** Sido Code */
+            sido_code?: string | null;
+            /** Sigungu Code */
+            sigungu_code?: string | null;
+            /** Urls */
+            urls?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /**
          * AdminFeatureRecord
          * @description ``GET /admin/features`` item.
          */
@@ -1149,6 +1415,16 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+        };
+        /**
+         * AdminFeatureReviewActionRequest
+         * @description approve/reject body.
+         */
+        AdminFeatureReviewActionRequest: {
+            /** Operator */
+            operator?: string | null;
+            /** Reason */
+            reason?: string | null;
         };
         /**
          * AdminFeatureWriteMeta
@@ -4585,6 +4861,262 @@ export interface operations {
             };
         };
     };
+    create_feature_route_admin_features_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminFeatureCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminFeatureChangeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_feature_change_request_route_admin_features_change_requests_get: {
+        parameters: {
+            query?: {
+                state?: ("pending" | "applied" | "rejected")[] | null;
+                action?: ("add" | "update" | "delete")[] | null;
+                q?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminFeatureChangeListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    approve_feature_change_request_route_admin_features_change_requests__request_id__approve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminFeatureReviewActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminFeatureChangeResponse"];
+                };
+            };
+            /** @description request 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 승인 불가 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_feature_change_request_route_admin_features_change_requests__request_id__reject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminFeatureReviewActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminFeatureChangeResponse"];
+                };
+            };
+            /** @description request 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_feature_route_admin_features__feature_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminFeatureDeleteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminFeatureChangeResponse"];
+                };
+            };
+            /** @description feature 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 삭제 불가 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_feature_route_admin_features__feature_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminFeaturePatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminFeatureChangeResponse"];
+                };
+            };
+            /** @description feature 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 변경 불가 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     deactivate_feature_route_admin_features__feature_id__deactivate_post: {
         parameters: {
             query?: never;
@@ -6234,84 +6766,6 @@ export interface operations {
                 };
             };
             /** @description provider sync state 없음 */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_tripmate_feature_update_request_tripmate_feature_update_requests_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["FeatureUpdateRequestCreateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FeatureUpdateRequestCreateResponse"];
-                };
-            };
-            /** @description run_mode=now 요청의 동일 scope advisory lock 경합 */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_tripmate_feature_update_request_tripmate_feature_update_requests__request_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                request_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FeatureUpdateRequestDetailResponse"];
-                };
-            };
-            /** @description request_id 없음 */
             404: {
                 headers: {
                     [name: string]: unknown;

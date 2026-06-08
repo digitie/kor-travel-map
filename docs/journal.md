@@ -2,6 +2,35 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-08 (codex) — REST API v1 계약 정리 + feature CRUD admin API
+
+**작업**: `docs/reports/api-endpoint-review-2026-06-08.md`와 TripMate repo
+`docs/integrations/krtour-map-rest-api.md`를 종합해 REST API 정본 문서와 후속 task를 정리하고,
+사용자 요청 place/event feature 추가·수정·삭제 API를 admin 영역에 구현.
+
+- `docs/tripmate-rest-api.md`: `/v1` 목표 계약, envelope/error/parameter 규약, endpoint naming,
+  중복 제거, 누락 API, 현재 구현 gap을 한 문서로 재작성.
+- 사용자 결정 반영: `/tripmate/feature-update-requests*`는 TripMate/user 표면이 아니라
+  `/admin/feature-update-requests*` 운영 표면으로 이동. TripMate 사용자 제안 큐는 TripMate
+  app DB가 소유하고, 운영자 승인 후 admin API로 refresh scope를 실행한다.
+- `docs/openapi-admin-contract.md`, `docs/tripmate-integration.md`,
+  `docs/poi-cache-update-targets.md`, `docs/architecture.md`,
+  `packages/krtour-map-admin/README.md`의 충돌 문구를 정리.
+- `/tripmate/feature-update-requests*` alias를 코드/OpenAPI user profile에서 제거하고
+  `/admin/feature-update-requests*`만 남겼다.
+- `/admin/features`에 `POST`, `/admin/features/{feature_id}`에 `PATCH`/`DELETE`,
+  `/admin/features/change-requests*` 승인/거절 API를 추가했다. 기본은
+  `KRTOUR_MAP_ADMIN_FEATURE_CHANGE_REVIEW_MODE=require_review`, 설정이 `immediate`면 같은
+  transaction에서 바로 적용한다.
+- `feature.features`에 `data_origin`/`data_version`/`user_change_*` metadata,
+  `feature.feature_versions`, `ops.feature_change_requests`를 추가했다. provider reload는
+  version 0 snapshot을 갱신하고, 사용자 요청 version 1 effective row와 soft delete를
+  덮거나 되살리지 않는다.
+- `docs/tasks.md`: `T-214a~h`, `T-215a~c`를 정리했다. `T-214a`, `T-214c`, `T-215a`는 완료.
+
+**검증**: admin feature repo 통합 테스트, admin router/export OpenAPI 단위 테스트, ruff/mypy,
+OpenAPI drift check를 수행.
+
 ## 2026-06-08 (claude) — 앱 레벨 service-token 인증(ADR-045 D-1 B안)
 
 **작업**: API 리뷰 [P1] "보안 스킴 미선언" 후속. 사용자 결정 = D-1 B안(infra + 앱 레벨

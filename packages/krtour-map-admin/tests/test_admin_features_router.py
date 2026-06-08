@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from krtour.map.infra.admin_feature_repo import (
     AdminFeaturePage,
     AdminFeatureRow,
+    FeatureChangeRequest,
     FeatureDeactivateResult,
     FeatureOverride,
     FeatureStateConflict,
@@ -82,12 +83,51 @@ def _feature_row() -> AdminFeatureRow:
     )
 
 
+def _change_request(
+    *,
+    request_id: str = "change-1",
+    feature_id: str = "feature-1",
+    action: str = "add",
+    state: str = "pending",
+    review_mode: str = "require_review",
+    payload: dict[str, Any] | None = None,
+    reason: str | None = "사용자 제보",
+    requested_by: str | None = "local-admin",
+    reviewed_by: str | None = None,
+    applied_at: datetime | None = None,
+) -> FeatureChangeRequest:
+    now = datetime(2026, 6, 3, tzinfo=UTC)
+    return FeatureChangeRequest(
+        request_id=request_id,
+        feature_id=feature_id,
+        action=action,
+        state=state,
+        review_mode=review_mode,
+        payload=payload or {},
+        reason=reason,
+        requested_by=requested_by,
+        reviewed_by=reviewed_by,
+        reviewed_at=now if reviewed_by is not None else None,
+        applied_at=applied_at,
+        created_at=now,
+    )
+
+
 @pytest.mark.unit
 def test_admin_features_routes_mounted_in_openapi(client: TestClient) -> None:
     spec = client.get("/openapi.json").json()
     assert "/admin/features" in spec["paths"]
+    assert set(spec["paths"]["/admin/features"]) >= {"get", "post"}
+    assert "/admin/features/{feature_id}" in spec["paths"]
+    assert set(spec["paths"]["/admin/features/{feature_id}"]) >= {"patch", "delete"}
+    assert "/admin/features/change-requests" in spec["paths"]
+    assert "/admin/features/change-requests/{request_id}/approve" in spec["paths"]
+    assert "/admin/features/change-requests/{request_id}/reject" in spec["paths"]
     assert "/admin/features/{feature_id}/deactivate" in spec["paths"]
     assert "AdminFeatureRecord" in spec["components"]["schemas"]
+    assert "AdminFeatureCreateRequest" in spec["components"]["schemas"]
+    assert "AdminFeaturePatchRequest" in spec["components"]["schemas"]
+    assert "AdminFeatureChangeResponse" in spec["components"]["schemas"]
     assert (
         spec["components"]["schemas"]["AdminFeatureIssueRecord"][
             "additionalProperties"
@@ -132,6 +172,186 @@ def test_list_admin_features_passes_filters(
     assert body["data"]["items"][0]["feature_id"] == "feature-1"
     assert body["data"]["next_cursor"] == "next"
     assert body["meta"]["order"] == "desc"
+
+
+@pytest.mark.unit
+def test_create_feature_request_uses_review_required_by_default(
+    client: TestClient,
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import admin_features as router_mod
+
+    async def _submit(_session: Any, **kwargs: Any) -> FeatureChangeRequest:
+        assert kwargs["action"] == "add"
+        assert kwargs["review_mode"] == "require_review"
+        assert kwargs["payload"]["kind"] == "place"
+        assert kwargs["payload"]["name"] == "사용자 장소"
+        assert kwargs["payload"]["coord"] == {"lon": 126.98, "lat": 37.57}
+        assert kwargs["payload"]["feature_id"] == kwargs["feature_id"]
+        assert kwargs["reason"] == "사용자 제보"
+        assert kwargs["requested_by"] == "tripmate-admin"
+        return _change_request(
+            feature_id=kwargs["feature_id"],
+            action=kwargs["action"],
+            state="pending",
+            review_mode=kwargs["review_mode"],
+            payload=kwargs["payload"],
+            reason=kwargs["reason"],
+            requested_by=kwargs["requested_by"],
+        )
+
+    monkeypatch.setattr(router_mod, "submit_feature_change_request", _submit)
+
+    response = client.post(
+        "/admin/features",
+        json={
+            "kind": "place",
+            "name": "사용자 장소",
+            "category": "01070300",
+            "coord": {"lon": 126.98, "lat": 37.57},
+            "marker_icon": "map-pin",
+            "marker_color": "P-01",
+            "reason": "사용자 제보",
+            "operator": "tripmate-admin",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data"]["request"]["state"] == "pending"
+    assert body["data"]["request"]["review_mode"] == "require_review"
+    assert session.begin_count == 1
+
+
+@pytest.mark.unit
+def test_patch_feature_request_can_apply_immediately(
+    client: TestClient,
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import admin_features as router_mod
+
+    client.app.dependency_overrides[router_mod._settings] = lambda: AdminSettings(
+        feature_change_review_mode="immediate"
+    )
+
+    async def _submit(_session: Any, **kwargs: Any) -> FeatureChangeRequest:
+        assert kwargs["action"] == "update"
+        assert kwargs["feature_id"] == "feature-1"
+        assert kwargs["payload"] == {"name": "수정된 장소"}
+        assert kwargs["review_mode"] == "immediate"
+        return _change_request(
+            feature_id=kwargs["feature_id"],
+            action=kwargs["action"],
+            state="applied",
+            review_mode=kwargs["review_mode"],
+            payload=kwargs["payload"],
+            applied_at=datetime(2026, 6, 3, tzinfo=UTC),
+        )
+
+    monkeypatch.setattr(router_mod, "submit_feature_change_request", _submit)
+
+    response = client.patch(
+        "/admin/features/feature-1",
+        json={
+            "name": "수정된 장소",
+            "reason": "사용자 수정",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["request"]["state"] == "applied"
+    assert session.begin_count == 1
+
+
+@pytest.mark.unit
+def test_delete_feature_request_submits_soft_delete(
+    client: TestClient,
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import admin_features as router_mod
+
+    async def _submit(_session: Any, **kwargs: Any) -> FeatureChangeRequest:
+        assert kwargs["action"] == "delete"
+        assert kwargs["feature_id"] == "feature-1"
+        assert kwargs["payload"] == {}
+        assert kwargs["reason"] == "사용자 삭제 요청"
+        return _change_request(
+            feature_id=kwargs["feature_id"],
+            action=kwargs["action"],
+            payload=kwargs["payload"],
+            reason=kwargs["reason"],
+        )
+
+    monkeypatch.setattr(router_mod, "submit_feature_change_request", _submit)
+
+    response = client.request(
+        "DELETE",
+        "/admin/features/feature-1",
+        json={"reason": "사용자 삭제 요청"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["request"]["action"] == "delete"
+    assert session.begin_count == 1
+
+
+@pytest.mark.unit
+def test_approve_and_reject_feature_change_requests(
+    client: TestClient,
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import admin_features as router_mod
+
+    async def _apply(
+        _session: Any,
+        request_id: str,
+        **kwargs: Any,
+    ) -> FeatureChangeRequest:
+        assert request_id == "change-1"
+        assert kwargs["operator"] == "reviewer"
+        return _change_request(
+            request_id=request_id,
+            state="applied",
+            reviewed_by=kwargs["operator"],
+            applied_at=datetime(2026, 6, 3, tzinfo=UTC),
+        )
+
+    async def _reject(
+        _session: Any,
+        request_id: str,
+        **kwargs: Any,
+    ) -> FeatureChangeRequest:
+        assert request_id == "change-2"
+        assert kwargs["operator"] == "reviewer"
+        assert kwargs["reason"] == "중복"
+        return _change_request(
+            request_id=request_id,
+            state="rejected",
+            reviewed_by=kwargs["operator"],
+            reason=kwargs["reason"],
+        )
+
+    monkeypatch.setattr(router_mod, "apply_feature_change_request", _apply)
+    monkeypatch.setattr(router_mod, "reject_feature_change_request", _reject)
+
+    approve = client.post(
+        "/admin/features/change-requests/change-1/approve",
+        json={"operator": "reviewer"},
+    )
+    reject = client.post(
+        "/admin/features/change-requests/change-2/reject",
+        json={"operator": "reviewer", "reason": "중복"},
+    )
+
+    assert approve.status_code == 200
+    assert approve.json()["data"]["request"]["state"] == "applied"
+    assert reject.status_code == 200
+    assert reject.json()["data"]["request"]["state"] == "rejected"
+    assert session.begin_count == 2
 
 
 @pytest.mark.unit

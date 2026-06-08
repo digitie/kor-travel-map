@@ -84,6 +84,8 @@ INSERT INTO feature.features (
     urls, marker_icon, marker_color,
     parent_feature_id, sibling_group_id,
     detail, raw_refs, status,
+    data_origin, data_version, user_change_kind, user_change_status,
+    user_change_request_id, user_deleted_at, user_deleted_by, user_change_reason,
     created_at, updated_at, deleted_at
 ) VALUES (
     :feature_id, :kind, :name, :category,
@@ -100,30 +102,73 @@ INSERT INTO feature.features (
     CAST(:urls AS jsonb), :marker_icon, :marker_color,
     :parent_feature_id, :sibling_group_id,
     CAST(:detail AS jsonb), CAST(:raw_refs AS jsonb), :status,
+    'provider', 0, NULL, NULL, NULL, NULL, NULL, NULL,
     :created_at, :updated_at, :deleted_at
 )
 ON CONFLICT (feature_id) DO UPDATE SET
-    kind = EXCLUDED.kind,
-    name = EXCLUDED.name,
-    category = EXCLUDED.category,
-    coord = EXCLUDED.coord,
-    coord_precision_digits = EXCLUDED.coord_precision_digits,
-    geom = EXCLUDED.geom,
-    address = EXCLUDED.address,
-    legal_dong_code = EXCLUDED.legal_dong_code,
-    road_name_code = EXCLUDED.road_name_code,
-    road_address_management_no = EXCLUDED.road_address_management_no,
-    admin_dong_code = EXCLUDED.admin_dong_code,
-    sido_code = EXCLUDED.sido_code,
-    sigungu_code = EXCLUDED.sigungu_code,
-    urls = EXCLUDED.urls,
-    marker_icon = EXCLUDED.marker_icon,
-    marker_color = EXCLUDED.marker_color,
-    parent_feature_id = EXCLUDED.parent_feature_id,
-    sibling_group_id = EXCLUDED.sibling_group_id,
-    detail = EXCLUDED.detail,
-    raw_refs = EXCLUDED.raw_refs,
+    kind = CASE
+        WHEN features.data_origin = 'user_request' AND features.data_version > 0
+        THEN features.kind ELSE EXCLUDED.kind END,
+    name = CASE
+        WHEN features.data_origin = 'user_request' AND features.data_version > 0
+        THEN features.name ELSE EXCLUDED.name END,
+    category = CASE
+        WHEN features.data_origin = 'user_request' AND features.data_version > 0
+        THEN features.category ELSE EXCLUDED.category END,
+    coord = CASE
+        WHEN features.data_origin = 'user_request' AND features.data_version > 0
+        THEN features.coord ELSE EXCLUDED.coord END,
+    coord_precision_digits = CASE
+        WHEN features.data_origin = 'user_request' AND features.data_version > 0
+        THEN features.coord_precision_digits ELSE EXCLUDED.coord_precision_digits END,
+    geom = CASE
+        WHEN features.data_origin = 'user_request' AND features.data_version > 0
+        THEN features.geom ELSE EXCLUDED.geom END,
+    address = CASE
+        WHEN features.data_origin = 'user_request' AND features.data_version > 0
+        THEN features.address ELSE EXCLUDED.address END,
+    legal_dong_code = CASE
+        WHEN features.data_origin = 'user_request' AND features.data_version > 0
+        THEN features.legal_dong_code ELSE EXCLUDED.legal_dong_code END,
+    road_name_code = CASE
+        WHEN features.data_origin = 'user_request' AND features.data_version > 0
+        THEN features.road_name_code ELSE EXCLUDED.road_name_code END,
+    road_address_management_no = CASE
+        WHEN features.data_origin = 'user_request' AND features.data_version > 0
+        THEN features.road_address_management_no ELSE EXCLUDED.road_address_management_no END,
+    admin_dong_code = CASE
+        WHEN features.data_origin = 'user_request' AND features.data_version > 0
+        THEN features.admin_dong_code ELSE EXCLUDED.admin_dong_code END,
+    sido_code = CASE
+        WHEN features.data_origin = 'user_request' AND features.data_version > 0
+        THEN features.sido_code ELSE EXCLUDED.sido_code END,
+    sigungu_code = CASE
+        WHEN features.data_origin = 'user_request' AND features.data_version > 0
+        THEN features.sigungu_code ELSE EXCLUDED.sigungu_code END,
+    urls = CASE
+        WHEN features.data_origin = 'user_request' AND features.data_version > 0
+        THEN features.urls ELSE EXCLUDED.urls END,
+    marker_icon = CASE
+        WHEN features.data_origin = 'user_request' AND features.data_version > 0
+        THEN features.marker_icon ELSE EXCLUDED.marker_icon END,
+    marker_color = CASE
+        WHEN features.data_origin = 'user_request' AND features.data_version > 0
+        THEN features.marker_color ELSE EXCLUDED.marker_color END,
+    parent_feature_id = CASE
+        WHEN features.data_origin = 'user_request' AND features.data_version > 0
+        THEN features.parent_feature_id ELSE EXCLUDED.parent_feature_id END,
+    sibling_group_id = CASE
+        WHEN features.data_origin = 'user_request' AND features.data_version > 0
+        THEN features.sibling_group_id ELSE EXCLUDED.sibling_group_id END,
+    detail = CASE
+        WHEN features.data_origin = 'user_request' AND features.data_version > 0
+        THEN features.detail ELSE EXCLUDED.detail END,
+    raw_refs = CASE
+        WHEN features.data_origin = 'user_request' AND features.data_version > 0
+        THEN features.raw_refs ELSE EXCLUDED.raw_refs END,
     status = CASE
+        WHEN features.data_origin = 'user_request' AND features.data_version > 0
+        THEN features.status
         WHEN EXISTS (
             SELECT 1
             FROM ops.feature_overrides AS fo
@@ -135,8 +180,24 @@ ON CONFLICT (feature_id) DO UPDATE SET
         THEN features.status
         ELSE EXCLUDED.status
     END,
-    updated_at = EXCLUDED.updated_at,
+    data_origin = CASE
+        WHEN features.data_origin = 'user_request' AND features.data_version > 0
+        THEN features.data_origin ELSE 'provider' END,
+    data_version = CASE
+        WHEN features.data_origin = 'user_request' AND features.data_version > 0
+        THEN features.data_version ELSE 0 END,
+    user_change_kind = features.user_change_kind,
+    user_change_status = features.user_change_status,
+    user_change_request_id = features.user_change_request_id,
+    user_deleted_at = features.user_deleted_at,
+    user_deleted_by = features.user_deleted_by,
+    user_change_reason = features.user_change_reason,
+    updated_at = CASE
+        WHEN features.data_origin = 'user_request' AND features.data_version > 0
+        THEN features.updated_at ELSE EXCLUDED.updated_at END,
     deleted_at = CASE
+        WHEN features.data_origin = 'user_request' AND features.data_version > 0
+        THEN features.deleted_at
         WHEN EXISTS (
             SELECT 1
             FROM ops.feature_overrides AS fo
@@ -149,6 +210,20 @@ ON CONFLICT (feature_id) DO UPDATE SET
         ELSE EXCLUDED.deleted_at
     END
 RETURNING (xmax = 0) AS inserted
+"""
+
+_UPSERT_PROVIDER_VERSION_SQL: Final[str] = """
+INSERT INTO feature.feature_versions (
+    feature_id, version, origin, change_kind, payload, request_id, created_by
+) VALUES (
+    :feature_id, 0, 'provider', 'load', CAST(:payload AS jsonb), NULL, 'provider'
+)
+ON CONFLICT (feature_id, version) DO UPDATE SET
+    payload = EXCLUDED.payload,
+    origin = EXCLUDED.origin,
+    change_kind = EXCLUDED.change_kind,
+    created_by = EXCLUDED.created_by,
+    created_at = now()
 """
 
 # source_records는 payload_hash가 UNIQUE 구성요소 → 이력 보존 (ADR-017).
@@ -739,6 +814,7 @@ _SOFT_DELETE_NOT_IN_SNAPSHOT_SQL: Final[str] = """
 UPDATE feature.features AS f
 SET status = 'inactive', deleted_at = now(), updated_at = now()
 WHERE f.deleted_at IS NULL
+  AND COALESCE(f.data_origin, 'provider') <> 'user_request'
   AND f.feature_id IN (
     SELECT sl.feature_id
     FROM provider_sync.source_links AS sl
@@ -762,6 +838,7 @@ _INACTIVATE_BY_ENTITY_IDS_SQL: Final[str] = """
 UPDATE feature.features AS f
 SET status = 'inactive', deleted_at = now(), updated_at = now()
 WHERE f.deleted_at IS NULL
+  AND COALESCE(f.data_origin, 'provider') <> 'user_request'
   AND f.feature_id IN (
     SELECT sl.feature_id
     FROM provider_sync.source_links AS sl
@@ -973,6 +1050,11 @@ def _feature_params(feature: Feature) -> dict[str, Any]:
     }
 
 
+def _feature_snapshot(feature: Feature) -> str:
+    """``feature.feature_versions`` version 0 payload용 canonical JSON."""
+    return json.dumps(feature.model_dump(mode="json"), ensure_ascii=False, default=str)
+
+
 def _dump_raw_refs(feature: Feature) -> str:
     """``feature.raw_refs`` (list[RawDataRef]) → JSONB array 문자열."""
     import json
@@ -1023,7 +1105,12 @@ async def upsert_feature(session: AsyncSession, feature: Feature) -> bool:
     ``coord_5179``는 STORED generated이라 INSERT/UPDATE 대상에서 제외 (ADR-012).
     """
     result = await session.execute(text(_UPSERT_FEATURE_SQL), _feature_params(feature))
-    return bool(result.scalar_one())
+    inserted = bool(result.scalar_one())
+    await session.execute(
+        text(_UPSERT_PROVIDER_VERSION_SQL),
+        {"feature_id": feature.feature_id, "payload": _feature_snapshot(feature)},
+    )
+    return inserted
 
 
 async def upsert_source_record(session: AsyncSession, record: SourceRecord) -> bool:

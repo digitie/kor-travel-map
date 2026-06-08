@@ -15,11 +15,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from krtour.map.dto import Address, Coordinate, Feature, PlaceDetail
 from krtour.map.infra.admin_feature_repo import (
     FeatureStateConflict,
+    apply_feature_change_request,
     deactivate_feature,
     list_admin_features,
     list_dedup_reviews,
     merge_dedup_review,
     set_dedup_review_decision,
+    submit_feature_change_request,
 )
 from krtour.map.infra.feature_repo import upsert_feature
 from krtour.map.infra.models import (
@@ -211,6 +213,183 @@ async def test_deactivate_rejects_deleted_feature(
     ).one()
     assert row.status == "deleted"
     assert row.deleted_at is not None
+
+
+async def test_user_update_version_overrides_provider_reload(
+    migrated_session: AsyncSession,
+) -> None:
+    feature_id = "feature-admin-user-update"
+    await _seed_feature(migrated_session, feature_id)
+
+    request = await submit_feature_change_request(
+        migrated_session,
+        action="update",
+        feature_id=feature_id,
+        payload={
+            "name": "사용자 수정 이름",
+            "road_name_code": "111104100001",
+            "admin_dong_code": "1111051500",
+            "urls": {"homepage": "https://example.test/user-feature"},
+            "detail": {"note": "사용자 수정"},
+        },
+        review_mode="immediate",
+        reason="사용자 제보 반영",
+        requested_by="admin",
+    )
+    assert request.state == "applied"
+
+    inserted = await upsert_feature(migrated_session, _dto(feature_id, status="active"))
+    assert inserted is False
+
+    row = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT
+                    name, road_name_code, admin_dong_code, urls, detail,
+                    data_origin, data_version, user_change_kind
+                FROM feature.features
+                WHERE feature_id = :feature_id
+                """
+            ),
+            {"feature_id": feature_id},
+        )
+    ).mappings().one()
+    assert row["name"] == "사용자 수정 이름"
+    assert row["road_name_code"] == "111104100001"
+    assert row["admin_dong_code"] == "1111051500"
+    assert row["urls"]["homepage"] == "https://example.test/user-feature"
+    assert row["detail"]["note"] == "사용자 수정"
+    assert row["data_origin"] == "user_request"
+    assert row["data_version"] == 1
+    assert row["user_change_kind"] == "update"
+
+    versions = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT version, origin, change_kind
+                FROM feature.feature_versions
+                WHERE feature_id = :feature_id
+                ORDER BY version
+                """
+            ),
+            {"feature_id": feature_id},
+        )
+    ).mappings().all()
+    assert [(v["version"], v["origin"], v["change_kind"]) for v in versions] == [
+        (0, "provider", "load"),
+        (1, "user_request", "update"),
+    ]
+    version_payload = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT payload
+                FROM feature.feature_versions
+                WHERE feature_id = :feature_id AND version = 1
+                """
+            ),
+            {"feature_id": feature_id},
+        )
+    ).scalar_one()
+    assert version_payload["road_name_code"] == "111104100001"
+    assert version_payload["admin_dong_code"] == "1111051500"
+
+
+async def test_user_delete_soft_delete_prevents_provider_resurrection(
+    migrated_session: AsyncSession,
+) -> None:
+    feature_id = "feature-admin-user-delete"
+    await _seed_feature(migrated_session, feature_id)
+
+    request = await submit_feature_change_request(
+        migrated_session,
+        action="delete",
+        feature_id=feature_id,
+        payload={},
+        review_mode="immediate",
+        reason="사용자 삭제 요청",
+        requested_by="admin",
+    )
+    assert request.state == "applied"
+
+    await upsert_feature(migrated_session, _dto(feature_id, status="active"))
+
+    row = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT status, data_origin, data_version, user_deleted_at, user_deleted_by
+                FROM feature.features
+                WHERE feature_id = :feature_id
+                """
+            ),
+            {"feature_id": feature_id},
+        )
+    ).mappings().one()
+    assert row["status"] == "deleted"
+    assert row["data_origin"] == "user_request"
+    assert row["data_version"] == 1
+    assert row["user_deleted_at"] is not None
+    assert row["user_deleted_by"] == "admin"
+
+
+async def test_review_required_add_applies_only_after_admin_approval(
+    migrated_session: AsyncSession,
+) -> None:
+    feature_id = "feature-admin-user-add"
+    payload = {
+        "kind": "place",
+        "name": "사용자 추가 장소",
+        "category": "01070300",
+        "coord": {"lon": 126.9769, "lat": 37.5759},
+        "marker_icon": "marker",
+        "marker_color": "P-01",
+        "detail": {"place_kind": "attraction"},
+    }
+
+    request = await submit_feature_change_request(
+        migrated_session,
+        action="add",
+        feature_id=feature_id,
+        payload=payload,
+        review_mode="require_review",
+        reason="사용자 추가 요청",
+        requested_by="tripmate",
+    )
+    assert request.state == "pending"
+    assert (
+        await migrated_session.execute(
+            text("SELECT count(*) FROM feature.features WHERE feature_id = :feature_id"),
+            {"feature_id": feature_id},
+        )
+    ).scalar_one() == 0
+
+    applied = await apply_feature_change_request(
+        migrated_session,
+        request.request_id,
+        operator="admin",
+    )
+    assert applied is not None
+    assert applied.state == "applied"
+
+    row = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT name, data_origin, data_version, user_change_kind
+                FROM feature.features
+                WHERE feature_id = :feature_id
+                """
+            ),
+            {"feature_id": feature_id},
+        )
+    ).mappings().one()
+    assert row["name"] == "사용자 추가 장소"
+    assert row["data_origin"] == "user_request"
+    assert row["data_version"] == 1
+    assert row["user_change_kind"] == "add"
 
 
 async def test_list_admin_features_filters_issue_and_primary_source(

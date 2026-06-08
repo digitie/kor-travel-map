@@ -1,31 +1,18 @@
-# tripmate-rest-api.md — TripMate ↔ krtour-map 연계 REST API (params/returns)
+# krtour-map REST API 계약 — TripMate 소비 + v1 정리
 
-ADR-045 기준 TripMate가 krtour-map **OpenAPI(HTTP)** 로 호출하는 사용자/서비스 API의
-엔드포인트·파라미터·리턴값 구체화. admin API 전체 계약은 `docs/openapi-admin-contract.md`,
-admin UI 워크플로는 `docs/debug-ui-admin-workflows.md`가 정본 — **본 문서는 TripMate가
-실제로 쓰는 부분 집합 + 사용자 공개 응답 형태**를 확정한다.
+본 문서는 ADR-045 이후 TripMate가 krtour-map을 HTTP/OpenAPI로 소비할 때의
+**정본 REST API 계약**이다. admin 전체 계약은
+[`docs/openapi-admin-contract.md`](openapi-admin-contract.md), POI cache target 상세는
+[`docs/poi-cache-update-targets.md`](poi-cache-update-targets.md)를 함께 따른다.
 
-> 상태: **1차 계약 구현됨 (2026-06-03, T-207e/T-207g)** — TripMate/user-facing
-> 정본 spec은 `packages/krtour-map-admin/openapi.user.json`이다. `GET
-> /features/in-bounds`, `GET /features/{feature_id}`, `GET /features/search`,
-> `GET /features/nearby`(T-213b), `GET /features/nearby/by-target`,
-> `POST /tripmate/features/batch`,
-> `POST /tripmate/feature-update-requests`,
-> `GET /tripmate/feature-update-requests/{request_id}`가
-> user spec과 동기화됐다. D-1~D-16은 전부 확정됨
-> (`docs/adr045-open-decisions.md`). 시군구 반경 해석(D-11)의 kraddr-geo
-> `POST /v2/regions/within-radius` 정본은 `docs/regions-within-radius.md`.
-> TripMate `docs/krtour-map-requirements.md` 대조 후속은
-> `docs/reports/tripmate-requirements-reconcile-2026-06-06.md`와 `docs/tasks.md`
-> `T-213a~h`에 등록했다. **구현됨**(user spec 포함): 일반 좌표 `/features/nearby`
-> (T-213b), category catalog `GET /categories`(T-213f), public `GET /health`/
-> `GET /version`(T-213h), provider last-sync `GET /providers/{provider}/last-sync`
-> (T-213g), weather card `GET /features/{feature_id}/weather`(T-213e). **T-213a~h
-> 전부 구현 완료** — user spec은 `/features/*`(in-bounds/search/nearby/{id}/weather),
-> `/categories`, `/providers/{provider}/last-sync`, `/health`, `/version`,
-> `/tripmate/*`다.
+기준 검토:
 
-## 1. 공통 규약
+- krtour-map 내부 검토:
+  [`docs/reports/api-endpoint-review-2026-06-08.md`](reports/api-endpoint-review-2026-06-08.md)
+- TripMate 소비자 문서:
+  `F:\dev\tripmate-codex\docs\integrations\krtour-map-rest-api.md`
+- 현재 구현 spec:
+  `packages/krtour-map-admin/openapi.user.json`
 
 - **Base URL**: `https://<krtour-map-host>` (로컬 `http://127.0.0.1:9011`). TripMate는
   `KRTOUR_MAP_API_URL` env로 주입. **직접 DB 연결·라이브러리 import 금지**(ADR-045).
@@ -48,219 +35,419 @@ admin UI 워크플로는 `docs/debug-ui-admin-workflows.md`가 정본 — **본 
   `GET /version`은 `T-213h`에서 OpenAPI/패키지/commit 버전 확인 표면으로 추가한다.
   응답 필드 추가는 minor, 제거/의미변경은 major(D-3 versioning 정책).
 
-## 2. Feature 공개 응답 형태
+> **중요 결정(2026-06-08)**:
+> `POST/GET /tripmate/feature-update-requests*`는 TripMate 사용자/서비스 표면이 아니라
+> **admin 운영 표면으로 이동**한다. Feature update request는 provider 호출, Dagster
+> run, rate limit, lock, consistency/dedup 후처리를 동반하는 운영 트리거이므로 정본
+> 경로는 `/admin/feature-update-requests*`다. TripMate의 "사용자 제안" 큐는 TripMate
+> app DB가 소유하고, 운영자 승인 뒤 admin API로 refresh scope를 실행한다.
 
-`/features/*`(사용자) 응답의 feature 객체. admin 전용 필드(source_records 원문,
-dedup history, consistency 참조)는 **제외**(D-7 — 분리 확정 시 admin은 `/admin/
-features/*`로). 기존 `routers/features.py` 응답을 사용자용으로 정제한 형태.
+## 1. 구현 상태와 목표 계약
 
-### 2.1 `FeatureSummary` (목록/지도용 경량)
+현재 `openapi.user.json`은 unversioned 경로와 `/tripmate/*` 일부를 포함한다. Sprint 5
+종료 전 REST 표면은 다음 목표 계약으로 정리한다.
+
+| 구분 | 현재 구현 | 목표 계약 | 후속 |
+|------|-----------|-----------|------|
+| Versioning | `/features/...`, `/categories`, `/providers/...` | 사용자/서비스 리소스는 `/v1/...` | `T-214b` |
+| Batch 조회 | `POST /tripmate/features/batch` | `POST /v1/features/batch` | `T-214d` |
+| Feature update request | `/admin/feature-update-requests*`만 유지 | `/admin/feature-update-requests*` | `T-214c` 완료 |
+| Health/version | `/health`, `/version`, `/debug/*` 중복 | `/health` liveness, `/version` build info, `/ops/health-deep` readiness | `T-214g` 일부 |
+| Envelope | 대부분 `{data, meta}` | 성공/목록/단건/mutation 전부 `{data, meta}` | 유지 |
+| 페이지네이션 | `cursor/page_size`와 `limit` 혼용 | 페이지 가능한 목록은 `cursor/page_size`, bounded 조회만 `limit` | `T-214e` |
+| External write | cache target write가 `/admin/poi-cache-targets`에 있음 | TripMate 직접 write 허용 여부는 별도 결정. 허용 시 `/v1/poi-cache-targets` | `T-214f` |
+
+## 2. 공통 규약
+
+### 2.1 Base URL과 versioning
+
+- 로컬 API: `http://127.0.0.1:9011`
+- 운영 API: `https://<krtour-map-api-host>`
+- 사용자/서비스 리소스 목표 prefix: `/v1`
+- 내부 운영 리소스: `/admin`, `/ops`, `/debug`는 version prefix를 붙이지 않는다.
+- `/health`와 `/version`은 배포 확인용 top-level 경로로 유지한다.
+
+Breaking change는 `/v2`로 이동한다. 같은 `/v1` 안에서는 필드 추가, enum 값 추가,
+optional 필드 추가만 허용한다. 필드 제거, 필수화, 의미 변경, 응답 envelope 변경은
+major breaking change다.
+
+현재 unversioned 사용자 경로는 호환 기간에만 유지하고, `/v1` 구현 후 OpenAPI에는
+`deprecated: true`로 표기한다.
+
+### 2.2 인증 경계
+
+운영 1차 인증은 Cloudflare Tunnel, SSO 게이트웨이, IP allowlist 같은 인프라 계층이
+담당한다(ADR-005). 2026-06-08 D-1 B안 이후 앱 레벨 defense-in-depth도 선택적으로
+적용한다.
+
+- `KRTOUR_MAP_ADMIN_SERVICE_TOKEN`이 설정되면 `/tripmate/*` service-to-service 경로는
+  `X-Krtour-Service-Token` header가 같은 값이어야 한다.
+- 토큰 미설정 환경에서는 하위호환을 위해 강제하지 않는다.
+- `/features`, `/categories`, `/providers` 같은 공용 read surface는 브라우저 admin UI도
+  사용하므로 앱 토큰을 강제하지 않고 infra/proxy 인증에 맡긴다.
+
+TripMate는 사용자 JWT를 krtour-map으로 전달하지 않는다. 필요한 경우 TripMate server가
+service token header를 붙여 호출한다.
+
+### 2.3 성공 envelope
+
+모든 성공 응답은 다음 형식이다.
+
 ```json
 {
-  "feature_id": "f_1111014700_p_019c0211c8a5ec4e",
-  "kind": "place",
-  "name": "경복궁",
-  "category": "01070100",
-  "lon": 126.9770, "lat": 37.5796,
-  "marker_icon": "monument", "marker_color": "P-01",
-  "status": "active"
+  "data": {},
+  "meta": {
+    "duration_ms": 12
+  }
 }
 ```
 
-### 2.2 `FeatureDetail` (상세 카드용)
+목록 응답은 `data.items`와 `data.next_cursor`를 사용한다. `meta.count`는 이번 응답의
+item 수를 뜻하고, 전체 개수가 필요한 검색만 `data.total_count`를 선택적으로 둔다.
+
 ```json
 {
-  "feature_id": "f_1111014700_p_019c0211c8a5ec4e",
-  "kind": "place",
-  "name": "경복궁",
-  "category": "01070100",
-  "lon": 126.9770, "lat": 37.5796,
-  "address": { "road": "...", "admin": "...", "bjd_code": "1111014700",
-               "sido_code": "11", "sigungu_code": "11110" },
-  "detail": { "place_kind": "heritage", "phones": ["02-3700-3900"], "...": "..." },
-  "urls": { "homepage": "...", "image": ["..."] },
-  "marker_icon": "monument", "marker_color": "P-01",
-  "status": "active",
-  "updated_at": "2026-06-01T08:30:00+09:00"
+  "data": {
+    "items": [],
+    "next_cursor": null
+  },
+  "meta": {
+    "count": 0,
+    "duration_ms": 12
+  }
 }
 ```
-- `detail`은 kind별 DTO(`PlaceDetail`/`EventDetail`/`NoticeDetail`/…, ADR-018) JSON.
-- `kind=price`/`weather`는 시계열이라 별도 엔드포인트(§4)로 노출; feature 본문엔 미포함.
 
-## 3. 엔드포인트 (TripMate 사용)
+### 2.4 오류 envelope
 
-### 3.1 `GET /features/in-bounds` — 지도 뷰포트 로드
-- **목적**: TripMate 지도 화면 bbox 안 feature 경량 목록(+줌별 클러스터).
-- **query**: `min_lon`(float, req), `min_lat`, `max_lon`, `max_lat`(req),
-  `kind`(반복, 선택 — place/event/notice/route/area), `category`(반복, 선택),
-  `zoom`(int, 선택 — `cluster_unit` 미지정 시 유도), `cluster_unit`(선택 —
-  `sido`|`sigungu`|`eupmyeondong`), `limit`(int, 기본 1000, ≤5000).
-- **클러스터링(T-213c — 구현됨)**: `cluster_unit`이 지정되거나 `zoom`으로
-  유도되면(zoom ≤7=sido / ≤10=sigungu / ≤13=eupmyeondong / ≥14=개별) **서버
-  행정구역 rollup**으로 응답한다. (설계 결정: client-side·grid 대신 **행정코드
-  rollup** — feature에 이미 있는 `sido_code`/`sigungu_code`/`legal_dong_code`를
-  GROUP BY해 geometry 계산 없이 region별 count + 평균 좌표를 낸다.)
-- **200**: `{ "data": { "count": int, "items": [FeatureSummary],
-  "clusters": [{ "cluster_key", "feature_count", "lon", "lat" }],
-  "cluster_unit": str|null }, "meta": { "duration_ms": int } }`. `cluster_unit`이
-  None이면 `items`(개별 feature), 아니면 `clusters`(rollup, `items=[]`). `lon`/`lat`은
-  region 내 feature 평균 좌표(대표 마커 위치), region code 없는 feature는 제외.
-- **422** bbox min>max / 잘못된 `cluster_unit`. GIST(`coord`) 인덱스 사용
-  (ADR-012, 술어에 변환 없음), `deleted_at IS NULL`.
+오류 응답은 HTTP status와 다음 envelope를 함께 쓴다.
 
-### 3.2 `GET /features/{feature_id}` — 상세
-- **목적**: POI 상세 카드.
-- **path**: `feature_id`.
-- **200**: `{ "data": FeatureDetail, "meta": { "duration_ms": int } }`.
-  **404** `FEATURE_NOT_FOUND`.
+```json
+{
+  "error": {
+    "code": "FEATURE_NOT_FOUND",
+    "message": "Feature를 찾을 수 없습니다.",
+    "details": {},
+    "request_id": "019f3d5c-..."
+  }
+}
+```
 
-### 3.3 `POST /tripmate/features/batch` — 다건 상세 batch
-- **목적**: trip에 붙은 여러 POI를 한 번에 조회(N+1 방지).
-- **body**: `{ "feature_ids": ["...", "..."] }` (≤200, 초과 422 `TOO_MANY_IDS`).
-- **200**: `{ "data": { "items": { "<feature_id>": FeatureDetail }, "missing":
-  ["<feature_id>"] }, "meta": { "duration_ms": int } }` — 없는 id와 soft-deleted
-  id는 `missing`에.
+표준 코드:
 
-### 3.4 `GET /features/search` — 검색
-- **목적**: 사용자 feature 검색(이름 + 공간).
-- **query**: `q`(str, 선택 — name trgm), `kind`(반복), `category`(반복),
-  `bbox`(`min_lon,min_lat,max_lon,max_lat` CSV, 선택), `limit`(기본 50, ≤200),
-  `cursor`(keyset, 선택).
-- **200**: `{ "data": { "items": [FeatureSummary], "next_cursor": str|null,
-  "total_count": int|null }, "meta": { "duration_ms": int } }`. (`q`/`bbox` 둘 다
-  없으면 422 `SEARCH_SCOPE_REQUIRED`.) `total_count`는 cursor를 제외한 현재 검색
-  조건의 전체 매칭 수다.
+| code | status | 의미 |
+|------|--------|------|
+| `VALIDATION_ERROR` | 422 | 요청 스키마 또는 query parameter 오류 |
+| `FEATURE_NOT_FOUND` | 404 | feature 없음 또는 삭제됨 |
+| `SEARCH_SCOPE_REQUIRED` | 422 | 검색에 `q`와 `bbox`가 모두 없음 |
+| `TOO_MANY_IDS` | 422 | batch feature id가 200개 초과 |
+| `TARGET_NOT_FOUND` | 404 | POI cache target 없음 |
+| `LOCK_BUSY` | 409 | admin update request 즉시 실행 lock 충돌 |
+| `RATE_LIMITED` | 429 | provider 또는 API rate limit |
+| `UPSTREAM_UNAVAILABLE` | 503 | provider, DB, Dagster, kraddr-geo 등 upstream 장애 |
 
-### 3.5 `GET /features/nearby/by-target` — 외부 POI key 기준 주변 조회
-- **목적**: TripMate가 보유한 외부 POI(kakao/naver/google place id 등) 기준 주변
-  feature summary. 정본: `poi-cache-update-targets.md`.
-- **query**: `external_system`(str, req — kakao|naver|google|…), `target_key`(str,
-  req), `radius_km`(float, 기본 1.0), `kind`(반복), `limit`(기본 50).
-- **200**: `{ "data": { "target": {external_system,target_key,lon,lat},
-  "items": [NearbyFeatureSummary] } }`. **404** target 미등록 시.
-- `NearbyFeatureSummary`는 `FeatureSummary` 경량 필드에 `distance_m`만 더한다.
-  `primary_provider`, `primary_dataset_key`, target `refresh_policy`, `target_id` 같은
-  운영/내부 필드는 사용자 응답에 노출하지 않는다(D-7).
+`LOCK_BUSY`와 `RATE_LIMITED`는 가능하면 `Retry-After` header와
+`error.details.retry_after_seconds`를 함께 반환한다.
 
-### 3.6 `GET /providers/{provider}/last-sync` — 데이터 신선도 (T-213g — 구현됨)
-- **목적**: 상세 카드 "n시간 전 갱신" 표시.
-- **path**: `provider`(예: `python-mois-api`). **query**: `dataset_key`(선택),
-  `sync_scope`(선택) — 필터.
-- **200**: `{ "data": { "provider", "items": [{ "dataset_key", "sync_scope",
-  "status", "last_success_at", "last_failure_at", "consecutive_failures" }],
-  "count" }, "meta": { "count", "duration_ms" } }`(`provider_sync_state` 기반).
-  내부 **cursor(provider 증분 상태)는 응답에 노출하지 않는다**(운영 내부 값).
-  provider가 여러 dataset/scope를 가지므로 `items` 목록으로 반환한다.
-- **404**: provider에 매칭되는 sync state 행이 없을 때(필터 결과 0건 포함).
-- `AsyncKrtourMapClient`에 `get_sync_state`/`list_sync_states`(read) +
-  `record_sync_success`/`record_sync_failure`(write) helper, `krtour.map.providers`
-  에 knps/krheritage 변환 함수·상수 re-export 동반(T-213g).
+### 2.5 Parameter 규칙
 
-### 3.7 `POST /tripmate/feature-update-requests` — 지역 refresh 요청
-- **목적**: TripMate 운영 화면에서 "이 지역 데이터 즉시 갱신".
-  krtour-map admin 내부 경로(`/admin/feature-update-requests`)와 같은 queue에 적재하지만,
-  TripMate/user OpenAPI에는 `/tripmate` prefix만 노출한다.
-- **body/응답**: `openapi-admin-contract.md §5.1` 그대로 — scope(center_radius/bbox/
-  sigungu_by_radius/provider_dataset/feature_ids/cache_target_keys) + update_policy +
-  `run_mode`(queued|now) + `dry_run`. 응답: `{ data: { request_id, job_id, state,
-  matched_scope: { feature_count, sigungu_codes } , status_url } }`.
-- **dry_run=true**: 실행 없이 `matched_scope`만(영향 feature 수 미리보기).
-- **409** `LOCK_BUSY`(run_mode=now + 동일 scope lock 점유, D-6 정책). 응답은
-  `{error:{code:"LOCK_BUSY", message, details:{retry_after_seconds:15}}}`이며 HTTP
-  header `Retry-After: 15`를 함께 보낸다.
+- 좌표는 WGS84, 순서 `lon`, `lat`.
+- bbox는 query parameter `min_lon`, `min_lat`, `max_lon`, `max_lat`를 기본으로 한다.
+  검색처럼 단일 parameter가 필요한 경우만 `bbox=min_lon,min_lat,max_lon,max_lat` CSV를
+  허용한다.
+- 다중 값 query는 반복 parameter를 쓴다. 예: `kind=place&kind=event`.
+- 페이지 가능한 목록은 `page_size` + `cursor`를 쓴다.
+- 지도 viewport처럼 상한을 둔 bounded 조회는 `limit`만 허용할 수 있다.
+- 반경 query는 `radius_m`를 쓴다. 저장 정책이나 cache target 설정처럼 운영자가
+  관리하는 값은 기존 DB 계약대로 `radius_km`를 유지한다.
+- datetime은 KST aware ISO 8601 문자열이다.
 
-### 3.8 `GET /tripmate/feature-update-requests/{request_id}` — 진행 상태
-- **목적**: TripMate가 refresh 완료 폴링.
-- **200**: `{ data: { request_id, state(queued|running|done|failed|cancelled),
-  matched_scope, job_id, started_at, finished_at, error_message } }`.
+## 3. 사용자/서비스 v1 API
 
-### 3.9 `GET /health` / `GET /version` (T-213h — 구현됨)
-- `/health`(**liveness**): `{ data: { status: "ok", service: "krtour-map" },
-  meta: { duration_ms } }`. 의존 없는 정적 200 — `features_routes_enabled`와 무관하게
-  항상 mount(DB 없는 부팅에서도 동작). DB/RustFS/Dagster **deep readiness**는 후속
-  (`/ops/health-deep` 계열) — liveness probe가 DB 장애에도 동작해야 하므로 분리.
-- `/version`: `{ data: { version, krtour_map_version, openapi_version,
-  commit }, meta }`. `version`=배포 프로그램(admin) 버전, `krtour_map_version`=메인
-  lib, `commit`=env `KRTOUR_MAP_GIT_COMMIT`(없으면 null). 클라이언트 호환 확인용.
-- 기존 `/debug/health`, `/debug/version`은 debug gate 하에 그대로 유지.
-  TripMate/user spec의 public liveness/readiness 표면은 `T-213h`에서 분리해 추가한다.
+아래가 TripMate가 소비하는 목표 표면이다. 현재 구현의 unversioned 경로는 각 항목의
+호환 경로로 본다.
 
-### 3.10 `GET /categories` — PlaceCategory 카탈로그 (T-213f)
-- **목적**: TripMate/admin frontend의 marker·필터용 정적 category 카탈로그(144건,
-  ADR-023/027) + 선택적 현재 DB 분포.
-- **query**: `include_counts`(bool, 기본 false — true면 category별 DB feature 수 포함),
-  `active_only`(bool, 기본 false — counts를 `status='active'` feature만으로).
-- **200**: `{ "data": { "items": [CategorySummary], "count": 144,
-  "include_counts": bool }, "meta": { "count", "duration_ms" } }`.
-  `CategorySummary` = `code`/`depth`/`tier1~4_code`·`name`/`label`/`path[]`/
-  `parent_code`/`sort_order`/`is_active`/`maki_icon`(+ `include_counts`면
-  `db_feature_count`/`db_active`). 정적 카탈로그는 immutable이라 모듈 로드 시 1회 구성
-  (ADR-030). 카탈로그 정본은 `krtour.map.category`(`docs/category.md`).
+### 3.1 Public status
 
-## 4. 시계열·미디어
-### 4.1 `GET /features/{feature_id}/weather` — weather card (T-213e — 구현됨)
-- **목적**: POI 상세 카드의 날씨 — forecast_style별 최신 metric + freshness.
-- **path**: `feature_id`(weather kind feature). **query**: `asof`(선택 — 이 시점 이하
-  weather만, 미래 예보 제외).
-- **200**: `{ "data": { "feature_id", "asof", "source_styles": [str],
-  "metrics": [{ "forecast_style", "metric_key", "metric_name", "timeline_bucket",
-  "value_number"(float), "value_text", "unit", "severity", "issued_at", "valid_at",
-  "observed_at" }], "latest_at", "is_stale": bool }, "meta": { "duration_ms" } }`.
-  각 (forecast_style, metric_key)에서 `COALESCE(valid_at, observed_at, issued_at)`
-  최신 1건(DISTINCT ON). `source_styles`는 source trace(nowcast/ultra_short/short/mid/
-  observed/advisory 등). `is_stale`은 최신 weather가 `asof`(또는 now) 기준 기본 6h를
-  넘으면 true. weather 없으면 빈 card(200). 적재 정본은 `feature.feature_weather_values`
-  (alembic 0017, ADR-010 — `make_weather_value_key` PK).
-- `kind=price`는 별도 `GET /features/{id}/prices`(후속). media는 `FeatureDetail.urls`
-  + RustFS 공개 URL.
+| Method | Path | 설명 |
+|--------|------|------|
+| GET | `/health` | liveness. DB 없이도 200 가능 |
+| GET | `/version` | admin package, main lib, OpenAPI, git commit 버전 |
 
-## 5. 마이그레이션 (TripMate 측, 별도 repo)
-- 구(ADR-003): `AsyncKrtourMapClient` 직접 import → feature 조회.
-- 신(ADR-045) — **kraddr-geo 동일방식(D-4)**:
-  - **backend(Python `apps/api`)**: 수기 httpx wrapper
-    `integrations/krtour_map_client.py`(krtour-map의 `KraddrGeoRestClient`처럼,
-    codegen 아님; timeout/retry/error 변환). 직접 import 제거.
-  - **frontend(Next.js/TS)**: krtour-map `openapi.user.json` →
-    `openapi-typescript` codegen + 수동 Zod mirror + CI diff 게이트.
-- TripMate는 `feature_id`만 외부 참조로 저장(FK 없음, ADR-045 §2).
+Deep readiness는 admin/ops 표면의 `GET /ops/health-deep`만 사용한다.
 
-## 6. 결정 반영 / 미확정 (→ adr045-open-decisions.md)
+### 3.2 Feature read
 
-**결정됨 (2026-06-01~02, 전부 adr045-open-decisions.md 반영)**:
-- **D-7 분리** — 본 문서의 `/features/*`는 공개(정제 필드). 원문 source_records·
-  provider/dataset 식별자, dedup·consistency·target refresh policy는
-  `/admin/features/*` 또는 `/admin/poi-cache-targets/*`(별도). 사용자 응답엔 미노출.
-- **D-6** — `run_mode=now` + 동일 scope lock 점유 시 **409 + `retry_after`**(§3.7,
-  queued fallback 아님). request:job=1:1.
-- **D-1** — infra(reverse proxy) 인증 + `X-Krtour-Service-Token` pass-through.
-- **D-3** — SemVer + admin/사용자 OpenAPI schema 이원화 (client 생성은 D-4).
-- **D-11** — 시군구 반경 해석은 kraddr-geo `POST /v2/regions/within-radius`,
-  `sig_cd`(5자리) = `features.sigungu_code`. 정본: `docs/regions-within-radius.md`.
+| Method | Target path | 현재 호환 경로 | 설명 |
+|--------|-------------|----------------|------|
+| GET | `/v1/features/in-bounds` | `/features/in-bounds` | 지도 bbox feature 또는 행정구역 cluster |
+| GET | `/v1/features/nearby` | `/features/nearby` | 좌표 반경 주변 feature |
+| GET | `/v1/features/nearby/by-target` | `/features/nearby/by-target` | 등록된 POI cache target 주변 feature |
+| GET | `/v1/features/search` | `/features/search` | 이름/bbox 검색 |
+| GET | `/v1/features/{feature_id}` | `/features/{feature_id}` | feature 상세 |
+| GET | `/v1/features/{feature_id}/weather` | `/features/{feature_id}/weather` | weather metric card |
+| POST | `/v1/features/batch` | `/tripmate/features/batch` | feature id batch 상세 조회 |
 
-**잔여(ADR-045 결정 대상 아님)**:
-- ~~일반 좌표 기준 `/features/nearby`~~ ✅ **구현됨(T-213b)** — `GET /features/nearby`
-  (`lon`/`lat`/`radius_m`(≤100km)/`kind[]`/`category[]`/`status[]`/`provider[]`/
-  `sort`(distance|name|last_updated_at)/`page_size`/`cursor`). 응답은
-  `{data:{origin, items[NearbyFeatureSummary], next_cursor}, meta:{count, duration_ms}}`,
-  user subset(`openapi.user.json`)에 포함. ADR-012: 입력 좌표를 CTE에서 1회만 5179로
-  변환하고 술어는 STORED `coord_5179`에 적용(by-target nearby와 동일 candidates CTE).
-- 클러스터링(`cluster_unit`) 알고리즘/줌 매핑 — `T-213c`.
-- provider last-sync, public health/version, weather card/category catalog —
-  `T-213e~h`.
+#### `GET /v1/features/in-bounds`
 
-## 7. 향후 개선 및 리팩토링 검토 사항 (2026-06-07)
+Query:
 
-일관성, 확장성 및 연동 편의성 극대화를 위한 향후 엔드포인트 개선 검토 사항입니다. 상세 분석은 [tripmate-api-improvement-analysis-2026-06-07.md](file:///F:/dev/python-krtour-map-antigravity/docs/reports/tripmate-api-improvement-analysis-2026-06-07.md)를 참조하십시오.
+- `min_lon`, `min_lat`, `max_lon`, `max_lat` required
+- `kind` repeat optional
+- `category` repeat optional
+- `zoom` optional
+- `cluster_unit` optional: `sido`, `sigungu`, `eupmyeondong`
+- `limit` optional, default 1000, max 5000
 
-### 7.1 POI Cache Target의 `/tripmate` 이전
-*   TripMate가 호출하는 `PUT`/`DELETE` cache target API를 기존 `/admin/poi-cache-targets/...`에서 `/tripmate/poi-cache-targets/...` 로 이전하여 `openapi.user.json`에 포함시키고 보안 경계를 명확히 분리합니다.
+Response:
 
-### 7.2 API 버전 관리 prefix `/v1` 도입
-*   사용자/TripMate용 공개 API군(`openapi.user.json`에 포함되는 `/features/*`, `/tripmate/*`, `/categories`, `/providers/*`)에 대해 공통 `/v1` prefix(예: `/v1/features/in-bounds`)를 일괄 적용하여 향후 하위 호환성 관리(SemVer major breaking 대응) 환경을 구축합니다. 어드민/운영 내부용 API는 제외합니다.
+```json
+{
+  "data": {
+    "count": 1,
+    "cluster_unit": null,
+    "clusters": [],
+    "items": [
+      {
+        "feature_id": "f_1111014700_p_019c0211c8a5ec4e",
+        "kind": "place",
+        "name": "경복궁",
+        "category": "01070100",
+        "lon": 126.977,
+        "lat": 37.5796,
+        "marker_icon": "monument",
+        "marker_color": "P-01",
+        "status": "active"
+      }
+    ]
+  },
+  "meta": {"duration_ms": 8}
+}
+```
 
-### 7.3 신규 공개 API 추가 검토
-*   **시계열 가격 정보 조회**: `GET /v1/features/{id}/prices` (주유소 유가 등 그래프 렌더링용)
-*   **검색어 자동완성**: `GET /v1/features/autocomplete` (타이핑 중 실시간 Typeahead 추천용 초경량 API)
-*   **경로 공간 정보 조회**: `GET /v1/features/{id}/paths` (걷기/트래킹 코스 LineString GeoJSON 렌더링용)
-*   **실시간 유고/휴무 알림 구독**: Webhook 또는 SSE (관광지 기상 악화, 임시 휴무 시 즉시 TripMate 푸시 연동용)
+`cluster_unit`이 있으면 `items=[]`, `clusters[]`를 반환한다.
 
+#### `GET /v1/features/nearby`
+
+Query:
+
+- `lon`, `lat`, `radius_m` required
+- `kind`, `category`, `status`, `provider` repeat optional
+- `sort` optional: `distance`, `name`, `last_updated_at`
+- `page_size` optional
+- `cursor` optional
+
+Response `data.items[]`는 `FeatureSummary`에 `distance_m`를 더한 객체다.
+
+#### `GET /v1/features/nearby/by-target`
+
+Query:
+
+- `external_system` required
+- `target_key` required
+- `radius_km` optional
+- `kind`, `category`, `status`, `provider` repeat optional
+- `page_size`, `cursor` optional
+
+이 경로는 이미 등록된 target을 읽기만 한다. target 등록/삭제 write 경로는 §5의
+후속 결정에 따른다.
+
+#### `GET /v1/features/search`
+
+Query:
+
+- `q` optional
+- `bbox` optional CSV: `min_lon,min_lat,max_lon,max_lat`
+- `kind`, `category` repeat optional
+- `page_size` optional, max 200
+- `cursor` optional
+
+`q`와 `bbox` 중 하나 이상이 필요하다.
+
+#### `GET /v1/features/{feature_id}`
+
+`feature_id`는 UUID가 아니라 opaque string이다. TripMate는 파싱하지 않고 그대로 저장한다.
+
+응답 `data` 핵심 필드:
+
+- `feature_id`
+- `kind`
+- `name`
+- `category`
+- `lon`, `lat`
+- `address`
+- `legal_dong_code`, `sido_code`, `sigungu_code`
+- `marker_color`, `marker_icon`
+- `urls`
+- `detail`
+- `status`
+- `updated_at`
+
+#### `POST /v1/features/batch`
+
+Request:
+
+```json
+{
+  "feature_ids": ["f_1111014700_p_019c0211c8a5ec4e"]
+}
+```
+
+`feature_ids`는 최대 200개다. 초과 trip은 TripMate client가 chunking한다.
+
+Response:
+
+```json
+{
+  "data": {
+    "items": {
+      "f_1111014700_p_019c0211c8a5ec4e": {}
+    },
+    "missing": []
+  },
+  "meta": {"duration_ms": 12}
+}
+```
+
+없는 id와 soft-deleted feature는 `missing`에 넣는다.
+
+### 3.3 Catalog / provider status
+
+| Method | Target path | 현재 호환 경로 | 설명 |
+|--------|-------------|----------------|------|
+| GET | `/v1/categories` | `/categories` | category catalog |
+| GET | `/v1/providers/{provider}/last-sync` | `/providers/{provider}/last-sync` | provider sync state |
+
+`GET /v1/categories`는 `include_counts`, `active_only` query를 받는다.
+`GET /v1/providers/{provider}/last-sync`는 `dataset_key`, `sync_scope` filter를 받는다.
+
+## 4. Admin API
+
+Admin API는 운영자 전용이다. TripMate 사용자 flow나 public web client가 직접 호출하지
+않는다. 인증은 코드가 아니라 인프라 계층에서 강제한다.
+
+### 4.1 Feature update request
+
+정본 경로:
+
+| Method | Path | 설명 |
+|--------|------|------|
+| GET | `/admin/feature-update-requests` | update request 목록 |
+| POST | `/admin/feature-update-requests` | update request 생성 또는 dry-run |
+| GET | `/admin/feature-update-requests/{request_id}` | 상태 조회 |
+| POST | `/admin/feature-update-requests/{request_id}/cancel` | 취소 |
+| POST | `/admin/feature-update-requests/{request_id}/run-now` | 즉시 실행 재큐잉 |
+
+`/tripmate/feature-update-requests*`는 제거됐다. 같은 기능을 두 namespace에 동시에
+노출하지 않는다.
+
+TripMate에서 사용자가 "새 장소 추가" 또는 "정보 수정"을 제안하는 경우:
+
+1. TripMate app DB의 사용자 제안 큐에 저장한다.
+2. TripMate/Admin 운영자가 검토한다.
+3. 승인된 제안만 krtour-map admin API의 `scope`로 변환해
+   `POST /admin/feature-update-requests`를 호출한다.
+
+### 4.2 Feature 사용자 요청 추가·수정·삭제
+
+사용자 요청으로 krtour-map DB에 feature를 직접 추가·수정·삭제해야 하는 경우 정본은
+`/admin/features*`다. TripMate public client가 직접 호출하지 않고, TripMate app DB의
+사용자 제안 큐나 운영 화면을 거친 뒤 admin API로 전달한다.
+
+처리 모드는 krtour-map admin backend 설정
+`KRTOUR_MAP_ADMIN_FEATURE_CHANGE_REVIEW_MODE`로 제어한다.
+
+| 값 | 의미 |
+|----|------|
+| `require_review` | 기본값. 요청을 `ops.feature_change_requests.state='pending'`으로 저장하고 승인 후 반영 |
+| `immediate` | 요청 transaction에서 바로 반영하고 `state='applied'`로 저장 |
+
+엔드포인트:
+
+| Method | Path | 설명 |
+|--------|------|------|
+| GET | `/admin/features/change-requests` | add/update/delete 요청 목록 |
+| POST | `/admin/features` | `place` 또는 `event` feature 추가 요청 |
+| PATCH | `/admin/features/{feature_id}` | `place` 또는 `event` feature 수정 요청 |
+| DELETE | `/admin/features/{feature_id}` | `place` 또는 `event` feature 사용자 요청 soft delete |
+| POST | `/admin/features/change-requests/{request_id}/approve` | pending 요청 승인·적용 |
+| POST | `/admin/features/change-requests/{request_id}/reject` | pending 요청 거절 |
+
+버전/재적재 규칙:
+
+- provider 적재 데이터는 `data_origin='provider'`, `data_version=0`이다.
+- 사용자 요청으로 추가·수정·삭제된 데이터는 `data_origin='user_request'`,
+  `data_version=1`이다.
+- provider 재적재가 같은 `feature_id`를 다시 적재하면 provider snapshot은 version 0에
+  갱신하되, 적용 중인 사용자 version 1 필드를 덮어쓰지 않는다.
+- 사용자 요청 삭제는 soft delete다. `status='deleted'`, `deleted_at`,
+  `user_deleted_at`, `user_deleted_by`, `user_change_request_id`를 남기며 provider
+  재적재나 snapshot 누락 정리로 다시 살아나지 않는다.
+- 사용자 요청 추가 데이터는 재적재 snapshot 미포함 정리에서 삭제하지 않는다.
+
+### 4.3 POI cache target
+
+현재 구현 정본:
+
+| Method | Path | 설명 |
+|--------|------|------|
+| GET | `/admin/poi-cache-targets` | target 목록 |
+| GET | `/admin/poi-cache-targets/{external_system}/{target_key}` | target 상세 |
+| PUT | `/admin/poi-cache-targets/{external_system}/{target_key}` | target upsert |
+| DELETE | `/admin/poi-cache-targets/{external_system}/{target_key}` | target 삭제 |
+
+TripMate가 POI 생성/수정/삭제 때 target을 직접 write해야 한다면 `/admin`을 노출하지
+말고 service-safe 경로를 별도로 만든다. 후보는
+`/v1/poi-cache-targets/{external_system}/{target_key}`다. 이 결정과 구현은 `T-214f`로
+분리한다.
+
+### 4.4 기타 admin/ops/debug
+
+아래 경로는 admin 전체 OpenAPI에만 포함한다.
+
+- `/admin/features`
+- `/admin/issues`
+- `/admin/dedup-review`
+- `/admin/enrichment-review`
+- `/admin/offline-uploads`
+- `/admin/backups`, `/admin/restore`
+- `/ops/metrics`, `/ops/import-jobs`, `/ops/consistency/*`
+- `/ops/system-logs`, `/ops/api-call-logs`
+- `/ops/dagster/*`
+- `/debug/*`
+
+`/debug/health`와 `/debug/version`은 개발자 호환 경로로 유지하되, TripMate/public
+상태 확인은 `/health`와 `/version`만 사용한다.
+
+## 5. TripMate 소비 매핑
+
+| TripMate 기능 | krtour-map 목표 API | 비고 |
+|---------------|---------------------|------|
+| 지도 viewport | `GET /v1/features/in-bounds` | 서버 cluster 사용 |
+| 주변 feature | `GET /v1/features/nearby` | cursor 페이지네이션 |
+| POI target 주변 | `GET /v1/features/nearby/by-target` | target write API는 `T-214f` 결정 |
+| feature 상세 | `GET /v1/features/{feature_id}` | `feature_id` opaque string |
+| trip view batch | `POST /v1/features/batch` | 기존 `/tripmate/features/batch` 대체 |
+| 검색 | `GET /v1/features/search` | 주소/내 POI 검색은 TripMate가 합성 |
+| 날씨 카드 | `GET /v1/features/{feature_id}/weather` | `forecast_style`별 grouping은 TripMate 표현 계층 |
+| 카테고리 | `GET /v1/categories` | 긴 TTL 캐시 가능 |
+| provider 신선도 | `GET /v1/providers/{provider}/last-sync` | 사용자 표시 또는 admin 상태판 |
+| 사용자 장소 제안 | 없음 | TripMate app DB 큐가 소유 |
+| 운영 feature 추가/수정/삭제 | `/admin/features*` | admin review mode에 따라 pending 또는 즉시 반영 |
+| 운영 refresh 실행 | `/admin/feature-update-requests*` | admin/operator flow만 |
+
+## 6. 누락/정리 backlog
+
+REST 표면을 위 목표 계약으로 맞추기 위한 후속 task는 `docs/tasks.md`의 `T-214` 묶음이
+정본이다. 핵심은 다음 순서다.
+
+1. `/v1` prefix 도입과 unversioned 호환 경로 deprecation.
+2. `/tripmate/feature-update-requests*` 제거, admin-only 전환. (완료)
+3. `POST /tripmate/features/batch`를 `POST /v1/features/batch`로 이동.
+4. pageable list parameter를 `cursor/page_size`로 정렬.
+5. POI cache target write를 external service API로 열지 admin-only로 둘지 결정.
+6. idempotency/rate-limit header, error code, deprecation header 규약을 OpenAPI에 명시.
+
+가격 시계열(`GET /v1/features/{feature_id}/prices`), 검색 자동완성,
+route/path GeoJSON, webhook/SSE 알림은 Sprint 5 운영 진입 이후 별도 제품 요구로
+분리한다.

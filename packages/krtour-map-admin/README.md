@@ -101,6 +101,7 @@ shadcn/ui + `@krtour/map-marker-react` (ADR-029). 자세한 사양:
 | `KRTOUR_MAP_ADMIN_RESTORE_DAGSTER_DB` | `krtour_map_dagster_restore` | staging restore Dagster DB 기본값 |
 | `KRTOUR_MAP_ADMIN_RESTORE_RUSTFS_VOLUME` | `krtour-map-rustfs-restore` | staging restore RustFS volume 기본값 |
 | `KRTOUR_MAP_ADMIN_FRONTEND_DIST` | (auto) | static export 모드 시 `frontend/out/` 경로 |
+| `KRTOUR_MAP_ADMIN_FEATURE_CHANGE_REVIEW_MODE` | `require_review` | place/event feature 추가·수정·삭제 요청 처리 모드. `require_review` 또는 `immediate` |
 
 ### Frontend (`NEXT_PUBLIC_*` — Next.js 규약)
 
@@ -120,10 +121,10 @@ shadcn/ui + `@krtour/map-marker-react` (ADR-029). 자세한 사양:
 
 - `/health`, `/version`
 - `/features/{id}`, `/features/in-bounds`, `/features/nearby`
-- `/admin/features`, `/admin/features/{id}/deactivate`
+- `/admin/features`, `/admin/features/{id}`, `/admin/features/{id}/deactivate`,
+  `/admin/features/change-requests`
 - `/admin/providers`, `/admin/providers/{provider}/datasets/{dataset_key}/runs`
 - `/admin/feature-update-requests` (좌표/반경/시군구/provider 기준 업데이트 생성/조회/취소/run-now 재큐잉)
-- `/tripmate/feature-update-requests` (TripMate/user OpenAPI용 업데이트 생성/조회 alias)
 - `/admin/poi-cache-targets`, `/features/nearby/by-target` (외부 POI key 기준 target
   등록/삭제/주변 feature summary 조회)
 - `/admin/provider-refresh-policies` (provider별 update 주기/rate limit 정책)

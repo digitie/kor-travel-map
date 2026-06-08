@@ -9,11 +9,12 @@
 요구사항 후속(T-213a~h), T-RV-04b provider live wiring, T-212a inventory,
 T-212b admin UI 완결성, T-212c API/error/log contract, T-212d seeded PostGIS
 성능 baseline, T-209e backup/restore 최종 safety automation까지 merged 또는 PR
-진행 범위로 닫았다.
+진행 범위로 닫았다. REST API v1 정리 후속은 `T-214`로 분리했다.
 
 Sprint 5 종료까지 남은 작업은
 `docs/reports/sprint5-final-task-breakdown-2026-06-07.md`를 정본으로 상세화했다.
-권장 순서는 **T-212e 실데이터 full reload → T-210 TripMate 연계 정리 → Sprint 5
+권장 순서는 **T-212e 실데이터 full reload → T-214 REST API v1 정리 →
+T-210 TripMate 연계 정리 → Sprint 5
 closure**다. T-207b는 사용자 결정에 따라 구현하지 않는다.
 
 ### 현재 기준 보강 필요 체크포인트 (2026-06-03)
@@ -655,8 +656,8 @@ lint-imports/pytest/coverage, frontend type-check/e2e). 실데이터 검증은 T
   consistency report, data integrity issue를 read-only keyset cursor로 조회한다.
 - **T-207c** (2026-06-03): `/admin/features` 목록/비활성화, `ops.feature_overrides`
   `prevent_provider_reactivation`, provider upsert status 보호, `/admin/dedup-review`
-  목록/결정/merge backend를 연결. 수동 feature 생성과 영구 삭제는 audit log 설계 후
-  후속으로 남긴다.
+  목록/결정/merge backend를 연결. 이후 T-215a에서 사용자 요청 기반 place/event
+  추가·수정·soft delete API를 붙였다. hard delete와 별도 audit log는 여전히 후속이다.
 - **PR#168** (merged 2026-06-03): Dagster `feature_update_request_queue_sensor` +
   `feature_update_request_worker` + failure sensor. queued/now request를
   `AsyncKrtourMapClient.execute_feature_update_request()`로 실행하고, 실패 시
@@ -967,8 +968,9 @@ lint-imports/pytest/coverage, frontend type-check/e2e). 실데이터 검증은 T
 - [x] T-207c — `/admin/features` 검토/병합/override/deactivate (D-8).
   `/admin/features` 목록과 deactivate, active status override, provider upsert
   재활성화 방지, `/admin/dedup-review` 목록/accepted/rejected/ignored/merged 전이를
-  연결했다. `POST /admin/features` 수동 생성과 `DELETE /admin/features/{id}` 영구 삭제는
-  `ops.admin_audit_log` 설계 후 후속 작업으로 남긴다.
+  연결했다. 이후 T-215a에서 `POST /admin/features`, `PATCH`/`DELETE /admin/features/{id}`
+  사용자 요청 API를 추가했다. `DELETE`는 user-request soft delete이며, hard delete와
+  별도 admin audit log는 후속 작업으로 남긴다.
 - [x] T-207d — `/ops/*` consistency/jobs/metrics. `GET /ops/metrics`,
   `GET /ops/import-jobs`, `GET /ops/import-jobs/{job_id}`,
   `GET /ops/consistency/reports`, `GET /ops/consistency/issues`를 연결했다.
@@ -1071,6 +1073,9 @@ lint-imports/pytest/coverage, frontend type-check/e2e). 실데이터 검증은 T
 **Phase 6 — TripMate 연계/정리 (일부 TripMate repo)**
 - [ ] T-210a — `docs/tripmate-rest-api.md` 확정(본 PR 1차) → 구현 시 OpenAPI 동기.
       Sprint 5 closure 전 `openapi.user.json`과 실제 TripMate 요구사항을 다시 대조한다.
+      2026-06-08 Codex가 API endpoint review와 TripMate 소비자 문서를 종합해
+      `docs/tripmate-rest-api.md`를 `/v1` 목표 계약 기준으로 재작성했다. 실제
+      OpenAPI/라우터 동기화는 `T-214`에서 진행한다.
 - [ ] T-210b — TripMate 문서 supersede(직접 import/공유 DB/owned Dagster, TripMate repo).
       대상 문서 목록과 치환 문구는 PR 본문에 남기고, krtour-map repo에는 링크/요약만 둔다.
 - [ ] T-210c — TripMate `apps/etl`에 남은 레거시 Dagster 문서/스켈레톤은
@@ -1162,6 +1167,64 @@ lint-imports/pytest/coverage, frontend type-check/e2e). 실데이터 검증은 T
   user OpenAPI subset 포함, frontend types 재생성. router unit 5(spec presence/
   liveness/version/env commit/feature-off 시에도 mount). **deep readiness**(DB/RustFS/
   Dagster `/ops/health-deep`)는 후속 — liveness를 DB-free로 유지하기 위해 분리.
+
+**Phase 6.6 — REST API v1 정리 후속 (2026-06-08, `T-214`)**
+
+정본 문서는 `docs/tripmate-rest-api.md`. 기준 입력은
+`docs/reports/api-endpoint-review-2026-06-08.md`와 TripMate
+`docs/integrations/krtour-map-rest-api.md`. 사용자 결정으로
+`/tripmate/feature-update-requests*`는 admin 영역으로 이동한다.
+
+- [x] **T-214a — REST API 정본 문서 작성.**
+  Versioning, envelope, parameter 규약, endpoint naming, 중복 처리, 누락 API를
+  종합해 `docs/tripmate-rest-api.md`를 목표 `/v1` 계약과 현재 구현 gap 중심으로
+  재작성했다. `docs/openapi-admin-contract.md`, `docs/tripmate-integration.md`,
+  `docs/poi-cache-update-targets.md`, `docs/architecture.md`의 충돌 문구도 정리했다.
+- [ ] **T-214b — 사용자/서비스 API `/v1` prefix 도입.**
+  `/features/*`, `/categories`, `/providers/{provider}/last-sync`,
+  `POST /features/batch` 목표 경로를 `/v1/*`로 노출하고, 기존 unversioned 경로는
+  호환 alias + `deprecated: true` + deprecation header로 표시한다. admin/ops/debug는
+  prefix 없이 유지한다.
+- [x] **T-214c — `/tripmate/feature-update-requests*` 제거, admin-only 전환.**
+  user OpenAPI와 `USER_OPERATIONS`에서 `POST/GET /tripmate/feature-update-requests*`를
+  제거하고 `/admin/feature-update-requests*`만 정본으로 남긴다. TripMate 사용자 제안 큐는
+  TripMate app DB 소유로 문서화하고, 운영자 승인 뒤 admin API 호출로 연결한다.
+- [ ] **T-214d — batch 조회 경로를 `POST /v1/features/batch`로 이동.**
+  기존 `POST /tripmate/features/batch`는 호환 alias로 유지하거나 deprecate하고,
+  OpenAPI/user docs/frontend generated type을 새 경로로 정렬한다.
+- [ ] **T-214e — pagination/parameter 일관성 정리.**
+  페이지 가능한 목록은 `cursor/page_size`, bounded 지도 조회는 `limit`, 다중 값은 반복
+  query parameter, bbox는 `min_lon/min_lat/max_lon/max_lat`를 기본으로 문서와 schema를
+  맞춘다. `/features` flat 목록은 admin 호환용으로만 두거나 cursor 지원을 추가한다.
+- [ ] **T-214f — POI cache target write 표면 결정.**
+  TripMate가 POI target upsert/delete를 직접 해야 하면 `/admin/poi-cache-targets`를 노출하지
+  말고 service-safe `/v1/poi-cache-targets/{external_system}/{target_key}` 경로를 추가한다.
+  직접 write를 허용하지 않으면 TripMate admin/operator flow만 허용한다고 명시한다.
+- [ ] **T-214g — error/idempotency/rate-limit/deprecation header 명시.**
+  `Idempotency-Key`, `Retry-After`, `X-RateLimit-*`, `Deprecation`, `Sunset`,
+  `X-Request-ID` 규약과 표준 error code를 OpenAPI schema/라우터 테스트/문서에 고정한다.
+- [ ] **T-214h — endpoint naming cleanup.**
+  `/debug/health`·`/debug/version`은 debug 호환 경로로만 표시하고 public 상태 확인은
+  `/health`·`/version`·`/ops/health-deep`으로 수렴한다. 차기 major에서
+  `/admin/dedup-review`/`/admin/enrichment-review` 복수화 가능 여부를 검토한다.
+
+**Phase 6.7 — Feature 사용자 요청 CRUD/versioning (2026-06-08, `T-215`)**
+
+- [x] **T-215a — place/event feature 추가·수정·삭제 admin API + versioning.**
+  `/admin/features`에 `POST`, `/admin/features/{feature_id}`에 `PATCH`/`DELETE`,
+  `/admin/features/change-requests*` 승인/거절 API를 추가했다.
+  `KRTOUR_MAP_ADMIN_FEATURE_CHANGE_REVIEW_MODE=require_review|immediate` 설정에 따라
+  요청을 `pending`으로 보관하거나 같은 transaction에서 바로 적용한다. provider 적재는
+  `data_origin='provider', data_version=0`, 사용자 요청은
+  `data_origin='user_request', data_version=1`로 구분하고
+  `feature.feature_versions` snapshot을 남긴다. 사용자 요청 삭제는 soft delete이며
+  provider 재적재나 snapshot 누락 정리로 되살리지 않는다.
+- [ ] **T-215b — admin UI feature change queue 화면.**
+  `GET /admin/features/change-requests` 목록, add/update/delete form, approve/reject
+  동작, `KRTOUR_MAP_ADMIN_FEATURE_CHANGE_REVIEW_MODE` 표시를 frontend에 연결한다.
+- [ ] **T-215c — frontend generated type/e2e workflow 보강.**
+  OpenAPI 타입 기반 mutation hook, pending→approve→applied flow, immediate mode route
+  mock, soft delete 표시/필터 e2e를 추가한다.
 
 **Phase 7 — ADR-045 전체점검/튜닝 (ADR-045 잔여 task 완료 후 시작)**
 

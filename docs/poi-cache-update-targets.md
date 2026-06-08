@@ -427,9 +427,11 @@ Target summary도 외부 key와 좌표만 반환하며 `target_id`, `refresh_pol
 
 ### 7.4 Target 기반 update request
 
-#### `POST /tripmate/feature-update-requests`
+#### `POST /admin/feature-update-requests`
 
-scope에 `cache_target_keys`를 추가한다.
+feature update request는 운영자/admin 영역이다. scope에 `cache_target_keys`를
+추가해 등록된 target 묶음 기준 refresh를 실행한다. TripMate 사용자 제안 큐는
+TripMate app DB가 소유하고, 운영자 승인 뒤 admin API로 이 요청을 만든다.
 
 ```json
 {

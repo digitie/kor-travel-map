@@ -59,6 +59,7 @@ __all__ = [
     "metadata",
     "Base",
     "FeatureRow",
+    "FeatureVersionRow",
     "SourceRecordRow",
     "SourceLinkRow",
     "ProviderSyncStateRow",
@@ -68,6 +69,7 @@ __all__ = [
     "ImportJobRow",
     "OfflineUploadRow",
     "FeatureOverrideRow",
+    "FeatureChangeRequestRow",
     "FeatureUpdateRequestRow",
     "DataIntegrityViolationRow",
     "PoiCacheTargetRow",
@@ -126,6 +128,20 @@ class FeatureRow(Base):
             name="features_status",
         ),
         CheckConstraint(
+            "data_origin IN ('provider','user_request')",
+            name="ck_features_data_origin",
+        ),
+        CheckConstraint("data_version >= 0", name="ck_features_data_version"),
+        CheckConstraint(
+            "user_change_kind IS NULL OR user_change_kind IN ('add','update','delete')",
+            name="ck_features_user_change_kind",
+        ),
+        CheckConstraint(
+            "user_change_status IS NULL OR user_change_status IN "
+            "('pending','applied','rejected')",
+            name="ck_features_user_change_status",
+        ),
+        CheckConstraint(
             "coord IS NULL OR ("
             "ST_X(coord) BETWEEN 124.0 AND 132.0 AND "
             "ST_Y(coord) BETWEEN 33.0 AND 39.5)",
@@ -179,6 +195,12 @@ class FeatureRow(Base):
               postgresql_where=text("sibling_group_id IS NOT NULL")),
         Index("idx_features_name_trgm", "name", postgresql_using="gin",
               postgresql_ops={"name": "x_extension.gin_trgm_ops"}),
+        Index("idx_features_data_origin", "data_origin", "data_version"),
+        Index(
+            "idx_features_user_deleted",
+            "user_deleted_at",
+            postgresql_where=text("user_deleted_at IS NOT NULL"),
+        ),
         {"schema": "feature"},
     )
 
@@ -234,6 +256,18 @@ class FeatureRow(Base):
     status: Mapped[str] = mapped_column(
         String, nullable=False, server_default=text("'active'"),
     )
+    data_origin: Mapped[str] = mapped_column(
+        String, nullable=False, server_default=text("'provider'"),
+    )
+    data_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0"),
+    )
+    user_change_kind: Mapped[str | None] = mapped_column(String)
+    user_change_status: Mapped[str | None] = mapped_column(String)
+    user_change_request_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    user_deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    user_deleted_by: Mapped[str | None] = mapped_column(String)
+    user_change_reason: Mapped[str | None] = mapped_column(Text)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()"),
@@ -242,6 +276,46 @@ class FeatureRow(Base):
         DateTime(timezone=True), nullable=False, server_default=text("now()"),
     )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class FeatureVersionRow(Base):
+    """``feature.feature_versions`` row mapping.
+
+    provider 적재 snapshot은 version 0, 사용자/admin 요청으로 적용된 effective
+    snapshot은 version 1에 저장한다. ``feature.features``는 조회용 effective row다.
+    """
+
+    __tablename__ = "feature_versions"
+    __table_args__ = (
+        CheckConstraint("version >= 0", name="ck_feature_versions_version"),
+        CheckConstraint(
+            "origin IN ('provider','user_request')",
+            name="ck_feature_versions_origin",
+        ),
+        CheckConstraint(
+            "change_kind IN ('load','add','update','delete')",
+            name="ck_feature_versions_change_kind",
+        ),
+        Index("idx_feature_versions_request", "request_id"),
+        {"schema": "feature"},
+    )
+
+    feature_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("feature.features.feature_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    version: Mapped[int] = mapped_column(Integer, primary_key=True)
+    origin: Mapped[str] = mapped_column(String, nullable=False)
+    change_kind: Mapped[str] = mapped_column(String, nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb"),
+    )
+    request_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    created_by: Mapped[str | None] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
 
 
 # =============================================================================
@@ -683,6 +757,66 @@ class FeatureOverrideRow(Base):
     )
     reason: Mapped[str | None] = mapped_column(Text)
     created_by: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
+
+
+# =============================================================================
+# ops.feature_change_requests  (user/admin feature add/update/delete)
+# =============================================================================
+
+
+class FeatureChangeRequestRow(Base):
+    """``ops.feature_change_requests`` row mapping.
+
+    place/event feature 추가·수정·삭제 요청을 보존한다. admin 설정에 따라
+    ``pending``으로 남거나 즉시 ``applied``된다.
+    """
+
+    __tablename__ = "feature_change_requests"
+    __table_args__ = (
+        CheckConstraint(
+            "action IN ('add','update','delete')",
+            name="ck_feature_change_action",
+        ),
+        CheckConstraint(
+            "state IN ('pending','applied','rejected')",
+            name="ck_feature_change_state",
+        ),
+        CheckConstraint(
+            "review_mode IN ('require_review','immediate')",
+            name="ck_feature_change_review_mode",
+        ),
+        Index(
+            "idx_feature_change_state_created",
+            "state",
+            text("created_at DESC"),
+            text("request_id DESC"),
+        ),
+        Index("idx_feature_change_feature", "feature_id"),
+        {"schema": "ops"},
+    )
+
+    request_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=text("x_extension.gen_random_uuid()"),
+    )
+    feature_id: Mapped[str] = mapped_column(String, nullable=False)
+    action: Mapped[str] = mapped_column(String, nullable=False)
+    state: Mapped[str] = mapped_column(
+        String, nullable=False, server_default=text("'pending'"),
+    )
+    review_mode: Mapped[str] = mapped_column(String, nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb"),
+    )
+    reason: Mapped[str | None] = mapped_column(Text)
+    requested_by: Mapped[str | None] = mapped_column(Text)
+    reviewed_by: Mapped[str | None] = mapped_column(Text)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()"),
     )
