@@ -210,7 +210,11 @@ def test_dagster_run_detail_parses_graphql_response(
         assert graphql_url == "http://dagster.example:9013/graphql"
         calls.append({"query": query, "variables": variables})
         assert query == dagster_mod._DAGSTER_RUN_DETAIL_QUERY
-        assert variables == {"runId": "run-1", "eventLimit": 5}
+        assert variables == {
+            "runId": "run-1",
+            "eventLimit": 5,
+            "afterCursor": None,
+        }
         return {
             "data": {
                 "runOrError": {
@@ -277,7 +281,7 @@ def test_dagster_run_detail_parses_graphql_response(
     assert calls == [
         {
             "query": dagster_mod._DAGSTER_RUN_DETAIL_QUERY,
-            "variables": {"runId": "run-1", "eventLimit": 5},
+            "variables": {"runId": "run-1", "eventLimit": 5, "afterCursor": None},
         },
     ]
 
@@ -312,6 +316,75 @@ def test_dagster_run_detail_returns_not_found(
     assert data["run"] is None
     assert data["events"] == []
     assert data["errors"] == ["Run not found"]
+
+
+@pytest.mark.unit
+def test_dagster_run_detail_passes_after_cursor(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``after`` 쿼리파라미터가 GraphQL ``afterCursor`` 변수로 전달돼야 한다(긴 run
+    뒤쪽 실패 이벤트로 전진 페이지네이션, #291 리뷰)."""
+    seen: list[dict[str, object]] = []
+
+    async def _fake_post_graphql(
+        client: httpx.AsyncClient,
+        graphql_url: str,
+        variables: dict[str, object],
+        query: str = dagster_mod._DAGSTER_SUMMARY_QUERY,
+    ) -> dict[str, object]:
+        seen.append(variables)
+        return {
+            "data": {
+                "runOrError": {
+                    "__typename": "Run",
+                    "runId": "run-1",
+                    "status": "FAILURE",
+                    "tags": [],
+                    "eventConnection": {"cursor": None, "hasMore": False, "events": []},
+                }
+            }
+        }
+
+    monkeypatch.setattr(dagster_mod, "_post_graphql", _fake_post_graphql)
+
+    response = client.get("/ops/dagster/runs/run-1?event_limit=5&after=ev-cursor-80")
+
+    assert response.status_code == 200
+    assert seen == [{"runId": "run-1", "eventLimit": 5, "afterCursor": "ev-cursor-80"}]
+
+
+@pytest.mark.unit
+def test_dagster_run_detail_graphql_error_extracts_message(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GraphQL top-level errors는 dict repr이 아니라 message만 노출돼야 한다(#291 리뷰)."""
+
+    async def _fake_post_graphql(
+        client: httpx.AsyncClient,
+        graphql_url: str,
+        variables: dict[str, object],
+        query: str = dagster_mod._DAGSTER_SUMMARY_QUERY,
+    ) -> dict[str, object]:
+        return {
+            "errors": [
+                {
+                    "message": "Field 'bogus' doesn't exist",
+                    "locations": [{"line": 3, "column": 5}],
+                    "path": ["runOrError"],
+                }
+            ]
+        }
+
+    monkeypatch.setattr(dagster_mod, "_post_graphql", _fake_post_graphql)
+
+    response = client.get("/ops/dagster/runs/run-1")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["status"] == "error"
+    assert data["errors"] == ["Field 'bogus' doesn't exist"]
+    # dict repr(파이썬 표현)이 새지 않아야 한다.
+    assert "locations" not in data["errors"][0]
 
 
 @pytest.mark.unit

@@ -494,9 +494,22 @@ function RunEventsTable({ events }: { events: DagsterRunEvent[] }) {
 }
 
 function RunDetailCard({ runId }: { runId: string | null }) {
-  const detail = useDagsterRunDetail(runId, 80);
+  // event log cursor 페이지네이션 — 긴 run의 뒤쪽(실패) 이벤트로 전진하기 위함.
+  // cursorStack: 2페이지부터의 after cursor 누적(1페이지는 after 없음). run 전환 시
+  // 호출부의 key={runId}로 remount돼 1페이지로 리셋된다.
+  const [cursorStack, setCursorStack] = useState<string[]>([]);
+  const after = cursorStack.length > 0 ? cursorStack[cursorStack.length - 1] : null;
+
+  const detail = useDagsterRunDetail(runId, 80, after);
   const data = detail.data?.data;
   const run = data?.run;
+  const nextCursor = data?.event_cursor ?? null;
+  const goNext = () => {
+    if (data?.event_has_more && nextCursor) {
+      setCursorStack((stack) => [...stack, nextCursor]);
+    }
+  };
+  const goPrev = () => setCursorStack((stack) => stack.slice(0, -1));
 
   return (
     <Card>
@@ -594,6 +607,36 @@ function RunDetailCard({ runId }: { runId: string | null }) {
         ) : null}
 
         {data ? <RunEventsTable events={data.events ?? []} /> : null}
+
+        {data?.run ? (
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs text-muted-foreground">
+              이벤트 페이지 {cursorStack.length + 1} · {data.events?.length ?? 0}건
+              {data.event_has_more ? " (뒤쪽 이벤트 더 있음)" : ""}
+            </span>
+            <div className="flex gap-1">
+              <Button
+                disabled={cursorStack.length === 0 || detail.isFetching}
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={goPrev}
+              >
+                이전
+              </Button>
+              <Button
+                aria-label="다음 이벤트"
+                disabled={!data.event_has_more || detail.isFetching}
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={goNext}
+              >
+                다음
+              </Button>
+            </div>
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   );
@@ -757,7 +800,10 @@ export function DagsterAdminClient() {
               </CardContent>
             </Card>
 
-            <RunDetailCard runId={effectiveSelectedRunId} />
+            <RunDetailCard
+              key={effectiveSelectedRunId ?? "none"}
+              runId={effectiveSelectedRunId}
+            />
           </div>
 
           <Card className="min-h-[48rem]">

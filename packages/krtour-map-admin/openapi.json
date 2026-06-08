@@ -12098,6 +12098,24 @@
               "title": "Event Limit",
               "type": "integer"
             }
+          },
+          {
+            "description": "event log cursor(이전 응답의 event_cursor). 긴 run의 뒤쪽(실패) 이벤트로 전진 페이지네이션하기 위함. 미지정이면 처음부터.",
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "event log cursor(이전 응답의 event_cursor). 긴 run의 뒤쪽(실패) 이벤트로 전진 페이지네이션하기 위함. 미지정이면 처음부터.",
+              "title": "After"
+            }
           }
         ],
         "responses": {
