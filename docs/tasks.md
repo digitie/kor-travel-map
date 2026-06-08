@@ -1172,7 +1172,7 @@ lint-imports/pytest/coverage, frontend type-check/e2e). 실데이터 검증은 T
       43/13 path, frontend route 10개, Dagster job/sensor/schedule/resource, DB/API/
       frontend/e2e gap을 최신 main 기준으로 재분류했다. 후속은 T-209e-c, T-212b~e로
       분리한다.
-- [ ] T-212b — admin UI 완결성 보강.
+- [x] T-212b — admin UI 완결성 보강.
       table 기반 CRUD, 지도뷰 검토, 이슈 승인/거절, API debug/test, Dagster monitoring
       summary/scraping, 시스템/이슈 로그 확인 화면을 운영자 workflow 기준으로 보완한다.
       상세 분해:
@@ -1191,7 +1191,11 @@ lint-imports/pytest/coverage, frontend type-check/e2e). 실데이터 검증은 T
       - [x] Dagster summary에 schedule/sensor recent tick을 포함하고,
         `/ops/dagster/runs/{run_id}` event/failure detail API와 `/admin/dagster`
         선택 panel을 연결(2026-06-07 Codex).
-      - [ ] offline upload/POI cache target 주요 mutation e2e.
+      - [x] offline upload/POI cache target 주요 mutation e2e(2026-06-08 Codex).
+        Playwright route mock으로 `/admin/poi-cache-targets` upsert → target 선택 →
+        `/features/nearby/by-target` 조회 → delete, `/admin/offline-uploads`
+        CSV multipart upload → preview → validation → Dagster load alert까지 브라우저
+        상호작용과 mutation 요청을 고정했다.
 - [x] T-212c — API endpoint/error/log contract 정리 (2026-06-07 완료).
       admin/user endpoint shape, error envelope, debug/test endpoint, import job event,
       system log API, route mount 정책을 점검하고 필요한 backend를 구현한다.

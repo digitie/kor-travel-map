@@ -1,5 +1,24 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-08 Codex 작업 메모 — T-212b admin UI 완결성 완료
+
+PR#291(Dagster tick/run failure 드릴다운)과 PR#277(admin feature/issues/logs 화면)을 최신
+main에 머지한 뒤, T-212b 마지막 잔여였던 **offline upload/POI cache target 주요 mutation e2e**를
+별도 PR 범위로 닫았다.
+
+- `/admin/poi-cache-targets`: Playwright route mock으로 target upsert(`PUT`) → 목록 반영 →
+  target 선택 → `/features/nearby/by-target` 조회 → target delete(`DELETE`)까지 운영자 흐름을
+  검증한다.
+- `/admin/offline-uploads`: CSV multipart upload(`POST`) → preview 조회 → validation
+  실행(`POST /validate`) → 상태 필터 전환 → Dagster load 실행(`POST /load`) alert까지 검증한다.
+- backend DB/RustFS/Dagster 실스택 검증은 T-212e live full reload에서 수행하고, 이번 e2e는
+  브라우저 상호작용과 API 계약 요청/응답 shape를 고정하는 범위다.
+
+**현재 상태**: T-212b 완료. 남은 큰 축은 T-212d seeded PostGIS perf baseline, T-212e 실데이터
+full reload 최종 검증, T-210 TripMate 연계 정리, Sprint 5 closure다.
+
+**다음 한 작업 후보**: 실데이터 없이 바로 가능한 **T-212d seeded PostGIS perf baseline**.
+
 ## 2026-06-08 Claude 작업 메모 — T-RV-04b 완전 종료 (opinet 3/3 POI-타깃 완료)
 
 opinet wiring 3 PR 전부 머지(또는 머지 대기): opinet-1 ADR-044 재정렬(#302) · opinet-2 bbox(#303)
@@ -26,7 +45,7 @@ T-RV-04b 본체 마지막 1건(opinet) 진행 중. 사용자 결정 = bbox + POI
 `_enumerate_opinet_stations`로 enumerate(uni_id dedup). 단위 테스트(fake target + fake opinet).
 완료 시 **T-RV-04b 완전 종료**. (POI 인프라: `infra/scope_repo.py`/`PoiCacheTargetRow`.)
 
-## 2026-06-08 Claude 작업 메모 — T-RV-04b 후속 program(T-RV-50~55) 전체 완료
+## 2026-06-08 Claude 작업 메모 — T-RV-04b 후속 program 전체 완료
 
 T-RV-55d-2(airkorea orchestration)까지 완료·머지하며 **T-RV-04b 후속 program(T-RV-50~55) 전체
 종료**. 이번 세션에서 머지한 PR: #296(55e krairport) · #297/#298/#299(52c enrichment review

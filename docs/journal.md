@@ -2,6 +2,22 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-08 (codex) — T-212b admin UI mutation e2e 완료
+
+**작업**: PR#291(Dagster 드릴다운)과 PR#277(admin UI 핵심 화면)을 머지한 뒤, T-212b 마지막
+잔여인 offline upload/POI cache target 주요 mutation e2e를 별도 PR로 분리.
+
+- `/admin/poi-cache-targets` Playwright flow: target upsert(`PUT`) → 목록 반영 → row 선택 →
+  `/features/nearby/by-target` 조회 → target delete(`DELETE`) 요청과 row 제거 확인.
+- `/admin/offline-uploads` Playwright flow: CSV multipart upload(`POST`) → preview 조회 →
+  validation 실행(`POST /validate`) → `validated` 필터 전환 → Dagster load 실행(`POST /load`)
+  alert 확인.
+- route mock은 backend DB/RustFS/Dagster 상태와 분리해 브라우저 상호작용, 요청 method/path/body,
+  envelope 응답 shape, React Query invalidation 후 화면 상태 변화를 고정한다.
+
+**상태**: `docs/tasks.md`의 T-212b 체크리스트 완료 처리. 실스택/실데이터 검증은 T-212e에서
+별도 수행.
+
 ## 2026-06-08 (claude) — 리뷰 후속: enrichment-review 페이지네이션 UI (#299)
 
 **작업**: PR #299 리뷰(digitie) non-blocker 메모 — enrichment-review 프론트가 `page_size 100`까지만
