@@ -33,13 +33,32 @@ const statuses: Array<EnrichmentStatus | "all"> = [
   "all",
 ];
 
+const PAGE_SIZE = 50;
+
 export function EnrichmentReviewClient() {
   const [status, setStatus] = useState<EnrichmentStatus | "all">("pending");
+  // cursorStack: 2페이지부터의 cursor 누적(1페이지는 cursor 없음). 마지막이 현재 페이지.
+  const [cursorStack, setCursorStack] = useState<string[]>([]);
+  const currentCursor =
+    cursorStack.length > 0 ? cursorStack[cursorStack.length - 1] : undefined;
   const reviews = useEnrichmentReviews({
     status: status === "all" ? undefined : [status],
-    page_size: 100,
+    page_size: PAGE_SIZE,
+    cursor: currentCursor,
   });
   const decision = useEnrichmentDecisionMutation();
+
+  const nextCursor = reviews.data?.data.next_cursor ?? undefined;
+  const pageIndex = cursorStack.length + 1;
+
+  const changeStatus = (value: EnrichmentStatus | "all") => {
+    setStatus(value);
+    setCursorStack([]); // 필터 바뀌면 1페이지로.
+  };
+  const goNext = () => {
+    if (nextCursor) setCursorStack((stack) => [...stack, nextCursor]);
+  };
+  const goPrev = () => setCursorStack((stack) => stack.slice(0, -1));
 
   const decide = (reviewKey: string, value: EnrichmentDecision) => {
     decision.mutate({
@@ -83,7 +102,7 @@ export function EnrichmentReviewClient() {
           aria-label="enrichment status"
           value={status}
           onChange={(event) =>
-            setStatus(event.target.value as EnrichmentStatus | "all")
+            changeStatus(event.target.value as EnrichmentStatus | "all")
           }
         >
           {statuses.map((item) => (
@@ -187,6 +206,35 @@ export function EnrichmentReviewClient() {
               ) : null}
             </TableBody>
           </Table>
+        </div>
+
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-sm text-muted-foreground">
+            페이지 {pageIndex} · {reviews.data?.data.items.length ?? 0}건
+            {nextCursor ? " (다음 페이지 있음)" : ""}
+          </span>
+          <div className="flex gap-1">
+            <Button
+              aria-label="이전 페이지"
+              disabled={cursorStack.length === 0 || reviews.isFetching}
+              size="sm"
+              type="button"
+              variant="outline"
+              onClick={goPrev}
+            >
+              이전
+            </Button>
+            <Button
+              aria-label="다음 페이지"
+              disabled={!nextCursor || reviews.isFetching}
+              size="sm"
+              type="button"
+              variant="outline"
+              onClick={goNext}
+            >
+              다음
+            </Button>
+          </div>
         </div>
       </div>
     </AdminShell>
