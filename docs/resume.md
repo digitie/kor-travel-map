@@ -1,5 +1,17 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-09 claude 작업 메모 — ADR-048(REST versioning admin/ops 확장 + 정합성 표준)
+
+#317(T-214/T-215)의 `/v1` 1차 위에 사용자 지시(admin도 versioning + 정합성 심화)를 반영.
+PR #316을 #317 머지본 위로 재작성(문서 전용, **PR까지 / 머지 보류**).
+
+- **ADR-048** + **`docs/rest-api.md`**(전 표면 카탈로그+표준; 외부 정본은 tripmate-rest-api.md).
+- 실행 **Phase 6.8 / T-216a~f**(admin `/v1` mount → pagination 단일화 → envelope 공유모델 →
+  parameter/error → 명명 → 코드/DB 전파).
+
+**다음 한 작업 후보**: (1) **T-216a** admin/ops `/v1` mount, 또는 (2) #317 후속 **T-215b/c**
+(admin UI feature change queue + frontend types/e2e), 또는 (3) T-212e 실데이터 reload.
+
 ## 2026-06-08 Codex 작업 메모 — REST API v1 계약 정리
 
 `docs/reports/api-endpoint-review-2026-06-08.md`와 TripMate repo

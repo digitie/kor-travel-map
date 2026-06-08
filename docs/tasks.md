@@ -1226,6 +1226,35 @@ lint-imports/pytest/coverage, frontend type-check/e2e). 실데이터 검증은 T
   OpenAPI 타입 기반 mutation hook, pending→approve→applied flow, immediate mode route
   mock, soft delete 표시/필터 e2e를 추가한다.
 
+**Phase 6.8 — REST API 정합성 심화 (2026-06-09, `T-216`, ADR-048)**
+
+T-214/T-215(#317)의 `/v1` 1차 정리 위에 ADR-048 delta를 얹는다. 정본 = `docs/rest-api.md`
+(전 표면) + `docs/tripmate-rest-api.md`(외부). 각 항목 1-PR, OpenAPI drift + frontend
+gen:types 동반.
+
+- [ ] **T-216a — admin/ops/debug `/v1` prefix 도입.** 사용자 지시(admin도 versioning).
+  #317 T-214b가 비버저닝으로 둔 `/admin`·`/ops`·`/debug`를 `/v1` 아래로 mount(liveness
+  `/health`·`/version`만 제외). OpenAPI admin profile + frontend admin API base + e2e 경로
+  일괄 갱신. 경로별 shim 금지(ADR-046) — mount 1곳 전환. (외부 `/v1`은 #317 T-214b/d.)
+- [ ] **T-216b — pagination 단일화.** page-size 파라미터를 `page_size`로 통일
+  (`limit`/`run_limit`/`event_limit` 폐기), 2-티어 캡(기본 50/200, 지도 100/500),
+  `/features` 평면 cursor화(`limit le=5000` 폐기), `in-bounds` `max_items` 5000→2000,
+  `total_count` `?include_total=true` opt-in(현재 `search` 항상 COUNT). T-214e 심화.
+- [ ] **T-216c — envelope 공유 모델.** 라우터별 `*Meta` 중복 → 공유
+  `Meta{duration_ms,request_id}` + 제네릭 `ListData[T]`, 성공 응답 meta에도 `request_id`.
+- [ ] **T-216d — parameter/error 정합성.** bbox 분리 float 통일(`search` CSV deprecate),
+  상태 필드 `state`→`status`(외부 표면), issue/violation noun을 `issue_*`로. 에러 RFC7807
+  `application/problem+json`(`code`/`request_id`/`errors[]`). T-214e/g 심화.
+- [ ] **T-216e — 명명 통일(경로+응답 본문).** `dedup-review`→`dedup-reviews`,
+  `enrichment-review`→`enrichment-reviews`, `{review_key}`→`{review_id}`,
+  `/admin/issues/{violation_key}`→`{issue_id}`. 응답 UUID 단일식별자 `*_key`→`*_id`. T-214h 심화.
+- [ ] **T-216f — 코드/DB 명명 전파(내부 소유).** REST 개명을 물리 컬럼·ORM·repo까지
+  end-to-end(테이블별 1-PR migration, codegraph impact 선행): `review_key`→`review_id`,
+  `violation_key`→`issue_id`, ops 로그/내부 키 `*_key`→`*_id`, `state`→`status`(import_jobs/
+  offline_uploads/feature_update_requests). **경계(개명 금지, ADR-044)**: provider/source
+  어휘(`dataset_key`/`source_record_key`/`source_entity_id`/`source_dataset_key`/`raw_*`)·
+  복합 자연키(`target_key`+`external_system`)·canonical `feature_id`.
+
 **Phase 7 — ADR-045 전체점검/튜닝 (ADR-045 잔여 task 완료 후 시작)**
 
 상세 실행 계획은 `docs/reports/adr-045-overall-audit-plan-2026-06-04.md`를 정본으로

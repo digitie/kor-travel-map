@@ -2724,3 +2724,89 @@ ADR-045 이후 krtour-map은 Docker 독립 프로그램 + 독립 DB/Dagster + ad
   별도 후속으로 둔다.
 - Dagster metadata DB 분리, daemon/schedule/sensor 운영, RustFS/backup compose 확장은
   T-209b/T-209e에서 이어간다.
+
+## ADR-048: REST API versioning을 admin/ops까지 확장하고 envelope·pagination·parameter·response 정합성 표준을 고정한다 (T-214/T-215 위에 보강)
+
+- **상태**: accepted
+- **날짜**: 2026-06-09
+- **결정자**: 사용자
+- **관련**: ADR-005(인증=인프라), ADR-035(namespace), ADR-044(provider 충실),
+  ADR-045(TripMate OpenAPI 연동), ADR-046(무-shim),
+  `docs/tripmate-rest-api.md`(#317, 외부 `/v1` 정본), `docs/rest-api.md`(전 표면 보강),
+  `docs/reports/api-endpoint-review-2026-06-08.md`(검토 근거), T-214/T-215(#317)
+
+### 컨텍스트
+
+PR #317(T-214/T-215)이 REST API `/v1` 정리의 1차를 이미 끝냈다 — `docs/tripmate-rest-api.md`를
+외부 `/v1` 목표 계약으로 재작성, `/tripmate/feature-update-requests*` alias 제거(admin
+단일화), place/event **단건 feature 추가·수정·삭제 admin API**(K-15 해소) + version 0(provider)/
+1(user) 분리(`feature.feature_versions`/`ops.feature_change_requests`/
+`KRTOUR_MAP_ADMIN_FEATURE_CHANGE_REVIEW_MODE`). 보안 스킴(P1-B)은 #314로 이미 해소.
+
+`docs/reports/api-endpoint-review-2026-06-08.md` findings를 **전부** 닫으려면 #317 범위 밖의
+두 가지가 남는다. (1) #317 T-214b는 **`/admin`·`/ops`·`/debug`를 비버저닝으로 고정**했는데,
+사용자는 **admin 표면도 versioning**하라고 지시했다. (2) envelope/pagination/parameter/
+response의 **코드 실측 불일치**(라우터별 `*Meta` 중복, page-size 파라미터 3종·캡 3종,
+bbox 인코딩 2종, `status`↔`state`, 응답 `*_key`↔`*_id`)가 #317의 고수준 정리 아래에 남아
+있다. 본 ADR은 #317 위에 이 두 가지를 보강한다.
+
+### 결정 (#317 위의 delta)
+
+1. **versioning을 전 표면으로 확장.** #317 T-214b/§2.1의 "`/admin`·`/ops`·`/debug` 비버저닝"을
+   **supersede**하여 `/v1/admin/*`·`/v1/ops/*`·`/v1/debug/*`도 `/v1` 아래 둔다(사용자 지시).
+   liveness `/health`·`/version`만 비버저닝 유지. 외부 표면(`/v1/features`·`/v1/tripmate`·
+   `/v1/categories`·`/v1/providers`)은 #317 T-214b/d가 진행 중인 그대로.
+2. **envelope 공유 모델.** 라우터마다 재정의된 `FeatureListMeta`/`FeatureDetailMeta`/
+   `FeaturesNearbyByTargetMeta`…를 공유 `Meta{duration_ms, request_id}` + 제네릭
+   `ListData[T]{items,next_cursor,total_count}`로 통합하고, **성공 응답 meta에도 `request_id`**를
+   실어 오류 envelope와 추적 대칭을 맞춘다.
+3. **pagination 단일화(T-214e 심화).** page-size 파라미터를 `page_size`로 통일
+   (`limit`/`run_limit`/`event_limit` 폐기), 2-티어 캡(기본 50/200, 지도 nearby 100/500).
+   `/v1/features` 평면은 keyset `cursor`(현재 `limit le=5000` 폐기), `/v1/features/in-bounds`는
+   cursor 없이 `max_items` 하드캡 5000→2000 + 결정적 `feature_id` 정렬(T-212d). `total_count`는
+   `?include_total=true` opt-in(현재 `search`는 항상 COUNT).
+4. **parameter 일관성(T-214e 심화).** bbox는 분리 float 4개로 통일(`search` CSV `bbox`
+   deprecate). 다중값 필터는 단수 반복(`kind`/`category`/`provider`/`status`). lifecycle 상태
+   필드는 `status`로 통일(`import-jobs`/`offline-uploads`/`feature-update-requests`의 `state`
+   개명; `severity` 별개 축 유지). issue/violation noun은 외부 표면에서 `issue_*`로 통일.
+5. **에러 problem+json(T-214g 보강).** `{error:{…}}`를 RFC 7807 `application/problem+json`
+   (`type`/`title`/`status`/`detail` + 확장 `code`/`request_id`/`errors[]`)으로 발전.
+6. **응답 식별자 접미사 규약(응답 본문까지).** 시스템 단일 식별자 `*_id`, 복합/자연키만
+   `*_key`. 응답의 UUID 단일 식별자(`review_key`/`violation_key`/`system_log_key`/
+   `api_call_log_key`/`coord_key`/`override_key`/`step_key`)는 `*_id`로 개명.
+7. **명명 통일을 코드/DB 레벨까지 전파(내부 소유에 한함).** REST 단 개명을 영구 edge 매핑으로
+   두면 ADR-046(무-shim)과 어긋나므로, **krtour 내부 소유 식별자/상태 컬럼은 물리 컬럼·ORM
+   속성·repo 함수/변수까지 end-to-end 정렬**(테이블별 1-PR migration, codegraph impact 선행).
+   대상: `review_key`→`review_id`, `violation_key`→`issue_id`, ops 로그/내부 키 `*_key`→`*_id`,
+   `state`→`status`. **경계(개명 금지)**: provider/source 어휘(ADR-044 — `dataset_key`/
+   `source_record_key`/`source_entity_id`/`source_dataset_key`/`raw_*`), 복합 자연키
+   `target_key`(+`external_system`), canonical `feature_id`.
+8. **정본 관계.** 외부(TripMate) `/v1` 계약 정본 = `docs/tripmate-rest-api.md`(#317). 전 표면
+   (admin/ops 포함) 카탈로그 + 본 정합성 표준의 정본 = `docs/rest-api.md`. 기계 정본 =
+   `openapi.json`/`openapi.user.json`. 충돌 시 OpenAPI 우선.
+
+### 근거
+
+- 사용자가 admin 표면 versioning을 명시 지시 — breaking 분리 수단을 운영 표면에도 둔다.
+- 코드 실측 불일치(파라미터 3종·캡 3종·`*Meta` 중복·`total_count` 항상 COUNT)는 #317의
+  고수준 정리만으로는 닫히지 않으며, 공유 모델·opt-in count로 예측가능성·비용을 개선한다.
+- 내부 어휘를 물리 레벨까지 정렬하면 영구 매핑 shim을 피한다(ADR-046). provider/복합키 경계는
+  ADR-044로 보존.
+
+### 결과 (긍정)
+
+- 외부+내부 전 표면이 버전·envelope·pagination·error·명명 규약을 공유한다.
+- `*Meta` 통합 + `request_id` 전파로 응답 셰입을 한 곳에서 진화시키고 상관추적을 일관화.
+
+### 결과 (부정)
+
+- admin/ops도 `/v1`로 이동 — #317이 비버저닝으로 둔 결정을 되돌려 라우터 mount·OpenAPI
+  export·frontend·docs를 admin/ops까지 일괄 갱신해야 한다.
+- 내부 식별자 물리 개명은 테이블별 migration + 큰 mechanical churn(`review_key` 291·
+  `violation_key` 118건)을 동반 — codegraph impact 후 단계화.
+
+### 후속
+
+- 실행은 `docs/tasks.md` **Phase 6.8 / T-216a~f**로 분해(#317의 T-214/T-215와 별도 번호).
+  `docs/tripmate-rest-api.md` §2.1의 "admin/ops 비버저닝" 문구는 본 ADR로 갱신했다.
+- API shape가 `/v1`로 안정된 commit에서 T-210e(openapi-typescript codegen)를 진행한다.

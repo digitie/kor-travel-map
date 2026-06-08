@@ -2,6 +2,23 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-09 (claude) — ADR-048: REST versioning admin/ops 확장 + 정합성 표준(+ #317 reconcile)
+
+**작업**: #317(T-214/T-215, 머지됨)의 REST `/v1` 1차 정리 위에 사용자 지시 2건을 반영 —
+**admin도 versioning(`/v1`)** + envelope/pagination/parameter/response 정합성 심화 + 코드/DB
+명명 전파. PR #316을 #317 머지본 위로 reset/재작성(rebase 대신). PR까지, 머지 보류.
+
+- **ADR-048**(신규): #317 위 delta — (1) `/v1`를 admin/ops/debug까지 확장(#317 T-214b의
+  admin 비버저닝 supersede, 사용자 지시), (2) envelope 공유 `Meta{duration_ms,request_id}`+
+  `ListData[T]`, (3) `page_size` 단일·2-티어 캡·`total_count` opt-in, (4) bbox 분리-float·
+  `state`→`status`·issue noun, (5) RFC7807 problem+json, (6) 응답 `*_key`→`*_id`, (7) 코드/DB
+  명명 전파(내부 소유, provider/복합키 경계 ADR-044).
+- **`docs/rest-api.md`**(신규): 전 표면 카탈로그 + 정합성 표준. 외부 `/v1` 정본은
+  `docs/tripmate-rest-api.md`(#317)로 위임, §2.1 versioning 문구를 ADR-048로 갱신.
+- **#317 reconcile**: tripmate-alias 제거·feature CRUD(K-15)·version 0/1을 카탈로그에 반영.
+  내가 앞서 만든 Phase 8/T-214a~l(중복 충돌)을 폐기하고 **Phase 6.8 / T-216a~f**로 재정의.
+- **검증**: 문서 전용(코드 없음).
+
 ## 2026-06-08 (codex) — REST API v1 계약 정리 + feature CRUD admin API
 
 **작업**: `docs/reports/api-endpoint-review-2026-06-08.md`와 TripMate repo

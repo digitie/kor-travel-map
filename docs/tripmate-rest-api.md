@@ -64,8 +64,10 @@
 - 로컬 API: `http://127.0.0.1:9011`
 - 운영 API: `https://<krtour-map-api-host>`
 - 사용자/서비스 리소스 목표 prefix: `/v1`
-- 내부 운영 리소스: `/admin`, `/ops`, `/debug`는 version prefix를 붙이지 않는다.
-- `/health`와 `/version`은 배포 확인용 top-level 경로로 유지한다.
+- 내부 운영 리소스: `/admin`, `/ops`, `/debug`도 `/v1` 아래 둔다 — **ADR-048로 확장**
+  (사용자 지시 "admin도 versioning"; 당초 비버저닝 결정을 supersede). 전 표면 카탈로그와
+  정합성 표준은 `docs/rest-api.md` 참조.
+- `/health`와 `/version`은 배포 확인용 top-level(비버저닝) 경로로 유지한다.
 
 Breaking change는 `/v2`로 이동한다. 같은 `/v1` 안에서는 필드 추가, enum 값 추가,
 optional 필드 추가만 허용한다. 필드 제거, 필수화, 의미 변경, 응답 envelope 변경은
