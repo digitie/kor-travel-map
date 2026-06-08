@@ -12,6 +12,8 @@ from krtour.map.infra import admin_feature_repo as repo
 from krtour.map.infra.merge_repo import MergeError, MergeOutcome
 
 _NOW = datetime(2026, 6, 3, tzinfo=UTC)
+_REVIEW_KEY_1 = "00000000-0000-0000-0000-000000000001"
+_REVIEW_KEY_2 = "00000000-0000-0000-0000-000000000002"
 
 
 class _Mappings:
@@ -83,7 +85,7 @@ def _feature_row(feature_id: str = "feature-1") -> dict[str, Any]:
     }
 
 
-def _dedup_row(review_key: str = "review-1") -> dict[str, Any]:
+def _dedup_row(review_key: str = _REVIEW_KEY_1) -> dict[str, Any]:
     return {
         "review_key": review_key,
         "status": "pending",
@@ -269,7 +271,7 @@ def test_dedup_cursor_and_row_mapping() -> None:
 
     assert repo._dedup_cursor_params(cursor) == {
         "cursor_score": "90",
-        "cursor_review_key": "review-1",
+        "cursor_review_key": _REVIEW_KEY_1,
     }
     assert item.total_score_cursor == "90"
     assert item.feature_a.feature_id == "feature-a"
@@ -282,7 +284,7 @@ def test_dedup_cursor_and_row_mapping() -> None:
 
 @pytest.mark.asyncio
 async def test_list_dedup_reviews_and_decision() -> None:
-    session = _Session([_Result([_dedup_row("review-1"), _dedup_row("review-2")])])
+    session = _Session([_Result([_dedup_row(_REVIEW_KEY_1), _dedup_row(_REVIEW_KEY_2)])])
 
     page = await repo.list_dedup_reviews(
         session,  # type: ignore[arg-type]
@@ -298,8 +300,8 @@ async def test_list_dedup_reviews_and_decision() -> None:
     assert params["min_score"] == 80
 
     changed = await repo.set_dedup_review_decision(
-        _Session([_Result([{"review_key": "review-1"}])]),  # type: ignore[arg-type]
-        "review-1",
+        _Session([_Result([{"review_key": _REVIEW_KEY_1}])]),  # type: ignore[arg-type]
+        _REVIEW_KEY_1,
         decision="accepted",
         reviewed_by="local-admin",
     )
@@ -307,7 +309,7 @@ async def test_list_dedup_reviews_and_decision() -> None:
 
     unchanged = await repo.set_dedup_review_decision(
         _Session([_Result([])]),  # type: ignore[arg-type]
-        "review-1",
+        _REVIEW_KEY_1,
         decision="ignored",
     )
     assert unchanged is False
@@ -324,7 +326,7 @@ async def test_merge_dedup_review_auto_and_explicit_master(
         merged_by: str | None = None,
         reason: str | None = None,
     ) -> MergeOutcome:
-        assert review_key == "review-1"
+        assert review_key == _REVIEW_KEY_1
         assert merged_by == "local-admin"
         assert reason == "dup"
         return MergeOutcome("feature-a", "feature-b", 1, 0, "merge-1", True)
@@ -342,7 +344,7 @@ async def test_merge_dedup_review_auto_and_explicit_master(
         assert master_id == "feature-b"
         assert loser_id == "feature-a"
         assert score == 90.0
-        assert review_key == "review-1"
+        assert review_key == _REVIEW_KEY_1
         return MergeOutcome(master_id, loser_id, 0, 0, "merge-2", True)
 
     monkeypatch.setattr(repo, "merge_from_review", _merge_from_review)
@@ -350,22 +352,22 @@ async def test_merge_dedup_review_auto_and_explicit_master(
 
     auto = await repo.merge_dedup_review(
         object(),  # type: ignore[arg-type]
-        "review-1",
+        _REVIEW_KEY_1,
         merged_by="local-admin",
         reason="dup",
     )
     assert auto.merge_id == "merge-1"
 
     explicit = await repo.merge_dedup_review(
-        _Session([_Result([_dedup_row("review-1")])]),  # type: ignore[arg-type]
-        "review-1",
+        _Session([_Result([_dedup_row(_REVIEW_KEY_1)])]),  # type: ignore[arg-type]
+        _REVIEW_KEY_1,
         master_feature_id="feature-b",
     )
     assert explicit.master_feature_id == "feature-b"
 
     with pytest.raises(MergeError, match="master_feature_id"):
         await repo.merge_dedup_review(
-            _Session([_Result([_dedup_row("review-1")])]),  # type: ignore[arg-type]
-            "review-1",
+            _Session([_Result([_dedup_row(_REVIEW_KEY_1)])]),  # type: ignore[arg-type]
+            _REVIEW_KEY_1,
             master_feature_id="other",
         )

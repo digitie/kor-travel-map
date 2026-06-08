@@ -1,5 +1,29 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-08 Codex 작업 메모 — T-212d seeded PostGIS 성능 baseline 완료
+
+사용자 지시대로 main을 다시 동기화한 뒤 T-212d 성능 baseline/tuning을 진행했다. 로컬 live
+Postgres(`python-krtour-map-codex-postgres-1`)는 `features/source_records/source_links/import_jobs`
+각 1건, `consistency_reports`/`dedup_review_queue` 0건, alembic `0016` 상태라 성능 기준으로
+쓰기에는 부족했다. 대신 CI에서 재현 가능한 3,200 feature 규모 seeded PostGIS/testcontainers
+baseline을 만들고 EXPLAIN 인덱스 사용을 고정했다.
+
+- DB schema: `0020_t212d_perf_keyset_indexes` 추가. `feature.features` updated/status/name/opening_hours,
+  `ops.import_jobs`, consistency report/violation, dedup/enrichment review queue keyset 인덱스를
+  보강했다.
+- Query: `/features/in-bounds`는 공간 후보 CTE로 GiST 사용을 고정하고, q 검색은 trigram 후보
+  CTE를 분리해 `idx_features_name_trgm`을 먼저 탄다. dedup/enrichment review와 F7 consistency는
+  UUID `review_key` tie-breaker로 keyset cursor를 정렬한다.
+- Test: `tests/integration/test_t212d_perf_explain.py`가 `/features/search`, `/features/in-bounds`,
+  `/features/nearby`, `/admin/features`, `/ops/import-jobs`, consistency F4/F6/F7/F8, dedup refresh,
+  dedup/enrichment review list EXPLAIN을 live-like seed로 검증한다.
+- 검증: T-212d 전용 ruff + EXPLAIN 통합 4, 관련 통합 45, 관련 단위 44 통과.
+
+**현재 상태**: T-212d 완료. 남은 큰 축은 T-212e 실데이터 full reload 최종 검증, T-210 TripMate
+연계 정리, Sprint 5 closure다.
+
+**다음 한 작업 후보**: **T-212e 실데이터 full reload + offline upload 실데이터 검증 + 최종 리포트**.
+
 ## 2026-06-08 Codex 작업 메모 — T-212b admin UI 완결성 완료
 
 PR#291(Dagster tick/run failure 드릴다운)과 PR#277(admin feature/issues/logs 화면)을 최신

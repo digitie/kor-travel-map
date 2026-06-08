@@ -148,7 +148,28 @@ class FeatureRow(Base):
               postgresql_where=text("deleted_at IS NULL AND geom IS NOT NULL")),
         Index("idx_features_kind_category", "kind", "category",
               postgresql_where=text("deleted_at IS NULL")),
-        Index("idx_features_status_updated", "status", "updated_at"),
+        Index(
+            "idx_features_updated_keyset",
+            text("updated_at DESC"),
+            text("feature_id DESC"),
+        ),
+        Index(
+            "idx_features_status_updated",
+            "status",
+            text("updated_at DESC"),
+            text("feature_id DESC"),
+        ),
+        Index("idx_features_lower_name_keyset", text("lower(name)"), "feature_id"),
+        Index(
+            "idx_features_opening_hours_keyset",
+            "feature_id",
+            postgresql_where=text(
+                "deleted_at IS NULL "
+                "AND detail IS NOT NULL "
+                "AND detail <> '{}'::jsonb "
+                "AND detail ?| ARRAY['business_hours','opening_hours']"
+            ),
+        ),
         Index("idx_features_legal_dong_code", "legal_dong_code"),
         Index("idx_features_sigungu", "sigungu_code", "kind",
               postgresql_where=text("deleted_at IS NULL")),
@@ -416,7 +437,13 @@ class FeatureConsistencyReportRow(Base):
             name="feature_consistency_reports_severity_max",
         ),
         Index("idx_reports_batch", "batch_id"),
-        Index("idx_reports_started", text("started_at DESC")),
+        Index("idx_reports_started", text("started_at DESC"), text("report_id DESC")),
+        Index(
+            "idx_reports_severity_started",
+            "severity_max",
+            text("started_at DESC"),
+            text("report_id DESC"),
+        ),
         {"schema": "ops"},
     )
 
@@ -470,7 +497,10 @@ class DedupReviewQueueRow(Base):
             name="ck_dedup_scores",
         ),
         Index(
-            "idx_dedup_status_score", "status", text("total_score DESC"),
+            "idx_dedup_status_score",
+            "status",
+            text("total_score DESC"),
+            text("review_key DESC"),
         ),
         {"schema": "ops"},
     )
@@ -545,6 +575,14 @@ class EnrichmentReviewQueueRow(Base):
             "idx_enrichment_review_status_score",
             "status",
             text("name_score DESC"),
+            text("review_key DESC"),
+        ),
+        Index(
+            "idx_enrichment_review_provider_status_score",
+            "source_provider",
+            "status",
+            text("name_score DESC"),
+            text("review_key DESC"),
         ),
         {"schema": "ops"},
     )
@@ -677,9 +715,14 @@ class ImportJobRow(Base):
             "progress BETWEEN 0 AND 100",
             name="ck_import_jobs_progress",
         ),
-        Index("idx_import_jobs_state", "state", "created_at"),
+        Index("idx_import_jobs_created_keyset", text("created_at DESC"), text("job_id DESC")),
+        Index("idx_import_jobs_state", "state", "created_at", "queue_sequence"),
         Index(
-            "idx_import_jobs_kind_state", "kind", "state", text("created_at DESC"),
+            "idx_import_jobs_kind_state",
+            "kind",
+            "state",
+            text("created_at DESC"),
+            text("job_id DESC"),
         ),
         Index(
             "idx_import_jobs_heartbeat", "heartbeat_at",
@@ -706,6 +749,11 @@ class ImportJobRow(Base):
         UUID(as_uuid=False),
         primary_key=True,
         server_default=text("x_extension.gen_random_uuid()"),
+    )
+    queue_sequence: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        server_default=text("nextval('ops.import_jobs_queue_sequence_seq'::regclass)"),
     )
     kind: Mapped[str] = mapped_column(Text, nullable=False)
     load_batch_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
@@ -938,6 +986,27 @@ class DataIntegrityViolationRow(Base):
             "idx_violations_detected_brin",
             "detected_at",
             postgresql_using="brin",
+        ),
+        Index(
+            "idx_violations_status_detected",
+            "status",
+            text("detected_at DESC"),
+            text("violation_key DESC"),
+        ),
+        Index(
+            "idx_violations_provider_status_detected",
+            "provider",
+            "status",
+            text("detected_at DESC"),
+            text("violation_key DESC"),
+            postgresql_where=text("provider IS NOT NULL"),
+        ),
+        Index(
+            "idx_violations_feature_detected",
+            "feature_id",
+            text("detected_at DESC"),
+            text("violation_key DESC"),
+            postgresql_where=text("feature_id IS NOT NULL"),
         ),
         {"schema": "ops"},
     )
