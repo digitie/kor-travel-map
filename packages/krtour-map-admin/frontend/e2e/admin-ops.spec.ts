@@ -1,52 +1,11 @@
 import { expect, type Page, type Route, test } from "@playwright/test";
 
-type OfflineUploadRecord = {
-  byte_size: number;
-  checksum_sha256: string;
-  created_at: string;
-  created_by: string | null;
-  dataset_key: string;
-  detected_encoding: string | null;
-  detected_format: string | null;
-  load_job_id: string | null;
-  load_url: string;
-  original_filename: string;
-  provider: string;
-  state: string;
-  status_url: string;
-  storage_backend: string;
-  storage_key: string;
-  sync_scope: string;
-  updated_at: string;
-  upload_id: string;
-  validation_job_id: string | null;
-};
+import type { components } from "../src/api/types";
 
-type PoiCacheTargetRecord = {
-  coord: { lat: number; lon: number };
-  coord_key: string;
-  coord_precision_digits: number;
-  created_at: string;
-  deleted_at?: string | null;
-  external_system: string;
-  last_failed_at?: string | null;
-  last_refreshed_at?: string | null;
-  last_requested_at?: string | null;
-  last_seen_at: string;
-  metadata: Record<string, unknown>;
-  name?: string | null;
-  nearby_url: string;
-  next_eligible_refresh_at?: string | null;
-  provider_overrides: Record<string, Record<string, unknown>>;
-  radius_km: number;
-  refresh_policy: string;
-  scope_mode: string;
-  status_url: string;
-  target_id: string;
-  target_key: string;
-  update_enabled: boolean;
-  updated_at: string;
-};
+// 손으로 쓴 record shape 대신 **생성된 OpenAPI 스키마**에 바인딩한다(#308 리뷰).
+// 백엔드 DTO가 바뀌면 mock factory가 타입 불일치로 컴파일 실패 → mock-실계약 drift 감지.
+type OfflineUploadRecord = components["schemas"]["OfflineUploadRecord"];
+type PoiCacheTargetRecord = components["schemas"]["PoiCacheTargetRecord"];
 
 const MOCK_NOW = "2026-06-08T00:00:00.000Z";
 const OFFLINE_UPLOAD_ID = "11111111-1111-4111-8111-111111111111";
