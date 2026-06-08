@@ -4609,6 +4609,13 @@ export interface operations {
                     "application/json": components["schemas"]["AdminFeatureDeactivateResponse"];
                 };
             };
+            /** @description 파괴적 admin 작업 비활성 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description feature 없음 */
             404: {
                 headers: {
@@ -5229,6 +5236,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["PoiCacheTargetResponse"];
                 };
+            };
+            /** @description 파괴적 admin 작업 비활성 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description target 없음 */
             404: {

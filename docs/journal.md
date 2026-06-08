@@ -2,6 +2,27 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-08 (claude) — 앱 레벨 service-token 인증(ADR-045 D-1 B안)
+
+**작업**: API 리뷰 [P1] "보안 스킴 미선언" 후속. 사용자 결정 = D-1 B안(infra + 앱 레벨
+defense-in-depth). 운영 1차 인증은 여전히 infra(proxy SSO/IP allowlist)이고 그 위에 얇은
+앱 방어를 옵션으로 추가.
+
+- settings: `service_token`(SecretStr, opt-in) + `admin_destructive_enabled`(kill-switch, 기본 True).
+- `map_admin/auth.py`: `require_service_token`(`APIKeyHeader` `X-Krtour-Service-Token` + **상수시간**
+  `hmac.compare_digest`; 토큰 미설정이면 통과=하위호환) + `require_admin_destructive_enabled`.
+- app.py 와이어링: **순수 service-to-service `/tripmate/*`**에만 service token 강제. **공용 read
+  surface(`/features`·`/categories`·`/providers`)는 브라우저 admin UI도 써서 앱 토큰 강제 안 함**
+  (이 구분이 핵심 — 안 그러면 브라우저 UI가 깨짐). 파괴적 `/admin`(restore/swap/deactivate/POI
+  delete)에 kill-switch.
+- OpenAPI `securitySchemes.ServiceToken` 자동 선언 + `/tripmate/*` operation `security`(user.json
+  포함 — TripMate 계약 문서화, P1 해소). types.ts(파괴적 endpoint 403 응답) 재생성.
+- 테스트 `test_auth.py` 8건: dependency 단위(미설정 통과/일치/불일치 401/kill-switch 403) +
+  TestClient(OpenAPI 스킴, /tripmate 401, 미설정 비차단, /features 비게이트, 파괴적 403).
+- ADR-005 amendment + tripmate-rest-api §1 갱신.
+- **검증**: ruff + mypy --strict(admin 27) + admin 234 + auth 8 + frontend gen:types/type-check
+  (src+e2e)/eslint/build + OpenAPI drift green.
+
 ## 2026-06-08 (codex) — T-212d 사후 리뷰 반영
 
 **작업**: PR #313 머지 후 PR issue comment로 달린 T-212d 사후 상세리뷰를 확인하고 후속 보강.

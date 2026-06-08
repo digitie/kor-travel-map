@@ -29,9 +29,12 @@ admin UI 워크플로는 `docs/debug-ui-admin-workflows.md`가 정본 — **본 
 
 - **Base URL**: `https://<krtour-map-host>` (로컬 `http://127.0.0.1:9011`). TripMate는
   `KRTOUR_MAP_API_URL` env로 주입. **직접 DB 연결·라이브러리 import 금지**(ADR-045).
-- **인증**: 코드에 인증 로직 없음(ADR-005). 운영은 network/infra 계층(Cloudflare
-  Tunnel SSO / IP allowlist / API key header pass-through, D-1). TripMate는 서비스
-  토큰을 헤더로 전달하되 krtour-map은 "인증된 요청만 도달" 가정.
+- **인증**: 운영 1차 인증은 network/infra 계층(Cloudflare Tunnel SSO / IP allowlist,
+  D-1). 추가로 **앱 레벨 defense-in-depth**(D-1 B안, 2026-06-08): `KRTOUR_MAP_ADMIN_
+  SERVICE_TOKEN` 설정 시 **`/tripmate/*`** 호출은 `X-Krtour-Service-Token` 헤더가 그 값과
+  일치(상수시간 비교)해야 한다(불일치/누락 → 401). 미설정이면 강제 안 함(하위호환).
+  공용 read(`/features`·`/categories`·`/providers`)는 브라우저 admin UI 공용이라 앱 토큰을
+  강제하지 않는다(proxy SSO). OpenAPI `securitySchemes.ServiceToken`으로 계약 명시.
 - **응답 봉투**: `{ "data": <payload>, "meta": { "duration_ms": int, ... } }`
   (admin API와 동일, `openapi-admin-contract.md`). list는 `data.items[]` + `data.
   next_cursor`(keyset, D-10).

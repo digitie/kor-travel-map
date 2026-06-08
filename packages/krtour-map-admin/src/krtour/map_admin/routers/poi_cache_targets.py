@@ -18,6 +18,7 @@ from krtour.map.infra.poi_cache_target_repo import (
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_serializer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from krtour.map_admin.auth import require_admin_destructive_enabled
 from krtour.map_admin.db import get_session
 
 __all__ = [
@@ -386,7 +387,11 @@ async def get_poi_cache_target_record(
     "/{external_system}/{target_key}",
     response_model=PoiCacheTargetResponse,
     summary="POI/cache target soft delete",
-    responses={404: {"description": "target 없음"}},
+    dependencies=[Depends(require_admin_destructive_enabled)],
+    responses={
+        404: {"description": "target 없음"},
+        403: {"description": "파괴적 admin 작업 비활성"},
+    },
 )
 async def delete_poi_cache_target_record(
     external_system: str,

@@ -100,6 +100,27 @@ class AdminSettings(BaseSettings):
             "env override는 JSON 배열."
         ),
     )
+    service_token: SecretStr | None = Field(
+        default=None,
+        description=(
+            "외부 서비스 토큰(ADR-045 D-1 defense-in-depth, ADR-005 amendment). 설정되면 "
+            "외부 surface(``/features`` · ``/tripmate`` · ``/categories`` · "
+            "``/providers``)는 ``X-Krtour-Service-Token`` 헤더가 이 값과 일치(상수시간 "
+            "비교)해야 한다. **미설정(None)이면 강제하지 않음**(intranet/dev 기본, 하위호환 — "
+            "운영 인증의 1차 책임은 여전히 infra 계층의 reverse proxy/Cloudflare). "
+            "``/health`` · ``/version`` · ``/debug`` · ``/admin`` · ``/ops``는 면제(liveness/"
+            "operator는 proxy SSO). env ``KRTOUR_MAP_ADMIN_SERVICE_TOKEN``."
+        ),
+    )
+    admin_destructive_enabled: bool = Field(
+        default=True,
+        description=(
+            "파괴적 ``/admin`` 작업(restore/swap/feature deactivate/POI cache target "
+            "delete) 허용 여부 kill-switch(defense-in-depth). False면 해당 엔드포인트는 "
+            "403. 읽기/관측 전용 배포에서 내려 둔다. env "
+            "``KRTOUR_MAP_ADMIN_DESTRUCTIVE_ENABLED``."
+        ),
+    )
     dagster_url: str = Field(
         default="http://127.0.0.1:9013",
         description=(
