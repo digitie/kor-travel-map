@@ -1,0 +1,10 @@
+{
+  "//": "e2e(Playwright) 타입체크 전용. 기본 tsconfig는 src만 include하므로 e2e mock이 생성 OpenAPI 타입과 어긋나도 잡지 못한다(#308 리뷰). 본 설정으로 e2e를 별도 type-check해 mock-실계약 drift를 컴파일 타임에 감지한다.",
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "plugins": []
+  },
+  "include": ["**/*.ts", "../src/api/types.ts"],
+  "exclude": ["node_modules"]
+}

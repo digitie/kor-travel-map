@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-08 (claude) — 리뷰 반영: admin e2e mock을 생성 OpenAPI 타입에 바인딩 (#308)
+
+**작업**: 내가 #308에 남긴 리뷰 finding(mock이 OpenAPI 스키마로 검증되지 않은 수작업 JSON →
+백엔드 DTO 변경 시 silent drift) 반영.
+
+- `admin-ops.spec.ts`의 수작업 `OfflineUploadRecord`/`PoiCacheTargetRecord` 타입을 생성된
+  `components["schemas"][...]`에 바인딩 → 백엔드 DTO가 바뀌면 mock factory가 타입 불일치로
+  컴파일 실패해 drift를 컴파일 타임에 감지.
+- 기존 `tsconfig.json`은 `src/**`만 include해 e2e가 type-check 대상이 아니었음 → `e2e/tsconfig.json`
+  추가 + `type-check` 스크립트를 `tsc --noEmit && tsc -p e2e/tsconfig.json --noEmit`로 확장(+
+  `type-check:e2e`). 이제 frontend CI `type-check`가 e2e mock 계약까지 검증.
+- **검증**(Windows Node): gen:types:check(drift 0) + type-check(src + e2e) + eslint + next build green.
+  (mock이 실제 스키마를 그대로 만족 — 추가 churn 없음.)
+
 ## 2026-06-08 (claude) — 리뷰 반영: Dagster run drilldown 보강 (#291)
 
 **작업**: 내가 #291에 남긴 상세리뷰 findings 반영.
