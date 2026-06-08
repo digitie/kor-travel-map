@@ -307,8 +307,12 @@ async def _explain_json(
     session: AsyncSession,
     sql: str,
     params: dict[str, Any] | None = None,
+    *,
+    force_index: bool = True,
 ) -> dict[str, Any]:
-    await session.execute(text("SET LOCAL enable_seqscan = off"))
+    await session.execute(
+        text(f"SET LOCAL enable_seqscan = {'off' if force_index else 'on'}")
+    )
     result = await session.execute(
         text("EXPLAIN (FORMAT JSON, COSTS OFF) " + sql),
         params or {},
@@ -334,6 +338,48 @@ def _index_names(plan: dict[str, Any]) -> set[str]:
 def _assert_uses_index(plan: dict[str, Any], *expected: str) -> None:
     used = _index_names(plan)
     assert set(expected) & used, f"expected one of {expected}, used={sorted(used)}"
+
+
+def _assert_no_seq_scan_on(plan: dict[str, Any], relation_name: str) -> None:
+    seq_scans = [
+        node
+        for node in _walk_plan(plan)
+        if node.get("Node Type") == "Seq Scan"
+        and node.get("Relation Name") == relation_name
+    ]
+    assert not seq_scans, f"unexpected Seq Scan on {relation_name}: {seq_scans}"
+
+
+async def _walk_dedup_review_keys(
+    session: AsyncSession, *, page_size: int = 37
+) -> list[str]:
+    seen: list[str] = []
+    cursor: str | None = None
+    for _ in range(100):
+        page = await admin_feature_repo.list_dedup_reviews(
+            session, page_size=page_size, cursor=cursor
+        )
+        seen.extend(item.review_key for item in page.items)
+        if page.next_cursor is None:
+            return seen
+        cursor = page.next_cursor
+    raise AssertionError("dedup review cursor did not terminate")
+
+
+async def _walk_enrichment_review_keys(
+    session: AsyncSession, *, page_size: int = 37
+) -> list[str]:
+    seen: list[str] = []
+    cursor: str | None = None
+    for _ in range(100):
+        page = await admin_feature_repo.list_enrichment_reviews(
+            session, page_size=page_size, cursor=cursor
+        )
+        seen.extend(item.review_key for item in page.items)
+        if page.next_cursor is None:
+            return seen
+        cursor = page.next_cursor
+    raise AssertionError("enrichment review cursor did not terminate")
 
 
 async def test_t212d_feature_hot_reads_use_spatial_and_search_indexes(
@@ -401,6 +447,55 @@ async def test_t212d_feature_hot_reads_use_spatial_and_search_indexes(
         },
     )
     _assert_uses_index(search, "idx_features_name_trgm")
+
+
+async def test_t212d_planner_selects_representative_indexes_without_seqscan_hint(
+    migrated_session: AsyncSession,
+) -> None:
+    await _seed_live_like_perf_data(migrated_session)
+
+    in_bbox = await _explain_json(
+        migrated_session,
+        _FEATURES_IN_BBOX_SQL,
+        {
+            "min_lon": 126.975,
+            "min_lat": 37.515,
+            "max_lon": 126.985,
+            "max_lat": 37.525,
+            "kinds": ["place", "event"],
+            "categories": None,
+            "limit": 200,
+        },
+        force_index=False,
+    )
+    _assert_uses_index(in_bbox, "idx_features_coord_gist")
+    _assert_no_seq_scan_on(in_bbox, "features")
+
+    admin_features_by_name = await _explain_json(
+        migrated_session,
+        admin_feature_repo._admin_features_sql(sort="name", order="asc"),
+        {
+            "kinds": None,
+            "categories": None,
+            "statuses": None,
+            "providers": None,
+            "dataset_keys": None,
+            "issue_types": None,
+            "has_coord": None,
+            "updated_from": None,
+            "updated_to": None,
+            "q_like": None,
+            "has_issue": None,
+            "cursor_feature_id": None,
+            "cursor_text": None,
+            "cursor_dt": None,
+            "cursor_int": None,
+            "limit_plus_one": 51,
+        },
+        force_index=False,
+    )
+    _assert_uses_index(admin_features_by_name, "idx_features_lower_name_keyset")
+    _assert_no_seq_scan_on(admin_features_by_name, "features")
 
 
 async def test_t212d_ops_and_review_lists_use_keyset_indexes(
@@ -574,6 +669,8 @@ async def test_t212d_dedup_refresh_and_consistency_checks_are_index_compatible(
     )
     _assert_uses_index(f7, "idx_dedup_status_score", "idx_source_links_primary")
 
+    # feature_files는 아직 실제 Alembic 테이블이 없고, 첫 파일 업로드 PR에서
+    # 도입될 예정이다. F8 SQL의 실행 계획 형태만 고정하기 위한 임시 DDL이다.
     await migrated_session.execute(
         text(
             """
@@ -639,6 +736,42 @@ async def test_t212d_keyset_cursor_queries_keep_uuid_tie_breakers(
     assert {item.review_key for item in enrichment_page.items}.isdisjoint(
         {item.review_key for item in enrichment_next.items}
     )
+
+    dedup_seen = await _walk_dedup_review_keys(migrated_session)
+    dedup_expected = list(
+        (
+            await migrated_session.execute(
+                text(
+                    """
+                    SELECT review_key::text
+                    FROM ops.dedup_review_queue
+                    WHERE status = 'pending'
+                    ORDER BY total_score DESC, review_key DESC
+                    """
+                )
+            )
+        ).scalars()
+    )
+    assert dedup_seen == dedup_expected
+    assert len(dedup_seen) == len(set(dedup_seen))
+
+    enrichment_seen = await _walk_enrichment_review_keys(migrated_session)
+    enrichment_expected = list(
+        (
+            await migrated_session.execute(
+                text(
+                    """
+                    SELECT review_key::text
+                    FROM ops.enrichment_review_queue
+                    WHERE status = 'pending'
+                    ORDER BY name_score DESC, review_key DESC
+                    """
+                )
+            )
+        ).scalars()
+    )
+    assert enrichment_seen == enrichment_expected
+    assert len(enrichment_seen) == len(set(enrichment_seen))
 
     with pytest.raises(ValueError, match="invalid dedup review cursor"):
         await admin_feature_repo.list_dedup_reviews(
