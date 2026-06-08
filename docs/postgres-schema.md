@@ -31,9 +31,9 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 
 | schema | 책임 | 테이블 수 (v2 1차) |
 |--------|------|------------------|
-| `feature` | feature 도메인 본체 (features + 5 detail + opening_hours + weather + price + files) | 11 |
+| `feature` | feature 도메인 본체 (features + versions + 5 detail + opening_hours + weather + price + files) | 12 |
 | `provider_sync` | source 추적 + sync state | 3 |
-| `ops` | 운영 (작업 큐, 검수, 정합성, api 로그) | 7 |
+| `ops` | 운영 (작업 큐, 검수, 정합성, 사용자 변경 요청, api 로그) | 13 |
 | `x_extension` | 확장 (postgis 등) | extensions only |
 
 ## 3. 테이블 카탈로그 (alphabetical by schema)
@@ -42,7 +42,8 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 
 | 테이블 | PK | 핵심 컬럼 / 비고 |
 |--------|----|---------------|
-| `features` | `feature_id` | kind/name/category/coord/coord_precision_digits/coord_5179(generated)/geom/address/legal_dong_code/marker_*/parent/sibling_group_id/detail/raw_refs/status |
+| `features` | `feature_id` | kind/name/category/coord/coord_precision_digits/coord_5179(generated)/geom/address/legal_dong_code/marker_*/parent/sibling_group_id/detail/raw_refs/status/data_origin/data_version/user_change_* |
+| `feature_versions` | `(feature_id, version)` | provider version 0과 user_request version 1 snapshot 보존; payload JSONB |
 | `feature_files` | `file_id` | feature_id FK CASCADE; UNIQUE (storage_backend,bucket,object_key); file_type CHECK |
 | `feature_place_details` | `feature_id` | place_kind, phones (≤3), reviews_link, business_hours, facility_info, license_date, biz_number |
 | `feature_event_details` | `feature_id` | event_kind, starts_on/ends_on (CHECK), venue_name, content_id, area_code |
@@ -78,6 +79,7 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 | `api_call_log` | `id BIGSERIAL` | provider, endpoint, status, latency_ms, occurred_at; BRIN(occurred_at) |
 | `feature_consistency_reports` | `report_id UUID` | ADR-033 Phase 1; batch_id, started_at/finished_at, severity_max CHECK(OK/WARN/ERROR), cases/summary JSONB |
 | `feature_update_requests` | `request_id UUID` | **구현됨(alembic 0008, ADR-045 T-205a)** — scope_type/scope JSONB, providers·dataset_keys JSONB, run_mode (queued/now), state (queued/running/done/failed/cancelled — import_jobs와 동일 전이), matched_scope JSONB, job_id FK, dagster_run_id, operator, reason, error_message. DDL 정본: `docs/openapi-admin-contract.md` §6.1 + `docs/data-model.md` §9.8 |
+| `feature_change_requests` | `request_id UUID` | **구현됨(alembic 0021)** — place/event 사용자 요청 add/update/delete queue. review_mode(require_review/immediate), state(pending/applied/rejected), payload JSONB, reviewer/applied timestamp |
 
 ## 4. 인덱스 카탈로그
 
@@ -96,8 +98,16 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 | `idx_features_parent` | (parent_feature_id) | partial NOT NULL |
 | `idx_features_sibling` | (sibling_group_id) | partial NOT NULL |
 | `idx_features_name_trgm` | GIN(name gin_trgm_ops) | pg_trgm 부분 문자열 |
+| `idx_features_data_origin` | (data_origin, data_version) | provider/user_request effective row 필터 |
+| `idx_features_user_deleted` | (user_deleted_at) | partial user_deleted_at IS NOT NULL |
 | `idx_features_event_end` | ((detail->>'ends_on')::date) | partial event |
 | `idx_features_notice_valid` | ((detail->>'valid_end_time')::timestamptz) | partial notice |
+
+### 4.1.1 `feature.feature_versions`
+
+| 인덱스 | 컬럼 | 비고 |
+|--------|------|------|
+| `idx_feature_versions_request` | (request_id) | 사용자 변경 요청에서 snapshot 역추적 |
 
 ### 4.2 `provider_sync.*`
 
@@ -165,6 +175,8 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 | `idx_api_call_provider_time` | (provider, occurred_at DESC) | |
 | `idx_reports_batch` | (batch_id) | feature_consistency_reports (ADR-033) |
 | `idx_reports_started` | (started_at DESC) | feature_consistency_reports |
+| `idx_feature_change_state_created` | (state, created_at DESC, request_id DESC) | pending/applied/rejected 목록 |
+| `idx_feature_change_feature` | (feature_id) | feature별 사용자 변경 요청 |
 
 ## 5. CHECK constraint 카탈로그
 
@@ -172,7 +184,14 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 |--------|------|------|
 | `features` | `ck_features_kind` | kind ∈ FeatureKind 7종 |
 | `features` | `ck_features_status` | status ∈ FeatureStatus 6종 |
+| `features` | `ck_features_data_origin` | provider/user_request |
+| `features` | `ck_features_data_version` | ≥ 0 |
+| `features` | `ck_features_user_change_kind` | NULL 또는 add/update/delete |
+| `features` | `ck_features_user_change_status` | NULL 또는 pending/applied/rejected |
 | `features` | `ck_features_coord_pair` | coord NULL이거나 한국 영역 안 (lon 124-132, lat 33-39.5) |
+| `feature_versions` | `ck_feature_versions_version` | ≥ 0 |
+| `feature_versions` | `ck_feature_versions_origin` | provider/user_request |
+| `feature_versions` | `ck_feature_versions_change_kind` | load/add/update/delete |
 | `feature_files` | `ck_feature_files_file_type` | image/video/audio/document/file |
 | `feature_files` | `ck_feature_files_display_order` | ≥ 0 |
 | `feature_files` | `ck_feature_files_byte_size` | NULL or ≥ 0 |
@@ -208,6 +227,9 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 | `provider_refresh_policies` | `ck_provider_refresh_source_kind` | openapi/filedata/manual/system |
 | `provider_refresh_policies` | `ck_provider_refresh_targeted_policy` | follow_system/allow_targeted/disabled |
 | `provider_refresh_policies` | `ck_provider_refresh_*` | interval/rate-limit/max_concurrent/burst 양수 |
+| `feature_change_requests` | `ck_feature_change_action` | add/update/delete |
+| `feature_change_requests` | `ck_feature_change_state` | pending/applied/rejected |
+| `feature_change_requests` | `ck_feature_change_review_mode` | require_review/immediate |
 
 ## 6. FK CASCADE 정책
 

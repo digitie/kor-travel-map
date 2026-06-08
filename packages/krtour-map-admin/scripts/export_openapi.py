@@ -34,6 +34,8 @@ import sys
 from pathlib import Path
 from typing import Any, Literal, cast
 
+from fastapi import FastAPI
+
 OpenApiProfile = Literal["admin", "user"]
 
 ADMIN_OPENAPI_PATH = Path("packages/krtour-map-admin/openapi.json")
@@ -51,8 +53,6 @@ USER_OPERATIONS: dict[str, frozenset[str]] = {
     "/health": frozenset({"get"}),
     "/version": frozenset({"get"}),
     "/tripmate/features/batch": frozenset({"post"}),
-    "/tripmate/feature-update-requests": frozenset({"post"}),
-    "/tripmate/feature-update-requests/{request_id}": frozenset({"get"}),
 }
 
 HTTP_METHODS: frozenset[str] = frozenset(
@@ -60,14 +60,14 @@ HTTP_METHODS: frozenset[str] = frozenset(
 )
 
 
-def _load_app():
+def _load_app() -> FastAPI:
     """Import krtour.map_admin.app:app lazily.
 
     코드 작성 단계 진입 전에는 모듈이 존재하지 않으므로 명시적 안내 메시지로
     실패한다. Sprint 1의 첫 라우터 PR에서 실제 import가 동작하기 시작한다.
     """
     try:
-        from krtour.map_admin.app import app  # type: ignore[import-not-found]
+        from krtour.map_admin.app import app
     except ModuleNotFoundError as e:
         raise SystemExit(
             "krtour.map_admin 모듈이 아직 없습니다 (코드 작성 단계 진입 전).\n"
@@ -206,8 +206,8 @@ def check(output: Path, *, profile: OpenApiProfile = "admin") -> int:
 
 def _output_for_profile(args: argparse.Namespace, profile: OpenApiProfile) -> Path:
     if profile == "admin":
-        return args.output
-    return args.user_output
+        return cast(Path, args.output)
+    return cast(Path, args.user_output)
 
 
 def main(argv: list[str] | None = None) -> int:

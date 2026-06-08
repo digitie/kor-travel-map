@@ -66,12 +66,8 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
         "/features/search",
         "/features/{feature_id}",
         "/features/{feature_id}/weather",
-        "/tripmate/feature-update-requests",
-        "/tripmate/feature-update-requests/{request_id}",
         "/tripmate/features/batch",
     }
-    assert set(user["paths"]["/tripmate/feature-update-requests"]) >= {"post"}
-    assert "get" not in user["paths"]["/tripmate/feature-update-requests"]
     assert not any(path.startswith("/admin") for path in user["paths"])
     assert not any(path.startswith("/ops") for path in user["paths"])
     assert not any(path.startswith("/debug") for path in user["paths"])

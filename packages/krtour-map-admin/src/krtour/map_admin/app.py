@@ -60,7 +60,6 @@ from krtour.map_admin.routers import (
     poi_cache_targets_router,
     providers_router,
     public_status_router,
-    tripmate_feature_update_requests_router,
     tripmate_router,
     version_router,
 )
@@ -327,10 +326,6 @@ def create_app(settings: AdminSettings | None = None) -> FastAPI:
         # 게이트한다(ADR-045 D-1 defense-in-depth). token 미설정이면 통과(하위호환).
         application.include_router(
             tripmate_router, dependencies=[Depends(require_service_token)]
-        )
-        application.include_router(
-            tripmate_feature_update_requests_router,
-            dependencies=[Depends(require_service_token)],
         )
         # Step D on-demand 상세는 DB(적재된 raw_data) 필요 → features와 동일 gate.
         if settings.debug_routes_enabled:

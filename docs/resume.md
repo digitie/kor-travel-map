@@ -1,5 +1,33 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-08 Codex 작업 메모 — REST API v1 계약 정리
+
+`docs/reports/api-endpoint-review-2026-06-08.md`와 TripMate repo
+`docs/integrations/krtour-map-rest-api.md`를 대조해 krtour-map REST API 정본 문서를
+재작성했다. 핵심 결정은 사용자 지시대로 **`/tripmate/feature-update-requests*`를
+admin 영역으로 이동**하는 것이고, 이어서 place/event feature 사용자 요청
+추가·수정·삭제 API를 admin 영역에 구현했다.
+
+- `docs/tripmate-rest-api.md`: 목표 `/v1` 사용자/서비스 계약, envelope/error/parameter 규약,
+  endpoint naming, 중복 제거, 누락 API, 현재 구현 gap을 한 문서로 정리했다.
+- `docs/openapi-admin-contract.md`/`docs/tripmate-integration.md`/
+  `docs/poi-cache-update-targets.md`/`docs/architecture.md`: feature update request는
+  `/admin/feature-update-requests*`만 정본이고, TripMate 사용자 제안 큐는 TripMate app DB가
+  소유한다고 정리했다.
+- 코드: `/tripmate/feature-update-requests*` alias를 제거하고
+  `/admin/feature-update-requests*`만 남겼다. `/admin/features`에 `POST`,
+  `/admin/features/{feature_id}`에 `PATCH`/`DELETE`,
+  `/admin/features/change-requests*` 승인/거절 API를 추가했다.
+- DB: provider 적재는 version 0, 사용자 요청 추가·수정·삭제는 version 1로 보존하도록
+  `feature.features` metadata, `feature.feature_versions`,
+  `ops.feature_change_requests`를 추가했다. provider 재적재는 사용자 version 1 effective
+  row를 덮지 않고, 사용자 요청 soft delete는 되살리지 않는다.
+- `docs/tasks.md`: REST API 정리 후속 `T-214a~h`와 feature CRUD 후속 `T-215a~c`를
+  정리했다. `T-214a`, `T-214c`, `T-215a`는 완료했고, 남은 큰 후속은 `/v1` prefix와
+  admin UI feature change queue 화면이다.
+
+**다음 한 작업 후보**: **T-214b REST API `/v1` prefix 도입** 또는 **T-215b admin UI feature change queue 화면**.
+
 ## 2026-06-08 Codex 작업 메모 — T-212d 사후 리뷰 반영
 
 PR #313 머지 후 달린 사후 상세리뷰를 확인하고 T-212d 후속 보강을 진행했다. GitHub

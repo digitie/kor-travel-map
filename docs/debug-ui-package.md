@@ -42,7 +42,7 @@ Admin 우선 OpenAPI와 Dagster feature update queue 계약은
 [`debug-ui-admin-workflows.md`](debug-ui-admin-workflows.md)에 둔다.
 
 - 전체 feature 검색/소팅/페이징/지도-테이블 전환.
-- feature 수동 추가, 비활성화, 영구 삭제.
+- feature 사용자 요청 추가·수정·soft delete, 비활성화.
 - feature 상세, source/raw payload, 주변 feature 지도/테이블 검토.
 - provider 상태 확인, 강제 호출, dry-run/load, job progress/cancel.
 - provider 적재 중 발생한 중복 후보와 결측/정합성 이슈 검토.

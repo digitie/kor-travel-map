@@ -85,8 +85,10 @@
 
 ADR-045 이후 TripMate와 krtour-map 사이의 운영 계약은 OpenAPI다.
 
-- TripMate는 generated OpenAPI client로 `GET /features`, `GET /features/{id}`,
-  필요 시 `POST /tripmate/feature-update-requests` 등을 호출한다.
+- TripMate는 generated OpenAPI client로 feature read API(`GET /features/*` 또는
+  목표 v1 계약의 `GET /v1/features/*`)와 batch 조회를 호출한다. Feature update
+  request는 사용자/서비스 표면이 아니라 `/admin/feature-update-requests*` 운영
+  표면에서만 실행한다.
 - TripMate는 krtour-map PostgreSQL에 직접 연결하지 않는다.
 - TripMate는 `python-krtour-map`을 직접 import하지 않는다.
 - TripMate DB에는 `feature_id`를 외부 참조 값으로 저장할 수 있으나 DB FK는 걸지

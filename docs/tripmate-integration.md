@@ -9,7 +9,9 @@
 > - krtour-map은 독립 PostgreSQL/PostGIS DB와 독립 Dagster를 가진다.
 > - TripMate는 krtour-map DB에 직접 접근하지 않는다.
 > - TripMate는 `python-krtour-map`을 운영 코드에서 직접 import하지 않는다.
-> - TripMate는 krtour-map OpenAPI client로 feature 조회와 update request를 호출한다.
+> - TripMate는 krtour-map OpenAPI client로 feature 조회와 batch 조회를 호출한다.
+>   Feature update request는 `/admin/feature-update-requests*` 운영 표면으로 이동했으며,
+>   TripMate 사용자 제안 큐는 TripMate app DB가 소유한다.
 > - OpenAPI는 우선 admin UI 기준으로 작성하고, TripMate 연동 시 필요한 공개 API를
 >   보완·확장한다.
 >
@@ -23,7 +25,7 @@ TripMate 연동의 현재 표준 흐름:
 ```
 TripMate API/Web
   → generated krtour-map OpenAPI client
-  → krtour-map API (`/features/in-bounds`, `/features/{id}`, `/tripmate/feature-update-requests`)
+  → krtour-map API (`/v1/features/in-bounds`, `/v1/features/{id}`, `/v1/features/batch`)
   → krtour-map 독립 DB/Dagster
 ```
 
@@ -31,24 +33,24 @@ TripMate API/Web
 
 | API | 목적 |
 |-----|------|
-| `GET /features/in-bounds` | bbox 기반 지도 feature 조회 |
-| `GET /features/{feature_id}` | feature 상세 |
-| `GET /features/search` | 이름/bbox 기반 feature 검색 |
-| `GET /features/nearby/by-target` | 외부 POI/cache target key 기준 주변 feature 조회 |
-| `POST /tripmate/features/batch` | 여러 feature_id batch 상세 조회 |
-| `POST /tripmate/feature-update-requests` | 특정 feature/좌표 반경/시군구/provider 업데이트 큐잉 |
-| `GET /tripmate/feature-update-requests/{request_id}` | 업데이트 요청 진행 상태 |
+| `GET /v1/features/in-bounds` | bbox 기반 지도 feature 조회 |
+| `GET /v1/features/{feature_id}` | feature 상세 |
+| `GET /v1/features/search` | 이름/bbox 기반 feature 검색 |
+| `GET /v1/features/nearby/by-target` | 외부 POI/cache target key 기준 주변 feature 조회 |
+| `POST /v1/features/batch` | 여러 feature_id batch 상세 조회 (`/tripmate/features/batch` 호환 경로 대체) |
+| `/admin/feature-update-requests*` | 운영자 승인 후 특정 feature/좌표 반경/시군구/provider 업데이트 큐잉 |
 | `GET /ops/import-jobs/{job_id}` | 실제 Dagster/import job progress |
 
 후속 후보는 `docs/reports/tripmate-requirements-reconcile-2026-06-06.md`와
 `docs/tasks.md` `T-213a~h`를 따른다. 특히 일반 좌표 기준 `/features/nearby`,
 provider last-sync, public `/health`/`/version`, weather card, category catalog는
-아직 user OpenAPI 표면이 아니다.
+현재 user OpenAPI에 포함되어 있으며, 목표 안정 계약은
+`docs/tripmate-rest-api.md`의 `/v1` 경로 정리를 따른다.
 
 예: 특정 좌표 중심 반경 5km 안 feature 업데이트 요청.
 
 ```http
-POST /tripmate/feature-update-requests
+POST /admin/feature-update-requests
 Content-Type: application/json
 
 {
@@ -94,7 +96,7 @@ Content-Type: application/json
 scope는 krtour-map이 dedup해 한 번만 업데이트한다.
 
 ```http
-POST /tripmate/feature-update-requests
+POST /admin/feature-update-requests
 Content-Type: application/json
 
 {
@@ -122,7 +124,7 @@ GET /features/nearby/by-target?external_system=tripmate&target_key=poi_123&radiu
 예: 특정 좌표 중심 반경 10km와 교차하는 시군구의 feature 업데이트 dry-run.
 
 ```http
-POST /tripmate/feature-update-requests
+POST /admin/feature-update-requests
 Content-Type: application/json
 
 {
@@ -150,7 +152,9 @@ TripMate가 직접 소유하는 항목:
 
 - 사용자 인증/인가, 여행계획, 저장 POI, 사용자 UI.
 - krtour-map OpenAPI client 생성물과 타입 검증 계층.
-- POI 생성·수정·삭제 시 `PUT/DELETE /admin/poi-cache-targets/{external_system}/{target_key}` 호출.
+- POI 생성·수정·삭제 시 cache target write 경로 호출. 현재 구현은
+  `PUT/DELETE /admin/poi-cache-targets/{external_system}/{target_key}`이며, TripMate
+  직접 write를 허용할지는 `docs/tripmate-rest-api.md`의 `T-214f` 결정에 따른다.
 - 저장 POI 기준 주변 feature 조회 시 `GET /features/nearby/by-target` 호출.
 - 사용자 흐름에서 필요한 feature 상세 조회 시 `GET /features/{feature_id}` 호출.
 

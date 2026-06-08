@@ -90,7 +90,7 @@ def test_openapi_declares_service_token_scheme() -> None:
     assert scheme["in"] == "header"
     assert scheme["name"] == SERVICE_TOKEN_HEADER
     # /tripmate/* 외부 surface는 security 요구, /features 공용 read는 없음.
-    tri = spec["paths"]["/tripmate/feature-update-requests"]["post"]
+    tri = spec["paths"]["/tripmate/features/batch"]["post"]
     assert tri.get("security")
     feat = spec["paths"]["/features"]["get"]
     assert not feat.get("security")
@@ -100,10 +100,10 @@ def test_openapi_declares_service_token_scheme() -> None:
 def test_tripmate_requires_token_when_set() -> None:
     client = _client(AdminSettings(service_token=SecretStr("tok")))
     # 헤더 없음/오류 → 401(핸들러/DB 도달 전 auth 차단).
-    assert client.post("/tripmate/feature-update-requests", json={}).status_code == 401
+    assert client.post("/tripmate/features/batch", json={}).status_code == 401
     assert (
         client.post(
-            "/tripmate/feature-update-requests",
+            "/tripmate/features/batch",
             json={},
             headers={SERVICE_TOKEN_HEADER: "wrong"},
         ).status_code
@@ -115,7 +115,7 @@ def test_tripmate_requires_token_when_set() -> None:
 def test_tripmate_token_unset_not_blocked() -> None:
     client = _client(AdminSettings(service_token=None))
     # 미설정이면 auth가 막지 않는다(하위호환). 본문/DB 사유로 401은 아니어야 한다.
-    assert client.post("/tripmate/feature-update-requests", json={}).status_code != 401
+    assert client.post("/tripmate/features/batch", json={}).status_code != 401
 
 
 @pytest.mark.unit

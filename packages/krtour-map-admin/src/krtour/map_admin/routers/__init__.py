@@ -27,9 +27,6 @@ from krtour.map_admin.routers.etl import router as etl_router
 from krtour.map_admin.routers.feature_update_requests import (
     router as feature_update_requests_router,
 )
-from krtour.map_admin.routers.feature_update_requests import (
-    tripmate_router as tripmate_feature_update_requests_router,
-)
 from krtour.map_admin.routers.features import (
     router as features_router,
 )
@@ -59,7 +56,6 @@ __all__ = [
     "dedup_review_router",
     "enrichment_review_router",
     "feature_update_requests_router",
-    "tripmate_feature_update_requests_router",
     "poi_cache_targets_router",
     "features_router",
     "tripmate_router",

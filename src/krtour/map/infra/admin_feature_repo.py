@@ -42,7 +42,13 @@ __all__ = [
     "FeatureDeactivateResult",
     "FeatureStateConflict",
     "FeatureOverride",
+    "FeatureChangeConflict",
+    "FeatureChangeRequest",
     "deactivate_feature",
+    "submit_feature_change_request",
+    "apply_feature_change_request",
+    "reject_feature_change_request",
+    "list_feature_change_requests",
     "list_admin_features",
     "list_dedup_reviews",
     "list_enrichment_reviews",
@@ -61,6 +67,9 @@ AdminFeatureSort = Literal[
 ]
 SortOrder = Literal["asc", "desc"]
 DedupDecision = Literal["accepted", "rejected", "ignored"]
+FeatureChangeAction = Literal["add", "update", "delete"]
+FeatureChangeState = Literal["pending", "applied", "rejected"]
+FeatureChangeReviewMode = Literal["require_review", "immediate"]
 
 
 @dataclass(frozen=True)
@@ -137,6 +146,48 @@ class FeatureStateConflict(ValueError):
         super().__init__(
             f"feature {feature_id!r}는 {target_status!r} 전이를 허용하지 않음: {reason}"
         )
+
+
+class FeatureChangeConflict(ValueError):
+    """feature add/update/delete 요청을 적용할 수 없을 때 발생."""
+
+    def __init__(
+        self,
+        *,
+        feature_id: str,
+        action: str,
+        current_status: str | None = None,
+        user_deleted_at: datetime | None = None,
+        message: str | None = None,
+    ) -> None:
+        self.feature_id = feature_id
+        self.action = action
+        self.current_status = current_status
+        self.user_deleted_at = user_deleted_at
+        if message is None:
+            reason = f"status={current_status!r}"
+            if user_deleted_at is not None:
+                reason = f"{reason}, user_deleted_at={user_deleted_at.isoformat()}"
+            message = f"feature {feature_id!r}는 {action!r} 적용 불가: {reason}"
+        super().__init__(message)
+
+
+@dataclass(frozen=True)
+class FeatureChangeRequest:
+    """``ops.feature_change_requests`` row summary."""
+
+    request_id: str
+    feature_id: str
+    action: str
+    state: str
+    review_mode: str
+    payload: dict[str, Any]
+    reason: str | None
+    requested_by: str | None
+    reviewed_by: str | None
+    reviewed_at: datetime | None
+    applied_at: datetime | None
+    created_at: datetime
 
 
 @dataclass(frozen=True)
@@ -643,6 +694,631 @@ async def deactivate_feature(
         override_created=override is not None,
         override=override,
     )
+
+
+_INSERT_FEATURE_CHANGE_REQUEST_SQL: Final[str] = """
+INSERT INTO ops.feature_change_requests (
+    request_id, feature_id, action, state, review_mode,
+    payload, reason, requested_by
+) VALUES (
+    x_extension.gen_random_uuid(), :feature_id, :action, :state, :review_mode,
+    CAST(:payload AS jsonb), :reason, :requested_by
+)
+RETURNING
+    request_id::text, feature_id, action, state, review_mode,
+    payload, reason, requested_by, reviewed_by, reviewed_at, applied_at, created_at
+"""
+
+_GET_CHANGE_REQUEST_FOR_UPDATE_SQL: Final[str] = """
+SELECT
+    request_id::text, feature_id, action, state, review_mode,
+    payload, reason, requested_by, reviewed_by, reviewed_at, applied_at, created_at
+FROM ops.feature_change_requests
+WHERE request_id::text = :request_id
+FOR UPDATE
+"""
+
+_LIST_CHANGE_REQUESTS_SQL: Final[str] = """
+SELECT
+    request_id::text, feature_id, action, state, review_mode,
+    payload, reason, requested_by, reviewed_by, reviewed_at, applied_at, created_at
+FROM ops.feature_change_requests
+WHERE (CAST(:states AS text[]) IS NULL OR state = ANY(CAST(:states AS text[])))
+  AND (CAST(:actions AS text[]) IS NULL OR action = ANY(CAST(:actions AS text[])))
+  AND (
+    CAST(:q_like AS text) IS NULL
+    OR feature_id ILIKE CAST(:q_like AS text)
+    OR requested_by ILIKE CAST(:q_like AS text)
+    OR reason ILIKE CAST(:q_like AS text)
+  )
+ORDER BY created_at DESC, request_id DESC
+LIMIT :limit
+"""
+
+_FEATURE_CHANGE_STATE_SQL: Final[str] = """
+SELECT feature_id, kind, status, user_deleted_at
+FROM feature.features
+WHERE feature_id = :feature_id
+FOR UPDATE
+"""
+
+_APPLY_FEATURE_ADD_SQL: Final[str] = """
+INSERT INTO feature.features (
+    feature_id, kind, name, category,
+    coord, coord_precision_digits, geom,
+    address, legal_dong_code, road_name_code, road_address_management_no,
+    admin_dong_code, sido_code, sigungu_code,
+    urls, marker_icon, marker_color,
+    parent_feature_id, sibling_group_id,
+    detail, raw_refs, status,
+    data_origin, data_version, user_change_kind, user_change_status,
+    user_change_request_id, user_deleted_at, user_deleted_by, user_change_reason,
+    created_at, updated_at, deleted_at
+) VALUES (
+    :feature_id, :kind, :name, :category,
+    CASE WHEN CAST(:lon AS double precision) IS NULL THEN NULL
+         ELSE x_extension.ST_SetSRID(
+             x_extension.ST_MakePoint(
+                 CAST(:lon AS double precision),
+                 CAST(:lat AS double precision)
+             ),
+             4326
+         ) END,
+    :coord_precision_digits,
+    CASE WHEN CAST(:geom_wkt AS text) IS NULL THEN NULL
+         ELSE x_extension.ST_SetSRID(
+             x_extension.ST_GeomFromText(CAST(:geom_wkt AS text)), 4326
+         ) END,
+    CAST(:address AS jsonb), :legal_dong_code, :road_name_code,
+    :road_address_management_no, :admin_dong_code, :sido_code, :sigungu_code,
+    CAST(:urls AS jsonb), :marker_icon, :marker_color,
+    :parent_feature_id, :sibling_group_id,
+    CAST(:detail AS jsonb), '[]'::jsonb, :status,
+    'user_request', 1, 'add', 'applied',
+    CAST(:request_id AS uuid), NULL, NULL, :reason,
+    now(), now(), NULL
+)
+ON CONFLICT (feature_id) DO UPDATE SET
+    kind = EXCLUDED.kind,
+    name = EXCLUDED.name,
+    category = EXCLUDED.category,
+    coord = EXCLUDED.coord,
+    coord_precision_digits = EXCLUDED.coord_precision_digits,
+    geom = EXCLUDED.geom,
+    address = EXCLUDED.address,
+    legal_dong_code = EXCLUDED.legal_dong_code,
+    road_name_code = EXCLUDED.road_name_code,
+    road_address_management_no = EXCLUDED.road_address_management_no,
+    admin_dong_code = EXCLUDED.admin_dong_code,
+    sido_code = EXCLUDED.sido_code,
+    sigungu_code = EXCLUDED.sigungu_code,
+    urls = EXCLUDED.urls,
+    marker_icon = EXCLUDED.marker_icon,
+    marker_color = EXCLUDED.marker_color,
+    parent_feature_id = EXCLUDED.parent_feature_id,
+    sibling_group_id = EXCLUDED.sibling_group_id,
+    detail = EXCLUDED.detail,
+    status = EXCLUDED.status,
+    data_origin = 'user_request',
+    data_version = 1,
+    user_change_kind = 'add',
+    user_change_status = 'applied',
+    user_change_request_id = CAST(:request_id AS uuid),
+    user_deleted_at = NULL,
+    user_deleted_by = NULL,
+    user_change_reason = :reason,
+    updated_at = now(),
+    deleted_at = NULL
+WHERE features.user_deleted_at IS NULL
+  AND features.status <> 'deleted'
+  AND features.kind IN ('place','event')
+RETURNING feature_id, status, user_deleted_at
+"""
+
+_APPLY_FEATURE_UPDATE_SQL: Final[str] = """
+UPDATE feature.features AS f
+SET
+    name = CASE WHEN CAST(:name_set AS boolean) THEN CAST(:name AS text) ELSE f.name END,
+    category = CASE
+        WHEN CAST(:category_set AS boolean) THEN CAST(:category AS text)
+        ELSE f.category
+    END,
+    coord = CASE
+        WHEN CAST(:coord_set AS boolean) THEN x_extension.ST_SetSRID(
+            x_extension.ST_MakePoint(
+                CAST(:lon AS double precision),
+                CAST(:lat AS double precision)
+            ),
+            4326
+        )
+        ELSE f.coord
+    END,
+    coord_precision_digits = CASE
+        WHEN CAST(:coord_set AS boolean) THEN CAST(:coord_precision_digits AS smallint)
+        ELSE f.coord_precision_digits
+    END,
+    geom = CASE
+        WHEN CAST(:geom_set AS boolean) THEN
+            CASE WHEN CAST(:geom_wkt AS text) IS NULL THEN NULL
+                 ELSE x_extension.ST_SetSRID(
+                     x_extension.ST_GeomFromText(CAST(:geom_wkt AS text)), 4326
+                 ) END
+        ELSE f.geom
+    END,
+    address = CASE
+        WHEN CAST(:address_set AS boolean) THEN CAST(:address AS jsonb)
+        ELSE f.address
+    END,
+    legal_dong_code = CASE
+        WHEN CAST(:legal_dong_code_set AS boolean) THEN CAST(:legal_dong_code AS text)
+        ELSE f.legal_dong_code
+    END,
+    road_name_code = CASE
+        WHEN CAST(:road_name_code_set AS boolean) THEN CAST(:road_name_code AS text)
+        ELSE f.road_name_code
+    END,
+    road_address_management_no = CASE
+        WHEN CAST(:road_address_management_no_set AS boolean) THEN
+            CAST(:road_address_management_no AS text)
+        ELSE f.road_address_management_no
+    END,
+    admin_dong_code = CASE
+        WHEN CAST(:admin_dong_code_set AS boolean) THEN CAST(:admin_dong_code AS text)
+        ELSE f.admin_dong_code
+    END,
+    sido_code = CASE
+        WHEN CAST(:sido_code_set AS boolean) THEN CAST(:sido_code AS text)
+        ELSE f.sido_code
+    END,
+    sigungu_code = CASE
+        WHEN CAST(:sigungu_code_set AS boolean) THEN CAST(:sigungu_code AS text)
+        ELSE f.sigungu_code
+    END,
+    urls = CASE WHEN CAST(:urls_set AS boolean) THEN CAST(:urls AS jsonb) ELSE f.urls END,
+    marker_icon = CASE
+        WHEN CAST(:marker_icon_set AS boolean) THEN CAST(:marker_icon AS text)
+        ELSE f.marker_icon
+    END,
+    marker_color = CASE
+        WHEN CAST(:marker_color_set AS boolean) THEN CAST(:marker_color AS text)
+        ELSE f.marker_color
+    END,
+    detail = CASE
+        WHEN CAST(:detail_set AS boolean) THEN CAST(:detail AS jsonb)
+        ELSE f.detail
+    END,
+    parent_feature_id = CASE
+        WHEN CAST(:parent_feature_id_set AS boolean) THEN CAST(:parent_feature_id AS text)
+        ELSE f.parent_feature_id
+    END,
+    sibling_group_id = CASE
+        WHEN CAST(:sibling_group_id_set AS boolean) THEN CAST(:sibling_group_id AS uuid)
+        ELSE f.sibling_group_id
+    END,
+    data_origin = 'user_request',
+    data_version = 1,
+    user_change_kind = 'update',
+    user_change_status = 'applied',
+    user_change_request_id = CAST(:request_id AS uuid),
+    user_change_reason = :reason,
+    updated_at = now()
+WHERE f.feature_id = :feature_id
+  AND f.kind IN ('place','event')
+  AND f.status <> 'deleted'
+  AND f.user_deleted_at IS NULL
+RETURNING f.feature_id, f.status, f.user_deleted_at
+"""
+
+_APPLY_FEATURE_DELETE_SQL: Final[str] = """
+UPDATE feature.features AS f
+SET
+    status = 'deleted',
+    deleted_at = now(),
+    data_origin = 'user_request',
+    data_version = 1,
+    user_change_kind = 'delete',
+    user_change_status = 'applied',
+    user_change_request_id = CAST(:request_id AS uuid),
+    user_deleted_at = now(),
+    user_deleted_by = :operator,
+    user_change_reason = :reason,
+    updated_at = now()
+WHERE f.feature_id = :feature_id
+  AND f.kind IN ('place','event')
+  AND f.status <> 'deleted'
+  AND f.user_deleted_at IS NULL
+RETURNING f.feature_id, f.status, f.user_deleted_at
+"""
+
+_UPSERT_USER_VERSION_FROM_FEATURE_SQL: Final[str] = """
+INSERT INTO feature.feature_versions (
+    feature_id, version, origin, change_kind, payload, request_id, created_by
+)
+SELECT
+    f.feature_id,
+    1,
+    'user_request',
+    :change_kind,
+    jsonb_build_object(
+        'feature_id', f.feature_id,
+        'kind', f.kind,
+        'name', f.name,
+        'category', f.category,
+        'lon', x_extension.ST_X(f.coord),
+        'lat', x_extension.ST_Y(f.coord),
+        'coord_precision_digits', f.coord_precision_digits,
+        'address', f.address,
+        'legal_dong_code', f.legal_dong_code,
+        'road_name_code', f.road_name_code,
+        'road_address_management_no', f.road_address_management_no,
+        'admin_dong_code', f.admin_dong_code,
+        'sido_code', f.sido_code,
+        'sigungu_code', f.sigungu_code,
+        'urls', f.urls,
+        'marker_icon', f.marker_icon,
+        'marker_color', f.marker_color,
+        'parent_feature_id', f.parent_feature_id,
+        'sibling_group_id', f.sibling_group_id,
+        'detail', f.detail,
+        'status', f.status,
+        'data_origin', f.data_origin,
+        'data_version', f.data_version,
+        'user_change_kind', f.user_change_kind,
+        'user_change_status', f.user_change_status,
+        'user_deleted_at', f.user_deleted_at,
+        'deleted_at', f.deleted_at,
+        'updated_at', f.updated_at
+    ),
+    CAST(:request_id AS uuid),
+    :operator
+FROM feature.features AS f
+WHERE f.feature_id = :feature_id
+ON CONFLICT (feature_id, version) DO UPDATE SET
+    origin = EXCLUDED.origin,
+    change_kind = EXCLUDED.change_kind,
+    payload = EXCLUDED.payload,
+    request_id = EXCLUDED.request_id,
+    created_by = EXCLUDED.created_by,
+    created_at = now()
+"""
+
+_MARK_CHANGE_APPLIED_SQL: Final[str] = """
+UPDATE ops.feature_change_requests
+SET state = 'applied',
+    reviewed_by = COALESCE(:operator, reviewed_by),
+    reviewed_at = COALESCE(reviewed_at, now()),
+    applied_at = now()
+WHERE request_id::text = :request_id
+RETURNING
+    request_id::text, feature_id, action, state, review_mode,
+    payload, reason, requested_by, reviewed_by, reviewed_at, applied_at, created_at
+"""
+
+_MARK_CHANGE_REJECTED_SQL: Final[str] = """
+UPDATE ops.feature_change_requests
+SET state = 'rejected',
+    reviewed_by = :operator,
+    reviewed_at = now(),
+    reason = COALESCE(:reason, reason)
+WHERE request_id::text = :request_id
+  AND state = 'pending'
+RETURNING
+    request_id::text, feature_id, action, state, review_mode,
+    payload, reason, requested_by, reviewed_by, reviewed_at, applied_at, created_at
+"""
+
+
+def _feature_change_row(row: Any) -> FeatureChangeRequest:
+    payload = row["payload"]
+    if isinstance(payload, str):
+        payload = json.loads(payload)
+    return FeatureChangeRequest(
+        request_id=str(row["request_id"]),
+        feature_id=str(row["feature_id"]),
+        action=str(row["action"]),
+        state=str(row["state"]),
+        review_mode=str(row["review_mode"]),
+        payload=dict(payload or {}),
+        reason=row["reason"],
+        requested_by=row["requested_by"],
+        reviewed_by=row["reviewed_by"],
+        reviewed_at=row["reviewed_at"],
+        applied_at=row["applied_at"],
+        created_at=row["created_at"],
+    )
+
+
+def _change_payload_json(payload: dict[str, Any]) -> str:
+    return json.dumps(payload, ensure_ascii=False, default=str)
+
+
+def _json_param(value: Any) -> str:
+    return json.dumps(value if value is not None else {}, ensure_ascii=False, default=str)
+
+
+def _add_params(
+    *,
+    request_id: str,
+    feature_id: str,
+    payload: dict[str, Any],
+    reason: str | None,
+) -> dict[str, Any]:
+    coord = payload.get("coord") or {}
+    return {
+        "request_id": request_id,
+        "feature_id": feature_id,
+        "kind": payload["kind"],
+        "name": payload["name"],
+        "category": payload["category"],
+        "lon": coord.get("lon"),
+        "lat": coord.get("lat"),
+        "coord_precision_digits": payload.get("coord_precision_digits") or (
+            6 if coord else None
+        ),
+        "geom_wkt": payload.get("geom"),
+        "address": _json_param(payload.get("address")),
+        "legal_dong_code": payload.get("legal_dong_code"),
+        "road_name_code": payload.get("road_name_code"),
+        "road_address_management_no": payload.get("road_address_management_no"),
+        "admin_dong_code": payload.get("admin_dong_code"),
+        "sido_code": payload.get("sido_code"),
+        "sigungu_code": payload.get("sigungu_code"),
+        "urls": _json_param(payload.get("urls")),
+        "marker_icon": payload["marker_icon"],
+        "marker_color": payload["marker_color"],
+        "parent_feature_id": payload.get("parent_feature_id"),
+        "sibling_group_id": payload.get("sibling_group_id"),
+        "detail": _json_param(payload.get("detail")),
+        "status": payload.get("status") or "active",
+        "reason": reason,
+    }
+
+
+def _update_params(
+    *,
+    request_id: str,
+    feature_id: str,
+    payload: dict[str, Any],
+    reason: str | None,
+) -> dict[str, Any]:
+    coord = payload.get("coord") if "coord" in payload else None
+    return {
+        "request_id": request_id,
+        "feature_id": feature_id,
+        "name_set": "name" in payload,
+        "name": payload.get("name"),
+        "category_set": "category" in payload,
+        "category": payload.get("category"),
+        "coord_set": coord is not None,
+        "lon": coord.get("lon") if isinstance(coord, dict) else None,
+        "lat": coord.get("lat") if isinstance(coord, dict) else None,
+        "coord_precision_digits": payload.get("coord_precision_digits") or (
+            6 if coord is not None else None
+        ),
+        "geom_set": "geom" in payload,
+        "geom_wkt": payload.get("geom"),
+        "address_set": "address" in payload,
+        "address": _json_param(payload.get("address")),
+        "legal_dong_code_set": "legal_dong_code" in payload,
+        "legal_dong_code": payload.get("legal_dong_code"),
+        "road_name_code_set": "road_name_code" in payload,
+        "road_name_code": payload.get("road_name_code"),
+        "road_address_management_no_set": "road_address_management_no" in payload,
+        "road_address_management_no": payload.get("road_address_management_no"),
+        "admin_dong_code_set": "admin_dong_code" in payload,
+        "admin_dong_code": payload.get("admin_dong_code"),
+        "sido_code_set": "sido_code" in payload,
+        "sido_code": payload.get("sido_code"),
+        "sigungu_code_set": "sigungu_code" in payload,
+        "sigungu_code": payload.get("sigungu_code"),
+        "urls_set": "urls" in payload,
+        "urls": _json_param(payload.get("urls")),
+        "marker_icon_set": "marker_icon" in payload,
+        "marker_icon": payload.get("marker_icon"),
+        "marker_color_set": "marker_color" in payload,
+        "marker_color": payload.get("marker_color"),
+        "detail_set": "detail" in payload,
+        "detail": _json_param(payload.get("detail")),
+        "parent_feature_id_set": "parent_feature_id" in payload,
+        "parent_feature_id": payload.get("parent_feature_id"),
+        "sibling_group_id_set": "sibling_group_id" in payload,
+        "sibling_group_id": payload.get("sibling_group_id"),
+        "reason": reason,
+    }
+
+
+async def _state_for_conflict(
+    session: AsyncSession, feature_id: str
+) -> dict[str, Any] | None:
+    row = (
+        await session.execute(
+            text(_FEATURE_CHANGE_STATE_SQL),
+            {"feature_id": feature_id},
+        )
+    ).mappings().first()
+    return dict(row) if row is not None else None
+
+
+async def _apply_change(
+    session: AsyncSession,
+    request: FeatureChangeRequest,
+    *,
+    operator: str | None,
+) -> None:
+    payload = request.payload
+    if request.action == "add":
+        row = (
+            await session.execute(
+                text(_APPLY_FEATURE_ADD_SQL),
+                _add_params(
+                    request_id=request.request_id,
+                    feature_id=request.feature_id,
+                    payload=payload,
+                    reason=request.reason,
+                ),
+            )
+        ).mappings().first()
+    elif request.action == "update":
+        row = (
+            await session.execute(
+                text(_APPLY_FEATURE_UPDATE_SQL),
+                _update_params(
+                    request_id=request.request_id,
+                    feature_id=request.feature_id,
+                    payload=payload,
+                    reason=request.reason,
+                ),
+            )
+        ).mappings().first()
+    else:
+        row = (
+            await session.execute(
+                text(_APPLY_FEATURE_DELETE_SQL),
+                {
+                    "request_id": request.request_id,
+                    "feature_id": request.feature_id,
+                    "operator": operator,
+                    "reason": request.reason,
+                },
+            )
+        ).mappings().first()
+
+    if row is None:
+        state = await _state_for_conflict(session, request.feature_id)
+        if state is None:
+            raise FeatureChangeConflict(
+                feature_id=request.feature_id,
+                action=request.action,
+                message=f"feature 없음: {request.feature_id!r}",
+            )
+        raise FeatureChangeConflict(
+            feature_id=str(state["feature_id"]),
+            action=request.action,
+            current_status=str(state["status"]),
+            user_deleted_at=state["user_deleted_at"],
+        )
+
+    await session.execute(
+        text(_UPSERT_USER_VERSION_FROM_FEATURE_SQL),
+        {
+            "feature_id": request.feature_id,
+            "request_id": request.request_id,
+            "change_kind": request.action,
+            "operator": operator,
+        },
+    )
+
+
+async def submit_feature_change_request(
+    session: AsyncSession,
+    *,
+    action: FeatureChangeAction,
+    feature_id: str,
+    payload: dict[str, Any],
+    review_mode: FeatureChangeReviewMode,
+    reason: str | None,
+    requested_by: str | None,
+) -> FeatureChangeRequest:
+    """feature add/update/delete 요청을 만들고 설정에 따라 즉시 적용한다."""
+    initial_state = "applied" if review_mode == "immediate" else "pending"
+    row = (
+        await session.execute(
+            text(_INSERT_FEATURE_CHANGE_REQUEST_SQL),
+            {
+                "feature_id": feature_id,
+                "action": action,
+                "state": initial_state,
+                "review_mode": review_mode,
+                "payload": _change_payload_json(payload),
+                "reason": reason,
+                "requested_by": requested_by,
+            },
+        )
+    ).mappings().one()
+    request = _feature_change_row(row)
+    if review_mode == "immediate":
+        await _apply_change(session, request, operator=requested_by)
+        applied = (
+            await session.execute(
+                text(_MARK_CHANGE_APPLIED_SQL),
+                {"request_id": request.request_id, "operator": requested_by},
+            )
+        ).mappings().one()
+        return _feature_change_row(applied)
+    return request
+
+
+async def apply_feature_change_request(
+    session: AsyncSession,
+    request_id: str,
+    *,
+    operator: str | None,
+) -> FeatureChangeRequest | None:
+    """pending feature change request를 승인하고 적용한다."""
+    row = (
+        await session.execute(
+            text(_GET_CHANGE_REQUEST_FOR_UPDATE_SQL),
+            {"request_id": request_id},
+        )
+    ).mappings().first()
+    if row is None:
+        return None
+    request = _feature_change_row(row)
+    if request.state != "pending":
+        raise FeatureChangeConflict(
+            feature_id=request.feature_id,
+            action=request.action,
+            message=f"request {request_id!r}는 pending 상태가 아님: {request.state!r}",
+        )
+    await _apply_change(session, request, operator=operator)
+    applied = (
+        await session.execute(
+            text(_MARK_CHANGE_APPLIED_SQL),
+            {"request_id": request_id, "operator": operator},
+        )
+    ).mappings().one()
+    return _feature_change_row(applied)
+
+
+async def reject_feature_change_request(
+    session: AsyncSession,
+    request_id: str,
+    *,
+    operator: str | None,
+    reason: str | None,
+) -> FeatureChangeRequest | None:
+    """pending feature change request를 거절한다."""
+    row = (
+        await session.execute(
+            text(_MARK_CHANGE_REJECTED_SQL),
+            {"request_id": request_id, "operator": operator, "reason": reason},
+        )
+    ).mappings().first()
+    return _feature_change_row(row) if row is not None else None
+
+
+async def list_feature_change_requests(
+    session: AsyncSession,
+    *,
+    states: Sequence[str] | None = None,
+    actions: Sequence[str] | None = None,
+    q: str | None = None,
+    limit: int = 100,
+) -> tuple[FeatureChangeRequest, ...]:
+    """feature change request 목록."""
+    normalized_q = _normalize_query(q)
+    rows = (
+        await session.execute(
+            text(_LIST_CHANGE_REQUESTS_SQL),
+            {
+                "states": _normalize_values(states),
+                "actions": _normalize_values(actions),
+                "q_like": f"%{normalized_q}%" if normalized_q is not None else None,
+                "limit": min(max(limit, 1), 500),
+            },
+        )
+    ).mappings().all()
+    return tuple(_feature_change_row(row) for row in rows)
 
 
 _DEDUP_REVIEW_SQL: Final[str] = """
