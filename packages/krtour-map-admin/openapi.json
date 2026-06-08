@@ -7934,6 +7934,14 @@
         "title": "_Meta",
         "type": "object"
       }
+    },
+    "securitySchemes": {
+      "ServiceToken": {
+        "description": "TripMate 등 외부 서비스 호출 토큰 (ADR-045 D-1).",
+        "in": "header",
+        "name": "X-Krtour-Service-Token",
+        "type": "apiKey"
+      }
     }
   },
   "info": {
@@ -9270,6 +9278,9 @@
             },
             "description": "Successful Response"
           },
+          "403": {
+            "description": "파괴적 admin 작업 비활성"
+          },
           "404": {
             "description": "feature 없음"
           },
@@ -10171,6 +10182,9 @@
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "description": "파괴적 admin 작업 비활성"
           },
           "404": {
             "description": "target 없음"
@@ -12652,6 +12666,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
         "summary": "TripMate feature update request 생성 또는 dry-run",
         "tags": [
           "tripmate-update-requests"
@@ -12697,6 +12716,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
         "summary": "TripMate feature update request 단건 조회",
         "tags": [
           "tripmate-update-requests"
@@ -12731,6 +12755,11 @@
             "description": "feature_ids 1~200개 필요"
           }
         },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
         "summary": "TripMate feature 상세 batch 조회",
         "tags": [
           "tripmate"

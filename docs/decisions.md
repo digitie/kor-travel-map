@@ -116,6 +116,18 @@
   **infra 계층**(Cloudflare Tunnel SSO + IP allowlist)이 책임지고, TripMate 서비스
   토큰은 **`X-Krtour-Service-Token`** 헤더로 pass-through한다(앱은 검증하지 않고
   "인증된 요청만 도달"을 가정, 로그/감사만). reverse proxy에서 미인증 요청을 차단.
+- **Amendment (2026-06-08, D-1 "B안" defense-in-depth)**: 운영 인증의 **1차 책임은
+  여전히 infra 계층**이나, 그 위에 **얇은 앱 레벨 방어를 옵션으로** 더한다(네트워크를
+  무조건 신뢰하지 않기 위함). `map_admin/auth.py`:
+  - `service_token`(`KRTOUR_MAP_ADMIN_SERVICE_TOKEN`, opt-in) 설정 시 **순수
+    service-to-service surface(`/tripmate/*`)**에서 `X-Krtour-Service-Token`을
+    **상수시간 비교**로 검증(불일치/누락 → 401). 미설정이면 강제하지 않음(intranet/dev
+    하위호환). **공용 read surface(`/features`·`/categories`·`/providers`)는 브라우저
+    admin UI도 쓰므로 앱 토큰을 강제하지 않는다**(operator는 proxy SSO).
+  - `admin_destructive_enabled=False`(kill-switch) 시 파괴적 `/admin` 작업
+    (restore/swap/deactivate/POI delete) 차단(403).
+  - `APIKeyHeader`를 통해 OpenAPI `securitySchemes.ServiceToken`이 선언되고 `/tripmate/*`
+    operation에 `security`가 기록된다(계약 문서화, API 리뷰 P1 해소).
 - **근거**:
   - `python-kraddr-geo` ADR-013과 동일 패턴 (디버그 UI 내부망 전용).
   - 라이브러리 코드/응답에 인증 로직이 침투하지 않음 → 코드 단순.

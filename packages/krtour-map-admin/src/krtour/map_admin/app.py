@@ -27,7 +27,7 @@ from time import perf_counter
 from uuid import uuid4
 
 import httpx
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -36,6 +36,10 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse, Response
 
 from krtour.map_admin import __version__
+from krtour.map_admin.auth import (
+    require_admin_destructive_enabled,
+    require_service_token,
+)
 from krtour.map_admin.routers import (
     admin_backups_router,
     admin_features_router,
@@ -314,18 +318,31 @@ def create_app(settings: AdminSettings | None = None) -> FastAPI:
         application.include_router(etl_router)
 
     if settings.features_routes_enabled:
+        # ``/features`` · ``/categories`` · ``/providers``는 브라우저 admin UI도
+        # 쓰는 공용 read surface라 앱 토큰을 강제하지 않는다(operator는 proxy SSO).
         application.include_router(features_router)
         application.include_router(categories_router)
         application.include_router(providers_router)
-        application.include_router(tripmate_router)
-        application.include_router(tripmate_feature_update_requests_router)
+        # ``/tripmate/*``는 **순수 service-to-service**(TripMate)라 service token으로
+        # 게이트한다(ADR-045 D-1 defense-in-depth). token 미설정이면 통과(하위호환).
+        application.include_router(
+            tripmate_router, dependencies=[Depends(require_service_token)]
+        )
+        application.include_router(
+            tripmate_feature_update_requests_router,
+            dependencies=[Depends(require_service_token)],
+        )
         # Step D on-demand 상세는 DB(적재된 raw_data) 필요 → features와 동일 gate.
         if settings.debug_routes_enabled:
             application.include_router(mois_detail_router)
 
     if admin_routes_enabled:
         application.include_router(admin_backups_router)
-        application.include_router(admin_restore_router)
+        # restore/swap은 전부 파괴적 → kill-switch 게이트(admin_destructive_enabled).
+        application.include_router(
+            admin_restore_router,
+            dependencies=[Depends(require_admin_destructive_enabled)],
+        )
         application.include_router(admin_features_router)
         application.include_router(admin_issues_router)
         application.include_router(dedup_review_router)

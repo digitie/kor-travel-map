@@ -19,6 +19,7 @@ from krtour.map.infra.admin_feature_repo import (
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from krtour.map_admin.auth import require_admin_destructive_enabled
 from krtour.map_admin.db import get_session
 
 __all__ = [
@@ -288,9 +289,11 @@ async def list_features(
 @router.post(
     "/{feature_id}/deactivate",
     response_model=AdminFeatureDeactivateResponse,
+    dependencies=[Depends(require_admin_destructive_enabled)],
     responses={
         404: {"description": "feature 없음"},
         409: {"description": "feature 상태 전이 불가"},
+        403: {"description": "파괴적 admin 작업 비활성"},
     },
 )
 async def deactivate_feature_route(
