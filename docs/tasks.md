@@ -6,17 +6,15 @@
 
 **진행 중**: Sprint 5 운영 진입 마무리. main은 ADR-045 독립 프로그램화 핵심
 구현(T-205~T-209), 정합성 Phase 2(T-201b), 운영 게이트(T-202~T-204), TripMate
-요구사항 후속(T-213a~h), T-212a inventory, T-212c API/error/log contract, T-209e
-backup/restore 최종 safety automation까지 merged했다. `T-RV-04b`는
-`opinet_stations` krtour-side wiring만 남았고, `python-opinet-api#8` 보강은 merged되어
-bounded bbox enumeration을 사용할 수 있다.
+요구사항 후속(T-213a~h), T-RV-04b provider live wiring, T-212a inventory,
+T-212b admin UI 완결성, T-212c API/error/log contract, T-212d seeded PostGIS
+성능 baseline, T-209e backup/restore 최종 safety automation까지 merged 또는 PR
+진행 범위로 닫았다.
 
 Sprint 5 종료까지 남은 작업은
 `docs/reports/sprint5-final-task-breakdown-2026-06-07.md`를 정본으로 상세화했다.
-권장 순서는 **T-RV-04b-opinet 결정/구현 → T-212b admin UI 완결성 → T-212d 성능
-baseline → T-212e 실데이터 full reload → T-210 TripMate 연계 정리 → Sprint 5 closure**다.
-단, 지금 바로 충돌 적게 집기 좋은 다음 PR은 실데이터 없이 가능한 **T-212d seeded
-PostGIS perf baseline**이다. T-207b는 사용자 결정에 따라 구현하지 않는다.
+권장 순서는 **T-212e 실데이터 full reload → T-210 TripMate 연계 정리 → Sprint 5
+closure**다. T-207b는 사용자 결정에 따라 구현하지 않는다.
 
 ### 현재 기준 보강 필요 체크포인트 (2026-06-03)
 
@@ -1216,13 +1214,24 @@ lint-imports/pytest/coverage, frontend type-check/e2e). 실데이터 검증은 T
       - [x] error envelope 일관성 — `app.py` 중앙 exception handler(`_error_response` +
         `_status_error_code`)가 모든 `HTTPException`/검증오류를 공통 `{error:{code,message,
         details,request_id}}` + `X-Request-ID`로 통일(기구현). 라우터는 detail만 던지면 됨.
-- [ ] T-212d — DB/API/frontend 성능 튜닝.
+- [x] T-212d — DB/API/frontend 성능 튜닝 (2026-06-08 완료).
       PostGIS/pg_trgm/ops table EXPLAIN, keyset cursor, index 추가/수정, frontend
       table/map 렌더링 병목을 측정하고 개선 결과를 문서화한다.
       1차 PR은 실데이터 없이 seeded PostGIS/testcontainers로 `/features/search`,
       `/features/in-bounds`, `/features/nearby`, `/admin/features`, `/ops/import-jobs`,
       dedup refresh, consistency F6/F8의 EXPLAIN baseline을 모은다. 실 운영 규모 측정은
       T-212e 리포트에서 보강한다.
+      - 로컬 live DB 확인 결과 `features/source_records/source_links/import_jobs` 각 1건,
+        `consistency_reports`/`dedup_review_queue` 0건, alembic `0016` 상태라 성능
+        baseline으로 부적합했다.
+      - `0020_t212d_perf_keyset_indexes`로 hot read/keyset 인덱스를 보강하고,
+        q 검색은 trigram 후보 CTE, bbox는 공간 후보 CTE, review/consistency 큐는
+        UUID tie-breaker keyset으로 정렬축을 고정했다.
+      - 통합 테스트 `tests/integration/test_t212d_perf_explain.py`가 3,200 feature +
+        provider/source/ops/review live-like seed로 `/features/search`, `/features/in-bounds`,
+        `/features/nearby`, `/admin/features`, `/ops/import-jobs`, consistency F4/F6/F7/F8,
+        dedup/enrichment review list EXPLAIN 인덱스 사용을 검증한다.
+      - 상세 리포트: `docs/reports/t-212d-perf-baseline-2026-06-08.md`.
 - [ ] T-212e — 실데이터 full reload + offline upload 실데이터 검증 + 최종 리포트.
       DB를 비운 뒤 처음부터 다시 로드하고, provider 실데이터와 offline upload
       CSV/TSV/JSONL 실데이터 적재, kraddr-geo bjd 보강, Playwright e2e, API smoke,

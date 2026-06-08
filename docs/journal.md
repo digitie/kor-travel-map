@@ -2,6 +2,25 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-08 (codex) — T-212d seeded PostGIS 성능 baseline
+
+**작업**: 사용자 지시대로 main 재동기화 후 T-212d DB/API 성능 baseline과 hot path 튜닝을 진행.
+
+- 로컬 live DB는 alembic `0016`, `features/source_records/source_links/import_jobs` 각 1건,
+  `consistency_reports`/`dedup_review_queue` 0건이라 성능 baseline으로 부적합함을 확인.
+- `0020_t212d_perf_keyset_indexes`: feature updated/status/name/opening_hours, import_jobs,
+  consistency reports/violations, dedup/enrichment review queue keyset 인덱스 보강.
+- `/features/in-bounds` 공간 후보 CTE, `/features/search` trigram 후보 CTE, dedup/enrichment
+  review 및 F7 consistency UUID tie-breaker keyset 정렬로 EXPLAIN 인덱스 사용을 고정.
+- 신규 통합 테스트 `test_t212d_perf_explain.py`: 3,200 feature + provider/source/ops/review
+  live-like seed로 `/features/search`, `/features/in-bounds`, `/features/nearby`, `/admin/features`,
+  `/ops/import-jobs`, dedup refresh, consistency F4/F6/F7/F8, review list EXPLAIN 검증.
+
+**검증**: T-212d 전용 ruff + EXPLAIN 통합 4 passed, 관련 통합 45 passed, 관련 단위 44 passed.
+
+**다음**: T-212e live full reload에서 실제 provider/offline upload 볼륨, Dagster run, Playwright
+실스택 smoke, backup/restore smoke를 최종 리포트로 보강.
+
 ## 2026-06-08 (claude) — 리뷰 반영: admin e2e mock을 생성 OpenAPI 타입에 바인딩 (#308)
 
 **작업**: 내가 #308에 남긴 리뷰 finding(mock이 OpenAPI 스키마로 검증되지 않은 수작업 JSON →

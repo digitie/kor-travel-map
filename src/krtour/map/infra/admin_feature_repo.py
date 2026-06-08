@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any, Final, Literal
+from uuid import UUID
 
 from sqlalchemy import text
 
@@ -645,7 +646,7 @@ async def deactivate_feature(
 
 
 _DEDUP_REVIEW_SQL: Final[str] = """
-WITH reviews AS (
+WITH reviews AS MATERIALIZED (
     SELECT
         q.review_key,
         q.status,
@@ -669,6 +670,14 @@ WITH reviews AS (
         CAST(:max_score AS numeric) IS NULL
         OR q.total_score <= CAST(:max_score AS numeric)
       )
+      AND (
+        CAST(:cursor_score AS numeric) IS NULL
+        OR (q.total_score, q.review_key) < (
+            CAST(:cursor_score AS numeric),
+            CAST(:cursor_review_key AS uuid)
+        )
+      )
+    ORDER BY q.total_score DESC, q.review_key DESC
 ),
 expanded AS (
     SELECT
@@ -744,14 +753,7 @@ WHERE (
     OR category_a = ANY(CAST(:categories AS text[]))
     OR category_b = ANY(CAST(:categories AS text[]))
   )
-  AND (
-    CAST(:cursor_score AS numeric) IS NULL
-    OR (total_score, review_key::text) < (
-        CAST(:cursor_score AS numeric),
-        CAST(:cursor_review_key AS text)
-    )
-  )
-ORDER BY total_score DESC, review_key::text DESC
+ORDER BY total_score DESC, review_key DESC
 LIMIT :limit_plus_one
 """
 
@@ -778,6 +780,7 @@ def _dedup_cursor_params(cursor: str | None) -> dict[str, Any]:
     try:
         score = str(payload["total_score"])
         Decimal(score)
+        UUID(str(payload["review_key"]))
     except (KeyError, TypeError, ValueError, InvalidOperation) as exc:
         raise ValueError("invalid dedup review cursor") from exc
     return {"cursor_score": score, "cursor_review_key": payload["review_key"]}
@@ -1009,6 +1012,51 @@ class EnrichmentReviewPage:
 
 
 _ENRICHMENT_REVIEW_SQL: Final[str] = """
+WITH reviews AS MATERIALIZED (
+    SELECT
+        q.review_key,
+        q.status,
+        q.name_score,
+        q.target_feature_id,
+        q.target_name,
+        q.source_provider,
+        q.source_dataset_key,
+        q.source_entity_id,
+        q.source_name,
+        q.decision_reason,
+        q.reviewed_by,
+        q.reviewed_at,
+        q.created_at
+    FROM ops.enrichment_review_queue AS q
+    WHERE (CAST(:statuses AS text[]) IS NULL OR q.status = ANY(CAST(:statuses AS text[])))
+      AND (
+        CAST(:min_score AS numeric) IS NULL
+        OR q.name_score >= CAST(:min_score AS numeric)
+      )
+      AND (
+        CAST(:max_score AS numeric) IS NULL
+        OR q.name_score <= CAST(:max_score AS numeric)
+      )
+      AND (
+        CAST(:providers AS text[]) IS NULL
+        OR q.source_provider = ANY(CAST(:providers AS text[]))
+      )
+      AND (
+        CAST(:q_like AS text) IS NULL
+        OR q.target_feature_id ILIKE CAST(:q_like AS text)
+        OR q.target_name ILIKE CAST(:q_like AS text)
+        OR q.source_name ILIKE CAST(:q_like AS text)
+        OR q.source_entity_id ILIKE CAST(:q_like AS text)
+      )
+      AND (
+        CAST(:cursor_score AS numeric) IS NULL
+        OR (q.name_score, q.review_key) < (
+            CAST(:cursor_score AS numeric),
+            CAST(:cursor_review_key AS uuid)
+        )
+    )
+    ORDER BY q.name_score DESC, q.review_key DESC
+)
 SELECT
     q.review_key,
     q.status,
@@ -1027,36 +1075,9 @@ SELECT
     f.category AS target_category,
     x_extension.ST_X(f.coord) AS target_lon,
     x_extension.ST_Y(f.coord) AS target_lat
-FROM ops.enrichment_review_queue AS q
+FROM reviews AS q
 LEFT JOIN feature.features AS f ON f.feature_id = q.target_feature_id
-WHERE (CAST(:statuses AS text[]) IS NULL OR q.status = ANY(CAST(:statuses AS text[])))
-  AND (
-    CAST(:min_score AS numeric) IS NULL
-    OR q.name_score >= CAST(:min_score AS numeric)
-  )
-  AND (
-    CAST(:max_score AS numeric) IS NULL
-    OR q.name_score <= CAST(:max_score AS numeric)
-  )
-  AND (
-    CAST(:providers AS text[]) IS NULL
-    OR q.source_provider = ANY(CAST(:providers AS text[]))
-  )
-  AND (
-    CAST(:q_like AS text) IS NULL
-    OR q.target_feature_id ILIKE CAST(:q_like AS text)
-    OR q.target_name ILIKE CAST(:q_like AS text)
-    OR q.source_name ILIKE CAST(:q_like AS text)
-    OR q.source_entity_id ILIKE CAST(:q_like AS text)
-  )
-  AND (
-    CAST(:cursor_score AS numeric) IS NULL
-    OR (q.name_score, q.review_key::text) < (
-        CAST(:cursor_score AS numeric),
-        CAST(:cursor_review_key AS text)
-    )
-  )
-ORDER BY q.name_score DESC, q.review_key::text DESC
+ORDER BY q.name_score DESC, q.review_key DESC
 LIMIT :limit_plus_one
 """
 
@@ -1068,6 +1089,7 @@ def _enrichment_cursor_params(cursor: str | None) -> dict[str, Any]:
     try:
         score = str(payload["name_score"])
         Decimal(score)
+        UUID(str(payload["review_key"]))
     except (KeyError, TypeError, ValueError, InvalidOperation) as exc:
         raise ValueError("invalid enrichment review cursor") from exc
     return {"cursor_score": score, "cursor_review_key": payload["review_key"]}

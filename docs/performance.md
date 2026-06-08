@@ -554,7 +554,63 @@ async def test_features_nearby_uses_gist_index(session, sample_features):
 | BRIN on randomly-inserted column | B-Tree 또는 시간순 정렬 보장 |
 | `LIMIT n` + ORDER without matching index | 복합 인덱스 추가 |
 
-## 14. 운영 체크리스트 (Sprint 5 진입 전)
+## 14. T-212d hot path baseline (2026-06-08)
+
+T-212d는 실 운영 데이터가 충분하지 않은 상태에서 CI 재현성을 우선해 seeded
+PostGIS/testcontainers baseline으로 고정했다. 로컬 live DB 확인 결과는 alembic `0016`,
+`features/source_records/source_links/import_jobs` 각 1건, `consistency_reports`와
+`dedup_review_queue` 0건이라 planner baseline으로 쓰지 않았다. 실제 provider/offline upload
+볼륨 기준 측정은 T-212e live full reload 리포트에서 보강한다.
+
+### 14.1 추가/수정 인덱스
+
+- `feature.features`
+  - `idx_features_updated_keyset(updated_at DESC, feature_id DESC)`
+  - `idx_features_status_updated(status, updated_at DESC, feature_id DESC)`
+  - `idx_features_lower_name_keyset(lower(name), feature_id)`
+  - `idx_features_opening_hours_keyset(feature_id)` partial:
+    `deleted_at IS NULL AND detail ?| ARRAY['business_hours','opening_hours']`
+- `ops.import_jobs`
+  - `idx_import_jobs_created_keyset(created_at DESC, job_id DESC)`
+  - `idx_import_jobs_state(state, created_at, queue_sequence)` — claim FIFO tie-breaker
+  - `idx_import_jobs_kind_state(kind, state, created_at DESC, job_id DESC)`
+- `ops.feature_consistency_reports`
+  - `idx_reports_started(started_at DESC, report_id DESC)`
+  - `idx_reports_severity_started(severity_max, started_at DESC, report_id DESC)`
+- `ops.data_integrity_violations`
+  - `idx_violations_status_detected(status, detected_at DESC, violation_key DESC)`
+  - `idx_violations_provider_status_detected(provider, status, detected_at DESC, violation_key DESC)`
+  - `idx_violations_feature_detected(feature_id, detected_at DESC, violation_key DESC)`
+- review queue
+  - `idx_dedup_status_score(status, total_score DESC, review_key DESC)`
+  - `idx_enrichment_review_status_score(status, name_score DESC, review_key DESC)`
+  - `idx_enrichment_review_provider_status_score(source_provider, status, name_score DESC, review_key DESC)`
+
+### 14.2 쿼리 패턴 변경
+
+- `/features/in-bounds`: bbox 조건을 `spatial_candidates AS MATERIALIZED` CTE에 먼저
+  적용해 `idx_features_coord_gist` 사용을 고정한다. API 응답 순서 보장은 없으므로
+  `ORDER BY feature_id`를 제거했다.
+- `/features/search`: q 검색 경로는 `name % :q` 후보를 먼저 materialize해 기존
+  `idx_features_name_trgm` full GIN을 탄 뒤, `deleted_at`/bbox/kind/category 필터와
+  score keyset을 적용한다. count query도 같은 q 전용 CTE를 사용한다.
+- dedup/enrichment review list: cursor tie-breaker를 `review_key::text`가 아니라 UUID
+  그대로 비교하고, queue 후보를 materialize한 뒤 feature/source 정보를 붙인다.
+- consistency F6/F7: F6은 `?| ARRAY[...]`와 partial index로 opening-hours 후보만 읽고,
+  F7은 pending dedup 후보를 score keyset CTE로 먼저 고정한다.
+
+### 14.3 회귀 테스트
+
+`tests/integration/test_t212d_perf_explain.py`는 3,200 feature, source/link, import job,
+consistency report/violation, dedup/enrichment review queue를 live-like 분포로 seed한다.
+EXPLAIN JSON에서 다음 hot path가 기대 인덱스를 쓰는지 검증한다.
+
+- `/features/nearby`, `/features/in-bounds`, `/features/search`
+- `/admin/features`, `/ops/import-jobs`, consistency report/issue 목록
+- dedup refresh, dedup/enrichment review list
+- consistency F4/F6/F7/F8
+
+## 15. 운영 체크리스트 (Sprint 5 진입 전)
 
 - [ ] 모든 hot path SQL에 EXPLAIN 통합 테스트
 - [ ] `pg_stat_statements` 활성화 및 Grafana 패널

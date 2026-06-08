@@ -174,7 +174,7 @@ CONSISTENCY_CASES: Final[tuple[CaseSpec, ...]] = (
             "  WHERE f.deleted_at IS NULL "
             "    AND f.detail IS NOT NULL "
             "    AND f.detail <> '{}'::jsonb "
-            "    AND (f.detail ? 'business_hours' OR f.detail ? 'opening_hours')"
+            "    AND f.detail ?| ARRAY['business_hours','opening_hours']"
             "), opening_periods AS ("
             "  SELECT f.feature_id, periods.period "
             "  FROM candidate_features f "
@@ -288,7 +288,7 @@ _F4_PENDING_COUNT_SQL: Final[str] = (
 )
 _F4_PENDING_SAMPLE_SQL: Final[str] = (
     "SELECT review_key FROM ops.dedup_review_queue WHERE status = 'pending' "
-    "ORDER BY total_score DESC LIMIT :lim"
+    "ORDER BY total_score DESC, review_key DESC LIMIT :lim"
 )
 
 _F5_PROVIDER_LAST_SUCCESS_COUNT_SQL: Final[str] = (
@@ -333,7 +333,17 @@ _F5_PROVIDER_LAST_SUCCESS_SAMPLE_SQL: Final[str] = (
 )
 
 _F7_DEDUP_SCORE_ROWS_SQL: Final[str] = """
-WITH primary_sources AS (
+WITH pending_dedup AS MATERIALIZED (
+  SELECT
+    review_key,
+    feature_id_a,
+    feature_id_b,
+    total_score
+  FROM ops.dedup_review_queue
+  WHERE status = 'pending'
+  ORDER BY total_score DESC, review_key DESC
+),
+primary_sources AS (
   SELECT feature_id, provider, dataset_key
   FROM (
     SELECT
@@ -364,7 +374,7 @@ SELECT
   x_extension.ST_Y(fa.coord) AS lat_a,
   x_extension.ST_X(fb.coord) AS lon_b,
   x_extension.ST_Y(fb.coord) AS lat_b
-FROM ops.dedup_review_queue AS dq
+FROM pending_dedup AS dq
 JOIN feature.features AS fa
   ON fa.feature_id = dq.feature_id_a
 JOIN feature.features AS fb
@@ -373,9 +383,8 @@ JOIN primary_sources AS psa
   ON psa.feature_id = dq.feature_id_a
 JOIN primary_sources AS psb
   ON psb.feature_id = dq.feature_id_b
-WHERE dq.status = 'pending'
-  AND psa.provider <> psb.provider
-ORDER BY dq.total_score DESC, dq.review_key
+WHERE psa.provider <> psb.provider
+ORDER BY dq.total_score DESC, dq.review_key DESC
 """
 
 _F8_FEATURE_FILES_TABLE_EXISTS_SQL: Final[str] = (

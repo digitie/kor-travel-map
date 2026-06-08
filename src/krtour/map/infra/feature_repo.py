@@ -245,22 +245,27 @@ LIMIT 1
 # bbox 조회 — ADR-012: 입력 bbox는 4326, GIST(coord) 인덱스 사용. deleted_at 제외.
 # kinds 필터는 NULL이면 전체 (asyncpg ARRAY 바인딩). 경량 표현(좌표 + 표시 메타).
 _FEATURES_IN_BBOX_SQL: Final[str] = """
+WITH spatial_candidates AS MATERIALIZED (
+    SELECT
+        feature_id, kind, name, category, coord,
+        marker_icon, marker_color, status
+    FROM feature.features
+    WHERE deleted_at IS NULL
+      AND coord IS NOT NULL
+      AND coord && x_extension.ST_MakeEnvelope(
+            CAST(:min_lon AS double precision), CAST(:min_lat AS double precision),
+            CAST(:max_lon AS double precision), CAST(:max_lat AS double precision), 4326)
+)
 SELECT
     feature_id, kind, name, category,
     x_extension.ST_X(coord) AS lon, x_extension.ST_Y(coord) AS lat,
     marker_icon, marker_color, status
-FROM feature.features
-WHERE deleted_at IS NULL
-  AND coord IS NOT NULL
-  AND coord && x_extension.ST_MakeEnvelope(
-        CAST(:min_lon AS double precision), CAST(:min_lat AS double precision),
-        CAST(:max_lon AS double precision), CAST(:max_lat AS double precision), 4326)
-  AND (CAST(:kinds AS text[]) IS NULL OR kind = ANY(CAST(:kinds AS text[])))
+FROM spatial_candidates
+WHERE (CAST(:kinds AS text[]) IS NULL OR kind = ANY(CAST(:kinds AS text[])))
   AND (
     CAST(:categories AS text[]) IS NULL
     OR category = ANY(CAST(:categories AS text[]))
   )
-ORDER BY feature_id
 LIMIT :limit
 """
 
@@ -396,8 +401,59 @@ WITH candidates AS (
 )
 """
 
+_FEATURE_SEARCH_SCORE_CTE_SQL: Final[str] = """
+WITH name_candidates AS MATERIALIZED (
+    SELECT
+        feature_id,
+        kind,
+        name,
+        category,
+        coord,
+        marker_icon,
+        marker_color,
+        status,
+        deleted_at,
+        x_extension.similarity(name, CAST(:q AS text)) AS score
+    FROM feature.features
+    WHERE name % CAST(:q AS text)
+),
+candidates AS (
+    SELECT
+        feature_id,
+        kind,
+        name,
+        category,
+        x_extension.ST_X(coord) AS lon,
+        x_extension.ST_Y(coord) AS lat,
+        marker_icon,
+        marker_color,
+        status,
+        score
+    FROM name_candidates
+    WHERE deleted_at IS NULL
+      AND (
+        CAST(:bbox_enabled AS boolean) IS FALSE
+        OR (
+          coord IS NOT NULL
+          AND coord && x_extension.ST_MakeEnvelope(
+            CAST(:min_lon AS double precision),
+            CAST(:min_lat AS double precision),
+            CAST(:max_lon AS double precision),
+            CAST(:max_lat AS double precision),
+            4326
+          )
+        )
+      )
+      AND (CAST(:kinds AS text[]) IS NULL OR kind = ANY(CAST(:kinds AS text[])))
+      AND (
+        CAST(:categories AS text[]) IS NULL
+        OR category = ANY(CAST(:categories AS text[]))
+      )
+)
+"""
+
 _FEATURE_SEARCH_BY_SCORE_SQL: Final[str] = (
-    _FEATURE_SEARCH_CTE_SQL
+    _FEATURE_SEARCH_SCORE_CTE_SQL
     + """
 SELECT candidates.*, score::text AS score_cursor
 FROM candidates
@@ -429,6 +485,14 @@ LIMIT :limit_plus_one
 
 _FEATURE_SEARCH_COUNT_SQL: Final[str] = (
     _FEATURE_SEARCH_CTE_SQL
+    + """
+SELECT count(*) AS total_count
+FROM candidates
+"""
+)
+
+_FEATURE_SEARCH_SCORE_COUNT_SQL: Final[str] = (
+    _FEATURE_SEARCH_SCORE_CTE_SQL
     + """
 SELECT count(*) AS total_count
 FROM candidates
@@ -1441,7 +1505,7 @@ async def search_features(
         )
     ).mappings().all()
     count_result = await session.execute(
-        text(_FEATURE_SEARCH_COUNT_SQL),
+        text(_FEATURE_SEARCH_SCORE_COUNT_SQL if q_enabled else _FEATURE_SEARCH_COUNT_SQL),
         {
             "q": normalized_q,
             "bbox_enabled": bbox is not None,

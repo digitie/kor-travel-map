@@ -176,7 +176,7 @@ SET state = 'running', started_at = now(), heartbeat_at = now()
 WHERE job_id = (
     SELECT job_id FROM ops.import_jobs
     WHERE state = 'queued'
-    ORDER BY created_at
+    ORDER BY created_at, queue_sequence
     FOR UPDATE SKIP LOCKED
     LIMIT 1
 )
