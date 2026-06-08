@@ -46,13 +46,18 @@ function markDagsterNuxSeen(): Promise<DagsterNuxSeenResponse> {
 function fetchDagsterRunDetail(
   runId: string,
   eventLimit = 50,
+  after: string | null = null,
 ): Promise<DagsterRunDetailResponse> {
   return getJson<DagsterRunDetailResponse>(
     pathWithQuery(`/ops/dagster/runs/${encodeURIComponent(runId)}`, {
       event_limit: eventLimit,
+      after: after ?? undefined,
     }),
   );
 }
+
+// SUCCESS/FAILURE/CANCELED 등 종료 run은 상세가 더 변하지 않으므로 폴링을 멈춘다.
+const _TERMINAL_RUN_STATUS = new Set(["SUCCESS", "FAILURE", "CANCELED"]);
 
 export function useDagsterSummary(runLimit = 10) {
   return useQuery<DagsterSummaryResponse, Error>({
@@ -69,12 +74,21 @@ export function useMarkDagsterNuxSeen() {
   });
 }
 
-export function useDagsterRunDetail(runId: string | null, eventLimit = 50) {
+export function useDagsterRunDetail(
+  runId: string | null,
+  eventLimit = 50,
+  after: string | null = null,
+) {
   return useQuery<DagsterRunDetailResponse, Error>({
-    queryKey: ["ops", "dagster", "runs", runId, eventLimit],
-    queryFn: () => fetchDagsterRunDetail(runId ?? "", eventLimit),
+    queryKey: ["ops", "dagster", "runs", runId, eventLimit, after],
+    queryFn: () => fetchDagsterRunDetail(runId ?? "", eventLimit, after),
     enabled: Boolean(runId),
-    refetchInterval: runId ? 10_000 : false,
+    refetchInterval: (query) => {
+      if (!runId) return false;
+      const status = query.state.data?.data.run?.status;
+      if (status && _TERMINAL_RUN_STATUS.has(status)) return false;
+      return 10_000;
+    },
     staleTime: 8_000,
   });
 }

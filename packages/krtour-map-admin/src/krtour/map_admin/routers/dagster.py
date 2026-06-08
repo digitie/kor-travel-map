@@ -111,7 +111,9 @@ query KrtourMapDagsterSummary($limit: Int!) {
 """
 
 _DAGSTER_RUN_DETAIL_QUERY = """
-query KrtourMapDagsterRunDetail($runId: ID!, $eventLimit: Int!) {
+query KrtourMapDagsterRunDetail(
+  $runId: ID!, $eventLimit: Int!, $afterCursor: String
+) {
   runOrError(runId: $runId) {
     __typename
     ... on Run {
@@ -122,7 +124,7 @@ query KrtourMapDagsterRunDetail($runId: ID!, $eventLimit: Int!) {
       endTime
       updateTime
       tags { key value }
-      eventConnection(limit: $eventLimit) {
+      eventConnection(limit: $eventLimit, afterCursor: $afterCursor) {
         cursor
         hasMore
         events {
@@ -486,6 +488,19 @@ def _parse_graphql_error(raw_error: object) -> DagsterGraphqlError | None:
         stack=_string_list(error.get("stack")),
         class_name=_optional_string(error.get("className")),
     )
+
+
+def _graphql_error_message(raw_error: object) -> str:
+    """GraphQL ``errors[]`` 항목 → 사람이 읽을 메시지(dict repr 노출 방지).
+
+    GraphQL 스펙 오류는 ``{"message": ..., "locations": ..., "path": ...}`` dict라
+    ``str(dict)``이면 UI에 파이썬 repr이 새어나간다. ``message``를 우선 추출한다.
+    """
+    error = _dict(raw_error)
+    message = _optional_string(error.get("message"))
+    if message:
+        return message
+    return str(raw_error)
 
 
 def _parse_ticks(raw_ticks: object) -> list[DagsterInstigationTick]:
@@ -893,6 +908,13 @@ async def get_dagster_run_detail(
     request: Request,
     run_id: str,
     event_limit: int = Query(default=50, ge=1, le=200),
+    after: str | None = Query(
+        default=None,
+        description=(
+            "event log cursor(이전 응답의 event_cursor). 긴 run의 뒤쪽(실패) 이벤트로 "
+            "전진 페이지네이션하기 위함. 미지정이면 처음부터."
+        ),
+    ),
 ) -> DagsterRunDetailResponse:
     started_at = perf_counter()
     settings = _settings_from_request(request)
@@ -918,7 +940,11 @@ async def get_dagster_run_detail(
         payload = await _post_graphql(
             client=client,
             graphql_url=dagster_urls.graphql_url,
-            variables={"runId": run_id, "eventLimit": event_limit},
+            variables={
+                "runId": run_id,
+                "eventLimit": event_limit,
+                "afterCursor": after,
+            },
             query=_DAGSTER_RUN_DETAIL_QUERY,
         )
     except (httpx.HTTPError, ValueError) as exc:
@@ -941,7 +967,7 @@ async def get_dagster_run_detail(
                 dagster_url=dagster_urls.dagster_url,
                 graphql_url=dagster_urls.graphql_url,
                 checked_at=checked_at,
-                errors=[str(error) for error in graphql_errors],
+                errors=[_graphql_error_message(error) for error in graphql_errors],
             ),
             started_at=started_at,
         )

@@ -5990,6 +5990,8 @@ export interface operations {
         parameters: {
             query?: {
                 event_limit?: number;
+                /** @description event log cursor(이전 응답의 event_cursor). 긴 run의 뒤쪽(실패) 이벤트로 전진 페이지네이션하기 위함. 미지정이면 처음부터. */
+                after?: string | null;
             };
             header?: never;
             path: {

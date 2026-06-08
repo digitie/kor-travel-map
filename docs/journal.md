@@ -2,6 +2,23 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-08 (claude) — 리뷰 반영: Dagster run drilldown 보강 (#291)
+
+**작업**: 내가 #291에 남긴 상세리뷰 findings 반영.
+
+- **이벤트 윈도잉(중간)**: `eventConnection(limit:N)`이 `afterCursor` 없이 **앞쪽 N개**만 가져와
+  긴 run의 **실패 이벤트(뒤쪽)가 잘릴 수 있던** 문제 → GraphQL에 `$afterCursor` 추가 +
+  엔드포인트에 `after` 쿼리파라미터(`event_cursor`로 전진). 프론트 Run detail에 이벤트
+  **이전/다음 페이지** 컨트롤(cursor stack, run 전환 시 `key`로 remount 리셋).
+- **str(error)(minor)**: GraphQL top-level errors를 `str(dict)`로 노출하던 것 → `_graphql_error_message`로
+  `message`만 추출(파이썬 repr 누수 방지).
+- **폴링(minor)**: `useDagsterRunDetail` `refetchInterval`을 함수로 — run status가 terminal
+  (SUCCESS/FAILURE/CANCELED)이면 폴링 중단.
+- 테스트: `after`→`afterCursor` 전달 / GraphQL error message 추출 단위 테스트 추가, 기존 변수
+  assertion 갱신. OpenAPI(+`after` param)/types.ts 재생성.
+- **검증**: ruff + mypy --strict(admin 26) + admin 226 + frontend gen:types/eslint/tsc/build +
+  drift-check green.
+
 ## 2026-06-08 (claude) — 리뷰 후속: opinet POI-타깃 scope 계약 수정 (#304)
 
 **작업**: PR #304 리뷰(codex) actionable finding — `_opinet_poi_target_bboxes`의 POI target
