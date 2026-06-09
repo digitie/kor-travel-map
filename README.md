@@ -278,7 +278,8 @@ lint-imports
 - [`docs/windows-reinstall-recovery.md`](docs/windows-reinstall-recovery.md) —
   세션 복구 절차
 - [`docs/external-apis.md`](docs/external-apis.md) — provider API 키 발급/호출
-- [`docs/tasks.md`](docs/tasks.md), [`docs/resume.md`](docs/resume.md),
+- [`docs/tasks.md`](docs/tasks.md)(진행/예정 백로그) · [`docs/tasks-done.md`](docs/tasks-done.md)(완료·아카이브),
+  [`docs/resume.md`](docs/resume.md),
   [`docs/journal.md`](docs/journal.md) — 백로그·진척도·작업 일지
 
 ## 라이선스

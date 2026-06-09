@@ -2,6 +2,13 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-09 (claude) — tasks.md 분리: 진행(tasks.md) / 완료·아카이브(tasks-done.md)
+
+**작업**: tasks.md가 1567줄로 길어 확인이 어려워 분리. 블록(섹션/Phase) 단위로 열린 `[ ]`
+항목 유무로 라우팅 — 열린 항목 있으면 tasks.md, 없으면 tasks-done.md. 유실 0(27 open 전부
+tasks.md). tasks.md 상단에 "진행 중인 작업 인덱스"(27건) 추가. CLAUDE/AGENTS/SKILL/
+agent-guide/README의 백로그 포인터에 분리 반영. 문서 전용.
+
 ## 2026-06-09 (claude) — T-214b: 사용자/서비스 API `/v1` prefix 도입
 
 **작업**: `features`/`categories`/`providers` 표면을 `/v1`로 clean cut(ADR-048). PR→머지.

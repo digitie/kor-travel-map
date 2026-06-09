@@ -1,5 +1,10 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-09 claude 작업 메모 — tasks.md 분리(진행/완료)
+
+tasks.md(1567줄)를 **진행/예정 = `tasks.md`(상단 열린항목 인덱스) + 완료·아카이브 =
+`tasks-done.md`**로 분리. entry 문서(CLAUDE/AGENTS/SKILL/agent-guide/README) 포인터 갱신.
+
 ## 2026-06-09 claude 작업 메모 — T-214b 완료 (사용자/서비스 `/v1` prefix)
 
 `features`/`categories`/`providers` → `/v1` clean cut. 백엔드(include prefix)+USER_OPERATIONS+
