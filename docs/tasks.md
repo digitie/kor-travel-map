@@ -6,11 +6,9 @@
 
 ## 진행 중인 작업 인덱스 (열린 `[ ]` 항목)
 
-> 총 21건. 상세는 아래 각 섹션. 완료 이력은 [`tasks-done.md`](tasks-done.md).
+> 총 19건. 상세는 아래 각 섹션. 완료 이력은 [`tasks-done.md`](tasks-done.md).
 
 - **다음 (우선순위 순)**
-  - [ ] 공통 maki marker / category 매핑 npm 패키지 추출
-  - [ ] `python-knps-api` provider 등록 / KNPS 적재 준비
   - [ ] TripMate 측 후속 작업 추적
 - **보류 (v2 1차 범위 외)**
   - [ ] Materialized View 도입 검토
@@ -490,8 +488,11 @@ lint-imports/pytest/coverage, frontend type-check/e2e). 실데이터 검증은 T
     - [x] **후속 (PR#29 merged)**: `core/scoring.py` (Record Linkage ADR-016) +
           `core/providers.py` (CANONICAL_PROVIDER_NAMES 18종). `core/weather.py`
           + `kst_now` 통합은 Sprint 2 KMA PR(#38~#39)에서 완료.
-- [ ] T-017 — **공통 maki marker / category 매핑 npm 패키지 추출** (ADR-029
-      proposed, PR#10 merged) — 실 코드는 Sprint 2
+- [x] T-017 — **공통 maki marker / category 매핑 npm 패키지 추출** (2026-06-09)
+      — `packages/map-marker-react/`(monorepo share, npm 게시 보류 ADR-043)에 `maki.ts`
+      (MAKI_GLYPH name→glyph)/`marker.ts`/`palette.ts` 추출 완료 + **drift gate**
+      `tests/unit/test_category_maki_consistency.py` 추가(Python category maki ⊆ TS MAKI_GLYPH;
+      누락 maki 46개 글리프 보강). (ADR-029 proposed → ADR-043 supersede.)
   - **ADR-029 (proposed, PR#10 merged)** — `@krtour/map-marker-react` (MIT
     license, monorepo `packages/map-marker-react/`).
   - PR#10에서 skeleton 박힘 (`package.json` / `README.md` / `vite.config.ts`
@@ -499,7 +500,10 @@ lint-imports/pytest/coverage, frontend type-check/e2e). 실데이터 검증은 T
   - 실제 코드 (`src/categoryMaki.ts`, `<MakiMarker>` 등)는 Sprint 2 PR.
   - drift gate: `tests/unit/test_category_maki_consistency.py` (Python ↔ TS
     1:1 검증, Sprint 2 코드 작성).
-- [ ] T-018 — **`python-knps-api` provider 등록 / KNPS 적재 준비**
+- [x] T-018 — **`python-knps-api` provider 등록 / KNPS 적재 준비** — **완료**
+      (provider 모듈 `providers/knps.py`(point/geometry `*_to_bundles`) + dagster
+      `fetch_knps_point_records`/`fetch_knps_geometry_records`+asset 구현 PR#77/#78 머지.
+      `access_restriction`/`fire_alert` notice source는 후속 ADR로 분리.)
   - **외부 repo keyless file-only 전환 완료** (2026-05-25):
     `digitie/python-knps-api` `06da125f` (PR#3+#4). 공개 API:
     `KnpsClient`, `KnpsConfig`, `FileDataset`, `CatalogEntry`,
