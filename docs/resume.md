@@ -1,5 +1,10 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-09 claude 작업 메모 — T-RV-53/54 close-out
+
+krforest(휴양림/수목원)·standard_data(박물관/미술관) provider 풀스택은 sub-task a~d가 이미
+머지됨(2026-06-07). 부모 task [x] 처리(회귀 green). 실데이터 fetch는 T-212e.
+
 ## 2026-06-09 claude 작업 메모 — T-214 tail 완료 (e/f/g/h)
 
 T-214e(search bbox 4-float·page_size) + T-214f(POI write=admin only 결정) + T-214g(헤더/에러
