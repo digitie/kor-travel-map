@@ -41,6 +41,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from krtour.map_admin.db import get_session
+from krtour.map_admin.response import Meta, make_meta
 
 __all__ = [
     "router",
@@ -93,7 +94,7 @@ class AdminIssueRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    violation_key: str
+    issue_id: str
     provider: str | None = None
     dataset_key: str | None = None
     source_record_key: str | None = None
@@ -129,16 +130,6 @@ class AdminIssueListData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     items: list[AdminIssueRecord]
-    next_cursor: str | None = None
-
-
-class AdminIssueListMeta(BaseModel):
-    """이슈 목록 meta."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    count: int
-    duration_ms: int
 
 
 class AdminIssueListResponse(BaseModel):
@@ -147,7 +138,7 @@ class AdminIssueListResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: AdminIssueListData
-    meta: AdminIssueListMeta
+    meta: Meta
 
 
 class AdminIssueDetailData(BaseModel):
@@ -159,25 +150,17 @@ class AdminIssueDetailData(BaseModel):
     feature: AdminIssueFeatureSnapshot | None = None
 
 
-class AdminIssueDetailMeta(BaseModel):
-    """단건 응답 meta."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    duration_ms: int
-
-
 class AdminIssueDetailResponse(BaseModel):
-    """``GET /admin/issues/{violation_key}`` 응답."""
+    """``GET /admin/issues/{issue_id}`` 응답."""
 
     model_config = ConfigDict(extra="forbid")
 
     data: AdminIssueDetailData
-    meta: AdminIssueDetailMeta
+    meta: Meta
 
 
 class AdminIssueActionData(BaseModel):
-    """``PATCH /admin/issues/{violation_key}`` data."""
+    """``PATCH /admin/issues/{issue_id}`` data."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -187,12 +170,12 @@ class AdminIssueActionData(BaseModel):
 
 
 class AdminIssueActionResponse(BaseModel):
-    """``PATCH /admin/issues/{violation_key}`` 응답."""
+    """``PATCH /admin/issues/{issue_id}`` 응답."""
 
     model_config = ConfigDict(extra="forbid")
 
     data: AdminIssueActionData
-    meta: AdminIssueDetailMeta
+    meta: Meta
 
 
 class AdminIssuePatchRequest(BaseModel):
@@ -217,7 +200,7 @@ class AdminIssuePatchRequest(BaseModel):
 
 def _record(issue: OpsIntegrityIssue | DataIntegrityViolation) -> AdminIssueRecord:
     return AdminIssueRecord(
-        violation_key=issue.violation_key,
+        issue_id=issue.violation_key,
         provider=issue.provider,
         dataset_key=issue.dataset_key,
         source_record_key=issue.source_record_key,
@@ -246,10 +229,6 @@ def _snapshot(row: FeatureAddressSnapshot | None) -> AdminIssueFeatureSnapshot |
         road_address_management_no=row.road_address_management_no,
         status=row.status,
     )
-
-
-def _elapsed_ms(started_at: float) -> int:
-    return max(0, int((perf_counter() - started_at) * 1000))
 
 
 # ── kraddr-geo 헬퍼 (테스트 monkeypatch 지점) ─────────────────────────────────
@@ -310,17 +289,22 @@ async def _reverse_geocode(lon: float, lat: float) -> dict[str, Any] | None:
     }
 
 
-def _parse_bbox_csv(value: str | None) -> tuple[float, float, float, float] | None:
-    """``min_lon,min_lat,max_lon,max_lat`` CSV → 튜플. 형식 오류는 ``ValueError``."""
-    if value is None:
+def _bbox_tuple(
+    min_lon: float | None,
+    min_lat: float | None,
+    max_lon: float | None,
+    max_lat: float | None,
+) -> tuple[float, float, float, float] | None:
+    parts = (min_lon, min_lat, max_lon, max_lat)
+    none_count = sum(1 for value in parts if value is None)
+    if none_count == 4:
         return None
-    parts = [part.strip() for part in value.split(",")]
-    if len(parts) != 4:
-        raise ValueError("bbox는 min_lon,min_lat,max_lon,max_lat CSV 형식이어야 합니다")
-    try:
-        min_lon, min_lat, max_lon, max_lat = (float(part) for part in parts)
-    except ValueError as exc:
-        raise ValueError("bbox 좌표는 숫자여야 합니다") from exc
+    if none_count != 0:
+        raise ValueError("bbox는 min_lon/min_lat/max_lon/max_lat 4개를 모두 지정해야 합니다")
+    assert min_lon is not None
+    assert min_lat is not None
+    assert max_lon is not None
+    assert max_lat is not None
     if min_lon > max_lon or min_lat > max_lat:
         raise ValueError("bbox min 좌표가 max보다 큽니다")
     return (min_lon, min_lat, max_lon, max_lat)
@@ -365,10 +349,10 @@ async def list_admin_issues(
         str | None,
         Query(description="message/feature_id/source_record_key 부분일치(ILIKE)."),
     ] = None,
-    bbox: Annotated[
-        str | None,
-        Query(description="연결 feature 좌표 bbox: min_lon,min_lat,max_lon,max_lat (WGS84)."),
-    ] = None,
+    min_lon: Annotated[float | None, Query(description="bbox 최소 경도 (WGS84).")] = None,
+    min_lat: Annotated[float | None, Query(description="bbox 최소 위도.")] = None,
+    max_lon: Annotated[float | None, Query(description="bbox 최대 경도.")] = None,
+    max_lat: Annotated[float | None, Query(description="bbox 최대 위도.")] = None,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
     cursor: Annotated[str | None, Query()] = None,
 ) -> AdminIssueListResponse:
@@ -380,7 +364,7 @@ async def list_admin_issues(
     """
     started_at = perf_counter()
     try:
-        bbox_tuple = _parse_bbox_csv(bbox)
+        bbox_tuple = _bbox_tuple(min_lon, min_lat, max_lon, max_lat)
         page = await list_ops_integrity_issues(
             session,
             status=issue_status,
@@ -397,33 +381,31 @@ async def list_admin_issues(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return AdminIssueListResponse(
-        data=AdminIssueListData(
-            items=[_record(item) for item in page.items],
+        data=AdminIssueListData(items=[_record(item) for item in page.items]),
+        meta=make_meta(
+            started_at=started_at,
+            page_size=page_size,
             next_cursor=page.next_cursor,
-        ),
-        meta=AdminIssueListMeta(
-            count=len(page.items),
-            duration_ms=_elapsed_ms(started_at),
         ),
     )
 
 
 @router.get(
-    "/{violation_key}",
+    "/{issue_id}",
     response_model=AdminIssueDetailResponse,
     responses={404: {"description": "이슈 없음"}},
 )
 async def get_admin_issue(
-    violation_key: str,
+    issue_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AdminIssueDetailResponse:
     """운영 이슈 단건 + 연결 feature 주소/좌표 스냅샷."""
     started_at = perf_counter()
-    issue = await get_data_integrity_violation(session, violation_key)
+    issue = await get_data_integrity_violation(session, issue_id)
     if issue is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"이슈 없음: {violation_key}",
+            detail=f"이슈 없음: {issue_id}",
         )
     feature = (
         await get_feature_address_snapshot(session, issue.feature_id)
@@ -435,7 +417,7 @@ async def get_admin_issue(
             issue=_record(issue),
             feature=_snapshot(feature),
         ),
-        meta=AdminIssueDetailMeta(duration_ms=_elapsed_ms(started_at)),
+        meta=make_meta(started_at=started_at),
     )
 
 
@@ -453,7 +435,7 @@ def _resolution_payload(action: str, body: AdminIssuePatchRequest) -> dict[str, 
 
 
 @router.patch(
-    "/{violation_key}",
+    "/{issue_id}",
     response_model=AdminIssueActionResponse,
     responses={
         404: {"description": "이슈/feature 없음"},
@@ -462,22 +444,22 @@ def _resolution_payload(action: str, body: AdminIssuePatchRequest) -> dict[str, 
     },
 )
 async def patch_admin_issue(
-    violation_key: str,
+    issue_id: str,
     body: AdminIssuePatchRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AdminIssueActionResponse:
     """이슈 상태 전이 + kraddr-geo 재지오코딩/주소 덮어쓰기."""
     started_at = perf_counter()
-    issue = await get_data_integrity_violation(session, violation_key)
+    issue = await get_data_integrity_violation(session, issue_id)
     if issue is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"이슈 없음: {violation_key}",
+            detail=f"이슈 없음: {issue_id}",
         )
     try:
         return await _dispatch_action(
             session,
-            violation_key=violation_key,
+            violation_key=issue_id,
             issue=issue,
             body=body,
             started_at=started_at,
@@ -658,5 +640,5 @@ def _action_response(
             feature=_snapshot(feature),
             geocode_candidate=candidate,
         ),
-        meta=AdminIssueDetailMeta(duration_ms=_elapsed_ms(started_at)),
+        meta=make_meta(started_at=started_at),
     )

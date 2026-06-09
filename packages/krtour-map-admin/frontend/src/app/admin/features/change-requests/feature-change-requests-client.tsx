@@ -16,7 +16,7 @@ import { useDeferredValue, useMemo, useState, type FormEvent } from "react";
 import {
   type AdminFeatureChangeAction,
   type AdminFeatureChangeRecord,
-  type AdminFeatureChangeState,
+  type AdminFeatureChangeStatus,
   type AdminFeatureCreateRequest,
   type AdminFeaturePatchRequest,
   useAdminFeatureChangeRequests,
@@ -45,7 +45,7 @@ import {
 import { formatCount, formatDateTime, shortId } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-const CHANGE_STATES: Array<AdminFeatureChangeState | "all"> = [
+const CHANGE_STATUSES: Array<AdminFeatureChangeStatus | "all"> = [
   "pending",
   "applied",
   "rejected",
@@ -57,7 +57,7 @@ const CHANGE_ACTIONS: Array<AdminFeatureChangeAction | "all"> = [
   "update",
   "delete",
 ];
-const LIMIT_OPTIONS = [25, 50, 100, 200, 500] as const;
+const PAGE_SIZE_OPTIONS = [25, 50, 100, 200, 500] as const;
 const MUTATION_STATUSES = ["draft", "active", "inactive", "hidden"] as const;
 const MUTATION_KINDS = ["place", "event"] as const;
 
@@ -239,7 +239,7 @@ function ChangeRequestDetail({
         </div>
         <div className="flex flex-wrap gap-1">
           <Badge variant="outline">{request.action}</Badge>
-          <StatusBadge status={request.state} />
+          <StatusBadge status={request.status} />
         </div>
       </div>
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
@@ -269,9 +269,9 @@ function ChangeRequestDetail({
 }
 
 export function FeatureChangeRequestsClient() {
-  const [state, setState] = useState<AdminFeatureChangeState | "all">("pending");
+  const [status, setStatus] = useState<AdminFeatureChangeStatus | "all">("pending");
   const [action, setAction] = useState<AdminFeatureChangeAction | "all">("all");
-  const [limit, setLimit] = useState<(typeof LIMIT_OPTIONS)[number]>(100);
+  const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(100);
   const [q, setQ] = useState("");
   const deferredQ = useDeferredValue(q.trim());
   const [selectedRequest, setSelectedRequest] =
@@ -281,12 +281,12 @@ export function FeatureChangeRequestsClient() {
 
   const params = useMemo(
     () => ({
-      state: state === "all" ? undefined : [state],
+      status: status === "all" ? undefined : [status],
       action: action === "all" ? undefined : [action],
       q: deferredQ.length > 0 ? deferredQ : undefined,
-      limit,
+      page_size: pageSize,
     }),
-    [action, deferredQ, limit, state],
+    [action, deferredQ, pageSize, status],
   );
   const changes = useAdminFeatureChangeRequests(params);
   const createFeature = useCreateAdminFeatureMutation();
@@ -295,7 +295,7 @@ export function FeatureChangeRequestsClient() {
   const approveChange = useApproveAdminFeatureChangeMutation();
   const rejectChange = useRejectAdminFeatureChangeMutation();
   const items = changes.data?.data.items ?? [];
-  const reviewMode = changes.data?.meta.review_mode ?? "unknown";
+  const reviewMode = changes.data?.data.review_mode ?? "unknown";
   const anyMutationPending =
     createFeature.isPending ||
     patchFeature.isPending ||
@@ -421,13 +421,13 @@ export function FeatureChangeRequestsClient() {
           <div className="rounded-lg border bg-background p-4">
             <div className="text-sm text-muted-foreground">rows</div>
             <div className="mt-1 text-xl font-semibold">
-              {formatCount(changes.data?.meta.count)}
+              {formatCount(items.length)}
             </div>
           </div>
           <div className="rounded-lg border bg-background p-4">
             <div className="text-sm text-muted-foreground">limit</div>
             <div className="mt-1 text-xl font-semibold">
-              {changes.data?.meta.limit ?? limit}
+              {changes.data?.meta.page?.page_size ?? pageSize}
             </div>
           </div>
           <div className="rounded-lg border bg-background p-4">
@@ -559,7 +559,7 @@ export function FeatureChangeRequestsClient() {
                 >
                   status
                   <NativeSelect
-                    aria-label="change status"
+                    aria-label="change feature status"
                     id="change-status"
                     value={form.status}
                     onChange={(event) =>
@@ -749,13 +749,13 @@ export function FeatureChangeRequestsClient() {
               />
             </div>
             <NativeSelect
-              aria-label="change state"
-              value={state}
+              aria-label="change status"
+              value={status}
               onChange={(event) =>
-                setState(event.target.value as AdminFeatureChangeState | "all")
+                setStatus(event.target.value as AdminFeatureChangeStatus | "all")
               }
             >
-              {CHANGE_STATES.map((item) => (
+              {CHANGE_STATUSES.map((item) => (
                 <NativeSelectOption key={item} value={item}>
                   {item}
                 </NativeSelectOption>
@@ -775,13 +775,13 @@ export function FeatureChangeRequestsClient() {
               ))}
             </NativeSelect>
             <NativeSelect
-              aria-label="change limit"
-              value={String(limit)}
+              aria-label="change page size"
+              value={String(pageSize)}
               onChange={(event) =>
-                setLimit(Number(event.target.value) as typeof limit)
+                setPageSize(Number(event.target.value) as typeof pageSize)
               }
             >
-              {LIMIT_OPTIONS.map((item) => (
+              {PAGE_SIZE_OPTIONS.map((item) => (
                 <NativeSelectOption key={item} value={item}>
                   {item}
                 </NativeSelectOption>
@@ -797,7 +797,7 @@ export function FeatureChangeRequestsClient() {
               <TableHeader>
                 <TableRow>
                   <TableHead>request</TableHead>
-                  <TableHead>action/state</TableHead>
+                  <TableHead>action/status</TableHead>
                   <TableHead>feature</TableHead>
                   <TableHead>review</TableHead>
                   <TableHead>reason</TableHead>
@@ -828,7 +828,7 @@ export function FeatureChangeRequestsClient() {
                     <TableCell>
                       <div className="flex flex-wrap gap-1">
                         <Badge variant="outline">{request.action}</Badge>
-                        <StatusBadge status={request.state} />
+                        <StatusBadge status={request.status} />
                       </div>
                     </TableCell>
                     <TableCell className="max-w-64">
@@ -854,7 +854,7 @@ export function FeatureChangeRequestsClient() {
                       {formatDateTime(request.created_at)}
                     </TableCell>
                     <TableCell>
-                      {request.state === "pending" ? (
+                      {request.status === "pending" ? (
                         <div className="flex flex-wrap gap-1">
                           <Button
                             disabled={anyMutationPending}

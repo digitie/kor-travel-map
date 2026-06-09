@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -16,14 +18,18 @@ def client() -> TestClient:
     return TestClient(app)
 
 
+def _data(response: Any) -> dict[str, Any]:
+    return response.json()["data"]
+
+
 # ── /debug/etl/providers ───────────────────────────────────────────────
 
 
 @pytest.mark.unit
 def test_providers_returns_registry(client: TestClient) -> None:
-    response = client.get("/debug/etl/providers")
+    response = client.get("/v1/debug/etl/providers")
     assert response.status_code == 200
-    body = response.json()
+    body = _data(response)
     providers = body["providers"]
     # registry에 있는 모든 provider 포함.
     registry_providers = sorted({e.provider for e in FIXTURE_REGISTRY})
@@ -33,8 +39,8 @@ def test_providers_returns_registry(client: TestClient) -> None:
 
 @pytest.mark.unit
 def test_providers_includes_kma_datasets(client: TestClient) -> None:
-    response = client.get("/debug/etl/providers")
-    body = response.json()
+    response = client.get("/v1/debug/etl/providers")
+    body = _data(response)
     kma = next(p for p in body["providers"] if p["provider"] == "python-kma-api")
     dataset_keys = {d["dataset"] for d in kma["datasets"]}
     assert {
@@ -49,9 +55,9 @@ def test_providers_includes_kma_datasets(client: TestClient) -> None:
 
 @pytest.mark.unit
 def test_provider_datasets_opinet(client: TestClient) -> None:
-    response = client.get("/debug/etl/python-opinet-api/datasets")
+    response = client.get("/v1/debug/etl/python-opinet-api/datasets")
     assert response.status_code == 200
-    body = response.json()
+    body = _data(response)
     assert body["provider"] == "python-opinet-api"
     dataset_keys = {d["dataset"] for d in body["datasets"]}
     assert "opinet_fuel_station_details" in dataset_keys
@@ -60,10 +66,10 @@ def test_provider_datasets_opinet(client: TestClient) -> None:
 
 @pytest.mark.unit
 def test_provider_datasets_unknown_404(client: TestClient) -> None:
-    response = client.get("/debug/etl/unknown-provider/datasets")
+    response = client.get("/v1/debug/etl/unknown-provider/datasets")
     assert response.status_code == 404
     body = response.json()
-    assert "등록된 provider 아님" in body["error"]["message"]
+    assert "등록된 provider 아님" in body["detail"]
 
 
 # ── /debug/etl/{provider}/{dataset}/preview ───────────────────────────
@@ -72,15 +78,14 @@ def test_provider_datasets_unknown_404(client: TestClient) -> None:
 @pytest.mark.unit
 def test_preview_datagokr_festival(client: TestClient) -> None:
     response = client.post(
-        "/debug/etl/data.go.kr-standard/datagokr_cultural_festivals/preview"
+        "/v1/debug/etl/data.go.kr-standard/datagokr_cultural_festivals/preview"
     )
     assert response.status_code == 200
-    body = response.json()
+    body = _data(response)
     assert body["provider"] == "data.go.kr-standard"
     assert body["dataset"] == "datagokr_cultural_festivals"
     assert body["source"] == "fixture"
     assert body["variant"] == "FeatureBundle"
-    assert body["count"] == 2
     assert len(body["items"]) == 2
     # 첫 item이 FeatureBundle dict 구조.
     item0 = body["items"][0]
@@ -93,12 +98,12 @@ def test_preview_datagokr_festival(client: TestClient) -> None:
 @pytest.mark.unit
 def test_preview_kma_short_forecast(client: TestClient) -> None:
     response = client.post(
-        "/debug/etl/python-kma-api/kma_short_forecast/preview"
+        "/v1/debug/etl/python-kma-api/kma_short_forecast/preview"
     )
     assert response.status_code == 200
-    body = response.json()
+    body = _data(response)
     assert body["variant"] == "WeatherValue"
-    assert body["count"] >= 5
+    assert len(body["items"]) >= 5
     item0 = body["items"][0]
     assert item0["weather_domain"] == "kma_short_forecast"
     assert item0["forecast_style"] == "short"
@@ -108,10 +113,10 @@ def test_preview_kma_short_forecast(client: TestClient) -> None:
 @pytest.mark.unit
 def test_preview_kma_nowcast(client: TestClient) -> None:
     response = client.post(
-        "/debug/etl/python-kma-api/kma_ultra_short_nowcast/preview"
+        "/v1/debug/etl/python-kma-api/kma_ultra_short_nowcast/preview"
     )
-    body = response.json()
-    assert body["count"] == 5
+    body = _data(response)
+    assert len(body["items"]) == 5
     assert body["items"][0]["forecast_style"] == "nowcast"
     # nowcast는 observed_at 있고 valid_at 없음.
     assert body["items"][0]["observed_at"] is not None
@@ -121,11 +126,11 @@ def test_preview_kma_nowcast(client: TestClient) -> None:
 @pytest.mark.unit
 def test_preview_opinet_stations(client: TestClient) -> None:
     response = client.post(
-        "/debug/etl/python-opinet-api/opinet_fuel_station_details/preview"
+        "/v1/debug/etl/python-opinet-api/opinet_fuel_station_details/preview"
     )
-    body = response.json()
+    body = _data(response)
     assert body["variant"] == "FeatureBundle"
-    assert body["count"] == 2
+    assert len(body["items"]) == 2
     item0 = body["items"][0]
     assert item0["feature"]["kind"] == "place"
     assert item0["feature"]["category"] == "06020000"
@@ -135,11 +140,11 @@ def test_preview_opinet_stations(client: TestClient) -> None:
 @pytest.mark.unit
 def test_preview_opinet_prices(client: TestClient) -> None:
     response = client.post(
-        "/debug/etl/python-opinet-api/opinet_gas_station_prices/preview"
+        "/v1/debug/etl/python-opinet-api/opinet_gas_station_prices/preview"
     )
-    body = response.json()
+    body = _data(response)
     assert body["variant"] == "PriceValue"
-    assert body["count"] == 3
+    assert len(body["items"]) == 3
     item0 = body["items"][0]
     assert item0["price_domain"] == "opinet_gas_station"
     assert item0["unit"] == "KRW/L"
@@ -148,11 +153,11 @@ def test_preview_opinet_prices(client: TestClient) -> None:
 @pytest.mark.unit
 def test_preview_airkorea_stations(client: TestClient) -> None:
     response = client.post(
-        "/debug/etl/python-airkorea-api/airkorea_stations/preview"
+        "/v1/debug/etl/python-airkorea-api/airkorea_stations/preview"
     )
-    body = response.json()
+    body = _data(response)
     assert body["variant"] == "FeatureBundle"
-    assert body["count"] == 1
+    assert len(body["items"]) == 1
     item0 = body["items"][0]
     # 측정소는 weather kind feature (place 아님).
     assert item0["feature"]["kind"] == "weather"
@@ -162,12 +167,12 @@ def test_preview_airkorea_stations(client: TestClient) -> None:
 @pytest.mark.unit
 def test_preview_airkorea_air_quality(client: TestClient) -> None:
     response = client.post(
-        "/debug/etl/python-airkorea-api/airkorea_air_quality/preview"
+        "/v1/debug/etl/python-airkorea-api/airkorea_air_quality/preview"
     )
-    body = response.json()
+    body = _data(response)
     assert body["variant"] == "WeatherValue"
     # PM10/PM2_5/O3/CAI 4종(결측 제외).
-    assert body["count"] == 4
+    assert len(body["items"]) == 4
     metric_keys = {item["metric_key"] for item in body["items"]}
     assert metric_keys == {"PM10", "PM2_5", "O3", "CAI"}
     item0 = body["items"][0]
@@ -178,11 +183,11 @@ def test_preview_airkorea_air_quality(client: TestClient) -> None:
 @pytest.mark.unit
 def test_preview_unknown_dataset_404(client: TestClient) -> None:
     response = client.post(
-        "/debug/etl/python-kma-api/unknown_dataset/preview"
+        "/v1/debug/etl/python-kma-api/unknown_dataset/preview"
     )
     assert response.status_code == 404
     body = response.json()
-    assert "등록되지 않은" in body["error"]["message"]
+    assert "등록되지 않은" in body["detail"]
 
 
 @pytest.mark.unit
@@ -200,29 +205,29 @@ def test_preview_live_source_501_when_loader_missing(
         lambda *a, **k: None,
     )
     response = client.post(
-        "/debug/etl/python-kma-api/kma_weather_alerts/preview?source=live"
+        "/v1/debug/etl/python-kma-api/kma_weather_alerts/preview?source=live"
     )
     assert response.status_code == 501
     body = response.json()
-    assert "source=live 미구현" in body["error"]["message"]
+    assert "source=live 미구현" in body["detail"]
 
 
 @pytest.mark.unit
 def test_preview_live_kma_503_when_key_missing(client: TestClient) -> None:
     """KMA 단기예보는 live 등록됐지만 .env 키 없으면 503."""
     response = client.post(
-        "/debug/etl/python-kma-api/kma_short_forecast/preview?source=live"
+        "/v1/debug/etl/python-kma-api/kma_short_forecast/preview?source=live"
     )
     assert response.status_code == 503
     body = response.json()
-    assert "KMA_SERVICE_KEY 미설정" in body["error"]["message"]
+    assert "KMA_SERVICE_KEY 미설정" in body["detail"]
 
 
 @pytest.mark.unit
 def test_providers_dataset_marks_live_supported(client: TestClient) -> None:
     """KMA 4 dataset 전부 live_supported=True (PR#58부터 weather_alerts 포함)."""
-    response = client.get("/debug/etl/providers")
-    body = response.json()
+    response = client.get("/v1/debug/etl/providers")
+    body = _data(response)
     kma = next(p for p in body["providers"] if p["provider"] == "python-kma-api")
     live_map = {d["dataset"]: d["live_supported"] for d in kma["datasets"]}
     assert live_map["kma_short_forecast"] is True
@@ -235,8 +240,8 @@ def test_providers_dataset_marks_live_supported(client: TestClient) -> None:
 @pytest.mark.unit
 def test_providers_krex_live_supported(client: TestClient) -> None:
     """krex 4 dataset은 PR#55부터 live_supported=True."""
-    response = client.get("/debug/etl/providers")
-    body = response.json()
+    response = client.get("/v1/debug/etl/providers")
+    body = _data(response)
     krex = next(p for p in body["providers"] if p["provider"] == "python-krex-api")
     live_map = {d["dataset"]: d["live_supported"] for d in krex["datasets"]}
     assert live_map["krex_rest_areas"] is True
@@ -249,18 +254,18 @@ def test_providers_krex_live_supported(client: TestClient) -> None:
 def test_preview_live_krex_503_when_key_missing(client: TestClient) -> None:
     """krex는 live 등록됐지만 .env 키 없으면 503."""
     response = client.post(
-        "/debug/etl/python-krex-api/krex_rest_areas/preview?source=live"
+        "/v1/debug/etl/python-krex-api/krex_rest_areas/preview?source=live"
     )
     assert response.status_code == 503
     body = response.json()
-    assert "KREX_SERVICE_KEY 미설정" in body["error"]["message"]
+    assert "KREX_SERVICE_KEY 미설정" in body["detail"]
 
 
 @pytest.mark.unit
 def test_providers_opinet_live_supported(client: TestClient) -> None:
     """opinet 2 dataset은 PR#56부터 live_supported=True."""
-    response = client.get("/debug/etl/providers")
-    body = response.json()
+    response = client.get("/v1/debug/etl/providers")
+    body = _data(response)
     op = next(p for p in body["providers"] if p["provider"] == "python-opinet-api")
     live_map = {d["dataset"]: d["live_supported"] for d in op["datasets"]}
     assert live_map["opinet_fuel_station_details"] is True
@@ -271,18 +276,18 @@ def test_providers_opinet_live_supported(client: TestClient) -> None:
 def test_preview_live_opinet_503_when_key_missing(client: TestClient) -> None:
     """opinet은 live 등록됐지만 .env 키 없으면 503."""
     response = client.post(
-        "/debug/etl/python-opinet-api/opinet_fuel_station_details/preview?source=live"
+        "/v1/debug/etl/python-opinet-api/opinet_fuel_station_details/preview?source=live"
     )
     assert response.status_code == 503
     body = response.json()
-    assert "OPINET_SERVICE_KEY 미설정" in body["error"]["message"]
+    assert "OPINET_SERVICE_KEY 미설정" in body["detail"]
 
 
 @pytest.mark.unit
 def test_providers_datagokr_live_supported(client: TestClient) -> None:
     """datagokr_cultural_festivals는 PR#57부터 live_supported=True."""
-    response = client.get("/debug/etl/providers")
-    body = response.json()
+    response = client.get("/v1/debug/etl/providers")
+    body = _data(response)
     dg = next(
         p for p in body["providers"] if p["provider"] == "data.go.kr-standard"
     )
@@ -294,18 +299,18 @@ def test_providers_datagokr_live_supported(client: TestClient) -> None:
 def test_preview_live_datagokr_503_when_key_missing(client: TestClient) -> None:
     """datagokr은 live 등록됐지만 .env 키 없으면 503."""
     response = client.post(
-        "/debug/etl/data.go.kr-standard/datagokr_cultural_festivals/preview?source=live"
+        "/v1/debug/etl/data.go.kr-standard/datagokr_cultural_festivals/preview?source=live"
     )
     assert response.status_code == 503
     body = response.json()
-    assert "DATAGOKR_SERVICE_KEY 미설정" in body["error"]["message"]
+    assert "DATAGOKR_SERVICE_KEY 미설정" in body["detail"]
 
 
 @pytest.mark.unit
 def test_providers_kma_weather_alerts_live_supported(client: TestClient) -> None:
     """kma_weather_alerts는 PR#58부터 live_supported=True (apihub wrn_now_data)."""
-    response = client.get("/debug/etl/providers")
-    body = response.json()
+    response = client.get("/v1/debug/etl/providers")
+    body = _data(response)
     kma = next(p for p in body["providers"] if p["provider"] == "python-kma-api")
     live_map = {d["dataset"]: d["live_supported"] for d in kma["datasets"]}
     assert live_map["kma_weather_alerts"] is True
@@ -319,19 +324,19 @@ def test_preview_live_kma_alerts_503_when_both_keys_missing(
     필요 — 둘 다 미설정 시 503. 두 키 이름 모두 안내 (KMA 소스 정책: data.go.kr 우선).
     """
     response = client.post(
-        "/debug/etl/python-kma-api/kma_weather_alerts/preview?source=live"
+        "/v1/debug/etl/python-kma-api/kma_weather_alerts/preview?source=live"
     )
     assert response.status_code == 503
     body = response.json()
-    assert "KMA_APIHUB_KEY 미설정" in body["error"]["message"]
-    assert "KMA_SERVICE_KEY" in body["error"]["message"]
+    assert "KMA_APIHUB_KEY 미설정" in body["detail"]
+    assert "KMA_SERVICE_KEY" in body["detail"]
 
 
 @pytest.mark.unit
 def test_preview_invalid_source_query_422(client: TestClient) -> None:
     """source는 Literal['fixture', 'live'] — 그 외는 FastAPI validator가 422."""
     response = client.post(
-        "/debug/etl/data.go.kr-standard/datagokr_cultural_festivals/preview"
+        "/v1/debug/etl/data.go.kr-standard/datagokr_cultural_festivals/preview"
         "?source=bogus"
     )
     assert response.status_code == 422
@@ -344,7 +349,7 @@ def test_preview_invalid_source_query_422(client: TestClient) -> None:
 def test_cors_allows_frontend_origin(client: TestClient) -> None:
     """frontend(Next.js dev/start 9012) origin은 CORS 허용 (debug UI 동작 전제)."""
     response = client.get(
-        "/debug/etl/providers",
+        "/v1/debug/etl/providers",
         headers={"Origin": "http://localhost:9012"},
     )
     assert response.status_code == 200
@@ -358,7 +363,7 @@ def test_cors_allows_frontend_origin(client: TestClient) -> None:
 def test_cors_preflight_options(client: TestClient) -> None:
     """preflight OPTIONS도 허용 origin에 대해 200 + allow-origin."""
     response = client.options(
-        "/debug/etl/python-kma-api/kma_short_forecast/preview",
+        "/v1/debug/etl/python-kma-api/kma_short_forecast/preview",
         headers={
             "Origin": "http://localhost:9012",
             "Access-Control-Request-Method": "POST",
@@ -378,4 +383,4 @@ def test_cors_preflight_options(client: TestClient) -> None:
 def test_etl_unmounted_when_debug_disabled() -> None:
     app = create_app(AdminSettings(debug_routes_enabled=False))
     client = TestClient(app)
-    assert client.get("/debug/etl/providers").status_code == 404
+    assert client.get("/v1/debug/etl/providers").status_code == 404

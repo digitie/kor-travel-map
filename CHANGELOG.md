@@ -5,6 +5,18 @@
 
 ## [Unreleased]
 
+### API — T-216 REST 계약 표면 clean cut (2026-06-09)
+
+- **CHANGED (breaking)**: admin/ops/debug 라우터도 `/v1` prefix로 이동했다. liveness
+  `/health`·`/version`만 비버저닝 유지하며, 구 unversioned alias는 두지 않는다.
+- **CHANGED (breaking)**: 목록 pagination은 `page_size` + `meta.page.next_cursor`로
+  통일하고, `data.next_cursor`/`meta.count`/파생 `count`를 제거했다.
+- **CHANGED (breaking)**: REST 표면의 상태/식별자 명명을 `status`, `issue_id`,
+  `review_id`, `log_id`로 정리하고, 에러 응답은 `application/problem+json` top-level
+  `code`/`request_id`/`errors` 확장으로 통일했다.
+- **CHANGED**: `openapi.json`/`openapi.user.json`, frontend generated type/API hook/UI/e2e
+  mock을 새 계약 기준으로 재생성·정렬했다.
+
 ## [Unreleased]
 
 ### DB — pg_prewarm 부팅 후 warm-up 메커니즘 (T-102, 2026-06-09)

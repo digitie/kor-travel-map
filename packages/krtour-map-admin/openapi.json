@@ -25,29 +25,6 @@
             },
             "title": "Items",
             "type": "array"
-          }
-        },
-        "required": [
-          "items"
-        ],
-        "title": "AdminFeatureChangeListData",
-        "type": "object"
-      },
-      "AdminFeatureChangeListMeta": {
-        "additionalProperties": false,
-        "description": "feature change request list meta.",
-        "properties": {
-          "count": {
-            "title": "Count",
-            "type": "integer"
-          },
-          "duration_ms": {
-            "title": "Duration Ms",
-            "type": "integer"
-          },
-          "limit": {
-            "title": "Limit",
-            "type": "integer"
           },
           "review_mode": {
             "enum": [
@@ -59,12 +36,10 @@
           }
         },
         "required": [
-          "count",
-          "limit",
-          "review_mode",
-          "duration_ms"
+          "items",
+          "review_mode"
         ],
-        "title": "AdminFeatureChangeListMeta",
+        "title": "AdminFeatureChangeListData",
         "type": "object"
       },
       "AdminFeatureChangeListResponse": {
@@ -75,7 +50,7 @@
             "$ref": "#/components/schemas/AdminFeatureChangeListData"
           },
           "meta": {
-            "$ref": "#/components/schemas/AdminFeatureChangeListMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -181,13 +156,13 @@
             ],
             "title": "Reviewed By"
           },
-          "state": {
+          "status": {
             "enum": [
               "pending",
               "applied",
               "rejected"
             ],
-            "title": "State",
+            "title": "Status",
             "type": "string"
           }
         },
@@ -195,7 +170,7 @@
           "request_id",
           "feature_id",
           "action",
-          "state",
+          "status",
           "review_mode",
           "payload",
           "created_at"
@@ -211,7 +186,7 @@
             "$ref": "#/components/schemas/AdminFeatureChangeData"
           },
           "meta": {
-            "$ref": "#/components/schemas/AdminFeatureWriteMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -578,7 +553,7 @@
             "$ref": "#/components/schemas/AdminFeatureDeactivateData"
           },
           "meta": {
-            "$ref": "#/components/schemas/AdminFeatureWriteMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -631,6 +606,17 @@
             ],
             "title": "Detected At"
           },
+          "issue_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issue Id"
+          },
           "message": {
             "anyOf": [
               {
@@ -652,17 +638,6 @@
               }
             ],
             "title": "Severity"
-          },
-          "violation_key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Violation Key"
           },
           "violation_type": {
             "anyOf": [
@@ -707,8 +682,8 @@
             "title": "Field Path",
             "type": "string"
           },
-          "override_key": {
-            "title": "Override Key",
+          "override_id": {
+            "title": "Override Id",
             "type": "string"
           },
           "override_value": {
@@ -731,7 +706,7 @@
           }
         },
         "required": [
-          "override_key",
+          "override_id",
           "feature_id",
           "field_path",
           "override_value",
@@ -1113,21 +1088,6 @@
         "title": "AdminFeatureReviewActionRequest",
         "type": "object"
       },
-      "AdminFeatureWriteMeta": {
-        "additionalProperties": false,
-        "description": "Admin feature write meta.",
-        "properties": {
-          "duration_ms": {
-            "title": "Duration Ms",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "duration_ms"
-        ],
-        "title": "AdminFeatureWriteMeta",
-        "type": "object"
-      },
       "AdminFeaturesListData": {
         "additionalProperties": false,
         "description": "Admin feature 목록 data.",
@@ -1138,71 +1098,12 @@
             },
             "title": "Items",
             "type": "array"
-          },
-          "next_cursor": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Cursor"
           }
         },
         "required": [
           "items"
         ],
         "title": "AdminFeaturesListData",
-        "type": "object"
-      },
-      "AdminFeaturesListMeta": {
-        "additionalProperties": false,
-        "description": "Admin feature 목록 meta.",
-        "properties": {
-          "count": {
-            "title": "Count",
-            "type": "integer"
-          },
-          "duration_ms": {
-            "title": "Duration Ms",
-            "type": "integer"
-          },
-          "order": {
-            "enum": [
-              "asc",
-              "desc"
-            ],
-            "title": "Order",
-            "type": "string"
-          },
-          "page_size": {
-            "title": "Page Size",
-            "type": "integer"
-          },
-          "sort": {
-            "enum": [
-              "name",
-              "updated_at",
-              "created_at",
-              "kind",
-              "status",
-              "provider",
-              "issue_count"
-            ],
-            "title": "Sort",
-            "type": "string"
-          }
-        },
-        "required": [
-          "count",
-          "page_size",
-          "sort",
-          "order",
-          "duration_ms"
-        ],
-        "title": "AdminFeaturesListMeta",
         "type": "object"
       },
       "AdminFeaturesListResponse": {
@@ -1213,7 +1114,7 @@
             "$ref": "#/components/schemas/AdminFeaturesListData"
           },
           "meta": {
-            "$ref": "#/components/schemas/AdminFeaturesListMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -1225,7 +1126,7 @@
       },
       "AdminIssueActionData": {
         "additionalProperties": false,
-        "description": "``PATCH /admin/issues/{violation_key}`` data.",
+        "description": "``PATCH /admin/issues/{issue_id}`` data.",
         "properties": {
           "feature": {
             "anyOf": [
@@ -1261,13 +1162,13 @@
       },
       "AdminIssueActionResponse": {
         "additionalProperties": false,
-        "description": "``PATCH /admin/issues/{violation_key}`` 응답.",
+        "description": "``PATCH /admin/issues/{issue_id}`` 응답.",
         "properties": {
           "data": {
             "$ref": "#/components/schemas/AdminIssueActionData"
           },
           "meta": {
-            "$ref": "#/components/schemas/AdminIssueDetailMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -1301,30 +1202,15 @@
         "title": "AdminIssueDetailData",
         "type": "object"
       },
-      "AdminIssueDetailMeta": {
-        "additionalProperties": false,
-        "description": "단건 응답 meta.",
-        "properties": {
-          "duration_ms": {
-            "title": "Duration Ms",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "duration_ms"
-        ],
-        "title": "AdminIssueDetailMeta",
-        "type": "object"
-      },
       "AdminIssueDetailResponse": {
         "additionalProperties": false,
-        "description": "``GET /admin/issues/{violation_key}`` 응답.",
+        "description": "``GET /admin/issues/{issue_id}`` 응답.",
         "properties": {
           "data": {
             "$ref": "#/components/schemas/AdminIssueDetailData"
           },
           "meta": {
-            "$ref": "#/components/schemas/AdminIssueDetailMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -1436,43 +1322,12 @@
             },
             "title": "Items",
             "type": "array"
-          },
-          "next_cursor": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Cursor"
           }
         },
         "required": [
           "items"
         ],
         "title": "AdminIssueListData",
-        "type": "object"
-      },
-      "AdminIssueListMeta": {
-        "additionalProperties": false,
-        "description": "이슈 목록 meta.",
-        "properties": {
-          "count": {
-            "title": "Count",
-            "type": "integer"
-          },
-          "duration_ms": {
-            "title": "Duration Ms",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "count",
-          "duration_ms"
-        ],
-        "title": "AdminIssueListMeta",
         "type": "object"
       },
       "AdminIssueListResponse": {
@@ -1483,7 +1338,7 @@
             "$ref": "#/components/schemas/AdminIssueListData"
           },
           "meta": {
-            "$ref": "#/components/schemas/AdminIssueListMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -1641,6 +1496,10 @@
             ],
             "title": "Feature Id"
           },
+          "issue_id": {
+            "title": "Issue Id",
+            "type": "string"
+          },
           "message": {
             "title": "Message",
             "type": "string"
@@ -1692,17 +1551,13 @@
             "title": "Status",
             "type": "string"
           },
-          "violation_key": {
-            "title": "Violation Key",
-            "type": "string"
-          },
           "violation_type": {
             "title": "Violation Type",
             "type": "string"
           }
         },
         "required": [
-          "violation_key",
+          "issue_id",
           "violation_type",
           "severity",
           "message",
@@ -1717,10 +1572,6 @@
         "additionalProperties": false,
         "description": "``ops.api_call_log`` HTTP 표현.",
         "properties": {
-          "api_call_log_key": {
-            "title": "Api Call Log Key",
-            "type": "string"
-          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -1740,6 +1591,10 @@
               }
             ],
             "title": "Error Code"
+          },
+          "log_id": {
+            "title": "Log Id",
+            "type": "string"
           },
           "method": {
             "title": "Method",
@@ -1766,7 +1621,7 @@
           }
         },
         "required": [
-          "api_call_log_key",
+          "log_id",
           "method",
           "path",
           "status_code",
@@ -1786,17 +1641,6 @@
             },
             "title": "Items",
             "type": "array"
-          },
-          "next_cursor": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Cursor"
           }
         },
         "required": [
@@ -1813,7 +1657,7 @@
             "$ref": "#/components/schemas/ApiCallLogsListData"
           },
           "meta": {
-            "$ref": "#/components/schemas/LogListMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -1859,31 +1703,6 @@
         "title": "BackupCommandPlan",
         "type": "object"
       },
-      "BackupDetailMeta": {
-        "additionalProperties": false,
-        "description": "Backup detail metadata.",
-        "properties": {
-          "backup_root": {
-            "title": "Backup Root",
-            "type": "string"
-          },
-          "command_enabled": {
-            "title": "Command Enabled",
-            "type": "boolean"
-          },
-          "duration_ms": {
-            "title": "Duration Ms",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "backup_root",
-          "command_enabled",
-          "duration_ms"
-        ],
-        "title": "BackupDetailMeta",
-        "type": "object"
-      },
       "BackupDetailResponse": {
         "additionalProperties": false,
         "description": "``GET /admin/backups/{backup_id}`` response.",
@@ -1892,7 +1711,7 @@
             "$ref": "#/components/schemas/BackupRecord"
           },
           "meta": {
-            "$ref": "#/components/schemas/BackupDetailMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -1906,6 +1725,14 @@
         "additionalProperties": false,
         "description": "Backup list data.",
         "properties": {
+          "backup_root": {
+            "title": "Backup Root",
+            "type": "string"
+          },
+          "command_enabled": {
+            "title": "Command Enabled",
+            "type": "boolean"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/BackupRecord"
@@ -1915,39 +1742,11 @@
           }
         },
         "required": [
-          "items"
+          "items",
+          "backup_root",
+          "command_enabled"
         ],
         "title": "BackupListData",
-        "type": "object"
-      },
-      "BackupListMeta": {
-        "additionalProperties": false,
-        "description": "Backup list metadata.",
-        "properties": {
-          "backup_root": {
-            "title": "Backup Root",
-            "type": "string"
-          },
-          "command_enabled": {
-            "title": "Command Enabled",
-            "type": "boolean"
-          },
-          "count": {
-            "title": "Count",
-            "type": "integer"
-          },
-          "duration_ms": {
-            "title": "Duration Ms",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "count",
-          "backup_root",
-          "command_enabled",
-          "duration_ms"
-        ],
-        "title": "BackupListMeta",
         "type": "object"
       },
       "BackupListResponse": {
@@ -1958,7 +1757,7 @@
             "$ref": "#/components/schemas/BackupListData"
           },
           "meta": {
-            "$ref": "#/components/schemas/BackupListMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -2061,21 +1860,6 @@
         "title": "BackupOperationData",
         "type": "object"
       },
-      "BackupOperationMeta": {
-        "additionalProperties": false,
-        "description": "Backup operation metadata.",
-        "properties": {
-          "duration_ms": {
-            "title": "Duration Ms",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "duration_ms"
-        ],
-        "title": "BackupOperationMeta",
-        "type": "object"
-      },
       "BackupOperationResponse": {
         "additionalProperties": false,
         "description": "Backup/restore/swap operation response.",
@@ -2084,7 +1868,7 @@
             "$ref": "#/components/schemas/BackupOperationData"
           },
           "meta": {
-            "$ref": "#/components/schemas/BackupOperationMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -2258,7 +2042,7 @@
         "title": "BboxScope",
         "type": "object"
       },
-      "Body_create_offline_upload_request_admin_offline_uploads_post": {
+      "Body_create_offline_upload_request_v1_admin_offline_uploads_post": {
         "properties": {
           "created_by": {
             "anyOf": [
@@ -2299,7 +2083,7 @@
           "provider",
           "dataset_key"
         ],
-        "title": "Body_create_offline_upload_request_admin_offline_uploads_post",
+        "title": "Body_create_offline_upload_request_v1_admin_offline_uploads_post",
         "type": "object"
       },
       "CacheTargetKeysScope": {
@@ -2362,10 +2146,6 @@
         "additionalProperties": false,
         "description": "``GET /categories`` data payload.",
         "properties": {
-          "count": {
-            "title": "Count",
-            "type": "integer"
-          },
           "include_counts": {
             "title": "Include Counts",
             "type": "boolean"
@@ -2380,29 +2160,9 @@
         },
         "required": [
           "items",
-          "count",
           "include_counts"
         ],
         "title": "CategoriesData",
-        "type": "object"
-      },
-      "CategoriesMeta": {
-        "additionalProperties": false,
-        "properties": {
-          "count": {
-            "title": "Count",
-            "type": "integer"
-          },
-          "duration_ms": {
-            "title": "Duration Ms",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "count",
-          "duration_ms"
-        ],
-        "title": "CategoriesMeta",
         "type": "object"
       },
       "CategoriesResponse": {
@@ -2413,7 +2173,7 @@
             "$ref": "#/components/schemas/CategoriesData"
           },
           "meta": {
-            "$ref": "#/components/schemas/CategoriesMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -2593,6 +2353,25 @@
         "title": "CenterRadiusScope",
         "type": "object"
       },
+      "ClusterMeta": {
+        "additionalProperties": false,
+        "description": "Map clustering metadata.",
+        "properties": {
+          "cluster_unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cluster Unit"
+          }
+        },
+        "title": "ClusterMeta",
+        "type": "object"
+      },
       "ClusterSummary": {
         "additionalProperties": false,
         "description": "행정구역 rollup 클러스터 1건 (T-213c).",
@@ -2673,21 +2452,6 @@
           "assets"
         ],
         "title": "DagsterAssetGroup",
-        "type": "object"
-      },
-      "DagsterDetailMeta": {
-        "additionalProperties": false,
-        "description": "단건 요약 응답 meta.",
-        "properties": {
-          "duration_ms": {
-            "title": "Duration Ms",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "duration_ms"
-        ],
-        "title": "DagsterDetailMeta",
         "type": "object"
       },
       "DagsterGraphqlError": {
@@ -2885,7 +2649,7 @@
             "$ref": "#/components/schemas/DagsterNuxSeenData"
           },
           "meta": {
-            "$ref": "#/components/schemas/DagsterDetailMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -3037,7 +2801,7 @@
             "$ref": "#/components/schemas/DagsterRunDetailData"
           },
           "meta": {
-            "$ref": "#/components/schemas/DagsterDetailMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -3398,7 +3162,7 @@
             "$ref": "#/components/schemas/DagsterSummaryData"
           },
           "meta": {
-            "$ref": "#/components/schemas/DagsterDetailMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -3533,8 +3297,8 @@
             ],
             "title": "Merge Id"
           },
-          "review_key": {
-            "title": "Review Key",
+          "review_id": {
+            "title": "Review Id",
             "type": "string"
           },
           "source_links_dropped": {
@@ -3561,31 +3325,16 @@
           }
         },
         "required": [
-          "review_key",
+          "review_id",
           "decision",
           "changed"
         ],
         "title": "DedupReviewDecisionData",
         "type": "object"
       },
-      "DedupReviewDecisionMeta": {
-        "additionalProperties": false,
-        "description": "Dedup decision meta.",
-        "properties": {
-          "duration_ms": {
-            "title": "Duration Ms",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "duration_ms"
-        ],
-        "title": "DedupReviewDecisionMeta",
-        "type": "object"
-      },
       "DedupReviewDecisionRequest": {
         "additionalProperties": false,
-        "description": "``PATCH /admin/dedup-review/{review_key}`` body.",
+        "description": "``PATCH /admin/dedup-reviews/{review_id}`` body.",
         "properties": {
           "decision": {
             "enum": [
@@ -3640,13 +3389,13 @@
       },
       "DedupReviewDecisionResponse": {
         "additionalProperties": false,
-        "description": "``PATCH /admin/dedup-review/{review_key}`` response.",
+        "description": "``PATCH /admin/dedup-reviews/{review_id}`` response.",
         "properties": {
           "data": {
             "$ref": "#/components/schemas/DedupReviewDecisionData"
           },
           "meta": {
-            "$ref": "#/components/schemas/DedupReviewDecisionMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -3666,17 +3415,6 @@
             },
             "title": "Items",
             "type": "array"
-          },
-          "next_cursor": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Cursor"
           }
         },
         "required": [
@@ -3685,40 +3423,15 @@
         "title": "DedupReviewListData",
         "type": "object"
       },
-      "DedupReviewListMeta": {
-        "additionalProperties": false,
-        "description": "Dedup review list meta.",
-        "properties": {
-          "count": {
-            "title": "Count",
-            "type": "integer"
-          },
-          "duration_ms": {
-            "title": "Duration Ms",
-            "type": "integer"
-          },
-          "page_size": {
-            "title": "Page Size",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "count",
-          "page_size",
-          "duration_ms"
-        ],
-        "title": "DedupReviewListMeta",
-        "type": "object"
-      },
       "DedupReviewListResponse": {
         "additionalProperties": false,
-        "description": "``GET /admin/dedup-review`` response.",
+        "description": "``GET /admin/dedup-reviews`` response.",
         "properties": {
           "data": {
             "$ref": "#/components/schemas/DedupReviewListData"
           },
           "meta": {
-            "$ref": "#/components/schemas/DedupReviewListMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -3730,7 +3443,7 @@
       },
       "DedupReviewRecord": {
         "additionalProperties": false,
-        "description": "``GET /admin/dedup-review`` item.",
+        "description": "``GET /admin/dedup-reviews`` item.",
         "properties": {
           "category_score": {
             "title": "Category Score",
@@ -3773,8 +3486,8 @@
             "title": "Name Score",
             "type": "number"
           },
-          "review_key": {
-            "title": "Review Key",
+          "review_id": {
+            "title": "Review Id",
             "type": "string"
           },
           "reviewed_at": {
@@ -3814,7 +3527,7 @@
           }
         },
         "required": [
-          "review_key",
+          "review_id",
           "status",
           "total_score",
           "name_score",
@@ -3848,8 +3561,8 @@
             "title": "Decision",
             "type": "string"
           },
-          "review_key": {
-            "title": "Review Key",
+          "review_id": {
+            "title": "Review Id",
             "type": "string"
           },
           "source_links_inserted": {
@@ -3876,7 +3589,7 @@
           }
         },
         "required": [
-          "review_key",
+          "review_id",
           "decision",
           "changed",
           "applied"
@@ -3884,24 +3597,9 @@
         "title": "EnrichmentReviewDecisionData",
         "type": "object"
       },
-      "EnrichmentReviewDecisionMeta": {
-        "additionalProperties": false,
-        "description": "Enrichment decision meta.",
-        "properties": {
-          "duration_ms": {
-            "title": "Duration Ms",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "duration_ms"
-        ],
-        "title": "EnrichmentReviewDecisionMeta",
-        "type": "object"
-      },
       "EnrichmentReviewDecisionRequest": {
         "additionalProperties": false,
-        "description": "``PATCH /admin/enrichment-review/{review_key}`` body.",
+        "description": "``PATCH /admin/enrichment-reviews/{review_id}`` body.",
         "properties": {
           "decision": {
             "enum": [
@@ -3944,13 +3642,13 @@
       },
       "EnrichmentReviewDecisionResponse": {
         "additionalProperties": false,
-        "description": "``PATCH /admin/enrichment-review/{review_key}`` response.",
+        "description": "``PATCH /admin/enrichment-reviews/{review_id}`` response.",
         "properties": {
           "data": {
             "$ref": "#/components/schemas/EnrichmentReviewDecisionData"
           },
           "meta": {
-            "$ref": "#/components/schemas/EnrichmentReviewDecisionMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -3970,17 +3668,6 @@
             },
             "title": "Items",
             "type": "array"
-          },
-          "next_cursor": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Cursor"
           }
         },
         "required": [
@@ -3989,40 +3676,15 @@
         "title": "EnrichmentReviewListData",
         "type": "object"
       },
-      "EnrichmentReviewListMeta": {
-        "additionalProperties": false,
-        "description": "Enrichment review list meta.",
-        "properties": {
-          "count": {
-            "title": "Count",
-            "type": "integer"
-          },
-          "duration_ms": {
-            "title": "Duration Ms",
-            "type": "integer"
-          },
-          "page_size": {
-            "title": "Page Size",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "count",
-          "page_size",
-          "duration_ms"
-        ],
-        "title": "EnrichmentReviewListMeta",
-        "type": "object"
-      },
       "EnrichmentReviewListResponse": {
         "additionalProperties": false,
-        "description": "``GET /admin/enrichment-review`` response.",
+        "description": "``GET /admin/enrichment-reviews`` response.",
         "properties": {
           "data": {
             "$ref": "#/components/schemas/EnrichmentReviewListData"
           },
           "meta": {
-            "$ref": "#/components/schemas/EnrichmentReviewListMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -4034,7 +3696,7 @@
       },
       "EnrichmentReviewRecord": {
         "additionalProperties": false,
-        "description": "``GET /admin/enrichment-review`` item.",
+        "description": "``GET /admin/enrichment-reviews`` item.",
         "properties": {
           "created_at": {
             "format": "date-time",
@@ -4056,8 +3718,8 @@
             "title": "Name Score",
             "type": "number"
           },
-          "review_key": {
-            "title": "Review Key",
+          "review_id": {
+            "title": "Review Id",
             "type": "string"
           },
           "reviewed_at": {
@@ -4157,7 +3819,7 @@
           }
         },
         "required": [
-          "review_key",
+          "review_id",
           "status",
           "name_score",
           "target_feature_id",
@@ -4171,14 +3833,10 @@
         "title": "EnrichmentReviewRecord",
         "type": "object"
       },
-      "EtlPreviewResponse": {
+      "EtlPreviewData": {
         "additionalProperties": false,
-        "description": "`/debug/etl/{provider}/{dataset}/preview` 응답.",
+        "description": "`/debug/etl/{provider}/{dataset}/preview` data payload.",
         "properties": {
-          "count": {
-            "title": "Count",
-            "type": "integer"
-          },
           "dataset": {
             "title": "Dataset",
             "type": "string"
@@ -4220,8 +3878,25 @@
           "source",
           "variant",
           "description",
-          "count",
           "items"
+        ],
+        "title": "EtlPreviewData",
+        "type": "object"
+      },
+      "EtlPreviewResponse": {
+        "additionalProperties": false,
+        "description": "`/debug/etl/{provider}/{dataset}/preview` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/EtlPreviewData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
         ],
         "title": "EtlPreviewResponse",
         "type": "object"
@@ -4230,11 +3905,11 @@
         "additionalProperties": false,
         "description": "feature batch 상세 data payload.",
         "properties": {
-          "items": {
+          "found": {
             "additionalProperties": {
               "$ref": "#/components/schemas/FeatureDetailResponse"
             },
-            "title": "Items",
+            "title": "Found",
             "type": "object"
           },
           "missing": {
@@ -4246,7 +3921,7 @@
           }
         },
         "required": [
-          "items",
+          "found",
           "missing"
         ],
         "title": "FeatureBatchData",
@@ -4280,7 +3955,7 @@
             "$ref": "#/components/schemas/FeatureBatchData"
           },
           "meta": {
-            "$ref": "#/components/schemas/FeatureDetailMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -4298,7 +3973,7 @@
             "$ref": "#/components/schemas/FeatureDetailResponse"
           },
           "meta": {
-            "$ref": "#/components/schemas/FeatureDetailMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -4306,21 +3981,6 @@
           "meta"
         ],
         "title": "FeatureDetailEnvelopeResponse",
-        "type": "object"
-      },
-      "FeatureDetailMeta": {
-        "additionalProperties": false,
-        "description": "feature 상세 meta.",
-        "properties": {
-          "duration_ms": {
-            "title": "Duration Ms",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "duration_ms"
-        ],
-        "title": "FeatureDetailMeta",
         "type": "object"
       },
       "FeatureDetailResponse": {
@@ -4486,21 +4146,6 @@
         "title": "FeatureIdsScope",
         "type": "object"
       },
-      "FeatureListMeta": {
-        "additionalProperties": false,
-        "description": "public feature 목록 meta.",
-        "properties": {
-          "duration_ms": {
-            "title": "Duration Ms",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "duration_ms"
-        ],
-        "title": "FeatureListMeta",
-        "type": "object"
-      },
       "FeatureSearchData": {
         "additionalProperties": false,
         "description": "사용자 feature 검색 data payload.",
@@ -4511,28 +4156,6 @@
             },
             "title": "Items",
             "type": "array"
-          },
-          "next_cursor": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Cursor"
-          },
-          "total_count": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Total Count"
           }
         },
         "required": [
@@ -4549,7 +4172,7 @@
             "$ref": "#/components/schemas/FeatureSearchData"
           },
           "meta": {
-            "$ref": "#/components/schemas/FeatureListMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -4881,7 +4504,7 @@
             "$ref": "#/components/schemas/FeatureUpdateRequestRecord"
           },
           "meta": {
-            "$ref": "#/components/schemas/FeatureUpdateRequestMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -4899,7 +4522,7 @@
             "$ref": "#/components/schemas/FeatureUpdateRequestRecord"
           },
           "meta": {
-            "$ref": "#/components/schemas/FeatureUpdateRequestMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -4919,43 +4542,12 @@
             },
             "title": "Items",
             "type": "array"
-          },
-          "next_cursor": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Cursor"
           }
         },
         "required": [
           "items"
         ],
         "title": "FeatureUpdateRequestListData",
-        "type": "object"
-      },
-      "FeatureUpdateRequestListMeta": {
-        "additionalProperties": false,
-        "description": "feature update request 목록 meta.",
-        "properties": {
-          "count": {
-            "title": "Count",
-            "type": "integer"
-          },
-          "duration_ms": {
-            "title": "Duration Ms",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "count",
-          "duration_ms"
-        ],
-        "title": "FeatureUpdateRequestListMeta",
         "type": "object"
       },
       "FeatureUpdateRequestListResponse": {
@@ -4966,7 +4558,7 @@
             "$ref": "#/components/schemas/FeatureUpdateRequestListData"
           },
           "meta": {
-            "$ref": "#/components/schemas/FeatureUpdateRequestListMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -4974,21 +4566,6 @@
           "meta"
         ],
         "title": "FeatureUpdateRequestListResponse",
-        "type": "object"
-      },
-      "FeatureUpdateRequestMeta": {
-        "additionalProperties": false,
-        "description": "쓰기 요청의 간단한 메타데이터.",
-        "properties": {
-          "duration_ms": {
-            "title": "Duration Ms",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "duration_ms"
-        ],
-        "title": "FeatureUpdateRequestMeta",
         "type": "object"
       },
       "FeatureUpdateRequestRecord": {
@@ -5141,8 +4718,8 @@
             ],
             "title": "Started At"
           },
-          "state": {
-            "title": "State",
+          "status": {
+            "title": "Status",
             "type": "string"
           },
           "status_url": {
@@ -5182,7 +4759,7 @@
           "update_policy",
           "run_mode",
           "priority",
-          "state",
+          "status",
           "dry_run",
           "matched_scope"
         ],
@@ -5240,7 +4817,7 @@
             "$ref": "#/components/schemas/WeatherCardData"
           },
           "meta": {
-            "$ref": "#/components/schemas/FeatureDetailMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -5250,14 +4827,10 @@
         "title": "FeatureWeatherResponse",
         "type": "object"
       },
-      "FeaturesInBboxResponse": {
+      "FeaturesInBboxData": {
         "additionalProperties": false,
-        "description": "``GET /features`` 응답 — bbox 안 feature 목록.",
+        "description": "``GET /features`` data payload.",
         "properties": {
-          "count": {
-            "title": "Count",
-            "type": "integer"
-          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/FeatureSummary"
@@ -5267,8 +4840,25 @@
           }
         },
         "required": [
-          "count",
           "items"
+        ],
+        "title": "FeaturesInBboxData",
+        "type": "object"
+      },
+      "FeaturesInBboxResponse": {
+        "additionalProperties": false,
+        "description": "``GET /features`` 응답 — bbox 안 feature 목록.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/FeaturesInBboxData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
         ],
         "title": "FeaturesInBboxResponse",
         "type": "object"
@@ -5281,7 +4871,7 @@
             "$ref": "#/components/schemas/PublicFeatureListData"
           },
           "meta": {
-            "$ref": "#/components/schemas/FeatureListMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -5302,17 +4892,6 @@
             "title": "Items",
             "type": "array"
           },
-          "next_cursor": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Cursor"
-          },
           "target": {
             "$ref": "#/components/schemas/NearbyTargetSummary"
           }
@@ -5324,26 +4903,6 @@
         "title": "FeaturesNearbyByTargetData",
         "type": "object"
       },
-      "FeaturesNearbyByTargetMeta": {
-        "additionalProperties": false,
-        "description": "주변 feature 목록 메타데이터.",
-        "properties": {
-          "count": {
-            "title": "Count",
-            "type": "integer"
-          },
-          "duration_ms": {
-            "title": "Duration Ms",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "count",
-          "duration_ms"
-        ],
-        "title": "FeaturesNearbyByTargetMeta",
-        "type": "object"
-      },
       "FeaturesNearbyByTargetResponse": {
         "additionalProperties": false,
         "description": "``GET /features/nearby/by-target`` 응답.",
@@ -5352,7 +4911,7 @@
             "$ref": "#/components/schemas/FeaturesNearbyByTargetData"
           },
           "meta": {
-            "$ref": "#/components/schemas/FeaturesNearbyByTargetMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -5373,17 +4932,6 @@
             "title": "Items",
             "type": "array"
           },
-          "next_cursor": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Cursor"
-          },
           "origin": {
             "$ref": "#/components/schemas/NearbyOriginSummary"
           }
@@ -5403,7 +4951,7 @@
             "$ref": "#/components/schemas/FeaturesNearbyData"
           },
           "meta": {
-            "$ref": "#/components/schemas/FeaturesNearbyByTargetMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -5469,24 +5017,45 @@
         "title": "IssueCoordBody",
         "type": "object"
       },
-      "LogListMeta": {
+      "Meta": {
         "additionalProperties": false,
-        "description": "로그 목록 공통 meta.",
+        "description": "전 REST 표면에서 공유하는 성공 응답 metadata.",
         "properties": {
-          "count": {
-            "title": "Count",
-            "type": "integer"
+          "cluster": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClusterMeta"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "duration_ms": {
             "title": "Duration Ms",
             "type": "integer"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PageMeta"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "request_id": {
+            "default": "",
+            "description": "X-Request-ID와 같은 요청 ID.",
+            "title": "Request Id",
+            "type": "string"
           }
         },
         "required": [
-          "count",
           "duration_ms"
         ],
-        "title": "LogListMeta",
+        "title": "Meta",
         "type": "object"
       },
       "MoisLicenseDetailData": {
@@ -5497,6 +5066,12 @@
             "additionalProperties": true,
             "title": "Address",
             "type": "object"
+          },
+          "cached": {
+            "default": false,
+            "description": "프로세스 캐시 히트 여부.",
+            "title": "Cached",
+            "type": "boolean"
           },
           "category": {
             "title": "Category",
@@ -5566,27 +5141,6 @@
         "title": "MoisLicenseDetailData",
         "type": "object"
       },
-      "MoisLicenseDetailMeta": {
-        "additionalProperties": false,
-        "description": "단건 상세 meta — 캐시 히트 여부 + 처리 시간.",
-        "properties": {
-          "cached": {
-            "description": "프로세스 캐시 히트 여부.",
-            "title": "Cached",
-            "type": "boolean"
-          },
-          "duration_ms": {
-            "title": "Duration Ms",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "cached",
-          "duration_ms"
-        ],
-        "title": "MoisLicenseDetailMeta",
-        "type": "object"
-      },
       "MoisLicenseDetailResponse": {
         "additionalProperties": false,
         "description": "``GET /debug/mois-license/{license_id}`` 응답 (DA-D-03 envelope).",
@@ -5595,7 +5149,7 @@
             "$ref": "#/components/schemas/MoisLicenseDetailData"
           },
           "meta": {
-            "$ref": "#/components/schemas/MoisLicenseDetailMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -5802,21 +5356,6 @@
         "title": "OfflineUploadColumnMappingRecord",
         "type": "object"
       },
-      "OfflineUploadDetailMeta": {
-        "additionalProperties": false,
-        "description": "단건 조회 응답 metadata.",
-        "properties": {
-          "duration_ms": {
-            "title": "Duration Ms",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "duration_ms"
-        ],
-        "title": "OfflineUploadDetailMeta",
-        "type": "object"
-      },
       "OfflineUploadDetailResponse": {
         "additionalProperties": false,
         "description": "`GET /admin/offline-uploads/{upload_id}` 응답 (DA-D-03 envelope).",
@@ -5825,7 +5364,7 @@
             "$ref": "#/components/schemas/OfflineUploadRecord"
           },
           "meta": {
-            "$ref": "#/components/schemas/OfflineUploadDetailMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -5850,6 +5389,11 @@
           "duration_ms": {
             "title": "Duration Ms",
             "type": "integer"
+          },
+          "request_id": {
+            "default": "",
+            "title": "Request Id",
+            "type": "string"
           }
         },
         "required": [
@@ -5888,43 +5432,12 @@
             },
             "title": "Items",
             "type": "array"
-          },
-          "next_cursor": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Cursor"
           }
         },
         "required": [
           "items"
         ],
         "title": "OfflineUploadListData",
-        "type": "object"
-      },
-      "OfflineUploadListMeta": {
-        "additionalProperties": false,
-        "description": "오프라인 업로드 목록 meta.",
-        "properties": {
-          "count": {
-            "title": "Count",
-            "type": "integer"
-          },
-          "duration_ms": {
-            "title": "Duration Ms",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "count",
-          "duration_ms"
-        ],
-        "title": "OfflineUploadListMeta",
         "type": "object"
       },
       "OfflineUploadListResponse": {
@@ -5935,7 +5448,7 @@
             "$ref": "#/components/schemas/OfflineUploadListData"
           },
           "meta": {
-            "$ref": "#/components/schemas/OfflineUploadListMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -5978,6 +5491,11 @@
           },
           "parsed_format": {
             "title": "Parsed Format",
+            "type": "string"
+          },
+          "request_id": {
+            "default": "",
+            "title": "Request Id",
             "type": "string"
           },
           "rows_sampled": {
@@ -6108,8 +5626,8 @@
             "title": "Provider",
             "type": "string"
           },
-          "state": {
-            "title": "State",
+          "status": {
+            "title": "Status",
             "type": "string"
           },
           "status_url": {
@@ -6160,7 +5678,7 @@
           "checksum_sha256",
           "detected_format",
           "detected_encoding",
-          "state",
+          "status",
           "validation_job_id",
           "load_job_id",
           "created_by",
@@ -6275,7 +5793,7 @@
             ],
             "title": "Job Id"
           },
-          "job_state": {
+          "job_status": {
             "anyOf": [
               {
                 "type": "string"
@@ -6284,10 +5802,15 @@
                 "type": "null"
               }
             ],
-            "title": "Job State"
+            "title": "Job Status"
           },
           "parsed_format": {
             "title": "Parsed Format",
+            "type": "string"
+          },
+          "request_id": {
+            "default": "",
+            "title": "Request Id",
             "type": "string"
           },
           "rows_sampled": {
@@ -6325,7 +5848,7 @@
           "bytes_read",
           "checksum_sha256_actual",
           "job_id",
-          "job_state",
+          "job_status",
           "column_mapping",
           "valid_rows",
           "error_rows",
@@ -6402,6 +5925,11 @@
           },
           "object_key": {
             "title": "Object Key",
+            "type": "string"
+          },
+          "request_id": {
+            "default": "",
+            "title": "Request Id",
             "type": "string"
           }
         },
@@ -6500,17 +6028,6 @@
             },
             "title": "Items",
             "type": "array"
-          },
-          "next_cursor": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Cursor"
           }
         },
         "required": [
@@ -6527,7 +6044,7 @@
             "$ref": "#/components/schemas/OpsConsistencyReportsData"
           },
           "meta": {
-            "$ref": "#/components/schemas/OpsListMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -6594,21 +6111,6 @@
           "fp_rate"
         ],
         "title": "OpsDedupFpStatsRecord",
-        "type": "object"
-      },
-      "OpsDetailMeta": {
-        "additionalProperties": false,
-        "description": "단건 응답 공통 meta.",
-        "properties": {
-          "duration_ms": {
-            "title": "Duration Ms",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "duration_ms"
-        ],
-        "title": "OpsDetailMeta",
         "type": "object"
       },
       "OpsHealthCheck": {
@@ -6681,7 +6183,7 @@
             "$ref": "#/components/schemas/OpsHealthDeepData"
           },
           "meta": {
-            "$ref": "#/components/schemas/OpsDetailMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -6808,8 +6310,8 @@
             ],
             "title": "Started At"
           },
-          "state": {
-            "title": "State",
+          "status": {
+            "title": "Status",
             "type": "string"
           },
           "status_url": {
@@ -6821,7 +6323,7 @@
           "job_id",
           "kind",
           "payload",
-          "state",
+          "status",
           "progress",
           "created_at",
           "status_url"
@@ -6837,7 +6339,7 @@
             "$ref": "#/components/schemas/OpsImportJobRecord"
           },
           "meta": {
-            "$ref": "#/components/schemas/OpsDetailMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -6857,17 +6359,6 @@
             },
             "title": "Items",
             "type": "array"
-          },
-          "next_cursor": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Cursor"
           }
         },
         "required": [
@@ -6884,7 +6375,7 @@
             "$ref": "#/components/schemas/OpsImportJobsData"
           },
           "meta": {
-            "$ref": "#/components/schemas/OpsListMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -6964,6 +6455,10 @@
             ],
             "title": "Feature Id"
           },
+          "issue_id": {
+            "title": "Issue Id",
+            "type": "string"
+          },
           "message": {
             "title": "Message",
             "type": "string"
@@ -7015,17 +6510,13 @@
             "title": "Status",
             "type": "string"
           },
-          "violation_key": {
-            "title": "Violation Key",
-            "type": "string"
-          },
           "violation_type": {
             "title": "Violation Type",
             "type": "string"
           }
         },
         "required": [
-          "violation_key",
+          "issue_id",
           "violation_type",
           "severity",
           "message",
@@ -7046,17 +6537,6 @@
             },
             "title": "Items",
             "type": "array"
-          },
-          "next_cursor": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Cursor"
           }
         },
         "required": [
@@ -7073,7 +6553,7 @@
             "$ref": "#/components/schemas/OpsIntegrityIssuesData"
           },
           "meta": {
-            "$ref": "#/components/schemas/OpsListMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -7081,31 +6561,6 @@
           "meta"
         ],
         "title": "OpsIntegrityIssuesListResponse",
-        "type": "object"
-      },
-      "OpsListMeta": {
-        "additionalProperties": false,
-        "description": "목록 공통 meta.",
-        "properties": {
-          "count": {
-            "title": "Count",
-            "type": "integer"
-          },
-          "duration_ms": {
-            "title": "Duration Ms",
-            "type": "integer"
-          },
-          "page_size": {
-            "title": "Page Size",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "count",
-          "page_size",
-          "duration_ms"
-        ],
-        "title": "OpsListMeta",
         "type": "object"
       },
       "OpsMetricsData": {
@@ -7197,7 +6652,7 @@
             "$ref": "#/components/schemas/OpsMetricsData"
           },
           "meta": {
-            "$ref": "#/components/schemas/OpsDetailMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -7205,6 +6660,43 @@
           "meta"
         ],
         "title": "OpsMetricsResponse",
+        "type": "object"
+      },
+      "PageMeta": {
+        "additionalProperties": false,
+        "description": "Cursor pagination metadata.\n\n``next_cursor``는 페이지가 끝났을 때도 ``null``로 항상 직렬화한다.",
+        "properties": {
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "required": [
+          "page_size"
+        ],
+        "title": "PageMeta",
         "type": "object"
       },
       "PoiCacheTargetListData": {
@@ -7217,43 +6709,12 @@
             },
             "title": "Items",
             "type": "array"
-          },
-          "next_cursor": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Cursor"
           }
         },
         "required": [
           "items"
         ],
         "title": "PoiCacheTargetListData",
-        "type": "object"
-      },
-      "PoiCacheTargetListMeta": {
-        "additionalProperties": false,
-        "description": "POI/cache target 목록 meta.",
-        "properties": {
-          "count": {
-            "title": "Count",
-            "type": "integer"
-          },
-          "duration_ms": {
-            "title": "Duration Ms",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "count",
-          "duration_ms"
-        ],
-        "title": "PoiCacheTargetListMeta",
         "type": "object"
       },
       "PoiCacheTargetListResponse": {
@@ -7264,7 +6725,7 @@
             "$ref": "#/components/schemas/PoiCacheTargetListData"
           },
           "meta": {
-            "$ref": "#/components/schemas/PoiCacheTargetListMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -7281,6 +6742,11 @@
           "duration_ms": {
             "title": "Duration Ms",
             "type": "integer"
+          },
+          "request_id": {
+            "default": "",
+            "title": "Request Id",
+            "type": "string"
           }
         },
         "required": [
@@ -7789,9 +7255,9 @@
         "title": "ProviderDatasetScope",
         "type": "object"
       },
-      "ProviderDatasetsResponse": {
+      "ProviderDatasetsData": {
         "additionalProperties": false,
-        "description": "`/debug/etl/{provider}/datasets` 응답.",
+        "description": "`/debug/etl/{provider}/datasets` data payload.",
         "properties": {
           "datasets": {
             "items": {
@@ -7809,16 +7275,30 @@
           "provider",
           "datasets"
         ],
+        "title": "ProviderDatasetsData",
+        "type": "object"
+      },
+      "ProviderDatasetsResponse": {
+        "additionalProperties": false,
+        "description": "`/debug/etl/{provider}/datasets` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ProviderDatasetsData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
         "title": "ProviderDatasetsResponse",
         "type": "object"
       },
       "ProviderLastSyncData": {
         "additionalProperties": false,
         "properties": {
-          "count": {
-            "title": "Count",
-            "type": "integer"
-          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/SyncStateSummary"
@@ -7833,8 +7313,7 @@
         },
         "required": [
           "provider",
-          "items",
-          "count"
+          "items"
         ],
         "title": "ProviderLastSyncData",
         "type": "object"
@@ -7847,7 +7326,7 @@
             "$ref": "#/components/schemas/ProviderLastSyncData"
           },
           "meta": {
-            "$ref": "#/components/schemas/krtour__map_admin__routers__providers___Meta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -7857,9 +7336,9 @@
         "title": "ProviderLastSyncResponse",
         "type": "object"
       },
-      "ProvidersResponse": {
+      "ProvidersData": {
         "additionalProperties": false,
-        "description": "`/debug/etl/providers` 응답.",
+        "description": "`/debug/etl/providers` data payload.",
         "properties": {
           "providers": {
             "items": {
@@ -7872,6 +7351,24 @@
         "required": [
           "providers"
         ],
+        "title": "ProvidersData",
+        "type": "object"
+      },
+      "ProvidersResponse": {
+        "additionalProperties": false,
+        "description": "`/debug/etl/providers` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ProvidersData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
         "title": "ProvidersResponse",
         "type": "object"
       },
@@ -7879,17 +7376,6 @@
         "additionalProperties": false,
         "description": "public feature 목록 data payload.\n\n``cluster_unit``이 None이면 ``items``(개별 feature), 아니면 ``clusters``\n(행정구역 rollup)를 채운다(T-213c).",
         "properties": {
-          "cluster_unit": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cluster Unit"
-          },
           "clusters": {
             "default": [],
             "items": {
@@ -7897,10 +7383,6 @@
             },
             "title": "Clusters",
             "type": "array"
-          },
-          "count": {
-            "title": "Count",
-            "type": "integer"
           },
           "items": {
             "items": {
@@ -7911,7 +7393,6 @@
           }
         },
         "required": [
-          "count",
           "items"
         ],
         "title": "PublicFeatureListData",
@@ -7925,7 +7406,7 @@
             "$ref": "#/components/schemas/HealthData"
           },
           "meta": {
-            "$ref": "#/components/schemas/krtour__map_admin__routers__public_status___Meta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -7943,7 +7424,7 @@
             "$ref": "#/components/schemas/VersionData"
           },
           "meta": {
-            "$ref": "#/components/schemas/krtour__map_admin__routers__public_status___Meta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -8251,6 +7732,10 @@
             "title": "Level",
             "type": "string"
           },
+          "log_id": {
+            "title": "Log Id",
+            "type": "string"
+          },
           "message": {
             "title": "Message",
             "type": "string"
@@ -8269,14 +7754,10 @@
           "source": {
             "title": "Source",
             "type": "string"
-          },
-          "system_log_key": {
-            "title": "System Log Key",
-            "type": "string"
           }
         },
         "required": [
-          "system_log_key",
+          "log_id",
           "level",
           "source",
           "event",
@@ -8297,17 +7778,6 @@
             },
             "title": "Items",
             "type": "array"
-          },
-          "next_cursor": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Cursor"
           }
         },
         "required": [
@@ -8324,7 +7794,7 @@
             "$ref": "#/components/schemas/SystemLogsListData"
           },
           "meta": {
-            "$ref": "#/components/schemas/LogListMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -8643,39 +8113,6 @@
         ],
         "title": "_ProviderEntry",
         "type": "object"
-      },
-      "krtour__map_admin__routers__providers___Meta": {
-        "additionalProperties": false,
-        "properties": {
-          "count": {
-            "title": "Count",
-            "type": "integer"
-          },
-          "duration_ms": {
-            "title": "Duration Ms",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "count",
-          "duration_ms"
-        ],
-        "title": "_Meta",
-        "type": "object"
-      },
-      "krtour__map_admin__routers__public_status___Meta": {
-        "additionalProperties": false,
-        "properties": {
-          "duration_ms": {
-            "title": "Duration Ms",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "duration_ms"
-        ],
-        "title": "_Meta",
-        "type": "object"
       }
     },
     "securitySchemes": {
@@ -8694,10 +8131,32 @@
   },
   "openapi": "3.1.0",
   "paths": {
-    "/admin/backups": {
+    "/health": {
+      "get": {
+        "description": "liveness — 의존 없이 항상 ``status='ok'`` 200. deep readiness는 후속.",
+        "operationId": "get_public_health_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicHealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "public liveness probe",
+        "tags": [
+          "public"
+        ]
+      }
+    },
+    "/v1/admin/backups": {
       "get": {
         "description": "List local backup artifacts.",
-        "operationId": "list_backups_admin_backups_get",
+        "operationId": "list_backups_v1_admin_backups_get",
         "responses": {
           "200": {
             "content": {
@@ -8717,7 +8176,7 @@
       },
       "post": {
         "description": "Plan or run a cold backup command.",
-        "operationId": "create_backup_admin_backups_post",
+        "operationId": "create_backup_v1_admin_backups_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -8763,10 +8222,10 @@
         ]
       }
     },
-    "/admin/backups/{backup_id}": {
+    "/v1/admin/backups/{backup_id}": {
       "get": {
         "description": "Return one backup artifact.",
-        "operationId": "get_backup_admin_backups__backup_id__get",
+        "operationId": "get_backup_v1_admin_backups__backup_id__get",
         "parameters": [
           {
             "in": "path",
@@ -8806,9 +8265,9 @@
         ]
       }
     },
-    "/admin/dedup-review": {
+    "/v1/admin/dedup-reviews": {
       "get": {
-        "operationId": "list_reviews_admin_dedup_review_get",
+        "operationId": "list_reviews_v1_admin_dedup_reviews_get",
         "parameters": [
           {
             "description": "dedup review status 반복 필터",
@@ -9023,16 +8482,16 @@
         ]
       }
     },
-    "/admin/dedup-review/{review_key}": {
+    "/v1/admin/dedup-reviews/{review_id}": {
       "patch": {
-        "operationId": "decide_review_admin_dedup_review__review_key__patch",
+        "operationId": "decide_review_v1_admin_dedup_reviews__review_id__patch",
         "parameters": [
           {
             "in": "path",
-            "name": "review_key",
+            "name": "review_id",
             "required": true,
             "schema": {
-              "title": "Review Key",
+              "title": "Review Id",
               "type": "string"
             }
           }
@@ -9059,7 +8518,7 @@
             "description": "Successful Response"
           },
           "404": {
-            "description": "review_key 없음"
+            "description": "review_id 없음"
           },
           "409": {
             "description": "전이 불가"
@@ -9081,9 +8540,9 @@
         ]
       }
     },
-    "/admin/enrichment-review": {
+    "/v1/admin/enrichment-reviews": {
       "get": {
-        "operationId": "list_reviews_admin_enrichment_review_get",
+        "operationId": "list_reviews_v1_admin_enrichment_reviews_get",
         "parameters": [
           {
             "description": "enrichment review status 반복 필터",
@@ -9240,16 +8699,16 @@
         ]
       }
     },
-    "/admin/enrichment-review/{review_key}": {
+    "/v1/admin/enrichment-reviews/{review_id}": {
       "patch": {
-        "operationId": "decide_review_admin_enrichment_review__review_key__patch",
+        "operationId": "decide_review_v1_admin_enrichment_reviews__review_id__patch",
         "parameters": [
           {
             "in": "path",
-            "name": "review_key",
+            "name": "review_id",
             "required": true,
             "schema": {
-              "title": "Review Key",
+              "title": "Review Id",
               "type": "string"
             }
           }
@@ -9295,13 +8754,13 @@
         ]
       }
     },
-    "/admin/feature-update-requests": {
+    "/v1/admin/feature-update-requests": {
       "get": {
-        "operationId": "list_feature_update_requests_admin_feature_update_requests_get",
+        "operationId": "list_feature_update_requests_v1_admin_feature_update_requests_get",
         "parameters": [
           {
             "in": "query",
-            "name": "state",
+            "name": "status",
             "required": false,
             "schema": {
               "anyOf": [
@@ -9319,7 +8778,7 @@
                   "type": "null"
                 }
               ],
-              "title": "State"
+              "title": "Status"
             }
           },
           {
@@ -9461,7 +8920,7 @@
         ]
       },
       "post": {
-        "operationId": "create_feature_update_request_admin_feature_update_requests_post",
+        "operationId": "create_feature_update_request_v1_admin_feature_update_requests_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -9503,9 +8962,9 @@
         ]
       }
     },
-    "/admin/feature-update-requests/{request_id}": {
+    "/v1/admin/feature-update-requests/{request_id}": {
       "get": {
-        "operationId": "get_feature_update_request_admin_feature_update_requests__request_id__get",
+        "operationId": "get_feature_update_request_v1_admin_feature_update_requests__request_id__get",
         "parameters": [
           {
             "in": "path",
@@ -9548,9 +9007,9 @@
         ]
       }
     },
-    "/admin/feature-update-requests/{request_id}/cancel": {
+    "/v1/admin/feature-update-requests/{request_id}/cancel": {
       "post": {
-        "operationId": "cancel_feature_update_request_admin_feature_update_requests__request_id__cancel_post",
+        "operationId": "cancel_feature_update_request_v1_admin_feature_update_requests__request_id__cancel_post",
         "parameters": [
           {
             "in": "path",
@@ -9613,9 +9072,9 @@
         ]
       }
     },
-    "/admin/feature-update-requests/{request_id}/run-now": {
+    "/v1/admin/feature-update-requests/{request_id}/run-now": {
       "post": {
-        "operationId": "run_feature_update_request_now_admin_feature_update_requests__request_id__run_now_post",
+        "operationId": "run_feature_update_request_now_v1_admin_feature_update_requests__request_id__run_now_post",
         "parameters": [
           {
             "in": "path",
@@ -9678,9 +9137,9 @@
         ]
       }
     },
-    "/admin/features": {
+    "/v1/admin/features": {
       "get": {
-        "operationId": "list_features_admin_features_get",
+        "operationId": "list_features_v1_admin_features_get",
         "parameters": [
           {
             "description": "name/address/feature/source 검색",
@@ -9986,7 +9445,7 @@
         ]
       },
       "post": {
-        "operationId": "create_feature_route_admin_features_post",
+        "operationId": "create_feature_route_v1_admin_features_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -10025,13 +9484,13 @@
         ]
       }
     },
-    "/admin/features/change-requests": {
+    "/v1/admin/features/change-requests": {
       "get": {
-        "operationId": "list_feature_change_request_route_admin_features_change_requests_get",
+        "operationId": "list_feature_change_request_route_v1_admin_features_change_requests_get",
         "parameters": [
           {
             "in": "query",
-            "name": "state",
+            "name": "status",
             "required": false,
             "schema": {
               "anyOf": [
@@ -10050,7 +9509,7 @@
                   "type": "null"
                 }
               ],
-              "title": "State"
+              "title": "Status"
             }
           },
           {
@@ -10095,13 +9554,13 @@
           },
           {
             "in": "query",
-            "name": "limit",
+            "name": "page_size",
             "required": false,
             "schema": {
               "default": 100,
               "maximum": 500,
               "minimum": 1,
-              "title": "Limit",
+              "title": "Page Size",
               "type": "integer"
             }
           }
@@ -10134,9 +9593,9 @@
         ]
       }
     },
-    "/admin/features/change-requests/{request_id}/approve": {
+    "/v1/admin/features/change-requests/{request_id}/approve": {
       "post": {
-        "operationId": "approve_feature_change_request_route_admin_features_change_requests__request_id__approve_post",
+        "operationId": "approve_feature_change_request_route_v1_admin_features_change_requests__request_id__approve_post",
         "parameters": [
           {
             "in": "path",
@@ -10192,9 +9651,9 @@
         ]
       }
     },
-    "/admin/features/change-requests/{request_id}/reject": {
+    "/v1/admin/features/change-requests/{request_id}/reject": {
       "post": {
-        "operationId": "reject_feature_change_request_route_admin_features_change_requests__request_id__reject_post",
+        "operationId": "reject_feature_change_request_route_v1_admin_features_change_requests__request_id__reject_post",
         "parameters": [
           {
             "in": "path",
@@ -10247,9 +9706,9 @@
         ]
       }
     },
-    "/admin/features/{feature_id}": {
+    "/v1/admin/features/{feature_id}": {
       "delete": {
-        "operationId": "delete_feature_route_admin_features__feature_id__delete",
+        "operationId": "delete_feature_route_v1_admin_features__feature_id__delete",
         "parameters": [
           {
             "in": "path",
@@ -10305,7 +9764,7 @@
         ]
       },
       "patch": {
-        "operationId": "patch_feature_route_admin_features__feature_id__patch",
+        "operationId": "patch_feature_route_v1_admin_features__feature_id__patch",
         "parameters": [
           {
             "in": "path",
@@ -10361,9 +9820,9 @@
         ]
       }
     },
-    "/admin/features/{feature_id}/deactivate": {
+    "/v1/admin/features/{feature_id}/deactivate": {
       "post": {
-        "operationId": "deactivate_feature_route_admin_features__feature_id__deactivate_post",
+        "operationId": "deactivate_feature_route_v1_admin_features__feature_id__deactivate_post",
         "parameters": [
           {
             "in": "path",
@@ -10422,10 +9881,10 @@
         ]
       }
     },
-    "/admin/issues": {
+    "/v1/admin/issues": {
       "get": {
         "description": "운영 이슈 목록 (keyset cursor).\n\n``q``는 message/feature_id/source_record_key 부분일치, ``bbox``는 연결 feature\n좌표가 범위 안에 드는 이슈만 남긴다(ADR-012 STORED coord 4326 GiST; feature_id\n없는 이슈는 bbox 적용 시 제외).",
-        "operationId": "list_admin_issues_admin_issues_get",
+        "operationId": "list_admin_issues_v1_admin_issues_get",
         "parameters": [
           {
             "in": "query",
@@ -10555,21 +10014,75 @@
             }
           },
           {
-            "description": "연결 feature 좌표 bbox: min_lon,min_lat,max_lon,max_lat (WGS84).",
+            "description": "bbox 최소 경도 (WGS84).",
             "in": "query",
-            "name": "bbox",
+            "name": "min_lon",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "number"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "연결 feature 좌표 bbox: min_lon,min_lat,max_lon,max_lat (WGS84).",
-              "title": "Bbox"
+              "description": "bbox 최소 경도 (WGS84).",
+              "title": "Min Lon"
+            }
+          },
+          {
+            "description": "bbox 최소 위도.",
+            "in": "query",
+            "name": "min_lat",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "bbox 최소 위도.",
+              "title": "Min Lat"
+            }
+          },
+          {
+            "description": "bbox 최대 경도.",
+            "in": "query",
+            "name": "max_lon",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "bbox 최대 경도.",
+              "title": "Max Lon"
+            }
+          },
+          {
+            "description": "bbox 최대 위도.",
+            "in": "query",
+            "name": "max_lat",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "bbox 최대 위도.",
+              "title": "Max Lat"
             }
           },
           {
@@ -10629,17 +10142,17 @@
         ]
       }
     },
-    "/admin/issues/{violation_key}": {
+    "/v1/admin/issues/{issue_id}": {
       "get": {
         "description": "운영 이슈 단건 + 연결 feature 주소/좌표 스냅샷.",
-        "operationId": "get_admin_issue_admin_issues__violation_key__get",
+        "operationId": "get_admin_issue_v1_admin_issues__issue_id__get",
         "parameters": [
           {
             "in": "path",
-            "name": "violation_key",
+            "name": "issue_id",
             "required": true,
             "schema": {
-              "title": "Violation Key",
+              "title": "Issue Id",
               "type": "string"
             }
           }
@@ -10676,14 +10189,14 @@
       },
       "patch": {
         "description": "이슈 상태 전이 + kraddr-geo 재지오코딩/주소 덮어쓰기.",
-        "operationId": "patch_admin_issue_admin_issues__violation_key__patch",
+        "operationId": "patch_admin_issue_v1_admin_issues__issue_id__patch",
         "parameters": [
           {
             "in": "path",
-            "name": "violation_key",
+            "name": "issue_id",
             "required": true,
             "schema": {
-              "title": "Violation Key",
+              "title": "Issue Id",
               "type": "string"
             }
           }
@@ -10735,13 +10248,13 @@
         ]
       }
     },
-    "/admin/offline-uploads": {
+    "/v1/admin/offline-uploads": {
       "get": {
-        "operationId": "list_offline_upload_requests_admin_offline_uploads_get",
+        "operationId": "list_offline_upload_requests_v1_admin_offline_uploads_get",
         "parameters": [
           {
             "in": "query",
-            "name": "state",
+            "name": "status",
             "required": false,
             "schema": {
               "anyOf": [
@@ -10762,7 +10275,7 @@
                   "type": "null"
                 }
               ],
-              "title": "State"
+              "title": "Status"
             }
           },
           {
@@ -10854,12 +10367,12 @@
         ]
       },
       "post": {
-        "operationId": "create_offline_upload_request_admin_offline_uploads_post",
+        "operationId": "create_offline_upload_request_v1_admin_offline_uploads_post",
         "requestBody": {
           "content": {
             "multipart/form-data": {
               "schema": {
-                "$ref": "#/components/schemas/Body_create_offline_upload_request_admin_offline_uploads_post"
+                "$ref": "#/components/schemas/Body_create_offline_upload_request_v1_admin_offline_uploads_post"
               }
             }
           },
@@ -10896,9 +10409,9 @@
         ]
       }
     },
-    "/admin/offline-uploads/{upload_id}": {
+    "/v1/admin/offline-uploads/{upload_id}": {
       "get": {
-        "operationId": "get_offline_upload_request_admin_offline_uploads__upload_id__get",
+        "operationId": "get_offline_upload_request_v1_admin_offline_uploads__upload_id__get",
         "parameters": [
           {
             "in": "path",
@@ -10941,9 +10454,9 @@
         ]
       }
     },
-    "/admin/offline-uploads/{upload_id}/load": {
+    "/v1/admin/offline-uploads/{upload_id}/load": {
       "post": {
-        "operationId": "load_offline_upload_request_admin_offline_uploads__upload_id__load_post",
+        "operationId": "load_offline_upload_request_v1_admin_offline_uploads__upload_id__load_post",
         "parameters": [
           {
             "in": "path",
@@ -10992,9 +10505,9 @@
         ]
       }
     },
-    "/admin/offline-uploads/{upload_id}/preview": {
+    "/v1/admin/offline-uploads/{upload_id}/preview": {
       "get": {
-        "operationId": "preview_offline_upload_request_admin_offline_uploads__upload_id__preview_get",
+        "operationId": "preview_offline_upload_request_v1_admin_offline_uploads__upload_id__preview_get",
         "parameters": [
           {
             "in": "path",
@@ -11055,9 +10568,9 @@
         ]
       }
     },
-    "/admin/offline-uploads/{upload_id}/validate": {
+    "/v1/admin/offline-uploads/{upload_id}/validate": {
       "post": {
-        "operationId": "validate_offline_upload_request_admin_offline_uploads__upload_id__validate_post",
+        "operationId": "validate_offline_upload_request_v1_admin_offline_uploads__upload_id__validate_post",
         "parameters": [
           {
             "in": "path",
@@ -11116,9 +10629,9 @@
         ]
       }
     },
-    "/admin/offline-uploads/{upload_id}/validation": {
+    "/v1/admin/offline-uploads/{upload_id}/validation": {
       "get": {
-        "operationId": "get_offline_upload_validation_request_admin_offline_uploads__upload_id__validation_get",
+        "operationId": "get_offline_upload_validation_request_v1_admin_offline_uploads__upload_id__validation_get",
         "parameters": [
           {
             "in": "path",
@@ -11164,9 +10677,9 @@
         ]
       }
     },
-    "/admin/poi-cache-targets": {
+    "/v1/admin/poi-cache-targets": {
       "get": {
-        "operationId": "list_poi_cache_target_records_admin_poi_cache_targets_get",
+        "operationId": "list_poi_cache_target_records_v1_admin_poi_cache_targets_get",
         "parameters": [
           {
             "in": "query",
@@ -11267,9 +10780,9 @@
         ]
       }
     },
-    "/admin/poi-cache-targets/{external_system}/{target_key}": {
+    "/v1/admin/poi-cache-targets/{external_system}/{target_key}": {
       "delete": {
-        "operationId": "delete_poi_cache_target_record_admin_poi_cache_targets__external_system___target_key__delete",
+        "operationId": "delete_poi_cache_target_record_v1_admin_poi_cache_targets__external_system___target_key__delete",
         "parameters": [
           {
             "in": "path",
@@ -11324,7 +10837,7 @@
         ]
       },
       "get": {
-        "operationId": "get_poi_cache_target_record_admin_poi_cache_targets__external_system___target_key__get",
+        "operationId": "get_poi_cache_target_record_v1_admin_poi_cache_targets__external_system___target_key__get",
         "parameters": [
           {
             "in": "path",
@@ -11386,7 +10899,7 @@
         ]
       },
       "put": {
-        "operationId": "put_poi_cache_target_admin_poi_cache_targets__external_system___target_key__put",
+        "operationId": "put_poi_cache_target_v1_admin_poi_cache_targets__external_system___target_key__put",
         "parameters": [
           {
             "in": "path",
@@ -11448,10 +10961,10 @@
         ]
       }
     },
-    "/admin/restore/{backup_id}": {
+    "/v1/admin/restore/{backup_id}": {
       "post": {
         "description": "Plan or run a staging restore command.",
-        "operationId": "restore_backup_admin_restore__backup_id__post",
+        "operationId": "restore_backup_v1_admin_restore__backup_id__post",
         "parameters": [
           {
             "in": "path",
@@ -11508,10 +11021,10 @@
         ]
       }
     },
-    "/admin/restore/{backup_id}/swap": {
+    "/v1/admin/restore/{backup_id}/swap": {
       "post": {
         "description": "Plan or run the restore hot-swap env switch.",
-        "operationId": "plan_restore_swap_admin_restore__backup_id__swap_post",
+        "operationId": "plan_restore_swap_v1_admin_restore__backup_id__swap_post",
         "parameters": [
           {
             "in": "path",
@@ -11568,10 +11081,67 @@
         ]
       }
     },
-    "/debug/etl/providers": {
+    "/v1/categories": {
+      "get": {
+        "operationId": "list_categories_v1_categories_get",
+        "parameters": [
+          {
+            "description": "현재 DB feature 분포(category별 수)를 포함",
+            "in": "query",
+            "name": "include_counts",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "현재 DB feature 분포(category별 수)를 포함",
+              "title": "Include Counts",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "counts를 status='active' feature만으로 집계",
+            "in": "query",
+            "name": "active_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "counts를 status='active' feature만으로 집계",
+              "title": "Active Only",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CategoriesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "PlaceCategory 정적 카탈로그(144건, 선택적 DB 분포)",
+        "tags": [
+          "categories"
+        ]
+      }
+    },
+    "/v1/debug/etl/providers": {
       "get": {
         "description": "fixture 변환이 등록된 provider/dataset 매트릭스. 추가 변환 함수가 본 lib에 들어오면 `etl_fixtures.FIXTURE_REGISTRY`에 1행 등록 → 본 응답에 자동 반영.",
-        "operationId": "get_providers_debug_etl_providers_get",
+        "operationId": "get_providers_v1_debug_etl_providers_get",
         "responses": {
           "200": {
             "content": {
@@ -11591,9 +11161,9 @@
         ]
       }
     },
-    "/debug/etl/{provider}/datasets": {
+    "/v1/debug/etl/{provider}/datasets": {
       "get": {
-        "operationId": "get_provider_datasets_debug_etl__provider__datasets_get",
+        "operationId": "get_provider_datasets_v1_debug_etl__provider__datasets_get",
         "parameters": [
           {
             "in": "path",
@@ -11634,10 +11204,10 @@
         ]
       }
     },
-    "/debug/etl/{provider}/{dataset}/preview": {
+    "/v1/debug/etl/{provider}/{dataset}/preview": {
       "post": {
         "description": "fixture 또는 live source로 provider raw → DTO 변환을 실행하고 결과를 JSON으로 응답. DB write 없음. fixture 모드는 외부 의존 X. live 모드는 `etl_live.LIVE_LOADER_REGISTRY` 등록된 dataset만 — `?source=fixture` 응답의 `live_supported` 필드로 확인.",
-        "operationId": "post_preview_debug_etl__provider___dataset__preview_post",
+        "operationId": "post_preview_v1_debug_etl__provider___dataset__preview_post",
         "parameters": [
           {
             "in": "path",
@@ -11713,9 +11283,9 @@
         ]
       }
     },
-    "/debug/mois-license/{license_id}": {
+    "/v1/debug/mois-license/{license_id}": {
       "get": {
-        "operationId": "get_mois_license_detail_debug_mois_license__license_id__get",
+        "operationId": "get_mois_license_detail_v1_debug_mois_license__license_id__get",
         "parameters": [
           {
             "in": "path",
@@ -11756,934 +11326,6 @@
         "tags": [
           "debug",
           "mois"
-        ]
-      }
-    },
-    "/health": {
-      "get": {
-        "description": "liveness — 의존 없이 항상 ``status='ok'`` 200. deep readiness는 후속.",
-        "operationId": "get_public_health_health_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PublicHealthResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "public liveness probe",
-        "tags": [
-          "public"
-        ]
-      }
-    },
-    "/ops/api-call-logs": {
-      "get": {
-        "description": "``ops.api_call_log`` 호출 로그 목록.",
-        "operationId": "get_api_call_logs_ops_api_call_logs_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "method",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Method"
-            }
-          },
-          {
-            "in": "query",
-            "name": "min_status",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maximum": 599,
-                  "minimum": 100,
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Min Status"
-            }
-          },
-          {
-            "in": "query",
-            "name": "path",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Path"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_size",
-            "required": false,
-            "schema": {
-              "default": 50,
-              "maximum": 200,
-              "minimum": 1,
-              "title": "Page Size",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "cursor",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Cursor"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiCallLogsResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Api Call Logs",
-        "tags": [
-          "ops"
-        ]
-      }
-    },
-    "/ops/consistency/issues": {
-      "get": {
-        "description": "열린 data integrity issue 목록.",
-        "operationId": "list_integrity_issues_ops_consistency_issues_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "status",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "open",
-                    "acknowledged",
-                    "resolved",
-                    "ignored"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": "open",
-              "title": "Status"
-            }
-          },
-          {
-            "in": "query",
-            "name": "severity",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "info",
-                    "warning",
-                    "error",
-                    "critical"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Severity"
-            }
-          },
-          {
-            "in": "query",
-            "name": "violation_type",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Violation Type"
-            }
-          },
-          {
-            "in": "query",
-            "name": "provider",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Provider"
-            }
-          },
-          {
-            "in": "query",
-            "name": "dataset_key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Dataset Key"
-            }
-          },
-          {
-            "in": "query",
-            "name": "feature_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Feature Id"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_size",
-            "required": false,
-            "schema": {
-              "default": 50,
-              "maximum": 200,
-              "minimum": 1,
-              "title": "Page Size",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "cursor",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Cursor"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OpsIntegrityIssuesListResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Integrity Issues",
-        "tags": [
-          "ops"
-        ]
-      }
-    },
-    "/ops/consistency/reports": {
-      "get": {
-        "description": "최근 consistency report 목록.",
-        "operationId": "list_consistency_reports_ops_consistency_reports_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "severity_max",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "OK",
-                    "WARN",
-                    "ERROR"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Severity Max"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_size",
-            "required": false,
-            "schema": {
-              "default": 50,
-              "maximum": 200,
-              "minimum": 1,
-              "title": "Page Size",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "cursor",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Cursor"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OpsConsistencyReportsListResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Consistency Reports",
-        "tags": [
-          "ops"
-        ]
-      }
-    },
-    "/ops/dagster/nux-seen": {
-      "post": {
-        "description": "embedded Dagster 화면의 로컬 첫 실행 NUX를 접기 위해 Dagster GraphQL setNuxSeen mutation을 호출한다. GET summary의 부수효과를 제거하기 위해 명시 POST endpoint로 분리했다.",
-        "operationId": "mark_dagster_nux_seen_ops_dagster_nux_seen_post",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DagsterNuxSeenResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Dagster NUX seen 처리",
-        "tags": [
-          "ops",
-          "dagster"
-        ]
-      }
-    },
-    "/ops/dagster/runs/{run_id}": {
-      "get": {
-        "description": "Dagster GraphQL runOrError를 조회해 최근 event log와 실패 error payload를 admin UI용 DTO로 반환한다. 조회 전용이며 Dagster run을 재실행하거나 상태를 변경하지 않는다.",
-        "operationId": "get_dagster_run_detail_ops_dagster_runs__run_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "run_id",
-            "required": true,
-            "schema": {
-              "title": "Run Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "event_limit",
-            "required": false,
-            "schema": {
-              "default": 50,
-              "maximum": 200,
-              "minimum": 1,
-              "title": "Event Limit",
-              "type": "integer"
-            }
-          },
-          {
-            "description": "event log cursor(이전 응답의 event_cursor). 긴 run의 뒤쪽(실패) 이벤트로 전진 페이지네이션하기 위함. 미지정이면 처음부터.",
-            "in": "query",
-            "name": "after",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "event log cursor(이전 응답의 event_cursor). 긴 run의 뒤쪽(실패) 이벤트로 전진 페이지네이션하기 위함. 미지정이면 처음부터.",
-              "title": "After"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DagsterRunDetailResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Dagster run 상세",
-        "tags": [
-          "ops",
-          "dagster"
-        ]
-      }
-    },
-    "/ops/dagster/summary": {
-      "get": {
-        "description": "Dagster GraphQL에서 repository, asset, schedule/sensor, recent run 정보를 읽어 admin UI 요약 DTO로 반환한다. Dagster webserver가 내려가도 200 응답(status=unavailable)으로 UI가 장애 상태를 표시할 수 있게 한다. GET은 조회 전용이며 Dagster mutation은 호출하지 않는다.",
-        "operationId": "get_dagster_summary_ops_dagster_summary_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "run_limit",
-            "required": false,
-            "schema": {
-              "default": 10,
-              "maximum": 50,
-              "minimum": 1,
-              "title": "Run Limit",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DagsterSummaryResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Dagster 운영 요약",
-        "tags": [
-          "ops",
-          "dagster"
-        ]
-      }
-    },
-    "/ops/health-deep": {
-      "get": {
-        "description": "DB 연결 + PostGIS 확장 readiness를 점검한다. liveness용 public ``/health``(DB-free 정적 200)와 달리 실제 DB를 친다. 한 컴포넌트라도 error면 전체 ``status=degraded`` + HTTP 503(모니터링이 body로 컴포넌트별 상태를 읽음).",
-        "operationId": "get_ops_health_deep_ops_health_deep_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OpsHealthDeepResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "deep readiness (DB/PostGIS)",
-        "tags": [
-          "ops"
-        ]
-      }
-    },
-    "/ops/import-jobs": {
-      "get": {
-        "description": "``ops.import_jobs`` 작업 목록.",
-        "operationId": "list_import_jobs_ops_import_jobs_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "state",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "queued",
-                    "running",
-                    "done",
-                    "failed",
-                    "cancelled"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "State"
-            }
-          },
-          {
-            "in": "query",
-            "name": "kind",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Kind"
-            }
-          },
-          {
-            "in": "query",
-            "name": "load_batch_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Load Batch Id"
-            }
-          },
-          {
-            "in": "query",
-            "name": "parent_job_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Parent Job Id"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_size",
-            "required": false,
-            "schema": {
-              "default": 50,
-              "maximum": 200,
-              "minimum": 1,
-              "title": "Page Size",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "cursor",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Cursor"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OpsImportJobsListResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Import Jobs",
-        "tags": [
-          "ops"
-        ]
-      }
-    },
-    "/ops/import-jobs/{job_id}": {
-      "get": {
-        "description": "``ops.import_jobs`` 작업 단건.",
-        "operationId": "get_import_job_ops_import_jobs__job_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "job_id",
-            "required": true,
-            "schema": {
-              "title": "Job Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OpsImportJobResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Import Job",
-        "tags": [
-          "ops"
-        ]
-      }
-    },
-    "/ops/metrics": {
-      "get": {
-        "description": "운영 홈/대시보드가 쓰는 DB 기반 summary metric.",
-        "operationId": "get_ops_metrics_ops_metrics_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OpsMetricsResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Get Ops Metrics",
-        "tags": [
-          "ops"
-        ]
-      }
-    },
-    "/ops/system-logs": {
-      "get": {
-        "description": "``ops.system_log`` 운영 로그 목록.",
-        "operationId": "get_system_logs_ops_system_logs_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "level",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "debug",
-                    "info",
-                    "warning",
-                    "error",
-                    "critical"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Level"
-            }
-          },
-          {
-            "in": "query",
-            "name": "source",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Source"
-            }
-          },
-          {
-            "in": "query",
-            "name": "q",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Q"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_size",
-            "required": false,
-            "schema": {
-              "default": 50,
-              "maximum": 200,
-              "minimum": 1,
-              "title": "Page Size",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "cursor",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Cursor"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SystemLogsResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get System Logs",
-        "tags": [
-          "ops"
-        ]
-      }
-    },
-    "/v1/categories": {
-      "get": {
-        "operationId": "list_categories_v1_categories_get",
-        "parameters": [
-          {
-            "description": "현재 DB feature 분포(category별 수)를 포함",
-            "in": "query",
-            "name": "include_counts",
-            "required": false,
-            "schema": {
-              "default": false,
-              "description": "현재 DB feature 분포(category별 수)를 포함",
-              "title": "Include Counts",
-              "type": "boolean"
-            }
-          },
-          {
-            "description": "counts를 status='active' feature만으로 집계",
-            "in": "query",
-            "name": "active_only",
-            "required": false,
-            "schema": {
-              "default": false,
-              "description": "counts를 status='active' feature만으로 집계",
-              "title": "Active Only",
-              "type": "boolean"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CategoriesResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "PlaceCategory 정적 카탈로그(144건, 선택적 DB 분포)",
-        "tags": [
-          "categories"
         ]
       }
     },
@@ -12779,17 +11421,33 @@
             }
           },
           {
-            "description": "최대 반환 수.",
+            "description": "페이지 크기.",
             "in": "query",
-            "name": "limit",
+            "name": "page_size",
             "required": false,
             "schema": {
-              "default": 1000,
-              "description": "최대 반환 수.",
-              "maximum": 5000,
+              "default": 100,
+              "description": "페이지 크기.",
+              "maximum": 500,
               "minimum": 1,
-              "title": "Limit",
+              "title": "Page Size",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
             }
           }
         ],
@@ -12993,13 +11651,13 @@
           },
           {
             "in": "query",
-            "name": "limit",
+            "name": "max_items",
             "required": false,
             "schema": {
               "default": 1000,
-              "maximum": 5000,
+              "maximum": 2000,
               "minimum": 1,
-              "title": "Limit",
+              "title": "Max Items",
               "type": "integer"
             }
           }
@@ -13587,6 +12245,16 @@
               ],
               "title": "Cursor"
             }
+          },
+          {
+            "in": "query",
+            "name": "include_total",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Total",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -13713,6 +12381,855 @@
         "summary": "feature weather card (forecast_style별 최신값 + freshness)",
         "tags": [
           "features"
+        ]
+      }
+    },
+    "/v1/ops/api-call-logs": {
+      "get": {
+        "description": "``ops.api_call_log`` 호출 로그 목록.",
+        "operationId": "get_api_call_logs_v1_ops_api_call_logs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "method",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Method"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 599,
+                  "minimum": 100,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "path",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Path"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiCallLogsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Api Call Logs",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
+    "/v1/ops/consistency/issues": {
+      "get": {
+        "description": "열린 data integrity issue 목록.",
+        "operationId": "list_integrity_issues_v1_ops_consistency_issues_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "open",
+                    "acknowledged",
+                    "resolved",
+                    "ignored"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": "open",
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "severity",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "info",
+                    "warning",
+                    "error",
+                    "critical"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Severity"
+            }
+          },
+          {
+            "in": "query",
+            "name": "violation_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Violation Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Provider"
+            }
+          },
+          {
+            "in": "query",
+            "name": "dataset_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dataset Key"
+            }
+          },
+          {
+            "in": "query",
+            "name": "feature_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Feature Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpsIntegrityIssuesListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Integrity Issues",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
+    "/v1/ops/consistency/reports": {
+      "get": {
+        "description": "최근 consistency report 목록.",
+        "operationId": "list_consistency_reports_v1_ops_consistency_reports_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "severity_max",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "OK",
+                    "WARN",
+                    "ERROR"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Severity Max"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpsConsistencyReportsListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Consistency Reports",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
+    "/v1/ops/dagster/nux-seen": {
+      "post": {
+        "description": "embedded Dagster 화면의 로컬 첫 실행 NUX를 접기 위해 Dagster GraphQL setNuxSeen mutation을 호출한다. GET summary의 부수효과를 제거하기 위해 명시 POST endpoint로 분리했다.",
+        "operationId": "mark_dagster_nux_seen_v1_ops_dagster_nux_seen_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DagsterNuxSeenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Dagster NUX seen 처리",
+        "tags": [
+          "ops",
+          "dagster"
+        ]
+      }
+    },
+    "/v1/ops/dagster/runs/{run_id}": {
+      "get": {
+        "description": "Dagster GraphQL runOrError를 조회해 최근 event log와 실패 error payload를 admin UI용 DTO로 반환한다. 조회 전용이며 Dagster run을 재실행하거나 상태를 변경하지 않는다.",
+        "operationId": "get_dagster_run_detail_v1_ops_dagster_runs__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "event log cursor(이전 응답의 event_cursor). 긴 run의 뒤쪽(실패) 이벤트로 전진 페이지네이션하기 위함. 미지정이면 처음부터.",
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "event log cursor(이전 응답의 event_cursor). 긴 run의 뒤쪽(실패) 이벤트로 전진 페이지네이션하기 위함. 미지정이면 처음부터.",
+              "title": "After"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DagsterRunDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Dagster run 상세",
+        "tags": [
+          "ops",
+          "dagster"
+        ]
+      }
+    },
+    "/v1/ops/dagster/summary": {
+      "get": {
+        "description": "Dagster GraphQL에서 repository, asset, schedule/sensor, recent run 정보를 읽어 admin UI 요약 DTO로 반환한다. Dagster webserver가 내려가도 200 응답(status=unavailable)으로 UI가 장애 상태를 표시할 수 있게 한다. GET은 조회 전용이며 Dagster mutation은 호출하지 않는다.",
+        "operationId": "get_dagster_summary_v1_ops_dagster_summary_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DagsterSummaryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Dagster 운영 요약",
+        "tags": [
+          "ops",
+          "dagster"
+        ]
+      }
+    },
+    "/v1/ops/health-deep": {
+      "get": {
+        "description": "DB 연결 + PostGIS 확장 readiness를 점검한다. liveness용 public ``/health``(DB-free 정적 200)와 달리 실제 DB를 친다. 한 컴포넌트라도 error면 전체 ``status=degraded`` + HTTP 503(모니터링이 body로 컴포넌트별 상태를 읽음).",
+        "operationId": "get_ops_health_deep_v1_ops_health_deep_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpsHealthDeepResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "deep readiness (DB/PostGIS)",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
+    "/v1/ops/import-jobs": {
+      "get": {
+        "description": "``ops.import_jobs`` 작업 목록.",
+        "operationId": "list_import_jobs_v1_ops_import_jobs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "queued",
+                    "running",
+                    "done",
+                    "failed",
+                    "cancelled"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "load_batch_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Load Batch Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "parent_job_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Parent Job Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpsImportJobsListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Import Jobs",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
+    "/v1/ops/import-jobs/{job_id}": {
+      "get": {
+        "description": "``ops.import_jobs`` 작업 단건.",
+        "operationId": "get_import_job_v1_ops_import_jobs__job_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpsImportJobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Import Job",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
+    "/v1/ops/metrics": {
+      "get": {
+        "description": "운영 홈/대시보드가 쓰는 DB 기반 summary metric.",
+        "operationId": "get_ops_metrics_v1_ops_metrics_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpsMetricsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Ops Metrics",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
+    "/v1/ops/system-logs": {
+      "get": {
+        "description": "``ops.system_log`` 운영 로그 목록.",
+        "operationId": "get_system_logs_v1_ops_system_logs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "level",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "debug",
+                    "info",
+                    "warning",
+                    "error",
+                    "critical"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Level"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemLogsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get System Logs",
+        "tags": [
+          "ops"
         ]
       }
     },

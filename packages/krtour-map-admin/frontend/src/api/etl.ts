@@ -1,5 +1,5 @@
 /**
- * ETL preview API hooks — `/debug/etl/*` (PR#44).
+ * ETL preview API hooks — `/v1/debug/etl/*` (PR#44).
  *
  * 변환 결과(FeatureBundle / WeatherValue / PriceValue dict)를 generic하게
  * 다룬다 — TypeScript에서는 `unknown` 또는 dict로 받고 UI에서 JSON 그대로
@@ -21,7 +21,7 @@ export type EtlPreviewResponse = EtlSchemas["EtlPreviewResponse"];
 export function useProviders() {
   return useQuery<ProvidersResponse, Error>({
     queryKey: ["debug", "etl", "providers"],
-    queryFn: () => getJson<ProvidersResponse>("/debug/etl/providers"),
+    queryFn: () => getJson<ProvidersResponse>("/v1/debug/etl/providers"),
     staleTime: 60_000,
   });
 }
@@ -34,7 +34,7 @@ export function useEtlPreviewMutation() {
   >({
     mutationFn: ({ provider, dataset, source = "fixture" }) => {
       const path =
-        `/debug/etl/${encodeURIComponent(provider)}/` +
+        `/v1/debug/etl/${encodeURIComponent(provider)}/` +
         `${encodeURIComponent(dataset)}/preview?source=${source}`;
       return postJson<EtlPreviewResponse>(path);
     },

@@ -19,11 +19,11 @@
   - [ ] T-210c — TripMate `apps/etl` 레거시 Dagster 이관/삭제 **(TripMate repo, 외부)**
   - [ ] T-210d — TripMate httpx OpenAPI client 신규 **(TripMate repo, 외부)**
 - **Phase 6.8 — REST API 정합성 심화 (2026-06-09, `T-216`, ADR-048)**
-  - [ ] T-216a — `/v1` clean cut(admin/ops/debug 포함).
-  - [ ] T-216b — pagination 단일화.
-  - [ ] T-216c — envelope payload/meta 분리.
-  - [ ] T-216d — parameter/error/좌표 정합성.
-  - [ ] T-216e — 명명 통일(경로+응답 본문, 본질 기준).
+  - [x] T-216a — `/v1` clean cut(admin/ops/debug 포함).
+  - [x] T-216b — pagination 단일화.
+  - [x] T-216c — envelope payload/meta 분리.
+  - [x] T-216d — parameter/error/좌표 정합성.
+  - [x] T-216e — 명명 통일(경로+응답 본문, 본질 기준).
   - [ ] T-216f — 코드/DB 명명 전파(surrogate만).
   - [ ] T-216g — 단일 정본 수렴 + 버전 거버넌스.
 - **Phase 7 — ADR-045 전체점검/튜닝 (ADR-045 잔여 task 완료 후 시작)**
@@ -123,7 +123,7 @@ enrichment(모듈 있음, 미wiring)**. dedup 인프라(scoring/queue/admin rout
   확인 + `tsc --noEmit` + `next build` 13 페이지(/features maplibre 포함) green. 기능 동일이라
   e2e 거동 불변(CI type-check+build 게이트로 검증).
 - **T-RV-51 dedup 수동처리 UI 완성 + 기본 scope**(point 4 foundation, 세분화):
-  - [x] **T-RV-51a (frontend) merge master 선택 UI**(2026-06-07): `dedup-review`에 merge 액션 추가 —
+  - [x] **T-RV-51a (frontend) merge master 선택 UI**(2026-06-07): `dedup-reviews`에 merge 액션 추가 —
     inline master 선택 패널(`A: <name>·좌표✓` / `B: <name>·좌표✓` / **자동 선정** / 취소). 자동 선정은
     `master_feature_id` 미전달 → backend `select_master`(좌표→updated_at→provider 우선순위). 수동
     선택 시 feature A/B의 `feature_id` 전달. API/types 변경 없음(계약 기구현). type-check/eslint/
@@ -151,7 +151,7 @@ enrichment(모듈 있음, 미wiring)**. dedup 인프라(scoring/queue/admin rout
       `feature_event_visitkorea_enrichment` asset(EnrichmentLoadResult 반환) + resource + definitions.
       dagster 66 + unit 932 + coverage 80.68% green. **overview/homepage N+1 detail 보강은 후속**
       (현재 list 기반 enrichment = 이미지+content_id+event date; matched feature에 SourceRecord/Link).
-  - **T-RV-52c (review 큐+UI)** 축제 datagokr↔visitkorea 매칭/enrichment를 dedup-review와 **같은
+  - **T-RV-52c (review 큐+UI)** 축제 datagokr↔visitkorea 매칭/enrichment를 dedup-reviews와 **같은
     방식**으로 수동 검토. 3 PR로 세분:
     - [x] **52c-1 (backend domain/infra)**(2026-06-08) 이름 유사도 점수 밴드 분류 +
       `ops.enrichment_review_queue` 영속화. `ScoringFestivalMatcher.best_match`(임계 비의존) +
@@ -162,14 +162,14 @@ enrichment(모듈 있음, 미wiring)**. dedup 인프라(scoring/queue/admin rout
       client `refresh_festival_enrichment_reviews`/`list_pending_enrichment_reviews`/
       `resolve_enrichment_review`. 게이트: ruff/mypy(map 84/dagster 13/admin 25)/lint-imports/unit+lint
       959(coverage 81%)/integration(enrichment_review_repo 7 + client 6) green.
-    - [x] **52c-2 (admin API)**(2026-06-08) `GET /admin/enrichment-review`(pending list, status/
-      provider/score/q 필터 + name_score cursor) + `PATCH /admin/enrichment-review/{review_key}`
+    - [x] **52c-2 (admin API)**(2026-06-08) `GET /admin/enrichment-reviews`(pending list, status/
+      provider/score/q 필터 + name_score cursor) + `PATCH /admin/enrichment-reviews/{review_id}`
       (accept→enrichment 적재/reject/ignore, 이미 검토 시 409). `list_enrichment_reviews`
       (admin_feature_repo, 1차 feature join) + `enrichment_review` router(app/routers 등록) +
       Pydantic 모델 + OpenAPI 재생성(openapi.json만, /admin은 user profile 제외). 게이트:
       ruff/mypy(map 84/dagster 13/admin 26)/lint-imports/unit+lint 959(coverage 81%)/admin 220/
       dagster 75 + drift-check + integration(list_enrichment_reviews) green.
-    - [x] **52c-3 (frontend)**(2026-06-08) dedup-review와 유사한 `admin/enrichment-review` 페이지
+    - [x] **52c-3 (frontend)**(2026-06-08) dedup-reviews와 유사한 `admin/enrichment-reviews` 페이지
       (pending list + accept/reject/ignore; 병합 없으니 master 선택 UI 없음, 1차/2차 양측 표시) +
       `src/api/enrichment.ts` 훅(`useEnrichmentReviews`/`useEnrichmentDecisionMutation`) + nav 항목
       (admin-shell) + e2e smoke(admin-ops.spec). 게이트: gen:types:check(drift 0)/tsc/next build
@@ -201,7 +201,7 @@ enrichment(모듈 있음, 미wiring)**. dedup 인프라(scoring/queue/admin rout
     `etl_fixtures.FIXTURE_REGISTRY`에 `krforest_recreation_forests`/`krforest_arboretums` 2 entry
     (fixture dataclass + builder + `*_to_bundles` convert) 추가 → `/debug/etl/providers`·
     `/debug/etl/{provider}/{dataset}/preview`에 자동 노출(dry-run place FeatureBundle). admin mypy
-    25 files + etl router 25 passed + preview 실행(count 2/1, kind place) 확인. dedup은 dedup-review
+    25 files + etl router 25 passed + preview 실행(count 2/1, kind place) 확인. dedup은 dedup-reviews
     UI(T-RV-51a)에 자동 노출(53c scope). **NOTE: ETL preview 레지스트리는 Sprint-2 provider만 있었고
     knps/krheritage/mois도 미등록 — 후속 정리 후보.**
 - [x] **T-RV-54 박물관/미술관(standard_data) feature-load**(points 1·3·4) — **완료(2026-06-07, sub-task a~d 전부 머지; 실데이터 fetch 검증은 T-212e)**. provider `datagokr`
@@ -299,7 +299,7 @@ lint-imports/pytest/coverage, frontend type-check/e2e). 실데이터 검증은 T
 - ~~**T-RV-10** keyset cursor float/decimal 정밀도·정렬축 불일치(행 skip/dup).~~
   ✅ `/features/search`는 DB score text cursor와 `(-score, feature_id)` row-tuple
   비교로 `ORDER BY score DESC, feature_id ASC`와 같은 축을 사용한다.
-  `/admin/dedup-review`는 `NUMERIC` score를 string cursor로 운반하고 predicate와
+  `/admin/dedup-reviews`는 `NUMERIC` score를 string cursor로 운반하고 predicate와
   `ORDER BY` 모두 `review_key::text`를 사용한다. 동점 다중 페이지 walk
   integration test를 추가했다.
 - ~~**T-RV-27** admin API `0.0.0.0` 노출(ADR-005/.env 모순)~~ ✅
@@ -342,7 +342,7 @@ lint-imports/pytest/coverage, frontend type-check/e2e). 실데이터 검증은 T
   다시 `loading`으로 돌아가는 중복 Dagster launch 경로를 차단한다.
 - ~~**T-RV-18** router substring 기반 status 매핑.~~
   ✅ `MergeNotFoundError`/`MergeConflictError` 하위 타입을 추가해
-  `/admin/dedup-review` merge 404/409를 문구 substring이 아니라 타입으로 매핑한다.
+  `/admin/dedup-reviews` merge 404/409를 문구 substring이 아니라 타입으로 매핑한다.
   feature update request 라우터는 `SigunguResolverUnavailable`으로 kraddr-geo 설정
   누락을 503으로 매핑하고, 미분류 enqueue/merge 예외의 내부 메시지를 500 응답에
   노출하지 않는다.
@@ -647,26 +647,26 @@ T-214/T-215(#317)의 `/v1` 1차 정리 위에 ADR-048 delta를 얹는다. 정본
 무-호환)**: 호환성 미고려 — `/v1` clean cut(구 경로/alias 없음), 외부 read 포함 명명 전면
 적용, dual-support/deprecation 창 없음. 소비자(TripMate)는 안정 spec commit을 일괄 추종.
 
-- [ ] **T-216a — `/v1` clean cut(admin/ops/debug 포함).** 사용자 지시(admin도 versioning).
+- [x] **T-216a — `/v1` clean cut(admin/ops/debug 포함).** 사용자 지시(admin도 versioning).
   `/admin`·`/ops`·`/debug`(+외부)를 `/v1`로 mount하고 **구 unprefixed 경로는 제거**(호환 alias
   없음). liveness `/health`·`/version`만 제외. `/debug/health`·`/debug/version` 제거.
   OpenAPI 두 profile + frontend API base + e2e 일괄 갱신. mount 1곳 전환(ADR-046).
-- [ ] **T-216b — pagination 단일화.** page-size 파라미터를 `page_size`로 통일
+- [x] **T-216b — pagination 단일화.** page-size 파라미터를 `page_size`로 통일
   (`limit`/`run_limit`/`event_limit` 폐기), 2-티어 캡(기본 50/200, 지도 100/500),
   `/features` 평면 cursor화(`limit le=5000` 폐기), `in-bounds` `max_items` 5000→2000.
-- [ ] **T-216c — envelope payload/meta 분리.** 라우터별 `*Meta` 중복 → 공유 `Meta`. `data`는
+- [x] **T-216c — envelope payload/meta 분리.** 라우터별 `*Meta` 중복 → 공유 `Meta`. `data`는
   payload만, 페이지네이션은 **`meta.page{page_size,next_cursor,total}`**(`total` opt-in
   `?include_total=true`). `data.next_cursor`/`data.total_count`/파생 `count` 폐기. in-bounds의
   `cluster_unit`은 `meta.cluster.cluster_unit`, batch id-keyed map은 `data.found`로 둔다.
   **envelope 불변식(ADR-048 #12)**: `meta`·`request_id` 모든 응답에 present,
   `meta.page.next_cursor` 항상 키 존재(소진 시 `null`, omit 금지) — 계약/라우터 테스트로 lock.
-- [ ] **T-216d — parameter/error/좌표 정합성.** bbox 분리 float 통일(`search` CSV 제거),
+- [x] **T-216d — parameter/error/좌표 정합성.** bbox 분리 float 통일(`search` CSV 제거),
   상태 필드 `state`→`status`, issue/violation noun을 `issue_*`로. 에러 RFC7807
   `application/problem+json`(`code`/`request_id`/`errors[]` top-level 확장, `{error:{}}` 제거).
   **좌표명 cross-repo 정렬 = `lon`/`lat`**(ADR-048 #10; TripMate DEC-07 하향 정렬). **`feature_id`
   값 불변식**(ADR-048 #11)을 외부 계약/테스트에 명시.
-- [ ] **T-216e — 명명 통일(경로+응답 본문, 본질 기준).** `dedup-review`→`dedup-reviews`,
-  `enrichment-review`→`enrichment-reviews`, `{review_key}`→`{review_id}`,
+- [x] **T-216e — 명명 통일(경로+응답 본문, 본질 기준).** `dedup-reviews`/`enrichment-reviews`
+  복수형을 정본으로 유지하고, `{review_key}`→`{review_id}`,
   `/admin/issues/{violation_key}`→`{issue_id}`. 응답 surrogate `*_key`→`*_id`. action
   sub-resource 규약(ADR-048 #8) 명시. **유지(자연/복합키)**: `cluster_key`(행정코드 자연키 —
   개명 안 함, #316 재리뷰 C), `target_key`, provider 어휘, `feature_id`.

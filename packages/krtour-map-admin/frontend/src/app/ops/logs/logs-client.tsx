@@ -25,7 +25,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { formatCount, formatDateTime, shortId } from "@/lib/format";
+import { formatDateTime, shortId } from "@/lib/format";
 
 const LEVELS: Array<SystemLogLevel | "all"> = [
   "critical",
@@ -129,10 +129,10 @@ export function LogsClient() {
               ))}
             </NativeSelect>
             <Badge variant="outline">
-              system {formatCount(systemLogs.data?.meta.count)}
+              system {systemItems.length}
             </Badge>
             <Badge variant="outline">
-              api {formatCount(apiLogs.data?.meta.count)}
+              api {apiItems.length}
             </Badge>
           </div>
         </div>
@@ -191,11 +191,11 @@ export function LogsClient() {
                   첫 페이지
                 </Button>
                 <Button
-                  disabled={!systemLogs.data?.data.next_cursor}
+                  disabled={!systemLogs.data?.meta.page?.next_cursor}
                   type="button"
                   variant="outline"
                   onClick={() =>
-                    setSystemCursor(systemLogs.data?.data.next_cursor ?? null)
+                    setSystemCursor(systemLogs.data?.meta.page?.next_cursor ?? null)
                   }
                 >
                   다음
@@ -216,7 +216,7 @@ export function LogsClient() {
                   </TableHeader>
                   <TableBody>
                     {systemItems.map((item) => (
-                      <TableRow key={item.system_log_key}>
+                      <TableRow key={item.log_id}>
                         <TableCell className="text-muted-foreground">
                           {formatDateTime(item.created_at)}
                         </TableCell>
@@ -288,11 +288,11 @@ export function LogsClient() {
                   첫 페이지
                 </Button>
                 <Button
-                  disabled={!apiLogs.data?.data.next_cursor}
+                  disabled={!apiLogs.data?.meta.page?.next_cursor}
                   type="button"
                   variant="outline"
                   onClick={() =>
-                    setApiCursor(apiLogs.data?.data.next_cursor ?? null)
+                    setApiCursor(apiLogs.data?.meta.page?.next_cursor ?? null)
                   }
                 >
                   다음
@@ -314,7 +314,7 @@ export function LogsClient() {
                   </TableHeader>
                   <TableBody>
                     {apiItems.map((item) => (
-                      <TableRow key={item.api_call_log_key}>
+                      <TableRow key={item.log_id}>
                         <TableCell className="text-muted-foreground">
                           {formatDateTime(item.created_at)}
                         </TableCell>

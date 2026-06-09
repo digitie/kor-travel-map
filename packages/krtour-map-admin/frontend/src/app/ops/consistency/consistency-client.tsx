@@ -104,7 +104,9 @@ export function ConsistencyClient() {
                   최근 consistency batch
                 </div>
               </div>
-              <Badge variant="outline">{reports.data?.meta.count ?? 0}</Badge>
+              <Badge variant="outline">
+                {reports.data?.data.items.length ?? 0}
+              </Badge>
             </div>
             {reports.isLoading ? <Skeleton className="m-4 h-72" /> : null}
             <div className="overflow-auto">
@@ -175,9 +177,9 @@ export function ConsistencyClient() {
                 </TableHeader>
                 <TableBody>
                   {(issues.data?.data.items ?? []).map((issue) => (
-                    <TableRow key={issue.violation_key}>
+                    <TableRow key={issue.issue_id}>
                       <TableCell className="font-mono text-xs">
-                        {shortId(issue.violation_key)}
+                        {shortId(issue.issue_id)}
                       </TableCell>
                       <TableCell>
                         <StatusBadge status={issue.severity} />

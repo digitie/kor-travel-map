@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from krtour.map_admin.auth import require_admin_destructive_enabled
 from krtour.map_admin.db import get_session
+from krtour.map_admin.response import Meta, make_meta
 
 __all__ = [
     "router",
@@ -182,6 +183,7 @@ class PoiCacheTargetMeta(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     duration_ms: int
+    request_id: str = ""
 
 
 class PoiCacheTargetResponse(BaseModel):
@@ -199,16 +201,6 @@ class PoiCacheTargetListData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     items: list[PoiCacheTargetRecord]
-    next_cursor: str | None = None
-
-
-class PoiCacheTargetListMeta(BaseModel):
-    """POI/cache target 목록 meta."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    count: int
-    duration_ms: int
 
 
 class PoiCacheTargetListResponse(BaseModel):
@@ -217,7 +209,7 @@ class PoiCacheTargetListResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: PoiCacheTargetListData
-    meta: PoiCacheTargetListMeta
+    meta: Meta
 
 
 def _provider_overrides_payload(
@@ -255,9 +247,11 @@ def _record_from_target(target: PoiCacheTarget) -> PoiCacheTargetRecord:
         deleted_at=target.deleted_at,
         created_at=target.created_at,
         updated_at=target.updated_at,
-        status_url=(f"/admin/poi-cache-targets/{target.external_system}/{target.target_key}"),
+        status_url=(
+            f"/v1/admin/poi-cache-targets/{target.external_system}/{target.target_key}"
+        ),
         nearby_url=(
-            "/features/nearby/by-target?"
+            "/v1/features/nearby/by-target?"
             f"external_system={target.external_system}&target_key={target.target_key}"
         ),
     )
@@ -347,11 +341,11 @@ async def list_poi_cache_target_records(
     return PoiCacheTargetListResponse(
         data=PoiCacheTargetListData(
             items=[_record_from_target(target) for target in page.items],
-            next_cursor=page.next_cursor,
         ),
-        meta=PoiCacheTargetListMeta(
-            count=len(page.items),
-            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
+        meta=make_meta(
+            started_at=started_at,
+            page_size=page_size,
+            next_cursor=page.next_cursor,
         ),
     )
 

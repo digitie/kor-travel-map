@@ -1,5 +1,5 @@
 /**
- * `/admin/feature-update-requests/*` 업데이트 요청 queue hooks.
+ * `/v1/admin/feature-update-requests/*` 업데이트 요청 queue hooks.
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -9,13 +9,13 @@ import type { components, paths } from "./types";
 
 type FeatureUpdateSchemas = components["schemas"];
 type FeatureUpdateListQuery = NonNullable<
-  paths["/admin/feature-update-requests"]["get"]["parameters"]["query"]
+  paths["/v1/admin/feature-update-requests"]["get"]["parameters"]["query"]
 >;
 type GeneratedFeatureUpdateRequestCreateRequest =
-  paths["/admin/feature-update-requests"]["post"]["requestBody"]["content"]["application/json"];
+  paths["/v1/admin/feature-update-requests"]["post"]["requestBody"]["content"]["application/json"];
 
-export type FeatureUpdateState = Exclude<
-  FeatureUpdateListQuery["state"],
+export type FeatureUpdateStatus = Exclude<
+  FeatureUpdateListQuery["status"],
   null | undefined
 >;
 export type FeatureUpdateRunMode =
@@ -59,8 +59,8 @@ function fetchFeatureUpdateRequests(
   params: FeatureUpdateRequestListParams = {},
 ): Promise<FeatureUpdateRequestListResponse> {
   return getJson<FeatureUpdateRequestListResponse>(
-    pathWithQuery("/admin/feature-update-requests", {
-      state: params.state,
+    pathWithQuery("/v1/admin/feature-update-requests", {
+      status: params.status,
       scope_type: params.scope_type,
       provider: params.provider,
       dataset_key: params.dataset_key,
@@ -76,7 +76,7 @@ function fetchFeatureUpdateRequest(
   requestId: string,
 ): Promise<FeatureUpdateRequestDetailResponse> {
   return getJson<FeatureUpdateRequestDetailResponse>(
-    `/admin/feature-update-requests/${encodeURIComponent(requestId)}`,
+    `/v1/admin/feature-update-requests/${encodeURIComponent(requestId)}`,
   );
 }
 
@@ -84,7 +84,7 @@ function createFeatureUpdateRequest(
   body: FeatureUpdateRequestCreateRequest,
 ): Promise<FeatureUpdateRequestCreateResponse> {
   return postJson<FeatureUpdateRequestCreateResponse>(
-    "/admin/feature-update-requests",
+    "/v1/admin/feature-update-requests",
     body,
   );
 }
@@ -94,7 +94,7 @@ function cancelFeatureUpdateRequest(
   body: FeatureUpdateRequestCancelRequest = {},
 ): Promise<FeatureUpdateRequestCreateResponse> {
   return postJson<FeatureUpdateRequestCreateResponse>(
-    `/admin/feature-update-requests/${encodeURIComponent(requestId)}/cancel`,
+    `/v1/admin/feature-update-requests/${encodeURIComponent(requestId)}/cancel`,
     body,
   );
 }
@@ -104,7 +104,7 @@ function runFeatureUpdateRequestNow(
   body: FeatureUpdateRequestRunNowRequest = {},
 ): Promise<FeatureUpdateRequestCreateResponse> {
   return postJson<FeatureUpdateRequestCreateResponse>(
-    `/admin/feature-update-requests/${encodeURIComponent(requestId)}/run-now`,
+    `/v1/admin/feature-update-requests/${encodeURIComponent(requestId)}/run-now`,
     body,
   );
 }
@@ -117,7 +117,7 @@ export function useFeatureUpdateRequests(
     queryFn: () => fetchFeatureUpdateRequests(params),
     refetchInterval: (query) => {
       const hasActiveRequest = query.state.data?.data.items.some((item) =>
-        ["queued", "running"].includes(item.state),
+        ["queued", "running"].includes(item.status),
       );
       return hasActiveRequest ? 2_000 : false;
     },
@@ -131,8 +131,8 @@ export function useFeatureUpdateRequest(requestId: string | null) {
     queryFn: () => fetchFeatureUpdateRequest(requestId as string),
     enabled: requestId !== null && requestId.length > 0,
     refetchInterval: (query) => {
-      const state = query.state.data?.data.state;
-      return state === "queued" || state === "running" ? 2_000 : false;
+      const status = query.state.data?.data.status;
+      return status === "queued" || status === "running" ? 2_000 : false;
     },
     staleTime: 2_000,
   });

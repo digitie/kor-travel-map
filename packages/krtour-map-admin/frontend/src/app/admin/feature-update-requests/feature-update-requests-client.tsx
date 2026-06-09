@@ -4,7 +4,7 @@ import { PlayIcon, RefreshCwIcon, XIcon } from "lucide-react";
 import { useState } from "react";
 
 import {
-  type FeatureUpdateState,
+  type FeatureUpdateStatus,
   useCancelFeatureUpdateRequestMutation,
   useCreateFeatureUpdateRequestMutation,
   useFeatureUpdateRequests,
@@ -28,7 +28,7 @@ import {
 } from "@/components/ui/table";
 import { formatDateTime, shortId } from "@/lib/format";
 
-const states: Array<FeatureUpdateState | "all"> = [
+const statuses: Array<FeatureUpdateStatus | "all"> = [
   "queued",
   "running",
   "done",
@@ -45,7 +45,7 @@ function commaSeparatedValues(value: string): string[] {
 }
 
 export function FeatureUpdateRequestsClient() {
-  const [state, setState] = useState<FeatureUpdateState | "all">("queued");
+  const [status, setStatus] = useState<FeatureUpdateStatus | "all">("queued");
   const [lon, setLon] = useState("126.9780");
   const [lat, setLat] = useState("37.5665");
   const [radiusKm, setRadiusKm] = useState("5");
@@ -55,7 +55,7 @@ export function FeatureUpdateRequestsClient() {
   const [runMode, setRunMode] = useState<"queued" | "now">("queued");
 
   const requests = useFeatureUpdateRequests({
-    state: state === "all" ? undefined : state,
+    status: status === "all" ? undefined : status,
     page_size: 100,
   });
   const createRequest = useCreateFeatureUpdateRequestMutation();
@@ -155,7 +155,7 @@ export function FeatureUpdateRequestsClient() {
                 <AlertTitle>요청 처리 완료</AlertTitle>
                 <AlertDescription>
                   {createRequest.data.data.request_id ?? "dry-run"} ·{" "}
-                  {createRequest.data.data.state}
+                  {createRequest.data.data.status}
                 </AlertDescription>
               </Alert>
             ) : null}
@@ -181,19 +181,21 @@ export function FeatureUpdateRequestsClient() {
           )}
           <div className="flex flex-wrap items-center gap-2">
             <NativeSelect
-              aria-label="request state"
-              value={state}
+              aria-label="request status"
+              value={status}
               onChange={(event) =>
-                setState(event.target.value as FeatureUpdateState | "all")
+                setStatus(event.target.value as FeatureUpdateStatus | "all")
               }
             >
-              {states.map((item) => (
+              {statuses.map((item) => (
                 <NativeSelectOption key={item} value={item}>
                   {item}
                 </NativeSelectOption>
               ))}
             </NativeSelect>
-            <Badge variant="outline">{requests.data?.meta.count ?? 0} rows</Badge>
+            <Badge variant="outline">
+              {requests.data?.data.items.length ?? 0} rows
+            </Badge>
           </div>
           {requests.isLoading ? <Skeleton className="h-96" /> : null}
           <div className="overflow-auto rounded-lg border bg-background">
@@ -202,7 +204,7 @@ export function FeatureUpdateRequestsClient() {
                 <TableRow>
                   <TableHead>request</TableHead>
                   <TableHead>scope</TableHead>
-                  <TableHead>state</TableHead>
+                  <TableHead>status</TableHead>
                   <TableHead>mode</TableHead>
                   <TableHead>providers</TableHead>
                   <TableHead>job</TableHead>
@@ -218,7 +220,7 @@ export function FeatureUpdateRequestsClient() {
                     </TableCell>
                     <TableCell>{request.scope_type}</TableCell>
                     <TableCell>
-                      <StatusBadge status={request.state} />
+                      <StatusBadge status={request.status} />
                     </TableCell>
                     <TableCell>{request.run_mode}</TableCell>
                     <TableCell className="max-w-56 truncate">
@@ -233,7 +235,7 @@ export function FeatureUpdateRequestsClient() {
                     <TableCell>
                       {request.request_id ? (
                         <div className="flex flex-wrap gap-1">
-                          {["queued", "running"].includes(request.state) ? (
+                          {["queued", "running"].includes(request.status) ? (
                             <Button
                               disabled={cancelRequest.isPending}
                               size="sm"
@@ -250,7 +252,7 @@ export function FeatureUpdateRequestsClient() {
                               cancel
                             </Button>
                           ) : null}
-                          {request.state !== "running" ? (
+                          {request.status !== "running" ? (
                             <Button
                               disabled={runNow.isPending}
                               size="sm"

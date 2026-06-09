@@ -84,7 +84,7 @@ export function PoiCacheTargetsClient() {
   };
 
   const goToNextPage = () => {
-    const nextCursor = targets.data?.data.next_cursor;
+    const nextCursor = targets.data?.meta.page?.next_cursor;
     if (nextCursor) {
       setCursorStack((value) => [...value, nextCursor]);
     }
@@ -188,7 +188,8 @@ export function PoiCacheTargetsClient() {
               <div>
                 <div className="font-medium">Targets</div>
                 <div className="text-sm text-muted-foreground">
-                  page {cursorStack.length + 1} · {targets.data?.meta.count ?? 0} rows
+                  page {cursorStack.length + 1} ·{" "}
+                  {targets.data?.data.items.length ?? 0} rows
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -203,7 +204,7 @@ export function PoiCacheTargetsClient() {
                   이전
                 </Button>
                 <Button
-                  disabled={!targets.data?.data.next_cursor || targets.isFetching}
+                  disabled={!targets.data?.meta.page?.next_cursor || targets.isFetching}
                   size="sm"
                   type="button"
                   variant="outline"

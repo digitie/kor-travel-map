@@ -1,5 +1,5 @@
 /**
- * `/ops/*` 운영 summary/consistency 조회 hooks.
+ * `/v1/ops/*` 운영 summary/consistency 조회 hooks.
  */
 
 import { useQuery } from "@tanstack/react-query";
@@ -9,16 +9,16 @@ import type { components, paths } from "./types";
 
 type OpsSchemas = components["schemas"];
 type ConsistencyReportsQuery = NonNullable<
-  paths["/ops/consistency/reports"]["get"]["parameters"]["query"]
+  paths["/v1/ops/consistency/reports"]["get"]["parameters"]["query"]
 >;
 type IntegrityIssuesQuery = NonNullable<
-  paths["/ops/consistency/issues"]["get"]["parameters"]["query"]
+  paths["/v1/ops/consistency/issues"]["get"]["parameters"]["query"]
 >;
 type SystemLogsQuery = NonNullable<
-  paths["/ops/system-logs"]["get"]["parameters"]["query"]
+  paths["/v1/ops/system-logs"]["get"]["parameters"]["query"]
 >;
 type ApiCallLogsQuery = NonNullable<
-  paths["/ops/api-call-logs"]["get"]["parameters"]["query"]
+  paths["/v1/ops/api-call-logs"]["get"]["parameters"]["query"]
 >;
 
 export type ConsistencySeverity = Exclude<
@@ -37,7 +37,6 @@ export type SystemLogLevel = Exclude<
   SystemLogsQuery["level"],
   null | undefined
 >;
-export type OpsListMeta = OpsSchemas["OpsListMeta"];
 export type OpsConsistencyReportRecord =
   OpsSchemas["OpsConsistencyReportRecord"];
 export type OpsConsistencyReportsListResponse =
@@ -74,14 +73,14 @@ export type ApiCallLogsListParams = Omit<ApiCallLogsQuery, "cursor"> & {
 };
 
 function fetchOpsMetrics(): Promise<OpsMetricsResponse> {
-  return getJson<OpsMetricsResponse>("/ops/metrics");
+  return getJson<OpsMetricsResponse>("/v1/ops/metrics");
 }
 
 function fetchConsistencyReports(
   params: ConsistencyReportsListParams = {},
 ): Promise<OpsConsistencyReportsListResponse> {
   return getJson<OpsConsistencyReportsListResponse>(
-    pathWithQuery("/ops/consistency/reports", {
+    pathWithQuery("/v1/ops/consistency/reports", {
       severity_max: params.severity_max,
       page_size: params.page_size,
       cursor: params.cursor,
@@ -93,7 +92,7 @@ function fetchIntegrityIssues(
   params: IntegrityIssuesListParams = {},
 ): Promise<OpsIntegrityIssuesListResponse> {
   return getJson<OpsIntegrityIssuesListResponse>(
-    pathWithQuery("/ops/consistency/issues", {
+    pathWithQuery("/v1/ops/consistency/issues", {
       status: params.status,
       severity: params.severity,
       violation_type: params.violation_type,
@@ -110,7 +109,7 @@ function fetchSystemLogs(
   params: SystemLogsListParams = {},
 ): Promise<SystemLogsResponse> {
   return getJson<SystemLogsResponse>(
-    pathWithQuery("/ops/system-logs", {
+    pathWithQuery("/v1/ops/system-logs", {
       level: params.level,
       source: params.source,
       q: params.q,
@@ -124,7 +123,7 @@ function fetchApiCallLogs(
   params: ApiCallLogsListParams = {},
 ): Promise<ApiCallLogsResponse> {
   return getJson<ApiCallLogsResponse>(
-    pathWithQuery("/ops/api-call-logs", {
+    pathWithQuery("/v1/ops/api-call-logs", {
       method: params.method,
       min_status: params.min_status,
       path: params.path,

@@ -47,7 +47,6 @@ def test_categories_static_returns_full_catalog(client: TestClient) -> None:
         r = client.get("/v1/categories")
         assert r.status_code == 200
         body = r.json()
-        assert body["data"]["count"] == 144
         assert body["data"]["include_counts"] is False
         assert len(body["data"]["items"]) == 144
         item = body["data"]["items"][0]

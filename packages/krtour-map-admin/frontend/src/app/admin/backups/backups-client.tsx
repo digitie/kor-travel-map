@@ -268,12 +268,18 @@ export function BackupsClient() {
                   <CardTitle>백업 목록</CardTitle>
                   <CardDescription>
                     {backups.data
-                      ? `${formatCount(backups.data.meta.count)} artifacts`
+                      ? `${formatCount(backups.data.data.items.length)} artifacts`
                       : "loading"}
                   </CardDescription>
                 </div>
-                <Badge variant={backups.data?.meta.command_enabled ? "default" : "secondary"}>
-                  {backups.data?.meta.command_enabled ? "execute enabled" : "plan only"}
+                <Badge
+                  variant={
+                    backups.data?.data.command_enabled ? "default" : "secondary"
+                  }
+                >
+                  {backups.data?.data.command_enabled
+                    ? "execute enabled"
+                    : "plan only"}
                 </Badge>
               </div>
             </CardHeader>

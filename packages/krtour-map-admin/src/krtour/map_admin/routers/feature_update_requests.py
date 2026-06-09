@@ -41,6 +41,7 @@ from pydantic import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from krtour.map_admin.db import get_session
+from krtour.map_admin.response import Meta, make_meta
 
 __all__ = [
     "router",
@@ -51,10 +52,11 @@ __all__ = [
 ]
 
 
-ADMIN_FEATURE_UPDATE_REQUESTS_PREFIX = "/admin/feature-update-requests"
+ADMIN_FEATURE_UPDATE_REQUESTS_ROUTE_PREFIX = "/admin/feature-update-requests"
+ADMIN_FEATURE_UPDATE_REQUESTS_URL_PREFIX = "/v1/admin/feature-update-requests"
 
 router = APIRouter(
-    prefix=ADMIN_FEATURE_UPDATE_REQUESTS_PREFIX,
+    prefix=ADMIN_FEATURE_UPDATE_REQUESTS_ROUTE_PREFIX,
     tags=["admin-update-requests"],
 )
 
@@ -227,7 +229,7 @@ class FeatureUpdateRequestRecord(BaseModel):
     update_policy: dict[str, Any]
     run_mode: RunMode
     priority: int
-    state: str
+    status: str
     dry_run: bool
     matched_scope: dict[str, Any]
     job_id: str | None = None
@@ -242,21 +244,13 @@ class FeatureUpdateRequestRecord(BaseModel):
     status_url: str | None = None
 
 
-class FeatureUpdateRequestMeta(BaseModel):
-    """쓰기 요청의 간단한 메타데이터."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    duration_ms: int
-
-
 class FeatureUpdateRequestCreateResponse(BaseModel):
     """생성/취소/run-now 응답."""
 
     model_config = ConfigDict(extra="forbid")
 
     data: FeatureUpdateRequestRecord
-    meta: FeatureUpdateRequestMeta
+    meta: Meta
 
 
 class FeatureUpdateRequestDetailResponse(BaseModel):
@@ -265,7 +259,7 @@ class FeatureUpdateRequestDetailResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: FeatureUpdateRequestRecord
-    meta: FeatureUpdateRequestMeta
+    meta: Meta
 
 
 class FeatureUpdateRequestListData(BaseModel):
@@ -274,16 +268,6 @@ class FeatureUpdateRequestListData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     items: list[FeatureUpdateRequestRecord]
-    next_cursor: str | None = None
-
-
-class FeatureUpdateRequestListMeta(BaseModel):
-    """feature update request 목록 meta."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    count: int
-    duration_ms: int
 
 
 class FeatureUpdateRequestListResponse(BaseModel):
@@ -292,7 +276,7 @@ class FeatureUpdateRequestListResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: FeatureUpdateRequestListData
-    meta: FeatureUpdateRequestListMeta
+    meta: Meta
 
 
 class FeatureUpdateRequestCancelRequest(BaseModel):
@@ -327,7 +311,7 @@ def _update_policy_payload(policy: FeatureUpdatePolicy) -> dict[str, Any]:
 def _record_from_request(
     row: FeatureUpdateRequest,
     *,
-    status_url_prefix: str = ADMIN_FEATURE_UPDATE_REQUESTS_PREFIX,
+    status_url_prefix: str = ADMIN_FEATURE_UPDATE_REQUESTS_URL_PREFIX,
 ) -> FeatureUpdateRequestRecord:
     return FeatureUpdateRequestRecord(
         request_id=row.request_id,
@@ -338,7 +322,7 @@ def _record_from_request(
         update_policy=row.update_policy,
         run_mode=row.run_mode,
         priority=row.priority,
-        state=row.state,
+        status=row.state,
         dry_run=row.dry_run,
         matched_scope=row.matched_scope,
         job_id=row.job_id,
@@ -365,7 +349,7 @@ def _record_from_preview(
         update_policy=preview.update_policy,
         run_mode=preview.run_mode,
         priority=preview.priority,
-        state="dry_run",
+        status="dry_run",
         dry_run=True,
         matched_scope=preview.matched_scope,
     )
@@ -375,7 +359,7 @@ def _create_response(
     data: FeatureUpdateRequest | FeatureUpdateRequestPreview,
     *,
     started_at: float,
-    status_url_prefix: str = ADMIN_FEATURE_UPDATE_REQUESTS_PREFIX,
+    status_url_prefix: str = ADMIN_FEATURE_UPDATE_REQUESTS_URL_PREFIX,
 ) -> FeatureUpdateRequestCreateResponse:
     record = (
         _record_from_request(data, status_url_prefix=status_url_prefix)
@@ -384,9 +368,7 @@ def _create_response(
     )
     return FeatureUpdateRequestCreateResponse(
         data=record,
-        meta=FeatureUpdateRequestMeta(
-            duration_ms=max(0, int((perf_counter() - started_at) * 1000))
-        ),
+        meta=make_meta(started_at=started_at),
     )
 
 
@@ -564,7 +546,7 @@ async def create_feature_update_request(
     return await _create_feature_update_request_response(
         body,
         session,
-        status_url_prefix=ADMIN_FEATURE_UPDATE_REQUESTS_PREFIX,
+        status_url_prefix=ADMIN_FEATURE_UPDATE_REQUESTS_URL_PREFIX,
     )
 
 
@@ -575,7 +557,7 @@ async def create_feature_update_request(
 )
 async def list_feature_update_requests(
     session: Annotated[AsyncSession, Depends(get_session)],
-    state: Annotated[FeatureUpdateState | None, Query()] = None,
+    status_filter: Annotated[FeatureUpdateState | None, Query(alias="status")] = None,
     scope_type: Annotated[str | None, Query()] = None,
     provider: Annotated[str | None, Query()] = None,
     dataset_key: Annotated[str | None, Query()] = None,
@@ -588,7 +570,7 @@ async def list_feature_update_requests(
     try:
         page: FeatureUpdateRequestPage = await list_update_requests(
             session,
-            state=state,
+            state=status_filter,
             scope_type=scope_type,
             provider=provider,
             dataset_key=dataset_key,
@@ -602,11 +584,11 @@ async def list_feature_update_requests(
     return FeatureUpdateRequestListResponse(
         data=FeatureUpdateRequestListData(
             items=[_record_from_request(item) for item in page.items],
-            next_cursor=page.next_cursor,
         ),
-        meta=FeatureUpdateRequestListMeta(
-            count=len(page.items),
-            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
+        meta=make_meta(
+            started_at=started_at,
+            page_size=page_size,
+            next_cursor=page.next_cursor,
         ),
     )
 
@@ -630,9 +612,7 @@ async def get_feature_update_request(
         )
     return FeatureUpdateRequestDetailResponse(
         data=_record_from_request(row),
-        meta=FeatureUpdateRequestMeta(
-            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
-        ),
+        meta=make_meta(started_at=started_at),
     )
 
 

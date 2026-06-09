@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from krtour.map_admin.auth import require_admin_destructive_enabled
 from krtour.map_admin.db import get_session
+from krtour.map_admin.response import Meta, make_meta
 from krtour.map_admin.settings import AdminSettings
 
 __all__ = [
@@ -62,7 +63,7 @@ class AdminFeatureIssueRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    violation_key: str | None = None
+    issue_id: str | None = None
     violation_type: str | None = None
     severity: str | None = None
     message: str | None = None
@@ -96,19 +97,6 @@ class AdminFeaturesListData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     items: list[AdminFeatureRecord]
-    next_cursor: str | None = None
-
-
-class AdminFeaturesListMeta(BaseModel):
-    """Admin feature 목록 meta."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    count: int
-    page_size: int
-    sort: AdminFeatureSort
-    order: SortOrder
-    duration_ms: int
 
 
 class AdminFeaturesListResponse(BaseModel):
@@ -117,7 +105,7 @@ class AdminFeaturesListResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: AdminFeaturesListData
-    meta: AdminFeaturesListMeta
+    meta: Meta
 
 
 class AdminFeatureOverrideRecord(BaseModel):
@@ -125,7 +113,7 @@ class AdminFeatureOverrideRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    override_key: str
+    override_id: str
     feature_id: str
     field_path: str
     override_value: Any
@@ -157,21 +145,13 @@ class AdminFeatureDeactivateData(BaseModel):
     override: AdminFeatureOverrideRecord | None = None
 
 
-class AdminFeatureWriteMeta(BaseModel):
-    """Admin feature write meta."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    duration_ms: int
-
-
 class AdminFeatureDeactivateResponse(BaseModel):
     """``POST /admin/features/{feature_id}/deactivate`` 응답."""
 
     model_config = ConfigDict(extra="forbid")
 
     data: AdminFeatureDeactivateData
-    meta: AdminFeatureWriteMeta
+    meta: Meta
 
 
 class AdminFeatureCoordInput(BaseModel):
@@ -263,7 +243,7 @@ class AdminFeatureChangeRequestRecord(BaseModel):
     request_id: str
     feature_id: str
     action: Literal["add", "update", "delete"]
-    state: Literal["pending", "applied", "rejected"]
+    status: Literal["pending", "applied", "rejected"]
     review_mode: FeatureMutationReviewMode
     payload: dict[str, Any]
     reason: str | None = None
@@ -288,7 +268,7 @@ class AdminFeatureChangeResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: AdminFeatureChangeData
-    meta: AdminFeatureWriteMeta
+    meta: Meta
 
 
 class AdminFeatureChangeListData(BaseModel):
@@ -297,17 +277,7 @@ class AdminFeatureChangeListData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     items: list[AdminFeatureChangeRequestRecord]
-
-
-class AdminFeatureChangeListMeta(BaseModel):
-    """feature change request list meta."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    count: int
-    limit: int
     review_mode: FeatureMutationReviewMode
-    duration_ms: int
 
 
 class AdminFeatureChangeListResponse(BaseModel):
@@ -316,7 +286,7 @@ class AdminFeatureChangeListResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: AdminFeatureChangeListData
-    meta: AdminFeatureChangeListMeta
+    meta: Meta
 
 
 class AdminFeatureReviewActionRequest(BaseModel):
@@ -332,6 +302,16 @@ def _settings() -> AdminSettings:
     return AdminSettings()
 
 
+def _issue_record(issue: dict[str, Any]) -> AdminFeatureIssueRecord:
+    return AdminFeatureIssueRecord(
+        issue_id=issue.get("violation_key"),
+        violation_type=issue.get("violation_type"),
+        severity=issue.get("severity"),
+        message=issue.get("message"),
+        detected_at=issue.get("detected_at"),
+    )
+
+
 def _record(row: AdminFeatureRow) -> AdminFeatureRecord:
     return AdminFeatureRecord(
         feature_id=row.feature_id,
@@ -345,7 +325,7 @@ def _record(row: AdminFeatureRow) -> AdminFeatureRecord:
         primary_provider=row.primary_provider,
         primary_dataset_key=row.primary_dataset_key,
         issue_count=row.issue_count,
-        issues=[AdminFeatureIssueRecord(**issue) for issue in row.issues],
+        issues=[_issue_record(issue) for issue in row.issues],
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
@@ -355,7 +335,7 @@ def _override(row: FeatureOverride | None) -> AdminFeatureOverrideRecord | None:
     if row is None:
         return None
     return AdminFeatureOverrideRecord(
-        override_key=row.override_key,
+        override_id=row.override_key,
         feature_id=row.feature_id,
         field_path=row.field_path,
         override_value=row.override_value,
@@ -379,9 +359,7 @@ def _deactivate_response(
             override_created=row.override_created,
             override=_override(row.override),
         ),
-        meta=AdminFeatureWriteMeta(
-            duration_ms=max(0, int((perf_counter() - started_at) * 1000))
-        ),
+        meta=make_meta(started_at=started_at),
     )
 
 
@@ -390,7 +368,7 @@ def _change_record(row: FeatureChangeRequest) -> AdminFeatureChangeRequestRecord
         request_id=row.request_id,
         feature_id=row.feature_id,
         action=row.action,
-        state=row.state,
+        status=row.state,
         review_mode=row.review_mode,
         payload=row.payload,
         reason=row.reason,
@@ -409,9 +387,7 @@ def _change_response(
 ) -> AdminFeatureChangeResponse:
     return AdminFeatureChangeResponse(
         data=AdminFeatureChangeData(request=_change_record(row)),
-        meta=AdminFeatureWriteMeta(
-            duration_ms=max(0, int((perf_counter() - started_at) * 1000))
-        ),
+        meta=make_meta(started_at=started_at),
     )
 
 
@@ -512,16 +488,11 @@ async def list_features(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return AdminFeaturesListResponse(
-        data=AdminFeaturesListData(
-            items=[_record(item) for item in page.items],
-            next_cursor=page.next_cursor,
-        ),
-        meta=AdminFeaturesListMeta(
-            count=len(page.items),
+        data=AdminFeaturesListData(items=[_record(item) for item in page.items]),
+        meta=make_meta(
+            started_at=started_at,
             page_size=page_size,
-            sort=sort,
-            order=effective_order,
-            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
+            next_cursor=page.next_cursor,
         ),
     )
 
@@ -533,34 +504,34 @@ async def list_features(
 async def list_feature_change_request_route(
     session: Annotated[AsyncSession, Depends(get_session)],
     settings: Annotated[AdminSettings, Depends(_settings)],
-    state_filter: Annotated[
+    status_filter: Annotated[
         list[Literal["pending", "applied", "rejected"]] | None,
-        Query(alias="state"),
+        Query(alias="status"),
     ] = None,
     action: Annotated[
         list[Literal["add", "update", "delete"]] | None,
         Query(),
     ] = None,
     q: Annotated[str | None, Query()] = None,
-    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    page_size: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> AdminFeatureChangeListResponse:
     started_at = perf_counter()
     rows = await list_feature_change_requests(
         session,
-        states=state_filter,
+        states=status_filter,
         actions=action,
         q=q,
-        limit=limit,
+        limit=page_size,
     )
     return AdminFeatureChangeListResponse(
         data=AdminFeatureChangeListData(
             items=[_change_record(row) for row in rows],
-        ),
-        meta=AdminFeatureChangeListMeta(
-            count=len(rows),
-            limit=limit,
             review_mode=_review_mode(settings),
-            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
+        ),
+        meta=make_meta(
+            started_at=started_at,
+            page_size=page_size,
+            next_cursor=None,
         ),
     )
 

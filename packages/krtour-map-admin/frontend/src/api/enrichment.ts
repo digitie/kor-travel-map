@@ -1,5 +1,5 @@
 /**
- * `/admin/enrichment-review/*` 축제 enrichment 매칭 검토 hooks (T-RV-52c).
+ * `/v1/admin/enrichment-reviews/*` 축제 enrichment 매칭 검토 hooks (T-RV-52c).
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -9,7 +9,7 @@ import type { components, paths } from "./types";
 
 type EnrichmentSchemas = components["schemas"];
 type EnrichmentReviewListQuery = NonNullable<
-  paths["/admin/enrichment-review"]["get"]["parameters"]["query"]
+  paths["/v1/admin/enrichment-reviews"]["get"]["parameters"]["query"]
 >;
 
 export type EnrichmentStatus = Exclude<
@@ -40,7 +40,7 @@ function fetchEnrichmentReviews(
   params: EnrichmentReviewListParams = {},
 ): Promise<EnrichmentReviewListResponse> {
   return getJson<EnrichmentReviewListResponse>(
-    pathWithQuery("/admin/enrichment-review", {
+    pathWithQuery("/v1/admin/enrichment-reviews", {
       status: params.status,
       provider: params.provider,
       min_score: params.min_score,
@@ -57,14 +57,14 @@ function decideEnrichmentReview(
   body: EnrichmentReviewDecisionRequest,
 ): Promise<EnrichmentReviewDecisionResponse> {
   return patchJson<EnrichmentReviewDecisionResponse>(
-    `/admin/enrichment-review/${encodeURIComponent(reviewKey)}`,
+    `/v1/admin/enrichment-reviews/${encodeURIComponent(reviewKey)}`,
     body,
   );
 }
 
 export function useEnrichmentReviews(params: EnrichmentReviewListParams = {}) {
   return useQuery<EnrichmentReviewListResponse, Error>({
-    queryKey: ["enrichment-review", params],
+    queryKey: ["enrichment-reviews", params],
     queryFn: () => fetchEnrichmentReviews(params),
     staleTime: 15_000,
   });
@@ -79,7 +79,7 @@ export function useEnrichmentDecisionMutation() {
   >({
     mutationFn: ({ reviewKey, body }) => decideEnrichmentReview(reviewKey, body),
     onSuccess: (data) => {
-      void queryClient.invalidateQueries({ queryKey: ["enrichment-review"] });
+      void queryClient.invalidateQueries({ queryKey: ["enrichment-reviews"] });
       void queryClient.invalidateQueries({ queryKey: ["admin-features"] });
       void queryClient.invalidateQueries({ queryKey: ["ops", "metrics"] });
       // accept는 1차 feature에 enrichment source를 추가하므로 feature 캐시도 무효화.

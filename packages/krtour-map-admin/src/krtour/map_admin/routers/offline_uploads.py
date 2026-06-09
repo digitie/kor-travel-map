@@ -63,6 +63,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from krtour.map_admin.db import get_session
+from krtour.map_admin.response import Meta, make_meta
 from krtour.map_admin.settings import AdminSettings
 
 __all__ = [
@@ -141,7 +142,7 @@ class OfflineUploadRecord(BaseModel):
     checksum_sha256: str
     detected_format: str | None
     detected_encoding: str | None
-    state: str
+    status: str
     validation_job_id: str | None
     load_job_id: str | None
     created_by: str | None
@@ -157,6 +158,7 @@ class OfflineUploadWriteMeta(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     duration_ms: int
+    request_id: str = ""
     bucket: str
     object_key: str
     content_type: str
@@ -168,6 +170,7 @@ class OfflineUploadLaunchMeta(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     duration_ms: int
+    request_id: str = ""
     dagster_run_id: str
     dagster_status: str
 
@@ -196,6 +199,7 @@ class OfflineUploadPreviewMeta(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     duration_ms: int
+    request_id: str = ""
     parsed_format: str
     encoding: str
     delimiter: str
@@ -233,7 +237,7 @@ class OfflineUploadValidationMeta(OfflineUploadPreviewMeta):
     """CSV/TSV validation response metadata."""
 
     job_id: str | None
-    job_state: str | None
+    job_status: str | None
     column_mapping: OfflineUploadColumnMappingRecord
     valid_rows: int
     error_rows: int
@@ -282,6 +286,7 @@ class OfflineUploadDetailMeta(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     duration_ms: int
+    request_id: str = ""
 
 
 class OfflineUploadDetailResponse(BaseModel):
@@ -290,7 +295,7 @@ class OfflineUploadDetailResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: OfflineUploadRecord
-    meta: OfflineUploadDetailMeta
+    meta: Meta
 
 
 class OfflineUploadListData(BaseModel):
@@ -299,16 +304,6 @@ class OfflineUploadListData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     items: list[OfflineUploadRecord]
-    next_cursor: str | None = None
-
-
-class OfflineUploadListMeta(BaseModel):
-    """오프라인 업로드 목록 meta."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    count: int
-    duration_ms: int
 
 
 class OfflineUploadListResponse(BaseModel):
@@ -317,7 +312,7 @@ class OfflineUploadListResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: OfflineUploadListData
-    meta: OfflineUploadListMeta
+    meta: Meta
 
 
 class _DagsterLaunch(BaseModel):
@@ -340,14 +335,14 @@ def _record_from_upload(row: OfflineUpload) -> OfflineUploadRecord:
         checksum_sha256=row.checksum_sha256,
         detected_format=row.detected_format,
         detected_encoding=row.detected_encoding,
-        state=row.state,
+        status=row.state,
         validation_job_id=row.validation_job_id,
         load_job_id=row.load_job_id,
         created_by=row.created_by,
         created_at=row.created_at.isoformat(),
         updated_at=row.updated_at.isoformat(),
-        status_url=f"/admin/offline-uploads/{row.upload_id}",
-        load_url=f"/admin/offline-uploads/{row.upload_id}/load",
+        status_url=f"/v1/admin/offline-uploads/{row.upload_id}",
+        load_url=f"/v1/admin/offline-uploads/{row.upload_id}/load",
     )
 
 
@@ -370,7 +365,7 @@ def _can_load(row: OfflineUpload) -> bool:
 def _load_reject_detail(row: OfflineUpload) -> str:
     if _is_tabular_upload(row) and row.validation_job_id is None:
         return "CSV/TSV offline upload은 load 전 validate가 필요합니다."
-    return f"load 가능한 상태가 아닙니다: {row.state}"
+    return f"load 가능한 status가 아닙니다: {row.state}"
 
 
 def _require_tabular(row: OfflineUpload) -> None:
@@ -461,7 +456,7 @@ def _validation_meta_from_payload(
         bytes_read=_int(payload.get("bytes_read")),
         checksum_sha256_actual=_string(payload.get("checksum_sha256_actual")),
         job_id=(_string(payload.get("job_id")) if payload.get("job_id") is not None else None),
-        job_state=(
+        job_status=(
             _string(payload.get("job_state")) if payload.get("job_state") is not None else None
         ),
         column_mapping=OfflineUploadColumnMappingRecord.model_validate(
@@ -854,7 +849,7 @@ async def create_offline_upload_request(
 )
 async def list_offline_upload_requests(
     session: Annotated[AsyncSession, Depends(get_session)],
-    state: Annotated[OfflineUploadState | None, Query()] = None,
+    status_filter: Annotated[OfflineUploadState | None, Query(alias="status")] = None,
     provider: Annotated[str | None, Query()] = None,
     dataset_key: Annotated[str | None, Query()] = None,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
@@ -864,7 +859,7 @@ async def list_offline_upload_requests(
     try:
         page: OfflineUploadPage = await list_offline_uploads(
             session,
-            state=state,
+            state=status_filter,
             provider=provider,
             dataset_key=dataset_key,
             limit=page_size,
@@ -873,13 +868,11 @@ async def list_offline_upload_requests(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return OfflineUploadListResponse(
-        data=OfflineUploadListData(
-            items=[_record_from_upload(item) for item in page.items],
+        data=OfflineUploadListData(items=[_record_from_upload(item) for item in page.items]),
+        meta=make_meta(
+            started_at=started_at,
+            page_size=page_size,
             next_cursor=page.next_cursor,
-        ),
-        meta=OfflineUploadListMeta(
-            count=len(page.items),
-            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
         ),
     )
 
@@ -903,9 +896,7 @@ async def get_offline_upload_request(
         )
     return OfflineUploadDetailResponse(
         data=_record_from_upload(row),
-        meta=OfflineUploadDetailMeta(
-            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
-        ),
+        meta=make_meta(started_at=started_at),
     )
 
 

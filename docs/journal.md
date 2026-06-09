@@ -2,6 +2,18 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-09 (codex) — T-216a~e REST 계약 표면 정리
+
+**작업**: 관련도가 높은 `/v1` mount, pagination/envelope, error, REST 표면 명명, OpenAPI/frontend/e2e
+갱신을 한 PR 범위로 묶었다.
+
+- **REST 표면**: admin/ops/debug/public feature API를 `/v1`로 clean cut하고, 성공 응답은 공유
+  `Meta`(`request_id`, `meta.page`, `meta.cluster`)로 통일했다.
+- **명명/파라미터**: `page_size`, `status`, `issue_id`, `review_id`, `log_id`를 REST 표면 정본으로
+  맞추고 구 `data.next_cursor`/`meta.count`/`{error:{...}}` shape를 제거했다.
+- **검증 표면**: OpenAPI admin/user spec과 frontend generated type/API hook/UI/e2e mock을 새 계약에
+  맞췄다. 물리 DB/ORM/repo rename은 T-216f 별도 migration PR로 남긴다.
+
 ## 2026-06-09 (claude) — T-210 정리: a 닫기 + b/c/d 외부(TripMate repo) 태그
 
 사용자 질문(T-210 인덱스에 설명 누락 + 불필요한가)에 대응. 인덱스 생성 스크립트가

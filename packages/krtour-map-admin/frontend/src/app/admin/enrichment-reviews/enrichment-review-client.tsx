@@ -48,7 +48,7 @@ export function EnrichmentReviewClient() {
   });
   const decision = useEnrichmentDecisionMutation();
 
-  const nextCursor = reviews.data?.data.next_cursor ?? undefined;
+  const nextCursor = reviews.data?.meta.page?.next_cursor ?? undefined;
   const pageIndex = cursorStack.length + 1;
 
   const changeStatus = (value: EnrichmentStatus | "all") => {
@@ -60,9 +60,9 @@ export function EnrichmentReviewClient() {
   };
   const goPrev = () => setCursorStack((stack) => stack.slice(0, -1));
 
-  const decide = (reviewKey: string, value: EnrichmentDecision) => {
+  const decide = (reviewId: string, value: EnrichmentDecision) => {
     decision.mutate({
-      reviewKey,
+      reviewKey: reviewId,
       body: {
         decision: value,
         decision_reason: `admin-ui ${value}`,
@@ -128,9 +128,9 @@ export function EnrichmentReviewClient() {
             </TableHeader>
             <TableBody>
               {(reviews.data?.data.items ?? []).map((item) => (
-                <TableRow key={item.review_key}>
+                <TableRow key={item.review_id}>
                   <TableCell className="font-mono text-xs">
-                    {shortId(item.review_key)}
+                    {shortId(item.review_id)}
                   </TableCell>
                   <TableCell className="font-mono">
                     {item.name_score.toFixed(1)}
@@ -162,7 +162,7 @@ export function EnrichmentReviewClient() {
                           size="sm"
                           type="button"
                           variant="outline"
-                          onClick={() => decide(item.review_key, "accepted")}
+                          onClick={() => decide(item.review_id, "accepted")}
                         >
                           <CheckIcon data-icon="inline-start" />
                           accept
@@ -172,7 +172,7 @@ export function EnrichmentReviewClient() {
                           size="sm"
                           type="button"
                           variant="outline"
-                          onClick={() => decide(item.review_key, "rejected")}
+                          onClick={() => decide(item.review_id, "rejected")}
                         >
                           <XIcon data-icon="inline-start" />
                           reject
@@ -182,7 +182,7 @@ export function EnrichmentReviewClient() {
                           size="sm"
                           type="button"
                           variant="ghost"
-                          onClick={() => decide(item.review_key, "ignored")}
+                          onClick={() => decide(item.review_id, "ignored")}
                         >
                           ignore
                         </Button>

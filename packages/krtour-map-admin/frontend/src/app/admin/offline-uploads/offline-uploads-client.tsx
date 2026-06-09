@@ -13,7 +13,7 @@ import { useMemo, useState } from "react";
 import {
   type OfflineUploadColumnMapping,
   type OfflineUploadRecord,
-  type OfflineUploadState,
+  type OfflineUploadStatus,
   useCreateOfflineUploadMutation,
   useLaunchOfflineUploadLoadMutation,
   useOfflineUpload,
@@ -40,7 +40,7 @@ import {
 } from "@/components/ui/table";
 import { formatDateTime, shortId } from "@/lib/format";
 
-const states: Array<OfflineUploadState | "all"> = [
+const statuses: Array<OfflineUploadStatus | "all"> = [
   "uploaded",
   "validating",
   "validated",
@@ -111,7 +111,7 @@ function isTabularUpload(upload: OfflineUploadRecord | null): boolean {
 }
 
 function canLoad(upload: OfflineUploadRecord): boolean {
-  if (!loadableStates.has(upload.state)) {
+  if (!loadableStates.has(upload.status)) {
     return false;
   }
   if (!isTabularUpload(upload)) {
@@ -119,7 +119,7 @@ function canLoad(upload: OfflineUploadRecord): boolean {
   }
   return (
     upload.validation_job_id !== null &&
-    ["validated", "loaded", "load_failed"].includes(upload.state)
+    ["validated", "loaded", "load_failed"].includes(upload.status)
   );
 }
 
@@ -179,7 +179,7 @@ function UploadDetail({ upload }: { upload: OfflineUploadRecord | null }) {
             {shortId(upload.upload_id, 18)}
           </div>
         </div>
-        <StatusBadge status={upload.state} />
+        <StatusBadge status={upload.status} />
       </div>
       <dl className="flex flex-col gap-3">
         <DetailRow label="provider" value={upload.provider} />
@@ -471,7 +471,7 @@ export function OfflineUploadsClient() {
   const [datasetKey, setDatasetKey] = useState("offline_csv");
   const [syncScope, setSyncScope] = useState("default");
   const [createdBy, setCreatedBy] = useState("local-admin");
-  const [state, setState] = useState<OfflineUploadState | "all">("uploaded");
+  const [status, setStatus] = useState<OfflineUploadStatus | "all">("uploaded");
   const [providerFilter, setProviderFilter] = useState("");
   const [datasetFilter, setDatasetFilter] = useState("");
   const [selectedUploadId, setSelectedUploadId] = useState<string | null>(null);
@@ -480,12 +480,12 @@ export function OfflineUploadsClient() {
 
   const uploadsParams = useMemo(
     () => ({
-      state: state === "all" ? undefined : state,
+      status: status === "all" ? undefined : status,
       provider: providerFilter.trim() || undefined,
       dataset_key: datasetFilter.trim() || undefined,
       page_size: 100,
     }),
-    [datasetFilter, providerFilter, state],
+    [datasetFilter, providerFilter, status],
   );
   const uploads = useOfflineUploads(uploadsParams);
   const selectedUpload = useOfflineUpload(selectedUploadId);
@@ -594,7 +594,7 @@ export function OfflineUploadsClient() {
                   <AlertTitle>업로드 완료</AlertTitle>
                   <AlertDescription>
                     {shortId(createUpload.data.data.upload_id, 18)} ·{" "}
-                    {createUpload.data.data.state} ·{" "}
+                    {createUpload.data.data.status} ·{" "}
                     {formatBytes(createUpload.data.data.byte_size)}
                   </AlertDescription>
                 </Alert>
@@ -640,13 +640,13 @@ export function OfflineUploadsClient() {
 
           <div className="flex flex-wrap items-center gap-2">
             <NativeSelect
-              aria-label="offline upload state"
-              value={state}
+              aria-label="offline upload status"
+              value={status}
               onChange={(event) =>
-                setState(event.target.value as OfflineUploadState | "all")
+                setStatus(event.target.value as OfflineUploadStatus | "all")
               }
             >
-              {states.map((item) => (
+              {statuses.map((item) => (
                 <NativeSelectOption key={item} value={item}>
                   {item}
                 </NativeSelectOption>
@@ -666,7 +666,9 @@ export function OfflineUploadsClient() {
               value={datasetFilter}
               onChange={(event) => setDatasetFilter(event.target.value)}
             />
-            <Badge variant="outline">{uploads.data?.meta.count ?? 0} rows</Badge>
+            <Badge variant="outline">
+              {uploads.data?.data.items.length ?? 0} rows
+            </Badge>
           </div>
 
           {uploads.isLoading ? <Skeleton className="h-96" /> : null}
@@ -675,7 +677,7 @@ export function OfflineUploadsClient() {
               <TableHeader>
                 <TableRow>
                   <TableHead>upload</TableHead>
-                  <TableHead>state</TableHead>
+                  <TableHead>status</TableHead>
                   <TableHead>format</TableHead>
                   <TableHead>provider/dataset</TableHead>
                   <TableHead>file</TableHead>
@@ -698,7 +700,7 @@ export function OfflineUploadsClient() {
                         {shortId(upload.upload_id)}
                       </TableCell>
                       <TableCell>
-                        <StatusBadge status={upload.state} />
+                        <StatusBadge status={upload.status} />
                       </TableCell>
                       <TableCell>
                         <Badge variant="outline">{uploadFormat(upload) || "-"}</Badge>

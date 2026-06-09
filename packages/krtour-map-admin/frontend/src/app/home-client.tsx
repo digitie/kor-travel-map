@@ -197,7 +197,7 @@ export function HomePageClient() {
                   <TableRow>
                     <TableHead>job</TableHead>
                     <TableHead>kind</TableHead>
-                    <TableHead>state</TableHead>
+                    <TableHead>status</TableHead>
                     <TableHead>progress</TableHead>
                     <TableHead>updated</TableHead>
                   </TableRow>
@@ -210,7 +210,7 @@ export function HomePageClient() {
                       </TableCell>
                       <TableCell>{job.kind}</TableCell>
                       <TableCell>
-                        <StatusBadge status={job.state} />
+                        <StatusBadge status={job.status} />
                       </TableCell>
                       <TableCell className="font-mono">{job.progress}%</TableCell>
                       <TableCell className="text-muted-foreground">
@@ -301,14 +301,14 @@ export function HomePageClient() {
                 {(dedup.data?.data.items ?? []).slice(0, 4).map((item) => (
                   <Link
                     className="rounded-md border px-3 py-2 text-sm hover:bg-muted"
-                    href="/admin/dedup-review"
-                    key={item.review_key}
+                    href="/admin/dedup-reviews"
+                    key={item.review_id}
                   >
                     <div className="font-medium">
                       {item.feature_a.name} / {item.feature_b.name}
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      score {item.total_score.toFixed(1)} · {shortId(item.review_key)}
+                      score {item.total_score.toFixed(1)} · {shortId(item.review_id)}
                     </div>
                   </Link>
                 ))}

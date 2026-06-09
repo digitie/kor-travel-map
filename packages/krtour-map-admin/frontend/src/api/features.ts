@@ -127,10 +127,10 @@ export const FEATURE_KINDS = [
 ] as const;
 export type FeatureKind = (typeof FEATURE_KINDS)[number];
 
-// ── admin feature 목록/비활성화 (`/admin/features`) ───────────────────────
+// ── admin feature 목록/비활성화 (`/v1/admin/features`) ───────────────────────
 
 type AdminFeaturesListQuery = NonNullable<
-  paths["/admin/features"]["get"]["parameters"]["query"]
+  paths["/v1/admin/features"]["get"]["parameters"]["query"]
 >;
 
 export type AdminFeatureSort = NonNullable<AdminFeaturesListQuery["sort"]>;
@@ -157,11 +157,11 @@ export type AdminFeatureDeactivateResponse =
   FeatureSchemas["AdminFeatureDeactivateResponse"];
 
 type AdminFeatureChangeListQuery = NonNullable<
-  paths["/admin/features/change-requests"]["get"]["parameters"]["query"]
+  paths["/v1/admin/features/change-requests"]["get"]["parameters"]["query"]
 >;
 
-export type AdminFeatureChangeState = Exclude<
-  NonNullable<AdminFeatureChangeListQuery["state"]>[number],
+export type AdminFeatureChangeStatus = Exclude<
+  NonNullable<AdminFeatureChangeListQuery["status"]>[number],
   null | undefined
 >;
 export type AdminFeatureChangeAction = Exclude<
@@ -184,18 +184,18 @@ export type AdminFeatureReviewActionRequest =
   FeatureSchemas["AdminFeatureReviewActionRequest"];
 export type AdminFeatureChangeListParams = Omit<
   AdminFeatureChangeListQuery,
-  "action" | "q" | "state"
+  "action" | "q" | "status"
 > & {
   action?: AdminFeatureChangeAction[];
   q?: string;
-  state?: AdminFeatureChangeState[];
+  status?: AdminFeatureChangeStatus[];
 };
 
 function fetchAdminFeatures(
   params: AdminFeaturesListParams = {},
 ): Promise<AdminFeaturesListResponse> {
   return getJson<AdminFeaturesListResponse>(
-    pathWithQuery("/admin/features", {
+    pathWithQuery("/v1/admin/features", {
       q: params.q,
       kind: params.kind,
       category: params.category,
@@ -220,7 +220,7 @@ function deactivateAdminFeature(
   body: AdminFeatureDeactivateRequest,
 ): Promise<AdminFeatureDeactivateResponse> {
   return postJson<AdminFeatureDeactivateResponse>(
-    `/admin/features/${encodeURIComponent(featureId)}/deactivate`,
+    `/v1/admin/features/${encodeURIComponent(featureId)}/deactivate`,
     body,
   );
 }
@@ -229,11 +229,11 @@ function fetchAdminFeatureChangeRequests(
   params: AdminFeatureChangeListParams = {},
 ): Promise<AdminFeatureChangeListResponse> {
   return getJson<AdminFeatureChangeListResponse>(
-    pathWithQuery("/admin/features/change-requests", {
-      state: params.state,
+    pathWithQuery("/v1/admin/features/change-requests", {
+      status: params.status,
       action: params.action,
       q: params.q,
-      limit: params.limit,
+      page_size: params.page_size,
     }),
   );
 }
@@ -241,7 +241,7 @@ function fetchAdminFeatureChangeRequests(
 function createAdminFeature(
   body: AdminFeatureCreateRequest,
 ): Promise<AdminFeatureChangeResponse> {
-  return postJson<AdminFeatureChangeResponse>("/admin/features", body);
+  return postJson<AdminFeatureChangeResponse>("/v1/admin/features", body);
 }
 
 function patchAdminFeature(
@@ -249,7 +249,7 @@ function patchAdminFeature(
   body: AdminFeaturePatchRequest,
 ): Promise<AdminFeatureChangeResponse> {
   return patchJson<AdminFeatureChangeResponse>(
-    `/admin/features/${encodeURIComponent(featureId)}`,
+    `/v1/admin/features/${encodeURIComponent(featureId)}`,
     body,
   );
 }
@@ -259,7 +259,7 @@ function deleteAdminFeature(
   body: AdminFeatureDeleteRequest,
 ): Promise<AdminFeatureChangeResponse> {
   return deleteJson<AdminFeatureChangeResponse>(
-    `/admin/features/${encodeURIComponent(featureId)}`,
+    `/v1/admin/features/${encodeURIComponent(featureId)}`,
     body,
   );
 }
@@ -269,7 +269,7 @@ function approveAdminFeatureChangeRequest(
   body: AdminFeatureReviewActionRequest,
 ): Promise<AdminFeatureChangeResponse> {
   return postJson<AdminFeatureChangeResponse>(
-    `/admin/features/change-requests/${encodeURIComponent(requestId)}/approve`,
+    `/v1/admin/features/change-requests/${encodeURIComponent(requestId)}/approve`,
     body,
   );
 }
@@ -279,7 +279,7 @@ function rejectAdminFeatureChangeRequest(
   body: AdminFeatureReviewActionRequest,
 ): Promise<AdminFeatureChangeResponse> {
   return postJson<AdminFeatureChangeResponse>(
-    `/admin/features/change-requests/${encodeURIComponent(requestId)}/reject`,
+    `/v1/admin/features/change-requests/${encodeURIComponent(requestId)}/reject`,
     body,
   );
 }

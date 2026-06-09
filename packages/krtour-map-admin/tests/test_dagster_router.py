@@ -142,7 +142,7 @@ def test_dagster_summary_parses_graphql_response(
 
     monkeypatch.setattr(dagster_mod, "_post_graphql", _fake_post_graphql)
 
-    response = client.get("/ops/dagster/summary?run_limit=3")
+    response = client.get("/v1/ops/dagster/summary?page_size=3")
 
     assert response.status_code == 200
     body = response.json()
@@ -259,7 +259,7 @@ def test_dagster_run_detail_parses_graphql_response(
 
     monkeypatch.setattr(dagster_mod, "_post_graphql", _fake_post_graphql)
 
-    response = client.get("/ops/dagster/runs/run-1?event_limit=5")
+    response = client.get("/v1/ops/dagster/runs/run-1?page_size=5")
 
     assert response.status_code == 200
     body = response.json()
@@ -308,7 +308,7 @@ def test_dagster_run_detail_returns_not_found(
 
     monkeypatch.setattr(dagster_mod, "_post_graphql", _fake_post_graphql)
 
-    response = client.get("/ops/dagster/runs/missing-run")
+    response = client.get("/v1/ops/dagster/runs/missing-run")
 
     assert response.status_code == 200
     data = response.json()["data"]
@@ -347,7 +347,7 @@ def test_dagster_run_detail_passes_after_cursor(
 
     monkeypatch.setattr(dagster_mod, "_post_graphql", _fake_post_graphql)
 
-    response = client.get("/ops/dagster/runs/run-1?event_limit=5&after=ev-cursor-80")
+    response = client.get("/v1/ops/dagster/runs/run-1?page_size=5&after=ev-cursor-80")
 
     assert response.status_code == 200
     assert seen == [{"runId": "run-1", "eventLimit": 5, "afterCursor": "ev-cursor-80"}]
@@ -377,7 +377,7 @@ def test_dagster_run_detail_graphql_error_extracts_message(
 
     monkeypatch.setattr(dagster_mod, "_post_graphql", _fake_post_graphql)
 
-    response = client.get("/ops/dagster/runs/run-1")
+    response = client.get("/v1/ops/dagster/runs/run-1")
 
     assert response.status_code == 200
     data = response.json()["data"]
@@ -407,7 +407,7 @@ def test_mark_dagster_nux_seen_posts_mutation(
 
     monkeypatch.setattr(dagster_mod, "_post_graphql", _fake_post_graphql)
 
-    response = client.post("/ops/dagster/nux-seen")
+    response = client.post("/v1/ops/dagster/nux-seen")
 
     assert response.status_code == 200
     body = response.json()
@@ -435,7 +435,7 @@ def test_dagster_summary_returns_unavailable_when_graphql_fails(
 
     monkeypatch.setattr(dagster_mod, "_post_graphql", _raise_post_graphql)
 
-    response = client.get("/ops/dagster/summary")
+    response = client.get("/v1/ops/dagster/summary")
 
     assert response.status_code == 200
     body = response.json()
@@ -468,7 +468,7 @@ def test_dagster_summary_rejects_disallowed_url_before_http_call(
     monkeypatch.setattr(dagster_mod, "_post_graphql", _unexpected_post_graphql)
 
     with TestClient(app) as test_client:
-        response = test_client.get("/ops/dagster/summary")
+        response = test_client.get("/v1/ops/dagster/summary")
 
     assert response.status_code == 200
     body = response.json()
@@ -501,7 +501,7 @@ def test_dagster_nux_seen_rejects_invalid_graphql_override(
     monkeypatch.setattr(dagster_mod, "_post_graphql", _unexpected_post_graphql)
 
     with TestClient(app) as test_client:
-        response = test_client.post("/ops/dagster/nux-seen")
+        response = test_client.post("/v1/ops/dagster/nux-seen")
 
     assert response.status_code == 200
     body = response.json()
@@ -514,9 +514,9 @@ def test_dagster_nux_seen_rejects_invalid_graphql_override(
 @pytest.mark.unit
 def test_dagster_summary_openapi_path_is_mounted(client: TestClient) -> None:
     spec = client.get("/openapi.json").json()
-    assert "/ops/dagster/runs/{run_id}" in spec["paths"]
-    assert "/ops/dagster/summary" in spec["paths"]
-    assert "/ops/dagster/nux-seen" in spec["paths"]
+    assert "/v1/ops/dagster/runs/{run_id}" in spec["paths"]
+    assert "/v1/ops/dagster/summary" in spec["paths"]
+    assert "/v1/ops/dagster/nux-seen" in spec["paths"]
     assert "DagsterRunDetailResponse" in spec["components"]["schemas"]
     assert "DagsterSummaryResponse" in spec["components"]["schemas"]
     assert "DagsterNuxSeenResponse" in spec["components"]["schemas"]

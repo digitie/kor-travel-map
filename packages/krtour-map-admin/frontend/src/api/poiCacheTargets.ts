@@ -9,7 +9,7 @@ import type { components, paths } from "./types";
 
 type PoiCacheTargetSchemas = components["schemas"];
 type GeneratedPoiCacheTargetUpsertRequest =
-  paths["/admin/poi-cache-targets/{external_system}/{target_key}"]["put"]["requestBody"]["content"]["application/json"];
+  paths["/v1/admin/poi-cache-targets/{external_system}/{target_key}"]["put"]["requestBody"]["content"]["application/json"];
 
 export type PoiCacheTargetScopeMode =
   PoiCacheTargetSchemas["PoiCacheTargetUpsertRequest"]["scope_mode"];
@@ -87,7 +87,7 @@ function fetchPoiCacheTargets(
   params: PoiCacheTargetListParams = {},
 ): Promise<PoiCacheTargetListResponse> {
   return getJson<PoiCacheTargetListResponse>(
-    pathWithQuery("/admin/poi-cache-targets", {
+    pathWithQuery("/v1/admin/poi-cache-targets", {
       external_system: params.external_system,
       update_enabled: params.update_enabled,
       include_deleted: params.include_deleted,
@@ -104,7 +104,7 @@ function fetchPoiCacheTarget(
 ): Promise<PoiCacheTargetResponse> {
   return getJson<PoiCacheTargetResponse>(
     pathWithQuery(
-      `/admin/poi-cache-targets/${encodeURIComponent(
+      `/v1/admin/poi-cache-targets/${encodeURIComponent(
         externalSystem,
       )}/${encodeURIComponent(targetKey)}`,
       { include_deleted: includeDeleted },
@@ -118,7 +118,7 @@ function upsertPoiCacheTarget(
   body: PoiCacheTargetUpsertRequest,
 ): Promise<PoiCacheTargetResponse> {
   return putJson<PoiCacheTargetResponse>(
-    `/admin/poi-cache-targets/${encodeURIComponent(
+    `/v1/admin/poi-cache-targets/${encodeURIComponent(
       externalSystem,
     )}/${encodeURIComponent(targetKey)}`,
     body,
@@ -130,7 +130,7 @@ function deletePoiCacheTarget(
   targetKey: string,
 ): Promise<PoiCacheTargetResponse> {
   return deleteJson<PoiCacheTargetResponse>(
-    `/admin/poi-cache-targets/${encodeURIComponent(
+    `/v1/admin/poi-cache-targets/${encodeURIComponent(
       externalSystem,
     )}/${encodeURIComponent(targetKey)}`,
   );

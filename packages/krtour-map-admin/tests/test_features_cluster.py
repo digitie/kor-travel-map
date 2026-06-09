@@ -45,9 +45,9 @@ def test_in_bounds_cluster_unit_returns_clusters(
     try:
         r = client.get("/v1/features/in-bounds", params={**_BBOX, "cluster_unit": "sigungu"})
         assert r.status_code == 200
-        d = r.json()["data"]
-        assert d["cluster_unit"] == "sigungu"
-        assert d["count"] == 1
+        body = r.json()
+        d = body["data"]
+        assert body["meta"]["cluster"] == {"cluster_unit": "sigungu"}
         assert d["items"] == []
         assert d["clusters"][0]["cluster_key"] == "11110"
         assert d["clusters"][0]["feature_count"] == 3
@@ -97,9 +97,9 @@ def test_in_bounds_high_zoom_returns_individual_features(
     try:
         r = client.get("/v1/features/in-bounds", params={**_BBOX, "zoom": 16})
         assert r.status_code == 200
-        d = r.json()["data"]
-        assert d["cluster_unit"] is None  # zoom≥14 → 개별
-        assert d["count"] == 1
+        body = r.json()
+        d = body["data"]
+        assert body["meta"]["cluster"] is None  # zoom≥14 → 개별
         assert d["items"][0]["feature_id"] == "f1"
         assert d["clusters"] == []
     finally:

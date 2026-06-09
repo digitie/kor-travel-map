@@ -297,7 +297,7 @@ export function FeaturesClient() {
 
   useEffect(() => {
     if (mapRef.current === null) return;
-    const data: FeatureSummary[] = featuresQuery.data?.items ?? [];
+    const data: FeatureSummary[] = featuresQuery.data?.data.items ?? [];
     for (const marker of markerLayerRef.current) marker.remove();
     markerLayerRef.current = [];
     for (const feature of data) {
@@ -320,7 +320,7 @@ export function FeaturesClient() {
 
   const sortedFeatures = useMemo(
     () =>
-      (featuresQuery.data?.items ?? []).toSorted((a, b) =>
+      (featuresQuery.data?.data.items ?? []).toSorted((a, b) =>
         a.name.localeCompare(b.name, "ko"),
       ),
     [featuresQuery.data],
@@ -330,7 +330,7 @@ export function FeaturesClient() {
     if (!bbox) return "지도 로딩 중";
     if (featuresQuery.isLoading) return "feature 로딩 중";
     if (featuresQuery.isError) return "feature 호출 실패";
-    return `${featuresQuery.data?.count ?? 0}건 표시`;
+    return `${featuresQuery.data?.data.items.length ?? 0}건 표시`;
   }, [bbox, featuresQuery]);
 
   return (
@@ -404,7 +404,7 @@ export function FeaturesClient() {
           </Link>
           <Link
             className={cn(buttonVariants({ variant: "outline" }))}
-            href="/admin/dedup-review"
+            href="/admin/dedup-reviews"
           >
             <GitCompareArrowsIcon data-icon="inline-start" />
             Dedup

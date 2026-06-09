@@ -1,4 +1,4 @@
-"""``/admin/features`` 라우터 단위 테스트."""
+"""``/v1/admin/features`` 라우터 단위 테스트."""
 
 from __future__ import annotations
 
@@ -116,14 +116,14 @@ def _change_request(
 @pytest.mark.unit
 def test_admin_features_routes_mounted_in_openapi(client: TestClient) -> None:
     spec = client.get("/openapi.json").json()
-    assert "/admin/features" in spec["paths"]
-    assert set(spec["paths"]["/admin/features"]) >= {"get", "post"}
-    assert "/admin/features/{feature_id}" in spec["paths"]
-    assert set(spec["paths"]["/admin/features/{feature_id}"]) >= {"patch", "delete"}
-    assert "/admin/features/change-requests" in spec["paths"]
-    assert "/admin/features/change-requests/{request_id}/approve" in spec["paths"]
-    assert "/admin/features/change-requests/{request_id}/reject" in spec["paths"]
-    assert "/admin/features/{feature_id}/deactivate" in spec["paths"]
+    assert "/v1/admin/features" in spec["paths"]
+    assert set(spec["paths"]["/v1/admin/features"]) >= {"get", "post"}
+    assert "/v1/admin/features/{feature_id}" in spec["paths"]
+    assert set(spec["paths"]["/v1/admin/features/{feature_id}"]) >= {"patch", "delete"}
+    assert "/v1/admin/features/change-requests" in spec["paths"]
+    assert "/v1/admin/features/change-requests/{request_id}/approve" in spec["paths"]
+    assert "/v1/admin/features/change-requests/{request_id}/reject" in spec["paths"]
+    assert "/v1/admin/features/{feature_id}/deactivate" in spec["paths"]
     assert "AdminFeatureRecord" in spec["components"]["schemas"]
     assert "AdminFeatureCreateRequest" in spec["components"]["schemas"]
     assert "AdminFeaturePatchRequest" in spec["components"]["schemas"]
@@ -156,7 +156,7 @@ def test_list_admin_features_passes_filters(
     monkeypatch.setattr(router_mod, "list_admin_features", _list)
 
     response = client.get(
-        "/admin/features",
+        "/v1/admin/features",
         params={
             "q": "광화문",
             "kind": "place",
@@ -170,8 +170,12 @@ def test_list_admin_features_passes_filters(
     assert response.status_code == 200
     body = response.json()
     assert body["data"]["items"][0]["feature_id"] == "feature-1"
-    assert body["data"]["next_cursor"] == "next"
-    assert body["meta"]["order"] == "desc"
+    assert body["data"]["items"][0]["issues"][0]["issue_id"] == "issue-1"
+    assert body["meta"]["page"] == {
+        "page_size": 25,
+        "next_cursor": "next",
+        "total": None,
+    }
 
 
 @pytest.mark.unit
@@ -195,21 +199,25 @@ def test_list_feature_change_requests_returns_current_review_mode(
     monkeypatch.setattr(router_mod, "list_feature_change_requests", _list)
 
     response = client.get(
-        "/admin/features/change-requests",
+        "/v1/admin/features/change-requests",
         params={
-            "state": "pending",
+            "status": "pending",
             "action": "add",
             "q": "광화문",
-            "limit": "25",
+            "page_size": "25",
         },
     )
 
     assert response.status_code == 200
     body = response.json()
     assert body["data"]["items"][0]["review_mode"] == "immediate"
-    assert body["meta"]["count"] == 1
-    assert body["meta"]["limit"] == 25
-    assert body["meta"]["review_mode"] == "immediate"
+    assert body["data"]["items"][0]["status"] == "applied"
+    assert body["data"]["review_mode"] == "immediate"
+    assert body["meta"]["page"] == {
+        "page_size": 25,
+        "next_cursor": None,
+        "total": None,
+    }
 
 
 @pytest.mark.unit
@@ -242,7 +250,7 @@ def test_create_feature_request_uses_review_required_by_default(
     monkeypatch.setattr(router_mod, "submit_feature_change_request", _submit)
 
     response = client.post(
-        "/admin/features",
+        "/v1/admin/features",
         json={
             "kind": "place",
             "name": "사용자 장소",
@@ -257,7 +265,7 @@ def test_create_feature_request_uses_review_required_by_default(
 
     assert response.status_code == 200
     body = response.json()
-    assert body["data"]["request"]["state"] == "pending"
+    assert body["data"]["request"]["status"] == "pending"
     assert body["data"]["request"]["review_mode"] == "require_review"
     assert session.begin_count == 1
 
@@ -291,7 +299,7 @@ def test_patch_feature_request_can_apply_immediately(
     monkeypatch.setattr(router_mod, "submit_feature_change_request", _submit)
 
     response = client.patch(
-        "/admin/features/feature-1",
+        "/v1/admin/features/feature-1",
         json={
             "name": "수정된 장소",
             "reason": "사용자 수정",
@@ -299,7 +307,7 @@ def test_patch_feature_request_can_apply_immediately(
     )
 
     assert response.status_code == 200
-    assert response.json()["data"]["request"]["state"] == "applied"
+    assert response.json()["data"]["request"]["status"] == "applied"
     assert session.begin_count == 1
 
 
@@ -327,7 +335,7 @@ def test_delete_feature_request_submits_soft_delete(
 
     response = client.request(
         "DELETE",
-        "/admin/features/feature-1",
+        "/v1/admin/features/feature-1",
         json={"reason": "사용자 삭제 요청"},
     )
 
@@ -377,18 +385,18 @@ def test_approve_and_reject_feature_change_requests(
     monkeypatch.setattr(router_mod, "reject_feature_change_request", _reject)
 
     approve = client.post(
-        "/admin/features/change-requests/change-1/approve",
+        "/v1/admin/features/change-requests/change-1/approve",
         json={"operator": "reviewer"},
     )
     reject = client.post(
-        "/admin/features/change-requests/change-2/reject",
+        "/v1/admin/features/change-requests/change-2/reject",
         json={"operator": "reviewer", "reason": "중복"},
     )
 
     assert approve.status_code == 200
-    assert approve.json()["data"]["request"]["state"] == "applied"
+    assert approve.json()["data"]["request"]["status"] == "applied"
     assert reject.status_code == 200
-    assert reject.json()["data"]["request"]["state"] == "rejected"
+    assert reject.json()["data"]["request"]["status"] == "rejected"
     assert session.begin_count == 2
 
 
@@ -427,7 +435,7 @@ def test_deactivate_feature_uses_transaction(
     monkeypatch.setattr(router_mod, "deactivate_feature", _deactivate)
 
     response = client.post(
-        "/admin/features/feature-1/deactivate",
+        "/v1/admin/features/feature-1/deactivate",
         json={
             "reason": "운영상 제외",
             "operator": "local-admin",
@@ -453,7 +461,7 @@ def test_deactivate_missing_feature_returns_404(
     monkeypatch.setattr(router_mod, "deactivate_feature", _missing)
 
     response = client.post(
-        "/admin/features/missing/deactivate",
+        "/v1/admin/features/missing/deactivate",
         json={"reason": "없음"},
     )
 
@@ -478,9 +486,9 @@ def test_deactivate_state_conflict_returns_409(
     monkeypatch.setattr(router_mod, "deactivate_feature", _conflict)
 
     response = client.post(
-        "/admin/features/feature-deleted/deactivate",
+        "/v1/admin/features/feature-deleted/deactivate",
         json={"reason": "삭제됨"},
     )
 
     assert response.status_code == 409
-    assert "deleted" in response.json()["error"]["message"]
+    assert "deleted" in response.json()["detail"]

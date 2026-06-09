@@ -18,14 +18,9 @@ from krtour.map import __version__ as KRTOUR_MAP_VERSION
 from pydantic import BaseModel, ConfigDict
 
 from krtour.map_admin import __version__ as ADMIN_VERSION
+from krtour.map_admin.response import Meta, make_meta
 
 router = APIRouter(tags=["public"])
-
-
-class _Meta(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    duration_ms: int
 
 
 class HealthData(BaseModel):
@@ -41,7 +36,7 @@ class PublicHealthResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: HealthData
-    meta: _Meta
+    meta: Meta
 
 
 class VersionData(BaseModel):
@@ -59,11 +54,7 @@ class PublicVersionResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: VersionData
-    meta: _Meta
-
-
-def _ms(started_at: float) -> int:
-    return max(0, int((perf_counter() - started_at) * 1000))
+    meta: Meta
 
 
 @router.get(
@@ -76,7 +67,7 @@ async def get_public_health() -> PublicHealthResponse:
     started_at = perf_counter()
     return PublicHealthResponse(
         data=HealthData(status="ok", service="krtour-map"),
-        meta=_Meta(duration_ms=_ms(started_at)),
+        meta=make_meta(started_at=started_at),
     )
 
 
@@ -95,5 +86,5 @@ async def get_public_version() -> PublicVersionResponse:
             openapi_version=ADMIN_VERSION,
             commit=os.environ.get("KRTOUR_MAP_GIT_COMMIT") or None,
         ),
-        meta=_Meta(duration_ms=_ms(started_at)),
+        meta=make_meta(started_at=started_at),
     )
