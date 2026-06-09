@@ -6,9 +6,11 @@
 
 ## 진행 중인 작업 인덱스 (열린 `[ ]` 항목)
 
-> 총 15건. 상세는 아래 각 섹션. 완료 이력은 [`tasks-done.md`](tasks-done.md).
+> 총 12건. 상세는 아래 각 섹션. 완료 이력은 [`tasks-done.md`](tasks-done.md).
 
 - **다음 (우선순위 순)**
+  - [ ] T-215d — 사용자 데이터 버전 단조화(v0,v1,v2,v3… + 디폴트=최신) *(reload-safety F-2)*
+  - [ ] T-104 — dedup merge 영속화(재적재 후 loser 부활 차단) *(reload-safety F-1)*
   - [ ] TripMate 측 후속 작업 추적
 - **보류 (v2 1차 범위 외)**
   - [ ] Materialized View 도입 검토
@@ -439,6 +441,17 @@ lint-imports/pytest/coverage, frontend type-check/e2e). 실데이터 검증은 T
 
 ## 다음 (우선순위 순)
 
+- [ ] T-215d — **사용자 데이터 버전 단조화 (v0,v1,v2,v3… + 디폴트=최신)**
+  (`docs/reports/data-reload-safety-2026-06-10.md` F-2.) 현재 #317은 binary v0/v1
+  (`data_version=1` 하드코딩, `feature_versions` v1 덮어씀). 사용자 요건은 단조 증가 +
+  버전별 히스토리. 편집 시 `version=MAX+1`, `feature_versions` 새 row INSERT(이력 보존),
+  `features.data_version=latest`. provider 재적재 가드(`data_version>0`)·snapshot cleanup
+  (`<>'user_request'`)은 이미 호환이라 **쓰기 측만 보강**. (선택) 버전 조회/diff/revert API.
+- [ ] T-104 — **dedup merge 영속화 (재적재 후 loser 부활 차단)**
+  (`docs/reports/data-reload-safety-2026-06-10.md` F-1.) `merge_repo`가 loser를 soft-delete만
+  하고 재활성화 가드 미설정 → provider 재적재가 동일 `feature_id`로 loser를 되살려 중복 재생성.
+  권장: merge 시 loser에 `prevent_provider_reactivation` override 생성(기존 가드와 일관) 또는
+  `load_bundles`가 `feature_merge_history`(loser→master) 참조해 redirect/skip.
 - [x] T-012 — ADR-020+ 후속 결정 작성 (proposed → **accepted**, 사용자 승인
   2026-05-29) — ADR-030~033 결정자 라인 정정 + 교차 참조 (proposed) → (accepted)
   - **ADR-030 (accepted)** — 라이브러리 in-memory 캐시 금지
