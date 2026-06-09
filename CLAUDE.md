@@ -43,7 +43,7 @@ rename 완료(PR#148). 역할은 "debug UI"를 넘어 krtour-map **admin/API 프
   OpenAPI 연동(ADR-003 운영 모델 supersede). 046 = 이행 시 구 모델 호환 shim 금지
   + 주소는 kraddr-geo REST v2로 통일. 047 = standalone 고정 포트. 048 = REST API
   versioning을 admin/ops까지 확장(`/v1`, #317 위 보강) + envelope/pagination/parameter/
-  response 정합성 표준 + 코드/DB 명명 전파 — 정본 `docs/rest-api.md`, 실행 T-216a~f.
+  response 정합성 표준 + 코드/DB 명명 전파 — 정본 `docs/rest-api.md`, 실행 T-216a~g.
 - **고정 포트(ADR-047)**: API `9011` · admin UI `9012` · Dagster `9013` ·
   Postgres host `15433` · RustFS S3 `9003`/console `9004`.
 - **geocoding 정본**: kraddr-geo REST v2 `POST /v2/{reverse,geocode}`, 로컬 기본

@@ -2756,17 +2756,20 @@ bbox 인코딩 2종, `status`↔`state`, 응답 `*_key`↔`*_id`)가 #317의 고
    **supersede**하여 `/v1/admin/*`·`/v1/ops/*`·`/v1/debug/*`도 `/v1` 아래 둔다(사용자 지시).
    liveness `/health`·`/version`만 비버저닝 유지. 외부 표면(`/v1/features`·`/v1/tripmate`·
    `/v1/categories`·`/v1/providers`)은 #317 T-214b/d가 진행 중인 그대로.
-2. **envelope 공유 모델.** 라우터마다 재정의된 `FeatureListMeta`/`FeatureDetailMeta`/
-   `FeaturesNearbyByTargetMeta`…를 공유 `Meta{duration_ms, request_id}` + 제네릭
-   `ListData[T]{items,next_cursor,total_count}`로 통합하고, **성공 응답 meta에도 `request_id`**를
-   실어 오류 envelope와 추적 대칭을 맞춘다.
+2. **envelope 공유 모델 — payload와 메타 완전 분리.** 라우터별 `*Meta` 중복을 공유
+   `Meta`로 통합한다. `data`는 **payload만**(단건=객체, 목록=`{items:[...]}`, in-bounds=
+   `{clusters,items,cluster_unit}`). **페이지네이션·추적 메타는 `meta`로 모은다**:
+   `meta = { duration_ms, request_id, page?: { page_size, next_cursor, total } }`(`page`는
+   목록에만, `total`은 opt-in null 기본). 즉 `data.next_cursor`/`data.total_count`/파생
+   `count`를 **폐기**하고 `meta.page`로 일원화한다(payload=데이터, meta=cross-cutting →
+   확장 시 `meta.page`만 늘리면 됨). 성공 응답에도 `request_id`를 실어 오류 envelope와 대칭.
 3. **pagination 단일화(T-214e 심화).** page-size 파라미터를 `page_size`로 통일
-   (`limit`/`run_limit`/`event_limit` 폐기), 2-티어 캡(기본 50/200, 지도 nearby 100/500).
-   `/v1/features` 평면은 keyset `cursor`(현재 `limit le=5000` 폐기), `/v1/features/in-bounds`는
-   cursor 없이 `max_items` 하드캡 5000→2000 + 결정적 `feature_id` 정렬(T-212d). `total_count`는
-   `?include_total=true` opt-in(현재 `search`는 항상 COUNT).
+   (`limit`/`run_limit`/`event_limit` 폐기), 2-티어 캡(기본 50/200, 지도 nearby 100/500),
+   opaque `cursor`. `/v1/features` 평면은 keyset cursor(현재 `limit le=5000` 폐기),
+   `/v1/features/in-bounds`는 cursor 없이 `max_items` 하드캡 5000→2000 + 결정적 `feature_id`
+   정렬(T-212d). `total`은 `?include_total=true` opt-in(현재 `search`는 항상 COUNT).
 4. **parameter 일관성(T-214e 심화).** bbox는 분리 float 4개로 통일(`search` CSV `bbox`
-   deprecate). 다중값 필터는 단수 반복(`kind`/`category`/`provider`/`status`). lifecycle 상태
+   제거, clean cut). 다중값 필터는 단수 반복(`kind`/`category`/`provider`/`status`). lifecycle 상태
    필드는 `status`로 통일(`import-jobs`/`offline-uploads`/`feature-update-requests`의 `state`
    개명; `severity` 별개 축 유지). issue/violation noun은 외부 표면에서 `issue_*`로 통일.
 5. **에러 problem+json(T-214g 보강).** `{error:{…}}`를 RFC 7807 `application/problem+json`
@@ -2775,22 +2778,28 @@ bbox 인코딩 2종, `status`↔`state`, 응답 `*_key`↔`*_id`)가 #317의 고
    고정), 코드 enum(`FEATURE_NOT_FOUND`/`INVALID_BBOX`/`TOO_MANY_IDS`/`VALIDATION_ERROR`/
    `RATE_LIMITED`/`LOCK_BUSY`/`DESTRUCTIVE_DISABLED`/`UNAUTHORIZED`/`UPSTREAM_UNAVAILABLE`)을
    확장 `code`로 유지한다.
-6. **응답 식별자 접미사 규약(응답 본문까지).** 시스템 단일 식별자 `*_id`, 복합/자연키만
-   `*_key`. 응답의 UUID 단일 식별자(`review_key`/`violation_key`/`system_log_key`/
-   `api_call_log_key`/`override_key`/`step_key`)는 `*_id`로 개명. **단 외부 소비 read 응답
-   필드는 동결(개명 제외)**: `feature_id`·`cluster_key`·`target_key` 및 FeatureSummary 필드
-   (`lon`/`lat`/`name`/`category`/`marker_icon`/`marker_color`/`status`). 즉 `*_key`→`*_id`는
-   **내부 ops/admin 식별자에만** 적용하고 TripMate가 소비하는 read 계약은 바꾸지 않는다.
-7. **명명 통일을 코드/DB 레벨까지 전파(내부 소유에 한함).** REST 단 개명을 영구 edge 매핑으로
-   두면 ADR-046(무-shim)과 어긋나므로, **krtour 내부 소유 식별자/상태 컬럼은 물리 컬럼·ORM
-   속성·repo 함수/변수까지 end-to-end 정렬**(테이블별 1-PR migration, codegraph impact 선행).
-   대상: `review_key`→`review_id`, `violation_key`→`issue_id`, ops 로그/내부 키 `*_key`→`*_id`,
+6. **응답 식별자 접미사 규약 — 의미 기준 전면 적용(외부 read 포함).** 호환성 동기의 "외부
+   필드 동결"은 두지 않는다. 규칙은 **의미**로만 정한다: 시스템 단일 식별자 = `*_id`,
+   **복합/자연키만 `*_key`**. 응답 본문 전체(외부 read 포함)에 적용 — `review_key`→`review_id`,
+   `violation_key`→`issue_id`, `system_log_key`/`api_call_log_key`/`override_key`/`step_key`→
+   `*_id`, **`cluster_key`→`cluster_id`**(외부 read여도 단일 식별자라 개명). **`*_key` 유지는
+   근거 있는 것만**: 복합 자연키 `target_key`(+`external_system`), provider/source 어휘(ADR-044),
+   canonical `feature_id`. `lon`/`lat`/`name`/`category`/`marker_*`/`status`는 이미 일관 → 불변.
+7. **명명 통일을 코드/DB 레벨까지 전파.** REST 단 개명을 영구 edge 매핑으로 두면 ADR-046
+   (무-shim)과 어긋나므로, **식별자/상태를 물리 컬럼·ORM 속성·repo 함수/변수까지 end-to-end
+   정렬**(테이블별 1-PR migration, codegraph impact 선행). 대상: `review_key`→`review_id`,
+   `violation_key`→`issue_id`, ops 로그/내부 키 `*_key`→`*_id`, `cluster_key`→`cluster_id`,
    `state`→`status`. **경계(개명 금지)**: provider/source 어휘(ADR-044 — `dataset_key`/
    `source_record_key`/`source_entity_id`/`source_dataset_key`/`raw_*`), 복합 자연키
    `target_key`(+`external_system`), canonical `feature_id`.
-8. **정본 관계.** 외부(TripMate) `/v1` 계약 정본 = `docs/tripmate-rest-api.md`(#317). 전 표면
-   (admin/ops 포함) 카탈로그 + 본 정합성 표준의 정본 = `docs/rest-api.md`. 기계 정본 =
-   `openapi.json`/`openapi.user.json`. 충돌 시 OpenAPI 우선.
+8. **action sub-resource 규약(확장성).** 부수효과 있는 상태 전이(Dagster 트리거/snapshot/
+   lock/승인·거절)는 `POST {collection}/{id}/{verb}`(`deactivate`/`cancel`/`run-now`/`approve`/
+   `reject`/`load`/`validate`/`swap`), 순수 필드 수정은 `PATCH {id}`, 생성은 `POST {collection}`,
+   조회는 `GET`. 이 규약을 계약에 명시해 신규 action도 같은 형태로 확장한다.
+9. **정본 관계 — 단일 전 표면 정본으로 수렴.** drift 회피를 위해 **`docs/rest-api.md`를 전
+   표면(외부+admin/ops) 계약 단일 정본**으로 두고, `docs/tripmate-rest-api.md`는 TripMate
+   **소비 매핑 view**로 축소(계약 세부는 rest-api.md로 위임). 기계 정본 =
+   `openapi.json`/`openapi.user.json`. 충돌 시 OpenAPI 우선. (수렴은 T-216g.)
 
 ### 근거
 
@@ -2811,27 +2820,29 @@ bbox 인코딩 2종, `status`↔`state`, 응답 `*_key`↔`*_id`)가 #317의 고
   export·frontend·docs를 admin/ops까지 일괄 갱신해야 한다.
 - 내부 식별자 물리 개명은 테이블별 migration + 큰 mechanical churn(`review_key` 291·
   `violation_key` 118건)을 동반 — codegraph impact 후 단계화.
+- **무-호환 clean cut**: 외부 read 필드 개명(`cluster_key`→`cluster_id`)·envelope 재배치
+  (`data.next_cursor`→`meta.page`)·구 경로 제거가 소비자(TripMate)를 한 번에 깬다. pre-prod
+  단계라 의도적으로 수용 — 안정 spec commit에서 소비자가 일괄 추종한다.
 
-### 소비자 안전 (TripMate, #316 리뷰 반영)
+### 전환 정책 — 무-호환 clean cut (#316 2차 리뷰, 사용자 지시)
 
-외부 표면 변경(`/v1`·problem+json·파라미터 개명)은 TripMate httpx client(T-170, 머지됨)에
-직접 닿으므로 무중단 전환을 보장한다.
+사용자 지시 = **호환성은 고려하지 않는다. 늦기 전에 일관성·확장성·안정성으로 한 번에
+정리한다.** TripMate는 pre-production 소비자이므로 최신 spec을 따라오면 된다.
 
-1. **dual-support 전환 창**: 외부 `/v1` 도입 시 구 unprefixed 경로를 호환 alias로 한동안
-   **동시 지원**하고 OpenAPI에 `deprecated: true` + `Deprecation`/`Sunset` 헤더로 예고한다
-   (#317 T-214b 정책). `openapi.user.json`에 `/v1`이 반영되는 commit을 공지한다.
-2. **machine 정본 + drift gate**: `openapi.user.json`을 기계 정본으로 유지하고, `/v1` 안정
-   commit에서 TripMate가 codegen(T-210e) + httpx 계약 테스트를 그 spec에 pin한다.
-3. **에러 `code` 고정**: 위 #5대로 problem+json top-level 확장 `code`/`request_id` + enum 유지.
-4. **외부 read 필드 동결**: 위 #6대로 `feature_id`/`cluster_key`/`target_key` 및 FeatureSummary
-   필드 개명 제외 — TripMate 소비 read 계약 불변.
-5. **admin/ops `/v1`은 외부 무영향**: admin client는 TripMate 미구현(T-180)이라 최신 spec
-   기준으로 만들면 되며, 본 ADR의 내부 개명/admin versioning은 외부 소비자를 깨지 않는다.
+- **dual-support/deprecation 창 없음**: 구 unprefixed 경로·호환 alias를 유지하지 않고 `/v1`로
+  **즉시 단일 전환**한다(이중 코드경로 제거 = 안정성). `/debug/health`·`/debug/version`은
+  deprecate가 아니라 **제거**(→ `/health`·`/version`·`/v1/ops/health-deep`로 수렴).
+- **개명도 즉시 전면 적용**: 외부 read 포함 명명 규칙을 한 번에 적용(#6·#7). `cluster_key`→
+  `cluster_id` 등 외부 소비 필드도 그대로 개명한다 — 동결 carve-out 없음.
+- **기계 정본 + codegen pin**: `openapi.json`/`openapi.user.json`을 기계 정본으로 유지하고,
+  `/v1` 안정 commit에서 소비자(T-210e codegen + 계약 테스트)가 그 spec에 핀한다. 이게
+  유일한 "안전판"이며, 별도 호환 창은 두지 않는다.
+- **에러 `code` 고정**: problem+json top-level 확장 `code`/`request_id` + enum(#5).
 
 ### 후속
 
-- 실행은 `docs/tasks.md` **Phase 6.8 / T-216a~f**로 분해(#317의 T-214/T-215와 별도 번호).
+- 실행은 `docs/tasks.md` **Phase 6.8 / T-216a~g**로 분해(#317의 T-214/T-215와 별도 번호).
   `docs/tripmate-rest-api.md` §2.1의 "admin/ops 비버저닝" 문구는 본 ADR로 갱신했다.
-- **반영 순서**: 외부 `/v1`(#317 T-214b/d)을 dual-support로 먼저 고정 → TripMate가 base/
-  에러파싱/파라미터 갱신(소비자측 T-181) → admin/ops `/v1`(T-216a, 외부 무영향)·내부 명명
-  전파(T-216e/f)는 병행. API shape `/v1` 안정 commit에서 T-210e(codegen) 진행.
+- **반영 순서**: 외부+admin `/v1` clean cut(T-216a/b) → 명명·코드/DB 전파(T-216e/f) →
+  정본 수렴(T-216g). API shape `/v1` 안정 commit에서 T-210e(codegen) 진행. 소비자(TripMate)는
+  안정 spec commit 기준으로 base/에러파싱/파라미터/필드명을 일괄 갱신한다.

@@ -6,7 +6,7 @@
 PR #316을 #317 머지본 위로 재작성(문서 전용, **PR까지 / 머지 보류**).
 
 - **ADR-048** + **`docs/rest-api.md`**(전 표면 카탈로그+표준; 외부 정본은 tripmate-rest-api.md).
-- 실행 **Phase 6.8 / T-216a~f**(admin `/v1` mount → pagination 단일화 → envelope 공유모델 →
+- 실행 **Phase 6.8 / T-216a~g**(admin `/v1` mount → pagination 단일화 → envelope 공유모델 →
   parameter/error → 명명 → 코드/DB 전파).
 
 **다음 한 작업 후보**: (1) **T-216a** admin/ops `/v1` mount, 또는 (2) #317 후속 **T-215b/c**

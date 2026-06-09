@@ -2,6 +2,23 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-09 (claude) — ADR-048 무-호환 재검토(#316 2차): 일관성·확장성·안정성 우선
+
+**작업**: 사용자 지시 "호환성 신경쓰지 말고 늦기 전에 일관성/확장성/안정성으로 정리". 앞서
+호환성 동기로 넣은 hedge들을 걷어내고 ADR-048/rest-api.md/T-216을 재정리. PR까지, 머지 보류.
+
+- **외부 read "동결" carve-out 제거**: 명명 규칙을 의미 기준으로 전면 적용 —
+  `cluster_key`→`cluster_id`(외부 read여도 단일 식별자). `*_key` 유지는 근거 있는 것만
+  (복합 자연키 `target_key`, provider 어휘 ADR-044, canonical `feature_id`).
+- **envelope payload/meta 완전 분리**: `data`=payload만, 페이지네이션은
+  `meta.page{page_size,next_cursor,total}`로 일원화. `data.next_cursor`/파생 `count` 폐기.
+- **dual-support/deprecation 창 제거 → `/v1` clean cut**: 구 unprefixed/alias 미유지,
+  `/debug/health`·`/debug/version` 제거. 이중 코드경로 제거(안정성).
+- **action sub-resource 규약 명문화**(부수효과=POST verb / 순수수정=PATCH) + **단일 정본
+  수렴**(rest-api.md, tripmate-rest-api.md는 소비 view로 축소 — T-216g).
+- ADR-048 결정 #2/#6/#8/#9 개정 + "전환 정책(무-호환)" 절로 "소비자 안전" 대체. T-216a~g.
+- **검증**: 문서 전용(코드 없음).
+
 ## 2026-06-09 (claude) — ADR-048: REST versioning admin/ops 확장 + 정합성 표준(+ #317 reconcile)
 
 **작업**: #317(T-214/T-215, 머지됨)의 REST `/v1` 1차 정리 위에 사용자 지시 2건을 반영 —

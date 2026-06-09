@@ -212,7 +212,8 @@ POST               /tripmate/features/batch   (admin profile에도 노출)
 - **ADR-048**: #317 위 보강 — versioning을 **admin/ops까지 확장**(사용자 지시), envelope
   공유모델, pagination 단일화(`page_size`/2-티어 캡/`total_count` opt-in), parameter(bbox/
   status/issue), RFC7807 problem+json, 응답 `*_key`→`*_id`, **코드/DB 명명 전파**. 전 표면
-  계약·표준 정본 = `docs/rest-api.md`. 실행 = `docs/tasks.md` **Phase 6.8 / T-216a~f**.
+  계약·표준 정본 = `docs/rest-api.md`. 실행 = `docs/tasks.md` **Phase 6.8 / T-216a~g**
+  (무-호환 clean cut — `meta.page` envelope, `cluster_key`→`cluster_id`, 정본 수렴 포함).
 
 ---
 
