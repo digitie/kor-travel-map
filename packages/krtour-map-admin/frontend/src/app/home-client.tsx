@@ -248,13 +248,13 @@ export function HomePageClient() {
               <CardContent className="flex flex-col gap-3">
                 <div className="flex flex-wrap gap-2">
                   <StatusBadge
-                    status={health.data?.status ?? (health.isError ? "error" : "loading")}
+                    status={health.data?.data?.status ?? (health.isError ? "error" : "loading")}
                   />
                   {version.data ? (
-                    <Badge variant="outline">admin {version.data.admin}</Badge>
+                    <Badge variant="outline">admin {version.data.data.version}</Badge>
                   ) : null}
                   {version.data ? (
-                    <Badge variant="outline">map {version.data.krtour_map}</Badge>
+                    <Badge variant="outline">map {version.data.data.krtour_map_version}</Badge>
                   ) : null}
                 </div>
               </CardContent>

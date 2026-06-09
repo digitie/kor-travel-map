@@ -1,18 +1,18 @@
-"""``test_routers`` — admin 첫 라우터 health/version (PR#35, ADR-031/035).
+"""``test_routers`` — app 라우터 mount/gate 검증.
 
-본 PR 테스트 범위:
-- ``GET /debug/health`` 정적 200 OK + schema 정합
-- ``GET /debug/version`` admin + krtour_map version 응답
-- ``debug_routes_enabled=False`` 시 라우터 unregister 검증
-- ``features_routes_enabled=False`` 시 DB 의존 features/admin/ops unregister 검증
-- ``app.openapi()``가 ``HealthResponse`` + ``VersionResponse`` 스키마를 노출
+본 테스트 범위:
+- ``/debug/health``·``/debug/version`` **제거** 검증(T-214h/ADR-048 clean cut) — 공용
+  liveness는 ``/health``·``/version``(public_status, `test_public_status_router`) +
+  ``/ops/health-deep``으로 수렴.
+- ``debug_routes_enabled=False`` 시 ``/debug/*``(etl) unregister.
+- ``features_routes_enabled=False`` 시 DB 의존 features/admin/ops unregister.
+- ``app.openapi()`` info.title/version 정합.
 """
 
 from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
-from krtour.map import __version__ as KRTOUR_MAP_VERSION
 
 from krtour.map_admin import __version__ as ADMIN_VERSION
 from krtour.map_admin.app import create_app
@@ -27,44 +27,25 @@ def client() -> TestClient:
 
 
 @pytest.mark.unit
-def test_health_returns_ok(client: TestClient) -> None:
-    """``GET /debug/health`` 200 + ``status='ok'`` + service 식별자."""
-    response = client.get("/debug/health")
-    assert response.status_code == 200
-    body = response.json()
-    assert body == {"status": "ok", "service": "krtour-map-admin"}
-
-
-@pytest.mark.unit
-def test_health_extra_fields_rejected_on_response_schema(client: TestClient) -> None:
-    """응답 schema가 ``extra='forbid'`` — 응답 키가 정확히 status/service만."""
-    response = client.get("/debug/health")
-    body = response.json()
-    assert set(body.keys()) == {"status", "service"}
-
-
-@pytest.mark.unit
-def test_version_returns_both_versions(client: TestClient) -> None:
-    """``GET /debug/version`` — admin + krtour_map version 모두 응답."""
-    response = client.get("/debug/version")
-    assert response.status_code == 200
-    body = response.json()
-    assert body == {
-        "admin": ADMIN_VERSION,
-        "krtour_map": KRTOUR_MAP_VERSION,
-    }
-    # 둘 다 비어 있지 않다.
-    assert body["admin"]
-    assert body["krtour_map"]
-
-
-@pytest.mark.unit
-def test_debug_routes_disabled_unmounts_health_and_version() -> None:
-    """``debug_routes_enabled=False``면 ``/debug/*`` 라우터 unmounted → 404."""
-    app = create_app(AdminSettings(debug_routes_enabled=False))
-    client = TestClient(app)
+def test_debug_health_version_removed(client: TestClient) -> None:
+    """``/debug/health``·``/debug/version``은 제거됐다 (404 + openapi 미노출)."""
     assert client.get("/debug/health").status_code == 404
     assert client.get("/debug/version").status_code == 404
+    spec = client.get("/openapi.json").json()
+    assert "/debug/health" not in spec["paths"]
+    assert "/debug/version" not in spec["paths"]
+    # 공용 liveness는 비버저닝 /health·/version으로 수렴.
+    assert "/health" in spec["paths"]
+    assert "/version" in spec["paths"]
+
+
+@pytest.mark.unit
+def test_debug_routes_disabled_unmounts_etl() -> None:
+    """``debug_routes_enabled=False``면 ``/debug/*``(etl) unmounted → 404."""
+    app = create_app(AdminSettings(debug_routes_enabled=False))
+    client = TestClient(app)
+    spec = client.get("/openapi.json").json()
+    assert not any(p.startswith("/debug/") for p in spec["paths"])
 
 
 @pytest.mark.unit
@@ -100,17 +81,6 @@ def test_admin_ops_route_gates_can_be_enabled_explicitly() -> None:
     assert "/admin/offline-uploads" in spec["paths"]
     assert "/ops/import-jobs" in spec["paths"]
     assert "/ops/dagster/summary" in spec["paths"]
-
-
-@pytest.mark.unit
-def test_openapi_lists_health_and_version_routes(client: TestClient) -> None:
-    """``GET /openapi.json``에 두 라우터 + 두 schema 노출."""
-    spec = client.get("/openapi.json").json()
-    assert "/debug/health" in spec["paths"]
-    assert "/debug/version" in spec["paths"]
-    schemas = spec["components"]["schemas"]
-    assert "HealthResponse" in schemas
-    assert "VersionResponse" in schemas
 
 
 @pytest.mark.unit

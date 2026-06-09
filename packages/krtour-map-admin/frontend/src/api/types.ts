@@ -573,26 +573,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/debug/health": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * liveness probe
-         * @description 정적 응답. 본 라우터가 200을 내면 FastAPI app이 살아 있다. DB/외부 자원의 deep health check는 별도 ``/ops/health-deep`` (Sprint 3+).
-         */
-        get: operations["get_health_debug_health_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/debug/mois-license/{license_id}": {
         parameters: {
             query?: never;
@@ -602,26 +582,6 @@ export interface paths {
         };
         /** MOIS 인허가 on-demand 상세 (Step D, 캐시만) */
         get: operations["get_mois_license_detail_debug_mois_license__license_id__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/debug/version": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * package versions
-         * @description 본 디버그 패키지 + 메인 라이브러리 distribution version 응답. ADR-038 CI 재활성화 이후 PR 추적 / TripMate 측 호환성 점검에 사용.
-         */
-        get: operations["get_version_debug_version_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3038,22 +2998,6 @@ export interface components {
             status: string;
         };
         /**
-         * HealthResponse
-         * @description `/debug/health` 응답 schema.
-         */
-        HealthResponse: {
-            /**
-             * Service
-             * @description 서비스 식별자 — ``'krtour-map-admin'``.
-             */
-            service: string;
-            /**
-             * Status
-             * @description 항상 ``'ok'``. unhealthy면 본 라우터에 도달 X.
-             */
-            status: string;
-        };
-        /**
          * IssueCoordBody
          * @description WGS84 좌표. 외부 인터페이스는 lon/lat 순서 (SKILL.md DO NOT #5).
          */
@@ -4233,22 +4177,6 @@ export interface components {
             openapi_version: string;
             /** Version */
             version: string;
-        };
-        /**
-         * VersionResponse
-         * @description ``/debug/version`` 응답 schema.
-         */
-        VersionResponse: {
-            /**
-             * Admin
-             * @description ``krtour-map-admin`` distribution version.
-             */
-            admin: string;
-            /**
-             * Krtour Map
-             * @description ``python-krtour-map`` (메인) distribution version.
-             */
-            krtour_map: string;
         };
         /**
          * WeatherCardData
@@ -5977,26 +5905,6 @@ export interface operations {
             };
         };
     };
-    get_health_debug_health_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HealthResponse"];
-                };
-            };
-        };
-    };
     get_mois_license_detail_debug_mois_license__license_id__get: {
         parameters: {
             query?: never;
@@ -6031,26 +5939,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_version_debug_version_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["VersionResponse"];
                 };
             };
         };
@@ -6670,9 +6558,16 @@ export interface operations {
                 kind?: string[] | null;
                 /** @description category code 반복 필터. */
                 category?: string[] | null;
-                /** @description min_lon,min_lat,max_lon,max_lat CSV. */
-                bbox?: string | null;
-                limit?: number;
+                /** @description bbox 최소 경도 (WGS84). */
+                min_lon?: number | null;
+                /** @description bbox 최소 위도. */
+                min_lat?: number | null;
+                /** @description bbox 최대 경도. */
+                max_lon?: number | null;
+                /** @description bbox 최대 위도. */
+                max_lat?: number | null;
+                /** @description 페이지 크기. */
+                page_size?: number;
                 cursor?: string | null;
             };
             header?: never;

@@ -6,7 +6,7 @@
 
 ## 진행 중인 작업 인덱스 (열린 `[ ]` 항목)
 
-> 총 27건. 상세는 아래 각 섹션. 완료 이력은 [`tasks-done.md`](tasks-done.md).
+> 총 23건. 상세는 아래 각 섹션. 완료 이력은 [`tasks-done.md`](tasks-done.md).
 
 - **T-RV-50 시리즈 — T-RV-04b 완전 마무리 + 후속 (데이터소스 전수 + dedup UI + maplibre)**
   - [ ] T-RV-53 휴양림/수목원(krforest) feature-load
@@ -25,11 +25,6 @@
   - [ ] T-210c
   - [ ] T-210d
   - [ ] T-210e
-- **Phase 6.6 — REST API v1 정리 후속 (2026-06-08, `T-214`)**
-  - [ ] T-214e — pagination/parameter 일관성 정리.
-  - [ ] T-214f — POI cache target write 표면 결정.
-  - [ ] T-214g — error/idempotency/rate-limit/deprecation header 명시.
-  - [ ] T-214h — endpoint naming cleanup.
 - **Phase 6.7 — Feature 사용자 요청 CRUD/versioning (2026-06-08, `T-215`)**
   - [ ] T-215b — admin UI feature change queue 화면.
   - [ ] T-215c — frontend generated type/e2e workflow 보강.
@@ -670,21 +665,31 @@ admin 영역으로 이동한다.
   gate로 유지(ServiceToken scheme 보존). `USER_OPERATIONS`·OpenAPI 두 profile·frontend
   generated type·테스트·문서 일괄 갱신. `/v1` prefix 부여는 T-214b/T-216a에서. 응답은 list
   `items[]`와 충돌하지 않게 `data={found:{feature_id:Feature},missing[]}`로 정렬(후속).
-- [ ] **T-214e — pagination/parameter 일관성 정리.**
-  페이지 가능한 목록은 `cursor/page_size`, bounded 지도 조회는 `limit`, 다중 값은 반복
-  query parameter, bbox는 `min_lon/min_lat/max_lon/max_lat`를 기본으로 문서와 schema를
-  맞춘다. `/features` flat 목록은 admin 호환용으로만 두거나 cursor 지원을 추가한다.
-- [ ] **T-214f — POI cache target write 표면 결정.**
-  TripMate가 POI target upsert/delete를 직접 해야 하면 `/admin/poi-cache-targets`를 노출하지
-  말고 service-safe `/v1/poi-cache-targets/{external_system}/{target_key}` 경로를 추가한다.
-  직접 write를 허용하지 않으면 TripMate admin/operator flow만 허용한다고 명시한다.
-- [ ] **T-214g — error/idempotency/rate-limit/deprecation header 명시.**
-  `Idempotency-Key`, `Retry-After`, `X-RateLimit-*`, `Deprecation`, `Sunset`,
-  `X-Request-ID` 규약과 표준 error code를 OpenAPI schema/라우터 테스트/문서에 고정한다.
-- [ ] **T-214h — endpoint naming cleanup.**
-  `/debug/health`·`/debug/version`은 debug 호환 경로로만 표시하고 public 상태 확인은
-  `/health`·`/version`·`/ops/health-deep`으로 수렴한다. 차기 major에서
-  `/admin/dedup-review`/`/admin/enrichment-review` 복수화 가능 여부를 검토한다.
+- [x] **T-214e — pagination/parameter 일관성 정리.** (2026-06-09)
+  규약 확정: **페이지 가능한 목록 = `page_size`+`cursor`**(search·nearby·admin/ops),
+  **bounded 지도 조회 = `limit`**(`/features` flat·`/features/in-bounds` — 뷰포트 로드),
+  다중 값 = 단수 반복 query parameter, bbox = `min_lon/min_lat/max_lon/max_lat` 4-float.
+  코드: `/v1/features/search`의 CSV `bbox` 제거 → 4-float, `limit`→`page_size`,
+  `_parse_bbox_csv` 삭제. `/features` flat은 bounded map이라 `limit` 유지(admin/지도 호환).
+  (envelope `meta.page`·`total` opt-in·2-티어 캡 등 심화는 T-216b/c, ADR-048.)
+- [x] **T-214f — POI cache target write 표면 결정.** (2026-06-09)
+  **결정: TripMate 직접 write 미허용 — admin/operator flow만.** POI cache target
+  upsert/delete는 `/admin/poi-cache-targets*`(인프라 SSO + kill-switch)로만 수행하고,
+  service-safe `/v1/poi-cache-targets/*` write 경로는 **추가하지 않는다**. TripMate는 등록된
+  target 기준 read(`GET /v1/features/nearby/by-target`)만 소비. (rest-api.md·
+  tripmate-rest-api.md 명시.)
+- [x] **T-214g — error/idempotency/rate-limit/deprecation header 규약 명시.** (2026-06-09)
+  규약을 `docs/rest-api.md`에 단일 표로 고정: `X-Request-ID`(구현됨 — 모든 응답),
+  problem+json `code` enum(§4), `Retry-After`(LOCK_BUSY/RATE_LIMITED), `Idempotency-Key`·
+  `RateLimit-*`·`Deprecation`/`Sunset`(규약 정의 + 적용 시점 명시; idempotency/rate-limit
+  구현은 T-216 외부 변경 호출에서). 실제 problem+json 본문 전환은 T-216d.
+- [x] **T-214h — endpoint naming cleanup.** (2026-06-09)
+  `/debug/health`·`/debug/version` **제거**(ADR-048 clean cut — 공용 `/health`·`/version`과
+  중복). `health.py`/`version.py` 라우터 삭제, app.py/__init__ 정리, 상태확인은
+  `/health`·`/version`(public_status) + `/ops/health-deep`(readiness)로 수렴. frontend
+  `useHealth`/`useVersion`을 public `/health`·`/version`(envelope) 소비로 repoint.
+  `dedup-review`/`enrichment-review` **복수화는 T-216e(major 컷)로 이월** — 본 task에선
+  결정만(소비자 영향 큰 path 개명은 ADR-048 명명 묶음에서 일괄).
 
 
 **Phase 6.7 — Feature 사용자 요청 CRUD/versioning (2026-06-08, `T-215`)**

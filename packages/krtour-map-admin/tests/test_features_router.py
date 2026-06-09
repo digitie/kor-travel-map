@@ -347,10 +347,14 @@ def test_search_features_maps_page_and_requires_scope(
 
 
 @pytest.mark.unit
-def test_search_features_rejects_bad_bbox(
+def test_search_features_rejects_partial_bbox(
     client: TestClient,
 ) -> None:
-    r = client.get("/v1/features/search", params={"bbox": "127,37,126,38"})
+    # bbox는 4개(min_lon/min_lat/max_lon/max_lat) 모두 지정해야 한다 (T-214e).
+    r = client.get(
+        "/v1/features/search",
+        params={"min_lon": 127, "min_lat": 37, "max_lon": 126},
+    )
     assert r.status_code == 422
     assert "bbox" in r.json()["error"]["message"]
 

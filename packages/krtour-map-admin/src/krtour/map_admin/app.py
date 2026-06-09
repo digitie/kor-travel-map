@@ -51,7 +51,6 @@ from krtour.map_admin.routers import (
     etl_router,
     feature_update_requests_router,
     features_router,
-    health_router,
     mois_detail_router,
     offline_uploads_router,
     ops_logs_router,
@@ -59,7 +58,6 @@ from krtour.map_admin.routers import (
     poi_cache_targets_router,
     providers_router,
     public_status_router,
-    version_router,
 )
 from krtour.map_admin.settings import AdminSettings
 
@@ -191,8 +189,8 @@ def create_app(settings: AdminSettings | None = None) -> FastAPI:
     Returns
     -------
     FastAPI
-        ``/debug/health``, ``/debug/version`` 라우터가 마운트된 app. 후속 PR에서
-        ``/features/...``, ``/admin/...``, ``/ops/...`` 추가.
+        liveness ``/health``·``/version``(public) + ``/v1/features/...``·``/admin/...``·
+        ``/ops/...``·``/debug/...`` 라우터가 설정 flag에 따라 마운트된 app.
 
     Notes
     -----
@@ -307,11 +305,11 @@ def create_app(settings: AdminSettings | None = None) -> FastAPI:
             return response
 
     # public liveness/version은 의존 없는 정적 응답 — 항상 mount (T-213h).
+    # `/debug/health`·`/debug/version`은 이와 중복이라 제거(T-214h/ADR-048 clean cut) —
+    # 상태확인은 `/health`·`/version`(public) + `/ops/health-deep`(readiness)로 수렴.
     application.include_router(public_status_router)
 
     if settings.debug_routes_enabled:
-        application.include_router(health_router)
-        application.include_router(version_router)
         application.include_router(etl_router)
 
     if settings.features_routes_enabled:

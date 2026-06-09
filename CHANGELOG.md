@@ -5,6 +5,19 @@
 
 ## [Unreleased]
 
+### API — T-214 tail: pagination/parameter·error 규약 + `/debug/health|version` 제거 (T-214e/f/g/h, 2026-06-09)
+
+- **CHANGED (breaking)**: `GET /v1/features/search`의 bbox를 CSV `bbox`에서 분리 4-float
+  (`min_lon`/`min_lat`/`max_lon`/`max_lat`)로 바꾸고, `limit`→`page_size`로 통일(T-214e).
+  bounded 지도 조회(`/v1/features`·`/v1/features/in-bounds`)는 `limit` 유지.
+- **CHANGED (breaking)**: `/debug/health`·`/debug/version` **제거**(T-214h, ADR-048 clean cut) —
+  공용 `/health`·`/version` + `/ops/health-deep`과 중복. `health.py`/`version.py` 라우터 삭제,
+  frontend status 위젯을 public 엔드포인트로 repoint.
+- **결정(T-214f)**: POI cache target write(upsert/delete)는 **admin/operator flow 전용**.
+  TripMate 직접 write 미허용 — service-safe `/v1/poi-cache-targets/*` write 경로 안 둠.
+- **DOC(T-214g)**: 표준 헤더 규약(`X-Request-ID`/`Retry-After`/`Idempotency-Key`/`RateLimit-*`/
+  `Deprecation`/`Sunset`) + 에러 코드 enum을 `docs/rest-api.md §4.1`에 단일 표로 고정.
+
 ### API — 사용자/서비스 표면에 `/v1` prefix 도입 (T-214b, 2026-06-09)
 
 - **CHANGED (breaking)**: `features`/`categories`/`providers` 라우터를 **`/v1` prefix**로

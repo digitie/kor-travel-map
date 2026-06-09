@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-09 (claude) — T-214 tail (e/f/g/h): pagination/param·error 규약 + debug health/version 제거
+
+**작업**: 사용자 지시로 T-214e→f→g→h를 한 PR로. (이어서 T-214h 포함 지시.)
+
+- **T-214e(code)**: `/v1/features/search` bbox CSV→분리 4-float, `limit`→`page_size`,
+  `_parse_bbox_csv` 삭제. 규약: pageable=page_size+cursor / bounded map=limit / bbox=4-float.
+- **T-214f(결정)**: POI cache target write는 admin/operator flow 전용(직접 write 미허용).
+- **T-214g(doc)**: 표준 헤더 규약 표(`docs/rest-api.md §4.1`) + 에러 코드 enum 고정.
+- **T-214h(code)**: `/debug/health`·`/debug/version` 제거(ADR-048 clean cut, 공용과 중복).
+  `health.py`/`version.py` 삭제, app.py/__init__ 정리, test_routers 재작성. frontend
+  `useHealth`/`useVersion`을 public `/health`·`/version`(envelope) 소비로 repoint
+  (client.ts 타입/경로 + home-client 필드). dedup-review 복수화는 T-216e로 이월.
+- **검증**: ruff/mypy --strict(25)/admin pytest **235 passed**/OpenAPI drift/lint-imports/
+  frontend gen:types:check·type-check(src+e2e)·eslint green.
+
 ## 2026-06-09 (claude) — tasks.md 분리: 진행(tasks.md) / 완료·아카이브(tasks-done.md)
 
 **작업**: tasks.md가 1567줄로 길어 확인이 어려워 분리. 블록(섹션/Phase) 단위로 열린 `[ ]`

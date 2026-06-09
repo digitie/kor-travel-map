@@ -19,8 +19,8 @@ const BASE_URL = publicUrlEnv(
 
 type ClientSchemas = components["schemas"];
 
-export type HealthResponse = ClientSchemas["HealthResponse"];
-export type VersionResponse = ClientSchemas["VersionResponse"];
+export type HealthResponse = ClientSchemas["PublicHealthResponse"];
+export type VersionResponse = ClientSchemas["PublicVersionResponse"];
 
 class AdminApiError extends Error {
   constructor(
@@ -137,12 +137,12 @@ export function deleteJson<T>(path: string): Promise<T> {
 
 /** `GET /debug/health` — backend liveness probe (PR#35). */
 export function fetchHealth(): Promise<HealthResponse> {
-  return getJson<HealthResponse>("/debug/health");
+  return getJson<HealthResponse>("/health");
 }
 
 /** `GET /debug/version` — backend + lib version 정보 (PR#35). */
 export function fetchVersion(): Promise<VersionResponse> {
-  return getJson<VersionResponse>("/debug/version");
+  return getJson<VersionResponse>("/version");
 }
 
 export { AdminApiError, BASE_URL };
