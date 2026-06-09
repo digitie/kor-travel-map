@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from krtour.map_admin.db import get_session
+from krtour.map_admin.response import Meta, make_meta
 
 router = APIRouter(tags=["providers"])
 
@@ -40,14 +41,6 @@ class ProviderLastSyncData(BaseModel):
 
     provider: str
     items: list[SyncStateSummary]
-    count: int
-
-
-class _Meta(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    count: int
-    duration_ms: int
 
 
 class ProviderLastSyncResponse(BaseModel):
@@ -56,7 +49,7 @@ class ProviderLastSyncResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: ProviderLastSyncData
-    meta: _Meta
+    meta: Meta
 
 
 @router.get(
@@ -91,8 +84,7 @@ async def get_provider_last_sync(
         )
         for s in states
     ]
-    duration_ms = max(0, int((perf_counter() - started_at) * 1000))
     return ProviderLastSyncResponse(
-        data=ProviderLastSyncData(provider=provider, items=items, count=len(items)),
-        meta=_Meta(count=len(items), duration_ms=duration_ms),
+        data=ProviderLastSyncData(provider=provider, items=items),
+        meta=make_meta(started_at=started_at),
     )

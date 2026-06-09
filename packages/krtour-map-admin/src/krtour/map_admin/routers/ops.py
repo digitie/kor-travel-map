@@ -31,6 +31,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from krtour.map_admin.db import get_session
+from krtour.map_admin.response import Meta, make_meta
 
 __all__ = [
     "router",
@@ -60,7 +61,7 @@ class OpsImportJobRecord(BaseModel):
     load_batch_id: str | None = None
     parent_job_id: str | None = None
     payload: dict[str, Any]
-    state: str
+    status: str
     progress: int
     current_stage: str | None = None
     source_checksum: str | None = None
@@ -78,25 +79,6 @@ class OpsImportJobsData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     items: list[OpsImportJobRecord]
-    next_cursor: str | None = None
-
-
-class OpsListMeta(BaseModel):
-    """목록 공통 meta."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    count: int
-    page_size: int
-    duration_ms: int
-
-
-class OpsDetailMeta(BaseModel):
-    """단건 응답 공통 meta."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    duration_ms: int
 
 
 class OpsImportJobsListResponse(BaseModel):
@@ -105,7 +87,7 @@ class OpsImportJobsListResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: OpsImportJobsData
-    meta: OpsListMeta
+    meta: Meta
 
 
 class OpsImportJobResponse(BaseModel):
@@ -114,7 +96,7 @@ class OpsImportJobResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: OpsImportJobRecord
-    meta: OpsDetailMeta
+    meta: Meta
 
 
 class OpsConsistencyReportRecord(BaseModel):
@@ -137,7 +119,6 @@ class OpsConsistencyReportsData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     items: list[OpsConsistencyReportRecord]
-    next_cursor: str | None = None
 
 
 class OpsConsistencyReportsListResponse(BaseModel):
@@ -146,7 +127,7 @@ class OpsConsistencyReportsListResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: OpsConsistencyReportsData
-    meta: OpsListMeta
+    meta: Meta
 
 
 class OpsIntegrityIssueRecord(BaseModel):
@@ -154,7 +135,7 @@ class OpsIntegrityIssueRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    violation_key: str
+    issue_id: str
     provider: str | None = None
     dataset_key: str | None = None
     source_record_key: str | None = None
@@ -174,7 +155,6 @@ class OpsIntegrityIssuesData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     items: list[OpsIntegrityIssueRecord]
-    next_cursor: str | None = None
 
 
 class OpsIntegrityIssuesListResponse(BaseModel):
@@ -183,7 +163,7 @@ class OpsIntegrityIssuesListResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: OpsIntegrityIssuesData
-    meta: OpsListMeta
+    meta: Meta
 
 
 class OpsDedupFpStatsRecord(BaseModel):
@@ -235,7 +215,7 @@ class OpsMetricsResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: OpsMetricsData
-    meta: OpsDetailMeta
+    meta: Meta
 
 
 def _job(row: OpsImportJob) -> OpsImportJobRecord:
@@ -245,7 +225,7 @@ def _job(row: OpsImportJob) -> OpsImportJobRecord:
         load_batch_id=row.load_batch_id,
         parent_job_id=row.parent_job_id,
         payload=row.payload,
-        state=row.state,
+        status=row.state,
         progress=row.progress,
         current_stage=row.current_stage,
         source_checksum=row.source_checksum,
@@ -254,7 +234,7 @@ def _job(row: OpsImportJob) -> OpsImportJobRecord:
         started_at=row.started_at,
         finished_at=row.finished_at,
         heartbeat_at=row.heartbeat_at,
-        status_url=f"/ops/import-jobs/{row.job_id}",
+        status_url=f"/v1/ops/import-jobs/{row.job_id}",
     )
 
 
@@ -274,7 +254,7 @@ def _report(row: OpsConsistencyReport | None) -> OpsConsistencyReportRecord | No
 
 def _issue(row: OpsIntegrityIssue) -> OpsIntegrityIssueRecord:
     return OpsIntegrityIssueRecord(
-        violation_key=row.violation_key,
+        issue_id=row.violation_key,
         provider=row.provider,
         dataset_key=row.dataset_key,
         source_record_key=row.source_record_key,
@@ -322,9 +302,7 @@ def _metrics_response(
             data_integrity_issues=issue_counts,
             latest_consistency_report=latest_report,
         ),
-        meta=OpsDetailMeta(
-            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
-        ),
+        meta=make_meta(started_at=started_at),
     )
 
 
@@ -374,7 +352,7 @@ class OpsHealthDeepResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: OpsHealthDeepData
-    meta: OpsDetailMeta
+    meta: Meta
 
 
 async def _check_database(session: AsyncSession) -> OpsHealthCheck:
@@ -458,16 +436,14 @@ async def get_ops_health_deep(
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     return OpsHealthDeepResponse(
         data=OpsHealthDeepData(status=overall, checks=checks),
-        meta=OpsDetailMeta(
-            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
-        ),
+        meta=make_meta(started_at=started_at),
     )
 
 
 @router.get("/import-jobs", response_model=OpsImportJobsListResponse)
 async def list_import_jobs(
     session: Annotated[AsyncSession, Depends(get_session)],
-    state: Annotated[ImportJobState | None, Query()] = None,
+    status_filter: Annotated[ImportJobState | None, Query(alias="status")] = None,
     kind: Annotated[str | None, Query()] = None,
     load_batch_id: Annotated[UUID | None, Query()] = None,
     parent_job_id: Annotated[UUID | None, Query()] = None,
@@ -479,7 +455,7 @@ async def list_import_jobs(
     try:
         page = await list_ops_import_jobs(
             session,
-            state=state,
+            state=status_filter,
             kind=kind,
             load_batch_id=str(load_batch_id) if load_batch_id is not None else None,
             parent_job_id=str(parent_job_id) if parent_job_id is not None else None,
@@ -489,14 +465,11 @@ async def list_import_jobs(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return OpsImportJobsListResponse(
-        data=OpsImportJobsData(
-            items=[_job(item) for item in page.items],
-            next_cursor=page.next_cursor,
-        ),
-        meta=OpsListMeta(
-            count=len(page.items),
+        data=OpsImportJobsData(items=[_job(item) for item in page.items]),
+        meta=make_meta(
+            started_at=started_at,
             page_size=page_size,
-            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
+            next_cursor=page.next_cursor,
         ),
     )
 
@@ -516,9 +489,7 @@ async def get_import_job(
         )
     return OpsImportJobResponse(
         data=_job(row),
-        meta=OpsDetailMeta(
-            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
-        ),
+        meta=make_meta(started_at=started_at),
     )
 
 
@@ -546,12 +517,11 @@ async def list_consistency_reports(
     return OpsConsistencyReportsListResponse(
         data=OpsConsistencyReportsData(
             items=[item for item in (_report(row) for row in page.items) if item],
-            next_cursor=page.next_cursor,
         ),
-        meta=OpsListMeta(
-            count=len(page.items),
+        meta=make_meta(
+            started_at=started_at,
             page_size=page_size,
-            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
+            next_cursor=page.next_cursor,
         ),
     )
 
@@ -588,13 +558,10 @@ async def list_integrity_issues(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return OpsIntegrityIssuesListResponse(
-        data=OpsIntegrityIssuesData(
-            items=[_issue(item) for item in page.items],
-            next_cursor=page.next_cursor,
-        ),
-        meta=OpsListMeta(
-            count=len(page.items),
+        data=OpsIntegrityIssuesData(items=[_issue(item) for item in page.items]),
+        meta=make_meta(
+            started_at=started_at,
             page_size=page_size,
-            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
+            next_cursor=page.next_cursor,
         ),
     )

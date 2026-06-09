@@ -1,4 +1,4 @@
-"""``/admin/enrichment-review`` 라우터 단위 테스트 (T-RV-52c)."""
+"""``/v1/admin/enrichment-reviews`` 라우터 단위 테스트 (T-RV-52c)."""
 
 from __future__ import annotations
 
@@ -79,8 +79,8 @@ def _review_row() -> EnrichmentReviewRow:
 @pytest.mark.unit
 def test_enrichment_review_routes_mounted_in_openapi(client: TestClient) -> None:
     spec = client.get("/openapi.json").json()
-    assert "/admin/enrichment-review" in spec["paths"]
-    assert "/admin/enrichment-review/{review_key}" in spec["paths"]
+    assert "/v1/admin/enrichment-reviews" in spec["paths"]
+    assert "/v1/admin/enrichment-reviews/{review_id}" in spec["paths"]
     assert "EnrichmentReviewRecord" in spec["components"]["schemas"]
 
 
@@ -101,7 +101,7 @@ def test_list_enrichment_reviews_passes_filters(
     monkeypatch.setattr(router_mod, "list_enrichment_reviews", _list)
 
     response = client.get(
-        "/admin/enrichment-review",
+        "/v1/admin/enrichment-reviews",
         params={
             "status": "pending",
             "provider": "python-visitkorea-api",
@@ -112,9 +112,13 @@ def test_list_enrichment_reviews_passes_filters(
 
     assert response.status_code == 200
     body = response.json()
-    assert body["data"]["items"][0]["review_key"] == "review-1"
+    assert body["data"]["items"][0]["review_id"] == "review-1"
     assert body["data"]["items"][0]["source_name"] == "서울 봄꽃"
-    assert body["data"]["next_cursor"] == "next"
+    assert body["meta"]["page"] == {
+        "page_size": 25,
+        "next_cursor": "next",
+        "total": None,
+    }
 
 
 @pytest.mark.unit
@@ -147,7 +151,7 @@ def test_patch_accepted_applies_and_uses_transaction(
     monkeypatch.setattr(router_mod, "decide_enrichment_review", _decide)
 
     response = client.patch(
-        "/admin/enrichment-review/review-1",
+        "/v1/admin/enrichment-reviews/review-1",
         json={
             "decision": "accepted",
             "decision_reason": "같은 축제",
@@ -180,7 +184,7 @@ def test_patch_reject_does_not_apply(
     monkeypatch.setattr(router_mod, "decide_enrichment_review", _decide)
 
     response = client.patch(
-        "/admin/enrichment-review/review-1",
+        "/v1/admin/enrichment-reviews/review-1",
         json={"decision": "rejected"},
     )
 
@@ -207,9 +211,9 @@ def test_patch_already_reviewed_returns_409(
     monkeypatch.setattr(router_mod, "decide_enrichment_review", _decide)
 
     response = client.patch(
-        "/admin/enrichment-review/review-1",
+        "/v1/admin/enrichment-reviews/review-1",
         json={"decision": "accepted"},
     )
 
     assert response.status_code == 409
-    assert "전이 실패" in response.json()["error"]["message"]
+    assert "전이 실패" in response.json()["detail"]

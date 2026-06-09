@@ -1,7 +1,7 @@
 /**
  * Dagster 운영 요약 API hooks.
  *
- * `/ops/dagster/summary`는 backend가 Dagster GraphQL을 읽어 admin UI용 DTO로
+ * `/v1/ops/dagster/summary`는 backend가 Dagster GraphQL을 읽어 admin UI용 DTO로
  * 정규화한 응답이다. iframe embed에는 public Dagster URL을 직접 사용한다.
  */
 
@@ -35,12 +35,12 @@ export type DagsterNuxSeenResponse = DagsterSchemas["DagsterNuxSeenResponse"];
 
 function fetchDagsterSummary(runLimit = 10): Promise<DagsterSummaryResponse> {
   return getJson<DagsterSummaryResponse>(
-    pathWithQuery("/ops/dagster/summary", { run_limit: runLimit }),
+    pathWithQuery("/v1/ops/dagster/summary", { run_limit: runLimit }),
   );
 }
 
 function markDagsterNuxSeen(): Promise<DagsterNuxSeenResponse> {
-  return postJson<DagsterNuxSeenResponse>("/ops/dagster/nux-seen");
+  return postJson<DagsterNuxSeenResponse>("/v1/ops/dagster/nux-seen");
 }
 
 function fetchDagsterRunDetail(
@@ -49,7 +49,7 @@ function fetchDagsterRunDetail(
   after: string | null = null,
 ): Promise<DagsterRunDetailResponse> {
   return getJson<DagsterRunDetailResponse>(
-    pathWithQuery(`/ops/dagster/runs/${encodeURIComponent(runId)}`, {
+    pathWithQuery(`/v1/ops/dagster/runs/${encodeURIComponent(runId)}`, {
       event_limit: eventLimit,
       after: after ?? undefined,
     }),

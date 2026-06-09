@@ -68,7 +68,7 @@ export function EtlPreviewClient() {
   });
   const datasets = useMemo(
     () =>
-      providersQuery.data?.providers.find((p) => p.provider === provider)
+      providersQuery.data?.data.providers.find((p) => p.provider === provider)
         ?.datasets ?? [],
     [provider, providersQuery.data],
   );
@@ -81,7 +81,7 @@ export function EtlPreviewClient() {
     previewMutation.mutate(values, {
       onSuccess: (data) =>
         toast.success("Preview 완료", {
-          description: `${data.provider}/${data.dataset} ${data.count}건`,
+          description: `${data.data.provider}/${data.data.dataset} ${data.data.items.length}건`,
         }),
       onError: (error) =>
         toast.error("Preview 실패", { description: error.message }),
@@ -154,7 +154,7 @@ export function EtlPreviewClient() {
                         }}
                       >
                         <NativeSelectOption value="">선택</NativeSelectOption>
-                        {providersQuery.data.providers.map((entry) => (
+                        {providersQuery.data.data.providers.map((entry) => (
                           <NativeSelectOption
                             key={entry.provider}
                             value={entry.provider}
@@ -247,19 +247,21 @@ export function EtlPreviewClient() {
               {previewMutation.data ? (
                 <div className="flex flex-col gap-3">
                   <div className="flex flex-wrap items-center gap-2 text-sm">
-                    <Badge>{previewMutation.data.provider}</Badge>
-                    <Badge variant="outline">{previewMutation.data.dataset}</Badge>
+                    <Badge>{previewMutation.data.data.provider}</Badge>
+                    <Badge variant="outline">
+                      {previewMutation.data.data.dataset}
+                    </Badge>
                     <Badge variant="secondary">
-                      {previewMutation.data.variant}
+                      {previewMutation.data.data.variant}
                     </Badge>
                     <span
                       className="text-muted-foreground"
                       data-testid="preview-count"
                     >
-                      {previewMutation.data.count}건
+                      {previewMutation.data.data.items.length}건
                     </span>
                   </div>
-                  <JsonBlock value={previewMutation.data.items} />
+                  <JsonBlock value={previewMutation.data.data.items} />
                 </div>
               ) : (
                 <div className="flex h-80 items-center justify-center rounded-lg border border-dashed text-sm text-muted-foreground">

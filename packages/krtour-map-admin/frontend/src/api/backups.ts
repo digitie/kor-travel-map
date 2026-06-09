@@ -1,5 +1,5 @@
 /**
- * `/admin/backups/*` backup/restore hooks.
+ * `/v1/admin/backups/*` backup/restore hooks.
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -17,11 +17,11 @@ export type RestoreRunRequest = BackupSchemas["RestoreRunRequest"];
 export type RestoreSwapRequest = BackupSchemas["RestoreSwapRequest"];
 
 function fetchBackups(): Promise<BackupListResponse> {
-  return getJson<BackupListResponse>("/admin/backups");
+  return getJson<BackupListResponse>("/v1/admin/backups");
 }
 
 function createBackup(body: BackupRunRequest): Promise<BackupOperationResponse> {
-  return postJson<BackupOperationResponse>("/admin/backups", body);
+  return postJson<BackupOperationResponse>("/v1/admin/backups", body);
 }
 
 function restoreBackup({
@@ -32,7 +32,7 @@ function restoreBackup({
   body: RestoreRunRequest;
 }): Promise<BackupOperationResponse> {
   return postJson<BackupOperationResponse>(
-    `/admin/restore/${encodeURIComponent(backupId)}`,
+    `/v1/admin/restore/${encodeURIComponent(backupId)}`,
     body,
   );
 }
@@ -45,7 +45,7 @@ function planRestoreSwap({
   body: RestoreSwapRequest;
 }): Promise<BackupOperationResponse> {
   return postJson<BackupOperationResponse>(
-    `/admin/restore/${encodeURIComponent(backupId)}/swap`,
+    `/v1/admin/restore/${encodeURIComponent(backupId)}/swap`,
     body,
   );
 }

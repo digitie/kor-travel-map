@@ -1,4 +1,4 @@
-"""``/ops/{system-logs,api-call-logs}`` 라우터 단위 테스트 (T-212c)."""
+"""``/v1/ops/{system-logs,api-call-logs}`` 라우터 단위 테스트 (T-212c)."""
 
 from __future__ import annotations
 
@@ -59,7 +59,7 @@ def _api_row(key: str = "22222222-2222-2222-2222-222222222222") -> ApiCallLogRow
     return ApiCallLogRow(
         api_call_log_key=key,
         method="GET",
-        path="/ops/metrics",
+        path="/v1/ops/metrics",
         status_code=200,
         duration_ms=12,
         request_id="req-2",
@@ -71,8 +71,8 @@ def _api_row(key: str = "22222222-2222-2222-2222-222222222222") -> ApiCallLogRow
 @pytest.mark.unit
 def test_ops_logs_routes_mounted_in_openapi(client: TestClient) -> None:
     spec = client.get("/openapi.json").json()
-    assert "/ops/system-logs" in spec["paths"]
-    assert "/ops/api-call-logs" in spec["paths"]
+    assert "/v1/ops/system-logs" in spec["paths"]
+    assert "/v1/ops/api-call-logs" in spec["paths"]
     schemas = spec["components"]["schemas"]
     assert "SystemLogsResponse" in schemas
     assert "ApiCallLogsResponse" in schemas
@@ -99,17 +99,20 @@ def test_system_logs_list_passes_filters(
     monkeypatch.setattr(router_mod, "list_system_logs", _list)
 
     response = client.get(
-        "/ops/system-logs?level=warning&source=geocoding&q=실패"
+        "/v1/ops/system-logs?level=warning&source=geocoding&q=실패"
         "&page_size=25&cursor=cursor-1"
     )
 
     assert response.status_code == 200
     body = response.json()
     assert set(body) == {"data", "meta"}
-    assert body["data"]["items"][0]["system_log_key"] == _sys_row().system_log_key
+    assert body["data"]["items"][0]["log_id"] == _sys_row().system_log_key
     assert body["data"]["items"][0]["detail"] == {"count": 3}
-    assert body["data"]["next_cursor"] == "cursor-2"
-    assert body["meta"]["count"] == 1
+    assert body["meta"]["page"] == {
+        "page_size": 25,
+        "next_cursor": "cursor-2",
+        "total": None,
+    }
     assert "duration_ms" in body["meta"]
 
 
@@ -132,13 +135,17 @@ def test_api_call_logs_list_passes_filters(
 
     monkeypatch.setattr(router_mod, "list_api_call_logs", _list)
 
-    response = client.get("/ops/api-call-logs?method=GET&min_status=500&path=/ops")
+    response = client.get("/v1/ops/api-call-logs?method=GET&min_status=500&path=/ops")
 
     assert response.status_code == 200
     body = response.json()
     assert body["data"]["items"][0]["status_code"] == 200
-    assert body["data"]["next_cursor"] is None
-    assert body["meta"]["count"] == 1
+    assert body["data"]["items"][0]["log_id"] == _api_row().api_call_log_key
+    assert body["meta"]["page"] == {
+        "page_size": 50,
+        "next_cursor": None,
+        "total": None,
+    }
 
 
 @pytest.mark.unit
@@ -153,7 +160,7 @@ def test_system_logs_invalid_cursor_422(
 
     monkeypatch.setattr(router_mod, "list_system_logs", _list)
 
-    response = client.get("/ops/system-logs?cursor=bad")
+    response = client.get("/v1/ops/system-logs?cursor=bad")
 
     assert response.status_code == 422
 
@@ -161,5 +168,5 @@ def test_system_logs_invalid_cursor_422(
 @pytest.mark.unit
 def test_api_call_logs_min_status_out_of_range_422(client: TestClient) -> None:
     # Query(ge=100, le=599) → 99는 FastAPI validation 422.
-    response = client.get("/ops/api-call-logs?min_status=99")
+    response = client.get("/v1/ops/api-call-logs?min_status=99")
     assert response.status_code == 422

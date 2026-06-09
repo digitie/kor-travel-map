@@ -38,10 +38,10 @@ const navItems = [
   { href: "/ops/import-jobs", label: "Import jobs", icon: ListChecksIcon },
   { href: "/ops/consistency", label: "Consistency", icon: RadarIcon },
   { href: "/ops/logs", label: "Logs", icon: ActivityIcon },
-  { href: "/admin/dedup-review", label: "Dedup review", icon: GitCompareArrowsIcon },
+  { href: "/admin/dedup-reviews", label: "Dedup reviews", icon: GitCompareArrowsIcon },
   {
-    href: "/admin/enrichment-review",
-    label: "Enrichment review",
+    href: "/admin/enrichment-reviews",
+    label: "Enrichment reviews",
     icon: LinkIcon,
   },
   {

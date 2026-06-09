@@ -130,13 +130,13 @@ def test_destructive_admin_blocked_when_disabled() -> None:
     client = _client(AdminSettings(admin_destructive_enabled=False))
     assert (
         client.post(
-            "/admin/features/f_x/deactivate", json={"reason": "test"}
+            "/v1/admin/features/f_x/deactivate", json={"reason": "test"}
         ).status_code
         == 403
     )
     assert (
         client.request(
-            "DELETE", "/admin/poi-cache-targets/tripmate/key-1"
+            "DELETE", "/v1/admin/poi-cache-targets/tripmate/key-1"
         ).status_code
         == 403
     )

@@ -1,4 +1,4 @@
-"""``/ops/*`` 라우터 단위 테스트."""
+"""``/v1/ops/*`` 라우터 단위 테스트."""
 
 from __future__ import annotations
 
@@ -110,11 +110,11 @@ def _issue(
 @pytest.mark.unit
 def test_ops_routes_mounted_in_openapi(client: TestClient) -> None:
     spec = client.get("/openapi.json").json()
-    assert "/ops/metrics" in spec["paths"]
-    assert "/ops/import-jobs" in spec["paths"]
-    assert "/ops/import-jobs/{job_id}" in spec["paths"]
-    assert "/ops/consistency/reports" in spec["paths"]
-    assert "/ops/consistency/issues" in spec["paths"]
+    assert "/v1/ops/metrics" in spec["paths"]
+    assert "/v1/ops/import-jobs" in spec["paths"]
+    assert "/v1/ops/import-jobs/{job_id}" in spec["paths"]
+    assert "/v1/ops/consistency/reports" in spec["paths"]
+    assert "/v1/ops/consistency/issues" in spec["paths"]
     assert "OpsMetricsResponse" in spec["components"]["schemas"]
 
 
@@ -151,7 +151,7 @@ def test_ops_metrics_maps_counts(
     monkeypatch.setattr(router_mod, "get_ops_integrity_issue_counts", _issue_counts)
     monkeypatch.setattr(router_mod, "get_latest_consistency_report", _latest)
 
-    response = client.get("/ops/metrics")
+    response = client.get("/v1/ops/metrics")
 
     assert response.status_code == 200
     body = response.json()
@@ -186,8 +186,8 @@ def test_import_jobs_list_passes_filters(
     monkeypatch.setattr(router_mod, "list_ops_import_jobs", _list)
 
     response = client.get(
-        "/ops/import-jobs?"
-        "state=running&kind=feature_update_request"
+        "/v1/ops/import-jobs?"
+        "status=running&kind=feature_update_request"
         "&load_batch_id=33333333-3333-3333-3333-333333333333"
         "&parent_job_id=44444444-4444-4444-4444-444444444444"
         "&page_size=25&cursor=cursor-1"
@@ -198,8 +198,12 @@ def test_import_jobs_list_passes_filters(
     assert body["data"]["items"][0]["job_id"] == _job().job_id
     assert body["data"]["items"][0]["load_batch_id"] == _job().load_batch_id
     assert body["data"]["items"][0]["parent_job_id"] == _job().parent_job_id
-    assert body["data"]["next_cursor"] == "cursor-2"
-    assert body["meta"]["count"] == 1
+    assert body["data"]["items"][0]["status"] == "running"
+    assert body["meta"]["page"] == {
+        "page_size": 25,
+        "next_cursor": "cursor-2",
+        "total": None,
+    }
 
 
 @pytest.mark.unit
@@ -214,7 +218,7 @@ def test_import_job_detail_404(
 
     monkeypatch.setattr(router_mod, "get_ops_import_job", _get)
 
-    response = client.get("/ops/import-jobs/missing")
+    response = client.get("/v1/ops/import-jobs/missing")
 
     assert response.status_code == 404
 
@@ -246,9 +250,9 @@ def test_consistency_and_issue_lists_pass_filters(
     monkeypatch.setattr(router_mod, "list_ops_consistency_reports", _reports)
     monkeypatch.setattr(router_mod, "list_ops_integrity_issues", _issues)
 
-    reports = client.get("/ops/consistency/reports?severity_max=WARN&page_size=5")
+    reports = client.get("/v1/ops/consistency/reports?severity_max=WARN&page_size=5")
     issues = client.get(
-        "/ops/consistency/issues?"
+        "/v1/ops/consistency/issues?"
         "status=open&severity=error&violation_type=missing_coordinate&"
         "provider=python-mois-api&dataset_key=mois_license_features_bulk&"
         "feature_id=feature-1&page_size=5"
@@ -256,8 +260,11 @@ def test_consistency_and_issue_lists_pass_filters(
 
     assert reports.status_code == 200
     assert reports.json()["data"]["items"][0]["summary"]["by_code"] == {"F4": 3}
+    assert reports.json()["meta"]["page"]["page_size"] == 5
     assert issues.status_code == 200
+    assert issues.json()["data"]["items"][0]["issue_id"] == _issue().violation_key
     assert issues.json()["data"]["items"][0]["message"] == "좌표 없음"
+    assert issues.json()["meta"]["page"]["page_size"] == 5
 
 
 @pytest.mark.unit
@@ -283,7 +290,7 @@ def test_health_deep_ok(
     monkeypatch.setattr(router_mod, "_check_postgis", _postgis)
     monkeypatch.setattr(router_mod, "_check_prewarm", _prewarm)
 
-    response = client.get("/ops/health-deep")
+    response = client.get("/v1/ops/health-deep")
 
     assert response.status_code == 200
     body = response.json()
@@ -317,7 +324,7 @@ def test_health_deep_degraded_returns_503(
     monkeypatch.setattr(router_mod, "_check_postgis", _postgis)
     monkeypatch.setattr(router_mod, "_check_prewarm", _prewarm)
 
-    response = client.get("/ops/health-deep")
+    response = client.get("/v1/ops/health-deep")
 
     assert response.status_code == 503
     body = response.json()

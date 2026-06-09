@@ -1,5 +1,5 @@
 /**
- * `/admin/issues` 운영 이슈 검토/조치 hooks.
+ * `/v1/admin/issues` 운영 이슈 검토/조치 hooks.
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -9,7 +9,7 @@ import type { components, paths } from "./types";
 
 type IssueSchemas = components["schemas"];
 type AdminIssuesListQuery = NonNullable<
-  paths["/admin/issues"]["get"]["parameters"]["query"]
+  paths["/v1/admin/issues"]["get"]["parameters"]["query"]
 >;
 
 export type AdminIssueStatus = Exclude<
@@ -34,7 +34,7 @@ function fetchAdminIssues(
   params: AdminIssueListParams = {},
 ): Promise<AdminIssueListResponse> {
   return getJson<AdminIssueListResponse>(
-    pathWithQuery("/admin/issues", {
+    pathWithQuery("/v1/admin/issues", {
       status: params.status,
       issue_type: params.issue_type,
       provider: params.provider,
@@ -42,7 +42,10 @@ function fetchAdminIssues(
       severity: params.severity,
       feature_id: params.feature_id,
       q: params.q,
-      bbox: params.bbox,
+      min_lon: params.min_lon,
+      min_lat: params.min_lat,
+      max_lon: params.max_lon,
+      max_lat: params.max_lat,
       page_size: params.page_size,
       cursor: params.cursor,
     }),
@@ -50,19 +53,19 @@ function fetchAdminIssues(
 }
 
 function fetchAdminIssueDetail(
-  violationKey: string,
+  issueId: string,
 ): Promise<AdminIssueDetailResponse> {
   return getJson<AdminIssueDetailResponse>(
-    `/admin/issues/${encodeURIComponent(violationKey)}`,
+    `/v1/admin/issues/${encodeURIComponent(issueId)}`,
   );
 }
 
 function patchAdminIssue(
-  violationKey: string,
+  issueId: string,
   body: AdminIssuePatchRequest,
 ): Promise<AdminIssueActionResponse> {
   return patchJson<AdminIssueActionResponse>(
-    `/admin/issues/${encodeURIComponent(violationKey)}`,
+    `/v1/admin/issues/${encodeURIComponent(issueId)}`,
     body,
   );
 }
@@ -75,11 +78,11 @@ export function useAdminIssues(params: AdminIssueListParams = {}) {
   });
 }
 
-export function useAdminIssueDetail(violationKey: string | null) {
+export function useAdminIssueDetail(issueId: string | null) {
   return useQuery<AdminIssueDetailResponse, Error>({
-    queryKey: ["admin-issue", violationKey] as const,
-    queryFn: () => fetchAdminIssueDetail(violationKey as string),
-    enabled: violationKey !== null && violationKey.length > 0,
+    queryKey: ["admin-issue", issueId] as const,
+    queryFn: () => fetchAdminIssueDetail(issueId as string),
+    enabled: issueId !== null && issueId.length > 0,
     staleTime: 15_000,
   });
 }
@@ -89,13 +92,13 @@ export function useAdminIssueActionMutation() {
   return useMutation<
     AdminIssueActionResponse,
     Error,
-    { violationKey: string; body: AdminIssuePatchRequest }
+    { issueId: string; body: AdminIssuePatchRequest }
   >({
-    mutationFn: ({ violationKey, body }) => patchAdminIssue(violationKey, body),
+    mutationFn: ({ issueId, body }) => patchAdminIssue(issueId, body),
     onSuccess: (data, variables) => {
       void queryClient.invalidateQueries({ queryKey: ["admin-issues"] });
       void queryClient.invalidateQueries({
-        queryKey: ["admin-issue", variables.violationKey],
+        queryKey: ["admin-issue", variables.issueId],
       });
       void queryClient.invalidateQueries({ queryKey: ["ops", "metrics"] });
       void queryClient.invalidateQueries({

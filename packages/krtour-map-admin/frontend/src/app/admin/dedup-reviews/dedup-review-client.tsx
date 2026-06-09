@@ -53,9 +53,9 @@ export function DedupReviewClient() {
   });
   const decision = useDedupDecisionMutation();
 
-  const decide = (reviewKey: string, value: DedupDecision) => {
+  const decide = (reviewId: string, value: DedupDecision) => {
     decision.mutate({
-      reviewKey,
+      reviewKey: reviewId,
       body: {
         decision: value,
         decision_reason: `admin-ui ${value}`,
@@ -68,10 +68,10 @@ export function DedupReviewClient() {
    * merge 확정. ``masterFeatureId``가 없으면 backend가 ``select_master``로 자동 선정한다.
    * 성공/실패와 무관하게 inline master 선택 패널을 닫는다.
    */
-  const merge = (reviewKey: string, masterFeatureId?: string) => {
+  const merge = (reviewId: string, masterFeatureId?: string) => {
     decision.mutate(
       {
-        reviewKey,
+        reviewKey: reviewId,
         body: {
           decision: "merged",
           master_feature_id: masterFeatureId,
@@ -141,9 +141,9 @@ export function DedupReviewClient() {
             </TableHeader>
             <TableBody>
               {(reviews.data?.data.items ?? []).map((item) => (
-                <TableRow key={item.review_key}>
+                <TableRow key={item.review_id}>
                   <TableCell className="font-mono text-xs">
-                    {shortId(item.review_key)}
+                    {shortId(item.review_id)}
                   </TableCell>
                   <TableCell className="font-mono">
                     {item.total_score.toFixed(1)}
@@ -173,7 +173,7 @@ export function DedupReviewClient() {
                   </TableCell>
                   <TableCell>
                     {item.status === "pending" ? (
-                      mergeKey === item.review_key ? (
+                      mergeKey === item.review_id ? (
                         <div className="flex flex-col gap-1">
                           <span className="text-xs text-muted-foreground">
                             master 선택 (병합 시 나머지는 master로 흡수)
@@ -185,7 +185,7 @@ export function DedupReviewClient() {
                               type="button"
                               variant="outline"
                               onClick={() =>
-                                merge(item.review_key, item.feature_a.feature_id)
+                                merge(item.review_id, item.feature_a.feature_id)
                               }
                             >
                               A: {item.feature_a.name}
@@ -197,7 +197,7 @@ export function DedupReviewClient() {
                               type="button"
                               variant="outline"
                               onClick={() =>
-                                merge(item.review_key, item.feature_b.feature_id)
+                                merge(item.review_id, item.feature_b.feature_id)
                               }
                             >
                               B: {item.feature_b.name}
@@ -208,7 +208,7 @@ export function DedupReviewClient() {
                               size="sm"
                               type="button"
                               variant="secondary"
-                              onClick={() => merge(item.review_key)}
+                              onClick={() => merge(item.review_id)}
                             >
                               자동 선정
                             </Button>
@@ -230,7 +230,7 @@ export function DedupReviewClient() {
                             size="sm"
                             type="button"
                             variant="outline"
-                            onClick={() => decide(item.review_key, "accepted")}
+                            onClick={() => decide(item.review_id, "accepted")}
                           >
                             <CheckIcon data-icon="inline-start" />
                             accept
@@ -240,7 +240,7 @@ export function DedupReviewClient() {
                             size="sm"
                             type="button"
                             variant="outline"
-                            onClick={() => decide(item.review_key, "rejected")}
+                            onClick={() => decide(item.review_id, "rejected")}
                           >
                             <XIcon data-icon="inline-start" />
                             reject
@@ -250,7 +250,7 @@ export function DedupReviewClient() {
                             size="sm"
                             type="button"
                             variant="default"
-                            onClick={() => setMergeKey(item.review_key)}
+                            onClick={() => setMergeKey(item.review_id)}
                           >
                             <MergeIcon data-icon="inline-start" />
                             merge
@@ -260,7 +260,7 @@ export function DedupReviewClient() {
                             size="sm"
                             type="button"
                             variant="ghost"
-                            onClick={() => decide(item.review_key, "ignored")}
+                            onClick={() => decide(item.review_id, "ignored")}
                           >
                             ignore
                           </Button>

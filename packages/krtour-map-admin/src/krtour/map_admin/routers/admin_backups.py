@@ -25,6 +25,7 @@ from krtour.map.infra.backup import (
 )
 from pydantic import BaseModel, ConfigDict, Field
 
+from krtour.map_admin.response import Meta, make_meta
 from krtour.map_admin.settings import AdminSettings
 
 __all__ = [
@@ -74,36 +75,8 @@ class BackupListData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     items: list[BackupRecord]
-
-
-class BackupListMeta(BaseModel):
-    """Backup list metadata."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    count: int
     backup_root: str
     command_enabled: bool
-    duration_ms: int
-
-
-class BackupListResponse(BaseModel):
-    """``GET /admin/backups`` response."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    data: BackupListData
-    meta: BackupListMeta
-
-
-class BackupDetailMeta(BaseModel):
-    """Backup detail metadata."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    backup_root: str
-    command_enabled: bool
-    duration_ms: int
 
 
 class BackupDetailResponse(BaseModel):
@@ -112,7 +85,16 @@ class BackupDetailResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: BackupRecord
-    meta: BackupDetailMeta
+    meta: Meta
+
+
+class BackupListResponse(BaseModel):
+    """``GET /admin/backups`` response."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: BackupListData
+    meta: Meta
 
 
 class BackupRunRequest(BaseModel):
@@ -197,30 +179,18 @@ class BackupOperationData(BaseModel):
     stderr: str | None = None
 
 
-class BackupOperationMeta(BaseModel):
-    """Backup operation metadata."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    duration_ms: int
-
-
 class BackupOperationResponse(BaseModel):
     """Backup/restore/swap operation response."""
 
     model_config = ConfigDict(extra="forbid")
 
     data: BackupOperationData
-    meta: BackupOperationMeta
+    meta: Meta
 
 
 def _settings(request: Request) -> AdminSettings:
     settings = getattr(request.app.state, "settings", None)
     return settings if isinstance(settings, AdminSettings) else AdminSettings()
-
-
-def _duration_ms(started_at: float) -> int:
-    return max(0, int((perf_counter() - started_at) * 1000))
 
 
 def _backup_id() -> str:
@@ -239,8 +209,8 @@ def _record(artifact: BackupArtifact) -> BackupRecord:
         object_storage=artifact.object_storage,
         byte_size=artifact.byte_size,
         checksum_count=artifact.checksum_count,
-        detail_url=f"/admin/backups/{artifact.backup_id}",
-        restore_url=f"/admin/restore/{artifact.backup_id}",
+        detail_url=f"/v1/admin/backups/{artifact.backup_id}",
+        restore_url=f"/v1/admin/restore/{artifact.backup_id}",
     )
 
 
@@ -344,13 +314,12 @@ async def list_backups(request: Request) -> BackupListResponse:
     settings = _settings(request)
     items = [_record(item) for item in list_backup_artifacts(settings.backup_root)]
     return BackupListResponse(
-        data=BackupListData(items=items),
-        meta=BackupListMeta(
-            count=len(items),
+        data=BackupListData(
+            items=items,
             backup_root=str(settings.backup_root),
             command_enabled=settings.backup_command_enabled,
-            duration_ms=_duration_ms(started_at),
         ),
+        meta=make_meta(started_at=started_at),
     )
 
 
@@ -369,11 +338,7 @@ async def get_backup(request: Request, backup_id: str) -> BackupDetailResponse:
         raise _backup_error(exc) from exc
     return BackupDetailResponse(
         data=_record(artifact),
-        meta=BackupDetailMeta(
-            backup_root=str(settings.backup_root),
-            command_enabled=settings.backup_command_enabled,
-            duration_ms=_duration_ms(started_at),
-        ),
+        meta=make_meta(started_at=started_at),
     )
 
 
@@ -409,7 +374,7 @@ async def create_backup(
                 message="백업 command plan을 생성했습니다.",
                 command=plan,
             ),
-            meta=BackupOperationMeta(duration_ms=_duration_ms(started_at)),
+            meta=make_meta(started_at=started_at),
         )
     if not settings.backup_command_enabled:
         raise _command_disabled()
@@ -441,7 +406,7 @@ async def create_backup(
             stdout=result.stdout,
             stderr=result.stderr,
         ),
-        meta=BackupOperationMeta(duration_ms=_duration_ms(started_at)),
+        meta=make_meta(started_at=started_at),
     )
 
 
@@ -513,7 +478,7 @@ async def restore_backup(
                 restore_targets=targets,
                 command=plan,
             ),
-            meta=BackupOperationMeta(duration_ms=_duration_ms(started_at)),
+            meta=make_meta(started_at=started_at),
         )
     if not settings.backup_command_enabled:
         raise _command_disabled()
@@ -542,7 +507,7 @@ async def restore_backup(
             stdout=result.stdout,
             stderr=result.stderr,
         ),
-        meta=BackupOperationMeta(duration_ms=_duration_ms(started_at)),
+        meta=make_meta(started_at=started_at),
     )
 
 
@@ -600,7 +565,7 @@ async def plan_restore_swap(
                 restore_targets=targets,
                 command=plan,
             ),
-            meta=BackupOperationMeta(duration_ms=_duration_ms(started_at)),
+            meta=make_meta(started_at=started_at),
         )
     if not settings.backup_command_enabled:
         raise _command_disabled()
@@ -629,5 +594,5 @@ async def plan_restore_swap(
             stdout=result.stdout,
             stderr=result.stderr,
         ),
-        meta=BackupOperationMeta(duration_ms=_duration_ms(started_at)),
+        meta=make_meta(started_at=started_at),
     )

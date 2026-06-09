@@ -421,6 +421,7 @@ async def test_t212d_feature_hot_reads_use_spatial_and_search_indexes(
             "max_lat": 37.525,
             "kinds": ["place", "event"],
             "categories": None,
+            "cursor_feature_id": None,
             "limit": 200,
         },
     )
@@ -464,6 +465,7 @@ async def test_t212d_planner_selects_representative_indexes_without_seqscan_hint
             "max_lat": 37.525,
             "kinds": ["place", "event"],
             "categories": None,
+            "cursor_feature_id": None,
             "limit": 200,
         },
         force_index=False,

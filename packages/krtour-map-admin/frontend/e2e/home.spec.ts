@@ -17,7 +17,7 @@ test.describe("home page (/)", () => {
       "Features",
       "Import jobs",
       "Consistency",
-      "Dedup review",
+      "Dedup reviews",
       "Update requests",
       "POI targets",
       "Dagster",

@@ -1,4 +1,4 @@
-"""``/admin/backups`` router tests."""
+"""``/v1/admin/backups`` router tests."""
 
 from __future__ import annotations
 
@@ -58,27 +58,29 @@ def client(tmp_path: Path) -> TestClient:
 def test_admin_backup_routes_mounted_in_openapi(client: TestClient) -> None:
     spec = client.get("/openapi.json").json()
 
-    assert "/admin/backups" in spec["paths"]
-    assert "/admin/backups/{backup_id}" in spec["paths"]
-    assert "/admin/restore/{backup_id}" in spec["paths"]
-    assert "/admin/restore/{backup_id}/swap" in spec["paths"]
-    assert "/admin/backups/restore/{backup_id}" not in spec["paths"]
+    assert "/v1/admin/backups" in spec["paths"]
+    assert "/v1/admin/backups/{backup_id}" in spec["paths"]
+    assert "/v1/admin/restore/{backup_id}" in spec["paths"]
+    assert "/v1/admin/restore/{backup_id}/swap" in spec["paths"]
+    assert "/v1/admin/backups/restore/{backup_id}" not in spec["paths"]
 
 
 @pytest.mark.unit
 def test_list_backups_reads_artifacts(client: TestClient) -> None:
-    response = client.get("/admin/backups")
+    response = client.get("/v1/admin/backups")
 
     assert response.status_code == 200
     body = response.json()
-    assert body["meta"]["count"] == 1
+    assert len(body["data"]["items"]) == 1
+    assert body["data"]["backup_root"]
+    assert body["data"]["command_enabled"] is False
     assert body["data"]["items"][0]["backup_id"] == "backup-1"
     assert body["data"]["items"][0]["manifest_status"] == "ok"
 
 
 @pytest.mark.unit
 def test_create_backup_defaults_to_plan_only(client: TestClient) -> None:
-    response = client.post("/admin/backups", json={"backup_id": "manual"})
+    response = client.post("/v1/admin/backups", json={"backup_id": "manual"})
 
     assert response.status_code == 200
     body = response.json()
@@ -90,21 +92,21 @@ def test_create_backup_defaults_to_plan_only(client: TestClient) -> None:
 
 @pytest.mark.unit
 def test_get_backup_rejects_invalid_id(client: TestClient) -> None:
-    response = client.get("/admin/backups/bad!")
+    response = client.get("/v1/admin/backups/bad!")
 
     assert response.status_code == 422
-    assert response.json()["error"]["code"] == "INVALID_BACKUP_ID"
+    assert response.json()["code"] == "INVALID_BACKUP_ID"
 
 
 @pytest.mark.unit
 def test_execute_backup_requires_opt_in(client: TestClient) -> None:
     response = client.post(
-        "/admin/backups",
+        "/v1/admin/backups",
         json={"backup_id": "manual", "execute": True},
     )
 
     assert response.status_code == 503
-    assert response.json()["error"]["code"] == "BACKUP_COMMAND_DISABLED"
+    assert response.json()["code"] == "BACKUP_COMMAND_DISABLED"
 
 
 @pytest.mark.unit
@@ -131,7 +133,7 @@ def test_execute_backup_uses_command_runner(
 
     monkeypatch.setattr(router_mod, "_run_command", _fake_run)
     response = TestClient(app).post(
-        "/admin/backups",
+        "/v1/admin/backups",
         json={"backup_id": "manual", "execute": True},
     )
 
@@ -145,7 +147,7 @@ def test_execute_backup_uses_command_runner(
 @pytest.mark.unit
 def test_restore_plan_and_swap_boundary(client: TestClient) -> None:
     restore = client.post(
-        "/admin/restore/backup-1",
+        "/v1/admin/restore/backup-1",
         json={"recreate": True, "skip_rustfs": True},
     )
     assert restore.status_code == 200
@@ -155,7 +157,7 @@ def test_restore_plan_and_swap_boundary(client: TestClient) -> None:
     assert restore_body["data"]["command"]["env"]["KRTOUR_MAP_RESTORE_RECREATE"] == "1"
     assert restore_body["data"]["command"]["env"]["KRTOUR_MAP_RESTORE_SKIP_RUSTFS"] == "1"
 
-    swap = client.post("/admin/restore/backup-1/swap", json={})
+    swap = client.post("/v1/admin/restore/backup-1/swap", json={})
     assert swap.status_code == 200
     swap_body = swap.json()
     assert swap_body["data"]["operation"] == "swap"
@@ -167,12 +169,12 @@ def test_restore_plan_and_swap_boundary(client: TestClient) -> None:
 @pytest.mark.unit
 def test_execute_restore_swap_requires_opt_in(client: TestClient) -> None:
     response = client.post(
-        "/admin/restore/backup-1/swap",
+        "/v1/admin/restore/backup-1/swap",
         json={"execute": True, "apply": True},
     )
 
     assert response.status_code == 503
-    assert response.json()["error"]["code"] == "BACKUP_COMMAND_DISABLED"
+    assert response.json()["code"] == "BACKUP_COMMAND_DISABLED"
 
 
 @pytest.mark.unit
@@ -199,7 +201,7 @@ def test_execute_restore_swap_uses_command_runner(
 
     monkeypatch.setattr(router_mod, "_run_command", _fake_run)
     response = TestClient(app).post(
-        "/admin/restore/backup-1/swap",
+        "/v1/admin/restore/backup-1/swap",
         json={"execute": True, "apply": True, "skip_verify": True},
     )
 

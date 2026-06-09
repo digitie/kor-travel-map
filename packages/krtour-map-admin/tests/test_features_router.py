@@ -95,7 +95,7 @@ def test_bbox_min_greater_than_max_returns_422(client: TestClient) -> None:
             "min_lon": 128, "min_lat": 37, "max_lon": 127, "max_lat": 38,
         })
         assert r.status_code == 422
-        assert "bbox" in r.json()["error"]["message"]
+        assert "bbox" in r.json()["detail"]
     finally:
         client.app.dependency_overrides.clear()
 
@@ -127,7 +127,7 @@ def test_get_feature_404_when_missing(
     try:
         r = client.get("/v1/features/nonexistent")
         assert r.status_code == 404
-        assert "nonexistent" in r.json()["error"]["message"]
+        assert "nonexistent" in r.json()["detail"]
     finally:
         client.app.dependency_overrides.clear()
 
@@ -148,6 +148,8 @@ def test_list_features_maps_bbox_rows(
     ]
 
     async def _bbox(_session: Any, **_kw: Any) -> list[dict[str, Any]]:
+        assert _kw["limit"] == 101
+        assert _kw["cursor"] is None
         return rows
 
     monkeypatch.setattr(features_mod.feature_repo, "features_in_bbox", _bbox)
@@ -163,9 +165,13 @@ def test_list_features_maps_bbox_rows(
         })
         assert r.status_code == 200
         body = r.json()
-        assert body["count"] == 1
-        assert body["items"][0]["feature_id"] == "f1"
-        assert body["items"][0]["lon"] == 126.97
+        assert body["data"]["items"][0]["feature_id"] == "f1"
+        assert body["data"]["items"][0]["lon"] == 126.97
+        assert body["meta"]["page"] == {
+            "page_size": 100,
+            "next_cursor": None,
+            "total": None,
+        }
     finally:
         client.app.dependency_overrides.clear()
 
@@ -202,9 +208,8 @@ def test_list_public_features_in_bounds_uses_envelope(
         })
         assert r.status_code == 200
         body = r.json()
-        assert body["data"]["count"] == 1
         assert body["data"]["items"][0]["feature_id"] == "f1"
-        assert body["data"]["cluster_unit"] is None
+        assert body["meta"]["cluster"] is None
         assert "duration_ms" in body["meta"]
     finally:
         client.app.dependency_overrides.clear()
@@ -291,10 +296,10 @@ def test_features_batch_returns_items_and_missing(
         )
         assert r.status_code == 200
         body = r.json()
-        assert body["data"]["items"]["f1"]["name"] == "축제"
-        assert "coord_5179_srid" not in body["data"]["items"]["f1"]
-        assert "parent_feature_id" not in body["data"]["items"]["f1"]
-        assert "sibling_group_id" not in body["data"]["items"]["f1"]
+        assert body["data"]["found"]["f1"]["name"] == "축제"
+        assert "coord_5179_srid" not in body["data"]["found"]["f1"]
+        assert "parent_feature_id" not in body["data"]["found"]["f1"]
+        assert "sibling_group_id" not in body["data"]["found"]["f1"]
         assert body["data"]["missing"] == ["missing"]
     finally:
         client.app.dependency_overrides.clear()
@@ -337,11 +342,18 @@ def test_search_features_maps_page_and_requires_scope(
 
     client.app.dependency_overrides[get_session] = _fake_session
     try:
-        r = client.get("/v1/features/search", params={"q": "경복궁"})
+        r = client.get(
+            "/v1/features/search",
+            params={"q": "경복궁", "include_total": "true"},
+        )
         assert r.status_code == 200
         body = r.json()
         assert body["data"]["items"][0]["feature_id"] == "f1"
-        assert body["data"]["total_count"] == 1
+        assert body["meta"]["page"] == {
+            "page_size": 50,
+            "next_cursor": None,
+            "total": 1,
+        }
     finally:
         client.app.dependency_overrides.clear()
 
@@ -356,7 +368,7 @@ def test_search_features_rejects_partial_bbox(
         params={"min_lon": 127, "min_lat": 37, "max_lon": 126},
     )
     assert r.status_code == 422
-    assert "bbox" in r.json()["error"]["message"]
+    assert "bbox" in r.json()["detail"]
 
 
 @pytest.mark.unit
@@ -378,6 +390,6 @@ def test_search_features_rejects_missing_scope(
     try:
         r = client.get("/v1/features/search")
         assert r.status_code == 422
-        assert "q 또는 bbox" in r.json()["error"]["message"]
+        assert "q 또는 bbox" in r.json()["detail"]
     finally:
         client.app.dependency_overrides.clear()

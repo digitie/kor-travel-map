@@ -1,4 +1,4 @@
-"""``/admin/dedup-review`` 라우터 단위 테스트."""
+"""``/v1/admin/dedup-reviews`` 라우터 단위 테스트."""
 
 from __future__ import annotations
 
@@ -101,8 +101,8 @@ def _review_row() -> DedupReviewRow:
 @pytest.mark.unit
 def test_dedup_review_routes_mounted_in_openapi(client: TestClient) -> None:
     spec = client.get("/openapi.json").json()
-    assert "/admin/dedup-review" in spec["paths"]
-    assert "/admin/dedup-review/{review_key}" in spec["paths"]
+    assert "/v1/admin/dedup-reviews" in spec["paths"]
+    assert "/v1/admin/dedup-reviews/{review_id}" in spec["paths"]
     assert "DedupReviewRecord" in spec["components"]["schemas"]
 
 
@@ -123,7 +123,7 @@ def test_list_dedup_reviews_passes_filters(
     monkeypatch.setattr(router_mod, "list_dedup_reviews", _list)
 
     response = client.get(
-        "/admin/dedup-review",
+        "/v1/admin/dedup-reviews",
         params={
             "status": "pending",
             "provider": "python-mois-api",
@@ -134,8 +134,12 @@ def test_list_dedup_reviews_passes_filters(
 
     assert response.status_code == 200
     body = response.json()
-    assert body["data"]["items"][0]["review_key"] == "review-1"
-    assert body["data"]["next_cursor"] == "next"
+    assert body["data"]["items"][0]["review_id"] == "review-1"
+    assert body["meta"]["page"] == {
+        "page_size": 25,
+        "next_cursor": "next",
+        "total": None,
+    }
 
 
 @pytest.mark.unit
@@ -155,7 +159,7 @@ def test_patch_accepted_uses_transaction(
     monkeypatch.setattr(router_mod, "set_dedup_review_decision", _set)
 
     response = client.patch(
-        "/admin/dedup-review/review-1",
+        "/v1/admin/dedup-reviews/review-1",
         json={
             "decision": "accepted",
             "decision_reason": "같은 장소",
@@ -199,7 +203,7 @@ def test_patch_merged_uses_advisory_lock(
     monkeypatch.setattr(router_mod, "merge_dedup_review", _merge)
 
     response = client.patch(
-        "/admin/dedup-review/review-1",
+        "/v1/admin/dedup-reviews/review-1",
         json={
             "decision": "merged",
             "master_feature_id": "feature-a",
@@ -232,12 +236,12 @@ def test_patch_merged_not_found_returns_404(
     monkeypatch.setattr(router_mod, "merge_dedup_review", _merge)
 
     response = client.patch(
-        "/admin/dedup-review/missing",
+        "/v1/admin/dedup-reviews/missing",
         json={"decision": "merged", "master_feature_id": "feature-a"},
     )
 
     assert response.status_code == 404
-    assert "review_key 없음" in response.json()["error"]["message"]
+    assert "review_key 없음" in response.json()["detail"]
 
 
 @pytest.mark.unit
@@ -258,12 +262,12 @@ def test_patch_merged_conflict_returns_409(
     monkeypatch.setattr(router_mod, "merge_dedup_review", _merge)
 
     response = client.patch(
-        "/admin/dedup-review/review-1",
+        "/v1/admin/dedup-reviews/review-1",
         json={"decision": "merged", "master_feature_id": "feature-a"},
     )
 
     assert response.status_code == 409
-    assert "이미 검토" in response.json()["error"]["message"]
+    assert "이미 검토" in response.json()["detail"]
 
 
 @pytest.mark.unit
@@ -284,9 +288,9 @@ def test_patch_merged_unknown_merge_error_hides_internal_message(
     monkeypatch.setattr(router_mod, "merge_dedup_review", _merge)
 
     response = client.patch(
-        "/admin/dedup-review/review-1",
+        "/v1/admin/dedup-reviews/review-1",
         json={"decision": "merged", "master_feature_id": "feature-a"},
     )
 
     assert response.status_code == 500
-    assert response.json()["error"]["message"] == "dedup review merge failed"
+    assert response.json()["detail"] == "dedup review merge failed"

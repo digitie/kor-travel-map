@@ -22,6 +22,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from krtour.map_admin.db import get_session
+from krtour.map_admin.response import Meta, make_meta
 
 __all__ = [
     "router",
@@ -42,7 +43,7 @@ class SystemLogRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    system_log_key: str
+    log_id: str
     level: str
     source: str
     event: str
@@ -57,7 +58,7 @@ class ApiCallLogRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    api_call_log_key: str
+    log_id: str
     method: str
     path: str
     status_code: int
@@ -73,7 +74,6 @@ class SystemLogsListData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     items: list[SystemLogRecord]
-    next_cursor: str | None = None
 
 
 class ApiCallLogsListData(BaseModel):
@@ -82,16 +82,6 @@ class ApiCallLogsListData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     items: list[ApiCallLogRecord]
-    next_cursor: str | None = None
-
-
-class LogListMeta(BaseModel):
-    """로그 목록 공통 meta."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    count: int
-    duration_ms: int
 
 
 class SystemLogsResponse(BaseModel):
@@ -100,7 +90,7 @@ class SystemLogsResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: SystemLogsListData
-    meta: LogListMeta
+    meta: Meta
 
 
 class ApiCallLogsResponse(BaseModel):
@@ -109,12 +99,12 @@ class ApiCallLogsResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: ApiCallLogsListData
-    meta: LogListMeta
+    meta: Meta
 
 
 def _system_log(row: SystemLogRow) -> SystemLogRecord:
     return SystemLogRecord(
-        system_log_key=row.system_log_key,
+        log_id=row.system_log_key,
         level=row.level,
         source=row.source,
         event=row.event,
@@ -127,7 +117,7 @@ def _system_log(row: SystemLogRow) -> SystemLogRecord:
 
 def _api_call_log(row: ApiCallLogRow) -> ApiCallLogRecord:
     return ApiCallLogRecord(
-        api_call_log_key=row.api_call_log_key,
+        log_id=row.api_call_log_key,
         method=row.method,
         path=row.path,
         status_code=row.status_code,
@@ -161,13 +151,11 @@ async def get_system_logs(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return SystemLogsResponse(
-        data=SystemLogsListData(
-            items=[_system_log(item) for item in page.items],
+        data=SystemLogsListData(items=[_system_log(item) for item in page.items]),
+        meta=make_meta(
+            started_at=started_at,
+            page_size=page_size,
             next_cursor=page.next_cursor,
-        ),
-        meta=LogListMeta(
-            count=len(page.items),
-            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
         ),
     )
 
@@ -195,12 +183,10 @@ async def get_api_call_logs(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return ApiCallLogsResponse(
-        data=ApiCallLogsListData(
-            items=[_api_call_log(item) for item in page.items],
+        data=ApiCallLogsListData(items=[_api_call_log(item) for item in page.items]),
+        meta=make_meta(
+            started_at=started_at,
+            page_size=page_size,
             next_cursor=page.next_cursor,
-        ),
-        meta=LogListMeta(
-            count=len(page.items),
-            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
         ),
     )

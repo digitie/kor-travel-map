@@ -178,7 +178,7 @@ export function AdminFeaturesClient() {
   const features = useAdminFeatures(params);
   const deactivate = useDeactivateAdminFeatureMutation();
   const items = features.data?.data.items ?? [];
-  const nextCursor = features.data?.data.next_cursor ?? null;
+  const nextCursor = features.data?.meta.page?.next_cursor ?? null;
 
   const resetCursor = () => setCursor(null);
   const refresh = () => {
@@ -337,7 +337,7 @@ export function AdminFeaturesClient() {
               desc
             </Button>
             <Badge variant="outline">
-              {formatCount(features.data?.meta.count)} rows
+              {formatCount(items.length)} rows
             </Badge>
             <Badge variant="outline">
               {features.data?.meta.duration_ms ?? 0}ms
@@ -431,7 +431,7 @@ export function AdminFeaturesClient() {
                         {feature.issues.slice(0, 2).map((issue) => (
                           <div
                             className="mt-1 max-w-48 truncate text-xs text-muted-foreground"
-                            key={issue.violation_key ?? issue.message}
+                            key={issue.issue_id ?? issue.message}
                           >
                             {issue.violation_type ?? "issue"} ·{" "}
                             {issue.message ?? "-"}

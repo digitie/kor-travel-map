@@ -38,7 +38,7 @@ def _clear_cache() -> AsyncIterator[None]:
 @pytest.mark.unit
 def test_mois_detail_mounted_in_openapi(client: TestClient) -> None:
     spec = client.get("/openapi.json").json()
-    assert "/debug/mois-license/{license_id}" in spec["paths"]
+    assert "/v1/debug/mois-license/{license_id}" in spec["paths"]
     assert "MoisLicenseDetailResponse" in spec["components"]["schemas"]
 
 
@@ -46,9 +46,9 @@ def test_mois_detail_mounted_in_openapi(client: TestClient) -> None:
 def test_mois_detail_unmounts_when_features_disabled() -> None:
     app = create_app(AdminSettings(features_routes_enabled=False))
     c = TestClient(app)
-    assert c.get("/debug/mois-license/x").status_code == 404
+    assert c.get("/v1/debug/mois-license/x").status_code == 404
     spec = c.get("/openapi.json").json()
-    assert "/debug/mois-license/{license_id}" not in spec["paths"]
+    assert "/v1/debug/mois-license/{license_id}" not in spec["paths"]
 
 
 @pytest.mark.unit
@@ -68,9 +68,9 @@ def test_mois_detail_404_when_missing(
 
     client.app.dependency_overrides[get_session] = _fake_session
     try:
-        r = client.get("/debug/mois-license/general_restaurants::nope")
+        r = client.get("/v1/debug/mois-license/general_restaurants::nope")
         assert r.status_code == 404
-        assert "nope" in r.json()["error"]["message"]
+        assert "nope" in r.json()["detail"]
     finally:
         client.app.dependency_overrides.clear()
 
@@ -107,18 +107,18 @@ def test_mois_detail_returns_and_caches(
     client.app.dependency_overrides[get_session] = _fake_session
     try:
         lid = "general_restaurants::A1"
-        r1 = client.get(f"/debug/mois-license/{lid}")
+        r1 = client.get(f"/v1/debug/mois-license/{lid}")
         assert r1.status_code == 200
         body = r1.json()
         assert body["data"]["license_id"] == lid
         assert body["data"]["feature_id"] == "f_x"
         assert body["data"]["raw"]["BPLC_NM"] == "한식당 가나다"
-        assert body["meta"]["cached"] is False
+        assert body["data"]["cached"] is False
 
         # 2회차 — 프로세스 캐시 히트 (DB 재조회 없음).
-        r2 = client.get(f"/debug/mois-license/{lid}")
+        r2 = client.get(f"/v1/debug/mois-license/{lid}")
         assert r2.status_code == 200
-        assert r2.json()["meta"]["cached"] is True
+        assert r2.json()["data"]["cached"] is True
         assert calls["n"] == 1  # repo는 1회만 호출
     finally:
         client.app.dependency_overrides.clear()

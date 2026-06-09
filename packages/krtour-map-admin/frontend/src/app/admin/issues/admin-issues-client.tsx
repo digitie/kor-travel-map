@@ -83,8 +83,18 @@ function linkedFeatureLabel(issue: AdminIssueRecord): string {
   return issue.feature_id ? shortId(issue.feature_id, 18) : "-";
 }
 
-function IssueDetailPanel({ violationKey }: { violationKey: string | null }) {
-  const detail = useAdminIssueDetail(violationKey);
+function parseBbox(value: string) {
+  const parts = value
+    .split(",")
+    .map((item) => Number(item.trim()))
+    .filter((item) => Number.isFinite(item));
+  if (parts.length !== 4) return {};
+  const [min_lon, min_lat, max_lon, max_lat] = parts;
+  return { min_lon, min_lat, max_lon, max_lat };
+}
+
+function IssueDetailPanel({ issueId }: { issueId: string | null }) {
+  const detail = useAdminIssueDetail(issueId);
   const action = useAdminIssueActionMutation();
   const [manualAddress, setManualAddress] = useState("");
   const [manualLon, setManualLon] = useState("");
@@ -92,7 +102,7 @@ function IssueDetailPanel({ violationKey }: { violationKey: string | null }) {
   const [manualReason, setManualReason] = useState("");
   const [manualError, setManualError] = useState<string | null>(null);
 
-  if (!violationKey) {
+  if (!issueId) {
     return (
       <div className="rounded-lg border bg-background p-5 text-sm text-muted-foreground">
         table에서 issue를 선택하면 상세 payload와 조치 버튼을 확인할 수 있습니다.
@@ -108,7 +118,7 @@ function IssueDetailPanel({ violationKey }: { violationKey: string | null }) {
     patch: Partial<AdminIssuePatchRequest> = {},
   ) => {
     action.mutate({
-      violationKey,
+      issueId,
       body: buildActionBody(actionName, patch),
     });
   };
@@ -158,7 +168,7 @@ function IssueDetailPanel({ violationKey }: { violationKey: string | null }) {
           <div className="min-w-0">
             <div className="font-medium">Issue detail</div>
             <div className="break-all font-mono text-xs text-muted-foreground">
-              {violationKey}
+              {issueId}
             </div>
           </div>
           {issue?.feature_id ? (
@@ -340,7 +350,7 @@ function IssueDetailPanel({ violationKey }: { violationKey: string | null }) {
             />
           </div>
           <Button
-            disabled={action.isPending || !violationKey}
+            disabled={action.isPending || !issueId}
             type="button"
             onClick={submitManualOverride}
           >
@@ -363,9 +373,7 @@ export function AdminIssuesClient() {
   const [bbox, setBbox] = useState("");
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(100);
   const [cursor, setCursor] = useState<string | null>(null);
-  const [selectedViolationKey, setSelectedViolationKey] = useState<string | null>(
-    null,
-  );
+  const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
   const action = useAdminIssueActionMutation();
 
   const params = useMemo(
@@ -376,7 +384,7 @@ export function AdminIssuesClient() {
       provider: provider.trim().length > 0 ? provider.trim() : undefined,
       dataset_key:
         datasetKey.trim().length > 0 ? datasetKey.trim() : undefined,
-      bbox: bbox.trim().length > 0 ? bbox.trim() : undefined,
+      ...(bbox.trim().length > 0 ? parseBbox(bbox) : {}),
       q: deferredQ.length > 0 ? deferredQ : undefined,
       page_size: pageSize,
       cursor: cursor ?? undefined,
@@ -395,15 +403,15 @@ export function AdminIssuesClient() {
   );
   const issues = useAdminIssues(params);
   const items = issues.data?.data.items ?? [];
-  const nextCursor = issues.data?.data.next_cursor ?? null;
+  const nextCursor = issues.data?.meta.page?.next_cursor ?? null;
 
   const resetCursor = () => setCursor(null);
   const quickAction = (
-    violationKey: string,
+    issueId: string,
     actionName: AdminIssueAction,
   ) => {
     action.mutate({
-      violationKey,
+      issueId,
       body: buildActionBody(actionName),
     });
   };
@@ -550,7 +558,7 @@ export function AdminIssuesClient() {
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
             <Badge variant="outline">
-              {formatCount(issues.data?.meta.count)} rows
+              {formatCount(items.length)} rows
             </Badge>
             <Badge variant="outline">
               {issues.data?.meta.duration_ms ?? 0}ms
@@ -607,17 +615,17 @@ export function AdminIssuesClient() {
                   {items.map((issue) => (
                     <TableRow
                       className="cursor-pointer"
-                      key={issue.violation_key}
+                      key={issue.issue_id}
                       data-state={
-                        selectedViolationKey === issue.violation_key
+                        selectedIssueId === issue.issue_id
                           ? "selected"
                           : undefined
                       }
-                      onClick={() => setSelectedViolationKey(issue.violation_key)}
+                      onClick={() => setSelectedIssueId(issue.issue_id)}
                     >
                       <TableCell>
                         <div className="font-mono text-xs">
-                          {shortId(issue.violation_key)}
+                          {shortId(issue.issue_id)}
                         </div>
                         <div className="mt-1 text-xs text-muted-foreground">
                           {issue.violation_type}
@@ -656,7 +664,7 @@ export function AdminIssuesClient() {
                             variant="outline"
                             onClick={(event) => {
                               event.stopPropagation();
-                              quickAction(issue.violation_key, "resolve");
+                              quickAction(issue.issue_id, "resolve");
                             }}
                           >
                             <CheckIcon data-icon="inline-start" />
@@ -669,7 +677,7 @@ export function AdminIssuesClient() {
                             variant="ghost"
                             onClick={(event) => {
                               event.stopPropagation();
-                              quickAction(issue.violation_key, "ignore");
+                              quickAction(issue.issue_id, "ignore");
                             }}
                           >
                             ignore
@@ -693,7 +701,7 @@ export function AdminIssuesClient() {
             </div>
           </div>
 
-          <IssueDetailPanel violationKey={selectedViolationKey} />
+          <IssueDetailPanel issueId={selectedIssueId} />
         </section>
       </div>
     </AdminShell>

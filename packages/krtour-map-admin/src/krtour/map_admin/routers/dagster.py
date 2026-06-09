@@ -18,6 +18,7 @@ import httpx
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from krtour.map_admin.response import Meta, make_meta
 from krtour.map_admin.settings import AdminSettings
 
 __all__ = [
@@ -278,21 +279,13 @@ class DagsterSummaryData(BaseModel):
     errors: list[str] = Field(default_factory=list)
 
 
-class DagsterDetailMeta(BaseModel):
-    """단건 요약 응답 meta."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    duration_ms: int
-
-
 class DagsterSummaryResponse(BaseModel):
     """`GET /ops/dagster/summary` 응답 (DA-D-03 envelope)."""
 
     model_config = ConfigDict(extra="forbid")
 
     data: DagsterSummaryData
-    meta: DagsterDetailMeta
+    meta: Meta
 
 
 class DagsterNuxSeenData(BaseModel):
@@ -314,7 +307,7 @@ class DagsterNuxSeenResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: DagsterNuxSeenData
-    meta: DagsterDetailMeta
+    meta: Meta
 
 
 class DagsterRunEvent(BaseModel):
@@ -353,7 +346,7 @@ class DagsterRunDetailResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: DagsterRunDetailData
-    meta: DagsterDetailMeta
+    meta: Meta
 
 
 @dataclass(frozen=True)
@@ -747,9 +740,7 @@ def _summary_response(
 ) -> DagsterSummaryResponse:
     return DagsterSummaryResponse(
         data=data,
-        meta=DagsterDetailMeta(
-            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
-        ),
+        meta=make_meta(started_at=started_at),
     )
 
 
@@ -758,9 +749,7 @@ def _nux_seen_response(
 ) -> DagsterNuxSeenResponse:
     return DagsterNuxSeenResponse(
         data=data,
-        meta=DagsterDetailMeta(
-            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
-        ),
+        meta=make_meta(started_at=started_at),
     )
 
 
@@ -769,9 +758,7 @@ def _run_detail_response(
 ) -> DagsterRunDetailResponse:
     return DagsterRunDetailResponse(
         data=data,
-        meta=DagsterDetailMeta(
-            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
-        ),
+        meta=make_meta(started_at=started_at),
     )
 
 
@@ -788,7 +775,7 @@ def _run_detail_response(
 )
 async def get_dagster_summary(
     request: Request,
-    run_limit: int = Query(default=10, ge=1, le=50),
+    page_size: int = Query(default=10, ge=1, le=50),
 ) -> DagsterSummaryResponse:
     started_at = perf_counter()
     settings = _settings_from_request(request)
@@ -823,7 +810,7 @@ async def get_dagster_summary(
         payload = await _post_graphql(
             client=client,
             graphql_url=dagster_urls.graphql_url,
-            variables={"limit": run_limit},
+            variables={"limit": page_size},
         )
     except (httpx.HTTPError, ValueError) as exc:
         return _summary_response(
@@ -907,7 +894,7 @@ async def get_dagster_summary(
 async def get_dagster_run_detail(
     request: Request,
     run_id: str,
-    event_limit: int = Query(default=50, ge=1, le=200),
+    page_size: int = Query(default=50, ge=1, le=200),
     after: str | None = Query(
         default=None,
         description=(
@@ -942,7 +929,7 @@ async def get_dagster_run_detail(
             graphql_url=dagster_urls.graphql_url,
             variables={
                 "runId": run_id,
-                "eventLimit": event_limit,
+                "eventLimit": page_size,
                 "afterCursor": after,
             },
             query=_DAGSTER_RUN_DETAIL_QUERY,

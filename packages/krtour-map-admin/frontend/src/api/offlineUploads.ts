@@ -1,5 +1,5 @@
 /**
- * `/admin/offline-uploads/*` 오프라인 업로드 hooks.
+ * `/v1/admin/offline-uploads/*` 오프라인 업로드 hooks.
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -9,11 +9,11 @@ import type { components, paths } from "./types";
 
 type OfflineUploadSchemas = components["schemas"];
 type OfflineUploadListQuery = NonNullable<
-  paths["/admin/offline-uploads"]["get"]["parameters"]["query"]
+  paths["/v1/admin/offline-uploads"]["get"]["parameters"]["query"]
 >;
 
-export type OfflineUploadState = Exclude<
-  OfflineUploadListQuery["state"],
+export type OfflineUploadStatus = Exclude<
+  OfflineUploadListQuery["status"],
   null | undefined
 >;
 export type OfflineUploadRecord = OfflineUploadSchemas["OfflineUploadRecord"];
@@ -62,8 +62,8 @@ function fetchOfflineUploads(
   params: OfflineUploadListParams = {},
 ): Promise<OfflineUploadListResponse> {
   return getJson<OfflineUploadListResponse>(
-    pathWithQuery("/admin/offline-uploads", {
-      state: params.state,
+    pathWithQuery("/v1/admin/offline-uploads", {
+      status: params.status,
       provider: params.provider,
       dataset_key: params.dataset_key,
       page_size: params.page_size,
@@ -76,7 +76,7 @@ function fetchOfflineUpload(
   uploadId: string,
 ): Promise<OfflineUploadDetailResponse> {
   return getJson<OfflineUploadDetailResponse>(
-    `/admin/offline-uploads/${encodeURIComponent(uploadId)}`,
+    `/v1/admin/offline-uploads/${encodeURIComponent(uploadId)}`,
   );
 }
 
@@ -85,7 +85,7 @@ function fetchOfflineUploadPreview(
   sampleSize: number,
 ): Promise<OfflineUploadPreviewResponse> {
   return getJson<OfflineUploadPreviewResponse>(
-    pathWithQuery(`/admin/offline-uploads/${encodeURIComponent(uploadId)}/preview`, {
+    pathWithQuery(`/v1/admin/offline-uploads/${encodeURIComponent(uploadId)}/preview`, {
       sample_size: sampleSize,
     }),
   );
@@ -95,7 +95,7 @@ function fetchOfflineUploadValidation(
   uploadId: string,
 ): Promise<OfflineUploadValidationResponse> {
   return getJson<OfflineUploadValidationResponse>(
-    `/admin/offline-uploads/${encodeURIComponent(uploadId)}/validation`,
+    `/v1/admin/offline-uploads/${encodeURIComponent(uploadId)}/validation`,
   );
 }
 
@@ -110,14 +110,14 @@ function createOfflineUpload(
   if (body.createdBy) {
     form.append("created_by", body.createdBy);
   }
-  return postFormData<OfflineUploadWriteResponse>("/admin/offline-uploads", form);
+  return postFormData<OfflineUploadWriteResponse>("/v1/admin/offline-uploads", form);
 }
 
 function validateOfflineUpload(
   body: OfflineUploadValidateRequest,
 ): Promise<OfflineUploadValidationResponse> {
   return postJson<OfflineUploadValidationResponse>(
-    `/admin/offline-uploads/${encodeURIComponent(body.uploadId)}/validate`,
+    `/v1/admin/offline-uploads/${encodeURIComponent(body.uploadId)}/validate`,
     {
       sample_size: body.sampleSize ?? 1000,
       operator: body.operator,
@@ -130,7 +130,7 @@ function launchOfflineUploadLoad(
   uploadId: string,
 ): Promise<OfflineUploadLaunchResponse> {
   return postJson<OfflineUploadLaunchResponse>(
-    `/admin/offline-uploads/${encodeURIComponent(uploadId)}/load`,
+    `/v1/admin/offline-uploads/${encodeURIComponent(uploadId)}/load`,
     {},
   );
 }
@@ -141,7 +141,7 @@ export function useOfflineUploads(params: OfflineUploadListParams = {}) {
     queryFn: () => fetchOfflineUploads(params),
     refetchInterval: (query) => {
       const hasActiveUpload = query.state.data?.data.items.some((item) =>
-        ["validating", "loading"].includes(item.state),
+        ["validating", "loading"].includes(item.status),
       );
       return hasActiveUpload ? 2_000 : false;
     },
@@ -155,8 +155,8 @@ export function useOfflineUpload(uploadId: string | null) {
     queryFn: () => fetchOfflineUpload(uploadId as string),
     enabled: uploadId !== null && uploadId.length > 0,
     refetchInterval: (query) => {
-      const state = query.state.data?.data.state;
-      return state === "validating" || state === "loading" ? 2_000 : false;
+      const status = query.state.data?.data.status;
+      return status === "validating" || status === "loading" ? 2_000 : false;
     },
     staleTime: 2_000,
   });

@@ -1,4 +1,4 @@
-"""``/admin/dedup-review`` 운영 중복 후보 검토 라우터."""
+"""``/admin/dedup-reviews`` 운영 중복 후보 검토 라우터."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from datetime import datetime
 from time import perf_counter
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from krtour.map.infra.admin_feature_repo import (
     DedupFeatureSummary,
     DedupReviewPage,
@@ -26,6 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from krtour.map_admin.db import get_session
+from krtour.map_admin.response import Meta, make_meta
 
 __all__ = [
     "router",
@@ -36,7 +37,7 @@ __all__ = [
 ]
 
 
-router = APIRouter(prefix="/admin/dedup-review", tags=["admin-dedup"])
+router = APIRouter(prefix="/admin/dedup-reviews", tags=["admin-dedup"])
 
 DedupStatus = Literal["pending", "accepted", "rejected", "merged", "ignored"]
 DedupDecision = Literal["accepted", "rejected", "merged", "ignored"]
@@ -58,11 +59,11 @@ class DedupFeatureRecord(BaseModel):
 
 
 class DedupReviewRecord(BaseModel):
-    """``GET /admin/dedup-review`` item."""
+    """``GET /admin/dedup-reviews`` item."""
 
     model_config = ConfigDict(extra="forbid")
 
-    review_key: str
+    review_id: str
     status: str
     total_score: float
     name_score: float
@@ -83,30 +84,19 @@ class DedupReviewListData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     items: list[DedupReviewRecord]
-    next_cursor: str | None = None
-
-
-class DedupReviewListMeta(BaseModel):
-    """Dedup review list meta."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    count: int
-    page_size: int
-    duration_ms: int
 
 
 class DedupReviewListResponse(BaseModel):
-    """``GET /admin/dedup-review`` response."""
+    """``GET /admin/dedup-reviews`` response."""
 
     model_config = ConfigDict(extra="forbid")
 
     data: DedupReviewListData
-    meta: DedupReviewListMeta
+    meta: Meta
 
 
 class DedupReviewDecisionRequest(BaseModel):
-    """``PATCH /admin/dedup-review/{review_key}`` body."""
+    """``PATCH /admin/dedup-reviews/{review_id}`` body."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -121,7 +111,7 @@ class DedupReviewDecisionData(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    review_key: str
+    review_id: str
     decision: DedupDecision
     changed: bool
     master_feature_id: str | None = None
@@ -131,21 +121,13 @@ class DedupReviewDecisionData(BaseModel):
     source_links_dropped: int | None = None
 
 
-class DedupReviewDecisionMeta(BaseModel):
-    """Dedup decision meta."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    duration_ms: int
-
-
 class DedupReviewDecisionResponse(BaseModel):
-    """``PATCH /admin/dedup-review/{review_key}`` response."""
+    """``PATCH /admin/dedup-reviews/{review_id}`` response."""
 
     model_config = ConfigDict(extra="forbid")
 
     data: DedupReviewDecisionData
-    meta: DedupReviewDecisionMeta
+    meta: Meta
 
 
 def _feature(item: DedupFeatureSummary) -> DedupFeatureRecord:
@@ -163,7 +145,7 @@ def _feature(item: DedupFeatureSummary) -> DedupFeatureRecord:
 
 def _record(row: DedupReviewRow) -> DedupReviewRecord:
     return DedupReviewRecord(
-        review_key=row.review_key,
+        review_id=row.review_key,
         status=row.status,
         total_score=row.total_score,
         name_score=row.name_score,
@@ -181,15 +163,16 @@ def _record(row: DedupReviewRow) -> DedupReviewRecord:
 
 def _decision_response(
     *,
-    review_key: str,
+    review_id: str,
     decision: DedupDecision,
     changed: bool,
     started_at: float,
+    request: Request,
     outcome: MergeOutcome | None = None,
 ) -> DedupReviewDecisionResponse:
     return DedupReviewDecisionResponse(
         data=DedupReviewDecisionData(
-            review_key=review_key,
+            review_id=review_id,
             decision=decision,
             changed=changed,
             master_feature_id=outcome.master_feature_id if outcome else None,
@@ -198,14 +181,13 @@ def _decision_response(
             source_links_moved=outcome.source_links_moved if outcome else None,
             source_links_dropped=outcome.source_links_dropped if outcome else None,
         ),
-        meta=DedupReviewDecisionMeta(
-            duration_ms=max(0, int((perf_counter() - started_at) * 1000))
-        ),
+        meta=make_meta(request, started_at=started_at),
     )
 
 
 @router.get("", response_model=DedupReviewListResponse)
 async def list_reviews(
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
     review_status: Annotated[
         list[DedupStatus] | None,
@@ -241,23 +223,24 @@ async def list_reviews(
     return DedupReviewListResponse(
         data=DedupReviewListData(
             items=[_record(item) for item in page.items],
-            next_cursor=page.next_cursor,
         ),
-        meta=DedupReviewListMeta(
-            count=len(page.items),
+        meta=make_meta(
+            request,
+            started_at=started_at,
             page_size=page_size,
-            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
+            next_cursor=page.next_cursor,
         ),
     )
 
 
 @router.patch(
-    "/{review_key}",
+    "/{review_id}",
     response_model=DedupReviewDecisionResponse,
-    responses={404: {"description": "review_key 없음"}, 409: {"description": "전이 불가"}},
+    responses={404: {"description": "review_id 없음"}, 409: {"description": "전이 불가"}},
 )
 async def decide_review(
-    review_key: str,
+    request: Request,
+    review_id: str,
     body: DedupReviewDecisionRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> DedupReviewDecisionResponse:
@@ -266,11 +249,11 @@ async def decide_review(
         try:
             async with (
                 session.begin(),
-                advisory_lock(session, f"dedup-merge:{review_key}"),
+                advisory_lock(session, f"dedup-merge:{review_id}"),
             ):
                 outcome = await merge_dedup_review(
                     session,
-                    review_key,
+                    review_id,
                     master_feature_id=body.master_feature_id,
                     merged_by=body.reviewed_by,
                     reason=body.decision_reason,
@@ -291,17 +274,18 @@ async def decide_review(
                 detail="dedup review merge failed",
             ) from exc
         return _decision_response(
-            review_key=review_key,
+            review_id=review_id,
             decision=body.decision,
             changed=True,
             outcome=outcome,
             started_at=started_at,
+            request=request,
         )
 
     async with session.begin():
         changed = await set_dedup_review_decision(
             session,
-            review_key,
+            review_id,
             decision=body.decision,
             reviewed_by=body.reviewed_by,
             decision_reason=body.decision_reason,
@@ -309,11 +293,12 @@ async def decide_review(
     if not changed:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"pending dedup review 전이 실패: {review_key!r}",
+            detail=f"pending dedup review 전이 실패: {review_id!r}",
         )
     return _decision_response(
-        review_key=review_key,
+        review_id=review_id,
         decision=body.decision,
         changed=True,
         started_at=started_at,
+        request=request,
     )

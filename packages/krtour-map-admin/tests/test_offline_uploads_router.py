@@ -1,4 +1,4 @@
-"""``/admin/offline-uploads`` 라우터 단위 테스트."""
+"""``/v1/admin/offline-uploads`` 라우터 단위 테스트."""
 
 from __future__ import annotations
 
@@ -153,12 +153,12 @@ def _import_job(
 @pytest.mark.unit
 def test_offline_upload_routes_mounted_in_openapi(client: TestClient) -> None:
     spec = client.get("/openapi.json").json()
-    assert "/admin/offline-uploads" in spec["paths"]
-    assert "/admin/offline-uploads/{upload_id}" in spec["paths"]
-    assert "/admin/offline-uploads/{upload_id}/preview" in spec["paths"]
-    assert "/admin/offline-uploads/{upload_id}/validate" in spec["paths"]
-    assert "/admin/offline-uploads/{upload_id}/validation" in spec["paths"]
-    assert "/admin/offline-uploads/{upload_id}/load" in spec["paths"]
+    assert "/v1/admin/offline-uploads" in spec["paths"]
+    assert "/v1/admin/offline-uploads/{upload_id}" in spec["paths"]
+    assert "/v1/admin/offline-uploads/{upload_id}/preview" in spec["paths"]
+    assert "/v1/admin/offline-uploads/{upload_id}/validate" in spec["paths"]
+    assert "/v1/admin/offline-uploads/{upload_id}/validation" in spec["paths"]
+    assert "/v1/admin/offline-uploads/{upload_id}/load" in spec["paths"]
     assert "OfflineUploadRecord" in spec["components"]["schemas"]
 
 
@@ -191,7 +191,7 @@ def test_create_offline_upload_writes_object_and_metadata(
     monkeypatch.setattr(router_mod, "create_offline_upload", _create)
 
     response = client.post(
-        "/admin/offline-uploads",
+        "/v1/admin/offline-uploads",
         data={
             "provider": "offline-test-provider",
             "dataset_key": "offline_jsonl",
@@ -209,7 +209,7 @@ def test_create_offline_upload_writes_object_and_metadata(
 
     assert response.status_code == 201
     body = response.json()
-    assert body["data"]["state"] == "uploaded"
+    assert body["data"]["status"] == "uploaded"
     assert body["meta"]["bucket"] == "krtour-uploads"
     assert body["meta"]["object_key"].startswith("offline-uploads/")
     assert store.calls[0]["body"] == b'{"feature":{"feature_id":"f1"}}\n'
@@ -241,7 +241,7 @@ def test_create_offline_upload_duplicate_checksum_rolls_back_object(
     monkeypatch.setattr(router_mod, "get_offline_upload_by_checksum", _duplicate)
 
     response = client.post(
-        "/admin/offline-uploads",
+        "/v1/admin/offline-uploads",
         data={"provider": "p", "dataset_key": "d"},
         files={
             "file": (
@@ -253,9 +253,9 @@ def test_create_offline_upload_duplicate_checksum_rolls_back_object(
     )
 
     assert response.status_code == 409
-    error = response.json()["error"]
-    assert error["code"] == "OFFLINE_UPLOAD_DUPLICATE"
-    assert error["details"]["upload_id"] == existing.upload_id
+    body = response.json()
+    assert body["code"] == "OFFLINE_UPLOAD_DUPLICATE"
+    assert body["details"]["upload_id"] == existing.upload_id
     assert store.deleted == [store.calls[0]["storage_key"]]
 
 
@@ -284,7 +284,7 @@ def test_create_offline_upload_accepts_csv(
     monkeypatch.setattr(router_mod, "create_offline_upload", _create)
 
     response = client.post(
-        "/admin/offline-uploads",
+        "/v1/admin/offline-uploads",
         data={"provider": "p", "dataset_key": "d"},
         files={"file": ("features.csv", b"name,lon,lat\nA,126.9,37.5\n", "text/csv")},
     )
@@ -322,7 +322,7 @@ def test_offline_upload_store_is_reused_from_app_state(
 
     for filename in ("features-a.jsonl", "features-b.jsonl"):
         response = client.post(
-            "/admin/offline-uploads",
+            "/v1/admin/offline-uploads",
             data={"provider": "p", "dataset_key": "d"},
             files={
                 "file": (filename, b'{"feature":{"feature_id":"f1"}}\n', "application/x-ndjson")
@@ -364,7 +364,7 @@ def test_preview_offline_upload_prefers_app_state_store(
     monkeypatch.setattr(router_mod, "get_offline_upload", _get)
     monkeypatch.setattr(router_mod, "build_offline_upload_store", _build_store)
 
-    response = client.get(f"/admin/offline-uploads/{upload.upload_id}/preview")
+    response = client.get(f"/v1/admin/offline-uploads/{upload.upload_id}/preview")
 
     assert response.status_code == 200
     assert response.json()["meta"]["headers"] == ["name", "lon", "lat"]
@@ -424,7 +424,7 @@ def test_validate_offline_upload_prefers_app_state_store(
     monkeypatch.setattr(router_mod, "build_offline_upload_store", _build_store)
 
     response = client.post(
-        f"/admin/offline-uploads/{upload.upload_id}/validate",
+        f"/v1/admin/offline-uploads/{upload.upload_id}/validate",
         json={
             "sample_size": 100,
             "column_mapping": {
@@ -437,7 +437,7 @@ def test_validate_offline_upload_prefers_app_state_store(
     )
 
     assert response.status_code == 200
-    assert response.json()["data"]["state"] == "validated"
+    assert response.json()["data"]["status"] == "validated"
 
 
 @pytest.mark.unit
@@ -479,7 +479,7 @@ def test_create_offline_upload_deletes_object_when_metadata_insert_fails(
 
     with pytest.raises(RuntimeError, match="metadata insert failed"):
         client.post(
-            "/admin/offline-uploads",
+            "/v1/admin/offline-uploads",
             data={"provider": "p", "dataset_key": "d"},
             files={
                 "file": (
@@ -509,25 +509,25 @@ def test_create_rejects_file_over_configured_max_bytes(
     monkeypatch.setattr(router_mod, "build_offline_upload_store", _build_store)
 
     response = client.post(
-        "/admin/offline-uploads",
+        "/v1/admin/offline-uploads",
         data={"provider": "p", "dataset_key": "d"},
         files={"file": ("features.jsonl", b"123456789", "application/x-ndjson")},
     )
 
     assert response.status_code == 413
-    assert "최대 8 bytes" in response.json()["error"]["message"]
+    assert "최대 8 bytes" in response.json()["detail"]
 
 
 @pytest.mark.unit
 def test_create_rejects_unsupported_format(client: TestClient) -> None:
     response = client.post(
-        "/admin/offline-uploads",
+        "/v1/admin/offline-uploads",
         data={"provider": "p", "dataset_key": "d"},
         files={"file": ("features.xlsx", b"id,name\n1,a\n", "application/octet-stream")},
     )
 
     assert response.status_code == 422
-    assert "CSV/TSV" in response.json()["error"]["message"]
+    assert "CSV/TSV" in response.json()["detail"]
 
 
 @pytest.mark.unit
@@ -547,9 +547,9 @@ def test_list_offline_uploads_passes_filters(
     monkeypatch.setattr(router_mod, "list_offline_uploads", _list)
 
     response = client.get(
-        "/admin/offline-uploads",
+        "/v1/admin/offline-uploads",
         params={
-            "state": "uploaded",
+            "status": "uploaded",
             "provider": "offline-test-provider",
             "dataset_key": "offline_jsonl",
             "page_size": 25,
@@ -558,11 +558,15 @@ def test_list_offline_uploads_passes_filters(
 
     assert response.status_code == 200
     body = response.json()
-    assert body["meta"]["count"] == 1
+    assert body["meta"]["page"] == {
+        "page_size": 25,
+        "next_cursor": "next",
+        "total": None,
+    }
     assert body["data"]["items"][0]["upload_id"] == (
         "00000000-0000-0000-0000-000000000001"
     )
-    assert body["data"]["next_cursor"] == "next"
+    assert body["data"]["items"][0]["status"] == "uploaded"
 
 
 @pytest.mark.unit
@@ -598,12 +602,12 @@ def test_load_offline_upload_launches_dagster(
     monkeypatch.setattr(router_mod, "reserve_offline_upload_load", _reserve)
     monkeypatch.setattr(router_mod, "launch_offline_upload_load", _launch)
 
-    response = client.post("/admin/offline-uploads/00000000-0000-0000-0000-000000000001/load")
+    response = client.post("/v1/admin/offline-uploads/00000000-0000-0000-0000-000000000001/load")
 
     assert response.status_code == 200
     body = response.json()
     assert body["data"]["upload_id"] == "00000000-0000-0000-0000-000000000001"
-    assert body["data"]["state"] == "loading"
+    assert body["data"]["status"] == "loading"
     assert body["data"]["load_job_id"] == "10000000-0000-0000-0000-000000000001"
     assert body["meta"]["dagster_run_id"] == "dagster-run-1"
     assert order == ["reserve", "launch"]
@@ -657,10 +661,10 @@ def test_load_offline_upload_rejects_concurrent_reserve(
     monkeypatch.setattr(router_mod, "reserve_offline_upload_load", _reserve)
     monkeypatch.setattr(router_mod, "launch_offline_upload_load", _launch)
 
-    response = client.post("/admin/offline-uploads/00000000-0000-0000-0000-000000000001/load")
+    response = client.post("/v1/admin/offline-uploads/00000000-0000-0000-0000-000000000001/load")
 
     assert response.status_code == 409
-    assert "loading" in response.json()["error"]["message"]
+    assert "loading" in response.json()["detail"]
 
 
 @pytest.mark.unit
@@ -714,7 +718,7 @@ def test_load_offline_upload_marks_failed_when_launch_fails(
     monkeypatch.setattr(router_mod, "finish_import_job", _finish_import_job)
     monkeypatch.setattr(router_mod, "finish_offline_upload_load", _finish)
 
-    response = client.post("/admin/offline-uploads/00000000-0000-0000-0000-000000000001/load")
+    response = client.post("/v1/admin/offline-uploads/00000000-0000-0000-0000-000000000001/load")
 
     assert response.status_code == 502
     assert finished_jobs == [
@@ -754,7 +758,7 @@ def test_preview_offline_upload_reads_csv_sample(
     monkeypatch.setattr(router_mod, "get_offline_upload", _get)
     monkeypatch.setattr(router_mod, "build_offline_upload_store", lambda _settings: store)
 
-    response = client.get(f"/admin/offline-uploads/{upload.upload_id}/preview")
+    response = client.get(f"/v1/admin/offline-uploads/{upload.upload_id}/preview")
 
     assert response.status_code == 200
     meta = response.json()["meta"]
@@ -815,7 +819,7 @@ def test_validate_offline_upload_runs_validation_job(
     monkeypatch.setattr(router_mod, "run_offline_upload_validation_job", _run)
 
     response = client.post(
-        f"/admin/offline-uploads/{upload.upload_id}/validate",
+        f"/v1/admin/offline-uploads/{upload.upload_id}/validate",
         json={
             "sample_size": 100,
             "operator": "pytest",
@@ -830,7 +834,7 @@ def test_validate_offline_upload_runs_validation_job(
 
     assert response.status_code == 200
     body_json = response.json()
-    assert body_json["data"]["state"] == "validated"
+    assert body_json["data"]["status"] == "validated"
     assert body_json["meta"]["valid_rows"] == 1
     assert body_json["meta"]["issues"] == []
 
@@ -885,10 +889,10 @@ def test_get_validation_returns_saved_import_job_payload(
     monkeypatch.setattr(router_mod, "get_offline_upload", _get)
     monkeypatch.setattr(router_mod, "get_import_job", _job)
 
-    response = client.get(f"/admin/offline-uploads/{upload.upload_id}/validation")
+    response = client.get(f"/v1/admin/offline-uploads/{upload.upload_id}/validation")
 
     assert response.status_code == 200
-    assert response.json()["meta"]["job_state"] == "done"
+    assert response.json()["meta"]["job_status"] == "done"
 
 
 @pytest.mark.unit
@@ -903,10 +907,10 @@ def test_load_offline_upload_rejects_unloadable_state(
 
     monkeypatch.setattr(router_mod, "get_offline_upload", _get)
 
-    response = client.post("/admin/offline-uploads/00000000-0000-0000-0000-000000000001/load")
+    response = client.post("/v1/admin/offline-uploads/00000000-0000-0000-0000-000000000001/load")
 
     assert response.status_code == 409
-    assert "loading" in response.json()["error"]["message"]
+    assert "loading" in response.json()["detail"]
 
 
 @pytest.mark.unit
@@ -925,10 +929,10 @@ def test_load_offline_upload_rejects_loaded_state(
     monkeypatch.setattr(router_mod, "get_offline_upload", _get)
     monkeypatch.setattr(router_mod, "launch_offline_upload_load", _launch)
 
-    response = client.post("/admin/offline-uploads/00000000-0000-0000-0000-000000000001/load")
+    response = client.post("/v1/admin/offline-uploads/00000000-0000-0000-0000-000000000001/load")
 
     assert response.status_code == 409
-    assert "loaded" in response.json()["error"]["message"]
+    assert "loaded" in response.json()["detail"]
 
 
 @pytest.mark.unit
@@ -948,7 +952,7 @@ def test_load_offline_upload_rejects_csv_without_validation(
 
     monkeypatch.setattr(router_mod, "get_offline_upload", _get)
 
-    response = client.post("/admin/offline-uploads/00000000-0000-0000-0000-000000000001/load")
+    response = client.post("/v1/admin/offline-uploads/00000000-0000-0000-0000-000000000001/load")
 
     assert response.status_code == 409
-    assert "validate" in response.json()["error"]["message"]
+    assert "validate" in response.json()["detail"]

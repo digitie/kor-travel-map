@@ -1,8 +1,8 @@
 /**
  * Import job 운영 조회 hooks.
  *
- * 화면 route는 `/ops/import-jobs` 또는 admin navigation 안의 job 화면이지만,
- * backend 계약은 ADR-045 T-207d 기준 `/ops/import-jobs/*`다.
+ * 화면 route는 `/v1/ops/import-jobs` 또는 admin navigation 안의 job 화면이지만,
+ * backend 계약은 ADR-045 T-207d 기준 `/v1/ops/import-jobs/*`다.
  */
 
 import { useQuery } from "@tanstack/react-query";
@@ -12,11 +12,11 @@ import type { components, paths } from "./types";
 
 type ImportJobSchemas = components["schemas"];
 type ImportJobsListQuery = NonNullable<
-  paths["/ops/import-jobs"]["get"]["parameters"]["query"]
+  paths["/v1/ops/import-jobs"]["get"]["parameters"]["query"]
 >;
 
-export type ImportJobState = Exclude<
-  ImportJobsListQuery["state"],
+export type ImportJobStatus = Exclude<
+  ImportJobsListQuery["status"],
   null | undefined
 >;
 export type OpsImportJobRecord = ImportJobSchemas["OpsImportJobRecord"];
@@ -31,8 +31,8 @@ function fetchImportJobs(
   params: ImportJobsListParams = {},
 ): Promise<OpsImportJobsListResponse> {
   return getJson<OpsImportJobsListResponse>(
-    pathWithQuery("/ops/import-jobs", {
-      state: params.state,
+    pathWithQuery("/v1/ops/import-jobs", {
+      status: params.status,
       kind: params.kind,
       load_batch_id: params.load_batch_id,
       parent_job_id: params.parent_job_id,
@@ -44,7 +44,7 @@ function fetchImportJobs(
 
 function fetchImportJob(jobId: string): Promise<OpsImportJobResponse> {
   return getJson<OpsImportJobResponse>(
-    `/ops/import-jobs/${encodeURIComponent(jobId)}`,
+    `/v1/ops/import-jobs/${encodeURIComponent(jobId)}`,
   );
 }
 
@@ -54,7 +54,7 @@ export function useImportJobs(params: ImportJobsListParams = {}) {
     queryFn: () => fetchImportJobs(params),
     refetchInterval: (query) => {
       const hasRunningJob = query.state.data?.data.items.some((item) =>
-        ["queued", "running"].includes(item.state),
+        ["queued", "running"].includes(item.status),
       );
       return hasRunningJob ? 2_000 : false;
     },
@@ -68,8 +68,8 @@ export function useImportJob(jobId: string | null) {
     queryFn: () => fetchImportJob(jobId as string),
     enabled: jobId !== null && jobId.length > 0,
     refetchInterval: (query) => {
-      const state = query.state.data?.data.state;
-      return state === "queued" || state === "running" ? 2_000 : false;
+      const status = query.state.data?.data.status;
+      return status === "queued" || status === "running" ? 2_000 : false;
     },
     staleTime: 2_000,
   });

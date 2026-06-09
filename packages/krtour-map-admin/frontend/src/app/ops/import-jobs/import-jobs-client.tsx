@@ -3,7 +3,7 @@
 import { RefreshCwIcon } from "lucide-react";
 import { useState } from "react";
 
-import { type ImportJobState, useImportJobs } from "@/api/importJobs";
+import { type ImportJobStatus, useImportJobs } from "@/api/importJobs";
 import { AdminShell } from "@/components/admin-shell";
 import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/table";
 import { formatDateTime, shortId } from "@/lib/format";
 
-const states: Array<ImportJobState | "all"> = [
+const statuses: Array<ImportJobStatus | "all"> = [
   "all",
   "queued",
   "running",
@@ -31,12 +31,12 @@ const states: Array<ImportJobState | "all"> = [
 ];
 
 export function ImportJobsClient() {
-  const [state, setState] = useState<ImportJobState | "all">("all");
+  const [status, setStatus] = useState<ImportJobStatus | "all">("all");
   const [kind, setKind] = useState("");
   const [loadBatchId, setLoadBatchId] = useState("");
   const [parentJobId, setParentJobId] = useState("");
   const jobs = useImportJobs({
-    state: state === "all" ? undefined : state,
+    status: status === "all" ? undefined : status,
     kind: kind.trim() || undefined,
     load_batch_id: loadBatchId.trim() || undefined,
     parent_job_id: parentJobId.trim() || undefined,
@@ -70,13 +70,13 @@ export function ImportJobsClient() {
 
         <div className="flex flex-wrap items-center gap-2">
           <NativeSelect
-            aria-label="state"
-            value={state}
+            aria-label="status"
+            value={status}
             onChange={(event) =>
-              setState(event.target.value as ImportJobState | "all")
+              setStatus(event.target.value as ImportJobStatus | "all")
             }
           >
-            {states.map((item) => (
+            {statuses.map((item) => (
               <NativeSelectOption key={item} value={item}>
                 {item}
               </NativeSelectOption>
@@ -111,7 +111,7 @@ export function ImportJobsClient() {
                 <TableHead>batch</TableHead>
                 <TableHead>parent</TableHead>
                 <TableHead>kind</TableHead>
-                <TableHead>state</TableHead>
+                <TableHead>status</TableHead>
                 <TableHead>progress</TableHead>
                 <TableHead>stage</TableHead>
                 <TableHead>created</TableHead>
@@ -133,7 +133,7 @@ export function ImportJobsClient() {
                   </TableCell>
                   <TableCell>{job.kind}</TableCell>
                   <TableCell>
-                    <StatusBadge status={job.state} />
+                    <StatusBadge status={job.status} />
                   </TableCell>
                   <TableCell className="font-mono">{job.progress}%</TableCell>
                   <TableCell>{job.current_stage ?? "-"}</TableCell>

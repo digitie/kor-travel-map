@@ -101,14 +101,14 @@ def _nearby_row() -> NearbyFeatureRow:
 @pytest.mark.unit
 def test_poi_cache_target_routes_mounted_in_openapi(client: TestClient) -> None:
     spec = client.get("/openapi.json").json()
-    assert "/admin/poi-cache-targets" in spec["paths"]
-    assert "/admin/poi-cache-targets/{external_system}/{target_key}" in spec["paths"]
+    assert "/v1/admin/poi-cache-targets" in spec["paths"]
+    assert "/v1/admin/poi-cache-targets/{external_system}/{target_key}" in spec["paths"]
     assert "/v1/features/nearby/by-target" in spec["paths"]
     schemas = spec["components"]["schemas"]
     assert "PoiCacheTargetUpsertRequest" in schemas
     assert "FeaturesNearbyByTargetResponse" in schemas
     assert set(schemas["PoiCacheTargetListResponse"]["properties"]) == {"data", "meta"}
-    assert "next_cursor" in schemas["PoiCacheTargetListData"]["properties"]
+    assert "next_cursor" not in schemas["PoiCacheTargetListData"]["properties"]
     upsert_props = schemas["PoiCacheTargetUpsertRequest"]["properties"]
     assert "metadata" in upsert_props
     assert "metadata_" not in upsert_props
@@ -143,7 +143,7 @@ def test_put_poi_cache_target_uses_transaction(
     monkeypatch.setattr(router_mod, "upsert_poi_cache_target", _upsert)
 
     response = client.put(
-        "/admin/poi-cache-targets/tripmate/poi-1",
+        "/v1/admin/poi-cache-targets/tripmate/poi-1",
         json={
             "coord": {"lon": 126.978, "lat": 37.5665},
             "radius_km": 5.0,
@@ -185,7 +185,7 @@ def test_put_poi_cache_target_rejects_unbounded_payloads_before_transaction(
     body: dict[str, Any] = {"coord": {"lon": 126.978, "lat": 37.5665}}
     body.update(payload)
 
-    response = client.put("/admin/poi-cache-targets/tripmate/poi-1", json=body)
+    response = client.put("/v1/admin/poi-cache-targets/tripmate/poi-1", json=body)
 
     assert response.status_code == 422
     assert session.begin_count == 0
@@ -204,12 +204,12 @@ def test_put_poi_cache_target_conflict_returns_409(
     monkeypatch.setattr(router_mod, "upsert_poi_cache_target", _conflict)
 
     response = client.put(
-        "/admin/poi-cache-targets/tripmate/poi-1",
+        "/v1/admin/poi-cache-targets/tripmate/poi-1",
         json={"coord": {"lon": 126.978, "lat": 37.5665}},
     )
 
     assert response.status_code == 409
-    assert "coord conflict" in response.json()["error"]["message"]
+    assert "coord conflict" in response.json()["detail"]
 
 
 @pytest.mark.unit
@@ -230,7 +230,7 @@ def test_list_poi_cache_targets_passes_filters(
     monkeypatch.setattr(router_mod, "list_poi_cache_targets", _list)
 
     response = client.get(
-        "/admin/poi-cache-targets",
+        "/v1/admin/poi-cache-targets",
         params={
             "external_system": "tripmate",
             "update_enabled": "true",
@@ -241,9 +241,12 @@ def test_list_poi_cache_targets_passes_filters(
 
     assert response.status_code == 200
     body = response.json()
-    assert body["meta"]["count"] == 1
+    assert body["meta"]["page"] == {
+        "page_size": 25,
+        "next_cursor": "cursor-2",
+        "total": None,
+    }
     assert body["data"]["items"][0]["target_key"] == "poi-1"
-    assert body["data"]["next_cursor"] == "cursor-2"
 
 
 @pytest.mark.unit
@@ -258,10 +261,10 @@ def test_list_poi_cache_targets_rejects_invalid_cursor(
 
     monkeypatch.setattr(router_mod, "list_poi_cache_targets", _list)
 
-    response = client.get("/admin/poi-cache-targets", params={"cursor": "bad"})
+    response = client.get("/v1/admin/poi-cache-targets", params={"cursor": "bad"})
 
     assert response.status_code == 422
-    assert "invalid poi cache target cursor" in response.json()["error"]["message"]
+    assert "invalid poi cache target cursor" in response.json()["detail"]
 
 
 @pytest.mark.unit
@@ -276,7 +279,7 @@ def test_get_poi_cache_target_404_when_missing(
 
     monkeypatch.setattr(router_mod, "get_poi_cache_target_by_key", _missing)
 
-    response = client.get("/admin/poi-cache-targets/tripmate/missing")
+    response = client.get("/v1/admin/poi-cache-targets/tripmate/missing")
 
     assert response.status_code == 404
 
@@ -296,7 +299,7 @@ def test_delete_poi_cache_target_uses_transaction(
 
     monkeypatch.setattr(router_mod, "delete_poi_cache_target", _delete)
 
-    response = client.delete("/admin/poi-cache-targets/tripmate/poi-1")
+    response = client.delete("/v1/admin/poi-cache-targets/tripmate/poi-1")
 
     assert response.status_code == 200
     assert response.json()["data"]["target_id"] == "target-1"
@@ -359,8 +362,11 @@ def test_features_nearby_by_target_passes_filters(
     assert body["data"]["items"][0]["distance_m"] == 320.5
     assert "primary_provider" not in body["data"]["items"][0]
     assert "primary_dataset_key" not in body["data"]["items"][0]
-    assert body["data"]["next_cursor"] == "next"
-    assert body["meta"]["count"] == 1
+    assert body["meta"]["page"] == {
+        "page_size": 10,
+        "next_cursor": "next",
+        "total": None,
+    }
 
 
 @pytest.mark.unit

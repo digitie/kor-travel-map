@@ -1,5 +1,5 @@
 /**
- * `/admin/dedup-review/*` 중복 후보 검토 hooks.
+ * `/v1/admin/dedup-reviews/*` 중복 후보 검토 hooks.
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -9,7 +9,7 @@ import type { components, paths } from "./types";
 
 type DedupSchemas = components["schemas"];
 type DedupReviewListQuery = NonNullable<
-  paths["/admin/dedup-review"]["get"]["parameters"]["query"]
+  paths["/v1/admin/dedup-reviews"]["get"]["parameters"]["query"]
 >;
 
 export type DedupStatus = Exclude<
@@ -49,7 +49,7 @@ function fetchDedupReviews(
   params: DedupReviewListParams = {},
 ): Promise<DedupReviewListResponse> {
   return getJson<DedupReviewListResponse>(
-    pathWithQuery("/admin/dedup-review", {
+    pathWithQuery("/v1/admin/dedup-reviews", {
       status: params.status,
       provider: params.provider,
       dataset_key: params.dataset_key,
@@ -69,14 +69,14 @@ function decideDedupReview(
   body: DedupReviewDecisionRequest,
 ): Promise<DedupReviewDecisionResponse> {
   return patchJson<DedupReviewDecisionResponse>(
-    `/admin/dedup-review/${encodeURIComponent(reviewKey)}`,
+    `/v1/admin/dedup-reviews/${encodeURIComponent(reviewKey)}`,
     body,
   );
 }
 
 export function useDedupReviews(params: DedupReviewListParams = {}) {
   return useQuery<DedupReviewListResponse, Error>({
-    queryKey: ["dedup-review", params],
+    queryKey: ["dedup-reviews", params],
     queryFn: () => fetchDedupReviews(params),
     staleTime: 15_000,
   });
@@ -91,7 +91,7 @@ export function useDedupDecisionMutation() {
   >({
     mutationFn: ({ reviewKey, body }) => decideDedupReview(reviewKey, body),
     onSuccess: (data) => {
-      void queryClient.invalidateQueries({ queryKey: ["dedup-review"] });
+      void queryClient.invalidateQueries({ queryKey: ["dedup-reviews"] });
       void queryClient.invalidateQueries({ queryKey: ["admin-features"] });
       void queryClient.invalidateQueries({ queryKey: ["ops", "metrics"] });
       if (data.data.master_feature_id) {

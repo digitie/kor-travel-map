@@ -1,4 +1,4 @@
-"""``/admin/issues`` 운영 이슈 라우터 단위 테스트 (T-212 / DA-D-04)."""
+"""``/v1/admin/issues`` 운영 이슈 라우터 단위 테스트 (T-212 / DA-D-04)."""
 
 from __future__ import annotations
 
@@ -121,8 +121,8 @@ def _snapshot(
 @pytest.mark.unit
 def test_admin_issues_mounted_in_openapi(client: TestClient) -> None:
     spec = client.get("/openapi.json").json()
-    assert "/admin/issues" in spec["paths"]
-    assert "/admin/issues/{violation_key}" in spec["paths"]
+    assert "/v1/admin/issues" in spec["paths"]
+    assert "/v1/admin/issues/{issue_id}" in spec["paths"]
     schemas = spec["components"]["schemas"]
     assert "AdminIssueListResponse" in schemas
     assert set(schemas["AdminIssueListResponse"]["properties"]) == {"data", "meta"}
@@ -149,7 +149,7 @@ def test_list_issues_passes_filters_and_envelope(
     monkeypatch.setattr(router_mod, "list_ops_integrity_issues", _list)
 
     response = client.get(
-        "/admin/issues",
+        "/v1/admin/issues",
         params={
             "status": "open",
             "issue_type": "address_mismatch",
@@ -158,7 +158,10 @@ def test_list_issues_passes_filters_and_envelope(
             "severity": "error",
             "feature_id": "feature-1",
             "q": "종로",
-            "bbox": "126.97,37.57,126.98,37.58",
+            "min_lon": "126.97",
+            "min_lat": "37.57",
+            "max_lon": "126.98",
+            "max_lat": "37.58",
             "page_size": "25",
             "cursor": "cursor-1",
         },
@@ -167,14 +170,20 @@ def test_list_issues_passes_filters_and_envelope(
     assert response.status_code == 200
     body = response.json()
     assert set(body) == {"data", "meta"}
-    assert body["meta"]["count"] == 1
-    assert body["data"]["items"][0]["violation_key"] == _VIOLATION_KEY
-    assert body["data"]["next_cursor"] == "cursor-2"
+    assert body["meta"]["page"] == {
+        "page_size": 25,
+        "next_cursor": "cursor-2",
+        "total": None,
+    }
+    assert body["data"]["items"][0]["issue_id"] == _VIOLATION_KEY
 
 
 @pytest.mark.unit
 def test_list_issues_invalid_bbox_returns_422(client: TestClient) -> None:
-    response = client.get("/admin/issues", params={"bbox": "126.97,37.57,126.98"})
+    response = client.get(
+        "/v1/admin/issues",
+        params={"min_lon": "126.97", "min_lat": "37.57", "max_lon": "126.98"},
+    )
     assert response.status_code == 422
 
 
@@ -188,7 +197,7 @@ def test_list_issues_invalid_cursor_returns_422(
 
     monkeypatch.setattr(router_mod, "list_ops_integrity_issues", _list)
 
-    response = client.get("/admin/issues", params={"cursor": "bad"})
+    response = client.get("/v1/admin/issues", params={"cursor": "bad"})
 
     assert response.status_code == 422
 
@@ -209,11 +218,11 @@ def test_get_issue_detail_with_feature(
     monkeypatch.setattr(router_mod, "get_data_integrity_violation", _get)
     monkeypatch.setattr(router_mod, "get_feature_address_snapshot", _feature)
 
-    response = client.get(f"/admin/issues/{_VIOLATION_KEY}")
+    response = client.get(f"/v1/admin/issues/{_VIOLATION_KEY}")
 
     assert response.status_code == 200
     body = response.json()
-    assert body["data"]["issue"]["violation_key"] == _VIOLATION_KEY
+    assert body["data"]["issue"]["issue_id"] == _VIOLATION_KEY
     assert body["data"]["feature"]["feature_id"] == "feature-1"
     assert body["data"]["feature"]["sigungu_code"] == "11560"
 
@@ -228,7 +237,7 @@ def test_get_issue_detail_404(
 
     monkeypatch.setattr(router_mod, "get_data_integrity_violation", _missing)
 
-    response = client.get(f"/admin/issues/{_VIOLATION_KEY}")
+    response = client.get(f"/v1/admin/issues/{_VIOLATION_KEY}")
 
     assert response.status_code == 404
 
@@ -264,7 +273,7 @@ def test_patch_status_actions(
     monkeypatch.setattr(router_mod, "set_data_integrity_violation_status", _set)
 
     response = client.patch(
-        f"/admin/issues/{_VIOLATION_KEY}",
+        f"/v1/admin/issues/{_VIOLATION_KEY}",
         json={"action": action, "operator": "ops-1", "reason": "검토 완료"},
     )
 
@@ -294,7 +303,7 @@ def test_patch_state_conflict_returns_409(
     monkeypatch.setattr(router_mod, "set_data_integrity_violation_status", _set)
 
     response = client.patch(
-        f"/admin/issues/{_VIOLATION_KEY}",
+        f"/v1/admin/issues/{_VIOLATION_KEY}",
         json={"action": "resolve"},
     )
 
@@ -330,7 +339,7 @@ def test_patch_manual_override_applies_and_resolves(
     monkeypatch.setattr(router_mod, "set_data_integrity_violation_status", _set)
 
     response = client.patch(
-        f"/admin/issues/{_VIOLATION_KEY}",
+        f"/v1/admin/issues/{_VIOLATION_KEY}",
         json={
             "action": "manual_override",
             "coord": {"lon": 126.978, "lat": 37.5665},
@@ -365,7 +374,7 @@ def test_patch_manual_override_no_fields_returns_422(
     monkeypatch.setattr(router_mod, "get_data_integrity_violation", _get)
 
     response = client.patch(
-        f"/admin/issues/{_VIOLATION_KEY}",
+        f"/v1/admin/issues/{_VIOLATION_KEY}",
         json={"action": "manual_override"},
     )
 
@@ -384,12 +393,12 @@ def test_patch_action_requires_feature_returns_422(
     monkeypatch.setattr(router_mod, "get_data_integrity_violation", _get)
 
     response = client.patch(
-        f"/admin/issues/{_VIOLATION_KEY}",
+        f"/v1/admin/issues/{_VIOLATION_KEY}",
         json={"action": "retry_reverse_geocode"},
     )
 
     assert response.status_code == 422
-    assert "no linked feature" in response.json()["error"]["message"]
+    assert "no linked feature" in response.json()["detail"]
 
 
 @pytest.mark.unit
@@ -422,7 +431,7 @@ def test_patch_retry_reverse_geocode_returns_candidate(
     monkeypatch.setattr(router_mod, "_reverse_geocode", _reverse)
 
     response = client.patch(
-        f"/admin/issues/{_VIOLATION_KEY}",
+        f"/v1/admin/issues/{_VIOLATION_KEY}",
         json={"action": "retry_reverse_geocode"},
     )
 
@@ -455,7 +464,7 @@ def test_patch_geocode_action_503_when_base_url_unset(
     monkeypatch.setattr(router_mod, "_reverse_geocode", _reverse)
 
     response = client.patch(
-        f"/admin/issues/{_VIOLATION_KEY}",
+        f"/v1/admin/issues/{_VIOLATION_KEY}",
         json={"action": "retry_reverse_geocode"},
     )
 

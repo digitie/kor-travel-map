@@ -24,7 +24,6 @@ import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from time import perf_counter
-from uuid import uuid4
 
 import httpx
 from fastapi import Depends, FastAPI, Request
@@ -39,6 +38,8 @@ from krtour.map_admin import __version__
 from krtour.map_admin.auth import (
     require_admin_destructive_enabled,
 )
+from krtour.map_admin.response import bind_request_id, reset_request_id
+from krtour.map_admin.response import request_id as response_request_id
 from krtour.map_admin.routers import (
     admin_backups_router,
     admin_features_router,
@@ -82,8 +83,7 @@ _ERROR_CODE_BY_STATUS: dict[int, str] = {
 
 
 def _request_id(request: Request) -> str:
-    value = request.headers.get("x-request-id")
-    return value if value else str(uuid4())
+    return response_request_id(request)
 
 
 async def _record_api_call_safe(
@@ -162,19 +162,27 @@ def _error_response(
 ) -> JSONResponse:
     response_headers = dict(headers or {})
     response_headers.setdefault("X-Request-ID", request_id)
+    problem_type = code.lower().replace("_", "-")
+    problem: dict[str, object] = {
+        "type": f"https://krtour-map/errors/{problem_type}",
+        "title": message,
+        "status": status_code,
+        "detail": message,
+        "code": code,
+        "request_id": request_id,
+        "errors": details.get("errors", [])
+        if isinstance(details, Mapping)
+        else [],
+    }
+    if details not in ({}, None) and not (
+        isinstance(details, Mapping) and set(details) == {"errors"}
+    ):
+        problem["details"] = details
     return JSONResponse(
         status_code=status_code,
         headers=response_headers,
-        content=jsonable_encoder(
-            {
-                "error": {
-                    "code": code,
-                    "message": message,
-                    "details": details if details is not None else {},
-                    "request_id": request_id,
-                }
-            }
-        ),
+        media_type="application/problem+json",
+        content=jsonable_encoder(problem),
     )
 
 
@@ -284,6 +292,20 @@ def create_app(settings: AdminSettings | None = None) -> FastAPI:
             allow_headers=["*"],
         )
 
+    @application.middleware("http")
+    async def attach_request_id(
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        rid = _request_id(request)
+        token = bind_request_id(rid)
+        try:
+            response = await call_next(request)
+        finally:
+            reset_request_id(token)
+        response.headers.setdefault("X-Request-ID", rid)
+        return response
+
     # opt-in API 호출 로그 (T-212c). 기본 off → 등록 안 하면 zero overhead.
     # OpenAPI spec에는 영향 없음(미들웨어, ADR-031 drift gate 무관).
     if settings.api_call_log_enabled:
@@ -310,7 +332,7 @@ def create_app(settings: AdminSettings | None = None) -> FastAPI:
     application.include_router(public_status_router)
 
     if settings.debug_routes_enabled:
-        application.include_router(etl_router)
+        application.include_router(etl_router, prefix="/v1")
 
     if settings.features_routes_enabled:
         # 사용자/서비스 표면 ``/features`` · ``/categories`` · ``/providers``는 ``/v1``
@@ -319,33 +341,33 @@ def create_app(settings: AdminSettings | None = None) -> FastAPI:
         # ``POST /v1/features/batch``는 순수 service-to-service read라 route-level에서
         # service token으로 게이트한다(ADR-045 D-1; features.py). token 미설정이면
         # 통과(하위호환). 나머지 ``/v1/features`` read는 공용이라 앱 토큰을 강제하지 않는다.
-        # admin/ops/debug의 ``/v1`` 이동은 ADR-048/T-216a에서 처리한다.
         application.include_router(features_router, prefix="/v1")
         application.include_router(categories_router, prefix="/v1")
         application.include_router(providers_router, prefix="/v1")
         # Step D on-demand 상세는 DB(적재된 raw_data) 필요 → features와 동일 gate.
         if settings.debug_routes_enabled:
-            application.include_router(mois_detail_router)
+            application.include_router(mois_detail_router, prefix="/v1")
 
     if admin_routes_enabled:
-        application.include_router(admin_backups_router)
+        application.include_router(admin_backups_router, prefix="/v1")
         # restore/swap은 전부 파괴적 → kill-switch 게이트(admin_destructive_enabled).
         application.include_router(
             admin_restore_router,
+            prefix="/v1",
             dependencies=[Depends(require_admin_destructive_enabled)],
         )
-        application.include_router(admin_features_router)
-        application.include_router(admin_issues_router)
-        application.include_router(dedup_review_router)
-        application.include_router(enrichment_review_router)
-        application.include_router(feature_update_requests_router)
-        application.include_router(poi_cache_targets_router)
-        application.include_router(offline_uploads_router)
+        application.include_router(admin_features_router, prefix="/v1")
+        application.include_router(admin_issues_router, prefix="/v1")
+        application.include_router(dedup_review_router, prefix="/v1")
+        application.include_router(enrichment_review_router, prefix="/v1")
+        application.include_router(feature_update_requests_router, prefix="/v1")
+        application.include_router(poi_cache_targets_router, prefix="/v1")
+        application.include_router(offline_uploads_router, prefix="/v1")
 
     if ops_routes_enabled:
-        application.include_router(ops_router)
-        application.include_router(ops_logs_router)
-        application.include_router(dagster_router)
+        application.include_router(ops_router, prefix="/v1")
+        application.include_router(ops_logs_router, prefix="/v1")
+        application.include_router(dagster_router, prefix="/v1")
 
     return application
 

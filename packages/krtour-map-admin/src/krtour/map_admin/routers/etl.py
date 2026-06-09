@@ -18,6 +18,7 @@ ADR 참조
 
 from __future__ import annotations
 
+from time import perf_counter
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
@@ -34,6 +35,7 @@ from krtour.map_admin.etl_live import (
     LiveLoaderError,
     find_live_loader,
 )
+from krtour.map_admin.response import Meta, make_meta
 from krtour.map_admin.settings import AdminSettings
 
 __all__ = [
@@ -74,16 +76,25 @@ class _ProviderEntry(BaseModel):
     datasets: list[_DatasetEntry]
 
 
-class ProvidersResponse(BaseModel):
-    """`/debug/etl/providers` 응답."""
+class ProvidersData(BaseModel):
+    """`/debug/etl/providers` data payload."""
 
     model_config = ConfigDict(extra="forbid")
 
     providers: list[_ProviderEntry]
 
 
-class ProviderDatasetsResponse(BaseModel):
-    """`/debug/etl/{provider}/datasets` 응답."""
+class ProvidersResponse(BaseModel):
+    """`/debug/etl/providers` 응답."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: ProvidersData
+    meta: Meta
+
+
+class ProviderDatasetsData(BaseModel):
+    """`/debug/etl/{provider}/datasets` data payload."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -91,8 +102,17 @@ class ProviderDatasetsResponse(BaseModel):
     datasets: list[_DatasetEntry]
 
 
-class EtlPreviewResponse(BaseModel):
-    """`/debug/etl/{provider}/{dataset}/preview` 응답."""
+class ProviderDatasetsResponse(BaseModel):
+    """`/debug/etl/{provider}/datasets` 응답."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: ProviderDatasetsData
+    meta: Meta
+
+
+class EtlPreviewData(BaseModel):
+    """`/debug/etl/{provider}/{dataset}/preview` data payload."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -101,7 +121,6 @@ class EtlPreviewResponse(BaseModel):
     source: Literal["fixture", "live"]
     variant: str = Field(description="`FeatureBundle` / `WeatherValue` / `PriceValue`.")
     description: str
-    count: int
     items: list[dict[str, Any]] = Field(
         description=(
             "변환 결과 list. variant에 따라 schema가 다르다 — FeatureBundle "
@@ -109,6 +128,15 @@ class EtlPreviewResponse(BaseModel):
             "PriceValue 등."
         ),
     )
+
+
+class EtlPreviewResponse(BaseModel):
+    """`/debug/etl/{provider}/{dataset}/preview` 응답."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: EtlPreviewData
+    meta: Meta
 
 
 # ── helper: build dataset entries ─────────────────────────────────────
@@ -143,12 +171,16 @@ def _dataset_entries(provider: str) -> list[_DatasetEntry]:
     ),
 )
 async def get_providers() -> ProvidersResponse:
+    started_at = perf_counter()
     entries: list[_ProviderEntry] = []
     for provider in list_providers():
         entries.append(
             _ProviderEntry(provider=provider, datasets=_dataset_entries(provider))
         )
-    return ProvidersResponse(providers=entries)
+    return ProvidersResponse(
+        data=ProvidersData(providers=entries),
+        meta=make_meta(started_at=started_at),
+    )
 
 
 @router.get(
@@ -157,6 +189,7 @@ async def get_providers() -> ProvidersResponse:
     summary="특정 provider의 dataset 목록",
 )
 async def get_provider_datasets(provider: str) -> ProviderDatasetsResponse:
+    started_at = perf_counter()
     datasets = list_datasets(provider)
     if not datasets:
         raise HTTPException(
@@ -167,7 +200,8 @@ async def get_provider_datasets(provider: str) -> ProviderDatasetsResponse:
             ),
         )
     return ProviderDatasetsResponse(
-        provider=provider, datasets=_dataset_entries(provider)
+        data=ProviderDatasetsData(provider=provider, datasets=_dataset_entries(provider)),
+        meta=make_meta(started_at=started_at),
     )
 
 
@@ -194,8 +228,11 @@ async def post_preview(
     dataset: str,
     source: Literal["fixture", "live"] = Query(default="fixture"),
 ) -> EtlPreviewResponse:
+    started_at = perf_counter()
     if source == "live":
-        return await _run_live_preview(provider, dataset, request)
+        return await _run_live_preview(
+            provider, dataset, request, started_at=started_at
+        )
 
     try:
         result = await run_fixture_preview(provider, dataset)
@@ -204,11 +241,19 @@ async def post_preview(
             status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
         ) from exc
 
-    return EtlPreviewResponse(**result)
+    result.pop("count", None)
+    return EtlPreviewResponse(
+        data=EtlPreviewData(**result),
+        meta=make_meta(started_at=started_at),
+    )
 
 
 async def _run_live_preview(
-    provider: str, dataset: str, request: Request
+    provider: str,
+    dataset: str,
+    request: Request,
+    *,
+    started_at: float,
 ) -> EtlPreviewResponse:
     """``?source=live`` 분기 — provider 실 호출 + 변환 결과 응답."""
     entry = next(
@@ -257,11 +302,13 @@ async def _run_live_preview(
         raise HTTPException(status_code=status_code, detail=msg) from exc
 
     return EtlPreviewResponse(
-        provider=entry.provider,
-        dataset=entry.dataset,
-        source="live",
-        variant=entry.variant,
-        description=entry.description,
-        count=len(items),
-        items=items,
+        data=EtlPreviewData(
+            provider=entry.provider,
+            dataset=entry.dataset,
+            source="live",
+            variant=entry.variant,
+            description=entry.description,
+            items=items,
+        ),
+        meta=make_meta(started_at=started_at),
     )

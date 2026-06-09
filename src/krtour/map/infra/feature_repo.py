@@ -67,6 +67,7 @@ __all__ = [
     "find_place_features_without_phone",
     "set_feature_phones",
     "features_in_bbox",
+    "encode_bbox_cursor",
     "search_features",
     "features_nearby_poi_cache_target",
 ]
@@ -340,6 +341,10 @@ WHERE (CAST(:kinds AS text[]) IS NULL OR kind = ANY(CAST(:kinds AS text[])))
   AND (
     CAST(:categories AS text[]) IS NULL
     OR category = ANY(CAST(:categories AS text[]))
+  )
+  AND (
+    CAST(:cursor_feature_id AS text) IS NULL
+    OR feature_id > CAST(:cursor_feature_id AS text)
   )
 ORDER BY feature_id ASC
 LIMIT :limit
@@ -1441,6 +1446,7 @@ async def features_in_bbox(
     kinds: list[str] | None = None,
     categories: Sequence[str] | None = None,
     limit: int = 1000,
+    cursor: str | None = None,
 ) -> list[dict[str, Any]]:
     """bbox 안의 feature 경량 표현 list (지도/목록용). 좌표는 ``lon``/``lat`` (4326).
 
@@ -1459,10 +1465,37 @@ async def features_in_bbox(
                 "kinds": kinds,
                 "categories": _normalized_filter(categories),
                 "limit": limit,
+                "cursor_feature_id": _bbox_cursor_feature_id(cursor),
             },
         )
     ).mappings().all()
     return [dict(r) for r in rows]
+
+
+def _bbox_cursor_feature_id(cursor: str | None) -> str | None:
+    if cursor is None:
+        return None
+    try:
+        padded = cursor + "=" * (-len(cursor) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("invalid feature bbox cursor") from exc
+    if not isinstance(payload, dict) or payload.get("kind") != "features_bbox":
+        raise ValueError("invalid feature bbox cursor")
+    feature_id = payload.get("feature_id")
+    if not isinstance(feature_id, str) or not feature_id:
+        raise ValueError("invalid feature bbox cursor")
+    return feature_id
+
+
+def encode_bbox_cursor(feature_id: str) -> str:
+    """Return opaque cursor for ``features_in_bbox`` keyset pagination."""
+
+    raw = json.dumps(
+        {"kind": "features_bbox", "feature_id": feature_id},
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
 
 
 def _search_cursor_payload(cursor: str | None, *, q_enabled: bool) -> dict[str, Any]:

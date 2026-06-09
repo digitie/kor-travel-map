@@ -1,9 +1,9 @@
-"""``/admin/enrichment-review`` 축제 enrichment 매칭 수동 검토 라우터 (T-RV-52c).
+"""``/admin/enrichment-reviews`` 축제 enrichment 매칭 수동 검토 라우터 (T-RV-52c).
 
 visitkorea(2차)↔datagokr(1차) 축제 이름 유사도가 자동 확정 임계 미만·검토 하한 이상인
 모호한 매칭(``ops.enrichment_review_queue``)을 운영자가 accept/reject/ignore 한다. accept는
 보관된 ``SourceRecord``를 복원해 ENRICHMENT ``SourceLink``를 1차 feature에 적재한다.
-dedup-review 라우터(병합)와 달리 단순 link 적재이므로 advisory lock/merge 분기가 없다.
+dedup-reviews 라우터(병합)와 달리 단순 link 적재이므로 advisory lock/merge 분기가 없다.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from datetime import datetime
 from time import perf_counter
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from krtour.map.infra.admin_feature_repo import (
     EnrichmentReviewPage,
     EnrichmentReviewRow,
@@ -23,6 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from krtour.map_admin.db import get_session
+from krtour.map_admin.response import Meta, make_meta
 
 __all__ = [
     "router",
@@ -33,18 +34,18 @@ __all__ = [
 ]
 
 
-router = APIRouter(prefix="/admin/enrichment-review", tags=["admin-enrichment"])
+router = APIRouter(prefix="/admin/enrichment-reviews", tags=["admin-enrichment"])
 
 EnrichmentStatus = Literal["pending", "accepted", "rejected", "ignored"]
 EnrichmentDecision = Literal["accepted", "rejected", "ignored"]
 
 
 class EnrichmentReviewRecord(BaseModel):
-    """``GET /admin/enrichment-review`` item."""
+    """``GET /admin/enrichment-reviews`` item."""
 
     model_config = ConfigDict(extra="forbid")
 
-    review_key: str
+    review_id: str
     status: str
     name_score: float
     target_feature_id: str
@@ -69,30 +70,19 @@ class EnrichmentReviewListData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     items: list[EnrichmentReviewRecord]
-    next_cursor: str | None = None
-
-
-class EnrichmentReviewListMeta(BaseModel):
-    """Enrichment review list meta."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    count: int
-    page_size: int
-    duration_ms: int
 
 
 class EnrichmentReviewListResponse(BaseModel):
-    """``GET /admin/enrichment-review`` response."""
+    """``GET /admin/enrichment-reviews`` response."""
 
     model_config = ConfigDict(extra="forbid")
 
     data: EnrichmentReviewListData
-    meta: EnrichmentReviewListMeta
+    meta: Meta
 
 
 class EnrichmentReviewDecisionRequest(BaseModel):
-    """``PATCH /admin/enrichment-review/{review_key}`` body."""
+    """``PATCH /admin/enrichment-reviews/{review_id}`` body."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -106,7 +96,7 @@ class EnrichmentReviewDecisionData(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    review_key: str
+    review_id: str
     decision: EnrichmentDecision
     changed: bool
     applied: bool
@@ -114,26 +104,18 @@ class EnrichmentReviewDecisionData(BaseModel):
     source_links_updated: int | None = None
 
 
-class EnrichmentReviewDecisionMeta(BaseModel):
-    """Enrichment decision meta."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    duration_ms: int
-
-
 class EnrichmentReviewDecisionResponse(BaseModel):
-    """``PATCH /admin/enrichment-review/{review_key}`` response."""
+    """``PATCH /admin/enrichment-reviews/{review_id}`` response."""
 
     model_config = ConfigDict(extra="forbid")
 
     data: EnrichmentReviewDecisionData
-    meta: EnrichmentReviewDecisionMeta
+    meta: Meta
 
 
 def _record(row: EnrichmentReviewRow) -> EnrichmentReviewRecord:
     return EnrichmentReviewRecord(
-        review_key=row.review_key,
+        review_id=row.review_key,
         status=row.status,
         name_score=row.name_score,
         target_feature_id=row.target_feature_id,
@@ -155,6 +137,7 @@ def _record(row: EnrichmentReviewRow) -> EnrichmentReviewRecord:
 
 @router.get("", response_model=EnrichmentReviewListResponse)
 async def list_reviews(
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
     review_status: Annotated[
         list[EnrichmentStatus] | None,
@@ -184,23 +167,24 @@ async def list_reviews(
     return EnrichmentReviewListResponse(
         data=EnrichmentReviewListData(
             items=[_record(item) for item in page.items],
-            next_cursor=page.next_cursor,
         ),
-        meta=EnrichmentReviewListMeta(
-            count=len(page.items),
+        meta=make_meta(
+            request,
+            started_at=started_at,
             page_size=page_size,
-            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
+            next_cursor=page.next_cursor,
         ),
     )
 
 
 @router.patch(
-    "/{review_key}",
+    "/{review_id}",
     response_model=EnrichmentReviewDecisionResponse,
     responses={409: {"description": "이미 검토됨/없음"}},
 )
 async def decide_review(
-    review_key: str,
+    request: Request,
+    review_id: str,
     body: EnrichmentReviewDecisionRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> EnrichmentReviewDecisionResponse:
@@ -208,7 +192,7 @@ async def decide_review(
     async with session.begin():
         result = await decide_enrichment_review(
             session,
-            review_key,
+            review_id,
             body.decision,
             reviewed_by=body.reviewed_by,
             reason=body.decision_reason,
@@ -216,11 +200,11 @@ async def decide_review(
     if not result.changed:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"pending enrichment review 전이 실패: {review_key!r}",
+            detail=f"pending enrichment review 전이 실패: {review_id!r}",
         )
     return EnrichmentReviewDecisionResponse(
         data=EnrichmentReviewDecisionData(
-            review_key=result.review_key,
+            review_id=result.review_key,
             decision=body.decision,
             changed=result.changed,
             applied=result.applied,
@@ -231,7 +215,5 @@ async def decide_review(
                 result.load.source_links_updated if result.load is not None else None
             ),
         ),
-        meta=EnrichmentReviewDecisionMeta(
-            duration_ms=max(0, int((perf_counter() - started_at) * 1000))
-        ),
+        meta=make_meta(request, started_at=started_at),
     )

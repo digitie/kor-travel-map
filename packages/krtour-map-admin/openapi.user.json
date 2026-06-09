@@ -5,10 +5,6 @@
         "additionalProperties": false,
         "description": "``GET /categories`` data payload.",
         "properties": {
-          "count": {
-            "title": "Count",
-            "type": "integer"
-          },
           "include_counts": {
             "title": "Include Counts",
             "type": "boolean"
@@ -23,29 +19,9 @@
         },
         "required": [
           "items",
-          "count",
           "include_counts"
         ],
         "title": "CategoriesData",
-        "type": "object"
-      },
-      "CategoriesMeta": {
-        "additionalProperties": false,
-        "properties": {
-          "count": {
-            "title": "Count",
-            "type": "integer"
-          },
-          "duration_ms": {
-            "title": "Duration Ms",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "count",
-          "duration_ms"
-        ],
-        "title": "CategoriesMeta",
         "type": "object"
       },
       "CategoriesResponse": {
@@ -56,7 +32,7 @@
             "$ref": "#/components/schemas/CategoriesData"
           },
           "meta": {
-            "$ref": "#/components/schemas/CategoriesMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -209,6 +185,25 @@
         "title": "CategorySummary",
         "type": "object"
       },
+      "ClusterMeta": {
+        "additionalProperties": false,
+        "description": "Map clustering metadata.",
+        "properties": {
+          "cluster_unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cluster Unit"
+          }
+        },
+        "title": "ClusterMeta",
+        "type": "object"
+      },
       "ClusterSummary": {
         "additionalProperties": false,
         "description": "행정구역 rollup 클러스터 1건 (T-213c).",
@@ -243,11 +238,11 @@
         "additionalProperties": false,
         "description": "feature batch 상세 data payload.",
         "properties": {
-          "items": {
+          "found": {
             "additionalProperties": {
               "$ref": "#/components/schemas/FeatureDetailResponse"
             },
-            "title": "Items",
+            "title": "Found",
             "type": "object"
           },
           "missing": {
@@ -259,7 +254,7 @@
           }
         },
         "required": [
-          "items",
+          "found",
           "missing"
         ],
         "title": "FeatureBatchData",
@@ -293,7 +288,7 @@
             "$ref": "#/components/schemas/FeatureBatchData"
           },
           "meta": {
-            "$ref": "#/components/schemas/FeatureDetailMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -311,7 +306,7 @@
             "$ref": "#/components/schemas/FeatureDetailResponse"
           },
           "meta": {
-            "$ref": "#/components/schemas/FeatureDetailMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -319,21 +314,6 @@
           "meta"
         ],
         "title": "FeatureDetailEnvelopeResponse",
-        "type": "object"
-      },
-      "FeatureDetailMeta": {
-        "additionalProperties": false,
-        "description": "feature 상세 meta.",
-        "properties": {
-          "duration_ms": {
-            "title": "Duration Ms",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "duration_ms"
-        ],
-        "title": "FeatureDetailMeta",
         "type": "object"
       },
       "FeatureDetailResponse": {
@@ -472,21 +452,6 @@
         "title": "FeatureDetailResponse",
         "type": "object"
       },
-      "FeatureListMeta": {
-        "additionalProperties": false,
-        "description": "public feature 목록 meta.",
-        "properties": {
-          "duration_ms": {
-            "title": "Duration Ms",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "duration_ms"
-        ],
-        "title": "FeatureListMeta",
-        "type": "object"
-      },
       "FeatureSearchData": {
         "additionalProperties": false,
         "description": "사용자 feature 검색 data payload.",
@@ -497,28 +462,6 @@
             },
             "title": "Items",
             "type": "array"
-          },
-          "next_cursor": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Cursor"
-          },
-          "total_count": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Total Count"
           }
         },
         "required": [
@@ -535,7 +478,7 @@
             "$ref": "#/components/schemas/FeatureSearchData"
           },
           "meta": {
-            "$ref": "#/components/schemas/FeatureListMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -636,7 +579,7 @@
             "$ref": "#/components/schemas/WeatherCardData"
           },
           "meta": {
-            "$ref": "#/components/schemas/FeatureDetailMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -654,7 +597,7 @@
             "$ref": "#/components/schemas/PublicFeatureListData"
           },
           "meta": {
-            "$ref": "#/components/schemas/FeatureListMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -675,17 +618,6 @@
             "title": "Items",
             "type": "array"
           },
-          "next_cursor": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Cursor"
-          },
           "target": {
             "$ref": "#/components/schemas/NearbyTargetSummary"
           }
@@ -697,26 +629,6 @@
         "title": "FeaturesNearbyByTargetData",
         "type": "object"
       },
-      "FeaturesNearbyByTargetMeta": {
-        "additionalProperties": false,
-        "description": "주변 feature 목록 메타데이터.",
-        "properties": {
-          "count": {
-            "title": "Count",
-            "type": "integer"
-          },
-          "duration_ms": {
-            "title": "Duration Ms",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "count",
-          "duration_ms"
-        ],
-        "title": "FeaturesNearbyByTargetMeta",
-        "type": "object"
-      },
       "FeaturesNearbyByTargetResponse": {
         "additionalProperties": false,
         "description": "``GET /features/nearby/by-target`` 응답.",
@@ -725,7 +637,7 @@
             "$ref": "#/components/schemas/FeaturesNearbyByTargetData"
           },
           "meta": {
-            "$ref": "#/components/schemas/FeaturesNearbyByTargetMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -746,17 +658,6 @@
             "title": "Items",
             "type": "array"
           },
-          "next_cursor": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Cursor"
-          },
           "origin": {
             "$ref": "#/components/schemas/NearbyOriginSummary"
           }
@@ -776,7 +677,7 @@
             "$ref": "#/components/schemas/FeaturesNearbyData"
           },
           "meta": {
-            "$ref": "#/components/schemas/FeaturesNearbyByTargetMeta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -816,6 +717,47 @@
           "service"
         ],
         "title": "HealthData",
+        "type": "object"
+      },
+      "Meta": {
+        "additionalProperties": false,
+        "description": "전 REST 표면에서 공유하는 성공 응답 metadata.",
+        "properties": {
+          "cluster": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClusterMeta"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PageMeta"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "request_id": {
+            "default": "",
+            "description": "X-Request-ID와 같은 요청 ID.",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "duration_ms"
+        ],
+        "title": "Meta",
         "type": "object"
       },
       "NearbyFeatureSummary": {
@@ -923,13 +865,46 @@
         "title": "NearbyTargetSummary",
         "type": "object"
       },
+      "PageMeta": {
+        "additionalProperties": false,
+        "description": "Cursor pagination metadata.\n\n``next_cursor``는 페이지가 끝났을 때도 ``null``로 항상 직렬화한다.",
+        "properties": {
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "required": [
+          "page_size"
+        ],
+        "title": "PageMeta",
+        "type": "object"
+      },
       "ProviderLastSyncData": {
         "additionalProperties": false,
         "properties": {
-          "count": {
-            "title": "Count",
-            "type": "integer"
-          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/SyncStateSummary"
@@ -944,8 +919,7 @@
         },
         "required": [
           "provider",
-          "items",
-          "count"
+          "items"
         ],
         "title": "ProviderLastSyncData",
         "type": "object"
@@ -958,7 +932,7 @@
             "$ref": "#/components/schemas/ProviderLastSyncData"
           },
           "meta": {
-            "$ref": "#/components/schemas/krtour__map_admin__routers__providers___Meta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -972,17 +946,6 @@
         "additionalProperties": false,
         "description": "public feature 목록 data payload.\n\n``cluster_unit``이 None이면 ``items``(개별 feature), 아니면 ``clusters``\n(행정구역 rollup)를 채운다(T-213c).",
         "properties": {
-          "cluster_unit": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cluster Unit"
-          },
           "clusters": {
             "default": [],
             "items": {
@@ -990,10 +953,6 @@
             },
             "title": "Clusters",
             "type": "array"
-          },
-          "count": {
-            "title": "Count",
-            "type": "integer"
           },
           "items": {
             "items": {
@@ -1004,7 +963,6 @@
           }
         },
         "required": [
-          "count",
           "items"
         ],
         "title": "PublicFeatureListData",
@@ -1018,7 +976,7 @@
             "$ref": "#/components/schemas/HealthData"
           },
           "meta": {
-            "$ref": "#/components/schemas/krtour__map_admin__routers__public_status___Meta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -1036,7 +994,7 @@
             "$ref": "#/components/schemas/VersionData"
           },
           "meta": {
-            "$ref": "#/components/schemas/krtour__map_admin__routers__public_status___Meta"
+            "$ref": "#/components/schemas/Meta"
           }
         },
         "required": [
@@ -1358,39 +1316,6 @@
         ],
         "title": "WeatherMetricOut",
         "type": "object"
-      },
-      "krtour__map_admin__routers__providers___Meta": {
-        "additionalProperties": false,
-        "properties": {
-          "count": {
-            "title": "Count",
-            "type": "integer"
-          },
-          "duration_ms": {
-            "title": "Duration Ms",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "count",
-          "duration_ms"
-        ],
-        "title": "_Meta",
-        "type": "object"
-      },
-      "krtour__map_admin__routers__public_status___Meta": {
-        "additionalProperties": false,
-        "properties": {
-          "duration_ms": {
-            "title": "Duration Ms",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "duration_ms"
-        ],
-        "title": "_Meta",
-        "type": "object"
       }
     },
     "securitySchemes": {
@@ -1660,13 +1585,13 @@
           },
           {
             "in": "query",
-            "name": "limit",
+            "name": "max_items",
             "required": false,
             "schema": {
               "default": 1000,
-              "maximum": 5000,
+              "maximum": 2000,
               "minimum": 1,
-              "title": "Limit",
+              "title": "Max Items",
               "type": "integer"
             }
           }
@@ -2253,6 +2178,16 @@
                 }
               ],
               "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_total",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Total",
+              "type": "boolean"
             }
           }
         ],

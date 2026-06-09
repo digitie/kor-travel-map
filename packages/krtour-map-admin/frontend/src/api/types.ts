@@ -4,592 +4,6 @@
  */
 
 export interface paths {
-    "/admin/backups": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Backups
-         * @description List local backup artifacts.
-         */
-        get: operations["list_backups_admin_backups_get"];
-        put?: never;
-        /**
-         * Create Backup
-         * @description Plan or run a cold backup command.
-         */
-        post: operations["create_backup_admin_backups_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/backups/{backup_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Backup
-         * @description Return one backup artifact.
-         */
-        get: operations["get_backup_admin_backups__backup_id__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/dedup-review": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Reviews */
-        get: operations["list_reviews_admin_dedup_review_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/dedup-review/{review_key}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /** Decide Review */
-        patch: operations["decide_review_admin_dedup_review__review_key__patch"];
-        trace?: never;
-    };
-    "/admin/enrichment-review": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Reviews */
-        get: operations["list_reviews_admin_enrichment_review_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/enrichment-review/{review_key}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /** Decide Review */
-        patch: operations["decide_review_admin_enrichment_review__review_key__patch"];
-        trace?: never;
-    };
-    "/admin/feature-update-requests": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** feature update request 목록 */
-        get: operations["list_feature_update_requests_admin_feature_update_requests_get"];
-        put?: never;
-        /** feature update request 생성 또는 dry-run */
-        post: operations["create_feature_update_request_admin_feature_update_requests_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/feature-update-requests/{request_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** feature update request 단건 조회 */
-        get: operations["get_feature_update_request_admin_feature_update_requests__request_id__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/feature-update-requests/{request_id}/cancel": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** feature update request 취소 */
-        post: operations["cancel_feature_update_request_admin_feature_update_requests__request_id__cancel_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/feature-update-requests/{request_id}/run-now": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** 기존 request payload를 run_mode=now로 재큐잉 */
-        post: operations["run_feature_update_request_now_admin_feature_update_requests__request_id__run_now_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/features": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Features */
-        get: operations["list_features_admin_features_get"];
-        put?: never;
-        /** Create Feature Route */
-        post: operations["create_feature_route_admin_features_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/features/change-requests": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Feature Change Request Route */
-        get: operations["list_feature_change_request_route_admin_features_change_requests_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/features/change-requests/{request_id}/approve": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Approve Feature Change Request Route */
-        post: operations["approve_feature_change_request_route_admin_features_change_requests__request_id__approve_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/features/change-requests/{request_id}/reject": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Reject Feature Change Request Route */
-        post: operations["reject_feature_change_request_route_admin_features_change_requests__request_id__reject_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/features/{feature_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /** Delete Feature Route */
-        delete: operations["delete_feature_route_admin_features__feature_id__delete"];
-        options?: never;
-        head?: never;
-        /** Patch Feature Route */
-        patch: operations["patch_feature_route_admin_features__feature_id__patch"];
-        trace?: never;
-    };
-    "/admin/features/{feature_id}/deactivate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Deactivate Feature Route */
-        post: operations["deactivate_feature_route_admin_features__feature_id__deactivate_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/issues": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Admin Issues
-         * @description 운영 이슈 목록 (keyset cursor).
-         *
-         *     ``q``는 message/feature_id/source_record_key 부분일치, ``bbox``는 연결 feature
-         *     좌표가 범위 안에 드는 이슈만 남긴다(ADR-012 STORED coord 4326 GiST; feature_id
-         *     없는 이슈는 bbox 적용 시 제외).
-         */
-        get: operations["list_admin_issues_admin_issues_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/issues/{violation_key}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Admin Issue
-         * @description 운영 이슈 단건 + 연결 feature 주소/좌표 스냅샷.
-         */
-        get: operations["get_admin_issue_admin_issues__violation_key__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /**
-         * Patch Admin Issue
-         * @description 이슈 상태 전이 + kraddr-geo 재지오코딩/주소 덮어쓰기.
-         */
-        patch: operations["patch_admin_issue_admin_issues__violation_key__patch"];
-        trace?: never;
-    };
-    "/admin/offline-uploads": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** 오프라인 업로드 목록 */
-        get: operations["list_offline_upload_requests_admin_offline_uploads_get"];
-        put?: never;
-        /** 오프라인 원본 업로드 */
-        post: operations["create_offline_upload_request_admin_offline_uploads_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/offline-uploads/{upload_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** 오프라인 업로드 단건 조회 */
-        get: operations["get_offline_upload_request_admin_offline_uploads__upload_id__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/offline-uploads/{upload_id}/load": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Dagster offline_upload_load job 실행 */
-        post: operations["load_offline_upload_request_admin_offline_uploads__upload_id__load_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/offline-uploads/{upload_id}/preview": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** CSV/TSV 오프라인 업로드 header/sample preview */
-        get: operations["preview_offline_upload_request_admin_offline_uploads__upload_id__preview_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/offline-uploads/{upload_id}/validate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** CSV/TSV 오프라인 업로드 column mapping 검증 */
-        post: operations["validate_offline_upload_request_admin_offline_uploads__upload_id__validate_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/offline-uploads/{upload_id}/validation": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** CSV/TSV 오프라인 업로드 최근 validation 결과 조회 */
-        get: operations["get_offline_upload_validation_request_admin_offline_uploads__upload_id__validation_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/poi-cache-targets": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** POI/cache target 목록 */
-        get: operations["list_poi_cache_target_records_admin_poi_cache_targets_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/poi-cache-targets/{external_system}/{target_key}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** POI/cache target 단건 조회 */
-        get: operations["get_poi_cache_target_record_admin_poi_cache_targets__external_system___target_key__get"];
-        /** POI/cache target 등록 또는 갱신 */
-        put: operations["put_poi_cache_target_admin_poi_cache_targets__external_system___target_key__put"];
-        post?: never;
-        /** POI/cache target soft delete */
-        delete: operations["delete_poi_cache_target_record_admin_poi_cache_targets__external_system___target_key__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/restore/{backup_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Restore Backup
-         * @description Plan or run a staging restore command.
-         */
-        post: operations["restore_backup_admin_restore__backup_id__post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/restore/{backup_id}/swap": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Plan Restore Swap
-         * @description Plan or run the restore hot-swap env switch.
-         */
-        post: operations["plan_restore_swap_admin_restore__backup_id__swap_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/debug/etl/providers": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * ETL preview 가능한 provider + dataset 목록
-         * @description fixture 변환이 등록된 provider/dataset 매트릭스. 추가 변환 함수가 본 lib에 들어오면 `etl_fixtures.FIXTURE_REGISTRY`에 1행 등록 → 본 응답에 자동 반영.
-         */
-        get: operations["get_providers_debug_etl_providers_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/debug/etl/{provider}/datasets": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** 특정 provider의 dataset 목록 */
-        get: operations["get_provider_datasets_debug_etl__provider__datasets_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/debug/etl/{provider}/{dataset}/preview": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * provider 변환 함수 dry-run preview
-         * @description fixture 또는 live source로 provider raw → DTO 변환을 실행하고 결과를 JSON으로 응답. DB write 없음. fixture 모드는 외부 의존 X. live 모드는 `etl_live.LIVE_LOADER_REGISTRY` 등록된 dataset만 — `?source=fixture` 응답의 `live_supported` 필드로 확인.
-         */
-        post: operations["post_preview_debug_etl__provider___dataset__preview_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/debug/mois-license/{license_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** MOIS 인허가 on-demand 상세 (Step D, 캐시만) */
-        get: operations["get_mois_license_detail_debug_mois_license__license_id__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/health": {
         parameters: {
             query?: never;
@@ -610,7 +24,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/ops/api-call-logs": {
+    "/v1/admin/backups": {
         parameters: {
             query?: never;
             header?: never;
@@ -618,10 +32,34 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get Api Call Logs
-         * @description ``ops.api_call_log`` 호출 로그 목록.
+         * List Backups
+         * @description List local backup artifacts.
          */
-        get: operations["get_api_call_logs_ops_api_call_logs_get"];
+        get: operations["list_backups_v1_admin_backups_get"];
+        put?: never;
+        /**
+         * Create Backup
+         * @description Plan or run a cold backup command.
+         */
+        post: operations["create_backup_v1_admin_backups_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/backups/{backup_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Backup
+         * @description Return one backup artifact.
+         */
+        get: operations["get_backup_v1_admin_backups__backup_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -630,18 +68,15 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/ops/consistency/issues": {
+    "/v1/admin/dedup-reviews": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /**
-         * List Integrity Issues
-         * @description 열린 data integrity issue 목록.
-         */
-        get: operations["list_integrity_issues_ops_consistency_issues_get"];
+        /** List Reviews */
+        get: operations["list_reviews_v1_admin_dedup_reviews_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -650,18 +85,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/ops/consistency/reports": {
+    "/v1/admin/dedup-reviews/{review_id}": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /**
-         * List Consistency Reports
-         * @description 최근 consistency report 목록.
-         */
-        get: operations["list_consistency_reports_ops_consistency_reports_get"];
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Decide Review */
+        patch: operations["decide_review_v1_admin_dedup_reviews__review_id__patch"];
+        trace?: never;
+    };
+    "/v1/admin/enrichment-reviews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Reviews */
+        get: operations["list_reviews_v1_admin_enrichment_reviews_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -670,7 +119,384 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/ops/dagster/nux-seen": {
+    "/v1/admin/enrichment-reviews/{review_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Decide Review */
+        patch: operations["decide_review_v1_admin_enrichment_reviews__review_id__patch"];
+        trace?: never;
+    };
+    "/v1/admin/feature-update-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** feature update request 목록 */
+        get: operations["list_feature_update_requests_v1_admin_feature_update_requests_get"];
+        put?: never;
+        /** feature update request 생성 또는 dry-run */
+        post: operations["create_feature_update_request_v1_admin_feature_update_requests_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/feature-update-requests/{request_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** feature update request 단건 조회 */
+        get: operations["get_feature_update_request_v1_admin_feature_update_requests__request_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/feature-update-requests/{request_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** feature update request 취소 */
+        post: operations["cancel_feature_update_request_v1_admin_feature_update_requests__request_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/feature-update-requests/{request_id}/run-now": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 기존 request payload를 run_mode=now로 재큐잉 */
+        post: operations["run_feature_update_request_now_v1_admin_feature_update_requests__request_id__run_now_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/features": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Features */
+        get: operations["list_features_v1_admin_features_get"];
+        put?: never;
+        /** Create Feature Route */
+        post: operations["create_feature_route_v1_admin_features_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/features/change-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Feature Change Request Route */
+        get: operations["list_feature_change_request_route_v1_admin_features_change_requests_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/features/change-requests/{request_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve Feature Change Request Route */
+        post: operations["approve_feature_change_request_route_v1_admin_features_change_requests__request_id__approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/features/change-requests/{request_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject Feature Change Request Route */
+        post: operations["reject_feature_change_request_route_v1_admin_features_change_requests__request_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/features/{feature_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Feature Route */
+        delete: operations["delete_feature_route_v1_admin_features__feature_id__delete"];
+        options?: never;
+        head?: never;
+        /** Patch Feature Route */
+        patch: operations["patch_feature_route_v1_admin_features__feature_id__patch"];
+        trace?: never;
+    };
+    "/v1/admin/features/{feature_id}/deactivate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Deactivate Feature Route */
+        post: operations["deactivate_feature_route_v1_admin_features__feature_id__deactivate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/issues": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Admin Issues
+         * @description 운영 이슈 목록 (keyset cursor).
+         *
+         *     ``q``는 message/feature_id/source_record_key 부분일치, ``bbox``는 연결 feature
+         *     좌표가 범위 안에 드는 이슈만 남긴다(ADR-012 STORED coord 4326 GiST; feature_id
+         *     없는 이슈는 bbox 적용 시 제외).
+         */
+        get: operations["list_admin_issues_v1_admin_issues_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/issues/{issue_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Admin Issue
+         * @description 운영 이슈 단건 + 연결 feature 주소/좌표 스냅샷.
+         */
+        get: operations["get_admin_issue_v1_admin_issues__issue_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Patch Admin Issue
+         * @description 이슈 상태 전이 + kraddr-geo 재지오코딩/주소 덮어쓰기.
+         */
+        patch: operations["patch_admin_issue_v1_admin_issues__issue_id__patch"];
+        trace?: never;
+    };
+    "/v1/admin/offline-uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 오프라인 업로드 목록 */
+        get: operations["list_offline_upload_requests_v1_admin_offline_uploads_get"];
+        put?: never;
+        /** 오프라인 원본 업로드 */
+        post: operations["create_offline_upload_request_v1_admin_offline_uploads_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/offline-uploads/{upload_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 오프라인 업로드 단건 조회 */
+        get: operations["get_offline_upload_request_v1_admin_offline_uploads__upload_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/offline-uploads/{upload_id}/load": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Dagster offline_upload_load job 실행 */
+        post: operations["load_offline_upload_request_v1_admin_offline_uploads__upload_id__load_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/offline-uploads/{upload_id}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** CSV/TSV 오프라인 업로드 header/sample preview */
+        get: operations["preview_offline_upload_request_v1_admin_offline_uploads__upload_id__preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/offline-uploads/{upload_id}/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** CSV/TSV 오프라인 업로드 column mapping 검증 */
+        post: operations["validate_offline_upload_request_v1_admin_offline_uploads__upload_id__validate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/offline-uploads/{upload_id}/validation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** CSV/TSV 오프라인 업로드 최근 validation 결과 조회 */
+        get: operations["get_offline_upload_validation_request_v1_admin_offline_uploads__upload_id__validation_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/poi-cache-targets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** POI/cache target 목록 */
+        get: operations["list_poi_cache_target_records_v1_admin_poi_cache_targets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/poi-cache-targets/{external_system}/{target_key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** POI/cache target 단건 조회 */
+        get: operations["get_poi_cache_target_record_v1_admin_poi_cache_targets__external_system___target_key__get"];
+        /** POI/cache target 등록 또는 갱신 */
+        put: operations["put_poi_cache_target_v1_admin_poi_cache_targets__external_system___target_key__put"];
+        post?: never;
+        /** POI/cache target soft delete */
+        delete: operations["delete_poi_cache_target_record_v1_admin_poi_cache_targets__external_system___target_key__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/restore/{backup_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -680,150 +506,30 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Dagster NUX seen 처리
-         * @description embedded Dagster 화면의 로컬 첫 실행 NUX를 접기 위해 Dagster GraphQL setNuxSeen mutation을 호출한다. GET summary의 부수효과를 제거하기 위해 명시 POST endpoint로 분리했다.
+         * Restore Backup
+         * @description Plan or run a staging restore command.
          */
-        post: operations["mark_dagster_nux_seen_ops_dagster_nux_seen_post"];
+        post: operations["restore_backup_v1_admin_restore__backup_id__post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/ops/dagster/runs/{run_id}": {
+    "/v1/admin/restore/{backup_id}/swap": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /**
-         * Dagster run 상세
-         * @description Dagster GraphQL runOrError를 조회해 최근 event log와 실패 error payload를 admin UI용 DTO로 반환한다. 조회 전용이며 Dagster run을 재실행하거나 상태를 변경하지 않는다.
-         */
-        get: operations["get_dagster_run_detail_ops_dagster_runs__run_id__get"];
+        get?: never;
         put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/ops/dagster/summary": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
         /**
-         * Dagster 운영 요약
-         * @description Dagster GraphQL에서 repository, asset, schedule/sensor, recent run 정보를 읽어 admin UI 요약 DTO로 반환한다. Dagster webserver가 내려가도 200 응답(status=unavailable)으로 UI가 장애 상태를 표시할 수 있게 한다. GET은 조회 전용이며 Dagster mutation은 호출하지 않는다.
+         * Plan Restore Swap
+         * @description Plan or run the restore hot-swap env switch.
          */
-        get: operations["get_dagster_summary_ops_dagster_summary_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/ops/health-deep": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * deep readiness (DB/PostGIS)
-         * @description DB 연결 + PostGIS 확장 readiness를 점검한다. liveness용 public ``/health``(DB-free 정적 200)와 달리 실제 DB를 친다. 한 컴포넌트라도 error면 전체 ``status=degraded`` + HTTP 503(모니터링이 body로 컴포넌트별 상태를 읽음).
-         */
-        get: operations["get_ops_health_deep_ops_health_deep_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/ops/import-jobs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Import Jobs
-         * @description ``ops.import_jobs`` 작업 목록.
-         */
-        get: operations["list_import_jobs_ops_import_jobs_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/ops/import-jobs/{job_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Import Job
-         * @description ``ops.import_jobs`` 작업 단건.
-         */
-        get: operations["get_import_job_ops_import_jobs__job_id__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/ops/metrics": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Ops Metrics
-         * @description 운영 홈/대시보드가 쓰는 DB 기반 summary metric.
-         */
-        get: operations["get_ops_metrics_ops_metrics_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/ops/system-logs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get System Logs
-         * @description ``ops.system_log`` 운영 로그 목록.
-         */
-        get: operations["get_system_logs_ops_system_logs_get"];
-        put?: never;
-        post?: never;
+        post: operations["plan_restore_swap_v1_admin_restore__backup_id__swap_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -839,6 +545,80 @@ export interface paths {
         };
         /** PlaceCategory 정적 카탈로그(144건, 선택적 DB 분포) */
         get: operations["list_categories_v1_categories_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/debug/etl/providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * ETL preview 가능한 provider + dataset 목록
+         * @description fixture 변환이 등록된 provider/dataset 매트릭스. 추가 변환 함수가 본 lib에 들어오면 `etl_fixtures.FIXTURE_REGISTRY`에 1행 등록 → 본 응답에 자동 반영.
+         */
+        get: operations["get_providers_v1_debug_etl_providers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/debug/etl/{provider}/datasets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 특정 provider의 dataset 목록 */
+        get: operations["get_provider_datasets_v1_debug_etl__provider__datasets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/debug/etl/{provider}/{dataset}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * provider 변환 함수 dry-run preview
+         * @description fixture 또는 live source로 provider raw → DTO 변환을 실행하고 결과를 JSON으로 응답. DB write 없음. fixture 모드는 외부 의존 X. live 모드는 `etl_live.LIVE_LOADER_REGISTRY` 등록된 dataset만 — `?source=fixture` 응답의 `live_supported` 필드로 확인.
+         */
+        post: operations["post_preview_v1_debug_etl__provider___dataset__preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/debug/mois-license/{license_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** MOIS 인허가 on-demand 상세 (Step D, 캐시만) */
+        get: operations["get_mois_license_detail_v1_debug_mois_license__license_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -986,6 +766,226 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/ops/api-call-logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Api Call Logs
+         * @description ``ops.api_call_log`` 호출 로그 목록.
+         */
+        get: operations["get_api_call_logs_v1_ops_api_call_logs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ops/consistency/issues": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Integrity Issues
+         * @description 열린 data integrity issue 목록.
+         */
+        get: operations["list_integrity_issues_v1_ops_consistency_issues_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ops/consistency/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Consistency Reports
+         * @description 최근 consistency report 목록.
+         */
+        get: operations["list_consistency_reports_v1_ops_consistency_reports_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ops/dagster/nux-seen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dagster NUX seen 처리
+         * @description embedded Dagster 화면의 로컬 첫 실행 NUX를 접기 위해 Dagster GraphQL setNuxSeen mutation을 호출한다. GET summary의 부수효과를 제거하기 위해 명시 POST endpoint로 분리했다.
+         */
+        post: operations["mark_dagster_nux_seen_v1_ops_dagster_nux_seen_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ops/dagster/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Dagster run 상세
+         * @description Dagster GraphQL runOrError를 조회해 최근 event log와 실패 error payload를 admin UI용 DTO로 반환한다. 조회 전용이며 Dagster run을 재실행하거나 상태를 변경하지 않는다.
+         */
+        get: operations["get_dagster_run_detail_v1_ops_dagster_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ops/dagster/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Dagster 운영 요약
+         * @description Dagster GraphQL에서 repository, asset, schedule/sensor, recent run 정보를 읽어 admin UI 요약 DTO로 반환한다. Dagster webserver가 내려가도 200 응답(status=unavailable)으로 UI가 장애 상태를 표시할 수 있게 한다. GET은 조회 전용이며 Dagster mutation은 호출하지 않는다.
+         */
+        get: operations["get_dagster_summary_v1_ops_dagster_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ops/health-deep": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * deep readiness (DB/PostGIS)
+         * @description DB 연결 + PostGIS 확장 readiness를 점검한다. liveness용 public ``/health``(DB-free 정적 200)와 달리 실제 DB를 친다. 한 컴포넌트라도 error면 전체 ``status=degraded`` + HTTP 503(모니터링이 body로 컴포넌트별 상태를 읽음).
+         */
+        get: operations["get_ops_health_deep_v1_ops_health_deep_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ops/import-jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Import Jobs
+         * @description ``ops.import_jobs`` 작업 목록.
+         */
+        get: operations["list_import_jobs_v1_ops_import_jobs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ops/import-jobs/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Import Job
+         * @description ``ops.import_jobs`` 작업 단건.
+         */
+        get: operations["get_import_job_v1_ops_import_jobs__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ops/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Ops Metrics
+         * @description 운영 홈/대시보드가 쓰는 DB 기반 summary metric.
+         */
+        get: operations["get_ops_metrics_v1_ops_metrics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ops/system-logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get System Logs
+         * @description ``ops.system_log`` 운영 로그 목록.
+         */
+        get: operations["get_system_logs_v1_ops_system_logs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/providers/{provider}/last-sync": {
         parameters: {
             query?: never;
@@ -1041,18 +1041,6 @@ export interface components {
         AdminFeatureChangeListData: {
             /** Items */
             items: components["schemas"]["AdminFeatureChangeRequestRecord"][];
-        };
-        /**
-         * AdminFeatureChangeListMeta
-         * @description feature change request list meta.
-         */
-        AdminFeatureChangeListMeta: {
-            /** Count */
-            count: number;
-            /** Duration Ms */
-            duration_ms: number;
-            /** Limit */
-            limit: number;
             /**
              * Review Mode
              * @enum {string}
@@ -1065,7 +1053,7 @@ export interface components {
          */
         AdminFeatureChangeListResponse: {
             data: components["schemas"]["AdminFeatureChangeListData"];
-            meta: components["schemas"]["AdminFeatureChangeListMeta"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * AdminFeatureChangeRequestRecord
@@ -1106,10 +1094,10 @@ export interface components {
             /** Reviewed By */
             reviewed_by?: string | null;
             /**
-             * State
+             * Status
              * @enum {string}
              */
-            state: "pending" | "applied" | "rejected";
+            status: "pending" | "applied" | "rejected";
         };
         /**
          * AdminFeatureChangeResponse
@@ -1117,7 +1105,7 @@ export interface components {
          */
         AdminFeatureChangeResponse: {
             data: components["schemas"]["AdminFeatureChangeData"];
-            meta: components["schemas"]["AdminFeatureWriteMeta"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * AdminFeatureCoordInput
@@ -1237,7 +1225,7 @@ export interface components {
          */
         AdminFeatureDeactivateResponse: {
             data: components["schemas"]["AdminFeatureDeactivateData"];
-            meta: components["schemas"]["AdminFeatureWriteMeta"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * AdminFeatureDeleteRequest
@@ -1256,12 +1244,12 @@ export interface components {
         AdminFeatureIssueRecord: {
             /** Detected At */
             detected_at?: string | null;
+            /** Issue Id */
+            issue_id?: string | null;
             /** Message */
             message?: string | null;
             /** Severity */
             severity?: string | null;
-            /** Violation Key */
-            violation_key?: string | null;
             /** Violation Type */
             violation_type?: string | null;
         };
@@ -1281,8 +1269,8 @@ export interface components {
             feature_id: string;
             /** Field Path */
             field_path: string;
-            /** Override Key */
-            override_key: string;
+            /** Override Id */
+            override_id: string;
             /** Override Value */
             override_value: unknown;
             /** Prevent Provider Reactivation */
@@ -1392,44 +1380,12 @@ export interface components {
             reason?: string | null;
         };
         /**
-         * AdminFeatureWriteMeta
-         * @description Admin feature write meta.
-         */
-        AdminFeatureWriteMeta: {
-            /** Duration Ms */
-            duration_ms: number;
-        };
-        /**
          * AdminFeaturesListData
          * @description Admin feature 목록 data.
          */
         AdminFeaturesListData: {
             /** Items */
             items: components["schemas"]["AdminFeatureRecord"][];
-            /** Next Cursor */
-            next_cursor?: string | null;
-        };
-        /**
-         * AdminFeaturesListMeta
-         * @description Admin feature 목록 meta.
-         */
-        AdminFeaturesListMeta: {
-            /** Count */
-            count: number;
-            /** Duration Ms */
-            duration_ms: number;
-            /**
-             * Order
-             * @enum {string}
-             */
-            order: "asc" | "desc";
-            /** Page Size */
-            page_size: number;
-            /**
-             * Sort
-             * @enum {string}
-             */
-            sort: "name" | "updated_at" | "created_at" | "kind" | "status" | "provider" | "issue_count";
         };
         /**
          * AdminFeaturesListResponse
@@ -1437,11 +1393,11 @@ export interface components {
          */
         AdminFeaturesListResponse: {
             data: components["schemas"]["AdminFeaturesListData"];
-            meta: components["schemas"]["AdminFeaturesListMeta"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * AdminIssueActionData
-         * @description ``PATCH /admin/issues/{violation_key}`` data.
+         * @description ``PATCH /admin/issues/{issue_id}`` data.
          */
         AdminIssueActionData: {
             feature?: components["schemas"]["AdminIssueFeatureSnapshot"] | null;
@@ -1453,11 +1409,11 @@ export interface components {
         };
         /**
          * AdminIssueActionResponse
-         * @description ``PATCH /admin/issues/{violation_key}`` 응답.
+         * @description ``PATCH /admin/issues/{issue_id}`` 응답.
          */
         AdminIssueActionResponse: {
             data: components["schemas"]["AdminIssueActionData"];
-            meta: components["schemas"]["AdminIssueDetailMeta"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * AdminIssueDetailData
@@ -1468,20 +1424,12 @@ export interface components {
             issue: components["schemas"]["AdminIssueRecord"];
         };
         /**
-         * AdminIssueDetailMeta
-         * @description 단건 응답 meta.
-         */
-        AdminIssueDetailMeta: {
-            /** Duration Ms */
-            duration_ms: number;
-        };
-        /**
          * AdminIssueDetailResponse
-         * @description ``GET /admin/issues/{violation_key}`` 응답.
+         * @description ``GET /admin/issues/{issue_id}`` 응답.
          */
         AdminIssueDetailResponse: {
             data: components["schemas"]["AdminIssueDetailData"];
-            meta: components["schemas"]["AdminIssueDetailMeta"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * AdminIssueFeatureSnapshot
@@ -1516,18 +1464,6 @@ export interface components {
         AdminIssueListData: {
             /** Items */
             items: components["schemas"]["AdminIssueRecord"][];
-            /** Next Cursor */
-            next_cursor?: string | null;
-        };
-        /**
-         * AdminIssueListMeta
-         * @description 이슈 목록 meta.
-         */
-        AdminIssueListMeta: {
-            /** Count */
-            count: number;
-            /** Duration Ms */
-            duration_ms: number;
         };
         /**
          * AdminIssueListResponse
@@ -1535,7 +1471,7 @@ export interface components {
          */
         AdminIssueListResponse: {
             data: components["schemas"]["AdminIssueListData"];
-            meta: components["schemas"]["AdminIssueListMeta"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * AdminIssuePatchRequest
@@ -1584,6 +1520,8 @@ export interface components {
             detected_at: string;
             /** Feature Id */
             feature_id?: string | null;
+            /** Issue Id */
+            issue_id: string;
             /** Message */
             message: string;
             /** Payload */
@@ -1600,8 +1538,6 @@ export interface components {
             source_record_key?: string | null;
             /** Status */
             status: string;
-            /** Violation Key */
-            violation_key: string;
             /** Violation Type */
             violation_type: string;
         };
@@ -1610,8 +1546,6 @@ export interface components {
          * @description ``ops.api_call_log`` HTTP 표현.
          */
         ApiCallLogRecord: {
-            /** Api Call Log Key */
-            api_call_log_key: string;
             /**
              * Created At
              * Format: date-time
@@ -1621,6 +1555,8 @@ export interface components {
             duration_ms: number;
             /** Error Code */
             error_code?: string | null;
+            /** Log Id */
+            log_id: string;
             /** Method */
             method: string;
             /** Path */
@@ -1637,8 +1573,6 @@ export interface components {
         ApiCallLogsListData: {
             /** Items */
             items: components["schemas"]["ApiCallLogRecord"][];
-            /** Next Cursor */
-            next_cursor?: string | null;
         };
         /**
          * ApiCallLogsResponse
@@ -1646,7 +1580,7 @@ export interface components {
          */
         ApiCallLogsResponse: {
             data: components["schemas"]["ApiCallLogsListData"];
-            meta: components["schemas"]["LogListMeta"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * BackupCommandPlan
@@ -1665,46 +1599,24 @@ export interface components {
             };
         };
         /**
-         * BackupDetailMeta
-         * @description Backup detail metadata.
-         */
-        BackupDetailMeta: {
-            /** Backup Root */
-            backup_root: string;
-            /** Command Enabled */
-            command_enabled: boolean;
-            /** Duration Ms */
-            duration_ms: number;
-        };
-        /**
          * BackupDetailResponse
          * @description ``GET /admin/backups/{backup_id}`` response.
          */
         BackupDetailResponse: {
             data: components["schemas"]["BackupRecord"];
-            meta: components["schemas"]["BackupDetailMeta"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * BackupListData
          * @description Backup list data.
          */
         BackupListData: {
-            /** Items */
-            items: components["schemas"]["BackupRecord"][];
-        };
-        /**
-         * BackupListMeta
-         * @description Backup list metadata.
-         */
-        BackupListMeta: {
             /** Backup Root */
             backup_root: string;
             /** Command Enabled */
             command_enabled: boolean;
-            /** Count */
-            count: number;
-            /** Duration Ms */
-            duration_ms: number;
+            /** Items */
+            items: components["schemas"]["BackupRecord"][];
         };
         /**
          * BackupListResponse
@@ -1712,7 +1624,7 @@ export interface components {
          */
         BackupListResponse: {
             data: components["schemas"]["BackupListData"];
-            meta: components["schemas"]["BackupListMeta"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * BackupOperationData
@@ -1742,20 +1654,12 @@ export interface components {
             stdout?: string | null;
         };
         /**
-         * BackupOperationMeta
-         * @description Backup operation metadata.
-         */
-        BackupOperationMeta: {
-            /** Duration Ms */
-            duration_ms: number;
-        };
-        /**
          * BackupOperationResponse
          * @description Backup/restore/swap operation response.
          */
         BackupOperationResponse: {
             data: components["schemas"]["BackupOperationData"];
-            meta: components["schemas"]["BackupOperationMeta"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * BackupRecord
@@ -1834,8 +1738,8 @@ export interface components {
              */
             type: "bbox";
         };
-        /** Body_create_offline_upload_request_admin_offline_uploads_post */
-        Body_create_offline_upload_request_admin_offline_uploads_post: {
+        /** Body_create_offline_upload_request_v1_admin_offline_uploads_post */
+        Body_create_offline_upload_request_v1_admin_offline_uploads_post: {
             /** Created By */
             created_by?: string | null;
             /** Dataset Key */
@@ -1881,19 +1785,10 @@ export interface components {
          * @description ``GET /categories`` data payload.
          */
         CategoriesData: {
-            /** Count */
-            count: number;
             /** Include Counts */
             include_counts: boolean;
             /** Items */
             items: components["schemas"]["CategorySummary"][];
-        };
-        /** CategoriesMeta */
-        CategoriesMeta: {
-            /** Count */
-            count: number;
-            /** Duration Ms */
-            duration_ms: number;
         };
         /**
          * CategoriesResponse
@@ -1901,7 +1796,7 @@ export interface components {
          */
         CategoriesResponse: {
             data: components["schemas"]["CategoriesData"];
-            meta: components["schemas"]["CategoriesMeta"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * CategorySummary
@@ -1960,6 +1855,14 @@ export interface components {
             type: "center_radius";
         };
         /**
+         * ClusterMeta
+         * @description Map clustering metadata.
+         */
+        ClusterMeta: {
+            /** Cluster Unit */
+            cluster_unit?: string | null;
+        };
+        /**
          * ClusterSummary
          * @description 행정구역 rollup 클러스터 1건 (T-213c).
          */
@@ -1994,14 +1897,6 @@ export interface components {
             assets: string[];
             /** Group Name */
             group_name: string;
-        };
-        /**
-         * DagsterDetailMeta
-         * @description 단건 요약 응답 meta.
-         */
-        DagsterDetailMeta: {
-            /** Duration Ms */
-            duration_ms: number;
         };
         /**
          * DagsterGraphqlError
@@ -2078,7 +1973,7 @@ export interface components {
          */
         DagsterNuxSeenResponse: {
             data: components["schemas"]["DagsterNuxSeenData"];
-            meta: components["schemas"]["DagsterDetailMeta"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * DagsterRepository
@@ -2138,7 +2033,7 @@ export interface components {
          */
         DagsterRunDetailResponse: {
             data: components["schemas"]["DagsterRunDetailData"];
-            meta: components["schemas"]["DagsterDetailMeta"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * DagsterRunEvent
@@ -2257,7 +2152,7 @@ export interface components {
          */
         DagsterSummaryResponse: {
             data: components["schemas"]["DagsterSummaryData"];
-            meta: components["schemas"]["DagsterDetailMeta"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * DedupFeatureRecord
@@ -2299,24 +2194,16 @@ export interface components {
             master_feature_id?: string | null;
             /** Merge Id */
             merge_id?: string | null;
-            /** Review Key */
-            review_key: string;
+            /** Review Id */
+            review_id: string;
             /** Source Links Dropped */
             source_links_dropped?: number | null;
             /** Source Links Moved */
             source_links_moved?: number | null;
         };
         /**
-         * DedupReviewDecisionMeta
-         * @description Dedup decision meta.
-         */
-        DedupReviewDecisionMeta: {
-            /** Duration Ms */
-            duration_ms: number;
-        };
-        /**
          * DedupReviewDecisionRequest
-         * @description ``PATCH /admin/dedup-review/{review_key}`` body.
+         * @description ``PATCH /admin/dedup-reviews/{review_id}`` body.
          */
         DedupReviewDecisionRequest: {
             /**
@@ -2333,11 +2220,11 @@ export interface components {
         };
         /**
          * DedupReviewDecisionResponse
-         * @description ``PATCH /admin/dedup-review/{review_key}`` response.
+         * @description ``PATCH /admin/dedup-reviews/{review_id}`` response.
          */
         DedupReviewDecisionResponse: {
             data: components["schemas"]["DedupReviewDecisionData"];
-            meta: components["schemas"]["DedupReviewDecisionMeta"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * DedupReviewListData
@@ -2346,32 +2233,18 @@ export interface components {
         DedupReviewListData: {
             /** Items */
             items: components["schemas"]["DedupReviewRecord"][];
-            /** Next Cursor */
-            next_cursor?: string | null;
-        };
-        /**
-         * DedupReviewListMeta
-         * @description Dedup review list meta.
-         */
-        DedupReviewListMeta: {
-            /** Count */
-            count: number;
-            /** Duration Ms */
-            duration_ms: number;
-            /** Page Size */
-            page_size: number;
         };
         /**
          * DedupReviewListResponse
-         * @description ``GET /admin/dedup-review`` response.
+         * @description ``GET /admin/dedup-reviews`` response.
          */
         DedupReviewListResponse: {
             data: components["schemas"]["DedupReviewListData"];
-            meta: components["schemas"]["DedupReviewListMeta"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * DedupReviewRecord
-         * @description ``GET /admin/dedup-review`` item.
+         * @description ``GET /admin/dedup-reviews`` item.
          */
         DedupReviewRecord: {
             /** Category Score */
@@ -2389,8 +2262,8 @@ export interface components {
             feature_b: components["schemas"]["DedupFeatureRecord"];
             /** Name Score */
             name_score: number;
-            /** Review Key */
-            review_key: string;
+            /** Review Id */
+            review_id: string;
             /** Reviewed At */
             reviewed_at?: string | null;
             /** Reviewed By */
@@ -2416,24 +2289,16 @@ export interface components {
              * @enum {string}
              */
             decision: "accepted" | "rejected" | "ignored";
-            /** Review Key */
-            review_key: string;
+            /** Review Id */
+            review_id: string;
             /** Source Links Inserted */
             source_links_inserted?: number | null;
             /** Source Links Updated */
             source_links_updated?: number | null;
         };
         /**
-         * EnrichmentReviewDecisionMeta
-         * @description Enrichment decision meta.
-         */
-        EnrichmentReviewDecisionMeta: {
-            /** Duration Ms */
-            duration_ms: number;
-        };
-        /**
          * EnrichmentReviewDecisionRequest
-         * @description ``PATCH /admin/enrichment-review/{review_key}`` body.
+         * @description ``PATCH /admin/enrichment-reviews/{review_id}`` body.
          */
         EnrichmentReviewDecisionRequest: {
             /**
@@ -2448,11 +2313,11 @@ export interface components {
         };
         /**
          * EnrichmentReviewDecisionResponse
-         * @description ``PATCH /admin/enrichment-review/{review_key}`` response.
+         * @description ``PATCH /admin/enrichment-reviews/{review_id}`` response.
          */
         EnrichmentReviewDecisionResponse: {
             data: components["schemas"]["EnrichmentReviewDecisionData"];
-            meta: components["schemas"]["EnrichmentReviewDecisionMeta"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * EnrichmentReviewListData
@@ -2461,32 +2326,18 @@ export interface components {
         EnrichmentReviewListData: {
             /** Items */
             items: components["schemas"]["EnrichmentReviewRecord"][];
-            /** Next Cursor */
-            next_cursor?: string | null;
-        };
-        /**
-         * EnrichmentReviewListMeta
-         * @description Enrichment review list meta.
-         */
-        EnrichmentReviewListMeta: {
-            /** Count */
-            count: number;
-            /** Duration Ms */
-            duration_ms: number;
-            /** Page Size */
-            page_size: number;
         };
         /**
          * EnrichmentReviewListResponse
-         * @description ``GET /admin/enrichment-review`` response.
+         * @description ``GET /admin/enrichment-reviews`` response.
          */
         EnrichmentReviewListResponse: {
             data: components["schemas"]["EnrichmentReviewListData"];
-            meta: components["schemas"]["EnrichmentReviewListMeta"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * EnrichmentReviewRecord
-         * @description ``GET /admin/enrichment-review`` item.
+         * @description ``GET /admin/enrichment-reviews`` item.
          */
         EnrichmentReviewRecord: {
             /**
@@ -2498,8 +2349,8 @@ export interface components {
             decision_reason?: string | null;
             /** Name Score */
             name_score: number;
-            /** Review Key */
-            review_key: string;
+            /** Review Id */
+            review_id: string;
             /** Reviewed At */
             reviewed_at?: string | null;
             /** Reviewed By */
@@ -2528,12 +2379,10 @@ export interface components {
             target_name: string;
         };
         /**
-         * EtlPreviewResponse
-         * @description `/debug/etl/{provider}/{dataset}/preview` 응답.
+         * EtlPreviewData
+         * @description `/debug/etl/{provider}/{dataset}/preview` data payload.
          */
-        EtlPreviewResponse: {
-            /** Count */
-            count: number;
+        EtlPreviewData: {
             /** Dataset */
             dataset: string;
             /** Description */
@@ -2559,12 +2408,20 @@ export interface components {
             variant: string;
         };
         /**
+         * EtlPreviewResponse
+         * @description `/debug/etl/{provider}/{dataset}/preview` 응답.
+         */
+        EtlPreviewResponse: {
+            data: components["schemas"]["EtlPreviewData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
          * FeatureBatchData
          * @description feature batch 상세 data payload.
          */
         FeatureBatchData: {
-            /** Items */
-            items: {
+            /** Found */
+            found: {
                 [key: string]: components["schemas"]["FeatureDetailResponse"];
             };
             /** Missing */
@@ -2584,7 +2441,7 @@ export interface components {
          */
         FeatureBatchResponse: {
             data: components["schemas"]["FeatureBatchData"];
-            meta: components["schemas"]["FeatureDetailMeta"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * FeatureDetailEnvelopeResponse
@@ -2592,15 +2449,7 @@ export interface components {
          */
         FeatureDetailEnvelopeResponse: {
             data: components["schemas"]["FeatureDetailResponse"];
-            meta: components["schemas"]["FeatureDetailMeta"];
-        };
-        /**
-         * FeatureDetailMeta
-         * @description feature 상세 meta.
-         */
-        FeatureDetailMeta: {
-            /** Duration Ms */
-            duration_ms: number;
+            meta: components["schemas"]["Meta"];
         };
         /**
          * FeatureDetailResponse
@@ -2663,24 +2512,12 @@ export interface components {
             type: "feature_ids";
         };
         /**
-         * FeatureListMeta
-         * @description public feature 목록 meta.
-         */
-        FeatureListMeta: {
-            /** Duration Ms */
-            duration_ms: number;
-        };
-        /**
          * FeatureSearchData
          * @description 사용자 feature 검색 data payload.
          */
         FeatureSearchData: {
             /** Items */
             items: components["schemas"]["FeatureSummary"][];
-            /** Next Cursor */
-            next_cursor?: string | null;
-            /** Total Count */
-            total_count?: number | null;
         };
         /**
          * FeatureSearchResponse
@@ -2688,7 +2525,7 @@ export interface components {
          */
         FeatureSearchResponse: {
             data: components["schemas"]["FeatureSearchData"];
-            meta: components["schemas"]["FeatureListMeta"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * FeatureSummary
@@ -2801,7 +2638,7 @@ export interface components {
          */
         FeatureUpdateRequestCreateResponse: {
             data: components["schemas"]["FeatureUpdateRequestRecord"];
-            meta: components["schemas"]["FeatureUpdateRequestMeta"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * FeatureUpdateRequestDetailResponse
@@ -2809,7 +2646,7 @@ export interface components {
          */
         FeatureUpdateRequestDetailResponse: {
             data: components["schemas"]["FeatureUpdateRequestRecord"];
-            meta: components["schemas"]["FeatureUpdateRequestMeta"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * FeatureUpdateRequestListData
@@ -2818,18 +2655,6 @@ export interface components {
         FeatureUpdateRequestListData: {
             /** Items */
             items: components["schemas"]["FeatureUpdateRequestRecord"][];
-            /** Next Cursor */
-            next_cursor?: string | null;
-        };
-        /**
-         * FeatureUpdateRequestListMeta
-         * @description feature update request 목록 meta.
-         */
-        FeatureUpdateRequestListMeta: {
-            /** Count */
-            count: number;
-            /** Duration Ms */
-            duration_ms: number;
         };
         /**
          * FeatureUpdateRequestListResponse
@@ -2837,15 +2662,7 @@ export interface components {
          */
         FeatureUpdateRequestListResponse: {
             data: components["schemas"]["FeatureUpdateRequestListData"];
-            meta: components["schemas"]["FeatureUpdateRequestListMeta"];
-        };
-        /**
-         * FeatureUpdateRequestMeta
-         * @description 쓰기 요청의 간단한 메타데이터.
-         */
-        FeatureUpdateRequestMeta: {
-            /** Duration Ms */
-            duration_ms: number;
+            meta: components["schemas"]["Meta"];
         };
         /**
          * FeatureUpdateRequestRecord
@@ -2893,8 +2710,8 @@ export interface components {
             scope_type: string;
             /** Started At */
             started_at?: string | null;
-            /** State */
-            state: string;
+            /** Status */
+            status: string;
             /** Status Url */
             status_url?: string | null;
             /** Update Policy */
@@ -2922,17 +2739,23 @@ export interface components {
          */
         FeatureWeatherResponse: {
             data: components["schemas"]["WeatherCardData"];
-            meta: components["schemas"]["FeatureDetailMeta"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * FeaturesInBboxData
+         * @description ``GET /features`` data payload.
+         */
+        FeaturesInBboxData: {
+            /** Items */
+            items: components["schemas"]["FeatureSummary"][];
         };
         /**
          * FeaturesInBboxResponse
          * @description ``GET /features`` 응답 — bbox 안 feature 목록.
          */
         FeaturesInBboxResponse: {
-            /** Count */
-            count: number;
-            /** Items */
-            items: components["schemas"]["FeatureSummary"][];
+            data: components["schemas"]["FeaturesInBboxData"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * FeaturesInBoundsResponse
@@ -2940,7 +2763,7 @@ export interface components {
          */
         FeaturesInBoundsResponse: {
             data: components["schemas"]["PublicFeatureListData"];
-            meta: components["schemas"]["FeatureListMeta"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * FeaturesNearbyByTargetData
@@ -2949,19 +2772,7 @@ export interface components {
         FeaturesNearbyByTargetData: {
             /** Items */
             items: components["schemas"]["NearbyFeatureSummary"][];
-            /** Next Cursor */
-            next_cursor?: string | null;
             target: components["schemas"]["NearbyTargetSummary"];
-        };
-        /**
-         * FeaturesNearbyByTargetMeta
-         * @description 주변 feature 목록 메타데이터.
-         */
-        FeaturesNearbyByTargetMeta: {
-            /** Count */
-            count: number;
-            /** Duration Ms */
-            duration_ms: number;
         };
         /**
          * FeaturesNearbyByTargetResponse
@@ -2969,7 +2780,7 @@ export interface components {
          */
         FeaturesNearbyByTargetResponse: {
             data: components["schemas"]["FeaturesNearbyByTargetData"];
-            meta: components["schemas"]["FeaturesNearbyByTargetMeta"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * FeaturesNearbyData
@@ -2978,8 +2789,6 @@ export interface components {
         FeaturesNearbyData: {
             /** Items */
             items: components["schemas"]["NearbyFeatureSummary"][];
-            /** Next Cursor */
-            next_cursor?: string | null;
             origin: components["schemas"]["NearbyOriginSummary"];
         };
         /**
@@ -2988,7 +2797,7 @@ export interface components {
          */
         FeaturesNearbyResponse: {
             data: components["schemas"]["FeaturesNearbyData"];
-            meta: components["schemas"]["FeaturesNearbyByTargetMeta"];
+            meta: components["schemas"]["Meta"];
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -3013,14 +2822,20 @@ export interface components {
             lon: number;
         };
         /**
-         * LogListMeta
-         * @description 로그 목록 공통 meta.
+         * Meta
+         * @description 전 REST 표면에서 공유하는 성공 응답 metadata.
          */
-        LogListMeta: {
-            /** Count */
-            count: number;
+        Meta: {
+            cluster?: components["schemas"]["ClusterMeta"] | null;
             /** Duration Ms */
             duration_ms: number;
+            page?: components["schemas"]["PageMeta"] | null;
+            /**
+             * Request Id
+             * @description X-Request-ID와 같은 요청 ID.
+             * @default
+             */
+            request_id: string;
         };
         /**
          * MoisLicenseDetailData
@@ -3031,6 +2846,12 @@ export interface components {
             address: {
                 [key: string]: unknown;
             };
+            /**
+             * Cached
+             * @description 프로세스 캐시 히트 여부.
+             * @default false
+             */
+            cached: boolean;
             /** Category */
             category: string;
             /** Detail */
@@ -3061,25 +2882,12 @@ export interface components {
             status: string;
         };
         /**
-         * MoisLicenseDetailMeta
-         * @description 단건 상세 meta — 캐시 히트 여부 + 처리 시간.
-         */
-        MoisLicenseDetailMeta: {
-            /**
-             * Cached
-             * @description 프로세스 캐시 히트 여부.
-             */
-            cached: boolean;
-            /** Duration Ms */
-            duration_ms: number;
-        };
-        /**
          * MoisLicenseDetailResponse
          * @description ``GET /debug/mois-license/{license_id}`` 응답 (DA-D-03 envelope).
          */
         MoisLicenseDetailResponse: {
             data: components["schemas"]["MoisLicenseDetailData"];
-            meta: components["schemas"]["MoisLicenseDetailMeta"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * NearbyFeatureSummary
@@ -3170,20 +2978,12 @@ export interface components {
             source_id?: string | null;
         };
         /**
-         * OfflineUploadDetailMeta
-         * @description 단건 조회 응답 metadata.
-         */
-        OfflineUploadDetailMeta: {
-            /** Duration Ms */
-            duration_ms: number;
-        };
-        /**
          * OfflineUploadDetailResponse
          * @description `GET /admin/offline-uploads/{upload_id}` 응답 (DA-D-03 envelope).
          */
         OfflineUploadDetailResponse: {
             data: components["schemas"]["OfflineUploadRecord"];
-            meta: components["schemas"]["OfflineUploadDetailMeta"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * OfflineUploadLaunchMeta
@@ -3196,6 +2996,11 @@ export interface components {
             dagster_status: string;
             /** Duration Ms */
             duration_ms: number;
+            /**
+             * Request Id
+             * @default
+             */
+            request_id: string;
         };
         /**
          * OfflineUploadLaunchResponse
@@ -3212,18 +3017,6 @@ export interface components {
         OfflineUploadListData: {
             /** Items */
             items: components["schemas"]["OfflineUploadRecord"][];
-            /** Next Cursor */
-            next_cursor?: string | null;
-        };
-        /**
-         * OfflineUploadListMeta
-         * @description 오프라인 업로드 목록 meta.
-         */
-        OfflineUploadListMeta: {
-            /** Count */
-            count: number;
-            /** Duration Ms */
-            duration_ms: number;
         };
         /**
          * OfflineUploadListResponse
@@ -3231,7 +3024,7 @@ export interface components {
          */
         OfflineUploadListResponse: {
             data: components["schemas"]["OfflineUploadListData"];
-            meta: components["schemas"]["OfflineUploadListMeta"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * OfflineUploadPreviewMeta
@@ -3252,6 +3045,11 @@ export interface components {
             headers: string[];
             /** Parsed Format */
             parsed_format: string;
+            /**
+             * Request Id
+             * @default
+             */
+            request_id: string;
             /** Rows Sampled */
             rows_sampled: number;
             /** Rows Total */
@@ -3296,8 +3094,8 @@ export interface components {
             original_filename: string;
             /** Provider */
             provider: string;
-            /** State */
-            state: string;
+            /** Status */
+            status: string;
             /** Status Url */
             status_url: string;
             /** Storage Backend */
@@ -3353,10 +3151,15 @@ export interface components {
             issues: components["schemas"]["OfflineUploadValidationIssueRecord"][];
             /** Job Id */
             job_id: string | null;
-            /** Job State */
-            job_state: string | null;
+            /** Job Status */
+            job_status: string | null;
             /** Parsed Format */
             parsed_format: string;
+            /**
+             * Request Id
+             * @default
+             */
+            request_id: string;
             /** Rows Sampled */
             rows_sampled: number;
             /** Rows Total */
@@ -3403,6 +3206,11 @@ export interface components {
             duration_ms: number;
             /** Object Key */
             object_key: string;
+            /**
+             * Request Id
+             * @default
+             */
+            request_id: string;
         };
         /**
          * OfflineUploadWriteResponse
@@ -3446,8 +3254,6 @@ export interface components {
         OpsConsistencyReportsData: {
             /** Items */
             items: components["schemas"]["OpsConsistencyReportRecord"][];
-            /** Next Cursor */
-            next_cursor?: string | null;
         };
         /**
          * OpsConsistencyReportsListResponse
@@ -3455,7 +3261,7 @@ export interface components {
          */
         OpsConsistencyReportsListResponse: {
             data: components["schemas"]["OpsConsistencyReportsData"];
-            meta: components["schemas"]["OpsListMeta"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * OpsDedupFpStatsRecord
@@ -3476,14 +3282,6 @@ export interface components {
             rejected: number;
             /** Resolved */
             resolved: number;
-        };
-        /**
-         * OpsDetailMeta
-         * @description 단건 응답 공통 meta.
-         */
-        OpsDetailMeta: {
-            /** Duration Ms */
-            duration_ms: number;
         };
         /**
          * OpsHealthCheck
@@ -3519,7 +3317,7 @@ export interface components {
          */
         OpsHealthDeepResponse: {
             data: components["schemas"]["OpsHealthDeepData"];
-            meta: components["schemas"]["OpsDetailMeta"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * OpsImportJobRecord
@@ -3557,8 +3355,8 @@ export interface components {
             source_checksum?: string | null;
             /** Started At */
             started_at?: string | null;
-            /** State */
-            state: string;
+            /** Status */
+            status: string;
             /** Status Url */
             status_url: string;
         };
@@ -3568,7 +3366,7 @@ export interface components {
          */
         OpsImportJobResponse: {
             data: components["schemas"]["OpsImportJobRecord"];
-            meta: components["schemas"]["OpsDetailMeta"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * OpsImportJobsData
@@ -3577,8 +3375,6 @@ export interface components {
         OpsImportJobsData: {
             /** Items */
             items: components["schemas"]["OpsImportJobRecord"][];
-            /** Next Cursor */
-            next_cursor?: string | null;
         };
         /**
          * OpsImportJobsListResponse
@@ -3586,7 +3382,7 @@ export interface components {
          */
         OpsImportJobsListResponse: {
             data: components["schemas"]["OpsImportJobsData"];
-            meta: components["schemas"]["OpsListMeta"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * OpsIntegrityIssueCountsRecord
@@ -3622,6 +3418,8 @@ export interface components {
             detected_at: string;
             /** Feature Id */
             feature_id?: string | null;
+            /** Issue Id */
+            issue_id: string;
             /** Message */
             message: string;
             /** Payload */
@@ -3638,8 +3436,6 @@ export interface components {
             source_record_key?: string | null;
             /** Status */
             status: string;
-            /** Violation Key */
-            violation_key: string;
             /** Violation Type */
             violation_type: string;
         };
@@ -3650,8 +3446,6 @@ export interface components {
         OpsIntegrityIssuesData: {
             /** Items */
             items: components["schemas"]["OpsIntegrityIssueRecord"][];
-            /** Next Cursor */
-            next_cursor?: string | null;
         };
         /**
          * OpsIntegrityIssuesListResponse
@@ -3659,19 +3453,7 @@ export interface components {
          */
         OpsIntegrityIssuesListResponse: {
             data: components["schemas"]["OpsIntegrityIssuesData"];
-            meta: components["schemas"]["OpsListMeta"];
-        };
-        /**
-         * OpsListMeta
-         * @description 목록 공통 meta.
-         */
-        OpsListMeta: {
-            /** Count */
-            count: number;
-            /** Duration Ms */
-            duration_ms: number;
-            /** Page Size */
-            page_size: number;
+            meta: components["schemas"]["Meta"];
         };
         /**
          * OpsMetricsData
@@ -3715,7 +3497,21 @@ export interface components {
          */
         OpsMetricsResponse: {
             data: components["schemas"]["OpsMetricsData"];
-            meta: components["schemas"]["OpsDetailMeta"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * PageMeta
+         * @description Cursor pagination metadata.
+         *
+         *     ``next_cursor``는 페이지가 끝났을 때도 ``null``로 항상 직렬화한다.
+         */
+        PageMeta: {
+            /** Next Cursor */
+            next_cursor?: string | null;
+            /** Page Size */
+            page_size: number;
+            /** Total */
+            total?: number | null;
         };
         /**
          * PoiCacheTargetListData
@@ -3724,18 +3520,6 @@ export interface components {
         PoiCacheTargetListData: {
             /** Items */
             items: components["schemas"]["PoiCacheTargetRecord"][];
-            /** Next Cursor */
-            next_cursor?: string | null;
-        };
-        /**
-         * PoiCacheTargetListMeta
-         * @description POI/cache target 목록 meta.
-         */
-        PoiCacheTargetListMeta: {
-            /** Count */
-            count: number;
-            /** Duration Ms */
-            duration_ms: number;
         };
         /**
          * PoiCacheTargetListResponse
@@ -3743,7 +3527,7 @@ export interface components {
          */
         PoiCacheTargetListResponse: {
             data: components["schemas"]["PoiCacheTargetListData"];
-            meta: components["schemas"]["PoiCacheTargetListMeta"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * PoiCacheTargetMeta
@@ -3752,6 +3536,11 @@ export interface components {
         PoiCacheTargetMeta: {
             /** Duration Ms */
             duration_ms: number;
+            /**
+             * Request Id
+             * @default
+             */
+            request_id: string;
         };
         /**
          * PoiCacheTargetMetadata
@@ -3929,19 +3718,25 @@ export interface components {
             type: "provider_dataset";
         };
         /**
-         * ProviderDatasetsResponse
-         * @description `/debug/etl/{provider}/datasets` 응답.
+         * ProviderDatasetsData
+         * @description `/debug/etl/{provider}/datasets` data payload.
          */
-        ProviderDatasetsResponse: {
+        ProviderDatasetsData: {
             /** Datasets */
             datasets: components["schemas"]["_DatasetEntry"][];
             /** Provider */
             provider: string;
         };
+        /**
+         * ProviderDatasetsResponse
+         * @description `/debug/etl/{provider}/datasets` 응답.
+         */
+        ProviderDatasetsResponse: {
+            data: components["schemas"]["ProviderDatasetsData"];
+            meta: components["schemas"]["Meta"];
+        };
         /** ProviderLastSyncData */
         ProviderLastSyncData: {
-            /** Count */
-            count: number;
             /** Items */
             items: components["schemas"]["SyncStateSummary"][];
             /** Provider */
@@ -3953,15 +3748,23 @@ export interface components {
          */
         ProviderLastSyncResponse: {
             data: components["schemas"]["ProviderLastSyncData"];
-            meta: components["schemas"]["krtour__map_admin__routers__providers___Meta"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * ProvidersData
+         * @description `/debug/etl/providers` data payload.
+         */
+        ProvidersData: {
+            /** Providers */
+            providers: components["schemas"]["_ProviderEntry"][];
         };
         /**
          * ProvidersResponse
          * @description `/debug/etl/providers` 응답.
          */
         ProvidersResponse: {
-            /** Providers */
-            providers: components["schemas"]["_ProviderEntry"][];
+            data: components["schemas"]["ProvidersData"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * PublicFeatureListData
@@ -3971,15 +3774,11 @@ export interface components {
          *     (행정구역 rollup)를 채운다(T-213c).
          */
         PublicFeatureListData: {
-            /** Cluster Unit */
-            cluster_unit?: string | null;
             /**
              * Clusters
              * @default []
              */
             clusters: components["schemas"]["ClusterSummary"][];
-            /** Count */
-            count: number;
             /** Items */
             items: components["schemas"]["FeatureSummary"][];
         };
@@ -3989,7 +3788,7 @@ export interface components {
          */
         PublicHealthResponse: {
             data: components["schemas"]["HealthData"];
-            meta: components["schemas"]["krtour__map_admin__routers__public_status___Meta"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * PublicVersionResponse
@@ -3997,7 +3796,7 @@ export interface components {
          */
         PublicVersionResponse: {
             data: components["schemas"]["VersionData"];
-            meta: components["schemas"]["krtour__map_admin__routers__public_status___Meta"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * RestoreRunRequest
@@ -4132,14 +3931,14 @@ export interface components {
             event: string;
             /** Level */
             level: string;
+            /** Log Id */
+            log_id: string;
             /** Message */
             message: string;
             /** Request Id */
             request_id?: string | null;
             /** Source */
             source: string;
-            /** System Log Key */
-            system_log_key: string;
         };
         /**
          * SystemLogsListData
@@ -4148,8 +3947,6 @@ export interface components {
         SystemLogsListData: {
             /** Items */
             items: components["schemas"]["SystemLogRecord"][];
-            /** Next Cursor */
-            next_cursor?: string | null;
         };
         /**
          * SystemLogsResponse
@@ -4157,7 +3954,7 @@ export interface components {
          */
         SystemLogsResponse: {
             data: components["schemas"]["SystemLogsListData"];
-            meta: components["schemas"]["LogListMeta"];
+            meta: components["schemas"]["Meta"];
         };
         /** ValidationError */
         ValidationError: {
@@ -4254,18 +4051,6 @@ export interface components {
             /** Provider */
             provider: string;
         };
-        /** _Meta */
-        krtour__map_admin__routers__providers___Meta: {
-            /** Count */
-            count: number;
-            /** Duration Ms */
-            duration_ms: number;
-        };
-        /** _Meta */
-        krtour__map_admin__routers__public_status___Meta: {
-            /** Duration Ms */
-            duration_ms: number;
-        };
     };
     responses: never;
     parameters: never;
@@ -4275,7 +4060,27 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    list_backups_admin_backups_get: {
+    get_public_health_health_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicHealthResponse"];
+                };
+            };
+        };
+    };
+    list_backups_v1_admin_backups_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -4295,7 +4100,7 @@ export interface operations {
             };
         };
     };
-    create_backup_admin_backups_post: {
+    create_backup_v1_admin_backups_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -4328,7 +4133,7 @@ export interface operations {
             };
         };
     };
-    get_backup_admin_backups__backup_id__get: {
+    get_backup_v1_admin_backups__backup_id__get: {
         parameters: {
             query?: never;
             header?: never;
@@ -4359,7 +4164,7 @@ export interface operations {
             };
         };
     };
-    list_reviews_admin_dedup_review_get: {
+    list_reviews_v1_admin_dedup_reviews_get: {
         parameters: {
             query?: {
                 /** @description dedup review status 반복 필터 */
@@ -4400,12 +4205,12 @@ export interface operations {
             };
         };
     };
-    decide_review_admin_dedup_review__review_key__patch: {
+    decide_review_v1_admin_dedup_reviews__review_id__patch: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                review_key: string;
+                review_id: string;
             };
             cookie?: never;
         };
@@ -4424,7 +4229,7 @@ export interface operations {
                     "application/json": components["schemas"]["DedupReviewDecisionResponse"];
                 };
             };
-            /** @description review_key 없음 */
+            /** @description review_id 없음 */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -4449,7 +4254,7 @@ export interface operations {
             };
         };
     };
-    list_reviews_admin_enrichment_review_get: {
+    list_reviews_v1_admin_enrichment_reviews_get: {
         parameters: {
             query?: {
                 /** @description enrichment review status 반복 필터 */
@@ -4487,12 +4292,12 @@ export interface operations {
             };
         };
     };
-    decide_review_admin_enrichment_review__review_key__patch: {
+    decide_review_v1_admin_enrichment_reviews__review_id__patch: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                review_key: string;
+                review_id: string;
             };
             cookie?: never;
         };
@@ -4529,10 +4334,10 @@ export interface operations {
             };
         };
     };
-    list_feature_update_requests_admin_feature_update_requests_get: {
+    list_feature_update_requests_v1_admin_feature_update_requests_get: {
         parameters: {
             query?: {
-                state?: ("queued" | "running" | "done" | "failed" | "cancelled") | null;
+                status?: ("queued" | "running" | "done" | "failed" | "cancelled") | null;
                 scope_type?: string | null;
                 provider?: string | null;
                 dataset_key?: string | null;
@@ -4567,7 +4372,7 @@ export interface operations {
             };
         };
     };
-    create_feature_update_request_admin_feature_update_requests_post: {
+    create_feature_update_request_v1_admin_feature_update_requests_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -4607,7 +4412,7 @@ export interface operations {
             };
         };
     };
-    get_feature_update_request_admin_feature_update_requests__request_id__get: {
+    get_feature_update_request_v1_admin_feature_update_requests__request_id__get: {
         parameters: {
             query?: never;
             header?: never;
@@ -4645,7 +4450,7 @@ export interface operations {
             };
         };
     };
-    cancel_feature_update_request_admin_feature_update_requests__request_id__cancel_post: {
+    cancel_feature_update_request_v1_admin_feature_update_requests__request_id__cancel_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -4694,7 +4499,7 @@ export interface operations {
             };
         };
     };
-    run_feature_update_request_now_admin_feature_update_requests__request_id__run_now_post: {
+    run_feature_update_request_now_v1_admin_feature_update_requests__request_id__run_now_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -4743,7 +4548,7 @@ export interface operations {
             };
         };
     };
-    list_features_admin_features_get: {
+    list_features_v1_admin_features_get: {
         parameters: {
             query?: {
                 /** @description name/address/feature/source 검색 */
@@ -4794,7 +4599,7 @@ export interface operations {
             };
         };
     };
-    create_feature_route_admin_features_post: {
+    create_feature_route_v1_admin_features_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -4827,13 +4632,13 @@ export interface operations {
             };
         };
     };
-    list_feature_change_request_route_admin_features_change_requests_get: {
+    list_feature_change_request_route_v1_admin_features_change_requests_get: {
         parameters: {
             query?: {
-                state?: ("pending" | "applied" | "rejected")[] | null;
+                status?: ("pending" | "applied" | "rejected")[] | null;
                 action?: ("add" | "update" | "delete")[] | null;
                 q?: string | null;
-                limit?: number;
+                page_size?: number;
             };
             header?: never;
             path?: never;
@@ -4861,7 +4666,7 @@ export interface operations {
             };
         };
     };
-    approve_feature_change_request_route_admin_features_change_requests__request_id__approve_post: {
+    approve_feature_change_request_route_v1_admin_features_change_requests__request_id__approve_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -4910,7 +4715,7 @@ export interface operations {
             };
         };
     };
-    reject_feature_change_request_route_admin_features_change_requests__request_id__reject_post: {
+    reject_feature_change_request_route_v1_admin_features_change_requests__request_id__reject_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -4952,7 +4757,7 @@ export interface operations {
             };
         };
     };
-    delete_feature_route_admin_features__feature_id__delete: {
+    delete_feature_route_v1_admin_features__feature_id__delete: {
         parameters: {
             query?: never;
             header?: never;
@@ -5001,7 +4806,7 @@ export interface operations {
             };
         };
     };
-    patch_feature_route_admin_features__feature_id__patch: {
+    patch_feature_route_v1_admin_features__feature_id__patch: {
         parameters: {
             query?: never;
             header?: never;
@@ -5050,7 +4855,7 @@ export interface operations {
             };
         };
     };
-    deactivate_feature_route_admin_features__feature_id__deactivate_post: {
+    deactivate_feature_route_v1_admin_features__feature_id__deactivate_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -5106,7 +4911,7 @@ export interface operations {
             };
         };
     };
-    list_admin_issues_admin_issues_get: {
+    list_admin_issues_v1_admin_issues_get: {
         parameters: {
             query?: {
                 status?: ("open" | "acknowledged" | "resolved" | "ignored") | null;
@@ -5117,8 +4922,14 @@ export interface operations {
                 feature_id?: string | null;
                 /** @description message/feature_id/source_record_key 부분일치(ILIKE). */
                 q?: string | null;
-                /** @description 연결 feature 좌표 bbox: min_lon,min_lat,max_lon,max_lat (WGS84). */
-                bbox?: string | null;
+                /** @description bbox 최소 경도 (WGS84). */
+                min_lon?: number | null;
+                /** @description bbox 최소 위도. */
+                min_lat?: number | null;
+                /** @description bbox 최대 경도. */
+                max_lon?: number | null;
+                /** @description bbox 최대 위도. */
+                max_lat?: number | null;
                 page_size?: number;
                 cursor?: string | null;
             };
@@ -5148,12 +4959,12 @@ export interface operations {
             };
         };
     };
-    get_admin_issue_admin_issues__violation_key__get: {
+    get_admin_issue_v1_admin_issues__issue_id__get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                violation_key: string;
+                issue_id: string;
             };
             cookie?: never;
         };
@@ -5186,12 +4997,12 @@ export interface operations {
             };
         };
     };
-    patch_admin_issue_admin_issues__violation_key__patch: {
+    patch_admin_issue_v1_admin_issues__issue_id__patch: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                violation_key: string;
+                issue_id: string;
             };
             cookie?: never;
         };
@@ -5242,10 +5053,10 @@ export interface operations {
             };
         };
     };
-    list_offline_upload_requests_admin_offline_uploads_get: {
+    list_offline_upload_requests_v1_admin_offline_uploads_get: {
         parameters: {
             query?: {
-                state?: ("uploaded" | "validating" | "validated" | "validation_failed" | "loading" | "loaded" | "load_failed" | "cancelled") | null;
+                status?: ("uploaded" | "validating" | "validated" | "validation_failed" | "loading" | "loaded" | "load_failed" | "cancelled") | null;
                 provider?: string | null;
                 dataset_key?: string | null;
                 page_size?: number;
@@ -5277,7 +5088,7 @@ export interface operations {
             };
         };
     };
-    create_offline_upload_request_admin_offline_uploads_post: {
+    create_offline_upload_request_v1_admin_offline_uploads_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -5286,7 +5097,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "multipart/form-data": components["schemas"]["Body_create_offline_upload_request_admin_offline_uploads_post"];
+                "multipart/form-data": components["schemas"]["Body_create_offline_upload_request_v1_admin_offline_uploads_post"];
             };
         };
         responses: {
@@ -5317,7 +5128,7 @@ export interface operations {
             };
         };
     };
-    get_offline_upload_request_admin_offline_uploads__upload_id__get: {
+    get_offline_upload_request_v1_admin_offline_uploads__upload_id__get: {
         parameters: {
             query?: never;
             header?: never;
@@ -5355,7 +5166,7 @@ export interface operations {
             };
         };
     };
-    load_offline_upload_request_admin_offline_uploads__upload_id__load_post: {
+    load_offline_upload_request_v1_admin_offline_uploads__upload_id__load_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -5407,7 +5218,7 @@ export interface operations {
             };
         };
     };
-    preview_offline_upload_request_admin_offline_uploads__upload_id__preview_get: {
+    preview_offline_upload_request_v1_admin_offline_uploads__upload_id__preview_get: {
         parameters: {
             query?: {
                 sample_size?: number;
@@ -5461,7 +5272,7 @@ export interface operations {
             };
         };
     };
-    validate_offline_upload_request_admin_offline_uploads__upload_id__validate_post: {
+    validate_offline_upload_request_v1_admin_offline_uploads__upload_id__validate_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -5517,7 +5328,7 @@ export interface operations {
             };
         };
     };
-    get_offline_upload_validation_request_admin_offline_uploads__upload_id__validation_get: {
+    get_offline_upload_validation_request_v1_admin_offline_uploads__upload_id__validation_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -5562,7 +5373,7 @@ export interface operations {
             };
         };
     };
-    list_poi_cache_target_records_admin_poi_cache_targets_get: {
+    list_poi_cache_target_records_v1_admin_poi_cache_targets_get: {
         parameters: {
             query?: {
                 external_system?: string | null;
@@ -5597,7 +5408,7 @@ export interface operations {
             };
         };
     };
-    get_poi_cache_target_record_admin_poi_cache_targets__external_system___target_key__get: {
+    get_poi_cache_target_record_v1_admin_poi_cache_targets__external_system___target_key__get: {
         parameters: {
             query?: {
                 include_deleted?: boolean;
@@ -5638,7 +5449,7 @@ export interface operations {
             };
         };
     };
-    put_poi_cache_target_admin_poi_cache_targets__external_system___target_key__put: {
+    put_poi_cache_target_v1_admin_poi_cache_targets__external_system___target_key__put: {
         parameters: {
             query?: never;
             header?: never;
@@ -5681,7 +5492,7 @@ export interface operations {
             };
         };
     };
-    delete_poi_cache_target_record_admin_poi_cache_targets__external_system___target_key__delete: {
+    delete_poi_cache_target_record_v1_admin_poi_cache_targets__external_system___target_key__delete: {
         parameters: {
             query?: never;
             header?: never;
@@ -5727,7 +5538,7 @@ export interface operations {
             };
         };
     };
-    restore_backup_admin_restore__backup_id__post: {
+    restore_backup_v1_admin_restore__backup_id__post: {
         parameters: {
             query?: never;
             header?: never;
@@ -5762,7 +5573,7 @@ export interface operations {
             };
         };
     };
-    plan_restore_swap_admin_restore__backup_id__swap_post: {
+    plan_restore_swap_v1_admin_restore__backup_id__swap_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -5797,7 +5608,41 @@ export interface operations {
             };
         };
     };
-    get_providers_debug_etl_providers_get: {
+    list_categories_v1_categories_get: {
+        parameters: {
+            query?: {
+                /** @description 현재 DB feature 분포(category별 수)를 포함 */
+                include_counts?: boolean;
+                /** @description counts를 status='active' feature만으로 집계 */
+                active_only?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CategoriesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_providers_v1_debug_etl_providers_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -5817,7 +5662,7 @@ export interface operations {
             };
         };
     };
-    get_provider_datasets_debug_etl__provider__datasets_get: {
+    get_provider_datasets_v1_debug_etl__provider__datasets_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -5848,7 +5693,7 @@ export interface operations {
             };
         };
     };
-    post_preview_debug_etl__provider___dataset__preview_post: {
+    post_preview_v1_debug_etl__provider___dataset__preview_post: {
         parameters: {
             query?: {
                 source?: "fixture" | "live";
@@ -5910,7 +5755,7 @@ export interface operations {
             };
         };
     };
-    get_mois_license_detail_debug_mois_license__license_id__get: {
+    get_mois_license_detail_v1_debug_mois_license__license_id__get: {
         parameters: {
             query?: never;
             header?: never;
@@ -5948,394 +5793,6 @@ export interface operations {
             };
         };
     };
-    get_public_health_health_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PublicHealthResponse"];
-                };
-            };
-        };
-    };
-    get_api_call_logs_ops_api_call_logs_get: {
-        parameters: {
-            query?: {
-                method?: string | null;
-                min_status?: number | null;
-                path?: string | null;
-                page_size?: number;
-                cursor?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiCallLogsResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_integrity_issues_ops_consistency_issues_get: {
-        parameters: {
-            query?: {
-                status?: ("open" | "acknowledged" | "resolved" | "ignored") | null;
-                severity?: ("info" | "warning" | "error" | "critical") | null;
-                violation_type?: string | null;
-                provider?: string | null;
-                dataset_key?: string | null;
-                feature_id?: string | null;
-                page_size?: number;
-                cursor?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OpsIntegrityIssuesListResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_consistency_reports_ops_consistency_reports_get: {
-        parameters: {
-            query?: {
-                severity_max?: ("OK" | "WARN" | "ERROR") | null;
-                page_size?: number;
-                cursor?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OpsConsistencyReportsListResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    mark_dagster_nux_seen_ops_dagster_nux_seen_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DagsterNuxSeenResponse"];
-                };
-            };
-        };
-    };
-    get_dagster_run_detail_ops_dagster_runs__run_id__get: {
-        parameters: {
-            query?: {
-                event_limit?: number;
-                /** @description event log cursor(이전 응답의 event_cursor). 긴 run의 뒤쪽(실패) 이벤트로 전진 페이지네이션하기 위함. 미지정이면 처음부터. */
-                after?: string | null;
-            };
-            header?: never;
-            path: {
-                run_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DagsterRunDetailResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_dagster_summary_ops_dagster_summary_get: {
-        parameters: {
-            query?: {
-                run_limit?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DagsterSummaryResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_ops_health_deep_ops_health_deep_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OpsHealthDeepResponse"];
-                };
-            };
-        };
-    };
-    list_import_jobs_ops_import_jobs_get: {
-        parameters: {
-            query?: {
-                state?: ("queued" | "running" | "done" | "failed" | "cancelled") | null;
-                kind?: string | null;
-                load_batch_id?: string | null;
-                parent_job_id?: string | null;
-                page_size?: number;
-                cursor?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OpsImportJobsListResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_import_job_ops_import_jobs__job_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                job_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OpsImportJobResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_ops_metrics_ops_metrics_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OpsMetricsResponse"];
-                };
-            };
-        };
-    };
-    get_system_logs_ops_system_logs_get: {
-        parameters: {
-            query?: {
-                level?: ("debug" | "info" | "warning" | "error" | "critical") | null;
-                source?: string | null;
-                q?: string | null;
-                page_size?: number;
-                cursor?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SystemLogsResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_categories_v1_categories_get: {
-        parameters: {
-            query?: {
-                /** @description 현재 DB feature 분포(category별 수)를 포함 */
-                include_counts?: boolean;
-                /** @description counts를 status='active' feature만으로 집계 */
-                active_only?: boolean;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CategoriesResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     list_features_in_bbox_v1_features_get: {
         parameters: {
             query: {
@@ -6351,8 +5808,9 @@ export interface operations {
                 kind?: string[] | null;
                 /** @description category code 필터 (반복 가능). 미지정 시 전체. */
                 category?: string[] | null;
-                /** @description 최대 반환 수. */
-                limit?: number;
+                /** @description 페이지 크기. */
+                page_size?: number;
+                cursor?: string | null;
             };
             header?: never;
             path?: never;
@@ -6429,7 +5887,7 @@ export interface operations {
                 zoom?: number | null;
                 /** @description 행정구역 rollup 단위. 미지정 시 zoom으로 유도. */
                 cluster_unit?: ("sido" | "sigungu" | "eupmyeondong") | null;
-                limit?: number;
+                max_items?: number;
             };
             header?: never;
             path?: never;
@@ -6574,6 +6032,7 @@ export interface operations {
                 /** @description 페이지 크기. */
                 page_size?: number;
                 cursor?: string | null;
+                include_total?: boolean;
             };
             header?: never;
             path?: never;
@@ -6658,6 +6117,340 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FeatureWeatherResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_api_call_logs_v1_ops_api_call_logs_get: {
+        parameters: {
+            query?: {
+                method?: string | null;
+                min_status?: number | null;
+                path?: string | null;
+                page_size?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiCallLogsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_integrity_issues_v1_ops_consistency_issues_get: {
+        parameters: {
+            query?: {
+                status?: ("open" | "acknowledged" | "resolved" | "ignored") | null;
+                severity?: ("info" | "warning" | "error" | "critical") | null;
+                violation_type?: string | null;
+                provider?: string | null;
+                dataset_key?: string | null;
+                feature_id?: string | null;
+                page_size?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpsIntegrityIssuesListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_consistency_reports_v1_ops_consistency_reports_get: {
+        parameters: {
+            query?: {
+                severity_max?: ("OK" | "WARN" | "ERROR") | null;
+                page_size?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpsConsistencyReportsListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mark_dagster_nux_seen_v1_ops_dagster_nux_seen_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DagsterNuxSeenResponse"];
+                };
+            };
+        };
+    };
+    get_dagster_run_detail_v1_ops_dagster_runs__run_id__get: {
+        parameters: {
+            query?: {
+                page_size?: number;
+                /** @description event log cursor(이전 응답의 event_cursor). 긴 run의 뒤쪽(실패) 이벤트로 전진 페이지네이션하기 위함. 미지정이면 처음부터. */
+                after?: string | null;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DagsterRunDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_dagster_summary_v1_ops_dagster_summary_get: {
+        parameters: {
+            query?: {
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DagsterSummaryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_ops_health_deep_v1_ops_health_deep_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpsHealthDeepResponse"];
+                };
+            };
+        };
+    };
+    list_import_jobs_v1_ops_import_jobs_get: {
+        parameters: {
+            query?: {
+                status?: ("queued" | "running" | "done" | "failed" | "cancelled") | null;
+                kind?: string | null;
+                load_batch_id?: string | null;
+                parent_job_id?: string | null;
+                page_size?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpsImportJobsListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_import_job_v1_ops_import_jobs__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpsImportJobResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_ops_metrics_v1_ops_metrics_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpsMetricsResponse"];
+                };
+            };
+        };
+    };
+    get_system_logs_v1_ops_system_logs_get: {
+        parameters: {
+            query?: {
+                level?: ("debug" | "info" | "warning" | "error" | "critical") | null;
+                source?: string | null;
+                q?: string | null;
+                page_size?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemLogsResponse"];
                 };
             };
             /** @description Validation Error */

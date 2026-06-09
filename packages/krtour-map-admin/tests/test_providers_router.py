@@ -49,7 +49,7 @@ def test_provider_last_sync_404_when_empty(
     try:
         r = client.get("/v1/providers/python-mois-api/last-sync")
         assert r.status_code == 404
-        assert "python-mois-api" in r.json()["error"]["message"]
+        assert "python-mois-api" in r.json()["detail"]
     finally:
         client.app.dependency_overrides.clear()
 
@@ -83,7 +83,7 @@ def test_provider_last_sync_200_excludes_cursor(
         assert r.status_code == 200
         body = r.json()
         assert body["data"]["provider"] == "python-mois-api"
-        assert body["data"]["count"] == 1
+        assert len(body["data"]["items"]) == 1
         item = body["data"]["items"][0]
         assert item["dataset_key"] == "mois_license_features_bulk"
         assert item["status"] == "active"

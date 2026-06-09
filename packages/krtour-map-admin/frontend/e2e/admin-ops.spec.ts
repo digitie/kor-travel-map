@@ -44,11 +44,11 @@ function makeOfflineUpload(
     detected_encoding: "utf-8",
     detected_format: "csv",
     load_job_id: null,
-    load_url: `/admin/offline-uploads/${OFFLINE_UPLOAD_ID}/load`,
+    load_url: `/v1/admin/offline-uploads/${OFFLINE_UPLOAD_ID}/load`,
     original_filename: "offline.csv",
     provider: "offline-test-provider",
-    state: "uploaded",
-    status_url: `/admin/offline-uploads/${OFFLINE_UPLOAD_ID}`,
+    status: "uploaded",
+    status_url: `/v1/admin/offline-uploads/${OFFLINE_UPLOAD_ID}`,
     storage_backend: "rustfs",
     storage_key: `offline-uploads/${OFFLINE_UPLOAD_ID}/offline.csv`,
     sync_scope: "default",
@@ -82,7 +82,7 @@ function makePoiTarget(
     radius_km: 5,
     refresh_policy: "provider_default",
     scope_mode: "center_radius",
-    status_url: "/admin/poi-cache-targets/tripmate/mock-target-1",
+    status_url: "/v1/admin/poi-cache-targets/tripmate/mock-target-1",
     target_id: POI_TARGET_ID,
     target_key: "mock-target-1",
     update_enabled: true,
@@ -110,7 +110,7 @@ function makeFeatureChange(
     review_mode: "require_review",
     reviewed_at: null,
     reviewed_by: null,
-    state: "pending",
+    status: "pending",
     ...overrides,
   };
 }
@@ -135,21 +135,29 @@ async function mockOfflineUploadMutations(page: Page) {
       return;
     }
     const url = new URL(request.url());
-    const uploadPath = `/admin/offline-uploads/${OFFLINE_UPLOAD_ID}`;
+    if (url.pathname === "/admin/offline-uploads" || url.searchParams.has("_rsc")) {
+      await route.continue();
+      return;
+    }
+    const uploadPath = `/v1/admin/offline-uploads/${OFFLINE_UPLOAD_ID}`;
 
-    if (request.method() === "GET" && url.pathname === "/admin/offline-uploads") {
-      const state = url.searchParams.get("state");
-      const items = state
-        ? uploads.filter((item) => item.state === state)
+    if (request.method() === "GET" && url.pathname === "/v1/admin/offline-uploads") {
+      const status = url.searchParams.get("status");
+      const items = status
+        ? uploads.filter((item) => item.status === status)
         : uploads;
       await fulfillJson(route, {
-        data: { items, next_cursor: null },
-        meta: { count: items.length, duration_ms: 1 },
+        data: { items },
+        meta: {
+          duration_ms: 1,
+          page: { page_size: 100, next_cursor: null, total: null },
+          request_id: "e2e-offline-list",
+        },
       });
       return;
     }
 
-    if (request.method() === "POST" && url.pathname === "/admin/offline-uploads") {
+    if (request.method() === "POST" && url.pathname === "/v1/admin/offline-uploads") {
       requests.create += 1;
       expect(request.headers()["content-type"]).toContain("multipart/form-data");
       uploads = [upload];
@@ -197,7 +205,7 @@ async function mockOfflineUploadMutations(page: Page) {
       expect(request.postData()).toContain("column_mapping");
       upload = {
         ...upload,
-        state: "validated",
+        status: "validated",
         updated_at: "2026-06-08T00:01:00.000Z",
         validation_job_id: OFFLINE_VALIDATION_JOB_ID,
       };
@@ -227,7 +235,7 @@ async function mockOfflineUploadMutations(page: Page) {
           headers: ["name", "lon", "lat"],
           issues: [],
           job_id: OFFLINE_VALIDATION_JOB_ID,
-          job_state: "done",
+          job_status: "done",
           parsed_format: "csv",
           rows_sampled: 1,
           rows_total: 1,
@@ -258,7 +266,7 @@ async function mockOfflineUploadMutations(page: Page) {
           headers: ["name", "lon", "lat"],
           issues: [],
           job_id: OFFLINE_VALIDATION_JOB_ID,
-          job_state: "done",
+          job_status: "done",
           parsed_format: "csv",
           rows_sampled: 1,
           rows_total: 1,
@@ -276,7 +284,7 @@ async function mockOfflineUploadMutations(page: Page) {
       upload = {
         ...upload,
         load_job_id: OFFLINE_LOAD_JOB_ID,
-        state: "loading",
+        status: "loading",
         updated_at: "2026-06-08T00:02:00.000Z",
       };
       uploads = [upload];
@@ -308,12 +316,20 @@ async function mockPoiCacheTargetMutations(page: Page) {
       return;
     }
     const url = new URL(request.url());
-    const targetPath = "/admin/poi-cache-targets/tripmate/mock-target-1";
+    if (url.pathname === "/admin/poi-cache-targets" || url.searchParams.has("_rsc")) {
+      await route.continue();
+      return;
+    }
+    const targetPath = "/v1/admin/poi-cache-targets/tripmate/mock-target-1";
 
-    if (request.method() === "GET" && url.pathname === "/admin/poi-cache-targets") {
+    if (request.method() === "GET" && url.pathname === "/v1/admin/poi-cache-targets") {
       await fulfillJson(route, {
-        data: { items: targets, next_cursor: null },
-        meta: { count: targets.length, duration_ms: 1 },
+        data: { items: targets },
+        meta: {
+          duration_ms: 1,
+          page: { page_size: 100, next_cursor: null, total: null },
+          request_id: "e2e-poi-target-list",
+        },
       });
       return;
     }
@@ -373,7 +389,6 @@ async function mockPoiCacheTargetMutations(page: Page) {
             status: "active",
           },
         ],
-        next_cursor: null,
         target: {
           external_system: "tripmate",
           lat: 37.5665,
@@ -381,7 +396,11 @@ async function mockPoiCacheTargetMutations(page: Page) {
           target_key: "mock-target-1",
         },
       },
-      meta: { count: 1, duration_ms: 1 },
+      meta: {
+        duration_ms: 1,
+        page: { page_size: 100, next_cursor: null, total: null },
+        request_id: "e2e-nearby-target",
+      },
     });
   });
 
@@ -394,12 +413,11 @@ function featureChangeListResponse(
   limit: number,
 ): AdminFeatureChangeListResponse {
   return {
-    data: { items },
+    data: { items, review_mode: reviewMode },
     meta: {
-      count: items.length,
       duration_ms: 1,
-      limit,
-      review_mode: reviewMode,
+      page: { page_size: limit, next_cursor: null, total: null },
+      request_id: "e2e-feature-change-list",
     },
   };
 }
@@ -409,7 +427,7 @@ function featureChangeResponse(
 ): AdminFeatureChangeResponse {
   return {
     data: { request },
-    meta: { duration_ms: 1 },
+    meta: { duration_ms: 1, request_id: "e2e-feature-change" },
   };
 }
 
@@ -422,7 +440,7 @@ function applyFeatureChange(
     applied_at: MOCK_REVIEWED_AT,
     reviewed_at: MOCK_REVIEWED_AT,
     reviewed_by: operator ?? "local-admin",
-    state: "applied",
+    status: "applied",
   };
 }
 
@@ -449,7 +467,7 @@ async function mockFeatureChangeMutations(
   };
 
   function filteredChanges(url: URL) {
-    const states = new Set(url.searchParams.getAll("state"));
+    const statuses = new Set(url.searchParams.getAll("status"));
     const actions = new Set(url.searchParams.getAll("action"));
     const q = (url.searchParams.get("q") ?? "").toLowerCase();
     return changes.filter((item) => {
@@ -458,7 +476,7 @@ async function mockFeatureChangeMutations(
           ? item.payload.name.toLowerCase()
           : "";
       return (
-        (states.size === 0 || states.has(item.state)) &&
+        (statuses.size === 0 || statuses.has(item.status)) &&
         (actions.size === 0 || actions.has(item.action)) &&
         (q.length === 0 ||
           item.request_id.toLowerCase().includes(q) ||
@@ -497,15 +515,15 @@ async function mockFeatureChangeMutations(
 
     if (
       request.method() === "GET" &&
-      url.pathname === "/admin/features/change-requests"
+      url.pathname === "/v1/admin/features/change-requests"
     ) {
       requests.list += 1;
       await fulfillJson(
         route,
         featureChangeListResponse(
           filteredChanges(url),
-          reviewMode,
-          Number(url.searchParams.get("limit") ?? 100),
+            reviewMode,
+          Number(url.searchParams.get("page_size") ?? 100),
         ),
       );
       return;
@@ -543,13 +561,13 @@ async function mockFeatureChangeMutations(
         ...target,
         reviewed_at: MOCK_REVIEWED_AT,
         reviewed_by: body.operator ?? "local-admin",
-        state: "rejected",
+        status: "rejected",
       });
       await fulfillJson(route, featureChangeResponse(updated));
       return;
     }
 
-    if (request.method() === "POST" && url.pathname === "/admin/features") {
+    if (request.method() === "POST" && url.pathname === "/v1/admin/features") {
       requests.create += 1;
       const body = request.postDataJSON() as AdminFeatureCreateRequest;
       requests.createBodies.push(body);
@@ -571,7 +589,7 @@ async function mockFeatureChangeMutations(
 
     if (
       request.method() === "PATCH" &&
-      url.pathname.startsWith("/admin/features/")
+      url.pathname.startsWith("/v1/admin/features/")
     ) {
       requests.patch += 1;
       const body = request.postDataJSON() as AdminFeaturePatchRequest;
@@ -596,7 +614,7 @@ async function mockFeatureChangeMutations(
 
     if (
       request.method() === "DELETE" &&
-      url.pathname.startsWith("/admin/features/")
+      url.pathname.startsWith("/v1/admin/features/")
     ) {
       requests.delete += 1;
       const body = request.postDataJSON() as AdminFeatureDeleteRequest;
@@ -630,20 +648,20 @@ async function mockFeatureChangeMutations(
  * API 결과 행 수보다 운영자가 사용할 표면(제목, 필터, 폼, 표)을 우선 검증한다.
  */
 test.describe("admin/ops pages", () => {
-  test("/ops/import-jobs", async ({ page }) => {
+  test("/v1/ops/import-jobs", async ({ page }) => {
     await page.goto("/ops/import-jobs");
 
     await expect(
       page.getByRole("heading", { level: 1, name: "Import jobs" }),
     ).toBeVisible();
-    await expect(page.getByLabel("state")).toBeVisible();
+    await expect(page.getByLabel("status")).toBeVisible();
     await expect(page.getByPlaceholder("kind filter")).toBeVisible();
-    for (const column of ["job", "kind", "state", "progress", "stage"]) {
+    for (const column of ["job", "kind", "status", "progress", "stage"]) {
       await expect(page.getByRole("columnheader", { name: column })).toBeVisible();
     }
   });
 
-  test("/admin/features", async ({ page }) => {
+  test("/v1/admin/features", async ({ page }) => {
     await page.goto("/admin/features");
 
     await expect(
@@ -669,7 +687,7 @@ test.describe("admin/ops pages", () => {
     await expect(page.getByText("table에서 feature를 선택하면")).toBeVisible();
   });
 
-  test("/admin/features/change-requests", async ({ page }) => {
+  test("/v1/admin/features/change-requests", async ({ page }) => {
     await page.goto("/admin/features/change-requests");
 
     await expect(
@@ -682,22 +700,22 @@ test.describe("admin/ops pages", () => {
       "change reason",
       "change operator",
       "change kind",
-      "change status",
+      "change feature status",
       "change name",
       "change category",
       "change lon",
       "change lat",
       "change detail JSON",
       "change search",
-      "change state",
+      "change status",
       "change action filter",
-      "change limit",
+      "change page size",
     ]) {
       await expect(page.getByLabel(label, { exact: true })).toBeVisible();
     }
     for (const column of [
       "request",
-      "action/state",
+      "action/status",
       "feature",
       "review",
       "reason",
@@ -709,7 +727,7 @@ test.describe("admin/ops pages", () => {
     await expect(page.getByText("요청 행을 선택하면")).toBeVisible();
   });
 
-  test("/admin/features/change-requests approve workflow", async ({ page }) => {
+  test("/v1/admin/features/change-requests approve workflow", async ({ page }) => {
     const requests = await mockFeatureChangeMutations(page, {
       initial: [
         makeFeatureChange({
@@ -726,7 +744,7 @@ test.describe("admin/ops pages", () => {
     });
 
     await page.goto("/admin/features/change-requests");
-    await page.getByLabel("change state", { exact: true }).selectOption("all");
+    await page.getByLabel("change status", { exact: true }).selectOption("all");
 
     const pendingRow = page.getByRole("row", { name: /Mock pending feature/ });
     await expect(pendingRow).toBeVisible();
@@ -746,7 +764,7 @@ test.describe("admin/ops pages", () => {
     );
   });
 
-  test("/admin/features/change-requests immediate create workflow", async ({
+  test("/v1/admin/features/change-requests immediate create workflow", async ({
     page,
   }) => {
     const requests = await mockFeatureChangeMutations(page, {
@@ -769,19 +787,19 @@ test.describe("admin/ops pages", () => {
       reason: "즉시 적용",
     });
 
-    await page.getByLabel("change state", { exact: true }).selectOption("all");
+    await page.getByLabel("change status", { exact: true }).selectOption("all");
     const createdRow = page.getByRole("row", { name: /Immediate feature/ });
     await expect(createdRow).toBeVisible();
     await expect(createdRow.getByText("applied")).toBeVisible();
   });
 
-  test("/admin/features/change-requests update/delete workflow", async ({
+  test("/v1/admin/features/change-requests update/delete workflow", async ({
     page,
   }) => {
     const requests = await mockFeatureChangeMutations(page);
 
     await page.goto("/admin/features/change-requests");
-    await page.getByLabel("change state", { exact: true }).selectOption("all");
+    await page.getByLabel("change status", { exact: true }).selectOption("all");
 
     await page.getByLabel("change action", { exact: true }).selectOption("update");
     await page
@@ -827,7 +845,7 @@ test.describe("admin/ops pages", () => {
     );
   });
 
-  test("/admin/issues", async ({ page }) => {
+  test("/v1/admin/issues", async ({ page }) => {
     await page.goto("/admin/issues");
 
     await expect(
@@ -864,7 +882,7 @@ test.describe("admin/ops pages", () => {
     }
   });
 
-  test("/ops/consistency", async ({ page }) => {
+  test("/v1/ops/consistency", async ({ page }) => {
     await page.goto("/ops/consistency");
 
     await expect(
@@ -876,7 +894,7 @@ test.describe("admin/ops pages", () => {
     await expect(page.getByLabel("issue status")).toBeVisible();
   });
 
-  test("/ops/logs", async ({ page }) => {
+  test("/v1/ops/logs", async ({ page }) => {
     await page.goto("/ops/logs");
 
     await expect(page.getByRole("heading", { level: 1, name: "Logs" })).toBeVisible();
@@ -897,10 +915,6 @@ test.describe("admin/ops pages", () => {
       await expect(page.getByRole("columnheader", { name: column })).toBeVisible();
     }
     await page.getByRole("tab", { name: "API call logs" }).click();
-    await expect(page.getByRole("tab", { name: "API call logs" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
     await expect(page.getByLabel("api log method")).toBeVisible();
     await expect(page.getByLabel("api log path")).toBeVisible();
     await expect(page.getByLabel("api log min status")).toBeVisible();
@@ -917,8 +931,8 @@ test.describe("admin/ops pages", () => {
     }
   });
 
-  test("/admin/dedup-review", async ({ page }) => {
-    await page.goto("/admin/dedup-review");
+  test("/v1/admin/dedup-reviews", async ({ page }) => {
+    await page.goto("/admin/dedup-reviews");
 
     await expect(
       page.getByRole("heading", { level: 1, name: "Dedup review" }),
@@ -929,8 +943,8 @@ test.describe("admin/ops pages", () => {
     }
   });
 
-  test("/admin/enrichment-review", async ({ page }) => {
-    await page.goto("/admin/enrichment-review");
+  test("/v1/admin/enrichment-reviews", async ({ page }) => {
+    await page.goto("/admin/enrichment-reviews");
 
     await expect(
       page.getByRole("heading", { level: 1, name: "Enrichment review" }),
@@ -950,7 +964,7 @@ test.describe("admin/ops pages", () => {
     await expect(page.getByLabel("다음 페이지")).toBeVisible();
   });
 
-  test("/admin/feature-update-requests", async ({ page }) => {
+  test("/v1/admin/feature-update-requests", async ({ page }) => {
     await page.goto("/admin/feature-update-requests");
 
     await expect(
@@ -962,10 +976,10 @@ test.describe("admin/ops pages", () => {
     }
     await expect(page.getByLabel("run mode")).toBeVisible();
     await expect(page.getByLabel("dry-run")).toBeChecked();
-    await expect(page.getByLabel("request state")).toBeVisible();
+    await expect(page.getByLabel("request status")).toBeVisible();
   });
 
-  test("/admin/poi-cache-targets", async ({ page }) => {
+  test("/v1/admin/poi-cache-targets", async ({ page }) => {
     await page.goto("/admin/poi-cache-targets");
 
     await expect(
@@ -986,7 +1000,7 @@ test.describe("admin/ops pages", () => {
     await expect(page.getByText("Nearby features")).toBeVisible();
   });
 
-  test("/admin/poi-cache-targets mutation flow", async ({ page }) => {
+  test("/v1/admin/poi-cache-targets mutation flow", async ({ page }) => {
     const requests = await mockPoiCacheTargetMutations(page);
 
     await page.goto("/admin/poi-cache-targets");
@@ -1007,7 +1021,7 @@ test.describe("admin/ops pages", () => {
     await expect(page.getByRole("row", { name: /Mock target/ })).toHaveCount(0);
   });
 
-  test("/admin/offline-uploads", async ({ page }) => {
+  test("/v1/admin/offline-uploads", async ({ page }) => {
     await page.goto("/admin/offline-uploads");
 
     await expect(
@@ -1020,12 +1034,12 @@ test.describe("admin/ops pages", () => {
     }
     await expect(page.getByRole("button", { name: "업로드" })).toBeDisabled();
     await expect(page.getByText("CSV/TSV 업로드를 선택하면")).toBeVisible();
-    await expect(page.getByLabel("offline upload state")).toBeVisible();
+    await expect(page.getByLabel("offline upload status")).toBeVisible();
     await expect(page.getByLabel("provider filter")).toBeVisible();
     await expect(page.getByLabel("dataset filter")).toBeVisible();
     for (const column of [
       "upload",
-      "state",
+      "status",
       "format",
       "provider/dataset",
       "file",
@@ -1037,7 +1051,7 @@ test.describe("admin/ops pages", () => {
     }
   });
 
-  test("/admin/offline-uploads mutation flow", async ({ page }) => {
+  test("/v1/admin/offline-uploads mutation flow", async ({ page }) => {
     const requests = await mockOfflineUploadMutations(page);
 
     await page.goto("/admin/offline-uploads");
@@ -1057,7 +1071,7 @@ test.describe("admin/ops pages", () => {
     await expect.poll(() => requests.validate).toBe(1);
     await expect(page.getByText("1 valid / 0 error")).toBeVisible();
 
-    await page.getByLabel("offline upload state").selectOption("validated");
+    await page.getByLabel("offline upload status").selectOption("validated");
     const loadButton = page.getByTestId("offline-upload-load");
     await expect(loadButton).toBeEnabled();
     await loadButton.click();

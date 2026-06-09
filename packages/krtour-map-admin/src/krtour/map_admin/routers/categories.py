@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from krtour.map_admin.db import get_session
+from krtour.map_admin.response import Meta, make_meta
 
 router = APIRouter(tags=["categories"])
 
@@ -54,15 +55,7 @@ class CategoriesData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     items: list[CategorySummary]
-    count: int
     include_counts: bool
-
-
-class CategoriesMeta(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    count: int
-    duration_ms: int
 
 
 class CategoriesResponse(BaseModel):
@@ -71,7 +64,7 @@ class CategoriesResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: CategoriesData
-    meta: CategoriesMeta
+    meta: Meta
 
 
 def _static_summary(cat: PlaceCategory) -> CategorySummary:
@@ -132,10 +125,7 @@ async def list_categories(
             )
             for summary in _STATIC_CATEGORIES
         ]
-    duration_ms = max(0, int((perf_counter() - started_at) * 1000))
     return CategoriesResponse(
-        data=CategoriesData(
-            items=items, count=len(items), include_counts=include_counts
-        ),
-        meta=CategoriesMeta(count=len(items), duration_ms=duration_ms),
+        data=CategoriesData(items=items, include_counts=include_counts),
+        meta=make_meta(started_at=started_at),
     )

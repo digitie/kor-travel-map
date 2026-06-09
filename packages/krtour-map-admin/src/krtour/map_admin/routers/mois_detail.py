@@ -27,6 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from krtour.map_admin.db import get_session
+from krtour.map_admin.response import Meta, make_meta
 
 __all__ = ["router", "MoisLicenseDetailResponse", "clear_detail_cache"]
 
@@ -55,15 +56,7 @@ class MoisLicenseDetailData(BaseModel):
     address: dict[str, Any]
     detail: dict[str, Any]
     raw: dict[str, Any] = Field(description="원본 MOIS payload (source_records.raw_data).")
-
-
-class MoisLicenseDetailMeta(BaseModel):
-    """단건 상세 meta — 캐시 히트 여부 + 처리 시간."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    cached: bool = Field(description="프로세스 캐시 히트 여부.")
-    duration_ms: int
+    cached: bool = Field(default=False, description="프로세스 캐시 히트 여부.")
 
 
 class MoisLicenseDetailResponse(BaseModel):
@@ -72,7 +65,7 @@ class MoisLicenseDetailResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: MoisLicenseDetailData
-    meta: MoisLicenseDetailMeta
+    meta: Meta
 
 
 def clear_detail_cache() -> None:
@@ -101,11 +94,8 @@ async def get_mois_license_detail(
     cached = _cache_get(license_id)
     if cached is not None:
         return MoisLicenseDetailResponse(
-            data=cached,
-            meta=MoisLicenseDetailMeta(
-                cached=True,
-                duration_ms=max(0, int((time.perf_counter() - started_at) * 1000)),
-            ),
+            data=cached.model_copy(update={"cached": True}),
+            meta=make_meta(started_at=started_at),
         )
 
     row = await feature_repo.get_primary_source_detail(
@@ -135,8 +125,5 @@ async def get_mois_license_detail(
     _CACHE[license_id] = (time.monotonic() + _CACHE_TTL_SECONDS, data)
     return MoisLicenseDetailResponse(
         data=data,
-        meta=MoisLicenseDetailMeta(
-            cached=False,
-            duration_ms=max(0, int((time.perf_counter() - started_at) * 1000)),
-        ),
+        meta=make_meta(started_at=started_at),
     )
