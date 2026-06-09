@@ -37,7 +37,7 @@ TripMate API/Web
 | `GET /v1/features/{feature_id}` | feature 상세 |
 | `GET /v1/features/search` | 이름/bbox 기반 feature 검색 |
 | `GET /v1/features/nearby/by-target` | 외부 POI/cache target key 기준 주변 feature 조회 |
-| `POST /v1/features/batch` | 여러 feature_id batch 상세 조회 (`/tripmate/features/batch` 호환 경로 대체) |
+| `POST /v1/features/batch` | 여러 feature_id batch 상세 조회 (service read, `ServiceToken`; 구 `/tripmate/features/batch` 폐지) |
 | `/admin/feature-update-requests*` | 운영자 승인 후 특정 feature/좌표 반경/시군구/provider 업데이트 큐잉 |
 | `GET /ops/import-jobs/{job_id}` | 실제 Dagster/import job progress |
 

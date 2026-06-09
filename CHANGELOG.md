@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### API — `/tripmate/*` namespace 제거, batch를 `POST /features/batch`로 일반화 (2026-06-09)
+
+- **CHANGED (breaking)**: `POST /tripmate/features/batch` → **`POST /features/batch`**.
+  `/tripmate/*` namespace를 제거했다(krtour-map은 TripMate 전용이 아니다). batch는
+  `features_router`의 service read로 옮기고 `ServiceToken`(`X-Krtour-Service-Token`)을
+  route-level로 유지한다(미설정 시 비강제). 다른 `/features/*` GET은 공용 read 그대로.
+- **CHANGED**: `USER_OPERATIONS` allowlist·OpenAPI(`openapi.json`/`openapi.user.json`)·
+  frontend generated type을 새 경로로 재생성. (ADR-005/045 D-1·ADR-048·`docs/rest-api.md`·
+  `docs/tripmate-rest-api.md` 갱신, tasks T-214d 완료.)
+
 ### Admin API/Dagster — offline upload idempotency + load preclaim (2026-06-06)
 
 - **FIXED**: `POST /admin/offline-uploads`가 요청 body 기준 SHA-256 checksum을

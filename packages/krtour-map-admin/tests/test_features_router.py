@@ -35,7 +35,7 @@ def test_features_routes_mounted_in_openapi(client: TestClient) -> None:
     assert "/features/search" in spec["paths"]
     assert "/features/nearby" in spec["paths"]
     assert "/features/{feature_id}" in spec["paths"]
-    assert "/tripmate/features/batch" in spec["paths"]
+    assert "/features/batch" in spec["paths"]
     schemas = spec["components"]["schemas"]
     assert "FeatureSummary" in schemas
     assert "FeaturesInBboxResponse" in schemas
@@ -77,7 +77,7 @@ def test_features_routes_disabled_unmounts() -> None:
     })
     assert r.status_code == 404
     assert c.get("/features/x").status_code == 404
-    assert c.post("/tripmate/features/batch", json={"feature_ids": ["x"]}).status_code == 404
+    assert c.post("/features/batch", json={"feature_ids": ["x"]}).status_code == 404
 
 
 @pytest.mark.unit
@@ -256,7 +256,7 @@ def test_get_feature_detail_maps_row(
 
 
 @pytest.mark.unit
-def test_tripmate_batch_returns_items_and_missing(
+def test_features_batch_returns_items_and_missing(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from krtour.map_admin.db import get_session
@@ -286,7 +286,7 @@ def test_tripmate_batch_returns_items_and_missing(
     client.app.dependency_overrides[get_session] = _fake_session
     try:
         r = client.post(
-            "/tripmate/features/batch",
+            "/features/batch",
             json={"feature_ids": ["f1", "missing", "f1"]},
         )
         assert r.status_code == 200

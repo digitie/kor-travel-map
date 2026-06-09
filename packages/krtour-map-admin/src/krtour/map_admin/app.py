@@ -38,7 +38,6 @@ from starlette.responses import JSONResponse, Response
 from krtour.map_admin import __version__
 from krtour.map_admin.auth import (
     require_admin_destructive_enabled,
-    require_service_token,
 )
 from krtour.map_admin.routers import (
     admin_backups_router,
@@ -60,7 +59,6 @@ from krtour.map_admin.routers import (
     poi_cache_targets_router,
     providers_router,
     public_status_router,
-    tripmate_router,
     version_router,
 )
 from krtour.map_admin.settings import AdminSettings
@@ -319,14 +317,12 @@ def create_app(settings: AdminSettings | None = None) -> FastAPI:
     if settings.features_routes_enabled:
         # ``/features`` · ``/categories`` · ``/providers``는 브라우저 admin UI도
         # 쓰는 공용 read surface라 앱 토큰을 강제하지 않는다(operator는 proxy SSO).
+        # ``POST /features/batch``는 순수 service-to-service read라 route-level에서
+        # service token으로 게이트한다(ADR-045 D-1; features.py). token 미설정이면
+        # 통과(하위호환). 나머지 ``/features`` read는 공용이라 앱 토큰을 강제하지 않는다.
         application.include_router(features_router)
         application.include_router(categories_router)
         application.include_router(providers_router)
-        # ``/tripmate/*``는 **순수 service-to-service**(TripMate)라 service token으로
-        # 게이트한다(ADR-045 D-1 defense-in-depth). token 미설정이면 통과(하위호환).
-        application.include_router(
-            tripmate_router, dependencies=[Depends(require_service_token)]
-        )
         # Step D on-demand 상세는 DB(적재된 raw_data) 필요 → features와 동일 gate.
         if settings.debug_routes_enabled:
             application.include_router(mois_detail_router)

@@ -15,8 +15,9 @@
   예: `GET {base}/v1/features/search`.
 - 호환성은 고려하지 않는다. pre-1.0 단계에서는 `/v1` clean cut으로 정리하고, 구 unprefixed
   경로와 alias는 유지하지 않는다(ADR-048).
-- `KRTOUR_MAP_ADMIN_SERVICE_TOKEN`이 설정된 환경에서는 `/v1/tripmate/*` service-to-service
-  호출에 `X-Krtour-Service-Token`을 붙인다.
+- `KRTOUR_MAP_ADMIN_SERVICE_TOKEN`이 설정된 환경에서는 service read `POST /v1/features/batch`
+  호출에 `X-Krtour-Service-Token`을 붙인다. (`/tripmate/*` namespace는 제거됐다 — krtour-map은
+  TripMate 전용이 아니다.)
 
 ## 2. TripMate 소비 표면
 
@@ -26,7 +27,7 @@
 | 주변 feature | `GET /v1/features/nearby` | cursor paging |
 | POI target 주변 | `GET /v1/features/nearby/by-target` | target write는 admin/operator flow |
 | feature 상세 | `GET /v1/features/{feature_id}` | `feature_id`는 opaque string |
-| trip view batch | `POST /v1/tripmate/features/batch` | service-to-service, token 적용 대상 |
+| trip view batch | `POST /v1/features/batch` | service read, `ServiceToken` 적용 대상 |
 | 검색 | `GET /v1/features/search` | `bbox`는 분리 4-float |
 | 날씨 카드 | `GET /v1/features/{feature_id}/weather` | `forecast_style`별 grouping |
 | 카테고리 | `GET /v1/categories` | 긴 TTL 캐시 가능 |

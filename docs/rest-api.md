@@ -40,8 +40,10 @@
   path `/v1/features/search`). base와 path 양쪽에 `/v1`를 중복 삽입하지 않는다.
 
 ### 1.2 Versioning (ADR-048 — #317 확장)
-- **전 표면 `/v1`**: `/v1/features/*`·`/v1/tripmate/*`·`/v1/categories`·`/v1/providers/*`
+- **전 표면 `/v1`**: `/v1/features/*`·`/v1/categories`·`/v1/providers/*`
   **+ `/v1/admin/*`·`/v1/ops/*`·`/v1/debug/*`**(ADR-048이 #317의 admin 비버저닝을 supersede).
+  `/tripmate/*` namespace는 **제거**(krtour-map은 TripMate에만 묶이지 않음) — batch는
+  `/v1/features/batch`로 일반화.
 - **비버저닝 고정**: `/health`·`/version`. 경로별 shim 금지(ADR-046) — mount 1곳 전환.
 - **무-호환 clean cut(ADR-048, 사용자 지시)**: 호환성은 고려하지 않는다. 구 unprefixed
   경로·호환 alias를 유지하지 않고 `/v1`로 **즉시 단일 전환**한다(이중 코드경로 제거). 소비자
@@ -52,8 +54,9 @@
   `/v2`로만 깬다"를 규칙화.
 
 ### 1.3 인증 (ADR-005 / ADR-045 D-1, #314)
-- `/v1/tripmate/*`: `ServiceToken`(`X-Krtour-Service-Token`, 미설정 시 비강제, 상수시간).
-- `/v1/features/*`·`/v1/categories`·`/v1/providers/*`: 공용 read, 앱 토큰 비강제(인프라 SSO).
+- `POST /v1/features/batch`(service read): `ServiceToken`(`X-Krtour-Service-Token`, 미설정 시
+  비강제, 상수시간) route-level gate. 나머지 `/v1/features/*` GET은 공용 read.
+- `/v1/features/*`(GET)·`/v1/categories`·`/v1/providers/*`: 공용 read, 앱 토큰 비강제(인프라 SSO).
 - `/v1/admin/*`·`/v1/ops/*`·`/v1/debug/*`: 인프라 SSO + IP allowlist. 파괴적 admin은
   `admin_destructive_enabled` kill-switch.
 
@@ -93,8 +96,8 @@
 - `meta.page.total`은 `?include_total=true` opt-in(기본 `null`; 현재 `search`는 항상 COUNT).
 
 ### 1.7 idempotency · rate limit (T-214g)
-- `/v1/tripmate/*` POST: `Idempotency-Key` 허용. rate limit `429`+`RateLimit-*`+`Retry-After`,
-  lock 경합 `409 LOCK_BUSY`+`Retry-After: 15`.
+- 변경 호출(admin mutation 등) POST: `Idempotency-Key` 허용. rate limit `429`+`RateLimit-*`+
+  `Retry-After`, lock 경합 `409 LOCK_BUSY`+`Retry-After: 15`.
 
 ### 1.8 좌표 · datetime
 - WGS84 lon,lat. bbox=`min_lon,min_lat,max_lon,max_lat`. 목록 좌표는 평면 `lon`/`lat`.
@@ -126,16 +129,13 @@ GET /v1/features/search                 # q|bbox, page_size+cursor, meta.page.to
 GET /v1/features/in-bounds              # clusters[](cluster_key=행정코드)/items[], max_items cap
 GET /v1/features/nearby                 # 반경, page_size+cursor, distance_m
 GET /v1/features/nearby/by-target       # 등록 POI cache target 주변
-GET /v1/features/{feature_id}           # 단건 상세
-GET /v1/features/{feature_id}/weather   # 날씨 카드(metric + forecast_style)
+GET  /v1/features/{feature_id}          # 단건 상세
+GET  /v1/features/{feature_id}/weather  # 날씨 카드(metric + forecast_style)
+POST /v1/features/batch                 # 배치 조회 {feature_ids[]} cap≤200 → {found{},missing[]} (ServiceToken)
 ```
-
-### 2.3 `/v1/tripmate/*` — 외부 service-to-service (ServiceToken)
-```
-POST /v1/tripmate/features/batch        # 배치 조회 {feature_ids[]} cap≤200 → {found{},missing[]}
-```
-- ⚠️ `/tripmate/feature-update-requests*`는 **#317로 제거**(→ `/v1/admin/*`). 중복 C2 해소.
-  batch 조회도 service-to-service surface이므로 `/v1/tripmate/features/batch`를 정본으로 둔다.
+- ⚠️ `/tripmate/*` namespace **제거**(krtour-map은 TripMate 전용이 아니다). batch는
+  `POST /v1/features/batch`(service read, ServiceToken)로 일반화, `/tripmate/
+  feature-update-requests*`는 #317로 `/v1/admin/*`에 이미 이전(중복 C2 해소).
 
 ### 2.4 참조 데이터
 ```
@@ -256,6 +256,7 @@ POST /v1/debug/etl/{provider}/{dataset}/preview
 | `/debug/health`·`/debug/version` | 제거(clean cut) | 🔁 |
 | 2개 계약 doc | `rest-api.md` 단일 정본 + tripmate-rest-api.md 소비 view | 🔁 수렴(T-216g) |
 | `/tripmate/feature-update-requests*` | `/admin/*` | ✅#317 |
+| `POST /tripmate/features/batch` | `POST /features/batch`(ServiceToken) | ✅ `/tripmate` namespace 제거 |
 | `POST /admin/features` 등 add/edit/delete | (구현됨) | ✅#317 K-15 |
 
 ---

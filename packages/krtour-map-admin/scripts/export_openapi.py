@@ -52,7 +52,7 @@ USER_OPERATIONS: dict[str, frozenset[str]] = {
     "/providers/{provider}/last-sync": frozenset({"get"}),
     "/health": frozenset({"get"}),
     "/version": frozenset({"get"}),
-    "/tripmate/features/batch": frozenset({"post"}),
+    "/features/batch": frozenset({"post"}),
 }
 
 HTTP_METHODS: frozenset[str] = frozenset(

@@ -119,15 +119,16 @@
 - **Amendment (2026-06-08, D-1 "B안" defense-in-depth)**: 운영 인증의 **1차 책임은
   여전히 infra 계층**이나, 그 위에 **얇은 앱 레벨 방어를 옵션으로** 더한다(네트워크를
   무조건 신뢰하지 않기 위함). `map_admin/auth.py`:
-  - `service_token`(`KRTOUR_MAP_ADMIN_SERVICE_TOKEN`, opt-in) 설정 시 **순수
-    service-to-service surface(`/tripmate/*`)**에서 `X-Krtour-Service-Token`을
-    **상수시간 비교**로 검증(불일치/누락 → 401). 미설정이면 강제하지 않음(intranet/dev
-    하위호환). **공용 read surface(`/features`·`/categories`·`/providers`)는 브라우저
-    admin UI도 쓰므로 앱 토큰을 강제하지 않는다**(operator는 proxy SSO).
+  - `service_token`(`KRTOUR_MAP_ADMIN_SERVICE_TOKEN`, opt-in) 설정 시 **service read
+    엔드포인트 `POST /features/batch`**에서 `X-Krtour-Service-Token`을 **상수시간 비교**로
+    검증(불일치/누락 → 401). 미설정이면 강제하지 않음(intranet/dev 하위호환). **공용 read
+    surface(`/features` GET·`/categories`·`/providers`)는 브라우저 admin UI도 쓰므로 앱 토큰을
+    강제하지 않는다**(operator는 proxy SSO). (`/tripmate/*` namespace는 제거됨 — krtour-map은
+    TripMate 전용이 아니다; batch가 `/features/batch`로 일반화되며 route-level gate.)
   - `admin_destructive_enabled=False`(kill-switch) 시 파괴적 `/admin` 작업
     (restore/swap/deactivate/POI delete) 차단(403).
-  - `APIKeyHeader`를 통해 OpenAPI `securitySchemes.ServiceToken`이 선언되고 `/tripmate/*`
-    operation에 `security`가 기록된다(계약 문서화, API 리뷰 P1 해소).
+  - `APIKeyHeader`를 통해 OpenAPI `securitySchemes.ServiceToken`이 선언되고
+    `POST /features/batch` operation에 `security`가 기록된다(계약 문서화, API 리뷰 P1 해소).
 - **근거**:
   - `python-kraddr-geo` ADR-013과 동일 패턴 (디버그 UI 내부망 전용).
   - 라이브러리 코드/응답에 인증 로직이 침투하지 않음 → 코드 단순.
@@ -2754,8 +2755,9 @@ bbox 인코딩 2종, `status`↔`state`, 응답 `*_key`↔`*_id`)가 #317의 고
 
 1. **versioning을 전 표면으로 확장.** #317 T-214b/§2.1의 "`/admin`·`/ops`·`/debug` 비버저닝"을
    **supersede**하여 `/v1/admin/*`·`/v1/ops/*`·`/v1/debug/*`도 `/v1` 아래 둔다(사용자 지시).
-   liveness `/health`·`/version`만 비버저닝 유지. 외부 표면(`/v1/features`·`/v1/tripmate`·
-   `/v1/categories`·`/v1/providers`)은 #317 T-214b/d가 진행 중인 그대로.
+   liveness `/health`·`/version`만 비버저닝 유지. 외부 표면(`/v1/features`(batch 포함)·
+   `/v1/categories`·`/v1/providers`)은 #317 T-214b/d가 진행 중인 그대로. **`/tripmate/*`
+   namespace는 제거**(krtour-map은 TripMate 전용이 아니다; batch → `/v1/features/batch`).
 2. **envelope 공유 모델 — payload와 메타 완전 분리.** 라우터별 `*Meta` 중복을 공유
    `Meta`로 통합한다. `data`는 **payload만**(단건=객체, 목록=`{items:[...]}`, in-bounds=
    `{clusters,items}`, batch=`{found:{feature_id:Feature},missing:[...]}`). **`items`는 list array
