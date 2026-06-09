@@ -1170,10 +1170,10 @@ lint-imports/pytest/coverage, frontend type-check/e2e). 실데이터 검증은 T
 
 **Phase 6.6 — REST API v1 정리 후속 (2026-06-08, `T-214`)**
 
-정본 문서는 `docs/tripmate-rest-api.md`. 기준 입력은
-`docs/reports/api-endpoint-review-2026-06-08.md`와 TripMate
-`docs/integrations/krtour-map-rest-api.md`. 사용자 결정으로
-`/tripmate/feature-update-requests*`는 admin 영역으로 이동한다.
+전 표면 계약 정본은 `docs/rest-api.md`, TripMate 소비 view는 `docs/tripmate-rest-api.md`.
+기준 입력은 `docs/reports/api-endpoint-review-2026-06-08.md`와 TripMate
+`docs/integrations/krtour-map-rest-api.md`. 사용자 결정으로 `/tripmate/feature-update-requests*`는
+admin 영역으로 이동한다.
 
 - [x] **T-214a — REST API 정본 문서 작성.**
   Versioning, envelope, parameter 규약, endpoint naming, 중복 처리, 누락 API를
@@ -1182,16 +1182,16 @@ lint-imports/pytest/coverage, frontend type-check/e2e). 실데이터 검증은 T
   `docs/poi-cache-update-targets.md`, `docs/architecture.md`의 충돌 문구도 정리했다.
 - [ ] **T-214b — 사용자/서비스 API `/v1` prefix 도입.**
   `/features/*`, `/categories`, `/providers/{provider}/last-sync`,
-  `POST /features/batch` 목표 경로를 `/v1/*`로 노출하고, 기존 unversioned 경로는
-  호환 alias + `deprecated: true` + deprecation header로 표시한다. admin/ops/debug는
-  prefix 없이 유지한다.
+  `POST /tripmate/features/batch` 목표 경로를 `/v1/*`로 노출하고, 기존 unversioned 경로는
+  유지하지 않는다(clean cut, alias 없음). admin/ops/debug도 ADR-048/T-216a에서 `/v1`로
+  이동한다.
 - [x] **T-214c — `/tripmate/feature-update-requests*` 제거, admin-only 전환.**
   user OpenAPI와 `USER_OPERATIONS`에서 `POST/GET /tripmate/feature-update-requests*`를
   제거하고 `/admin/feature-update-requests*`만 정본으로 남긴다. TripMate 사용자 제안 큐는
   TripMate app DB 소유로 문서화하고, 운영자 승인 뒤 admin API 호출로 연결한다.
-- [ ] **T-214d — batch 조회 경로를 `POST /v1/features/batch`로 이동.**
-  기존 `POST /tripmate/features/batch`는 호환 alias로 유지하거나 deprecate하고,
-  OpenAPI/user docs/frontend generated type을 새 경로로 정렬한다.
+- [ ] **T-214d — batch 조회 경로를 `POST /v1/tripmate/features/batch`로 이동.**
+  service-to-service surface로 유지하되 `/v1` 아래로 clean cut한다. 응답은 list `items[]`와
+  충돌하지 않게 `data={found:{feature_id:Feature},missing[]}`로 정렬한다.
 - [ ] **T-214e — pagination/parameter 일관성 정리.**
   페이지 가능한 목록은 `cursor/page_size`, bounded 지도 조회는 `limit`, 다중 값은 반복
   query parameter, bbox는 `min_lon/min_lat/max_lon/max_lat`를 기본으로 문서와 schema를
@@ -1225,6 +1225,47 @@ lint-imports/pytest/coverage, frontend type-check/e2e). 실데이터 검증은 T
 - [ ] **T-215c — frontend generated type/e2e workflow 보강.**
   OpenAPI 타입 기반 mutation hook, pending→approve→applied flow, immediate mode route
   mock, soft delete 표시/필터 e2e를 추가한다.
+
+**Phase 6.8 — REST API 정합성 심화 (2026-06-09, `T-216`, ADR-048)**
+
+T-214/T-215(#317)의 `/v1` 1차 정리 위에 ADR-048 delta를 얹는다. 정본 = `docs/rest-api.md`
+(전 표면 단일). 각 항목 1-PR, OpenAPI drift + frontend gen:types 동반. **전환 정책(ADR-048,
+무-호환)**: 호환성 미고려 — `/v1` clean cut(구 경로/alias 없음), 외부 read 포함 명명 전면
+적용, dual-support/deprecation 창 없음. 소비자(TripMate)는 안정 spec commit을 일괄 추종.
+
+- [ ] **T-216a — `/v1` clean cut(admin/ops/debug 포함).** 사용자 지시(admin도 versioning).
+  `/admin`·`/ops`·`/debug`(+외부)를 `/v1`로 mount하고 **구 unprefixed 경로는 제거**(호환 alias
+  없음). liveness `/health`·`/version`만 제외. `/debug/health`·`/debug/version` 제거.
+  OpenAPI 두 profile + frontend API base + e2e 일괄 갱신. mount 1곳 전환(ADR-046).
+- [ ] **T-216b — pagination 단일화.** page-size 파라미터를 `page_size`로 통일
+  (`limit`/`run_limit`/`event_limit` 폐기), 2-티어 캡(기본 50/200, 지도 100/500),
+  `/features` 평면 cursor화(`limit le=5000` 폐기), `in-bounds` `max_items` 5000→2000.
+- [ ] **T-216c — envelope payload/meta 분리.** 라우터별 `*Meta` 중복 → 공유 `Meta`. `data`는
+  payload만, 페이지네이션은 **`meta.page{page_size,next_cursor,total}`**(`total` opt-in
+  `?include_total=true`). `data.next_cursor`/`data.total_count`/파생 `count` 폐기. in-bounds의
+  `cluster_unit`은 `meta.cluster.cluster_unit`, batch id-keyed map은 `data.found`로 둔다.
+  **envelope 불변식(ADR-048 #12)**: `meta`·`request_id` 모든 응답에 present,
+  `meta.page.next_cursor` 항상 키 존재(소진 시 `null`, omit 금지) — 계약/라우터 테스트로 lock.
+- [ ] **T-216d — parameter/error/좌표 정합성.** bbox 분리 float 통일(`search` CSV 제거),
+  상태 필드 `state`→`status`, issue/violation noun을 `issue_*`로. 에러 RFC7807
+  `application/problem+json`(`code`/`request_id`/`errors[]` top-level 확장, `{error:{}}` 제거).
+  **좌표명 cross-repo 정렬 = `lon`/`lat`**(ADR-048 #10; TripMate DEC-07 하향 정렬). **`feature_id`
+  값 불변식**(ADR-048 #11)을 외부 계약/테스트에 명시.
+- [ ] **T-216e — 명명 통일(경로+응답 본문, 본질 기준).** `dedup-review`→`dedup-reviews`,
+  `enrichment-review`→`enrichment-reviews`, `{review_key}`→`{review_id}`,
+  `/admin/issues/{violation_key}`→`{issue_id}`. 응답 surrogate `*_key`→`*_id`. action
+  sub-resource 규약(ADR-048 #8) 명시. **유지(자연/복합키)**: `cluster_key`(행정코드 자연키 —
+  개명 안 함, #316 재리뷰 C), `target_key`, provider 어휘, `feature_id`.
+- [ ] **T-216f — 코드/DB 명명 전파(surrogate만).** REST 개명을 물리 컬럼·ORM·repo까지
+  end-to-end(테이블별 1-PR migration, codegraph impact 선행): `review_key`→`review_id`,
+  `violation_key`→`issue_id`, ops 로그/내부 키 `*_key`→`*_id`, `state`→`status`(import_jobs/
+  offline_uploads/feature_update_requests). **경계(개명 금지)**: `cluster_key`(행정코드 자연키),
+  provider/source 어휘(ADR-044 — `dataset_key`/`source_record_key`/`source_entity_id`/
+  `source_dataset_key`/`raw_*`)·복합 자연키(`target_key`+`external_system`)·canonical `feature_id`.
+- [ ] **T-216g — 단일 정본 수렴 + 버전 거버넌스.** `docs/rest-api.md`를 전 표면 계약 단일
+  정본으로 두고 `docs/tripmate-rest-api.md`를 소비 매핑 view로 축소(ADR-048 #9). `/vN`
+  거버넌스(#13: pre-1.0 in-place breaking, v1.0.0 GA에서 `/v1` 동결→이후 `/v2`+N-1, OpenAPI
+  major별 export)를 문서·export 스크립트에 반영.
 
 **Phase 7 — ADR-045 전체점검/튜닝 (ADR-045 잔여 task 완료 후 시작)**
 
@@ -1444,8 +1485,8 @@ lint-imports/pytest/coverage, frontend type-check/e2e). 실데이터 검증은 T
   조회 + 정합성 책임) PR#54. **ADR-045** (krtour-map Docker 독립 프로그램 + 독립
   DB/Dagster + TripMate OpenAPI 연동 — ADR-003 함수 직접 호출 모델 supersede,
   2026-06-01). **ADR-046** (ADR-045 이행 시 구 모델 호환 shim 금지, 2026-06-02).
-- **001~047 accepted**. **다음 후보 번호 = ADR-048**:
-  - **ADR-048+** — 신규 provider 추가 절차 표준 (체크리스트)
+- **001~048 accepted**. **다음 후보 번호 = ADR-049**:
+  - **ADR-049+** — 신규 provider 추가 절차 표준 (체크리스트)
   - 후속 `@krtour/map-marker-react` npm 게시 자동화 ADR (현재 ADR-043 보류)
   - (필요 시) ADR — Sprint 3 SHP/GeoJSON parsing 위치 결정 (`krtour.map.
     providers.knps` vs upstream `[geo]` extra)

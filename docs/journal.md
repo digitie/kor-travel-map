@@ -2,6 +2,78 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-09 (codex) — PR #316 3차 잔여 정합성 반영
+
+**작업**: PR #316 추가 리뷰의 잔여 2건(batch `items` map 충돌, in-bounds `cluster_unit` 위치)과
+기존 문서 포인터 drift를 반영했다.
+
+- Batch 조회는 service-to-service 표면 `POST /v1/tripmate/features/batch`로 고정하고,
+  id-keyed map은 list `items[]`와 충돌하지 않게 `data.found`로 분리했다.
+- in-bounds `cluster_unit`은 payload가 아니라 `meta.cluster.cluster_unit`으로 이동했다.
+- base URL은 host root까지만 포함하고 path가 `/v1`를 명시하도록 고정했다.
+- `docs/tripmate-rest-api.md`를 전면 축소해 TripMate 소비 매핑 view로 만들고, 전 표면 계약 정본은
+  `docs/rest-api.md` 하나로 수렴했다.
+- AGENTS/SKILL/README/tasks ADR 번호 포인터를 001~048 accepted / 다음 049로 정렬했다.
+
+## 2026-06-09 (claude) — ADR-048 #316 TripMate 재리뷰(A–F) 반영 + 2차 오류 정정
+
+**작업**: PR #316에 올라온 TripMate-소비자 재리뷰(호환성→정합성 입장 전환, A–F)를 판단·반영.
+무-호환 방향과 정렬되며, **2차의 `cluster_key→cluster_id` 개명이 오류**임을 잡아줬다. PR까지, 보류.
+
+- **(C) `cluster_key` 자연키로 재분류 → 유지(2차 `cluster_id` 철회)**. 코드 확인
+  (`feature_repo.py` rollup): `cluster_key`={행정코드 컬럼}(sido/sigungu/eupmyeondong) = **자연키**
+  → §3.1 규칙상 `*_key`가 맞음. "동결/compat"이 아니라 **본질**로 분류.
+- **(B) 좌표명 cross-repo 정렬 = `lon`/`lat`**(ADR-048 #10): TripMate DEC-07(`longitude`/
+  `latitude`)을 `lon`/`lat`로 하향 — 경계 매핑 0, terse payload.
+- **(D) `feature_id` 값 불변식 명문화**(§3.2, #11): provider 재적재·편집·버전승급·soft delete에
+  값 불변. 정체성 변경=새 feature+link. (소비자 FK/snapshot 영속 — 안정성 최우선.)
+- **(E) envelope 불변식 lock**(§3.3, #12): `meta`/`request_id` 항상 present, `next_cursor`
+  항상 키(소진 시 `null`, omit 금지).
+- **(F) `/vN` major 거버넌스**(§1.2, #13): pre-1.0 in-place breaking, v1.0.0 GA에서 `/v1`
+  동결→이후 `/v2`+N-1, OpenAPI major별 export.
+- **(A) clean cut**: 2차에서 이미 dual-support 제거 — 재리뷰의 모순 지적(shim 금지↔alias)
+  해소 확인. ADR-048 결정 #6/#7 정정 + #10~#13 신설, rest-api.md §1.2/§3.1/§3.2/§3.3/§5/§7/§8,
+  T-216c~g. **검증**: 문서 전용(코드 없음).
+
+## 2026-06-09 (claude) — ADR-048 무-호환 재검토(#316 2차): 일관성·확장성·안정성 우선
+
+**작업**: 사용자 지시 "호환성 신경쓰지 말고 늦기 전에 일관성/확장성/안정성으로 정리". 앞서
+호환성 동기로 넣은 hedge들을 걷어내고 ADR-048/rest-api.md/T-216을 재정리. PR까지, 머지 보류.
+
+- **외부 read "동결" carve-out 제거**: 명명 규칙을 의미 기준으로 전면 적용 —
+  `cluster_key`→`cluster_id`(외부 read여도 단일 식별자). `*_key` 유지는 근거 있는 것만
+  (복합 자연키 `target_key`, provider 어휘 ADR-044, canonical `feature_id`).
+- **envelope payload/meta 완전 분리**: `data`=payload만, 페이지네이션은
+  `meta.page{page_size,next_cursor,total}`로 일원화. `data.next_cursor`/파생 `count` 폐기.
+- **dual-support/deprecation 창 제거 → `/v1` clean cut**: 구 unprefixed/alias 미유지,
+  `/debug/health`·`/debug/version` 제거. 이중 코드경로 제거(안정성).
+- **action sub-resource 규약 명문화**(부수효과=POST verb / 순수수정=PATCH) + **단일 정본
+  수렴**(rest-api.md, tripmate-rest-api.md는 소비 view로 축소 — T-216g).
+- ADR-048 결정 #2/#6/#8/#9 개정 + "전환 정책(무-호환)" 절로 "소비자 안전" 대체. T-216a~g.
+- **검증**: 문서 전용(코드 없음).
+
+## 2026-06-09 (claude) — ADR-048: REST versioning admin/ops 확장 + 정합성 표준(+ #317 reconcile)
+
+**작업**: #317(T-214/T-215, 머지됨)의 REST `/v1` 1차 정리 위에 사용자 지시 2건을 반영 —
+**admin도 versioning(`/v1`)** + envelope/pagination/parameter/response 정합성 심화 + 코드/DB
+명명 전파. PR #316을 #317 머지본 위로 reset/재작성(rebase 대신). PR까지, 머지 보류.
+
+- **ADR-048**(신규): #317 위 delta — (1) `/v1`를 admin/ops/debug까지 확장(#317 T-214b의
+  admin 비버저닝 supersede, 사용자 지시), (2) envelope 공유 `Meta{duration_ms,request_id}`+
+  `ListData[T]`, (3) `page_size` 단일·2-티어 캡·`total_count` opt-in, (4) bbox 분리-float·
+  `state`→`status`·issue noun, (5) RFC7807 problem+json, (6) 응답 `*_key`→`*_id`, (7) 코드/DB
+  명명 전파(내부 소유, provider/복합키 경계 ADR-044).
+- **`docs/rest-api.md`**(신규): 전 표면 카탈로그 + 정합성 표준. 외부 `/v1` 정본은
+  `docs/tripmate-rest-api.md`(#317)로 위임, §2.1 versioning 문구를 ADR-048로 갱신.
+- **#317 reconcile**: tripmate-alias 제거·feature CRUD(K-15)·version 0/1을 카탈로그에 반영.
+  내가 앞서 만든 Phase 8/T-214a~l(중복 충돌)을 폐기하고 **Phase 6.8 / T-216a~f**로 재정의.
+- **#316 TripMate-소비자 리뷰 반영**: 외부 dual-support 전환 창(구 unprefixed alias +
+  `deprecated`/`Sunset`), problem+json `code`/`request_id` top-level 확장 멤버 + enum 고정,
+  **외부 소비 read 필드 동결**(`feature_id`/`cluster_key`/`target_key`/FeatureSummary —
+  `*_key`→`*_id`는 내부 ops/admin만), 반영 순서(외부 `/v1` 먼저→admin `/v1`은 외부 무영향)를
+  ADR-048 "소비자 안전" 절 + rest-api.md + T-216에 명시.
+- **검증**: 문서 전용(코드 없음).
+
 ## 2026-06-08 (codex) — REST API v1 계약 정리 + feature CRUD admin API
 
 **작업**: `docs/reports/api-endpoint-review-2026-06-08.md`와 TripMate repo

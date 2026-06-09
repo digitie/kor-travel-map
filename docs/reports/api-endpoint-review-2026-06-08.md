@@ -10,8 +10,8 @@
 
 > **후속 결정(2026-06-08)**: 본 리포트는 당시 spec 기준으로
 > `/tripmate/feature-update-requests*`를 TripMate 외부 계약으로 분류했지만, 이후 사용자
-> 결정으로 feature update request는 **admin 영역으로 이동**한다. 정본 정리 문서는
-> `docs/tripmate-rest-api.md`이며, 목표 경로는 `/admin/feature-update-requests*`다.
+> 결정으로 feature update request는 **admin 영역으로 이동**한다. 전 표면 정본 정리 문서는
+> `docs/rest-api.md`이며, 목표 경로는 `/v1/admin/feature-update-requests*`다.
 > TripMate 사용자 제안 큐는 TripMate app DB가 소유한다.
 
 ---
@@ -200,6 +200,21 @@ POST               /debug/etl/{provider}/{dataset}/preview
 GET                /debug/mois-license/{license_id}
 POST               /tripmate/features/batch   (admin profile에도 노출)
 ```
+
+---
+
+## 후속 처리 (2026-06-09)
+
+본 검토 findings는 두 단계로 닫혔다.
+- **#317(T-214/T-215)**: 외부 `/v1` 정본(`docs/tripmate-rest-api.md`), `/tripmate/feature-
+  update-requests*` 제거(C2), 단건 feature add/edit/delete(K-15·E2 일부), version 0/1.
+  보안 스킴(B)은 #314로 해소.
+- **ADR-048**: #317 위 보강 — versioning을 **admin/ops까지 확장**(사용자 지시), envelope
+  공유모델, pagination 단일화(`page_size`/2-티어 캡/`meta.page.total` opt-in), parameter(bbox/
+  status/issue), RFC7807 problem+json, 응답 surrogate `*_key`→`*_id`, **코드/DB 명명 전파**.
+  전 표면 계약·표준 정본 = `docs/rest-api.md`. 실행 = `docs/tasks.md` **Phase 6.8 / T-216a~g**
+  (무-호환 clean cut — `meta.page`/`meta.cluster` envelope, batch `data.found`, `cluster_key`
+  자연키 유지, 정본 수렴 포함). 본 검토 finding은 정책·백로그로 수렴했으며 실제 구현은 T-216에 남는다.
 
 ---
 

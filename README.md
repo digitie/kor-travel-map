@@ -14,8 +14,9 @@ SQLAlchemy 2 async + GeoAlchemy2 + GeoPandas 위에서 동작한다.
 > **기준값(잘 바뀌지 않는 사실)**: standalone 고정 포트 API `9011` / admin UI
 > `9012` / Dagster `9013`(ADR-047), RustFS S3 `9003`·console `9004`, geocoding은
 > kraddr-geo REST v2 `POST /v2/{reverse,geocode}` 로컬 `http://127.0.0.1:9001`,
-> frontend Next.js 16 + `maplibre-vworld-js#v0.1.2`. ADR 현황: **001~047 accepted**
-> (다음 후보 048). admin UI는 `/admin/dagster`에서 Dagster 요약 + webserver embed 제공.
+> frontend Next.js 16 + `maplibre-vworld-js#v0.1.2`. ADR 현황: **001~048 accepted**
+> (다음 후보 049). ADR-048은 `/v1` REST clean cut + 정합성 표준. admin UI는
+> `/admin/dagster`에서 Dagster 요약 + webserver embed 제공.
 >
 > **현재 진척·스프린트 상태의 단일 정본은 `docs/resume.md`(다음 한 작업) +
 > `docs/tasks.md`(백로그)다** — 이 README에는 자주 바뀌는 PR 번호/완료여부를 박지
@@ -225,7 +226,7 @@ lint-imports
 - [`CLAUDE.md`](CLAUDE.md) — Claude(Code/Agent SDK)용 1쪽 진입 요약
 - [`CHANGELOG.md`](CHANGELOG.md) — Keep a Changelog 형식 (Unreleased + ADR-024~034)
 - [`docs/architecture.md`](docs/architecture.md) — 의존 방향, 계층, 데이터 흐름
-- [`docs/decisions.md`](docs/decisions.md) — ADR 누적 (ADR-001~047)
+- [`docs/decisions.md`](docs/decisions.md) — ADR 누적 (ADR-001~048)
 - [`docs/sprints/README.md`](docs/sprints/README.md) — Sprint 1~5 계획 + ADR-034 9단계 구현 순서
   - [`docs/sprints/SPRINT-1.md`](docs/sprints/SPRINT-1.md) — 코드 작성 단계 진입 + scaffolding (provider 없음)
   - [`docs/sprints/SPRINT-2.md`](docs/sprints/SPRINT-2.md) — MOIS-독립 4 provider (축제/날씨/유가/휴게소) + 디버그 UI 첫 라우터
