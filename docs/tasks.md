@@ -1181,17 +1181,19 @@ admin 영역으로 이동한다.
   재작성했다. `docs/openapi-admin-contract.md`, `docs/tripmate-integration.md`,
   `docs/poi-cache-update-targets.md`, `docs/architecture.md`의 충돌 문구도 정리했다.
 - [ ] **T-214b — 사용자/서비스 API `/v1` prefix 도입.**
-  `/features/*`, `/categories`, `/providers/{provider}/last-sync`,
-  `POST /tripmate/features/batch` 목표 경로를 `/v1/*`로 노출하고, 기존 unversioned 경로는
-  유지하지 않는다(clean cut, alias 없음). admin/ops/debug도 ADR-048/T-216a에서 `/v1`로
-  이동한다.
+  `/features/*`(batch 포함), `/categories`, `/providers/{provider}/last-sync` 목표 경로를
+  `/v1/*`로 노출하고, 기존 unversioned 경로는 유지하지 않는다(clean cut, alias 없음).
+  admin/ops/debug도 ADR-048/T-216a에서 `/v1`로 이동한다.
 - [x] **T-214c — `/tripmate/feature-update-requests*` 제거, admin-only 전환.**
   user OpenAPI와 `USER_OPERATIONS`에서 `POST/GET /tripmate/feature-update-requests*`를
   제거하고 `/admin/feature-update-requests*`만 정본으로 남긴다. TripMate 사용자 제안 큐는
   TripMate app DB 소유로 문서화하고, 운영자 승인 뒤 admin API 호출로 연결한다.
-- [ ] **T-214d — batch 조회 경로를 `POST /v1/tripmate/features/batch`로 이동.**
-  service-to-service surface로 유지하되 `/v1` 아래로 clean cut한다. 응답은 list `items[]`와
-  충돌하지 않게 `data={found:{feature_id:Feature},missing[]}`로 정렬한다.
+- [x] **T-214d — `/tripmate/*` namespace 제거, batch를 `POST /features/batch`로 일반화.**
+  (2026-06-09, 사용자 지시 — krtour-map은 TripMate 전용이 아니다.) `tripmate_router` 제거,
+  batch를 `features_router`의 `POST /features/batch`로 옮기고 service-token을 route-level
+  gate로 유지(ServiceToken scheme 보존). `USER_OPERATIONS`·OpenAPI 두 profile·frontend
+  generated type·테스트·문서 일괄 갱신. `/v1` prefix 부여는 T-214b/T-216a에서. 응답은 list
+  `items[]`와 충돌하지 않게 `data={found:{feature_id:Feature},missing[]}`로 정렬(후속).
 - [ ] **T-214e — pagination/parameter 일관성 정리.**
   페이지 가능한 목록은 `cursor/page_size`, bounded 지도 조회는 `limit`, 다중 값은 반복
   query parameter, bbox는 `min_lon/min_lat/max_lon/max_lat`를 기본으로 문서와 schema를

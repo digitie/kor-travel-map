@@ -66,7 +66,7 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
         "/features/search",
         "/features/{feature_id}",
         "/features/{feature_id}/weather",
-        "/tripmate/features/batch",
+        "/features/batch",
     }
     assert not any(path.startswith("/admin") for path in user["paths"])
     assert not any(path.startswith("/ops") for path in user["paths"])

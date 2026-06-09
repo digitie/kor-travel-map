@@ -9,7 +9,7 @@ DTO 매핑만, SQL 미보유.
 - ``GET /features/in-bounds`` — TripMate/user용 bbox envelope 응답.
 - ``GET /features/search`` — TripMate/user용 이름/bbox 검색.
 - ``GET /features/{feature_id}`` — feature 단건 상세.
-- ``POST /tripmate/features/batch`` — TripMate N+1 방지 batch 상세.
+- ``POST /features/batch`` — N+1 방지 batch 상세(service read, ServiceToken).
 
 ADR 참조
 --------
@@ -33,11 +33,11 @@ from krtour.map.infra.poi_cache_target_repo import (
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from krtour.map_admin.auth import require_service_token
 from krtour.map_admin.db import get_session
 
 __all__ = [
     "router",
-    "tripmate_router",
     "FeatureSummary",
     "FeaturesInBboxResponse",
     "FeaturesInBoundsResponse",
@@ -51,7 +51,6 @@ __all__ = [
 
 
 router = APIRouter(prefix="/features", tags=["features"])
-tripmate_router = APIRouter(prefix="/tripmate", tags=["tripmate"])
 NearbySort = Literal["distance", "name", "last_updated_at"]
 
 
@@ -170,7 +169,7 @@ class FeatureDetailEnvelopeResponse(BaseModel):
 
 
 class FeatureBatchRequest(BaseModel):
-    """TripMate batch 상세 조회 요청."""
+    """feature batch 상세 조회 요청 (service read)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -178,7 +177,7 @@ class FeatureBatchRequest(BaseModel):
 
 
 class FeatureBatchData(BaseModel):
-    """TripMate batch 상세 data payload."""
+    """feature batch 상세 data payload."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -187,7 +186,7 @@ class FeatureBatchData(BaseModel):
 
 
 class FeatureBatchResponse(BaseModel):
-    """``POST /tripmate/features/batch`` 응답."""
+    """``POST /features/batch`` 응답."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -815,13 +814,14 @@ async def get_feature_weather(
     )
 
 
-@tripmate_router.post(
-    "/features/batch",
+@router.post(
+    "/batch",
     response_model=FeatureBatchResponse,
-    summary="TripMate feature 상세 batch 조회",
+    summary="feature 상세 batch 조회 (service read)",
+    dependencies=[Depends(require_service_token)],
     responses={422: {"description": "feature_ids 1~200개 필요"}},
 )
-async def get_tripmate_features_batch(
+async def get_features_batch(
     body: FeatureBatchRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> FeatureBatchResponse:

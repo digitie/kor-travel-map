@@ -2,6 +2,27 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-09 (claude) — `/tripmate/*` namespace 제거 → `POST /features/batch` 일반화
+
+**작업**: 사용자 지시("krtour-map은 TripMate에만 묶이지 않음 — `/tripmate/` endpoint 제거").
+batch를 일반 feature service read로 옮기고 모든 문서·OpenAPI·frontend·테스트를 갱신. PR→머지.
+
+- **코드**: `tripmate_router`(prefix `/tripmate`) 제거. `POST /tripmate/features/batch` →
+  `POST /features/batch`(`features_router`). service-token은 router-level → **route-level
+  `dependencies=[Depends(require_service_token)]`로 유지**(generic 토큰이라 TripMate 종속
+  아님, #314 보안 통제 보존). `USER_OPERATIONS` allowlist·app.py wiring·`__init__` export·
+  핸들러/스키마 docstring 갱신.
+- **재생성**: `openapi.json`/`openapi.user.json`(WSL `export_openapi.py --profile all`) +
+  frontend `types.ts`(Windows `npm run gen:types`). `/features/batch` + ServiceToken 유지,
+  `/tripmate` 0건 확인.
+- **테스트**: `test_auth.py`/`test_features_router.py`/`test_export_openapi.py` 경로 갱신
+  (`test_feature_update_requests_router`의 `/tripmate/feature-update-requests` 부재 검증과
+  `external_system="tripmate"` 데이터값은 유지).
+- **문서**: rest-api.md(§0/§1.2/§1.3/§1.7/§2.2/§5), tripmate-rest-api.md, decisions.md
+  (ADR-005/045 D-1·ADR-048), tasks.md(T-214d 완료), openapi-admin-contract.md,
+  debug-ui-admin-workflows.md, tripmate-integration.md, CHANGELOG. (reports/* 과거 스냅샷 보존.)
+- **검증**: ruff/mypy --strict(27)/44 tests/OpenAPI drift/lint-imports(4) green.
+
 ## 2026-06-09 (codex) — PR #316 3차 잔여 정합성 반영
 
 **작업**: PR #316 추가 리뷰의 잔여 2건(batch `items` map 충돌, in-bounds `cluster_unit` 위치)과

@@ -1,5 +1,11 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-09 claude 작업 메모 — `/tripmate/*` namespace 제거 (T-214d 완료)
+
+사용자 지시로 `/tripmate/` endpoint 제거: `POST /tripmate/features/batch` →
+`POST /features/batch`(service read, ServiceToken route-level 유지). 코드+OpenAPI+frontend+
+테스트+모든 live 문서 갱신, gates green. PR→머지 진행.
+
 ## 2026-06-09 claude 작업 메모 — ADR-048(REST versioning admin/ops 확장 + 정합성 표준)
 
 #317(T-214/T-215)의 `/v1` 1차 위에 사용자 지시(admin도 versioning + 정합성 심화)를 반영.

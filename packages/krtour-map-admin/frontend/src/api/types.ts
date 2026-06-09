@@ -667,6 +667,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/features/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** feature 상세 batch 조회 (service read) */
+        post: operations["get_features_batch_features_batch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/features/in-bounds": {
         parameters: {
             query?: never;
@@ -1020,23 +1037,6 @@ export interface paths {
         get: operations["get_provider_last_sync_providers__provider__last_sync_get"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/tripmate/features/batch": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** TripMate feature 상세 batch 조회 */
-        post: operations["get_tripmate_features_batch_tripmate_features_batch_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2595,7 +2595,7 @@ export interface components {
         };
         /**
          * FeatureBatchData
-         * @description TripMate batch 상세 data payload.
+         * @description feature batch 상세 data payload.
          */
         FeatureBatchData: {
             /** Items */
@@ -2607,7 +2607,7 @@ export interface components {
         };
         /**
          * FeatureBatchRequest
-         * @description TripMate batch 상세 조회 요청.
+         * @description feature batch 상세 조회 요청 (service read).
          */
         FeatureBatchRequest: {
             /** Feature Ids */
@@ -2615,7 +2615,7 @@ export interface components {
         };
         /**
          * FeatureBatchResponse
-         * @description ``POST /tripmate/features/batch`` 응답.
+         * @description ``POST /features/batch`` 응답.
          */
         FeatureBatchResponse: {
             data: components["schemas"]["FeatureBatchData"];
@@ -6133,6 +6133,37 @@ export interface operations {
             };
         };
     };
+    get_features_batch_features_batch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeatureBatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureBatchResponse"];
+                };
+            };
+            /** @description feature_ids 1~200개 필요 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     list_public_features_in_bounds_features_in_bounds_get: {
         parameters: {
             query: {
@@ -6780,37 +6811,6 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
-            };
-        };
-    };
-    get_tripmate_features_batch_tripmate_features_batch_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["FeatureBatchRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FeatureBatchResponse"];
-                };
-            };
-            /** @description feature_ids 1~200개 필요 */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
             };
         };
     };

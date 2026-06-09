@@ -906,7 +906,7 @@ T-207e 구현 상태: TripMate에는 다음 public/read API를 제공한다. 기
 | `GET /features/in-bounds` | bbox 기반 사용자 지도 feature. `kind`/`category` 반복 필터, `limit<=5000`, `cluster_unit=null` |
 | `GET /features/{feature_id}` | feature 상세 envelope. `updated_at` 포함 |
 | `GET /features/search` | `q`(pg_trgm) 또는 `bbox` 기반 검색. keyset cursor |
-| `POST /tripmate/features/batch` | 여러 feature_id 상세 batch 조회. `feature_ids<=200`, missing 목록 반환 |
+| `POST /features/batch` | 여러 feature_id 상세 batch 조회(service read, ServiceToken). `feature_ids<=200`, missing 목록 반환 |
 | `PUT /admin/poi-cache-targets/{external_system}/{target_key}` | 외부 POI cache target 등록/갱신 |
 | `DELETE /admin/poi-cache-targets/{external_system}/{target_key}` | 외부 POI 삭제 반영 |
 | `GET /features/nearby/by-target` | 외부 POI key 기준 주변 feature summary 조회 |
@@ -917,8 +917,8 @@ TripMate app DB가 소유하고, 운영자 승인 후 admin API로 refresh scope
 
 TripMate 사용자-facing 응답에는 raw payload, provider key 상태, provider/dataset 내부
 식별자, dedup/sibling linkage, target refresh policy, 내부 error detail, admin audit log를
-노출하지 않는다. batch처럼 TripMate 전용 동작이 필요한 경우만
-`/tripmate/*` prefix를 사용한다.
+노출하지 않는다. `/tripmate/*` namespace는 제거됐다(krtour-map은 TripMate 전용이 아니다) —
+batch 같은 service read는 `POST /features/batch`(ServiceToken route-level gate)로 일반화한다.
 
 상세 응답에는 aware `updated_at`을 포함한다. 목록 API는 JSONB detail/raw payload를
 반환하지 않고, 특정 feature 상세 API에서만 `address`/`detail`/`urls` JSON 데이터를

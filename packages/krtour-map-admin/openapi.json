@@ -4219,7 +4219,7 @@
       },
       "FeatureBatchData": {
         "additionalProperties": false,
-        "description": "TripMate batch 상세 data payload.",
+        "description": "feature batch 상세 data payload.",
         "properties": {
           "items": {
             "additionalProperties": {
@@ -4245,7 +4245,7 @@
       },
       "FeatureBatchRequest": {
         "additionalProperties": false,
-        "description": "TripMate batch 상세 조회 요청.",
+        "description": "feature batch 상세 조회 요청 (service read).",
         "properties": {
           "feature_ids": {
             "items": {
@@ -4265,7 +4265,7 @@
       },
       "FeatureBatchResponse": {
         "additionalProperties": false,
-        "description": "``POST /tripmate/features/batch`` 응답.",
+        "description": "``POST /features/batch`` 응답.",
         "properties": {
           "data": {
             "$ref": "#/components/schemas/FeatureBatchData"
@@ -12029,6 +12029,45 @@
         ]
       }
     },
+    "/features/batch": {
+      "post": {
+        "operationId": "get_features_batch_features_batch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeatureBatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureBatchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "feature_ids 1~200개 필요"
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "feature 상세 batch 조회 (service read)",
+        "tags": [
+          "features"
+        ]
+      }
+    },
     "/features/in-bounds": {
       "get": {
         "operationId": "list_public_features_in_bounds_features_in_bounds_get",
@@ -13778,45 +13817,6 @@
         "summary": "provider 데이터 신선도(last-sync)",
         "tags": [
           "providers"
-        ]
-      }
-    },
-    "/tripmate/features/batch": {
-      "post": {
-        "operationId": "get_tripmate_features_batch_tripmate_features_batch_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FeatureBatchRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FeatureBatchResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "description": "feature_ids 1~200개 필요"
-          }
-        },
-        "security": [
-          {
-            "ServiceToken": []
-          }
-        ],
-        "summary": "TripMate feature 상세 batch 조회",
-        "tags": [
-          "tripmate"
         ]
       }
     },
