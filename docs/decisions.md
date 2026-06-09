@@ -2758,11 +2758,14 @@ bbox 인코딩 2종, `status`↔`state`, 응답 `*_key`↔`*_id`)가 #317의 고
    `/v1/categories`·`/v1/providers`)은 #317 T-214b/d가 진행 중인 그대로.
 2. **envelope 공유 모델 — payload와 메타 완전 분리.** 라우터별 `*Meta` 중복을 공유
    `Meta`로 통합한다. `data`는 **payload만**(단건=객체, 목록=`{items:[...]}`, in-bounds=
-   `{clusters,items,cluster_unit}`). **페이지네이션·추적 메타는 `meta`로 모은다**:
-   `meta = { duration_ms, request_id, page?: { page_size, next_cursor, total } }`(`page`는
-   목록에만, `total`은 opt-in null 기본). 즉 `data.next_cursor`/`data.total_count`/파생
-   `count`를 **폐기**하고 `meta.page`로 일원화한다(payload=데이터, meta=cross-cutting →
-   확장 시 `meta.page`만 늘리면 됨). 성공 응답에도 `request_id`를 실어 오류 envelope와 대칭.
+   `{clusters,items}`, batch=`{found:{feature_id:Feature},missing:[...]}`). **`items`는 list array
+   전용**이고 id-keyed map은 `found`처럼 별도 키를 쓴다. **페이지네이션·추적·뷰 해석 메타는
+   `meta`로 모은다**: `meta = { duration_ms, request_id, page?: { page_size, next_cursor, total },
+   cluster?: { cluster_unit } }`(`page`는 pageable 목록에만, `total`은 opt-in null 기본,
+   `cluster`는 in-bounds에만). 즉 `data.next_cursor`/`data.total_count`/`data.cluster_unit`/
+   파생 `count`를 **폐기**하고 `meta.page`/`meta.cluster`로 일원화한다(payload=데이터,
+   meta=cross-cutting → 확장 시 meta만 늘리면 됨). 성공 응답에도 `request_id`를 실어 오류
+   envelope와 대칭.
 3. **pagination 단일화(T-214e 심화).** page-size 파라미터를 `page_size`로 통일
    (`limit`/`run_limit`/`event_limit` 폐기), 2-티어 캡(기본 50/200, 지도 nearby 100/500),
    opaque `cursor`. `/v1/features` 평면은 keyset cursor(현재 `limit le=5000` 폐기),
@@ -2816,6 +2819,9 @@ bbox 인코딩 2종, `status`↔`state`, 응답 `*_key`↔`*_id`)가 #317의 고
     수단이므로 규칙을 둔다: **pre-1.0(현재)** = `/v1` 가변, in-place breaking 허용(지금 정리
     방침과 일치). **v1.0.0 GA에서 `/v1` 동결**, 이후 breaking = `/v2` + N-1 동시지원. OpenAPI는
     major별 분리 export.
+14. **Base URL과 path 분리(#316 추가 리뷰).** 환경변수 base URL은 host root까지만 포함하고
+    `/v1`는 path에 둔다(예: base `http://127.0.0.1:9011` + path `/v1/features/search`).
+    base와 path 양쪽에 `/v1`를 중복 삽입하지 않는다.
 
 ### 근거
 
@@ -2855,6 +2861,7 @@ bbox 인코딩 2종, `status`↔`state`, 응답 `*_key`↔`*_id`)가 #317의 고
   `/v1` 안정 commit에서 소비자(T-210e codegen + 계약 테스트)가 그 spec에 핀한다. 이게
   유일한 "안전판"이며, 별도 호환 창은 두지 않는다.
 - **에러 `code` 고정**: problem+json top-level 확장 `code`/`request_id` + enum(#5).
+- **Base URL은 host root**: `/v1`는 path에만 둔다(#14).
 
 ### 후속
 

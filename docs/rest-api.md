@@ -35,7 +35,9 @@
 
 ### 1.1 Base URL · 포트 (ADR-047)
 - API `http://127.0.0.1:9011`(admin UI `9012`, Dagster `9013`, Postgres host `15433`,
-  RustFS `9003`/`9004`). `TRIPMATE_KRTOUR_MAP_API_BASE_URL`은 `/v1`까지 포함.
+  RustFS `9003`/`9004`). `TRIPMATE_KRTOUR_MAP_API_BASE_URL`은 host root까지만 포함하고,
+  모든 REST path가 `/v1` prefix를 명시한다(예: base `http://127.0.0.1:9011` +
+  path `/v1/features/search`). base와 path 양쪽에 `/v1`를 중복 삽입하지 않는다.
 
 ### 1.2 Versioning (ADR-048 — #317 확장)
 - **전 표면 `/v1`**: `/v1/features/*`·`/v1/tripmate/*`·`/v1/categories`·`/v1/providers/*`
@@ -57,10 +59,13 @@
 
 ### 1.4 응답 envelope (🔁 ADR-048 — payload/meta 완전 분리)
 - 성공 `{ "data": <payload>, "meta": <Meta> }`. **`data`는 payload만**:
-  단건=`<object>`, 목록=`{items:[…]}`, in-bounds=`{clusters:[…],items:[…],cluster_unit}`.
-- **페이지네이션·추적은 `meta`로 일원화**:
-  `meta = { duration_ms, request_id, page?: { page_size, next_cursor, total } }`
-  (`page`는 목록에만, `total`은 opt-in `null` 기본). `data.next_cursor`/`data.total_count`/
+  단건=`<object>`, 목록=`{items:[…]}`, in-bounds=`{clusters:[…],items:[…]}`,
+  batch=`{found:{feature_id:Feature},missing:[…]}`. list의 `items`는 항상 배열이고,
+  id-keyed map은 `found`처럼 별도 키를 쓴다.
+- **페이지네이션·추적·뷰 해석 메타는 `meta`로 일원화**:
+  `meta = { duration_ms, request_id, page?: { page_size, next_cursor, total },
+  cluster?: { cluster_unit } }`(`page`는 pageable 목록에만, `total`은 opt-in `null` 기본,
+  `cluster`는 in-bounds에만). `data.next_cursor`/`data.total_count`/`data.cluster_unit`/
   파생 `count`는 **폐기**.
 - 라우터별 `FeatureListMeta`/`FeatureDetailMeta`/… 중복 → 공유 `Meta` 1개 + `data` payload
   모델. 확장 시 `meta.page`만 늘리면 됨(payload 불변). 성공 응답에도 `request_id`(추적 대칭).
@@ -106,7 +111,8 @@
 
 ## 2. 엔드포인트 카탈로그 (목표 `/v1` 전 표면, #317 반영)
 
-> 외부 표면 필드 세부는 `docs/tripmate-rest-api.md` §3·§4 정본 우선.
+> 본 문서가 전 표면 계약 정본이다. `docs/tripmate-rest-api.md`는 TripMate 소비 매핑 view이며
+> 계약 세부는 이 문서를 따른다.
 
 ### 2.1 Liveness (비버저닝)
 ```
@@ -126,10 +132,10 @@ GET /v1/features/{feature_id}/weather   # 날씨 카드(metric + forecast_style)
 
 ### 2.3 `/v1/tripmate/*` — 외부 service-to-service (ServiceToken)
 ```
-POST /v1/tripmate/features/batch        # 배치 조회 {feature_ids[]} cap≤200 → {items{},missing[]}
+POST /v1/tripmate/features/batch        # 배치 조회 {feature_ids[]} cap≤200 → {found{},missing[]}
 ```
 - ⚠️ `/tripmate/feature-update-requests*`는 **#317로 제거**(→ `/v1/admin/*`). 중복 C2 해소.
-  batch 경로의 `/v1/features/batch` 이동은 #317 T-214d 진행 중.
+  batch 조회도 service-to-service surface이므로 `/v1/tripmate/features/batch`를 정본으로 둔다.
 
 ### 2.4 참조 데이터
 ```
@@ -196,7 +202,7 @@ POST /v1/debug/etl/{provider}/{dataset}/preview
 | 주소 | 구조화 `address`+`*_code` | |
 | category | 8자리 코드 + `/v1/categories` label | |
 | 날씨 | metric 목록 + `forecast_style` | |
-| envelope | `{data,meta}`, 목록 `data={items}` + `meta.page{page_size,next_cursor,total}` | §1.4 |
+| envelope | `{data,meta}`, 목록 `data={items}` + `meta.page{page_size,next_cursor,total}`, batch `data={found,missing}` | §1.4 |
 
 ### 3.1 응답 필드 명명 규약 (🔁 ADR-048 — 의미/본질 기준 전면 적용)
 - **식별자(외부 read 포함)**: 시스템 단일 surrogate = `*_id`, **복합/자연키 = `*_key`**.
@@ -219,6 +225,8 @@ POST /v1/debug/etl/{provider}/{dataset}/preview
 - `meta`는 **모든 응답에 항상 present**(단건 GET 포함). 성공 `meta`/에러 problem+json 모두
   `request_id`를 싣는다.
 - `meta.page.next_cursor`는 **항상 키로 존재**, 소진 시 `null`(omit 금지) — 페이지 종료 신호.
+- in-bounds의 `cluster_unit`처럼 payload 해석에 필요한 view metadata는 `data`가 아니라
+  `meta.cluster`에 둔다. `data`는 `items`/`clusters` 같은 실제 payload만 담는다.
 
 ---
 
@@ -238,6 +246,8 @@ POST /v1/debug/etl/{provider}/{dataset}/preview
 | `limit le=5000`(features), in-bounds | `page_size`+`cursor` / `max_items` 2000 | 🔁 |
 | `search` 항상 COUNT | `meta.page.total` opt-in | 🔁 |
 | `search` bbox CSV | 분리 float | 🔁 |
+| in-bounds `data.cluster_unit` | `meta.cluster.cluster_unit` | 🔁 |
+| batch `data.items` id-keyed map | `data.found` id-keyed map + `data.missing[]` | 🔁 |
 | `state`(jobs/uploads/requests) | `status` | 🔁 |
 | 응답 surrogate `*_key`(review/violation/log…) | `*_id` (`cluster_key` 등 자연키는 유지) | 🔁 |
 | 좌표 `lon`/`lat` ↔ TripMate `longitude`/`latitude` | `lon`/`lat`로 cross-repo 정렬 | 🔁 #10 |
@@ -255,6 +265,8 @@ POST /v1/debug/etl/{provider}/{dataset}/preview
 - **DEC-05**: 재적재(admin)와 사용자 제안(TripMate→승인→`/admin/features`) 분리(확정).
 - **정본 수렴(T-216g)**: 본 문서를 전 표면 단일 계약 정본으로, `docs/tripmate-rest-api.md`는
   소비 매핑 view로 축소(ADR-048 #9, drift 회피).
+- **Batch 응답 키**: `items`는 list array 전용으로 고정하고, batch id-keyed map은 `found`로
+  둔다(TripMate 3차 리뷰 반영).
 - **codegen(T-210e)**: `/v1` 안정 commit에서 진행.
 
 ---
@@ -291,3 +303,6 @@ codegraph impact 선행). raw `text()` SQL이 물리명을 써서 ORM attr만으
   (D) `feature_id` **값 불변식** 명문화(§3.2), (E) envelope 불변식 lock(§3.3 — `meta` 항상
   present·`request_id`·`next_cursor` null-not-omit), (F) `/vN` major 거버넌스(§1.2, #13).
   실행 T-216a~g.
+- 2026-06-09(4차, #316 TripMate 3차 잔여 반영): batch id-keyed map은 `items`가 아니라
+  `found`로 분리하고, in-bounds `cluster_unit`은 payload에서 `meta.cluster.cluster_unit`로 이동.
+  base URL은 host root만 포함하고 path가 `/v1`를 명시한다고 고정.

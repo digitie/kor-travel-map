@@ -1170,10 +1170,10 @@ lint-imports/pytest/coverage, frontend type-check/e2e). 실데이터 검증은 T
 
 **Phase 6.6 — REST API v1 정리 후속 (2026-06-08, `T-214`)**
 
-정본 문서는 `docs/tripmate-rest-api.md`. 기준 입력은
-`docs/reports/api-endpoint-review-2026-06-08.md`와 TripMate
-`docs/integrations/krtour-map-rest-api.md`. 사용자 결정으로
-`/tripmate/feature-update-requests*`는 admin 영역으로 이동한다.
+전 표면 계약 정본은 `docs/rest-api.md`, TripMate 소비 view는 `docs/tripmate-rest-api.md`.
+기준 입력은 `docs/reports/api-endpoint-review-2026-06-08.md`와 TripMate
+`docs/integrations/krtour-map-rest-api.md`. 사용자 결정으로 `/tripmate/feature-update-requests*`는
+admin 영역으로 이동한다.
 
 - [x] **T-214a — REST API 정본 문서 작성.**
   Versioning, envelope, parameter 규약, endpoint naming, 중복 처리, 누락 API를
@@ -1182,16 +1182,16 @@ lint-imports/pytest/coverage, frontend type-check/e2e). 실데이터 검증은 T
   `docs/poi-cache-update-targets.md`, `docs/architecture.md`의 충돌 문구도 정리했다.
 - [ ] **T-214b — 사용자/서비스 API `/v1` prefix 도입.**
   `/features/*`, `/categories`, `/providers/{provider}/last-sync`,
-  `POST /features/batch` 목표 경로를 `/v1/*`로 노출하고, 기존 unversioned 경로는
-  호환 alias + `deprecated: true` + deprecation header로 표시한다. admin/ops/debug는
-  prefix 없이 유지한다.
+  `POST /tripmate/features/batch` 목표 경로를 `/v1/*`로 노출하고, 기존 unversioned 경로는
+  유지하지 않는다(clean cut, alias 없음). admin/ops/debug도 ADR-048/T-216a에서 `/v1`로
+  이동한다.
 - [x] **T-214c — `/tripmate/feature-update-requests*` 제거, admin-only 전환.**
   user OpenAPI와 `USER_OPERATIONS`에서 `POST/GET /tripmate/feature-update-requests*`를
   제거하고 `/admin/feature-update-requests*`만 정본으로 남긴다. TripMate 사용자 제안 큐는
   TripMate app DB 소유로 문서화하고, 운영자 승인 뒤 admin API 호출로 연결한다.
-- [ ] **T-214d — batch 조회 경로를 `POST /v1/features/batch`로 이동.**
-  기존 `POST /tripmate/features/batch`는 호환 alias로 유지하거나 deprecate하고,
-  OpenAPI/user docs/frontend generated type을 새 경로로 정렬한다.
+- [ ] **T-214d — batch 조회 경로를 `POST /v1/tripmate/features/batch`로 이동.**
+  service-to-service surface로 유지하되 `/v1` 아래로 clean cut한다. 응답은 list `items[]`와
+  충돌하지 않게 `data={found:{feature_id:Feature},missing[]}`로 정렬한다.
 - [ ] **T-214e — pagination/parameter 일관성 정리.**
   페이지 가능한 목록은 `cursor/page_size`, bounded 지도 조회는 `limit`, 다중 값은 반복
   query parameter, bbox는 `min_lon/min_lat/max_lon/max_lat`를 기본으로 문서와 schema를
@@ -1242,9 +1242,10 @@ T-214/T-215(#317)의 `/v1` 1차 정리 위에 ADR-048 delta를 얹는다. 정본
   `/features` 평면 cursor화(`limit le=5000` 폐기), `in-bounds` `max_items` 5000→2000.
 - [ ] **T-216c — envelope payload/meta 분리.** 라우터별 `*Meta` 중복 → 공유 `Meta`. `data`는
   payload만, 페이지네이션은 **`meta.page{page_size,next_cursor,total}`**(`total` opt-in
-  `?include_total=true`). `data.next_cursor`/`data.total_count`/파생 `count` 폐기. **envelope
-  불변식(ADR-048 #12)**: `meta`·`request_id` 모든 응답에 present, `meta.page.next_cursor` 항상
-  키 존재(소진 시 `null`, omit 금지) — 계약/라우터 테스트로 lock.
+  `?include_total=true`). `data.next_cursor`/`data.total_count`/파생 `count` 폐기. in-bounds의
+  `cluster_unit`은 `meta.cluster.cluster_unit`, batch id-keyed map은 `data.found`로 둔다.
+  **envelope 불변식(ADR-048 #12)**: `meta`·`request_id` 모든 응답에 present,
+  `meta.page.next_cursor` 항상 키 존재(소진 시 `null`, omit 금지) — 계약/라우터 테스트로 lock.
 - [ ] **T-216d — parameter/error/좌표 정합성.** bbox 분리 float 통일(`search` CSV 제거),
   상태 필드 `state`→`status`, issue/violation noun을 `issue_*`로. 에러 RFC7807
   `application/problem+json`(`code`/`request_id`/`errors[]` top-level 확장, `{error:{}}` 제거).
@@ -1484,8 +1485,8 @@ T-214/T-215(#317)의 `/v1` 1차 정리 위에 ADR-048 delta를 얹는다. 정본
   조회 + 정합성 책임) PR#54. **ADR-045** (krtour-map Docker 독립 프로그램 + 독립
   DB/Dagster + TripMate OpenAPI 연동 — ADR-003 함수 직접 호출 모델 supersede,
   2026-06-01). **ADR-046** (ADR-045 이행 시 구 모델 호환 shim 금지, 2026-06-02).
-- **001~047 accepted**. **다음 후보 번호 = ADR-048**:
-  - **ADR-048+** — 신규 provider 추가 절차 표준 (체크리스트)
+- **001~048 accepted**. **다음 후보 번호 = ADR-049**:
+  - **ADR-049+** — 신규 provider 추가 절차 표준 (체크리스트)
   - 후속 `@krtour/map-marker-react` npm 게시 자동화 ADR (현재 ADR-043 보류)
   - (필요 시) ADR — Sprint 3 SHP/GeoJSON parsing 위치 결정 (`krtour.map.
     providers.knps` vs upstream `[geo]` extra)

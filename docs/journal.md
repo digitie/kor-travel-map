@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-09 (codex) — PR #316 3차 잔여 정합성 반영
+
+**작업**: PR #316 추가 리뷰의 잔여 2건(batch `items` map 충돌, in-bounds `cluster_unit` 위치)과
+기존 문서 포인터 drift를 반영했다.
+
+- Batch 조회는 service-to-service 표면 `POST /v1/tripmate/features/batch`로 고정하고,
+  id-keyed map은 list `items[]`와 충돌하지 않게 `data.found`로 분리했다.
+- in-bounds `cluster_unit`은 payload가 아니라 `meta.cluster.cluster_unit`으로 이동했다.
+- base URL은 host root까지만 포함하고 path가 `/v1`를 명시하도록 고정했다.
+- `docs/tripmate-rest-api.md`를 전면 축소해 TripMate 소비 매핑 view로 만들고, 전 표면 계약 정본은
+  `docs/rest-api.md` 하나로 수렴했다.
+- AGENTS/SKILL/README/tasks ADR 번호 포인터를 001~048 accepted / 다음 049로 정렬했다.
+
 ## 2026-06-09 (claude) — ADR-048 #316 TripMate 재리뷰(A–F) 반영 + 2차 오류 정정
 
 **작업**: PR #316에 올라온 TripMate-소비자 재리뷰(호환성→정합성 입장 전환, A–F)를 판단·반영.
