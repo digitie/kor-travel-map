@@ -306,6 +306,7 @@ class AdminFeatureChangeListMeta(BaseModel):
 
     count: int
     limit: int
+    review_mode: FeatureMutationReviewMode
     duration_ms: int
 
 
@@ -531,6 +532,7 @@ async def list_features(
 )
 async def list_feature_change_request_route(
     session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[AdminSettings, Depends(_settings)],
     state_filter: Annotated[
         list[Literal["pending", "applied", "rejected"]] | None,
         Query(alias="state"),
@@ -557,6 +559,7 @@ async def list_feature_change_request_route(
         meta=AdminFeatureChangeListMeta(
             count=len(rows),
             limit=limit,
+            review_mode=_review_mode(settings),
             duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
         ),
     )

@@ -703,9 +703,11 @@ admin 영역으로 이동한다.
   `data_origin='user_request', data_version=1`로 구분하고
   `feature.feature_versions` snapshot을 남긴다. 사용자 요청 삭제는 soft delete이며
   provider 재적재나 snapshot 누락 정리로 되살리지 않는다.
-- [ ] **T-215b — admin UI feature change queue 화면.**
-  `GET /admin/features/change-requests` 목록, add/update/delete form, approve/reject
-  동작, `KRTOUR_MAP_ADMIN_FEATURE_CHANGE_REVIEW_MODE` 표시를 frontend에 연결한다.
+- [x] **T-215b — admin UI feature change queue 화면.** (2026-06-09)
+  `/admin/features/change-requests` 화면을 추가해 `GET /admin/features/change-requests`
+  목록, add/update/delete 요청 form, approve/reject 동작을 연결했다. 목록 meta에
+  `review_mode`를 추가해 `KRTOUR_MAP_ADMIN_FEATURE_CHANGE_REVIEW_MODE` 현재값을 빈 큐에서도
+  표시한다. 기존 정본 mutation endpoint만 사용하며 새 중복 REST 표면은 만들지 않았다.
 - [ ] **T-215c — frontend generated type/e2e workflow 보강.**
   OpenAPI 타입 기반 mutation hook, pending→approve→applied flow, immediate mode route
   mock, soft delete 표시/필터 e2e를 추가한다.

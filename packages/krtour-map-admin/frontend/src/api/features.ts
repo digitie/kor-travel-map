@@ -7,7 +7,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { getJson, pathWithQuery, postJson } from "./client";
+import { deleteJson, getJson, patchJson, pathWithQuery, postJson } from "./client";
 import type { components, paths } from "./types";
 
 type FeatureSchemas = components["schemas"];
@@ -156,6 +156,41 @@ export type AdminFeatureOverride = FeatureSchemas["AdminFeatureOverrideRecord"];
 export type AdminFeatureDeactivateResponse =
   FeatureSchemas["AdminFeatureDeactivateResponse"];
 
+type AdminFeatureChangeListQuery = NonNullable<
+  paths["/admin/features/change-requests"]["get"]["parameters"]["query"]
+>;
+
+export type AdminFeatureChangeState = Exclude<
+  NonNullable<AdminFeatureChangeListQuery["state"]>[number],
+  null | undefined
+>;
+export type AdminFeatureChangeAction = Exclude<
+  NonNullable<AdminFeatureChangeListQuery["action"]>[number],
+  null | undefined
+>;
+export type AdminFeatureChangeRecord =
+  FeatureSchemas["AdminFeatureChangeRequestRecord"];
+export type AdminFeatureChangeListResponse =
+  FeatureSchemas["AdminFeatureChangeListResponse"];
+export type AdminFeatureChangeResponse =
+  FeatureSchemas["AdminFeatureChangeResponse"];
+export type AdminFeatureCreateRequest =
+  FeatureSchemas["AdminFeatureCreateRequest"];
+export type AdminFeaturePatchRequest =
+  FeatureSchemas["AdminFeaturePatchRequest"];
+export type AdminFeatureDeleteRequest =
+  FeatureSchemas["AdminFeatureDeleteRequest"];
+export type AdminFeatureReviewActionRequest =
+  FeatureSchemas["AdminFeatureReviewActionRequest"];
+export type AdminFeatureChangeListParams = Omit<
+  AdminFeatureChangeListQuery,
+  "action" | "q" | "state"
+> & {
+  action?: AdminFeatureChangeAction[];
+  q?: string;
+  state?: AdminFeatureChangeState[];
+};
+
 function fetchAdminFeatures(
   params: AdminFeaturesListParams = {},
 ): Promise<AdminFeaturesListResponse> {
@@ -190,6 +225,65 @@ function deactivateAdminFeature(
   );
 }
 
+function fetchAdminFeatureChangeRequests(
+  params: AdminFeatureChangeListParams = {},
+): Promise<AdminFeatureChangeListResponse> {
+  return getJson<AdminFeatureChangeListResponse>(
+    pathWithQuery("/admin/features/change-requests", {
+      state: params.state,
+      action: params.action,
+      q: params.q,
+      limit: params.limit,
+    }),
+  );
+}
+
+function createAdminFeature(
+  body: AdminFeatureCreateRequest,
+): Promise<AdminFeatureChangeResponse> {
+  return postJson<AdminFeatureChangeResponse>("/admin/features", body);
+}
+
+function patchAdminFeature(
+  featureId: string,
+  body: AdminFeaturePatchRequest,
+): Promise<AdminFeatureChangeResponse> {
+  return patchJson<AdminFeatureChangeResponse>(
+    `/admin/features/${encodeURIComponent(featureId)}`,
+    body,
+  );
+}
+
+function deleteAdminFeature(
+  featureId: string,
+  body: AdminFeatureDeleteRequest,
+): Promise<AdminFeatureChangeResponse> {
+  return deleteJson<AdminFeatureChangeResponse>(
+    `/admin/features/${encodeURIComponent(featureId)}`,
+    body,
+  );
+}
+
+function approveAdminFeatureChangeRequest(
+  requestId: string,
+  body: AdminFeatureReviewActionRequest,
+): Promise<AdminFeatureChangeResponse> {
+  return postJson<AdminFeatureChangeResponse>(
+    `/admin/features/change-requests/${encodeURIComponent(requestId)}/approve`,
+    body,
+  );
+}
+
+function rejectAdminFeatureChangeRequest(
+  requestId: string,
+  body: AdminFeatureReviewActionRequest,
+): Promise<AdminFeatureChangeResponse> {
+  return postJson<AdminFeatureChangeResponse>(
+    `/admin/features/change-requests/${encodeURIComponent(requestId)}/reject`,
+    body,
+  );
+}
+
 export function useAdminFeatures(params: AdminFeaturesListParams = {}) {
   return useQuery<AdminFeaturesListResponse, Error>({
     queryKey: ["admin-features", params],
@@ -213,5 +307,105 @@ export function useDeactivateAdminFeatureMutation() {
         queryKey: ["feature", variables.featureId],
       });
     },
+  });
+}
+
+export function useAdminFeatureChangeRequests(
+  params: AdminFeatureChangeListParams = {},
+) {
+  return useQuery<AdminFeatureChangeListResponse, Error>({
+    queryKey: ["admin-feature-changes", params],
+    queryFn: () => fetchAdminFeatureChangeRequests(params),
+    staleTime: 15_000,
+  });
+}
+
+function invalidateFeatureChangeQueries(
+  queryClient: ReturnType<typeof useQueryClient>,
+  featureId?: string,
+) {
+  void queryClient.invalidateQueries({ queryKey: ["admin-feature-changes"] });
+  void queryClient.invalidateQueries({ queryKey: ["admin-features"] });
+  void queryClient.invalidateQueries({ queryKey: ["features"] });
+  if (featureId) {
+    void queryClient.invalidateQueries({ queryKey: ["feature", featureId] });
+  }
+}
+
+export function useCreateAdminFeatureMutation() {
+  const queryClient = useQueryClient();
+  return useMutation<AdminFeatureChangeResponse, Error, AdminFeatureCreateRequest>({
+    mutationFn: createAdminFeature,
+    onSuccess: (data) =>
+      invalidateFeatureChangeQueries(
+        queryClient,
+        data.data.request.feature_id,
+      ),
+  });
+}
+
+export function usePatchAdminFeatureMutation() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    AdminFeatureChangeResponse,
+    Error,
+    { featureId: string; body: AdminFeaturePatchRequest }
+  >({
+    mutationFn: ({ featureId, body }) => patchAdminFeature(featureId, body),
+    onSuccess: (data, variables) =>
+      invalidateFeatureChangeQueries(
+        queryClient,
+        data.data.request.feature_id || variables.featureId,
+      ),
+  });
+}
+
+export function useDeleteAdminFeatureMutation() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    AdminFeatureChangeResponse,
+    Error,
+    { featureId: string; body: AdminFeatureDeleteRequest }
+  >({
+    mutationFn: ({ featureId, body }) => deleteAdminFeature(featureId, body),
+    onSuccess: (data, variables) =>
+      invalidateFeatureChangeQueries(
+        queryClient,
+        data.data.request.feature_id || variables.featureId,
+      ),
+  });
+}
+
+export function useApproveAdminFeatureChangeMutation() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    AdminFeatureChangeResponse,
+    Error,
+    { requestId: string; body: AdminFeatureReviewActionRequest }
+  >({
+    mutationFn: ({ requestId, body }) =>
+      approveAdminFeatureChangeRequest(requestId, body),
+    onSuccess: (data) =>
+      invalidateFeatureChangeQueries(
+        queryClient,
+        data.data.request.feature_id,
+      ),
+  });
+}
+
+export function useRejectAdminFeatureChangeMutation() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    AdminFeatureChangeResponse,
+    Error,
+    { requestId: string; body: AdminFeatureReviewActionRequest }
+  >({
+    mutationFn: ({ requestId, body }) =>
+      rejectAdminFeatureChangeRequest(requestId, body),
+    onSuccess: (data) =>
+      invalidateFeatureChangeQueries(
+        queryClient,
+        data.data.request.feature_id,
+      ),
   });
 }

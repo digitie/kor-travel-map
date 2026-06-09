@@ -5,6 +5,7 @@ import {
   AlertTriangleIcon,
   DatabaseIcon,
   ArchiveIcon,
+  ClipboardListIcon,
   GitCompareArrowsIcon,
   HomeIcon,
   LinkIcon,
@@ -28,6 +29,11 @@ const navItems = [
   { href: "/", label: "홈", icon: HomeIcon },
   { href: "/features", label: "Features", icon: MapIcon },
   { href: "/admin/features", label: "Admin features", icon: DatabaseIcon },
+  {
+    href: "/admin/features/change-requests",
+    label: "Feature changes",
+    icon: ClipboardListIcon,
+  },
   { href: "/admin/issues", label: "Issues", icon: AlertTriangleIcon },
   { href: "/ops/import-jobs", label: "Import jobs", icon: ListChecksIcon },
   { href: "/ops/consistency", label: "Consistency", icon: RadarIcon },
@@ -75,6 +81,9 @@ export function AdminShell({
   children: ReactNode;
 }) {
   const pathname = usePathname();
+  const activeHref = navItems
+    .filter((item) => isActive(pathname, item.href))
+    .toSorted((a, b) => b.href.length - a.href.length)[0]?.href;
 
   return (
     <main className="min-h-screen bg-muted/30 text-foreground">
@@ -90,7 +99,7 @@ export function AdminShell({
             <nav className="flex gap-1 overflow-x-auto lg:flex-col lg:overflow-visible">
               {navItems.map((item) => {
                 const Icon = item.icon;
-                const active = isActive(pathname, item.href);
+                const active = item.href === activeHref;
                 return (
                   <Link
                     className={cn(

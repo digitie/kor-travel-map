@@ -1053,6 +1053,11 @@ export interface components {
             duration_ms: number;
             /** Limit */
             limit: number;
+            /**
+             * Review Mode
+             * @enum {string}
+             */
+            review_mode: "require_review" | "immediate";
         };
         /**
          * AdminFeatureChangeListResponse

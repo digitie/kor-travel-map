@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-09 (codex) — T-215b feature change queue admin UI
+
+**작업**: T-215a에서 추가한 feature add/update/delete change request API를 admin UI에 연결.
+작업 단위 PR용으로 T-215b만 닫고, e2e 심화(T-215c)는 별도 PR로 남긴다.
+
+- **Frontend**: `/admin/features/change-requests` route 추가. 목록 필터(state/action/q/limit),
+  payload 상세 panel, add/update/delete 요청 form, approve/reject 버튼, nav link를 연결했다.
+- **API hook**: `src/api/features.ts`에 OpenAPI 타입 기반 feature change query/mutation hooks를
+  추가했다. 중복 REST 경로는 만들지 않고 `/admin/features` + `/admin/features/change-requests*`
+  정본 endpoint만 사용한다.
+- **Backend schema**: `GET /admin/features/change-requests` meta에 `review_mode`를 추가해
+  `KRTOUR_MAP_ADMIN_FEATURE_CHANGE_REVIEW_MODE` 값을 빈 큐에서도 표시한다.
+- **OpenAPI**: `openapi.json`과 frontend generated type을 재생성했다.
+
 ## 2026-06-09 (claude) — T-214 tail (e/f/g/h): pagination/param·error 규약 + debug health/version 제거
 
 **작업**: 사용자 지시로 T-214e→f→g→h를 한 PR로. (이어서 T-214h 포함 지시.)

@@ -175,6 +175,44 @@ def test_list_admin_features_passes_filters(
 
 
 @pytest.mark.unit
+def test_list_feature_change_requests_returns_current_review_mode(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import admin_features as router_mod
+
+    client.app.dependency_overrides[router_mod._settings] = lambda: AdminSettings(
+        feature_change_review_mode="immediate"
+    )
+
+    async def _list(_session: Any, **kwargs: Any) -> tuple[FeatureChangeRequest, ...]:
+        assert kwargs["states"] == ["pending"]
+        assert kwargs["actions"] == ["add"]
+        assert kwargs["q"] == "광화문"
+        assert kwargs["limit"] == 25
+        return (_change_request(review_mode="immediate", state="applied"),)
+
+    monkeypatch.setattr(router_mod, "list_feature_change_requests", _list)
+
+    response = client.get(
+        "/admin/features/change-requests",
+        params={
+            "state": "pending",
+            "action": "add",
+            "q": "광화문",
+            "limit": "25",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data"]["items"][0]["review_mode"] == "immediate"
+    assert body["meta"]["count"] == 1
+    assert body["meta"]["limit"] == 25
+    assert body["meta"]["review_mode"] == "immediate"
+
+
+@pytest.mark.unit
 def test_create_feature_request_uses_review_required_by_default(
     client: TestClient,
     session: _FakeSession,

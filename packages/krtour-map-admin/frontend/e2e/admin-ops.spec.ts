@@ -391,6 +391,46 @@ test.describe("admin/ops pages", () => {
     await expect(page.getByText("table에서 feature를 선택하면")).toBeVisible();
   });
 
+  test("/admin/features/change-requests", async ({ page }) => {
+    await page.goto("/admin/features/change-requests");
+
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Feature change requests" }),
+    ).toBeVisible();
+    await expect(page.getByText("Change request form")).toBeVisible();
+    for (const label of [
+      "change action",
+      "change feature id",
+      "change reason",
+      "change operator",
+      "change kind",
+      "change status",
+      "change name",
+      "change category",
+      "change lon",
+      "change lat",
+      "change detail JSON",
+      "change search",
+      "change state",
+      "change action filter",
+      "change limit",
+    ]) {
+      await expect(page.getByLabel(label, { exact: true })).toBeVisible();
+    }
+    for (const column of [
+      "request",
+      "action/state",
+      "feature",
+      "review",
+      "reason",
+      "created",
+      "actions",
+    ]) {
+      await expect(page.getByRole("columnheader", { name: column })).toBeVisible();
+    }
+    await expect(page.getByText("요청 행을 선택하면")).toBeVisible();
+  });
+
   test("/admin/issues", async ({ page }) => {
     await page.goto("/admin/issues");
 
