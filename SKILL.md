@@ -304,7 +304,8 @@ docs/
 본 저장소는 T-014 승인 (2026-05-25, PR#16) 이후 **코드 작성 단계**다.
 
 > **진척/스프린트 상태·"다음 한 작업"의 단일 정본은 `docs/resume.md` + 백로그
-> `docs/tasks.md`다.** 이 문서에는 자주 바뀌는 PR 번호/완료여부를 박지 않는다
+> `docs/tasks.md`다.** (2026-06-09 분리: 진행/예정 = `docs/tasks.md`, 완료·아카이브 =
+> `docs/tasks-done.md`.) 이 문서에는 자주 바뀌는 PR 번호/완료여부를 박지 않는다
 > (반복 drift 회피 — `docs/reports/docs-consistency-audit-2026-06-06.md` DA-D-01).
 > 운영 모델·ADR·포트·frontend stack 같은 불변 기준값은 §1 식별자 매핑,
 > `CLAUDE.md §2`, `docs/decisions.md`를 정본으로 본다. 패키지

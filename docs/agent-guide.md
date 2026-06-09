@@ -55,7 +55,8 @@ codegraph 인덱스는 `codegraph sync`로 증분 동기(있다면) / `codegraph
 | `docs/decisions.md` | ADR 누적 | 결정이 발생할 때마다 |
 | `docs/resume.md` | 진척도 + "다음 한 작업" | 작업 마무리마다 |
 | `docs/journal.md` | 작업 로그 (역시간순 append) | 작업 끝낼 때마다 |
-| `docs/tasks.md` | 백로그 + 머지 history 표 | 작업 추가/완료/포기 시 + PR 머지 시 |
+| `docs/tasks.md` | 백로그 — **진행/예정(`[ ]`)** + 상단 "진행 중인 작업 인덱스" | 작업 추가/시작 시 |
+| `docs/tasks-done.md` | 완료·아카이브(`[x]`) + 머지 history 표 (2026-06-09 분리) | 작업 완료/포기 시 + PR 머지 시 |
 | `docs/sprints/SPRINT-N.md` | Sprint별 진입/산출물/DoD | Sprint 진입/종료 PR마다 |
 
 코드/문서를 바꿨는데 위 5개 중 관련된 것이 하나도 갱신되지 않았다면 그

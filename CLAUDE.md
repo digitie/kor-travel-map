@@ -33,7 +33,8 @@ rename 완료(PR#148). 역할은 "debug UI"를 넘어 krtour-map **admin/API 프
 ## 2. 현재 기준
 
 > **진척/스프린트 상태·"다음 한 작업"의 단일 정본은 `docs/resume.md` + 백로그
-> `docs/tasks.md`다.** 이 1쪽 요약에는 자주 바뀌는 PR 번호·스프린트 완료여부를
+> `docs/tasks.md`다.** 백로그는 2026-06-09부터 **진행/예정은 `docs/tasks.md`(상단에
+> 열린 항목 인덱스), 완료·아카이브는 `docs/tasks-done.md`**로 분리됐다. 이 1쪽 요약에는 자주 바뀌는 PR 번호·스프린트 완료여부를
 > 박지 않는다(반복 drift 회피 — `docs/reports/docs-consistency-audit-2026-06-06.md`
 > DA-D-01). 아래는 잘 바뀌지 않는 기준값만 둔다.
 

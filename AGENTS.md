@@ -422,7 +422,9 @@ python -m pytest -q
 **코드 작성 단계**다.
 
 > **현재 진척·스프린트 상태·"다음 한 작업"의 단일 정본은 `docs/resume.md`,
-> 백로그는 `docs/tasks.md`다.** 이 문서에는 자주 바뀌는 PR 번호/완료여부를 박지
+> 백로그는 `docs/tasks.md`다.** (2026-06-09 분리: **진행/예정 = `docs/tasks.md`**
+> (상단 "진행 중인 작업 인덱스"), **완료·아카이브 = `docs/tasks-done.md`**.)
+> 이 문서에는 자주 바뀌는 PR 번호/완료여부를 박지
 > 않는다(반복 drift 회피 — `docs/reports/docs-consistency-audit-2026-06-06.md`
 > DA-D-01). 운영 모델·ADR·포트·frontend stack 같은 **불변 사실**은 위 "TripMate
 > ↔ krtour-map 경계" / "디버그·관리 REST API 정책" / "Frontend stack" 절,
