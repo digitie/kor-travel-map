@@ -2778,20 +2778,21 @@ bbox 인코딩 2종, `status`↔`state`, 응답 `*_key`↔`*_id`)가 #317의 고
    고정), 코드 enum(`FEATURE_NOT_FOUND`/`INVALID_BBOX`/`TOO_MANY_IDS`/`VALIDATION_ERROR`/
    `RATE_LIMITED`/`LOCK_BUSY`/`DESTRUCTIVE_DISABLED`/`UNAUTHORIZED`/`UPSTREAM_UNAVAILABLE`)을
    확장 `code`로 유지한다.
-6. **응답 식별자 접미사 규약 — 의미 기준 전면 적용(외부 read 포함).** 호환성 동기의 "외부
-   필드 동결"은 두지 않는다. 규칙은 **의미**로만 정한다: 시스템 단일 식별자 = `*_id`,
-   **복합/자연키만 `*_key`**. 응답 본문 전체(외부 read 포함)에 적용 — `review_key`→`review_id`,
+6. **응답 식별자 접미사 규약 — 의미(본질) 기준 전면 적용.** 호환성/외부 동결 같은 동기는
+   두지 않고 **의미**로만 정한다: 시스템 단일 surrogate = `*_id`, **복합/자연키 = `*_key`**.
+   응답 본문 전체(외부 read 포함)에 적용 — surrogate인 `review_key`→`review_id`,
    `violation_key`→`issue_id`, `system_log_key`/`api_call_log_key`/`override_key`/`step_key`→
-   `*_id`, **`cluster_key`→`cluster_id`**(외부 read여도 단일 식별자라 개명). **`*_key` 유지는
-   근거 있는 것만**: 복합 자연키 `target_key`(+`external_system`), provider/source 어휘(ADR-044),
-   canonical `feature_id`. `lon`/`lat`/`name`/`category`/`marker_*`/`status`는 이미 일관 → 불변.
+   `*_id`. **`*_key` 유지는 본질이 자연/복합키인 것**: **`cluster_key`(행정구역 코드 sido/
+   sigungu/eupmyeondong = 자연키 → 유지, #316 재리뷰 C; 2차의 `cluster_id` 개명을 철회)**,
+   복합 자연키 `target_key`(+`external_system`), provider/source 어휘(ADR-044), canonical
+   `feature_id`. `lon`/`lat`/`name`/`category`/`marker_*`/`status`는 이미 일관 → 불변.
 7. **명명 통일을 코드/DB 레벨까지 전파.** REST 단 개명을 영구 edge 매핑으로 두면 ADR-046
-   (무-shim)과 어긋나므로, **식별자/상태를 물리 컬럼·ORM 속성·repo 함수/변수까지 end-to-end
-   정렬**(테이블별 1-PR migration, codegraph impact 선행). 대상: `review_key`→`review_id`,
-   `violation_key`→`issue_id`, ops 로그/내부 키 `*_key`→`*_id`, `cluster_key`→`cluster_id`,
-   `state`→`status`. **경계(개명 금지)**: provider/source 어휘(ADR-044 — `dataset_key`/
-   `source_record_key`/`source_entity_id`/`source_dataset_key`/`raw_*`), 복합 자연키
-   `target_key`(+`external_system`), canonical `feature_id`.
+   (무-shim)과 어긋나므로, **surrogate 식별자/상태를 물리 컬럼·ORM 속성·repo 함수/변수까지
+   end-to-end 정렬**(테이블별 1-PR migration, codegraph impact 선행). 대상: `review_key`→
+   `review_id`, `violation_key`→`issue_id`, ops 로그/내부 키 `*_key`→`*_id`, `state`→`status`.
+   **경계(개명 금지 — 자연/복합/provider/canonical)**: `cluster_key`(행정코드 자연키),
+   `target_key`(+`external_system`), provider/source 어휘(ADR-044 — `dataset_key`/
+   `source_record_key`/`source_entity_id`/`source_dataset_key`/`raw_*`), canonical `feature_id`.
 8. **action sub-resource 규약(확장성).** 부수효과 있는 상태 전이(Dagster 트리거/snapshot/
    lock/승인·거절)는 `POST {collection}/{id}/{verb}`(`deactivate`/`cancel`/`run-now`/`approve`/
    `reject`/`load`/`validate`/`swap`), 순수 필드 수정은 `PATCH {id}`, 생성은 `POST {collection}`,
@@ -2800,6 +2801,21 @@ bbox 인코딩 2종, `status`↔`state`, 응답 `*_key`↔`*_id`)가 #317의 고
    표면(외부+admin/ops) 계약 단일 정본**으로 두고, `docs/tripmate-rest-api.md`는 TripMate
    **소비 매핑 view**로 축소(계약 세부는 rest-api.md로 위임). 기계 정본 =
    `openapi.json`/`openapi.user.json`. 충돌 시 OpenAPI 우선. (수렴은 T-216g.)
+10. **좌표 필드명 cross-repo 정렬 = `lon`/`lat`(#316 재리뷰 B).** TripMate 정본(DEC-07)은
+    `longitude`/`latitude`지만, krtour는 `lon`/`lat`로 이미 일관하고 대용량 지도 feature
+    payload에 terse가 바이트·파싱에 유리하다. **krtour 정본 = `lon`/`lat` 유지**, TripMate가
+    DEC-07을 `lon`/`lat`로 하향 정렬해 **경계 매핑 0**으로 만든다.
+11. **`feature_id` 값 불변식(#316 재리뷰 D — 안정성 최우선).** 외부 `feature_id` **값**은
+    provider 재적재·사용자 편집(#317 v0/v1)·버전 승급·soft delete에도 **절대 바뀌지 않는다**.
+    정체성이 바뀌는 사건(bjd 변경 등)은 **id 변경이 아니라 새 feature + link**로 모델링한다.
+    이름 동결(#6)과 **별개로 값 불변**을 외부 계약에 명문화한다(소비자가 FK·snapshot 키로 영속).
+12. **envelope 불변식(#316 재리뷰 E).** `meta`는 **모든 응답에 항상 present**(단건 GET 포함)
+    하고, 모든 응답(성공 `meta` 또는 problem+json)은 `request_id`를 싣는다. `meta.page.next_cursor`
+    는 **항상 키로 존재**하고 소진 시 `null`(omit 금지) — 페이지 종료 신호를 계약으로 lock.
+13. **`/vN` major 거버넌스(#316 재리뷰 F).** hard cutover 하에서 `/v1`→`/v2`가 유일한 breaking
+    수단이므로 규칙을 둔다: **pre-1.0(현재)** = `/v1` 가변, in-place breaking 허용(지금 정리
+    방침과 일치). **v1.0.0 GA에서 `/v1` 동결**, 이후 breaking = `/v2` + N-1 동시지원. OpenAPI는
+    major별 분리 export.
 
 ### 근거
 
@@ -2820,9 +2836,9 @@ bbox 인코딩 2종, `status`↔`state`, 응답 `*_key`↔`*_id`)가 #317의 고
   export·frontend·docs를 admin/ops까지 일괄 갱신해야 한다.
 - 내부 식별자 물리 개명은 테이블별 migration + 큰 mechanical churn(`review_key` 291·
   `violation_key` 118건)을 동반 — codegraph impact 후 단계화.
-- **무-호환 clean cut**: 외부 read 필드 개명(`cluster_key`→`cluster_id`)·envelope 재배치
-  (`data.next_cursor`→`meta.page`)·구 경로 제거가 소비자(TripMate)를 한 번에 깬다. pre-prod
-  단계라 의도적으로 수용 — 안정 spec commit에서 소비자가 일괄 추종한다.
+- **무-호환 clean cut**: envelope 재배치(`data.next_cursor`→`meta.page`)·파라미터/필드 개명·
+  좌표명 정렬(`lon`/`lat`)·구 경로 제거가 소비자(TripMate)를 한 번에 깬다. pre-prod 단계라
+  의도적으로 수용 — 안정 spec commit에서 소비자가 lockstep으로 추종한다(T-181).
 
 ### 전환 정책 — 무-호환 clean cut (#316 2차 리뷰, 사용자 지시)
 
@@ -2832,8 +2848,9 @@ bbox 인코딩 2종, `status`↔`state`, 응답 `*_key`↔`*_id`)가 #317의 고
 - **dual-support/deprecation 창 없음**: 구 unprefixed 경로·호환 alias를 유지하지 않고 `/v1`로
   **즉시 단일 전환**한다(이중 코드경로 제거 = 안정성). `/debug/health`·`/debug/version`은
   deprecate가 아니라 **제거**(→ `/health`·`/version`·`/v1/ops/health-deep`로 수렴).
-- **개명도 즉시 전면 적용**: 외부 read 포함 명명 규칙을 한 번에 적용(#6·#7). `cluster_key`→
-  `cluster_id` 등 외부 소비 필드도 그대로 개명한다 — 동결 carve-out 없음.
+- **개명도 즉시 전면 적용(의미 기준)**: 명명 규칙을 외부 read 포함 한 번에 적용(#6·#7).
+  단 `cluster_key`(행정코드 자연키)는 규칙상 `*_key`가 맞아 **유지**(동결이 아니라 본질).
+  `longitude`/`latitude`↔`lon`/`lat` cross-repo 정렬도 이 컷에서 처리(#10).
 - **기계 정본 + codegen pin**: `openapi.json`/`openapi.user.json`을 기계 정본으로 유지하고,
   `/v1` 안정 commit에서 소비자(T-210e codegen + 계약 테스트)가 그 spec에 핀한다. 이게
   유일한 "안전판"이며, 별도 호환 창은 두지 않는다.

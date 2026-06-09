@@ -1242,25 +1242,29 @@ T-214/T-215(#317)의 `/v1` 1차 정리 위에 ADR-048 delta를 얹는다. 정본
   `/features` 평면 cursor화(`limit le=5000` 폐기), `in-bounds` `max_items` 5000→2000.
 - [ ] **T-216c — envelope payload/meta 분리.** 라우터별 `*Meta` 중복 → 공유 `Meta`. `data`는
   payload만, 페이지네이션은 **`meta.page{page_size,next_cursor,total}`**(`total` opt-in
-  `?include_total=true`). `data.next_cursor`/`data.total_count`/파생 `count` 폐기. 성공 응답
-  meta에도 `request_id`.
-- [ ] **T-216d — parameter/error 정합성.** bbox 분리 float 통일(`search` CSV 제거),
+  `?include_total=true`). `data.next_cursor`/`data.total_count`/파생 `count` 폐기. **envelope
+  불변식(ADR-048 #12)**: `meta`·`request_id` 모든 응답에 present, `meta.page.next_cursor` 항상
+  키 존재(소진 시 `null`, omit 금지) — 계약/라우터 테스트로 lock.
+- [ ] **T-216d — parameter/error/좌표 정합성.** bbox 분리 float 통일(`search` CSV 제거),
   상태 필드 `state`→`status`, issue/violation noun을 `issue_*`로. 에러 RFC7807
   `application/problem+json`(`code`/`request_id`/`errors[]` top-level 확장, `{error:{}}` 제거).
-- [ ] **T-216e — 명명 통일(경로+응답 본문, 외부 read 포함).** `dedup-review`→`dedup-reviews`,
+  **좌표명 cross-repo 정렬 = `lon`/`lat`**(ADR-048 #10; TripMate DEC-07 하향 정렬). **`feature_id`
+  값 불변식**(ADR-048 #11)을 외부 계약/테스트에 명시.
+- [ ] **T-216e — 명명 통일(경로+응답 본문, 본질 기준).** `dedup-review`→`dedup-reviews`,
   `enrichment-review`→`enrichment-reviews`, `{review_key}`→`{review_id}`,
-  `/admin/issues/{violation_key}`→`{issue_id}`. 응답 UUID 단일식별자 `*_key`→`*_id`
-  (**`cluster_key`→`cluster_id` 등 외부 read 포함** — 동결 carve-out 없음). action
-  sub-resource 규약(ADR-048 #8) 명시. 유지는 근거 있는 것만(복합 자연키/provider/`feature_id`).
-- [ ] **T-216f — 코드/DB 명명 전파.** REST 개명을 물리 컬럼·ORM·repo까지 end-to-end(테이블별
-  1-PR migration, codegraph impact 선행): `review_key`→`review_id`, `violation_key`→`issue_id`,
-  ops 로그/내부 키 `*_key`→`*_id`, `cluster_key`→`cluster_id`, `state`→`status`(import_jobs/
-  offline_uploads/feature_update_requests). **경계(개명 금지, ADR-044)**: provider/source
-  어휘(`dataset_key`/`source_record_key`/`source_entity_id`/`source_dataset_key`/`raw_*`)·
-  복합 자연키(`target_key`+`external_system`)·canonical `feature_id`.
-- [ ] **T-216g — 단일 정본 수렴.** `docs/rest-api.md`를 전 표면 계약 단일 정본으로 두고,
-  `docs/tripmate-rest-api.md`를 TripMate 소비 매핑 view로 축소(계약 세부는 rest-api.md 위임,
-  ADR-048 #9, drift 회피).
+  `/admin/issues/{violation_key}`→`{issue_id}`. 응답 surrogate `*_key`→`*_id`. action
+  sub-resource 규약(ADR-048 #8) 명시. **유지(자연/복합키)**: `cluster_key`(행정코드 자연키 —
+  개명 안 함, #316 재리뷰 C), `target_key`, provider 어휘, `feature_id`.
+- [ ] **T-216f — 코드/DB 명명 전파(surrogate만).** REST 개명을 물리 컬럼·ORM·repo까지
+  end-to-end(테이블별 1-PR migration, codegraph impact 선행): `review_key`→`review_id`,
+  `violation_key`→`issue_id`, ops 로그/내부 키 `*_key`→`*_id`, `state`→`status`(import_jobs/
+  offline_uploads/feature_update_requests). **경계(개명 금지)**: `cluster_key`(행정코드 자연키),
+  provider/source 어휘(ADR-044 — `dataset_key`/`source_record_key`/`source_entity_id`/
+  `source_dataset_key`/`raw_*`)·복합 자연키(`target_key`+`external_system`)·canonical `feature_id`.
+- [ ] **T-216g — 단일 정본 수렴 + 버전 거버넌스.** `docs/rest-api.md`를 전 표면 계약 단일
+  정본으로 두고 `docs/tripmate-rest-api.md`를 소비 매핑 view로 축소(ADR-048 #9). `/vN`
+  거버넌스(#13: pre-1.0 in-place breaking, v1.0.0 GA에서 `/v1` 동결→이후 `/v2`+N-1, OpenAPI
+  major별 export)를 문서·export 스크립트에 반영.
 
 **Phase 7 — ADR-045 전체점검/튜닝 (ADR-045 잔여 task 완료 후 시작)**
 

@@ -25,7 +25,7 @@
 | pagination | cursor/page_size(고수준) | `page_size` 단일·2-티어 캡·`total` opt-in·`/features` cursor |
 | parameter | bbox 분리 float 권고 | bbox 통일·`state`→`status`·issue noun·다중 반복 |
 | error | header 규약(T-214g) | RFC7807 `application/problem+json` body |
-| 응답 식별자 | — | `*_id`(단일)/`*_key`(복합) **전면**, `*_key`→`*_id`(`cluster_key`→`cluster_id` 포함) |
+| 응답 식별자 | — | surrogate `*_id` / 자연·복합키 `*_key` **전면(본질 기준)**. `cluster_key`(행정코드 자연키) 유지 |
 | 전환 | dual-support alias | **무-호환 clean cut**(구 경로/`/debug/health|version` 제거) |
 | 코드/DB 명명 | — | 내부 소유 end-to-end 정렬(테이블별 migration) |
 
@@ -40,11 +40,14 @@
 ### 1.2 Versioning (ADR-048 — #317 확장)
 - **전 표면 `/v1`**: `/v1/features/*`·`/v1/tripmate/*`·`/v1/categories`·`/v1/providers/*`
   **+ `/v1/admin/*`·`/v1/ops/*`·`/v1/debug/*`**(ADR-048이 #317의 admin 비버저닝을 supersede).
-- **비버저닝 고정**: `/health`·`/version`. breaking은 `/v1`→`/v2`. deprecate 시
-  `Deprecation`/`Sunset` 헤더, 경로별 shim 금지(ADR-046) — mount 1곳 전환.
+- **비버저닝 고정**: `/health`·`/version`. 경로별 shim 금지(ADR-046) — mount 1곳 전환.
 - **무-호환 clean cut(ADR-048, 사용자 지시)**: 호환성은 고려하지 않는다. 구 unprefixed
   경로·호환 alias를 유지하지 않고 `/v1`로 **즉시 단일 전환**한다(이중 코드경로 제거). 소비자
-  (TripMate)는 안정 spec commit 기준으로 일괄 추종 — 별도 dual-support 창 없음.
+  (TripMate)는 안정 spec commit 기준으로 lockstep 추종(T-181) — 별도 dual-support 창 없음.
+- **`/vN` major 거버넌스(ADR-048 #13)**: **pre-1.0(현재)** = `/v1` 가변, in-place breaking
+  허용(위 clean cut). **v1.0.0 GA에서 `/v1` 동결** → 이후 breaking = `/v2` + N-1 동시지원
+  (`Deprecation`/`Sunset` 헤더), OpenAPI major별 분리 export. 즉 "지금은 깨도 되고, GA 후엔
+  `/v2`로만 깬다"를 규칙화.
 
 ### 1.3 인증 (ADR-005 / ADR-045 D-1, #314)
 - `/v1/tripmate/*`: `ServiceToken`(`X-Krtour-Service-Token`, 미설정 시 비강제, 상수시간).
@@ -114,7 +117,7 @@ GET /health        GET /version
 ```
 GET /v1/features                        # 🔁 page_size+cursor (현재 limit-only)
 GET /v1/features/search                 # q|bbox, page_size+cursor, meta.page.total opt-in
-GET /v1/features/in-bounds              # clusters[](cluster_id)/items[], max_items cap
+GET /v1/features/in-bounds              # clusters[](cluster_key=행정코드)/items[], max_items cap
 GET /v1/features/nearby                 # 반경, page_size+cursor, distance_m
 GET /v1/features/nearby/by-target       # 등록 POI cache target 주변
 GET /v1/features/{feature_id}           # 단건 상세
@@ -187,24 +190,35 @@ POST /v1/debug/etl/{provider}/{dataset}/preview
 
 | 항목 | 정본 | 비고 |
 |------|------|------|
-| feature_id | `f_{bjd\|global}_{kind[0]}_{sha1[:16]}` 문자열 | UUID 아님 |
+| feature_id | `f_{bjd\|global}_{kind[0]}_{sha1[:16]}` 문자열 | UUID 아님. **값 불변식**(아래) |
 | 표시명 | `name`(not `title`) | |
-| 좌표(목록) | 평면 `lon`/`lat` | |
+| 좌표(목록) | 평면 `lon`/`lat`(cross-repo 정본, ADR-048 #10) | TripMate DEC-07도 `lon`/`lat`로 정렬 |
 | 주소 | 구조화 `address`+`*_code` | |
 | category | 8자리 코드 + `/v1/categories` label | |
 | 날씨 | metric 목록 + `forecast_style` | |
 | envelope | `{data,meta}`, 목록 `data={items}` + `meta.page{page_size,next_cursor,total}` | §1.4 |
 
-### 3.1 응답 필드 명명 규약 (🔁 ADR-048 — 의미 기준 전면 적용)
-- **식별자(외부 read 포함)**: 시스템 단일 식별자 = `*_id`, **복합/자연키만 `*_key`**. 응답
-  본문 전체에 적용 — `review_key`→`review_id`, `violation_key`→`issue_id`, ops 로그/내부 키
-  `*_key`→`*_id`, **`cluster_key`→`cluster_id`**(외부 read여도 단일 식별자). **`*_key` 유지는
-  근거 있는 것만**: 복합 자연키 `target_key`(+`external_system`), provider/source 어휘
-  (`dataset_key` 등, ADR-044), canonical `feature_id`. 호환 동기의 "외부 필드 동결" carve-out
-  없음.
+### 3.1 응답 필드 명명 규약 (🔁 ADR-048 — 의미/본질 기준 전면 적용)
+- **식별자(외부 read 포함)**: 시스템 단일 surrogate = `*_id`, **복합/자연키 = `*_key`**.
+  응답 본문 전체에 적용 — surrogate `review_key`→`review_id`, `violation_key`→`issue_id`,
+  ops 로그/내부 키 `*_key`→`*_id`. **`*_key` 유지(본질이 자연/복합키)**: `cluster_key`
+  (**행정구역 코드 sido/sigungu/eupmyeondong = 자연키 → 유지**; 2차의 `cluster_id` 개명 철회,
+  #316 재리뷰 C), 복합 자연키 `target_key`(+`external_system`), provider/source 어휘
+  (`dataset_key` 등 ADR-044), canonical `feature_id`. 호환 동기의 "동결" 버킷은 두지 않고
+  본질로 분류한다.
 - **상태**: `status`로 통일(`state` 개명). `severity` 별개 축.
 - **timestamp**: `*_at`(ISO 8601 KST). 목록 길이용 `count`는 폐기(=`len(items)`), 전체 수는
   `meta.page.total`(opt-in).
+
+### 3.2 `feature_id` 값 불변식 (안정성, ADR-048 #11)
+외부 `feature_id` **값**은 provider 재적재·사용자 편집(#317 v0/v1)·버전 승급·soft delete에도
+**바뀌지 않는다**. 정체성이 바뀌는 사건(bjd 변경 등)은 id 변경이 아니라 **새 feature + link**로
+모델링한다. 소비자(TripMate)가 FK·snapshot 키로 영속화하므로 값 안정성을 계약으로 보장.
+
+### 3.3 envelope 불변식 (안정성, ADR-048 #12)
+- `meta`는 **모든 응답에 항상 present**(단건 GET 포함). 성공 `meta`/에러 problem+json 모두
+  `request_id`를 싣는다.
+- `meta.page.next_cursor`는 **항상 키로 존재**, 소진 시 `null`(omit 금지) — 페이지 종료 신호.
 
 ---
 
@@ -225,7 +239,8 @@ POST /v1/debug/etl/{provider}/{dataset}/preview
 | `search` 항상 COUNT | `meta.page.total` opt-in | 🔁 |
 | `search` bbox CSV | 분리 float | 🔁 |
 | `state`(jobs/uploads/requests) | `status` | 🔁 |
-| 응답 `*_key`(UUID 단일, 외부 read 포함) | `*_id`(`cluster_key`→`cluster_id` 포함) | 🔁 |
+| 응답 surrogate `*_key`(review/violation/log…) | `*_id` (`cluster_key` 등 자연키는 유지) | 🔁 |
+| 좌표 `lon`/`lat` ↔ TripMate `longitude`/`latitude` | `lon`/`lat`로 cross-repo 정렬 | 🔁 #10 |
 | `{violation_key}`/`{review_key}` | `{issue_id}`/`{review_id}`, `*-reviews` 복수 | 🔁 |
 | `{error:{…}}` | problem+json(`code`/`request_id` 확장) | 🔁 |
 | `/debug/health`·`/debug/version` | 제거(clean cut) | 🔁 |
@@ -255,7 +270,7 @@ ORM·repo까지 end-to-end 정렬**(ADR-046 무-shim), provider/복합키는 경
 | `coord_key`/`system_log_key`/`api_call_log_key`/`override_key`/`step_key` | 내부 | ✅ | `*_id` | 28/28/26/13/5 |
 | `state`(import_jobs/offline_uploads/feature_update_requests) | 내부 | ✅ | `status` | 3 테이블 |
 | `dataset_key`/`source_record_key`/`source_entity_id` | provider/source(ADR-044) | ❌ | 유지 | 859/398/234 |
-| `cluster_key` | 외부 read이나 단일 식별자 | ✅ | `cluster_id` | — |
+| `cluster_key` | 행정구역 코드 = 자연키 | ❌ | 유지(규칙상 `*_key`) | — |
 | `target_key`(+`external_system`) | 복합 자연키(근거 있음) | ❌ | 유지 | 130 |
 | `feature_id` | canonical | ❌ | 불변 | — |
 
@@ -268,8 +283,11 @@ codegraph impact 선행). raw `text()` SQL이 물리명을 써서 ORM attr만으
 ## 8. 변경 이력
 - 2026-06-09: #317(T-214/T-215) `/v1` 1차 정리 위에 ADR-048(admin/ops versioning 확장 +
   envelope/pagination/parameter/response 정합성 표준 + 코드/DB 명명 전파)을 반영.
-- 2026-06-09(2차, #316 무-호환 재검토): 호환성 제약을 빼고 일관성·확장성·안정성으로 재정리 —
-  (a) 외부 read 동결 carve-out 제거, 명명 규칙 의미 기준 전면 적용(`cluster_key`→`cluster_id`),
-  (b) envelope 페이지네이션을 `meta.page`로 분리(`data`=payload만, `count` 폐기),
-  (c) dual-support/deprecation 창 제거 — `/v1` clean cut + `/debug/health|version` 제거,
-  (d) action sub-resource 규약 명문화, (e) 단일 정본 수렴(T-216g). 실행 T-216a~g.
+- 2026-06-09(2차, #316 무-호환 재검토): 외부 read 동결 carve-out 제거, envelope
+  페이지네이션을 `meta.page`로 분리(`data`=payload만, `count` 폐기), dual-support 제거 →
+  `/v1` clean cut + `/debug/health|version` 제거, action sub-resource 규약, 단일 정본 수렴.
+- 2026-06-09(3차, #316 TripMate 재리뷰 A–F 반영): (B) 좌표명 cross-repo 정렬 = `lon`/`lat`
+  (ADR-048 #10), (C) **`cluster_key`는 행정코드 자연키라 유지**(2차 `cluster_id` 철회),
+  (D) `feature_id` **값 불변식** 명문화(§3.2), (E) envelope 불변식 lock(§3.3 — `meta` 항상
+  present·`request_id`·`next_cursor` null-not-omit), (F) `/vN` major 거버넌스(§1.2, #13).
+  실행 T-216a~g.

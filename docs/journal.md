@@ -2,6 +2,26 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-09 (claude) — ADR-048 #316 TripMate 재리뷰(A–F) 반영 + 2차 오류 정정
+
+**작업**: PR #316에 올라온 TripMate-소비자 재리뷰(호환성→정합성 입장 전환, A–F)를 판단·반영.
+무-호환 방향과 정렬되며, **2차의 `cluster_key→cluster_id` 개명이 오류**임을 잡아줬다. PR까지, 보류.
+
+- **(C) `cluster_key` 자연키로 재분류 → 유지(2차 `cluster_id` 철회)**. 코드 확인
+  (`feature_repo.py` rollup): `cluster_key`={행정코드 컬럼}(sido/sigungu/eupmyeondong) = **자연키**
+  → §3.1 규칙상 `*_key`가 맞음. "동결/compat"이 아니라 **본질**로 분류.
+- **(B) 좌표명 cross-repo 정렬 = `lon`/`lat`**(ADR-048 #10): TripMate DEC-07(`longitude`/
+  `latitude`)을 `lon`/`lat`로 하향 — 경계 매핑 0, terse payload.
+- **(D) `feature_id` 값 불변식 명문화**(§3.2, #11): provider 재적재·편집·버전승급·soft delete에
+  값 불변. 정체성 변경=새 feature+link. (소비자 FK/snapshot 영속 — 안정성 최우선.)
+- **(E) envelope 불변식 lock**(§3.3, #12): `meta`/`request_id` 항상 present, `next_cursor`
+  항상 키(소진 시 `null`, omit 금지).
+- **(F) `/vN` major 거버넌스**(§1.2, #13): pre-1.0 in-place breaking, v1.0.0 GA에서 `/v1`
+  동결→이후 `/v2`+N-1, OpenAPI major별 export.
+- **(A) clean cut**: 2차에서 이미 dual-support 제거 — 재리뷰의 모순 지적(shim 금지↔alias)
+  해소 확인. ADR-048 결정 #6/#7 정정 + #10~#13 신설, rest-api.md §1.2/§3.1/§3.2/§3.3/§5/§7/§8,
+  T-216c~g. **검증**: 문서 전용(코드 없음).
+
 ## 2026-06-09 (claude) — ADR-048 무-호환 재검토(#316 2차): 일관성·확장성·안정성 우선
 
 **작업**: 사용자 지시 "호환성 신경쓰지 말고 늦기 전에 일관성/확장성/안정성으로 정리". 앞서
