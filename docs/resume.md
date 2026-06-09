@@ -1,5 +1,11 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-10 claude 작업 메모 — 데이터 재적재 안전성 검증
+
+재적재 충돌·결측·엎어쓰기 검증 → `docs/reports/data-reload-safety-2026-06-10.md`. 기본 안전망
+OK(v0/v1 가드·soft-delete·advisory lock). 보강 2건: T-215d(버전 단조화 v0,v1,v2,v3+디폴트=최신,
+F-2), T-104(dedup merge 영속화, F-1).
+
 ## 2026-06-09 Codex 작업 메모 — T-216a~e REST 계약 표면 정리
 
 T-216의 표면 계약 묶음(a~e)을 한 PR 범위로 구현했다. admin/ops/debug까지 `/v1`

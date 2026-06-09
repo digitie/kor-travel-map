@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-10 (claude) — 데이터 재적재 안전성 검증 + 문서화 (충돌·결측·엎어쓰기)
+
+사용자 지시로 재적재 안전성 꼼꼼 검증. (분석 초기에 stale `sandbox/claude` 트리를 보고 오판
+했다가 origin/main으로 재검증해 정정.) 결과: `docs/reports/data-reload-safety-2026-06-10.md`.
+
+- **엎어쓰기 ✅**: `_UPSERT_FEATURE_SQL` 전 컬럼이 `data_origin='user_request' AND data_version>0`
+  이면 보존(provider 재적재가 사용자 편집 안 덮음). 가드 `>0`이라 단조 버전 호환. source_record DO NOTHING.
+- **결측 ✅**: snapshot cleanup이 `data_origin<>'user_request'` + `deleted_at IS NULL`만 soft-delete
+  (사용자 feature·기삭제분 제외). cursor 실패 시 미전진.
+- **충돌 ✅**: ON CONFLICT + advisory lock(offline/import/merge) + dedup queue pending만 갱신.
+- **F-1(Medium)**: dedup merge 비영속 — 재적재가 merge된 loser 부활→중복 재생성(가드/redirect 미설정).
+- **F-2(요건 gap)**: 버전이 binary v0/v1(write `version=1` 하드코딩). 사용자 요건은 단조
+  v0,v1,v2,v3…+디폴트=최신. 스키마(`data_version` Integer≥0)·재적재 가드는 호환, 쓰기만 보강.
+- 후속 task T-215d(단조화)·T-104(merge 영속화) 추가. 문서+task 전용.
+
 ## 2026-06-09 (codex) — T-216a~e REST 계약 표면 정리
 
 **작업**: 관련도가 높은 `/v1` mount, pagination/envelope, error, REST 표면 명명, OpenAPI/frontend/e2e
