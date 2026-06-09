@@ -470,7 +470,15 @@ detail kind union)는 MV로. `REFRESH MATERIALIZED VIEW CONCURRENTLY`로 lock
 
 ### 9.5 pg_prewarm 부팅 후 warm-up — T-102
 
-**v2 1차 범위에서는 미사용** — 운영 결정 (T-102 보류 항목).
+**메커니즘 구현 완료 (2026-06-09, T-102)** — 효과는 도입 조건 충족 시 큼:
+- migration `0022_pg_prewarm_extension` (`x_extension.pg_prewarm`).
+- 명시적 헬퍼 `krtour.map.infra.prewarm.prewarm_relations`(hot relation buffer warm-up,
+  확장 미설치 시 no-op). 부팅 훅/CLI/Dagster가 배포 직후 호출하는 용도.
+- docker-compose postgres `shared_preload_libraries=pg_prewarm` + `pg_prewarm.autoprewarm=on`
+  (background: 주기적 buffer 목록 dump + 재기동 시 자동 reload = "부팅 후 warm-up").
+- `/ops/health-deep`의 `prewarm` 컴포넌트(extension/autoprewarm 상태, 정보용).
+- **효과 조건**: 명시적 P99 SLO + 재배포 빈도 높음 + `shared_buffers`가 hot 데이터 fit
+  (Odroid 기본 512MB는 일부만). 조건 미충족 시 비용은 낮고(저비용 worker) 이득이 작다.
 
 **도입 시 장점**:
 - 컨테이너 재시작/장애 복구 직후 cold-start cliff 제거. 첫 1~2분 P99

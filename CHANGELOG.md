@@ -7,6 +7,17 @@
 
 ## [Unreleased]
 
+### DB — pg_prewarm 부팅 후 warm-up 메커니즘 (T-102, 2026-06-09)
+
+- **ADDED**: migration `0022_pg_prewarm_extension` — `pg_prewarm` 확장을 `x_extension`에 생성.
+- **ADDED**: `krtour.map.infra.prewarm.prewarm_relations` — hot relation을 `pg_prewarm`으로
+  buffer warm-up하는 명시적 헬퍼(확장 미설치 시 no-op, 존재하지 않는 relation skip).
+- **ADDED**: docker-compose postgres `shared_preload_libraries=pg_prewarm` +
+  `autoprewarm=on`(background 재기동 자동 warm-up). `/ops/health-deep`에 `prewarm` 컴포넌트.
+- 효과는 도입 조건(P99 SLO + shared_buffers fit) 충족 시 큼 — `docs/performance.md §9.5`.
+
+## [Unreleased]
+
 ### marker — map-marker-react maki glyph 보강 + Python↔TS drift gate (T-017, 2026-06-09)
 
 - **ADDED**: `tests/unit/test_category_maki_consistency.py` — Python category catalog의 maki

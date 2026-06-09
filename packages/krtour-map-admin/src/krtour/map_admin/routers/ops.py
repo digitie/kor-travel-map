@@ -405,6 +405,34 @@ async def _check_postgis(session: AsyncSession) -> OpsHealthCheck:
     return OpsHealthCheck(component="postgis", status="ok", detail=str(version))
 
 
+async def _check_prewarm(session: AsyncSession) -> OpsHealthCheck:
+    """pg_prewarm 확장/autoprewarm 상태(정보용, T-102). opt-in이라 degrade 안 함."""
+    try:
+        present = (
+            await session.execute(
+                text("SELECT 1 FROM pg_extension WHERE extname = 'pg_prewarm'")
+            )
+        ).scalar_one_or_none() is not None
+        spl = (
+            await session.execute(
+                text("SELECT current_setting('shared_preload_libraries', true)")
+            )
+        ).scalar_one_or_none() or ""
+    except SQLAlchemyError as exc:
+        return OpsHealthCheck(
+            component="prewarm", status="ok", detail=f"미점검: {str(exc)[:120]}"
+        )
+    autoprewarm = "pg_prewarm" in spl
+    return OpsHealthCheck(
+        component="prewarm",
+        status="ok",
+        detail=(
+            f"extension={'present' if present else 'absent'}, "
+            f"autoprewarm={'on' if autoprewarm else 'off'}"
+        ),
+    )
+
+
 @router.get(
     "/health-deep",
     response_model=OpsHealthDeepResponse,
@@ -423,6 +451,7 @@ async def get_ops_health_deep(
     checks = [
         await _check_database(session),
         await _check_postgis(session),
+        await _check_prewarm(session),
     ]
     overall = "ok" if all(check.status == "ok" for check in checks) else "degraded"
     if overall != "ok":

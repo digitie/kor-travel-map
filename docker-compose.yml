@@ -1,6 +1,16 @@
 services:
   postgres:
     image: postgis/postgis:16-3.5-alpine
+    # T-102 — pg_prewarm autoprewarm background worker(부팅 후 buffer warm-up). 확장 자체는
+    # alembic 0022가 만들고, autoprewarm(주기 dump + 재기동 reload)은 아래 server config로 켠다.
+    # 저비용이라 standalone 스택 기본 on. 효과는 shared_buffers가 hot 데이터에 fit할 때 큼
+    # (docs/performance.md §9.5). 끄려면 command override 제거.
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_preload_libraries=pg_prewarm"
+      - "-c"
+      - "pg_prewarm.autoprewarm=on"
     environment:
       POSTGRES_DB: ${KRTOUR_MAP_POSTGRES_DB:-krtour_map}
       POSTGRES_USER: ${KRTOUR_MAP_POSTGRES_USER:-krtour_map}
