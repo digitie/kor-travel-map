@@ -6,19 +6,18 @@
 
 ## 진행 중인 작업 인덱스 (열린 `[ ]` 항목)
 
-> 총 16건. 상세는 아래 각 섹션. 완료 이력은 [`tasks-done.md`](tasks-done.md).
+> 총 15건. 상세는 아래 각 섹션. 완료 이력은 [`tasks-done.md`](tasks-done.md).
 
 - **다음 (우선순위 순)**
   - [ ] TripMate 측 후속 작업 추적
 - **보류 (v2 1차 범위 외)**
   - [ ] Materialized View 도입 검토
   - [ ] streaming ETL (Kafka/Redpanda) 대응
-- **Phase 6 — TripMate 연계/정리 (일부 TripMate repo)**
-  - [ ] T-210a
-  - [ ] T-210b
-  - [ ] T-210c
-  - [ ] T-210d
-  - [ ] T-210e
+- **Phase 6 — TripMate 연계/정리 (대부분 TripMate repo 외부)**
+  - [ ] T-210e — `openapi-typescript` client 생성 (T-212e 후 API shape 안정 시)
+  - [ ] T-210b — TripMate 문서 supersede **(TripMate repo, 외부 추적)**
+  - [ ] T-210c — TripMate `apps/etl` 레거시 Dagster 이관/삭제 **(TripMate repo, 외부)**
+  - [ ] T-210d — TripMate httpx OpenAPI client 신규 **(TripMate repo, 외부)**
 - **Phase 6.8 — REST API 정합성 심화 (2026-06-09, `T-216`, ADR-048)**
   - [ ] T-216a — `/v1` clean cut(admin/ops/debug 포함).
   - [ ] T-216b — pagination 단일화.
@@ -622,19 +621,23 @@ lint-imports/pytest/coverage, frontend type-check/e2e). 실데이터 검증은 T
 > 아래엔 **열린 항목이 남은 Phase(6, 6.8, 7)**만 둔다 — 그래서 Phase 번호가 건너뛴다.
 
 
-**Phase 6 — TripMate 연계/정리 (일부 TripMate repo)**
-- [ ] T-210a — `docs/tripmate-rest-api.md` 확정(본 PR 1차) → 구현 시 OpenAPI 동기.
-      Sprint 5 closure 전 `openapi.user.json`과 실제 TripMate 요구사항을 다시 대조한다.
-      2026-06-08 Codex가 API endpoint review와 TripMate 소비자 문서를 종합해
-      `docs/tripmate-rest-api.md`를 `/v1` 목표 계약 기준으로 재작성했다. 실제
-      OpenAPI/라우터 동기화는 `T-214`에서 진행한다.
-- [ ] T-210b — TripMate 문서 supersede(직접 import/공유 DB/owned Dagster, TripMate repo).
-      대상 문서 목록과 치환 문구는 PR 본문에 남기고, krtour-map repo에는 링크/요약만 둔다.
-- [ ] T-210c — TripMate `apps/etl`에 남은 레거시 Dagster 문서/스켈레톤은
-      krtour-map-owned Dagster(T-208)로 이관하거나 삭제.
-- [ ] T-210d — TripMate httpx OpenAPI client 신규(직접 import 제거, TripMate repo).
-- [ ] T-210e — `openapi-typescript` client 생성 (D-4 timing).
-      T-212e 최종 검증 뒤 API shape가 안정된 commit 기준으로 진행한다.
+**Phase 6 — TripMate 연계/정리 (대부분 TripMate repo 외부)**
+
+> 본 저장소 actionable은 **T-210e뿐**(T-212e 후). T-210b/c/d는 **TripMate 저장소** 작업으로
+> 여기선 추적만 한다. T-210a는 이번 세션(ADR-048/`rest-api.md`/`tripmate-rest-api.md` 재정비)
+> 으로 흡수돼 닫는다.
+
+- [x] T-210a — `docs/tripmate-rest-api.md` 확정 + `/v1` 목표 계약 정리. **완료(2026-06-09)**
+      — 2026-06-08 Codex 1차 재작성 + 2026-06-09 ADR-048/`docs/rest-api.md`(전 표면 단일 정본)/
+      `tripmate-rest-api.md`(소비 view) 재정비로 충족. OpenAPI/라우터 실제 동기화는 `T-214`
+      (완료), Sprint 5 마감 시 최종 `openapi.user.json`↔요구사항 재대조는 **T-212e closure**에 흡수.
+- [ ] T-210e — `openapi-typescript` client 생성 (D-4 timing). T-212e 최종 검증 뒤 API shape가
+      `/v1`로 안정된 commit 기준으로 진행한다. **(본 저장소 actionable, deferred)**
+- [ ] T-210b — TripMate 문서 supersede(직접 import/공유 DB/owned Dagster). **(TripMate repo,
+      외부 — 본 저장소 미실행, 추적만)** 대상 문서/치환 문구는 그 PR 본문에, 여기엔 링크/요약만.
+- [ ] T-210c — TripMate `apps/etl` 레거시 Dagster 문서/스켈레톤을 krtour-map-owned Dagster
+      (T-208)로 이관/삭제. **(TripMate repo, 외부)**
+- [ ] T-210d — TripMate httpx OpenAPI client 신규(직접 import 제거). **(TripMate repo, 외부)**
 
 
 **Phase 6.8 — REST API 정합성 심화 (2026-06-09, `T-216`, ADR-048)**

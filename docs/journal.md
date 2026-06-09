@@ -2,6 +2,14 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-09 (claude) — T-210 정리: a 닫기 + b/c/d 외부(TripMate repo) 태그
+
+사용자 질문(T-210 인덱스에 설명 누락 + 불필요한가)에 대응. 인덱스 생성 스크립트가
+`T-210x — 설명` em-dash 앞만 잘라 ID만 남은 defect 수정. T-210a는 이번 세션 ADR-048/
+rest-api.md/tripmate-rest-api.md 재정비로 흡수 → 닫음(Sprint5 재대조는 T-212e closure). 
+T-210b/c/d는 TripMate 저장소 작업이라 외부 태그(추적만), T-210e만 본 저장소 actionable
+(T-212e 후 codegen). 문서 전용.
+
 ## 2026-06-09 (codex) — T-215c feature change workflow e2e
 
 **작업**: T-215b admin UI의 e2e workflow를 생성 타입 기반 route mock으로 보강.

@@ -1,5 +1,10 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-09 claude 작업 메모 — T-210 정리
+
+T-210a 닫기(ADR-048/문서 재정비로 흡수), b/c/d는 TripMate repo 외부 태그, e만 본 저장소
+actionable(T-212e 후). 인덱스 설명 누락 defect 수정.
+
 ## 2026-06-09 Codex 작업 메모 — T-215c feature change e2e workflow
 
 T-215b에서 만든 `/admin/features/change-requests` 화면의 workflow e2e를 보강했다.
