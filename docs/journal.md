@@ -2,6 +2,18 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-09 (codex) — T-215c feature change workflow e2e
+
+**작업**: T-215b admin UI의 e2e workflow를 생성 타입 기반 route mock으로 보강.
+
+- **Typed mock**: `components["schemas"]`에서 feature change record/list/write body/response 타입을
+  파생해 mock DTO drift를 type-check에서 잡게 했다.
+- **Workflow e2e**: pending→approve→applied, immediate mode create→applied,
+  update request 생성, delete request 생성→approve, soft delete 완료 표시와 action delete
+  필터를 검증한다.
+- **Route hygiene**: backend API mock은 Next RSC prefetch를 통과시켜 frontend document 요청과
+  admin REST API 요청을 분리했다.
+
 ## 2026-06-09 (claude) — T-102 pg_prewarm 부팅 후 warm-up (mechanism)
 
 보류(v2 1차 외) 항목이지만 사용자 지시로 메커니즘 구현. migration 0022(확장) +
