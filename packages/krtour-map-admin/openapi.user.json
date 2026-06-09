@@ -2154,32 +2154,88 @@
             }
           },
           {
-            "description": "min_lon,min_lat,max_lon,max_lat CSV.",
+            "description": "bbox 최소 경도 (WGS84).",
             "in": "query",
-            "name": "bbox",
+            "name": "min_lon",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "number"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "min_lon,min_lat,max_lon,max_lat CSV.",
-              "title": "Bbox"
+              "description": "bbox 최소 경도 (WGS84).",
+              "title": "Min Lon"
             }
           },
           {
+            "description": "bbox 최소 위도.",
             "in": "query",
-            "name": "limit",
+            "name": "min_lat",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "bbox 최소 위도.",
+              "title": "Min Lat"
+            }
+          },
+          {
+            "description": "bbox 최대 경도.",
+            "in": "query",
+            "name": "max_lon",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "bbox 최대 경도.",
+              "title": "Max Lon"
+            }
+          },
+          {
+            "description": "bbox 최대 위도.",
+            "in": "query",
+            "name": "max_lat",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "bbox 최대 위도.",
+              "title": "Max Lat"
+            }
+          },
+          {
+            "description": "페이지 크기.",
+            "in": "query",
+            "name": "page_size",
             "required": false,
             "schema": {
               "default": 50,
+              "description": "페이지 크기.",
               "maximum": 200,
               "minimum": 1,
-              "title": "Limit",
+              "title": "Page Size",
               "type": "integer"
             }
           },

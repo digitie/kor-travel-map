@@ -30,7 +30,6 @@ from krtour.map_admin.routers.feature_update_requests import (
 from krtour.map_admin.routers.features import (
     router as features_router,
 )
-from krtour.map_admin.routers.health import router as health_router
 from krtour.map_admin.routers.mois_detail import router as mois_detail_router
 from krtour.map_admin.routers.offline_uploads import router as offline_uploads_router
 from krtour.map_admin.routers.ops import router as ops_router
@@ -40,11 +39,8 @@ from krtour.map_admin.routers.poi_cache_targets import (
 )
 from krtour.map_admin.routers.providers import router as providers_router
 from krtour.map_admin.routers.public_status import router as public_status_router
-from krtour.map_admin.routers.version import router as version_router
 
 __all__ = [
-    "health_router",
-    "version_router",
     "etl_router",
     "admin_backups_router",
     "admin_restore_router",

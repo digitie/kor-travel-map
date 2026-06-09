@@ -350,21 +350,6 @@ def _detail_from_row(row: dict[str, Any]) -> FeatureDetailResponse:
     )
 
 
-def _parse_bbox_csv(value: str | None) -> tuple[float, float, float, float] | None:
-    if value is None:
-        return None
-    parts = [part.strip() for part in value.split(",")]
-    if len(parts) != 4:
-        raise ValueError("bbox는 min_lon,min_lat,max_lon,max_lat CSV 형식이어야 합니다")
-    try:
-        min_lon, min_lat, max_lon, max_lat = (float(part) for part in parts)
-    except ValueError as exc:
-        raise ValueError("bbox 좌표는 숫자여야 합니다") from exc
-    if min_lon > max_lon or min_lat > max_lat:
-        raise ValueError("bbox min 좌표가 max보다 큽니다")
-    return (min_lon, min_lat, max_lon, max_lat)
-
-
 # ── 라우터 ───────────────────────────────────────────────────────────
 
 
@@ -501,22 +486,37 @@ async def search_public_features(
         list[str] | None,
         Query(description="category code 반복 필터."),
     ] = None,
-    bbox: Annotated[
-        str | None,
-        Query(description="min_lon,min_lat,max_lon,max_lat CSV."),
-    ] = None,
-    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    min_lon: Annotated[float | None, Query(description="bbox 최소 경도 (WGS84).")] = None,
+    min_lat: Annotated[float | None, Query(description="bbox 최소 위도.")] = None,
+    max_lon: Annotated[float | None, Query(description="bbox 최대 경도.")] = None,
+    max_lat: Annotated[float | None, Query(description="bbox 최대 위도.")] = None,
+    page_size: Annotated[int, Query(ge=1, le=200, description="페이지 크기.")] = 50,
     cursor: Annotated[str | None, Query()] = None,
 ) -> FeatureSearchResponse:
     started_at = perf_counter()
+    bbox_parts = (min_lon, min_lat, max_lon, max_lat)
+    none_count = sum(1 for p in bbox_parts if p is None)
+    if none_count not in (0, 4):
+        raise HTTPException(
+            status_code=422,
+            detail="bbox는 min_lon/min_lat/max_lon/max_lat 4개를 모두 지정해야 합니다.",
+        )
+    bbox: tuple[float, float, float, float] | None = None
+    if (
+        min_lon is not None
+        and min_lat is not None
+        and max_lon is not None
+        and max_lat is not None
+    ):
+        bbox = (min_lon, min_lat, max_lon, max_lat)
     try:
         page = await feature_repo.search_features(
             session,
             q=q,
-            bbox=_parse_bbox_csv(bbox),
+            bbox=bbox,
             kinds=kind,
             categories=category,
-            limit=limit,
+            limit=page_size,
             cursor=cursor,
         )
     except ValueError as exc:

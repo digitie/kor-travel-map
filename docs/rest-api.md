@@ -161,6 +161,9 @@ GET/POST /v1/admin/offline-uploads  (+ {upload_id}[/preview|/validate|/validatio
 DELETE /v1/admin/offline-uploads/{upload_id}           # 🆕 정리 lifecycle
 GET    /v1/admin/poi-cache-targets
 GET/PUT/DELETE /v1/admin/poi-cache-targets/{external_system}/{target_key}  # 복합 자연키
+# T-214f 결정: POI cache target write(PUT/DELETE)는 admin/operator flow 전용.
+# TripMate 직접 write 미허용 — service-safe /v1/poi-cache-targets/* write 경로 안 둠.
+# TripMate는 등록된 target 기준 read(GET /v1/features/nearby/by-target)만 소비.
 GET/POST /v1/admin/backups   GET /v1/admin/backups/{backup_id}
 DELETE /v1/admin/backups/{backup_id}                   # 🆕 정리 lifecycle
 POST   /v1/admin/restore/{backup_id}[/swap]            # kill-switch
@@ -183,8 +186,8 @@ GET /v1/ops/health-deep · metrics · import-jobs[/{job_id}] · consistency/{rep
 ```
 GET /v1/debug/etl/providers · etl/{provider}/datasets · mois-license/{license_id}
 POST /v1/debug/etl/{provider}/{dataset}/preview
-⚠️ /debug/health · /debug/version → 제거(clean cut). 상태확인은 /health·/version·
-   /v1/ops/health-deep로 수렴. (debug 표면은 dev 전용, debug_routes_enabled로 gate.)
+✅ /debug/health · /debug/version 제거됨(T-214h, clean cut). 상태확인은 /health·/version·
+   /v1/ops/health-deep로 수렴. (나머지 debug 표면은 dev 전용, debug_routes_enabled로 gate.)
 ```
 - **action sub-resource 규약(ADR-048 #8)**: 부수효과 상태전이는 `POST {col}/{id}/{verb}`
   (`deactivate`/`cancel`/`run-now`/`approve`/`reject`/`load`/`validate`/`swap`), 순수 수정은
@@ -234,6 +237,17 @@ POST /v1/debug/etl/{provider}/{dataset}/preview
 `FEATURE_NOT_FOUND`(404) · `INVALID_BBOX`(422) · `TOO_MANY_IDS`(422) · `VALIDATION_ERROR`(422)
 · `RATE_LIMITED`(429) · `LOCK_BUSY`(409,`Retry-After:15`) · `DESTRUCTIVE_DISABLED`(403) ·
 `UNAUTHORIZED`(401) · `UPSTREAM_UNAVAILABLE`(503).
+
+### 4.1 표준 헤더 규약 (T-214g)
+| 헤더 | 방향 | 의미 | 상태 |
+|------|------|------|------|
+| `X-Request-ID` | 응답(전체) | 요청 상관추적. `meta.request_id`/problem+json `request_id`와 동일 | **구현됨** |
+| `Retry-After` | 응답(429/409) | `RATE_LIMITED`/`LOCK_BUSY` 재시도 지연(초). LOCK_BUSY=15 | **구현됨**(LOCK_BUSY) |
+| `Idempotency-Key` | 요청(변경 POST) | 동일 key 재시도 = 동일 결과 | 규약(구현 T-216) |
+| `RateLimit-Limit`/`RateLimit-Remaining`/`RateLimit-Reset` | 응답(429) | rate limit 상태 | 규약(구현 T-216) |
+| `Deprecation`/`Sunset` | 응답 | GA 후 `/v1`→`/v2` 전환 예고(ADR-048 #13). pre-1.0 clean cut에선 미사용 | 규약(GA 후) |
+
+에러 본문은 RFC 7807 `application/problem+json`(§1.5), 머신 코드는 위 enum을 확장 `code`로.
 
 ---
 

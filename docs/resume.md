@@ -1,5 +1,14 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-09 claude 작업 메모 — T-214 tail 완료 (e/f/g/h)
+
+T-214e(search bbox 4-float·page_size) + T-214f(POI write=admin only 결정) + T-214g(헤더/에러
+규약 표) + T-214h(`/debug/health|version` 제거 + frontend repoint) 한 PR. gates green.
+**→ Phase 6.6(T-214) 전부 완료.** 남은 REST 정합성 심화는 Phase 6.8(T-216a~g).
+
+**다음 한 작업 후보**: (1) **T-216a** admin/ops/debug `/v1` mount, (2) T-215b/c feature change
+UI/e2e, (3) T-212e 실데이터 reload.
+
 ## 2026-06-09 claude 작업 메모 — tasks.md 분리(진행/완료)
 
 tasks.md(1567줄)를 **진행/예정 = `tasks.md`(상단 열린항목 인덱스) + 완료·아카이브 =
