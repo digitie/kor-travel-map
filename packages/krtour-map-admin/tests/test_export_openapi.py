@@ -56,17 +56,17 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
 
     assert user["info"]["title"] == "krtour-map-user"
     assert set(user["paths"]) == {
-        "/categories",
-        "/providers/{provider}/last-sync",
+        "/v1/categories",
+        "/v1/providers/{provider}/last-sync",
         "/health",
         "/version",
-        "/features/in-bounds",
-        "/features/nearby",
-        "/features/nearby/by-target",
-        "/features/search",
-        "/features/{feature_id}",
-        "/features/{feature_id}/weather",
-        "/features/batch",
+        "/v1/features/in-bounds",
+        "/v1/features/nearby",
+        "/v1/features/nearby/by-target",
+        "/v1/features/search",
+        "/v1/features/{feature_id}",
+        "/v1/features/{feature_id}/weather",
+        "/v1/features/batch",
     }
     assert not any(path.startswith("/admin") for path in user["paths"])
     assert not any(path.startswith("/ops") for path in user["paths"])

@@ -32,7 +32,7 @@ def _fake_session(client: TestClient) -> None:
 @pytest.mark.unit
 def test_weather_in_openapi(client: TestClient) -> None:
     spec = client.get("/openapi.json").json()
-    assert "/features/{feature_id}/weather" in spec["paths"]
+    assert "/v1/features/{feature_id}/weather" in spec["paths"]
     assert "FeatureWeatherResponse" in spec["components"]["schemas"]
 
 
@@ -65,7 +65,7 @@ def test_weather_card_response_maps_metrics(
     monkeypatch.setattr(mod.weather_repo, "build_weather_card", _card)
     _fake_session(client)
     try:
-        r = client.get("/features/f1/weather")
+        r = client.get("/v1/features/f1/weather")
         assert r.status_code == 200
         d = r.json()["data"]
         assert d["feature_id"] == "f1"

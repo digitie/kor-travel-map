@@ -22,7 +22,7 @@ export type PoiCacheTargetTargetedPolicy =
 export type PoiCacheTargetConflictMode =
   PoiCacheTargetSchemas["PoiCacheTargetUpsertRequest"]["on_conflict"];
 export type NearbySort =
-  paths["/features/nearby/by-target"]["get"]["parameters"]["query"]["sort"];
+  paths["/v1/features/nearby/by-target"]["get"]["parameters"]["query"]["sort"];
 
 export type CoordinateBody = PoiCacheTargetSchemas["CoordinateBody"];
 export type PoiCacheTargetProviderOverride =
@@ -140,7 +140,7 @@ function fetchNearbyFeaturesByTarget(
   params: NearbyByTargetParams,
 ): Promise<FeaturesNearbyByTargetResponse> {
   return getJson<FeaturesNearbyByTargetResponse>(
-    pathWithQuery("/features/nearby/by-target", {
+    pathWithQuery("/v1/features/nearby/by-target", {
       external_system: params.external_system,
       target_key: params.target_key,
       radius_km: params.radius_km,

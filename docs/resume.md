@@ -1,5 +1,14 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-09 claude 작업 메모 — T-214b 완료 (사용자/서비스 `/v1` prefix)
+
+`features`/`categories`/`providers` → `/v1` clean cut. 백엔드(include prefix)+USER_OPERATIONS+
+OpenAPI+frontend 호출부/타입+e2e+테스트 갱신, gates green(next build의 /admin/dagster
+prerender 실패는 기존 Windows 로컬 이슈, CI Linux 통과). PR→머지.
+
+**다음 한 작업 후보**: (1) **T-214d**(이미 완료) 외 **T-216a** admin/ops/debug `/v1` mount,
+(2) T-215b/c 사용자 feature change UI/e2e, (3) T-212e 실데이터 reload.
+
 ## 2026-06-09 claude 작업 메모 — `/tripmate/*` namespace 제거 (T-214d 완료)
 
 사용자 지시로 `/tripmate/` endpoint 제거: `POST /tripmate/features/batch` →

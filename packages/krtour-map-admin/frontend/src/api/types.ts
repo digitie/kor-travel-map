@@ -516,23 +516,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/categories": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** PlaceCategory 정적 카탈로그(144건, 선택적 DB 분포) */
-        get: operations["list_categories_categories_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/debug/etl/providers": {
         parameters: {
             query?: never;
@@ -639,145 +622,6 @@ export interface paths {
          * @description 본 디버그 패키지 + 메인 라이브러리 distribution version 응답. ADR-038 CI 재활성화 이후 PR 추적 / TripMate 측 호환성 점검에 사용.
          */
         get: operations["get_version_debug_version_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/features": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * bbox 안 feature 목록 (지도 뷰포트)
-         * @description 주어진 경계 상자(WGS84) 안의 feature 경량 표현 list. ``coord``의 GIST 인덱스를 사용하는 공간 조회 (ADR-012). ``kind`` 반복 파라미터로 종류 필터 (예: ``?kind=place&kind=event``). 삭제된 feature 제외.
-         */
-        get: operations["list_features_in_bbox_features_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/features/batch": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** feature 상세 batch 조회 (service read) */
-        post: operations["get_features_batch_features_batch_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/features/in-bounds": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** bbox 안 feature 목록 (TripMate/public envelope) */
-        get: operations["list_public_features_in_bounds_features_in_bounds_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/features/nearby": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** 좌표 중심 반경 주변 feature 목록 */
-        get: operations["list_features_nearby_features_nearby_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/features/nearby/by-target": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** 외부 POI/cache target key 기준 주변 feature 목록 */
-        get: operations["list_features_nearby_by_target_features_nearby_by_target_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/features/search": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** feature 검색 (이름 trgm + bbox) */
-        get: operations["search_public_features_features_search_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/features/{feature_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** feature 단건 상세 */
-        get: operations["get_feature_features__feature_id__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/features/{feature_id}/weather": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** feature weather card (forecast_style별 최신값 + freshness) */
-        get: operations["get_feature_weather_features__feature_id__weather_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1026,7 +870,163 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/providers/{provider}/last-sync": {
+    "/v1/categories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** PlaceCategory 정적 카탈로그(144건, 선택적 DB 분포) */
+        get: operations["list_categories_v1_categories_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/features": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * bbox 안 feature 목록 (지도 뷰포트)
+         * @description 주어진 경계 상자(WGS84) 안의 feature 경량 표현 list. ``coord``의 GIST 인덱스를 사용하는 공간 조회 (ADR-012). ``kind`` 반복 파라미터로 종류 필터 (예: ``?kind=place&kind=event``). 삭제된 feature 제외.
+         */
+        get: operations["list_features_in_bbox_v1_features_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/features/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** feature 상세 batch 조회 (service read) */
+        post: operations["get_features_batch_v1_features_batch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/features/in-bounds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** bbox 안 feature 목록 (TripMate/public envelope) */
+        get: operations["list_public_features_in_bounds_v1_features_in_bounds_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/features/nearby": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 좌표 중심 반경 주변 feature 목록 */
+        get: operations["list_features_nearby_v1_features_nearby_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/features/nearby/by-target": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 외부 POI/cache target key 기준 주변 feature 목록 */
+        get: operations["list_features_nearby_by_target_v1_features_nearby_by_target_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/features/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** feature 검색 (이름 trgm + bbox) */
+        get: operations["search_public_features_v1_features_search_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/features/{feature_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** feature 단건 상세 */
+        get: operations["get_feature_v1_features__feature_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/features/{feature_id}/weather": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** feature weather card (forecast_style별 최신값 + freshness) */
+        get: operations["get_feature_weather_v1_features__feature_id__weather_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/providers/{provider}/last-sync": {
         parameters: {
             query?: never;
             header?: never;
@@ -1034,7 +1034,7 @@ export interface paths {
             cookie?: never;
         };
         /** provider 데이터 신선도(last-sync) */
-        get: operations["get_provider_last_sync_providers__provider__last_sync_get"];
+        get: operations["get_provider_last_sync_v1_providers__provider__last_sync_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5864,40 +5864,6 @@ export interface operations {
             };
         };
     };
-    list_categories_categories_get: {
-        parameters: {
-            query?: {
-                /** @description 현재 DB feature 분포(category별 수)를 포함 */
-                include_counts?: boolean;
-                /** @description counts를 status='active' feature만으로 집계 */
-                active_only?: boolean;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CategoriesResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_providers_debug_etl_providers_get: {
         parameters: {
             query?: never;
@@ -6085,334 +6051,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VersionResponse"];
-                };
-            };
-        };
-    };
-    list_features_in_bbox_features_get: {
-        parameters: {
-            query: {
-                /** @description bbox 최소 경도 (WGS84). */
-                min_lon: number;
-                /** @description bbox 최소 위도. */
-                min_lat: number;
-                /** @description bbox 최대 경도. */
-                max_lon: number;
-                /** @description bbox 최대 위도. */
-                max_lat: number;
-                /** @description feature kind 필터 (반복 가능). 미지정 시 전체. */
-                kind?: string[] | null;
-                /** @description category code 필터 (반복 가능). 미지정 시 전체. */
-                category?: string[] | null;
-                /** @description 최대 반환 수. */
-                limit?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FeaturesInBboxResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_features_batch_features_batch_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["FeatureBatchRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FeatureBatchResponse"];
-                };
-            };
-            /** @description feature_ids 1~200개 필요 */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    list_public_features_in_bounds_features_in_bounds_get: {
-        parameters: {
-            query: {
-                /** @description bbox 최소 경도 (WGS84). */
-                min_lon: number;
-                /** @description bbox 최소 위도. */
-                min_lat: number;
-                /** @description bbox 최대 경도. */
-                max_lon: number;
-                /** @description bbox 최대 위도. */
-                max_lat: number;
-                /** @description feature kind 반복 필터. */
-                kind?: string[] | null;
-                /** @description category code 반복 필터. */
-                category?: string[] | null;
-                zoom?: number | null;
-                /** @description 행정구역 rollup 단위. 미지정 시 zoom으로 유도. */
-                cluster_unit?: ("sido" | "sigungu" | "eupmyeondong") | null;
-                limit?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FeaturesInBoundsResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_features_nearby_features_nearby_get: {
-        parameters: {
-            query: {
-                /** @description 중심 경도(4326). */
-                lon: number;
-                /** @description 중심 위도(4326). */
-                lat: number;
-                /** @description 반경(m). 최대 100km. */
-                radius_m: number;
-                /** @description feature kind 반복 필터. */
-                kind?: string[] | null;
-                /** @description category code 반복 필터. */
-                category?: string[] | null;
-                /** @description feature status 반복 필터. 기본 active. */
-                status?: string[] | null;
-                /** @description primary provider 반복 필터. */
-                provider?: string[] | null;
-                page_size?: number;
-                cursor?: string | null;
-                sort?: "distance" | "name" | "last_updated_at";
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FeaturesNearbyResponse"];
-                };
-            };
-            /** @description cursor/sort/radius/좌표 오류 */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    list_features_nearby_by_target_features_nearby_by_target_get: {
-        parameters: {
-            query: {
-                /** @description 외부 시스템 이름. 예: tripmate */
-                external_system: string;
-                /** @description 외부 POI 고유 key. */
-                target_key: string;
-                /** @description 미지정 시 target 기본 radius 사용. */
-                radius_km?: number | null;
-                /** @description feature kind 반복 필터. */
-                kind?: string[] | null;
-                /** @description category code 반복 필터. */
-                category?: string[] | null;
-                /** @description feature status 반복 필터. 기본 active. */
-                status?: string[] | null;
-                /** @description primary provider 반복 필터. */
-                provider?: string[] | null;
-                page_size?: number;
-                cursor?: string | null;
-                sort?: "distance" | "name" | "last_updated_at";
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FeaturesNearbyByTargetResponse"];
-                };
-            };
-            /** @description target 없음 */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description cursor/sort/radius 오류 */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    search_public_features_features_search_get: {
-        parameters: {
-            query?: {
-                /** @description name pg_trgm 검색어. */
-                q?: string | null;
-                /** @description feature kind 반복 필터. */
-                kind?: string[] | null;
-                /** @description category code 반복 필터. */
-                category?: string[] | null;
-                /** @description min_lon,min_lat,max_lon,max_lat CSV. */
-                bbox?: string | null;
-                limit?: number;
-                cursor?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FeatureSearchResponse"];
-                };
-            };
-            /** @description 검색 범위 또는 cursor 오류 */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    get_feature_features__feature_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                feature_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FeatureDetailEnvelopeResponse"];
-                };
-            };
-            /** @description feature_id 없음 */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_feature_weather_features__feature_id__weather_get: {
-        parameters: {
-            query?: {
-                /** @description 이 시점 이하 weather만(미래 예보 제외). */
-                asof?: string | null;
-            };
-            header?: never;
-            path: {
-                feature_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FeatureWeatherResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -6771,7 +6409,369 @@ export interface operations {
             };
         };
     };
-    get_provider_last_sync_providers__provider__last_sync_get: {
+    list_categories_v1_categories_get: {
+        parameters: {
+            query?: {
+                /** @description 현재 DB feature 분포(category별 수)를 포함 */
+                include_counts?: boolean;
+                /** @description counts를 status='active' feature만으로 집계 */
+                active_only?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CategoriesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_features_in_bbox_v1_features_get: {
+        parameters: {
+            query: {
+                /** @description bbox 최소 경도 (WGS84). */
+                min_lon: number;
+                /** @description bbox 최소 위도. */
+                min_lat: number;
+                /** @description bbox 최대 경도. */
+                max_lon: number;
+                /** @description bbox 최대 위도. */
+                max_lat: number;
+                /** @description feature kind 필터 (반복 가능). 미지정 시 전체. */
+                kind?: string[] | null;
+                /** @description category code 필터 (반복 가능). 미지정 시 전체. */
+                category?: string[] | null;
+                /** @description 최대 반환 수. */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeaturesInBboxResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_features_batch_v1_features_batch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeatureBatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureBatchResponse"];
+                };
+            };
+            /** @description feature_ids 1~200개 필요 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_public_features_in_bounds_v1_features_in_bounds_get: {
+        parameters: {
+            query: {
+                /** @description bbox 최소 경도 (WGS84). */
+                min_lon: number;
+                /** @description bbox 최소 위도. */
+                min_lat: number;
+                /** @description bbox 최대 경도. */
+                max_lon: number;
+                /** @description bbox 최대 위도. */
+                max_lat: number;
+                /** @description feature kind 반복 필터. */
+                kind?: string[] | null;
+                /** @description category code 반복 필터. */
+                category?: string[] | null;
+                zoom?: number | null;
+                /** @description 행정구역 rollup 단위. 미지정 시 zoom으로 유도. */
+                cluster_unit?: ("sido" | "sigungu" | "eupmyeondong") | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeaturesInBoundsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_features_nearby_v1_features_nearby_get: {
+        parameters: {
+            query: {
+                /** @description 중심 경도(4326). */
+                lon: number;
+                /** @description 중심 위도(4326). */
+                lat: number;
+                /** @description 반경(m). 최대 100km. */
+                radius_m: number;
+                /** @description feature kind 반복 필터. */
+                kind?: string[] | null;
+                /** @description category code 반복 필터. */
+                category?: string[] | null;
+                /** @description feature status 반복 필터. 기본 active. */
+                status?: string[] | null;
+                /** @description primary provider 반복 필터. */
+                provider?: string[] | null;
+                page_size?: number;
+                cursor?: string | null;
+                sort?: "distance" | "name" | "last_updated_at";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeaturesNearbyResponse"];
+                };
+            };
+            /** @description cursor/sort/radius/좌표 오류 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_features_nearby_by_target_v1_features_nearby_by_target_get: {
+        parameters: {
+            query: {
+                /** @description 외부 시스템 이름. 예: tripmate */
+                external_system: string;
+                /** @description 외부 POI 고유 key. */
+                target_key: string;
+                /** @description 미지정 시 target 기본 radius 사용. */
+                radius_km?: number | null;
+                /** @description feature kind 반복 필터. */
+                kind?: string[] | null;
+                /** @description category code 반복 필터. */
+                category?: string[] | null;
+                /** @description feature status 반복 필터. 기본 active. */
+                status?: string[] | null;
+                /** @description primary provider 반복 필터. */
+                provider?: string[] | null;
+                page_size?: number;
+                cursor?: string | null;
+                sort?: "distance" | "name" | "last_updated_at";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeaturesNearbyByTargetResponse"];
+                };
+            };
+            /** @description target 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description cursor/sort/radius 오류 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    search_public_features_v1_features_search_get: {
+        parameters: {
+            query?: {
+                /** @description name pg_trgm 검색어. */
+                q?: string | null;
+                /** @description feature kind 반복 필터. */
+                kind?: string[] | null;
+                /** @description category code 반복 필터. */
+                category?: string[] | null;
+                /** @description min_lon,min_lat,max_lon,max_lat CSV. */
+                bbox?: string | null;
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureSearchResponse"];
+                };
+            };
+            /** @description 검색 범위 또는 cursor 오류 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_feature_v1_features__feature_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureDetailEnvelopeResponse"];
+                };
+            };
+            /** @description feature_id 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_feature_weather_v1_features__feature_id__weather_get: {
+        parameters: {
+            query?: {
+                /** @description 이 시점 이하 weather만(미래 예보 제외). */
+                asof?: string | null;
+            };
+            header?: never;
+            path: {
+                feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureWeatherResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_provider_last_sync_v1_providers__provider__last_sync_get: {
         parameters: {
             query?: {
                 /** @description dataset_key 필터 */

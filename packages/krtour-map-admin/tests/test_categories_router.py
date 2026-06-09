@@ -34,7 +34,7 @@ def _override_session(client: TestClient) -> None:
 @pytest.mark.unit
 def test_categories_in_openapi(client: TestClient) -> None:
     spec = client.get("/openapi.json").json()
-    assert "/categories" in spec["paths"]
+    assert "/v1/categories" in spec["paths"]
     schemas = spec["components"]["schemas"]
     assert "CategoriesResponse" in schemas
     assert "CategorySummary" in schemas
@@ -44,7 +44,7 @@ def test_categories_in_openapi(client: TestClient) -> None:
 def test_categories_static_returns_full_catalog(client: TestClient) -> None:
     _override_session(client)
     try:
-        r = client.get("/categories")
+        r = client.get("/v1/categories")
         assert r.status_code == 200
         body = r.json()
         assert body["data"]["count"] == 144
@@ -77,7 +77,7 @@ def test_categories_include_counts_merges_db(
 
     client.app.dependency_overrides[get_session] = _fake_session
     try:
-        r = client.get("/categories", params={"include_counts": "true"})
+        r = client.get("/v1/categories", params={"include_counts": "true"})
         assert r.status_code == 200
         body = r.json()
         assert body["data"]["include_counts"] is True

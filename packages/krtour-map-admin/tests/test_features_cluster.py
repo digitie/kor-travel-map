@@ -43,7 +43,7 @@ def test_in_bounds_cluster_unit_returns_clusters(
     monkeypatch.setattr(mod.feature_repo, "cluster_features_in_bbox", _cluster)
     _fake_session(client)
     try:
-        r = client.get("/features/in-bounds", params={**_BBOX, "cluster_unit": "sigungu"})
+        r = client.get("/v1/features/in-bounds", params={**_BBOX, "cluster_unit": "sigungu"})
         assert r.status_code == 200
         d = r.json()["data"]
         assert d["cluster_unit"] == "sigungu"
@@ -70,7 +70,7 @@ def test_in_bounds_zoom_derives_cluster_unit(
     monkeypatch.setattr(mod.feature_repo, "cluster_features_in_bbox", _cluster)
     _fake_session(client)
     try:
-        r = client.get("/features/in-bounds", params={**_BBOX, "zoom": 9})
+        r = client.get("/v1/features/in-bounds", params={**_BBOX, "zoom": 9})
         assert r.status_code == 200
         assert captured["unit"] == "sigungu"  # zoom 9 → sigungu
     finally:
@@ -95,7 +95,7 @@ def test_in_bounds_high_zoom_returns_individual_features(
     monkeypatch.setattr(mod.feature_repo, "features_in_bbox", _bbox)
     _fake_session(client)
     try:
-        r = client.get("/features/in-bounds", params={**_BBOX, "zoom": 16})
+        r = client.get("/v1/features/in-bounds", params={**_BBOX, "zoom": 16})
         assert r.status_code == 200
         d = r.json()["data"]
         assert d["cluster_unit"] is None  # zoom≥14 → 개별
@@ -108,5 +108,5 @@ def test_in_bounds_high_zoom_returns_individual_features(
 
 @pytest.mark.unit
 def test_in_bounds_invalid_cluster_unit_422(client: TestClient) -> None:
-    r = client.get("/features/in-bounds", params={**_BBOX, "cluster_unit": "bogus"})
+    r = client.get("/v1/features/in-bounds", params={**_BBOX, "cluster_unit": "bogus"})
     assert r.status_code == 422

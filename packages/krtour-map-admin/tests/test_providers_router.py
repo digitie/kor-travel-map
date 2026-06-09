@@ -31,7 +31,7 @@ def _override_session(client: TestClient) -> None:
 @pytest.mark.unit
 def test_providers_last_sync_in_openapi(client: TestClient) -> None:
     spec = client.get("/openapi.json").json()
-    assert "/providers/{provider}/last-sync" in spec["paths"]
+    assert "/v1/providers/{provider}/last-sync" in spec["paths"]
     assert "ProviderLastSyncResponse" in spec["components"]["schemas"]
 
 
@@ -47,7 +47,7 @@ def test_provider_last_sync_404_when_empty(
     monkeypatch.setattr(mod.sync_state_repo, "list_sync_states", _empty)
     _override_session(client)
     try:
-        r = client.get("/providers/python-mois-api/last-sync")
+        r = client.get("/v1/providers/python-mois-api/last-sync")
         assert r.status_code == 404
         assert "python-mois-api" in r.json()["error"]["message"]
     finally:
@@ -79,7 +79,7 @@ def test_provider_last_sync_200_excludes_cursor(
     monkeypatch.setattr(mod.sync_state_repo, "list_sync_states", _list)
     _override_session(client)
     try:
-        r = client.get("/providers/python-mois-api/last-sync")
+        r = client.get("/v1/providers/python-mois-api/last-sync")
         assert r.status_code == 200
         body = r.json()
         assert body["data"]["provider"] == "python-mois-api"
