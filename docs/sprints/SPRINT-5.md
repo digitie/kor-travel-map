@@ -132,9 +132,10 @@
 
 ### 2.8 T-101 MV 시범 도입 (선택)
 
-- `docs/performance.md §9.3` 사양 — read >> write 비율 측정 + 시범 도입
-- `mv_features_place_with_detail` 1건만 시범 → 1주 운영 + EXPLAIN diff
-- 결과에 따라 ADR-035+ 신설 가능성
+- `docs/performance.md §9.3` 사양 — read >> write 정성 확정(2026-06-10), P99는 T-212e
+- **클러스터 rollup MV `mv_feature_cluster_counts`** 1건만 시범 → 1주 운영 + EXPLAIN diff
+  (구 예시 `mv_features_place_with_detail`은 ADR-018 단일 JSONB detail로 폐기)
+- 결과에 따라 ADR 신설 가능성 (MV 카탈로그 + 클러스터 exact-viewport vs region-total 결정)
 
 ### 2.9 T-102 pg_prewarm 운영 검토 (선택)
 

@@ -541,16 +541,23 @@ lint-imports/pytest/coverage, frontend type-check/e2e). 실데이터 검증은 T
 
 ## 보류 (v2 1차 범위 외)
 
-- [ ] T-101 — **Materialized View 도입 검토** (feature + 7 detail flatten)
-  - 상세 분석: `docs/performance.md §9.3` (도입 조건, 부작용, ROI).
-  - 도입 조건: read >> write 비율 실측 (Sprint 5 이후 24h 로그) + Phase 2
-    정합성 게이트(ADR-033)가 이미 작동 + 디스크 ×2 수용.
-  - 도입 전제: `REFRESH MATERIALIZED VIEW CONCURRENTLY` 대상 MV마다 refresh identity
-    `UNIQUE` 인덱스를 migration에 포함하고, 생성 직후 최초 1회는 비-concurrent
-    `REFRESH MATERIALIZED VIEW schema.view`로 populate한 뒤 Dagster `swap`/
-    `concurrently` 전략에 연결한다(T-RV-41).
-  - 도입 절차: 하나의 hot path 시범 (예: `mv_features_place_with_detail`) →
-    UNIQUE 인덱스 + 최초 populate → 1주 운영 + EXPLAIN diff → 확장 판단 → ADR 신설.
+- [ ] T-101 — **Materialized View 도입 검토** (재타깃: 클러스터 rollup MV)
+  - **검토 갱신 2026-06-10** (`docs/performance.md §9.3` 재작성): read >> write는
+    product owner가 정성 확정. 단 원래 전제 "feature + 7 detail flatten"은 **무효**
+    — detail은 ADR-018로 `feature.features.detail` 단일 JSONB(per-kind detail 테이블
+    없음)라 단건/배치/bbox read는 이미 단일 테이블 조회. flatten할 JOIN이 없음.
+  - **재타깃 1순위 = 클러스터 rollup MV** `mv_feature_cluster_counts`:
+    viewport 이동마다 재계산되는 `GROUP BY sido/sigungu/legal_dong_code` 집계를
+    사전집계. rollup row 수 ≪ feature 본수라 디스크/메모리 유리. **의미 변화**
+    (exact-viewport vs region-total + centroid) 택일을 시범 PR에서 확정해야 함.
+  - **2순위 = primary-source LATERAL** (`/features/nearby`·`/admin/features`):
+    MV보다 `feature.features` denormalized 유지 컬럼(`primary_provider`/
+    `primary_dataset_key`, 적재 트랜잭션 내 갱신) 권장 — stale 윈도우/refresh job 불요.
+  - 도입 전제: `REFRESH MATERIALIZED VIEW CONCURRENTLY` identity `UNIQUE` 인덱스를
+    migration에 포함, 생성 직후 1회 비-concurrent populate 뒤 batch gate `mv_refresh`
+    (`concurrently`)에 연결(T-RV-41 — orchestration 이미 존재, 카탈로그 등록만).
+  - 도입 절차: 클러스터 MV 1개 시범 → UNIQUE+GIST(region_bbox) + 최초 populate →
+    의미 택일 + 1주 운영 + EXPLAIN diff → 2순위 판단 → ADR 신설.
 - [x] T-102 — **pg_prewarm 부팅 후 warm-up** (2026-06-09 — mechanism 구현)
   - migration `0022_pg_prewarm_extension`: `CREATE EXTENSION pg_prewarm SCHEMA x_extension`
     (ADR-008). 명시적 warm-up 헬퍼 `krtour.map.infra.prewarm.prewarm_relations`

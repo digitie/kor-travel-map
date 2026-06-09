@@ -2,6 +2,24 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-10 (claude) — read>>write Materialized View 도입 재검토 + 문서 보강 (T-101, 코드無)
+
+사용자 지시: "읽기가 압도적으로 많으므로 MV 도입 검토하고 문서 보완. 코드작업 금지."
+실제 read 경로를 코드(`feature_repo.py`)·스키마(alembic `0002`)로 재조사 후 `docs/performance.md
+§9.3` 재작성 + `tasks.md` T-101 재타깃.
+
+- **전제 정정**: 원래 §9.3의 "feature + 7 detail flatten" MV는 **무효** — ADR-018로 detail은
+  `feature.features.detail` 단일 JSONB(per-kind detail 테이블 없음). 단건/배치/bbox read는 이미
+  단일 테이블 조회. 코드의 `AS MATERIALIZED` CTE는 planner 힌트지 영속 MV가 아님(혼동 정리).
+- **재타깃 1순위 = 클러스터 rollup MV** `mv_feature_cluster_counts`: viewport 이동마다 재계산되는
+  `GROUP BY sido/sigungu/legal_dong_code` 집계를 사전집계. rollup row ≪ feature 본수 → 디스크 유리.
+  **의미 변화**(exact-viewport→region-total + region centroid) 택일을 시범 PR에서 확정 필요.
+- **2순위 = primary-source LATERAL**(nearby/admin): MV보다 적재 트랜잭션 내 denormalized 유지 컬럼
+  (`primary_provider`/`primary_dataset_key`) 권장 — stale 윈도우/refresh job 불요.
+- refresh orchestration은 batch gate `mv_refresh`(T-200/T-RV-41)가 이미 존재 → 카탈로그 등록만.
+- 코드/마이그레이션 변경 없음. 문서+task 전용. **tripmate-agent provider는 API 변경 중이라 보류**
+  (추후 재검토). 사용자 변경 feature 버전관리 admin UI(T-215d/T-104 계열)는 별도 진행.
+
 ## 2026-06-10 (claude) — 데이터 재적재 안전성 검증 + 문서화 (충돌·결측·엎어쓰기)
 
 사용자 지시로 재적재 안전성 꼼꼼 검증. (분석 초기에 stale `sandbox/claude` 트리를 보고 오판
