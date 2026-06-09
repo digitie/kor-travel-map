@@ -1409,9 +1409,31 @@
   },
   "openapi": "3.1.0",
   "paths": {
-    "/categories": {
+    "/health": {
       "get": {
-        "operationId": "list_categories_categories_get",
+        "description": "liveness — 의존 없이 항상 ``status='ok'`` 200. deep readiness는 후속.",
+        "operationId": "get_public_health_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicHealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "public liveness probe",
+        "tags": [
+          "public"
+        ]
+      }
+    },
+    "/v1/categories": {
+      "get": {
+        "operationId": "list_categories_v1_categories_get",
         "parameters": [
           {
             "description": "현재 DB feature 분포(category별 수)를 포함",
@@ -1466,9 +1488,9 @@
         ]
       }
     },
-    "/features/batch": {
+    "/v1/features/batch": {
       "post": {
-        "operationId": "get_features_batch_features_batch_post",
+        "operationId": "get_features_batch_v1_features_batch_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1505,9 +1527,9 @@
         ]
       }
     },
-    "/features/in-bounds": {
+    "/v1/features/in-bounds": {
       "get": {
-        "operationId": "list_public_features_in_bounds_features_in_bounds_get",
+        "operationId": "list_public_features_in_bounds_v1_features_in_bounds_get",
         "parameters": [
           {
             "description": "bbox 최소 경도 (WGS84).",
@@ -1677,9 +1699,9 @@
         ]
       }
     },
-    "/features/nearby": {
+    "/v1/features/nearby": {
       "get": {
-        "operationId": "list_features_nearby_features_nearby_get",
+        "operationId": "list_features_nearby_v1_features_nearby_get",
         "parameters": [
           {
             "description": "중심 경도(4326).",
@@ -1869,9 +1891,9 @@
         ]
       }
     },
-    "/features/nearby/by-target": {
+    "/v1/features/nearby/by-target": {
       "get": {
-        "operationId": "list_features_nearby_by_target_features_nearby_by_target_get",
+        "operationId": "list_features_nearby_by_target_v1_features_nearby_by_target_get",
         "parameters": [
           {
             "description": "외부 시스템 이름. 예: tripmate",
@@ -2067,9 +2089,9 @@
         ]
       }
     },
-    "/features/search": {
+    "/v1/features/search": {
       "get": {
-        "operationId": "search_public_features_features_search_get",
+        "operationId": "search_public_features_v1_features_search_get",
         "parameters": [
           {
             "description": "name pg_trgm 검색어.",
@@ -2199,9 +2221,9 @@
         ]
       }
     },
-    "/features/{feature_id}": {
+    "/v1/features/{feature_id}": {
       "get": {
-        "operationId": "get_feature_features__feature_id__get",
+        "operationId": "get_feature_v1_features__feature_id__get",
         "parameters": [
           {
             "in": "path",
@@ -2244,9 +2266,9 @@
         ]
       }
     },
-    "/features/{feature_id}/weather": {
+    "/v1/features/{feature_id}/weather": {
       "get": {
-        "operationId": "get_feature_weather_features__feature_id__weather_get",
+        "operationId": "get_feature_weather_v1_features__feature_id__weather_get",
         "parameters": [
           {
             "in": "path",
@@ -2305,31 +2327,9 @@
         ]
       }
     },
-    "/health": {
+    "/v1/providers/{provider}/last-sync": {
       "get": {
-        "description": "liveness — 의존 없이 항상 ``status='ok'`` 200. deep readiness는 후속.",
-        "operationId": "get_public_health_health_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PublicHealthResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "public liveness probe",
-        "tags": [
-          "public"
-        ]
-      }
-    },
-    "/providers/{provider}/last-sync": {
-      "get": {
-        "operationId": "get_provider_last_sync_providers__provider__last_sync_get",
+        "operationId": "get_provider_last_sync_v1_providers__provider__last_sync_get",
         "parameters": [
           {
             "in": "path",

@@ -312,7 +312,7 @@ async function mockPoiCacheTargetMutations(page: Page) {
     throw new Error(`Unhandled POI cache target route: ${request.method()} ${url}`);
   });
 
-  await page.route("**/features/nearby/by-target**", async (route) => {
+  await page.route("**/v1/features/nearby/by-target**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     requests.nearby += 1;

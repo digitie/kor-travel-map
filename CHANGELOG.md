@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### API — 사용자/서비스 표면에 `/v1` prefix 도입 (T-214b, 2026-06-09)
+
+- **CHANGED (breaking)**: `features`/`categories`/`providers` 라우터를 **`/v1` prefix**로
+  노출한다. `GET /features*`→`/v1/features*`(batch `POST /v1/features/batch` 포함),
+  `GET /categories`→`/v1/categories`, `GET /providers/{provider}/last-sync`→
+  `/v1/providers/...`. 구 unversioned 경로는 유지하지 않는다(clean cut, alias 없음, ADR-048).
+  liveness `/health`·`/version`은 비버저닝 유지. admin/ops/debug의 `/v1` 이동은 T-216a.
+- **CHANGED**: `USER_OPERATIONS`·`openapi.json`/`openapi.user.json`·frontend generated type·
+  frontend API 호출부·e2e route mock 재정렬.
+
 ### API — `/tripmate/*` namespace 제거, batch를 `POST /features/batch`로 일반화 (2026-06-09)
 
 - **CHANGED (breaking)**: `POST /tripmate/features/batch` → **`POST /features/batch`**.

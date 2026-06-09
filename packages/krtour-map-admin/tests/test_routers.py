@@ -74,7 +74,7 @@ def test_db_dependent_routes_follow_features_gate_by_default() -> None:
     client = TestClient(app)
     spec = client.get("/openapi.json").json()
 
-    assert "/features" not in spec["paths"]
+    assert "/v1/features" not in spec["paths"]
     assert "/admin/features" not in spec["paths"]
     assert "/admin/offline-uploads" not in spec["paths"]
     assert "/ops/import-jobs" not in spec["paths"]
@@ -95,7 +95,7 @@ def test_admin_ops_route_gates_can_be_enabled_explicitly() -> None:
     )
     spec = app.openapi()
 
-    assert "/features" not in spec["paths"]
+    assert "/v1/features" not in spec["paths"]
     assert "/admin/features" in spec["paths"]
     assert "/admin/offline-uploads" in spec["paths"]
     assert "/ops/import-jobs" in spec["paths"]

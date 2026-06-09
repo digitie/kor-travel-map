@@ -103,7 +103,7 @@ def test_poi_cache_target_routes_mounted_in_openapi(client: TestClient) -> None:
     spec = client.get("/openapi.json").json()
     assert "/admin/poi-cache-targets" in spec["paths"]
     assert "/admin/poi-cache-targets/{external_system}/{target_key}" in spec["paths"]
-    assert "/features/nearby/by-target" in spec["paths"]
+    assert "/v1/features/nearby/by-target" in spec["paths"]
     schemas = spec["components"]["schemas"]
     assert "PoiCacheTargetUpsertRequest" in schemas
     assert "FeaturesNearbyByTargetResponse" in schemas
@@ -334,7 +334,7 @@ def test_features_nearby_by_target_passes_filters(
     )
 
     response = client.get(
-        "/features/nearby/by-target",
+        "/v1/features/nearby/by-target",
         params=[
             ("external_system", "tripmate"),
             ("target_key", "poi-1"),
@@ -376,7 +376,7 @@ def test_features_nearby_by_target_404_when_missing(
     monkeypatch.setattr(features_mod, "get_poi_cache_target_by_key", _missing)
 
     response = client.get(
-        "/features/nearby/by-target",
+        "/v1/features/nearby/by-target",
         params={"external_system": "tripmate", "target_key": "missing"},
     )
 

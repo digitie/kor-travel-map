@@ -42,17 +42,19 @@ ADMIN_OPENAPI_PATH = Path("packages/krtour-map-admin/openapi.json")
 USER_OPENAPI_PATH = Path("packages/krtour-map-admin/openapi.user.json")
 
 USER_OPERATIONS: dict[str, frozenset[str]] = {
-    "/features/in-bounds": frozenset({"get"}),
-    "/features/{feature_id}": frozenset({"get"}),
-    "/features/{feature_id}/weather": frozenset({"get"}),
-    "/features/search": frozenset({"get"}),
-    "/features/nearby": frozenset({"get"}),
-    "/features/nearby/by-target": frozenset({"get"}),
-    "/categories": frozenset({"get"}),
-    "/providers/{provider}/last-sync": frozenset({"get"}),
+    # 사용자/서비스 표면은 ``/v1`` prefix (T-214b). liveness ``/health``·``/version``은
+    # 비버저닝 유지(ADR-048).
+    "/v1/features/in-bounds": frozenset({"get"}),
+    "/v1/features/{feature_id}": frozenset({"get"}),
+    "/v1/features/{feature_id}/weather": frozenset({"get"}),
+    "/v1/features/search": frozenset({"get"}),
+    "/v1/features/nearby": frozenset({"get"}),
+    "/v1/features/nearby/by-target": frozenset({"get"}),
+    "/v1/categories": frozenset({"get"}),
+    "/v1/providers/{provider}/last-sync": frozenset({"get"}),
     "/health": frozenset({"get"}),
     "/version": frozenset({"get"}),
-    "/features/batch": frozenset({"post"}),
+    "/v1/features/batch": frozenset({"post"}),
 }
 
 HTTP_METHODS: frozenset[str] = frozenset(

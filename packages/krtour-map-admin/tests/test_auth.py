@@ -90,9 +90,9 @@ def test_openapi_declares_service_token_scheme() -> None:
     assert scheme["in"] == "header"
     assert scheme["name"] == SERVICE_TOKEN_HEADER
     # /features/batch service read는 security 요구, /features 공용 GET read는 없음.
-    tri = spec["paths"]["/features/batch"]["post"]
+    tri = spec["paths"]["/v1/features/batch"]["post"]
     assert tri.get("security")
-    feat = spec["paths"]["/features"]["get"]
+    feat = spec["paths"]["/v1/features"]["get"]
     assert not feat.get("security")
 
 
@@ -100,10 +100,10 @@ def test_openapi_declares_service_token_scheme() -> None:
 def test_batch_requires_token_when_set() -> None:
     client = _client(AdminSettings(service_token=SecretStr("tok")))
     # 헤더 없음/오류 → 401(핸들러/DB 도달 전 auth 차단).
-    assert client.post("/features/batch", json={}).status_code == 401
+    assert client.post("/v1/features/batch", json={}).status_code == 401
     assert (
         client.post(
-            "/features/batch",
+            "/v1/features/batch",
             json={},
             headers={SERVICE_TOKEN_HEADER: "wrong"},
         ).status_code
@@ -115,14 +115,14 @@ def test_batch_requires_token_when_set() -> None:
 def test_batch_token_unset_not_blocked() -> None:
     client = _client(AdminSettings(service_token=None))
     # 미설정이면 auth가 막지 않는다(하위호환). 본문/DB 사유로 401은 아니어야 한다.
-    assert client.post("/features/batch", json={}).status_code != 401
+    assert client.post("/v1/features/batch", json={}).status_code != 401
 
 
 @pytest.mark.unit
 def test_features_not_gated_by_service_token() -> None:
     client = _client(AdminSettings(service_token=SecretStr("tok")))
     # 브라우저 admin UI도 쓰는 공용 read surface는 service token으로 막지 않는다.
-    assert client.get("/features?limit=1").status_code != 401
+    assert client.get("/v1/features?limit=1").status_code != 401
 
 
 @pytest.mark.unit

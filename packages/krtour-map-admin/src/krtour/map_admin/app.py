@@ -315,14 +315,16 @@ def create_app(settings: AdminSettings | None = None) -> FastAPI:
         application.include_router(etl_router)
 
     if settings.features_routes_enabled:
-        # ``/features`` · ``/categories`` · ``/providers``는 브라우저 admin UI도
-        # 쓰는 공용 read surface라 앱 토큰을 강제하지 않는다(operator는 proxy SSO).
-        # ``POST /features/batch``는 순수 service-to-service read라 route-level에서
+        # 사용자/서비스 표면 ``/features`` · ``/categories`` · ``/providers``는 ``/v1``
+        # prefix로 노출한다(T-214b, ADR-048 — clean cut, unversioned alias 없음). 브라우저
+        # admin UI도 쓰는 공용 read라 앱 토큰을 강제하지 않는다(operator는 proxy SSO).
+        # ``POST /v1/features/batch``는 순수 service-to-service read라 route-level에서
         # service token으로 게이트한다(ADR-045 D-1; features.py). token 미설정이면
-        # 통과(하위호환). 나머지 ``/features`` read는 공용이라 앱 토큰을 강제하지 않는다.
-        application.include_router(features_router)
-        application.include_router(categories_router)
-        application.include_router(providers_router)
+        # 통과(하위호환). 나머지 ``/v1/features`` read는 공용이라 앱 토큰을 강제하지 않는다.
+        # admin/ops/debug의 ``/v1`` 이동은 ADR-048/T-216a에서 처리한다.
+        application.include_router(features_router, prefix="/v1")
+        application.include_router(categories_router, prefix="/v1")
+        application.include_router(providers_router, prefix="/v1")
         # Step D on-demand 상세는 DB(적재된 raw_data) 필요 → features와 동일 gate.
         if settings.debug_routes_enabled:
             application.include_router(mois_detail_router)

@@ -1180,10 +1180,13 @@ admin 영역으로 이동한다.
   종합해 `docs/tripmate-rest-api.md`를 목표 `/v1` 계약과 현재 구현 gap 중심으로
   재작성했다. `docs/openapi-admin-contract.md`, `docs/tripmate-integration.md`,
   `docs/poi-cache-update-targets.md`, `docs/architecture.md`의 충돌 문구도 정리했다.
-- [ ] **T-214b — 사용자/서비스 API `/v1` prefix 도입.**
-  `/features/*`(batch 포함), `/categories`, `/providers/{provider}/last-sync` 목표 경로를
-  `/v1/*`로 노출하고, 기존 unversioned 경로는 유지하지 않는다(clean cut, alias 없음).
-  admin/ops/debug도 ADR-048/T-216a에서 `/v1`로 이동한다.
+- [x] **T-214b — 사용자/서비스 API `/v1` prefix 도입.** (2026-06-09)
+  `features`/`categories`/`providers` 라우터를 `application.include_router(..., prefix="/v1")`로
+  `/v1/*` 노출(`/features/*`(batch 포함)·`/categories`·`/providers/{provider}/last-sync`).
+  구 unversioned 경로는 유지하지 않는다(clean cut, alias 없음). liveness `/health`·`/version`은
+  비버저닝 유지. `USER_OPERATIONS`·OpenAPI 두 profile·frontend 호출부(`api/features.ts`·
+  `api/poiCacheTargets.ts`)·generated type·e2e mock·테스트 일괄 갱신. admin/ops/debug의
+  `/v1` 이동은 ADR-048/T-216a에서 처리한다.
 - [x] **T-214c — `/tripmate/feature-update-requests*` 제거, admin-only 전환.**
   user OpenAPI와 `USER_OPERATIONS`에서 `POST/GET /tripmate/feature-update-requests*`를
   제거하고 `/admin/feature-update-requests*`만 정본으로 남긴다. TripMate 사용자 제안 큐는

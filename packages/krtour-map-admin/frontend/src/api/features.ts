@@ -28,7 +28,7 @@ async function fetchFeaturesInBbox(
   params: FeaturesInBboxParams,
 ): Promise<FeaturesInBboxResponse> {
   return getJson<FeaturesInBboxResponse>(
-    pathWithQuery("/features", {
+    pathWithQuery("/v1/features", {
       min_lon: params.min_lon,
       min_lat: params.min_lat,
       max_lon: params.max_lon,
@@ -65,7 +65,7 @@ export function useFeaturesInBbox(
   });
 }
 
-// ── feature 단건 상세 (`GET /features/{feature_id}`) ────────────────────────
+// ── feature 단건 상세 (`GET /v1/features/{feature_id}`) ────────────────────────
 
 export type FeatureDetail = FeatureSchemas["FeatureDetailResponse"];
 type FeatureDetailEnvelopeResponse =
@@ -76,7 +76,7 @@ export type WeatherMetric = FeatureSchemas["WeatherMetricOut"];
 
 async function fetchFeatureDetail(featureId: string): Promise<FeatureDetail> {
   const body = await getJson<FeatureDetailEnvelopeResponse>(
-    `/features/${encodeURIComponent(featureId)}`,
+    `/v1/features/${encodeURIComponent(featureId)}`,
   );
   return body.data;
 }
@@ -96,7 +96,7 @@ async function fetchFeatureWeather(
   params: { asof?: string | Date | null } = {},
 ): Promise<FeatureWeatherResponse> {
   return getJson<FeatureWeatherResponse>(
-    pathWithQuery(`/features/${encodeURIComponent(featureId)}/weather`, {
+    pathWithQuery(`/v1/features/${encodeURIComponent(featureId)}/weather`, {
       asof: params.asof,
     }),
   );

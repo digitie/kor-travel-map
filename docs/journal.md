@@ -2,6 +2,23 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-09 (claude) — T-214b: 사용자/서비스 API `/v1` prefix 도입
+
+**작업**: `features`/`categories`/`providers` 표면을 `/v1`로 clean cut(ADR-048). PR→머지.
+
+- **백엔드**: `app.py`에서 `include_router(features/categories/providers, prefix="/v1")`
+  (mount 1곳 전환, ADR-046). liveness `/health`·`/version`·admin/ops/debug는 비버저닝 유지
+  (admin/ops `/v1`은 T-216a). `USER_OPERATIONS`를 `/v1/*`로 갱신(liveness 제외).
+- **재생성**: `openapi.json`/`openapi.user.json`(WSL export) + frontend `types.ts`. user spec
+  paths 전부 `/v1/*`(+ `/health`·`/version`), admin/ops 비버저닝 유지 확인.
+- **frontend 호출부**: `api/features.ts`(in-bbox/detail/weather)·`api/poiCacheTargets.ts`
+  (by-target 런타임 문자열 + `paths[...]` 타입)에 `/v1` 적용. Next.js nav route `href="/features"`
+  는 프론트 라우트라 그대로. e2e mock `**/v1/features/nearby/by-target**`.
+- **테스트**: user-surface 경로 문자열 `/v1` 일괄(문자열 시작 경계로 `/admin/features` 등은 제외).
+- **검증**: ruff/mypy --strict(27)/admin pytest **238 passed**/OpenAPI drift/lint-imports/
+  frontend gen:types:check·type-check·eslint green. (next build의 `/admin/dagster` prerender
+  실패는 Windows 로컬 기존 이슈 — 변경 revert 후에도 동일, CI Linux는 통과.)
+
 ## 2026-06-09 (claude) — `/tripmate/*` namespace 제거 → `POST /features/batch` 일반화
 
 **작업**: 사용자 지시("krtour-map은 TripMate에만 묶이지 않음 — `/tripmate/` endpoint 제거").

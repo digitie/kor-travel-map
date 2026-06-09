@@ -1,4 +1,4 @@
-"""``test_features_router`` — ``/features`` 조회 라우터 (PR, ADR-035/004/012).
+"""``test_features_router`` — ``/v1/features`` 조회 라우터 (PR, ADR-035/004/012).
 
 DB 무관 단위 테스트:
 - 라우터 마운트 + OpenAPI 노출
@@ -30,12 +30,12 @@ def client() -> TestClient:
 @pytest.mark.unit
 def test_features_routes_mounted_in_openapi(client: TestClient) -> None:
     spec = client.get("/openapi.json").json()
-    assert "/features" in spec["paths"]
-    assert "/features/in-bounds" in spec["paths"]
-    assert "/features/search" in spec["paths"]
-    assert "/features/nearby" in spec["paths"]
-    assert "/features/{feature_id}" in spec["paths"]
-    assert "/features/batch" in spec["paths"]
+    assert "/v1/features" in spec["paths"]
+    assert "/v1/features/in-bounds" in spec["paths"]
+    assert "/v1/features/search" in spec["paths"]
+    assert "/v1/features/nearby" in spec["paths"]
+    assert "/v1/features/{feature_id}" in spec["paths"]
+    assert "/v1/features/batch" in spec["paths"]
     schemas = spec["components"]["schemas"]
     assert "FeatureSummary" in schemas
     assert "FeaturesInBboxResponse" in schemas
@@ -50,19 +50,19 @@ def test_features_routes_mounted_in_openapi(client: TestClient) -> None:
 def test_features_nearby_validation(client: TestClient) -> None:
     # radius_m 필수 — 누락 시 DB 도달 전 422.
     assert client.get(
-        "/features/nearby", params={"lon": 127.0, "lat": 37.5}
+        "/v1/features/nearby", params={"lon": 127.0, "lat": 37.5}
     ).status_code == 422
     # lon 범위 초과 → 422.
     assert client.get(
-        "/features/nearby", params={"lon": 200.0, "lat": 37.5, "radius_m": 1000}
+        "/v1/features/nearby", params={"lon": 200.0, "lat": 37.5, "radius_m": 1000}
     ).status_code == 422
     # radius_m must be > 0 → 422.
     assert client.get(
-        "/features/nearby", params={"lon": 127.0, "lat": 37.5, "radius_m": 0}
+        "/v1/features/nearby", params={"lon": 127.0, "lat": 37.5, "radius_m": 0}
     ).status_code == 422
     # invalid sort → 422.
     assert client.get(
-        "/features/nearby",
+        "/v1/features/nearby",
         params={"lon": 127.0, "lat": 37.5, "radius_m": 1000, "sort": "bogus"},
     ).status_code == 422
 
@@ -72,12 +72,12 @@ def test_features_routes_disabled_unmounts() -> None:
     app = create_app(AdminSettings(features_routes_enabled=False))
     c = TestClient(app)
     # bbox 조회는 422(검증) 이전에 라우트 자체가 없어 404.
-    r = c.get("/features", params={
+    r = c.get("/v1/features", params={
         "min_lon": 126, "min_lat": 37, "max_lon": 127, "max_lat": 38,
     })
     assert r.status_code == 404
-    assert c.get("/features/x").status_code == 404
-    assert c.post("/features/batch", json={"feature_ids": ["x"]}).status_code == 404
+    assert c.get("/v1/features/x").status_code == 404
+    assert c.post("/v1/features/batch", json={"feature_ids": ["x"]}).status_code == 404
 
 
 @pytest.mark.unit
@@ -91,7 +91,7 @@ def test_bbox_min_greater_than_max_returns_422(client: TestClient) -> None:
 
     client.app.dependency_overrides[get_session] = _empty_session
     try:
-        r = client.get("/features", params={
+        r = client.get("/v1/features", params={
             "min_lon": 128, "min_lat": 37, "max_lon": 127, "max_lat": 38,
         })
         assert r.status_code == 422
@@ -125,7 +125,7 @@ def test_get_feature_404_when_missing(
 
     client.app.dependency_overrides[get_session] = _fake_session
     try:
-        r = client.get("/features/nonexistent")
+        r = client.get("/v1/features/nonexistent")
         assert r.status_code == 404
         assert "nonexistent" in r.json()["error"]["message"]
     finally:
@@ -157,7 +157,7 @@ def test_list_features_maps_bbox_rows(
 
     client.app.dependency_overrides[get_session] = _fake_session
     try:
-        r = client.get("/features", params={
+        r = client.get("/v1/features", params={
             "min_lon": 126, "min_lat": 37, "max_lon": 127, "max_lat": 38,
             "kind": ["place"],
         })
@@ -196,7 +196,7 @@ def test_list_public_features_in_bounds_uses_envelope(
 
     client.app.dependency_overrides[get_session] = _fake_session
     try:
-        r = client.get("/features/in-bounds", params={
+        r = client.get("/v1/features/in-bounds", params={
             "min_lon": 126, "min_lat": 37, "max_lon": 127, "max_lat": 38,
             "category": ["01010100"],
         })
@@ -239,7 +239,7 @@ def test_get_feature_detail_maps_row(
 
     client.app.dependency_overrides[get_session] = _fake_session
     try:
-        r = client.get("/features/f1")
+        r = client.get("/v1/features/f1")
         assert r.status_code == 200
         body = r.json()
         assert body["data"]["kind"] == "event"
@@ -286,7 +286,7 @@ def test_features_batch_returns_items_and_missing(
     client.app.dependency_overrides[get_session] = _fake_session
     try:
         r = client.post(
-            "/features/batch",
+            "/v1/features/batch",
             json={"feature_ids": ["f1", "missing", "f1"]},
         )
         assert r.status_code == 200
@@ -337,7 +337,7 @@ def test_search_features_maps_page_and_requires_scope(
 
     client.app.dependency_overrides[get_session] = _fake_session
     try:
-        r = client.get("/features/search", params={"q": "경복궁"})
+        r = client.get("/v1/features/search", params={"q": "경복궁"})
         assert r.status_code == 200
         body = r.json()
         assert body["data"]["items"][0]["feature_id"] == "f1"
@@ -350,7 +350,7 @@ def test_search_features_maps_page_and_requires_scope(
 def test_search_features_rejects_bad_bbox(
     client: TestClient,
 ) -> None:
-    r = client.get("/features/search", params={"bbox": "127,37,126,38"})
+    r = client.get("/v1/features/search", params={"bbox": "127,37,126,38"})
     assert r.status_code == 422
     assert "bbox" in r.json()["error"]["message"]
 
@@ -372,7 +372,7 @@ def test_search_features_rejects_missing_scope(
 
     client.app.dependency_overrides[get_session] = _fake_session
     try:
-        r = client.get("/features/search")
+        r = client.get("/v1/features/search")
         assert r.status_code == 422
         assert "q 또는 bbox" in r.json()["error"]["message"]
     finally:
