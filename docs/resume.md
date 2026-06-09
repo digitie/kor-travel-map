@@ -1,5 +1,10 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-09 claude 작업 메모 — T-RV-53/54 close-out
+
+krforest·standard_data provider 풀스택은 sub-task a~d 머지 완료(2026-06-07). 부모 [x] 처리
+(회귀 green). 실데이터 fetch는 T-212e.
+
 ## 2026-06-09 Codex 작업 메모 — T-215b feature change queue UI
 
 T-215a의 `/admin/features/change-requests*` API를 admin UI에 연결했다. 새 REST 표면은 만들지

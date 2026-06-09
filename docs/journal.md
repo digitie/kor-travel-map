@@ -2,6 +2,12 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-09 (claude) — T-RV-53/54 close-out (krforest 휴양림·수목원 / standard_data 박물관·미술관)
+
+**작업**: T-RV-53·T-RV-54 부모 task 닫기. sub-task(a transform / b dagster / c dedup /
+d ETL preview)는 2026-06-07 전부 머지 완료, 부모 rollup만 미체크였다. main 산출물 확인 +
+회귀(transform 16 + dagster 9 passed) green → 부모 [x]. 실데이터 fetch는 T-212e 이월. 문서 전용.
+
 ## 2026-06-09 (codex) — T-215b feature change queue admin UI
 
 **작업**: T-215a에서 추가한 feature add/update/delete change request API를 admin UI에 연결.
