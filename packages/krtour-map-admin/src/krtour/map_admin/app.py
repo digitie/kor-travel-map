@@ -20,7 +20,6 @@ uvicorn 설정은 ``AdminSettings``(``KRTOUR_MAP_ADMIN_*`` env) 또는 호출자
 
 from __future__ import annotations
 
-import json
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
@@ -39,6 +38,7 @@ from krtour.map_admin import __version__
 from krtour.map_admin.auth import (
     require_admin_destructive_enabled,
 )
+from krtour.map_admin.response import bind_request_id, reset_request_id
 from krtour.map_admin.response import request_id as response_request_id
 from krtour.map_admin.routers import (
     admin_backups_router,
@@ -298,53 +298,13 @@ def create_app(settings: AdminSettings | None = None) -> FastAPI:
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
         rid = _request_id(request)
-        response = await call_next(request)
-        response.headers.setdefault("X-Request-ID", rid)
-        content_type = response.headers.get("content-type", "")
-        if not content_type.startswith("application/json"):
-            return response
-        body_iterator = getattr(response, "body_iterator", None)
-        if body_iterator is None:
-            return response
-        chunks = [chunk async for chunk in body_iterator]
-        body = b"".join(chunks)
-        if not body:
-            return Response(
-                body,
-                status_code=response.status_code,
-                headers=dict(response.headers),
-                media_type=response.media_type,
-            )
+        token = bind_request_id(rid)
         try:
-            payload = json.loads(body)
-        except json.JSONDecodeError:
-            return Response(
-                body,
-                status_code=response.status_code,
-                headers=dict(response.headers),
-                media_type=response.media_type,
-            )
-        if isinstance(payload, dict):
-            meta = payload.get("meta")
-            if isinstance(meta, dict):
-                meta.setdefault("request_id", rid)
-                body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode(
-                    "utf-8"
-                )
-                headers = dict(response.headers)
-                headers.pop("content-length", None)
-                return Response(
-                    body,
-                    status_code=response.status_code,
-                    headers=headers,
-                    media_type=response.media_type,
-                )
-        return Response(
-            body,
-            status_code=response.status_code,
-            headers=dict(response.headers),
-            media_type=response.media_type,
-        )
+            response = await call_next(request)
+        finally:
+            reset_request_id(token)
+        response.headers.setdefault("X-Request-ID", rid)
+        return response
 
     # opt-in API 호출 로그 (T-212c). 기본 off → 등록 안 하면 zero overhead.
     # OpenAPI spec에는 영향 없음(미들웨어, ADR-031 drift gate 무관).

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextvars import ContextVar, Token
 from time import perf_counter
 from uuid import uuid4
 
@@ -12,10 +13,18 @@ __all__ = [
     "ClusterMeta",
     "Meta",
     "PageMeta",
+    "bind_request_id",
     "duration_ms",
     "make_meta",
     "request_id",
+    "reset_request_id",
 ]
+
+
+_CURRENT_REQUEST_ID: ContextVar[str | None] = ContextVar(
+    "krtour_map_admin_request_id",
+    default=None,
+)
 
 
 class PageMeta(BaseModel):
@@ -62,6 +71,18 @@ def request_id(request: Request) -> str:
     return value
 
 
+def bind_request_id(value: str) -> Token[str | None]:
+    """Bind ``value`` as the current request id for envelope helpers."""
+
+    return _CURRENT_REQUEST_ID.set(value)
+
+
+def reset_request_id(token: Token[str | None]) -> None:
+    """Reset the request id context after a request has been handled."""
+
+    _CURRENT_REQUEST_ID.reset(token)
+
+
 def duration_ms(started_at: float) -> int:
     """Return elapsed milliseconds from ``perf_counter`` start."""
 
@@ -84,7 +105,11 @@ def make_meta(
 
     return Meta(
         duration_ms=duration_ms(started_at),
-        request_id=request_id(request) if request is not None else "",
+        request_id=(
+            request_id(request)
+            if request is not None
+            else (_CURRENT_REQUEST_ID.get() or "")
+        ),
         page=(
             PageMeta(page_size=page_size, next_cursor=next_cursor, total=total)
             if page_size is not None
