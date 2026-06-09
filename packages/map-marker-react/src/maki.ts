@@ -44,6 +44,57 @@ const MAKI_GLYPH: Readonly<Record<string, string>> = Object.freeze({
   "construction": "\u{1F6A7}", // 🚧
   // 기타
   "marker": "\u{1F4CD}", // 📍
+  // ── Python category catalog 커버 (T-017 drift gate) ──
+  // 교통
+  "airport": "\u{2708}", // ✈
+  "bus": "\u{1F68C}", // 🚌
+  "car": "\u{1F697}", // 🚗
+  "taxi": "\u{1F695}", // 🚕
+  "ferry": "\u{26F4}", // ⛴
+  "rail": "\u{1F682}", // 🚂
+  "rail-metro": "\u{1F687}", // 🚇
+  "parking": "\u{1F17F}", // 🅿
+  "highway-rest-area": "\u{1F6E3}", // 🛣
+  // 자연/관광
+  "beach": "\u{1F3D6}", // 🏖
+  "garden": "\u{1F337}", // 🌷
+  "hot-spring": "\u{2668}", // ♨
+  "viewpoint": "\u{1F52D}", // 🔭
+  "water": "\u{1F4A7}", // 💧
+  "attraction": "\u{1F3A1}", // 🎡
+  "amusement-park": "\u{1F3A2}", // 🎢
+  "golf": "\u{26F3}", // ⛳
+  "pitch": "\u{26BD}", // ⚽
+  "swimming": "\u{1F3CA}", // 🏊
+  "zoo": "\u{1F981}", // 🦁
+  "aquarium": "\u{1F420}", // 🐠
+  "castle": "\u{1F3F0}", // 🏰
+  // 문화/시설
+  "museum": "\u{1F3DB}", // 🏛 (= monument)
+  "art-gallery": "\u{1F5BC}", // 🖼
+  "library": "\u{1F4DA}", // 📚
+  "cinema": "\u{1F3AC}", // 🎬
+  "theatre": "\u{1F3AD}", // 🎭
+  "town-hall": "\u{1F3E4}", // 🏤
+  "village": "\u{1F3D8}", // 🏘
+  "home": "\u{1F3E0}", // 🏠
+  "lodging": "\u{1F6CF}", // 🛏
+  "toilet": "\u{1F6BB}", // 🚻
+  "information": "\u{2139}", // ℹ (= info)
+  // 의료/상점/음식
+  "hospital": "\u{1F3E5}", // 🏥
+  "doctor": "\u{1FA7A}", // 🩺
+  "dentist": "\u{1F9B7}", // 🦷
+  "pharmacy": "\u{1F48A}", // 💊
+  "bank": "\u{1F3E6}", // 🏦
+  "shop": "\u{1F6CD}", // 🛍
+  "grocery": "\u{1F6D2}", // 🛒
+  "convenience": "\u{1F3EA}", // 🏪
+  "clothing-store": "\u{1F455}", // 👕
+  "bakery": "\u{1F956}", // 🥖
+  "fast-food": "\u{1F354}", // 🍔
+  "restaurant-sushi": "\u{1F363}", // 🍣
+  "bar": "\u{1F378}", // 🍸
 });
 
 /** 알려진 maki name이면 글리프, 아니면 `null`. */

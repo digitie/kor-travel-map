@@ -1,5 +1,10 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-09 claude 작업 메모 — T-017(maki drift) + T-018(KNPS) 완료
+
+T-017: map-marker-react 패키지는 추출돼 있었고 drift gate 테스트만 누락 → 추가(+maki 46종
+글리프 보강). T-018: KNPS provider/dagster는 PR#77/#78 구현 완료 → close. 인덱스 19건.
+
 ## 2026-06-09 claude 작업 메모 — T-RV-53/54 close-out
 
 krforest·standard_data provider 풀스택은 sub-task a~d 머지 완료(2026-06-07). 부모 [x] 처리

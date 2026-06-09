@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+## [Unreleased]
+
+### marker — map-marker-react maki glyph 보강 + Python↔TS drift gate (T-017, 2026-06-09)
+
+- **ADDED**: `tests/unit/test_category_maki_consistency.py` — Python category catalog의 maki
+  아이콘 이름(`PLACE_CATEGORY_MAPBOX_MAKI_ICON_VALUES`)이 전부 TS `packages/map-marker-react/
+  src/maki.ts`의 `MAKI_GLYPH`에 존재하는지 검증(drift gate, ADR-029/043).
+- **ADDED**: `MAKI_GLYPH`에 Python category가 쓰는 누락 maki 46종(airport/museum/hospital/
+  beach 등) 글리프 추가. T-017(maki/category npm share 모듈 추출) 완료.
+
 ### Admin UI/API — feature change request 큐 화면 (T-215b, 2026-06-09)
 
 - **NEW**: `/admin/features/change-requests` 화면을 추가해 feature add/update/delete 요청

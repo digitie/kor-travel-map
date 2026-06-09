@@ -2,6 +2,17 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-09 (claude) — T-017(maki drift gate) 완료 + T-018(KNPS) close
+
+- **T-017**: `packages/map-marker-react/`는 `maki.ts`/`marker.ts`/`palette.ts`로 이미 추출돼
+  있었고(ADR-043 monorepo share), 누락은 **drift gate 테스트**뿐. `test_category_maki_
+  consistency.py` 추가 → 실제 drift 검출(Python category maki 46종이 TS MAKI_GLYPH에 없음)
+  → maki.ts에 46 글리프 보강 → 2 passed. ADR-029→043 supersede.
+- **T-018**: KNPS provider 모듈(`providers/knps.py` point/geometry)+dagster fetcher/asset이
+  PR#77/#78로 이미 구현·머지됨. 부모 task만 미체크였어 close. notice source(access_restriction/
+  fire_alert)는 후속 ADR로 분리. 회귀 확인.
+- tasks.md 인덱스 19건, journal/resume. 문서+테스트.
+
 ## 2026-06-09 (claude) — T-RV-53/54 close-out (krforest 휴양림·수목원 / standard_data 박물관·미술관)
 
 **작업**: T-RV-53·T-RV-54 부모 task 닫기. sub-task(a transform / b dagster / c dedup /
