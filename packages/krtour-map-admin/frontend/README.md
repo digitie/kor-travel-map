@@ -216,6 +216,7 @@ PID를 종료한 뒤 WSL frontend를 다시 띄운다. 정상은 `wslrelay`다.
 | `/` | `/ops/metrics`, `/ops/import-jobs`, `/admin/dedup-review`, `/ops/dagster/summary` | 구현됨. 운영 홈: feature/import job/dedup/이슈/Dagster 요약 |
 | `/features` | `/features`, `/features/{id}` | 구현됨. 지도/테이블/상세 panel + 운영 quick link |
 | `/admin/features` | `/admin/features`, `/admin/features/{id}/deactivate`, `/features/{id}`, `/features/{id}/weather` | 구현됨. 운영자용 table 목록, 상세/weather panel, 단건 비활성화 |
+| `/admin/features/change-requests` | `/admin/features`, `/admin/features/change-requests*` | 구현됨. feature add/update/delete 요청 생성, 검토 큐, approve/reject |
 | `/admin/issues` | `/admin/issues`, `/admin/issues/{violation_key}` | 구현됨. 이슈 목록/상세, resolve/ignore/reopen/retry/apply/manual override |
 | `/ops/import-jobs` | `/ops/import-jobs` | 구현됨. 작업 큐 read-only 상태, state/kind filter |
 | `/ops/consistency` | `/ops/metrics`, `/ops/consistency/reports`, `/ops/consistency/issues` | 구현됨. 정합성 보고서/이슈 |

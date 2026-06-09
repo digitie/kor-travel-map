@@ -48,11 +48,20 @@
           "limit": {
             "title": "Limit",
             "type": "integer"
+          },
+          "review_mode": {
+            "enum": [
+              "require_review",
+              "immediate"
+            ],
+            "title": "Review Mode",
+            "type": "string"
           }
         },
         "required": [
           "count",
           "limit",
+          "review_mode",
           "duration_ms"
         ],
         "title": "AdminFeatureChangeListMeta",

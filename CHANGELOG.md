@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### Admin UI/API — feature change request 큐 화면 (T-215b, 2026-06-09)
+
+- **NEW**: `/admin/features/change-requests` 화면을 추가해 feature add/update/delete 요청
+  생성, 상태/action/q/limit 필터, payload 상세, approve/reject 작업을 한 곳에서 처리한다.
+- **CHANGED**: frontend API hook은 기존 REST 표면(`/admin/features` +
+  `/admin/features/change-requests*`)만 사용한다. 중복 create/update/delete 별도 endpoint는
+  만들지 않았다.
+- **CHANGED**: `GET /admin/features/change-requests` 응답 meta에 현재
+  `review_mode`를 포함해 큐가 비어 있어도 UI가 운영 모드를 표시한다.
+
 ### API — T-214 tail: pagination/parameter·error 규약 + `/debug/health|version` 제거 (T-214e/f/g/h, 2026-06-09)
 
 - **CHANGED (breaking)**: `GET /v1/features/search`의 bbox를 CSV `bbox`에서 분리 4-float

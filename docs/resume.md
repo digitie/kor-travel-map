@@ -1,5 +1,21 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-09 Codex 작업 메모 — T-215b feature change queue UI
+
+T-215a의 `/admin/features/change-requests*` API를 admin UI에 연결했다. 새 REST 표면은 만들지
+않고 기존 정본 endpoint만 사용한다.
+
+- `/admin/features/change-requests`: 요청 목록, 상태/action/q/limit 필터, payload 상세, approve/reject.
+- 같은 화면에서 add/update/delete 요청 form을 제공한다. `DELETE /admin/features/{feature_id}`는
+  JSON body가 필요해 frontend `deleteJson`이 optional body를 받을 수 있게 확장했다.
+- `GET /admin/features/change-requests` meta에 `review_mode`를 추가해
+  `KRTOUR_MAP_ADMIN_FEATURE_CHANGE_REVIEW_MODE`를 빈 큐에서도 표시한다.
+- OpenAPI와 frontend generated type을 재생성했다.
+
+**다음 한 작업 후보**: **T-215c** feature change e2e workflow 보강(typed route mock,
+pending→approve→applied, immediate mode, soft delete 표시/필터), 또는 T-216a admin/ops/debug
+`/v1` mount.
+
 ## 2026-06-09 claude 작업 메모 — T-214 tail 완료 (e/f/g/h)
 
 T-214e(search bbox 4-float·page_size) + T-214f(POI write=admin only 결정) + T-214g(헤더/에러
