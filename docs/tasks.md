@@ -6,11 +6,8 @@
 
 ## 진행 중인 작업 인덱스 (열린 `[ ]` 항목)
 
-> 총 23건. 상세는 아래 각 섹션. 완료 이력은 [`tasks-done.md`](tasks-done.md).
+> 총 21건. 상세는 아래 각 섹션. 완료 이력은 [`tasks-done.md`](tasks-done.md).
 
-- **T-RV-50 시리즈 — T-RV-04b 완전 마무리 + 후속 (데이터소스 전수 + dedup UI + maplibre)**
-  - [ ] T-RV-53 휴양림/수목원(krforest) feature-load
-  - [ ] T-RV-54 박물관/미술관(standard_data) feature-load
 - **다음 (우선순위 순)**
   - [ ] 공통 maki marker / category 매핑 npm 패키지 추출
   - [ ] `python-knps-api` provider 등록 / KNPS 적재 준비
@@ -183,7 +180,7 @@ enrichment(모듈 있음, 미wiring)**. dedup 인프라(scoring/queue/admin rout
       `src/api/enrichment.ts` 훅(`useEnrichmentReviews`/`useEnrichmentDecisionMutation`) + nav 항목
       (admin-shell) + e2e smoke(admin-ops.spec). 게이트: gen:types:check(drift 0)/tsc/next build
       (route 등록 확인)/eslint green. **→ T-RV-52c 전체 완료.**
-- [ ] **T-RV-53 휴양림/수목원(krforest) feature-load**(points 1·2·3·4): provider `python-krforest-api`
+- [x] **T-RV-53 휴양림/수목원(krforest) feature-load**(points 1·2·3·4) — **완료(2026-06-07, sub-task a~d 전부 머지; 실데이터 fetch 검증은 T-212e)**. provider `python-krforest-api`
   `ForestClient().travel.standard_recreation_forests()`→`StandardRecreationForest`(institution_code
   stable id / name / address / lat·lon WGS84 / phone / homepage), 수목원/식물원은 SHP file
   (`recreation_forest_arboretums()`→`ForestSpatialPoint`). env `DATA_GO_KR_SERVICE_KEY`. (READY 판정.)
@@ -213,7 +210,7 @@ enrichment(모듈 있음, 미wiring)**. dedup 인프라(scoring/queue/admin rout
     25 files + etl router 25 passed + preview 실행(count 2/1, kind place) 확인. dedup은 dedup-review
     UI(T-RV-51a)에 자동 노출(53c scope). **NOTE: ETL preview 레지스트리는 Sprint-2 provider만 있었고
     knps/krheritage/mois도 미등록 — 후속 정리 후보.**
-- [ ] **T-RV-54 박물관/미술관(standard_data) feature-load**(points 1·3·4): provider `datagokr`
+- [x] **T-RV-54 박물관/미술관(standard_data) feature-load**(points 1·3·4) — **완료(2026-06-07, sub-task a~d 전부 머지; 실데이터 fetch 검증은 T-212e)**. provider `datagokr`
   `client.museum_art.iter_all()`→`PublicMuseumArtGallery`(instt_code / fclty_nm / fclty_type /
   rdnmadr·lnmadr / lat·lon / phone / homepage). (READY 판정.)
   - [x] **T-RV-54a (krtour)**(2026-06-07) `standard_data.py` 확장 — `museums_to_bundles`(place) +
