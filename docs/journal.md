@@ -2,6 +2,13 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-09 (claude) — T-102 pg_prewarm 부팅 후 warm-up (mechanism)
+
+보류(v2 1차 외) 항목이지만 사용자 지시로 메커니즘 구현. migration 0022(확장) +
+`infra/prewarm.py`(`prewarm_relations`, to_regclass 필터·확장 미설치 no-op) + docker-compose
+postgres autoprewarm(shared_preload_libraries) + `/ops/health-deep` prewarm 컴포넌트.
+통합 3 + ops 7 passed, ruff/mypy(86+25)/drift/lint-imports green. 효과는 도입 조건 충족 시.
+
 ## 2026-06-09 (claude) — T-017(maki drift gate) 완료 + T-018(KNPS) close
 
 - **T-017**: `packages/map-marker-react/`는 `maki.ts`/`marker.ts`/`palette.ts`로 이미 추출돼

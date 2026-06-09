@@ -1,5 +1,10 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-09 claude 작업 메모 — T-102 pg_prewarm warm-up (mechanism)
+
+보류 항목이지만 메커니즘 구현: migration 0022 + infra/prewarm.py + docker autoprewarm +
+health-deep prewarm. 효과는 P99 SLO+shared_buffers fit 조건 충족 시. 인덱스 18건.
+
 ## 2026-06-09 claude 작업 메모 — T-017(maki drift) + T-018(KNPS) 완료
 
 T-017: map-marker-react 패키지는 추출돼 있었고 drift gate 테스트만 누락 → 추가(+maki 46종

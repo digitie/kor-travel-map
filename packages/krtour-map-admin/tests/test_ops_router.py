@@ -274,8 +274,14 @@ def test_health_deep_ok(
     async def _postgis(_session: Any) -> OpsHealthCheck:
         return OpsHealthCheck(component="postgis", status="ok", detail="3.5")
 
+    async def _prewarm(_session: Any) -> OpsHealthCheck:
+        return OpsHealthCheck(
+            component="prewarm", status="ok", detail="extension=present, autoprewarm=off"
+        )
+
     monkeypatch.setattr(router_mod, "_check_database", _db)
     monkeypatch.setattr(router_mod, "_check_postgis", _postgis)
+    monkeypatch.setattr(router_mod, "_check_prewarm", _prewarm)
 
     response = client.get("/ops/health-deep")
 
@@ -284,7 +290,7 @@ def test_health_deep_ok(
     assert set(body) == {"data", "meta"}
     assert body["data"]["status"] == "ok"
     components = {c["component"]: c["status"] for c in body["data"]["checks"]}
-    assert components == {"database": "ok", "postgis": "ok"}
+    assert components == {"database": "ok", "postgis": "ok", "prewarm": "ok"}
     assert "duration_ms" in body["meta"]
 
 
@@ -304,8 +310,12 @@ def test_health_deep_degraded_returns_503(
     async def _postgis(_session: Any) -> OpsHealthCheck:
         return OpsHealthCheck(component="postgis", status="ok", detail="3.5")
 
+    async def _prewarm(_session: Any) -> OpsHealthCheck:
+        return OpsHealthCheck(component="prewarm", status="ok")
+
     monkeypatch.setattr(router_mod, "_check_database", _db)
     monkeypatch.setattr(router_mod, "_check_postgis", _postgis)
+    monkeypatch.setattr(router_mod, "_check_prewarm", _prewarm)
 
     response = client.get("/ops/health-deep")
 

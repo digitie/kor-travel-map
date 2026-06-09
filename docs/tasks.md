@@ -6,13 +6,12 @@
 
 ## 진행 중인 작업 인덱스 (열린 `[ ]` 항목)
 
-> 총 19건. 상세는 아래 각 섹션. 완료 이력은 [`tasks-done.md`](tasks-done.md).
+> 총 18건. 상세는 아래 각 섹션. 완료 이력은 [`tasks-done.md`](tasks-done.md).
 
 - **다음 (우선순위 순)**
   - [ ] TripMate 측 후속 작업 추적
 - **보류 (v2 1차 범위 외)**
   - [ ] Materialized View 도입 검토
-  - [ ] pg_prewarm 부팅 후 warm-up
   - [ ] streaming ETL (Kafka/Redpanda) 대응
 - **Phase 6 — TripMate 연계/정리 (일부 TripMate repo)**
   - [ ] T-210a
@@ -542,13 +541,16 @@ lint-imports/pytest/coverage, frontend type-check/e2e). 실데이터 검증은 T
     `concurrently` 전략에 연결한다(T-RV-41).
   - 도입 절차: 하나의 hot path 시범 (예: `mv_features_place_with_detail`) →
     UNIQUE 인덱스 + 최초 populate → 1주 운영 + EXPLAIN diff → 확장 판단 → ADR 신설.
-- [ ] T-102 — **pg_prewarm 부팅 후 warm-up**
-  - 상세 분석: `docs/performance.md §9.5` (장점, 조건, 부작용, ROI).
-  - 도입 조건: 명시적 P99 SLO + 재배포 빈도 높음 + `shared_buffers`가 핫
-    데이터 fit (Odroid 기본 512MB는 일부만 가능).
-  - 도입 절차: `CREATE EXTENSION pg_prewarm SCHEMA x_extension;` (ADR-008)
-    + `autoprewarm = on` background 모드 + `/health` `prewarm_completed:bool`
-    노출.
+- [x] T-102 — **pg_prewarm 부팅 후 warm-up** (2026-06-09 — mechanism 구현)
+  - migration `0022_pg_prewarm_extension`: `CREATE EXTENSION pg_prewarm SCHEMA x_extension`
+    (ADR-008). 명시적 warm-up 헬퍼 `krtour.map.infra.prewarm.prewarm_relations`
+    (`x_extension.pg_prewarm(regclass)`, `to_regclass` 필터 + 확장 미설치 시 no-op).
+    docker-compose postgres `shared_preload_libraries=pg_prewarm` + `autoprewarm=on`
+    (background dump/reload). `/ops/health-deep`에 `prewarm` 컴포넌트(extension/autoprewarm
+    상태, 정보용 — opt-in이라 degrade 안 함) 노출. 통합 3 + ops 7 passed.
+  - **효과는 도입 조건(명시적 P99 SLO + shared_buffers가 hot 데이터 fit)이 충족될 때 큼**
+    (Odroid 512MB는 일부만). 상세: `docs/performance.md §9.5`. 메커니즘만 박았고 hot
+    relation 목록·부팅 훅 연결은 운영 측정 후 조정.
 - [ ] T-103 — **streaming ETL (Kafka/Redpanda) 대응** — 본 라이브러리는
       consumer 미보유 (ADR-003)
   - 상세 분석: `docs/performance.md §9.4` (시나리오, 비용, 라이브러리 위치).
