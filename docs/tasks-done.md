@@ -3,6 +3,84 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## Phase 6.7 — Feature 사용자 요청 CRUD/versioning (2026-06-08, `T-215`)
+
+- [x] **T-215a — place/event feature 추가·수정·삭제 admin API + versioning.**
+  `/admin/features`에 `POST`, `/admin/features/{feature_id}`에 `PATCH`/`DELETE`,
+  `/admin/features/change-requests*` 승인/거절 API를 추가했다.
+  `KRTOUR_MAP_ADMIN_FEATURE_CHANGE_REVIEW_MODE=require_review|immediate` 설정에 따라
+  요청을 `pending`으로 보관하거나 같은 transaction에서 바로 적용한다. provider 적재는
+  `data_origin='provider', data_version=0`, 사용자 요청은
+  `data_origin='user_request', data_version=1`로 구분하고
+  `feature.feature_versions` snapshot을 남긴다. 사용자 요청 삭제는 soft delete이며
+  provider 재적재나 snapshot 누락 정리로 되살리지 않는다.
+- [x] **T-215b — admin UI feature change queue 화면.** (2026-06-09)
+  `/admin/features/change-requests` 화면을 추가해 `GET /admin/features/change-requests`
+  목록, add/update/delete 요청 form, approve/reject 동작을 연결했다. 목록 meta에
+  `review_mode`를 추가해 `KRTOUR_MAP_ADMIN_FEATURE_CHANGE_REVIEW_MODE` 현재값을 빈 큐에서도
+  표시한다. 기존 정본 mutation endpoint만 사용하며 새 중복 REST 표면은 만들지 않았다.
+- [x] **T-215c — frontend generated type/e2e workflow 보강.** (2026-06-09)
+  OpenAPI 생성 schema 타입 기반 route mock으로 pending→approve→applied, immediate mode
+  create, update/delete 요청 생성, soft delete 적용 표시와 action delete 필터 e2e를 추가했다.
+  Next RSC prefetch는 mock 범위에서 제외해 document/API 요청을 분리했다.
+
+
+## Phase 6.6 — REST API v1 정리 후속 (2026-06-08, `T-214`)
+
+전 표면 계약 정본은 `docs/rest-api.md`, TripMate 소비 view는 `docs/tripmate-rest-api.md`.
+기준 입력은 `docs/reports/api-endpoint-review-2026-06-08.md`와 TripMate
+`docs/integrations/krtour-map-rest-api.md`. 사용자 결정으로 `/tripmate/feature-update-requests*`는
+admin 영역으로 이동한다.
+
+- [x] **T-214a — REST API 정본 문서 작성.**
+  Versioning, envelope, parameter 규약, endpoint naming, 중복 처리, 누락 API를
+  종합해 `docs/tripmate-rest-api.md`를 목표 `/v1` 계약과 현재 구현 gap 중심으로
+  재작성했다. `docs/openapi-admin-contract.md`, `docs/tripmate-integration.md`,
+  `docs/poi-cache-update-targets.md`, `docs/architecture.md`의 충돌 문구도 정리했다.
+- [x] **T-214b — 사용자/서비스 API `/v1` prefix 도입.** (2026-06-09)
+  `features`/`categories`/`providers` 라우터를 `application.include_router(..., prefix="/v1")`로
+  `/v1/*` 노출(`/features/*`(batch 포함)·`/categories`·`/providers/{provider}/last-sync`).
+  구 unversioned 경로는 유지하지 않는다(clean cut, alias 없음). liveness `/health`·`/version`은
+  비버저닝 유지. `USER_OPERATIONS`·OpenAPI 두 profile·frontend 호출부(`api/features.ts`·
+  `api/poiCacheTargets.ts`)·generated type·e2e mock·테스트 일괄 갱신. admin/ops/debug의
+  `/v1` 이동은 ADR-048/T-216a에서 처리한다.
+- [x] **T-214c — `/tripmate/feature-update-requests*` 제거, admin-only 전환.**
+  user OpenAPI와 `USER_OPERATIONS`에서 `POST/GET /tripmate/feature-update-requests*`를
+  제거하고 `/admin/feature-update-requests*`만 정본으로 남긴다. TripMate 사용자 제안 큐는
+  TripMate app DB 소유로 문서화하고, 운영자 승인 뒤 admin API 호출로 연결한다.
+- [x] **T-214d — `/tripmate/*` namespace 제거, batch를 `POST /features/batch`로 일반화.**
+  (2026-06-09, 사용자 지시 — krtour-map은 TripMate 전용이 아니다.) `tripmate_router` 제거,
+  batch를 `features_router`의 `POST /features/batch`로 옮기고 service-token을 route-level
+  gate로 유지(ServiceToken scheme 보존). `USER_OPERATIONS`·OpenAPI 두 profile·frontend
+  generated type·테스트·문서 일괄 갱신. `/v1` prefix 부여는 T-214b/T-216a에서. 응답은 list
+  `items[]`와 충돌하지 않게 `data={found:{feature_id:Feature},missing[]}`로 정렬(후속).
+- [x] **T-214e — pagination/parameter 일관성 정리.** (2026-06-09)
+  규약 확정: **페이지 가능한 목록 = `page_size`+`cursor`**(search·nearby·admin/ops),
+  **bounded 지도 조회 = `limit`**(`/features` flat·`/features/in-bounds` — 뷰포트 로드),
+  다중 값 = 단수 반복 query parameter, bbox = `min_lon/min_lat/max_lon/max_lat` 4-float.
+  코드: `/v1/features/search`의 CSV `bbox` 제거 → 4-float, `limit`→`page_size`,
+  `_parse_bbox_csv` 삭제. `/features` flat은 bounded map이라 `limit` 유지(admin/지도 호환).
+  (envelope `meta.page`·`total` opt-in·2-티어 캡 등 심화는 T-216b/c, ADR-048.)
+- [x] **T-214f — POI cache target write 표면 결정.** (2026-06-09)
+  **결정: TripMate 직접 write 미허용 — admin/operator flow만.** POI cache target
+  upsert/delete는 `/admin/poi-cache-targets*`(인프라 SSO + kill-switch)로만 수행하고,
+  service-safe `/v1/poi-cache-targets/*` write 경로는 **추가하지 않는다**. TripMate는 등록된
+  target 기준 read(`GET /v1/features/nearby/by-target`)만 소비. (rest-api.md·
+  tripmate-rest-api.md 명시.)
+- [x] **T-214g — error/idempotency/rate-limit/deprecation header 규약 명시.** (2026-06-09)
+  규약을 `docs/rest-api.md`에 단일 표로 고정: `X-Request-ID`(구현됨 — 모든 응답),
+  problem+json `code` enum(§4), `Retry-After`(LOCK_BUSY/RATE_LIMITED), `Idempotency-Key`·
+  `RateLimit-*`·`Deprecation`/`Sunset`(규약 정의 + 적용 시점 명시; idempotency/rate-limit
+  구현은 T-216 외부 변경 호출에서). 실제 problem+json 본문 전환은 T-216d.
+- [x] **T-214h — endpoint naming cleanup.** (2026-06-09)
+  `/debug/health`·`/debug/version` **제거**(ADR-048 clean cut — 공용 `/health`·`/version`과
+  중복). `health.py`/`version.py` 라우터 삭제, app.py/__init__ 정리, 상태확인은
+  `/health`·`/version`(public_status) + `/ops/health-deep`(readiness)로 수렴. frontend
+  `useHealth`/`useVersion`을 public `/health`·`/version`(envelope) 소비로 repoint.
+  `dedup-review`/`enrichment-review` **복수화는 T-216e(major 컷)로 이월** — 본 task에선
+  결정만(소비자 영향 큰 path 개명은 ADR-048 명명 묶음에서 일괄).
+
+
 ## 문서 정합성 백로그 (T-DA, 2026-06-06)
 
 문서 전수 정합성 감사 결과. 전체 지적·근거·파일위치·의사결정은

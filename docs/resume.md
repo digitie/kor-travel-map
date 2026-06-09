@@ -1,5 +1,17 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-09 Codex 작업 메모 — T-215c feature change e2e workflow
+
+T-215b에서 만든 `/admin/features/change-requests` 화면의 workflow e2e를 보강했다.
+
+- OpenAPI generated schema 타입에 묶인 feature change route mock을 추가했다.
+- `require_review`: pending row 선택 → approve → applied 표시와 approve button 제거를 검증한다.
+- `immediate`: create form 제출 후 즉시 applied row가 보이는지 검증한다.
+- update/delete 요청 생성, delete approve 이후 soft delete 완료 표시, action delete 필터를 검증한다.
+- Next RSC prefetch(`/admin/features?_rsc=...`)는 backend mock에서 제외했다.
+
+**다음 한 작업 후보**: **T-216a** admin/ops/debug `/v1` clean cut.
+
 ## 2026-06-09 claude 작업 메모 — T-102 pg_prewarm warm-up (mechanism)
 
 보류 항목이지만 메커니즘 구현: migration 0022 + infra/prewarm.py + docker autoprewarm +

@@ -6,13 +6,30 @@ import type { components } from "../src/api/types";
 // 백엔드 DTO가 바뀌면 mock factory가 타입 불일치로 컴파일 실패 → mock-실계약 drift 감지.
 type OfflineUploadRecord = components["schemas"]["OfflineUploadRecord"];
 type PoiCacheTargetRecord = components["schemas"]["PoiCacheTargetRecord"];
+type AdminFeatureChangeRecord =
+  components["schemas"]["AdminFeatureChangeRequestRecord"];
+type AdminFeatureChangeListResponse =
+  components["schemas"]["AdminFeatureChangeListResponse"];
+type AdminFeatureChangeResponse =
+  components["schemas"]["AdminFeatureChangeResponse"];
+type AdminFeatureCreateRequest =
+  components["schemas"]["AdminFeatureCreateRequest"];
+type AdminFeaturePatchRequest =
+  components["schemas"]["AdminFeaturePatchRequest"];
+type AdminFeatureDeleteRequest =
+  components["schemas"]["AdminFeatureDeleteRequest"];
+type AdminFeatureReviewActionRequest =
+  components["schemas"]["AdminFeatureReviewActionRequest"];
+type AdminFeatureReviewMode = AdminFeatureChangeRecord["review_mode"];
 
 const MOCK_NOW = "2026-06-08T00:00:00.000Z";
+const MOCK_REVIEWED_AT = "2026-06-08T00:10:00.000Z";
 const OFFLINE_UPLOAD_ID = "11111111-1111-4111-8111-111111111111";
 const OFFLINE_VALIDATION_JOB_ID = "22222222-2222-4222-8222-222222222222";
 const OFFLINE_LOAD_JOB_ID = "33333333-3333-4333-8333-333333333333";
 const OFFLINE_DAGSTER_RUN_ID = "dagster-run-offline-upload-001";
 const POI_TARGET_ID = "44444444-4444-4444-8444-444444444444";
+const FEATURE_CHANGE_ID = "55555555-5555-4555-8555-555555555555";
 
 function makeOfflineUpload(
   overrides: Partial<OfflineUploadRecord> = {},
@@ -70,6 +87,30 @@ function makePoiTarget(
     target_key: "mock-target-1",
     update_enabled: true,
     updated_at: MOCK_NOW,
+    ...overrides,
+  };
+}
+
+function makeFeatureChange(
+  overrides: Partial<AdminFeatureChangeRecord> = {},
+): AdminFeatureChangeRecord {
+  return {
+    action: "add",
+    applied_at: null,
+    created_at: MOCK_NOW,
+    feature_id: "user_request::e2e::mock-feature",
+    payload: {
+      category: "01070300",
+      kind: "place",
+      name: "Mock pending feature",
+    },
+    reason: "운영 변경",
+    request_id: FEATURE_CHANGE_ID,
+    requested_by: "local-admin",
+    review_mode: "require_review",
+    reviewed_at: null,
+    reviewed_by: null,
+    state: "pending",
     ...overrides,
   };
 }
@@ -347,6 +388,243 @@ async function mockPoiCacheTargetMutations(page: Page) {
   return requests;
 }
 
+function featureChangeListResponse(
+  items: AdminFeatureChangeRecord[],
+  reviewMode: AdminFeatureReviewMode,
+  limit: number,
+): AdminFeatureChangeListResponse {
+  return {
+    data: { items },
+    meta: {
+      count: items.length,
+      duration_ms: 1,
+      limit,
+      review_mode: reviewMode,
+    },
+  };
+}
+
+function featureChangeResponse(
+  request: AdminFeatureChangeRecord,
+): AdminFeatureChangeResponse {
+  return {
+    data: { request },
+    meta: { duration_ms: 1 },
+  };
+}
+
+function applyFeatureChange(
+  request: AdminFeatureChangeRecord,
+  operator: string | null | undefined,
+): AdminFeatureChangeRecord {
+  return {
+    ...request,
+    applied_at: MOCK_REVIEWED_AT,
+    reviewed_at: MOCK_REVIEWED_AT,
+    reviewed_by: operator ?? "local-admin",
+    state: "applied",
+  };
+}
+
+async function mockFeatureChangeMutations(
+  page: Page,
+  options: {
+    initial?: AdminFeatureChangeRecord[];
+    reviewMode?: AdminFeatureReviewMode;
+  } = {},
+) {
+  const reviewMode = options.reviewMode ?? "require_review";
+  let changes = [...(options.initial ?? [])];
+  const requests = {
+    approve: 0,
+    create: 0,
+    delete: 0,
+    list: 0,
+    patch: 0,
+    reject: 0,
+    createBodies: [] as AdminFeatureCreateRequest[],
+    deleteBodies: [] as AdminFeatureDeleteRequest[],
+    patchBodies: [] as AdminFeaturePatchRequest[],
+    reviewBodies: [] as AdminFeatureReviewActionRequest[],
+  };
+
+  function filteredChanges(url: URL) {
+    const states = new Set(url.searchParams.getAll("state"));
+    const actions = new Set(url.searchParams.getAll("action"));
+    const q = (url.searchParams.get("q") ?? "").toLowerCase();
+    return changes.filter((item) => {
+      const name =
+        typeof item.payload.name === "string"
+          ? item.payload.name.toLowerCase()
+          : "";
+      return (
+        (states.size === 0 || states.has(item.state)) &&
+        (actions.size === 0 || actions.has(item.action)) &&
+        (q.length === 0 ||
+          item.request_id.toLowerCase().includes(q) ||
+          item.feature_id.toLowerCase().includes(q) ||
+          (item.reason ?? "").toLowerCase().includes(q) ||
+          name.includes(q))
+      );
+    });
+  }
+
+  function storeChange(request: AdminFeatureChangeRecord) {
+    changes = [
+      request,
+      ...changes.filter((item) => item.request_id !== request.request_id),
+    ];
+    return request;
+  }
+
+  function changeStateForWrite(request: AdminFeatureChangeRecord) {
+    return reviewMode === "immediate"
+      ? applyFeatureChange(request, request.requested_by)
+      : request;
+  }
+
+  await page.route("**/admin/features**", async (route) => {
+    const request = route.request();
+    if (request.resourceType() === "document") {
+      await route.continue();
+      return;
+    }
+    const url = new URL(request.url());
+    if (url.port === "9012") {
+      await route.continue();
+      return;
+    }
+
+    if (
+      request.method() === "GET" &&
+      url.pathname === "/admin/features/change-requests"
+    ) {
+      requests.list += 1;
+      await fulfillJson(
+        route,
+        featureChangeListResponse(
+          filteredChanges(url),
+          reviewMode,
+          Number(url.searchParams.get("limit") ?? 100),
+        ),
+      );
+      return;
+    }
+
+    if (
+      request.method() === "POST" &&
+      url.pathname.endsWith("/approve")
+    ) {
+      requests.approve += 1;
+      const body = request.postDataJSON() as AdminFeatureReviewActionRequest;
+      requests.reviewBodies.push(body);
+      const requestId = url.pathname.split("/").at(-2);
+      const target = changes.find((item) => item.request_id === requestId);
+      if (!target) {
+        await fulfillJson(route, { detail: "not found" }, 404);
+        return;
+      }
+      const updated = storeChange(applyFeatureChange(target, body.operator));
+      await fulfillJson(route, featureChangeResponse(updated));
+      return;
+    }
+
+    if (request.method() === "POST" && url.pathname.endsWith("/reject")) {
+      requests.reject += 1;
+      const body = request.postDataJSON() as AdminFeatureReviewActionRequest;
+      requests.reviewBodies.push(body);
+      const requestId = url.pathname.split("/").at(-2);
+      const target = changes.find((item) => item.request_id === requestId);
+      if (!target) {
+        await fulfillJson(route, { detail: "not found" }, 404);
+        return;
+      }
+      const updated = storeChange({
+        ...target,
+        reviewed_at: MOCK_REVIEWED_AT,
+        reviewed_by: body.operator ?? "local-admin",
+        state: "rejected",
+      });
+      await fulfillJson(route, featureChangeResponse(updated));
+      return;
+    }
+
+    if (request.method() === "POST" && url.pathname === "/admin/features") {
+      requests.create += 1;
+      const body = request.postDataJSON() as AdminFeatureCreateRequest;
+      requests.createBodies.push(body);
+      const created = storeChange(
+        changeStateForWrite(
+          makeFeatureChange({
+            feature_id: body.feature_id ?? "user_request::e2e::created-feature",
+            payload: { ...body },
+            reason: body.reason,
+            request_id: `change-create-${requests.create}`,
+            requested_by: body.operator ?? "local-admin",
+            review_mode: reviewMode,
+          }),
+        ),
+      );
+      await fulfillJson(route, featureChangeResponse(created));
+      return;
+    }
+
+    if (
+      request.method() === "PATCH" &&
+      url.pathname.startsWith("/admin/features/")
+    ) {
+      requests.patch += 1;
+      const body = request.postDataJSON() as AdminFeaturePatchRequest;
+      requests.patchBodies.push(body);
+      const featureId = decodeURIComponent(url.pathname.split("/").at(-1) ?? "");
+      const updated = storeChange(
+        changeStateForWrite(
+          makeFeatureChange({
+            action: "update",
+            feature_id: featureId,
+            payload: { feature_id: featureId, ...body },
+            reason: body.reason,
+            request_id: `change-update-${requests.patch}`,
+            requested_by: body.operator ?? "local-admin",
+            review_mode: reviewMode,
+          }),
+        ),
+      );
+      await fulfillJson(route, featureChangeResponse(updated));
+      return;
+    }
+
+    if (
+      request.method() === "DELETE" &&
+      url.pathname.startsWith("/admin/features/")
+    ) {
+      requests.delete += 1;
+      const body = request.postDataJSON() as AdminFeatureDeleteRequest;
+      requests.deleteBodies.push(body);
+      const featureId = decodeURIComponent(url.pathname.split("/").at(-1) ?? "");
+      const deleted = storeChange(
+        changeStateForWrite(
+          makeFeatureChange({
+            action: "delete",
+            feature_id: featureId,
+            payload: { deleted: true, feature_id: featureId, status: "hidden" },
+            reason: body.reason,
+            request_id: `change-delete-${requests.delete}`,
+            requested_by: body.operator ?? "local-admin",
+            review_mode: reviewMode,
+          }),
+        ),
+      );
+      await fulfillJson(route, featureChangeResponse(deleted));
+      return;
+    }
+
+    throw new Error(`Unhandled feature change route: ${request.method()} ${url}`);
+  });
+
+  return requests;
+}
+
 /**
  * 신규 admin/ops 화면 smoke.
  * API 결과 행 수보다 운영자가 사용할 표면(제목, 필터, 폼, 표)을 우선 검증한다.
@@ -429,6 +707,124 @@ test.describe("admin/ops pages", () => {
       await expect(page.getByRole("columnheader", { name: column })).toBeVisible();
     }
     await expect(page.getByText("요청 행을 선택하면")).toBeVisible();
+  });
+
+  test("/admin/features/change-requests approve workflow", async ({ page }) => {
+    const requests = await mockFeatureChangeMutations(page, {
+      initial: [
+        makeFeatureChange({
+          feature_id: "feature-pending-1",
+          payload: {
+            category: "01070300",
+            kind: "place",
+            name: "Mock pending feature",
+          },
+          reason: "검토 필요",
+          request_id: "change-pending-1",
+        }),
+      ],
+    });
+
+    await page.goto("/admin/features/change-requests");
+    await page.getByLabel("change state", { exact: true }).selectOption("all");
+
+    const pendingRow = page.getByRole("row", { name: /Mock pending feature/ });
+    await expect(pendingRow).toBeVisible();
+    await pendingRow.click();
+    await expect(page.locator("aside").getByText("change-pending-1")).toBeVisible();
+
+    await pendingRow.getByRole("button", { name: "approve" }).click();
+
+    await expect.poll(() => requests.approve).toBe(1);
+    expect(requests.reviewBodies[0]).toMatchObject({
+      operator: "local-admin",
+      reason: "admin-ui approve",
+    });
+    await expect(pendingRow.getByText("applied")).toBeVisible();
+    await expect(pendingRow.getByRole("button", { name: "approve" })).toHaveCount(
+      0,
+    );
+  });
+
+  test("/admin/features/change-requests immediate create workflow", async ({
+    page,
+  }) => {
+    const requests = await mockFeatureChangeMutations(page, {
+      reviewMode: "immediate",
+    });
+
+    await page.goto("/admin/features/change-requests");
+    await expect(page.getByText("immediate").first()).toBeVisible();
+
+    await page.getByLabel("change name", { exact: true }).fill("Immediate feature");
+    await page.getByLabel("change reason", { exact: true }).fill("즉시 적용");
+    await page.getByLabel("change lon", { exact: true }).fill("126.978");
+    await page.getByLabel("change lat", { exact: true }).fill("37.5665");
+    await page.getByRole("button", { name: "요청 생성" }).click();
+
+    await expect.poll(() => requests.create).toBe(1);
+    expect(requests.createBodies[0]).toMatchObject({
+      coord: { lon: 126.978, lat: 37.5665 },
+      name: "Immediate feature",
+      reason: "즉시 적용",
+    });
+
+    await page.getByLabel("change state", { exact: true }).selectOption("all");
+    const createdRow = page.getByRole("row", { name: /Immediate feature/ });
+    await expect(createdRow).toBeVisible();
+    await expect(createdRow.getByText("applied")).toBeVisible();
+  });
+
+  test("/admin/features/change-requests update/delete workflow", async ({
+    page,
+  }) => {
+    const requests = await mockFeatureChangeMutations(page);
+
+    await page.goto("/admin/features/change-requests");
+    await page.getByLabel("change state", { exact: true }).selectOption("all");
+
+    await page.getByLabel("change action", { exact: true }).selectOption("update");
+    await page
+      .getByLabel("change feature id", { exact: true })
+      .fill("feature-update-1");
+    await page.getByLabel("change reason", { exact: true }).fill("이름 수정");
+    await page.getByLabel("change name", { exact: true }).fill("Updated feature");
+    await page.getByRole("button", { name: "요청 생성" }).click();
+
+    await expect.poll(() => requests.patch).toBe(1);
+    expect(requests.patchBodies[0]).toMatchObject({
+      name: "Updated feature",
+      reason: "이름 수정",
+    });
+    await expect(page.getByRole("row", { name: /Updated feature/ })).toBeVisible();
+
+    await page.getByLabel("change action", { exact: true }).selectOption("delete");
+    await page
+      .getByLabel("change feature id", { exact: true })
+      .fill("feature-delete-1");
+    await page.getByLabel("change reason", { exact: true }).fill("soft delete");
+    await page.getByRole("button", { name: "요청 생성" }).click();
+
+    await expect.poll(() => requests.delete).toBe(1);
+    expect(requests.deleteBodies[0]).toMatchObject({
+      operator: "local-admin",
+      reason: "soft delete",
+    });
+
+    const deleteRow = page.getByRole("row", { name: /feature-delete-1/ });
+    await expect(deleteRow).toBeVisible();
+    await deleteRow.getByRole("button", { name: "approve" }).click();
+    await expect.poll(() => requests.approve).toBe(1);
+    await expect(deleteRow.getByText("applied")).toBeVisible();
+    await expect(deleteRow.getByText("완료")).toBeVisible();
+
+    await page
+      .getByLabel("change action filter", { exact: true })
+      .selectOption("delete");
+    await expect(deleteRow).toBeVisible();
+    await expect(page.getByRole("row", { name: /Updated feature/ })).toHaveCount(
+      0,
+    );
   });
 
   test("/admin/issues", async ({ page }) => {
