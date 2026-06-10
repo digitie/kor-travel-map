@@ -2,6 +2,14 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-10 (claude) — T-218d 위험 액션 음성 경로 e2e
+
+폼 검증 실패(서버 미호출) 경로를 e2e로 고정. change-requests에 비-object detail JSON
+입력 → `buildCreatePayload` 동기 throw → formError 배너 단언을 추가했다(네트워크 호출
+없음). 기존 T-218b 적용분(poi-cache 필수·좌표, feature-update 좌표, issues
+manual-override 빈 입력)과 합쳐 **음성 경로 4개 폼** 커버. admin-ops e2e 20 passed.
+tasks.md T-218d `[x]`. 남은 것은 T-218e(focus/aria-live)·T-218f(점검 체크리스트).
+
 ## 2026-06-10 (claude) — T-218c `/admin/backups` e2e 신설 (e2e 16/16 화면 커버)
 
 유일한 e2e 미커버 화면 `/admin/backups`에 Playwright route-mock 스펙을 추가했다.
