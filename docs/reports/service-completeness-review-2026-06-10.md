@@ -194,8 +194,9 @@ cursor 무한루프 가드(`next_cursor == cursor` 검출)도 확인 — 이 부
 > (`/admin/feature-requests` 큐) → krtour-map admin 최종 반영(`/v1/admin/features*`·
 > `/v1/admin/feature-update-requests*`, krtour `docs/tripmate-rest-api.md` §2 "제안
 > 원본은 TripMate app DB 소유, 운영자 승인 후 전달"). 실제 갭은 **1차 승인분의 자동
-> 전송 구간**이며, ADR-051(`POST /v1/features/suggestions`)이 그 구간을 맡는 것으로
-> 재정의됐다.
+> 전송 구간**인데, 2차 재독 결과 그 구간도 krtour PR #317 admin feature change API +
+> TripMate DEC-05/T-179/T-180으로 **이미 설계·구현돼 있었다** — ADR-051은 신규 API
+> 신설 없이 이 기존 흐름을 공식 승인하고 잔여 합의 5건만 T-217c로 확정한다.
 | R-3 | **후보 철회 라이프사이클** | reject/tombstone을 krtour가 skip (§3.2 A-1) — "후보 검수 권한은 tripmate-agent, feature 생명주기는 krtour" 합의의 마지막 고리 누락 | krtour 측 비활성 경로 구현 필요 → **D-03** |
 | R-4 | **export 계약 정본 위치** | 계약 전문이 tripmate-agent `docs/youtube-feature-pipeline-plan.md` §7(계획 문서)에만 존재. krtour 측은 ADR-049 + fetcher 코드 | 계획 문서는 계약 정본으로 부적합(완료 후 동결·이동됨). 정본 1곳 + 상대 repo는 링크 → **D-04** |
 
