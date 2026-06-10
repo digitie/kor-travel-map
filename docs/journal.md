@@ -28,6 +28,11 @@
   admin 최종 반영(`docs/tripmate-rest-api.md` §2). 검토 보고서의 "공식 경로 없음"을
   "1차 승인분의 자동 전송 구간 부재"로 정정하고, ADR-051 수신 API의 입력을 "TripMate
   admin 1차 승인분"으로 재정의했다.
+- **2차 결정 종결(같은 날)**: D-07(a)→T-217g(provider 신선도 목록 API+화면),
+  D-10(a)→버킷 분리는 T-066 운영 개시 전(ADR-052 보강), D-11(a)→제보 페이로드 익명
+  (ADR-051 보강), D-12(a)→inactive feature는 `found`+status 노출(ADR-050 보강),
+  D-13 확인→TripMate 자체 ETL은 KASI류 고유 잡만(중복 없음, T-210c 양립).
+  **의사결정 전 항목 종결**. TripMate repo에도 직접 문서 반영 + PR (머지는 사용자).
 
 ## 2026-06-10 (claude) — cross-repo 완성도·정합성 검토 보고서 4종 (코드無)
 

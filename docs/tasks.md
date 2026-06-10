@@ -6,7 +6,7 @@
 
 ## 진행 중인 작업 인덱스 (열린 `[ ]` 항목)
 
-> 총 14건. 상세는 아래 각 섹션. 완료 이력은 [`tasks-done.md`](tasks-done.md).
+> 총 15건. 상세는 아래 각 섹션. 완료 이력은 [`tasks-done.md`](tasks-done.md).
 
 - **다음 (우선순위 순)**
   - [ ] T-212d 재측정 pass — read가 압도적으로 많은 운영 전제를 두고 seeded/live
@@ -39,21 +39,28 @@
         (양쪽 동시 배포 전 한쪽만 바꾸면 즉시 적재 실패).
   - [ ] T-217b — `reject`/`tombstone` operation → feature **inactive 전환** (ADR-050
         #4, MOIS Step C 동형). 1단계 skip 건수 WARN/admin 이슈 노출 선행 가능.
-        착수 전 결정 필요: inactive feature의 소비자 응답 정책(batch `found`+status
-        vs `missing`).
+        응답 정책 확정(D-12): inactive feature는 batch/단건 read의 **`found`에 포함
+        + status 노출** (`missing` 아님) — 기존 admin deactivate read 정책과의 일관성
+        검증 포함.
   - [ ] T-217c — TripMate admin **1차 승인분** 수신 API `POST /v1/features/suggestions`
         (가칭, ServiceToken+rate-limit) → `admin/features/change-requests` 큐 합류
         (ADR-051, 2단 검토: TripMate admin 1차 → krtour-map admin 최종; TripMate
-        TM-13 짝). 착수 전 결정 필요: 페이로드의 사용자 식별 정보 범위(PIPA).
+        TM-13 짝). 페이로드 확정(D-11): **익명** — TripMate 측 불투명 참조 ID만,
+        krtour-map 개인정보 비저장.
   - [ ] T-217d — cross-repo 연동 정본 문서 `docs/integration-map.md` 신설: 3-시스템
         포트·연동 방향·인증 방식·envelope 차이·계약 정본 위치 1장 (D-08 권고안 채택)
         + 분기 cross-repo 정합성 audit 체크리스트 runbook 등재. 각 repo 진입 문서에서 링크.
   - [ ] T-217e — RustFS 공유 버킷 정책 명문화 (ADR-052): `docs/architecture.md` rustfs
         절 + backup/restore 문서에 TripMate-agent prefix 소유권·backup 제외 반영.
-        전용 버킷 분리 시점/트리거는 별도 결정 후 후속 task.
+        분리 시점 확정(D-10): **전용 버킷 분리는 TripMate-agent T-066 운영 개시 전**
+        — 분리 주체는 tripmate-agent, krtour-map은 backup 정책 갱신만.
   - [ ] T-217f — YouTube evidence(영상 링크·타임스탬프·confidence)의 feature detail
         노출 형태 확정 (검토 KR-06; TripMate 출처 배지 UX TM-08의 선행, D-05 (a) 채택
         — export는 검수 통과 후보만).
+  - [ ] T-217g — provider 동기화 신선도 대시보드 (D-07 (a) 채택): 전 provider×dataset의
+        last-sync/최근 실패 요약 목록 API(예: `GET /v1/providers`) + admin 화면 1식.
+        `docs/rest-api.md` 갱신 포함. 기존 단건 `GET /v1/providers/{provider}/last-sync`는
+        유지.
 - **Phase 7 — ADR-045 전체점검/튜닝 (ADR-045 잔여 task 완료 후 시작)**
   - [ ] T-212e
 

@@ -47,7 +47,7 @@ rename 완료(PR#148). 역할은 "debug UI"를 넘어 krtour-map **admin/API 프
   response 정합성 표준 + 코드/DB 명명 전파 — 정본 `docs/rest-api.md`, 실행 T-216a~g.
   049~052 = TripMate-agent YouTube provider pull 경계 + export 계약 보강(경로 중립화·
   검수 통과만 export·철회→inactive) + 사용자 제보 수신 API + RustFS 공유 버킷 잠정
-  정책 — 실행 T-217a~f.
+  정책 — 실행 T-217a~g.
 - **고정 포트(ADR-047)**: API `9011` · admin UI `9012` · Dagster `9013` ·
   Postgres host `15433` · RustFS S3 `9003`/console `9004`.
 - **geocoding 정본**: kraddr-geo REST v2 `POST /v2/{reverse,geocode}`, 로컬 기본

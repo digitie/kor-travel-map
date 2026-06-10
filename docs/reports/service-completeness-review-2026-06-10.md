@@ -1,6 +1,8 @@
 # 서비스 완성도·정합성 종합 검토 — krtour-map · TripMate · tripmate-agent (2026-06-10)
 
-> **상태**: 검토 보고서 (정본 문서 미반영 — 사용자 승인 후 각 정본에 반영).
+> **상태 (2026-06-10 갱신)**: 검토 보고서 — 의사결정 D-01~13 전 항목 종결, 결정분은
+> 정본 반영 완료 (ADR-050~052, tasks T-217a~g, TripMate/tripmate-agent 측 문서).
+> 결정 이력은 [`decisions-needed-2026-06-10.md`](decisions-needed-2026-06-10.md) 참조.
 > **검토 기준 커밋**:
 > - python-krtour-map `origin/main` `0e45bd7` (T-216 REST naming + TripMate-agent provider)
 > - TripMate `origin/main` `4a10a5b` (#149 공유 trip 읽기전용 뷰)

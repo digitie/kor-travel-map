@@ -2957,8 +2957,10 @@ Accepted (2026-06-10) — ADR-049 보강. 배경은 `docs/reports/service-comple
 - krtour-map: T-217a(fetcher 경로 정렬, T-066 배포와 동시) + T-217b(inactive 전환).
 - TripMate-agent: T-066 구현 시 본 ADR 준수 — 상세 체크리스트는 해당 repo
   `docs/cross-repo-consistency-actions-2026-06-10.md` TA-01~03.
-- inactive 전환 시 소비자(TripMate POI) 측 응답 정책(batch에서 status 노출 vs missing)은
-  **추가 결정 필요** — T-217b 착수 전 확정.
+- inactive 전환된 feature의 소비자 응답 정책 확정(D-12, 2026-06-10): batch/단건
+  read에서 **`found`에 포함하되 status(inactive)를 노출**한다 — `missing` 처리하면
+  "삭제됨"과 "철회됨"을 구분할 수 없다. 기존 admin deactivate read 정책과 동일해야
+  하며, T-217b에서 일관성 검증을 포함한다.
 
 ## ADR-051: TripMate 사용자 장소 제보는 krtour-map 서비스용 수신 API로 받는다
 
@@ -2992,8 +2994,9 @@ Accepted (2026-06-10) — `docs/reports/decisions-needed-2026-06-10.md` D-02.
 
 - 신규 task T-217c (API + change-requests 합류 + admin 표시 — 출처가 TripMate admin
   승인분임을 큐에서 식별 가능하게).
-- 제보 페이로드에 담을 사용자 식별 정보 범위(PIPA — 익명화 vs TripMate 측 참조 ID만)는
-  **추가 결정 필요** — T-217c 설계 전 확정.
+- 제보 페이로드의 사용자 식별 정보 범위 확정(D-11, 2026-06-10): **익명** —
+  TripMate 측 불투명 참조 ID(suggestion_id)만 싣고 krtour-map은 개인정보를 저장하지
+  않는다. 역추적이 필요하면 TripMate admin에서 수행한다 (PIPA 부담 비전이).
 - 거절/반려의 역방향 통지(krtour-map 최종 거절 → TripMate admin 큐 상태 갱신)는
   1차 범위 외 — 필요해지면 후속 결정.
 
@@ -3017,8 +3020,10 @@ TripMate-agent가 미디어 원본(영상/자막/전사/프레임, 무기한 보
 - **prefix 소유권 명문화**: TripMate-agent가 쓰는 prefix 이하 객체의 소유·수명주기·
   복구 책임은 TripMate-agent에 있다. krtour-map cold backup 범위에서 해당 prefix는
   **제외**한다 (T-217e에서 architecture.md·backup 문서에 반영).
-- **추후 분리**: TripMate-agent 전용 버킷으로 분리한다. 분리 시점/트리거(용량 임계,
-  운영 개시 등)는 **추가 결정 필요**.
+- **추후 분리**: TripMate-agent 전용 버킷으로 분리한다. 분리 시점 확정(D-10,
+  2026-06-10): **TripMate-agent T-066 운영 개시(krtour-map 실데이터 pull 시작) 전** —
+  운영 데이터가 쌓이기 전이 마이그레이션 비용 최소다. 분리 작업 주체는 TripMate-agent
+  (버킷 config + 객체 이전), krtour-map은 backup 정책 갱신만.
 
 ### 결과
 
