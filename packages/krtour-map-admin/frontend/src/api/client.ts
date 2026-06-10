@@ -135,12 +135,12 @@ export function deleteJson<T>(path: string, body?: unknown): Promise<T> {
   return requestJson<T>(path, { method: "DELETE", body });
 }
 
-/** `GET /debug/health` — backend liveness probe (PR#35). */
+/** `GET /health` — backend liveness probe. */
 export function fetchHealth(): Promise<HealthResponse> {
   return getJson<HealthResponse>("/health");
 }
 
-/** `GET /debug/version` — backend + lib version 정보 (PR#35). */
+/** `GET /version` — backend + lib version 정보. */
 export function fetchVersion(): Promise<VersionResponse> {
   return getJson<VersionResponse>("/version");
 }

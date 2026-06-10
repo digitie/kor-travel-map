@@ -8,7 +8,7 @@ feature 운영, provider 적재, dedup/결측 검토, 오프라인 업로드를 
 
 > **PR#36 (2026-05-27)**: Sprint 2 §2.5 frontend skeleton 진입. Next.js 15
 > App Router + TanStack Query + Zustand (ADR-037) 최소 골격 박음.
-> `src/api/{client,queries}.ts` (`/debug/health`/`/debug/version` 호출 hook) +
+> `src/api/{client,queries}.ts` (`/health`/`/version` 호출 hook) +
 > `src/state/map.ts` (Zustand map viewport store) + `src/providers/query-
 > client-provider.tsx` (`QueryClientProvider`) + `src/app/{layout,page}.tsx`
 > (root layout + landing page). 실제 지도 화면 + `/features/*` 라우터 wiring
