@@ -6,7 +6,7 @@ import {
   RefreshCwIcon,
   Trash2Icon,
 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import {
   type PoiCacheTargetRecord,
@@ -19,8 +19,8 @@ import { AdminShell } from "@/components/admin-shell";
 import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { FormField, FormSelect } from "@/components/ui/form-field";
+import { NativeSelectOption } from "@/components/ui/native-select";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -31,6 +31,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatDateTime, shortId } from "@/lib/format";
+import {
+  combine,
+  numberInRange,
+  required,
+  validateForm,
+} from "@/lib/form-validation";
 
 export function PoiCacheTargetsClient() {
   const [externalSystem, setExternalSystem] = useState("tripmate");
@@ -46,6 +52,14 @@ export function PoiCacheTargetsClient() {
     null,
   );
   const [cursorStack, setCursorStack] = useState<string[]>([]);
+  const [errors, setErrors] = useState<
+    Partial<Record<"externalSystem" | "targetKey" | "lon" | "lat" | "radiusKm", string>>
+  >({});
+  const externalSystemRef = useRef<HTMLInputElement>(null);
+  const targetKeyRef = useRef<HTMLInputElement>(null);
+  const lonRef = useRef<HTMLInputElement>(null);
+  const latRef = useRef<HTMLInputElement>(null);
+  const radiusKmRef = useRef<HTMLInputElement>(null);
   const currentCursor =
     cursorStack.length > 0 ? cursorStack[cursorStack.length - 1] : undefined;
 
@@ -63,12 +77,50 @@ export function PoiCacheTargetsClient() {
   );
 
   const submit = () => {
-    const normalizedExternalSystem = externalSystem.trim();
-    const normalizedTargetKey = targetKey.trim();
+    const values = { externalSystem, targetKey, lon, lat, radiusKm };
+    const result = validateForm(values, [
+      { field: "externalSystem", validate: required("external_system은 필수입니다.") },
+      { field: "targetKey", validate: required("target_key는 필수입니다.") },
+      {
+        field: "lon",
+        validate: combine(
+          required("경도(lon)는 필수입니다."),
+          numberInRange({ min: 124, max: 132, message: "경도는 124~132 범위여야 합니다." }),
+        ),
+      },
+      {
+        field: "lat",
+        validate: combine(
+          required("위도(lat)는 필수입니다."),
+          numberInRange({ min: 33, max: 43, message: "위도는 33~43 범위여야 합니다." }),
+        ),
+      },
+      {
+        field: "radiusKm",
+        validate: combine(
+          required("반경(radius_km)은 필수입니다."),
+          numberInRange({ min: 0.1, message: "반경은 0.1 이상이어야 합니다." }),
+        ),
+      },
+    ]);
+    setErrors(result.errors);
+    if (!result.isValid) {
+      const refByField = {
+        externalSystem: externalSystemRef,
+        targetKey: targetKeyRef,
+        lon: lonRef,
+        lat: latRef,
+        radiusKm: radiusKmRef,
+      };
+      if (result.firstErrorField) {
+        refByField[result.firstErrorField].current?.focus();
+      }
+      return;
+    }
     upsert.mutate(
       {
-        externalSystem: normalizedExternalSystem,
-        targetKey: normalizedTargetKey,
+        externalSystem: externalSystem.trim(),
+        targetKey: targetKey.trim(),
         body: {
           coord: { lon: Number(lon), lat: Number(lat) },
           name: name.trim() || null,
@@ -120,32 +172,55 @@ export function PoiCacheTargetsClient() {
             </div>
           </div>
           <div className="flex flex-col gap-3">
-            <Input
-              aria-label="external system"
+            <FormField
+              error={errors.externalSystem}
+              label="external system"
+              ref={externalSystemRef}
+              required
               value={externalSystem}
               onChange={(event) => setExternalSystem(event.target.value)}
             />
-            <Input
-              aria-label="target key"
+            <FormField
+              error={errors.targetKey}
+              label="target key"
               placeholder="target_key"
+              ref={targetKeyRef}
+              required
               value={targetKey}
               onChange={(event) => setTargetKey(event.target.value)}
             />
-            <Input
-              aria-label="target name"
+            <FormField
+              label="target name"
               placeholder="name"
               value={name}
               onChange={(event) => setName(event.target.value)}
             />
-            <Input aria-label="lon" value={lon} onChange={(e) => setLon(e.target.value)} />
-            <Input aria-label="lat" value={lat} onChange={(e) => setLat(e.target.value)} />
-            <Input
-              aria-label="radius km"
+            <FormField
+              error={errors.lon}
+              label="lon"
+              ref={lonRef}
+              required
+              value={lon}
+              onChange={(e) => setLon(e.target.value)}
+            />
+            <FormField
+              error={errors.lat}
+              label="lat"
+              ref={latRef}
+              required
+              value={lat}
+              onChange={(e) => setLat(e.target.value)}
+            />
+            <FormField
+              error={errors.radiusKm}
+              label="radius km"
+              ref={radiusKmRef}
+              required
               value={radiusKm}
               onChange={(e) => setRadiusKm(e.target.value)}
             />
-            <NativeSelect
-              aria-label="scope mode"
+            <FormSelect
+              label="scope mode"
               value={scopeMode}
               onChange={(event) =>
                 setScopeMode(event.target.value as "center_radius" | "sigungu_by_radius")
@@ -157,16 +232,8 @@ export function PoiCacheTargetsClient() {
               <NativeSelectOption value="sigungu_by_radius">
                 sigungu_by_radius
               </NativeSelectOption>
-            </NativeSelect>
-            <Button
-              disabled={
-                upsert.isPending ||
-                externalSystem.trim().length === 0 ||
-                targetKey.trim().length === 0
-              }
-              type="button"
-              onClick={submit}
-            >
+            </FormSelect>
+            <Button disabled={upsert.isPending} type="button" onClick={submit}>
               저장
             </Button>
             {(targets.isError || upsert.isError || remove.isError) && (
