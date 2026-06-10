@@ -305,19 +305,10 @@ KRTOUR_MAP_DOCKER_OBJECT_STORE_ENDPOINT_URL=http://rustfs:9000
 v1 fallback chain (`TRIPMATE_RUSTFS_*`, `RUSTFS_ACCESS_KEY`, `RUSTFS_SECRET_KEY`)도
 optional 지원 (마이그레이션 편의).
 
-## 9. 로컬 실행 (RustFS Docker)
+## 9. 로컬 실행
 
-```bash
-npm run docker:up
-# 또는
-docker compose up -d --build postgres rustfs rustfs-init api frontend dagster
-```
+python-krtour-map 에서 rustfs, postgresql 등 인프라는 python-kraddr-geo가 아니라 어딘가에서 잘 동작하는 db, bucket 에 접속하여 활용하며, 그러기 위해서는 설정을 이 프로젝트에 잘 저장해두고 써야 합니다.
 
-bucket 자동 생성 (`rustfs-init` 컨테이너가 `mc mb --ignore-existing` 호출):
-`krtour-map`(feature files)과 `krtour-uploads`(offline upload 원본). 또는 RustFS
-console (`http://127.0.0.1:9004`)에서 수동 생성.
-
-대안: MinIO testcontainer (`testcontainers-python`의 `MinioContainer`).
 
 ## 10. presigned URL (옵션)
 

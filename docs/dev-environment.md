@@ -123,73 +123,19 @@ $EDITOR .env
 # data 링크
 ln -s /mnt/f/dev/python-krtour-map/data data
 
-# PostgreSQL + PostGIS
-docker compose up -d postgres
-
-# Alembic upgrade (스키마 적용)
+# Alembic upgrade (스키마 적용 - 설정한 외부 DB에 반영)
 alembic upgrade head
 
 # 단위 테스트 (DB 불필요)
 pytest tests/unit -q
 
-# 통합 테스트 (PostGIS 필요)
+# 통합 테스트 (DB 필요)
 pytest tests/integration -q
 ```
 
-## 4. PostgreSQL + PostGIS 컨테이너
+## 4. PostgreSQL 및 RustFS 인프라 설정
 
-### 4.1 단순 한 줄 docker
-
-```bash
-docker run -d --name krtour-postgis \
-  -p 5432:5432 \
-  -e POSTGRES_USER=krtour_map \
-  -e POSTGRES_PASSWORD=changeme \
-  -e POSTGRES_DB=krtour_map \
-  -v krtour-pgdata:/var/lib/postgresql/data \
-  postgis/postgis:16-3.5-alpine
-```
-
-DSN: `postgresql+asyncpg://krtour_map:changeme@localhost:5432/krtour_map`.
-
-### 4.2 docker-compose
-
-RustFS 로컬 표준 포트는 S3 API `9003`, console `9004`다. 아래 MinIO 예시는
-호환 테스트용이며, host 포트는 RustFS 표준과 맞춰 `9003`/`9004`로 노출한다.
-
-```yaml
-# docker-compose.yml (코드 작성 단계에서 추가)
-services:
-  postgres:
-    image: postgis/postgis:16-3.5-alpine
-    environment:
-      POSTGRES_USER: krtour_map
-      POSTGRES_PASSWORD: changeme
-      POSTGRES_DB: krtour_map
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-  minio:
-    image: minio/minio:latest
-    command: server /data --console-address ":9004"
-    environment:
-      MINIO_ROOT_USER: minio
-      MINIO_ROOT_PASSWORD: minio123
-    ports:
-      - "9003:9000"
-      - "9004:9004"
-    volumes:
-      - miniodata:/data
-volumes:
-  pgdata: {}
-  miniodata: {}
-```
-
-### 4.3 운영 환경 (Odroid M1S)
-
-SPEC V8 v8_0 참고. PostgreSQL 16 + PostGIS 3.5 도커 컨테이너로 동일하게
-실행한다. 튜닝 임계값은 `AGENTS.md` §17 표.
+python-krtour-map 에서 rustfs, postgresql 등 인프라는 python-kraddr-geo가 아니라 어딘가에서 잘 동작하는 db, bucket 에 접속하여 활용하며, 그러기 위해서는 설정을 이 프로젝트에 잘 저장해두고 써야 합니다.
 
 ## 5. 스키마 초기화 (수동)
 
