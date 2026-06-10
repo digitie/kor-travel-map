@@ -39,8 +39,11 @@
     확장성 없음 — 초기 임시안으로만.
   - (c) TripMate api가 krtour admin API 호출: 관리망 인증 경계 침범 — 비권장.
 - **반영처**: krtour ADR + rest-api.md + tasks, TripMate TM-13.
-- **결정(2026-06-10)**: ✅ **(a) 채택** → ADR-051 + T-217c. 후속 결정 D-11은 2차에서
-  종결 (익명 — TripMate 측 참조 ID만).
+- **결정(2026-06-10) — 최종**: 옵션 (a)의 "신규 수신 API 신설"은 같은 날 2차 재독에서
+  **superseded(기각)** — 취지(승인분 자동 전송)는 **기존 `/v1/admin/features*` change
+  API(#317)** 승인으로 충족한다 (아래 2차 보정, ADR-051 보정본). T-217c = 신규 API
+  구현이 아니라 **잔여 합의 5건 확정**. 후속 결정 D-11은 2차에서 종결(익명 —
+  TripMate 측 참조 ID만).
 - **보정(2026-06-10, 사용자 확인)**: 본 항목의 "공식 경로 없음"은 과대 기술 — 설계는
   **2단 검토**(TripMate 사용자 요청 → TripMate admin 1차 검토 `/admin/feature-requests`
   → krtour-map admin 최종 반영)로 이미 존재하며(`docs/tripmate-rest-api.md` §2),

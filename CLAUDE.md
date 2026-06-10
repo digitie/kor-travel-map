@@ -46,8 +46,9 @@ rename 완료(PR#148). 역할은 "debug UI"를 넘어 krtour-map **admin/API 프
   versioning을 admin/ops까지 확장(`/v1`, #317 위 보강) + envelope/pagination/parameter/
   response 정합성 표준 + 코드/DB 명명 전파 — 정본 `docs/rest-api.md`, 실행 T-216a~g.
   049~052 = TripMate-agent YouTube provider pull 경계 + export 계약 보강(경로 중립화·
-  검수 통과만 export·철회→inactive) + 사용자 제보 수신 API + RustFS 공유 버킷 잠정
-  정책 — 실행 T-217a~g.
+  검수 통과만 export·철회→inactive) + TripMate feature 제안 반영은 **기존
+  `/v1/admin/features*` change API(#317) 승인**(신규 suggestions API 철회 — 잔여 합의
+  5건만 확정) + RustFS 공유 버킷 잠정 정책 — 실행 T-217a~g.
 - **고정 포트(ADR-047)**: API `9011` · admin UI `9012` · Dagster `9013` ·
   Postgres host `15433` · RustFS S3 `9003`/console `9004`.
 - **geocoding 정본**: kraddr-geo REST v2 `POST /v2/{reverse,geocode}`, 로컬 기본

@@ -11,16 +11,17 @@
   `/api/v1/features/{snapshot,changes}`(사용자 보정: downstream 이름 path 금지,
   ADR-049 표기 보정), 계약 정본=tripmate-agent repo 독립 문서, 검수 통과만 export,
   reject/tombstone → feature inactive 전환.
-- **ADR-051**: 사용자 장소 제보 수신 API `POST /v1/features/suggestions`(가칭,
-  ServiceToken) → change-requests 큐 합류.
+- **ADR-051**: TripMate 사용자 feature 제안 반영 — **최종**: 신규 수신 API를 만들지
+  않고 **기존 `/v1/admin/features*` change API(#317)를 전송 구간으로 승인** (초안의
+  `POST /v1/features/suggestions` 신설안은 같은 날 재독에서 중복으로 철회).
 - **ADR-052**: RustFS 버킷 잠정 공유(prefix 소유권·backup 제외 명문화) + 추후 분리.
 - **tasks**: Phase 6.9 신설 — T-217a(fetcher 경로 정렬, **T-066과 동시 배포**),
-  T-217b(inactive 전환), T-217c(제보 API), T-217d(integration-map 정본+분기 audit),
-  T-217e(RustFS 정책 문서화), T-217f(YouTube evidence 노출 확정). CLAUDE.md ADR
-  카운터 052/053으로 갱신.
-- **후속 미결**: D-07(provider 신선도 대시보드), D-10(버킷 분리 트리거),
-  D-11(제보 PIPA 범위), D-12(inactive feature 소비자 응답), D-13(TripMate 자체 ETL
-  범위 vs T-210c) — `docs/reports/decisions-needed-2026-06-10.md` 하단 정리.
+  T-217b(inactive 전환), T-217c(TripMate 제안 연동 **합의 5건 확정** — 신규 API 아님),
+  T-217d(integration-map 정본+분기 audit), T-217e(RustFS 정책 문서화),
+  T-217f(YouTube evidence 노출 확정), T-217g(provider 신선도 대시보드, D-07).
+  CLAUDE.md ADR 카운터 052/053으로 갱신.
+- **의사결정 최종 상태**: 같은 날 2차까지 **D-01~13 전 항목 종결** (당초 미결이던
+  D-07/D-10~13 포함) — 이력은 `docs/reports/decisions-needed-2026-06-10.md`.
 - tripmate-agent 측 문서(`docs/cross-repo-consistency-actions-2026-06-10.md`)에도
   결정 결과 반영 (해당 repo, 미커밋).
 - **R-2/ADR-051 보정(사용자 확인)**: 사용자 feature 추가/수정/삭제 요청은 **2단 검토
