@@ -6,12 +6,12 @@ ETL 적재 작업 상태를 영속화해 프로세스 재시작 안전성과 다
 
 워커 흐름
 ---------
-1. ``enqueue_import_job(kind, payload)`` — ``state='queued'`` 행 INSERT.
+1. ``enqueue_import_job(kind, payload)`` — ``status='queued'`` 행 INSERT.
 2. ``claim_next_import_job()`` — advisory lock(큐 슬롯)으로 동시 claim 직렬화 후
    ``SELECT ... FOR UPDATE SKIP LOCKED``로 가장 오래된 ``queued`` 1건을 잡아
-   ``state='running'`` + ``started_at``/``heartbeat_at``으로 전이. 없으면 ``None``.
+   ``status='running'`` + ``started_at``/``heartbeat_at``으로 전이. 없으면 ``None``.
 3. ``heartbeat_import_job(job_id, progress, current_stage)`` — 진행 중 갱신.
-4. ``finish_import_job(job_id, state, error_message)`` — ``done``/``failed``/
+4. ``finish_import_job(job_id, status, error_message)`` — ``done``/``failed``/
    ``cancelled`` 종료 전이 + ``finished_at``.
 5. ``recover_stale_running_jobs()`` — lifespan startup 복구. heartbeat 만료(또는
    전부)인 ``running`` 잔존 행을 ``failed``로 정리 (재시작 가정).
@@ -68,7 +68,7 @@ DEFAULT_STALE_AFTER: Final[timedelta] = timedelta(minutes=5)
 _FINISHED_STATES: Final[frozenset[str]] = frozenset({"done", "failed", "cancelled"})
 
 _RETURN_COLUMNS: Final[str] = (
-    "job_id, kind, load_batch_id, parent_job_id, payload, state, progress, "
+    "job_id, kind, load_batch_id, parent_job_id, payload, status, progress, "
     "current_stage, source_checksum, error_message, started_at, finished_at, "
     "heartbeat_at, created_at"
 )
@@ -81,7 +81,7 @@ class ImportJob:
     job_id: str
     kind: str
     payload: dict[str, Any]
-    state: str
+    status: str
     progress: int
     current_stage: str | None
     source_checksum: str | None
@@ -100,7 +100,7 @@ def _row_to_job(row: Any) -> ImportJob:
         load_batch_id=str(row.load_batch_id) if row.load_batch_id else None,
         parent_job_id=str(row.parent_job_id) if row.parent_job_id else None,
         payload=dict(payload) if payload else {},
-        state=row.state,
+        status=row.status,
         progress=row.progress,
         current_stage=row.current_stage,
         source_checksum=row.source_checksum,
@@ -124,7 +124,7 @@ RETURNING {_RETURN_COLUMNS}
 _START_JOB_SQL: Final[str] = f"""
 INSERT INTO ops.import_jobs (
     kind, payload, source_checksum, load_batch_id, parent_job_id,
-    state, started_at, heartbeat_at
+    status, started_at, heartbeat_at
 )
 VALUES (
     :kind, CAST(:payload AS jsonb), :source_checksum,
@@ -172,10 +172,10 @@ RETURNING {_RETURN_COLUMNS}
 # 가장 오래된 queued 1건을 running으로 전이 (FOR UPDATE SKIP LOCKED — row 경합 회피).
 _CLAIM_JOB_SQL: Final[str] = f"""
 UPDATE ops.import_jobs
-SET state = 'running', started_at = now(), heartbeat_at = now()
+SET status = 'running', started_at = now(), heartbeat_at = now()
 WHERE job_id = (
     SELECT job_id FROM ops.import_jobs
-    WHERE state = 'queued'
+    WHERE status = 'queued'
     ORDER BY created_at, queue_sequence
     FOR UPDATE SKIP LOCKED
     LIMIT 1
@@ -188,18 +188,18 @@ UPDATE ops.import_jobs
 SET heartbeat_at = now(),
     progress = COALESCE(:progress, progress),
     current_stage = COALESCE(:current_stage, current_stage)
-WHERE job_id = :job_id AND state = 'running'
+WHERE job_id = :job_id AND status = 'running'
 RETURNING {_RETURN_COLUMNS}
 """
 
 # 종료 전이 — done이면 progress=100. running 행만 종료(이미 종료된 행 보존).
 _FINISH_SQL: Final[str] = f"""
 UPDATE ops.import_jobs
-SET state = :state,
+SET status = :status,
     finished_at = now(),
     error_message = :error_message,
-    progress = CASE WHEN :state = 'done' THEN 100 ELSE progress END
-WHERE job_id = :job_id AND state = 'running'
+    progress = CASE WHEN :status = 'done' THEN 100 ELSE progress END
+WHERE job_id = :job_id AND status = 'running'
 RETURNING {_RETURN_COLUMNS}
 """
 
@@ -208,10 +208,10 @@ RETURNING {_RETURN_COLUMNS}
 # 시계 회피). :stale_seconds가 NULL이면 모든 running 행 복구.
 _RECOVER_STALE_SQL: Final[str] = """
 UPDATE ops.import_jobs
-SET state = 'failed',
+SET status = 'failed',
     finished_at = now(),
     error_message = COALESCE(error_message, 'recovered: stale running on startup')
-WHERE state = 'running'
+WHERE status = 'running'
   AND (
     CAST(:stale_seconds AS double precision) IS NULL
     OR heartbeat_at IS NULL
@@ -231,7 +231,7 @@ async def enqueue_import_job(
     load_batch_id: str | None = None,
     parent_job_id: str | None = None,
 ) -> ImportJob:
-    """``state='queued'`` 작업 1건 INSERT. commit은 호출자 책임."""
+    """``status='queued'`` 작업 1건 INSERT. commit은 호출자 책임."""
     result = await session.execute(
         text(_INSERT_JOB_SQL),
         {
@@ -254,7 +254,7 @@ async def start_import_job(
     load_batch_id: str | None = None,
     parent_job_id: str | None = None,
 ) -> ImportJob:
-    """곧바로 ``state='running'``인 작업 1건 INSERT (self-driven inline job).
+    """곧바로 ``status='running'``인 작업 1건 INSERT (self-driven inline job).
 
     queue를 거치지 않고 호출자가 직접 수행하는 작업 추적용 — 보통 advisory lock을
     보유한 단일 워커가 적재 전에 호출하고, 종료 시 ``finish_import_job``으로 닫는다.
@@ -369,7 +369,7 @@ async def finish_import_job(
     session: AsyncSession,
     job_id: str,
     *,
-    state: str = "done",
+    status: str = "done",
     error_message: str | None = None,
 ) -> ImportJob | None:
     """running 작업을 ``done``/``failed``/``cancelled``로 종료 전이. 없으면 ``None``.
@@ -377,13 +377,13 @@ async def finish_import_job(
     ``done``이면 ``progress=100``. 이미 종료된 작업(running 아님)은 건드리지 않고
     ``None``을 반환한다(idempotent-safe).
     """
-    if state not in _FINISHED_STATES:
+    if status not in _FINISHED_STATES:
         raise ValueError(
-            f"state must be one of {sorted(_FINISHED_STATES)}, got {state!r}."
+            f"status must be one of {sorted(_FINISHED_STATES)}, got {status!r}."
         )
     result = await session.execute(
         text(_FINISH_SQL),
-        {"job_id": job_id, "state": state, "error_message": error_message},
+        {"job_id": job_id, "status": status, "error_message": error_message},
     )
     row = result.one_or_none()
     return _row_to_job(row) if row is not None else None

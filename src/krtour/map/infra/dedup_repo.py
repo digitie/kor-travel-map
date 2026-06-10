@@ -76,12 +76,12 @@ RETURNING (xmax = 0) AS inserted
 # pending 후보 조회 — idx_dedup_status_score (status, total_score DESC) 사용.
 _PENDING_DEDUP_SQL: Final[str] = """
 SELECT
-    review_key, feature_id_a, feature_id_b,
+    review_id, feature_id_a, feature_id_b,
     total_score, name_score, spatial_score, category_score,
     status, decision_reason, created_at
 FROM ops.dedup_review_queue
 WHERE status = 'pending'
-ORDER BY total_score DESC, review_key
+ORDER BY total_score DESC, review_id
 LIMIT :limit
 """
 

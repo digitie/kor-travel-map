@@ -41,6 +41,7 @@ def test_feature_load_asset_keys_registered() -> None:
         "feature_place_standard_parking_lots",
         "feature_place_khoa_beaches",
         "feature_place_krairport_airports",
+        "feature_place_tripmate_agent_youtube",
         "feature_weather_airkorea_air_quality",
         "feature_event_visitkorea_enrichment",
     } <= asset_keys
@@ -102,6 +103,7 @@ _LIVE_PROVIDER_RESOURCE_KEYS = {
     "airkorea_stations",
     "airkorea_air_quality",
     "visitkorea_festival_events",
+    "tripmate_agent_youtube_features",
 }
 
 

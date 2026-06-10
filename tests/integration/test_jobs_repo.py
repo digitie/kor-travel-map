@@ -36,7 +36,7 @@ pytestmark = pytest.mark.integration
 async def _state(session: AsyncSession, job_id: str) -> str:
     return (
         await session.execute(
-            text("SELECT state FROM ops.import_jobs WHERE job_id = :id"),
+            text("SELECT status FROM ops.import_jobs WHERE job_id = :id"),
             {"id": job_id},
         )
     ).scalar_one()
@@ -49,7 +49,7 @@ async def test_enqueue_creates_queued_job(migrated_session: AsyncSession) -> Non
         payload={"dataset_key": "mois_license_features_bulk"},
         source_checksum="abc123",
     )
-    assert job.state == "queued"
+    assert job.status == "queued"
     assert job.kind == "mois_license_full_update"
     assert job.payload == {"dataset_key": "mois_license_features_bulk"}
     assert job.progress == 0
@@ -106,7 +106,7 @@ async def test_attach_existing_jobs_to_batch(
         kind="offline_upload_load",
         payload={"upload_id": "u1"},
     )
-    child = await finish_import_job(migrated_session, child.job_id, state="done") or child
+    child = await finish_import_job(migrated_session, child.job_id, status="done") or child
 
     attached = await attach_import_jobs_to_batch(
         migrated_session,
@@ -116,7 +116,7 @@ async def test_attach_existing_jobs_to_batch(
     )
 
     assert attached[0].job_id == child.job_id
-    assert attached[0].state == "done"
+    assert attached[0].status == "done"
     assert attached[0].load_batch_id == batch_id
     assert attached[0].parent_job_id == root.job_id
 
@@ -129,7 +129,7 @@ async def test_claim_fifo_and_transition_running(migrated_session: AsyncSession)
     claimed1 = await claim_next_import_job(migrated_session)
     assert claimed1 is not None
     assert claimed1.job_id == j1.job_id  # FIFO (created_at order)
-    assert claimed1.state == "running"
+    assert claimed1.status == "running"
     assert await _state(migrated_session, j1.job_id) == "running"
 
     claimed2 = await claim_next_import_job(migrated_session)
@@ -160,30 +160,30 @@ async def test_heartbeat_updates_progress_and_stage(
 async def test_finish_done_sets_progress_100(migrated_session: AsyncSession) -> None:
     job = await enqueue_import_job(migrated_session, kind="k")
     await claim_next_import_job(migrated_session)
-    done = await finish_import_job(migrated_session, job.job_id, state="done")
+    done = await finish_import_job(migrated_session, job.job_id, status="done")
     assert done is not None
-    assert done.state == "done"
+    assert done.status == "done"
     assert done.progress == 100
     # 종료 후 재finish는 None(running 아님).
-    assert await finish_import_job(migrated_session, job.job_id, state="failed") is None
+    assert await finish_import_job(migrated_session, job.job_id, status="failed") is None
 
 
 async def test_finish_failed_records_error(migrated_session: AsyncSession) -> None:
     job = await enqueue_import_job(migrated_session, kind="k")
     await claim_next_import_job(migrated_session)
     failed = await finish_import_job(
-        migrated_session, job.job_id, state="failed", error_message="boom"
+        migrated_session, job.job_id, status="failed", error_message="boom"
     )
     assert failed is not None
-    assert failed.state == "failed"
+    assert failed.status == "failed"
     assert failed.error_message == "boom"
 
 
-async def test_finish_invalid_state_raises(migrated_session: AsyncSession) -> None:
+async def test_finish_invalid_status_raises(migrated_session: AsyncSession) -> None:
     job = await enqueue_import_job(migrated_session, kind="k")
     await claim_next_import_job(migrated_session)
-    with pytest.raises(ValueError, match="state must be one of"):
-        await finish_import_job(migrated_session, job.job_id, state="running")
+    with pytest.raises(ValueError, match="status must be one of"):
+        await finish_import_job(migrated_session, job.job_id, status="running")
 
 
 async def test_recover_stale_running_all(migrated_session: AsyncSession) -> None:

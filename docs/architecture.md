@@ -17,10 +17,11 @@
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│ TripMate                                                             │
-│   - 사용자/여행계획/POI 도메인                                        │
+│ TripMate / TripMate-agent                                             │
+│   - TripMate: 사용자/여행계획/POI 도메인                               │
+│   - TripMate-agent: YouTube 장소 후보 REST export provider             │
 │   - krtour-map DB 직접 접근 금지                                      │
-│   - generated OpenAPI client로 HTTP 호출                              │
+│   - OpenAPI client 또는 provider export HTTP 호출                      │
 └──────────────────────────────────────────────────────────────────────┘
                               │ HTTP / OpenAPI
                               ▼
@@ -56,6 +57,11 @@
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
+위 provider 입력에는 공공 `python-*-api` client 외에 형제 앱 `tripmate-agent`의
+YouTube 장소 후보 REST export(`tripmate-agent-youtube`)도 포함된다. 다만
+TripMate-agent도 krtour-map DB에 직접 쓰지 않고, krtour-map Dagster가 HTTP로 pull한
+JSON을 순수 변환 함수로 `FeatureBundle`화한다(ADR-049).
+
 ## 2. 의존 방향 (한 방향 강제)
 
 ```
@@ -75,6 +81,8 @@
   단위 테스트는 Fake repo로 100% 가능해야 한다.
 - `providers/`는 `python-*-api`의 typed model을 받아 `dto/`의 모델로 정규화하는
   **순수 함수**의 집합이다. 새 wrapper class를 만들지 않는다 (ADR-002).
+  `tripmate-agent-youtube`는 예외적으로 형제 앱 REST export JSON을 입력으로 받지만,
+  동일하게 순수 변환 함수만 둔다.
 - `client.py`는 `providers/`와 `infra/` repository를 합쳐 외부에 노출하는
   단일 진입점 `AsyncKrtourMapClient`다.
 - `krtour.map_admin`는 별도 패키지로, 기본적으로 `krtour.map.client`를 통해
@@ -95,6 +103,9 @@ ADR-045 이후 TripMate와 krtour-map 사이의 운영 계약은 OpenAPI다.
   않는다.
 - OpenAPI는 처음에는 admin UI 기준으로 작성하고, TripMate 연동 시 공개/사용자
   응답을 보완·확장한다.
+- TripMate-agent는 `python-krtour-map` DB에 쓰지 않고
+  `/api/v1/krtour/features/{snapshot|changes}`로 YouTube 장소 후보를 export한다.
+  krtour-map Dagster가 이를 pull해 최종 `feature_id`를 생성한다(ADR-049).
 
 자세한 계약은 `docs/openapi-admin-contract.md`.
 
@@ -154,7 +165,7 @@ REST/OpenAPI는 `python-krtour-map`이 아니라 **별도 Python 패키지**
               → infra.repos (raw SQL upsert; bulk는 COPY)
               → Postgres + 객체 저장소
               → infra.provider_sync_repo (cursor 업데이트)
-              → infra.import_jobs_repo (state='done' + progress)
+              → infra.import_jobs_repo (status='done' + progress)
 ```
 
 ### 5.2 조회 (TripMate → 사용자)

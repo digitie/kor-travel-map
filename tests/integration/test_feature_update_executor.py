@@ -123,12 +123,12 @@ async def _load_seed(session: AsyncSession, management_no: str):
     return bundle
 
 
-async def _job_state(session: AsyncSession, job_id: str) -> dict[str, object]:
+async def _job_status(session: AsyncSession, job_id: str) -> dict[str, object]:
     row = (
         await session.execute(
             text(
                 """
-                SELECT state, progress, current_stage, error_message
+                SELECT status, progress, current_stage, error_message
                 FROM ops.import_jobs
                 WHERE job_id = :job_id
                 """
@@ -209,8 +209,8 @@ async def test_execute_next_request_runs_provider_and_syncs_target_links(
     )
 
     assert result is not None
-    assert result.state == "done"
-    assert result.request.state == "done"
+    assert result.status == "done"
+    assert result.request.status == "done"
     assert result.request.dagster_run_id == "dagster-run-1"
     assert result.results[0].loaded_count == 1
     assert competing_lock_results == [False]
@@ -220,12 +220,12 @@ async def test_execute_next_request_runs_provider_and_syncs_target_links(
 
     stored = await get_update_request(migrated_session, request.request_id)
     assert stored is not None
-    assert stored.state == "done"
+    assert stored.status == "done"
     assert stored.matched_scope["target_count"] == 1
     assert stored.matched_scope["eligible_provider_scopes"][0][
         "provider"
     ] == seed.source_record.provider
-    assert (await _job_state(migrated_session, request.job_id))["progress"] == 100
+    assert (await _job_status(migrated_session, request.job_id))["progress"] == 100
 
     refreshed_target = await get_poi_cache_target_by_key(
         migrated_session,
@@ -284,7 +284,7 @@ async def test_execute_next_request_applies_follow_system_policy_skip(
     )
 
     assert result is not None
-    assert result.state == "done"
+    assert result.status == "done"
     assert result.results == ()
     assert result.plan.skipped_scopes[0].reason == "follow_system_skipped"
 
@@ -354,7 +354,7 @@ async def test_failed_runner_rolls_back_refresh_writes(
     )
 
     assert result is not None
-    assert result.state == "failed"
+    assert result.status == "failed"
     assert result.results == ()
     assert result.error_message is not None
     assert "RuntimeError" in result.error_message
@@ -369,7 +369,7 @@ async def test_failed_runner_rolls_back_refresh_writes(
 
     stored = await get_update_request(migrated_session, request.request_id)
     assert stored is not None
-    assert stored.state == "failed"
+    assert stored.status == "failed"
     assert stored.error_message is not None
     assert "RuntimeError" in stored.error_message
 

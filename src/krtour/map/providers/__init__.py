@@ -202,6 +202,14 @@ from krtour.map.providers.standard_data import (
     parking_lots_to_bundles,
     tourist_attractions_to_bundles,
 )
+from krtour.map.providers.tripmate_agent import (
+    DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
+    TRIPMATE_AGENT_MARKER_COLOR,
+    TRIPMATE_AGENT_PROVIDER_NAME,
+    TRIPMATE_AGENT_YOUTUBE_CATEGORY_FALLBACK,
+    TripmateAgentFeatureItem,
+    tripmate_agent_items_to_bundles,
+)
 from krtour.map.providers.visitkorea import (
     DATASET_KEY_FESTIVAL_EVENTS,
     VISITKOREA_PROVIDER_NAME,
@@ -378,4 +386,11 @@ __all__ = [
     "KRHERITAGE_DATASET_KEY_HERITAGE",
     "KRHERITAGE_DATASET_KEY_EVENT",
     "HERITAGE_MARKER_COLOR",
+    # tripmate-agent (YouTube 장소 후보 provider)
+    "TripmateAgentFeatureItem",
+    "tripmate_agent_items_to_bundles",
+    "TRIPMATE_AGENT_PROVIDER_NAME",
+    "DATASET_KEY_YOUTUBE_PLACE_CANDIDATES",
+    "TRIPMATE_AGENT_YOUTUBE_CATEGORY_FALLBACK",
+    "TRIPMATE_AGENT_MARKER_COLOR",
 ]

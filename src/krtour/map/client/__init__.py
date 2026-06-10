@@ -483,7 +483,7 @@ class AsyncKrtourMapClient:
 
     async def resolve_enrichment_review(
         self,
-        review_key: str,
+        review_id: str,
         decision: str,
         *,
         reviewed_by: str | None = None,
@@ -497,7 +497,7 @@ class AsyncKrtourMapClient:
         async with self._session_factory() as session, session.begin():
             return await repo_decide_enrichment_review(
                 session,
-                review_key,
+                review_id,
                 decision,
                 reviewed_by=reviewed_by,
                 reason=reason,
@@ -817,7 +817,7 @@ class AsyncKrtourMapClient:
             return await repo_finish_update_request(
                 session,
                 request_id,
-                state="failed",
+                status="failed",
                 dagster_run_id=dagster_run_id,
                 error_message=error_message,
             )
@@ -1049,12 +1049,12 @@ class AsyncKrtourMapClient:
 
     async def merge_dedup_review(
         self,
-        review_key: str,
+        review_id: str,
         *,
         merged_by: str | None = None,
         reason: str | None = None,
     ) -> MergeOutcome:
-        """검토 큐 후보(``review_key``) 1쌍을 master 자동 선정 후 병합한다 (ADR-016).
+        """검토 큐 후보(``review_id``) 1쌍을 master 자동 선정 후 병합한다 (ADR-016).
 
         ``infra.merge_repo.merge_from_review``를 한 transaction에서 실행: loser의
         source_link를 master로 재지정, loser feature soft-delete, ``feature_merge_history``
@@ -1062,11 +1062,11 @@ class AsyncKrtourMapClient:
         source 우선순위)로 결정. 큐 행이 없거나 이미 검토됐으면 ``MergeError``.
 
         **중복 실행 직렬화(ADR-039)는 호출 측 책임** — CLI ``dedup-merge``가
-        ``dedup-merge:{review_key}`` advisory lock으로 감싼다(본 메서드는 lock 미적용).
+        ``dedup-merge:{review_id}`` advisory lock으로 감싼다(본 메서드는 lock 미적용).
         """
         async with self._session_factory() as session, session.begin():
             return await merge_from_review(
-                session, review_key, merged_by=merged_by, reason=reason
+                session, review_id, merged_by=merged_by, reason=reason
             )
 
     # ─── read ──────────────────────────────────────────────────────────────
@@ -1346,7 +1346,7 @@ class AsyncKrtourMapClient:
     async def list_update_requests(
         self,
         *,
-        state: str | None = None,
+        status: str | None = None,
         scope_type: str | None = None,
         provider: str | None = None,
         dataset_key: str | None = None,
@@ -1359,7 +1359,7 @@ class AsyncKrtourMapClient:
         async with self._session_factory() as session:
             return await repo_list_update_requests(
                 session,
-                state=state,
+                status=status,
                 scope_type=scope_type,
                 provider=provider,
                 dataset_key=dataset_key,
@@ -1373,7 +1373,7 @@ class AsyncKrtourMapClient:
         """운영 현황 카운트 스냅샷 (read-only) — ``krtour-map status``용.
 
         features(활성/비활성/kind별) + source_records(provider별) + import_jobs
-        (state별) + dedup_review_queue(status별)를 한 번에 집계. mutex 불필요.
+        (status별) + dedup_review_queue(status별)를 한 번에 집계. mutex 불필요.
         """
         async with self._session_factory() as session:
             return await gather_status_counts(session)

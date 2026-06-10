@@ -157,13 +157,13 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
   location) + `pyproject.toml`(dagster + krtour.map + provider libs). import-linter
   계층에 dagster layer 추가(client보다 위).
 - **T-208b** `resources.py` — `KrtourMapDatabaseResource`(독립 DSN) +
-  `KrtourMapClientResource` + provider resource 9종(키는 env, D-15 주입 정책) +
+  `KrtourMapClientResource` + provider resource 세트(키는 env, D-15 주입 정책) +
   `KraddrGeoResource` + 선택 `RustFSResource`.
-- **T-208c** provider load asset 9종 — thin wrapper(provider fetch → lib 변환 →
+- **T-208c** provider load asset 세트 — thin wrapper(provider fetch → lib 변환 →
   `client.load_feature_bundles` → `sync_state` 갱신). ADR-034 9단계 순서. 각 asset
   `concurrency_key=provider:dataset`(advisory lock, ADR-039) + RetryPolicy.
 - **T-208d** ✅ `schedules.py` — provider별 cron(`execution_timezone="Asia/Seoul"`).
-  Feature 적재 asset 9개의 asset job/schedule을 등록했고, 부하 분산을 위해 분/요일을
+  Feature 적재 asset job/schedule을 등록했고, 부하 분산을 위해 분/요일을
   나눴다. 기본 status는 `STOPPED`.
 - **T-208e** ✅ `sensors.py` — (1) `feature_update_requests` 폴링 sensor:
   `peek_next_update_request` → request id별 `RunRequest` → worker job 안에서

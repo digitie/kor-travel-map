@@ -111,7 +111,7 @@ def test_offline_upload_load_job_executes_client() -> None:
     assert client.calls[0]["dagster_run_id"]
 
     output = result.output_for_node("load_offline_upload")
-    assert output["job_state"] == "done"
+    assert output["job_status"] == "done"
     assert output["bundles_total"] == 2
     assert output["features_inserted"] == 2
 
@@ -149,7 +149,7 @@ def _upload(upload_id: str) -> OfflineUpload:
         checksum_sha256="a" * 64,
         detected_format="jsonl",
         detected_encoding="utf-8",
-        state="loaded",
+        status="loaded",
         validation_job_id=None,
         load_job_id="10000000-0000-0000-0000-000000000001",
         created_by="pytest",
@@ -163,7 +163,7 @@ def _job() -> ImportJob:
         job_id="10000000-0000-0000-0000-000000000001",
         kind="offline_upload_load",
         payload={},
-        state="done",
+        status="done",
         progress=100,
         current_stage=None,
         source_checksum="a" * 64,

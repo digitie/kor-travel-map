@@ -72,7 +72,7 @@ def _feature_row(feature_id: str = "feature-1") -> dict[str, Any]:
         "issues": json.dumps(
             [
                 {
-                    "violation_key": "issue-1",
+                    "issue_id": "issue-1",
                     "violation_type": "missing_address",
                     "severity": "warning",
                     "message": "주소 검토 필요",
@@ -85,9 +85,9 @@ def _feature_row(feature_id: str = "feature-1") -> dict[str, Any]:
     }
 
 
-def _dedup_row(review_key: str = _REVIEW_KEY_1) -> dict[str, Any]:
+def _dedup_row(review_id: str = _REVIEW_KEY_1) -> dict[str, Any]:
     return {
-        "review_key": review_key,
+        "review_id": review_id,
         "status": "pending",
         "total_score": 90,
         "name_score": 95,
@@ -177,7 +177,7 @@ async def test_list_admin_features_builds_params_and_next_cursor() -> None:
 @pytest.mark.asyncio
 async def test_deactivate_feature_with_and_without_override() -> None:
     override_row = {
-        "override_key": "override-1",
+        "override_id": "override-1",
         "feature_id": "feature-1",
         "field_path": "status",
         "override_value": '"inactive"',
@@ -271,7 +271,7 @@ def test_dedup_cursor_and_row_mapping() -> None:
 
     assert repo._dedup_cursor_params(cursor) == {
         "cursor_score": "90",
-        "cursor_review_key": _REVIEW_KEY_1,
+        "cursor_review_id": _REVIEW_KEY_1,
     }
     assert item.total_score_cursor == "90"
     assert item.feature_a.feature_id == "feature-a"
@@ -300,7 +300,7 @@ async def test_list_dedup_reviews_and_decision() -> None:
     assert params["min_score"] == 80
 
     changed = await repo.set_dedup_review_decision(
-        _Session([_Result([{"review_key": _REVIEW_KEY_1}])]),  # type: ignore[arg-type]
+        _Session([_Result([{"review_id": _REVIEW_KEY_1}])]),  # type: ignore[arg-type]
         _REVIEW_KEY_1,
         decision="accepted",
         reviewed_by="local-admin",
@@ -321,12 +321,12 @@ async def test_merge_dedup_review_auto_and_explicit_master(
 ) -> None:
     async def _merge_from_review(
         _session: object,
-        review_key: str,
+        review_id: str,
         *,
         merged_by: str | None = None,
         reason: str | None = None,
     ) -> MergeOutcome:
-        assert review_key == _REVIEW_KEY_1
+        assert review_id == _REVIEW_KEY_1
         assert merged_by == "local-admin"
         assert reason == "dup"
         return MergeOutcome("feature-a", "feature-b", 1, 0, "merge-1", True)
@@ -337,14 +337,14 @@ async def test_merge_dedup_review_auto_and_explicit_master(
         master_id: str,
         loser_id: str,
         score: float | None = None,
-        review_key: str | None = None,
+        review_id: str | None = None,
         merged_by: str | None = None,
         reason: str | None = None,
     ) -> MergeOutcome:
         assert master_id == "feature-b"
         assert loser_id == "feature-a"
         assert score == 90.0
-        assert review_key == _REVIEW_KEY_1
+        assert review_id == _REVIEW_KEY_1
         return MergeOutcome(master_id, loser_id, 0, 0, "merge-2", True)
 
     monkeypatch.setattr(repo, "merge_from_review", _merge_from_review)

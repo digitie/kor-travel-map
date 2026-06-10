@@ -287,8 +287,8 @@ _F4_PENDING_COUNT_SQL: Final[str] = (
     "SELECT count(*) FROM ops.dedup_review_queue WHERE status = 'pending'"
 )
 _F4_PENDING_SAMPLE_SQL: Final[str] = (
-    "SELECT review_key FROM ops.dedup_review_queue WHERE status = 'pending' "
-    "ORDER BY total_score DESC, review_key DESC LIMIT :lim"
+    "SELECT review_id FROM ops.dedup_review_queue WHERE status = 'pending' "
+    "ORDER BY total_score DESC, review_id DESC LIMIT :lim"
 )
 
 _F5_PROVIDER_LAST_SUCCESS_COUNT_SQL: Final[str] = (
@@ -335,13 +335,13 @@ _F5_PROVIDER_LAST_SUCCESS_SAMPLE_SQL: Final[str] = (
 _F7_DEDUP_SCORE_ROWS_SQL: Final[str] = """
 WITH pending_dedup AS MATERIALIZED (
   SELECT
-    review_key,
+    review_id,
     feature_id_a,
     feature_id_b,
     total_score
   FROM ops.dedup_review_queue
   WHERE status = 'pending'
-  ORDER BY total_score DESC, review_key DESC
+  ORDER BY total_score DESC, review_id DESC
 ),
 primary_sources AS (
   SELECT feature_id, provider, dataset_key
@@ -362,7 +362,7 @@ primary_sources AS (
   WHERE rn = 1
 )
 SELECT
-  dq.review_key,
+  dq.review_id,
   dq.feature_id_a,
   dq.feature_id_b,
   dq.total_score::float AS baseline_score,
@@ -384,7 +384,7 @@ JOIN primary_sources AS psa
 JOIN primary_sources AS psb
   ON psb.feature_id = dq.feature_id_b
 WHERE psa.provider <> psb.provider
-ORDER BY dq.total_score DESC, dq.review_key DESC
+ORDER BY dq.total_score DESC, dq.review_id DESC
 """
 
 _F8_FEATURE_FILES_TABLE_EXISTS_SQL: Final[str] = (
@@ -503,7 +503,7 @@ def _build_f7_dedup_score_result(
             count += 1
             if len(sample_ids) < sample_limit:
                 sample_ids.append(
-                    f"{row['review_key']}:{row['feature_id_a']}:{row['feature_id_b']}:"
+                    f"{row['review_id']}:{row['feature_id_a']}:{row['feature_id_b']}:"
                     f"{baseline_score:.2f}->{current_score:.2f}"
                 )
     return CaseResult(

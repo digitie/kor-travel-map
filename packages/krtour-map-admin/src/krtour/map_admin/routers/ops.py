@@ -202,7 +202,7 @@ class OpsMetricsData(BaseModel):
     features_inactive: int
     features_by_kind: dict[str, int]
     source_records_by_provider: dict[str, int]
-    import_jobs_by_state: dict[str, int]
+    import_jobs_by_status: dict[str, int]
     dedup_queue_by_status: dict[str, int]
     dedup_fp_stats: OpsDedupFpStatsRecord
     data_integrity_issues: OpsIntegrityIssueCountsRecord
@@ -225,7 +225,7 @@ def _job(row: OpsImportJob) -> OpsImportJobRecord:
         load_batch_id=row.load_batch_id,
         parent_job_id=row.parent_job_id,
         payload=row.payload,
-        status=row.state,
+        status=row.status,
         progress=row.progress,
         current_stage=row.current_stage,
         source_checksum=row.source_checksum,
@@ -254,7 +254,7 @@ def _report(row: OpsConsistencyReport | None) -> OpsConsistencyReportRecord | No
 
 def _issue(row: OpsIntegrityIssue) -> OpsIntegrityIssueRecord:
     return OpsIntegrityIssueRecord(
-        issue_id=row.violation_key,
+        issue_id=row.issue_id,
         provider=row.provider,
         dataset_key=row.dataset_key,
         source_record_key=row.source_record_key,
@@ -296,7 +296,7 @@ def _metrics_response(
             features_inactive=counts.features_inactive,
             features_by_kind=counts.features_by_kind,
             source_records_by_provider=counts.source_records_by_provider,
-            import_jobs_by_state=counts.import_jobs_by_state,
+            import_jobs_by_status=counts.import_jobs_by_status,
             dedup_queue_by_status=counts.dedup_queue_by_status,
             dedup_fp_stats=_dedup_stats(dedup_fp_stats(counts.dedup_queue_by_status)),
             data_integrity_issues=issue_counts,
@@ -455,7 +455,7 @@ async def list_import_jobs(
     try:
         page = await list_ops_import_jobs(
             session,
-            state=status_filter,
+            status=status_filter,
             kind=kind,
             load_batch_id=str(load_batch_id) if load_batch_id is not None else None,
             parent_job_id=str(parent_job_id) if parent_job_id is not None else None,

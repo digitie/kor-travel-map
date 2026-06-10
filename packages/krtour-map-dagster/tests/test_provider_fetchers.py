@@ -33,6 +33,7 @@ from krtour.map_dagster.provider_fetchers import (
     fetch_standard_museums,
     fetch_standard_parking_lots,
     fetch_standard_tourist_attractions,
+    fetch_tripmate_agent_youtube_features,
     fetch_visitkorea_festival_events,
 )
 from krtour.map_dagster.resources import (
@@ -51,6 +52,57 @@ pytestmark = pytest.mark.filterwarnings(
 _DATAGOKR_SPEC = {
     spec.resource_key: spec for spec in PROVIDER_RECORD_RESOURCE_SPECS
 }["datagokr_cultural_festivals"]
+
+
+class _FakeTripmateResponse:
+    def __init__(self, payload: dict[str, Any]) -> None:
+        self._payload = payload
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> dict[str, Any]:
+        return self._payload
+
+
+class _FakeTripmateAsyncClient:
+    payloads: list[dict[str, Any]] = []
+    instances: list[_FakeTripmateAsyncClient] = []
+
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        timeout: float,
+        headers: dict[str, str],
+    ) -> None:
+        self.base_url = base_url
+        self.timeout = timeout
+        self.headers = headers
+        self.calls: list[tuple[str, dict[str, str | int]]] = []
+        self.closed = False
+        _FakeTripmateAsyncClient.instances.append(self)
+
+    async def __aenter__(self) -> _FakeTripmateAsyncClient:
+        return self
+
+    async def __aexit__(self, *_exc: object) -> None:
+        self.closed = True
+
+    async def get(self, path: str, *, params: dict[str, str | int]) -> _FakeTripmateResponse:
+        self.calls.append((path, dict(params)))
+        index = len(self.calls) - 1
+        return _FakeTripmateResponse(type(self).payloads[index])
+
+
+def _install_fake_tripmate_httpx(
+    monkeypatch: pytest.MonkeyPatch,
+    payloads: list[dict[str, Any]],
+) -> type[_FakeTripmateAsyncClient]:
+    _FakeTripmateAsyncClient.payloads = payloads
+    _FakeTripmateAsyncClient.instances = []
+    monkeypatch.setattr(provider_fetchers.httpx, "AsyncClient", _FakeTripmateAsyncClient)
+    return _FakeTripmateAsyncClient
 
 
 class _FakeFestivalService:
@@ -91,6 +143,78 @@ def _install_fake_datagokr(monkeypatch: pytest.MonkeyPatch) -> type[_FakeDataGoK
     module.__dict__["DataGoKrClient"] = _FakeDataGoKrClient
     monkeypatch.setitem(sys.modules, "datagokr", module)
     return _FakeDataGoKrClient
+
+
+async def test_tripmate_agent_youtube_fetch_paginates_and_closes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _install_fake_tripmate_httpx(
+        monkeypatch,
+        [
+            {"items": [{"id": 1}], "next_cursor": "c2", "has_more": True},
+            {"items": [{"id": 2}], "next_cursor": None, "has_more": False},
+        ],
+    )
+    settings = KrtourMapSettings(
+        tripmate_agent_base_url="https://tripmate-agent.example",
+        tripmate_agent_api_key=SecretStr("agent-key"),
+    )
+
+    records = [
+        item async for item in fetch_tripmate_agent_youtube_features(settings)
+    ]
+
+    assert records == [{"id": 1}, {"id": 2}]
+    assert len(fake.instances) == 1
+    client = fake.instances[0]
+    assert client.base_url == "https://tripmate-agent.example"
+    assert client.headers == {"X-API-Key": "agent-key"}
+    assert client.closed is True
+    assert client.calls == [
+        ("/api/v1/krtour/features/snapshot", {"limit": 200}),
+        ("/api/v1/krtour/features/snapshot", {"limit": 200, "cursor": "c2"}),
+    ]
+
+
+async def test_tripmate_agent_youtube_fetch_changes_uses_initial_cursor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _install_fake_tripmate_httpx(
+        monkeypatch,
+        [{"items": [], "next_cursor": None, "has_more": False}],
+    )
+    settings = KrtourMapSettings(
+        tripmate_agent_base_url="https://tripmate-agent.example/",
+        tripmate_agent_api_key=SecretStr("agent-key"),
+        tripmate_agent_feature_sync_endpoint="changes",
+        tripmate_agent_feature_cursor="cursor-1",
+        tripmate_agent_feature_page_size=50,
+    )
+
+    records = [
+        item async for item in fetch_tripmate_agent_youtube_features(settings)
+    ]
+
+    assert records == []
+    assert fake.instances[0].base_url == "https://tripmate-agent.example"
+    assert fake.instances[0].calls == [
+        (
+            "/api/v1/krtour/features/changes",
+            {"limit": 50, "cursor": "cursor-1"},
+        )
+    ]
+
+
+async def test_tripmate_agent_youtube_fetch_raises_when_credential_missing() -> None:
+    generator = fetch_tripmate_agent_youtube_features(
+        KrtourMapSettings(
+            tripmate_agent_base_url=None,
+            tripmate_agent_api_key=SecretStr("agent-key"),
+        )
+    )
+
+    with pytest.raises(ProviderCredentialMissing):
+        await anext(generator)
 
 
 class _FakeEventService:

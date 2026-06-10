@@ -123,12 +123,12 @@ async def _seed_feature(
 
 
 async def _merge_dedup_review_with_short_lock_timeout(
-    session: AsyncSession, review_key: str
+    session: AsyncSession, review_id: str
 ) -> None:
     await session.execute(text("SET LOCAL lock_timeout = '100ms'"))
     await merge_dedup_review(
         session,
-        review_key,
+        review_id,
         master_feature_id="feature-admin-lock-a",
     )
 
@@ -238,6 +238,20 @@ async def test_user_update_version_overrides_provider_reload(
     )
     assert request.state == "applied"
 
+    second_request = await submit_feature_change_request(
+        migrated_session,
+        action="update",
+        feature_id=feature_id,
+        payload={
+            "name": "사용자 수정 이름 2",
+            "detail": {"note": "사용자 수정 2"},
+        },
+        review_mode="immediate",
+        reason="사용자 제보 추가 반영",
+        requested_by="admin",
+    )
+    assert second_request.state == "applied"
+
     inserted = await upsert_feature(migrated_session, _dto(feature_id, status="active"))
     assert inserted is False
 
@@ -255,13 +269,13 @@ async def test_user_update_version_overrides_provider_reload(
             {"feature_id": feature_id},
         )
     ).mappings().one()
-    assert row["name"] == "사용자 수정 이름"
+    assert row["name"] == "사용자 수정 이름 2"
     assert row["road_name_code"] == "111104100001"
     assert row["admin_dong_code"] == "1111051500"
     assert row["urls"]["homepage"] == "https://example.test/user-feature"
-    assert row["detail"]["note"] == "사용자 수정"
+    assert row["detail"]["note"] == "사용자 수정 2"
     assert row["data_origin"] == "user_request"
-    assert row["data_version"] == 1
+    assert row["data_version"] == 2
     assert row["user_change_kind"] == "update"
 
     versions = (
@@ -280,21 +294,26 @@ async def test_user_update_version_overrides_provider_reload(
     assert [(v["version"], v["origin"], v["change_kind"]) for v in versions] == [
         (0, "provider", "load"),
         (1, "user_request", "update"),
+        (2, "user_request", "update"),
     ]
-    version_payload = (
+    version_payloads = (
         await migrated_session.execute(
             text(
                 """
-                SELECT payload
+                SELECT version, payload
                 FROM feature.feature_versions
-                WHERE feature_id = :feature_id AND version = 1
+                WHERE feature_id = :feature_id
+                  AND version IN (1, 2)
+                ORDER BY version
                 """
             ),
             {"feature_id": feature_id},
         )
-    ).scalar_one()
-    assert version_payload["road_name_code"] == "111104100001"
-    assert version_payload["admin_dong_code"] == "1111051500"
+    ).mappings().all()
+    assert version_payloads[0]["payload"]["name"] == "사용자 수정 이름"
+    assert version_payloads[0]["payload"]["data_version"] == 1
+    assert version_payloads[1]["payload"]["name"] == "사용자 수정 이름 2"
+    assert version_payloads[1]["payload"]["data_version"] == 2
 
 
 async def test_user_delete_soft_delete_prevents_provider_resurrection(
@@ -447,7 +466,7 @@ async def test_dedup_review_decision_updates_pending_only(
 
     changed = await set_dedup_review_decision(
         session,
-        str(review.review_key),
+        str(review.review_id),
         decision="rejected",
         reviewed_by="local-admin",
         decision_reason="서로 다른 장소",
@@ -456,7 +475,7 @@ async def test_dedup_review_decision_updates_pending_only(
 
     unchanged = await set_dedup_review_decision(
         session,
-        str(review.review_key),
+        str(review.review_id),
         decision="ignored",
     )
     assert unchanged is False
@@ -480,21 +499,21 @@ async def test_merge_dedup_review_explicit_master_locks_review_row(
         )
         session.add(review)
         await session.flush()
-        review_key = str(review.review_key)
+        review_id = str(review.review_id)
 
     async with AsyncSession(migrated_engine) as holder, holder.begin():
         await holder.execute(
             text(
-                "SELECT review_key FROM ops.dedup_review_queue "
-                "WHERE review_key = :review_key FOR UPDATE"
+                "SELECT review_id FROM ops.dedup_review_queue "
+                "WHERE review_id = :review_id FOR UPDATE"
             ),
-            {"review_key": review_key},
+            {"review_id": review_id},
         )
 
         async with AsyncSession(migrated_engine) as contender:
             with pytest.raises(DBAPIError):
                 await _merge_dedup_review_with_short_lock_timeout(
-                    contender, review_key
+                    contender, review_id
                 )
 
 
@@ -512,7 +531,7 @@ async def test_list_dedup_reviews_cursor_walks_same_score_without_gaps(
     await session.flush()
     reviews = [
         DedupReviewQueueRow(
-            review_key="00000000-0000-0000-0000-000000000003",
+            review_id="00000000-0000-0000-0000-000000000003",
             feature_id_a="feature-admin-cursor-a",
             feature_id_b="feature-admin-cursor-b",
             total_score=Decimal("90.01"),
@@ -521,7 +540,7 @@ async def test_list_dedup_reviews_cursor_walks_same_score_without_gaps(
             category_score=100,
         ),
         DedupReviewQueueRow(
-            review_key="00000000-0000-0000-0000-000000000002",
+            review_id="00000000-0000-0000-0000-000000000002",
             feature_id_a="feature-admin-cursor-a",
             feature_id_b="feature-admin-cursor-c",
             total_score=Decimal("90.01"),
@@ -530,7 +549,7 @@ async def test_list_dedup_reviews_cursor_walks_same_score_without_gaps(
             category_score=100,
         ),
         DedupReviewQueueRow(
-            review_key="00000000-0000-0000-0000-000000000001",
+            review_id="00000000-0000-0000-0000-000000000001",
             feature_id_a="feature-admin-cursor-a",
             feature_id_b="feature-admin-cursor-d",
             total_score=Decimal("90.01"),
@@ -548,7 +567,7 @@ async def test_list_dedup_reviews_cursor_walks_same_score_without_gaps(
         page = await list_dedup_reviews(session, page_size=1, cursor=cursor)
         assert len(page.items) == 1
         assert page.items[0].total_score_cursor == "90.01"
-        seen.append(page.items[0].review_key)
+        seen.append(page.items[0].review_id)
         cursor = page.next_cursor
 
     assert seen == [

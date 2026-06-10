@@ -157,11 +157,11 @@ async def test_ops_integrity_issues_list_cursor_and_counts(
             """
             UPDATE ops.data_integrity_violations
             SET detected_at = :detected_at
-            WHERE violation_key = :violation_key
+            WHERE issue_id = :issue_id
             """
         ),
         {
-            "violation_key": first.violation_key,
+            "issue_id": first.issue_id,
             "detected_at": datetime(2026, 6, 3, 10, 0, tzinfo=_KST),
         },
     )
@@ -170,11 +170,11 @@ async def test_ops_integrity_issues_list_cursor_and_counts(
             """
             UPDATE ops.data_integrity_violations
             SET detected_at = :detected_at
-            WHERE violation_key = :violation_key
+            WHERE issue_id = :issue_id
             """
         ),
         {
-            "violation_key": second.violation_key,
+            "issue_id": second.issue_id,
             "detected_at": datetime(2026, 6, 3, 11, 0, tzinfo=_KST),
         },
     )
@@ -185,7 +185,7 @@ async def test_ops_integrity_issues_list_cursor_and_counts(
         provider="python-mois-api",
         limit=1,
     )
-    assert [item.violation_key for item in page1.items] == [second.violation_key]
+    assert [item.issue_id for item in page1.items] == [second.issue_id]
     assert page1.next_cursor is not None
 
     page2 = await list_ops_integrity_issues(
@@ -194,7 +194,7 @@ async def test_ops_integrity_issues_list_cursor_and_counts(
         limit=1,
         cursor=page1.next_cursor,
     )
-    assert [item.violation_key for item in page2.items] == [first.violation_key]
+    assert [item.issue_id for item in page2.items] == [first.issue_id]
 
     counts = await get_ops_integrity_issue_counts(migrated_session)
     assert counts.open_total == 2
@@ -252,9 +252,9 @@ async def test_ops_integrity_issues_q_and_bbox_filters(
         provider="python-mois-api",
         bbox=(126.97, 37.57, 126.98, 37.58),
     )
-    keys = {item.violation_key for item in seoul.items}
-    assert in_bbox.violation_key in keys
-    assert no_feature.violation_key not in keys
+    keys = {item.issue_id for item in seoul.items}
+    assert in_bbox.issue_id in keys
+    assert no_feature.issue_id not in keys
 
     # bbox: 다른 지역(부산) → 매칭 없음.
     busan = await list_ops_integrity_issues(
@@ -262,7 +262,7 @@ async def test_ops_integrity_issues_q_and_bbox_filters(
         provider="python-mois-api",
         bbox=(129.0, 35.0, 129.2, 35.2),
     )
-    assert in_bbox.violation_key not in {item.violation_key for item in busan.items}
+    assert in_bbox.issue_id not in {item.issue_id for item in busan.items}
 
     # q: message 부분일치.
     matched = await list_ops_integrity_issues(
@@ -270,7 +270,7 @@ async def test_ops_integrity_issues_q_and_bbox_filters(
         provider="python-mois-api",
         q="불일치",
     )
-    assert {item.violation_key for item in matched.items} == {in_bbox.violation_key}
+    assert {item.issue_id for item in matched.items} == {in_bbox.issue_id}
 
     # q: feature_id 부분일치.
     by_fid = await list_ops_integrity_issues(

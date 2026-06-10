@@ -95,7 +95,7 @@ class ProviderDatasetRefreshResult:
 
     provider: str
     dataset_key: str
-    state: str = "done"
+    status: str = "done"
     loaded_feature_ids: tuple[str, ...] = ()
     loaded_count: int = 0
     metadata: dict[str, Any] | None = None
@@ -104,7 +104,7 @@ class ProviderDatasetRefreshResult:
         return {
             "provider": self.provider,
             "dataset_key": self.dataset_key,
-            "state": self.state,
+            "status": self.status,
             "loaded_feature_ids": list(self.loaded_feature_ids),
             "loaded_count": self.loaded_count,
             "metadata": dict(self.metadata or {}),
@@ -161,7 +161,7 @@ class FeatureUpdateExecutionResult:
     request: FeatureUpdateRequest
     plan: FeatureUpdateExecutionPlan
     results: tuple[ProviderDatasetRefreshResult, ...]
-    state: str
+    status: str
     error_message: str | None = None
 
 
@@ -482,7 +482,7 @@ async def _execute_feature_update_request_locked(
             request=request,
             plan=plan,
             results=(),
-            state=request.state,
+            status=request.status,
             error_message="request is not executable",
         )
 
@@ -534,7 +534,7 @@ async def _execute_feature_update_request_locked(
         if results:
             await mark_poi_cache_targets_refreshed(session, target_ids)
         done = await finish_update_request(
-            session, started.request_id, state="done", dagster_run_id=dagster_run_id
+            session, started.request_id, status="done", dagster_run_id=dagster_run_id
         )
         if done is None:
             done = started
@@ -548,7 +548,7 @@ async def _execute_feature_update_request_locked(
                 matched_scope=final_matched_scope,
             ),
             results=tuple(results),
-            state="done",
+            status="done",
         )
     except Exception as exc:
         error_message = f"{exc.__class__.__name__}: {exc}"
@@ -556,7 +556,7 @@ async def _execute_feature_update_request_locked(
         failed = await finish_update_request(
             session,
             started.request_id,
-            state="failed",
+            status="failed",
             dagster_run_id=dagster_run_id,
             error_message=error_message,
         )
@@ -564,7 +564,7 @@ async def _execute_feature_update_request_locked(
             request=failed or started,
             plan=plan,
             results=tuple(results),
-            state="failed",
+            status="failed",
             error_message=error_message,
         )
 

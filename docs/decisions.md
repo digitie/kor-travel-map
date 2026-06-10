@@ -2785,16 +2785,16 @@ bbox 인코딩 2종, `status`↔`state`, 응답 `*_key`↔`*_id`)가 #317의 고
    확장 `code`로 유지한다.
 6. **응답 식별자 접미사 규약 — 의미(본질) 기준 전면 적용.** 호환성/외부 동결 같은 동기는
    두지 않고 **의미**로만 정한다: 시스템 단일 surrogate = `*_id`, **복합/자연키 = `*_key`**.
-   응답 본문 전체(외부 read 포함)에 적용 — surrogate인 `review_key`→`review_id`,
-   `violation_key`→`issue_id`, `system_log_key`/`api_call_log_key`/`override_key`/`step_key`→
+   응답 본문 전체(외부 read 포함)에 적용 — surrogate인 `review_id`→`review_id`,
+   `issue_id`→`issue_id`, `system_log_id`/`api_call_log_id`/`override_id`/`step_id`→
    `*_id`. **`*_key` 유지는 본질이 자연/복합키인 것**: **`cluster_key`(행정구역 코드 sido/
    sigungu/eupmyeondong = 자연키 → 유지, #316 재리뷰 C; 2차의 `cluster_id` 개명을 철회)**,
    복합 자연키 `target_key`(+`external_system`), provider/source 어휘(ADR-044), canonical
    `feature_id`. `lon`/`lat`/`name`/`category`/`marker_*`/`status`는 이미 일관 → 불변.
 7. **명명 통일을 코드/DB 레벨까지 전파.** REST 단 개명을 영구 edge 매핑으로 두면 ADR-046
    (무-shim)과 어긋나므로, **surrogate 식별자/상태를 물리 컬럼·ORM 속성·repo 함수/변수까지
-   end-to-end 정렬**(테이블별 1-PR migration, codegraph impact 선행). 대상: `review_key`→
-   `review_id`, `violation_key`→`issue_id`, ops 로그/내부 키 `*_key`→`*_id`, `state`→`status`.
+   end-to-end 정렬**(테이블별 1-PR migration, codegraph impact 선행). 대상: `review_id`→
+   `review_id`, `issue_id`→`issue_id`, ops 로그/내부 키 `*_key`→`*_id`, `state`→`status`.
    **경계(개명 금지 — 자연/복합/provider/canonical)**: `cluster_key`(행정코드 자연키),
    `target_key`(+`external_system`), provider/source 어휘(ADR-044 — `dataset_key`/
    `source_record_key`/`source_entity_id`/`source_dataset_key`/`raw_*`), canonical `feature_id`.
@@ -2842,8 +2842,8 @@ bbox 인코딩 2종, `status`↔`state`, 응답 `*_key`↔`*_id`)가 #317의 고
 
 - admin/ops도 `/v1`로 이동 — #317이 비버저닝으로 둔 결정을 되돌려 라우터 mount·OpenAPI
   export·frontend·docs를 admin/ops까지 일괄 갱신해야 한다.
-- 내부 식별자 물리 개명은 테이블별 migration + 큰 mechanical churn(`review_key` 291·
-  `violation_key` 118건)을 동반 — codegraph impact 후 단계화.
+- 내부 식별자 물리 개명은 테이블별 migration + 큰 mechanical churn(`review_id` 291·
+  `issue_id` 118건)을 동반 — codegraph impact 후 단계화.
 - **무-호환 clean cut**: envelope 재배치(`data.next_cursor`→`meta.page`)·파라미터/필드 개명·
   좌표명 정렬(`lon`/`lat`)·구 경로 제거가 소비자(TripMate)를 한 번에 깬다. pre-prod 단계라
   의도적으로 수용 — 안정 spec commit에서 소비자가 lockstep으로 추종한다(T-181).
@@ -2872,3 +2872,49 @@ bbox 인코딩 2종, `status`↔`state`, 응답 `*_key`↔`*_id`)가 #317의 고
 - **반영 순서**: 외부+admin `/v1` clean cut(T-216a/b) → 명명·코드/DB 전파(T-216e/f) →
   정본 수렴(T-216g). API shape `/v1` 안정 commit에서 T-210e(codegen) 진행. 소비자(TripMate)는
   안정 spec commit 기준으로 base/에러파싱/파라미터/필드명을 일괄 갱신한다.
+
+## ADR-049: TripMate-agent YouTube 장소 후보는 `tripmate-agent-youtube` provider로 pull한다
+
+### 상태
+
+Accepted (2026-06-10)
+
+### 배경
+
+TripMate-agent는 YouTube 여행 콘텐츠에서 장소 후보, 영상·채널·플레이리스트 근거,
+외부 geocoding evidence를 만든다. 그러나 krtour-map feature schema와 `feature_id`
+생성 책임은 `python-krtour-map`에 있다. TripMate-agent가 krtour-map DB나
+`FeatureBundle` schema에 직접 쓰면 ADR-045의 독립 프로그램 경계와 owner 책임이 흐려진다.
+
+### 결정
+
+- canonical provider name은 `tripmate-agent-youtube`로 둔다.
+- dataset_key는 `youtube_place_candidates`, source_entity_type은
+  `extracted_place_candidate`를 기본값으로 둔다.
+- TripMate-agent는 `/api/v1/krtour/features/snapshot`과
+  `/api/v1/krtour/features/changes` REST export를 제공한다. 외부 호출이므로
+  TripMate-agent ADR-24의 `X-API-Key` 인증을 그대로 사용한다.
+- krtour-map Dagster는 이 export를 HTTP로 pull하고, `providers.tripmate_agent`의
+  순수 변환 함수가 export item JSON을 `FeatureBundle`로 바꾼다.
+- 최종 `feature_id`, `SourceRecord.source_record_key`, `SourceLink` 생성과 PostGIS
+  적재는 krtour-map 책임이다.
+- `operation=upsert`만 즉시 `FeatureBundle`로 적재한다. `reject`/`tombstone`은
+  적재형 bundle로 표현하지 않고 export ledger/cursor 영속화 후속에서 별도 상태 전이로
+  처리한다.
+
+### 근거
+
+- TripMate-agent는 외부 app provider이고, krtour-map은 feature owner다.
+- full snapshot과 incremental changes를 모두 pull할 수 있어 재동기화와 운영 효율을
+  분리할 수 있다.
+- provider wrapper/adapter 금지(ADR-006)를 지키기 위해 krtour-map에는 client facade가
+  아니라 fetcher resource와 순수 변환 함수만 둔다.
+
+### 결과
+
+- `core.providers.CANONICAL_PROVIDER_NAMES`에 `tripmate-agent-youtube`를 추가한다.
+- Dagster resource는 `KRTOUR_MAP_TRIPMATE_AGENT_BASE_URL`과
+  `KRTOUR_MAP_TRIPMATE_AGENT_API_KEY`를 사용한다. API key 값은 TripMate-agent 운영
+  `API_KEYS` 중 하나여야 한다.
+- 실제 TripMate-agent export API 구현(T-066)이 배포되기 전까지 krtour-map live smoke는
+  fake response/계약 테스트로 제한된다.

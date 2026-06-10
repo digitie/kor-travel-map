@@ -92,7 +92,9 @@ class BatchDagRunResult:
             "plan_only": self.plan_only,
             "root_job_id": self.root_job.job_id if self.root_job is not None else None,
             "child_job_count": len(self.child_jobs),
-            "child_jobs_done": sum(1 for job in self.child_jobs if job.state == "done"),
+            "child_jobs_done": sum(
+                1 for job in self.child_jobs if job.status == "done"
+            ),
             "missing_child_job_ids": list(self.missing_child_job_ids),
             "consistency_job_id": (
                 self.consistency_job.job_id if self.consistency_job is not None else None
@@ -190,7 +192,7 @@ async def run_batch_dag_consistency_gate(
             session, root.job_id, payload={**payload, **result.as_metadata()}
         )
         root = await finish_import_job(
-            session, root.job_id, state="failed", error_message=child_error
+            session, root.job_id, status="failed", error_message=child_error
         ) or root
         return BatchDagRunResult(
             load_batch_id=normalized_batch_id,
@@ -224,10 +226,10 @@ async def run_batch_dag_consistency_gate(
     except Exception as exc:  # noqa: BLE001 - gate 실패를 import job에 남긴다.
         message = f"{exc.__class__.__name__}: {exc}"
         consistency_job = await finish_import_job(
-            session, consistency_job.job_id, state="failed", error_message=message
+            session, consistency_job.job_id, status="failed", error_message=message
         ) or consistency_job
         root = await finish_import_job(
-            session, root.job_id, state="failed", error_message=message
+            session, root.job_id, status="failed", error_message=message
         ) or root
         return BatchDagRunResult(
             load_batch_id=normalized_batch_id,
@@ -246,10 +248,10 @@ async def run_batch_dag_consistency_gate(
     if report.severity_max == "ERROR":
         message = "consistency gate blocked mv_refresh: severity_max=ERROR"
         consistency_job = await finish_import_job(
-            session, consistency_job.job_id, state="failed", error_message=message
+            session, consistency_job.job_id, status="failed", error_message=message
         ) or consistency_job
         root = await finish_import_job(
-            session, root.job_id, state="failed", error_message=message
+            session, root.job_id, status="failed", error_message=message
         ) or root
         return BatchDagRunResult(
             load_batch_id=normalized_batch_id,
@@ -263,7 +265,7 @@ async def run_batch_dag_consistency_gate(
         )
 
     consistency_job = await finish_import_job(
-        session, consistency_job.job_id, state="done"
+        session, consistency_job.job_id, status="done"
     ) or consistency_job
     mv_job = await start_import_job(
         session,
@@ -288,10 +290,10 @@ async def run_batch_dag_consistency_gate(
             },
         )
         mv_job = await finish_import_job(
-            session, mv_job.job_id, state="failed", error_message=message
+            session, mv_job.job_id, status="failed", error_message=message
         ) or mv_job
         root = await finish_import_job(
-            session, root.job_id, state="failed", error_message=message
+            session, root.job_id, status="failed", error_message=message
         ) or root
         return BatchDagRunResult(
             load_batch_id=normalized_batch_id,
@@ -313,7 +315,7 @@ async def run_batch_dag_consistency_gate(
             "results": [item.as_metadata() for item in mv_refreshes],
         },
     )
-    mv_job = await finish_import_job(session, mv_job.job_id, state="done") or mv_job
+    mv_job = await finish_import_job(session, mv_job.job_id, status="done") or mv_job
     result = BatchDagRunResult(
         load_batch_id=normalized_batch_id,
         state="done",
@@ -327,7 +329,7 @@ async def run_batch_dag_consistency_gate(
     await update_import_job_payload(
         session, root.job_id, payload={**payload, **result.as_metadata()}
     )
-    root = await finish_import_job(session, root.job_id, state="done") or root
+    root = await finish_import_job(session, root.job_id, status="done") or root
     return BatchDagRunResult(
         load_batch_id=normalized_batch_id,
         state="done",
@@ -426,9 +428,9 @@ def _child_error_message(
 ) -> str | None:
     if missing_child_job_ids:
         return "missing child import jobs: " + ",".join(missing_child_job_ids)
-    not_done = [job for job in child_jobs if job.state != "done"]
+    not_done = [job for job in child_jobs if job.status != "done"]
     if not_done:
-        summary = ",".join(f"{job.job_id}:{job.state}" for job in not_done)
+        summary = ",".join(f"{job.job_id}:{job.status}" for job in not_done)
         return "child import jobs are not done: " + summary
     return None
 

@@ -73,7 +73,7 @@ async def execute_feature_update_request_op(
 
     metadata = _execution_metadata(result)
     context.add_output_metadata(metadata)
-    if result.state == "failed":
+    if result.status == "failed":
         raise Failure(
             description=result.error_message or "feature update request 실행 실패",
         )
@@ -197,7 +197,7 @@ def _execution_metadata(
 ) -> dict[str, object]:
     return {
         "request_id": result.request.request_id,
-        "state": result.state,
+        "status": result.status,
         "scope_type": result.request.scope_type,
         "run_mode": result.request.run_mode,
         "refresh_scope_count": len(result.plan.refresh_scopes),

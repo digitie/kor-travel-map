@@ -40,7 +40,7 @@ async def test_batch_gate_success_records_mv_refresh(monkeypatch: pytest.MonkeyP
 
     assert result.state == "done"
     assert result.root_job is not None
-    assert result.root_job.state == "done"
+    assert result.root_job.status == "done"
     assert result.consistency_report is not None
     assert result.consistency_report.severity_max == "WARN"
     assert result.mv_refresh_job is not None
@@ -65,8 +65,8 @@ async def test_batch_gate_blocks_mv_refresh_on_error(
     assert result.blocked_by_gate is True
     assert result.mv_refresh_job is None
     assert calls["refresh"] == []
-    assert calls["jobs"][_ROOT_ID].state == "failed"
-    assert calls["jobs"][_CONSISTENCY_ID].state == "failed"
+    assert calls["jobs"][_ROOT_ID].status == "failed"
+    assert calls["jobs"][_CONSISTENCY_ID].status == "failed"
 
 
 async def test_batch_gate_fails_before_consistency_when_child_not_done(
@@ -226,14 +226,14 @@ def _install_fakes(
         _session: object,
         job_id: str,
         *,
-        state: str = "done",
+        status: str = "done",
         error_message: str | None = None,
     ) -> ImportJob:
         job = cast(ImportJob, calls["jobs"][job_id])
         finished = replace(
             job,
-            state=state,
-            progress=100 if state == "done" else job.progress,
+            status=status,
+            progress=100 if status == "done" else job.progress,
             error_message=error_message,
         )
         calls["jobs"][job_id] = finished
@@ -291,7 +291,7 @@ def _job(
         job_id=job_id,
         kind=kind,
         payload=dict(payload or {}),
-        state=state,
+        status=state,
         progress=100 if state == "done" else 0,
         current_stage=None,
         source_checksum=source_checksum,

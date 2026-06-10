@@ -41,6 +41,11 @@ facade를 만들지 않는다.
 - 사례: PR#53에서 본 lib `OPINET_PRODUCT_KEY_MAP`이 upstream `python-opinet-
   api` `codes.py` 및 OpiNet 공식 스펙과 `C004`/`K015`가 뒤바뀌어 있던 것을
   upstream 기준으로 정렬.
+- 예외: `tripmate-agent-youtube`는 공공 `python-*-api` 라이브러리가 아니라
+  형제 앱 `tripmate-agent`의 `/api/v1/krtour/features/{snapshot|changes}` REST
+  export를 pull하는 외부 app provider다. krtour-map은 client wrapper를 만들지
+  않고, export item JSON을 `providers.tripmate_agent.tripmate_agent_items_to_bundles`
+  순수 함수로 `FeatureBundle`화한다.
 
 ## 2. canonical provider name
 
@@ -67,6 +72,7 @@ data.go.kr-standard
 google-places-api-new
 kakao-local-api
 naver-search-api
+tripmate-agent-youtube
 manual
 system
 ```
@@ -88,6 +94,7 @@ system
 | `mois_license_detail` | python-mois-api | on-demand detail (캐시만) |
 | `opinet_fuel_station_details` | python-opinet-api | 주유소 detail + 가격 |
 | `krex_rest_areas` | python-krex-api | 고속도로 휴게소 |
+| `youtube_place_candidates` | tripmate-agent-youtube | YouTube 장소 후보 export |
 | `krex_rest_area_prices` | python-krex-api | 휴게소 유가 시계열 |
 | `krex_rest_area_weather` | python-krex-api | 휴게소 관측 weather |
 | `krex_traffic_notices` | python-krex-api | 교통 공지 |

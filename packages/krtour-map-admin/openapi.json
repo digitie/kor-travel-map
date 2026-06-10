@@ -2862,7 +2862,7 @@
             ],
             "title": "Message"
           },
-          "step_key": {
+          "step_id": {
             "anyOf": [
               {
                 "type": "string"
@@ -2871,7 +2871,7 @@
                 "type": "null"
               }
             ],
-            "title": "Step Key"
+            "title": "Step Id"
           },
           "timestamp": {
             "anyOf": [
@@ -6604,11 +6604,11 @@
             "title": "Features Total",
             "type": "integer"
           },
-          "import_jobs_by_state": {
+          "import_jobs_by_status": {
             "additionalProperties": {
               "type": "integer"
             },
-            "title": "Import Jobs By State",
+            "title": "Import Jobs By Status",
             "type": "object"
           },
           "latest_consistency_report": {
@@ -6636,7 +6636,7 @@
           "features_inactive",
           "features_by_kind",
           "source_records_by_provider",
-          "import_jobs_by_state",
+          "import_jobs_by_status",
           "dedup_queue_by_status",
           "dedup_fp_stats",
           "data_integrity_issues"

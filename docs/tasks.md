@@ -6,12 +6,17 @@
 
 ## 진행 중인 작업 인덱스 (열린 `[ ]` 항목)
 
-> 총 12건. 상세는 아래 각 섹션. 완료 이력은 [`tasks-done.md`](tasks-done.md).
+> 총 8건. 상세는 아래 각 섹션. 완료 이력은 [`tasks-done.md`](tasks-done.md).
 
 - **다음 (우선순위 순)**
-  - [ ] T-215d — 사용자 데이터 버전 단조화(v0,v1,v2,v3… + 디폴트=최신) *(reload-safety F-2)*
-  - [ ] T-104 — dedup merge 영속화(재적재 후 loser 부활 차단) *(reload-safety F-1)*
-  - [ ] TripMate 측 후속 작업 추적
+  - [ ] T-212d 재측정 pass — read가 압도적으로 많은 운영 전제를 두고 seeded/live
+        PostGIS 성능을 다시 측정한다. 필요 시 `mv_feature_cluster_counts` 같은
+        materialized view 시범을 도입한다.
+- **최근 완료**
+  - [x] TripMate-agent provider 추가/연동 후속 작업 추적 — krtour-map 쪽
+        `tripmate-agent-youtube` provider 변환, Dagster REST fetch/resource/asset/schedule
+        wiring 완료. 실제 TripMate-agent `/api/v1/krtour/features/*` 구현은 해당 repo
+        `T-066` 후속.
 - **보류 (v2 1차 범위 외)**
   - [ ] Materialized View 도입 검토
   - [ ] streaming ETL (Kafka/Redpanda) 대응
@@ -26,8 +31,8 @@
   - [x] T-216c — envelope payload/meta 분리.
   - [x] T-216d — parameter/error/좌표 정합성.
   - [x] T-216e — 명명 통일(경로+응답 본문, 본질 기준).
-  - [ ] T-216f — 코드/DB 명명 전파(surrogate만).
-  - [ ] T-216g — 단일 정본 수렴 + 버전 거버넌스.
+  - [x] T-216f — 코드/DB 명명 전파(surrogate만).
+  - [x] T-216g — 단일 정본 수렴 + 버전 거버넌스.
 - **Phase 7 — ADR-045 전체점검/튜닝 (ADR-045 잔여 task 완료 후 시작)**
   - [ ] T-212e
 
@@ -43,7 +48,8 @@ T-212b admin UI 완결성, T-212c API/error/log contract, T-212d seeded PostGIS
 
 Sprint 5 종료까지 남은 작업은
 `docs/reports/sprint5-final-task-breakdown-2026-06-07.md`를 정본으로 상세화했다.
-권장 순서는 **T-216 REST API 정합성 심화 → T-212e 실데이터 full reload →
+권장 순서는 **T-216 REST API 정합성 심화 → TripMate-agent provider →
+T-212d 재측정/튜닝 → T-212e 실데이터 full reload →
 T-210 TripMate 연계 정리 → Sprint 5 closure**다. T-207b는 사용자 결정에 따라
 구현하지 않는다.
 
@@ -302,7 +308,7 @@ lint-imports/pytest/coverage, frontend type-check/e2e). 실데이터 검증은 T
   ✅ `/features/search`는 DB score text cursor와 `(-score, feature_id)` row-tuple
   비교로 `ORDER BY score DESC, feature_id ASC`와 같은 축을 사용한다.
   `/admin/dedup-reviews`는 `NUMERIC` score를 string cursor로 운반하고 predicate와
-  `ORDER BY` 모두 `review_key::text`를 사용한다. 동점 다중 페이지 walk
+  `ORDER BY` 모두 `review_id::text`를 사용한다. 동점 다중 페이지 walk
   integration test를 추가했다.
 - ~~**T-RV-27** admin API `0.0.0.0` 노출(ADR-005/.env 모순)~~ ✅
   Docker compose host publish 기본값을 `KRTOUR_MAP_DOCKER_BIND_HOST=127.0.0.1`로
@@ -441,17 +447,16 @@ lint-imports/pytest/coverage, frontend type-check/e2e). 실데이터 검증은 T
 
 ## 다음 (우선순위 순)
 
-- [ ] T-215d — **사용자 데이터 버전 단조화 (v0,v1,v2,v3… + 디폴트=최신)**
-  (`docs/reports/data-reload-safety-2026-06-10.md` F-2.) 현재 #317은 binary v0/v1
-  (`data_version=1` 하드코딩, `feature_versions` v1 덮어씀). 사용자 요건은 단조 증가 +
-  버전별 히스토리. 편집 시 `version=MAX+1`, `feature_versions` 새 row INSERT(이력 보존),
-  `features.data_version=latest`. provider 재적재 가드(`data_version>0`)·snapshot cleanup
-  (`<>'user_request'`)은 이미 호환이라 **쓰기 측만 보강**. (선택) 버전 조회/diff/revert API.
-- [ ] T-104 — **dedup merge 영속화 (재적재 후 loser 부활 차단)**
-  (`docs/reports/data-reload-safety-2026-06-10.md` F-1.) `merge_repo`가 loser를 soft-delete만
-  하고 재활성화 가드 미설정 → provider 재적재가 동일 `feature_id`로 loser를 되살려 중복 재생성.
-  권장: merge 시 loser에 `prevent_provider_reactivation` override 생성(기존 가드와 일관) 또는
-  `load_bundles`가 `feature_merge_history`(loser→master) 참조해 redirect/skip.
+- [x] T-215d — **사용자 데이터 버전 단조화 (v0,v1,v2,v3… + 디폴트=최신)**
+  (`docs/reports/data-reload-safety-2026-06-10.md` F-2.) 편집 적용 시
+  `version=MAX(feature_versions.version)+1`, `feature_versions` 새 row INSERT(이력 보존),
+  `features.data_version=latest`로 전환했다. provider 재적재 가드(`data_version>0`)와
+  snapshot cleanup 조건(`data_origin<>'user_request'`)은 그대로 호환된다.
+  버전 조회/diff/revert API는 별도 선택 후속.
+- [x] T-104 — **dedup merge 영속화 (재적재 후 loser 부활 차단)**
+  (`docs/reports/data-reload-safety-2026-06-10.md` F-1.) merge 시 loser를 soft-delete한 같은
+  transaction에서 `ops.feature_overrides` status override(`prevent_provider_reactivation=true`)를
+  생성해 provider 재적재가 loser를 되살리지 못하게 했다.
 - [x] T-012 — ADR-020+ 후속 결정 작성 (proposed → **accepted**, 사용자 승인
   2026-05-29) — ADR-030~033 결정자 라인 정정 + 교차 참조 (proposed) → (accepted)
   - **ADR-030 (accepted)** — 라이브러리 in-memory 캐시 금지
@@ -686,17 +691,17 @@ T-214/T-215(#317)의 `/v1` 1차 정리 위에 ADR-048 delta를 얹는다. 정본
   **좌표명 cross-repo 정렬 = `lon`/`lat`**(ADR-048 #10; TripMate DEC-07 하향 정렬). **`feature_id`
   값 불변식**(ADR-048 #11)을 외부 계약/테스트에 명시.
 - [x] **T-216e — 명명 통일(경로+응답 본문, 본질 기준).** `dedup-reviews`/`enrichment-reviews`
-  복수형을 정본으로 유지하고, `{review_key}`→`{review_id}`,
-  `/admin/issues/{violation_key}`→`{issue_id}`. 응답 surrogate `*_key`→`*_id`. action
+  복수형을 정본으로 유지하고, `{review_id}`→`{review_id}`,
+  `/admin/issues/{issue_id}`→`{issue_id}`. 응답 surrogate `*_key`→`*_id`. action
   sub-resource 규약(ADR-048 #8) 명시. **유지(자연/복합키)**: `cluster_key`(행정코드 자연키 —
   개명 안 함, #316 재리뷰 C), `target_key`, provider 어휘, `feature_id`.
-- [ ] **T-216f — 코드/DB 명명 전파(surrogate만).** REST 개명을 물리 컬럼·ORM·repo까지
+- [x] **T-216f — 코드/DB 명명 전파(surrogate만).** REST 개명을 물리 컬럼·ORM·repo까지
   end-to-end(테이블별 1-PR migration, codegraph impact 선행): `review_key`→`review_id`,
   `violation_key`→`issue_id`, ops 로그/내부 키 `*_key`→`*_id`, `state`→`status`(import_jobs/
   offline_uploads/feature_update_requests). **경계(개명 금지)**: `cluster_key`(행정코드 자연키),
   provider/source 어휘(ADR-044 — `dataset_key`/`source_record_key`/`source_entity_id`/
   `source_dataset_key`/`raw_*`)·복합 자연키(`target_key`+`external_system`)·canonical `feature_id`.
-- [ ] **T-216g — 단일 정본 수렴 + 버전 거버넌스.** `docs/rest-api.md`를 전 표면 계약 단일
+- [x] **T-216g — 단일 정본 수렴 + 버전 거버넌스.** `docs/rest-api.md`를 전 표면 계약 단일
   정본으로 두고 `docs/tripmate-rest-api.md`를 소비 매핑 view로 축소(ADR-048 #9). `/vN`
   거버넌스(#13: pre-1.0 in-place breaking, v1.0.0 GA에서 `/v1` 동결→이후 `/v2`+N-1, OpenAPI
   major별 export)를 문서·export 스크립트에 반영.
@@ -773,6 +778,11 @@ T-214/T-215(#317)의 `/v1` 1차 정리 위에 ADR-048 delta를 얹는다. 정본
       - 사후 리뷰 보강으로 `/features/in-bounds` `LIMIT` subset 안정성, seqscan hint 없는
         대표 planner 가드, admin sort=name EXPLAIN, review cursor 전체 순회 완전성을 추가했다.
       - 상세 리포트: `docs/reports/t-212d-perf-baseline-2026-06-08.md`.
+- [ ] T-212d 재측정 pass — read가 압도적으로 많은 운영 전제를 반영해 hot read 경로를
+      다시 실행하고 튜닝한다(2026-06-10 사용자 지시). `docs/performance.md §9.3`의
+      결론처럼 detail flatten MV는 제외하고, 필요 시 클러스터 rollup MV
+      `feature.mv_feature_cluster_counts`를 시범 도입한다. 우선 seeded PostGIS
+      EXPLAIN을 갱신하고, 실 볼륨 P99는 T-212e live full reload에서 보강한다.
 - [ ] T-212e — 실데이터 full reload + offline upload 실데이터 검증 + 최종 리포트.
       DB를 비운 뒤 처음부터 다시 로드하고, provider 실데이터와 offline upload
       CSV/TSV/JSONL 실데이터 적재, kraddr-geo bjd 보강, Playwright e2e, API smoke,
@@ -818,8 +828,8 @@ T-214/T-215(#317)의 `/v1` 1차 정리 위에 ADR-048 delta를 얹는다. 정본
   조회 + 정합성 책임) PR#54. **ADR-045** (krtour-map Docker 독립 프로그램 + 독립
   DB/Dagster + TripMate OpenAPI 연동 — ADR-003 함수 직접 호출 모델 supersede,
   2026-06-01). **ADR-046** (ADR-045 이행 시 구 모델 호환 shim 금지, 2026-06-02).
-- **001~048 accepted**. **다음 후보 번호 = ADR-049**:
-  - **ADR-049+** — 신규 provider 추가 절차 표준 (체크리스트)
+- **001~049 accepted**. **다음 후보 번호 = ADR-050**:
+  - **ADR-050+** — 신규 provider 추가 절차 표준 (체크리스트)
   - 후속 `@krtour/map-marker-react` npm 게시 자동화 ADR (현재 ADR-043 보류)
   - (필요 시) ADR — Sprint 3 SHP/GeoJSON parsing 위치 결정 (`krtour.map.
     providers.knps` vs upstream `[geo]` extra)

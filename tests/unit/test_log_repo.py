@@ -46,7 +46,7 @@ _NOW = datetime(2026, 6, 7, 12, 0, tzinfo=UTC)
 
 def _sys_row(**over: Any) -> dict[str, Any]:
     base = {
-        "system_log_key": "11111111-1111-1111-1111-111111111111",
+        "system_log_id": "11111111-1111-1111-1111-111111111111",
         "level": "info",
         "source": "offline_upload",
         "event": "upload_done",
@@ -61,7 +61,7 @@ def _sys_row(**over: Any) -> dict[str, Any]:
 
 def _api_row(**over: Any) -> dict[str, Any]:
     base = {
-        "api_call_log_key": "22222222-2222-2222-2222-222222222222",
+        "api_call_log_id": "22222222-2222-2222-2222-222222222222",
         "method": "GET",
         "path": "/ops/metrics",
         "status_code": 200,
@@ -85,7 +85,7 @@ async def test_record_system_log_valid() -> None:
         detail={"count": 3},
         request_id="req-1",
     )
-    assert row.system_log_key == "11111111-1111-1111-1111-111111111111"
+    assert row.system_log_id == "11111111-1111-1111-1111-111111111111"
     assert row.level == "info"
     assert row.detail == {"count": 3}
     # detail은 jsonb 문자열로 직렬화돼 파라미터에 들어간다.
@@ -144,7 +144,7 @@ async def test_record_api_call() -> None:
         duration_ms=12,
         request_id="req-2",
     )
-    assert row.api_call_log_key == "22222222-2222-2222-2222-222222222222"
+    assert row.api_call_log_id == "22222222-2222-2222-2222-222222222222"
     assert row.status_code == 200
     assert row.duration_ms == 12
     assert row.error_code is None
@@ -153,7 +153,7 @@ async def test_record_api_call() -> None:
 
 async def test_list_system_logs_filters_and_cursor() -> None:
     # page_size=1, 2 rows 반환 → next_cursor 존재, items 1건.
-    session = _Session([[_sys_row(), _sys_row(system_log_key="33")]])
+    session = _Session([[_sys_row(), _sys_row(system_log_id="33")]])
     page = await repo.list_system_logs(
         session,  # type: ignore[arg-type]
         level="info",
@@ -187,7 +187,7 @@ async def test_list_system_logs_invalid_cursor() -> None:
 
 
 async def test_list_api_call_logs_min_status_and_path() -> None:
-    session = _Session([[_api_row(status_code=500), _api_row(api_call_log_key="44")]])
+    session = _Session([[_api_row(status_code=500), _api_row(api_call_log_id="44")]])
     page = await repo.list_api_call_logs(
         session,  # type: ignore[arg-type]
         method="GET",

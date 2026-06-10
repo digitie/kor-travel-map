@@ -572,7 +572,7 @@ CREATE TABLE ops.import_jobs (
   load_batch_id     UUID,                             -- full-load root/child batch id
   parent_job_id     UUID REFERENCES ops.import_jobs(job_id) ON DELETE SET NULL,
   payload           JSONB NOT NULL DEFAULT '{}'::jsonb,
-  state             TEXT NOT NULL DEFAULT 'queued',   -- queued, running, done, failed, cancelled
+  status            TEXT NOT NULL DEFAULT 'queued',   -- queued, running, done, failed, cancelled
   progress          INTEGER NOT NULL DEFAULT 0,       -- 0~100
   current_stage     TEXT,
   source_checksum   TEXT,
@@ -581,13 +581,13 @@ CREATE TABLE ops.import_jobs (
   finished_at       TIMESTAMPTZ,
   heartbeat_at      TIMESTAMPTZ,
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT ck_import_jobs_state CHECK (state IN ('queued','running','done','failed','cancelled')),
+  CONSTRAINT ck_import_jobs_status CHECK (status IN ('queued','running','done','failed','cancelled')),
   CONSTRAINT ck_import_jobs_progress CHECK (progress BETWEEN 0 AND 100)
 );
 
-CREATE INDEX idx_import_jobs_state         ON ops.import_jobs (state, created_at);
-CREATE INDEX idx_import_jobs_kind_state    ON ops.import_jobs (kind, state, created_at DESC);
-CREATE INDEX idx_import_jobs_heartbeat     ON ops.import_jobs (heartbeat_at) WHERE state='running';
+CREATE INDEX idx_import_jobs_status        ON ops.import_jobs (status, created_at);
+CREATE INDEX idx_import_jobs_kind_status   ON ops.import_jobs (kind, status, created_at DESC);
+CREATE INDEX idx_import_jobs_heartbeat     ON ops.import_jobs (heartbeat_at) WHERE status='running';
 CREATE INDEX idx_import_jobs_load_batch_created
   ON ops.import_jobs (load_batch_id, created_at DESC, job_id DESC)
   WHERE load_batch_id IS NOT NULL;
@@ -615,14 +615,14 @@ CREATE TABLE ops.offline_uploads (
   checksum_sha256   CHAR(64) NOT NULL,
   detected_format   TEXT,
   detected_encoding TEXT,
-  state             TEXT NOT NULL DEFAULT 'uploaded',
+  status            TEXT NOT NULL DEFAULT 'uploaded',
   validation_job_id UUID REFERENCES ops.import_jobs(job_id) ON DELETE SET NULL,
   load_job_id       UUID REFERENCES ops.import_jobs(job_id) ON DELETE SET NULL,
   created_by        TEXT,
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT ck_offline_uploads_state CHECK (
-    state IN (
+  CONSTRAINT ck_offline_uploads_status CHECK (
+    status IN (
       'uploaded','validating','validated','validation_failed',
       'loading','loaded','load_failed','cancelled'
     )
@@ -634,8 +634,8 @@ CREATE TABLE ops.offline_uploads (
 
 CREATE INDEX idx_offline_uploads_provider_dataset
   ON ops.offline_uploads (provider, dataset_key, created_at DESC);
-CREATE INDEX idx_offline_uploads_state
-  ON ops.offline_uploads (state, created_at DESC);
+CREATE INDEX idx_offline_uploads_status
+  ON ops.offline_uploads (status, created_at DESC);
 ```
 
 첫 load job과 기본 admin API/UI 구현은 JSON/JSONL `FeatureBundle` dump만 지원한다.
@@ -646,7 +646,7 @@ CSV/TSV column mapping과 validation wizard는 후속에서 같은 테이블과 
 
 ```sql
 CREATE TABLE ops.dedup_review_queue (
-  review_key         UUID PRIMARY KEY DEFAULT x_extension.gen_random_uuid(),
+  review_id         UUID PRIMARY KEY DEFAULT x_extension.gen_random_uuid(),
   feature_id_a       TEXT NOT NULL REFERENCES feature.features(feature_id) ON DELETE CASCADE,
   feature_id_b       TEXT NOT NULL REFERENCES feature.features(feature_id) ON DELETE CASCADE,
   total_score        NUMERIC(5,2) NOT NULL,
@@ -684,7 +684,7 @@ CREATE INDEX idx_dedup_status_score ON ops.dedup_review_queue (status, total_sco
 
 ```sql
 CREATE TABLE ops.feature_overrides (
-  override_key         UUID PRIMARY KEY DEFAULT x_extension.gen_random_uuid(),
+  override_id         UUID PRIMARY KEY DEFAULT x_extension.gen_random_uuid(),
   feature_id           TEXT NOT NULL REFERENCES feature.features(feature_id) ON DELETE CASCADE,
   source_record_key    TEXT REFERENCES provider_sync.source_records(source_record_key) ON DELETE SET NULL,
   field_path           TEXT NOT NULL,                 -- 'name', 'detail.phones[0]', ...
@@ -722,7 +722,7 @@ CREATE TABLE ops.feature_merge_history (
   master_feature_id TEXT NOT NULL REFERENCES feature.features(feature_id) ON DELETE CASCADE,
   loser_feature_id  TEXT NOT NULL REFERENCES feature.features(feature_id) ON DELETE CASCADE,
   score             NUMERIC(5,2),                     -- dedup total_score (0~100), nullable
-  review_key        UUID REFERENCES ops.dedup_review_queue(review_key) ON DELETE SET NULL,
+  review_id        UUID REFERENCES ops.dedup_review_queue(review_id) ON DELETE SET NULL,
   merged_by         TEXT,                             -- 운영자 ID 등
   reason            TEXT,
   merged_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -734,7 +734,7 @@ CREATE INDEX idx_merge_history_master ON ops.feature_merge_history (master_featu
 ```
 
 > 설계 메모: master/loser **둘 다** FK(CASCADE) — loser는 하드 삭제가 아니라
-> soft-delete(ADR-017)라 행이 남으므로 FK 유효. `review_key` FK는 큐 행 삭제 시
+> soft-delete(ADR-017)라 행이 남으므로 FK 유효. `review_id` FK는 큐 행 삭제 시
 > SET NULL(이력 보존). master 자동 선정은 `select_master`(좌표 보유 → updated_at →
 > source 우선순위 행안부>TourAPI>사용자, 동률은 feature_id 사전순).
 
@@ -746,7 +746,7 @@ CREATE INDEX idx_merge_history_master ON ops.feature_merge_history (master_featu
 
 ```sql
 CREATE TABLE ops.data_integrity_violations (
-  violation_key       UUID PRIMARY KEY DEFAULT x_extension.gen_random_uuid(),
+  issue_id       UUID PRIMARY KEY DEFAULT x_extension.gen_random_uuid(),
   provider            TEXT,
   dataset_key         TEXT,
   source_record_key   TEXT REFERENCES provider_sync.source_records(source_record_key) ON DELETE SET NULL,
@@ -837,7 +837,7 @@ run/import job으로 연결한다. 상세 계약은 `docs/openapi-admin-contract
 | `update_policy` | 재적재/중복/정합성 정책 JSONB |
 | `run_mode` | `queued` 또는 `now` |
 | `priority` | queue 우선순위, 기본 50 |
-| `state` | `queued`/`running`/`done`/`failed`/`cancelled` |
+| `status` | `queued`/`running`/`done`/`failed`/`cancelled` |
 | `dry_run` | 영향 범위만 계산한 요청 여부 |
 | `matched_scope` | scope resolver가 계산한 feature/provider/sigungu 요약 |
 | `job_id` | `ops.import_jobs(job_id)` FK, job 삭제 시 `NULL` |
@@ -845,7 +845,7 @@ run/import job으로 연결한다. 상세 계약은 `docs/openapi-admin-contract
 
 인덱스:
 
-- `idx_feature_update_state_priority` — queued/running claim과 목록.
+- `idx_feature_update_status_priority` — queued/running claim과 목록.
 - `idx_feature_update_created` — 최신 요청 목록.
 - `idx_feature_update_job` — import job에서 request 역추적.
 

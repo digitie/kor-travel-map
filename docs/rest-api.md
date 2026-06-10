@@ -1,8 +1,8 @@
 # krtour-map REST API — 전 표면 카탈로그 + 정합성 표준
 
-> **상태**: 2026-06-09. PR #317(T-214/T-215)의 `/v1` 1차 정리 위에 ADR-048(admin/ops
-> versioning 확장 + envelope/pagination/parameter/response 정합성 표준 + 코드/DB 명명 전파)을
-> 얹은 기준선.
+> **상태**: 2026-06-10. PR #317(T-214/T-215)의 `/v1` 1차 정리 위에 ADR-048(admin/ops
+> versioning 확장 + envelope/pagination/parameter/response 정합성 표준 + 코드/DB 명명 전파
+> T-216a~g)을 얹은 기준선.
 > **범위**: krtour-map **전 표면**(user/TripMate + admin + ops + debug)의 **단일 계약 정본**
 > (ADR-048 #9). `docs/tripmate-rest-api.md`는 TripMate **소비 매핑 view**로 수렴하고 계약
 > 세부는 본 문서로 위임한다(수렴 작업 T-216g).
@@ -209,7 +209,7 @@ POST /v1/debug/etl/{provider}/{dataset}/preview
 
 ### 3.1 응답 필드 명명 규약 (🔁 ADR-048 — 의미/본질 기준 전면 적용)
 - **식별자(외부 read 포함)**: 시스템 단일 surrogate = `*_id`, **복합/자연키 = `*_key`**.
-  응답 본문 전체에 적용 — surrogate `review_key`→`review_id`, `violation_key`→`issue_id`,
+  응답 본문 전체에 적용 — surrogate `review_id`→`review_id`, `issue_id`→`issue_id`,
   ops 로그/내부 키 `*_key`→`*_id`. **`*_key` 유지(본질이 자연/복합키)**: `cluster_key`
   (**행정구역 코드 sido/sigungu/eupmyeondong = 자연키 → 유지**; 2차의 `cluster_id` 개명 철회,
   #316 재리뷰 C), 복합 자연키 `target_key`(+`external_system`), provider/source 어휘
@@ -265,7 +265,7 @@ POST /v1/debug/etl/{provider}/{dataset}/preview
 | `state`(jobs/uploads/requests) | `status` | 🔁 |
 | 응답 surrogate `*_key`(review/violation/log…) | `*_id` (`cluster_key` 등 자연키는 유지) | 🔁 |
 | 좌표 `lon`/`lat` ↔ TripMate `longitude`/`latitude` | `lon`/`lat`로 cross-repo 정렬 | 🔁 #10 |
-| `{violation_key}`/`{review_key}` | `{issue_id}`/`{review_id}`, `*-reviews` 복수 | 🔁 |
+| `{issue_id}`/`{review_id}` | `{issue_id}`/`{review_id}`, `*-reviews` 복수 | 🔁 |
 | `{error:{…}}` | problem+json(`code`/`request_id` 확장) | 🔁 |
 | `/debug/health`·`/debug/version` | 제거(clean cut) | 🔁 |
 | 2개 계약 doc | `rest-api.md` 단일 정본 + tripmate-rest-api.md 소비 view | 🔁 수렴(T-216g) |
@@ -292,9 +292,9 @@ ORM·repo까지 end-to-end 정렬**(ADR-046 무-shim), provider/복합키는 경
 
 | 식별자/필드 | 출처 | 전파 | 목표 | blast |
 |---|---|---|---|---|
-| `review_key` | 내부 ops | ✅ | `review_id` | 291 |
-| `violation_key` | 내부 ops | ✅ | `issue_id` | 118 |
-| `coord_key`/`system_log_key`/`api_call_log_key`/`override_key`/`step_key` | 내부 | ✅ | `*_id` | 28/28/26/13/5 |
+| `review_id` | 내부 ops | ✅ | `review_id` | 291 |
+| `issue_id` | 내부 ops | ✅ | `issue_id` | 118 |
+| `coord_key`/`system_log_id`/`api_call_log_id`/`override_id`/`step_id` | 내부 | ✅ | `*_id` | 28/28/26/13/5 |
 | `state`(import_jobs/offline_uploads/feature_update_requests) | 내부 | ✅ | `status` | 3 테이블 |
 | `dataset_key`/`source_record_key`/`source_entity_id` | provider/source(ADR-044) | ❌ | 유지 | 859/398/234 |
 | `cluster_key` | 행정구역 코드 = 자연키 | ❌ | 유지(규칙상 `*_key`) | — |

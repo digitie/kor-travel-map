@@ -82,7 +82,7 @@ def _review_row() -> DedupReviewRow:
         dataset_key="cultural_festivals",
     )
     return DedupReviewRow(
-        review_key="review-1",
+        review_id="review-1",
         status="pending",
         total_score=90.0,
         name_score=95.0,
@@ -150,8 +150,8 @@ def test_patch_accepted_uses_transaction(
 ) -> None:
     from krtour.map_admin.routers import dedup_review as router_mod
 
-    async def _set(_session: Any, review_key: str, **kwargs: Any) -> bool:
-        assert review_key == "review-1"
+    async def _set(_session: Any, review_id: str, **kwargs: Any) -> bool:
+        assert review_id == "review-1"
         assert kwargs["decision"] == "accepted"
         assert kwargs["reviewed_by"] == "local-admin"
         return True
@@ -187,8 +187,8 @@ def test_patch_merged_uses_advisory_lock(
         seen_lock.append(key)
         yield None
 
-    async def _merge(_session: Any, review_key: str, **kwargs: Any) -> MergeOutcome:
-        assert review_key == "review-1"
+    async def _merge(_session: Any, review_id: str, **kwargs: Any) -> MergeOutcome:
+        assert review_id == "review-1"
         assert kwargs["master_feature_id"] == "feature-a"
         return MergeOutcome(
             master_feature_id="feature-a",
@@ -229,8 +229,8 @@ def test_patch_merged_not_found_returns_404(
     async def _lock(_session: Any, _key: str) -> AsyncIterator[None]:
         yield None
 
-    async def _merge(_session: Any, review_key: str, **_kwargs: Any) -> MergeOutcome:
-        raise MergeNotFoundError(f"review_key 없음 — {review_key!r}")
+    async def _merge(_session: Any, review_id: str, **_kwargs: Any) -> MergeOutcome:
+        raise MergeNotFoundError(f"review_id 없음 — {review_id!r}")
 
     monkeypatch.setattr(router_mod, "advisory_lock", _lock)
     monkeypatch.setattr(router_mod, "merge_dedup_review", _merge)
@@ -241,7 +241,7 @@ def test_patch_merged_not_found_returns_404(
     )
 
     assert response.status_code == 404
-    assert "review_key 없음" in response.json()["detail"]
+    assert "review_id 없음" in response.json()["detail"]
 
 
 @pytest.mark.unit
@@ -255,7 +255,7 @@ def test_patch_merged_conflict_returns_409(
     async def _lock(_session: Any, _key: str) -> AsyncIterator[None]:
         yield None
 
-    async def _merge(_session: Any, _review_key: str, **_kwargs: Any) -> MergeOutcome:
+    async def _merge(_session: Any, _review_id: str, **_kwargs: Any) -> MergeOutcome:
         raise MergeConflictError("이미 검토된 후보(status='merged')")
 
     monkeypatch.setattr(router_mod, "advisory_lock", _lock)
@@ -281,7 +281,7 @@ def test_patch_merged_unknown_merge_error_hides_internal_message(
     async def _lock(_session: Any, _key: str) -> AsyncIterator[None]:
         yield None
 
-    async def _merge(_session: Any, _review_key: str, **_kwargs: Any) -> MergeOutcome:
+    async def _merge(_session: Any, _review_id: str, **_kwargs: Any) -> MergeOutcome:
         raise MergeError("internal merge detail")
 
     monkeypatch.setattr(router_mod, "advisory_lock", _lock)

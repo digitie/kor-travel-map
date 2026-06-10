@@ -14,7 +14,7 @@ from krtour.map.infra.jobs_repo import ImportJob
 from krtour.map.infra.offline_upload_repo import (
     OfflineUpload,
     OfflineUploadPage,
-    OfflineUploadStateConflict,
+    OfflineUploadStatusConflict,
 )
 from krtour.map.offline_upload import validate_offline_tabular_upload
 from sqlalchemy.exc import IntegrityError
@@ -121,7 +121,7 @@ def _upload(
         checksum_sha256=checksum_sha256,
         detected_format=detected_format,
         detected_encoding="utf-8",
-        state=state,
+        status=state,
         validation_job_id=validation_job_id,
         load_job_id=load_job_id,
         created_by="pytest",
@@ -142,7 +142,7 @@ def _import_job(
         job_id=job_id,
         kind="offline_upload_load",
         payload=payload or {},
-        state=state,
+        status=state,
         progress=0 if state == "running" else 100,
         current_stage=None,
         source_checksum=source_checksum,
@@ -359,7 +359,7 @@ def test_preview_offline_upload_prefers_app_state_store(
         return upload
 
     def _build_store(_settings: Any) -> _FakeStore:
-        raise AssertionError("cached app.state store must be reused")
+        raise AssertionError("cached app.status store must be reused")
 
     monkeypatch.setattr(router_mod, "get_offline_upload", _get)
     monkeypatch.setattr(router_mod, "build_offline_upload_store", _build_store)
@@ -417,7 +417,7 @@ def test_validate_offline_upload_prefers_app_state_store(
         )
 
     def _build_store(_settings: Any) -> _FakeStore:
-        raise AssertionError("cached app.state store must be reused")
+        raise AssertionError("cached app.status store must be reused")
 
     monkeypatch.setattr(router_mod, "get_offline_upload", _get)
     monkeypatch.setattr(router_mod, "run_offline_upload_validation_job", _run)
@@ -538,7 +538,7 @@ def test_list_offline_uploads_passes_filters(
     from krtour.map_admin.routers import offline_uploads as router_mod
 
     async def _list(_session: Any, **kwargs: Any) -> OfflineUploadPage:
-        assert kwargs["state"] == "uploaded"
+        assert kwargs["status"] == "uploaded"
         assert kwargs["provider"] == "offline-test-provider"
         assert kwargs["dataset_key"] == "offline_jsonl"
         assert kwargs["limit"] == 25
@@ -647,11 +647,11 @@ def test_load_offline_upload_rejects_concurrent_reserve(
         return _upload(upload_id=upload_id)
 
     async def _reserve(_session: Any, *, upload_id: str) -> OfflineUpload:
-        raise OfflineUploadStateConflict(
+        raise OfflineUploadStatusConflict(
             upload_id=upload_id,
-            current_state="loading",
-            target_state="loading",
-            allowed_states=frozenset({"uploaded", "validated", "load_failed"}),
+            current_status="loading",
+            target_status="loading",
+            allowed_statuses=frozenset({"uploaded", "validated", "load_failed"}),
         )
 
     async def _launch(_request: Any, _upload_id: str) -> Any:
@@ -677,7 +677,7 @@ def test_load_offline_upload_marks_failed_when_launch_fails(
     from krtour.map_admin.routers import offline_uploads as router_mod
 
     finished_jobs: list[dict[str, str]] = []
-    finished_upload_states: list[str] = []
+    finished_upload_statuses: list[str] = []
 
     async def _get(_session: Any, upload_id: str) -> OfflineUpload:
         return _upload(upload_id=upload_id)
@@ -692,25 +692,25 @@ def test_load_offline_upload_marks_failed_when_launch_fails(
     async def _launch(_request: Any, _upload_id: str) -> Any:
         raise HTTPException(status_code=502, detail="Dagster launch failed")
 
-    async def _finish(_session: Any, *, upload_id: str, state: str) -> OfflineUpload:
-        finished_upload_states.append(state)
-        return _upload(upload_id=upload_id, state=state)
+    async def _finish(_session: Any, *, upload_id: str, status: str) -> OfflineUpload:
+        finished_upload_statuses.append(status)
+        return _upload(upload_id=upload_id, state=status)
 
     async def _finish_import_job(
         _session: Any,
         job_id: str,
         *,
-        state: str,
+        status: str,
         error_message: str | None = None,
     ) -> ImportJob:
         finished_jobs.append(
             {
                 "job_id": job_id,
-                "state": state,
+                "status": status,
                 "error_message": error_message or "",
             }
         )
-        return _import_job(job_id=job_id, state=state, error_message=error_message)
+        return _import_job(job_id=job_id, state=status, error_message=error_message)
 
     monkeypatch.setattr(router_mod, "get_offline_upload", _get)
     monkeypatch.setattr(router_mod, "reserve_offline_upload_load", _reserve)
@@ -724,11 +724,11 @@ def test_load_offline_upload_marks_failed_when_launch_fails(
     assert finished_jobs == [
         {
             "job_id": "10000000-0000-0000-0000-000000000001",
-            "state": "failed",
+            "status": "failed",
             "error_message": "Dagster launch failed",
         }
     ]
-    assert finished_upload_states == ["load_failed"]
+    assert finished_upload_statuses == ["load_failed"]
 
 
 @pytest.mark.unit
@@ -864,7 +864,7 @@ def test_get_validation_returns_saved_import_job_payload(
             kind="offline_upload_validate",
             payload={
                 "job_id": job_id,
-                "job_state": "done",
+                "job_status": "done",
                 "column_mapping": {"name": "name", "lon": "lon", "lat": "lat"},
                 "parsed_format": "csv",
                 "encoding": "utf-8",
@@ -879,7 +879,7 @@ def test_get_validation_returns_saved_import_job_payload(
                 "bytes_read": 27,
                 "checksum_sha256_actual": "b" * 64,
             },
-            state="done",
+            status="done",
             progress=100,
             current_stage=None,
             source_checksum=None,

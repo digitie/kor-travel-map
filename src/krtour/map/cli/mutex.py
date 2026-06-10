@@ -8,7 +8,7 @@ lock key 컨벤션
 ---------------
 - ``import:{provider}:{dataset_key}`` — ``krtour-map import`` 중복 실행 차단.
 - ``dedup-merge:{id}`` — manual merge 중복 실행 차단. CLI ``dedup-merge``는
-  ``id`` = ``review_key``(병합 대상 후보쌍 식별자)를 쓴다.
+  ``id`` = ``review_id``(병합 대상 후보쌍 식별자)를 쓴다.
 - ``alembic-upgrade`` — Alembic 다중 워커 중복 차단.
 
 read-only 명령(``status``/``--dry-run``)은 mutex 없이 (호출 측 책임).
@@ -52,7 +52,7 @@ def import_lock_key(provider: str, dataset_key: str) -> str:
 
 
 def dedup_merge_lock_key(target_id: str) -> str:
-    """``krtour-map dedup-merge`` mutex 키. ``target_id`` = ``review_key``(병합
+    """``krtour-map dedup-merge`` mutex 키. ``target_id`` = ``review_id``(병합
     대상 후보쌍 식별자). 값은 lock에 불투명 — 같은 후보 병합 중복 실행만 차단."""
     return f"dedup-merge:{target_id}"
 

@@ -131,7 +131,7 @@ def _job(job_id: str, kind: str) -> ImportJob:
         job_id=job_id,
         kind=kind,
         payload={},
-        state="done",
+        status="done",
         progress=100,
         current_stage=None,
         source_checksum=None,

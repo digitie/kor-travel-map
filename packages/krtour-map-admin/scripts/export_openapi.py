@@ -41,8 +41,11 @@ OpenApiProfile = Literal["admin", "user"]
 ADMIN_OPENAPI_PATH = Path("packages/krtour-map-admin/openapi.json")
 USER_OPENAPI_PATH = Path("packages/krtour-map-admin/openapi.user.json")
 
+# ADR-048/T-216g: 현재 pre-1.0 단계의 기계 정본은 ``/v1`` 경로를 in-place로
+# 갱신하는 admin/user spec 2종이다. v1.0.0 GA 이후 breaking change는 ``/v2``와
+# major별 별도 export 파일을 추가하고, N-1 지원 정책은 문서/CI에서 함께 고정한다.
 USER_OPERATIONS: dict[str, frozenset[str]] = {
-    # 사용자/서비스 표면은 ``/v1`` prefix (T-214b). liveness ``/health``·``/version``은
+    # 사용자/서비스 표면은 ``/v1`` prefix. liveness ``/health``·``/version``은
     # 비버저닝 유지(ADR-048).
     "/v1/features/in-bounds": frozenset({"get"}),
     "/v1/features/{feature_id}": frozenset({"get"}),

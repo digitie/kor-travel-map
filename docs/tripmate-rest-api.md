@@ -1,6 +1,6 @@
 # TripMate 소비용 krtour-map REST API 매핑
 
-> **상태**: 2026-06-09, PR #316 / ADR-048 기준.
+> **상태**: 2026-06-10, ADR-048 / T-216a~g 기준.
 > **역할**: 이 문서는 TripMate가 어떤 krtour-map API를 소비하는지 정리하는 view다.
 > 전 표면 REST 계약의 단일 정본은 [`docs/rest-api.md`](rest-api.md)이고, 기계 정본은
 > `packages/krtour-map-admin/openapi.user.json` / `openapi.json`이다. 충돌 시 OpenAPI를 우선한다.

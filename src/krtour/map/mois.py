@@ -350,10 +350,10 @@ async def run_mois_license_bulk_job(
             # 작업을 failed로 표시 후 원래 예외를 re-raise. 같은 transaction을
             # 호출자가 rollback하면 이 기록도 사라진다(docstring 참조).
             await finish_import_job(
-                session, job.job_id, state="failed", error_message=str(exc)
+                session, job.job_id, status="failed", error_message=str(exc)
             )
             raise
-        finished = await finish_import_job(session, job.job_id, state="done")
+        finished = await finish_import_job(session, job.job_id, status="done")
         return MoisBulkJobResult(acquired=True, job=finished or job, sync=sync)
 
 
@@ -444,7 +444,7 @@ async def run_mois_license_incremental_job(
                 sync_scope=sync_scope,
             )
             await finish_import_job(
-                session, job.job_id, state="failed", error_message=str(exc)
+                session, job.job_id, status="failed", error_message=str(exc)
             )
             raise
         state = await record_sync_success(
@@ -454,7 +454,7 @@ async def run_mois_license_incremental_job(
             sync_scope=sync_scope,
             cursor=new_cursor,
         )
-        finished = await finish_import_job(session, job.job_id, state="done")
+        finished = await finish_import_job(session, job.job_id, status="done")
         return MoisIncrementalJobResult(
             acquired=True, job=finished or job, load=load, sync_state=state
         )
@@ -535,7 +535,7 @@ async def run_mois_license_closed_job(
                 sync_scope=sync_scope,
             )
             await finish_import_job(
-                session, job.job_id, state="failed", error_message=str(exc)
+                session, job.job_id, status="failed", error_message=str(exc)
             )
             raise
         state = await record_sync_success(
@@ -545,7 +545,7 @@ async def run_mois_license_closed_job(
             sync_scope=sync_scope,
             cursor=new_cursor,
         )
-        finished = await finish_import_job(session, job.job_id, state="done")
+        finished = await finish_import_job(session, job.job_id, status="done")
         return MoisClosedJobResult(
             acquired=True,
             job=finished or job,

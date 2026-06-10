@@ -673,19 +673,19 @@ PostGIS/testcontainers baseline으로 고정했다. 로컬 live DB 확인 결과
     `deleted_at IS NULL AND detail ?| ARRAY['business_hours','opening_hours']`
 - `ops.import_jobs`
   - `idx_import_jobs_created_keyset(created_at DESC, job_id DESC)`
-  - `idx_import_jobs_state(state, created_at, queue_sequence)` — claim FIFO tie-breaker
-  - `idx_import_jobs_kind_state(kind, state, created_at DESC, job_id DESC)`
+  - `idx_import_jobs_status(status, created_at, queue_sequence)` — claim FIFO tie-breaker
+  - `idx_import_jobs_kind_status(kind, status, created_at DESC, job_id DESC)`
 - `ops.feature_consistency_reports`
   - `idx_reports_started(started_at DESC, report_id DESC)`
   - `idx_reports_severity_started(severity_max, started_at DESC, report_id DESC)`
 - `ops.data_integrity_violations`
-  - `idx_violations_status_detected(status, detected_at DESC, violation_key DESC)`
-  - `idx_violations_provider_status_detected(provider, status, detected_at DESC, violation_key DESC)`
-  - `idx_violations_feature_detected(feature_id, detected_at DESC, violation_key DESC)`
+  - `idx_violations_status_detected(status, detected_at DESC, issue_id DESC)`
+  - `idx_violations_provider_status_detected(provider, status, detected_at DESC, issue_id DESC)`
+  - `idx_violations_feature_detected(feature_id, detected_at DESC, issue_id DESC)`
 - review queue
-  - `idx_dedup_status_score(status, total_score DESC, review_key DESC)`
-  - `idx_enrichment_review_status_score(status, name_score DESC, review_key DESC)`
-  - `idx_enrichment_review_provider_status_score(source_provider, status, name_score DESC, review_key DESC)`
+  - `idx_dedup_status_score(status, total_score DESC, review_id DESC)`
+  - `idx_enrichment_review_status_score(status, name_score DESC, review_id DESC)`
+  - `idx_enrichment_review_provider_status_score(source_provider, status, name_score DESC, review_id DESC)`
 
 ### 14.2 쿼리 패턴 변경
 
@@ -695,7 +695,7 @@ PostGIS/testcontainers baseline으로 고정했다. 로컬 live DB 확인 결과
 - `/features/search`: q 검색 경로는 `name % :q` 후보를 먼저 materialize해 기존
   `idx_features_name_trgm` full GIN을 탄 뒤, `deleted_at`/bbox/kind/category 필터와
   score keyset을 적용한다. count query도 같은 q 전용 CTE를 사용한다.
-- dedup/enrichment review list: cursor tie-breaker를 `review_key::text`가 아니라 UUID
+- dedup/enrichment review list: cursor tie-breaker를 `review_id::text`가 아니라 UUID
   그대로 비교하고, queue 후보를 materialize한 뒤 feature/source 정보를 붙인다.
 - consistency F6/F7: F6은 `?| ARRAY[...]`와 partial index로 opening-hours 후보만 읽고,
   F7은 pending dedup 후보를 score keyset CTE로 먼저 고정한다.
@@ -718,9 +718,9 @@ planner가 base table `Seq Scan`을 선택하지 않는지 별도 가드한다.
 제약: `feature.feature_files`는 아직 Alembic 테이블이 없으므로 F8 테스트는 임시 DDL로
 실행 계획 형태만 확인한다. `0020`의 `CREATE INDEX`는 일반 Alembic transaction DDL이며,
 T-212e empty reload 전제에서는 무해하지만 데이터가 찬 운영 DB에 직접 적용하면 쓰기 잠금을
-동반할 수 있다. `idx_import_jobs_state(state, created_at, queue_sequence)`는 FIFO queue
+동반할 수 있다. `idx_import_jobs_status(status, created_at, queue_sequence)`는 FIFO queue
 claim에 맞춘 인덱스이고 list keyset의 `job_id` tie-breaker와 완전히 같지는 않으므로,
-import job 대량화 뒤 `idx_import_jobs_state_created_keyset(state, created_at DESC, job_id DESC)`
+import job 대량화 뒤 `idx_import_jobs_status_created_keyset(status, created_at DESC, job_id DESC)`
 필요성을 다시 EXPLAIN으로 확인한다.
 
 ## 15. 운영 체크리스트 (Sprint 5 진입 전)

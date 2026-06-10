@@ -38,11 +38,11 @@ _RESOLVED_STATUSES: Final[frozenset[str]] = frozenset({"resolved", "ignored"})
 _MAX_LIST_LIMIT: Final[int] = 500
 
 _RETURN_COLUMNS: Final[str] = (
-    "violation_key, provider, dataset_key, source_record_key, feature_id, "
+    "issue_id, provider, dataset_key, source_record_key, feature_id, "
     "violation_type, severity, message, payload, status, detected_at, resolved_at"
 )
 _RETURN_COLUMNS_V: Final[str] = (
-    "v.violation_key, v.provider, v.dataset_key, v.source_record_key, v.feature_id, "
+    "v.issue_id, v.provider, v.dataset_key, v.source_record_key, v.feature_id, "
     "v.violation_type, v.severity, v.message, v.payload, v.status, v.detected_at, "
     "v.resolved_at"
 )
@@ -52,7 +52,7 @@ _RETURN_COLUMNS_V: Final[str] = (
 class DataIntegrityViolation:
     """``ops.data_integrity_violations`` row."""
 
-    violation_key: str
+    issue_id: str
     provider: str | None
     dataset_key: str | None
     source_record_key: str | None
@@ -72,16 +72,16 @@ class DataIntegrityViolationStateConflict(ValueError):
     def __init__(
         self,
         *,
-        violation_key: str,
+        issue_id: str,
         current_status: str,
         target_status: str,
     ) -> None:
-        self.violation_key = violation_key
+        self.issue_id = issue_id
         self.current_status = current_status
         self.target_status = target_status
         super().__init__(
             "data integrity violation "
-            f"{violation_key!r}는 {target_status!r} 전이를 허용하지 않음: "
+            f"{issue_id!r}는 {target_status!r} 전이를 허용하지 않음: "
             f"status={current_status!r}"
         )
 
@@ -94,7 +94,7 @@ def _json_dict(value: Any) -> dict[str, Any]:
 
 def _row_to_violation(row: Any) -> DataIntegrityViolation:
     return DataIntegrityViolation(
-        violation_key=str(row.violation_key),
+        issue_id=str(row.issue_id),
         provider=row.provider,
         dataset_key=row.dataset_key,
         source_record_key=row.source_record_key,
@@ -137,14 +137,14 @@ RETURNING {_RETURN_COLUMNS}
 _GET_SQL: Final[str] = f"""
 SELECT {_RETURN_COLUMNS}
 FROM ops.data_integrity_violations
-WHERE violation_key = :violation_key
+WHERE issue_id = :issue_id
 """
 
 _SET_STATUS_SQL: Final[str] = f"""
 WITH locked AS (
-    SELECT violation_key, status
+    SELECT issue_id, status
     FROM ops.data_integrity_violations
-    WHERE violation_key = :violation_key
+    WHERE issue_id = :issue_id
     FOR UPDATE
 ),
 updated AS (
@@ -163,7 +163,7 @@ updated AS (
             )
         END
     FROM locked
-    WHERE v.violation_key = locked.violation_key
+    WHERE v.issue_id = locked.issue_id
       AND (
         locked.status = :status
         OR locked.status <> ALL(CAST(:resolved_statuses AS text[]))
@@ -184,7 +184,7 @@ WHERE (CAST(:status AS text) IS NULL OR status = CAST(:status AS text))
   AND (CAST(:feature_id AS text) IS NULL OR feature_id = CAST(:feature_id AS text))
   AND (CAST(:provider AS text) IS NULL OR provider = CAST(:provider AS text))
   AND (CAST(:dataset_key AS text) IS NULL OR dataset_key = CAST(:dataset_key AS text))
-ORDER BY detected_at DESC, violation_key DESC
+ORDER BY detected_at DESC, issue_id DESC
 LIMIT :limit
 """
 
@@ -231,13 +231,13 @@ async def create_data_integrity_violation(
 
 async def get_data_integrity_violation(
     session: AsyncSession,
-    violation_key: str,
+    issue_id: str,
 ) -> DataIntegrityViolation | None:
     """violation key로 이슈 1건 조회."""
     row = (
         await session.execute(
             text(_GET_SQL),
-            {"violation_key": violation_key},
+            {"issue_id": issue_id},
         )
     ).one_or_none()
     return _row_to_violation(row) if row is not None else None
@@ -245,7 +245,7 @@ async def get_data_integrity_violation(
 
 async def set_data_integrity_violation_status(
     session: AsyncSession,
-    violation_key: str,
+    issue_id: str,
     *,
     status: str,
     resolution_payload: Mapping[str, Any] | None = None,
@@ -257,7 +257,7 @@ async def set_data_integrity_violation_status(
         await session.execute(
             text(_SET_STATUS_SQL),
             {
-                "violation_key": violation_key,
+                "issue_id": issue_id,
                 "status": status,
                 "resolved_statuses": list(_RESOLVED_STATUSES),
                 "resolution_payload": json.dumps(
@@ -270,11 +270,11 @@ async def set_data_integrity_violation_status(
     ).one_or_none()
     if row is not None:
         return _row_to_violation(row)
-    existing = await get_data_integrity_violation(session, violation_key)
+    existing = await get_data_integrity_violation(session, issue_id)
     if existing is None:
         return None
     raise DataIntegrityViolationStateConflict(
-        violation_key=existing.violation_key,
+        issue_id=existing.issue_id,
         current_status=existing.status,
         target_status=status,
     )

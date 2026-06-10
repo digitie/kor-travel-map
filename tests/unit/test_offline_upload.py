@@ -165,9 +165,9 @@ async def test_run_offline_upload_validation_job_persists_success(
     )
 
     assert result.has_errors is False
-    assert result.upload.state == "validated"
+    assert result.upload.status == "validated"
     assert result.job is not None
-    assert result.job.state == "done"
+    assert result.job.status == "done"
     assert result.valid_rows == 1
     assert result.error_rows == 0
     assert calls.validation_state == "validated"
@@ -192,9 +192,9 @@ async def test_run_offline_upload_validation_job_records_failed_result(
     )
 
     assert result.has_errors is True
-    assert result.upload.state == "validation_failed"
+    assert result.upload.status == "validation_failed"
     assert result.job is not None
-    assert result.job.state == "failed"
+    assert result.job.status == "failed"
     assert result.error_rows == 1
     assert calls.validation_state == "validation_failed"
     assert calls.finished_jobs[-1].error_message == "offline upload validation failed: 1 rows"
@@ -242,9 +242,9 @@ async def test_run_offline_upload_load_job_uses_validation_mapping(
     )
 
     assert result.acquired is True
-    assert result.upload.state == "loaded"
+    assert result.upload.status == "loaded"
     assert result.job is not None
-    assert result.job.state == "done"
+    assert result.job.status == "done"
     assert result.load == FeatureLoadResult(
         bundles_total=1,
         features_inserted=1,
@@ -277,9 +277,9 @@ async def test_run_offline_upload_load_job_records_parser_failure(
     )
 
     assert result.acquired is True
-    assert result.upload.state == "load_failed"
+    assert result.upload.status == "load_failed"
     assert result.job is not None
-    assert result.job.state == "failed"
+    assert result.job.status == "failed"
     assert result.error_message == "lon column 'x'이 header에 없음."
     assert calls.load_state == "load_failed"
 
@@ -303,7 +303,7 @@ async def test_run_offline_upload_load_job_uses_preclaimed_loading_job(
         job_id="job-load-preclaimed",
         kind="offline_upload_load",
         payload={"upload_id": upload.upload_id},
-        state="running",
+        status="running",
         progress=0,
         current_stage=None,
         source_checksum=upload.checksum_sha256,
@@ -342,7 +342,7 @@ async def test_run_offline_upload_load_job_uses_preclaimed_loading_job(
     assert result.job is not None
     assert result.job.job_id == "job-load-preclaimed"
     assert calls.updated_payloads[-1]["dagster_run_id"] == "run-preclaimed"
-    assert result.upload.state == "loaded"
+    assert result.upload.status == "loaded"
 
 
 @pytest.mark.asyncio
@@ -445,7 +445,7 @@ def _csv_upload(
         checksum_sha256=checksum,
         detected_format="csv",
         detected_encoding="utf-8",
-        state=state,
+        status=state,
         validation_job_id=validation_job_id,
         load_job_id=load_job_id,
         created_by="pytest",
@@ -480,6 +480,8 @@ class _FakeOfflineUploadCalls:
         self.load_state: str | None = None
 
     def _replace_upload(self, **changes: object) -> OfflineUpload:
+        if "state" in changes:
+            changes["status"] = changes.pop("state")
         data = self.upload.__dict__ | changes
         self.upload = OfflineUpload(**data)
         return self.upload
@@ -516,7 +518,7 @@ def _patch_offline_job_repos(
             job_id=job_id,
             kind=kind,
             payload=dict(payload or {}),
-            state="running",
+            status="running",
             progress=0,
             current_stage=None,
             source_checksum=source_checksum,
@@ -544,13 +546,13 @@ def _patch_offline_job_repos(
         _session: object,
         job_id: str,
         *,
-        state: str,
+        status: str,
         error_message: str | None = None,
     ) -> ImportJob:
         job = calls._replace_job(
             calls.jobs[job_id],
-            state=state,
-            progress=100 if state == "done" else calls.jobs[job_id].progress,
+            status=status,
+            progress=100 if status == "done" else calls.jobs[job_id].progress,
             error_message=error_message,
         )
         calls.finished_jobs.append(job)
@@ -571,7 +573,7 @@ def _patch_offline_job_repos(
                 job_id=job_id,
                 kind="offline_upload_validate",
                 payload=calls.validation_payload,
-                state="done",
+                status="done",
                 progress=100,
                 current_stage=None,
                 source_checksum=calls.upload.checksum_sha256,
@@ -592,11 +594,11 @@ def _patch_offline_job_repos(
         _session: object,
         *,
         upload_id: str,
-        state: str,
+        status: str,
     ) -> OfflineUpload:
         assert upload_id == calls.upload.upload_id
-        calls.validation_state = state
-        return calls._replace_upload(state=state)
+        calls.validation_state = status
+        return calls._replace_upload(state=status)
 
     async def _mark_loading(
         _session: object,
@@ -611,11 +613,11 @@ def _patch_offline_job_repos(
         _session: object,
         *,
         upload_id: str,
-        state: str,
+        status: str,
     ) -> OfflineUpload:
         assert upload_id == calls.upload.upload_id
-        calls.load_state = state
-        return calls._replace_upload(state=state)
+        calls.load_state = status
+        return calls._replace_upload(state=status)
 
     monkeypatch.setattr(offline_upload_mod, "try_advisory_lock", _try_advisory_lock)
     monkeypatch.setattr(offline_upload_mod, "get_offline_upload", _get_offline_upload)

@@ -57,17 +57,17 @@ def test_offline_upload_state_sets_are_single_source_contract() -> None:
     assert {"json", "jsonl", "csv", "tsv"} == OFFLINE_UPLOAD_WRITEABLE_FORMATS
 
 
-def test_offline_upload_orm_state_check_uses_core_contract() -> None:
-    state_checks = [
+def test_offline_upload_orm_status_check_uses_core_contract() -> None:
+    status_checks = [
         str(constraint.sqltext)
         for constraint in OfflineUploadRow.__table__.constraints
-        if isinstance(constraint, CheckConstraint) and "state IN" in str(constraint.sqltext)
+        if isinstance(constraint, CheckConstraint) and "status IN" in str(constraint.sqltext)
     ]
 
-    assert len(state_checks) == 1
-    state_check = state_checks[0]
+    assert len(status_checks) == 1
+    status_check = status_checks[0]
     for state in OFFLINE_UPLOAD_STATE_VALUES:
-        assert f"'{state}'" in state_check
+        assert f"'{state}'" in status_check
 
 
 def test_offline_upload_orm_checksum_idempotency_constraint_matches_migration() -> None:

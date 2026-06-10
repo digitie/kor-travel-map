@@ -89,6 +89,11 @@ from krtour.map.providers.standard_data import (
     parking_lots_to_bundles,
     tourist_attractions_to_bundles,
 )
+from krtour.map.providers.tripmate_agent import (
+    DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
+    TRIPMATE_AGENT_PROVIDER_NAME,
+    tripmate_agent_items_to_bundles,
+)
 
 from .etl import (
     DagsterFeatureLoadResult,
@@ -636,6 +641,36 @@ async def feature_place_krairport_airports(
     return await run_feature_place_krairport_airports(context)
 
 
+async def run_feature_place_tripmate_agent_youtube(
+    context: AssetExecutionContext,
+) -> DagsterFeatureLoadResult:
+    """TripMate-agent YouTube 장소 후보 export를 place Feature로 적재한다."""
+    records = await _record_list(context, "tripmate_agent_youtube_features")
+    fetched_at = await _fetched_at(context)
+    bundles = await tripmate_agent_items_to_bundles(
+        records,
+        fetched_at=fetched_at,
+        reverse_geocoder=_reverse_geocoder(context),
+    )
+    return await _load(
+        context,
+        provider=TRIPMATE_AGENT_PROVIDER_NAME,
+        dataset_key=DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
+        bundles=bundles,
+    )
+
+
+@asset(
+    group_name="features_place",
+    required_resource_keys=_COMMON_RESOURCE_KEYS | {"tripmate_agent_youtube_features"},
+    retry_policy=FEATURE_LOAD_RETRY_POLICY,
+)
+async def feature_place_tripmate_agent_youtube(
+    context: AssetExecutionContext,
+) -> DagsterFeatureLoadResult:
+    return await run_feature_place_tripmate_agent_youtube(context)
+
+
 async def run_feature_event_visitkorea_enrichment(
     context: AssetExecutionContext,
 ) -> EnrichmentLoadResult:
@@ -738,6 +773,7 @@ FEATURE_LOAD_ASSETS: Final = [
     feature_place_standard_parking_lots,
     feature_place_khoa_beaches,
     feature_place_krairport_airports,
+    feature_place_tripmate_agent_youtube,
     feature_weather_airkorea_air_quality,
     feature_event_visitkorea_enrichment,
 ]

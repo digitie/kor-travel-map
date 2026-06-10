@@ -104,7 +104,7 @@ class ApiCallLogsResponse(BaseModel):
 
 def _system_log(row: SystemLogRow) -> SystemLogRecord:
     return SystemLogRecord(
-        log_id=row.system_log_key,
+        log_id=row.system_log_id,
         level=row.level,
         source=row.source,
         event=row.event,
@@ -117,7 +117,7 @@ def _system_log(row: SystemLogRow) -> SystemLogRecord:
 
 def _api_call_log(row: ApiCallLogRow) -> ApiCallLogRecord:
     return ApiCallLogRecord(
-        log_id=row.api_call_log_key,
+        log_id=row.api_call_log_id,
         method=row.method,
         path=row.path,
         status_code=row.status_code,

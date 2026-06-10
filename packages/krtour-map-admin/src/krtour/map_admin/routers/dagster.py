@@ -319,7 +319,7 @@ class DagsterRunEvent(BaseModel):
     message: str | None = None
     timestamp: str | None = None
     level: str | None = None
-    step_key: str | None = None
+    step_id: str | None = None
     dagster_event_type: str | None = None
     error: DagsterGraphqlError | None = None
 
@@ -647,7 +647,7 @@ def _parse_run_event(raw_event: object) -> DagsterRunEvent:
         message=_optional_string(event.get("message")),
         timestamp=_optional_string(event.get("timestamp")),
         level=_optional_string(event.get("level")),
-        step_key=_optional_string(event.get("stepKey")),
+        step_id=_optional_string(event.get("stepKey")),
         dagster_event_type=_optional_string(event.get("eventType")),
         error=_parse_graphql_error(event.get("error")),
     )

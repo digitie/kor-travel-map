@@ -2,8 +2,12 @@
 
 > 목적: provider/offline 재적재(reload) 시 **(1)충돌(conflict) (2)결측(missing) (3)엎어쓰기
 > (overwrite)** 이슈가 없는지 코드 레벨로 검증하고, 사용자 데이터 버전 모델(요건: v0,v1,v2,
-> v3… 단조 증가 + 디폴트=최신)과의 정합을 확인한다. 기준: `origin/main` `HEAD` (#317 v0/v1
-> 모델 포함). 인용은 실제 SQL/가드 코드 + `file:line`.
+> v3… 단조 증가 + 디폴트=최신)과의 정합을 확인한다. 최초 기준: `origin/main` `HEAD`
+> (#317 v0/v1 모델 포함). 인용은 실제 SQL/가드 코드 + `file:line`.
+>
+> **후속 반영(2026-06-10 Codex)**: F-1/F-2는 본 브랜치에서 해결했다. 사용자 feature 변경은
+> `feature_versions.MAX(version)+1`을 새 row로 보존하고, dedup merge loser는
+> `ops.feature_overrides.prevent_provider_reactivation=true` status override로 재적재 부활을 차단한다.
 
 ---
 
@@ -14,11 +18,10 @@
 | **엎어쓰기(overwrite)** | ✅ 안전 | `_UPSERT_FEATURE_SQL` 전 컬럼이 `data_origin='user_request' AND data_version>0`이면 기존값 보존. source_record는 `DO NOTHING`. |
 | **결측(missing)** | ✅ 안전 | snapshot cleanup이 `data_origin<>'user_request'` + `deleted_at IS NULL`만 soft-delete. cursor는 실패 시 미전진. |
 | **충돌(conflict, 동시성)** | ✅ 안전 | feature/link `ON CONFLICT` + offline/import advisory lock + dedup queue `pending`만 갱신. |
-| **dedup merge 영속성** | ⚠️ **F-1 (Medium)** | merge가 loser를 soft-delete만 하고 **재활성화 가드 미설정** → provider 재적재가 loser를 되살려 **중복 재생성**. |
-| **버전 모델** | ⚠️ **F-2 (요건 gap)** | 현재 **binary v0/v1**(write가 `version=1` 하드코딩). 사용자 요건 **단조 v0,v1,v2,v3… + 디폴트=최신** 미충족. |
+| **dedup merge 영속성** | ✅ 해결(F-1) | merge loser soft-delete와 동시에 active status override를 생성해 provider 재적재 부활을 차단. |
+| **버전 모델** | ✅ 해결(F-2) | 사용자 변경마다 `version=MAX+1` row를 추가하고 `features.data_version=latest`로 유지. |
 
-→ **즉각적 데이터 손실 위험은 없다**(엎어쓰기/결측은 가드됨). 단 **F-1(merge 후 중복 부활)**과
-**F-2(버전 단조화)**는 후속 보강 대상.
+→ **즉각적 데이터 손실 위험은 없고**, F-1/F-2 후속 보강도 본 브랜치에서 반영했다.
 
 ---
 
@@ -29,8 +32,8 @@
   `soft_delete_features_not_in_snapshot`. incremental(MOIS Step B)은 `provider_sync_state` cursor.
 - **offline upload**: `POST /admin/offline-uploads`(저장+checksum) → `.../load`(advisory lock +
   `load_job_id` preclaim → `load_bundles`).
-- **user edit**: `POST/PATCH/DELETE /v1/admin/features`(#317) → `features` effective row를
-  `data_origin='user_request', data_version=1`로 갱신 + `feature_versions` snapshot.
+- **user edit**: `POST/PATCH/DELETE /v1/admin/features` → `features` effective row를
+  `data_origin='user_request', data_version=latest(v1+)`로 갱신 + `feature_versions` 단조 snapshot.
 
 ---
 
@@ -94,14 +97,14 @@ WHERE f.deleted_at IS NULL
 - **import job claim**: `FOR UPDATE SKIP LOCKED`(`jobs_repo`) — row 경합 회피.
 - **dedup_review_queue**: `ON CONFLICT (feature_id_a, feature_id_b) DO UPDATE ... WHERE status='pending'`
   → 재스캔이 **결정 완료(accepted/rejected/merged/ignored) 행을 덮지 않음**(`dedup_repo`).
-- **dedup merge**: `advisory_lock(f"dedup-merge:{review_key}")`로 직렬화(`dedup_review` router).
+- **dedup merge**: `advisory_lock(f"dedup-merge:{review_id}")`로 직렬화(`dedup_review` router).
 
 ---
 
 ## 5. 발견사항 (findings)
 
-### F-1 [Medium] dedup merge가 비영속 — 재적재가 loser를 되살려 중복 재생성
-`merge_repo`는 병합 시 (1) loser source_link를 master로 이동, (2) **loser feature를 soft-delete**
+### F-1 [해결] dedup merge가 비영속 — 재적재가 loser를 되살려 중복 재생성
+`origin/main` 기준 `merge_repo`는 병합 시 (1) loser source_link를 master로 이동, (2) **loser feature를 soft-delete**
 (`status='deleted'`+`deleted_at`), (3) `feature_merge_history` 1행 INSERT 만 한다. **loser에
 `feature_overrides`(prevent_provider_reactivation)를 만들지 않고**, `load_bundles`도
 `feature_merge_history`를 참조하지 않는다.
@@ -111,13 +114,13 @@ WHERE f.deleted_at IS NULL
   feature_id로 ON CONFLICT upsert** → `deleted_at←NULL`, `status←active`로 **부활** + source_link
   재생성 → master와 같은 원천을 가진 **중복 feature 재출현**.
 - **영향**: 재적재마다 merge가 무효화될 수 있고, dedup 재스캔이 같은 쌍을 다시 큐잉(운영 부담).
-- **권장**: 다음 중 하나 — (a) merge 시 loser에 `prevent_provider_reactivation` override 생성,
-  (b) `load_bundles`가 `feature_merge_history`(loser→master)를 조회해 loser upsert를 master로
-  redirect하거나 skip, (c) merge된 entity를 source 측에서 제외. (a)가 기존 override 가드와 가장
-  일관적이고 변경 최소.
+- **해결**: (a)를 적용했다. `apply_feature_merge`가 loser soft-delete 직후 같은 transaction에서
+  `ops.feature_overrides` active status override(`prevent_provider_reactivation=true`,
+  `override_value='deleted'`)를 upsert한다. 기존 provider 재적재 가드가 이 override를 보고
+  `status/deleted_at` 부활을 차단한다.
 
-### F-2 [요건 gap] 버전 모델이 binary(v0/v1) — 사용자 요건은 단조(v0,v1,v2,v3… + 디폴트=최신)
-현재 #317 구현:
+### F-2 [해결] 버전 모델이 binary(v0/v1) — 사용자 요건은 단조(v0,v1,v2,v3… + 디폴트=최신)
+`origin/main` #317 구현:
 - `feature.features.data_version` = **Integer, CHECK `>= 0`** (스키마는 단조 호환).
 - 그러나 **write가 `data_version = 1` 하드코딩**(`admin_feature_repo` create/patch/delete L802/898/918),
   `feature_versions`도 `version=1` 고정 + `ON CONFLICT (feature_id, version) DO UPDATE` →
@@ -128,7 +131,7 @@ WHERE f.deleted_at IS NULL
 **중요**: 재적재 가드(§2)는 이미 `data_version > 0` 조건이라 **단조화해도 그대로 동작**(v2,v3…도
 보존). 즉 **읽기/보호 측은 호환**, **쓰기 측만 보강**하면 된다.
 
-**권장 변경(후속 task)**:
+**해결 변경**:
 1. 편집 시 `next = COALESCE((SELECT MAX(version) FROM feature.feature_versions WHERE feature_id=:fid),0)+1`.
 2. `feature_versions`는 ON CONFLICT 없이 **새 version row INSERT**(provider v0 + user v1,v2,v3… 전 이력 보존).
 3. `features.data_version = next`(effective = 항상 latest), `data_origin='user_request'`.
@@ -149,9 +152,9 @@ WHERE f.deleted_at IS NULL
 
 ## 7. 결론
 
-재적재의 **충돌·결측·엎어쓰기 기본 안전망은 갖춰져 있다**(v0/v1 가드 + soft-delete + advisory
-lock + ON CONFLICT 규약). 실질 보강 2건:
+재적재의 **충돌·결측·엎어쓰기 기본 안전망은 갖춰져 있고**(v1+ 가드 + soft-delete + advisory
+lock + ON CONFLICT 규약), 본 브랜치에서 실질 보강 2건도 반영했다:
 - **F-1**: dedup merge 영속화(재적재 부활 차단).
-- **F-2**: 사용자 버전 단조화(v0,v1,v2,v3… + 디폴트=최신) — 스키마는 이미 호환, 쓰기 로직만 보강.
+- **F-2**: 사용자 버전 단조화(v0,v1,v2,v3… + 디폴트=최신).
 
 *작성: Claude (2026-06-10). 기준 `origin/main`. 코드 인용은 실제 SQL/가드.*

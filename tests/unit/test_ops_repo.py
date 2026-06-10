@@ -54,7 +54,7 @@ def _job_row(job_id: str, *, at: datetime) -> SimpleNamespace:
         load_batch_id="33333333-3333-3333-3333-333333333333",
         parent_job_id="44444444-4444-4444-4444-444444444444",
         payload='{"request_id":"req-1"}',
-        state="running",
+        status="running",
         progress=42,
         current_stage="loading",
         source_checksum=None,
@@ -80,7 +80,7 @@ def _report_row(report_id: str, *, at: datetime) -> SimpleNamespace:
 
 def _issue_row(key: str, *, at: datetime) -> SimpleNamespace:
     return SimpleNamespace(
-        violation_key=key,
+        issue_id=key,
         provider="python-mois-api",
         dataset_key="mois_license_features_bulk",
         source_record_key=None,
@@ -117,7 +117,7 @@ async def test_import_job_list_detail_and_cursor() -> None:
 
     page = await list_ops_import_jobs(
         db,
-        state="running",
+        status="running",
         kind="feature_update_request",
         load_batch_id="33333333-3333-3333-3333-333333333333",
         parent_job_id="44444444-4444-4444-4444-444444444444",

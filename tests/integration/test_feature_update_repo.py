@@ -61,7 +61,7 @@ async def _job_row(session: AsyncSession, job_id: str) -> dict[str, Any]:
         await session.execute(
             text(
                 """
-                SELECT kind, payload, state, progress, current_stage, error_message
+                SELECT kind, payload, status, progress, current_stage, error_message
                 FROM ops.import_jobs
                 WHERE job_id = :job_id
                 """
@@ -106,7 +106,7 @@ async def test_enqueue_creates_request_and_import_job(
     )
 
     assert isinstance(request, FeatureUpdateRequest)
-    assert request.state == "queued"
+    assert request.status == "queued"
     assert request.priority == 80
     assert request.job_id is not None
     assert request.matched_scope == {"feature_count": 0, "sigungu_codes": []}
@@ -114,7 +114,7 @@ async def test_enqueue_creates_request_and_import_job(
     job = await _job_row(migrated_session, request.job_id)
     payload = _json_obj(job["payload"])
     assert job["kind"] == FEATURE_UPDATE_JOB_KIND
-    assert job["state"] == "queued"
+    assert job["status"] == "queued"
     assert payload["request_id"] == request.request_id
     assert payload["scope_type"] == "feature_ids"
     assert payload["providers"] == ["python-mois-api"]
@@ -139,9 +139,9 @@ async def test_claim_uses_priority_and_starts_linked_job(
     claimed = await claim_next_update_request(migrated_session)
     assert claimed is not None
     assert claimed.request_id == high.request_id
-    assert claimed.state == "running"
+    assert claimed.status == "running"
     assert claimed.job_id is not None
-    assert (await _job_row(migrated_session, claimed.job_id))["state"] == "running"
+    assert (await _job_row(migrated_session, claimed.job_id))["status"] == "running"
     assert (
         await _job_row(migrated_session, claimed.job_id)
     )["current_stage"] == "claimed"
@@ -171,16 +171,16 @@ async def test_peek_next_update_request_does_not_claim(
     peeked = await peek_next_update_request(migrated_session)
     assert peeked is not None
     assert peeked.request_id == high.request_id
-    assert peeked.state == "queued"
+    assert peeked.status == "queued"
     assert peeked.job_id is not None
-    assert (await _job_row(migrated_session, peeked.job_id))["state"] == "queued"
+    assert (await _job_row(migrated_session, peeked.job_id))["status"] == "queued"
 
     peeked_batch = await peek_update_requests(migrated_session, limit=2)
     assert [item.request_id for item in peeked_batch] == [
         high.request_id,
         low.request_id,
     ]
-    assert all(item.state == "queued" for item in peeked_batch)
+    assert all(item.status == "queued" for item in peeked_batch)
 
     claimed = await claim_next_update_request(migrated_session)
     assert claimed is not None
@@ -209,7 +209,7 @@ async def test_claim_raises_when_queue_lock_is_held(
 
     still_queued = await get_update_request(migrated_session, request.request_id)
     assert still_queued is not None
-    assert still_queued.state == "queued"
+    assert still_queued.status == "queued"
 
 
 async def test_enqueue_now_raises_when_scope_lock_is_held(
@@ -260,22 +260,22 @@ async def test_start_finish_and_cancel_update_linked_import_job(
         migrated_session, request.request_id, dagster_run_id="run-1"
     )
     assert started is not None
-    assert started.state == "running"
+    assert started.status == "running"
     assert started.dagster_run_id == "run-1"
     job = await _job_row(migrated_session, request.job_id)
-    assert job["state"] == "running"
+    assert job["status"] == "running"
     assert job["current_stage"] == "started"
 
     done = await finish_update_request(
-        migrated_session, request.request_id, state="done"
+        migrated_session, request.request_id, status="done"
     )
     assert done is not None
-    assert done.state == "done"
+    assert done.status == "done"
     job = await _job_row(migrated_session, request.job_id)
-    assert job["state"] == "done"
+    assert job["status"] == "done"
     assert job["progress"] == 100
     assert await finish_update_request(
-        migrated_session, request.request_id, state="failed"
+        migrated_session, request.request_id, status="failed"
     ) is None
 
     to_cancel = await enqueue_feature_update_request(
@@ -290,21 +290,21 @@ async def test_start_finish_and_cancel_update_linked_import_job(
         error_message="operator cancelled",
     )
     assert cancelled is not None
-    assert cancelled.state == "cancelled"
+    assert cancelled.status == "cancelled"
     job = await _job_row(migrated_session, to_cancel.job_id)
-    assert job["state"] == "cancelled"
+    assert job["status"] == "cancelled"
     assert job["error_message"] == "operator cancelled"
 
 
-async def test_finish_invalid_state_raises(migrated_session: AsyncSession) -> None:
+async def test_finish_invalid_status_raises(migrated_session: AsyncSession) -> None:
     request = await enqueue_feature_update_request(
         migrated_session,
         scope={"type": "feature_ids", "feature_ids": []},
     )
     assert isinstance(request, FeatureUpdateRequest)
-    with pytest.raises(ValueError, match="state must be one of"):
+    with pytest.raises(ValueError, match="status must be one of"):
         await finish_update_request(
-            migrated_session, request.request_id, state="running"
+            migrated_session, request.request_id, status="running"
         )
 
 
@@ -337,7 +337,7 @@ async def test_list_update_requests_uses_keyset_cursor(
     }
 
     queued_page = await list_update_requests(
-        migrated_session, state="queued", limit=10
+        migrated_session, status="queued", limit=10
     )
     assert len(queued_page.items) == 3
 

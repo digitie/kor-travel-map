@@ -14,13 +14,13 @@ pytestmark = pytest.mark.integration
 
 _EXPECTED_DEFAULTS = {
     ("feature_consistency_reports", "report_id"): "x_extension.gen_random_uuid()",
-    ("dedup_review_queue", "review_key"): "x_extension.gen_random_uuid()",
+    ("dedup_review_queue", "review_id"): "x_extension.gen_random_uuid()",
     ("import_jobs", "job_id"): "x_extension.gen_random_uuid()",
     ("feature_merge_history", "merge_id"): "x_extension.gen_random_uuid()",
     ("feature_update_requests", "request_id"): "x_extension.gen_random_uuid()",
     ("offline_uploads", "upload_id"): "x_extension.gen_random_uuid()",
-    ("feature_overrides", "override_key"): "x_extension.gen_random_uuid()",
-    ("data_integrity_violations", "violation_key"): "x_extension.gen_random_uuid()",
+    ("feature_overrides", "override_id"): "x_extension.gen_random_uuid()",
+    ("data_integrity_violations", "issue_id"): "x_extension.gen_random_uuid()",
     ("poi_cache_targets", "target_id"): "x_extension.gen_random_uuid()",
 }
 
