@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-10 (claude) — T-218b-1 폼 a11y 적용(좌표 폼 2화면) + 진척 반영
+
+T-218a wrapper(#337)를 좌표 scope 폼 2화면에 적용하고 검증 e2e를 추가했다(#338).
+
+- `poi-cache-targets`·`feature-update-requests`: bare `aria-label` Input/NativeSelect →
+  `FormField`/`FormSelect`. lon/lat/radius(+필수 키) `validateForm` 검증 + 첫 에러 필드
+  포커스, 제출 버튼 disabled 휴리스틱을 검증으로 대체. Windows Playwright admin-ops
+  17 passed(검증 2건 신설, route-mock 기반). etl.spec(3건)은 실 backend 필요로 미수행.
+- **실측 발견**: `/etl`은 이미 react-hook-form + zodResolver + `Field/FieldLabel/
+  FieldError`로 a11y 완비 — T-218b 적용 대상에서 제외. 남은 갭은 bare `aria-label`
+  화면(offline-uploads/change-requests/issues) = **T-218b-2**.
+- tasks.md: T-218a `[x]`·T-218b `[~]`(b-1 완료, b-2 예정)로 갱신.
+
 ## 2026-06-10 (claude) — T-218a 공통 폼 a11y wrapper + validateForm util
 
 admin/ops 폼 화면이 label 없이 `aria-label`/placeholder만 단 bare control이라 label↔control
