@@ -131,3 +131,42 @@
   4-float, `meta.page.next_cursor`, batch `data.found` 반영.
 - **T-182**: TripMate DEC-07 좌표명을 `lon`/`lat`로 하향 정렬.
 - **T-210e**: `/v1` 안정 commit의 OpenAPI를 기준으로 codegen과 httpx 계약 테스트를 pin.
+
+## 7. 사용자 제안 연동 합의 (ADR-051, 확정 2026-06-11 — T-217c)
+
+TripMate 사용자 feature 추가/수정/삭제 제안의 전송 구간은 **기존
+`/v1/admin/features*` change API**다(신규 suggestions API 없음, ADR-051). TripMate
+admin 1차 승인 → 본 API 호출 → krtour-map `change-requests` 큐 최종 반영의 2단 검토.
+TripMate 측 질의 5건(해당 repo `docs/integrations/krtour-map-rest-api.md` §7)의 확정:
+
+| # | 항목 | 확정 |
+|---|---|---|
+| 1 | review_mode | 기본 **`require_review`** 유지(krtour-map 최종 반영 권한 보존). 운영 합의 시 `KRTOUR_MAP_ADMIN_FEATURE_CHANGE_REVIEW_MODE=immediate`(전역) |
+| 2 | idempotency_key | `feature_id` 미지정 create에서 **결정적 feature_id** 생성(`make_feature_id(source_type="user_request", source_natural_key=idempotency_key)`) — 같은 key 재시도=같은 feature_id. **`idempotency_key=suggestion_id` 권장** |
+| 3 | 출처 태깅 | 전용 필드 없음 — **`operator: "tripmate-admin"` + `reason` 머리 `[suggestion:<id>]` prefix** 컨벤션. change-requests 큐가 reason을 표시하므로 출처 식별 가능(D-11 익명 — 사용자 개인정보 비전송) |
+| 4 | admin 인증 | admin API는 **9011 `/v1/admin/*`**(9012는 admin UI). 코드 게이트는 `admin_destructive_enabled` kill-switch, 호출자 인증은 인프라 계층(SSO/IP allowlist, ADR-005) |
+| 5 | closure | 영구 폐업/사용자 삭제 = **soft `DELETE`**(`user_deleted_*`, provider 재적재 부활 차단) / 일시 중단 = `POST .../deactivate`(`status='inactive'`) |
+
+inactive/soft-deleted feature는 **batch/단건 read의 `found`에 status와 함께 반환**된다
+(D-12, T-217b) — `missing`(미존재)과 "철회/폐업됨"을 구분하라.
+
+## 8. YouTube 후보 feature detail 소비 계약 (T-217f — TripMate TM-08 선행)
+
+provider `tripmate-agent-youtube`(marker `P-13`, kind `place`,
+`detail.place_kind="youtube_place_candidate"`) feature의 출처 배지/영상 카드 UX는
+**`detail.facility_info`만 읽으면 된다** (평면 key, 값 없으면 key 자체 부재):
+
+| key | 의미 |
+|---|---|
+| `youtube_video_id` / `youtube_video_url` / `youtube_video_title` | 출처 영상 |
+| `youtube_channel_id` / `youtube_channel_title` | 채널 |
+| `youtube_playlist_id` / `youtube_playlist_title` | 플레이리스트(있을 때) |
+| `timestamp_start` / `timestamp_end` | 영상 내 언급 구간 (`"HH:MM:SS"`) |
+| `transcript_excerpt` | 자막 발췌 |
+| `gemini_url_evidence` | Gemini URL 분석 근거 |
+| `confidence_score` | **0~100 정수** 신뢰도(소스 매칭 confidence와 동일 정규화) |
+| `description` / `gemini_enriched_description` / `category_label` | 설명/카테고리 라벨 |
+
+원본 export item 전체는 `detail.payload.tripmate_agent.{youtube,evidence,...}`에
+보존된다(디버그/확장용 — UX는 facility_info 우선). export는 검수 통과 후보만
+내려오므로(D-05) 별도 검수 상태 분기는 불필요하다.

@@ -6,11 +6,16 @@
 
 ## 진행 중인 작업 인덱스 (열린 `[ ]` 항목)
 
-> 총 15건. 상세는 아래 각 섹션. 완료 이력은 [`tasks-done.md`](tasks-done.md).
+> 총 9건. 상세는 아래 각 섹션. 완료 이력은 [`tasks-done.md`](tasks-done.md).
 
 - **다음 (우선순위 순)**
   - [ ] T-212e — 실데이터 full reload + offline upload 실데이터 검증 + 최종 리포트.
 - **최근 완료**
+  - [x] **T-217a~g 전부 완료(2026-06-10~11)** — Phase 6.9 cross-repo 정합성 종결:
+        경로 중립화(a, agent T-066 실측 대조 포함) · 철회→inactive+D-12 read 정렬(b) ·
+        제안 연동 합의 5건(c) · integration-map+분기 audit(d) · RustFS=tripmate-manager
+        일괄 관리(e, ADR-052 Amendment) · evidence 노출 확정(f) · provider 신선도
+        대시보드(g, #345).
   - [x] T-218 — admin UI 상세 구현 점검 + a11y/e2e 완비. **T-218a~f 전부 완료
         (#337~#343 + 체크리스트)**: 폼 a11y wrapper, bare-label 4폼 적용, backups e2e로
         16/16 화면 커버, 음성 경로 4폼, Alert live-region, 화면별 점검 runbook. 정본
@@ -52,20 +57,23 @@
         `get_feature_rows_by_ids`의 `deleted_at IS NULL` 필터 제거 — inactive도
         `found`+status로 반환(단건 `get_feature_row`와 일관, 통합 테스트로 검증).
         목록/검색 read는 기존대로 기본 active.
-  - [ ] T-217c — TripMate feature 제안 연동 **합의 5건 확정 + 문서화** (ADR-051 보정:
-        신규 수신 API **철회** — 전송 구간은 기존 `/v1/admin/features*` change API,
-        PR #317). ① review_mode(이중 검수 여부) ② idempotency_key 멱등 ③ 출처 태깅
-        (suggestion_id, D-11: 익명 참조 ID만) ④ admin 인증 — admin API는 **9011
-        `/v1/admin/*`**(9012는 UI, TripMate 측 가정 오류 정정 통보) ⑤ closure
-        (`DELETE` vs `deactivate` 권장). 결과를 `docs/rest-api.md`·
-        `docs/tripmate-rest-api.md`에 반영 + change-requests 큐 TripMate 출처 표시.
-  - [ ] T-217d — cross-repo 연동 정본 문서 `docs/integration-map.md` 신설: 3-시스템
-        포트·연동 방향·인증 방식·envelope 차이·계약 정본 위치 1장 (D-08 권고안 채택)
-        + 분기 cross-repo 정합성 audit 체크리스트 runbook 등재. 각 repo 진입 문서에서 링크.
-  - [ ] T-217e — RustFS 공유 버킷 정책 명문화 (ADR-052): `docs/architecture.md` rustfs
-        절 + backup/restore 문서에 TripMate-agent prefix 소유권·backup 제외 반영.
-        분리 시점 확정(D-10): **전용 버킷 분리는 TripMate-agent T-066 운영 개시 전**
-        — 분리 주체는 tripmate-agent, krtour-map은 backup 정책 갱신만.
+  - [x] T-217c — TripMate feature 제안 연동 **합의 5건 확정 + 문서화**. **완료
+        (2026-06-11, 코드 실측 기반)**: ① review_mode 기본 `require_review` 유지
+        ② idempotency_key = 결정적 feature_id(`suggestion_id` 권장) ③ 출처 태깅 =
+        `operator:"tripmate-admin"`+`reason` `[suggestion:<id>]` prefix 컨벤션
+        (큐가 reason 표시 — 추가 코드 없음) ④ admin 인증 = 9011 `/v1/admin/*`,
+        kill-switch+인프라 SSO ⑤ closure = 영구 폐업 soft `DELETE`/일시 중단
+        `deactivate`. 정본 `docs/tripmate-rest-api.md` §7 + ADR-051 결과 절 보강.
+  - [x] T-217d — cross-repo 연동 정본 문서. **완료(2026-06-11)**:
+        `docs/integration-map.md` 신설(4-시스템 포트·연동 방향·인증/envelope 차이표·
+        계약 정본 위치, tripmate-manager 포함) + 분기 audit
+        `docs/runbooks/cross-repo-audit-checklist.md` + runbooks README 등재 +
+        CLAUDE.md 진입 순서/AGENTS.md 경계 절에서 링크.
+  - [x] T-217e — RustFS 관리 주체 확정. **완료(2026-06-11, 사용자 재정의)**:
+        prefix 공유 정책 명문화 대신 **RustFS를 tripmate-manager에서 일괄 관리**하는
+        것으로 갈음 — ADR-052 Amendment(인프라 소유=tripmate-manager
+        단일 PostGIS :15434 + RustFS :9003/9004, krtour-map·tripmate-agent는 사용자,
+        버킷 분리(D-10) 후속도 tripmate-manager 운영으로 위임).
   - [x] T-217f — YouTube evidence의 feature detail 노출 형태 확정. **완료(2026-06-10)**:
         정본 형태 = `detail.facility_info`(평면 — youtube_video_id/url/title,
         channel/playlist, timestamp_start/end, transcript_excerpt,

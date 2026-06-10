@@ -72,6 +72,8 @@ v1 산출물 요약: 저장소 루트 `python-krtour-map-spec.docx` (약 80쪽).
 5. `docs/resume.md` — 다음 한 작업
 6. `docs/journal.md` 최신 3건
 7. 관련 ADR (`docs/decisions.md`)
+8. cross-repo 연동(TripMate/tripmate-agent/tripmate-manager) 작업 시
+   `docs/integration-map.md` — 포트·연동 방향·인증·계약 정본 위치 1장 정본
 
 ## 4. 의존 스택 (v2 확정)
 
