@@ -2,6 +2,15 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-10 (claude) — T-218e Alert aria-live 안내 정합
+
+`Alert`를 variant별 live-region으로 개선했다 — destructive=`role=alert`(assertive,
+에러는 즉시 안내), default(성공/정보)=`role=status`(polite, 작업 흐름 비차단). 호출부가
+role/aria-live를 명시하면 우선한다. 전 16화면의 액션 결과/에러 안내가 스크린리더에
+적절히 전달된다. backups 성공 결과의 polite status region e2e 단언 추가.
+admin-ops 20 + home/features/dagster 8 = 28 passed. **본 UI는 오버레이 모달/드로어가
+없어 modal focus trap은 비해당**(폼 첫 에러 포커스는 T-218b 적용). 남은 것은 T-218f.
+
 ## 2026-06-10 (claude) — T-218d 위험 액션 음성 경로 e2e
 
 폼 검증 실패(서버 미호출) 경로를 e2e로 고정. change-requests에 비-object detail JSON
