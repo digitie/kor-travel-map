@@ -212,7 +212,7 @@ class KrtourMapSettings(BaseSettings):
         description=(
             "TripMate-agent REST API base URL. 예: ``http://127.0.0.1:9041``. "
             "설정 시 Dagster ``tripmate_agent_youtube_features`` resource가 "
-            "``/api/v1/krtour/features/{snapshot|changes}``를 pull한다."
+            "``/api/v1/features/{snapshot|changes}``를 pull한다(ADR-050 경로 중립화)."
         ),
     )
     tripmate_agent_api_key: SecretStr | None = Field(

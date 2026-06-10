@@ -2,6 +2,26 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-11 (claude) — T-217a/b/f tripmate-agent provider 연동 완결
+
+- **T-217a 경로 중립화(ADR-050 #1)**: fetcher path + 테스트/docstring 7곳을
+  `/api/v1/features/*`로 정렬. 동시 배포 조건 충족 — TripMate-agent T-066(#60)이
+  같은 중립 경로(`/api/v1` prefix, `{items,next_cursor,has_more}`, `X-API-Key`)로
+  origin/main에 머지된 것을 실측 확인.
+- **T-217b 철회 라이프사이클(ADR-050 #4)**: 변환부
+  `tripmate_agent_inactive_entity_ids`(reject/tombstone entity 수집) + client
+  `inactivate_features_by_source`(generic — MOIS Step C와 같은
+  `infra.inactivate_features_by_source_entity_ids` 위임, 한 transaction) + Dagster
+  asset 배선(적재 후 전환 + 로그). **D-12 read 정렬**: batch
+  `_GET_FEATURES_BY_IDS_SQL`의 `deleted_at IS NULL` 제거 — inactive feature도
+  `found`+status로 반환(단건과 일관). 통합 테스트로 inactive→found+status 검증,
+  목록/검색 read는 기본 active 불변.
+- **T-217f evidence 노출 확정**: `detail.facility_info`에 `confidence_score`(0~100)
+  추가 — TM-08 출처 배지 UX가 facility_info만으로 영상 링크·타임스탬프·confidence를
+  얻는다. 원본은 `detail.payload.tripmate_agent` 보존.
+- 게이트: unit 978 + admin/dagster 332 + 통합(by_ids D-12) 1 + ruff + mypy --strict
+  (krtour.map 87 + dagster 13) + lint-imports green (WSL ext4).
+
 ## 2026-06-10 (claude) — T-217g provider 동기화 신선도 대시보드 (D-07)
 
 전 provider×dataset의 last-sync/최근 실패를 한눈에 보는 목록 API + admin 화면.

@@ -171,8 +171,8 @@ async def test_tripmate_agent_youtube_fetch_paginates_and_closes(
     assert client.headers == {"X-API-Key": "agent-key"}
     assert client.closed is True
     assert client.calls == [
-        ("/api/v1/krtour/features/snapshot", {"limit": 200}),
-        ("/api/v1/krtour/features/snapshot", {"limit": 200, "cursor": "c2"}),
+        ("/api/v1/features/snapshot", {"limit": 200}),
+        ("/api/v1/features/snapshot", {"limit": 200, "cursor": "c2"}),
     ]
 
 
@@ -199,7 +199,7 @@ async def test_tripmate_agent_youtube_fetch_changes_uses_initial_cursor(
     assert fake.instances[0].base_url == "https://tripmate-agent.example"
     assert fake.instances[0].calls == [
         (
-            "/api/v1/krtour/features/changes",
+            "/api/v1/features/changes",
             {"limit": 50, "cursor": "cursor-1"},
         )
     ]

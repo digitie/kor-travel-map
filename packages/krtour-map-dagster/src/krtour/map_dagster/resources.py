@@ -219,7 +219,7 @@ PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
         setting_names=("tripmate_agent_base_url", "tripmate_agent_api_key"),
         source_env_names=("API_KEYS",),
         note=(
-            "TripMate-agent의 /api/v1/krtour/features/{snapshot|changes} REST export를 "
+            "TripMate-agent의 /api/v1/features/{snapshot|changes} REST export를 "
             "pull한다. source env API_KEYS 중 하나를 krtour-map API key로 주입한다."
         ),
     ),

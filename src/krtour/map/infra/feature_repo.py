@@ -290,7 +290,6 @@ SELECT
     created_at, updated_at, deleted_at
 FROM feature.features
 WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
-  AND deleted_at IS NULL
 """
 
 # primary source 1건의 on-demand 상세 — source_record raw_data(원본 provider payload)
@@ -1303,8 +1302,10 @@ async def get_feature_rows_by_ids(
     """여러 feature 상세 row를 한 번에 조회한다.
 
     ``feature_ids`` 순서는 반환 dict에서 보장하지 않는다. 호출자는 입력 순서와
-    key 존재 여부를 비교해 missing 목록을 만든다. public/TripMate batch 응답은
-    soft-deleted feature를 missing으로 취급하므로 ``deleted_at IS NULL``만 반환한다.
+    key 존재 여부를 비교해 missing 목록을 만든다. soft-deleted(inactive) feature도
+    status와 함께 반환한다(D-12, 2026-06-10) — 단건 ``get_feature_row``와 동일 정책.
+    소비자는 ``missing``(미존재)과 ``status='inactive'``("철회/폐업됨")를 구분할 수
+    있어야 한다. 목록/검색 read(search/in-bounds/nearby)는 기존대로 기본 active만.
     """
     normalized = _normalized_filter(feature_ids)
     if normalized is None:

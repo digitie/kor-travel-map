@@ -86,6 +86,51 @@ def _read_client(monkeypatch: pytest.MonkeyPatch) -> AsyncKrtourMapClient:
     return client
 
 
+class _FakeTxSession:
+    """``session.begin()``까지 흉내내는 sentinel session (write 위임 테스트용)."""
+
+    def begin(self) -> _FakeSessionCM:
+        return _FakeSessionCM()
+
+
+class _FakeTxSessionCM:
+    async def __aenter__(self) -> _FakeTxSession:
+        return _FakeTxSession()
+
+    async def __aexit__(self, *exc: object) -> bool:
+        return False
+
+
+async def test_inactivate_features_by_source_delegates_to_repo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """T-217b — reject/tombstone entity 집합을 infra inactivate로 위임(ADR-050 #4)."""
+    import krtour.map.client as client_mod
+
+    recorded: dict[str, object] = {}
+
+    async def _fake(session: object, **kwargs: object) -> int:
+        recorded.update(kwargs)
+        return 2
+
+    monkeypatch.setattr(
+        client_mod, "inactivate_features_by_source_entity_ids", _fake
+    )
+    client = _read_client(monkeypatch)
+    monkeypatch.setattr(client, "_session_factory", _FakeTxSessionCM)
+    out = await client.inactivate_features_by_source(
+        provider="tripmate-agent-youtube",
+        dataset_key="youtube_place_candidates",
+        source_entity_type="extracted_place_candidate",
+        source_entity_ids={"201", "202"},
+    )
+    assert out == 2
+    assert recorded["provider"] == "tripmate-agent-youtube"
+    assert recorded["dataset_key"] == "youtube_place_candidates"
+    assert recorded["source_entity_type"] == "extracted_place_candidate"
+    assert recorded["source_entity_ids"] == {"201", "202"}
+
+
 async def test_get_features_delegates_to_repo(monkeypatch: pytest.MonkeyPatch) -> None:
     import krtour.map.client as client_mod
 
