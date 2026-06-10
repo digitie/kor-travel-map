@@ -2,6 +2,22 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-10 (claude) — T-217g provider 동기화 신선도 대시보드 (D-07)
+
+전 provider×dataset의 last-sync/최근 실패를 한눈에 보는 목록 API + admin 화면.
+
+- **backend**: `sync_state_repo.list_all_sync_states`(전량, provider/dataset/scope 정렬) +
+  `GET /v1/providers`(`ProvidersFreshnessResponse`, cursor 비노출, bounded 비페이지네이션 —
+  `/v1/categories` 패턴, 빈 환경 200+빈 items). `USER_OPERATIONS`에 등재(user spec 포함),
+  OpenAPI admin/user 재생성. 단위 테스트 3건 추가(전체 unit 975 passed), ruff/mypy
+  --strict/lint-imports green(WSL ext4 mirror).
+- **frontend**: `api/providers.ts` 훅 + `/ops/providers` 페이지(요약 배지
+  providers/datasets/failing/stale(>48h), 연속 실패 경고 alert(assertive), 신선도
+  테이블 — 실패 행 강조) + nav "Providers"(GaugeIcon). types 재생성.
+- **e2e**: providers 대시보드 렌더+실패 경고 spec + home nav 링크 추가 — 전 spec
+  29 passed(Windows). build 19 route green. `docs/rest-api.md` §2.4 + 화면 점검
+  체크리스트 runbook(17 route) 갱신. 기존 단건 last-sync 유지.
+
 ## 2026-06-10 (claude) — T-218f 화면별 점검 체크리스트 + T-218 완료
 
 마지막 슬라이스로 `docs/runbooks/admin-ui-screen-checklist.md`를 신설했다 — admin UI

@@ -16,6 +16,7 @@ test.describe("home page (/)", () => {
     for (const linkName of [
       "Features",
       "Import jobs",
+      "Providers",
       "Consistency",
       "Dedup reviews",
       "Update requests",

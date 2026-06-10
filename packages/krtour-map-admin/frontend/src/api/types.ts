@@ -986,6 +986,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 전 provider 데이터 신선도 목록(대시보드)
+         * @description 전 provider×dataset×scope의 last-sync/최근 실패 요약 (T-217g, D-07).
+         *
+         *     행 수가 유한(provider×dataset 수십 개)하므로 페이지네이션 없이 전량 반환한다
+         *     (``/v1/categories`` bounded reference 패턴). 빈 환경은 200 + 빈 ``items``.
+         */
+        get: operations["list_providers_freshness_v1_providers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/providers/{provider}/last-sync": {
         parameters: {
             query?: never;
@@ -3751,12 +3774,45 @@ export interface components {
             meta: components["schemas"]["Meta"];
         };
         /**
+         * ProviderSyncStateSummary
+         * @description 전체 목록의 1행 — ``SyncStateSummary`` + ``provider`` (cursor 제외).
+         */
+        ProviderSyncStateSummary: {
+            /** Consecutive Failures */
+            consecutive_failures: number;
+            /** Dataset Key */
+            dataset_key: string;
+            /** Last Failure At */
+            last_failure_at: string | null;
+            /** Last Success At */
+            last_success_at: string | null;
+            /** Provider */
+            provider: string;
+            /** Status */
+            status: string;
+            /** Sync Scope */
+            sync_scope: string;
+        };
+        /**
          * ProvidersData
          * @description `/debug/etl/providers` data payload.
          */
         ProvidersData: {
             /** Providers */
             providers: components["schemas"]["_ProviderEntry"][];
+        };
+        /** ProvidersFreshnessData */
+        ProvidersFreshnessData: {
+            /** Items */
+            items: components["schemas"]["ProviderSyncStateSummary"][];
+        };
+        /**
+         * ProvidersFreshnessResponse
+         * @description ``GET /providers`` 응답 — 전 provider×dataset 신선도 목록.
+         */
+        ProvidersFreshnessResponse: {
+            data: components["schemas"]["ProvidersFreshnessData"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * ProvidersResponse
@@ -6460,6 +6516,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_providers_freshness_v1_providers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProvidersFreshnessResponse"];
                 };
             };
         };

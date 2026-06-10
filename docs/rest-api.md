@@ -140,7 +140,13 @@ POST /v1/features/batch                 # 배치 조회 {feature_ids[]} cap≤20
 ### 2.4 참조 데이터
 ```
 GET /v1/categories                       GET /v1/providers/{provider}/last-sync
+GET /v1/providers                        # 전 provider×dataset 신선도 목록 (T-217g, D-07)
 ```
+- `GET /v1/providers`(T-217g): `provider_sync_state` 전량을 `data={items:[...]}`로 반환
+  (provider/dataset_key/sync_scope/status/last_success_at/last_failure_at/
+  consecutive_failures, 내부 cursor 비노출). provider×dataset 조합이 유한해
+  `/v1/categories`처럼 비페이지네이션 bounded reference 패턴. 운영 신선도 대시보드
+  (`admin UI /ops/providers`)와 TripMate Admin 상태판용. 빈 환경은 200 + 빈 `items`.
 
 ### 2.5 `/v1/admin/*` — 운영자 (인프라 SSO + kill-switch)
 ```

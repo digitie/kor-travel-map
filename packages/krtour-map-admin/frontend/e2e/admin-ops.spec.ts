@@ -22,6 +22,8 @@ type AdminFeatureReviewActionRequest =
   components["schemas"]["AdminFeatureReviewActionRequest"];
 type AdminFeatureReviewMode = AdminFeatureChangeRecord["review_mode"];
 type BackupRecord = components["schemas"]["BackupRecord"];
+type ProviderSyncStateSummary =
+  components["schemas"]["ProviderSyncStateSummary"];
 
 const MOCK_NOW = "2026-06-08T00:00:00.000Z";
 const MOCK_REVIEWED_AT = "2026-06-08T00:10:00.000Z";
@@ -131,6 +133,21 @@ function makeFeatureChange(
     reviewed_at: null,
     reviewed_by: null,
     status: "pending",
+    ...overrides,
+  };
+}
+
+function makeProviderSyncState(
+  overrides: Partial<ProviderSyncStateSummary> = {},
+): ProviderSyncStateSummary {
+  return {
+    provider: "python-kma-api",
+    dataset_key: "kma_weather_values",
+    sync_scope: "default",
+    status: "active",
+    last_success_at: MOCK_NOW,
+    last_failure_at: null,
+    consecutive_failures: 0,
     ...overrides,
   };
 }
@@ -1283,5 +1300,54 @@ test.describe("admin/ops pages", () => {
     await page.getByRole("button", { name: "Swap" }).first().click();
     await expect.poll(() => requests.swap).toBe(1);
     await expect(page.getByText("swap command planned")).toBeVisible();
+  });
+
+  test("/v1/providers freshness dashboard (T-217g)", async ({ page }) => {
+    await page.route("**/v1/providers", async (route) => {
+      await fulfillJson(route, {
+        data: {
+          items: [
+            makeProviderSyncState(),
+            makeProviderSyncState({
+              provider: "python-mois-api",
+              dataset_key: "mois_license_features_bulk",
+              last_failure_at: "2026-06-10T02:00:00.000Z",
+              consecutive_failures: 3,
+            }),
+          ],
+        },
+        meta: { duration_ms: 1, request_id: "e2e-providers-freshness" },
+      });
+    });
+
+    await page.goto("/ops/providers");
+
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Providers" }),
+    ).toBeVisible();
+    for (const column of [
+      "provider",
+      "dataset",
+      "scope",
+      "status",
+      "last success",
+      "last failure",
+      "failures",
+    ]) {
+      await expect(page.getByRole("columnheader", { name: column })).toBeVisible();
+    }
+    // 요약 배지 + 연속 실패 경고(assertive alert)
+    await expect(page.getByText("2 providers")).toBeVisible();
+    await expect(page.getByText("failing 1")).toBeVisible();
+    await expect(
+      page
+        .getByRole("alert")
+        .filter({ hasText: "python-mois-api/mois_license_features_bulk (3회)" }),
+    ).toBeVisible();
+    // 행 데이터
+    await expect(page.getByText("kma_weather_values")).toBeVisible();
+    await expect(
+      page.getByRole("row", { name: /python-mois-api/ }).getByText("3"),
+    ).toBeVisible();
   });
 });

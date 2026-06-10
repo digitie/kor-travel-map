@@ -7336,6 +7336,67 @@
         "title": "ProviderLastSyncResponse",
         "type": "object"
       },
+      "ProviderSyncStateSummary": {
+        "additionalProperties": false,
+        "description": "전체 목록의 1행 — ``SyncStateSummary`` + ``provider`` (cursor 제외).",
+        "properties": {
+          "consecutive_failures": {
+            "title": "Consecutive Failures",
+            "type": "integer"
+          },
+          "dataset_key": {
+            "title": "Dataset Key",
+            "type": "string"
+          },
+          "last_failure_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Failure At"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "sync_scope": {
+            "title": "Sync Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "dataset_key",
+          "sync_scope",
+          "status",
+          "last_success_at",
+          "last_failure_at",
+          "consecutive_failures"
+        ],
+        "title": "ProviderSyncStateSummary",
+        "type": "object"
+      },
       "ProvidersData": {
         "additionalProperties": false,
         "description": "`/debug/etl/providers` data payload.",
@@ -7352,6 +7413,41 @@
           "providers"
         ],
         "title": "ProvidersData",
+        "type": "object"
+      },
+      "ProvidersFreshnessData": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderSyncStateSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "ProvidersFreshnessData",
+        "type": "object"
+      },
+      "ProvidersFreshnessResponse": {
+        "additionalProperties": false,
+        "description": "``GET /providers`` 응답 — 전 provider×dataset 신선도 목록.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ProvidersFreshnessData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ProvidersFreshnessResponse",
         "type": "object"
       },
       "ProvidersResponse": {
@@ -13230,6 +13326,28 @@
         "summary": "Get System Logs",
         "tags": [
           "ops"
+        ]
+      }
+    },
+    "/v1/providers": {
+      "get": {
+        "description": "전 provider×dataset×scope의 last-sync/최근 실패 요약 (T-217g, D-07).\n\n행 수가 유한(provider×dataset 수십 개)하므로 페이지네이션 없이 전량 반환한다\n(``/v1/categories`` bounded reference 패턴). 빈 환경은 200 + 빈 ``items``.",
+        "operationId": "list_providers_freshness_v1_providers_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProvidersFreshnessResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "전 provider 데이터 신선도 목록(대시보드)",
+        "tags": [
+          "providers"
         ]
       }
     },
