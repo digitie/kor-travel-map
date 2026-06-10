@@ -12,6 +12,7 @@ from krtour.map.providers.tripmate_agent import (
     TRIPMATE_AGENT_MARKER_COLOR,
     TRIPMATE_AGENT_PROVIDER_NAME,
     TRIPMATE_AGENT_YOUTUBE_CATEGORY_FALLBACK,
+    tripmate_agent_inactivation_entity_ids,
     tripmate_agent_items_to_bundles,
 )
 
@@ -101,12 +102,44 @@ async def test_tripmate_agent_youtube_item_to_feature_bundle() -> None:
 
 
 async def test_tripmate_agent_skips_reject_and_tombstone() -> None:
+    # 적재형 FeatureBundle은 upsert만. reject/tombstone은 비활성화 경로에서 처리한다.
     bundles = await tripmate_agent_items_to_bundles(
         [_item(operation="reject"), _item(operation="tombstone")],
         fetched_at=_FETCHED,
     )
 
     assert bundles == []
+
+
+def _closure_item(operation: str, entity_id: str) -> dict[str, Any]:
+    return _item(
+        operation=operation,
+        candidate_id=entity_id,
+        source_record={
+            **_item()["source_record"],
+            "source_entity_id": entity_id,
+        },
+    )
+
+
+def test_tripmate_agent_inactivation_entity_ids_collects_reject_and_tombstone() -> None:
+    items = [
+        _item(operation="upsert"),
+        _closure_item("reject", "200"),
+        _closure_item("tombstone", "201"),
+    ]
+
+    assert tripmate_agent_inactivation_entity_ids(items) == {"200", "201"}
+
+
+def test_tripmate_agent_inactivation_entity_ids_ignores_upsert() -> None:
+    assert tripmate_agent_inactivation_entity_ids([_item(operation="upsert")]) == set()
+
+
+def test_tripmate_agent_inactivation_entity_ids_falls_back_to_export_id() -> None:
+    item = _item(operation="reject", candidate_id="", export_id="ytpc_900", source_record={})
+
+    assert tripmate_agent_inactivation_entity_ids([item]) == {"ytpc_900"}
 
 
 async def test_tripmate_agent_defaults_source_and_category() -> None:

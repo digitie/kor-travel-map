@@ -42,7 +42,7 @@ facade를 만들지 않는다.
   api` `codes.py` 및 OpiNet 공식 스펙과 `C004`/`K015`가 뒤바뀌어 있던 것을
   upstream 기준으로 정렬.
 - 예외: `tripmate-agent-youtube`는 공공 `python-*-api` 라이브러리가 아니라
-  형제 앱 `tripmate-agent`의 `/api/v1/krtour/features/{snapshot|changes}` REST
+  형제 앱 `tripmate-agent`의 `/api/v1/features/{snapshot|changes}` REST
   export를 pull하는 외부 app provider다. krtour-map은 client wrapper를 만들지
   않고, export item JSON을 `providers.tripmate_agent.tripmate_agent_items_to_bundles`
   순수 함수로 `FeatureBundle`화한다.

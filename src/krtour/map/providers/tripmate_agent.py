@@ -1,9 +1,10 @@
 """``krtour.map.providers.tripmate_agent`` — TripMate-agent YouTube 후보 → FeatureBundle.
 
 ``tripmate-agent``는 YouTube 여행 콘텐츠에서 장소 후보와 근거를 추출하고,
-``python-krtour-map``은 문서화된 ``/api/v1/krtour/features/*`` JSON을 pull해
-최종 ``Feature``/``SourceRecord``/``SourceLink``로 소유한다. 이 모듈은 REST client
-wrapper가 아니라, 이미 받은 export item dict를 DTO로 바꾸는 순수 변환 함수다.
+``python-krtour-map``은 문서화된 ``/api/v1/features/*`` JSON을 pull해 최종
+``Feature``/``SourceRecord``/``SourceLink``로 소유한다(경로는 ADR-050 #1로 downstream
+이름 없이 중립화). 이 모듈은 REST client wrapper가 아니라, 이미 받은 export item
+dict를 DTO로 바꾸는 순수 변환 함수다.
 
 ADR 참조: ADR-006 / ADR-009 / ADR-019 / ADR-024 / ADR-045
 """
@@ -41,8 +42,10 @@ __all__ = [
     "DATASET_KEY_YOUTUBE_PLACE_CANDIDATES",
     "TRIPMATE_AGENT_MARKER_COLOR",
     "TRIPMATE_AGENT_PROVIDER_NAME",
+    "TRIPMATE_AGENT_SOURCE_ENTITY_TYPE",
     "TRIPMATE_AGENT_YOUTUBE_CATEGORY_FALLBACK",
     "TripmateAgentFeatureItem",
+    "tripmate_agent_inactivation_entity_ids",
     "tripmate_agent_items_to_bundles",
 ]
 
@@ -57,6 +60,9 @@ DATASET_KEY_YOUTUBE_PLACE_CANDIDATES: Final[str] = "youtube_place_candidates"
 """TripMate-agent export dataset key."""
 
 _SOURCE_ENTITY_TYPE: Final[str] = "extracted_place_candidate"
+TRIPMATE_AGENT_SOURCE_ENTITY_TYPE: Final[str] = _SOURCE_ENTITY_TYPE
+"""``reject``/``tombstone`` 비활성화 시 source_entity_type 식별자 (upsert와 동일)."""
+
 _PLACE_KIND: Final[str] = "youtube_place_candidate"
 TRIPMATE_AGENT_YOUTUBE_CATEGORY_FALLBACK: Final[str] = PlaceCategoryCode.TOURISM.value
 """TripMate-agent category suggestion이 없거나 잘못된 경우의 안전한 fallback."""
@@ -94,6 +100,29 @@ async def tripmate_agent_items_to_bundles(
         if bundle is not None:
             bundles.append(bundle)
     return bundles
+
+
+def tripmate_agent_inactivation_entity_ids(
+    items: Iterable[TripmateAgentFeatureItem],
+) -> set[str]:
+    """``reject``/``tombstone`` export item → 비활성화 대상 source_entity_id 집합.
+
+    ``upsert``는 :func:`tripmate_agent_items_to_bundles`가 적재한다. 이 함수는 검수
+    제외(``reject``) 또는 무효화(``tombstone``)된 후보의 ``source_entity_id``만 모아,
+    호출자가 ``inactivate_features_by_source_entity_ids``로 대응 feature를
+    ``status='inactive'``로 전환하게 한다(ADR-050 #4, MOIS Step C 동형). place는
+    무기한 유지하고 status만 inactive로 둔다(ADR-017). source_entity_id를 못 구한
+    item은 건너뛴다.
+    """
+    entity_ids: set[str] = set()
+    for item in items:
+        if _operation(item) not in {"reject", "tombstone"}:
+            continue
+        source_record_payload = _mapping(item.get("source_record"))
+        entity_id = _source_entity_id(item, source_record_payload)
+        if entity_id:
+            entity_ids.add(entity_id)
+    return entity_ids
 
 
 async def _item_to_bundle(

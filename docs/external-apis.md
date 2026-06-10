@@ -149,10 +149,11 @@ API 키 우선순위:
 
 ### 3.13 TripMate-agent YouTube 후보 export
 
-1. TripMate-agent가 `/api/v1/krtour/features/snapshot`과
-   `/api/v1/krtour/features/changes`를 제공해야 한다(TripMate-agent `T-066`).
+1. TripMate-agent가 `/api/v1/features/snapshot`과
+   `/api/v1/features/changes`를 제공해야 한다(TripMate-agent `T-066`). 경로는
+   downstream 이름 없이 중립화됐다(ADR-050 #1, T-217a 정렬 완료).
 2. krtour-map Dagster는 `KRTOUR_MAP_TRIPMATE_AGENT_BASE_URL`을 host root로 받고,
-   path는 fetcher가 `/api/v1/krtour/features/{snapshot|changes}`로 붙인다.
+   path는 fetcher가 `/api/v1/features/{snapshot|changes}`로 붙인다.
 3. `KRTOUR_MAP_TRIPMATE_AGENT_API_KEY`는 TripMate-agent 운영 환경의 `API_KEYS` 중
    하나와 같아야 하며, `X-API-Key` 헤더로만 전송한다.
 4. `KRTOUR_MAP_TRIPMATE_AGENT_FEATURE_SYNC_ENDPOINT=snapshot|changes`,

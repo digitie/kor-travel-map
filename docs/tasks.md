@@ -39,14 +39,20 @@
   - [x] T-216f — 코드/DB 명명 전파(surrogate만).
   - [x] T-216g — 단일 정본 수렴 + 버전 거버넌스.
 - **Phase 6.9 — cross-repo 정합성 (2026-06-10 검토, ADR-050~052 — 결정 반영분)**
-  - [ ] T-217a — tripmate-agent fetcher 경로 중립화 정렬: `/api/v1/krtour/features/*`
-        → `/api/v1/features/*` (ADR-050 #1). **TripMate-agent T-066 배포와 동시 전환**
-        (양쪽 동시 배포 전 한쪽만 바꾸면 즉시 적재 실패).
-  - [ ] T-217b — `reject`/`tombstone` operation → feature **inactive 전환** (ADR-050
-        #4, MOIS Step C 동형). 1단계 skip 건수 WARN/admin 이슈 노출 선행 가능.
-        응답 정책 확정(D-12): inactive feature는 batch/단건 read의 **`found`에 포함
-        + status 노출** (`missing` 아님) — 기존 admin deactivate read 정책과의 일관성
-        검증 포함.
+  - [x] T-217a — tripmate-agent fetcher 경로 중립화 정렬: `/api/v1/krtour/features/*`
+        → `/api/v1/features/*` (ADR-050 #1). **완료**: Dagster fetcher path, 테스트,
+        provider/settings/resources docstring, architecture/external-apis/provider-contract
+        문서를 `/api/v1/features/{snapshot|changes}`로 정렬(TripMate-agent T-066 배포 완료로
+        unblocked).
+  - [x] T-217b (전환) — `reject`/`tombstone` operation → feature **inactive 전환** (ADR-050
+        #4, MOIS Step C 동형). **완료**: `tripmate_agent_inactivation_entity_ids`(reject/
+        tombstone → source_entity_id) + client `deactivate_features_by_source_entity_ids`
+        (infra `inactivate_features_by_source_entity_ids` wrap) + Dagster asset upsert/closure
+        분기 + `DagsterFeatureLoadResult.deactivated`. place는 무기한 유지·status만 inactive
+        (ADR-017).
+  - [ ] T-217b (read policy D-12) — inactive feature를 batch read `found`에 포함 + status
+        노출(현재 `get_feature_rows_by_ids`는 `deleted_at IS NULL`로 제외, 단건 read는 이미
+        status 노출). admin/TripMate batch 계약(T-213d) 전반에 영향이라 별도 결정/PR로 분리.
   - [ ] T-217c — TripMate feature 제안 연동 **합의 5건 확정 + 문서화** (ADR-051 보정:
         신규 수신 API **철회** — 전송 구간은 기존 `/v1/admin/features*` change API,
         PR #317). ① review_mode(이중 검수 여부) ② idempotency_key 멱등 ③ 출처 태깅

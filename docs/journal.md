@@ -2,6 +2,32 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-11 (claude) — T-217a/b TripMate-agent feature pull 경로 정렬 + reject/tombstone inactive 전환
+
+TripMate-agent T-066(`/api/v1/features/*` export) 배포로 unblocked된 cross-repo 정합성
+작업. provider 변환과 Dagster fetch/asset wiring은 이미 있었고(경로만 `/api/v1/krtour/
+features/*`로 stale), 두 가지를 정렬·보강했다.
+
+- **T-217a 경로 중립화**: Dagster fetcher path를 `/api/v1/features/{snapshot|changes}`로
+  바꾸고(ADR-050 #1) `test_provider_fetchers` assertion, `providers.tripmate_agent`/
+  `settings`/`resources` docstring, `docs/architecture`·`external-apis`·`provider-contract`를
+  정렬했다. ADR-050 결정 본문(`decisions.md`)은 이력이라 보존.
+- **T-217b reject/tombstone → inactive 전환**(ADR-050 #4, MOIS Step C 동형):
+  - `providers.tripmate_agent.tripmate_agent_inactivation_entity_ids`: `reject`/`tombstone`
+    item에서 `source_entity_id` 집합 추출(upsert는 기존 `..._items_to_bundles`가 적재).
+  - `AsyncKrtourMapClient.deactivate_features_by_source_entity_ids`: infra
+    `inactivate_features_by_source_entity_ids`를 한 transaction으로 wrap(status='inactive'
+    + deleted_at, place는 무기한 유지 — ADR-017).
+  - Dagster asset `run_feature_place_tripmate_agent_youtube`: upsert→적재 / reject·tombstone→
+    비활성화로 분기하고 `DagsterFeatureLoadResult.deactivated`로 노출(metadata 1회 emit).
+  - 단건 read(`get_feature`)는 이미 inactive를 status와 함께 found로 반환(D-12 단건 부분).
+    batch read(`get_feature_rows_by_ids`)의 inactive 포함은 admin/TripMate 계약(T-213d)
+    전반 영향이라 별도 결정/PR로 분리(`docs/tasks.md`).
+- **검증**(ext4가 아닌 NTFS 마운트 `.venv`, WSL): ruff, mypy --strict(변경 core+dagster
+  파일), `lint-imports`(layered architecture KEPT, 0 broken), 단위/대거스터 `67 passed`,
+  core 단위 전체 `974 passed`, integration(testcontainers PostGIS) tripmate 비활성화
+  end-to-end.
+
 ## 2026-06-10 (claude) — T-217g provider 동기화 신선도 대시보드 (D-07)
 
 전 provider×dataset의 last-sync/최근 실패를 한눈에 보는 목록 API + admin 화면.

@@ -1,5 +1,21 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-11 (claude) 작업 메모 — T-217a/b TripMate-agent pull 정렬 + inactive 전환
+
+TripMate-agent T-066(`/api/v1/features/*`) 배포로 unblocked된 cross-repo 정합성 작업.
+
+- **T-217a**: Dagster fetcher 경로를 `/api/v1/krtour/features/*` → `/api/v1/features/*`로
+  정렬(ADR-050 #1) + 테스트/문서.
+- **T-217b**: `reject`/`tombstone` export item을 feature `status='inactive'`로 전환
+  (ADR-050 #4, MOIS Step C 동형). provider `tripmate_agent_inactivation_entity_ids` +
+  client `deactivate_features_by_source_entity_ids` + Dagster asset upsert/closure 분기.
+- 검증: ruff/mypy --strict/lint-imports, 단위·대거스터 67 + core 974, integration(PostGIS)
+  tripmate 비활성화 end-to-end.
+
+**다음 한 작업 후보**: **T-217b read policy (D-12)** — batch read(`get_feature_rows_by_ids`)에
+inactive feature를 `found`+status로 포함할지 결정/구현. admin/TripMate batch 계약(T-213d)
+전반 영향이라 일관성 검증 동반. 이후 T-217c~f, T-212e 순.
+
 ## 2026-06-10 Codex 작업 메모 — T-212d read-heavy 재측정
 
 PR #332 머지 후 `origin/main`에서 새 브랜치를 만들고 T-212d를 다시 실행했다. 기존

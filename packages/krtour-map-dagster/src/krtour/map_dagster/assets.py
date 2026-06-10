@@ -2,6 +2,7 @@
 
 import inspect
 from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Iterable
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Final, cast
 
@@ -92,6 +93,8 @@ from krtour.map.providers.standard_data import (
 from krtour.map.providers.tripmate_agent import (
     DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
     TRIPMATE_AGENT_PROVIDER_NAME,
+    TRIPMATE_AGENT_SOURCE_ENTITY_TYPE,
+    tripmate_agent_inactivation_entity_ids,
     tripmate_agent_items_to_bundles,
 )
 
@@ -644,7 +647,11 @@ async def feature_place_krairport_airports(
 async def run_feature_place_tripmate_agent_youtube(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
-    """TripMate-agent YouTube 장소 후보 export를 place Feature로 적재한다."""
+    """TripMate-agent YouTube 장소 후보 export를 place Feature로 적재한다.
+
+    ``upsert`` item은 FeatureBundle로 적재하고, ``reject``/``tombstone`` item은 대응
+    feature를 ``status='inactive'``로 전환한다(ADR-050 #4, MOIS Step C 동형, T-217b).
+    """
     records = await _record_list(context, "tripmate_agent_youtube_features")
     fetched_at = await _fetched_at(context)
     bundles = await tripmate_agent_items_to_bundles(
@@ -652,12 +659,23 @@ async def run_feature_place_tripmate_agent_youtube(
         fetched_at=fetched_at,
         reverse_geocoder=_reverse_geocoder(context),
     )
-    return await _load(
+    result = await _load(
         context,
         provider=TRIPMATE_AGENT_PROVIDER_NAME,
         dataset_key=DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
         bundles=bundles,
     )
+    closures = tripmate_agent_inactivation_entity_ids(records)
+    deactivated = await _deactivate(
+        context,
+        provider=TRIPMATE_AGENT_PROVIDER_NAME,
+        dataset_key=DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
+        source_entity_type=TRIPMATE_AGENT_SOURCE_ENTITY_TYPE,
+        source_entity_ids=closures,
+    )
+    result = replace(result, deactivated=deactivated)
+    _add_output_metadata(context, {"features_deactivated": deactivated})
+    return result
 
 
 @asset(
@@ -796,6 +814,26 @@ async def _load(
         provider=provider,
         dataset_key=dataset_key,
         strict_address=strict_address,
+    )
+
+
+async def _deactivate(
+    context: AssetExecutionContext,
+    *,
+    provider: str,
+    dataset_key: str,
+    source_entity_type: str,
+    source_entity_ids: set[str],
+) -> int:
+    """``reject``/``tombstone`` 후보의 source_entity_id를 ``status='inactive'``로 전환."""
+    if not source_entity_ids:
+        return 0
+    client = cast("AsyncKrtourMapClient", _resource_object(context, "krtour_map_client"))
+    return await client.deactivate_features_by_source_entity_ids(
+        provider=provider,
+        dataset_key=dataset_key,
+        source_entity_type=source_entity_type,
+        source_entity_ids=source_entity_ids,
     )
 
 

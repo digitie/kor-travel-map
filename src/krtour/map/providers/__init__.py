@@ -206,8 +206,10 @@ from krtour.map.providers.tripmate_agent import (
     DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
     TRIPMATE_AGENT_MARKER_COLOR,
     TRIPMATE_AGENT_PROVIDER_NAME,
+    TRIPMATE_AGENT_SOURCE_ENTITY_TYPE,
     TRIPMATE_AGENT_YOUTUBE_CATEGORY_FALLBACK,
     TripmateAgentFeatureItem,
+    tripmate_agent_inactivation_entity_ids,
     tripmate_agent_items_to_bundles,
 )
 from krtour.map.providers.visitkorea import (
@@ -389,7 +391,9 @@ __all__ = [
     # tripmate-agent (YouTube 장소 후보 provider)
     "TripmateAgentFeatureItem",
     "tripmate_agent_items_to_bundles",
+    "tripmate_agent_inactivation_entity_ids",
     "TRIPMATE_AGENT_PROVIDER_NAME",
+    "TRIPMATE_AGENT_SOURCE_ENTITY_TYPE",
     "DATASET_KEY_YOUTUBE_PLACE_CANDIDATES",
     "TRIPMATE_AGENT_YOUTUBE_CATEGORY_FALLBACK",
     "TRIPMATE_AGENT_MARKER_COLOR",

@@ -36,6 +36,12 @@ from krtour.map.providers.airkorea import (
     air_quality_to_weather_values,
 )
 from krtour.map.providers.standard_data import cultural_festivals_to_bundles
+from krtour.map.providers.tripmate_agent import (
+    DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
+    TRIPMATE_AGENT_PROVIDER_NAME,
+    TRIPMATE_AGENT_SOURCE_ENTITY_TYPE,
+    tripmate_agent_items_to_bundles,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
@@ -172,6 +178,66 @@ async def test_load_feature_bundles_commits_and_reads(
         min_lon=126.0, min_lat=37.0, max_lon=127.5, max_lat=38.0, kinds=["event"]
     )
     assert any(f["feature_id"] == fid for f in feats)
+
+
+async def test_deactivate_tripmate_features_by_source_entity_ids(
+    map_client: AsyncKrtourMapClient,
+) -> None:
+    # upsert로 적재한 tripmate feature를 reject/tombstone 폐기 경로로 inactive 전환.
+    item = {
+        "operation": "upsert",
+        "candidate_id": "tm-1",
+        "place": {
+            "name": "월정리 해변",
+            "category_code_suggestion": "01020300",
+            "longitude": 126.7958,
+            "latitude": 33.5563,
+            "address": {"legal_dong_code": "5011025624"},
+        },
+        "source_record": {"source_entity_id": "tm-1"},
+    }
+    bundles = await tripmate_agent_items_to_bundles(
+        [item], fetched_at=datetime(2026, 6, 11, 12, 0, tzinfo=_KST)
+    )
+    await map_client.load_feature_bundles(bundles)
+    fid = bundles[0].feature.feature_id
+
+    row = await map_client.get_feature(fid)
+    assert row is not None
+    assert row["status"] == "active"
+
+    deactivated = await map_client.deactivate_features_by_source_entity_ids(
+        provider=TRIPMATE_AGENT_PROVIDER_NAME,
+        dataset_key=DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
+        source_entity_type=TRIPMATE_AGENT_SOURCE_ENTITY_TYPE,
+        source_entity_ids={"tm-1"},
+    )
+    assert deactivated == 1
+
+    # 별도 세션 조회 → inactive로 전환됐고 단건 read에는 여전히 found(missing 아님, D-12).
+    row_after = await map_client.get_feature(fid)
+    assert row_after is not None
+    assert row_after["status"] == "inactive"
+
+    # idempotent: 이미 inactive면 재호출 0건.
+    again = await map_client.deactivate_features_by_source_entity_ids(
+        provider=TRIPMATE_AGENT_PROVIDER_NAME,
+        dataset_key=DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
+        source_entity_type=TRIPMATE_AGENT_SOURCE_ENTITY_TYPE,
+        source_entity_ids={"tm-1"},
+    )
+    assert again == 0
+
+    # 빈 집합 no-op.
+    assert (
+        await map_client.deactivate_features_by_source_entity_ids(
+            provider=TRIPMATE_AGENT_PROVIDER_NAME,
+            dataset_key=DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
+            source_entity_type=TRIPMATE_AGENT_SOURCE_ENTITY_TYPE,
+            source_entity_ids=set(),
+        )
+        == 0
+    )
 
 
 async def test_sync_dedup_candidates_persists(

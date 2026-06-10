@@ -84,7 +84,9 @@ async def fetch_tripmate_agent_youtube_features(
         )
 
     endpoint = settings.tripmate_agent_feature_sync_endpoint
-    path = f"/api/v1/krtour/features/{endpoint}"
+    # TripMate-agent export 경로는 downstream 이름 없이 중립화됐다(ADR-050 #1,
+    # TripMate-agent T-066). 과거 `/api/v1/krtour/features/*`에서 전환.
+    path = f"/api/v1/features/{endpoint}"
     cursor = settings.tripmate_agent_feature_cursor
     headers = {"X-API-Key": secret.get_secret_value()}
     async with httpx.AsyncClient(

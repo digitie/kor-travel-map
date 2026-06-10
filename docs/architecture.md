@@ -104,7 +104,7 @@ ADR-045 이후 TripMate와 krtour-map 사이의 운영 계약은 OpenAPI다.
 - OpenAPI는 처음에는 admin UI 기준으로 작성하고, TripMate 연동 시 공개/사용자
   응답을 보완·확장한다.
 - TripMate-agent는 `python-krtour-map` DB에 쓰지 않고
-  `/api/v1/krtour/features/{snapshot|changes}`로 YouTube 장소 후보를 export한다.
+  `/api/v1/features/{snapshot|changes}`로 YouTube 장소 후보를 export한다.
   krtour-map Dagster가 이를 pull해 최종 `feature_id`를 생성한다(ADR-049).
 
 자세한 계약은 `docs/openapi-admin-contract.md`.

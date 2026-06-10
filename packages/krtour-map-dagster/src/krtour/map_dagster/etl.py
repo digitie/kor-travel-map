@@ -34,6 +34,8 @@ class DagsterFeatureLoadResult:
     feature_ids: tuple[str, ...]
     load: FeatureLoadResult
     address_validation: FeatureAddressValidationSummary
+    deactivated: int = 0
+    """``reject``/``tombstone`` 등으로 ``status='inactive'`` 전환된 feature 수."""
 
     def as_metadata(self) -> dict[str, object]:
         metadata: dict[str, object] = {
@@ -47,6 +49,8 @@ class DagsterFeatureLoadResult:
             "source_links_inserted": self.load.source_links_inserted,
             "source_links_updated": self.load.source_links_updated,
         }
+        # `features_deactivated`는 _load 자동 emit과 중복 키 충돌을 피하려 여기 넣지
+        # 않고, 비활성화를 수행하는 asset이 별도로 1회 emit한다(T-217b).
         metadata.update(self.address_validation.as_metadata())
         return metadata
 
@@ -64,6 +68,7 @@ class DagsterFeatureLoadResult:
             address_validation=_merge_validation_summaries(
                 self.address_validation, other.address_validation
             ),
+            deactivated=self.deactivated + other.deactivated,
         )
 
 
