@@ -11,8 +11,8 @@
 - **다음 (우선순위 순)**
   - [ ] T-212e — 실데이터 full reload + offline upload 실데이터 검증 + 최종 리포트.
   - [~] T-218 — admin UI 상세 구현 점검 + a11y/e2e 완비(화면별 슬라이스 a~f,
-        T-212e와 독립·병렬). **T-218a(#337)·T-218b(#338/#339/+issues) 완료**, 다음은
-        T-218c(backups e2e)·T-218d~f. 정본
+        T-212e와 독립·병렬). **T-218a·b·c 완료(e2e 16/16 화면 커버)**, 다음은
+        T-218d(음성 경로 e2e)·T-218e(focus/aria-live)·T-218f(점검 체크리스트). 정본
         `docs/reports/t-218-admin-ui-hardening-plan-2026-06-10.md`.
 - **최근 완료**
   - [x] T-212d 재측정 pass — read-heavy 전제로 hot read EXPLAIN을 다시 돌리고
@@ -851,8 +851,9 @@ T-214/T-215(#317)의 `/v1` 1차 정리 위에 ADR-048 delta를 얹는다. 정본
         - [x] **적용 대상 아님(이미 a11y 완비, 실측 2026-06-10)**: `/etl`(RHF+zodResolver+
           `Field/FieldLabel/FieldError`), `admin/features/change-requests`(전 필드가 이미
           `<label htmlFor>`+`id` 연결 보유 — bare aria-label 아님).
-      - [ ] T-218c — `/admin/backups` e2e 신설 — 유일 미커버 화면, create/restore/
-        restore-swap 위험 액션 + confirm + alert까지 고정(P0).
+      - [x] T-218c — `/admin/backups` e2e 신설 — 유일 미커버 화면. **완료(2026-06-10)**:
+        route-mock으로 목록/manifest 상세 + create/restore(staging target)/swap command
+        plan 액션 + result alert 고정(2 tests). **admin-ops e2e 19 passed = 16/16 화면 커버 달성.**
       - [ ] T-218d — 위험 액션 음성 경로 e2e — 잘못된 JSON(payload/address/coord)·필수
         누락·캡 경계의 클라이언트 검증 에러 표시(서버 미호출) 단언(P1).
       - [ ] T-218e — focus 관리(상세 drawer/confirm 모달 trap·복원·Escape) + aria-live/

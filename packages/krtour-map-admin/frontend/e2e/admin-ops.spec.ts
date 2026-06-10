@@ -21,6 +21,7 @@ type AdminFeatureDeleteRequest =
 type AdminFeatureReviewActionRequest =
   components["schemas"]["AdminFeatureReviewActionRequest"];
 type AdminFeatureReviewMode = AdminFeatureChangeRecord["review_mode"];
+type BackupRecord = components["schemas"]["BackupRecord"];
 
 const MOCK_NOW = "2026-06-08T00:00:00.000Z";
 const MOCK_REVIEWED_AT = "2026-06-08T00:10:00.000Z";
@@ -30,6 +31,25 @@ const OFFLINE_LOAD_JOB_ID = "33333333-3333-4333-8333-333333333333";
 const OFFLINE_DAGSTER_RUN_ID = "dagster-run-offline-upload-001";
 const POI_TARGET_ID = "44444444-4444-4444-8444-444444444444";
 const FEATURE_CHANGE_ID = "55555555-5555-4555-8555-555555555555";
+const MOCK_BACKUP_ID = "backup-20260608-000000";
+
+function makeBackup(overrides: Partial<BackupRecord> = {}): BackupRecord {
+  return {
+    backup_id: MOCK_BACKUP_ID,
+    byte_size: 1024,
+    checksum_count: 3,
+    components: { app_db: "ok", dagster_db: "ok" },
+    created_at_utc: MOCK_NOW,
+    databases: { app: "krtour_map", dagster: "krtour_map_dagster" },
+    detail_url: `/v1/admin/backups/${MOCK_BACKUP_ID}`,
+    manifest_status: "complete",
+    mode: "cold",
+    object_storage: {},
+    path: `/var/backups/${MOCK_BACKUP_ID}`,
+    restore_url: `/v1/admin/restore/${MOCK_BACKUP_ID}`,
+    ...overrides,
+  };
+}
 
 function makeOfflineUpload(
   overrides: Partial<OfflineUploadRecord> = {},
@@ -401,6 +421,88 @@ async function mockPoiCacheTargetMutations(page: Page) {
         page: { page_size: 100, next_cursor: null, total: null },
         request_id: "e2e-nearby-target",
       },
+    });
+  });
+
+  return requests;
+}
+
+async function mockBackupOperations(page: Page) {
+  const requests = { create: 0, restore: 0, swap: 0 };
+
+  await page.route("**/admin/backups**", async (route) => {
+    const request = route.request();
+    if (request.resourceType() === "document") {
+      await route.continue();
+      return;
+    }
+    const url = new URL(request.url());
+    if (url.pathname === "/admin/backups" || url.searchParams.has("_rsc")) {
+      await route.continue();
+      return;
+    }
+
+    if (request.method() === "GET" && url.pathname === "/v1/admin/backups") {
+      await fulfillJson(route, {
+        data: {
+          backup_root: "/var/backups",
+          command_enabled: false,
+          items: [makeBackup()],
+        },
+        meta: { duration_ms: 1, request_id: "e2e-backup-list" },
+      });
+      return;
+    }
+
+    if (request.method() === "POST" && url.pathname === "/v1/admin/backups") {
+      requests.create += 1;
+      await fulfillJson(route, {
+        data: {
+          backup_id: MOCK_BACKUP_ID,
+          message: "backup command planned",
+          operation: "backup",
+          status: "planned",
+        },
+        meta: { duration_ms: 1 },
+      });
+      return;
+    }
+
+    throw new Error(`Unhandled backups route: ${request.method()} ${url}`);
+  });
+
+  await page.route("**/admin/restore/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+
+    if (url.pathname.endsWith("/swap")) {
+      requests.swap += 1;
+      await fulfillJson(route, {
+        data: {
+          backup_id: MOCK_BACKUP_ID,
+          message: "swap command planned",
+          operation: "swap",
+          status: "planned",
+        },
+        meta: { duration_ms: 1 },
+      });
+      return;
+    }
+
+    requests.restore += 1;
+    await fulfillJson(route, {
+      data: {
+        backup_id: MOCK_BACKUP_ID,
+        message: "restore command planned",
+        operation: "restore",
+        status: "planned",
+        restore_targets: {
+          app_db: "krtour_map_staging",
+          dagster_db: "krtour_map_dagster_staging",
+          rustfs_volume: "rustfs_staging",
+        },
+      },
+      meta: { duration_ms: 1 },
     });
   });
 
@@ -1119,5 +1221,46 @@ test.describe("admin/ops pages", () => {
     await expect.poll(() => requests.load).toBe(1);
     await expect(page.getByText("Dagster load 실행됨")).toBeVisible();
     await expect(page.getByText("STARTED")).toBeVisible();
+  });
+
+  test("/v1/admin/backups", async ({ page }) => {
+    await mockBackupOperations(page);
+
+    await page.goto("/admin/backups");
+
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Backups" }),
+    ).toBeVisible();
+    for (const column of ["backup", "created", "status", "size", "action"]) {
+      await expect(page.getByRole("columnheader", { name: column })).toBeVisible();
+    }
+    // 목록 + manifest 상세(선택 없음 시 첫 행을 detail로 노출)
+    await expect(page.getByText("1 artifacts")).toBeVisible();
+    await expect(page.getByText(MOCK_BACKUP_ID).first()).toBeVisible();
+  });
+
+  test("/v1/admin/backups operations (T-218c)", async ({ page }) => {
+    const requests = await mockBackupOperations(page);
+
+    await page.goto("/admin/backups");
+    await expect(
+      page.getByRole("row", { name: new RegExp(MOCK_BACKUP_ID.slice(0, 12)) }),
+    ).toBeVisible();
+
+    // 백업 command plan 생성
+    await page.getByRole("button", { name: "백업" }).click();
+    await expect.poll(() => requests.create).toBe(1);
+    await expect(page.getByText("backup command planned")).toBeVisible();
+
+    // restore command plan (staging target)
+    await page.getByRole("button", { name: "Restore" }).first().click();
+    await expect.poll(() => requests.restore).toBe(1);
+    await expect(page.getByText("restore command planned")).toBeVisible();
+    await expect(page.getByText("krtour_map_staging")).toBeVisible();
+
+    // hot-swap command plan
+    await page.getByRole("button", { name: "Swap" }).first().click();
+    await expect.poll(() => requests.swap).toBe(1);
+    await expect(page.getByText("swap command planned")).toBeVisible();
   });
 });
