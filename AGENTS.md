@@ -210,6 +210,10 @@ credential은 각 worktree 루트의 로컬 파일 `.env.mcp-telegram`에만 저
 
 ## TripMate ↔ krtour-map 경계 (ADR-045)
 
+> cross-repo 연동의 1장 정본(포트·연동 방향·인증·envelope 차이·계약 정본 위치)은
+> **`docs/integration-map.md`** (T-217d). 분기 drift 점검은
+> `docs/runbooks/cross-repo-audit-checklist.md`.
+
 - **TripMate는 krtour-map을 OpenAPI로 호출한다**. 운영 코드에서
   `python-krtour-map`을 직접 import하지 않는다.
 - TripMate는 krtour-map PostgreSQL/PostGIS DB에 직접 연결하지 않는다.

@@ -3011,6 +3011,27 @@ Accepted (2026-06-10) — `docs/reports/decisions-needed-2026-06-10.md` D-02.
   역추적이 필요하면 TripMate admin에서 수행한다 (PIPA 부담 비전이).
 - 거절/반려의 역방향 통지(krtour-map 최종 거절 → TripMate `feature_suggestions`
   상태 갱신)는 TripMate가 `request_id`/state 폴링으로 처리(기존 설계) — 별도 push 불요.
+- **잔여 합의 5건 확정 (2026-06-11, T-217c — 코드 실측 기반, 소비 계약은
+  `docs/tripmate-rest-api.md` §"사용자 제안 연동 합의"):**
+  1. **review_mode**: 기본 `require_review` 유지 — TripMate 1차 검수가 있어도
+     krtour-map admin이 최종 반영 권한을 갖는 2단 검토가 설계 의도다. 운영 합의로
+     `KRTOUR_MAP_ADMIN_FEATURE_CHANGE_REVIEW_MODE=immediate` 전환 가능(전역 설정).
+  2. **idempotency_key 멱등**: `feature_id` 미지정 create에서
+     `make_feature_id(source_type="user_request",
+     source_natural_key=idempotency_key)`로 **결정적 feature_id**를 생성한다 —
+     같은 key 재시도 = 같은 feature_id(upsert 충돌 정책은 version 1 모델, #317).
+     TripMate는 `idempotency_key=suggestion_id` 사용을 권장.
+  3. **출처 태깅**: 전용 필드 없이 기존 필드 컨벤션 — `operator: "tripmate-admin"`
+     고정 + `reason` 머리에 `[suggestion:<suggestion_id>]` prefix. change-requests
+     큐(API/admin UI)가 reason을 표시하므로 추가 코드 없이 출처 식별 가능(D-11 익명).
+  4. **admin 인증**: admin API는 **9011 `/v1/admin/*`**(9012는 admin UI). 코드 인증은
+     `admin_destructive_enabled` kill-switch뿐이고 호출자 인증은 인프라 계층(SSO/IP
+     allowlist, ADR-005 모델) — TripMate admin client는 관리망 경로로 9011에 도달해야
+     한다.
+  5. **closure**: 영구 폐업/사용자 삭제 = **soft `DELETE`**(`user_deleted_*` 계열 —
+     provider 재적재 부활 차단, #332) / 일시 중단·운영 비활성 =
+     `POST .../deactivate`(`status='inactive'`, provider 폐업과 동일 표현,
+     read에서 `found`+status 노출 — D-12).
 
 ## ADR-052: RustFS 버킷은 당분간 공유하되 prefix 소유권을 명문화하고, 추후 전용 버킷으로 분리한다
 
@@ -3042,3 +3063,19 @@ TripMate-agent가 미디어 원본(영상/자막/전사/프레임, 무기한 보
 - T-217e — 공유 정책을 `docs/architecture.md` rustfs 절 + backup/restore 문서에 명문화.
 - TripMate-agent 측: 분리 전까지 버킷 기본값 의존 신규 기능 보류 권고 유지 (해당 repo
   TA-04).
+
+### Amendment (2026-06-11, 사용자 지시 — T-217e 재정의)
+
+**RustFS 인프라는 `tripmate-manager`(`F:\dev\tripmate-manager`)가 일괄 소유·관리한다.**
+tripmate-manager는 TripMate 생태계 공용 기반 서비스(단일 PostGIS 컨테이너
+`kraddr-geo-postgres` :15434 + RustFS `tripmate-rustfs` S3 :9003/console :9004)를
+docker-compose + Web UI로 구동/모니터링하는 관리 소프트웨어다(해당 repo README,
+`docker-compose.yml` 실측).
+
+- **이행**: 위 결정의 "krtour-map 측 prefix 소유권·backup 제외 명문화"와 "전용 버킷
+  분리(D-10)"는 **tripmate-manager의 RustFS 운영 범위로 이관**한다 — krtour-map은
+  버킷/prefix·키·볼륨·수명주기를 직접 운영하지 않는 **사용자**다(tripmate-agent도 동일).
+- **krtour-map 잔여 책임**: 자기 데이터(offline upload 산출물 등)의 S3 키 사용과,
+  cold backup이 RustFS를 포함할 때 그 범위가 krtour-map 소유 객체에 한정된다는 것뿐.
+  rustfs 구동/포트는 tripmate-manager 정본을 따른다(고정 포트 값 자체는 ADR-047과 동일).
+- 버킷 분리 시점/방식(D-10)의 후속 결정 주체도 tripmate-manager 운영으로 위임.

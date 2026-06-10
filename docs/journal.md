@@ -2,6 +2,24 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-11 (claude) — T-217c/d/e 문서 완결 (Phase 6.9 종결)
+
+- **T-217c 합의 5건 확정**(코드 실측): review_mode 기본 `require_review` 유지 /
+  idempotency_key=결정적 feature_id(suggestion_id 권장) / 출처 태깅
+  `operator:"tripmate-admin"`+reason `[suggestion:<id>]` 컨벤션 / admin 인증 9011
+  `/v1/admin/*`(kill-switch+인프라 SSO) / closure=영구 soft DELETE·일시 deactivate.
+  정본 `docs/tripmate-rest-api.md` §7 + ADR-051 결과 절. §8에 YouTube 후보 detail
+  소비 계약(T-217f facility_info 키 표) 기재.
+- **T-217d**: `docs/integration-map.md` 신설 — 4-시스템(krtour-map/TripMate/
+  tripmate-agent/tripmate-manager) 포트·연동 방향·인증/envelope 차이표(D-08)·계약
+  정본 위치 1장. 분기 audit `runbooks/cross-repo-audit-checklist.md` + README 등재,
+  CLAUDE.md 진입 순서·AGENTS.md 경계 절에서 링크.
+- **T-217e(사용자 재정의)**: RustFS를 **tripmate-manager가 일괄 관리** — 실측
+  (`docker-compose.yml`: 단일 PostGIS `kraddr-geo-postgres` :15434 + `tripmate-rustfs`
+  :9003/9004, Web UI 관리) 후 ADR-052 Amendment. krtour-map·tripmate-agent는 사용자,
+  버킷 분리(D-10) 후속도 tripmate-manager 운영으로 위임.
+- **Phase 6.9(T-217a~g) 전부 종결.** 다음 한 작업은 T-212e 불변.
+
 ## 2026-06-11 (claude) — T-217a/b/f tripmate-agent provider 연동 완결
 
 - **T-217a 경로 중립화(ADR-050 #1)**: fetcher path + 테스트/docstring 7곳을
