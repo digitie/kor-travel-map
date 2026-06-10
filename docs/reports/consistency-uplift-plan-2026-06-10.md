@@ -1,7 +1,12 @@
 # Cross-repo 일관성 uplift 액션 플랜 (2026-06-10)
 
-> **상태**: 실행 계획 — 본 문서 자체는 머지하되, 개별 액션의 정본 반영(ADR/코드/문서 수정)은
-> 사용자 승인 후 각 repo에서 진행한다. 의사결정 의존 항목은 D-번호
+> **상태 (2026-06-10 갱신)**: 의사결정 처리 완료 — D-01(b 잠정)·D-02~05(a)·D-06(수정:
+> TripMate `/admin/etl` 유지)·D-08/09(권고안) 채택, D-07 + 신규 D-10~13 미결.
+> krtour-map 정본 반영: **ADR-050~052 + tasks T-217a~f + CLAUDE.md**. 본 문서의
+> KR-01→T-217b, KR-02→완료, KR-03→ADR-050 #2, KR-04→T-217d, KR-06→T-217f로 task화됨.
+> **추가 결정 사항(사용자 보정)**: tripmate-agent export 경로는 downstream 이름 없이
+> `/api/v1/features/{snapshot|changes}` — krtour fetcher 정렬은 T-217a (TA-01/T-066과
+> 동시 배포). 의사결정 의존 항목은 D-번호
 > ([`decisions-needed-2026-06-10.md`](decisions-needed-2026-06-10.md))를 참조.
 > **검토 근거**: [`service-completeness-review-2026-06-10.md`](service-completeness-review-2026-06-10.md)
 > (기준 커밋: krtour `0e45bd7` / TripMate `4a10a5b` / tripmate-agent `a443ca0`).

@@ -2891,9 +2891,10 @@ TripMate-agent는 YouTube 여행 콘텐츠에서 장소 후보, 영상·채널·
 - canonical provider name은 `tripmate-agent-youtube`로 둔다.
 - dataset_key는 `youtube_place_candidates`, source_entity_type은
   `extracted_place_candidate`를 기본값으로 둔다.
-- TripMate-agent는 `/api/v1/krtour/features/snapshot`과
-  `/api/v1/krtour/features/changes` REST export를 제공한다. 외부 호출이므로
+- TripMate-agent는 snapshot/changes REST export를 제공한다. 외부 호출이므로
   TripMate-agent ADR-24의 `X-API-Key` 인증을 그대로 사용한다.
+  (경로는 ADR-050에서 `/api/v1/features/{snapshot,changes}`로 보정 — downstream
+  이름을 path에 넣지 않는다.)
 - krtour-map Dagster는 이 export를 HTTP로 pull하고, `providers.tripmate_agent`의
   순수 변환 함수가 export item JSON을 `FeatureBundle`로 바꾼다.
 - 최종 `feature_id`, `SourceRecord.source_record_key`, `SourceLink` 생성과 PostGIS
@@ -2918,3 +2919,98 @@ TripMate-agent는 YouTube 여행 콘텐츠에서 장소 후보, 영상·채널·
   `API_KEYS` 중 하나여야 한다.
 - 실제 TripMate-agent export API 구현(T-066)이 배포되기 전까지 krtour-map live smoke는
   fake response/계약 테스트로 제한된다.
+
+## ADR-050: TripMate-agent feature export 계약을 보강한다 — 경로 중립화·정본 위치·노출 정책·철회 라이프사이클
+
+### 상태
+
+Accepted (2026-06-10) — ADR-049 보강. 배경은 `docs/reports/service-completeness-review-2026-06-10.md`
+§4 C-4 · §5 R-3/R-4, 의사결정 `docs/reports/decisions-needed-2026-06-10.md` D-03/D-04/D-05.
+
+### 결정
+
+1. **경로 중립화**: export 경로는 `/api/v1/features/snapshot`·`/api/v1/features/changes`다.
+   REST path에 특정 downstream 이름(`krtour`)을 넣지 않는다 (ADR-049 표기 보정).
+   krtour-map fetcher의 현재 하드코딩 `/api/v1/krtour/features/*`는 TripMate-agent
+   T-066 배포와 동시에 정렬한다 (T-217a).
+2. **계약 정본 위치**: export 계약(스키마·cursor·operation)의 정본은 **TripMate-agent
+   repo의 독립 계약 문서**(`docs/feature-export-api.md`류)다. 본 repo는
+   `docs/rest-api.md` 계열에서 링크 + 소비 측 기대치(`{items, has_more, next_cursor}`,
+   `X-API-Key`, env 키)만 요약한다. ADR-044 관행(데이터 정합성 1차 책임 = 공급 측)과 일치.
+3. **노출 정책**: TripMate-agent는 **검수 통과 후보만 export**한다
+   (`matched`/`user_corrected`; `needs_review`/`ignored` 제외). 검수 후 철회는
+   `reject` operation으로 증분 export한다.
+4. **철회 라이프사이클**: krtour-map은 `reject`/`tombstone` operation을 skip으로
+   끝내지 않고 해당 feature의 **inactive 전환**(+사유 기록)으로 처리한다 — MOIS
+   Step C(폐업→inactive)와 동형 (T-217b). 1단계로 skip 건수 WARN/admin 이슈 노출을
+   선행할 수 있다.
+
+### 근거
+
+- path에 소비자 이름이 박히면 공급 API가 1:1 전용이 되어 확장(다른 소비자)이 막힌다.
+- 계획 문서(`youtube-feature-pipeline-plan.md`)는 완료 후 동결되므로 계약 정본으로 부적합.
+- 검수 전 후보가 일반 feature와 동급 노출되면 사용자 신뢰도 구분이 불가능하다.
+- skip-only 처리는 철회된 후보를 feature로 영구 잔존시켜 데이터 품질을 해친다.
+
+### 결과
+
+- krtour-map: T-217a(fetcher 경로 정렬, T-066 배포와 동시) + T-217b(inactive 전환).
+- TripMate-agent: T-066 구현 시 본 ADR 준수 — 상세 체크리스트는 해당 repo
+  `docs/cross-repo-consistency-actions-2026-06-10.md` TA-01~03.
+- inactive 전환 시 소비자(TripMate POI) 측 응답 정책(batch에서 status 노출 vs missing)은
+  **추가 결정 필요** — T-217b 착수 전 확정.
+
+## ADR-051: TripMate 사용자 장소 제보는 krtour-map 서비스용 수신 API로 받는다
+
+### 상태
+
+Accepted (2026-06-10) — `docs/reports/decisions-needed-2026-06-10.md` D-02.
+
+### 배경
+
+TripMate에 사용자 장소 제보(`FeatureSuggestion`, 일일 한도 20건)가 있으나 krtour-map으로
+흐르는 공식 경로가 없다. TripMate public client의 `/v1/admin/*` 직접 호출은 금지다
+(`docs/tripmate-rest-api.md` §2 — 관리망 인증 경계).
+
+### 결정
+
+- krtour-map에 **서비스용 제보 수신 API**를 신설한다: `POST /v1/features/suggestions`
+  (가칭, `X-Krtour-Service-Token` 인증 + rate-limit).
+- 수신된 제보는 기존 `admin/features/change-requests` 승인 큐로 합류한다 — 별도 승인
+  flow를 만들지 않는다.
+- TripMate는 제보 발생 시 이 API로 릴레이한다 (TripMate TM-13).
+
+### 결과
+
+- 신규 task T-217c (API + change-requests 합류 + admin 표시).
+- 제보 페이로드에 담을 사용자 식별 정보 범위(PIPA — 익명화 vs TripMate 측 참조 ID만)는
+  **추가 결정 필요** — T-217c 설계 전 확정.
+
+## ADR-052: RustFS 버킷은 당분간 공유하되 prefix 소유권을 명문화하고, 추후 전용 버킷으로 분리한다
+
+### 상태
+
+Accepted (2026-06-10, 잠정) — `docs/reports/decisions-needed-2026-06-10.md` D-01 옵션 (b)
+채택, **추후 옵션 (a)(전용 버킷 분리)로 이행 예정**.
+
+### 배경
+
+TripMate-agent가 미디어 원본(영상/자막/전사/프레임, 무기한 보존)을 krtour-map 소유
+버킷(`krtour-map`, prefix `features/`)에 직접 저장한다. krtour-map의 backup/restore·
+수명주기·용량 책임과 충돌 소지가 있다.
+
+### 결정
+
+- **당분간 공유 유지**: 단일 RustFS(S3 `9003`/console `9004`)의 `krtour-map` 버킷을
+  공유한다.
+- **prefix 소유권 명문화**: TripMate-agent가 쓰는 prefix 이하 객체의 소유·수명주기·
+  복구 책임은 TripMate-agent에 있다. krtour-map cold backup 범위에서 해당 prefix는
+  **제외**한다 (T-217e에서 architecture.md·backup 문서에 반영).
+- **추후 분리**: TripMate-agent 전용 버킷으로 분리한다. 분리 시점/트리거(용량 임계,
+  운영 개시 등)는 **추가 결정 필요**.
+
+### 결과
+
+- T-217e — 공유 정책을 `docs/architecture.md` rustfs 절 + backup/restore 문서에 명문화.
+- TripMate-agent 측: 분리 전까지 버킷 기본값 의존 신규 기능 보류 권고 유지 (해당 repo
+  TA-04).

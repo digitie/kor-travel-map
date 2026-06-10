@@ -2,6 +2,28 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-10 (claude) — cross-repo 의사결정 반영: ADR-050~052 + T-217a~f (코드無)
+
+사용자 결정(D-01: b 잠정·추후 분리 / D-02~05: a / D-06: 수정 승인 — TripMate
+`/admin/etl` 유지 / D-08·09: 권고안 / D-07: 미결)을 정본에 반영했다.
+
+- **ADR-050**: TripMate-agent export 계약 보강 — 경로 중립화
+  `/api/v1/features/{snapshot,changes}`(사용자 보정: downstream 이름 path 금지,
+  ADR-049 표기 보정), 계약 정본=tripmate-agent repo 독립 문서, 검수 통과만 export,
+  reject/tombstone → feature inactive 전환.
+- **ADR-051**: 사용자 장소 제보 수신 API `POST /v1/features/suggestions`(가칭,
+  ServiceToken) → change-requests 큐 합류.
+- **ADR-052**: RustFS 버킷 잠정 공유(prefix 소유권·backup 제외 명문화) + 추후 분리.
+- **tasks**: Phase 6.9 신설 — T-217a(fetcher 경로 정렬, **T-066과 동시 배포**),
+  T-217b(inactive 전환), T-217c(제보 API), T-217d(integration-map 정본+분기 audit),
+  T-217e(RustFS 정책 문서화), T-217f(YouTube evidence 노출 확정). CLAUDE.md ADR
+  카운터 052/053으로 갱신.
+- **후속 미결**: D-07(provider 신선도 대시보드), D-10(버킷 분리 트리거),
+  D-11(제보 PIPA 범위), D-12(inactive feature 소비자 응답), D-13(TripMate 자체 ETL
+  범위 vs T-210c) — `docs/reports/decisions-needed-2026-06-10.md` 하단 정리.
+- tripmate-agent 측 문서(`docs/cross-repo-consistency-actions-2026-06-10.md`)에도
+  결정 결과 반영 (해당 repo, 미커밋).
+
 ## 2026-06-10 (claude) — cross-repo 완성도·정합성 검토 보고서 4종 (코드無)
 
 사용자 지시: krtour-map · TripMate · tripmate-agent 3-시스템을 기획자/개발리더 시각에서

@@ -6,7 +6,7 @@
 
 ## 진행 중인 작업 인덱스 (열린 `[ ]` 항목)
 
-> 총 8건. 상세는 아래 각 섹션. 완료 이력은 [`tasks-done.md`](tasks-done.md).
+> 총 14건. 상세는 아래 각 섹션. 완료 이력은 [`tasks-done.md`](tasks-done.md).
 
 - **다음 (우선순위 순)**
   - [ ] T-212d 재측정 pass — read가 압도적으로 많은 운영 전제를 두고 seeded/live
@@ -15,8 +15,8 @@
 - **최근 완료**
   - [x] TripMate-agent provider 추가/연동 후속 작업 추적 — krtour-map 쪽
         `tripmate-agent-youtube` provider 변환, Dagster REST fetch/resource/asset/schedule
-        wiring 완료. 실제 TripMate-agent `/api/v1/krtour/features/*` 구현은 해당 repo
-        `T-066` 후속.
+        wiring 완료. 실제 TripMate-agent export 구현은 해당 repo `T-066` 후속
+        (경로는 ADR-050에서 `/api/v1/features/*`로 중립화 — T-217a에서 fetcher 정렬).
 - **보류 (v2 1차 범위 외)**
   - [ ] Materialized View 도입 검토
   - [ ] streaming ETL (Kafka/Redpanda) 대응
@@ -33,6 +33,26 @@
   - [x] T-216e — 명명 통일(경로+응답 본문, 본질 기준).
   - [x] T-216f — 코드/DB 명명 전파(surrogate만).
   - [x] T-216g — 단일 정본 수렴 + 버전 거버넌스.
+- **Phase 6.9 — cross-repo 정합성 (2026-06-10 검토, ADR-050~052 — 결정 반영분)**
+  - [ ] T-217a — tripmate-agent fetcher 경로 중립화 정렬: `/api/v1/krtour/features/*`
+        → `/api/v1/features/*` (ADR-050 #1). **TripMate-agent T-066 배포와 동시 전환**
+        (양쪽 동시 배포 전 한쪽만 바꾸면 즉시 적재 실패).
+  - [ ] T-217b — `reject`/`tombstone` operation → feature **inactive 전환** (ADR-050
+        #4, MOIS Step C 동형). 1단계 skip 건수 WARN/admin 이슈 노출 선행 가능.
+        착수 전 결정 필요: inactive feature의 소비자 응답 정책(batch `found`+status
+        vs `missing`).
+  - [ ] T-217c — 사용자 장소 제보 수신 API `POST /v1/features/suggestions`(가칭,
+        ServiceToken+rate-limit) → `admin/features/change-requests` 큐 합류 (ADR-051;
+        TripMate TM-13 짝). 착수 전 결정 필요: 제보 페이로드의 사용자 식별 정보 범위(PIPA).
+  - [ ] T-217d — cross-repo 연동 정본 문서 `docs/integration-map.md` 신설: 3-시스템
+        포트·연동 방향·인증 방식·envelope 차이·계약 정본 위치 1장 (D-08 권고안 채택)
+        + 분기 cross-repo 정합성 audit 체크리스트 runbook 등재. 각 repo 진입 문서에서 링크.
+  - [ ] T-217e — RustFS 공유 버킷 정책 명문화 (ADR-052): `docs/architecture.md` rustfs
+        절 + backup/restore 문서에 TripMate-agent prefix 소유권·backup 제외 반영.
+        전용 버킷 분리 시점/트리거는 별도 결정 후 후속 task.
+  - [ ] T-217f — YouTube evidence(영상 링크·타임스탬프·confidence)의 feature detail
+        노출 형태 확정 (검토 KR-06; TripMate 출처 배지 UX TM-08의 선행, D-05 (a) 채택
+        — export는 검수 통과 후보만).
 - **Phase 7 — ADR-045 전체점검/튜닝 (ADR-045 잔여 task 완료 후 시작)**
   - [ ] T-212e
 
