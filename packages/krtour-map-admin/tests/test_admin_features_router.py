@@ -71,7 +71,7 @@ def _feature_row() -> AdminFeatureRow:
         issue_count=1,
         issues=(
             {
-                "violation_key": "issue-1",
+                "issue_id": "issue-1",
                 "violation_type": "missing_address",
                 "severity": "warning",
                 "message": "주소 누락",
@@ -421,7 +421,7 @@ def test_deactivate_feature_uses_transaction(
             status="inactive",
             override_created=True,
             override=FeatureOverride(
-                override_key="override-1",
+                override_id="override-1",
                 feature_id="feature-1",
                 field_path="status",
                 override_value="inactive",

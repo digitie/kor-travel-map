@@ -52,7 +52,7 @@ async def test_feature_update_request_defaults_and_job_fk(
                 )
                 RETURNING
                   request_id, providers, dataset_keys, update_policy, priority,
-                  state, dry_run, matched_scope, job_id, created_at, updated_at
+                  status, dry_run, matched_scope, job_id, created_at, updated_at
                 """
             ),
             {
@@ -67,7 +67,7 @@ async def test_feature_update_request_defaults_and_job_fk(
     assert row["dataset_keys"] == []
     assert row["update_policy"] == {}
     assert row["priority"] == 50
-    assert row["state"] == "queued"
+    assert row["status"] == "queued"
     assert row["dry_run"] is False
     assert row["matched_scope"] == {}
     assert row["job_id"] == job_id
@@ -91,7 +91,7 @@ async def test_feature_update_request_defaults_and_job_fk(
     [
         ("scope_type", "bad_scope"),
         ("run_mode", "later"),
-        ("state", "blocked"),
+        ("status", "blocked"),
     ],
 )
 async def test_feature_update_request_check_constraints(
@@ -103,7 +103,7 @@ async def test_feature_update_request_check_constraints(
         "scope_type": "feature_ids",
         "scope": '{"feature_ids":[]}',
         "run_mode": "queued",
-        "state": "queued",
+        "status": "queued",
     }
     values[column] = value
 
@@ -112,9 +112,9 @@ async def test_feature_update_request_check_constraints(
             text(
                 """
                 INSERT INTO ops.feature_update_requests (
-                  scope_type, scope, run_mode, state
+                  scope_type, scope, run_mode, status
                 )
-                VALUES (:scope_type, CAST(:scope AS jsonb), :run_mode, :state)
+                VALUES (:scope_type, CAST(:scope AS jsonb), :run_mode, :status)
                 """
             ),
             values,
@@ -140,7 +140,7 @@ async def test_feature_update_request_indexes_exist(
         ).all()
     }
     assert {
-        "idx_feature_update_state_priority",
+        "idx_feature_update_status_priority",
         "idx_feature_update_created",
         "idx_feature_update_job",
     }.issubset(indexes)

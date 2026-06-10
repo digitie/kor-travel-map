@@ -73,7 +73,7 @@ _MAX_PEEK_LIMIT: Final[int] = 50
 
 _RETURN_COLUMNS: Final[str] = (
     "request_id, scope_type, scope, providers, dataset_keys, update_policy, "
-    "run_mode, priority, state, dry_run, matched_scope, job_id, dagster_run_id, "
+    "run_mode, priority, status, dry_run, matched_scope, job_id, dagster_run_id, "
     "operator, reason, error_message, created_at, started_at, finished_at, updated_at"
 )
 
@@ -90,7 +90,7 @@ class FeatureUpdateRequest:
     update_policy: dict[str, Any]
     run_mode: str
     priority: int
-    state: str
+    status: str
     dry_run: bool
     matched_scope: dict[str, Any]
     job_id: str | None
@@ -179,7 +179,7 @@ def _row_to_request(row: Any) -> FeatureUpdateRequest:
         update_policy=_json_dict(row.update_policy),
         run_mode=str(row.run_mode),
         priority=int(row.priority),
-        state=str(row.state),
+        status=str(row.status),
         dry_run=bool(row.dry_run),
         matched_scope=_json_dict(row.matched_scope),
         job_id=str(row.job_id) if row.job_id is not None else None,
@@ -286,7 +286,7 @@ def _decode_cursor(cursor: str | None) -> tuple[datetime | None, str | None]:
 _INSERT_REQUEST_SQL: Final[str] = f"""
 INSERT INTO ops.feature_update_requests (
     request_id, scope_type, scope, providers, dataset_keys, update_policy,
-    run_mode, priority, state, dry_run, matched_scope, job_id, operator, reason
+    run_mode, priority, status, dry_run, matched_scope, job_id, operator, reason
 ) VALUES (
     :request_id, :scope_type, CAST(:scope AS jsonb), CAST(:providers AS jsonb),
     CAST(:dataset_keys AS jsonb), CAST(:update_policy AS jsonb),
@@ -304,13 +304,13 @@ WHERE request_id = :request_id
 
 _CLAIM_REQUEST_SQL: Final[str] = f"""
 UPDATE ops.feature_update_requests
-SET state = 'running',
+SET status = 'running',
     started_at = COALESCE(started_at, now()),
     updated_at = now()
 WHERE request_id = (
     SELECT request_id
     FROM ops.feature_update_requests
-    WHERE state = 'queued' AND dry_run IS false
+    WHERE status = 'queued' AND dry_run IS false
     ORDER BY priority DESC, created_at, request_id
     FOR UPDATE SKIP LOCKED
     LIMIT 1
@@ -321,19 +321,19 @@ RETURNING {_RETURN_COLUMNS}
 _PEEK_REQUEST_SQL: Final[str] = f"""
 SELECT {_RETURN_COLUMNS}
 FROM ops.feature_update_requests
-WHERE state = 'queued' AND dry_run IS false
+WHERE status = 'queued' AND dry_run IS false
 ORDER BY priority DESC, created_at, request_id
 LIMIT :limit
 """
 
 _START_REQUEST_SQL: Final[str] = f"""
 UPDATE ops.feature_update_requests
-SET state = 'running',
+SET status = 'running',
     started_at = COALESCE(started_at, now()),
     dagster_run_id = COALESCE(:dagster_run_id, dagster_run_id),
     updated_at = now()
 WHERE request_id = :request_id
-  AND state IN ('queued', 'running')
+  AND status IN ('queued', 'running')
 RETURNING {_RETURN_COLUMNS}
 """
 
@@ -342,47 +342,47 @@ UPDATE ops.feature_update_requests
 SET matched_scope = CAST(:matched_scope AS jsonb),
     updated_at = now()
 WHERE request_id = :request_id
-  AND state IN ('queued', 'running')
+  AND status IN ('queued', 'running')
 RETURNING {_RETURN_COLUMNS}
 """
 
 _FINISH_REQUEST_SQL: Final[str] = f"""
 UPDATE ops.feature_update_requests
-SET state = :state,
+SET status = :status,
     dagster_run_id = COALESCE(:dagster_run_id, dagster_run_id),
     error_message = :error_message,
     finished_at = now(),
     updated_at = now()
 WHERE request_id = :request_id
-  AND state IN ('queued', 'running')
+  AND status IN ('queued', 'running')
 RETURNING {_RETURN_COLUMNS}
 """
 
 _START_IMPORT_JOB_SQL: Final[str] = """
 UPDATE ops.import_jobs
-SET state = 'running',
+SET status = 'running',
     started_at = COALESCE(started_at, now()),
     heartbeat_at = now(),
     current_stage = COALESCE(:current_stage, current_stage)
 WHERE job_id = :job_id
-  AND state IN ('queued', 'running')
+  AND status IN ('queued', 'running')
 """
 
 _FINISH_IMPORT_JOB_SQL: Final[str] = """
 UPDATE ops.import_jobs
-SET state = :state,
+SET status = :status,
     finished_at = now(),
     heartbeat_at = now(),
     error_message = :error_message,
-    progress = CASE WHEN :state = 'done' THEN 100 ELSE progress END
+    progress = CASE WHEN :status = 'done' THEN 100 ELSE progress END
 WHERE job_id = :job_id
-  AND state IN ('queued', 'running')
+  AND status IN ('queued', 'running')
 """
 
 _LIST_REQUESTS_SQL: Final[str] = f"""
 SELECT {_RETURN_COLUMNS}
 FROM ops.feature_update_requests
-WHERE (CAST(:state AS text) IS NULL OR state = CAST(:state AS text))
+WHERE (CAST(:status AS text) IS NULL OR status = CAST(:status AS text))
   AND (CAST(:scope_type AS text) IS NULL OR scope_type = CAST(:scope_type AS text))
   AND (
     CAST(:provider_filter AS jsonb) IS NULL
@@ -430,14 +430,14 @@ async def _finish_import_job(
     session: AsyncSession,
     *,
     job_id: str | None,
-    state: str,
+    status: str,
     error_message: str | None,
 ) -> None:
     if job_id is None:
         return
     await session.execute(
         text(_FINISH_IMPORT_JOB_SQL),
-        {"job_id": job_id, "state": state, "error_message": error_message},
+        {"job_id": job_id, "status": status, "error_message": error_message},
     )
 
 
@@ -597,19 +597,19 @@ async def finish_update_request(
     session: AsyncSession,
     request_id: str,
     *,
-    state: str = "done",
+    status: str = "done",
     dagster_run_id: str | None = None,
     error_message: str | None = None,
 ) -> FeatureUpdateRequest | None:
     """queued/running 요청을 terminal 상태로 닫고 import job도 같은 상태로 닫는다."""
-    if state not in _TERMINAL_STATES:
-        raise ValueError(f"state must be one of {sorted(_TERMINAL_STATES)}")
+    if status not in _TERMINAL_STATES:
+        raise ValueError(f"status must be one of {sorted(_TERMINAL_STATES)}")
     row = (
         await session.execute(
             text(_FINISH_REQUEST_SQL),
             {
                 "request_id": request_id,
-                "state": state,
+                "status": status,
                 "dagster_run_id": dagster_run_id,
                 "error_message": error_message,
             },
@@ -621,7 +621,7 @@ async def finish_update_request(
     await _finish_import_job(
         session,
         job_id=request.job_id,
-        state=state,
+        status=status,
         error_message=error_message,
     )
     return request
@@ -656,7 +656,7 @@ async def cancel_update_request(
     return await finish_update_request(
         session,
         request_id,
-        state="cancelled",
+        status="cancelled",
         error_message=error_message,
     )
 
@@ -677,7 +677,7 @@ async def get_update_request(
 async def list_update_requests(
     session: AsyncSession,
     *,
-    state: str | None = None,
+    status: str | None = None,
     scope_type: str | None = None,
     provider: str | None = None,
     dataset_key: str | None = None,
@@ -695,7 +695,7 @@ async def list_update_requests(
         await session.execute(
             text(_LIST_REQUESTS_SQL),
             {
-                "state": state,
+                "status": status,
                 "scope_type": scope_type,
                 "provider_filter": _json_param([provider]) if provider else None,
                 "dataset_key_filter": (

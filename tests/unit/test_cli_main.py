@@ -111,7 +111,7 @@ def test_format_status_full() -> None:
         features_inactive=2,
         features_by_kind={"place": 7, "event": 1},
         source_records_by_provider={"python-mois-api": 8},
-        import_jobs_by_state={"done": 3, "running": 1},
+        import_jobs_by_status={"done": 3, "running": 1},
         dedup_queue_by_status={"pending": 5},
     )
     out = _format_status(counts)
@@ -195,7 +195,7 @@ def test_format_incremental_result_done() -> None:
                 job_id="job-9",
                 kind="mois_license_incremental_update",
                 payload={},
-                state="done",
+                status="done",
                 progress=100,
                 current_stage=None,
                 source_checksum=None,
@@ -249,7 +249,7 @@ def test_format_closed_result_done() -> None:
                 job_id="job-c",
                 kind="mois_license_closed_update",
                 payload={},
-                state="done",
+                status="done",
                 progress=100,
                 current_stage=None,
                 source_checksum=None,
@@ -321,7 +321,7 @@ def _job_result(*, acquired: bool) -> MoisBulkJobResult:
         job_id="job-1",
         kind="mois_license_full_update",
         payload={"dataset_key": "mois_license_features_bulk"},
-        state="done",
+        status="done",
         progress=100,
         current_stage=None,
         source_checksum=None,
@@ -362,7 +362,7 @@ def test_parser_dedup_merge_minimal() -> None:
     parser = build_parser()
     args = parser.parse_args(["dedup-merge", "rk-123"])
     assert args.command == "dedup-merge"
-    assert args.review_key == "rk-123"
+    assert args.review_id == "rk-123"
     assert args.merged_by is None
     assert args.reason is None
     assert hasattr(args, "func")
@@ -377,10 +377,10 @@ def test_parser_dedup_merge_options() -> None:
     assert args.reason == "dup"
 
 
-def test_parser_dedup_merge_requires_review_key() -> None:
+def test_parser_dedup_merge_requires_review_id() -> None:
     parser = build_parser()
     with pytest.raises(SystemExit):
-        parser.parse_args(["dedup-merge"])  # review_key 필수
+        parser.parse_args(["dedup-merge"])  # review_id 필수
 
 
 def test_format_merge_outcome() -> None:

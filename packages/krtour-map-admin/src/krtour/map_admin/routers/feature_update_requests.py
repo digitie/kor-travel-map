@@ -322,7 +322,7 @@ def _record_from_request(
         update_policy=row.update_policy,
         run_mode=row.run_mode,
         priority=row.priority,
-        status=row.state,
+        status=row.status,
         dry_run=row.dry_run,
         matched_scope=row.matched_scope,
         job_id=row.job_id,
@@ -570,7 +570,7 @@ async def list_feature_update_requests(
     try:
         page: FeatureUpdateRequestPage = await list_update_requests(
             session,
-            state=status_filter,
+            status=status_filter,
             scope_type=scope_type,
             provider=provider,
             dataset_key=dataset_key,
@@ -649,7 +649,7 @@ async def cancel_feature_update_request(
                 )
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"취소할 수 없는 상태: {existing.state}",
+                detail=f"취소할 수 없는 상태: {existing.status}",
             )
     return _create_response(cancelled, started_at=started_at)
 
@@ -677,7 +677,7 @@ async def run_feature_update_request_now(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"feature update request 없음: {request_id!r}",
             )
-        if existing.state == "running":
+        if existing.status == "running":
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="이미 running 상태인 request는 run-now 재요청할 수 없습니다.",

@@ -188,7 +188,7 @@ async def test_f4_warn_over_threshold(migrated_session: AsyncSession) -> None:
         "threshold": 2,
         "over_threshold": True,
     }
-    assert len(f4.sample_ids) == 5  # pending review_key 샘플
+    assert len(f4.sample_ids) == 5  # pending review_id 샘플
     # 다른 위반(F1~F3) 없으면 severity_max는 WARN.
     assert report.severity_max == "WARN"
     assert report.summary["by_severity"]["WARN"] == 1
@@ -382,7 +382,7 @@ async def _seed_dedup_review(
                 " spatial_score, category_score, status) "
                 "VALUES (:feature_id_a, :feature_id_b, :score, :score, "
                 " :score, :score, :status) "
-                "RETURNING review_key::text"
+                "RETURNING review_id::text"
             ),
             {
                 "feature_id_a": feature_id_a,

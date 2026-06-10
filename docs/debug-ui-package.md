@@ -224,7 +224,7 @@ krtour-map-admin run --host 127.0.0.1 --port 9011
 | `/import-jobs` | GET, POST | 작업 큐 조회/등록 |
 | `/import-jobs/{job_id}` | GET, PATCH | 상태 변경 |
 | `/dedup-review` | GET | pending 큐 |
-| `/dedup-review/{review_key}` | PATCH | accept/reject/merged |
+| `/dedup-review/{review_id}` | PATCH | accept/reject/merged |
 | `/integrity-violations` | GET | `data_integrity_violations` |
 | `/debug/explain` | POST | body에 SQL (allowlist 적용) → EXPLAIN (FORMAT JSON, ANALYZE) |
 | `/debug/fixtures` | GET, POST | fixture 저장/replay 메타 |

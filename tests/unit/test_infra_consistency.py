@@ -203,7 +203,7 @@ async def test_check_f5_provider_last_success_sla_ok_skips_sample_query() -> Non
 def test_build_f7_dedup_score_result_counts_regressions_and_limits_samples() -> None:
     rows = [
         {
-            "review_key": "rk-regressed",
+            "review_id": "rk-regressed",
             "feature_id_a": "f7-a",
             "feature_id_b": "f7-b",
             "baseline_score": 95.0,
@@ -217,7 +217,7 @@ def test_build_f7_dedup_score_result_counts_regressions_and_limits_samples() -> 
             "lat_b": 37.5665,
         },
         {
-            "review_key": "rk-stable",
+            "review_id": "rk-stable",
             "feature_id_a": "f7-c",
             "feature_id_b": "f7-d",
             "baseline_score": 95.0,
@@ -231,7 +231,7 @@ def test_build_f7_dedup_score_result_counts_regressions_and_limits_samples() -> 
             "lat_b": 37.5796,
         },
         {
-            "review_key": "rk-no-coord",
+            "review_id": "rk-no-coord",
             "feature_id_a": "f7-e",
             "feature_id_b": "f7-f",
             "baseline_score": 95.0,
@@ -262,7 +262,7 @@ async def test_check_f7_dedup_score_regression_delegates_sql_rows() -> None:
             _FakeResult(
                 rows=[
                     {
-                        "review_key": "rk-regressed",
+                        "review_id": "rk-regressed",
                         "feature_id_a": "f7-a",
                         "feature_id_b": "f7-b",
                         "baseline_score": 95.0,
@@ -411,7 +411,7 @@ async def test_run_consistency_checks_evaluates_dynamic_cases_and_persists() -> 
             _FakeResult(
                 rows=[
                     {
-                        "review_key": "rk-regressed",
+                        "review_id": "rk-regressed",
                         "feature_id_a": "f7-a",
                         "feature_id_b": "f7-b",
                         "baseline_score": 95.0,

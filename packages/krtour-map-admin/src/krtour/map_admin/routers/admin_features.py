@@ -304,7 +304,7 @@ def _settings() -> AdminSettings:
 
 def _issue_record(issue: dict[str, Any]) -> AdminFeatureIssueRecord:
     return AdminFeatureIssueRecord(
-        issue_id=issue.get("violation_key"),
+        issue_id=issue.get("issue_id"),
         violation_type=issue.get("violation_type"),
         severity=issue.get("severity"),
         message=issue.get("message"),
@@ -335,7 +335,7 @@ def _override(row: FeatureOverride | None) -> AdminFeatureOverrideRecord | None:
     if row is None:
         return None
     return AdminFeatureOverrideRecord(
-        override_id=row.override_key,
+        override_id=row.override_id,
         feature_id=row.feature_id,
         field_path=row.field_path,
         override_value=row.override_value,

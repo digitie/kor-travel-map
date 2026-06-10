@@ -29,7 +29,7 @@ async def test_batch_dag_gate_links_done_child_and_records_mv_refresh_skip(
         kind="offline_upload_load",
         payload={"upload_id": "00000000-0000-0000-0000-000000000001"},
     )
-    child = await finish_import_job(migrated_session, child.job_id, state="done") or child
+    child = await finish_import_job(migrated_session, child.job_id, status="done") or child
 
     result = await run_batch_dag_consistency_gate(
         migrated_session,
@@ -40,14 +40,14 @@ async def test_batch_dag_gate_links_done_child_and_records_mv_refresh_skip(
 
     assert result.state == "done"
     assert result.root_job is not None
-    assert result.root_job.state == "done"
+    assert result.root_job.status == "done"
     assert result.child_jobs[0].job_id == child.job_id
     assert result.child_jobs[0].load_batch_id == result.load_batch_id
     assert result.child_jobs[0].parent_job_id == result.root_job.job_id
     assert result.consistency_report is not None
     assert result.consistency_report.severity_max == "OK"
     assert result.mv_refresh_job is not None
-    assert result.mv_refresh_job.state == "done"
+    assert result.mv_refresh_job.status == "done"
     assert result.mv_refreshes[0].state == "skipped:no_materialized_views"
 
     persisted = (
@@ -66,7 +66,7 @@ async def test_batch_dag_gate_blocks_mv_refresh_on_error(
     migrated_session: AsyncSession,
 ) -> None:
     child = await start_import_job(migrated_session, kind="feature_event_source_load")
-    child = await finish_import_job(migrated_session, child.job_id, state="done") or child
+    child = await finish_import_job(migrated_session, child.job_id, status="done") or child
     migrated_session.add(
         SourceRecordRow(
             source_record_key="batch-gate-orphan",
@@ -93,9 +93,9 @@ async def test_batch_dag_gate_blocks_mv_refresh_on_error(
     assert result.consistency_report.severity_max == "ERROR"
     assert result.mv_refresh_job is None
     assert result.root_job is not None
-    assert result.root_job.state == "failed"
+    assert result.root_job.status == "failed"
     assert result.consistency_job is not None
-    assert result.consistency_job.state == "failed"
+    assert result.consistency_job.status == "failed"
 
 
 async def test_batch_dag_gate_fails_when_child_not_done(
@@ -114,4 +114,4 @@ async def test_batch_dag_gate_fails_when_child_not_done(
     assert "not done" in result.error_message
     assert result.consistency_job is None
     assert result.root_job is not None
-    assert result.root_job.state == "failed"
+    assert result.root_job.status == "failed"

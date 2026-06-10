@@ -179,7 +179,7 @@ async def _seed_live_like_perf_data(session: AsyncSession, *, n: int = 3200) -> 
         text(
             """
             INSERT INTO ops.import_jobs (
-                kind, payload, state, progress,
+                kind, payload, status, progress,
                 load_batch_id, parent_job_id, created_at, started_at, heartbeat_at
             )
             SELECT
@@ -350,7 +350,7 @@ def _assert_no_seq_scan_on(plan: dict[str, Any], relation_name: str) -> None:
     assert not seq_scans, f"unexpected Seq Scan on {relation_name}: {seq_scans}"
 
 
-async def _walk_dedup_review_keys(
+async def _walk_dedup_review_ids(
     session: AsyncSession, *, page_size: int = 37
 ) -> list[str]:
     seen: list[str] = []
@@ -359,14 +359,14 @@ async def _walk_dedup_review_keys(
         page = await admin_feature_repo.list_dedup_reviews(
             session, page_size=page_size, cursor=cursor
         )
-        seen.extend(item.review_key for item in page.items)
+        seen.extend(item.review_id for item in page.items)
         if page.next_cursor is None:
             return seen
         cursor = page.next_cursor
     raise AssertionError("dedup review cursor did not terminate")
 
 
-async def _walk_enrichment_review_keys(
+async def _walk_enrichment_review_ids(
     session: AsyncSession, *, page_size: int = 37
 ) -> list[str]:
     seen: list[str] = []
@@ -375,7 +375,7 @@ async def _walk_enrichment_review_keys(
         page = await admin_feature_repo.list_enrichment_reviews(
             session, page_size=page_size, cursor=cursor
         )
-        seen.extend(item.review_key for item in page.items)
+        seen.extend(item.review_id for item in page.items)
         if page.next_cursor is None:
             return seen
         cursor = page.next_cursor
@@ -537,7 +537,7 @@ async def test_t212d_ops_and_review_lists_use_keyset_indexes(
         migrated_session,
         ops_repo._LIST_IMPORT_JOBS_SQL,
         {
-            "state": "queued",
+            "status": "queued",
             "kind": None,
             "load_batch_id": None,
             "parent_job_id": None,
@@ -548,7 +548,7 @@ async def test_t212d_ops_and_review_lists_use_keyset_indexes(
     )
     _assert_uses_index(
         jobs,
-        "idx_import_jobs_state",
+        "idx_import_jobs_status",
         "idx_import_jobs_created_keyset",
     )
 
@@ -580,7 +580,7 @@ async def test_t212d_ops_and_review_lists_use_keyset_indexes(
             "bbox_max_lon": None,
             "bbox_max_lat": None,
             "cursor_detected_at": None,
-            "cursor_violation_key": None,
+            "cursor_issue_id": None,
             "limit": 51,
         },
     )
@@ -603,7 +603,7 @@ async def test_t212d_ops_and_review_lists_use_keyset_indexes(
             "max_score": None,
             "q_like": None,
             "cursor_score": None,
-            "cursor_review_key": None,
+            "cursor_review_id": None,
             "limit_plus_one": 51,
         },
     )
@@ -619,7 +619,7 @@ async def test_t212d_ops_and_review_lists_use_keyset_indexes(
             "max_score": None,
             "q_like": None,
             "cursor_score": None,
-            "cursor_review_key": None,
+            "cursor_review_id": None,
             "limit_plus_one": 51,
         },
     )
@@ -723,8 +723,8 @@ async def test_t212d_keyset_cursor_queries_keep_uuid_tie_breakers(
     dedup_next = await admin_feature_repo.list_dedup_reviews(
         migrated_session, page_size=5, cursor=dedup_page.next_cursor
     )
-    assert {item.review_key for item in dedup_page.items}.isdisjoint(
-        {item.review_key for item in dedup_next.items}
+    assert {item.review_id for item in dedup_page.items}.isdisjoint(
+        {item.review_id for item in dedup_next.items}
     )
 
     enrichment_page = await admin_feature_repo.list_enrichment_reviews(
@@ -735,20 +735,20 @@ async def test_t212d_keyset_cursor_queries_keep_uuid_tie_breakers(
     enrichment_next = await admin_feature_repo.list_enrichment_reviews(
         migrated_session, page_size=5, cursor=enrichment_page.next_cursor
     )
-    assert {item.review_key for item in enrichment_page.items}.isdisjoint(
-        {item.review_key for item in enrichment_next.items}
+    assert {item.review_id for item in enrichment_page.items}.isdisjoint(
+        {item.review_id for item in enrichment_next.items}
     )
 
-    dedup_seen = await _walk_dedup_review_keys(migrated_session)
+    dedup_seen = await _walk_dedup_review_ids(migrated_session)
     dedup_expected = list(
         (
             await migrated_session.execute(
                 text(
                     """
-                    SELECT review_key::text
+                    SELECT review_id::text
                     FROM ops.dedup_review_queue
                     WHERE status = 'pending'
-                    ORDER BY total_score DESC, review_key DESC
+                    ORDER BY total_score DESC, review_id DESC
                     """
                 )
             )
@@ -757,16 +757,16 @@ async def test_t212d_keyset_cursor_queries_keep_uuid_tie_breakers(
     assert dedup_seen == dedup_expected
     assert len(dedup_seen) == len(set(dedup_seen))
 
-    enrichment_seen = await _walk_enrichment_review_keys(migrated_session)
+    enrichment_seen = await _walk_enrichment_review_ids(migrated_session)
     enrichment_expected = list(
         (
             await migrated_session.execute(
                 text(
                     """
-                    SELECT review_key::text
+                    SELECT review_id::text
                     FROM ops.enrichment_review_queue
                     WHERE status = 'pending'
-                    ORDER BY name_score DESC, review_key DESC
+                    ORDER BY name_score DESC, review_id DESC
                     """
                 )
             )

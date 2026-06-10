@@ -116,7 +116,7 @@ def _request(
         update_policy={"prevent_provider_reactivation": True},
         run_mode=run_mode,
         priority=50,
-        state=state,
+        status=state,
         dry_run=False,
         matched_scope={},
         job_id="job-1",
@@ -174,7 +174,7 @@ def _execution_result(
         request=request,
         plan=plan,
         results=results,
-        state=state,
+        status=state,
         error_message=error_message,
     )
 

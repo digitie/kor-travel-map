@@ -1,8 +1,8 @@
 """``test_cli_dedup_merge`` — ``krtour-map dedup-merge`` round-trip (Sprint 4a).
 
-검토 큐 후보 1쌍 적재 → CLI ``dedup-merge <review_key>``(자체 engine, ``--dsn``) →
+검토 큐 후보 1쌍 적재 → CLI ``dedup-merge <review_id>``(자체 engine, ``--dsn``) →
 병합 + 큐 ``merged`` 전이를 검증. + advisory lock 점유 시 skip(exit 3) + 미존재
-review_key(exit 2).
+review_id(exit 2).
 """
 
 from __future__ import annotations
@@ -92,7 +92,7 @@ async def _seed_pair(engine: AsyncEngine) -> str:
         )
         session.add(row)
         await session.flush()
-        return str(row.review_key)
+        return str(row.review_id)
 
 
 @pytest.fixture
@@ -107,16 +107,16 @@ async def container_dsn(
         await session.execute(text(_TRUNCATE_SQL))
 
 
-async def _queue_status(engine: AsyncEngine, review_key: str) -> str:
+async def _queue_status(engine: AsyncEngine, review_id: str) -> str:
     async with AsyncSession(engine) as session:
         return str(
             (
                 await session.execute(
                     text(
                         "SELECT status FROM ops.dedup_review_queue "
-                        "WHERE review_key = :k"
+                        "WHERE review_id = :k"
                     ),
-                    {"k": review_key},
+                    {"k": review_id},
                 )
             ).scalar_one()
         )
@@ -125,23 +125,23 @@ async def _queue_status(engine: AsyncEngine, review_key: str) -> str:
 async def test_cli_dedup_merge_round_trip(
     container_dsn: str, migrated_engine: AsyncEngine
 ) -> None:
-    review_key = await _seed_pair(migrated_engine)
+    review_id = await _seed_pair(migrated_engine)
     args = build_parser().parse_args(
-        ["--dsn", container_dsn, "dedup-merge", review_key, "--merged-by", "op-1"]
+        ["--dsn", container_dsn, "dedup-merge", review_id, "--merged-by", "op-1"]
     )
     rc = await args.func(args)  # type: ignore[attr-defined]
     assert rc == 0
-    assert await _queue_status(migrated_engine, review_key) == "merged"
+    assert await _queue_status(migrated_engine, review_id) == "merged"
 
 
 async def test_cli_dedup_merge_skips_when_locked(
     container_dsn: str, migrated_engine: AsyncEngine
 ) -> None:
-    review_key = await _seed_pair(migrated_engine)
+    review_id = await _seed_pair(migrated_engine)
     args = build_parser().parse_args(
-        ["--dsn", container_dsn, "dedup-merge", review_key]
+        ["--dsn", container_dsn, "dedup-merge", review_id]
     )
-    key = dedup_merge_lock_key(review_key)
+    key = dedup_merge_lock_key(review_id)
     async with (
         AsyncSession(migrated_engine) as holder,
         advisory_lock(holder, key),
@@ -149,7 +149,7 @@ async def test_cli_dedup_merge_skips_when_locked(
         rc = await args.func(args)  # type: ignore[attr-defined]
     assert rc == 3  # _EXIT_LOCK_SKIPPED
     # 잠겨서 미수행 — 큐는 그대로 pending.
-    assert await _queue_status(migrated_engine, review_key) == "pending"
+    assert await _queue_status(migrated_engine, review_id) == "pending"
 
 
 async def test_cli_dedup_merge_unknown_key_exit2(

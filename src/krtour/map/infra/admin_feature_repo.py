@@ -104,7 +104,7 @@ class AdminFeaturePage:
 class FeatureOverride:
     """생성/갱신된 feature override summary."""
 
-    override_key: str
+    override_id: str
     feature_id: str
     field_path: str
     override_value: Any
@@ -208,7 +208,7 @@ class DedupFeatureSummary:
 class DedupReviewRow:
     """``GET /admin/dedup-review`` item."""
 
-    review_key: str
+    review_id: str
     status: str
     total_score: float
     name_score: float
@@ -415,7 +415,7 @@ WITH base AS (
             count(*)::integer AS issue_count,
             jsonb_agg(
                 jsonb_build_object(
-                    'violation_key', v.violation_key::text,
+                    'issue_id', v.issue_id::text,
                     'violation_type', v.violation_type,
                     'severity', v.severity,
                     'message', v.message,
@@ -612,7 +612,7 @@ DO UPDATE SET
     created_by = EXCLUDED.created_by,
     created_at = now()
 RETURNING
-    override_key::text,
+    override_id::text,
     feature_id,
     field_path,
     override_value,
@@ -629,7 +629,7 @@ def _feature_override(row: Any) -> FeatureOverride:
         with suppress(json.JSONDecodeError):
             value = json.loads(value)
     return FeatureOverride(
-        override_key=str(row["override_key"]),
+        override_id=str(row["override_id"]),
         feature_id=str(row["feature_id"]),
         field_path=str(row["field_path"]),
         override_value=value,
@@ -800,7 +800,7 @@ ON CONFLICT (feature_id) DO UPDATE SET
     detail = EXCLUDED.detail,
     status = EXCLUDED.status,
     data_origin = 'user_request',
-    data_version = 1,
+    data_version = GREATEST(features.data_version, 1),
     user_change_kind = 'add',
     user_change_status = 'applied',
     user_change_request_id = CAST(:request_id AS uuid),
@@ -896,7 +896,7 @@ SET
         ELSE f.sibling_group_id
     END,
     data_origin = 'user_request',
-    data_version = 1,
+    data_version = GREATEST(f.data_version, 1),
     user_change_kind = 'update',
     user_change_status = 'applied',
     user_change_request_id = CAST(:request_id AS uuid),
@@ -915,7 +915,7 @@ SET
     status = 'deleted',
     deleted_at = now(),
     data_origin = 'user_request',
-    data_version = 1,
+    data_version = GREATEST(f.data_version, 1),
     user_change_kind = 'delete',
     user_change_status = 'applied',
     user_change_request_id = CAST(:request_id AS uuid),
@@ -930,13 +930,26 @@ WHERE f.feature_id = :feature_id
 RETURNING f.feature_id, f.status, f.user_deleted_at
 """
 
-_UPSERT_USER_VERSION_FROM_FEATURE_SQL: Final[str] = """
+_NEXT_USER_VERSION_SQL: Final[str] = """
+SELECT COALESCE(MAX(version), 0) + 1
+FROM feature.feature_versions
+WHERE feature_id = :feature_id
+"""
+
+_SET_FEATURE_DATA_VERSION_SQL: Final[str] = """
+UPDATE feature.features
+SET data_version = :version,
+    updated_at = now()
+WHERE feature_id = :feature_id
+"""
+
+_INSERT_USER_VERSION_FROM_FEATURE_SQL: Final[str] = """
 INSERT INTO feature.feature_versions (
     feature_id, version, origin, change_kind, payload, request_id, created_by
 )
 SELECT
     f.feature_id,
-    1,
+    CAST(:version AS integer),
     'user_request',
     :change_kind,
     jsonb_build_object(
@@ -973,13 +986,6 @@ SELECT
     :operator
 FROM feature.features AS f
 WHERE f.feature_id = :feature_id
-ON CONFLICT (feature_id, version) DO UPDATE SET
-    origin = EXCLUDED.origin,
-    change_kind = EXCLUDED.change_kind,
-    payload = EXCLUDED.payload,
-    request_id = EXCLUDED.request_id,
-    created_by = EXCLUDED.created_by,
-    created_at = now()
 """
 
 _MARK_CHANGE_APPLIED_SQL: Final[str] = """
@@ -1198,10 +1204,23 @@ async def _apply_change(
             user_deleted_at=state["user_deleted_at"],
         )
 
+    next_version = int(
+        (
+            await session.execute(
+                text(_NEXT_USER_VERSION_SQL),
+                {"feature_id": request.feature_id},
+            )
+        ).scalar_one()
+    )
     await session.execute(
-        text(_UPSERT_USER_VERSION_FROM_FEATURE_SQL),
+        text(_SET_FEATURE_DATA_VERSION_SQL),
+        {"feature_id": request.feature_id, "version": next_version},
+    )
+    await session.execute(
+        text(_INSERT_USER_VERSION_FROM_FEATURE_SQL),
         {
             "feature_id": request.feature_id,
+            "version": next_version,
             "request_id": request.request_id,
             "change_kind": request.action,
             "operator": operator,
@@ -1324,7 +1343,7 @@ async def list_feature_change_requests(
 _DEDUP_REVIEW_SQL: Final[str] = """
 WITH reviews AS MATERIALIZED (
     SELECT
-        q.review_key,
+        q.review_id,
         q.status,
         q.total_score,
         q.name_score,
@@ -1348,12 +1367,12 @@ WITH reviews AS MATERIALIZED (
       )
       AND (
         CAST(:cursor_score AS numeric) IS NULL
-        OR (q.total_score, q.review_key) < (
+        OR (q.total_score, q.review_id) < (
             CAST(:cursor_score AS numeric),
-            CAST(:cursor_review_key AS uuid)
+            CAST(:cursor_review_id AS uuid)
         )
       )
-    ORDER BY q.total_score DESC, q.review_key DESC
+    ORDER BY q.total_score DESC, q.review_id DESC
 ),
 expanded AS (
     SELECT
@@ -1429,7 +1448,7 @@ WHERE (
     OR category_a = ANY(CAST(:categories AS text[]))
     OR category_b = ANY(CAST(:categories AS text[]))
   )
-ORDER BY total_score DESC, review_key DESC
+ORDER BY total_score DESC, review_id DESC
 LIMIT :limit_plus_one
 """
 
@@ -1444,7 +1463,7 @@ def _dedup_cursor_payload(cursor: str | None) -> dict[str, Any]:
         raise ValueError("invalid dedup review cursor") from exc
     if not isinstance(payload, dict):
         raise ValueError("invalid dedup review cursor")
-    if not isinstance(payload.get("review_key"), str):
+    if not isinstance(payload.get("review_id"), str):
         raise ValueError("invalid dedup review cursor")
     return payload
 
@@ -1452,20 +1471,20 @@ def _dedup_cursor_payload(cursor: str | None) -> dict[str, Any]:
 def _dedup_cursor_params(cursor: str | None) -> dict[str, Any]:
     payload = _dedup_cursor_payload(cursor)
     if not payload:
-        return {"cursor_score": None, "cursor_review_key": None}
+        return {"cursor_score": None, "cursor_review_id": None}
     try:
         score = str(payload["total_score"])
         Decimal(score)
-        UUID(str(payload["review_key"]))
+        UUID(str(payload["review_id"]))
     except (KeyError, TypeError, ValueError, InvalidOperation) as exc:
         raise ValueError("invalid dedup review cursor") from exc
-    return {"cursor_score": score, "cursor_review_key": payload["review_key"]}
+    return {"cursor_score": score, "cursor_review_id": payload["review_id"]}
 
 
 def _encode_dedup_cursor(item: DedupReviewRow) -> str:
     raw = json.dumps(
         {
-            "review_key": item.review_key,
+            "review_id": item.review_id,
             "total_score": (
                 item.total_score_cursor
                 if item.total_score_cursor is not None
@@ -1496,7 +1515,7 @@ def _dedup_feature(row: Any, suffix: str) -> DedupFeatureSummary:
 
 def _dedup_review_row(row: Any) -> DedupReviewRow:
     return DedupReviewRow(
-        review_key=str(row["review_key"]),
+        review_id=str(row["review_id"]),
         status=str(row["status"]),
         total_score=_score(row["total_score"]),
         name_score=_score(row["name_score"]),
@@ -1566,23 +1585,23 @@ SET status = :decision,
     reviewed_at = now(),
     reviewed_by = :reviewed_by,
     decision_reason = COALESCE(:decision_reason, decision_reason)
-WHERE review_key = :review_key
+WHERE review_id = :review_id
   AND status = 'pending'
   AND :decision = ANY(CAST(ARRAY['accepted','rejected','ignored'] AS text[]))
-RETURNING review_key::text
+RETURNING review_id::text
 """
 
 _SELECT_DEDUP_PAIR_SQL: Final[str] = """
 SELECT feature_id_a, feature_id_b, total_score, status
 FROM ops.dedup_review_queue
-WHERE review_key = :review_key
+WHERE review_id = :review_id
 FOR UPDATE
 """
 
 
 async def set_dedup_review_decision(
     session: AsyncSession,
-    review_key: str,
+    review_id: str,
     *,
     decision: DedupDecision,
     reviewed_by: str | None = None,
@@ -1593,7 +1612,7 @@ async def set_dedup_review_decision(
         await session.execute(
             text(_SET_DEDUP_DECISION_SQL),
             {
-                "review_key": review_key,
+                "review_id": review_id,
                 "decision": decision,
                 "reviewed_by": reviewed_by,
                 "decision_reason": decision_reason,
@@ -1605,7 +1624,7 @@ async def set_dedup_review_decision(
 
 async def merge_dedup_review(
     session: AsyncSession,
-    review_key: str,
+    review_id: str,
     *,
     master_feature_id: str | None = None,
     merged_by: str | None = None,
@@ -1614,17 +1633,17 @@ async def merge_dedup_review(
     """dedup review를 병합한다. ``master_feature_id``가 없으면 기존 자동 선정."""
     if master_feature_id is None:
         return await merge_from_review(
-            session, review_key, merged_by=merged_by, reason=reason
+            session, review_id, merged_by=merged_by, reason=reason
         )
 
     row = (
-        await session.execute(text(_SELECT_DEDUP_PAIR_SQL), {"review_key": review_key})
+        await session.execute(text(_SELECT_DEDUP_PAIR_SQL), {"review_id": review_id})
     ).one_or_none()
     if row is None:
-        raise MergeNotFoundError(f"review_key 없음 — {review_key!r}")
+        raise MergeNotFoundError(f"review_id 없음 — {review_id!r}")
     if row.status != "pending":
         raise MergeConflictError(
-            f"이미 검토된 후보(status={row.status!r}) — {review_key!r}"
+            f"이미 검토된 후보(status={row.status!r}) — {review_id!r}"
         )
     if master_feature_id == row.feature_id_a:
         loser_id = row.feature_id_b
@@ -1640,7 +1659,7 @@ async def merge_dedup_review(
         master_id=master_feature_id,
         loser_id=loser_id,
         score=float(row.total_score) if row.total_score is not None else None,
-        review_key=review_key,
+        review_id=review_id,
         merged_by=merged_by,
         reason=reason,
     )
@@ -1659,7 +1678,7 @@ class EnrichmentReviewRow:
     join해 표시하고, source(2차, visitkorea)는 큐에 보관된 식별/이름만 노출한다.
     """
 
-    review_key: str
+    review_id: str
     status: str
     name_score: float
     target_feature_id: str
@@ -1690,7 +1709,7 @@ class EnrichmentReviewPage:
 _ENRICHMENT_REVIEW_SQL: Final[str] = """
 WITH reviews AS MATERIALIZED (
     SELECT
-        q.review_key,
+        q.review_id,
         q.status,
         q.name_score,
         q.target_feature_id,
@@ -1726,15 +1745,15 @@ WITH reviews AS MATERIALIZED (
       )
       AND (
         CAST(:cursor_score AS numeric) IS NULL
-        OR (q.name_score, q.review_key) < (
+        OR (q.name_score, q.review_id) < (
             CAST(:cursor_score AS numeric),
-            CAST(:cursor_review_key AS uuid)
+            CAST(:cursor_review_id AS uuid)
         )
     )
-    ORDER BY q.name_score DESC, q.review_key DESC
+    ORDER BY q.name_score DESC, q.review_id DESC
 )
 SELECT
-    q.review_key,
+    q.review_id,
     q.status,
     q.name_score,
     q.target_feature_id,
@@ -1753,7 +1772,7 @@ SELECT
     x_extension.ST_Y(f.coord) AS target_lat
 FROM reviews AS q
 LEFT JOIN feature.features AS f ON f.feature_id = q.target_feature_id
-ORDER BY q.name_score DESC, q.review_key DESC
+ORDER BY q.name_score DESC, q.review_id DESC
 LIMIT :limit_plus_one
 """
 
@@ -1761,20 +1780,20 @@ LIMIT :limit_plus_one
 def _enrichment_cursor_params(cursor: str | None) -> dict[str, Any]:
     payload = _dedup_cursor_payload(cursor)
     if not payload:
-        return {"cursor_score": None, "cursor_review_key": None}
+        return {"cursor_score": None, "cursor_review_id": None}
     try:
         score = str(payload["name_score"])
         Decimal(score)
-        UUID(str(payload["review_key"]))
+        UUID(str(payload["review_id"]))
     except (KeyError, TypeError, ValueError, InvalidOperation) as exc:
         raise ValueError("invalid enrichment review cursor") from exc
-    return {"cursor_score": score, "cursor_review_key": payload["review_key"]}
+    return {"cursor_score": score, "cursor_review_id": payload["review_id"]}
 
 
 def _encode_enrichment_cursor(item: EnrichmentReviewRow) -> str:
     raw = json.dumps(
         {
-            "review_key": item.review_key,
+            "review_id": item.review_id,
             "name_score": (
                 item.name_score_cursor
                 if item.name_score_cursor is not None
@@ -1788,7 +1807,7 @@ def _encode_enrichment_cursor(item: EnrichmentReviewRow) -> str:
 
 def _enrichment_review_row(row: Any) -> EnrichmentReviewRow:
     return EnrichmentReviewRow(
-        review_key=str(row["review_key"]),
+        review_id=str(row["review_id"]),
         status=str(row["status"]),
         name_score=_score(row["name_score"]),
         name_score_cursor=str(row["name_score"]),

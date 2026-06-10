@@ -207,6 +207,47 @@ class KrtourMapSettings(BaseSettings):
             "KNPS geometry(route/area) feature-load asset이 적재할 file dataset key."
         ),
     )
+    tripmate_agent_base_url: str | None = Field(
+        default=None,
+        description=(
+            "TripMate-agent REST API base URL. 예: ``http://127.0.0.1:9041``. "
+            "설정 시 Dagster ``tripmate_agent_youtube_features`` resource가 "
+            "``/api/v1/krtour/features/{snapshot|changes}``를 pull한다."
+        ),
+    )
+    tripmate_agent_api_key: SecretStr | None = Field(
+        default=None,
+        description=(
+            "TripMate-agent 외부 호출용 ``X-API-Key`` 값. TripMate-agent 운영 "
+            "환경의 ``API_KEYS`` 중 하나와 일치해야 한다."
+        ),
+    )
+    tripmate_agent_feature_sync_endpoint: Literal["snapshot", "changes"] = Field(
+        default="snapshot",
+        description=(
+            "TripMate-agent feature pull endpoint 선택. ``snapshot``은 full sync, "
+            "``changes``는 incremental cursor sync."
+        ),
+    )
+    tripmate_agent_feature_cursor: str | None = Field(
+        default=None,
+        description=(
+            "TripMate-agent incremental 시작 cursor. 운영 cursor 영속화가 붙기 전 "
+            "초기 wiring/수동 재개용 값."
+        ),
+    )
+    tripmate_agent_feature_page_size: int = Field(
+        default=200,
+        ge=1,
+        le=1000,
+        description="TripMate-agent feature export page size.",
+    )
+    tripmate_agent_timeout_seconds: float = Field(
+        default=20.0,
+        ge=0.2,
+        le=60.0,
+        description="TripMate-agent REST 호출 timeout seconds.",
+    )
 
     # ── 로깅 ─────────────────────────────────────────────────────────────
     log_level: str = Field(

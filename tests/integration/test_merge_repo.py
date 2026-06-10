@@ -79,7 +79,7 @@ def _link(feature_id: str, key: str, *, primary: bool = True) -> SourceLinkRow:
 async def _seed_pair(engine: AsyncEngine) -> str:
     """master(좌표 O) + loser(좌표 X) + source_links(충돌 SR 포함) + 큐 1행 적재.
 
-    반환: 생성된 ``review_key``. SR1은 양쪽 모두 링크(충돌), SR2는 loser 전용.
+    반환: 생성된 ``review_id``. SR1은 양쪽 모두 링크(충돌), SR2는 loser 전용.
     """
     async with AsyncSession(engine) as session, session.begin():
         session.add(_feature("f_master", with_coord=True))
@@ -100,7 +100,7 @@ async def _seed_pair(engine: AsyncEngine) -> str:
         )
         session.add(row)
         await session.flush()
-        return str(row.review_key)
+        return str(row.review_id)
 
 
 async def _links_of(engine: AsyncEngine, feature_id: str) -> set[str]:
@@ -126,19 +126,19 @@ async def _feature_status(engine: AsyncEngine, feature_id: str) -> tuple[str, bo
 
 
 async def _merge_from_review_with_short_lock_timeout(
-    session: AsyncSession, review_key: str
+    session: AsyncSession, review_id: str
 ) -> None:
     await session.execute(text("SET LOCAL lock_timeout = '100ms'"))
-    await merge_from_review(session, review_key)
+    await merge_from_review(session, review_id)
 
 
 @pytest.fixture
 async def seeded(
     pg_container: object, migrated_engine: AsyncEngine
 ) -> object:
-    """병합 대상 1쌍 적재 + teardown TRUNCATE. 반환: review_key."""
-    review_key = await _seed_pair(migrated_engine)
-    yield review_key
+    """병합 대상 1쌍 적재 + teardown TRUNCATE. 반환: review_id."""
+    review_id = await _seed_pair(migrated_engine)
+    yield review_id
     async with AsyncSession(migrated_engine) as session, session.begin():
         await session.execute(
             text(
@@ -152,10 +152,10 @@ async def seeded(
 async def test_merge_from_review_full_flow(
     seeded: str, migrated_engine: AsyncEngine
 ) -> None:
-    review_key = seeded
+    review_id = seeded
     async with AsyncSession(migrated_engine) as session, session.begin():
         outcome = await merge_from_review(
-            session, review_key, merged_by="op-1", reason="dup"
+            session, review_id, merged_by="op-1", reason="dup"
         )
 
     # 좌표 보유 master 선정 (ADR-016 1순위).
@@ -181,7 +181,7 @@ async def test_merge_from_review_full_flow(
             await session.execute(
                 text(
                     "SELECT master_feature_id, loser_feature_id, score, "
-                    "merged_by, review_key FROM ops.feature_merge_history"
+                    "merged_by, review_id FROM ops.feature_merge_history"
                 )
             )
         ).one()
@@ -189,25 +189,42 @@ async def test_merge_from_review_full_flow(
         assert hist[1] == "f_loser"
         assert float(hist[2]) == 90.0
         assert hist[3] == "op-1"
-        assert str(hist[4]) == review_key
+        assert str(hist[4]) == review_id
         qstatus = (
             await session.execute(
                 text(
                     "SELECT status, reviewed_by FROM ops.dedup_review_queue "
-                    "WHERE review_key = :k"
+                    "WHERE review_id = :k"
                 ),
-                {"k": review_key},
+                {"k": review_id},
             )
         ).one()
         assert qstatus[0] == "merged"
         assert qstatus[1] == "op-1"
+        override = (
+            await session.execute(
+                text(
+                    """
+                    SELECT override_value, prevent_provider_reactivation, reason, created_by
+                    FROM ops.feature_overrides
+                    WHERE feature_id = 'f_loser'
+                      AND field_path = 'status'
+                      AND status = 'active'
+                    """
+                )
+            )
+        ).one()
+        assert override[0] == "deleted"
+        assert override[1] is True
+        assert override[2] == "dup"
+        assert override[3] == "op-1"
 
 
 async def test_merge_from_review_unknown_key_raises(
     seeded: str, migrated_engine: AsyncEngine
 ) -> None:
     async with AsyncSession(migrated_engine) as session, session.begin():
-        with pytest.raises(MergeNotFoundError, match="review_key 없음"):
+        with pytest.raises(MergeNotFoundError, match="review_id 없음"):
             await merge_from_review(
                 session, "00000000-0000-0000-0000-000000000000"
             )
@@ -216,32 +233,32 @@ async def test_merge_from_review_unknown_key_raises(
 async def test_merge_from_review_already_merged_raises(
     seeded: str, migrated_engine: AsyncEngine
 ) -> None:
-    review_key = seeded
+    review_id = seeded
     async with AsyncSession(migrated_engine) as session, session.begin():
-        await merge_from_review(session, review_key)
+        await merge_from_review(session, review_id)
     # 두 번째 시도 — 이미 merged.
     async with AsyncSession(migrated_engine) as session, session.begin():
         with pytest.raises(MergeConflictError, match="이미 검토"):
-            await merge_from_review(session, review_key)
+            await merge_from_review(session, review_id)
 
 
 async def test_merge_from_review_locks_review_row(
     seeded: str, migrated_engine: AsyncEngine
 ) -> None:
-    review_key = seeded
+    review_id = seeded
     async with AsyncSession(migrated_engine) as holder, holder.begin():
         await holder.execute(
             text(
-                "SELECT review_key FROM ops.dedup_review_queue "
-                "WHERE review_key = :review_key FOR UPDATE"
+                "SELECT review_id FROM ops.dedup_review_queue "
+                "WHERE review_id = :review_id FOR UPDATE"
             ),
-            {"review_key": review_key},
+            {"review_id": review_id},
         )
 
         async with AsyncSession(migrated_engine) as contender:
             with pytest.raises(DBAPIError):
                 await _merge_from_review_with_short_lock_timeout(
-                    contender, review_key
+                    contender, review_id
                 )
 
 
@@ -258,9 +275,9 @@ async def test_apply_feature_merge_distinct_guard(
 async def test_merge_history_count_after_merge(
     seeded: str, migrated_engine: AsyncEngine
 ) -> None:
-    review_key = seeded
+    review_id = seeded
     async with AsyncSession(migrated_engine) as session, session.begin():
-        await merge_from_review(session, review_key)
+        await merge_from_review(session, review_id)
     async with AsyncSession(migrated_engine) as session:
         count = (
             await session.execute(

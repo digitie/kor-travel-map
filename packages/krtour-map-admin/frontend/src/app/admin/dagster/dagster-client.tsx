@@ -474,7 +474,7 @@ function RunEventsTable({ events }: { events: DagsterRunEvent[] }) {
                 </div>
               </TableCell>
               <TableCell className="font-mono text-xs">
-                {event.step_key ?? "-"}
+                {event.step_id ?? "-"}
               </TableCell>
               <TableCell>
                 <div className="max-w-[34rem] whitespace-normal break-words text-sm">

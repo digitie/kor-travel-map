@@ -574,12 +574,12 @@ class DedupReviewQueueRow(Base):
             "idx_dedup_status_score",
             "status",
             text("total_score DESC"),
-            text("review_key DESC"),
+            text("review_id DESC"),
         ),
         {"schema": "ops"},
     )
 
-    review_key: Mapped[str] = mapped_column(
+    review_id: Mapped[str] = mapped_column(
         UUID(as_uuid=False),
         primary_key=True,
         server_default=text("x_extension.gen_random_uuid()"),
@@ -649,19 +649,19 @@ class EnrichmentReviewQueueRow(Base):
             "idx_enrichment_review_status_score",
             "status",
             text("name_score DESC"),
-            text("review_key DESC"),
+            text("review_id DESC"),
         ),
         Index(
             "idx_enrichment_review_provider_status_score",
             "source_provider",
             "status",
             text("name_score DESC"),
-            text("review_key DESC"),
+            text("review_id DESC"),
         ),
         {"schema": "ops"},
     )
 
-    review_key: Mapped[str] = mapped_column(
+    review_id: Mapped[str] = mapped_column(
         UUID(as_uuid=False),
         primary_key=True,
         server_default=text("x_extension.gen_random_uuid()"),
@@ -727,7 +727,7 @@ class FeatureOverrideRow(Base):
         {"schema": "ops"},
     )
 
-    override_key: Mapped[str] = mapped_column(
+    override_id: Mapped[str] = mapped_column(
         UUID(as_uuid=False),
         primary_key=True,
         server_default=text("x_extension.gen_random_uuid()"),
@@ -842,25 +842,25 @@ class ImportJobRow(Base):
     __tablename__ = "import_jobs"
     __table_args__ = (
         CheckConstraint(
-            "state IN ('queued','running','done','failed','cancelled')",
-            name="ck_import_jobs_state",
+            "status IN ('queued','running','done','failed','cancelled')",
+            name="ck_import_jobs_status",
         ),
         CheckConstraint(
             "progress BETWEEN 0 AND 100",
             name="ck_import_jobs_progress",
         ),
         Index("idx_import_jobs_created_keyset", text("created_at DESC"), text("job_id DESC")),
-        Index("idx_import_jobs_state", "state", "created_at", "queue_sequence"),
+        Index("idx_import_jobs_status", "status", "created_at", "queue_sequence"),
         Index(
-            "idx_import_jobs_kind_state",
+            "idx_import_jobs_kind_status",
             "kind",
-            "state",
+            "status",
             text("created_at DESC"),
             text("job_id DESC"),
         ),
         Index(
             "idx_import_jobs_heartbeat", "heartbeat_at",
-            postgresql_where=text("state='running'"),
+            postgresql_where=text("status='running'"),
         ),
         Index(
             "idx_import_jobs_load_batch_created",
@@ -898,7 +898,7 @@ class ImportJobRow(Base):
     payload: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb"),
     )
-    state: Mapped[str] = mapped_column(
+    status: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("'queued'"),
     )
     progress: Mapped[int] = mapped_column(
@@ -926,8 +926,8 @@ class OfflineUploadRow(Base):
     __tablename__ = "offline_uploads"
     __table_args__ = (
         CheckConstraint(
-            f"state IN ({_sql_text_literals(OFFLINE_UPLOAD_STATE_VALUES)})",
-            name="ck_offline_uploads_state",
+            f"status IN ({_sql_text_literals(OFFLINE_UPLOAD_STATE_VALUES)})",
+            name="ck_offline_uploads_status",
         ),
         CheckConstraint("byte_size >= 0", name="ck_offline_uploads_byte_size"),
         CheckConstraint(
@@ -947,7 +947,7 @@ class OfflineUploadRow(Base):
             "dataset_key",
             text("created_at DESC"),
         ),
-        Index("idx_offline_uploads_state", "state", text("created_at DESC")),
+        Index("idx_offline_uploads_status", "status", text("created_at DESC")),
         {"schema": "ops"},
     )
 
@@ -968,7 +968,7 @@ class OfflineUploadRow(Base):
     checksum_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     detected_format: Mapped[str | None] = mapped_column(Text)
     detected_encoding: Mapped[str | None] = mapped_column(Text)
-    state: Mapped[str] = mapped_column(
+    status: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("'uploaded'"),
     )
     validation_job_id: Mapped[str | None] = mapped_column(
@@ -1015,12 +1015,12 @@ class FeatureUpdateRequestRow(Base):
             name="ck_feature_update_run_mode",
         ),
         CheckConstraint(
-            "state IN ('queued','running','done','failed','cancelled')",
-            name="ck_feature_update_state",
+            "status IN ('queued','running','done','failed','cancelled')",
+            name="ck_feature_update_status",
         ),
         Index(
-            "idx_feature_update_state_priority",
-            "state",
+            "idx_feature_update_status_priority",
+            "status",
             text("priority DESC"),
             "created_at",
         ),
@@ -1056,7 +1056,7 @@ class FeatureUpdateRequestRow(Base):
     priority: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("50"),
     )
-    state: Mapped[str] = mapped_column(
+    status: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("'queued'"),
     )
     dry_run: Mapped[bool] = mapped_column(
@@ -1125,27 +1125,27 @@ class DataIntegrityViolationRow(Base):
             "idx_violations_status_detected",
             "status",
             text("detected_at DESC"),
-            text("violation_key DESC"),
+            text("issue_id DESC"),
         ),
         Index(
             "idx_violations_provider_status_detected",
             "provider",
             "status",
             text("detected_at DESC"),
-            text("violation_key DESC"),
+            text("issue_id DESC"),
             postgresql_where=text("provider IS NOT NULL"),
         ),
         Index(
             "idx_violations_feature_detected",
             "feature_id",
             text("detected_at DESC"),
-            text("violation_key DESC"),
+            text("issue_id DESC"),
             postgresql_where=text("feature_id IS NOT NULL"),
         ),
         {"schema": "ops"},
     )
 
-    violation_key: Mapped[str] = mapped_column(
+    issue_id: Mapped[str] = mapped_column(
         UUID(as_uuid=False),
         primary_key=True,
         server_default=text("x_extension.gen_random_uuid()"),
@@ -1429,7 +1429,7 @@ class FeatureMergeHistoryRow(Base):
     확정해 병합할 때 1행 INSERT한다. loser의 ``source_links``는 master로 재지정되고
     loser feature는 soft-delete(status='deleted')된다. raw SQL은
     ``infra/merge_repo.py`` (ADR-004). master/loser FK는 feature 하드 삭제 시
-    CASCADE, ``review_key`` FK는 큐 행 삭제 시 SET NULL(이력 보존).
+    CASCADE, ``review_id`` FK는 큐 행 삭제 시 SET NULL(이력 보존).
     """
 
     __tablename__ = "feature_merge_history"
@@ -1463,9 +1463,9 @@ class FeatureMergeHistoryRow(Base):
         nullable=False,
     )
     score: Mapped[Any | None] = mapped_column(Numeric(5, 2))
-    review_key: Mapped[str | None] = mapped_column(
+    review_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=False),
-        ForeignKey("ops.dedup_review_queue.review_key", ondelete="SET NULL"),
+        ForeignKey("ops.dedup_review_queue.review_id", ondelete="SET NULL"),
     )
     merged_by: Mapped[str | None] = mapped_column(Text)
     reason: Mapped[str | None] = mapped_column(Text)

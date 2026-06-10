@@ -68,17 +68,17 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 
 | 테이블 | PK | 핵심 컬럼 / 비고 |
 |--------|----|---------------|
-| `import_jobs` | `job_id UUID` | kind, `load_batch_id`, `parent_job_id` self-FK, payload, state (queued/running/done/failed/cancelled), progress (0-100), heartbeat_at |
-| `dedup_review_queue` | `review_key UUID` | feature_id_a < feature_id_b canonical pair UNIQUE, total_score/name/spatial/category (0-100), status, decision_reason |
-| `feature_overrides` | `override_key UUID` | **구현됨(alembic 0010, ADR-045 T-207c)** — feature_id FK, field_path, source_value/override_value JSONB, prevent_provider_reactivation, status |
-| `feature_merge_history` | `merge_id UUID` | master_feature_id FK, loser_feature_id FK (둘 다 CASCADE), score, review_key FK (SET NULL), merged_by, reason, merged_at (alembic 0007, ADR-016) |
-| `data_integrity_violations` | `violation_key UUID` | **구현됨(alembic 0009, ADR-045 T-205c)** — provider/dataset/source_record/feature 연결, violation_type, severity (info/warning/error/critical), payload, status |
+| `import_jobs` | `job_id UUID` | kind, `load_batch_id`, `parent_job_id` self-FK, payload, status (queued/running/done/failed/cancelled), progress (0-100), heartbeat_at |
+| `dedup_review_queue` | `review_id UUID` | feature_id_a < feature_id_b canonical pair UNIQUE, total_score/name/spatial/category (0-100), status, decision_reason |
+| `feature_overrides` | `override_id UUID` | **구현됨(alembic 0010, ADR-045 T-207c)** — feature_id FK, field_path, source_value/override_value JSONB, prevent_provider_reactivation, status |
+| `feature_merge_history` | `merge_id UUID` | master_feature_id FK, loser_feature_id FK (둘 다 CASCADE), score, review_id FK (SET NULL), merged_by, reason, merged_at (alembic 0007, ADR-016) |
+| `data_integrity_violations` | `issue_id UUID` | **구현됨(alembic 0009, ADR-045 T-205c)** — provider/dataset/source_record/feature 연결, violation_type, severity (info/warning/error/critical), payload, status |
 | `poi_cache_targets` | `target_id UUID` | **구현됨(alembic 0009, ADR-045 T-205c)** — external_system+target_key active UNIQUE, lon/lat, coord/coord_5179, radius_km, refresh_policy, provider_overrides, soft delete |
 | `poi_cache_target_feature_links` | `(target_id, feature_id)` | **구현됨(alembic 0009, ADR-045 T-205c)** — target 주변 feature link, provider/dataset, distance_m, relation, active |
 | `provider_refresh_policies` | `(provider, dataset_key)` | **구현됨(alembic 0009, ADR-045 T-205c)** — source_kind, targeted_policy, interval/rate-limit/max_concurrent, rate_limit_source, enabled |
 | `api_call_log` | `id BIGSERIAL` | provider, endpoint, status, latency_ms, occurred_at; BRIN(occurred_at) |
 | `feature_consistency_reports` | `report_id UUID` | ADR-033 Phase 1; batch_id, started_at/finished_at, severity_max CHECK(OK/WARN/ERROR), cases/summary JSONB |
-| `feature_update_requests` | `request_id UUID` | **구현됨(alembic 0008, ADR-045 T-205a)** — scope_type/scope JSONB, providers·dataset_keys JSONB, run_mode (queued/now), state (queued/running/done/failed/cancelled — import_jobs와 동일 전이), matched_scope JSONB, job_id FK, dagster_run_id, operator, reason, error_message. DDL 정본: `docs/openapi-admin-contract.md` §6.1 + `docs/data-model.md` §9.8 |
+| `feature_update_requests` | `request_id UUID` | **구현됨(alembic 0008, ADR-045 T-205a)** — scope_type/scope JSONB, providers·dataset_keys JSONB, run_mode (queued/now), status (queued/running/done/failed/cancelled — import_jobs와 동일 전이), matched_scope JSONB, job_id FK, dagster_run_id, operator, reason, error_message. DDL 정본: `docs/openapi-admin-contract.md` §6.1 + `docs/data-model.md` §9.8 |
 | `feature_change_requests` | `request_id UUID` | **구현됨(alembic 0021)** — place/event 사용자 요청 add/update/delete queue. review_mode(require_review/immediate), state(pending/applied/rejected), payload JSONB, reviewer/applied timestamp |
 
 ## 4. 인덱스 카탈로그
@@ -158,9 +158,9 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 
 | 인덱스 | 컬럼 | 비고 |
 |--------|------|------|
-| `idx_import_jobs_state` | (state, created_at) | scheduler |
-| `idx_import_jobs_kind_state` | (kind, state, created_at DESC) | admin |
-| `idx_import_jobs_heartbeat` | (heartbeat_at) | partial state='running' |
+| `idx_import_jobs_status` | (status, created_at) | scheduler |
+| `idx_import_jobs_kind_status` | (kind, status, created_at DESC) | admin |
+| `idx_import_jobs_heartbeat` | (heartbeat_at) | partial status='running' |
 | `idx_import_jobs_load_batch_created` | (load_batch_id, created_at DESC, job_id DESC) | partial `load_batch_id IS NOT NULL`, T-200 batch 조회 |
 | `idx_import_jobs_parent_created` | (parent_job_id, created_at DESC, job_id DESC) | partial `parent_job_id IS NOT NULL`, root/child 조회 |
 | `idx_dedup_status_score` | (status, total_score DESC) | partial pending |
@@ -208,7 +208,7 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 | `source_links` | `ck_source_links_confidence` | 0-100 |
 | `source_links` | `ck_source_links_role` | SourceRole 8종 |
 | `price_points` | `ck_price_points_retention` | ≥ 1 |
-| `import_jobs` | `ck_import_jobs_state` | queued/running/done/failed/cancelled |
+| `import_jobs` | `ck_import_jobs_status` | queued/running/done/failed/cancelled |
 | `import_jobs` | `ck_import_jobs_progress` | 0-100 |
 | `dedup_review_queue` | `ck_dedup_status` | pending/accepted/rejected/merged/ignored |
 | `dedup_review_queue` | `ck_dedup_pair_order` | feature_id_a < feature_id_b |
@@ -252,7 +252,7 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 | `feature_overrides.source_record_key` → `source_records` | SET NULL | |
 | `feature_merge_history.master_feature_id` → `features` | CASCADE | |
 | `feature_merge_history.loser_feature_id` → `features` | CASCADE | loser는 soft-delete(ADR-017)라 행 잔존 → FK 유효 |
-| `feature_merge_history.review_key` → `dedup_review_queue` | SET NULL | 큐 행 삭제돼도 이력 보존 |
+| `feature_merge_history.review_id` → `dedup_review_queue` | SET NULL | 큐 행 삭제돼도 이력 보존 |
 | `data_integrity_violations.feature_id` → `features` | CASCADE | |
 | `data_integrity_violations.source_record_key` → `source_records` | SET NULL | source 정리해도 이슈 이력 보존 |
 | `poi_cache_target_feature_links.target_id` → `poi_cache_targets` | CASCADE | target 삭제 시 link 제거 |

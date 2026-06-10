@@ -191,14 +191,14 @@ async def test_accept_applies_enrichment_link(
     await enqueue_review_candidate(
         migrated_session, _as_input(_review_candidate("서울 봄꽃"))
     )
-    review_key = (
+    review_id = (
         await migrated_session.execute(
-            text("SELECT review_key FROM ops.enrichment_review_queue LIMIT 1")
+            text("SELECT review_id FROM ops.enrichment_review_queue LIMIT 1")
         )
     ).scalar_one()
 
     decision = await decide_enrichment_review(
-        migrated_session, review_key, "accepted", reviewed_by="tester"
+        migrated_session, review_id, "accepted", reviewed_by="tester"
     )
     assert decision.changed is True
     assert decision.applied is True
@@ -221,9 +221,9 @@ async def test_accept_applies_enrichment_link(
         await migrated_session.execute(
             text(
                 "SELECT status FROM ops.enrichment_review_queue "
-                "WHERE review_key = :k"
+                "WHERE review_id = :k"
             ),
-            {"k": review_key},
+            {"k": review_id},
         )
     ).scalar_one()
     assert status == "accepted"
@@ -237,18 +237,18 @@ async def test_decide_idempotent_after_review(
     await enqueue_review_candidate(
         migrated_session, _as_input(_review_candidate("서울 봄꽃"))
     )
-    review_key = (
+    review_id = (
         await migrated_session.execute(
-            text("SELECT review_key FROM ops.enrichment_review_queue LIMIT 1")
+            text("SELECT review_id FROM ops.enrichment_review_queue LIMIT 1")
         )
     ).scalar_one()
 
-    first = await decide_enrichment_review(migrated_session, review_key, "rejected")
+    first = await decide_enrichment_review(migrated_session, review_id, "rejected")
     assert first.changed is True
     assert first.applied is False
 
     # 이미 검토됨 → 두 번째 결정은 무효(changed=False).
-    second = await decide_enrichment_review(migrated_session, review_key, "accepted")
+    second = await decide_enrichment_review(migrated_session, review_id, "accepted")
     assert second.changed is False
     assert second.applied is False
 
@@ -336,16 +336,16 @@ async def test_concurrent_decide_no_accepted_link_leak(
                 session, _as_input(_review_candidate("서울 봄꽃"))
             )
         async with _AsyncSession(migrated_engine) as session:
-            review_key = (
+            review_id = (
                 await session.execute(
-                    text("SELECT review_key FROM ops.enrichment_review_queue LIMIT 1")
+                    text("SELECT review_id FROM ops.enrichment_review_queue LIMIT 1")
                 )
             ).scalar_one()
 
         # 2) accept / reject 동시 결정 (각 자기 transaction).
         async def _decide(decision: str) -> object:
             async with _AsyncSession(migrated_engine) as session, session.begin():
-                return await decide_enrichment_review(session, review_key, decision)
+                return await decide_enrichment_review(session, review_id, decision)
 
         results = await asyncio.gather(
             _decide("accepted"), _decide("rejected")
@@ -359,9 +359,9 @@ async def test_concurrent_decide_no_accepted_link_leak(
                 await session.execute(
                     text(
                         "SELECT status FROM ops.enrichment_review_queue "
-                        "WHERE review_key = :k"
+                        "WHERE review_id = :k"
                     ),
-                    {"k": review_key},
+                    {"k": review_id},
                 )
             ).scalar_one()
             link_count = (

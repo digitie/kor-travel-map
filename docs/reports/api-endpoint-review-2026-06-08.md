@@ -101,8 +101,8 @@
   `/admin/dedup-review`, `/admin/enrichment-review`는 **단수**(리소스 컬렉션인데 단수형). →
   `dedup-reviews`/`enrichment-reviews` 권고(이미 배포돼 호환성 고려 필요).
 - **D3. path 파라미터 명명 혼용**: `{feature_id}`/`{request_id}`/`{backup_id}`/`{upload_id}`/`{job_id}`/
-  `{run_id}`/`{license_id}`(=`_id`) vs `{review_key}`/`{violation_key}`/`{target_key}`(=`_key`) 혼재.
-  특히 컬렉션 `/admin/issues`인데 파라미터는 `{violation_key}`(noun 불일치: issue vs violation).
+  `{run_id}`/`{license_id}`(=`_id`) vs `{review_id}`/`{issue_id}`/`{target_key}`(=`_key`) 혼재.
+  특히 컬렉션 `/admin/issues`인데 파라미터는 `{issue_id}`(noun 불일치: issue vs violation).
 - **D4. action-style 서브리소스 다수**: `POST .../deactivate`, `.../cancel`, `.../run-now`,
   `.../load`, `.../validate`, `.../swap`, `POST /ops/dagster/nux-seen`. RPC 스타일이라 자체로 위반은
   아니나(허용 패턴), 일부는 RESTful 대안(예: deactivate→`PATCH`로 status 전이) 가능. 일관 규약(언제
@@ -163,11 +163,11 @@ POST               /admin/restore/{backup_id}/swap
 GET                /admin/features
 POST               /admin/features/{feature_id}/deactivate
 GET                /admin/issues
-GET/PATCH          /admin/issues/{violation_key}
+GET/PATCH          /admin/issues/{issue_id}
 GET                /admin/dedup-review
-PATCH              /admin/dedup-review/{review_key}
+PATCH              /admin/dedup-review/{review_id}
 GET                /admin/enrichment-review
-PATCH              /admin/enrichment-review/{review_key}
+PATCH              /admin/enrichment-review/{review_id}
 GET/POST           /admin/feature-update-requests
 GET                /admin/feature-update-requests/{request_id}
 POST               /admin/feature-update-requests/{request_id}/cancel

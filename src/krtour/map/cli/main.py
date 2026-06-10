@@ -82,7 +82,7 @@ __all__ = ["main", "build_parser"]
 # mutate 명령이 다른 워커와 충돌(advisory lock 미획득)해 skip된 경우의 exit code —
 # 실패(1)와 구분해 운영 스크립트가 재시도/대기 판단에 쓴다.
 _EXIT_LOCK_SKIPPED = 3
-# 입력 오류(파일 없음 / review_key 없음·이미 검토) — 재시도 무의미.
+# 입력 오류(파일 없음 / review_id 없음·이미 검토) — 재시도 무의미.
 _EXIT_INVALID = 2
 
 
@@ -241,8 +241,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="검토 큐 후보 1쌍을 병합 (mutate, advisory lock; ADR-016).",
     )
     merge_p.add_argument(
-        "review_key",
-        help="ops.dedup_review_queue.review_key (UUID). status로 후보 목록 확인.",
+        "review_id",
+        help="ops.dedup_review_queue.review_id (UUID). status로 후보 목록 확인.",
     )
     merge_p.add_argument(
         "--merged-by",
@@ -276,11 +276,11 @@ def _format_status(counts: StatusCounts) -> str:
             for k, v in sorted(counts.source_records_by_provider.items())
         )
         lines.append(f"source_records by_provider: {provs}")
-    if counts.import_jobs_by_state:
+    if counts.import_jobs_by_status:
         jobs = ", ".join(
-            f"{k}={v}" for k, v in sorted(counts.import_jobs_by_state.items())
+            f"{k}={v}" for k, v in sorted(counts.import_jobs_by_status.items())
         )
-        lines.append(f"import_jobs by_state: {jobs}")
+        lines.append(f"import_jobs by_status: {jobs}")
     if counts.dedup_queue_by_status:
         dq = ", ".join(
             f"{k}={v}" for k, v in sorted(counts.dedup_queue_by_status.items())
@@ -543,19 +543,19 @@ async def _cmd_dedup_merge(args: argparse.Namespace) -> int:
         async with (
             AsyncSession(engine) as lock_session,
             try_mutex_lock(
-                lock_session, dedup_merge_lock_key(args.review_key)
+                lock_session, dedup_merge_lock_key(args.review_id)
             ) as acquired,
         ):
             if not acquired:
                 print(
                     f"dedup-merge: skipped — 같은 review 병합 진행 중 "
-                    f"({args.review_key}).",
+                    f"({args.review_id}).",
                 )
                 return _EXIT_LOCK_SKIPPED
             async with AsyncKrtourMapClient(engine) as client:
                 try:
                     outcome = await client.merge_dedup_review(
-                        args.review_key,
+                        args.review_id,
                         merged_by=args.merged_by,
                         reason=args.reason,
                     )

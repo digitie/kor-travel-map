@@ -44,7 +44,7 @@ def client(session: _FakeSession) -> TestClient:
 
 def _sys_row(key: str = "11111111-1111-1111-1111-111111111111") -> SystemLogRow:
     return SystemLogRow(
-        system_log_key=key,
+        system_log_id=key,
         level="info",
         source="offline_upload",
         event="upload_done",
@@ -57,7 +57,7 @@ def _sys_row(key: str = "11111111-1111-1111-1111-111111111111") -> SystemLogRow:
 
 def _api_row(key: str = "22222222-2222-2222-2222-222222222222") -> ApiCallLogRow:
     return ApiCallLogRow(
-        api_call_log_key=key,
+        api_call_log_id=key,
         method="GET",
         path="/v1/ops/metrics",
         status_code=200,
@@ -106,7 +106,7 @@ def test_system_logs_list_passes_filters(
     assert response.status_code == 200
     body = response.json()
     assert set(body) == {"data", "meta"}
-    assert body["data"]["items"][0]["log_id"] == _sys_row().system_log_key
+    assert body["data"]["items"][0]["log_id"] == _sys_row().system_log_id
     assert body["data"]["items"][0]["detail"] == {"count": 3}
     assert body["meta"]["page"] == {
         "page_size": 25,
@@ -140,7 +140,7 @@ def test_api_call_logs_list_passes_filters(
     assert response.status_code == 200
     body = response.json()
     assert body["data"]["items"][0]["status_code"] == 200
-    assert body["data"]["items"][0]["log_id"] == _api_row().api_call_log_key
+    assert body["data"]["items"][0]["log_id"] == _api_row().api_call_log_id
     assert body["meta"]["page"] == {
         "page_size": 50,
         "next_cursor": None,

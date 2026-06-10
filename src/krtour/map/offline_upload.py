@@ -200,7 +200,7 @@ class OfflineUploadValidationResult:
         return {
             "upload": self.upload.as_metadata(),
             "job_id": self.job.job_id if self.job is not None else None,
-            "job_state": self.job.state if self.job is not None else None,
+            "job_status": self.job.status if self.job is not None else None,
             "column_mapping": self.column_mapping.as_payload(),
             "parsed_format": self.parsed_format,
             "encoding": self.encoding,
@@ -238,7 +238,7 @@ class OfflineUploadLoadResult:
             **upload_metadata,
             "acquired": self.acquired,
             "job_id": self.job.job_id if self.job is not None else None,
-            "job_state": self.job.state if self.job is not None else None,
+            "job_status": self.job.status if self.job is not None else None,
             "bytes_read": self.bytes_read,
             "checksum_sha256_actual": self.checksum_sha256,
             "parsed_format": self.parsed_format,
@@ -267,9 +267,9 @@ async def run_offline_upload_validation_job(
     upload = await get_offline_upload(session, upload_id)
     if upload is None:
         raise ValueError(f"offline upload 없음: {upload_id!r}")
-    if upload.state not in OFFLINE_UPLOAD_VALIDATABLE_STATES:
+    if upload.status not in OFFLINE_UPLOAD_VALIDATABLE_STATES:
         raise ValueError(
-            f"offline upload {upload_id!r}는 validation 가능한 상태가 아님: {upload.state!r}"
+            f"offline upload {upload_id!r}는 validation 가능한 상태가 아님: {upload.status!r}"
         )
     mapping = normalize_offline_upload_column_mapping(column_mapping)
 
@@ -349,7 +349,7 @@ async def run_offline_upload_validation_job(
                 await finish_import_job(
                     session,
                     job.job_id,
-                    state="failed",
+                    status="failed",
                     error_message=f"offline upload validation failed: {result.error_rows} rows",
                 )
                 or job
@@ -357,17 +357,17 @@ async def run_offline_upload_validation_job(
             failed_upload = await finish_offline_upload_validation(
                 session,
                 upload_id=upload.upload_id,
-                state="validation_failed",
+                status="validation_failed",
             )
             if failed_upload is None:
                 raise ValueError(f"offline upload 없음: {upload.upload_id!r}")
             upload = failed_upload
         else:
-            finished = await finish_import_job(session, job.job_id, state="done") or job
+            finished = await finish_import_job(session, job.job_id, status="done") or job
             validated_upload = await finish_offline_upload_validation(
                 session,
                 upload_id=upload.upload_id,
-                state="validated",
+                status="validated",
             )
             if validated_upload is None:
                 raise ValueError(f"offline upload 없음: {upload.upload_id!r}")
@@ -409,17 +409,17 @@ async def run_offline_upload_load_job(
     """업로드 파일을 읽어 FeatureBundle로 적재한다.
 
     같은 provider/dataset/scope 단위는 advisory lock으로 직렬화한다. checksum/size
-    불일치나 parser 오류는 ``import_jobs.state='failed'``와
-    ``offline_uploads.state='load_failed'``로 기록한 뒤 결과의 ``error_message``에
+    불일치나 parser 오류는 ``import_jobs.status='failed'``와
+    ``offline_uploads.status='load_failed'``로 기록한 뒤 결과의 ``error_message``에
     담아 반환한다. commit/rollback은 호출자 책임이다.
     """
     upload = await get_offline_upload(session, upload_id)
     if upload is None:
         raise ValueError(f"offline upload 없음: {upload_id!r}")
-    preclaimed = upload.state == "loading" and upload.load_job_id is not None
-    if upload.state not in OFFLINE_UPLOAD_LOADABLE_STATES and not preclaimed:
+    preclaimed = upload.status == "loading" and upload.load_job_id is not None
+    if upload.status not in OFFLINE_UPLOAD_LOADABLE_STATES and not preclaimed:
         raise ValueError(
-            f"offline upload {upload_id!r}는 load 가능한 상태가 아님: {upload.state!r}"
+            f"offline upload {upload_id!r}는 load 가능한 상태가 아님: {upload.status!r}"
         )
     upload_format = _detected_format(upload.detected_format, upload.original_filename)
     if upload_format in OFFLINE_UPLOAD_TABULAR_FORMATS and upload.validation_job_id is None:
@@ -432,13 +432,13 @@ async def run_offline_upload_load_job(
                 finished = await finish_import_job(
                     session,
                     upload.load_job_id,
-                    state="failed",
+                    status="failed",
                     error_message=lock_error_message,
                 ) or await get_import_job(session, upload.load_job_id)
                 failed_upload = await finish_offline_upload_load(
                     session,
                     upload_id=upload.upload_id,
-                    state="load_failed",
+                    status="load_failed",
                 )
                 upload = failed_upload or upload
                 return OfflineUploadLoadResult(
@@ -548,7 +548,7 @@ async def run_offline_upload_load_job(
                 await finish_import_job(
                     session,
                     job.job_id,
-                    state="failed",
+                    status="failed",
                     error_message=error_message,
                 )
                 or job
@@ -556,7 +556,7 @@ async def run_offline_upload_load_job(
             failed_upload = await finish_offline_upload_load(
                 session,
                 upload_id=upload.upload_id,
-                state="load_failed",
+                status="load_failed",
             )
             if failed_upload is None:
                 raise ValueError(f"offline upload 없음: {upload.upload_id!r}") from exc
@@ -572,11 +572,11 @@ async def run_offline_upload_load_job(
                 error_message=error_message,
             )
 
-        finished = await finish_import_job(session, job.job_id, state="done") or job
+        finished = await finish_import_job(session, job.job_id, status="done") or job
         loaded_upload = await finish_offline_upload_load(
             session,
             upload_id=upload.upload_id,
-            state="loaded",
+            status="loaded",
         )
         if loaded_upload is None:
             raise ValueError(f"offline upload 없음: {upload.upload_id!r}")

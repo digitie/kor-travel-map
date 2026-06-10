@@ -17,6 +17,7 @@ from .assets import (
     feature_place_krheritage_items,
     feature_place_mois_licenses,
     feature_place_opinet_stations,
+    feature_place_tripmate_agent_youtube,
 )
 
 KST_TIMEZONE: Final[str] = "Asia/Seoul"
@@ -122,6 +123,15 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         provider="knps",
         dataset_key="knps_geometry_dataset_key",
         description="국립공원 route/area geometry Feature 반기 1회 적재.",
+    ),
+    FeatureLoadScheduleSpec(
+        asset=feature_place_tripmate_agent_youtube,
+        job_name="feature_place_tripmate_agent_youtube_job",
+        schedule_name="feature_place_tripmate_agent_youtube_daily_schedule",
+        cron_schedule="40 3 * * *",
+        provider="tripmate-agent-youtube",
+        dataset_key="youtube_place_candidates",
+        description="TripMate-agent YouTube 장소 후보 place Feature 일 1회 적재.",
     ),
 )
 """현재 구현된 Feature provider asset의 기본 schedule 사양."""

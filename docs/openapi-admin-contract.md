@@ -545,9 +545,9 @@ queued 또는 running 요청을 취소 요청 상태로 둔다. running job은 c
 권장 기본 방식:
 
 1. API가 `ops.feature_update_requests`와 `ops.import_jobs`를 같은 transaction에 생성.
-2. Dagster sensor가 `state='queued'` request를 peek해 request id별 run을 생성.
+2. Dagster sensor가 `status='queued'` request를 peek해 request id별 run을 생성.
 3. Dagster worker run은 request/import job을 `running`으로 바꾸고 progress를 갱신.
-4. 완료 시 `feature_update_requests.state`와 `import_jobs.state`를 같이 terminal로
+4. 완료 시 `feature_update_requests.status`와 `import_jobs.status`를 같이 terminal로
    갱신.
 
 즉시 실행(`run_mode=now`)도 request와 job row를 먼저 저장한다. 현재 구현은 API가
@@ -565,7 +565,7 @@ CREATE TABLE ops.feature_update_requests (
   update_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
   run_mode TEXT NOT NULL,
   priority INTEGER NOT NULL DEFAULT 50,
-  state TEXT NOT NULL DEFAULT 'queued',
+  status TEXT NOT NULL DEFAULT 'queued',
   dry_run BOOLEAN NOT NULL DEFAULT FALSE,
   matched_scope JSONB NOT NULL DEFAULT '{}'::jsonb,
   job_id UUID REFERENCES ops.import_jobs(job_id) ON DELETE SET NULL,
@@ -584,13 +584,13 @@ CREATE TABLE ops.feature_update_requests (
     )
   ),
   CONSTRAINT ck_feature_update_run_mode CHECK (run_mode IN ('queued','now')),
-  CONSTRAINT ck_feature_update_state CHECK (
-    state IN ('queued','running','done','failed','cancelled')
+  CONSTRAINT ck_feature_update_status CHECK (
+    status IN ('queued','running','done','failed','cancelled')
   )
 );
 
-CREATE INDEX idx_feature_update_state_priority
-  ON ops.feature_update_requests (state, priority DESC, created_at);
+CREATE INDEX idx_feature_update_status_priority
+  ON ops.feature_update_requests (status, priority DESC, created_at);
 CREATE INDEX idx_feature_update_created
   ON ops.feature_update_requests (created_at DESC);
 CREATE INDEX idx_feature_update_job
@@ -634,7 +634,7 @@ T-207d 구현 상태: `krtour-map-admin`은 운영 화면이 필요한 DB 기반
 - `features_total`, `features_active`, `features_inactive`
 - `features_by_kind`
 - `source_records_by_provider`
-- `import_jobs_by_state`
+- `import_jobs_by_status`
 - `dedup_queue_by_status`
 - `dedup_fp_stats`
 - `data_integrity_issues`
@@ -646,14 +646,14 @@ T-207d 구현 상태: `krtour-map-admin`은 운영 화면이 필요한 DB 기반
 
 Query:
 
-- `state`: `queued` / `running` / `done` / `failed` / `cancelled`
+- `status`: `queued` / `running` / `done` / `failed` / `cancelled`
 - `kind`
 - `load_batch_id`: UUID. T-200 full-load batch 단위 조회.
 - `parent_job_id`: UUID. root import job 아래 child job 조회.
 - `page_size` (`1..200`, 기본 `50`)
 - `cursor`
 
-각 item은 `job_id`, `kind`, `load_batch_id`, `parent_job_id`, `payload`, `state`,
+각 item은 `job_id`, `kind`, `load_batch_id`, `parent_job_id`, `payload`, `status`,
 `progress`, `current_stage`, `source_checksum`, `error_message`, timestamp 4종,
 `status_url`을 포함한다.
 
@@ -674,7 +674,7 @@ Query:
 
 ### `GET /ops/consistency/issues`
 
-`ops.data_integrity_violations` 목록을 `detected_at DESC, violation_key DESC` keyset
+`ops.data_integrity_violations` 목록을 `detected_at DESC, issue_id DESC` keyset
 cursor로 반환한다. Phase 2 F5~F8 계열과 주소/좌표 매칭 이슈는 이 큐를 통해 운영
 화면에 노출한다.
 

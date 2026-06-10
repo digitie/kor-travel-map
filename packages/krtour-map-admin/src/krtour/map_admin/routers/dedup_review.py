@@ -145,7 +145,7 @@ def _feature(item: DedupFeatureSummary) -> DedupFeatureRecord:
 
 def _record(row: DedupReviewRow) -> DedupReviewRecord:
     return DedupReviewRecord(
-        review_id=row.review_key,
+        review_id=row.review_id,
         status=row.status,
         total_score=row.total_score,
         name_score=row.name_score,

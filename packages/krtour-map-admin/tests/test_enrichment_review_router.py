@@ -56,7 +56,7 @@ def client(session: _FakeSession) -> TestClient:
 def _review_row() -> EnrichmentReviewRow:
     now = datetime(2026, 6, 8, tzinfo=UTC)
     return EnrichmentReviewRow(
-        review_key="review-1",
+        review_id="review-1",
         status="pending",
         name_score=82.0,
         target_feature_id="f_festival",
@@ -130,13 +130,13 @@ def test_patch_accepted_applies_and_uses_transaction(
     from krtour.map_admin.routers import enrichment_review as router_mod
 
     async def _decide(
-        _session: Any, review_key: str, decision: str, **kwargs: Any
+        _session: Any, review_id: str, decision: str, **kwargs: Any
     ) -> EnrichmentDecisionResult:
-        assert review_key == "review-1"
+        assert review_id == "review-1"
         assert decision == "accepted"
         assert kwargs["reviewed_by"] == "local-admin"
         return EnrichmentDecisionResult(
-            review_key="review-1",
+            review_id="review-1",
             decision="accepted",
             changed=True,
             applied=True,
@@ -175,10 +175,10 @@ def test_patch_reject_does_not_apply(
     from krtour.map_admin.routers import enrichment_review as router_mod
 
     async def _decide(
-        _session: Any, _review_key: str, decision: str, **_kwargs: Any
+        _session: Any, _review_id: str, decision: str, **_kwargs: Any
     ) -> EnrichmentDecisionResult:
         return EnrichmentDecisionResult(
-            review_key="review-1", decision=decision, changed=True, applied=False
+            review_id="review-1", decision=decision, changed=True, applied=False
         )
 
     monkeypatch.setattr(router_mod, "decide_enrichment_review", _decide)
@@ -202,10 +202,10 @@ def test_patch_already_reviewed_returns_409(
     from krtour.map_admin.routers import enrichment_review as router_mod
 
     async def _decide(
-        _session: Any, _review_key: str, decision: str, **_kwargs: Any
+        _session: Any, _review_id: str, decision: str, **_kwargs: Any
     ) -> EnrichmentDecisionResult:
         return EnrichmentDecisionResult(
-            review_key="review-1", decision=decision, changed=False, applied=False
+            review_id="review-1", decision=decision, changed=False, applied=False
         )
 
     monkeypatch.setattr(router_mod, "decide_enrichment_review", _decide)

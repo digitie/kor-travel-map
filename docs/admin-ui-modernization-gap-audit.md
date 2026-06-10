@@ -22,7 +22,7 @@ T-211a의 완료 기준은 다음 두 가지다.
 | `src/api/features.ts` | `/features`, `/features/{feature_id}`, `/admin/features`, `/admin/features/{feature_id}/deactivate` | 기존 지도/상세 hook에 admin 목록/비활성화 mutation 추가 |
 | `src/api/importJobs.ts` | `/ops/import-jobs`, `/ops/import-jobs/{job_id}` | 신규. 화면 route가 admin navigation 아래여도 backend 정본은 `/ops` |
 | `src/api/ops.ts` | `/ops/metrics`, `/ops/consistency/reports`, `/ops/consistency/issues` | 신규. 홈/consistency 화면 공통 summary |
-| `src/api/dedup.ts` | `/admin/dedup-review`, `/admin/dedup-review/{review_key}` | 신규. 결정 mutation 후 feature/ops cache 무효화 |
+| `src/api/dedup.ts` | `/admin/dedup-review`, `/admin/dedup-review/{review_id}` | 신규. 결정 mutation 후 feature/ops cache 무효화 |
 | `src/api/updateRequests.ts` | `/admin/feature-update-requests`, cancel, run-now | 신규. queue polling과 request detail polling 포함 |
 | `src/api/poiCacheTargets.ts` | `/admin/poi-cache-targets`, `/features/nearby/by-target` | 신규. 외부 POI target CRUD와 target 기준 주변 feature 조회 |
 | `src/api/offlineUploads.ts` | `/admin/offline-uploads`, `/admin/offline-uploads/{upload_id}`, load 실행 | T-208h 신규. JSON/JSONL upload/list/detail/Dagster load launch |
@@ -93,7 +93,7 @@ T-208h는 T-211b 이후 admin UI #9의 offline upload 선행 gap을 닫았다.
   `POST /admin/offline-uploads/{upload_id}/load`.
 - Storage: RustFS/S3 `krtour-uploads` bucket에
   `offline-uploads/{upload_id}/{filename}` key로 JSON/JSONL 원본을 저장.
-- DB: `ops.offline_uploads` row 생성, state/provider/dataset keyset 목록, 상세 조회.
+- DB: `ops.offline_uploads` row 생성, status/provider/dataset keyset 목록, 상세 조회.
 - Dagster: API가 Dagster GraphQL `launchRun`으로 `offline_upload_load` job을 실행하고
   run id/status를 반환.
 - Frontend: `/admin/offline-uploads` 화면에서 파일 업로드, 필터, 상세 확인, load 실행.

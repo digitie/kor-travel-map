@@ -67,7 +67,7 @@ class AsyncKrtourMapClient:
         self, features: Iterable[DedupInput], *, include_auto_merge: bool = True
     ) -> DedupSyncResult: ...
     async def merge_dedup_review(
-        self, review_key: str, *, merged_by: str | None = None, reason: str | None = None
+        self, review_id: str, *, merged_by: str | None = None, reason: str | None = None
     ) -> MergeOutcome: ...
 
     # MOIS lifecycle

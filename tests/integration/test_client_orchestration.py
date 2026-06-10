@@ -229,7 +229,7 @@ async def test_feature_update_request_client_lifecycle(
         operator="integration-test",
     )
     assert isinstance(request, FeatureUpdateRequest)
-    assert request.state == "queued"
+    assert request.status == "queued"
     assert request.job_id is not None
 
     loaded = await map_client.get_update_request(request.request_id)
@@ -240,11 +240,11 @@ async def test_feature_update_request_client_lifecycle(
     peeked = await map_client.peek_next_update_request()
     assert peeked is not None
     assert peeked.request_id == request.request_id
-    assert peeked.state == "queued"
+    assert peeked.status == "queued"
 
     peeked_batch = await map_client.peek_update_requests(limit=5)
     assert [item.request_id for item in peeked_batch] == [request.request_id]
-    assert peeked_batch[0].state == "queued"
+    assert peeked_batch[0].status == "queued"
 
     page1 = await map_client.list_update_requests(limit=1)
     assert page1.items == (loaded,)
@@ -262,7 +262,7 @@ async def test_feature_update_request_client_lifecycle(
         error_message="client test failure",
     )
     assert failed is not None
-    assert failed.state == "failed"
+    assert failed.status == "failed"
     assert failed.dagster_run_id == "dagster-run-client-test"
     assert failed.error_message == "client test failure"
 
@@ -270,11 +270,11 @@ async def test_feature_update_request_client_lifecycle(
         request.request_id, error_message="client test cancel"
     )
     assert cancelled is not None
-    assert cancelled.state == "cancelled"
+    assert cancelled.status == "cancelled"
     assert cancelled.error_message == "client test cancel"
 
     cancelled_page = await map_client.list_update_requests(
-        state="cancelled", limit=10
+        status="cancelled", limit=10
     )
     assert tuple(item.request_id for item in cancelled_page.items) == (
         request.request_id,
@@ -331,10 +331,10 @@ async def test_refresh_festival_enrichment_reviews_classifies(
     pending = await map_client.list_pending_enrichment_reviews()
     assert len(pending) == 1
     assert pending[0]["source_name"] == "서울 봄꽃"
-    review_key = pending[0]["review_key"]
+    review_id = pending[0]["review_id"]
 
     decision = await map_client.resolve_enrichment_review(
-        review_key, "accepted", reviewed_by="tester"
+        review_id, "accepted", reviewed_by="tester"
     )
     assert decision.changed is True
     assert decision.applied is True
@@ -355,9 +355,9 @@ async def test_resolve_enrichment_review_reject_keeps_no_link(
         review_floor=0.5,
     )
     pending = await map_client.list_pending_enrichment_reviews()
-    review_key = pending[0]["review_key"]
+    review_id = pending[0]["review_id"]
 
-    decision = await map_client.resolve_enrichment_review(review_key, "rejected")
+    decision = await map_client.resolve_enrichment_review(review_id, "rejected")
     assert decision.changed is True
     assert decision.applied is False
 

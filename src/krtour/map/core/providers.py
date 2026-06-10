@@ -47,8 +47,10 @@ CANONICAL_PROVIDER_NAMES: Final[tuple[str, ...]] = (
     "kakao-local-api",
     "naver-search-api",
     "google-places-api-new",
+    # 외부 app provider (TripMate-agent YouTube 장소 후보)
+    "tripmate-agent-youtube",
 )
-"""본 라이브러리가 알고 있는 provider canonical name 18종.
+"""본 라이브러리가 알고 있는 provider canonical name.
 
 신규 provider 추가 시 본 tuple에 추가 + `PROVIDER_ALIASES`에 alias 매핑 +
 ADR 작성 (`docs/decisions.md`).
@@ -86,6 +88,11 @@ PROVIDER_ALIASES: Final[dict[str, str]] = {
     "naver_search": "naver-search-api",
     "google": "google-places-api-new",
     "google_places": "google-places-api-new",
+    # 외부 app provider.
+    "tripmate-agent": "tripmate-agent-youtube",
+    "tripmate_agent": "tripmate-agent-youtube",
+    "tripmate_youtube": "tripmate-agent-youtube",
+    "youtube_place_candidates": "tripmate-agent-youtube",
 }
 """provider name alias → canonical 매핑. provider raw에서 들어오는 다양한
 표기를 단일 canonical로 정규화."""

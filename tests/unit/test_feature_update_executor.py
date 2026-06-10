@@ -44,7 +44,7 @@ def _request(
         update_policy=update_policy or {},
         run_mode="queued",
         priority=100,
-        state="queued",
+        status="queued",
         dry_run=False,
         matched_scope={},
         job_id="job-1",

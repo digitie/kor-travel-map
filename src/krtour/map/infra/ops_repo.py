@@ -47,7 +47,7 @@ class OpsImportJob:
     load_batch_id: str | None
     parent_job_id: str | None
     payload: dict[str, Any]
-    state: str
+    status: str
     progress: int
     current_stage: str | None
     source_checksum: str | None
@@ -91,7 +91,7 @@ class OpsConsistencyReportPage:
 class OpsIntegrityIssue:
     """``ops.data_integrity_violations`` 운영 issue row."""
 
-    violation_key: str
+    issue_id: str
     provider: str | None
     dataset_key: str | None
     source_record_key: str | None
@@ -171,7 +171,7 @@ def _decode_cursor(cursor: str | None, *, kind: str) -> tuple[datetime | None, s
 
 
 _IMPORT_JOB_COLUMNS: Final[str] = (
-    "job_id, kind, load_batch_id, parent_job_id, payload, state, progress, "
+    "job_id, kind, load_batch_id, parent_job_id, payload, status, progress, "
     "current_stage, source_checksum, error_message, created_at, started_at, "
     "finished_at, heartbeat_at"
 )
@@ -179,7 +179,7 @@ _IMPORT_JOB_COLUMNS: Final[str] = (
 _LIST_IMPORT_JOBS_SQL: Final[str] = f"""
 SELECT {_IMPORT_JOB_COLUMNS}
 FROM ops.import_jobs
-WHERE (CAST(:state AS text) IS NULL OR state = CAST(:state AS text))
+WHERE (CAST(:status AS text) IS NULL OR status = CAST(:status AS text))
   AND (CAST(:kind AS text) IS NULL OR kind = CAST(:kind AS text))
   AND (
     CAST(:load_batch_id AS uuid) IS NULL
@@ -236,7 +236,7 @@ LIMIT 1
 """
 
 _ISSUE_COLUMNS: Final[str] = (
-    "violation_key, provider, dataset_key, source_record_key, feature_id, "
+    "issue_id, provider, dataset_key, source_record_key, feature_id, "
     "violation_type, severity, message, payload, status, detected_at, resolved_at"
 )
 
@@ -273,12 +273,12 @@ WHERE (CAST(:status AS text) IS NULL OR status = CAST(:status AS text))
   )
   AND (
     CAST(:cursor_detected_at AS timestamptz) IS NULL
-    OR (detected_at, violation_key) < (
+    OR (detected_at, issue_id) < (
         CAST(:cursor_detected_at AS timestamptz),
-        CAST(:cursor_violation_key AS uuid)
+        CAST(:cursor_issue_id AS uuid)
     )
   )
-ORDER BY detected_at DESC, violation_key DESC
+ORDER BY detected_at DESC, issue_id DESC
 LIMIT :limit
 """
 
@@ -325,7 +325,7 @@ def _row_to_import_job(row: Any) -> OpsImportJob:
         load_batch_id=str(row.load_batch_id) if row.load_batch_id else None,
         parent_job_id=str(row.parent_job_id) if row.parent_job_id else None,
         payload=_json_dict(row.payload),
-        state=str(row.state),
+        status=str(row.status),
         progress=int(row.progress),
         current_stage=row.current_stage,
         source_checksum=row.source_checksum,
@@ -351,7 +351,7 @@ def _row_to_consistency(row: Any) -> OpsConsistencyReport:
 
 def _row_to_issue(row: Any) -> OpsIntegrityIssue:
     return OpsIntegrityIssue(
-        violation_key=str(row.violation_key),
+        issue_id=str(row.issue_id),
         provider=row.provider,
         dataset_key=row.dataset_key,
         source_record_key=row.source_record_key,
@@ -369,7 +369,7 @@ def _row_to_issue(row: Any) -> OpsIntegrityIssue:
 async def list_ops_import_jobs(
     session: AsyncSession,
     *,
-    state: str | None = None,
+    status: str | None = None,
     kind: str | None = None,
     load_batch_id: str | None = None,
     parent_job_id: str | None = None,
@@ -383,7 +383,7 @@ async def list_ops_import_jobs(
         await session.execute(
             text(_LIST_IMPORT_JOBS_SQL),
             {
-                "state": state,
+                "status": status,
                 "kind": kind,
                 "load_batch_id": load_batch_id,
                 "parent_job_id": parent_job_id,
@@ -477,7 +477,7 @@ async def list_ops_integrity_issues(
     없는 이슈는 제외). 둘 다 ``None``이면 필터하지 않는다.
     """
     page_size = _limit(limit)
-    cursor_detected_at, cursor_violation_key = _decode_cursor(
+    cursor_detected_at, cursor_issue_id = _decode_cursor(
         cursor, kind="integrity_issues"
     )
     q_like = f"%{q}%" if q else None
@@ -500,7 +500,7 @@ async def list_ops_integrity_issues(
                 "bbox_max_lon": bbox_max_lon,
                 "bbox_max_lat": bbox_max_lat,
                 "cursor_detected_at": cursor_detected_at,
-                "cursor_violation_key": cursor_violation_key,
+                "cursor_issue_id": cursor_issue_id,
                 "limit": page_size + 1,
             },
         )
@@ -508,7 +508,7 @@ async def list_ops_integrity_issues(
     items = tuple(_row_to_issue(row) for row in rows[:page_size])
     next_cursor = (
         _encode_cursor(
-            "integrity_issues", at=items[-1].detected_at, key=items[-1].violation_key
+            "integrity_issues", at=items[-1].detected_at, key=items[-1].issue_id
         )
         if len(rows) > page_size and items
         else None

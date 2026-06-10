@@ -9,7 +9,7 @@
   적재한다.
 - `feature_update_request_queue_sensor`는 `ops.feature_update_requests` queued/now
   request를 15초 간격으로 감지하고 `feature_update_request_worker` run을 만든다.
-- Feature 적재 asset 9개는 provider별 KST schedule로 묶어 등록한다. 기본 status는
+- Feature 적재 asset은 provider별 KST schedule로 묶어 등록한다. 기본 status는
   로컬 개발 중 실 provider 호출을 막기 위해 `STOPPED`이며, 운영 배포에서 필요한
   schedule만 enable한다.
 
@@ -40,7 +40,8 @@ PostgreSQL-backed instance config를 쓴다.
   metadata storage 런타임.
 - `boto3`, `botocore`: `offline_upload_store` resource가 RustFS/S3 호환 client를
   만들 때 직접 import한다.
-- `httpx`: kraddr-geo REST resource와 Dagster summary 연동에서 사용한다.
+- `httpx`: kraddr-geo REST resource, TripMate-agent REST export fetcher, Dagster summary
+  연동에서 사용한다.
 
 패키지 로컬 테스트도 루트 `pyproject.toml`에만 의존하지 않도록
 `[tool.pytest.ini_options] asyncio_mode="auto"`를 가진다.
@@ -73,15 +74,27 @@ provider record resource:
 - `mois_license_records`
 - `knps_point_records`
 - `knps_geometry_records`
+- `krforest_recreation_forests`
+- `krforest_arboretums`
+- `standard_museums`
+- `standard_tourist_attractions`
+- `standard_parking_lots`
+- `khoa_beaches`
+- `krairport_airports`
+- `airkorea_stations`
+- `airkorea_air_quality`
+- `visitkorea_festival_events`
+- `tripmate_agent_youtube_features`
 
-현재 기본 `defs`는 위 provider record key마다 **guard resource**를 등록한다. code
-location과 schedule/job 정의는 로드되지만, provider record resource를 실제로
-materialize하면 명확한 `RuntimeError`를 낸다. 이는 `_missing_resource`로 어느 key가
-왜 비어 있는지 알 수 없던 상태를 막기 위한 임시 운영 guard다.
+현재 기본 `defs`는 provider record key마다 guard 또는 live resource를 등록한다. code
+location과 schedule/job 정의는 로드되며, credential이 필요한 live resource는 설정이
+없을 때 명확한 `RuntimeError`를 낸다. 이는 `_missing_resource`로 어느 key가 왜 비어
+있는지 알 수 없던 상태를 막기 위한 운영 guard다.
 
-실제 provider live fetch는 provider public client wiring PR에서 provider별로 닫는다.
-그 전 운영 실행은 `Definitions(..., resources={...})` override로 record iterable을
-주입해야 한다. 기본 guard가 안내하는 env 매핑은 다음과 같다.
+실제 provider live fetch가 연결된 resource는 기본 definitions에서 바로 동작한다.
+credential이 없거나 아직 guard로 남은 resource는 운영 실행 전에
+`Definitions(..., resources={...})` override로 record iterable을 주입하거나 환경변수를
+채워야 한다. 기본 guard/live resource가 안내하는 env 매핑은 다음과 같다.
 
 | resource | provider package | krtour-map env | source env |
 |----------|------------------|----------------|------------|
@@ -94,6 +107,17 @@ materialize하면 명확한 `RuntimeError`를 낸다. 이는 `_missing_resource`
 | `mois_license_records` | `python-mois-api` | `KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
 | `knps_point_records` | `python-knps-api` | 없음 | 없음 |
 | `knps_geometry_records` | `python-knps-api` | 없음 | 없음 |
+| `krforest_recreation_forests` | `python-krforest-api` | `KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
+| `krforest_arboretums` | `python-krforest-api` | `KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
+| `standard_museums` | `python-datagokr-api` | `KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
+| `standard_tourist_attractions` | `python-datagokr-api` | `KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
+| `standard_parking_lots` | `python-datagokr-api` | `KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
+| `khoa_beaches` | `python-khoa-api` | `KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
+| `krairport_airports` | `python-krairport-api` | 없음 | 없음 |
+| `airkorea_stations` | `python-airkorea-api` | `KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
+| `airkorea_air_quality` | `python-airkorea-api` | `KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
+| `visitkorea_festival_events` | `python-visitkorea-api` | `KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
+| `tripmate_agent_youtube_features` | `tripmate-agent` | `KRTOUR_MAP_TRIPMATE_AGENT_BASE_URL`, `KRTOUR_MAP_TRIPMATE_AGENT_API_KEY` | `API_KEYS` |
 
 ## Feature load schedules
 
@@ -111,6 +135,7 @@ materialize하면 명확한 `RuntimeError`를 낸다. 이는 `_missing_resource`
 | `feature_place_mois_licenses_weekly_schedule` | `feature_place_mois_licenses_job` | `35 4 * * 1` |
 | `feature_place_knps_points_semiannual_schedule` | `feature_place_knps_points_job` | `45 3 1 1,7 *` |
 | `feature_geometry_knps_records_semiannual_schedule` | `feature_geometry_knps_records_job` | `15 4 1 1,7 *` |
+| `feature_place_tripmate_agent_youtube_daily_schedule` | `feature_place_tripmate_agent_youtube_job` | `40 3 * * *` |
 
 ## Feature update queue
 

@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 __all__ = [
     "OfflineUpload",
     "OfflineUploadPage",
-    "OfflineUploadStateConflict",
+    "OfflineUploadStatusConflict",
     "attach_offline_upload_load_job",
     "create_offline_upload",
     "finish_offline_upload_load",
@@ -53,7 +53,7 @@ __all__ = [
 _RETURN_COLUMNS: Final[str] = (
     "upload_id, provider, dataset_key, sync_scope, original_filename, "
     "storage_backend, storage_key, byte_size, checksum_sha256, detected_format, "
-    "detected_encoding, state, validation_job_id, load_job_id, created_by, "
+    "detected_encoding, status, validation_job_id, load_job_id, created_by, "
     "created_at, updated_at"
 )
 
@@ -75,7 +75,7 @@ class OfflineUpload:
     checksum_sha256: str
     detected_format: str | None
     detected_encoding: str | None
-    state: str
+    status: str
     validation_job_id: str | None
     load_job_id: str | None
     created_by: str | None
@@ -96,7 +96,7 @@ class OfflineUpload:
             "checksum_sha256": self.checksum_sha256,
             "detected_format": self.detected_format,
             "detected_encoding": self.detected_encoding,
-            "state": self.state,
+            "status": self.status,
             "validation_job_id": self.validation_job_id,
             "load_job_id": self.load_job_id,
         }
@@ -110,24 +110,24 @@ class OfflineUploadPage:
     next_cursor: str | None
 
 
-class OfflineUploadStateConflict(ValueError):
+class OfflineUploadStatusConflict(ValueError):
     """offline upload가 요청한 상태 전이를 허용하지 않을 때 발생."""
 
     def __init__(
         self,
         *,
         upload_id: str,
-        current_state: str,
-        target_state: str,
-        allowed_states: frozenset[str],
+        current_status: str,
+        target_status: str,
+        allowed_statuses: frozenset[str],
     ) -> None:
         self.upload_id = upload_id
-        self.current_state = current_state
-        self.target_state = target_state
-        self.allowed_states = allowed_states
+        self.current_status = current_status
+        self.target_status = target_status
+        self.allowed_statuses = allowed_statuses
         super().__init__(
-            f"offline upload {upload_id!r}는 {target_state!r} 전이를 허용하지 않음: "
-            f"state={current_state!r}, allowed={sorted(allowed_states)}"
+            f"offline upload {upload_id!r}는 {target_status!r} 전이를 허용하지 않음: "
+            f"status={current_status!r}, allowed={sorted(allowed_statuses)}"
         )
 
 
@@ -145,7 +145,7 @@ def _row_to_upload(row: Any) -> OfflineUpload:
         checksum_sha256=str(data["checksum_sha256"]),
         detected_format=data["detected_format"],
         detected_encoding=data["detected_encoding"],
-        state=str(data["state"]),
+        status=str(data["status"]),
         validation_job_id=(
             str(data["validation_job_id"]) if data["validation_job_id"] is not None else None
         ),
@@ -199,7 +199,7 @@ WHERE upload_id = :upload_id
 """
 
 _GET_STATE_SQL: Final[str] = """
-SELECT upload_id, state
+SELECT upload_id, status
 FROM ops.offline_uploads
 WHERE upload_id = :upload_id
 FOR UPDATE
@@ -219,7 +219,7 @@ LIMIT 1
 _LIST_SQL: Final[str] = f"""
 SELECT {_RETURN_COLUMNS}
 FROM ops.offline_uploads
-WHERE (CAST(:state AS text) IS NULL OR state = CAST(:state AS text))
+WHERE (CAST(:status AS text) IS NULL OR status = CAST(:status AS text))
   AND (CAST(:provider AS text) IS NULL OR provider = CAST(:provider AS text))
   AND (CAST(:dataset_key AS text) IS NULL OR dataset_key = CAST(:dataset_key AS text))
   AND (
@@ -235,11 +235,11 @@ LIMIT :limit_plus_one
 
 _MARK_LOADING_SQL: Final[str] = f"""
 UPDATE ops.offline_uploads
-SET state = 'loading',
+SET status = 'loading',
     load_job_id = :load_job_id,
     updated_at = now()
 WHERE upload_id = :upload_id
-  AND state = ANY(CAST(:allowed_states AS text[]))
+  AND status = ANY(CAST(:allowed_statuses AS text[]))
 RETURNING {_RETURN_COLUMNS}
 """
 
@@ -248,46 +248,46 @@ UPDATE ops.offline_uploads
 SET load_job_id = :load_job_id,
     updated_at = now()
 WHERE upload_id = :upload_id
-  AND state = 'loading'
+  AND status = 'loading'
   AND load_job_id IS NULL
 RETURNING {_RETURN_COLUMNS}
 """
 
 _MARK_VALIDATING_SQL: Final[str] = f"""
 UPDATE ops.offline_uploads
-SET state = 'validating',
+SET status = 'validating',
     validation_job_id = :validation_job_id,
     updated_at = now()
 WHERE upload_id = :upload_id
-  AND state = ANY(CAST(:allowed_states AS text[]))
+  AND status = ANY(CAST(:allowed_statuses AS text[]))
 RETURNING {_RETURN_COLUMNS}
 """
 
 _FINISH_VALIDATION_SQL: Final[str] = f"""
 UPDATE ops.offline_uploads
-SET state = :state,
+SET status = :status,
     updated_at = now()
 WHERE upload_id = :upload_id
-  AND state = ANY(CAST(:allowed_states AS text[]))
+  AND status = ANY(CAST(:allowed_statuses AS text[]))
 RETURNING {_RETURN_COLUMNS}
 """
 
 _FINISH_LOAD_SQL: Final[str] = f"""
 UPDATE ops.offline_uploads
-SET state = :state,
+SET status = :status,
     updated_at = now()
 WHERE upload_id = :upload_id
-  AND state = ANY(CAST(:allowed_states AS text[]))
+  AND status = ANY(CAST(:allowed_statuses AS text[]))
 RETURNING {_RETURN_COLUMNS}
 """
 
 
-async def _missing_or_state_conflict(
+async def _missing_or_status_conflict(
     session: AsyncSession,
     *,
     upload_id: str,
-    target_state: str,
-    allowed_states: frozenset[str],
+    target_status: str,
+    allowed_statuses: frozenset[str],
 ) -> None:
     row = (
         (
@@ -301,11 +301,11 @@ async def _missing_or_state_conflict(
     )
     if row is None:
         return
-    raise OfflineUploadStateConflict(
+    raise OfflineUploadStatusConflict(
         upload_id=str(row["upload_id"]),
-        current_state=str(row["state"]),
-        target_state=target_state,
-        allowed_states=allowed_states,
+        current_status=str(row["status"]),
+        target_status=target_status,
+        allowed_statuses=allowed_statuses,
     )
 
 
@@ -381,7 +381,7 @@ async def get_offline_upload_by_checksum(
 async def list_offline_uploads(
     session: AsyncSession,
     *,
-    state: str | None = None,
+    status: str | None = None,
     provider: str | None = None,
     dataset_key: str | None = None,
     limit: int = 50,
@@ -396,7 +396,7 @@ async def list_offline_uploads(
         await session.execute(
             text(_LIST_SQL),
             {
-                "state": state,
+                "status": status,
                 "provider": provider,
                 "dataset_key": dataset_key,
                 "cursor_created_at": cursor_created_at,
@@ -416,23 +416,23 @@ async def mark_offline_upload_loading(
     upload_id: str,
     load_job_id: str,
 ) -> OfflineUpload | None:
-    """load import job과 연결하고 ``state='loading'``으로 전이한다."""
+    """load import job과 연결하고 ``status='loading'``으로 전이한다."""
     result = await session.execute(
         text(_MARK_LOADING_SQL),
         {
             "upload_id": upload_id,
             "load_job_id": load_job_id,
-            "allowed_states": list(OFFLINE_UPLOAD_LOADABLE_STATES),
+            "allowed_statuses": list(OFFLINE_UPLOAD_LOADABLE_STATES),
         },
     )
     row = result.one_or_none()
     if row is not None:
         return _row_to_upload(row)
-    await _missing_or_state_conflict(
+    await _missing_or_status_conflict(
         session,
         upload_id=upload_id,
-        target_state="loading",
-        allowed_states=OFFLINE_UPLOAD_LOADABLE_STATES,
+        target_status="loading",
+        allowed_statuses=OFFLINE_UPLOAD_LOADABLE_STATES,
     )
     return None
 
@@ -486,11 +486,11 @@ async def attach_offline_upload_load_job(
     row = result.one_or_none()
     if row is not None:
         return _row_to_upload(row)
-    await _missing_or_state_conflict(
+    await _missing_or_status_conflict(
         session,
         upload_id=upload_id,
-        target_state="loading",
-        allowed_states=frozenset({"loading"}),
+        target_status="loading",
+        allowed_statuses=frozenset({"loading"}),
     )
     return None
 
@@ -501,23 +501,23 @@ async def mark_offline_upload_validating(
     upload_id: str,
     validation_job_id: str,
 ) -> OfflineUpload | None:
-    """validation import job과 연결하고 ``state='validating'``으로 전이한다."""
+    """validation import job과 연결하고 ``status='validating'``으로 전이한다."""
     result = await session.execute(
         text(_MARK_VALIDATING_SQL),
         {
             "upload_id": upload_id,
             "validation_job_id": validation_job_id,
-            "allowed_states": list(OFFLINE_UPLOAD_VALIDATABLE_STATES),
+            "allowed_statuses": list(OFFLINE_UPLOAD_VALIDATABLE_STATES),
         },
     )
     row = result.one_or_none()
     if row is not None:
         return _row_to_upload(row)
-    await _missing_or_state_conflict(
+    await _missing_or_status_conflict(
         session,
         upload_id=upload_id,
-        target_state="validating",
-        allowed_states=OFFLINE_UPLOAD_VALIDATABLE_STATES,
+        target_status="validating",
+        allowed_statuses=OFFLINE_UPLOAD_VALIDATABLE_STATES,
     )
     return None
 
@@ -526,30 +526,30 @@ async def finish_offline_upload_validation(
     session: AsyncSession,
     *,
     upload_id: str,
-    state: str,
+    status: str,
 ) -> OfflineUpload | None:
     """validation 종료 상태를 기록한다. ``validated``/``validation_failed``만 허용."""
-    if state not in OFFLINE_UPLOAD_VALIDATION_FINISH_STATES:
+    if status not in OFFLINE_UPLOAD_VALIDATION_FINISH_STATES:
         raise ValueError(
-            "offline upload validation state는 ['validated', 'validation_failed'] "
-            f"중 하나여야 함, got {state!r}."
+            "offline upload validation status는 ['validated', 'validation_failed'] "
+            f"중 하나여야 함, got {status!r}."
         )
     result = await session.execute(
         text(_FINISH_VALIDATION_SQL),
         {
             "upload_id": upload_id,
-            "state": state,
-            "allowed_states": list(OFFLINE_UPLOAD_VALIDATION_FINISH_SOURCE_STATES),
+            "status": status,
+            "allowed_statuses": list(OFFLINE_UPLOAD_VALIDATION_FINISH_SOURCE_STATES),
         },
     )
     row = result.one_or_none()
     if row is not None:
         return _row_to_upload(row)
-    await _missing_or_state_conflict(
+    await _missing_or_status_conflict(
         session,
         upload_id=upload_id,
-        target_state=state,
-        allowed_states=OFFLINE_UPLOAD_VALIDATION_FINISH_SOURCE_STATES,
+        target_status=status,
+        allowed_statuses=OFFLINE_UPLOAD_VALIDATION_FINISH_SOURCE_STATES,
     )
     return None
 
@@ -558,29 +558,29 @@ async def finish_offline_upload_load(
     session: AsyncSession,
     *,
     upload_id: str,
-    state: str,
+    status: str,
 ) -> OfflineUpload | None:
     """load 종료 상태를 기록한다. ``loaded``/``load_failed``/``cancelled``만 허용."""
-    if state not in OFFLINE_UPLOAD_LOAD_FINISH_STATES:
+    if status not in OFFLINE_UPLOAD_LOAD_FINISH_STATES:
         raise ValueError(
-            "offline upload load state는 "
-            f"{sorted(OFFLINE_UPLOAD_LOAD_FINISH_STATES)} 중 하나여야 함, got {state!r}."
+            "offline upload load status는 "
+            f"{sorted(OFFLINE_UPLOAD_LOAD_FINISH_STATES)} 중 하나여야 함, got {status!r}."
         )
     result = await session.execute(
         text(_FINISH_LOAD_SQL),
         {
             "upload_id": upload_id,
-            "state": state,
-            "allowed_states": list(OFFLINE_UPLOAD_LOAD_FINISH_SOURCE_STATES),
+            "status": status,
+            "allowed_statuses": list(OFFLINE_UPLOAD_LOAD_FINISH_SOURCE_STATES),
         },
     )
     row = result.one_or_none()
     if row is not None:
         return _row_to_upload(row)
-    await _missing_or_state_conflict(
+    await _missing_or_status_conflict(
         session,
         upload_id=upload_id,
-        target_state=state,
-        allowed_states=OFFLINE_UPLOAD_LOAD_FINISH_SOURCE_STATES,
+        target_status=status,
+        allowed_statuses=OFFLINE_UPLOAD_LOAD_FINISH_SOURCE_STATES,
     )
     return None

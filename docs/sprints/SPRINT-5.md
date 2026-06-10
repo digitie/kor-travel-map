@@ -197,8 +197,10 @@
 2. **T-212b-admin-ui-completion** — `/admin/features`, `/admin/issues`, weather panel,
    logs, Dagster drilldown, offline upload/POI 주요 e2e를 운영자 workflow 기준으로 닫는다.
 3. **T-212d-perf-baseline-and-tuning** — seeded PostGIS 기준 hot read/F-check SQL
-   EXPLAIN과 frontend rendering baseline을 먼저 문서화하고, 실 볼륨 측정은 T-212e에서
-   보강한다.
+   EXPLAIN과 frontend rendering baseline은 2026-06-08 1차 완료. 2026-06-10 사용자
+   지시에 따라 read >> write 전제를 반영한 재측정 pass를 한 번 더 돌리고, 필요 시
+   클러스터 rollup MV(`mv_feature_cluster_counts`) 시범을 도입한다. 실 볼륨 측정은
+   T-212e에서 보강한다.
 4. **T-212e-live-full-reload-final-verification** — provider full reload, offline upload,
    kraddr-geo 보강, consistency gate, API smoke, Playwright, backup/restore smoke를 한
    리포트로 묶는다.

@@ -32,7 +32,7 @@ from krtour.map.dto import (
 )
 from krtour.map.infra.jobs_repo import start_import_job
 from krtour.map.infra.offline_upload_repo import (
-    OfflineUploadStateConflict,
+    OfflineUploadStatusConflict,
     create_offline_upload,
     finish_offline_upload_load,
     get_offline_upload_by_checksum,
@@ -90,17 +90,17 @@ async def test_offline_upload_load_job_persists_feature_and_job(
     assert result.acquired is True
     assert result.error_message is None
     assert result.job is not None
-    assert result.job.state == "done"
+    assert result.job.status == "done"
     assert result.load is not None
     assert result.load.bundles_total == 1
     assert result.upload is not None
-    assert result.upload.state == "loaded"
+    assert result.upload.status == "loaded"
 
     async with AsyncSession(migrated_engine) as session:
         row = (
             await session.execute(
                 text(
-                    "SELECT f.feature_id, ou.state AS upload_state, ij.state AS job_state "
+                    "SELECT f.feature_id, ou.status AS upload_status, ij.status AS job_status "
                     "FROM feature.features AS f "
                     "JOIN ops.offline_uploads AS ou ON ou.upload_id = :upload_id "
                     "JOIN ops.import_jobs AS ij ON ij.job_id = ou.load_job_id "
@@ -111,8 +111,8 @@ async def test_offline_upload_load_job_persists_feature_and_job(
         ).one()
 
     assert row.feature_id == bundle.feature.feature_id
-    assert row.upload_state == "loaded"
-    assert row.job_state == "done"
+    assert row.upload_status == "loaded"
+    assert row.job_status == "done"
 
 
 async def test_offline_upload_load_job_uses_preclaimed_load_job(
@@ -136,7 +136,7 @@ async def test_offline_upload_load_job_uses_preclaimed_load_job(
             load_job_id=job.job_id,
         )
         assert loading is not None
-        assert loading.state == "loading"
+        assert loading.status == "loading"
         assert loading.load_job_id == job.job_id
 
     client = AsyncKrtourMapClient(migrated_engine)
@@ -150,10 +150,10 @@ async def test_offline_upload_load_job_uses_preclaimed_load_job(
     assert result.error_message is None
     assert result.job is not None
     assert result.job.job_id == job.job_id
-    assert result.job.state == "done"
+    assert result.job.status == "done"
     assert result.job.payload["dagster_run_id"] == "dagster-run-preclaimed"
     assert result.upload is not None
-    assert result.upload.state == "loaded"
+    assert result.upload.status == "loaded"
 
 
 async def test_offline_upload_validate_then_load_csv(
@@ -191,9 +191,9 @@ async def test_offline_upload_validate_then_load_csv(
     )
     assert validation.has_errors is False
     assert validation.valid_rows == 1
-    assert validation.upload.state == "validated"
+    assert validation.upload.status == "validated"
     assert validation.job is not None
-    assert validation.job.state == "done"
+    assert validation.job.status == "done"
 
     loaded = await client.run_offline_upload_load_job(
         upload_id,
@@ -206,13 +206,13 @@ async def test_offline_upload_validate_then_load_csv(
     assert loaded.load is not None
     assert loaded.load.bundles_total == 1
     assert loaded.upload is not None
-    assert loaded.upload.state == "loaded"
+    assert loaded.upload.status == "loaded"
 
     async with AsyncSession(migrated_engine) as session:
         row = (
             await session.execute(
                 text(
-                    "SELECT f.name, sr.source_entity_id, ou.state AS upload_state "
+                    "SELECT f.name, sr.source_entity_id, ou.status AS upload_status "
                     "FROM feature.features AS f "
                     "JOIN provider_sync.source_links AS sl "
                     "  ON sl.feature_id = f.feature_id "
@@ -227,7 +227,7 @@ async def test_offline_upload_validate_then_load_csv(
 
     assert row.name == "오프라인 CSV 통합 장소"
     assert row.source_entity_id == "csv-live-001"
-    assert row.upload_state == "loaded"
+    assert row.upload_status == "loaded"
 
 
 async def test_offline_upload_load_job_records_checksum_failure(
@@ -254,15 +254,15 @@ async def test_offline_upload_load_job_records_checksum_failure(
     assert result.error_message
     assert "checksum mismatch" in result.error_message
     assert result.job is not None
-    assert result.job.state == "failed"
+    assert result.job.status == "failed"
     assert result.upload is not None
-    assert result.upload.state == "load_failed"
+    assert result.upload.status == "load_failed"
 
     async with AsyncSession(migrated_engine) as session:
         row = (
             await session.execute(
                 text(
-                    "SELECT ou.state AS upload_state, ij.state AS job_state, "
+                    "SELECT ou.status AS upload_status, ij.status AS job_status, "
                     "ij.error_message "
                     "FROM ops.offline_uploads AS ou "
                     "JOIN ops.import_jobs AS ij ON ij.job_id = ou.load_job_id "
@@ -278,8 +278,8 @@ async def test_offline_upload_load_job_records_checksum_failure(
             )
         ).scalar_one()
 
-    assert row.upload_state == "load_failed"
-    assert row.job_state == "failed"
+    assert row.upload_status == "load_failed"
+    assert row.job_status == "failed"
     assert "checksum mismatch" in row.error_message
     assert int(feature_count) == 0
 
@@ -295,14 +295,14 @@ async def test_offline_upload_repo_rejects_invalid_state_transitions(
     )
 
     async with AsyncSession(migrated_engine) as session, session.begin():
-        with pytest.raises(OfflineUploadStateConflict) as finish_conflict:
+        with pytest.raises(OfflineUploadStatusConflict) as finish_conflict:
             await finish_offline_upload_load(
                 session,
                 upload_id=upload_id,
-                state="loaded",
+                status="loaded",
             )
-        assert finish_conflict.value.current_state == "uploaded"
-        assert finish_conflict.value.allowed_states == frozenset({"loading"})
+        assert finish_conflict.value.current_status == "uploaded"
+        assert finish_conflict.value.allowed_statuses == frozenset({"loading"})
 
         job = await start_import_job(session, kind="offline_upload_load")
         loading = await mark_offline_upload_loading(
@@ -311,24 +311,24 @@ async def test_offline_upload_repo_rejects_invalid_state_transitions(
             load_job_id=job.job_id,
         )
         assert loading is not None
-        assert loading.state == "loading"
+        assert loading.status == "loading"
 
         loaded = await finish_offline_upload_load(
             session,
             upload_id=upload_id,
-            state="loaded",
+            status="loaded",
         )
         assert loaded is not None
-        assert loaded.state == "loaded"
+        assert loaded.status == "loaded"
 
-        with pytest.raises(OfflineUploadStateConflict) as reload_conflict:
+        with pytest.raises(OfflineUploadStatusConflict) as reload_conflict:
             await mark_offline_upload_loading(
                 session,
                 upload_id=upload_id,
                 load_job_id=job.job_id,
             )
-        assert reload_conflict.value.current_state == "loaded"
-        assert reload_conflict.value.target_state == "loading"
+        assert reload_conflict.value.current_status == "loaded"
+        assert reload_conflict.value.target_status == "loading"
 
 
 async def test_offline_upload_repo_reserves_load_job_transactionally(
@@ -344,15 +344,15 @@ async def test_offline_upload_repo_reserves_load_job_transactionally(
     async with AsyncSession(migrated_engine) as session, session.begin():
         loading = await reserve_offline_upload_load(session, upload_id=upload_id)
         assert loading is not None
-        assert loading.state == "loading"
+        assert loading.status == "loading"
         assert loading.load_job_id is not None
 
     async with AsyncSession(migrated_engine) as session:
         row = (
             await session.execute(
                 text(
-                    "SELECT ou.state AS upload_state, ou.load_job_id, "
-                    "ij.state AS job_state, ij.kind, ij.source_checksum "
+                    "SELECT ou.status AS upload_status, ou.load_job_id, "
+                    "ij.status AS job_status, ij.kind, ij.source_checksum "
                     "FROM ops.offline_uploads AS ou "
                     "JOIN ops.import_jobs AS ij ON ij.job_id = ou.load_job_id "
                     "WHERE ou.upload_id = :upload_id"
@@ -361,8 +361,8 @@ async def test_offline_upload_repo_reserves_load_job_transactionally(
             )
         ).one()
 
-    assert row.upload_state == "loading"
-    assert row.job_state == "running"
+    assert row.upload_status == "loading"
+    assert row.job_status == "running"
     assert row.kind == "offline_upload_load"
     assert row.source_checksum == hashlib.sha256(body).hexdigest()
 

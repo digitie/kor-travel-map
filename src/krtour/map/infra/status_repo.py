@@ -6,7 +6,7 @@
 집계 대상:
 - ``feature.features`` — 활성/비활성/전체 + kind별.
 - ``provider_sync.source_records`` — provider별 row 수.
-- ``ops.import_jobs`` — state별.
+- ``ops.import_jobs`` — status별.
 - ``ops.dedup_review_queue`` — status별.
 """
 
@@ -37,7 +37,7 @@ class StatusCounts:
     features_inactive: int = 0
     features_by_kind: dict[str, int] = field(default_factory=dict)
     source_records_by_provider: dict[str, int] = field(default_factory=dict)
-    import_jobs_by_state: dict[str, int] = field(default_factory=dict)
+    import_jobs_by_status: dict[str, int] = field(default_factory=dict)
     dedup_queue_by_status: dict[str, int] = field(default_factory=dict)
 
 
@@ -109,9 +109,9 @@ GROUP BY provider
 """
 
 _IMPORT_JOBS_SQL: Final[str] = """
-SELECT state, count(*) AS n
+SELECT status, count(*) AS n
 FROM ops.import_jobs
-GROUP BY state
+GROUP BY status
 """
 
 _DEDUP_QUEUE_SQL: Final[str] = """
@@ -132,8 +132,8 @@ async def gather_status_counts(session: AsyncSession) -> StatusCounts:
         row.provider: int(row.n)
         for row in (await session.execute(text(_SOURCE_RECORDS_SQL))).all()
     }
-    by_state = {
-        row.state: int(row.n)
+    by_job_status = {
+        row.status: int(row.n)
         for row in (await session.execute(text(_IMPORT_JOBS_SQL))).all()
     }
     by_status = {
@@ -146,6 +146,6 @@ async def gather_status_counts(session: AsyncSession) -> StatusCounts:
         features_inactive=int(feat.inactive),
         features_by_kind=by_kind,
         source_records_by_provider=by_provider,
-        import_jobs_by_state=by_state,
+        import_jobs_by_status=by_job_status,
         dedup_queue_by_status=by_status,
     )

@@ -69,7 +69,7 @@ def _request(
         update_policy={"mode": "refresh_existing"},
         run_mode=run_mode,
         priority=50,
-        state=state,
+        status=state,
         dry_run=False,
         matched_scope={"feature_count": 1, "sigungu_codes": []},
         job_id="job-1",
@@ -310,7 +310,7 @@ def test_list_requests_passes_filters(
     from krtour.map_admin.routers import feature_update_requests as router_mod
 
     async def _list(_session: Any, **kwargs: Any) -> FeatureUpdateRequestPage:
-        assert kwargs["state"] == "queued"
+        assert kwargs["status"] == "queued"
         assert kwargs["scope_type"] == "feature_ids"
         assert kwargs["provider"] == "python-a-api"
         assert kwargs["dataset_key"] == "dataset-a"

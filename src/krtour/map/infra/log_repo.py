@@ -51,7 +51,7 @@ _MAX_PAGE_SIZE: Final[int] = 200
 class SystemLogRow:
     """``ops.system_log`` row."""
 
-    system_log_key: str
+    system_log_id: str
     level: str
     source: str
     event: str
@@ -73,7 +73,7 @@ class SystemLogPage:
 class ApiCallLogRow:
     """``ops.api_call_log`` row."""
 
-    api_call_log_key: str
+    api_call_log_id: str
     method: str
     path: str
     status_code: int
@@ -133,7 +133,7 @@ def _decode_cursor(
 
 
 _SYSTEM_LOG_COLUMNS: Final[str] = (
-    "system_log_key, level, source, event, message, detail, request_id, created_at"
+    "system_log_id, level, source, event, message, detail, request_id, created_at"
 )
 
 _INSERT_SYSTEM_LOG_SQL: Final[str] = f"""
@@ -152,17 +152,17 @@ WHERE (CAST(:level AS text) IS NULL OR level = CAST(:level AS text))
   AND (CAST(:q_like AS text) IS NULL OR message ILIKE CAST(:q_like AS text))
   AND (
     CAST(:cursor_created_at AS timestamptz) IS NULL
-    OR (created_at, system_log_key) < (
+    OR (created_at, system_log_id) < (
         CAST(:cursor_created_at AS timestamptz),
         CAST(:cursor_key AS uuid)
     )
   )
-ORDER BY created_at DESC, system_log_key DESC
+ORDER BY created_at DESC, system_log_id DESC
 LIMIT :limit
 """
 
 _API_CALL_LOG_COLUMNS: Final[str] = (
-    "api_call_log_key, method, path, status_code, duration_ms, request_id, "
+    "api_call_log_id, method, path, status_code, duration_ms, request_id, "
     "error_code, created_at"
 )
 
@@ -186,19 +186,19 @@ WHERE (CAST(:method AS text) IS NULL OR method = CAST(:method AS text))
   AND (CAST(:path_like AS text) IS NULL OR path ILIKE CAST(:path_like AS text))
   AND (
     CAST(:cursor_created_at AS timestamptz) IS NULL
-    OR (created_at, api_call_log_key) < (
+    OR (created_at, api_call_log_id) < (
         CAST(:cursor_created_at AS timestamptz),
         CAST(:cursor_key AS uuid)
     )
   )
-ORDER BY created_at DESC, api_call_log_key DESC
+ORDER BY created_at DESC, api_call_log_id DESC
 LIMIT :limit
 """
 
 
 def _row_to_system_log(row: Any) -> SystemLogRow:
     return SystemLogRow(
-        system_log_key=str(row.system_log_key),
+        system_log_id=str(row.system_log_id),
         level=str(row.level),
         source=str(row.source),
         event=str(row.event),
@@ -211,7 +211,7 @@ def _row_to_system_log(row: Any) -> SystemLogRow:
 
 def _row_to_api_call_log(row: Any) -> ApiCallLogRow:
     return ApiCallLogRow(
-        api_call_log_key=str(row.api_call_log_key),
+        api_call_log_id=str(row.api_call_log_id),
         method=str(row.method),
         path=str(row.path),
         status_code=int(row.status_code),
@@ -291,7 +291,7 @@ async def list_system_logs(
     limit: int = 50,
     cursor: str | None = None,
 ) -> SystemLogPage:
-    """``ops.system_log``를 ``created_at DESC, system_log_key DESC`` cursor로 조회."""
+    """``ops.system_log``를 ``created_at DESC, system_log_id DESC`` cursor로 조회."""
     page_size = _limit(limit)
     cursor_created_at, cursor_key = _decode_cursor(cursor, kind="system_logs")
     q_like = f"%{q}%" if q else None
@@ -311,7 +311,7 @@ async def list_system_logs(
     items = tuple(_row_to_system_log(row) for row in rows[:page_size])
     next_cursor = (
         _encode_cursor(
-            "system_logs", at=items[-1].created_at, key=items[-1].system_log_key
+            "system_logs", at=items[-1].created_at, key=items[-1].system_log_id
         )
         if len(rows) > page_size and items
         else None
@@ -328,7 +328,7 @@ async def list_api_call_logs(
     limit: int = 50,
     cursor: str | None = None,
 ) -> ApiCallLogPage:
-    """``ops.api_call_log``을 ``created_at DESC, api_call_log_key DESC`` cursor로 조회."""
+    """``ops.api_call_log``을 ``created_at DESC, api_call_log_id DESC`` cursor로 조회."""
     page_size = _limit(limit)
     cursor_created_at, cursor_key = _decode_cursor(cursor, kind="api_call_logs")
     path_like = f"%{path}%" if path else None
@@ -348,7 +348,7 @@ async def list_api_call_logs(
     items = tuple(_row_to_api_call_log(row) for row in rows[:page_size])
     next_cursor = (
         _encode_cursor(
-            "api_call_logs", at=items[-1].created_at, key=items[-1].api_call_log_key
+            "api_call_logs", at=items[-1].created_at, key=items[-1].api_call_log_id
         )
         if len(rows) > page_size and items
         else None

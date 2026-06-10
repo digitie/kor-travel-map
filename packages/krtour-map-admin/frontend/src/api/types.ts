@@ -2049,8 +2049,8 @@ export interface components {
             level?: string | null;
             /** Message */
             message?: string | null;
-            /** Step Key */
-            step_key?: string | null;
+            /** Step Id */
+            step_id?: string | null;
             /** Timestamp */
             timestamp?: string | null;
         };
@@ -3481,8 +3481,8 @@ export interface components {
             features_inactive: number;
             /** Features Total */
             features_total: number;
-            /** Import Jobs By State */
-            import_jobs_by_state: {
+            /** Import Jobs By Status */
+            import_jobs_by_status: {
                 [key: string]: number;
             };
             latest_consistency_report?: components["schemas"]["OpsConsistencyReportRecord"] | null;

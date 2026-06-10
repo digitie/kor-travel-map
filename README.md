@@ -14,8 +14,9 @@ SQLAlchemy 2 async + GeoAlchemy2 + GeoPandas 위에서 동작한다.
 > **기준값(잘 바뀌지 않는 사실)**: standalone 고정 포트 API `9011` / admin UI
 > `9012` / Dagster `9013`(ADR-047), RustFS S3 `9003`·console `9004`, geocoding은
 > kraddr-geo REST v2 `POST /v2/{reverse,geocode}` 로컬 `http://127.0.0.1:9001`,
-> frontend Next.js 16 + `maplibre-vworld-js#v0.1.2`. ADR 현황: **001~048 accepted**
-> (다음 후보 049). ADR-048은 `/v1` REST clean cut + 정합성 표준. admin UI는
+> frontend Next.js 16 + `maplibre-vworld-js#v0.1.2`. ADR 현황: **001~049 accepted**
+> (다음 후보 050). ADR-048은 `/v1` REST clean cut + 정합성 표준, ADR-049는
+> TripMate-agent YouTube provider pull 경계. admin UI는
 > `/admin/dagster`에서 Dagster 요약 + webserver embed 제공.
 >
 > **현재 진척·스프린트 상태의 단일 정본은 `docs/resume.md`(다음 한 작업) +
@@ -52,6 +53,8 @@ OpenAPI는 우선 admin UI 기준으로 작성하고, TripMate 연동 시 필요
 - 결정적 `feature_id` 생성
 - `python-*-api` provider 결과를 `Feature`/`SourceRecord`/`WeatherValue`/`PriceValue`/
   `FeatureFile`로 정규화
+- `tripmate-agent`의 YouTube 장소 후보 REST export를 `tripmate-agent-youtube`
+  provider로 소비해 `FeatureBundle`로 정규화
 - PostgreSQL + PostGIS 스키마 + Alembic 마이그레이션 + raw SQL repository
 - S3 호환 객체 저장소(RustFS) 연동: 이미지/문서 메타데이터
 - 주소/좌표 정규화: 내장 `Address`/`Coordinate` DTO + `python-kraddr-geo`
@@ -139,7 +142,7 @@ Windows Node/npm(`/mnt/c/Program Files/nodejs/...`)으로 frontend 서버를 띄
 | HTTP client | httpx + tenacity |
 | 마이그레이션 | Alembic |
 | 주소/좌표 | `python-kraddr-base`, `python-kraddr-geo` |
-| Provider client | `python-{visitkorea,mois,opinet,krex,kma,khoa,airkorea,krforest,krheritage,kasi,datagokr,mcst,krairport}-api` |
+| Provider client/export | `python-{visitkorea,mois,opinet,krex,kma,khoa,airkorea,krforest,krheritage,kasi,datagokr,mcst,krairport}-api` + `tripmate-agent` REST export |
 | 객체 저장소 | S3 호환 (RustFS 우선, 로컬 API `9003` / console `9004`) |
 | Orchestration | Dagster (krtour-map 독립 프로그램이 소유; OpenAPI로 update request 큐잉/제어) |
 | Lint/Type | ruff, mypy --strict, import-linter |
@@ -226,7 +229,7 @@ lint-imports
 - [`CLAUDE.md`](CLAUDE.md) — Claude(Code/Agent SDK)용 1쪽 진입 요약
 - [`CHANGELOG.md`](CHANGELOG.md) — Keep a Changelog 형식 (Unreleased + ADR-024~034)
 - [`docs/architecture.md`](docs/architecture.md) — 의존 방향, 계층, 데이터 흐름
-- [`docs/decisions.md`](docs/decisions.md) — ADR 누적 (ADR-001~048)
+- [`docs/decisions.md`](docs/decisions.md) — ADR 누적 (ADR-001~049)
 - [`docs/sprints/README.md`](docs/sprints/README.md) — Sprint 1~5 계획 + ADR-034 9단계 구현 순서
   - [`docs/sprints/SPRINT-1.md`](docs/sprints/SPRINT-1.md) — 코드 작성 단계 진입 + scaffolding (provider 없음)
   - [`docs/sprints/SPRINT-2.md`](docs/sprints/SPRINT-2.md) — MOIS-독립 4 provider (축제/날씨/유가/휴게소) + 디버그 UI 첫 라우터

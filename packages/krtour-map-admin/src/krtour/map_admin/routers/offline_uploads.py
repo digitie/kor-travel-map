@@ -45,7 +45,7 @@ from krtour.map.infra.jobs_repo import finish_import_job, get_import_job
 from krtour.map.infra.offline_upload_repo import (
     OfflineUpload,
     OfflineUploadPage,
-    OfflineUploadStateConflict,
+    OfflineUploadStatusConflict,
     create_offline_upload,
     finish_offline_upload_load,
     get_offline_upload,
@@ -335,7 +335,7 @@ def _record_from_upload(row: OfflineUpload) -> OfflineUploadRecord:
         checksum_sha256=row.checksum_sha256,
         detected_format=row.detected_format,
         detected_encoding=row.detected_encoding,
-        status=row.state,
+        status=row.status,
         validation_job_id=row.validation_job_id,
         load_job_id=row.load_job_id,
         created_by=row.created_by,
@@ -352,12 +352,12 @@ def _is_tabular_upload(row: OfflineUpload) -> bool:
 
 
 def _can_load(row: OfflineUpload) -> bool:
-    if row.state not in OFFLINE_UPLOAD_LOADABLE_STATES:
+    if row.status not in OFFLINE_UPLOAD_LOADABLE_STATES:
         return False
     if _is_tabular_upload(row):
         return (
             row.validation_job_id is not None
-            and row.state in OFFLINE_UPLOAD_TABULAR_LOADABLE_STATES
+            and row.status in OFFLINE_UPLOAD_TABULAR_LOADABLE_STATES
         )
     return True
 
@@ -365,7 +365,7 @@ def _can_load(row: OfflineUpload) -> bool:
 def _load_reject_detail(row: OfflineUpload) -> str:
     if _is_tabular_upload(row) and row.validation_job_id is None:
         return "CSV/TSV offline upload은 load 전 validate가 필요합니다."
-    return f"load 가능한 status가 아닙니다: {row.state}"
+    return f"load 가능한 status가 아닙니다: {row.status}"
 
 
 def _require_tabular(row: OfflineUpload) -> None:
@@ -457,7 +457,9 @@ def _validation_meta_from_payload(
         checksum_sha256_actual=_string(payload.get("checksum_sha256_actual")),
         job_id=(_string(payload.get("job_id")) if payload.get("job_id") is not None else None),
         job_status=(
-            _string(payload.get("job_state")) if payload.get("job_state") is not None else None
+            _string(payload.get("job_status"))
+            if payload.get("job_status") is not None
+            else None
         ),
         column_mapping=OfflineUploadColumnMappingRecord.model_validate(
             _dict(payload.get("column_mapping"))
@@ -859,7 +861,7 @@ async def list_offline_upload_requests(
     try:
         page: OfflineUploadPage = await list_offline_uploads(
             session,
-            state=status_filter,
+            status=status_filter,
             provider=provider,
             dataset_key=dataset_key,
             limit=page_size,
@@ -1131,7 +1133,7 @@ async def load_offline_upload_request(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"offline upload 없음: {upload_id!r}",
                 )
-    except OfflineUploadStateConflict as exc:
+    except OfflineUploadStatusConflict as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(exc),
@@ -1145,10 +1147,10 @@ async def load_offline_upload_request(
                 await finish_import_job(
                     session,
                     loading.load_job_id,
-                    state="failed",
+                    status="failed",
                     error_message=str(exc.detail),
                 )
-            await finish_offline_upload_load(session, upload_id=upload_id, state="load_failed")
+            await finish_offline_upload_load(session, upload_id=upload_id, status="load_failed")
         raise
     return OfflineUploadLaunchResponse(
         data=_record_from_upload(loading),

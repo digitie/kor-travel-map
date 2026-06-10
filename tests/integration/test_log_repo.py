@@ -31,7 +31,7 @@ async def _set_system_log_created_at(
             """
             UPDATE ops.system_log
             SET created_at = :created_at
-            WHERE system_log_key = :key
+            WHERE system_log_id = :key
             """
         ),
         {"key": key, "created_at": created_at},
@@ -46,7 +46,7 @@ async def _set_api_call_created_at(
             """
             UPDATE ops.api_call_log
             SET created_at = :created_at
-            WHERE api_call_log_key = :key
+            WHERE api_call_log_id = :key
             """
         ),
         {"key": key, "created_at": created_at},
@@ -75,38 +75,38 @@ async def test_record_and_list_system_logs_cursor_and_filters(
     )
     await _set_system_log_created_at(
         migrated_session,
-        key=old.system_log_key,
+        key=old.system_log_id,
         created_at=datetime(2026, 6, 3, 10, 0, tzinfo=_KST),
     )
     await _set_system_log_created_at(
         migrated_session,
-        key=new.system_log_key,
+        key=new.system_log_id,
         created_at=datetime(2026, 6, 3, 11, 0, tzinfo=_KST),
     )
     await migrated_session.flush()
 
     # keyset cursor: page1 = 최신(new), page2 = 오래된(old).
     page1 = await list_system_logs(migrated_session, limit=1)
-    assert [row.system_log_key for row in page1.items] == [new.system_log_key]
+    assert [row.system_log_id for row in page1.items] == [new.system_log_id]
     assert page1.next_cursor is not None
     assert page1.items[0].detail == {"feature_id": "f1"}
 
     page2 = await list_system_logs(
         migrated_session, limit=1, cursor=page1.next_cursor
     )
-    assert [row.system_log_key for row in page2.items] == [old.system_log_key]
+    assert [row.system_log_id for row in page2.items] == [old.system_log_id]
 
     # level 필터.
     errors = await list_system_logs(migrated_session, level="error")
-    assert {row.system_log_key for row in errors.items} == {new.system_log_key}
+    assert {row.system_log_id for row in errors.items} == {new.system_log_id}
 
     # source 필터.
     uploads = await list_system_logs(migrated_session, source="offline_upload")
-    assert {row.system_log_key for row in uploads.items} == {old.system_log_key}
+    assert {row.system_log_id for row in uploads.items} == {old.system_log_id}
 
     # q: message 부분일치.
     matched = await list_system_logs(migrated_session, q="역지오코딩")
-    assert {row.system_log_key for row in matched.items} == {new.system_log_key}
+    assert {row.system_log_id for row in matched.items} == {new.system_log_id}
 
 
 async def test_record_system_log_invalid_level_raises(
@@ -143,33 +143,33 @@ async def test_record_and_list_api_call_logs_cursor_and_min_status(
     )
     await _set_api_call_created_at(
         migrated_session,
-        key=ok.api_call_log_key,
+        key=ok.api_call_log_id,
         created_at=datetime(2026, 6, 3, 10, 0, tzinfo=_KST),
     )
     await _set_api_call_created_at(
         migrated_session,
-        key=err.api_call_log_key,
+        key=err.api_call_log_id,
         created_at=datetime(2026, 6, 3, 11, 0, tzinfo=_KST),
     )
     await migrated_session.flush()
 
     # keyset cursor: page1 = 최신(err), page2 = 오래된(ok).
     page1 = await list_api_call_logs(migrated_session, limit=1)
-    assert [row.api_call_log_key for row in page1.items] == [err.api_call_log_key]
+    assert [row.api_call_log_id for row in page1.items] == [err.api_call_log_id]
     assert page1.next_cursor is not None
 
     page2 = await list_api_call_logs(
         migrated_session, limit=1, cursor=page1.next_cursor
     )
-    assert [row.api_call_log_key for row in page2.items] == [ok.api_call_log_key]
+    assert [row.api_call_log_id for row in page2.items] == [ok.api_call_log_id]
 
     # min_status 필터: >= 500.
     failures = await list_api_call_logs(migrated_session, min_status=500)
-    assert {row.api_call_log_key for row in failures.items} == {err.api_call_log_key}
+    assert {row.api_call_log_id for row in failures.items} == {err.api_call_log_id}
     assert failures.items[0].error_code == "INTERNAL_ERROR"
 
     # method + path 필터.
     by_method = await list_api_call_logs(
         migrated_session, method="GET", path="/ops"
     )
-    assert {row.api_call_log_key for row in by_method.items} == {ok.api_call_log_key}
+    assert {row.api_call_log_id for row in by_method.items} == {ok.api_call_log_id}

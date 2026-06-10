@@ -52,7 +52,7 @@ def _job(job_id: str = "11111111-1111-1111-1111-111111111111") -> OpsImportJob:
         load_batch_id="33333333-3333-3333-3333-333333333333",
         parent_job_id="44444444-4444-4444-4444-444444444444",
         payload={"request_id": "req-1"},
-        state="running",
+        status="running",
         progress=40,
         current_stage="loading",
         source_checksum=None,
@@ -88,11 +88,11 @@ def _report(
 
 
 def _issue(
-    violation_key: str = "44444444-4444-4444-4444-444444444444",
+    issue_id: str = "44444444-4444-4444-4444-444444444444",
 ) -> OpsIntegrityIssue:
     now = datetime(2026, 6, 3, tzinfo=UTC)
     return OpsIntegrityIssue(
-        violation_key=violation_key,
+        issue_id=issue_id,
         provider="python-mois-api",
         dataset_key="mois_license_features_bulk",
         source_record_key="src-1",
@@ -132,7 +132,7 @@ def test_ops_metrics_maps_counts(
             features_inactive=1,
             features_by_kind={"place": 8, "event": 2},
             source_records_by_provider={"python-mois-api": 10},
-            import_jobs_by_state={"running": 1},
+            import_jobs_by_status={"running": 1},
             dedup_queue_by_status={"merged": 1, "rejected": 1, "pending": 2},
         )
 
@@ -158,7 +158,7 @@ def test_ops_metrics_maps_counts(
     assert "duration_ms" in body["meta"]
     data = body["data"]
     assert data["features_total"] == 10
-    assert data["import_jobs_by_state"] == {"running": 1}
+    assert data["import_jobs_by_status"] == {"running": 1}
     assert data["dedup_fp_stats"]["confirmed"] == 1
     assert data["dedup_fp_stats"]["rejected"] == 1
     assert data["data_integrity_issues"]["open_total"] == 3
@@ -174,7 +174,7 @@ def test_import_jobs_list_passes_filters(
 
     async def _list(_session: Any, **kwargs: Any) -> OpsImportJobPage:
         assert kwargs == {
-            "state": "running",
+            "status": "running",
             "kind": "feature_update_request",
             "load_batch_id": "33333333-3333-3333-3333-333333333333",
             "parent_job_id": "44444444-4444-4444-4444-444444444444",
@@ -262,7 +262,7 @@ def test_consistency_and_issue_lists_pass_filters(
     assert reports.json()["data"]["items"][0]["summary"]["by_code"] == {"F4": 3}
     assert reports.json()["meta"]["page"]["page_size"] == 5
     assert issues.status_code == 200
-    assert issues.json()["data"]["items"][0]["issue_id"] == _issue().violation_key
+    assert issues.json()["data"]["items"][0]["issue_id"] == _issue().issue_id
     assert issues.json()["data"]["items"][0]["message"] == "좌표 없음"
     assert issues.json()["meta"]["page"]["page_size"] == 5
 

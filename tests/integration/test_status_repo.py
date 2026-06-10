@@ -80,7 +80,7 @@ async def test_status_counts_empty(migrated_session: AsyncSession) -> None:
     assert counts.features_active == 0
     assert counts.features_by_kind == {}
     assert counts.source_records_by_provider == {}
-    assert counts.import_jobs_by_state == {}
+    assert counts.import_jobs_by_status == {}
     assert counts.dedup_queue_by_status == {}
 
 
@@ -103,4 +103,4 @@ async def test_status_counts_with_data(migrated_session: AsyncSession) -> None:
     assert counts.features_inactive == 0
     assert counts.features_by_kind == {"place": 2}
     assert counts.source_records_by_provider == {"python-mois-api": 2}
-    assert counts.import_jobs_by_state == {"queued": 1, "running": 1}
+    assert counts.import_jobs_by_status == {"queued": 1, "running": 1}

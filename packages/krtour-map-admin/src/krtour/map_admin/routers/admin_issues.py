@@ -200,7 +200,7 @@ class AdminIssuePatchRequest(BaseModel):
 
 def _record(issue: OpsIntegrityIssue | DataIntegrityViolation) -> AdminIssueRecord:
     return AdminIssueRecord(
-        issue_id=issue.violation_key,
+        issue_id=issue.issue_id,
         provider=issue.provider,
         dataset_key=issue.dataset_key,
         source_record_key=issue.source_record_key,
@@ -459,7 +459,7 @@ async def patch_admin_issue(
     try:
         return await _dispatch_action(
             session,
-            violation_key=issue_id,
+            issue_id=issue_id,
             issue=issue,
             body=body,
             started_at=started_at,
@@ -486,7 +486,7 @@ async def patch_admin_issue(
 async def _dispatch_action(
     session: AsyncSession,
     *,
-    violation_key: str,
+    issue_id: str,
     issue: DataIntegrityViolation,
     body: AdminIssuePatchRequest,
     started_at: float,
@@ -498,12 +498,12 @@ async def _dispatch_action(
         async with session.begin():
             updated = await set_data_integrity_violation_status(
                 session,
-                violation_key,
+                issue_id,
                 status=target_status,
                 resolution_payload=_resolution_payload(action, body),
             )
         if updated is None:
-            raise HTTPException(status_code=404, detail=f"이슈 없음: {violation_key}")
+            raise HTTPException(status_code=404, detail=f"이슈 없음: {issue_id}")
         return _action_response(updated, feature=None, candidate=None, started_at=started_at)
 
     if action == "retry_geocode":
@@ -569,12 +569,12 @@ async def _dispatch_action(
                 )
             updated = await set_data_integrity_violation_status(
                 session,
-                violation_key,
+                issue_id,
                 status="resolved",
                 resolution_payload=_resolution_payload(action, body),
             )
         if updated is None:
-            raise HTTPException(status_code=404, detail=f"이슈 없음: {violation_key}")
+            raise HTTPException(status_code=404, detail=f"이슈 없음: {issue_id}")
         return _action_response(
             updated,
             feature=result.snapshot,
@@ -616,12 +616,12 @@ async def _dispatch_action(
             raise HTTPException(status_code=404, detail=f"feature 없음: {feature_id}")
         updated = await set_data_integrity_violation_status(
             session,
-            violation_key,
+            issue_id,
             status="resolved",
             resolution_payload=_resolution_payload(action, body),
         )
     if updated is None:
-        raise HTTPException(status_code=404, detail=f"이슈 없음: {violation_key}")
+        raise HTTPException(status_code=404, detail=f"이슈 없음: {issue_id}")
     return _action_response(
         updated, feature=result.snapshot, candidate=None, started_at=started_at
     )

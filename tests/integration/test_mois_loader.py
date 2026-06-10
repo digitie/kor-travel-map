@@ -313,13 +313,13 @@ async def test_sync_bulk_empty_snapshot_deactivates_all(
 # -- run_mois_license_bulk_job (advisory lock + import_jobs 추적) -------------
 
 
-async def _job_states(session: AsyncSession) -> list[tuple[str, str, int]]:
+async def _job_statuss(session: AsyncSession) -> list[tuple[str, str, int]]:
     rows = (
         await session.execute(
-            text("SELECT kind, state, progress FROM ops.import_jobs ORDER BY created_at")
+            text("SELECT kind, status, progress FROM ops.import_jobs ORDER BY created_at")
         )
     ).all()
-    return [(r.kind, r.state, r.progress) for r in rows]
+    return [(r.kind, r.status, r.progress) for r in rows]
 
 
 async def test_run_bulk_job_tracks_done_and_syncs(
@@ -336,12 +336,12 @@ async def test_run_bulk_job_tracks_done_and_syncs(
     await migrated_session.flush()
     assert result.acquired is True
     assert result.job is not None
-    assert result.job.state == "done"
+    assert result.job.status == "done"
     assert result.job.progress == 100
     assert result.sync is not None
     assert result.sync.load.bundles_total == 2
     # import_jobs에 done 1건 기록.
-    assert await _job_states(migrated_session) == [
+    assert await _job_statuss(migrated_session) == [
         ("mois_license_full_update", "done", 100)
     ]
     assert await _active_entity_ids(migrated_session) == {
@@ -374,7 +374,7 @@ async def test_run_bulk_job_skips_when_lock_held(
         assert result.job is None
         assert result.sync is None
     # 작업 row도, feature도 생성 안 됨.
-    assert await _job_states(migrated_session) == []
+    assert await _job_statuss(migrated_session) == []
     assert await _active_entity_ids(migrated_session) == set()
 
 
@@ -440,7 +440,7 @@ async def test_incremental_job_loads_and_advances_cursor(
     )
     assert result.acquired is True
     assert result.job is not None
-    assert result.job.state == "done"
+    assert result.job.status == "done"
     assert result.load is not None
     assert result.load.features_inserted == 2
     assert result.sync_state is not None
@@ -547,7 +547,7 @@ async def test_run_closed_job_tracks_and_advances_cursor(
     )
     assert result.acquired is True
     assert result.job is not None
-    assert result.job.state == "done"
+    assert result.job.status == "done"
     assert result.deactivated == 1
     assert result.sync_state is not None
     assert result.sync_state.cursor == {"last_modified_date": "2026-06-03"}

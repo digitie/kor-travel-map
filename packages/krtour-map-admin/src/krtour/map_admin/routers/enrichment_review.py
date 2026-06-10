@@ -115,7 +115,7 @@ class EnrichmentReviewDecisionResponse(BaseModel):
 
 def _record(row: EnrichmentReviewRow) -> EnrichmentReviewRecord:
     return EnrichmentReviewRecord(
-        review_id=row.review_key,
+        review_id=row.review_id,
         status=row.status,
         name_score=row.name_score,
         target_feature_id=row.target_feature_id,
@@ -204,7 +204,7 @@ async def decide_review(
         )
     return EnrichmentReviewDecisionResponse(
         data=EnrichmentReviewDecisionData(
-            review_id=result.review_key,
+            review_id=result.review_id,
             decision=body.decision,
             changed=result.changed,
             applied=result.applied,

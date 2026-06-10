@@ -255,7 +255,7 @@ async def test_data_integrity_violation_lifecycle_and_fk_behavior(
     assert violation.status == "open"
     assert violation.payload["distance_m"] == 120.0
 
-    loaded = await get_data_integrity_violation(migrated_session, violation.violation_key)
+    loaded = await get_data_integrity_violation(migrated_session, violation.issue_id)
     assert loaded == violation
     assert await list_data_integrity_violations(
         migrated_session,
@@ -266,7 +266,7 @@ async def test_data_integrity_violation_lifecycle_and_fk_behavior(
 
     resolved = await set_data_integrity_violation_status(
         migrated_session,
-        violation.violation_key,
+        violation.issue_id,
         status="resolved",
         resolution_payload={
             "operator": "local-admin",
@@ -280,7 +280,7 @@ async def test_data_integrity_violation_lifecycle_and_fk_behavior(
 
     same_resolved = await set_data_integrity_violation_status(
         migrated_session,
-        violation.violation_key,
+        violation.issue_id,
         status="resolved",
     )
     assert same_resolved is not None
@@ -290,11 +290,11 @@ async def test_data_integrity_violation_lifecycle_and_fk_behavior(
     with pytest.raises(DataIntegrityViolationStateConflict) as exc_info:
         await set_data_integrity_violation_status(
             migrated_session,
-            violation.violation_key,
+            violation.issue_id,
             status="open",
         )
     assert exc_info.value.current_status == "resolved"
-    still_resolved = await get_data_integrity_violation(migrated_session, violation.violation_key)
+    still_resolved = await get_data_integrity_violation(migrated_session, violation.issue_id)
     assert still_resolved is not None
     assert still_resolved.status == "resolved"
     assert still_resolved.resolved_at == resolved.resolved_at
@@ -303,7 +303,7 @@ async def test_data_integrity_violation_lifecycle_and_fk_behavior(
         text("DELETE FROM provider_sync.source_records WHERE source_record_key = 'src:violation:1'")
     )
     after_source_delete = await get_data_integrity_violation(
-        migrated_session, violation.violation_key
+        migrated_session, violation.issue_id
     )
     assert after_source_delete is not None
     assert after_source_delete.source_record_key is None
@@ -311,4 +311,4 @@ async def test_data_integrity_violation_lifecycle_and_fk_behavior(
     await migrated_session.execute(
         text("DELETE FROM feature.features WHERE feature_id = 'feature:violation:1'")
     )
-    assert await get_data_integrity_violation(migrated_session, violation.violation_key) is None
+    assert await get_data_integrity_violation(migrated_session, violation.issue_id) is None

@@ -59,10 +59,10 @@ def client(session: _FakeSession) -> TestClient:
     return TestClient(app)
 
 
-def _ops_issue(violation_key: str = _VIOLATION_KEY) -> OpsIntegrityIssue:
+def _ops_issue(issue_id: str = _VIOLATION_KEY) -> OpsIntegrityIssue:
     now = datetime(2026, 6, 3, tzinfo=UTC)
     return OpsIntegrityIssue(
-        violation_key=violation_key,
+        issue_id=issue_id,
         provider="python-mois-api",
         dataset_key="mois_license_features_bulk",
         source_record_key="src-1",
@@ -85,7 +85,7 @@ def _violation(
 ) -> DataIntegrityViolation:
     now = datetime(2026, 6, 3, tzinfo=UTC)
     return DataIntegrityViolation(
-        violation_key=_VIOLATION_KEY,
+        issue_id=_VIOLATION_KEY,
         provider="python-mois-api",
         dataset_key="mois_license_features_bulk",
         source_record_key="src-1",
@@ -294,7 +294,7 @@ def test_patch_state_conflict_returns_409(
 
     async def _set(_session: Any, key: str, **kwargs: Any) -> DataIntegrityViolation:
         raise DataIntegrityViolationStateConflict(
-            violation_key=key,
+            issue_id=key,
             current_status="resolved",
             target_status=kwargs["status"],
         )

@@ -6,8 +6,9 @@
    보유하므로 drop).
 2. loser ``feature.features``를 soft-delete(``status='deleted'`` + ``deleted_at``,
    ADR-017 — place는 하드 삭제 안 함).
-3. ``ops.feature_merge_history`` 1행 INSERT(ADR-016 이력 보존).
-4. (``review_key`` 주어지면) ``ops.dedup_review_queue`` 행을 ``status='merged'``로
+3. loser에 ``ops.feature_overrides`` status 가드를 남겨 provider 재적재 부활을 차단.
+4. ``ops.feature_merge_history`` 1행 INSERT(ADR-016 이력 보존).
+5. (``review_id`` 주어지면) ``ops.dedup_review_queue`` 행을 ``status='merged'``로
    전이(pending 행만).
 
 master 선정은 ``core.scoring.select_master``(순수, ADR-016 3순위). commit은 호출자
@@ -20,7 +21,7 @@ ADR 참조
 - ADR-008 — schema 격리(feature/provider_sync/ops)
 - ADR-016 — master 선정 + ``feature_merge_history``
 - ADR-017 — place soft-delete(무기한 보관, status만 전이)
-- ADR-039 — 중복 실행은 호출 측 advisory lock(``dedup-merge:{review_key}``)
+- ADR-039 — 중복 실행은 호출 측 advisory lock(``dedup-merge:{review_id}``)
 """
 
 from __future__ import annotations
@@ -101,7 +102,7 @@ WHERE f.feature_id = :feature_id
 _SELECT_REVIEW_SQL: Final[str] = """
 SELECT feature_id_a, feature_id_b, total_score, status
 FROM ops.dedup_review_queue
-WHERE review_key = :review_key
+WHERE review_id = :review_id
 FOR UPDATE
 """
 
@@ -127,16 +128,51 @@ RETURNING source_record_key
 
 # loser feature soft-delete (ADR-017).
 _SOFT_DELETE_LOSER_SQL: Final[str] = """
-UPDATE feature.features
-SET status = 'deleted', deleted_at = now(), updated_at = now()
-WHERE feature_id = :loser AND status <> 'deleted'
+WITH locked AS (
+    SELECT feature_id, status AS previous_status
+    FROM feature.features
+    WHERE feature_id = :loser
+    FOR UPDATE
+),
+updated AS (
+    UPDATE feature.features AS f
+    SET status = 'deleted', deleted_at = now(), updated_at = now()
+    FROM locked
+    WHERE f.feature_id = locked.feature_id
+      AND locked.previous_status <> 'deleted'
+    RETURNING f.feature_id, locked.previous_status
+)
+SELECT feature_id, previous_status
+FROM updated
+"""
+
+_UPSERT_LOSER_STATUS_OVERRIDE_SQL: Final[str] = """
+INSERT INTO ops.feature_overrides (
+    feature_id, source_record_key, field_path,
+    source_value, override_value, prevent_provider_reactivation,
+    status, reason, created_by
+) VALUES (
+    :loser, NULL, 'status',
+    to_jsonb(CAST(:source_value AS text)),
+    to_jsonb('deleted'::text),
+    true,
+    'active', :reason, :merged_by
+)
+ON CONFLICT (feature_id, field_path) WHERE status = 'active'
+DO UPDATE SET
+    source_value = EXCLUDED.source_value,
+    override_value = EXCLUDED.override_value,
+    prevent_provider_reactivation = true,
+    reason = EXCLUDED.reason,
+    created_by = EXCLUDED.created_by,
+    created_at = now()
 """
 
 _INSERT_HISTORY_SQL: Final[str] = """
 INSERT INTO ops.feature_merge_history (
-    master_feature_id, loser_feature_id, score, review_key, merged_by, reason
+    master_feature_id, loser_feature_id, score, review_id, merged_by, reason
 ) VALUES (
-    :master, :loser, :score, :review_key, :merged_by, :reason
+    :master, :loser, :score, :review_id, :merged_by, :reason
 )
 RETURNING merge_id
 """
@@ -146,8 +182,8 @@ _MARK_QUEUE_MERGED_SQL: Final[str] = """
 UPDATE ops.dedup_review_queue
 SET status = 'merged', reviewed_at = now(), reviewed_by = :merged_by,
     decision_reason = COALESCE(:reason, decision_reason)
-WHERE review_key = :review_key AND status = 'pending'
-RETURNING review_key
+WHERE review_id = :review_id AND status = 'pending'
+RETURNING review_id
 """
 
 
@@ -175,7 +211,7 @@ async def apply_feature_merge(
     master_id: str,
     loser_id: str,
     score: float | None = None,
-    review_key: str | None = None,
+    review_id: str | None = None,
     merged_by: str | None = None,
     reason: str | None = None,
 ) -> MergeOutcome:
@@ -200,7 +236,19 @@ async def apply_feature_merge(
             )
         ).fetchall()
     )
-    await session.execute(text(_SOFT_DELETE_LOSER_SQL), {"loser": loser_id})
+    soft_deleted = (
+        await session.execute(text(_SOFT_DELETE_LOSER_SQL), {"loser": loser_id})
+    ).mappings().first()
+    if soft_deleted is not None:
+        await session.execute(
+            text(_UPSERT_LOSER_STATUS_OVERRIDE_SQL),
+            {
+                "loser": loser_id,
+                "source_value": soft_deleted["previous_status"],
+                "reason": reason,
+                "merged_by": merged_by,
+            },
+        )
     merge_id = (
         await session.execute(
             text(_INSERT_HISTORY_SQL),
@@ -208,17 +256,17 @@ async def apply_feature_merge(
                 "master": master_id,
                 "loser": loser_id,
                 "score": score,
-                "review_key": review_key,
+                "review_id": review_id,
                 "merged_by": merged_by,
                 "reason": reason,
             },
         )
     ).scalar_one()
     queue_updated = False
-    if review_key is not None:
+    if review_id is not None:
         result = await session.execute(
             text(_MARK_QUEUE_MERGED_SQL),
-            {"review_key": review_key, "merged_by": merged_by, "reason": reason},
+            {"review_id": review_id, "merged_by": merged_by, "reason": reason},
         )
         queue_updated = bool(result.fetchall())
     return MergeOutcome(
@@ -233,12 +281,12 @@ async def apply_feature_merge(
 
 async def merge_from_review(
     session: AsyncSession,
-    review_key: str,
+    review_id: str,
     *,
     merged_by: str | None = None,
     reason: str | None = None,
 ) -> MergeOutcome:
-    """검토 큐 후보(``review_key``) 1쌍을 master 자동 선정 후 병합한다.
+    """검토 큐 후보(``review_id``) 1쌍을 master 자동 선정 후 병합한다.
 
     큐 행이 없거나 이미 검토(``status != 'pending'``)됐으면 ``MergeError``.
     master는 ``core.scoring.select_master``(좌표 → updated_at → source 우선순위)로
@@ -246,14 +294,14 @@ async def merge_from_review(
     """
     row = (
         await session.execute(
-            text(_SELECT_REVIEW_SQL), {"review_key": review_key}
+            text(_SELECT_REVIEW_SQL), {"review_id": review_id}
         )
     ).one_or_none()
     if row is None:
-        raise MergeNotFoundError(f"review_key 없음 — {review_key!r}")
+        raise MergeNotFoundError(f"review_id 없음 — {review_id!r}")
     if row.status != "pending":
         raise MergeConflictError(
-            f"이미 검토된 후보(status={row.status!r}) — {review_key!r}"
+            f"이미 검토된 후보(status={row.status!r}) — {review_id!r}"
         )
 
     cand_a = await _master_candidate(session, row.feature_id_a)
@@ -266,7 +314,7 @@ async def merge_from_review(
         master_id=master_id,
         loser_id=loser_id,
         score=score,
-        review_key=review_key,
+        review_id=review_id,
         merged_by=merged_by,
         reason=reason,
     )

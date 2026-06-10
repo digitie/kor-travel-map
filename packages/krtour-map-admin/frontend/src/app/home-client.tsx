@@ -144,7 +144,7 @@ export function HomePageClient() {
                 icon={ListChecksIcon}
                 title="Import jobs"
                 value={formatCount(
-                  Object.values(metricsData?.import_jobs_by_state ?? {}).reduce(
+                  Object.values(metricsData?.import_jobs_by_status ?? {}).reduce(
                     (sum, count) => sum + count,
                     0,
                   ),
