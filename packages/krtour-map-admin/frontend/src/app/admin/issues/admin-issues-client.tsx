@@ -11,7 +11,7 @@ import {
   XIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { useDeferredValue, useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useRef, useState } from "react";
 
 import {
   useAdminIssueActionMutation,
@@ -28,6 +28,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { FormField, FormTextArea } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -101,6 +102,11 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
   const [manualLat, setManualLat] = useState("");
   const [manualReason, setManualReason] = useState("");
   const [manualError, setManualError] = useState<string | null>(null);
+  const [manualErrorField, setManualErrorField] = useState<
+    "address" | "lon" | null
+  >(null);
+  const manualAddressRef = useRef<HTMLTextAreaElement>(null);
+  const manualLonRef = useRef<HTMLInputElement>(null);
 
   if (!issueId) {
     return (
@@ -123,14 +129,28 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
     });
   };
 
+  const failManualOverride = (
+    field: "address" | "lon",
+    message: string,
+  ) => {
+    setManualError(message);
+    setManualErrorField(field);
+    if (field === "address") {
+      manualAddressRef.current?.focus();
+    } else {
+      manualLonRef.current?.focus();
+    }
+  };
+
   const submitManualOverride = () => {
     setManualError(null);
+    setManualErrorField(null);
     let address: Record<string, unknown> | undefined;
     if (manualAddress.trim().length > 0) {
       try {
         address = JSON.parse(manualAddress) as Record<string, unknown>;
       } catch {
-        setManualError("address JSON을 파싱할 수 없습니다.");
+        failManualOverride("address", "address JSON을 파싱할 수 없습니다.");
         return;
       }
     }
@@ -140,15 +160,15 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
       (lon !== undefined && !Number.isFinite(lon)) ||
       (lat !== undefined && !Number.isFinite(lat))
     ) {
-      setManualError("lon/lat은 숫자여야 합니다.");
+      failManualOverride("lon", "lon/lat은 숫자여야 합니다.");
       return;
     }
     if ((lon === undefined) !== (lat === undefined)) {
-      setManualError("coord override는 lon/lat을 함께 입력해야 합니다.");
+      failManualOverride("lon", "coord override는 lon/lat을 함께 입력해야 합니다.");
       return;
     }
     if (address === undefined && lon === undefined) {
-      setManualError("address JSON 또는 lon/lat 중 하나는 필요합니다.");
+      failManualOverride("address", "address JSON 또는 lon/lat 중 하나는 필요합니다.");
       return;
     }
     runAction("manual_override", {
@@ -309,12 +329,6 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
           <WrenchIcon className="size-4 text-muted-foreground" />
           Manual override
         </div>
-        {manualError ? (
-          <Alert className="mb-3" variant="destructive">
-            <AlertTitle>manual override 입력 오류</AlertTitle>
-            <AlertDescription>{manualError}</AlertDescription>
-          </Alert>
-        ) : null}
         {action.isError ? (
           <Alert className="mb-3" variant="destructive">
             <AlertTitle>issue 조치 실패</AlertTitle>
@@ -322,28 +336,32 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
           </Alert>
         ) : null}
         <div className="grid gap-3">
-          <textarea
-            aria-label="address JSON"
-            className="min-h-28 rounded-lg border border-input bg-background p-3 font-mono text-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+          <FormTextArea
+            className="font-mono"
+            error={manualErrorField === "address" ? manualError : undefined}
+            label="address JSON"
             placeholder='{"road": "...", "jibun": "..."}'
+            ref={manualAddressRef}
             value={manualAddress}
             onChange={(event) => setManualAddress(event.target.value)}
           />
           <div className="grid gap-3 sm:grid-cols-3">
-            <Input
-              aria-label="manual lon"
+            <FormField
+              error={manualErrorField === "lon" ? manualError : undefined}
+              label="manual lon"
               placeholder="lon"
+              ref={manualLonRef}
               value={manualLon}
               onChange={(event) => setManualLon(event.target.value)}
             />
-            <Input
-              aria-label="manual lat"
+            <FormField
+              label="manual lat"
               placeholder="lat"
               value={manualLat}
               onChange={(event) => setManualLat(event.target.value)}
             />
-            <Input
-              aria-label="manual reason"
+            <FormField
+              label="manual reason"
               placeholder="reason"
               value={manualReason}
               onChange={(event) => setManualReason(event.target.value)}
