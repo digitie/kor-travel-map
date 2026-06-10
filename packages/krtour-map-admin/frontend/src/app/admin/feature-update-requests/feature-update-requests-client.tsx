@@ -1,7 +1,7 @@
 "use client";
 
 import { PlayIcon, RefreshCwIcon, XIcon } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import {
   type FeatureUpdateStatus,
@@ -15,7 +15,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { FormField, FormSelect } from "@/components/ui/form-field";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -27,6 +27,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatDateTime, shortId } from "@/lib/format";
+import {
+  combine,
+  numberInRange,
+  required,
+  validateForm,
+} from "@/lib/form-validation";
 
 const statuses: Array<FeatureUpdateStatus | "all"> = [
   "queued",
@@ -53,6 +59,12 @@ export function FeatureUpdateRequestsClient() {
   const [datasets, setDatasets] = useState("");
   const [dryRun, setDryRun] = useState(true);
   const [runMode, setRunMode] = useState<"queued" | "now">("queued");
+  const [errors, setErrors] = useState<
+    Partial<Record<"lon" | "lat" | "radiusKm", string>>
+  >({});
+  const lonRef = useRef<HTMLInputElement>(null);
+  const latRef = useRef<HTMLInputElement>(null);
+  const radiusKmRef = useRef<HTMLInputElement>(null);
 
   const requests = useFeatureUpdateRequests({
     status: status === "all" ? undefined : status,
@@ -63,6 +75,37 @@ export function FeatureUpdateRequestsClient() {
   const runNow = useRunFeatureUpdateRequestNowMutation();
 
   const submit = () => {
+    const result = validateForm({ lon, lat, radiusKm }, [
+      {
+        field: "lon",
+        validate: combine(
+          required("경도(lon)는 필수입니다."),
+          numberInRange({ min: 124, max: 132, message: "경도는 124~132 범위여야 합니다." }),
+        ),
+      },
+      {
+        field: "lat",
+        validate: combine(
+          required("위도(lat)는 필수입니다."),
+          numberInRange({ min: 33, max: 43, message: "위도는 33~43 범위여야 합니다." }),
+        ),
+      },
+      {
+        field: "radiusKm",
+        validate: combine(
+          required("반경(radius_km)은 필수입니다."),
+          numberInRange({ min: 0.1, message: "반경은 0.1 이상이어야 합니다." }),
+        ),
+      },
+    ]);
+    setErrors(result.errors);
+    if (!result.isValid) {
+      const refByField = { lon: lonRef, lat: latRef, radiusKm: radiusKmRef };
+      if (result.firstErrorField) {
+        refByField[result.firstErrorField].current?.focus();
+      }
+      return;
+    }
     createRequest.mutate({
       scope: {
         type: "center_radius",
@@ -107,33 +150,50 @@ export function FeatureUpdateRequestsClient() {
             </div>
           </div>
           <div className="flex flex-col gap-3">
-            <Input aria-label="lon" value={lon} onChange={(e) => setLon(e.target.value)} />
-            <Input aria-label="lat" value={lat} onChange={(e) => setLat(e.target.value)} />
-            <Input
-              aria-label="radius km"
+            <FormField
+              error={errors.lon}
+              label="lon"
+              ref={lonRef}
+              required
+              value={lon}
+              onChange={(e) => setLon(e.target.value)}
+            />
+            <FormField
+              error={errors.lat}
+              label="lat"
+              ref={latRef}
+              required
+              value={lat}
+              onChange={(e) => setLat(e.target.value)}
+            />
+            <FormField
+              error={errors.radiusKm}
+              label="radius km"
+              ref={radiusKmRef}
+              required
               value={radiusKm}
               onChange={(e) => setRadiusKm(e.target.value)}
             />
-            <Input
-              aria-label="providers"
+            <FormField
+              label="providers"
               placeholder="providers comma separated"
               value={providers}
               onChange={(e) => setProviders(e.target.value)}
             />
-            <Input
-              aria-label="dataset keys"
+            <FormField
+              label="dataset keys"
               placeholder="dataset_keys comma separated"
               value={datasets}
               onChange={(e) => setDatasets(e.target.value)}
             />
-            <NativeSelect
-              aria-label="run mode"
+            <FormSelect
+              label="run mode"
               value={runMode}
               onChange={(event) => setRunMode(event.target.value as "queued" | "now")}
             >
               <NativeSelectOption value="queued">queued</NativeSelectOption>
               <NativeSelectOption value="now">now</NativeSelectOption>
-            </NativeSelect>
+            </FormSelect>
             <label className="flex items-center gap-2 text-sm">
               <input
                 checked={dryRun}

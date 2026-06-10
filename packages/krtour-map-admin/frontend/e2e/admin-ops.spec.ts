@@ -977,6 +977,14 @@ test.describe("admin/ops pages", () => {
     await expect(page.getByLabel("run mode")).toBeVisible();
     await expect(page.getByLabel("dry-run")).toBeChecked();
     await expect(page.getByLabel("request status")).toBeVisible();
+
+    // T-218b: lon을 비우고 생성 → 클라이언트 검증 에러 + 포커스(네트워크 호출 전 차단).
+    const lon = page.getByLabel("lon");
+    await lon.fill("");
+    await page.getByRole("button", { name: "요청 생성" }).click();
+    await expect(lon).toHaveAttribute("aria-invalid", "true");
+    await expect(lon).toBeFocused();
+    await expect(page.getByText("경도(lon)는 필수입니다.")).toBeVisible();
   });
 
   test("/v1/admin/poi-cache-targets", async ({ page }) => {
@@ -1019,6 +1027,29 @@ test.describe("admin/ops pages", () => {
     await targetRow.getByRole("button", { name: "삭제" }).click();
     await expect.poll(() => requests.delete).toBe(1);
     await expect(page.getByRole("row", { name: /Mock target/ })).toHaveCount(0);
+  });
+
+  test("/v1/admin/poi-cache-targets validation (T-218b a11y)", async ({ page }) => {
+    const requests = await mockPoiCacheTargetMutations(page);
+
+    await page.goto("/admin/poi-cache-targets");
+
+    // target_key가 비어있는 상태로 저장 → 클라이언트 검증 에러(서버 미호출).
+    await page.getByRole("button", { name: "저장" }).click();
+
+    const targetKey = page.getByLabel("target key");
+    await expect(targetKey).toHaveAttribute("aria-invalid", "true");
+    await expect(targetKey).toBeFocused();
+    await expect(page.getByText("target_key는 필수입니다.")).toBeVisible();
+    expect(requests.upsert).toBe(0);
+
+    // 채우면 에러가 사라지고 정상 제출.
+    await targetKey.fill("mock-target-1");
+    await page.getByLabel("target name").fill("Mock target");
+    await page.getByRole("button", { name: "저장" }).click();
+    await expect.poll(() => requests.upsert).toBe(1);
+    await expect(targetKey).not.toHaveAttribute("aria-invalid", "true");
+    await expect(page.getByText("target_key는 필수입니다.")).toHaveCount(0);
   });
 
   test("/v1/admin/offline-uploads", async ({ page }) => {
