@@ -2,6 +2,23 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-10 (claude) — cross-repo 완성도·정합성 검토 보고서 4종 (코드無)
+
+사용자 지시: krtour-map · TripMate · tripmate-agent 3-시스템을 기획자/개발리더 시각에서
+교차 검토(사용자 UX/admin UX/API 계약/R&R/문서 정합성), 정본 미반영·보고서만 작성.
+형제 repo는 origin/main 임시 워크트리로 실측 (TripMate 로컬 워크트리가 133커밋 stale였음).
+
+- **산출물**: `docs/reports/{service-completeness-review, tripmate-side-actions,
+  decisions-needed, consistency-uplift-plan}-2026-06-10.md` 4종 + tripmate-agent repo에
+  `docs/cross-repo-consistency-actions-2026-06-10.md` 직접 전달.
+- **핵심 발견**: ① TripMate batch 파싱이 `items`를 읽음(krtour는 `found`) ② TripMate
+  feature 라우터가 구모델 etl_bridge stub에 배선 + 평면 `lon/lat` 미반영 ③ TripMate
+  문서의 "krtour HTTP 미존재" 전제(DEC-01)가 노후 — :9011 `/v1`은 완비 상태
+  ④ tripmate-agent export(T-066)는 미구현이나 계약 스펙은 krtour fetcher와 정렬 확인
+  ⑤ reject/tombstone skip 라이프사이클, RustFS 버킷 소유권, 제보 릴레이, 계약 정본
+  위치 등 의사결정 9건(D-01~09) 분리 정리.
+- 정본(ADR/tasks/resume 등) 반영은 사용자 승인 후 진행. 다음 작업 순서(T-212d/e)는 불변.
+
 ## 2026-06-10 (codex) — T-216f/g REST 명명 + 재적재 안전성 + TripMate-agent provider
 
 **작업**: ADR-048/T-216a~e의 REST 명명 정합성을 물리 DB/ORM/repo/API/OpenAPI/frontend type까지
