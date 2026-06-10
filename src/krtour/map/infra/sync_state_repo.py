@@ -33,6 +33,7 @@ __all__ = [
     "SyncState",
     "get_sync_state",
     "list_sync_states",
+    "list_all_sync_states",
     "record_sync_success",
     "record_sync_failure",
 ]
@@ -169,6 +170,23 @@ async def list_sync_states(
             },
         )
     ).all()
+    return [_row_to_state(row) for row in rows]
+
+
+_LIST_ALL_SQL: Final[str] = f"""
+SELECT {_RETURN_COLS}
+FROM provider_sync.provider_sync_state
+ORDER BY provider, dataset_key, sync_scope
+"""
+
+
+async def list_all_sync_states(session: AsyncSession) -> list[SyncState]:
+    """전 provider×dataset×scope sync state 목록(신선도 대시보드, T-217g).
+
+    provider×dataset 조합은 유한(수십 행)하므로 페이지네이션 없이 전량 반환한다 —
+    ``/v1/categories``와 같은 bounded reference 목록 패턴.
+    """
+    rows = (await session.execute(text(_LIST_ALL_SQL))).all()
     return [_row_to_state(row) for row in rows]
 
 

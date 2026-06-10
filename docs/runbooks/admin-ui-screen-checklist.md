@@ -1,7 +1,7 @@
 # admin UI 화면별 점검 체크리스트 (T-218f)
 
-`krtour-map-admin` frontend(Next.js, 포트 9012)의 16 route를 **운영 회귀·a11y·e2e
-커버 관점에서 점검**하기 위한 체크리스트다. T-218(admin UI 상세 점검 + a11y/e2e 완비)의
+`krtour-map-admin` frontend(Next.js, 포트 9012)의 route 전수(현재 17)를 **운영 회귀·
+a11y·e2e 커버 관점에서 점검**하기 위한 체크리스트다. T-218(admin UI 상세 점검 + a11y/e2e 완비)의
 점검 항목을 화면 단위로 고정하고, 현재 e2e 커버 상태를 매핑한다.
 
 > 정본 계획: `docs/reports/t-218-admin-ui-hardening-plan-2026-06-10.md`.
@@ -43,6 +43,7 @@
 | `/admin/backups` | command_enabled 배지 | — | — | ✓ | ✓ | create/restore/swap(plan-only 기본) | label(기존) | `admin-ops`(T-218c, 렌더+액션) |
 | `/admin/dagster` | run/tick 목록 | — | — | ✓ | ✓ | nux-seen | — | `dagster.spec`(smoke) |
 | `/ops/import-jobs` | status/kind | — | ✓ | ✓ | ✓ | — | 필터 라벨 | `admin-ops`(smoke) |
+| `/ops/providers` (T-217g) | 요약 배지(failing/stale) | — | —(bounded) | ✓ | ✓ | — | — | `admin-ops`(렌더+실패 경고) |
 | `/ops/consistency` | status | — | — | ✓ | ✓ | — | — | `admin-ops`(smoke) |
 | `/ops/logs` | system/api tab + level/source/method/path/min_status | — | ✓ | ✓ | ✓ | — | 필터 라벨 | `admin-ops`(tab/filter) |
 | `/etl` | provider/dataset/source | — | — | ✓ | ✓ | preview only(DB write 없음) | ✓ RHF+zodResolver+Field(기존) | `etl.spec`(실 backend) |

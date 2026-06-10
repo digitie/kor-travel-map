@@ -64,10 +64,12 @@
   - [ ] T-217f — YouTube evidence(영상 링크·타임스탬프·confidence)의 feature detail
         노출 형태 확정 (검토 KR-06; TripMate 출처 배지 UX TM-08의 선행, D-05 (a) 채택
         — export는 검수 통과 후보만).
-  - [ ] T-217g — provider 동기화 신선도 대시보드 (D-07 (a) 채택): 전 provider×dataset의
-        last-sync/최근 실패 요약 목록 API(예: `GET /v1/providers`) + admin 화면 1식.
-        `docs/rest-api.md` 갱신 포함. 기존 단건 `GET /v1/providers/{provider}/last-sync`는
-        유지.
+  - [x] T-217g — provider 동기화 신선도 대시보드 (D-07 (a) 채택). **완료(2026-06-10)**:
+        `GET /v1/providers`(전 provider×dataset last-sync/최근 실패, cursor 비노출,
+        bounded 비페이지네이션 — user spec 포함) + `sync_state_repo.list_all_sync_states`
+        + admin UI `/ops/providers`(요약 배지 failing/stale, 연속 실패 경고 alert,
+        신선도 테이블, nav 등재) + e2e + `docs/rest-api.md` §2.4 갱신. 단건
+        `GET /v1/providers/{provider}/last-sync` 유지.
 - **Phase 7 — ADR-045 전체점검/튜닝 (ADR-045 잔여 task 완료 후 시작)**
   - [ ] T-212e
 
