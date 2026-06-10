@@ -40,6 +40,11 @@
 - **반영처**: krtour ADR + rest-api.md + tasks, TripMate TM-13.
 - **결정(2026-06-10)**: ✅ **(a) 채택** → ADR-051 + T-217c. **후속 결정 필요**: 제보
   페이로드의 사용자 식별 정보 범위(PIPA) (D-11 참조).
+- **보정(2026-06-10, 사용자 확인)**: 본 항목의 "공식 경로 없음"은 과대 기술 — 설계는
+  **2단 검토**(TripMate 사용자 요청 → TripMate admin 1차 검토 `/admin/feature-requests`
+  → krtour-map admin 최종 반영)로 이미 존재하며(`docs/tripmate-rest-api.md` §2),
+  실제 갭은 **TripMate admin 승인분 → krtour-map 자동 전송 구간**이다. ADR-051은
+  이 전송 구간으로 재정의됨 (수신 대상 = 1차 승인분, 사용자 원시 제보 아님).
 
 ## D-03. tripmate-agent 후보 철회(reject/tombstone)의 krtour 라이프사이클 처리
 

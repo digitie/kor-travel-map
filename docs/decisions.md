@@ -2968,23 +2968,34 @@ Accepted (2026-06-10) — `docs/reports/decisions-needed-2026-06-10.md` D-02.
 
 ### 배경
 
-TripMate에 사용자 장소 제보(`FeatureSuggestion`, 일일 한도 20건)가 있으나 krtour-map으로
-흐르는 공식 경로가 없다. TripMate public client의 `/v1/admin/*` 직접 호출은 금지다
-(`docs/tripmate-rest-api.md` §2 — 관리망 인증 경계).
+설계된 흐름은 **2단 검토**다: TripMate 사용자가 feature 추가/수정/삭제를 요청
+(`FeatureSuggestion`, 일일 한도 20건) → **TripMate admin이 1차 검토**(자체
+`/admin/feature-requests` 큐) → 승인분이 krtour-map으로 전달 → **krtour-map admin이
+최종 반영**(`/v1/admin/features*`·`/v1/admin/feature-update-requests*`,
+`docs/tripmate-rest-api.md` §2 "제안 원본은 TripMate app DB 소유, 운영자 승인 후 전달").
+이 설계에서 빠진 것은 사용자 요청 경로가 아니라 **TripMate admin 승인분 → krtour-map
+사이의 자동 전송 구간**뿐이다 — TripMate public client의 `/v1/admin/*` 직접 호출은
+금지(관리망 인증 경계)이므로 수동 운영자 입력 외 수단이 없다.
 
 ### 결정
 
-- krtour-map에 **서비스용 제보 수신 API**를 신설한다: `POST /v1/features/suggestions`
-  (가칭, `X-Krtour-Service-Token` 인증 + rate-limit).
-- 수신된 제보는 기존 `admin/features/change-requests` 승인 큐로 합류한다 — 별도 승인
-  flow를 만들지 않는다.
-- TripMate는 제보 발생 시 이 API로 릴레이한다 (TripMate TM-13).
+- 기존 2단 검토 설계를 유지한다 — 1차 검토는 TripMate admin, 최종 반영은 krtour-map
+  admin 책임 그대로.
+- krtour-map에 **서비스용 수신 API**를 신설한다: `POST /v1/features/suggestions`
+  (가칭, `X-Krtour-Service-Token` 인증 + rate-limit). 이 API는 사용자 원시 제보가
+  아니라 **TripMate admin이 1차 승인한 요청**을 받는 전송 구간이다.
+- 수신분은 기존 `admin/features/change-requests` 승인 큐로 합류한다 — krtour-map측
+  별도 승인 flow를 만들지 않는다 (TripMate 1차 + krtour-map 최종의 2단 유지).
+- TripMate는 admin 1차 승인 시점에 이 API로 릴레이한다 (TripMate TM-13).
 
 ### 결과
 
-- 신규 task T-217c (API + change-requests 합류 + admin 표시).
+- 신규 task T-217c (API + change-requests 합류 + admin 표시 — 출처가 TripMate admin
+  승인분임을 큐에서 식별 가능하게).
 - 제보 페이로드에 담을 사용자 식별 정보 범위(PIPA — 익명화 vs TripMate 측 참조 ID만)는
   **추가 결정 필요** — T-217c 설계 전 확정.
+- 거절/반려의 역방향 통지(krtour-map 최종 거절 → TripMate admin 큐 상태 갱신)는
+  1차 범위 외 — 필요해지면 후속 결정.
 
 ## ADR-052: RustFS 버킷은 당분간 공유하되 prefix 소유권을 명문화하고, 추후 전용 버킷으로 분리한다
 

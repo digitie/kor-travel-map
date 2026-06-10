@@ -23,6 +23,11 @@
   범위 vs T-210c) — `docs/reports/decisions-needed-2026-06-10.md` 하단 정리.
 - tripmate-agent 측 문서(`docs/cross-repo-consistency-actions-2026-06-10.md`)에도
   결정 결과 반영 (해당 repo, 미커밋).
+- **R-2/ADR-051 보정(사용자 확인)**: 사용자 feature 추가/수정/삭제 요청은 **2단 검토
+  설계가 이미 존재** — TripMate admin 1차 검토(`/admin/feature-requests`) → krtour-map
+  admin 최종 반영(`docs/tripmate-rest-api.md` §2). 검토 보고서의 "공식 경로 없음"을
+  "1차 승인분의 자동 전송 구간 부재"로 정정하고, ADR-051 수신 API의 입력을 "TripMate
+  admin 1차 승인분"으로 재정의했다.
 
 ## 2026-06-10 (claude) — cross-repo 완성도·정합성 검토 보고서 4종 (코드無)
 

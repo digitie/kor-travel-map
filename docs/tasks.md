@@ -41,9 +41,10 @@
         #4, MOIS Step C 동형). 1단계 skip 건수 WARN/admin 이슈 노출 선행 가능.
         착수 전 결정 필요: inactive feature의 소비자 응답 정책(batch `found`+status
         vs `missing`).
-  - [ ] T-217c — 사용자 장소 제보 수신 API `POST /v1/features/suggestions`(가칭,
-        ServiceToken+rate-limit) → `admin/features/change-requests` 큐 합류 (ADR-051;
-        TripMate TM-13 짝). 착수 전 결정 필요: 제보 페이로드의 사용자 식별 정보 범위(PIPA).
+  - [ ] T-217c — TripMate admin **1차 승인분** 수신 API `POST /v1/features/suggestions`
+        (가칭, ServiceToken+rate-limit) → `admin/features/change-requests` 큐 합류
+        (ADR-051, 2단 검토: TripMate admin 1차 → krtour-map admin 최종; TripMate
+        TM-13 짝). 착수 전 결정 필요: 페이로드의 사용자 식별 정보 범위(PIPA).
   - [ ] T-217d — cross-repo 연동 정본 문서 `docs/integration-map.md` 신설: 3-시스템
         포트·연동 방향·인증 방식·envelope 차이·계약 정본 위치 1장 (D-08 권고안 채택)
         + 분기 cross-repo 정합성 audit 체크리스트 runbook 등재. 각 repo 진입 문서에서 링크.

@@ -173,6 +173,14 @@ cursor 무한루프 가드(`next_cursor == cursor` 검출)도 확인 — 이 부
 |---|---|---|---|
 | R-1 | **RustFS 버킷 소유권** | tripmate-agent가 미디어 원본(영상/자막/전사/프레임)을 **krtour-map 소유 버킷**(`RUSTFS_BUCKET_*=krtour-map`, prefix `features/`)에 직접 저장 (tripmate-agent `config.py`) | 경계 침범 소지. krtour rustfs는 "선택" 구성요소이고 offline upload 용도인데, 타 시스템의 무기한 보존 미디어가 같은 버킷에 들어가면 백업/복원·수명주기·용량 관리 책임이 모호해짐 → **D-01** |
 | R-2 | **사용자 장소 제보 릴레이** | TripMate에 `FeatureSuggestion` 모델/일일limit까지 있으나(`features.py:48`), krtour `admin/features/change-requests`로 흘러가는 공식 경로 없음 | 갭. 옵션: ① 운영자 수동 ② TripMate api가 krtour admin API 호출(관리망 인증 필요 — 권장 안 함) ③ krtour에 서비스용 suggestion 수신 API 신설 → **D-02** |
+
+> **R-2 보정 (2026-06-10, 사용자 확인)**: "공식 경로 없음"은 과대 기술. 설계는 **2단
+> 검토**로 이미 존재 — TripMate 사용자 요청(추가/수정/삭제) → TripMate admin 1차 검토
+> (`/admin/feature-requests` 큐) → krtour-map admin 최종 반영(`/v1/admin/features*`·
+> `/v1/admin/feature-update-requests*`, krtour `docs/tripmate-rest-api.md` §2 "제안
+> 원본은 TripMate app DB 소유, 운영자 승인 후 전달"). 실제 갭은 **1차 승인분의 자동
+> 전송 구간**이며, ADR-051(`POST /v1/features/suggestions`)이 그 구간을 맡는 것으로
+> 재정의됐다.
 | R-3 | **후보 철회 라이프사이클** | reject/tombstone을 krtour가 skip (§3.2 A-1) — "후보 검수 권한은 tripmate-agent, feature 생명주기는 krtour" 합의의 마지막 고리 누락 | krtour 측 비활성 경로 구현 필요 → **D-03** |
 | R-4 | **export 계약 정본 위치** | 계약 전문이 tripmate-agent `docs/youtube-feature-pipeline-plan.md` §7(계획 문서)에만 존재. krtour 측은 ADR-049 + fetcher 코드 | 계획 문서는 계약 정본으로 부적합(완료 후 동결·이동됨). 정본 1곳 + 상대 repo는 링크 → **D-04** |
 
