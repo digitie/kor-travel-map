@@ -11,8 +11,8 @@
 - **다음 (우선순위 순)**
   - [ ] T-212e — 실데이터 full reload + offline upload 실데이터 검증 + 최종 리포트.
   - [~] T-218 — admin UI 상세 구현 점검 + a11y/e2e 완비(화면별 슬라이스 a~f,
-        T-212e와 독립·병렬). **T-218a 완료(#337)·T-218b-1 완료(#338)**, 다음은 T-218b-2
-        (offline-uploads/change-requests/issues)·T-218c~f. 정본
+        T-212e와 독립·병렬). **T-218a(#337)·T-218b(#338/#339/+issues) 완료**, 다음은
+        T-218c(backups e2e)·T-218d~f. 정본
         `docs/reports/t-218-admin-ui-hardening-plan-2026-06-10.md`.
 - **최근 완료**
   - [x] T-212d 재측정 pass — read-heavy 전제로 hot read EXPLAIN을 다시 돌리고
@@ -840,16 +840,17 @@ T-214/T-215(#317)의 `/v1` 1차 정리 위에 ADR-048 delta를 얹는다. 정본
         `validateForm` util) 도입(P0, 기존 `ui/field.tsx` 위에 얇게, 신규 라이브러리 없음).
         **완료(2026-06-10, #337)**: `lib/form-validation.ts`(+vitest 11) +
         `ui/form-field.tsx` + `ui/textarea.tsx` + `native-select` forwardRef 보강.
-      - [~] T-218b — 폼 보유 화면에 wrapper 적용 + 라벨/에러/포커스 e2e 단언(P0).
+      - [x] T-218b — 폼 보유 화면에 wrapper 적용 + 라벨/에러/포커스 e2e 단언(P0).
+        **완료(2026-06-10)**: bare `aria-label`(visible 라벨 부재) 화면 3종을 전부 적용.
         - [x] **T-218b-1(#338)**: 좌표 scope 폼 2화면 — `poi-cache-targets`,
           `feature-update-requests`. lon/lat/radius(+필수 키) validateForm + 첫 에러 포커스.
-          admin-ops e2e 17 passed(검증 2건 신설).
-        - [x] **etl는 적용 대상 아님(2026-06-10 실측)**: `/etl`은 이미 react-hook-form +
-          zodResolver + `Field/FieldLabel/FieldError`로 a11y 완비(`etl-client.tsx`) — 갭 없음.
-        - [ ] **T-218b-2(예정)**: `offline-uploads`(create 폼 — e2e가 `getByLabel exact`+
-          disabled 버튼을 검증하므로 e2e 동반 갱신 필요), `admin/features/change-requests`
-          (13필드, JSON payload는 FormTextArea), `admin/issues` manual-override(address/coord
-          JSON + 액션 사유).
+        - [x] **T-218b-2(#339)**: `offline-uploads` create 폼 5입력 라벨 연결(기존 동작/
+          e2e 보존).
+        - [x] **T-218b-3**: `admin/issues` manual-override(address JSON + lon/lat/reason) —
+          FormTextArea/FormField + 필드별 에러/포커스. issues e2e에 검증 단언 추가.
+        - [x] **적용 대상 아님(이미 a11y 완비, 실측 2026-06-10)**: `/etl`(RHF+zodResolver+
+          `Field/FieldLabel/FieldError`), `admin/features/change-requests`(전 필드가 이미
+          `<label htmlFor>`+`id` 연결 보유 — bare aria-label 아님).
       - [ ] T-218c — `/admin/backups` e2e 신설 — 유일 미커버 화면, create/restore/
         restore-swap 위험 액션 + confirm + alert까지 고정(P0).
       - [ ] T-218d — 위험 액션 음성 경로 e2e — 잘못된 JSON(payload/address/coord)·필수
