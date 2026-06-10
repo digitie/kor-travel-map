@@ -2,6 +2,17 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-10 (claude) — T-218c `/admin/backups` e2e 신설 (e2e 16/16 화면 커버)
+
+유일한 e2e 미커버 화면 `/admin/backups`에 Playwright route-mock 스펙을 추가했다.
+
+- `makeBackup` 팩토리(생성 OpenAPI `BackupRecord` 바인딩) + `mockBackupOperations`
+  (GET 목록 / POST 백업 / POST restore{,/swap} command plan).
+- 2 tests: 렌더(heading/컬럼/목록/manifest 상세) + 위험 액션(백업·Restore staging
+  target·Swap) command plan 생성 + result alert. **admin-ops e2e 19 passed = 16/16
+  화면 e2e 커버 달성**(직전 backups만 미커버였음).
+- tasks.md T-218c `[x]`. 남은 것은 T-218d(음성 경로)·T-218e(focus/aria-live)·T-218f(체크리스트).
+
 ## 2026-06-10 (claude) — T-218b 완료(offline-uploads #339 + issues manual-override)
 
 T-218b의 bare `aria-label` 화면을 모두 적용해 G-1(폼 label↔control 미연결) 해소.
