@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-10 (claude) — T-218b 완료(offline-uploads #339 + issues manual-override)
+
+T-218b의 bare `aria-label` 화면을 모두 적용해 G-1(폼 label↔control 미연결) 해소.
+
+- **offline-uploads(#339)**: create 폼 5입력 → FormField(라벨 연결), 기존 disabled
+  가드/동작·e2e 보존.
+- **issues manual-override**: address JSON textarea + manual lon/lat/reason →
+  FormTextArea/FormField. 단일 `manualError` 배너를 필드별 인라인 에러 + 첫 에러
+  포커스(address/lon)로 전환. issues e2e에 검증/aria-invalid/focus 단언 추가.
+- **비대상 확정(실측)**: `/etl`(이미 RHF+zodResolver+Field), `change-requests`(전 필드
+  이미 `<label htmlFor>`+`id` — bare aria-label 아님). → T-218b의 실제 갭은 bare-label
+  3종(poi-cache/feature-update/offline)+issues manual-override뿐이었고 전부 완료.
+- Windows Playwright admin-ops 17 passed. tasks.md T-218b `[x]`로 갱신. 다음 T-218c(backups e2e).
+
 ## 2026-06-10 (claude) — T-218b-1 폼 a11y 적용(좌표 폼 2화면) + 진척 반영
 
 T-218a wrapper(#337)를 좌표 scope 폼 2화면에 적용하고 검증 e2e를 추가했다(#338).
