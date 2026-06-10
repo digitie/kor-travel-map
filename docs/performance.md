@@ -385,51 +385,144 @@ LIMIT 1;
 
 ### 9.3 PostGIS MV (Materialized View, T-101)
 
-자주 쓰는 join 결과(예: `feature + place_detail + opening_hours` 또는 7개
-detail kind union)는 MV로. `REFRESH MATERIALIZED VIEW CONCURRENTLY`로 lock
-없이 갱신.
+> **read >> write 확정 (2026-06-10, product owner)**: 본 시스템은 provider 적재
+> (1일~수일 주기 cron) 대비 지도 viewport read가 압도적으로 많다. MV 도입의
+> 첫째 전제(`read >> write 비율 실측`)는 정성적으로 충족됐다고 본다. 아래는 실제
+> read 경로를 코드 기준으로 다시 검토해 **MV 도입 대상을 재타깃**한 결과다.
+> 실 latency 수치(P99) 측정은 T-212e live full reload 리포트에서 보강한다.
 
-**v2 1차 범위에서는 미사용** — 실 부하 보고 결정 (T-101 보류 항목).
+#### 9.3.0 전제 정정 — "7-way detail JOIN"은 더 이상 없다
 
-**도입 시 장점**:
-- viewport/`features_in_bounds` 쿼리에서 7-way JOIN이 단일 table scan으로
-  단순화 → P99 latency 감소 + EXPLAIN plan 안정화 (JOIN order optimizer
-  의존 제거).
-- GiST(`coord_5179`) + detail 컬럼 필터를 단일 plan으로 묶을 수 있어 zoom
-  레벨 클러스터 응답 시간 단축 (디버그 UI + TripMate 사용자 UI 모두 이득).
-- detail kind별 partial MV (`mv_features_place`, `mv_features_event` 등)로
-  cold path 격리 가능. zoom 8 미만에서 자주 쓰는 컬럼만 추출하면 메모리도
-  절약.
+원래 §9.3은 "`feature + place_detail + opening_hours` 또는 7개 detail kind union을
+MV로 flatten"을 전제했다. **이 전제는 ADR-018로 무효화됐다.** 현재 스키마(alembic
+`0002_features_and_source_tables`)에서 detail은 **`feature.features.detail` 단일
+JSONB 컬럼**이고 `kind`로 구분된다. `place_details`/`event_details` 같은 per-kind
+detail 테이블은 **존재하지 않는다**. 따라서:
 
-**도입 조건 (모두 충족 시)**:
-- read >> write 비율이 실측으로 확인 (Sprint 5 이후 24h 운영 로그 기준).
-- `REFRESH CONCURRENTLY` lag (수십 초~수 분) 허용 가능.
-- 디스크 사용량 ×2 수용 (Odroid SSD 여유 확인).
-- 일관성 게이트 (ADR-033 Phase 2)가 이미 swap 직전에 적용되어 있을 것 —
-  비정상 데이터가 MV로 새는 것을 차단해야 함.
-- `REFRESH MATERIALIZED VIEW CONCURRENTLY` 대상 MV마다 refresh identity를 보장하는
-  `UNIQUE` 인덱스가 있을 것. 최초 생성 직후에는 비-concurrent
-  `REFRESH MATERIALIZED VIEW schema.view`로 1회 populate한 뒤 concurrent refresh로
-  전환한다.
+- 단건/배치 detail 조회(`_GET_FEATURE_SQL`, `_GET_FEATURES_BY_IDS_SQL`,
+  `feature_repo.py`)는 이미 `feature.features` **PK/`ANY(ids)` 단일 테이블 조회 +
+  JSONB 인라인**이다. flatten할 JOIN이 없으므로 MV 이득이 **없다**.
+- viewport bbox 조회(`_FEATURES_IN_BBOX_SQL`)도 단일 테이블 GIST(`coord`) +
+  keyset이라 이미 최적이다.
+- 코드에 등장하는 `WITH ... AS MATERIALIZED (…)` CTE(`spatial_candidates` 등)는
+  **planner 힌트(쿼리 1회 내 중간결과 고정)**일 뿐 **영속 MV가 아니다.** 혼동 주의.
+
+결론: detail flatten용 `mv_features_place_with_detail`은 **더 이상 1순위가 아니다.**
+read >> write 환경에서 실제로 반복 계산되는 비용은 아래 두 곳이다.
+
+#### 9.3.1 read 경로별 MV 적합성 (코드 근거)
+
+| read 경로 | 구조 (`feature_repo.py`) | 반복 비용 | MV 적합성 |
+|-----------|--------------------------|-----------|-----------|
+| `/features/in-bounds` 개별, `/features` bbox | 단일 테이블 GIST(`coord`) + keyset | 없음(인덱스 only) | ❌ 불필요 |
+| `/features/{id}`, `/features/batch` | PK / `ANY(ids)` 단일 테이블 + JSONB detail 인라인 | 없음 | ❌ 불필요 |
+| `/features/search` | trgm GIN + `similarity()` 동적 채점 | 쿼리마다 결과 변동 | ❌ 사전계산 불가 |
+| **클러스터 rollup** (`_cluster_bbox_sql`, sido/sigungu/eupmyeondong) | viewport bbox 내 **`GROUP BY {code_col}` 집계 매 pan/zoom 재계산** | **viewport 이동마다 전체 후보 재집계** | ✅ **1순위** |
+| `/features/nearby`, `/nearby/by-target` | GIST `ST_DWithin(coord_5179)` + **primary-source LATERAL** | per-row `source_links→source_records` lateral | ⚠️ 2순위(대안 有) |
+| `/admin/features` | LEFT JOIN issues + source LATERAL | admin 전용, 저빈도 | ⚠️ 낮음 |
+
+#### 9.3.2 1순위 후보 — 클러스터 rollup MV (`mv_feature_cluster_counts`)
+
+zoom-out 클러스터링은 **viewport를 이동할 때마다** bbox 내 전체 feature를
+`GROUP BY sido_code|sigungu_code|legal_dong_code`로 재집계한다(`_cluster_bbox_sql`).
+read >> write에서 이 집계 결과는 적재 사이에 거의 불변이므로 **사전집계가 가장 큰
+이득**이다.
+
+```sql
+-- 후보 정의 (예시 — 시범 시 확정)
+CREATE MATERIALIZED VIEW feature.mv_feature_cluster_counts AS
+SELECT
+    cu.cluster_unit,                       -- 'sido' | 'sigungu' | 'eupmyeondong'
+    cu.region_code,
+    f.kind, f.category,
+    count(*)                       AS feature_count,
+    x_extension.ST_Centroid(x_extension.ST_Collect(f.coord)) AS centroid,  -- 대표 마커
+    x_extension.ST_Envelope(x_extension.ST_Collect(f.coord)) AS region_bbox -- viewport 교차용
+FROM feature.features f
+CROSS JOIN LATERAL (VALUES
+    ('sido', f.sido_code), ('sigungu', f.sigungu_code), ('eupmyeondong', f.legal_dong_code)
+) AS cu(cluster_unit, region_code)
+WHERE f.deleted_at IS NULL AND f.coord IS NOT NULL AND cu.region_code IS NOT NULL
+GROUP BY cu.cluster_unit, cu.region_code, f.kind, f.category;
+
+-- REFRESH CONCURRENTLY identity (필수)
+CREATE UNIQUE INDEX uq_mv_cluster_counts
+  ON feature.mv_feature_cluster_counts (cluster_unit, region_code, kind, category);
+CREATE INDEX idx_mv_cluster_counts_bbox
+  ON feature.mv_feature_cluster_counts USING GIST (region_bbox);
+```
+
+viewport 클러스터 쿼리는 이후 작은 rollup row만 합산한다:
+
+```sql
+SELECT region_code, sum(feature_count) AS feature_count,
+       x_extension.ST_X(x_extension.ST_Centroid(x_extension.ST_Collect(centroid))) AS lon,
+       x_extension.ST_Y(x_extension.ST_Centroid(x_extension.ST_Collect(centroid))) AS lat
+FROM feature.mv_feature_cluster_counts
+WHERE cluster_unit = :unit
+  AND region_bbox && x_extension.ST_MakeEnvelope(:min_lon,:min_lat,:max_lon,:max_lat,4326)
+  AND (:kinds IS NULL OR kind = ANY(:kinds))
+  AND (:categories IS NULL OR category = ANY(:categories))
+GROUP BY region_code
+ORDER BY feature_count DESC, region_code
+LIMIT :limit;
+```
+
+**카디널리티**: rollup row 수 = Σ(region 수 × kind × category). eupmyeondong(~3,500) ×
+kind(≤7) × category(~수십)라도 feature 본수(10만+)보다 훨씬 작아 메모리에 fit.
+
+**의미 변화 (도입 시 반드시 합의)**: 현재 쿼리는 **coord가 viewport bbox 안에 든
+feature만** 세고 마커 위치는 그 부분집합의 `avg(coord)`다. MV 방식은 **region 단위
+전체 집계**를 쓰고 viewport 교차는 `region_bbox &&`로 판단하므로,
+(a) viewport 경계에 걸친 region은 **전체 count**가 잡혀 가장자리에서 과대계상,
+(b) 마커는 viewport-clip 평균이 아니라 region 전체 centroid. zoom-out 클러스터의
+"이 지역에 N개" 표시 의미에는 통상 허용되나 **현 동작과 다르다.** exact-viewport
+(현행) vs region-total(MV) 중 택일을 시범 PR에서 결정한다.
+
+#### 9.3.3 2순위 — primary-source LATERAL: MV보다 유지(denormalized) 컬럼 우선
+
+`/features/nearby`·`/admin/features`는 feature마다
+`source_links(is_primary_source) → source_records`를 LATERAL로 1건 조회해
+`primary_provider`/`primary_dataset_key`를 붙인다(`feature_repo.py`
+`features_nearby_*`). read >> write에서 이 lateral은 매 호출 반복된다.
+
+다만 이 비용은 **MV보다 적재/merge 시점에 `feature.features`에 유지하는
+denormalized 컬럼**(`primary_provider`, `primary_dataset_key`)으로 더 싸게 제거
+가능하다 — stale 윈도우가 없고 별도 refresh job도 불필요하기 때문이다(적재
+트랜잭션 안에서 갱신). **권고: 2순위는 MV가 아니라 유지 컬럼으로 처리**하고,
+유지 컬럼이 거부될 때에만 MV에 lateral 결과를 접는다. (코드 작업 전 ADR/Task로
+별도 결정 — 본 문서는 검토만.)
+
+#### 9.3.4 도입 조건 (1순위 MV 기준, 모두 충족 시)
+
+- read >> write 비율 — **정성 충족(2026-06-10)**, 정량 P99는 T-212e에서 보강.
+- `REFRESH CONCURRENTLY` lag (수십 초~수 분) 허용 가능 — 클러스터는 통상 허용.
+- 디스크 사용량 증가 수용 (rollup MV는 본 테이블 대비 작음 — detail flatten보다 유리).
+- 일관성 게이트 (ADR-033 Phase 2)가 swap 직전 적용되어 비정상 데이터의 MV 유입 차단.
+- `REFRESH MATERIALIZED VIEW CONCURRENTLY` identity `UNIQUE` 인덱스(위 `uq_mv_cluster_counts`)
+  를 migration에 포함. 생성 직후 1회는 비-concurrent `REFRESH MATERIALIZED VIEW`로 populate.
 
 **도입 시 부작용**:
-- `REFRESH CONCURRENTLY`는 UNIQUE 인덱스 필수 → MV 정의에 `feature_id`
-  UNIQUE 보장 필요.
-- DDL 변경(컬럼 추가/타입 변경)이 무거워짐 — alembic revision에 MV `DROP +
-  CREATE` 동반.
-- MV가 stale인 상태에서 디버그 UI/TripMate가 조회하면 "유저는 갱신했는데
-  지도엔 안 보임" 혼동 — `mv_last_refreshed_at` 컬럼 노출 + `/health`에
-  포함 권장.
+- `REFRESH CONCURRENTLY`는 UNIQUE 인덱스 필수 (위에서 보장).
+- DDL 변경(컬럼/타입)이 무거워짐 — alembic revision에 MV `DROP + CREATE` 동반.
+- MV가 stale일 때 "유저는 갱신했는데 지도엔 안 보임" 혼동 → 클러스터 MV는 적재
+  주기와 묶여 갱신되므로 영향 작음. 그래도 `mv_last_refreshed_at` 노출 +
+  `/ops/health-deep`에 포함 권장(T-102 prewarm 컴포넌트와 동일한 정보용 노출 패턴).
+
+**refresh orchestration**: 이미 batch gate가 `OK/WARN`일 때 `mv_refresh` job을
+만들고 현재 MV 카탈로그가 없으면 `skipped:no_materialized_views`로 기록한다
+(T-200/T-RV-41, `infra.batch_dag`). 1순위 MV를 카탈로그에 등록하면 적재 batch
+직후 자동 refresh로 연결된다 — **신규 orchestration 불필요.**
 
 **도입 절차 (예상)**:
-1. 하나의 hot path만 시범 도입 (예: `mv_features_place_with_detail`).
-2. MV `CREATE`와 같은 migration에 `UNIQUE` 인덱스를 함께 정의한다.
-3. 배포 직후 최초 populate는 비-concurrent `REFRESH MATERIALIZED VIEW`로 실행한다.
-4. 최초 populate 성공 후 batch gate/Dagster `swap` 또는 `concurrently` 전략에
-   `materialized_views`를 연결한다.
-5. 1주일 운영 + EXPLAIN diff 비교 → 회귀 추적.
-6. 다른 kind 확장 여부 판단.
-7. ADR 신설 — `feature_*` MV 카탈로그 + refresh schedule + DDL 정책.
+1. **클러스터 rollup MV 1개만** 시범 도입 (`mv_feature_cluster_counts`).
+   ~~예전 예시 `mv_features_place_with_detail`은 9.3.0 사유로 폐기.~~
+2. MV `CREATE`와 같은 migration에 `UNIQUE`(identity) + GIST(`region_bbox`) 인덱스 정의.
+3. 배포 직후 최초 populate는 비-concurrent `REFRESH MATERIALIZED VIEW`로 실행.
+4. 최초 populate 성공 후 batch gate/Dagster `mv_refresh`(`concurrently`)에 카탈로그 연결.
+5. exact-viewport vs region-total 의미 택일 확정 + 1주 운영 + EXPLAIN diff 회귀 추적.
+6. 효과 확인 시 2순위(primary-source 유지 컬럼) 별도 판단.
+7. ADR 신설 — MV 카탈로그 + refresh schedule + DDL 정책 + 클러스터 의미 결정 기록.
 
 ### 9.4 별도 streaming ETL (Kafka/Redpanda) — T-103
 
