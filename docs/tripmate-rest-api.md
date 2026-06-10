@@ -130,7 +130,10 @@
 - **T-181**: `/v1` hard cutover lockstep, problem+json 파싱, `page_size`/`max_items`/bbox
   4-float, `meta.page.next_cursor`, batch `data.found` 반영.
 - **T-182**: TripMate DEC-07 좌표명을 `lon`/`lat`로 하향 정렬.
-- **T-210e**: `/v1` 안정 commit의 OpenAPI를 기준으로 codegen과 httpx 계약 테스트를 pin.
+- **T-210e** ✅(2026-06-11): krtour-map에 `packages/krtour-map-user-client/`
+  (`@krtour/map-user-client`) — `openapi.user.json` 생성 TS 타입 + named alias +
+  ADR-048 표면 단언 + CI drift gate. TripMate frontend는 vendoring 또는 같은
+  openapi-typescript 버전 자체 codegen으로 pin(패키지 README 참조).
 
 ## 7. 사용자 제안 연동 합의 (ADR-051, 확정 2026-06-11 — T-217c)
 

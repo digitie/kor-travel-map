@@ -2,6 +2,22 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-11 (claude) — T-210e user-facing OpenAPI TS client 패키지
+
+사용자 지시로 T-212e 게이트를 해제하고 진행. 신규 workspace 패키지
+`packages/krtour-map-user-client/`(`@krtour/map-user-client`, npm 게시 X — ADR-043).
+
+- `src/types.ts`: `openapi.user.json` → openapi-typescript 생성 산출물 커밋.
+- `src/index.ts`: named alias(FeatureDetail/FeatureSummary/배치/카테고리/providers 등)
+  + **컴파일 타임 표면 단언** — batch `data.found`, `meta.page.next_cursor`, 평면
+  `lon`/`lat`, in-bounds payload, `/v1` 경로 11종(ADR-048 불변식). 단언 함정 1건
+  해결: 실패 분기가 `never`면 bottom type이라 `extends true`를 통과해 무력화 —
+  `false` 반환으로 수정하고 음성 검증(bogus key → TS2344)으로 작동 확인.
+- CI(frontend workflow)에 user-client `gen:types:check` + `tsc` 스텝 추가 —
+  spec↔산출물 drift와 표면 회귀를 PR에서 차단.
+- 소비(README): TripMate는 vendoring 또는 같은 버전 자체 codegen. T-212e 후 spec
+  변동은 `gen:types` 재실행+커밋으로 추종. tasks.md T-210e `[x]`(열린 9→8건).
+
 ## 2026-06-11 (claude) — T-217c/d/e 문서 완결 (Phase 6.9 종결)
 
 - **T-217c 합의 5건 확정**(코드 실측): review_mode 기본 `require_review` 유지 /

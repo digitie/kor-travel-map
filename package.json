@@ -5,7 +5,8 @@
   "description": "npm workspace root for the frontend packages of python-krtour-map (debug UI + shared map-marker-react). 본 저장소의 1차 산출물은 Python 라이브러리(pyproject.toml)이며, 본 package.json은 frontend workspace 해석 전용 (ADR-025/029/043 — @krtour/map-marker-react는 모노레포 내부 share, registry 게시 X).",
   "workspaces": [
     "packages/map-marker-react",
-    "packages/krtour-map-admin/frontend"
+    "packages/krtour-map-admin/frontend",
+    "packages/krtour-map-user-client"
   ],
   "scripts": {
     "admin:dev": "npm -w packages/krtour-map-admin/frontend run dev",
