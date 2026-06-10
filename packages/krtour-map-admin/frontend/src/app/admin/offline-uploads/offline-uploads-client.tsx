@@ -27,6 +27,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -544,32 +545,33 @@ export function OfflineUploadsClient() {
               </div>
             </div>
             <div className="flex flex-col gap-3">
-              <Input
+              <FormField
                 data-testid="offline-upload-file-input"
+                label="file"
                 type="file"
                 accept=".json,.jsonl,.ndjson,.csv,.tsv,application/json,application/x-ndjson,text/csv,text/tab-separated-values"
                 onChange={(event) => setFile(event.target.files?.[0] ?? null)}
               />
-              <Input
-                aria-label="provider"
+              <FormField
+                label="provider"
                 placeholder="provider"
                 value={provider}
                 onChange={(event) => setProvider(event.target.value)}
               />
-              <Input
-                aria-label="dataset key"
+              <FormField
+                label="dataset key"
                 placeholder="dataset_key"
                 value={datasetKey}
                 onChange={(event) => setDatasetKey(event.target.value)}
               />
-              <Input
-                aria-label="sync scope"
+              <FormField
+                label="sync scope"
                 placeholder="sync_scope"
                 value={syncScope}
                 onChange={(event) => setSyncScope(event.target.value)}
               />
-              <Input
-                aria-label="created by"
+              <FormField
+                label="created by"
                 placeholder="created_by"
                 value={createdBy}
                 onChange={(event) => setCreatedBy(event.target.value)}
