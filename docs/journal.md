@@ -2,6 +2,46 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-10 (claude) — cross-repo 의사결정 반영: ADR-050~052 + T-217a~f (코드無)
+
+사용자 결정(D-01: b 잠정·추후 분리 / D-02~05: a / D-06: 수정 승인 — TripMate
+`/admin/etl` 유지 / D-08·09: 권고안 / D-07: 미결)을 정본에 반영했다.
+
+- **ADR-050**: TripMate-agent export 계약 보강 — 경로 중립화
+  `/api/v1/features/{snapshot,changes}`(사용자 보정: downstream 이름 path 금지,
+  ADR-049 표기 보정), 계약 정본=tripmate-agent repo 독립 문서, 검수 통과만 export,
+  reject/tombstone → feature inactive 전환.
+- **ADR-051**: TripMate 사용자 feature 제안 반영 — **최종**: 신규 수신 API를 만들지
+  않고 **기존 `/v1/admin/features*` change API(#317)를 전송 구간으로 승인** (초안의
+  `POST /v1/features/suggestions` 신설안은 같은 날 재독에서 중복으로 철회).
+- **ADR-052**: RustFS 버킷 잠정 공유(prefix 소유권·backup 제외 명문화) + 추후 분리.
+- **tasks**: Phase 6.9 신설 — T-217a(fetcher 경로 정렬, **T-066과 동시 배포**),
+  T-217b(inactive 전환), T-217c(TripMate 제안 연동 **합의 5건 확정** — 신규 API 아님),
+  T-217d(integration-map 정본+분기 audit), T-217e(RustFS 정책 문서화),
+  T-217f(YouTube evidence 노출 확정), T-217g(provider 신선도 대시보드, D-07).
+  CLAUDE.md ADR 카운터 052/053으로 갱신.
+- **의사결정 최종 상태**: 같은 날 2차까지 **D-01~13 전 항목 종결** (당초 미결이던
+  D-07/D-10~13 포함) — 이력은 `docs/reports/decisions-needed-2026-06-10.md`.
+- tripmate-agent 측 문서(`docs/cross-repo-consistency-actions-2026-06-10.md`)에도
+  결정 결과 반영 (해당 repo, 미커밋).
+- **R-2/ADR-051 보정(사용자 확인)**: 사용자 feature 추가/수정/삭제 요청은 **2단 검토
+  설계가 이미 존재** — TripMate admin 1차 검토(`/admin/feature-requests`) → krtour-map
+  admin 최종 반영(`docs/tripmate-rest-api.md` §2). 검토 보고서의 "공식 경로 없음"을
+  "1차 승인분의 자동 전송 구간 부재"로 정정하고, ADR-051 수신 API의 입력을 "TripMate
+  admin 1차 승인분"으로 재정의했다.
+- **재독 보정(같은 날, 사용자 지시 "전체 2회 재독")**: TripMate
+  `docs/integrations/krtour-map-rest-api.md`(06-08~09 갱신) 재정독으로 3건 보정 —
+  ① **ADR-051 신규 수신 API 철회**: TripMate DEC-05 + krtour PR #317(admin feature
+  change API)이 이미 그 전송 구간을 구축, 중복이라 기존 흐름 승인으로 재정의
+  (T-217c = 합의 5건 확정으로 재범위). ② C-1/C-5는 TripMate T-181 잔여로 기추적
+  (krtour T-216 머지로 대기 해제), C-3은 잔재 블록 한정으로 축소. ③ 신규 실오류
+  발견: TripMate "admin base=9012" 가정(9012=UI, admin API=9011) — TripMate 정정 대상.
+- **2차 결정 종결(같은 날)**: D-07(a)→T-217g(provider 신선도 목록 API+화면),
+  D-10(a)→버킷 분리는 T-066 운영 개시 전(ADR-052 보강), D-11(a)→제보 페이로드 익명
+  (ADR-051 보강), D-12(a)→inactive feature는 `found`+status 노출(ADR-050 보강),
+  D-13 확인→TripMate 자체 ETL은 KASI류 고유 잡만(중복 없음, T-210c 양립).
+  **의사결정 전 항목 종결**. TripMate repo에도 직접 문서 반영 + PR (머지는 사용자).
+
 ## 2026-06-10 (claude) — cross-repo 완성도·정합성 검토 보고서 4종 (코드無)
 
 사용자 지시: krtour-map · TripMate · tripmate-agent 3-시스템을 기획자/개발리더 시각에서

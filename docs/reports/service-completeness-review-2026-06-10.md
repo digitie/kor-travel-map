@@ -1,6 +1,8 @@
 # 서비스 완성도·정합성 종합 검토 — krtour-map · TripMate · tripmate-agent (2026-06-10)
 
-> **상태**: 검토 보고서 (정본 문서 미반영 — 사용자 승인 후 각 정본에 반영).
+> **상태 (2026-06-10 갱신)**: 검토 보고서 — 의사결정 D-01~13 전 항목 종결, 결정분은
+> 정본 반영 완료 (ADR-050~052, tasks T-217a~g, TripMate/tripmate-agent 측 문서).
+> 결정 이력은 [`decisions-needed-2026-06-10.md`](decisions-needed-2026-06-10.md) 참조.
 > **검토 기준 커밋**:
 > - python-krtour-map `origin/main` `0e45bd7` (T-216 REST naming + TripMate-agent provider)
 > - TripMate `origin/main` `4a10a5b` (#149 공유 trip 읽기전용 뷰)
@@ -161,6 +163,19 @@ Dagster 관제, 정합성 리포트, import job, 로그)이 일관된 envelope/c
 | C-9 | ⚪ | 인증 방식 이원화: krtour `X-Krtour-Service-Token`(batch) vs tripmate-agent `X-API-Key` | 각 repo 정책 문서 | — | 통일 불요(시스템별 정책), 단 cross-repo 문서에 한 표로 명시 (KR-04) |
 | C-10 | ⚪ | envelope 3종: krtour `{data,meta}`+RFC7807 / tripmate-agent export `{items,has_more,next_cursor}` 무-envelope / TripMate 자체 `Envelope` | 각 코드 | — | 통일 비권장(공용 read vs 내부 export vs 자체 표면) — 결정 D-08로 명문화 |
 
+> **재독 보정 (2026-06-10, 2차)**: TripMate `docs/integrations/krtour-map-rest-api.md`
+> (2026-06-08~09 갱신)를 재정독한 결과 위 표의 뉘앙스를 보정한다.
+> ① **C-3 축소**: "krtour HTTP 미존재" 전제는 `docs/krtour-map-integration.md` 경고
+> 블록·audit 문서에만 남은 잔재이고, TripMate DEC-01은 이미 (B)로 확정(2026-06-08)
+> 됐으며 integrations 문서는 "krtour 구축 완료, 공은 TripMate"를 기록하고 있다.
+> 남은 갱신 대상은 그 잔재 블록 + "krtour T-216 미머지라 T-181 대기" 전제(이제 머지됨
+> — **대기 해제**)다. ② **C-1/C-5는 TripMate가 이미 자체 식별·추적 중**(T-181 잔여 —
+> batch `found`는 TripMate 3차 검토가 제안해 krtour가 수용한 것). 결함이 아니라
+> lockstep 대기 항목이었다. ③ **C-2의 라우터 재배선도 T-172~T-176으로 추적 중**.
+> ④ 신규 발견: TripMate의 "admin base = 9012" 가정은 **실오류**(9012는 admin UI,
+> admin API는 9011 `/v1/admin/*`). ⑤ §5 R-2의 2차 보정은 ADR-051 참조(신규 API 철회,
+> 기존 #317 change API 승인).
+
 **bbox/좌표 순서**(min_lon,min_lat,max_lon,max_lat 분리 4-float, lon-first)는 양측 정합 확인.
 batch chunk(200) = krtour cap(200), retry/backoff + Retry-After 존중, fetcher의
 cursor 무한루프 가드(`next_cursor == cursor` 검출)도 확인 — 이 부분 설계 품질은 좋다.
@@ -173,6 +188,15 @@ cursor 무한루프 가드(`next_cursor == cursor` 검출)도 확인 — 이 부
 |---|---|---|---|
 | R-1 | **RustFS 버킷 소유권** | tripmate-agent가 미디어 원본(영상/자막/전사/프레임)을 **krtour-map 소유 버킷**(`RUSTFS_BUCKET_*=krtour-map`, prefix `features/`)에 직접 저장 (tripmate-agent `config.py`) | 경계 침범 소지. krtour rustfs는 "선택" 구성요소이고 offline upload 용도인데, 타 시스템의 무기한 보존 미디어가 같은 버킷에 들어가면 백업/복원·수명주기·용량 관리 책임이 모호해짐 → **D-01** |
 | R-2 | **사용자 장소 제보 릴레이** | TripMate에 `FeatureSuggestion` 모델/일일limit까지 있으나(`features.py:48`), krtour `admin/features/change-requests`로 흘러가는 공식 경로 없음 | 갭. 옵션: ① 운영자 수동 ② TripMate api가 krtour admin API 호출(관리망 인증 필요 — 권장 안 함) ③ krtour에 서비스용 suggestion 수신 API 신설 → **D-02** |
+
+> **R-2 보정 (2026-06-10, 사용자 확인)**: "공식 경로 없음"은 과대 기술. 설계는 **2단
+> 검토**로 이미 존재 — TripMate 사용자 요청(추가/수정/삭제) → TripMate admin 1차 검토
+> (`/admin/feature-requests` 큐) → krtour-map admin 최종 반영(`/v1/admin/features*`·
+> `/v1/admin/feature-update-requests*`, krtour `docs/tripmate-rest-api.md` §2 "제안
+> 원본은 TripMate app DB 소유, 운영자 승인 후 전달"). 실제 갭은 **1차 승인분의 자동
+> 전송 구간**인데, 2차 재독 결과 그 구간도 krtour PR #317 admin feature change API +
+> TripMate DEC-05/T-179/T-180으로 **이미 설계·구현돼 있었다** — ADR-051은 신규 API
+> 신설 없이 이 기존 흐름을 공식 승인하고 잔여 합의 5건만 T-217c로 확정한다.
 | R-3 | **후보 철회 라이프사이클** | reject/tombstone을 krtour가 skip (§3.2 A-1) — "후보 검수 권한은 tripmate-agent, feature 생명주기는 krtour" 합의의 마지막 고리 누락 | krtour 측 비활성 경로 구현 필요 → **D-03** |
 | R-4 | **export 계약 정본 위치** | 계약 전문이 tripmate-agent `docs/youtube-feature-pipeline-plan.md` §7(계획 문서)에만 존재. krtour 측은 ADR-049 + fetcher 코드 | 계획 문서는 계약 정본으로 부적합(완료 후 동결·이동됨). 정본 1곳 + 상대 repo는 링크 → **D-04** |
 

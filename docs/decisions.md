@@ -2891,9 +2891,10 @@ TripMate-agent는 YouTube 여행 콘텐츠에서 장소 후보, 영상·채널·
 - canonical provider name은 `tripmate-agent-youtube`로 둔다.
 - dataset_key는 `youtube_place_candidates`, source_entity_type은
   `extracted_place_candidate`를 기본값으로 둔다.
-- TripMate-agent는 `/api/v1/krtour/features/snapshot`과
-  `/api/v1/krtour/features/changes` REST export를 제공한다. 외부 호출이므로
+- TripMate-agent는 snapshot/changes REST export를 제공한다. 외부 호출이므로
   TripMate-agent ADR-24의 `X-API-Key` 인증을 그대로 사용한다.
+  (경로는 ADR-050에서 `/api/v1/features/{snapshot,changes}`로 보정 — downstream
+  이름을 path에 넣지 않는다.)
 - krtour-map Dagster는 이 export를 HTTP로 pull하고, `providers.tripmate_agent`의
   순수 변환 함수가 export item JSON을 `FeatureBundle`로 바꾼다.
 - 최종 `feature_id`, `SourceRecord.source_record_key`, `SourceLink` 생성과 PostGIS
@@ -2918,3 +2919,126 @@ TripMate-agent는 YouTube 여행 콘텐츠에서 장소 후보, 영상·채널·
   `API_KEYS` 중 하나여야 한다.
 - 실제 TripMate-agent export API 구현(T-066)이 배포되기 전까지 krtour-map live smoke는
   fake response/계약 테스트로 제한된다.
+
+## ADR-050: TripMate-agent feature export 계약을 보강한다 — 경로 중립화·정본 위치·노출 정책·철회 라이프사이클
+
+### 상태
+
+Accepted (2026-06-10) — ADR-049 보강. 배경은 `docs/reports/service-completeness-review-2026-06-10.md`
+§4 C-4 · §5 R-3/R-4, 의사결정 `docs/reports/decisions-needed-2026-06-10.md` D-03/D-04/D-05.
+
+### 결정
+
+1. **경로 중립화**: export 경로는 `/api/v1/features/snapshot`·`/api/v1/features/changes`다.
+   REST path에 특정 downstream 이름(`krtour`)을 넣지 않는다 (ADR-049 표기 보정).
+   krtour-map fetcher의 현재 하드코딩 `/api/v1/krtour/features/*`는 TripMate-agent
+   T-066 배포와 동시에 정렬한다 (T-217a).
+2. **계약 정본 위치**: export 계약(스키마·cursor·operation)의 정본은 **TripMate-agent
+   repo의 독립 계약 문서**(`docs/feature-export-api.md`류)다. 본 repo는
+   `docs/rest-api.md` 계열에서 링크 + 소비 측 기대치(`{items, has_more, next_cursor}`,
+   `X-API-Key`, env 키)만 요약한다. ADR-044 관행(데이터 정합성 1차 책임 = 공급 측)과 일치.
+3. **노출 정책**: TripMate-agent는 **검수 통과 후보만 export**한다
+   (`matched`/`user_corrected`; `needs_review`/`ignored` 제외). 검수 후 철회는
+   `reject` operation으로 증분 export한다.
+4. **철회 라이프사이클**: krtour-map은 `reject`/`tombstone` operation을 skip으로
+   끝내지 않고 해당 feature의 **inactive 전환**(+사유 기록)으로 처리한다 — MOIS
+   Step C(폐업→inactive)와 동형 (T-217b). 1단계로 skip 건수 WARN/admin 이슈 노출을
+   선행할 수 있다.
+
+### 근거
+
+- path에 소비자 이름이 박히면 공급 API가 1:1 전용이 되어 확장(다른 소비자)이 막힌다.
+- 계획 문서(`youtube-feature-pipeline-plan.md`)는 완료 후 동결되므로 계약 정본으로 부적합.
+- 검수 전 후보가 일반 feature와 동급 노출되면 사용자 신뢰도 구분이 불가능하다.
+- skip-only 처리는 철회된 후보를 feature로 영구 잔존시켜 데이터 품질을 해친다.
+
+### 결과
+
+- krtour-map: T-217a(fetcher 경로 정렬, T-066 배포와 동시) + T-217b(inactive 전환).
+- TripMate-agent: T-066 구현 시 본 ADR 준수 — 상세 체크리스트는 해당 repo
+  `docs/cross-repo-consistency-actions-2026-06-10.md` TA-01~03.
+- inactive 전환된 feature의 소비자 응답 정책 확정(D-12, 2026-06-10): batch/단건
+  read에서 **`found`에 포함하되 status(inactive)를 노출**한다 — `missing` 처리하면
+  "삭제됨"과 "철회됨"을 구분할 수 없다. 기존 admin deactivate read 정책과 동일해야
+  하며, T-217b에서 일관성 검증을 포함한다.
+
+## ADR-051: TripMate 사용자 feature 제안의 krtour-map 반영은 기존 admin feature change API를 전송 구간으로 쓴다
+
+### 상태
+
+Accepted (2026-06-10) — `docs/reports/decisions-needed-2026-06-10.md` D-02.
+같은 날 2차 재독에서 **신규 수신 endpoint 신설안을 철회**하고 기존 설계 승인으로 보정
+(아래 배경 참조).
+
+### 배경
+
+설계된 흐름은 **2단 검토**다: TripMate 사용자가 feature 추가/수정/삭제를 요청
+(`app.feature_suggestions`, TripMate T-177 완료) → **TripMate admin이 1차 검토**
+(`/admin/feature-requests` 큐, TripMate T-179) → 승인분을 krtour-map에 전달 →
+**krtour-map에서 반영**. 이 마지막 구간을 위해 krtour-map은 이미 PR #317(K-15)로
+**admin feature change API**(`POST/PATCH/DELETE /v1/admin/features*` +
+`change-requests` 검수 큐, `require_admin_destructive_enabled` + 서비스 토큰)를
+신설했고, TripMate는 admin 전용 client(T-180)로 이를 호출하는 계획을 확정했다
+(TripMate DEC-05, 2026-06-08; `docs/integrations/krtour-map-rest-api.md` §2.8/§2.9).
+
+1차 검토 보고서가 이 구간을 "공식 경로 없음"으로 보고 별도 수신 API
+(`POST /v1/features/suggestions`)를 제안했으나, 이는 **기존 #317 설계와 기능 중복**
+이다 — 철회한다.
+
+### 결정
+
+- **신규 수신 endpoint를 만들지 않는다.** TripMate admin 1차 승인분의 전송 구간은
+  기존 **`/v1/admin/features*` feature change API**(#317)다.
+- 2단 검토 유지: TripMate admin 1차 검토 → krtour-map `change-requests` 큐
+  (`KRTOUR_MAP_ADMIN_FEATURE_CHANGE_REVIEW_MODE`에 따라 krtour-map 운영자 최종
+  승인 또는 immediate 적용).
+- TripMate↔krtour-map **잔여 합의 5건**(TripMate 문서 §7에 질의로 등재됨)을 krtour-map이
+  확정·문서화한다 (T-217c 재정의):
+  1. review_mode — TripMate 출처 요청의 이중 검수 여부 (`require_review` vs `immediate`).
+  2. `idempotency_key` 멱등성 — 같은 제안 재시도 시 동일 feature_id 보장.
+  3. 출처 태깅 — TripMate `suggestion_id` 추적 필드 방식.
+  4. admin 인증 — TripMate admin client의 `/v1/admin/*` 호출 토큰/경로. **주의**:
+     admin API는 **9011 `/v1/admin/*`**이다 (9012는 admin UI — TripMate 문서의
+    "admin base 9012" 가정은 오류, TripMate 측 정정 대상).
+  5. closure 표현 — 영구 폐업 = soft `DELETE` vs `deactivate` 권장안.
+
+### 결과
+
+- T-217c 재정의: 신규 API 구현이 아니라 **합의 5건 확정 + `docs/rest-api.md`·
+  `docs/tripmate-rest-api.md` 반영 + change-requests 큐에 TripMate 출처 식별 표시**.
+- 출처 태깅의 사용자 식별 정보 범위 확정(D-11, 2026-06-10): **익명** — TripMate 측
+  불투명 참조 ID(suggestion_id)만 싣고 krtour-map은 개인정보를 저장하지 않는다.
+  역추적이 필요하면 TripMate admin에서 수행한다 (PIPA 부담 비전이).
+- 거절/반려의 역방향 통지(krtour-map 최종 거절 → TripMate `feature_suggestions`
+  상태 갱신)는 TripMate가 `request_id`/state 폴링으로 처리(기존 설계) — 별도 push 불요.
+
+## ADR-052: RustFS 버킷은 당분간 공유하되 prefix 소유권을 명문화하고, 추후 전용 버킷으로 분리한다
+
+### 상태
+
+Accepted (2026-06-10, 잠정) — `docs/reports/decisions-needed-2026-06-10.md` D-01 옵션 (b)
+채택, **추후 옵션 (a)(전용 버킷 분리)로 이행 예정**.
+
+### 배경
+
+TripMate-agent가 미디어 원본(영상/자막/전사/프레임, 무기한 보존)을 krtour-map 소유
+버킷(`krtour-map`, prefix `features/`)에 직접 저장한다. krtour-map의 backup/restore·
+수명주기·용량 책임과 충돌 소지가 있다.
+
+### 결정
+
+- **당분간 공유 유지**: 단일 RustFS(S3 `9003`/console `9004`)의 `krtour-map` 버킷을
+  공유한다.
+- **prefix 소유권 명문화**: TripMate-agent가 쓰는 prefix 이하 객체의 소유·수명주기·
+  복구 책임은 TripMate-agent에 있다. krtour-map cold backup 범위에서 해당 prefix는
+  **제외**한다 (T-217e에서 architecture.md·backup 문서에 반영).
+- **추후 분리**: TripMate-agent 전용 버킷으로 분리한다. 분리 시점 확정(D-10,
+  2026-06-10): **TripMate-agent T-066 운영 개시(krtour-map 실데이터 pull 시작) 전** —
+  운영 데이터가 쌓이기 전이 마이그레이션 비용 최소다. 분리 작업 주체는 TripMate-agent
+  (버킷 config + 객체 이전), krtour-map은 backup 정책 갱신만.
+
+### 결과
+
+- T-217e — 공유 정책을 `docs/architecture.md` rustfs 절 + backup/restore 문서에 명문화.
+- TripMate-agent 측: 분리 전까지 버킷 기본값 의존 신규 기능 보류 권고 유지 (해당 repo
+  TA-04).
