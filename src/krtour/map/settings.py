@@ -239,8 +239,12 @@ class KrtourMapSettings(BaseSettings):
     tripmate_agent_feature_page_size: int = Field(
         default=200,
         ge=1,
-        le=1000,
-        description="TripMate-agent feature export page size.",
+        le=500,
+        description=(
+            "TripMate-agent feature export page size. 상한 500은 TripMate-agent "
+            "``FEATURE_EXPORT_LIMIT_MAX``와 정렬(초과분은 서버가 silent 클램프하므로 "
+            "계약상 상한을 일치시킨다, T-217a)."
+        ),
     )
     tripmate_agent_timeout_seconds: float = Field(
         default=20.0,
