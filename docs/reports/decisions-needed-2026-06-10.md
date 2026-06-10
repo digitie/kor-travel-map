@@ -44,8 +44,16 @@
 - **보정(2026-06-10, 사용자 확인)**: 본 항목의 "공식 경로 없음"은 과대 기술 — 설계는
   **2단 검토**(TripMate 사용자 요청 → TripMate admin 1차 검토 `/admin/feature-requests`
   → krtour-map admin 최종 반영)로 이미 존재하며(`docs/tripmate-rest-api.md` §2),
-  실제 갭은 **TripMate admin 승인분 → krtour-map 자동 전송 구간**이다. ADR-051은
-  이 전송 구간으로 재정의됨 (수신 대상 = 1차 승인분, 사용자 원시 제보 아님).
+  실제 갭은 **TripMate admin 승인분 → krtour-map 자동 전송 구간**이다.
+- **2차 보정(2026-06-10, 재독)**: 그 전송 구간조차 **이미 설계·구현돼 있었다** —
+  krtour PR #317(K-15)의 admin feature change API(`/v1/admin/features*` +
+  change-requests 큐)가 정확히 이 용도로 신설됐고, TripMate DEC-05(2026-06-08 확정)
+  + T-179/T-180이 이를 호출하는 계획을 보유(`docs/integrations/krtour-map-rest-api.md`
+  §2.8/2.9). 따라서 **신규 수신 API(`POST /v1/features/suggestions`) 신설안은 중복으로
+  철회** — ADR-051은 기존 change API를 전송 구간으로 승인 + 잔여 합의 5건
+  (review_mode/idempotency/출처 태깅/admin 인증/closure) 확정으로 재정의(T-217c).
+  부수 발견: TripMate 측 "admin base = 9012" 가정은 오류(9012는 admin UI, admin
+  API는 9011 `/v1/admin/*`) — TripMate 정정 대상.
 
 ## D-03. tripmate-agent 후보 철회(reject/tombstone)의 krtour 라이프사이클 처리
 
@@ -192,7 +200,7 @@
 | 결정 | 결과 | 정본 반영 |
 |---|---|---|
 | D-01 | (b) 잠정 채택, 추후 분리 | ADR-052, T-217e |
-| D-02 | (a) | ADR-051, T-217c |
+| D-02 | (a) → 2차 보정: 신규 API 철회, 기존 #317 change API 승인 | ADR-051(보정), T-217c(합의 5건) |
 | D-03 | (a) | ADR-050 #4, T-217b |
 | D-04 | (a) + 경로 중립화 보정 | ADR-050 #1·#2, T-217a |
 | D-05 | (a) | ADR-050 #3, tripmate-agent TA-03 |

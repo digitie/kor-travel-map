@@ -2962,43 +2962,55 @@ Accepted (2026-06-10) — ADR-049 보강. 배경은 `docs/reports/service-comple
   "삭제됨"과 "철회됨"을 구분할 수 없다. 기존 admin deactivate read 정책과 동일해야
   하며, T-217b에서 일관성 검증을 포함한다.
 
-## ADR-051: TripMate 사용자 장소 제보는 krtour-map 서비스용 수신 API로 받는다
+## ADR-051: TripMate 사용자 feature 제안의 krtour-map 반영은 기존 admin feature change API를 전송 구간으로 쓴다
 
 ### 상태
 
 Accepted (2026-06-10) — `docs/reports/decisions-needed-2026-06-10.md` D-02.
+같은 날 2차 재독에서 **신규 수신 endpoint 신설안을 철회**하고 기존 설계 승인으로 보정
+(아래 배경 참조).
 
 ### 배경
 
 설계된 흐름은 **2단 검토**다: TripMate 사용자가 feature 추가/수정/삭제를 요청
-(`FeatureSuggestion`, 일일 한도 20건) → **TripMate admin이 1차 검토**(자체
-`/admin/feature-requests` 큐) → 승인분이 krtour-map으로 전달 → **krtour-map admin이
-최종 반영**(`/v1/admin/features*`·`/v1/admin/feature-update-requests*`,
-`docs/tripmate-rest-api.md` §2 "제안 원본은 TripMate app DB 소유, 운영자 승인 후 전달").
-이 설계에서 빠진 것은 사용자 요청 경로가 아니라 **TripMate admin 승인분 → krtour-map
-사이의 자동 전송 구간**뿐이다 — TripMate public client의 `/v1/admin/*` 직접 호출은
-금지(관리망 인증 경계)이므로 수동 운영자 입력 외 수단이 없다.
+(`app.feature_suggestions`, TripMate T-177 완료) → **TripMate admin이 1차 검토**
+(`/admin/feature-requests` 큐, TripMate T-179) → 승인분을 krtour-map에 전달 →
+**krtour-map에서 반영**. 이 마지막 구간을 위해 krtour-map은 이미 PR #317(K-15)로
+**admin feature change API**(`POST/PATCH/DELETE /v1/admin/features*` +
+`change-requests` 검수 큐, `require_admin_destructive_enabled` + 서비스 토큰)를
+신설했고, TripMate는 admin 전용 client(T-180)로 이를 호출하는 계획을 확정했다
+(TripMate DEC-05, 2026-06-08; `docs/integrations/krtour-map-rest-api.md` §2.8/§2.9).
+
+1차 검토 보고서가 이 구간을 "공식 경로 없음"으로 보고 별도 수신 API
+(`POST /v1/features/suggestions`)를 제안했으나, 이는 **기존 #317 설계와 기능 중복**
+이다 — 철회한다.
 
 ### 결정
 
-- 기존 2단 검토 설계를 유지한다 — 1차 검토는 TripMate admin, 최종 반영은 krtour-map
-  admin 책임 그대로.
-- krtour-map에 **서비스용 수신 API**를 신설한다: `POST /v1/features/suggestions`
-  (가칭, `X-Krtour-Service-Token` 인증 + rate-limit). 이 API는 사용자 원시 제보가
-  아니라 **TripMate admin이 1차 승인한 요청**을 받는 전송 구간이다.
-- 수신분은 기존 `admin/features/change-requests` 승인 큐로 합류한다 — krtour-map측
-  별도 승인 flow를 만들지 않는다 (TripMate 1차 + krtour-map 최종의 2단 유지).
-- TripMate는 admin 1차 승인 시점에 이 API로 릴레이한다 (TripMate TM-13).
+- **신규 수신 endpoint를 만들지 않는다.** TripMate admin 1차 승인분의 전송 구간은
+  기존 **`/v1/admin/features*` feature change API**(#317)다.
+- 2단 검토 유지: TripMate admin 1차 검토 → krtour-map `change-requests` 큐
+  (`KRTOUR_MAP_ADMIN_FEATURE_CHANGE_REVIEW_MODE`에 따라 krtour-map 운영자 최종
+  승인 또는 immediate 적용).
+- TripMate↔krtour-map **잔여 합의 5건**(TripMate 문서 §7에 질의로 등재됨)을 krtour-map이
+  확정·문서화한다 (T-217c 재정의):
+  1. review_mode — TripMate 출처 요청의 이중 검수 여부 (`require_review` vs `immediate`).
+  2. `idempotency_key` 멱등성 — 같은 제안 재시도 시 동일 feature_id 보장.
+  3. 출처 태깅 — TripMate `suggestion_id` 추적 필드 방식.
+  4. admin 인증 — TripMate admin client의 `/v1/admin/*` 호출 토큰/경로. **주의**:
+     admin API는 **9011 `/v1/admin/*`**이다 (9012는 admin UI — TripMate 문서의
+    "admin base 9012" 가정은 오류, TripMate 측 정정 대상).
+  5. closure 표현 — 영구 폐업 = soft `DELETE` vs `deactivate` 권장안.
 
 ### 결과
 
-- 신규 task T-217c (API + change-requests 합류 + admin 표시 — 출처가 TripMate admin
-  승인분임을 큐에서 식별 가능하게).
-- 제보 페이로드의 사용자 식별 정보 범위 확정(D-11, 2026-06-10): **익명** —
-  TripMate 측 불투명 참조 ID(suggestion_id)만 싣고 krtour-map은 개인정보를 저장하지
-  않는다. 역추적이 필요하면 TripMate admin에서 수행한다 (PIPA 부담 비전이).
-- 거절/반려의 역방향 통지(krtour-map 최종 거절 → TripMate admin 큐 상태 갱신)는
-  1차 범위 외 — 필요해지면 후속 결정.
+- T-217c 재정의: 신규 API 구현이 아니라 **합의 5건 확정 + `docs/rest-api.md`·
+  `docs/tripmate-rest-api.md` 반영 + change-requests 큐에 TripMate 출처 식별 표시**.
+- 출처 태깅의 사용자 식별 정보 범위 확정(D-11, 2026-06-10): **익명** — TripMate 측
+  불투명 참조 ID(suggestion_id)만 싣고 krtour-map은 개인정보를 저장하지 않는다.
+  역추적이 필요하면 TripMate admin에서 수행한다 (PIPA 부담 비전이).
+- 거절/반려의 역방향 통지(krtour-map 최종 거절 → TripMate `feature_suggestions`
+  상태 갱신)는 TripMate가 `request_id`/state 폴링으로 처리(기존 설계) — 별도 push 불요.
 
 ## ADR-052: RustFS 버킷은 당분간 공유하되 prefix 소유권을 명문화하고, 추후 전용 버킷으로 분리한다
 

@@ -42,11 +42,13 @@
         응답 정책 확정(D-12): inactive feature는 batch/단건 read의 **`found`에 포함
         + status 노출** (`missing` 아님) — 기존 admin deactivate read 정책과의 일관성
         검증 포함.
-  - [ ] T-217c — TripMate admin **1차 승인분** 수신 API `POST /v1/features/suggestions`
-        (가칭, ServiceToken+rate-limit) → `admin/features/change-requests` 큐 합류
-        (ADR-051, 2단 검토: TripMate admin 1차 → krtour-map admin 최종; TripMate
-        TM-13 짝). 페이로드 확정(D-11): **익명** — TripMate 측 불투명 참조 ID만,
-        krtour-map 개인정보 비저장.
+  - [ ] T-217c — TripMate feature 제안 연동 **합의 5건 확정 + 문서화** (ADR-051 보정:
+        신규 수신 API **철회** — 전송 구간은 기존 `/v1/admin/features*` change API,
+        PR #317). ① review_mode(이중 검수 여부) ② idempotency_key 멱등 ③ 출처 태깅
+        (suggestion_id, D-11: 익명 참조 ID만) ④ admin 인증 — admin API는 **9011
+        `/v1/admin/*`**(9012는 UI, TripMate 측 가정 오류 정정 통보) ⑤ closure
+        (`DELETE` vs `deactivate` 권장). 결과를 `docs/rest-api.md`·
+        `docs/tripmate-rest-api.md`에 반영 + change-requests 큐 TripMate 출처 표시.
   - [ ] T-217d — cross-repo 연동 정본 문서 `docs/integration-map.md` 신설: 3-시스템
         포트·연동 방향·인증 방식·envelope 차이·계약 정본 위치 1장 (D-08 권고안 채택)
         + 분기 cross-repo 정합성 audit 체크리스트 runbook 등재. 각 repo 진입 문서에서 링크.

@@ -28,6 +28,13 @@
   admin 최종 반영(`docs/tripmate-rest-api.md` §2). 검토 보고서의 "공식 경로 없음"을
   "1차 승인분의 자동 전송 구간 부재"로 정정하고, ADR-051 수신 API의 입력을 "TripMate
   admin 1차 승인분"으로 재정의했다.
+- **재독 보정(같은 날, 사용자 지시 "전체 2회 재독")**: TripMate
+  `docs/integrations/krtour-map-rest-api.md`(06-08~09 갱신) 재정독으로 3건 보정 —
+  ① **ADR-051 신규 수신 API 철회**: TripMate DEC-05 + krtour PR #317(admin feature
+  change API)이 이미 그 전송 구간을 구축, 중복이라 기존 흐름 승인으로 재정의
+  (T-217c = 합의 5건 확정으로 재범위). ② C-1/C-5는 TripMate T-181 잔여로 기추적
+  (krtour T-216 머지로 대기 해제), C-3은 잔재 블록 한정으로 축소. ③ 신규 실오류
+  발견: TripMate "admin base=9012" 가정(9012=UI, admin API=9011) — TripMate 정정 대상.
 - **2차 결정 종결(같은 날)**: D-07(a)→T-217g(provider 신선도 목록 API+화면),
   D-10(a)→버킷 분리는 T-066 운영 개시 전(ADR-052 보강), D-11(a)→제보 페이로드 익명
   (ADR-051 보강), D-12(a)→inactive feature는 `found`+status 노출(ADR-050 보강),

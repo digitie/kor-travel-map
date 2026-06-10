@@ -163,6 +163,19 @@ Dagster 관제, 정합성 리포트, import job, 로그)이 일관된 envelope/c
 | C-9 | ⚪ | 인증 방식 이원화: krtour `X-Krtour-Service-Token`(batch) vs tripmate-agent `X-API-Key` | 각 repo 정책 문서 | — | 통일 불요(시스템별 정책), 단 cross-repo 문서에 한 표로 명시 (KR-04) |
 | C-10 | ⚪ | envelope 3종: krtour `{data,meta}`+RFC7807 / tripmate-agent export `{items,has_more,next_cursor}` 무-envelope / TripMate 자체 `Envelope` | 각 코드 | — | 통일 비권장(공용 read vs 내부 export vs 자체 표면) — 결정 D-08로 명문화 |
 
+> **재독 보정 (2026-06-10, 2차)**: TripMate `docs/integrations/krtour-map-rest-api.md`
+> (2026-06-08~09 갱신)를 재정독한 결과 위 표의 뉘앙스를 보정한다.
+> ① **C-3 축소**: "krtour HTTP 미존재" 전제는 `docs/krtour-map-integration.md` 경고
+> 블록·audit 문서에만 남은 잔재이고, TripMate DEC-01은 이미 (B)로 확정(2026-06-08)
+> 됐으며 integrations 문서는 "krtour 구축 완료, 공은 TripMate"를 기록하고 있다.
+> 남은 갱신 대상은 그 잔재 블록 + "krtour T-216 미머지라 T-181 대기" 전제(이제 머지됨
+> — **대기 해제**)다. ② **C-1/C-5는 TripMate가 이미 자체 식별·추적 중**(T-181 잔여 —
+> batch `found`는 TripMate 3차 검토가 제안해 krtour가 수용한 것). 결함이 아니라
+> lockstep 대기 항목이었다. ③ **C-2의 라우터 재배선도 T-172~T-176으로 추적 중**.
+> ④ 신규 발견: TripMate의 "admin base = 9012" 가정은 **실오류**(9012는 admin UI,
+> admin API는 9011 `/v1/admin/*`). ⑤ §5 R-2의 2차 보정은 ADR-051 참조(신규 API 철회,
+> 기존 #317 change API 승인).
+
 **bbox/좌표 순서**(min_lon,min_lat,max_lon,max_lat 분리 4-float, lon-first)는 양측 정합 확인.
 batch chunk(200) = krtour cap(200), retry/backoff + Retry-After 존중, fetcher의
 cursor 무한루프 가드(`next_cursor == cursor` 검출)도 확인 — 이 부분 설계 품질은 좋다.
