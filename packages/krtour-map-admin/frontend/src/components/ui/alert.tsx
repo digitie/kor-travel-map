@@ -22,12 +22,21 @@ const alertVariants = cva(
 function Alert({
   className,
   variant,
+  role,
+  "aria-live": ariaLive,
   ...props
 }: React.ComponentProps<"div"> & VariantProps<typeof alertVariants>) {
+  // 에러(destructive)는 즉시 안내해야 하므로 role=alert(assertive),
+  // 성공/정보(default)는 작업 흐름을 끊지 않도록 role=status(polite)로 안내한다.
+  // 호출부가 role/aria-live를 명시하면 그 값을 우선한다. (T-218e)
+  const resolvedRole = role ?? (variant === "destructive" ? "alert" : "status")
+  const resolvedAriaLive =
+    ariaLive ?? (resolvedRole === "alert" ? "assertive" : "polite")
   return (
     <div
       data-slot="alert"
-      role="alert"
+      role={resolvedRole}
+      aria-live={resolvedAriaLive}
       className={cn(alertVariants({ variant }), className)}
       {...props}
     />

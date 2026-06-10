@@ -1268,6 +1268,10 @@ test.describe("admin/ops pages", () => {
     await page.getByRole("button", { name: "백업" }).click();
     await expect.poll(() => requests.create).toBe(1);
     await expect(page.getByText("backup command planned")).toBeVisible();
+    // T-218e: 성공 결과는 polite live region(role=status)으로 안내된다.
+    await expect(
+      page.getByRole("status").filter({ hasText: "backup command planned" }),
+    ).toBeVisible();
 
     // restore command plan (staging target)
     await page.getByRole("button", { name: "Restore" }).first().click();

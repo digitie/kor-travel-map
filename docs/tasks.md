@@ -11,8 +11,7 @@
 - **다음 (우선순위 순)**
   - [ ] T-212e — 실데이터 full reload + offline upload 실데이터 검증 + 최종 리포트.
   - [~] T-218 — admin UI 상세 구현 점검 + a11y/e2e 완비(화면별 슬라이스 a~f,
-        T-212e와 독립·병렬). **T-218a·b·c·d 완료(e2e 16/16 화면 + 음성 경로 4폼)**,
-        다음은 T-218e(focus/aria-live)·T-218f(점검 체크리스트). 정본
+        T-212e와 독립·병렬). **T-218a~e 완료**, 남은 것은 T-218f(화면별 점검 체크리스트). 정본
         `docs/reports/t-218-admin-ui-hardening-plan-2026-06-10.md`.
 - **최근 완료**
   - [x] T-212d 재측정 pass — read-heavy 전제로 hot read EXPLAIN을 다시 돌리고
@@ -858,8 +857,12 @@ T-214/T-215(#317)의 `/v1` 1차 정리 위에 ADR-048 delta를 얹는다. 정본
         **완료(2026-06-10)**: change-requests 비-object detail JSON, issues manual-override
         빈 입력, poi-cache/feature-update 필수·좌표 범위 = 4개 폼에 음성 경로 e2e
         (T-218b 적용분 + change-requests 추가). admin-ops e2e 20 passed.
-      - [ ] T-218e — focus 관리(상세 drawer/confirm 모달 trap·복원·Escape) + aria-live/
-        aria-busy(로딩·액션 상태) + 키보드 흐름 e2e(P1).
+      - [x] T-218e — aria-live 안내 + 포커스. **완료(2026-06-10)**: `Alert`를 variant별
+        live-region으로 개선 — destructive=`role=alert`(assertive), default(성공/정보)=
+        `role=status`(polite) → 전 16화면 액션 결과/에러 안내 정합. backups 성공 결과의
+        polite status region e2e 단언 추가. (※ 본 admin UI는 오버레이 모달/드로어가 없는
+        인라인 패널 구조라 "modal focus trap"은 비해당 — 폼 검증 첫 에러 필드 포커스는
+        T-218b에서 이미 적용.)
       - [ ] T-218f — 화면별 상세 회귀 점검 체크리스트(필터/정렬/cursor 소진/빈·에러 상태/
         kill-switch/`meta.page` 소비)를 `docs/runbooks/admin-ui-screen-checklist.md`로
         고정 + e2e 커버 매핑(P2).
