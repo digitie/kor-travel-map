@@ -20,6 +20,20 @@ admin/ops 폼 화면이 label 없이 `aria-label`/placeholder만 단 bare contro
 - 게이트: gen:types:check(drift 0) + type-check + lint + vitest 11 + env 명시 build 통과.
   화면 소비/e2e 단언은 T-218b. (T-218 task 정본 `docs/reports/t-218-admin-ui-hardening-plan-2026-06-10.md`.)
 
+## 2026-06-10 (claude) — T-218 admin UI 상세 점검 + a11y/e2e 완비 task 신설 (문서만)
+
+사용자 지시: TripMate "Claude Sprint 4 PR-C 프론트"(화면별 슬라이스 + E2E)와 같은
+admin UI 상세 구현·e2e 점검 task를 만들어 문서 정리.
+
+- **실측**: admin/ops UI 16 route 전부 구현 + e2e 15/16 커버(T-212b 완료, `1128626` 기준).
+  유일 미커버는 `/admin/backups`. 공통 폼 a11y wrapper(FormField류)는 부재 — 각 화면이
+  `ui/field.tsx` 컨테이너 위에서 수동 조립(TripMate FormField 패턴 대비 갭).
+- **신설**: `docs/tasks.md` Phase 7에 **T-218**(a11y wrapper→폼 적용→backups e2e→음성 경로
+  e2e→focus/aria-live→화면별 점검 체크리스트, 6 sub-task) + 상세 계획·갭 매트릭스 정본
+  `docs/reports/t-218-admin-ui-hardening-plan-2026-06-10.md`. 열린 항목 인덱스 15→16.
+- **경계**: T-212e(백엔드 실데이터)와 독립·병렬. 신규 라이브러리 없이 기존 `ui/*` 위에
+  구성, 프론트 표현 계층만(provider 변환 불변). 코드 변경 없음 — 계획 문서만.
+
 ## 2026-06-10 (codex) — T-212d read-heavy 재측정 + enrichment read path 튜닝
 
 **작업**: PR #332 머지 후 `origin/main` 기준 새 브랜치에서 T-212d를 재실행했다. read-heavy

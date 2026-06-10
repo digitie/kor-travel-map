@@ -6,10 +6,12 @@
 
 ## 진행 중인 작업 인덱스 (열린 `[ ]` 항목)
 
-> 총 15건. 상세는 아래 각 섹션. 완료 이력은 [`tasks-done.md`](tasks-done.md).
+> 총 16건. 상세는 아래 각 섹션. 완료 이력은 [`tasks-done.md`](tasks-done.md).
 
 - **다음 (우선순위 순)**
   - [ ] T-212e — 실데이터 full reload + offline upload 실데이터 검증 + 최종 리포트.
+  - [ ] T-218 — admin UI 상세 구현 점검 + a11y/e2e 완비(화면별 슬라이스 a~f,
+        T-212e와 독립·병렬). 정본 `docs/reports/t-218-admin-ui-hardening-plan-2026-06-10.md`.
 - **최근 완료**
   - [x] T-212d 재측정 pass — read-heavy 전제로 hot read EXPLAIN을 다시 돌리고
         클러스터 hot path 회귀를 추가했다. `mv_feature_cluster_counts`는 exact-viewport
@@ -825,6 +827,27 @@ T-214/T-215(#317)의 `/v1` 1차 정리 위에 ADR-048 delta를 얹는다. 정본
       provider별 성공/실패/skip, import job/Dagster run id, consistency report id,
       backup/restore smoke 결과를 `docs/reports/t-212e-live-full-reload-final-*.md`에
       남긴다.
+- [ ] T-218 — admin UI 상세 구현 점검 + a11y/e2e 완비. TripMate "Claude Sprint 4 PR-C
+      프론트"(화면별 슬라이스 + E2E)와 동급의 **화면별 상세 점검 + 잔여 갭 완비**.
+      admin/ops UI 16 route는 이미 전부 구현 + e2e 15/16 커버(T-212b 완료)이므로, 본
+      task는 신규 화면이 아니라 **일관성·접근성·e2e 완전성의 마지막 보강**이다. 상세
+      계획·현재 매트릭스는 `docs/reports/t-218-admin-ui-hardening-plan-2026-06-10.md` 정본.
+      T-212e(백엔드 실데이터)와 독립·병렬. 전 PR 게이트: gen:types:check(drift 0) +
+      type-check + lint + env 명시 build + Windows Playwright e2e.
+      - [ ] T-218a — 공통 폼 a11y wrapper(`FormField`/`FormSelect`/`FormTextArea` +
+        `validateForm` util) 도입(P0, 기존 `ui/field.tsx` 위에 얇게, 신규 라이브러리 없음).
+      - [ ] T-218b — 폼 보유 화면(change-requests/issues manual-override/feature-update-
+        requests/poi-cache-targets/offline-uploads/etl)에 wrapper 적용 + 라벨/에러/포커스
+        e2e 단언(P0).
+      - [ ] T-218c — `/admin/backups` e2e 신설 — 유일 미커버 화면, create/restore/
+        restore-swap 위험 액션 + confirm + alert까지 고정(P0).
+      - [ ] T-218d — 위험 액션 음성 경로 e2e — 잘못된 JSON(payload/address/coord)·필수
+        누락·캡 경계의 클라이언트 검증 에러 표시(서버 미호출) 단언(P1).
+      - [ ] T-218e — focus 관리(상세 drawer/confirm 모달 trap·복원·Escape) + aria-live/
+        aria-busy(로딩·액션 상태) + 키보드 흐름 e2e(P1).
+      - [ ] T-218f — 화면별 상세 회귀 점검 체크리스트(필터/정렬/cursor 소진/빈·에러 상태/
+        kill-switch/`meta.page` 소비)를 `docs/runbooks/admin-ui-screen-checklist.md`로
+        고정 + e2e 커버 매핑(P2).
 
 
 ## 우선순위 가이드
