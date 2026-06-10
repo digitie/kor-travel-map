@@ -1,11 +1,14 @@
 """``krtour.map.providers.tripmate_agent`` — TripMate-agent YouTube 후보 → FeatureBundle.
 
 ``tripmate-agent``는 YouTube 여행 콘텐츠에서 장소 후보와 근거를 추출하고,
-``python-krtour-map``은 문서화된 ``/api/v1/krtour/features/*`` JSON을 pull해
-최종 ``Feature``/``SourceRecord``/``SourceLink``로 소유한다. 이 모듈은 REST client
-wrapper가 아니라, 이미 받은 export item dict를 DTO로 바꾸는 순수 변환 함수다.
+``python-krtour-map``은 문서화된 ``/api/v1/features/*`` JSON을 pull해(ADR-050 #1
+경로 중립화) 최종 ``Feature``/``SourceRecord``/``SourceLink``로 소유한다. 이 모듈은
+REST client wrapper가 아니라, 이미 받은 export item dict를 DTO로 바꾸는 순수 변환
+함수다. ``operation=upsert``는 ``FeatureBundle`` 적재로, ``reject``/``tombstone``은
+``tripmate_agent_inactive_entity_ids``로 분리해 대응 feature inactive 전환에 쓴다
+(ADR-050 #4, T-217b — MOIS Step C 동형).
 
-ADR 참조: ADR-006 / ADR-009 / ADR-019 / ADR-024 / ADR-045
+ADR 참조: ADR-006 / ADR-009 / ADR-019 / ADR-024 / ADR-045 / ADR-050
 """
 
 from __future__ import annotations
@@ -41,14 +44,16 @@ __all__ = [
     "DATASET_KEY_YOUTUBE_PLACE_CANDIDATES",
     "TRIPMATE_AGENT_MARKER_COLOR",
     "TRIPMATE_AGENT_PROVIDER_NAME",
+    "TRIPMATE_AGENT_SOURCE_ENTITY_TYPE",
     "TRIPMATE_AGENT_YOUTUBE_CATEGORY_FALLBACK",
     "TripmateAgentFeatureItem",
+    "tripmate_agent_inactive_entity_ids",
     "tripmate_agent_items_to_bundles",
 ]
 
 
 TripmateAgentFeatureItem = Mapping[str, Any]
-"""TripMate-agent ``/api/v1/krtour/features/*`` item JSON shape."""
+"""TripMate-agent ``/api/v1/features/*`` item JSON shape."""
 
 TRIPMATE_AGENT_PROVIDER_NAME: Final[str] = "tripmate-agent-youtube"
 """YouTube 장소 후보 provider canonical name."""
@@ -56,7 +61,10 @@ TRIPMATE_AGENT_PROVIDER_NAME: Final[str] = "tripmate-agent-youtube"
 DATASET_KEY_YOUTUBE_PLACE_CANDIDATES: Final[str] = "youtube_place_candidates"
 """TripMate-agent export dataset key."""
 
-_SOURCE_ENTITY_TYPE: Final[str] = "extracted_place_candidate"
+TRIPMATE_AGENT_SOURCE_ENTITY_TYPE: Final[str] = "extracted_place_candidate"
+"""export 계약의 source_entity_type 기본값 — inactive 전환 매칭에도 사용."""
+
+_SOURCE_ENTITY_TYPE: Final[str] = TRIPMATE_AGENT_SOURCE_ENTITY_TYPE
 _PLACE_KIND: Final[str] = "youtube_place_candidate"
 TRIPMATE_AGENT_YOUTUBE_CATEGORY_FALLBACK: Final[str] = PlaceCategoryCode.TOURISM.value
 """TripMate-agent category suggestion이 없거나 잘못된 경우의 안전한 fallback."""
@@ -73,9 +81,10 @@ async def tripmate_agent_items_to_bundles(
 ) -> list[FeatureBundle]:
     """TripMate-agent feature export items → ``list[FeatureBundle]``.
 
-    ``operation``이 ``upsert``가 아닌 ``reject``/``tombstone`` item은 현재 적재형
-    ``FeatureBundle``로 표현할 수 없으므로 건너뛴다. 실제 삭제/거절 cursor 처리는
-    export ledger가 붙는 후속 작업에서 별도 상태 전이로 다룬다.
+    ``operation``이 ``upsert``가 아닌 ``reject``/``tombstone`` item은 적재형
+    ``FeatureBundle``로 표현하지 않는다 — 같은 items에서
+    ``tripmate_agent_inactive_entity_ids``로 추출해 대응 feature를 inactive로
+    전환한다(ADR-050 #4, T-217b).
     """
     geocoder = (
         cached_reverse_geocoder(reverse_geocoder)
@@ -215,6 +224,32 @@ async def _item_to_bundle(
     )
 
 
+def tripmate_agent_inactive_entity_ids(
+    items: Iterable[TripmateAgentFeatureItem],
+) -> set[str]:
+    """``reject``/``tombstone`` item의 ``source_entity_id`` 집합 (T-217b, ADR-050 #4).
+
+    tripmate-agent 검수에서 철회(reject)되거나 폐기(tombstone)된 후보에 대응하는
+    기적재 feature를 ``infra.inactivate_features_by_source_entity_ids``로
+    ``status='inactive'`` 전환할 때 쓴다(MOIS Step C 동형, ADR-017 — place 무기한
+    유지·status만 전환). export 계약(tripmate-agent plan §7)상 provider/dataset/
+    source_entity_type은 단일 고정값이므로 entity id 집합만 모은다. id를 뽑을 수
+    없는 item은 무시한다(빈 집합이면 호출측 no-op).
+
+    D-12(2026-06-10): inactive 전환된 feature는 batch/단건 read의 ``found``에
+    status와 함께 남는다 — ``missing``(미존재)과 "철회/폐업됨"을 구분한다.
+    """
+    entity_ids: set[str] = set()
+    for item in items:
+        if _operation(item) == "upsert":
+            continue
+        source_record_payload = _mapping(item.get("source_record"))
+        entity_id = _source_entity_id(item, source_record_payload)
+        if entity_id is not None:
+            entity_ids.add(entity_id)
+    return entity_ids
+
+
 def _operation(item: Mapping[str, Any]) -> str:
     return str(item.get("operation") or "upsert").strip().lower()
 
@@ -334,6 +369,10 @@ def _facility_info(
         "timestamp_end": _text(evidence, "timestamp_end"),
         "transcript_excerpt": _text(evidence, "transcript_excerpt"),
         "gemini_url_evidence": _text(evidence, "gemini_url_evidence"),
+        # T-217f: TripMate 출처 배지 UX(TM-08)가 detail.facility_info만 읽고
+        # confidence까지 얻도록 0~100 정규화 점수를 함께 노출한다(소비 계약은
+        # docs/tripmate-rest-api.md §"YouTube 후보 detail").
+        "confidence_score": _confidence(evidence.get("confidence_score")),
     }
     return {key: value for key, value in values.items() if value is not None}
 

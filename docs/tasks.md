@@ -39,14 +39,19 @@
   - [x] T-216f — 코드/DB 명명 전파(surrogate만).
   - [x] T-216g — 단일 정본 수렴 + 버전 거버넌스.
 - **Phase 6.9 — cross-repo 정합성 (2026-06-10 검토, ADR-050~052 — 결정 반영분)**
-  - [ ] T-217a — tripmate-agent fetcher 경로 중립화 정렬: `/api/v1/krtour/features/*`
-        → `/api/v1/features/*` (ADR-050 #1). **TripMate-agent T-066 배포와 동시 전환**
-        (양쪽 동시 배포 전 한쪽만 바꾸면 즉시 적재 실패).
-  - [ ] T-217b — `reject`/`tombstone` operation → feature **inactive 전환** (ADR-050
-        #4, MOIS Step C 동형). 1단계 skip 건수 WARN/admin 이슈 노출 선행 가능.
-        응답 정책 확정(D-12): inactive feature는 batch/단건 read의 **`found`에 포함
-        + status 노출** (`missing` 아님) — 기존 admin deactivate read 정책과의 일관성
-        검증 포함.
+  - [x] T-217a — tripmate-agent fetcher 경로 중립화 정렬 (ADR-050 #1). **완료
+        (2026-06-10)**: fetcher path + 테스트/docstring 7곳 `/api/v1/krtour/features/*`
+        → `/api/v1/features/*`. 동시 배포 조건 충족 확인 — TripMate-agent T-066이
+        같은 중립 경로로 origin/main(#60)에 머지됨(`/api/v1` prefix +
+        `{items,next_cursor,has_more}` + `X-API-Key`, fetcher 기대와 일치).
+  - [x] T-217b — `reject`/`tombstone` operation → feature **inactive 전환**. **완료
+        (2026-06-10, ADR-050 #4)**: 변환부 `tripmate_agent_inactive_entity_ids`(skip
+        분리 수집) + client `inactivate_features_by_source`(generic, MOIS Step C와
+        같은 `infra.inactivate_features_by_source_entity_ids` 위임) + Dagster asset
+        배선(적재 후 전환+로그). **D-12 read 정렬**: batch
+        `get_feature_rows_by_ids`의 `deleted_at IS NULL` 필터 제거 — inactive도
+        `found`+status로 반환(단건 `get_feature_row`와 일관, 통합 테스트로 검증).
+        목록/검색 read는 기존대로 기본 active.
   - [ ] T-217c — TripMate feature 제안 연동 **합의 5건 확정 + 문서화** (ADR-051 보정:
         신규 수신 API **철회** — 전송 구간은 기존 `/v1/admin/features*` change API,
         PR #317). ① review_mode(이중 검수 여부) ② idempotency_key 멱등 ③ 출처 태깅
@@ -61,9 +66,13 @@
         절 + backup/restore 문서에 TripMate-agent prefix 소유권·backup 제외 반영.
         분리 시점 확정(D-10): **전용 버킷 분리는 TripMate-agent T-066 운영 개시 전**
         — 분리 주체는 tripmate-agent, krtour-map은 backup 정책 갱신만.
-  - [ ] T-217f — YouTube evidence(영상 링크·타임스탬프·confidence)의 feature detail
-        노출 형태 확정 (검토 KR-06; TripMate 출처 배지 UX TM-08의 선행, D-05 (a) 채택
-        — export는 검수 통과 후보만).
+  - [x] T-217f — YouTube evidence의 feature detail 노출 형태 확정. **완료(2026-06-10)**:
+        정본 형태 = `detail.facility_info`(평면 — youtube_video_id/url/title,
+        channel/playlist, timestamp_start/end, transcript_excerpt,
+        **confidence_score(0~100, 신규 추가)**) + 원본 보존 `detail.payload.
+        tripmate_agent.{youtube,evidence}`. TripMate 출처 배지 UX(TM-08)는
+        facility_info만 읽으면 됨 — 소비 계약은 `docs/tripmate-rest-api.md`
+        §"YouTube 후보 feature detail" (T-217c 문서 PR에서 기재).
   - [x] T-217g — provider 동기화 신선도 대시보드 (D-07 (a) 채택). **완료(2026-06-10)**:
         `GET /v1/providers`(전 provider×dataset last-sync/최근 실패, cursor 비노출,
         bounded 비페이지네이션 — user spec 포함) + `sync_state_repo.list_all_sync_states`

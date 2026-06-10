@@ -268,6 +268,34 @@ async def test_get_feature_rows_by_ids_and_search_features(
     assert set(rows) == {first.feature.feature_id}
     assert rows[first.feature.feature_id]["updated_at"] == first.feature.updated_at
 
+    # D-12(T-217b): soft-deleted(inactive) feature는 missing이 아니라 status와 함께
+    # found로 반환된다 — "철회/폐업됨"과 "미존재"를 소비자가 구분한다.
+    inactivated = await feature_repo.inactivate_features_by_source_entity_ids(
+        migrated_session,
+        provider=second.source_record.provider,
+        dataset_key=second.source_record.dataset_key,
+        source_entity_type=second.source_record.source_entity_type,
+        source_entity_ids={second.source_record.source_entity_id},
+    )
+    assert inactivated == 1
+    rows_after = await feature_repo.get_feature_rows_by_ids(
+        migrated_session,
+        [second.feature.feature_id, "missing"],
+    )
+    assert set(rows_after) == {second.feature.feature_id}
+    inactive_row = rows_after[second.feature.feature_id]
+    assert inactive_row["status"] == "inactive"
+    assert inactive_row["deleted_at"] is not None
+    # 검색(목록 read)은 기존대로 active만 — 아래 search 루프가 3건 전제를 깨지
+    # 않도록 다시 active로 되돌린다.
+    await migrated_session.execute(
+        text(
+            "UPDATE feature.features SET status='active', deleted_at=NULL "
+            "WHERE feature_id = :fid"
+        ),
+        {"fid": second.feature.feature_id},
+    )
+
     lon = float(first.feature.coord.lon)
     lat = float(first.feature.coord.lat)
     seen: list[str] = []

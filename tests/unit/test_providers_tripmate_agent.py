@@ -12,6 +12,7 @@ from krtour.map.providers.tripmate_agent import (
     TRIPMATE_AGENT_MARKER_COLOR,
     TRIPMATE_AGENT_PROVIDER_NAME,
     TRIPMATE_AGENT_YOUTUBE_CATEGORY_FALLBACK,
+    tripmate_agent_inactive_entity_ids,
     tripmate_agent_items_to_bundles,
 )
 
@@ -85,6 +86,8 @@ async def test_tripmate_agent_youtube_item_to_feature_bundle() -> None:
     assert feature.detail.place_kind == "youtube_place_candidate"  # type: ignore[union-attr]
     assert feature.detail.facility_info["youtube_video_id"] == "video-1"  # type: ignore[union-attr]
     assert feature.detail.facility_info["timestamp_start"] == "00:03:12"  # type: ignore[union-attr]
+    # T-217f — TripMate 출처 배지 UX가 detail.facility_info만으로 confidence를 얻는다.
+    assert feature.detail.facility_info["confidence_score"] == 86  # type: ignore[union-attr]
 
     source_record = bundle.source_record
     assert source_record.provider == TRIPMATE_AGENT_PROVIDER_NAME
@@ -107,6 +110,38 @@ async def test_tripmate_agent_skips_reject_and_tombstone() -> None:
     )
 
     assert bundles == []
+
+
+def test_tripmate_agent_inactive_entity_ids_collects_reject_and_tombstone() -> None:
+    """T-217b — reject/tombstone item만 entity id로 수집한다(ADR-050 #4)."""
+    items = [
+        _item(operation="upsert"),
+        _item(
+            operation="reject",
+            source_record={**_item()["source_record"], "source_entity_id": "201"},
+        ),
+        _item(
+            operation="tombstone",
+            source_record={**_item()["source_record"], "source_entity_id": "202"},
+        ),
+        # source_record가 비면 candidate_id → export_id 순 fallback.
+        _item(operation="tombstone", source_record={}, candidate_id=303),
+    ]
+
+    assert tripmate_agent_inactive_entity_ids(items) == {"201", "202", "303"}
+
+
+def test_tripmate_agent_inactive_entity_ids_ignores_unidentifiable() -> None:
+    items = [
+        _item(
+            operation="reject",
+            source_record={},
+            candidate_id=None,
+            export_id=None,
+        ),
+    ]
+
+    assert tripmate_agent_inactive_entity_ids(items) == set()
 
 
 async def test_tripmate_agent_defaults_source_and_category() -> None:

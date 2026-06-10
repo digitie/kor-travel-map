@@ -92,6 +92,8 @@ from krtour.map.providers.standard_data import (
 from krtour.map.providers.tripmate_agent import (
     DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
     TRIPMATE_AGENT_PROVIDER_NAME,
+    TRIPMATE_AGENT_SOURCE_ENTITY_TYPE,
+    tripmate_agent_inactive_entity_ids,
     tripmate_agent_items_to_bundles,
 )
 
@@ -644,7 +646,11 @@ async def feature_place_krairport_airports(
 async def run_feature_place_tripmate_agent_youtube(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
-    """TripMate-agent YouTube 장소 후보 export를 place Feature로 적재한다."""
+    """TripMate-agent YouTube 장소 후보 export를 place Feature로 적재한다.
+
+    ``operation=upsert``는 bundle 적재, ``reject``/``tombstone``은 대응 feature를
+    ``status='inactive'``로 전환한다(ADR-050 #4, T-217b — MOIS Step C 동형).
+    """
     records = await _record_list(context, "tripmate_agent_youtube_features")
     fetched_at = await _fetched_at(context)
     bundles = await tripmate_agent_items_to_bundles(
@@ -652,12 +658,29 @@ async def run_feature_place_tripmate_agent_youtube(
         fetched_at=fetched_at,
         reverse_geocoder=_reverse_geocoder(context),
     )
-    return await _load(
+    result = await _load(
         context,
         provider=TRIPMATE_AGENT_PROVIDER_NAME,
         dataset_key=DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
         bundles=bundles,
     )
+    inactive_ids = tripmate_agent_inactive_entity_ids(records)
+    if inactive_ids:
+        client = cast(
+            "AsyncKrtourMapClient", _resource_object(context, "krtour_map_client")
+        )
+        inactivated = await client.inactivate_features_by_source(
+            provider=TRIPMATE_AGENT_PROVIDER_NAME,
+            dataset_key=DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
+            source_entity_type=TRIPMATE_AGENT_SOURCE_ENTITY_TYPE,
+            source_entity_ids=inactive_ids,
+        )
+        context.log.info(
+            "tripmate-agent reject/tombstone %d건 → feature %d건 inactive 전환",
+            len(inactive_ids),
+            inactivated,
+        )
+    return result
 
 
 @asset(

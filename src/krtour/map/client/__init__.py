@@ -93,6 +93,7 @@ from krtour.map.infra.feature_repo import (
     features_in_bbox,
     get_feature_row,
     get_feature_rows_by_ids,
+    inactivate_features_by_source_entity_ids,
     load_bundles,
     load_source_record_links,
 )
@@ -357,6 +358,31 @@ class AsyncKrtourMapClient:
         """
         async with self._session_factory() as session, session.begin():
             return await load_bundles(session, bundles)
+
+    async def inactivate_features_by_source(
+        self,
+        *,
+        provider: str,
+        dataset_key: str,
+        source_entity_type: str,
+        source_entity_ids: set[str],
+    ) -> int:
+        """명시 철회/폐기된 source entity의 대응 feature를 inactive로 전환.
+
+        provider가 ``reject``/``tombstone``/폐업으로 통지한 ``source_entity_id``
+        집합에 속하는 primary-source feature를 ``status='inactive'``로 전환한다
+        (``infra.inactivate_features_by_source_entity_ids``, ADR-017 — place 무기한
+        유지·status만 전환, ADR-050 #4). 빈 집합이면 no-op(0). 한 transaction.
+        D-12: 전환된 feature는 batch/단건 read의 ``found``에 status와 함께 남는다.
+        """
+        async with self._session_factory() as session, session.begin():
+            return await inactivate_features_by_source_entity_ids(
+                session,
+                provider=provider,
+                dataset_key=dataset_key,
+                source_entity_type=source_entity_type,
+                source_entity_ids=source_entity_ids,
+            )
 
     async def load_enrichment_links(
         self, enrichments: Iterable[FestivalEnrichment]
