@@ -145,7 +145,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "python -c \"import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/debug/health' % os.environ.get('KRTOUR_MAP_ADMIN_PORT', '9011'), timeout=2).read()\"",
+          "python -c \"import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/health' % os.environ.get('KRTOUR_MAP_ADMIN_PORT', '9011'), timeout=2).read()\"",
         ]
       interval: 10s
       timeout: 5s

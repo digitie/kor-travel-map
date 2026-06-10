@@ -26,7 +26,7 @@ export const queryKeys = {
 type HealthQueryKey = ReturnType<typeof queryKeys.health>;
 type VersionQueryKey = ReturnType<typeof queryKeys.version>;
 
-/** `GET /debug/health`. 5초마다 자동 refetch. */
+/** `GET /health`. 5초마다 자동 refetch. */
 export function useHealth(
   options?: Omit<
     UseQueryOptions<HealthResponse, Error, HealthResponse, HealthQueryKey>,
@@ -42,7 +42,7 @@ export function useHealth(
   });
 }
 
-/** `GET /debug/version`. 버전 정보는 자주 변경되지 않음 — staleTime 1분. */
+/** `GET /version`. 버전 정보는 자주 변경되지 않음 — staleTime 1분. */
 export function useVersion(
   options?: Omit<
     UseQueryOptions<VersionResponse, Error, VersionResponse, VersionQueryKey>,

@@ -127,7 +127,7 @@ Dagster webserver, `dagster-daemon`은 schedule/sensor daemon이다. `rustfs-ini
 
 Compose healthcheck 기준은 다음과 같다.
 
-- `api`: 컨테이너 내부 `GET /debug/health`
+- `api`: 컨테이너 내부 `GET /health`
 - `frontend`: 컨테이너 내부 Next.js root(`:9012`)
 - `dagster`: 컨테이너 내부 Dagster webserver root
 
@@ -154,7 +154,7 @@ Dagster webserver, Dagster daemon을 백그라운드로 시작한다. 로컬 `DA
 ## 6. 스모크
 
 ```bash
-curl -fsS http://127.0.0.1:9011/debug/health
+curl -fsS http://127.0.0.1:9011/health
 curl -fsS -I http://127.0.0.1:9012/ | sed -n '1,8p'
 curl -fsS -I http://127.0.0.1:9013/ | sed -n '1,8p'
 curl -fsS -I http://127.0.0.1:9003/ | sed -n '1,8p' || true

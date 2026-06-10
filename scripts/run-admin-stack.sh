@@ -200,7 +200,7 @@ ensure_bg_alive() {
   return 1
 }
 
-wait_url api "http://127.0.0.1:${KRTOUR_MAP_ADMIN_PORT}/debug/health"
+wait_url api "http://127.0.0.1:${KRTOUR_MAP_ADMIN_PORT}/health"
 wait_url web "http://127.0.0.1:${KRTOUR_MAP_ADMIN_WEB_PORT}/"
 wait_url dagster "http://127.0.0.1:${KRTOUR_MAP_DAGSTER_PORT}/"
 ensure_bg_alive dagster-daemon
