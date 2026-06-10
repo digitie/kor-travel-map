@@ -41,6 +41,13 @@ jobs:
         # packages/krtour-map-admin/openapi.json과 drift 나지 않게 고정한다.
         run: npm -w packages/krtour-map-admin/frontend run gen:types:check
 
+      - name: user-client types drift + surface assertions (T-210e)
+        # downstream(TripMate) 소비용 user spec 타입 산출물 고정 + ADR-048 표면
+        # 불변식(batch found / meta.page / 평면 lon,lat / /v1 경로) 컴파일 단언.
+        run: |
+          npm -w packages/krtour-map-user-client run gen:types:check
+          npm -w packages/krtour-map-user-client run type-check
+
       - name: tsc --noEmit (frontend type-check)
         # 빠른 1차 게이트. JSDoc 주석 안의 `*/`(comment terminator) 같은 잠복
         # syntax 오류도 검출 (PR#92 회고).

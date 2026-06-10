@@ -6,7 +6,7 @@
 
 ## 진행 중인 작업 인덱스 (열린 `[ ]` 항목)
 
-> 총 9건. 상세는 아래 각 섹션. 완료 이력은 [`tasks-done.md`](tasks-done.md).
+> 총 8건. 상세는 아래 각 섹션. 완료 이력은 [`tasks-done.md`](tasks-done.md).
 
 - **다음 (우선순위 순)**
   - [ ] T-212e — 실데이터 full reload + offline upload 실데이터 검증 + 최종 리포트.
@@ -31,7 +31,14 @@
   - [ ] Materialized View 도입 검토
   - [ ] streaming ETL (Kafka/Redpanda) 대응
 - **Phase 6 — TripMate 연계/정리 (대부분 TripMate repo 외부)**
-  - [ ] T-210e — `openapi-typescript` client 생성 (T-212e 후 API shape 안정 시)
+  - [x] T-210e — `openapi-typescript` client 생성. **완료(2026-06-11, 사용자 지시로
+        T-212e 게이트 해제)**: 신규 workspace 패키지
+        `packages/krtour-map-user-client/`(`@krtour/map-user-client`) —
+        `openapi.user.json` 생성 타입(`src/types.ts` 커밋) + named alias +
+        **컴파일 타임 표면 단언**(batch `found`/`meta.page`/평면 `lon`·`lat`/
+        `/v1` 경로 — ADR-048 불변식 회귀 시 tsc 실패, 음성 검증 완료) + CI drift
+        gate(frontend workflow). npm 게시 X(ADR-043) — vendoring/자체 codegen
+        소비(README). T-212e 후 spec 변동 시 재생성만 하면 됨.
   - [ ] T-210b — TripMate 문서 supersede **(TripMate repo, 외부 추적)**
   - [ ] T-210c — TripMate `apps/etl` 레거시 Dagster 이관/삭제 **(TripMate repo, 외부)**
   - [ ] T-210d — TripMate httpx OpenAPI client 신규 **(TripMate repo, 외부)**
@@ -710,8 +717,9 @@ lint-imports/pytest/coverage, frontend type-check/e2e). 실데이터 검증은 T
       — 2026-06-08 Codex 1차 재작성 + 2026-06-09 ADR-048/`docs/rest-api.md`(전 표면 단일 정본)/
       `tripmate-rest-api.md`(소비 view) 재정비로 충족. OpenAPI/라우터 실제 동기화는 `T-214`
       (완료), Sprint 5 마감 시 최종 `openapi.user.json`↔요구사항 재대조는 **T-212e closure**에 흡수.
-- [ ] T-210e — `openapi-typescript` client 생성 (D-4 timing). T-212e 최종 검증 뒤 API shape가
-      `/v1`로 안정된 commit 기준으로 진행한다. **(본 저장소 actionable, deferred)**
+- [x] T-210e — `openapi-typescript` client 생성. **완료(2026-06-11)** —
+      `packages/krtour-map-user-client/` 신설(상단 인덱스 항목 참조). T-212e 후
+      spec 변동은 `gen:types` 재실행+커밋으로 추종(CI drift gate가 강제).
 - [ ] T-210b — TripMate 문서 supersede(직접 import/공유 DB/owned Dagster). **(TripMate repo,
       외부 — 본 저장소 미실행, 추적만)** 대상 문서/치환 문구는 그 PR 본문에, 여기엔 링크/요약만.
 - [ ] T-210c — TripMate `apps/etl` 레거시 Dagster 문서/스켈레톤을 krtour-map-owned Dagster
