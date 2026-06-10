@@ -977,6 +977,14 @@ test.describe("admin/ops pages", () => {
     await expect(page.getByLabel("run mode")).toBeVisible();
     await expect(page.getByLabel("dry-run")).toBeChecked();
     await expect(page.getByLabel("request status")).toBeVisible();
+
+    // T-218b: lon을 비우고 생성 → 클라이언트 검증 에러 + 포커스(네트워크 호출 전 차단).
+    const lon = page.getByLabel("lon");
+    await lon.fill("");
+    await page.getByRole("button", { name: "요청 생성" }).click();
+    await expect(lon).toHaveAttribute("aria-invalid", "true");
+    await expect(lon).toBeFocused();
+    await expect(page.getByText("경도(lon)는 필수입니다.")).toBeVisible();
   });
 
   test("/v1/admin/poi-cache-targets", async ({ page }) => {
