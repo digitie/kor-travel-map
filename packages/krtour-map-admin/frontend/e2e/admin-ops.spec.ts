@@ -829,6 +829,23 @@ test.describe("admin/ops pages", () => {
     await expect(page.getByText("요청 행을 선택하면")).toBeVisible();
   });
 
+  test("/v1/admin/features/change-requests validation (T-218d)", async ({
+    page,
+  }) => {
+    await page.goto("/admin/features/change-requests");
+
+    // 필수값을 채우되 detail JSON에 object가 아닌 배열을 넣어 클라이언트 검증 실패 유도.
+    await page.getByLabel("change name", { exact: true }).fill("Neg test");
+    await page.getByLabel("change reason", { exact: true }).fill("음성 경로");
+    await page.getByLabel("change detail JSON", { exact: true }).fill("[]");
+    await page.getByRole("button", { name: "요청 생성" }).click();
+
+    // buildCreatePayload가 동기적으로 throw → 네트워크 호출 없이 formError 배너 노출.
+    await expect(
+      page.getByText("detail는 JSON object여야 합니다."),
+    ).toBeVisible();
+  });
+
   test("/v1/admin/features/change-requests approve workflow", async ({ page }) => {
     const requests = await mockFeatureChangeMutations(page, {
       initial: [
