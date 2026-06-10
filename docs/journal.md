@@ -2,6 +2,18 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-10 (claude) — T-218f 화면별 점검 체크리스트 + T-218 완료
+
+마지막 슬라이스로 `docs/runbooks/admin-ui-screen-checklist.md`를 신설했다 — admin UI
+16 route × (목록/필터·정렬·cursor·빈·에러·kill-switch·a11y·e2e) 매트릭스 + T-218 적용
+결과 요약 + 신규 폼 추가 절차. runbooks README 인덱스 등재.
+
+**T-218 전체 완료(#337~#343)**: ① a11y wrapper(FormField/FormSelect/FormTextArea +
+validateForm, vitest 11) ② bare-label 4폼 적용(poi-cache/feature-update/offline/issues) ③
+backups e2e로 **admin/ops 16/16 화면 e2e 커버** ④ 음성 경로 4폼 ⑤ Alert variant별
+live-region ⑥ 점검 runbook. change-requests·etl은 이미 a11y 완비라 비대상, 모달 focus
+trap은 인라인 패널 구조라 비해당. tasks.md T-218 `[x]`(최근 완료로 이동).
+
 ## 2026-06-10 (claude) — T-218e Alert aria-live 안내 정합
 
 `Alert`를 variant별 live-region으로 개선했다 — destructive=`role=alert`(assertive,

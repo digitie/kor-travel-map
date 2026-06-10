@@ -6,14 +6,15 @@
 
 ## 진행 중인 작업 인덱스 (열린 `[ ]` 항목)
 
-> 총 16건. 상세는 아래 각 섹션. 완료 이력은 [`tasks-done.md`](tasks-done.md).
+> 총 15건. 상세는 아래 각 섹션. 완료 이력은 [`tasks-done.md`](tasks-done.md).
 
 - **다음 (우선순위 순)**
   - [ ] T-212e — 실데이터 full reload + offline upload 실데이터 검증 + 최종 리포트.
-  - [~] T-218 — admin UI 상세 구현 점검 + a11y/e2e 완비(화면별 슬라이스 a~f,
-        T-212e와 독립·병렬). **T-218a~e 완료**, 남은 것은 T-218f(화면별 점검 체크리스트). 정본
-        `docs/reports/t-218-admin-ui-hardening-plan-2026-06-10.md`.
 - **최근 완료**
+  - [x] T-218 — admin UI 상세 구현 점검 + a11y/e2e 완비. **T-218a~f 전부 완료
+        (#337~#343 + 체크리스트)**: 폼 a11y wrapper, bare-label 4폼 적용, backups e2e로
+        16/16 화면 커버, 음성 경로 4폼, Alert live-region, 화면별 점검 runbook. 정본
+        `docs/reports/t-218-admin-ui-hardening-plan-2026-06-10.md`.
   - [x] T-212d 재측정 pass — read-heavy 전제로 hot read EXPLAIN을 다시 돌리고
         클러스터 hot path 회귀를 추가했다. `mv_feature_cluster_counts`는 exact-viewport
         의미 변경 때문에 T-212e live row 수/P99 확인 전까지 보류.
@@ -863,9 +864,10 @@ T-214/T-215(#317)의 `/v1` 1차 정리 위에 ADR-048 delta를 얹는다. 정본
         polite status region e2e 단언 추가. (※ 본 admin UI는 오버레이 모달/드로어가 없는
         인라인 패널 구조라 "modal focus trap"은 비해당 — 폼 검증 첫 에러 필드 포커스는
         T-218b에서 이미 적용.)
-      - [ ] T-218f — 화면별 상세 회귀 점검 체크리스트(필터/정렬/cursor 소진/빈·에러 상태/
-        kill-switch/`meta.page` 소비)를 `docs/runbooks/admin-ui-screen-checklist.md`로
-        고정 + e2e 커버 매핑(P2).
+      - [x] T-218f — 화면별 상세 회귀 점검 체크리스트. **완료(2026-06-10)**:
+        `docs/runbooks/admin-ui-screen-checklist.md` 신설 — 16 route × (목록/필터·정렬·
+        cursor·빈·에러·kill-switch·a11y·e2e) 매트릭스 + T-218 적용 결과 요약 + 신규 폼
+        추가 절차. runbooks README 인덱스 등재.
 
 
 ## 우선순위 가이드
