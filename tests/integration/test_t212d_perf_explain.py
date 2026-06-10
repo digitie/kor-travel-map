@@ -21,9 +21,12 @@ from krtour.map.infra import (
 )
 from krtour.map.infra.admin_feature_repo import (  # noqa: PLC2701 - EXPLAIN 대상
     _DEDUP_REVIEW_SQL,
-    _ENRICHMENT_REVIEW_SQL,
+    _ENRICHMENT_REVIEW_SCALAR_STATUS_PROVIDER_SQL,
+    _ENRICHMENT_REVIEW_STATUS_PROVIDER_SQL,
+    _ENRICHMENT_REVIEW_STATUS_SQL,
 )
 from krtour.map.infra.feature_repo import (  # noqa: PLC2701 - EXPLAIN 대상
+    _CLUSTER_BBOX_SQL_BY_UNIT,
     _FEATURE_SEARCH_BY_SCORE_SQL,
     _FEATURES_IN_BBOX_SQL,
     _NEARBY_COORD_DISTANCE_SQL,
@@ -450,6 +453,38 @@ async def test_t212d_feature_hot_reads_use_spatial_and_search_indexes(
     _assert_uses_index(search, "idx_features_name_trgm")
 
 
+async def test_t212d_cluster_hot_reads_use_spatial_index_without_mv(
+    migrated_session: AsyncSession,
+) -> None:
+    await _seed_live_like_perf_data(migrated_session)
+
+    params = {
+        "min_lon": 126.975,
+        "min_lat": 37.515,
+        "max_lon": 126.985,
+        "max_lat": 37.525,
+        "kinds": ["place", "event"],
+        "categories": None,
+        "limit": 200,
+    }
+    for cluster_unit in ("sido", "sigungu", "eupmyeondong"):
+        cluster = await _explain_json(
+            migrated_session,
+            _CLUSTER_BBOX_SQL_BY_UNIT[cluster_unit],
+            params,
+        )
+        _assert_uses_index(cluster, "idx_features_coord_gist")
+
+    representative = await _explain_json(
+        migrated_session,
+        _CLUSTER_BBOX_SQL_BY_UNIT["sigungu"],
+        params,
+        force_index=False,
+    )
+    _assert_uses_index(representative, "idx_features_coord_gist")
+    _assert_no_seq_scan_on(representative, "features")
+
+
 async def test_t212d_planner_selects_representative_indexes_without_seqscan_hint(
     migrated_session: AsyncSession,
 ) -> None:
@@ -611,10 +646,28 @@ async def test_t212d_ops_and_review_lists_use_keyset_indexes(
 
     enrichment = await _explain_json(
         migrated_session,
-        _ENRICHMENT_REVIEW_SQL,
+        _ENRICHMENT_REVIEW_STATUS_SQL,
         {
             "statuses": ["pending"],
+            "providers": None,
+            "min_score": None,
+            "max_score": None,
+            "q_like": None,
+            "cursor_score": None,
+            "cursor_review_id": None,
+            "limit_plus_one": 51,
+        },
+    )
+    _assert_uses_index(enrichment, "idx_enrichment_review_status_score")
+
+    enrichment_provider = await _explain_json(
+        migrated_session,
+        _ENRICHMENT_REVIEW_SCALAR_STATUS_PROVIDER_SQL,
+        {
+            "statuses": ["pending"],
+            "status": "pending",
             "providers": ["python-visitkorea-api"],
+            "provider": "python-visitkorea-api",
             "min_score": None,
             "max_score": None,
             "q_like": None,
@@ -624,10 +677,26 @@ async def test_t212d_ops_and_review_lists_use_keyset_indexes(
         },
     )
     _assert_uses_index(
-        enrichment,
+        enrichment_provider,
         "idx_enrichment_review_provider_status_score",
         "idx_enrichment_review_status_score",
     )
+
+    enrichment_multi_provider = await _explain_json(
+        migrated_session,
+        _ENRICHMENT_REVIEW_STATUS_PROVIDER_SQL,
+        {
+            "statuses": ["pending"],
+            "providers": ["python-visitkorea-api", "python-datagokr-api"],
+            "min_score": None,
+            "max_score": None,
+            "q_like": None,
+            "cursor_score": None,
+            "cursor_review_id": None,
+            "limit_plus_one": 51,
+        },
+    )
+    _assert_no_seq_scan_on(enrichment_multi_provider, "enrichment_review_queue")
 
 
 async def test_t212d_dedup_refresh_and_consistency_checks_are_index_compatible(

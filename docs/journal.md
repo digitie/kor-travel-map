@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-10 (codex) — T-212d read-heavy 재측정 + enrichment read path 튜닝
+
+**작업**: PR #332 머지 후 `origin/main` 기준 새 브랜치에서 T-212d를 재실행했다. read-heavy
+전제의 MV 후보를 다시 보되, 현재 API 의미를 바꾸지 않는 범위에서 hot read 회귀와 튜닝을
+반영했다.
+
+- **클러스터 hot path**: `sido`/`sigungu`/`eupmyeondong` bbox cluster EXPLAIN 회귀를 추가했다.
+  현 exact-viewport 쿼리는 `idx_features_coord_gist`를 사용한다.
+- **MV 판단**: `mv_feature_cluster_counts`는 exact-viewport → region-total count/centroid로
+  의미가 바뀌므로 이번 PR에서는 미도입. T-212e live full reload의 row 수/P99 후 별도 결정.
+- **enrichment review**: 단일 `status + provider` 필터를 scalar equality SQL로 분리하고,
+  후보 CTE 안에 `LIMIT`을 적용해 join 전 row 수를 줄였다.
+- **검증**: ext4 mirror에서 `compileall` + T-212d EXPLAIN 통합 테스트 통과(`6 passed`).
+  상세 리포트는 `docs/reports/t-212d-read-heavy-rerun-2026-06-10.md`.
+
 ## 2026-06-10 (claude) — cross-repo 의사결정 반영: ADR-050~052 + T-217a~f (코드無)
 
 사용자 결정(D-01: b 잠정·추후 분리 / D-02~05: a / D-06: 수정 승인 — TripMate
