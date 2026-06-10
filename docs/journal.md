@@ -2,6 +2,24 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-10 (claude) — T-218a 공통 폼 a11y wrapper + validateForm util
+
+admin/ops 폼 화면이 label 없이 `aria-label`/placeholder만 단 bare control이라 label↔control
+연결·에러 `aria-describedby`·제출 시 `aria-invalid` 토글·첫 에러 포커스가 화면마다
+수동/누락이었다(T-218 계획 G-1). 토대 wrapper를 추가했다(신규 런타임 의존성 0).
+
+- `src/lib/form-validation.ts`: 프레임워크 비의존 `validateForm(values, rules)` +
+  `required`/`numberInRange`/`jsonObject`/`combine` 검증기. `firstErrorField`(규칙 선언
+  순서 기준)로 포커스 이동 지원. `src/lib/form-validation.test.ts` vitest 11건.
+- `src/components/ui/form-field.tsx`: `FormField`/`FormSelect`/`FormTextArea` — 기존
+  `Field`/`Input`/`NativeSelect` 위에 얇게 얹어 visible `<label htmlFor>`(Playwright
+  `getByLabel` 호환) + `aria-describedby`(hint/error) + `aria-invalid` + `forwardRef`
+  (포커스)를 일원화. controlled `useState` 화면에 드롭인.
+- `src/components/ui/textarea.tsx` 신규 + `native-select.tsx` `forwardRef`/`NativeSelectProps`
+  export 보강.
+- 게이트: gen:types:check(drift 0) + type-check + lint + vitest 11 + env 명시 build 통과.
+  화면 소비/e2e 단언은 T-218b. (T-218 task 정본 `docs/reports/t-218-admin-ui-hardening-plan-2026-06-10.md`.)
+
 ## 2026-06-10 (codex) — T-212d read-heavy 재측정 + enrichment read path 튜닝
 
 **작업**: PR #332 머지 후 `origin/main` 기준 새 브랜치에서 T-212d를 재실행했다. read-heavy
