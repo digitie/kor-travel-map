@@ -1,5 +1,27 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-10 Codex 작업 메모 — T-212d read-heavy 재측정
+
+PR #332 머지 후 `origin/main`에서 새 브랜치를 만들고 T-212d를 다시 실행했다. 기존
+seeded PostGIS baseline은 유지하면서 read-heavy 전제의 누락 hot path를 보강했다.
+
+- `tests/integration/test_t212d_perf_explain.py`에 bbox 클러스터(`sido`/`sigungu`/
+  `eupmyeondong`) EXPLAIN 회귀를 추가했다. 현재 exact-viewport 클러스터 쿼리는
+  `idx_features_coord_gist`를 사용하고, 대표 `sigungu` 경로는 seqscan hint 없이도
+  base table `Seq Scan`을 피한다.
+- `mv_feature_cluster_counts`는 이번 PR에서 도입하지 않았다. 후보 MV는 region-total
+  count/centroid 의미라 현재 API의 exact-viewport count/avg(coord)와 달라진다.
+  실제 row 수/P99가 나오는 T-212e 이후 별도 ADR/PR에서 판단한다.
+- enrichment review 목록은 단일 `status + provider` 필터일 때 scalar equality fast path를
+  사용해 `idx_enrichment_review_provider_status_score`를 안정적으로 타게 했다. 후보 CTE 안에
+  `LIMIT`을 넣어 feature join 전에 page 크기로 줄였다.
+- 검증: ext4 mirror에서 `compileall` + `pytest -s tests/integration/test_t212d_perf_explain.py -q`
+  통과(`6 passed`). 상세 리포트는
+  `docs/reports/t-212d-read-heavy-rerun-2026-06-10.md`.
+
+**다음 한 작업 후보**: **T-212e** — 실데이터 full reload + offline upload 실데이터 검증 +
+최종 리포트. 여기서 live row 수/P99를 확보한 뒤 클러스터 MV ADR 여부를 다시 판단한다.
+
 ## 2026-06-10 Codex 작업 메모 — T-216f/g + 재적재 충돌 + TripMate-agent provider
 
 T-216f/g를 한 PR 범위로 닫았다. REST 표면에서 이미 정리한 surrogate/lifecycle 명명을
@@ -24,8 +46,8 @@ DB/ORM/repo/API/OpenAPI/frontend type까지 전파했다.
   decisions/tasks/provider-contract/external-apis/Dagster 문서의 provider·MV·다음 작업
   상태를 맞췄다.
 
-**다음 한 작업 후보**: **T-212d 재측정 pass** — read >> write 기준으로 hot read 경로를
-다시 돌리고, 필요 시 클러스터 rollup MV(`mv_feature_cluster_counts`) 시범을 도입한다.
+**후속 반영**: T-212d 재측정 pass는 위 2026-06-10 Codex 메모에서 완료했다. 현 기준
+다음 한 작업은 T-212e live full reload다.
 
 ## 2026-06-10 claude 작업 메모 — 데이터 재적재 안전성 검증
 

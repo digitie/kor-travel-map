@@ -9,10 +9,11 @@
 > 총 15건. 상세는 아래 각 섹션. 완료 이력은 [`tasks-done.md`](tasks-done.md).
 
 - **다음 (우선순위 순)**
-  - [ ] T-212d 재측정 pass — read가 압도적으로 많은 운영 전제를 두고 seeded/live
-        PostGIS 성능을 다시 측정한다. 필요 시 `mv_feature_cluster_counts` 같은
-        materialized view 시범을 도입한다.
+  - [ ] T-212e — 실데이터 full reload + offline upload 실데이터 검증 + 최종 리포트.
 - **최근 완료**
+  - [x] T-212d 재측정 pass — read-heavy 전제로 hot read EXPLAIN을 다시 돌리고
+        클러스터 hot path 회귀를 추가했다. `mv_feature_cluster_counts`는 exact-viewport
+        의미 변경 때문에 T-212e live row 수/P99 확인 전까지 보류.
   - [x] TripMate-agent provider 추가/연동 후속 작업 추적 — krtour-map 쪽
         `tripmate-agent-youtube` provider 변환, Dagster REST fetch/resource/asset/schedule
         wiring 완료. 실제 TripMate-agent export 구현은 해당 repo `T-066` 후속
@@ -78,10 +79,10 @@ T-212b admin UI 완결성, T-212c API/error/log contract, T-212d seeded PostGIS
 
 Sprint 5 종료까지 남은 작업은
 `docs/reports/sprint5-final-task-breakdown-2026-06-07.md`를 정본으로 상세화했다.
-권장 순서는 **T-216 REST API 정합성 심화 → TripMate-agent provider →
-T-212d 재측정/튜닝 → T-212e 실데이터 full reload →
-T-210 TripMate 연계 정리 → Sprint 5 closure**다. T-207b는 사용자 결정에 따라
-구현하지 않는다.
+T-216 REST API 정합성 심화, TripMate-agent provider, T-212d 재측정/튜닝은 닫았다.
+현 기준 권장 순서는 **T-212e 실데이터 full reload → T-217a~g cross-repo 정합성
+결정 반영분 → T-210e TripMate client 생성 → Sprint 5 closure**다. T-207b는 사용자
+결정에 따라 구현하지 않는다.
 
 ### 현재 기준 보강 필요 체크포인트 (2026-06-03)
 
@@ -808,11 +809,15 @@ T-214/T-215(#317)의 `/v1` 1차 정리 위에 ADR-048 delta를 얹는다. 정본
       - 사후 리뷰 보강으로 `/features/in-bounds` `LIMIT` subset 안정성, seqscan hint 없는
         대표 planner 가드, admin sort=name EXPLAIN, review cursor 전체 순회 완전성을 추가했다.
       - 상세 리포트: `docs/reports/t-212d-perf-baseline-2026-06-08.md`.
-- [ ] T-212d 재측정 pass — read가 압도적으로 많은 운영 전제를 반영해 hot read 경로를
+- [x] T-212d 재측정 pass — read가 압도적으로 많은 운영 전제를 반영해 hot read 경로를
       다시 실행하고 튜닝한다(2026-06-10 사용자 지시). `docs/performance.md §9.3`의
       결론처럼 detail flatten MV는 제외하고, 필요 시 클러스터 rollup MV
       `feature.mv_feature_cluster_counts`를 시범 도입한다. 우선 seeded PostGIS
       EXPLAIN을 갱신하고, 실 볼륨 P99는 T-212e live full reload에서 보강한다.
+      - 2026-06-10 재측정: 클러스터 EXPLAIN 회귀 추가, enrichment review 단일
+        `status + provider` read path scalar fast path 튜닝. 클러스터 MV는 exact-viewport →
+        region-total 의미 변경 때문에 미도입. 상세:
+        `docs/reports/t-212d-read-heavy-rerun-2026-06-10.md`.
 - [ ] T-212e — 실데이터 full reload + offline upload 실데이터 검증 + 최종 리포트.
       DB를 비운 뒤 처음부터 다시 로드하고, provider 실데이터와 offline upload
       CSV/TSV/JSONL 실데이터 적재, kraddr-geo bjd 보강, Playwright e2e, API smoke,

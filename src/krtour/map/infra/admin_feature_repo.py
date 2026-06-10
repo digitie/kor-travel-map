@@ -1706,7 +1706,36 @@ class EnrichmentReviewPage:
     next_cursor: str | None
 
 
-_ENRICHMENT_REVIEW_SQL: Final[str] = """
+_ENRICHMENT_REVIEW_OPTIONAL_STATUS_FILTER: Final[str] = """
+    WHERE (CAST(:statuses AS text[]) IS NULL OR q.status = ANY(CAST(:statuses AS text[])))
+"""
+
+_ENRICHMENT_REVIEW_REQUIRED_STATUS_FILTER: Final[str] = """
+    WHERE q.status = ANY(CAST(:statuses AS text[]))
+"""
+
+_ENRICHMENT_REVIEW_SCALAR_STATUS_FILTER: Final[str] = """
+    WHERE q.status = CAST(:status AS text)
+"""
+
+_ENRICHMENT_REVIEW_OPTIONAL_PROVIDER_FILTER: Final[str] = """
+      AND (
+        CAST(:providers AS text[]) IS NULL
+        OR q.source_provider = ANY(CAST(:providers AS text[]))
+      )
+"""
+
+_ENRICHMENT_REVIEW_REQUIRED_PROVIDER_FILTER: Final[str] = """
+      AND q.source_provider = ANY(CAST(:providers AS text[]))
+"""
+
+_ENRICHMENT_REVIEW_SCALAR_PROVIDER_FILTER: Final[str] = """
+      AND q.source_provider = CAST(:provider AS text)
+"""
+
+
+def _enrichment_review_sql(status_filter: str, provider_filter: str) -> str:
+    return f"""
 WITH reviews AS MATERIALIZED (
     SELECT
         q.review_id,
@@ -1723,7 +1752,7 @@ WITH reviews AS MATERIALIZED (
         q.reviewed_at,
         q.created_at
     FROM ops.enrichment_review_queue AS q
-    WHERE (CAST(:statuses AS text[]) IS NULL OR q.status = ANY(CAST(:statuses AS text[])))
+{status_filter.rstrip()}
       AND (
         CAST(:min_score AS numeric) IS NULL
         OR q.name_score >= CAST(:min_score AS numeric)
@@ -1732,10 +1761,7 @@ WITH reviews AS MATERIALIZED (
         CAST(:max_score AS numeric) IS NULL
         OR q.name_score <= CAST(:max_score AS numeric)
       )
-      AND (
-        CAST(:providers AS text[]) IS NULL
-        OR q.source_provider = ANY(CAST(:providers AS text[]))
-      )
+{provider_filter.rstrip()}
       AND (
         CAST(:q_like AS text) IS NULL
         OR q.target_feature_id ILIKE CAST(:q_like AS text)
@@ -1751,6 +1777,7 @@ WITH reviews AS MATERIALIZED (
         )
     )
     ORDER BY q.name_score DESC, q.review_id DESC
+    LIMIT :limit_plus_one
 )
 SELECT
     q.review_id,
@@ -1775,6 +1802,28 @@ LEFT JOIN feature.features AS f ON f.feature_id = q.target_feature_id
 ORDER BY q.name_score DESC, q.review_id DESC
 LIMIT :limit_plus_one
 """
+
+
+_ENRICHMENT_REVIEW_SQL: Final[str] = _enrichment_review_sql(
+    _ENRICHMENT_REVIEW_OPTIONAL_STATUS_FILTER,
+    _ENRICHMENT_REVIEW_OPTIONAL_PROVIDER_FILTER
+)
+_ENRICHMENT_REVIEW_STATUS_SQL: Final[str] = _enrichment_review_sql(
+    _ENRICHMENT_REVIEW_REQUIRED_STATUS_FILTER,
+    _ENRICHMENT_REVIEW_OPTIONAL_PROVIDER_FILTER,
+)
+_ENRICHMENT_REVIEW_PROVIDER_SQL: Final[str] = _enrichment_review_sql(
+    _ENRICHMENT_REVIEW_OPTIONAL_STATUS_FILTER,
+    _ENRICHMENT_REVIEW_REQUIRED_PROVIDER_FILTER
+)
+_ENRICHMENT_REVIEW_STATUS_PROVIDER_SQL: Final[str] = _enrichment_review_sql(
+    _ENRICHMENT_REVIEW_REQUIRED_STATUS_FILTER,
+    _ENRICHMENT_REVIEW_REQUIRED_PROVIDER_FILTER,
+)
+_ENRICHMENT_REVIEW_SCALAR_STATUS_PROVIDER_SQL: Final[str] = _enrichment_review_sql(
+    _ENRICHMENT_REVIEW_SCALAR_STATUS_FILTER,
+    _ENRICHMENT_REVIEW_SCALAR_PROVIDER_FILTER,
+)
 
 
 def _enrichment_cursor_params(cursor: str | None) -> dict[str, Any]:
@@ -1848,12 +1897,29 @@ async def list_enrichment_reviews(
         raise ValueError("page_size must be greater than 0")
     effective_limit = min(page_size, 500)
     normalized_q = _normalize_query(q)
+    status_values = _normalize_values(statuses)
+    provider_values = _normalize_values(providers)
+    status_value = status_values[0] if status_values and len(status_values) == 1 else None
+    provider_value = (
+        provider_values[0] if provider_values and len(provider_values) == 1 else None
+    )
+    review_sql = _ENRICHMENT_REVIEW_SQL
+    if status_value is not None and provider_value is not None:
+        review_sql = _ENRICHMENT_REVIEW_SCALAR_STATUS_PROVIDER_SQL
+    elif status_values is not None and provider_values is not None:
+        review_sql = _ENRICHMENT_REVIEW_STATUS_PROVIDER_SQL
+    elif status_values is not None:
+        review_sql = _ENRICHMENT_REVIEW_STATUS_SQL
+    elif provider_values is not None:
+        review_sql = _ENRICHMENT_REVIEW_PROVIDER_SQL
     rows = (
         await session.execute(
-            text(_ENRICHMENT_REVIEW_SQL),
+            text(review_sql),
             {
-                "statuses": _normalize_values(statuses),
-                "providers": _normalize_values(providers),
+                "statuses": status_values,
+                "status": status_value,
+                "providers": provider_values,
+                "provider": provider_value,
                 "min_score": min_score,
                 "max_score": max_score,
                 "q_like": f"%{normalized_q}%" if normalized_q is not None else None,
