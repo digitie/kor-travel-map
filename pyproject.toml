@@ -78,40 +78,40 @@ providers = [
   #
   # ── Sprint 2 §2.1 — datagokr 표준데이터 (축제 1차, ADR-042) ────────────
   # `krtour.map.providers.standard_data.CulturalFestivalItem` Protocol (PR#34) 정합.
-  # "python-datagokr-api @ git+https://github.com/digitie/python-datagokr-api.git@<sha>",
+  "python-datagokr-api @ git+https://github.com/digitie/python-datagokr-api.git@f88e62eb542be97432e41a11c91b81dc5dcc84a2",
   #
   # ── Sprint 2 §2.2 — 날씨 (ADR-010) ────────────────────────────────────
   # `krtour.map.providers.kma.{KmaShortForecastItem, KmaUltraShortNowcastItem}`
   # Protocol (PR#38/39) 정합.
   # "python-kma-api      @ git+https://github.com/digitie/python-kma-api.git@<sha>",
-  # "python-airkorea-api @ git+https://github.com/digitie/python-airkorea-api.git@<sha>",
-  # "python-khoa-api     @ git+https://github.com/digitie/python-khoa-api.git@<sha>",
+  "python-airkorea-api @ git+https://github.com/digitie/python-airkorea-api.git@22996a457fa2c845101b0bbbf8167e655e8d562d",
+  "python-khoa-api @ git+https://github.com/digitie/python-khoa-api.git@0c4c07fa7e5afd9040c9ee6dbcd178cc78c1ba5c",
   # python-krforest-api는 산악기상 + Sprint 3 trails 양쪽 사용 (아래 §2.5와 동일 lib).
   #
   # ── Sprint 2 §2.3 — opinet 유가 (place + price) ───────────────────────
-  # "python-opinet-api   @ git+https://github.com/digitie/python-opinet-api.git@<sha>",
+  "python-opinet-api @ git+https://github.com/digitie/python-opinet-api.git@bb6385caebe204b781a3ba9544efa04d5fe68671",
   #
   # ── Sprint 2 §2.4 — krex 휴게소 (multi-kind) ──────────────────────────
-  # "python-krex-api     @ git+https://github.com/digitie/python-krex-api.git@<sha>",
+  "python-krex-api @ git+https://github.com/digitie/python-krex-api.git@72b74d7a23bd7f0c96f13975acdc5dd30b4f6809",
   #
   # ── Sprint 2 §2.1 (enrichment 2차, ADR-042) ───────────────────────────
   # visitkorea TourAPI는 datagokr 1차 source의 enrichment (image/description/
   # contentId 매핑) 책임 — Sprint 2 끝물 PR.
-  # "python-visitkorea-api @ git+https://github.com/digitie/python-visitkorea-api.git@<sha>",
+  "python-visitkorea-api @ git+https://github.com/digitie/python-visitkorea-api.git@cebf543d331423910cf7d2748c022665e538c201",
   #
   # ── Sprint 3 — knps / krforest_trails / krheritage / krairport ────────
   # python-knps-api: keyless file dataset client (ADR-028 + amendment 2026-05-25).
   # PR#4 (codex/keyless-file-download-dtos) merged → ApiEndpoint/Page 삭제,
-  # KNPS_SERVICE_KEY 사용 안 함. sha 06da125f.
+  # KNPS_SERVICE_KEY 사용 안 함. sha 5e88fb4.
   # `krtour.map.providers.knps.KnpsPointRecord` Protocol (Point/place 5 dataset
   # 구현됨). SHP(area)/route는 후속. 다른 provider처럼 본 lib 본 의존 X (Protocol).
-  # "python-knps-api     @ git+https://github.com/digitie/python-knps-api.git@06da125f",
-  # "python-krforest-api @ git+https://github.com/digitie/python-krforest-api.git@<sha>",
-  # "python-krheritage-api @ git+https://github.com/digitie/python-krheritage-api.git@<sha>",
-  # "python-krairport-api @ git+https://github.com/digitie/python-krairport-api.git@<sha>",
+  "python-knps-api @ git+https://github.com/digitie/python-knps-api.git@5e88fb45fa3c4fe4858efedeb2be52f687e6b167",
+  "python-krforest-api @ git+https://github.com/digitie/python-krforest-api.git@f9254e6bbb54f0a4f0fb7d85831f9adcdc318a3f",
+  "python-krheritage-api @ git+https://github.com/digitie/python-krheritage-api.git@7dc46c31a7a8129c9698ec0a56df562dcb014ab2",
+  "python-krairport-api @ git+https://github.com/digitie/python-krairport-api.git@b8854137f26be4ae14c1693b83b425ee37c60655",
   #
   # ── Sprint 4 — MOIS 인허가 4단계 (ADR-024) ────────────────────────────
-  # "python-mois-api     @ git+https://github.com/digitie/python-mois-api.git@<sha>",
+  "python-mois-api @ git+https://github.com/digitie/python-mois-api.git@bc6f742feb8b6e28c9b889aa71a4cac9c489091c",
   # "python-kasi-api     @ git+https://github.com/digitie/python-kasi-api.git@<sha>",
   #
   # ── Sprint 5 — 박물관/미술관 / mcst enrichment / standard data ────────

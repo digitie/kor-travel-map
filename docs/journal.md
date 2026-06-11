@@ -2,6 +2,14 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-11 (codex) — provider extra git pin 복구
+
+T-212e live full reload 중 `.[providers]` extra가 문서와 달리 실제 provider git
+dependency를 설치하지 않는 packaging 갭을 확인했다. keyless `krairport` asset도
+`ModuleNotFoundError: No module named 'krairport'`로 retry에 들어가므로, root
+`pyproject.toml`의 `providers` extra에 현재 로컬 provider checkout SHA를 직접 URL로
+활성화하고 `docs/provider-contract.md` §12 status 표를 같은 SHA로 갱신했다.
+
 ## 2026-06-11 (claude) — T-210e user-facing OpenAPI TS client 패키지
 
 사용자 지시로 T-212e 게이트를 해제하고 진행. 신규 workspace 패키지
