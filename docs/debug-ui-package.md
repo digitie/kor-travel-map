@@ -340,8 +340,8 @@ type drift 부채 0).
 | 항목 | 값 |
 |------|----|
 | Framework | **Next.js 16 (App Router)** — `kraddr-geo-ui` / TripMate `apps/web`와 동일 stack (ADR-025 2차 보강 2026-05-25, 2026-05-31 최신화) |
-| 라이브러리 | `maplibre-vworld` **v0.1.2** (`github:digitie/maplibre-vworld-js#v0.1.2` — npm 미게시, git URL+tag 핀, ADR-043 패턴) |
-| 의존 | `maplibre-gl` ^5.24.0 (BSD-3), `zod` ^4.4.3 (좌표 검증, v0.1.2 peer), React 19, `@tanstack/react-query` |
+| 라이브러리 | `maplibre-vworld` **v0.1.3** (`github:digitie/maplibre-vworld-js#v0.1.3` — npm 미게시, git URL+tag 핀, ADR-043 패턴) |
+| 의존 | `maplibre-gl` ^5.24.0 (BSD-3), `zod` ^4.4.3 (좌표 검증, v0.1.3 peer), React 19, `@tanstack/react-query` |
 | 공통 마커 | `@krtour/map-marker-react` (workspace, ADR-029) |
 | Form | React Hook Form + Zod resolver |
 | UI primitive | shadcn/ui |

@@ -14,7 +14,7 @@ SQLAlchemy 2 async + GeoAlchemy2 + GeoPandas 위에서 동작한다.
 > **기준값(잘 바뀌지 않는 사실)**: standalone 고정 포트 API `9011` / admin UI
 > `9012` / Dagster `9013`(ADR-047), RustFS S3 `9003`·console `9004`, geocoding은
 > kraddr-geo REST v2 `POST /v2/{reverse,geocode}` 로컬 `http://127.0.0.1:9001`,
-> frontend Next.js 16 + `maplibre-vworld-js#v0.1.2`. ADR 현황: **001~049 accepted**
+> frontend Next.js 16 + `maplibre-vworld-js#v0.1.3`. ADR 현황: **001~049 accepted**
 > (다음 후보 050). ADR-048은 `/v1` REST clean cut + 정합성 표준, ADR-049는
 > TripMate-agent YouTube provider pull 경계. admin UI는
 > `/admin/dagster`에서 Dagster 요약 + webserver embed 제공.

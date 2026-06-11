@@ -2,6 +2,17 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-11 (codex) — React Doctor 0 이슈 + maplibre-vworld-js v0.1.3 정합
+
+frontend React Doctor full scan의 optional warning까지 0으로 맞추기 위해 shadcn 기반
+UI primitive를 정리했다. `buttonVariants`는 component 파일 밖으로 분리하고,
+`form-field`/`native-select` multi-component 파일을 단일 component 파일로 나눴다.
+React 19 기준으로 `forwardRef`를 제거했고, Dagster iframe sandbox 조합에서
+`allow-same-origin`을 제거했으며 미사용 detail hook export를 정리했다.
+
+로컬/원격 `maplibre-vworld-js` 최신 tag가 v0.1.3임을 확인하고 frontend,
+`@krtour/map-marker-react`, root lockfile, 현재 기준 문서를 `#v0.1.3`으로 맞췄다.
+
 ## 2026-06-11 (claude) — T-220c MCST fixture/문서 — T-220 완결 (KMA·MCST 전체 종료)
 
 사용자 지시 "kma, mcst provider 빠짐없이 상세구현(Dagster 포함)"의 마지막 조각.

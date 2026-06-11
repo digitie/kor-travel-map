@@ -390,7 +390,7 @@ surface 전수 조사 완료. 미구현 데이터소스 = **휴양림/수목원(
 성숙(scoring/queue/admin router+page)하나 **merge master 선택 UI 미완 + 기본 scope 미설정**.
 
 **프로그램(tasks.md T-RV-50~55)**:
-- T-RV-50 maplibre-vworld-js 최신화(point 6) — frontend는 이미 최신 태그 v0.1.2 핀, main untagged
+- T-RV-50 maplibre-vworld-js 최신화(point 6) — frontend는 최신 태그 v0.1.3 핀, main untagged
   후속 커밋 확인 필요(기능 변경 시 신규 태그 릴리스).
 - T-RV-51 dedup 수동처리 UI 완성 + 기본 scope(point 4 기반).
 - T-RV-52 visitkorea 축제 enrichment(points 1·5·5.1, provider+krtour+UI; provider TourItem에
@@ -1246,7 +1246,7 @@ payload를 추가해 DB query 실행 전에 거절되는지 검증한다.
 T-RV-37 cleanup 묶음 중 `@krtour/map-marker-react` dependency metadata를 정리했다.
 `maplibre-vworld` peer dependency는 더 이상 floating range `^0.1.2`가 아니라 정확히
 `0.1.2`를 요구한다. 실제 설치 spec은 workspace devDependency와 lockfile의
-`github:digitie/maplibre-vworld-js#v0.1.2`가 담당한다.
+`github:digitie/maplibre-vworld-js#v0.1.3`이 담당한다.
 
 패키지가 아직 skeleton이라 test file이 없으므로, `npm run test`는
 `vitest run --passWithNoTests`로 성공 종료하게 했다. README는 ADR-043에 맞춰 npm

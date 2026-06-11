@@ -257,7 +257,7 @@ credential은 각 worktree 루트의 로컬 파일 `.env.mcp-telegram`에만 저
 
 ### Frontend stack (ADR-025 + ADR-026 + ADR-036 + ADR-037)
 
-- **지도**: `maplibre-vworld-js` 별도 라이브러리(현재 v0.1.2, ADR-036). 공통
+- **지도**: `maplibre-vworld-js` 별도 라이브러리(현재 v0.1.3, ADR-036). 공통
   기능은 상류, TripMate 전용 확장만 본 저장소(`packages/krtour-map-admin/
   frontend/` + 향후 `packages/tripmate-map-extensions/`).
 - **앱 프레임워크**: Next.js 16 + React 19 + TypeScript. `next lint`는 Next.js

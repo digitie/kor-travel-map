@@ -311,7 +311,7 @@ docs/
 > `CLAUDE.md §2`, `docs/decisions.md`를 정본으로 본다. 패키지
 > `krtour-map-debug-ui` → `krtour-map-admin` rename 완료, 구 이름/env/import 호환
 > shim 금지(ADR-046). geocoding 로컬 `:9001`, RustFS `:9003`/`:9004`, frontend
-> Next.js 16 + `maplibre-vworld-js#v0.1.2`.
+> Next.js 16 + `maplibre-vworld-js#v0.1.3`.
 
 신규 코드는 항상 PR로 (ADR-021). 각 PR은 `pytest -q` + `ruff check` +
 `mypy --strict` + `lint-imports` + `docs/journal.md` + `docs/resume.md`
