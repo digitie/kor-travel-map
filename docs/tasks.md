@@ -6,7 +6,7 @@
 
 ## 진행 중인 작업 인덱스 (열린 `[ ]` 항목)
 
-> 총 5건. 상세는 아래 각 섹션. 완료 이력은 [`tasks-done.md`](tasks-done.md).
+> 총 1건. 상세는 아래 각 섹션. 완료 이력은 [`tasks-done.md`](tasks-done.md).
 
 - **다음 (우선순위 순)**
   - [ ] T-212e — 실데이터 full reload + offline upload 실데이터 검증 + 최종 리포트.
@@ -34,9 +34,10 @@
           (종류/등급 title 토큰 스캔, region명=raw_address 위치 단서).
           ※ ASOS/해수욕장(beach_*)/APIHub 표면 + 특보 구역별 fan-out·좌표
           enrichment는 백로그 비고(1차 범위 외).
-  - [ ] T-220 — **MCST(python-mcst-api) 신규 provider 풀스택** — KCISA 14 place
-        dataset(`CultureRecord`) + ODCloud 도서관 2종, marker `P-12`,
-        `DATA_GO_KR_SERVICE_KEY` 공유. 정본 동 문서 §3.
+  - [x] T-220 — **MCST(python-mcst-api) 신규 provider 풀스택**. **T-220a~c 전부
+        완료(2026-06-11)** — 변환/Dagster/fixture·문서. marker `P-12`,
+        `DATA_GO_KR_SERVICE_KEY` 공유. 정본 동 문서 §3 +
+        `docs/mcst-feature-etl.md`.
     - [x] T-220a — `providers/mcst.py`. **완료(2026-06-11)**: slug 메타표
           16종(`MCST_CULTURE_DATASETS` 14 + `MCST_LIBRARY_DATASETS` 2,
           dataset_key `mcst_<slug>`) + 공용 `culture_records_to_bundles` +
@@ -49,8 +50,12 @@
           resource 2종(live) + `mcst_features.py` asset 2종(slug별 분리 `_load`,
           `McstLoadResult` 합산 metadata) + 주 1회 schedule 2종 + definitions
           배선 + 테스트 8종/카운트 단언 갱신.
-    - [ ] T-220c — ETL preview fixture + 문서(external-apis/provider-contract/
-          `docs/mcst-feature-etl.md`/CHANGELOG) + dedup pair 검토.
+    - [x] T-220c — fixture/문서. **완료(2026-06-11)**: ETL preview fixture 2종
+          (공용 변환 대표 — independent_bookstores/public_libraries) +
+          `docs/mcst-feature-etl.md` 신규 + external-apis §3.14 +
+          provider-contract §3/§12 + `python-mcst-api@d06e8d2` 핀 + CHANGELOG.
+          **dedup pair는 즉시 등록 안 함** — 실데이터(T-212e 이후) 매칭 품질
+          확인 후 재검토(etl 문서 §6).
 - **최근 완료**
   - [x] **T-217a~g 전부 완료(2026-06-10~11)** — Phase 6.9 cross-repo 정합성 종결:
         경로 중립화(a, agent T-066 실측 대조 포함) · 철회→inactive+D-12 read 정렬(b) ·

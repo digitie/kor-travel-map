@@ -50,6 +50,10 @@ from krtour.map.providers.krforest import (
     arboretums_to_bundles,
     recreation_forests_to_bundles,
 )
+from krtour.map.providers.mcst import (
+    culture_records_to_bundles,
+    library_records_to_bundles,
+)
 from krtour.map.providers.opinet import (
     prices_to_values,
     stations_to_bundles,
@@ -964,6 +968,64 @@ async def _convert_airkorea_air_quality(items: Sequence[Any]) -> list[Any]:
     return [v.model_dump(mode="json") for v in values]
 
 
+@dataclass(frozen=True)
+class _McstCulture:
+    """krtour ``McstCultureItem`` Protocol 준수 (mcst ``CultureRecord`` 정합)."""
+
+    name: str | None
+    address: str | None
+    tel: str | None
+    url: str | None
+    longitude: float | None
+    latitude: float | None
+    category: str | None
+    raw: Any = None
+
+
+def _mcst_culture_fixture() -> Sequence[_McstCulture]:
+    return [
+        _McstCulture(
+            name="데모 독립서점",
+            address="서울특별시 종로구 세종대로 175",
+            tel="02-000-0000",
+            url="https://bookstore.example",
+            longitude=126.9769,
+            latitude=37.5728,
+            category="서점",
+        ),
+    ]
+
+
+async def _convert_mcst_culture(items: Sequence[Any]) -> list[Any]:
+    bundles = await culture_records_to_bundles(
+        items, slug="independent_bookstores", fetched_at=_now()
+    )
+    return [b.model_dump(mode="json") for b in bundles]
+
+
+def _mcst_libraries_fixture() -> Sequence[dict[str, Any]]:
+    return [
+        {
+            "도서관명": "데모 공공도서관",
+            "시도명": "서울특별시",
+            "시군구명": "종로구",
+            "소재지도로명주소": "서울특별시 종로구 사직로9길 15-14",
+            "위도": "37.5765",
+            "경도": "126.9685",
+            "전화번호": "02-721-0707",
+            "홈페이지주소": "https://library.example",
+            "도서관유형": "공공도서관",
+        },
+    ]
+
+
+async def _convert_mcst_libraries(items: Sequence[Any]) -> list[Any]:
+    bundles = await library_records_to_bundles(
+        items, slug="public_libraries", fetched_at=_now()
+    )
+    return [b.model_dump(mode="json") for b in bundles]
+
+
 # ── Registry ──────────────────────────────────────────────────────────
 
 
@@ -1144,6 +1206,25 @@ FIXTURE_REGISTRY: Final[tuple[EtlFixtureEntry, ...]] = (
         description="대기질 측정값 → 오염물질별 WeatherValue (observed). T-RV-55d.",
         build_fixture=_airkorea_air_quality_fixture,
         convert=_convert_airkorea_air_quality,
+    ),
+    EtlFixtureEntry(
+        provider="python-mcst-api",
+        dataset="mcst_independent_bookstores",
+        variant="FeatureBundle",
+        description=(
+            "KCISA 공통 CultureRecord(14 dataset 공용 변환 대표) → place Feature. "
+            "T-220c."
+        ),
+        build_fixture=_mcst_culture_fixture,
+        convert=_convert_mcst_culture,
+    ),
+    EtlFixtureEntry(
+        provider="python-mcst-api",
+        dataset="mcst_public_libraries",
+        variant="FeatureBundle",
+        description="ODCloud 도서관 raw row(2 dataset 공용 변환 대표) → place Feature. T-220c.",
+        build_fixture=_mcst_libraries_fixture,
+        convert=_convert_mcst_libraries,
     ),
 )
 
