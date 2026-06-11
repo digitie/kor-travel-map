@@ -1340,6 +1340,25 @@ def test_live_resource_returns_iterable_when_credentials_present(
     assert result is sentinel
 
 
+def test_live_resource_wraps_sync_generator_for_dagster_resource(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY", "service-key")
+    sentinel = [object(), object()]
+
+    def _fake_fetch(_settings: KrtourMapSettings) -> Iterator[Any]:
+        yield from sentinel
+
+    resource_def = build_provider_record_live_resource(_DATAGOKR_SPEC, _fake_fetch)
+    resource_fn = cast("Callable[[object], object]", resource_def.resource_fn)
+
+    result = resource_fn(build_init_resource_context())
+
+    assert isinstance(result, Iterable)
+    assert not isinstance(result, Iterator)
+    assert list(cast(Iterable[Any], result)) == sentinel
+
+
 def test_live_resource_raises_guard_message_when_credentials_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
