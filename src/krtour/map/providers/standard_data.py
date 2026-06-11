@@ -356,6 +356,15 @@ async def _item_to_bundle(
     )
 
     # 8) Feature 본체. 한국어 텍스트는 normalize, 전화번호는 dash 표준 표기로.
+    #    실데이터에 시작/종료 역전 row(원천 오타, 예: 시작 2025-10-25/종료
+    #    2024-10-01)가 존재한다(#386) — 어느 쪽이 오타인지 추정할 수 없으므로
+    #    둘 다 격리(None)하고 raw_data에만 원본을 보존한다. EventDetail의
+    #    ends_on >= starts_on 도메인 검증이 dataset 전체를 죽이지 않게 한다.
+    starts_on = item.fstvl_start_date
+    ends_on = item.fstvl_end_date
+    if starts_on is not None and ends_on is not None and ends_on < starts_on:
+        starts_on = None
+        ends_on = None
     feature = Feature(
         feature_id=feature_id,
         kind=FeatureKind.EVENT,
@@ -368,8 +377,8 @@ async def _item_to_bundle(
         detail=EventDetail(
             feature_id=feature_id,
             event_kind="festival",
-            starts_on=item.fstvl_start_date,
-            ends_on=item.fstvl_end_date,
+            starts_on=starts_on,
+            ends_on=ends_on,
             venue_name=normalize_korean_text(item.opar),
             tel=normalize_phone_number(item.phone_number),
             # area_code / sigungu_code 등 TourAPI 식별자는 visitkorea enrichment

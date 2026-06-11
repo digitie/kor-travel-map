@@ -2,6 +2,15 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-11 (claude) — T-212e #386: 축제 날짜 역전 격리 + datagokr 핀 범프
+
+배치 C에서 축제가 `ends_on (2024-10-01) must be >= starts_on (2025-10-25)`
+ValidationError로 재실패(run `31dbac21`) — #374 재정렬과 별개의 실데이터
+오타 케이스. 어느 쪽이 오타인지 추정 불가하므로 역전 시 두 날짜를 격리(None)
+하고 row는 적재(raw_data 원본 보존). 주차장은 provider
+`python-datagokr-api#6`/PR#7(`26a5be3`, addUnitTime='0.5' float 허용) 머지 후
+핀 범프(run `ea127324` 해소).
+
 ## 2026-06-11 (claude) — T-212e #384: mois op/job 동명 충돌 — repository 로드 실패
 
 offline upload live 검증에서 `POST /{id}/load`가 502

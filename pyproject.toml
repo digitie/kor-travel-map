@@ -78,7 +78,9 @@ providers = [
   #
   # ── Sprint 2 §2.1 — datagokr 표준데이터 (축제 1차, ADR-042) ────────────
   # `krtour.map.providers.standard_data.CulturalFestivalItem` Protocol (PR#34) 정합.
-  "python-datagokr-api @ git+https://github.com/digitie/python-datagokr-api.git@f88e62eb542be97432e41a11c91b81dc5dcc84a2",
+  # 26a5be3: 주차장 basicTime/addUnitTime 분수값(float) 허용 (provider #6/PR#7,
+  # T-212e live 실측 addUnitTime='0.5').
+  "python-datagokr-api @ git+https://github.com/digitie/python-datagokr-api.git@26a5be3215fbe056499ed6e684f446528a254ef2",
   #
   # ── Sprint 2 §2.2 — 날씨 (ADR-010) ────────────────────────────────────
   # `krtour.map.providers.kma.{KmaShortForecastItem, KmaUltraShortNowcastItem}`

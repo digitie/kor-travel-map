@@ -4,7 +4,7 @@
 - 5건 fixture (좌표 있음 3 + 좌표 nullable 2, KST aware).
 - ``cultural_festivals_to_bundles`` happy path.
 - 좌표 없는 case는 ``Feature.coord=None`` + ``feature_id`` ``global`` fallback.
-- ``starts_on > ends_on``은 ``EventDetail`` validator에서 reject.
+- ``starts_on > ends_on`` 역전 row는 날짜 격리(None) 후 적재 (#386 — 실데이터 오타).
 - 결정성 — 같은 입력은 항상 같은 ``feature_id`` / ``source_record_key``.
 - ``FeatureBundle`` FK consistency (model_validator 가동).
 - ``ReverseGeocoder`` 적용 시 ``Address.bjd_code`` 채워짐.
@@ -376,16 +376,28 @@ def test_payload_hash_differs_when_payload_changes() -> None:
 
 
 @pytest.mark.unit
-def test_invalid_date_order_rejected() -> None:
-    """``EventDetail`` validator — ``ends_on < starts_on``은 ValidationError."""
+def test_inverted_date_row_quarantines_dates_but_loads(  # noqa: D103 — 제목이 곧 의도
+) -> None:
+    """실데이터 날짜 역전 row(#386) — 두 날짜를 격리(None)하고 row는 적재한다.
+
+    원천 오타(예: 시작 2025-10-25/종료 2024-10-01)에서 어느 쪽이 맞는지 추정할
+    수 없으므로 둘 다 None, raw_data에만 원본 보존. dataset 전체가
+    ValidationError로 죽지 않는 것이 회귀 포인트.
+    """
     bad_fixture = dataclasses.replace(
         _F5_NO_COORD_MINIMAL,
         fstvl_nm="잘못된 날짜 축제",
         fstvl_start_date=date(2026, 5, 10),
-        fstvl_end_date=date(2026, 5, 1),  # ends_on < starts_on
+        fstvl_end_date=date(2026, 5, 1),  # ends_on < starts_on (원천 오타)
     )
-    with pytest.raises(ValueError, match="ends_on .* must be >= starts_on"):
-        cultural_festivals_to_bundles([bad_fixture], fetched_at=_now())
+    bundles = cultural_festivals_to_bundles([bad_fixture], fetched_at=_now())
+
+    assert len(bundles) == 1
+    detail = bundles[0].feature.detail
+    assert detail.starts_on is None  # type: ignore[union-attr]
+    assert detail.ends_on is None  # type: ignore[union-attr]
+    assert bundles[0].source_record.raw_data["fstvl_start_date"] == "2026-05-10"
+    assert bundles[0].source_record.raw_data["fstvl_end_date"] == "2026-05-01"
 
 
 @pytest.mark.unit
