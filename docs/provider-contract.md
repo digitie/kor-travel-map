@@ -397,18 +397,18 @@ def test_no_provider_wrapper_classes():
 |----------|--------------|-----------------|---------|------|
 | python-kraddr-base | **제거** | — | — | ADR-041 (PR#37) 흡수 완료. archive 후보 |
 | python-kraddr-geo | REST 서비스(직접 의존 없음) | `KraddrGeoRestClient` + `ReverseGeocoder`/`AddressGeocoder` 콜러블 | PR#90/#123 | on-demand geocoder. 최신 로컬 FastAPI 포트 `9001` 기준 |
-| python-datagokr-api | placeholder | `CulturalFestivalItem` (PR#34) | PR#34 | ADR-042 1차 축제 source |
+| python-datagokr-api | `@f88e62e` | `CulturalFestivalItem` (PR#34) | PR#34 | ADR-042 1차 축제 source |
 | python-kma-api | placeholder | `KmaShortForecastItem` (PR#38), `KmaUltraShortNowcastItem` (PR#39) | PR#38/39 | ADR-010 두 축. 후속: ultra_short_forecast/mid/alerts |
-| python-airkorea-api | placeholder | (후속 PR) | — | PM10/PM2.5/CAI |
-| python-khoa-api | placeholder | (후속 PR) | — | 해수욕장, 해양 공지 |
-| python-krforest-api | placeholder | (후속 PR) | — | 산악기상 (Sprint 2) + trails (Sprint 3) 양쪽 사용 |
-| python-opinet-api | placeholder | (후속 PR) | — | Sprint 2 §2.3 PriceValue |
-| python-krex-api | placeholder | (후속 PR) | — | Sprint 2 §2.4 multi-kind |
-| python-visitkorea-api | placeholder | (후속 PR — enrichment) | — | ADR-042: 축제는 enrichment 2차 |
-| python-knps-api | `@06da125f` (PR#25 시점) | (Sprint 3 PR) | PR#25 | keyless file-only, ADR-028 amendment 2026-05-25 |
-| python-krheritage-api | placeholder | (Sprint 3 PR) | — | media → RustFS |
-| python-krairport-api | placeholder | (Sprint 3 PR) | — | 공항 운항·날씨 |
-| python-mois-api | placeholder | (Sprint 4 PR) | — | ADR-024 canonical name 정정. 4단계 lifecycle |
+| python-airkorea-api | `@22996a4` | (후속 PR) | — | PM10/PM2.5/CAI |
+| python-khoa-api | `@0c4c07f` | (후속 PR) | — | 해수욕장, 해양 공지 |
+| python-krforest-api | `@f9254e6` | (후속 PR) | — | 산악기상 (Sprint 2) + trails (Sprint 3) 양쪽 사용 |
+| python-opinet-api | `@bb6385c` | (후속 PR) | — | Sprint 2 §2.3 PriceValue |
+| python-krex-api | `@72b74d7` | (후속 PR) | — | Sprint 2 §2.4 multi-kind |
+| python-visitkorea-api | `@cebf543` | (후속 PR — enrichment) | — | ADR-042: 축제는 enrichment 2차 |
+| python-knps-api | `@5e88fb4` | (Sprint 3 PR) | PR#25 | keyless file-only, ADR-028 amendment 2026-05-25 |
+| python-krheritage-api | `@7dc46c3` | (Sprint 3 PR) | — | media → RustFS |
+| python-krairport-api | `@b885413` | (Sprint 3 PR) | — | 공항 운항·날씨 |
+| python-mois-api | `@bc6f742` | (Sprint 4 PR) | — | ADR-024 canonical name 정정. 4단계 lifecycle |
 | python-kasi-api | placeholder | (Sprint 4 PR) | — | KASI 영업주기 |
 | python-mcst-api | placeholder | (Sprint 5 PR) | — | 독립서점/북카페 — MOIS enrichment |
 
