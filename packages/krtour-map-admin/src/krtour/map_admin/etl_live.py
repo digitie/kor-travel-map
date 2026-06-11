@@ -937,22 +937,31 @@ _DATAGOKR_CULTURAL_FESTIVAL_ENDPOINT: Final[str] = "tn_pubr_public_cltur_fstvl_a
 
 @dataclass(frozen=True)
 class _DatagokrFestivalAdapter:
-    """`CulturalFestivalItem` Protocol 만족 (standard_data.py)."""
+    """`CulturalFestivalItem` Protocol 만족 (standard_data.py).
 
-    management_no: str
-    festival_name: str
-    venue_name: str | None
-    start_date: date | None
-    end_date: date | None
-    description: str | None
-    latitude: Decimal | None
-    longitude: Decimal | None
-    road_address: str | None
-    jibun_address: str | None
-    organizer_name: str | None
-    organizer_tel: str | None
-    data_reference_date: date | None
-    provider_org_name: str | None
+    provider 실모델 ``PublicCulturalFestival`` 필드명 그대로 (ADR-044 재정렬,
+    #374). 자연키(``name::address``)는 변환 함수가 파생하므로 adapter는 합성
+    키를 만들지 않는다.
+    """
+
+    fstvl_nm: str | None
+    opar: str | None
+    fstvl_start_date: date | None
+    fstvl_end_date: date | None
+    fstvl_co: str | None
+    mnnst_nm: str | None
+    auspc_instt_nm: str | None
+    suprt_instt_nm: str | None
+    phone_number: str | None
+    homepage_url: str | None
+    relate_info: str | None
+    rdnmadr: str | None
+    lnmadr: str | None
+    latitude: float | None
+    longitude: float | None
+    reference_date: date | None
+    instt_code: str | None
+    instt_nm: str | None
 
 
 def _datagokr_parse_date(value: str | None) -> date | None:
@@ -966,36 +975,35 @@ def _datagokr_parse_date(value: str | None) -> date | None:
     return None
 
 
-def _datagokr_decimal(value: Any) -> Decimal | None:
+def _datagokr_float(value: Any) -> float | None:
     if value is None or str(value).strip() == "":
         return None
     try:
-        return Decimal(str(value).strip())
-    except (ValueError, ArithmeticError):
+        return float(str(value).strip())
+    except ValueError:
         return None
 
 
 def _adapt_datagokr_festival(raw: dict[str, Any]) -> _DatagokrFestivalAdapter:
-    festival_name = _first_str(raw, "fstvlNm", "festival_name") or ""
-    road = _first_str(raw, "rdnmadr")
-    jibun = _first_str(raw, "lnmadr")
-    # 표준데이터에 관리번호 컬럼이 없어 (축제명@주소)로 자연키 합성 (결정적).
-    management_no = f"{festival_name}@{road or jibun or ''}".strip("@") or festival_name
     return _DatagokrFestivalAdapter(
-        management_no=management_no or "unknown",
-        festival_name=festival_name,
-        venue_name=_first_str(raw, "opar"),
-        start_date=_datagokr_parse_date(_first_str(raw, "fstvlStartDate")),
-        end_date=_datagokr_parse_date(_first_str(raw, "fstvlEndDate")),
-        description=_first_str(raw, "fstvlCo"),
-        latitude=_datagokr_decimal(raw.get("latitude")),
-        longitude=_datagokr_decimal(raw.get("longitude")),
-        road_address=road,
-        jibun_address=jibun,
-        organizer_name=_first_str(raw, "mnnstNm", "auspcInsttNm"),
-        organizer_tel=_first_str(raw, "phoneNumber"),
-        data_reference_date=_datagokr_parse_date(_first_str(raw, "referenceDate")),
-        provider_org_name=_first_str(raw, "instt_nm"),
+        fstvl_nm=_first_str(raw, "fstvlNm", "fstvl_nm"),
+        opar=_first_str(raw, "opar"),
+        fstvl_start_date=_datagokr_parse_date(_first_str(raw, "fstvlStartDate")),
+        fstvl_end_date=_datagokr_parse_date(_first_str(raw, "fstvlEndDate")),
+        fstvl_co=_first_str(raw, "fstvlCo"),
+        mnnst_nm=_first_str(raw, "mnnstNm"),
+        auspc_instt_nm=_first_str(raw, "auspcInsttNm"),
+        suprt_instt_nm=_first_str(raw, "suprtInsttNm"),
+        phone_number=_first_str(raw, "phoneNumber"),
+        homepage_url=_first_str(raw, "homepageUrl"),
+        relate_info=_first_str(raw, "relateInfo"),
+        rdnmadr=_first_str(raw, "rdnmadr"),
+        lnmadr=_first_str(raw, "lnmadr"),
+        latitude=_datagokr_float(raw.get("latitude")),
+        longitude=_datagokr_float(raw.get("longitude")),
+        reference_date=_datagokr_parse_date(_first_str(raw, "referenceDate")),
+        instt_code=_first_str(raw, "instt_code", "insttCode"),
+        instt_nm=_first_str(raw, "instt_nm", "insttNm"),
     )
 
 

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
-from decimal import Decimal
 from typing import TYPE_CHECKING
 
 import pytest
@@ -44,52 +43,49 @@ _FETCHED = datetime(2026, 6, 3, 12, 0, tzinfo=_KST)
 
 @dataclass(frozen=True)
 class _Festival:
-    management_no: str
-    festival_name: str
-    venue_name: str | None
-    start_date: date | None
-    end_date: date | None
-    description: str | None
-    latitude: Decimal | None
-    longitude: Decimal | None
-    road_address: str | None
-    jibun_address: str | None
-    organizer_name: str | None
-    organizer_tel: str | None
-    data_reference_date: date | None
-    provider_org_name: str | None
-    bjd_code: str | None = None
-    sigungu_code: str | None = None
-    sido_code: str | None = None
-    admin_address: str | None = None
+    """`CulturalFestivalItem` Protocol 만족 — provider 실모델 필드명 (#374)."""
+
+    fstvl_nm: str | None
+    opar: str | None = None
+    fstvl_start_date: date | None = None
+    fstvl_end_date: date | None = None
+    fstvl_co: str | None = None
+    mnnst_nm: str | None = None
+    auspc_instt_nm: str | None = None
+    suprt_instt_nm: str | None = None
+    phone_number: str | None = None
+    homepage_url: str | None = None
+    relate_info: str | None = None
+    rdnmadr: str | None = None
+    lnmadr: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    reference_date: date | None = None
+    instt_code: str | None = None
+    instt_nm: str | None = None
 
 
 async def _bundle(
-    management_no: str,
+    seed: str,
     *,
     lon: str = "126.9780",
     lat: str = "37.5665",
-    bjd_code: str = "1114010100",
-    sigungu_code: str = "11140",
 ):
+    # 자연키는 name::address 파생(#374) — seed를 이름에 넣어 feature 구분.
     item = _Festival(
-        management_no=management_no,
-        festival_name=f"executor 테스트 축제 {management_no}",
-        venue_name="테스트 광장",
-        start_date=date(2026, 6, 1),
-        end_date=date(2026, 6, 7),
-        description="feature update executor 테스트용 fixture.",
-        latitude=Decimal(lat),
-        longitude=Decimal(lon),
-        road_address="서울특별시 중구 세종대로 110",
-        jibun_address="서울특별시 중구 태평로1가 31",
-        organizer_name="중구청",
-        organizer_tel="02-3396-4114",
-        data_reference_date=date(2026, 6, 1),
-        provider_org_name="서울특별시 중구",
-        bjd_code=bjd_code,
-        sigungu_code=sigungu_code,
-        sido_code=bjd_code[:2],
+        fstvl_nm=f"executor 테스트 축제 {seed}",
+        opar="테스트 광장",
+        fstvl_start_date=date(2026, 6, 1),
+        fstvl_end_date=date(2026, 6, 7),
+        fstvl_co="feature update executor 테스트용 fixture.",
+        mnnst_nm="중구청",
+        phone_number="02-3396-4114",
+        rdnmadr="서울특별시 중구 세종대로 110",
+        lnmadr="서울특별시 중구 태평로1가 31",
+        latitude=float(lat),
+        longitude=float(lon),
+        reference_date=date(2026, 6, 1),
+        instt_nm="서울특별시 중구",
     )
     return (
         await cultural_festivals_to_bundles(
@@ -99,8 +95,8 @@ async def _bundle(
     )[0]
 
 
-async def _load_seed(session: AsyncSession, management_no: str):
-    bundle = await _bundle(management_no)
+async def _load_seed(session: AsyncSession, seed: str):
+    bundle = await _bundle(seed)
     await feature_repo.load_bundle(session, bundle)
     await session.execute(
         text(

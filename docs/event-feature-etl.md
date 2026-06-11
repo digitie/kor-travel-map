@@ -39,15 +39,44 @@
 
 ## 4. dataset 매핑
 
+### 4.1 1차 — datagokr 전국문화축제표준데이터
+
 | 항목 | 값 |
 |------|----|
-| natural key | `content_id` (VisitKorea PK) |
+| natural key | **`name::address` 파생** (ADR-009 `::`) — 원천에 관리번호 컬럼이 **없어** `정규화(축제명)::도로명주소(없으면 지번주소, 둘 다 없으면 빈 문자열)`로 파생한다 (#374). enrichment(visitkorea)의 natural key는 `content_id` |
 | FeatureKind | `event` |
 | detail table | `feature_event_details` |
 | category | event는 `EventDetail.event_kind`(`festival`/`concert`/`exhibition` 등)로 1차 분류. `features.category` 컬럼에는 `01000000` `TOURISM` (대분류) 또는 행사 성격에 맞는 `01040*` (문화시설) 카테고리 — 공식 카테고리 트리는 `docs/category.md` §4 |
 | source_role | `primary` |
 | marker_icon | `star` |
 | marker_color | `P-11` (자홍) |
+
+### 4.2 원천 한국어 컬럼 → `CulturalFestivalItem` Protocol 필드
+
+Protocol 필드명은 provider 실모델 `PublicCulturalFestival`(`python-datagokr-api`)
+필드명 **그대로**다 (ADR-044 — provider lib가 데이터 정합성 1차 책임, 본 lib는
+미러). 종전 Protocol이 발명했던 `management_no`/`road_address`/`festival_name`
+류 필드는 #374에서 제거됐다.
+
+| 한국어 컬럼 | Protocol 필드 | 매핑 |
+|------------|--------------|------|
+| 축제명 | `fstvl_nm` | `Feature.name` — 정규화 후 비면 해당 row **skip** |
+| 개최장소 | `opar` | `EventDetail.venue_name` |
+| 축제시작일자 | `fstvl_start_date` | `EventDetail.starts_on` |
+| 축제종료일자 | `fstvl_end_date` | `EventDetail.ends_on` |
+| 축제내용 | `fstvl_co` | `SourceRecord.raw_data`만 |
+| 주관기관명 | `mnnst_nm` | `EventDetail.payload['organizer_name']` |
+| 주최기관명 | `auspc_instt_nm` | `SourceRecord.raw_data`만 |
+| 후원기관명 | `suprt_instt_nm` | `SourceRecord.raw_data`만 |
+| 전화번호 | `phone_number` | `EventDetail.tel` (dash 정규화) |
+| 홈페이지주소 | `homepage_url` | `SourceRecord.raw_data`만 |
+| 관련정보 | `relate_info` | `SourceRecord.raw_data`만 |
+| 소재지도로명주소 | `rdnmadr` | `Feature.address.road` + `SourceRecord.raw_address` + 자연키 |
+| 소재지지번주소 | `lnmadr` | `Feature.address.legal` (도로명 없을 때 자연키 fallback) |
+| 위도 / 경도 | `latitude` / `longitude` (`float`) | `Feature.coord` (`Decimal(str(...))` 변환) |
+| 데이터기준일자 | `reference_date` | `SourceRecord.raw_data`만 |
+| 제공기관코드 | `instt_code` | `SourceRecord.raw_data`만 |
+| 제공기관명 | `instt_nm` | `EventDetail.payload['provider_org_name']` |
 
 ## 5. 주소·좌표
 

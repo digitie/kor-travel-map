@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -47,109 +48,136 @@ def cultural_festivals_to_bundles(
 
 @dataclass(frozen=True)
 class _Fixture:
-    """``CulturalFestivalItem`` Protocol 만족 + 테스트용 frozen dataclass."""
+    """``CulturalFestivalItem`` Protocol 만족 + 테스트용 frozen dataclass.
 
-    management_no: str
-    festival_name: str
-    venue_name: str | None
-    start_date: date | None
-    end_date: date | None
-    description: str | None
-    latitude: Decimal | None
-    longitude: Decimal | None
-    road_address: str | None
-    jibun_address: str | None
-    organizer_name: str | None
-    organizer_tel: str | None
-    data_reference_date: date | None
-    provider_org_name: str | None
+    provider 실모델 ``PublicCulturalFestival`` 필드명 (ADR-044 재정렬, #374).
+    """
+
+    fstvl_nm: str | None
+    opar: str | None
+    fstvl_start_date: date | None
+    fstvl_end_date: date | None
+    fstvl_co: str | None
+    mnnst_nm: str | None
+    auspc_instt_nm: str | None
+    suprt_instt_nm: str | None
+    phone_number: str | None
+    homepage_url: str | None
+    relate_info: str | None
+    rdnmadr: str | None
+    lnmadr: str | None
+    latitude: float | None
+    longitude: float | None
+    reference_date: date | None
+    instt_code: str | None
+    instt_nm: str | None
 
 
 # 5건 — 좌표 있음 3 + 좌표 nullable 2 (SPRINT-2 §2.1 specification).
 _F1 = _Fixture(
-    management_no="CF-0001",
-    festival_name="서울 봄꽃 축제",
-    venue_name="여의도공원",
-    start_date=date(2026, 4, 5),
-    end_date=date(2026, 4, 12),
-    description="봄꽃 만개에 맞춘 가족 단위 봄꽃 축제.",
-    latitude=Decimal("37.5263"),
-    longitude=Decimal("126.9239"),
-    road_address="서울특별시 영등포구 여의공원로 120",
-    jibun_address="서울특별시 영등포구 여의도동 8",
-    organizer_name="영등포구청",
-    organizer_tel="02-2670-3114",
-    data_reference_date=date(2026, 3, 1),
-    provider_org_name="서울특별시 영등포구",
+    fstvl_nm="서울 봄꽃 축제",
+    opar="여의도공원",
+    fstvl_start_date=date(2026, 4, 5),
+    fstvl_end_date=date(2026, 4, 12),
+    fstvl_co="봄꽃 만개에 맞춘 가족 단위 봄꽃 축제.",
+    mnnst_nm="영등포구청",
+    auspc_instt_nm=None,
+    suprt_instt_nm=None,
+    phone_number="02-2670-3114",
+    homepage_url=None,
+    relate_info=None,
+    rdnmadr="서울특별시 영등포구 여의공원로 120",
+    lnmadr="서울특별시 영등포구 여의도동 8",
+    latitude=37.5263,
+    longitude=126.9239,
+    reference_date=date(2026, 3, 1),
+    instt_code=None,
+    instt_nm="서울특별시 영등포구",
 )
 
 _F2 = _Fixture(
-    management_no="CF-0002",
-    festival_name="부산 바다 축제",
-    venue_name="해운대 해수욕장",
-    start_date=date(2026, 8, 1),
-    end_date=date(2026, 8, 7),
-    description="해운대 메인 비치 여름 축제.",
-    latitude=Decimal("35.1587"),
-    longitude=Decimal("129.1604"),
-    road_address="부산광역시 해운대구 해운대해변로 264",
-    jibun_address="부산광역시 해운대구 우동 620",
-    organizer_name="해운대구청",
-    organizer_tel="051-749-4000",
-    data_reference_date=date(2026, 6, 1),
-    provider_org_name="부산광역시 해운대구",
+    fstvl_nm="부산 바다 축제",
+    opar="해운대 해수욕장",
+    fstvl_start_date=date(2026, 8, 1),
+    fstvl_end_date=date(2026, 8, 7),
+    fstvl_co="해운대 메인 비치 여름 축제.",
+    mnnst_nm="해운대구청",
+    auspc_instt_nm=None,
+    suprt_instt_nm=None,
+    phone_number="051-749-4000",
+    homepage_url=None,
+    relate_info=None,
+    rdnmadr="부산광역시 해운대구 해운대해변로 264",
+    lnmadr="부산광역시 해운대구 우동 620",
+    latitude=35.1587,
+    longitude=129.1604,
+    reference_date=date(2026, 6, 1),
+    instt_code=None,
+    instt_nm="부산광역시 해운대구",
 )
 
 _F3 = _Fixture(
-    management_no="CF-0003",
-    festival_name="제주 유채꽃 축제",
-    venue_name="가시리 마을",
-    start_date=date(2026, 4, 1),
-    end_date=date(2026, 4, 30),
-    description="제주 봄철 유채꽃 만개에 맞춘 한 달짜리 축제.",
-    latitude=Decimal("33.3893"),
-    longitude=Decimal("126.7831"),
-    road_address="제주특별자치도 서귀포시 표선면 가시로 565번길 41",
-    jibun_address="제주특별자치도 서귀포시 표선면 가시리",
-    organizer_name="서귀포시청",
-    organizer_tel="064-740-6000",
-    data_reference_date=date(2026, 3, 1),
-    provider_org_name="제주특별자치도 서귀포시",
+    fstvl_nm="제주 유채꽃 축제",
+    opar="가시리 마을",
+    fstvl_start_date=date(2026, 4, 1),
+    fstvl_end_date=date(2026, 4, 30),
+    fstvl_co="제주 봄철 유채꽃 만개에 맞춘 한 달짜리 축제.",
+    mnnst_nm="서귀포시청",
+    auspc_instt_nm=None,
+    suprt_instt_nm=None,
+    phone_number="064-740-6000",
+    homepage_url=None,
+    relate_info=None,
+    rdnmadr="제주특별자치도 서귀포시 표선면 가시로 565번길 41",
+    lnmadr="제주특별자치도 서귀포시 표선면 가시리",
+    latitude=33.3893,
+    longitude=126.7831,
+    reference_date=date(2026, 3, 1),
+    instt_code=None,
+    instt_nm="제주특별자치도 서귀포시",
 )
 
 # 좌표 nullable 2건.
 _F4_NO_COORD = _Fixture(
-    management_no="CF-0004",
-    festival_name="전남 청년 문화 축제",
-    venue_name="광주광역시 광산구청 광장",  # 좌표는 표준데이터에 미기재
-    start_date=date(2026, 9, 18),
-    end_date=date(2026, 9, 19),
-    description="전남 권역 청년 문화 행사.",
+    fstvl_nm="전남 청년 문화 축제",
+    opar="광주광역시 광산구청 광장",  # 좌표는 표준데이터에 미기재
+    fstvl_start_date=date(2026, 9, 18),
+    fstvl_end_date=date(2026, 9, 19),
+    fstvl_co="전남 권역 청년 문화 행사.",
+    mnnst_nm="광산구청 문화체육과",
+    auspc_instt_nm=None,
+    suprt_instt_nm=None,
+    phone_number="062-960-8800",
+    homepage_url=None,
+    relate_info=None,
+    rdnmadr="광주광역시 광산구 광산로 29번길 15",
+    lnmadr=None,
     latitude=None,
     longitude=None,
-    road_address="광주광역시 광산구 광산로 29번길 15",
-    jibun_address=None,
-    organizer_name="광산구청 문화체육과",
-    organizer_tel="062-960-8800",
-    data_reference_date=date(2026, 8, 15),
-    provider_org_name="광주광역시 광산구",
+    reference_date=date(2026, 8, 15),
+    instt_code=None,
+    instt_nm="광주광역시 광산구",
 )
 
 _F5_NO_COORD_MINIMAL = _Fixture(
-    management_no="CF-0005",
-    festival_name="강원 산촌 마을 축제",
-    venue_name=None,  # 장소도 미상
-    start_date=None,
-    end_date=None,
-    description=None,
+    fstvl_nm="강원 산촌 마을 축제",
+    opar=None,  # 장소도 미상
+    fstvl_start_date=None,
+    fstvl_end_date=None,
+    fstvl_co=None,
+    mnnst_nm=None,
+    auspc_instt_nm=None,
+    suprt_instt_nm=None,
+    phone_number=None,
+    homepage_url=None,
+    relate_info=None,
+    rdnmadr=None,
+    lnmadr=None,
     latitude=None,
     longitude=None,
-    road_address=None,
-    jibun_address=None,
-    organizer_name=None,
-    organizer_tel=None,
-    data_reference_date=None,
-    provider_org_name=None,
+    reference_date=None,
+    instt_code=None,
+    instt_nm=None,
 )
 
 
@@ -169,9 +197,42 @@ def test_returns_bundle_per_item() -> None:
     """N items → N bundles, 순서 유지."""
     bundles = cultural_festivals_to_bundles(_ALL_FIXTURES, fetched_at=_now())
     assert len(bundles) == 5
-    # 순서 유지 확인 (management_no 매칭).
+    # 순서 유지 확인 — 자연키는 name::address 파생 (관리번호 컬럼 없음, #374).
     natural_keys = [b.source_record.source_entity_id for b in bundles]
-    assert natural_keys == [f.management_no for f in _ALL_FIXTURES]
+    assert natural_keys == [
+        f"{f.fstvl_nm}::{f.rdnmadr or f.lnmadr or ''}" for f in _ALL_FIXTURES
+    ]
+
+
+@pytest.mark.unit
+def test_row_without_festival_name_is_skipped() -> None:
+    """축제명(fstvl_nm) 없는 row는 skip — bundle 미생성 (#374)."""
+    nameless = _Fixture(
+        fstvl_nm=None,
+        opar=None,
+        fstvl_start_date=None,
+        fstvl_end_date=None,
+        fstvl_co=None,
+        mnnst_nm=None,
+        auspc_instt_nm=None,
+        suprt_instt_nm=None,
+        phone_number=None,
+        homepage_url=None,
+        relate_info=None,
+        rdnmadr=None,
+        lnmadr=None,
+        latitude=None,
+        longitude=None,
+        reference_date=None,
+        instt_code=None,
+        instt_nm=None,
+    )
+    blank_name = dataclasses.replace(nameless, fstvl_nm="   ")
+    bundles = cultural_festivals_to_bundles(
+        [nameless, _F1, blank_name], fetched_at=_now()
+    )
+    assert len(bundles) == 1
+    assert bundles[0].feature.name == "서울 봄꽃 축제"
 
 
 @pytest.mark.unit
@@ -243,14 +304,18 @@ def test_source_record_provider_and_dataset() -> None:
     assert source.provider == "data.go.kr-standard"  # ADR-024
     assert source.dataset_key == DATASET_KEY_CULTURAL_FESTIVALS
     assert source.source_entity_type == "cultural_festival"
-    assert source.source_entity_id == "CF-0002"
+    # 자연키는 name::address 파생 (관리번호 컬럼 없음, ADR-009 ``::``, #374).
+    assert source.source_entity_id == (
+        "부산 바다 축제::부산광역시 해운대구 해운대해변로 264"
+    )
     assert source.raw_payload_hash != ""
     assert len(source.raw_payload_hash) == 32  # PAYLOAD_HASH_DEFAULT_LENGTH
-    # raw_data canonical 직렬화 (sort_keys 가동, sets 등 거부) 정합.
-    assert source.raw_data["management_no"] == "CF-0002"
-    assert source.raw_data["festival_name"] == "부산 바다 축제"
+    # raw_data canonical 직렬화 (sort_keys 가동, sets 등 거부) 정합 —
+    # key는 provider 필드명 그대로 (ADR-044).
+    assert source.raw_data["fstvl_nm"] == "부산 바다 축제"
     assert source.raw_data["latitude"] == "35.1587"
     assert source.raw_data["longitude"] == "129.1604"
+    assert source.raw_data["instt_nm"] == "부산광역시 해운대구"
 
 
 @pytest.mark.unit
@@ -293,22 +358,9 @@ def test_determinism_same_input_same_ids() -> None:
 def test_payload_hash_differs_when_payload_changes() -> None:
     """payload 변경 시 ``raw_payload_hash`` + ``source_record_key`` 변경 (이력)."""
     bundles_a = cultural_festivals_to_bundles([_F1], fetched_at=_now())
-    # description 변경한 새 fixture.
-    f1_modified = _Fixture(
-        management_no=_F1.management_no,
-        festival_name=_F1.festival_name,
-        venue_name=_F1.venue_name,
-        start_date=_F1.start_date,
-        end_date=_F1.end_date,
-        description="새로 바뀐 설명 — payload hash 변동 시나리오.",
-        latitude=_F1.latitude,
-        longitude=_F1.longitude,
-        road_address=_F1.road_address,
-        jibun_address=_F1.jibun_address,
-        organizer_name=_F1.organizer_name,
-        organizer_tel=_F1.organizer_tel,
-        data_reference_date=_F1.data_reference_date,
-        provider_org_name=_F1.provider_org_name,
+    # 축제내용(fstvl_co) 변경한 새 fixture.
+    f1_modified = dataclasses.replace(
+        _F1, fstvl_co="새로 바뀐 설명 — payload hash 변동 시나리오."
     )
     bundles_b = cultural_festivals_to_bundles([f1_modified], fetched_at=_now())
     # source_record_key는 raw_payload_hash 포함 → 다름.
@@ -326,21 +378,11 @@ def test_payload_hash_differs_when_payload_changes() -> None:
 @pytest.mark.unit
 def test_invalid_date_order_rejected() -> None:
     """``EventDetail`` validator — ``ends_on < starts_on``은 ValidationError."""
-    bad_fixture = _Fixture(
-        management_no="CF-BAD",
-        festival_name="잘못된 날짜 축제",
-        venue_name=None,
-        start_date=date(2026, 5, 10),
-        end_date=date(2026, 5, 1),  # ends_on < starts_on
-        description=None,
-        latitude=None,
-        longitude=None,
-        road_address=None,
-        jibun_address=None,
-        organizer_name=None,
-        organizer_tel=None,
-        data_reference_date=None,
-        provider_org_name=None,
+    bad_fixture = dataclasses.replace(
+        _F5_NO_COORD_MINIMAL,
+        fstvl_nm="잘못된 날짜 축제",
+        fstvl_start_date=date(2026, 5, 10),
+        fstvl_end_date=date(2026, 5, 1),  # ends_on < starts_on
     )
     with pytest.raises(ValueError, match="ends_on .* must be >= starts_on"):
         cultural_festivals_to_bundles([bad_fixture], fetched_at=_now())
