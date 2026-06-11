@@ -88,15 +88,24 @@ class _RestArea:
 
 @dataclass(frozen=True)
 class _Notice:
-    """`KrexTrafficNoticeItem` Protocol 준수 (provider ``krex.models.Incident`` 정합)."""
+    """`KrexTrafficNoticeItem` Protocol 준수 (provider ``krex.models.Incident``
+    realTimeSms shape 정합, #378)."""
 
+    occurred_date: str | None
+    occurred_time: str | None
+    incident_type: str | None
+    incident_type_code: str | None
+    direction: str | None
+    message: str | None
+    point_name: str | None
     route_no: str | None
     route_name: str | None
-    direction: str | None
-    incident_type: str | None
-    message: str | None
-    started_at: str | None
-    ended_at: str | None
+    process_status: str | None
+    process_status_code: str | None
+    latitude: float | None
+    longitude: float | None
+    congestion_length: float | None
+    series_no: int | None
     raw: dict[str, Any]
 
 
@@ -287,18 +296,28 @@ async def test_dagster_assets_validate_coordinates_and_load_to_postgis(
             map_client,
             krex_traffic_notices=[
                 _Notice(
+                    occurred_date="2026.05.28",
+                    occurred_time="05:00:00",
+                    incident_type="공사",  # → roadwork
+                    incident_type_code="3",
+                    direction="부산방향",
+                    message="서해안고속도로 105km 지점 도로공사",
+                    point_name="서산나들목",
                     route_no="0150",
                     route_name="서해안고속도로",
-                    direction="부산방향",
-                    incident_type="공사",  # → roadwork
-                    message="서해안고속도로 105km 지점 도로공사",
-                    started_at="20260528",
-                    ended_at="20260530",
+                    process_status="진행",
+                    process_status_code="1",
+                    latitude=None,
+                    longitude=None,
+                    congestion_length=None,
+                    series_no=1,
                     raw={
-                        "routeNo": "0150",
-                        "incidentType": "공사",
-                        "message": "서해안고속도로 105km 지점 도로공사",
-                        "startDate": "20260528",
+                        "accDate": "2026.05.28",
+                        "accHour": "05:00:00",
+                        "accType": "공사",
+                        "smsText": "서해안고속도로 105km 지점 도로공사",
+                        "nosunNM": "0150",
+                        "roadNM": "서해안고속도로",
                     },
                 )
             ],

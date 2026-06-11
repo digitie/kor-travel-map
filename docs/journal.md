@@ -2,6 +2,28 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-11 (claude) — T-212e #378: krex 교통공지 신규 Incident(realTimeSms) 재정렬 + krex/khoa pin bump
+
+T-212e live full reload에서 `feature_notice_krex_traffic_notices`가
+`KrexBadRequestError: endpoint not found`(404) — provider가 호출하던
+`/openapi/trafficapi/incident`는 EX OpenAPI에 존재하지 않는 endpoint였다.
+provider 측은 krex#8/PR#9(`2504a36`)로 실시간 돌발 `openapi/burstInfo/
+realTimeSms`(apiId 0611) repoint + `Incident` 실측 shape 재정렬(live 200/192).
+
+- `KrexTrafficNoticeItem` Protocol/변환을 신규 Incident 16필드로 재정렬:
+  `occurred_date`+`occurred_time` → `valid_start_time`(KST 방어적 파싱,
+  `_parse_krex_occurrence` — 시각 실패 시 자정 강등), 종료 컬럼 없음 →
+  `valid_end_time=None`. 자연키 `occurred_date::occurred_time::route_no::
+  raw_hash`(ADR-009). 좌표 보유 row(실측 36/99)는 Coordinate + reverse
+  geocoding(coordless 전제 완화 — 원천 경도 키는 `altitude`), coordless는
+  노선/지점/방향을 raw_address 단서로. title 합성에 point_name fallback 추가.
+- admin live loader endpoint(`burstInfo/realTimeSms`) + adapter(raw 키
+  `accDate`/`accHour`/`accType(Code)`/`startEndTypeCode`/`smsText`/`accPointNM`/
+  `nosunNM`/`roadNM`/`accProcessNM(Code)`/`latitude`/`altitude`/`lateLength`/
+  `seriesNM`)·fixture·단위/통합 테스트 fake를 새 shape로 갱신.
+- pin bump: `python-krex-api@2504a36`, `python-khoa-api@0ccb5ed`(snake_case
+  live row, khoa#5/PR#6). provider-contract §12, notice-feature-etl §5.1 갱신.
+
 ## 2026-06-11 (claude) — T-212e #376: 주소 검증 모드 strict/drop/off
 
 T-212e live reload에서 표준데이터 박물관(4/1,100여)·관광지(3건)의

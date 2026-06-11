@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Literal
@@ -351,56 +351,82 @@ def test_weather_count_per_metric() -> None:
 class _Notice:
     """`KrexTrafficNoticeItem` Protocol 준수 (provider ``krex.models.Incident`` 정합).
 
-    notice_id/title/notice_type/좌표/valid_from/severity/source_agency는
-    provider에 **없다** — 변환부가 파생한다(ADR-044 reconciliation).
+    realTimeSms(#378) shape — notice_id/title/notice_type/valid/severity/
+    source_agency는 provider에 **없다**(변환부 파생, ADR-044 reconciliation).
+    좌표(latitude/longitude)는 일부 row에만 있다.
     """
 
-    route_no: str | None
-    route_name: str | None
-    direction: str | None
-    incident_type: str | None
-    message: str | None
-    started_at: str | None
-    ended_at: str | None
-    raw: dict[str, Any]
+    occurred_date: str | None = None
+    occurred_time: str | None = None
+    incident_type: str | None = None
+    incident_type_code: str | None = None
+    direction: str | None = None
+    message: str | None = None
+    point_name: str | None = None
+    route_no: str | None = None
+    route_name: str | None = None
+    process_status: str | None = None
+    process_status_code: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    congestion_length: float | None = None
+    series_no: int | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
 
 
 _N_ROADWORK = _Notice(
+    occurred_date="2026.05.28",
+    occurred_time="05:00:00",
+    incident_type="공사",  # alias → normalize_notice_type → roadwork
+    incident_type_code="3",
+    direction="부산방향",
+    message="서해안고속도로 105km 지점 도로공사",
+    point_name="서산나들목",
     route_no="0150",
     route_name="서해안고속도로",
-    direction="부산방향",
-    incident_type="공사",  # alias → normalize_notice_type → roadwork
-    message="서해안고속도로 105km 지점 도로공사",
-    started_at="20260528",
-    ended_at="20260530",
+    process_status="진행",
+    process_status_code="1",
     raw={
-        "routeNo": "0150",
-        "routeName": "서해안고속도로",
-        "incidentType": "공사",
-        "message": "서해안고속도로 105km 지점 도로공사",
-        "startDate": "20260528",
-        "endDate": "20260530",
+        "accDate": "2026.05.28",
+        "accHour": "05:00:00",
+        "accType": "공사",
+        "accTypeCode": "3",
+        "startEndTypeCode": "부산방향",
+        "smsText": "서해안고속도로 105km 지점 도로공사",
+        "accPointNM": "서산나들목",
+        "nosunNM": "0150",
+        "roadNM": "서해안고속도로",
+        "accProcessNM": "진행",
+        "accProcessCode": "1",
     },
 )
 _N_ACCIDENT_ALIAS = _Notice(
+    occurred_date="2026.05.28",
+    occurred_time="09:11:24",
+    incident_type="교통사고",  # alias → normalize_notice_type → traffic_accident
+    incident_type_code="1",
+    direction="서울방향",
+    message="경부고속도로 200km 교통사고",
     route_no="0010",
     route_name="경부고속도로",
-    direction="서울방향",
-    incident_type="교통사고",  # alias → normalize_notice_type → traffic_accident
-    message="경부고속도로 200km 교통사고",
-    started_at=None,
-    ended_at=None,
-    raw={"routeNo": "0010", "incidentType": "교통사고", "message": "200km 사고"},
+    # 좌표 보유 row (실측 36/99) — 원천 키 altitude가 경도(provider 매핑).
+    latitude=36.1234,
+    longitude=127.5678,
+    raw={
+        "accDate": "2026.05.28",
+        "accHour": "09:11:24",
+        "accType": "교통사고",
+        "smsText": "경부고속도로 200km 교통사고",
+        "latitude": 36.1234,
+        "altitude": 127.5678,
+    },
 )
 _N_UNKNOWN_TYPE = _Notice(
-    route_no=None,
-    route_name=None,
-    direction=None,
     incident_type="알수없는돌발",  # NOTICE_TYPES/alias에 없음 → 'traffic' fallback
     message="원인 미상 지정체",
-    started_at="not-a-date",  # 파싱 불가 → valid_from None
-    ended_at=None,
-    raw={"incidentType": "알수없는돌발", "message": "원인 미상 지정체"},
+    occurred_date="not-a-date",  # 파싱 불가 → valid_from None
+    occurred_time=None,
+    raw={"accType": "알수없는돌발", "smsText": "원인 미상 지정체"},
 )
 
 
@@ -417,37 +443,43 @@ def test_traffic_notice_bundle_metadata() -> None:
     assert detail.notice_type == "roadwork"  # type: ignore[union-attr]
     # severity는 Incident에 없음 → None (변환부 고정).
     assert detail.severity is None  # type: ignore[union-attr]
-    # started_at "20260528" → %Y%m%d → KST 자정.
+    # occurred_date "2026.05.28" + occurred_time "05:00:00" → KST aware.
     assert detail.valid_start_time == datetime(  # type: ignore[union-attr]
-        2026, 5, 28, 0, 0, tzinfo=KST
+        2026, 5, 28, 5, 0, tzinfo=KST
     )
-    assert detail.valid_end_time == datetime(  # type: ignore[union-attr]
-        2026, 5, 30, 0, 0, tzinfo=KST
-    )
+    # realTimeSms에는 종료 시각 컬럼이 없음 → 항상 None (#378).
+    assert detail.valid_end_time is None  # type: ignore[union-attr]
     # source_agency는 변환부 고정값(krex EX = 한국도로공사).
     assert detail.source_agency == "한국도로공사"  # type: ignore[union-attr]
     assert detail.payload["domain"] == "highway"  # type: ignore[union-attr]
-    # description = message.
+    # description = message(smsText).
     assert (
         detail.payload["description"]  # type: ignore[union-attr]
         == "서해안고속도로 105km 지점 도로공사"
     )
+    # 신규 필드 payload 보존.
+    assert detail.payload["point_name"] == "서산나들목"  # type: ignore[union-attr]
+    assert detail.payload["process_status"] == "진행"  # type: ignore[union-attr]
+    assert detail.payload["process_status_code"] == "1"  # type: ignore[union-attr]
+    assert detail.payload["incident_type_code"] == "3"  # type: ignore[union-attr]
 
 
 @pytest.mark.unit
-def test_traffic_notice_title_falls_back_to_message() -> None:
-    """route/type가 모두 비면 message를 title로 사용."""
-    notice = _Notice(
-        route_no=None,
-        route_name=None,
-        direction=None,
-        incident_type=None,
+def test_traffic_notice_title_falls_back_to_point_then_message() -> None:
+    """route/type가 모두 비면 point_name → message 순으로 title 사용."""
+    point = _Notice(
         message="원인 미상 지정체 발생",
-        started_at=None,
-        ended_at=None,
-        raw={"message": "원인 미상 지정체 발생"},
+        point_name="동대구분기점",
+        raw={"smsText": "원인 미상 지정체 발생", "accPointNM": "동대구분기점"},
     )
-    [bundle] = traffic_notices_to_bundles([notice], fetched_at=_NOW)
+    [bundle] = traffic_notices_to_bundles([point], fetched_at=_NOW)
+    assert bundle.feature.name == "동대구분기점"
+
+    message_only = _Notice(
+        message="원인 미상 지정체 발생",
+        raw={"smsText": "원인 미상 지정체 발생"},
+    )
+    [bundle] = traffic_notices_to_bundles([message_only], fetched_at=_NOW)
     assert bundle.feature.name == "원인 미상 지정체 발생"
 
 
@@ -471,7 +503,7 @@ def test_traffic_notice_unknown_type_falls_back_to_traffic() -> None:
 
 @pytest.mark.unit
 def test_traffic_notice_unparseable_datetime_is_none() -> None:
-    """started_at 파싱 실패 → valid_start_time None (방어적 파싱)."""
+    """occurred_date 파싱 실패 → valid_start_time None (방어적 파싱)."""
     [bundle] = traffic_notices_to_bundles([_N_UNKNOWN_TYPE], fetched_at=_NOW)
     detail = bundle.feature.detail
     assert detail is not None
@@ -480,17 +512,39 @@ def test_traffic_notice_unparseable_datetime_is_none() -> None:
 
 
 @pytest.mark.unit
+def test_traffic_notice_time_missing_falls_back_to_midnight() -> None:
+    """occurred_time 부재/파싱 실패 → 해당 일자 KST 자정으로 강등."""
+    notice = _Notice(
+        occurred_date="2026.05.28",
+        occurred_time=None,
+        incident_type="공사",
+        route_no="0150",
+        raw={"accDate": "2026.05.28", "accType": "공사"},
+    )
+    [bundle] = traffic_notices_to_bundles([notice], fetched_at=_NOW)
+    detail = bundle.feature.detail
+    assert detail is not None
+    assert detail.valid_start_time == datetime(  # type: ignore[union-attr]
+        2026, 5, 28, 0, 0, tzinfo=KST
+    )
+
+
+@pytest.mark.unit
 def test_traffic_notice_natural_key_stable_and_collision() -> None:
     """파생 자연키는 결정적 — 동일 입력은 동일 feature_id/자연키(충돌),
     raw가 다르면 분리(payload hash 성분)."""
     twin = _Notice(  # _N_ROADWORK과 byte-identical → 동일 자연키.
+        occurred_date="2026.05.28",
+        occurred_time="05:00:00",
+        incident_type="공사",
+        incident_type_code="3",
+        direction="부산방향",
+        message="서해안고속도로 105km 지점 도로공사",
+        point_name="서산나들목",
         route_no="0150",
         route_name="서해안고속도로",
-        direction="부산방향",
-        incident_type="공사",
-        message="서해안고속도로 105km 지점 도로공사",
-        started_at="20260528",
-        ended_at="20260530",
+        process_status="진행",
+        process_status_code="1",
         raw=dict(_N_ROADWORK.raw),
     )
     [b1, b2, b3] = traffic_notices_to_bundles(
@@ -500,26 +554,33 @@ def test_traffic_notice_natural_key_stable_and_collision() -> None:
     assert (
         b1.source_record.source_entity_id == b2.source_record.source_entity_id
     )
+    # 자연키 = occurred_date::occurred_time::route_no::raw_hash (ADR-009 '::').
+    assert b1.source_record.source_entity_id.startswith(
+        "2026.05.28::05:00:00::0150::"
+    )
     # 자연키 구분자는 '|' 미포함(ADR-009), '::' 사용.
     assert "|" not in b1.source_record.source_entity_id
-    assert "::" in b1.source_record.source_entity_id
     # 서로 다른 incident는 분리.
     assert b3.feature.feature_id != b1.feature.feature_id
 
 
 @pytest.mark.unit
 def test_traffic_notice_natural_key_differs_on_raw_change() -> None:
-    """동일 route/type/started_at이라도 raw payload가 다르면 자연키 분리."""
+    """동일 route/발생시각이라도 raw payload가 다르면 자연키 분리."""
     base = _N_ROADWORK
     variant = _Notice(
+        occurred_date=base.occurred_date,
+        occurred_time=base.occurred_time,
+        incident_type=base.incident_type,
+        incident_type_code=base.incident_type_code,
+        direction=base.direction,
+        message=base.message,
+        point_name=base.point_name,
         route_no=base.route_no,
         route_name=base.route_name,
-        direction=base.direction,
-        incident_type=base.incident_type,
-        message=base.message,
-        started_at=base.started_at,
-        ended_at=base.ended_at,
-        raw={**base.raw, "message": "내용 수정됨"},
+        process_status=base.process_status,
+        process_status_code=base.process_status_code,
+        raw={**base.raw, "smsText": "내용 수정됨"},
     )
     [b1, b2] = traffic_notices_to_bundles([base, variant], fetched_at=_NOW)
     assert (
@@ -530,10 +591,28 @@ def test_traffic_notice_natural_key_differs_on_raw_change() -> None:
 
 @pytest.mark.unit
 def test_traffic_notice_no_coord_global_fallback() -> None:
-    [bundle] = traffic_notices_to_bundles([_N_ACCIDENT_ALIAS], fetched_at=_NOW)
-    # Incident에 좌표 없음 → coordless.
+    [bundle] = traffic_notices_to_bundles([_N_ROADWORK], fetched_at=_NOW)
+    # 좌표 없는 row → coordless.
     assert bundle.feature.coord is None
     # coord=None → bjd_code 미상 → feature_id global.
+    assert bundle.feature.feature_id.startswith("f_global_n_")
+    # coordless 위치 단서(raw_address): 노선명 + 돌발지점명 + 방향.
+    assert (
+        bundle.source_record.raw_address == "서해안고속도로 서산나들목 부산방향"
+    )
+
+
+@pytest.mark.unit
+def test_traffic_notice_with_coord_builds_coordinate() -> None:
+    """좌표 보유 row(실측 36/99) → Coordinate (Decimal(str(float))) + raw 좌표 보존."""
+    [bundle] = traffic_notices_to_bundles([_N_ACCIDENT_ALIAS], fetched_at=_NOW)
+    coord = bundle.feature.coord
+    assert coord is not None
+    assert coord.lat == Decimal("36.1234")
+    assert coord.lon == Decimal("127.5678")
+    assert bundle.source_record.raw_latitude == Decimal("36.1234")
+    assert bundle.source_record.raw_longitude == Decimal("127.5678")
+    # reverse_geocoder 미주입 → bjd_code 미상 → 여전히 global feature_id.
     assert bundle.feature.feature_id.startswith("f_global_n_")
 
 

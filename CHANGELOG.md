@@ -5,6 +5,25 @@
 
 ## [Unreleased]
 
+### krex 교통공지 — 신규 Incident(realTimeSms) shape 재정렬 + krex/khoa pin bump (#378, T-212e, 2026-06-11)
+
+- **FIXED**: `KrexTrafficNoticeItem`/`traffic_notices_to_bundles`를 provider
+  `krex.models.Incident` 신규 shape(krex#8/PR#9 — 구 404 endpoint
+  `trafficapi/incident` → `openapi/burstInfo/realTimeSms` repoint)으로 재정렬
+  (ADR-044). 구 `started_at`/`ended_at`은 provider에 더 이상 없음 —
+  `occurred_date`("2023.09.27")+`occurred_time`("09:11:24")에서
+  `valid_start_time`을 파생하고(KST, 방어적 파싱), 종료 컬럼이 없어
+  `valid_end_time`은 None(만료는 transient refresh + `process_status` payload).
+- **CHANGED**: 자연키 `occurred_date::occurred_time::route_no::raw_hash`
+  (ADR-009 `::`). 좌표(`latitude`/`longitude` — 원천 키 `altitude`가 경도)
+  보유 row는 이제 `Feature.coord` + reverse geocoding, coordless row는
+  노선/지점/방향을 `raw_address` 위치 단서로 보존. `point_name`/
+  `incident_type_code`/`process_status(_code)` 등 신규 필드 payload 보존.
+  admin live loader endpoint/adapter(raw 키 `accDate`/`accType`/`smsText`/
+  `nosunNM`/`roadNM` 등)·fixture·테스트 fake 동일 shape 갱신.
+- **CHANGED**: providers extra pin bump — `python-krex-api@2504a36`(realTimeSms
+  재정렬), `python-khoa-api@0ccb5ed`(snake_case live row 파싱, khoa#5/PR#6).
+
 ### Dagster — 주소/좌표 검증 모드 strict/drop/off (#376, T-212e, 2026-06-11)
 
 - **NEW**: settings `dagster_address_validation`(`strict`/`drop`/`off`, 기본 `strict`,
