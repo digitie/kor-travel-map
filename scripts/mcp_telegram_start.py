@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -84,6 +85,9 @@ def main() -> int:
         return 1
 
     args = sys.argv[1:] or ["start"]
+    if os.name == "nt":
+        return subprocess.call([command, *args], env=os.environ)
+
     os.execvpe(command, [command, *args], os.environ)
     return 1
 
