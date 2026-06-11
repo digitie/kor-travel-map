@@ -68,7 +68,6 @@ REQUIRED_RESOURCE_KEYS: Final[tuple[str, ...]] = (
 
 DEFAULT_RESOURCE_VALUES: Final[dict[str, object]] = {
     "fetched_at": None,
-    "strict_address": True,
     "feature_update_failure_notifier": None,
     "mois_dataset_key": "mois_license_features_bulk",
 }
@@ -77,12 +76,14 @@ DEFAULT_RESOURCE_VALUES: Final[dict[str, object]] = {
 # KNPS dataset key는 ``KrtourMapSettings``에서 읽어 fetcher(``fetch_knps_*_records``)와
 # asset의 ``knps_*_dataset_key`` resource가 같은 dataset을 보게 한다(불일치 방지).
 # KMA weather 대상 설정 2종(T-219b)도 같은 메커니즘으로 asset에 주입한다.
+# strict_address는 주소/좌표 검증 모드(strict/drop/off, #376)를 settings에서 읽는다.
 SETTINGS_VALUE_RESOURCES: Final[dict[str, str]] = {
     "knps_point_dataset_key": "knps_point_dataset_key",
     "knps_geometry_dataset_key": "knps_geometry_dataset_key",
     "kma_weather_extra_points": "kma_weather_extra_points",
     "kma_weather_max_grids_per_run": "kma_weather_max_grids_per_run",
     "kma_mid_region_features": "kma_mid_region_features",
+    "strict_address": "dagster_address_validation",
 }
 """resource key → 같은 값을 제공하는 ``KrtourMapSettings`` 속성명."""
 

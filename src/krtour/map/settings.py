@@ -214,6 +214,18 @@ class KrtourMapSettings(BaseSettings):
             "포함 N일. env ``KRTOUR_MAP_KMA_WEATHER_ALERT_LOOKBACK_DAYS``."
         ),
     )
+    dagster_address_validation: Literal["strict", "drop", "off"] = Field(
+        default="strict",
+        description=(
+            "Dagster feature 적재 주소/좌표 검증 정책(#376). ``strict``(error "
+            "이슈 1건이라도 있으면 run 실패 — 종전 동작) / ``drop``(error row만 "
+            "제외하고 적재, 제외 건수·feature_id는 run 메타데이터에 기록) / "
+            "``off``(전부 적재, 검증 요약만 기록). 실데이터에는 소수의 주소↔좌표 "
+            "불일치가 항상 존재하므로 운영은 ``drop`` 권장 — 격리분은 "
+            "``/admin/issues`` geocode retry/manual override로 처리. "
+            "env ``KRTOUR_MAP_DAGSTER_ADDRESS_VALIDATION``."
+        ),
+    )
     mcst_max_items_per_dataset: int = Field(
         default=5000,
         ge=1,
