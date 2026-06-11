@@ -5,6 +5,28 @@
 
 ## [Unreleased]
 
+### krheritage 국가유산 본체 — items live fetcher 배선 + HeritageDetail 재정렬 (#380, T-212e, 2026-06-11)
+
+- **FIXED**: `KrHeritageItem`/`heritage_items_to_bundles`를 provider 실모델
+  `krheritage.models.HeritageDetail`(복합키 `key` 중첩 — 신규
+  `KrHeritageItemKey` Protocol + `key.natural_key`, 명칭 `name_ko`, 유형
+  `category`=ccmaName, 지정일 `designated_at` YYYYMMDD 문자열 방어 파싱)으로
+  재정렬했다(ADR-044, #374/#378과 동일 방향). `geom_wkt`/`raw`는 provider에
+  없는 발명 필드라 제거 — GIS 경계 보강은 후속, raw_data는 Protocol 필드에서
+  구성. 소재지는 `location_text`(detail) 우선 + `region+sigungu` fallback.
+  명칭 빈 row는 skip. 천연기념물(15)은 경계 미배선 동안 place.
+- **NEW**: Dagster `fetch_krheritage_items` live fetcher + `krheritage_items`
+  resource live override(#380 — 종전 guard로 `feature_place_krheritage_items`
+  run 실패). khs.go.kr search/detail은 **keyless**(provider transport는
+  apis.data.go.kr URL에만 serviceKey 주입) — spec credential 요구 제거.
+  settings `krheritage_kind_codes`(기본 `"11,12,13,15,16"` 국보/보물/사적/
+  천연기념물/명승)와 `krheritage_max_items_per_run`(기본 5000, detail 1건당
+  1콜 보호) 신설.
+- **FIXED**: `krheritage_events` live 일부 row의 빈 `sn`이 ADR-009 검증
+  ValueError로 run을 깨던 문제(run `bd92b726`) — `sn`이 비면
+  `title::starts_on::place` 결정적 fallback 자연키 파생(ADR-009 `::`),
+  `sn`도 행사명도 없는 row는 skip.
+
 ### krex 교통공지 — 신규 Incident(realTimeSms) shape 재정렬 + krex/khoa pin bump (#378, T-212e, 2026-06-11)
 
 - **FIXED**: `KrexTrafficNoticeItem`/`traffic_notices_to_bundles`를 provider

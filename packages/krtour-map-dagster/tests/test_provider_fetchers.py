@@ -28,6 +28,7 @@ from krtour.map_dagster.provider_fetchers import (
     fetch_krforest_arboretums,
     fetch_krforest_recreation_forests,
     fetch_krheritage_events,
+    fetch_krheritage_items,
     fetch_mois_license_records,
     fetch_opinet_stations,
     fetch_standard_museums,
@@ -225,21 +226,41 @@ class _FakeEventService:
         yield from self._records
 
 
+class _FakeHeritageSearchService:
+    def __init__(self, details_by_kind: dict[str, list[object]]) -> None:
+        self._details_by_kind = details_by_kind
+        self.calls: list[tuple[int, str]] = []
+
+    def iter_all_details(
+        self, *, page_size: int = 100, **filters: Any
+    ) -> Iterator[object]:
+        kind_code = str(filters.get("ccba_kdcd", ""))
+        self.calls.append((page_size, kind_code))
+        yield from self._details_by_kind.get(kind_code, [])
+
+
 class _FakeHeritageClient:
     instances: list[_FakeHeritageClient] = []
+    details_by_kind: dict[str, list[object]] = {}
 
     def __init__(self, *, api_key: str | None = None, **_kwargs: Any) -> None:
         self.api_key = api_key
         self.closed = False
         self.event = _FakeEventService([object(), object()])
+        self.search = _FakeHeritageSearchService(type(self).details_by_kind)
         _FakeHeritageClient.instances.append(self)
 
     def close(self) -> None:
         self.closed = True
 
 
-def _install_fake_krheritage(monkeypatch: pytest.MonkeyPatch) -> type[_FakeHeritageClient]:
+def _install_fake_krheritage(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    details_by_kind: dict[str, list[object]] | None = None,
+) -> type[_FakeHeritageClient]:
     _FakeHeritageClient.instances = []
+    _FakeHeritageClient.details_by_kind = details_by_kind or {}
     module = ModuleType("krheritage")
     module.__dict__["HeritageClient"] = _FakeHeritageClient
     monkeypatch.setitem(sys.modules, "krheritage", module)
@@ -1323,6 +1344,54 @@ def test_krheritage_fetch_yields_records_and_closes_client(
     assert client.closed is True
 
 
+def test_krheritage_items_fetch_is_keyless_iterates_kind_codes_and_closes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # khs.go.kr search/detail은 keyless (#380) — credential 없이도 fetch.
+    fake = _install_fake_krheritage(
+        monkeypatch,
+        details_by_kind={"11": [object()], "13": [object(), object()]},
+    )
+    settings = KrtourMapSettings(
+        data_go_kr_service_key=None,
+        krheritage_kind_codes="11, 13",
+    )
+
+    records = list(fetch_krheritage_items(settings))
+
+    assert len(records) == 3
+    assert len(fake.instances) == 1
+    client = fake.instances[0]
+    assert client.api_key is None
+    assert client.closed is True
+    # 종목코드별 iter_all_details(page_size=100, ccba_kdcd=...) 1회씩.
+    assert client.search.calls == [(100, "11"), (100, "13")]
+
+
+def test_krheritage_items_fetch_stops_at_max_items_per_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _install_fake_krheritage(
+        monkeypatch,
+        details_by_kind={
+            "11": [object(), object(), object()],
+            "12": [object()],
+        },
+    )
+    settings = KrtourMapSettings(
+        krheritage_kind_codes="11,12",
+        krheritage_max_items_per_run=2,
+    )
+
+    records = list(fetch_krheritage_items(settings))
+
+    # detail 1콜/건 보호 — 상한 2에서 중단, 두 번째 종목코드(12)는 미호출.
+    assert len(records) == 2
+    client = fake.instances[0]
+    assert client.closed is True
+    assert client.search.calls == [(100, "11")]
+
+
 def test_live_resource_returns_iterable_when_credentials_present(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1385,6 +1454,6 @@ def test_datagokr_resource_definition_is_live_not_guard() -> None:
     assert live.description is not None
     assert "live fetcher" in live.description
     assert "live fetcher" not in (guard.description or "")
-    # 아직 wiring 안 된 provider(krheritage_items)는 guard로 남는다.
+    # krheritage_items도 live로 wiring 완료 (#380) — guard 아님.
     heritage_items = PROVIDER_RECORD_RESOURCE_DEFINITIONS["krheritage_items"]
-    assert "guard" in (heritage_items.description or "")
+    assert "live fetcher" in (heritage_items.description or "")

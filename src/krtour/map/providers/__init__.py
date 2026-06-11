@@ -130,6 +130,7 @@ from krtour.map.providers.krheritage import (
     HERITAGE_MARKER_COLOR,
     KrHeritageEvent,
     KrHeritageItem,
+    KrHeritageItemKey,
     classify_heritage_kind,
     heritage_events_to_bundles,
     heritage_items_to_bundles,
@@ -395,6 +396,7 @@ __all__ = [
     "KNPS_PROVIDER_NAME",
     # krheritage (Sprint 3 — 국가유산청, ADR-024/034 ⑥)
     "KrHeritageItem",
+    "KrHeritageItemKey",
     "KrHeritageEvent",
     "heritage_items_to_bundles",
     "heritage_events_to_bundles",
