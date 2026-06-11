@@ -2,6 +2,26 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-11 (claude) — T-220a MCST provider 변환 (KCISA 14 + ODCloud 도서관 2)
+
+신규 provider `python-mcst-api`(origin/master `d06e8d2` 실측) 1단계 — 변환 순수
+함수. `providers/mcst.py` 신설:
+
+- **slug 메타표 1곳**: `MCST_CULTURE_DATASETS`(KCISA 14종 — client 메서드명과
+  동일 slug, dataset_key `mcst_<slug>`) + `MCST_LIBRARY_DATASETS`(ODCloud
+  public/small_libraries). **category 신설 불요** — 계획 §3.2의 "신설 검토"
+  항목 전부 기존 코드로 흡수(미디어 명소/추천 여행지→01000000, 문화시설
+  계열→01040000, 레저→01080400/01080000, 캠핑→03060000, 세계음식→02010000,
+  소공연장→01040300, 회의→05000000, 도서관→01040500), place_kind가 세부 구분.
+- **변환 2종**: 공용 `culture_records_to_bundles(slug=...)`(`CultureRecord`
+  Protocol — name/address/tel/url/lon/lat/category) +
+  `library_records_to_bundles`(RawRecord 한국어 CSV 컬럼 방언을 mcst lib
+  `from_row` 패턴대로 관대 조회). 자연키 `name::address`, 좌표 있으면 reverse
+  bjd 보강, 없으면 주소 텍스트 단서 보존(검증 통과), 이름/위치 단서 없는 row
+  skip. marker P-12 단일색.
+- 게이트: unit 1001 passed(+11) / ruff / mypy --strict 88 files / lint-imports.
+  Dagster 배선(T-220b)·fixture/문서(T-220c)는 후속 PR.
+
 ## 2026-06-11 (claude) — T-219c KMA 중기예보 + 기상특보 — T-219 완결
 
 KMA Dagster 파이프라인 마지막 조각. 중기는 region 체계(격자 X)라 옵션 B가 불가,
