@@ -9,15 +9,25 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential curl \
+    && apt-get install -y --no-install-recommends build-essential curl git \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml README.md ./
 COPY src ./src
 COPY packages/krtour-map-dagster ./packages/krtour-map-dagster
 
-RUN python -m pip install --no-cache-dir --upgrade pip \
-    && python -m pip install --no-cache-dir --prefix=/install . ./packages/krtour-map-dagster
+# `[providers]` extra는 git+https pin이라 builder에 git이 필요하다 (#370).
+# private provider repo(python-datagokr-api)는 BuildKit secret `github_token`으로
+# fetch한다 — GIT_CONFIG_* 환경변수는 이 RUN 수명에서만 존재하므로 토큰이
+# 레이어/최종 이미지에 남지 않는다.
+RUN --mount=type=secret,id=github_token \
+    python -m pip install --no-cache-dir --upgrade pip \
+    && if [ -s /run/secrets/github_token ]; then \
+        export GIT_CONFIG_COUNT=1 \
+            GIT_CONFIG_KEY_0="url.https://x-access-token:$(cat /run/secrets/github_token)@github.com/.insteadOf" \
+            GIT_CONFIG_VALUE_0="https://github.com/"; \
+    fi \
+    && python -m pip install --no-cache-dir --prefix=/install ".[providers]" ./packages/krtour-map-dagster
 
 FROM python:3.12-slim AS runtime
 
