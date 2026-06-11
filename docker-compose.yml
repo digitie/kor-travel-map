@@ -184,6 +184,8 @@ services:
     build:
       context: .
       dockerfile: docker/dagster.Dockerfile
+      secrets:
+        - github_token
     command:
       - /bin/sh
       - -c
@@ -235,6 +237,8 @@ services:
     build:
       context: .
       dockerfile: docker/dagster.Dockerfile
+      secrets:
+        - github_token
     env_file:
       - path: .env
         required: false
@@ -270,3 +274,8 @@ volumes:
   krtour-map-postgres:
   krtour-map-rustfs-data:
     name: ${KRTOUR_MAP_RUSTFS_VOLUME:-krtour-map-rustfs}
+
+# private provider repo fetch용 (#370). 미설정(빈 값) 시 public pin만 fetch.
+secrets:
+  github_token:
+    environment: GITHUB_TOKEN
