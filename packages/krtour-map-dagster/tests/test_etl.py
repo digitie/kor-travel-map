@@ -6,10 +6,14 @@ from dataclasses import dataclass
 from typing import Any
 
 import pytest
+from dagster import Failure
 from krtour.map.infra.feature_repo import FeatureLoadResult
 
 from krtour.map_dagster.etl import load_feature_bundles_for_dagster
-from krtour.map_dagster.validation import FeatureAddressValidationSummary
+from krtour.map_dagster.validation import (
+    FeatureAddressIssue,
+    FeatureAddressValidationSummary,
+)
 
 
 @dataclass(frozen=True)
@@ -83,3 +87,111 @@ async def test_load_feature_bundles_for_dagster_chunks_db_load(
     assert result.load.bundles_total == 5
     assert result.load.features_inserted == 5
     assert context.metadata[-1]["bundles_total"] == 5
+
+
+def _error_summary(items: Any, *, error_feature_id: str) -> FeatureAddressValidationSummary:
+    return FeatureAddressValidationSummary(
+        total=len(items),
+        issue_count=1,
+        error_count=1,
+        warning_count=0,
+        issues=(
+            FeatureAddressIssue(
+                feature_id=error_feature_id,
+                source_record_key="record-key",
+                code="provider_address_mismatch",
+                severity="error",
+                message="mismatch",
+            ),
+        ),
+    )
+
+
+@pytest.mark.parametrize("mode", ["strict", True])
+async def test_load_strict_mode_fails_on_error_issue(
+    monkeypatch: pytest.MonkeyPatch, mode: bool | str
+) -> None:
+    bundles = [_Bundle(_Feature(f"feature-{index}")) for index in range(3)]
+    context = _Context()
+    client = _Client()
+    monkeypatch.setattr(
+        "krtour.map_dagster.etl.validate_feature_bundles_address",
+        lambda items: _error_summary(items, error_feature_id="feature-1"),
+    )
+
+    with pytest.raises(Failure, match="provider_address_mismatch"):
+        await load_feature_bundles_for_dagster(
+            context=context,  # type: ignore[arg-type]
+            client=client,  # type: ignore[arg-type]
+            bundles=bundles,  # type: ignore[arg-type]
+            provider="demo",
+            dataset_key="places",
+            strict_address=mode,
+        )
+    assert client.chunks == []
+
+
+async def test_load_drop_mode_quarantines_error_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundles = [_Bundle(_Feature(f"feature-{index}")) for index in range(3)]
+    context = _Context()
+    client = _Client()
+    monkeypatch.setattr(
+        "krtour.map_dagster.etl.validate_feature_bundles_address",
+        lambda items: _error_summary(items, error_feature_id="feature-1"),
+    )
+
+    result = await load_feature_bundles_for_dagster(
+        context=context,  # type: ignore[arg-type]
+        client=client,  # type: ignore[arg-type]
+        bundles=bundles,  # type: ignore[arg-type]
+        provider="demo",
+        dataset_key="places",
+        strict_address="drop",
+    )
+
+    assert client.chunks == [("feature-0", "feature-2")]
+    assert result.feature_ids == ("feature-0", "feature-2")
+    assert context.metadata[-1]["address_validation_dropped_count"] == 1
+    assert context.metadata[-1]["address_validation_dropped_feature_ids"] == [
+        "feature-1"
+    ]
+
+
+@pytest.mark.parametrize("mode", ["off", False])
+async def test_load_off_mode_loads_all_rows(
+    monkeypatch: pytest.MonkeyPatch, mode: bool | str
+) -> None:
+    bundles = [_Bundle(_Feature(f"feature-{index}")) for index in range(3)]
+    context = _Context()
+    client = _Client()
+    monkeypatch.setattr(
+        "krtour.map_dagster.etl.validate_feature_bundles_address",
+        lambda items: _error_summary(items, error_feature_id="feature-1"),
+    )
+
+    result = await load_feature_bundles_for_dagster(
+        context=context,  # type: ignore[arg-type]
+        client=client,  # type: ignore[arg-type]
+        bundles=bundles,  # type: ignore[arg-type]
+        provider="demo",
+        dataset_key="places",
+        strict_address=mode,
+    )
+
+    assert client.chunks == [("feature-0", "feature-1", "feature-2")]
+    assert result.load.bundles_total == 3
+    assert "address_validation_dropped_count" not in context.metadata[-1]
+
+
+async def test_load_rejects_unknown_validation_mode() -> None:
+    with pytest.raises(ValueError, match="unknown address validation mode"):
+        await load_feature_bundles_for_dagster(
+            context=_Context(),  # type: ignore[arg-type]
+            client=_Client(),  # type: ignore[arg-type]
+            bundles=[],  # type: ignore[arg-type]
+            provider="demo",
+            dataset_key="places",
+            strict_address="lenient",
+        )

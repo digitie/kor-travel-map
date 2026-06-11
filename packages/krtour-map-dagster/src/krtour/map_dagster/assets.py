@@ -811,7 +811,11 @@ async def _load(
     bundles: list[Any],
 ) -> DagsterFeatureLoadResult:
     client = cast("AsyncKrtourMapClient", _resource_object(context, "krtour_map_client"))
-    strict_address = bool(await _resource_value(context, "strict_address", default=True))
+    # bool(True/False) 하위호환 + settings 모드 문자열(strict/drop/off, #376).
+    strict_address = cast(
+        "bool | str",
+        await _resource_value(context, "strict_address", default="strict"),
+    )
     return await load_feature_bundles_for_dagster(
         context=context,
         client=client,

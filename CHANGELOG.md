@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### Dagster — 주소/좌표 검증 모드 strict/drop/off (#376, T-212e, 2026-06-11)
+
+- **NEW**: settings `dagster_address_validation`(`strict`/`drop`/`off`, 기본 `strict`,
+  env `KRTOUR_MAP_DAGSTER_ADDRESS_VALIDATION`) — `strict_address` resource가 이 값을
+  읽는다(bool 하위호환: True→strict, False→off).
+- **NEW**: `drop` 모드 — error-severity 검증 row만 격리하고 나머지를 적재. 격리
+  건수/feature_id는 run 메타데이터(`address_validation_dropped_*`)로 노출(silent
+  cap 금지). 실데이터의 소수 주소↔좌표 불일치가 dataset 전체 적재를 차단하지
+  않게 한다(T-212e 박물관/관광지 live run에서 발견).
+
 ### datagokr 축제 변환 — provider 실모델 재정렬 (#374, 2026-06-11)
 
 - **FIXED**: `cultural_festivals_to_bundles`/`CulturalFestivalItem`을 provider

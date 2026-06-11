@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-11 (claude) — T-212e #376: 주소 검증 모드 strict/drop/off
+
+T-212e live reload에서 표준데이터 박물관(4/1,100여)·관광지(3건)의
+`provider_address_mismatch`/`missing_bjd_code`가 **dataset 전체 적재를 차단**
+(`strict_address`가 `DEFAULT_RESOURCE_VALUES`에 True 하드코딩, override 경로 없음).
+실데이터에는 소수 불일치가 항상 존재 — 운영 설계상 이런 row는 `/admin/issues`
+geocode retry/manual override 흐름으로 처리한다.
+
+- settings `dagster_address_validation`(strict/drop/off, 기본 strict) 신설,
+  `strict_address` resource를 `SETTINGS_VALUE_RESOURCES`로 전환(키 유지, bool
+  하위호환). `drop`은 error row만 격리 + 메타데이터
+  `address_validation_dropped_{count,feature_ids}` 노출.
+- 테스트: etl 모드 5종(strict fail/drop 격리/off 전부 적재/bool 호환/unknown 거부).
+
 ## 2026-06-11 (claude) — T-212e #374: datagokr 축제 변환 provider 실모델 재정렬
 
 T-212e live full reload 1차 시도에서 `feature_event_datagokr_cultural_festivals`가

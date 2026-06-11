@@ -67,6 +67,21 @@ class DagsterFeatureLoadResult:
         )
 
 
+def _normalize_address_validation_mode(value: bool | str) -> str:
+    """``strict_address`` resource 값 → 검증 모드 문자열 (#376).
+
+    bool은 하위호환 — ``True``는 ``strict``, ``False``는 ``off``.
+    """
+    if value is True:
+        return "strict"
+    if value is False:
+        return "off"
+    mode = str(value)
+    if mode not in {"strict", "drop", "off"}:
+        raise ValueError(f"unknown address validation mode: {mode!r}")
+    return mode
+
+
 async def load_feature_bundles_for_dagster(
     *,
     context: AssetExecutionContext,
@@ -74,15 +89,21 @@ async def load_feature_bundles_for_dagster(
     bundles: Sequence[FeatureBundle],
     provider: str,
     dataset_key: str,
-    strict_address: bool = True,
+    strict_address: bool | str = True,
     chunk_size: int = FEATURE_LOAD_CHUNK_SIZE,
 ) -> DagsterFeatureLoadResult:
-    """주소/좌표 검증 후 ``AsyncKrtourMapClient``로 PostGIS에 적재한다."""
+    """주소/좌표 검증 후 ``AsyncKrtourMapClient``로 PostGIS에 적재한다.
+
+    ``strict_address``(모드 ``strict``/``drop``/``off``, bool 하위호환)는
+    error-severity 검증 이슈 처리 정책을 정한다 — ``strict``는 run 실패,
+    ``drop``은 해당 row만 제외 + 메타데이터 기록, ``off``는 전부 적재 (#376).
+    """
     if chunk_size <= 0:
         raise ValueError("chunk_size must be positive")
 
+    mode = _normalize_address_validation_mode(strict_address)
     validation = validate_feature_bundles_address(bundles)
-    if strict_address and validation.has_errors:
+    if mode == "strict" and validation.has_errors:
         _add_output_metadata(context, validation.as_metadata())
         codes = ", ".join(
             issue.code for issue in validation.issues if issue.severity == "error"
@@ -91,6 +112,25 @@ async def load_feature_bundles_for_dagster(
             description=f"Feature 주소/좌표 검증 실패: {codes}",
             metadata=validation.as_metadata(),
         )
+
+    dropped_feature_ids: tuple[str, ...] = ()
+    if mode == "drop" and validation.has_errors:
+        error_feature_ids = {
+            issue.feature_id
+            for issue in validation.issues
+            if issue.severity == "error"
+        }
+        dropped = [
+            bundle
+            for bundle in bundles
+            if bundle.feature.feature_id in error_feature_ids
+        ]
+        bundles = [
+            bundle
+            for bundle in bundles
+            if bundle.feature.feature_id not in error_feature_ids
+        ]
+        dropped_feature_ids = tuple(b.feature.feature_id for b in dropped)
 
     load: FeatureLoadResult | None = None
     for start in range(0, len(bundles), chunk_size):
@@ -107,7 +147,12 @@ async def load_feature_bundles_for_dagster(
         load=load,
         address_validation=validation,
     )
-    _add_output_metadata(context, result.as_metadata())
+    metadata = result.as_metadata()
+    if dropped_feature_ids:
+        # silent cap 금지 — drop 모드에서 격리한 row를 메타데이터로 노출한다.
+        metadata["address_validation_dropped_count"] = len(dropped_feature_ids)
+        metadata["address_validation_dropped_feature_ids"] = list(dropped_feature_ids)
+    _add_output_metadata(context, metadata)
     return result
 
 
