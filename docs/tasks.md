@@ -6,10 +6,30 @@
 
 ## 진행 중인 작업 인덱스 (열린 `[ ]` 항목)
 
-> 총 8건. 상세는 아래 각 섹션. 완료 이력은 [`tasks-done.md`](tasks-done.md).
+> 총 10건. 상세는 아래 각 섹션. 완료 이력은 [`tasks-done.md`](tasks-done.md).
 
 - **다음 (우선순위 순)**
   - [ ] T-212e — 실데이터 full reload + offline upload 실데이터 검증 + 최종 리포트.
+  - [ ] T-219 — **KMA weather Dagster 파이프라인 완결** (변환은 기구현 100%/Dagster 0%
+        — 2026-06-11 실측). 정본
+        `docs/reports/kma-mcst-provider-plan-2026-06-11.md` §2.
+    - [ ] T-219a — 기반: weather 대상 격자/feature 매핑 조회(옵션 B — poi_cache_targets
+          좌표 + `kma_weather_extra_points`, run당 상한) + settings 2필드 + LGT 메트릭
+          메타 등록.
+    - [ ] T-219b — 초단기실황/초단기예보/단기예보 asset+schedule(매시/30분/3h base)
+          + credential guard + fake client 테스트.
+    - [ ] T-219c — 중기(region 107 → 설정 주입 매핑, 미설정 skip) + 특보(record
+          resource → notice 적재) asset + 테스트. ※ ASOS/해수욕장(beach_*)/APIHub
+          표면은 백로그 비고(1차 범위 외).
+  - [ ] T-220 — **MCST(python-mcst-api) 신규 provider 풀스택** — KCISA 14 place
+        dataset(`CultureRecord`) + ODCloud 도서관 2종, marker `P-12`,
+        `DATA_GO_KR_SERVICE_KEY` 공유. 정본 동 문서 §3.
+    - [ ] T-220a — `providers/mcst.py`(slug 메타표 16종 + 공용 변환 + 도서관 변환)
+          + category 신설분 + 단위 테스트.
+    - [ ] T-220b — Dagster fetch/resource/asset/schedule/definitions(자산 2종 —
+          slug별 분리 `_load`) + 카운트 단언 갱신 테스트.
+    - [ ] T-220c — ETL preview fixture + 문서(external-apis/provider-contract/
+          `docs/mcst-feature-etl.md`/CHANGELOG) + dedup pair 검토.
 - **최근 완료**
   - [x] **T-217a~g 전부 완료(2026-06-10~11)** — Phase 6.9 cross-repo 정합성 종결:
         경로 중립화(a, agent T-066 실측 대조 포함) · 철회→inactive+D-12 read 정렬(b) ·
