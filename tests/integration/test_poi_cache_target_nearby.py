@@ -9,7 +9,10 @@ import pytest
 from sqlalchemy import text
 
 from krtour.map.infra import feature_repo
-from krtour.map.infra.poi_cache_target_repo import upsert_poi_cache_target
+from krtour.map.infra.poi_cache_target_repo import (
+    list_active_target_coords,
+    upsert_poi_cache_target,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -149,6 +152,25 @@ async def test_features_nearby_target_filters_and_sorts_by_distance(
     assert page.items[0].distance_m < 50
     assert page.items[0].primary_provider == "python-opinet-api"
     assert page.next_cursor is None
+
+    # T-219a — KMA weather 대상 조회 2종.
+    # 활성 target 좌표: 위에서 만든 target 1건.
+    coords = await list_active_target_coords(migrated_session)
+    assert (126.978, 37.5665) in coords
+    # active place 좌표 전량: deleted_at IS NULL 기준(soft-deleted만 제외 —
+    # status='inactive'여도 미삭제면 날씨를 붙일 수 있다, D-12 read 정합).
+    place_coords = await feature_repo.list_active_place_coords(migrated_session)
+    by_id = {feature_id: (lon, lat) for feature_id, lon, lat in place_coords}
+    assert by_id["feature:nearby:in"] == (126.9782, 37.5667)
+    assert "feature:nearby:inactive" in by_id
+    await migrated_session.execute(
+        text(
+            "UPDATE feature.features SET deleted_at = now() "
+            "WHERE feature_id = 'feature:nearby:far'"
+        )
+    )
+    after = await feature_repo.list_active_place_coords(migrated_session)
+    assert all(feature_id != "feature:nearby:far" for feature_id, _, _ in after)
 
 
 async def test_features_nearby_target_cursor_pages_distance_order(

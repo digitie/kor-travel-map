@@ -174,6 +174,26 @@ class KrtourMapSettings(BaseSettings):
             "env ``OPINET_SCOPE_RADIUS_M``."
         ),
     )
+    kma_weather_extra_points: str | None = Field(
+        default=None,
+        description=(
+            "KMA weather 적재 대상 추가 좌표 ``lon,lat;lon,lat`` (WGS84, 세미콜론 "
+            "구분, T-219a). 기본 대상은 활성 POI cache target 좌표이며 본 설정으로 "
+            "대표 지점을 명시 추가한다. 파서는 "
+            "``krtour.map.providers.kma.parse_weather_extra_points``. "
+            "env ``KMA_WEATHER_EXTRA_POINTS``."
+        ),
+    )
+    kma_weather_max_grids_per_run: int = Field(
+        default=50,
+        ge=1,
+        le=500,
+        description=(
+            "KMA weather asset 1 run당 호출 격자 상한(T-219a) — data.go.kr 일일 "
+            "한도 보호. 초과분은 다음 run으로(정렬 안정). "
+            "env ``KMA_WEATHER_MAX_GRIDS_PER_RUN``."
+        ),
+    )
     krex_ex_api_key: SecretStr | None = Field(
         default=None,
         description="한국도로공사 EX OpenAPI key. source env는 ``KEX_GO_API_KEY``.",

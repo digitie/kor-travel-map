@@ -38,9 +38,30 @@ __all__ = [
     "mark_poi_cache_targets_refreshed",
     "upsert_poi_cache_target",
     "upsert_poi_cache_target_feature_link",
+    "list_active_target_coords",
 ]
 
 OnConflict = Literal["reject", "move"]
+
+_LIST_ACTIVE_TARGET_COORDS_SQL: Final[str] = """
+SELECT lon, lat
+FROM ops.poi_cache_targets
+WHERE deleted_at IS NULL AND update_enabled
+ORDER BY lon, lat
+"""
+
+
+async def list_active_target_coords(
+    session: AsyncSession,
+) -> list[tuple[float, float]]:
+    """활성(미삭제 + update_enabled) POI cache target의 ``(lon, lat)`` 목록.
+
+    KMA weather 적재 대상 격자 산출용(T-219a) — 외부 시스템이 등록한 관심 지점이
+    1차 weather 대상이다(`docs/reports/kma-mcst-provider-plan-2026-06-11.md` §2.1).
+    정렬은 결정적(lon, lat) — 호출자(asset)가 격자 dedupe/상한을 적용한다.
+    """
+    rows = (await session.execute(text(_LIST_ACTIVE_TARGET_COORDS_SQL))).all()
+    return [(float(row.lon), float(row.lat)) for row in rows]
 
 _SCOPE_MODES: Final[frozenset[str]] = frozenset({"center_radius", "sigungu_by_radius"})
 _REFRESH_POLICIES: Final[frozenset[str]] = frozenset(
