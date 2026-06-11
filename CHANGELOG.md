@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### 축제 날짜 역전 격리 + datagokr 핀 범프 (#386, T-212e, 2026-06-11)
+
+- **FIXED**: 전국문화축제 실데이터의 시작/종료 역전 row(원천 오타)가
+  `EventDetail` 도메인 검증 ValidationError로 dataset 전체 적재를 막던 문제 —
+  역전 시 두 날짜를 격리(None)하고 row는 적재(raw_data에 원본 보존).
+- **CHANGED**: `python-datagokr-api` pin `f88e62e` → `26a5be3` — 주차장
+  `basicTime`/`addUnitTime` 분수값(live `'0.5'`) float 허용(provider #6/PR#7).
+
 ### Dagster — mois op/job 동명 충돌로 repository 로드 실패 수정 (#384, T-212e, 2026-06-11)
 
 - **FIXED**: `mois_source_sync` op 이름을 `sync_mois_localdata_source_db`로 변경 —
