@@ -11,6 +11,7 @@ from .assets import FEATURE_LOAD_ASSETS
 from .batch_dag import BATCH_DAG_JOBS
 from .kma_weather import KMA_WEATHER_ASSETS
 from .maintenance import MAINTENANCE_JOBS, MAINTENANCE_SCHEDULES
+from .mcst_features import MCST_FEATURE_ASSETS
 from .mois_source_sync import MOIS_SOURCE_SYNC_JOBS, MOIS_SOURCE_SYNC_SCHEDULES
 from .offline_uploads import OFFLINE_UPLOAD_JOBS
 from .resources import (
@@ -60,6 +61,8 @@ REQUIRED_RESOURCE_KEYS: Final[tuple[str, ...]] = (
     "kma_datagokr_client",
     "kma_mid_region_features",
     "kma_weather_alert_records",
+    "mcst_culture_records",
+    "mcst_library_records",
 )
 """Feature 적재 asset이 요구하는 Dagster resource key."""
 
@@ -122,7 +125,7 @@ def _settings_value_resource(key: str, attr: str) -> ResourceDefinition:
 
 
 defs = Definitions(
-    assets=[*FEATURE_LOAD_ASSETS, *KMA_WEATHER_ASSETS],
+    assets=[*FEATURE_LOAD_ASSETS, *KMA_WEATHER_ASSETS, *MCST_FEATURE_ASSETS],
     jobs=cast(
         "Any",
         [

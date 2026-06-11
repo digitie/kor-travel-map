@@ -214,6 +214,15 @@ class KrtourMapSettings(BaseSettings):
             "포함 N일. env ``KRTOUR_MAP_KMA_WEATHER_ALERT_LOOKBACK_DAYS``."
         ),
     )
+    mcst_max_items_per_dataset: int = Field(
+        default=5000,
+        ge=1,
+        le=100000,
+        description=(
+            "MCST(KCISA/ODCloud) dataset당 1 run 최대 record 수(T-220b) — "
+            "이상 응답/페이지 루프 방어. env ``KRTOUR_MAP_MCST_MAX_ITEMS_PER_DATASET``."
+        ),
+    )
     krex_ex_api_key: SecretStr | None = Field(
         default=None,
         description="한국도로공사 EX OpenAPI key. source env는 ``KEX_GO_API_KEY``.",

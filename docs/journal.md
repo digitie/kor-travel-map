@@ -2,6 +2,24 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-11 (claude) — T-220b MCST Dagster 배선 (fetch/resource/asset/schedule)
+
+T-220a 변환 위에 파이프라인. KCISA 14종이 공통 스키마라 record resource 1개가
+`(slug, record)` 튜플을 stream하고 **asset이 slug별 분리 `_load`** —
+dataset_key(`mcst_<slug>`) 단위 import job/sync state 유지(계획 §3.3).
+
+- fetch 2종: `fetch_mcst_culture_records`(CultureOpenApiClient, slug 14 순회
+  iter_items + `mcst_max_items_per_dataset` 가드 — settings 신설, 기본 5000) /
+  `fetch_mcst_libraries`(DataGoFileApiClient, ODCloud 2 slug 페이지네이션).
+- `mcst_features.py` 신설: `group_records_by_slug` + `_load_grouped` 공통(미등록
+  slug KeyError, 변환 제외분 경고) + asset 2종. slug별
+  `DagsterFeatureLoadResult`는 dataset이 달라 merge 불가 → `McstLoadResult`가
+  dataset별 결과 + 합산 metadata.
+- resource spec/live 2종, REQUIRED_RESOURCE_KEYS 2키, 주 1회 schedule 2종
+  (화 04:30/04:50), definitions assets 합산.
+- 게이트: dagster 129 passed(+8) / unit 1005 / admin 241 / ruff / mypy --strict
+  88+15 files / lint-imports green.
+
 ## 2026-06-11 (claude) — T-220a MCST provider 변환 (KCISA 14 + ODCloud 도서관 2)
 
 신규 provider `python-mcst-api`(origin/master `d06e8d2` 실측) 1단계 — 변환 순수

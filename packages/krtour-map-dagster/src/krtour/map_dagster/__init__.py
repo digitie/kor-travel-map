@@ -12,6 +12,7 @@ from .maintenance import (
     MAINTENANCE_JOBS,
     MAINTENANCE_SCHEDULES,
 )
+from .mcst_features import MCST_FEATURE_ASSETS
 from .offline_uploads import OFFLINE_UPLOAD_JOBS
 from .resources import (
     build_offline_upload_store_from_settings,
@@ -33,6 +34,7 @@ from .validation import (
 __all__ = [
     "FEATURE_LOAD_ASSETS",
     "KMA_WEATHER_ASSETS",
+    "MCST_FEATURE_ASSETS",
     "BATCH_DAG_JOBS",
     "FEATURE_LOAD_JOBS",
     "FEATURE_LOAD_SCHEDULES",

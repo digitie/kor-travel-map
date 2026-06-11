@@ -44,8 +44,11 @@
           11종. **category 신설 불요**(실측 — 전부 기존 코드 매핑, place_kind가
           세부 구분). marker P-12, 자연키 `name::address`, 이름/위치 단서 없는
           row skip.
-    - [ ] T-220b — Dagster fetch/resource/asset/schedule/definitions(자산 2종 —
-          slug별 분리 `_load`) + 카운트 단언 갱신 테스트.
+    - [x] T-220b — Dagster 배선. **완료(2026-06-11)**: fetch 2종(`(slug, record)`
+          튜플 스트림, dataset당 `mcst_max_items_per_dataset` 상한) + record
+          resource 2종(live) + `mcst_features.py` asset 2종(slug별 분리 `_load`,
+          `McstLoadResult` 합산 metadata) + 주 1회 schedule 2종 + definitions
+          배선 + 테스트 8종/카운트 단언 갱신.
     - [ ] T-220c — ETL preview fixture + 문서(external-apis/provider-contract/
           `docs/mcst-feature-etl.md`/CHANGELOG) + dedup pair 검토.
 - **최근 완료**
