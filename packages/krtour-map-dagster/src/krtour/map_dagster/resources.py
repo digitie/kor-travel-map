@@ -13,8 +13,10 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterat
 from dataclasses import dataclass
 from typing import Any, cast
 
+import httpx
 from dagster import InitResourceContext, ResourceDefinition, resource
 from krtour.map.client import AsyncKrtourMapClient
+from krtour.map.geocoding import KraddrGeoRestClient, kraddr_geo_reverse_geocoder
 from krtour.map.infra.db import make_async_engine
 from krtour.map.infra.file_store import (
     S3ObjectStore,
@@ -55,6 +57,7 @@ __all__ = [
     "create_s3_client_from_settings",
     "krtour_map_client_resource",
     "offline_upload_store_resource",
+    "reverse_geocoder_resource",
 ]
 
 
@@ -664,6 +667,29 @@ def _dispose_async_engine(engine: Any) -> None:
 def offline_upload_store_resource(_context: InitResourceContext) -> S3ObjectStore:
     """Dagster ``offline_upload_store`` 기본 resource."""
     return build_offline_upload_store_from_settings(KrtourMapSettings())
+
+
+@resource(
+    description=(
+        "KrtourMapSettings.kraddr_geo_base_url 기반 kraddr-geo reverse_geocoder. "
+        "base URL이 없으면 None."
+    ),
+)
+def reverse_geocoder_resource(_context: InitResourceContext) -> Iterator[Any]:
+    """Dagster ``reverse_geocoder`` 기본 resource."""
+    settings = KrtourMapSettings()
+    if settings.kraddr_geo_base_url is None:
+        yield None
+        return
+
+    http = httpx.AsyncClient(
+        base_url=settings.kraddr_geo_base_url,
+        timeout=settings.kraddr_geo_timeout_seconds,
+    )
+    try:
+        yield kraddr_geo_reverse_geocoder(KraddrGeoRestClient(http))
+    finally:
+        _run_async_resource_teardown(http.aclose())
 
 
 @resource(description="krtour-map app DB에 연결된 AsyncKrtourMapClient.")
