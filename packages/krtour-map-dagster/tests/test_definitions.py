@@ -43,6 +43,9 @@ def test_feature_load_asset_keys_registered() -> None:
         "feature_place_krairport_airports",
         "feature_place_tripmate_agent_youtube",
         "feature_weather_airkorea_air_quality",
+        "feature_weather_kma_ultra_short_nowcast",
+        "feature_weather_kma_ultra_short_forecast",
+        "feature_weather_kma_short_forecast",
         "feature_event_visitkorea_enrichment",
     } <= asset_keys
 

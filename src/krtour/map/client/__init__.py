@@ -104,6 +104,9 @@ from krtour.map.infra.feature_repo import (
     features_nearby_poi_cache_target as repo_features_nearby_poi_cache_target,
 )
 from krtour.map.infra.feature_repo import (
+    list_active_place_coords as repo_list_active_place_coords,
+)
+from krtour.map.infra.feature_repo import (
     search_features as repo_search_features,
 )
 from krtour.map.infra.feature_update_executor import (
@@ -143,6 +146,9 @@ from krtour.map.infra.feature_update_repo import (
     peek_update_requests as repo_peek_update_requests,
 )
 from krtour.map.infra.merge_repo import MergeOutcome, merge_from_review
+from krtour.map.infra.poi_cache_target_repo import (
+    list_active_target_coords as repo_list_active_target_coords,
+)
 from krtour.map.infra.status_repo import StatusCounts, gather_status_counts
 from krtour.map.infra.sync_state_repo import (
     SyncState,
@@ -1309,6 +1315,27 @@ class AsyncKrtourMapClient:
                 sync_scope=sync_scope,
                 next_run_after=next_run_after,
             )
+
+    # ─── KMA weather 대상 조회 (T-219b) ─────────────────────────────────────
+
+    async def list_poi_cache_target_coords(self) -> list[tuple[float, float]]:
+        """활성(미삭제 + update_enabled) POI cache target ``(lon, lat)`` 목록 (read).
+
+        KMA weather 적재 대상 격자 산출용 — 외부 시스템이 등록한 관심 지점이
+        1차 weather 대상이다(`docs/kma-weather-etl.md` §3 옵션 B).
+        """
+        async with self._session_factory() as session:
+            return await repo_list_active_target_coords(session)
+
+    async def list_active_place_coords(self) -> list[tuple[str, float, float]]:
+        """미삭제 place feature의 ``(feature_id, lon, lat)`` 전량 (read).
+
+        ``deleted_at IS NULL`` 기준 — ``status='inactive'``여도 미삭제면 날씨를
+        붙일 수 있다(D-12 read 정합). 호출자(Dagster asset)가 좌표를 KMA 격자로
+        변환해 대상 격자와 일치하는 feature에 ``WeatherValue``를 적재한다.
+        """
+        async with self._session_factory() as session:
+            return await repo_list_active_place_coords(session)
 
     # ─── weather card (T-213e) ───────────────────────────────────────────────
 

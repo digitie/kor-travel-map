@@ -28,13 +28,14 @@
 
 ## 3. KMA 격자 좌표
 
-KMA API는 위경도 대신 격자 좌표 `(nx, ny)` 사용. 변환:
+KMA API는 위경도 대신 격자 좌표 `(nx, ny)` 사용. 변환은 **python-kma-api 책임**
+(LCC DFS 내장) — krtour에 grid 모듈을 두지 않는다(ADR-006, 계획 정본
+`docs/reports/kma-mcst-provider-plan-2026-06-11.md` §2.1):
 
 ```python
-# python-kma-api 또는 본 라이브러리 helper
-from krtour.map.providers.kma.grid import latlon_to_grid
+from kma.grid import to_grid  # Dagster asset에서 lazy import
 
-nx, ny = latlon_to_grid(lat=37.5, lon=127.0)
+nx, ny = to_grid(37.5, 127.0)  # (lat, lon) 순서
 # (60, 127) — 서울 종로구 일대
 ```
 
@@ -43,7 +44,12 @@ nx, ny = latlon_to_grid(lat=37.5, lon=127.0)
   feature와 `sibling_group_id`로 묶음.
 - **옵션 B**: 각 place의 `coord`로 격자 계산 → 같은 격자의 weather를 직접 매핑.
 
-v2 1차: 옵션 B (place 별로 격자 계산하면 매핑 N:1로 깔끔).
+v2 1차: 옵션 B (place 별로 격자 계산하면 매핑 N:1로 깔끔). **대상 한정**
+(T-219a/b): 전 place가 아니라 ① 활성 `poi_cache_targets` 좌표 + ② 설정
+`KRTOUR_MAP_KMA_WEATHER_EXTRA_POINTS`(`lon,lat;lon,lat`)의 distinct 격자만,
+run당 `KRTOUR_MAP_KMA_WEATHER_MAX_GRIDS_PER_RUN`(기본 50) 상한. 매핑된 place
+feature가 없는 격자는 KMA 호출 자체를 생략한다(일일 한도 보호). place는
+`deleted_at IS NULL` 기준(`status='inactive'`여도 날씨 부착 — D-12 read 정합).
 
 ## 4. 단기예보 변환 (TMP, REH, WSD, PTY, SKY 등)
 
@@ -130,8 +136,11 @@ def _latest_base_time(now: datetime) -> tuple[str, str]:
     return now.strftime("%Y%m%d"), f"{base_hour:02d}00"
 ```
 
-`provider_sync_state.cursor`에 `last_base_datetime` 저장 → 같은 base 중복 호출
-회피.
+`provider_sync_state.cursor`에 `base_datetime`(``YYYYMMDDHHMM``) 저장 → 같은
+base 중복 호출 회피(T-219b 구현). 최신 base 계산도 python-kma-api
+`kma.time_utils.latest_{ultra_srt_ncst,ultra_srt_fcst,vilage}_base`를 그대로
+쓴다(발표 지연 내장 — 재구현 금지). KMA 호출/적재 실패 시 cursor 미전진 +
+`record_sync_failure`(신선도 대시보드 T-217g 신호).
 
 ## 7. 적재 흐름 (단기예보 — 30분 cron)
 
@@ -160,17 +169,25 @@ async def kma_short_forecast_etl(client, async_session):
 격자가 많으면 (전국 ~5000) 분당 호출 한도 고려. KMA API 키 한도는 보통 일
 ~10,000 호출. 격자 그룹화 또는 batch 분할.
 
-## 8. Dagster
+## 8. Dagster (T-219b 구현 기준)
+
+`krtour.map_dagster.kma_weather` — 대상 좌표가 DB에서 나오므로 표준
+record-resource 패턴이 아니라 **asset 직접 구현**(resource는
+`kma_weather_client` = `KmaClient` live 인스턴스 + settings 값 2종). 발표
+스케줄 + 가용 지연(§6)에 cron을 맞췄고, 같은 base 재실행은 cursor가 skip.
 
 | asset | dataset_key | cron | group |
 |-------|-------------|------|-------|
-| `weather_kma_ultra_short_nowcast` | `kma_ultra_short_nowcast` | `*/10 * * * *` | `features_weather` |
-| `weather_kma_ultra_short_forecast` | `kma_ultra_short_forecast` | `*/30 * * * *` | `features_weather` |
-| `weather_kma_short_forecast` | `kma_short_forecast` | `*/30 * * * *` | `features_weather` |
-| `weather_kma_mid_forecast` | `kma_mid_forecast` | `0 6,18 * * *` | `features_weather` |
-| `notice_kma_weather_alerts` | `kma_weather_alerts` | `*/10 * * * *` | `features_notice` |
+| `feature_weather_kma_ultra_short_nowcast` | `kma_ultra_short_nowcast` | `45 * * * *` | `features_weather` |
+| `feature_weather_kma_ultra_short_forecast` | `kma_ultra_short_forecast` | `20,50 * * * *` | `features_weather` |
+| `feature_weather_kma_short_forecast` | `kma_short_forecast` | `20 2,5,8,11,14,17,20,23 * * *` | `features_weather` |
+| `weather_kma_mid_forecast` | `kma_mid_forecast` | `0 6,18 * * *` | (T-219c) |
+| `notice_kma_weather_alerts` | `kma_weather_alerts` | 일 1회 | (T-219c) |
 
-ConcurrencyConfig: `kma_api: max_concurrent=1`.
+변환 입력: `KmaClient`의 `ForecastItem`/`WeatherSnapshot`은 base/forecast를
+`datetime`으로 정규화한 모델이라 krtour 변환 Protocol(KMA 공식 필드명
+snake_case row)과 shape이 다르다 — client가 보존한 `raw` payload에서
+`KmaForecastRow`/`KmaNowcastRow`를 만들어 변환에 넘긴다(ADR-044 신뢰·미러).
 
 ## 9. 데이터 양과 인덱스
 

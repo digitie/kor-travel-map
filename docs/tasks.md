@@ -20,8 +20,12 @@
           `list_active_target_coords`(poi_cache_targets) +
           `list_active_place_coords`(deleted_at IS NULL — D-12 read 정합).
           LGT 메트릭은 기등록 확인(실측) — 노후 docstring만 정정.
-    - [ ] T-219b — 초단기실황/초단기예보/단기예보 asset+schedule(매시/30분/3h base)
-          + credential guard + fake client 테스트.
+    - [x] T-219b — 초단기실황/초단기예보/단기예보 asset+schedule. **완료
+          (2026-06-11)**: `map_dagster.kma_weather` — asset 3종(`feature_weather_
+          kma_*`) + KST cron(45분/20·50분/02~23시 8회) + `kma_weather_client`
+          resource(credential guard) + cursor `base_datetime` skip/failure 기록 +
+          fake client 테스트 12종. `python-kma-api@ab1a0b8` 핀 활성화. KmaClient
+          모델↔Protocol shape 차이는 raw payload→row dataclass로 해소.
     - [ ] T-219c — 중기(region 107 → 설정 주입 매핑, 미설정 skip) + 특보(record
           resource → notice 적재) asset + 테스트. ※ ASOS/해수욕장(beach_*)/APIHub
           표면은 백로그 비고(1차 범위 외).

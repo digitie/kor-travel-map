@@ -2,6 +2,33 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-11 (claude) — T-219b KMA weather Dagster asset 3종 (실황/초단기/단기)
+
+T-219a 기반 위에 Dagster 파이프라인 본체. 대상 좌표가 DB(poi_cache_targets)에서
+나오므로 record-resource 패턴 대신 **asset 직접 구현**(계획 정본 §2.3).
+
+- **`map_dagster/kma_weather.py` 신설**: `map_grid_targets`(target→extra 순서
+  dedupe + run 상한 + place 매핑, silent cap 금지 — dropped 카운트/경고) + 공통
+  runner(`provider_sync_state` cursor `base_datetime` skip → 격자별 KMA 호출 →
+  feature별 `WeatherValue` 변환 → `load_weather_values`, 실패 시 cursor 미전진 +
+  `record_sync_failure`) + asset 3종/`KMA_WEATHER_ASSETS`. feature 없는 격자는
+  KMA 호출 생략(일일 한도 보호). cursor 전진은 실제 호출이 있었을 때만.
+- **shape 차이 해소**: `KmaClient`의 `ForecastItem`/`WeatherSnapshot`은
+  base/forecast가 `datetime`으로 정규화돼 krtour 변환 Protocol(snake_case raw
+  row)과 다르다 — client가 보존한 `raw` payload(KMA 공식 필드명)에서
+  `KmaForecastRow`/`KmaNowcastRow`를 만들어 변환에 넘김(ADR-044 신뢰·미러,
+  wrapper 클래스 없음 — ADR-006 `KmaGateway` 금지 예시 준수).
+- **배선**: resource `kma_weather_client`(lazy import + credential guard, 종료 시
+  close) + `SETTINGS_VALUE_RESOURCES`에 extra_points/max_grids 2종 +
+  `REQUIRED_RESOURCE_KEYS` 3키 + schedule spec 3종(45 * / 20,50 * /
+  20 2,5,…,23 — 발표+지연 정렬, 같은 base는 cursor skip). client에
+  `list_poi_cache_target_coords`/`list_active_place_coords` read 메서드.
+- **핀/문서**: `providers` extra `python-kma-api@ab1a0b8`(origin/main) 활성화,
+  provider-contract §12 갱신, kma-weather-etl §3/§6/§8 구현 기준 정정(asset
+  명/cron/대상 한정/`to_grid`는 lib 책임), CHANGELOG.
+- 테스트: `test_kma_weather.py` 12종(매핑/row 빌더/skip·failure·no-feature 경로/
+  endpoint 라우팅/lazy helper/resource guard·close) + definitions asset key 3종.
+
 ## 2026-06-11 (claude) — T-219a KMA weather 기반: 대상 좌표 조회 + settings
 
 T-219 (KMA Dagster 완결)의 기반 task. 계획 정본

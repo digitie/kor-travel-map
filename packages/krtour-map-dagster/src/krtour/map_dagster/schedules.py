@@ -19,6 +19,11 @@ from .assets import (
     feature_place_opinet_stations,
     feature_place_tripmate_agent_youtube,
 )
+from .kma_weather import (
+    feature_weather_kma_short_forecast,
+    feature_weather_kma_ultra_short_forecast,
+    feature_weather_kma_ultra_short_nowcast,
+)
 
 KST_TIMEZONE: Final[str] = "Asia/Seoul"
 """Dagster provider schedule execution timezone."""
@@ -132,6 +137,35 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         provider="tripmate-agent-youtube",
         dataset_key="youtube_place_candidates",
         description="TripMate-agent YouTube 장소 후보 place Feature 일 1회 적재.",
+    ),
+    # KMA weather 3종 (T-219b) — 발표 스케줄 + 가용 지연(docs/kma-weather-etl.md §6)
+    # 에 맞춘 cron. 같은 base 재실행은 provider_sync_state cursor가 skip한다.
+    FeatureLoadScheduleSpec(
+        asset=feature_weather_kma_ultra_short_nowcast,
+        job_name="feature_weather_kma_ultra_short_nowcast_job",
+        schedule_name="feature_weather_kma_ultra_short_nowcast_hourly_schedule",
+        cron_schedule="45 * * * *",
+        provider="python-kma-api",
+        dataset_key="kma_ultra_short_nowcast",
+        description="KMA 초단기실황 WeatherValue 매시 적재(발표 HH:00 + 40분 지연 후).",
+    ),
+    FeatureLoadScheduleSpec(
+        asset=feature_weather_kma_ultra_short_forecast,
+        job_name="feature_weather_kma_ultra_short_forecast_job",
+        schedule_name="feature_weather_kma_ultra_short_forecast_half_hourly_schedule",
+        cron_schedule="20,50 * * * *",
+        provider="python-kma-api",
+        dataset_key="kma_ultra_short_forecast",
+        description="KMA 초단기예보 WeatherValue 30분 간격 적재(발표 HH:30 + 15분 지연 후).",
+    ),
+    FeatureLoadScheduleSpec(
+        asset=feature_weather_kma_short_forecast,
+        job_name="feature_weather_kma_short_forecast_job",
+        schedule_name="feature_weather_kma_short_forecast_3h_schedule",
+        cron_schedule="20 2,5,8,11,14,17,20,23 * * *",
+        provider="python-kma-api",
+        dataset_key="kma_short_forecast",
+        description="KMA 단기예보 WeatherValue 일 8회 적재(발표 02~23시 3시간 간격 + 10분 지연 후).",
     ),
 )
 """현재 구현된 Feature provider asset의 기본 schedule 사양."""
