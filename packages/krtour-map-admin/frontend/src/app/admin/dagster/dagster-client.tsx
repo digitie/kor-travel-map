@@ -27,7 +27,8 @@ import {
 import { AdminShell } from "@/components/admin-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button-variants";
 import {
   Card,
   CardAction,
@@ -819,7 +820,7 @@ export function DagsterAdminClient() {
                 <iframe
                   className="h-[44rem] w-full min-w-[44rem] border-0 bg-background"
                   data-testid="dagster-embed"
-                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"
+                  sandbox="allow-scripts allow-forms allow-popups allow-downloads"
                   src={DAGSTER_UI_URL}
                   title="Dagster management UI"
                 />

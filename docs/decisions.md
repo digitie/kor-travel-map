@@ -1832,9 +1832,10 @@ ADR-005/ADR-020에서 `krtour-map-admin` 패키지는 "디버그 + 내부망 전
 
 ## ADR-036: `maplibre-vworld-js` 라이브러리 분리 + v0.1.0 — 공통 기능은 상류, TripMate 전용만 본 저장소
 
-> **현행 핀(2026-06-06 기준)**: `maplibre-vworld-js#v0.1.2` + Next.js 16. 본 ADR
-> 제목/초기 본문의 `v0.1.0`은 채택 당시 값이며, v0.1.2 + Next.js 16 정합은 아래
-> "Amendment (2026-05-31, PR#114)"가 정본이다.
+> **현행 핀(2026-06-11 기준)**: `maplibre-vworld-js#v0.1.3` + Next.js 16. 본 ADR
+> 제목/초기 본문의 `v0.1.0`은 채택 당시 값이며, v0.1.2 + Next.js 16 정합은
+> "Amendment (2026-05-31, PR#114)", v0.1.3 docs-sync patch 정합은
+> "Amendment (2026-06-11)"가 정본이다.
 
 - **상태**: accepted (PR#33, 2026-05-27)
 - **날짜**: 2026-05-27
@@ -1915,14 +1916,22 @@ maki marker + 카테고리 토글 + bounds 검색 등 공통 기능이 빠르게
 
 ### Amendment (2026-05-31, PR#114) — v0.1.2 + Next.js 16 최신화
 
-로컬 `F:\dev\maplibre-vworld-js` 최신 `main`/tag를 확인한 결과
-`maplibre-vworld-js` 최신 릴리스는 **v0.1.2**다. 본 저장소 frontend와
+로컬 `F:\dev\maplibre-vworld-js` 당시 `main`/tag를 확인한 결과
+`maplibre-vworld-js` 최신 릴리스는 **v0.1.2**였다. 본 저장소 frontend와
 `@krtour/map-marker-react`의 git URL 핀을 `#v0.1.2`로 올리고, Next.js는 공식
 v16 업그레이드 가이드에 따라 **Next.js 16 + ESLint CLI(flat config)** 기준으로
 정렬한다.
 
 - `next lint`는 Next.js 16에서 제거되었으므로 `npm run lint`는 `eslint .`를
   실행한다.
+
+### Amendment (2026-06-11) — v0.1.3 docs-sync patch 핀 정합
+
+로컬 `F:\dev\maplibre-vworld-js`와 원격 tag를 확인한 결과 최신 릴리스는 **v0.1.3**다.
+tag 주석 기준 v0.1.3은 v0.1.2와 `src/dist`가 같은 문서 동기화 patch release지만,
+consumer pin과 lockfile drift를 피하기 위해 본 저장소 frontend, root `package-lock.json`,
+`@krtour/map-marker-react` peer/dev dependency, 진입 문서의 현재 기준값을 모두
+`github:digitie/maplibre-vworld-js#v0.1.3`으로 맞춘다.
 - `packages/krtour-map-admin/frontend/eslint.config.mjs`는
   `eslint-config-next/core-web-vitals` + `eslint-config-next/typescript` flat config를
   사용한다.

@@ -97,21 +97,6 @@ function fetchPoiCacheTargets(
   );
 }
 
-function fetchPoiCacheTarget(
-  externalSystem: string,
-  targetKey: string,
-  includeDeleted = false,
-): Promise<PoiCacheTargetResponse> {
-  return getJson<PoiCacheTargetResponse>(
-    pathWithQuery(
-      `/v1/admin/poi-cache-targets/${encodeURIComponent(
-        externalSystem,
-      )}/${encodeURIComponent(targetKey)}`,
-      { include_deleted: includeDeleted },
-    ),
-  );
-}
-
 function upsertPoiCacheTarget(
   externalSystem: string,
   targetKey: string,
@@ -159,24 +144,6 @@ export function usePoiCacheTargets(params: PoiCacheTargetListParams = {}) {
   return useQuery<PoiCacheTargetListResponse, Error>({
     queryKey: ["poi-cache-targets", params],
     queryFn: () => fetchPoiCacheTargets(params),
-    staleTime: 30_000,
-  });
-}
-
-export function usePoiCacheTarget(
-  externalSystem: string | null,
-  targetKey: string | null,
-  includeDeleted = false,
-) {
-  return useQuery<PoiCacheTargetResponse, Error>({
-    queryKey: ["poi-cache-target", externalSystem, targetKey, includeDeleted],
-    queryFn: () =>
-      fetchPoiCacheTarget(externalSystem as string, targetKey as string, includeDeleted),
-    enabled:
-      externalSystem !== null &&
-      externalSystem.length > 0 &&
-      targetKey !== null &&
-      targetKey.length > 0,
     staleTime: 30_000,
   });
 }

@@ -72,14 +72,6 @@ function fetchFeatureUpdateRequests(
   );
 }
 
-function fetchFeatureUpdateRequest(
-  requestId: string,
-): Promise<FeatureUpdateRequestDetailResponse> {
-  return getJson<FeatureUpdateRequestDetailResponse>(
-    `/v1/admin/feature-update-requests/${encodeURIComponent(requestId)}`,
-  );
-}
-
 function createFeatureUpdateRequest(
   body: FeatureUpdateRequestCreateRequest,
 ): Promise<FeatureUpdateRequestCreateResponse> {
@@ -122,19 +114,6 @@ export function useFeatureUpdateRequests(
       return hasActiveRequest ? 2_000 : false;
     },
     staleTime: 5_000,
-  });
-}
-
-export function useFeatureUpdateRequest(requestId: string | null) {
-  return useQuery<FeatureUpdateRequestDetailResponse, Error>({
-    queryKey: ["feature-update-request", requestId],
-    queryFn: () => fetchFeatureUpdateRequest(requestId as string),
-    enabled: requestId !== null && requestId.length > 0,
-    refetchInterval: (query) => {
-      const status = query.state.data?.data.status;
-      return status === "queued" || status === "running" ? 2_000 : false;
-    },
-    staleTime: 2_000,
   });
 }
 

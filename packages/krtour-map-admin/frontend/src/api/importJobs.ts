@@ -42,12 +42,6 @@ function fetchImportJobs(
   );
 }
 
-function fetchImportJob(jobId: string): Promise<OpsImportJobResponse> {
-  return getJson<OpsImportJobResponse>(
-    `/v1/ops/import-jobs/${encodeURIComponent(jobId)}`,
-  );
-}
-
 export function useImportJobs(params: ImportJobsListParams = {}) {
   return useQuery<OpsImportJobsListResponse, Error>({
     queryKey: ["import-jobs", params],
@@ -59,18 +53,5 @@ export function useImportJobs(params: ImportJobsListParams = {}) {
       return hasRunningJob ? 2_000 : false;
     },
     staleTime: 5_000,
-  });
-}
-
-export function useImportJob(jobId: string | null) {
-  return useQuery<OpsImportJobResponse, Error>({
-    queryKey: ["import-job", jobId],
-    queryFn: () => fetchImportJob(jobId as string),
-    enabled: jobId !== null && jobId.length > 0,
-    refetchInterval: (query) => {
-      const status = query.state.data?.data.status;
-      return status === "queued" || status === "running" ? 2_000 : false;
-    },
-    staleTime: 2_000,
   });
 }

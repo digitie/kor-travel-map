@@ -20,7 +20,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { FormField, FormSelect } from "@/components/ui/form-field";
-import { NativeSelectOption } from "@/components/ui/native-select";
+import { NativeSelectOption } from "@/components/ui/native-select-option";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,

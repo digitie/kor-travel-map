@@ -53,7 +53,7 @@ rename 완료(PR#148). 역할은 "debug UI"를 넘어 krtour-map **admin/API 프
   Postgres host `15433` · RustFS S3 `9003`/console `9004`.
 - **geocoding 정본**: kraddr-geo REST v2 `POST /v2/{reverse,geocode}`, 로컬 기본
   `http://127.0.0.1:9001`(ADR-046).
-- **frontend 정본**: Next.js 16 + React 19 + `maplibre-vworld-js#v0.1.2`(ADR-036),
+- **frontend 정본**: Next.js 16 + React 19 + `maplibre-vworld-js#v0.1.3`(ADR-036),
   Windows Playwright e2e.
 - **coverage gate**: ADR-032 단계 상향 일정(Sprint 4 기준 `fail_under=80`).
 - **provider 9단계 구현 순서**(ADR-034): 축제 → 날씨 → 유가 → 휴게소 →

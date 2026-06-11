@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### Frontend — React Doctor + maplibre-vworld-js 정합 (2026-06-11)
+
+- **CHANGED**: admin frontend React Doctor full scan 기준 optional warning까지 0건이 되도록
+  UI primitive export 구조, React 19 ref 전달, iframe sandbox, 미사용 hook export를 정리했다.
+- **CHANGED**: `maplibre-vworld-js` consumer pin을 최신 tag `v0.1.3`으로 맞추고,
+  `@krtour/map-marker-react` peer/dev dependency와 root lockfile의 `maplibre-vworld`
+  항목을 같은 값으로 정렬했다.
+
 ### MCST 신규 provider — KCISA 14 + ODCloud 도서관 2 (T-220, 2026-06-11)
 
 - **NEW**: `providers/mcst.py` — slug 메타표 16종(`mcst_<slug>`) + 공용

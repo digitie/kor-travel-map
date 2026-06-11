@@ -18,13 +18,13 @@ feature 운영, provider 적재, dedup/결측 검토, 오프라인 업로드를 
 
 - **Next.js 16** (App Router) + **React 19** + **TypeScript** —
   `kraddr-geo-ui` / TripMate `apps/web`와 동일 stack
-- **maplibre-vworld** v0.1.2 (`github:digitie/maplibre-vworld-js#v0.1.2`) —
+- **maplibre-vworld** v0.1.3 (`github:digitie/maplibre-vworld-js#v0.1.3`) —
   VWorld 지도 React 컴포넌트 (ADR-036). **npm 미게시** — git URL + release
   tag로 핀 (ADR-043 형제 라이브러리 패턴). 공개 API: `VWorldMap`(apiKey/
   center/zoom) + `MapStore`/`useMap*` hook + `MakiMarker`/`PlaceMarker`/
   `PriceMarker`/`WeatherMarker` 등 마커 13종 + `ClusterLayer`/`RouteLine`.
-- **maplibre-gl** ^5.24.0 — WebGL 지도 엔진 (maplibre-vworld v0.1.2 peer)
-- **zod** ^4.4.3 — 좌표 검증 (maplibre-vworld v0.1.2 peer — schemas 모듈)
+- **maplibre-gl** ^5.24.0 — WebGL 지도 엔진 (maplibre-vworld v0.1.3 peer)
+- **zod** ^4.4.3 — 좌표 검증 (maplibre-vworld v0.1.3 peer — schemas 모듈)
 - **React Hook Form** — 수동 feature 추가, provider 실행, offline upload,
   feature update request form 상태
 - **shadcn/ui** — admin UI primitive(Button/Input/Select/Dialog/Sheet/Tabs/Table/

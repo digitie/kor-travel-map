@@ -166,7 +166,7 @@ export function ProvidersFreshnessClient() {
                     className="h-32 text-center text-muted-foreground"
                     colSpan={7}
                   >
-                    sync state가 없습니다 — 아직 provider 적재가 실행되지 않았습니다.
+                    sync state가 없습니다. 아직 provider 적재가 실행되지 않았습니다.
                   </TableCell>
                 </TableRow>
               ) : null}
