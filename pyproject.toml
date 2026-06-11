@@ -86,14 +86,16 @@ providers = [
   # 를 lazy import — runtime 의존 활성화 (origin/main ab1a0b8).
   "python-kma-api @ git+https://github.com/digitie/python-kma-api.git@ab1a0b880f9d0b0881edfa7f8a99eebd24ae45a0",
   "python-airkorea-api @ git+https://github.com/digitie/python-airkorea-api.git@22996a457fa2c845101b0bbbf8167e655e8d562d",
-  "python-khoa-api @ git+https://github.com/digitie/python-khoa-api.git@0c4c07fa7e5afd9040c9ee6dbcd178cc78c1ba5c",
+  # khoa: snake_case live row 파싱 (khoa#5/PR#6).
+  "python-khoa-api @ git+https://github.com/digitie/python-khoa-api.git@0ccb5ed90da5886a2d346b33f1019efd2719e0bc",
   # python-krforest-api는 산악기상 + Sprint 3 trails 양쪽 사용 (아래 §2.5와 동일 lib).
   #
   # ── Sprint 2 §2.3 — opinet 유가 (place + price) ───────────────────────
   "python-opinet-api @ git+https://github.com/digitie/python-opinet-api.git@bb6385caebe204b781a3ba9544efa04d5fe68671",
   #
   # ── Sprint 2 §2.4 — krex 휴게소 (multi-kind) ──────────────────────────
-  "python-krex-api @ git+https://github.com/digitie/python-krex-api.git@72b74d7a23bd7f0c96f13975acdc5dd30b4f6809",
+  # krex: incident → openapi/burstInfo/realTimeSms 재정렬 (krex PR#9, #378).
+  "python-krex-api @ git+https://github.com/digitie/python-krex-api.git@2504a3608dec7535ec32ce983d13d5cbc1da27ae",
   #
   # ── Sprint 2 §2.1 (enrichment 2차, ADR-042) ───────────────────────────
   # visitkorea TourAPI는 datagokr 1차 source의 enrichment (image/description/

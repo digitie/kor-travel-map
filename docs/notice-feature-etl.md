@@ -118,15 +118,19 @@ payload = {"krex_grade": "Level3", "krex_grade_desc": "차량 통행 통제"}
 
 ### 5.1 krex_traffic_notices
 
+provider `krex.models.Incident`(`openapi/burstInfo/realTimeSms`, apiId 0611 —
+krex#8/PR#9, #378) 기준:
+
 | provider 필드 | NoticeDetail 매핑 |
 |--------------|------------------|
-| `incident_type` | `notice_type` (사고/공사/통제 → 정규화) |
-| `grade` | `severity` (0-5 정규화) |
-| `start_time` / `end_time` | `valid_start_time` / `valid_end_time` |
-| `road_name` + `direction` | `payload.road_info` |
-| `description` | `Feature.detail.description` |
+| `incident_type` (돌발유형명) | `notice_type` (정규화, 실패 시 `traffic` fallback) |
+| — (등급 컬럼 없음) | `severity = None` |
+| `occurred_date` + `occurred_time` | `valid_start_time` (KST; 종료 컬럼 없음 → `valid_end_time = None`) |
+| `route_no`/`route_name`/`point_name`/`direction`/`process_status(_code)` | `payload` 보존 |
+| `message` (smsText) | `payload.description` |
 
-좌표: 사고/공사 지점 → `Feature.coord`.
+좌표: `latitude`/`longitude`(원천 키 `altitude`가 경도) — 일부 row만 보유.
+있으면 `Feature.coord`, 없으면 coordless(노선/지점/방향이 `raw_address` 단서).
 
 ### 5.2 kma_weather_alerts
 

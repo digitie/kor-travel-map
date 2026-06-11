@@ -368,16 +368,24 @@ class _KrexNoticeAdapter:
 
     ADR-044: notice_id/title/notice_type/효력기간/severity/source_agency 등 파생은
     본 lib 변환부(`traffic_notices_to_bundles`)가 전담한다 — adapter는 provider
-    ``_incident`` 파서와 동일하게 raw 필드만 mirror한다.
+    ``_incident`` 파서(realTimeSms, #378)와 동일하게 raw 필드만 mirror한다.
     """
 
+    occurred_date: str | None
+    occurred_time: str | None
+    incident_type: str | None
+    incident_type_code: str | None
+    direction: str | None
+    message: str | None
+    point_name: str | None
     route_no: str | None
     route_name: str | None
-    direction: str | None
-    incident_type: str | None
-    message: str | None
-    started_at: str | None
-    ended_at: str | None
+    process_status: str | None
+    process_status_code: str | None
+    latitude: float | None
+    longitude: float | None
+    congestion_length: float | None
+    series_no: int | None
     raw: dict[str, Any]
 
 
@@ -388,6 +396,26 @@ def _first_str(item: dict[str, Any], *keys: str) -> str | None:
         if value is not None and str(value).strip():
             return str(value).strip()
     return None
+
+
+def _float_or_none(value: Any) -> float | None:
+    """raw 값 → float (빈 문자열/비숫자는 None — 방어적, provider 파서 mirror)."""
+    if value is None or str(value).strip() == "":
+        return None
+    try:
+        return float(str(value).strip())
+    except ValueError:
+        return None
+
+
+def _int_or_none(value: Any) -> int | None:
+    """raw 값 → int (빈 문자열/비숫자는 None — 방어적, provider 파서 mirror)."""
+    if value is None or str(value).strip() == "":
+        return None
+    try:
+        return int(float(str(value).strip()))
+    except ValueError:
+        return None
 
 
 async def _krex_call(
@@ -519,20 +547,30 @@ def _adapt_krex_weather_row(
 
 
 def _adapt_krex_notice(raw: dict[str, Any]) -> _KrexNoticeAdapter:
-    """raw EX incident dict → provider ``Incident`` shape mirror (ADR-044).
+    """raw EX 돌발(realTimeSms) dict → provider ``Incident`` shape mirror (ADR-044).
 
-    provider ``krex.client._incident`` 파서와 동일한 raw 키를 읽어 그대로 옮긴다.
-    notice_type 매핑·id/title 합성·효력기간 파싱·source_agency 부여 등 모든 파생은
-    본 lib 변환부(`traffic_notices_to_bundles`)가 전담하므로 adapter는 mirror만 한다.
+    provider ``krex.client._incident`` 파서(#378, ``openapi/burstInfo/realTimeSms``)
+    와 동일한 raw 키를 읽어 그대로 옮긴다 — 경도는 **원천 키 ``altitude``**(포털
+    명세 '돌발시작이정경도', 고도 아님). notice_type 매핑·title 합성·발생 시각
+    파싱·source_agency 부여 등 모든 파생은 본 lib 변환부
+    (`traffic_notices_to_bundles`)가 전담하므로 adapter는 mirror만 한다.
     """
     return _KrexNoticeAdapter(
-        route_no=_first_str(raw, "routeNo"),
-        route_name=_first_str(raw, "routeName"),
-        direction=_first_str(raw, "dirType", "directionCode"),
-        incident_type=_first_str(raw, "incidentType", "eventType"),
-        message=_first_str(raw, "message", "contents", "incidentContent"),
-        started_at=_first_str(raw, "startDate", "startTime"),
-        ended_at=_first_str(raw, "endDate", "endTime"),
+        occurred_date=_first_str(raw, "accDate"),
+        occurred_time=_first_str(raw, "accHour"),
+        incident_type=_first_str(raw, "accType"),
+        incident_type_code=_first_str(raw, "accTypeCode"),
+        direction=_first_str(raw, "startEndTypeCode"),
+        message=_first_str(raw, "smsText"),
+        point_name=_first_str(raw, "accPointNM"),
+        route_no=_first_str(raw, "nosunNM"),
+        route_name=_first_str(raw, "roadNM"),
+        process_status=_first_str(raw, "accProcessNM"),
+        process_status_code=_first_str(raw, "accProcessCode"),
+        latitude=_float_or_none(raw.get("latitude")),
+        longitude=_float_or_none(raw.get("altitude")),
+        congestion_length=_float_or_none(raw.get("lateLength")),
+        series_no=_int_or_none(raw.get("seriesNM")),
         raw=raw,
     )
 
@@ -622,11 +660,15 @@ async def krex_rest_area_weather_live(
 async def krex_traffic_notices_live(
     settings: AdminSettings, params: dict[str, str]
 ) -> list[dict[str, Any]]:
-    """krex 교통 공지/돌발 raw API → list[FeatureBundle dict] (notice)."""
+    """krex 교통 공지/돌발 raw API → list[FeatureBundle dict] (notice).
+
+    구 ``openapi/trafficapi/incident``는 포털에서 제거되어 404 — 실시간 돌발
+    ``openapi/burstInfo/realTimeSms``(apiId 0611)를 호출한다(#378).
+    """
     raw_items = await _krex_call(
-        "openapi/trafficapi/incident",
+        "openapi/burstInfo/realTimeSms",
         service_key=_krex_key(settings),
-        params={k: v for k, v in params.items() if k in {"routeNo", "incidentType"}},
+        params={k: v for k, v in params.items() if k in {"accTypeCode"}},
     )
     adapted = [_adapt_krex_notice(r) for r in raw_items]
     bundles = await traffic_notices_to_bundles(

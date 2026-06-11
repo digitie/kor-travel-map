@@ -163,35 +163,65 @@ def test_weather_adapter_passes_transform() -> None:
 
 @pytest.mark.unit
 def test_adapt_notice_mirrors_incident_fields() -> None:
-    """adapter는 provider ``Incident`` shape으로 raw 필드만 mirror (ADR-044) —
-    notice_type 매핑·id/title 합성·효력기간 파싱은 변환부 책임."""
+    """adapter는 provider ``Incident``(realTimeSms, #378) shape으로 raw 필드만
+    mirror (ADR-044) — notice_type 매핑·title 합성·발생 시각 파싱은 변환부 책임.
+    경도는 원천 키 ``altitude``(포털 명세 '돌발시작이정경도')에서 온다."""
     raw = {
-        "routeNo": "0010",
-        "routeName": "경부선",
-        "dirType": "0",
-        "incidentType": "공사",
-        "message": "경부선 양방향 정체",
-        "startDate": "20260528",
-        "endDate": "20260529",
+        "accDate": "2023.09.27",
+        "accHour": "09:11:24",
+        "accType": "이벤트/홍보",
+        "accTypeCode": "15",
+        "startEndTypeCode": "대구방향",
+        "smsText": "대구부산선 동대구 부근 이벤트 진행 중",
+        "accPointNM": "동대구",
+        "nosunNM": "0552",
+        "roadNM": "대구부산선",
+        "accProcessNM": "진행",
+        "accProcessCode": "1",
+        "latitude": 35.88,
+        "altitude": 128.61,
+        "lateLength": 1.5,
+        "seriesNM": 7,
     }
     n = _adapt_krex_notice(raw)
-    assert n.route_no == "0010"
-    assert n.route_name == "경부선"
-    assert n.incident_type == "공사"
-    assert n.message == "경부선 양방향 정체"
-    assert n.started_at == "20260528"
-    assert n.ended_at == "20260529"
+    assert n.occurred_date == "2023.09.27"
+    assert n.occurred_time == "09:11:24"
+    assert n.incident_type == "이벤트/홍보"
+    assert n.incident_type_code == "15"
+    assert n.direction == "대구방향"
+    assert n.message == "대구부산선 동대구 부근 이벤트 진행 중"
+    assert n.point_name == "동대구"
+    assert n.route_no == "0552"
+    assert n.route_name == "대구부산선"
+    assert n.process_status == "진행"
+    assert n.process_status_code == "1"
+    assert n.latitude == 35.88
+    assert n.longitude == 128.61  # 원천 키 altitude → 경도.
+    assert n.congestion_length == 1.5
+    assert n.series_no == 7
     assert n.raw is raw
+
+
+@pytest.mark.unit
+def test_adapt_notice_missing_coords_and_numbers_are_none() -> None:
+    """좌표/숫자 컬럼 부재·비숫자 → None (방어적, 실측 36/99 row만 좌표 보유)."""
+    raw = {"accDate": "2023.09.27", "accType": "공사", "lateLength": "-"}
+    n = _adapt_krex_notice(raw)
+    assert n.latitude is None
+    assert n.longitude is None
+    assert n.congestion_length is None
+    assert n.series_no is None
 
 
 @pytest.mark.unit
 async def test_notice_adapter_passes_transform() -> None:
     """adapter 결과가 변환부를 통과 → notice Feature + 파생값(source_agency)."""
     raw = {
-        "routeName": "경부선",
-        "incidentType": "공사",
-        "message": "정체",
-        "startDate": "20260528",
+        "accDate": "2026.05.28",
+        "accHour": "05:00:00",
+        "accType": "공사",
+        "smsText": "정체",
+        "roadNM": "경부선",
     }
     bundles = await traffic_notices_to_bundles(
         [_adapt_krex_notice(raw)], fetched_at=_OBS  # type: ignore[list-item]
@@ -203,3 +233,5 @@ async def test_notice_adapter_passes_transform() -> None:
     assert detail is not None
     assert detail.notice_type == "roadwork"  # type: ignore[union-attr]
     assert detail.source_agency == "한국도로공사"  # type: ignore[union-attr]
+    assert detail.valid_start_time is not None  # type: ignore[union-attr]
+    assert detail.valid_end_time is None  # type: ignore[union-attr]

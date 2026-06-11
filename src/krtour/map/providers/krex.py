@@ -35,25 +35,29 @@ ADR 참조
 - 가격은 `REST_AREA_FOOD`(식음료) 또는 `REST_AREA_FUEL`(주유) — 입력 row의
   category 필드로 분기.
 - 교통 공지(traffic notice)는 provider ``krex.models.Incident``를 mirror한다
-  (ADR-044 실측 — 구 `KrexTrafficNoticeItem`이 기대하던 notice_id/title/severity/
-  좌표/valid_from 등은 provider에 **없다**). Incident가 노출하는 건 route_no/
-  route_name/direction/incident_type/message/started_at/ended_at/raw 뿐이므로,
-  notice Feature에 필요한 모든 파생값(자연키·제목·notice_type·효력기간·source_
-  agency)을 krtour 변환부(`_traffic_notice_item_to_bundle`)가 생성한다.
+  (ADR-044 실측 — provider PR#9에서 실시간 돌발 API ``openapi/burstInfo/
+  realTimeSms``(apiId 0611)로 repoint, #378). Incident가 노출하는 건
+  occurred_date/occurred_time/incident_type(+code)/direction/message/point_name/
+  route_no/route_name/process_status(+code)/latitude/longitude/congestion_length/
+  series_no/raw이며, notice Feature에 필요한 나머지 파생값(자연키·제목·
+  notice_type·효력기간·source_agency)은 krtour 변환부
+  (`_traffic_notice_item_to_bundle`)가 생성한다.
 - Incident에는 안정 식별자가 없어 자연키를 krtour 측에서 파생한다
-  (`_traffic_notice_natural_key`): route_no + incident_type + started_at +
-  raw payload hash. Incident에는 좌표도 없어 notice Feature는 **coordless**다
-  (bjd_code 미상 → global feature_id).
+  (`_traffic_notice_natural_key`): occurred_date + occurred_time + route_no +
+  raw payload hash. 좌표(latitude/longitude)는 일부 row에만 있다(실측 36/99) —
+  좌표가 있으면 Coordinate + reverse geocoding, 없으면 **coordless**
+  (bjd_code 미상 → global feature_id, 노선/지점/방향이 위치 단서).
 - **transient 주의**: EX 돌발(incident) feed는 해소된 사건이 사라지는 휘발성
-  피드다. notice Feature로 적재하면 재실행마다 현재 활성 집합으로 refresh되고,
-  `valid_until`(ended_at 파생)이 만료를 표현한다 — 실행 사이 stale Feature가
-  남는 건 정상 동작이다.
+  피드다. notice Feature로 적재하면 재실행마다 현재 활성 집합으로 refresh된다.
+  realTimeSms에는 종료 시각 컬럼이 없어 `valid_until`은 None — 만료는 feed
+  refresh(사라짐) + `process_status`(payload 보존)가 표현한다. 실행 사이 stale
+  Feature가 남는 건 정상 동작이다.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Final, Literal, Protocol, runtime_checkable
 
@@ -246,40 +250,77 @@ class KrexRestAreaWeatherItem(Protocol):
 class KrexTrafficNoticeItem(Protocol):
     """krex 교통 공지(돌발) row shape — provider ``krex.models.Incident`` 정합.
 
-    ADR-044 실측: provider ``Incident``는 아래 8개 필드만 노출한다. notice
-    Feature가 필요로 하는 식별자/제목/notice_type/효력기간/좌표/severity/기관은
+    ADR-044 실측 (provider PR#9, ``openapi/burstInfo/realTimeSms`` repoint, #378):
+    notice Feature가 필요로 하는 식별자/제목/notice_type/효력기간/severity/기관은
     **provider에 없으므로** krtour 변환부(`_traffic_notice_item_to_bundle`)가
-    전부 파생한다(구 Protocol의 notice_id/title/severity/longitude 등은 제거).
+    전부 파생한다. 좌표(latitude/longitude)는 일부 row에만 있다(실측 36/99).
 
     파생 자연키 tradeoff (사용자 승인, ADR-009/044)
-    - Incident에 안정 id가 없어 route_no+incident_type+started_at+raw payload
+    - Incident에 안정 id가 없어 occurred_date+occurred_time+route_no+raw payload
       hash로 자연키를 파생한다(`_traffic_notice_natural_key`). raw가 byte 단위로
-      바뀌면(예: message 수정) 자연키가 달라져 새 Feature로 적재될 수 있다.
+      바뀌면(예: smsText 수정, accProcessCode 진행→완료 전이) 자연키가 달라져
+      새 Feature로 적재될 수 있다.
     - EX 돌발 feed는 휘발성(transient) — 해소된 사건은 사라진다. 재실행마다
-      활성 집합으로 refresh, `valid_until`이 만료를 표현(모듈 docstring 참조).
+      활성 집합으로 refresh. realTimeSms에는 종료 시각 컬럼이 없어
+      `valid_until`은 None(모듈 docstring 참조).
     """
 
-    route_no: str | None
-    """노선 번호 (예: '0010'). (provider ``Incident.route_no``)"""
+    occurred_date: str | None
+    """발생 일자 (예: '2023.09.27'). (provider ``Incident.occurred_date`` ←
+    원천 ``accDate``) 방어적 파싱 — `_parse_krex_occurrence`."""
 
-    route_name: str | None
-    """노선명 (예: '경부선'). (provider ``Incident.route_name``)"""
-
-    direction: str | None
-    """방향. (provider ``Incident.direction`` — provider는 ``Direction`` enum/None)."""
+    occurred_time: str | None
+    """발생 시각 (예: '09:11:24'). (provider ``Incident.occurred_time`` ←
+    원천 ``accHour``)"""
 
     incident_type: str | None
-    """돌발 종류 원문 (EX 코드/한글). (provider ``Incident.incident_type``)
-    변환부가 `normalize_notice_type`로 정규화, 실패 시 ``traffic`` fallback."""
+    """돌발유형명 (예: '이벤트/홍보'). (provider ``Incident.incident_type`` ←
+    원천 ``accType``) 변환부가 `normalize_notice_type`로 정규화, 실패 시
+    ``traffic`` fallback."""
+
+    incident_type_code: str | None
+    """돌발유형 코드 (예: '15'). (provider ``Incident.incident_type_code`` ←
+    원천 ``accTypeCode``)"""
+
+    direction: str | None
+    """방향 한글 텍스트 (예: '대구방향'). (provider ``Incident.direction`` ←
+    원천 ``startEndTypeCode``)"""
 
     message: str | None
-    """돌발 내용 본문. (provider ``Incident.message``) Feature.name/description 파생."""
+    """돌발 문자 본문. (provider ``Incident.message`` ← 원천 ``smsText``)
+    Feature.name/description 파생."""
 
-    started_at: str | None
-    """발생 시각 raw 문자열 (포맷 미상 — 방어적 파싱). (provider ``Incident.started_at``)"""
+    point_name: str | None
+    """돌발지점명. (provider ``Incident.point_name`` ← 원천 ``accPointNM``,
+    whitespace-only는 provider가 None 처리)"""
 
-    ended_at: str | None
-    """종료 시각 raw 문자열 (포맷 미상 — 방어적 파싱). (provider ``Incident.ended_at``)"""
+    route_no: str | None
+    """노선 번호 (예: '0552'). (provider ``Incident.route_no`` ← 원천 ``nosunNM``)"""
+
+    route_name: str | None
+    """노선명 (예: '대구부산선'). (provider ``Incident.route_name`` ← 원천 ``roadNM``)"""
+
+    process_status: str | None
+    """처리 상태명 (예: '진행'). (provider ``Incident.process_status`` ←
+    원천 ``accProcessNM``)"""
+
+    process_status_code: str | None
+    """처리 상태 코드 (예: '1'). (provider ``Incident.process_status_code`` ←
+    원천 ``accProcessCode``)"""
+
+    latitude: float | Decimal | None
+    """위도 WGS84 (일부 row만). provider는 ``float`` — 변환부에서
+    ``Decimal(str(...))`` 강제. (provider ``Incident.latitude``)"""
+
+    longitude: float | Decimal | None
+    """경도 WGS84 (일부 row만). **원천 키는 ``altitude``** — provider가 경도로
+    매핑한다(포털 명세 '돌발시작이정경도'). (provider ``Incident.longitude``)"""
+
+    congestion_length: float | None
+    """정체 길이 km. (provider ``Incident.congestion_length`` ← 원천 ``lateLength``)"""
+
+    series_no: int | None
+    """연번. (provider ``Incident.series_no`` ← 원천 ``seriesNM``)"""
 
     raw: dict[str, Any]
     """provider 원본 row. 자연키 hash + payload 보존에 사용. (provider ``Incident.raw``)"""
@@ -646,59 +687,75 @@ def rest_area_weather_to_values(
 
 # -- traffic_notices → notice FeatureBundle ----------------------------
 
-_KREX_DATETIME_FORMATS: Final[tuple[str, ...]] = (
-    "%Y%m%d%H%M%S",
-    "%Y%m%d%H%M",
-    "%Y%m%d",
-    "%Y-%m-%d %H:%M:%S",
+_KREX_OCCURRED_DATE_FORMATS: Final[tuple[str, ...]] = (
+    "%Y.%m.%d",
     "%Y-%m-%d",
+    "%Y%m%d",
 )
-"""``_parse_krex_datetime``이 차례로 시도할 strptime 포맷 (ISO는 별도 fallback)."""
+"""``_parse_krex_occurrence``가 차례로 시도할 발생 일자 strptime 포맷
+(실측 정본은 ``"2023.09.27"`` — 나머지는 방어적 fallback)."""
+
+_KREX_OCCURRED_TIME_FORMATS: Final[tuple[str, ...]] = (
+    "%H:%M:%S",
+    "%H:%M",
+    "%H%M%S",
+)
+"""``_parse_krex_occurrence``가 차례로 시도할 발생 시각 strptime 포맷
+(실측 정본은 ``"09:11:24"``)."""
 
 
-def _parse_krex_datetime(value: str | None) -> datetime | None:
-    """EX incident의 raw 시각 문자열을 KST aware datetime으로 방어적 파싱.
+def _parse_krex_occurrence(
+    occurred_date: str | None, occurred_time: str | None
+) -> datetime | None:
+    """EX incident의 occurred_date+occurred_time을 KST aware datetime으로 방어적 파싱.
 
-    provider ``Incident.started_at``/``ended_at``은 startDate/startTime(또는
-    endDate/endTime) 중 첫 값을 담은 raw 문자열이라 포맷이 일정치 않다(ADR-044
-    — 실측 미상). 알려진 포맷을 차례로 시도하고 ISO까지 실패하면 None을 반환한다.
+    realTimeSms는 발생 시각을 ``accDate``("2023.09.27") + ``accHour``("09:11:24")
+    두 컬럼으로 쪼개 내려준다(ADR-044 실측, #378). 일자 파싱 실패 시 None,
+    시각 파싱 실패/부재 시 해당 일자의 자정으로 강등한다(일자만이라도 보존).
     naive 결과엔 KST tzinfo를 부착한다(ADR-019).
     """
-    if value is None:
+    date_text = (occurred_date or "").strip()
+    if not date_text:
         return None
-    text = value.strip()
-    if not text:
-        return None
-    parsed: datetime | None = None
-    for fmt in _KREX_DATETIME_FORMATS:
+    parsed_date: date | None = None
+    for fmt in _KREX_OCCURRED_DATE_FORMATS:
         try:
-            parsed = datetime.strptime(text, fmt)
+            parsed_date = datetime.strptime(date_text, fmt).date()
             break
         except ValueError:
             continue
-    if parsed is None:
-        try:
-            parsed = datetime.fromisoformat(text)
-        except ValueError:
-            return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=_KST)
-    return parsed
+    if parsed_date is None:
+        return None
+    parsed_time = time(0, 0)
+    time_text = (occurred_time or "").strip()
+    if time_text:
+        for fmt in _KREX_OCCURRED_TIME_FORMATS:
+            try:
+                parsed_time = datetime.strptime(time_text, fmt).time()
+                break
+            except ValueError:
+                continue
+    return datetime.combine(parsed_date, parsed_time, tzinfo=_KST)
 
 
 def _traffic_notice_natural_key(item: KrexTrafficNoticeItem) -> str:
-    """krtour 측 파생 자연키 — ``route_no::incident_type::started_at::raw_hash``.
+    """krtour 측 파생 자연키 — ``occurred_date::occurred_time::route_no::raw_hash``.
 
     provider ``Incident``에 안정 식별자가 없어(ADR-044) 네 성분을 normalize
     (strip→lower) 후 ``::``로 잇는다 — ID 시스템이 예약한 ``|``를 피한다
     (mois/rest_areas와 동일 구분자, ADR-009 `_validate_component`). raw payload
-    hash로 동일 노선/종류/시각이라도 본문이 다른 사건을 구분한다. 충돌·재적재
-    tradeoff는 ``KrexTrafficNoticeItem`` docstring 참조.
+    hash로 동일 노선/발생시각이라도 본문이 다른 사건을 구분한다.
+
+    tradeoff (#378): raw에는 ``accProcessCode``(처리 상태)·``smsText``가 포함되어
+    상태 전이(진행→완료)나 문구 수정만으로도 raw hash가 바뀌어 새 Feature로
+    적재된다 — transient feed라 재실행 refresh가 전제이므로 수용(구 scheme의
+    started_at 성분을 occurred_date+occurred_time으로 대체, 나머지 성질 동일).
+    충돌·재적재 tradeoff는 ``KrexTrafficNoticeItem`` docstring 참조.
     """
     parts = (
+        (item.occurred_date or "").strip().lower(),
+        (item.occurred_time or "").strip().lower(),
         (item.route_no or "").strip().lower(),
-        (item.incident_type or "").strip().lower(),
-        (item.started_at or "").strip().lower(),
         make_payload_hash(item.raw),
     )
     return "::".join(parts)
@@ -723,13 +780,16 @@ def _synthesize_notice_title(item: KrexTrafficNoticeItem) -> str:
     """Incident → 비어있지 않은 ``Feature.name`` 합성.
 
     ``[{route_name|route_no|'고속도로'}] {incident_type|'교통정보'}`` 형태. route와
-    type가 모두 비면 message를 80자로 truncate해 쓰고, 그것도 비면 최종 기본
-    문구를 반환한다(Feature.name은 1자 이상이어야 함).
+    type가 모두 비면 point_name(돌발지점명) → message 순으로 80자 truncate해
+    쓰고, 그것도 비면 최종 기본 문구를 반환한다(Feature.name은 1자 이상).
     """
     route = (item.route_name or item.route_no or "").strip()
     itype = (item.incident_type or "").strip()
     if route or itype:
         return f"[{route or '고속도로'}] {itype or '교통정보'}".strip()
+    point = (item.point_name or "").strip()
+    if point:
+        return point[:80]
     message = (item.message or "").strip()
     if message:
         return message[:80]
@@ -742,10 +802,12 @@ async def _traffic_notice_item_to_bundle(
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None,
 ) -> FeatureBundle:
-    # provider ``Incident``에는 좌표가 없어 notice는 항상 coordless(ADR-044).
-    # reverse_geocoder는 시그니처 호환을 위해 받지만 좌표가 없어 행정구역을 채울
-    # 수 없다 → bjd_code 미상 → global feature_id.
-    coord: Coordinate | None = None
+    # realTimeSms는 일부 row에만 좌표가 있다(실측 36/99, #378). 좌표가 있으면
+    # reverse geocoding으로 행정구역을 채우고, 없으면 bjd_code 미상 →
+    # global feature_id.
+    lon = _to_decimal_or_none(item.longitude)
+    lat = _to_decimal_or_none(item.latitude)
+    coord = _coord_or_none(lat, lon)
     bjd_code, sigungu, sido, admin = await _reverse_geocode(coord, reverse_geocoder)
 
     address = Address(
@@ -758,23 +820,43 @@ async def _traffic_notice_item_to_bundle(
     natural_key = _traffic_notice_natural_key(item)
     notice_type = _safe_notice_type(item.incident_type)
     title = _synthesize_notice_title(item)
-    valid_from = _parse_krex_datetime(item.started_at)
-    valid_until = _parse_krex_datetime(item.ended_at)
-    # Incident에 좌표가 없어 coordless다. notice가 좌표·주소 둘 다 없으면 주소
-    # 검증이 ``missing_address`` error로 막으므로(validation.py), 노선명/번호를
-    # 위치 단서(raw_address)로 채워 coordless notice도 적재되게 한다(ADR-044).
-    location_clue = (item.route_name or item.route_no or "").strip() or None
+    valid_from = _parse_krex_occurrence(item.occurred_date, item.occurred_time)
+    # realTimeSms에는 종료 시각 컬럼이 없다(#378) — transient feed 만료는 refresh
+    # (사라짐) + process_status(payload 보존)가 표현한다(모듈 docstring).
+    valid_until: datetime | None = None
+    # coordless row는 좌표·주소 둘 다 없으면 주소 검증이 ``missing_address``
+    # error로 막으므로(validation.py), 노선명/번호·돌발지점명·방향을 위치 단서
+    # (raw_address)로 채워 coordless notice도 적재되게 한다(ADR-044).
+    location_clue = (
+        " ".join(
+            part
+            for part in (
+                (item.route_name or item.route_no or "").strip(),
+                (item.point_name or "").strip(),
+                (item.direction or "").strip(),
+            )
+            if part
+        )
+        or None
+    )
 
     raw_data: dict[str, Any] = {
         "natural_key": natural_key,
+        "occurred_date": item.occurred_date,
+        "occurred_time": item.occurred_time,
+        "incident_type": item.incident_type,
+        "incident_type_code": item.incident_type_code,
+        "direction": item.direction,
+        "message": item.message,
+        "point_name": item.point_name,
         "route_no": item.route_no,
         "route_name": item.route_name,
-        # provider ``Incident.direction``은 ``Direction`` enum/None — JSON-safe하게 str.
-        "direction": str(item.direction) if item.direction is not None else None,
-        "incident_type": item.incident_type,
-        "message": item.message,
-        "started_at": item.started_at,
-        "ended_at": item.ended_at,
+        "process_status": item.process_status,
+        "process_status_code": item.process_status_code,
+        "latitude": str(lat) if lat is not None else None,
+        "longitude": str(lon) if lon is not None else None,
+        "congestion_length": item.congestion_length,
+        "series_no": item.series_no,
     }
     payload_hash = make_payload_hash(raw_data)
     source_record_key = make_source_record_key(
@@ -816,6 +898,11 @@ async def _traffic_notice_item_to_bundle(
                 "route_no": item.route_no,
                 "route_name": item.route_name,
                 "incident_type": item.incident_type,
+                "incident_type_code": item.incident_type_code,
+                "point_name": item.point_name,
+                "direction": item.direction,
+                "process_status": item.process_status,
+                "process_status_code": item.process_status_code,
             },
         ),
     )
@@ -828,8 +915,8 @@ async def _traffic_notice_item_to_bundle(
         raw_payload_hash=payload_hash,
         raw_name=title,
         raw_address=location_clue,
-        raw_longitude=None,
-        raw_latitude=None,
+        raw_longitude=lon,
+        raw_latitude=lat,
         raw_data=raw_data,
         fetched_at=fetched_at,
         source_record_key=source_record_key,
@@ -855,12 +942,14 @@ async def traffic_notices_to_bundles(
 ) -> list[FeatureBundle]:
     """krex 교통 공지(돌발) items → ``list[FeatureBundle]`` (notice kind).
 
-    입력은 provider ``krex.models.Incident``(또는 동일 shape)이며, notice Feature에
-    필요한 모든 파생값은 본 변환부가 생성한다(ADR-044 reconciliation):
-    자연키(`_traffic_notice_natural_key`), 제목(`_synthesize_notice_title`),
-    notice_type(`_safe_notice_type` — 매핑 실패 시 ``traffic``), 효력기간
-    (`_parse_krex_datetime`), source_agency(``한국도로공사`` 고정). Incident에
-    좌표가 없어 Feature는 coordless(global feature_id)다.
+    입력은 provider ``krex.models.Incident``(realTimeSms, #378 — 또는 동일 shape)
+    이며, notice Feature에 필요한 모든 파생값은 본 변환부가 생성한다(ADR-044
+    reconciliation): 자연키(`_traffic_notice_natural_key`), 제목
+    (`_synthesize_notice_title`), notice_type(`_safe_notice_type` — 매핑 실패 시
+    ``traffic``), 발생 시각(`_parse_krex_occurrence` → valid_start_time;
+    종료 컬럼이 없어 valid_end_time은 None), source_agency(``한국도로공사`` 고정).
+    좌표가 있는 row(실측 36/99)는 Coordinate + reverse geocoding, 없는 row는
+    coordless(global feature_id, 노선/지점/방향이 raw_address 위치 단서)다.
 
     **transient feed**: 해소된 incident는 사라지므로 재실행마다 활성 집합으로
     refresh되고, 실행 사이 stale Feature가 남는 건 정상이다(모듈 docstring).

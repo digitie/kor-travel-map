@@ -401,10 +401,10 @@ def test_no_provider_wrapper_classes():
 | python-datagokr-api | `@f88e62e` | `CulturalFestivalItem` (PR#34) | PR#34 | ADR-042 1차 축제 source |
 | python-kma-api | `@ab1a0b8` | `KmaShortForecastItem` (PR#38), `KmaUltraShortNowcastItem` (PR#39), `KmaUltraShortForecastItem`/mid/alerts 등 7종 | PR#38~46, T-219b/c | ADR-010 두 축. Dagster asset 5종 완비 — 실황/초단기/단기(T-219b, `KmaClient`) + 중기(설정 주입 region, `DataGoKrClient`)/특보(record resource→notice)(T-219c). ASOS/해수욕장/APIHub 표면은 백로그 |
 | python-airkorea-api | `@22996a4` | (후속 PR) | — | PM10/PM2.5/CAI |
-| python-khoa-api | `@0c4c07f` | (후속 PR) | — | 해수욕장, 해양 공지 |
+| python-khoa-api | `@0ccb5ed` | (후속 PR) | — | 해수욕장, 해양 공지. snake_case live row 파싱 정정(khoa#5/PR#6, #378 pin bump) |
 | python-krforest-api | `@f9254e6` | (후속 PR) | — | 산악기상 (Sprint 2) + trails (Sprint 3) 양쪽 사용 |
 | python-opinet-api | `@bb6385c` | (후속 PR) | — | Sprint 2 §2.3 PriceValue |
-| python-krex-api | `@72b74d7` | (후속 PR) | — | Sprint 2 §2.4 multi-kind |
+| python-krex-api | `@2504a36` | `KrexTrafficNoticeItem` 재정렬 (#378) | — | Sprint 2 §2.4 multi-kind. incident → `openapi/burstInfo/realTimeSms`(apiId 0611) repoint(krex#8/PR#9) — 좌표 일부 row 보유, 종료 시각 컬럼 없음 |
 | python-visitkorea-api | `@cebf543` | (후속 PR — enrichment) | — | ADR-042: 축제는 enrichment 2차 |
 | python-knps-api | `@5e88fb4` | (Sprint 3 PR) | PR#25 | keyless file-only, ADR-028 amendment 2026-05-25 |
 | python-krheritage-api | `@7dc46c3` | (Sprint 3 PR) | — | media → RustFS |
