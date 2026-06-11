@@ -175,6 +175,27 @@ GET /v1/public/festivals/{feature_id}
   표면 중 하나로 확정한다.
 - 축제 월별 뷰는 `EventDetail.starts_on`/`ends_on` 기간 겹침으로 집계한다.
 
+### 2.4.2 `/v1/curated-features*` — 테마형 큐레이션 후보 (문서 계약, 아직 OpenAPI 미포함)
+
+세계음식점, 독립서점, 카페가 있는 서점, 도서관, 무장애 관광지 같은 테마형 source는
+[`docs/curated-features.md`](curated-features.md)의 `feature.curated_*` overlay 계약을
+따른다. TripMate는 이 표면을 읽어 `app.curated_trip_plans` /
+`app.curated_plan_pois`로 1:1 복사한다. TripMate의 `/notice-plans`는 호환 API alias일
+뿐 신규 정본명이 아니다.
+
+제안 엔드포인트:
+
+```
+GET /v1/curated-themes
+GET /v1/curated-sources
+GET /v1/curated-features
+GET /v1/curated-features/{curated_feature_id}
+GET /v1/curated-features/{curated_feature_id}/tripmate-copy
+```
+
+구현 시 사용자 profile에 추가하고 `openapi.user.json` 및 `@krtour/map-user-client` 타입을
+재생성한다. write/admin 표면은 `/v1/admin/curated-*`로 둔다.
+
 ### 2.5 `/v1/admin/*` — 운영자 (인프라 SSO + kill-switch)
 ```
 GET    /v1/admin/features                              # 목록(page_size+cursor)
@@ -318,6 +339,8 @@ POST /v1/debug/etl/{provider}/{dataset}/preview
 - **codegen(T-210e)**: `/v1` 안정 commit에서 진행.
 - **TripMate T-130 공개 뷰**: 해수욕장/축제 공개 뷰 후보 사양을
   `docs/public-views-api.md`에 추가했다. 구현 전까지 `openapi.user.json`에는 포함하지 않는다.
+- **curated_features**: 테마형 큐레이션 후보 사양을
+  `docs/curated-features.md`에 추가했다. 구현 전까지 `openapi.user.json`에는 포함하지 않는다.
 
 ---
 

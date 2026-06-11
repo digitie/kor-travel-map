@@ -6,7 +6,7 @@
 
 ## 진행 중인 작업 인덱스 (열린 `[ ]` 항목)
 
-> 핵심 실행 3건(T-212e, T-221, T-222) + 외부/보류 항목 별도. 상세는 아래 각 섹션.
+> 핵심 실행 4건(T-212e, T-221, T-222, T-223) + 외부/보류 항목 별도. 상세는 아래 각 섹션.
 > 완료 이력은 [`tasks-done.md`](tasks-done.md).
 
 - **다음 (우선순위 순)**
@@ -35,6 +35,19 @@
           변환 보강 여부 결정.
     - [ ] T-222c — TripMate T-130 소비 문서/픽스처 동기화. TripMate `/public/*`는
           krtour `openapi.user.json`에 표면이 들어간 뒤 구현.
+  - [ ] T-223 — **curated_features + TripMate curated_trip_plans import 계약/구현**.
+        정본 후보: `docs/curated-features.md`. `notice_plans`는 TripMate 호환 API
+        alias일 뿐 신규 정본명은 `curated_trip_plans`.
+    - [x] T-223a — 문서 계약 정리(2026-06-12): 책/음식 테마 source 조사, overlay DB
+          모델, REST/Admin UI/Dagster, TripMate 1:1 복사 계약.
+    - [ ] T-223b — provider 보강: `python-mcst-api` 중고서점/아동서점,
+          `python-datagokr-api` 서울 책방·무슬림 친화 음식점·안산 세계맛집·제주 향토음식점,
+          `data.go.kr-standard` 특화거리 area/anchor 후보.
+    - [ ] T-223c — krtour-map DB/API/Dagster/Admin UI 구현:
+          `feature.curated_*`, `/v1/curated-features*`, `/v1/admin/curated-*`,
+          Dagster `curated_features` group, admin 선택/해제 UI.
+    - [ ] T-223d — TripMate 연동(외부 repo): krtour REST 호출로
+          `app.curated_trip_plans` / `app.curated_plan_pois` 복사, source version/etag 저장.
   - [x] T-219 — **KMA weather Dagster 파이프라인 완결**. **T-219a~c 전부 완료
         (2026-06-11)** — asset 5종(실황/초단기/단기/중기/특보) + KST schedule +
         cursor/credential guard. 정본

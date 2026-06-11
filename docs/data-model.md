@@ -202,6 +202,44 @@ CREATE INDEX idx_feature_versions_request
 - 사용자 요청 삭제는 version 1 `change_kind='delete'`와 `feature.features` soft delete
   marker를 함께 남긴다.
 
+### 1.2 `feature.curated_*` (테마형 overlay, 계획)
+
+테마형 큐레이션은 `feature.features`를 복제하지 않고 overlay로 관리한다. 정본 계약은
+[`docs/curated-features.md`](curated-features.md)다. DB schema는 `feature`에 둔다.
+
+테이블:
+
+- `feature.curated_themes` — `theme_slug`, `theme_name`, `theme_group`,
+  `default_curated`, `visibility`, 표시 metadata.
+- `feature.curated_sources` — `provider`, `dataset_key`, `source_name`,
+  `source_url`, `source_kind`, `license`, `update_cycle`,
+  `last_source_modified_at`, `last_checked_at`, `next_expected_at`, `row_count`,
+  `freshness_note`, `provider_status`, source metadata.
+- `feature.curated_source_rules` — provider/dataset/category/place_kind 조건을
+  `candidate`/`curated`/`ignore` 기본 action으로 매핑한다.
+- `feature.curated_features` — `theme_id + feature_id` overlay 본체. 상태와
+  TripMate 복사 정책을 저장한다.
+
+핵심 상태:
+
+- `curation_status`: `candidate` / `curated` / `rejected` / `archived`
+- `selection_origin`: `source_rule` / `admin` / `external_api` / `tripmate_agent`
+- `tripmate_relation`: `primary_stop` / `food_stop` / `cafe_stop` /
+  `bookstore_stop` / `nearby_option` / `accessibility_support` / `pet_support` /
+  `family_support` / `theme_area_anchor`
+
+인덱스 기준:
+
+- `UNIQUE (theme_id, feature_id) WHERE archived_at IS NULL`
+- `INDEX (curation_status, updated_at DESC, curated_feature_id DESC)`
+- `INDEX (theme_id, curation_status, rank_score DESC)`
+- `INDEX (source_id, curation_status)`
+- `INDEX (feature_id)`
+
+`rejected`/`archived` row는 provider 재적재나 source rule 재적용으로 되살리지 않는다.
+TripMate는 REST snapshot을 읽어 `app.curated_trip_plans` /
+`app.curated_plan_pois`로 복사하며, krtour-map DB에 직접 접근하지 않는다.
+
 ## 2. `provider_sync.source_records`
 
 ```sql

@@ -1,5 +1,28 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-12 Codex 작업 메모 — curated_features 문서 계약 + TripMate 명명 정리
+
+사용자 지시로 테마형 데이터 소스와 TripMate curated plan import 방향을 문서화했다. 코드 변경은
+없고 DB/API/Admin UI/Dagster 구현 전 계약만 정리했다.
+
+- 새 정본 후보 `docs/curated-features.md`를 추가했다. 기존 MCST 16종 중 세계음식점,
+  독립서점, 카페가 있는 서점, 도서관 계열을 1차 curated 후보로 두고, 중고서점·아동서점·
+  서울 책방·무슬림 친화 음식점·안산 세계맛집·제주 향토음식점·전국지역특화거리표준데이터를
+  provider 보강 후보로 분리했다.
+- `curated_features`는 `feature.features`를 복제하지 않는 `feature.curated_*` overlay로
+  관리한다. 테마명, 데이터 소스 URL, 수정일, 갱신주기, row_count, freshness note 같은
+  source metadata를 공용으로 뽑을 수 있게 설계했다.
+- TripMate 정본명은 `app.curated_trip_plans` / `app.curated_plan_pois`다.
+  `notice_plans`는 TripMate 호환 API alias일 뿐 신규 DB/ORM/문서 정본으로 쓰지 않는다.
+- TripMate는 krtour-map REST `GET /v1/curated-features*` 후보 표면을 호출해
+  `curated_features` 1건을 `curated_trip_plans` 1건으로 복사한다. DB 직접 접근은 없다.
+- 백로그 T-223을 추가했다. T-223a(문서 계약)는 완료, provider 보강/DB·API·Dagster·Admin UI/
+  TripMate import 구현은 열린 후속으로 남겼다.
+
+**다음 한 작업**: 기존 우선순위인 **T-212e**는 그대로 유지. 병렬/후속 후보는
+**T-223b~d**(provider 보강 → krtour 구현 → TripMate import)와 **T-221a~c** /
+**T-222b**.
+
 ## 2026-06-11 Codex 작업 메모 — admin UI/UX 시나리오 재점검 + T-130 공개 뷰 사양
 
 사용자 지시로 admin UI/UX 계획 문서와 실제 프론트엔드/백엔드/OpenAPI, TripMate T-130

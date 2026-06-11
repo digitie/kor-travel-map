@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-12 (codex) — curated_features 문서 계약 + TripMate curated_trip_plans 명명 정리
+
+문서 전용 작업으로 `docs/curated-features.md`를 추가하고, `rest-api` /
+`tripmate-rest-api` / `integration-map` / `data-model` / `provider-contract` /
+`tasks` / `resume`을 연결했다.
+
+- data.go.kr와 기존 MCST provider를 대조해 세계음식점, 독립서점, 카페가 있는 서점,
+  도서관 계열은 바로 curated 후보로, 중고서점·아동서점·서울 책방·무슬림 친화 음식점·
+  안산 세계맛집·제주 향토음식점·전국지역특화거리표준데이터는 provider 보강 후보로 정리.
+- `curated_features`는 `feature.features` overlay로 설계. 테마/source metadata,
+  selection/rejection, TripMate copy relation, Admin UI select/unselect, Dagster
+  `curated_features` group 계약을 문서화.
+- TripMate 정본명은 `curated_trip_plans` / `curated_plan_pois`로 확정하고,
+  `notice_plans`는 호환 API alias라고 명시.
+
 ## 2026-06-11 (claude) — T-212e #386: 축제 날짜 역전 격리 + datagokr 핀 범프
 
 배치 C에서 축제가 `ends_on (2024-10-01) must be >= starts_on (2025-10-25)`
