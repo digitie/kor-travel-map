@@ -6,7 +6,7 @@ kraddr-geo). 두 provider feature가 실 kraddr-geo로 보강되고, 적재 → 
 + Docker(testcontainers PostGIS). 도달 불가 시 ``pytest.skip``.
 
 검증 시나리오:
-1. 두 제공처(=두 management_no)가 **같은 좌표·같은 이름**을 emit → 양쪽 모두 실
+1. 두 제공처(=두 자연키, name::address 파생 — #374)가 **같은 좌표·같은 이름**을 emit → 양쪽 모두 실
    kraddr-geo bjd 보강 → DB 적재 → ``sync_dedup_candidates`` → score≥0.85 →
    queue에 1 행 + decision=``auto_merge``.
 2. 같은 이름·**먼 좌표** → spatial_sim 매우 낮음 → KEEP_SEPARATE → 큐 0 행.
@@ -21,7 +21,6 @@ import os
 import socket
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
-from decimal import Decimal
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
@@ -110,44 +109,42 @@ async def map_client(
 
 @dataclass(frozen=True)
 class _Festival:
-    management_no: str
-    festival_name: str
-    venue_name: str | None
-    start_date: date | None
-    end_date: date | None
-    description: str | None
-    latitude: Decimal | None
-    longitude: Decimal | None
-    road_address: str | None
-    jibun_address: str | None
-    organizer_name: str | None
-    organizer_tel: str | None
-    data_reference_date: date | None
-    provider_org_name: str | None
-    bjd_code: str | None = None
-    sigungu_code: str | None = None
-    sido_code: str | None = None
-    admin_address: str | None = None
+    """`CulturalFestivalItem` Protocol 만족 — provider 실모델 필드명 (#374)."""
+
+    fstvl_nm: str | None
+    opar: str | None = None
+    fstvl_start_date: date | None = None
+    fstvl_end_date: date | None = None
+    fstvl_co: str | None = None
+    mnnst_nm: str | None = None
+    auspc_instt_nm: str | None = None
+    suprt_instt_nm: str | None = None
+    phone_number: str | None = None
+    homepage_url: str | None = None
+    relate_info: str | None = None
+    rdnmadr: str | None = None
+    lnmadr: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    reference_date: date | None = None
+    instt_code: str | None = None
+    instt_nm: str | None = None
 
 
 def _festival(
     *, no: str, name: str, lon: str, lat: str, org: str = "test-org"
 ) -> _Festival:
+    # 자연키가 name::address 파생(#374)이라, 같은 이름의 두 제공처 row를
+    # 별개 feature로 만들려면 주소를 no로 구분한다.
     return _Festival(
-        management_no=no,
-        festival_name=name,
-        venue_name=None,
-        start_date=date(2026, 4, 1),
-        end_date=date(2026, 4, 10),
-        description=None,
-        latitude=Decimal(lat),
-        longitude=Decimal(lon),
-        road_address=None,
-        jibun_address=None,
-        organizer_name=None,
-        organizer_tel=None,
-        data_reference_date=date(2026, 3, 1),
-        provider_org_name=org,
+        fstvl_nm=name,
+        fstvl_start_date=date(2026, 4, 1),
+        fstvl_end_date=date(2026, 4, 10),
+        rdnmadr=f"서울특별시 중구 세종대로 110 ({no})",
+        latitude=float(lat),
+        longitude=float(lon),
+        reference_date=date(2026, 3, 1),
+        instt_nm=org,
     )
 
 

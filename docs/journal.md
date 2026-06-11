@@ -2,6 +2,22 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-11 (claude) — T-212e #374: datagokr 축제 변환 provider 실모델 재정렬
+
+T-212e live full reload 1차 시도에서 `feature_event_datagokr_cultural_festivals`가
+`AttributeError: 'PublicCulturalFestival' object has no attribute 'road_address'`로
+즉시 실패(run `d7530e23`, 결정적이라 retry 중단 — 쿼터 보호). `CulturalFestivalItem`
+Protocol(Sprint 2 PR#34, ADR-044 이전)이 provider에 존재한 적 없는 필드명을 가정한
+것 — `git log -S road_address` 무히트로 확인. T-RV-04b ①의 "clean match"는 미검증
+가정이었다.
+
+- Protocol/변환을 provider 필드명(`fstvl_nm`/`opar`/`rdnmadr`/`lnmadr`/float 좌표 등)
+  으로 재정렬 — 같은 모듈 박물관 패턴 미러. 관리번호 컬럼이 없어 자연키는
+  `name::address` 파생(ADR-009 `::`). 이름 없는 row는 skip.
+- admin `etl_live` 어댑터(구 `name@address` 우회)·`etl_fixtures`·단위/통합/dagster
+  테스트 fake를 새 shape로 갱신, `docs/event-feature-etl.md` §4 재구성.
+- 게이트: unit 1004 / dagster+admin 370 passed / ruff / mypy --strict 88+15 / lint-imports.
+
 ## 2026-06-11 (codex) — React Doctor 0 이슈 + maplibre-vworld-js v0.1.3 정합
 
 frontend React Doctor full scan의 optional warning까지 0으로 맞추기 위해 shadcn 기반

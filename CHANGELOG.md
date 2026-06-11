@@ -5,6 +5,18 @@
 
 ## [Unreleased]
 
+### datagokr 축제 변환 — provider 실모델 재정렬 (#374, 2026-06-11)
+
+- **FIXED**: `cultural_festivals_to_bundles`/`CulturalFestivalItem`을 provider
+  실모델 `PublicCulturalFestival` 필드명(`fstvl_nm`/`opar`/`rdnmadr` 등, 좌표
+  `float`)으로 재정렬했다 (ADR-044). 종전 Protocol이 발명한 `management_no`/
+  `road_address`/`festival_name` 필드 때문에 live Dagster run이
+  `AttributeError`로 실패하던 문제 해결.
+- **CHANGED**: 자연키는 원천에 관리번호 컬럼이 없어 `name::address` 파생
+  (ADR-009 `::`, museum/mcst 패턴). 축제명 없는 row는 skip. admin ETL
+  adapter/fixture도 동일 shape으로 갱신 — `EventDetail.payload`의
+  `organizer_name`(주관기관명)/`provider_org_name`(제공기관명) key는 유지.
+
 ### Frontend — React Doctor + maplibre-vworld-js 정합 (2026-06-11)
 
 - **CHANGED**: admin frontend React Doctor full scan 기준 optional warning까지 0건이 되도록

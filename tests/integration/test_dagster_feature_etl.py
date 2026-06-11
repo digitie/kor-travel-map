@@ -41,20 +41,26 @@ _TRUNCATE_SQL = (
 
 @dataclass(frozen=True)
 class _Festival:
-    management_no: str
-    festival_name: str
-    venue_name: str | None
-    start_date: date | None
-    end_date: date | None
-    description: str | None
-    latitude: Decimal | None
-    longitude: Decimal | None
-    road_address: str | None
-    jibun_address: str | None
-    organizer_name: str | None
-    organizer_tel: str | None
-    data_reference_date: date | None
-    provider_org_name: str | None
+    """`CulturalFestivalItem` Protocol 만족 — provider 실모델 필드명 (#374)."""
+
+    fstvl_nm: str | None
+    opar: str | None = None
+    fstvl_start_date: date | None = None
+    fstvl_end_date: date | None = None
+    fstvl_co: str | None = None
+    mnnst_nm: str | None = None
+    auspc_instt_nm: str | None = None
+    suprt_instt_nm: str | None = None
+    phone_number: str | None = None
+    homepage_url: str | None = None
+    relate_info: str | None = None
+    rdnmadr: str | None = None
+    lnmadr: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    reference_date: date | None = None
+    instt_code: str | None = None
+    instt_nm: str | None = None
 
 
 @dataclass(frozen=True)
@@ -229,20 +235,19 @@ async def test_dagster_assets_validate_coordinates_and_load_to_postgis(
             map_client,
             datagokr_cultural_festivals=[
                 _Festival(
-                    management_no="DAGSTER-FEST-001",
-                    festival_name="서울 봄꽃 축제",
-                    venue_name="여의도공원",
-                    start_date=date(2026, 4, 5),
-                    end_date=date(2026, 4, 12),
-                    description="봄꽃 축제.",
-                    latitude=Decimal("37.5263"),
-                    longitude=Decimal("126.9239"),
-                    road_address="서울특별시 영등포구 여의공원로 120",
-                    jibun_address="서울특별시 영등포구 여의도동 8",
-                    organizer_name="영등포구청",
-                    organizer_tel="02-2670-3114",
-                    data_reference_date=date(2026, 3, 1),
-                    provider_org_name="서울특별시 영등포구",
+                    fstvl_nm="서울 봄꽃 축제",
+                    opar="여의도공원",
+                    fstvl_start_date=date(2026, 4, 5),
+                    fstvl_end_date=date(2026, 4, 12),
+                    fstvl_co="봄꽃 축제.",
+                    mnnst_nm="영등포구청",
+                    phone_number="02-2670-3114",
+                    rdnmadr="서울특별시 영등포구 여의공원로 120",
+                    lnmadr="서울특별시 영등포구 여의도동 8",
+                    latitude=37.5263,
+                    longitude=126.9239,
+                    reference_date=date(2026, 3, 1),
+                    instt_nm="서울특별시 영등포구",
                 )
             ],
         ),

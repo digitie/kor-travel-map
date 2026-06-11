@@ -25,7 +25,6 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
-from decimal import Decimal
 from typing import Any, Final
 
 from krtour.map.providers.airkorea import (
@@ -88,57 +87,72 @@ def _now() -> datetime:
 
 @dataclass(frozen=True)
 class _CulturalFestival:
-    """`krtour.map.providers.standard_data.CulturalFestivalItem` Protocol 준수."""
+    """`krtour.map.providers.standard_data.CulturalFestivalItem` Protocol 준수.
 
-    management_no: str
-    festival_name: str
-    venue_name: str | None
-    start_date: date | None
-    end_date: date | None
-    description: str | None
-    latitude: Decimal | None
-    longitude: Decimal | None
-    road_address: str | None
-    jibun_address: str | None
-    organizer_name: str | None
-    organizer_tel: str | None
-    data_reference_date: date | None
-    provider_org_name: str | None
+    provider 실모델 ``PublicCulturalFestival`` 필드명 (ADR-044 재정렬, #374).
+    """
+
+    fstvl_nm: str | None
+    opar: str | None
+    fstvl_start_date: date | None
+    fstvl_end_date: date | None
+    fstvl_co: str | None
+    mnnst_nm: str | None
+    auspc_instt_nm: str | None
+    suprt_instt_nm: str | None
+    phone_number: str | None
+    homepage_url: str | None
+    relate_info: str | None
+    rdnmadr: str | None
+    lnmadr: str | None
+    latitude: float | None
+    longitude: float | None
+    reference_date: date | None
+    instt_code: str | None
+    instt_nm: str | None
 
 
 def _datagokr_festival_fixture() -> Sequence[_CulturalFestival]:
     return [
         _CulturalFestival(
-            management_no="CF-DEMO-001",
-            festival_name="서울 봄꽃 축제",
-            venue_name="여의도공원",
-            start_date=date(2026, 4, 5),
-            end_date=date(2026, 4, 12),
-            description="봄꽃 만개 축제 (fixture demo).",
-            latitude=Decimal("37.5263"),
-            longitude=Decimal("126.9239"),
-            road_address="서울특별시 영등포구 여의공원로 120",
-            jibun_address="서울특별시 영등포구 여의도동 8",
-            organizer_name="영등포구청",
-            organizer_tel="02-2670-3114",
-            data_reference_date=date(2026, 3, 1),
-            provider_org_name="서울특별시 영등포구",
+            fstvl_nm="서울 봄꽃 축제",
+            opar="여의도공원",
+            fstvl_start_date=date(2026, 4, 5),
+            fstvl_end_date=date(2026, 4, 12),
+            fstvl_co="봄꽃 만개 축제 (fixture demo).",
+            mnnst_nm="영등포구청",
+            auspc_instt_nm=None,
+            suprt_instt_nm=None,
+            phone_number="02-2670-3114",
+            homepage_url=None,
+            relate_info=None,
+            rdnmadr="서울특별시 영등포구 여의공원로 120",
+            lnmadr="서울특별시 영등포구 여의도동 8",
+            latitude=37.5263,
+            longitude=126.9239,
+            reference_date=date(2026, 3, 1),
+            instt_code=None,
+            instt_nm="서울특별시 영등포구",
         ),
         _CulturalFestival(
-            management_no="CF-DEMO-002",
-            festival_name="제주 유채꽃 축제",
-            venue_name="가시리 마을",
-            start_date=date(2026, 4, 1),
-            end_date=date(2026, 4, 30),
-            description="제주 유채꽃 축제 (fixture demo).",
-            latitude=Decimal("33.3893"),
-            longitude=Decimal("126.7831"),
-            road_address="제주특별자치도 서귀포시 표선면 가시로 565번길 41",
-            jibun_address="제주특별자치도 서귀포시 표선면 가시리",
-            organizer_name="서귀포시청",
-            organizer_tel="064-740-6000",
-            data_reference_date=date(2026, 3, 1),
-            provider_org_name="제주특별자치도 서귀포시",
+            fstvl_nm="제주 유채꽃 축제",
+            opar="가시리 마을",
+            fstvl_start_date=date(2026, 4, 1),
+            fstvl_end_date=date(2026, 4, 30),
+            fstvl_co="제주 유채꽃 축제 (fixture demo).",
+            mnnst_nm="서귀포시청",
+            auspc_instt_nm=None,
+            suprt_instt_nm=None,
+            phone_number="064-740-6000",
+            homepage_url=None,
+            relate_info=None,
+            rdnmadr="제주특별자치도 서귀포시 표선면 가시로 565번길 41",
+            lnmadr="제주특별자치도 서귀포시 표선면 가시리",
+            latitude=33.3893,
+            longitude=126.7831,
+            reference_date=date(2026, 3, 1),
+            instt_code=None,
+            instt_nm="제주특별자치도 서귀포시",
         ),
     ]
 
