@@ -12,10 +12,42 @@ from krtour.map.dto import ForecastStyle, TimelineBucket, WeatherDomain
 from krtour.map.providers.kma import (
     KMA_METRIC_NAMES,
     KMA_METRIC_UNITS,
+    parse_weather_extra_points,
     short_forecast_to_weather_values,
 )
 
 KST = timezone(timedelta(hours=9))
+
+
+# -- parse_weather_extra_points (T-219a) -----------------------------------
+
+
+def test_parse_weather_extra_points_none_and_empty() -> None:
+    assert parse_weather_extra_points(None) == []
+    assert parse_weather_extra_points("") == []
+    assert parse_weather_extra_points("  ;  ") == []
+
+
+def test_parse_weather_extra_points_multiple_with_spaces() -> None:
+    assert parse_weather_extra_points("126.978, 37.5665 ; 129.075,35.1796") == [
+        (126.978, 37.5665),
+        (129.075, 35.1796),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("value", "match"),
+    [
+        ("126.978", "lon,lat"),  # lat 누락
+        ("126.978,37.5665,9", "lon,lat"),  # 조각 3개
+        ("abc,37.5", "숫자 변환 실패"),  # 비숫자
+        ("10.0,37.5", "bbox"),  # 한국 bbox 밖 (lon)
+        ("126.978,50.0", "bbox"),  # 한국 bbox 밖 (lat)
+    ],
+)
+def test_parse_weather_extra_points_rejects_invalid(value: str, match: str) -> None:
+    with pytest.raises(ValueError, match=match):
+        parse_weather_extra_points(value)
 
 
 @dataclass(frozen=True)

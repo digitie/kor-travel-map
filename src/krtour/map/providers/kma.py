@@ -76,6 +76,7 @@ __all__ = [
     "KMA_WEATHER_ALERT_MARKER_ICON",
     "KMA_WEATHER_ALERT_MARKER_COLOR",
     "KMA_ALERT_LEVEL_SEVERITY",
+    "parse_weather_extra_points",
 ]
 
 
@@ -158,6 +159,36 @@ KMA_METRIC_NAMES: Final[dict[str, str]] = {
     "VVV": "남북바람성분",
     "LGT": "낙뢰",
 }
+
+
+def parse_weather_extra_points(value: str | None) -> list[tuple[float, float]]:
+    """``kma_weather_extra_points`` 설정(``lon,lat;lon,lat``) 파서 (T-219a).
+
+    KMA weather 적재 대상에 명시 추가할 좌표 목록. 세미콜론으로 지점을, 콤마로
+    lon/lat을 구분한다(공백 허용). 빈 항목은 무시하고, 숫자가 아니거나 한국
+    bbox(경도 124~132, 위도 33~43) 밖이면 ``ValueError`` — 설정 오타가 조용히
+    빈 대상이 되지 않게 한다. ``None``/빈 문자열은 빈 목록.
+    """
+    if value is None or not value.strip():
+        return []
+    points: list[tuple[float, float]] = []
+    for chunk in value.split(";"):
+        part = chunk.strip()
+        if not part:
+            continue
+        pieces = [p.strip() for p in part.split(",")]
+        if len(pieces) != 2:
+            raise ValueError(f"좌표는 'lon,lat' 형식이어야 합니다: {part!r}")
+        try:
+            lon, lat = float(pieces[0]), float(pieces[1])
+        except ValueError as exc:
+            raise ValueError(f"좌표 숫자 변환 실패: {part!r}") from exc
+        if not (124.0 <= lon <= 132.0 and 33.0 <= lat <= 43.0):
+            raise ValueError(
+                f"좌표가 한국 bbox(lon 124~132, lat 33~43) 밖입니다: {part!r}"
+            )
+        points.append((lon, lat))
+    return points
 
 
 # -- 입력 Protocol --------------------------------------------------------
@@ -593,8 +624,7 @@ def ultra_short_forecast_to_weather_values(
     - 초단기예보는 30분 단위로 발표, 6시간 예보. 한 격자점에서 10 카테고리 ×
       ~12 시각 = ~120 row가 떨어진다.
     - 카테고리 일부는 단기예보와 다름 (예: ``LGT`` 낙뢰는 초단기예보 전용).
-      현재 ``KMA_METRIC_UNITS``/``KMA_METRIC_NAMES``에 LGT 미수록 — 첫 LGT
-      적재 PR에서 표 추가.
+      ``KMA_METRIC_UNITS``/``KMA_METRIC_NAMES``에 수록돼 있다(unit=code).
     """
     return [
         _ultra_short_forecast_item_to_weather_value(

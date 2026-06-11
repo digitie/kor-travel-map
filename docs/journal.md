@@ -2,6 +2,26 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-11 (claude) — T-219a KMA weather 기반: 대상 좌표 조회 + settings
+
+T-219 (KMA Dagster 완결)의 기반 task. 계획 정본
+`docs/reports/kma-mcst-provider-plan-2026-06-11.md` §2의 "옵션 B + 1차 대상 한정"
+설계를 코드로 깔았다. Dagster asset(T-219b/c)이 이 표면 위에 올라간다.
+
+- `providers/kma.py`: `parse_weather_extra_points` 신설 — `"lon,lat;lon,lat"` 파서,
+  한국 bbox(lon 124~132 / lat 33~43) 검증, 형식/숫자/범위 위반 ValueError.
+  LGT 메트릭은 **기등록 확인**(KMA_METRIC_UNITS/NAMES에 이미 존재) — 계획 문서의
+  "미등록" 기술은 노후 docstring 오판이었고 docstring만 정정.
+- `settings.py`: `kma_weather_extra_points`(env `KMA_WEATHER_EXTRA_POINTS`) +
+  `kma_weather_max_grids_per_run`(기본 50, 1~500) 2필드.
+- infra 조회 2종: `poi_cache_target_repo.list_active_target_coords`(미삭제+
+  update_enabled) + `feature_repo.list_active_place_coords`(place,
+  `deleted_at IS NULL` — status inactive여도 날씨 부착 가능, D-12 read 정합).
+  `infra/__init__.py` re-export 포함.
+- 테스트: 파서 unit 3종(PT011 — `match` 필수) + 통합 테스트에 좌표 조회 2종 단언
+  (inactive 포함/soft-deleted 제외 검증). 게이트: unit 981 passed / ruff / mypy
+  --strict / lint-imports / 통합 1 passed (WSL).
+
 ## 2026-06-11 (codex) — provider extra git pin 복구
 
 T-212e live full reload 중 `.[providers]` extra가 문서와 달리 실제 provider git

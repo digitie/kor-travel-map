@@ -13,9 +13,13 @@
   - [ ] T-219 — **KMA weather Dagster 파이프라인 완결** (변환은 기구현 100%/Dagster 0%
         — 2026-06-11 실측). 정본
         `docs/reports/kma-mcst-provider-plan-2026-06-11.md` §2.
-    - [ ] T-219a — 기반: weather 대상 격자/feature 매핑 조회(옵션 B — poi_cache_targets
-          좌표 + `kma_weather_extra_points`, run당 상한) + settings 2필드 + LGT 메트릭
-          메타 등록.
+    - [x] T-219a — 기반: weather 대상 격자/feature 매핑 조회(옵션 B). **완료
+          (2026-06-11)**: `parse_weather_extra_points`(lon,lat;… 파서 + 한국 bbox
+          검증) + settings 2필드(`kma_weather_extra_points`/
+          `kma_weather_max_grids_per_run` 1~500, 기본 50) +
+          `list_active_target_coords`(poi_cache_targets) +
+          `list_active_place_coords`(deleted_at IS NULL — D-12 read 정합).
+          LGT 메트릭은 기등록 확인(실측) — 노후 docstring만 정정.
     - [ ] T-219b — 초단기실황/초단기예보/단기예보 asset+schedule(매시/30분/3h base)
           + credential guard + fake client 테스트.
     - [ ] T-219c — 중기(region 107 → 설정 주입 매핑, 미설정 skip) + 특보(record
