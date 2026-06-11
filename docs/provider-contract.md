@@ -102,6 +102,7 @@ system
 | `kma_ultra_short_nowcast` | python-kma-api | 초단기실황 |
 | `kma_mid_forecast` | python-kma-api | 중기예보 |
 | `kma_weather_alerts` | python-kma-api | 특보 |
+| `mcst_<slug>` (16종) | python-mcst-api | KCISA 14(`mcst_independent_bookstores` 등, 공통 CultureRecord) + ODCloud 도서관 2(`mcst_public_libraries`/`mcst_small_libraries`). 메타표 `providers.mcst.MCST_{CULTURE,LIBRARY}_DATASETS` |
 | `khoa_oceans_beach_info` | python-khoa-api | 해수욕장 정보 |
 | `khoa_coastal_notices` | python-khoa-api | 해양 공지 |
 | `krforest_recreation_forests` | python-krforest-api | 휴양림 |
@@ -410,7 +411,7 @@ def test_no_provider_wrapper_classes():
 | python-krairport-api | `@b885413` | (Sprint 3 PR) | — | 공항 운항·날씨 |
 | python-mois-api | `@bc6f742` | (Sprint 4 PR) | — | ADR-024 canonical name 정정. 4단계 lifecycle |
 | python-kasi-api | placeholder | (Sprint 4 PR) | — | KASI 영업주기 |
-| python-mcst-api | placeholder | (Sprint 5 PR) | — | 독립서점/북카페 — MOIS enrichment |
+| python-mcst-api | `@d06e8d2` | `McstCultureItem` + slug 메타표 16종 (T-220a) | T-220a~c | KCISA 14 + ODCloud 도서관 2 — asset 2종(slug별 분리 적재). dedup pair는 실데이터 확인 후 등록 검토(`docs/mcst-feature-etl.md` §6) |
 
 **최신 sha 갱신 절차**:
 1. provider 저장소에서 안정 commit sha 확인 (사용자 모니터링).

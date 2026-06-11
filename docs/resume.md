@@ -1,5 +1,23 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-11 claude 작업 메모 — T-219/T-220 완결 (KMA Dagster + MCST 신규 provider)
+
+사용자 지시 "kma, mcst provider 빠짐없이 상세구현(Dagster 포함)"을 PR 6개로 종결
+(T-219a #356 / T-219b #360 / T-219c #361 / T-220a #363 / T-220b #364 / T-220c).
+
+- **KMA**: Dagster asset 5종 완비 — 실황/초단기/단기(옵션 B 대상 한정 — poi
+  target+extra 좌표 격자, run당 상한) + 중기(설정 주입 region 매핑) + 특보
+  (record resource→notice, region명=raw_address 위치 단서). cursor
+  `base_datetime` skip / 실패 시 미전진. `python-kma-api@ab1a0b8` 핀.
+- **MCST**: 신규 provider 풀스택 — slug 메타표 16종(KCISA 14 + 도서관 2, 전부
+  기존 category), `(slug, record)` 튜플 스트림 → slug별 분리 적재 asset 2종,
+  ETL preview fixture, `docs/mcst-feature-etl.md`. `python-mcst-api@d06e8d2` 핀.
+  dedup pair는 실데이터 확인 후 등록 검토.
+
+**다음 한 작업**: **T-212e** — 실데이터 full reload + offline upload 실데이터
+검증 + 최종 리포트(백로그 인덱스에 남은 유일한 열린 항목). KMA/MCST 신규
+asset의 실 fetch 검증도 T-212e 범위에서 함께 본다(credential/스키마 drift).
+
 ## 2026-06-10 Codex 작업 메모 — T-212d read-heavy 재측정
 
 PR #332 머지 후 `origin/main`에서 새 브랜치를 만들고 T-212d를 다시 실행했다. 기존

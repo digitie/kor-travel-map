@@ -5,6 +5,19 @@
 
 ## [Unreleased]
 
+### MCST 신규 provider — KCISA 14 + ODCloud 도서관 2 (T-220, 2026-06-11)
+
+- **NEW**: `providers/mcst.py` — slug 메타표 16종(`mcst_<slug>`) + 공용
+  `culture_records_to_bundles`/`library_records_to_bundles`. category는 전부
+  기존 코드(place_kind가 세부 구분), marker `P-12`, 자연키 `name::address`.
+- **NEW**: Dagster `(slug, record)` 튜플 fetch 2종 + record resource 2종 +
+  asset 2종(`feature_place_mcst_{culture,libraries}` — slug별 분리 적재,
+  `McstLoadResult` 합산 metadata) + 주 1회 schedule. settings
+  `mcst_max_items_per_dataset`(기본 5000).
+- **ADDED**: admin ETL preview fixture 2종(`mcst_independent_bookstores`/
+  `mcst_public_libraries`), `python-mcst-api@d06e8d2` 핀 활성화, 문서
+  `docs/mcst-feature-etl.md`(dedup pair는 실데이터 확인 후 등록 검토 — §6).
+
 ### Dagster — KMA 중기예보 + 기상특보 (T-219c, 2026-06-11)
 
 - **NEW**: asset `feature_weather_kma_mid_forecast` — 운영자 주입 매핑

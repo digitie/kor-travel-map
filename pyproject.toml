@@ -116,7 +116,9 @@ providers = [
   # "python-kasi-api     @ git+https://github.com/digitie/python-kasi-api.git@<sha>",
   #
   # ── Sprint 5 — 박물관/미술관 / mcst enrichment / standard data ────────
-  # "python-mcst-api     @ git+https://github.com/digitie/python-mcst-api.git@<sha>",
+  # T-220b: Dagster fetcher가 CultureOpenApiClient/DataGoFileApiClient를 lazy
+  # import — runtime 의존 활성화 (origin/master d06e8d2).
+  "python-mcst-api @ git+https://github.com/digitie/python-mcst-api.git@d06e8d2de1aac9eb336a711d4cacbaf0aa512d22",
   # data.go.kr-standard 5종은 본 라이브러리 + python-datagokr-api 경유 (ADR-042).
 ]
 

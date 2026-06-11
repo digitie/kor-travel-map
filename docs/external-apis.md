@@ -149,15 +149,26 @@ API 키 우선순위:
 
 ### 3.13 TripMate-agent YouTube 후보 export
 
-1. TripMate-agent가 `/api/v1/krtour/features/snapshot`과
-   `/api/v1/krtour/features/changes`를 제공해야 한다(TripMate-agent `T-066`).
+1. TripMate-agent가 `/api/v1/features/snapshot`과
+   `/api/v1/features/changes`를 제공해야 한다(TripMate-agent `T-066`,
+   ADR-050 경로 중립화 — T-217a).
 2. krtour-map Dagster는 `KRTOUR_MAP_TRIPMATE_AGENT_BASE_URL`을 host root로 받고,
-   path는 fetcher가 `/api/v1/krtour/features/{snapshot|changes}`로 붙인다.
+   path는 fetcher가 `/api/v1/features/{snapshot|changes}`로 붙인다.
 3. `KRTOUR_MAP_TRIPMATE_AGENT_API_KEY`는 TripMate-agent 운영 환경의 `API_KEYS` 중
    하나와 같아야 하며, `X-API-Key` 헤더로만 전송한다.
 4. `KRTOUR_MAP_TRIPMATE_AGENT_FEATURE_SYNC_ENDPOINT=snapshot|changes`,
    `KRTOUR_MAP_TRIPMATE_AGENT_FEATURE_CURSOR`,
    `KRTOUR_MAP_TRIPMATE_AGENT_FEATURE_PAGE_SIZE`로 full/incremental pull을 조정한다.
+
+### 3.14 문화체육관광부 (MCST, `python-mcst-api`)
+
+1. KCISA 14 dataset(공통 `CultureRecord`)과 ODCloud 도서관 2 dataset 모두
+   **`DATA_GO_KR_SERVICE_KEY` 공유**(별도 발급 불필요 — mcst lib 실측, T-220).
+2. krtour-map env는 `KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY` 하나로 두 client
+   (`CultureOpenApiClient`/`DataGoFileApiClient`)를 연다.
+3. dataset당 1 run 상한은 `KRTOUR_MAP_MCST_MAX_ITEMS_PER_DATASET`(기본 5000).
+4. dataset 카탈로그(slug/endpoint)는 `python-mcst-api` `catalog.py`가 정본 —
+   krtour 측 메타표는 `krtour.map.providers.mcst.MCST_{CULTURE,LIBRARY}_DATASETS`.
 
 ## 4. 호출 정책 (provider 라이브러리가 책임)
 

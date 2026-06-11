@@ -2,6 +2,24 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-11 (claude) — T-220c MCST fixture/문서 — T-220 완결 (KMA·MCST 전체 종료)
+
+사용자 지시 "kma, mcst provider 빠짐없이 상세구현(Dagster 포함)"의 마지막 조각.
+
+- admin ETL preview fixture 2종: `mcst_independent_bookstores`(KCISA 공용 변환
+  대표) + `mcst_public_libraries`(도서관 공용 변환 대표) — 16종 전부는 공용
+  변환이라 대표 1개씩이면 회귀 커버.
+- 문서: `docs/mcst-feature-etl.md` 신규(메타표/변환 규칙/Dagster/fixture/dedup
+  결정) + external-apis §3.14(키 공유) + provider-contract §3 dataset 표·§12
+  status(`@d06e8d2`) + CHANGELOG. drive-by: external-apis §3.13의 구
+  `/api/v1/krtour/features/*` 경로를 ADR-050 중립 경로로 정정.
+- pyproject `providers` extra에 `python-mcst-api@d06e8d2`(origin/master) 핀.
+- **dedup pair 결정**: world_restaurants/서점/캠핑이 MOIS PROMOTED와 교차
+  가능하나 자연키 체계가 달라 **즉시 등록 안 함** — T-212e 실데이터 매칭 품질
+  확인 후 `DEFAULT_DEDUP_SCOPE_PAIRS` 재검토(etl 문서 §6).
+- 이로써 T-219(KMA asset 5종) + T-220(MCST 신규 provider) 전부 종료 — 열린
+  백로그는 T-212e 1건.
+
 ## 2026-06-11 (claude) — T-220b MCST Dagster 배선 (fetch/resource/asset/schedule)
 
 T-220a 변환 위에 파이프라인. KCISA 14종이 공통 스키마라 record resource 1개가
