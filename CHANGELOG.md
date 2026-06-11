@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### Dagster — mois op/job 동명 충돌로 repository 로드 실패 수정 (#384, T-212e, 2026-06-11)
+
+- **FIXED**: `mois_source_sync` op 이름을 `sync_mois_localdata_source_db`로 변경 —
+  job과 동명(`mois_localdata_source_sync`)이라 **repository 전체 로드가
+  `DagsterInvalidDefinitionError`로 실패**(웹서버 repo 0개, admin offline upload
+  `POST /load` 502 `PipelineNotFoundError`, schedule/sensor 불능)하던 문제.
+  2026-06-07 mois Phase A 머지 이후 잠복 — CLI materialize/execute는 전체 로드
+  경로를 타지 않아 드러나지 않았다.
+- **ADDED**: definitions 테스트에 repository 전체 로드 회귀
+  (`load_all_definitions`) — 노드명 충돌류를 CI에서 차단.
+
 ### kma pin bump — datagokr 03 NO_DATA 빈 결과 정규화 (T-212e, 2026-06-11)
 
 - **CHANGED**: `python-kma-api` pin `ab1a0b8` → `006fdbe` — datagokr result

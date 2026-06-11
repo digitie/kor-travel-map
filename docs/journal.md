@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-11 (claude) — T-212e #384: mois op/job 동명 충돌 — repository 로드 실패
+
+offline upload live 검증에서 `POST /{id}/load`가 502
+`PipelineNotFoundError` → 웹서버 GraphQL이 repository 0개를 노출하는 것을 발견.
+원인: `mois_source_sync.py`의 op와 job이 같은 이름(`mois_localdata_source_sync`)
+— Dagster job은 동명 graph를 만들므로 `load_all_definitions`의 노드명 유일성
+검사에서 repository 전체가 죽는다. **2026-06-07 mois Phase A 머지 이후 웹서버
+repo·daemon schedule·admin run launch가 전부 잠복 불능**이었고, CLI
+materialize/execute는 그 경로를 타지 않아 못 봤다.
+
+- op 이름 `sync_mois_localdata_source_db`로 변경(job/schedule 이름 유지).
+- definitions 테스트에 repository 전체 로드 회귀 추가 — 이 부류를 CI에서 차단.
+
 ## 2026-06-11 (claude) — T-212e: kma pin bump (03 NO_DATA 빈 결과)
 
 T-212e live run에서 `feature_notice_kma_weather_alerts`가
