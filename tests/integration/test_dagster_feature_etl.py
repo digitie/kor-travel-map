@@ -110,26 +110,35 @@ class _Notice:
 
 
 @dataclass(frozen=True)
-class _HeritageItem:
+class _HeritageKey:
     ccba_kdcd: str
     ccba_asno: str
     ccba_ctcd: str
-    name: str
-    heritage_type: str | None = None
+
+    @property
+    def natural_key(self) -> str:
+        return f"{self.ccba_kdcd}-{self.ccba_asno}-{self.ccba_ctcd}"
+
+
+@dataclass(frozen=True)
+class _HeritageItem:
+    key: _HeritageKey
+    name_ko: str
+    category: str | None = None
+    region: str | None = None
+    sigungu: str | None = None
     longitude: Decimal | float | None = None
     latitude: Decimal | float | None = None
     location_text: str | None = None
-    designated_date: date | None = None
+    designated_at: str | None = None
     manager: str | None = None
-    geom_wkt: str | None = None
     image_url: str | None = None
-    raw: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class _HeritageEvent:
-    sn: str
-    title: str
+    sn: str | None
+    title: str | None
     starts_on: date | None = None
     ends_on: date | None = None
     place: str | None = None
@@ -327,15 +336,17 @@ async def test_dagster_assets_validate_coordinates_and_load_to_postgis(
             map_client,
             krheritage_items=[
                 _HeritageItem(
-                    ccba_kdcd="11",
-                    ccba_asno="DAGSTER001",
-                    ccba_ctcd="37",
-                    name="석굴암 석굴",
-                    heritage_type="전통사찰",
+                    key=_HeritageKey(
+                        ccba_kdcd="11",
+                        ccba_asno="DAGSTER001",
+                        ccba_ctcd="37",
+                    ),
+                    name_ko="석굴암 석굴",
+                    category="전통사찰",
                     longitude=Decimal("129.349"),
                     latitude=Decimal("35.795"),
                     location_text="경상북도 경주시 진현동",
-                    designated_date=date(1962, 12, 20),
+                    designated_at="19621220",
                     manager="불국사",
                 )
             ],

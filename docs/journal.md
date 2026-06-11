@@ -2,6 +2,39 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-11 (claude) — T-212e #380: krheritage items live fetcher 배선 + HeritageDetail 재정렬 + events 빈 sn fallback
+
+T-212e live full reload에서 `feature_place_krheritage_items`가 resource guard로
+실패 — T-RV-04b ②는 `krheritage_events`만 배선했고 국가유산 본체
+(`krheritage_heritage_features`) fetcher는 배선된 적이 없었다. 추가로
+`KrHeritageItem` Protocol이 provider 실모델(`HeritageDetail@7dc46c3`)과
+불일치(top-level `ccba_*`/`name`/`designated_date: date`/`geom_wkt`/`raw` —
+전부 발명 shape), `krheritage_events`는 live 일부 row의 빈 `sn`이 ADR-009
+검증 ValueError로 run을 깼다(run `bd92b726`).
+
+- Protocol 재정렬(ADR-044): 복합키는 `KrHeritageItemKey`(중첩 `key`,
+  `ccba_kdcd/asno/ctcd` + provider 제공 `natural_key`), 명칭 `name_ko`, 유형
+  `category`(ccmaName), 지정일 `designated_at`(YYYYMMDD str → 방어 파싱),
+  소재지 `location_text` + `region+sigungu` fallback. `geom_wkt` 제거 — GIS
+  경계(`gis_spca`/`gis_3070426`) 보강은 후속, 천연기념물(15)은 그동안 place,
+  area(사적/명승)도 원천 좌표만(boundary/면적 None). model에 raw 미보유 →
+  raw_data는 Protocol 필드에서 구성. 명칭 빈 row skip(#374 패턴).
+- `fetch_krheritage_items` 신설: `HeritageClient()` **keyless**(khs.go.kr —
+  transport는 apis.data.go.kr URL에만 serviceKey 주입, 실측) +
+  `search.iter_all_details(page_size=100, ccba_kdcd=...)`를 settings
+  `krheritage_kind_codes`(기본 11,12,13,15,16)별 순회, run당
+  `krheritage_max_items_per_run`(기본 5000) 상한 — detail이 1건당 1콜이라
+  필수(mcst 가드 패턴). resources spec credential 제거(빈 setting_names,
+  knps keyless 패턴) + live override 등록.
+- events 빈 `sn` fallback: `_event_natural_key` — `sn` 우선, 비면
+  `title::starts_on::place(없으면 address)`(ADR-009 `::`), 둘 다 없으면 row
+  skip(helper None → public fn filter). `content_id`/`source_entity_id`는
+  natural_key로 통일(sn 있으면 종전과 동일).
+- 테스트: unit 변환(중첩 key fake/skip/파싱/region fallback/이벤트 fallback
+  4종) + dagster fetcher(keyless·kind 순회·상한 중단) + live override 단언
+  갱신(전 spec live). admin은 krheritage 참조 없음(grep 확인). 문서:
+  provider-contract §12, CHANGELOG, journal.
+
 ## 2026-06-11 (claude) — T-212e #378: krex 교통공지 신규 Incident(realTimeSms) 재정렬 + krex/khoa pin bump
 
 T-212e live full reload에서 `feature_notice_krex_traffic_notices`가

@@ -96,6 +96,7 @@ _LIVE_PROVIDER_RESOURCE_KEYS = {
     "opinet_stations",
     "krex_rest_areas",
     "krex_traffic_notices",
+    "krheritage_items",
     "krheritage_events",
     "mois_license_records",
     "knps_point_records",

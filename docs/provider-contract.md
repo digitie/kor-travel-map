@@ -407,7 +407,7 @@ def test_no_provider_wrapper_classes():
 | python-krex-api | `@2504a36` | `KrexTrafficNoticeItem` 재정렬 (#378) | — | Sprint 2 §2.4 multi-kind. incident → `openapi/burstInfo/realTimeSms`(apiId 0611) repoint(krex#8/PR#9) — 좌표 일부 row 보유, 종료 시각 컬럼 없음 |
 | python-visitkorea-api | `@cebf543` | (후속 PR — enrichment) | — | ADR-042: 축제는 enrichment 2차 |
 | python-knps-api | `@5e88fb4` | (Sprint 3 PR) | PR#25 | keyless file-only, ADR-028 amendment 2026-05-25 |
-| python-krheritage-api | `@7dc46c3` | (Sprint 3 PR) | — | media → RustFS |
+| python-krheritage-api | `@7dc46c3` | `KrHeritageItem`/`KrHeritageItemKey` — `HeritageDetail` 재정렬 (#380) | — | items+events live fetcher 배선. items는 **keyless**(khs.go.kr — transport는 apis.data.go.kr에만 serviceKey 주입). scope/상한 settings `krheritage_kind_codes`(기본 11,12,13,15,16)/`krheritage_max_items_per_run`(detail 1콜/건). event `sn` 빈 값은 `title::starts_on::place` fallback. GIS 경계(geom) 보강은 후속. media → RustFS |
 | python-krairport-api | `@b885413` | (Sprint 3 PR) | — | 공항 운항·날씨 |
 | python-mois-api | `@bc6f742` | (Sprint 4 PR) | — | ADR-024 canonical name 정정. 4단계 lifecycle |
 | python-kasi-api | placeholder | (Sprint 4 PR) | — | KASI 영업주기 |

@@ -235,6 +235,24 @@ class KrtourMapSettings(BaseSettings):
             "이상 응답/페이지 루프 방어. env ``KRTOUR_MAP_MCST_MAX_ITEMS_PER_DATASET``."
         ),
     )
+    krheritage_kind_codes: str = Field(
+        default="11,12,13,15,16",
+        description=(
+            "국가유산 items live fetch 대상 종목코드(ccbaKdcd) comma 목록(#380). "
+            "기본 11 국보/12 보물/13 사적/15 천연기념물/16 명승. "
+            "env ``KRTOUR_MAP_KRHERITAGE_KIND_CODES``."
+        ),
+    )
+    krheritage_max_items_per_run: int = Field(
+        default=5000,
+        ge=1,
+        le=100000,
+        description=(
+            "국가유산 items 1 run 최대 record 수(#380) — detail이 1건당 1콜이라 "
+            "과호출 방어(``mcst_max_items_per_dataset`` 패턴). "
+            "env ``KRTOUR_MAP_KRHERITAGE_MAX_ITEMS_PER_RUN``."
+        ),
+    )
     krex_ex_api_key: SecretStr | None = Field(
         default=None,
         description="한국도로공사 EX OpenAPI key. source env는 ``KEX_GO_API_KEY``.",

@@ -47,6 +47,7 @@ __all__ = [
     "fetch_krforest_arboretums",
     "fetch_krforest_recreation_forests",
     "fetch_krheritage_events",
+    "fetch_krheritage_items",
     "fetch_mcst_culture_records",
     "fetch_mcst_libraries",
     "fetch_mois_license_records",
@@ -193,6 +194,51 @@ def fetch_krheritage_events(
         yield from client.event.iter_months()
     finally:
         client.close()
+
+
+def fetch_krheritage_items(
+    settings: KrtourMapSettings,
+) -> Iterator[Any]:
+    """국가유산 본체(place/area) record를 krheritage public client로 stream한다 (#380).
+
+    ``HeritageClient()``를 **keyless**로 열고 — 국가유산 search/detail은
+    khs.go.kr OpenAPI라 service key가 필요 없다(provider transport는
+    ``apis.data.go.kr`` URL에만 serviceKey를 주입) — settings
+    ``krheritage_kind_codes``(기본 ``"11,12,13,15,16"``: 국보/보물/사적/
+    천연기념물/명승)의 종목코드별로 ``client.search.iter_all_details(
+    page_size=100, ccba_kdcd=...)``의 record(``HeritageDetail``, krtour
+    ``KrHeritageItem`` Protocol 충족)를 lazily yield한다.
+
+    detail이 **1건당 1 HTTP 콜**이므로 run당 상한
+    ``krheritage_max_items_per_run``(기본 5000)에서 끊는다
+    (``mcst_max_items_per_dataset`` 가드 패턴). sync generator, finally close.
+    """
+    # provider public client는 ADR-044 로컬 체크아웃이며 hard dependency가
+    # 아니므로(부재 가능), datagokr와 동일하게 import time이 아닌 호출 시점에
+    # ``importlib`` + ``cast(Any, ...)``로 lazy resolve한다.
+    krheritage = cast(Any, importlib.import_module("krheritage"))
+
+    kind_codes = [
+        code.strip()
+        for code in settings.krheritage_kind_codes.split(",")
+        if code.strip()
+    ]
+    max_items = settings.krheritage_max_items_per_run
+    client = krheritage.HeritageClient()
+    seen = 0
+    try:
+        for kind_code in kind_codes:
+            for record in client.search.iter_all_details(
+                page_size=100, ccba_kdcd=kind_code
+            ):
+                yield record
+                seen += 1
+                if seen >= max_items:
+                    return
+    finally:
+        close = getattr(client, "close", None)
+        if callable(close):
+            close()
 
 
 def fetch_krex_rest_areas(

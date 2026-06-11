@@ -40,6 +40,7 @@ from .provider_fetchers import (
     fetch_krforest_arboretums,
     fetch_krforest_recreation_forests,
     fetch_krheritage_events,
+    fetch_krheritage_items,
     fetch_mcst_culture_records,
     fetch_mcst_libraries,
     fetch_mois_license_records,
@@ -127,8 +128,11 @@ PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
         resource_key="krheritage_items",
         provider_package="python-krheritage-api",
         dataset_key="krheritage_heritage_features",
-        setting_names=("data_go_kr_service_key",),
-        source_env_names=("DATA_GO_KR_SERVICE_KEY",),
+        note=(
+            "국가유산 search/detail(khs.go.kr)은 keyless — provider transport는 "
+            "apis.data.go.kr URL에만 serviceKey를 주입한다. scope는 settings "
+            "krheritage_kind_codes, run당 상한은 krheritage_max_items_per_run."
+        ),
     ),
     ProviderRecordResourceSpec(
         resource_key="krheritage_events",
@@ -440,6 +444,24 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["krheritage_events"] = (
     build_provider_record_live_resource(
         _KRHERITAGE_EVENTS_SPEC,
         fetch_krheritage_events,
+    )
+)
+
+_KRHERITAGE_ITEMS_SPEC: ProviderRecordResourceSpec = next(
+    spec
+    for spec in PROVIDER_RECORD_RESOURCE_SPECS
+    if spec.resource_key == "krheritage_items"
+)
+"""krheritage 국가유산 본체 spec 참조 (live resource override용, #380).
+
+khs.go.kr search/detail은 keyless라 spec.setting_names가 비어 있어 live guard
+활성 판정(all(...) over empty)은 항상 True — knps file dataset과 동일 패턴.
+"""
+
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["krheritage_items"] = (
+    build_provider_record_live_resource(
+        _KRHERITAGE_ITEMS_SPEC,
+        fetch_krheritage_items,
     )
 )
 
