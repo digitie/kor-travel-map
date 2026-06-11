@@ -6,12 +6,13 @@
 
 ## 진행 중인 작업 인덱스 (열린 `[ ]` 항목)
 
-> 총 10건. 상세는 아래 각 섹션. 완료 이력은 [`tasks-done.md`](tasks-done.md).
+> 총 5건. 상세는 아래 각 섹션. 완료 이력은 [`tasks-done.md`](tasks-done.md).
 
 - **다음 (우선순위 순)**
   - [ ] T-212e — 실데이터 full reload + offline upload 실데이터 검증 + 최종 리포트.
-  - [ ] T-219 — **KMA weather Dagster 파이프라인 완결** (변환은 기구현 100%/Dagster 0%
-        — 2026-06-11 실측). 정본
+  - [x] T-219 — **KMA weather Dagster 파이프라인 완결**. **T-219a~c 전부 완료
+        (2026-06-11)** — asset 5종(실황/초단기/단기/중기/특보) + KST schedule +
+        cursor/credential guard. 정본
         `docs/reports/kma-mcst-provider-plan-2026-06-11.md` §2.
     - [x] T-219a — 기반: weather 대상 격자/feature 매핑 조회(옵션 B). **완료
           (2026-06-11)**: `parse_weather_extra_points`(lon,lat;… 파서 + 한국 bbox
@@ -26,9 +27,13 @@
           resource(credential guard) + cursor `base_datetime` skip/failure 기록 +
           fake client 테스트 12종. `python-kma-api@ab1a0b8` 핀 활성화. KmaClient
           모델↔Protocol shape 차이는 raw payload→row dataclass로 해소.
-    - [ ] T-219c — 중기(region 107 → 설정 주입 매핑, 미설정 skip) + 특보(record
-          resource → notice 적재) asset + 테스트. ※ ASOS/해수욕장(beach_*)/APIHub
-          표면은 백로그 비고(1차 범위 외).
+    - [x] T-219c — 중기 + 특보. **완료(2026-06-11)**: mid asset(설정 주입
+          `kma_mid_region_features` JSON — 육상/기온 reg_id 분리, 미설정 skip,
+          `kma_datagokr_client` resource) + 특보 record resource
+          `kma_weather_alert_records`(전국 108, rolling window)→notice 적재
+          (종류/등급 title 토큰 스캔, region명=raw_address 위치 단서).
+          ※ ASOS/해수욕장(beach_*)/APIHub 표면 + 특보 구역별 fan-out·좌표
+          enrichment는 백로그 비고(1차 범위 외).
   - [ ] T-220 — **MCST(python-mcst-api) 신규 provider 풀스택** — KCISA 14 place
         dataset(`CultureRecord`) + ODCloud 도서관 2종, marker `P-12`,
         `DATA_GO_KR_SERVICE_KEY` 공유. 정본 동 문서 §3.

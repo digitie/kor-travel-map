@@ -194,6 +194,26 @@ class KrtourMapSettings(BaseSettings):
             "env ``KMA_WEATHER_MAX_GRIDS_PER_RUN``."
         ),
     )
+    kma_mid_region_features: str | None = Field(
+        default=None,
+        description=(
+            "KMA 중기예보 region→feature 매핑 JSON (T-219c). 중기는 격자가 아니라 "
+            "region 체계라 운영자가 광역시도 대표 feature를 명시 주입한다 — "
+            '미설정이면 mid asset skip. 형식 ``[{"land_reg_id": "11B00000", '
+            '"ta_reg_id": "11B10101", "feature_ids": ["..."]}]``. 파서는 '
+            "``krtour.map.providers.kma.parse_mid_region_features``. "
+            "env ``KRTOUR_MAP_KMA_MID_REGION_FEATURES``."
+        ),
+    )
+    kma_weather_alert_lookback_days: int = Field(
+        default=3,
+        ge=1,
+        le=30,
+        description=(
+            "KMA 특보(getWthrWrnList) 조회 rolling window 일수(T-219c) — 오늘 "
+            "포함 N일. env ``KRTOUR_MAP_KMA_WEATHER_ALERT_LOOKBACK_DAYS``."
+        ),
+    )
     krex_ex_api_key: SecretStr | None = Field(
         default=None,
         description="한국도로공사 EX OpenAPI key. source env는 ``KEX_GO_API_KEY``.",

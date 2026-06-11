@@ -9,18 +9,29 @@ from typing import Any, cast
 import pytest
 from dagster import build_asset_context, build_init_resource_context
 from krtour.map.dto import ForecastStyle, WeatherDomain
+from krtour.map.infra.feature_repo import FeatureLoadResult
+from krtour.map.settings import KrtourMapSettings
 from pydantic import SecretStr
 
-from krtour.map_dagster import kma_weather, resources
+from krtour.map_dagster import kma_weather, provider_fetchers, resources
 from krtour.map_dagster.kma_weather import (
     KmaForecastRow,
     KmaNowcastRow,
     forecast_rows_from_items,
     map_grid_targets,
+    mid_land_rows_from_items,
+    mid_temp_rows_from_items,
     nowcast_rows_from_snapshot,
+    run_feature_notice_kma_weather_alerts,
+    run_feature_weather_kma_mid_forecast,
     run_feature_weather_kma_short_forecast,
     run_feature_weather_kma_ultra_short_forecast,
     run_feature_weather_kma_ultra_short_nowcast,
+    weather_warning_rows,
+)
+from krtour.map_dagster.provider_fetchers import (
+    ProviderCredentialMissing,
+    fetch_kma_weather_alerts,
 )
 
 pytestmark = pytest.mark.filterwarnings(
@@ -535,3 +546,381 @@ def test_kma_weather_client_resource_guard_without_credential(
     assert "kma_weather_client" in message
     assert "KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY" in message
     assert "python-kma-api" in message
+
+
+# -- T-219c: 중기예보 -------------------------------------------------------
+
+
+_MID_LAND_ITEM = SimpleNamespace(
+    reg_id="11B00000",
+    tm_fc="202606110600",
+    raw={
+        "regId": "11B00000",
+        "tmFc": "202606110600",
+        "wf3Am": "맑음",
+        "rnSt3Am": "20",
+        "wf8": "구름많음",
+        "rnSt8": 30,
+    },
+)
+
+_MID_TEMP_ITEM = SimpleNamespace(
+    reg_id="11B10101",
+    tm_fc="202606110600",
+    raw={
+        "regId": "11B10101",
+        "tmFc": "202606110600",
+        "taMin3": "18",
+        "taMax3": 29,
+    },
+)
+
+
+def test_mid_rows_from_items_map_camel_case_raw() -> None:
+    [land] = mid_land_rows_from_items([_MID_LAND_ITEM])
+    assert land.reg_id == "11B00000"
+    assert land.tm_fc == "202606110600"
+    assert land.wf_3_am == "맑음"
+    assert land.rn_st_3_am == 20
+    assert land.wf_8 == "구름많음"
+    assert land.rn_st_8 == 30
+    assert land.wf_3_pm is None
+    assert land.rn_st_10 is None
+
+    [temp] = mid_temp_rows_from_items([_MID_TEMP_ITEM])
+    assert temp.reg_id == "11B10101"
+    assert temp.ta_min_3 == 18
+    assert temp.ta_max_3 == 29
+    assert temp.ta_min_4 is None
+
+
+class _FakeDataGoKrClient:
+    def __init__(
+        self,
+        *,
+        land_items: list[Any] | None = None,
+        temp_items: list[Any] | None = None,
+    ) -> None:
+        self._land_items = land_items or []
+        self._temp_items = temp_items or []
+        self.calls: list[tuple[str, str]] = []
+
+    def mid_land_forecast(self, *, reg_id: str) -> list[Any]:
+        self.calls.append(("land", reg_id))
+        return list(self._land_items)
+
+    def mid_temperature_forecast(self, *, reg_id: str) -> list[Any]:
+        self.calls.append(("ta", reg_id))
+        return list(self._temp_items)
+
+
+_MID_REGION_JSON = (
+    '[{"land_reg_id": "11B00000", "ta_reg_id": "11B10101",'
+    ' "feature_ids": ["f1", "f2"]}]'
+)
+
+
+def _mid_context(
+    krtour_client: _FakeKrtourClient,
+    datagokr: _FakeDataGoKrClient,
+    *,
+    region_json: str | None = _MID_REGION_JSON,
+) -> Any:
+    return build_asset_context(
+        resources={
+            "krtour_map_client": krtour_client,
+            "kma_datagokr_client": datagokr,
+            "kma_mid_region_features": region_json,
+        }
+    )
+
+
+async def test_mid_forecast_asset_loads_values_per_region_feature(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(kma_weather, "_latest_mid_base", lambda: "202606110600")
+    krtour_client = _FakeKrtourClient()
+    datagokr = _FakeDataGoKrClient(
+        land_items=[_MID_LAND_ITEM], temp_items=[_MID_TEMP_ITEM]
+    )
+
+    result = await run_feature_weather_kma_mid_forecast(
+        _mid_context(krtour_client, datagokr)
+    )
+
+    assert result.skipped is False
+    assert result.base_datetime == "202606110600"
+    assert result.regions_total == 1
+    assert result.regions_fetched == 1
+    assert result.features_total == 2
+    # land(SKY+POP ×2 시점) 4 + temp(TMN/TMX) 2 = 6 per feature × 2 features.
+    assert result.values_loaded == 12
+    assert datagokr.calls == [("land", "11B00000"), ("ta", "11B10101")]
+    assert krtour_client.success_calls == [
+        {
+            "provider": "python-kma-api",
+            "dataset_key": "kma_mid_forecast",
+            "cursor": {"base_datetime": "202606110600"},
+        }
+    ]
+
+
+async def test_mid_forecast_asset_skips_when_cursor_matches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(kma_weather, "_latest_mid_base", lambda: "202606110600")
+    krtour_client = _FakeKrtourClient(
+        sync_state=SimpleNamespace(cursor={"base_datetime": "202606110600"})
+    )
+    datagokr = _FakeDataGoKrClient(land_items=[_MID_LAND_ITEM])
+
+    result = await run_feature_weather_kma_mid_forecast(
+        _mid_context(krtour_client, datagokr)
+    )
+
+    assert result.skipped is True
+    assert datagokr.calls == []
+    assert krtour_client.success_calls == []
+
+
+async def test_mid_forecast_asset_skips_without_region_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(kma_weather, "_latest_mid_base", lambda: "202606110600")
+    krtour_client = _FakeKrtourClient()
+    datagokr = _FakeDataGoKrClient(land_items=[_MID_LAND_ITEM])
+
+    result = await run_feature_weather_kma_mid_forecast(
+        _mid_context(krtour_client, datagokr, region_json=None)
+    )
+
+    assert result.regions_total == 0
+    assert result.values_loaded == 0
+    assert datagokr.calls == []
+    # 호출이 없었으므로 cursor를 전진시키지 않는다.
+    assert krtour_client.success_calls == []
+
+
+async def test_mid_forecast_asset_records_failure_when_load_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(kma_weather, "_latest_mid_base", lambda: "202606110600")
+    krtour_client = _FakeKrtourClient(load_error=RuntimeError("boom"))
+    datagokr = _FakeDataGoKrClient(
+        land_items=[_MID_LAND_ITEM], temp_items=[_MID_TEMP_ITEM]
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await run_feature_weather_kma_mid_forecast(
+            _mid_context(krtour_client, datagokr)
+        )
+
+    assert krtour_client.success_calls == []
+    assert krtour_client.failure_calls == [
+        {"provider": "python-kma-api", "dataset_key": "kma_mid_forecast"}
+    ]
+
+
+# -- T-219c: 특보 ------------------------------------------------------------
+
+
+def _warning_record(
+    *,
+    title: str | None = "서울특별시 호우주의보 발표",
+    tm_fc: str | None = "202606110500",
+    stn_id: str | None = "108",
+    seq: str | None = "1",
+) -> SimpleNamespace:
+    return SimpleNamespace(title=title, tm_fc=tm_fc, stn_id=stn_id, seq=seq)
+
+
+def test_weather_warning_rows_extract_type_level_and_region() -> None:
+    [row] = weather_warning_rows([_warning_record()])
+
+    assert row.alert_id == "108:202606110500:1"
+    assert row.alert_type == "호우"
+    assert row.level == "주의보"
+    assert row.title == "서울특별시 호우주의보 발표"
+    assert row.issued_at.isoformat() == "2026-06-11T05:00:00+09:00"
+    assert row.source_agency == "기상청"
+    [region] = row.regions
+    assert region.region_code == "stn:108"
+    assert region.region_name == "전국"
+
+
+def test_weather_warning_rows_generic_fallback_and_minute_padding() -> None:
+    [row] = weather_warning_rows(
+        [_warning_record(title="모르는 특보 경보", tm_fc="2026061105", stn_id="133")]
+    )
+
+    assert row.alert_type == "weather_alert"
+    assert row.level == "경보"
+    assert row.issued_at.isoformat() == "2026-06-11T05:00:00+09:00"
+    [region] = row.regions
+    assert region.region_code == "stn:133"
+    assert region.region_name == "발표관서 133"
+
+
+def test_weather_warning_rows_skip_unidentifiable_records() -> None:
+    rows = weather_warning_rows(
+        [
+            _warning_record(title=None),
+            _warning_record(tm_fc=None),
+            _warning_record(),
+        ]
+    )
+
+    assert len(rows) == 1
+
+
+def test_parse_alert_tm_fc_rejects_bad_length() -> None:
+    with pytest.raises(ValueError, match="tm_fc"):
+        kma_weather._parse_alert_tm_fc("202606")
+
+
+class _FakeBundleLoadClient:
+    def __init__(self) -> None:
+        self.loaded_bundles: list[Any] = []
+
+    async def load_feature_bundles(self, bundles: Any) -> FeatureLoadResult:
+        materialized = list(bundles)
+        self.loaded_bundles.extend(materialized)
+        return FeatureLoadResult(
+            bundles_total=len(materialized),
+            features_inserted=len(materialized),
+        )
+
+
+async def test_weather_alerts_asset_loads_notice_bundles() -> None:
+    client = _FakeBundleLoadClient()
+    context = build_asset_context(
+        resources={
+            "krtour_map_client": client,
+            "reverse_geocoder": None,
+            "fetched_at": None,
+            "strict_address": True,
+            "kma_weather_alert_records": [
+                _warning_record(),
+                _warning_record(title=None),  # 식별 불가 — 제외
+            ],
+        }
+    )
+
+    result = await run_feature_notice_kma_weather_alerts(context)
+
+    assert result.provider == "python-kma-api"
+    assert result.dataset_key == "kma_weather_alerts"
+    assert result.load.bundles_total == 1
+    [bundle] = client.loaded_bundles
+    assert bundle.feature.kind.value == "notice"
+    assert bundle.feature.detail.notice_type == "heavy_rain_warning"
+    # region명이 위치 단서(raw_address) — strict 주소 검증 통과의 핵심.
+    assert bundle.source_record.raw_address == "전국"
+    assert result.address_validation.error_count == 0
+
+
+# -- T-219c: 특보 fetcher / datagokr client resource --------------------------
+
+
+class _FakeWarningDataGoKrClient:
+    instances: list[_FakeWarningDataGoKrClient] = []
+    pages: list[list[Any]] = []
+
+    def __init__(self, *, service_key: str) -> None:
+        self.service_key = service_key
+        self.closed = False
+        self.calls: list[dict[str, Any]] = []
+        _FakeWarningDataGoKrClient.instances.append(self)
+
+    def weather_warning_list(self, **kwargs: Any) -> list[Any]:
+        self.calls.append(kwargs)
+        index = len(self.calls) - 1
+        pages = type(self).pages
+        return pages[index] if index < len(pages) else []
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _install_fake_kma_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
+    module = ModuleType("kma")
+    module.__dict__["DataGoKrClient"] = _FakeWarningDataGoKrClient
+    monkeypatch.setitem(sys.modules, "kma", module)
+    return module
+
+
+def test_fetch_kma_weather_alerts_paginates_and_closes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _FakeWarningDataGoKrClient.instances = []
+    _FakeWarningDataGoKrClient.pages = [
+        [_warning_record() for _ in range(100)],
+        [_warning_record(seq="200")],
+    ]
+    _install_fake_kma_module(monkeypatch)
+    settings = KrtourMapSettings(
+        data_go_kr_service_key=SecretStr("data-key"),
+        kma_weather_alert_lookback_days=2,
+    )
+
+    records = list(fetch_kma_weather_alerts(settings))
+
+    assert len(records) == 101
+    [client] = _FakeWarningDataGoKrClient.instances
+    assert client.service_key == "data-key"
+    assert client.closed is True
+    assert client.calls[0]["stn_id"] == provider_fetchers.KMA_WEATHER_ALERT_STN_ID
+    assert client.calls[0]["page_no"] == 1
+    assert client.calls[1]["page_no"] == 2
+    window = client.calls[0]["to_tm_fc"] - client.calls[0]["from_tm_fc"]
+    assert window.days == 1  # lookback 2일 = 오늘 포함 어제부터
+
+
+def test_fetch_kma_weather_alerts_requires_credential() -> None:
+    settings = KrtourMapSettings(data_go_kr_service_key=None)
+
+    with pytest.raises(ProviderCredentialMissing, match="DATA_GO_KR_SERVICE_KEY"):
+        next(iter(fetch_kma_weather_alerts(settings)))
+
+
+def test_kma_datagokr_client_resource_yields_client_and_closes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _FakeWarningDataGoKrClient.instances = []
+    _FakeWarningDataGoKrClient.pages = []
+    _install_fake_kma_module(monkeypatch)
+    monkeypatch.setattr(
+        resources,
+        "KrtourMapSettings",
+        lambda: SimpleNamespace(data_go_kr_service_key=SecretStr("data-key")),
+    )
+
+    resource_fn = cast("Any", resources.kma_datagokr_client_resource.resource_fn)
+    resource_iter = resource_fn(build_init_resource_context())
+    client = next(resource_iter)
+
+    assert client.service_key == "data-key"
+
+    with pytest.raises(StopIteration):
+        next(resource_iter)
+
+    assert client.closed is True
+
+
+def test_kma_datagokr_client_resource_guard_without_credential(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        resources,
+        "KrtourMapSettings",
+        lambda: SimpleNamespace(data_go_kr_service_key=None),
+    )
+
+    resource_fn = cast("Any", resources.kma_datagokr_client_resource.resource_fn)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        next(resource_fn(build_init_resource_context()))
+
+    message = str(exc_info.value)
+    assert "kma_datagokr_client" in message
+    assert "KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY" in message

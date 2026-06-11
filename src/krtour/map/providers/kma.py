@@ -29,7 +29,9 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Final, Protocol, runtime_checkable
@@ -79,7 +81,9 @@ __all__ = [
     "KMA_WEATHER_ALERT_MARKER_ICON",
     "KMA_WEATHER_ALERT_MARKER_COLOR",
     "KMA_ALERT_LEVEL_SEVERITY",
+    "KmaMidRegionSpec",
     "parse_weather_extra_points",
+    "parse_mid_region_features",
 ]
 
 
@@ -205,6 +209,79 @@ def parse_weather_extra_points(value: str | None) -> list[tuple[float, float]]:
             )
         points.append((lon, lat))
     return points
+
+
+@dataclass(frozen=True, slots=True)
+class KmaMidRegionSpec:
+    """중기예보 적재 대상 region 1건 (T-219c — `parse_mid_region_features` 결과).
+
+    중기 **육상**(`getMidLandFcst`)과 **기온**(`getMidTa`)은 예보구역 코드 체계가
+    다르다(예: 서울 육상 ``11B00000`` vs 기온 ``11B10101``) — 한 spec이 두 코드와
+    값을 적재할 feature 목록을 함께 갖는다.
+    """
+
+    land_reg_id: str
+    """중기육상예보 구역 코드 (``getMidLandFcst`` regId)."""
+
+    ta_reg_id: str
+    """중기기온예보 구역 코드 (``getMidTa`` regId)."""
+
+    feature_ids: tuple[str, ...]
+    """이 region의 ``WeatherValue``를 붙일 feature ID 목록 (비어 있으면 안 됨)."""
+
+
+def parse_mid_region_features(value: str | None) -> tuple[KmaMidRegionSpec, ...]:
+    """``kma_mid_region_features`` 설정(JSON) 파서 (T-219c).
+
+    중기예보는 격자가 아니라 region 107 지점 체계라 좌표→격자 매핑(옵션 B)을
+    쓸 수 없다 — 1차는 운영자가 광역시도 대표 feature 매핑을 설정으로 주입하고,
+    미설정이면 asset이 skip한다(계획 정본 §2.4). 형식:
+
+    ``[{"land_reg_id": "11B00000", "ta_reg_id": "11B10101",
+    "feature_ids": ["..."]}]``
+
+    ``None``/빈 문자열은 빈 tuple. JSON 오류·필수 키 누락·빈 feature_ids·
+    중복 (land, ta) 페어는 ``ValueError`` — 설정 오타가 조용히 빈 대상이 되지
+    않게 한다.
+    """
+    if value is None or not value.strip():
+        return ()
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"kma_mid_region_features JSON 파싱 실패: {exc}") from exc
+    if not isinstance(parsed, list):
+        raise ValueError("kma_mid_region_features는 JSON 배열이어야 합니다.")
+    specs: list[KmaMidRegionSpec] = []
+    seen: set[tuple[str, str]] = set()
+    for entry in parsed:
+        if not isinstance(entry, dict):
+            raise ValueError(f"region 항목은 객체여야 합니다: {entry!r}")
+        land = entry.get("land_reg_id")
+        ta = entry.get("ta_reg_id")
+        feature_ids = entry.get("feature_ids")
+        if not isinstance(land, str) or not land.strip():
+            raise ValueError(f"land_reg_id 누락/형식 오류: {entry!r}")
+        if not isinstance(ta, str) or not ta.strip():
+            raise ValueError(f"ta_reg_id 누락/형식 오류: {entry!r}")
+        if (
+            not isinstance(feature_ids, list)
+            or not feature_ids
+            or not all(isinstance(f, str) and f.strip() for f in feature_ids)
+        ):
+            raise ValueError(f"feature_ids는 비어 있지 않은 문자열 배열이어야 합니다: {entry!r}")
+        pair = (land.strip(), ta.strip())
+        if pair in seen:
+            raise ValueError(f"중복 region 페어: {pair!r}")
+        seen.add(pair)
+        specs.append(
+            KmaMidRegionSpec(
+                land_reg_id=pair[0],
+                ta_reg_id=pair[1],
+                feature_ids=tuple(f.strip() for f in feature_ids),
+            )
+        )
+    return tuple(specs)
 
 
 # -- 입력 Protocol --------------------------------------------------------
@@ -786,6 +863,9 @@ def _alert_region_to_bundle(
         source_entity_id=natural_key,
         raw_payload_hash=payload_hash,
         raw_name=alert.title,
+        # 특보는 region 단위 무좌표 notice — region명이 유일한 위치 단서다.
+        # Dagster 주소 검증(ADR-046 missing_address)이 이 단서를 인정한다(T-219c).
+        raw_address=region.region_name,
         raw_data=raw_data,
         fetched_at=fetched_at,
         source_record_key=source_record_key,

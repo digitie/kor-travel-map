@@ -2,6 +2,31 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-11 (claude) — T-219c KMA 중기예보 + 기상특보 — T-219 완결
+
+KMA Dagster 파이프라인 마지막 조각. 중기는 region 체계(격자 X)라 옵션 B가 불가,
+특보는 좌표 무관이라 표준 record-resource — 두 패턴이 갈린다(계획 정본 §2.3/2.4).
+
+- **중기(mid)**: `parse_mid_region_features`(JSON — 육상 `getMidLandFcst`와 기온
+  `getMidTa`의 reg_id 체계가 달라 spec이 두 코드+feature 목록을 묶음, 오류/중복
+  페어 ValueError) + settings `kma_mid_region_features` + resource
+  `kma_datagokr_client`(DataGoKrClient live) + asset
+  `feature_weather_kma_mid_forecast`(미설정 region skip — cursor 미전진, 일 2회).
+  `MidForecastItem.raw` camelCase → `KmaMidLandRow`/`KmaMidTempRow`.
+- **특보(alerts)**: fetcher `fetch_kma_weather_alerts`(전국 발표관서 108, rolling
+  window `kma_weather_alert_lookback_days` 기본 3일, 페이지네이션) + record
+  resource `kma_weather_alert_records` + asset `feature_notice_kma_weather_alerts`
+  (표준 `_load`). `WeatherWarningItem`은 관서/시각/번호/제목만 구조화 — 종류/
+  등급은 title 토큰 스캔(미매칭 generic `weather_alert`, alias는 krtour
+  `normalize_notice_type` 기등록 10종), 특보구역은 1차 발표관서 단위 1건(구역별
+  fan-out·좌표 enrichment 백로그).
+- **주소 검증 통과**: 특보 bundle은 coord 없음 → `_alert_region_to_bundle`이
+  `SourceRecord.raw_address=region_name`을 채워(위치 단서) strict 주소 검증
+  (`missing_address`)을 자연 통과. strict 해제 없이 0 issue.
+- mypy frozen-dataclass↔Protocol 함정 재현(메모리 기록 그대로) —
+  `Sequence[Any]` 우회. 게이트: dagster 121 + unit/lint 994 + admin 241 passed /
+  ruff / mypy --strict 87+14 files / lint-imports green.
+
 ## 2026-06-11 (claude) — T-219b KMA weather Dagster asset 3종 (실황/초단기/단기)
 
 T-219a 기반 위에 Dagster 파이프라인 본체. 대상 좌표가 DB(poi_cache_targets)에서

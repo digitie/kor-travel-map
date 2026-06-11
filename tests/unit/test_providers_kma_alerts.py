@@ -162,6 +162,9 @@ def test_alert_source_record_metadata() -> None:
     assert src.dataset_key == KMA_WEATHER_ALERT_DATASET_KEY
     assert src.source_entity_type == "weather_alert"
     assert src.fetched_at == _NOW
+    # T-219c — region명이 유일한 위치 단서: Dagster 주소 검증(missing_address,
+    # ADR-046)이 raw_address를 인정한다.
+    assert src.raw_address == "서울특별시"
 
 
 @pytest.mark.unit

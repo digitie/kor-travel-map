@@ -20,6 +20,8 @@ from .assets import (
     feature_place_tripmate_agent_youtube,
 )
 from .kma_weather import (
+    feature_notice_kma_weather_alerts,
+    feature_weather_kma_mid_forecast,
     feature_weather_kma_short_forecast,
     feature_weather_kma_ultra_short_forecast,
     feature_weather_kma_ultra_short_nowcast,
@@ -168,6 +170,24 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         description=(
             "KMA 단기예보 WeatherValue 일 8회 적재(발표 02~23시 3시간 간격 + 10분 지연 후)."
         ),
+    ),
+    FeatureLoadScheduleSpec(
+        asset=feature_weather_kma_mid_forecast,
+        job_name="feature_weather_kma_mid_forecast_job",
+        schedule_name="feature_weather_kma_mid_forecast_twice_daily_schedule",
+        cron_schedule="20 6,18 * * *",
+        provider="python-kma-api",
+        dataset_key="kma_mid_forecast",
+        description="KMA 중기예보(육상+기온) WeatherValue 일 2회 적재(발표 06/18시 + 지연 후).",
+    ),
+    FeatureLoadScheduleSpec(
+        asset=feature_notice_kma_weather_alerts,
+        job_name="feature_notice_kma_weather_alerts_job",
+        schedule_name="feature_notice_kma_weather_alerts_daily_schedule",
+        cron_schedule="15 6 * * *",
+        provider="python-kma-api",
+        dataset_key="kma_weather_alerts",
+        description="KMA 기상특보 notice Feature 일 1회 적재(rolling window 멱등 upsert).",
     ),
 )
 """현재 구현된 Feature provider asset의 기본 schedule 사양."""
