@@ -5,6 +5,14 @@
 기준이고, 본 문서는 실제 화면, API, 진행 상태, 검토 흐름을 AI agent가 바로
 구현할 수 있도록 풀어 쓴 작업 지시서다.
 
+> **2026-06-11 재점검**: T-218 이후 실제 프론트엔드 17개 경로와 백엔드/OpenAPI를 다시
+> 대조한 최신 간극/실시간 판단은
+> [`docs/reports/admin-ui-scenario-linkage-recheck-2026-06-11.md`](reports/admin-ui-scenario-linkage-recheck-2026-06-11.md)를
+> 우선한다. 이 문서의 오래된 후보 중 일반 `/v1/features/nearby`와 offline upload
+> preview/validation/load는 구현됐고, `/admin/providers/*` 직접 run 엔드포인트는 T-207b
+> 취소 결정에 따라 `/v1/admin/feature-update-requests` `provider_dataset` scope로
+> 대체한다.
+
 관련 결정:
 
 - ADR-005: 인증 없음, 내부망/네트워크 계층 보호.
@@ -125,6 +133,29 @@ Frontend 작업 후에는 `react-doctor` 실행, 결과 검토, 개선 반영이
 - **Review**: `/admin/dedup-review`, missing data queue, consistency samples.
 - **Ops**: `/admin/dagster`, `/ops/error-logs`, `/ops/consistency`, `/ops/metrics`.
 - **Debug**: `/debug/etl`, `/debug/explain`, `/debug/fixtures`.
+
+### 4.3 현재 구현과 남은 연결부 (2026-06-11)
+
+현재 구현된 admin/frontend 페이지 경로는 `/`, `/features`, `/etl`, `/admin/features`,
+`/admin/features/change-requests`, `/admin/issues`, `/admin/dedup-reviews`,
+`/admin/enrichment-reviews`, `/admin/feature-update-requests`,
+`/admin/poi-cache-targets`, `/admin/offline-uploads`, `/admin/backups`,
+`/admin/dagster`, `/ops/import-jobs`, `/ops/providers`, `/ops/consistency`,
+`/ops/logs`다.
+
+남은 핵심은 새 목록 추가보다 **상세 추적과 실시간 event 연결**이다.
+
+- `/features/[feature_id]` 1급 상세 경로: SourceLink, raw payload, files, issues,
+  overrides/history, nearby, weather를 한곳에 묶는다.
+- `/features/new` 또는 `/admin/features/new`: change-request create form을 별도 수동
+  작성 흐름으로 승격한다.
+- `/ops/import-jobs/[job_id]`: 백엔드 단건 조회는 있으나 프론트엔드 detail hook/경로가
+  없다. event 타임라인, linked request/upload/Dagster run, cancel/실시간 스트림을 붙인다.
+- `/ops/logs`: system/API log는 구현됐지만 provider/import job stage event는 없다.
+  `ops.import_job_events`와 job별 events API가 필요하다.
+- `/ops/providers`: provider freshness list는 구현됐지만 provider/dataset 상세, refresh
+  policy, provider_dataset update request 상세 링크가 필요하다. 중복
+  `/admin/providers/{provider}/datasets/{dataset_key}/runs`는 만들지 않는다.
 
 ## 5. 공통 UX 규칙
 

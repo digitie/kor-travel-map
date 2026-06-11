@@ -6,9 +6,9 @@ cwd = "/mnt/f/dev/python-krtour-map-codex"
 
 [mcp_servers.mcp-telegram]
 enabled = true
-command = "python3"
-args = ["scripts/mcp_telegram_start.py"]
-cwd = "/mnt/f/dev/python-krtour-map-codex"
+command = "C:\\Python314\\python.exe"
+args = ["scripts\\mcp_telegram_start.py"]
+cwd = "F:\\dev\\python-krtour-map-codex"
 
 [mcp_servers.playwright]
 command = "npx"

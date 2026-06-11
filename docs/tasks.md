@@ -6,10 +6,35 @@
 
 ## 진행 중인 작업 인덱스 (열린 `[ ]` 항목)
 
-> 총 1건. 상세는 아래 각 섹션. 완료 이력은 [`tasks-done.md`](tasks-done.md).
+> 핵심 실행 3건(T-212e, T-221, T-222) + 외부/보류 항목 별도. 상세는 아래 각 섹션.
+> 완료 이력은 [`tasks-done.md`](tasks-done.md).
 
 - **다음 (우선순위 순)**
-  - [ ] T-212e — 실데이터 full reload + offline upload 실데이터 검증 + 최종 리포트.
+  - [ ] T-212e — 실데이터 전체 재적재 + offline upload 실데이터 검증 + 최종 리포트.
+  - [ ] T-221 — **admin UI/UX 시나리오 연결성 + 실시간성 보강**. 정본 점검:
+        `docs/reports/admin-ui-scenario-linkage-recheck-2026-06-11.md`.
+    - [ ] T-221a — `/features/[feature_id]` 1급 상세 경로 + `/features/new` 또는
+          `/admin/features/new` 수동 feature 작성 흐름. source/raw/files/issues/history/
+          nearby/weather 연결.
+    - [ ] T-221b — `/ops/import-jobs/[job_id]` 상세 + `ops.import_job_events`
+          스키마/API + cancel/event 타임라인. feature-update/offline-upload/Dagster run 상세
+          링크 포함.
+    - [ ] T-221c — admin 실시간 전송. `WS /v1/ops/live` 다중화 topic과
+          job/request/upload/run별 WebSocket 또는 SSE 대체 경로 설계·구현.
+    - [ ] T-221d — provider 상세/refresh policy 보강. `/ops/providers` 행 상세 추적,
+          provider_dataset update request 상세 링크, `provider_refresh_policies` 편집 UI.
+          중복 `/admin/providers/{provider}/datasets/{dataset_key}/runs`는 만들지 않는다.
+    - [ ] T-221e — `/ops/logs`와 job event 연계, `/debug/explain`/`/debug/fixtures`
+          필요성 재판정.
+  - [ ] T-222 — **TripMate T-130 공개 해수욕장/축제 뷰 API**. 정본 후보:
+        `docs/public-views-api.md`.
+    - [x] T-222a — T-130 차단 해소용 API 사양 초안 작성(2026-06-11): `/v1/public/beaches*`,
+          `/v1/public/festivals*`, 스키마, category drift, KHOA index/축제 월별 집계 결정점.
+    - [ ] T-222b — krtour-map 백엔드/OpenAPI/user-client 구현. 해수욕장 `place_kind=beach`
+          기준, category `01050100` 문서 vs `01020300` 코드 drift 정리, KHOA 폭/길이/재질
+          변환 보강 여부 결정.
+    - [ ] T-222c — TripMate T-130 소비 문서/픽스처 동기화. TripMate `/public/*`는
+          krtour `openapi.user.json`에 표면이 들어간 뒤 구현.
   - [x] T-219 — **KMA weather Dagster 파이프라인 완결**. **T-219a~c 전부 완료
         (2026-06-11)** — asset 5종(실황/초단기/단기/중기/특보) + KST schedule +
         cursor/credential guard. 정본
@@ -57,6 +82,17 @@
           **dedup pair는 즉시 등록 안 함** — 실데이터(T-212e 이후) 매칭 품질
           확인 후 재검토(etl 문서 §6).
 - **최근 완료**
+  - [x] 2026-06-11 Codex admin UI/UX 시나리오·실시간성 재점검 + TripMate T-130 사양
+        보강 — 문서/코드/TripMate T-130을 대조해
+        `docs/reports/admin-ui-scenario-linkage-recheck-2026-06-11.md`와
+        `docs/public-views-api.md`를 추가하고, T-221/T-222 후속 task를 등록했다.
+  - [x] 2026-06-11 Claude PR 리뷰 sweep — 2026-06-08 00:00 KST 이후 Claude 작성
+        신호가 있고 기존 review/comment가 없던 PR(닫힌 PR 포함) #305, #306, #307,
+        #309, #310, #311, #312, #314, #318, #319, #320, #321, #323, #324,
+        #325, #326, #328, #330, #331, #333, #336, #337, #338, #339, #340,
+        #341, #342, #343, #344, #345, #347, #348을 재검토했다. 새 blocking /
+        actionable finding은 없어 후속 `[ ]` task 추가 없음. 기존 코멘트/리뷰가
+        있던 PR은 중복 방지를 위해 생략.
   - [x] **T-217a~g 전부 완료(2026-06-10~11)** — Phase 6.9 cross-repo 정합성 종결:
         경로 중립화(a, agent T-066 실측 대조 포함) · 철회→inactive+D-12 read 정렬(b) ·
         제안 연동 합의 5건(c) · integration-map+분기 audit(d) · RustFS=tripmate-manager
@@ -156,9 +192,11 @@ T-212b admin UI 완결성, T-212c API/error/log contract, T-212d seeded PostGIS
 Sprint 5 종료까지 남은 작업은
 `docs/reports/sprint5-final-task-breakdown-2026-06-07.md`를 정본으로 상세화했다.
 T-216 REST API 정합성 심화, TripMate-agent provider, T-212d 재측정/튜닝은 닫았다.
-현 기준 권장 순서는 **T-212e 실데이터 full reload → T-217a~g cross-repo 정합성
-결정 반영분 → T-210e TripMate client 생성 → Sprint 5 closure**다. T-207b는 사용자
-결정에 따라 구현하지 않는다.
+현 기준 권장 순서는 **T-212e 실데이터 전체 재적재 → T-217a~g cross-repo 정합성
+결정 반영분 → T-210e TripMate client 생성 → Sprint 5 closure**였으나, T-217/T-210e는
+이미 닫혔다. 2026-06-11 재점검 후 새로 열린 후속은 **T-221 admin UI linkage/realtime**과
+**T-222 TripMate T-130 공개 뷰**다. T-207b는 사용자 결정에 따라 구현하지 않고,
+provider 강제 실행은 feature update request `provider_dataset` scope로 유도한다.
 
 ### 현재 기준 보강 필요 체크포인트 (2026-06-03)
 
@@ -895,7 +933,7 @@ T-214/T-215(#317)의 `/v1` 1차 정리 위에 ADR-048 delta를 얹는다. 정본
         `status + provider` read path scalar fast path 튜닝. 클러스터 MV는 exact-viewport →
         region-total 의미 변경 때문에 미도입. 상세:
         `docs/reports/t-212d-read-heavy-rerun-2026-06-10.md`.
-- [ ] T-212e — 실데이터 full reload + offline upload 실데이터 검증 + 최종 리포트.
+- [ ] T-212e — 실데이터 전체 재적재 + offline upload 실데이터 검증 + 최종 리포트.
       DB를 비운 뒤 처음부터 다시 로드하고, provider 실데이터와 offline upload
       CSV/TSV/JSONL 실데이터 적재, kraddr-geo bjd 보강, Playwright e2e, API smoke,
       Dagster 상태를 모두 확인한다.

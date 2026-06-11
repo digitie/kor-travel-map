@@ -5,6 +5,8 @@ a11y·e2e 커버 관점에서 점검**하기 위한 체크리스트다. T-218(ad
 점검 항목을 화면 단위로 고정하고, 현재 e2e 커버 상태를 매핑한다.
 
 > 정본 계획: `docs/reports/t-218-admin-ui-hardening-plan-2026-06-10.md`.
+> 2026-06-11 시나리오/연계/realtime 재점검:
+> `docs/reports/admin-ui-scenario-linkage-recheck-2026-06-11.md`.
 > e2e 실행: **서버=WSL(`npm run dev` :9012), Playwright=Windows**(`docs/dev-environment.md`,
 > `playwright.config.ts` 머리말). admin/ops 스펙은 route-mock 기반이라 backend 없이도
 > 돈다. `/etl`만 실 backend(:9011, `/debug/etl`) 필요.
@@ -26,7 +28,7 @@ a11y·e2e 커버 관점에서 점검**하기 위한 체크리스트다. T-218(ad
   성공 결과는 `role=status`(polite)로 안내되는가(T-218b/e).
 - **e2e**: Playwright 스펙 커버 여부(파일).
 
-## 2. 화면별 매트릭스 (16 route)
+## 2. 화면별 매트릭스 (17 route)
 
 | route | 목록/필터 | 정렬 | cursor | 빈 상태 | 에러 | kill-switch | a11y(폼) | e2e |
 |---|---|---|---|---|---|---|---|---|
