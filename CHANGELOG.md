@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### kma pin bump — datagokr 03 NO_DATA 빈 결과 정규화 (T-212e, 2026-06-11)
+
+- **CHANGED**: `python-kma-api` pin `ab1a0b8` → `006fdbe` — datagokr result
+  code `03`(NO_DATA)을 예외 대신 빈 결과로 정규화한 provider #18/PR#19 반영.
+  T-212e live run에서 특보(getWthrWrnList) rolling window에 특보가 없는 평시
+  구간 조회가 `KmaRequestError`로 죽던 문제 해소(run `408ad65f`). 중기예보 등
+  같은 unwrap 경로의 datagokr endpoint 전체에 적용.
+
 ### krheritage 국가유산 본체 — items live fetcher 배선 + HeritageDetail 재정렬 (#380, T-212e, 2026-06-11)
 
 - **FIXED**: `KrHeritageItem`/`heritage_items_to_bundles`를 provider 실모델

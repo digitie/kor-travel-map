@@ -2,6 +2,16 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-11 (claude) — T-212e: kma pin bump (03 NO_DATA 빈 결과)
+
+T-212e live run에서 `feature_notice_kma_weather_alerts`가
+`KmaRequestError: data.go.kr API returned 03: NO_DATA`로 실패(run `408ad65f`) —
+lookback 3일 구간에 특보 0건인 **평시가 오히려 정상**인데 provider가 datagokr
+result code 03을 전 endpoint에서 예외로 올렸다. provider
+`python-kma-api#18`/PR#19(merged, `006fdbe`)로 03을 빈 결과로 정규화(인증/서버
+코드 정책 유지, 중기예보 등 동일 unwrap 경로 전체 적용) 후 pin bump.
+provider-contract §12/CHANGELOG 갱신.
+
 ## 2026-06-11 (claude) — T-212e #380: krheritage items live fetcher 배선 + HeritageDetail 재정렬 + events 빈 sn fallback
 
 T-212e live full reload에서 `feature_place_krheritage_items`가 resource guard로
