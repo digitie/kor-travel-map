@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 from io import BytesIO
-from typing import cast
+from typing import Any, cast
 
 import pytest
 from dagster import build_init_resource_context
@@ -43,6 +43,19 @@ class _FakeClient:
         self.settings = settings
 
 
+class _FakeHttpClient:
+    instances: list[_FakeHttpClient] = []
+
+    def __init__(self, *, base_url: str, timeout: float) -> None:
+        self.base_url = base_url
+        self.timeout = timeout
+        self.closed = False
+        type(self).instances.append(self)
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
 async def test_build_offline_upload_store_uses_offline_upload_bucket() -> None:
     settings = KrtourMapSettings(
         object_store_endpoint_url="http://127.0.0.1:9003",
@@ -78,6 +91,64 @@ async def test_krtour_map_client_resource_disposes_engine(monkeypatch: pytest.Mo
         next(resource_iter)
 
     assert engine.disposed is True
+
+
+def test_reverse_geocoder_resource_returns_none_without_base_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("KRTOUR_MAP_KRADDR_GEO_BASE_URL", raising=False)
+
+    resource_fn = cast(
+        "Callable[[object], Iterator[object | None]]",
+        resources.reverse_geocoder_resource.resource_fn,
+    )
+    resource_iter = resource_fn(build_init_resource_context())
+
+    assert next(resource_iter) is None
+    with pytest.raises(StopIteration):
+        next(resource_iter)
+
+
+def test_reverse_geocoder_resource_builds_and_closes_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "KRTOUR_MAP_KRADDR_GEO_BASE_URL",
+        "http://127.0.0.1:9001",
+    )
+    monkeypatch.setenv("KRTOUR_MAP_KRADDR_GEO_TIMEOUT_SECONDS", "2.5")
+    _FakeHttpClient.instances = []
+    sentinel = object()
+
+    def _fake_client(client: _FakeHttpClient) -> tuple[str, _FakeHttpClient]:
+        return ("kraddr", client)
+
+    def _fake_reverse(client: tuple[str, _FakeHttpClient]) -> object:
+        assert client[0] == "kraddr"
+        return sentinel
+
+    monkeypatch.setattr(resources.httpx, "AsyncClient", _FakeHttpClient)
+    monkeypatch.setattr(resources, "KraddrGeoRestClient", _fake_client)
+    monkeypatch.setattr(resources, "kraddr_geo_reverse_geocoder", _fake_reverse)
+
+    resource_fn = cast(
+        "Callable[[object], Iterator[Any]]",
+        resources.reverse_geocoder_resource.resource_fn,
+    )
+    resource_iter = resource_fn(build_init_resource_context())
+    reverse_geocoder = next(resource_iter)
+
+    assert reverse_geocoder is sentinel
+    assert len(_FakeHttpClient.instances) == 1
+    http = _FakeHttpClient.instances[0]
+    assert http.base_url == "http://127.0.0.1:9001"
+    assert http.timeout == 2.5
+    assert not http.closed
+
+    with pytest.raises(StopIteration):
+        next(resource_iter)
+
+    assert http.closed
 
 
 def test_provider_record_resource_env_mapping() -> None:

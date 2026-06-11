@@ -16,6 +16,7 @@ from .resources import (
     PROVIDER_RECORD_RESOURCE_DEFINITIONS,
     krtour_map_client_resource,
     offline_upload_store_resource,
+    reverse_geocoder_resource,
 )
 from .schedules import FEATURE_LOAD_JOBS, FEATURE_LOAD_SCHEDULES
 from .sensors import FEATURE_UPDATE_JOBS, FEATURE_UPDATE_SENSORS
@@ -54,7 +55,6 @@ REQUIRED_RESOURCE_KEYS: Final[tuple[str, ...]] = (
 """Feature 적재 asset이 요구하는 Dagster resource key."""
 
 DEFAULT_RESOURCE_VALUES: Final[dict[str, object]] = {
-    "reverse_geocoder": None,
     "fetched_at": None,
     "strict_address": True,
     "feature_update_failure_notifier": None,
@@ -73,6 +73,7 @@ SETTINGS_VALUE_RESOURCES: Final[dict[str, str]] = {
 DEFAULT_RESOURCE_DEFINITIONS: Final[dict[str, ResourceDefinition]] = {
     "krtour_map_client": krtour_map_client_resource,
     "offline_upload_store": offline_upload_store_resource,
+    "reverse_geocoder": reverse_geocoder_resource,
     **PROVIDER_RECORD_RESOURCE_DEFINITIONS,
 }
 """환경변수 기반 실제 구현을 제공하는 기본 Dagster resource."""
