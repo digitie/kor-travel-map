@@ -733,6 +733,12 @@ def _run_async_resource_teardown(awaitable: Awaitable[object]) -> None:
 
 
 def _dispose_async_engine(engine: Any) -> None:
+    sync_engine = getattr(engine, "sync_engine", None)
+    sync_dispose = getattr(sync_engine, "dispose", None)
+    if sync_dispose is not None:
+        sync_dispose(close=False)
+        return
+
     dispose_result = engine.dispose()
     if inspect.isawaitable(dispose_result):
         _run_async_resource_teardown(cast("Awaitable[object]", dispose_result))
@@ -829,7 +835,10 @@ def reverse_geocoder_resource(_context: InitResourceContext) -> Iterator[Any]:
         timeout=settings.kraddr_geo_timeout_seconds,
     )
     try:
-        yield kraddr_geo_reverse_geocoder(KraddrGeoRestClient(http))
+        yield kraddr_geo_reverse_geocoder(
+            KraddrGeoRestClient(http),
+            region_fallback_radius_km=0.1,
+        )
     finally:
         _run_async_resource_teardown(http.aclose())
 

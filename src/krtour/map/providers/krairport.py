@@ -189,7 +189,7 @@ async def _airport_to_bundle(
         raw_payload_hash=payload_hash,
         source_version=None,
         raw_name=item.name_korean or item.name_english,
-        raw_address=municipality,
+        raw_address=None,
         raw_longitude=coord.lon if coord is not None else None,
         raw_latitude=coord.lat if coord is not None else None,
         raw_data=raw_data,

@@ -74,6 +74,8 @@ def test_airport_feature_fields_and_natural_key() -> None:
     assert bundle.source_record.source_entity_id == "ICN"
     assert bundle.source_record.dataset_key == DATASET_KEY_AIRPORTS
     assert bundle.source_record.source_entity_type == "airport"
+    assert bundle.source_record.raw_address is None
+    assert bundle.source_record.raw_data["municipality"] == "인천광역시"
 
 
 @pytest.mark.unit

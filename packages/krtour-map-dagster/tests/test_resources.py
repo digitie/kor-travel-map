@@ -37,6 +37,23 @@ class _FakeEngine:
         self.disposed = True
 
 
+class _FakeSyncEngine:
+    def __init__(self) -> None:
+        self.dispose_close: bool | None = None
+
+    def dispose(self, *, close: bool = True) -> None:
+        self.dispose_close = close
+
+
+class _FakeSqlAlchemyAsyncEngine:
+    def __init__(self) -> None:
+        self.sync_engine = _FakeSyncEngine()
+        self.async_dispose_called = False
+
+    async def dispose(self) -> None:
+        self.async_dispose_called = True
+
+
 class _FakeClient:
     def __init__(self, engine: _FakeEngine, *, settings: KrtourMapSettings) -> None:
         self.engine = engine
@@ -93,6 +110,15 @@ async def test_krtour_map_client_resource_disposes_engine(monkeypatch: pytest.Mo
     assert engine.disposed is True
 
 
+def test_dispose_async_engine_uses_sync_no_close_for_sqlalchemy_engine() -> None:
+    engine = _FakeSqlAlchemyAsyncEngine()
+
+    resources._dispose_async_engine(engine)
+
+    assert engine.sync_engine.dispose_close is False
+    assert engine.async_dispose_called is False
+
+
 def test_reverse_geocoder_resource_returns_none_without_base_url(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -123,8 +149,13 @@ def test_reverse_geocoder_resource_builds_and_closes_client(
     def _fake_client(client: _FakeHttpClient) -> tuple[str, _FakeHttpClient]:
         return ("kraddr", client)
 
-    def _fake_reverse(client: tuple[str, _FakeHttpClient]) -> object:
+    def _fake_reverse(
+        client: tuple[str, _FakeHttpClient],
+        *,
+        region_fallback_radius_km: float | None = None,
+    ) -> object:
         assert client[0] == "kraddr"
+        assert region_fallback_radius_km == 0.1
         return sentinel
 
     monkeypatch.setattr(resources.httpx, "AsyncClient", _FakeHttpClient)

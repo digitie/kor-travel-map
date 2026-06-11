@@ -1068,6 +1068,123 @@ def test_kraddr_geo_reverse_geocoder_max_distance_filters() -> None:
     asyncio.run(_run())
 
 
+def test_kraddr_geo_reverse_geocoder_region_fallback_when_reverse_not_found() -> None:
+    seen: list[tuple[str, dict[str, Any]]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = _body(request)
+        seen.append((request.url.path, body))
+        if request.url.path == "/v2/reverse":
+            return httpx.Response(200, json={"status": "NOT_FOUND", "candidates": []})
+        return httpx.Response(
+            200,
+            json={
+                "center": {"lon": 126.4407, "lat": 37.4602},
+                "radius_km": 0.1,
+                "sido": [
+                    {"code": "28", "name": "인천광역시", "relation": "contains"}
+                ],
+                "sigungu": [
+                    {"code": "28110", "name": "중구", "relation": "contains"}
+                ],
+                "emd": [
+                    {"code": "28110147", "name": "운서동", "relation": "contains"}
+                ],
+            },
+        )
+
+    async def _run() -> None:
+        async with _mock_client(handler) as http:
+            client = KraddrGeoRestClient(http)
+            reverse = kraddr_geo_reverse_geocoder(
+                client,
+                region_fallback_radius_km=0.1,
+            )
+            addr = await reverse(
+                Coordinate(lon=Decimal("126.4407"), lat=Decimal("37.4602"))
+            )
+            assert addr is not None
+            assert addr.bjd_code == "2811014700"
+            assert addr.sigungu_code == "28110"
+            assert addr.sido_code == "28"
+            assert addr.legal == "인천광역시 중구 운서동"
+
+    asyncio.run(_run())
+    assert seen == [
+        (
+            "/v2/reverse",
+            {
+                "lon": 126.4407,
+                "lat": 37.4602,
+                "include_region": True,
+                "include_zipcode": True,
+            },
+        ),
+        (
+            "/v2/regions/within-radius",
+            {
+                "lon": 126.4407,
+                "lat": 37.4602,
+                "radius_km": 0.1,
+                "levels": ["sido", "sigungu", "emd"],
+            },
+        ),
+    ]
+
+
+def test_kraddr_geo_reverse_geocoder_region_fallback_when_bjd_missing() -> None:
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        if request.url.path == "/v2/reverse":
+            return httpx.Response(
+                200,
+                json={
+                    "status": "OK",
+                    "candidates": [
+                        {
+                            "confidence": 0.7,
+                            "match_kind": "parcel",
+                            "address": {"full": "공항"},
+                            "region": {"sig_cd": "48240"},
+                        }
+                    ],
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "center": {"lon": 128.071747, "lat": 35.088591},
+                "radius_km": 0.1,
+                "sido": [{"code": "48", "name": "경상남도", "relation": "contains"}],
+                "sigungu": [
+                    {"code": "48240", "name": "사천시", "relation": "contains"}
+                ],
+                "emd": [
+                    {"code": "48240250", "name": "사천읍", "relation": "contains"}
+                ],
+            },
+        )
+
+    async def _run() -> None:
+        async with _mock_client(handler) as http:
+            reverse = kraddr_geo_reverse_geocoder(
+                KraddrGeoRestClient(http),
+                region_fallback_radius_km=0.1,
+            )
+            addr = await reverse(
+                Coordinate(lon=Decimal("128.071747"), lat=Decimal("35.088591"))
+            )
+            assert addr is not None
+            assert addr.bjd_code == "4824025000"
+            assert addr.sigungu_code == "48240"
+            assert addr.legal == "경상남도 사천시 사천읍"
+
+    asyncio.run(_run())
+    assert seen == ["/v2/reverse", "/v2/regions/within-radius"]
+
+
 def test_kraddr_geo_address_geocoder_min_confidence_via_wrapper() -> None:
     """팩토리 인자 `min_confidence`가 변환 함수에 그대로 전달 — 신뢰도 낮은 결과 drop."""
 
