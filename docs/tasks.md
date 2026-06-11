@@ -37,8 +37,13 @@
   - [ ] T-220 — **MCST(python-mcst-api) 신규 provider 풀스택** — KCISA 14 place
         dataset(`CultureRecord`) + ODCloud 도서관 2종, marker `P-12`,
         `DATA_GO_KR_SERVICE_KEY` 공유. 정본 동 문서 §3.
-    - [ ] T-220a — `providers/mcst.py`(slug 메타표 16종 + 공용 변환 + 도서관 변환)
-          + category 신설분 + 단위 테스트.
+    - [x] T-220a — `providers/mcst.py`. **완료(2026-06-11)**: slug 메타표
+          16종(`MCST_CULTURE_DATASETS` 14 + `MCST_LIBRARY_DATASETS` 2,
+          dataset_key `mcst_<slug>`) + 공용 `culture_records_to_bundles` +
+          `library_records_to_bundles`(한국어 컬럼 방언 관대 조회) + 단위 테스트
+          11종. **category 신설 불요**(실측 — 전부 기존 코드 매핑, place_kind가
+          세부 구분). marker P-12, 자연키 `name::address`, 이름/위치 단서 없는
+          row skip.
     - [ ] T-220b — Dagster fetch/resource/asset/schedule/definitions(자산 2종 —
           slug별 분리 `_load`) + 카운트 단언 갱신 테스트.
     - [ ] T-220c — ETL preview fixture + 문서(external-apis/provider-contract/
