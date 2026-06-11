@@ -103,6 +103,13 @@ system
 | `kma_mid_forecast` | python-kma-api | 중기예보 |
 | `kma_weather_alerts` | python-kma-api | 특보 |
 | `mcst_<slug>` (16종) | python-mcst-api | KCISA 14(`mcst_independent_bookstores` 등, 공통 CultureRecord) + ODCloud 도서관 2(`mcst_public_libraries`/`mcst_small_libraries`). 메타표 `providers.mcst.MCST_{CULTURE,LIBRARY}_DATASETS` |
+| `mcst_used_bookstores` | python-mcst-api (후보) | 전국 중고서점 및 운영정보. curated source 보강 후보 |
+| `mcst_children_bookstores` | python-mcst-api 또는 python-datagokr-api (후보) | 전국 아동서점 상세운영정보. 파일데이터 기반 후보 |
+| `datagokr_seoul_bookstores` | python-datagokr-api (후보) | 서울특별시 책방(서점) 현황정보 |
+| `datagokr_gyeonggi_muslim_friendly_restaurants` | python-datagokr-api (후보) | 경기도 무슬림 친화 음식점 |
+| `datagokr_ansan_world_restaurants` | python-datagokr-api (후보) | 안산 세계맛집(다문화 세계음식점) |
+| `datagokr_jeju_local_restaurants` | python-datagokr-api (후보) | 제주 향토음식점 지정 현황 |
+| `standard_special_streets` | data.go.kr-standard (후보) | 전국지역특화거리표준데이터. 개별 POI보다 area/anchor source |
 | `khoa_oceans_beach_info` | python-khoa-api | 해수욕장 정보 |
 | `khoa_coastal_notices` | python-khoa-api | 해양 공지 |
 | `krforest_recreation_forests` | python-krforest-api | 휴양림 |
@@ -140,6 +147,21 @@ system
 | `place_phone_enrichment` | kakao-local-api / naver-search-api / google-places-api-new | 전화번호 보강 |
 
 신규 추가는 ADR + `docs/<provider>-feature-etl.md`.
+
+### 3.1 curated source 후보
+
+테마형 source는 [`docs/curated-features.md`](curated-features.md)가 정본이다. 현재
+구현된 `mcst_<slug>` 16종은 `feature.curated_source_rules`의 기본 후보로 바로 쓸 수
+있고, 책·음식 확장 source는 provider 라이브러리 보강 뒤 편입한다.
+
+- `python-mcst-api` 우선 후보: 중고서점, 아동서점. 이미 구현된 독립서점·카페가 있는
+  서점·세계음식점·도서관 계열과 같은 문화정보원 source 성격이다.
+- `python-datagokr-api` 우선 후보: 서울 책방, 경기도 무슬림 친화 음식점, 안산 세계맛집,
+  제주 향토음식점.
+- `data.go.kr-standard` 후보: 전국지역특화거리표준데이터. 거리명·좌표·점포수·관리기관을
+  area/anchor metadata로 보존하고, 개별 점포 POI로 과해석하지 않는다.
+- 신규 source도 wrapper/facade 없이 provider public client/typed model을 먼저 정렬한 뒤,
+  본 저장소에서는 raw → `FeatureBundle` 변환과 curated overlay rule만 둔다.
 
 ## 4. provider 카탈로그 (책임 매트릭스)
 

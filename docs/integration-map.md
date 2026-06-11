@@ -31,7 +31,7 @@
                                                         ▼
                           [TripMate api :9021] ◀──(read: in-bounds/search/nearby/
                             trip·POI·공유·협업          {id}/weather/batch/categories
-                                  ▲                     /providers)
+                                  ▲                     /providers + curated-features)
                                   │                  ◀──(admin: /v1/admin/features*
                           [TripMate web :9022]          — 사용자 제안 승인 반영, ADR-051)
 
@@ -39,6 +39,9 @@
 ```
 
 - TripMate ↔ krtour-map: **HTTP만**(라이브러리 import·공유 DB 없음, ADR-045/TripMate ADR-026).
+- TripMate curated plan import: krtour-map `curated_features`를 REST로 읽어 TripMate
+  `app.curated_trip_plans` / `app.curated_plan_pois`에 복사한다. `notice_plans`는
+  TripMate 호환 API alias일 뿐 신규 정본명이 아니다.
 - tripmate-agent → krtour-map: **pull 모델** — agent는 export API만 제공, krtour Dagster가
   가져가 `FeatureBundle`로 소유(ADR-049). `operation=upsert` 적재 /
   `reject`·`tombstone` → 대응 feature `status='inactive'` 전환(ADR-050 #4, T-217b).
@@ -66,9 +69,10 @@
 |---|---|---|
 | krtour-map 전 표면 REST | `docs/rest-api.md` + 기계 정본 `packages/krtour-map-admin/openapi{,.user}.json` | TripMate `docs/integrations/krtour-map-rest-api.md` / 본 repo `docs/tripmate-rest-api.md`(TripMate 소비 매핑) |
 | TripMate T-130 공개 해수욕장/축제 뷰 | 본 repo `docs/public-views-api.md`(제안 사양, 아직 OpenAPI 미포함) | TripMate `docs/api/public.md` / `docs/krtour-map-requirements.md` §6 |
+| curated features → TripMate curated trip plans | 본 repo [`docs/curated-features.md`](curated-features.md)(문서 계약, 아직 OpenAPI 미포함) | TripMate `docs/krtour-map-requirements.md`의 curated trip plan import 절 / TripMate `docs/api/notice-plans.md`의 호환 alias 설명 |
 | tripmate-agent feature export | tripmate-agent `docs/youtube-feature-pipeline-plan.md` §7 (→ 독립 계약 문서로 분리 예정, D-04/TA-02) | 본 repo: ADR-049/050 + `providers/tripmate_agent.py` docstring |
 | TripMate 사용자 제안 연동(합의 5건) | 본 repo `docs/tripmate-rest-api.md` §7 (ADR-051) | TripMate `docs/integrations/krtour-map-rest-api.md` §7 |
-| YouTube 후보 detail 소비(TM-08) | 본 repo `docs/tripmate-rest-api.md` §8 (T-217f) | TripMate UX 기획 |
+| YouTube 후보 detail 소비(TM-08) | 본 repo `docs/tripmate-rest-api.md` §9 (T-217f) | TripMate UX 기획 |
 | geocoding | kraddr-geo REST v2 (`POST /v2/{reverse,geocode}`) | ADR-046 |
 | 인프라(PostGIS·RustFS) 구동/포트 | **tripmate-manager** `docker-compose.yml`+README (ADR-052 amendment) | 각 repo는 사용자 — 포트 값은 ADR-047과 정합 |
 

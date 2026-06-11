@@ -1,6 +1,6 @@
 # TripMate 소비용 krtour-map REST API 매핑
 
-> **상태**: 2026-06-10, ADR-048 / T-216a~g 기준.
+> **상태**: 2026-06-12, ADR-048 / T-216a~g + curated_features 문서 계약 기준.
 > **역할**: 이 문서는 TripMate가 어떤 krtour-map API를 소비하는지 정리하는 view다.
 > 전 표면 REST 계약의 단일 정본은 [`docs/rest-api.md`](rest-api.md)이고, 기계 정본은
 > `packages/krtour-map-admin/openapi.user.json` / `openapi.json`이다. 충돌 시 OpenAPI를 우선한다.
@@ -35,6 +35,7 @@
 | 운영 feature 추가/수정/삭제 | `/v1/admin/features*` | TripMate public client 직접 호출 금지 |
 | 운영 refresh 실행 | `/v1/admin/feature-update-requests*` | admin/operator flow만 |
 | 비로그인 공개 해수욕장/축제 뷰 | `GET /v1/public/*` 후보 | T-130용 제안 사양. 아직 OpenAPI 미포함 |
+| 테마형 curated trip plan import | `GET /v1/curated-features*` 후보 | `curated_features` → TripMate `curated_trip_plans` 1:1 복사. 아직 OpenAPI 미포함 |
 
 `/tripmate/feature-update-requests*`는 제거됐다. 사용자가 새 장소 추가, 정보 수정, 폐업 삭제를
 제안하는 큐는 TripMate app DB가 소유하고, 운영자 승인 뒤 `/v1/admin/features*` 또는
@@ -154,7 +155,34 @@ TripMate 측 질의 5건(해당 repo `docs/integrations/krtour-map-rest-api.md` 
 inactive/soft-deleted feature는 **batch/단건 read의 `found`에 status와 함께 반환**된다
 (D-12, T-217b) — `missing`(미존재)과 "철회/폐업됨"을 구분하라.
 
-## 8. YouTube 후보 feature detail 소비 계약 (T-217f — TripMate TM-08 선행)
+## 8. curated_features → curated_trip_plans import 계약 (문서 계약, 2026-06-12)
+
+테마형 source(세계음식점, 독립서점, 카페가 있는 서점, 도서관, 무장애 관광지 등)는
+krtour-map `feature.curated_features` overlay가 소유한다. TripMate의 저장 정본명은
+`app.curated_trip_plans` / `app.curated_plan_pois`다. TripMate API의 `/notice-plans`
+또는 `notice_plan_id`는 기존 호환 alias일 뿐이며, 신규 DB/ORM/문서에서는
+`curated_trip_plans`를 쓴다.
+
+제안 엔드포인트와 상세 payload는 [`docs/curated-features.md`](curated-features.md)를
+따른다.
+
+- `GET /v1/curated-themes`
+- `GET /v1/curated-sources`
+- `GET /v1/curated-features`
+- `GET /v1/curated-features/{curated_feature_id}`
+- `GET /v1/curated-features/{curated_feature_id}/tripmate-copy`
+
+복사 규칙:
+
+- krtour-map `curated_features` 1건 = TripMate `curated_trip_plans` 1건.
+- 하위 장소·정류점·추천 POI는 TripMate `curated_plan_pois`로 복사한다.
+- TripMate는 `source_system='krtour-map'`,
+  `source_curated_feature_id`, `source_curated_feature_version`, `source_etag`,
+  `source_imported_at`을 저장한다.
+- TripMate는 krtour-map DB를 직접 읽지 않고 REST payload snapshot만 저장한다.
+- `feature_id`는 opaque string으로 저장하고 파싱하지 않는다.
+
+## 9. YouTube 후보 feature detail 소비 계약 (T-217f — TripMate TM-08 선행)
 
 provider `tripmate-agent-youtube`(marker `P-13`, kind `place`,
 `detail.place_kind="youtube_place_candidate"`) feature의 출처 배지/영상 카드 UX는
@@ -175,7 +203,7 @@ provider `tripmate-agent-youtube`(marker `P-13`, kind `place`,
 보존된다(디버그/확장용 — UX는 facility_info 우선). export는 검수 통과 후보만
 내려오므로(D-05) 별도 검수 상태 분기는 불필요하다.
 
-## 9. T-130 공개 해수욕장/축제 뷰 (제안 사양)
+## 10. T-130 공개 해수욕장/축제 뷰 (제안 사양)
 
 TripMate T-130(`/public/*`)은 비로그인 공개 API이며, 현재 차단 조건은 krtour-map
 사용자 OpenAPI에 해수욕장/축제 전용 뷰와 닫힌 detail 스키마가 없다는 점이다. krtour-map
