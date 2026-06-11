@@ -297,6 +297,29 @@ def _two_digits_or_none(value: str | None) -> str | None:
     return text if (len(text) == 2 and text.isdigit()) else None
 
 
+def _contains_region_item(
+    items: tuple[RegionWithinRadiusItem, ...],
+) -> RegionWithinRadiusItem | None:
+    return next((item for item in items if item.relation == "contains"), None)
+
+
+def _bjd_code_from_emd_code(value: str | None) -> str | None:
+    if value is None:
+        return None
+    code = value.strip()
+    if len(code) == 8 and code.isdigit():
+        code = f"{code}00"
+    try:
+        return normalize_bjd_code(code)
+    except ValueError:
+        return None
+
+
+def _region_names(*values: str | None) -> str | None:
+    text = " ".join(value for value in values if value)
+    return normalize_korean_text(text) or None
+
+
 @dataclass(frozen=True)
 class RegionWithinRadiusCenter:
     """kraddr-geo v2 반경 행정구역 질의 중심점. 외부 순서는 ``(lon, lat)``."""
@@ -700,6 +723,43 @@ def _parse_regions_within_radius_response(data: dict[str, Any]) -> RegionsWithin
     )
 
 
+def _regions_within_radius_response_to_address(
+    response: RegionsWithinRadiusResponse,
+) -> Address | None:
+    """중심 좌표가 포함된 행정구역 응답 → 최소 ``Address`` 보강값."""
+    emd = _contains_region_item(response.emd)
+    sigungu = _contains_region_item(response.sigungu)
+    sido = _contains_region_item(response.sido)
+
+    bjd_code = _bjd_code_from_emd_code(emd.code if emd is not None else None)
+    sigungu_code = extract_sigungu_code(bjd_code) or _five_digits_or_none(
+        sigungu.code if sigungu is not None else None
+    )
+    sido_code = extract_sido_code(bjd_code) or _two_digits_or_none(
+        sido.code if sido is not None else None
+    )
+    if sido_code is None and sigungu_code is not None:
+        sido_code = _two_digits_or_none(sigungu_code[:2])
+    if bjd_code is None and sigungu_code is None and sido_code is None:
+        return None
+
+    return Address(
+        legal=_region_names(
+            sido.name if sido is not None else None,
+            sigungu.name if sigungu is not None else None,
+            emd.name if emd is not None else None,
+        ),
+        admin=normalize_korean_text(emd.name if emd is not None else None),
+        bjd_code=bjd_code,
+        sigungu_code=sigungu_code,
+        sido_code=sido_code,
+        sido_name=normalize_korean_text(sido.name if sido is not None else None),
+        sigungu_name=normalize_korean_text(
+            sigungu.name if sigungu is not None else None
+        ),
+    )
+
+
 # -- kraddr-geo REST 클라이언트 -----------------------------------------------
 
 
@@ -790,8 +850,13 @@ def kraddr_geo_reverse_geocoder(
     *,
     radius_m: int | None = None,
     max_distance_m: float | None = None,
+    region_fallback_radius_km: float | None = None,
 ) -> ReverseGeocoder:
     """kraddr-geo REST client → ``ReverseGeocoder`` (좌표 → ``Address``) 콜러블.
+
+    ``region_fallback_radius_km``를 지정하면 ``POST /v2/reverse``가 주소 후보를
+    찾지 못했을 때 ``POST /v2/regions/within-radius``로 중심 좌표가 포함된
+    행정구역을 조회해 bjd/sigungu/sido code만 최소 보강한다.
 
     Examples
     --------
@@ -806,7 +871,36 @@ def kraddr_geo_reverse_geocoder(
         response = await client.reverse(
             float(coord.lon), float(coord.lat), radius_m=radius_m
         )
-        return reverse_response_to_address(response, max_distance_m=max_distance_m)
+        address = reverse_response_to_address(
+            response, max_distance_m=max_distance_m
+        )
+        if (
+            address is not None and address.bjd_code is not None
+        ) or region_fallback_radius_km is None:
+            return address
+
+        regions = await client.regions_within_radius(
+            lon=float(coord.lon),
+            lat=float(coord.lat),
+            radius_km=region_fallback_radius_km,
+            levels=("sido", "sigungu", "emd"),
+        )
+        region_address = _regions_within_radius_response_to_address(regions)
+        if address is None or region_address is None:
+            return region_address or address
+        return address.model_copy(
+            update={
+                "legal": address.legal or region_address.legal,
+                "admin": address.admin or region_address.admin,
+                "bjd_code": region_address.bjd_code,
+                "sigungu_code": region_address.sigungu_code
+                or address.sigungu_code,
+                "sido_code": region_address.sido_code or address.sido_code,
+                "sido_name": address.sido_name or region_address.sido_name,
+                "sigungu_name": address.sigungu_name
+                or region_address.sigungu_name,
+            }
+        )
 
     return _reverse
 
