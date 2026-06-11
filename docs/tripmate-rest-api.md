@@ -34,6 +34,7 @@
 | provider 신선도 | `GET /v1/providers/{provider}/last-sync` | 사용자 표시 또는 admin 상태판 |
 | 운영 feature 추가/수정/삭제 | `/v1/admin/features*` | TripMate public client 직접 호출 금지 |
 | 운영 refresh 실행 | `/v1/admin/feature-update-requests*` | admin/operator flow만 |
+| 비로그인 공개 해수욕장/축제 뷰 | `GET /v1/public/*` 후보 | T-130용 제안 사양. 아직 OpenAPI 미포함 |
 
 `/tripmate/feature-update-requests*`는 제거됐다. 사용자가 새 장소 추가, 정보 수정, 폐업 삭제를
 제안하는 큐는 TripMate app DB가 소유하고, 운영자 승인 뒤 `/v1/admin/features*` 또는
@@ -173,3 +174,25 @@ provider `tripmate-agent-youtube`(marker `P-13`, kind `place`,
 원본 export item 전체는 `detail.payload.tripmate_agent.{youtube,evidence,...}`에
 보존된다(디버그/확장용 — UX는 facility_info 우선). export는 검수 통과 후보만
 내려오므로(D-05) 별도 검수 상태 분기는 불필요하다.
+
+## 9. T-130 공개 해수욕장/축제 뷰 (제안 사양)
+
+TripMate T-130(`/public/*`)은 비로그인 공개 API이며, 현재 차단 조건은 krtour-map
+사용자 OpenAPI에 해수욕장/축제 전용 뷰와 닫힌 detail 스키마가 없다는 점이다. krtour-map
+쪽 제안 사양은 [`docs/public-views-api.md`](public-views-api.md)에 둔다.
+
+제안 엔드포인트:
+
+- `GET /v1/public/beaches`
+- `GET /v1/public/beaches/map-markers`
+- `GET /v1/public/beaches/{feature_id}`
+- `GET /v1/public/festivals/monthly`
+- `GET /v1/public/festivals/map-markers`
+- `GET /v1/public/festivals/{feature_id}`
+
+구현 전 주의:
+
+- 해수욕장은 `detail.place_kind="beach"`를 1차 판별 기준으로 쓴다. 문서의
+  `01050100`과 현재 provider 코드의 `01020300` category drift는 T-222에서 정리한다.
+- KHOA 수질/index는 weather metric 확장 또는 별도 marine 표면 중 하나로 확정해야 한다.
+- 축제 monthly 뷰는 `EventDetail.starts_on`/`ends_on` 기간 겹침 집계가 필요하다.

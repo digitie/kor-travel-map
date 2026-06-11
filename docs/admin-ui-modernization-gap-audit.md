@@ -2,6 +2,14 @@
 
 작성일: 2026-06-03
 
+> **갱신 메모 (2026-06-11)**: 이 문서는 T-211a/T-211b 당시의 선행 gap audit이다.
+> T-218 이후 실제 17개 경로, OpenAPI, 실시간 필요성까지 다시 대조한 최신 판단은
+> [`docs/reports/admin-ui-scenario-linkage-recheck-2026-06-11.md`](reports/admin-ui-scenario-linkage-recheck-2026-06-11.md)를
+> 우선한다. 특히 일반 `/v1/features/nearby`는 현재 구현됐고, offline upload
+> preview/validation/load도 화면에 연결됐다. `/admin/providers*` 직접 run 표면은
+> 취소됐으며 provider 실행은 `/v1/admin/feature-update-requests`의 `provider_dataset`
+> scope로 유도한다.
+
 ## 목적
 
 이 문서는 T-211b admin UI 최신화 구현 전에 필요한 선행 정리다. 기준 문서는

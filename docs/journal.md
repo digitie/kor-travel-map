@@ -119,6 +119,23 @@ Protocol(Sprint 2 PR#34, ADR-044 이전)이 provider에 존재한 적 없는 필
   테스트 fake를 새 shape로 갱신, `docs/event-feature-etl.md` §4 재구성.
 - 게이트: unit 1004 / dagster+admin 370 passed / ruff / mypy --strict 88+15 / lint-imports.
 
+## 2026-06-11 (codex) — admin UI/UX 시나리오 재점검 + T-130 공개 뷰 사양
+
+admin UI/UX 계획 문서, 프론트엔드 17개 경로, 백엔드 routers, OpenAPI admin/user 사양,
+TripMate T-130 문서를 전수 대조했다. 새 리포트
+`docs/reports/admin-ui-scenario-linkage-recheck-2026-06-11.md`에 빠진 연결부와
+실시간 기준을 정리했다.
+
+- 남은 admin 간극은 경로 수가 아니라 `/features/[feature_id]` 상세, 수동 feature 작성 흐름,
+  `/ops/import-jobs/[job_id]` 상세/event 타임라인, provider 상세/policy, job/log 상세 링크다.
+- 폴링 현황(2초/10초)을 기준으로 `WS /v1/ops/live` 다중화와 job/request/upload/run별
+  WebSocket 또는 SSE 대체 후보 엔드포인트를 정리했다.
+- TripMate T-130 차단 해소용 제안 사양 `docs/public-views-api.md` 추가:
+  `/v1/public/beaches*`, `/v1/public/festivals*`, 스키마, KHOA index/수질, 월별 축제 집계.
+- 해수욕장 category drift 발견: 문서 `01050100`, 현재 provider 코드 `01020300 +
+  place_kind=beach`. 공개 뷰는 우선 `place_kind=beach`를 판별 기준으로 문서화.
+- `docs/tasks.md`에 T-221(admin UI 연결/실시간)과 T-222(T-130 공개 뷰)를 추가했다.
+
 ## 2026-06-11 (codex) — React Doctor 0 이슈 + maplibre-vworld-js v0.1.3 정합
 
 frontend React Doctor full scan의 optional warning까지 0으로 맞추기 위해 shadcn 기반

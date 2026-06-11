@@ -924,6 +924,19 @@ batch 같은 service read는 `POST /features/batch`(ServiceToken route-level gat
 반환하지 않고, 특정 feature 상세 API에서만 `address`/`detail`/`urls` JSON 데이터를
 반환한다.
 
+### 8.1 TripMate T-130 공개 뷰 후보
+
+TripMate T-130(`/public/*`)은 현재 사용자 subset에 없는 해수욕장/축제 전용 뷰를
+요구한다. 제안 계약은 [`docs/public-views-api.md`](public-views-api.md)에 둔다.
+아직 `openapi.user.json`에는 포함하지 않는다. 구현 시 다음 표면을 사용자 profile에 추가한다.
+
+- `GET /v1/public/beaches`
+- `GET /v1/public/beaches/map-markers`
+- `GET /v1/public/beaches/{feature_id}`
+- `GET /v1/public/festivals/monthly`
+- `GET /v1/public/festivals/map-markers`
+- `GET /v1/public/festivals/{feature_id}`
+
 ## 9. Frontend stack 계약
 
 Admin frontend 표준:

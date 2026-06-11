@@ -1,5 +1,26 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-11 Codex 작업 메모 — admin UI/UX 시나리오 재점검 + T-130 공개 뷰 사양
+
+사용자 지시로 admin UI/UX 계획 문서와 실제 프론트엔드/백엔드/OpenAPI, TripMate T-130
+문서를 다시 대조했다. 코드 변경은 없고 문서/백로그 보강만 수행했다.
+
+- 실제 admin 프론트엔드는 17개 경로가 구현되어 있고 T-218 이후 a11y/e2e 기본 커버는 충분하다.
+  남은 간극은 목록 화면 추가보다 `/features/[feature_id]` 상세, 수동 feature 작성 흐름,
+  import job 상세/event 타임라인, provider 상세/policy, job/log 실시간 스트림 같은 **연결부**다.
+- 현재 실시간성은 2초/10초 폴링 중심이다. T-212e 전체 재적재, offline upload 적재,
+  feature update request run-now, Dagster 실패 상세 추적은 `ops.import_job_events`와
+  `WS /v1/ops/live` + job/request/upload/run별 WebSocket 또는 SSE 대체 경로가 필요하다.
+- TripMate T-130(`/public/*`) 차단 원인은 krtour-map 사용자 OpenAPI에 해수욕장/축제
+  전용 뷰와 닫힌 detail 스키마가 없다는 점이다. 제안 사양
+  `docs/public-views-api.md`를 추가했다.
+- 해수욕장 category drift 확인: 문서 정본은 `01050100`, 현재 provider 코드는
+  `01020300 + detail.place_kind="beach"`다. T-222 구현 전에 정리해야 한다.
+- 백로그: T-221(admin UI 연결/실시간), T-222(TripMate T-130 공개 뷰)를 추가했다.
+
+**다음 한 작업**: 기존 우선순위인 **T-212e**는 그대로 유지. 병렬/후속 후보는
+**T-221a~c**(feature 상세·job 상세·실시간 전송)와 **T-222b**(공개 뷰 OpenAPI 구현).
+
 ## 2026-06-11 claude 작업 메모 — T-219/T-220 완결 (KMA Dagster + MCST 신규 provider)
 
 사용자 지시 "kma, mcst provider 빠짐없이 상세구현(Dagster 포함)"을 PR 6개로 종결
