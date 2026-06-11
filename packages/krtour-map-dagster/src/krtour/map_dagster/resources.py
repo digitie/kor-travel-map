@@ -74,6 +74,16 @@ class ProviderRecordResourceSpec:
         return tuple(f"KRTOUR_MAP_{name.upper()}" for name in self.setting_names)
 
 
+@dataclass(frozen=True, slots=True)
+class _ProviderRecordIterable:
+    """Dagster가 sync generator를 resource setup generator로 오해하지 않게 감싼다."""
+
+    records: Iterator[Any]
+
+    def __iter__(self) -> Iterator[Any]:
+        return self.records
+
+
 PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
     ProviderRecordResourceSpec(
         resource_key="datagokr_cultural_festivals",
@@ -281,8 +291,13 @@ def build_provider_record_live_resource(
     credential이 없으면 guard와 동일한 helpful message로 ``RuntimeError``를
     던져 missing-credential 동작을 graceful하게 유지한다. credential이 있으면
     ``fetch(settings)``가 반환한 record iterable(sync ``Iterable`` 또는 async
-    generator)을 그대로 돌려준다(여기서 소비하지 않음 — asset의
-    ``_record_batches``가 sync/async 모두 lazy하게 iterate).
+    generator)을 asset이 소비할 resource value로 돌려준다(여기서 소비하지 않음 —
+    asset의 ``_record_batches``가 sync/async 모두 lazy하게 iterate).
+
+    주의: Dagster는 ``@resource`` 함수가 sync generator object를 반환하면 이를
+    setup/teardown resource generator로 해석한다. 따라서 sync ``Iterator``는 얇은
+    iterable wrapper로 감싸고, list/tuple 같은 일반 ``Iterable``과 ``AsyncIterator``는
+    그대로 둔다.
     """
 
     @resource(
@@ -300,7 +315,10 @@ def build_provider_record_live_resource(
             raise RuntimeError(
                 _provider_guard_message(spec, has_required_settings=False)
             )
-        return fetch(settings)
+        records = fetch(settings)
+        if isinstance(records, Iterator):
+            return _ProviderRecordIterable(records)
+        return records
 
     return _resource
 
