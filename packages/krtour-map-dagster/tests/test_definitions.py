@@ -46,6 +46,8 @@ def test_feature_load_asset_keys_registered() -> None:
         "feature_weather_kma_ultra_short_nowcast",
         "feature_weather_kma_ultra_short_forecast",
         "feature_weather_kma_short_forecast",
+        "feature_weather_kma_mid_forecast",
+        "feature_notice_kma_weather_alerts",
         "feature_event_visitkorea_enrichment",
     } <= asset_keys
 
@@ -107,6 +109,7 @@ _LIVE_PROVIDER_RESOURCE_KEYS = {
     "airkorea_air_quality",
     "visitkorea_festival_events",
     "tripmate_agent_youtube_features",
+    "kma_weather_alert_records",
 }
 
 

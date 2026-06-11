@@ -38,6 +38,7 @@ __all__ = [
     "fetch_airkorea_stations",
     "fetch_datagokr_cultural_festivals",
     "fetch_khoa_beaches",
+    "fetch_kma_weather_alerts",
     "fetch_knps_geometry_records",
     "fetch_knps_point_records",
     "fetch_krairport_airports",
@@ -528,6 +529,61 @@ def fetch_krairport_airports(
         close = getattr(client, "close", None)
         if callable(close):
             close()
+
+
+KMA_WEATHER_ALERT_STN_ID: Final[str] = "108"
+"""KMA 특보 발표관서 — ``108`` = 전국(기상청 본청). 1차는 전국 단일 조회."""
+
+
+def fetch_kma_weather_alerts(
+    settings: KrtourMapSettings,
+) -> Iterator[Any]:
+    """KMA 기상특보 목록(getWthrWrnList) record를 kma public client로 stream한다.
+
+    ``settings.data_go_kr_service_key``로 ``DataGoKrClient(service_key=...)``를
+    열고 전국 발표관서(``108``)의 rolling window(오늘 포함
+    ``kma_weather_alert_lookback_days``일)를 ``weather_warning_list(stn_id,
+    from_tm_fc, to_tm_fc, page_no=N)``로 페이지네이션하며 record
+    (``kma.models.WeatherWarningItem`` — ``stn_id``/``tm_fc``/``seq``/``title``
+    + ``raw``)를 lazily yield한다. 특보 종류/등급/구역의 구조화 파싱은
+    ``kma_weather.weather_warning_rows``(asset 측 adapter)가 맡는다.
+    sync generator, finally close.
+    """
+    secret = settings.data_go_kr_service_key
+    if secret is None:
+        raise ProviderCredentialMissing(
+            "kma weather alerts live fetch에는 "
+            "KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY (source DATA_GO_KR_SERVICE_KEY)가 "
+            "필요하다."
+        )
+    api_key = secret.get_secret_value()
+
+    kma = cast(Any, importlib.import_module("kma"))
+    client = kma.DataGoKrClient(service_key=api_key)
+    kst = timezone(timedelta(hours=9))
+    today = datetime.now(kst).date()
+    window_start = today - timedelta(days=settings.kma_weather_alert_lookback_days - 1)
+    num_of_rows = 100
+    try:
+        page_no = 1
+        while True:
+            items = list(
+                client.weather_warning_list(
+                    stn_id=KMA_WEATHER_ALERT_STN_ID,
+                    from_tm_fc=window_start,
+                    to_tm_fc=today,
+                    page_no=page_no,
+                    num_of_rows=num_of_rows,
+                )
+            )
+            if not items:
+                break
+            yield from items
+            if len(items) < num_of_rows:
+                break
+            page_no += 1
+    finally:
+        client.close()
 
 
 def fetch_khoa_beaches(

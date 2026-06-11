@@ -24,43 +24,72 @@ snake_case row)과 shape이 다르다 — client가 보존한 ``raw`` payload(KM
 import importlib
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Final, cast
 
 from dagster import AssetExecutionContext, asset
 from krtour.map.dto.weather import WeatherValue
 from krtour.map.providers.kma import (
+    KMA_MID_FORECAST_DATASET_KEY,
     KMA_PROVIDER_NAME,
     KMA_SHORT_FORECAST_DATASET_KEY,
     KMA_ULTRA_SHORT_FORECAST_DATASET_KEY,
     KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY,
+    KMA_WEATHER_ALERT_DATASET_KEY,
+    mid_land_forecast_to_weather_values,
+    mid_temperature_to_weather_values,
+    parse_mid_region_features,
     parse_weather_extra_points,
     short_forecast_to_weather_values,
     ultra_short_forecast_to_weather_values,
     ultra_short_nowcast_to_weather_values,
+    weather_alerts_to_notice_bundles,
 )
 
-from .assets import FEATURE_LOAD_RETRY_POLICY, _resource_object, _resource_value
-from .etl import _add_output_metadata
+from .assets import (
+    _COMMON_RESOURCE_KEYS,
+    FEATURE_LOAD_RETRY_POLICY,
+    _fetched_at,
+    _load,
+    _record_list,
+    _resource_object,
+    _resource_value,
+)
+from .etl import DagsterFeatureLoadResult, _add_output_metadata
 
 if TYPE_CHECKING:
     from krtour.map.client import AsyncKrtourMapClient
 
 __all__ = [
     "KMA_WEATHER_ASSETS",
+    "KmaAlertRegionRow",
+    "KmaAlertRow",
     "KmaForecastRow",
     "KmaGridTargets",
+    "KmaMidForecastLoadResult",
+    "KmaMidLandRow",
+    "KmaMidTempRow",
     "KmaNowcastRow",
     "KmaWeatherLoadResult",
+    "feature_notice_kma_weather_alerts",
+    "feature_weather_kma_mid_forecast",
     "feature_weather_kma_short_forecast",
     "feature_weather_kma_ultra_short_forecast",
     "feature_weather_kma_ultra_short_nowcast",
     "forecast_rows_from_items",
     "map_grid_targets",
+    "mid_land_rows_from_items",
+    "mid_temp_rows_from_items",
     "nowcast_rows_from_snapshot",
+    "run_feature_notice_kma_weather_alerts",
+    "run_feature_weather_kma_mid_forecast",
     "run_feature_weather_kma_short_forecast",
     "run_feature_weather_kma_ultra_short_forecast",
     "run_feature_weather_kma_ultra_short_nowcast",
+    "weather_warning_rows",
 ]
+
+_KST: Final = timezone(timedelta(hours=9))
 
 _KMA_WEATHER_RESOURCE_KEYS: Final[set[str]] = {
     "krtour_map_client",
@@ -493,9 +522,434 @@ async def feature_weather_kma_short_forecast(
     return await run_feature_weather_kma_short_forecast(context)
 
 
+# =========================================================================
+# T-219c — 중기예보 (region 설정 주입) + 특보 (record resource → notice)
+# =========================================================================
+
+
+def _str_or_none(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _int_or_none(value: Any) -> int | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return int(float(text))
+    except ValueError:
+        return None
+
+
+@dataclass(frozen=True, slots=True)
+class KmaMidLandRow:
+    """``KmaMidLandForecastItem`` Protocol을 만족하는 중기육상예보 row.
+
+    ``MidForecastItem.raw``(KMA 공식 camelCase 필드 보존)에서 만든다.
+    """
+
+    reg_id: str
+    tm_fc: str
+    wf_3_am: str | None
+    wf_3_pm: str | None
+    wf_4_am: str | None
+    wf_4_pm: str | None
+    wf_5_am: str | None
+    wf_5_pm: str | None
+    wf_6_am: str | None
+    wf_6_pm: str | None
+    wf_7_am: str | None
+    wf_7_pm: str | None
+    wf_8: str | None
+    wf_9: str | None
+    wf_10: str | None
+    rn_st_3_am: int | None
+    rn_st_3_pm: int | None
+    rn_st_4_am: int | None
+    rn_st_4_pm: int | None
+    rn_st_5_am: int | None
+    rn_st_5_pm: int | None
+    rn_st_6_am: int | None
+    rn_st_6_pm: int | None
+    rn_st_7_am: int | None
+    rn_st_7_pm: int | None
+    rn_st_8: int | None
+    rn_st_9: int | None
+    rn_st_10: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class KmaMidTempRow:
+    """``KmaMidTemperatureItem`` Protocol을 만족하는 중기기온예보 row."""
+
+    reg_id: str
+    tm_fc: str
+    ta_min_3: int | None
+    ta_max_3: int | None
+    ta_min_4: int | None
+    ta_max_4: int | None
+    ta_min_5: int | None
+    ta_max_5: int | None
+    ta_min_6: int | None
+    ta_max_6: int | None
+    ta_min_7: int | None
+    ta_max_7: int | None
+    ta_min_8: int | None
+    ta_max_8: int | None
+    ta_min_9: int | None
+    ta_max_9: int | None
+    ta_min_10: int | None
+    ta_max_10: int | None
+
+
+def mid_land_rows_from_items(items: Sequence[Any]) -> list[KmaMidLandRow]:
+    """``DataGoKrClient.mid_land_forecast()`` ``MidForecastItem`` → 육상 row 목록."""
+    rows: list[KmaMidLandRow] = []
+    for item in items:
+        raw = item.raw
+        kwargs: dict[str, Any] = {
+            "reg_id": str(getattr(item, "reg_id", None) or raw.get("regId") or ""),
+            "tm_fc": str(getattr(item, "tm_fc", None) or raw.get("tmFc") or ""),
+        }
+        for day in (3, 4, 5, 6, 7):
+            for period in ("Am", "Pm"):
+                suffix = period.lower()
+                kwargs[f"wf_{day}_{suffix}"] = _str_or_none(raw.get(f"wf{day}{period}"))
+                kwargs[f"rn_st_{day}_{suffix}"] = _int_or_none(
+                    raw.get(f"rnSt{day}{period}")
+                )
+        for day in (8, 9, 10):
+            kwargs[f"wf_{day}"] = _str_or_none(raw.get(f"wf{day}"))
+            kwargs[f"rn_st_{day}"] = _int_or_none(raw.get(f"rnSt{day}"))
+        rows.append(KmaMidLandRow(**kwargs))
+    return rows
+
+
+def mid_temp_rows_from_items(items: Sequence[Any]) -> list[KmaMidTempRow]:
+    """``DataGoKrClient.mid_temperature_forecast()`` ``MidForecastItem`` → 기온 row 목록."""
+    rows: list[KmaMidTempRow] = []
+    for item in items:
+        raw = item.raw
+        kwargs: dict[str, Any] = {
+            "reg_id": str(getattr(item, "reg_id", None) or raw.get("regId") or ""),
+            "tm_fc": str(getattr(item, "tm_fc", None) or raw.get("tmFc") or ""),
+        }
+        for day in (3, 4, 5, 6, 7, 8, 9, 10):
+            kwargs[f"ta_min_{day}"] = _int_or_none(raw.get(f"taMin{day}"))
+            kwargs[f"ta_max_{day}"] = _int_or_none(raw.get(f"taMax{day}"))
+        rows.append(KmaMidTempRow(**kwargs))
+    return rows
+
+
+def _latest_mid_base() -> str:
+    """중기예보 최신 발표 ``tmFc`` (``YYYYMMDDHHMM``, ``kma.time_utils``)."""
+    time_utils = cast(Any, importlib.import_module("kma.time_utils"))
+    return str(time_utils.latest_mid_fcst_time())
+
+
+@dataclass(frozen=True)
+class KmaMidForecastLoadResult:
+    """KMA 중기예보 적재 asset 결과."""
+
+    provider: str
+    dataset_key: str
+    base_datetime: str
+    skipped: bool
+    regions_total: int
+    regions_fetched: int
+    features_total: int
+    values_loaded: int
+
+    def as_metadata(self) -> dict[str, object]:
+        return {
+            "provider": self.provider,
+            "dataset_key": self.dataset_key,
+            "base_datetime": self.base_datetime,
+            "skipped": self.skipped,
+            "regions_total": self.regions_total,
+            "regions_fetched": self.regions_fetched,
+            "features_total": self.features_total,
+            "values_loaded": self.values_loaded,
+        }
+
+
+_KMA_MID_RESOURCE_KEYS: Final[set[str]] = {
+    "krtour_map_client",
+    "kma_datagokr_client",
+    "kma_mid_region_features",
+}
+
+
+async def run_feature_weather_kma_mid_forecast(
+    context: AssetExecutionContext,
+) -> KmaMidForecastLoadResult:
+    """KMA 중기예보(육상+기온)를 설정 주입 region의 feature에 적재한다.
+
+    중기는 region 107 지점 체계(격자 아님)라 옵션 B 좌표 매핑이 불가 — 운영자가
+    ``kma_mid_region_features``(JSON)로 region→feature 매핑을 명시 주입하고,
+    미설정이면 skip한다(계획 정본 §2.4). cursor는 다른 KMA asset과 동일하게
+    ``base_datetime``(발표 ``tmFc``) 기준.
+    """
+    krtour_client = cast(
+        "AsyncKrtourMapClient", _resource_object(context, "krtour_map_client")
+    )
+    base_key = _latest_mid_base()
+
+    state = await krtour_client.get_sync_state(
+        provider=KMA_PROVIDER_NAME, dataset_key=KMA_MID_FORECAST_DATASET_KEY
+    )
+    if state is not None and state.cursor.get("base_datetime") == base_key:
+        context.log.info(
+            "KMA %s base %s 이미 적재됨 — skip (provider_sync_state cursor).",
+            KMA_MID_FORECAST_DATASET_KEY,
+            base_key,
+        )
+        result = KmaMidForecastLoadResult(
+            provider=KMA_PROVIDER_NAME,
+            dataset_key=KMA_MID_FORECAST_DATASET_KEY,
+            base_datetime=base_key,
+            skipped=True,
+            regions_total=0,
+            regions_fetched=0,
+            features_total=0,
+            values_loaded=0,
+        )
+        _add_output_metadata(context, result.as_metadata())
+        return result
+
+    specs_raw = await _resource_value(context, "kma_mid_region_features", default=None)
+    specs = parse_mid_region_features(cast("str | None", specs_raw))
+    if not specs:
+        context.log.warning(
+            "KMA 중기예보 대상 region 미설정 — KRTOUR_MAP_KMA_MID_REGION_FEATURES가 "
+            "비어 있다. cursor는 전진하지 않는다."
+        )
+
+    datagokr_client = _resource_object(context, "kma_datagokr_client")
+    regions_fetched = 0
+    values_loaded = 0
+    matched_features: set[str] = set()
+    try:
+        for spec in specs:
+            # 변환 함수 Protocol 인자: frozen dataclass attr은 mypy에서 read-only라
+            # 직접 만족 판정이 안 됨 → ``Sequence[Any]`` 우회 (기존 패턴).
+            land_rows: Sequence[Any] = mid_land_rows_from_items(
+                cast(Any, datagokr_client).mid_land_forecast(reg_id=spec.land_reg_id)
+            )
+            temp_rows: Sequence[Any] = mid_temp_rows_from_items(
+                cast(Any, datagokr_client).mid_temperature_forecast(
+                    reg_id=spec.ta_reg_id
+                )
+            )
+            regions_fetched += 1
+            region_values: list[WeatherValue] = []
+            for feature_id in spec.feature_ids:
+                region_values.extend(
+                    mid_land_forecast_to_weather_values(
+                        land_rows, feature_id=feature_id
+                    )
+                )
+                region_values.extend(
+                    mid_temperature_to_weather_values(
+                        temp_rows, feature_id=feature_id
+                    )
+                )
+            if region_values:
+                values_loaded += await krtour_client.load_weather_values(region_values)
+                matched_features.update(spec.feature_ids)
+    except Exception:
+        await krtour_client.record_sync_failure(
+            provider=KMA_PROVIDER_NAME, dataset_key=KMA_MID_FORECAST_DATASET_KEY
+        )
+        raise
+
+    if regions_fetched:
+        await krtour_client.record_sync_success(
+            provider=KMA_PROVIDER_NAME,
+            dataset_key=KMA_MID_FORECAST_DATASET_KEY,
+            cursor={"base_datetime": base_key},
+        )
+
+    result = KmaMidForecastLoadResult(
+        provider=KMA_PROVIDER_NAME,
+        dataset_key=KMA_MID_FORECAST_DATASET_KEY,
+        base_datetime=base_key,
+        skipped=False,
+        regions_total=len(specs),
+        regions_fetched=regions_fetched,
+        features_total=len(matched_features),
+        values_loaded=values_loaded,
+    )
+    _add_output_metadata(context, result.as_metadata())
+    return result
+
+
+@asset(
+    group_name="features_weather",
+    required_resource_keys=_KMA_MID_RESOURCE_KEYS,
+    retry_policy=FEATURE_LOAD_RETRY_POLICY,
+)
+async def feature_weather_kma_mid_forecast(
+    context: AssetExecutionContext,
+) -> KmaMidForecastLoadResult:
+    return await run_feature_weather_kma_mid_forecast(context)
+
+
+# -- 특보 (getWthrWrnList record → notice FeatureBundle) -------------------
+
+_ALERT_TYPE_TOKENS: Final[tuple[str, ...]] = (
+    "폭풍해일",
+    "호우",
+    "대설",
+    "폭염",
+    "강풍",
+    "풍랑",
+    "태풍",
+    "건조",
+    "한파",
+    "황사",
+)
+"""특보 종류 토큰 — title에서 첫 매칭을 ``alert_type``으로 쓴다(긴 토큰 우선).
+
+토큰은 전부 krtour ``normalize_notice_type`` alias에 등록돼 있다. 미매칭은
+generic ``weather_alert``로 보내고 원문 title은 ``Feature.name``에 보존된다.
+"""
+
+_ALERT_LEVEL_TOKENS: Final[tuple[str, ...]] = ("예비특보", "주의보", "경보", "긴급")
+"""특보 등급 토큰 — ``KMA_ALERT_LEVEL_SEVERITY`` 키와 동일 표기."""
+
+
+@dataclass(frozen=True, slots=True)
+class KmaAlertRegionRow:
+    """``KmaWeatherAlertRegion`` Protocol을 만족하는 특보 지역 row."""
+
+    region_code: str
+    region_name: str
+
+
+@dataclass(frozen=True)
+class KmaAlertRow:
+    """``KmaWeatherAlertItem`` Protocol을 만족하는 특보 row.
+
+    ``getWthrWrnList``의 ``WeatherWarningItem``은 발표관서/시각/번호/제목만
+    구조화돼 있다 — 종류/등급은 title 토큰 스캔으로 보수적으로 추출하고,
+    특보구역은 1차로 발표관서 단위 1건으로 둔다(구역→좌표 enrichment는 백로그,
+    계획 정본 §2.4 비고).
+    """
+
+    alert_id: str
+    alert_type: str
+    level: str | None
+    title: str
+    description: str | None
+    issued_at: datetime
+    effective_from: datetime | None
+    effective_until: datetime | None
+    source_agency: str | None
+    regions: list[KmaAlertRegionRow]
+
+
+def _parse_alert_tm_fc(tm_fc: str) -> datetime:
+    """특보 ``tmFc``(``YYYYMMDDHHMM`` — 10자리면 분 보정) → KST aware."""
+    text = tm_fc.strip()
+    if len(text) == 10:
+        text += "00"
+    if len(text) != 12:
+        raise ValueError(f"특보 tm_fc 형식 오류: {tm_fc!r} (10/12자리 필요).")
+    return datetime.strptime(text, "%Y%m%d%H%M").replace(tzinfo=_KST)
+
+
+def weather_warning_rows(records: Sequence[Any]) -> list[KmaAlertRow]:
+    """``WeatherWarningItem`` record → ``KmaWeatherAlertItem`` Protocol row.
+
+    title/tm_fc가 없는 row는 식별 불가라 건너뛴다 — 호출 asset이 dropped
+    수를 로깅한다.
+    """
+    rows: list[KmaAlertRow] = []
+    for record in records:
+        title = _str_or_none(getattr(record, "title", None))
+        tm_fc = _str_or_none(getattr(record, "tm_fc", None))
+        if title is None or tm_fc is None:
+            continue
+        stn_id = _str_or_none(getattr(record, "stn_id", None)) or "unknown"
+        seq = _str_or_none(getattr(record, "seq", None)) or "0"
+        alert_type = next(
+            (token for token in _ALERT_TYPE_TOKENS if token in title),
+            "weather_alert",
+        )
+        level = next((token for token in _ALERT_LEVEL_TOKENS if token in title), None)
+        regions = [
+            KmaAlertRegionRow(
+                region_code=f"stn:{stn_id}",
+                region_name="전국" if stn_id == "108" else f"발표관서 {stn_id}",
+            )
+        ]
+        rows.append(
+            KmaAlertRow(
+                alert_id=f"{stn_id}:{tm_fc}:{seq}",
+                alert_type=alert_type,
+                level=level,
+                title=title,
+                description=None,
+                issued_at=_parse_alert_tm_fc(tm_fc),
+                effective_from=None,
+                effective_until=None,
+                source_agency="기상청",
+                regions=regions,
+            )
+        )
+    return rows
+
+
+async def run_feature_notice_kma_weather_alerts(
+    context: AssetExecutionContext,
+) -> DagsterFeatureLoadResult:
+    """KMA 기상특보 record를 notice Feature로 적재한다(표준 record-resource 패턴).
+
+    좌표는 region 단위라 없음 — ``SourceRecord.raw_address``의 region명이 위치
+    단서로 주소 검증을 통과한다(T-219c, ADR-046 정합).
+    """
+    records = await _record_list(context, "kma_weather_alert_records")
+    # Protocol 인자 ``Sequence[Any]`` 우회 — frozen dataclass attr read-only 함정.
+    rows: Sequence[Any] = weather_warning_rows(records)
+    dropped = len(records) - len(rows)
+    if dropped:
+        context.log.warning(
+            "KMA 특보 record %d건이 title/tm_fc 부재로 제외됨(전체 %d건).",
+            dropped,
+            len(records),
+        )
+    fetched_at = await _fetched_at(context)
+    bundles = weather_alerts_to_notice_bundles(rows, fetched_at=fetched_at)
+    return await _load(
+        context,
+        provider=KMA_PROVIDER_NAME,
+        dataset_key=KMA_WEATHER_ALERT_DATASET_KEY,
+        bundles=bundles,
+    )
+
+
+@asset(
+    group_name="features_notice",
+    required_resource_keys=_COMMON_RESOURCE_KEYS | {"kma_weather_alert_records"},
+    retry_policy=FEATURE_LOAD_RETRY_POLICY,
+)
+async def feature_notice_kma_weather_alerts(
+    context: AssetExecutionContext,
+) -> DagsterFeatureLoadResult:
+    return await run_feature_notice_kma_weather_alerts(context)
+
+
 KMA_WEATHER_ASSETS: Final = [
     feature_weather_kma_ultra_short_nowcast,
     feature_weather_kma_ultra_short_forecast,
     feature_weather_kma_short_forecast,
+    feature_weather_kma_mid_forecast,
+    feature_notice_kma_weather_alerts,
 ]
-"""KMA weather 적재 asset 목록 (T-219b)."""
+"""KMA weather/notice 적재 asset 목록 (T-219b/c)."""

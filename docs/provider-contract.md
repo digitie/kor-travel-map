@@ -398,7 +398,7 @@ def test_no_provider_wrapper_classes():
 | python-kraddr-base | **제거** | — | — | ADR-041 (PR#37) 흡수 완료. archive 후보 |
 | python-kraddr-geo | REST 서비스(직접 의존 없음) | `KraddrGeoRestClient` + `ReverseGeocoder`/`AddressGeocoder` 콜러블 | PR#90/#123 | on-demand geocoder. 최신 로컬 FastAPI 포트 `9001` 기준 |
 | python-datagokr-api | `@f88e62e` | `CulturalFestivalItem` (PR#34) | PR#34 | ADR-042 1차 축제 source |
-| python-kma-api | `@ab1a0b8` | `KmaShortForecastItem` (PR#38), `KmaUltraShortNowcastItem` (PR#39), `KmaUltraShortForecastItem` 등 5종 | PR#38~46, T-219b | ADR-010 두 축. T-219b: Dagster asset 3종(실황/초단기/단기)이 `KmaClient`/`kma.grid`/`kma.time_utils` lazy 사용. 후속: mid/alerts asset(T-219c) |
+| python-kma-api | `@ab1a0b8` | `KmaShortForecastItem` (PR#38), `KmaUltraShortNowcastItem` (PR#39), `KmaUltraShortForecastItem`/mid/alerts 등 7종 | PR#38~46, T-219b/c | ADR-010 두 축. Dagster asset 5종 완비 — 실황/초단기/단기(T-219b, `KmaClient`) + 중기(설정 주입 region, `DataGoKrClient`)/특보(record resource→notice)(T-219c). ASOS/해수욕장/APIHub 표면은 백로그 |
 | python-airkorea-api | `@22996a4` | (후속 PR) | — | PM10/PM2.5/CAI |
 | python-khoa-api | `@0c4c07f` | (후속 PR) | — | 해수욕장, 해양 공지 |
 | python-krforest-api | `@f9254e6` | (후속 PR) | — | 산악기상 (Sprint 2) + trails (Sprint 3) 양쪽 사용 |

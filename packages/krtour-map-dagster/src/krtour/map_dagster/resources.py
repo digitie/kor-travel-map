@@ -31,6 +31,7 @@ from .provider_fetchers import (
     fetch_airkorea_stations,
     fetch_datagokr_cultural_festivals,
     fetch_khoa_beaches,
+    fetch_kma_weather_alerts,
     fetch_knps_geometry_records,
     fetch_knps_point_records,
     fetch_krairport_airports,
@@ -56,6 +57,7 @@ __all__ = [
     "build_provider_record_guard_resource",
     "build_provider_record_live_resource",
     "create_s3_client_from_settings",
+    "kma_datagokr_client_resource",
     "kma_weather_client_resource",
     "krtour_map_client_resource",
     "offline_upload_store_resource",
@@ -236,6 +238,17 @@ PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
         note=(
             "TripMate-agent의 /api/v1/features/{snapshot|changes} REST export를 "
             "pull한다. source env API_KEYS 중 하나를 krtour-map API key로 주입한다."
+        ),
+    ),
+    ProviderRecordResourceSpec(
+        resource_key="kma_weather_alert_records",
+        provider_package="python-kma-api",
+        dataset_key="kma_weather_alerts",
+        setting_names=("data_go_kr_service_key",),
+        source_env_names=("DATA_GO_KR_SERVICE_KEY",),
+        note=(
+            "기상특보 getWthrWrnList — 전국 발표관서(108) rolling window 조회. "
+            "특보 종류/등급 구조화는 kma_weather.weather_warning_rows adapter."
         ),
     ),
 )
@@ -585,6 +598,18 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["tripmate_agent_youtube_features"] = (
     )
 )
 
+_KMA_WEATHER_ALERT_RECORDS_SPEC: ProviderRecordResourceSpec = next(
+    spec
+    for spec in PROVIDER_RECORD_RESOURCE_SPECS
+    if spec.resource_key == "kma_weather_alert_records"
+)
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["kma_weather_alert_records"] = (
+    build_provider_record_live_resource(
+        _KMA_WEATHER_ALERT_RECORDS_SPEC,
+        fetch_kma_weather_alerts,
+    )
+)
+
 
 def build_offline_upload_store_from_settings(
     settings: KrtourMapSettings,
@@ -693,6 +718,39 @@ def kma_weather_client_resource(_context: InitResourceContext) -> Iterator[Any]:
     # 아니므로(부재 가능) 호출 시점에 lazy import한다.
     kma = cast(Any, importlib.import_module("kma"))
     client = kma.KmaClient(service_key=secret.get_secret_value())
+    try:
+        yield client
+    finally:
+        client.close()
+
+
+@resource(
+    description=(
+        "kma_datagokr_client provider live client (python-kma-api DataGoKrClient, "
+        "kma_mid_forecast)."
+    )
+)
+def kma_datagokr_client_resource(_context: InitResourceContext) -> Iterator[Any]:
+    """``python-kma-api`` ``DataGoKrClient`` live 인스턴스 (T-219c).
+
+    중기예보(``getMidLandFcst``/``getMidTa``)는 대상 region이 설정
+    (``kma_mid_region_features``)에서 나와 record-stream resource 패턴이 맞지
+    않는다 — client 자체를 resource로 노출하고 mid asset이 region별로 직접
+    호출한다(ADR-006 wrapper 없음). credential이 없으면 guard와 동일한
+    helpful message로 실패한다.
+    """
+    settings = KrtourMapSettings()
+    secret = settings.data_go_kr_service_key
+    if secret is None:
+        raise RuntimeError(
+            "Dagster resource 'kma_datagokr_client'는 기본 실행 비활성 상태: "
+            "credential 환경변수가 설정되지 않았음. provider=python-kma-api, "
+            "dataset=kma_mid_forecast. "
+            "krtour-map env: KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY; "
+            "source env: DATA_GO_KR_SERVICE_KEY."
+        )
+    kma = cast(Any, importlib.import_module("kma"))
+    client = kma.DataGoKrClient(service_key=secret.get_secret_value())
     try:
         yield client
     finally:

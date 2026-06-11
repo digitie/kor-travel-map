@@ -12,6 +12,8 @@ from krtour.map.dto import ForecastStyle, TimelineBucket, WeatherDomain
 from krtour.map.providers.kma import (
     KMA_METRIC_NAMES,
     KMA_METRIC_UNITS,
+    KmaMidRegionSpec,
+    parse_mid_region_features,
     parse_weather_extra_points,
     short_forecast_to_weather_values,
 )
@@ -48,6 +50,49 @@ def test_parse_weather_extra_points_multiple_with_spaces() -> None:
 def test_parse_weather_extra_points_rejects_invalid(value: str, match: str) -> None:
     with pytest.raises(ValueError, match=match):
         parse_weather_extra_points(value)
+
+
+# -- parse_mid_region_features (T-219c) -------------------------------------
+
+
+def test_parse_mid_region_features_none_and_empty() -> None:
+    assert parse_mid_region_features(None) == ()
+    assert parse_mid_region_features("  ") == ()
+
+
+def test_parse_mid_region_features_valid_specs() -> None:
+    specs = parse_mid_region_features(
+        '[{"land_reg_id": " 11B00000 ", "ta_reg_id": "11B10101",'
+        ' "feature_ids": ["f1", " f2 "]}]'
+    )
+    assert specs == (
+        KmaMidRegionSpec(
+            land_reg_id="11B00000",
+            ta_reg_id="11B10101",
+            feature_ids=("f1", "f2"),
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("value", "match"),
+    [
+        ("{not json", "JSON 파싱 실패"),
+        ('{"land_reg_id": "x"}', "배열"),
+        ('["x"]', "객체"),
+        ('[{"ta_reg_id": "a", "feature_ids": ["f"]}]', "land_reg_id"),
+        ('[{"land_reg_id": "a", "feature_ids": ["f"]}]', "ta_reg_id"),
+        ('[{"land_reg_id": "a", "ta_reg_id": "b", "feature_ids": []}]', "feature_ids"),
+        (
+            '[{"land_reg_id": "a", "ta_reg_id": "b", "feature_ids": ["f"]},'
+            ' {"land_reg_id": "a", "ta_reg_id": "b", "feature_ids": ["g"]}]',
+            "중복",
+        ),
+    ],
+)
+def test_parse_mid_region_features_rejects_invalid(value: str, match: str) -> None:
+    with pytest.raises(ValueError, match=match):
+        parse_mid_region_features(value)
 
 
 @dataclass(frozen=True)

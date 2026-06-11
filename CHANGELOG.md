@@ -5,6 +5,21 @@
 
 ## [Unreleased]
 
+### Dagster — KMA 중기예보 + 기상특보 (T-219c, 2026-06-11)
+
+- **NEW**: asset `feature_weather_kma_mid_forecast` — 운영자 주입 매핑
+  (`KRTOUR_MAP_KMA_MID_REGION_FEATURES` JSON, 육상/기온 reg_id 분리)의 region별
+  `getMidLandFcst`+`getMidTa`를 SKY/POP/TMN/TMX `WeatherValue`로 적재(일 2회,
+  미설정 시 skip). resource `kma_datagokr_client` 신설.
+- **NEW**: asset `feature_notice_kma_weather_alerts` — 표준 record-resource
+  (`kma_weather_alert_records`, getWthrWrnList 전국 발표관서 rolling window) →
+  notice Feature 적재. 종류/등급은 title 토큰 스캔, 특보구역은 1차 발표관서
+  단위(구역 enrichment 백로그).
+- **CHANGED**: 특보 `SourceRecord.raw_address`에 region명을 채워(위치 단서)
+  Dagster 주소 검증(ADR-046 `missing_address`)을 통과하게 했다.
+- **ADDED**: settings `kma_mid_region_features`/`kma_weather_alert_lookback_days`,
+  파서 `parse_mid_region_features`.
+
 ### Dagster — KMA weather 파이프라인 (실황/초단기/단기, T-219b, 2026-06-11)
 
 - **NEW**: Dagster asset 3종 `feature_weather_kma_{ultra_short_nowcast,

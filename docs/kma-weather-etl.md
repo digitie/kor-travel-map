@@ -108,20 +108,25 @@ async def short_forecast_to_weather_values(
         )
 ```
 
-## 5. 중기예보
+## 5. 중기예보 (T-219c 구현 기준)
 
-지역 단위 (107 지점 — 광역시도 + 특수지역). 격자 X.
+지역 단위 (107 지점 — 광역시도 + 특수지역). 격자 X — 옵션 B 좌표 매핑 불가.
+**1차는 운영자가 region→feature 매핑을 설정으로 명시 주입**하고, 미설정이면
+asset이 skip한다(cursor 미전진):
 
-```python
-async def mid_forecast_to_weather_values(
-    items, *, feature_id_by_region: dict[str, str], fetched_at,
-) -> AsyncIterator[WeatherValue]:
-    """region code (e.g., '11B00000' 서울) → feature_id 매핑."""
-    ...
+```bash
+# 육상(getMidLandFcst)과 기온(getMidTa)은 reg_id 체계가 다르다 —
+# 예: 서울 육상 11B00000 vs 기온 11B10101.
+KRTOUR_MAP_KMA_MID_REGION_FEATURES='[{"land_reg_id": "11B00000",
+  "ta_reg_id": "11B10101", "feature_ids": ["<feature_id>", ...]}]'
 ```
 
-각 region마다 weather-only feature를 미리 생성하거나, 광역시도 행정구역 area
-feature에 연결.
+파서는 `krtour.map.providers.kma.parse_mid_region_features`(JSON 오류/필수 키
+누락/빈 feature_ids/중복 페어는 ValueError). asset
+`feature_weather_kma_mid_forecast`가 region별로 `DataGoKrClient.
+mid_land_forecast` + `mid_temperature_forecast`를 호출해 SKY 텍스트/POP/TMN/TMX
+`WeatherValue`를 적재한다. 변환은 `mid_land_forecast_to_weather_values` /
+`mid_temperature_to_weather_values`(기구현).
 
 ## 6. base_time 처리
 
@@ -181,8 +186,15 @@ record-resource 패턴이 아니라 **asset 직접 구현**(resource는
 | `feature_weather_kma_ultra_short_nowcast` | `kma_ultra_short_nowcast` | `45 * * * *` | `features_weather` |
 | `feature_weather_kma_ultra_short_forecast` | `kma_ultra_short_forecast` | `20,50 * * * *` | `features_weather` |
 | `feature_weather_kma_short_forecast` | `kma_short_forecast` | `20 2,5,8,11,14,17,20,23 * * *` | `features_weather` |
-| `weather_kma_mid_forecast` | `kma_mid_forecast` | `0 6,18 * * *` | (T-219c) |
-| `notice_kma_weather_alerts` | `kma_weather_alerts` | 일 1회 | (T-219c) |
+| `feature_weather_kma_mid_forecast` | `kma_mid_forecast` | `20 6,18 * * *` | `features_weather` |
+| `feature_notice_kma_weather_alerts` | `kma_weather_alerts` | `15 6 * * *` | `features_notice` |
+
+특보(T-219c)는 표준 record-resource 패턴 — `kma_weather_alert_records`
+(getWthrWrnList, 전국 발표관서 108, rolling window
+`KRTOUR_MAP_KMA_WEATHER_ALERT_LOOKBACK_DAYS` 기본 3일, 멱등 upsert). 종류/등급은
+title 토큰 스캔(미매칭은 generic `weather_alert`), 특보구역은 1차 발표관서
+단위 1건 — region명이 `SourceRecord.raw_address` 위치 단서로 주소 검증을
+통과한다. 구역→좌표 enrichment·구역별 fan-out은 백로그(§11).
 
 변환 입력: `KmaClient`의 `ForecastItem`/`WeatherSnapshot`은 base/forecast를
 `datetime`으로 정규화한 모델이라 krtour 변환 Protocol(KMA 공식 필드명
