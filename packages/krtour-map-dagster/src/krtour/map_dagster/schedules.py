@@ -165,7 +165,9 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         cron_schedule="20 2,5,8,11,14,17,20,23 * * *",
         provider="python-kma-api",
         dataset_key="kma_short_forecast",
-        description="KMA 단기예보 WeatherValue 일 8회 적재(발표 02~23시 3시간 간격 + 10분 지연 후).",
+        description=(
+            "KMA 단기예보 WeatherValue 일 8회 적재(발표 02~23시 3시간 간격 + 10분 지연 후)."
+        ),
     ),
 )
 """현재 구현된 Feature provider asset의 기본 schedule 사양."""

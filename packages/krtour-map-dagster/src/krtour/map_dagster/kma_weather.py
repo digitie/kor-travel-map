@@ -19,13 +19,15 @@ snake_case row)과 shape이 다르다 — client가 보존한 ``raw`` payload(KM
 필드명, ADR-044 신뢰·미러)에서 Protocol-만족 row를 만들어 변환에 넘긴다.
 """
 
-from __future__ import annotations
-
+# NOTE: `from __future__ import annotations` 금지 — dagster가 asset 함수의
+# ``context`` 어노테이션을 런타임 타입으로 검증한다(assets.py와 동일).
 import importlib
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Final, cast
 
 from dagster import AssetExecutionContext, asset
+from krtour.map.dto.weather import WeatherValue
 from krtour.map.providers.kma import (
     KMA_PROVIDER_NAME,
     KMA_SHORT_FORECAST_DATASET_KEY,
@@ -41,10 +43,7 @@ from .assets import FEATURE_LOAD_RETRY_POLICY, _resource_object, _resource_value
 from .etl import _add_output_metadata
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
-
     from krtour.map.client import AsyncKrtourMapClient
-    from krtour.map.dto.weather import WeatherValue
 
 __all__ = [
     "KMA_WEATHER_ASSETS",
