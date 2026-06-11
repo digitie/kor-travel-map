@@ -26,6 +26,10 @@ from .kma_weather import (
     feature_weather_kma_ultra_short_forecast,
     feature_weather_kma_ultra_short_nowcast,
 )
+from .mcst_features import (
+    feature_place_mcst_culture,
+    feature_place_mcst_libraries,
+)
 
 KST_TIMEZONE: Final[str] = "Asia/Seoul"
 """Dagster provider schedule execution timezone."""
@@ -188,6 +192,25 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         provider="python-kma-api",
         dataset_key="kma_weather_alerts",
         description="KMA 기상특보 notice Feature 일 1회 적재(rolling window 멱등 upsert).",
+    ),
+    # MCST 2종 (T-220b) — 저빈도 시설 데이터, 주 1회.
+    FeatureLoadScheduleSpec(
+        asset=feature_place_mcst_culture,
+        job_name="feature_place_mcst_culture_job",
+        schedule_name="feature_place_mcst_culture_weekly_schedule",
+        cron_schedule="30 4 * * 2",
+        provider="python-mcst-api",
+        dataset_key="mcst_culture_datasets",
+        description="MCST KCISA 14 dataset place Feature 주 1회 적재(slug별 분리 적재).",
+    ),
+    FeatureLoadScheduleSpec(
+        asset=feature_place_mcst_libraries,
+        job_name="feature_place_mcst_libraries_job",
+        schedule_name="feature_place_mcst_libraries_weekly_schedule",
+        cron_schedule="50 4 * * 2",
+        provider="python-mcst-api",
+        dataset_key="mcst_library_datasets",
+        description="MCST 공공/작은도서관 place Feature 주 1회 적재.",
     ),
 )
 """현재 구현된 Feature provider asset의 기본 schedule 사양."""

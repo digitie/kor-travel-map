@@ -40,6 +40,8 @@ from .provider_fetchers import (
     fetch_krforest_arboretums,
     fetch_krforest_recreation_forests,
     fetch_krheritage_events,
+    fetch_mcst_culture_records,
+    fetch_mcst_libraries,
     fetch_mois_license_records,
     fetch_opinet_stations,
     fetch_standard_museums,
@@ -249,6 +251,28 @@ PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
         note=(
             "기상특보 getWthrWrnList — 전국 발표관서(108) rolling window 조회. "
             "특보 종류/등급 구조화는 kma_weather.weather_warning_rows adapter."
+        ),
+    ),
+    ProviderRecordResourceSpec(
+        resource_key="mcst_culture_records",
+        provider_package="python-mcst-api",
+        dataset_key="mcst_culture_datasets",
+        setting_names=("data_go_kr_service_key",),
+        source_env_names=("DATA_GO_KR_SERVICE_KEY",),
+        note=(
+            "KCISA 공통 CultureRecord 14 dataset을 (slug, record) 튜플로 stream — "
+            "asset이 slug별 분리 적재(dataset_key mcst_<slug>)."
+        ),
+    ),
+    ProviderRecordResourceSpec(
+        resource_key="mcst_library_records",
+        provider_package="python-mcst-api",
+        dataset_key="mcst_library_datasets",
+        setting_names=("data_go_kr_service_key",),
+        source_env_names=("DATA_GO_KR_SERVICE_KEY",),
+        note=(
+            "ODCloud 도서관 2 dataset(public/small_libraries)을 (slug, row) "
+            "튜플로 stream — 위치/운영 정보만(장서 제외)."
         ),
     ),
 )
@@ -607,6 +631,30 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["kma_weather_alert_records"] = (
     build_provider_record_live_resource(
         _KMA_WEATHER_ALERT_RECORDS_SPEC,
         fetch_kma_weather_alerts,
+    )
+)
+
+_MCST_CULTURE_RECORDS_SPEC: ProviderRecordResourceSpec = next(
+    spec
+    for spec in PROVIDER_RECORD_RESOURCE_SPECS
+    if spec.resource_key == "mcst_culture_records"
+)
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["mcst_culture_records"] = (
+    build_provider_record_live_resource(
+        _MCST_CULTURE_RECORDS_SPEC,
+        fetch_mcst_culture_records,
+    )
+)
+
+_MCST_LIBRARY_RECORDS_SPEC: ProviderRecordResourceSpec = next(
+    spec
+    for spec in PROVIDER_RECORD_RESOURCE_SPECS
+    if spec.resource_key == "mcst_library_records"
+)
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["mcst_library_records"] = (
+    build_provider_record_live_resource(
+        _MCST_LIBRARY_RECORDS_SPEC,
+        fetch_mcst_libraries,
     )
 )
 
