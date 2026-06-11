@@ -10,6 +10,22 @@ dependency를 설치하지 않는 packaging 갭을 확인했다. keyless `krairp
 `pyproject.toml`의 `providers` extra에 현재 로컬 provider checkout SHA를 직접 URL로
 활성화하고 `docs/provider-contract.md` §12 status 표를 같은 SHA로 갱신했다.
 
+## 2026-06-11 (claude) — T-219/T-220 신설: KMA Dagster 완결 + MCST 신규 provider 계획
+
+사용자 지시 "kma, mcst provider 빠짐없이 상세구현(Dagster 포함)". 4-방향 병렬 실측
+(python-kma-api `ab1a0b8` / python-mcst-api origin/**master** `d06e8d2` / krtour 기존
+KMA / provider 풀스택 패턴) 후 계획 정본
+`docs/reports/kma-mcst-provider-plan-2026-06-11.md` 작성 + tasks.md 등록.
+
+- **갭**: KMA는 변환 5종 100%(1,133줄+57테스트)·**Dagster 0%**. MCST는 전무 —
+  라이브러리는 KCISA 14 place dataset(`CultureRecord`, 좌표 포함)+ODCloud 도서관 2종.
+- **KMA 설계**: 격자 매핑 옵션 B 유지하되 1차 대상 = poi_cache_targets 좌표 +
+  설정 추가 좌표(run당 상한) — 호출량/행 폭발 통제. 격자 변환은 라이브러리 책임.
+  nowcast/forecast는 asset 직접(좌표가 DB 의존이라 record-resource 부적합), 특보만
+  표준 record-resource. 키는 data_go_kr_service_key 공유.
+- **MCST 설계**: slug 메타표 16종 단일 모듈, marker P-12, dataset_key `mcst_<slug>`,
+  asset 2종이 slug별 분리 `_load`. T-219a~c/T-220a~c PR 분해.
+
 ## 2026-06-11 (claude) — T-210e user-facing OpenAPI TS client 패키지
 
 사용자 지시로 T-212e 게이트를 해제하고 진행. 신규 workspace 패키지
