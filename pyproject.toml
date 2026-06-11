@@ -82,8 +82,9 @@ providers = [
   #
   # ── Sprint 2 §2.2 — 날씨 (ADR-010) ────────────────────────────────────
   # `krtour.map.providers.kma.{KmaShortForecastItem, KmaUltraShortNowcastItem}`
-  # Protocol (PR#38/39) 정합.
-  # "python-kma-api      @ git+https://github.com/digitie/python-kma-api.git@<sha>",
+  # Protocol (PR#38/39) 정합. T-219b: Dagster asset이 KmaClient/grid/time_utils
+  # 를 lazy import — runtime 의존 활성화 (origin/main ab1a0b8).
+  "python-kma-api @ git+https://github.com/digitie/python-kma-api.git@ab1a0b880f9d0b0881edfa7f8a99eebd24ae45a0",
   "python-airkorea-api @ git+https://github.com/digitie/python-airkorea-api.git@22996a457fa2c845101b0bbbf8167e655e8d562d",
   "python-khoa-api @ git+https://github.com/digitie/python-khoa-api.git@0c4c07fa7e5afd9040c9ee6dbcd178cc78c1ba5c",
   # python-krforest-api는 산악기상 + Sprint 3 trails 양쪽 사용 (아래 §2.5와 동일 lib).

@@ -70,6 +70,9 @@ __all__ = [
     "KMA_PROVIDER_NAME",
     "KMA_METRIC_UNITS",
     "KMA_METRIC_NAMES",
+    "KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY",
+    "KMA_ULTRA_SHORT_FORECAST_DATASET_KEY",
+    "KMA_SHORT_FORECAST_DATASET_KEY",
     "KMA_MID_FORECAST_DATASET_KEY",
     "KMA_WEATHER_ALERT_DATASET_KEY",
     "KMA_WEATHER_ALERT_CATEGORY",
@@ -84,6 +87,19 @@ __all__ = [
 
 KMA_PROVIDER_NAME: Final[str] = "python-kma-api"
 """canonical provider name (ADR-024)."""
+
+
+# -- weather dataset_key (T-219b) ----------------------------------------
+# `docs/kma-weather-etl.md` §2 표 + `docs/provider-contract.md` §3 정합.
+
+KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY: Final[str] = "kma_ultra_short_nowcast"
+"""provider_sync dataset_key — 초단기실황 (``getUltraSrtNcst``)."""
+
+KMA_ULTRA_SHORT_FORECAST_DATASET_KEY: Final[str] = "kma_ultra_short_forecast"
+"""provider_sync dataset_key — 초단기예보 (``getUltraSrtFcst``)."""
+
+KMA_SHORT_FORECAST_DATASET_KEY: Final[str] = "kma_short_forecast"
+"""provider_sync dataset_key — 단기예보 (``getVilageFcst``)."""
 
 
 # -- 특보 (weather_alerts) 상수 (PR#46) ---------------------------------

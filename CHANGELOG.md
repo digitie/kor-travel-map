@@ -5,6 +5,22 @@
 
 ## [Unreleased]
 
+### Dagster — KMA weather 파이프라인 (실황/초단기/단기, T-219b, 2026-06-11)
+
+- **NEW**: Dagster asset 3종 `feature_weather_kma_{ultra_short_nowcast,
+  ultra_short_forecast,short_forecast}` + KST schedule — 활성 POI cache target
+  좌표(+설정 추가 좌표)의 distinct 격자만 호출(run당 상한, 기본 50)하고 같은
+  격자의 미삭제 place feature에 `WeatherValue`를 적재한다(옵션 B, D-12 read
+  정합). 같은 base 재실행은 `provider_sync_state` cursor(`base_datetime`)가
+  skip하고, 실패는 cursor 미전진 + `record_sync_failure`.
+- **NEW**: resource `kma_weather_client`(python-kma-api `KmaClient` live,
+  `DATA_GO_KR_SERVICE_KEY` 공유) + settings 값 resource 2종. `providers` extra에
+  `python-kma-api@ab1a0b8` 핀 활성화.
+- **ADDED**: `AsyncKrtourMapClient.list_poi_cache_target_coords()` /
+  `list_active_place_coords()` read 메서드, KMA dataset_key 상수 3종.
+
+## [Unreleased]
+
 ### API — T-216 REST 계약 표면 clean cut (2026-06-09)
 
 - **CHANGED (breaking)**: admin/ops/debug 라우터도 `/v1` prefix로 이동했다. liveness

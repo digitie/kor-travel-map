@@ -9,11 +9,13 @@ from krtour.map.settings import KrtourMapSettings
 
 from .assets import FEATURE_LOAD_ASSETS
 from .batch_dag import BATCH_DAG_JOBS
+from .kma_weather import KMA_WEATHER_ASSETS
 from .maintenance import MAINTENANCE_JOBS, MAINTENANCE_SCHEDULES
 from .mois_source_sync import MOIS_SOURCE_SYNC_JOBS, MOIS_SOURCE_SYNC_SCHEDULES
 from .offline_uploads import OFFLINE_UPLOAD_JOBS
 from .resources import (
     PROVIDER_RECORD_RESOURCE_DEFINITIONS,
+    kma_weather_client_resource,
     krtour_map_client_resource,
     offline_upload_store_resource,
     reverse_geocoder_resource,
@@ -51,6 +53,9 @@ REQUIRED_RESOURCE_KEYS: Final[tuple[str, ...]] = (
     "airkorea_air_quality",
     "visitkorea_festival_events",
     "tripmate_agent_youtube_features",
+    "kma_weather_client",
+    "kma_weather_extra_points",
+    "kma_weather_max_grids_per_run",
 )
 """Feature 적재 asset이 요구하는 Dagster resource key."""
 
@@ -64,9 +69,12 @@ DEFAULT_RESOURCE_VALUES: Final[dict[str, object]] = {
 
 # KNPS dataset key는 ``KrtourMapSettings``에서 읽어 fetcher(``fetch_knps_*_records``)와
 # asset의 ``knps_*_dataset_key`` resource가 같은 dataset을 보게 한다(불일치 방지).
+# KMA weather 대상 설정 2종(T-219b)도 같은 메커니즘으로 asset에 주입한다.
 SETTINGS_VALUE_RESOURCES: Final[dict[str, str]] = {
     "knps_point_dataset_key": "knps_point_dataset_key",
     "knps_geometry_dataset_key": "knps_geometry_dataset_key",
+    "kma_weather_extra_points": "kma_weather_extra_points",
+    "kma_weather_max_grids_per_run": "kma_weather_max_grids_per_run",
 }
 """resource key → 같은 값을 제공하는 ``KrtourMapSettings`` 속성명."""
 
@@ -74,6 +82,7 @@ DEFAULT_RESOURCE_DEFINITIONS: Final[dict[str, ResourceDefinition]] = {
     "krtour_map_client": krtour_map_client_resource,
     "offline_upload_store": offline_upload_store_resource,
     "reverse_geocoder": reverse_geocoder_resource,
+    "kma_weather_client": kma_weather_client_resource,
     **PROVIDER_RECORD_RESOURCE_DEFINITIONS,
 }
 """환경변수 기반 실제 구현을 제공하는 기본 Dagster resource."""
@@ -107,7 +116,7 @@ def _settings_value_resource(key: str, attr: str) -> ResourceDefinition:
 
 
 defs = Definitions(
-    assets=FEATURE_LOAD_ASSETS,
+    assets=[*FEATURE_LOAD_ASSETS, *KMA_WEATHER_ASSETS],
     jobs=cast(
         "Any",
         [

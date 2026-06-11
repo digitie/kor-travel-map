@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import inspect
 import threading
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterator
@@ -55,6 +56,7 @@ __all__ = [
     "build_provider_record_guard_resource",
     "build_provider_record_live_resource",
     "create_s3_client_from_settings",
+    "kma_weather_client_resource",
     "krtour_map_client_resource",
     "offline_upload_store_resource",
     "reverse_geocoder_resource",
@@ -661,6 +663,40 @@ def _dispose_async_engine(engine: Any) -> None:
     dispose_result = engine.dispose()
     if inspect.isawaitable(dispose_result):
         _run_async_resource_teardown(cast("Awaitable[object]", dispose_result))
+
+
+@resource(
+    description=(
+        "kma_weather_client provider live client (python-kma-api, "
+        "kma_ultra_short_nowcast/kma_ultra_short_forecast/kma_short_forecast)."
+    )
+)
+def kma_weather_client_resource(_context: InitResourceContext) -> Iterator[Any]:
+    """``python-kma-api`` ``KmaClient`` live 인스턴스 (T-219b).
+
+    KMA weather asset은 대상 격자가 DB(``ops.poi_cache_targets``)에서 나와
+    record-stream resource 패턴이 맞지 않는다 — client 자체를 resource로
+    노출하고 asset이 격자별로 직접 호출한다(ADR-006 wrapper 없음, 계획 정본
+    §2.3). credential이 없으면 guard와 동일한 helpful message로 실패한다.
+    """
+    settings = KrtourMapSettings()
+    secret = settings.data_go_kr_service_key
+    if secret is None:
+        raise RuntimeError(
+            "Dagster resource 'kma_weather_client'는 기본 실행 비활성 상태: "
+            "credential 환경변수가 설정되지 않았음. provider=python-kma-api, "
+            "dataset=kma_ultra_short_nowcast/kma_ultra_short_forecast/"
+            "kma_short_forecast. krtour-map env: KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY; "
+            "source env: DATA_GO_KR_SERVICE_KEY."
+        )
+    # provider public client는 ADR-044 로컬 체크아웃이며 hard dependency가
+    # 아니므로(부재 가능) 호출 시점에 lazy import한다.
+    kma = cast(Any, importlib.import_module("kma"))
+    client = kma.KmaClient(service_key=secret.get_secret_value())
+    try:
+        yield client
+    finally:
+        client.close()
 
 
 @resource(description="admin offline upload 원본 파일을 읽는 RustFS/S3 store.")
