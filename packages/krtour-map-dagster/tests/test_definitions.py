@@ -81,6 +81,16 @@ def test_feature_update_job_and_sensors_registered() -> None:
     )
 
 
+def test_repository_loads_all_definitions() -> None:
+    """repository 전체 로드 회귀 (#384).
+
+    웹서버/데몬은 ``load_all_definitions``로 노드명 유일성까지 검증한다 —
+    CLI materialize/execute는 이 경로를 타지 않아 op/job 동명 충돌(#384,
+    mois Phase A)이 잠복했었다. 여기서 한 번 전체 로드해 CI에서 잡는다.
+    """
+    defs.get_repository_def().load_all_definitions()
+
+
 def test_offline_upload_load_default_resources_registered() -> None:
     job = defs.get_job_def("offline_upload_load")
     assert {"krtour_map_client", "offline_upload_store"} <= set(

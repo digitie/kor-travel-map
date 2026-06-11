@@ -193,7 +193,10 @@ _MOIS_SOURCE_SYNC_CONFIG_SCHEMA: Final[dict[str, object]] = {
 
 
 @op(
-    name="mois_localdata_source_sync",
+    # NOTE: job 이름(`mois_localdata_source_sync`)과 달라야 한다 — Dagster job은
+    # 동명 graph를 만들므로 op가 같은 이름이면 repository 전체 로드가
+    # DagsterInvalidDefinitionError로 실패한다 (#384, T-212e에서 발견).
+    name="sync_mois_localdata_source_db",
     config_schema=_MOIS_SOURCE_SYNC_CONFIG_SCHEMA,
     retry_policy=MAINTENANCE_RETRY_POLICY,
 )
