@@ -1,0 +1,29 @@
+# 외부(공유) 객체 저장소 모드 오버레이 (#372, ADR-052 amendment).
+#
+# RustFS 인프라를 tripmate-manager 공유 인스턴스(S3 :9003/console :9004)로 쓸 때
+# 자체 rustfs 계열 서비스 의존을 제거한다. 적용:
+#
+#   KRTOUR_MAP_OBJECT_STORE_EXTERNAL=true bash scripts/docker-up.sh
+#   # 또는 직접:
+#   docker compose -f docker-compose.yml -f docker-compose.external-object-store.yml up -d ...
+#
+# 객체 저장소 endpoint/credential은 .env에서 공유 인스턴스 값으로 지정한다
+# (컨테이너 관점 endpoint는 http://host.docker.internal:9003 — extra_hosts가
+# docker-ce에서도 host-gateway로 해석되게 한다).
+services:
+  api:
+    depends_on: !override
+      postgres:
+        condition: service_healthy
+  dagster:
+    depends_on: !override
+      dagster-db-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+  dagster-daemon:
+    depends_on: !override
+      dagster-db-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy

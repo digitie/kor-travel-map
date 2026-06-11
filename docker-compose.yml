@@ -134,6 +134,10 @@ services:
       KRTOUR_MAP_ADMIN_KNPS_SERVICE_KEY: ${KRTOUR_MAP_ADMIN_KNPS_SERVICE_KEY:-${KNPS_SERVICE_KEY:-${KNPS_API_KEY:-}}}
       KRTOUR_MAP_ADMIN_AIRKOREA_SERVICE_KEY: ${KRTOUR_MAP_ADMIN_AIRKOREA_SERVICE_KEY:-${AIRKOREA_SERVICE_KEY:-${AIRKOREA_API_KEY:-${DATA_GO_KR_SERVICE_KEY:-}}}}
       KRTOUR_MAP_ADMIN_KRFOREST_SERVICE_KEY: ${KRTOUR_MAP_ADMIN_KRFOREST_SERVICE_KEY:-${KRFOREST_SERVICE_KEY:-${KRFOREST_API_KEY:-${DATA_GO_KR_SERVICE_KEY:-}}}}
+    # 호스트 공유 서비스(kraddr-geo :9001, tripmate-manager RustFS :9003) 접근 경로.
+    # Docker Desktop과 달리 docker-ce는 host.docker.internal을 기본 제공하지 않는다 (#372).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
@@ -213,6 +217,8 @@ services:
       KRTOUR_MAP_OPINET_API_KEY: ${KRTOUR_MAP_OPINET_API_KEY:-${OPINET_API_KEY:-${OPINET_SERVICE_KEY:-}}}
       KRTOUR_MAP_KREX_EX_API_KEY: ${KRTOUR_MAP_KREX_EX_API_KEY:-${KEX_GO_API_KEY:-${KREX_API_KEY:-${KREX_SERVICE_KEY:-}}}}
       KRTOUR_MAP_KREX_GO_API_KEY: ${KRTOUR_MAP_KREX_GO_API_KEY:-${DATA_GO_KR_SERVICE_KEY:-${KEX_GO_API_KEY:-${KREX_API_KEY:-${KREX_SERVICE_KEY:-}}}}}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       dagster-db-init:
         condition: service_completed_successfully
@@ -261,6 +267,8 @@ services:
       KRTOUR_MAP_OPINET_API_KEY: ${KRTOUR_MAP_OPINET_API_KEY:-${OPINET_API_KEY:-${OPINET_SERVICE_KEY:-}}}
       KRTOUR_MAP_KREX_EX_API_KEY: ${KRTOUR_MAP_KREX_EX_API_KEY:-${KEX_GO_API_KEY:-${KREX_API_KEY:-${KREX_SERVICE_KEY:-}}}}
       KRTOUR_MAP_KREX_GO_API_KEY: ${KRTOUR_MAP_KREX_GO_API_KEY:-${DATA_GO_KR_SERVICE_KEY:-${KEX_GO_API_KEY:-${KREX_API_KEY:-${KREX_SERVICE_KEY:-}}}}}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       dagster-db-init:
         condition: service_completed_successfully
