@@ -6,40 +6,14 @@
 
 ## 진행 중인 작업 인덱스 (열린 `[ ]` 항목)
 
-> 핵심 실행 4건(T-212e 병행, T-223, T-225, T-226) + 외부/보류 항목 별도.
+> 핵심 실행 3건(T-212e 병행, T-225, T-226) + 외부/보류 항목 별도.
 > 상세는 아래 각 섹션.
 > 완료 이력은 [`tasks-done.md`](tasks-done.md).
 
 - **다음 (우선순위 순)**
   - [ ] T-212e — **실데이터 전체 재적재 + offline upload 실데이터 검증 + 최종 리포트**.
-        다른 agent가 병행 진행 중이다(2026-06-12 사용자 확인). 본 agent는 T-222/T-223
-        작업 중에도 주기적으로 main/rebase 충돌을 확인하고, T-212e 결과가
-        머지되면 후속 T-225 closure 재검증에 반영한다.
-  - [ ] T-223 — **curated_features + TripMate curated_trip_plans import 계약/구현**.
-        정본 후보: `docs/curated-features.md`. `notice_plans`는 TripMate 호환 API
-        alias일 뿐 신규 정본명은 `curated_trip_plans`. 이 flow는 krtour-map REST와
-        TripMate 사이의 복사 계약이며, `krtour-ai-agent`는 curated trip plan 생성에
-        관여하지 않는다.
-    - [x] T-223a — 문서 계약 정리(2026-06-12): 책/음식 테마 source 조사, overlay DB
-          모델, REST/Admin UI/Dagster, TripMate 1:1 복사 계약.
-    - [x] T-223b — provider 보강(2026-06-12, Codex): `python-mcst-api`
-          중고서점 CSV(provider PR#11), `python-datagokr-api` 서울 책방·무슬림 친화
-          음식점·안산 세계맛집·제주 향토음식점 fileData + 전국지역특화거리 표준데이터
-          서비스(provider PR#10)를 반영하고, krtour-map 변환 함수와 단위 테스트를 추가했다.
-    - [x] T-223c-1 — krtour-map DB/API/OpenAPI foundation 구현(2026-06-12,
-          Codex): `feature.curated_*` 4개 테이블 + seed source/rule,
-          `/v1/curated-*` read, `/v1/admin/curated-*` backend write,
-          source rule apply, TripMate copy snapshot, OpenAPI/user-client 타입.
-    - [x] T-223c-2 — Dagster `curated_features` group 구현(2026-06-12,
-          Codex):
-          `curated_source_metadata`, `curated_feature_candidates`,
-          `curated_feature_status_sweep`, `curated_tripmate_copy_snapshots`
-          asset과 copy snapshot cache table을 추가했다.
-    - [x] T-223c-3 — Admin UI 구현(2026-06-12, Codex): `/admin/curated-features`
-          화면에 curated 후보 목록, select/unselect/archive, source rule 편집/apply,
-          TripMate copy preview를 연결했다.
-    - [ ] T-223d — TripMate 연동(외부 repo): krtour REST 호출로
-          `app.curated_trip_plans` / `app.curated_plan_pois` 복사, source version/etag 저장.
+        다른 agent가 병행 진행 중이다(2026-06-12 사용자 확인). T-221/T-222/T-223은
+        완료됐으므로, T-212e 결과가 머지되면 후속 T-225 closure 재검증에 반영한다.
   - [ ] T-225 — **T-212e closure 재검증**. T-224/T-221/T-222/T-223 이후 main 기준으로
         T-212e 실데이터 full reload/offline upload 결과를 한 번 더 대조한다. 다른 agent의
         T-212e 결과가 이미 충분하면 재실행 대신 최신 provider/API 표면 포함 여부,
@@ -62,12 +36,20 @@
           GitHub repo 표시명, generated client/TripMate 문서, examples/snippets,
           `import kortravel as kt` quickstart와 migration guide를 갱신한다.
 - **최근 완료**
+  - [x] **T-223 — curated_features + TripMate curated_trip_plans import 계약/구현.
+        완료(2026-06-12, Codex)**: T-223a 문서 계약, T-223b provider 보강,
+        T-223c-1 DB/API/OpenAPI foundation, T-223c-2 Dagster group, T-223c-3
+        Admin UI, T-223d TripMate 소비 측 import까지 완료했다. TripMate PR #184
+        (`5966628192a1f7b0c359a6435011f3e2f3f04469`)에서
+        `/admin/notice-plans/imports/krtour-curated-features`, source version/etag
+        provenance, upsert/refresh, `TRIPMATE_AGENT_API_BASE_URL` 제거가 머지됐다.
+        `krtour-ai-agent`는 curated trip plan 생성에 관여하지 않는다.
   - [x] **T-222b — 공개 해수욕장/축제 뷰 API 구현. 완료(2026-06-12, Codex)**:
         `public_views_repo`와 `/v1/public/beaches*`, `/v1/public/festivals*` 라우터를
         추가하고 admin/user OpenAPI, `@krtour/map-user-client` 타입을 갱신했다.
         category drift는 `place_kind='beach'` 1차 판별로 닫고, 축제 monthly는
-        기간 겹침 + 전월/당월/익월 summary로 구현했다. 다음 krtour-map 내부 작업은
-        T-223이며, TripMate 소비 측 동기화는 T-222c로 남긴다.
+        기간 겹침 + 전월/당월/익월 summary로 구현했다. TripMate 소비 측 동기화는
+        TripMate PR #183으로 완료됐다.
   - [x] **T-221 — admin UI/UX 시나리오 연결성 + 실시간성 보강. 완료
         (2026-06-12, Codex)**: feature 상세/수동 작성(T-221a), import job 상세·event·cancel
         (T-221b), `WS /v1/ops/live` signal channel(T-221c), provider 상세/refresh policy
@@ -193,10 +175,9 @@ T-212b admin UI 완결성, T-212c API/error/log contract, T-212d seeded PostGIS
 Sprint 5 종료까지 남은 작업은
 `docs/reports/sprint5-final-task-breakdown-2026-06-07.md`를 정본으로 상세화했다.
 T-216 REST API 정합성 심화, TripMate-agent provider, T-212d 재측정/튜닝은 닫았다.
-T-217/T-210e/T-224도 닫혔다. 2026-06-12 사용자 재정렬 기준 T-212e는 다른 agent가
-병행 진행 중이며, 본 agent의 다음 순서는
-**T-221 admin UI linkage/realtime → T-222 TripMate T-130 공개 뷰 →
-T-223 curated_features/import → T-225 T-212e closure 재검증**이다.
+T-217/T-210e/T-224도 닫혔다. 2026-06-12 사용자 재정렬 기준 T-221/T-222/T-223은
+완료됐고, T-212e는 다른 agent가 병행 진행 중이다. T-212e 결과가 머지되면
+**T-225 T-212e closure 재검증**으로 이어간다.
 `krtour-ai-agent`는 TripMate와 직접 연동하지 않고, TripMate curated plan 생성 flow에도
 관여하지 않는다. T-226 package identity rename(`kor-travel-map`/`kortravel`)은 별도
 후속 clean cut이다. T-207b는 사용자 결정에 따라 구현하지 않고, provider 강제 실행은

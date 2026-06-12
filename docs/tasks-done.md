@@ -3,6 +3,28 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## curated_features + TripMate import (2026-06-12, `T-223`)
+
+- [x] **T-223 — curated_features + TripMate curated_trip_plans import 계약/구현.**
+  T-223a~d 전부 완료. 정본은 `docs/curated-features.md`.
+  - [x] **T-223a — 문서 계약 정리.**
+    책/음식 테마 source 조사, overlay DB 모델, REST/Admin UI/Dagster,
+    TripMate 1:1 복사 계약을 정리했다.
+  - [x] **T-223b — provider 보강.**
+    `python-mcst-api` 중고서점 CSV(provider PR#11),
+    `python-datagokr-api` 서울 책방·무슬림 친화 음식점·안산 세계맛집·제주 향토음식점
+    fileData + 전국지역특화거리 표준데이터 서비스(provider PR#10)를 반영하고,
+    krtour-map 변환 함수와 단위 테스트를 추가했다.
+  - [x] **T-223c — krtour-map DB/API/Dagster/Admin UI.**
+    `feature.curated_*` 테이블, seed source/rule, `/v1/curated-*`,
+    `/v1/admin/curated-*`, source rule apply, TripMate copy snapshot, OpenAPI/user-client,
+    Dagster `curated_features` group, `/admin/curated-features` UI를 구현했다.
+  - [x] **T-223d — TripMate 연동.**
+    TripMate PR #184(`5966628192a1f7b0c359a6435011f3e2f3f04469`)에서
+    krtour REST snapshot을 `app.curated_trip_plans` / `app.curated_plan_pois`로
+    복사하고 source version/etag/item provenance를 저장하는 admin import를 머지했다.
+    `krtour-ai-agent`는 curated trip plan 생성에 관여하지 않는다.
+
 ## TripMate T-130 공개 해수욕장/축제 뷰 API (2026-06-12, `T-222`)
 
 - [x] **T-222 — TripMate T-130 공개 해수욕장/축제 뷰 API.**
