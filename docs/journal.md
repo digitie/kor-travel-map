@@ -2,6 +2,31 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-12 (claude) — fix(e2e): admin-ops spec drift 2건 (#409, T-212e 후속)
+
+T-212e live 최종 e2e 30/32의 잔여 실패 2건 — 환경이 아니라 spec-vs-UI/데이터
+drift(#409).
+
+- **providers freshness(T-217g)**: T-221d(#404) 이후 `/ops/providers`가
+  `/v1/providers`가 아닌 **`/v1/ops/providers`(+`/{provider}` 상세)**를 쓰는데
+  spec mock이 구 endpoint를 가리켜 라이브 데이터로 렌더 → 상세 패널의 sync
+  state/update request 테이블과 `last success`/`status` 등 columnheader가
+  겹쳐 strict mode 위반(로딩 race라 실패 지점 비결정). 수정: 목록·상세 mock을
+  신 endpoint로 교체(`OpsProviderDatasetSummary`/`OpsProviderDetailResponse`
+  생성 타입 바인딩 factory), columnheader 단언을 freshness 테이블에만 있는
+  `policy` 헤더 기반 `getByRole("table").filter({ has: ... })`로 한정, 기대
+  컬럼을 현 UI(detail/policy/next run 포함, last failure 제거)로 갱신.
+- **admin/issues**: 라이브 직격 spec이 `getByRole("row").nth(1)` 클릭 후 폼을
+  무조건 단언 — 또한 빈 목록 분기가 `emptyRow.isVisible()` 즉시평가라 1M행
+  느린 쿼리 중 false로 새는 race. 수정: manual-override 정본 type
+  `missing_address`(docs/debug-ui-admin-workflows.md)로 **issue type 필터를
+  먼저 적용**해 행을 고정, `expect(emptyRow.or(row)).toBeVisible()`로 목록
+  settle 대기 후 분기 — 해당 type 0건이면 폼 단언 skip. (현 컴포넌트는 폼을
+  type 무관 렌더하지만 type 고정으로 데이터 구성에도 견고.)
+- **검증(Windows, live 스택 12305/12301)**: 타깃 2 spec green + 전체 e2e
+  **32/32 passed**(비어있지 않은 분기는 임시 mock spec으로 별도 재현 후 폐기).
+  `npm run type-check`(src+e2e tsconfig) 통과. 컴포넌트 변경 없음(spec만).
+
 ## 2026-06-12 (codex) — T-223c-2 curated Dagster group
 
 curated overlay 운영 배치를 Dagster `curated_features` asset group으로 연결했다.
