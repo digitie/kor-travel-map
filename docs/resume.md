@@ -1,5 +1,29 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-12 Codex 작업 메모 — T-222b public beaches/festivals API
+
+T-222b로 TripMate T-130 차단 조건이던 공개 해수욕장/축제 사용자 API를 krtour-map
+쪽에 구현했다.
+
+- `src/krtour/map/infra/public_views_repo.py`를 추가했다. 해수욕장은
+  `kind='place'` + `detail.place_kind='beach'`, 축제는 `kind='event'` +
+  `detail.event_kind IN ('festival', 'cultural_festival')`와 기간 겹침으로 조회한다.
+- `GET /v1/public/beaches`, `/beaches/map-markers`, `/beaches/{feature_id}`,
+  `/festivals/monthly`, `/festivals/map-markers`, `/festivals/{feature_id}`를 추가했다.
+- user OpenAPI allowlist와 `@krtour/map-user-client` 생성 타입/alias를 갱신했다.
+- category drift는 `place_kind='beach'` 1차 판별로 닫았다. KHOA provider category
+  `01020300`은 보조 정보로 유지하고, 예전 문서값 `01050100`은 판별 기준에서 제외한다.
+- KHOA 폭/길이/재질은 nullable projection으로 열어 두고, 현재는 `facility_info` 또는
+  primary raw payload에 값이 있을 때만 채운다. 수질/index/weather는 null/빈 배열 후속이다.
+
+검증: public view 라우터 단위 테스트 6 passed, repo 통합 테스트 2 passed,
+`ruff check .`, targeted mypy, `export_openapi.py --profile all --check`,
+`npm -w packages/krtour-map-user-client run type-check` 통과.
+
+**다음 한 작업**: **T-222c** — TripMate 소비 문서/픽스처 동기화(외부 repo). krtour-map
+내부 다음 큰 작업은 **T-223b** curated feature provider 보강이다. T-212e는 다른 agent가
+병행 진행 중이며, 결과는 T-225에서 다시 대조한다.
+
 ## 2026-06-12 Codex 작업 메모 — T-221e ops logs + debug 재판정
 
 T-221 마지막 조각으로 `/ops/logs`를 import job event stream과 연결하고 debug 진단 표면을

@@ -1,7 +1,8 @@
 # public-views-api — TripMate T-130 공개 뷰용 krtour-map API 사양
 
-> **상태**: 제안 사양(2026-06-11). 아직 `openapi.user.json`에는 포함하지 않는다.
-> 구현 task는 `docs/tasks.md` T-222.
+> **상태**: 구현됨(2026-06-12, T-222b). `openapi.user.json` 사용자 profile과
+> `@krtour/map-user-client` 생성 타입에 포함한다.
+> 후속 소비/픽스처 동기화는 `docs/tasks.md` T-222c.
 > **목적**: TripMate T-130(`/public/*`)이 요구하는 해수욕장/축제 공개 조회 뷰를
 > krtour-map 쪽 사용자 API 계약으로 먼저 고정한다.
 
@@ -97,7 +98,7 @@
 - `EventDetail.ends_on IS NULL OR EventDetail.ends_on >= month_start`
 - `status='active'`
 
-응답 `data.months[]`는 기준 월 전후 summary이고, `data.items[]`는
+응답 `data.months[]`는 기준 월의 전월/당월/익월 summary이고, `data.items[]`는
 `FestivalPublicView`다.
 
 ### 2.5 `GET /v1/public/festivals/map-markers`
@@ -130,13 +131,13 @@
 | `road_address`, `jibun_address` | string/null | `address`에서 projection |
 | `marker_icon`, `marker_color` | string/null | feature marker |
 | `beach_kind` | string/null | `detail.facility_info.beach_kind` |
-| `beach_width_m`, `beach_length_m` | number/null | KHOA 상세 필드. 구현 전 provider 변환 보강 필요 |
-| `beach_material` | string/null | KHOA 상세 필드. `beach_type`/`beach_material` 명명 정렬 필요 |
+| `beach_width_m`, `beach_length_m` | number/null | KHOA 상세 필드. 현재는 `facility_info`/primary raw payload에 값이 있을 때만 projection |
+| `beach_material` | string/null | KHOA 상세 필드. 현재는 `beach_type`/`beach_material` raw key를 projection |
 | `emergency_contact` | string/null | `detail.phones[0]` 또는 provider payload |
 | `homepage_url`, `image_url` | string/null | `urls.homepage`, `detail.facility_info.image_url`, FeatureFile |
-| `latest_water_quality` | object/null | KHOA 수질 값. 구현 전 weather/index 표면 확정 필요 |
-| `upcoming_index_forecasts` | array | KHOA index forecast 또는 `/weather` metric projection |
-| `latest_weather` | object/null | `/v1/features/{feature_id}/weather` projection |
+| `latest_water_quality` | object/null | 현재 null. KHOA 수질 값 projection은 후속 marine/weather 확정 후 채움 |
+| `upcoming_index_forecasts` | array | 현재 빈 배열. KHOA index forecast projection은 후속 확정 후 채움 |
+| `latest_weather` | object/null | 현재 null. `/v1/features/{feature_id}/weather` projection 연결은 후속 |
 | `source_providers` | array[string] | SourceLink 또는 provider 요약 |
 | `updated_at` | datetime | feature updated_at |
 
@@ -144,8 +145,9 @@
 
 1. `kind='place'`
 2. `detail.place_kind='beach'`
-3. category는 현재 코드/문서 drift가 있어 1차 판별로 쓰지 않는다. 정렬 후에는
-   `01050100` 또는 최종 확정 category를 보조 필터로 사용할 수 있다.
+3. category는 현재 코드/문서 drift가 있어 1차 판별로 쓰지 않는다. T-222b 구현
+   기준으로 KHOA provider category는 코드 정본 `01020300`(자연명소>해안/섬)을 유지하고,
+   문서의 예전 `01050100`은 공개 view 판별 기준에서 제외한다.
 
 ### 3.2 `FestivalPublicView`
 
@@ -160,13 +162,13 @@
 | `address` | object | 구조화 `Address` |
 | `road_address`, `jibun_address` | string/null | `address`에서 projection |
 | `sido_code`, `sigungu_code` | string/null | feature/address |
-| `festival_content` | string/null | datagokr/visitkorea enrichment payload. 구현 전 매핑 확정 |
+| `festival_content` | string/null | primary source raw payload `fstvl_co` 또는 detail payload |
 | `organizer_name` | string/null | `detail.payload.organizer_name` |
 | `provider_org_name` | string/null | `detail.payload.provider_org_name` |
-| `auspc_instt_name`, `suprt_instt_name` | string/null | provider payload. 구현 전 매핑 확정 |
+| `auspc_instt_name`, `suprt_instt_name` | string/null | primary source raw payload |
 | `phone_number` | string/null | `EventDetail.tel` |
 | `homepage_url` | string/null | `urls.homepage` 또는 visitkorea enrichment |
-| `reference_date` | date/null | provider payload. 구현 전 매핑 확정 |
+| `reference_date` | date/null | primary source raw payload `reference_date` |
 | `marker_icon`, `marker_color` | string/null | feature marker |
 | `source_providers` | array[string] | SourceLink |
 | `updated_at` | datetime | feature updated_at |
@@ -178,16 +180,18 @@
 - `ended`: `ends_on < today`
 - `unknown`: 시작/종료일이 부족한 경우
 
-## 4. 구현 전 결정
+## 4. 구현 결정과 후속
 
-1. 해수욕장 category drift를 정리한다. 현재 문서 정본은 `01050100`, 코드 정본은
-   `01020300 + place_kind=beach`다.
-2. KHOA 해수욕장 폭/길이/재질을 provider Protocol과 변환에 다시 포함할지 결정한다.
-3. 수질·KHOA index를 `/v1/features/{feature_id}/weather` metric 확장으로 제공할지,
-   `/v1/public/beaches/{feature_id}/marine` 같은 별도 표면으로 둘지 결정한다.
-4. 축제 상세 content/주최/주관/후원/reference_date의 datagokr/visitkorea 필드 매핑을
-   닫힌 OpenAPI 스키마로 확정한다.
-5. `docs/tripmate-rest-api.md`에 이 표면을 TripMate T-130 차단 해소 조건으로 유지한다.
+1. 해수욕장 category drift는 `detail.place_kind='beach'` 1차 판별로 닫았다. KHOA
+   provider category `01020300`은 유지하고, `01050100` 문서값은 판별 기준에서 제외한다.
+2. KHOA 해수욕장 폭/길이/재질은 공개 schema에 nullable 필드로 열어 두고,
+   현재는 `facility_info` 또는 primary raw payload에 값이 있으면 projection한다.
+   provider 모델 보강은 후속 task로 분리한다.
+3. 수질·KHOA index·latest weather는 이번 구현에서 null/빈 배열로 고정한다. 별도
+   marine 표면 또는 weather metric 확장은 후속 결정으로 둔다.
+4. 축제 상세 content/주최/주관/후원/reference_date는 `source_records.raw_data`의
+   primary source payload를 함께 읽어 projection한다.
+5. `docs/tripmate-rest-api.md`는 이 표면을 TripMate T-130 차단 해소 조건으로 유지한다.
 
 ## 5. 테스트 기준
 

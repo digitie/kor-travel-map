@@ -2,6 +2,23 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-12 (codex) — T-222b 공개 해수욕장/축제 view API
+
+TripMate T-130 차단 조건이던 공개 해수욕장/축제 view API를 krtour-map 사용자 표면에
+구현했다.
+
+- **Backend**: `public_views_repo`를 추가하고 `GET /v1/public/beaches*`,
+  `GET /v1/public/festivals*` 6개 endpoint를 추가했다. 해수욕장은
+  `detail.place_kind='beach'`, 축제는 기간 겹침으로 조회한다.
+- **Contract**: admin/user OpenAPI와 `@krtour/map-user-client` 생성 타입/alias를
+  갱신했다.
+- **결정**: KHOA category drift는 `place_kind` 1차 판별로 닫았다. provider category
+  `01020300`은 보조 정보로 유지하고, 예전 문서값 `01050100`은 판별 기준에서 제외한다.
+- **후속**: KHOA 폭/길이/재질 provider 보강, 수질/index/weather projection, TripMate
+  소비 측 문서/픽스처 동기화(T-222c)는 후속으로 남겼다.
+- **검증**: public view 라우터 단위 테스트 6 passed, repo 통합 테스트 2 passed,
+  `ruff check .`, targeted mypy, OpenAPI drift check, user-client type-check 통과.
+
 ## 2026-06-12 (claude) — T-212e: 표준데이터 한국 경계 밖 좌표 격리 (#386 패턴)
 
 핀 범프(#393) 후 주차장 재실행이 **다른 불량 row 클래스**로 재실패(run

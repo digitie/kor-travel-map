@@ -1174,6 +1174,126 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/public/beaches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Public Beaches
+         * @description 해수욕장 공개 목록 view.
+         */
+        get: operations["list_public_beaches_v1_public_beaches_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/public/beaches/map-markers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Public Beach Markers
+         * @description 해수욕장 공개 지도 marker layer.
+         */
+        get: operations["list_public_beach_markers_v1_public_beaches_map_markers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/public/beaches/{feature_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Public Beach
+         * @description 해수욕장 공개 상세 view.
+         */
+        get: operations["get_public_beach_v1_public_beaches__feature_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/public/festivals/map-markers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Public Festival Markers
+         * @description 축제 공개 지도 marker layer.
+         */
+        get: operations["list_public_festival_markers_v1_public_festivals_map_markers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/public/festivals/monthly": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Public Festivals Monthly
+         * @description 월별 활성 축제 공개 view.
+         */
+        get: operations["list_public_festivals_monthly_v1_public_festivals_monthly_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/public/festivals/{feature_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Public Festival
+         * @description 축제 공개 상세 view.
+         */
+        get: operations["get_public_festival_v1_public_festivals__feature_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/version": {
         parameters: {
             query?: never;
@@ -2223,6 +2343,71 @@ export interface components {
              * @enum {string}
              */
             type: "bbox";
+        };
+        /**
+         * BeachPublicView
+         * @description 해수욕장 공개 상세/목록 view.
+         */
+        BeachPublicView: {
+            /** Address */
+            address: {
+                [key: string]: unknown;
+            };
+            /** Beach Kind */
+            beach_kind?: string | null;
+            /** Beach Length M */
+            beach_length_m?: number | null;
+            /** Beach Material */
+            beach_material?: string | null;
+            /** Beach Width M */
+            beach_width_m?: number | null;
+            /** Display Name */
+            display_name: string;
+            /** Emergency Contact */
+            emergency_contact?: string | null;
+            /** Feature Id */
+            feature_id: string;
+            /** Homepage Url */
+            homepage_url?: string | null;
+            /** Image Url */
+            image_url?: string | null;
+            /** Jibun Address */
+            jibun_address?: string | null;
+            /** Lat */
+            lat?: number | null;
+            /** Latest Water Quality */
+            latest_water_quality?: {
+                [key: string]: unknown;
+            } | null;
+            /** Latest Weather */
+            latest_weather?: {
+                [key: string]: unknown;
+            } | null;
+            /** Legal Dong Code */
+            legal_dong_code?: string | null;
+            /** Lon */
+            lon?: number | null;
+            /** Marker Color */
+            marker_color?: string | null;
+            /** Marker Icon */
+            marker_icon?: string | null;
+            /** Road Address */
+            road_address?: string | null;
+            /** Sido Code */
+            sido_code?: string | null;
+            /** Sigungu Code */
+            sigungu_code?: string | null;
+            /** Source Providers */
+            source_providers: string[];
+            /** Upcoming Index Forecasts */
+            upcoming_index_forecasts?: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
         };
         /** Body_create_offline_upload_request_v1_admin_offline_uploads_post */
         Body_create_offline_upload_request_v1_admin_offline_uploads_post: {
@@ -3284,6 +3469,70 @@ export interface components {
         FeaturesNearbyResponse: {
             data: components["schemas"]["FeaturesNearbyData"];
             meta: components["schemas"]["Meta"];
+        };
+        /**
+         * FestivalPublicView
+         * @description 축제 공개 상세/목록 view.
+         */
+        FestivalPublicView: {
+            /** Address */
+            address: {
+                [key: string]: unknown;
+            };
+            /** Auspc Instt Name */
+            auspc_instt_name?: string | null;
+            /** Event End Date */
+            event_end_date?: string | null;
+            /** Event Start Date */
+            event_start_date?: string | null;
+            /**
+             * Event Status
+             * @enum {string}
+             */
+            event_status: "scheduled" | "ongoing" | "ended" | "unknown";
+            /** Feature Id */
+            feature_id: string;
+            /** Festival Content */
+            festival_content?: string | null;
+            /** Festival Name */
+            festival_name: string;
+            /** Homepage Url */
+            homepage_url?: string | null;
+            /** Jibun Address */
+            jibun_address?: string | null;
+            /** Lat */
+            lat?: number | null;
+            /** Lon */
+            lon?: number | null;
+            /** Marker Color */
+            marker_color?: string | null;
+            /** Marker Icon */
+            marker_icon?: string | null;
+            /** Organizer Name */
+            organizer_name?: string | null;
+            /** Phone Number */
+            phone_number?: string | null;
+            /** Provider Org Name */
+            provider_org_name?: string | null;
+            /** Reference Date */
+            reference_date?: string | null;
+            /** Road Address */
+            road_address?: string | null;
+            /** Sido Code */
+            sido_code?: string | null;
+            /** Sigungu Code */
+            sigungu_code?: string | null;
+            /** Source Providers */
+            source_providers: string[];
+            /** Suprt Instt Name */
+            suprt_instt_name?: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Venue Name */
+            venue_name?: string | null;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -4621,6 +4870,30 @@ export interface components {
             meta: components["schemas"]["Meta"];
         };
         /**
+         * PublicBeachDetailResponse
+         * @description ``GET /public/beaches/{feature_id}`` 응답.
+         */
+        PublicBeachDetailResponse: {
+            data: components["schemas"]["BeachPublicView"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * PublicBeachListData
+         * @description 해수욕장 공개 목록 data payload.
+         */
+        PublicBeachListData: {
+            /** Items */
+            items: components["schemas"]["BeachPublicView"][];
+        };
+        /**
+         * PublicBeachListResponse
+         * @description ``GET /public/beaches`` 응답.
+         */
+        PublicBeachListResponse: {
+            data: components["schemas"]["PublicBeachListData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
          * PublicFeatureListData
          * @description public feature 목록 data payload.
          *
@@ -4637,11 +4910,92 @@ export interface components {
             items: components["schemas"]["FeatureSummary"][];
         };
         /**
+         * PublicFestivalDetailResponse
+         * @description ``GET /public/festivals/{feature_id}`` 응답.
+         */
+        PublicFestivalDetailResponse: {
+            data: components["schemas"]["FestivalPublicView"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * PublicFestivalMonth
+         * @description 월별 축제 count summary.
+         */
+        PublicFestivalMonth: {
+            /** Count */
+            count: number;
+            /** Month */
+            month: number;
+            /** Year */
+            year: number;
+        };
+        /**
+         * PublicFestivalMonthlyData
+         * @description 월별 축제 공개 목록 data payload.
+         */
+        PublicFestivalMonthlyData: {
+            /** Items */
+            items: components["schemas"]["FestivalPublicView"][];
+            /** Months */
+            months: components["schemas"]["PublicFestivalMonth"][];
+        };
+        /**
+         * PublicFestivalMonthlyResponse
+         * @description ``GET /public/festivals/monthly`` 응답.
+         */
+        PublicFestivalMonthlyResponse: {
+            data: components["schemas"]["PublicFestivalMonthlyData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
          * PublicHealthResponse
          * @description ``GET /health`` 응답 (liveness).
          */
         PublicHealthResponse: {
             data: components["schemas"]["HealthData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * PublicMapMarker
+         * @description 공개 지도 layer marker 1건.
+         */
+        PublicMapMarker: {
+            /** Feature Id */
+            feature_id: string;
+            /** Lat */
+            lat: number;
+            /** Lon */
+            lon: number;
+            /** Name */
+            name: string;
+            /** Sigungu Code */
+            sigungu_code?: string | null;
+        };
+        /**
+         * PublicMapMarkerLayerData
+         * @description 공개 지도 layer marker data payload.
+         */
+        PublicMapMarkerLayerData: {
+            /** Display Name */
+            display_name: string;
+            /** Items */
+            items: components["schemas"]["PublicMapMarker"][];
+            /**
+             * Layer Key
+             * @enum {string}
+             */
+            layer_key: "beach" | "festival";
+            /** Marker Color */
+            marker_color: string;
+            /** Marker Icon */
+            marker_icon: string;
+        };
+        /**
+         * PublicMapMarkerLayerResponse
+         * @description 공개 지도 layer marker 응답.
+         */
+        PublicMapMarkerLayerResponse: {
+            data: components["schemas"]["PublicMapMarkerLayerData"];
             meta: components["schemas"]["Meta"];
         };
         /**
@@ -7693,6 +8047,219 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_public_beaches_v1_public_beaches_get: {
+        parameters: {
+            query?: {
+                sido_code?: string | null;
+                sigungu_code?: string | null;
+                q?: string | null;
+                page_size?: number;
+                cursor?: string | null;
+                include_quality?: boolean;
+                include_forecast?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicBeachListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_public_beach_markers_v1_public_beaches_map_markers_get: {
+        parameters: {
+            query?: {
+                min_lon?: number | null;
+                min_lat?: number | null;
+                max_lon?: number | null;
+                max_lat?: number | null;
+                sido_code?: string | null;
+                sigungu_code?: string | null;
+                max_items?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicMapMarkerLayerResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_public_beach_v1_public_beaches__feature_id__get: {
+        parameters: {
+            query?: {
+                include_quality?: boolean;
+                include_forecast?: boolean;
+            };
+            header?: never;
+            path: {
+                feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicBeachDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_public_festival_markers_v1_public_festivals_map_markers_get: {
+        parameters: {
+            query?: {
+                year?: number | null;
+                month?: number | null;
+                min_lon?: number | null;
+                min_lat?: number | null;
+                max_lon?: number | null;
+                max_lat?: number | null;
+                max_items?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicMapMarkerLayerResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_public_festivals_monthly_v1_public_festivals_monthly_get: {
+        parameters: {
+            query?: {
+                year?: number | null;
+                month?: number | null;
+                sido_code?: string | null;
+                sigungu_code?: string | null;
+                page_size?: number;
+                cursor?: string | null;
+                include_months?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicFestivalMonthlyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_public_festival_v1_public_festivals__feature_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicFestivalDetailResponse"];
+                };
             };
             /** @description Validation Error */
             422: {

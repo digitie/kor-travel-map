@@ -19,9 +19,12 @@
         `docs/public-views-api.md`.
     - [x] T-222a — T-130 차단 해소용 API 사양 초안 작성(2026-06-11): `/v1/public/beaches*`,
           `/v1/public/festivals*`, 스키마, category drift, KHOA index/축제 월별 집계 결정점.
-    - [ ] T-222b — krtour-map 백엔드/OpenAPI/user-client 구현. 해수욕장 `place_kind=beach`
-          기준, category `01050100` 문서 vs `01020300` 코드 drift 정리, KHOA 폭/길이/재질
-          변환 보강 여부 결정.
+    - [x] T-222b — krtour-map 백엔드/OpenAPI/user-client 구현(2026-06-12, Codex).
+          `/v1/public/beaches*`, `/v1/public/festivals*`를 추가하고 user OpenAPI와
+          `@krtour/map-user-client` 타입을 재생성했다. 해수욕장은
+          `detail.place_kind='beach'`를 1차 판별로 쓰며, KHOA provider category
+          `01020300`은 보조 정보로 유지한다. 폭/길이/재질은 nullable projection,
+          수질/index/weather는 null/빈 배열 후속 보강으로 정리했다.
     - [ ] T-222c — TripMate T-130 소비 문서/픽스처 동기화. TripMate `/public/*`는
           krtour `openapi.user.json`에 표면이 들어간 뒤 구현.
   - [ ] T-223 — **curated_features + TripMate curated_trip_plans import 계약/구현**.
@@ -61,6 +64,12 @@
           GitHub repo 표시명, generated client/TripMate 문서, examples/snippets,
           `import kortravel as kt` quickstart와 migration guide를 갱신한다.
 - **최근 완료**
+  - [x] **T-222b — 공개 해수욕장/축제 뷰 API 구현. 완료(2026-06-12, Codex)**:
+        `public_views_repo`와 `/v1/public/beaches*`, `/v1/public/festivals*` 라우터를
+        추가하고 admin/user OpenAPI, `@krtour/map-user-client` 타입을 갱신했다.
+        category drift는 `place_kind='beach'` 1차 판별로 닫고, 축제 monthly는
+        기간 겹침 + 전월/당월/익월 summary로 구현했다. 다음 krtour-map 내부 작업은
+        T-223이며, TripMate 소비 측 동기화는 T-222c로 남긴다.
   - [x] **T-221 — admin UI/UX 시나리오 연결성 + 실시간성 보강. 완료
         (2026-06-12, Codex)**: feature 상세/수동 작성(T-221a), import job 상세·event·cancel
         (T-221b), `WS /v1/ops/live` signal channel(T-221c), provider 상세/refresh policy

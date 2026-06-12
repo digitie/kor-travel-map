@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### 공개 해수욕장/축제 view API (T-222b, 2026-06-12)
+
+- **ADDED**: `GET /v1/public/beaches`, `/v1/public/beaches/map-markers`,
+  `/v1/public/beaches/{feature_id}` — 해수욕장 공개 목록/지도/상세 view.
+- **ADDED**: `GET /v1/public/festivals/monthly`,
+  `/v1/public/festivals/map-markers`, `/v1/public/festivals/{feature_id}` —
+  월별 축제 공개 목록/지도/상세 view.
+- **CHANGED**: `openapi.user.json`과 `@krtour/map-user-client` 생성 타입에
+  `BeachPublicView`/`FestivalPublicView` 공개 view schema와 경로를 포함했다.
+
 ### Ops logs job event 연결 + debug 재판정 (T-221e, 2026-06-12)
 
 - **ADDED**: `GET /v1/ops/import-job-events` — `job_id`/`provider`/`dataset_key`/

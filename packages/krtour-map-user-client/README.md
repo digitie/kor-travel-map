@@ -9,6 +9,8 @@ ADR-048/T-216g 기계 정본)에서 `openapi-typescript`로 생성한 **TypeScri
   `docs/tripmate-rest-api.md`.
 - **npm 게시 안 함**(ADR-043 관행) — 산출물(`src/types.ts`)을 커밋하고 CI drift
   gate(`gen:types:check`)로 spec과 고정한다.
+- T-222b부터 `BeachPublicView`/`FestivalPublicView`와 `/v1/public/*` 공개 해수욕장·
+  축제 view 경로를 named alias와 compile-time 경로 단언에 포함한다.
 
 ## 소비 방법 (downstream)
 
