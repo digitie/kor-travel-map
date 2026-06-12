@@ -459,7 +459,7 @@ WITH candidates AS (
     WHERE deleted_at IS NULL
       AND (
         CAST(:q AS text) IS NULL
-        OR name % CAST(:q AS text)
+        OR name OPERATOR(x_extension.%) CAST(:q AS text)
       )
       AND (
         CAST(:bbox_enabled AS boolean) IS FALSE
@@ -496,7 +496,7 @@ WITH name_candidates AS MATERIALIZED (
         deleted_at,
         x_extension.similarity(name, CAST(:q AS text)) AS score
     FROM feature.features
-    WHERE name % CAST(:q AS text)
+    WHERE name OPERATOR(x_extension.%) CAST(:q AS text)
 ),
 candidates AS (
     SELECT
