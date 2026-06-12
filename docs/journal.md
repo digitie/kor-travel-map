@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-12 (claude) — T-212e: 공간 연산자 스키마 qualify — live 500 수정
+
+T-212e live P99 측정에서 `/features/in-bounds`·`/features/search`가
+`UndefinedFunctionError: operator does not exist: x_extension.geometry &&
+x_extension.geometry`로 **500**. 원인: PostGIS가 `x_extension` 스키마인데
+live docker DB의 search_path는 postgis 이미지 기본값(`public, topology,
+tiger`)이라 **연산자**가 미해석 — 함수는 `x_extension.ST_*`로 qualify해 왔지만
+연산자(`&&`/`<->`)는 누락(통합 테스트 conftest가 `SET search_path = public,
+x_extension`을 명시 세팅해 CI에서는 가려짐). infra 4파일 12곳을
+`OPERATOR(x_extension.&&)`/`OPERATOR(x_extension.<->)`로 교체 — DB search_path
+구성과 무관하게 동작(repo의 명시-qualify 정책 완성). live 검증: 서울 bbox
+94,431건 정상 조회.
+
 ## 2026-06-12 (claude) — fix: frontend Docker 빌드에 NEXT_PUBLIC_KRADDR_GEO_BASE_URL 누락
 
 T-221b(#403 좌표 picker)가 `/admin/features/new`를 prerender 시점 fail-fast로

@@ -321,7 +321,7 @@ WHERE (CAST(:status AS text) IS NULL OR status = CAST(:status AS text))
         SELECT 1
         FROM feature.features AS f
         WHERE f.feature_id = data_integrity_violations.feature_id
-          AND f.coord && x_extension.ST_MakeEnvelope(
+          AND f.coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
               CAST(:bbox_min_lon AS double precision),
               CAST(:bbox_min_lat AS double precision),
               CAST(:bbox_max_lon AS double precision),

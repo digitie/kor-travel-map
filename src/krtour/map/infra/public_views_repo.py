@@ -233,7 +233,7 @@ WHERE {_PUBLIC_BEACH_BASE_WHERE_SQL}
   AND f.coord IS NOT NULL
   AND (
     NOT CAST(:bbox_enabled AS boolean)
-    OR f.coord && x_extension.ST_MakeEnvelope(
+    OR f.coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
         CAST(:min_lon AS double precision),
         CAST(:min_lat AS double precision),
         CAST(:max_lon AS double precision),
@@ -338,7 +338,7 @@ WHERE {_PUBLIC_FESTIVAL_BASE_WHERE_SQL}
   AND f.coord IS NOT NULL
   AND (
     NOT CAST(:bbox_enabled AS boolean)
-    OR f.coord && x_extension.ST_MakeEnvelope(
+    OR f.coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
         CAST(:min_lon AS double precision),
         CAST(:min_lat AS double precision),
         CAST(:max_lon AS double precision),

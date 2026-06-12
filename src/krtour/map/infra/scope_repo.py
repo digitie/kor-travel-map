@@ -217,7 +217,7 @@ WHERE f.deleted_at IS NULL
         i.pt,
         CAST(:radius_m AS double precision)
       )
-ORDER BY f.coord_5179 <-> i.pt, f.feature_id
+ORDER BY f.coord_5179 OPERATOR(x_extension.<->) i.pt, f.feature_id
 LIMIT CAST(:limit AS integer)
 """
 
@@ -311,7 +311,7 @@ SELECT f.feature_id, f.sigungu_code
 FROM feature.features AS f
 WHERE f.deleted_at IS NULL
   AND f.coord IS NOT NULL
-  AND f.coord && x_extension.ST_MakeEnvelope(
+  AND f.coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
         CAST(:min_lon AS double precision),
         CAST(:min_lat AS double precision),
         CAST(:max_lon AS double precision),
@@ -327,7 +327,7 @@ SELECT count(*)::int
 FROM feature.features AS f
 WHERE f.deleted_at IS NULL
   AND f.coord IS NOT NULL
-  AND f.coord && x_extension.ST_MakeEnvelope(
+  AND f.coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
         CAST(:min_lon AS double precision),
         CAST(:min_lat AS double precision),
         CAST(:max_lon AS double precision),
@@ -342,7 +342,7 @@ WITH matched AS (
     FROM feature.features AS f
     WHERE f.deleted_at IS NULL
       AND f.coord IS NOT NULL
-      AND f.coord && x_extension.ST_MakeEnvelope(
+      AND f.coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
             CAST(:min_lon AS double precision),
             CAST(:min_lat AS double precision),
             CAST(:max_lon AS double precision),
@@ -367,7 +367,7 @@ FROM feature.features AS f
 WHERE f.deleted_at IS NULL
   AND f.coord IS NOT NULL
   AND f.sigungu_code IS NOT NULL
-  AND f.coord && x_extension.ST_MakeEnvelope(
+  AND f.coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
         CAST(:min_lon AS double precision),
         CAST(:min_lat AS double precision),
         CAST(:max_lon AS double precision),
