@@ -77,6 +77,8 @@ function invalidateLiveTopic(queryClient: QueryClient, topic: string) {
     });
     void queryClient.invalidateQueries({ queryKey: ["import-jobs"] });
     void queryClient.invalidateQueries({ queryKey: ["ops", "metrics"] });
+    void queryClient.invalidateQueries({ queryKey: ["providers"] });
+    void queryClient.invalidateQueries({ queryKey: ["ops-providers"] });
     return;
   }
   if (topic.startsWith("feature_update_request:")) {
@@ -89,6 +91,8 @@ function invalidateLiveTopic(queryClient: QueryClient, topic: string) {
     void queryClient.invalidateQueries({
       queryKey: ["feature-update-requests"],
     });
+    void queryClient.invalidateQueries({ queryKey: ["providers"] });
+    void queryClient.invalidateQueries({ queryKey: ["ops-providers"] });
     return;
   }
   if (topic === "offline_uploads") {

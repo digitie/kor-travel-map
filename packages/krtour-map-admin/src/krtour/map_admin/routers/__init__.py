@@ -38,6 +38,9 @@ from krtour.map_admin.routers.ops_logs import router as ops_logs_router
 from krtour.map_admin.routers.poi_cache_targets import (
     router as poi_cache_targets_router,
 )
+from krtour.map_admin.routers.provider_refresh_policies import (
+    router as provider_refresh_policies_router,
+)
 from krtour.map_admin.routers.providers import router as providers_router
 from krtour.map_admin.routers.public_status import router as public_status_router
 
@@ -51,6 +54,7 @@ __all__ = [
     "enrichment_review_router",
     "feature_update_requests_router",
     "poi_cache_targets_router",
+    "provider_refresh_policies_router",
     "features_router",
     "categories_router",
     "mois_detail_router",

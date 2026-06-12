@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### Provider 상세/refresh policy 연결 (T-221d, 2026-06-12)
+
+- **ADDED**: `GET /v1/ops/providers`, `GET /v1/ops/providers/{provider}` —
+  provider×dataset sync state, cursor(ops 상세 전용), refresh policy, 최근
+  `provider_dataset` update request 링크를 묶는 운영 상세 API.
+- **ADDED**: `GET/PUT /v1/admin/provider-refresh-policies*` — provider별 refresh
+  interval/rate-limit/source policy 편집 API와 admin UI 편집 패널.
+- **ADDED**: admin frontend `/ops/providers`에서 dataset 상세, 정책 편집,
+  `provider_dataset` update request 생성/상세 이동을 한 화면에서 처리한다.
+
 ### Admin live signal channel (T-221c, 2026-06-12)
 
 - **ADDED**: `WS /v1/ops/live` — `import_jobs`, `import_job:{job_id}`,

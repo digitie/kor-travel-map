@@ -379,6 +379,28 @@ async def test_list_update_requests_filters_by_scope_provider_dataset_and_time(
 
     assert [item.request_id for item in page.items] == [target.request_id]
 
+    provider_dataset = await enqueue_feature_update_request(
+        migrated_session,
+        scope={
+            "type": "provider_dataset",
+            "provider": "python-c-api",
+            "dataset_key": "dataset-c",
+        },
+    )
+    assert isinstance(provider_dataset, FeatureUpdateRequest)
+
+    provider_dataset_page = await list_update_requests(
+        migrated_session,
+        scope_type="provider_dataset",
+        provider="python-c-api",
+        dataset_key="dataset-c",
+        limit=10,
+    )
+
+    assert [item.request_id for item in provider_dataset_page.items] == [
+        provider_dataset.request_id
+    ]
+
 
 async def test_invalid_cursor_raises(migrated_session: AsyncSession) -> None:
     with pytest.raises(ValueError, match="invalid feature update request cursor"):

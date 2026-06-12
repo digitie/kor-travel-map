@@ -220,19 +220,19 @@ PID를 종료한 뒤 WSL frontend를 다시 띄운다. 정상은 `wslrelay`다.
 | `/admin/issues` | `/v1/admin/issues`, `/v1/admin/issues/{issue_id}` | 구현됨. 이슈 목록/상세, resolve/ignore/reopen/retry/apply/manual override |
 | `/ops/import-jobs` | `/v1/ops/import-jobs`, `WS /v1/ops/live` | 구현됨. 작업 큐 상태, status/kind/batch/parent filter, live invalidate |
 | `/ops/import-jobs/[job_id]` | `/v1/ops/import-jobs/{job_id}`, `/v1/ops/import-jobs/{job_id}/events`, `/v1/ops/import-jobs/{job_id}/cancel`, `WS /v1/ops/live` | 구현됨. 상세/payload/event timeline/cancel/관련 링크/live invalidate |
+| `/ops/providers` | `/v1/ops/providers`, `/v1/ops/providers/{provider}`, `/v1/admin/provider-refresh-policies*`, `/v1/admin/feature-update-requests` | 구현됨. provider×dataset sync/detail, cursor, 최근 provider_dataset request, policy 편집/요청 생성 |
 | `/ops/consistency` | `/v1/ops/metrics`, `/v1/ops/consistency/reports`, `/v1/ops/consistency/issues` | 구현됨. 정합성 보고서/이슈 |
 | `/ops/logs` | `/v1/ops/system-logs`, `/v1/ops/api-call-logs` | 구현됨. system log와 opt-in API call log 조회 |
 | `/admin/dedup-reviews` | `/v1/admin/dedup-reviews` | 구현됨. dedup 검토 큐와 결정 mutation |
 | `/admin/enrichment-reviews` | `/v1/admin/enrichment-reviews` | 구현됨. enrichment 검토 큐와 결정 mutation |
 | `/admin/feature-update-requests` | `/v1/admin/feature-update-requests` | 구현됨. 좌표/반경/provider 업데이트 큐잉, cancel, run-now |
+| `/admin/feature-update-requests/[request_id]` | `/v1/admin/feature-update-requests/{request_id}`, `WS /v1/ops/live` | 구현됨. scope/matched_scope/job/Dagster 상세, cancel/run-now |
 | `/admin/poi-cache-targets` | `/v1/admin/poi-cache-targets`, `/v1/features/nearby/by-target` | 구현됨. 외부 POI key 기반 주변 feature 캐시 |
 | `/admin/dagster` | `/v1/ops/dagster/summary`, `/v1/ops/dagster/runs/{run_id}`, `/v1/ops/dagster/nux-seen` | 구현됨. Dagster 운영 요약 + tick/run 실패 드릴다운 + Dagster webserver embed |
 | `/etl` | `/v1/debug/etl/*` | 구현됨. fixture/live ETL preview |
 | `/admin/features/new` | `/v1/admin/features`, `/v1/features/nearby`, kraddr-geo REST v2 | 구현됨. 수동 feature 작성 change request + 지도 좌표/geocode/reverse/중복 후보 |
 | `/features/[id]` | `/v1/features/{id}`, `/v1/admin/features/{id}`, `/v1/features/{id}/weather`, `/v1/features/nearby` | 구현됨. feature 상세/source/raw/issues/history/files/weather/nearby |
-| `/admin/providers` | 없음 | 후속. 별도 provider REST 없음 |
 | `/admin/offline-uploads` | `/admin/offline-uploads`, `/admin/offline-uploads/{upload_id}/load` | 구현됨. JSON/JSONL upload/list/detail + Dagster load launch. CSV/TSV wizard는 후속 |
-| `/admin/provider-refresh-policies` | 없음 | 후속. provider policy REST 필요 |
 | `/ops/error-logs` | 없음 | 후속. 일반 error log 화면은 미구현. job event는 `/ops/import-jobs/[job_id]`에서 조회 |
 | `/debug/explain` | 없음 | 후속. SQL EXPLAIN viewer |
 | `/debug/fixtures` | 없음 | 후속. fixture 저장/replay |

@@ -143,15 +143,15 @@ Frontend 작업 후에는 `react-doctor` 실행, 결과 검토, 개선 반영이
 `/admin/dagster`, `/ops/import-jobs`, `/ops/import-jobs/[job_id]`, `/ops/providers`,
 `/ops/consistency`, `/ops/logs`다.
 
-남은 핵심은 새 목록 추가보다 **provider 상세 추적**이다.
+남은 핵심은 새 목록 추가보다 **logs/explain/fixtures 재판정**이다.
 
 - `WS /v1/ops/live`는 T-221c에서 구현됐다. job/request/upload/run topic을
   snapshot revision signal로 전송하고, frontend는 관련 query를 즉시 invalidate한다.
+- `/ops/providers`: T-221d에서 provider/dataset 상세, sync cursor(ops 상세 전용),
+  최근 `provider_dataset` update request 링크, refresh policy 편집 UI를 연결했다.
+  중복 `/admin/providers/{provider}/datasets/{dataset_key}/runs`는 만들지 않는다.
 - `/ops/logs`: system/API log는 구현됐고 job event는 import job 상세에 붙었다.
   운영자가 provider 실패를 한 화면에서 훑는 일반 error/event log는 후속 판단 대상이다.
-- `/ops/providers`: provider freshness list는 구현됐지만 provider/dataset 상세, refresh
-  policy, provider_dataset update request 상세 링크가 필요하다. 중복
-  `/admin/providers/{provider}/datasets/{dataset_key}/runs`는 만들지 않는다.
 
 ## 5. 공통 UX 규칙
 
@@ -588,148 +588,88 @@ Route: `/features/[feature_id]`
 - sort: `name`, `distance`, `kind`, `category`, `status`, `provider`, `updated_at`.
 - row action: 상세 열기, dedup 후보로 추가, keep separate 표시.
 
-## 11. Provider 상태와 강제 호출
+## 11. Provider 상태와 refresh policy
 
-### 11.1 Provider 목록
+### 11.1 Provider 목록/상세
 
-Route: `/admin/providers`
+Route: `/ops/providers`
 
-#### `GET /admin/providers`
+#### `GET /ops/providers`
 
-provider별 요약 상태.
+provider×dataset별 sync state와 refresh policy 요약.
 
 응답 item:
 
 ```json
 {
   "provider": "python-mois-api",
-  "display_name": "MOIS 인허가",
+  "dataset_key": "mois_license_features_bulk",
+  "sync_scope": "default",
   "status": "active",
-  "datasets_total": 4,
-  "datasets_failed": 1,
   "last_success_at": "2026-06-01T02:10:00+09:00",
   "last_failure_at": "2026-06-01T04:11:00+09:00",
   "consecutive_failures": 2,
   "next_run_after": "2026-06-02T02:00:00+09:00",
-  "running_jobs": 1,
-  "pending_jobs": 0,
-  "open_issues": 182,
-  "pending_dedup_reviews": 391,
-  "required_secret_status": "missing"
+  "refresh_policy": {
+    "source_kind": "openapi",
+    "targeted_policy": "allow_targeted",
+    "min_interval_seconds": 60,
+    "max_requests_per_minute": 60,
+    "max_concurrent": 1
+  }
 }
 ```
 
-`required_secret_status`는 값을 노출하지 않는다.
+`GET /providers` 사용자 표면은 cursor를 숨긴다. `GET /ops/providers/{provider}`는
+운영 상세 표면이므로 dataset별 `sync_states[].cursor`, refresh policy, 최근
+`provider_dataset` update request summary와 관련 link를 포함한다.
 
-- `ok`: 필요한 key가 설정됨.
-- `missing`: 필요한 key 없음.
-- `not_required`: keyless provider.
-- `unknown`: 아직 provider metadata 없음.
+### 11.2 Provider refresh policy
 
-### 11.2 Provider 상세
+Route: `/admin/provider-refresh-policies`
 
-Route: `/admin/providers/[provider]`
+#### `GET /admin/provider-refresh-policies`
 
-섹션:
+provider/dataset별 policy 목록. query `provider`, `enabled`, `limit`을 지원한다.
 
-- provider metadata
-- dataset별 sync state
-- 최근 import jobs
-- 최근 API error logs
-- 최근 source row count
-- 결측/중복/정합성 issue summary
-- 강제 실행 form
+#### `GET /admin/provider-refresh-policies/{provider}/{dataset_key}`
 
-#### `GET /admin/providers/{provider}`
+단건 policy 조회. 없으면 404.
 
-응답에는 dataset별 `ProviderSyncState`를 포함한다.
+#### `PUT /admin/provider-refresh-policies/{provider}/{dataset_key}`
+
+full upsert. `system_interval_seconds`/`optimal_interval_seconds`는
+`min_interval_seconds`와 선언된 request/min/hour/day rate-limit floor보다 짧을 수 없다.
+
+### 11.3 Provider dataset 갱신 요청
+
+중복 실행 endpoint인 `POST /admin/providers/{provider}/datasets/{dataset_key}/runs`는
+구현하지 않는다. provider/dataset 직접 갱신은 feature update request의
+`provider_dataset` scope를 사용한다.
 
 ```json
 {
-  "data": {
+  "scope": {
+    "type": "provider_dataset",
     "provider": "python-mois-api",
-    "datasets": [
-      {
-        "dataset_key": "mois_license_features_bulk",
-        "sync_scope": "kr",
-        "status": "active",
-        "cursor": {},
-        "last_success_at": null,
-        "last_failure_at": null,
-        "consecutive_failures": 0,
-        "next_run_after": null,
-        "last_job": null,
-        "last_counts": {
-          "fetched": 0,
-          "loaded": 0,
-          "skipped_invalid": 0,
-          "dedup_candidates": 0,
-          "missing_required": 0
-        }
-      }
-    ]
+    "dataset_key": "mois_license_features_bulk",
+    "sync_scope": "kr"
   },
-  "meta": {"duration_ms": 12}
-}
-```
-
-### 11.3 Provider 강제 호출 및 적재
-
-#### `POST /admin/providers/{provider}/datasets/{dataset_key}/runs`
-
-provider를 즉시 실행한다. preview, dry-run, load를 모두 이 endpoint에서 job으로
-등록한다.
-
-요청:
-
-```json
-{
-  "mode": "load",
-  "source": "live",
-  "sync_scope": "kr",
-  "params": {
-    "limit": 1000,
-    "sigungu_code": "11110"
-  },
-  "force": true,
+  "providers": ["python-mois-api"],
+  "dataset_keys": ["mois_license_features_bulk"],
+  "run_mode": "queued",
   "operator": "local-admin",
-  "reason": "MOIS 첫 bulk 샘플 적재"
-}
-```
-
-필드:
-
-| 이름 | 값 | 설명 |
-|------|----|------|
-| `mode` | `preview`, `dry_run`, `load` | preview는 변환 결과만, dry_run은 검증/중복까지, load는 DB 적재 |
-| `source` | `live`, `fixture`, `offline` | live는 provider API, fixture는 저장 fixture, offline은 업로드 파일 |
-| `sync_scope` | string | provider_sync_state PK scope |
-| `params` | object | provider dataset별 파라미터 |
-| `force` | boolean | next_run_after와 failure backoff 무시 |
-| `operator` | string | 감사용 표시명. 보안 식별자 아님 |
-| `reason` | string | 강제 실행 사유 |
-
-응답:
-
-```json
-{
-  "data": {
-    "job_id": "c2ef3a84-...",
-    "state": "queued",
-    "status_url": "/ops/import-jobs/c2ef3a84-..."
-  },
-  "meta": {"duration_ms": 9}
+  "reason": "provider dataset refresh"
 }
 ```
 
 처리 규칙:
 
-- `mode=load`와 `source=live`는 advisory lock 대상이다.
-- lock key 예: `krtour-map:import:python-mois-api:mois_license_features_bulk:kr`.
-- 같은 provider/dataset/scope의 running job이 있으면 409를 반환한다.
-- `force=true`는 schedule/backoff만 무시한다. advisory lock은 무시하지 않는다.
+- 응답은 `FeatureUpdateRequestRecord` envelope다.
+- 생성된 request의 `job_id`는 `/ops/import-jobs/{job_id}`에서 진행 상태를 본다.
+- request 상세는 `/admin/feature-update-requests/{request_id}`에서 확인한다.
+- 같은 scope 동시 실행은 feature update request의 advisory lock과 queue 처리 규칙을 따른다.
 - provider client 호출은 provider 라이브러리 public API를 직접 사용한다.
-- raw row, 변환 bundle, validation issue, dedup 후보 count를 job summary에 남긴다.
 
 ## 12. Import job 진행 상태
 
@@ -1595,7 +1535,7 @@ Mutation 후 invalidation:
 |----------|------------|
 | feature 생성 | `admin-features`, `features`, `feature-detail` |
 | feature 비활성화/삭제 | `admin-features`, `features`, `feature-detail`, `issue-features` |
-| provider run 생성 | `import-jobs`, `provider`, `providers`, `dashboard` |
+| provider_dataset update request 생성 | `feature-update-requests`, `import-jobs`, `providers`, `dashboard` |
 | job cancel | `import-job`, `import-jobs`, `dashboard` |
 | dedup decision | `dedup-review`, `feature-detail`, `issue-features`, `admin-features` |
 | issue resolve/ignore | `issue-features`, `feature-detail`, `dashboard` |

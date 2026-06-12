@@ -619,6 +619,25 @@ feature update request는 운영자가 쓰기 쉬운 높은 수준 API다.
 
 결과적으로 `ops.import_jobs`와 Dagster run을 사용한다.
 
+T-221d 구현 상태:
+
+- `GET /ops/providers`: provider×dataset×scope sync state와
+  `ops.provider_refresh_policies` 요약을 함께 반환한다. 사용자 표면 `GET /providers`와
+  달리 ops 전용 next_run/policy link를 포함하되 cursor는 목록에서 숨긴다.
+- `GET /ops/providers/{provider}`: provider별 dataset 상세. 이 endpoint는 ops 전용이라
+  `sync_states[].cursor`, refresh policy, 최근 `provider_dataset` update request summary,
+  관련 link를 포함한다.
+- `GET /admin/provider-refresh-policies`: query `provider`, `enabled`, `limit`으로 policy
+  목록을 반환한다.
+- `GET /admin/provider-refresh-policies/{provider}/{dataset_key}`: policy 단건 조회.
+- `PUT /admin/provider-refresh-policies/{provider}/{dataset_key}`: policy full upsert.
+  `system_interval_seconds`/`optimal_interval_seconds`는 `min_interval_seconds`와
+  선언된 request/min/hour/day floor보다 짧을 수 없다.
+
+`GET /admin/feature-update-requests`의 `provider`/`dataset_key` filter는
+`providers`/`dataset_keys` JSON array뿐 아니라 `scope.type='provider_dataset'`의
+`scope.provider`/`scope.dataset_key`도 매칭한다.
+
 ## 7.1 Ops 조회 API
 
 T-207d 구현 상태: `krtour-map-admin`은 운영 화면이 필요한 DB 기반 summary와 목록을

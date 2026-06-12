@@ -72,6 +72,14 @@ function fetchFeatureUpdateRequests(
   );
 }
 
+function fetchFeatureUpdateRequest(
+  requestId: string,
+): Promise<FeatureUpdateRequestDetailResponse> {
+  return getJson<FeatureUpdateRequestDetailResponse>(
+    `/v1/admin/feature-update-requests/${encodeURIComponent(requestId)}`,
+  );
+}
+
 function createFeatureUpdateRequest(
   body: FeatureUpdateRequestCreateRequest,
 ): Promise<FeatureUpdateRequestCreateResponse> {
@@ -117,6 +125,19 @@ export function useFeatureUpdateRequests(
   });
 }
 
+export function useFeatureUpdateRequest(requestId: string | null) {
+  return useQuery<FeatureUpdateRequestDetailResponse, Error>({
+    queryKey: ["feature-update-request", requestId],
+    queryFn: () => fetchFeatureUpdateRequest(requestId as string),
+    enabled: Boolean(requestId),
+    refetchInterval: (query) => {
+      const status = query.state.data?.data.status;
+      return status && ["queued", "running"].includes(status) ? 2_000 : false;
+    },
+    staleTime: 5_000,
+  });
+}
+
 export function useCreateFeatureUpdateRequestMutation() {
   const queryClient = useQueryClient();
   return useMutation<
@@ -131,6 +152,8 @@ export function useCreateFeatureUpdateRequestMutation() {
       });
       void queryClient.invalidateQueries({ queryKey: ["import-jobs"] });
       void queryClient.invalidateQueries({ queryKey: ["ops", "metrics"] });
+      void queryClient.invalidateQueries({ queryKey: ["providers"] });
+      void queryClient.invalidateQueries({ queryKey: ["ops-providers"] });
     },
   });
 }
@@ -158,6 +181,8 @@ export function useCancelFeatureUpdateRequestMutation() {
       }
       void queryClient.invalidateQueries({ queryKey: ["import-jobs"] });
       void queryClient.invalidateQueries({ queryKey: ["ops", "metrics"] });
+      void queryClient.invalidateQueries({ queryKey: ["providers"] });
+      void queryClient.invalidateQueries({ queryKey: ["ops-providers"] });
     },
   });
 }
@@ -177,6 +202,8 @@ export function useRunFeatureUpdateRequestNowMutation() {
       });
       void queryClient.invalidateQueries({ queryKey: ["import-jobs"] });
       void queryClient.invalidateQueries({ queryKey: ["ops", "metrics"] });
+      void queryClient.invalidateQueries({ queryKey: ["providers"] });
+      void queryClient.invalidateQueries({ queryKey: ["ops-providers"] });
       if (data.data.request_id) {
         void queryClient.invalidateQueries({
           queryKey: ["feature-update-request", data.data.request_id],

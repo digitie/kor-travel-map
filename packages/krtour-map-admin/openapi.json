@@ -7817,6 +7817,399 @@
         "title": "OpsMetricsResponse",
         "type": "object"
       },
+      "OpsProviderDatasetDetail": {
+        "additionalProperties": false,
+        "description": "provider dataset 상세 추적 단위.",
+        "properties": {
+          "dataset_key": {
+            "title": "Dataset Key",
+            "type": "string"
+          },
+          "links": {
+            "items": {
+              "$ref": "#/components/schemas/OpsProviderLink"
+            },
+            "title": "Links",
+            "type": "array"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "recent_update_requests": {
+            "items": {
+              "$ref": "#/components/schemas/OpsProviderUpdateRequestSummary"
+            },
+            "title": "Recent Update Requests",
+            "type": "array"
+          },
+          "refresh_policy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProviderRefreshPolicyRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sync_states": {
+            "items": {
+              "$ref": "#/components/schemas/OpsProviderSyncStateDetail"
+            },
+            "title": "Sync States",
+            "type": "array"
+          }
+        },
+        "required": [
+          "provider",
+          "dataset_key",
+          "sync_states",
+          "recent_update_requests",
+          "links"
+        ],
+        "title": "OpsProviderDatasetDetail",
+        "type": "object"
+      },
+      "OpsProviderDatasetSummary": {
+        "additionalProperties": false,
+        "description": "``GET /ops/providers`` 목록의 1행.",
+        "properties": {
+          "consecutive_failures": {
+            "title": "Consecutive Failures",
+            "type": "integer"
+          },
+          "dataset_key": {
+            "title": "Dataset Key",
+            "type": "string"
+          },
+          "last_failure_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Failure At"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "links": {
+            "items": {
+              "$ref": "#/components/schemas/OpsProviderLink"
+            },
+            "title": "Links",
+            "type": "array"
+          },
+          "next_run_after": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Run After"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "refresh_policy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProviderRefreshPolicyRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "sync_scope": {
+            "title": "Sync Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "dataset_key",
+          "sync_scope",
+          "status",
+          "last_success_at",
+          "last_failure_at",
+          "consecutive_failures",
+          "next_run_after",
+          "links"
+        ],
+        "title": "OpsProviderDatasetSummary",
+        "type": "object"
+      },
+      "OpsProviderDetailData": {
+        "additionalProperties": false,
+        "description": "provider 상세 data.",
+        "properties": {
+          "datasets": {
+            "items": {
+              "$ref": "#/components/schemas/OpsProviderDatasetDetail"
+            },
+            "title": "Datasets",
+            "type": "array"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "datasets"
+        ],
+        "title": "OpsProviderDetailData",
+        "type": "object"
+      },
+      "OpsProviderDetailResponse": {
+        "additionalProperties": false,
+        "description": "``GET /ops/providers/{provider}`` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/OpsProviderDetailData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "OpsProviderDetailResponse",
+        "type": "object"
+      },
+      "OpsProviderLink": {
+        "additionalProperties": false,
+        "description": "provider ops 상세 화면이 쓰는 관련 API 링크.",
+        "properties": {
+          "href": {
+            "title": "Href",
+            "type": "string"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "rel": {
+            "title": "Rel",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rel",
+          "href"
+        ],
+        "title": "OpsProviderLink",
+        "type": "object"
+      },
+      "OpsProviderSyncStateDetail": {
+        "additionalProperties": false,
+        "description": "ops provider 상세에서만 노출하는 sync state 상세.",
+        "properties": {
+          "consecutive_failures": {
+            "title": "Consecutive Failures",
+            "type": "integer"
+          },
+          "cursor": {
+            "additionalProperties": true,
+            "title": "Cursor",
+            "type": "object"
+          },
+          "last_failure_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Failure At"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "next_run_after": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Run After"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "sync_scope": {
+            "title": "Sync Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sync_scope",
+          "status",
+          "cursor",
+          "last_success_at",
+          "last_failure_at",
+          "consecutive_failures",
+          "next_run_after"
+        ],
+        "title": "OpsProviderSyncStateDetail",
+        "type": "object"
+      },
+      "OpsProviderUpdateRequestSummary": {
+        "additionalProperties": false,
+        "description": "provider/dataset과 연결된 feature update request 요약.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "dagster_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dagster Run Id"
+          },
+          "dry_run": {
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          },
+          "run_mode": {
+            "title": "Run Mode",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "status_url": {
+            "title": "Status Url",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "status",
+          "run_mode",
+          "dry_run",
+          "created_at",
+          "updated_at",
+          "status_url"
+        ],
+        "title": "OpsProviderUpdateRequestSummary",
+        "type": "object"
+      },
+      "OpsProvidersData": {
+        "additionalProperties": false,
+        "description": "provider ops 목록 data.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OpsProviderDatasetSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "OpsProvidersData",
+        "type": "object"
+      },
+      "OpsProvidersResponse": {
+        "additionalProperties": false,
+        "description": "``GET /ops/providers`` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/OpsProvidersData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "OpsProvidersResponse",
+        "type": "object"
+      },
       "PageMeta": {
         "additionalProperties": false,
         "description": "Cursor pagination metadata.\n\n``next_cursor``는 페이지가 끝났을 때도 ``null``로 항상 직렬화한다.",
@@ -8489,6 +8882,338 @@
           "meta"
         ],
         "title": "ProviderLastSyncResponse",
+        "type": "object"
+      },
+      "ProviderRefreshPolicyListData": {
+        "additionalProperties": false,
+        "description": "provider refresh policy 목록 data.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderRefreshPolicyRecord"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "ProviderRefreshPolicyListData",
+        "type": "object"
+      },
+      "ProviderRefreshPolicyListResponse": {
+        "additionalProperties": false,
+        "description": "``GET /admin/provider-refresh-policies`` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ProviderRefreshPolicyListData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ProviderRefreshPolicyListResponse",
+        "type": "object"
+      },
+      "ProviderRefreshPolicyRecord": {
+        "additionalProperties": false,
+        "description": "``ops.provider_refresh_policies`` HTTP 표현.",
+        "properties": {
+          "burst_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Burst Size"
+          },
+          "config_source": {
+            "title": "Config Source",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "dataset_key": {
+            "title": "Dataset Key",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "max_concurrent": {
+            "title": "Max Concurrent",
+            "type": "integer"
+          },
+          "max_requests_per_day": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Requests Per Day"
+          },
+          "max_requests_per_hour": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Requests Per Hour"
+          },
+          "max_requests_per_minute": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Requests Per Minute"
+          },
+          "min_interval_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Interval Seconds"
+          },
+          "optimal_interval_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Optimal Interval Seconds"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "rate_limit_source": {
+            "additionalProperties": true,
+            "title": "Rate Limit Source",
+            "type": "object"
+          },
+          "source_kind": {
+            "title": "Source Kind",
+            "type": "string"
+          },
+          "system_interval_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "System Interval Seconds"
+          },
+          "targeted_policy": {
+            "title": "Targeted Policy",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "dataset_key",
+          "source_kind",
+          "targeted_policy",
+          "max_concurrent",
+          "rate_limit_source",
+          "config_source",
+          "enabled",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ProviderRefreshPolicyRecord",
+        "type": "object"
+      },
+      "ProviderRefreshPolicyResponse": {
+        "additionalProperties": false,
+        "description": "provider refresh policy 단건 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ProviderRefreshPolicyRecord"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ProviderRefreshPolicyResponse",
+        "type": "object"
+      },
+      "ProviderRefreshPolicyUpsertRequest": {
+        "additionalProperties": false,
+        "description": "provider/dataset refresh policy full upsert 요청.",
+        "properties": {
+          "burst_size": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Burst Size"
+          },
+          "config_source": {
+            "default": "db",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Config Source",
+            "type": "string"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "max_concurrent": {
+            "default": 1,
+            "exclusiveMinimum": 0.0,
+            "title": "Max Concurrent",
+            "type": "integer"
+          },
+          "max_requests_per_day": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Requests Per Day"
+          },
+          "max_requests_per_hour": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Requests Per Hour"
+          },
+          "max_requests_per_minute": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Requests Per Minute"
+          },
+          "min_interval_seconds": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Interval Seconds"
+          },
+          "optimal_interval_seconds": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Optimal Interval Seconds"
+          },
+          "rate_limit_source": {
+            "additionalProperties": true,
+            "title": "Rate Limit Source",
+            "type": "object"
+          },
+          "source_kind": {
+            "enum": [
+              "openapi",
+              "filedata",
+              "manual",
+              "system"
+            ],
+            "title": "Source Kind",
+            "type": "string"
+          },
+          "system_interval_seconds": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "System Interval Seconds"
+          },
+          "targeted_policy": {
+            "default": "follow_system",
+            "enum": [
+              "follow_system",
+              "allow_targeted",
+              "disabled"
+            ],
+            "title": "Targeted Policy",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_kind"
+        ],
+        "title": "ProviderRefreshPolicyUpsertRequest",
         "type": "object"
       },
       "ProviderSyncStateSummary": {
@@ -12255,6 +12980,199 @@
         ]
       }
     },
+    "/v1/admin/provider-refresh-policies": {
+      "get": {
+        "description": "provider/dataset refresh policy 목록.",
+        "operationId": "list_provider_refresh_policy_route_v1_admin_provider_refresh_policies_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Provider"
+            }
+          },
+          {
+            "in": "query",
+            "name": "enabled",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Enabled"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderRefreshPolicyListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Provider Refresh Policy Route",
+        "tags": [
+          "admin-provider-refresh-policies"
+        ]
+      }
+    },
+    "/v1/admin/provider-refresh-policies/{provider}/{dataset_key}": {
+      "get": {
+        "description": "provider/dataset refresh policy 단건.",
+        "operationId": "get_provider_refresh_policy_route_v1_admin_provider_refresh_policies__provider___dataset_key__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "dataset_key",
+            "required": true,
+            "schema": {
+              "title": "Dataset Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderRefreshPolicyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "provider refresh policy 없음"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Provider Refresh Policy Route",
+        "tags": [
+          "admin-provider-refresh-policies"
+        ]
+      },
+      "put": {
+        "description": "provider/dataset refresh policy를 full upsert한다.",
+        "operationId": "upsert_provider_refresh_policy_route_v1_admin_provider_refresh_policies__provider___dataset_key__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "dataset_key",
+            "required": true,
+            "schema": {
+              "title": "Dataset Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderRefreshPolicyUpsertRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderRefreshPolicyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upsert Provider Refresh Policy Route",
+        "tags": [
+          "admin-provider-refresh-policies"
+        ]
+      }
+    },
     "/v1/admin/restore/{backup_id}": {
       "post": {
         "description": "Plan or run a staging restore command.",
@@ -14567,6 +15485,74 @@
         "summary": "Get Ops Metrics",
         "tags": [
           "ops"
+        ]
+      }
+    },
+    "/v1/ops/providers": {
+      "get": {
+        "description": "전 provider×dataset의 sync state와 refresh policy를 함께 조회한다.\n\n``/v1/providers``는 사용자/서비스 표면이라 cursor를 계속 숨긴다. 이 endpoint는\nadmin UI 내부 운영 화면이 쓰는 확장 표면이다.",
+        "operationId": "list_ops_providers_v1_ops_providers_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpsProvidersResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "provider 운영 상세 목록",
+        "tags": [
+          "providers"
+        ]
+      }
+    },
+    "/v1/ops/providers/{provider}": {
+      "get": {
+        "description": "provider의 dataset별 sync state, refresh policy, 최근 update request.",
+        "operationId": "get_ops_provider_v1_ops_providers__provider__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpsProviderDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "provider sync/policy row 없음"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "provider 운영 상세",
+        "tags": [
+          "providers"
         ]
       }
     },
