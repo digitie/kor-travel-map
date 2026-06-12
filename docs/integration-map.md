@@ -9,6 +9,10 @@
 > 본 문서는 **포인터 지도**다 — 계약 세부는 각 정본을 따른다(§4). 충돌 시 기계
 > 정본(OpenAPI) > prose 정본 > 본 문서 순.
 
+> **T-226 / ADR-054**: `python-krtour-map`의 public 배포명은 `kor-travel-map`,
+> Python import root는 `kortravel`로 clean cut할 예정이다. 본 문서의 시스템명
+> `python-krtour-map`은 T-226b/c 적용 전 현재 저장소/운영 명칭이다.
+
 ## 1. 시스템·포트
 
 | 시스템 | 역할 | 로컬 고정 포트 | 근거 |

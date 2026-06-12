@@ -3155,3 +3155,64 @@ TripMate와 직접 연동하지 않는다. YouTube/AI 후보 provider 관계는
 - `docs/curated-features.md`는 TripMate 복사 계약에서 krtour-ai-agent를 제외한다.
 - T-224에서 코드/문서 clean cut을 수행하고, T-212e closure 재검증(T-225)에서 새
   provider/env 이름 기준 실데이터 pull 여부를 다시 확인한다.
+
+## ADR-054: 배포명은 `kor-travel-map`, Python import root는 `kortravel`로 clean cut한다
+
+### 상태
+
+Accepted (2026-06-12) — T-226의 package identity rename 정본이다. 본 ADR은 목표
+identity와 이행 범위를 확정한다. 실제 코드/패키지 이동은 T-226b/c에서 별도 PR로 수행한다.
+
+### 배경
+
+현재 public identity는 GitHub/PyPI distribution `python-krtour-map`, Python import
+`krtour.map`, CLI `krtour-map`, env prefix `KRTOUR_MAP_*`다(ADR-022/045/047).
+하지만 "krtour" 축약어는 검색성과 직관성이 낮고, 사용자가 새 public 배포명과 import
+관례를 다음처럼 확정했다.
+
+- 배포명: `kor-travel-map`
+- Python import root: `kortravel`
+- 권장 import 예시: `import kortravel as kt`
+
+### 결정
+
+T-226 clean cut의 목표 identity는 다음과 같다.
+
+| 표면 | 현재 | 목표 |
+|------|------|------|
+| PyPI distribution(메인) | `python-krtour-map` | `kor-travel-map` |
+| Python import root(메인) | `krtour.map` | `kortravel` |
+| 권장 import | `from krtour.map import ...` | `import kortravel as kt` |
+| Admin distribution | `krtour-map-admin` | `kor-travel-map-admin` |
+| Admin import | `krtour.map_admin` | `kortravel.admin` |
+| CLI | `krtour-map` | `kor-travel-map` |
+| env prefix | `KRTOUR_MAP_*` | `KOR_TRAVEL_MAP_*` |
+| admin env prefix | `KRTOUR_MAP_ADMIN_*` | `KOR_TRAVEL_MAP_ADMIN_*` |
+| 개발/운영 DB 이름 | `krtour_map` | `kor_travel_map` |
+| Dagster metadata DB 이름 | `krtour_map_dagster` | `kor_travel_map_dagster` |
+| Docker/image/service 표시명 | `krtour-map*` | `kor-travel-map*` |
+
+Postgres schema 이름(`feature`, `provider_sync`, `ops`, `x_extension`)과 고정 포트
+(API `12301`, admin UI `12305`, Dagster `12302`)는 바꾸지 않는다. TripMate ↔
+krtour-map HTTP 계약은 서비스 identity가 바뀌어도 OpenAPI `/v1` 계약을 유지한다.
+
+### 이행 원칙
+
+- clean cut으로 진행한다. 구 `krtour.map` / `krtour.map_admin` / `KRTOUR_MAP_*`
+  호환 shim은 만들지 않는다(ADR-046과 동일한 이유).
+- 단, migration guide에는 "이전 이름 → 새 이름" 표를 제공한다.
+- 코드 이동은 T-226b에서 수행한다: `src/krtour/map` → `src/kortravel`,
+  `packages/krtour-map-admin/src/krtour/map_admin` → `packages/kor-travel-map-admin/src/kortravel/admin`
+  또는 동등한 최종 layout을 적용하고, import-linter/contracts/test 경로를 함께 바꾼다.
+- 소비자 전파는 T-226c에서 수행한다: PyPI/package metadata, Docker/image/service name,
+  generated client/TripMate 문서, README quickstart, examples/snippets를 갱신한다.
+- 이 ADR이 머지된 시점의 코드/문서 식별자 표는 아직 "현재 상태"를 말한다. 목표 identity는
+  `docs/package-identity-rename.md`를 정본으로 본다.
+
+### 결과
+
+- T-226a는 ADR-054와 `docs/package-identity-rename.md`를 정본으로 완료한다.
+- T-226b/c가 끝나기 전까지 `python-krtour-map` / `krtour.map` 표기는 코드와 현재 운영값을
+  가리키는 사실로 남는다.
+- T-226b/c 완료 후 README/AGENTS/SKILL/architecture/provider-contract/integration-map의
+  식별자 표를 목표 identity로 일괄 전환한다.
