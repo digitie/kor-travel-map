@@ -627,7 +627,7 @@ async function mockFeatureChangeMutations(
       return;
     }
     const url = new URL(request.url());
-    if (url.port === "9012") {
+    if (url.port === "12305") {
       await route.continue();
       return;
     }
@@ -1007,24 +1007,26 @@ test.describe("admin/ops pages", () => {
     ]) {
       await expect(page.getByRole("columnheader", { name: column })).toBeVisible();
     }
-    const firstIssue = page.getByRole("row").nth(1);
-    if (await firstIssue.isVisible()) {
-      await firstIssue.click();
-      const addressJson = page.getByLabel("address JSON");
-      await expect(addressJson).toBeVisible();
-      await expect(page.getByLabel("manual lon")).toBeVisible();
-      await expect(page.getByLabel("manual lat")).toBeVisible();
-
-      // T-218b-3: 빈 입력으로 manual override → 클라이언트 검증 에러 + 포커스(서버 미호출).
-      await page.getByRole("button", { name: "manual override" }).click();
-      await expect(
-        page.getByText("address JSON 또는 lon/lat 중 하나는 필요합니다."),
-      ).toBeVisible();
-      await expect(addressJson).toHaveAttribute("aria-invalid", "true");
-      await expect(addressJson).toBeFocused();
-    } else {
+    const emptyRow = page.getByRole("row", { name: /issue가 없습니다/ });
+    if (await emptyRow.isVisible()) {
       await expect(page.getByText("table에서 issue를 선택하면")).toBeVisible();
+      return;
     }
+
+    const firstIssue = page.getByRole("row").nth(1);
+    await firstIssue.click();
+    const addressJson = page.getByLabel("address JSON");
+    await expect(addressJson).toBeVisible();
+    await expect(page.getByLabel("manual lon")).toBeVisible();
+    await expect(page.getByLabel("manual lat")).toBeVisible();
+
+    // T-218b-3: 빈 입력으로 manual override → 클라이언트 검증 에러 + 포커스(서버 미호출).
+    await page.getByRole("button", { name: "manual override" }).click();
+    await expect(
+      page.getByText("address JSON 또는 lon/lat 중 하나는 필요합니다."),
+    ).toBeVisible();
+    await expect(addressJson).toHaveAttribute("aria-invalid", "true");
+    await expect(addressJson).toBeFocused();
   });
 
   test("/v1/ops/consistency", async ({ page }) => {

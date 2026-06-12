@@ -37,7 +37,7 @@
 | `NAVER_SEARCH_CLIENT_ID` | naver-search-api | NAVER Developers | 헤더 `X-Naver-Client-Id` |
 | `NAVER_SEARCH_CLIENT_SECRET` | 동일 | 동일 | 헤더 `X-Naver-Client-Secret` |
 | `GOOGLE_PLACES_API_KEY` | google-places-api-new | Google Cloud Console (Places API New) | field mask 필수 |
-| `KRTOUR_MAP_TRIPMATE_AGENT_BASE_URL` | tripmate-agent-youtube | 형제 앱 TripMate-agent | base URL, 예: `http://127.0.0.1:9041` |
+| `KRTOUR_MAP_TRIPMATE_AGENT_BASE_URL` | tripmate-agent-youtube | 형제 앱 TripMate-agent | base URL, 예: `http://127.0.0.1:12401` |
 | `KRTOUR_MAP_TRIPMATE_AGENT_API_KEY` | tripmate-agent-youtube | TripMate-agent `API_KEYS` 중 하나 | `X-API-Key` 헤더로 전송 |
 | `KRADDR_GEO_*` | python-kraddr-geo | (로컬 DB 위주, vworld 폴백 키는 kraddr-geo가 관리) | 본 라이브러리는 kraddr-geo client만 사용 |
 | `KRADDR_GEO_VWORLD_API_KEY` | python-kraddr-geo (reverse geocoding), 디버그 UI frontend (maplibre-vworld), TripMate 사용자 UI (ADR-026) | VWorld (vworld.kr) | **공유 키**. 별도 발급 X. ADR-025 + ADR-026 |

@@ -63,7 +63,7 @@ def test_docker_compose_has_runtime_healthchecks_and_readiness_order() -> None:
     assert "/health" in _command_text(api["healthcheck"]["test"])
     assert "debug/health" not in _command_text(api["healthcheck"]["test"])
     assert "node -e" in _command_text(frontend["healthcheck"]["test"])
-    assert "9012" in _command_text(frontend["healthcheck"]["test"])
+    assert "12305" in _command_text(frontend["healthcheck"]["test"])
     assert "KRTOUR_MAP_DAGSTER_PORT" in _command_text(dagster["healthcheck"]["test"])
 
     assert frontend["depends_on"]["api"]["condition"] == "service_healthy"

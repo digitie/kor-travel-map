@@ -700,7 +700,7 @@
 ## ADR-025: 디버그 UI frontend는 `maplibre-vworld-js` 채택
 
 > **현행 기준(2026-06-06)**: frontend는 **Next.js 16**(ADR-036 amendment 2026-05-31),
-> dev 포트는 admin UI **9012**(ADR-047). 본문의 "Next.js 15"·"`next dev --port 8610`"
+> dev 포트는 admin UI **12305**(ADR-047). 본문의 "Next.js 15"·"`next dev --port 8610`"
 > 은 채택/2차 보강 당시 값이며 위 ADR이 정본이다.
 
 - **상태**: accepted
@@ -2673,10 +2673,13 @@ TripMate OpenAPI 연동으로 바뀌었다. 또한 ADR-041로 `python-kraddr-bas
 
 ---
 
-## ADR-047: krtour-map standalone 로컬 포트는 API 9011, admin UI 9012, Dagster 9013으로 고정
+## ADR-047: krtour-map standalone 로컬 포트는 API 12301, admin UI 12305, Dagster 12302로 고정
 
 - **상태**: accepted
 - **날짜**: 2026-06-02
+- **개정**: 2026-06-12 — Postgres host `5432`, RustFS S3 API `12101`,
+  kraddr-geo API `12201`/Web UI `12205`, krtour-map API `12301`, 관리 보조(Dagster)
+  `12302`, Web UI `12305`로 재고정.
 - **결정자**: 사용자
 - **관련**: ADR-020, ADR-035, ADR-045
 
@@ -2693,10 +2696,13 @@ ADR-045 이후 krtour-map은 Docker 독립 프로그램 + 독립 DB/Dagster + ad
 ### 결정
 
 1. krtour-map standalone의 로컬/개발/compose 기본 포트는 다음으로 고정한다.
-   - API(FastAPI `krtour-map-admin`): `9011`
-   - admin UI(Next.js): `9012`
-   - Dagster UI/code location dev server: `9013`
-2. `scripts/stop-fixed-ports.sh`는 기본으로 `9011`, `9012`, `9013` listener를 찾아
+   - API(FastAPI `krtour-map-admin`): `12301`
+   - 추가 관리 포트(Dagster): `12302`
+   - admin UI(Next.js): `12305`
+   - Postgres host: `5432`(container도 `5432`)
+   - RustFS S3 API: `12101`(console은 `12105`, RustFS container 내부 console은 `9001`)
+   - kraddr-geo API/Web UI: `12201` / `12205`
+2. `scripts/stop-fixed-ports.sh`는 기본으로 `12301`, `12305`, `12302` listener를 찾아
    종료한다. 로컬 stack과 Docker stack 기동 스크립트는 먼저 이 스크립트를 실행한다.
 3. `.env`의 기존 provider service key 이름은 `scripts/load-env.sh`와
    `docker-compose.yml`에서 `KRTOUR_MAP_ADMIN_*`/`NEXT_PUBLIC_*` 환경변수로 매핑한다.
@@ -2831,7 +2837,7 @@ bbox 인코딩 2종, `status`↔`state`, 응답 `*_key`↔`*_id`)가 #317의 고
     방침과 일치). **v1.0.0 GA에서 `/v1` 동결**, 이후 breaking = `/v2` + N-1 동시지원. OpenAPI는
     major별 분리 export.
 14. **Base URL과 path 분리(#316 추가 리뷰).** 환경변수 base URL은 host root까지만 포함하고
-    `/v1`는 path에 둔다(예: base `http://127.0.0.1:9011` + path `/v1/features/search`).
+    `/v1`는 path에 둔다(예: base `http://127.0.0.1:12301` + path `/v1/features/search`).
     base와 path 양쪽에 `/v1`를 중복 삽입하지 않는다.
 
 ### 근거
@@ -3007,8 +3013,8 @@ Accepted (2026-06-10) — `docs/reports/decisions-needed-2026-06-10.md` D-02.
   2. `idempotency_key` 멱등성 — 같은 제안 재시도 시 동일 feature_id 보장.
   3. 출처 태깅 — TripMate `suggestion_id` 추적 필드 방식.
   4. admin 인증 — TripMate admin client의 `/v1/admin/*` 호출 토큰/경로. **주의**:
-     admin API는 **9011 `/v1/admin/*`**이다 (9012는 admin UI — TripMate 문서의
-    "admin base 9012" 가정은 오류, TripMate 측 정정 대상).
+     admin API는 **12301 `/v1/admin/*`**이다 (12305는 admin UI — TripMate 문서의
+    "admin base 12305" 가정은 오류, TripMate 측 정정 대상).
   5. closure 표현 — 영구 폐업 = soft `DELETE` vs `deactivate` 권장안.
 
 ### 결과
@@ -3033,9 +3039,9 @@ Accepted (2026-06-10) — `docs/reports/decisions-needed-2026-06-10.md` D-02.
   3. **출처 태깅**: 전용 필드 없이 기존 필드 컨벤션 — `operator: "tripmate-admin"`
      고정 + `reason` 머리에 `[suggestion:<suggestion_id>]` prefix. change-requests
      큐(API/admin UI)가 reason을 표시하므로 추가 코드 없이 출처 식별 가능(D-11 익명).
-  4. **admin 인증**: admin API는 **9011 `/v1/admin/*`**(9012는 admin UI). 코드 인증은
+  4. **admin 인증**: admin API는 **12301 `/v1/admin/*`**(12305는 admin UI). 코드 인증은
      `admin_destructive_enabled` kill-switch뿐이고 호출자 인증은 인프라 계층(SSO/IP
-     allowlist, ADR-005 모델) — TripMate admin client는 관리망 경로로 9011에 도달해야
+     allowlist, ADR-005 모델) — TripMate admin client는 관리망 경로로 12301에 도달해야
      한다.
   5. **closure**: 영구 폐업/사용자 삭제 = **soft `DELETE`**(`user_deleted_*` 계열 —
      provider 재적재 부활 차단, #332) / 일시 중단·운영 비활성 =
@@ -3057,7 +3063,7 @@ TripMate-agent가 미디어 원본(영상/자막/전사/프레임, 무기한 보
 
 ### 결정
 
-- **당분간 공유 유지**: 단일 RustFS(S3 `9003`/console `9004`)의 `krtour-map` 버킷을
+- **당분간 공유 유지**: 단일 RustFS(S3 `12101`/console `12105`)의 `krtour-map` 버킷을
   공유한다.
 - **prefix 소유권 명문화**: TripMate-agent가 쓰는 prefix 이하 객체의 소유·수명주기·
   복구 책임은 TripMate-agent에 있다. krtour-map cold backup 범위에서 해당 prefix는
@@ -3077,7 +3083,7 @@ TripMate-agent가 미디어 원본(영상/자막/전사/프레임, 무기한 보
 
 **RustFS 인프라는 `tripmate-manager`(`F:\dev\tripmate-manager`)가 일괄 소유·관리한다.**
 tripmate-manager는 TripMate 생태계 공용 기반 서비스(단일 PostGIS 컨테이너
-`kraddr-geo-postgres` :15434 + RustFS `tripmate-rustfs` S3 :9003/console :9004)를
+`kraddr-geo-postgres` :5432 + RustFS `tripmate-rustfs` S3 :12101/console :12105)를
 docker-compose + Web UI로 구동/모니터링하는 관리 소프트웨어다(해당 repo README,
 `docker-compose.yml` 실측).
 

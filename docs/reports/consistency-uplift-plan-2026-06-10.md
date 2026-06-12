@@ -41,7 +41,7 @@ TM-/TA-/KR-는 액션 간 의존. 의사결정 D-01~13 **전 항목 종결(2026-
 | KR-01 | 🟡 | **tombstone/reject → feature inactive 경로 구현**: `tripmate_agent_items_to_bundles()`의 skip(`providers/tripmate_agent.py:87`)을 deactivate 연동으로 보강(MOIS Step C 동형). 1단계로 skip 건수 WARN/admin 이슈 노출도 가능 | D-03 |
 | KR-02 | 🟡 | **신규 task 등록**: KR-01(라이프사이클), 제보 수신 API(D-02 승인 시), provider 신선도 대시보드(D-07 승인 시)를 `docs/tasks.md`에 T-2xx로 | D-02/03/07 |
 | KR-03 | 🟡 | **tripmate-agent 계약 링크 정리**: D-04 확정 후 `docs/rest-api.md`(또는 external-apis 절)에서 tripmate-agent 정본 계약 문서로 링크 + 소비 측 기대(fetcher의 `{items,has_more,next_cursor}`/`X-API-Key`/env 키) 요약 | D-04 |
-| KR-04 | 🟡 | **cross-repo 연동 정본 문서 신설** (예: `docs/integration-map.md`): 3-시스템 포트(9011/9012/9013/15433 · 9021/9022 · 9041/9042)·연동 방향·인증 방식(C-9)·envelope 차이(C-10)·계약 정본 위치를 1장으로. 각 repo CLAUDE.md/AGENTS.md에서 링크. "한쪽 갱신이 타 repo 전제에 전파 안 되는" 구조적 사고(DEC-01류) 재발 방지 | D-08 |
+| KR-04 | 🟡 | **cross-repo 연동 정본 문서 신설** (예: `docs/integration-map.md`): 3-시스템 포트(12301/12305/12302/5432 · 9021/9022 · 12401/9042)·연동 방향·인증 방식(C-9)·envelope 차이(C-10)·계약 정본 위치를 1장으로. 각 repo CLAUDE.md/AGENTS.md에서 링크. "한쪽 갱신이 타 repo 전제에 전파 안 되는" 구조적 사고(DEC-01류) 재발 방지 | D-08 |
 | KR-05 | ⚪ | **geocoding R&R 1줄 명시**: tripmate-agent 후보 지오코딩(제안) vs krtour kraddr-geo 재검증(정본 확정)의 역할 차이를 architecture.md 또는 ADR-049 보강에 기록 | — |
 | KR-06 | 🟡 | **YouTube evidence 노출 형태 확정**: feature detail의 `urls`/`detail`/`raw_refs`에 영상 링크·타임스탬프·confidence가 소비 가능한 형태로 나오는지 점검·보강 — TripMate TM-08(출처 배지 UX)의 선행 | D-05 |
 | KR-07 | ⚪ | **경미 문서 2건**: CLAUDE.md에 REST 버전 거버넌스(GA 후 `/v2` N-1 동시지원) 1줄, architecture.md에 고정 포트 표기(또는 의도적 생략 주석) | — |

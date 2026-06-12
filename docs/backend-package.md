@@ -162,18 +162,18 @@ class KrtourMapSettings(BaseSettings):
 
     # admin/API 프로그램 기본 바인드 (패키지 쪽 KRTOUR_MAP_ADMIN_*가 우선)
     admin_host: str = "127.0.0.1"  # 외부 노출 금지 default
-    admin_port: int = 9011
+    admin_port: int = 12301
 
     # 객체 저장소 (boto3 S3 호환)
-    object_store_endpoint_url: str = "http://127.0.0.1:9003"
+    object_store_endpoint_url: str = "http://127.0.0.1:12101"
     object_store_bucket: str = "krtour-map"
     object_store_region: str = "us-east-1"
     object_store_access_key_id: SecretStr | None = None
     object_store_secret_access_key: SecretStr | None = None
-    object_store_public_base_url: str | None = "http://127.0.0.1:9003/krtour-map"
+    object_store_public_base_url: str | None = "http://127.0.0.1:12101/krtour-map"
 
     # 주소 보강 (kraddr-geo REST v2)
-    kraddr_geo_base_url: str | None = "http://127.0.0.1:9001"
+    kraddr_geo_base_url: str | None = "http://127.0.0.1:12201"
 
     # 로그
     log_level: str = "INFO"

@@ -4,9 +4,9 @@
   "description": "Debug UI frontend for python-krtour-map (Next.js + maplibre-vworld, ADR-025 사용자 보강 2026-05-25).",
   "private": true,
   "scripts": {
-    "dev": "next dev --port 9012 --hostname 127.0.0.1",
+    "dev": "next dev --port 12305 --hostname 127.0.0.1",
     "build": "next build",
-    "start": "next start --port 9012 --hostname 127.0.0.1",
+    "start": "next start --port 12305 --hostname 127.0.0.1",
     "lint": "eslint .",
     "type-check": "tsc --noEmit && tsc -p e2e/tsconfig.json --noEmit",
     "type-check:e2e": "tsc -p e2e/tsconfig.json --noEmit",

@@ -1,0 +1,46 @@
+# 외부(공유) 인프라 모드 오버레이 (ADR-052 amendment).
+#
+# tripmate-manager가 소유한 공유 PostGIS(:5432)와 RustFS(S3 :12101)를 사용할 때
+# krtour-map compose의 local postgres/rustfs 계열을 시작하지 않는다.
+# 적용:
+#
+#   KRTOUR_MAP_INFRA_EXTERNAL=true bash scripts/docker-up.sh
+#
+# 공유 DB에는 `krtour_map`과 `krtour_map_dagster` DB가 있어야 한다. 비밀번호가
+# 기본값과 다르면 `.env`에 `KRTOUR_MAP_POSTGRES_PASSWORD` 또는 아래
+# `KRTOUR_MAP_EXTERNAL_DOCKER_*` DSN을 명시한다.
+services:
+  postgres:
+    profiles: ["local-infra"]
+
+  dagster-db-init:
+    profiles: ["local-infra"]
+
+  rustfs-perms:
+    profiles: ["local-infra"]
+
+  rustfs:
+    profiles: ["local-infra"]
+
+  rustfs-init:
+    profiles: ["local-infra"]
+
+  api:
+    depends_on: !override {}
+    environment:
+      KRTOUR_MAP_PG_DSN: ${KRTOUR_MAP_EXTERNAL_DOCKER_PG_DSN:-postgresql+asyncpg://${KRTOUR_MAP_POSTGRES_USER:-krtour_map}:${KRTOUR_MAP_POSTGRES_PASSWORD:-krtour_map}@host.docker.internal:${KRTOUR_MAP_POSTGRES_HOST_PORT:-5432}/${KRTOUR_MAP_POSTGRES_DB:-krtour_map}}
+      KRTOUR_MAP_OBJECT_STORE_ENDPOINT_URL: ${KRTOUR_MAP_EXTERNAL_DOCKER_OBJECT_STORE_ENDPOINT_URL:-http://host.docker.internal:${KRTOUR_MAP_RUSTFS_API_PORT:-12101}}
+
+  dagster:
+    depends_on: !override {}
+    environment:
+      KRTOUR_MAP_DAGSTER_PG_URL: ${KRTOUR_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL:-postgresql://${KRTOUR_MAP_POSTGRES_USER:-krtour_map}:${KRTOUR_MAP_POSTGRES_PASSWORD:-krtour_map}@host.docker.internal:${KRTOUR_MAP_POSTGRES_HOST_PORT:-5432}/${KRTOUR_MAP_DAGSTER_POSTGRES_DB:-krtour_map_dagster}}
+      KRTOUR_MAP_PG_DSN: ${KRTOUR_MAP_EXTERNAL_DOCKER_PG_DSN:-postgresql+asyncpg://${KRTOUR_MAP_POSTGRES_USER:-krtour_map}:${KRTOUR_MAP_POSTGRES_PASSWORD:-krtour_map}@host.docker.internal:${KRTOUR_MAP_POSTGRES_HOST_PORT:-5432}/${KRTOUR_MAP_POSTGRES_DB:-krtour_map}}
+      KRTOUR_MAP_OBJECT_STORE_ENDPOINT_URL: ${KRTOUR_MAP_EXTERNAL_DOCKER_OBJECT_STORE_ENDPOINT_URL:-http://host.docker.internal:${KRTOUR_MAP_RUSTFS_API_PORT:-12101}}
+
+  dagster-daemon:
+    depends_on: !override {}
+    environment:
+      KRTOUR_MAP_DAGSTER_PG_URL: ${KRTOUR_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL:-postgresql://${KRTOUR_MAP_POSTGRES_USER:-krtour_map}:${KRTOUR_MAP_POSTGRES_PASSWORD:-krtour_map}@host.docker.internal:${KRTOUR_MAP_POSTGRES_HOST_PORT:-5432}/${KRTOUR_MAP_DAGSTER_POSTGRES_DB:-krtour_map_dagster}}
+      KRTOUR_MAP_PG_DSN: ${KRTOUR_MAP_EXTERNAL_DOCKER_PG_DSN:-postgresql+asyncpg://${KRTOUR_MAP_POSTGRES_USER:-krtour_map}:${KRTOUR_MAP_POSTGRES_PASSWORD:-krtour_map}@host.docker.internal:${KRTOUR_MAP_POSTGRES_HOST_PORT:-5432}/${KRTOUR_MAP_POSTGRES_DB:-krtour_map}}
+      KRTOUR_MAP_OBJECT_STORE_ENDPOINT_URL: ${KRTOUR_MAP_EXTERNAL_DOCKER_OBJECT_STORE_ENDPOINT_URL:-http://host.docker.internal:${KRTOUR_MAP_RUSTFS_API_PORT:-12101}}

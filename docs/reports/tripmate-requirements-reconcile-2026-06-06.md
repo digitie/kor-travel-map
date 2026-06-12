@@ -44,7 +44,7 @@ import하거나 krtour-map DB/Dagster DB에 직접 접속하는 구 모델은 AD
 | K-11 sync state write helper | `infra.sync_state_repo`에는 read/write helper가 있으나 `AsyncKrtourMapClient`와 user/admin last-sync API 표면이 없다. | `T-213g` |
 | K-12 healthz public | `/debug/health`, `/debug/version`만 있다. TripMate liveness용 `/health`, `/version`, deep health는 user spec에 없다. | `T-213h` |
 | K-13 feature_id 포맷 | ADR-009와 `core.ids.make_feature_id`가 `f_{bjd_code}_{kind[0]}_{sha1[:16]}` 포맷을 확정한다. TripMate 쪽 UUID 가정은 TripMate 수정 대상이다. | `T-210b` |
-| K-14 운영급 HTTP 서비스 | ADR-045 이후 Docker 독립 프로그램 + API `9011` + admin UI `9012` + Dagster `9013` 모델로 구현 중이다. 생산 운영 hardening은 T-209/T-RV/T-212 범위다. | `T-209b-a`, `T-212` |
+| K-14 운영급 HTTP 서비스 | ADR-045 이후 Docker 독립 프로그램 + API `12301` + admin UI `12305` + Dagster `12302` 모델로 구현 중이다. 생산 운영 hardening은 T-209/T-RV/T-212 범위다. | `T-209b-a`, `T-212` |
 
 ## 우선순위
 

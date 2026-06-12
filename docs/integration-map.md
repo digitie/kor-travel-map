@@ -13,18 +13,18 @@
 
 | 시스템 | 역할 | 로컬 고정 포트 | 근거 |
 |---|---|---|---|
-| **python-krtour-map** | feature 정본 owner — 공공 API+후보 정규화·dedup·PostGIS 조회 (독립 Docker, ADR-045) | API **9011** · admin UI 9012 · Dagster 9013 · (standalone postgres 15433 · rustfs 9003/9004) | ADR-047 |
+| **python-krtour-map** | feature 정본 owner — 공공 API+후보 정규화·dedup·PostGIS 조회 (독립 Docker, ADR-045) | API **12301** · admin UI 12305 · Dagster 12302 · (standalone postgres 5432 · rustfs 12101/12105) | ADR-047 |
 | **TripMate** | 사용자 여행 계획/협업/공유 서비스 — feature **consumer** | api **9021** · web 9022 | TripMate README |
-| **tripmate-agent** | YouTube 콘텐츠 → 장소 후보 추출/검수 — feature 후보 **provider** | API **9041** · web 9042 | tripmate-agent ADR-23 |
-| **tripmate-manager** | 공용 인프라 일괄 관리(docker-compose+Web UI) — 단일 PostGIS·RustFS 소유 | PostGIS **15434**(`kraddr-geo-postgres`) · RustFS S3 **9003**/console 9004 | tripmate-manager README, ADR-052 amendment |
-| (보조) kraddr-geo | geocoding REST v2 정본 | **9001** | ADR-046 |
+| **tripmate-agent** | YouTube 콘텐츠 → 장소 후보 추출/검수 — feature 후보 **provider** | API **12401** · web 9042 | tripmate-agent ADR-23 |
+| **tripmate-manager** | 공용 인프라 일괄 관리(docker-compose+Web UI) — 단일 PostGIS·RustFS 소유 | PostGIS **5432**(`kraddr-geo-postgres`) · RustFS S3 **12101**/console 12105 | tripmate-manager README, ADR-052 amendment |
+| (보조) kraddr-geo | geocoding REST v2 정본 | **12201** | ADR-046 |
 
 ## 2. 연동 방향 (데이터 흐름)
 
 ```
 [공공 API provider 라이브러리들]──────────────┐
                                               ▼ (krtour Dagster live fetch)
-[tripmate-agent :9041] ──(REST export pull)──▶ [python-krtour-map :9011]
+[tripmate-agent :12401] ──(REST export pull)──▶ [python-krtour-map :12301]
    GET /api/v1/features/{snapshot|changes}        feature_id 생성·dedup·정합성
    (krtour Dagster가 주기 pull, ADR-049/050)            │
                                                         │ OpenAPI /v1 (HTTP)
@@ -35,7 +35,7 @@
                                   │                  ◀──(admin: /v1/admin/features*
                           [TripMate web :9022]          — 사용자 제안 승인 반영, ADR-051)
 
-[tripmate-manager] ═══ 인프라 계층(별도 데이터 흐름 없음): PostGIS(15434)·RustFS(9003) 구동/관리
+[tripmate-manager] ═══ 인프라 계층(별도 데이터 흐름 없음): PostGIS(5432)·RustFS(12101) 구동/관리
 ```
 
 - TripMate ↔ krtour-map: **HTTP만**(라이브러리 import·공유 DB 없음, ADR-045/TripMate ADR-026).

@@ -143,14 +143,14 @@ class AdminSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="KRTOUR_MAP_ADMIN_", env_file=".env")
 
     host: str = "127.0.0.1"                   # 외부 노출 금지 default (ADR-005)
-    port: int = 9011
+    port: int = 12301
     log_level: str = "info"
     debug_routes_enabled: bool = True         # /debug/* 활성
     features_routes_enabled: bool = True      # /features/* 활성 (DB 필요, PR#73)
     admin_routes_enabled: bool | None = None  # /admin/* 활성. None이면 features flag 추종
     ops_routes_enabled: bool | None = None    # /ops/* + /ops/dagster/* 활성. None이면 features flag 추종
-    cors_allow_origins: list[str] = [         # frontend(9012) cross-origin (PR#68)
-        "http://localhost:9012", "http://127.0.0.1:9012",
+    cors_allow_origins: list[str] = [         # frontend(12305) cross-origin (PR#68)
+        "http://localhost:12305", "http://127.0.0.1:12305",
     ]
     # provider API key 8종 (source=live용, PR#47) — SecretStr | None:
     #   kma_service_key / kma_apihub_key / opinet_service_key /
@@ -171,16 +171,16 @@ uv pip install -e .
 uv pip install -e packages/krtour-map-admin
 
 # 기동 (인증 없음, localhost 전용)
-uvicorn krtour.map_admin.app:app --host 127.0.0.1 --port 9011
+uvicorn krtour.map_admin.app:app --host 127.0.0.1 --port 12301
 
 # 환경변수로 override
 KRTOUR_MAP_ADMIN_HOST=127.0.0.1 \
-KRTOUR_MAP_ADMIN_PORT=9011 \
+KRTOUR_MAP_ADMIN_PORT=12301 \
 KRTOUR_MAP_PG_DSN=postgresql+asyncpg://... \
 uvicorn krtour.map_admin.app:app
 
 # 또는 CLI (옵션)
-krtour-map-admin run --host 127.0.0.1 --port 9011
+krtour-map-admin run --host 127.0.0.1 --port 12301
 ```
 
 `0.0.0.0` 바인드 시 경고 로그 (ADR-005 후속). 코드 작성 단계에서
@@ -298,7 +298,7 @@ type drift 부채 0).
 
 - **외부 노출 금지**. host default `127.0.0.1`. `0.0.0.0` 바인드 시 경고.
 - **방화벽**: Odroid 운영 노드에서 외부 포트 차단. `ufw allow from 192.168.0.0/16
-  to any port 9011` 같은 사내망 한정 허용만.
+  to any port 12301` 같은 사내망 한정 허용만.
 - **Cloudflare Tunnel** 또는 **Tailscale**로 원격 접근 시에도 인증은 네트워크
   계층에서.
 - **로그**: structlog JSON to stdout. 메인 라이브러리와 동일 키 표준
@@ -348,7 +348,7 @@ type drift 부채 0).
 | 언어 | TypeScript |
 | 라이선스 | MIT (`next`) + ISC (`maplibre-vworld`) + BSD-3 (`maplibre-gl`) + GPL-3.0 (본 저장소) — 호환 |
 | 디렉토리 | `packages/krtour-map-admin/frontend/` |
-| 개발 포트 | `9012` (`next dev --port 9012`, TripMate `apps/web` dev 3000 충돌 회피) |
+| 개발 포트 | `12305` (`next dev --port 12305`, TripMate `apps/web` dev 3000 충돌 회피) |
 
 **Kakao Maps SDK 사용 안 함** (ADR-025/026). VWorld 지도가 1차 + 유일.
 
@@ -357,9 +357,9 @@ type drift 부채 0).
 | 변수 | 의미 |
 |------|------|
 | `NEXT_PUBLIC_VWORLD_API_KEY` | VWorld API key. **`KRADDR_GEO_VWORLD_API_KEY`와 동일 값 공유** (ADR-025 사용자 보강 1차 + 2차 2026-05-25). frontend 빌드/런타임 주입. |
-| `NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API` | 백엔드 API base URL (개발: `http://127.0.0.1:9011`) |
-| `NEXT_PUBLIC_KRTOUR_MAP_DAGSTER_URL` | Dagster UI/embed base URL (개발: `http://127.0.0.1:9013`) |
-| `KRTOUR_MAP_ADMIN_DAGSTER_URL` | backend가 Dagster GraphQL을 조회할 때 쓰는 Dagster webserver base URL. 로컬 기본 `http://127.0.0.1:9013`, Docker API 컨테이너 기본 `http://dagster:9013` |
+| `NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API` | 백엔드 API base URL (개발: `http://127.0.0.1:12301`) |
+| `NEXT_PUBLIC_KRTOUR_MAP_DAGSTER_URL` | Dagster UI/embed base URL (개발: `http://127.0.0.1:12302`) |
+| `KRTOUR_MAP_ADMIN_DAGSTER_URL` | backend가 Dagster GraphQL을 조회할 때 쓰는 Dagster webserver base URL. 로컬 기본 `http://127.0.0.1:12302`, Docker API 컨테이너 기본 `http://dagster:12302` |
 | `KRTOUR_MAP_ADMIN_DAGSTER_ALLOWED_HOSTS` | backend Dagster GraphQL 호출 host allowlist. 기본은 `["127.0.0.1","localhost","::1","dagster"]`이며, 운영 Dagster host를 별도로 쓰면 URL과 함께 명시한다 |
 | `KRTOUR_MAP_ADMIN_DAGSTER_REPOSITORY_NAME` | offline upload load GraphQL launch selector의 repositoryName. 기본 `__repository__` |
 | `KRTOUR_MAP_ADMIN_DAGSTER_REPOSITORY_LOCATION_NAME` | offline upload load GraphQL launch selector의 repositoryLocationName. 기본 `krtour.map_dagster.definitions` |
@@ -397,28 +397,28 @@ uv pip install -e ".[dev]"
 uv pip install -e packages/krtour-map-admin
 
 # 2. backend (FastAPI) 기동
-uvicorn krtour.map_admin.app:app --host 127.0.0.1 --port 9011
+uvicorn krtour.map_admin.app:app --host 127.0.0.1 --port 12301
 
 # 3. frontend (Next.js dev) 기동
 cd packages/krtour-map-admin/frontend
 npm ci
 cp .env.example .env.local
 $EDITOR .env.local           # VWorld API key
-npm run dev                  # http://127.0.0.1:9012
+npm run dev                  # http://127.0.0.1:12305
 ```
 
 **운영 옵션 3가지** (운영자 결정):
 
 - **A. standalone (default 권고)**: `next build` + `next start` — frontend는
-  9012 포트, backend는 9011 포트로 동일 호스트에서 별도 프로세스. CORS
+  12305 포트, backend는 12301 포트로 동일 호스트에서 별도 프로세스. CORS
   미필요 (Next.js rewrites로 same-origin fetch).
   ```bash
   cd packages/krtour-map-admin/frontend
   npm run build                # .next/
-  npm run start                # next start --port 9012 --hostname 127.0.0.1
+  npm run start                # next start --port 12305 --hostname 127.0.0.1
   ```
 - **B. FastAPI reverse proxy**: backend의 `/ui/*` 경로가 Next.js로 proxy.
-  Next.js는 `basePath: '/ui'` 설정. 단일 포트 운영 (9011).
+  Next.js는 `basePath: '/ui'` 설정. 단일 포트 운영 (12301).
 - **C. static export**: `next build` + `next export` → `out/` HTML/JS.
   FastAPI가 `out/`을 static mount. SSR 미사용 (App Router의 client-only
   페이지만 가능). 본 디버그 UI는 read-mostly이라 가능하지만 server actions
@@ -506,7 +506,7 @@ npm run doctor
 
 ### 14.9 외부 노출 안전
 
-- frontend는 `127.0.0.1:9012` (Next.js dev/standalone) 또는 `127.0.0.1:9011`
+- frontend는 `127.0.0.1:12305` (Next.js dev/standalone) 또는 `127.0.0.1:12301`
   (FastAPI proxy/static mount, §14.3 옵션 B/C) 만.
 - VWorld API key는 frontend에 노출되지만 HTTP referrer 제한으로 보호.
   공유 키(`KRADDR_GEO_VWORLD_API_KEY`)이므로 referrer 화이트리스트에 backend

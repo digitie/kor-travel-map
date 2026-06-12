@@ -17,7 +17,7 @@ from krtour.map_admin.settings import AdminSettings
 def client() -> Iterator[TestClient]:
     app = create_app(
         AdminSettings(
-            dagster_url="http://dagster.example:9013",
+            dagster_url="http://dagster.example:12302",
             dagster_allowed_hosts=["dagster.example"],
             dagster_request_timeout_seconds=1.0,
         )
@@ -38,7 +38,7 @@ def test_dagster_summary_parses_graphql_response(
         variables: dict[str, object],
         query: str = dagster_mod._DAGSTER_SUMMARY_QUERY,
     ) -> dict[str, object]:
-        assert graphql_url == "http://dagster.example:9013/graphql"
+        assert graphql_url == "http://dagster.example:12302/graphql"
         calls.append({"query": query, "variables": variables})
         assert query == dagster_mod._DAGSTER_SUMMARY_QUERY
         assert variables == {"limit": 3}
@@ -149,8 +149,8 @@ def test_dagster_summary_parses_graphql_response(
     assert "duration_ms" in body["meta"]
     data = body["data"]
     assert data["status"] == "ok"
-    assert data["dagster_url"] == "http://dagster.example:9013"
-    assert data["graphql_url"] == "http://dagster.example:9013/graphql"
+    assert data["dagster_url"] == "http://dagster.example:12302"
+    assert data["graphql_url"] == "http://dagster.example:12302/graphql"
     assert data["version"] == "1.13.7"
     assert data["repository_count"] == 1
     assert data["job_count"] == 1
@@ -207,7 +207,7 @@ def test_dagster_run_detail_parses_graphql_response(
         variables: dict[str, object],
         query: str = dagster_mod._DAGSTER_SUMMARY_QUERY,
     ) -> dict[str, object]:
-        assert graphql_url == "http://dagster.example:9013/graphql"
+        assert graphql_url == "http://dagster.example:12302/graphql"
         calls.append({"query": query, "variables": variables})
         assert query == dagster_mod._DAGSTER_RUN_DETAIL_QUERY
         assert variables == {
@@ -266,8 +266,8 @@ def test_dagster_run_detail_parses_graphql_response(
     assert "duration_ms" in body["meta"]
     data = body["data"]
     assert data["status"] == "ok"
-    assert data["dagster_url"] == "http://dagster.example:9013"
-    assert data["graphql_url"] == "http://dagster.example:9013/graphql"
+    assert data["dagster_url"] == "http://dagster.example:12302"
+    assert data["graphql_url"] == "http://dagster.example:12302/graphql"
     assert data["run"]["run_id"] == "run-1"
     assert data["run"]["status"] == "FAILURE"
     assert data["event_cursor"] == "event-cursor-1"
@@ -399,7 +399,7 @@ def test_mark_dagster_nux_seen_posts_mutation(
         variables: dict[str, object],
         query: str = dagster_mod._DAGSTER_SUMMARY_QUERY,
     ) -> dict[str, object]:
-        assert graphql_url == "http://dagster.example:9013/graphql"
+        assert graphql_url == "http://dagster.example:12302/graphql"
         calls.append({"query": query, "variables": variables})
         assert query == dagster_mod._DAGSTER_SET_NUX_SEEN_MUTATION
         assert variables == {}
@@ -452,7 +452,7 @@ def test_dagster_summary_rejects_disallowed_url_before_http_call(
 ) -> None:
     app = create_app(
         AdminSettings(
-            dagster_url="http://169.254.169.254:9013",
+            dagster_url="http://169.254.169.254:12302",
             dagster_allowed_hosts=["127.0.0.1"],
         )
     )
@@ -484,8 +484,8 @@ def test_dagster_nux_seen_rejects_invalid_graphql_override(
 ) -> None:
     app = create_app(
         AdminSettings(
-            dagster_url="http://127.0.0.1:9013",
-            dagster_graphql_url="http://127.0.0.1:9013/query",
+            dagster_url="http://127.0.0.1:12302",
+            dagster_graphql_url="http://127.0.0.1:12302/query",
             dagster_allowed_hosts=["127.0.0.1"],
         )
     )

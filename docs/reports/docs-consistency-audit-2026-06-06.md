@@ -50,13 +50,13 @@
 | ID | sev | 한 줄 | 정본(ground truth) |
 |----|-----|-------|--------------------|
 | T-DA-01 | HIGH | CLAUDE.md §2 "현 단계" 전체가 stale (PR#149 / Sprint4 완료·Sprint5 진입준비) | main=PR#225, ADR-045 standalone 대부분 구현됨 |
-| T-DA-02 | HIGH | CLAUDE.md §2 geocoding 로컬 포트 `8888` | `.env.example:58` = **9001** |
+| T-DA-02 | HIGH | CLAUDE.md §2 geocoding 로컬 포트 `8888` | `.env.example:58` = **12201** |
 | T-DA-03 | HIGH | CLAUDE.md ADR 현황 "001~046 / 다음 ADR-047" | `decisions.md` = **001~047 / 다음 048** |
 | T-DA-04 | MED | AGENTS.md "코드 작성 단계"(406~437) stale (Sprint4 완료 / PR#156) | 동일 drift |
 | T-DA-05 | MED | sprints/README.md "현 위치"(14~21) stale (PR#149 / Sprint5 🟡 진입준비) | Sprint5/ADR-045 작업 대부분 완료 |
 | T-DA-06 | MED | category 개수 "141건" 표기 | 코드 = **144** (`PLACE_CATEGORY_DEFINITIONS`) |
 | T-DA-07 | LOW | architecture.md 의존체인 다이어그램에서 `category` 계층 누락 | ADR-023 = `category → dto → …` |
-| T-DA-08 | LOW | decisions.md ADR-025 본문 "Next.js 15"/"port 8610"에 supersede 교차참조 없음 | 현재 = Next.js 16(ADR-036) / 포트 9012(ADR-047) |
+| T-DA-08 | LOW | decisions.md ADR-025 본문 "Next.js 15"/"port 8610"에 supersede 교차참조 없음 | 현재 = Next.js 16(ADR-036) / 포트 12305(ADR-047) |
 | T-DA-09 | LOW | decisions.md ADR-002 본문 의존체인이 `api`(폐기) 포함·`category` 누락 | ADR-020/023 반영 안 됨 |
 | T-DA-10 | LOW | decisions.md ADR-036 제목이 `v0.1.0` (본문 amendment는 v0.1.2 반영) | 현재 핀 = v0.1.2 |
 | T-DA-11 | INFO | openapi-admin-contract ↔ 구현 endpoint 전수 대조 미수행 | T-212a/T-212c로 위임 |
@@ -91,11 +91,11 @@
 - [ ] **T-DA-02** — `CLAUDE.md` §2 geocoding 로컬 기본 포트 `8888` stale.
   - **위치**: `CLAUDE.md` §2 "geocoding 정본: kraddr-geo REST(v2 …), 로컬 기본
     `http://127.0.0.1:8888`".
-  - **근거**: `.env.example:58` `KRTOUR_MAP_KRADDR_GEO_BASE_URL=http://127.0.0.1:9001`,
-    `:32` `KRTOUR_MAP_ADMIN_KRADDR_GEO_BASE_URL=http://127.0.0.1:9001`.
+  - **근거**: `.env.example:58` `KRTOUR_MAP_KRADDR_GEO_BASE_URL=http://127.0.0.1:12201`,
+    `:32` `KRTOUR_MAP_ADMIN_KRADDR_GEO_BASE_URL=http://127.0.0.1:12201`.
     `tasks.md` 체크포인트 #4, `AGENTS.md`, `journal.md:1151`("기본값에서 이전
-    `8888` 표기를 제거")도 모두 **9001**. CLAUDE.md만 누락된 sweep 잔재.
-  - **조치**: `8888` → `http://127.0.0.1:9001`.
+    `8888` 표기를 제거")도 모두 **12201**. CLAUDE.md만 누락된 sweep 잔재.
+  - **조치**: `8888` → `http://127.0.0.1:12201`.
 
 - [ ] **T-DA-03** — `CLAUDE.md` ADR 현황/다음 번호 stale.
   - **위치**: `CLAUDE.md` §2 ("ADR 현황: **001~046 모두 accepted** … 다음 후보
@@ -155,7 +155,7 @@
   `category → dto → core → infra → providers → client → cli`. §2 본문도 함께 확인.
 - [ ] **T-DA-08** — `decisions.md` ADR-025 본문이 "Next.js 15"(`:702`)·"`next dev
   --port 8610`"(`:769`)을 현행처럼 서술. 역사 기록은 유지하되 각 위치에 "→ 현재
-  기준: Next.js 16(ADR-036 amendment 2026-05-31) / 포트 9012(ADR-047)" 한 줄 추가
+  기준: Next.js 16(ADR-036 amendment 2026-05-31) / 포트 12305(ADR-047)" 한 줄 추가
   권장.
 - [ ] **T-DA-09** — `decisions.md` ADR-002 본문 의존체인(`:40` "dto → core → infra
   → providers → client → **api/cli**")이 `api`(ADR-020으로 폐기)를 포함하고
@@ -213,11 +213,11 @@
 - `tripmate-integration.md`는 상단에 **ADR-045 supersede 배너**가 이미 있음.
 - `architecture.md` 큰그림은 Docker 독립 프로그램 + OpenAPI 모델로 **최신**.
 - 포트 `8087`/`8610`은 `journal.md`/`docs/reports/*`(역사 로그)와 ADR-025/047
-  (superseded 맥락)에만 남아 있고 **현행 실행 문서에는 9011/9012 사용** — 정상.
+  (superseded 맥락)에만 남아 있고 **현행 실행 문서에는 12301/12305 사용** — 정상.
 - alembic 마이그레이션은 `0001`~`0016`까지 실제 존재(0016 = offline upload
   idempotency). 문서가 인용한 0007/0008/0009/0011/0012 등과 일치.
-- `.env.example` 포트(API 9011 / web 9012 / Dagster 9013 / Postgres 15433 /
-  kraddr-geo 9001 / RustFS 9003·9004)는 ADR-047 및 `AGENTS.md` 식별자 표와 일치.
+- `.env.example` 포트(API 12301 / web 12305 / Dagster 12302 / Postgres 5432 /
+  kraddr-geo 12201 / RustFS 12101·12105)는 ADR-047 및 `AGENTS.md` 식별자 표와 일치.
 
 ---
 

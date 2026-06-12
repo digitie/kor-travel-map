@@ -17,4 +17,4 @@ done
 
 exec python -m uvicorn krtour.map_admin.app:app \
   --host 0.0.0.0 \
-  --port "${KRTOUR_MAP_ADMIN_PORT:-9011}"
+  --port "${KRTOUR_MAP_ADMIN_PORT:-12301}"

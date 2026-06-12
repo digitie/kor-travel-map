@@ -55,8 +55,8 @@
   §2.8/2.9). 따라서 **신규 수신 API(`POST /v1/features/suggestions`) 신설안은 중복으로
   철회** — ADR-051은 기존 change API를 전송 구간으로 승인 + 잔여 합의 5건
   (review_mode/idempotency/출처 태깅/admin 인증/closure) 확정으로 재정의(T-217c).
-  부수 발견: TripMate 측 "admin base = 9012" 가정은 오류(9012는 admin UI, admin
-  API는 9011 `/v1/admin/*`) — TripMate 정정 대상.
+  부수 발견: TripMate 측 "admin base = 12305" 가정은 오류(12305는 admin UI, admin
+  API는 12301 `/v1/admin/*`) — TripMate 정정 대상.
 
 ## D-03. tripmate-agent 후보 철회(reject/tombstone)의 krtour 라이프사이클 처리
 

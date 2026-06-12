@@ -53,6 +53,6 @@ COPY --chown=appuser:appuser docker/dagster.yaml /opt/dagster/dagster_home/dagst
 
 USER appuser
 
-EXPOSE 9013
+EXPOSE 12302
 
-CMD ["sh", "-c", "dagster-webserver -m krtour.map_dagster.definitions -h 0.0.0.0 -p ${KRTOUR_MAP_DAGSTER_PORT:-9013}"]
+CMD ["sh", "-c", "dagster-webserver -m krtour.map_dagster.definitions -h 0.0.0.0 -p ${KRTOUR_MAP_DAGSTER_PORT:-12302}"]

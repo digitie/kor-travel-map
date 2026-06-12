@@ -1,15 +1,15 @@
 # admin UI 화면별 점검 체크리스트 (T-218f)
 
-`krtour-map-admin` frontend(Next.js, 포트 9012)의 route 전수(현재 17)를 **운영 회귀·
+`krtour-map-admin` frontend(Next.js, 포트 12305)의 route 전수(현재 17)를 **운영 회귀·
 a11y·e2e 커버 관점에서 점검**하기 위한 체크리스트다. T-218(admin UI 상세 점검 + a11y/e2e 완비)의
 점검 항목을 화면 단위로 고정하고, 현재 e2e 커버 상태를 매핑한다.
 
 > 정본 계획: `docs/reports/t-218-admin-ui-hardening-plan-2026-06-10.md`.
 > 2026-06-11 시나리오/연계/realtime 재점검:
 > `docs/reports/admin-ui-scenario-linkage-recheck-2026-06-11.md`.
-> e2e 실행: **서버=WSL(`npm run dev` :9012), Playwright=Windows**(`docs/dev-environment.md`,
+> e2e 실행: **서버=WSL(`npm run dev` :12305), Playwright=Windows**(`docs/dev-environment.md`,
 > `playwright.config.ts` 머리말). admin/ops 스펙은 route-mock 기반이라 backend 없이도
-> 돈다. `/etl`만 실 backend(:9011, `/debug/etl`) 필요.
+> 돈다. `/etl`만 실 backend(:12301, `/debug/etl`) 필요.
 > 검증 게이트(프론트 PR): `gen:types:check`(drift 0) · `type-check` · `lint` ·
 > env 명시 `build` · Windows Playwright e2e.
 

@@ -39,7 +39,7 @@ uv pip install -e ".[dev,geo,providers]"
 uv pip install -e packages/krtour-map-admin
 
 # 실행 — 인증 없음, localhost 전용
-uvicorn krtour.map_admin.app:app --host 127.0.0.1 --port 9011 --reload
+uvicorn krtour.map_admin.app:app --host 127.0.0.1 --port 12301 --reload
 ```
 
 기본 host `127.0.0.1` (외부 노출 금지 default). `0.0.0.0` 바인드 시 경고
@@ -57,7 +57,7 @@ which node npm              # /home/.../.nvm/... 등 WSL 경로여야 함 (/mnt/
 cp .env.example .env.local
 $EDITOR .env.local           # NEXT_PUBLIC_VWORLD_API_KEY 설정
 npm install
-npm run dev                  # http://127.0.0.1:9012 (next dev)
+npm run dev                  # http://127.0.0.1:12305 (next dev)
 ```
 
 `node`/`npm`이 `/mnt/c/Program Files/nodejs/...`를 가리키면 Windows Node가 섞인
@@ -69,7 +69,7 @@ shadcn/ui + `@krtour/map-marker-react` (ADR-029). 자세한 사양:
 `../../docs/debug-ui-package.md` §14.
 
 운영 배포 (옵션 3가지 — `docs/debug-ui-package.md §14.3` 참조):
-- **A. standalone (default)**: `npm run build` + `npm run start` → 9012.
+- **A. standalone (default)**: `npm run build` + `npm run start` → 12305.
 - **B. FastAPI reverse proxy**: backend `/ui/*` → Next.js. `next.config.js`
   `basePath: '/ui'` + `output: 'standalone'`.
 - **C. static export**: `next build` + `next export` → `out/` static, FastAPI
@@ -82,9 +82,9 @@ shadcn/ui + `@krtour/map-marker-react` (ADR-029). 자세한 사양:
 | 변수 | 기본값 | 설명 |
 |------|--------|------|
 | `KRTOUR_MAP_ADMIN_HOST` | `127.0.0.1` | uvicorn 바인드 host (외부 노출 금지) |
-| `KRTOUR_MAP_ADMIN_PORT` | `9011` | uvicorn 포트 |
+| `KRTOUR_MAP_ADMIN_PORT` | `12301` | uvicorn 포트 |
 | `KRTOUR_MAP_ADMIN_RELOAD` | `false` | dev 모드 hot-reload |
-| `KRTOUR_MAP_ADMIN_CORS_ALLOW_ORIGINS` | `http://localhost:9012` | Next.js dev 서버 |
+| `KRTOUR_MAP_ADMIN_CORS_ALLOW_ORIGINS` | `http://localhost:12305` | Next.js dev 서버 |
 | `KRTOUR_MAP_ADMIN_FEATURES_ROUTES_ENABLED` | `true` | `/features/*` 조회 라우터 활성화 |
 | `KRTOUR_MAP_ADMIN_ADMIN_ROUTES_ENABLED` | unset | `/admin/*` 운영 라우터 활성화. unset이면 features flag를 따름 |
 | `KRTOUR_MAP_ADMIN_OPS_ROUTES_ENABLED` | unset | `/ops/*`, `/ops/dagster/*` 라우터 활성화. unset이면 features flag를 따름 |
@@ -108,8 +108,8 @@ shadcn/ui + `@krtour/map-marker-react` (ADR-029). 자세한 사양:
 | 변수 | 기본값 | 설명 |
 |------|--------|------|
 | `NEXT_PUBLIC_VWORLD_API_KEY` | (필수) | VWorld API key. `KRADDR_GEO_VWORLD_API_KEY` 공유 (ADR-025 보강). |
-| `NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API` | 개발 기본 `http://127.0.0.1:9011` | 백엔드 base URL. production에서는 명시 필수 |
-| `NEXT_PUBLIC_KRTOUR_MAP_DAGSTER_URL` | 개발 기본 `http://127.0.0.1:9013` | Dagster UI/embed base URL. production에서는 명시 필수 |
+| `NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API` | 개발 기본 `http://127.0.0.1:12301` | 백엔드 base URL. production에서는 명시 필수 |
+| `NEXT_PUBLIC_KRTOUR_MAP_DAGSTER_URL` | 개발 기본 `http://127.0.0.1:12302` | Dagster UI/embed base URL. production에서는 명시 필수 |
 
 메인 라이브러리 환경변수(`KRTOUR_MAP_PG_DSN`, `KRTOUR_MAP_OBJECT_STORE_*` 등)는
 그대로 사용한다. 디버그 UI는 메인 라이브러리의 settings를 상속한다.

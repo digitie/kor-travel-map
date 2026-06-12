@@ -338,11 +338,14 @@ GitHub branch protection (운영자 수동 설정):
 
 ## 9. Windows Git vs WSL 실행 흐름
 
-- `git`/브랜치/커밋/PR 준비는 Windows NTFS worktree에서 Windows Git(`git.exe`)로 수행한다.
-- `pytest`, `ruff`, `mypy`, `uvicorn`, `alembic`처럼 Linux 실행 환경이 필요한 작업은
-  NTFS 소스를 WSL ext4 샌드박스로 `rsync`한 뒤 실행한다.
+- 브랜치 전환, 커밋, push 같은 순수 Git 명령은 Windows NTFS worktree에서
+  Windows Git(`git.exe`)로 수행해도 된다.
+- 파일 조회·수정·테스트·lint·build·Docker·Python/Node/npm·`gh`/GitHub CLI는 WSL에서
+  `/mnt/f/dev/python-krtour-map-<agent>`로 이동해 실행한다.
+- Playwright e2e만 Windows 호스트에서 실행한다. 서버는 WSL/Docker 기준이다.
 - `data/`는 NTFS에 보관하고 git에는 넣지 않는다.
-- WSL 샌드박스의 `.git`은 원본이 아니다. Git source of truth는 NTFS다.
+- WSL ext4 mirror는 대량 I/O 성능·격리 필요 시의 선택 경로다. Git source of truth는
+  NTFS다.
 
 상세 절차는 `docs/dev-environment.md`.
 

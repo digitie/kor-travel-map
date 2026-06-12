@@ -91,7 +91,7 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
   `docs/regions-within-radius.md` (요약은 `adr045-open-decisions.md` D-11).
   `tl_scco_sig`(+ctprvn/emd) PostGIS 교차. 반환 `code`(sig_cd)는 krtour-map
   `sigungu_code`와 동일 체계(D-11 확인) — 매핑 불필요. 2026-06-03 기준 local
-  API `9001` smoke에서 `sigungu` `11650`(서초구) contains 응답을 확인했다.
+  API `12201` smoke에서 `sigungu` `11650`(서초구) contains 응답을 확인했다.
 - **T-206b** ✅ `infra/feature_update_repo.py` 신규 — 요청 생명주기:
   - `enqueue_feature_update_request(session, scope, providers, dataset_keys,
     update_policy, run_mode, priority, dry_run, operator, reason) -> FeatureUpdateRequest`
@@ -200,8 +200,8 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
 > 정본 서비스 목록: `openapi-admin-contract.md §2`. 파일 자체가 없음 → 신규.
 
 - **T-209a** `docker-compose.yml` — 서비스 6종(api/frontend/dagster-webserver/
-  dagster-daemon/postgres/선택 rustfs) + 네트워크 + 볼륨 + 포트(`api` 9011,
-  `frontend` 9012, Dagster 9013, RustFS API 9003/console 9004, Postgres host 15433) +
+  dagster-daemon/postgres/선택 rustfs) + 네트워크 + 볼륨 + 포트(`api` 12301,
+  `frontend` 12305, Dagster 12302, RustFS API 12101/console 12105, Postgres host 5432) +
   env(`KRTOUR_MAP_PG_DSN`/provider keys/RUSTFS). healthcheck + depends_on(기동 순서:
   postgres → migrate → api/dagster).
 - **T-209b** 기동 순서 스크립트 — postgres ready → `alembic upgrade head`(app DB

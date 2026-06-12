@@ -49,7 +49,7 @@ provider별 refresh policy/rate limit 상세는
 | `krtour-map-dagster-webserver` | Dagster UI |
 | `krtour-map-dagster-daemon` | schedules/sensors/runs |
 | `krtour-map-postgres` | 독립 PostgreSQL 16 + PostGIS 3.5 |
-| `krtour-map-rustfs` | 선택 객체 저장소. 로컬 표준 포트는 S3 API `9003`, console `9004` |
+| `krtour-map-rustfs` | 선택 객체 저장소. 로컬 표준 포트는 S3 API `12101`, console `12105` |
 
 PostgreSQL 기본 DB:
 
@@ -720,8 +720,8 @@ Query:
 {
   "data": {
     "status": "ok",
-    "dagster_url": "http://127.0.0.1:9013",
-    "graphql_url": "http://127.0.0.1:9013/graphql",
+    "dagster_url": "http://127.0.0.1:12302",
+    "graphql_url": "http://127.0.0.1:12302/graphql",
     "version": "1.13.7",
     "repository_count": 1,
     "job_count": 10,
@@ -793,8 +793,8 @@ Query:
 {
   "data": {
     "status": "ok",
-    "dagster_url": "http://127.0.0.1:9013",
-    "graphql_url": "http://127.0.0.1:9013/graphql",
+    "dagster_url": "http://127.0.0.1:12302",
+    "graphql_url": "http://127.0.0.1:12302/graphql",
     "checked_at": "2026-06-07T09:00:00Z",
     "run": {
       "run_id": "run-1",
@@ -834,8 +834,8 @@ embedded Dagster 화면이 로컬 첫 실행 커뮤니티 모달로 가려지지
 ```json
 {
   "status": "ok",
-  "dagster_url": "http://127.0.0.1:9013",
-  "graphql_url": "http://127.0.0.1:9013/graphql",
+  "dagster_url": "http://127.0.0.1:12302",
+  "graphql_url": "http://127.0.0.1:12302/graphql",
   "checked_at": "2026-06-05T09:00:00Z",
   "seen": true,
   "errors": []
