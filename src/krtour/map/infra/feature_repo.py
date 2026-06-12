@@ -328,7 +328,7 @@ WITH spatial_candidates AS MATERIALIZED (
     FROM feature.features
     WHERE deleted_at IS NULL
       AND coord IS NOT NULL
-      AND coord && x_extension.ST_MakeEnvelope(
+      AND coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
             CAST(:min_lon AS double precision), CAST(:min_lat AS double precision),
             CAST(:max_lon AS double precision), CAST(:max_lat AS double precision), 4326)
 )
@@ -366,7 +366,7 @@ FROM feature.features
 WHERE deleted_at IS NULL
   AND coord IS NOT NULL
   AND {code_col} IS NOT NULL
-  AND coord && x_extension.ST_MakeEnvelope(
+  AND coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
         CAST(:min_lon AS double precision), CAST(:min_lat AS double precision),
         CAST(:max_lon AS double precision), CAST(:max_lat AS double precision), 4326)
   AND (CAST(:kinds AS text[]) IS NULL OR kind = ANY(CAST(:kinds AS text[])))
@@ -465,7 +465,7 @@ WITH candidates AS (
         CAST(:bbox_enabled AS boolean) IS FALSE
         OR (
           coord IS NOT NULL
-          AND coord && x_extension.ST_MakeEnvelope(
+          AND coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
             CAST(:min_lon AS double precision),
             CAST(:min_lat AS double precision),
             CAST(:max_lon AS double precision),
@@ -516,7 +516,7 @@ candidates AS (
         CAST(:bbox_enabled AS boolean) IS FALSE
         OR (
           coord IS NOT NULL
-          AND coord && x_extension.ST_MakeEnvelope(
+          AND coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
             CAST(:min_lon AS double precision),
             CAST(:min_lat AS double precision),
             CAST(:max_lon AS double precision),
