@@ -2,6 +2,23 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-12 (codex) — T-221a-1 feature detail route 1차
+
+T-221 admin UI 연결성 보강의 첫 조각으로 feature first-class 상세 경로를 추가했다.
+
+- **Backend**: `GET /v1/admin/features/{feature_id}` 추가. feature core snapshot,
+  SourceRecord/SourceLink(raw payload 포함), data integrity issue, override,
+  feature version, change request, 선택적 `feature_files` metadata를 한 응답으로
+  aggregate한다. 아직 `feature.feature_files` 테이블이 없는 DB head는 빈 배열로 응답.
+- **Frontend**: `/features/[featureId]` route + `FeatureDetailView` 공통 컴포넌트 추가.
+  source/raw/issues/overrides/history/files/nearby/weather를 한 화면에 묶고,
+  `/features` 지도 panel과 `/admin/features` table/inspector에서 상세 URL로 링크.
+- **Contract**: admin OpenAPI + frontend generated type 갱신. user OpenAPI 표면 변경 없음.
+- **검증**: admin feature router/repo 단위 테스트 20 passed, frontend type-check,
+  ESLint, ruff, mypy, OpenAPI drift check, openapi-typescript check.
+- **잔여**: T-221a-2로 `/admin/features/new` 수동 작성 전용 흐름(지도 좌표 선택,
+  kraddr-geo geocode/reverse, kind별 detail form, duplicate 후보 확인)을 이어간다.
+
 ## 2026-06-12 (claude) — T-220 재배선 #395: MCST → CSV 파일 다운로드 주경로
 
 `python-mcst-api`가 CSV 파일 다운로드 주경로로 재편됨(provider #6/#7/#9,

@@ -73,6 +73,22 @@ type FeatureDetailEnvelopeResponse =
 export type FeatureWeatherResponse = FeatureSchemas["FeatureWeatherResponse"];
 export type WeatherCardData = FeatureSchemas["WeatherCardData"];
 export type WeatherMetric = FeatureSchemas["WeatherMetricOut"];
+export type FeaturesNearbyResponse = FeatureSchemas["FeaturesNearbyResponse"];
+export type NearbyFeatureSummary = FeatureSchemas["NearbyFeatureSummary"];
+
+type FeaturesNearbyQuery = NonNullable<
+  paths["/v1/features/nearby"]["get"]["parameters"]["query"]
+>;
+export type FeaturesNearbySort = NonNullable<FeaturesNearbyQuery["sort"]>;
+export type FeaturesNearbyParams = Omit<
+  FeaturesNearbyQuery,
+  "category" | "kind" | "provider" | "status"
+> & {
+  category?: string[];
+  kind?: string[];
+  provider?: string[];
+  status?: string[];
+};
 
 async function fetchFeatureDetail(featureId: string): Promise<FeatureDetail> {
   const body = await getJson<FeatureDetailEnvelopeResponse>(
@@ -114,6 +130,41 @@ export function useFeatureWeather(
   });
 }
 
+async function fetchNearbyFeatures(
+  params: FeaturesNearbyParams,
+): Promise<FeaturesNearbyResponse> {
+  return getJson<FeaturesNearbyResponse>(
+    pathWithQuery("/v1/features/nearby", {
+      lon: params.lon,
+      lat: params.lat,
+      radius_m: params.radius_m,
+      kind: params.kind,
+      category: params.category,
+      status: params.status,
+      provider: params.provider,
+      page_size: params.page_size,
+      cursor: params.cursor,
+      sort: params.sort,
+    }),
+  );
+}
+
+export function useNearbyFeatures(
+  params: FeaturesNearbyParams | null,
+  options?: { enabled?: boolean },
+) {
+  return useQuery<FeaturesNearbyResponse, Error>({
+    queryKey: ["features-nearby", params] as const,
+    queryFn: () => fetchNearbyFeatures(params as FeaturesNearbyParams),
+    enabled:
+      (options?.enabled ?? true) &&
+      params !== null &&
+      typeof params.lon === "number" &&
+      typeof params.lat === "number",
+    staleTime: 60_000,
+  });
+}
+
 // ── kind 필터 — backend가 받는 7종 (data-model.md §1 FeatureKind) ───────────
 
 export const FEATURE_KINDS = [
@@ -142,6 +193,9 @@ export type AdminFeatureIssue = FeatureSchemas["AdminFeatureIssueRecord"];
 export type AdminFeatureRecord = FeatureSchemas["AdminFeatureRecord"];
 export type AdminFeaturesListResponse =
   FeatureSchemas["AdminFeaturesListResponse"];
+export type AdminFeatureDetailResponse =
+  FeatureSchemas["AdminFeatureDetailResponse"];
+export type AdminFeatureDetailData = FeatureSchemas["AdminFeatureDetailData"];
 export type AdminFeaturesListParams = Omit<
   AdminFeaturesListQuery,
   "cursor" | "updated_from" | "updated_to"
@@ -190,6 +244,23 @@ export type AdminFeatureChangeListParams = Omit<
   q?: string;
   status?: AdminFeatureChangeStatus[];
 };
+
+function fetchAdminFeatureDetail(
+  featureId: string,
+): Promise<AdminFeatureDetailResponse> {
+  return getJson<AdminFeatureDetailResponse>(
+    `/v1/admin/features/${encodeURIComponent(featureId)}`,
+  );
+}
+
+export function useAdminFeatureDetail(featureId: string | null) {
+  return useQuery<AdminFeatureDetailResponse, Error>({
+    queryKey: ["admin-feature-detail", featureId] as const,
+    queryFn: () => fetchAdminFeatureDetail(featureId as string),
+    enabled: featureId !== null && featureId.length > 0,
+    staleTime: 30_000,
+  });
+}
 
 function fetchAdminFeatures(
   params: AdminFeaturesListParams = {},
@@ -306,6 +377,9 @@ export function useDeactivateAdminFeatureMutation() {
       void queryClient.invalidateQueries({
         queryKey: ["feature", variables.featureId],
       });
+      void queryClient.invalidateQueries({
+        queryKey: ["admin-feature-detail", variables.featureId],
+      });
     },
   });
 }
@@ -329,6 +403,9 @@ function invalidateFeatureChangeQueries(
   void queryClient.invalidateQueries({ queryKey: ["features"] });
   if (featureId) {
     void queryClient.invalidateQueries({ queryKey: ["feature", featureId] });
+    void queryClient.invalidateQueries({
+      queryKey: ["admin-feature-detail", featureId],
+    });
   }
 }
 

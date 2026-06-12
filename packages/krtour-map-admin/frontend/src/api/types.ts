@@ -281,7 +281,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Get Feature Detail Route */
+        get: operations["get_feature_detail_route_v1_admin_features__feature_id__get"];
         put?: never;
         post?: never;
         /** Delete Feature Route */
@@ -1259,6 +1260,321 @@ export interface components {
             operator?: string | null;
             /** Reason */
             reason: string;
+        };
+        /**
+         * AdminFeatureDetailData
+         * @description ``GET /admin/features/{feature_id}`` data.
+         */
+        AdminFeatureDetailData: {
+            /** Change Requests */
+            change_requests: components["schemas"]["AdminFeatureChangeRequestRecord"][];
+            feature: components["schemas"]["AdminFeatureDetailFeatureRecord"];
+            /** Files */
+            files: components["schemas"]["AdminFeatureDetailFileRecord"][];
+            /** Issues */
+            issues: components["schemas"]["AdminFeatureDetailIssueRecord"][];
+            /** Overrides */
+            overrides: components["schemas"]["AdminFeatureDetailOverrideRecord"][];
+            /** Sources */
+            sources: components["schemas"]["AdminFeatureDetailSourceRecord"][];
+            /** Versions */
+            versions: components["schemas"]["AdminFeatureDetailVersionRecord"][];
+        };
+        /**
+         * AdminFeatureDetailFeatureRecord
+         * @description Admin feature 상세 core snapshot.
+         */
+        AdminFeatureDetailFeatureRecord: {
+            /** Address */
+            address: {
+                [key: string]: unknown;
+            };
+            /** Admin Dong Code */
+            admin_dong_code?: string | null;
+            /** Category */
+            category: string;
+            /** Coord Precision Digits */
+            coord_precision_digits?: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Data Origin */
+            data_origin: string;
+            /** Data Version */
+            data_version: number;
+            /** Deleted At */
+            deleted_at?: string | null;
+            /** Detail */
+            detail: {
+                [key: string]: unknown;
+            };
+            /** Feature Id */
+            feature_id: string;
+            /** Kind */
+            kind: string;
+            /** Lat */
+            lat?: number | null;
+            /** Legal Dong Code */
+            legal_dong_code?: string | null;
+            /** Lon */
+            lon?: number | null;
+            /** Marker Color */
+            marker_color?: string | null;
+            /** Marker Icon */
+            marker_icon?: string | null;
+            /** Name */
+            name: string;
+            /** Parent Feature Id */
+            parent_feature_id?: string | null;
+            /** Raw Refs */
+            raw_refs: {
+                [key: string]: unknown;
+            }[];
+            /** Road Address Management No */
+            road_address_management_no?: string | null;
+            /** Road Name Code */
+            road_name_code?: string | null;
+            /** Sibling Group Id */
+            sibling_group_id?: string | null;
+            /** Sido Code */
+            sido_code?: string | null;
+            /** Sigungu Code */
+            sigungu_code?: string | null;
+            /** Status */
+            status: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Urls */
+            urls: {
+                [key: string]: unknown;
+            };
+            /** User Change Kind */
+            user_change_kind?: string | null;
+            /** User Change Reason */
+            user_change_reason?: string | null;
+            /** User Change Request Id */
+            user_change_request_id?: string | null;
+            /** User Change Status */
+            user_change_status?: string | null;
+            /** User Deleted At */
+            user_deleted_at?: string | null;
+            /** User Deleted By */
+            user_deleted_by?: string | null;
+        };
+        /**
+         * AdminFeatureDetailFileRecord
+         * @description Admin feature 상세 file metadata row.
+         */
+        AdminFeatureDetailFileRecord: {
+            /** Alt Text */
+            alt_text?: string | null;
+            /** Bucket */
+            bucket: string;
+            /** Byte Size */
+            byte_size?: number | null;
+            /** Checksum Sha256 */
+            checksum_sha256?: string | null;
+            /** Content Type */
+            content_type?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Dataset Key */
+            dataset_key?: string | null;
+            /** Display Order */
+            display_order: number;
+            /** File Id */
+            file_id: string;
+            /** File Type */
+            file_type: string;
+            /** Height */
+            height?: number | null;
+            /** Object Key */
+            object_key: string;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+            /** Provider */
+            provider?: string | null;
+            /** Public Url */
+            public_url?: string | null;
+            /** Role */
+            role: string;
+            /** Source Record Key */
+            source_record_key?: string | null;
+            /** Source Url */
+            source_url?: string | null;
+            /** Storage Backend */
+            storage_backend: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Width */
+            width?: number | null;
+        };
+        /**
+         * AdminFeatureDetailIssueRecord
+         * @description Admin feature 상세 issue row.
+         */
+        AdminFeatureDetailIssueRecord: {
+            /** Dataset Key */
+            dataset_key?: string | null;
+            /**
+             * Detected At
+             * Format: date-time
+             */
+            detected_at: string;
+            /** Issue Id */
+            issue_id: string;
+            /** Message */
+            message: string;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+            /** Provider */
+            provider?: string | null;
+            /** Resolved At */
+            resolved_at?: string | null;
+            /** Severity */
+            severity: string;
+            /** Source Record Key */
+            source_record_key?: string | null;
+            /** Status */
+            status: string;
+            /** Violation Type */
+            violation_type: string;
+        };
+        /**
+         * AdminFeatureDetailOverrideRecord
+         * @description Admin feature 상세 override row.
+         */
+        AdminFeatureDetailOverrideRecord: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By */
+            created_by?: string | null;
+            /** Field Path */
+            field_path: string;
+            /** Override Id */
+            override_id: string;
+            /** Override Value */
+            override_value: unknown;
+            /** Prevent Provider Reactivation */
+            prevent_provider_reactivation: boolean;
+            /** Reason */
+            reason?: string | null;
+            /** Source Record Key */
+            source_record_key?: string | null;
+            /** Source Value */
+            source_value: unknown;
+            /** Status */
+            status: string;
+        };
+        /**
+         * AdminFeatureDetailResponse
+         * @description ``GET /admin/features/{feature_id}`` 응답.
+         */
+        AdminFeatureDetailResponse: {
+            data: components["schemas"]["AdminFeatureDetailData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * AdminFeatureDetailSourceRecord
+         * @description Admin feature 상세 source/link row.
+         */
+        AdminFeatureDetailSourceRecord: {
+            /** Confidence */
+            confidence: number;
+            /** Dataset Key */
+            dataset_key: string;
+            /** Expires At */
+            expires_at?: string | null;
+            /**
+             * Fetched At
+             * Format: date-time
+             */
+            fetched_at: string;
+            /**
+             * Imported At
+             * Format: date-time
+             */
+            imported_at: string;
+            /** Is Primary Source */
+            is_primary_source: boolean;
+            /**
+             * Linked At
+             * Format: date-time
+             */
+            linked_at: string;
+            /** Match Method */
+            match_method: string;
+            /** Provider */
+            provider: string;
+            /** Raw Address */
+            raw_address?: string | null;
+            /** Raw Data */
+            raw_data: {
+                [key: string]: unknown;
+            };
+            /** Raw Latitude */
+            raw_latitude?: number | null;
+            /** Raw Longitude */
+            raw_longitude?: number | null;
+            /** Raw Name */
+            raw_name?: string | null;
+            /** Raw Payload Hash */
+            raw_payload_hash: string;
+            /** Source Entity Id */
+            source_entity_id: string;
+            /** Source Entity Type */
+            source_entity_type: string;
+            /** Source Record Key */
+            source_record_key: string;
+            /** Source Role */
+            source_role: string;
+            /** Source Version */
+            source_version?: string | null;
+        };
+        /**
+         * AdminFeatureDetailVersionRecord
+         * @description Admin feature 상세 version row.
+         */
+        AdminFeatureDetailVersionRecord: {
+            /** Change Kind */
+            change_kind: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By */
+            created_by?: string | null;
+            /** Feature Id */
+            feature_id: string;
+            /** Origin */
+            origin: string;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+            /** Request Id */
+            request_id?: string | null;
+            /** Version */
+            version: number;
         };
         /**
          * AdminFeatureIssueRecord
@@ -4796,6 +5112,44 @@ export interface operations {
                 };
             };
             /** @description request 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_feature_detail_route_v1_admin_features__feature_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminFeatureDetailResponse"];
+                };
+            };
+            /** @description feature 없음 */
             404: {
                 headers: {
                     [name: string]: unknown;

@@ -1,5 +1,27 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-12 Codex 작업 메모 — T-221a-1 feature detail route 1차
+
+T-221a의 feature 상세 경로 1차를 구현했다. `/features/[featureId]`가 새 first-class
+상세 화면이 되었고, inline 지도/admin 목록에서는 해당 상세 URL로 이동할 수 있다.
+
+- 백엔드: `GET /v1/admin/features/{feature_id}`를 추가했다. `feature.features`
+  core snapshot과 `source_records/source_links`, `data_integrity_violations`,
+  `feature_overrides`, `feature_versions`, `feature_change_requests`, 선택적
+  `feature_files` metadata를 한 응답으로 묶는다. `feature.feature_files` 테이블이 아직
+  없는 DB head에서는 빈 배열을 반환한다.
+- 프론트엔드: `FeatureDetailView` 공통 컴포넌트를 추가해 source raw payload, issue,
+  override, history, files, nearby, weather를 한 화면에 묶었다. `/features` 지도 패널과
+  `/admin/features` 목록/inspector에서 새 상세 경로로 링크한다.
+- OpenAPI/admin frontend type을 재생성했다. user OpenAPI 표면은 변하지 않는다.
+
+검증: admin feature router/repo 단위 테스트 20 passed, frontend type-check, ESLint,
+ruff, mypy, OpenAPI drift check, openapi-typescript check 통과.
+
+**다음 한 작업**: **T-221a-2** — `/admin/features/new` 전용 수동 작성 흐름. 지도 좌표
+선택, kraddr-geo geocode/reverse, kind별 detail form, duplicate 후보 확인을
+change-request 생성 앞단에 연결한다.
+
 ## 2026-06-12 claude 작업 메모 — T-220 재배선 (#395, MCST CSV 파일 다운로드)
 
 `python-mcst-api` 재편(provider #6/#7/#9 — KCISA OpenAPI 폐기, CSV 파일 다운로드

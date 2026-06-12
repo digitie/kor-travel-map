@@ -175,6 +175,142 @@ async def test_list_admin_features_builds_params_and_next_cursor() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_admin_feature_detail_aggregates_rows_without_feature_files_table() -> None:
+    feature_row = {
+        "feature_id": "feature-1",
+        "kind": "place",
+        "name": "광화문",
+        "category": "01070300",
+        "status": "active",
+        "lon": 126.9769,
+        "lat": 37.5759,
+        "coord_precision_digits": 5,
+        "address": '{"road": "서울특별시 종로구 세종대로 1"}',
+        "detail": '{"place_kind": "attraction"}',
+        "urls": '{"homepage": "https://example.test"}',
+        "raw_refs": '[{"source": "fixture"}]',
+        "legal_dong_code": "1111010100",
+        "road_name_code": None,
+        "road_address_management_no": None,
+        "admin_dong_code": "1111051500",
+        "sido_code": "11",
+        "sigungu_code": "11110",
+        "marker_icon": "landmark",
+        "marker_color": "P-01",
+        "parent_feature_id": None,
+        "sibling_group_id": None,
+        "data_origin": "provider",
+        "data_version": 0,
+        "user_change_kind": None,
+        "user_change_status": None,
+        "user_change_request_id": None,
+        "user_deleted_at": None,
+        "user_deleted_by": None,
+        "user_change_reason": None,
+        "created_at": _NOW,
+        "updated_at": _NOW,
+        "deleted_at": None,
+    }
+    source_row = {
+        "source_record_key": "sr-feature-1",
+        "provider": "python-mois-api",
+        "dataset_key": "mois_license_features_bulk",
+        "source_entity_type": "license_place",
+        "source_entity_id": "sr-feature-1",
+        "source_version": "20260603",
+        "source_role": "primary",
+        "match_method": "natural_key",
+        "confidence": 100,
+        "is_primary_source": True,
+        "raw_name": "광화문",
+        "raw_address": "서울특별시 종로구 세종대로 1",
+        "raw_longitude": 126.9769,
+        "raw_latitude": 37.5759,
+        "raw_payload_hash": "hash-1",
+        "raw_data": '{"id": "sr-feature-1"}',
+        "fetched_at": _NOW,
+        "imported_at": _NOW,
+        "expires_at": None,
+        "linked_at": _NOW,
+    }
+    issue_row = {
+        "issue_id": "issue-1",
+        "provider": "python-mois-api",
+        "dataset_key": "mois_license_features_bulk",
+        "source_record_key": "sr-feature-1",
+        "violation_type": "missing_address",
+        "severity": "warning",
+        "message": "주소 누락",
+        "payload": '{"field": "address"}',
+        "status": "open",
+        "detected_at": _NOW,
+        "resolved_at": None,
+    }
+    override_row = {
+        "override_id": "override-1",
+        "source_record_key": None,
+        "field_path": "status",
+        "source_value": '"active"',
+        "override_value": '"inactive"',
+        "prevent_provider_reactivation": True,
+        "status": "active",
+        "reason": "운영상 제외",
+        "created_by": "local-admin",
+        "created_at": _NOW,
+    }
+    version_row = {
+        "feature_id": "feature-1",
+        "version": 0,
+        "origin": "provider",
+        "change_kind": "load",
+        "payload": '{"name": "광화문"}',
+        "request_id": None,
+        "created_by": "provider",
+        "created_at": _NOW,
+    }
+    change_row = {
+        "request_id": "change-1",
+        "feature_id": "feature-1",
+        "action": "update",
+        "state": "applied",
+        "review_mode": "immediate",
+        "payload": '{"name": "광화문"}',
+        "reason": "사용자 수정",
+        "requested_by": "local-admin",
+        "reviewed_by": None,
+        "reviewed_at": None,
+        "applied_at": _NOW,
+        "created_at": _NOW,
+    }
+    session = _Session(
+        [
+            _Result([feature_row]),
+            _Result([source_row]),
+            _Result([issue_row]),
+            _Result([override_row]),
+            _Result([version_row]),
+            _Result([change_row]),
+            _Result([{"exists": False}]),
+        ]
+    )
+
+    detail = await repo.get_admin_feature_detail(
+        session,  # type: ignore[arg-type]
+        "feature-1",
+    )
+
+    assert detail is not None
+    assert detail.feature.raw_refs == [{"source": "fixture"}]
+    assert detail.sources[0].raw_data == {"id": "sr-feature-1"}
+    assert detail.issues[0].payload == {"field": "address"}
+    assert detail.overrides[0].override_value == "inactive"
+    assert detail.versions[0].payload == {"name": "광화문"}
+    assert detail.change_requests[0].payload == {"name": "광화문"}
+    assert detail.files == ()
+    assert "feature.feature_files" in session.calls[-1]["statement"]
+
+
+@pytest.mark.asyncio
 async def test_deactivate_feature_with_and_without_override() -> None:
     override_row = {
         "override_id": "override-1",
