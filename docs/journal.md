@@ -2,6 +2,15 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-12 (claude) — T-212e: pg_trgm `%` 연산자도 스키마 qualify (#410 후속)
+
+#410(공간 연산자) 머지·api 재배포 후 P99 재측정에서 `/features/search`가
+여전히 500 — `operator does not exist: character varying % text`. pg_trgm도
+`x_extension` 스키마라 **trigram `%` 연산자**가 같은 search_path 문제를
+가진다(#410 스캔이 coord/geom 문맥만 봐서 텍스트 연산자를 누락).
+`feature_repo` 2곳을 `OPERATOR(x_extension.%)`로 교체. live 검증: '박물관'
+trigram 1,646건 매칭. `SET LOCAL pg_trgm.similarity_threshold`는 GUC라 무관.
+
 ## 2026-06-12 (claude) — T-212e: 공간 연산자 스키마 qualify — live 500 수정
 
 T-212e live P99 측정에서 `/features/in-bounds`·`/features/search`가
