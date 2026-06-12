@@ -27,8 +27,8 @@
     - [x] T-221b — `/ops/import-jobs/[job_id]` 상세 + `ops.import_job_events`
           스키마/API + cancel/event 타임라인. feature-update/offline-upload/Dagster run 상세
           링크 포함(2026-06-12 Codex).
-    - [ ] T-221c — admin 실시간 전송. `WS /v1/ops/live` 다중화 topic과
-          job/request/upload/run별 WebSocket 또는 SSE 대체 경로 설계·구현.
+    - [x] T-221c — admin 실시간 전송. `WS /v1/ops/live` 다중화 topic과
+          job/request/upload/run별 WebSocket signal channel 구현(2026-06-12 Codex).
     - [ ] T-221d — provider 상세/refresh policy 보강. `/ops/providers` 행 상세 추적,
           provider_dataset update request 상세 링크, `provider_refresh_policies` 편집 UI.
           중복 `/admin/providers/{provider}/datasets/{dataset_key}/runs`는 만들지 않는다.

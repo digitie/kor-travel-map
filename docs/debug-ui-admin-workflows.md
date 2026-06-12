@@ -143,9 +143,10 @@ Frontend 작업 후에는 `react-doctor` 실행, 결과 검토, 개선 반영이
 `/admin/dagster`, `/ops/import-jobs`, `/ops/import-jobs/[job_id]`, `/ops/providers`,
 `/ops/consistency`, `/ops/logs`다.
 
-남은 핵심은 새 목록 추가보다 **실시간 event 연결과 provider 상세 추적**이다.
+남은 핵심은 새 목록 추가보다 **provider 상세 추적**이다.
 
-- `WS /v1/ops/live` 또는 SSE 대체 경로로 job/request/upload/run 이벤트를 실시간 전송한다.
+- `WS /v1/ops/live`는 T-221c에서 구현됐다. job/request/upload/run topic을
+  snapshot revision signal로 전송하고, frontend는 관련 query를 즉시 invalidate한다.
 - `/ops/logs`: system/API log는 구현됐고 job event는 import job 상세에 붙었다.
   운영자가 provider 실패를 한 화면에서 훑는 일반 error/event log는 후속 판단 대상이다.
 - `/ops/providers`: provider freshness list는 구현됐지만 provider/dataset 상세, refresh
@@ -823,17 +824,19 @@ T-200 full-load root/child job을 좁혀볼 수 있다. provider/dataset/date/so
 
 ### 12.4 진행 상태 업데이트 방식
 
-최소 구현:
+기본 구현(T-221c):
 
-- frontend가 `GET /ops/import-jobs/{job_id}`를 2초 간격으로 polling한다.
-- tab focus 시 즉시 refetch한다.
+- `WS /v1/ops/live`가 `import_jobs`, `import_job:{job_id}`,
+  `import_job_events:{job_id}`, `feature_update_requests`, `offline_uploads`,
+  `dagster_runs` topic을 다중화한다.
+- server는 DB trigger 없이 topic snapshot revision을 polling하고, 변경된 topic만
+  `snapshot`/`update` frame으로 전송한다.
+- frontend는 WebSocket payload를 화면 source of truth로 저장하지 않고,
+  TanStack Query invalidate signal로만 사용한다.
+- 기존 `GET /ops/import-jobs*` polling은 WebSocket이 막힌 환경의 fallback으로 유지한다.
 - `status`가 terminal(`done`, `failed`, `cancelled`)이면 polling을 멈춘다.
 - `/ops/import-jobs/[job_id]` frontend 상세 화면은 job payload, parent/batch/request/
   upload/Dagster 관련 링크, event timeline, cancel form을 제공한다.
-
-후속 확장:
-
-- `GET /ops/import-jobs/{job_id}/stream` SSE로 progress/event streaming.
 
 ### 12.5 취소
 
@@ -1549,6 +1552,7 @@ API module:
 - `src/api/features.ts`: `/features/*`, `/admin/features`.
 - `src/api/providers.ts`: `/admin/providers/*`.
 - `src/api/importJobs.ts`: `/ops/import-jobs/*`.
+- `src/api/live.ts`: `WS /ops/live` signal → TanStack Query invalidation.
 - `src/api/ops.ts`: `/ops/metrics`, `/ops/consistency/*`.
 - `src/api/dedup.ts`: `/admin/dedup-review/*`.
 - `src/api/issues.ts`: `/admin/issues/*`.
@@ -1727,7 +1731,8 @@ tradeoff 근거를 PR 설명이나 `docs/journal.md`에 남긴다.
    - `POST /admin/providers/{provider}/datasets/{dataset_key}/runs`
    - `/ops/import-jobs`
    - `/ops/import-jobs/{job_id}`
-   - cancel은 후속 `/admin/import-jobs/{job_id}/cancel` 쓰기 계약 필요.
+   - `/ops/import-jobs/{job_id}/cancel`
+   - `WS /ops/live`
 7. **Error log/events**
    - `ops.import_job_events` migration.
    - `/ops/error-logs`.

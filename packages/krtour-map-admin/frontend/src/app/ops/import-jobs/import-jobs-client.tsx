@@ -5,9 +5,11 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { type ImportJobStatus, useImportJobs } from "@/api/importJobs";
+import { useOpsLiveInvalidation } from "@/api/live";
 import { AdminShell } from "@/components/admin-shell";
 import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
@@ -64,19 +66,32 @@ export function ImportJobsClient({
     parent_job_id: parentJobId.trim() || undefined,
     page_size: 100,
   });
+  const live = useOpsLiveInvalidation({
+    topics: [
+      "import_jobs",
+      "feature_update_requests",
+      "offline_uploads",
+      "dagster_runs",
+    ],
+  });
 
   return (
     <AdminShell
       actions={
-        <Button
-          disabled={jobs.isFetching}
-          type="button"
-          variant="outline"
-          onClick={() => void jobs.refetch()}
-        >
-          <RefreshCwIcon data-icon="inline-start" />
-          새로고침
-        </Button>
+        <>
+          <Badge variant={live.state === "live" ? "default" : "outline"}>
+            {live.state}
+          </Badge>
+          <Button
+            disabled={jobs.isFetching}
+            type="button"
+            variant="outline"
+            onClick={() => void jobs.refetch()}
+          >
+            <RefreshCwIcon data-icon="inline-start" />
+            새로고침
+          </Button>
+        </>
       }
       description="ops.import_jobs 진행 상태와 batch/parent 연결을 확인합니다."
       section="Ops"

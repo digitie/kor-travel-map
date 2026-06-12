@@ -622,8 +622,12 @@ feature update request는 운영자가 쓰기 쉬운 높은 수준 API다.
 ## 7.1 Ops 조회 API
 
 T-207d 구현 상태: `krtour-map-admin`은 운영 화면이 필요한 DB 기반 summary와 목록을
-`/ops/*`로 제공한다. 이 API는 read-only다. import job 취소/재실행 같은 쓰기 작업은
-후속 쓰기 계약에서 다룬다. 현재 import job 조회 정본은 `/ops/import-jobs`다.
+`/ops/*`로 제공한다. import job 조회 정본은 `/ops/import-jobs`이며, active job
+취소는 `POST /ops/import-jobs/{job_id}/cancel`로 제공한다.
+
+실시간 signal 채널 `WS /ops/live`는 WebSocket이므로 `openapi.json` `paths`에는
+포함되지 않는다. REST DTO source of truth는 계속 아래 endpoint이며, live frame은
+admin frontend의 query invalidation signal로만 사용한다.
 
 ### `GET /ops/metrics`
 
@@ -689,6 +693,35 @@ queued/running job을 best-effort로 `cancelled` 전이한다. 이미 `done` / `
 - `reason`
 
 응답은 갱신된 `OpsImportJobRecord` envelope다.
+
+### `WS /ops/live` (OpenAPI 제외)
+
+Admin UI 내부망 전용 WebSocket signal 채널이다. query `topics`는 comma-separated이며,
+client command는 JSON object `{ "type": "subscribe" | "unsubscribe" | "replace" | "ping",
+"topics": [...] }`다. `poll_interval_ms`는 `1000..30000` 범위로 clamp된다.
+
+지원 topic:
+
+- `import_jobs`
+- `import_job:{job_id}`
+- `import_job_events:{job_id}`
+- `feature_update_requests`
+- `feature_update_request:{request_id}`
+- `offline_uploads`
+- `offline_upload:{upload_id}`
+- `dagster_runs`
+- `dagster_run:{run_id}`
+
+서버 frame:
+
+- `hello`: 연결 직후 현재 topic과 poll 간격.
+- `snapshot`: 최초 또는 topic 변경 직후 전체 topic snapshot.
+- `update`: revision이 바뀐 topic만 전송.
+- `heartbeat`: 변경이 없어도 연결 생존을 알림.
+- `error`: live snapshot 조회/command 오류.
+
+frontend는 frame `data`를 화면 상태로 직접 저장하지 않고, topic에 해당하는 TanStack
+Query key를 invalidate한다. WebSocket이 막힌 환경에서는 기존 REST polling이 fallback이다.
 
 ### `GET /ops/consistency/reports`
 
