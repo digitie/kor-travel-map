@@ -6,11 +6,30 @@
 
 ## 진행 중인 작업 인덱스 (열린 `[ ]` 항목)
 
-> 핵심 실행 4건(T-212e, T-221, T-222, T-223) + 외부/보류 항목 별도. 상세는 아래 각 섹션.
+> 핵심 실행 6건(T-212e 병행, T-224, T-221, T-222, T-223, T-225) + 외부/보류 항목 별도.
+> 상세는 아래 각 섹션.
 > 완료 이력은 [`tasks-done.md`](tasks-done.md).
 
 - **다음 (우선순위 순)**
-  - [ ] T-212e — 실데이터 전체 재적재 + offline upload 실데이터 검증 + 최종 리포트.
+  - [ ] T-212e — **실데이터 전체 재적재 + offline upload 실데이터 검증 + 최종 리포트**.
+        다른 agent가 병행 진행 중이다(2026-06-12 사용자 확인). 본 agent는 T-224/T-221/
+        T-222/T-223 작업 중에도 주기적으로 main/rebase 충돌을 확인하고, T-212e 결과가
+        머지되면 후속 T-225 closure 재검증에 반영한다.
+  - [ ] T-224 — **`tripmate-agent` → `krtour-ai-agent` provider 경계 재정의 + 상세 구현**.
+        사용자 결정(2026-06-12): `tripmate-agent`는 `krtour-ai-agent`로 이름을 바꾸고,
+        TripMate와의 직접 관계는 끊는다. TripMate의 `curated_trip_plans` 생성에는
+        `krtour-ai-agent`가 관여하지 않으며, YouTube/AI 후보 provider 관계는
+        **krtour-map ↔ krtour-ai-agent** 사이에만 둔다. 이 작업은 T-221 진입 전 선행한다.
+    - [ ] T-224a — 문서/ADR/계약 정본 재정렬: ADR-049/050, architecture,
+          provider-contract, external-apis, integration-map, Dagster 문서의
+          `tripmate-agent-youtube`/`TripMate-agent` 표기를 `krtour-ai-agent` 기준으로
+          바꾸고 TripMate curated plan flow에서 agent를 명시적으로 제외한다.
+    - [ ] T-224b — 코드 명명 clean cut: canonical provider/env/settings/resource/asset/
+          schedule/test/docstring을 `krtour-ai-agent` 기준으로 변경한다. 기존 실데이터가
+          없거나 마이그레이션 비용이 낮으면 구 provider/env 호환 shim은 만들지 않는다.
+    - [ ] T-224c — provider 상세 구현 보강: export 계약 readback, cursor/page guard,
+          reject/tombstone inactive 경로, evidence/provenance admin 노출, live smoke fixture와
+          Dagster 검증을 `krtour-ai-agent` repo 계약 기준으로 마감한다.
   - [ ] T-221 — **admin UI/UX 시나리오 연결성 + 실시간성 보강**. 정본 점검:
         `docs/reports/admin-ui-scenario-linkage-recheck-2026-06-11.md`.
     - [ ] T-221a — `/features/[feature_id]` 1급 상세 경로 + `/features/new` 또는
@@ -37,7 +56,9 @@
           krtour `openapi.user.json`에 표면이 들어간 뒤 구현.
   - [ ] T-223 — **curated_features + TripMate curated_trip_plans import 계약/구현**.
         정본 후보: `docs/curated-features.md`. `notice_plans`는 TripMate 호환 API
-        alias일 뿐 신규 정본명은 `curated_trip_plans`.
+        alias일 뿐 신규 정본명은 `curated_trip_plans`. 이 flow는 krtour-map REST와
+        TripMate 사이의 복사 계약이며, `krtour-ai-agent`는 curated trip plan 생성에
+        관여하지 않는다.
     - [x] T-223a — 문서 계약 정리(2026-06-12): 책/음식 테마 source 조사, overlay DB
           모델, REST/Admin UI/Dagster, TripMate 1:1 복사 계약.
     - [ ] T-223b — provider 보강: `python-mcst-api` 중고서점/아동서점,
@@ -48,52 +69,10 @@
           Dagster `curated_features` group, admin 선택/해제 UI.
     - [ ] T-223d — TripMate 연동(외부 repo): krtour REST 호출로
           `app.curated_trip_plans` / `app.curated_plan_pois` 복사, source version/etag 저장.
-  - [x] T-219 — **KMA weather Dagster 파이프라인 완결**. **T-219a~c 전부 완료
-        (2026-06-11)** — asset 5종(실황/초단기/단기/중기/특보) + KST schedule +
-        cursor/credential guard. 정본
-        `docs/reports/kma-mcst-provider-plan-2026-06-11.md` §2.
-    - [x] T-219a — 기반: weather 대상 격자/feature 매핑 조회(옵션 B). **완료
-          (2026-06-11)**: `parse_weather_extra_points`(lon,lat;… 파서 + 한국 bbox
-          검증) + settings 2필드(`kma_weather_extra_points`/
-          `kma_weather_max_grids_per_run` 1~500, 기본 50) +
-          `list_active_target_coords`(poi_cache_targets) +
-          `list_active_place_coords`(deleted_at IS NULL — D-12 read 정합).
-          LGT 메트릭은 기등록 확인(실측) — 노후 docstring만 정정.
-    - [x] T-219b — 초단기실황/초단기예보/단기예보 asset+schedule. **완료
-          (2026-06-11)**: `map_dagster.kma_weather` — asset 3종(`feature_weather_
-          kma_*`) + KST cron(45분/20·50분/02~23시 8회) + `kma_weather_client`
-          resource(credential guard) + cursor `base_datetime` skip/failure 기록 +
-          fake client 테스트 12종. `python-kma-api@ab1a0b8` 핀 활성화. KmaClient
-          모델↔Protocol shape 차이는 raw payload→row dataclass로 해소.
-    - [x] T-219c — 중기 + 특보. **완료(2026-06-11)**: mid asset(설정 주입
-          `kma_mid_region_features` JSON — 육상/기온 reg_id 분리, 미설정 skip,
-          `kma_datagokr_client` resource) + 특보 record resource
-          `kma_weather_alert_records`(전국 108, rolling window)→notice 적재
-          (종류/등급 title 토큰 스캔, region명=raw_address 위치 단서).
-          ※ ASOS/해수욕장(beach_*)/APIHub 표면 + 특보 구역별 fan-out·좌표
-          enrichment는 백로그 비고(1차 범위 외).
-  - [x] T-220 — **MCST(python-mcst-api) 신규 provider 풀스택**. **T-220a~c 전부
-        완료(2026-06-11)** — 변환/Dagster/fixture·문서. marker `P-12`,
-        `DATA_GO_KR_SERVICE_KEY` 공유. 정본 동 문서 §3 +
-        `docs/mcst-feature-etl.md`.
-    - [x] T-220a — `providers/mcst.py`. **완료(2026-06-11)**: slug 메타표
-          16종(`MCST_CULTURE_DATASETS` 14 + `MCST_LIBRARY_DATASETS` 2,
-          dataset_key `mcst_<slug>`) + 공용 `culture_records_to_bundles` +
-          `library_records_to_bundles`(한국어 컬럼 방언 관대 조회) + 단위 테스트
-          11종. **category 신설 불요**(실측 — 전부 기존 코드 매핑, place_kind가
-          세부 구분). marker P-12, 자연키 `name::address`, 이름/위치 단서 없는
-          row skip.
-    - [x] T-220b — Dagster 배선. **완료(2026-06-11)**: fetch 2종(`(slug, record)`
-          튜플 스트림, dataset당 `mcst_max_items_per_dataset` 상한) + record
-          resource 2종(live) + `mcst_features.py` asset 2종(slug별 분리 `_load`,
-          `McstLoadResult` 합산 metadata) + 주 1회 schedule 2종 + definitions
-          배선 + 테스트 8종/카운트 단언 갱신.
-    - [x] T-220c — fixture/문서. **완료(2026-06-11)**: ETL preview fixture 2종
-          (공용 변환 대표 — independent_bookstores/public_libraries) +
-          `docs/mcst-feature-etl.md` 신규 + external-apis §3.14 +
-          provider-contract §3/§12 + `python-mcst-api@d06e8d2` 핀 + CHANGELOG.
-          **dedup pair는 즉시 등록 안 함** — 실데이터(T-212e 이후) 매칭 품질
-          확인 후 재검토(etl 문서 §6).
+  - [ ] T-225 — **T-212e closure 재검증**. T-224/T-221/T-222/T-223 이후 main 기준으로
+        T-212e 실데이터 full reload/offline upload 결과를 한 번 더 대조한다. 다른 agent의
+        T-212e 결과가 이미 충분하면 재실행 대신 최신 provider/API 표면 포함 여부,
+        live row 수/P99, 실패 provider, offline upload 증거, 최종 리포트 링크를 확인한다.
 - **최근 완료**
   - [x] 2026-06-11 Codex admin UI/UX 시나리오·실시간성 재점검 + TripMate T-130 사양
         보강 — 문서/코드/TripMate T-130을 대조해
@@ -191,6 +170,7 @@
         `GET /v1/providers/{provider}/last-sync` 유지.
 - **Phase 7 — ADR-045 전체점검/튜닝 (ADR-045 잔여 task 완료 후 시작)**
   - [ ] T-212e
+  - [ ] T-225 — T-212e closure 재검증
 
 ## 진행 중
 
@@ -205,11 +185,13 @@ T-212b admin UI 완결성, T-212c API/error/log contract, T-212d seeded PostGIS
 Sprint 5 종료까지 남은 작업은
 `docs/reports/sprint5-final-task-breakdown-2026-06-07.md`를 정본으로 상세화했다.
 T-216 REST API 정합성 심화, TripMate-agent provider, T-212d 재측정/튜닝은 닫았다.
-현 기준 권장 순서는 **T-212e 실데이터 전체 재적재 → T-217a~g cross-repo 정합성
-결정 반영분 → T-210e TripMate client 생성 → Sprint 5 closure**였으나, T-217/T-210e는
-이미 닫혔다. 2026-06-11 재점검 후 새로 열린 후속은 **T-221 admin UI linkage/realtime**과
-**T-222 TripMate T-130 공개 뷰**다. T-207b는 사용자 결정에 따라 구현하지 않고,
-provider 강제 실행은 feature update request `provider_dataset` scope로 유도한다.
+T-217/T-210e도 닫혔다. 2026-06-12 사용자 재정렬 기준 T-212e는 다른 agent가
+병행 진행 중이며, 본 agent의 다음 순서는
+**T-224 krtour-ai-agent provider 경계/상세 구현 → T-221 admin UI linkage/realtime →
+T-222 TripMate T-130 공개 뷰 → T-223 curated_features/import → T-225 T-212e closure 재검증**이다.
+`krtour-ai-agent`는 TripMate와 직접 연동하지 않고, TripMate curated plan 생성 flow에도
+관여하지 않는다. T-207b는 사용자 결정에 따라 구현하지 않고, provider 강제 실행은
+feature update request `provider_dataset` scope로 유도한다.
 
 ### 현재 기준 보강 필요 체크포인트 (2026-06-03)
 

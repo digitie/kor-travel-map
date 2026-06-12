@@ -1,5 +1,23 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-12 Codex 작업 메모 — T-221~T-223 순서 재정렬 + krtour-ai-agent 선행
+
+사용자 지시로 `docs/tasks.md`/`docs/tasks-done.md`의 진행/완료 상태를 먼저 정리했다.
+
+- 완료된 T-219(KMA weather Dagster)와 T-220(MCST provider 풀스택)은
+  `docs/tasks-done.md`로 이동하고, 열린 작업 인덱스에서 제거했다.
+- T-212e는 다른 agent가 병행 진행 중인 작업으로 열린 인덱스에 유지한다. 본 agent는
+  T-224/T-221/T-222/T-223 진행 중 main rebase 충돌을 계속 확인한다.
+- 사용자 결정 반영: `tripmate-agent`는 `krtour-ai-agent`로 이름을 바꾸고 TripMate와의
+  직접 관계를 끊는다. TripMate의 `curated_trip_plans` 생성에는 `krtour-ai-agent`가
+  관여하지 않으며, AI 후보 provider 관계는 krtour-map ↔ krtour-ai-agent 사이에만 둔다.
+- 새 선행 작업 T-224를 추가했다. T-221 진입 전 `krtour-ai-agent` provider 경계/명명/
+  상세 구현을 마감한다.
+- T-221 → T-222 → T-223 순서 뒤에는 T-225로 T-212e closure 재검증을 한 번 더 둔다.
+
+**다음 한 작업**: **T-224** — `krtour-ai-agent` provider 경계 재정의 + 상세 구현.
+T-212e는 병행 진행 중이며, 완료 결과는 T-225 closure 재검증에서 다시 대조한다.
+
 ## 2026-06-12 Codex 작업 메모 — local/Docker 포트 재고정
 
 사용자 지시로 local/Docker 포트 기준을 새 고정값으로 정렬했다.

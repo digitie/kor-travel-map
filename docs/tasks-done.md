@@ -3,6 +3,47 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## Provider Dagster 완결 — KMA/MCST (2026-06-11, `T-219`/`T-220`)
+
+- [x] **T-219 — KMA weather Dagster 파이프라인 완결.**
+  T-219a~c 전부 완료. asset 5종(실황/초단기/단기/중기/특보) + KST schedule +
+  cursor/credential guard를 구현했다. 정본은
+  `docs/reports/kma-mcst-provider-plan-2026-06-11.md` §2.
+  - [x] **T-219a — weather 대상 격자/feature 매핑 조회 기반.**
+    `parse_weather_extra_points`(lon,lat;… 파서 + 한국 bbox 검증)와
+    `kma_weather_extra_points`/`kma_weather_max_grids_per_run` 설정,
+    `list_active_target_coords`(poi_cache_targets),
+    `list_active_place_coords`(deleted_at IS NULL — D-12 read 정합)를 추가했다.
+    LGT 메트릭은 기등록 확인 후 노후 docstring만 정정했다.
+  - [x] **T-219b — 초단기실황/초단기예보/단기예보 asset+schedule.**
+    `map_dagster.kma_weather` asset 3종, KST cron(45분/20·50분/02~23시 8회),
+    `kma_weather_client` resource(credential guard), cursor `base_datetime` skip/failure 기록,
+    fake client 테스트 12종을 추가했다. `python-kma-api@ab1a0b8` 핀 활성화.
+  - [x] **T-219c — 중기 + 특보.**
+    mid asset(설정 주입 `kma_mid_region_features` JSON — 육상/기온 reg_id 분리,
+    미설정 skip, `kma_datagokr_client` resource)과 특보 record resource
+    `kma_weather_alert_records`(전국 108, rolling window)→notice 적재를 구현했다.
+    ASOS/해수욕장(beach_*)/APIHub 표면 + 특보 구역별 fan-out·좌표 enrichment는
+    1차 범위 밖 백로그 비고로 남겼다.
+- [x] **T-220 — MCST(python-mcst-api) 신규 provider 풀스택.**
+  T-220a~c 전부 완료. 변환/Dagster/fixture·문서를 구현했고 marker `P-12`,
+  `DATA_GO_KR_SERVICE_KEY` 공유 기준을 문서화했다. 정본은 같은 리포트 §3과
+  `docs/mcst-feature-etl.md`.
+  - [x] **T-220a — `providers/mcst.py`.**
+    slug 메타표 16종(`MCST_CULTURE_DATASETS` 14 + `MCST_LIBRARY_DATASETS` 2,
+    dataset_key `mcst_<slug>`), 공용 `culture_records_to_bundles`,
+    `library_records_to_bundles`(한국어 컬럼 방언 관대 조회), 단위 테스트 11종을 추가했다.
+    category 신설 없이 기존 코드 매핑과 `place_kind` 세부 구분을 사용한다.
+  - [x] **T-220b — Dagster 배선.**
+    fetch 2종(`(slug, record)` 튜플 스트림, dataset당 `mcst_max_items_per_dataset` 상한),
+    record resource 2종(live), `mcst_features.py` asset 2종(slug별 분리 `_load`,
+    `McstLoadResult` 합산 metadata), 주 1회 schedule 2종, definitions 배선을 구현했다.
+  - [x] **T-220c — fixture/문서.**
+    ETL preview fixture 2종(공용 변환 대표 — independent_bookstores/public_libraries),
+    `docs/mcst-feature-etl.md`, external-apis §3.14, provider-contract §3/§12,
+    `python-mcst-api@d06e8d2` 핀, CHANGELOG를 갱신했다. dedup pair는 실데이터
+    매칭 품질 확인 후 재검토한다.
+
 ## Phase 6.7 — Feature 사용자 요청 CRUD/versioning (2026-06-08, `T-215`)
 
 - [x] **T-215a — place/event feature 추가·수정·삭제 admin API + versioning.**

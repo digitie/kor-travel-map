@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-12 (codex) — T-221~T-223 순서 재정렬 + T-224/T-225 등록
+
+사용자 지시에 따라 `docs/tasks.md`/`docs/tasks-done.md`를 먼저 정리했다.
+
+- 완료된 T-219(KMA weather Dagster)와 T-220(MCST provider 풀스택)은 열린 인덱스에서
+  제거하고 `tasks-done.md` 최신 완료 이력으로 이동.
+- T-212e는 다른 agent가 병행 진행 중인 작업으로 열린 인덱스에 유지.
+- `tripmate-agent` rename 결정에 맞춰 T-224를 새로 등록: `krtour-ai-agent` provider
+  경계/명명/상세 구현을 T-221보다 먼저 진행.
+- T-223에는 `krtour-ai-agent`가 TripMate `curated_trip_plans` 생성 flow에 관여하지
+  않는다는 경계를 명시.
+- T-221 → T-222 → T-223 이후 T-225로 T-212e closure 재검증을 한 번 더 수행하도록 추가.
+
 ## 2026-06-12 (codex) — ADR-047 포트 재고정 + Docker/runtime/docs 정렬
 
 사용자 지시에 따라 local/Docker 고정 포트를 재정렬했다. Postgres host는 표준 `5432`,
