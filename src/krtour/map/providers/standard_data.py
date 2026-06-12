@@ -11,6 +11,7 @@
 |-------------|-------------|------|--------|
 | ``datagokr_cultural_festivals`` | ``event`` | ``cultural_festivals_to_bundles`` | 2 (본 PR) |
 | ``datagokr_tourism_points`` | ``place`` | ``tourism_points_to_bundles`` | 5 |
+| ``standard_special_streets`` | ``place`` | ``special_streets_to_bundles`` | T-223b |
 
 ADR 참조
 --------
@@ -86,10 +87,12 @@ __all__ = [
     "CulturalFestivalItem",
     "PublicMuseumArtItem",
     "PublicParkingLotItem",
+    "PublicSpecialStreetItem",
     "PublicTouristAttractionItem",
     "cultural_festivals_to_bundles",
     "museums_to_bundles",
     "parking_lots_to_bundles",
+    "special_streets_to_bundles",
     "tourist_attractions_to_bundles",
     # 상수 (호출자가 source_role/marker 등 변경하고 싶을 때 참조)
     "DATASET_KEY_CULTURAL_FESTIVALS",
@@ -106,6 +109,9 @@ __all__ = [
     "DATASET_KEY_PARKING_LOTS",
     "PARKING_CATEGORY",
     "PARKING_MARKER_COLOR",
+    "DATASET_KEY_SPECIAL_STREETS",
+    "SPECIAL_STREET_CATEGORY",
+    "SPECIAL_STREET_MARKER_COLOR",
 ]
 
 
@@ -237,9 +243,7 @@ class CulturalFestivalItem(Protocol):
 # -- 단일 변환 ------------------------------------------------------------
 
 
-def _coordinate_or_none(
-    longitude: float | None, latitude: float | None
-) -> Coordinate | None:
+def _coordinate_or_none(longitude: float | None, latitude: float | None) -> Coordinate | None:
     """좌표 쌍 → ``Coordinate``. 결측이거나 검증 실패면 좌표 미상(None) 격리.
 
     표준데이터 live에는 한국 경계 밖 오타 좌표가 실존한다(T-212e 실측 —
@@ -294,13 +298,8 @@ async def _item_to_bundle(
         if resolved is not None and resolved.bjd_code is not None:
             geo = resolved
     bjd_code = geo.bjd_code if geo is not None else None
-    sigungu_code = (
-        (geo.sigungu_code if geo is not None else None)
-        or extract_sigungu_code(bjd_code)
-    )
-    sido_code = (
-        (geo.sido_code if geo is not None else None) or extract_sido_code(bjd_code)
-    )
+    sigungu_code = (geo.sigungu_code if geo is not None else None) or extract_sigungu_code(bjd_code)
+    sido_code = (geo.sido_code if geo is not None else None) or extract_sido_code(bjd_code)
 
     # 3) Address — 표시 텍스트는 item 원천(도로명/지번)을 정규화해 유지하고,
     #    행정코드/행정동명/우편번호 등은 reverse lookup 결과(geo)에서 채운다.
@@ -327,12 +326,8 @@ async def _item_to_bundle(
     raw_data: dict[str, Any] = {
         "fstvl_nm": item.fstvl_nm,
         "opar": item.opar,
-        "fstvl_start_date": (
-            item.fstvl_start_date.isoformat() if item.fstvl_start_date else None
-        ),
-        "fstvl_end_date": (
-            item.fstvl_end_date.isoformat() if item.fstvl_end_date else None
-        ),
+        "fstvl_start_date": (item.fstvl_start_date.isoformat() if item.fstvl_start_date else None),
+        "fstvl_end_date": (item.fstvl_end_date.isoformat() if item.fstvl_end_date else None),
         "fstvl_co": item.fstvl_co,
         "mnnst_nm": item.mnnst_nm,
         "auspc_instt_nm": item.auspc_instt_nm,
@@ -344,9 +339,7 @@ async def _item_to_bundle(
         "lnmadr": item.lnmadr,
         "latitude": str(item.latitude) if item.latitude is not None else None,
         "longitude": str(item.longitude) if item.longitude is not None else None,
-        "reference_date": (
-            item.reference_date.isoformat() if item.reference_date else None
-        ),
+        "reference_date": (item.reference_date.isoformat() if item.reference_date else None),
         "instt_code": item.instt_code,
         "instt_nm": item.instt_nm,
     }
@@ -515,16 +508,8 @@ async def cultural_festivals_to_bundles(
     - visitkorea enrichment(이미지 / 상세설명 / contentId)는 Sprint 2 끝물
       별도 PR — `festival_to_enrichment_links`에서 처리.
     """
-    geocoder = (
-        cached_reverse_geocoder(reverse_geocoder)
-        if reverse_geocoder is not None
-        else None
-    )
-    resolver = (
-        cached_address_resolver(address_resolver)
-        if address_resolver is not None
-        else None
-    )
+    geocoder = cached_reverse_geocoder(reverse_geocoder) if reverse_geocoder is not None else None
+    resolver = cached_address_resolver(address_resolver) if address_resolver is not None else None
     bundles: list[FeatureBundle] = []
     for item in items:
         bundle = await _item_to_bundle(
@@ -608,13 +593,8 @@ async def _museum_to_bundle(
         if resolved is not None and resolved.bjd_code is not None:
             geo = resolved
     bjd_code = geo.bjd_code if geo is not None else None
-    sigungu_code = (
-        (geo.sigungu_code if geo is not None else None)
-        or extract_sigungu_code(bjd_code)
-    )
-    sido_code = (
-        (geo.sido_code if geo is not None else None) or extract_sido_code(bjd_code)
-    )
+    sigungu_code = (geo.sigungu_code if geo is not None else None) or extract_sigungu_code(bjd_code)
+    sido_code = (geo.sido_code if geo is not None else None) or extract_sido_code(bjd_code)
     address = Address(
         road=road_text,
         legal=legal_text,
@@ -725,16 +705,8 @@ async def museums_to_bundles(
     각 bundle은 박물관/미술관 place Feature(category 0104xxxx) + SourceRecord + PRIMARY
     SourceLink. ``instt_code``가 없으면 ``name::road`` 파생키(ADR-009 ``::``).
     """
-    geocoder = (
-        cached_reverse_geocoder(reverse_geocoder)
-        if reverse_geocoder is not None
-        else None
-    )
-    resolver = (
-        cached_address_resolver(address_resolver)
-        if address_resolver is not None
-        else None
-    )
+    geocoder = cached_reverse_geocoder(reverse_geocoder) if reverse_geocoder is not None else None
+    resolver = cached_address_resolver(address_resolver) if address_resolver is not None else None
     return [
         await _museum_to_bundle(
             item,
@@ -782,13 +754,8 @@ async def _standard_place_to_bundle(
         if resolved is not None and resolved.bjd_code is not None:
             geo = resolved
     bjd_code = geo.bjd_code if geo is not None else None
-    sigungu_code = (
-        (geo.sigungu_code if geo is not None else None)
-        or extract_sigungu_code(bjd_code)
-    )
-    sido_code = (
-        (geo.sido_code if geo is not None else None) or extract_sido_code(bjd_code)
-    )
+    sigungu_code = (geo.sigungu_code if geo is not None else None) or extract_sigungu_code(bjd_code)
+    sido_code = (geo.sido_code if geo is not None else None) or extract_sido_code(bjd_code)
     address = Address(
         road=road_text,
         legal=legal_text,
@@ -858,9 +825,7 @@ async def _standard_place_to_bundle(
         confidence=100,
         is_primary_source=True,
     )
-    return FeatureBundle(
-        feature=feature, source_record=source_record, source_link=source_link
-    )
+    return FeatureBundle(feature=feature, source_record=source_record, source_link=source_link)
 
 
 # -- 관광지 (place, ADR-034 보조) -----------------------------------------
@@ -949,16 +914,8 @@ async def tourist_attractions_to_bundles(
     각 bundle은 관광지 place Feature(category 01000000) + SourceRecord + PRIMARY
     SourceLink. ``instt_code``가 없으면 ``name::road`` 파생키(ADR-009 ``::``).
     """
-    geocoder = (
-        cached_reverse_geocoder(reverse_geocoder)
-        if reverse_geocoder is not None
-        else None
-    )
-    resolver = (
-        cached_address_resolver(address_resolver)
-        if address_resolver is not None
-        else None
-    )
+    geocoder = cached_reverse_geocoder(reverse_geocoder) if reverse_geocoder is not None else None
+    resolver = cached_address_resolver(address_resolver) if address_resolver is not None else None
     return [
         await _tourist_to_bundle(
             item,
@@ -1011,8 +968,10 @@ async def _parking_to_bundle(
     name = item.prkplce_nm or ""
     road_text = normalize_korean_text(item.rdnmadr)
     legal_text = normalize_korean_text(item.lnmadr)
-    natural_key = item.prkplce_no or item.instt_code or "::".join(
-        [normalize_korean_text(name) or name, road_text or ""]
+    natural_key = (
+        item.prkplce_no
+        or item.instt_code
+        or "::".join([normalize_korean_text(name) or name, road_text or ""])
     )
     raw_data: dict[str, Any] = {
         "prkplce_no": item.prkplce_no,
@@ -1065,16 +1024,8 @@ async def parking_lots_to_bundles(
 
     안정키 ``prkplce_no``(없으면 ``instt_code``, 그것도 없으면 ``name::road`` 파생).
     """
-    geocoder = (
-        cached_reverse_geocoder(reverse_geocoder)
-        if reverse_geocoder is not None
-        else None
-    )
-    resolver = (
-        cached_address_resolver(address_resolver)
-        if address_resolver is not None
-        else None
-    )
+    geocoder = cached_reverse_geocoder(reverse_geocoder) if reverse_geocoder is not None else None
+    resolver = cached_address_resolver(address_resolver) if address_resolver is not None else None
     return [
         await _parking_to_bundle(
             item,
@@ -1084,3 +1035,133 @@ async def parking_lots_to_bundles(
         )
         for item in items
     ]
+
+
+# -- 지역특화거리 (place anchor, T-223b curated source) --------------------
+
+DATASET_KEY_SPECIAL_STREETS: Final[str] = "standard_special_streets"
+"""``source_records.dataset_key`` — 전국지역특화거리표준데이터."""
+
+_SPECIAL_STREET_ENTITY_TYPE: Final[str] = "special_street"
+SPECIAL_STREET_CATEGORY: Final[str] = PlaceCategoryCode.TOURISM.value
+"""``Feature.category`` — 개별 점포가 아닌 테마 구역 anchor이므로 관광 parent."""
+SPECIAL_STREET_PLACE_KIND: Final[str] = "theme_area_anchor"
+SPECIAL_STREET_MARKER_COLOR: Final[str] = "P-14"
+_DEFAULT_SPECIAL_STREET_ICON: Final[str] = "marker"
+
+
+@runtime_checkable
+class PublicSpecialStreetItem(Protocol):
+    """전국지역특화거리표준데이터 1 row 입력 shape (``PublicSpecialStreet``)."""
+
+    stret_nm: str | None
+    stret_intrcn: str | None
+    rdnmadr: str | None
+    lnmadr: str | None
+    latitude: float | None
+    longitude: float | None
+    stret_lt: float | None
+    stor_number: int | None
+    appn_year: int | None
+    phone_number: str | None
+    institution_nm: str | None
+    reference_date: date | None
+    instt_code: str | None
+    instt_nm: str | None
+    raw: Any
+
+
+async def _special_street_to_bundle(
+    item: PublicSpecialStreetItem,
+    *,
+    fetched_at: datetime,
+    reverse_geocoder: ReverseGeocoder | None,
+    address_resolver: AddressResolver | None,
+) -> FeatureBundle:
+    name = item.stret_nm or ""
+    road_text = normalize_korean_text(item.rdnmadr)
+    legal_text = normalize_korean_text(item.lnmadr)
+    normalized_name = normalize_korean_text(name) or name
+    natural_key = "::".join([normalized_name, road_text or legal_text or ""])
+    raw_data: dict[str, Any] = {
+        "stret_nm": item.stret_nm,
+        "stret_intrcn": item.stret_intrcn,
+        "rdnmadr": item.rdnmadr,
+        "lnmadr": item.lnmadr,
+        "latitude": str(item.latitude) if item.latitude is not None else None,
+        "longitude": str(item.longitude) if item.longitude is not None else None,
+        "stret_lt": item.stret_lt,
+        "stor_number": item.stor_number,
+        "appn_year": item.appn_year,
+        "phone_number": item.phone_number,
+        "institution_nm": item.institution_nm,
+        "reference_date": item.reference_date.isoformat()
+        if item.reference_date is not None
+        else None,
+        "instt_code": item.instt_code,
+        "instt_nm": item.instt_nm,
+    }
+    return await _standard_place_to_bundle(
+        name=normalized_name,
+        natural_key=natural_key,
+        dataset_key=DATASET_KEY_SPECIAL_STREETS,
+        entity_type=_SPECIAL_STREET_ENTITY_TYPE,
+        category=SPECIAL_STREET_CATEGORY,
+        place_kind=SPECIAL_STREET_PLACE_KIND,
+        road_text=road_text,
+        legal_text=legal_text,
+        latitude=item.latitude,
+        longitude=item.longitude,
+        phone_raw=item.phone_number,
+        facility_info={
+            "stret_intrcn": normalize_korean_text(item.stret_intrcn),
+            "stret_lt": item.stret_lt,
+            "stor_number": item.stor_number,
+            "appn_year": item.appn_year,
+            "institution_nm": normalize_korean_text(item.institution_nm),
+            "instt_code": item.instt_code,
+            "instt_nm": normalize_korean_text(item.instt_nm),
+            "reference_date": raw_data["reference_date"],
+        },
+        raw_data=raw_data,
+        raw_name=item.stret_nm,
+        default_icon=_DEFAULT_SPECIAL_STREET_ICON,
+        marker_color=SPECIAL_STREET_MARKER_COLOR,
+        fetched_at=fetched_at,
+        reverse_geocoder=reverse_geocoder,
+        address_resolver=address_resolver,
+    )
+
+
+async def special_streets_to_bundles(
+    items: Iterable[PublicSpecialStreetItem],
+    *,
+    fetched_at: datetime,
+    reverse_geocoder: ReverseGeocoder | None = None,
+    address_resolver: AddressResolver | None = None,
+) -> list[FeatureBundle]:
+    """전국지역특화거리표준데이터 items → place anchor ``FeatureBundle``.
+
+    특화거리는 개별 POI가 아니라 거리/구역 메타 source다. T-223b에서는 geometry가
+    없는 원천 좌표를 ``theme_area_anchor`` place로 보존하고, 후속 curated overlay가
+    TripMate 복사 시 ``tripmate_relation='theme_area_anchor'``로 해석한다.
+    """
+    geocoder = cached_reverse_geocoder(reverse_geocoder) if reverse_geocoder is not None else None
+    resolver = cached_address_resolver(address_resolver) if address_resolver is not None else None
+    bundles: list[FeatureBundle] = []
+    for item in items:
+        name = normalize_korean_text(item.stret_nm)
+        road_text = normalize_korean_text(item.rdnmadr)
+        legal_text = normalize_korean_text(item.lnmadr)
+        coord = _coordinate_or_none(item.longitude, item.latitude)
+        if name is None or (coord is None and road_text is None and legal_text is None):
+            continue
+        bundles.append(
+            await _special_street_to_bundle(
+                item,
+                fetched_at=fetched_at,
+                reverse_geocoder=geocoder,
+                address_resolver=resolver,
+            )
+        )
+    return bundles

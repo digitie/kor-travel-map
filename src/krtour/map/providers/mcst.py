@@ -1,20 +1,20 @@
 """``krtour.map.providers.mcst`` — 문체부 파일데이터(CSV) → place FeatureBundle.
 
-(T-220 재배선, #395) ``python-mcst-api``가 KCISA OpenAPI에서 **CSV 파일 다운로드
-주경로**로 재편됨(provider #6/#7/#9, ``@ba471ee``)에 따라 ``FileDataClient``
+(T-220 재배선, #395 + T-223b) ``python-mcst-api``가 KCISA OpenAPI에서 **CSV 파일
+다운로드 주경로**로 재편됨(provider #6/#7/#9/#11, ``@c011f6e``)에 따라 ``FileDataClient``
 (**keyless**)의 ``iter_csv(slug)``가 주는 CSV dict row를 place ``FeatureBundle``로
 정규화한다. provider client/카탈로그는 별도 라이브러리가 제공(ADR-006 — 본 모듈은
 변환 순수 함수).
 
-적재 12 dataset은 컬럼 방언 4종으로 묶인다(2026-06-12 live 전수 CSV 실측):
+적재 13 dataset은 컬럼 방언 4종으로 묶인다(2026-06-12 live 전수 CSV 실측):
 
 - ``kcisa_common`` — TITLE(또는 PLACENAME)/ADDRESS/TEL/URL/COORDINATES/
   CATEGORY1-3 대문자 컬럼 8종. ``leisure_classes_csv``는 좌표 컬럼이 없어 주소
   단서만, ``media_famous_places_csv``는 ``PLACENAME`` + ``MEDIATITLE`` 보조.
 - ``cntc_resrce`` — CNTC_RESRCE_ID/TITLE/ADDRESS/CONTACT_POINT/COORDINATES 2종
   (독립서점/북카페).
-- ``split_coord`` — FCLTY_NM/FCLTY_ROAD_NM_ADDR/FCLTY_LA/FCLTY_LO/TEL_NO 1종
-  (아동서점).
+- ``split_coord`` — FCLTY_NM/FCLTY_ROAD_NM_ADDR/FCLTY_LA/FCLTY_LO/TEL_NO 2종
+  (아동서점/중고서점).
 - ``korean_address`` — 지역/이름/사업자/소재지 한국어 컬럼·좌표 없음 1종
   (골프장 현황, ``지역``+``소재지`` 합성 주소 단서).
 
@@ -24,9 +24,9 @@
 ``public_libraries``(도서관 통계 — 시설 디렉토리 아님; 구 ODCloud 디렉토리
 경로는 provider 재편으로 소멸 — 도서관 디렉토리 재적재는 후속 과제).
 
-category는 전부 **기존 코드**(T-220a 결정 재사용 + 신규 2종도 기존 코드로 흡수
-— 아동서점은 서점류와 동일 계열, 골프장은 ``01080100``), marker는 문화 계열
-1색 ``P-12``.
+category는 전부 **기존 코드**(T-220a 결정 재사용 + 신규 3종도 기존 코드로 흡수
+— 아동서점/중고서점은 서점류와 동일 계열, 골프장은 ``01080100``), marker는 문화
+계열 1색 ``P-12``.
 
 안정 식별자가 없어 자연키는 ``name::address``(정규화 후, ADR-009 ``::``).
 ``COORDINATES``는 실측 2형식("N37.5, E126.9" N/E 접두 lat-lon 순 / "35.8 , 128.6"
@@ -221,12 +221,19 @@ MCST_FILE_DATASETS: Final[dict[str, McstDatasetSpec]] = {
             "북카페",
             "cntc_resrce",
         ),
-        # ── 분리좌표 방언 (1종) — 서점류와 동일 계열 ──────────────────────
+        # ── 분리좌표 방언 (2종) — 서점류와 동일 계열 ──────────────────────
         _spec(
             "children_bookstores_csv",
             PlaceCategoryCode.TOURISM_CULTURAL_FACILITY,
             "children_bookstore",
             "아동서점",
+            "split_coord",
+        ),
+        _spec(
+            "used_bookstores_csv",
+            PlaceCategoryCode.TOURISM_CULTURAL_FACILITY,
+            "used_bookstore",
+            "중고서점",
             "split_coord",
         ),
         # ── 한국어 주소-only (1종) — 좌표 없음, 지역+소재지 합성 주소 ─────
@@ -240,7 +247,7 @@ MCST_FILE_DATASETS: Final[dict[str, McstDatasetSpec]] = {
         ),
     )
 }
-"""파일데이터 적재 12 dataset slug 메타표 (#395 — 실측 헤더 기준)."""
+"""파일데이터 적재 13 dataset slug 메타표 (#395 + T-223b — 실측 헤더 기준)."""
 
 MCST_EXCLUDED_FILE_DATASETS: Final[dict[str, str]] = {
     "tourism_attractions_csv": (
@@ -271,10 +278,7 @@ _KOREA_LAT_MAX: Final[float] = 43.0
 
 
 def _in_korea_bbox(lon: float, lat: float) -> bool:
-    return (
-        _KOREA_LON_MIN <= lon <= _KOREA_LON_MAX
-        and _KOREA_LAT_MIN <= lat <= _KOREA_LAT_MAX
-    )
+    return _KOREA_LON_MIN <= lon <= _KOREA_LON_MAX and _KOREA_LAT_MIN <= lat <= _KOREA_LAT_MAX
 
 
 def _validated_lonlat(lon: float, lat: float) -> tuple[float, float] | None:
@@ -383,9 +387,7 @@ def _extract_kcisa_common(row: Mapping[str, Any]) -> _ExtractedRow:
         raw_address=_row_text(row, ("ADDRESS",)),
         lonlat=parse_kcisa_coordinates(_row_text(row, ("COORDINATES",))),
         facility_info={
-            "source_category": _joined_categories(
-                row, ("CATEGORY1", "CATEGORY2", "CATEGORY3")
-            ),
+            "source_category": _joined_categories(row, ("CATEGORY1", "CATEGORY2", "CATEGORY3")),
             "tel": _aux_text(row, ("TEL",)),
             "url": _aux_text(row, ("URL",)),
             "media_title": _row_text(row, ("MEDIATITLE",)),
@@ -411,9 +413,7 @@ def _extract_cntc_resrce(row: Mapping[str, Any]) -> _ExtractedRow:
 def _extract_split_coord(row: Mapping[str, Any]) -> _ExtractedRow:
     lat = _row_float(row, ("FCLTY_LA",))
     lon = _row_float(row, ("FCLTY_LO",))
-    lonlat = (
-        _validated_lonlat(lon, lat) if lon is not None and lat is not None else None
-    )
+    lonlat = _validated_lonlat(lon, lat) if lon is not None and lat is not None else None
     return _ExtractedRow(
         name=_row_text(row, ("FCLTY_NM",)),
         raw_address=_row_text(row, ("FCLTY_ROAD_NM_ADDR",)),
@@ -447,9 +447,7 @@ def _extract_korean_address(row: Mapping[str, Any]) -> _ExtractedRow:
     )
 
 
-_DIALECT_EXTRACTORS: Final[
-    dict[McstDialect, Callable[[Mapping[str, Any]], _ExtractedRow]]
-] = {
+_DIALECT_EXTRACTORS: Final[dict[McstDialect, Callable[[Mapping[str, Any]], _ExtractedRow]]] = {
     "kcisa_common": _extract_kcisa_common,
     "cntc_resrce": _extract_cntc_resrce,
     "split_coord": _extract_split_coord,
@@ -483,12 +481,9 @@ async def _resolve_address(
         bjd_code=bjd_code,
         admin_dong_code=geo.admin_dong_code if geo is not None else None,
         sigungu_code=(
-            (geo.sigungu_code if geo is not None else None)
-            or extract_sigungu_code(bjd_code)
+            (geo.sigungu_code if geo is not None else None) or extract_sigungu_code(bjd_code)
         ),
-        sido_code=(
-            (geo.sido_code if geo is not None else None) or extract_sido_code(bjd_code)
-        ),
+        sido_code=((geo.sido_code if geo is not None else None) or extract_sido_code(bjd_code)),
         zipcode=geo.zipcode if geo is not None else None,
         sido_name=geo.sido_name if geo is not None else None,
         sigungu_name=geo.sigungu_name if geo is not None else None,
@@ -560,9 +555,7 @@ def _build_bundle(
         confidence=100,
         is_primary_source=True,
     )
-    return FeatureBundle(
-        feature=feature, source_record=source_record, source_link=source_link
-    )
+    return FeatureBundle(feature=feature, source_record=source_record, source_link=source_link)
 
 
 async def file_rows_to_bundles(
@@ -580,11 +573,7 @@ async def file_rows_to_bundles(
     """
     spec = MCST_FILE_DATASETS[slug]
     extractor = _DIALECT_EXTRACTORS[spec.dialect]
-    geocoder = (
-        cached_reverse_geocoder(reverse_geocoder)
-        if reverse_geocoder is not None
-        else None
-    )
+    geocoder = cached_reverse_geocoder(reverse_geocoder) if reverse_geocoder is not None else None
     bundles: list[FeatureBundle] = []
     for row in rows:
         extracted = extractor(row)

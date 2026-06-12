@@ -36,6 +36,15 @@ from krtour.map.providers.airkorea import (
     air_quality_stations_to_bundles,
     air_quality_to_weather_values,
 )
+from krtour.map.providers.datagokr_file_data import (
+    DATAGOKR_FILEDATA_BOOK_MARKER_COLOR,
+    DATAGOKR_FILEDATA_DATASETS,
+    DATAGOKR_FILEDATA_FOOD_MARKER_COLOR,
+    DATAGOKR_FILEDATA_PROVIDER_NAME,
+    DataGoKrFileDataDatasetSpec,
+    DataGoKrFileDataRecord,
+    file_data_rows_to_bundles,
+)
 from krtour.map.providers.khoa import (
     BEACH_CATEGORY,
     BEACH_MARKER_COLOR,
@@ -200,6 +209,7 @@ from krtour.map.providers.standard_data import (
     DATASET_KEY_CULTURAL_FESTIVALS,
     DATASET_KEY_MUSEUMS,
     DATASET_KEY_PARKING_LOTS,
+    DATASET_KEY_SPECIAL_STREETS,
     DATASET_KEY_TOURIST_ATTRACTIONS,
     FESTIVAL_CATEGORY,
     FESTIVAL_MARKER_COLOR,
@@ -208,16 +218,20 @@ from krtour.map.providers.standard_data import (
     MUSEUM_MARKER_COLOR,
     PARKING_CATEGORY,
     PARKING_MARKER_COLOR,
+    SPECIAL_STREET_CATEGORY,
+    SPECIAL_STREET_MARKER_COLOR,
     STANDARD_DATA_PROVIDER_NAME,
     TOURIST_ATTRACTION_CATEGORY,
     TOURIST_MARKER_COLOR,
     CulturalFestivalItem,
     PublicMuseumArtItem,
     PublicParkingLotItem,
+    PublicSpecialStreetItem,
     PublicTouristAttractionItem,
     cultural_festivals_to_bundles,
     museums_to_bundles,
     parking_lots_to_bundles,
+    special_streets_to_bundles,
     tourist_attractions_to_bundles,
 )
 from krtour.map.providers.visitkorea import (
@@ -259,6 +273,20 @@ __all__ = [
     "DATASET_KEY_PARKING_LOTS",
     "PARKING_CATEGORY",
     "PARKING_MARKER_COLOR",
+    # standard_data 특화거리 (T-223b curated source)
+    "PublicSpecialStreetItem",
+    "special_streets_to_bundles",
+    "DATASET_KEY_SPECIAL_STREETS",
+    "SPECIAL_STREET_CATEGORY",
+    "SPECIAL_STREET_MARKER_COLOR",
+    # data.go.kr fileData (T-223b curated source)
+    "DataGoKrFileDataRecord",
+    "DataGoKrFileDataDatasetSpec",
+    "file_data_rows_to_bundles",
+    "DATAGOKR_FILEDATA_PROVIDER_NAME",
+    "DATAGOKR_FILEDATA_DATASETS",
+    "DATAGOKR_FILEDATA_BOOK_MARKER_COLOR",
+    "DATAGOKR_FILEDATA_FOOD_MARKER_COLOR",
     # airkorea 대기질 (T-RV-55d, ADR-034 보조 — weather kind + WeatherValue)
     "AirQualityStationItem",
     "AirQualityMeasurementItem",
