@@ -110,6 +110,7 @@ shadcn/ui + `@krtour/map-marker-react` (ADR-029). 자세한 사양:
 | `NEXT_PUBLIC_VWORLD_API_KEY` | (필수) | VWorld API key. `KRADDR_GEO_VWORLD_API_KEY` 공유 (ADR-025 보강). |
 | `NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API` | 개발 기본 `http://127.0.0.1:12301` | 백엔드 base URL. production에서는 명시 필수 |
 | `NEXT_PUBLIC_KRTOUR_MAP_DAGSTER_URL` | 개발 기본 `http://127.0.0.1:12302` | Dagster UI/embed base URL. production에서는 명시 필수 |
+| `NEXT_PUBLIC_KRADDR_GEO_BASE_URL` | 개발 기본 `http://127.0.0.1:12201` | 수동 feature 작성 화면의 kraddr-geo v2 geocode/reverse base URL. production에서는 명시 필수 |
 
 메인 라이브러리 환경변수(`KRTOUR_MAP_PG_DSN`, `KRTOUR_MAP_OBJECT_STORE_*` 등)는
 그대로 사용한다. 디버그 UI는 메인 라이브러리의 settings를 상속한다.

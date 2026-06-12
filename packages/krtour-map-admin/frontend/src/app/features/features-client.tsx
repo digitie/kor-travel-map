@@ -2,7 +2,7 @@
 
 import { createMarkerElement } from "@krtour/map-marker-react";
 import "maplibre-vworld/style.css";
-import maplibregl, { LngLatBounds, type StyleSpecification } from "maplibre-gl";
+import maplibregl, { LngLatBounds } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
   GitCompareArrowsIcon,
@@ -48,92 +48,16 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
+import { buildVWorldStyle, isVWorldApiKeyConfigured } from "@/lib/vworld-style";
 import { useMapStore, type FeatureViewMode } from "@/state/map";
 
 const VWORLD_KEY = process.env.NEXT_PUBLIC_VWORLD_API_KEY;
-const VWORLD_ATTRIBUTION = "공간정보 오픈플랫폼 브이월드";
-const VWORLD_IMAGERY_LAYERS = new Set<VWorldLayerType>(["Hybrid", "Satellite"]);
-
-type VWorldLayerType = "Base" | "gray" | "midnight" | "Hybrid" | "Satellite";
 
 interface Bbox {
   min_lon: number;
   min_lat: number;
   max_lon: number;
   max_lat: number;
-}
-
-function buildStyle(): StyleSpecification {
-  if (VWORLD_KEY && VWORLD_KEY !== "CHANGE_ME") {
-    return getClientVWorldStyle(VWORLD_KEY, "Base");
-  }
-  return {
-    version: 8,
-    sources: {},
-    layers: [
-      {
-        id: "bg",
-        type: "background",
-        paint: { "background-color": "#edf1f5" },
-      },
-    ],
-  };
-}
-
-function getVWorldTileUrl(apiKey: string, layerType: VWorldLayerType): string {
-  const extension = layerType === "Satellite" ? "jpeg" : "png";
-  const layerName = layerType === "gray" ? "white" : layerType;
-  return `https://api.vworld.kr/req/wmts/1.0.0/${encodeURIComponent(
-    apiKey.trim(),
-  )}/${layerName}/{z}/{y}/{x}.${extension}`;
-}
-
-function getVWorldMaxZoom(layerType: VWorldLayerType): number {
-  return VWORLD_IMAGERY_LAYERS.has(layerType) ? 18 : 19;
-}
-
-function getClientVWorldStyle(
-  apiKey: string,
-  layerType: VWorldLayerType,
-): StyleSpecification {
-  const maxzoom = getVWorldMaxZoom(layerType);
-  const sources: StyleSpecification["sources"] = {};
-  const layers: StyleSpecification["layers"] = [];
-
-  const appendRasterLayer = (
-    sourceId: string,
-    layerId: string,
-    sourceLayerType: VWorldLayerType,
-  ) => {
-    sources[sourceId] = {
-      type: "raster",
-      tiles: [getVWorldTileUrl(apiKey, sourceLayerType)],
-      tileSize: 256,
-      attribution: VWORLD_ATTRIBUTION,
-      maxzoom,
-    };
-    layers.push({
-      id: layerId,
-      type: "raster",
-      source: sourceId,
-      minzoom: 0,
-    });
-  };
-
-  if (layerType === "Hybrid") {
-    appendRasterLayer(
-      "vworld-satellite",
-      "vworld-satellite-layer",
-      "Satellite",
-    );
-  }
-  appendRasterLayer(`vworld-${layerType}`, `vworld-${layerType}-layer`, layerType);
-
-  return {
-    version: 8,
-    sources,
-    layers,
-  };
 }
 
 function boundsToBbox(bounds: LngLatBounds): Bbox {
@@ -279,7 +203,7 @@ export function FeaturesClient() {
     if (containerRef.current === null) return;
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: buildStyle(),
+      style: buildVWorldStyle(VWORLD_KEY),
       center: [viewport.lon, viewport.lat],
       zoom: viewport.zoom,
       attributionControl: { compact: true },
@@ -469,6 +393,12 @@ export function FeaturesClient() {
               ref={containerRef}
               className="absolute inset-0 h-full w-full"
               data-testid="map-canvas-container"
+              style={{
+                height: "100%",
+                inset: 0,
+                position: "absolute",
+                width: "100%",
+              }}
             />
             {selectedFeatureId ? (
               <FeatureDetailPanel
@@ -543,7 +473,7 @@ export function FeaturesClient() {
         </TabsContent>
       </Tabs>
 
-      {!VWORLD_KEY || VWORLD_KEY === "CHANGE_ME" ? (
+      {!isVWorldApiKeyConfigured(VWORLD_KEY) ? (
         <Alert className="mx-4 mb-4">
           <AlertTitle>VWorld key 미설정</AlertTitle>
           <AlertDescription>

@@ -388,6 +388,13 @@ export function FeatureChangeRequestsClient() {
             <ClipboardListIcon data-icon="inline-start" />
             목록
           </Link>
+          <Link
+            className={cn(buttonVariants({ variant: "outline" }))}
+            href="/admin/features/new"
+          >
+            <PlusIcon data-icon="inline-start" />
+            새 작성
+          </Link>
           <Button
             disabled={changes.isFetching}
             type="button"

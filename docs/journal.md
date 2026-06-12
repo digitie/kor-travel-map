@@ -2,6 +2,26 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-12 (codex) — T-221a-2 수동 feature 작성 흐름
+
+T-221a feature 상세/수동 작성 흐름을 닫았다.
+
+- **Frontend route**: `/admin/features/new` 추가. 지도 좌표 선택, 중심 좌표 적용,
+  `place`/`event` kind별 detail form, 주소/code 필드, extra JSON 병합, 기존
+  `POST /v1/admin/features` change-request mutation 제출을 한 화면에 묶었다.
+- **kraddr-geo**: `NEXT_PUBLIC_KRADDR_GEO_BASE_URL` 기반 브라우저 helper 추가.
+  REST v2 `POST /v2/geocode`, `POST /v2/reverse` 후보를 좌표·주소·행정코드 필드로
+  적용한다. 순수 정규화 함수는 Vitest로 회귀 테스트.
+- **중복 후보**: 좌표와 `radius_m`이 유효하면 `/v1/features/nearby`로 active/
+  inactive/hidden 후보를 조회하고 feature 상세 링크를 제공한다.
+- **지도 보정**: MapLibre가 mount 시 붙이는 `maplibregl-map` CSS가 Tailwind
+  `absolute`를 이기는 문제를 새 작성 화면과 기존 `/features` 지도에서 inline sizing으로
+  보정했다.
+- **문서**: frontend `.env.example`, `krtour-map-admin` README,
+  `docs/debug-ui-package.md`에 `NEXT_PUBLIC_KRADDR_GEO_BASE_URL`을 추가.
+- **검증**: frontend type-check, ESLint, Vitest 15 passed, React Doctor no issues,
+  Next production build, in-app Browser DOM/canvas/좌표 상호작용 확인.
+
 ## 2026-06-12 (codex) — T-221a-1 feature detail route 1차
 
 T-221 admin UI 연결성 보강의 첫 조각으로 feature first-class 상세 경로를 추가했다.

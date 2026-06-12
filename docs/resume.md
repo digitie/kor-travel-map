@@ -1,5 +1,28 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-12 Codex 작업 메모 — T-221a-2 수동 feature 작성 흐름
+
+T-221a의 두 번째 조각으로 `/admin/features/new` 전용 수동 작성 화면을 추가했다.
+
+- 지도 좌표 선택: MapLibre/VWorld fallback 지도에서 좌표를 선택하거나 중심 좌표를
+  적용할 수 있다. 기존 `/features` 지도와 새 작성 화면 모두 MapLibre가 붙이는
+  `maplibregl-map` CSS와 Tailwind `absolute` 충돌을 피하도록 inline sizing을 보정했다.
+- kraddr-geo 연동: `NEXT_PUBLIC_KRADDR_GEO_BASE_URL` 기반 브라우저 helper를 추가해
+  REST v2 `POST /v2/geocode`, `POST /v2/reverse` 후보를 주소/code 필드로 적용한다.
+- 중복 후보: 좌표와 `radius_m`이 유효하면 기존 `/v1/features/nearby`로 active/
+  inactive/hidden 후보를 보여주고, feature detail 링크로 바로 이동할 수 있다.
+- kind별 detail form: `place`와 `event` 생성에 맞춘 구조화 필드와 extra JSON 병합
+  지점을 제공하고, 최종 제출은 기존 `POST /v1/admin/features` change-request
+  mutation만 호출한다.
+- 진입점: `/admin/features`, `/admin/features/change-requests`에서 새 작성 화면으로
+  이동할 수 있다.
+
+검증: frontend type-check, ESLint, Vitest 15 passed, React Doctor no issues,
+Next production build, in-app Browser DOM/canvas/좌표 상호작용 확인 통과.
+
+**다음 한 작업**: **T-221b** — `/ops/import-jobs/[job_id]` 상세와
+`ops.import_job_events` 스키마/API/event timeline/cancel 연결.
+
 ## 2026-06-12 Codex 작업 메모 — T-221a-1 feature detail route 1차
 
 T-221a의 feature 상세 경로 1차를 구현했다. `/features/[featureId]`가 새 first-class

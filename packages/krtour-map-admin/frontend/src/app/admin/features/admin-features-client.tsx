@@ -4,6 +4,7 @@ import {
   AlertTriangleIcon,
   EyeIcon,
   ExternalLinkIcon,
+  PlusIcon,
   RefreshCwIcon,
   SearchIcon,
   XCircleIcon,
@@ -210,15 +211,24 @@ export function AdminFeaturesClient() {
   return (
     <AdminShell
       actions={
-        <Button
-          disabled={features.isFetching}
-          type="button"
-          variant="outline"
-          onClick={refresh}
-        >
-          <RefreshCwIcon data-icon="inline-start" />
-          새로고침
-        </Button>
+        <>
+          <Link
+            className={cn(buttonVariants({ variant: "outline" }))}
+            href="/admin/features/new"
+          >
+            <PlusIcon data-icon="inline-start" />
+            새 작성
+          </Link>
+          <Button
+            disabled={features.isFetching}
+            type="button"
+            variant="outline"
+            onClick={refresh}
+          >
+            <RefreshCwIcon data-icon="inline-start" />
+            새로고침
+          </Button>
+        </>
       }
       description="운영자용 feature 목록, 상세, weather, 단건 비활성화 표면입니다."
       section="Admin"

@@ -359,6 +359,7 @@ type drift 부채 0).
 | `NEXT_PUBLIC_VWORLD_API_KEY` | VWorld API key. **`KRADDR_GEO_VWORLD_API_KEY`와 동일 값 공유** (ADR-025 사용자 보강 1차 + 2차 2026-05-25). frontend 빌드/런타임 주입. |
 | `NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API` | 백엔드 API base URL (개발: `http://127.0.0.1:12301`) |
 | `NEXT_PUBLIC_KRTOUR_MAP_DAGSTER_URL` | Dagster UI/embed base URL (개발: `http://127.0.0.1:12302`) |
+| `NEXT_PUBLIC_KRADDR_GEO_BASE_URL` | 수동 feature 작성 화면의 kraddr-geo REST v2 geocode/reverse base URL (개발: `http://127.0.0.1:12201`) |
 | `KRTOUR_MAP_ADMIN_DAGSTER_URL` | backend가 Dagster GraphQL을 조회할 때 쓰는 Dagster webserver base URL. 로컬 기본 `http://127.0.0.1:12302`, Docker API 컨테이너 기본 `http://dagster:12302` |
 | `KRTOUR_MAP_ADMIN_DAGSTER_ALLOWED_HOSTS` | backend Dagster GraphQL 호출 host allowlist. 기본은 `["127.0.0.1","localhost","::1","dagster"]`이며, 운영 Dagster host를 별도로 쓰면 URL과 함께 명시한다 |
 | `KRTOUR_MAP_ADMIN_DAGSTER_REPOSITORY_NAME` | offline upload load GraphQL launch selector의 repositoryName. 기본 `__repository__` |
