@@ -128,9 +128,11 @@ providers = [
   # "python-kasi-api     @ git+https://github.com/digitie/python-kasi-api.git@<sha>",
   #
   # ── Sprint 5 — 박물관/미술관 / mcst enrichment / standard data ────────
-  # T-220b: Dagster fetcher가 CultureOpenApiClient/DataGoFileApiClient를 lazy
-  # import — runtime 의존 활성화 (origin/master d06e8d2).
-  "python-mcst-api @ git+https://github.com/digitie/python-mcst-api.git@d06e8d2de1aac9eb336a711d4cacbaf0aa512d22",
+  # T-220 재배선(#395): provider가 CSV 파일 다운로드 주경로로 재편(provider
+  # #6/#7) — Dagster fetcher가 keyless FileDataClient를 lazy import.
+  # 핀 ba471ee = 카탈로그 재편(#7) + 빈 params query 박탈 수정(#9) 포함
+  # origin/master.
+  "python-mcst-api @ git+https://github.com/digitie/python-mcst-api.git@ba471ee6c87f9ab29dbe617c9d31b19fbcc7ebbd",
   # data.go.kr-standard 5종은 본 라이브러리 + python-datagokr-api 경유 (ADR-042).
 ]
 

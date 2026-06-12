@@ -102,9 +102,8 @@ system
 | `kma_ultra_short_nowcast` | python-kma-api | 초단기실황 |
 | `kma_mid_forecast` | python-kma-api | 중기예보 |
 | `kma_weather_alerts` | python-kma-api | 특보 |
-| `mcst_<slug>` (16종) | python-mcst-api | KCISA 14(`mcst_independent_bookstores` 등, 공통 CultureRecord) + ODCloud 도서관 2(`mcst_public_libraries`/`mcst_small_libraries`). 메타표 `providers.mcst.MCST_{CULTURE,LIBRARY}_DATASETS` |
+| `mcst_<slug>` (12종) | python-mcst-api | 파일데이터 CSV 12종(`mcst_world_restaurants_csv`/`mcst_independent_bookstores_csv`/`mcst_children_bookstores_csv`/`mcst_golf_courses_status` 등, 컬럼 방언 4종). 메타표 `providers.mcst.MCST_FILE_DATASETS`. 제외 3종(`tourism_attractions_csv`/`recommended_travel_destinations_csv`/`public_libraries` — 기사형/통계)은 `MCST_EXCLUDED_FILE_DATASETS` + `docs/mcst-feature-etl.md` §3 (#395) |
 | `mcst_used_bookstores` | python-mcst-api (후보) | 전국 중고서점 및 운영정보. curated source 보강 후보 |
-| `mcst_children_bookstores` | python-mcst-api 또는 python-datagokr-api (후보) | 전국 아동서점 상세운영정보. 파일데이터 기반 후보 |
 | `datagokr_seoul_bookstores` | python-datagokr-api (후보) | 서울특별시 책방(서점) 현황정보 |
 | `datagokr_gyeonggi_muslim_friendly_restaurants` | python-datagokr-api (후보) | 경기도 무슬림 친화 음식점 |
 | `datagokr_ansan_world_restaurants` | python-datagokr-api (후보) | 안산 세계맛집(다문화 세계음식점) |
@@ -151,11 +150,13 @@ system
 ### 3.1 curated source 후보
 
 테마형 source는 [`docs/curated-features.md`](curated-features.md)가 정본이다. 현재
-구현된 `mcst_<slug>` 16종은 `feature.curated_source_rules`의 기본 후보로 바로 쓸 수
+구현된 `mcst_<slug>` 12종은 `feature.curated_source_rules`의 기본 후보로 바로 쓸 수
 있고, 책·음식 확장 source는 provider 라이브러리 보강 뒤 편입한다.
 
-- `python-mcst-api` 우선 후보: 중고서점, 아동서점. 이미 구현된 독립서점·카페가 있는
-  서점·세계음식점·도서관 계열과 같은 문화정보원 source 성격이다.
+- `python-mcst-api` 우선 후보: 중고서점. 이미 구현된 독립서점·카페가 있는 서점·
+  아동서점·세계음식점 계열과 같은 문화정보원 source 성격이다(아동서점은 #395에서
+  `mcst_children_bookstores_csv`로 구현됨 — 도서관 디렉토리는 provider 재편으로
+  소멸, 후속 과제).
 - `python-datagokr-api` 우선 후보: 서울 책방, 경기도 무슬림 친화 음식점, 안산 세계맛집,
   제주 향토음식점.
 - `data.go.kr-standard` 후보: 전국지역특화거리표준데이터. 거리명·좌표·점포수·관리기관을
@@ -183,7 +184,7 @@ system
 | python-krheritage-api | place, area, event | primary | 주 (place/area), 일 (event) | media → RustFS |
 | python-kasi-api | (calendar) | (system) | 주 1회 | 공휴일/달력 (TripMate utility) |
 | python-datagokr-api (data.go.kr-standard) | event, place, route | primary | 표준데이터별 | 5종 dataset bounded. 본 lib에서 직접 사용 (ADR-042) — 위 첫 행 참조 |
-| python-mcst-api | place | enrichment | 일 | 독립서점/북카페/도서관 — MOIS에 enrichment |
+| python-mcst-api | place | primary | 주 (파일데이터 CSV) | keyless 파일 다운로드(#395). 세계음식점/서점류/레저·캠핑/미디어 촬영지/골프장 등 12 dataset — MOIS dedup pair는 실데이터 확인 후 (`docs/mcst-feature-etl.md` §7) |
 | kakao-local-api | place | enrichment | on-demand | 전화번호 보강 |
 | naver-search-api | place | enrichment | on-demand | 전화번호 보강 |
 | google-places-api-new | place | enrichment | on-demand | 전화번호 보강 (Text Search New) |
@@ -337,15 +338,16 @@ async with AsyncKrtourMapClient(engine=engine, file_store=store, providers={...}
 
 ## 8. enrichment provider 처리
 
-`kakao-local-api`, `naver-search-api`, `google-places-api-new`,
-`python-mcst-api`는 enrichment 전용. 다음 규약:
+`kakao-local-api`, `naver-search-api`, `google-places-api-new`는 enrichment
+전용. (`python-mcst-api`는 T-220부터 primary place provider — §2 표 참조.)
+다음 규약:
 
 - 새 feature를 만들지 않는다 — 기존 feature를 찾아서 `SourceLink
   (source_role='enrichment')` + 필드 보강.
 - 보강 대상은 명시적으로 제한 (예: place 전화번호만, 리뷰 링크만).
 - 자체 좌표/주소는 신뢰도 낮음 — 기존 `coord`/`address`를 덮어쓰지 않는다
   (`source_role='correction'`로 명시 시에만 가능).
-- `match_method`는 `'place_phone_search'`, `'mcst_natural_key'` 등 구체적으로.
+- `match_method`는 `'place_phone_search'` 등 구체적으로.
 
 ## 9. weather provider 처리
 
@@ -433,7 +435,7 @@ def test_no_provider_wrapper_classes():
 | python-krairport-api | `@b885413` | (Sprint 3 PR) | — | 공항 운항·날씨 |
 | python-mois-api | `@bc6f742` | (Sprint 4 PR) | — | ADR-024 canonical name 정정. 4단계 lifecycle |
 | python-kasi-api | placeholder | (Sprint 4 PR) | — | KASI 영업주기 |
-| python-mcst-api | `@d06e8d2` | `McstCultureItem` + slug 메타표 16종 (T-220a) | T-220a~c | KCISA 14 + ODCloud 도서관 2 — asset 2종(slug별 분리 적재). dedup pair는 실데이터 확인 후 등록 검토(`docs/mcst-feature-etl.md` §6) |
+| python-mcst-api | `@ba471ee` | slug 메타표 12종 + 방언 4종 + `parse_kcisa_coordinates` (#395) | T-220a~c → #395 재배선 | CSV 파일 다운로드 주경로(keyless `FileDataClient`, provider #6/#7/#9). 적재 12 + 제외 3(기사형/통계 — `MCST_EXCLUDED_FILE_DATASETS`). asset 1종(slug별 분리 적재). dedup pair는 실데이터 확인 후 등록 검토(`docs/mcst-feature-etl.md` §7) |
 
 **최신 sha 갱신 절차**:
 1. provider 저장소에서 안정 commit sha 확인 (사용자 모니터링).

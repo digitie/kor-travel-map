@@ -227,12 +227,14 @@ class KrtourMapSettings(BaseSettings):
         ),
     )
     mcst_max_items_per_dataset: int = Field(
-        default=5000,
+        default=50000,
         ge=1,
         le=100000,
         description=(
-            "MCST(KCISA/ODCloud) dataset당 1 run 최대 record 수(T-220b) — "
-            "이상 응답/페이지 루프 방어. env ``KRTOUR_MAP_MCST_MAX_ITEMS_PER_DATASET``."
+            "MCST 파일데이터 CSV dataset당 1 run 최대 row 수(#395) — 이상 "
+            "응답(비정상 거대 CSV) 방어. 기본 50000은 2026-06-12 live 실측 최대 "
+            "(leisure_activity_facilities_csv 24,537행)의 약 2배 여유. "
+            "env ``KRTOUR_MAP_MCST_MAX_ITEMS_PER_DATASET``."
         ),
     )
     krheritage_kind_codes: str = Field(

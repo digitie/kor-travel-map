@@ -49,7 +49,6 @@ def test_feature_load_asset_keys_registered() -> None:
         "feature_weather_kma_mid_forecast",
         "feature_notice_kma_weather_alerts",
         "feature_place_mcst_culture",
-        "feature_place_mcst_libraries",
         "feature_event_visitkorea_enrichment",
     } <= asset_keys
 
@@ -124,7 +123,6 @@ _LIVE_PROVIDER_RESOURCE_KEYS = {
     "krtour_ai_agent_youtube_features",
     "kma_weather_alert_records",
     "mcst_culture_records",
-    "mcst_library_records",
 }
 
 

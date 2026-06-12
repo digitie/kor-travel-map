@@ -43,7 +43,6 @@ from .provider_fetchers import (
     fetch_krheritage_items,
     fetch_krtour_ai_agent_youtube_features,
     fetch_mcst_culture_records,
-    fetch_mcst_libraries,
     fetch_mois_license_records,
     fetch_opinet_stations,
     fetch_standard_museums,
@@ -260,23 +259,11 @@ PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
     ProviderRecordResourceSpec(
         resource_key="mcst_culture_records",
         provider_package="python-mcst-api",
-        dataset_key="mcst_culture_datasets",
-        setting_names=("data_go_kr_service_key",),
-        source_env_names=("DATA_GO_KR_SERVICE_KEY",),
+        dataset_key="mcst_file_datasets",
         note=(
-            "KCISA 공통 CultureRecord 14 dataset을 (slug, record) 튜플로 stream — "
-            "asset이 slug별 분리 적재(dataset_key mcst_<slug>)."
-        ),
-    ),
-    ProviderRecordResourceSpec(
-        resource_key="mcst_library_records",
-        provider_package="python-mcst-api",
-        dataset_key="mcst_library_datasets",
-        setting_names=("data_go_kr_service_key",),
-        source_env_names=("DATA_GO_KR_SERVICE_KEY",),
-        note=(
-            "ODCloud 도서관 2 dataset(public/small_libraries)을 (slug, row) "
-            "튜플로 stream — 위치/운영 정보만(장서 제외)."
+            "MCST 파일데이터 CSV 12 dataset을 (slug, row) 튜플로 stream — "
+            "asset이 slug별 분리 적재(dataset_key mcst_<slug>). CSV 다운로드는 "
+            "keyless(다운로드 페이지 스크레이핑, provider #6/#7 — #395)."
         ),
     ),
 )
@@ -661,22 +648,16 @@ _MCST_CULTURE_RECORDS_SPEC: ProviderRecordResourceSpec = next(
     for spec in PROVIDER_RECORD_RESOURCE_SPECS
     if spec.resource_key == "mcst_culture_records"
 )
+"""MCST 파일데이터 spec 참조 (live resource override용, #395).
+
+CSV 파일 다운로드는 keyless라 spec.setting_names가 비어 있어 live guard
+활성 판정(all(...) over empty)은 항상 True — knps/krheritage items와 동일 패턴.
+"""
+
 PROVIDER_RECORD_RESOURCE_DEFINITIONS["mcst_culture_records"] = (
     build_provider_record_live_resource(
         _MCST_CULTURE_RECORDS_SPEC,
         fetch_mcst_culture_records,
-    )
-)
-
-_MCST_LIBRARY_RECORDS_SPEC: ProviderRecordResourceSpec = next(
-    spec
-    for spec in PROVIDER_RECORD_RESOURCE_SPECS
-    if spec.resource_key == "mcst_library_records"
-)
-PROVIDER_RECORD_RESOURCE_DEFINITIONS["mcst_library_records"] = (
-    build_provider_record_live_resource(
-        _MCST_LIBRARY_RECORDS_SPEC,
-        fetch_mcst_libraries,
     )
 )
 

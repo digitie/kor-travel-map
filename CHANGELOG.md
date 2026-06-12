@@ -5,6 +5,31 @@
 
 ## [Unreleased]
 
+### MCST provider 재배선 — CSV 파일 다운로드 주경로 (#395, T-220 재배선, 2026-06-12)
+
+- **CHANGED**: `python-mcst-api` pin `d06e8d2` → `ba471ee` — provider가 KCISA
+  OpenAPI에서 **CSV 파일 다운로드 주경로**로 재편(provider #6/#7/#9). krtour
+  MCST 배선 전체를 keyless `FileDataClient` 표면으로 재작성.
+- **CHANGED**: `providers.mcst` — slug 메타표를 `MCST_FILE_DATASETS` 12종(컬럼
+  방언 4종: kcisa_common/cntc_resrce/split_coord/korean_address)으로 교체하고
+  변환을 `file_rows_to_bundles` 1개로 통합. dataset_key는 `mcst_<slug>` 클린 컷
+  (구 키 하위호환 없음 — 빈 DB 재적재 중). 신규 적재 2종: 아동서점
+  (`children_bookstores_csv`)·골프장(`golf_courses_status`).
+- **ADDED**: `parse_kcisa_coordinates` — 실측 COORDINATES 2형식("N37.5,
+  E126.9" 접두형 / "35.8 , 128.6" 평문 lat-lon, 공백 변형 포함) 파서 + 한국
+  bbox(lon 124~132, lat 33~43) 검증·순서 뒤집힘 교정. 실패 시 좌표 없음(주소
+  단서 경로).
+- **REMOVED**: ODCloud 도서관 계열(`mcst_public_libraries`/
+  `mcst_small_libraries` dataset, `feature_place_mcst_libraries` asset,
+  `fetch_mcst_libraries` fetcher, `mcst_library_records` resource) — provider
+  재편으로 경로 소멸. 기사형/통계 3 dataset(`tourism_attractions_csv`/
+  `recommended_travel_destinations_csv`/`public_libraries`)은 적재 제외
+  (`MCST_EXCLUDED_FILE_DATASETS`에 사유 보존).
+- **CHANGED**: Dagster `fetch_mcst_culture_records`가 keyless로 전환(credential
+  guard 제거 — `DATA_GO_KR_SERVICE_KEY` 불요), `mcst_max_items_per_dataset`
+  기본 5000 → 50000(실측 최대 24,537행의 약 2배 여유). admin ETL preview
+  fixture는 방언 대표 3종으로 교체.
+
 ### krtour-ai-agent provider identity clean cut (ADR-053, T-224, 2026-06-12)
 
 - **CHANGED**: YouTube 장소 후보 provider를 `tripmate-agent-youtube`에서

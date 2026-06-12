@@ -23,28 +23,27 @@
 
 ### 2.1 바로 후보화 가능한 기존 source
 
-`python-mcst-api` provider는 이미 16개 dataset을 `Feature`로 정규화한다. 이 중
-세계음식점, 독립서점, 카페가 있는 서점, 도서관 계열은 첫 curated 후보로 쓸 수 있다.
-나머지 MCST 테마 source도 admin 기본 규칙으로 후보화할 수 있다.
+`python-mcst-api` provider는 파일데이터 CSV 12개 dataset을 `Feature`로 정규화한다
+(T-220 재배선 #395 — slug가 `*_csv`형으로 바뀌었고 도서관·다국어 안내·소공연장·
+회의 시설·추천 여행지는 provider 재편으로 적재 대상에서 빠졌다. 제외 사유는
+`docs/mcst-feature-etl.md` §3). 이 중 세계음식점, 독립서점, 카페가 있는 서점,
+아동서점 계열은 첫 curated 후보로 쓸 수 있다. 나머지 MCST 테마 source도 admin
+기본 규칙으로 후보화할 수 있다.
 
 | dataset_key | slug | 테마 | 현재 상태 |
 |-------------|------|------|-----------|
-| `mcst_world_restaurants` | `world_restaurants` | 세계음식점 | 구현됨 |
-| `mcst_independent_bookstores` | `independent_bookstores` | 독립서점 | 구현됨 |
-| `mcst_cafe_bookstores` | `cafe_bookstores` | 카페가 있는 서점 | 구현됨 |
-| `mcst_public_libraries` | `public_libraries` | 공공도서관 | 구현됨 |
-| `mcst_small_libraries` | `small_libraries` | 작은도서관 | 구현됨 |
-| `mcst_media_famous_places` | `media_famous_places` | 미디어 촬영지 | 구현됨 |
-| `mcst_barrier_free_places` | `barrier_free_places` | 무장애 관광지 | 구현됨 |
-| `mcst_pet_friendly_culture_facilities` | `pet_friendly_culture_facilities` | 반려동물 동반 가능 문화시설 | 구현됨 |
-| `mcst_leisure_activity_facilities` | `leisure_activity_facilities` | 레저활동 시설 | 구현됨 |
-| `mcst_leisure_camping_facilities` | `leisure_camping_facilities` | 레저 캠핑 시설 | 구현됨 |
-| `mcst_leisure_classes` | `leisure_classes` | 레저 클래스/강습 | 구현됨 |
-| `mcst_family_infant_culture_facilities` | `family_infant_culture_facilities` | 가족/영유아 동반 문화시설 | 구현됨 |
-| `mcst_multilingual_guide_culture_facilities` | `multilingual_guide_culture_facilities` | 다국어 안내 문화시설 | 구현됨 |
-| `mcst_small_theaters` | `small_theaters` | 소공연장 | 구현됨 |
-| `mcst_meeting_seminar_facilities` | `meeting_seminar_facilities` | 회의/세미나 시설 | 구현됨 |
-| `mcst_recommended_travel_destinations` | `recommended_travel_destinations` | 추천 여행지 | 구현됨 |
+| `mcst_world_restaurants_csv` | `world_restaurants_csv` | 세계음식점 | 구현됨 |
+| `mcst_independent_bookstores_csv` | `independent_bookstores_csv` | 독립서점 | 구현됨 |
+| `mcst_cafe_bookstores_csv` | `cafe_bookstores_csv` | 카페가 있는 서점 | 구현됨 |
+| `mcst_children_bookstores_csv` | `children_bookstores_csv` | 아동서점 | 구현됨 (#395) |
+| `mcst_media_famous_places_csv` | `media_famous_places_csv` | 미디어 촬영지 | 구현됨 |
+| `mcst_barrier_free_places_csv` | `barrier_free_places_csv` | 무장애 관광지 | 구현됨 |
+| `mcst_pet_friendly_culture_facilities_csv` | `pet_friendly_culture_facilities_csv` | 반려동물 동반 가능 문화시설 | 구현됨 |
+| `mcst_leisure_activity_facilities_csv` | `leisure_activity_facilities_csv` | 레저활동 시설 | 구현됨 |
+| `mcst_leisure_camping_facilities_csv` | `leisure_camping_facilities_csv` | 레저 캠핑 시설 | 구현됨 |
+| `mcst_leisure_classes_csv` | `leisure_classes_csv` | 레저 클래스/강습 | 구현됨 |
+| `mcst_family_infant_culture_facilities_csv` | `family_infant_culture_facilities_csv` | 가족/영유아 동반 문화시설 | 구현됨 |
+| `mcst_golf_courses_status` | `golf_courses_status` | 골프장 | 구현됨 (#395) |
 
 ### 2.2 책·음식 테마 확장 후보
 
@@ -56,9 +55,9 @@ DB seed 또는 migration data로 옮긴다.
 | 후보 dataset_key | 테마 | 제공기관 | source URL | 최근 수정일 / 갱신 | 상태·비고 |
 |------------------|------|----------|------------|--------------------|-----------|
 | `mcst_used_bookstores` | 중고서점 | 한국문화정보원 | https://www.data.go.kr/data/15100298/openapi.do?recommendDataYn=Y | 2025-08-13 / 실시간 | `python-mcst-api` 보강 후보. JSON+XML, 제한 없음 |
-| `mcst_independent_bookstores` | 독립서점 | 한국문화정보원 | https://www.data.go.kr/data/15138901/openapi.do?recommendDataYn=Y | 2025-08-13 / 실시간 | 이미 구현. XML, 제한 없음 |
-| `mcst_cafe_bookstores` | 카페가 있는 서점 | 한국문화정보원 | https://www.data.go.kr/data/15138904/openapi.do?recommendDataYn=Y | 2025-08-13 / 실시간 | 이미 구현. XML, 제한 없음 |
-| `mcst_children_bookstores` | 아동서점·복합문화공간 | 한국문화정보원 | https://www.data.go.kr/data/15089405/fileData.do?recommendDataYn=Y | 2025-08-14 / 연간 | `python-mcst-api` 또는 `python-datagokr-api` 보강 후보. 506행, 2023년 조사 한계 |
+| `mcst_independent_bookstores_csv` | 독립서점 | 한국문화정보원 | https://www.data.go.kr/data/15138901/openapi.do?recommendDataYn=Y | 2025-08-13 / 실시간 | 이미 구현 (CSV 파일 다운로드 경로, #395) |
+| `mcst_cafe_bookstores_csv` | 카페가 있는 서점 | 한국문화정보원 | https://www.data.go.kr/data/15138904/openapi.do?recommendDataYn=Y | 2025-08-13 / 실시간 | 이미 구현 (CSV 파일 다운로드 경로, #395) |
+| `mcst_children_bookstores_csv` | 아동서점·복합문화공간 | 한국문화정보원 | https://www.data.go.kr/data/15089405/fileData.do?recommendDataYn=Y | 2025-08-14 / 연간 | 이미 구현 (#395 — culture.go.kr 파일데이터 795행 실측) |
 | `datagokr_seoul_bookstores` | 서울 책방 | 서울특별시 | https://www.data.go.kr/data/15084328/fileData.do | 2025-12-02 / 수시·1회성 | `python-datagokr-api` 파일데이터 후보. 555행, 서울 자체 URL 보유 |
 | `datagokr_gyeonggi_muslim_friendly_restaurants` | 무슬림 친화 음식점 | 경기관광공사 | https://www.data.go.kr/data/15099378/fileData.do | 2025-09-23 / 수시·1회성 | `python-datagokr-api` 후보. 51행, 2024-05 기준 조사 한계 |
 | `datagokr_ansan_world_restaurants` | 안산 다문화 세계맛집 | 경기도 안산시 | https://www.data.go.kr/data/15152605/fileData.do | 2025-11-20 / 수시·1회성 | `python-datagokr-api` 후보. 44행, 다국어 설명 포함 |
@@ -252,7 +251,7 @@ TripMate import payload의 최소 구조:
   },
   "source": {
     "provider": "python-mcst-api",
-    "dataset_key": "mcst_world_restaurants",
+    "dataset_key": "mcst_world_restaurants_csv",
     "source_name": "한국문화정보원_세계음식 음식점",
     "source_url": "https://www.data.go.kr/..."
   },
