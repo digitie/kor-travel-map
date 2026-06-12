@@ -131,8 +131,15 @@ class VisitKoreaFestivalItem(Protocol):
     homepage: str | None
     """홈페이지 (HTML anchor 포함 가능 — raw_data 보존)."""
 
-    modified_time: str | None
-    """TourAPI 최종 수정시각 (``source_version`` 대용)."""
+    modified_time: datetime | str | None
+    """TourAPI 최종 수정시각 (``source_version`` 대용).
+
+    provider 실모델(``visitkorea.TourItem.modified_time``)은 ``datetime``으로
+    파싱해 보존한다(ADR-044 재정렬 — T-212e live에서 str 가정이
+    ``SourceRecord.source_version`` 검증 실패로 실측됨). 변환은
+    ``_modified_time_str``로 원시 TourAPI 표기(``YYYYMMDDHHMMSS``)에 맞춰
+    문자열화한다.
+    """
 
 
 # -- 매칭 Protocol (festival ↔ visitkorea) --------------------------------
@@ -289,6 +296,22 @@ class FestivalEnrichment(BaseModel):
 # -- 단일 변환 ------------------------------------------------------------
 
 
+def _modified_time_str(value: datetime | str | None) -> str | None:
+    """provider ``modified_time``을 원시 TourAPI 표기 문자열로 정규화한다.
+
+    provider 실모델은 ``datetime``(tz 포함 가능)으로 파싱해 두므로 raw
+    ``modifiedtime``(``YYYYMMDDHHMMSS``) 형태로 되돌린다. str이 오면(과거
+    Protocol 가정/테스트 fake) strip만 하고, 빈 문자열은 None으로 둔다.
+    """
+
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.strftime("%Y%m%d%H%M%S")
+    text = value.strip()
+    return text or None
+
+
 def _item_to_enrichment(
     item: VisitKoreaFestivalItem,
     match: FestivalMatch,
@@ -296,6 +319,8 @@ def _item_to_enrichment(
     fetched_at: datetime,
 ) -> FestivalEnrichment:
     """한 visitkorea item + 매칭 결과 → 한 ``FestivalEnrichment``. 모듈 private."""
+
+    modified_time = _modified_time_str(item.modified_time)
 
     # 1) Raw payload (canonical JSON 직렬화 가능한 dict). 이미지/overview 등
     #    enrichment 콘텐츠는 여기에 보존 — FeatureFileSource DTO는 후속 PR.
@@ -312,7 +337,7 @@ def _item_to_enrichment(
         "event_end_date": item.event_end_date,
         "tel": normalize_phone_number(item.tel),
         "homepage": item.homepage,
-        "modified_time": item.modified_time,
+        "modified_time": modified_time,
     }
     payload_hash = make_payload_hash(raw_data)
 
@@ -332,7 +357,7 @@ def _item_to_enrichment(
         source_entity_type=_SOURCE_ENTITY_TYPE,
         source_entity_id=item.content_id,
         raw_payload_hash=payload_hash,
-        source_version=item.modified_time,
+        source_version=modified_time,
         raw_name=normalize_korean_text(item.title),
         raw_address=normalize_korean_text(item.addr1),
         raw_data=raw_data,
