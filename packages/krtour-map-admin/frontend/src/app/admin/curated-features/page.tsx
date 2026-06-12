@@ -1,0 +1,12 @@
+import type { Metadata } from "next";
+
+import { CuratedFeaturesClient } from "./curated-features-client";
+
+export const metadata: Metadata = {
+  title: "Curated features | krtour-map",
+  description: "curated 후보, source rule, TripMate copy preview 운영 화면",
+};
+
+export default function CuratedFeaturesPage() {
+  return <CuratedFeaturesClient />;
+}

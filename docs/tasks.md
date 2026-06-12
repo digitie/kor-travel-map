@@ -35,8 +35,9 @@
           `curated_source_metadata`, `curated_feature_candidates`,
           `curated_feature_status_sweep`, `curated_tripmate_copy_snapshots`
           asset과 copy snapshot cache table을 추가했다.
-    - [ ] T-223c-3 — Admin UI 구현: curated 후보 목록, select/unselect,
-          source rule 편집/apply, TripMate copy preview.
+    - [x] T-223c-3 — Admin UI 구현(2026-06-12, Codex): `/admin/curated-features`
+          화면에 curated 후보 목록, select/unselect/archive, source rule 편집/apply,
+          TripMate copy preview를 연결했다.
     - [ ] T-223d — TripMate 연동(외부 repo): krtour REST 호출로
           `app.curated_trip_plans` / `app.curated_plan_pois` 복사, source version/etag 저장.
   - [ ] T-225 — **T-212e closure 재검증**. T-224/T-221/T-222/T-223 이후 main 기준으로

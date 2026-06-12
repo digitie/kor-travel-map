@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-12 (codex) — T-223c-3 curated Admin UI
+
+curated feature overlay 운영 화면을 admin frontend에 연결했다.
+
+- **Admin UI**: `/admin/curated-features` route와 nav 진입점을 추가했다. 후보 목록은
+  theme/provider/dataset/status/page filter와 select/unselect/archive action을 제공한다.
+- **편집 표면**: 선택 후보의 display title/summary, rank score, TripMate copy policy,
+  TripMate relation을 편집할 수 있게 했다.
+- **Source rule**: rule 목록, enabled/action/priority/place_kind/category/JSON metadata
+  편집, 단건 apply를 연결했다.
+- **TripMate preview**: `/v1/curated-features/{id}/tripmate-copy` snapshot을 조회해
+  `curated_trip_plans`/`curated_plan_pois` 복사 payload를 확인할 수 있게 했다.
+
 ## 2026-06-12 (claude) — #397: offline-uploads DELETE lifecycle 구현
 
 T-212e 실측에서 RustFS 인스턴스 교체로 원본 객체가 소실된 좀비 업로드 2건이
