@@ -27,14 +27,32 @@
           ADR-054와 `docs/package-identity-rename.md`를 추가해 target identity
           (`kor-travel-map`, `kortravel`, `import kortravel as kt`, `KOR_TRAVEL_MAP_*`,
           `kor_travel_map`)와 clean cut/no-shim 원칙을 확정했다.
-    - [ ] T-226b — 코드/package clean cut 계획: `src/krtour/map` → `src/kortravel`
-          이동, admin/dagster package import 전환, import-linter layer 규칙 갱신,
-          console script/entrypoint 이름 변경 여부, 구 `krtour.map` import 호환 shim을
-          둘지 여부를 ADR로 확정한다.
-    - [ ] T-226c — 배포/소비자 전파: PyPI distribution `kor-travel-map`, Docker/image/
-          GitHub repo 표시명, generated client/TripMate 문서, examples/snippets,
+    - [x] T-226b — 코드/package clean cut 실행계획(완료: 2026-06-12, Codex):
+          `docs/reports/t-226b-package-clean-cut-plan-2026-06-12.md`에서
+          `kortravel`, `kortravel.admin`, `kortravel.dagster` 최종 layout,
+          no-shim 원칙, grep/OpenAPI/type/lint gate, 후속 PR 분할 단위를 확정했다.
+    - [ ] T-226c — Python import/package layout clean cut:
+          `src/krtour/map` → `src/kortravel`,
+          `packages/krtour-map-admin/src/krtour/map_admin` →
+          `packages/kor-travel-map-admin/src/kortravel/admin`,
+          `packages/krtour-map-dagster/src/krtour/map_dagster` →
+          `packages/kor-travel-map-dagster/src/kortravel/dagster`, import-linter,
+          mypy/coverage/package metadata, console script, OpenAPI export 경로를 갱신한다.
+    - [ ] T-226d — runtime/deployment identity 전파:
+          `KRTOUR_MAP_*` → `KOR_TRAVEL_MAP_*`, DB 기본값 `kor_travel_map`,
+          Dagster metadata DB `kor_travel_map_dagster`, Docker/image/service 표시명,
+          advisory lock/log/metric service label을 clean cut한다.
+    - [ ] T-226e — 소비자 문서/client/migration guide:
+          README/AGENTS/SKILL/architecture/provider-contract/integration-map 식별자 표,
+          generated client/TripMate 문서, examples/snippets,
           `import kortravel as kt` quickstart와 migration guide를 갱신한다.
 - **최근 완료**
+  - [x] **T-226b — package identity clean cut 실행계획. 완료(2026-06-12, Codex)**:
+        `krtour.map` → `kortravel` 변경은 active code/config 기준 `krtour.map` 참조
+        368개 파일, `KRTOUR_MAP` 참조 86개 파일이 흔들리는 대형 rename으로 확인했다.
+        T-226b는 실제 이동 전 최종 layout(`kortravel`, `kortravel.admin`,
+        `kortravel.dagster`), no-shim 원칙, grep/OpenAPI/type/lint gate, 후속
+        T-226c/d/e 분할을 확정했다.
   - [x] **T-223 — curated_features + TripMate curated_trip_plans import 계약/구현.
         완료(2026-06-12, Codex)**: T-223a 문서 계약, T-223b provider 보강,
         T-223c-1 DB/API/OpenAPI foundation, T-223c-2 Dagster group, T-223c-3

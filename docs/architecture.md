@@ -7,7 +7,7 @@
 
 > **T-226 / ADR-054**: public 배포명과 Python import root는 `kor-travel-map` /
 > `kortravel`로 clean cut할 예정이다. 본 문서의 `python-krtour-map`,
-> `src/krtour/map`, `krtour-map-admin` 표기는 T-226b/c 적용 전 현재 코드 기준이다.
+> `src/krtour/map`, `krtour-map-admin` 표기는 T-226c/d/e 적용 전 현재 코드 기준이다.
 
 ## 1. 큰 그림
 

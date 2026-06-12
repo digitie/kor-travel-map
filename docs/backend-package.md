@@ -5,7 +5,7 @@
 
 > **T-226 / ADR-054 예정 변경**: 메인 distribution은 `kor-travel-map`, Python import
 > root는 `kortravel`, 권장 예시는 `import kortravel as kt`로 clean cut할 예정이다.
-> 본 문서의 `krtour.map` 예시는 T-226b/c 적용 전 현재 코드 기준이다.
+> 본 문서의 `krtour.map` 예시는 T-226c/d/e 적용 전 현재 코드 기준이다.
 
 > **ADR-045 주의**: 메인 패키지의 Python API는 krtour-map 독립 프로그램 내부
 > API/Dagster/테스트에서 사용하는 public Python 표면이다. TripMate 운영 연동은

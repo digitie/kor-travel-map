@@ -11,7 +11,7 @@
 
 > **T-226 / ADR-054**: `python-krtour-map`의 public 배포명은 `kor-travel-map`,
 > Python import root는 `kortravel`로 clean cut할 예정이다. 본 문서의 시스템명
-> `python-krtour-map`은 T-226b/c 적용 전 현재 저장소/운영 명칭이다.
+> `python-krtour-map`은 T-226c/d/e 적용 전 현재 저장소/운영 명칭이다.
 
 ## 1. 시스템·포트
 

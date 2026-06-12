@@ -30,7 +30,7 @@ SQLAlchemy 2 async + GeoAlchemy2 + GeoPandas 위에서 동작한다.
 
 > **T-226 예정 변경**: ADR-054에 따라 public 배포명은 `kor-travel-map`, Python import
 > root는 `kortravel`, 권장 예시는 `import kortravel as kt`로 clean cut할 예정이다.
-> 현재 표는 T-226b/c 적용 전 코드의 실제값이다. 전환 정본은
+> 현재 표는 T-226c/d/e 적용 전 코드의 실제값이다. 전환 정본은
 > [`docs/package-identity-rename.md`](docs/package-identity-rename.md).
 
 - **GitHub 저장소**: `python-krtour-map`

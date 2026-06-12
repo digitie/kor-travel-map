@@ -1,5 +1,23 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-12 Codex 작업 메모 — T-226b package clean cut 실행계획
+
+T-226b로 `kor-travel-map` / `kortravel` 코드 clean cut의 실행 단위를 확정했다.
+
+- 현 main 기준 Python/설정/문서 후보 908개 파일 중 `krtour.map` 참조 파일 368개,
+  `KRTOUR_MAP` 참조 파일 86개가 확인됐다.
+- 최종 Python layout은 `src/kortravel`, `kortravel.admin`, `kortravel.dagster`로 둔다.
+  admin/dagster package path와 distribution도 `kor-travel-map-admin`,
+  `kor-travel-map-dagster`로 전환한다.
+- 구 `krtour.map` / `krtour.map_admin` / `krtour.map_dagster` /
+  `KRTOUR_MAP_*` compatibility shim은 만들지 않는다.
+- 실제 구현은 T-226c(Python import/package layout), T-226d(runtime/deployment
+  identity), T-226e(소비자 문서/client/migration guide)로 나눈다.
+
+**다음 한 작업**: T-212e는 다른 agent가 병행 진행 중이다. 본 agent가 이어갈 수 있는
+다음 작업은 **T-226c** Python import/package layout clean cut이다. PR 시작 전 main
+rebase와 T-212e 최종 머지 여부를 다시 확인한다.
+
 ## 2026-06-12 Codex 작업 메모 — T-226a package identity ADR
 
 T-226a로 package identity rename 정본을 문서화했다.
@@ -10,12 +28,11 @@ T-226a로 package identity rename 정본을 문서화했다.
   `KRTOUR_MAP_*`, `krtour_map`)과 목표값(`kor-travel-map`, `kortravel`,
   `KOR_TRAVEL_MAP_*`, `kor_travel_map`)을 분리했다.
 - README/AGENTS/CLAUDE/backend-package/architecture/provider-contract/integration-map에는
-  "현재 표기는 T-226b/c 전 코드 기준, 목표 identity는 ADR-054"라는 note를 추가했다.
+  "현재 표기는 T-226 후속 clean cut 전 코드 기준, 목표 identity는 ADR-054"라는 note를 추가했다.
 - clean cut/no-shim 원칙을 확정했다. 구 `krtour.map`/`KRTOUR_MAP_*` compatibility shim은
   만들지 않는다.
 
-**다음 한 작업**: T-212e는 다른 agent가 병행 진행 중이다. 본 agent가 이어갈 수 있는
-다음 작업은 **T-226b** 코드/package clean cut 계획 및 실제 layout 전환 준비다.
+**다음 한 작업(당시)**: **T-226b** — 2026-06-12 실행계획 PR로 완료했다.
 
 ## 2026-06-12 Codex 작업 메모 — T-223d TripMate import 머지
 

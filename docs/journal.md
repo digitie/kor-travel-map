@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-12 (codex) — T-226b package clean cut 실행계획
+
+T-226b로 `kor-travel-map` / `kortravel` 코드 clean cut의 분할 단위와 게이트를 확정했다.
+
+- main 기준 표면을 계량했다: Python/설정/문서 후보 908개 파일, `krtour.map` 참조
+  파일 368개, `KRTOUR_MAP` 참조 파일 86개.
+- 최종 layout은 `src/kortravel`, `kortravel.admin`, `kortravel.dagster`로 정했다.
+  admin/dagster distribution과 package path도 `kor-travel-map-admin`,
+  `kor-travel-map-dagster`로 맞춘다.
+- 구 `krtour.map` / `krtour.map_admin` / `krtour.map_dagster` /
+  `KRTOUR_MAP_*` compatibility shim은 만들지 않는다.
+- 실제 구현을 T-226c(Python import/package layout), T-226d(runtime/deployment
+  identity), T-226e(소비자 문서/client/migration guide)로 나눴다.
+- 정본: `docs/reports/t-226b-package-clean-cut-plan-2026-06-12.md`.
+
 ## 2026-06-12 (claude) — #407: knps 핀 범프 — trails 코스 LINESTRING 조립 반영
 
 T-212e에서 `feature_geometry_knps_records`가 RUN_SUCCESS인데 적재 0건(#407)
@@ -19,10 +34,10 @@ T-226a로 배포명/임포트명 clean cut의 문서 정본을 만들었다.
 - ADR-054 accepted: 배포명 `kor-travel-map`, Python import root `kortravel`, 권장 예시
   `import kortravel as kt`.
 - `docs/package-identity-rename.md` 추가: current identity와 target identity, no-shim 원칙,
-  T-226b/c 남은 작업을 표로 정리했다.
+  T-226 후속 작업을 표로 정리했다.
 - README/AGENTS/CLAUDE/backend-package/architecture/provider-contract/integration-map에
   "현재 표기는 코드 기준, 목표 identity는 ADR-054/T-226" note를 추가했다.
-- T-226b/c 전에는 코드와 현재 운영값이 아직 `python-krtour-map` / `krtour.map` /
+- T-226c/d/e 전에는 코드와 현재 운영값이 아직 `python-krtour-map` / `krtour.map` /
   `KRTOUR_MAP_*`임을 명시했다.
 
 ## 2026-06-12 (codex) — T-223d TripMate import 머지 반영
