@@ -1,7 +1,8 @@
 # address-geocoding.md — 주소·좌표 보강
 
 본 문서는 feature 주소/좌표를 본 라이브러리 `Address` DTO로 정리하고,
-`python-kraddr-geo` REST v2 기반 정/역지오코딩으로 통일하는 패턴이다.
+`kor-travel-geo`(구 `python-kraddr-geo`) REST v2 기반 정/역지오코딩으로 통일하는
+패턴이다.
 
 **ADR-041 (2026-05-27)** — 주소 DTO + utility는 `python-kraddr-base`에서
 본 라이브러리로 흡수. 외부 의존 1개 제거.
@@ -16,7 +17,8 @@
 - 주소 normalize / 행정코드 parse: **`krtour.map.core.address`** (PR#37) —
   `normalize_bjd_code` / `parse_bjd_code` / `extract_sigungu_code` /
   `extract_sido_code` / `normalize_phone_number` / `normalize_korean_text`.
-- geocoding 엔진: `kraddr-geo` **REST API v2** (provider-neutral `POST /v2/reverse`,
+- geocoding 엔진: `kor-travel-geo`(현 REST/env 표기 `kraddr-geo`) **REST API v2**
+  (provider-neutral `POST /v2/reverse`,
   `POST /v2/geocode`). 별도 FastAPI 서비스로 기동하며 본 라이브러리는 **HTTP로만**
   호출한다 — python 패키지/DB 의존 없음 (ADR-006). v1 sqlite store 및 in-process
   `AsyncAddressClient`는 폐기. v2 응답은 `CandidateV2.address.legal_dong_code` 등
@@ -30,8 +32,8 @@
   `geocode_response_to_address` + `KraddrGeoRestClient`(httpx.AsyncClient 주입) +
   콜러블 팩토리.
 - 설정: `KRTOUR_MAP_KRADDR_GEO_BASE_URL` — REST 서비스 base URL. 로컬 개발의
-  공식 `python-kraddr-geo` FastAPI 포트는 `http://127.0.0.1:12201`
-  (`python-kraddr-geo/docs/ports.md`). `None`이면 정/역지오코딩 보강 비활성
+  공식 `kor-travel-geo` FastAPI 포트는 `http://127.0.0.1:12201`
+  (`kor-travel-geo/docs/ports.md`). `None`이면 정/역지오코딩 보강 비활성
   (좌표만으로 적재).
 - VWorld 폴백 키: `kraddr-geo` REST 서비스 내부 설정에서만. 본 라이브러리에서
   `python-vworld-api` 직접 import 금지.

@@ -6,7 +6,8 @@
 접근하거나 Python 패키지를 import하지 않고, OpenAPI client로 통신한다.
 
 > **T-226 / ADR-054**: public 배포명과 Python import root는 `kor-travel-map` /
-> `kortravelmap`로 clean cut할 예정이다. 본 문서의 `python-krtour-map`,
+> `kortravelmap`로 clean cut할 예정이다. 형제 프로젝트 표시는 `kor-travel-geo`,
+> `kor-travel-concierge`를 쓴다. 본 문서의 `python-krtour-map`,
 > `src/krtour/map`, `krtour-map-admin` 표기는 T-226c/d/e 적용 전 현재 코드 기준이다.
 
 ## 1. 큰 그림
@@ -21,11 +22,11 @@
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│ TripMate / krtour-ai-agent                                            │
+│ TripMate / kor-travel-concierge                                        │
 │   - TripMate: 사용자/여행계획/POI 도메인                               │
-│   - krtour-ai-agent: YouTube 장소 후보 REST export provider            │
+│   - kor-travel-concierge: YouTube 장소 후보 REST export provider        │
 │   - 두 시스템 모두 krtour-map DB 직접 접근 금지                         │
-│   - TripMate는 OpenAPI, krtour-ai-agent는 provider export HTTP          │
+│   - TripMate는 OpenAPI, concierge는 provider export HTTP                │
 └──────────────────────────────────────────────────────────────────────┘
                               │ HTTP / OpenAPI
                               ▼
@@ -61,9 +62,9 @@
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-위 provider 입력에는 공공 `python-*-api` client 외에 형제 앱 `krtour-ai-agent`의
-YouTube 장소 후보 REST export(`krtour-ai-agent-youtube`)도 포함된다. 다만
-`krtour-ai-agent`도 krtour-map DB에 직접 쓰지 않고, krtour-map Dagster가 HTTP로 pull한
+위 provider 입력에는 공공 `python-*-api` client 외에 형제 앱 `kor-travel-concierge`의
+YouTube 장소 후보 REST export(현 코드/provider 이름 `krtour-ai-agent-youtube`)도 포함된다. 다만
+`kor-travel-concierge`도 krtour-map DB에 직접 쓰지 않고, krtour-map Dagster가 HTTP로 pull한
 JSON을 순수 변환 함수로 `FeatureBundle`화한다(ADR-053).
 
 ## 2. 의존 방향 (한 방향 강제)
@@ -107,7 +108,7 @@ ADR-045 이후 TripMate와 krtour-map 사이의 운영 계약은 OpenAPI다.
   않는다.
 - OpenAPI는 처음에는 admin UI 기준으로 작성하고, TripMate 연동 시 공개/사용자
   응답을 보완·확장한다.
-- `krtour-ai-agent`는 TripMate와 직접 연동하지 않고, `python-krtour-map` DB에도 쓰지
+- `kor-travel-concierge`는 TripMate와 직접 연동하지 않고, `python-krtour-map` DB에도 쓰지
   않는다. `/api/v1/features/{snapshot|changes}`로 YouTube 장소 후보를 export하고,
   krtour-map Dagster가 이를 pull해 최종 `feature_id`를 생성한다(ADR-053).
 

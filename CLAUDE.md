@@ -25,8 +25,9 @@ OpenAPI) · `frontend`(Next.js admin UI) · `dagster`(feature 업데이트 orche
 ADR-022). 이 라이브러리는 위 `api`/`dagster`가 **내부에서** import하는 핵심
 정규화·적재 엔진이다(외부 경계는 OpenAPI). PyPI distribution은 현재
 `python-krtour-map`이다. T-226/ADR-054에서 목표 배포명 `kor-travel-map`,
-Python import root `kortravelmap`, 권장 예시 `import kortravelmap as ktm`로 clean cut을
-확정했고 실제 코드 전환은 후속 PR에서 수행한다.
+Python import root `kortravelmap`, 권장 예시 `import kortravelmap as ktm`, CLI
+`ktmctl`, DB/RustFS 사용자 가시 이름 `kortravelmap*` 계열로 clean cut을 확정했고
+실제 코드 전환은 후속 PR에서 수행한다.
 
 **api/admin 프로그램**: `packages/krtour-map-admin/` — 구 `krtour-map-debug-ui`에서
 rename 완료(PR#148). 역할은 "debug UI"를 넘어 krtour-map **admin/API 프로그램**이다
@@ -45,17 +46,17 @@ rename 완료(PR#148). 역할은 "debug UI"를 넘어 krtour-map **admin/API 프
 - **ADR 현황**: ADR-001~054 모두 accepted, **다음 후보 번호 = ADR-055**
   (`docs/decisions.md`). 045 = Docker 독립 프로그램 + 독립 DB/Dagster + TripMate
   OpenAPI 연동(ADR-003 운영 모델 supersede). 046 = 이행 시 구 모델 호환 shim 금지
-  + 주소는 kraddr-geo REST v2로 통일. 047 = standalone 고정 포트. 048 = REST API
+  + 주소는 kor-travel-geo(구 kraddr-geo) REST v2로 통일. 047 = standalone 고정 포트. 048 = REST API
   versioning을 admin/ops까지 확장(`/v1`, #317 위 보강) + envelope/pagination/parameter/
   response 정합성 표준 + 코드/DB 명명 전파 — 정본 `docs/rest-api.md`, 실행 T-216a~g.
-  049~053 = `krtour-ai-agent` YouTube provider pull 경계 + export 계약 보강(경로 중립화·
+  049~053 = `kor-travel-concierge`(현 코드/provider 이름 `krtour-ai-agent`) YouTube provider pull 경계 + export 계약 보강(경로 중립화·
   검수 통과만 export·철회→inactive) + TripMate 직접 연동 제거 + TripMate feature 제안 반영은 **기존
   `/v1/admin/features*` change API(#317) 승인**(신규 suggestions API 철회 — 잔여 합의
   5건만 확정) + RustFS 공유 버킷 잠정 정책 — 실행 T-217a~g. 054 =
   `kor-travel-map` / `kortravelmap` package identity clean cut.
 - **고정 포트(ADR-047)**: API `12301` · admin UI `12305` · Dagster `12302` ·
   Postgres host `5432` · RustFS S3 `12101`/console `12105`.
-- **geocoding 정본**: kraddr-geo REST v2 `POST /v2/{reverse,geocode}`, 로컬 기본
+- **geocoding 정본**: kor-travel-geo(구 kraddr-geo) REST v2 `POST /v2/{reverse,geocode}`, 로컬 기본
   `http://127.0.0.1:12201`(ADR-046).
 - **frontend 정본**: Next.js 16 + React 19 + `maplibre-vworld-js#v0.1.3`(ADR-036),
   Windows Playwright e2e.
@@ -76,12 +77,12 @@ v1 산출물 요약: 저장소 루트 `python-krtour-map-spec.docx` (약 80쪽).
 5. `docs/resume.md` — 다음 한 작업
 6. `docs/journal.md` 최신 3건
 7. 관련 ADR (`docs/decisions.md`)
-8. cross-repo 연동(TripMate/krtour-ai-agent/tripmate-manager) 작업 시
+8. cross-repo 연동(TripMate/kor-travel-concierge/tripmate-manager) 작업 시
    `docs/integration-map.md` — 포트·연동 방향·인증·계약 정본 위치 1장 정본
 
 ## 4. 의존 스택 (v2 확정)
 
-`python-kraddr-geo`와 동일 스택. PostgreSQL 16 + PostGIS 3.5 + pg_trgm + pgcrypto /
+`kor-travel-geo`(구 `python-kraddr-geo`)와 동일 스택. PostgreSQL 16 + PostGIS 3.5 + pg_trgm + pgcrypto /
 SQLAlchemy 2 async + GeoAlchemy2 + asyncpg + psycopg[binary,pool]>=3.2 / GeoPandas
 + Shapely 2 + GDAL / Pydantic v2 / FastAPI + Uvicorn / httpx + tenacity / Alembic.
 

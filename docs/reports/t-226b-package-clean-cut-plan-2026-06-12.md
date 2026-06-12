@@ -62,8 +62,8 @@ T-226c 이후 Python import layout은 다음을 목표로 한다.
 | main distribution | `kor-travel-map` |
 | admin distribution | `kor-travel-map-admin` |
 | dagster distribution | `kor-travel-map-dagster` |
-| main CLI | `kor-travel-map` |
-| admin CLI | `kor-travel-map-admin` |
+| main CLI | `ktmctl` |
+| admin CLI | `ktmctl admin` |
 
 구 `krtour.map`, `krtour.map_admin`, `krtour.map_dagster`, `KRTOUR_MAP_*`,
 `krtour-map*` 호환 shim은 만들지 않는다. `src/krtour/__init__.py`를 만들지 않는다는
@@ -128,8 +128,10 @@ T-226d는 runtime identity를 바꾼다.
 
 - `KRTOUR_MAP_*` → `KOR_TRAVEL_MAP_*`
 - `KRTOUR_MAP_ADMIN_*` → `KOR_TRAVEL_MAP_ADMIN_*`
-- 기본 DB 이름 `krtour_map` → `kor_travel_map`
-- 기본 Dagster metadata DB 이름 `krtour_map_dagster` → `kor_travel_map_dagster`
+- 기본 DB 이름 `krtour_map` → `kortravelmap`
+- 기본 Dagster metadata DB 이름 `krtour_map_dagster` → `kortravelmap_dagster`
+- RustFS bucket/volume 표시명 `krtour-map*`, `krtour-uploads` →
+  `kortravelmap*`, `kortravelmap-uploads`
 - Docker image/service/container 표시명 `krtour-map*` → `kor-travel-map*`
 - advisory lock namespace, 로그/metric service label, compose profile 이름 중 사용자 가시
   identity를 새 이름으로 전환
