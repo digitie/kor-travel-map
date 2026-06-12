@@ -2,6 +2,15 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-12 (claude) — fix: frontend Docker 빌드에 NEXT_PUBLIC_KRADDR_GEO_BASE_URL 누락
+
+T-221b(#403 좌표 picker)가 `/admin/features/new`를 prerender 시점 fail-fast로
+`NEXT_PUBLIC_KRADDR_GEO_BASE_URL`을 요구하는데 `docker/frontend.Dockerfile`
+ARG/ENV와 compose 빌드 args에 빠져 **main의 frontend Docker 이미지가 빌드
+불능**이었다(T-212e 최종 리빌드에서 실측 — T-221b 검증은 WSL dev 스택이라
+미검출). ARG 기본값 `http://127.0.0.1:12201`(ADR-046 표준) + compose
+args/environment 전파 추가. `docker compose build frontend` 통과 확인.
+
 ## 2026-06-12 (codex) — T-222b 공개 해수욕장/축제 view API
 
 TripMate T-130 차단 조건이던 공개 해수욕장/축제 view API를 krtour-map 사용자 표면에
