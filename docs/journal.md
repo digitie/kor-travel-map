@@ -2,6 +2,23 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-12 (codex) — T-221c admin live signal channel
+
+T-221 admin UI 연결성 보강의 세 번째 조각으로 admin 실시간 signal 채널을 추가했다.
+
+- **Backend**: `WS /v1/ops/live` WebSocket endpoint를 추가했다. query/topic command로
+  `import_jobs`, `import_job:{job_id}`, `import_job_events:{job_id}`,
+  `feature_update_requests`, `feature_update_request:{request_id}`, `offline_uploads`,
+  `offline_upload:{upload_id}`, `dagster_runs`, `dagster_run:{run_id}`를 구독한다.
+- **Signal model**: DB trigger 없이 topic snapshot revision을 주기적으로 비교해 변경된
+  topic만 `snapshot`/`update` frame으로 전송한다. client payload는 source of truth가
+  아니라 query invalidation signal이다.
+- **Frontend**: `src/api/live.ts` hook을 추가하고 `/ops/import-jobs`,
+  `/ops/import-jobs/[job_id]` 화면에 live badge와 query invalidation을 연결했다. 기존
+  polling은 fallback으로 유지한다.
+- **검증**: ops WebSocket router 단위 테스트 12 passed, Python ruff/mypy targeted,
+  frontend type-check/ESLint/React Doctor 통과.
+
 ## 2026-06-12 (codex) — T-221b import job 상세/event/cancel
 
 T-221 admin UI 연결성 보강의 두 번째 조각으로 import job 상세 흐름을 추가했다.

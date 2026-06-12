@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### Admin live signal channel (T-221c, 2026-06-12)
+
+- **ADDED**: `WS /v1/ops/live` — `import_jobs`, `import_job:{job_id}`,
+  `import_job_events:{job_id}`, `feature_update_requests`, `offline_uploads`,
+  `dagster_runs` topic을 다중화하는 admin WebSocket signal 채널.
+- **ADDED**: admin frontend import job 목록/상세 화면이 live signal을 받아 관련
+  TanStack Query cache를 즉시 invalidate한다. 기존 polling은 fallback으로 유지한다.
+
 ### Import job 상세/event/cancel (T-221b, 2026-06-12)
 
 - **ADDED**: `ops.import_job_events` 테이블과

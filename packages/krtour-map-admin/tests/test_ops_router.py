@@ -156,6 +156,89 @@ def test_ops_routes_mounted_in_openapi(client: TestClient) -> None:
 
 
 @pytest.mark.unit
+def test_ops_live_websocket_initial_snapshot(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import ops_live as live_mod
+
+    async def _collect(
+        _session: Any,
+        topics: set[str],
+    ) -> dict[str, live_mod.LiveTopicSnapshot]:
+        return {
+            topic: live_mod.LiveTopicSnapshot(
+                topic=topic,
+                revision=f"{topic}:1",
+                data={"topic": topic, "ok": True},
+            )
+            for topic in topics
+        }
+
+    monkeypatch.setattr(live_mod, "collect_live_topic_snapshots", _collect)
+
+    with client.websocket_connect(
+        "/v1/ops/live?topics=import_jobs&poll_interval_ms=1000"
+    ) as websocket:
+        hello = websocket.receive_json()
+        snapshot = websocket.receive_json()
+
+    assert hello["type"] == "hello"
+    assert hello["topics"] == ["import_jobs"]
+    assert snapshot["type"] == "snapshot"
+    assert snapshot["topic"] == "import_jobs"
+    assert snapshot["data"] == {"topic": "import_jobs", "ok": True}
+
+
+@pytest.mark.unit
+def test_ops_live_websocket_subscribe_command(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import ops_live as live_mod
+
+    async def _collect(
+        _session: Any,
+        topics: set[str],
+    ) -> dict[str, live_mod.LiveTopicSnapshot]:
+        return {
+            topic: live_mod.LiveTopicSnapshot(
+                topic=topic,
+                revision=f"{topic}:1",
+                data={"topic": topic},
+            )
+            for topic in topics
+        }
+
+    monkeypatch.setattr(live_mod, "collect_live_topic_snapshots", _collect)
+
+    with client.websocket_connect(
+        "/v1/ops/live?topics=import_jobs&poll_interval_ms=1000"
+    ) as websocket:
+        assert websocket.receive_json()["type"] == "hello"
+        assert websocket.receive_json()["topic"] == "import_jobs"
+
+        websocket.send_json(
+            {
+                "type": "subscribe",
+                "topics": ["import_job:11111111-1111-1111-1111-111111111111"],
+            }
+        )
+        ack = websocket.receive_json()
+        snapshots = [websocket.receive_json(), websocket.receive_json()]
+
+    assert ack["type"] == "subscribed"
+    assert ack["topics"] == [
+        "import_job:11111111-1111-1111-1111-111111111111",
+        "import_jobs",
+    ]
+    assert {message["topic"] for message in snapshots} == {
+        "import_job:11111111-1111-1111-1111-111111111111",
+        "import_jobs",
+    }
+
+
+@pytest.mark.unit
 def test_ops_metrics_maps_counts(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

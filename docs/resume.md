@@ -1,5 +1,28 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-12 Codex 작업 메모 — T-221c admin live signal channel
+
+T-221c로 admin 실시간 signal 채널을 추가했다.
+
+- `WS /v1/ops/live`를 추가했다. query `topics`와 client command
+  `subscribe`/`unsubscribe`/`replace`/`ping`을 지원한다.
+- 지원 topic은 `import_jobs`, `import_job:{job_id}`, `import_job_events:{job_id}`,
+  `feature_update_requests`, `feature_update_request:{request_id}`, `offline_uploads`,
+  `offline_upload:{upload_id}`, `dagster_runs`, `dagster_run:{run_id}`다.
+- 구현은 DB trigger/NOTIFY 없이 시작하는 snapshot revision polling 방식이다. 서버는 변경된
+  topic만 `snapshot`/`update` frame으로 보내고, frontend는 payload를 source of truth로
+  저장하지 않고 TanStack Query invalidation signal로만 사용한다.
+- admin frontend `src/api/live.ts`를 추가하고 `/ops/import-jobs`,
+  `/ops/import-jobs/[job_id]`에 live badge와 query invalidation을 붙였다. 기존 query
+  polling은 WebSocket이 막힌 환경의 fallback으로 유지한다.
+
+검증: ops WebSocket router 단위 테스트 12 passed, Python ruff/mypy targeted,
+frontend type-check/ESLint/React Doctor 통과.
+
+**다음 한 작업**: **T-221d** — provider 상세/refresh policy 보강. `/ops/providers`
+행 상세 추적, provider_dataset update request 상세 링크,
+`provider_refresh_policies` 편집 UI.
+
 ## 2026-06-12 Codex 작업 메모 — T-221b import job 상세/event/cancel
 
 T-221b로 import job 상세 흐름을 구현했다.

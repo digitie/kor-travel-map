@@ -18,6 +18,7 @@ import {
   useImportJobEvents,
 } from "@/api/importJobs";
 import { DAGSTER_UI_URL } from "@/api/dagster";
+import { useOpsLiveInvalidation } from "@/api/live";
 import { AdminShell } from "@/components/admin-shell";
 import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -186,6 +187,16 @@ export function ImportJobDetailClient({ jobId }: { jobId: string }) {
     page_size: 100,
   });
   const cancelJob = useCancelImportJobMutation();
+  const live = useOpsLiveInvalidation({
+    topics: [
+      "import_jobs",
+      `import_job:${jobId}`,
+      `import_job_events:${jobId}`,
+      "feature_update_requests",
+      "offline_uploads",
+      "dagster_runs",
+    ],
+  });
   const canCancel = Boolean(
     jobData?.status && !terminalStatuses.has(jobData.status),
   );
@@ -220,6 +231,9 @@ export function ImportJobDetailClient({ jobId }: { jobId: string }) {
             <ArrowLeftIcon data-icon="inline-start" />
             목록
           </Link>
+          <Badge variant={live.state === "live" ? "default" : "outline"}>
+            {live.state}
+          </Badge>
           <Button
             disabled={job.isFetching || events.isFetching}
             type="button"
