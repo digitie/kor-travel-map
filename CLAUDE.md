@@ -25,7 +25,7 @@ OpenAPI) · `frontend`(Next.js admin UI) · `dagster`(feature 업데이트 orche
 ADR-022). 이 라이브러리는 위 `api`/`dagster`가 **내부에서** import하는 핵심
 정규화·적재 엔진이다(외부 경계는 OpenAPI). PyPI distribution은 현재
 `python-krtour-map`이다. T-226/ADR-054에서 목표 배포명 `kor-travel-map`,
-Python import root `kortravel`, 권장 예시 `import kortravel as kt`로 clean cut을
+Python import root `kortravelmap`, 권장 예시 `import kortravelmap as ktm`로 clean cut을
 확정했고 실제 코드 전환은 후속 PR에서 수행한다.
 
 **api/admin 프로그램**: `packages/krtour-map-admin/` — 구 `krtour-map-debug-ui`에서
@@ -52,7 +52,7 @@ rename 완료(PR#148). 역할은 "debug UI"를 넘어 krtour-map **admin/API 프
   검수 통과만 export·철회→inactive) + TripMate 직접 연동 제거 + TripMate feature 제안 반영은 **기존
   `/v1/admin/features*` change API(#317) 승인**(신규 suggestions API 철회 — 잔여 합의
   5건만 확정) + RustFS 공유 버킷 잠정 정책 — 실행 T-217a~g. 054 =
-  `kor-travel-map` / `kortravel` package identity clean cut.
+  `kor-travel-map` / `kortravelmap` package identity clean cut.
 - **고정 포트(ADR-047)**: API `12301` · admin UI `12305` · Dagster `12302` ·
   Postgres host `5432` · RustFS S3 `12101`/console `12105`.
 - **geocoding 정본**: kraddr-geo REST v2 `POST /v2/{reverse,geocode}`, 로컬 기본

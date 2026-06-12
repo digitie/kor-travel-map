@@ -2,6 +2,15 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-13 (codex) — T-226 import root 재결정 반영
+
+T-226 목표 Python import root와 권장 alias를 사용자 재결정에 맞춰 갱신했다.
+
+- 목표 Python import root를 `kortravelmap`으로 정렬했다.
+- 권장 import 예시는 `import kortravelmap as ktm`으로 바꿨다.
+- ADR-054, `docs/package-identity-rename.md`, T-226b 실행계획, README/AGENTS/SKILL/
+  CLAUDE 및 관련 아키텍처/연동 문서의 T-226 note를 같은 기준으로 맞췄다.
+
 ## 2026-06-12 (claude) — T-212e 완결: 실데이터 full reload 최종 리포트
 
 T-212e 전 트랙 종결. 정본 리포트
@@ -50,6 +59,21 @@ knps 핀 범프(#420) 후 trails 재실행이 14분 진행 끝에
 (`krtour.map`+`krtour.map_dagster`) / lint-imports green. trails 실적재
 재실행은 dagster 리빌드 후 수행(T-212e 리포트 기록, #407 종결 조건).
 
+## 2026-06-12 (codex) — T-226b package clean cut 실행계획
+
+T-226b로 `kor-travel-map` / `kortravelmap` 코드 clean cut의 분할 단위와 게이트를 확정했다.
+
+- main 기준 표면을 계량했다: Python/설정/문서 후보 908개 파일, `krtour.map` 참조
+  파일 368개, `KRTOUR_MAP` 참조 파일 86개.
+- 최종 layout은 `src/kortravelmap`, `kortravelmap.admin`, `kortravelmap.dagster`로 정했다.
+  admin/dagster distribution과 package path도 `kor-travel-map-admin`,
+  `kor-travel-map-dagster`로 맞춘다.
+- 구 `krtour.map` / `krtour.map_admin` / `krtour.map_dagster` /
+  `KRTOUR_MAP_*` compatibility shim은 만들지 않는다.
+- 실제 구현을 T-226c(Python import/package layout), T-226d(runtime/deployment
+  identity), T-226e(소비자 문서/client/migration guide)로 나눴다.
+- 정본: `docs/reports/t-226b-package-clean-cut-plan-2026-06-12.md`.
+
 ## 2026-06-12 (claude) — #407: knps 핀 범프 — trails 코스 LINESTRING 조립 반영
 
 T-212e에서 `feature_geometry_knps_records`가 RUN_SUCCESS인데 적재 0건(#407)
@@ -64,13 +88,13 @@ LineString 계약 불일치) → krtour route 변환이 전 행 skip. provider
 
 T-226a로 배포명/임포트명 clean cut의 문서 정본을 만들었다.
 
-- ADR-054 accepted: 배포명 `kor-travel-map`, Python import root `kortravel`, 권장 예시
-  `import kortravel as kt`.
+- ADR-054 accepted: 배포명 `kor-travel-map`, Python import root `kortravelmap`, 권장 예시
+  `import kortravelmap as ktm`.
 - `docs/package-identity-rename.md` 추가: current identity와 target identity, no-shim 원칙,
-  T-226b/c 남은 작업을 표로 정리했다.
+  T-226 후속 작업을 표로 정리했다.
 - README/AGENTS/CLAUDE/backend-package/architecture/provider-contract/integration-map에
   "현재 표기는 코드 기준, 목표 identity는 ADR-054/T-226" note를 추가했다.
-- T-226b/c 전에는 코드와 현재 운영값이 아직 `python-krtour-map` / `krtour.map` /
+- T-226c/d/e 전에는 코드와 현재 운영값이 아직 `python-krtour-map` / `krtour.map` /
   `KRTOUR_MAP_*`임을 명시했다.
 
 ## 2026-06-12 (codex) — T-223d TripMate import 머지 반영
@@ -389,7 +413,7 @@ T-224를 완료했다.
   reject/tombstone inactive helper와 cursor/page guard 테스트를 유지.
 - TripMate ↛ krtour-ai-agent 직접 연동 없음, curated trip plan 생성 flow 제외를
   integration/curated/tripmate 소비 문서에 반영.
-- 신규 결정(`kor-travel-map`, `kortravel`, 권장 `import kortravel as kt`)은 T-226으로
+- 신규 결정(`kor-travel-map`, `kortravelmap`, 권장 `import kortravelmap as ktm`)은 T-226으로
   등록. 검증: targeted pytest 87 passed/1 skipped, ruff, mypy, import-linter,
   diff check.
 
@@ -434,7 +458,7 @@ T-212e live full reload Phase 2에서 `feature_event_visitkorea_enrichment`가
 - T-223에는 `krtour-ai-agent`가 TripMate `curated_trip_plans` 생성 flow에 관여하지
   않는다는 경계를 명시.
 - T-221 → T-222 → T-223 이후 T-225로 T-212e closure 재검증을 한 번 더 수행하도록 추가.
-- 새 배포/임포트명 결정(`kor-travel-map`, `kortravel`, 권장 `import kortravel as kt`)은
+- 새 배포/임포트명 결정(`kor-travel-map`, `kortravelmap`, 권장 `import kortravelmap as ktm`)은
   대형 package identity clean cut으로 보고 T-226에 별도 등록.
 
 ## 2026-06-12 (codex) — ADR-047 포트 재고정 + Docker/runtime/docs 정렬

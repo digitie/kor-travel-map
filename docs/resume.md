@@ -1,5 +1,39 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-13 Codex 작업 메모 — T-226 import root 재결정 반영
+
+사용자 재결정에 따라 T-226 목표 Python import root를 `kortravelmap`으로, 권장 import
+패턴을 `import kortravelmap as ktm`으로 변경했다.
+
+- ADR-054, `docs/package-identity-rename.md`, T-226b 실행계획의 최종 layout을
+  `src/kortravelmap`, `kortravelmap.admin`, `kortravelmap.dagster`로 정렬했다.
+- README/AGENTS/SKILL/CLAUDE/backend-package/architecture/provider-contract/
+  integration-map/tasks/journal의 T-226 note와 작업 설명도 같은 기준으로 맞췄다.
+- public distribution `kor-travel-map`, CLI `kor-travel-map`, env prefix
+  `KOR_TRAVEL_MAP_*`, DB 기본값 `kor_travel_map`은 그대로 유지한다.
+
+**다음 한 작업**: **T-225** — T-212e closure 재검증(최신 표면 포함 여부,
+live row 수/P99, 리포트 링크 재대조). T-226c Python import/package layout clean cut은
+그 다음 큰 package identity 후속이다.
+
+## 2026-06-12 Codex 작업 메모 — T-226b package clean cut 실행계획
+
+T-226b로 `kor-travel-map` / `kortravelmap` 코드 clean cut의 실행 단위를 확정했다.
+
+- 현 main 기준 Python/설정/문서 후보 908개 파일 중 `krtour.map` 참조 파일 368개,
+  `KRTOUR_MAP` 참조 파일 86개가 확인됐다.
+- 최종 Python layout은 `src/kortravelmap`, `kortravelmap.admin`, `kortravelmap.dagster`로 둔다.
+  admin/dagster package path와 distribution도 `kor-travel-map-admin`,
+  `kor-travel-map-dagster`로 전환한다.
+- 구 `krtour.map` / `krtour.map_admin` / `krtour.map_dagster` /
+  `KRTOUR_MAP_*` compatibility shim은 만들지 않는다.
+- 실제 구현은 T-226c(Python import/package layout), T-226d(runtime/deployment
+  identity), T-226e(소비자 문서/client/migration guide)로 나눈다.
+
+**다음 한 작업**: T-212e는 다른 agent가 병행 진행 중이다. 본 agent가 이어갈 수 있는
+다음 작업은 **T-226c** Python import/package layout clean cut이다. PR 시작 전 main
+rebase와 T-212e 최종 머지 여부를 다시 확인한다.
+
 ## 2026-06-12 claude 작업 메모 — T-212e 완결 (실데이터 full reload)
 
 T-212e를 종결했다. 정본 리포트
@@ -23,17 +57,16 @@ T-226b/c package identity clean cut.
 T-226a로 package identity rename 정본을 문서화했다.
 
 - ADR-054를 accepted로 추가했다. public 배포명은 `kor-travel-map`, Python import root는
-  `kortravel`, 권장 예시는 `import kortravel as kt`다.
+  `kortravelmap`, 권장 예시는 `import kortravelmap as ktm`다.
 - `docs/package-identity-rename.md`를 추가해 현재값(`python-krtour-map`, `krtour.map`,
-  `KRTOUR_MAP_*`, `krtour_map`)과 목표값(`kor-travel-map`, `kortravel`,
+  `KRTOUR_MAP_*`, `krtour_map`)과 목표값(`kor-travel-map`, `kortravelmap`,
   `KOR_TRAVEL_MAP_*`, `kor_travel_map`)을 분리했다.
 - README/AGENTS/CLAUDE/backend-package/architecture/provider-contract/integration-map에는
-  "현재 표기는 T-226b/c 전 코드 기준, 목표 identity는 ADR-054"라는 note를 추가했다.
+  "현재 표기는 T-226 후속 clean cut 전 코드 기준, 목표 identity는 ADR-054"라는 note를 추가했다.
 - clean cut/no-shim 원칙을 확정했다. 구 `krtour.map`/`KRTOUR_MAP_*` compatibility shim은
   만들지 않는다.
 
-**다음 한 작업**: T-212e는 다른 agent가 병행 진행 중이다. 본 agent가 이어갈 수 있는
-다음 작업은 **T-226b** 코드/package clean cut 계획 및 실제 layout 전환 준비다.
+**다음 한 작업(당시)**: **T-226b** — 2026-06-12 실행계획 PR로 완료했다.
 
 ## 2026-06-12 Codex 작업 메모 — T-223d TripMate import 머지
 
@@ -307,8 +340,8 @@ TripMate와의 직접 관계는 끊었다. YouTube/AI 후보 provider 관계는
 - TripMate `curated_trip_plans` 생성 flow에는 `krtour-ai-agent`가 관여하지 않는다는
   경계를 `docs/integration-map.md`, `docs/curated-features.md`,
   `docs/tripmate-rest-api.md`에 반영했다.
-- 사용자 신규 결정: 배포명 `kor-travel-map`, Python import root `kortravel`,
-  권장 예시 `import kortravel as kt`는 T-226 package identity rename task로 등록했다.
+- 사용자 신규 결정: 배포명 `kor-travel-map`, Python import root `kortravelmap`,
+  권장 예시 `import kortravelmap as ktm`는 T-226 package identity rename task로 등록했다.
 
 검증: targeted pytest 87 passed/1 skipped(`mois.db` 선택 의존성 부재), ruff, mypy,
 import-linter, `git diff --check` 통과.
@@ -330,8 +363,8 @@ T-212e는 다른 agent가 병행 진행 중이며, 완료 결과는 T-225에서 
 - 새 선행 작업 T-224를 추가했다. T-221 진입 전 `krtour-ai-agent` provider 경계/명명/
   상세 구현을 마감한다.
 - T-221 → T-222 → T-223 순서 뒤에는 T-225로 T-212e closure 재검증을 한 번 더 둔다.
-- 사용자 결정 반영: 배포명은 `kor-travel-map`, Python import root는 `kortravel`,
-  권장 예시는 `import kortravel as kt`로 바꿀 예정이다. 구현 범위가 커서 T-226
+- 사용자 결정 반영: 배포명은 `kor-travel-map`, Python import root는 `kortravelmap`,
+  권장 예시는 `import kortravelmap as ktm`로 바꿀 예정이다. 구현 범위가 커서 T-226
   별도 clean cut task로 등록했다.
 
 **다음 한 작업**: **T-224** — `krtour-ai-agent` provider 경계 재정의 + 상세 구현.
