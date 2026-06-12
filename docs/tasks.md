@@ -18,25 +18,25 @@
         T-212e 실데이터 full reload/offline upload 결과를 한 번 더 대조한다. 다른 agent의
         T-212e 결과가 이미 충분하면 재실행 대신 최신 provider/API 표면 포함 여부,
         live row 수/P99, 실패 provider, offline upload 증거, 최종 리포트 링크를 확인한다.
-  - [ ] T-226 — **배포명/임포트명 재정의: `kor-travel-map` / `kortravel`**.
-        사용자 결정(2026-06-12): 검색성과 직관성을 위해 배포명은 `kor-travel-map`,
-        Python import root는 `kortravel`로 바꾸고, 권장 사용 예시는
-        `import kortravel as kt`로 둔다. 구현은 대규모 package identity clean cut이므로
-        별도 PR에서 진행한다.
+  - [ ] T-226 — **배포명/임포트명 재정의: `kor-travel-map` / `kortravelmap`**.
+        사용자 결정(2026-06-12, 2026-06-13 재조정): 검색성과 직관성을 위해 배포명은
+        `kor-travel-map`, Python import root는 `kortravelmap`으로 바꾸고, 권장 사용
+        예시는 `import kortravelmap as ktm`로 둔다. 구현은 대규모 package identity
+        clean cut이므로 별도 PR에서 진행한다.
     - [x] T-226a — ADR/문서 정본 작성(완료: 2026-06-12, Codex):
           ADR-054와 `docs/package-identity-rename.md`를 추가해 target identity
-          (`kor-travel-map`, `kortravel`, `import kortravel as kt`, `KOR_TRAVEL_MAP_*`,
+          (`kor-travel-map`, `kortravelmap`, `import kortravelmap as ktm`, `KOR_TRAVEL_MAP_*`,
           `kor_travel_map`)와 clean cut/no-shim 원칙을 확정했다.
     - [x] T-226b — 코드/package clean cut 실행계획(완료: 2026-06-12, Codex):
           `docs/reports/t-226b-package-clean-cut-plan-2026-06-12.md`에서
-          `kortravel`, `kortravel.admin`, `kortravel.dagster` 최종 layout,
+          `kortravelmap`, `kortravelmap.admin`, `kortravelmap.dagster` 최종 layout,
           no-shim 원칙, grep/OpenAPI/type/lint gate, 후속 PR 분할 단위를 확정했다.
     - [ ] T-226c — Python import/package layout clean cut:
-          `src/krtour/map` → `src/kortravel`,
+          `src/krtour/map` → `src/kortravelmap`,
           `packages/krtour-map-admin/src/krtour/map_admin` →
-          `packages/kor-travel-map-admin/src/kortravel/admin`,
+          `packages/kor-travel-map-admin/src/kortravelmap/admin`,
           `packages/krtour-map-dagster/src/krtour/map_dagster` →
-          `packages/kor-travel-map-dagster/src/kortravel/dagster`, import-linter,
+          `packages/kor-travel-map-dagster/src/kortravelmap/dagster`, import-linter,
           mypy/coverage/package metadata, console script, OpenAPI export 경로를 갱신한다.
     - [ ] T-226d — runtime/deployment identity 전파:
           `KRTOUR_MAP_*` → `KOR_TRAVEL_MAP_*`, DB 기본값 `kor_travel_map`,
@@ -45,13 +45,13 @@
     - [ ] T-226e — 소비자 문서/client/migration guide:
           README/AGENTS/SKILL/architecture/provider-contract/integration-map 식별자 표,
           generated client/TripMate 문서, examples/snippets,
-          `import kortravel as kt` quickstart와 migration guide를 갱신한다.
+          `import kortravelmap as ktm` quickstart와 migration guide를 갱신한다.
 - **최근 완료**
   - [x] **T-226b — package identity clean cut 실행계획. 완료(2026-06-12, Codex)**:
-        `krtour.map` → `kortravel` 변경은 active code/config 기준 `krtour.map` 참조
+        `krtour.map` → `kortravelmap` 변경은 active code/config 기준 `krtour.map` 참조
         368개 파일, `KRTOUR_MAP` 참조 86개 파일이 흔들리는 대형 rename으로 확인했다.
-        T-226b는 실제 이동 전 최종 layout(`kortravel`, `kortravel.admin`,
-        `kortravel.dagster`), no-shim 원칙, grep/OpenAPI/type/lint gate, 후속
+        T-226b는 실제 이동 전 최종 layout(`kortravelmap`, `kortravelmap.admin`,
+        `kortravelmap.dagster`), no-shim 원칙, grep/OpenAPI/type/lint gate, 후속
         T-226c/d/e 분할을 확정했다.
   - [x] **T-223 — curated_features + TripMate curated_trip_plans import 계약/구현.
         완료(2026-06-12, Codex)**: T-223a 문서 계약, T-223b provider 보강,
@@ -196,7 +196,7 @@ T-217/T-210e/T-224도 닫혔다. 2026-06-12 사용자 재정렬 기준 T-221/T-2
 완료됐고, T-212e는 다른 agent가 병행 진행 중이다. T-212e 결과가 머지되면
 **T-225 T-212e closure 재검증**으로 이어간다.
 `krtour-ai-agent`는 TripMate와 직접 연동하지 않고, TripMate curated plan 생성 flow에도
-관여하지 않는다. T-226 package identity rename(`kor-travel-map`/`kortravel`)은 별도
+관여하지 않는다. T-226 package identity rename(`kor-travel-map`/`kortravelmap`)은 별도
 후속 clean cut이다. T-207b는 사용자 결정에 따라 구현하지 않고, provider 강제 실행은
 feature update request `provider_dataset` scope로 유도한다.
 

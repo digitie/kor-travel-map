@@ -6,7 +6,7 @@
 
 ## 1. 결론
 
-T-226b는 `kor-travel-map` / `kortravel` clean cut을 실제 코드 PR로 들어가기 전
+T-226b는 `kor-travel-map` / `kortravelmap` clean cut을 실제 코드 PR로 들어가기 전
 분할 단위와 게이트를 확정하는 작업으로 닫는다. 코드 이동 자체는 다음 PR부터
 수행한다.
 
@@ -51,14 +51,14 @@ T-226c 이후 Python import layout은 다음을 목표로 한다.
 
 | 표면 | 목표 |
 |------|------|
-| 메인 import root | `kortravel` |
-| 권장 사용 | `import kortravel as kt` |
-| DTO/core/infra/provider import | `kortravel.dto`, `kortravel.core`, `kortravel.infra`, `kortravel.providers` |
-| 메인 package path | `src/kortravel` |
-| Admin import | `kortravel.admin` |
-| Admin package path | `packages/kor-travel-map-admin/src/kortravel/admin` |
-| Dagster import | `kortravel.dagster` |
-| Dagster package path | `packages/kor-travel-map-dagster/src/kortravel/dagster` |
+| 메인 import root | `kortravelmap` |
+| 권장 사용 | `import kortravelmap as ktm` |
+| DTO/core/infra/provider import | `kortravelmap.dto`, `kortravelmap.core`, `kortravelmap.infra`, `kortravelmap.providers` |
+| 메인 package path | `src/kortravelmap` |
+| Admin import | `kortravelmap.admin` |
+| Admin package path | `packages/kor-travel-map-admin/src/kortravelmap/admin` |
+| Dagster import | `kortravelmap.dagster` |
+| Dagster package path | `packages/kor-travel-map-dagster/src/kortravelmap/dagster` |
 | main distribution | `kor-travel-map` |
 | admin distribution | `kor-travel-map-admin` |
 | dagster distribution | `kor-travel-map-dagster` |
@@ -75,15 +75,15 @@ T-226c는 코드 import와 package metadata만 다룬다.
 
 1. 최신 `main`에서 새 branch를 만들고 `codegraph sync`를 실행한다.
 2. 파일 이동을 먼저 수행한다.
-   - `src/krtour/map` → `src/kortravel`
+   - `src/krtour/map` → `src/kortravelmap`
    - `packages/krtour-map-admin/src/krtour/map_admin` →
-     `packages/kor-travel-map-admin/src/kortravel/admin`
+     `packages/kor-travel-map-admin/src/kortravelmap/admin`
    - `packages/krtour-map-dagster/src/krtour/map_dagster` →
-     `packages/kor-travel-map-dagster/src/kortravel/dagster`
+     `packages/kor-travel-map-dagster/src/kortravelmap/dagster`
 3. import를 기계적으로 바꾼다.
-   - `krtour.map.` → `kortravel.`
-   - `krtour.map_admin` → `kortravel.admin`
-   - `krtour.map_dagster` → `kortravel.dagster`
+   - `krtour.map.` → `kortravelmap.`
+   - `krtour.map_admin` → `kortravelmap.admin`
+   - `krtour.map_dagster` → `kortravelmap.dagster`
 4. `pyproject.toml` 계열을 갱신한다.
    - `project.name`
    - `[project.scripts]`
@@ -114,7 +114,7 @@ T-226c 최소 검증:
 
 ```bash
 python -m ruff check .
-python -m mypy --strict src/kortravel
+python -m mypy --strict src/kortravelmap
 python -m mypy --strict packages/kor-travel-map-admin/src
 python -m mypy --strict packages/kor-travel-map-dagster/src
 lint-imports
@@ -141,7 +141,7 @@ Docker compose, systemd/standalone runbook을 같은 PR에서 맞춘다.
 
 T-226e는 소비자 전파와 안내 문서를 다룬다.
 
-- README quickstart를 `import kortravel as kt` 기준으로 재작성한다.
+- README quickstart를 `import kortravelmap as ktm` 기준으로 재작성한다.
 - `docs/package-identity-rename.md`를 migration guide로 승격한다.
 - AGENTS/SKILL/CLAUDE/architecture/provider-contract/integration-map의 식별자 표를
   목표값으로 일괄 전환한다.
