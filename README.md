@@ -14,9 +14,10 @@ SQLAlchemy 2 async + GeoAlchemy2 + GeoPandas 위에서 동작한다.
 > **기준값(잘 바뀌지 않는 사실)**: standalone 고정 포트 API `12301` / admin UI
 > `12305` / Dagster `12302`(ADR-047), RustFS S3 `12101`·console `12105`, geocoding은
 > kraddr-geo REST v2 `POST /v2/{reverse,geocode}` 로컬 `http://127.0.0.1:12201`,
-> frontend Next.js 16 + `maplibre-vworld-js#v0.1.3`. ADR 현황: **001~053 accepted**
-> (다음 후보 054). ADR-048은 `/v1` REST clean cut + 정합성 표준, ADR-053은
-> `krtour-ai-agent` YouTube provider identity와 TripMate 직접 연동 제거 경계. admin UI는
+> frontend Next.js 16 + `maplibre-vworld-js#v0.1.3`. ADR 현황: **001~054 accepted**
+> (다음 후보 055). ADR-048은 `/v1` REST clean cut + 정합성 표준, ADR-053은
+> `krtour-ai-agent` YouTube provider identity와 TripMate 직접 연동 제거 경계, ADR-054는
+> `kor-travel-map` / `kortravel` package identity clean cut. admin UI는
 > `/admin/dagster`에서 Dagster 요약 + webserver embed 제공.
 >
 > **현재 진척·스프린트 상태의 단일 정본은 `docs/resume.md`(다음 한 작업) +
@@ -26,6 +27,11 @@ SQLAlchemy 2 async + GeoAlchemy2 + GeoPandas 위에서 동작한다.
 > `python-krtour-map-spec.docx`(저장소 루트, 약 80쪽).
 
 ## 정체성
+
+> **T-226 예정 변경**: ADR-054에 따라 public 배포명은 `kor-travel-map`, Python import
+> root는 `kortravel`, 권장 예시는 `import kortravel as kt`로 clean cut할 예정이다.
+> 현재 표는 T-226b/c 적용 전 코드의 실제값이다. 전환 정본은
+> [`docs/package-identity-rename.md`](docs/package-identity-rename.md).
 
 - **GitHub 저장소**: `python-krtour-map`
 - **Python import**: `from krtour.map import ...` (ADR-022, PEP 420 implicit namespace `krtour`)

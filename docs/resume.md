@@ -1,5 +1,22 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-12 Codex 작업 메모 — T-226a package identity ADR
+
+T-226a로 package identity rename 정본을 문서화했다.
+
+- ADR-054를 accepted로 추가했다. public 배포명은 `kor-travel-map`, Python import root는
+  `kortravel`, 권장 예시는 `import kortravel as kt`다.
+- `docs/package-identity-rename.md`를 추가해 현재값(`python-krtour-map`, `krtour.map`,
+  `KRTOUR_MAP_*`, `krtour_map`)과 목표값(`kor-travel-map`, `kortravel`,
+  `KOR_TRAVEL_MAP_*`, `kor_travel_map`)을 분리했다.
+- README/AGENTS/CLAUDE/backend-package/architecture/provider-contract/integration-map에는
+  "현재 표기는 T-226b/c 전 코드 기준, 목표 identity는 ADR-054"라는 note를 추가했다.
+- clean cut/no-shim 원칙을 확정했다. 구 `krtour.map`/`KRTOUR_MAP_*` compatibility shim은
+  만들지 않는다.
+
+**다음 한 작업**: T-212e는 다른 agent가 병행 진행 중이다. 본 agent가 이어갈 수 있는
+다음 작업은 **T-226b** 코드/package clean cut 계획 및 실제 layout 전환 준비다.
+
 ## 2026-06-12 Codex 작업 메모 — T-223d TripMate import 머지
 
 T-223d 외부 TripMate 연동까지 완료했다.
@@ -15,10 +32,10 @@ T-223d 외부 TripMate 연동까지 완료했다.
 - TripMate 쪽 `TRIPMATE_AGENT_API_BASE_URL` / 12401 잔여 설정도 제거됐다.
   `krtour-ai-agent`는 curated trip plan 생성에 관여하지 않는다.
 
-**다음 한 작업**: T-212e는 다른 agent가 병행 진행 중이다. 완료 결과가 머지되면
+**다음 한 작업(당시)**: T-212e는 다른 agent가 병행 진행 중이다. 완료 결과가 머지되면
 **T-225**로 최신 T-221/T-222/T-223 표면 포함 여부와 live row 수/P99/offline upload 증거를
 재대조한다. 그 전까지 본 agent의 다음 큰 후속은 T-226 package identity rename
-ADR/문서 정본화다.
+ADR/문서 정본화였고, T-226a로 완료했다.
 
 ## 2026-06-12 Codex 작업 메모 — T-223c-3 curated Admin UI
 

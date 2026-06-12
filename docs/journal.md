@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-12 (codex) — T-226a package identity rename 정본화
+
+T-226a로 배포명/임포트명 clean cut의 문서 정본을 만들었다.
+
+- ADR-054 accepted: 배포명 `kor-travel-map`, Python import root `kortravel`, 권장 예시
+  `import kortravel as kt`.
+- `docs/package-identity-rename.md` 추가: current identity와 target identity, no-shim 원칙,
+  T-226b/c 남은 작업을 표로 정리했다.
+- README/AGENTS/CLAUDE/backend-package/architecture/provider-contract/integration-map에
+  "현재 표기는 코드 기준, 목표 identity는 ADR-054/T-226" note를 추가했다.
+- T-226b/c 전에는 코드와 현재 운영값이 아직 `python-krtour-map` / `krtour.map` /
+  `KRTOUR_MAP_*`임을 명시했다.
+
 ## 2026-06-12 (codex) — T-223d TripMate import 머지 반영
 
 T-223d 외부 TripMate 소비 측 구현이 TripMate PR #184로 머지됐다.

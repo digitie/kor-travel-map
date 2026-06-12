@@ -23,11 +23,10 @@
         Python import root는 `kortravel`로 바꾸고, 권장 사용 예시는
         `import kortravel as kt`로 둔다. 구현은 대규모 package identity clean cut이므로
         별도 PR에서 진행한다.
-    - [ ] T-226a — ADR/문서 정본 작성: 현재 `python-krtour-map`,
-          `from krtour.map import ...`, `krtour-map` CLI/env/docs 표기를 어디까지
-          바꿀지 결정한다. `AGENTS.md`, `CLAUDE.md`, `README.md`, `docs/architecture.md`,
-          `docs/provider-contract.md`, `docs/backend-package.md`, `docs/integration-map.md`
-          식별자 표를 함께 정리한다.
+    - [x] T-226a — ADR/문서 정본 작성(완료: 2026-06-12, Codex):
+          ADR-054와 `docs/package-identity-rename.md`를 추가해 target identity
+          (`kor-travel-map`, `kortravel`, `import kortravel as kt`, `KOR_TRAVEL_MAP_*`,
+          `kor_travel_map`)와 clean cut/no-shim 원칙을 확정했다.
     - [ ] T-226b — 코드/package clean cut 계획: `src/krtour/map` → `src/kortravel`
           이동, admin/dagster package import 전환, import-linter layer 규칙 갱신,
           console script/entrypoint 이름 변경 여부, 구 `krtour.map` import 호환 shim을

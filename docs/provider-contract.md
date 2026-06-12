@@ -1,5 +1,9 @@
 # provider-contract.md — Provider 계약과 wrapper 금지 원칙
 
+> **T-226 / ADR-054**: public 배포명과 Python import root는 `kor-travel-map` /
+> `kortravel`로 clean cut할 예정이다. 본 문서의 `krtour.map.*` provider module 표기는
+> T-226b/c 적용 전 현재 코드 기준이다.
+
 ## 1. 핵심 원칙 (ADR-006)
 
 본 라이브러리는 **provider client에 대한 wrapper/adapter/gateway를 새로 만들지

@@ -5,6 +5,10 @@
 **Docker 독립 프로그램 + OpenAPI** 모델이다. TripMate는 krtour-map DB에 직접
 접근하거나 Python 패키지를 import하지 않고, OpenAPI client로 통신한다.
 
+> **T-226 / ADR-054**: public 배포명과 Python import root는 `kor-travel-map` /
+> `kortravel`로 clean cut할 예정이다. 본 문서의 `python-krtour-map`,
+> `src/krtour/map`, `krtour-map-admin` 표기는 T-226b/c 적용 전 현재 코드 기준이다.
+
 ## 1. 큰 그림
 
 본 저장소는 **monorepo**다. 핵심 패키지와 운영 프로그램 패키지가 들어 있다:
