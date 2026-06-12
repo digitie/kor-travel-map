@@ -52,6 +52,7 @@ function topicId(topic: string, prefix: string) {
 function invalidateLiveTopic(queryClient: QueryClient, topic: string) {
   if (topic === "import_jobs") {
     void queryClient.invalidateQueries({ queryKey: ["import-jobs"] });
+    void queryClient.invalidateQueries({ queryKey: ["import-job-events"] });
     void queryClient.invalidateQueries({ queryKey: ["ops", "metrics"] });
     return;
   }
@@ -59,6 +60,7 @@ function invalidateLiveTopic(queryClient: QueryClient, topic: string) {
     void queryClient.invalidateQueries({
       queryKey: ["import-job-events", topicId(topic, "import_job_events:")],
     });
+    void queryClient.invalidateQueries({ queryKey: ["import-job-events"] });
     return;
   }
   if (topic.startsWith("import_job:")) {
@@ -67,6 +69,7 @@ function invalidateLiveTopic(queryClient: QueryClient, topic: string) {
     void queryClient.invalidateQueries({
       queryKey: ["import-job-events", jobId],
     });
+    void queryClient.invalidateQueries({ queryKey: ["import-job-events"] });
     void queryClient.invalidateQueries({ queryKey: ["import-jobs"] });
     void queryClient.invalidateQueries({ queryKey: ["ops", "metrics"] });
     return;

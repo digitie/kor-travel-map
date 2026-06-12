@@ -44,20 +44,19 @@ T-211a의 완료 기준은 다음 두 가지다.
 
 | UI route | T-211b 구현 가능성 | 사용할 API/hook | 남은 backend gap |
 |----------|-------------------|-----------------|------------------|
-| `/` | 가능 | `useOpsMetrics`, `useImportJobs`, `useDedupReviews`, `useDagsterSummary` | `/ops/error-logs`는 아직 없음. 홈의 provider 실패는 metrics/import job 실패 중심으로 표시 |
+| `/` | 가능 | `useOpsMetrics`, `useImportJobs`, `useDedupReviews`, `useDagsterSummary` | provider 실패는 metrics/import job 실패와 `/ops/logs` job event stream에서 확인 |
 | `/features` | 가능 | `useAdminFeatures`, `useFeaturesInBbox`, `useFeatureDetail`, `useDeactivateAdminFeatureMutation`, feature change request mutation hooks(T-215b) | place/event 추가·수정·soft delete backend는 T-215a 구현. admin UI queue 화면과 hard delete/audit는 후속 |
 | `/features/[feature_id]` | 부분 가능 | `useFeatureDetail` | 일반 좌표 기준 `/features/nearby` endpoint 없음. target 기반 주변 조회는 `/features/nearby/by-target`만 사용 가능 |
-| `/ops/import-jobs` | 가능 | `useImportJobs`, `useImportJob` | job cancel, events, SSE stream endpoint 없음 |
+| `/ops/import-jobs` | 가능 | `useImportJobs`, `useImportJob` | job cancel, events, live signal 구현 완료 |
 | `/admin/dedup-review` | 가능 | `useDedupReviews`, `useDedupDecisionMutation` | decision 이유/작성자 UI validation만 프론트에서 보강 |
 | `/ops/metrics` | 가능 | `useOpsMetrics` | 없음 |
 | `/ops/consistency` | 가능 | `useConsistencyReports`, `useIntegrityIssues` | issue resolve/ignore mutation 없음 |
 | `/admin/feature-update-requests` | 가능 | `useFeatureUpdateRequests`, create/cancel/run-now mutation | 실제 Dagster 실행 연결은 T-208e 구현분 사용. provider별 세부 rate-limit UI는 후속 |
 | `/admin/poi-cache-targets` | 가능 | `usePoiCacheTargets`, `usePoiCacheTarget`, upsert/delete, `useNearbyFeaturesByTarget` | 없음 |
 | `/admin/dagster` | 가능 | `useDagsterSummary`, `useMarkDagsterNuxSeen`, `DAGSTER_UI_URL` iframe | Dagster NUX seen은 summary 성공 후 POST로 best-effort 처리. iframe 차단은 배포 환경 header 설정 영향 |
-| `/admin/providers` | 보류 | 없음 | `/admin/providers*` REST 없음 |
-| `/admin/provider-refresh-policies` | 보류 | 없음 | `/admin/provider-refresh-policies*` REST 없음 |
+| `/ops/providers` | 구현 완료 | `useOpsProviders`, `useOpsProvider`, provider refresh policy mutation | provider/dataset 상세, `provider_dataset` update request, refresh policy 편집 구현 |
 | `/admin/offline-uploads` | 기본 구현 완료 | `useOfflineUploads`, create/load mutation | T-208h에서 JSON/JSONL `FeatureBundle` upload/list/detail/Dagster load launch 연결. CSV/TSV validation wizard와 column mapping은 T-208i 후속 |
-| `/ops/error-logs` | 보류 | 없음 | `ops.import_job_events`, `/ops/error-logs` 미구현 |
+| `/ops/logs` | 구현 완료 | `useSystemLogs`, `useApiCallLogs`, `useImportJobEvents` | system/API log와 import job event stream 구현 |
 
 ## 문서 정정 사항
 

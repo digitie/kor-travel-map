@@ -147,6 +147,7 @@ def test_ops_routes_mounted_in_openapi(client: TestClient) -> None:
     spec = client.get("/openapi.json").json()
     assert "/v1/ops/metrics" in spec["paths"]
     assert "/v1/ops/import-jobs" in spec["paths"]
+    assert "/v1/ops/import-job-events" in spec["paths"]
     assert "/v1/ops/import-jobs/{job_id}" in spec["paths"]
     assert "/v1/ops/import-jobs/{job_id}/events" in spec["paths"]
     assert "/v1/ops/import-jobs/{job_id}/cancel" in spec["paths"]
@@ -376,6 +377,42 @@ def test_import_job_events_list_passes_filters(
     body = response.json()
     assert body["data"]["items"][0]["event_id"] == _event().event_id
     assert body["data"]["items"][0]["payload"] == {"attempt": 2}
+    assert body["meta"]["page"]["next_cursor"] == "cursor-2"
+
+
+@pytest.mark.unit
+def test_import_job_events_global_list_passes_filters(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import ops as router_mod
+
+    async def _events(
+        _session: Any,
+        job_id: str | None = None,
+        **kwargs: Any,
+    ) -> OpsImportJobEventPage:
+        assert job_id == _job().job_id
+        assert kwargs == {
+            "level": "warning",
+            "provider": "python-mois-api",
+            "dataset_key": "mois_license_features_bulk",
+            "limit": 25,
+            "cursor": "cursor-1",
+        }
+        return OpsImportJobEventPage(items=(_event(),), next_cursor="cursor-2")
+
+    monkeypatch.setattr(router_mod, "list_ops_import_job_events", _events)
+
+    response = client.get(
+        "/v1/ops/import-job-events?"
+        f"job_id={_job().job_id}&level=warning&provider=python-mois-api&"
+        "dataset_key=mois_license_features_bulk&page_size=25&cursor=cursor-1"
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data"]["items"][0]["job_id"] == _job().job_id
     assert body["meta"]["page"]["next_cursor"] == "cursor-2"
 
 

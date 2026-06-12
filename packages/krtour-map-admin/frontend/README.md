@@ -222,7 +222,7 @@ PID를 종료한 뒤 WSL frontend를 다시 띄운다. 정상은 `wslrelay`다.
 | `/ops/import-jobs/[job_id]` | `/v1/ops/import-jobs/{job_id}`, `/v1/ops/import-jobs/{job_id}/events`, `/v1/ops/import-jobs/{job_id}/cancel`, `WS /v1/ops/live` | 구현됨. 상세/payload/event timeline/cancel/관련 링크/live invalidate |
 | `/ops/providers` | `/v1/ops/providers`, `/v1/ops/providers/{provider}`, `/v1/admin/provider-refresh-policies*`, `/v1/admin/feature-update-requests` | 구현됨. provider×dataset sync/detail, cursor, 최근 provider_dataset request, policy 편집/요청 생성 |
 | `/ops/consistency` | `/v1/ops/metrics`, `/v1/ops/consistency/reports`, `/v1/ops/consistency/issues` | 구현됨. 정합성 보고서/이슈 |
-| `/ops/logs` | `/v1/ops/system-logs`, `/v1/ops/api-call-logs` | 구현됨. system log와 opt-in API call log 조회 |
+| `/ops/logs` | `/v1/ops/system-logs`, `/v1/ops/api-call-logs`, `/v1/ops/import-job-events` | 구현됨. system/API log와 import job event stream 조회 |
 | `/admin/dedup-reviews` | `/v1/admin/dedup-reviews` | 구현됨. dedup 검토 큐와 결정 mutation |
 | `/admin/enrichment-reviews` | `/v1/admin/enrichment-reviews` | 구현됨. enrichment 검토 큐와 결정 mutation |
 | `/admin/feature-update-requests` | `/v1/admin/feature-update-requests` | 구현됨. 좌표/반경/provider 업데이트 큐잉, cancel, run-now |
@@ -233,9 +233,8 @@ PID를 종료한 뒤 WSL frontend를 다시 띄운다. 정상은 `wslrelay`다.
 | `/admin/features/new` | `/v1/admin/features`, `/v1/features/nearby`, kraddr-geo REST v2 | 구현됨. 수동 feature 작성 change request + 지도 좌표/geocode/reverse/중복 후보 |
 | `/features/[id]` | `/v1/features/{id}`, `/v1/admin/features/{id}`, `/v1/features/{id}/weather`, `/v1/features/nearby` | 구현됨. feature 상세/source/raw/issues/history/files/weather/nearby |
 | `/admin/offline-uploads` | `/admin/offline-uploads`, `/admin/offline-uploads/{upload_id}/load` | 구현됨. JSON/JSONL upload/list/detail + Dagster load launch. CSV/TSV wizard는 후속 |
-| `/ops/error-logs` | 없음 | 후속. 일반 error log 화면은 미구현. job event는 `/ops/import-jobs/[job_id]`에서 조회 |
-| `/debug/explain` | 없음 | 후속. SQL EXPLAIN viewer |
-| `/debug/fixtures` | 없음 | 후속. fixture 저장/replay |
+| `/debug/explain` | 없음 | T-221e 재판정으로 제외. EXPLAIN은 통합 테스트 gate와 운영 DB read-only runbook에서 수행 |
+| `/debug/fixtures` | 없음 | T-221e 재판정으로 제외. fixture 저장/replay는 파일 기반 helper와 `/debug/etl` preview로 분리 |
 
 패키지 경계: `../../../docs/debug-ui-package.md` §14. Admin 상세 구현 사양:
 `../../../docs/debug-ui-admin-workflows.md`.

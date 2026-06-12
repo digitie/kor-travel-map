@@ -3,6 +3,27 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## Admin UI/UX 연결성 + 실시간성 (2026-06-12, `T-221`)
+
+- [x] **T-221 — admin UI/UX 시나리오 연결성 + 실시간성 보강.**
+  T-221a~e 전부 완료. 정본 점검은
+  `docs/reports/admin-ui-scenario-linkage-recheck-2026-06-11.md`.
+  - [x] **T-221a — feature 상세/수동 작성 흐름.**
+    `/features/[feature_id]` 1급 상세 route와 `GET /v1/admin/features/{feature_id}`,
+    `/admin/features/new` 수동 feature 작성 화면(지도 좌표 선택, kraddr-geo
+    geocode/reverse, kind별 form, nearby 중복 후보)을 구현했다.
+  - [x] **T-221b — import job 상세/event/cancel.**
+    `ops.import_job_events`, `/ops/import-jobs/[job_id]`, job event timeline,
+    `POST /v1/ops/import-jobs/{job_id}/cancel`을 연결했다.
+  - [x] **T-221c — admin live signal channel.**
+    `WS /v1/ops/live` topic 다중화와 frontend TanStack Query invalidation을 구현했다.
+  - [x] **T-221d — provider 상세/refresh policy.**
+    `/ops/providers` 상세, `provider_dataset` update request, `provider_refresh_policies`
+    편집 UI/API를 구현했다. 중복 provider run endpoint는 만들지 않는다.
+  - [x] **T-221e — ops logs + debug 재판정.**
+    `/ops/logs`에 job event stream을 붙이고, `/debug/explain`·`/debug/fixtures` REST/UI는
+    만들지 않는 것으로 정리했다.
+
 ## Provider Dagster 완결 — KMA/MCST (2026-06-11, `T-219`/`T-220`)
 
 - [x] **T-219 — KMA weather Dagster 파이프라인 완결.**

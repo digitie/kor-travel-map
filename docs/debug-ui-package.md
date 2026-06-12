@@ -80,8 +80,8 @@ packages/krtour-map-admin/
 │   │   ├── import_jobs.py
 │   │   ├── dedup_review.py
 │   │   ├── integrity.py
-│   │   ├── debug.py           — /debug/explain, /debug/fixtures
-│   │   └── fixtures.py        — /debug/fixtures (저장/replay)
+│   │   ├── etl.py             — /debug/etl
+│   │   └── ops_logs.py        — /ops/system-logs, /ops/api-call-logs
 │   └── static/                — Next.js static export 산출물 mount 시 (옵션 C, frontend/out/ 복사)
 ├── frontend/                  — Next.js 16 + React 19 + TS + maplibre-vworld (ADR-025 2차 보강)
 │   ├── package.json
@@ -202,7 +202,7 @@ krtour-map-admin run --host 127.0.0.1 --port 12301
 > | `/features/{feature_id}` | GET | 단건 상세 (PR#73) |
 >
 > 나머지 행(`/features/nearby`, `/{id}/weather`, `/sources`, `/import-jobs`,
-> `/dedup-review`, `/debug/explain` 등)은 **Sprint 3~5 예정**. 활성 라우터는
+> `/dedup-review` 등)은 **Sprint 3~5 예정**. 활성 라우터는
 > `settings.debug_routes_enabled` / `settings.features_routes_enabled` /
 > `settings.admin_routes_enabled` / `settings.ops_routes_enabled` flag로 제어.
 > `admin_routes_enabled`와 `ops_routes_enabled`가 `None`이면
@@ -226,8 +226,7 @@ krtour-map-admin run --host 127.0.0.1 --port 12301
 | `/dedup-review` | GET | pending 큐 |
 | `/dedup-review/{review_id}` | PATCH | accept/reject/merged |
 | `/integrity-violations` | GET | `data_integrity_violations` |
-| `/debug/explain` | POST | body에 SQL (allowlist 적용) → EXPLAIN (FORMAT JSON, ANALYZE) |
-| `/debug/fixtures` | GET, POST | fixture 저장/replay 메타 |
+| `/debug/etl` | GET, POST | provider fixture/live 변환 preview. DB write 없음 |
 
 Admin 운영 콘솔에서 새로 도입할 권장 경로는 `debug-ui-admin-workflows.md`가 더
 구체적이다. 특히 기존 `GET /features`는 bbox 지도 조회로 유지하고, 전역 feature
@@ -235,8 +234,10 @@ Admin 운영 콘솔에서 새로 도입할 권장 경로는 `debug-ui-admin-work
 
 ### 6.1 SQL EXPLAIN 안전 가드
 
-`/debug/explain`은 SELECT/WITH/EXPLAIN으로 시작하는 쿼리만 허용. INSERT/UPDATE/
-DELETE/DDL은 거부. `READ ONLY` transaction에서 실행.
+T-221e 재판정 결과 `/debug/explain` REST/UI는 현행 구현 범위에서 제외한다. 성능
+검증은 통합 테스트 EXPLAIN gate와 운영 DB read-only 세션/runbook으로 수행한다.
+나중에 필요하면 raw SQL 입력이 아니라 allowlist query catalog 방식으로 별도 task에서
+재검토한다.
 
 ## 7. 응답 셰입
 
@@ -312,7 +313,7 @@ type drift 부채 0).
 
 - 사용자 가시 UI (사용자 대상 지도/POI 보기 등 — TripMate)
 - 인증/세션/권한 (네트워크 계층 책임)
-- SQL write/DDL (`/debug/explain`은 read-only)
+- SQL write/DDL
 - 백업/복구/DR 직접 실행은 ADR-040의 별도 admin 기능으로만 다룬다
 - TripMate 사용자/여행계획/POI 도메인 화면
 
@@ -437,7 +438,7 @@ npm run dev                  # http://127.0.0.1:12305
 | `<FeatureMakiMarker>` (custom) | maki + 카테고리 color (P-01~P-16) | category code → maki + 색상 dispatch |
 | `<DetailPanel>` | feature 클릭 시 상세 | `GET /features/{id}` |
 | `<ProviderSyncBadge>` | provider sync 상태 | `GET /providers/{name}/sync-state` |
-| `<DebugExplain>` | SQL EXPLAIN viewer | `POST /debug/explain` (read-only) |
+| `<DebugEtlPreview>` | provider fixture/live 변환 preview | `GET/POST /debug/etl/*` |
 
 ### 14.5 카테고리 → maki icon 매핑
 

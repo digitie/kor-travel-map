@@ -1,5 +1,24 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-12 Codex 작업 메모 — T-221e ops logs + debug 재판정
+
+T-221 마지막 조각으로 `/ops/logs`를 import job event stream과 연결하고 debug 진단 표면을
+정리했다.
+
+- `GET /v1/ops/import-job-events`를 추가했다. `job_id`/`provider`/`dataset_key`/
+  `level` 필터와 keyset cursor를 지원하며, 기존 job별
+  `/v1/ops/import-jobs/{job_id}/events`는 유지한다.
+- admin frontend `/ops/logs`는 System logs / API call logs / Job events 3탭이 됐다.
+  Job events 탭은 provider/dataset/job/level 필터와 `/ops/import-jobs/[job_id]` 상세
+  링크를 제공한다.
+- `/debug/explain` REST/UI는 만들지 않는다. raw SQL 입력 화면 대신 통합 테스트
+  EXPLAIN gate와 운영 DB read-only runbook을 기준으로 둔다.
+- `/debug/fixtures` REST/UI도 만들지 않는다. fixture 저장·갱신은 파일 기반 helper와
+  provider 회귀 테스트, preview는 기존 `/debug/etl`로 분리한다.
+
+**다음 한 작업**: **T-222b** — 공개 해수욕장/축제 뷰 API 백엔드/OpenAPI/user-client 구현.
+T-212e는 다른 agent가 병행 진행 중이며, 결과는 T-225에서 다시 대조한다.
+
 ## 2026-06-12 Codex 작업 메모 — T-221d provider 상세/refresh policy
 
 T-221d로 provider 운영 상세와 refresh policy 편집 흐름을 연결했다.

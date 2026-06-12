@@ -1,11 +1,20 @@
 "use client";
 
-import { AlertTriangleIcon, RefreshCwIcon, SearchIcon } from "lucide-react";
+import {
+  AlertTriangleIcon,
+  ArrowUpRightIcon,
+  RefreshCwIcon,
+  SearchIcon,
+} from "lucide-react";
+import Link from "next/link";
 import { useDeferredValue, useMemo, useState } from "react";
 
+import { useOpsLiveInvalidation } from "@/api/live";
 import {
   useApiCallLogs,
+  useImportJobEvents,
   useSystemLogs,
+  type ImportJobEventLevel,
   type SystemLogLevel,
 } from "@/api/ops";
 import { AdminShell } from "@/components/admin-shell";
@@ -36,7 +45,15 @@ const LEVELS: Array<SystemLogLevel | "all"> = [
   "debug",
   "all",
 ];
-const PAGE_SIZE_OPTIONS = [25, 50, 100, 200, 500] as const;
+const EVENT_LEVELS: Array<ImportJobEventLevel | "all"> = [
+  "critical",
+  "error",
+  "warning",
+  "info",
+  "debug",
+  "all",
+];
+const PAGE_SIZE_OPTIONS = [25, 50, 100, 200] as const;
 
 export function LogsClient() {
   const [systemQ, setSystemQ] = useState("");
@@ -49,6 +66,13 @@ export function LogsClient() {
   const [apiPath, setApiPath] = useState("");
   const [apiMinStatus, setApiMinStatus] = useState("");
   const [apiCursor, setApiCursor] = useState<string | null>(null);
+
+  const [eventJobId, setEventJobId] = useState("");
+  const [eventLevel, setEventLevel] = useState<ImportJobEventLevel | "all">("all");
+  const [eventProvider, setEventProvider] = useState("");
+  const [eventDatasetKey, setEventDatasetKey] = useState("");
+  const [eventCursor, setEventCursor] = useState<string | null>(null);
+
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(100);
 
   const systemParams = useMemo(
@@ -74,21 +98,49 @@ export function LogsClient() {
     }),
     [apiCursor, apiMethod, apiMinStatus, apiPath, pageSize],
   );
+  const eventParams = useMemo(
+    () => ({
+      job_id: eventJobId.trim().length > 0 ? eventJobId.trim() : undefined,
+      level: eventLevel === "all" ? undefined : eventLevel,
+      provider:
+        eventProvider.trim().length > 0 ? eventProvider.trim() : undefined,
+      dataset_key:
+        eventDatasetKey.trim().length > 0
+          ? eventDatasetKey.trim()
+          : undefined,
+      page_size: pageSize,
+      cursor: eventCursor ?? undefined,
+    }),
+    [
+      eventCursor,
+      eventDatasetKey,
+      eventJobId,
+      eventLevel,
+      eventProvider,
+      pageSize,
+    ],
+  );
 
   const systemLogs = useSystemLogs(systemParams);
   const apiLogs = useApiCallLogs(apiParams);
+  const jobEvents = useImportJobEvents(eventParams);
+  const live = useOpsLiveInvalidation({ topics: ["import_jobs"] });
   const systemItems = systemLogs.data?.data.items ?? [];
   const apiItems = apiLogs.data?.data.items ?? [];
+  const eventItems = jobEvents.data?.data.items ?? [];
   const refreshAll = () => {
     void systemLogs.refetch();
     void apiLogs.refetch();
+    void jobEvents.refetch();
   };
 
   return (
     <AdminShell
       actions={
         <Button
-          disabled={systemLogs.isFetching || apiLogs.isFetching}
+          disabled={
+            systemLogs.isFetching || apiLogs.isFetching || jobEvents.isFetching
+          }
           type="button"
           variant="outline"
           onClick={refreshAll}
@@ -102,12 +154,14 @@ export function LogsClient() {
       title="Logs"
     >
       <div className="flex flex-col gap-4">
-        {(systemLogs.isError || apiLogs.isError) && (
+        {(systemLogs.isError || apiLogs.isError || jobEvents.isError) && (
           <Alert variant="destructive">
             <AlertTriangleIcon data-icon="inline-start" />
             <AlertTitle>로그 조회 실패</AlertTitle>
             <AlertDescription>
-              {systemLogs.error?.message ?? apiLogs.error?.message}
+              {systemLogs.error?.message ??
+                apiLogs.error?.message ??
+                jobEvents.error?.message}
             </AlertDescription>
           </Alert>
         )}
@@ -121,6 +175,7 @@ export function LogsClient() {
                 setPageSize(Number(event.target.value) as typeof pageSize);
                 setSystemCursor(null);
                 setApiCursor(null);
+                setEventCursor(null);
               }}
             >
               {PAGE_SIZE_OPTIONS.map((item) => (
@@ -135,6 +190,12 @@ export function LogsClient() {
             <Badge variant="outline">
               api {apiItems.length}
             </Badge>
+            <Badge variant="outline">
+              job events {eventItems.length}
+            </Badge>
+            <Badge variant={live.state === "live" ? "default" : "outline"}>
+              live {live.state}
+            </Badge>
           </div>
         </div>
 
@@ -142,6 +203,7 @@ export function LogsClient() {
           <TabsList>
             <TabsTrigger value="system">System logs</TabsTrigger>
             <TabsTrigger value="api">API call logs</TabsTrigger>
+            <TabsTrigger value="events">Job events</TabsTrigger>
           </TabsList>
 
           <TabsContent className="mt-4" value="system">
@@ -344,6 +406,131 @@ export function LogsClient() {
                           colSpan={7}
                         >
                           API call log가 없습니다.
+                        </TableCell>
+                      </TableRow>
+                    ) : null}
+                  </TableBody>
+                </Table>
+              </div>
+            </section>
+          </TabsContent>
+
+          <TabsContent className="mt-4" value="events">
+            <section className="rounded-lg border bg-background">
+              <div className="grid gap-3 border-b p-4 md:grid-cols-[minmax(16rem,1.2fr)_auto_auto_auto_auto_auto]">
+                <Input
+                  aria-label="job event job id"
+                  placeholder="job_id"
+                  value={eventJobId}
+                  onChange={(event) => {
+                    setEventJobId(event.target.value);
+                    setEventCursor(null);
+                  }}
+                />
+                <NativeSelect
+                  aria-label="job event level"
+                  value={eventLevel}
+                  onChange={(event) => {
+                    setEventLevel(
+                      event.target.value as ImportJobEventLevel | "all",
+                    );
+                    setEventCursor(null);
+                  }}
+                >
+                  {EVENT_LEVELS.map((item) => (
+                    <NativeSelectOption key={item} value={item}>
+                      {item}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+                <Input
+                  aria-label="job event provider"
+                  placeholder="provider"
+                  value={eventProvider}
+                  onChange={(event) => {
+                    setEventProvider(event.target.value);
+                    setEventCursor(null);
+                  }}
+                />
+                <Input
+                  aria-label="job event dataset key"
+                  placeholder="dataset_key"
+                  value={eventDatasetKey}
+                  onChange={(event) => {
+                    setEventDatasetKey(event.target.value);
+                    setEventCursor(null);
+                  }}
+                />
+                <Button
+                  disabled={!eventCursor}
+                  type="button"
+                  variant="outline"
+                  onClick={() => setEventCursor(null)}
+                >
+                  첫 페이지
+                </Button>
+                <Button
+                  disabled={!jobEvents.data?.meta.page?.next_cursor}
+                  type="button"
+                  variant="outline"
+                  onClick={() =>
+                    setEventCursor(jobEvents.data?.meta.page?.next_cursor ?? null)
+                  }
+                >
+                  다음
+                </Button>
+              </div>
+              {jobEvents.isLoading ? <Skeleton className="m-4 h-96" /> : null}
+              <div className="overflow-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>occurred</TableHead>
+                      <TableHead>level</TableHead>
+                      <TableHead>provider</TableHead>
+                      <TableHead>dataset</TableHead>
+                      <TableHead>stage</TableHead>
+                      <TableHead>message</TableHead>
+                      <TableHead>job</TableHead>
+                      <TableHead>code</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {eventItems.map((item) => (
+                      <TableRow key={item.event_id}>
+                        <TableCell className="text-muted-foreground">
+                          {formatDateTime(item.occurred_at)}
+                        </TableCell>
+                        <TableCell>
+                          <StatusBadge status={item.level} />
+                        </TableCell>
+                        <TableCell>{item.provider ?? "-"}</TableCell>
+                        <TableCell>{item.dataset_key ?? "-"}</TableCell>
+                        <TableCell>{item.stage ?? "-"}</TableCell>
+                        <TableCell className="max-w-96">
+                          <div className="line-clamp-2">{item.message}</div>
+                        </TableCell>
+                        <TableCell className="font-mono text-xs">
+                          <Link
+                            className={
+                              "inline-flex items-center gap-1 text-primary hover:underline"
+                            }
+                            href={`/ops/import-jobs/${item.job_id}`}
+                          >
+                            {shortId(item.job_id)}
+                            <ArrowUpRightIcon className="size-3" />
+                          </Link>
+                        </TableCell>
+                        <TableCell>{item.code ?? "-"}</TableCell>
+                      </TableRow>
+                    ))}
+                    {!jobEvents.isLoading && eventItems.length === 0 ? (
+                      <TableRow>
+                        <TableCell
+                          className="h-32 text-center text-muted-foreground"
+                          colSpan={8}
+                        >
+                          job event가 없습니다.
                         </TableCell>
                       </TableRow>
                     ) : null}
