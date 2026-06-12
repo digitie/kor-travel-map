@@ -1,5 +1,23 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-12 claude 작업 메모 — T-212e 완결 (실데이터 full reload)
+
+T-212e를 종결했다. 정본 리포트
+`docs/reports/t-212e-live-full-reload-final-2026-06-12.md`.
+
+- 빈 DB에서 전 provider Dagster 적재 **1,095,665 features**(MOIS 980,970 /
+  MCST 13종 102,121 / knps_trails 618 등) + weather values 92,923.
+- consistency gate 최종 report `99159eea` severity_max OK / offline upload
+  3포맷 + DELETE lifecycle live 검증 / e2e 33/33 / API smoke 17/17 /
+  backup→staging restore 검증값 운영 정확 일치 / P99 수집(in-bounds 442ms —
+  클러스터 MV ADR 재판단 입력).
+- 실측 적발 수정: krtour 11 PR + provider 5 repo(이슈→PR→머지 패턴).
+  이슈 #397/#407/#409 close.
+
+**다음 한 작업**: **T-225** — T-212e closure 재검증(최신 표면 포함 여부,
+live row 수/P99, 리포트 링크 재대조 — 본 리포트가 1차 입력). 그 외 큰 트랙은
+T-226b/c package identity clean cut.
+
 ## 2026-06-12 Codex 작업 메모 — T-226a package identity ADR
 
 T-226a로 package identity rename 정본을 문서화했다.
