@@ -227,6 +227,27 @@ async def test_import_job_events_list_and_cursor() -> None:
 
 
 @pytest.mark.unit
+async def test_import_job_events_global_filters() -> None:
+    at = datetime(2026, 6, 3, tzinfo=UTC)
+    session = _Session(_Result([_event_row("11111111-1111-1111-1111-111111111111", at=at)]))
+    db = cast(Any, session)
+
+    page = await list_ops_import_job_events(
+        db,
+        level="warning",
+        provider="python-mois-api",
+        dataset_key="mois_license_features_bulk",
+        limit=50,
+    )
+
+    assert len(page.items) == 1
+    assert session.params[0]["job_id"] is None
+    assert session.params[0]["level"] == "warning"
+    assert session.params[0]["provider"] == "python-mois-api"
+    assert session.params[0]["dataset_key"] == "mois_license_features_bulk"
+
+
+@pytest.mark.unit
 async def test_consistency_reports_list_and_latest() -> None:
     at = datetime(2026, 6, 3, tzinfo=UTC)
     session = _Session(

@@ -2,6 +2,23 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-12 (codex) — T-221e ops logs + debug 재판정
+
+T-221 admin UI 연결성 보강의 마지막 조각으로 `/ops/logs`와 import job event stream을
+연결하고, debug explain/fixtures 표면을 재판정했다.
+
+- **Backend**: `GET /v1/ops/import-job-events`를 추가했다. `job_id`/`provider`/
+  `dataset_key`/`level` 필터와 `occurred_at DESC, event_id DESC` keyset cursor를
+  지원한다. 기존 `/v1/ops/import-jobs/{job_id}/events`는 그대로 유지한다.
+- **Frontend**: `/ops/logs`에 Job events 탭을 추가했다. system/API log와 같은 화면에서
+  provider/dataset/job/level 필터로 event를 훑고, 각 row의 job 링크로
+  `/ops/import-jobs/[job_id]` 상세로 이동한다.
+- **Debug 재판정**: `/debug/explain` REST/UI는 raw SQL blast radius 때문에 제외하고,
+  EXPLAIN은 통합 테스트 gate와 운영 DB read-only runbook으로 둔다. `/debug/fixtures`도
+  만들지 않고 파일 기반 fixture helper + `/debug/etl` preview로 수렴했다.
+- **문서/계약**: admin OpenAPI, frontend generated type, admin workflow/package 문서,
+  fixture workflow, frontend README를 갱신했다.
+
 ## 2026-06-12 (codex) — T-221d provider 상세/refresh policy
 
 T-221 admin UI 연결성 보강의 네 번째 조각으로 provider 운영 상세와 refresh policy 편집을

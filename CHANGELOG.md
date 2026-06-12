@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### Ops logs job event 연결 + debug 재판정 (T-221e, 2026-06-12)
+
+- **ADDED**: `GET /v1/ops/import-job-events` — `job_id`/`provider`/`dataset_key`/
+  `level` 필터를 지원하는 전역 import job event stream.
+- **CHANGED**: admin frontend `/ops/logs`가 system/API log에 더해 Job events 탭과
+  job 상세 링크를 제공한다.
+- **CHANGED**: `/debug/explain`·`/debug/fixtures` REST/UI는 T-221e 재판정으로
+  구현 범위에서 제외하고, EXPLAIN은 테스트/runbook, fixture 저장은 파일 기반 helper와
+  `/debug/etl` preview로 정리했다.
+
 ### Provider 상세/refresh policy 연결 (T-221d, 2026-06-12)
 
 - **ADDED**: `GET /v1/ops/providers`, `GET /v1/ops/providers/{provider}` —

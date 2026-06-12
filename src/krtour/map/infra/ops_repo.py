@@ -242,8 +242,16 @@ _IMPORT_JOB_EVENT_COLUMNS: Final[str] = (
 _LIST_IMPORT_JOB_EVENTS_SQL: Final[str] = f"""
 SELECT {_IMPORT_JOB_EVENT_COLUMNS}
 FROM ops.import_job_events
-WHERE job_id = CAST(:job_id AS uuid)
+WHERE (
+    CAST(:job_id AS uuid) IS NULL
+    OR job_id = CAST(:job_id AS uuid)
+  )
   AND (CAST(:level AS text) IS NULL OR level = CAST(:level AS text))
+  AND (CAST(:provider AS text) IS NULL OR provider = CAST(:provider AS text))
+  AND (
+    CAST(:dataset_key AS text) IS NULL
+    OR dataset_key = CAST(:dataset_key AS text)
+  )
   AND (
     CAST(:cursor_occurred_at AS timestamptz) IS NULL
     OR (occurred_at, event_id) < (
@@ -480,9 +488,11 @@ async def get_ops_import_job(
 
 async def list_ops_import_job_events(
     session: AsyncSession,
-    job_id: str,
+    job_id: str | None = None,
     *,
     level: str | None = None,
+    provider: str | None = None,
+    dataset_key: str | None = None,
     limit: int = 50,
     cursor: str | None = None,
 ) -> OpsImportJobEventPage:
@@ -497,6 +507,8 @@ async def list_ops_import_job_events(
             {
                 "job_id": job_id,
                 "level": level,
+                "provider": provider,
+                "dataset_key": dataset_key,
                 "cursor_occurred_at": cursor_occurred_at,
                 "cursor_event_id": cursor_event_id,
                 "limit": page_size + 1,

@@ -128,7 +128,7 @@ REST/OpenAPI는 `python-krtour-map`이 아니라 **별도 Python 패키지**
 │   ├── /features/{feature_id}  (단건 상세)     (구현됨, PR#73)    │
 │   ├── /features/nearby, /{id}/weather, /sources  (Sprint 3~4)   │
 │   ├── /providers/{name}/sync-state               (Sprint 4)     │
-│   ├── /debug/explain, /debug/fixtures            (Sprint 4)     │
+│   ├── /ops/logs                                  (T-221e)       │
 │   ├── /admin/dedup-review, /admin/integrity      (Sprint 4~5)   │
 │   └── /admin/feature-update-requests             (ADR-045)      │
 └──────────────────────────────────────────────────────────────────┘

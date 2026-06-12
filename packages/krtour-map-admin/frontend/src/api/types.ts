@@ -951,6 +951,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/ops/import-job-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Import Job Events All
+         * @description 전역 ``ops.import_job_events`` event stream.
+         */
+        get: operations["list_import_job_events_all_v1_ops_import_job_events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/ops/import-jobs": {
         parameters: {
             query?: never;
@@ -7318,6 +7338,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OpsHealthDeepResponse"];
+                };
+            };
+        };
+    };
+    list_import_job_events_all_v1_ops_import_job_events_get: {
+        parameters: {
+            query?: {
+                job_id?: string | null;
+                level?: ("debug" | "info" | "warning" | "error" | "critical") | null;
+                provider?: string | null;
+                dataset_key?: string | null;
+                page_size?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpsImportJobEventsListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

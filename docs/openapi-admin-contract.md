@@ -133,9 +133,9 @@ object 단건은 모두 envelope로 수렴시킨다.
 | `admin-issues` | `/admin/issues` | 주소/정합성 이슈 운영 처리(목록/단건/PATCH 7 action). T-DA-13 구현 완료. admin UI는 T-212b 후속 |
 | `admin-offline` | `/admin/offline-uploads` | 오프라인 파일 업로드/검증/적재 |
 | `admin-backups` | `/admin/backups`, `/admin/restore` | standalone backup artifact 조회, backup/restore command plan, manual-required hot-swap 경계 |
-| `ops` | `/ops` | import job 조회, metrics, consistency, `GET /ops/health-deep`(DB/PostGIS readiness; public `/health` liveness와 분리), `GET /ops/system-logs`·`GET /ops/api-call-logs`(운영 로그 조회, keyset cursor). api-call-log 적재는 `KRTOUR_MAP_ADMIN_API_CALL_LOG_ENABLED` opt-in middleware(기본 off, best-effort) |
+| `ops` | `/ops` | import job 조회, metrics, consistency, `GET /ops/health-deep`(DB/PostGIS readiness; public `/health` liveness와 분리), `GET /ops/system-logs`·`GET /ops/api-call-logs`·`GET /ops/import-job-events`(운영 로그 조회, keyset cursor). api-call-log 적재는 `KRTOUR_MAP_ADMIN_API_CALL_LOG_ENABLED` opt-in middleware(기본 off, best-effort) |
 | `dagster` | `/ops/dagster` | Dagster webserver GraphQL 기반 운영 요약 |
-| `debug` | `/debug` | fixture, ETL preview, EXPLAIN |
+| `debug` | `/debug` | ETL preview. `/debug/explain`·`/debug/fixtures` REST/UI는 T-221e에서 제외 결정 |
 
 라우터 노출은 `AdminSettings` flag로 제어한다. `/debug/*`는
 `debug_routes_enabled`, `/features/*`는 `features_routes_enabled`,
@@ -685,6 +685,24 @@ Query:
 ### `GET /ops/import-jobs/{job_id}`
 
 `ops.import_jobs` 단건을 반환한다. 없으면 `404`.
+
+### `GET /ops/import-job-events`
+
+`ops.import_job_events` 전역 event stream을 `occurred_at DESC, event_id DESC` keyset
+cursor로 반환한다. `/ops/logs`의 Job events 탭은 이 표면을 사용해 provider 실패를
+한 화면에서 훑고, item의 `job_id`를 `/ops/import-jobs/{job_id}` 상세로 연결한다.
+
+Query:
+
+- `job_id`: UUID. 특정 job으로 좁힐 때 사용.
+- `level`: `debug` / `info` / `warning` / `error` / `critical`
+- `provider`
+- `dataset_key`
+- `page_size` (`1..200`, 기본 `50`)
+- `cursor`
+
+각 item은 `event_id`, `job_id`, `provider`, `dataset_key`, `feature_id`, `stage`,
+`level`, `code`, `message`, `payload`, `occurred_at`을 포함한다.
 
 ### `GET /ops/import-jobs/{job_id}/events`
 

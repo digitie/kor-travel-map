@@ -6,35 +6,15 @@
 
 ## 진행 중인 작업 인덱스 (열린 `[ ]` 항목)
 
-> 핵심 실행 6건(T-212e 병행, T-221, T-222, T-223, T-225, T-226) + 외부/보류 항목 별도.
+> 핵심 실행 5건(T-212e 병행, T-222, T-223, T-225, T-226) + 외부/보류 항목 별도.
 > 상세는 아래 각 섹션.
 > 완료 이력은 [`tasks-done.md`](tasks-done.md).
 
 - **다음 (우선순위 순)**
   - [ ] T-212e — **실데이터 전체 재적재 + offline upload 실데이터 검증 + 최종 리포트**.
-        다른 agent가 병행 진행 중이다(2026-06-12 사용자 확인). 본 agent는 T-224/T-221/
-        T-222/T-223 작업 중에도 주기적으로 main/rebase 충돌을 확인하고, T-212e 결과가
+        다른 agent가 병행 진행 중이다(2026-06-12 사용자 확인). 본 agent는 T-222/T-223
+        작업 중에도 주기적으로 main/rebase 충돌을 확인하고, T-212e 결과가
         머지되면 후속 T-225 closure 재검증에 반영한다.
-  - [ ] T-221 — **admin UI/UX 시나리오 연결성 + 실시간성 보강**. 정본 점검:
-        `docs/reports/admin-ui-scenario-linkage-recheck-2026-06-11.md`.
-    - [x] T-221a — feature 상세/수동 작성 흐름.
-      - [x] T-221a-1 — `/features/[feature_id]` 1급 상세 경로 + admin 상세 API
-            `GET /v1/admin/features/{feature_id}` 1차. source/raw/files/issues/history/
-            nearby/weather 연결(2026-06-12 Codex).
-      - [x] T-221a-2 — `/admin/features/new` 수동 feature 작성
-            전용 흐름. 지도 좌표 선택, kraddr-geo geocode/reverse 연동, kind별 detail
-            form, duplicate 후보 확인을 change-request 생성 전에 연결(2026-06-12 Codex).
-    - [x] T-221b — `/ops/import-jobs/[job_id]` 상세 + `ops.import_job_events`
-          스키마/API + cancel/event 타임라인. feature-update/offline-upload/Dagster run 상세
-          링크 포함(2026-06-12 Codex).
-    - [x] T-221c — admin 실시간 전송. `WS /v1/ops/live` 다중화 topic과
-          job/request/upload/run별 WebSocket signal channel 구현(2026-06-12 Codex).
-    - [x] T-221d — provider 상세/refresh policy 보강. `/ops/providers` 행 상세 추적,
-          provider_dataset update request 상세 링크, `provider_refresh_policies` 편집 UI.
-          중복 `/admin/providers/{provider}/datasets/{dataset_key}/runs`는 만들지 않는다
-          (2026-06-12 Codex).
-    - [ ] T-221e — `/ops/logs`와 job event 연계, `/debug/explain`/`/debug/fixtures`
-          필요성 재판정.
   - [ ] T-222 — **TripMate T-130 공개 해수욕장/축제 뷰 API**. 정본 후보:
         `docs/public-views-api.md`.
     - [x] T-222a — T-130 차단 해소용 API 사양 초안 작성(2026-06-11): `/v1/public/beaches*`,
@@ -81,6 +61,11 @@
           GitHub repo 표시명, generated client/TripMate 문서, examples/snippets,
           `import kortravel as kt` quickstart와 migration guide를 갱신한다.
 - **최근 완료**
+  - [x] **T-221 — admin UI/UX 시나리오 연결성 + 실시간성 보강. 완료
+        (2026-06-12, Codex)**: feature 상세/수동 작성(T-221a), import job 상세·event·cancel
+        (T-221b), `WS /v1/ops/live` signal channel(T-221c), provider 상세/refresh policy
+        (T-221d), `/ops/logs` job event stream + `/debug/explain`·`/debug/fixtures`
+        제외 재판정(T-221e)을 순차 완료했다. 다음은 T-222 공개 해수욕장/축제 뷰 API 구현.
   - [x] **T-224 — `krtour-ai-agent` provider 경계 재정의 + 상세 구현. 완료
         (2026-06-12, Codex)**: ADR-053을 추가하고, canonical provider를
         `krtour-ai-agent-youtube`로 clean cut했다. `providers.krtour_ai_agent`,

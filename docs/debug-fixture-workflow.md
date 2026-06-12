@@ -380,22 +380,13 @@ def test_visitkorea_all_fixtures(fixture_path):
 4. PR (ADR-021)
 5. 회귀 추적: 같은 함수의 **기존 fixture도 통과해야 함** (역방향 호환)
 
-## 11. 디버그 UI에서 fixture 저장 (옵션)
+## 11. 디버그 UI와 fixture 저장
 
-`krtour.map_admin`의 `/debug/fixtures` 엔드포인트:
-
-```
-POST /debug/fixtures
-  body: {
-    "provider": "visitkorea",
-    "function": "festival_to_bundles",
-    "case_name": "festival_full_scan_seoul_2026_05",
-    "input": {...}
-  }
-  → live API 호출 + 변환 + fixture 저장 → 저장 경로 반환
-```
-
-운영자가 admin에서 trigger. 인증 없음 (ADR-005), 내부망만.
+T-221e 재판정 결과 `/debug/fixtures` REST/UI는 만들지 않는다. Admin의 `/debug/etl`
+preview는 fixture/live 변환 결과를 확인하는 용도이고, fixture 저장·갱신은 이 문서의
+파일 기반 helper와 provider별 회귀 테스트를 정본으로 둔다. 운영자가 UI에서 fixture
+capture를 직접 trigger해야 하는 요구가 생기면 provider 라이브러리 fixture 도구와 함께
+별도 task로 설계한다.
 
 ## 12. fixture 디렉토리 위치
 

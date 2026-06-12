@@ -20,6 +20,9 @@ type SystemLogsQuery = NonNullable<
 type ApiCallLogsQuery = NonNullable<
   paths["/v1/ops/api-call-logs"]["get"]["parameters"]["query"]
 >;
+type ImportJobEventsQuery = NonNullable<
+  paths["/v1/ops/import-job-events"]["get"]["parameters"]["query"]
+>;
 
 export type ConsistencySeverity = Exclude<
   ConsistencyReportsQuery["severity_max"],
@@ -35,6 +38,10 @@ export type IntegrityIssueSeverity = Exclude<
 >;
 export type SystemLogLevel = Exclude<
   SystemLogsQuery["level"],
+  null | undefined
+>;
+export type ImportJobEventLevel = Exclude<
+  ImportJobEventsQuery["level"],
   null | undefined
 >;
 export type OpsConsistencyReportRecord =
@@ -53,6 +60,9 @@ export type SystemLogRecord = OpsSchemas["SystemLogRecord"];
 export type SystemLogsResponse = OpsSchemas["SystemLogsResponse"];
 export type ApiCallLogRecord = OpsSchemas["ApiCallLogRecord"];
 export type ApiCallLogsResponse = OpsSchemas["ApiCallLogsResponse"];
+export type OpsImportJobEventRecord = OpsSchemas["OpsImportJobEventRecord"];
+export type OpsImportJobEventsListResponse =
+  OpsSchemas["OpsImportJobEventsListResponse"];
 export type ConsistencyReportsListParams = Omit<
   ConsistencyReportsQuery,
   "cursor"
@@ -69,6 +79,12 @@ export type SystemLogsListParams = Omit<SystemLogsQuery, "cursor"> & {
   cursor?: string;
 };
 export type ApiCallLogsListParams = Omit<ApiCallLogsQuery, "cursor"> & {
+  cursor?: string;
+};
+export type ImportJobEventsListParams = Omit<
+  ImportJobEventsQuery,
+  "cursor"
+> & {
   cursor?: string;
 };
 
@@ -133,6 +149,21 @@ function fetchApiCallLogs(
   );
 }
 
+function fetchImportJobEvents(
+  params: ImportJobEventsListParams = {},
+): Promise<OpsImportJobEventsListResponse> {
+  return getJson<OpsImportJobEventsListResponse>(
+    pathWithQuery("/v1/ops/import-job-events", {
+      job_id: params.job_id,
+      level: params.level,
+      provider: params.provider,
+      dataset_key: params.dataset_key,
+      page_size: params.page_size,
+      cursor: params.cursor,
+    }),
+  );
+}
+
 export function useOpsMetrics() {
   return useQuery<OpsMetricsResponse, Error>({
     queryKey: ["ops", "metrics"],
@@ -173,5 +204,14 @@ export function useApiCallLogs(params: ApiCallLogsListParams = {}) {
     queryKey: ["ops", "api-call-logs", params],
     queryFn: () => fetchApiCallLogs(params),
     staleTime: 15_000,
+  });
+}
+
+export function useImportJobEvents(params: ImportJobEventsListParams = {}) {
+  return useQuery<OpsImportJobEventsListResponse, Error>({
+    queryKey: ["import-job-events", params],
+    queryFn: () => fetchImportJobEvents(params),
+    refetchInterval: 10_000,
+    staleTime: 5_000,
   });
 }

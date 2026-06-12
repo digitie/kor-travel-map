@@ -120,6 +120,8 @@ async def test_ops_import_jobs_list_detail_and_cursor(
         code="provider.timeout",
         message="provider timeout",
         payload={"attempt": 1},
+        provider="python-mois-api",
+        dataset_key="mois_license_features_bulk",
         stage="fetching",
     )
     second_event = await record_import_job_event(
@@ -129,6 +131,8 @@ async def test_ops_import_jobs_list_detail_and_cursor(
         code="provider.timeout",
         message="provider timeout retry",
         payload={"attempt": 2},
+        provider="python-mois-api",
+        dataset_key="mois_license_features_bulk",
         stage="fetching",
     )
     assert first_event is not None
@@ -177,6 +181,18 @@ async def test_ops_import_jobs_list_detail_and_cursor(
         cursor=event_page1.next_cursor,
     )
     assert [item.event_id for item in event_page2.items] == [first_event.event_id]
+
+    global_event_page = await list_ops_import_job_events(
+        migrated_session,
+        level="error",
+        provider="python-mois-api",
+        dataset_key="mois_license_features_bulk",
+        limit=10,
+    )
+    assert [item.event_id for item in global_event_page.items] == [
+        second_event.event_id,
+        first_event.event_id,
+    ]
 
 
 async def test_ops_consistency_reports_latest_and_list(

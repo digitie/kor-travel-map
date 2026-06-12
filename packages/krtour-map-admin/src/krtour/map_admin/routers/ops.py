@@ -625,6 +625,43 @@ async def list_import_jobs(
     )
 
 
+@router.get(
+    "/import-job-events",
+    response_model=OpsImportJobEventsListResponse,
+)
+async def list_import_job_events_all(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    job_id: Annotated[UUID | None, Query()] = None,
+    level: Annotated[ImportJobEventLevel | None, Query()] = None,
+    provider: Annotated[str | None, Query()] = None,
+    dataset_key: Annotated[str | None, Query()] = None,
+    page_size: Annotated[int, Query(ge=1, le=200)] = 50,
+    cursor: Annotated[str | None, Query()] = None,
+) -> OpsImportJobEventsListResponse:
+    """전역 ``ops.import_job_events`` event stream."""
+    started_at = perf_counter()
+    try:
+        page = await list_ops_import_job_events(
+            session,
+            str(job_id) if job_id is not None else None,
+            level=level,
+            provider=provider,
+            dataset_key=dataset_key,
+            limit=page_size,
+            cursor=cursor,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return OpsImportJobEventsListResponse(
+        data=OpsImportJobEventsData(items=[_event(item) for item in page.items]),
+        meta=make_meta(
+            started_at=started_at,
+            page_size=page_size,
+            next_cursor=page.next_cursor,
+        ),
+    )
+
+
 @router.get("/import-jobs/{job_id}", response_model=OpsImportJobResponse)
 async def get_import_job(
     job_id: str,
