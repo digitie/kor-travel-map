@@ -12,8 +12,8 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
-from krtour.map.core.ids import make_source_record_key
-from krtour.map.dto import (
+from kortravelmap.core.ids import make_source_record_key
+from kortravelmap.dto import (
     KST,
     Coordinate,
     Feature,
@@ -357,7 +357,7 @@ def test_provider_to_bundle_flow() -> None:
     3. feature_id 결정
     4. FeatureBundle 묶음
     """
-    from krtour.map.core.ids import (
+    from kortravelmap.core.ids import (
         make_feature_id,
         make_payload_hash,
         make_source_record_key,

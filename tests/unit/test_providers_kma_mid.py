@@ -18,8 +18,8 @@ from decimal import Decimal
 
 import pytest
 
-from krtour.map.dto import ForecastStyle, TimelineBucket, WeatherDomain
-from krtour.map.providers.kma import (
+from kortravelmap.dto import ForecastStyle, TimelineBucket, WeatherDomain
+from kortravelmap.providers.kma import (
     mid_land_forecast_to_weather_values,
     mid_temperature_to_weather_values,
 )

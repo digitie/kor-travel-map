@@ -13,10 +13,10 @@ from typing import TYPE_CHECKING
 import pytest
 from sqlalchemy import text
 
-from krtour.map.core.dedup import find_sibling_candidates
-from krtour.map.infra.dedup_repo import enqueue_dedup_candidates
-from krtour.map.infra.feature_repo import get_feature_row
-from krtour.map.mois import load_mois_license_features_bulk
+from kortravelmap.core.dedup import find_sibling_candidates
+from kortravelmap.infra.dedup_repo import enqueue_dedup_candidates
+from kortravelmap.infra.feature_repo import get_feature_row
+from kortravelmap.mois import load_mois_license_features_bulk
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -103,7 +103,7 @@ async def test_sibling_candidates_enqueued(migrated_session: AsyncSession) -> No
 
     from decimal import Decimal
 
-    from krtour.map.dto.coordinate import Coordinate
+    from kortravelmap.dto.coordinate import Coordinate
 
     @dataclass(frozen=True)
     class _Feat:

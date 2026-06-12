@@ -7,10 +7,10 @@
 ## 1. 개요
 
 - **대상**: 디버그 UI ETL preview `?source=live` 11개 dataset
-  (`packages/krtour-map-admin/etl_live.py`의 `LIVE_LOADER_REGISTRY`).
+  (`packages/kor-travel-map-admin/etl_live.py`의 `LIVE_LOADER_REGISTRY`).
 - **방법**: 각 provider 공공 API를 실 키로 호출 → 본 lib `providers/*` 변환 함수
   통과 → DTO(FeatureBundle/WeatherValue/PriceValue) 정합성 점검.
-- **환경**: WSL(ext4, `/mnt/f`) + provider 키는 `packages/krtour-map-admin/
+- **환경**: WSL(ext4, `/mnt/f`) + provider 키는 `packages/kor-travel-map-admin/
   .env`(gitignore, 커밋 금지)에 매핑. 실행은 debug-ui 패키지 디렉터리 cwd
   (pydantic-settings `.env` 상대 경로).
 - **키 출처**: 사용자 제공(apihub/krex EX/datagokr) + provider repo `.env`

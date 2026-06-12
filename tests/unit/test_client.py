@@ -1,4 +1,4 @@
-"""``test_client`` — ``AsyncKrtourMapClient`` 순수 경로 (DB 미접근, #122).
+"""``test_client`` — ``AsyncKorTravelMapClient`` 순수 경로 (DB 미접근, #122).
 
 후보가 없을 때 ``sync_dedup_candidates``가 session을 열지 않고 빈 결과를
 조기 반환하는지 검증 (순수 ``find_dedup_candidates`` 경로). DB가 필요한 경로는
@@ -12,10 +12,10 @@ from decimal import Decimal
 
 import pytest
 
-from krtour.map.client import AsyncKrtourMapClient, DedupSyncResult
-from krtour.map.dto.coordinate import Coordinate
-from krtour.map.infra.db import make_async_engine
-from krtour.map.infra.dedup_repo import DedupQueueResult
+from kortravelmap.client import AsyncKorTravelMapClient, DedupSyncResult
+from kortravelmap.dto.coordinate import Coordinate
+from kortravelmap.infra.db import make_async_engine
+from kortravelmap.infra.dedup_repo import DedupQueueResult
 
 pytestmark = pytest.mark.unit
 
@@ -39,7 +39,7 @@ def _c(lon: str, lat: str) -> Coordinate:
 async def test_sync_dedup_no_candidates_skips_db() -> None:
     # 연결되지 않는 DSN — 후보가 없으면 session을 안 열어야 통과 (DB 미접근).
     engine = make_async_engine("postgresql+asyncpg://u:p@localhost:5432/nodb")
-    client = AsyncKrtourMapClient(engine)
+    client = AsyncKorTravelMapClient(engine)
     try:
         knps = [_Stub("a", "불국사", _c("129.3320", "35.7900"), _TEMPLE_CAT)]
         krh = [_Stub("b", "해인사", _c("128.0980", "35.8010"), _TEMPLE_CAT)]
@@ -53,8 +53,8 @@ async def test_sync_dedup_no_candidates_skips_db() -> None:
 async def test_client_constructs_with_engine() -> None:
     engine = make_async_engine("postgresql+asyncpg://u:p@localhost:5432/nodb")
     try:
-        client = AsyncKrtourMapClient(engine)
-        assert isinstance(client, AsyncKrtourMapClient)
+        client = AsyncKorTravelMapClient(engine)
+        assert isinstance(client, AsyncKorTravelMapClient)
         async with client as c:
             assert c is client
     finally:
@@ -78,9 +78,9 @@ def _fake_session_factory() -> _FakeSessionCM:
     return _FakeSessionCM()
 
 
-def _read_client(monkeypatch: pytest.MonkeyPatch) -> AsyncKrtourMapClient:
+def _read_client(monkeypatch: pytest.MonkeyPatch) -> AsyncKorTravelMapClient:
     engine = make_async_engine("postgresql+asyncpg://u:p@localhost:5432/nodb")
-    client = AsyncKrtourMapClient(engine)
+    client = AsyncKorTravelMapClient(engine)
     # DB 미접근: 세션 팩토리를 sentinel CM으로 교체 (engine 미사용).
     monkeypatch.setattr(client, "_session_factory", _fake_session_factory)
     return client
@@ -105,7 +105,7 @@ async def test_inactivate_features_by_source_delegates_to_repo(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """T-217b — reject/tombstone entity 집합을 infra inactivate로 위임(ADR-050 #4)."""
-    import krtour.map.client as client_mod
+    import kortravelmap.client as client_mod
 
     recorded: dict[str, object] = {}
 
@@ -119,20 +119,20 @@ async def test_inactivate_features_by_source_delegates_to_repo(
     client = _read_client(monkeypatch)
     monkeypatch.setattr(client, "_session_factory", _FakeTxSessionCM)
     out = await client.inactivate_features_by_source(
-        provider="krtour-ai-agent-youtube",
+        provider="kor-travel-concierge-youtube",
         dataset_key="youtube_place_candidates",
         source_entity_type="extracted_place_candidate",
         source_entity_ids={"201", "202"},
     )
     assert out == 2
-    assert recorded["provider"] == "krtour-ai-agent-youtube"
+    assert recorded["provider"] == "kor-travel-concierge-youtube"
     assert recorded["dataset_key"] == "youtube_place_candidates"
     assert recorded["source_entity_type"] == "extracted_place_candidate"
     assert recorded["source_entity_ids"] == {"201", "202"}
 
 
 async def test_get_features_delegates_to_repo(monkeypatch: pytest.MonkeyPatch) -> None:
-    import krtour.map.client as client_mod
+    import kortravelmap.client as client_mod
 
     recorded: dict[str, object] = {}
 
@@ -148,7 +148,7 @@ async def test_get_features_delegates_to_repo(monkeypatch: pytest.MonkeyPatch) -
 
 
 async def test_search_features_delegates_to_repo(monkeypatch: pytest.MonkeyPatch) -> None:
-    import krtour.map.client as client_mod
+    import kortravelmap.client as client_mod
 
     sentinel = object()
     recorded: dict[str, object] = {}
@@ -171,7 +171,7 @@ async def test_search_features_delegates_to_repo(monkeypatch: pytest.MonkeyPatch
 async def test_features_nearby_target_delegates_to_repo(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import krtour.map.client as client_mod
+    import kortravelmap.client as client_mod
 
     sentinel = object()
     recorded: dict[str, object] = {}
@@ -196,7 +196,7 @@ async def test_features_nearby_target_delegates_to_repo(
 async def test_features_nearby_coord_delegates_to_repo(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import krtour.map.client as client_mod
+    import kortravelmap.client as client_mod
 
     sentinel = object()
     recorded: dict[str, object] = {}

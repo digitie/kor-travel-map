@@ -13,16 +13,16 @@ from decimal import Decimal
 
 import pytest
 
-from krtour.map.dto import (
+from kortravelmap.dto import (
     Coordinate,
     Feature,
     PlaceDetail,
     SourceLink,
     SourceRecord,
 )
-from krtour.map.dto._enums import FeatureKind, SourceRole
-from krtour.map.infra import feature_repo
-from krtour.map.infra.feature_repo import (
+from kortravelmap.dto._enums import FeatureKind, SourceRole
+from kortravelmap.infra import feature_repo
+from kortravelmap.infra.feature_repo import (
     FeatureLoadResult,
     FeatureSearchRow,
     NearbyFeatureRow,

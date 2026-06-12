@@ -1,6 +1,6 @@
 """``test_mois_loader`` — MOIS 인허가 변환 → 적재 → 재조회 (Sprint 4a loader).
 
-``krtour.map.mois.load_mois_license_features_bulk``가 ``providers.mois`` 변환
+``kortravelmap.mois.load_mois_license_features_bulk``가 ``providers.mois`` 변환
 출력을 PostGIS에 idempotent upsert하는지 검증한다.
 
 검증: ① PROMOTED record 적재 + 재조회(JSONB detail/address) ② EXCLUDED/비영업
@@ -17,9 +17,9 @@ from typing import TYPE_CHECKING
 import pytest
 from sqlalchemy import func, select, text
 
-from krtour.map.infra.models import FeatureRow, SourceLinkRow
-from krtour.map.infra.sync_state_repo import get_sync_state
-from krtour.map.mois import (
+from kortravelmap.infra.models import FeatureRow, SourceLinkRow
+from kortravelmap.infra.sync_state_repo import get_sync_state
+from kortravelmap.mois import (
     close_mois_license_features,
     delete_mois_license_features_not_in,
     load_mois_license_features_bulk,
@@ -28,7 +28,7 @@ from krtour.map.mois import (
     run_mois_license_incremental_job,
     sync_mois_license_features_bulk,
 )
-from krtour.map.providers.mois import (
+from kortravelmap.providers.mois import (
     DATASET_KEY_CLOSED,
     DATASET_KEY_HISTORY,
     PROVIDER_NAME,
@@ -356,9 +356,9 @@ async def test_run_bulk_job_skips_when_lock_held(
 ) -> None:
     from sqlalchemy.ext.asyncio import AsyncSession as _Session
 
-    from krtour.map.infra.advisory_lock import advisory_lock
-    from krtour.map.mois import _bulk_advisory_key  # type: ignore[attr-defined]
-    from krtour.map.providers.mois import DATASET_KEY_BULK
+    from kortravelmap.infra.advisory_lock import advisory_lock
+    from kortravelmap.mois import _bulk_advisory_key  # type: ignore[attr-defined]
+    from kortravelmap.providers.mois import DATASET_KEY_BULK
 
     # 다른 connection(별도 세션)이 같은 키 lock 보유 → run은 skip.
     async with (
@@ -567,8 +567,8 @@ async def test_run_closed_job_tracks_and_advances_cursor(
 async def test_primary_source_detail_round_trip(
     migrated_session: AsyncSession,
 ) -> None:
-    from krtour.map.infra.feature_repo import get_primary_source_detail
-    from krtour.map.providers.mois import DATASET_KEY_BULK as _BULK
+    from kortravelmap.infra.feature_repo import get_primary_source_detail
+    from kortravelmap.providers.mois import DATASET_KEY_BULK as _BULK
 
     await load_mois_license_features_bulk(
         migrated_session,

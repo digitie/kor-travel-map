@@ -18,8 +18,8 @@ from typing import Any
 
 import pytest
 
-from krtour.map.dto import Address, Coordinate, FeatureKind, SourceRole
-from krtour.map.providers.mois import (
+from kortravelmap.dto import Address, Coordinate, FeatureKind, SourceRole
+from kortravelmap.providers.mois import (
     EXCLUDED_SERVICE_SLUGS,
     MOIS_MARKER_COLOR,
     PROMOTED_CATEGORY_BY_SLUG,

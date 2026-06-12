@@ -22,14 +22,14 @@ from typing import Any
 
 import pytest
 
-from krtour.map.dto import Address, Coordinate, FeatureBundle, FeatureKind, SourceRole
-from krtour.map.providers.standard_data import (
+from kortravelmap.dto import Address, Coordinate, FeatureBundle, FeatureKind, SourceRole
+from kortravelmap.providers.standard_data import (
     DATASET_KEY_CULTURAL_FESTIVALS,
     FESTIVAL_CATEGORY,
     FESTIVAL_MARKER_COLOR,
     FESTIVAL_MARKER_ICON,
 )
-from krtour.map.providers.standard_data import (
+from kortravelmap.providers.standard_data import (
     cultural_festivals_to_bundles as _cultural_festivals_to_bundles_async,
 )
 

@@ -5,7 +5,7 @@
 
 ## 1. 환경
 
-- 실행: WSL ext4 `~/dev/python-krtour-map` venv, provider 라이브러리는 NTFS
+- 실행: WSL ext4 `~/dev/kor-travel-map` venv, provider 라이브러리는 NTFS
   (`F:\dev\python-*-api`)에 `PYTHONPATH`로 주입. provider 라이브러리는 ADR-006상
   본 lib가 런타임 import하지 않으므로, 라이브 스크립트에서 provider model →
   본 lib Protocol **어댑터 dataclass**로 감싸 변환.
@@ -34,7 +34,7 @@ KMA 특보 `풍랑`/`강풍`/`태풍`/`건조`/`한파`/`폭풍해일`/`황사` 
 `대설`(주의보·경보 suffix 없는 단독형)을 `NoticeDetail.notice_type`으로 넘길 때
 `normalize_notice_type`이 alias를 못 찾아 `ValidationError`로 적재 실패했다.
 
-- 수정: `src/krtour/map/dto/notice.py` `_ALIAS_MAP`에 전용 canonical 보유
+- 수정: `src/kortravelmap/dto/notice.py` `_ALIAS_MAP`에 전용 canonical 보유
   종류(`호우`→heavy_rain / `대설`·`대설주의보`·`대설경보`→heavy_snow) + 전용 없는
   종류 7종(`강풍`/`풍랑`/`태풍`/`건조`/`한파`/`폭풍해일`/`황사`)→generic
   `weather_alert` 추가. 원문 특보명은 `Feature.name`/payload에 보존.

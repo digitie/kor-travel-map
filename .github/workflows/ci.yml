@@ -36,8 +36,8 @@ jobs:
           cache: pip
           cache-dependency-path: |
             pyproject.toml
-            packages/krtour-map-admin/pyproject.toml
-            packages/krtour-map-dagster/pyproject.toml
+            packages/kor-travel-map-admin/pyproject.toml
+            packages/kor-travel-map-dagster/pyproject.toml
 
       - name: Install package + dev/geo extras
         run: |
@@ -45,33 +45,33 @@ jobs:
           # geo extra는 GDAL system dependency 필요 — Sprint 2부터 별도 GDAL setup job
           pip install -e ".[dev]"
 
-      - name: Install krtour-map-admin (editable, PR#35+)
+      - name: Install kor-travel-map-admin (editable, PR#35+)
         # PR#35로 첫 FastAPI 라우터 머지 — 본 step에서 install + 후속 step에서
         # 패키지 tests 실행. 메인 라이브러리 coverage에는 포함되지 않는다 (별도
         # tests/ 트리, debug-ui pyproject은 독립 dev deps).
         run: |
-          pip install -e packages/krtour-map-admin
+          pip install -e packages/kor-travel-map-admin
 
-      - name: Install krtour-map-dagster (editable)
-        # ADR-045: Dagster code location은 krtour-map monorepo가 소유한다.
+      - name: Install kor-travel-map-dagster (editable)
+        # ADR-045: Dagster code location은 kor-travel-map monorepo가 소유한다.
         # 메인 라이브러리는 Dagster를 import하지 않으므로 별도 패키지로 설치한다.
         run: |
-          pip install -e packages/krtour-map-dagster
+          pip install -e packages/kor-travel-map-dagster
 
       - name: Run unit + lint tests
         run: |
           pytest tests/unit tests/lint -q \
-            --cov=src/krtour/map --cov-report=term-missing --cov-report=xml
+            --cov=src/kortravelmap --cov-report=term-missing --cov-report=xml
 
-      - name: Run krtour-map-admin unit tests
+      - name: Run kor-travel-map-admin unit tests
         # 본 step은 메인 lib coverage gate(ADR-032)에 영향 X — debug-ui 패키지
         # 자체 회귀 차단용. fail이면 PR 머지 차단.
         run: |
-          pytest packages/krtour-map-admin/tests/ -q
+          pytest packages/kor-travel-map-admin/tests/ -q
 
-      - name: Run krtour-map-dagster unit tests
+      - name: Run kor-travel-map-dagster unit tests
         run: |
-          pytest packages/krtour-map-dagster/tests/ -q
+          pytest packages/kor-travel-map-dagster/tests/ -q
 
       - name: Upload coverage XML (latest Python only)
         if: matrix.python-version == '3.13'
@@ -94,21 +94,21 @@ jobs:
           cache: pip
           cache-dependency-path: |
             pyproject.toml
-            packages/krtour-map-admin/pyproject.toml
-            packages/krtour-map-dagster/pyproject.toml
+            packages/kor-travel-map-admin/pyproject.toml
+            packages/kor-travel-map-dagster/pyproject.toml
 
       - name: Install package + dev/geo extras
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
-      - name: Install krtour-map-admin (editable)
+      - name: Install kor-travel-map-admin (editable)
         run: |
-          pip install -e packages/krtour-map-admin
+          pip install -e packages/kor-travel-map-admin
 
-      - name: Install krtour-map-dagster (editable)
+      - name: Install kor-travel-map-dagster (editable)
         run: |
-          pip install -e packages/krtour-map-dagster
+          pip install -e packages/kor-travel-map-dagster
 
       - name: Run integration tests (testcontainers PostGIS via Docker)
         # Docker는 ubuntu-latest runner에서 자동 제공.
@@ -129,15 +129,15 @@ jobs:
           cache: pip
           cache-dependency-path: |
             pyproject.toml
-            packages/krtour-map-admin/pyproject.toml
-            packages/krtour-map-dagster/pyproject.toml
+            packages/kor-travel-map-admin/pyproject.toml
+            packages/kor-travel-map-dagster/pyproject.toml
 
       - name: Install package + dev extras
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
-          pip install -e packages/krtour-map-admin
-          pip install -e packages/krtour-map-dagster
+          pip install -e packages/kor-travel-map-admin
+          pip install -e packages/kor-travel-map-dagster
 
       - name: Run fixture replay tests
         run: |

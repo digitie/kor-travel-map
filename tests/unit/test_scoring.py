@@ -6,7 +6,7 @@ from decimal import Decimal
 
 import pytest
 
-from krtour.map.core.scoring import (
+from kortravelmap.core.scoring import (
     SPATIAL_DECAY_METERS,
     THRESHOLD_AUTO,
     THRESHOLD_MANUAL,
@@ -22,7 +22,7 @@ from krtour.map.core.scoring import (
     score_pair,
     spatial_similarity,
 )
-from krtour.map.dto import Coordinate
+from kortravelmap.dto import Coordinate
 
 # -- ADR-016 가중치 정합 ----------------------------------------------------
 
@@ -381,7 +381,7 @@ def test_name_sim_one_empty_after_normalize_zero() -> None:
 
 from datetime import UTC, datetime  # noqa: E402
 
-from krtour.map.core.scoring import (  # noqa: E402
+from kortravelmap.core.scoring import (  # noqa: E402
     DEFAULT_SOURCE_PRIORITY,
     MasterCandidate,
     select_master,

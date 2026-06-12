@@ -1,35 +1,35 @@
-# dagster-boundary.md — krtour-map 독립 Dagster 책임 경계
+# dagster-boundary.md — kor-travel-map 독립 Dagster 책임 경계
 
-본 문서는 ADR-045 이후 krtour-map 독립 프로그램의 Dagster 책임 경계다.
+본 문서는 ADR-045 이후 kor-travel-map 독립 프로그램의 Dagster 책임 경계다.
 
 핵심 변경:
 
-- Dagster는 krtour-map 독립 프로그램 책임이다.
-- krtour-map Docker 프로그램이 자체 Dagster webserver/daemon/metadata DB를 가진다.
-- 외부 서비스는 krtour-map Dagster를 직접 제어하지 않고 krtour-map OpenAPI를
-  호출한다. 각 외부 서비스가 자체 Dagster를 운영하더라도 krtour-map Dagster와
+- Dagster는 kor-travel-map 독립 프로그램 책임이다.
+- kor-travel-map Docker 프로그램이 자체 Dagster webserver/daemon/metadata DB를 가진다.
+- 외부 서비스는 kor-travel-map Dagster를 직접 제어하지 않고 kor-travel-map OpenAPI를
+  호출한다. 각 외부 서비스가 자체 Dagster를 운영하더라도 kor-travel-map Dagster와
   별개다.
 - FastAPI admin API는 feature update request를 만들고, Dagster가 이를 실행한다.
-- 메인 라이브러리 `krtour.map` 자체는 여전히 Dagster를 import하지 않는다.
-  Dagster 코드는 별도 패키지 `packages/krtour-map-dagster/`에 둔다.
+- 메인 라이브러리 `kortravelmap` 자체는 여전히 Dagster를 import하지 않는다.
+  Dagster 코드는 별도 패키지 `packages/kor-travel-map-dagster/`에 둔다.
 
 ## 1. 책임 매트릭스
 
 | 책임 | 위치 |
 |------|------|
-| Dagster install / daemon / scheduler | krtour-map 독립 프로그램 |
-| `@asset`, `@op`, `@job`, `@schedule`, `Definitions` | krtour-map Dagster 패키지 |
-| Asset/job 이름, dataset_key 매핑, group 구조 | krtour-map Dagster |
-| Cron schedule (시각, frequency) | krtour-map Dagster |
-| Asset/job dependency graph | krtour-map Dagster |
-| `ConcurrencyConfig` 또는 pool 설정(provider 쿼터 보호) | krtour-map Dagster |
-| Retry policy (`tenacity`/Dagster retry) | krtour-map Dagster |
-| Run failure 알림 (Telegram, Slack, Sentry) | krtour-map 운영 설정 |
-| Dagster metadata DB | `krtour_map_dagster` |
-| Feature update request queue | krtour-map API + `ops.feature_update_requests` |
-| Import job progress | krtour-map API + `ops.import_jobs` |
-| Dagster resource 정의 (engine, file_store, provider clients) | krtour-map Dagster |
-| **provider 호출 자체** | provider 라이브러리 직접(ADR-006). 단 `krtour-ai-agent-youtube`는 형제 앱 REST export pull(ADR-053) |
+| Dagster install / daemon / scheduler | kor-travel-map 독립 프로그램 |
+| `@asset`, `@op`, `@job`, `@schedule`, `Definitions` | kor-travel-map Dagster 패키지 |
+| Asset/job 이름, dataset_key 매핑, group 구조 | kor-travel-map Dagster |
+| Cron schedule (시각, frequency) | kor-travel-map Dagster |
+| Asset/job dependency graph | kor-travel-map Dagster |
+| `ConcurrencyConfig` 또는 pool 설정(provider 쿼터 보호) | kor-travel-map Dagster |
+| Retry policy (`tenacity`/Dagster retry) | kor-travel-map Dagster |
+| Run failure 알림 (Telegram, Slack, Sentry) | kor-travel-map 운영 설정 |
+| Dagster metadata DB | `kor_travel_map_dagster` |
+| Feature update request queue | kor-travel-map API + `ops.feature_update_requests` |
+| Import job progress | kor-travel-map API + `ops.import_jobs` |
+| Dagster resource 정의 (engine, file_store, provider clients) | kor-travel-map Dagster |
+| **provider 호출 자체** | provider 라이브러리 직접(ADR-006). 단 `kor-travel-concierge-youtube`는 형제 앱 REST export pull(ADR-053) |
 | **raw → DTO 변환 (순수 함수)** | **본 라이브러리 (`providers/<name>.py`)** |
 | **DB 적재 (raw SQL upsert/COPY)** | **본 라이브러리 (`infra/*_repo.py`)** |
 | **객체 저장소 업로드** | **본 라이브러리 (`infra/file_store.py`)** |
@@ -38,18 +38,18 @@
 | Dedup scoring / Record Linkage | 본 라이브러리 (`core/scoring.py`) |
 | 정합성 검증 룰 (F1~F8) | 본 라이브러리 (`core/integrity.py`, T-201) |
 | 외부 사용자/여행계획/POI 도메인 | 외부 서비스 |
-| 외부 서비스에서 feature update 요청 | krtour-map OpenAPI 호출 |
+| 외부 서비스에서 feature update 요청 | kor-travel-map OpenAPI 호출 |
 
 요약:
 - **본 라이브러리**: 변환 + 저장 + 검증 (Dagster 없이도 호출 가능한 함수)
-- **krtour-map API**: OpenAPI, admin UI, queue 생성, 진행 상태 조회/취소
-- **krtour-map Dagster**: provider sync, feature update, offline upload load,
+- **kor-travel-map API**: OpenAPI, admin UI, queue 생성, 진행 상태 조회/취소
+- **kor-travel-map Dagster**: provider sync, feature update, offline upload load,
   consistency/dedup jobs 실행
 - **외부 서비스**: OpenAPI client 소비자
 
 ## 1.1 현재 구현된 Feature 적재 asset
 
-`packages/krtour-map-dagster`는 1차로 이미 구현·검증된 provider 변환 함수만
+`packages/kor-travel-map-dagster`는 1차로 이미 구현·검증된 provider 변환 함수만
 Dagster asset으로 연결한다. provider API 호출은 resource가 record iterable을
 제공하고, asset은 `raw record → FeatureBundle → 주소/좌표 검증 → PostGIS 적재`
 흐름만 소유한다.
@@ -74,22 +74,22 @@ Dagster asset으로 연결한다. provider API 호출은 resource가 record iter
 | `feature_place_krairport_airports` | `krairport_airports` | `krairport_airports` | `features_place` |
 | `feature_weather_airkorea_air_quality` | `airkorea_stations`, `airkorea_air_quality` | `airkorea_air_quality` | `features_weather` |
 | `feature_event_visitkorea_enrichment` | `visitkorea_festival_events` | `visitkorea_festival_events` | `features_event` |
-| `feature_place_krtour_ai_agent_youtube` | `krtour_ai_agent_youtube_features` | `youtube_place_candidates` | `features_place` |
+| `feature_place_kor_travel_concierge_youtube` | `kor_travel_concierge_youtube_features` | `youtube_place_candidates` | `features_place` |
 
 공통 resource:
 
-- `krtour_map_client`: `AsyncKrtourMapClient`.
-- `reverse_geocoder`: kraddr-geo REST v2 기반 `ReverseGeocoder`.
+- `kor_travel_map_client`: `AsyncKorTravelMapClient`.
+- `reverse_geocoder`: kor-travel-geo REST v2 기반 `ReverseGeocoder`.
 - `fetched_at`: batch 기준 aware `datetime`(없으면 KST 현재 시각).
 - `strict_address`: 기본 `True`. 주소/좌표 검증 error가 있으면 적재 전 중단.
 
 ## 2. 표준 Job/Asset 패턴
 
 ```python
-# packages/krtour-map-dagster/assets/visitkorea_festivals.py (후보 위치)
+# packages/kor-travel-map-dagster/assets/visitkorea_festivals.py (후보 위치)
 from dagster import asset, FreshnessPolicy, RetryPolicy, AssetExecutionContext
-from krtour.map import AsyncKrtourMapClient
-from krtour.map.dto import ProviderSyncState
+from kortravelmap import AsyncKorTravelMapClient
+from kortravelmap.dto import ProviderSyncState
 
 @asset(
     group_name="features_event",
@@ -100,7 +100,7 @@ from krtour.map.dto import ProviderSyncState
 async def feature_event_visitkorea_festivals(
     ctx: AssetExecutionContext,
     visitkorea,                # Dagster resource: provider client
-    krtour_map_client: AsyncKrtourMapClient,  # Dagster resource
+    kor_travel_map_client: AsyncKorTravelMapClient,  # Dagster resource
 ) -> "FeatureLoadResult":
     """raw → bundles → upload files → load → sync state."""
     
@@ -110,17 +110,17 @@ async def feature_event_visitkorea_festivals(
 
     # 2. 변환 (본 라이브러리 순수 함수)
     bundles = list(
-        krtour_map_client.providers.visitkorea.festival_to_bundles(
+        kor_travel_map_client.providers.visitkorea.festival_to_bundles(
             items, fetched_at=ctx.run.created_timestamp,
         )
     )
 
     # 3. 적재
-    result = await krtour_map_client.load_feature_bundles(bundles)
+    result = await kor_travel_map_client.load_feature_bundles(bundles)
     ctx.add_output_metadata(result.as_metadata())
 
     # 5. sync state
-    await krtour_map_client.upsert_sync_state(ProviderSyncState(
+    await kor_travel_map_client.upsert_sync_state(ProviderSyncState(
         provider="python-visitkorea-api",
         dataset_key="visitkorea_festival_events",
         last_success_at=kst_now(),
@@ -138,9 +138,9 @@ async def feature_event_visitkorea_festivals(
 ```python
 # 통합 테스트 또는 디버그 스크립트
 async def main():
-    settings = KrtourMapSettings()
+    settings = KorTravelMapSettings()
     engine = create_async_engine(settings.pg_dsn.get_secret_value())
-    client = AsyncKrtourMapClient(engine=engine, ...)
+    client = AsyncKorTravelMapClient(engine=engine, ...)
     
     # provider 직접 호출
     visitkorea = AsyncVisitKoreaClient(...)
@@ -159,12 +159,12 @@ strategy.md`).
 
 ## 4. dataset_key 표준 (본 라이브러리 제공)
 
-`krtour.map.providers.<name>` 모듈마다 `DATASET_KEY: Final[str]` 상수 노출.
-krtour-map Dagster asset/job이 이 상수를 import해서 dataset_key를 일관 사용:
+`kortravelmap.providers.<name>` 모듈마다 `DATASET_KEY: Final[str]` 상수 노출.
+kor-travel-map Dagster asset/job이 이 상수를 import해서 dataset_key를 일관 사용:
 
 ```python
-# packages/krtour-map-dagster/assets/visitkorea_festivals.py
-from krtour.map.providers.visitkorea import DATASET_KEY as VISITKOREA_FESTIVAL_DATASET_KEY
+# packages/kor-travel-map-dagster/assets/visitkorea_festivals.py
+from kortravelmap.providers.visitkorea import DATASET_KEY as VISITKOREA_FESTIVAL_DATASET_KEY
 
 # asset 이름 / Dagster metadata에 사용
 ctx.log.info("loaded", extra={"dataset_key": VISITKOREA_FESTIVAL_DATASET_KEY})
@@ -174,7 +174,7 @@ ctx.log.info("loaded", extra={"dataset_key": VISITKOREA_FESTIVAL_DATASET_KEY})
 
 ## 5. asset/job 명명 규약
 
-krtour-map Dagster의 asset/job 이름 표준:
+kor-travel-map Dagster의 asset/job 이름 표준:
 
 | asset 이름 | dataset_key | group |
 |-----------|-------------|-------|
@@ -201,7 +201,7 @@ krtour-map Dagster의 asset/job 이름 표준:
 ## 6. ConcurrencyConfig (provider 쿼터)
 
 ```python
-# packages/krtour-map-dagster/definitions.py
+# packages/kor-travel-map-dagster/definitions.py
 from dagster import Definitions, ConcurrencyConfig
 
 defs = Definitions(
@@ -222,23 +222,23 @@ defs = Definitions(
 
 provider별 max_concurrent는 그 provider의 분당 쿼터 / 안전 마진으로 결정.
 
-## 7. Resource 정의 (krtour-map Dagster)
+## 7. Resource 정의 (kor-travel-map Dagster)
 
 ```python
-# packages/krtour-map-dagster/resources.py
+# packages/kor-travel-map-dagster/resources.py
 from dagster import resource, ResourceDefinition
-from krtour.map import AsyncKrtourMapClient
+from kortravelmap import AsyncKorTravelMapClient
 
 @resource(config_schema={...})
-def krtour_map_client_resource(init_context):
-    settings = KrtourMapSettings()
+def kor_travel_map_client_resource(init_context):
+    settings = KorTravelMapSettings()
     engine = create_async_engine(settings.pg_dsn.get_secret_value())
     file_store = create_file_store(settings)
-    kraddr_geo = AsyncAddressClient(...)
+    kor_travel_geo = AsyncAddressClient(...)
     providers = {...}
-    return AsyncKrtourMapClient(
+    return AsyncKorTravelMapClient(
         engine=engine, file_store=file_store,
-        kraddr_geo_client=kraddr_geo, providers=providers,
+        kor_travel_geo_client=kor_travel_geo, providers=providers,
         settings=settings,
     )
 
@@ -283,18 +283,18 @@ POST /admin/feature-update-requests
 
 ## 8. EtlJobSpec helper (선택, 본 라이브러리 제공)
 
-krtour-map Dagster가 asset/job 정의할 때 참고용으로, 본 라이브러리가 `EtlJobSpec` dataclass를
+kor-travel-map Dagster가 asset/job 정의할 때 참고용으로, 본 라이브러리가 `EtlJobSpec` dataclass를
 제공할 수 있다:
 
 ```python
-# krtour.map.dto.etl
+# kortravelmap.dto.etl
 from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class EtlJobSpec:
     """provider별 ETL 메타데이터.
     
-    krtour-map Dagster 정의 시 참고용. 메인 라이브러리에는 Dagster import 없음."""
+    kor-travel-map Dagster 정의 시 참고용. 메인 라이브러리에는 Dagster import 없음."""
     provider: str
     dataset_key: str
     source_entity_type: str
@@ -309,7 +309,7 @@ class EtlJobSpec:
 provider 모듈마다 `JOB_SPEC: Final[EtlJobSpec]` 노출:
 
 ```python
-# krtour.map.providers.visitkorea
+# kortravelmap.providers.visitkorea
 JOB_SPEC = EtlJobSpec(
     provider="python-visitkorea-api",
     dataset_key="visitkorea_festival_events",
@@ -323,7 +323,7 @@ JOB_SPEC = EtlJobSpec(
 )
 ```
 
-krtour-map Dagster는 위 spec을 참고해 asset/schedule을 정의 (메인 라이브러리의
+kor-travel-map Dagster는 위 spec을 참고해 asset/schedule을 정의 (메인 라이브러리의
 직접 Dagster 의존성은 아님).
 
 ## 9. import_jobs 큐와 Dagster의 관계
@@ -333,9 +333,9 @@ krtour-map Dagster는 위 spec을 참고해 asset/schedule을 정의 (메인 라
 
 | 큐 | 용도 |
 |----|------|
-| Dagster run storage (`krtour_map_dagster`) | Dagster run/event/asset metadata |
-| `ops.import_jobs` (`krtour_map`) | admin/OpenAPI에서 보는 작업 진행률과 취소 상태 |
-| `ops.feature_update_requests` (`krtour_map`) | 지리 범위/provider 범위 업데이트 요청 |
+| Dagster run storage (`kor_travel_map_dagster`) | Dagster run/event/asset metadata |
+| `ops.import_jobs` (`kor_travel_map`) | admin/OpenAPI에서 보는 작업 진행률과 취소 상태 |
+| `ops.feature_update_requests` (`kor_travel_map`) | 지리 범위/provider 범위 업데이트 요청 |
 
 운영 시 정기 적재와 사용자 트리거 update 모두 Dagster가 실행한다. admin API는
 OpenAPI 계약과 queue/progress를 관리한다. 둘 다 advisory lock으로 race를 방지한다
@@ -344,11 +344,11 @@ OpenAPI 계약과 queue/progress를 관리한다. 둘 다 advisory lock으로 ra
 feature update request 큐는 T-208e 이후 다음 흐름을 따른다.
 
 1. `feature_update_request_queue_sensor`가 15초 간격으로
-   `AsyncKrtourMapClient.peek_next_update_request()`를 호출한다.
+   `AsyncKorTravelMapClient.peek_next_update_request()`를 호출한다.
 2. Sensor는 DB 상태를 바꾸지 않고 request id를 Dagster `RunRequest` config/tag에
    담아 `feature_update_request_worker`를 요청한다.
 3. Worker op `execute_feature_update_request`가
-   `AsyncKrtourMapClient.execute_feature_update_request()`를 호출해 request/import job
+   `AsyncKorTravelMapClient.execute_feature_update_request()`를 호출해 request/import job
    상태 전이와 provider refresh runner 실행을 한 흐름으로 처리한다.
 4. Worker run 실패는 `feature_update_request_failure_sensor`가 감지해
    `fail_update_request()`를 best-effort 호출하고, 선택 notifier resource에 알림
@@ -366,17 +366,17 @@ offline upload load job은 T-208h 이후 다음 흐름을 따른다.
    읽고, `byte_size`와 `checksum_sha256`을 검증한다.
 4. 현재 첫 구현은 JSON/JSONL `FeatureBundle` dump만 지원한다. parser는 kind별 detail
    DTO hydrate 후 `FeatureBundle` validation을 수행한다.
-5. `AsyncKrtourMapClient.run_offline_upload_load_job()`이 provider/dataset/scope advisory
+5. `AsyncKorTravelMapClient.run_offline_upload_load_job()`이 provider/dataset/scope advisory
    lock을 잡고 `ops.import_jobs` + `ops.offline_uploads` 상태 전이와 PostGIS 적재를 한
    transaction으로 처리한다.
-6. 기본 `offline_upload_store` resource는 `KRTOUR_MAP_OBJECT_STORE_*`와
-   `KRTOUR_MAP_OFFLINE_UPLOAD_BUCKET`에서 RustFS/S3 호환 client를 만든다.
+6. 기본 `offline_upload_store` resource는 `KOR_TRAVEL_MAP_OBJECT_STORE_*`와
+   `KOR_TRAVEL_MAP_OFFLINE_UPLOAD_BUCKET`에서 RustFS/S3 호환 client를 만든다.
 7. Multipart `/admin/offline-uploads*` 기본 API/UI는 T-208h에서 구현됐다.
    CSV/TSV column mapping과 validation wizard는 후속 T-208i다.
 
-## 10. 정기 schedule 구현 (krtour-map Dagster)
+## 10. 정기 schedule 구현 (kor-travel-map Dagster)
 
-`packages/krtour-map-dagster/src/krtour/map_dagster/schedules.py`가
+`packages/kor-travel-map-dagster/src/kortravelmap_dagster/schedules.py`가
 현재 schedule이 필요한 Feature 적재 asset의 provider별 schedule을 등록한다. 모든 schedule은
 `execution_timezone="Asia/Seoul"`이고, 같은 시각에 외부 API 호출이 몰리지 않도록
 분/요일을 분산한다. 기본 status는 로컬 개발 중 실 provider 호출을 막기 위해
@@ -393,10 +393,10 @@ offline upload load job은 T-208h 이후 다음 흐름을 따른다.
 | `feature_place_mois_licenses_weekly_schedule` | `feature_place_mois_licenses_job` | `35 4 * * 1` | MOIS bulk 주 1회 |
 | `feature_place_knps_points_semiannual_schedule` | `feature_place_knps_points_job` | `45 3 1 1,7 *` | KNPS point 반기 1회 |
 | `feature_geometry_knps_records_semiannual_schedule` | `feature_geometry_knps_records_job` | `15 4 1 1,7 *` | KNPS geometry 반기 1회 |
-| `feature_place_krtour_ai_agent_youtube_daily_schedule` | `feature_place_krtour_ai_agent_youtube_job` | `40 3 * * *` | krtour-ai-agent YouTube 후보 일 1회 |
+| `feature_place_kor_travel_concierge_youtube_daily_schedule` | `feature_place_kor_travel_concierge_youtube_job` | `40 3 * * *` | kor-travel-concierge YouTube 후보 일 1회 |
 | `consistency_dedup_refresh_daily_schedule` | `consistency_dedup_refresh` | `45 5 * * *` | DB 기준 dedup 후보 refresh + F1~F7 consistency report |
 
-운영 임계값은 SPEC V8 v8_0 + 실제 부하 기반으로 krtour-map 운영자가 조정한다.
+운영 임계값은 SPEC V8 v8_0 + 실제 부하 기반으로 kor-travel-map 운영자가 조정한다.
 T-208f 기준 maintenance schedule도 기본 `STOPPED`다. 로컬 개발에서 자동으로 큐와
 리포트를 갱신하지 않고, 운영자가 Dagster UI/API에서 scope config와 함께 수동 실행하거나
 배포 환경에서 schedule을 enable한다.
@@ -423,10 +423,10 @@ Dagster schedule 표에 purge 항목을 추가하지 않는다.
 }
 ```
 
-본 라이브러리는 dict로 반환한다. krtour-map Dagster 패키지가 `MetadataValue.*`로
+본 라이브러리는 dict로 반환한다. kor-travel-map Dagster 패키지가 `MetadataValue.*`로
 변환한다. 메인 라이브러리는 Dagster를 import하지 않는다.
 
-## 12. 정합성 게이트 패턴 (T-200, kraddr-geo ADR-017 미러)
+## 12. 정합성 게이트 패턴 (T-200, kor-travel-geo ADR-017 미러)
 
 T-205d 이후 `ops.import_jobs`는 `load_batch_id`와 self-FK `parent_job_id`를
 갖는다. T-200은 이 컬럼을 사용해 batch root와 기존 실제 source load import job을
@@ -478,13 +478,13 @@ T-205d 이후 `ops.import_jobs`는 `load_batch_id`와 self-FK `parent_job_id`를
   아직 별도다.
 - **Phase 2 (Sprint 5 운영 진입 직전, T-201b)**: F5~F8 + 실제 운영 MV 카탈로그/refresh
   정책, dry-run report 첨부, admin UI 승인/거절/재시도 UX를 붙인다. dry-run report
-  산출 경로는 `krtour-map consistency-report`이며, 기본은 `persist=false`라 DB에
+  산출 경로는 `ktmctl consistency-report`이며, 기본은 `persist=false`라 DB에
   report row를 쓰지 않는다.
 
 운영 enable 전 report 산출 예:
 
 ```bash
-krtour-map --dsn "$KRTOUR_MAP_PG_DSN" consistency-report \
+kor-travel-map --dsn "$KOR_TRAVEL_MAP_PG_DSN" consistency-report \
   --known-file-objects /path/to/rustfs-objects.jsonl \
   --output docs/reports/t-201b-phase2-dry-run-report-YYYY-MM-DD.md
 ```
@@ -494,13 +494,13 @@ krtour-map --dsn "$KRTOUR_MAP_PG_DSN" consistency-report \
 
 구현 위치:
 
-- 메인 라이브러리: `src/krtour/map/infra/batch_dag.py`
-- client wrapper: `AsyncKrtourMapClient.run_batch_dag_consistency_gate(...)`
-- Dagster: `packages/krtour-map-dagster/src/krtour/map_dagster/batch_dag.py`
+- 메인 라이브러리: `src/kortravelmap/infra/batch_dag.py`
+- client wrapper: `AsyncKorTravelMapClient.run_batch_dag_consistency_gate(...)`
+- Dagster: `packages/kor-travel-map-dagster/src/kortravelmap_dagster/batch_dag.py`
 
-## 13. 운영 알림 (krtour-map)
+## 13. 운영 알림 (kor-travel-map)
 
-메인 라이브러리는 알림 sink를 결정하지 않는다. krtour-map 운영 프로그램이:
+메인 라이브러리는 알림 sink를 결정하지 않는다. kor-travel-map 운영 프로그램이:
 - Dagster `RunStatusSensor`로 run failure → Sentry/Telegram/Slack
 - `data_integrity_violations.severity='critical'` 신규 row → 알림
 - `import_jobs.status='failed'` 신규 row → 알림
@@ -516,31 +516,31 @@ docker compose up dagster dagster-daemon
 
 # 로컬 venv에서 webserver/daemon을 직접 나누어 띄울 때
 export DAGSTER_HOME=.dagster
-export KRTOUR_MAP_DAGSTER_PG_URL=postgresql://krtour_map:krtour_map@127.0.0.1:5432/krtour_map_dagster
-dagster-webserver -m krtour.map_dagster.definitions -h 0.0.0.0 -p 12302
-dagster-daemon run -m krtour.map_dagster.definitions
+export KOR_TRAVEL_MAP_DAGSTER_PG_URL=postgresql://kor_travel_map:kor_travel_map@127.0.0.1:5432/kor_travel_map_dagster
+dagster-webserver -m kortravelmap.dagster.definitions -h 0.0.0.0 -p 12302
+dagster-daemon run -m kortravelmap.dagster.definitions
 ```
 
 메인 라이브러리 단독으로는 Dagster를 띄우지 않는다 (의존성 X). Dagster 실행 코드는
-krtour-map 독립 프로그램 패키지에 둔다. 디버그 / 적재 검증은 admin API
-(`krtour.map_admin`) 또는 직접 Python 스크립트로도 가능하다.
+kor-travel-map 독립 프로그램 패키지에 둔다. 디버그 / 적재 검증은 admin API
+(`kortravelmap.admin`) 또는 직접 Python 스크립트로도 가능하다.
 
 Docker compose는 `dagster-db-init`로 같은 Postgres container 안에
-`krtour_map_dagster` DB를 보장하고, `docker/dagster.yaml`의 `storage.postgres` 설정으로
+`kor_travel_map_dagster` DB를 보장하고, `docker/dagster.yaml`의 `storage.postgres` 설정으로
 run/event/schedule metadata를 영속화한다. `dagster dev`는 로컬 단일 프로세스 편의
 명령으로만 사용할 수 있고 운영 compose에서는 사용하지 않는다.
 
-로컬 `npm run admin:stack`도 같은 기준을 따른다. 시작 전 `krtour_map_dagster` DB
+로컬 `npm run admin:stack`도 같은 기준을 따른다. 시작 전 `kor_travel_map_dagster` DB
 존재를 확인/생성하고, `docker/dagster.yaml`을 `$DAGSTER_HOME/dagster.yaml`로 설치한 뒤
 `dagster-webserver`와 `dagster-daemon`을 별도 프로세스로 띄운다. `$DAGSTER_HOME`에
 `schedules/schedules.db*`가 생기면 Postgres instance config를 읽지 못한 회귀로 본다.
 
-feature update worker 실행에는 `krtour_map_client`와 `feature_update_runner` resource가
+feature update worker 실행에는 `kor_travel_map_client`와 `feature_update_runner` resource가
 필수다. 실패 알림은 선택 resource `feature_update_failure_notifier`로 연결한다.
 
 ## 15. 본 라이브러리가 노출하는 helper 요약
 
-`AsyncKrtourMapClient`:
+`AsyncKorTravelMapClient`:
 - `.providers.<name>.<entity>_to_bundles(items, fetched_at=...) -> Iterable[FeatureBundle]`
 - `.upload_feature_files(sources) -> list[FeatureFile]`
 - `.load_feature_bundles(bundles, *, prune_existing=False) -> FeatureLoadResult`
@@ -566,7 +566,7 @@ dataclasses:
 - ScheduleDefinition, SensorDefinition 정의 안 함
 - Dagster `Config`, `RunConfig` 정의 안 함
 
-위는 모두 krtour-map Dagster 패키지 책임이다.
+위는 모두 kor-travel-map Dagster 패키지 책임이다.
 
 본 라이브러리는 **순수 함수와 DTO + DB 적재 helper**만 제공 → Dagster 없이도
 import해서 사용 가능 → 단위 테스트가 Dagster 의존 없이 빠르게 동작.

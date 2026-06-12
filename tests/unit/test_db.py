@@ -1,4 +1,4 @@
-"""``test_db`` — ``krtour.map.infra.db`` async engine + DSN 정규화.
+"""``test_db`` — ``kortravelmap.infra.db`` async engine + DSN 정규화.
 
 실 DB 없이 DSN 정규화 + engine 객체 타입만 확인 (실 connection은
 ``tests/integration/`` 책임). 엔진 생성 테스트는 ``asyncpg`` 미설치 환경에서
@@ -13,7 +13,7 @@ import pytest
 from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
-from krtour.map.infra.db import (
+from kortravelmap.infra.db import (
     make_async_engine,
     make_async_session_factory,
     normalize_async_dsn,
@@ -90,7 +90,7 @@ def test_make_async_engine_returns_async_engine() -> None:
 
 @_skip_no_asyncpg
 def test_make_async_engine_accepts_secretstr() -> None:
-    """``KrtourMapSettings.pg_dsn`` (SecretStr)를 그대로 받는다."""
+    """``KorTravelMapSettings.pg_dsn`` (SecretStr)를 그대로 받는다."""
     secret = SecretStr("postgresql://u:p@localhost:5432/test")
     engine = make_async_engine(secret)
     assert isinstance(engine, AsyncEngine)

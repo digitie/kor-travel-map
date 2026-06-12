@@ -303,8 +303,8 @@ T-201 정합성 케이스:
 
 ## 13. v1 → v2 변경
 
-- import: `krtour_map.opening_hours` → `krtour.map.opening_hours` (또는
-  `krtour.map.dto.opening_hours`).
+- import: `kor_travel_map.opening_hours` → `kortravelmap.opening_hours` (또는
+  `kortravelmap.dto.opening_hours`).
 - DTO 자체는 v1 그대로 유지 (Google Places 호환).
 - DB 컬럼/CHECK 그대로 유지.
 

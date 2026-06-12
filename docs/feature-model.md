@@ -1,6 +1,6 @@
 # feature-model.md — Feature DTO 사양
 
-본 문서는 `python-krtour-map` v2의 `Feature` DTO와 kind별 detail의 사양이다.
+본 문서는 `kor-travel-map` v2의 `Feature` DTO와 kind별 detail의 사양이다.
 `docs/data-model.md`(DB 스키마)와 1:1 대응한다.
 
 ## 1. `FeatureKind` (7종)
@@ -48,7 +48,7 @@ class Feature(BaseModel):
     name: str = Field(min_length=1)
     coord: Coordinate | None = None      # WGS84 lon/lat — Korean bounds 검증
     address: Address = Field(default_factory=Address)
-    category: str = Field(min_length=1)  # krtour.map.category.PlaceCategoryCode value (ADR-023)
+    category: str = Field(min_length=1)  # kortravelmap.category.PlaceCategoryCode value (ADR-023)
     urls: FeatureUrls = Field(default_factory=FeatureUrls)
     marker_icon: str                     # maki id
     marker_color: str                    # 'P-01' ~ 'P-16'
@@ -76,7 +76,7 @@ class Feature(BaseModel):
   - kind=area → AreaDetail
   - kind=price/weather → None 가능 (별도 테이블에 시계열 저장)
 - `marker_color`: regex `^P-(0[1-9]|1[0-6])$`.
-- `category`: `krtour.map.category.PlaceCategoryCode` value로 정규화 (ADR-023).
+- `category`: `kortravelmap.category.PlaceCategoryCode` value로 정규화 (ADR-023).
 
 ### 4.2 `FeatureUrls`
 
@@ -459,7 +459,7 @@ class FeatureBundle(BaseModel):
     def detail(self) -> PlaceDetail | EventDetail | NoticeDetail | RouteDetail | AreaDetail | None: ...
 ```
 
-`AsyncKrtourMapClient.load_feature_bundles(bundles)`이 받는 단위.
+`AsyncKorTravelMapClient.load_feature_bundles(bundles)`이 받는 단위.
 `detail`은 별도 필드가 아니라 `feature.detail` alias다. PR#26 기준 bundle은
 `feature`/`source_record`/`source_link` 3개 필수 필드만 받으며,
 `file_sources`/`weather_values`/`price_values`는 해당 DTO가 구현되는 후속 PR에서

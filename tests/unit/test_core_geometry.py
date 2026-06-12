@@ -1,6 +1,6 @@
 """``test_core_geometry`` — WKT 파싱 + centroid + 한국 경계 검증 (ADR-012).
 
-``krtour.map.core.geometry``의 순수 함수 — DB/shapely 외 의존 없음.
+``kortravelmap.core.geometry``의 순수 함수 — DB/shapely 외 의존 없음.
 """
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ from decimal import Decimal
 
 import pytest
 
-from krtour.map.core.geometry import (
+from kortravelmap.core.geometry import (
     AREA_GEOMETRY_TYPES,
     ROUTE_GEOMETRY_TYPES,
     GeometryError,
@@ -18,7 +18,7 @@ from krtour.map.core.geometry import (
     normalize_geometry,
     parse_wkt,
 )
-from krtour.map.dto import Coordinate
+from kortravelmap.dto import Coordinate
 
 _LINE = "LINESTRING(127.0 37.5, 127.1 37.6)"
 _POLY = "POLYGON((127 37, 127.1 37, 127.1 37.1, 127 37.1, 127 37))"

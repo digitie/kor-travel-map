@@ -5,11 +5,11 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=load-env.sh
 source "$ROOT_DIR/scripts/load-env.sh"
 
-LOG_DIR="${KRTOUR_MAP_LOG_DIR:-"$ROOT_DIR/.codex_tmp/admin-stack"}"
+LOG_DIR="${KOR_TRAVEL_MAP_LOG_DIR:-"$ROOT_DIR/.codex_tmp/admin-stack"}"
 mkdir -p "$LOG_DIR"
 
 "$ROOT_DIR/scripts/stop-fixed-ports.sh" \
-  "$KRTOUR_MAP_ADMIN_PORT" "$KRTOUR_MAP_ADMIN_WEB_PORT" "$KRTOUR_MAP_DAGSTER_PORT"
+  "$KOR_TRAVEL_MAP_ADMIN_PORT" "$KOR_TRAVEL_MAP_ADMIN_WEB_PORT" "$KOR_TRAVEL_MAP_DAGSTER_PORT"
 
 PYTHON_BIN="${PYTHON_BIN:-"$ROOT_DIR/.venv/bin/python"}"
 if [[ ! -x "$PYTHON_BIN" ]]; then
@@ -32,7 +32,7 @@ echo "alembic upgrade head"
   "$PYTHON_BIN" -m alembic upgrade head
 )
 
-echo "ensure dagster metadata database: $KRTOUR_MAP_DAGSTER_POSTGRES_DB"
+echo "ensure dagster metadata database: $KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB"
 (
   "$PYTHON_BIN" - <<'PY'
 from __future__ import annotations
@@ -49,12 +49,12 @@ def _psycopg_dsn(value: str) -> str:
     return value.replace("postgresql+psycopg://", "postgresql://", 1)
 
 
-dagster_url = os.environ["KRTOUR_MAP_DAGSTER_PG_URL"]
+dagster_url = os.environ["KOR_TRAVEL_MAP_DAGSTER_PG_URL"]
 dagster_db = urlsplit(dagster_url).path.lstrip("/").split("?", 1)[0]
 if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", dagster_db):
-    raise SystemExit(f"invalid KRTOUR_MAP_DAGSTER_PG_URL database name: {dagster_db!r}")
+    raise SystemExit(f"invalid KOR_TRAVEL_MAP_DAGSTER_PG_URL database name: {dagster_db!r}")
 
-app_dsn = _psycopg_dsn(os.environ["KRTOUR_MAP_PG_DSN_SYNC"])
+app_dsn = _psycopg_dsn(os.environ["KOR_TRAVEL_MAP_PG_DSN_SYNC"])
 with psycopg.connect(app_dsn, autocommit=True) as conn:
     exists = conn.execute(
         "SELECT 1 FROM pg_database WHERE datname = %s",
@@ -72,9 +72,9 @@ DAGSTER_HOME_DIR="${DAGSTER_HOME:-"$ROOT_DIR/.dagster"}"
 mkdir -p "$DAGSTER_HOME_DIR"
 install -m 0644 "$ROOT_DIR/docker/dagster.yaml" "$DAGSTER_HOME_DIR/dagster.yaml"
 
-ADMIN_BIND_HOST="${KRTOUR_MAP_ADMIN_BIND_HOST:-0.0.0.0}"
-WEB_BIND_HOST="${KRTOUR_MAP_ADMIN_WEB_BIND_HOST:-0.0.0.0}"
-DAGSTER_BIND_HOST="${KRTOUR_MAP_DAGSTER_BIND_HOST:-0.0.0.0}"
+ADMIN_BIND_HOST="${KOR_TRAVEL_MAP_ADMIN_BIND_HOST:-0.0.0.0}"
+WEB_BIND_HOST="${KOR_TRAVEL_MAP_ADMIN_WEB_BIND_HOST:-0.0.0.0}"
+DAGSTER_BIND_HOST="${KOR_TRAVEL_MAP_DAGSTER_BIND_HOST:-0.0.0.0}"
 
 stop_logged_pid() {
   local name="$1"
@@ -112,19 +112,19 @@ start_bg() {
 (
   cd "$ROOT_DIR"
   start_bg api env \
-    KRTOUR_MAP_ADMIN_HOST="$ADMIN_BIND_HOST" \
-    KRTOUR_MAP_ADMIN_PORT="$KRTOUR_MAP_ADMIN_PORT" \
-    "$PYTHON_BIN" -m uvicorn krtour.map_admin.app:app \
-    --host "$ADMIN_BIND_HOST" --port "$KRTOUR_MAP_ADMIN_PORT"
+    KOR_TRAVEL_MAP_ADMIN_HOST="$ADMIN_BIND_HOST" \
+    KOR_TRAVEL_MAP_ADMIN_PORT="$KOR_TRAVEL_MAP_ADMIN_PORT" \
+    "$PYTHON_BIN" -m uvicorn kortravelmap.admin.app:app \
+    --host "$ADMIN_BIND_HOST" --port "$KOR_TRAVEL_MAP_ADMIN_PORT"
 )
 
 (
-  cd "$ROOT_DIR/packages/krtour-map-admin/frontend"
+  cd "$ROOT_DIR/packages/kor-travel-map-admin/frontend"
   start_bg web env \
-    NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API="$NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API" \
-    NEXT_PUBLIC_KRTOUR_MAP_DAGSTER_URL="$NEXT_PUBLIC_KRTOUR_MAP_DAGSTER_URL" \
+    NEXT_PUBLIC_KOR_TRAVEL_MAP_ADMIN_API="$NEXT_PUBLIC_KOR_TRAVEL_MAP_ADMIN_API" \
+    NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL="$NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL" \
     NEXT_PUBLIC_VWORLD_API_KEY="${NEXT_PUBLIC_VWORLD_API_KEY:-}" \
-    npx next dev --port "$KRTOUR_MAP_ADMIN_WEB_PORT" --hostname "$WEB_BIND_HOST"
+    npx next dev --port "$KOR_TRAVEL_MAP_ADMIN_WEB_PORT" --hostname "$WEB_BIND_HOST"
 )
 
 (
@@ -133,9 +133,9 @@ start_bg() {
     TMPDIR=/tmp TEMP=/tmp TMP=/tmp \
     DAGSTER_HOME="$DAGSTER_HOME_DIR" \
     DAGSTER_DISABLE_TELEMETRY="$DAGSTER_DISABLE_TELEMETRY" \
-    KRTOUR_MAP_DAGSTER_PG_URL="$KRTOUR_MAP_DAGSTER_PG_URL" \
-    "$DAGSTER_WEBSERVER_BIN" -m krtour.map_dagster.definitions \
-    -h "$DAGSTER_BIND_HOST" -p "$KRTOUR_MAP_DAGSTER_PORT"
+    KOR_TRAVEL_MAP_DAGSTER_PG_URL="$KOR_TRAVEL_MAP_DAGSTER_PG_URL" \
+    "$DAGSTER_WEBSERVER_BIN" -m kortravelmap.dagster.definitions \
+    -h "$DAGSTER_BIND_HOST" -p "$KOR_TRAVEL_MAP_DAGSTER_PORT"
 )
 
 (
@@ -144,8 +144,8 @@ start_bg() {
     TMPDIR=/tmp TEMP=/tmp TMP=/tmp \
     DAGSTER_HOME="$DAGSTER_HOME_DIR" \
     DAGSTER_DISABLE_TELEMETRY="$DAGSTER_DISABLE_TELEMETRY" \
-    KRTOUR_MAP_DAGSTER_PG_URL="$KRTOUR_MAP_DAGSTER_PG_URL" \
-    "$DAGSTER_DAEMON_BIN" run -m krtour.map_dagster.definitions
+    KOR_TRAVEL_MAP_DAGSTER_PG_URL="$KOR_TRAVEL_MAP_DAGSTER_PG_URL" \
+    "$DAGSTER_DAEMON_BIN" run -m kortravelmap.dagster.definitions
 )
 
 wait_url() {
@@ -200,11 +200,11 @@ ensure_bg_alive() {
   return 1
 }
 
-wait_url api "http://127.0.0.1:${KRTOUR_MAP_ADMIN_PORT}/health"
-wait_url web "http://127.0.0.1:${KRTOUR_MAP_ADMIN_WEB_PORT}/"
-wait_url dagster "http://127.0.0.1:${KRTOUR_MAP_DAGSTER_PORT}/"
+wait_url api "http://127.0.0.1:${KOR_TRAVEL_MAP_ADMIN_PORT}/health"
+wait_url web "http://127.0.0.1:${KOR_TRAVEL_MAP_ADMIN_WEB_PORT}/"
+wait_url dagster "http://127.0.0.1:${KOR_TRAVEL_MAP_DAGSTER_PORT}/"
 ensure_bg_alive dagster-daemon
 
-echo "api=http://127.0.0.1:${KRTOUR_MAP_ADMIN_PORT}"
-echo "web=http://127.0.0.1:${KRTOUR_MAP_ADMIN_WEB_PORT}"
-echo "dagster=http://127.0.0.1:${KRTOUR_MAP_DAGSTER_PORT}"
+echo "api=http://127.0.0.1:${KOR_TRAVEL_MAP_ADMIN_PORT}"
+echo "web=http://127.0.0.1:${KOR_TRAVEL_MAP_ADMIN_WEB_PORT}"
+echo "dagster=http://127.0.0.1:${KOR_TRAVEL_MAP_DAGSTER_PORT}"

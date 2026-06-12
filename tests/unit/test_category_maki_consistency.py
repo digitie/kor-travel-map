@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from krtour.map.category import PLACE_CATEGORY_MAPBOX_MAKI_ICON_VALUES
+from kortravelmap.category import PLACE_CATEGORY_MAPBOX_MAKI_ICON_VALUES
 
 pytestmark = pytest.mark.unit
 

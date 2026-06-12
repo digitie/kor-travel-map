@@ -8,14 +8,14 @@ from typing import TYPE_CHECKING
 import pytest
 from sqlalchemy import text
 
-from krtour.map.infra.consistency import run_consistency_checks
-from krtour.map.infra.integrity_violation_repo import create_data_integrity_violation
-from krtour.map.infra.jobs_repo import (
+from kortravelmap.infra.consistency import run_consistency_checks
+from kortravelmap.infra.integrity_violation_repo import create_data_integrity_violation
+from kortravelmap.infra.jobs_repo import (
     enqueue_import_job,
     record_import_job_event,
     start_import_job,
 )
-from krtour.map.infra.ops_repo import (
+from kortravelmap.infra.ops_repo import (
     get_latest_consistency_report,
     get_ops_import_job,
     get_ops_integrity_issue_counts,
@@ -294,7 +294,7 @@ async def test_ops_integrity_issues_q_and_bbox_filters(
 ) -> None:
     from geoalchemy2 import WKTElement
 
-    from krtour.map.infra.models import FeatureRow
+    from kortravelmap.infra.models import FeatureRow
 
     fid = "f_issue_bbox"
     migrated_session.add(

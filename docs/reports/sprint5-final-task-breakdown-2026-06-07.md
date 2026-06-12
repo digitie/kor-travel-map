@@ -5,7 +5,7 @@
 - 기준 브랜치: `origin/main` after PR#273
   (`docs: record opinet provider enhancement (python-opinet-api#8) + T-RV-04b status`).
 - Sprint 5 종료 정의: `docs/sprints/SPRINT-5.md` §4 운영 진입 게이트를 모두
-  충족해 TripMate가 krtour-map을 production 연동 대상으로 사용할 수 있는 상태.
+  충족해 TripMate가 kor-travel-map을 production 연동 대상으로 사용할 수 있는 상태.
 - 본 문서는 구현을 새로 끝낸 것이 아니라, 남은 작업을 1-PR 단위로 바로 실행할 수
   있게 상세화한 백로그 정본이다. 실제 완료 여부의 단일 정본은 계속
   `docs/resume.md`와 `docs/tasks.md`다.
@@ -34,11 +34,11 @@
     대상으로 삼는다.
 
 **수정 후보**:
-- `packages/krtour-map-dagster/src/krtour/map_dagster/provider_fetchers.py`
-- `packages/krtour-map-dagster/src/krtour/map_dagster/resources.py`
-- `packages/krtour-map-dagster/src/krtour/map_dagster/definitions.py`
-- `packages/krtour-map-dagster/tests/test_provider_fetchers.py`
-- 필요 시 `src/krtour/map/providers/opinet.py` Protocol 재정렬
+- `packages/kor-travel-map-dagster/src/kortravelmap_dagster/provider_fetchers.py`
+- `packages/kor-travel-map-dagster/src/kortravelmap_dagster/resources.py`
+- `packages/kor-travel-map-dagster/src/kortravelmap_dagster/definitions.py`
+- `packages/kor-travel-map-dagster/tests/test_provider_fetchers.py`
+- 필요 시 `src/kortravelmap/providers/opinet.py` Protocol 재정렬
 
 **DoD**:
 - provider `Station` shape에 맞춰 `OpinetStationItem` Protocol을 ADR-044 기준으로
@@ -105,7 +105,7 @@
 3. alembic head 적용.
 4. provider asset full reload 실행.
 5. offline upload CSV/TSV/JSONL happy/error path 실행.
-6. kraddr-geo REST v2 bjd 보강 확인.
+6. kor-travel-geo REST v2 bjd 보강 확인.
 7. consistency gate와 dedup queue 상태 확인.
 8. admin/user API smoke와 Windows Playwright e2e 실행.
 9. backup/restore smoke 또는 최근 backup artifact 검증.
@@ -119,23 +119,23 @@
 
 ### S5-5. T-210-tripmate-integration-cleanup
 
-**목표**: krtour-map이 HTTP/OpenAPI 독립 프로그램이라는 경계를 TripMate 쪽에도
+**목표**: kor-travel-map이 HTTP/OpenAPI 독립 프로그램이라는 경계를 TripMate 쪽에도
 반영한다.
 
 **분리 기준**:
-- `T-210a`: krtour-map repo에서 `docs/tripmate-rest-api.md`와 generated OpenAPI 정합
+- `T-210a`: kor-travel-map repo에서 `docs/tripmate-rest-api.md`와 generated OpenAPI 정합
   확인.
 - `T-210b`: TripMate repo 문서에서 직접 import, 공유 DB, TripMate-owned Dagster 문구를
   ADR-045 모델로 supersede.
-- `T-210c`: TripMate `apps/etl`에 남은 krtour-map Dagster skeleton 이관 또는 삭제.
-- `T-210d`: TripMate backend `httpx` client 추가. 운영 코드는 `python-krtour-map`을
+- `T-210c`: TripMate `apps/etl`에 남은 kor-travel-map Dagster skeleton 이관 또는 삭제.
+- `T-210d`: TripMate backend `httpx` client 추가. 운영 코드는 `kor-travel-map`을
   import하지 않는다.
 - `T-210e`: TripMate frontend TypeScript client/codegen과 CI drift gate.
 
 **DoD**:
-- TripMate 운영 코드에 `from krtour.map` import가 없다.
-- TripMate DB에서 krtour-map DB로 직접 연결하는 설정이 없다.
-- krtour-map user OpenAPI와 TripMate generated type이 같은 commit 기준임을 문서화한다.
+- TripMate 운영 코드에 `from kortravelmap` import가 없다.
+- TripMate DB에서 kor-travel-map DB로 직접 연결하는 설정이 없다.
+- kor-travel-map user OpenAPI와 TripMate generated type이 같은 commit 기준임을 문서화한다.
 
 ### S5-6. Sprint 5 closure
 

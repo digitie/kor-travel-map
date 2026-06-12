@@ -38,26 +38,26 @@ jobs:
 
       - name: openapi-typescript drift check
         # T-RV-30: admin frontend가 사용하는 generated OpenAPI 타입 산출물이
-        # packages/krtour-map-admin/openapi.json과 drift 나지 않게 고정한다.
-        run: npm -w packages/krtour-map-admin/frontend run gen:types:check
+        # packages/kor-travel-map-admin/openapi.json과 drift 나지 않게 고정한다.
+        run: npm -w packages/kor-travel-map-admin/frontend run gen:types:check
 
       - name: user-client types drift + surface assertions (T-210e)
         # downstream(TripMate) 소비용 user spec 타입 산출물 고정 + ADR-048 표면
         # 불변식(batch found / meta.page / 평면 lon,lat / /v1 경로) 컴파일 단언.
         run: |
-          npm -w packages/krtour-map-user-client run gen:types:check
-          npm -w packages/krtour-map-user-client run type-check
+          npm -w packages/kor-travel-map-user-client run gen:types:check
+          npm -w packages/kor-travel-map-user-client run type-check
 
       - name: tsc --noEmit (frontend type-check)
         # 빠른 1차 게이트. JSDoc 주석 안의 `*/`(comment terminator) 같은 잠복
         # syntax 오류도 검출 (PR#92 회고).
-        run: npm -w packages/krtour-map-admin/frontend run type-check
+        run: npm -w packages/kor-travel-map-admin/frontend run type-check
 
       - name: next build (production compile)
         # ADR-025 — swc/turbo의 syntax + 모듈 해석을 production 경로까지 확인.
         # NEXT_PUBLIC_* 는 build-time inline이므로 임의 값으로 진행 (실 호출 없음).
         env:
-          NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API: http://127.0.0.1:8087
-          NEXT_PUBLIC_KRTOUR_MAP_DAGSTER_URL: http://127.0.0.1:12302
-          NEXT_PUBLIC_KRADDR_GEO_BASE_URL: http://127.0.0.1:12201
-        run: npm -w packages/krtour-map-admin/frontend run build
+          NEXT_PUBLIC_KOR_TRAVEL_MAP_ADMIN_API: http://127.0.0.1:8087
+          NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL: http://127.0.0.1:12302
+          NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL: http://127.0.0.1:12201
+        run: npm -w packages/kor-travel-map-admin/frontend run build

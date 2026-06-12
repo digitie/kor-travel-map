@@ -30,8 +30,8 @@ case "$check_name" in
     "$python_bin" -m ruff format --check "$@"
     ;;
   mypy)
-    "$python_bin" -m mypy --strict -p krtour.map
-    "$python_bin" -m mypy --strict -p krtour.map_dagster
+    "$python_bin" -m mypy --strict -p kortravelmap
+    "$python_bin" -m mypy --strict -p kortravelmap.dagster
     ;;
   lint-imports)
     "$python_bin" -c "from importlinter.cli import lint_imports_command; import sys; sys.argv=['lint-imports']; lint_imports_command()"

@@ -30,18 +30,18 @@ code location, settings/env prefix, CLI, Docker/CI, generated OpenAPI/client, Tr
 | 항목 | 수치/경로 |
 |------|-----------|
 | Python/설정/문서 후보 파일 | 908개 |
-| `krtour.map` 참조 파일 | 368개 |
-| `KRTOUR_MAP` 참조 파일 | 86개 |
-| 메인 package | `src/krtour/map` |
-| Admin package | `packages/krtour-map-admin/src/krtour/map_admin` |
-| Dagster package | `packages/krtour-map-dagster/src/krtour/map_dagster` |
-| import-linter root | `krtour.map` |
-| main console script | `krtour-map = "krtour.map.cli.main:main"` |
-| admin console script | `krtour-map-admin = "krtour.map_admin.cli:main"` |
-| Dagster module | `krtour.map_dagster.definitions` |
+| `kortravelmap` 참조 파일 | 368개 |
+| `KOR_TRAVEL_MAP` 참조 파일 | 86개 |
+| 메인 package | `src/kortravelmap` |
+| Admin package | `packages/kor-travel-map-admin/src/kortravelmap_admin` |
+| Dagster package | `packages/kor-travel-map-dagster/src/kortravelmap_dagster` |
+| import-linter root | `kortravelmap` |
+| main console script | `kor-travel-map = "kortravelmap.cli.main:main"` |
+| admin console script | `kor-travel-map-admin = "kortravelmap.admin.cli:main"` |
+| Dagster module | `kortravelmap.dagster.definitions` |
 
-대표 settings 파일(`src/krtour/map/settings.py`,
-`packages/krtour-map-admin/src/krtour/map_admin/settings.py`)은 codegraph impact가
+대표 settings 파일(`src/kortravelmap/settings.py`,
+`packages/kor-travel-map-admin/src/kortravelmap_admin/settings.py`)은 codegraph impact가
 파일 단위 1개로만 잡혔지만, 실제 위험은 문자열 기반 env prefix, 테스트 fixture,
 Docker/CI 설정, 문서 예시가 함께 바뀌는 데 있다.
 
@@ -65,8 +65,8 @@ T-226c 이후 Python import layout은 다음을 목표로 한다.
 | main CLI | `ktmctl` |
 | admin CLI | `ktmctl admin` |
 
-구 `krtour.map`, `krtour.map_admin`, `krtour.map_dagster`, `KRTOUR_MAP_*`,
-`krtour-map*` 호환 shim은 만들지 않는다. `src/krtour/__init__.py`를 만들지 않는다는
+구 `kortravelmap`, `kortravelmap.admin`, `kortravelmap.dagster`, `KOR_TRAVEL_MAP_*`,
+`kor-travel-map*` 호환 shim은 만들지 않는다. `src/krtour/__init__.py`를 만들지 않는다는
 기존 금지 규칙도 계속 유효하며, T-226c 완료 뒤에는 `src/krtour/` 자체가 없어져야 한다.
 
 ## 4. T-226c 실행 절차
@@ -75,15 +75,15 @@ T-226c는 코드 import와 package metadata만 다룬다.
 
 1. 최신 `main`에서 새 branch를 만들고 `codegraph sync`를 실행한다.
 2. 파일 이동을 먼저 수행한다.
-   - `src/krtour/map` → `src/kortravelmap`
-   - `packages/krtour-map-admin/src/krtour/map_admin` →
+   - `src/kortravelmap` → `src/kortravelmap`
+   - `packages/kor-travel-map-admin/src/kortravelmap_admin` →
      `packages/kor-travel-map-admin/src/kortravelmap/admin`
-   - `packages/krtour-map-dagster/src/krtour/map_dagster` →
+   - `packages/kor-travel-map-dagster/src/kortravelmap_dagster` →
      `packages/kor-travel-map-dagster/src/kortravelmap/dagster`
 3. import를 기계적으로 바꾼다.
-   - `krtour.map.` → `kortravelmap.`
-   - `krtour.map_admin` → `kortravelmap.admin`
-   - `krtour.map_dagster` → `kortravelmap.dagster`
+   - `kortravelmap.` → `kortravelmap.`
+   - `kortravelmap.admin` → `kortravelmap.admin`
+   - `kortravelmap.dagster` → `kortravelmap.dagster`
 4. `pyproject.toml` 계열을 갱신한다.
    - `project.name`
    - `[project.scripts]`
@@ -103,7 +103,7 @@ T-226c PR의 grep gate:
 ```bash
 grep -R "from krtour\.map\|import krtour\.map\|krtour\.map_admin\|krtour\.map_dagster" \
   src packages tests scripts alembic pyproject.toml
-grep -R "src/krtour\|packages/krtour-map-admin\|packages/krtour-map-dagster" \
+grep -R "src/krtour\|packages/kor-travel-map-admin\|packages/kor-travel-map-dagster" \
   .github scripts packages pyproject.toml
 ```
 
@@ -126,13 +126,13 @@ python packages/kor-travel-map-admin/scripts/export_openapi.py --profile all --c
 
 T-226d는 runtime identity를 바꾼다.
 
-- `KRTOUR_MAP_*` → `KOR_TRAVEL_MAP_*`
-- `KRTOUR_MAP_ADMIN_*` → `KOR_TRAVEL_MAP_ADMIN_*`
-- 기본 DB 이름 `krtour_map` → `kor_travel_map`
-- 기본 Dagster metadata DB 이름 `krtour_map_dagster` → `kor_travel_map_dagster`
-- RustFS bucket/prefix 표시명 `krtour-map`, `krtour-uploads` →
+- `KOR_TRAVEL_MAP_*` → `KOR_TRAVEL_MAP_*`
+- `KOR_TRAVEL_MAP_ADMIN_*` → `KOR_TRAVEL_MAP_ADMIN_*`
+- 기본 DB 이름 `kor_travel_map` → `kor_travel_map`
+- 기본 Dagster metadata DB 이름 `kor_travel_map_dagster` → `kor_travel_map_dagster`
+- RustFS bucket/prefix 표시명 `kor-travel-map`, `krtour-uploads` →
   `kor-travel-map`, `kor-travel-map-uploads`
-- Docker image/service/container 표시명 `krtour-map*` → `kor-travel-map*`
+- Docker image/service/container 표시명 `kor-travel-map*` → `kor-travel-map*`
 - advisory lock namespace, 로그/metric service label, compose profile 이름 중 사용자 가시
   identity를 새 이름으로 전환
 
@@ -149,7 +149,7 @@ T-226e는 소비자 전파와 안내 문서를 다룬다.
   목표값으로 일괄 전환한다.
 - generated client와 TripMate 문서가 distribution/service 이름을 직접 참조하는지
   확인한다.
-- `python-krtour-map` / `krtour.map` 표기는 migration guide, ADR history, archive 문서에만
+- `kor-travel-map` / `kortravelmap` 표기는 migration guide, ADR history, archive 문서에만
   남긴다.
 
 ## 7. 병행 작업 주의

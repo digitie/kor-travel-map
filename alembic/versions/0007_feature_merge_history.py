@@ -5,7 +5,7 @@ Revises: 0006_import_jobs
 Create Date: 2026-06-01
 
 dedup 중복 병합 이력. ADR-016이 명시한 ``feature_merge_history(loser_id,
-master_id, score, merged_at)``를 영속화한다. ``krtour-map dedup-merge`` 명령이
+master_id, score, merged_at)``를 영속화한다. ``kor-travel-map dedup-merge`` 명령이
 ``ops.dedup_review_queue``의 후보 1쌍을 master/loser로 확정해 병합할 때, loser의
 ``source_links``를 master로 재지정하고 loser feature를 soft-delete(status='deleted')
 한 뒤 본 테이블에 이력을 남긴다.

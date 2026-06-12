@@ -8,7 +8,7 @@ Create Date: 2026-06-09
 두 가지를 제공한다:
 
 - `x_extension.pg_prewarm(regclass)` — 명시적 buffer warm-up 함수(부팅/배포 직후 hot
-  relation을 shared_buffers/OS cache로 끌어올림). `krtour.map.infra.prewarm` 헬퍼가 호출.
+  relation을 shared_buffers/OS cache로 끌어올림). `kortravelmap.infra.prewarm` 헬퍼가 호출.
 - autoprewarm background worker — `shared_preload_libraries='pg_prewarm'` +
   `pg_prewarm.autoprewarm=on`(서버 config, docker-compose)일 때만 동작. 주기적으로 buffer
   목록을 dump하고 재기동 시 자동 reload("부팅 후 warm-up").

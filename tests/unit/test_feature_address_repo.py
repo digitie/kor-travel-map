@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from krtour.map.infra import feature_address_repo as repo
+from kortravelmap.infra import feature_address_repo as repo
 
 
 class _Row:

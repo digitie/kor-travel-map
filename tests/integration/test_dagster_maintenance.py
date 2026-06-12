@@ -11,9 +11,9 @@ from geoalchemy2 import WKTElement
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from krtour.map.client import AsyncKrtourMapClient
-from krtour.map.infra.dedup_refresh_repo import DedupRefreshScope
-from krtour.map.infra.models import FeatureRow, SourceLinkRow, SourceRecordRow
+from kortravelmap.client import AsyncKorTravelMapClient
+from kortravelmap.infra.dedup_refresh_repo import DedupRefreshScope
+from kortravelmap.infra.models import FeatureRow, SourceLinkRow, SourceRecordRow
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
@@ -32,8 +32,8 @@ _TRUNCATE_SQL = (
 @pytest.fixture
 async def map_client(
     migrated_engine: AsyncEngine,
-) -> AsyncIterator[AsyncKrtourMapClient]:
-    client = AsyncKrtourMapClient(migrated_engine)
+) -> AsyncIterator[AsyncKorTravelMapClient]:
+    client = AsyncKorTravelMapClient(migrated_engine)
     try:
         yield client
     finally:
@@ -43,7 +43,7 @@ async def map_client(
 
 async def test_consistency_dedup_refresh_client_updates_queue_and_report(
     migrated_engine: AsyncEngine,
-    map_client: AsyncKrtourMapClient,
+    map_client: AsyncKorTravelMapClient,
 ) -> None:
     await _seed_feature_with_source(
         migrated_engine,

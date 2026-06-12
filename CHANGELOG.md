@@ -19,7 +19,7 @@
   "좀비 업로드"도 정리 가능). 진행 중(`validating`/`loading`) 업로드는 409,
   파괴적 admin kill-switch(`admin_destructive_enabled=False`)면 403. row 삭제로
   같은 checksum 재업로드의 멱등 가드(409)가 풀린다.
-- **ADDED**: `krtour.map.infra.offline_upload_repo.delete_offline_upload` +
+- **ADDED**: `kortravelmap.infra.offline_upload_repo.delete_offline_upload` +
   `OFFLINE_UPLOAD_IN_PROGRESS_STATES`/`OFFLINE_UPLOAD_DELETABLE_STATES` 상태
   계약. 연관 `ops.import_jobs` row는 audit 기록으로 보존한다.
 - **CHANGED**: admin frontend `/admin/offline-uploads` 목록에 행 단위 삭제
@@ -29,7 +29,7 @@
 
 - **ADDED**: `feature.curated_tripmate_copy_snapshots` — TripMate copy snapshot
   materialize/cache table.
-- **ADDED**: `AsyncKrtourMapClient` curated 배치 표면 —
+- **ADDED**: `AsyncKorTravelMapClient` curated 배치 표면 —
   source metadata refresh, source rule bulk apply, status sweep, TripMate snapshot
   materialize.
 - **ADDED**: Dagster `curated_features` asset group과 `curated_features_refresh`
@@ -43,7 +43,7 @@
   `/v1/curated-features*` 및 `/tripmate-copy` snapshot API.
 - **ADDED**: `/v1/admin/curated-*` backend API — feature select/unselect/archive,
   theme/source/rule create/patch, source rule apply.
-- **CHANGED**: `openapi.user.json`과 `@krtour/map-user-client` 타입에 curated read
+- **CHANGED**: `openapi.user.json`과 `@kor-travel-map/map-user-client` 타입에 curated read
   표면과 TripMate copy snapshot schema를 포함했다.
 
 ### 공개 해수욕장/축제 view API (T-222b, 2026-06-12)
@@ -53,7 +53,7 @@
 - **ADDED**: `GET /v1/public/festivals/monthly`,
   `/v1/public/festivals/map-markers`, `/v1/public/festivals/{feature_id}` —
   월별 축제 공개 목록/지도/상세 view.
-- **CHANGED**: `openapi.user.json`과 `@krtour/map-user-client` 생성 타입에
+- **CHANGED**: `openapi.user.json`과 `@kor-travel-map/map-user-client` 생성 타입에
   `BeachPublicView`/`FestivalPublicView` 공개 view schema와 경로를 포함했다.
 
 ### Ops logs job event 연결 + debug 재판정 (T-221e, 2026-06-12)
@@ -96,11 +96,11 @@
 
 ### Admin feature 수동 작성 흐름 (T-221a, 2026-06-12)
 
-- **ADDED**: admin frontend `/admin/features/new` — 지도 좌표 선택, kraddr-geo
+- **ADDED**: admin frontend `/admin/features/new` — 지도 좌표 선택, kor-travel-geo
   geocode/reverse 후보 적용, `place`/`event` detail form, nearby 중복 후보 확인,
   `POST /v1/admin/features` change-request 생성 흐름.
-- **ADDED**: frontend `NEXT_PUBLIC_KRADDR_GEO_BASE_URL` — 수동 작성 화면에서
-  kraddr-geo REST v2를 호출하는 public base URL.
+- **ADDED**: frontend `NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL` — 수동 작성 화면에서
+  kor-travel-geo REST v2를 호출하는 public base URL.
 - **FIXED**: MapLibre mount container에 inline sizing을 보강해 `/features` 지도와
   `/admin/features/new` 지도에서 `maplibregl-map` CSS가 Tailwind absolute sizing을
   무효화하지 않게 했다.
@@ -140,25 +140,25 @@
   기본 5000 → 50000(실측 최대 24,537행의 약 2배 여유). admin ETL preview
   fixture는 방언 대표 3종으로 교체.
 
-### krtour-ai-agent provider identity clean cut (ADR-053, T-224, 2026-06-12)
+### kor-travel-concierge provider identity clean cut (ADR-053, T-224, 2026-06-12)
 
-- **CHANGED**: YouTube 장소 후보 provider를 `tripmate-agent-youtube`에서
-  `krtour-ai-agent-youtube`로 재정의했다. TripMate와 agent의 직접 관계는 제거하고,
-  provider 관계는 krtour-map ↔ krtour-ai-agent 사이에만 둔다.
+- **CHANGED**: YouTube 장소 후보 provider를 `kor-travel-concierge-youtube`에서
+  `kor-travel-concierge-youtube`로 재정의했다. TripMate와 agent의 직접 관계는 제거하고,
+  provider 관계는 kor-travel-map ↔ kor-travel-concierge 사이에만 둔다.
 - **CHANGED**: Dagster resource/asset/schedule, settings/env 이름을
-  `krtour_ai_agent_*` / `KRTOUR_MAP_KRTOUR_AI_AGENT_*` 기준으로 바꿨다. 구
-  `KRTOUR_MAP_TRIPMATE_AGENT_*` 호환 shim은 두지 않는다.
-- **CHANGED**: Python provider module은 `krtour.map.providers.krtour_ai_agent`,
-  raw payload 보존 key는 `detail.payload.krtour_ai_agent`다.
+  `kor_travel_concierge_*` / `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_*` 기준으로 바꿨다. 구
+  `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_*` 호환 shim은 두지 않는다.
+- **CHANGED**: Python provider module은 `kortravelmap.providers.kor_travel_concierge`,
+  raw payload 보존 key는 `detail.payload.kor_travel_concierge`다.
 
 ### Local/Docker 고정 포트 재정렬 (ADR-047 amendment, 2026-06-12)
 
-- **CHANGED**: krtour-map standalone 기본 포트를 API `12301`, 관리 보조(Dagster)
+- **CHANGED**: kor-travel-map standalone 기본 포트를 API `12301`, 관리 보조(Dagster)
   `12302`, Web UI `12305`로 재고정했다.
 - **CHANGED**: Postgres host port 기본값을 표준 `5432`로 바꾸고, RustFS S3 API
   기본값을 `12101`로 바꿨다. RustFS console host port는 `12105`를 유지한다.
-- **CHANGED**: kraddr-geo 연동 기본 URL을 API `http://127.0.0.1:12201`로 바꿨고,
-  문서에는 kraddr-geo Web UI `12205`를 함께 명시했다.
+- **CHANGED**: kor-travel-geo 연동 기본 URL을 API `http://127.0.0.1:12201`로 바꿨고,
+  문서에는 kor-travel-geo Web UI `12205`를 함께 명시했다.
 - **CHANGED**: Docker compose, Dockerfile expose, `.env.example`, `scripts/load-env.sh`,
   admin/frontend fallback URL, Playwright/e2e/test expectation, runbook 문서의 포트
   기준을 새 값으로 정렬했다.
@@ -234,7 +234,7 @@
 ### Dagster — 주소/좌표 검증 모드 strict/drop/off (#376, T-212e, 2026-06-11)
 
 - **NEW**: settings `dagster_address_validation`(`strict`/`drop`/`off`, 기본 `strict`,
-  env `KRTOUR_MAP_DAGSTER_ADDRESS_VALIDATION`) — `strict_address` resource가 이 값을
+  env `KOR_TRAVEL_MAP_DAGSTER_ADDRESS_VALIDATION`) — `strict_address` resource가 이 값을
   읽는다(bool 하위호환: True→strict, False→off).
 - **NEW**: `drop` 모드 — error-severity 검증 row만 격리하고 나머지를 적재. 격리
   건수/feature_id는 run 메타데이터(`address_validation_dropped_*`)로 노출(silent
@@ -258,7 +258,7 @@
 - **CHANGED**: admin frontend React Doctor full scan 기준 optional warning까지 0건이 되도록
   UI primitive export 구조, React 19 ref 전달, iframe sandbox, 미사용 hook export를 정리했다.
 - **CHANGED**: `maplibre-vworld-js` consumer pin을 최신 tag `v0.1.3`으로 맞추고,
-  `@krtour/map-marker-react` peer/dev dependency와 root lockfile의 `maplibre-vworld`
+  `@kor-travel-map/map-marker-react` peer/dev dependency와 root lockfile의 `maplibre-vworld`
   항목을 같은 값으로 정렬했다.
 
 ### MCST 신규 provider — KCISA 14 + ODCloud 도서관 2 (T-220, 2026-06-11)
@@ -277,7 +277,7 @@
 ### Dagster — KMA 중기예보 + 기상특보 (T-219c, 2026-06-11)
 
 - **NEW**: asset `feature_weather_kma_mid_forecast` — 운영자 주입 매핑
-  (`KRTOUR_MAP_KMA_MID_REGION_FEATURES` JSON, 육상/기온 reg_id 분리)의 region별
+  (`KOR_TRAVEL_MAP_KMA_MID_REGION_FEATURES` JSON, 육상/기온 reg_id 분리)의 region별
   `getMidLandFcst`+`getMidTa`를 SKY/POP/TMN/TMX `WeatherValue`로 적재(일 2회,
   미설정 시 skip). resource `kma_datagokr_client` 신설.
 - **NEW**: asset `feature_notice_kma_weather_alerts` — 표준 record-resource
@@ -300,7 +300,7 @@
 - **NEW**: resource `kma_weather_client`(python-kma-api `KmaClient` live,
   `DATA_GO_KR_SERVICE_KEY` 공유) + settings 값 resource 2종. `providers` extra에
   `python-kma-api@ab1a0b8` 핀 활성화.
-- **ADDED**: `AsyncKrtourMapClient.list_poi_cache_target_coords()` /
+- **ADDED**: `AsyncKorTravelMapClient.list_poi_cache_target_coords()` /
   `list_active_place_coords()` read 메서드, KMA dataset_key 상수 3종.
 
 ## [Unreleased]
@@ -322,7 +322,7 @@
 ### DB — pg_prewarm 부팅 후 warm-up 메커니즘 (T-102, 2026-06-09)
 
 - **ADDED**: migration `0022_pg_prewarm_extension` — `pg_prewarm` 확장을 `x_extension`에 생성.
-- **ADDED**: `krtour.map.infra.prewarm.prewarm_relations` — hot relation을 `pg_prewarm`으로
+- **ADDED**: `kortravelmap.infra.prewarm.prewarm_relations` — hot relation을 `pg_prewarm`으로
   buffer warm-up하는 명시적 헬퍼(확장 미설치 시 no-op, 존재하지 않는 relation skip).
 - **ADDED**: docker-compose postgres `shared_preload_libraries=pg_prewarm` +
   `autoprewarm=on`(background 재기동 자동 warm-up). `/ops/health-deep`에 `prewarm` 컴포넌트.
@@ -374,8 +374,8 @@
 ### API — `/tripmate/*` namespace 제거, batch를 `POST /features/batch`로 일반화 (2026-06-09)
 
 - **CHANGED (breaking)**: `POST /tripmate/features/batch` → **`POST /features/batch`**.
-  `/tripmate/*` namespace를 제거했다(krtour-map은 TripMate 전용이 아니다). batch는
-  `features_router`의 service read로 옮기고 `ServiceToken`(`X-Krtour-Service-Token`)을
+  `/tripmate/*` namespace를 제거했다(kor-travel-map은 TripMate 전용이 아니다). batch는
+  `features_router`의 service read로 옮기고 `ServiceToken`(`X-Kor-Travel-Map-Service-Token`)을
   route-level로 유지한다(미설정 시 비강제). 다른 `/features/*` GET은 공용 read 그대로.
 - **CHANGED**: `USER_OPERATIONS` allowlist·OpenAPI(`openapi.json`/`openapi.user.json`)·
   frontend generated type을 새 경로로 재생성. (ADR-005/045 D-1·ADR-048·`docs/rest-api.md`·
@@ -400,7 +400,7 @@
 ### Admin API — offline upload store reuse (2026-06-05)
 
 - **FIXED**: offline upload `create`/`preview`/`validate` 경로가 요청마다
-  `KrtourMapSettings()`와 boto3 S3 client를 새로 만들지 않고,
+  `KorTravelMapSettings()`와 boto3 S3 client를 새로 만들지 않고,
   `request.app.state.offline_upload_store`를 우선 재사용한다.
 - **CHANGED**: cached offline upload store가 만들어진 경우 FastAPI lifespan 종료 시
   내부 S3 client의 `close()`를 호출한다.
@@ -409,7 +409,7 @@
 
 ### Admin API — offline upload state contract (2026-06-05)
 
-- **CHANGED**: offline upload 상태/포맷 집합을 `krtour.map.core.offline_upload_states`
+- **CHANGED**: offline upload 상태/포맷 집합을 `kortravelmap.core.offline_upload_states`
   단일 계약으로 분리해 router, repository, load/validation orchestration이 같은 값을
   사용하게 했다.
 - **CHANGED**: `ops.offline_uploads.state` ORM check constraint도 같은 상태 tuple을
@@ -501,8 +501,8 @@
 
 ### Ops — standalone cold backup runbook (2026-06-05)
 
-- **NEW**: `npm run docker:backup`이 standalone Docker app의 `krtour_map`,
-  `krtour_map_dagster`, RustFS volume을 하나의 backup bundle로 저장한다.
+- **NEW**: `npm run docker:backup`이 standalone Docker app의 `kor_travel_map`,
+  `kor_travel_map_dagster`, RustFS volume을 하나의 backup bundle로 저장한다.
 - **DOCS**: `docs/backup-restore.md`에 산출물 구조, checksum/restore dry-check,
   수동 cold restore 경계를 문서화했다.
 - **TEST**: backup script와 runbook의 3종 백업 대상, 비파괴 범위, npm script 연결을
@@ -525,18 +525,18 @@
 
 ### Map Marker React — dependency metadata hygiene (2026-06-05)
 
-- **FIXED**: `@krtour/map-marker-react`의 `maplibre-vworld` peer dependency를
+- **FIXED**: `@kor-travel-map/map-marker-react`의 `maplibre-vworld` peer dependency를
   `0.1.2`로 고정해 workspace devDependency의 git tag pin(`v0.1.2`)과 맞췄다.
 - **FIXED**: skeleton 패키지의 `npm run test`가 테스트 파일 없음 상태를 성공으로
   처리하도록 `vitest run --passWithNoTests`를 사용한다.
-- **DOCS**: `@krtour/map-marker-react` README의 npm registry 게시 설명을 ADR-043의
+- **DOCS**: `@kor-travel-map/map-marker-react` README의 npm registry 게시 설명을 ADR-043의
   registry 게시 보류 정책에 맞췄다.
 
 ### Admin API/UI — Dagster router hardening (2026-06-05)
 
 - **FIXED**: `GET /ops/dagster/summary`가 더 이상 Dagster `setNuxSeen` mutation을
   호출하지 않는다. NUX 처리는 `POST /ops/dagster/nux-seen`으로 분리했다.
-- **SECURITY**: `KRTOUR_MAP_ADMIN_DAGSTER_ALLOWED_HOSTS` allowlist와 http/https scheme,
+- **SECURITY**: `KOR_TRAVEL_MAP_ADMIN_DAGSTER_ALLOWED_HOSTS` allowlist와 http/https scheme,
   GraphQL path 검증으로 Dagster GraphQL URL SSRF 위험을 줄였다.
 - **CHANGED**: Dagster GraphQL 호출은 FastAPI app state의 공유 `httpx.AsyncClient`를
   사용한다.
@@ -558,7 +558,7 @@
 
 ### Dagster — package dependency hygiene (2026-06-05)
 
-- **FIXED**: `krtour-map-dagster`가 `python-krtour-map==0.2.0-dev`를 명시적으로
+- **FIXED**: `kor-travel-map-dagster`가 `kor-travel-map==0.2.0-dev`를 명시적으로
   요구해 같은 릴리스의 메인 라이브러리와 함께 설치되도록 했다.
 - **FIXED**: Dagster `offline_upload_store` resource가 직접 import하는
   `boto3`/`botocore`를 runtime dependencies에 추가했다.
@@ -583,7 +583,7 @@
 
 ### Admin API — typed error mapping (2026-06-05)
 
-- **FIXED**: feature update request의 kraddr-geo resolver 설정 누락을 substring
+- **FIXED**: feature update request의 kor-travel-geo resolver 설정 누락을 substring
   matching이 아니라 `SigunguResolverUnavailable` 타입으로 `503` 매핑한다.
 - **FIXED**: dedup review merge의 not found/conflict를
   `MergeNotFoundError`/`MergeConflictError` 타입으로 `404`/`409` 매핑한다.
@@ -683,17 +683,17 @@
 ### Ops — Dagster provider resource guard (2026-06-04)
 
 - **NEW**: feature-load provider record key 9개에 기본 guard resource를 등록했다.
-  guard는 provider package, dataset, `KRTOUR_MAP_*` credential env, source env를
+  guard는 provider package, dataset, `KOR_TRAVEL_MAP_*` credential env, source env를
   안내하고 secret 값은 노출하지 않는다.
-- **NEW**: `KrtourMapSettings`에 Dagster provider resource용
-  `KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY`, `KRTOUR_MAP_OPINET_API_KEY`,
-  `KRTOUR_MAP_KREX_EX_API_KEY`, `KRTOUR_MAP_KREX_GO_API_KEY` 설정을 추가했다.
+- **NEW**: `KorTravelMapSettings`에 Dagster provider resource용
+  `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY`, `KOR_TRAVEL_MAP_OPINET_API_KEY`,
+  `KOR_TRAVEL_MAP_KREX_EX_API_KEY`, `KOR_TRAVEL_MAP_KREX_GO_API_KEY` 설정을 추가했다.
 - **DOCS**: 실제 provider public client live fetch wiring은 T-RV-04b 후속으로 남기고,
-  현재 기본 guard는 비실행 상태임을 `krtour-map-dagster` README에 명시했다.
+  현재 기본 guard는 비실행 상태임을 `kor-travel-map-dagster` README에 명시했다.
 
 ### Ops — Dagster resource lifecycle (2026-06-04)
 
-- **FIXED**: `krtour_map_client` Dagster resource가 생성한 SQLAlchemy `AsyncEngine`을
+- **FIXED**: `kor_travel_map_client` Dagster resource가 생성한 SQLAlchemy `AsyncEngine`을
   run/tick 종료 후 `dispose()`하도록 generator resource로 전환했다.
 - **TEST**: fake engine/fake client 기반 resource teardown unit test를 추가했다.
 
@@ -702,9 +702,9 @@
 - **CHANGED**: Docker Dagster runtime을 단일 `dagster dev`에서 `dagster` webserver와
   `dagster-daemon` 서비스로 분리했다.
 - **NEW**: `dagster-db-init` 서비스가 같은 Postgres container 안의
-  `krtour_map_dagster` DB 존재를 보장한다.
+  `kor_travel_map_dagster` DB 존재를 보장한다.
 - **NEW**: `docker/dagster.yaml`을 추가해 Dagster run/event/schedule metadata를
-  `KRTOUR_MAP_DAGSTER_PG_URL` 기반 `dagster-postgres` storage에 저장한다.
+  `KOR_TRAVEL_MAP_DAGSTER_PG_URL` 기반 `dagster-postgres` storage에 저장한다.
 - **TEST**: compose 서비스 분리, Postgres storage 설정, `dagster-postgres` 의존성을
   고정하는 unit test를 추가했다.
 
@@ -720,9 +720,9 @@
 
 ### Admin API — Route gates (2026-06-04)
 
-- **NEW**: `KRTOUR_MAP_ADMIN_ADMIN_ROUTES_ENABLED`와
-  `KRTOUR_MAP_ADMIN_OPS_ROUTES_ENABLED` 설정을 추가했다. unset이면 둘 다
-  `KRTOUR_MAP_ADMIN_FEATURES_ROUTES_ENABLED`를 따른다.
+- **NEW**: `KOR_TRAVEL_MAP_ADMIN_ADMIN_ROUTES_ENABLED`와
+  `KOR_TRAVEL_MAP_ADMIN_OPS_ROUTES_ENABLED` 설정을 추가했다. unset이면 둘 다
+  `KOR_TRAVEL_MAP_ADMIN_FEATURES_ROUTES_ENABLED`를 따른다.
 - **CHANGED**: DB 없는 부팅 검증에서 `features_routes_enabled=False`를 주면
   `/features/*`뿐 아니라 DB 의존 `/admin/*`, `/ops/*`, `/ops/dagster/*` 라우터도 함께
   mount하지 않는다. 필요하면 admin/ops flag를 명시해 별도로 다시 열 수 있다.
@@ -740,7 +740,7 @@
 
 ### Admin API — Offline upload 크기 상한 (2026-06-04)
 
-- **NEW**: `KRTOUR_MAP_OFFLINE_UPLOAD_MAX_BYTES` 설정을 추가했다. 기본값은
+- **NEW**: `KOR_TRAVEL_MAP_OFFLINE_UPLOAD_MAX_BYTES` 설정을 추가했다. 기본값은
   `104857600` bytes(100 MiB)다.
 - **CHANGED**: `POST /admin/offline-uploads`는 설정 상한을 초과한 파일을 `413`으로
   거절한다. `Content-Length` 선차단과 `UploadFile.read(max_bytes + 1)` bounded read를
@@ -750,8 +750,8 @@
 
 ### Ops — Batch DAG + consistency gate (2026-06-04)
 
-- **NEW**: `krtour.map.infra.batch_dag.run_batch_dag_consistency_gate`와
-  `AsyncKrtourMapClient.run_batch_dag_consistency_gate(...)`를 추가했다.
+- **NEW**: `kortravelmap.infra.batch_dag.run_batch_dag_consistency_gate`와
+  `AsyncKorTravelMapClient.run_batch_dag_consistency_gate(...)`를 추가했다.
 - **NEW**: Dagster `full_load_batch_consistency_gate` job을 추가했다. 기존 실제 source
   load import job을 root batch에 연결하고, child `done` 확인 뒤 consistency gate를
   실행한다.
@@ -781,7 +781,7 @@
   import-linter, OpenAPI drift, frontend `type-check`/`lint`/`build`, React Doctor를
   확인했다.
 
-### Admin UI — Offline CSV/TSV validation + kraddr-geo bjd 보강 (2026-06-04)
+### Admin UI — Offline CSV/TSV validation + kor-travel-geo bjd 보강 (2026-06-04)
 
 - **NEW**: `GET /admin/offline-uploads/{upload_id}/preview`,
   `POST /admin/offline-uploads/{upload_id}/validate`,
@@ -790,7 +790,7 @@
   issue, validation job payload 저장, load 전 validation gate를 추가했다.
 - **NEW**: admin frontend `/admin/offline-uploads`에 CSV/TSV mapping/preview/validation
   panel을 추가했다.
-- **CHANGED**: `bjd_code`가 없는 offline/provider 행은 kraddr-geo REST v2 geocode 또는
+- **CHANGED**: `bjd_code`가 없는 offline/provider 행은 kor-travel-geo REST v2 geocode 또는
   reverse 결과로 법정동코드를 보강한다. resolver가 없거나 결과가 없으면 validation
   issue로 남긴다.
 - **CHANGED**: Dagster `offline_upload_load`가 validation job의 column mapping을
@@ -822,12 +822,12 @@
 
 ### 운영 — RustFS offline upload store wiring (2026-06-03)
 
-- **NEW**: `krtour.map.infra.file_store.S3ObjectStore`를 추가했다. boto3 호환
+- **NEW**: `kortravelmap.infra.file_store.S3ObjectStore`를 추가했다. boto3 호환
   S3 client를 async wrapper로 감싸고, 읽기/쓰기 실패는 `FileStoreError`로 표준화한다.
-- **NEW**: `krtour.map_dagster.resources.offline_upload_store_resource`를 추가했다.
-  Dagster `offline_upload_load` job이 `KRTOUR_MAP_OBJECT_STORE_*`와
-  `KRTOUR_MAP_OFFLINE_UPLOAD_BUCKET` 설정으로 RustFS/S3 호환 bucket을 읽는다.
-- **CHANGED**: `KrtourMapSettings`와 `.env.example`의 object store field/env 이름을
+- **NEW**: `kortravelmap.dagster.resources.offline_upload_store_resource`를 추가했다.
+  Dagster `offline_upload_load` job이 `KOR_TRAVEL_MAP_OBJECT_STORE_*`와
+  `KOR_TRAVEL_MAP_OFFLINE_UPLOAD_BUCKET` 설정으로 RustFS/S3 호환 bucket을 읽는다.
+- **CHANGED**: `KorTravelMapSettings`와 `.env.example`의 object store field/env 이름을
   정렬했다. offline upload bucket 기본값은 `krtour-uploads`다.
 - **CHANGED**: Docker compose stack에 RustFS API `12101`, console `12105`,
   `rustfs-init` bucket 생성 경로를 추가했다.
@@ -838,7 +838,7 @@
 
 - **NEW**: `ops.offline_uploads` 테이블과 repository를 추가했다. RustFS 등 객체
   저장소의 원본 파일 메타데이터를 보존하고 validation/load `import_jobs`와 연결한다.
-- **NEW**: `AsyncKrtourMapClient.run_offline_upload_load_job()`을 추가했다. 업로드
+- **NEW**: `AsyncKorTravelMapClient.run_offline_upload_load_job()`을 추가했다. 업로드
   원본 파일을 store resource에서 읽어 size/checksum을 검증하고 JSON/JSONL
   `FeatureBundle`로 파싱한 뒤 PostGIS에 적재한다.
 - **NEW**: `offline_upload_load` Dagster job을 추가했다. `upload_id` config와
@@ -852,7 +852,7 @@
 - **NEW**: `consistency_dedup_refresh` Dagster job을 추가했다. DB에 적재된
   provider/dataset scope를 pair/sibling 방식으로 다시 읽어 dedup 후보 큐를 갱신한 뒤
   F1~F4 consistency report를 저장한다.
-- **NEW**: `AsyncKrtourMapClient`에 DB 기준 dedup pair/sibling refresh와 consistency
+- **NEW**: `AsyncKorTravelMapClient`에 DB 기준 dedup pair/sibling refresh와 consistency
   report 실행 메서드를 추가했다.
 - **NEW**: `consistency_dedup_refresh_daily_schedule`을 추가했다. KST `45 5 * * *`,
   기본 status는 `STOPPED`다.
@@ -877,7 +877,7 @@
 - **CHANGED**: `scripts/load-env.sh`의 기본 CORS origin에 WSL IP 기반
   `http://<WSL-IP>:12305`를 포함해, Windows localhost relay가 죽었을 때도
   `E2E_BASE_URL` WSL IP fallback으로 브라우저 검증이 가능하게 했다.
-- **CHANGED**: `krtour.map_admin.app`이 설정된 CORS origin에 대해 응답과 preflight
+- **CHANGED**: `kortravelmap.admin.app`이 설정된 CORS origin에 대해 응답과 preflight
   헤더를 한 번 더 보강해 WSL IP fallback 경로에서도 frontend fetch가 막히지 않게 했다.
 - **TEST**: Playwright e2e를 새 home dashboard와 신규 admin/ops route smoke 기준으로
   갱신했다.
@@ -899,7 +899,7 @@
 
 ### 운영 — Dagster provider schedules (2026-06-03)
 
-- **NEW**: `packages/krtour-map-dagster`에 Feature 적재 asset 9개의 KST schedule과
+- **NEW**: `packages/kor-travel-map-dagster`에 Feature 적재 asset 9개의 KST schedule과
   asset job을 등록했다.
 - **CHANGED**: 모든 provider schedule은 `execution_timezone="Asia/Seoul"`을 사용하고,
   외부 API 호출이 몰리지 않도록 분/요일을 분산한다. 기본 status는 운영자가 명시적으로
@@ -909,10 +909,10 @@
 
 ### 운영 — OpenAPI admin/user 이원화 (2026-06-03)
 
-- **NEW**: `packages/krtour-map-admin/openapi.user.json`을 추가했다. TripMate/user
+- **NEW**: `packages/kor-travel-map-admin/openapi.user.json`을 추가했다. TripMate/user
   client가 사용하는 `/features/*`, `/tripmate/features/batch`,
   `/admin/feature-update-requests` 일부 method만 포함한다.
-- **CHANGED**: `packages/krtour-map-admin/scripts/export_openapi.py`에
+- **CHANGED**: `packages/kor-travel-map-admin/scripts/export_openapi.py`에
   `--profile admin|user|all`과 `--user-output`을 추가했다. 기본 admin export는 기존
   `openapi.json` 경로/동작을 유지한다.
 - **CHANGED**: `.github/workflows/openapi.yml` drift gate가
@@ -922,7 +922,7 @@
 
 ### 운영 — TripMate/public feature read API (2026-06-03)
 
-- **NEW**: `krtour-map-admin`에 `GET /features/in-bounds`,
+- **NEW**: `kor-travel-map-admin`에 `GET /features/in-bounds`,
   `GET /features/search`, `POST /tripmate/features/batch`를 추가했다.
 - **CHANGED**: `GET /features/{feature_id}`는 public envelope
   `{data, meta.duration_ms}` 응답으로 전환하고 `updated_at`을 포함한다. 기존
@@ -930,7 +930,7 @@
 - **CHANGED**: `feature_repo.features_in_bbox`에 category filter를 추가하고,
   `get_feature_rows_by_ids`, `search_features`를 추가했다. 검색은 `pg_trgm`
   `%` 연산자와 transaction-local similarity threshold를 사용한다.
-- **CHANGED**: `packages/krtour-map-admin/openapi.json`을 T-207e endpoint 기준으로
+- **CHANGED**: `packages/kor-travel-map-admin/openapi.json`을 T-207e endpoint 기준으로
   갱신했다.
 - **TEST**: `/features`/`/tripmate` 라우터 unit test, feature repo cursor/validation
   unit test, PostGIS batch/search/bbox 통합 테스트, frontend lint/type-check를
@@ -938,19 +938,19 @@
 
 ### 운영 — `/ops/*` consistency/jobs/metrics API (2026-06-03)
 
-- **NEW**: `krtour-map-admin`에 `GET /ops/metrics`, `GET /ops/import-jobs`,
+- **NEW**: `kor-travel-map-admin`에 `GET /ops/metrics`, `GET /ops/import-jobs`,
   `GET /ops/import-jobs/{job_id}`, `GET /ops/consistency/reports`,
   `GET /ops/consistency/issues`를 추가했다.
 - **NEW**: `infra.ops_repo`를 추가했다. `ops.import_jobs`,
   `ops.feature_consistency_reports`, `ops.data_integrity_violations`를 read-only
   keyset cursor로 조회하고, 열린 issue 집계를 제공한다.
-- **CHANGED**: `packages/krtour-map-admin/openapi.json`을 T-207d endpoint 기준으로
+- **CHANGED**: `packages/kor-travel-map-admin/openapi.json`을 T-207d endpoint 기준으로
   갱신했다.
 - **TEST**: `/ops` 라우터 unit test와 PostGIS ops repository 통합 테스트를 추가했다.
 
 ### 운영 — Admin feature review/deactivate API (2026-06-03)
 
-- **NEW**: `krtour-map-admin`에 `GET /admin/features`,
+- **NEW**: `kor-travel-map-admin`에 `GET /admin/features`,
   `POST /admin/features/{feature_id}/deactivate`, `GET/PATCH /admin/dedup-review`를
   추가했다.
 - **NEW**: `alembic 0010`으로 `ops.feature_overrides`를 추가했다. active
@@ -963,20 +963,20 @@
 
 ### 운영 — Dagster feature update sensor (2026-06-03)
 
-- **NEW**: `krtour-map-dagster`에 `feature_update_request_queue_sensor`와
+- **NEW**: `kor-travel-map-dagster`에 `feature_update_request_queue_sensor`와
   `feature_update_request_worker` job을 추가했다. sensor는 queued request를 상태 변경
   없이 peek한 뒤 request id를 Dagster `RunRequest` config/tag로 전달한다.
 - **NEW**: `feature_update_request_failure_sensor`를 추가했다. worker run 실패 시
   request/import job 실패 전이를 보강하고, 선택 notifier resource로 알림 payload를
   전달한다.
-- **CHANGED**: `AsyncKrtourMapClient`와 `infra.feature_update_repo`에
+- **CHANGED**: `AsyncKorTravelMapClient`와 `infra.feature_update_repo`에
   `peek_next_update_request`를 추가하고, client에 `fail_update_request`를 추가했다.
 - **TEST**: Dagster sensor/job unit test와 feature update repo/client PostGIS 통합
   테스트를 추가했다.
 
 ### 운영 — POI/cache target admin API (2026-06-03)
 
-- **NEW**: `krtour-map-admin`에 `PUT/GET/DELETE /admin/poi-cache-targets`와
+- **NEW**: `kor-travel-map-admin`에 `PUT/GET/DELETE /admin/poi-cache-targets`와
   `GET /features/nearby/by-target`를 추가했다. 외부 앱 POI는
   `external_system + target_key + 좌표 + radius`로 식별한다.
 - **NEW**: `feature_repo.features_nearby_poi_cache_target`를 추가했다. target의
@@ -987,11 +987,11 @@
 
 ### 운영 — Feature update admin API (2026-06-03)
 
-- **NEW**: `krtour-map-admin`에 `POST/GET /admin/feature-update-requests`,
+- **NEW**: `kor-travel-map-admin`에 `POST/GET /admin/feature-update-requests`,
   `GET /admin/feature-update-requests/{request_id}`,
   `POST /admin/feature-update-requests/{request_id}/cancel`,
   `POST /admin/feature-update-requests/{request_id}/run-now` 라우터를 추가했다.
-- **CHANGED**: `list_update_requests`와 `AsyncKrtourMapClient.list_update_requests`가
+- **CHANGED**: `list_update_requests`와 `AsyncKorTravelMapClient.list_update_requests`가
   `scope_type`, `provider`, `dataset_key`, `created_from`, `created_to` 필터를 받는다.
 - **TEST**: admin 라우터 unit test, OpenAPI export 갱신, provider/dataset JSONB 필터
   PostGIS 통합 테스트를 추가했다.
@@ -1004,7 +1004,7 @@
 - **NEW**: `cache_target_keys` scope resolver를 추가했다. active POI/cache target
   주변 feature를 PostGIS로 계산하고 missing/deleted/disabled key를 `matched_scope`에
   기록한다.
-- **CHANGED**: `AsyncKrtourMapClient`에
+- **CHANGED**: `AsyncKorTravelMapClient`에
   `execute_next_feature_update_request`와 `execute_feature_update_request`를 추가했다.
   실제 provider 호출은 runner 주입형이며 Dagster sensor 연결은 후속 T-208e에서
   진행한다.
@@ -1024,11 +1024,11 @@
 
 ### 운영 — Feature update client 표면 (2026-06-03)
 
-- **NEW**: `AsyncKrtourMapClient`에
+- **NEW**: `AsyncKorTravelMapClient`에
   `enqueue_feature_update_request`, `get_update_request`, `list_update_requests`,
   `cancel_update_request`를 추가했다. Dry-run은 DB write 없이 preview를 반환하고,
   실제 enqueue/cancel은 client가 transaction 경계를 소유한다.
-- **CHANGED**: `from krtour.map import AsyncKrtourMapClient` top-level import를 실제
+- **CHANGED**: `from kortravelmap import AsyncKorTravelMapClient` top-level import를 실제
   public export로 맞추고, TripMate 직접 import 설명을 ADR-045 OpenAPI 운영 모델
   기준으로 정정했다.
 - **DOCS**: RustFS 로컬 표준 포트를 S3 API `12101`, console `12105`로 정리했다.
@@ -1040,14 +1040,14 @@
   지원한다.
 - **CHANGED**: 실제 실행 request 생성 시 `ops.import_jobs` row를 같은 transaction에
   만들고, claim/start/finish/cancel 상태 전이를 request와 import job에 함께 반영한다.
-- **DOCS**: kraddr-geo REST API 로컬 포트 기준을 `http://127.0.0.1:12201`로 정정했다.
+- **DOCS**: kor-travel-geo REST API 로컬 포트 기준을 `http://127.0.0.1:12201`로 정정했다.
 
 ### 운영 — Feature update scope resolver (2026-06-03)
 
 - **NEW**: `infra.scope_repo`를 추가했다. `feature_ids`, `center_radius`, `bbox`,
   `sigungu_by_radius`, `provider_dataset` scope를 feature 집합과 `matched_scope`
   payload로 해석한다.
-- **CHANGED**: `sigungu_by_radius` 해석은 `infra`가 kraddr-geo를 직접 import하지 않고
+- **CHANGED**: `sigungu_by_radius` 해석은 `infra`가 kor-travel-geo를 직접 import하지 않고
   주입받은 async resolver의 5자리 `sigungu_code` 결과를 사용한다.
 
 ### 운영 — Feature update request 큐 스키마 (2026-06-03)
@@ -1055,8 +1055,8 @@
 - **NEW**: `ops.feature_update_requests` 테이블과 `FeatureUpdateRequestRow` 매핑을
   추가했다. Admin/OpenAPI feature update request를 `ops.import_jobs`와 Dagster run에
   연결하기 위한 기반 스키마다.
-- **DOCS**: `sigungu_by_radius` scope 설명을 kraddr-geo REST v2
-  `/v2/regions/within-radius` 기준으로 정리했다. krtour-map 내부에 행정경계 테이블을
+- **DOCS**: `sigungu_by_radius` scope 설명을 kor-travel-geo REST v2
+  `/v2/regions/within-radius` 기준으로 정리했다. kor-travel-map 내부에 행정경계 테이블을
   만들지 않는다.
 
 ### Admin UI — Dagster 운영 화면 (2026-06-02)
@@ -1077,43 +1077,43 @@
 - **NEW**: `docker-compose.yml`과 `docker/{api,frontend,dagster}.Dockerfile`을 추가했다.
   독립 PostGIS, API, admin UI, Dagster를 같은 compose에서 기동한다.
 - **CHANGED**: Docker API 컨테이너는 `.env`의 로컬 Dagster URL 대신
-  `KRTOUR_MAP_DOCKER_ADMIN_DAGSTER_URL` 기본값(`http://dagster:12302`)을 내부
-  `KRTOUR_MAP_ADMIN_DAGSTER_URL`로 사용한다.
+  `KOR_TRAVEL_MAP_DOCKER_ADMIN_DAGSTER_URL` 기본값(`http://dagster:12302`)을 내부
+  `KOR_TRAVEL_MAP_ADMIN_DAGSTER_URL`로 사용한다.
 - **CHANGED**: 로컬/standalone 고정 포트를 API `12301`, admin UI `12305`, Dagster
   `12302`으로 표준화했다.
-- **NEW**: `.env`의 provider service key를 `KRTOUR_MAP_ADMIN_*`/`NEXT_PUBLIC_*`
+- **NEW**: `.env`의 provider service key를 `KOR_TRAVEL_MAP_ADMIN_*`/`NEXT_PUBLIC_*`
   환경변수로 매핑하는 `scripts/load-env.sh`와 포트 종료/로컬 stack/Docker 기동
   스크립트를 추가했다.
 
 ### Admin UI — frontend stack 전환 + geocoding admin 표면 제거 (2026-06-02)
 
-- **CHANGED**: `krtour-map-admin` frontend를 문서화된 stack 기준으로 재정렬했다.
+- **CHANGED**: `kor-travel-map-admin` frontend를 문서화된 stack 기준으로 재정렬했다.
   Next.js 16 + React 19 + TanStack Query + Zustand + Zod + React Hook Form +
   shadcn/ui + `maplibre-vworld-js`를 기준으로 홈/ETL preview/Feature 지도 화면을
   구성한다.
 - **REMOVED**: geocoding 전용 admin/debug 라우터, frontend `/geocoding` 화면,
   관련 e2e/router/live 테스트를 제거했다. geocoding 자체 디버깅은
-  `python-kraddr-geo` 프로젝트 책임으로 둔다.
-- **CHANGED**: `packages/krtour-map-admin/openapi.json`에서 `/debug/geocoding/*` 경로와
+  `kor-travel-geo` 프로젝트 책임으로 둔다.
+- **CHANGED**: `packages/kor-travel-map-admin/openapi.json`에서 `/debug/geocoding/*` 경로와
   `GeocodingHealthResponse` schema를 제거했다.
 - **DOCS**: React Doctor 실행/검토 기준에 맞춰 `doctor` script와
   `doctor.config.json`을 추가하고, 실제 경고를 검토해 앱 metadata, MapLibre cleanup,
   정렬/폼 오류 표시 코드를 개선했다.
 
-### 문서 — ADR-046 정본 전환 + kraddr-geo v2 주소 정책 (2026-06-02)
+### 문서 — ADR-046 정본 전환 + kor-travel-geo v2 주소 정책 (2026-06-02)
 
-- ADR-045 이행 시 legacy 호환 shim을 남기지 않고 `krtour-map-admin`, 독립 DB,
+- ADR-045 이행 시 legacy 호환 shim을 남기지 않고 `kor-travel-map-admin`, 독립 DB,
   독립 Dagster, OpenAPI 연동을 정본으로 삼는 ADR-046을 추가했다.
-- provider 주소/좌표 정본을 kraddr-geo REST v2 `POST /v2/reverse`,
+- provider 주소/좌표 정본을 kor-travel-geo REST v2 `POST /v2/reverse`,
   `POST /v2/geocode` 결과로 통일하고, provider 원문 주소는 provenance로 보존하는
   정책을 문서화했다.
 - 주소/좌표 매칭 실패, 결측, reverse/geocode 실패를 admin UI `/admin/issues`에서
-  재시도·수동 수정·kraddr-geo 주소 채택·ignore/reopen 할 수 있도록 OpenAPI/UI
+  재시도·수동 수정·kor-travel-geo 주소 채택·ignore/reopen 할 수 있도록 OpenAPI/UI
   사양을 보강했다.
 
 ### 문서 — ADR-045 독립 프로그램/OpenAPI 전환 (2026-06-01)
 
-- krtour-map 운영 모델을 Docker 독립 프로그램 + 독립 PostgreSQL/PostGIS DB + 독립
+- kor-travel-map 운영 모델을 Docker 독립 프로그램 + 독립 PostgreSQL/PostGIS DB + 독립
   Dagster + TripMate OpenAPI 연동으로 전환하는 ADR-045를 추가했다.
 - Admin 우선 OpenAPI, Dagster feature update request, POI/cache target 기반 주변
   feature 캐시 갱신, provider refresh policy/rate limit, frontend React Doctor 필수
@@ -1123,11 +1123,11 @@
 
 - **CHANGED**: coverage 게이트 `fail_under` 75 → **80** 상향 (ADR-032 Sprint 4 목표
   도달, 실측 94.12%). 모든 tier 충족(core/infra/providers/전체 ≥ 목표). Sprint 4b 종료.
-- **NEW**: Place 전화번호 보강(`krtour.map.enrichment`, Sprint 4b 백그라운드 시작) —
+- **NEW**: Place 전화번호 보강(`kortravelmap.enrichment`, Sprint 4b 백그라운드 시작) —
   전화번호 없는 MOIS place 후보 발굴(`find_place_phone_candidates`) + 외부 lookup
   결과 보강(`apply_place_phone_enrichment` — `detail.phones` 정규화·dedup·max3 갱신 +
   `source_links(role='enrichment')` 이력). 외부 API(kakao/naver/google) 호출은 호출자
-  책임(ADR-006 — 결과 주입). `AsyncKrtourMapClient.find_place_phone_candidates` /
+  책임(ADR-006 — 결과 주입). `AsyncKorTravelMapClient.find_place_phone_candidates` /
   `enrich_place_phone` + `infra.feature_repo.{find_place_features_without_phone,
   set_feature_phones}`.
 - **NEW**: ADR-033 **F4** 정합성 검사 — `infra.consistency`에 dedup 백로그 baseline
@@ -1137,7 +1137,7 @@
   적재 차단 없음, Phase 1). F1~F3(행별 정적 SQL)과 달리 임계 초과 집계 케이스.
 - **NEW**: dedup 운영 FP 측정 — `infra.status_repo.dedup_fp_stats`(dedup_review_queue
   status별 카운트 → confirmed=merged+accepted / FP=rejected / precision / fp_rate;
-  ignored·pending 제외) + `krtour-map status` 출력에 `dedup FP(운영)` 라인 추가.
+  ignored·pending 제외) + `ktmctl status` 출력에 `dedup FP(운영)` 라인 추가.
   운영자가 `dedup-merge`/reject로 큐를 해소하면 실 FP율이 자동 집계된다(검토 완료
   후보 0이면 "검토 완료 후보 없음"). ADR-016 dedup-fp 리포트의 후속 운영 측정 도구.
 - **NEW**: MOIS Step D on-demand 상세 — debug-ui `GET /debug/mois-license/{license_id}`.
@@ -1146,22 +1146,22 @@
   `license_id` = `source_entity_id`(`{slug}::{mng_no}`). 신규
   `infra.get_primary_source_detail`(읽기 전용 단건 조회) + `routers/mois_detail`.
   미적재 시 404. `features_routes_enabled` + `debug_routes_enabled` gate.
-- **NEW**: MOIS Step C 폐업/취소 처리 — `krtour-map import mois <file> --mode closed
+- **NEW**: MOIS Step C 폐업/취소 처리 — `ktmctl import mois <file> --mode closed
   --cursor <값>`. provider가 `closed`/`cancelled`로 통지한 인허가 record의 대응
   feature를 `status='inactive'`+`deleted_at`으로 전환한다(ADR-017 — place는 무기한
   유지, status만 inactive; 새 feature 생성 없음). `infra.inactivate_features_by_
   source_entity_ids`(soft-delete inverse) + `mois.close_mois_license_features` /
   `run_mois_license_closed_job`(advisory lock + import_jobs + closed dataset cursor)
-  + `AsyncKrtourMapClient` 메서드. `--cursor` 미지정 시 exit 2.
-- **NEW**: MOIS Step B 증분 적재 — `krtour-map import mois <file> --mode incremental
+  + `AsyncKorTravelMapClient` 메서드. `--cursor` 미지정 시 exit 2.
+- **NEW**: MOIS Step B 증분 적재 — `ktmctl import mois <file> --mode incremental
   --cursor <값>`. 변경분만 upsert(snapshot prune 없음)하고 성공 시
   `provider_sync.provider_sync_state`의 cursor(`{"last_modified_date": …}`)를 전진
   시킨다(`--sync-scope`로 scope 분리). 신규 `infra/sync_state_repo`
   (get/record_success/record_failure) + `mois.run_mois_license_incremental_job`
-  (advisory lock + import_jobs + cursor) + `AsyncKrtourMapClient` 메서드. `--cursor`
+  (advisory lock + import_jobs + cursor) + `AsyncKorTravelMapClient` 메서드. `--cursor`
   미지정 시 exit 2. (Step C 폐업 처리는 별도 — 증분은 사라진 record를 비활성화하지
   않는다.)
-- **NEW**: `krtour-map dedup-merge <review_key>` — dedup 검토 큐 후보 1쌍 수동 병합
+- **NEW**: `ktmctl dedup-merge <review_key>` — dedup 검토 큐 후보 1쌍 수동 병합
   (ADR-016). master를 `select_master`(좌표 보유 → `updated_at` 최신 → 원천 우선순위
   행안부>TourAPI>사용자)로 자동 선정하고, loser의 `source_links`를 master로 재지정
   (충돌 키는 drop), loser feature를 soft-delete(`status='deleted'`), 신규
@@ -1170,13 +1170,13 @@
   skip(exit 3); 미존재/이미 검토된 review_key는 exit 2. `--merged-by`/`--reason`
   옵션. (SPRINT-4 §2.8의 예시 인자 `<feature_id>`는 후보쌍을 유일 식별하는
   `<review_key>`로 구체화.)
-- **NEW**: `krtour-map import mois <records-file>` — MOIS 인허가 Step A bulk 적재
+- **NEW**: `ktmctl import mois <records-file>` — MOIS 인허가 Step A bulk 적재
   CLI 명령. provider가 export한 provider-neutral **NDJSON snapshot**(한 줄당 JSON
   object)을 record source로 읽어(ADR-006 — provider 라이브러리 미import)
   `run_mois_license_bulk_job`으로 적재한다. `import:python-mois-api:<dataset>`
   advisory lock 단일 워커 직렬화(ADR-039) + `import_jobs` 추적(ADR-011); 다른
   워커가 적재 중이면 skip(exit 3). `--geocoder-url`로 좌표 → bjd_code 역지오코딩
-  보강(kraddr-geo REST) 선택. `--dataset-key`/`--batch-size`/`--source-checksum`
+  보강(kor-travel-geo REST) 선택. `--dataset-key`/`--batch-size`/`--source-checksum`
   옵션. (`cli/records.py` NDJSON 리더 + `cli/main.py` import 서브명령.)
 ### Sprint 3 — DB 적재 오케스트레이션 + dedup + geocoding REST + e2e (2026-05-29~30)
 
@@ -1185,8 +1185,8 @@
   한국어 사후 상세 리뷰를 등록. 당시 문서에서는 구 geocoding REST address endpoint와
   서비스 메타 버전 2.0 표현을 분리하고, accepted ADR을 proposed로 부르던 문구와
   `PlaceCoordinate` 잔존 예시, `docs/tasks.md` 현재 상태 drift를 정정.
-- **PR#114 — kraddr-geo 최신 로컬 포트 정합 + 라이브 검증 보강**:
-  `python-kraddr-geo` 최신 로컬 정책(`docs/ports.md`)에 맞춰 debug-ui
+- **PR#114 — kor-travel-geo 최신 로컬 포트 정합 + 라이브 검증 보강**:
+  `kor-travel-geo` 최신 로컬 정책(`docs/ports.md`)에 맞춰 debug-ui
   geocoding 기본 base URL과 live 테스트 기본값을 `http://127.0.0.1:8888`로
   고정. frontend 의존도 로컬 최신 `maplibre-vworld-js#v0.1.2` + Next.js 16
   기준으로 올리고 `next lint` 제거에 맞춰 ESLint CLI flat config를 추가.
@@ -1209,15 +1209,15 @@
   + native select nth 선택자). `docs/reports/debug-ui-e2e-2026-05-29.md`에
   backend 5경로 실 HTTP 통과 증거 + 사람용 런북.
 - **PR#90 — geocoding python API → REST address API 전환** (#123, 이후 v2로 supersede):
-  `krtour.map.geocoding`을 in-process `AsyncAddressClient` 가정에서
-  **kraddr-geo REST address API**로 재작성. structural Protocol을 실제
+  `kortravelmap.geocoding`을 in-process `AsyncAddressClient` 가정에서
+  **kor-travel-geo REST address API**로 재작성. structural Protocol을 실제
   `ReverseResponse`/`GeocodeResponse`/`AddressStructure`(vworld
   `level4LC=bjd_cd` 등)/`GeocodeExtension`으로 교체. 순수 변환
   `reverse_response_to_address` / `geocode_response_to_coordinate` + 새
-  `KraddrGeoRestClient`(httpx 주입, TYPE_CHECKING-only import — 메인 패키지
+  `KorTravelGeoRestClient`(httpx 주입, TYPE_CHECKING-only import — 메인 패키지
   런타임 httpx 의존 X). 소비자 계약(`ReverseGeocoder` 등) 유지 →
-  provider 무영향. `KRTOUR_MAP_KRADDR_GEO_BASE_URL` 설정 추가.
-- **PR#89 — `AsyncKrtourMapClient` 적재/dedup 오케스트레이션** (#122):
+  provider 무영향. `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_BASE_URL` 설정 추가.
+- **PR#89 — `AsyncKorTravelMapClient` 적재/dedup 오케스트레이션** (#122):
   placeholder였던 라이브러리 진입점에 transaction 소유 메서드 구현 —
   `load_feature_bundles`(`infra.load_bundles` 래핑), `sync_dedup_candidates`
   (`core.dedup` + `infra.enqueue_dedup_candidates`), 읽기
@@ -1272,7 +1272,7 @@
     `coord_5179` STORED generated column + 10 indexes incl. GiST/GIN partial)
     + source_records (UNIQUE 5-tuple + 4 indexes incl. BRIN) + source_links
     (FK CASCADE/RESTRICT + 3 indexes) + provider_sync_state.
-  - `src/krtour/map/infra/models.py` — `Base` (naming convention) + 4 row class
+  - `src/kortravelmap/infra/models.py` — `Base` (naming convention) + 4 row class
     (FeatureRow / SourceRecordRow / SourceLinkRow / ProviderSyncStateRow).
     Geoalchemy2 Geometry(POINT 4326/5179, GEOMETRY 4326) + CheckConstraint
     kind/status/coord_pair.
@@ -1287,7 +1287,7 @@
 
 - **PR#26 — review P0-4 ID helpers + SourceRecord/Link/Bundle DTO**:
   Sprint 2 첫 provider 변환 함수 직전 필수 묶음.
-  - `src/krtour/map/core/ids.py` 확장:
+  - `src/kortravelmap/core/ids.py` 확장:
     - `make_source_record_key(*, provider, dataset_key, source_entity_type,
       source_entity_id, raw_payload_hash) -> str` — `sr_{sha1[:20]}` 포맷
       (`docs/data-model.md §11`).
@@ -1298,13 +1298,13 @@
       거부한다. 1~64 hex char 길이 조정 가능.
     - `SOURCE_RECORD_KEY_HASH_LENGTH = 20`, `PAYLOAD_HASH_DEFAULT_LENGTH = 32`
       constants.
-  - `src/krtour/map/dto/source.py` 신설 — `SourceRecord` (provider raw payload
+  - `src/kortravelmap/dto/source.py` 신설 — `SourceRecord` (provider raw payload
     추적, 고유성 `(provider, dataset_key, source_entity_type, source_entity_id,
     raw_payload_hash)`) + `SourceLink` (Feature ↔ Source 1:N 매핑,
     `source_role`/`match_method`/`confidence`/`is_primary_source`).
     DB NOT NULL 계약에 맞춰 `source_record_key`/`fetched_at` 필수,
     `raw_data` 기본 `{}`. datetime aware validator (ADR-019).
-  - `src/krtour/map/dto/bundle.py` 신설 — `FeatureBundle` (feature +
+  - `src/kortravelmap/dto/bundle.py` 신설 — `FeatureBundle` (feature +
     source_record + source_link 3개 필수). `source_link.feature_id`와
     `source_link.source_record_key` 교차 검증. weather/price/file_sources 필드는
     Sprint 2 DTO 추가와 함께 enable.
@@ -1350,27 +1350,27 @@
     PostGIS, ADR-007) + coverage XML, Python 3.11/3.12/3.13 matrix +
     `concurrency` group으로 이전 run 자동 cancel.
   - `.github/workflows/lint.yml` — ruff check + mypy --strict
-    (`krtour.map` 전체) + import-linter (4 계약).
+    (`kortravelmap` 전체) + import-linter (4 계약).
   - `.github/workflows/openapi.yml` — ADR-031 drift gate. Sprint 1은
     `continue-on-error: true` (앱 모듈 미존재) — Sprint 2 첫 라우터 PR
     에서 제거.
   - `tests/lint/test_import_linter.py` — pyproject.toml의 4 계약 wrap
     (subprocess로 `lint-imports` 실행). 미설치 시 skip.
   - `pyproject.toml`: `include_external_packages = true` (외부 forbidden
-    검증 활성화) + `layers`에서 `krtour.map.cli` 제거 (모듈 미존재).
+    검증 활성화) + `layers`에서 `kortravelmap.cli` 제거 (모듈 미존재).
   - **ADR-002 위반 1건 실 해소** — `KST`/`kst_now` 정의를
     `core/types.py` → `dto/_time.py`로 이전 (dto/feature.py가 core를
-    역참조하던 위반 해소). 공개 API `from krtour.map.core import kst_now`는
+    역참조하던 위반 해소). 공개 API `from kortravelmap.core import kst_now`는
     그대로 (core/types.py shim).
   - `tests/unit/test_dto_*.py` + `test_category.py` —
     `pytest.raises(Exception)` → 구체 예외 type (B017/PT011 해소).
   - **125 passed, 10 skipped** (전체) + ruff/mypy/import-linter all green.
-- **PR#21 — `src/krtour/map/infra/` skeleton (crs + db + testcontainers)**:
-  - `src/krtour/map/infra/crs.py` — `pyproj.Transformer` singleton
+- **PR#21 — `src/kortravelmap/infra/` skeleton (crs + db + testcontainers)**:
+  - `src/kortravelmap/infra/crs.py` — `pyproj.Transformer` singleton
     (`@functools.cache`, ADR-030 narrow 예외): `transformer_4326_to_5179` /
     `transformer_5179_to_4326` + `project_to_5179` / `project_to_4326`
     + `EPSG_WGS84` / `EPSG_UTM_K`. `always_xy=True` 강제.
-  - `src/krtour/map/infra/db.py` — `make_async_engine` (SQLAlchemy 2
+  - `src/kortravelmap/infra/db.py` — `make_async_engine` (SQLAlchemy 2
     AsyncEngine + asyncpg) + `make_async_session_factory` +
     `normalize_async_dsn` (psycopg2/psycopg/postgres → asyncpg 통일).
     `SecretStr` 자동 처리.
@@ -1386,12 +1386,12 @@
     (asyncpg 미설치 환경 4건 자동 skip).
   - `pyproject.toml`: `pyproj>=3.6` 본 의존 추가.
   - **124 passed, 10 skipped** (전체 suite).
-- **PR#20 — `src/krtour/map/core/` 예외 계층 + ADR-009 `make_feature_id`**:
-  - `src/krtour/map/core/exceptions.py` — `KrtourMapError` 베이스 + 7 도메인
+- **PR#20 — `src/kortravelmap/core/` 예외 계층 + ADR-009 `make_feature_id`**:
+  - `src/kortravelmap/core/exceptions.py` — `KorTravelMapError` 베이스 + 7 도메인
     예외 (`ValidationError`/`FeatureNotFoundError`/`SourceRecordNotFoundError`/
     `DuplicateFeatureError`/`ImportJobConflictError`/`ProviderError`/
     `FileStoreError`). HTTP 매핑은 `docs/debug-ui-package.md §6.4`.
-  - `src/krtour/map/core/ids.py` — `make_feature_id(*, bjd_code, kind,
+  - `src/kortravelmap/core/ids.py` — `make_feature_id(*, bjd_code, kind,
     category, source_type, source_natural_key, content_hash=None)`. 포맷
     `f_{bjd or 'global'}_{kind[0]}_{sha1[:16]}` (ADR-009 SPEC V8 D-2).
     `usedforsecurity=False` 명시. `|` 구분자 / 빈 문자열 검증.
@@ -1401,7 +1401,7 @@
     2) 통합 export, 총 12 공개 식별자.
   - `tests/unit/test_exceptions.py` 7 case + `tests/unit/test_ids.py` 35
     case (parametrize 포함). **72 passed** (전체 suite).
-- **PR#19 — `src/krtour/map/dto/` Feature + 5 detail + ADR-027 적용**:
+- **PR#19 — `src/kortravelmap/dto/` Feature + 5 detail + ADR-027 적용**:
   - `core/types.py` — `KST` / `kst_now()` (ADR-019)
   - `dto/_enums.py` — FeatureKind 7 / FeatureStatus 6 / SourceRole 8
   - `dto/coordinate.py` — Coordinate (Korea bounds, frozen)
@@ -1418,7 +1418,7 @@
   - `dto/__init__.py` — 38 공개 식별자 re-export
   - `tests/unit/test_dto_{notice,area,feature}.py` (27 cases)
   - **62 pytest passed** (전체 test suite)
-- **PR#18 — `src/krtour/map/category/` 144건 (ADR-023 이전 + ADR-027)**:
+- **PR#18 — `src/kortravelmap/category/` 144건 (ADR-023 이전 + ADR-027)**:
   - `_definitions.py` (~2110줄, kraddr-base 사본 + ADR-027 패치)
   - ADR-027 신규 3건: `LODGING_MOUNTAIN_SHELTER` (Tier 2) +
     `LODGING_MOUNTAIN_SHELTER_KNPS` / `_KFS` (Tier 3) + maki = `shelter`
@@ -1428,16 +1428,16 @@
   - `tests/unit/test_category.py` (16 cases) — 144 총건/depth/Tier1/
     ADR-027/maki/helper/cache 검증. **30 passed** (전체 test suite)
   - `docs/category.md` §4.3 depth 통계 정정 (원본 Tier 2/4 swap 오류)
-- **PR#17 — `src/krtour/map/` PEP 420 scaffolding**:
-  - `src/krtour/map/__init__.py` (`__version__ = "0.2.0-dev"`)
-  - `src/krtour/map/py.typed` (PEP 561)
-  - `src/krtour/map/settings.py` — `KrtourMapSettings(BaseSettings)`
+- **PR#17 — `src/kortravelmap/` PEP 420 scaffolding**:
+  - `src/kortravelmap/__init__.py` (`__version__ = "0.2.0-dev"`)
+  - `src/kortravelmap/py.typed` (PEP 561)
+  - `src/kortravelmap/settings.py` — `KorTravelMapSettings(BaseSettings)`
     (pg_dsn / object_store_* / log_*)
-  - `src/krtour/map/{category,dto,core,infra,providers,client}/__init__.py`
+  - `src/kortravelmap/{category,dto,core,infra,providers,client}/__init__.py`
     (placeholder, 후속 PR에서 채움)
   - `pyproject.toml`: `pydantic-settings>=2.4` 의존 추가
   - `tests/lint/test_no_namespace_init.py` — ADR-022 PEP 420 enforcement
-  - `tests/unit/test_smoke_import.py` — `krtour.map` + `KrtourMapSettings`
+  - `tests/unit/test_smoke_import.py` — `kortravelmap` + `KorTravelMapSettings`
     smoke (5 cases)
 
 ### Sprint 1 진입 (2026-05-25, PR#16)
@@ -1449,7 +1449,7 @@
   Sprint 1 bar).
 - `docs/sprints/SPRINT-1.md` 상태 → active. SPRINT-2~5.md 상태 → accepted
   (시기 대기).
-- 후속 Sprint 1 scaffolding PR sequence (PR#17~#23): `src/krtour/map/`
+- 후속 Sprint 1 scaffolding PR sequence (PR#17~#23): `src/kortravelmap/`
   PEP 420 + `category/` 144건 + `dto/` (NOTICE_TYPES 14건 + AreaDetail.
   area_kind hazard_zone) + `core/` + `infra/` + CI workflows + 첫 통합
   테스트.
@@ -1462,8 +1462,8 @@
   (git mv).
 - **NEW (accepted)**: ADR-025 — 디버그 UI frontend는 `maplibre-vworld-js` 채택
   (React + Vite + TS + `maplibre-vworld` + `maplibre-gl` + `zod`). Kakao
-  Maps SDK 미사용. `packages/krtour-map-admin/frontend/` skeleton.
-  **사용자 보강 (2026-05-25)**: VWorld key는 `KRADDR_GEO_VWORLD_API_KEY`
+  Maps SDK 미사용. `packages/kor-travel-map-admin/frontend/` skeleton.
+  **사용자 보강 (2026-05-25)**: VWorld key는 `KOR_TRAVEL_GEO_VWORLD_API_KEY`
   공유 / maplibre-vworld-js upstream 직접 PR로 적극 수정.
 - **NEW (accepted)**: ADR-026 — TripMate 사용자 UI도 `maplibre-vworld` 채택
   (SPEC V8 v8_3 Kakao Maps 섹션 superseded). 두 UI 단일 stack.
@@ -1472,7 +1472,7 @@
   generic `notice_type=access_restriction`/`fire_alert`. 사용자 결정으로
   `forest_` prefix 없는 generic 명명. WEATHER_MOUNTAIN_STATION /
   NATURE_ECOLOGY / Tier 1 `08 SAFETY`는 거부.
-- **NEW (proposed)**: ADR-029 — `@krtour/map-marker-react` npm 패키지 추출
+- **NEW (proposed)**: ADR-029 — `@kor-travel-map/map-marker-react` npm 패키지 추출
   (본 PR#10): 디버그 UI + TripMate 사용자 UI 공통 마커/카테고리 매핑.
   MIT 라이선스 (TripMate proprietary 호환). monorepo
   `packages/map-marker-react/`.
@@ -1509,7 +1509,7 @@
   `access_restriction` / `fire_alert` 추가). 마커 스타일 매핑.
 - `docs/tripmate-integration.md` §14.5 — TripMate 사용자 UI 지도 stack
   (ADR-026).
-- `packages/krtour-map-admin/frontend/` — React + Vite + maplibre-vworld
+- `packages/kor-travel-map-admin/frontend/` — React + Vite + maplibre-vworld
   skeleton (`package.json` / `.env.example` / `.gitignore` / `README.md`).
 
 ### 잔존 명명 일치화 (본 PR#10)
@@ -1530,7 +1530,7 @@
 - `pyproject.toml` — ADR-030 `import-linter` forbidden 계약에
   `cachetools` / `async_lru` / `aiocache` / `diskcache` 추가. ADR-032
   `[tool.coverage.report] fail_under = 50` Sprint 1 bar 설정.
-- `packages/krtour-map-admin/scripts/export_openapi.py` — ADR-031
+- `packages/kor-travel-map-admin/scripts/export_openapi.py` — ADR-031
   CLI skeleton (실행은 코드 작성 단계에서).
 - `packages/map-marker-react/` — ADR-029 skeleton (`package.json` /
   `README.md` / `.gitignore` / `vite.config.ts`).
@@ -1542,38 +1542,39 @@
   `docs/agent-guide.md` §7.5에 PR 워크플로/commit format/PR 본문 표준 박힘.
 
 - **BREAKING**: ADR-022 — Python import 경로 변경.
-  - `from krtour_map import ...` → `from krtour.map import ...`
-  - `from krtour_map_admin import ...` → `from krtour.map_admin import ...`
-  - `src/krtour_map/` → `src/krtour/map/`
-  - `src/krtour_map_admin/` → `src/krtour/map_admin/` (디버그 UI 패키지)
-  - `krtour` PEP 420 implicit namespace (no `src/krtour/__init__.py`).
-  - PyPI distribution 이름(`python-krtour-map`), CLI(`krtour-map`),
-    env prefix(`KRTOUR_MAP_*`), DB 이름(`krtour_map`)는 모두 유지.
+  - `from kor_travel_map import ...` → `from kortravelmap import ...`
+  - `from kor_travel_map_admin import ...` → `from kortravelmap.admin import ...`
+  - `src/kor_travel_map/` → `src/kortravelmap/`
+  - `src/kor_travel_map_admin/` → `packages/kor-travel-map-admin/src/kortravelmap/admin/`
+    (디버그 UI 패키지)
+  - T-226 이후 `kortravelmap` public root를 사용한다.
+  - PyPI distribution 이름(`kor-travel-map`), CLI(`ktmctl`),
+    env prefix(`KOR_TRAVEL_MAP_*`), DB 이름(`kor_travel_map`)는 모두 유지.
   - `pyproject.toml` `packages.find` + `namespaces=true` + `import-linter`
     layers 갱신.
 
 - **NEW**: ADR-023 — `python-kraddr-base`의 category 모듈
   (`kraddr.base.categories`, ~2,072줄, 141 enum)을 본 저장소
-  `krtour.map.category`로 이전.
+  `kortravelmap.category`로 이전.
   - 공개 식별자 전부 유지 (`PlaceCategory`, `PlaceCategoryCode`, `get_category`,
     `iter_categories`, `mapbox_maki_icon_for_category` 등).
   - 의존 계층 최하단 (`category → dto → core → infra → providers → client → cli`).
   - 라이선스 GPL-3.0-or-later 호환. 실제 코드 이전은 코드 작성 단계에서 별도 PR.
   - 사양: `docs/category.md`.
 
-- **BREAKING**: 디버그 REST API/UI를 별도 Python 패키지 `krtour-map-admin`
-  (`packages/krtour-map-admin/`)로 분리 (ADR-020). 메인 라이브러리
-  `python-krtour-map`에서 FastAPI/Uvicorn 의존성 제거. `[api]` extra 폐기.
-  `krtour.map.api` 모듈 없음. ADR-005의 위치 부분은 ADR-020으로 superseded
+- **BREAKING**: 디버그 REST API/UI를 별도 Python 패키지 `kor-travel-map-admin`
+  (`packages/kor-travel-map-admin/`)로 분리 (ADR-020). 메인 라이브러리
+  `kor-travel-map`에서 FastAPI/Uvicorn 의존성 제거. `[api]` extra 폐기.
+  `kortravelmap.api` 모듈 없음. ADR-005의 위치 부분은 ADR-020으로 superseded
   (인증 없음 + 내부망 전용 정책은 유지).
-  - 디버그 UI 실행: `uvicorn krtour.map_admin.app:app --host 127.0.0.1 --port 8087`
-  - 환경변수 prefix: `KRTOUR_MAP_ADMIN_*`
+  - 디버그 UI 실행: `uvicorn kortravelmap.admin.app:app --host 127.0.0.1 --port 8087`
+  - 환경변수 prefix: `KOR_TRAVEL_MAP_ADMIN_*`
   - `import-linter`에 `메인 패키지는 fastapi/uvicorn/starlette import 금지`
     계약 추가.
 
 
 - **BREAKING**: v1 코드는 `v1` 브랜치로 이동. main은 orphan으로 v2 사양 시작.
-  v1 산출물은 `git checkout v1` 또는 `python-krtour-map-spec.docx` (저장소 루트
+  v1 산출물은 `git checkout v1` 또는 `kor-travel-map-spec.docx` (저장소 루트
   약 80쪽) 참고.
 - **BREAKING**: TripMate ↔ 라이브러리 연계는 **함수 직접 호출**로 일원화
   (ADR-003). REST 사용 안 함.

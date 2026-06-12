@@ -11,8 +11,8 @@ from typing import Any
 
 import pytest
 
-import krtour.map.infra.feature_repo as feature_repo
-from krtour.map.infra.feature_repo import EnrichmentLoadResult
+import kortravelmap.infra.feature_repo as feature_repo
+from kortravelmap.infra.feature_repo import EnrichmentLoadResult
 
 
 @pytest.mark.unit

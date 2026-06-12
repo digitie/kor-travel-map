@@ -11,7 +11,7 @@ from typing import Any, Literal
 
 import pytest
 
-from krtour.map.dto import (
+from kortravelmap.dto import (
     FeatureBundle,
     FeatureKind,
     ForecastStyle,
@@ -20,7 +20,7 @@ from krtour.map.dto import (
     TimelineBucket,
     WeatherDomain,
 )
-from krtour.map.providers.krex import (
+from kortravelmap.providers.krex import (
     REST_AREA_CATEGORY,
     REST_AREA_DATASET_KEY,
     REST_AREA_MARKER_ICON,
@@ -29,10 +29,10 @@ from krtour.map.providers.krex import (
     rest_area_prices_to_values,
     rest_area_weather_to_values,
 )
-from krtour.map.providers.krex import (
+from kortravelmap.providers.krex import (
     rest_areas_to_bundles as _rest_areas_to_bundles_async,
 )
-from krtour.map.providers.krex import (
+from kortravelmap.providers.krex import (
     traffic_notices_to_bundles as _traffic_notices_to_bundles_async,
 )
 

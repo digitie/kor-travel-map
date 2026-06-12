@@ -1,4 +1,4 @@
-"""``test_ids`` — ``krtour.map.core.ids`` 결정적 ID 생성 검증.
+"""``test_ids`` — ``kortravelmap.core.ids`` 결정적 ID 생성 검증.
 
 ADR-009 (``feature_id`` 결정적 생성) 명세를 강제한다. SPEC V8 D-2 입력 예제는
 ``docs/data-model.md §11`` + ``docs/test-strategy.md §3.3`` 참고.
@@ -10,7 +10,7 @@ import hashlib
 
 import pytest
 
-from krtour.map.core.ids import FEATURE_ID_HASH_LENGTH, make_feature_id
+from kortravelmap.core.ids import FEATURE_ID_HASH_LENGTH, make_feature_id
 
 # -- 결정성 / 멱등 -----------------------------------------------------------
 

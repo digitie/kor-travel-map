@@ -7,8 +7,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from krtour.map.dto import FeatureKind, SourceRole
-from krtour.map.providers.kma import (
+from kortravelmap.dto import FeatureKind, SourceRole
+from kortravelmap.providers.kma import (
     KMA_ALERT_LEVEL_SEVERITY,
     KMA_WEATHER_ALERT_CATEGORY,
     KMA_WEATHER_ALERT_DATASET_KEY,

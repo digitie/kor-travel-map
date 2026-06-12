@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from krtour.map.infra import scope_repo
-from krtour.map.infra.scope_repo import (
+from kortravelmap.infra import scope_repo
+from kortravelmap.infra.scope_repo import (
     CacheTargetFeatureMatch,
     CacheTargetScopeTarget,
     FeatureScopeRow,

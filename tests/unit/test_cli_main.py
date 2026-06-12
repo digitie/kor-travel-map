@@ -1,4 +1,4 @@
-"""``test_cli_main`` — krtour-map CLI 파서 + status 포맷 (순수).
+"""``test_cli_main`` — kor-travel-map CLI 파서 + status 포맷 (순수).
 
 DB 없이 argparse 구성과 ``_format_status`` 출력 포맷을 검증한다.
 """
@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from krtour.map.cli.main import (
+from kortravelmap.cli.main import (
     _EXIT_LOCK_SKIPPED,
     _format_bulk_result,
     _format_closed_result,
@@ -16,12 +16,12 @@ from krtour.map.cli.main import (
     _format_status,
     build_parser,
 )
-from krtour.map.infra.feature_repo import FeatureLoadResult
-from krtour.map.infra.jobs_repo import ImportJob
-from krtour.map.infra.merge_repo import MergeOutcome
-from krtour.map.infra.status_repo import StatusCounts
-from krtour.map.infra.sync_state_repo import SyncState
-from krtour.map.mois import (
+from kortravelmap.infra.feature_repo import FeatureLoadResult
+from kortravelmap.infra.jobs_repo import ImportJob
+from kortravelmap.infra.merge_repo import MergeOutcome
+from kortravelmap.infra.status_repo import StatusCounts
+from kortravelmap.infra.sync_state_repo import SyncState
+from kortravelmap.mois import (
     MoisBulkJobResult,
     MoisBulkSyncResult,
     MoisClosedJobResult,

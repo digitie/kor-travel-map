@@ -1,4 +1,4 @@
-"""``test_cli_dedup_merge`` — ``krtour-map dedup-merge`` round-trip (Sprint 4a).
+"""``test_cli_dedup_merge`` — ``ktmctl dedup-merge`` round-trip (Sprint 4a).
 
 검토 큐 후보 1쌍 적재 → CLI ``dedup-merge <review_id>``(자체 engine, ``--dsn``) →
 병합 + 큐 ``merged`` 전이를 검증. + advisory lock 점유 시 skip(exit 3) + 미존재
@@ -14,10 +14,10 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from krtour.map.cli import dedup_merge_lock_key
-from krtour.map.cli.main import build_parser
-from krtour.map.infra.advisory_lock import advisory_lock
-from krtour.map.infra.models import (
+from kortravelmap.cli import dedup_merge_lock_key
+from kortravelmap.cli.main import build_parser
+from kortravelmap.infra.advisory_lock import advisory_lock
+from kortravelmap.infra.models import (
     DedupReviewQueueRow,
     FeatureRow,
     SourceLinkRow,
@@ -99,7 +99,7 @@ async def _seed_pair(engine: AsyncEngine) -> str:
 async def container_dsn(
     pg_container: object, migrated_engine: AsyncEngine
 ) -> AsyncIterator[str]:
-    from krtour.map.infra.db import normalize_async_dsn
+    from kortravelmap.infra.db import normalize_async_dsn
 
     dsn = normalize_async_dsn(pg_container.get_connection_url())  # type: ignore[attr-defined]
     yield dsn

@@ -11,14 +11,14 @@ from decimal import Decimal
 
 import pytest
 
-from krtour.map.core.dedup import (
+from kortravelmap.core.dedup import (
     DedupCandidate,
     DedupInput,
     find_dedup_candidates,
     find_sibling_candidates,
 )
-from krtour.map.core.scoring import DedupDecision
-from krtour.map.dto.coordinate import Coordinate
+from kortravelmap.core.scoring import DedupDecision
+from kortravelmap.dto.coordinate import Coordinate
 
 pytestmark = pytest.mark.unit
 

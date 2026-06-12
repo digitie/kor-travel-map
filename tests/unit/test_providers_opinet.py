@@ -8,8 +8,8 @@ from decimal import Decimal
 
 import pytest
 
-from krtour.map.dto import PriceDomain
-from krtour.map.providers.opinet import (
+from kortravelmap.dto import PriceDomain
+from kortravelmap.providers.opinet import (
     OPINET_PRODUCT_KEY_MAP,
     OPINET_PRODUCT_NAME_KO,
     prices_to_values,

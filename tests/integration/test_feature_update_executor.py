@@ -9,28 +9,28 @@ from typing import TYPE_CHECKING
 import pytest
 from sqlalchemy import text
 
-from krtour.map.infra import feature_repo
-from krtour.map.infra.advisory_lock import try_advisory_lock
-from krtour.map.infra.feature_update_executor import (
+from kortravelmap.infra import feature_repo
+from kortravelmap.infra.advisory_lock import try_advisory_lock
+from kortravelmap.infra.feature_update_executor import (
     ProviderDatasetRefreshResult,
     ProviderDatasetRefreshScope,
     execute_next_feature_update_request,
 )
-from krtour.map.infra.feature_update_repo import (
+from kortravelmap.infra.feature_update_repo import (
     FeatureUpdateRequest,
     enqueue_feature_update_request,
     feature_update_scope_advisory_key,
     get_update_request,
 )
-from krtour.map.infra.poi_cache_target_repo import (
+from kortravelmap.infra.poi_cache_target_repo import (
     get_poi_cache_target_by_key,
     list_poi_cache_target_feature_links,
     upsert_poi_cache_target,
 )
-from krtour.map.infra.provider_refresh_policy_repo import (
+from kortravelmap.infra.provider_refresh_policy_repo import (
     upsert_provider_refresh_policy,
 )
-from krtour.map.providers.standard_data import cultural_festivals_to_bundles
+from kortravelmap.providers.standard_data import cultural_festivals_to_bundles
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession

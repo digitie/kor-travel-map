@@ -13,13 +13,13 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from krtour.map.client import AsyncKrtourMapClient
-from krtour.map.core.ids import (
+from kortravelmap.client import AsyncKorTravelMapClient
+from kortravelmap.core.ids import (
     make_feature_id,
     make_payload_hash,
     make_source_record_key,
 )
-from krtour.map.dto import (
+from kortravelmap.dto import (
     Address,
     Coordinate,
     Feature,
@@ -30,8 +30,8 @@ from krtour.map.dto import (
     SourceRecord,
     SourceRole,
 )
-from krtour.map.infra.jobs_repo import start_import_job
-from krtour.map.infra.offline_upload_repo import (
+from kortravelmap.infra.jobs_repo import start_import_job
+from kortravelmap.infra.offline_upload_repo import (
     OfflineUploadStatusConflict,
     create_offline_upload,
     delete_offline_upload,
@@ -82,7 +82,7 @@ async def test_offline_upload_load_job_persists_feature_and_job(
     storage_key = "offline/offline-success-001/features.jsonl"
     upload_id = await _create_upload(migrated_engine, body=body, storage_key=storage_key)
 
-    client = AsyncKrtourMapClient(migrated_engine)
+    client = AsyncKorTravelMapClient(migrated_engine)
     result = await client.run_offline_upload_load_job(
         upload_id,
         store=_MemoryStore({storage_key: body}),
@@ -141,7 +141,7 @@ async def test_offline_upload_load_job_uses_preclaimed_load_job(
         assert loading.status == "loading"
         assert loading.load_job_id == job.job_id
 
-    client = AsyncKrtourMapClient(migrated_engine)
+    client = AsyncKorTravelMapClient(migrated_engine)
     result = await client.run_offline_upload_load_job(
         upload_id,
         store=_MemoryStore({storage_key: body}),
@@ -176,7 +176,7 @@ async def test_offline_upload_validate_then_load_csv(
     )
     store = _MemoryStore({storage_key: body})
 
-    client = AsyncKrtourMapClient(migrated_engine)
+    client = AsyncKorTravelMapClient(migrated_engine)
     validation = await client.run_offline_upload_validation_job(
         upload_id,
         store=store,
@@ -245,7 +245,7 @@ async def test_offline_upload_load_job_records_checksum_failure(
         checksum_sha256="0" * 64,
     )
 
-    client = AsyncKrtourMapClient(migrated_engine)
+    client = AsyncKorTravelMapClient(migrated_engine)
     result = await client.run_offline_upload_load_job(
         upload_id,
         store=_MemoryStore({storage_key: body}),

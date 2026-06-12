@@ -8,14 +8,14 @@ from typing import TYPE_CHECKING
 import pytest
 from sqlalchemy import text
 
-from krtour.map.infra.integrity_violation_repo import (
+from kortravelmap.infra.integrity_violation_repo import (
     DataIntegrityViolationStateConflict,
     create_data_integrity_violation,
     get_data_integrity_violation,
     list_data_integrity_violations,
     set_data_integrity_violation_status,
 )
-from krtour.map.infra.poi_cache_target_repo import (
+from kortravelmap.infra.poi_cache_target_repo import (
     PoiCacheTargetConflict,
     delete_poi_cache_target,
     get_poi_cache_target_by_key,
@@ -24,7 +24,7 @@ from krtour.map.infra.poi_cache_target_repo import (
     upsert_poi_cache_target,
     upsert_poi_cache_target_feature_link,
 )
-from krtour.map.infra.provider_refresh_policy_repo import (
+from kortravelmap.infra.provider_refresh_policy_repo import (
     get_provider_refresh_policy,
     list_provider_refresh_policies,
     upsert_provider_refresh_policy,
@@ -248,7 +248,7 @@ async def test_data_integrity_violation_lifecycle_and_fk_behavior(
         message="provider 주소와 reverse geocode 주소가 다름",
         payload={
             "provider_address": "서울특별시 중구 세종대로 110",
-            "kraddr_geo_address": "서울특별시 중구 태평로1가",
+            "kor_travel_geo_address": "서울특별시 중구 태평로1가",
             "distance_m": 120.0,
         },
     )

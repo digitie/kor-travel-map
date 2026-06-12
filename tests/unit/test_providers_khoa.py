@@ -10,13 +10,13 @@ from typing import Any
 
 import pytest
 
-from krtour.map.dto import Address, Coordinate, FeatureBundle, FeatureKind, SourceRole
-from krtour.map.providers.khoa import (
+from kortravelmap.dto import Address, Coordinate, FeatureBundle, FeatureKind, SourceRole
+from kortravelmap.providers.khoa import (
     BEACH_CATEGORY,
     BEACH_MARKER_COLOR,
     DATASET_KEY_BEACHES,
 )
-from krtour.map.providers.khoa import (
+from kortravelmap.providers.khoa import (
     beaches_to_bundles as _beaches_async,
 )
 

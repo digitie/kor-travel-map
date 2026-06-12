@@ -1,6 +1,6 @@
 # feature-db-initialization.md — feature DB 부트스트랩
 
-본 문서는 krtour-map 독립 프로그램(ADR-045)이 PostgreSQL + PostGIS 위의 feature
+본 문서는 kor-travel-map 독립 프로그램(ADR-045)이 PostgreSQL + PostGIS 위의 feature
 DB를 부트스트랩하고 내부 라이브러리 client를 초기화하는 절차다. TripMate 공유 DB를
 사용하지 않는다.
 
@@ -8,14 +8,14 @@ DB를 부트스트랩하고 내부 라이브러리 client를 초기화하는 절
 
 ```
 1. PostgreSQL 16 + PostGIS 3.5 컨테이너 기동
-2. DB 생성 (`krtour_map`)
+2. DB 생성 (`kor_travel_map`)
 3. schema 생성 (feature, provider_sync, ops, x_extension)
 4. 확장 설치 (postgis, postgis_topology, pg_trgm, pgcrypto) — x_extension에
 5. search_path 설정 (public, x_extension)
 6. Alembic upgrade head
-7. KrtourMapSettings 로드 + create_async_engine
+7. KorTravelMapSettings 로드 + create_async_engine
 8. (선택) 객체 저장소 client + provider client 주입
-9. AsyncKrtourMapClient 생성
+9. AsyncKorTravelMapClient 생성
 ```
 
 ## 2. DB 생성
@@ -24,16 +24,16 @@ DB를 부트스트랩하고 내부 라이브러리 client를 초기화하는 절
 # 컨테이너 기동
 docker run -d --name krtour-postgis \
   -p 5432:5432 \
-  -e POSTGRES_USER=krtour_map \
+  -e POSTGRES_USER=kor_travel_map \
   -e POSTGRES_PASSWORD=changeme \
-  -e POSTGRES_DB=krtour_map \
+  -e POSTGRES_DB=kor_travel_map \
   -v krtour-pgdata:/var/lib/postgresql/data \
   postgis/postgis:16-3.5-alpine
 ```
 
-DSN: `postgresql+asyncpg://krtour_map:changeme@localhost:5432/krtour_map`.
+DSN: `postgresql+asyncpg://kor_travel_map:changeme@localhost:5432/kor_travel_map`.
 
-운영 환경에서도 DB는 krtour-map이 소유한다. TripMate는 OpenAPI로만 접근하며
+운영 환경에서도 DB는 kor-travel-map이 소유한다. TripMate는 OpenAPI로만 접근하며
 PostgreSQL에 직접 연결하지 않는다 (ADR-045).
 
 ## 3. Schema 부트스트랩
@@ -51,14 +51,14 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm           SCHEMA x_extension;
 CREATE EXTENSION IF NOT EXISTS pgcrypto          SCHEMA x_extension;
 
 -- DB 단위 영구 설정
-ALTER DATABASE krtour_map SET search_path = public, x_extension;
+ALTER DATABASE kor_travel_map SET search_path = public, x_extension;
 
 -- 라이브러리 user 권한
-GRANT USAGE  ON SCHEMA feature, provider_sync, ops, x_extension TO krtour_map;
-GRANT CREATE ON SCHEMA feature, provider_sync, ops TO krtour_map;
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA x_extension TO krtour_map;
+GRANT USAGE  ON SCHEMA feature, provider_sync, ops, x_extension TO kor_travel_map;
+GRANT CREATE ON SCHEMA feature, provider_sync, ops TO kor_travel_map;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA x_extension TO kor_travel_map;
 ALTER DEFAULT PRIVILEGES IN SCHEMA feature, provider_sync, ops
-  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO krtour_map;
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO kor_travel_map;
 ```
 
 ## 4. Alembic 마이그레이션
@@ -82,7 +82,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 from alembic import context
 
-from krtour.map.infra.models import metadata as target_metadata
+from kortravelmap.infra.models import metadata as target_metadata
 
 async def run_async():
     connectable = create_async_engine(DATABASE_URL)
@@ -106,14 +106,14 @@ asyncio.run(run_async())
 
 `version_table_schema="ops"`로 Alembic revision 테이블도 ops에 격리.
 
-## 5. KrtourMapSettings 로드
+## 5. KorTravelMapSettings 로드
 
 ```python
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-class KrtourMapSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="KRTOUR_MAP_", env_file=".env")
+class KorTravelMapSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="KOR_TRAVEL_MAP_", env_file=".env")
 
     pg_dsn: SecretStr
     pg_dsn_sync: SecretStr | None = None
@@ -122,13 +122,13 @@ class KrtourMapSettings(BaseSettings):
     pg_pool_pre_ping: bool = True
 
     object_store_endpoint_url: str = "http://127.0.0.1:12101"
-    object_store_bucket: str = "krtour-map"
+    object_store_bucket: str = "kor-travel-map"
     object_store_region: str = "us-east-1"
     object_store_access_key_id: SecretStr | None = None
     object_store_secret_access_key: SecretStr | None = None
-    object_store_public_base_url: str | None = "http://127.0.0.1:12101/krtour-map"
+    object_store_public_base_url: str | None = "http://127.0.0.1:12101/kor-travel-map"
 
-    kraddr_geo_pg_dsn: SecretStr | None = None
+    kor_travel_geo_pg_dsn: SecretStr | None = None
 
     log_level: str = "INFO"
     log_format: Literal["json", "console"] = "json"
@@ -141,7 +141,7 @@ class KrtourMapSettings(BaseSettings):
 ```python
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncEngine
 
-def create_feature_engine(settings: KrtourMapSettings) -> AsyncEngine:
+def create_feature_engine(settings: KorTravelMapSettings) -> AsyncEngine:
     return create_async_engine(
         settings.pg_dsn.get_secret_value(),
         pool_size=settings.pg_pool_size,
@@ -150,7 +150,7 @@ def create_feature_engine(settings: KrtourMapSettings) -> AsyncEngine:
         connect_args={
             "server_settings": {
                 "search_path": "public,x_extension",
-                "application_name": "krtour-map",
+                "application_name": "kor-travel-map",
             }
         },
     )
@@ -165,7 +165,7 @@ def create_feature_engine(settings: KrtourMapSettings) -> AsyncEngine:
 import boto3
 from botocore.config import Config as BotoConfig
 
-def create_file_store(settings: KrtourMapSettings):
+def create_file_store(settings: KorTravelMapSettings):
     if not settings.object_store_access_key_id:
         return None  # 옵션 — 이미지/문서 사용 안 하면 None 가능
     s3 = boto3.client(
@@ -184,15 +184,15 @@ RustFS / MinIO / Ceph / AWS S3 / Cloudflare R2 모두 동일 API (ADR-015).
 
 ## 8. Geocoder 주입
 
-`python-kraddr-geo`의 `AsyncAddressClient`를 본 라이브러리에 주입한다.
+`kor-travel-geo`의 `AsyncAddressClient`를 본 라이브러리에 주입한다.
 
 ```python
 from kraddr.geo import AsyncAddressClient
 
-async def create_kraddr_geo_client(settings: KrtourMapSettings):
-    if not settings.kraddr_geo_pg_dsn:
+async def create_kor_travel_geo_client(settings: KorTravelMapSettings):
+    if not settings.kor_travel_geo_pg_dsn:
         return None  # geocoding 미사용 — Address.legal_dong_code는 null로
-    return AsyncAddressClient(pg_dsn=settings.kraddr_geo_pg_dsn.get_secret_value())
+    return AsyncAddressClient(pg_dsn=settings.kor_travel_geo_pg_dsn.get_secret_value())
 ```
 
 geocoder 없이도 라이브러리는 동작한다. 주소 보강만 안 됨.
@@ -215,20 +215,20 @@ providers = {
 provider 라이브러리는 자기 환경변수(`KMA_API_KEY` 등)를 직접 읽는다 (본 라이브러리
 설정 영역 X).
 
-## 10. AsyncKrtourMapClient 생성
+## 10. AsyncKorTravelMapClient 생성
 
 ```python
-from krtour.map import AsyncKrtourMapClient
+from kortravelmap import AsyncKorTravelMapClient
 
-settings = KrtourMapSettings()
+settings = KorTravelMapSettings()
 engine = create_feature_engine(settings)
 file_store = create_file_store(settings)
-kraddr_geo_client = await create_kraddr_geo_client(settings)
+kor_travel_geo_client = await create_kor_travel_geo_client(settings)
 
-async with AsyncKrtourMapClient(
+async with AsyncKorTravelMapClient(
     engine=engine,
     file_store=file_store,
-    kraddr_geo_client=kraddr_geo_client,
+    kor_travel_geo_client=kor_travel_geo_client,
     providers=providers,
     settings=settings,
 ) as client:
@@ -243,19 +243,19 @@ async with AsyncKrtourMapClient(
 라이브러리는 부트스트랩 편의 함수를 제공할 수 있다 (확정 결정 보류):
 
 ```python
-async def bootstrap_from_env() -> AsyncKrtourMapClient:
+async def bootstrap_from_env() -> AsyncKorTravelMapClient:
     """환경변수만으로 client 부트스트랩.
     
     디버그 / CLI / 단순 스크립트 용. 운영 API/Dagster는 명시적 의존성 주입.
     """
-    settings = KrtourMapSettings()
+    settings = KorTravelMapSettings()
     engine = create_feature_engine(settings)
     file_store = create_file_store(settings)
-    kraddr_geo_client = await create_kraddr_geo_client(settings)
-    return AsyncKrtourMapClient(
+    kor_travel_geo_client = await create_kor_travel_geo_client(settings)
+    return AsyncKorTravelMapClient(
         engine=engine,
         file_store=file_store,
-        kraddr_geo_client=kraddr_geo_client,
+        kor_travel_geo_client=kor_travel_geo_client,
         providers={},  # provider는 호출 시점에 주입
         settings=settings,
     )
@@ -314,18 +314,18 @@ async def pg_engine(pg_container):
 
 ## 14. 멀티-DB / 멀티-환경
 
-- **dev**: `krtour_map` (로컬 PostgreSQL)
+- **dev**: `kor_travel_map` (로컬 PostgreSQL)
 - **integration test**: testcontainers (자동)
-- **운영**: krtour-map 독립 DB (`krtour_map`) + Dagster metadata DB
-  (`krtour_map_dagster`)
+- **운영**: kor-travel-map 독립 DB (`kor_travel_map`) + Dagster metadata DB
+  (`kor_travel_map_dagster`)
 
-같은 라이브러리가 세 환경 모두 지원. 차이는 settings (`KRTOUR_MAP_PG_DSN`)만.
+같은 라이브러리가 세 환경 모두 지원. 차이는 settings (`KOR_TRAVEL_MAP_PG_DSN`)만.
 
 ## 15. 초기화 실패 케이스
 
 | 케이스 | 검출 위치 | 조치 |
 |--------|----------|------|
-| `KRTOUR_MAP_PG_DSN` 미설정 | `KrtourMapSettings()` 생성 시 | Settings ValidationError |
+| `KOR_TRAVEL_MAP_PG_DSN` 미설정 | `KorTravelMapSettings()` 생성 시 | Settings ValidationError |
 | DB 접근 거부 | `engine.connect()` | `OperationalError` → caller 처리 |
 | schema 부재 | `client.healthz()` | warning + 사용자에게 부트스트랩 안내 |
 | Alembic 미적용 | `client.healthz()` | warning + `alembic upgrade head` 안내 |
@@ -334,7 +334,7 @@ async def pg_engine(pg_container):
 
 graceful degradation:
 - file_store=None: 이미지 업로드 비활성 (`NotImplementedError`)
-- kraddr_geo_client=None: 주소 보강 비활성 (legal_dong_code null 허용)
+- kor_travel_geo_client=None: 주소 보강 비활성 (legal_dong_code null 허용)
 - providers={}: collect만 외부 호출 안 됨 (변환은 호출자가 직접)
 
 ## 16. 운영 체크리스트
@@ -345,6 +345,6 @@ graceful degradation:
 - [ ] `search_path` 올바름 (`SHOW search_path` → `public, x_extension`)
 - [ ] Alembic at head
 - [ ] 객체 저장소 bucket healthy (RustFS healthcheck)
-- [ ] `KRTOUR_MAP_*` 환경변수 모두 설정
-- [ ] provider API 키 (krtour-map API/Dagster 환경)
+- [ ] `KOR_TRAVEL_MAP_*` 환경변수 모두 설정
+- [ ] provider API 키 (kor-travel-map API/Dagster 환경)
 - [ ] `client.healthz()` 모든 항목 true

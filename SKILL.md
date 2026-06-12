@@ -1,19 +1,19 @@
-# SKILL — python-krtour-map 에이전트 매뉴얼
+# SKILL — kor-travel-map 에이전트 매뉴얼
 
 > 이 파일은 당신(AI 에이전트)이 작업을 시작하기 전 반드시 읽어야 한다.
 > 1회만 읽으면 30분 이상의 디버깅을 줄일 수 있다.
 
 ## 1. 정체성
 
-이 저장소(GitHub 이름 `python-krtour-map`, Python 패키지 `krtour.map` — ADR-022)는
-**krtour-map 독립 프로그램 + 내부 Python 라이브러리**다. 한국 공공 API
+이 저장소(GitHub 이름 `kor-travel-map`, Python 패키지 `kortravelmap` — ADR-022)는
+**kor-travel-map 독립 프로그램 + 내부 Python 라이브러리**다. 한국 공공 API
 (`python-*-api`)의 결과를 단일 `Feature` 계약으로 정규화하고 독립 PostgreSQL +
 PostGIS DB에 저장한다.
 
-ADR-045 이후 TripMate ↔ krtour-map은 **OpenAPI 기반 HTTP**로 연결된다. TripMate는
-krtour-map DB에 직접 접근하지 않고 `python-krtour-map`을 운영 코드에서 직접 import하지
-않는다. REST/API/admin UI는 **별도 패키지** `krtour-map-admin`
-(`packages/krtour-map-admin/`, ADR-020/035/045)로 분리되어 있고 인증 없이 내부망에서
+ADR-045 이후 TripMate ↔ kor-travel-map은 **OpenAPI 기반 HTTP**로 연결된다. TripMate는
+kor-travel-map DB에 직접 접근하지 않고 `kor-travel-map`을 운영 코드에서 직접 import하지
+않는다. REST/API/admin UI는 **별도 패키지** `kor-travel-map-admin`
+(`packages/kor-travel-map-admin/`, ADR-020/035/045)로 분리되어 있고 인증 없이 내부망에서
 사용한다.
 
 외부 앱 POI 주변 캐시 갱신은 `external_system + target_key + 좌표 + radius_km`로
@@ -28,33 +28,33 @@ krtour-map DB에 직접 접근하지 않고 `python-krtour-map`을 운영 코드
 
 | 항목 | 값 |
 |------|----|
-| GitHub 저장소 | `python-krtour-map` |
-| PyPI distribution | `python-krtour-map` |
-| Python import (메인) | `from krtour.map import ...` (ADR-022) |
-| Python import (디버그 UI) | `from krtour.map_admin import ...` |
-| CLI 명령 (있다면) | `krtour-map` |
-| 환경변수 prefix | `KRTOUR_MAP_*` |
-| PostgreSQL DB 이름 (개발/운영 기본) | `krtour_map` (TripMate 공유 DB 아님, ADR-045) |
-| Dagster metadata DB 기본 | `krtour_map_dagster` |
+| GitHub 저장소 | `kor-travel-map` |
+| PyPI distribution | `kor-travel-map` |
+| Python import (메인) | `import kortravelmap as ktm` 또는 `from kortravelmap import ...` |
+| Python import (디버그 UI) | `from kortravelmap.admin import ...` |
+| CLI 명령 | `ktmctl` |
+| 환경변수 prefix | `KOR_TRAVEL_MAP_*` |
+| PostgreSQL DB 이름 (개발/운영 기본) | `kor_travel_map` (TripMate 공유 DB 아님, ADR-045) |
+| Dagster metadata DB 기본 | `kor_travel_map_dagster` |
 | Postgres schema | `feature`, `provider_sync`, `ops`, `x_extension` |
-| 디버그 UI 패키지 | `krtour-map-admin` (별도 Python 패키지, `packages/krtour-map-admin/`, ADR-020) |
-| Category 모듈 | `krtour.map.category` (구 `kraddr.base.categories`에서 이전, ADR-023) |
+| 디버그 UI 패키지 | `kor-travel-map-admin` (별도 Python 패키지, `packages/kor-travel-map-admin/`, ADR-020) |
+| Category 모듈 | `kortravelmap.category` (구 `kraddr.base.categories`에서 이전, ADR-023) |
 
 ### 개발 환경 (PC, WSL)
 
-형제 라이브러리 (`kor-travel-geo`(구 `python-kraddr-geo`) / `python-kraddr-base` / `python-knps-api`
+형제 라이브러리 (`kor-travel-geo` / `python-kraddr-base` / `python-knps-api`
 등)와 **동일 정책**. 자세히는 `AGENTS.md` §"개발 환경 정책 (PC, WSL)" +
 `docs/dev-environment.md`.
 
-- **코드/git**: Windows NTFS (`F:\dev\python-krtour-map\`). 브랜치 전환,
+- **코드/git**: Windows NTFS (`F:\dev\kor-travel-map\`). 브랜치 전환,
   커밋, push 같은 순수 Git 명령만 Windows Git(`git.exe`) 기준으로 수행한다.
 - **Git 외 실행**: 파일 조회·수정·테스트·lint·build·Docker·Python/Node/npm·
-  `gh`/GitHub CLI는 WSL에서 `/mnt/f/dev/python-krtour-map-<agent>` 경로로 실행한다.
-- **에이전트 worktree**: Codex `F:\dev\python-krtour-map-codex\`, Claude
-  `F:\dev\python-krtour-map-claude\`, Antigravity
-  `F:\dev\python-krtour-map-antigravity\`.
+  `gh`/GitHub CLI는 WSL에서 `/mnt/f/dev/kor-travel-map-<agent>` 경로로 실행한다.
+- **에이전트 worktree**: Codex `F:\dev\kor-travel-map-codex\`, Claude
+  `F:\dev\kor-travel-map-claude\`, Antigravity
+  `F:\dev\kor-travel-map-antigravity\`.
 - **데이터(`data/`)**: NTFS의 프로젝트 디렉토리 아래
-  (`F:\dev\python-krtour-map\data\`). git에는 넣지 않는다.
+  (`F:\dev\kor-travel-map\data\`). git에는 넣지 않는다.
 - **테스트/빌드/Docker**: 기본은 WSL에서 NTFS worktree의 `/mnt/f/...` 경로를 직접
   사용한다. ext4 mirror는 대량 I/O 성능·격리 필요 시에만 `rsync`한다.
 - **Playwright e2e**: 서버는 WSL/Docker에서 띄우고, Playwright(chromium)는 Windows
@@ -64,9 +64,9 @@ krtour-map DB에 직접 접근하지 않고 `python-krtour-map`을 운영 코드
 ### 에이전트 worktree + codegraph
 
 각 AI 에이전트는 자기 전용 git worktree + 로컬 codegraph 인덱스를 가진다.
-ChatGPT Codex → `F:\dev\python-krtour-map-codex\`, Claude Code →
-`F:\dev\python-krtour-map-claude\`, Google Antigravity 2.0 →
-`F:\dev\python-krtour-map-antigravity\`. 작업마다 worktree 안에서 브랜치만
+ChatGPT Codex → `F:\dev\kor-travel-map-codex\`, Claude Code →
+`F:\dev\kor-travel-map-claude\`, Google Antigravity 2.0 →
+`F:\dev\kor-travel-map-antigravity\`. 작업마다 worktree 안에서 브랜치만
 새로 (`git switch -c feat/<topic> main`), `.codegraph/`는 worktree마다 1회
 `codegraph init -i` 후 이후엔 `codegraph sync`로 증분 동기. `.codegraph/`는
 `.gitignore`. 자세히는 `docs/codegraph-worktree.md` + `AGENTS.md` §"에이전트
@@ -117,16 +117,16 @@ adapter/shim/파생 계산으로 끝내지 말고, 데이터 모델·migration·
 ## 2. 빠른 시작
 
 ```bash
-cd /mnt/f/dev/python-krtour-map                       # WSL에서 NTFS 소스 확인
-git.exe -C F:/dev/python-krtour-map status            # Git은 Windows Git 기준
+cd /mnt/f/dev/kor-travel-map                       # WSL에서 NTFS 소스 확인
+git.exe -C F:/dev/kor-travel-map status            # Git은 Windows Git 기준
 rsync -a --delete --exclude .git --exclude .venv \
-  --exclude data /mnt/f/dev/python-krtour-map/ ~/dev/python-krtour-map/
-cd ~/dev/python-krtour-map                            # WSL 테스트 샌드박스
-ln -sfn /mnt/f/dev/python-krtour-map/data data        # NTFS data 참조
+  --exclude data /mnt/f/dev/kor-travel-map/ ~/dev/kor-travel-map/
+cd ~/dev/kor-travel-map                            # WSL 테스트 샌드박스
+ln -sfn /mnt/f/dev/kor-travel-map/data data        # NTFS data 참조
 sudo apt install -y libgdal-dev gdal-bin              # GeoPandas/loaders용
 uv venv && uv pip install -e ".[dev,api,providers]"
 uv pip install "gdal==$(gdal-config --version)"
-cp .env.example .env && $EDITOR .env                  # KRTOUR_MAP_PG_DSN 채우기
+cp .env.example .env && $EDITOR .env                  # KOR_TRAVEL_MAP_PG_DSN 채우기
 docker compose up -d postgres                         # postgis/postgis:16-3.5
 alembic upgrade head
 python -m pytest -q
@@ -138,25 +138,24 @@ python -m pytest -q
 ## 3. 디렉토리 지도 (계획)
 
 ```
-src/krtour/                        ← PEP 420 implicit namespace (NO __init__.py, ADR-022)
-  map/                             ← 메인 패키지 (FastAPI 의존 없음)
+src/kortravelmap/                  ← 메인 패키지 (FastAPI 의존 없음)
     __init__.py
     category/  — kraddr-base에서 이전된 PlaceCategory(Code)/maki icon (ADR-023)
     dto/       — pydantic v2 입력/출력 (DB·FastAPI 의존 없음)
     core/      — 비즈니스 로직 (Protocol에만 의존)
     infra/     — DB 어댑터 (SQLAlchemy 2 async, raw SQL, Alembic 동반)
     providers/ — provider별 raw → DTO 변환 (wrapper 신규 생성 금지)
-    client.py  — AsyncKrtourMapClient (라이브러리 진입점)
+    client.py  — AsyncKorTravelMapClient (라이브러리 진입점)
     cli/       — typer CLI (옵션)
 
-packages/krtour-map-admin/      ← 별도 Python 패키지 (ADR-020)
+packages/kor-travel-map-admin/      ← 별도 Python 패키지 (ADR-020)
   pyproject.toml
-  src/krtour/                      ← 같은 namespace 공유 (NO __init__.py)
-    map_admin/
+  src/kortravelmap/
+    admin/
       __init__.py
       app.py     — FastAPI app + uvicorn entrypoint
       routers/   — 디버그 엔드포인트
-      deps.py    — AsyncKrtourMapClient 주입
+      deps.py    — AsyncKorTravelMapClient 주입
       settings.py
       views/     — (옵션) 정적 UI
 
@@ -166,18 +165,18 @@ docs/
 ```
 
 메인 패키지의 의존 방향: **category → dto → core → infra → providers → client → cli**
-한 방향. `import-linter`가 CI에서 강제한다. `krtour.map.api`는 존재하지
+한 방향. `import-linter`가 CI에서 강제한다. `kortravelmap.api`는 존재하지
 않는다 (ADR-020).
 
-`krtour-map-admin` 패키지는 OpenAPI backend/admin UI이며, 내부 구현에서
-`krtour.map.client`(`AsyncKrtourMapClient`)를 호출한다. 라우터가 메인 패키지의
+`kor-travel-map-admin` 패키지는 OpenAPI backend/admin UI이며, 내부 구현에서
+`kortravelmap.client`(`AsyncKorTravelMapClient`)를 호출한다. 라우터가 메인 패키지의
 `infra/`/`providers/`를 직접 우회하지 않는다.
 
 ## 4. 절대 하지 말 것 (DO NOT)
 
 1. **의존 방향 역행 금지** — 위 계층을 거스르는 import 금지. import-linter가
    CI에서 실패시킴.
-2. **동기 인터페이스 추가 금지** — `AsyncKrtourMapClient`만 둔다. 동기가 필요하면
+2. **동기 인터페이스 추가 금지** — `AsyncKorTravelMapClient`만 둔다. 동기가 필요하면
    호출자가 `asyncio.run`으로 감싼다 (ADR-002).
 3. **`pg_trgm.similarity_threshold` 전역 변경 금지** — 항상 트랜잭션 내부 `SET LOCAL`.
 4. **ORM에 비즈니스 로직 금지** — `infra/models.py`는 매핑만. 쿼리는
@@ -186,10 +185,10 @@ docs/
    `ST_MakePoint(lon, lat)`. DTO `Coordinate(lat=..., lon=...)`도 alias만 다를 뿐
    API 입력/출력은 `(lon, lat)` 순서로 직렬화.
 6. **카테고리/마커 매핑 하드코드 금지** — `category_mappings` DB 테이블 또는
-   `Settings`에서 읽음. 라이브러리 default 상수(`KRTOUR_MAP_CATEGORY_DEFAULTS`)는
+   `Settings`에서 읽음. 라이브러리 default 상수(`KOR_TRAVEL_MAP_CATEGORY_DEFAULTS`)는
    허용하되 DB override가 우선.
 7. **응답 셰입 임의 변경 금지** — 메인 라이브러리 DTO는 `data/meta/error` 같은 HTTP
-   래핑 키를 갖지 않는다. 래핑은 OpenAPI backend(`krtour-map-admin`) 책임.
+   래핑 키를 갖지 않는다. 래핑은 OpenAPI backend(`kor-travel-map-admin`) 책임.
 8. **외부 API 키 평문 커밋 금지** — 모두 `SecretStr`. `.env`는 권한 600 또는
    systemd `EnvironmentFile`/vault.
 9. **provider adapter/wrapper 신규 생성 금지** — public client 직접 사용.
@@ -212,8 +211,8 @@ docs/
 14. **디버그 API/UI 패키지에 인증 추가 금지** — 내부망 전제. 외부 노출이
     필요해지면 네트워크 계층(SSO 게이트웨이 / IP allowlist / Cloudflare
     Tunnel)에서 보호.
-15. **메인 라이브러리(`krtour.map`)에 FastAPI/Uvicorn import 금지** — ADR-020.
-    HTTP 서버 코드는 `packages/krtour-map-admin/`에만 둔다.
+15. **메인 라이브러리(`kortravelmap`)에 FastAPI/Uvicorn import 금지** — ADR-020.
+    HTTP 서버 코드는 `packages/kor-travel-map-admin/`에만 둔다.
 16. **데이터/원천 파일을 git에 커밋 금지** — `data/`는 `.gitignore`. NTFS 보관.
 17. **시간 직접 사용 금지** — 모든 datetime은 KST aware (Asia/Seoul). naive
     datetime을 DTO에 넣지 않는다. `kst_now()` 사용.
@@ -223,11 +222,11 @@ docs/
     `git push origin main` 절대 금지. 브랜치 명명: `feat/<topic>` /
     `fix/<topic>` / `chore/<topic>` / `docs/<topic>` / `refactor/<topic>` /
     `adr/<short>`. PR 작성: `gh pr create --title ... --body ...`.
-20. **`krtour_map` flat import 금지** — 항상 `from krtour.map import ...`
-    (ADR-022). `src/krtour_map/` 디렉토리 만들지 말 것 — `src/krtour/map/`.
-21. **`src/krtour/__init__.py` 생성 금지** — PEP 420 implicit namespace.
-    파일이 생기는 순간 자매 distribution과 namespace 충돌 (`tests/unit/
-    test_no_namespace_init.py`에서 차단).
+20. **`kor_travel_map` flat import 금지** — 항상 `import kortravelmap as ktm`
+    또는 `from kortravelmap import ...` (ADR-054). `src/kor_travel_map/` 디렉토리
+    만들지 말 것.
+21. **`src/krtour/` namespace 부활 금지** — T-226 이후 `kortravelmap`이 유일한
+    import root다. `src/kortravelmap/__init__.py`는 public root로 유지한다.
 22. **TripMate 도메인 모델을 본 라이브러리에 정의 금지** — 사용자/여행계획/POI는
     TripMate.
 23. **GitHub Actions CI green 통과 전 머지 금지** — ADR-038 (2026-05-27
@@ -236,10 +235,10 @@ docs/
 24. **CLI 중복 실행이 위험한 명령에 mutex 없이 머지 금지** — ADR-039 accepted.
     `import`/`dedup-merge`/`backup`/`restore`/`alembic upgrade`는 PostgreSQL
     `pg_try_advisory_lock` 기반 mutex 박음. read-only / `--dry-run` 예외.
-25. **`@krtour/map-marker-react` npm registry 게시 금지** — ADR-043. 모노레포
+25. **`@kor-travel-map/map-marker-react` npm registry 게시 금지** — ADR-043. 모노레포
     내부 git share만. `packages/map-marker-react/package.json` `"private": true`.
 26. **kraddr-base의 `PlaceCoordinate` import 금지** — ADR-041. 좌표 DTO는
-    `krtour.map.dto.Coordinate` 단일 source. kraddr-base 흡수 작업에서 명시적
+    `kortravelmap.dto.Coordinate` 단일 source. kraddr-base 흡수 작업에서 명시적
     제외 대상.
 
 ## 5. 자주 묻는 작업
@@ -312,13 +311,13 @@ docs/
 > (반복 drift 회피 — `docs/reports/docs-consistency-audit-2026-06-06.md` DA-D-01).
 > 운영 모델·ADR·포트·frontend stack 같은 불변 기준값은 §1 식별자 매핑,
 > `CLAUDE.md §2`, `docs/decisions.md`를 정본으로 본다. 패키지
-> `krtour-map-debug-ui` → `krtour-map-admin` rename 완료, 구 이름/env/import 호환
+> `kor-travel-map-admin` rename 완료, 구 이름/env/import 호환
 > shim 금지(ADR-046). geocoding 로컬 API `:12201`(Web UI `:12205`), RustFS
 > S3 API `:12101`/console `:12105`, frontend Next.js 16 +
 > `maplibre-vworld-js#v0.1.3`.
 
 신규 코드는 항상 PR로 (ADR-021). 각 PR은 `pytest -q` + `ruff check` +
 `mypy --strict` + `lint-imports` + `docs/journal.md` + `docs/resume.md`
-업데이트 (해당 시 ADR/CHANGELOG/OpenAPI 동기). `python-krtour-map-spec.docx`
+업데이트 (해당 시 ADR/CHANGELOG/OpenAPI 동기). `kor-travel-map-spec.docx`
 (루트, 약 80쪽)는 v1 + SPEC V8 정합 reference로만 사용 — 새 코드의 입력
 아닌 *참고용*.

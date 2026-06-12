@@ -69,14 +69,14 @@
 | jobs | offline upload load, full load batch consistency gate, consistency/dedup refresh, feature update request worker |
 | sensors | feature update request queue sensor, run failure sensor |
 | schedules | provider asset materialization schedule, consistency/dedup maintenance schedule |
-| resources | krtour-map client, offline upload store, provider live resource placeholders |
+| resources | kor-travel-map client, offline upload store, provider live resource placeholders |
 
 ### Dagster gap
 
 | ID | 우선순위 | gap | 후속 |
 |----|----------|-----|------|
 | T-212b-DAG-01 | MED | `/admin/dagster`는 summary/embed 중심이며 schedule/sensor tick history와 failure detail drilldown은 제한적이다. | T-212b |
-| T-212c-DAG-01 | MED | run failure/system log를 krtour-map API 표면으로 조회하는 contract가 없다. | T-212c |
+| T-212c-DAG-01 | MED | run failure/system log를 kor-travel-map API 표면으로 조회하는 contract가 없다. | T-212c |
 | T-212e-DAG-01 | MED | full reload 후 provider asset materialization 결과를 한 리포트로 묶는 검증 절차가 없다. | T-212e |
 
 ## 5. DB / 성능 inventory

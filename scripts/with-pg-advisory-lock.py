@@ -17,7 +17,7 @@ SRC_DIR = ROOT_DIR / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from krtour.map.infra.advisory_lock import advisory_lock_key  # noqa: E402
+from kortravelmap.infra.advisory_lock import advisory_lock_key  # noqa: E402
 
 LOCK_BUSY_EXIT_CODE = 3
 
@@ -41,7 +41,8 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--key", required=True, help="Logical lock key.")
     parser.add_argument(
         "--dsn",
-        default=os.environ.get("KRTOUR_MAP_PG_DSN_SYNC") or os.environ.get("KRTOUR_MAP_PG_DSN"),
+        default=os.environ.get("KOR_TRAVEL_MAP_PG_DSN_SYNC")
+        or os.environ.get("KOR_TRAVEL_MAP_PG_DSN"),
         help="PostgreSQL DSN used to hold the advisory lock.",
     )
     parser.add_argument(
@@ -57,7 +58,7 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     if not args.command:
         parser.error("command is required after --")
     if not args.dsn:
-        parser.error("--dsn or KRTOUR_MAP_PG_DSN_SYNC is required")
+        parser.error("--dsn or KOR_TRAVEL_MAP_PG_DSN_SYNC is required")
     return args
 
 
@@ -96,7 +97,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return LOCK_BUSY_EXIT_CODE
 
         env = os.environ.copy()
-        env["KRTOUR_MAP_MAINTENANCE_LOCK_HELD"] = "1"
+        env["KOR_TRAVEL_MAP_MAINTENANCE_LOCK_HELD"] = "1"
         try:
             completed = subprocess.run(args.command, env=env, check=False)
             return completed.returncode

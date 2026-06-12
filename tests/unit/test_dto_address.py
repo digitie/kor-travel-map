@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from krtour.map.dto import Address
+from kortravelmap.dto import Address
 
 
 @pytest.mark.unit

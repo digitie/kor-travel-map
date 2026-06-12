@@ -21,7 +21,7 @@
 - 지도뷰: bbox/검색/상세/nearby/by-target, 지도 선택과 테이블 선택의 상태 동기화,
   좌표/주소/bjd 결측 표시.
 - 이슈 처리: dedup accept/reject/ignore, integrity issue resolve/ignore/reopen,
-  geocode/reverse retry, kraddr-geo 주소 채택, 수동 override.
+  geocode/reverse retry, kor-travel-geo 주소 채택, 수동 override.
 - API debug/test: endpoint별 request builder, response/error 표시, dry-run과 실제
   실행 결과 비교.
 - Dagster 운영: 자체 summary UI, webserver embed, schedules/sensors/jobs/runs/assets
@@ -47,8 +47,8 @@
 - `features/search`, `features/in-bounds`, `/admin/features`, by-target nearby,
   dedup refresh, offline upload load, import jobs 목록은 EXPLAIN 결과를 남긴다.
 - 튜닝 전/후는 같은 데이터셋, 같은 파라미터, 같은 반복 횟수로 측정한다.
-- krtour-map 코드/DB 인덱스/쿼리로 해결 가능하면 즉시 수정한다. provider API나
-  kraddr-geo/rustfs/Dagster 외부 병목이면 원인과 재현 커맨드를 문서화한다.
+- kor-travel-map 코드/DB 인덱스/쿼리로 해결 가능하면 즉시 수정한다. provider API나
+  kor-travel-geo/rustfs/Dagster 외부 병목이면 원인과 재현 커맨드를 문서화한다.
 - frontend table/map은 긴 목록에서 렌더링 지연, hydration/console error, layout shift를
   Playwright와 React Doctor로 확인한다.
 
@@ -57,8 +57,8 @@
 - provider 실데이터 적재는 `.env`의 실제 서비스키와 독립 DB를 사용한다.
 - offline upload는 실제 확보 파일을 우선 사용한다. 데이터가 부족하면 실데이터와 같은
   컬럼/값 분포를 가진 증분 CSV/TSV/JSONL 샘플을 만들어 테스트한다.
-- `bjd_code`가 없는 행은 `KRTOUR_MAP_KRADDR_GEO_BASE_URL=http://127.0.0.1:12201`
-  기준 kraddr-geo REST v2 geocode/reverse로 보강되는지 확인한다.
+- `bjd_code`가 없는 행은 `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_BASE_URL=http://127.0.0.1:12201`
+  기준 kor-travel-geo REST v2 geocode/reverse로 보강되는지 확인한다.
 - 마지막 task에서는 DB를 비우고 처음부터 다시 로드한 뒤 API/UI/Dagster/Playwright까지
   통과 여부를 기록한다.
 
@@ -76,7 +76,7 @@
 - dedup/integrity/offline validation 이슈의 승인/거절/ignore/reopen 흐름을 화면에서
   직접 테스트한다.
 - Dagster 자체 summary UI와 embed를 함께 유지하되, scraping 실패와 run failure message를
-  krtour-map UI 안에서 확인할 수 있어야 한다.
+  kor-travel-map UI 안에서 확인할 수 있어야 한다.
 
 ### T-212c — API endpoint/error/log contract
 
@@ -97,7 +97,7 @@
 - 독립 DB를 초기화하고 migration부터 다시 실행한다.
 - provider 실데이터 적재, offline upload 실데이터 적재, 증분 데이터 재적재를 수행한다.
 - API smoke, admin UI Playwright, Dagster status, DB row count/consistency report,
-  kraddr-geo bjd 보강 결과를 최종 리포트에 남긴다.
+  kor-travel-geo bjd 보강 결과를 최종 리포트에 남긴다.
 
 ## 4. 완료 기준
 

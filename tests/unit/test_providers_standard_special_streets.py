@@ -10,13 +10,13 @@ from typing import Any
 
 import pytest
 
-from krtour.map.dto import Address, Coordinate, FeatureBundle, FeatureKind, SourceRole
-from krtour.map.providers.standard_data import (
+from kortravelmap.dto import Address, Coordinate, FeatureBundle, FeatureKind, SourceRole
+from kortravelmap.providers.standard_data import (
     DATASET_KEY_SPECIAL_STREETS,
     SPECIAL_STREET_CATEGORY,
     SPECIAL_STREET_MARKER_COLOR,
 )
-from krtour.map.providers.standard_data import (
+from kortravelmap.providers.standard_data import (
     special_streets_to_bundles as _special_async,
 )
 

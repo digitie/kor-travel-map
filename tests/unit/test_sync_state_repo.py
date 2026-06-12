@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from krtour.map.infra import sync_state_repo as repo
+from kortravelmap.infra import sync_state_repo as repo
 
 _NOW = datetime(2026, 6, 6, tzinfo=UTC)
 

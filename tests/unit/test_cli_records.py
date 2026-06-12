@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from krtour.map.cli.records import (
+from kortravelmap.cli.records import (
     MoisLicenseJsonRecord,
     iter_mois_license_records,
 )

@@ -1,4 +1,4 @@
-"""``test_crs`` — ``krtour.map.infra.crs`` pyproj.Transformer singleton 검증.
+"""``test_crs`` — ``kortravelmap.infra.crs`` pyproj.Transformer singleton 검증.
 
 ADR-012 (공간 쿼리 1회 변환) + ADR-030 (functools.cache narrow 예외 —
 ``pyproj.Transformer`` singleton)의 동작 보증. PostGIS ``ST_Transform`` 검증은
@@ -11,7 +11,7 @@ import math
 
 import pytest
 
-from krtour.map.infra.crs import (
+from kortravelmap.infra.crs import (
     EPSG_UTM_K,
     EPSG_WGS84,
     project_to_4326,

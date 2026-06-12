@@ -20,7 +20,7 @@
 | DB 적재 (testcontainers PostGIS) | ✅ FeatureBundle round-trip + STORED `coord_5179` + JSONB + FK / `ops.dedup_review_queue` 적재 + 검토완료 행 보존 / consistency F1~F3 | `tests/integration/test_*.py` + 본 리포트 §3 |
 | Debug UI backend (WSL :8087) | ✅ health/version/ETL providers/ETL fixture preview 실 HTTP 통과 | `debug-ui-e2e-2026-05-29.md` §2 |
 | Debug UI frontend (WSL :8610) | ✅ npm workspace 루트 확립 → `next dev` 정상 (PR#92) + maki 글리프·16색 팔레트 공통 마커(PR#97) + kind 필터·상세 패널(PR#98) | `debug-ui-e2e-2026-05-29.md` §1 + 본 리포트 §4 |
-| Windows Playwright e2e | ✅ **11/11 통과** (home 4 + etl 3 + features 4) — WSL frontend↔backend 실연동 | 본 리포트 §4 + 자체 spec(`packages/krtour-map-admin/frontend/e2e/*.spec.ts`) |
+| Windows Playwright e2e | ✅ **11/11 통과** (home 4 + etl 3 + features 4) — WSL frontend↔backend 실연동 | 본 리포트 §4 + 자체 spec(`packages/kor-travel-map-admin/frontend/e2e/*.spec.ts`) |
 | frontend CI 게이트 | ✅ `type-check` + `next build` (PR#93). 잠복 syntax(`*/`) 버그 같은 종류 머지 전 차단 | `.github/workflows/frontend.yml` |
 | Coverage bar | ✅ Sprint 3 bar 75 ☑ (`pyproject.toml fail_under=75`, 실측 92.66%) | PR#96 |
 
@@ -52,7 +52,7 @@
 | `tests/integration/test_feature_repo_load.py` | `infra/feature_repo` raw SQL 3-table upsert(features + source_records + source_links), idempotent, ON CONFLICT | (#116 후속) |
 | `tests/integration/test_consistency_reports.py` | F1(orphan source_record) / F2(detail 누락) / F3(CRS drift) 검출 + `ops.feature_consistency_reports` 적재 | (Sprint 3 §2.3) |
 | `tests/integration/test_dedup_repo.py` (5건) | `ops.dedup_review_queue` upsert + 점수 0~100 변환 + 검토완료 행 보존(`DO UPDATE WHERE status='pending'`) + FK CASCADE | PR#88 |
-| `tests/integration/test_client_orchestration.py` (3건) | `AsyncKrtourMapClient` transaction 소유 + `load_feature_bundles` commit / `sync_dedup_candidates` end-to-end / `include_auto_merge` 패스스루 | PR#89 |
+| `tests/integration/test_client_orchestration.py` (3건) | `AsyncKorTravelMapClient` transaction 소유 + `load_feature_bundles` commit / `sync_dedup_candidates` end-to-end / `include_auto_merge` 패스스루 | PR#89 |
 | `tests/integration/test_alembic_upgrade.py` | 0001~0005 모든 migration upgrade head 성공 | PR#88 |
 
 **총 integration 13건 + dedup repo 5건 + client 3건 + alembic 6건 = 27건** (실 PostGIS 컨테이너 자동 부팅) **모두 통과.**
@@ -129,7 +129,7 @@ PR#91→#92(7/7) → PR#95(9/9, /features 도입) → PR#98(11/11, kind 필터 +
 
 - ✅ 모든 SPRINT-3 §6 종료 조건 충족 (PR#96에 표기).
 - ✅ Coverage bar 75 (실측 92.66%).
-- ✅ ADR-033 Phase 1 + `ops.dedup_review_queue` + `AsyncKrtourMapClient` 안정.
+- ✅ ADR-033 Phase 1 + `ops.dedup_review_queue` + `AsyncKorTravelMapClient` 안정.
 - ✅ Frontend & e2e 인프라(workspace + CI 게이트 + e2e 11/11).
 - ✅ 4a/4b 분할 채택 결정(`SPRINT-4.md §3`).
 
@@ -147,7 +147,7 @@ MOIS provider 모듈(`providers/mois.py`)이다.
 | #67~#76 | infra | `feature_repo.py` + alembic 0001~0004 + ADR-033 Phase 1 + consistency |
 | #87 (#121) | core | `find_dedup_candidates` 순수 함수 |
 | #88 (#122) | infra/DB | `ops.dedup_review_queue` + `dedup_repo.py` (alembic 0005) |
-| #89 (#122) | client | `AsyncKrtourMapClient` 오케스트레이터 |
+| #89 (#122) | client | `AsyncKorTravelMapClient` 오케스트레이터 |
 | #90 (#123) | data 통로 | geocoding python API → REST API v2 전환 |
 | #91 (#117) | e2e/report | Playwright 스위트 + backend 라이브 검증 리포트 |
 | #92 (#117) | e2e/infra | npm workspace 루트 + WSL 기동 + e2e 7/7 + 🐞 fix |
@@ -155,6 +155,6 @@ MOIS provider 모듈(`providers/mois.py`)이다.
 | #94 (b) | docs | CHANGELOG + journal + resume + address-geocoding REST |
 | #95 (c) | frontend | `/features` 지도 페이지 + e2e 9/9 |
 | #96 (sprint prep) | governance | Sprint 3 종료 + Sprint 4 4a/4b 분할 |
-| #97 | marker | `@krtour/map-marker-react` 실제 구현(maki + 팔레트 + factory) |
+| #97 | marker | `@kor-travel-map/map-marker-react` 실제 구현(maki + 팔레트 + factory) |
 | #98 | frontend UX | kind 필터 + 상세 패널 + e2e 11/11 |
 | **#118**(본 리포트) | 검증 인덱스 | 본 문서 |

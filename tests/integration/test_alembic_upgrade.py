@@ -27,7 +27,7 @@ async def _run_alembic_upgrade(dsn: str) -> None:
     asyncio 호출이 자기 event loop을 만들도록 분리.
 
     env.py는 ``Config.get_main_option("sqlalchemy.url")``을 우선 사용하므로
-    여기서 박은 DSN이 적용됨 (KRTOUR_MAP_PG_DSN env var 불필요).
+    여기서 박은 DSN이 적용됨 (KOR_TRAVEL_MAP_PG_DSN env var 불필요).
     """
     import asyncio
     from pathlib import Path
@@ -50,7 +50,7 @@ async def pg_engine_with_migrations(pg_container: object) -> object:
     ``pg_engine``의 schema/extension 직접 생성 fixture를 우회 — alembic가
     혼자 만들어내는지 확인하기 위함.
     """
-    from krtour.map.infra.db import make_async_engine, normalize_async_dsn
+    from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
 
     raw_dsn = pg_container.get_connection_url()  # type: ignore[attr-defined]
     async_dsn = normalize_async_dsn(raw_dsn)

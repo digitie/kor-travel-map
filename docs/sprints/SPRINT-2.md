@@ -11,7 +11,7 @@
 ## 1. 진입 조건 (Sprint 1 DoD) — ✅ 충족 (PR#27 종료)
 
 - [x] Sprint 1 모든 DoD 충족 (`SPRINT-1.md §7`)
-- [x] `src/krtour/map/` scaffolding (`__init__.py`, `category/`, `dto/`,
+- [x] `src/kortravelmap/` scaffolding (`__init__.py`, `category/`, `dto/`,
       `core/`, `infra/`, `providers/`, `client/`, `settings.py`)
 - [x] `category/` 144건 (`PLACE_CATEGORY_DEFINITIONS` + maki + helpers)
 - [x] ADR-030 `import-linter` 계약 green
@@ -37,9 +37,9 @@
 - **category**: `01 TOURISM` 대분류 (festival 자체는 sub-category 없이 EventDetail
   에서 분기)
 - **module**:
-  - `src/krtour/map/providers/standard_data.py` — `cultural_festivals_to_bundles`
+  - `src/kortravelmap/providers/standard_data.py` — `cultural_festivals_to_bundles`
     (1차)
-  - `src/krtour/map/providers/visitkorea.py` — `festival_to_enrichment_links`
+  - `src/kortravelmap/providers/visitkorea.py` — `festival_to_enrichment_links`
     (enrichment, 2차 PR로)
 - **함수 시그니처**:
   - `cultural_festivals_to_bundles(items, *, fetched_at, reverse_geocoder=None) -> list[FeatureBundle]`
@@ -70,11 +70,11 @@
   - `python-krforest-api` 산악기상 — `krforest_mountain_weather` (kind=weather)
   - `python-khoa-api` 해양지수 — `khoa_coastal_observations` (kind=weather + notice)
 - **module**:
-  - `src/krtour/map/providers/kma.py` — PR#38 (`short_forecast_to_weather_
+  - `src/kortravelmap/providers/kma.py` — PR#38 (`short_forecast_to_weather_
     values` + `KmaShortForecastItem` Protocol + KMA_METRIC_UNITS/NAMES 18종)
-  - `src/krtour/map/providers/airkorea.py` (후속 PR)
-  - `src/krtour/map/providers/krforest_weather.py` (후속 PR)
-  - `src/krtour/map/providers/khoa_weather.py` (후속 PR)
+  - `src/kortravelmap/providers/airkorea.py` (후속 PR)
+  - `src/kortravelmap/providers/krforest_weather.py` (후속 PR)
+  - `src/kortravelmap/providers/khoa_weather.py` (후속 PR)
 - **fixture**: 3건/provider × 4 provider = 12건 (PR#38은 KMA 8 case 진입)
 - **WeatherValue 표 검증**: `docs/weather-feature-normalization.md` §5 timeline
   bucket (nowcast / short / mid). PR#38로 `WeatherValue` DTO + 3 enum
@@ -87,7 +87,7 @@
 - **Feature.kind**: `place` + `price` (PriceValue 시계열)
 - **detail**: `PlaceDetail.place_kind='gas_station'`
 - **category**: `06020000` `TRANSPORT_FUEL`
-- **module**: `src/krtour/map/providers/opinet.py` — **PR#42 merged 2026-05-28**
+- **module**: `src/kortravelmap/providers/opinet.py` — **PR#42 merged 2026-05-28**
 - **함수**:
   - `prices_to_values(items, *, feature_id, source_record_key=None) -> list[PriceValue]` — **PR#42 구현 완료**
   - `stations_to_bundles(items, *, fetched_at, reverse_geocoder=None) -> list[FeatureBundle]` — **PR#43 구현 완료** (gas station Feature(kind=place, category="06020000") + PlaceDetail(place_kind="gas_station") + SourceRecord + SourceLink)
@@ -110,7 +110,7 @@
   - `krex_traffic_notices` (notice)
 - **Feature.kind**: `place` + `price` + `weather` + `notice` — **multi-kind
   검증**
-- **module**: `src/krtour/map/providers/krex.py` — **PR#45 merged 2026-05-28**
+- **module**: `src/kortravelmap/providers/krex.py` — **PR#45 merged 2026-05-28**
 - **함수** (PR#45 구현 완료):
   - `rest_areas_to_bundles(items, *, fetched_at, reverse_geocoder=None) -> list[FeatureBundle]` (place)
   - `rest_area_prices_to_values(items, *, feature_id, source_record_key=None) -> list[PriceValue]` (food/fuel 분기)
@@ -128,16 +128,16 @@ ADR-035 (2026-05-27)로 운영 범위가 "디버그 + admin + 유지보수 + 프
 운영"으로 확장. 라우터 prefix로 시각적 분리.
 
 **PR#35 (2026-05-27, merged)** — 첫 두 라우터 + openapi.json drift gate 활성:
-- `packages/krtour-map-admin/src/krtour/map_admin/app.py` —
+- `packages/kor-travel-map-admin/src/kortravelmap/admin/app.py` —
   `create_app(settings)` FastAPI factory + 모듈-레벨 `app` instance
-- `settings.py` — `AdminSettings` (`KRTOUR_MAP_ADMIN_*` env)
+- `settings.py` — `AdminSettings` (`KOR_TRAVEL_MAP_ADMIN_*` env)
 - `routers/health.py` — `GET /debug/health` (정적 200 OK, 의존 없음)
-- `routers/version.py` — `GET /debug/version` (debug_ui + krtour_map version)
-- `packages/krtour-map-admin/openapi.json` commit (drift gate baseline)
+- `routers/version.py` — `GET /debug/version` (debug_ui + kor_travel_map version)
+- `packages/kor-travel-map-admin/openapi.json` commit (drift gate baseline)
 - `.github/workflows/openapi.yml` `--check` drift gate active
   (`continue-on-error: true` 제거)
 - `.github/workflows/ci.yml`에 debug-ui editable install + pytest step 추가
-- pyproject `mypy_path = "src:packages/krtour-map-admin/src"` (PEP 420
+- pyproject `mypy_path = "src:packages/kor-travel-map-admin/src"` (PEP 420
   namespace 통합)
 
 **PR#44 (2026-05-28, merged)** — ETL preview 라우터 (`?source=fixture` 활성):
@@ -149,7 +149,7 @@ ADR-035 (2026-05-27)로 운영 범위가 "디버그 + admin + 유지보수 + 프
 
 **PR#47 (2026-05-28, merged)** — ETL preview `?source=live` 활성화 + 8
 provider API key 설정:
-- `src/krtour/map_admin/etl_live.py` 신설 (`LiveLoader` + `LIVE_LOADER_
+- `src/kortravelmap/admin/etl_live.py` 신설 (`LiveLoader` + `LIVE_LOADER_
   REGISTRY` + KMA 3 endpoint async httpx wrapper + base_date/base_time 자동
   계산 + Protocol-만족 dataclass adapter).
 - KMA 3 dataset (`kma_short_forecast` / `kma_ultra_short_nowcast` / `kma_
@@ -159,8 +159,8 @@ provider API key 설정:
 - `settings.py` 8 `SecretStr | None` field 추가 (kma/opinet/datagokr/
   visitkorea/krex/knps/airkorea/krforest).
 - 서비스 키 컨벤션: 각 provider repo `.env`의 키 이름 그대로 + prefix
-  `KRTOUR_MAP_ADMIN_`만 붙여 디버그 UI `.env`에 옮긴다. 예: `python-kma-
-  api/.env`의 `KMA_SERVICE_KEY=...` → 디버그 UI의 `KRTOUR_MAP_ADMIN_KMA_
+  `KOR_TRAVEL_MAP_ADMIN_`만 붙여 디버그 UI `.env`에 옮긴다. 예: `python-kma-
+  api/.env`의 `KMA_SERVICE_KEY=...` → 디버그 UI의 `KOR_TRAVEL_MAP_ADMIN_KMA_
   SERVICE_KEY=...`.
 - `.env.example` (8 key 자리 + 컨벤션 주석) 신설. `pyproject.toml`
   `httpx>=0.27` 추가.
@@ -195,7 +195,7 @@ provider API key 설정:
 
 ### 2.6 Record Linkage scoring (첫 검증)
 
-- `src/krtour/map/core/scoring.py` — ADR-016 가중치 0.45·name + 0.35·spatial
+- `src/kortravelmap/core/scoring.py` — ADR-016 가중치 0.45·name + 0.35·spatial
   + 0.20·category, 임계값 0.85/0.65
 - 축제와 휴게소 간 dedup 비교는 거의 없음 — 휴게소 내부 (동일 휴게소
   방향별) sibling group 우선 검증.
@@ -223,11 +223,11 @@ Sprint 2 진행 중 다음 ADR들의 1차 implementation 점진 도입:
 
 | 항목 | 신규/변경 | 비고 |
 |------|----------|------|
-| `src/krtour/map/providers/standard_data.py` | 신규 | ADR-042 — `cultural_festivals_to_bundles` |
-| `src/krtour/map/providers/visitkorea.py` | 신규 (역할 축소) | enrichment 변환 함수만 |
+| `src/kortravelmap/providers/standard_data.py` | 신규 | ADR-042 — `cultural_festivals_to_bundles` |
+| `src/kortravelmap/providers/visitkorea.py` | 신규 (역할 축소) | enrichment 변환 함수만 |
 | `pyproject.toml` `[providers]` extra | 변경 | `python-datagokr-api` git URL 핀 추가 |
-| `packages/krtour-map-admin/src/.../routers/admin_jobs.py` | 신규 (옵션) | ADR-035 |
-| `packages/krtour-map-admin/frontend/package.json` | 변경 | `@tanstack/react-query` + `zustand` (ADR-037) |
+| `packages/kor-travel-map-admin/src/.../routers/admin_jobs.py` | 신규 (옵션) | ADR-035 |
+| `packages/kor-travel-map-admin/frontend/package.json` | 변경 | `@tanstack/react-query` + `zustand` (ADR-037) |
 | `packages/map-marker-react/package.json` | 변경 | `"private": true` (ADR-043) |
 | `.github/workflows/*.yml` | 변경 (사용자 측) | branch protection 활성 (ADR-038) |
 

@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from krtour.map.infra.consistency import (
+from kortravelmap.infra.consistency import (
     CONSISTENCY_CASES,
     CaseResult,
     FileObjectRef,
@@ -298,7 +298,7 @@ def test_build_f8_file_object_orphan_result_compares_metadata_and_objects() -> N
             "file_id": "file-missing-object",
             "feature_id": "feature-active",
             "storage_backend": "s3",
-            "bucket": "krtour-map",
+            "bucket": "kor-travel-map",
             "object_key": "missing-object.jpg",
             "feature_missing": False,
         },
@@ -306,7 +306,7 @@ def test_build_f8_file_object_orphan_result_compares_metadata_and_objects() -> N
             "file_id": "file-missing-feature",
             "feature_id": "feature-deleted",
             "storage_backend": "s3",
-            "bucket": "krtour-map",
+            "bucket": "kor-travel-map",
             "object_key": "deleted-feature.jpg",
             "feature_missing": True,
         },
@@ -314,12 +314,12 @@ def test_build_f8_file_object_orphan_result_compares_metadata_and_objects() -> N
     known_objects = [
         FileObjectRef(
             storage_backend="s3",
-            bucket="krtour-map",
+            bucket="kor-travel-map",
             object_key="deleted-feature.jpg",
         ),
         FileObjectRef(
             storage_backend="s3",
-            bucket="krtour-map",
+            bucket="kor-travel-map",
             object_key="object-without-metadata.jpg",
         ),
     ]
@@ -338,9 +338,9 @@ def test_build_f8_file_object_orphan_result_compares_metadata_and_objects() -> N
         "object_missing_metadata_count": 1,
     }
     assert result.sample_ids == [
-        "metadata_missing_object:s3:krtour-map:missing-object.jpg:"
+        "metadata_missing_object:s3:kor-travel-map:missing-object.jpg:"
         "file-missing-object:feature-active",
-        "metadata_without_active_feature:s3:krtour-map:deleted-feature.jpg:"
+        "metadata_without_active_feature:s3:kor-travel-map:deleted-feature.jpg:"
         "file-missing-feature:feature-deleted",
     ]
 
@@ -351,7 +351,7 @@ def test_build_f8_file_object_orphan_result_counts_same_file_once_for_multiple_i
             "file_id": "file-double-issue",
             "feature_id": "feature-deleted",
             "storage_backend": "s3",
-            "bucket": "krtour-map",
+            "bucket": "kor-travel-map",
             "object_key": "missing-and-deleted.jpg",
             "feature_missing": True,
         }
@@ -370,9 +370,9 @@ def test_build_f8_file_object_orphan_result_counts_same_file_once_for_multiple_i
         "object_missing_metadata_count": 0,
     }
     assert result.sample_ids == [
-        "metadata_without_active_feature:s3:krtour-map:missing-and-deleted.jpg:"
+        "metadata_without_active_feature:s3:kor-travel-map:missing-and-deleted.jpg:"
         "file-double-issue:feature-deleted",
-        "metadata_missing_object:s3:krtour-map:missing-and-deleted.jpg:"
+        "metadata_missing_object:s3:kor-travel-map:missing-and-deleted.jpg:"
         "file-double-issue:feature-deleted",
     ]
 
@@ -384,14 +384,14 @@ async def test_check_f8_file_object_orphans_missing_table_still_flags_known_obje
     result = await _check_f8_file_object_orphans(
         session,
         known_file_objects=[
-            FileObjectRef(storage_backend="s3", bucket="krtour-map", object_key="orphan.jpg")
+            FileObjectRef(storage_backend="s3", bucket="kor-travel-map", object_key="orphan.jpg")
         ],
         sample_limit=5,  # type: ignore[arg-type]
     )
 
     assert result.code == "F8"
     assert result.count == 1
-    assert result.sample_ids == ["object_missing_metadata:s3:krtour-map:orphan.jpg"]
+    assert result.sample_ids == ["object_missing_metadata:s3:kor-travel-map:orphan.jpg"]
     assert len(session.calls) == 1
 
 

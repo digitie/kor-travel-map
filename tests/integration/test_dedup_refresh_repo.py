@@ -8,11 +8,11 @@ from typing import TYPE_CHECKING
 import pytest
 from geoalchemy2 import WKTElement
 
-from krtour.map.infra.dedup_refresh_repo import (
+from kortravelmap.infra.dedup_refresh_repo import (
     DedupRefreshScope,
     list_dedup_refresh_features,
 )
-from krtour.map.infra.models import FeatureRow, SourceLinkRow, SourceRecordRow
+from kortravelmap.infra.models import FeatureRow, SourceLinkRow, SourceRecordRow
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession

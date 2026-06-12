@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from krtour.map.infra import sync_state_repo
+from kortravelmap.infra import sync_state_repo
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession

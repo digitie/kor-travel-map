@@ -1,13 +1,13 @@
-"""``test_dedup_with_kraddr_geo_live`` — dedup 큐 end-to-end (testcontainers + 실
-kraddr-geo). 두 provider feature가 실 kraddr-geo로 보강되고, 적재 → dedup 후보
+"""``test_dedup_with_kor_travel_geo_live`` — dedup 큐 end-to-end (testcontainers + 실
+kor-travel-geo). 두 provider feature가 실 kor-travel-geo로 보강되고, 적재 → dedup 후보
 검출 → ``ops.dedup_review_queue`` 영속화까지 한 PR로 닫는다.
 
-요구: ``LIVE_KRADDR_GEO_BASE_URL`` 도달 가능 (기본 http://127.0.0.1:12201)
+요구: ``LIVE_KOR_TRAVEL_GEO_BASE_URL`` 도달 가능 (기본 http://127.0.0.1:12201)
 + Docker(testcontainers PostGIS). 도달 불가 시 ``pytest.skip``.
 
 검증 시나리오:
 1. 두 제공처(=두 자연키, name::address 파생 — #374)가 **같은 좌표·같은 이름**을 emit → 양쪽 모두 실
-   kraddr-geo bjd 보강 → DB 적재 → ``sync_dedup_candidates`` → score≥0.85 →
+   kor-travel-geo bjd 보강 → DB 적재 → ``sync_dedup_candidates`` → score≥0.85 →
    queue에 1 행 + decision=``auto_merge``.
 2. 같은 이름·**먼 좌표** → spatial_sim 매우 낮음 → KEEP_SEPARATE → 큐 0 행.
 3. 다른 이름·같은 좌표 → name_sim 낮고 spatial=1.0+category=1.0 → manual_review
@@ -29,13 +29,13 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from krtour.map.client import AsyncKrtourMapClient
-from krtour.map.geocoding import (
-    KraddrGeoRestClient,
+from kortravelmap.client import AsyncKorTravelMapClient
+from kortravelmap.geocoding import (
+    KorTravelGeoRestClient,
     cached_reverse_geocoder,
-    kraddr_geo_reverse_geocoder,
+    kor_travel_geo_reverse_geocoder,
 )
-from krtour.map.providers.standard_data import cultural_festivals_to_bundles
+from kortravelmap.providers.standard_data import cultural_festivals_to_bundles
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -58,7 +58,7 @@ def _canonical_pair(feature_id_a: str, feature_id_b: str) -> tuple[str, str]:
 
 
 def _resolve_base_url() -> str:
-    return os.environ.get("LIVE_KRADDR_GEO_BASE_URL", _DEFAULT_BASE_URL)
+    return os.environ.get("LIVE_KOR_TRAVEL_GEO_BASE_URL", _DEFAULT_BASE_URL)
 
 
 def _is_reachable(base_url: str) -> bool:
@@ -78,10 +78,10 @@ def _is_reachable(base_url: str) -> bool:
 
 
 @pytest.fixture(scope="module")
-def kraddr_geo_base_url() -> str:
+def kor_travel_geo_base_url() -> str:
     url = _resolve_base_url()
     if not _is_reachable(url):
-        pytest.skip(f"kraddr-geo 도달 불가: {url}")
+        pytest.skip(f"kor-travel-geo 도달 불가: {url}")
     return url
 
 
@@ -94,9 +94,9 @@ _TRUNCATE_SQL = (
 @pytest.fixture
 async def map_client(
     migrated_engine: AsyncEngine,
-) -> AsyncIterator[AsyncKrtourMapClient]:
+) -> AsyncIterator[AsyncKorTravelMapClient]:
     """client + teardown TRUNCATE (client는 commit하므로 명시 격리)."""
-    client = AsyncKrtourMapClient(migrated_engine)
+    client = AsyncKorTravelMapClient(migrated_engine)
     try:
         yield client
     finally:
@@ -149,13 +149,13 @@ def _festival(
 
 
 async def _enrich_and_load(
-    base_url: str, client: AsyncKrtourMapClient, items: list[_Festival]
+    base_url: str, client: AsyncKorTravelMapClient, items: list[_Festival]
 ) -> list[object]:
-    """축제 items → kraddr-geo로 bjd 보강 → client.load_feature_bundles → bundles 반환."""
+    """축제 items → kor-travel-geo로 bjd 보강 → client.load_feature_bundles → bundles 반환."""
     async with httpx.AsyncClient(base_url=base_url, timeout=10.0) as http:
-        kraddr = KraddrGeoRestClient(http)
+        kraddr = KorTravelGeoRestClient(http)
         reverse = cached_reverse_geocoder(
-            kraddr_geo_reverse_geocoder(kraddr, max_distance_m=500)
+            kor_travel_geo_reverse_geocoder(kraddr, max_distance_m=500)
         )
         bundles = await cultural_festivals_to_bundles(
             items,  # type: ignore[arg-type]
@@ -170,7 +170,7 @@ async def _enrich_and_load(
 
 
 async def test_dedup_auto_merge_with_real_geocoder(
-    map_client: AsyncKrtourMapClient, kraddr_geo_base_url: str
+    map_client: AsyncKorTravelMapClient, kor_travel_geo_base_url: str
 ) -> None:
     a = _festival(
         no="LIVE-DEDUP-A1",
@@ -186,7 +186,7 @@ async def test_dedup_auto_merge_with_real_geocoder(
         lat="37.5663",
         org="provider-b",
     )
-    bundles = await _enrich_and_load(kraddr_geo_base_url, map_client, [a, b])
+    bundles = await _enrich_and_load(kor_travel_geo_base_url, map_client, [a, b])
     assert len(bundles) == 2
     feat_a, feat_b = bundles[0].feature, bundles[1].feature  # type: ignore[attr-defined]
     # 양쪽 모두 bjd 보강 + global 탈출.
@@ -218,7 +218,7 @@ async def test_dedup_auto_merge_with_real_geocoder(
 
 
 async def test_dedup_keep_separate_far_coord(
-    map_client: AsyncKrtourMapClient, kraddr_geo_base_url: str
+    map_client: AsyncKorTravelMapClient, kor_travel_geo_base_url: str
 ) -> None:
     seoul = _festival(
         no="LIVE-DEDUP-SEOUL", name="동명축제", lon="126.9779", lat="37.5663"
@@ -226,7 +226,7 @@ async def test_dedup_keep_separate_far_coord(
     busan = _festival(
         no="LIVE-DEDUP-BUSAN", name="동명축제", lon="129.0756", lat="35.1796"
     )
-    bundles = await _enrich_and_load(kraddr_geo_base_url, map_client, [seoul, busan])
+    bundles = await _enrich_and_load(kor_travel_geo_base_url, map_client, [seoul, busan])
     feat_seoul, feat_busan = bundles[0].feature, bundles[1].feature  # type: ignore[attr-defined]
     # sido 11 / 26 — 명확히 다른 시도.
     assert feat_seoul.address.sido_code == "11"
@@ -250,7 +250,7 @@ async def test_dedup_keep_separate_far_coord(
 
 
 async def test_dedup_different_name_same_coord(
-    map_client: AsyncKrtourMapClient, kraddr_geo_base_url: str
+    map_client: AsyncKorTravelMapClient, kor_travel_geo_base_url: str
 ) -> None:
     a = _festival(
         no="LIVE-DEDUP-DIFF-A",
@@ -264,7 +264,7 @@ async def test_dedup_different_name_same_coord(
         lon="126.9779",
         lat="37.5663",
     )
-    bundles = await _enrich_and_load(kraddr_geo_base_url, map_client, [a, b])
+    bundles = await _enrich_and_load(kor_travel_geo_base_url, map_client, [a, b])
     feat_a, feat_b = bundles[0].feature, bundles[1].feature  # type: ignore[attr-defined]
 
     sync = await map_client.sync_dedup_candidates([feat_a], [feat_b])
@@ -278,9 +278,9 @@ async def test_dedup_different_name_same_coord(
 
 
 async def test_dedup_rerun_updates_pending_preserves_reviewed(
-    map_client: AsyncKrtourMapClient,
+    map_client: AsyncKorTravelMapClient,
     migrated_engine: AsyncEngine,
-    kraddr_geo_base_url: str,
+    kor_travel_geo_base_url: str,
 ) -> None:
     a = _festival(
         no="LIVE-DEDUP-RERUN-A", name="동일축제", lon="126.9779", lat="37.5663"
@@ -288,7 +288,7 @@ async def test_dedup_rerun_updates_pending_preserves_reviewed(
     b = _festival(
         no="LIVE-DEDUP-RERUN-B", name="동일축제", lon="126.9779", lat="37.5663"
     )
-    bundles = await _enrich_and_load(kraddr_geo_base_url, map_client, [a, b])
+    bundles = await _enrich_and_load(kor_travel_geo_base_url, map_client, [a, b])
     feat_a, feat_b = bundles[0].feature, bundles[1].feature  # type: ignore[attr-defined]
 
     # 첫 sync — inserted=1.
@@ -324,8 +324,8 @@ async def test_dedup_rerun_updates_pending_preserves_reviewed(
 # ── 5) include_auto_merge=False — auto_merge 후보 큐 미입주 ────────────
 
 
-async def test_dedup_exclude_auto_merge_via_kraddr_geo(
-    map_client: AsyncKrtourMapClient, kraddr_geo_base_url: str
+async def test_dedup_exclude_auto_merge_via_kor_travel_geo(
+    map_client: AsyncKorTravelMapClient, kor_travel_geo_base_url: str
 ) -> None:
     a = _festival(
         no="LIVE-DEDUP-EXCL-A", name="제외 시험", lon="126.9779", lat="37.5663"
@@ -333,7 +333,7 @@ async def test_dedup_exclude_auto_merge_via_kraddr_geo(
     b = _festival(
         no="LIVE-DEDUP-EXCL-B", name="제외 시험", lon="126.9779", lat="37.5663"
     )
-    bundles = await _enrich_and_load(kraddr_geo_base_url, map_client, [a, b])
+    bundles = await _enrich_and_load(kor_travel_geo_base_url, map_client, [a, b])
     feat_a, feat_b = bundles[0].feature, bundles[1].feature  # type: ignore[attr-defined]
 
     sync = await map_client.sync_dedup_candidates(

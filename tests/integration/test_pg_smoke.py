@@ -101,7 +101,7 @@ async def test_st_transform_4326_to_5179_works(pg_session: AsyncSession) -> None
     서울 시청 (126.9784, 37.5666) → UTM-K meters. Python pyproj 결과와
     PostGIS 결과가 ~1m 이내로 일치하는지 본다.
     """
-    from krtour.map.infra.crs import project_to_5179
+    from kortravelmap.infra.crs import project_to_5179
 
     result = await pg_session.execute(
         text(

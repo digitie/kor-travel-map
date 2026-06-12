@@ -7,22 +7,22 @@ Search Local / Google Places Text Search(New)로 보강하는 ETL이다.
 > Places detail 추가는 별도 결정 (후속).
 
 > **구현 현황 (Sprint 4b, 2026-06-01 — PR#140)**: 후보 발굴 + 보강 적용 코어
-> 구현 완료(`krtour.map.enrichment`). 외부 API(kakao/naver/google) 호출은 본
+> 구현 완료(`kortravelmap.enrichment`). 외부 API(kakao/naver/google) 호출은 본
 > lib가 하지 않고 호출자(백그라운드 워커)가 결과를 주입한다(ADR-006).
 > - `find_place_phone_candidates(...)` → 전화번호 없는 place 후보
 >   (`infra.feature_repo.find_place_features_without_phone`, `detail.phones` 빈 것).
 > - `apply_place_phone_enrichment(...)` → 정규화(자릿수≥9) + dedup + max3 →
 >   `detail.phones` 갱신(`set_feature_phones`) + `source_links(role='enrichment',
 >   is_primary_source=False)` 이력. 무효/중복/초과/미존재는 `applied=False`+reason.
-> - client: `AsyncKrtourMapClient.find_place_phone_candidates` / `enrich_place_phone`.
+> - client: `AsyncKorTravelMapClient.find_place_phone_candidates` / `enrich_place_phone`.
 
 ## 1. 문서 정보
 
 | 항목 | 값 |
 |------|----|
-| 소유 | `python-krtour-map` |
+| 소유 | `kor-travel-map` |
 | 실행 소유 | TripMate (Dagster) 또는 admin trigger |
-| 기준 코드 | `krtour.map.places`, `krtour.map.load_feature_rows` |
+| 기준 코드 | `kortravelmap.places`, `kortravelmap.load_feature_rows` |
 | Feature.kind | `place` (보강 only — 새 feature 생성 X) |
 | 상세 테이블 | `feature_place_details` |
 | dataset_key | `place_phone_enrichment` |

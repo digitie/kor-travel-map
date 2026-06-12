@@ -3,29 +3,29 @@ minimum_pre_commit_version: "3.7.0"
 repos:
   - repo: local
     hooks:
-      - id: krtour-map-journal-required
+      - id: kor-travel-map-journal-required
         name: docs/journal.md required for staged src/tests changes
         entry: python scripts/check_journal_update.py
         language: python
         pass_filenames: false
         always_run: true
 
-      - id: krtour-map-ruff-format-check
+      - id: kor-travel-map-ruff-format-check
         name: ruff format --check
         entry: bash scripts/run-precommit-check.sh ruff-format
         language: system
-        files: ^(src/|tests/|packages/krtour-map-dagster/src/|packages/krtour-map-dagster/tests/)
+        files: ^(src/|tests/|packages/kor-travel-map-dagster/src/|packages/kor-travel-map-dagster/tests/)
 
-      - id: krtour-map-mypy-strict
+      - id: kor-travel-map-mypy-strict
         name: mypy --strict
         entry: bash scripts/run-precommit-check.sh mypy
         language: system
         pass_filenames: false
-        files: ^(src/|packages/krtour-map-dagster/src/)
+        files: ^(src/|packages/kor-travel-map-dagster/src/)
 
-      - id: krtour-map-lint-imports
+      - id: kor-travel-map-lint-imports
         name: lint-imports
         entry: bash scripts/run-precommit-check.sh lint-imports
         language: system
         pass_filenames: false
-        files: ^(src/|packages/krtour-map-dagster/src/)
+        files: ^(src/|packages/kor-travel-map-dagster/src/)

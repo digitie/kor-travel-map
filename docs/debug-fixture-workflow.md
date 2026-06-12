@@ -216,8 +216,8 @@ def mask_query_string(url: str) -> str:
 
 ```python
 # tests/fixtures_helper.py
-from krtour.map.providers import visitkorea
-from krtour.map.fixtures import save_fixture, mask_sensitive
+from kortravelmap.providers import visitkorea
+from kortravelmap.fixtures import save_fixture, mask_sensitive
 
 async def capture_festival_fixture():
     visitkorea_client = AsyncVisitKoreaClient(service_key=os.environ["VISITKOREA_SERVICE_KEY"])
@@ -259,7 +259,7 @@ asyncio.run(capture_festival_fixture())
 import json
 from pathlib import Path
 import pytest
-from krtour.map.fixtures import load_fixture, replay_fixture, RUNNERS
+from kortravelmap.fixtures import load_fixture, replay_fixture, RUNNERS
 
 def _discover_fixtures(provider: str | None = None) -> list[Path]:
     root = Path("tests/fixtures")
@@ -281,7 +281,7 @@ def test_fixture_replay(fixture_path):
 `RUNNERS`는 함수 dispatch dict:
 
 ```python
-# krtour.map.fixtures
+# kortravelmap.fixtures
 RUNNERS = {
     "visitkorea.festival_to_bundles": _run_visitkorea_festival,
     "mois.license_record_to_bundle": _run_mois_license,
@@ -290,7 +290,7 @@ RUNNERS = {
 }
 
 def _run_visitkorea_festival(input_: dict) -> list[dict]:
-    from krtour.map.providers.visitkorea import festival_to_bundles
+    from kortravelmap.providers.visitkorea import festival_to_bundles
     # fixture의 response.body에서 items 추출 → typed model 재구성 → 변환
     items = _items_from_fixture_response(input_)
     bundles = list(festival_to_bundles(items, fetched_at=kst_now()))

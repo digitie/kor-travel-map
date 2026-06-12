@@ -292,7 +292,7 @@ WHERE NOT EXISTS (SELECT 1 FROM provider_sync.source_links sl WHERE sl.source_re
 `alembic/env.py`에서:
 
 ```python
-from krtour.map.infra.models import metadata as target_metadata
+from kortravelmap.infra.models import metadata as target_metadata
 
 # search_path 강제
 def run_migrations_online():
@@ -386,14 +386,14 @@ Grafana Loki에서 LogQL로 추적 (TripMate 측 wiring).
 # 일 1회 custom format (SPEC V8 v8_0)
 pg_dump --format=custom --no-owner --no-privileges \
         --schema=feature --schema=provider_sync --schema=ops \
-        krtour_map > /backup/krtour_map_$(date +%F).dump
+        kor_travel_map > /backup/kor_travel_map_$(date +%F).dump
 
 # PITR: wal-g + BackBlaze B2 (TripMate 측 운영)
 ```
 
 복구:
 ```bash
-pg_restore --no-owner --no-privileges -d krtour_map_new krtour_map_2026-05-24.dump
+pg_restore --no-owner --no-privileges -d kor_travel_map_new kor_travel_map_2026-05-24.dump
 ```
 
 ## 12. 운영 체크리스트 (Sprint 5 진입 전)

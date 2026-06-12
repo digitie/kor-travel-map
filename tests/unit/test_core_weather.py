@@ -7,14 +7,14 @@ from decimal import Decimal
 
 import pytest
 
-from krtour.map.core.weather import (
+from kortravelmap.core.weather import (
     filter_by_provider,
     group_by_metric_key,
     latest_by_metric_key,
     pick_nowcast_value,
     pick_timeline_slice,
 )
-from krtour.map.dto import (
+from kortravelmap.dto import (
     ForecastStyle,
     TimelineBucket,
     WeatherDomain,

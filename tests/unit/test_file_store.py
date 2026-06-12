@@ -6,8 +6,8 @@ from io import BytesIO
 
 import pytest
 
-from krtour.map.core.exceptions import FileStoreError
-from krtour.map.infra.file_store import S3ObjectStore
+from kortravelmap.core.exceptions import FileStoreError
+from kortravelmap.infra.file_store import S3ObjectStore
 
 pytestmark = pytest.mark.unit
 
@@ -44,8 +44,8 @@ async def test_s3_object_store_write_and_read_bytes() -> None:
     client = _FakeS3Client()
     store = S3ObjectStore(
         s3_client=client,
-        bucket="krtour-uploads",
-        public_base_url="http://127.0.0.1:12101/krtour-uploads",
+        bucket="kor-travel-map-uploads",
+        public_base_url="http://127.0.0.1:12101/kor-travel-map-uploads",
     )
 
     stored = await store.write_bytes(
@@ -57,22 +57,22 @@ async def test_s3_object_store_write_and_read_bytes() -> None:
     body = await store.read_bytes("offline-uploads/u1/features.jsonl")
 
     assert body == b'{"ok": true}\n'
-    assert stored.bucket == "krtour-uploads"
+    assert stored.bucket == "kor-travel-map-uploads"
     assert stored.byte_size == 13
     assert stored.checksum_sha256
     assert stored.public_url == (
-        "http://127.0.0.1:12101/krtour-uploads/offline-uploads/u1/features.jsonl"
+        "http://127.0.0.1:12101/kor-travel-map-uploads/offline-uploads/u1/features.jsonl"
     )
     assert stored.etag == '"etag-1"'
 
     await store.delete_object("offline-uploads/u1/features.jsonl")
-    assert client.deleted == [("krtour-uploads", "offline-uploads/u1/features.jsonl")]
+    assert client.deleted == [("kor-travel-map-uploads", "offline-uploads/u1/features.jsonl")]
     with pytest.raises(FileStoreError, match="객체 저장소 읽기 실패"):
         await store.read_bytes("offline-uploads/u1/features.jsonl")
 
 
 async def test_s3_object_store_wraps_read_errors() -> None:
-    store = S3ObjectStore(s3_client=_FakeS3Client(), bucket="krtour-uploads")
+    store = S3ObjectStore(s3_client=_FakeS3Client(), bucket="kor-travel-map-uploads")
 
     with pytest.raises(FileStoreError, match="객체 저장소 읽기 실패"):
         await store.read_bytes("missing.jsonl")

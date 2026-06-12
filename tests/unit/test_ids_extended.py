@@ -13,7 +13,7 @@ from decimal import Decimal
 
 import pytest
 
-from krtour.map.core.ids import (
+from kortravelmap.core.ids import (
     PAYLOAD_HASH_DEFAULT_LENGTH,
     SOURCE_RECORD_KEY_HASH_LENGTH,
     make_payload_hash,

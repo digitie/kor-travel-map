@@ -39,7 +39,7 @@
 
 ## 2. 엎어쓰기 (overwrite) — ✅ 안전
 
-`src/krtour/map/infra/feature_repo.py` `_UPSERT_FEATURE_SQL` `ON CONFLICT (feature_id) DO UPDATE`:
+`src/kortravelmap/infra/feature_repo.py` `_UPSERT_FEATURE_SQL` `ON CONFLICT (feature_id) DO UPDATE`:
 **모든 컬럼**(name/category/coord/address/detail/marker/status/deleted_at/…)이 다음 형태다.
 
 ```sql

@@ -12,7 +12,7 @@
 | Feature.kind | `place` (휴게소) + `PricePoint`/`PriceValue` (유가) + `WeatherValue` (기상) + `notice` (교통) |
 | source_entity_type | `rest_area` |
 | 상세 테이블 | `feature_place_details`, `price_*`, `feature_weather_values`, `feature_notice_details` |
-| 코드 entrypoint | `krtour.map.providers.krex`, `krtour.map.highways`, `krtour.map.notices` |
+| 코드 entrypoint | `kortravelmap.providers.krex`, `kortravelmap.highways`, `kortravelmap.notices` |
 
 ## 2. 4가지 sub-ETL
 
@@ -96,7 +96,7 @@ def krex_rest_area_to_bundle(item, *, fetched_at, reverse_geocoder=None):
 ## 4. 유가 적재
 
 ```python
-from krtour.map.highways import collect_krex_rest_area_prices
+from kortravelmap.highways import collect_krex_rest_area_prices
 
 async def refresh_rest_area_prices(client, async_session):
     items = await client.aget_all_rest_area_prices()
@@ -113,7 +113,7 @@ async def refresh_rest_area_prices(client, async_session):
 ## 5. 기상 적재
 
 ```python
-from krtour.map.highways import collect_krex_rest_area_weather_values
+from kortravelmap.highways import collect_krex_rest_area_weather_values
 
 async def refresh_rest_area_weather(client, async_session, feature_id_by_rest_area):
     items = await client.aget_all_rest_area_weather()

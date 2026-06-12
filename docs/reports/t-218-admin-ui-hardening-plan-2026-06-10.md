@@ -1,11 +1,11 @@
-# T-218 — krtour-map admin UI 상세 구현 점검 + a11y/e2e 완비 계획 (2026-06-10)
+# T-218 — kor-travel-map admin UI 상세 구현 점검 + a11y/e2e 완비 계획 (2026-06-10)
 
 > **목적**: TripMate의 "Claude Sprint 4 PR-C 프론트"(화면별 상세 구현 + E2E 슬라이스,
 > TripMate `docs/tasks.md` §"Claude Sprint 4 PR-C 프론트")와 동급의 **화면별 상세 점검 +
-> 잔여 갭 완비** 작업을 krtour-map admin/ops UI에 대해 정의한다.
+> 잔여 갭 완비** 작업을 kor-travel-map admin/ops UI에 대해 정의한다.
 > **상태**: 계획서 (정본 task는 `docs/tasks.md` T-218). 코드 변경 없음 — 본 문서는 실행
 > 청사진이다.
-> **실측 기준**: `origin/main` `1128626`(T-212d 재측정 머지 후), `packages/krtour-map-admin/
+> **실측 기준**: `origin/main` `1128626`(T-212d 재측정 머지 후), `packages/kor-travel-map-admin/
 > frontend/`. admin UI는 **16 route 전부 구현 + e2e 15/16 커버**로 이미 성숙도가 높다
 > (T-212b 완료). 따라서 본 task는 신규 화면 구현이 아니라 **일관성·접근성·e2e 완전성의
 > 마지막 보강 + 화면별 회귀 점검**이다.
@@ -56,7 +56,7 @@
 > 각 sub-task는 1-PR 단위. 검증 게이트(전 PR 공통): `npm run gen:types:check`(drift 0)
 > + `npm run type-check`(tsc, e2e tsconfig 포함) + `npm run lint` + env 명시
 > `npm run build` + Windows 호스트 Playwright(`E2E_BASE_URL=http://127.0.0.1:9014 npm -w
-> packages/krtour-map-admin/frontend run e2e`). a11y 변경 PR은 변경 화면 e2e에 라벨/에러/
+> packages/kor-travel-map-admin/frontend run e2e`). a11y 변경 PR은 변경 화면 e2e에 라벨/에러/
 > 포커스 단언을 함께 추가한다.
 
 ### T-218a — 공통 폼 a11y wrapper 도입 (G-1, P0)
@@ -105,7 +105,7 @@
 - **T-212e와의 관계**: T-212e는 **실데이터 full reload/적재 검증**(백엔드·운영), T-218은
   **UI 일관성·접근성·e2e 완전성**(프론트). 독립 — 병렬 가능. 단 envelope/`meta.page`
   실제 응답 확인은 T-212e seed를 재사용하면 좋다.
-- **R&R**: 본 task는 krtour-map admin/ops UI **전용**. 사용자 대면 `/features` 지도의
+- **R&R**: 본 task는 kor-travel-map admin/ops UI **전용**. 사용자 대면 `/features` 지도의
   제품 UX는 TripMate 책임이며 여기서는 admin 관점의 smoke 유지만 한다.
 - **금지룰 준수**: 신규 라이브러리 추가 없이 기존 `@base-ui`/`ui/*` 위에 구성. provider
   변환·feature 정규화는 건드리지 않는다(프론트 표현 계층만).

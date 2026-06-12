@@ -67,7 +67,7 @@ def upgrade() -> None:
 
     # 3 extension을 x_extension에 격리 (ADR-008). testcontainers postgis image처럼
     # migration user가 public extension을 소유하는 경우에만 DROP CASCADE 후 재생성한다.
-    # tripmate-manager 공유 Postgres처럼 infra owner가 미리 설치한 extension은 재사용한다.
+    # kor-travel-docker-manager 공유 Postgres처럼 infra owner가 미리 설치한 extension은 재사용한다.
     _drop_extension_if_current_user_can("postgis_topology")
     _drop_extension_if_current_user_can("postgis", unless_schema="x_extension")
     for ext in _EXTENSIONS:

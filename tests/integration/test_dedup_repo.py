@@ -18,14 +18,14 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
-from krtour.map.core.dedup import DedupCandidate
-from krtour.map.infra.dedup_repo import (
+from kortravelmap.core.dedup import DedupCandidate
+from kortravelmap.infra.dedup_repo import (
     DedupQueueResult,
     enqueue_dedup_candidate,
     enqueue_dedup_candidates,
     pending_dedup_reviews,
 )
-from krtour.map.infra.models import FeatureRow
+from kortravelmap.infra.models import FeatureRow
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession

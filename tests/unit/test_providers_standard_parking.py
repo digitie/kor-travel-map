@@ -10,13 +10,13 @@ from typing import Any
 
 import pytest
 
-from krtour.map.dto import FeatureBundle, FeatureKind, SourceRole
-from krtour.map.providers.standard_data import (
+from kortravelmap.dto import FeatureBundle, FeatureKind, SourceRole
+from kortravelmap.providers.standard_data import (
     DATASET_KEY_PARKING_LOTS,
     PARKING_CATEGORY,
     PARKING_MARKER_COLOR,
 )
-from krtour.map.providers.standard_data import (
+from kortravelmap.providers.standard_data import (
     parking_lots_to_bundles as _parking_async,
 )
 

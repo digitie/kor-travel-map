@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from krtour.map.infra.status_repo import dedup_fp_stats
+from kortravelmap.infra.status_repo import dedup_fp_stats
 
 
 @pytest.mark.unit

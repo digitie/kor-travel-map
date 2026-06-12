@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from krtour.map.dto import AREA_KINDS, AreaDetail
+from kortravelmap.dto import AREA_KINDS, AreaDetail
 
 
 @pytest.mark.unit

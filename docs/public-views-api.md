@@ -1,17 +1,17 @@
-# public-views-api — TripMate T-130 공개 뷰용 krtour-map API 사양
+# public-views-api — TripMate T-130 공개 뷰용 kor-travel-map API 사양
 
 > **상태**: 구현됨(2026-06-12, T-222b). `openapi.user.json` 사용자 profile과
-> `@krtour/map-user-client` 생성 타입에 포함한다.
+> `@kor-travel-map/map-user-client` 생성 타입에 포함한다.
 > 후속 소비/픽스처 동기화는 `docs/tasks.md` T-222c.
 > **목적**: TripMate T-130(`/public/*`)이 요구하는 해수욕장/축제 공개 조회 뷰를
-> krtour-map 쪽 사용자 API 계약으로 먼저 고정한다.
+> kor-travel-map 쪽 사용자 API 계약으로 먼저 고정한다.
 
 ## 1. 경계
 
-- krtour-map은 feature 정본과 도메인 뷰를 제공한다.
+- kor-travel-map은 feature 정본과 도메인 뷰를 제공한다.
 - TripMate는 자기 `/public/*` 라우터에서 이 API를 서버측으로 호출해 비로그인
   사용자에게 재가공한다. TripMate 사용자/세션/여행계획 데이터는 포함하지 않는다.
-- 별도 인증 없는 공개 노출은 TripMate 책임이다. krtour-map의 `/v1/public/*`는
+- 별도 인증 없는 공개 노출은 TripMate 책임이다. kor-travel-map의 `/v1/public/*`는
   기존 `/v1/features/*` 조회와 같은 내부망/API `12301` 경계에 둔다.
 - 응답 envelope, error, pagination은 `docs/rest-api.md`의 ADR-048 규약을 따른다.
 

@@ -10,14 +10,14 @@ from typing import Any
 
 import pytest
 
-from krtour.map.dto import FeatureBundle, FeatureKind, SourceRole
-from krtour.map.providers.opinet import (
+from kortravelmap.dto import FeatureBundle, FeatureKind, SourceRole
+from kortravelmap.providers.opinet import (
     OPINET_STATION_CATEGORY,
     OPINET_STATION_DATASET_KEY,
     OPINET_STATION_MARKER_COLOR,
     OPINET_STATION_MARKER_ICON,
 )
-from krtour.map.providers.opinet import (
+from kortravelmap.providers.opinet import (
     stations_to_bundles as _stations_to_bundles_async,
 )
 

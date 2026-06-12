@@ -7,14 +7,14 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
-from krtour.map.infra import batch_dag
-from krtour.map.infra.batch_dag import (
+from kortravelmap.infra import batch_dag
+from kortravelmap.infra.batch_dag import (
     MaterializedViewRefreshResult,
     refresh_materialized_views,
     run_batch_dag_consistency_gate,
 )
-from krtour.map.infra.consistency import ConsistencyReport
-from krtour.map.infra.jobs_repo import ImportJob
+from kortravelmap.infra.consistency import ConsistencyReport
+from kortravelmap.infra.jobs_repo import ImportJob
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession

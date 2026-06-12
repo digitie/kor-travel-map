@@ -1,16 +1,16 @@
 {
-  "name": "krtour-map-monorepo",
+  "name": "kor-travel-map-monorepo",
   "version": "0.0.0",
   "private": true,
-  "description": "npm workspace root for the frontend packages of python-krtour-map (debug UI + shared map-marker-react). 본 저장소의 1차 산출물은 Python 라이브러리(pyproject.toml)이며, 본 package.json은 frontend workspace 해석 전용 (ADR-025/029/043 — @krtour/map-marker-react는 모노레포 내부 share, registry 게시 X).",
+  "description": "npm workspace root for the frontend packages of kor-travel-map (debug UI + shared map-marker-react). 본 저장소의 1차 산출물은 Python 라이브러리(pyproject.toml)이며, 본 package.json은 frontend workspace 해석 전용 (ADR-025/029/043 — @kor-travel-map/map-marker-react는 모노레포 내부 share, registry 게시 X).",
   "workspaces": [
     "packages/map-marker-react",
-    "packages/krtour-map-admin/frontend",
-    "packages/krtour-map-user-client"
+    "packages/kor-travel-map-admin/frontend",
+    "packages/kor-travel-map-user-client"
   ],
   "scripts": {
-    "admin:dev": "npm -w packages/krtour-map-admin/frontend run dev",
-    "admin:e2e": "npm -w packages/krtour-map-admin/frontend run e2e",
+    "admin:dev": "npm -w packages/kor-travel-map-admin/frontend run dev",
+    "admin:e2e": "npm -w packages/kor-travel-map-admin/frontend run e2e",
     "admin:stack": "bash scripts/run-admin-stack.sh",
     "docker:backup": "bash scripts/docker-backup.sh",
     "docker:restore": "bash scripts/docker-restore.sh",

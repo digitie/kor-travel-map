@@ -15,13 +15,13 @@ from typing import Any
 
 import pytest
 
-from krtour.map.dto import Address, Coordinate, FeatureBundle, FeatureKind, SourceRole
-from krtour.map.providers.standard_data import (
+from kortravelmap.dto import Address, Coordinate, FeatureBundle, FeatureKind, SourceRole
+from kortravelmap.providers.standard_data import (
     DATASET_KEY_MUSEUMS,
     MUSEUM_CATEGORY,
     MUSEUM_MARKER_COLOR,
 )
-from krtour.map.providers.standard_data import (
+from kortravelmap.providers.standard_data import (
     museums_to_bundles as _museums_async,
 )
 

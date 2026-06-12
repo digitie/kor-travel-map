@@ -8,11 +8,11 @@ source "$ROOT_DIR/scripts/load-env.sh"
 ports=("$@")
 if [[ "${#ports[@]}" -eq 0 ]]; then
   ports=(
-    "$KRTOUR_MAP_ADMIN_PORT"
-    "$KRTOUR_MAP_ADMIN_WEB_PORT"
-    "$KRTOUR_MAP_DAGSTER_PORT"
-    "$KRTOUR_MAP_RUSTFS_API_PORT"
-    "$KRTOUR_MAP_RUSTFS_CONSOLE_PORT"
+    "$KOR_TRAVEL_MAP_ADMIN_PORT"
+    "$KOR_TRAVEL_MAP_ADMIN_WEB_PORT"
+    "$KOR_TRAVEL_MAP_DAGSTER_PORT"
+    "$KOR_TRAVEL_MAP_RUSTFS_API_PORT"
+    "$KOR_TRAVEL_MAP_RUSTFS_CONSOLE_PORT"
   )
 fi
 

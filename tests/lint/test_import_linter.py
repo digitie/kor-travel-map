@@ -19,6 +19,7 @@ ADR 참조
 from __future__ import annotations
 
 import importlib.util
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -32,6 +33,11 @@ pytestmark = pytest.mark.skipif(
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PYTHONPATH_ENTRIES = [
+    PROJECT_ROOT / "src",
+    PROJECT_ROOT / "packages" / "kor-travel-map-admin" / "src",
+    PROJECT_ROOT / "packages" / "kor-travel-map-dagster" / "src",
+]
 
 
 @pytest.mark.unit
@@ -45,6 +51,12 @@ def test_import_linter_contracts_pass() -> None:
     4. ``main package must not depend on kafka/streaming libraries`` (ADR-103)
     """
     # `lint-imports` console script가 PATH에 없을 수 있으므로 Python 모듈로 실행.
+    env = os.environ.copy()
+    existing_pythonpath = env.get("PYTHONPATH")
+    pythonpath = os.pathsep.join(str(path) for path in PYTHONPATH_ENTRIES)
+    if existing_pythonpath:
+        pythonpath = os.pathsep.join([pythonpath, existing_pythonpath])
+    env["PYTHONPATH"] = pythonpath
     result = subprocess.run(
         [
             sys.executable,
@@ -56,6 +68,7 @@ def test_import_linter_contracts_pass() -> None:
         capture_output=True,
         text=True,
         check=False,
+        env=env,
     )
     assert result.returncode == 0, (
         "import-linter 계약 위반:\n"

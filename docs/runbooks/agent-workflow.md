@@ -10,7 +10,7 @@
 
 ## 1. 진입 (5분)
 
-1. 자기 worktree로 이동 (예: Claude → `F:\dev\python-krtour-map-claude`).
+1. 자기 worktree로 이동 (예: Claude → `F:\dev\kor-travel-map-claude`).
 2. `CLAUDE.md`/`AGENTS.md` → `SKILL.md` → `docs/sprints/README.md` →
    `docs/resume.md`("다음 한 작업") → `docs/journal.md` 최신 3건 → 관련 ADR.
 3. `codegraph sync`(init 아님) — 인덱스 증분 동기. 컴포넌트(특히 `Feature` DTO /
@@ -24,7 +24,7 @@ git -C <worktree> fetch origin
 git -C <worktree> switch -c feat/<topic> main      # 또는 origin/main
 ```
 
-- worktree는 영속, **브랜치만 새로**. 메인 trunk(`F:\dev\python-krtour-map`)는 안 만짐.
+- worktree는 영속, **브랜치만 새로**. 메인 trunk(`F:\dev\kor-travel-map`)는 안 만짐.
 - `sandbox/<agent>` 위에서 **직접 작업/커밋하지 않는다** — 반드시 `feat/*`·`fix/*`·
   `docs/*`·`chore/*` 브랜치. (실수로 `sandbox/<agent>`에 커밋했으면
   [failure-patterns §B1](./agent-failure-patterns.md) 복구법.)
@@ -33,7 +33,7 @@ git -C <worktree> switch -c feat/<topic> main      # 또는 origin/main
 
 - 코드/문서는 **NTFS worktree**가 원본이다. 다만 `rg`/`sed`/`python`/`uv`/`npm`/
   `docker`/`gh` 같은 순수 Git 외 명령은 WSL에서
-  `/mnt/f/dev/python-krtour-map-<agent>`로 이동해 실행한다. provider 라이브러리
+  `/mnt/f/dev/kor-travel-map-<agent>`로 이동해 실행한다. provider 라이브러리
   (`python-*-api`)는 `/mnt/f/dev/` 로컬 우선 조회(ADR-044) — GitHub 404는
   "미존재" 근거 아님.
 - 변경 분류별 동시 갱신 문서(agent-guide.md §2 "결정·기록 5종"):
@@ -46,7 +46,7 @@ git -C <worktree> switch -c feat/<topic> main      # 또는 origin/main
 ext4 mirror는 성능·격리 필요 시에만 선택한다.
 
 ```bash
-cd /mnt/f/dev/python-krtour-map-<agent>
+cd /mnt/f/dev/kor-travel-map-<agent>
 .venv/bin/ruff check .                 # 1) lint/format
 .venv/bin/mypy --strict src            # 2) 타입 (필요 시 packages/.../src 도)
 .venv/bin/lint-imports                 # 3) 의존 계층 (4 contracts)
@@ -54,7 +54,7 @@ cd /mnt/f/dev/python-krtour-map-<agent>
 ```
 
 - **debug-ui 라우터/DTO 변경 시** OpenAPI drift 게이트 추가:
-  `python packages/krtour-map-admin/scripts/export_openapi.py --profile all`
+  `python packages/kor-travel-map-admin/scripts/export_openapi.py --profile all`
   로 admin/user spec을 재생성 후 `--profile all --check`로 EXIT=0 확인 —
   재생성본을 NTFS로 복사해 커밋.
 - **Playwright e2e**는 하이브리드: 서버(backend `:12301` + frontend `:12305`)는 WSL,
@@ -105,7 +105,7 @@ git -C <worktree> fetch origin && git -C <worktree> merge --ff-only origin/main
 git -C <worktree> branch -D feat/<topic>
 git -C <worktree> push origin sandbox/<agent>
 # WSL 미러도 main으로:
-#   cd ~/dev/python-krtour-map && git fetch origin && git reset --hard origin/main
+#   cd ~/dev/kor-travel-map && git fetch origin && git reset --hard origin/main
 ```
 
 - WSL 미러가 main보다 뒤처져 보이면 `git reset --hard origin/main`

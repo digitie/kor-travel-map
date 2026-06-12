@@ -1,22 +1,22 @@
 # architecture.md
 
-`python-krtour-map`의 내부 아키텍처는 **계층(layered) + async 함수 라이브러리**
+`kor-travel-map`의 내부 아키텍처는 **계층(layered) + async 함수 라이브러리**
 모델이다. ADR-045 이후 운영 배포 모델은 이 내부 라이브러리를 감싼
-**Docker 독립 프로그램 + OpenAPI** 모델이다. TripMate는 krtour-map DB에 직접
+**Docker 독립 프로그램 + OpenAPI** 모델이다. TripMate는 kor-travel-map DB에 직접
 접근하거나 Python 패키지를 import하지 않고, OpenAPI client로 통신한다.
 
 > **T-226 / ADR-054**: public 배포명과 Python import root는 `kor-travel-map` /
 > `kortravelmap`로 clean cut할 예정이다. 형제 프로젝트 표시는 `kor-travel-geo`,
-> `kor-travel-concierge`를 쓴다. 본 문서의 `python-krtour-map`,
-> `src/krtour/map`, `krtour-map-admin` 표기는 T-226c/d/e 적용 전 현재 코드 기준이다.
+> `kor-travel-concierge`를 쓴다. 본 문서의 `kor-travel-map`,
+> `src/kortravelmap`, `kor-travel-map-admin` 표기는 T-226c/d/e 적용 전 현재 코드 기준이다.
 
 ## 1. 큰 그림
 
 본 저장소는 **monorepo**다. 핵심 패키지와 운영 프로그램 패키지가 들어 있다:
 
-- `python-krtour-map` (메인) — `src/krtour/map/`. 함수 라이브러리. FastAPI/Uvicorn
-  의존 없음. krtour-map API/Dagster 내부에서 사용한다.
-- `krtour-map-admin` (ADR-020/035/045) — `packages/krtour-map-admin/`.
+- `kor-travel-map` (메인) — `src/kortravelmap/`. 함수 라이브러리. FastAPI/Uvicorn
+  의존 없음. kor-travel-map API/Dagster 내부에서 사용한다.
+- `kor-travel-map-admin` (ADR-020/035/045) — `packages/kor-travel-map-admin/`.
   FastAPI OpenAPI backend + Next.js admin UI. Docker 독립 프로그램의 API/admin
   표면이다. 인증 없음, 내부망/네트워크 계층 보호 전제.
 
@@ -25,15 +25,15 @@
 │ TripMate / kor-travel-concierge                                        │
 │   - TripMate: 사용자/여행계획/POI 도메인                               │
 │   - kor-travel-concierge: YouTube 장소 후보 REST export provider        │
-│   - 두 시스템 모두 krtour-map DB 직접 접근 금지                         │
+│   - 두 시스템 모두 kor-travel-map DB 직접 접근 금지                         │
 │   - TripMate는 OpenAPI, concierge는 provider export HTTP                │
 └──────────────────────────────────────────────────────────────────────┘
                               │ HTTP / OpenAPI
                               ▼
 ┌──────────────────────────────────────────────────────────────────────┐
-│ krtour-map 독립 프로그램 (Docker)                                      │
+│ kor-travel-map 독립 프로그램 (Docker)                                      │
 │                                                                      │
-│  api        FastAPI + OpenAPI (`packages/krtour-map-admin`)         │
+│  api        FastAPI + OpenAPI (`packages/kor-travel-map-admin`)         │
 │  frontend   Next.js admin UI                                          │
 │  dagster    provider sync / feature update queue / consistency         │
 │  worker     import_jobs / offline upload / dedup processing            │
@@ -55,30 +55,30 @@
 
        내부 구현으로 import ↑
 ┌──────────────────────────────────────────────────────────────────────┐
-│ python-krtour-map (메인 패키지, FastAPI 의존 없음)                       │
+│ kor-travel-map (메인 패키지, FastAPI 의존 없음)                       │
 │                                                                      │
 │  category → dto → core → infra → providers → client → cli              │
-│  AsyncKrtourMapClient / raw SQL repo / provider 변환 함수               │
+│  AsyncKorTravelMapClient / raw SQL repo / provider 변환 함수               │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
 위 provider 입력에는 공공 `python-*-api` client 외에 형제 앱 `kor-travel-concierge`의
-YouTube 장소 후보 REST export(현 코드/provider 이름 `krtour-ai-agent-youtube`)도 포함된다. 다만
-`kor-travel-concierge`도 krtour-map DB에 직접 쓰지 않고, krtour-map Dagster가 HTTP로 pull한
+YouTube 장소 후보 REST export(현 코드/provider 이름 `kor-travel-concierge-youtube`)도 포함된다. 다만
+`kor-travel-concierge`도 kor-travel-map DB에 직접 쓰지 않고, kor-travel-map Dagster가 HTTP로 pull한
 JSON을 순수 변환 함수로 `FeatureBundle`화한다(ADR-053).
 
 ## 2. 의존 방향 (한 방향 강제)
 
 ```
-메인 패키지 (krtour.map):
+메인 패키지 (kortravelmap):
   category → dto → core → infra → providers → client → cli
 
-별도 패키지 (krtour.map_admin):
-  FastAPI routers → deps/client service → krtour.map.client → ... (메인 패키지 import)
+별도 패키지 (kortravelmap.admin):
+  FastAPI routers → deps/client service → kortravelmap.client → ... (메인 패키지 import)
 ```
 
 - 메인 패키지 내 화살표를 거스르는 import는 `import-linter`로 CI에서 차단
-  (ADR-002 / 7). `krtour.map.api`는 존재하지 않는다 (ADR-020).
+  (ADR-002 / 7). `kortravelmap.api`는 존재하지 않는다 (ADR-020).
 - `core/`는 Protocol(`FeatureRepo`, `DedupRepo`, `ProviderSyncRepo`,
   `WeatherValuesRepo`, `FileStore`, ...)에만 의존한다. `infra/`/`providers/`는
   이 Protocol의 구체 구현이다.
@@ -86,46 +86,46 @@ JSON을 순수 변환 함수로 `FeatureBundle`화한다(ADR-053).
   단위 테스트는 Fake repo로 100% 가능해야 한다.
 - `providers/`는 `python-*-api`의 typed model을 받아 `dto/`의 모델로 정규화하는
   **순수 함수**의 집합이다. 새 wrapper class를 만들지 않는다 (ADR-002).
-  `krtour-ai-agent-youtube`는 예외적으로 형제 앱 REST export JSON을 입력으로 받지만,
+  `kor-travel-concierge-youtube`는 예외적으로 형제 앱 REST export JSON을 입력으로 받지만,
   동일하게 순수 변환 함수만 둔다.
 - `client.py`는 `providers/`와 `infra/` repository를 합쳐 외부에 노출하는
-  단일 진입점 `AsyncKrtourMapClient`다.
-- `krtour.map_admin`는 별도 패키지로, 기본적으로 `krtour.map.client`를 통해
+  단일 진입점 `AsyncKorTravelMapClient`다.
+- `kortravelmap.admin`는 별도 패키지로, 기본적으로 `kortravelmap.client`를 통해
   메인 패키지를 호출한다. 라우터가 메인 패키지의 `infra/`/`providers/`를 직접
   우회하지 않는다.
 
 ## 3. TripMate와의 연계 (OpenAPI)
 
-ADR-045 이후 TripMate와 krtour-map 사이의 운영 계약은 OpenAPI다.
+ADR-045 이후 TripMate와 kor-travel-map 사이의 운영 계약은 OpenAPI다.
 
 - TripMate는 generated OpenAPI client로 feature read API(`GET /features/*` 또는
   목표 v1 계약의 `GET /v1/features/*`)와 batch 조회를 호출한다. Feature update
   request는 사용자/서비스 표면이 아니라 `/admin/feature-update-requests*` 운영
   표면에서만 실행한다.
-- TripMate는 krtour-map PostgreSQL에 직접 연결하지 않는다.
-- TripMate는 `python-krtour-map`을 직접 import하지 않는다.
+- TripMate는 kor-travel-map PostgreSQL에 직접 연결하지 않는다.
+- TripMate는 `kor-travel-map`을 직접 import하지 않는다.
 - TripMate DB에는 `feature_id`를 외부 참조 값으로 저장할 수 있으나 DB FK는 걸지
   않는다.
 - OpenAPI는 처음에는 admin UI 기준으로 작성하고, TripMate 연동 시 공개/사용자
   응답을 보완·확장한다.
-- `kor-travel-concierge`는 TripMate와 직접 연동하지 않고, `python-krtour-map` DB에도 쓰지
+- `kor-travel-concierge`는 TripMate와 직접 연동하지 않고, `kor-travel-map` DB에도 쓰지
   않는다. `/api/v1/features/{snapshot|changes}`로 YouTube 장소 후보를 export하고,
-  krtour-map Dagster가 이를 pull해 최종 `feature_id`를 생성한다(ADR-053).
+  kor-travel-map Dagster가 이를 pull해 최종 `feature_id`를 생성한다(ADR-053).
 
 자세한 계약은 `docs/openapi-admin-contract.md`.
 
 ## 4. 디버그 REST API (별도 패키지, ADR-020)
 
-REST/OpenAPI는 `python-krtour-map`이 아니라 **별도 Python 패키지**
-`krtour-map-admin`에 둔다. ADR-045 이후 이 패키지는 debug REST를 넘어
+REST/OpenAPI는 `kor-travel-map`이 아니라 **별도 Python 패키지**
+`kor-travel-map-admin`에 둔다. ADR-045 이후 이 패키지는 debug REST를 넘어
 독립 프로그램의 admin/API 표면이다. 메인 라이브러리는 FastAPI/Uvicorn 의존이 없다.
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│ krtour-map API/admin (별도 패키지)                                  │
-│ packages/krtour-map-admin/src/krtour/map_admin/            │
+│ kor-travel-map API/admin (별도 패키지)                                  │
+│ packages/kor-travel-map-admin/src/kortravelmap/admin/            │
 │                                                                  │
-│  uvicorn krtour.map_admin.app:app --host 127.0.0.1 --port 12301│
+│  uvicorn kortravelmap.admin.app:app --host 127.0.0.1 --port 12301│
 │                                                                  │
 │   ├── /debug/health, /debug/version          (구현됨, PR#35)    │
 │   ├── /debug/etl/...   (provider preview)     (구현됨, PR#44~47) │
@@ -140,12 +140,12 @@ REST/OpenAPI는 `python-krtour-map`이 아니라 **별도 Python 패키지**
         │  authentication: 없음 (내부망 / localhost 전제)
         │  내부 호출
         ▼
-   from krtour.map import AsyncKrtourMapClient
+   from kortravelmap import AsyncKorTravelMapClient
         ▼
-   AsyncKrtourMapClient (메인 패키지 client.py)
+   AsyncKorTravelMapClient (메인 패키지 client.py)
 ```
 
-- **별도 Python 패키지** (`krtour-map-admin`). 메인 라이브러리는 FastAPI
+- **별도 Python 패키지** (`kor-travel-map-admin`). 메인 라이브러리는 FastAPI
   의존이 없다 (ADR-020).
 - **인증 키 없음**. 내부망 / localhost / 사내망 전제 (ADR-005).
 - 외부 노출이 필요해지면 네트워크 계층(SSO 게이트웨이, IP allowlist,
@@ -177,8 +177,8 @@ REST/OpenAPI는 `python-krtour-map`이 아니라 **별도 Python 패키지**
 
 ```
 [TripMate 사용자] → TripMate API/Web
-                  → krtour-map OpenAPI (`/features`, `/features/{id}`, ...)
-                  → AsyncKrtourMapClient.<query>(...)  # krtour-map API 내부
+                  → kor-travel-map OpenAPI (`/features`, `/features/{id}`, ...)
+                  → AsyncKorTravelMapClient.<query>(...)  # kor-travel-map API 내부
                   → infra.repos (raw SQL EXPLAIN-검증된 쿼리)
                   → API 응답(data/meta/error) → TripMate가 자기 응답으로 재가공
 ```
@@ -197,8 +197,8 @@ REST/OpenAPI는 `python-krtour-map`이 아니라 **별도 Python 패키지**
 - `x_extension` — `postgis`, `postgis_topology`, `pg_trgm`, `pgcrypto`
   (ADR-008, search_path에 추가).
 
-ADR-045 이후 krtour-map DB는 TripMate DB와 물리적으로 분리된다. schema 분리는
-krtour-map 내부 도메인(`feature`), provider 추적(`provider_sync`), 운영(`ops`)을
+ADR-045 이후 kor-travel-map DB는 TripMate DB와 물리적으로 분리된다. schema 분리는
+kor-travel-map 내부 도메인(`feature`), provider 추적(`provider_sync`), 운영(`ops`)을
 분리하기 위한 경계다. 테이블별 ddl은 `data-model.md`.
 
 ## 7. 모듈 책임 1줄 요약
@@ -220,23 +220,23 @@ krtour-map 내부 도메인(`feature`), provider 추적(`provider_sync`), 운영
 | `core/weather.py` | `build_weather_card`, `latest_weather_values` |
 | `core/protocols.py` | Repository Protocol 정의 |
 | `core/exceptions.py` | 도메인 예외 |
-| `core/settings.py` | Pydantic settings (`KRTOUR_MAP_*`, `SecretStr`) |
+| `core/settings.py` | Pydantic settings (`KOR_TRAVEL_MAP_*`, `SecretStr`) |
 | `infra/models.py` | SQLAlchemy ORM 매핑 (read-only mapping) |
 | `infra/feature_repo.py` | raw SQL repository (`_SQL` 상수 + `text()`) — FeatureBundle upsert + get_feature_row |
 | `infra/source_repo.py`, `infra/sync_repo.py`, `infra/jobs_repo.py`, ... | 각 도메인 repository |
 | `infra/file_store.py` | S3 호환 객체 저장소 (RustFS) |
 | `providers/<name>.py` | provider raw → DTO 변환 + dataset_key 상수 |
-| `client.py` | `AsyncKrtourMapClient` |
-| `cli/main.py` | `krtour-map` CLI |
+| `client.py` | `AsyncKorTravelMapClient` |
+| `cli/main.py` | `kor-travel-map` CLI |
 
-**별도 패키지** `packages/krtour-map-admin/src/krtour/map_admin/` (ADR-020):
+**별도 패키지** `packages/kor-travel-map-admin/src/kortravelmap/admin/` (ADR-020):
 
 | 모듈 | 역할 |
 |------|------|
 | `app.py` | FastAPI app factory + uvicorn entrypoint |
 | `routers/*.py` | 디버그 엔드포인트 라우터 |
-| `deps.py` | `AsyncKrtourMapClient` 주입 |
-| `settings.py` | `KRTOUR_MAP_ADMIN_*` 환경변수 |
+| `deps.py` | `AsyncKorTravelMapClient` 주입 |
+| `settings.py` | `KOR_TRAVEL_MAP_ADMIN_*` 환경변수 |
 | `views/` (옵션) | 정적 HTML 또는 Next.js bridge |
 
 ## 8. 핵심 결정 요약 (전체는 `decisions.md`)
@@ -262,7 +262,7 @@ krtour-map 내부 도메인(`feature`), provider 추적(`provider_sync`), 운영
 | ADR-017 | 보관 정책: place 무기한, event +20y, notice +1y, weather +30d, price 카테고리별 |
 | ADR-018 | `Feature.detail`은 자유 dict 금지 (`DETAIL_MODELS` 분기 강제) |
 | ADR-019 | KST aware datetime만 허용 (`kst_now()`) |
-| ADR-020 | 디버그 UI는 별도 패키지 `krtour-map-admin` (ADR-005 위치 부분 supersede) |
+| ADR-020 | 디버그 UI는 별도 패키지 `kor-travel-map-admin` (ADR-005 위치 부분 supersede) |
 | ADR-045 | Docker 독립 프로그램 + 독립 DB/Dagster + TripMate OpenAPI 연동 |
 
 ## 9. v1 대비 변경 요약
@@ -271,7 +271,7 @@ krtour-map 내부 도메인(`feature`), provider 추적(`provider_sync`), 운영
 |------|----|-----|
 | 의존 계층 | 명시되지 않음 | dto/core/infra/providers/client/api 5층 + import-linter |
 | TripMate 연계 | 일부 함수 + 일부 라우터 | OpenAPI HTTP 연동 (ADR-045) |
-| 디버그 UI | stdlib HTTP server (별도 package) | FastAPI 별도 package `krtour-map-admin` (ADR-020, 인증 없음) |
+| 디버그 UI | stdlib HTTP server (별도 package) | FastAPI 별도 package `kor-travel-map-admin` (ADR-020, 인증 없음) |
 | ORM | 일부 SQLAlchemy ORM 사용 | ORM은 매핑만, 쿼리는 raw SQL `text()` |
 | 시간 | 일부 naive datetime 혼재 | KST aware 일원화 |
 | 공간 쿼리 | 좌표 자유 변환 | `coord_5179`(meter) 기준, CTE 1회 변환 강제 |

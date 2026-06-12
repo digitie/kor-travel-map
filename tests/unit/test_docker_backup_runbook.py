@@ -27,10 +27,10 @@ def test_docker_backup_script_captures_standalone_backup_bundle() -> None:
     script = _read("scripts/docker-backup.sh")
 
     assert 'source "$ROOT_DIR/scripts/load-env.sh"' in script
-    assert "KRTOUR_MAP_POSTGRES_DB" in script
-    assert "KRTOUR_MAP_DAGSTER_POSTGRES_DB" in script
-    assert "KRTOUR_MAP_OBJECT_STORE_BUCKET" in script
-    assert "KRTOUR_MAP_OFFLINE_UPLOAD_BUCKET" in script
+    assert "KOR_TRAVEL_MAP_POSTGRES_DB" in script
+    assert "KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB" in script
+    assert "KOR_TRAVEL_MAP_OBJECT_STORE_BUCKET" in script
+    assert "KOR_TRAVEL_MAP_OFFLINE_UPLOAD_BUCKET" in script
     assert "--format=custom" in script
     assert "pg_dump" in script
     assert "rustfs-perms" in script
@@ -45,7 +45,7 @@ def test_docker_backup_script_captures_standalone_backup_bundle() -> None:
 def test_docker_backup_script_is_non_destructive() -> None:
     script = _read("scripts/docker-backup.sh")
 
-    assert "KRTOUR_MAP_BACKUP_ALLOW_RUNNING" in script
+    assert "KOR_TRAVEL_MAP_BACKUP_ALLOW_RUNNING" in script
     assert "docker compose stop" not in script
     assert "pg_restore" not in script
     assert "docker compose down" not in script
@@ -56,17 +56,17 @@ def test_docker_restore_script_restores_backup_into_staging_targets() -> None:
     script = _read("scripts/docker-restore.sh")
 
     assert 'source "$ROOT_DIR/scripts/load-env.sh"' in script
-    assert "KRTOUR_MAP_RESTORE_BACKUP_ID" in script
-    assert "KRTOUR_MAP_RESTORE_BACKUP_DIR" in script
+    assert "KOR_TRAVEL_MAP_RESTORE_BACKUP_ID" in script
+    assert "KOR_TRAVEL_MAP_RESTORE_BACKUP_DIR" in script
     assert (
-        'KRTOUR_MAP_RESTORE_APP_DB="${KRTOUR_MAP_RESTORE_APP_DB:-'
-        '${KRTOUR_MAP_POSTGRES_DB}_restore}"'
+        'KOR_TRAVEL_MAP_RESTORE_APP_DB="${KOR_TRAVEL_MAP_RESTORE_APP_DB:-'
+        '${KOR_TRAVEL_MAP_POSTGRES_DB}_restore}"'
     ) in script
     assert (
-        'KRTOUR_MAP_RESTORE_DAGSTER_DB="${KRTOUR_MAP_RESTORE_DAGSTER_DB:-'
-        '${KRTOUR_MAP_DAGSTER_POSTGRES_DB}_restore}"'
+        'KOR_TRAVEL_MAP_RESTORE_DAGSTER_DB="${KOR_TRAVEL_MAP_RESTORE_DAGSTER_DB:-'
+        '${KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB}_restore}"'
     ) in script
-    assert "KRTOUR_MAP_RESTORE_RUSTFS_VOLUME" in script
+    assert "KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME" in script
     assert "sha256sum -c meta/SHA256SUMS" in script
     assert "pg_restore" in script
     assert "--clean" in script
@@ -75,7 +75,7 @@ def test_docker_restore_script_restores_backup_into_staging_targets() -> None:
     assert "--no-privileges" in script
     assert "rustfs-data.tar.gz" in script
     assert "docker run --rm" in script
-    assert "KRTOUR_MAP_RESTORE_SKIP_VERIFY" in script
+    assert "KOR_TRAVEL_MAP_RESTORE_SKIP_VERIFY" in script
     assert "docker-restore-verify.sh" in script
     assert "with-pg-advisory-lock.py" in script
     assert "maintenance:backup-restore" in script
@@ -87,10 +87,10 @@ def test_docker_restore_script_refuses_production_targets_by_default() -> None:
 
     assert "refusing to restore into production app DB" in script
     assert "refusing to restore into production Dagster DB" in script
-    assert "KRTOUR_MAP_RESTORE_RECREATE" in script
-    assert "set KRTOUR_MAP_RESTORE_RECREATE=1" in script
+    assert "KOR_TRAVEL_MAP_RESTORE_RECREATE" in script
+    assert "set KOR_TRAVEL_MAP_RESTORE_RECREATE=1" in script
     assert "docker compose down" not in script
-    assert "KRTOUR_MAP_RESTORE_ALLOW_PRODUCTION" not in script
+    assert "KOR_TRAVEL_MAP_RESTORE_ALLOW_PRODUCTION" not in script
 
 
 @pytest.mark.unit
@@ -108,10 +108,10 @@ def test_restore_swap_script_generates_env_switch_and_can_apply() -> None:
     script = _read("scripts/docker-restore-swap.sh")
 
     assert "docker-restore-verify.sh" in script
-    assert "KRTOUR_MAP_DOCKER_PG_DSN" in script
-    assert "KRTOUR_MAP_DOCKER_DAGSTER_PG_URL" in script
-    assert "KRTOUR_MAP_RUSTFS_VOLUME" in script
-    assert "KRTOUR_MAP_RESTORE_SWAP_APPLY" in script
+    assert "KOR_TRAVEL_MAP_DOCKER_PG_DSN" in script
+    assert "KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL" in script
+    assert "KOR_TRAVEL_MAP_RUSTFS_VOLUME" in script
+    assert "KOR_TRAVEL_MAP_RESTORE_SWAP_APPLY" in script
     assert "docker compose" in script
     assert "with-pg-advisory-lock.py" in script
 
@@ -120,26 +120,26 @@ def test_restore_swap_script_generates_env_switch_and_can_apply() -> None:
 def test_docker_compose_supports_restore_rustfs_volume_swap() -> None:
     compose = _read("docker-compose.yml")
 
-    assert "krtour-map-rustfs-data:/data" in compose
-    assert "name: ${KRTOUR_MAP_RUSTFS_VOLUME:-krtour-map-rustfs}" in compose
+    assert "kor-travel-map-rustfs-data:/data" in compose
+    assert "name: ${KOR_TRAVEL_MAP_RUSTFS_VOLUME:-kor-travel-map-rustfs}" in compose
 
 
 @pytest.mark.unit
 def test_backup_restore_runbook_documents_three_part_bundle_and_restore_boundary() -> None:
     runbook = _read("docs/backup-restore.md")
 
-    assert "krtour_map" in runbook
-    assert "krtour_map_dagster" in runbook
+    assert "kor_travel_map" in runbook
+    assert "kor_travel_map_dagster" in runbook
     assert "RustFS" in runbook
-    assert "postgres/krtour_map.dump" in runbook
-    assert "postgres/krtour_map_dagster.dump" in runbook
+    assert "postgres/kor_travel_map.dump" in runbook
+    assert "postgres/kor_travel_map_dagster.dump" in runbook
     assert "rustfs/rustfs-data.tar.gz" in runbook
     assert "meta/manifest.json" in runbook
     assert "meta/SHA256SUMS" in runbook
     assert "TripMate" in runbook
     assert "npm run docker:restore" in runbook
-    assert "krtour_map_restore" in runbook
-    assert "krtour_map_dagster_restore" in runbook
+    assert "kor_travel_map_restore" in runbook
+    assert "kor_travel_map_dagster_restore" in runbook
     assert "docker-restore-verify.sh" in runbook
     assert "docker-restore-swap.sh" in runbook
     assert "T-209e" in runbook

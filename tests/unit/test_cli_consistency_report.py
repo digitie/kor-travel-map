@@ -1,4 +1,4 @@
-"""``krtour-map consistency-report`` formatter/parser 단위 테스트."""
+"""``ktmctl consistency-report`` formatter/parser 단위 테스트."""
 
 from __future__ import annotations
 
@@ -8,14 +8,14 @@ from pathlib import Path
 
 import pytest
 
-from krtour.map.cli.consistency_report import (
+from kortravelmap.cli.consistency_report import (
     ConsistencyReportOptions,
     load_file_object_refs,
     render_consistency_report_json,
     render_consistency_report_markdown,
 )
-from krtour.map.dto._time import KST
-from krtour.map.infra.consistency import CaseResult, ConsistencyReport
+from kortravelmap.dto._time import KST
+from kortravelmap.infra.consistency import CaseResult, ConsistencyReport
 
 
 def _report() -> ConsistencyReport:
@@ -114,14 +114,14 @@ def test_load_file_object_refs_jsonl(tmp_path: Path) -> None:
                 json.dumps(
                     {
                         "storage_backend": "rustfs",
-                        "bucket": "krtour-map",
+                        "bucket": "kor-travel-map",
                         "object_key": "features/a.jpg",
                     }
                 ),
                 json.dumps(
                     {
                         "storage_backend": "rustfs",
-                        "bucket": "krtour-map",
+                        "bucket": "kor-travel-map",
                         "object_key": "features/b.jpg",
                     }
                 ),
@@ -133,8 +133,8 @@ def test_load_file_object_refs_jsonl(tmp_path: Path) -> None:
     refs = load_file_object_refs(path)
 
     assert [ref.sample_id() for ref in refs] == [
-        "rustfs:krtour-map:features/a.jpg",
-        "rustfs:krtour-map:features/b.jpg",
+        "rustfs:kor-travel-map:features/a.jpg",
+        "rustfs:kor-travel-map:features/b.jpg",
     ]
 
 
@@ -145,7 +145,7 @@ def test_load_file_object_refs_json_array(tmp_path: Path) -> None:
             [
                 {
                     "storage_backend": "rustfs",
-                    "bucket": "krtour-map",
+                    "bucket": "kor-travel-map",
                     "object_key": "features/a.jpg",
                 }
             ]
@@ -161,7 +161,7 @@ def test_load_file_object_refs_json_array(tmp_path: Path) -> None:
 
 def test_load_file_object_refs_rejects_missing_fields(tmp_path: Path) -> None:
     path = tmp_path / "bad.jsonl"
-    path.write_text('{"storage_backend":"rustfs","bucket":"krtour-map"}\n', encoding="utf-8")
+    path.write_text('{"storage_backend":"rustfs","bucket":"kor-travel-map"}\n', encoding="utf-8")
 
     with pytest.raises(ValueError, match="object_key"):
         load_file_object_refs(path)

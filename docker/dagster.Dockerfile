@@ -14,7 +14,7 @@ RUN apt-get update \
 
 COPY pyproject.toml README.md ./
 COPY src ./src
-COPY packages/krtour-map-dagster ./packages/krtour-map-dagster
+COPY packages/kor-travel-map-dagster ./packages/kor-travel-map-dagster
 
 # `[providers]` extra는 git+https pin이라 builder에 git이 필요하다 (#370).
 # private provider repo(python-datagokr-api)는 BuildKit secret `github_token`으로
@@ -27,7 +27,7 @@ RUN --mount=type=secret,id=github_token \
             GIT_CONFIG_KEY_0="url.https://x-access-token:$(cat /run/secrets/github_token)@github.com/.insteadOf" \
             GIT_CONFIG_VALUE_0="https://github.com/"; \
     fi \
-    && python -m pip install --no-cache-dir --prefix=/install ".[providers]" ./packages/krtour-map-dagster
+    && python -m pip install --no-cache-dir --prefix=/install ".[providers]" ./packages/kor-travel-map-dagster
 
 FROM python:3.12-slim AS runtime
 
@@ -55,4 +55,4 @@ USER appuser
 
 EXPOSE 12302
 
-CMD ["sh", "-c", "dagster-webserver -m krtour.map_dagster.definitions -h 0.0.0.0 -p ${KRTOUR_MAP_DAGSTER_PORT:-12302}"]
+CMD ["sh", "-c", "dagster-webserver -m kortravelmap.dagster.definitions -h 0.0.0.0 -p ${KOR_TRAVEL_MAP_DAGSTER_PORT:-12302}"]

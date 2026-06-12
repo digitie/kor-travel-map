@@ -1,10 +1,10 @@
-"""``krtour.map.providers`` re-export 검증 (T-213g) — knps/krheritage 추가."""
+"""``kortravelmap.providers`` re-export 검증 (T-213g) — knps/krheritage 추가."""
 
 from __future__ import annotations
 
 import pytest
 
-from krtour.map import providers
+from kortravelmap import providers
 
 pytestmark = pytest.mark.unit
 

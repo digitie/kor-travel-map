@@ -48,13 +48,13 @@
 - `krforest_trails` — kind=route (산림청 숲길, knps_trails와 sibling 후보)
 
 **module**:
-- `src/krtour/map/providers/knps.py` — 14 dataset 전부
-- `src/krtour/map/providers/krforest_trails.py` — krforest_trails 한정
+- `src/kortravelmap/providers/knps.py` — 14 dataset 전부
+- `src/kortravelmap/providers/krforest_trails.py` — krforest_trails 한정
 
 **SHP/GeoJSON parser 위치 결정** (ADR-028 §B 후속):
-- **본 라이브러리 내**: `src/krtour/map/providers/knps/_parser.py`. 의존
+- **본 라이브러리 내**: `src/kortravelmap/providers/knps/_parser.py`. 의존
   `pyproj>=3.6`, `pyshp>=2.3` (또는 `pyogrio`). EPSG:5179/5186 → WGS84 변환
-  + CP949 인코딩 처리 (kraddr-geo ADR-005 패턴).
+  + CP949 인코딩 처리 (kor-travel-geo ADR-005 패턴).
 - 또는 upstream knps-api `[geo]` extra에 PR로 추가 — Sprint 3 진입 PR
   설계 단계에서 cost/benefit 평가 후 결정.
 
@@ -71,7 +71,7 @@
   - `01070200` `TOURISM_HERITAGE_PALACE_ROYAL_TOMB`
   - `01070300` `TOURISM_HERITAGE_HISTORIC_SITE`
   - `01070400` `TOURISM_HERITAGE_HANOK_FOLK_VILLAGE`
-- **module**: `src/krtour/map/providers/krheritage.py`
+- **module**: `src/kortravelmap/providers/krheritage.py`
 - **사찰/한옥은 MOIS sibling 후보** — Sprint 3 시점엔 MOIS 미적재라
   dedup_review_queue 영향 0. Sprint 5에서 MOIS sibling으로 재검증.
 
@@ -152,7 +152,7 @@
       Phase 1은 본 lib에 Dagster 코드 없이 "관측만" (manual/외부 cron 호출).
 - [x] dedup_review_queue 첫 운영 시작 (PR#87 `core/dedup.find_dedup_candidates`
       + PR#88 `ops.dedup_review_queue` + `infra/dedup_repo.py` + PR#89
-      `AsyncKrtourMapClient.sync_dedup_candidates`). 룰 안정: 실 PostGIS
+      `AsyncKorTravelMapClient.sync_dedup_candidates`). 룰 안정: 실 PostGIS
       integration 5건 + client integration 3건 통과.
 - [x] Coverage bar 75% pass (실측 92.66%, `pyproject.toml` `fail_under=75`
       상향, 본 PR).

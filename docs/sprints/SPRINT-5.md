@@ -17,7 +17,7 @@
 - [x] dedup_review_queue 운영 안정 + F4 WARN baseline 결정 (dedup-merge + 운영
       FP 통계 + F4 provisional 1000)
 - [x] Coverage bar 80% pass (실측 94.12%, `fail_under=80`)
-- [x] Place phone enrichment 백그라운드 시작 (`krtour.map.enrichment`)
+- [x] Place phone enrichment 백그라운드 시작 (`kortravelmap.enrichment`)
 
 ## 2. 산출물
 
@@ -26,7 +26,7 @@
 > `docs/adr045-standalone-plan.md`**(T-205~T-210), 의사결정 결과는
 > `docs/adr045-open-decisions.md`(D-1~D-16 전부 결정 완료), TripMate REST 계약은
 > `docs/tripmate-rest-api.md`. 아래 §2.1+ provider 적재는 ADR-045 Dagster asset
-> (krtour-map 소유)로 운영 전환된다(T-208c).
+> (kor-travel-map 소유)로 운영 전환된다(T-208c).
 
 ### 2.1 Provider ⑧ — 휴양림/수목원 (`python-krforest-api`)
 
@@ -42,7 +42,7 @@
   그대로 가동. MOIS row가 이미 적재되어 있으므로 sibling group 자연
   생성 + `dedup_review_queue` 운영자 검토.
 - **fixture**: 6건 (휴양림 3 + 수목원 3 — 모두 MOIS sibling 후보 포함)
-- **module**: `src/krtour/map/providers/krforest.py` (Sprint 2의
+- **module**: `src/kortravelmap/providers/krforest.py` (Sprint 2의
   `krforest_weather.py`/Sprint 3의 `krforest_trails.py`와 namespace package
   로 통합)
 
@@ -58,7 +58,7 @@
 - **MOIS sibling**:
   - 박물관/미술관 ≅ MOIS `museums_art_galleries` 슬러그
   - 관광지/주차장은 약한 sibling (좌표만 비슷)
-- **module**: `src/krtour/map/standard_data/` (bounded asyncio client,
+- **module**: `src/kortravelmap/standard_data/` (bounded asyncio client,
   v1 패턴 재구현 — `docs/external-apis.md §3.12`)
 - **dedup**: MOIS sibling 적극 검증.
 
@@ -79,7 +79,7 @@
   score가 baseline보다 기본 10점 이상 낮아지면 WARN으로 보고한다. `F8`은
   `feature_files` metadata와 객체 저장소 snapshot을 비교해 metadata-only/object-only/
   삭제 feature 연결을 WARN으로 보고한다. dry-run report는
-  `krtour-map consistency-report` CLI와
+  `ktmctl consistency-report` CLI와
   `docs/reports/t-201b-phase2-dry-run-report-2026-06-06.md`로 산출한다.
 - **Dagster 게이트 적용** (`docs/dagster-boundary.md §12`):
   - root → child 적재 → `consistency_check` 실행
@@ -89,7 +89,7 @@
   후 점진 enable (ADR-033 §결과 부정). 운영 데이터 enable 전에는 같은 CLI를 실제
   DB/RustFS snapshot 대상으로 다시 실행해 report를 갱신한다.
 
-### 2.4 T-200 — Batch DAG + 정합성 게이트 (kraddr-geo ADR-017 미러)
+### 2.4 T-200 — Batch DAG + 정합성 게이트 (kor-travel-geo ADR-017 미러)
 
 - ✅ T-205d: `ops.import_jobs`에 `load_batch_id UUID`, `parent_job_id UUID` 컬럼 추가.
 - ✅ T-200: `infra.batch_dag` + Dagster `full_load_batch_consistency_gate` job 구현.
@@ -99,8 +99,8 @@
   OK/WARN 뒤 `mv_refresh` 단계는 `skipped:no_materialized_views`로 명시 기록한다.
 - phase별 중단/재개 UI/API(`PLAN_ONLY=1` preflight 포함)는 T-212 admin 전체점검에서
   운영 UX와 함께 보강한다.
-- krtour-map Dagster asset 작성. TripMate는 OpenAPI로 update request를 생성하고,
-  provider 적재 asset/worker는 krtour-map이 소유한다(ADR-045/046).
+- kor-travel-map Dagster asset 작성. TripMate는 OpenAPI로 update request를 생성하고,
+  provider 적재 asset/worker는 kor-travel-map이 소유한다(ADR-045/046).
 
 ### 2.5 T-202 — pre-commit hook 정착
 
@@ -151,7 +151,7 @@
 
 - **ADR-035+** 후보:
   - 신규 provider 추가 절차 표준 (체크리스트)
-  - `@krtour/map-marker-react` npm 게시 자동화 (release / version sync)
+  - `@kor-travel-map/map-marker-react` npm 게시 자동화 (release / version sync)
   - `core.feature_consistency_reports` Phase 2 알림 sink
     (Slack/Telegram/Sentry)
   - Sprint 2 SHP/GeoJSON parsing 위치 결정 정식화
@@ -202,7 +202,7 @@
    클러스터 rollup MV(`mv_feature_cluster_counts`) 시범을 도입한다. 실 볼륨 측정은
    T-212e에서 보강한다.
 4. **T-212e-live-full-reload-final-verification** — provider full reload, offline upload,
-   kraddr-geo 보강, consistency gate, API smoke, Playwright, backup/restore smoke를 한
+   kor-travel-geo 보강, consistency gate, API smoke, Playwright, backup/restore smoke를 한
    리포트로 묶는다.
 5. **T-210-tripmate-integration-cleanup** — TripMate 문서/ETL skeleton/backend client/
    frontend generated type을 ADR-045 OpenAPI 모델로 정리한다.

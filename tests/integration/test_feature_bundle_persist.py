@@ -18,8 +18,8 @@ from typing import TYPE_CHECKING
 import pytest
 from sqlalchemy import select, text
 
-from krtour.map.infra.models import FeatureRow, SourceLinkRow, SourceRecordRow
-from krtour.map.providers.standard_data import cultural_festivals_to_bundles
+from kortravelmap.infra.models import FeatureRow, SourceLinkRow, SourceRecordRow
+from kortravelmap.providers.standard_data import cultural_festivals_to_bundles
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession

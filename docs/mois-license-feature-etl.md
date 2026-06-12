@@ -21,7 +21,7 @@ feature로 승격하는 ETL의 Step B 좁은 가이드다. 폐업/취소/제외 
 >   source_entity_ids` (status='inactive', ADR-017).
 > - Step D detail: debug-ui `GET /debug/mois-license/{license_id}` +
 >   `feature_repo.get_primary_source_detail` (캐시만, 적재 없음).
-> - CLI: `krtour-map import mois <file> --mode {bulk|incremental|closed} [--cursor]`.
+> - CLI: `ktmctl import mois <file> --mode {bulk|incremental|closed} [--cursor]`.
 
 ## 1. 문서 정보
 
@@ -32,7 +32,7 @@ feature로 승격하는 ETL의 Step B 좁은 가이드다. 폐업/취소/제외 
 | Feature.kind | `place` |
 | source_entity_type | `license_place` |
 | 상세 테이블 | `feature_place_details` |
-| 코드 entrypoint | `krtour.map.providers.mois` (변환), `krtour.map.mois` (loader) |
+| 코드 entrypoint | `kortravelmap.providers.mois` (변환), `kortravelmap.mois` (loader) |
 | 갱신 주기 | 주 1회 (full update) |
 
 ## 2. 범위 / 책임
@@ -40,9 +40,9 @@ feature로 승격하는 ETL의 Step B 좁은 가이드다. 폐업/취소/제외 
 - `python-mois-api`: localdata zip 다운로드 + MOIS source DB 갱신, raw/localdata
   detail 보존, 영업중/폐업 iterator (`iter_open_place_records`,
   `iter_closed_place_records`), 주소 EPSG:5174 → WGS84 변환.
-- `python-krtour-map`: 영업중 `PlaceRecord` → `Feature(kind=place)` + `PlaceDetail`,
+- `kor-travel-map`: 영업중 `PlaceRecord` → `Feature(kind=place)` + `PlaceDetail`,
   service slug 필터링, 오래된 MOIS feature 삭제, job metadata.
-- krtour-map Dagster: MOIS source DB session, feature DB session, reverse
+- kor-travel-map Dagster: MOIS source DB session, feature DB session, reverse
   geocoder, transaction, 알림.
 
 wrapper/adapter/gateway 금지. 누락은 `python-mois-api`에서 먼저.
@@ -107,7 +107,7 @@ service slug → `PlaceDetail.place_kind` + category:
 ## 6. 주소·좌표
 
 - 원본 좌표: EPSG:5174 → WGS84 변환 (`python-mois-api`가 처리).
-- 주소: `admin_address` (지번) + `road_address` (도로명) → `krtour.map.dto.Address`.
+- 주소: `admin_address` (지번) + `road_address` (도로명) → `kortravelmap.dto.Address`.
 - `mng_no` (관리번호 25자): `source_entity_id`.
 - **`sigun_code` (관할기관)는 법정동코드 아님** — raw/payload만.
 - reverse geocoder **필수** — 정확한 `legal_dong_code` 확정 위해.
@@ -172,12 +172,12 @@ service slug → `PlaceDetail.place_kind` + category:
 ```
 
 각 업종별 facility fields는 MOIS localdata의 service-specific 컬럼에서 추출.
-스키마는 코드 상수 (`MOIS_FACILITY_FIELD_MAP` — `krtour.map.providers.mois`).
+스키마는 코드 상수 (`MOIS_FACILITY_FIELD_MAP` — `kortravelmap.providers.mois`).
 
 ## 9. DB 적재 흐름
 
 ```python
-from krtour.map.mois import (
+from kortravelmap.mois import (
     MOIS_LICENSE_FEATURE_DATASET_KEY,
     collect_and_load_mois_license_features,
     load_mois_license_feature_result,
@@ -219,7 +219,7 @@ async def run_mois_weekly_update(
 | 항목 | 값 |
 |------|----|
 | asset 이름 | `feature_place_mois_licenses` |
-| JOB_SPEC | `krtour.map.providers.mois.JOB_SPEC` |
+| JOB_SPEC | `kortravelmap.providers.mois.JOB_SPEC` |
 | suggested cron | `0 2 * * 1` (매주 월 02:00 KST) — 또는 `0 2 5 * *` (월 5일) |
 | group | `features_place` |
 | ConcurrencyConfig | `mois_api: max_concurrent=1` |

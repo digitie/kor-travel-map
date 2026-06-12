@@ -21,8 +21,8 @@ from typing import Any
 
 import pytest
 
-from krtour.map.dto import FeatureBundle, FeatureKind, SourceRole
-from krtour.map.providers.knps import (
+from kortravelmap.dto import FeatureBundle, FeatureKind, SourceRole
+from kortravelmap.providers.knps import (
     KNPS_GEOMETRY_DATASET_KEYS,
     KNPS_GEOMETRY_DATASETS,
     KNPS_PLACE_DATASETS,
@@ -32,16 +32,16 @@ from krtour.map.providers.knps import (
     KnpsPointColumnMap,
     resolve_cultural_resource_category,
 )
-from krtour.map.providers.knps import (
+from kortravelmap.providers.knps import (
     knps_csv_preview_to_geometry_bundles as _csv_geometry_async,
 )
-from krtour.map.providers.knps import (
+from kortravelmap.providers.knps import (
     knps_csv_preview_to_point_bundles as _csv_point_async,
 )
-from krtour.map.providers.knps import (
+from kortravelmap.providers.knps import (
     knps_geometry_records_to_bundles as _geometry_async,
 )
-from krtour.map.providers.knps import (
+from kortravelmap.providers.knps import (
     knps_point_records_to_bundles as _point_async,
 )
 

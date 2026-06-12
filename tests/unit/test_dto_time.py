@@ -12,8 +12,8 @@ from zoneinfo import ZoneInfo
 import pytest
 from pydantic import ValidationError
 
-from krtour.map.dto import RawDataRef, check_aware_datetime, kst_now
-from krtour.map.dto._time import KST
+from kortravelmap.dto import RawDataRef, check_aware_datetime, kst_now
+from kortravelmap.dto._time import KST
 
 
 @pytest.mark.unit

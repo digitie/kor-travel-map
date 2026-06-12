@@ -15,18 +15,18 @@ from typing import Any
 
 import pytest
 
-from krtour.map.dto import Address, Coordinate, FeatureBundle, FeatureKind, SourceRole
-from krtour.map.providers.krforest import (
+from kortravelmap.dto import Address, Coordinate, FeatureBundle, FeatureKind, SourceRole
+from kortravelmap.providers.krforest import (
     ARBORETUM_CATEGORY,
     DATASET_KEY_ARBORETUMS,
     DATASET_KEY_RECREATION_FORESTS,
     KRFOREST_MARKER_COLOR,
     RECREATION_FOREST_CATEGORY,
 )
-from krtour.map.providers.krforest import (
+from kortravelmap.providers.krforest import (
     arboretums_to_bundles as _arboretums_async,
 )
-from krtour.map.providers.krforest import (
+from kortravelmap.providers.krforest import (
     recreation_forests_to_bundles as _recreation_forests_async,
 )
 

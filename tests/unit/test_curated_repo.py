@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from krtour.map.infra import curated_repo
+from kortravelmap.infra import curated_repo
 
 pytestmark = pytest.mark.unit
 

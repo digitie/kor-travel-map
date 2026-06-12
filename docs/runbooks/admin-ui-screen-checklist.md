@@ -1,6 +1,6 @@
 # admin UI 화면별 점검 체크리스트 (T-218f)
 
-`krtour-map-admin` frontend(Next.js, 포트 12305)의 route 전수(현재 17)를 **운영 회귀·
+`kor-travel-map-admin` frontend(Next.js, 포트 12305)의 route 전수(현재 17)를 **운영 회귀·
 a11y·e2e 커버 관점에서 점검**하기 위한 체크리스트다. T-218(admin UI 상세 점검 + a11y/e2e 완비)의
 점검 항목을 화면 단위로 고정하고, 현재 e2e 커버 상태를 매핑한다.
 

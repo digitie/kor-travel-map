@@ -12,8 +12,8 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from krtour.map.dto import Address, Coordinate, Feature, PlaceDetail
-from krtour.map.infra.admin_feature_repo import (
+from kortravelmap.dto import Address, Coordinate, Feature, PlaceDetail
+from kortravelmap.infra.admin_feature_repo import (
     FeatureStateConflict,
     apply_feature_change_request,
     deactivate_feature,
@@ -23,8 +23,8 @@ from krtour.map.infra.admin_feature_repo import (
     set_dedup_review_decision,
     submit_feature_change_request,
 )
-from krtour.map.infra.feature_repo import upsert_feature
-from krtour.map.infra.models import (
+from kortravelmap.infra.feature_repo import upsert_feature
+from kortravelmap.infra.models import (
     DedupReviewQueueRow,
     FeatureRow,
     SourceLinkRow,

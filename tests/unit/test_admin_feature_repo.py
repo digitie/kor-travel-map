@@ -8,8 +8,8 @@ from typing import Any
 
 import pytest
 
-from krtour.map.infra import admin_feature_repo as repo
-from krtour.map.infra.merge_repo import MergeError, MergeOutcome
+from kortravelmap.infra import admin_feature_repo as repo
+from kortravelmap.infra.merge_repo import MergeError, MergeOutcome
 
 _NOW = datetime(2026, 6, 3, tzinfo=UTC)
 _REVIEW_KEY_1 = "00000000-0000-0000-0000-000000000001"

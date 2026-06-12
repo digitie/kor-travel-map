@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 from sqlalchemy import text
 
-from krtour.map.infra.log_repo import (
+from kortravelmap.infra.log_repo import (
     list_api_call_logs,
     list_system_logs,
     record_api_call,

@@ -9,7 +9,7 @@ from typing import Any, cast
 
 import pytest
 
-from krtour.map.infra.poi_cache_target_repo import (
+from kortravelmap.infra.poi_cache_target_repo import (
     PoiCacheTargetPage,
     list_poi_cache_targets,
 )
