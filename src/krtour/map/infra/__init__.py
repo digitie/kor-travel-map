@@ -150,6 +150,10 @@ from krtour.map.infra.jobs_repo import (
 )
 from krtour.map.infra.models import (
     Base,
+    CuratedFeatureRow,
+    CuratedSourceRow,
+    CuratedSourceRuleRow,
+    CuratedThemeRow,
     DataIntegrityViolationRow,
     DedupReviewQueueRow,
     FeatureConsistencyReportRow,
@@ -241,6 +245,10 @@ __all__ = [
     # models (PR#28, ADR-004 / ADR-007 / ADR-018)
     "Base",
     "metadata",
+    "CuratedFeatureRow",
+    "CuratedSourceRow",
+    "CuratedSourceRuleRow",
+    "CuratedThemeRow",
     "FeatureRow",
     "SourceRecordRow",
     "SourceLinkRow",

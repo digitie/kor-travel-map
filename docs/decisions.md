@@ -3107,8 +3107,9 @@ supersede한다. export 경로(`/api/v1/features/{snapshot|changes}`), cursor/en
 ### 배경
 
 사용자 결정으로 기존 `tripmate-agent` 프로젝트의 제품/서비스명은
-`krtour-ai-agent`가 됐다. 로컬 체크아웃 경로는 당분간 `F:\dev\tripmate-agent`일 수
-있지만, 문서·코드·provider 계약에서의 정식 identity는 `krtour-ai-agent`로 본다.
+`krtour-ai-agent`가 됐다. 로컬 체크아웃 경로는 `F:\dev\tripmate-agent`지만,
+그 프로젝트의 canonical 이름은 `krtour-ai-agent`이며 문서·코드·provider 계약도
+`krtour-ai-agent`를 쓴다.
 또한 이 agent는 TripMate의 `curated_trip_plans` 생성 flow에 관여하지 않고,
 TripMate와 직접 연동하지 않는다. YouTube/AI 후보 provider 관계는
 **krtour-map ↔ krtour-ai-agent** 사이에만 존재한다.

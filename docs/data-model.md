@@ -202,10 +202,12 @@ CREATE INDEX idx_feature_versions_request
 - 사용자 요청 삭제는 version 1 `change_kind='delete'`와 `feature.features` soft delete
   marker를 함께 남긴다.
 
-### 1.2 `feature.curated_*` (테마형 overlay, 계획)
+### 1.2 `feature.curated_*` (테마형 overlay, T-223c-1 구현)
 
 테마형 큐레이션은 `feature.features`를 복제하지 않고 overlay로 관리한다. 정본 계약은
 [`docs/curated-features.md`](curated-features.md)다. DB schema는 `feature`에 둔다.
+T-223c-1에서 Alembic `0025_curated_features`로 4개 테이블과 1차 seed metadata/rule을
+추가했다.
 
 테이블:
 

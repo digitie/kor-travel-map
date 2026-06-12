@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-12 (codex) — T-223c-1 curated DB/API foundation
+
+curated feature overlay의 DB/API foundation을 구현했다.
+
+- **DB**: Alembic `0025_curated_features`로 `feature.curated_themes`,
+  `curated_sources`, `curated_source_rules`, `curated_features`와 1차 seed
+  source/rule을 추가했다. UUID default는 `x_extension.gen_random_uuid()`로 고정.
+- **Backend API**: `curated_repo` + `/v1/curated-*` read, `/v1/admin/curated-*`
+  write/select/unselect/archive/source-rule-apply, TripMate copy snapshot을 추가했다.
+- **Contract**: `openapi.json`/`openapi.user.json`과 `@krtour/map-user-client`
+  generated type을 재생성했다.
+- **후속 분리**: Dagster group은 T-223c-2, Admin UI는 T-223c-3으로 분리했다.
+
 ## 2026-06-12 (claude) — T-212e: mcst 좌표도 격리 (#400 패턴, T-220 후속)
 
 `feature_place_mcst_culture` live 적재가 73분 진행 후 `lat=42.6406462,

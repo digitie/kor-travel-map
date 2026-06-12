@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### curated_features DB/API foundation (T-223c-1, 2026-06-12)
+
+- **ADDED**: `feature.curated_themes`, `curated_sources`,
+  `curated_source_rules`, `curated_features` overlay 테이블과 1차 seed source/rule.
+- **ADDED**: `GET /v1/curated-themes`, `/v1/curated-sources`,
+  `/v1/curated-features*` 및 `/tripmate-copy` snapshot API.
+- **ADDED**: `/v1/admin/curated-*` backend API — feature select/unselect/archive,
+  theme/source/rule create/patch, source rule apply.
+- **CHANGED**: `openapi.user.json`과 `@krtour/map-user-client` 타입에 curated read
+  표면과 TripMate copy snapshot schema를 포함했다.
+
 ### 공개 해수욕장/축제 view API (T-222b, 2026-06-12)
 
 - **ADDED**: `GET /v1/public/beaches`, `/v1/public/beaches/map-markers`,

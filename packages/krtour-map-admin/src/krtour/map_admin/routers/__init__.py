@@ -18,6 +18,8 @@ from krtour.map_admin.routers.admin_backups import router as admin_backups_route
 from krtour.map_admin.routers.admin_features import router as admin_features_router
 from krtour.map_admin.routers.admin_issues import router as admin_issues_router
 from krtour.map_admin.routers.categories import router as categories_router
+from krtour.map_admin.routers.curated import admin_router as admin_curated_router
+from krtour.map_admin.routers.curated import router as curated_router
 from krtour.map_admin.routers.dagster import router as dagster_router
 from krtour.map_admin.routers.dedup_review import router as dedup_review_router
 from krtour.map_admin.routers.enrichment_review import (
@@ -50,6 +52,7 @@ __all__ = [
     "admin_backups_router",
     "admin_restore_router",
     "admin_features_router",
+    "admin_curated_router",
     "admin_issues_router",
     "dedup_review_router",
     "enrichment_review_router",
@@ -67,4 +70,5 @@ __all__ = [
     "public_status_router",
     "providers_router",
     "public_views_router",
+    "curated_router",
 ]

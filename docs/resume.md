@@ -1,5 +1,26 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-12 Codex 작업 메모 — T-223c-1 curated DB/API foundation
+
+T-223c 첫 조각으로 krtour-map의 curated overlay DB/API 기반을 구현했다.
+
+- Alembic `0025_curated_features`로 `feature.curated_themes`,
+  `curated_sources`, `curated_source_rules`, `curated_features` 4개 테이블과
+  책방/세계음식/무장애/반려동물/가족/미디어/레저/특화거리 seed source/rule을 추가했다.
+- `curated_repo`를 추가해 list/detail/create/patch/select/unselect/archive,
+  source rule apply, TripMate copy snapshot(`etag`, `copy_version`)을 제공한다.
+- `GET /v1/curated-themes`, `/curated-sources`, `/curated-features*`,
+  `/tripmate-copy`와 `/v1/admin/curated-*` backend API를 추가했다.
+- `openapi.json`/`openapi.user.json`과 `@krtour/map-user-client` 타입을 재생성했다.
+
+검증: curated route unit, curated repo integration, targeted ruff/mypy 통과.
+
+**다음 한 작업**: **T-223c-2** — Dagster `curated_features` group 구현.
+`curated_source_metadata`, `curated_feature_candidates`, `curated_feature_status_sweep`,
+copy snapshot materialize/cache를 backend repo 함수와 연결한다. 이후 T-223c-3 Admin UI,
+T-223d TripMate 복사 연동 순서로 진행한다. T-212e는 다른 agent가 병행 진행 중이며,
+결과는 T-225에서 다시 대조한다.
+
 ## 2026-06-12 Codex 작업 메모 — T-222b public beaches/festivals API
 
 T-222b로 TripMate T-130 차단 조건이던 공개 해수욕장/축제 사용자 API를 krtour-map

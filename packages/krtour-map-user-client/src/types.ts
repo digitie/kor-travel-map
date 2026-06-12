@@ -41,6 +41,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/curated-features": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Curated Features Route */
+        get: operations["list_curated_features_route_v1_curated_features_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/curated-features/{curated_feature_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Curated Feature Route */
+        get: operations["get_curated_feature_route_v1_curated_features__curated_feature_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/curated-features/{curated_feature_id}/tripmate-copy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Curated Tripmate Copy Route */
+        get: operations["get_curated_tripmate_copy_route_v1_curated_features__curated_feature_id__tripmate_copy_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/curated-sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Curated Sources Route */
+        get: operations["list_curated_sources_route_v1_curated_sources_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/curated-themes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Curated Themes Route */
+        get: operations["list_curated_themes_route_v1_curated_themes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/features/batch": {
         parameters: {
             query?: never;
@@ -490,6 +575,219 @@ export interface components {
             lat: number;
             /** Lon */
             lon: number;
+        };
+        /** CuratedFeatureResponse */
+        CuratedFeatureResponse: {
+            data: components["schemas"]["CuratedFeatureView"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * CuratedFeatureView
+         * @description curated feature overlay view.
+         */
+        CuratedFeatureView: {
+            /** Address */
+            address: {
+                [key: string]: unknown;
+            };
+            /** Archived At */
+            archived_at?: string | null;
+            /** Copy Version */
+            copy_version: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Curated Feature Id */
+            curated_feature_id: string;
+            /** Curation Status */
+            curation_status: string;
+            /** Dataset Key */
+            dataset_key: string;
+            /** Detail */
+            detail: {
+                [key: string]: unknown;
+            };
+            /** Display Summary */
+            display_summary?: string | null;
+            /** Display Title */
+            display_title?: string | null;
+            /** Feature Category */
+            feature_category: string;
+            /** Feature Id */
+            feature_id: string;
+            /** Feature Kind */
+            feature_kind: string;
+            /** Feature Name */
+            feature_name: string;
+            /** Lat */
+            lat?: number | null;
+            /** Legal Dong Code */
+            legal_dong_code?: string | null;
+            /** Lon */
+            lon?: number | null;
+            /** Metadata */
+            metadata: {
+                [key: string]: unknown;
+            };
+            /** Provider */
+            provider: string;
+            /** Rank Score */
+            rank_score: number;
+            /** Rejected At */
+            rejected_at?: string | null;
+            /** Rejected By */
+            rejected_by?: string | null;
+            /** Rejection Reason */
+            rejection_reason?: string | null;
+            /** Selected At */
+            selected_at?: string | null;
+            /** Selected By */
+            selected_by?: string | null;
+            /** Selection Origin */
+            selection_origin: string;
+            /** Sido Code */
+            sido_code?: string | null;
+            /** Sigungu Code */
+            sigungu_code?: string | null;
+            /** Source Id */
+            source_id: string;
+            /** Source Name */
+            source_name: string;
+            /** Source Record Key */
+            source_record_key?: string | null;
+            /** Source Url */
+            source_url?: string | null;
+            /** Theme Group */
+            theme_group: string;
+            /** Theme Id */
+            theme_id: string;
+            /** Theme Name */
+            theme_name: string;
+            /** Theme Slug */
+            theme_slug: string;
+            /** Tripmate Copy Policy */
+            tripmate_copy_policy: string;
+            /** Tripmate Relation */
+            tripmate_relation: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** CuratedFeaturesData */
+        CuratedFeaturesData: {
+            /** Items */
+            items: components["schemas"]["CuratedFeatureView"][];
+        };
+        /** CuratedFeaturesResponse */
+        CuratedFeaturesResponse: {
+            data: components["schemas"]["CuratedFeaturesData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * CuratedSourceView
+         * @description curated source metadata view.
+         */
+        CuratedSourceView: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Dataset Key */
+            dataset_key: string;
+            /** Freshness Note */
+            freshness_note?: string | null;
+            /** Last Checked At */
+            last_checked_at?: string | null;
+            /** Last Source Modified At */
+            last_source_modified_at?: string | null;
+            /** License */
+            license?: string | null;
+            /** Metadata */
+            metadata: {
+                [key: string]: unknown;
+            };
+            /** Next Expected At */
+            next_expected_at?: string | null;
+            /** Provider */
+            provider: string;
+            /** Provider Status */
+            provider_status: string;
+            /** Row Count */
+            row_count?: number | null;
+            /** Source Id */
+            source_id: string;
+            /** Source Kind */
+            source_kind: string;
+            /** Source Name */
+            source_name: string;
+            /** Source Url */
+            source_url?: string | null;
+            /** Update Cycle */
+            update_cycle: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** CuratedSourcesData */
+        CuratedSourcesData: {
+            /** Items */
+            items: components["schemas"]["CuratedSourceView"][];
+        };
+        /** CuratedSourcesResponse */
+        CuratedSourcesResponse: {
+            data: components["schemas"]["CuratedSourcesData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * CuratedThemeView
+         * @description curated theme view.
+         */
+        CuratedThemeView: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Default Curated */
+            default_curated: boolean;
+            /** Metadata */
+            metadata: {
+                [key: string]: unknown;
+            };
+            /** Theme Description */
+            theme_description: string;
+            /** Theme Group */
+            theme_group: string;
+            /** Theme Id */
+            theme_id: string;
+            /** Theme Name */
+            theme_name: string;
+            /** Theme Slug */
+            theme_slug: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Visibility */
+            visibility: string;
+        };
+        /** CuratedThemesData */
+        CuratedThemesData: {
+            /** Items */
+            items: components["schemas"]["CuratedThemeView"][];
+        };
+        /** CuratedThemesResponse */
+        CuratedThemesResponse: {
+            data: components["schemas"]["CuratedThemesData"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * FeatureBatchData
@@ -1027,6 +1325,66 @@ export interface components {
             /** Sync Scope */
             sync_scope: string;
         };
+        /**
+         * TripmateCopyItemView
+         * @description TripMate curated_plan_pois copy item.
+         */
+        TripmateCopyItemView: {
+            /** Curated Feature Item Id */
+            curated_feature_item_id: string;
+            /** Day Index */
+            day_index?: number | null;
+            /** Feature Id */
+            feature_id: string;
+            /** Feature Snapshot */
+            feature_snapshot: {
+                [key: string]: unknown;
+            };
+            /** Memo */
+            memo?: string | null;
+            /** Relation */
+            relation: string;
+            /** Sort Order */
+            sort_order: number;
+            /** Source Record Key */
+            source_record_key?: string | null;
+        };
+        /** TripmateCopySnapshotResponse */
+        TripmateCopySnapshotResponse: {
+            data: components["schemas"]["TripmateCopySnapshotView"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * TripmateCopySnapshotView
+         * @description TripMate import snapshot.
+         */
+        TripmateCopySnapshotView: {
+            /** Curated Feature Id */
+            curated_feature_id: string;
+            /** Etag */
+            etag: string;
+            /** Items */
+            items: components["schemas"]["TripmateCopyItemView"][];
+            /** Plan */
+            plan: {
+                [key: string]: unknown;
+            };
+            /** Source */
+            source: {
+                [key: string]: unknown;
+            };
+            /** Theme */
+            theme: {
+                [key: string]: unknown;
+            };
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Version */
+            version: number;
+        };
         /** ValidationError */
         ValidationError: {
             /** Context */
@@ -1147,6 +1505,181 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CategoriesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_curated_features_route_v1_curated_features_get: {
+        parameters: {
+            query?: {
+                theme_id?: string | null;
+                theme_slug?: string | null;
+                source_id?: string | null;
+                provider?: string | null;
+                dataset_key?: string | null;
+                curation_status?: ("candidate" | "curated" | "rejected" | "archived") | null;
+                region_code?: string | null;
+                sido_code?: string | null;
+                sigungu_code?: string | null;
+                min_lon?: number | null;
+                min_lat?: number | null;
+                max_lon?: number | null;
+                max_lat?: number | null;
+                q?: string | null;
+                page_size?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CuratedFeaturesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_curated_feature_route_v1_curated_features__curated_feature_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                curated_feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CuratedFeatureResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_curated_tripmate_copy_route_v1_curated_features__curated_feature_id__tripmate_copy_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                curated_feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TripmateCopySnapshotResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_curated_sources_route_v1_curated_sources_get: {
+        parameters: {
+            query?: {
+                provider?: string | null;
+                dataset_key?: string | null;
+                provider_status?: ("implemented" | "provider_needed" | "manual_only" | "deprecated") | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CuratedSourcesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_curated_themes_route_v1_curated_themes_get: {
+        parameters: {
+            query?: {
+                visibility?: ("admin_only" | "public" | "tripmate") | null;
+                theme_group?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CuratedThemesResponse"];
                 };
             };
             /** @description Validation Error */
