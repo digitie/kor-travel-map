@@ -113,8 +113,9 @@ class KnpsPointRecord(Protocol):
         ...
 
     @property
-    def name(self) -> str:
-        """시설 이름 (한글)."""
+    def name(self) -> str | None:
+        """시설 이름 (한글). knps-api ``KnpsPlaceRecord.name``은 ``str | None``
+        (ADR-044 — provider 실모델 기준). 없으면 행 skip."""
         ...
 
     @property
@@ -247,8 +248,16 @@ async def _point_record_to_bundle(
     *,
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None,
-) -> FeatureBundle:
-    """KNPS point record 1건 → place ``FeatureBundle``."""
+) -> FeatureBundle | None:
+    """KNPS point record 1건 → place ``FeatureBundle``.
+
+    이름 없는 record는 ``None`` 반환 — ``Feature.name`` 필수에 표시/검색 단서가
+    없다 (mcst/datagokr file-data와 동일 규칙, 호출자가 skip).
+    """
+    normalized_name = normalize_korean_text(record.name)
+    if normalized_name is None:  # None/빈/공백-only 이름 모두 skip
+        return None
+
     if spec.dynamic:
         category, place_kind = resolve_cultural_resource_category(record.raw)
     else:
@@ -280,8 +289,6 @@ async def _point_record_to_bundle(
         source_type=f"{PROVIDER_NAME}:{spec.dataset_key}",
         source_natural_key=record.source_id,
     )
-
-    normalized_name = normalize_korean_text(record.name) or record.name
 
     feature = Feature(
         feature_id=feature_id,
@@ -337,6 +344,9 @@ async def knps_point_records_to_bundles(
 ) -> list[FeatureBundle]:
     """KNPS Point/place dataset의 파싱된 행들 → ``list[FeatureBundle]``.
 
+    이름 없는 행은 **건너뛴다** — ``Feature.name`` 필수에 표시/검색 단서가 없다
+    (mcst/datagokr file-data와 동일 규칙).
+
     Parameters
     ----------
     records
@@ -377,12 +387,14 @@ async def knps_point_records_to_bundles(
         if reverse_geocoder is not None
         else None
     )
-    return [
-        await _point_record_to_bundle(
+    bundles: list[FeatureBundle] = []
+    for record in records:
+        bundle = await _point_record_to_bundle(
             record, spec, fetched_at=fetched_at, reverse_geocoder=geocoder
         )
-        for record in records
-    ]
+        if bundle is not None:
+            bundles.append(bundle)
+    return bundles
 
 
 # =====================================================================
@@ -405,8 +417,9 @@ class KnpsGeometryRecord(Protocol):
         ...
 
     @property
-    def name(self) -> str:
-        """탐방로/구역 이름 (한글)."""
+    def name(self) -> str | None:
+        """탐방로/구역 이름 (한글). knps-api ``KnpsGeoRecord.name``은
+        ``str | None`` (ADR-044 — provider 실모델 기준). 없으면 행 skip."""
         ...
 
     @property
@@ -549,8 +562,13 @@ async def _geometry_record_to_bundle(
 ) -> FeatureBundle | None:
     """KNPS geometry record 1건 → route/area ``FeatureBundle``.
 
-    geometry 파싱 실패/경계 밖 centroid는 ``None`` 반환 (호출자가 skip/집계).
+    이름 없는 record/geometry 파싱 실패/경계 밖 centroid는 ``None`` 반환
+    (호출자가 skip/집계).
     """
+    normalized_name = normalize_korean_text(record.name)
+    if normalized_name is None:  # None/빈/공백-only 이름 모두 skip
+        return None
+
     try:
         canonical_wkt, centroid = normalize_geometry(
             record.geom_wkt, allowed_types=spec.allowed_geom_types
@@ -583,8 +601,6 @@ async def _geometry_record_to_bundle(
         source_type=f"{PROVIDER_NAME}:{spec.dataset_key}",
         source_natural_key=record.source_id,
     )
-    normalized_name = normalize_korean_text(record.name) or record.name
-
     feature = Feature(
         feature_id=feature_id,
         kind=spec.feature_kind,
@@ -630,8 +646,9 @@ async def knps_geometry_records_to_bundles(
 ) -> list[FeatureBundle]:
     """KNPS route/area dataset의 파싱된 행들(WKT geometry) → ``list[FeatureBundle]``.
 
-    geometry 파싱 실패/한국 경계 밖 centroid 행은 **건너뛴다**(결과에서 제외).
-    SHP/CSV 디코딩·좌표계 변환은 호출자 책임 — 본 함수는 WKT(4326) 입력만 받는다.
+    이름 없는 행/geometry 파싱 실패/한국 경계 밖 centroid 행은 **건너뛴다**
+    (결과에서 제외). SHP/CSV 디코딩·좌표계 변환은 호출자 책임 — 본 함수는
+    WKT(4326) 입력만 받는다.
 
     Parameters
     ----------

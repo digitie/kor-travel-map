@@ -11,9 +11,6 @@
 > 완료 이력은 [`tasks-done.md`](tasks-done.md).
 
 - **다음 (우선순위 순)**
-  - [ ] T-212e — **실데이터 전체 재적재 + offline upload 실데이터 검증 + 최종 리포트**.
-        다른 agent가 병행 진행 중이다(2026-06-12 사용자 확인). T-221/T-222/T-223은
-        완료됐으므로, T-212e 결과가 머지되면 후속 T-225 closure 재검증에 반영한다.
   - [ ] T-225 — **T-212e closure 재검증**. T-224/T-221/T-222/T-223 이후 main 기준으로
         T-212e 실데이터 full reload/offline upload 결과를 한 번 더 대조한다. 다른 agent의
         T-212e 결과가 이미 충분하면 재실행 대신 최신 provider/API 표면 포함 여부,
@@ -53,6 +50,13 @@
         T-226b는 실제 이동 전 최종 layout(`kortravelmap`, `kortravelmap.admin`,
         `kortravelmap.dagster`), no-shim 원칙, grep/OpenAPI/type/lint gate, 후속
         T-226c/d/e 분할을 확정했다.
+  - [x] **T-212e — 실데이터 전체 재적재 + offline upload 실데이터 검증 + 최종
+        리포트. 완료(2026-06-12, claude)**: 빈 DB에서 전 provider 적재
+        1,095,665 features, consistency gate OK(report `99159eea`), offline
+        upload 3포맷+DELETE lifecycle, e2e 33/33, API smoke 17/17,
+        backup/restore smoke, P99 수집. 정본
+        `docs/reports/t-212e-live-full-reload-final-2026-06-12.md`.
+        이슈 #397/#407/#409 close. 후속 대조는 T-225.
   - [x] **T-223 — curated_features + TripMate curated_trip_plans import 계약/구현.
         완료(2026-06-12, Codex)**: T-223a 문서 계약, T-223b provider 보강,
         T-223c-1 DB/API/OpenAPI foundation, T-223c-2 Dagster group, T-223c-3
@@ -176,7 +180,7 @@
         신선도 테이블, nav 등재) + e2e + `docs/rest-api.md` §2.4 갱신. 단건
         `GET /v1/providers/{provider}/last-sync` 유지.
 - **Phase 7 — ADR-045 전체점검/튜닝 (ADR-045 잔여 task 완료 후 시작)**
-  - [ ] T-212e
+  - [x] T-212e — 완료(2026-06-12), `tasks-done.md` 참조
   - [ ] T-225 — T-212e closure 재검증
 
 ## 진행 중
@@ -935,13 +939,6 @@ T-214/T-215(#317)의 `/v1` 1차 정리 위에 ADR-048 delta를 얹는다. 정본
         `status + provider` read path scalar fast path 튜닝. 클러스터 MV는 exact-viewport →
         region-total 의미 변경 때문에 미도입. 상세:
         `docs/reports/t-212d-read-heavy-rerun-2026-06-10.md`.
-- [ ] T-212e — 실데이터 전체 재적재 + offline upload 실데이터 검증 + 최종 리포트.
-      DB를 비운 뒤 처음부터 다시 로드하고, provider 실데이터와 offline upload
-      CSV/TSV/JSONL 실데이터 적재, kraddr-geo bjd 보강, Playwright e2e, API smoke,
-      Dagster 상태를 모두 확인한다.
-      provider별 성공/실패/skip, import job/Dagster run id, consistency report id,
-      backup/restore smoke 결과를 `docs/reports/t-212e-live-full-reload-final-*.md`에
-      남긴다.
 - [ ] T-218 — admin UI 상세 구현 점검 + a11y/e2e 완비. TripMate "Claude Sprint 4 PR-C
       프론트"(화면별 슬라이스 + E2E)와 동급의 **화면별 상세 점검 + 잔여 갭 완비**.
       admin/ops UI 16 route는 이미 전부 구현 + e2e 15/16 커버(T-212b 완료)이므로, 본
