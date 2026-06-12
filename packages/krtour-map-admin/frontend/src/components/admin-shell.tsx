@@ -16,6 +16,7 @@ import {
   RefreshCwIcon,
   RadarIcon,
   RouteIcon,
+  SparklesIcon,
   WorkflowIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -34,6 +35,11 @@ const navItems = [
     href: "/admin/features/change-requests",
     label: "Feature changes",
     icon: ClipboardListIcon,
+  },
+  {
+    href: "/admin/curated-features",
+    label: "Curated features",
+    icon: SparklesIcon,
   },
   { href: "/admin/issues", label: "Issues", icon: AlertTriangleIcon },
   { href: "/ops/import-jobs", label: "Import jobs", icon: ListChecksIcon },

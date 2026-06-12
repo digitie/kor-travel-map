@@ -1,5 +1,26 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-12 Codex 작업 메모 — T-223c-3 curated Admin UI
+
+T-223c-3로 curated overlay 운영 화면을 admin frontend에 연결했다.
+
+- `/admin/curated-features` route를 추가했다. theme/provider/dataset/status/page
+  filter와 후보 table을 제공하고, row별 select/unselect/archive mutation을 연결했다.
+- 선택 후보 inspector에서 display title/summary, rank score, TripMate copy policy,
+  TripMate relation을 편집할 수 있다.
+- Source rule 목록과 editor를 붙여 `enabled`, `default_action`, `priority`,
+  `place_kind`, `category`, `region_scope`, `metadata`를 수정하고 rule apply를 실행할 수
+  있다.
+- TripMate copy preview는 `/v1/curated-features/{id}/tripmate-copy` snapshot을 조회해
+  plan/source/theme/items를 보여준다.
+
+검증: admin frontend `type-check`, `lint`, React Doctor 통과(Doctor는 필수 error 없음,
+optional warning만 남음).
+
+**다음 한 작업**: **T-223d** — TripMate repo에서 krtour-map REST snapshot을 호출해
+`app.curated_trip_plans` / `app.curated_plan_pois`로 복사하고 source version/etag를
+저장한다. T-212e는 다른 agent가 병행 진행 중이며, 결과는 T-225에서 다시 대조한다.
+
 ## 2026-06-12 Codex 작업 메모 — T-223c-2 curated Dagster group
 
 T-223c-2로 curated overlay 운영 배치를 Dagster asset group으로 연결했다.
@@ -18,10 +39,10 @@ T-223c-2로 curated overlay 운영 배치를 Dagster asset group으로 연결했
 검증: curated repo unit, Dagster curated/definitions unit, curated repo PostGIS
 integration 통과.
 
-**다음 한 작업**: **T-223c-3** — Admin UI 구현. curated 후보 목록, select/unselect,
-source rule 편집/apply, TripMate copy preview를 admin frontend에 연결한다. 이후
-T-223d TripMate 복사 연동으로 진행한다. T-212e는 다른 agent가 병행 진행 중이며,
-결과는 T-225에서 다시 대조한다.
+**다음 한 작업(당시)**: **T-223c-3** — Admin UI 구현. curated 후보 목록,
+select/unselect, source rule 편집/apply, TripMate copy preview를 admin frontend에
+연결한다. 이후 T-223d TripMate 복사 연동으로 진행한다. T-212e는 다른 agent가 병행
+진행 중이며, 결과는 T-225에서 다시 대조한다.
 
 ## 2026-06-12 Codex 작업 메모 — T-223c-1 curated DB/API foundation
 

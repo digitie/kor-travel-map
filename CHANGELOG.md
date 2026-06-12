@@ -5,6 +5,13 @@
 
 ## [Unreleased]
 
+### curated_features Admin UI (T-223c-3, 2026-06-12)
+
+- **ADDED**: admin frontend `/admin/curated-features` — curated 후보 목록,
+  select/unselect/archive action, source rule 편집/apply, TripMate copy preview.
+- **ADDED**: 선택 후보의 display title/summary, rank score, TripMate copy policy,
+  TripMate relation 편집 표면.
+
 ### Offline upload 삭제 lifecycle (#397, 2026-06-12)
 
 - **ADDED**: `DELETE /v1/admin/offline-uploads/{upload_id}` — 업로드 메타데이터
