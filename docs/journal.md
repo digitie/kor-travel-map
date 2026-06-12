@@ -2,6 +2,16 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-12 (claude) — #407: knps 핀 범프 — trails 코스 LINESTRING 조립 반영
+
+T-212e에서 `feature_geometry_knps_records`가 RUN_SUCCESS인데 적재 0건(#407)
+이었던 원인은 provider가 trails CSV의 **vertex 단위 행 910,110개를 코스
+단위 LINESTRING으로 조립하지 않고 per-vertex POINT record로 반환**(카탈로그
+LineString 계약 불일치) → krtour route 변환이 전 행 skip. provider
+#9/PR#10(`16e3954`)으로 `read_geo_records`에 코스 조립을 추가(live 종단:
+625 코스 LINESTRING)하고 krtour 핀 범프. trails asset 재실행은 dagster
+리빌드 후 수행(T-212e 리포트 기록).
+
 ## 2026-06-12 (claude) — #397: offline-uploads DELETE lifecycle 구현
 
 T-212e 실측에서 RustFS 인스턴스 교체로 원본 객체가 소실된 좀비 업로드 2건이

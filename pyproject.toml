@@ -118,7 +118,9 @@ providers = [
   # KNPS_SERVICE_KEY 사용 안 함. sha 5e88fb4.
   # `krtour.map.providers.knps.KnpsPointRecord` Protocol (Point/place 5 dataset
   # 구현됨). SHP(area)/route는 후속. 다른 provider처럼 본 lib 본 의존 X (Protocol).
-  "python-knps-api @ git+https://github.com/digitie/python-knps-api.git@5e88fb45fa3c4fe4858efedeb2be52f687e6b167",
+  # 16e3954: trails vertex 행 → 코스 단위 LINESTRING 조립(provider #9/PR#10,
+  # T-212e 실측 — knps_trails 적재 0건(#407) 해소, 910,110 vertex → 625 코스).
+  "python-knps-api @ git+https://github.com/digitie/python-knps-api.git@16e395463e9ae510e1c484bfa00be3fc486af082",
   "python-krforest-api @ git+https://github.com/digitie/python-krforest-api.git@f9254e6bbb54f0a4f0fb7d85831f9adcdc318a3f",
   # 6076b52: 목록 응답 result 레벨 복합키/좌표 병합(live detail 100% 실패 수정)
   # + 결측 key row skip (provider #5/PR#6, T-212e live 실측).
