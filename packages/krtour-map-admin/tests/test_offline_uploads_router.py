@@ -155,6 +155,7 @@ def test_offline_upload_routes_mounted_in_openapi(client: TestClient) -> None:
     spec = client.get("/openapi.json").json()
     assert "/v1/admin/offline-uploads" in spec["paths"]
     assert "/v1/admin/offline-uploads/{upload_id}" in spec["paths"]
+    assert "delete" in spec["paths"]["/v1/admin/offline-uploads/{upload_id}"]
     assert "/v1/admin/offline-uploads/{upload_id}/preview" in spec["paths"]
     assert "/v1/admin/offline-uploads/{upload_id}/validate" in spec["paths"]
     assert "/v1/admin/offline-uploads/{upload_id}/validation" in spec["paths"]
@@ -933,6 +934,156 @@ def test_load_offline_upload_rejects_loaded_state(
 
     assert response.status_code == 409
     assert "loaded" in response.json()["detail"]
+
+
+@pytest.mark.unit
+def test_delete_offline_upload_removes_row_and_object(
+    client: TestClient,
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import offline_uploads as router_mod
+
+    upload = _upload(state="loaded")
+    store = _FakeStore({upload.storage_key: b'{"feature":{"feature_id":"f1"}}\n'})
+
+    async def _delete(_session: Any, *, upload_id: str) -> OfflineUpload:
+        assert upload_id == upload.upload_id
+        return upload
+
+    monkeypatch.setattr(router_mod, "delete_offline_upload", _delete)
+    monkeypatch.setattr(router_mod, "build_offline_upload_store", lambda _settings: store)
+
+    response = client.delete(f"/v1/admin/offline-uploads/{upload.upload_id}")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data"]["upload_id"] == upload.upload_id
+    assert body["data"]["status"] == "loaded"
+    assert "duration_ms" in body["meta"]
+    assert store.deleted == [upload.storage_key]
+    assert store.objects == {}
+    assert session.begin_count == 1
+
+
+@pytest.mark.unit
+def test_delete_offline_upload_succeeds_for_zombie_without_object(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RustFS 교체로 원본 객체가 소실된 좀비 업로드도 row 정리는 성공한다(#397)."""
+    from krtour.map.core.exceptions import FileStoreError
+
+    from krtour.map_admin.routers import offline_uploads as router_mod
+
+    upload = _upload()
+
+    class _BrokenStore(_FakeStore):
+        async def delete_object(self, storage_key: str) -> None:
+            await super().delete_object(storage_key)
+            raise FileStoreError(f"객체 저장소 삭제 실패: key={storage_key!r}")
+
+    store = _BrokenStore()
+
+    async def _delete(_session: Any, *, upload_id: str) -> OfflineUpload:
+        return upload
+
+    monkeypatch.setattr(router_mod, "delete_offline_upload", _delete)
+    monkeypatch.setattr(router_mod, "build_offline_upload_store", lambda _settings: store)
+
+    response = client.delete(f"/v1/admin/offline-uploads/{upload.upload_id}")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["upload_id"] == upload.upload_id
+    assert store.deleted == [upload.storage_key]
+
+
+@pytest.mark.unit
+def test_delete_offline_upload_returns_404_for_missing_row(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import offline_uploads as router_mod
+
+    store = _FakeStore()
+
+    async def _delete(_session: Any, *, upload_id: str) -> None:
+        return None
+
+    monkeypatch.setattr(router_mod, "delete_offline_upload", _delete)
+    monkeypatch.setattr(router_mod, "build_offline_upload_store", lambda _settings: store)
+
+    response = client.delete(
+        "/v1/admin/offline-uploads/00000000-0000-0000-0000-00000000dead"
+    )
+
+    assert response.status_code == 404
+    assert store.deleted == []
+
+
+@pytest.mark.unit
+def test_delete_offline_upload_rejects_in_progress_job(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import offline_uploads as router_mod
+
+    store = _FakeStore()
+
+    async def _delete(_session: Any, *, upload_id: str) -> OfflineUpload:
+        raise OfflineUploadStatusConflict(
+            upload_id=upload_id,
+            current_status="loading",
+            target_status="deleted",
+            allowed_statuses=frozenset(
+                {
+                    "uploaded",
+                    "validated",
+                    "validation_failed",
+                    "loaded",
+                    "load_failed",
+                    "cancelled",
+                }
+            ),
+        )
+
+    monkeypatch.setattr(router_mod, "delete_offline_upload", _delete)
+    monkeypatch.setattr(router_mod, "build_offline_upload_store", lambda _settings: store)
+
+    response = client.delete(
+        "/v1/admin/offline-uploads/00000000-0000-0000-0000-000000000001"
+    )
+
+    assert response.status_code == 409
+    assert "loading" in response.json()["detail"]
+    assert store.deleted == []
+
+
+@pytest.mark.unit
+def test_delete_offline_upload_blocked_when_destructive_disabled(
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import offline_uploads as router_mod
+
+    async def _delete(_session: Any, *, upload_id: str) -> OfflineUpload:
+        raise AssertionError("destructive kill-switch must reject before repo delete")
+
+    monkeypatch.setattr(router_mod, "delete_offline_upload", _delete)
+
+    app = create_app(AdminSettings(admin_destructive_enabled=False))
+
+    async def _fake_session() -> AsyncIterator[_FakeSession]:
+        yield session
+
+    app.dependency_overrides[get_session] = _fake_session
+    guarded_client = TestClient(app)
+
+    response = guarded_client.delete(
+        "/v1/admin/offline-uploads/00000000-0000-0000-0000-000000000001"
+    )
+
+    assert response.status_code == 403
 
 
 @pytest.mark.unit

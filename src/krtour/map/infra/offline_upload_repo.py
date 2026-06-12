@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any, Final
 from sqlalchemy import text
 
 from krtour.map.core.offline_upload_states import (
+    OFFLINE_UPLOAD_DELETABLE_STATES,
     OFFLINE_UPLOAD_LOAD_FINISH_SOURCE_STATES,
     OFFLINE_UPLOAD_LOAD_FINISH_STATES,
     OFFLINE_UPLOAD_LOADABLE_STATES,
@@ -40,6 +41,7 @@ __all__ = [
     "OfflineUploadStatusConflict",
     "attach_offline_upload_load_job",
     "create_offline_upload",
+    "delete_offline_upload",
     "finish_offline_upload_load",
     "finish_offline_upload_validation",
     "get_offline_upload",
@@ -233,6 +235,13 @@ ORDER BY created_at DESC, upload_id DESC
 LIMIT :limit_plus_one
 """
 
+_DELETE_SQL: Final[str] = f"""
+DELETE FROM ops.offline_uploads
+WHERE upload_id = :upload_id
+  AND status = ANY(CAST(:allowed_statuses AS text[]))
+RETURNING {_RETURN_COLUMNS}
+"""
+
 _MARK_LOADING_SQL: Final[str] = f"""
 UPDATE ops.offline_uploads
 SET status = 'loading',
@@ -344,6 +353,37 @@ async def create_offline_upload(
         },
     )
     return _row_to_upload(result.one())
+
+
+async def delete_offline_upload(
+    session: AsyncSession,
+    *,
+    upload_id: str,
+) -> OfflineUpload | None:
+    """업로드 메타데이터 row를 삭제한다. commit은 호출자 책임.
+
+    validation/load가 진행 중(``validating``/``loading``)이면
+    :class:`OfflineUploadStatusConflict`를 던지고, row가 없으면 ``None``을
+    반환한다. 연관 ``ops.import_jobs`` row는 audit 기록으로 보존한다
+    (FK는 upload→job 방향 ``ON DELETE SET NULL`` — row 삭제로 job은 안 지워짐).
+    """
+    result = await session.execute(
+        text(_DELETE_SQL),
+        {
+            "upload_id": upload_id,
+            "allowed_statuses": list(OFFLINE_UPLOAD_DELETABLE_STATES),
+        },
+    )
+    row = result.one_or_none()
+    if row is not None:
+        return _row_to_upload(row)
+    await _missing_or_status_conflict(
+        session,
+        upload_id=upload_id,
+        target_status="deleted",
+        allowed_statuses=OFFLINE_UPLOAD_DELETABLE_STATES,
+    )
+    return None
 
 
 async def get_offline_upload(

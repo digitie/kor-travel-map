@@ -13,6 +13,8 @@ __all__ = [
     "OfflineUploadState",
     "OFFLINE_UPLOAD_STATE_VALUES",
     "OFFLINE_UPLOAD_STATES",
+    "OFFLINE_UPLOAD_DELETABLE_STATES",
+    "OFFLINE_UPLOAD_IN_PROGRESS_STATES",
     "OFFLINE_UPLOAD_LOADABLE_STATES",
     "OFFLINE_UPLOAD_LOAD_FINISH_STATES",
     "OFFLINE_UPLOAD_LOAD_FINISH_SOURCE_STATES",
@@ -69,6 +71,12 @@ OFFLINE_UPLOAD_LOAD_FINISH_SOURCE_STATES: Final[frozenset[OfflineUploadState]] =
     {"loading"}
 )
 OFFLINE_UPLOAD_RESERVED_STATES: Final[frozenset[OfflineUploadState]] = frozenset({"cancelled"})
+OFFLINE_UPLOAD_IN_PROGRESS_STATES: Final[frozenset[OfflineUploadState]] = frozenset(
+    {"validating", "loading"}
+)
+OFFLINE_UPLOAD_DELETABLE_STATES: Final[frozenset[OfflineUploadState]] = (
+    OFFLINE_UPLOAD_STATES - OFFLINE_UPLOAD_IN_PROGRESS_STATES
+)
 
 OFFLINE_UPLOAD_TABULAR_FORMATS: Final[frozenset[str]] = frozenset({"csv", "tsv"})
 OFFLINE_UPLOAD_WRITEABLE_FORMATS: Final[frozenset[str]] = frozenset(

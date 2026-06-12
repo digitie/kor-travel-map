@@ -579,7 +579,15 @@ export interface paths {
         get: operations["get_offline_upload_request_v1_admin_offline_uploads__upload_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * 오프라인 업로드 삭제 (정리 lifecycle)
+         * @description 업로드 메타데이터 row를 지우고 저장 객체를 best-effort로 정리한다.
+         *
+         *     객체가 이미 없어도(예: RustFS 교체로 원본이 소실된 좀비 업로드, #397)
+         *     삭제는 성공한다. 진행 중(``validating``/``loading``) 업로드는 409.
+         *     같은 checksum 재업로드의 멱등 가드(409)는 row 삭제로 풀린다.
+         */
+        delete: operations["delete_offline_upload_request_v1_admin_offline_uploads__upload_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -4537,6 +4545,14 @@ export interface components {
             source_id?: string | null;
         };
         /**
+         * OfflineUploadDeleteResponse
+         * @description `DELETE /admin/offline-uploads/{upload_id}` 응답 (삭제된 row snapshot).
+         */
+        OfflineUploadDeleteResponse: {
+            data: components["schemas"]["OfflineUploadRecord"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
          * OfflineUploadDetailResponse
          * @description `GET /admin/offline-uploads/{upload_id}` 응답 (DA-D-03 envelope).
          */
@@ -7839,6 +7855,58 @@ export interface operations {
             };
             /** @description upload_id 없음 */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_offline_upload_request_v1_admin_offline_uploads__upload_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                upload_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OfflineUploadDeleteResponse"];
+                };
+            };
+            /** @description 파괴적 admin 작업 비활성 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description upload_id 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description validation/load 진행 중 — 종료 후 재시도 */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

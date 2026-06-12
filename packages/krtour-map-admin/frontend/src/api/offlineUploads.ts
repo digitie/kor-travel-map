@@ -4,7 +4,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { getJson, pathWithQuery, postFormData, postJson } from "./client";
+import { deleteJson, getJson, pathWithQuery, postFormData, postJson } from "./client";
 import type { components, paths } from "./types";
 
 type OfflineUploadSchemas = components["schemas"];
@@ -57,6 +57,8 @@ export interface OfflineUploadValidateRequest {
 
 export type OfflineUploadLaunchResponse =
   OfflineUploadSchemas["OfflineUploadLaunchResponse"];
+export type OfflineUploadDeleteResponse =
+  OfflineUploadSchemas["OfflineUploadDeleteResponse"];
 
 function fetchOfflineUploads(
   params: OfflineUploadListParams = {},
@@ -132,6 +134,14 @@ function launchOfflineUploadLoad(
   return postJson<OfflineUploadLaunchResponse>(
     `/v1/admin/offline-uploads/${encodeURIComponent(uploadId)}/load`,
     {},
+  );
+}
+
+function deleteOfflineUpload(
+  uploadId: string,
+): Promise<OfflineUploadDeleteResponse> {
+  return deleteJson<OfflineUploadDeleteResponse>(
+    `/v1/admin/offline-uploads/${encodeURIComponent(uploadId)}`,
   );
 }
 
@@ -220,6 +230,24 @@ export function useValidateOfflineUploadMutation() {
           queryKey: ["import-job", data.meta.job_id],
         });
       }
+    },
+  });
+}
+
+export function useDeleteOfflineUploadMutation() {
+  const queryClient = useQueryClient();
+  return useMutation<OfflineUploadDeleteResponse, Error, string>({
+    mutationFn: deleteOfflineUpload,
+    onSuccess: (_data, uploadId) => {
+      void queryClient.invalidateQueries({ queryKey: ["offline-uploads"] });
+      void queryClient.removeQueries({ queryKey: ["offline-upload", uploadId] });
+      void queryClient.removeQueries({
+        queryKey: ["offline-upload-preview", uploadId],
+      });
+      void queryClient.removeQueries({
+        queryKey: ["offline-upload-validation", uploadId],
+      });
+      void queryClient.invalidateQueries({ queryKey: ["ops", "metrics"] });
     },
   });
 }

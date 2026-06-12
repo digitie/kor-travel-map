@@ -47,6 +47,7 @@ from krtour.map.infra.offline_upload_repo import (
     OfflineUploadPage,
     OfflineUploadStatusConflict,
     create_offline_upload,
+    delete_offline_upload,
     finish_offline_upload_load,
     get_offline_upload,
     get_offline_upload_by_checksum,
@@ -62,6 +63,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from krtour.map_admin.auth import require_admin_destructive_enabled
 from krtour.map_admin.db import get_session
 from krtour.map_admin.response import Meta, make_meta
 from krtour.map_admin.settings import AdminSettings
@@ -71,6 +73,7 @@ __all__ = [
     "OfflineUploadRecord",
     "OfflineUploadListResponse",
     "OfflineUploadWriteResponse",
+    "OfflineUploadDeleteResponse",
     "OfflineUploadPreviewResponse",
     "OfflineUploadValidationResponse",
     "OfflineUploadLaunchResponse",
@@ -291,6 +294,15 @@ class OfflineUploadDetailMeta(BaseModel):
 
 class OfflineUploadDetailResponse(BaseModel):
     """`GET /admin/offline-uploads/{upload_id}` 응답 (DA-D-03 envelope)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: OfflineUploadRecord
+    meta: Meta
+
+
+class OfflineUploadDeleteResponse(BaseModel):
+    """`DELETE /admin/offline-uploads/{upload_id}` 응답 (삭제된 row snapshot)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -897,6 +909,62 @@ async def get_offline_upload_request(
             detail=f"offline upload 없음: {upload_id!r}",
         )
     return OfflineUploadDetailResponse(
+        data=_record_from_upload(row),
+        meta=make_meta(started_at=started_at),
+    )
+
+
+@router.delete(
+    "/{upload_id}",
+    response_model=OfflineUploadDeleteResponse,
+    summary="오프라인 업로드 삭제 (정리 lifecycle)",
+    dependencies=[Depends(require_admin_destructive_enabled)],
+    responses={
+        403: {"description": "파괴적 admin 작업 비활성"},
+        404: {"description": "upload_id 없음"},
+        409: {"description": "validation/load 진행 중 — 종료 후 재시도"},
+    },
+)
+async def delete_offline_upload_request(
+    upload_id: str,
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> OfflineUploadDeleteResponse:
+    """업로드 메타데이터 row를 지우고 저장 객체를 best-effort로 정리한다.
+
+    객체가 이미 없어도(예: RustFS 교체로 원본이 소실된 좀비 업로드, #397)
+    삭제는 성공한다. 진행 중(``validating``/``loading``) 업로드는 409.
+    같은 checksum 재업로드의 멱등 가드(409)는 row 삭제로 풀린다.
+    """
+    started_at = perf_counter()
+    try:
+        async with session.begin():
+            row = await delete_offline_upload(session, upload_id=upload_id)
+            if row is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"offline upload 없음: {upload_id!r}",
+                )
+    except OfflineUploadStatusConflict as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+
+    # DB row 삭제 확정 후 객체 best-effort 삭제. S3 DeleteObject는 미존재 키에도
+    # 성공(멱등)하고, 저장소 오류는 정리 lifecycle을 막지 않도록 기록만 한다.
+    store = _offline_upload_store_from_request(request)
+    try:
+        await store.delete_object(row.storage_key)
+    except FileStoreError:
+        _LOG.warning(
+            "offline upload object delete failed (best-effort): "
+            "upload_id=%s, storage_key=%s",
+            upload_id,
+            row.storage_key,
+            exc_info=True,
+        )
+    return OfflineUploadDeleteResponse(
         data=_record_from_upload(row),
         meta=make_meta(started_at=started_at),
     )

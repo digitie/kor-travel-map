@@ -6,6 +6,8 @@ import pytest
 from sqlalchemy import CheckConstraint, UniqueConstraint
 
 from krtour.map.core.offline_upload_states import (
+    OFFLINE_UPLOAD_DELETABLE_STATES,
+    OFFLINE_UPLOAD_IN_PROGRESS_STATES,
     OFFLINE_UPLOAD_LOADABLE_STATES,
     OFFLINE_UPLOAD_RESERVED_STATES,
     OFFLINE_UPLOAD_STATE_VALUES,
@@ -54,6 +56,20 @@ def test_offline_upload_state_sets_are_single_source_contract() -> None:
     } == OFFLINE_UPLOAD_VALIDATABLE_STATES
     assert {"validated", "load_failed"} == OFFLINE_UPLOAD_TABULAR_LOADABLE_STATES
     assert {"cancelled"} == OFFLINE_UPLOAD_RESERVED_STATES
+    assert {"validating", "loading"} == OFFLINE_UPLOAD_IN_PROGRESS_STATES
+    assert {
+        "uploaded",
+        "validated",
+        "validation_failed",
+        "loaded",
+        "load_failed",
+        "cancelled",
+    } == OFFLINE_UPLOAD_DELETABLE_STATES
+    assert OFFLINE_UPLOAD_DELETABLE_STATES.isdisjoint(OFFLINE_UPLOAD_IN_PROGRESS_STATES)
+    assert (
+        OFFLINE_UPLOAD_DELETABLE_STATES | OFFLINE_UPLOAD_IN_PROGRESS_STATES
+        == OFFLINE_UPLOAD_STATES
+    )
     assert {"json", "jsonl", "csv", "tsv"} == OFFLINE_UPLOAD_WRITEABLE_FORMATS
 
 

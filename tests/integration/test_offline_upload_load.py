@@ -34,7 +34,9 @@ from krtour.map.infra.jobs_repo import start_import_job
 from krtour.map.infra.offline_upload_repo import (
     OfflineUploadStatusConflict,
     create_offline_upload,
+    delete_offline_upload,
     finish_offline_upload_load,
+    get_offline_upload,
     get_offline_upload_by_checksum,
     list_offline_uploads,
     mark_offline_upload_loading,
@@ -449,6 +451,92 @@ async def test_offline_upload_repo_lists_with_keyset_and_provided_upload_id(
         )
         assert page2.items[0].upload_id == first_id
         assert page2.next_cursor is None
+
+
+async def test_delete_offline_upload_unblocks_same_checksum_reupload(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """좀비 업로드(#397) 정리: row 삭제로 checksum 멱등 가드(409)가 풀려야 한다."""
+    body = _bundle("offline-delete-001").model_dump_json().encode("utf-8")
+    checksum = hashlib.sha256(body).hexdigest()
+    upload_id = await _create_upload(
+        migrated_engine,
+        body=body,
+        storage_key="offline/delete/zombie.jsonl",
+        checksum_sha256=checksum,
+    )
+
+    async with AsyncSession(migrated_engine) as session, session.begin():
+        deleted = await delete_offline_upload(session, upload_id=upload_id)
+    assert deleted is not None
+    assert deleted.upload_id == upload_id
+    assert deleted.checksum_sha256 == checksum
+
+    async with AsyncSession(migrated_engine) as session:
+        assert await get_offline_upload(session, upload_id) is None
+        assert await delete_offline_upload(session, upload_id=upload_id) is None
+
+    # 같은 provider/dataset/scope/checksum 재업로드가 더는 unique 제약에 안 걸린다.
+    second_id = await _create_upload(
+        migrated_engine,
+        body=body,
+        storage_key="offline/delete/reupload.jsonl",
+        checksum_sha256=checksum,
+    )
+    assert second_id != upload_id
+
+
+async def test_delete_offline_upload_rejects_in_progress_and_keeps_jobs(
+    migrated_engine: AsyncEngine,
+) -> None:
+    body = _bundle("offline-delete-002").model_dump_json().encode("utf-8")
+    upload_id = await _create_upload(
+        migrated_engine,
+        body=body,
+        storage_key="offline/delete/in-progress.jsonl",
+    )
+
+    async with AsyncSession(migrated_engine) as session, session.begin():
+        job = await start_import_job(
+            session,
+            kind="offline_upload_load",
+            payload={"upload_id": upload_id, "dagster_run_id": None},
+            source_checksum=hashlib.sha256(body).hexdigest(),
+        )
+        loading = await mark_offline_upload_loading(
+            session,
+            upload_id=upload_id,
+            load_job_id=job.job_id,
+        )
+        assert loading is not None
+
+    # 진행 중(loading) row는 삭제 거부.
+    with pytest.raises(OfflineUploadStatusConflict):
+        async with AsyncSession(migrated_engine) as session, session.begin():
+            await delete_offline_upload(session, upload_id=upload_id)
+
+    async with AsyncSession(migrated_engine) as session, session.begin():
+        finished = await finish_offline_upload_load(
+            session,
+            upload_id=upload_id,
+            status="load_failed",
+        )
+        assert finished is not None
+
+    async with AsyncSession(migrated_engine) as session, session.begin():
+        deleted = await delete_offline_upload(session, upload_id=upload_id)
+    assert deleted is not None
+    assert deleted.status == "load_failed"
+
+    # 연관 import job row는 audit 기록으로 남는다.
+    async with AsyncSession(migrated_engine) as session:
+        job_row = (
+            await session.execute(
+                text("SELECT job_id FROM ops.import_jobs WHERE job_id = :job_id"),
+                {"job_id": job.job_id},
+            )
+        ).one_or_none()
+    assert job_row is not None
 
 
 async def _create_upload(

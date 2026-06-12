@@ -6,6 +6,7 @@ import {
   FileUpIcon,
   PlayIcon,
   RefreshCwIcon,
+  Trash2Icon,
   UploadCloudIcon,
 } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -15,6 +16,7 @@ import {
   type OfflineUploadRecord,
   type OfflineUploadStatus,
   useCreateOfflineUploadMutation,
+  useDeleteOfflineUploadMutation,
   useLaunchOfflineUploadLoadMutation,
   useOfflineUpload,
   useOfflineUploadPreview,
@@ -55,6 +57,7 @@ const statuses: Array<OfflineUploadStatus | "all"> = [
 ];
 
 const loadableStates = new Set(["uploaded", "validated", "loaded", "load_failed"]);
+const inProgressStates = new Set(["validating", "loading"]);
 const tabularFormats = new Set(["csv", "tsv"]);
 const byteFormatter = new Intl.NumberFormat("ko-KR");
 
@@ -493,6 +496,7 @@ export function OfflineUploadsClient() {
   const selectedUpload = useOfflineUpload(selectedUploadId);
   const createUpload = useCreateOfflineUploadMutation();
   const launchLoad = useLaunchOfflineUploadLoadMutation();
+  const deleteUpload = useDeleteOfflineUploadMutation();
 
   const selected =
     selectedUpload.data?.data ??
@@ -615,16 +619,29 @@ export function OfflineUploadsClient() {
         </div>
 
         <div className="flex flex-col gap-4">
-          {(uploads.isError || launchLoad.isError || selectedUpload.isError) && (
+          {(uploads.isError ||
+            launchLoad.isError ||
+            deleteUpload.isError ||
+            selectedUpload.isError) && (
             <Alert variant="destructive">
               <AlertTitle>offline upload 처리 실패</AlertTitle>
               <AlertDescription>
                 {uploads.error?.message ??
                   launchLoad.error?.message ??
+                  deleteUpload.error?.message ??
                   selectedUpload.error?.message}
               </AlertDescription>
             </Alert>
           )}
+          {deleteUpload.data ? (
+            <Alert>
+              <AlertTitle>업로드 삭제됨</AlertTitle>
+              <AlertDescription>
+                {shortId(deleteUpload.data.data.upload_id, 18)} ·{" "}
+                {deleteUpload.data.data.original_filename}
+              </AlertDescription>
+            </Alert>
+          ) : null}
           {launchLoad.data ? (
             <Alert>
               <AlertTitle>Dagster load 실행됨</AlertTitle>
@@ -725,26 +742,56 @@ export function OfflineUploadsClient() {
                         {formatDateTime(upload.updated_at)}
                       </TableCell>
                       <TableCell>
-                        <Button
-                          data-testid="offline-upload-load"
-                          disabled={launchLoad.isPending || !loadEnabled}
-                          size="sm"
-                          title={
-                            loadEnabled
-                              ? "load"
-                              : "CSV/TSV는 validation 완료 후 load 가능"
-                          }
-                          type="button"
-                          variant={loadEnabled ? "outline" : "ghost"}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setSelectedUploadId(upload.upload_id);
-                            launchLoad.mutate(upload.upload_id);
-                          }}
-                        >
-                          <PlayIcon data-icon="inline-start" />
-                          load
-                        </Button>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            data-testid="offline-upload-load"
+                            disabled={launchLoad.isPending || !loadEnabled}
+                            size="sm"
+                            title={
+                              loadEnabled
+                                ? "load"
+                                : "CSV/TSV는 validation 완료 후 load 가능"
+                            }
+                            type="button"
+                            variant={loadEnabled ? "outline" : "ghost"}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setSelectedUploadId(upload.upload_id);
+                              launchLoad.mutate(upload.upload_id);
+                            }}
+                          >
+                            <PlayIcon data-icon="inline-start" />
+                            load
+                          </Button>
+                          <Button
+                            data-testid="offline-upload-delete"
+                            disabled={
+                              deleteUpload.isPending ||
+                              inProgressStates.has(upload.status)
+                            }
+                            size="sm"
+                            title={
+                              inProgressStates.has(upload.status)
+                                ? "validation/load 진행 중에는 삭제 불가"
+                                : "업로드 row + 저장 객체 삭제"
+                            }
+                            type="button"
+                            variant="ghost"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              deleteUpload.mutate(upload.upload_id, {
+                                onSuccess: () => {
+                                  if (selectedUploadId === upload.upload_id) {
+                                    setSelectedUploadId(null);
+                                  }
+                                },
+                              });
+                            }}
+                          >
+                            <Trash2Icon data-icon="inline-start" />
+                            삭제
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   );

@@ -8584,6 +8584,24 @@
         "title": "OfflineUploadColumnMappingRecord",
         "type": "object"
       },
+      "OfflineUploadDeleteResponse": {
+        "additionalProperties": false,
+        "description": "`DELETE /admin/offline-uploads/{upload_id}` 응답 (삭제된 row snapshot).",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/OfflineUploadRecord"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "OfflineUploadDeleteResponse",
+        "type": "object"
+      },
       "OfflineUploadDetailResponse": {
         "additionalProperties": false,
         "description": "`GET /admin/offline-uploads/{upload_id}` 응답 (DA-D-03 envelope).",
@@ -16169,6 +16187,56 @@
       }
     },
     "/v1/admin/offline-uploads/{upload_id}": {
+      "delete": {
+        "description": "업로드 메타데이터 row를 지우고 저장 객체를 best-effort로 정리한다.\n\n객체가 이미 없어도(예: RustFS 교체로 원본이 소실된 좀비 업로드, #397)\n삭제는 성공한다. 진행 중(``validating``/``loading``) 업로드는 409.\n같은 checksum 재업로드의 멱등 가드(409)는 row 삭제로 풀린다.",
+        "operationId": "delete_offline_upload_request_v1_admin_offline_uploads__upload_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "upload_id",
+            "required": true,
+            "schema": {
+              "title": "Upload Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OfflineUploadDeleteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "파괴적 admin 작업 비활성"
+          },
+          "404": {
+            "description": "upload_id 없음"
+          },
+          "409": {
+            "description": "validation/load 진행 중 — 종료 후 재시도"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "오프라인 업로드 삭제 (정리 lifecycle)",
+        "tags": [
+          "admin-offline-uploads"
+        ]
+      },
       "get": {
         "operationId": "get_offline_upload_request_v1_admin_offline_uploads__upload_id__get",
         "parameters": [
