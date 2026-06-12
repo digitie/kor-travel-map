@@ -207,7 +207,7 @@ async function fulfillJson(route: Route, body: unknown, status = 200) {
 async function mockOfflineUploadMutations(page: Page) {
   let upload = makeOfflineUpload();
   let uploads: OfflineUploadRecord[] = [];
-  const requests = { create: 0, load: 0, preview: 0, validate: 0 };
+  const requests = { create: 0, delete: 0, load: 0, preview: 0, validate: 0 };
 
   await page.route("**/admin/offline-uploads**", async (route) => {
     const request = route.request();
@@ -256,6 +256,17 @@ async function mockOfflineUploadMutations(page: Page) {
 
     if (request.method() === "GET" && url.pathname === uploadPath) {
       await fulfillJson(route, { data: upload, meta: { duration_ms: 1 } });
+      return;
+    }
+
+    if (request.method() === "DELETE" && url.pathname === uploadPath) {
+      requests.delete += 1;
+      const deleted = upload;
+      uploads = uploads.filter((item) => item.upload_id !== deleted.upload_id);
+      await fulfillJson(route, {
+        data: deleted,
+        meta: { duration_ms: 1, request_id: "e2e-offline-delete" },
+      });
       return;
     }
 
@@ -1313,6 +1324,39 @@ test.describe("admin/ops pages", () => {
     await expect.poll(() => requests.load).toBe(1);
     await expect(page.getByText("Dagster load 실행됨")).toBeVisible();
     await expect(page.getByText("STARTED")).toBeVisible();
+
+    // 진행 중(loading) row는 삭제 버튼이 비활성 (#397 가드 UI)
+    await page.getByLabel("offline upload status").selectOption("loading");
+    await expect(page.getByTestId("offline-upload-delete")).toBeDisabled();
+  });
+
+  test("/v1/admin/offline-uploads delete flow (#397)", async ({ page }) => {
+    const requests = await mockOfflineUploadMutations(page);
+
+    await page.goto("/admin/offline-uploads");
+    await page.getByTestId("offline-upload-file-input").setInputFiles({
+      buffer: Buffer.from("name,lon,lat\nSeoul Test POI,126.978,37.5665\n"),
+      mimeType: "text/csv",
+      name: "offline.csv",
+    });
+    await page.getByRole("button", { name: "업로드" }).click();
+    await expect.poll(() => requests.create).toBe(1);
+    await expect(page.getByTestId("offline-upload-row")).toBeVisible();
+
+    // 좀비 업로드 정리: row 삭제 → 목록에서 사라지고 같은 파일 재업로드 가능
+    await page.getByTestId("offline-upload-delete").click();
+    await expect.poll(() => requests.delete).toBe(1);
+    await expect(page.getByText("업로드 삭제됨")).toBeVisible();
+    await expect(page.getByText("offline upload가 없습니다.")).toBeVisible();
+
+    await page.getByTestId("offline-upload-file-input").setInputFiles({
+      buffer: Buffer.from("name,lon,lat\nSeoul Test POI,126.978,37.5665\n"),
+      mimeType: "text/csv",
+      name: "offline.csv",
+    });
+    await page.getByRole("button", { name: "업로드" }).click();
+    await expect.poll(() => requests.create).toBe(2);
+    await expect(page.getByTestId("offline-upload-row")).toBeVisible();
   });
 
   test("/v1/admin/backups", async ({ page }) => {

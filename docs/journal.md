@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-12 (claude) — #397: offline-uploads DELETE lifecycle 구현
+
+T-212e 실측에서 RustFS 인스턴스 교체로 원본 객체가 소실된 좀비 업로드 2건이
+checksum 멱등 가드(409)에 막혀 재업로드 불가 + 정리 경로 부재(405)였던 갭을
+구현으로 해소. `delete_offline_upload` repo 함수(조건부 DELETE — `validating`/
+`loading`이면 `OfflineUploadStatusConflict`) + `OFFLINE_UPLOAD_DELETABLE_STATES`
+상태 계약 추가, 라우터는 DB row 삭제 확정 후 객체를 best-effort 삭제(S3
+DeleteObject 멱등 — 객체 없는 좀비도 성공, FileStoreError는 기록만). 응답은
+`{data: 삭제 row snapshot, meta}` 200, `require_admin_destructive_enabled`
+kill-switch 적용(rest-api.md §1.3). 연관 import_jobs row는 audit으로 보존
+(FK 방향이 upload→job이라 cascade 없음). admin UI 행 단위 삭제 버튼 +
+e2e mock DELETE 핸들러/삭제 flow, PostGIS 통합 2건(삭제→동일 checksum
+재업로드 통과, 진행중 409→종료 후 삭제+job 보존) 추가. OpenAPI/types 재생성.
+
 ## 2026-06-12 (claude) — fix(e2e): admin-ops spec drift 2건 (#409, T-212e 후속)
 
 T-212e live 최종 e2e 30/32의 잔여 실패 2건 — 환경이 아니라 spec-vs-UI/데이터

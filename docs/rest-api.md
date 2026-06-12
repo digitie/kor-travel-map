@@ -213,7 +213,7 @@ GET    /v1/admin/feature-update-requests/{request_id}
 POST   /v1/admin/feature-update-requests/{request_id}/cancel
 POST   /v1/admin/feature-update-requests/{request_id}/run-now    # kill-switch
 GET/POST /v1/admin/offline-uploads  (+ {upload_id}[/preview|/validate|/validation|/load])
-DELETE /v1/admin/offline-uploads/{upload_id}           # 🆕 정리 lifecycle
+DELETE /v1/admin/offline-uploads/{upload_id}           # ✅#397 정리 lifecycle(진행중 409·객체 best-effort 삭제)
 GET    /v1/admin/poi-cache-targets
 GET/PUT/DELETE /v1/admin/poi-cache-targets/{external_system}/{target_key}  # 복합 자연키
 # T-214f 결정: POI cache target write(PUT/DELETE)는 admin/operator flow 전용.

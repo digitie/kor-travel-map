@@ -5,6 +5,19 @@
 
 ## [Unreleased]
 
+### Offline upload 삭제 lifecycle (#397, 2026-06-12)
+
+- **ADDED**: `DELETE /v1/admin/offline-uploads/{upload_id}` — 업로드 메타데이터
+  row 삭제 + 저장 객체 best-effort 삭제(RustFS 교체 등으로 객체가 이미 없는
+  "좀비 업로드"도 정리 가능). 진행 중(`validating`/`loading`) 업로드는 409,
+  파괴적 admin kill-switch(`admin_destructive_enabled=False`)면 403. row 삭제로
+  같은 checksum 재업로드의 멱등 가드(409)가 풀린다.
+- **ADDED**: `krtour.map.infra.offline_upload_repo.delete_offline_upload` +
+  `OFFLINE_UPLOAD_IN_PROGRESS_STATES`/`OFFLINE_UPLOAD_DELETABLE_STATES` 상태
+  계약. 연관 `ops.import_jobs` row는 audit 기록으로 보존한다.
+- **CHANGED**: admin frontend `/admin/offline-uploads` 목록에 행 단위 삭제
+  버튼을 추가했다(진행 중 row는 비활성).
+
 ### curated_features Dagster group/cache (T-223c-2, 2026-06-12)
 
 - **ADDED**: `feature.curated_tripmate_copy_snapshots` — TripMate copy snapshot
