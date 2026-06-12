@@ -22,8 +22,10 @@ type AdminFeatureReviewActionRequest =
   components["schemas"]["AdminFeatureReviewActionRequest"];
 type AdminFeatureReviewMode = AdminFeatureChangeRecord["review_mode"];
 type BackupRecord = components["schemas"]["BackupRecord"];
-type ProviderSyncStateSummary =
-  components["schemas"]["ProviderSyncStateSummary"];
+type OpsProviderDatasetSummary =
+  components["schemas"]["OpsProviderDatasetSummary"];
+type OpsProviderDetailResponse =
+  components["schemas"]["OpsProviderDetailResponse"];
 
 // frontend(page) origin 포트 — RSC prefetch 등 page-origin 요청을 API mock에서
 // 통과시키는 기준. playwright.config.ts의 baseURL과 같은 env로 도출한다
@@ -145,9 +147,9 @@ function makeFeatureChange(
   };
 }
 
-function makeProviderSyncState(
-  overrides: Partial<ProviderSyncStateSummary> = {},
-): ProviderSyncStateSummary {
+function makeOpsProviderDataset(
+  overrides: Partial<OpsProviderDatasetSummary> = {},
+): OpsProviderDatasetSummary {
   return {
     provider: "python-kma-api",
     dataset_key: "kma_weather_values",
@@ -155,8 +157,42 @@ function makeProviderSyncState(
     status: "active",
     last_success_at: MOCK_NOW,
     last_failure_at: null,
+    next_run_after: null,
     consecutive_failures: 0,
+    links: [],
+    refresh_policy: null,
     ...overrides,
+  };
+}
+
+function makeOpsProviderDetailResponse(
+  item: OpsProviderDatasetSummary,
+): OpsProviderDetailResponse {
+  return {
+    data: {
+      provider: item.provider,
+      datasets: [
+        {
+          provider: item.provider,
+          dataset_key: item.dataset_key,
+          links: [],
+          recent_update_requests: [],
+          refresh_policy: item.refresh_policy ?? null,
+          sync_states: [
+            {
+              sync_scope: item.sync_scope,
+              status: item.status,
+              last_success_at: item.last_success_at,
+              last_failure_at: item.last_failure_at,
+              next_run_after: item.next_run_after,
+              consecutive_failures: item.consecutive_failures,
+              cursor: {},
+            },
+          ],
+        },
+      ],
+    },
+    meta: { duration_ms: 1, request_id: "e2e-ops-provider-detail" },
   };
 }
 
@@ -1015,14 +1051,26 @@ test.describe("admin/ops pages", () => {
     ]) {
       await expect(page.getByRole("columnheader", { name: column })).toBeVisible();
     }
+    // 라이브 backend 직격 spec(#409) — 첫 행 type에 의존하지 않도록 manual
+    // override(주소/좌표 보정) 대상 type으로 필터를 먼저 적용해 행을 고정한다.
+    // (`missing_address`: docs/debug-ui-admin-workflows.md §issue type 표 —
+    // "manual address 입력"으로 처리하는 정본 type.)
+    await page.getByLabel("issue type").fill("missing_address");
+
     const emptyRow = page.getByRole("row", { name: /issue가 없습니다/ });
+    const addressIssueRow = page
+      .getByRole("row", { name: /missing_address/ })
+      .first();
+    // 목록 쿼리가 끝나기 전 isVisible()이 false로 떨어져 빈 목록 분기를
+    // 건너뛰는 race를 막는다 — 빈 행 또는 대상 행이 렌더될 때까지 대기.
+    await expect(emptyRow.or(addressIssueRow)).toBeVisible();
     if (await emptyRow.isVisible()) {
+      // 해당 type 미적재 — 폼 단언은 skip하고 placeholder만 확인.
       await expect(page.getByText("table에서 issue를 선택하면")).toBeVisible();
       return;
     }
 
-    const firstIssue = page.getByRole("row").nth(1);
-    await firstIssue.click();
+    await addressIssueRow.click();
     const addressJson = page.getByLabel("address JSON");
     await expect(addressJson).toBeVisible();
     await expect(page.getByLabel("manual lon")).toBeVisible();
@@ -1313,21 +1361,23 @@ test.describe("admin/ops pages", () => {
   });
 
   test("/v1/providers freshness dashboard (T-217g)", async ({ page }) => {
-    await page.route("**/v1/providers", async (route) => {
+    // T-221d(#404) 이후 /ops/providers는 `/v1/ops/providers`(+`/{provider}` 상세)를
+    // 쓴다 — 목록·상세 모두 mock해 라이브 데이터와 분리한다(#409).
+    const kmaDataset = makeOpsProviderDataset();
+    const moisDataset = makeOpsProviderDataset({
+      provider: "python-mois-api",
+      dataset_key: "mois_license_features_bulk",
+      last_failure_at: "2026-06-10T02:00:00.000Z",
+      consecutive_failures: 3,
+    });
+    await page.route("**/v1/ops/providers", async (route) => {
       await fulfillJson(route, {
-        data: {
-          items: [
-            makeProviderSyncState(),
-            makeProviderSyncState({
-              provider: "python-mois-api",
-              dataset_key: "mois_license_features_bulk",
-              last_failure_at: "2026-06-10T02:00:00.000Z",
-              consecutive_failures: 3,
-            }),
-          ],
-        },
+        data: { items: [kmaDataset, moisDataset] },
         meta: { duration_ms: 1, request_id: "e2e-providers-freshness" },
       });
+    });
+    await page.route("**/v1/ops/providers/*", async (route) => {
+      await fulfillJson(route, makeOpsProviderDetailResponse(kmaDataset));
     });
 
     await page.goto("/ops/providers");
@@ -1335,16 +1385,26 @@ test.describe("admin/ops pages", () => {
     await expect(
       page.getByRole("heading", { level: 1, name: "Providers" }),
     ).toBeVisible();
+    // T-221d 상세 패널의 sync state/update request 테이블이 같은 헤더(last
+    // success 등)를 쓰므로, freshness 테이블에만 있는 `policy` 헤더로 테이블을
+    // 한정해 strict mode 위반을 피한다(#409).
+    const freshnessTable = page.getByRole("table").filter({
+      has: page.getByRole("columnheader", { name: "policy" }),
+    });
     for (const column of [
+      "detail",
       "provider",
       "dataset",
       "scope",
       "status",
+      "policy",
       "last success",
-      "last failure",
+      "next run",
       "failures",
     ]) {
-      await expect(page.getByRole("columnheader", { name: column })).toBeVisible();
+      await expect(
+        freshnessTable.getByRole("columnheader", { name: column }),
+      ).toBeVisible();
     }
     // 요약 배지 + 연속 실패 경고(assertive alert)
     await expect(page.getByText("2 providers")).toBeVisible();
@@ -1355,9 +1415,13 @@ test.describe("admin/ops pages", () => {
         .filter({ hasText: "python-mois-api/mois_license_features_bulk (3회)" }),
     ).toBeVisible();
     // 행 데이터
-    await expect(page.getByText("kma_weather_values")).toBeVisible();
+    await expect(freshnessTable.getByText("kma_weather_values")).toBeVisible();
     await expect(
-      page.getByRole("row", { name: /python-mois-api/ }).getByText("3"),
+      freshnessTable
+        .getByRole("row", { name: /python-mois-api/ })
+        .getByText("3", { exact: true }),
     ).toBeVisible();
+    // 첫 행(kma) dataset이 기본 선택되어 T-221d 상세 패널이 뜬다.
+    await expect(page.getByText("Dataset detail")).toBeVisible();
   });
 });
