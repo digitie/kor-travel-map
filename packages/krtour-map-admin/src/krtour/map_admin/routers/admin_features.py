@@ -9,6 +9,13 @@ from typing import Annotated, Any, Literal, cast
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from krtour.map.core import make_feature_id
 from krtour.map.infra.admin_feature_repo import (
+    AdminFeatureDetail,
+    AdminFeatureDetailFeature,
+    AdminFeatureDetailFile,
+    AdminFeatureDetailIssue,
+    AdminFeatureDetailOverride,
+    AdminFeatureDetailSource,
+    AdminFeatureDetailVersion,
     AdminFeaturePage,
     AdminFeatureRow,
     FeatureChangeConflict,
@@ -18,6 +25,7 @@ from krtour.map.infra.admin_feature_repo import (
     FeatureStateConflict,
     apply_feature_change_request,
     deactivate_feature,
+    get_admin_feature_detail,
     list_admin_features,
     list_feature_change_requests,
     reject_feature_change_request,
@@ -289,6 +297,174 @@ class AdminFeatureChangeListResponse(BaseModel):
     meta: Meta
 
 
+class AdminFeatureDetailFeatureRecord(BaseModel):
+    """Admin feature 상세 core snapshot."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    feature_id: str
+    kind: str
+    name: str
+    category: str
+    status: str
+    lon: float | None = None
+    lat: float | None = None
+    coord_precision_digits: int | None = None
+    address: dict[str, Any]
+    detail: dict[str, Any]
+    urls: dict[str, Any]
+    raw_refs: list[dict[str, Any]]
+    legal_dong_code: str | None = None
+    road_name_code: str | None = None
+    road_address_management_no: str | None = None
+    admin_dong_code: str | None = None
+    sido_code: str | None = None
+    sigungu_code: str | None = None
+    marker_icon: str | None = None
+    marker_color: str | None = None
+    parent_feature_id: str | None = None
+    sibling_group_id: str | None = None
+    data_origin: str
+    data_version: int
+    user_change_kind: str | None = None
+    user_change_status: str | None = None
+    user_change_request_id: str | None = None
+    user_deleted_at: datetime | None = None
+    user_deleted_by: str | None = None
+    user_change_reason: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    deleted_at: datetime | None = None
+
+
+class AdminFeatureDetailSourceRecord(BaseModel):
+    """Admin feature 상세 source/link row."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_record_key: str
+    provider: str
+    dataset_key: str
+    source_entity_type: str
+    source_entity_id: str
+    source_version: str | None = None
+    source_role: str
+    match_method: str
+    confidence: int
+    is_primary_source: bool
+    raw_name: str | None = None
+    raw_address: str | None = None
+    raw_longitude: float | None = None
+    raw_latitude: float | None = None
+    raw_payload_hash: str
+    raw_data: dict[str, Any]
+    fetched_at: datetime
+    imported_at: datetime
+    expires_at: datetime | None = None
+    linked_at: datetime
+
+
+class AdminFeatureDetailIssueRecord(BaseModel):
+    """Admin feature 상세 issue row."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    issue_id: str
+    provider: str | None = None
+    dataset_key: str | None = None
+    source_record_key: str | None = None
+    violation_type: str
+    severity: str
+    message: str
+    payload: dict[str, Any]
+    status: str
+    detected_at: datetime
+    resolved_at: datetime | None = None
+
+
+class AdminFeatureDetailOverrideRecord(BaseModel):
+    """Admin feature 상세 override row."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    override_id: str
+    source_record_key: str | None = None
+    field_path: str
+    source_value: Any
+    override_value: Any
+    prevent_provider_reactivation: bool
+    status: str
+    reason: str | None = None
+    created_by: str | None = None
+    created_at: datetime
+
+
+class AdminFeatureDetailVersionRecord(BaseModel):
+    """Admin feature 상세 version row."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    feature_id: str
+    version: int
+    origin: str
+    change_kind: str
+    payload: dict[str, Any]
+    request_id: str | None = None
+    created_by: str | None = None
+    created_at: datetime
+
+
+class AdminFeatureDetailFileRecord(BaseModel):
+    """Admin feature 상세 file metadata row."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    file_id: str
+    file_type: str
+    storage_backend: str
+    bucket: str
+    object_key: str
+    source_url: str | None = None
+    public_url: str | None = None
+    content_type: str | None = None
+    byte_size: int | None = None
+    checksum_sha256: str | None = None
+    width: int | None = None
+    height: int | None = None
+    role: str
+    display_order: int
+    alt_text: str | None = None
+    provider: str | None = None
+    dataset_key: str | None = None
+    source_record_key: str | None = None
+    payload: dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
+
+
+class AdminFeatureDetailData(BaseModel):
+    """``GET /admin/features/{feature_id}`` data."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    feature: AdminFeatureDetailFeatureRecord
+    sources: list[AdminFeatureDetailSourceRecord]
+    issues: list[AdminFeatureDetailIssueRecord]
+    overrides: list[AdminFeatureDetailOverrideRecord]
+    versions: list[AdminFeatureDetailVersionRecord]
+    change_requests: list[AdminFeatureChangeRequestRecord]
+    files: list[AdminFeatureDetailFileRecord]
+
+
+class AdminFeatureDetailResponse(BaseModel):
+    """``GET /admin/features/{feature_id}`` 응답."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: AdminFeatureDetailData
+    meta: Meta
+
+
 class AdminFeatureReviewActionRequest(BaseModel):
     """approve/reject body."""
 
@@ -377,6 +553,55 @@ def _change_record(row: FeatureChangeRequest) -> AdminFeatureChangeRequestRecord
         reviewed_at=row.reviewed_at,
         applied_at=row.applied_at,
         created_at=row.created_at,
+    )
+
+
+def _detail_feature(
+    row: AdminFeatureDetailFeature,
+) -> AdminFeatureDetailFeatureRecord:
+    return AdminFeatureDetailFeatureRecord.model_validate(row, from_attributes=True)
+
+
+def _detail_source(row: AdminFeatureDetailSource) -> AdminFeatureDetailSourceRecord:
+    return AdminFeatureDetailSourceRecord.model_validate(row, from_attributes=True)
+
+
+def _detail_issue(row: AdminFeatureDetailIssue) -> AdminFeatureDetailIssueRecord:
+    return AdminFeatureDetailIssueRecord.model_validate(row, from_attributes=True)
+
+
+def _detail_override(
+    row: AdminFeatureDetailOverride,
+) -> AdminFeatureDetailOverrideRecord:
+    return AdminFeatureDetailOverrideRecord.model_validate(row, from_attributes=True)
+
+
+def _detail_version(
+    row: AdminFeatureDetailVersion,
+) -> AdminFeatureDetailVersionRecord:
+    return AdminFeatureDetailVersionRecord.model_validate(row, from_attributes=True)
+
+
+def _detail_file(row: AdminFeatureDetailFile) -> AdminFeatureDetailFileRecord:
+    return AdminFeatureDetailFileRecord.model_validate(row, from_attributes=True)
+
+
+def _detail_response(
+    row: AdminFeatureDetail,
+    *,
+    started_at: float,
+) -> AdminFeatureDetailResponse:
+    return AdminFeatureDetailResponse(
+        data=AdminFeatureDetailData(
+            feature=_detail_feature(row.feature),
+            sources=[_detail_source(item) for item in row.sources],
+            issues=[_detail_issue(item) for item in row.issues],
+            overrides=[_detail_override(item) for item in row.overrides],
+            versions=[_detail_version(item) for item in row.versions],
+            change_requests=[_change_record(item) for item in row.change_requests],
+            files=[_detail_file(item) for item in row.files],
+        ),
+        meta=make_meta(started_at=started_at),
     )
 
 
@@ -534,6 +759,25 @@ async def list_feature_change_request_route(
             next_cursor=None,
         ),
     )
+
+
+@router.get(
+    "/{feature_id}",
+    response_model=AdminFeatureDetailResponse,
+    responses={404: {"description": "feature 없음"}},
+)
+async def get_feature_detail_route(
+    feature_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> AdminFeatureDetailResponse:
+    started_at = perf_counter()
+    row = await get_admin_feature_detail(session, feature_id)
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"feature 없음: {feature_id!r}",
+        )
+    return _detail_response(row, started_at=started_at)
 
 
 @router.post("", response_model=AdminFeatureChangeResponse)

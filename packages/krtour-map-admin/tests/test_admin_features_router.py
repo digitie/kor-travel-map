@@ -9,6 +9,13 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 from krtour.map.infra.admin_feature_repo import (
+    AdminFeatureDetail,
+    AdminFeatureDetailFeature,
+    AdminFeatureDetailFile,
+    AdminFeatureDetailIssue,
+    AdminFeatureDetailOverride,
+    AdminFeatureDetailSource,
+    AdminFeatureDetailVersion,
     AdminFeaturePage,
     AdminFeatureRow,
     FeatureChangeRequest,
@@ -83,6 +90,134 @@ def _feature_row() -> AdminFeatureRow:
     )
 
 
+def _feature_detail() -> AdminFeatureDetail:
+    now = datetime(2026, 6, 3, tzinfo=UTC)
+    feature = AdminFeatureDetailFeature(
+        feature_id="feature-1",
+        kind="place",
+        name="광화문",
+        category="01070300",
+        status="active",
+        lon=126.9769,
+        lat=37.5759,
+        coord_precision_digits=5,
+        address={"road": "서울특별시 종로구 세종대로 1"},
+        detail={"place_kind": "attraction"},
+        urls={"homepage": "https://example.test"},
+        raw_refs=[{"source": "fixture"}],
+        legal_dong_code="1111010100",
+        road_name_code=None,
+        road_address_management_no=None,
+        admin_dong_code="1111051500",
+        sido_code="11",
+        sigungu_code="11110",
+        marker_icon="landmark",
+        marker_color="P-01",
+        parent_feature_id=None,
+        sibling_group_id=None,
+        data_origin="provider",
+        data_version=0,
+        user_change_kind=None,
+        user_change_status=None,
+        user_change_request_id=None,
+        user_deleted_at=None,
+        user_deleted_by=None,
+        user_change_reason=None,
+        created_at=now,
+        updated_at=now,
+        deleted_at=None,
+    )
+    source = AdminFeatureDetailSource(
+        source_record_key="sr-feature-1",
+        provider="python-mois-api",
+        dataset_key="mois_license_features_bulk",
+        source_entity_type="license_place",
+        source_entity_id="sr-feature-1",
+        source_version="20260603",
+        source_role="primary",
+        match_method="natural_key",
+        confidence=100,
+        is_primary_source=True,
+        raw_name="광화문",
+        raw_address="서울특별시 종로구 세종대로 1",
+        raw_longitude=126.9769,
+        raw_latitude=37.5759,
+        raw_payload_hash="hash-1",
+        raw_data={"id": "sr-feature-1"},
+        fetched_at=now,
+        imported_at=now,
+        expires_at=None,
+        linked_at=now,
+    )
+    issue = AdminFeatureDetailIssue(
+        issue_id="issue-1",
+        provider="python-mois-api",
+        dataset_key="mois_license_features_bulk",
+        source_record_key="sr-feature-1",
+        violation_type="missing_address",
+        severity="warning",
+        message="주소 누락",
+        payload={"field": "address"},
+        status="open",
+        detected_at=now,
+        resolved_at=None,
+    )
+    override = AdminFeatureDetailOverride(
+        override_id="override-1",
+        source_record_key=None,
+        field_path="status",
+        source_value="active",
+        override_value="inactive",
+        prevent_provider_reactivation=True,
+        status="active",
+        reason="운영상 제외",
+        created_by="local-admin",
+        created_at=now,
+    )
+    version = AdminFeatureDetailVersion(
+        feature_id="feature-1",
+        version=0,
+        origin="provider",
+        change_kind="load",
+        payload={"name": "광화문"},
+        request_id=None,
+        created_by="provider",
+        created_at=now,
+    )
+    file = AdminFeatureDetailFile(
+        file_id="file-1",
+        file_type="image",
+        storage_backend="rustfs",
+        bucket="krtour-map",
+        object_key="features/example.jpg",
+        source_url="https://example.test/source.jpg",
+        public_url="https://cdn.example.test/features/example.jpg",
+        content_type="image/jpeg",
+        byte_size=1234,
+        checksum_sha256="a" * 64,
+        width=640,
+        height=480,
+        role="primary",
+        display_order=0,
+        alt_text="광화문",
+        provider="python-mois-api",
+        dataset_key="mois_license_features_bulk",
+        source_record_key="sr-feature-1",
+        payload={},
+        created_at=now,
+        updated_at=now,
+    )
+    return AdminFeatureDetail(
+        feature=feature,
+        sources=(source,),
+        issues=(issue,),
+        overrides=(override,),
+        versions=(version,),
+        change_requests=(_change_request(action="update", state="applied"),),
+        files=(file,),
+    )
+
+
 def _change_request(
     *,
     request_id: str = "change-1",
@@ -119,7 +254,11 @@ def test_admin_features_routes_mounted_in_openapi(client: TestClient) -> None:
     assert "/v1/admin/features" in spec["paths"]
     assert set(spec["paths"]["/v1/admin/features"]) >= {"get", "post"}
     assert "/v1/admin/features/{feature_id}" in spec["paths"]
-    assert set(spec["paths"]["/v1/admin/features/{feature_id}"]) >= {"patch", "delete"}
+    assert set(spec["paths"]["/v1/admin/features/{feature_id}"]) >= {
+        "get",
+        "patch",
+        "delete",
+    }
     assert "/v1/admin/features/change-requests" in spec["paths"]
     assert "/v1/admin/features/change-requests/{request_id}/approve" in spec["paths"]
     assert "/v1/admin/features/change-requests/{request_id}/reject" in spec["paths"]
@@ -176,6 +315,51 @@ def test_list_admin_features_passes_filters(
         "next_cursor": "next",
         "total": None,
     }
+
+
+@pytest.mark.unit
+def test_get_admin_feature_detail_returns_linked_operational_data(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import admin_features as router_mod
+
+    async def _detail(_session: Any, feature_id: str) -> AdminFeatureDetail:
+        assert feature_id == "feature-1"
+        return _feature_detail()
+
+    monkeypatch.setattr(router_mod, "get_admin_feature_detail", _detail)
+
+    response = client.get("/v1/admin/features/feature-1")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data"]["feature"]["feature_id"] == "feature-1"
+    assert body["data"]["feature"]["raw_refs"] == [{"source": "fixture"}]
+    assert body["data"]["sources"][0]["raw_data"] == {"id": "sr-feature-1"}
+    assert body["data"]["issues"][0]["status"] == "open"
+    assert body["data"]["overrides"][0]["field_path"] == "status"
+    assert body["data"]["versions"][0]["change_kind"] == "load"
+    assert body["data"]["change_requests"][0]["status"] == "applied"
+    assert body["data"]["files"][0]["role"] == "primary"
+
+
+@pytest.mark.unit
+def test_get_admin_feature_detail_returns_404(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import admin_features as router_mod
+
+    async def _detail(_session: Any, feature_id: str) -> None:
+        assert feature_id == "missing"
+
+    monkeypatch.setattr(router_mod, "get_admin_feature_detail", _detail)
+
+    response = client.get("/v1/admin/features/missing")
+
+    assert response.status_code == 404
+    assert response.json()["code"] == "NOT_FOUND"
 
 
 @pytest.mark.unit

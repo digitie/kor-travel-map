@@ -6,6 +6,7 @@ import maplibregl, { LngLatBounds, type StyleSpecification } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
   GitCompareArrowsIcon,
+  ExternalLinkIcon,
   ListChecksIcon,
   ListIcon,
   MapIcon,
@@ -152,6 +153,10 @@ function JsonBlock({ value }: { value: unknown }) {
   );
 }
 
+function featureDetailHref(featureId: string): string {
+  return `/features/${encodeURIComponent(featureId)}`;
+}
+
 function FeatureDetailPanel({
   featureId,
   onClose,
@@ -173,15 +178,24 @@ function FeatureDetailPanel({
             {featureId}
           </CardDescription>
         </div>
-        <Button
-          aria-label="닫기"
-          size="icon-sm"
-          type="button"
-          variant="ghost"
-          onClick={onClose}
-        >
-          <XIcon />
-        </Button>
+        <div className="flex items-center gap-1">
+          <Link
+            aria-label="상세 열기"
+            className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }))}
+            href={featureDetailHref(featureId)}
+          >
+            <ExternalLinkIcon />
+          </Link>
+          <Button
+            aria-label="닫기"
+            size="icon-sm"
+            type="button"
+            variant="ghost"
+            onClick={onClose}
+          >
+            <XIcon />
+          </Button>
+        </div>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         {detailQuery.isLoading ? <Skeleton className="h-48 w-full" /> : null}
@@ -491,7 +505,15 @@ export function FeaturesClient() {
                       key={feature.feature_id}
                       onClick={() => setSelectedFeatureId(feature.feature_id)}
                     >
-                      <TableCell className="font-medium">{feature.name}</TableCell>
+                      <TableCell className="font-medium">
+                        <Link
+                          className="text-primary underline-offset-4 hover:underline"
+                          href={featureDetailHref(feature.feature_id)}
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          {feature.name}
+                        </Link>
+                      </TableCell>
                       <TableCell>
                         <Badge variant="outline">{feature.kind}</Badge>
                       </TableCell>

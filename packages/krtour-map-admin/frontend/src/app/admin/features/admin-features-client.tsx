@@ -3,6 +3,7 @@
 import {
   AlertTriangleIcon,
   EyeIcon,
+  ExternalLinkIcon,
   RefreshCwIcon,
   SearchIcon,
   XCircleIcon,
@@ -78,6 +79,10 @@ function coordLabel(feature: AdminFeatureRecord): string {
   return "없음";
 }
 
+function featureDetailHref(featureId: string): string {
+  return `/features/${encodeURIComponent(featureId)}`;
+}
+
 function FeatureDetailInspector({ featureId }: { featureId: string | null }) {
   const detail = useFeatureDetail(featureId);
 
@@ -101,9 +106,10 @@ function FeatureDetailInspector({ featureId }: { featureId: string | null }) {
           </div>
           <Link
             className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
-            href="/features"
+            href={featureDetailHref(featureId)}
           >
-            지도
+            <ExternalLinkIcon data-icon="inline-start" />
+            전체 상세
           </Link>
         </div>
         {detail.isLoading ? <Skeleton className="m-4 h-48" /> : null}
@@ -463,6 +469,16 @@ export function AdminFeaturesClient() {
                             <EyeIcon data-icon="inline-start" />
                             detail
                           </Button>
+                          <Link
+                            className={cn(
+                              buttonVariants({ variant: "ghost", size: "sm" }),
+                            )}
+                            href={featureDetailHref(feature.feature_id)}
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            <ExternalLinkIcon data-icon="inline-start" />
+                            open
+                          </Link>
                           <Button
                             disabled={
                               deactivate.isPending ||

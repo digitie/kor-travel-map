@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### Admin feature 상세 경로 1차 (T-221a, 2026-06-12)
+
+- **ADDED**: `GET /v1/admin/features/{feature_id}` — feature core snapshot,
+  source/raw payload, issue, override, version/change request history, 선택적
+  `feature_files` metadata를 묶는 운영자용 상세 API.
+- **ADDED**: admin frontend `/features/[featureId]` 상세 화면. `/features` 지도/테이블과
+  `/admin/features` 목록에서 새 상세 화면으로 이동할 수 있으며, weather/nearby도 같은
+  화면에서 확인한다.
+- **CHANGED**: admin OpenAPI와 frontend generated type을 새 상세 API 기준으로 갱신했다.
+
 ### MCST provider 재배선 — CSV 파일 다운로드 주경로 (#395, T-220 재배선, 2026-06-12)
 
 - **CHANGED**: `python-mcst-api` pin `d06e8d2` → `ba471ee` — provider가 KCISA

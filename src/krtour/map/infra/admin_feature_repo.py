@@ -34,6 +34,13 @@ if TYPE_CHECKING:
 __all__ = [
     "AdminFeaturePage",
     "AdminFeatureRow",
+    "AdminFeatureDetail",
+    "AdminFeatureDetailFeature",
+    "AdminFeatureDetailFile",
+    "AdminFeatureDetailIssue",
+    "AdminFeatureDetailOverride",
+    "AdminFeatureDetailSource",
+    "AdminFeatureDetailVersion",
     "DedupReviewPage",
     "DedupReviewRow",
     "DedupFeatureSummary",
@@ -49,6 +56,7 @@ __all__ = [
     "apply_feature_change_request",
     "reject_feature_change_request",
     "list_feature_change_requests",
+    "get_admin_feature_detail",
     "list_admin_features",
     "list_dedup_reviews",
     "list_enrichment_reviews",
@@ -98,6 +106,162 @@ class AdminFeaturePage:
 
     items: tuple[AdminFeatureRow, ...]
     next_cursor: str | None
+
+
+@dataclass(frozen=True)
+class AdminFeatureDetailFeature:
+    """Admin feature 상세의 feature core snapshot."""
+
+    feature_id: str
+    kind: str
+    name: str
+    category: str
+    status: str
+    lon: float | None
+    lat: float | None
+    coord_precision_digits: int | None
+    address: dict[str, Any]
+    detail: dict[str, Any]
+    urls: dict[str, Any]
+    raw_refs: list[dict[str, Any]]
+    legal_dong_code: str | None
+    road_name_code: str | None
+    road_address_management_no: str | None
+    admin_dong_code: str | None
+    sido_code: str | None
+    sigungu_code: str | None
+    marker_icon: str | None
+    marker_color: str | None
+    parent_feature_id: str | None
+    sibling_group_id: str | None
+    data_origin: str
+    data_version: int
+    user_change_kind: str | None
+    user_change_status: str | None
+    user_change_request_id: str | None
+    user_deleted_at: datetime | None
+    user_deleted_by: str | None
+    user_change_reason: str | None
+    created_at: datetime
+    updated_at: datetime
+    deleted_at: datetime | None
+
+
+@dataclass(frozen=True)
+class AdminFeatureDetailSource:
+    """Feature에 연결된 SourceRecord + SourceLink snapshot."""
+
+    source_record_key: str
+    provider: str
+    dataset_key: str
+    source_entity_type: str
+    source_entity_id: str
+    source_version: str | None
+    source_role: str
+    match_method: str
+    confidence: int
+    is_primary_source: bool
+    raw_name: str | None
+    raw_address: str | None
+    raw_longitude: float | None
+    raw_latitude: float | None
+    raw_payload_hash: str
+    raw_data: dict[str, Any]
+    fetched_at: datetime
+    imported_at: datetime
+    expires_at: datetime | None
+    linked_at: datetime
+
+
+@dataclass(frozen=True)
+class AdminFeatureDetailIssue:
+    """Feature 상세 issue row."""
+
+    issue_id: str
+    provider: str | None
+    dataset_key: str | None
+    source_record_key: str | None
+    violation_type: str
+    severity: str
+    message: str
+    payload: dict[str, Any]
+    status: str
+    detected_at: datetime
+    resolved_at: datetime | None
+
+
+@dataclass(frozen=True)
+class AdminFeatureDetailOverride:
+    """Feature 상세 override row."""
+
+    override_id: str
+    source_record_key: str | None
+    field_path: str
+    source_value: Any
+    override_value: Any
+    prevent_provider_reactivation: bool
+    status: str
+    reason: str | None
+    created_by: str | None
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class AdminFeatureDetailVersion:
+    """Feature version/history row."""
+
+    feature_id: str
+    version: int
+    origin: str
+    change_kind: str
+    payload: dict[str, Any]
+    request_id: str | None
+    created_by: str | None
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class AdminFeatureDetailFile:
+    """Feature file metadata row.
+
+    ``feature.feature_files``는 아직 모든 DB head에 존재하지 않는다. 상세 API는 테이블이
+    있으면 이 모델로 반환하고, 없으면 빈 tuple을 반환한다.
+    """
+
+    file_id: str
+    file_type: str
+    storage_backend: str
+    bucket: str
+    object_key: str
+    source_url: str | None
+    public_url: str | None
+    content_type: str | None
+    byte_size: int | None
+    checksum_sha256: str | None
+    width: int | None
+    height: int | None
+    role: str
+    display_order: int
+    alt_text: str | None
+    provider: str | None
+    dataset_key: str | None
+    source_record_key: str | None
+    payload: dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
+class AdminFeatureDetail:
+    """Admin feature 상세 aggregate."""
+
+    feature: AdminFeatureDetailFeature
+    sources: tuple[AdminFeatureDetailSource, ...]
+    issues: tuple[AdminFeatureDetailIssue, ...]
+    overrides: tuple[AdminFeatureDetailOverride, ...]
+    versions: tuple[AdminFeatureDetailVersion, ...]
+    change_requests: tuple[FeatureChangeRequest, ...]
+    files: tuple[AdminFeatureDetailFile, ...]
 
 
 @dataclass(frozen=True)
@@ -267,6 +431,36 @@ def _json_array(value: Any) -> tuple[dict[str, Any], ...]:
     if not isinstance(value, list):
         return ()
     return tuple(dict(item) for item in value if isinstance(item, dict))
+
+
+def _json_value(value: Any) -> Any:
+    if isinstance(value, str):
+        with suppress(json.JSONDecodeError):
+            return json.loads(value)
+    return value
+
+
+def _json_object(value: Any) -> dict[str, Any]:
+    value = _json_value(value)
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _json_object_list(value: Any) -> list[dict[str, Any]]:
+    value = _json_value(value)
+    if not isinstance(value, list):
+        return []
+    return [dict(item) for item in value if isinstance(item, dict)]
+
+
+def _float_or_none(value: Any) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        return float(value)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _cursor_payload(cursor: str | None, *, sort: str, order: str) -> dict[str, Any]:
@@ -510,6 +704,393 @@ def _admin_feature_row(row: Any) -> AdminFeatureRow:
         issues=_json_array(row["issues"]),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+    )
+
+
+_ADMIN_FEATURE_DETAIL_SQL: Final[str] = """
+SELECT
+    feature_id,
+    kind,
+    name,
+    category,
+    status,
+    x_extension.ST_X(coord) AS lon,
+    x_extension.ST_Y(coord) AS lat,
+    coord_precision_digits,
+    address,
+    detail,
+    urls,
+    raw_refs,
+    legal_dong_code,
+    road_name_code,
+    road_address_management_no,
+    admin_dong_code,
+    sido_code,
+    sigungu_code,
+    marker_icon,
+    marker_color,
+    parent_feature_id,
+    sibling_group_id::text AS sibling_group_id,
+    data_origin,
+    data_version,
+    user_change_kind,
+    user_change_status,
+    user_change_request_id::text AS user_change_request_id,
+    user_deleted_at,
+    user_deleted_by,
+    user_change_reason,
+    created_at,
+    updated_at,
+    deleted_at
+FROM feature.features
+WHERE feature_id = :feature_id
+"""
+
+_ADMIN_FEATURE_SOURCES_SQL: Final[str] = """
+SELECT
+    sr.source_record_key,
+    sr.provider,
+    sr.dataset_key,
+    sr.source_entity_type,
+    sr.source_entity_id,
+    sr.source_version,
+    sl.source_role,
+    sl.match_method,
+    sl.confidence,
+    sl.is_primary_source,
+    sr.raw_name,
+    sr.raw_address,
+    sr.raw_longitude,
+    sr.raw_latitude,
+    sr.raw_payload_hash,
+    sr.raw_data,
+    sr.fetched_at,
+    sr.imported_at,
+    sr.expires_at,
+    sl.created_at AS linked_at
+FROM provider_sync.source_links AS sl
+JOIN provider_sync.source_records AS sr
+  ON sr.source_record_key = sl.source_record_key
+WHERE sl.feature_id = :feature_id
+ORDER BY sl.is_primary_source DESC, sr.imported_at DESC NULLS LAST,
+         sl.created_at DESC, sr.source_record_key
+LIMIT 50
+"""
+
+_ADMIN_FEATURE_ISSUES_SQL: Final[str] = """
+SELECT
+    issue_id::text AS issue_id,
+    provider,
+    dataset_key,
+    source_record_key,
+    violation_type,
+    severity,
+    message,
+    payload,
+    status,
+    detected_at,
+    resolved_at
+FROM ops.data_integrity_violations
+WHERE feature_id = :feature_id
+ORDER BY (status = 'open') DESC, detected_at DESC, issue_id DESC
+LIMIT 100
+"""
+
+_ADMIN_FEATURE_OVERRIDES_SQL: Final[str] = """
+SELECT
+    override_id::text AS override_id,
+    source_record_key,
+    field_path,
+    source_value,
+    override_value,
+    prevent_provider_reactivation,
+    status,
+    reason,
+    created_by,
+    created_at
+FROM ops.feature_overrides
+WHERE feature_id = :feature_id
+ORDER BY (status = 'active') DESC, created_at DESC, override_id DESC
+LIMIT 100
+"""
+
+_ADMIN_FEATURE_VERSIONS_SQL: Final[str] = """
+SELECT
+    feature_id,
+    version,
+    origin,
+    change_kind,
+    payload,
+    request_id::text AS request_id,
+    created_by,
+    created_at
+FROM feature.feature_versions
+WHERE feature_id = :feature_id
+ORDER BY version DESC, created_at DESC
+LIMIT 50
+"""
+
+_ADMIN_FEATURE_CHANGE_REQUESTS_SQL: Final[str] = """
+SELECT
+    request_id::text,
+    feature_id,
+    action,
+    state,
+    review_mode,
+    payload,
+    reason,
+    requested_by,
+    reviewed_by,
+    reviewed_at,
+    applied_at,
+    created_at
+FROM ops.feature_change_requests
+WHERE feature_id = :feature_id
+ORDER BY created_at DESC, request_id DESC
+LIMIT 50
+"""
+
+_FEATURE_FILES_TABLE_EXISTS_SQL: Final[str] = """
+SELECT to_regclass('feature.feature_files') IS NOT NULL AS exists
+"""
+
+_ADMIN_FEATURE_FILES_SQL: Final[str] = """
+SELECT
+    file_id,
+    file_type,
+    storage_backend,
+    bucket,
+    object_key,
+    source_url,
+    public_url,
+    content_type,
+    byte_size,
+    checksum_sha256,
+    width,
+    height,
+    role,
+    display_order,
+    alt_text,
+    provider,
+    dataset_key,
+    source_record_key,
+    payload,
+    created_at,
+    updated_at
+FROM feature.feature_files
+WHERE feature_id = :feature_id
+ORDER BY display_order ASC, file_id ASC
+LIMIT 100
+"""
+
+
+def _admin_feature_detail_feature(row: Any) -> AdminFeatureDetailFeature:
+    return AdminFeatureDetailFeature(
+        feature_id=str(row["feature_id"]),
+        kind=str(row["kind"]),
+        name=str(row["name"]),
+        category=str(row["category"]),
+        status=str(row["status"]),
+        lon=_float_or_none(row["lon"]),
+        lat=_float_or_none(row["lat"]),
+        coord_precision_digits=(
+            int(row["coord_precision_digits"])
+            if row["coord_precision_digits"] is not None
+            else None
+        ),
+        address=_json_object(row["address"]),
+        detail=_json_object(row["detail"]),
+        urls=_json_object(row["urls"]),
+        raw_refs=_json_object_list(row["raw_refs"]),
+        legal_dong_code=row["legal_dong_code"],
+        road_name_code=row["road_name_code"],
+        road_address_management_no=row["road_address_management_no"],
+        admin_dong_code=row["admin_dong_code"],
+        sido_code=row["sido_code"],
+        sigungu_code=row["sigungu_code"],
+        marker_icon=row["marker_icon"],
+        marker_color=row["marker_color"],
+        parent_feature_id=row["parent_feature_id"],
+        sibling_group_id=row["sibling_group_id"],
+        data_origin=str(row["data_origin"]),
+        data_version=int(row["data_version"]),
+        user_change_kind=row["user_change_kind"],
+        user_change_status=row["user_change_status"],
+        user_change_request_id=row["user_change_request_id"],
+        user_deleted_at=row["user_deleted_at"],
+        user_deleted_by=row["user_deleted_by"],
+        user_change_reason=row["user_change_reason"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+        deleted_at=row["deleted_at"],
+    )
+
+
+def _admin_feature_detail_source(row: Any) -> AdminFeatureDetailSource:
+    return AdminFeatureDetailSource(
+        source_record_key=str(row["source_record_key"]),
+        provider=str(row["provider"]),
+        dataset_key=str(row["dataset_key"]),
+        source_entity_type=str(row["source_entity_type"]),
+        source_entity_id=str(row["source_entity_id"]),
+        source_version=row["source_version"],
+        source_role=str(row["source_role"]),
+        match_method=str(row["match_method"]),
+        confidence=int(row["confidence"]),
+        is_primary_source=bool(row["is_primary_source"]),
+        raw_name=row["raw_name"],
+        raw_address=row["raw_address"],
+        raw_longitude=_float_or_none(row["raw_longitude"]),
+        raw_latitude=_float_or_none(row["raw_latitude"]),
+        raw_payload_hash=str(row["raw_payload_hash"]),
+        raw_data=_json_object(row["raw_data"]),
+        fetched_at=row["fetched_at"],
+        imported_at=row["imported_at"],
+        expires_at=row["expires_at"],
+        linked_at=row["linked_at"],
+    )
+
+
+def _admin_feature_detail_issue(row: Any) -> AdminFeatureDetailIssue:
+    return AdminFeatureDetailIssue(
+        issue_id=str(row["issue_id"]),
+        provider=row["provider"],
+        dataset_key=row["dataset_key"],
+        source_record_key=row["source_record_key"],
+        violation_type=str(row["violation_type"]),
+        severity=str(row["severity"]),
+        message=str(row["message"]),
+        payload=_json_object(row["payload"]),
+        status=str(row["status"]),
+        detected_at=row["detected_at"],
+        resolved_at=row["resolved_at"],
+    )
+
+
+def _admin_feature_detail_override(row: Any) -> AdminFeatureDetailOverride:
+    return AdminFeatureDetailOverride(
+        override_id=str(row["override_id"]),
+        source_record_key=row["source_record_key"],
+        field_path=str(row["field_path"]),
+        source_value=_json_value(row["source_value"]),
+        override_value=_json_value(row["override_value"]),
+        prevent_provider_reactivation=bool(row["prevent_provider_reactivation"]),
+        status=str(row["status"]),
+        reason=row["reason"],
+        created_by=row["created_by"],
+        created_at=row["created_at"],
+    )
+
+
+def _admin_feature_detail_version(row: Any) -> AdminFeatureDetailVersion:
+    return AdminFeatureDetailVersion(
+        feature_id=str(row["feature_id"]),
+        version=int(row["version"]),
+        origin=str(row["origin"]),
+        change_kind=str(row["change_kind"]),
+        payload=_json_object(row["payload"]),
+        request_id=row["request_id"],
+        created_by=row["created_by"],
+        created_at=row["created_at"],
+    )
+
+
+def _admin_feature_detail_file(row: Any) -> AdminFeatureDetailFile:
+    return AdminFeatureDetailFile(
+        file_id=str(row["file_id"]),
+        file_type=str(row["file_type"]),
+        storage_backend=str(row["storage_backend"]),
+        bucket=str(row["bucket"]),
+        object_key=str(row["object_key"]),
+        source_url=row["source_url"],
+        public_url=row["public_url"],
+        content_type=row["content_type"],
+        byte_size=int(row["byte_size"]) if row["byte_size"] is not None else None,
+        checksum_sha256=row["checksum_sha256"],
+        width=int(row["width"]) if row["width"] is not None else None,
+        height=int(row["height"]) if row["height"] is not None else None,
+        role=str(row["role"]),
+        display_order=int(row["display_order"]),
+        alt_text=row["alt_text"],
+        provider=row["provider"],
+        dataset_key=row["dataset_key"],
+        source_record_key=row["source_record_key"],
+        payload=_json_object(row["payload"]),
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+async def _feature_files_table_exists(session: AsyncSession) -> bool:
+    row = (
+        await session.execute(text(_FEATURE_FILES_TABLE_EXISTS_SQL), {})
+    ).mappings().one()
+    return bool(row["exists"])
+
+
+async def _list_admin_feature_files(
+    session: AsyncSession, feature_id: str
+) -> tuple[AdminFeatureDetailFile, ...]:
+    if not await _feature_files_table_exists(session):
+        return ()
+    rows = (
+        await session.execute(text(_ADMIN_FEATURE_FILES_SQL), {"feature_id": feature_id})
+    ).mappings().all()
+    return tuple(_admin_feature_detail_file(row) for row in rows)
+
+
+async def get_admin_feature_detail(
+    session: AsyncSession, feature_id: str
+) -> AdminFeatureDetail | None:
+    """Admin 상세 화면용 feature aggregate를 조회한다."""
+    feature_row = (
+        await session.execute(
+            text(_ADMIN_FEATURE_DETAIL_SQL),
+            {"feature_id": feature_id},
+        )
+    ).mappings().first()
+    if feature_row is None:
+        return None
+
+    sources = (
+        await session.execute(
+            text(_ADMIN_FEATURE_SOURCES_SQL),
+            {"feature_id": feature_id},
+        )
+    ).mappings().all()
+    issues = (
+        await session.execute(
+            text(_ADMIN_FEATURE_ISSUES_SQL),
+            {"feature_id": feature_id},
+        )
+    ).mappings().all()
+    overrides = (
+        await session.execute(
+            text(_ADMIN_FEATURE_OVERRIDES_SQL),
+            {"feature_id": feature_id},
+        )
+    ).mappings().all()
+    versions = (
+        await session.execute(
+            text(_ADMIN_FEATURE_VERSIONS_SQL),
+            {"feature_id": feature_id},
+        )
+    ).mappings().all()
+    change_requests = (
+        await session.execute(
+            text(_ADMIN_FEATURE_CHANGE_REQUESTS_SQL),
+            {"feature_id": feature_id},
+        )
+    ).mappings().all()
+
+    return AdminFeatureDetail(
+        feature=_admin_feature_detail_feature(feature_row),
+        sources=tuple(_admin_feature_detail_source(row) for row in sources),
+        issues=tuple(_admin_feature_detail_issue(row) for row in issues),
+        overrides=tuple(_admin_feature_detail_override(row) for row in overrides),
+        versions=tuple(_admin_feature_detail_version(row) for row in versions),
+        change_requests=tuple(_feature_change_row(row) for row in change_requests),
+        files=await _list_admin_feature_files(session, feature_id),
     )
 
 
