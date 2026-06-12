@@ -61,6 +61,7 @@ from krtour.map_admin.routers import (
     provider_refresh_policies_router,
     providers_router,
     public_status_router,
+    public_views_router,
 )
 from krtour.map_admin.settings import AdminSettings
 
@@ -344,6 +345,7 @@ def create_app(settings: AdminSettings | None = None) -> FastAPI:
         # service token으로 게이트한다(ADR-045 D-1; features.py). token 미설정이면
         # 통과(하위호환). 나머지 ``/v1/features`` read는 공용이라 앱 토큰을 강제하지 않는다.
         application.include_router(features_router, prefix="/v1")
+        application.include_router(public_views_router, prefix="/v1")
         application.include_router(categories_router, prefix="/v1")
         application.include_router(providers_router, prefix="/v1")
         # Step D on-demand 상세는 DB(적재된 raw_data) 필요 → features와 동일 gate.

@@ -43,6 +43,7 @@ from krtour.map_admin.routers.provider_refresh_policies import (
 )
 from krtour.map_admin.routers.providers import router as providers_router
 from krtour.map_admin.routers.public_status import router as public_status_router
+from krtour.map_admin.routers.public_views import router as public_views_router
 
 __all__ = [
     "etl_router",
@@ -65,4 +66,5 @@ __all__ = [
     "dagster_router",
     "public_status_router",
     "providers_router",
+    "public_views_router",
 ]

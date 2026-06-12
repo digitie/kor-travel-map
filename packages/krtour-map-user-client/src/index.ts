@@ -42,6 +42,13 @@ export type CategoriesResponse = Schemas["CategoriesResponse"];
 export type CategorySummary = Schemas["CategorySummary"];
 export type ProviderLastSyncResponse = Schemas["ProviderLastSyncResponse"];
 export type ProvidersFreshnessResponse = Schemas["ProvidersFreshnessResponse"];
+export type BeachPublicView = Schemas["BeachPublicView"];
+export type FestivalPublicView = Schemas["FestivalPublicView"];
+export type PublicBeachListResponse = Schemas["PublicBeachListResponse"];
+export type PublicFestivalMonthlyResponse =
+  Schemas["PublicFestivalMonthlyResponse"];
+export type PublicMapMarkerLayerResponse =
+  Schemas["PublicMapMarkerLayerResponse"];
 
 // ── 컴파일 타임 표면 단언 (codegen 호환성 게이트) ──
 // ADR-048 계약 불변식이 spec 변경으로 깨지면 본 패키지 tsc가 먼저 실패한다.
@@ -79,6 +86,12 @@ type _PathsStable = _Assert<
     | "/v1/features/batch"
     | "/v1/features/{feature_id}"
     | "/v1/features/{feature_id}/weather"
+    | "/v1/public/beaches"
+    | "/v1/public/beaches/map-markers"
+    | "/v1/public/beaches/{feature_id}"
+    | "/v1/public/festivals/monthly"
+    | "/v1/public/festivals/map-markers"
+    | "/v1/public/festivals/{feature_id}"
     | "/v1/categories"
     | "/v1/providers"
     | "/v1/providers/{provider}/last-sync"
