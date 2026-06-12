@@ -3,6 +3,24 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 실데이터 full reload 최종 검증 (2026-06-12, `T-212e`)
+
+- [x] **T-212e — 실데이터 전체 재적재 + offline upload 실데이터 검증 + 최종 리포트.**
+  정본은 `docs/reports/t-212e-live-full-reload-final-2026-06-12.md`.
+  - 빈 DB(WSL 재설치로 환경 전체 재구축)에서 전 provider Dagster 적재
+    **1,095,665 features**(MOIS bulk 980,970 / MCST CSV 13종 102,121 /
+    주차장 18,294 / knps_trails 618 등) + weather values 92,923.
+  - `full_load_batch_consistency_gate` 최종 report `99159eea` severity_max
+    OK, `ops.data_integrity_violations` 0.
+  - offline upload 실데이터 CSV/TSV/JSONL 3포맷 종단 `loaded` + #397→#417
+    DELETE lifecycle live 검증(좀비 2건 삭제 → 동일 checksum 재업로드 201).
+  - Windows Playwright e2e **33/33**, API smoke 17/17, backup→staging
+    restore 검증값 운영 정확 일치(1,095,665), 대표 read P99 수집
+    (in-bounds 442ms — 클러스터 MV ADR 재판단 입력).
+  - 실측 적발 수정: krtour #392/#393/#400/#408/#410/#411/#413/#416/#417/
+    #420/#424 + provider 5 repo(datagokr·krheritage·kma·mcst·knps)
+    이슈→PR→머지. 이슈 #397/#407/#409 close.
+
 ## curated_features + TripMate import (2026-06-12, `T-223`)
 
 - [x] **T-223 — curated_features + TripMate curated_trip_plans import 계약/구현.**

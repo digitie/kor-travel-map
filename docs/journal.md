@@ -2,6 +2,32 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-12 (claude) — T-212e 완결: 실데이터 full reload 최종 리포트
+
+T-212e 전 트랙 종결. 정본 리포트
+`docs/reports/t-212e-live-full-reload-final-2026-06-12.md`.
+
+- **적재**: 빈 DB → **1,095,665 features**(MOIS bulk 980,970 / MCST CSV 13종
+  102,121 / 주차장 18,294 / knps_trails 618 등) + weather values 92,923.
+  WSL 재설치로 환경 전체 재구축(네이티브 docker-ce + GITHUB_TOKEN build
+  secret + #391 표준 포트) 후 빈 DB에서 처음부터 실행.
+- **정합성**: `full_load_batch_consistency_gate` 최종 report `99159eea`
+  (trails 포함) severity_max **OK**, integrity violations 0.
+- **offline upload**: 실데이터 CSV 60/TSV 40/JSONL 60 종단 `loaded` +
+  #397→#417 DELETE lifecycle live 검증(좀비 2건 200 → 동일 checksum
+  재업로드 201).
+- **e2e/smoke**: Windows Playwright **33/33**(#416 spec drift 수정 + #417
+  delete flow 추가 검증, frontend 이미지 갱신 후) / API smoke 17/17.
+- **backup/restore**: cold backup(554MB dump+rustfs) → staging restore
+  검증값 운영 정확 일치(1,095,665). 교훈 2건 리포트 §5.3 — WSL
+  `PYTHON_BIN`(advisory lock psycopg) + 장시간 maintenance는 호출 세션과
+  분리 실행(SIGPIPE).
+- **P99**(~1.1M rows): search 86ms / nearby 102ms / categories 9ms /
+  in-bounds **442ms** — 클러스터 MV ADR 재판단 입력(리포트 §6).
+- 실측이 적발해 수정·머지한 결함: krtour #392/#393/#400/#408/#410/#411/
+  #413/#416/#417/#420/#424 + provider 5 repo(datagokr·krheritage·kma·
+  mcst·knps) 이슈→PR→머지. 이슈 #397/#407/#409 close.
+
 ## 2026-06-12 (claude) — #407: knps 이름 없는 record skip — trails 배치 크래시 수정
 
 knps 핀 범프(#420) 후 trails 재실행이 14분 진행 끝에
