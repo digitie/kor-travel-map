@@ -2,6 +2,22 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-12 (codex) — T-223d TripMate import 머지 반영
+
+T-223d 외부 TripMate 소비 측 구현이 TripMate PR #184로 머지됐다.
+
+- TripMate `KrtourMapClient`가 krtour-map
+  `/v1/curated-features/{curated_feature_id}/tripmate-copy` snapshot을 호출한다.
+- TripMate `POST /admin/notice-plans/imports/krtour-curated-features`가
+  `create` / `upsert` / `refresh` mode로 `curated_trip_plans` /
+  `curated_plan_pois`를 생성·갱신하고 source version/etag/item provenance를 저장한다.
+- TripMate 잔여 `TRIPMATE_AGENT_API_BASE_URL` / 12401 예약을 제거했다.
+  `krtour-ai-agent`는 curated trip plan 생성 flow에 관여하지 않는다.
+- krtour-map `tasks.md`, `tasks-done.md`, `resume.md`를 T-223 완료 상태로 갱신했다.
+
+검증(TripMate PR #184): CI `Aggregate CI gate`, `lint-typecheck-test`,
+`Post MCP review reminder` green.
+
 ## 2026-06-12 (codex) — T-223c-3 curated Admin UI
 
 curated feature overlay 운영 화면을 admin frontend에 연결했다.

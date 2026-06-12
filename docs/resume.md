@@ -1,5 +1,25 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-12 Codex 작업 메모 — T-223d TripMate import 머지
+
+T-223d 외부 TripMate 연동까지 완료했다.
+
+- TripMate PR #184(`5966628192a1f7b0c359a6435011f3e2f3f04469`)가 머지되어,
+  `POST /admin/notice-plans/imports/krtour-curated-features`가 krtour-map
+  `/v1/curated-features/{curated_feature_id}/tripmate-copy` snapshot을 소비한다.
+- TripMate는 `app.curated_trip_plans` / `app.curated_plan_pois`로 복사하고,
+  `source_system`, `source_curated_feature_id`, `source_curated_feature_version`,
+  `source_etag`, `source_imported_at`, source item id를 저장한다.
+- `create` / `upsert` / `refresh` mode, 기존 feature-backed POI 재사용, 신규 item
+  LexoRank append가 검증됐다.
+- TripMate 쪽 `TRIPMATE_AGENT_API_BASE_URL` / 12401 잔여 설정도 제거됐다.
+  `krtour-ai-agent`는 curated trip plan 생성에 관여하지 않는다.
+
+**다음 한 작업**: T-212e는 다른 agent가 병행 진행 중이다. 완료 결과가 머지되면
+**T-225**로 최신 T-221/T-222/T-223 표면 포함 여부와 live row 수/P99/offline upload 증거를
+재대조한다. 그 전까지 본 agent의 다음 큰 후속은 T-226 package identity rename
+ADR/문서 정본화다.
+
 ## 2026-06-12 Codex 작업 메모 — T-223c-3 curated Admin UI
 
 T-223c-3로 curated overlay 운영 화면을 admin frontend에 연결했다.
@@ -17,9 +37,8 @@ T-223c-3로 curated overlay 운영 화면을 admin frontend에 연결했다.
 검증: admin frontend `type-check`, `lint`, React Doctor 통과(Doctor는 필수 error 없음,
 optional warning만 남음).
 
-**다음 한 작업**: **T-223d** — TripMate repo에서 krtour-map REST snapshot을 호출해
-`app.curated_trip_plans` / `app.curated_plan_pois`로 복사하고 source version/etag를
-저장한다. T-212e는 다른 agent가 병행 진행 중이며, 결과는 T-225에서 다시 대조한다.
+**다음 한 작업(당시)**: **T-223d** — 2026-06-12 TripMate PR #184로 완료했다.
+T-212e는 다른 agent가 병행 진행 중이며, 결과는 T-225에서 다시 대조한다.
 
 ## 2026-06-12 Codex 작업 메모 — T-223c-2 curated Dagster group
 
