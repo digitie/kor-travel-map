@@ -100,6 +100,37 @@ def test_parking_derived_key_when_no_ids() -> None:
 
 
 @pytest.mark.unit
+def test_parking_out_of_korea_coordinate_isolated() -> None:
+    """한국 경계 밖 오타 좌표는 격리(coord None)하고 row는 주소 단서로 적재.
+
+    T-212e live 실측(run `bc740f74`): 주차장 표준데이터에 `lat=26.128492`
+    row가 실존 — 좌표 한 쌍의 오타가 dataset 전체 적재를 차단하면 안 된다
+    (#386 날짜 역전 격리와 동일 패턴).
+    """
+
+    bad = _Parking(
+        prkplce_no="PK-BAD-COORD",
+        prkplce_nm="좌표 오타 주차장",
+        prkplce_se="공영",
+        rdnmadr="경상남도 어딘가로 1",
+        lnmadr=None,
+        prkcmprt=10,
+        parkingchrge_info=None,
+        latitude=26.128492,  # 한국 lat 허용범위 [33.0, 39.5] 밖
+        longitude=128.33976,
+        phone_number=None,
+        instt_code=None,
+    )
+    bundles = parking_lots_to_bundles([bad, _P1], fetched_at=_now())
+    assert len(bundles) == 2
+    isolated = bundles[0]
+    assert isolated.feature.coord is None  # 좌표 격리
+    assert isolated.source_record.raw_address is not None  # 주소 단서 보존
+    # 정상 row는 영향 없음.
+    assert bundles[1].feature.coord is not None
+
+
+@pytest.mark.unit
 def test_parking_prefers_instt_code_over_derived() -> None:
     item = _Parking(
         prkplce_no=None,
