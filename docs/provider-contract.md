@@ -102,13 +102,12 @@ system
 | `kma_ultra_short_nowcast` | python-kma-api | 초단기실황 |
 | `kma_mid_forecast` | python-kma-api | 중기예보 |
 | `kma_weather_alerts` | python-kma-api | 특보 |
-| `mcst_<slug>` (12종) | python-mcst-api | 파일데이터 CSV 12종(`mcst_world_restaurants_csv`/`mcst_independent_bookstores_csv`/`mcst_children_bookstores_csv`/`mcst_golf_courses_status` 등, 컬럼 방언 4종). 메타표 `providers.mcst.MCST_FILE_DATASETS`. 제외 3종(`tourism_attractions_csv`/`recommended_travel_destinations_csv`/`public_libraries` — 기사형/통계)은 `MCST_EXCLUDED_FILE_DATASETS` + `docs/mcst-feature-etl.md` §3 (#395) |
-| `mcst_used_bookstores` | python-mcst-api (후보) | 전국 중고서점 및 운영정보. curated source 보강 후보 |
-| `datagokr_seoul_bookstores` | python-datagokr-api (후보) | 서울특별시 책방(서점) 현황정보 |
-| `datagokr_gyeonggi_muslim_friendly_restaurants` | python-datagokr-api (후보) | 경기도 무슬림 친화 음식점 |
-| `datagokr_ansan_world_restaurants` | python-datagokr-api (후보) | 안산 세계맛집(다문화 세계음식점) |
-| `datagokr_jeju_local_restaurants` | python-datagokr-api (후보) | 제주 향토음식점 지정 현황 |
-| `standard_special_streets` | data.go.kr-standard (후보) | 전국지역특화거리표준데이터. 개별 POI보다 area/anchor source |
+| `mcst_<slug>` (13종) | python-mcst-api | 파일데이터 CSV 13종(`mcst_world_restaurants_csv`/`mcst_independent_bookstores_csv`/`mcst_children_bookstores_csv`/`mcst_used_bookstores_csv`/`mcst_golf_courses_status` 등, 컬럼 방언 4종). 메타표 `providers.mcst.MCST_FILE_DATASETS`. 제외 3종(`tourism_attractions_csv`/`recommended_travel_destinations_csv`/`public_libraries` — 기사형/통계)은 `MCST_EXCLUDED_FILE_DATASETS` + `docs/mcst-feature-etl.md` §3 (#395 + T-223b) |
+| `datagokr_seoul_bookstores` | python-datagokr-api | 서울특별시 책방(서점) 현황정보 fileData |
+| `datagokr_gyeonggi_muslim_friendly_restaurants` | python-datagokr-api | 경기도 무슬림 친화 음식점 fileData |
+| `datagokr_ansan_world_restaurants` | python-datagokr-api | 안산 세계맛집(다문화 세계음식점) fileData |
+| `datagokr_jeju_local_restaurants` | python-datagokr-api | 제주 향토음식점 지정 현황 fileData |
+| `standard_special_streets` | data.go.kr-standard | 전국지역특화거리표준데이터. 개별 POI보다 area/anchor source이며 현재는 `theme_area_anchor` place로 보존 |
 | `khoa_oceans_beach_info` | python-khoa-api | 해수욕장 정보 |
 | `khoa_coastal_notices` | python-khoa-api | 해양 공지 |
 | `krforest_recreation_forests` | python-krforest-api | 휴양림 |
@@ -150,17 +149,16 @@ system
 ### 3.1 curated source 후보
 
 테마형 source는 [`docs/curated-features.md`](curated-features.md)가 정본이다. 현재
-구현된 `mcst_<slug>` 12종은 `feature.curated_source_rules`의 기본 후보로 바로 쓸 수
-있고, 책·음식 확장 source는 provider 라이브러리 보강 뒤 편입한다.
+구현된 `mcst_<slug>` 13종과 T-223b fileData/특화거리 source는
+`feature.curated_source_rules`의 기본 후보로 바로 쓸 수 있다.
 
-- `python-mcst-api` 우선 후보: 중고서점. 이미 구현된 독립서점·카페가 있는 서점·
-  아동서점·세계음식점 계열과 같은 문화정보원 source 성격이다(아동서점은 #395에서
-  `mcst_children_bookstores_csv`로 구현됨 — 도서관 디렉토리는 provider 재편으로
-  소멸, 후속 과제).
-- `python-datagokr-api` 우선 후보: 서울 책방, 경기도 무슬림 친화 음식점, 안산 세계맛집,
-  제주 향토음식점.
-- `data.go.kr-standard` 후보: 전국지역특화거리표준데이터. 거리명·좌표·점포수·관리기관을
-  area/anchor metadata로 보존하고, 개별 점포 POI로 과해석하지 않는다.
+- `python-mcst-api`: 중고서점은 `mcst_used_bookstores_csv`로 구현됐다(T-223b,
+  provider PR#11). 독립서점·카페가 있는 서점·아동서점·세계음식점 계열과 같은
+  문화정보원 source 성격이다.
+- `python-datagokr-api`: 서울 책방, 경기도 무슬림 친화 음식점, 안산 세계맛집,
+  제주 향토음식점 fileData 4종을 구현했다(T-223b, provider PR#10).
+- `data.go.kr-standard`: 전국지역특화거리표준데이터를 구현했다(T-223b). 거리명·좌표·
+  점포수·관리기관을 area/anchor metadata로 보존하고, 개별 점포 POI로 과해석하지 않는다.
 - 신규 source도 wrapper/facade 없이 provider public client/typed model을 먼저 정렬한 뒤,
   본 저장소에서는 raw → `FeatureBundle` 변환과 curated overlay rule만 둔다.
 
@@ -170,7 +168,7 @@ system
 |----------|-------------|-------------|----------|------|
 | provider | FeatureKind | source_role | 갱신 주기 | 비고 |
 |----------|-------------|-------------|----------|------|
-| **data.go.kr-standard (via `python-datagokr-api`)** | event, place, route | primary | 표준데이터별 (행안부 announce) | **1차 source** for 축제(ADR-042) + 관광지 5종 dataset. Protocol `CulturalFestivalItem` (PR#34) |
+| **data.go.kr-standard (via `python-datagokr-api`)** | event, place, route | primary | 표준데이터별 (행안부 announce) | **1차 source** for 축제(ADR-042) + 관광지/특화거리 6종 dataset. Protocol `CulturalFestivalItem` (PR#34) |
 | python-visitkorea-api | event, place | **enrichment** (축제, ADR-042 supersede) / primary (그 외) | 일 1회 | 축제는 좌표 nullable 허용. ADR-042 (2026-05-27) 이후 datagokr 1차 + visitkorea 2차 |
 | python-mois-api | place | primary | 주 1회 (full) + 일 1회 incremental + on-demand | 영업중 + PROMOTED_SERVICE_SLUGS (42종) 승격, EXCLUDED 제외 — `docs/mois-feature-etl.md` |
 | python-opinet-api | place + price | primary | hours (가격), 일 (상세) | PriceValue 시계열 |
@@ -183,8 +181,8 @@ system
 | python-knps-api | place, route, area, weather | primary | 월/분기/연 (파일 데이터) | keyless file-only. 국립공원 경계·탐방로·선형시설·시설·위험지역·특별보호구역·문화자원·대피소 (`docs/knps-feature-etl.md`, ADR-028 amendment) |
 | python-krheritage-api | place, area, event | primary | 주 (place/area), 일 (event) | media → RustFS |
 | python-kasi-api | (calendar) | (system) | 주 1회 | 공휴일/달력 (TripMate utility) |
-| python-datagokr-api (data.go.kr-standard) | event, place, route | primary | 표준데이터별 | 5종 dataset bounded. 본 lib에서 직접 사용 (ADR-042) — 위 첫 행 참조 |
-| python-mcst-api | place | primary | 주 (파일데이터 CSV) | keyless 파일 다운로드(#395). 세계음식점/서점류/레저·캠핑/미디어 촬영지/골프장 등 12 dataset — MOIS dedup pair는 실데이터 확인 후 (`docs/mcst-feature-etl.md` §7) |
+| python-datagokr-api (data.go.kr-standard/fileData) | event, place, route | primary | 표준데이터별 / fileData별 | 표준데이터 6종 + curated fileData 4종. 본 lib에서 직접 사용 (ADR-042/T-223b) — 위 첫 행 참조 |
+| python-mcst-api | place | primary | 주 (파일데이터 CSV) | keyless 파일 다운로드(#395). 세계음식점/서점류/레저·캠핑/미디어 촬영지/골프장 등 13 dataset — MOIS dedup pair는 실데이터 확인 후 (`docs/mcst-feature-etl.md` §7) |
 | kakao-local-api | place | enrichment | on-demand | 전화번호 보강 |
 | naver-search-api | place | enrichment | on-demand | 전화번호 보강 |
 | google-places-api-new | place | enrichment | on-demand | 전화번호 보강 (Text Search New) |
@@ -422,7 +420,7 @@ def test_no_provider_wrapper_classes():
 |----------|--------------|-----------------|---------|------|
 | python-kraddr-base | **제거** | — | — | ADR-041 (PR#37) 흡수 완료. archive 후보 |
 | python-kraddr-geo | REST 서비스(직접 의존 없음) | `KraddrGeoRestClient` + `ReverseGeocoder`/`AddressGeocoder` 콜러블 | PR#90/#123 | on-demand geocoder. 최신 로컬 FastAPI 포트 `12201` 기준 |
-| python-datagokr-api | `@1967fb6` | `CulturalFestivalItem` (PR#34, #374 재정렬) | PR#34 | ADR-042 1차 축제 source. `26a5be3`: 주차장 시간 필드 분수값 float(provider #6, T-212e). `1967fb6`: 주차장 요금/수치 int 필드 관용 파싱 — 자유 표기(`'200+400'`)는 None, 원문 raw 보존(provider #8/PR#9, T-212e) |
+| python-datagokr-api | `@48e458b` | `CulturalFestivalItem` (PR#34, #374 재정렬) + `PublicSpecialStreetItem` + fileData raw 변환 | PR#34, provider PR#10 | ADR-042 1차 축제 source. `26a5be3`: 주차장 시간 필드 분수값 float(provider #6, T-212e). `1967fb6`: 주차장 요금/수치 int 필드 관용 파싱. `48e458b`: T-223b fileData 4종 + 전국지역특화거리 service/model |
 | python-kma-api | `@2592b740` | `KmaShortForecastItem` (PR#38), `KmaUltraShortNowcastItem` (PR#39), `KmaUltraShortForecastItem`/mid/alerts 등 7종 | PR#38~46, T-219b/c | ADR-010 두 축. Dagster asset 5종 완비 — 실황/초단기/단기(T-219b, `KmaClient`) + 중기(설정 주입 region, `DataGoKrClient`)/특보(record resource→notice)(T-219c). `006fdbe`: datagokr `03 NO_DATA` → 빈 결과 정규화(provider #18, T-212e 특보 빈 구간). `2592b740`: 중기예보 응답이 `tmFc` 미에코 → 해석된 요청 tmFc를 item 폴백 주입(provider #20/PR#21, T-212e). ASOS/해수욕장/APIHub 표면은 백로그 |
 | python-airkorea-api | `@22996a4` | (후속 PR) | — | PM10/PM2.5/CAI |
 | python-khoa-api | `@0ccb5ed` | (후속 PR) | — | 해수욕장, 해양 공지. snake_case live row 파싱 정정(khoa#5/PR#6, #378 pin bump) |
@@ -435,7 +433,7 @@ def test_no_provider_wrapper_classes():
 | python-krairport-api | `@b885413` | (Sprint 3 PR) | — | 공항 운항·날씨 |
 | python-mois-api | `@bc6f742` | (Sprint 4 PR) | — | ADR-024 canonical name 정정. 4단계 lifecycle |
 | python-kasi-api | placeholder | (Sprint 4 PR) | — | KASI 영업주기 |
-| python-mcst-api | `@ba471ee` | slug 메타표 12종 + 방언 4종 + `parse_kcisa_coordinates` (#395) | T-220a~c → #395 재배선 | CSV 파일 다운로드 주경로(keyless `FileDataClient`, provider #6/#7/#9). 적재 12 + 제외 3(기사형/통계 — `MCST_EXCLUDED_FILE_DATASETS`). asset 1종(slug별 분리 적재). dedup pair는 실데이터 확인 후 등록 검토(`docs/mcst-feature-etl.md` §7) |
+| python-mcst-api | `@c011f6e` | slug 메타표 13종 + 방언 4종 + `parse_kcisa_coordinates` (#395/T-223b) | T-220a~c → #395 재배선, provider PR#11 | CSV 파일 다운로드 주경로(keyless `FileDataClient`, provider #6/#7/#9). 적재 13 + 제외 3(기사형/통계 — `MCST_EXCLUDED_FILE_DATASETS`). `c011f6e`: 중고서점 OpenAPI/CSV 보강. asset 1종(slug별 분리 적재). dedup pair는 실데이터 확인 후 등록 검토(`docs/mcst-feature-etl.md` §7) |
 
 **최신 sha 갱신 절차**:
 1. provider 저장소에서 안정 commit sha 확인 (사용자 모니터링).

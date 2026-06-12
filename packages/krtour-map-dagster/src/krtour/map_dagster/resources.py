@@ -261,7 +261,7 @@ PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
         provider_package="python-mcst-api",
         dataset_key="mcst_file_datasets",
         note=(
-            "MCST 파일데이터 CSV 12 dataset을 (slug, row) 튜플로 stream — "
+            "MCST 파일데이터 CSV 등록 dataset을 (slug, row) 튜플로 stream — "
             "asset이 slug별 분리 적재(dataset_key mcst_<slug>). CSV 다운로드는 "
             "keyless(다운로드 페이지 스크레이핑, provider #6/#7 — #395)."
         ),

@@ -580,12 +580,12 @@ def fetch_krairport_airports(
 def fetch_mcst_culture_records(
     settings: KrtourMapSettings,
 ) -> Iterator[Any]:
-    """MCST 파일데이터 12 dataset CSV row를 mcst public client로 stream한다 (#395).
+    """MCST 파일데이터 등록 dataset CSV row를 mcst public client로 stream한다 (#395).
 
     파일 다운로드는 **keyless** — ``FileDataClient()``가 카탈로그의 다운로드
     페이지를 스크레이핑해 최신 CSV를 받는다(provider #6/#7, krheritage items /
-    knps file dataset과 동일하게 credential guard 없음). ``MCST_FILE_DATASETS``의
-    slug 12종을 순회하며 ``client.iter_csv(slug)``의 raw row(dict)를
+    knps file dataset과 동일하게 credential guard 없음). ``MCST_FILE_DATASETS``에
+    등록된 slug를 순회하며 ``client.iter_csv(slug)``의 raw row(dict)를
     ``(slug, row)`` 튜플로 lazily yield한다 — asset이 slug별로 분리
     ``_load``한다(dataset_key 단위 sync state 유지). dataset당
     ``settings.mcst_max_items_per_dataset`` 상한(이상 응답 방어). sync

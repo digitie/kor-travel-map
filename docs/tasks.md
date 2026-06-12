@@ -6,7 +6,7 @@
 
 ## 진행 중인 작업 인덱스 (열린 `[ ]` 항목)
 
-> 핵심 실행 5건(T-212e 병행, T-222, T-223, T-225, T-226) + 외부/보류 항목 별도.
+> 핵심 실행 4건(T-212e 병행, T-223, T-225, T-226) + 외부/보류 항목 별도.
 > 상세는 아래 각 섹션.
 > 완료 이력은 [`tasks-done.md`](tasks-done.md).
 
@@ -15,18 +15,6 @@
         다른 agent가 병행 진행 중이다(2026-06-12 사용자 확인). 본 agent는 T-222/T-223
         작업 중에도 주기적으로 main/rebase 충돌을 확인하고, T-212e 결과가
         머지되면 후속 T-225 closure 재검증에 반영한다.
-  - [ ] T-222 — **TripMate T-130 공개 해수욕장/축제 뷰 API**. 정본 후보:
-        `docs/public-views-api.md`.
-    - [x] T-222a — T-130 차단 해소용 API 사양 초안 작성(2026-06-11): `/v1/public/beaches*`,
-          `/v1/public/festivals*`, 스키마, category drift, KHOA index/축제 월별 집계 결정점.
-    - [x] T-222b — krtour-map 백엔드/OpenAPI/user-client 구현(2026-06-12, Codex).
-          `/v1/public/beaches*`, `/v1/public/festivals*`를 추가하고 user OpenAPI와
-          `@krtour/map-user-client` 타입을 재생성했다. 해수욕장은
-          `detail.place_kind='beach'`를 1차 판별로 쓰며, KHOA provider category
-          `01020300`은 보조 정보로 유지한다. 폭/길이/재질은 nullable projection,
-          수질/index/weather는 null/빈 배열 후속 보강으로 정리했다.
-    - [ ] T-222c — TripMate T-130 소비 문서/픽스처 동기화. TripMate `/public/*`는
-          krtour `openapi.user.json`에 표면이 들어간 뒤 구현.
   - [ ] T-223 — **curated_features + TripMate curated_trip_plans import 계약/구현**.
         정본 후보: `docs/curated-features.md`. `notice_plans`는 TripMate 호환 API
         alias일 뿐 신규 정본명은 `curated_trip_plans`. 이 flow는 krtour-map REST와
@@ -34,9 +22,10 @@
         관여하지 않는다.
     - [x] T-223a — 문서 계약 정리(2026-06-12): 책/음식 테마 source 조사, overlay DB
           모델, REST/Admin UI/Dagster, TripMate 1:1 복사 계약.
-    - [ ] T-223b — provider 보강: `python-mcst-api` 중고서점/아동서점,
-          `python-datagokr-api` 서울 책방·무슬림 친화 음식점·안산 세계맛집·제주 향토음식점,
-          `data.go.kr-standard` 특화거리 area/anchor 후보.
+    - [x] T-223b — provider 보강(2026-06-12, Codex): `python-mcst-api`
+          중고서점 CSV(provider PR#11), `python-datagokr-api` 서울 책방·무슬림 친화
+          음식점·안산 세계맛집·제주 향토음식점 fileData + 전국지역특화거리 표준데이터
+          서비스(provider PR#10)를 반영하고, krtour-map 변환 함수와 단위 테스트를 추가했다.
     - [ ] T-223c — krtour-map DB/API/Dagster/Admin UI 구현:
           `feature.curated_*`, `/v1/curated-features*`, `/v1/admin/curated-*`,
           Dagster `curated_features` group, admin 선택/해제 UI.

@@ -1,6 +1,6 @@
 """MCST place Feature 적재 Dagster asset (T-220 재배선, #395).
 
-파일데이터 CSV 12 dataset은 record resource 1개(``mcst_culture_records``,
+파일데이터 CSV 등록 dataset은 record resource 1개(``mcst_culture_records``,
 keyless ``FileDataClient``)가 ``(slug, row)`` 튜플 스트림을 주고, asset이
 slug별로 분리 ``_load``한다 — dataset_key(``mcst_<slug>``) 단위 import job/
 sync state가 유지된다. 구 ODCloud 도서관 asset(``feature_place_mcst_
@@ -86,7 +86,7 @@ def group_records_by_slug(
 async def run_feature_place_mcst_culture(
     context: AssetExecutionContext,
 ) -> McstLoadResult:
-    """MCST 파일데이터 12 dataset CSV row를 slug별 place Feature로 적재한다."""
+    """MCST 파일데이터 등록 dataset CSV row를 slug별 place Feature로 적재한다."""
     records = await _record_list(context, "mcst_culture_records")
     grouped = group_records_by_slug(records)
     unknown = sorted(set(grouped) - set(MCST_FILE_DATASETS))

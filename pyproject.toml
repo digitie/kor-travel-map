@@ -82,7 +82,9 @@ providers = [
   # T-212e live 실측 addUnitTime='0.5').
   # 1967fb6: 주차장 요금/수치 int 필드 관용 파싱 — 자유 표기('200+400')는 None,
   # 원문은 raw 보존 (provider #8/PR#9, T-212e live 실측 addUnitCharge='200+400').
-  "python-datagokr-api @ git+https://github.com/digitie/python-datagokr-api.git@1967fb63074090e4af46bf6258f4464e31b91a93",
+  # 48e458b: curated source 보강(T-223b) — fileData 4종 + 전국지역특화거리
+  # 표준데이터 service/model 추가(provider PR#10).
+  "python-datagokr-api @ git+https://github.com/digitie/python-datagokr-api.git@48e458b1f06656a94474f9b08e87cefc3c9c9526",
   #
   # ── Sprint 2 §2.2 — 날씨 (ADR-010) ────────────────────────────────────
   # `krtour.map.providers.kma.{KmaShortForecastItem, KmaUltraShortNowcastItem}`
@@ -130,10 +132,11 @@ providers = [
   # ── Sprint 5 — 박물관/미술관 / mcst enrichment / standard data ────────
   # T-220 재배선(#395): provider가 CSV 파일 다운로드 주경로로 재편(provider
   # #6/#7) — Dagster fetcher가 keyless FileDataClient를 lazy import.
-  # 핀 ba471ee = 카탈로그 재편(#7) + 빈 params query 박탈 수정(#9) 포함
-  # origin/master.
-  "python-mcst-api @ git+https://github.com/digitie/python-mcst-api.git@ba471ee6c87f9ab29dbe617c9d31b19fbcc7ebbd",
-  # data.go.kr-standard 5종은 본 라이브러리 + python-datagokr-api 경유 (ADR-042).
+  # 핀 c011f6e = 카탈로그 재편(#7) + 빈 params query 박탈 수정(#9) +
+  # 중고서점 OpenAPI/CSV 보강(T-223b, provider PR#11) 포함.
+  "python-mcst-api @ git+https://github.com/digitie/python-mcst-api.git@c011f6e821938a9eab81ac219493ddc0d3fbe5c5",
+  # data.go.kr-standard 6종 + curated fileData 4종은 본 라이브러리 +
+  # python-datagokr-api 경유 (ADR-042/T-223b).
 ]
 
 [tool.setuptools]

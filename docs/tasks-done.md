@@ -3,6 +3,22 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## TripMate T-130 공개 해수욕장/축제 뷰 API (2026-06-12, `T-222`)
+
+- [x] **T-222 — TripMate T-130 공개 해수욕장/축제 뷰 API.**
+  T-222a~c 전부 완료. 정본은 `docs/public-views-api.md`와 TripMate PR#183.
+  - [x] **T-222a — API 사양 초안.**
+    `/v1/public/beaches*`, `/v1/public/festivals*`, 스키마, category drift,
+    KHOA index/축제 월별 집계 결정점을 정리했다.
+  - [x] **T-222b — krtour-map 백엔드/OpenAPI/user-client 구현.**
+    `/v1/public/beaches*`, `/v1/public/festivals*`를 추가하고 user OpenAPI와
+    `@krtour/map-user-client` 타입을 재생성했다. 해수욕장은
+    `detail.place_kind='beach'`를 1차 판별로 쓰며, KHOA provider category
+    `01020300`은 보조 정보로 유지한다.
+  - [x] **T-222c — TripMate 소비 문서/픽스처 동기화.**
+    TripMate `/public/beaches*`와 `/public/festivals*`가 krtour
+    `openapi.user.json` 기반 schema/client를 소비하도록 연결했다(TripMate PR#183).
+
 ## Admin UI/UX 연결성 + 실시간성 (2026-06-12, `T-221`)
 
 - [x] **T-221 — admin UI/UX 시나리오 연결성 + 실시간성 보강.**

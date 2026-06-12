@@ -55,8 +55,8 @@ def _world_restaurant_row(**overrides: Any) -> dict[str, Any]:
 
 
 @pytest.mark.unit
-def test_file_dataset_table_covers_all_12_loaded_slugs() -> None:
-    assert len(MCST_FILE_DATASETS) == 12
+def test_file_dataset_table_covers_all_13_loaded_slugs() -> None:
+    assert len(MCST_FILE_DATASETS) == 13
     assert set(MCST_FILE_DATASETS) == {
         # KCISA 공통 방언 A (8종)
         "world_restaurants_csv",
@@ -70,8 +70,9 @@ def test_file_dataset_table_covers_all_12_loaded_slugs() -> None:
         # CNTC_RESRCE (2종)
         "independent_bookstores_csv",
         "cafe_bookstores_csv",
-        # 분리좌표 (1종)
+        # 분리좌표 (2종)
         "children_bookstores_csv",
+        "used_bookstores_csv",
         # 한국어 주소-only (1종)
         "golf_courses_status",
     }
@@ -124,9 +125,7 @@ def test_dataset_specs_use_existing_categories_and_key_convention() -> None:
         ("128.6083915, 35.86561079", (128.6083915, 35.86561079)),
     ],
 )
-def test_parse_kcisa_coordinates_valid(
-    text: str, expected: tuple[float, float]
-) -> None:
+def test_parse_kcisa_coordinates_valid(text: str, expected: tuple[float, float]) -> None:
     assert parse_kcisa_coordinates(text) == expected
 
 
@@ -165,9 +164,7 @@ async def test_kcisa_common_bundle_core_fields_and_reverse_enrichment() -> None:
     assert feature.name == "과카몰레"
     assert feature.category == PlaceCategoryCode.FOOD_RESTAURANT.value
     assert feature.marker_color == MCST_MARKER_COLOR
-    assert feature.coord == Coordinate(
-        lon=Decimal("127.043367"), lat=Decimal("36.960756")
-    )
+    assert feature.coord == Coordinate(lon=Decimal("127.043367"), lat=Decimal("36.960756"))
     assert feature.address.bjd_code == "1111010100"
     assert feature.detail is not None
     assert feature.detail.place_kind == "world_restaurant"  # type: ignore[union-attr]
@@ -179,10 +176,7 @@ async def test_kcisa_common_bundle_core_fields_and_reverse_enrichment() -> None:
     assert src.provider == MCST_PROVIDER_NAME
     assert src.dataset_key == "mcst_world_restaurants_csv"
     assert src.source_entity_type == "culture_place"
-    assert (
-        src.source_entity_id
-        == "과카몰레::(17982)경기도 평택시 팽성읍 안정순환로222번길 92"
-    )
+    assert src.source_entity_id == "과카몰레::(17982)경기도 평택시 팽성읍 안정순환로222번길 92"
     # raw_data는 CSV row 원본 보존.
     assert src.raw_data["COORDINATES"] == "N36.960756, E127.043367"
     assert bundle.source_link.is_primary_source is True
@@ -208,13 +202,9 @@ async def test_media_famous_places_uses_placename_and_media_title() -> None:
         "COORDINATES": "N37.545904, E126.92094",
         "RNUM": "1",
     }
-    [bundle] = await file_rows_to_bundles(
-        [row], slug="media_famous_places_csv", fetched_at=_NOW
-    )
+    [bundle] = await file_rows_to_bundles([row], slug="media_famous_places_csv", fetched_at=_NOW)
     assert bundle.feature.name == "노보카인"
-    assert bundle.feature.coord == Coordinate(
-        lon=Decimal("126.92094"), lat=Decimal("37.545904")
-    )
+    assert bundle.feature.coord == Coordinate(lon=Decimal("126.92094"), lat=Decimal("37.545904"))
     facility = bundle.feature.detail.facility_info  # type: ignore[union-attr]
     assert facility["media_title"] == "미치겠다, 너땜에!"
 
@@ -267,15 +257,11 @@ async def test_cntc_resrce_bundle_maps_columns_and_plain_coordinates() -> None:
         "COORDINATES": "35.86561079 , 128.6083915",
         "RNUM": "1",
     }
-    [bundle] = await file_rows_to_bundles(
-        [row], slug="independent_bookstores_csv", fetched_at=_NOW
-    )
+    [bundle] = await file_rows_to_bundles([row], slug="independent_bookstores_csv", fetched_at=_NOW)
     feature = bundle.feature
     assert feature.name == "굿브랜딩북스"
     assert feature.category == PlaceCategoryCode.TOURISM_CULTURAL_FACILITY.value
-    assert feature.coord == Coordinate(
-        lon=Decimal("128.6083915"), lat=Decimal("35.86561079")
-    )
+    assert feature.coord == Coordinate(lon=Decimal("128.6083915"), lat=Decimal("35.86561079"))
     assert feature.detail.place_kind == "independent_bookstore"  # type: ignore[union-attr]
     facility = feature.detail.facility_info  # type: ignore[union-attr]
     assert facility["tel"] == "0534261765"
@@ -298,18 +284,37 @@ async def test_split_coord_bundle_maps_fclty_columns() -> None:
         "FCLTY_LO": "126.9760656",
         "TEL_NO": "314225455",
     }
-    [bundle] = await file_rows_to_bundles(
-        [row], slug="children_bookstores_csv", fetched_at=_NOW
-    )
+    [bundle] = await file_rows_to_bundles([row], slug="children_bookstores_csv", fetched_at=_NOW)
     feature = bundle.feature
     assert feature.name == "평촌어린이서점스펀지북"
-    assert feature.coord == Coordinate(
-        lon=Decimal("126.9760656"), lat=Decimal("37.39513617")
-    )
+    assert feature.coord == Coordinate(lon=Decimal("126.9760656"), lat=Decimal("37.39513617"))
     assert feature.detail.place_kind == "children_bookstore"  # type: ignore[union-attr]
     facility = feature.detail.facility_info  # type: ignore[union-attr]
     assert facility["source_category"] == "아동서점 > 아동서적"
     assert bundle.source_record.raw_address == "경기 안양시 동안구 흥안대로 460 1층"
+
+
+async def test_used_bookstores_reuses_split_coord_dialect() -> None:
+    row = {
+        "RNUM": "1",
+        "ESNTL_ID": "KCCBSPO22N000001001",
+        "FCLTY_NM": "청계천헌책방거리",
+        "LCLAS_NM": "중고서점",
+        "MLSFC_NM": "헌책방",
+        "FCLTY_ROAD_NM_ADDR": "서울특별시 중구 청계천로 274",
+        "FCLTY_LA": "37.568533",
+        "FCLTY_LO": "127.007754",
+        "TEL_NO": "02-0000-0000",
+    }
+    [bundle] = await file_rows_to_bundles([row], slug="used_bookstores_csv", fetched_at=_NOW)
+    feature = bundle.feature
+    assert feature.name == "청계천헌책방거리"
+    assert feature.category == PlaceCategoryCode.TOURISM_CULTURAL_FACILITY.value
+    assert feature.coord == Coordinate(lon=Decimal("127.007754"), lat=Decimal("37.568533"))
+    assert feature.detail.place_kind == "used_bookstore"  # type: ignore[union-attr]
+    facility = feature.detail.facility_info  # type: ignore[union-attr]
+    assert facility["source_category"] == "중고서점 > 헌책방"
+    assert bundle.source_record.dataset_key == "mcst_used_bookstores_csv"
 
 
 async def test_split_coord_out_of_bbox_treated_as_missing() -> None:
@@ -319,9 +324,7 @@ async def test_split_coord_out_of_bbox_treated_as_missing() -> None:
         "FCLTY_LA": "0.4375",  # 실측에 시간분수형 오염값 존재 가능 — bbox 밖
         "FCLTY_LO": "0.75",
     }
-    [bundle] = await file_rows_to_bundles(
-        [row], slug="children_bookstores_csv", fetched_at=_NOW
-    )
+    [bundle] = await file_rows_to_bundles([row], slug="children_bookstores_csv", fetched_at=_NOW)
     assert bundle.feature.coord is None
 
 
@@ -338,9 +341,7 @@ async def test_korean_address_golf_course_composes_region_address() -> None:
         "홀": "27",
         "구분": "회원제",
     }
-    [bundle] = await file_rows_to_bundles(
-        [row], slug="golf_courses_status", fetched_at=_NOW
-    )
+    [bundle] = await file_rows_to_bundles([row], slug="golf_courses_status", fetched_at=_NOW)
     feature = bundle.feature
     assert feature.name == "라데나골프클럽"
     assert feature.category == PlaceCategoryCode.TOURISM_ACTIVITY_GOLF.value
@@ -362,17 +363,13 @@ async def test_skips_unidentifiable_rows() -> None:
         _world_restaurant_row(ADDRESS="", COORDINATES=""),  # 위치 단서 없음 — skip
         _world_restaurant_row(),
     ]
-    bundles = await file_rows_to_bundles(
-        rows, slug="world_restaurants_csv", fetched_at=_NOW
-    )
+    bundles = await file_rows_to_bundles(rows, slug="world_restaurants_csv", fetched_at=_NOW)
     assert len(bundles) == 1
 
 
 async def test_unknown_slug_raises() -> None:
     with pytest.raises(KeyError):
-        await file_rows_to_bundles(
-            [_world_restaurant_row()], slug="nope", fetched_at=_NOW
-        )
+        await file_rows_to_bundles([_world_restaurant_row()], slug="nope", fetched_at=_NOW)
 
 
 async def test_excluded_slug_is_not_loadable() -> None:

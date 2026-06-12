@@ -24,6 +24,22 @@ x_extension`을 명시 세팅해 CI에서는 가려짐). infra 4파일 12곳을
 구성과 무관하게 동작(repo의 명시-qualify 정책 완성). live 검증: 서울 bbox
 94,431건 정상 조회.
 
+## 2026-06-12 (codex) — T-223b curated source provider 보강
+
+curated feature 후보의 책/음식/특화거리 source를 provider 라이브러리와 krtour-map
+변환 계층에 반영했다.
+
+- **provider pin**: `python-datagokr-api@48e458b`(provider PR#10 — fileData 4종 +
+  전국지역특화거리 service/model), `python-mcst-api@c011f6e`(provider PR#11 —
+  중고서점 OpenAPI/CSV)를 `providers` extra에 반영했다.
+- **krtour-map 변환**: MCST `used_bookstores_csv`를 기존 `split_coord` 방언에 추가하고,
+  `datagokr_file_data.py`를 신설해 서울 책방·경기 무슬림 친화 음식점·안산 세계맛집·
+  제주 향토음식점 raw fileData를 place `FeatureBundle`로 변환한다.
+- **표준데이터**: 전국지역특화거리표준데이터를 geometry 없는 `theme_area_anchor`
+  place로 보존하는 `special_streets_to_bundles`를 추가했다.
+- **문서**: `docs/curated-features.md`, `docs/provider-contract.md`, `docs/tasks.md`,
+  `docs/resume.md`의 T-222c/T-223b 상태를 갱신했다.
+
 ## 2026-06-12 (claude) — fix: frontend Docker 빌드에 NEXT_PUBLIC_KRADDR_GEO_BASE_URL 누락
 
 T-221b(#403 좌표 picker)가 `/admin/features/new`를 prerender 시점 fail-fast로
