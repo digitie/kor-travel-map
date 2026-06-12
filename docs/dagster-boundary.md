@@ -29,7 +29,7 @@
 | Feature update request queue | krtour-map API + `ops.feature_update_requests` |
 | Import job progress | krtour-map API + `ops.import_jobs` |
 | Dagster resource 정의 (engine, file_store, provider clients) | krtour-map Dagster |
-| **provider 호출 자체** | provider 라이브러리 직접(ADR-006). 단 `tripmate-agent-youtube`는 형제 앱 REST export pull(ADR-049) |
+| **provider 호출 자체** | provider 라이브러리 직접(ADR-006). 단 `krtour-ai-agent-youtube`는 형제 앱 REST export pull(ADR-053) |
 | **raw → DTO 변환 (순수 함수)** | **본 라이브러리 (`providers/<name>.py`)** |
 | **DB 적재 (raw SQL upsert/COPY)** | **본 라이브러리 (`infra/*_repo.py`)** |
 | **객체 저장소 업로드** | **본 라이브러리 (`infra/file_store.py`)** |
@@ -74,7 +74,7 @@ Dagster asset으로 연결한다. provider API 호출은 resource가 record iter
 | `feature_place_krairport_airports` | `krairport_airports` | `krairport_airports` | `features_place` |
 | `feature_weather_airkorea_air_quality` | `airkorea_stations`, `airkorea_air_quality` | `airkorea_air_quality` | `features_weather` |
 | `feature_event_visitkorea_enrichment` | `visitkorea_festival_events` | `visitkorea_festival_events` | `features_event` |
-| `feature_place_tripmate_agent_youtube` | `tripmate_agent_youtube_features` | `youtube_place_candidates` | `features_place` |
+| `feature_place_krtour_ai_agent_youtube` | `krtour_ai_agent_youtube_features` | `youtube_place_candidates` | `features_place` |
 
 공통 resource:
 
@@ -393,7 +393,7 @@ offline upload load job은 T-208h 이후 다음 흐름을 따른다.
 | `feature_place_mois_licenses_weekly_schedule` | `feature_place_mois_licenses_job` | `35 4 * * 1` | MOIS bulk 주 1회 |
 | `feature_place_knps_points_semiannual_schedule` | `feature_place_knps_points_job` | `45 3 1 1,7 *` | KNPS point 반기 1회 |
 | `feature_geometry_knps_records_semiannual_schedule` | `feature_geometry_knps_records_job` | `15 4 1 1,7 *` | KNPS geometry 반기 1회 |
-| `feature_place_tripmate_agent_youtube_daily_schedule` | `feature_place_tripmate_agent_youtube_job` | `40 3 * * *` | TripMate-agent YouTube 후보 일 1회 |
+| `feature_place_krtour_ai_agent_youtube_daily_schedule` | `feature_place_krtour_ai_agent_youtube_job` | `40 3 * * *` | krtour-ai-agent YouTube 후보 일 1회 |
 | `consistency_dedup_refresh_daily_schedule` | `consistency_dedup_refresh` | `45 5 * * *` | DB 기준 dedup 후보 refresh + F1~F7 consistency report |
 
 운영 임계값은 SPEC V8 v8_0 + 실제 부하 기반으로 krtour-map 운영자가 조정한다.

@@ -14,9 +14,9 @@ SQLAlchemy 2 async + GeoAlchemy2 + GeoPandas 위에서 동작한다.
 > **기준값(잘 바뀌지 않는 사실)**: standalone 고정 포트 API `12301` / admin UI
 > `12305` / Dagster `12302`(ADR-047), RustFS S3 `12101`·console `12105`, geocoding은
 > kraddr-geo REST v2 `POST /v2/{reverse,geocode}` 로컬 `http://127.0.0.1:12201`,
-> frontend Next.js 16 + `maplibre-vworld-js#v0.1.3`. ADR 현황: **001~049 accepted**
-> (다음 후보 050). ADR-048은 `/v1` REST clean cut + 정합성 표준, ADR-049는
-> TripMate-agent YouTube provider pull 경계. admin UI는
+> frontend Next.js 16 + `maplibre-vworld-js#v0.1.3`. ADR 현황: **001~053 accepted**
+> (다음 후보 054). ADR-048은 `/v1` REST clean cut + 정합성 표준, ADR-053은
+> `krtour-ai-agent` YouTube provider identity와 TripMate 직접 연동 제거 경계. admin UI는
 > `/admin/dagster`에서 Dagster 요약 + webserver embed 제공.
 >
 > **현재 진척·스프린트 상태의 단일 정본은 `docs/resume.md`(다음 한 작업) +
@@ -53,7 +53,7 @@ OpenAPI는 우선 admin UI 기준으로 작성하고, TripMate 연동 시 필요
 - 결정적 `feature_id` 생성
 - `python-*-api` provider 결과를 `Feature`/`SourceRecord`/`WeatherValue`/`PriceValue`/
   `FeatureFile`로 정규화
-- `tripmate-agent`의 YouTube 장소 후보 REST export를 `tripmate-agent-youtube`
+- `krtour-ai-agent`의 YouTube 장소 후보 REST export를 `krtour-ai-agent-youtube`
   provider로 소비해 `FeatureBundle`로 정규화
 - PostgreSQL + PostGIS 스키마 + Alembic 마이그레이션 + raw SQL repository
 - S3 호환 객체 저장소(RustFS) 연동: 이미지/문서 메타데이터
@@ -142,7 +142,7 @@ Windows Node/npm(`/mnt/c/Program Files/nodejs/...`)으로 frontend 서버를 띄
 | HTTP client | httpx + tenacity |
 | 마이그레이션 | Alembic |
 | 주소/좌표 | `python-kraddr-base`, `python-kraddr-geo` |
-| Provider client/export | `python-{visitkorea,mois,opinet,krex,kma,khoa,airkorea,krforest,krheritage,kasi,datagokr,mcst,krairport}-api` + `tripmate-agent` REST export |
+| Provider client/export | `python-{visitkorea,mois,opinet,krex,kma,khoa,airkorea,krforest,krheritage,kasi,datagokr,mcst,krairport}-api` + `krtour-ai-agent` REST export |
 | 객체 저장소 | S3 호환 (RustFS 우선, 로컬 API `12101` / console `12105`) |
 | Orchestration | Dagster (krtour-map 독립 프로그램이 소유; OpenAPI로 update request 큐잉/제어) |
 | Lint/Type | ruff, mypy --strict, import-linter |

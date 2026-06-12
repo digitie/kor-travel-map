@@ -198,11 +198,11 @@ def test_provider_record_resource_env_mapping() -> None:
         "KRTOUR_MAP_KREX_EX_API_KEY",
     )
     assert specs["knps_point_records"].source_env_names == ()
-    assert specs["tripmate_agent_youtube_features"].krtour_map_env_names == (
-        "KRTOUR_MAP_TRIPMATE_AGENT_BASE_URL",
-        "KRTOUR_MAP_TRIPMATE_AGENT_API_KEY",
+    assert specs["krtour_ai_agent_youtube_features"].krtour_map_env_names == (
+        "KRTOUR_MAP_KRTOUR_AI_AGENT_BASE_URL",
+        "KRTOUR_MAP_KRTOUR_AI_AGENT_API_KEY",
     )
-    assert specs["tripmate_agent_youtube_features"].source_env_names == ("API_KEYS",)
+    assert specs["krtour_ai_agent_youtube_features"].source_env_names == ("API_KEYS",)
 
 
 def test_provider_record_guard_message_hides_secret(

@@ -119,13 +119,13 @@ async def test_inactivate_features_by_source_delegates_to_repo(
     client = _read_client(monkeypatch)
     monkeypatch.setattr(client, "_session_factory", _FakeTxSessionCM)
     out = await client.inactivate_features_by_source(
-        provider="tripmate-agent-youtube",
+        provider="krtour-ai-agent-youtube",
         dataset_key="youtube_place_candidates",
         source_entity_type="extracted_place_candidate",
         source_entity_ids={"201", "202"},
     )
     assert out == 2
-    assert recorded["provider"] == "tripmate-agent-youtube"
+    assert recorded["provider"] == "krtour-ai-agent-youtube"
     assert recorded["dataset_key"] == "youtube_place_candidates"
     assert recorded["source_entity_type"] == "extracted_place_candidate"
     assert recorded["source_entity_ids"] == {"201", "202"}

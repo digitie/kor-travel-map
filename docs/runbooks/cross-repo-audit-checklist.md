@@ -1,6 +1,6 @@
 # cross-repo 정합성 audit 체크리스트 (분기 1회, T-217d)
 
-TripMate 생태계 4-repo(python-krtour-map · TripMate · tripmate-agent ·
+TripMate 생태계 4-repo(python-krtour-map · TripMate · krtour-ai-agent ·
 tripmate-manager)의 계약/문서 drift를 분기 1회 점검한다. 2026-06-10 검토에서
 드러난 사고 패턴("krtour HTTP 미존재" stale 전제, batch `items` vs `found`,
 admin base 12305 오인)의 재발 방지가 목적. 연동 지도 정본은
@@ -19,9 +19,9 @@ admin base 12305 오인)의 재발 방지가 목적. 연동 지도 정본은
 - [ ] **TripMate client ↔ krtour OpenAPI**: `apps/api/app/clients/krtour_map.py`의
       경로/파라미터/응답 파싱을 `openapi.user.json`과 대조 — 특히 batch `found`,
       in-bounds `max_items`, `meta.page.next_cursor`, problem+json `code`.
-- [ ] **krtour fetcher ↔ tripmate-agent export**: `provider_fetchers.py`의
+- [ ] **krtour fetcher ↔ krtour-ai-agent export**: `provider_fetchers.py`의
       경로(`/api/v1/features/*`)·`X-API-Key`·`{items,next_cursor,has_more}`·limit
-      상한(agent `FEATURE_EXPORT_LIMIT_MAX`=krtour `tripmate_agent_feature_page_size`
+      상한(agent `FEATURE_EXPORT_LIMIT_MAX`=krtour `krtour_ai_agent_feature_page_size`
       le)을 agent `routes.py`+`feature_export_service.py`와 대조. item 스키마
       (place/youtube/evidence/source_record + operation enum)와 상수 3종
       (provider/dataset_key/source_entity_type) 문자열 일치 확인.

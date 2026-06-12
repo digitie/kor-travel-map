@@ -15,9 +15,9 @@ from .assets import (
     feature_place_knps_points,
     feature_place_krex_rest_areas,
     feature_place_krheritage_items,
+    feature_place_krtour_ai_agent_youtube,
     feature_place_mois_licenses,
     feature_place_opinet_stations,
-    feature_place_tripmate_agent_youtube,
 )
 from .kma_weather import (
     feature_notice_kma_weather_alerts,
@@ -136,13 +136,13 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         description="국립공원 route/area geometry Feature 반기 1회 적재.",
     ),
     FeatureLoadScheduleSpec(
-        asset=feature_place_tripmate_agent_youtube,
-        job_name="feature_place_tripmate_agent_youtube_job",
-        schedule_name="feature_place_tripmate_agent_youtube_daily_schedule",
+        asset=feature_place_krtour_ai_agent_youtube,
+        job_name="feature_place_krtour_ai_agent_youtube_job",
+        schedule_name="feature_place_krtour_ai_agent_youtube_daily_schedule",
         cron_schedule="40 3 * * *",
-        provider="tripmate-agent-youtube",
+        provider="krtour-ai-agent-youtube",
         dataset_key="youtube_place_candidates",
-        description="TripMate-agent YouTube 장소 후보 place Feature 일 1회 적재.",
+        description="krtour-ai-agent YouTube 장소 후보 place Feature 일 1회 적재.",
     ),
     # KMA weather 3종 (T-219b) — 발표 스케줄 + 가용 지연(docs/kma-weather-etl.md §6)
     # 에 맞춘 cron. 같은 base 재실행은 provider_sync_state cursor가 skip한다.

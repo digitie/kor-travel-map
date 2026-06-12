@@ -2,8 +2,8 @@
 
 본 문서는 본 라이브러리가 의존하는 provider 라이브러리들이 호출하는 외부 API의
 발급/호출 정책 reference다. 공공 provider 호출은 `python-*-api` provider
-라이브러리에 위임한다(ADR-006). 예외적으로 `tripmate-agent-youtube`는 형제 앱
-`tripmate-agent`의 REST export를 krtour-map Dagster가 직접 pull한다(ADR-049).
+라이브러리에 위임한다(ADR-006). 예외적으로 `krtour-ai-agent-youtube`는 형제 앱
+`krtour-ai-agent`의 REST export를 krtour-map Dagster가 직접 pull한다(ADR-053).
 
 본 문서는 운영자/에이전트가 어떤 키를 어디서 발급받고 어디에 두는지 한 곳에서
 확인할 수 있도록 한다.
@@ -37,8 +37,8 @@
 | `NAVER_SEARCH_CLIENT_ID` | naver-search-api | NAVER Developers | 헤더 `X-Naver-Client-Id` |
 | `NAVER_SEARCH_CLIENT_SECRET` | 동일 | 동일 | 헤더 `X-Naver-Client-Secret` |
 | `GOOGLE_PLACES_API_KEY` | google-places-api-new | Google Cloud Console (Places API New) | field mask 필수 |
-| `KRTOUR_MAP_TRIPMATE_AGENT_BASE_URL` | tripmate-agent-youtube | 형제 앱 TripMate-agent | base URL, 예: `http://127.0.0.1:12401` |
-| `KRTOUR_MAP_TRIPMATE_AGENT_API_KEY` | tripmate-agent-youtube | TripMate-agent `API_KEYS` 중 하나 | `X-API-Key` 헤더로 전송 |
+| `KRTOUR_MAP_KRTOUR_AI_AGENT_BASE_URL` | krtour-ai-agent-youtube | 형제 앱 krtour-ai-agent | base URL, 예: `http://127.0.0.1:12401` |
+| `KRTOUR_MAP_KRTOUR_AI_AGENT_API_KEY` | krtour-ai-agent-youtube | krtour-ai-agent `API_KEYS` 중 하나 | `X-API-Key` 헤더로 전송 |
 | `KRADDR_GEO_*` | python-kraddr-geo | (로컬 DB 위주, vworld 폴백 키는 kraddr-geo가 관리) | 본 라이브러리는 kraddr-geo client만 사용 |
 | `KRADDR_GEO_VWORLD_API_KEY` | python-kraddr-geo (reverse geocoding), 디버그 UI frontend (maplibre-vworld), TripMate 사용자 UI (ADR-026) | VWorld (vworld.kr) | **공유 키**. 별도 발급 X. ADR-025 + ADR-026 |
 
@@ -147,18 +147,18 @@ API 키 우선순위:
 3. `PUBLIC_DATA_SERVICE_KEY`
 4. `SERVICE_KEY`
 
-### 3.13 TripMate-agent YouTube 후보 export
+### 3.13 krtour-ai-agent YouTube 후보 export
 
-1. TripMate-agent가 `/api/v1/features/snapshot`과
-   `/api/v1/features/changes`를 제공해야 한다(TripMate-agent `T-066`,
-   ADR-050 경로 중립화 — T-217a).
-2. krtour-map Dagster는 `KRTOUR_MAP_TRIPMATE_AGENT_BASE_URL`을 host root로 받고,
+1. krtour-ai-agent가 `/api/v1/features/snapshot`과
+   `/api/v1/features/changes`를 제공해야 한다(구 `tripmate-agent` 프로젝트명 변경,
+   ADR-053).
+2. krtour-map Dagster는 `KRTOUR_MAP_KRTOUR_AI_AGENT_BASE_URL`을 host root로 받고,
    path는 fetcher가 `/api/v1/features/{snapshot|changes}`로 붙인다.
-3. `KRTOUR_MAP_TRIPMATE_AGENT_API_KEY`는 TripMate-agent 운영 환경의 `API_KEYS` 중
+3. `KRTOUR_MAP_KRTOUR_AI_AGENT_API_KEY`는 krtour-ai-agent 운영 환경의 `API_KEYS` 중
    하나와 같아야 하며, `X-API-Key` 헤더로만 전송한다.
-4. `KRTOUR_MAP_TRIPMATE_AGENT_FEATURE_SYNC_ENDPOINT=snapshot|changes`,
-   `KRTOUR_MAP_TRIPMATE_AGENT_FEATURE_CURSOR`,
-   `KRTOUR_MAP_TRIPMATE_AGENT_FEATURE_PAGE_SIZE`로 full/incremental pull을 조정한다.
+4. `KRTOUR_MAP_KRTOUR_AI_AGENT_FEATURE_SYNC_ENDPOINT=snapshot|changes`,
+   `KRTOUR_MAP_KRTOUR_AI_AGENT_FEATURE_CURSOR`,
+   `KRTOUR_MAP_KRTOUR_AI_AGENT_FEATURE_PAGE_SIZE`로 full/incremental pull을 조정한다.
 
 ### 3.14 문화체육관광부 (MCST, `python-mcst-api`)
 
@@ -173,8 +173,8 @@ API 키 우선순위:
 ## 4. 호출 정책 (provider 라이브러리가 책임)
 
 공공 provider는 본 라이브러리가 직접 호출하지 않고 provider 라이브러리가 다음을
-지켜야 한다(각 provider 저장소의 ADR로 박혀 있어야 함). `tripmate-agent-youtube`
-REST export는 ADR-049 예외로, krtour-map Dagster fetcher가 같은 timeout/secret
+지켜야 한다(각 provider 저장소의 ADR로 박혀 있어야 함). `krtour-ai-agent-youtube`
+REST export는 ADR-053 예외로, krtour-map Dagster fetcher가 같은 timeout/secret
 마스킹 원칙을 따른다.
 
 - `httpx.AsyncClient`로 호출 (`requests` 동기 금지).

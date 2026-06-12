@@ -41,6 +41,7 @@ from .provider_fetchers import (
     fetch_krforest_recreation_forests,
     fetch_krheritage_events,
     fetch_krheritage_items,
+    fetch_krtour_ai_agent_youtube_features,
     fetch_mcst_culture_records,
     fetch_mcst_libraries,
     fetch_mois_license_records,
@@ -48,7 +49,6 @@ from .provider_fetchers import (
     fetch_standard_museums,
     fetch_standard_parking_lots,
     fetch_standard_tourist_attractions,
-    fetch_tripmate_agent_youtube_features,
     fetch_visitkorea_festival_events,
 )
 
@@ -236,13 +236,13 @@ PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
         note="visitkorea는 datagokr 축제(1차) 적재 후 enrichment(2차)로 매칭/적재된다.",
     ),
     ProviderRecordResourceSpec(
-        resource_key="tripmate_agent_youtube_features",
-        provider_package="tripmate-agent",
+        resource_key="krtour_ai_agent_youtube_features",
+        provider_package="krtour-ai-agent",
         dataset_key="youtube_place_candidates",
-        setting_names=("tripmate_agent_base_url", "tripmate_agent_api_key"),
+        setting_names=("krtour_ai_agent_base_url", "krtour_ai_agent_api_key"),
         source_env_names=("API_KEYS",),
         note=(
-            "TripMate-agent의 /api/v1/features/{snapshot|changes} REST export를 "
+            "krtour-ai-agent의 /api/v1/features/{snapshot|changes} REST export를 "
             "pull한다. source env API_KEYS 중 하나를 krtour-map API key로 주입한다."
         ),
     ),
@@ -632,15 +632,15 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["visitkorea_festival_events"] = (
     )
 )
 
-_TRIPMATE_AGENT_YOUTUBE_FEATURES_SPEC: ProviderRecordResourceSpec = next(
+_KRTOUR_AI_AGENT_YOUTUBE_FEATURES_SPEC: ProviderRecordResourceSpec = next(
     spec
     for spec in PROVIDER_RECORD_RESOURCE_SPECS
-    if spec.resource_key == "tripmate_agent_youtube_features"
+    if spec.resource_key == "krtour_ai_agent_youtube_features"
 )
-PROVIDER_RECORD_RESOURCE_DEFINITIONS["tripmate_agent_youtube_features"] = (
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["krtour_ai_agent_youtube_features"] = (
     build_provider_record_live_resource(
-        _TRIPMATE_AGENT_YOUTUBE_FEATURES_SPEC,
-        fetch_tripmate_agent_youtube_features,
+        _KRTOUR_AI_AGENT_YOUTUBE_FEATURES_SPEC,
+        fetch_krtour_ai_agent_youtube_features,
     )
 )
 

@@ -14,9 +14,8 @@
   호환 API alias일 뿐이며, 신규 문서·DB·ORM 기준으로 쓰지 않는다.
 - krtour-map `curated_features` 1건은 TripMate `curated_trip_plans` 1건으로
   복사된다. 하위 장소·정류점·추천 POI는 TripMate `curated_plan_pois`가 받는다.
-- TripMate는 krtour-map DB를 직접 읽지 않는다. TripMate 또는 `tripmate-agent`는
-  krtour-map REST API를 호출해 조회/추가/수정/삭제하고, TripMate는 필요한 snapshot을
-  자기 DB에 복사한다.
+- TripMate는 krtour-map DB를 직접 읽지 않는다. TripMate는 krtour-map REST API를 호출해
+  필요한 snapshot을 자기 DB에 복사한다. `krtour-ai-agent`는 이 복사 flow에 관여하지 않는다.
 - 구현 전까지 `openapi.user.json`에는 포함하지 않는다. 구현 PR에서 DTO/schema 추가 후
   `scripts/export_openapi.py`를 다시 실행한다.
 
@@ -144,7 +143,7 @@ admin이 이후 특정 feature를 해제하면 `feature.curated_features` row의
 | `source_id` | `curated_sources` FK |
 | `source_record_key` | provider 원천 record 추적 |
 | `curation_status` | `candidate` / `curated` / `rejected` / `archived` |
-| `selection_origin` | `source_rule` / `admin` / `external_api` / `tripmate_agent` |
+| `selection_origin` | `source_rule` / `admin` / `external_api` |
 | `selected_by` / `selected_at` | 선정자·시각 |
 | `rejected_by` / `rejected_at` | 제외자·시각 |
 | `rejection_reason` | 제외 사유 |
@@ -227,8 +226,8 @@ POST   /v1/admin/curated-source-rules/{rule_id}/apply
 ```
 
 외부 write가 필요한 경우에도 별도 `/tripmate/*` namespace를 만들지 않는다.
-TripMate-agent나 운영 자동화는 인프라 보호 + service/admin token 정책으로 위 표면을
-호출한다. 사용자용 TripMate public client가 직접 write하지 않는다.
+TripMate admin이나 운영 자동화는 인프라 보호 + service/admin token 정책으로 위 표면을
+호출한다. 사용자용 TripMate public client와 `krtour-ai-agent`는 직접 write하지 않는다.
 
 ## 5. TripMate 복사 계약
 
