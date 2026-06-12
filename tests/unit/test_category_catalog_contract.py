@@ -1,4 +1,4 @@
-"""카탈로그 self-consistency + ``@krtour/map-marker-react`` maki 교차 점검 (T-213f).
+"""카탈로그 self-consistency + ``@kor-travel-map/map-marker-react`` maki 교차 점검 (T-213f).
 
 - Python 카탈로그(144건)의 maki icon이 자기 일관적인지(ADR-027).
 - marker-react ``maki.ts``의 maki name이 valid kebab-case이고, provider가 자주
@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from krtour.map.category import (
+from kortravelmap.category import (
     PLACE_CATEGORY_DEFINITIONS,
     PLACE_CATEGORY_MAPBOX_MAKI_ICON_VALUES,
     mapbox_maki_icon_for_category,

@@ -87,15 +87,15 @@ branch protection의 required check로 승격해도 missing check 때문에 merg
 PR merge 전 check 상태:
 
 ```bash
-gh pr checks <PR_NUMBER> --repo digitie/python-krtour-map
-gh pr view <PR_NUMBER> --repo digitie/python-krtour-map \
+gh pr checks <PR_NUMBER> --repo digitie/kor-travel-map
+gh pr view <PR_NUMBER> --repo digitie/kor-travel-map \
   --json mergeStateStatus,statusCheckRollup,reviewDecision
 ```
 
 branch protection API 조회:
 
 ```bash
-gh api repos/digitie/python-krtour-map/branches/main/protection
+gh api repos/digitie/kor-travel-map/branches/main/protection
 ```
 
 `required_status_checks.contexts`에 §4의 always-on check가 들어 있어야 한다. 문서-only

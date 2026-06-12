@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import CheckConstraint, UniqueConstraint
 
-from krtour.map.core.offline_upload_states import (
+from kortravelmap.core.offline_upload_states import (
     OFFLINE_UPLOAD_DELETABLE_STATES,
     OFFLINE_UPLOAD_IN_PROGRESS_STATES,
     OFFLINE_UPLOAD_LOADABLE_STATES,
@@ -16,7 +16,7 @@ from krtour.map.core.offline_upload_states import (
     OFFLINE_UPLOAD_VALIDATABLE_STATES,
     OFFLINE_UPLOAD_WRITEABLE_FORMATS,
 )
-from krtour.map.infra.models import OfflineUploadRow
+from kortravelmap.infra.models import OfflineUploadRow
 
 pytestmark = pytest.mark.unit
 

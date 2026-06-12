@@ -17,8 +17,8 @@ from typing import TYPE_CHECKING
 import pytest
 from sqlalchemy import text
 
-from krtour.map.infra import feature_repo
-from krtour.map.providers.standard_data import cultural_festivals_to_bundles
+from kortravelmap.infra import feature_repo
+from kortravelmap.providers.standard_data import cultural_festivals_to_bundles
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -339,7 +339,7 @@ async def test_get_feature_rows_by_ids_and_search_features(
 
 async def test_area_feature_geom_persists(migrated_session: AsyncSession) -> None:
     """route/area Feature.geom(WKT)이 features.geom으로 적재되는지 (ADR-012)."""
-    from krtour.map.providers.knps import knps_geometry_records_to_bundles
+    from kortravelmap.providers.knps import knps_geometry_records_to_bundles
 
     @dataclass(frozen=True)
     class _GRec:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from krtour.map.dto import (
+from kortravelmap.dto import (
     NOTICE_TYPE_ACCESS_RESTRICTION,
     NOTICE_TYPE_FIRE_ALERT,
     NOTICE_TYPE_HEAVY_RAIN,

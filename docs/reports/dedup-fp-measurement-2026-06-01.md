@@ -67,7 +67,7 @@ ADR-016 가중치(0.45/0.35/0.20)와 임계값(AUTO 0.85 / MANUAL 0.65)을 **유
   방향(오토머지 FP)의 오류가 0.
 - **검토 큐 noise는 설계 의도**: 가까운 동일-카테고리 별개 장소가 manual_review로
   가는 것은 정상 — 그게 큐의 존재 이유다. 운영자가 reject하고, 확정 병합은
-  `krtour-map dedup-merge`로 적용한다.
+  `ktmctl dedup-merge`로 적용한다.
 - **접미사 stripping은 권하지 않음(현 시점)**: 4건의 manual FP를 줄이려 카테고리
   접미사(`약국`/`마트`…)를 name 정규화에서 제거하면, 반대로 **접두사 충돌 FP**가
   생긴다 — `강남약국`↔`강남마트`가 접미사 제거 후 둘 다 `강남`이 되어 name_sim
@@ -83,7 +83,7 @@ ADR-016 가중치(0.45/0.35/0.20)와 임계값(AUTO 0.85 / MANUAL 0.65)을 **유
   ADR-016 amendment 판단.
   - **운영 측정 도구 추가(2026-06-01)**: `infra.status_repo.dedup_fp_stats`
     (status별 카운트 → confirmed=merged+accepted / FP=rejected / precision /
-    fp_rate, ignored·pending 제외) + `krtour-map status` 출력의 `dedup FP(운영)`
+    fp_rate, ignored·pending 제외) + `ktmctl status` 출력의 `dedup FP(운영)`
     라인. 운영자가 `dedup-merge`/reject로 큐를 해소하면 실 FP율이 자동 집계된다.
     검토 완료 후보가 0이면 "검토 완료 후보 없음"으로 표시(현 상태).
 - 회귀 가드: `tests/unit/test_dedup_fp_measurement.py`가 (1) 오토머지 FP 0,

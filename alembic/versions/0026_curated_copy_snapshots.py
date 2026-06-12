@@ -6,7 +6,7 @@ Create Date: 2026-06-12
 
 T-223c-2는 Dagster ``curated_features`` group이 TripMate 복사용 snapshot을
 물리화할 수 있도록 cache table을 추가한다. TripMate는 여전히 REST snapshot을
-읽어 자기 DB에 복사하며, 본 table은 krtour-map 내부 materialize/cache 경계다.
+읽어 자기 DB에 복사하며, 본 table은 kor-travel-map 내부 materialize/cache 경계다.
 """
 
 from __future__ import annotations

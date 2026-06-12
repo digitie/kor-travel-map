@@ -11,7 +11,7 @@
 | provider | `python-kma-api` |
 | dataset_key | `kma_ultra_short_nowcast`, `kma_ultra_short_forecast`, `kma_short_forecast`, `kma_mid_forecast`, `kma_weather_alerts` (notice로 변환) |
 | Feature.kind | (weather → `WeatherValue` 적재) / (alert → `notice` 적재) |
-| 코드 entrypoint | `krtour.map.providers.kma` |
+| 코드 entrypoint | `kortravelmap.providers.kma` |
 | 갱신 주기 | endpoint별 (10분~12시간) |
 | category | weather-only anchor (`kind=weather`)는 `features.category` 일반적으로 비움. 기존 place feature에 `WeatherValue`를 붙이는 경우 그 feature의 category 유지 (`docs/category.md` §4). 산악 관측소 anchor는 `WEATHER_MOUNTAIN_STATION` 신설 후보 (forest-feature-etl.md §11.6) |
 
@@ -46,15 +46,15 @@ nx, ny = to_grid(37.5, 127.0)  # (lat, lon) 순서
 
 v2 1차: 옵션 B (place 별로 격자 계산하면 매핑 N:1로 깔끔). **대상 한정**
 (T-219a/b): 전 place가 아니라 ① 활성 `poi_cache_targets` 좌표 + ② 설정
-`KRTOUR_MAP_KMA_WEATHER_EXTRA_POINTS`(`lon,lat;lon,lat`)의 distinct 격자만,
-run당 `KRTOUR_MAP_KMA_WEATHER_MAX_GRIDS_PER_RUN`(기본 50) 상한. 매핑된 place
+`KOR_TRAVEL_MAP_KMA_WEATHER_EXTRA_POINTS`(`lon,lat;lon,lat`)의 distinct 격자만,
+run당 `KOR_TRAVEL_MAP_KMA_WEATHER_MAX_GRIDS_PER_RUN`(기본 50) 상한. 매핑된 place
 feature가 없는 격자는 KMA 호출 자체를 생략한다(일일 한도 보호). place는
 `deleted_at IS NULL` 기준(`status='inactive'`여도 날씨 부착 — D-12 read 정합).
 
 ## 4. 단기예보 변환 (TMP, REH, WSD, PTY, SKY 등)
 
 ```python
-from krtour.map.providers.kma import short_forecast_to_weather_values
+from kortravelmap.providers.kma import short_forecast_to_weather_values
 
 async def update_short_forecast_for_grid(client, async_session, nx, ny, feature_ids):
     """특정 격자의 단기예보 → 격자 내 모든 feature에 적용."""
@@ -117,11 +117,11 @@ asset이 skip한다(cursor 미전진):
 ```bash
 # 육상(getMidLandFcst)과 기온(getMidTa)은 reg_id 체계가 다르다 —
 # 예: 서울 육상 11B00000 vs 기온 11B10101.
-KRTOUR_MAP_KMA_MID_REGION_FEATURES='[{"land_reg_id": "11B00000",
+KOR_TRAVEL_MAP_KMA_MID_REGION_FEATURES='[{"land_reg_id": "11B00000",
   "ta_reg_id": "11B10101", "feature_ids": ["<feature_id>", ...]}]'
 ```
 
-파서는 `krtour.map.providers.kma.parse_mid_region_features`(JSON 오류/필수 키
+파서는 `kortravelmap.providers.kma.parse_mid_region_features`(JSON 오류/필수 키
 누락/빈 feature_ids/중복 페어는 ValueError). asset
 `feature_weather_kma_mid_forecast`가 region별로 `DataGoKrClient.
 mid_land_forecast` + `mid_temperature_forecast`를 호출해 SKY 텍스트/POP/TMN/TMX
@@ -176,7 +176,7 @@ async def kma_short_forecast_etl(client, async_session):
 
 ## 8. Dagster (T-219b 구현 기준)
 
-`krtour.map_dagster.kma_weather` — 대상 좌표가 DB에서 나오므로 표준
+`kortravelmap.dagster.kma_weather` — 대상 좌표가 DB에서 나오므로 표준
 record-resource 패턴이 아니라 **asset 직접 구현**(resource는
 `kma_weather_client` = `KmaClient` live 인스턴스 + settings 값 2종). 발표
 스케줄 + 가용 지연(§6)에 cron을 맞췄고, 같은 base 재실행은 cursor가 skip.
@@ -191,7 +191,7 @@ record-resource 패턴이 아니라 **asset 직접 구현**(resource는
 
 특보(T-219c)는 표준 record-resource 패턴 — `kma_weather_alert_records`
 (getWthrWrnList, 전국 발표관서 108, rolling window
-`KRTOUR_MAP_KMA_WEATHER_ALERT_LOOKBACK_DAYS` 기본 3일, 멱등 upsert). 종류/등급은
+`KOR_TRAVEL_MAP_KMA_WEATHER_ALERT_LOOKBACK_DAYS` 기본 3일, 멱등 upsert). 종류/등급은
 title 토큰 스캔(미매칭은 generic `weather_alert`), 특보구역은 1차 발표관서
 단위 1건 — region명이 `SourceRecord.raw_address` 위치 단서로 주소 검증을
 통과한다. 구역→좌표 enrichment·구역별 fan-out은 백로그(§11).

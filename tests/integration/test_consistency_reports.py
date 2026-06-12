@@ -17,8 +17,8 @@ from typing import TYPE_CHECKING
 import pytest
 from sqlalchemy import text
 
-from krtour.map.infra.consistency import FileObjectRef, run_consistency_checks
-from krtour.map.infra.models import FeatureRow, SourceRecordRow
+from kortravelmap.infra.consistency import FileObjectRef, run_consistency_checks
+from kortravelmap.infra.models import FeatureRow, SourceRecordRow
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -594,9 +594,9 @@ async def test_f8_warns_for_feature_file_metadata_and_object_snapshot_mismatch(
             "INSERT INTO feature.feature_files "
             "(file_id, feature_id, file_type, storage_backend, bucket, object_key, role) "
             "VALUES "
-            "('f8-missing-object', 'f8-active', 'image', 's3', 'krtour-map', "
+            "('f8-missing-object', 'f8-active', 'image', 's3', 'kor-travel-map', "
             " 'missing-object.jpg', 'gallery'), "
-            "('f8-deleted-feature', 'f8-deleted', 'image', 's3', 'krtour-map', "
+            "('f8-deleted-feature', 'f8-deleted', 'image', 's3', 'kor-travel-map', "
             " 'deleted-feature.jpg', 'gallery')"
         )
     )
@@ -608,12 +608,12 @@ async def test_f8_warns_for_feature_file_metadata_and_object_snapshot_mismatch(
         known_file_objects=[
             FileObjectRef(
                 storage_backend="s3",
-                bucket="krtour-map",
+                bucket="kor-travel-map",
                 object_key="deleted-feature.jpg",
             ),
             FileObjectRef(
                 storage_backend="s3",
-                bucket="krtour-map",
+                bucket="kor-travel-map",
                 object_key="object-without-metadata.jpg",
             ),
         ],

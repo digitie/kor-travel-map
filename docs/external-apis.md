@@ -2,8 +2,8 @@
 
 본 문서는 본 라이브러리가 의존하는 provider 라이브러리들이 호출하는 외부 API의
 발급/호출 정책 reference다. 공공 provider 호출은 `python-*-api` provider
-라이브러리에 위임한다(ADR-006). 예외적으로 `krtour-ai-agent-youtube`는 형제 앱
-`krtour-ai-agent`의 REST export를 krtour-map Dagster가 직접 pull한다(ADR-053).
+라이브러리에 위임한다(ADR-006). 예외적으로 `kor-travel-concierge-youtube`는 형제 앱
+`kor-travel-concierge`의 REST export를 kor-travel-map Dagster가 직접 pull한다(ADR-053).
 
 본 문서는 운영자/에이전트가 어떤 키를 어디서 발급받고 어디에 두는지 한 곳에서
 확인할 수 있도록 한다.
@@ -37,10 +37,10 @@
 | `NAVER_SEARCH_CLIENT_ID` | naver-search-api | NAVER Developers | 헤더 `X-Naver-Client-Id` |
 | `NAVER_SEARCH_CLIENT_SECRET` | 동일 | 동일 | 헤더 `X-Naver-Client-Secret` |
 | `GOOGLE_PLACES_API_KEY` | google-places-api-new | Google Cloud Console (Places API New) | field mask 필수 |
-| `KRTOUR_MAP_KRTOUR_AI_AGENT_BASE_URL` | krtour-ai-agent-youtube | 형제 앱 krtour-ai-agent | base URL, 예: `http://127.0.0.1:12401` |
-| `KRTOUR_MAP_KRTOUR_AI_AGENT_API_KEY` | krtour-ai-agent-youtube | krtour-ai-agent `API_KEYS` 중 하나 | `X-API-Key` 헤더로 전송 |
-| `KRADDR_GEO_*` | python-kraddr-geo | (로컬 DB 위주, vworld 폴백 키는 kraddr-geo가 관리) | 본 라이브러리는 kraddr-geo client만 사용 |
-| `KRADDR_GEO_VWORLD_API_KEY` | python-kraddr-geo (reverse geocoding), 디버그 UI frontend (maplibre-vworld), TripMate 사용자 UI (ADR-026) | VWorld (vworld.kr) | **공유 키**. 별도 발급 X. ADR-025 + ADR-026 |
+| `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_BASE_URL` | kor-travel-concierge-youtube | 형제 앱 kor-travel-concierge | base URL, 예: `http://127.0.0.1:12401` |
+| `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_API_KEY` | kor-travel-concierge-youtube | kor-travel-concierge `API_KEYS` 중 하나 | `X-API-Key` 헤더로 전송 |
+| `KOR_TRAVEL_GEO_*` | kor-travel-geo | (로컬 DB 위주, vworld 폴백 키는 kor-travel-geo가 관리) | 본 라이브러리는 kor-travel-geo client만 사용 |
+| `KOR_TRAVEL_GEO_VWORLD_API_KEY` | kor-travel-geo (reverse geocoding), 디버그 UI frontend (maplibre-vworld), TripMate 사용자 UI (ADR-026) | VWorld (vworld.kr) | **공유 키**. 별도 발급 X. ADR-025 + ADR-026 |
 
 ## 3. provider별 발급 절차 (요약)
 
@@ -136,7 +136,7 @@ data.go.kr 직접 다운로드 URL (atchFileId + fileDetailSn + insertDataPrcus)
 
 ### 3.12 data.go.kr 표준데이터
 
-표준데이터 5종은 별도 provider 라이브러리 없이 `krtour.map.standard_data`의
+표준데이터 5종은 별도 provider 라이브러리 없이 `kortravelmap.standard_data`의
 내부 bounded asyncio client에서 처리한다. (코드 작성 단계에서 v1과 동일 패턴
 재구현)
 
@@ -147,18 +147,18 @@ API 키 우선순위:
 3. `PUBLIC_DATA_SERVICE_KEY`
 4. `SERVICE_KEY`
 
-### 3.13 krtour-ai-agent YouTube 후보 export
+### 3.13 kor-travel-concierge YouTube 후보 export
 
-1. krtour-ai-agent가 `/api/v1/features/snapshot`과
-   `/api/v1/features/changes`를 제공해야 한다(구 `tripmate-agent` 프로젝트명 변경,
+1. kor-travel-concierge가 `/api/v1/features/snapshot`과
+   `/api/v1/features/changes`를 제공해야 한다(구 `kor-travel-concierge` 프로젝트명 변경,
    ADR-053).
-2. krtour-map Dagster는 `KRTOUR_MAP_KRTOUR_AI_AGENT_BASE_URL`을 host root로 받고,
+2. kor-travel-map Dagster는 `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_BASE_URL`을 host root로 받고,
    path는 fetcher가 `/api/v1/features/{snapshot|changes}`로 붙인다.
-3. `KRTOUR_MAP_KRTOUR_AI_AGENT_API_KEY`는 krtour-ai-agent 운영 환경의 `API_KEYS` 중
+3. `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_API_KEY`는 kor-travel-concierge 운영 환경의 `API_KEYS` 중
    하나와 같아야 하며, `X-API-Key` 헤더로만 전송한다.
-4. `KRTOUR_MAP_KRTOUR_AI_AGENT_FEATURE_SYNC_ENDPOINT=snapshot|changes`,
-   `KRTOUR_MAP_KRTOUR_AI_AGENT_FEATURE_CURSOR`,
-   `KRTOUR_MAP_KRTOUR_AI_AGENT_FEATURE_PAGE_SIZE`로 full/incremental pull을 조정한다.
+4. `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_FEATURE_SYNC_ENDPOINT=snapshot|changes`,
+   `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_FEATURE_CURSOR`,
+   `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_FEATURE_PAGE_SIZE`로 full/incremental pull을 조정한다.
 
 ### 3.14 문화체육관광부 (MCST, `python-mcst-api`)
 
@@ -168,17 +168,17 @@ API 키 우선순위:
    구 KCISA
    OpenAPI(`CultureOpenApiClient`)/ODCloud(`DataGoFileApiClient`) 경로는 폐기
    — KCISA OpenAPI는 공인 DNS 미해석 + KCISA 전용 발급키 필요(provider #6).
-2. dataset당 1 run 상한은 `KRTOUR_MAP_MCST_MAX_ITEMS_PER_DATASET`(기본 50000
+2. dataset당 1 run 상한은 `KOR_TRAVEL_MAP_MCST_MAX_ITEMS_PER_DATASET`(기본 50000
    — 실측 최대 24,537행의 약 2배 여유).
 3. dataset 카탈로그(slug/다운로드 페이지)는 `python-mcst-api` `catalog.py`가
-   정본 — krtour 측 메타표는 `krtour.map.providers.mcst.MCST_FILE_DATASETS`
+   정본 — krtour 측 메타표는 `kortravelmap.providers.mcst.MCST_FILE_DATASETS`
    (적재 13), 제외 3종 사유는 `MCST_EXCLUDED_FILE_DATASETS`.
 
 ## 4. 호출 정책 (provider 라이브러리가 책임)
 
 공공 provider는 본 라이브러리가 직접 호출하지 않고 provider 라이브러리가 다음을
-지켜야 한다(각 provider 저장소의 ADR로 박혀 있어야 함). `krtour-ai-agent-youtube`
-REST export는 ADR-053 예외로, krtour-map Dagster fetcher가 같은 timeout/secret
+지켜야 한다(각 provider 저장소의 ADR로 박혀 있어야 함). `kor-travel-concierge-youtube`
+REST export는 ADR-053 예외로, kor-travel-map Dagster fetcher가 같은 timeout/secret
 마스킹 원칙을 따른다.
 
 - `httpx.AsyncClient`로 호출 (`requests` 동기 금지).
@@ -230,7 +230,7 @@ provider API spec이 변경되면:
   3개 미만으로 제한 (`PLACE_PHONE_MAX_CANDIDATES=3`).
 - **VWorld API** (`maplibre-vworld-js` 의 raster/vector tile): 본 라이브러리
   디버그 UI frontend **및 TripMate 사용자 UI** (ADR-026)가 사용. 키는
-  `python-kraddr-geo` ADR-019의 `KRADDR_GEO_VWORLD_API_KEY`를 **공유 사용**
+  `kor-travel-geo` ADR-019의 `KOR_TRAVEL_GEO_VWORLD_API_KEY`를 **공유 사용**
   (ADR-025 사용자 보강 2026-05-25). 별도 발급 금지. frontend는 **Next.js**
   (ADR-025 2차 보강) 규약상 `NEXT_PUBLIC_VWORLD_API_KEY`로 노출 — 값은
   동일 출처. HTTP referrer 제한 권장 (backend 호스트 + TripMate frontend
@@ -267,7 +267,7 @@ Grafana 패널에 노출 (TripMate 측). 5xx 비율 임계 초과 시 알림.
 
 라이브 호출이 필요한 시나리오:
 - 디버그 UI에서 "라이브 호출" 옵션 (개발자 명시 트리거)
-- nightly canary (krtour-map Dagster `provider_canary` asset)
+- nightly canary (kor-travel-map Dagster `provider_canary` asset)
 - 운영 ETL
 
 위 시나리오는 모두 provider 라이브러리에서 직접 호출하고, 본 라이브러리는

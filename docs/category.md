@@ -1,9 +1,9 @@
-# category.md — `krtour.map.category` 모듈 사양
+# category.md — `kortravelmap.category` 모듈 사양
 
-본 문서는 `krtour.map.category` 모듈의 사양 reference다. 해당 모듈은
+본 문서는 `kortravelmap.category` 모듈의 사양 reference다. 해당 모듈은
 `python-kraddr-base`의 `kraddr.base.categories` 모듈을 이전해 온 것이다 (ADR-023).
 
-> **현재 상태**: Sprint 1에서 `src/krtour/map/category/` 이전 완료 (PR#18).
+> **현재 상태**: Sprint 1에서 `src/kortravelmap/category/` 이전 완료 (PR#18).
 > 본 문서는 현행 category 모듈의 계약 reference다. 신규 카테고리/마커 매핑
 > 변경은 ADR과 테스트를 함께 갱신한다.
 
@@ -16,7 +16,7 @@
 ## 2. import 경로
 
 ```python
-from krtour.map.category import (
+from kortravelmap.category import (
     # Enum
     PlaceCategoryCode, PlaceCategoryTier1Code,
     # Dataclass
@@ -293,7 +293,7 @@ dict가 한국어 라벨 제공.
 
 ### 4.3 표 형식 (전체 144 rows)
 
-전체 표는 `src/krtour/map/category/_definitions.py`의 `PLACE_CATEGORY_DEFINITIONS`
+전체 표는 `src/kortravelmap/category/_definitions.py`의 `PLACE_CATEGORY_DEFINITIONS`
 tuple에서 자동 생성된다 (ADR-023으로 본 라이브러리로 이전, PR#18). depth별
 통계 (실측):
 
@@ -380,16 +380,16 @@ depth 1 = 1 + 7). Tier 1 enum 자체는 ADR-027에서 변경 없음.
 본 모듈은 의존 계층의 **최하단**이다 (다른 어떤 내부 모듈도 import 안 함):
 
 ```
-krtour.map.category   ← 본 모듈 (외부 의존: pydantic 또는 stdlib만)
+kortravelmap.category   ← 본 모듈 (외부 의존: pydantic 또는 stdlib만)
   ↑
-krtour.map.dto        ← Feature.category 검증/정규화에서 import
+kortravelmap.dto        ← Feature.category 검증/정규화에서 import
   ↑
-krtour.map.core
+kortravelmap.core
   ↑
 ... (이하 ADR-002 계층)
 ```
 
-`import-linter` 계약 (`pyproject.toml`)에 `krtour.map.category`가 layered
+`import-linter` 계약 (`pyproject.toml`)에 `kortravelmap.category`가 layered
 contract의 가장 낮은 layer로 등록되어 있다 (ADR-023 §결정).
 
 ## 5. Feature.category 와의 연계
@@ -399,7 +399,7 @@ value로 정규화된다:
 
 ```python
 from pydantic import BaseModel, Field, field_validator
-from krtour.map.category import (
+from kortravelmap.category import (
     PlaceCategoryCode, is_known_category_code,
     PlaceCategory, get_category,
     mapbox_maki_icon_or_none,
@@ -429,7 +429,7 @@ def suggest_marker_icon(category_code: str) -> str | None:
 
 ## 6. 데이터 저장 위치
 
-- **Python 상수**: `src/krtour/map/category/__init__.py` (또는 `definitions.py` 분리)
+- **Python 상수**: `src/kortravelmap/category/__init__.py` (또는 `definitions.py` 분리)
   — `PLACE_CATEGORY_DEFINITIONS` tuple과 maki icon dict.
 - **JSON/YAML 데이터 파일은 없다** — 모두 Python 상수로 박는다 (변경 시 PR
   diff가 명확).
@@ -439,11 +439,11 @@ def suggest_marker_icon(category_code: str) -> str | None:
 
 - 본 모듈은 `python-kraddr-base` (GPL-3.0-or-later)의 `kraddr.base.categories`
   모듈을 derivation한다.
-- `python-krtour-map`도 GPL-3.0-or-later → **호환**.
+- `kor-travel-map`도 GPL-3.0-or-later → **호환**.
 - 파일 상단 주석에 origin 표기:
 
 ```python
-"""krtour.map.category — 지도 marker용 카테고리 분류 + Mapbox Maki icon 매핑.
+"""kortravelmap.category — 지도 marker용 카테고리 분류 + Mapbox Maki icon 매핑.
 
 Origin: python-kraddr-base의 kraddr.base.categories 모듈 (GPL-3.0-or-later).
 ADR-023 결정으로 본 저장소에 이전. 변경 이력은 git log 참조.
@@ -469,14 +469,14 @@ ADR-023 결정으로 본 저장소에 이전. 변경 이력은 git log 참조.
 
 별도 PR로 수행한다 (ADR-021):
 
-1. `src/krtour/map/category/__init__.py` 생성
+1. `src/kortravelmap/category/__init__.py` 생성
    - `kraddr.base.categories`의 전 내용을 복사 + origin 주석 추가
    - import 경로 정리 (`from kraddr.base import ...` 같은 자기 참조 제거)
 2. `tests/unit/test_category.py` 추가 (kraddr-base의 `test_categories.py` 포팅)
-3. `dto/feature.py`의 import를 `from krtour.map.category import ...`로 변경
+3. `dto/feature.py`의 import를 `from kortravelmap.category import ...`로 변경
 4. `pyproject.toml`의 `dependencies`는 `python-kraddr-base`를 유지 — 단,
    category 외 (address/coordinate)만 사용한다는 주석 추가
-5. `import-linter` 계약에 `krtour.map.category`를 최하 layer로 등록
+5. `import-linter` 계약에 `kortravelmap.category`를 최하 layer로 등록
 6. `docs/feature-model.md`의 category 부분을 본 모듈 import로 갱신
 7. PR description에 ADR-023 링크 + kraddr-base 원본 commit sha 명기
 

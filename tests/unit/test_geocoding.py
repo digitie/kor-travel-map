@@ -1,10 +1,10 @@
-"""``test_geocoding`` — kraddr-geo REST API v2 연동 (krtour.map.geocoding).
+"""``test_geocoding`` — kor-travel-geo REST API v2 연동 (kortravelmap.geocoding).
 
-kraddr-geo를 import하지 않고:
+kor-travel-geo를 import하지 않고:
 - 순수 변환 함수(``reverse_response_to_address``/``geocode_response_to_coordinate``)는
   REST v2 응답 shape(``CandidateV2``/``AddressV2``/``RegionV2``/``Point``)를 만족하는
   fake dataclass로 검증.
-- ``KraddrGeoRestClient`` + 콜러블 팩토리는 ``httpx.MockTransport``로 실 HTTP 경로
+- ``KorTravelGeoRestClient`` + 콜러블 팩토리는 ``httpx.MockTransport``로 실 HTTP 경로
   (``POST /v2/*`` JSON body + 응답 파싱 + 변환)를 서버 없이 검증.
 """
 
@@ -19,16 +19,16 @@ from typing import Any
 import httpx
 import pytest
 
-from krtour.map.dto import Address, Coordinate
-from krtour.map.geocoding import (
-    KraddrGeoRestClient,
+from kortravelmap.dto import Address, Coordinate
+from kortravelmap.geocoding import (
+    KorTravelGeoRestClient,
     cached_address_resolver,
     cached_reverse_geocoder,
     geocode_response_to_address,
     geocode_response_to_coordinate,
-    kraddr_geo_address_geocoder,
-    kraddr_geo_address_resolver,
-    kraddr_geo_reverse_geocoder,
+    kor_travel_geo_address_geocoder,
+    kor_travel_geo_address_resolver,
+    kor_travel_geo_reverse_geocoder,
     resolve_regions_within_radius,
     resolve_sigungu_by_radius,
     reverse_response_to_address,
@@ -36,7 +36,7 @@ from krtour.map.geocoding import (
 
 pytestmark = pytest.mark.unit
 
-# -- kraddr-geo REST v2 응답 fake (structural Protocol 만족) -------------------
+# -- kor-travel-geo REST v2 응답 fake (structural Protocol 만족) -------------------
 
 
 @dataclass(frozen=True)
@@ -189,7 +189,7 @@ def test_reverse_bjd_falls_back_to_region() -> None:
 
 
 def test_reverse_sig_cd_fallback_when_bjd_missing() -> None:
-    """kraddr-geo v2 ``RegionV2.sig_cd``를 bjd 없는 응답에서도 보존한다."""
+    """kor-travel-geo v2 ``RegionV2.sig_cd``를 bjd 없는 응답에서도 보존한다."""
     resp = _RevResp(
         candidates=(
             _CandV2(
@@ -469,12 +469,12 @@ def test_geocode_no_point_is_none() -> None:
     assert geocode_response_to_coordinate(resp) is None
 
 
-# -- KraddrGeoRestClient + 콜러블 팩토리 (httpx.MockTransport) -----------------
+# -- KorTravelGeoRestClient + 콜러블 팩토리 (httpx.MockTransport) -----------------
 
 
 def _mock_client(handler: object) -> httpx.AsyncClient:
     return httpx.AsyncClient(
-        base_url="http://kraddr-geo.test",
+        base_url="http://kor-travel-geo.test",
         transport=httpx.MockTransport(handler),  # type: ignore[arg-type]
     )
 
@@ -515,8 +515,8 @@ def test_rest_reverse_geocoder_hits_endpoint() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            reverse = kraddr_geo_reverse_geocoder(
-                KraddrGeoRestClient(http), radius_m=100
+            reverse = kor_travel_geo_reverse_geocoder(
+                KorTravelGeoRestClient(http), radius_m=100
             )
             addr = await reverse(
                 Coordinate(lon=Decimal("126.924"), lat=Decimal("37.526"))
@@ -558,7 +558,7 @@ def test_rest_address_geocoder_hits_endpoint() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            geocode = kraddr_geo_address_geocoder(KraddrGeoRestClient(http))
+            geocode = kor_travel_geo_address_geocoder(KorTravelGeoRestClient(http))
             coord = await geocode(
                 Address(
                     road="서울특별시 영등포구 여의공원로 120", bjd_code="1156010100"
@@ -596,7 +596,7 @@ def test_rest_address_geocoder_uses_parcel_when_no_road() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            geocode = kraddr_geo_address_geocoder(KraddrGeoRestClient(http))
+            geocode = kor_travel_geo_address_geocoder(KorTravelGeoRestClient(http))
             coord = await geocode(Address(legal="서울특별시 영등포구 여의도동 8"))
             assert coord is not None
 
@@ -612,7 +612,7 @@ def test_address_geocoder_returns_none_without_query() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            geocode = kraddr_geo_address_geocoder(KraddrGeoRestClient(http))
+            geocode = kor_travel_geo_address_geocoder(KorTravelGeoRestClient(http))
             assert await geocode(Address()) is None
 
     asyncio.run(_run())
@@ -624,9 +624,9 @@ def test_rest_geocoder_returns_none_on_not_found() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            client = KraddrGeoRestClient(http)
-            reverse = kraddr_geo_reverse_geocoder(client)
-            geocode = kraddr_geo_address_geocoder(client)
+            client = KorTravelGeoRestClient(http)
+            reverse = kor_travel_geo_reverse_geocoder(client)
+            geocode = kor_travel_geo_address_geocoder(client)
             rev = await reverse(
                 Coordinate(lon=Decimal("127"), lat=Decimal("37"))
             )
@@ -637,7 +637,7 @@ def test_rest_geocoder_returns_none_on_not_found() -> None:
     asyncio.run(_run())
 
 
-# -- KraddrGeoRestClient 세부 동작 (wire-level 회귀) ---------------------------
+# -- KorTravelGeoRestClient 세부 동작 (wire-level 회귀) ---------------------------
 #
 # base_path/JSON body/예외 전파 등 client 내부 동작은 통합 e2e만으로는 회귀
 # 검출이 어렵다 — httpx.MockTransport로 wire-level 동작을 고정한다.
@@ -653,7 +653,7 @@ def test_rest_client_base_path_trailing_slash_stripped() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            client = KraddrGeoRestClient(http, base_path="/v2/")
+            client = KorTravelGeoRestClient(http, base_path="/v2/")
             await client.reverse(127.0, 37.0)
             await client.geocode("서울특별시 중구 세종대로 110")
 
@@ -671,7 +671,7 @@ def test_rest_client_custom_base_path() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            client = KraddrGeoRestClient(http, base_path="/api/v2")
+            client = KorTravelGeoRestClient(http, base_path="/api/v2")
             await client.reverse(127.0, 37.0)
 
     asyncio.run(_run())
@@ -688,7 +688,7 @@ def test_rest_client_reverse_radius_m_none_omits_key() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            client = KraddrGeoRestClient(http)
+            client = KorTravelGeoRestClient(http)
             await client.reverse(127.0, 37.0)  # radius_m 미지정.
 
     asyncio.run(_run())
@@ -705,7 +705,7 @@ def test_rest_client_reverse_include_flags_default_true() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            client = KraddrGeoRestClient(http)
+            client = KorTravelGeoRestClient(http)
             await client.reverse(127.0, 37.0)
 
     asyncio.run(_run())
@@ -724,7 +724,7 @@ def test_rest_client_reverse_include_flags_false() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            client = KraddrGeoRestClient(http)
+            client = KorTravelGeoRestClient(http)
             await client.reverse(
                 127.0, 37.0, include_region=False, include_zipcode=False
             )
@@ -755,7 +755,7 @@ def test_rest_client_geocode_type_selects_body_key(type_: str, key: str) -> None
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            client = KraddrGeoRestClient(http)
+            client = KorTravelGeoRestClient(http)
             await client.geocode("addr", type_=type_)  # type: ignore[arg-type]
 
     asyncio.run(_run())
@@ -779,7 +779,7 @@ def test_rest_client_geocode_fallback_passes_through(fallback: str) -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            client = KraddrGeoRestClient(http)
+            client = KorTravelGeoRestClient(http)
             await client.geocode("addr", fallback=fallback)  # type: ignore[arg-type]
 
     asyncio.run(_run())
@@ -794,7 +794,7 @@ def test_rest_client_reverse_raises_on_http_500() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            client = KraddrGeoRestClient(http)
+            client = KorTravelGeoRestClient(http)
             with pytest.raises(httpx.HTTPStatusError):
                 await client.reverse(127.0, 37.0)
 
@@ -809,7 +809,7 @@ def test_rest_client_geocode_raises_on_http_502() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            client = KraddrGeoRestClient(http)
+            client = KorTravelGeoRestClient(http)
             with pytest.raises(httpx.HTTPStatusError):
                 await client.geocode("addr")
 
@@ -840,7 +840,7 @@ def test_rest_client_regions_within_radius_hits_endpoint() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            client = KraddrGeoRestClient(http)
+            client = KorTravelGeoRestClient(http)
             response = await client.regions_within_radius(
                 lon=126.978,
                 lat=37.5665,
@@ -882,7 +882,7 @@ def test_rest_client_regions_within_radius_default_levels() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            await KraddrGeoRestClient(http).regions_within_radius(
+            await KorTravelGeoRestClient(http).regions_within_radius(
                 lon=126.978,
                 lat=37.5665,
             )
@@ -909,7 +909,7 @@ def test_rest_client_regions_within_radius_center_xy_fallback_and_malformed_item
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            response = await KraddrGeoRestClient(http).regions_within_radius(
+            response = await KorTravelGeoRestClient(http).regions_within_radius(
                 lon=126.978,
                 lat=37.5665,
                 radius_km=3.0,
@@ -938,8 +938,8 @@ def test_rest_client_regions_within_radius_invalid_response_raises(
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            with pytest.raises(ValueError, match="kraddr-geo regions response"):
-                await KraddrGeoRestClient(http).regions_within_radius(
+            with pytest.raises(ValueError, match="kor-travel-geo regions response"):
+                await KorTravelGeoRestClient(http).regions_within_radius(
                     lon=126.978,
                     lat=37.5665,
                 )
@@ -954,7 +954,7 @@ def test_rest_client_regions_within_radius_raises_on_http_error() -> None:
     async def _run() -> None:
         async with _mock_client(handler) as http:
             with pytest.raises(httpx.HTTPStatusError):
-                await KraddrGeoRestClient(http).regions_within_radius(
+                await KorTravelGeoRestClient(http).regions_within_radius(
                     lon=126.978,
                     lat=37.5665,
                 )
@@ -982,7 +982,7 @@ def test_resolve_sigungu_by_radius_requests_sigungu_only() -> None:
     async def _run() -> None:
         async with _mock_client(handler) as http:
             codes = await resolve_sigungu_by_radius(
-                KraddrGeoRestClient(http),
+                KorTravelGeoRestClient(http),
                 lon=126.978,
                 lat=37.5665,
                 radius_km=3.0,
@@ -1012,7 +1012,7 @@ def test_resolve_regions_within_radius_passthrough() -> None:
     async def _run() -> None:
         async with _mock_client(handler) as http:
             response = await resolve_regions_within_radius(
-                KraddrGeoRestClient(http),
+                KorTravelGeoRestClient(http),
                 lon=126.978,
                 lat=37.5665,
                 radius_km=5.0,
@@ -1024,7 +1024,7 @@ def test_resolve_regions_within_radius_passthrough() -> None:
     assert seen[0]["levels"] == ["sido"]
 
 
-def test_kraddr_geo_reverse_geocoder_max_distance_filters() -> None:
+def test_kor_travel_geo_reverse_geocoder_max_distance_filters() -> None:
     """팩토리 인자 `max_distance_m`가 변환 함수에 그대로 전달돼 멀리 있는 결과 drop."""
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -1048,15 +1048,15 @@ def test_kraddr_geo_reverse_geocoder_max_distance_filters() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            client = KraddrGeoRestClient(http)
+            client = KorTravelGeoRestClient(http)
             # 100m 안쪽만 받아들임 — 800m 결과는 drop.
-            reverse = kraddr_geo_reverse_geocoder(client, max_distance_m=100.0)
+            reverse = kor_travel_geo_reverse_geocoder(client, max_distance_m=100.0)
             dropped = await reverse(
                 Coordinate(lon=Decimal("127"), lat=Decimal("37"))
             )
             assert dropped is None
             # 1000m로 완화 — 받아들임.
-            reverse_relaxed = kraddr_geo_reverse_geocoder(
+            reverse_relaxed = kor_travel_geo_reverse_geocoder(
                 client, max_distance_m=1000.0
             )
             addr = await reverse_relaxed(
@@ -1068,7 +1068,7 @@ def test_kraddr_geo_reverse_geocoder_max_distance_filters() -> None:
     asyncio.run(_run())
 
 
-def test_kraddr_geo_reverse_geocoder_region_fallback_when_reverse_not_found() -> None:
+def test_kor_travel_geo_reverse_geocoder_region_fallback_when_reverse_not_found() -> None:
     seen: list[tuple[str, dict[str, Any]]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -1095,8 +1095,8 @@ def test_kraddr_geo_reverse_geocoder_region_fallback_when_reverse_not_found() ->
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            client = KraddrGeoRestClient(http)
-            reverse = kraddr_geo_reverse_geocoder(
+            client = KorTravelGeoRestClient(http)
+            reverse = kor_travel_geo_reverse_geocoder(
                 client,
                 region_fallback_radius_km=0.1,
             )
@@ -1132,7 +1132,7 @@ def test_kraddr_geo_reverse_geocoder_region_fallback_when_reverse_not_found() ->
     ]
 
 
-def test_kraddr_geo_reverse_geocoder_region_fallback_when_bjd_missing() -> None:
+def test_kor_travel_geo_reverse_geocoder_region_fallback_when_bjd_missing() -> None:
     seen: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -1169,8 +1169,8 @@ def test_kraddr_geo_reverse_geocoder_region_fallback_when_bjd_missing() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            reverse = kraddr_geo_reverse_geocoder(
-                KraddrGeoRestClient(http),
+            reverse = kor_travel_geo_reverse_geocoder(
+                KorTravelGeoRestClient(http),
                 region_fallback_radius_km=0.1,
             )
             addr = await reverse(
@@ -1185,7 +1185,7 @@ def test_kraddr_geo_reverse_geocoder_region_fallback_when_bjd_missing() -> None:
     assert seen == ["/v2/reverse", "/v2/regions/within-radius"]
 
 
-def test_kraddr_geo_address_geocoder_min_confidence_via_wrapper() -> None:
+def test_kor_travel_geo_address_geocoder_min_confidence_via_wrapper() -> None:
     """팩토리 인자 `min_confidence`가 변환 함수에 그대로 전달 — 신뢰도 낮은 결과 drop."""
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -1205,10 +1205,10 @@ def test_kraddr_geo_address_geocoder_min_confidence_via_wrapper() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            client = KraddrGeoRestClient(http)
-            strict = kraddr_geo_address_geocoder(client, min_confidence=0.8)
+            client = KorTravelGeoRestClient(http)
+            strict = kor_travel_geo_address_geocoder(client, min_confidence=0.8)
             assert await strict(Address(road="아무 도로 1")) is None
-            relaxed = kraddr_geo_address_geocoder(client, min_confidence=0.1)
+            relaxed = kor_travel_geo_address_geocoder(client, min_confidence=0.1)
             coord = await relaxed(Address(road="아무 도로 1"))
             assert coord is not None
             assert coord.lon == Decimal("127.0")
@@ -1216,7 +1216,7 @@ def test_kraddr_geo_address_geocoder_min_confidence_via_wrapper() -> None:
     asyncio.run(_run())
 
 
-def test_kraddr_geo_address_geocoder_fallback_passed() -> None:
+def test_kor_travel_geo_address_geocoder_fallback_passed() -> None:
     """팩토리 인자 `fallback="api"`가 client.geocode JSON body `fallback`로 전달."""
     seen: list[dict[str, Any]] = []
 
@@ -1232,15 +1232,15 @@ def test_kraddr_geo_address_geocoder_fallback_passed() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            client = KraddrGeoRestClient(http)
-            geocode = kraddr_geo_address_geocoder(client, fallback="api")
+            client = KorTravelGeoRestClient(http)
+            geocode = kor_travel_geo_address_geocoder(client, fallback="api")
             await geocode(Address(road="아무 도로 1"))
 
     asyncio.run(_run())
     assert seen[0]["fallback"] == "api"
 
 
-def test_kraddr_geo_address_resolver_falls_back_to_parcel() -> None:
+def test_kor_travel_geo_address_resolver_falls_back_to_parcel() -> None:
     seen: list[dict[str, Any]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -1274,8 +1274,8 @@ def test_kraddr_geo_address_resolver_falls_back_to_parcel() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            client = KraddrGeoRestClient(http)
-            resolver = kraddr_geo_address_resolver(client, fallback="api")
+            client = KorTravelGeoRestClient(http)
+            resolver = kor_travel_geo_address_resolver(client, fallback="api")
             resolved = await resolver(
                 Address(
                     road="서울특별시 영등포구 여의공원로 120",

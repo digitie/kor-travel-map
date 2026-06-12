@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-from krtour.map_admin.routers.ops import _check_database, _check_postgis
+from kortravelmap.admin.routers.ops import _check_database, _check_postgis
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession

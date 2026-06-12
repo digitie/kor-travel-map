@@ -6,7 +6,7 @@
 provider 등록) + Amendment 2026-05-25 (keyless + file-only)** 기준.
 
 > upstream (`digitie/python-knps-api`) 측 동일 주제 문서: `docs/knps-feature-
-> etl.md`. 본 문서는 *downstream(`python-krtour-map`) 입장*의 ETL 계약.
+> etl.md`. 본 문서는 *downstream(`kor-travel-map`) 입장*의 ETL 계약.
 > 두 문서는 dataset_key, category 코드, area_kind 표기를 정합 유지한다 (PR로
 > 양방향 동기).
 >
@@ -22,12 +22,12 @@ provider 등록) + Amendment 2026-05-25 (keyless + file-only)** 기준.
 | import | `from knps import KnpsClient, FileDataset, FileArtifact, ...` (아래 §5) |
 | Python | `>=3.11` |
 | 인증 | **없음 (keyless)** — knps-api PR#4. data.go.kr 직접 다운로드 URL 사용. `KNPS_SERVICE_KEY` / `DATA_GO_KR_SERVICE_KEY` 사용 안 함 (ADR-028 amendment) |
-| 코드 entrypoint (본 라이브러리) | `krtour.map.providers.knps` (Sprint 3 작성, ADR-034 7단계) |
+| 코드 entrypoint (본 라이브러리) | `kortravelmap.providers.knps` (Sprint 3 작성, ADR-034 7단계) |
 | Feature.kind | `place`, `area`, `route`, `weather` (notice는 다른 source — ADR-028 amendment) |
 | 갱신 주기 | 모두 파일 데이터 (월~연 갱신). real-time notice 없음 |
 | 라이선스 | GPL-3.0-or-later (upstream과 동일) |
 | Rate limit | `KnpsClient(max_rps=5.0)` 기본 (token bucket). data.go.kr 정책 5 RPS 보수치 |
-| Upstream PR 워크플로 | `python-krtour-map` 측에서 발견한 maki/카테고리/명명 정합 이슈는 upstream PR로 적극 수정 (ADR-025 사용자 보강 패턴 미러). 예: knps-api PR#1 `docs/knps-feature-maki-icons` (shelter/barrier 정정). |
+| Upstream PR 워크플로 | `kor-travel-map` 측에서 발견한 maki/카테고리/명명 정합 이슈는 upstream PR로 적극 수정 (ADR-025 사용자 보강 패턴 미러). 예: knps-api PR#1 `docs/knps-feature-maki-icons` (shelter/barrier 정정). |
 
 ## 2. dataset 매핑 (총 14건 = 모두 file dataset, keyless)
 
@@ -163,9 +163,9 @@ ADR-027 generic notice_type (`access_restriction` / `fire_alert`)은 유효 —
 ## 5. 핵심 함수 (Sprint 3 작성 시 시그니처 후보, ADR-034 7단계)
 
 ```python
-# src/krtour/map/providers/knps/__init__.py
+# src/kortravelmap/providers/knps/__init__.py
 from datetime import datetime
-from krtour.map.dto import FeatureBundle
+from kortravelmap.dto import FeatureBundle
 # knps-api PR#4 이후 공개 API (ApiEndpoint/Page/raw_endpoint/api_endpoints는
 # knps-api에서 삭제됨)
 from knps import (

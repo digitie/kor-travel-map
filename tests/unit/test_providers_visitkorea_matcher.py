@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from krtour.map.providers.visitkorea import (
+from kortravelmap.providers.visitkorea import (
     FestivalCandidate,
     ScoringFestivalMatcher,
 )

@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 import pytest
 from sqlalchemy import text
 
-from krtour.map.infra.jobs_repo import (
+from kortravelmap.infra.jobs_repo import (
     attach_import_jobs_to_batch,
     cancel_import_job,
     claim_next_import_job,

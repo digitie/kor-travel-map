@@ -1,4 +1,4 @@
-"""``test_exceptions`` — ``krtour.map.core.exceptions`` 계층 검증.
+"""``test_exceptions`` — ``kortravelmap.core.exceptions`` 계층 검증.
 
 ``docs/backend-package.md §5`` + ``docs/debug-ui-package.md §6.4`` 명세 준수.
 """
@@ -7,12 +7,12 @@ from __future__ import annotations
 
 import pytest
 
-from krtour.map.core.exceptions import (
+from kortravelmap.core.exceptions import (
     DuplicateFeatureError,
     FeatureNotFoundError,
     FileStoreError,
     ImportJobConflictError,
-    KrtourMapError,
+    KorTravelMapError,
     ProviderError,
     SourceRecordNotFoundError,
     ValidationError,
@@ -20,8 +20,8 @@ from krtour.map.core.exceptions import (
 
 
 def test_base_exception_is_subclass_of_exception() -> None:
-    """``KrtourMapError``는 builtin ``Exception``을 상속한다."""
-    assert issubclass(KrtourMapError, Exception)
+    """``KorTravelMapError``는 builtin ``Exception``을 상속한다."""
+    assert issubclass(KorTravelMapError, Exception)
 
 
 @pytest.mark.parametrize(
@@ -36,18 +36,18 @@ def test_base_exception_is_subclass_of_exception() -> None:
         FileStoreError,
     ],
 )
-def test_all_subclasses_inherit_from_base(exc_cls: type[KrtourMapError]) -> None:
-    """모든 도메인 예외는 ``KrtourMapError``를 상속해야 한다.
+def test_all_subclasses_inherit_from_base(exc_cls: type[KorTravelMapError]) -> None:
+    """모든 도메인 예외는 ``KorTravelMapError``를 상속해야 한다.
 
-    호출자가 ``except KrtourMapError:`` 한 줄로 라이브러리 발 예외를 모두
+    호출자가 ``except KorTravelMapError:`` 한 줄로 라이브러리 발 예외를 모두
     catch할 수 있어야 한다 (``docs/backend-package.md §5``).
     """
-    assert issubclass(exc_cls, KrtourMapError)
+    assert issubclass(exc_cls, KorTravelMapError)
 
 
 def test_raise_and_catch_via_base() -> None:
-    """``KrtourMapError``로 모든 서브클래스를 catch할 수 있다."""
-    with pytest.raises(KrtourMapError) as exc_info:
+    """``KorTravelMapError``로 모든 서브클래스를 catch할 수 있다."""
+    with pytest.raises(KorTravelMapError) as exc_info:
         raise FeatureNotFoundError("feature_id=f_abc not found")
     assert "feature_id=f_abc not found" in str(exc_info.value)
 
@@ -67,10 +67,10 @@ def test_exception_message_preserved() -> None:
 
 def test_all_exported_via_module() -> None:
     """``__all__``에 명시된 심볼이 모두 module에서 import 가능하다."""
-    from krtour.map.core import exceptions as exc_mod
+    from kortravelmap.core import exceptions as exc_mod
 
     expected = {
-        "KrtourMapError",
+        "KorTravelMapError",
         "ValidationError",
         "FeatureNotFoundError",
         "SourceRecordNotFoundError",
@@ -85,11 +85,11 @@ def test_all_exported_via_module() -> None:
 
 
 def test_exceptions_reexported_from_core_package() -> None:
-    """``krtour.map.core``에서 직접 import 가능해야 한다 (편의 re-export)."""
-    from krtour.map import core
+    """``kortravelmap.core``에서 직접 import 가능해야 한다 (편의 re-export)."""
+    from kortravelmap import core
 
     for name in (
-        "KrtourMapError",
+        "KorTravelMapError",
         "ValidationError",
         "FeatureNotFoundError",
         "SourceRecordNotFoundError",
@@ -98,4 +98,4 @@ def test_exceptions_reexported_from_core_package() -> None:
         "ProviderError",
         "FileStoreError",
     ):
-        assert hasattr(core, name), f"{name} not re-exported from krtour.map.core"
+        assert hasattr(core, name), f"{name} not re-exported from kortravelmap.core"

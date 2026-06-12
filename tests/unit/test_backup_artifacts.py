@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from krtour.map.infra.backup import (
+from kortravelmap.infra.backup import (
     BackupArtifactError,
     backup_artifact,
     backup_artifact_path,
@@ -20,8 +20,8 @@ def _write_artifact(root, backup_id: str, *, created_at: str) -> None:
     (backup_dir / "postgres").mkdir(parents=True)
     (backup_dir / "rustfs").mkdir()
     (backup_dir / "meta").mkdir()
-    (backup_dir / "postgres" / "krtour_map.dump").write_bytes(b"app")
-    (backup_dir / "postgres" / "krtour_map_dagster.dump").write_bytes(b"dagster")
+    (backup_dir / "postgres" / "kor_travel_map.dump").write_bytes(b"app")
+    (backup_dir / "postgres" / "kor_travel_map_dagster.dump").write_bytes(b"dagster")
     (backup_dir / "rustfs" / "rustfs-data.tar.gz").write_bytes(b"rustfs")
     (backup_dir / "meta" / "manifest.json").write_text(
         json.dumps(
@@ -30,18 +30,18 @@ def _write_artifact(root, backup_id: str, *, created_at: str) -> None:
                 "created_at_utc": created_at,
                 "mode": "docker-compose-cold-backup",
                 "components": {
-                    "postgres_app": "postgres/krtour_map.dump",
-                    "postgres_dagster": "postgres/krtour_map_dagster.dump",
+                    "postgres_app": "postgres/kor_travel_map.dump",
+                    "postgres_dagster": "postgres/kor_travel_map_dagster.dump",
                     "rustfs": "rustfs/rustfs-data.tar.gz",
                 },
-                "databases": {"app": "krtour_map", "dagster": "krtour_map_dagster"},
-                "object_storage": {"feature_bucket": "krtour-map"},
+                "databases": {"app": "kor_travel_map", "dagster": "kor_travel_map_dagster"},
+                "object_storage": {"feature_bucket": "kor-travel-map"},
             }
         ),
         encoding="utf-8",
     )
     (backup_dir / "meta" / "SHA256SUMS").write_text(
-        "a  postgres/krtour_map.dump\nb  postgres/krtour_map_dagster.dump\n",
+        "a  postgres/kor_travel_map.dump\nb  postgres/kor_travel_map_dagster.dump\n",
         encoding="utf-8",
     )
 
@@ -54,7 +54,7 @@ def test_list_backup_artifacts_reads_manifest_and_sorts_newest_first(tmp_path) -
 
     assert [item.backup_id for item in artifacts] == ["backup-new", "backup-old"]
     assert artifacts[0].manifest_status == "ok"
-    assert artifacts[0].components["postgres_app"] == "postgres/krtour_map.dump"
+    assert artifacts[0].components["postgres_app"] == "postgres/kor_travel_map.dump"
     assert artifacts[0].checksum_count == 2
     assert artifacts[0].byte_size > 0
 

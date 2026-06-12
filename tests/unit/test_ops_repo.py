@@ -10,7 +10,7 @@ from typing import Any, cast
 
 import pytest
 
-from krtour.map.infra.ops_repo import (
+from kortravelmap.infra.ops_repo import (
     OpsConsistencyReport,
     OpsImportJob,
     OpsImportJobEvent,

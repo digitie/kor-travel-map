@@ -1,13 +1,13 @@
 # 개발 환경 셋업 (Windows Git + WSL 실행 기준)
 
-본 문서는 `python-krtour-map`(`krtour.map`)을 PC에서 개발할 때 필요한 시스템
+본 문서는 `kor-travel-map`(`kortravelmap`)을 PC에서 개발할 때 필요한 시스템
 의존성과 셋업 순서를 정리한다. **Windows NTFS worktree를 Git 원본으로 두되,
 순수 `git` 명령을 제외한 파일 조회·수정·테스트·빌드·Docker·GitHub CLI 작업은
-WSL에서 `/mnt/f/dev/python-krtour-map-<agent>` 경로로 실행한다**는 정책
+WSL에서 `/mnt/f/dev/kor-travel-map-<agent>` 경로로 실행한다**는 정책
 (`AGENTS.md` §"개발 환경 정책 (PC, WSL)", `SKILL.md` §"개발 환경 (PC,
 WSL)", `README.md` §"개발 환경 (PC, WSL)")을 전제로 한다. Playwright e2e만
 Windows 호스트 브라우저에서 실행한다. 형제 라이브러리
-(`python-kraddr-geo`/`python-kraddr-base`/`python-knps-api` 등)와 동일.
+(`kor-travel-geo`/`python-kraddr-base`/`python-knps-api` 등)와 동일.
 
 ## 1. 권장 호스트
 
@@ -31,7 +31,7 @@ Windows 호스트 브라우저에서 실행한다. 형제 라이브러리
 - `rg`, `sed`, `python`, `uv`, `pytest`, `ruff`, `mypy`, `npm`, `node`, `docker`,
   `docker compose`, `curl`, `gh`, 문서/코드 수정 스크립트는 WSL에서 실행한다.
 - WSL 경로는 agent worktree의 NTFS 마운트 경로를 직접 사용한다. 예:
-  `/mnt/f/dev/python-krtour-map-codex`.
+  `/mnt/f/dev/kor-travel-map-codex`.
 - Playwright e2e는 예외다. 서버는 WSL/Docker에서 띄우고, `chromium` 실행은 Windows
   호스트에서 수행한다.
 
@@ -39,27 +39,27 @@ Windows 호스트 브라우저에서 실행한다. 형제 라이브러리
 
 | 종류 | 위치 |
 |------|------|
-| 코드/git | NTFS — `F:\dev\python-krtour-map\` 또는 agent worktree |
-| Python/Node 실행 | WSL — `/mnt/f/dev/python-krtour-map-<agent>` |
-| 데이터 (`data/`) | NTFS — `F:\dev\python-krtour-map\data\` (또는 별도 외장) |
+| 코드/git | NTFS — `F:\dev\kor-travel-map\` 또는 agent worktree |
+| Python/Node 실행 | WSL — `/mnt/f/dev/kor-travel-map-<agent>` |
+| 데이터 (`data/`) | NTFS — `F:\dev\kor-travel-map\data\` (또는 별도 외장) |
 | 산출물 (`artifacts/`) | NTFS (백업 자동 sync) |
 | 테스트 실행/샌드박스 | 기본 WSL `/mnt/f/...`; ext4 복사는 성능·격리 필요 시에만 |
 
 ### 2.1 WSL 실행 정책
 
-코드는 NTFS 드라이브(`F:\dev\python-krtour-map`)에서 형상관리와 일반 편집이
-이루어진다. 단, 실제 명령 실행은 WSL에서 `/mnt/f/dev/python-krtour-map-<agent>`를
+코드는 NTFS 드라이브(`F:\dev\kor-travel-map`)에서 형상관리와 일반 편집이
+이루어진다. 단, 실제 명령 실행은 WSL에서 `/mnt/f/dev/kor-travel-map-<agent>`를
 현재 디렉토리로 잡고 수행한다. Windows Git(`git.exe`)은 브랜치 전환, 커밋, push 같은
 순수 Git 작업에만 사용한다. PostGIS testcontainers, Docker compose, Python/Node
 도구, GitHub CLI, 문서 수정 스크립트는 모두 WSL에서 실행한다.
 
-agent별 worktree (`F:\dev\python-krtour-map-codex` / `F:\dev\python-krtour-map-claude` /
-`F:\dev\python-krtour-map-antigravity`)에서도 동일하게 NTFS 소스 기준으로 git 브랜치를
+agent별 worktree (`F:\dev\kor-travel-map-codex` / `F:\dev\kor-travel-map-claude` /
+`F:\dev\kor-travel-map-antigravity`)에서도 동일하게 NTFS 소스 기준으로 git 브랜치를
 운영하고, Git 외 작업은 WSL 마운트 경로에서 실행한다.
 
 ### 2.2 NTFS → ext4 동기 (선택)
 
-기본 테스트와 빌드는 `/mnt/f/dev/python-krtour-map-<agent>`에서 바로 실행한다. 대량
+기본 테스트와 빌드는 `/mnt/f/dev/kor-travel-map-<agent>`에서 바로 실행한다. 대량
 I/O 때문에 성능 격리나 완전한 Linux filesystem 재현이 필요할 때만 NTFS 변경분을 WSL
 ext4 디렉토리에 동기화한다:
 
@@ -69,8 +69,8 @@ rsync -a --delete \
   --exclude .git --exclude .venv \
   --exclude __pycache__ --exclude .mypy_cache --exclude .pytest_cache \
   --exclude data --exclude artifacts \
-  /mnt/f/dev/python-krtour-map/ \
-  ~/dev/python-krtour-map/
+  /mnt/f/dev/kor-travel-map/ \
+  ~/dev/kor-travel-map/
 ```
 
 `data/`와 `.git`은 NTFS가 원본(Source of Truth)이므로 sync에서 제외합니다.
@@ -96,13 +96,13 @@ Windows PowerShell에서 `.sh` 파일을 직접 실행하지 않는다.
 
 ```bash
 # WSL 셸
-cd /mnt/f/dev/python-krtour-map-codex
+cd /mnt/f/dev/kor-travel-map-codex
 npm run docker:build
 ```
 
 ```powershell
 # PowerShell에서 WSL 셸로 넘길 때
-wsl bash -lc "cd /mnt/f/dev/python-krtour-map-codex && npm run docker:build"
+wsl bash -lc "cd /mnt/f/dev/kor-travel-map-codex && npm run docker:build"
 ```
 
 ## 3. 초기 셋업 (코드 작성 단계 진입 시)
@@ -110,12 +110,12 @@ wsl bash -lc "cd /mnt/f/dev/python-krtour-map-codex && npm run docker:build"
 ```bash
 # 1) Windows NTFS 개발 디렉토리에서 메인 repo 클론
 cd F:\dev
-git clone https://github.com/digitie/python-krtour-map.git
-cd python-krtour-map
+git clone https://github.com/digitie/kor-travel-map.git
+cd kor-travel-map
 
 # 2) Git 외 셋업은 WSL에서 NTFS worktree를 직접 사용
 wsl
-cd /mnt/f/dev/python-krtour-map
+cd /mnt/f/dev/kor-travel-map
 
 # 3) WSL 셸로 전환 후 시스템 의존성 셋업 (GeoPandas/loaders용)
 sudo apt update
@@ -140,7 +140,7 @@ cp .env.example .env
 $EDITOR .env
 
 # data 링크
-ln -s /mnt/f/dev/python-krtour-map/data data
+ln -s /mnt/f/dev/kor-travel-map/data data
 
 # Alembic upgrade (스키마 적용 - 설정한 외부 DB에 반영)
 alembic upgrade head
@@ -154,7 +154,7 @@ pytest tests/integration -q
 
 ## 4. PostgreSQL 및 RustFS 인프라 설정
 
-python-krtour-map 에서 rustfs, postgresql 등 인프라는 python-kraddr-geo가 아니라 어딘가에서 잘 동작하는 db, bucket 에 접속하여 활용하며, 그러기 위해서는 설정을 이 프로젝트에 잘 저장해두고 써야 합니다.
+kor-travel-map 에서 rustfs, postgresql 등 인프라는 kor-travel-geo가 아니라 어딘가에서 잘 동작하는 db, bucket 에 접속하여 활용하며, 그러기 위해서는 설정을 이 프로젝트에 잘 저장해두고 써야 합니다.
 
 ## 5. 스키마 초기화 (수동)
 
@@ -171,7 +171,7 @@ CREATE EXTENSION IF NOT EXISTS postgis_topology  SCHEMA x_extension;
 CREATE EXTENSION IF NOT EXISTS pg_trgm           SCHEMA x_extension;
 CREATE EXTENSION IF NOT EXISTS pgcrypto          SCHEMA x_extension;
 
-ALTER DATABASE krtour_map SET search_path = public, x_extension;
+ALTER DATABASE kor_travel_map SET search_path = public, x_extension;
 ```
 
 이 후 Alembic이 schema-aware migration을 적용한다.
@@ -190,7 +190,7 @@ ALTER DATABASE krtour_map SET search_path = public, x_extension;
 
 ```
 ~/dev/   (= F:\dev\)
-├── python-krtour-map/          # 본 repo
+├── kor-travel-map/          # 본 repo
 ├── python-kma-api/             # 기상청 (단기/초단기/중기/특보)
 ├── python-opinet-api/          # 한국석유공사 유가
 ├── python-krex-api/            # 한국도로공사 휴게소
@@ -200,7 +200,7 @@ ALTER DATABASE krtour_map SET search_path = public, x_extension;
 ├── python-krheritage-api/      # 국가유산청
 ├── python-mois-api/            # 행정안전부 인허가
 ├── python-airkorea-api/ python-krforest-api/ python-khoa-api/ …
-├── python-kraddr-geo/  python-kraddr-base/   # 주소/지오코딩
+├── kor-travel-geo/  python-kraddr-base/   # 주소/지오코딩
 └── maplibre-vworld-js/         # frontend VWorld 지도
 ```
 
@@ -214,7 +214,7 @@ git URL + commit sha 핀 + 동시 개발(editable install):
 
 ```bash
 # 예: opinet 동시 개발
-cd ~/dev/python-krtour-map
+cd ~/dev/kor-travel-map
 uv pip install -e ../python-opinet-api
 ```
 
@@ -242,14 +242,14 @@ pytest -m slow -q
 
 ### 8.1 디버그 UI Playwright e2e — **서버는 WSL, Playwright는 Windows**
 
-debug UI(`packages/krtour-map-admin`)의 Playwright e2e는 **하이브리드
+debug UI(`packages/kor-travel-map-admin`)의 Playwright e2e는 **하이브리드
 토폴로지**로 실행한다:
 
 | 구성요소 | 실행 위치 | 명령 |
 |----------|-----------|------|
-| backend (FastAPI) | **WSL `/mnt/f` worktree** | `.venv/bin/uvicorn krtour.map_admin.app:create_app --factory --port 12301` |
+| backend (FastAPI) | **WSL `/mnt/f` worktree** | `.venv/bin/uvicorn kortravelmap.admin.app:create_app --factory --port 12301` |
 | frontend (Next.js) | **WSL `/mnt/f` worktree** | `npm run start` (`next start :12305`) |
-| **Playwright (chromium)** | **Windows** | `cd packages\krtour-map-admin\frontend; npm run e2e` |
+| **Playwright (chromium)** | **Windows** | `cd packages\kor-travel-map-admin\frontend; npm run e2e` |
 
 Frontend 실행(`npm run dev`/`npm run start`)은 WSL 고정이다. Windows에서는 frontend
 서버를 띄우지 않고, e2e 검증용 Playwright만 실행한다.
@@ -275,7 +275,7 @@ Playwright가 WSL 서버가 아니라 stale Windows 서버를 본다. e2e 전 Wi
 > libasound2t64 libnss3 libnspr4 …` 또는 `npx playwright install-deps`를 수동
 > 실행해야 하나, 권장 경로는 Windows 실행.)
 
-자세히는 `packages/krtour-map-admin/frontend/README.md` §"e2e (Playwright)"
+자세히는 `packages/kor-travel-map-admin/frontend/README.md` §"e2e (Playwright)"
 + `frontend/playwright.config.ts` 상단 주석.
 
 ### 8.2 디버그 UI 서버 기동 실패 시 1회 점검표
@@ -292,15 +292,15 @@ Playwright가 WSL 서버가 아니라 stale Windows 서버를 본다. e2e 전 Wi
    `~/.nvm/nvm.sh`를 source하고 WSL Node를 활성화한다.
 2. Linux optional dependency 확인:
    ```bash
-   npm install -w packages/krtour-map-admin/frontend --include=optional
+   npm install -w packages/kor-travel-map-admin/frontend --include=optional
    ```
 3. Next lockfile 권한 에러가 있으면 `.next`를 지운다:
    ```bash
-   rm -rf packages/krtour-map-admin/frontend/.next
+   rm -rf packages/kor-travel-map-admin/frontend/.next
    ```
 4. `0.0.0.0` 바인드가 필요하면 hardcoded `npm run dev` script 대신 명시 실행:
    ```bash
-   cd packages/krtour-map-admin/frontend
+   cd packages/kor-travel-map-admin/frontend
    npx next dev --port 12305 --hostname 0.0.0.0
    ```
 5. 백그라운드 실행 시에는 `setsid -f bash -lc '... nvm use ... exec npx next ...'`
@@ -356,7 +356,7 @@ commit에 포함된 Python 파일만 format check한다.
 ```bash
 ruff check .                    # 코드 스타일 + 일부 오류
 ruff format .                   # 포매팅
-mypy --strict src/krtour/map    # 타입
+mypy --strict src/kortravelmap    # 타입
 lint-imports                    # 의존 계층 검증
 ```
 
@@ -400,12 +400,12 @@ uv pip show gdal                # Python GDAL
 
 운영 환경(Odroid M1S, ARM64)에 대한 상세 임계값은 SPEC V8 v8_0이 정한다.
 `AGENTS.md` §17의 표가 발췌본. 라이브러리는 운영 환경 결정을 직접 내리지 않고,
-TripMate가 주입한 settings(`KRTOUR_MAP_*`)에 따라 동작한다.
+TripMate가 주입한 settings(`KOR_TRAVEL_MAP_*`)에 따라 동작한다.
 
 ## 12. 작업 흐름 요약
 
 ```
-1. ~/dev/python-krtour-map에서 작업
+1. ~/dev/kor-travel-map에서 작업
 2. 변경 → 단위 테스트 → ruff → mypy → lint-imports
 3. PostGIS 컨테이너 띄워 통합 테스트
 4. journal.md + resume.md 갱신

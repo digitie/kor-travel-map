@@ -1,4 +1,4 @@
-"""smoke 테스트 — `krtour.map` import + `KrtourMapSettings` 기본값.
+"""smoke 테스트 — `kortravelmap` import + `KorTravelMapSettings` 기본값.
 
 Sprint 1 PR#17 scaffolding 검증. 후속 PR (#18~)에서 더 자세한 테스트 추가.
 """
@@ -9,42 +9,42 @@ import pytest
 
 
 @pytest.mark.unit
-def test_krtour_map_import() -> None:
-    """`import krtour.map`이 성공하고 public 진입점이 노출된다."""
-    import krtour.map
-    from krtour.map.client import AsyncKrtourMapClient
+def test_kor_travel_map_import() -> None:
+    """`import kortravelmap`이 성공하고 public 진입점이 노출된다."""
+    import kortravelmap
+    from kortravelmap.client import AsyncKorTravelMapClient
 
-    assert hasattr(krtour.map, "__version__")
-    assert isinstance(krtour.map.__version__, str)
-    assert krtour.map.__version__  # not empty
-    assert krtour.map.AsyncKrtourMapClient is AsyncKrtourMapClient
-    assert "AsyncKrtourMapClient" in krtour.map.__all__
+    assert hasattr(kortravelmap, "__version__")
+    assert isinstance(kortravelmap.__version__, str)
+    assert kortravelmap.__version__  # not empty
+    assert kortravelmap.AsyncKorTravelMapClient is AsyncKorTravelMapClient
+    assert "AsyncKorTravelMapClient" in kortravelmap.__all__
 
 
 @pytest.mark.unit
-def test_krtour_map_subpackages_importable() -> None:
-    """6개 layer subpackage가 모두 PEP 420 namespace로 import된다."""
-    import krtour.map.category  # noqa: F401
-    import krtour.map.client  # noqa: F401
-    import krtour.map.core  # noqa: F401
-    import krtour.map.dto  # noqa: F401
-    import krtour.map.infra  # noqa: F401
-    import krtour.map.providers  # noqa: F401
+def test_kor_travel_map_subpackages_importable() -> None:
+    """6개 layer subpackage가 모두 `kortravelmap` 아래에서 import된다."""
+    import kortravelmap.category  # noqa: F401
+    import kortravelmap.client  # noqa: F401
+    import kortravelmap.core  # noqa: F401
+    import kortravelmap.dto  # noqa: F401
+    import kortravelmap.infra  # noqa: F401
+    import kortravelmap.providers  # noqa: F401
 
 
 @pytest.mark.unit
 def test_settings_default_values() -> None:
-    """`KrtourMapSettings()` 환경변수 없이 기본값으로 생성."""
-    from krtour.map.settings import KrtourMapSettings
+    """`KorTravelMapSettings()` 환경변수 없이 기본값으로 생성."""
+    from kortravelmap.settings import KorTravelMapSettings
 
-    settings = KrtourMapSettings()
+    settings = KorTravelMapSettings()
 
     # PostgreSQL DSN 기본값
     assert settings.pg_dsn.get_secret_value().startswith(
         "postgresql+asyncpg://"
     )
     # 객체 저장소 기본 bucket
-    assert settings.object_store_bucket == "krtour-map"
+    assert settings.object_store_bucket == "kor-travel-map"
     assert settings.offline_upload_max_bytes == 100 * 1024 * 1024
     # 로깅
     assert settings.log_level == "INFO"
@@ -55,15 +55,15 @@ def test_settings_default_values() -> None:
 
 @pytest.mark.unit
 def test_settings_env_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``KRTOUR_MAP_*`` 환경변수가 우선 적용된다."""
-    from krtour.map.settings import KrtourMapSettings
+    """``KOR_TRAVEL_MAP_*`` 환경변수가 우선 적용된다."""
+    from kortravelmap.settings import KorTravelMapSettings
 
-    monkeypatch.setenv("KRTOUR_MAP_LOG_LEVEL", "DEBUG")
-    monkeypatch.setenv("KRTOUR_MAP_OBJECT_STORE_BUCKET", "custom-bucket")
-    monkeypatch.setenv("KRTOUR_MAP_OFFLINE_UPLOAD_MAX_BYTES", "2048")
-    monkeypatch.setenv("KRTOUR_MAP_LOG_API_CALLS", "true")
+    monkeypatch.setenv("KOR_TRAVEL_MAP_LOG_LEVEL", "DEBUG")
+    monkeypatch.setenv("KOR_TRAVEL_MAP_OBJECT_STORE_BUCKET", "custom-bucket")
+    monkeypatch.setenv("KOR_TRAVEL_MAP_OFFLINE_UPLOAD_MAX_BYTES", "2048")
+    monkeypatch.setenv("KOR_TRAVEL_MAP_LOG_API_CALLS", "true")
 
-    settings = KrtourMapSettings()
+    settings = KorTravelMapSettings()
 
     assert settings.log_level == "DEBUG"
     assert settings.object_store_bucket == "custom-bucket"
@@ -76,9 +76,9 @@ def test_settings_secrets_are_secretstr() -> None:
     """secret 필드는 ``SecretStr``로 wrap되어 repr 노출 방지."""
     from pydantic import SecretStr
 
-    from krtour.map.settings import KrtourMapSettings
+    from kortravelmap.settings import KorTravelMapSettings
 
-    settings = KrtourMapSettings()
+    settings = KorTravelMapSettings()
 
     assert isinstance(settings.pg_dsn, SecretStr)
     # repr는 `**********` 형태로 마스킹

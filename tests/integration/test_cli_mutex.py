@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from krtour.map.cli import (
+from kortravelmap.cli import (
     import_lock_key,
     mutex_lock,
     try_mutex_lock,

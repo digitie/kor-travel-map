@@ -1,13 +1,13 @@
 # Sprint 계획 디렉토리
 
-`python-krtour-map` v2 코드 작성 단계 Sprint 계획. 각 Sprint는 별도 markdown
+`kor-travel-map` v2 코드 작성 단계 Sprint 계획. 각 Sprint는 별도 markdown
 으로 박혀 있고, Sprint 진입 시 체크리스트와 함께 검토한다.
 
 | Sprint | 파일 | 상태 | 목표 |
 |--------|------|------|------|
 | Sprint 1 | [SPRINT-1.md](./SPRINT-1.md) | ✅ **완료** (PR#17~#27, 2026-05-25) | 코드 작성 단계 진입 + scaffolding + category 코드 이전 (provider 없음) |
 | Sprint 2 | [SPRINT-2.md](./SPRINT-2.md) | ✅ **완료** (PR#28~#59, 2026-05-26~28) | MOIS-독립 작은 provider 4건 (축제·날씨·유가·휴게소) + visitkorea enrichment + KMA mid_forecast + 디버그 UI backend 라우터 + ETL live 11/11 dataset + coverage 65 |
-| Sprint 3 | [SPRINT-3.md](./SPRINT-3.md) | ✅ **완료** (PR#60~#95, 2026-05-28~30) | KNPS + krheritage(+area_square_meters/file_sources) + ADR-033 Phase 1(F1~F3, 관측만) + `/features/*` 라우터 + `feature_repo.py` + `core/dedup` + `ops.dedup_review_queue` + `AsyncKrtourMapClient` 오케스트레이터 + geocoding REST 도입(후속 PR#123에서 v2 `POST /v2/*` 정본화) + `/features` 지도 페이지 + Windows Playwright e2e + frontend CI 게이트 + coverage 75 |
+| Sprint 3 | [SPRINT-3.md](./SPRINT-3.md) | ✅ **완료** (PR#60~#95, 2026-05-28~30) | KNPS + krheritage(+area_square_meters/file_sources) + ADR-033 Phase 1(F1~F3, 관측만) + `/features/*` 라우터 + `feature_repo.py` + `core/dedup` + `ops.dedup_review_queue` + `AsyncKorTravelMapClient` 오케스트레이터 + geocoding REST 도입(후속 PR#123에서 v2 `POST /v2/*` 정본화) + `/features` 지도 페이지 + Windows Playwright e2e + frontend CI 게이트 + coverage 75 |
 | Sprint 4 | [SPRINT-4.md](./SPRINT-4.md) | ✅ **완료** (PR#133~#142, 2026-05-31~06-01, 4a/4b 분할) | **MOIS 인허가** Step A~D lifecycle(bulk/incremental/closed/detail) + dedup-merge + `feature_merge_history` + dedup 운영 통계 + ADR-033 F4 + Place phone enrichment + coverage 80%(실측 94.12%) |
 | Sprint 5 | [SPRINT-5.md](./SPRINT-5.md) | 🟢 진행 중 (대부분 완료) | MOIS-sibling (휴양림/수목원/박물관/표준데이터) + 정합성 Phase 2 (F5~F8 + Dagster 게이트) + ADR-045 Docker 독립/admin OpenAPI/독립 Dagster + 운영 직전 T-200~T-204 |
 
@@ -48,7 +48,7 @@ Sprint 5:  ⑧ 휴양림/수목원 → ⑨ 박물관/미술관         (MOIS-sib
 - **ADR-021** — PR-only workflow (Sprint 진입은 PR로만)
 - **ADR-027** — forest 카테고리/notice_type 확장 (Sprint 1 코드 적용)
 - **ADR-028** — `python-knps-api` provider 등록 (Sprint 3에서 사용)
-- **ADR-029** — `@krtour/map-marker-react` npm 패키지 (Sprint 2부터)
+- **ADR-029** — `@kor-travel-map/map-marker-react` npm 패키지 (Sprint 2부터)
 - **ADR-030** — 라이브러리 캐시 금지 + import-linter 계약 (Sprint 1 활성화)
 - **ADR-031** — 디버그 패키지 OpenAPI export (Sprint 2 첫 라우터부터)
 - **ADR-032** — Coverage 단계적 상향 일정 (Sprint 1~5 schedule)

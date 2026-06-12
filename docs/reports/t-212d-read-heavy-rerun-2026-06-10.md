@@ -18,7 +18,7 @@
 
 ## 코드 변경
 
-- `src/krtour/map/infra/admin_feature_repo.py`
+- `src/kortravelmap/infra/admin_feature_repo.py`
   - enrichment review 목록 SQL을 status/provider 필터 조합별로 분리했다.
   - 단일 `status + provider` 조합은 `q.status = :status`와
     `q.source_provider = :provider`를 사용해
@@ -47,11 +47,11 @@ T-212e에서 실데이터 full reload 후 row 수, query latency, `pg_stat_state
 ## 검증
 
 ```bash
-/home/digitie/dev/python-krtour-map/.venv/bin/python -m compileall -q \
-  src/krtour/map/infra/admin_feature_repo.py \
+/home/digitie/dev/kor-travel-map/.venv/bin/python -m compileall -q \
+  src/kortravelmap/infra/admin_feature_repo.py \
   tests/integration/test_t212d_perf_explain.py
 
-/home/digitie/dev/python-krtour-map/.venv/bin/python -m pytest -s \
+/home/digitie/dev/kor-travel-map/.venv/bin/python -m pytest -s \
   tests/integration/test_t212d_perf_explain.py -q
 ```
 

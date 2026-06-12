@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from krtour.map.core.address import (
+from kortravelmap.core.address import (
     BjdParts,
     extract_sido_code,
     extract_sigungu_code,

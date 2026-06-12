@@ -6,16 +6,16 @@ from datetime import UTC, datetime
 
 import pytest
 
-from krtour.map.infra import feature_update_executor as executor
-from krtour.map.infra.feature_update_executor import (
+from kortravelmap.infra import feature_update_executor as executor
+from kortravelmap.infra.feature_update_executor import (
     ProviderDatasetRefreshResult,
     ProviderDatasetRefreshScope,
     SkippedProviderDatasetRefresh,
     build_feature_update_execution_plan,
 )
-from krtour.map.infra.feature_update_repo import FeatureUpdateRequest
-from krtour.map.infra.provider_refresh_policy_repo import ProviderRefreshPolicy
-from krtour.map.infra.scope_repo import (
+from kortravelmap.infra.feature_update_repo import FeatureUpdateRequest
+from kortravelmap.infra.provider_refresh_policy_repo import ProviderRefreshPolicy
+from kortravelmap.infra.scope_repo import (
     CacheTargetFeatureMatch,
     CacheTargetScopeTarget,
     FeatureScopeRow,

@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from krtour.map.infra import public_views_repo
+from kortravelmap.infra import public_views_repo
 
 pytestmark = pytest.mark.unit
 

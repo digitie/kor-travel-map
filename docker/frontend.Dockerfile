@@ -12,7 +12,7 @@ RUN apt-get update \
 COPY package.json ./
 COPY package-lock.json ./
 COPY packages/map-marker-react/package.json ./packages/map-marker-react/package.json
-COPY packages/krtour-map-admin/frontend/package.json ./packages/krtour-map-admin/frontend/package.json
+COPY packages/kor-travel-map-admin/frontend/package.json ./packages/kor-travel-map-admin/frontend/package.json
 
 RUN npm ci --workspaces --include=optional
 
@@ -27,24 +27,24 @@ COPY --from=deps /app/package.json ./package.json
 COPY --from=deps /app/package-lock.json ./package-lock.json
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/packages/map-marker-react/package.json ./packages/map-marker-react/package.json
-COPY --from=deps /app/packages/krtour-map-admin/frontend/package.json ./packages/krtour-map-admin/frontend/package.json
+COPY --from=deps /app/packages/kor-travel-map-admin/frontend/package.json ./packages/kor-travel-map-admin/frontend/package.json
 
 COPY packages/map-marker-react ./packages/map-marker-react
-COPY packages/krtour-map-admin/frontend ./packages/krtour-map-admin/frontend
+COPY packages/kor-travel-map-admin/frontend ./packages/kor-travel-map-admin/frontend
 
-ARG NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API=http://127.0.0.1:12301
-ARG NEXT_PUBLIC_KRTOUR_MAP_DAGSTER_URL=http://127.0.0.1:12302
+ARG NEXT_PUBLIC_KOR_TRAVEL_MAP_ADMIN_API=http://127.0.0.1:12301
+ARG NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL=http://127.0.0.1:12302
 # T-221b 좌표 picker(/admin/features/new)가 prerender 시점에 fail-fast로 요구 —
-# 누락 시 next build 실패 (ADR-046 kraddr-geo REST, 로컬 표준 12201).
-ARG NEXT_PUBLIC_KRADDR_GEO_BASE_URL=http://127.0.0.1:12201
+# 누락 시 next build 실패 (ADR-046 kor-travel-geo REST, 로컬 표준 12201).
+ARG NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL=http://127.0.0.1:12201
 ARG NEXT_PUBLIC_VWORLD_API_KEY=
-ENV NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API=$NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API \
-    NEXT_PUBLIC_KRTOUR_MAP_DAGSTER_URL=$NEXT_PUBLIC_KRTOUR_MAP_DAGSTER_URL \
-    NEXT_PUBLIC_KRADDR_GEO_BASE_URL=$NEXT_PUBLIC_KRADDR_GEO_BASE_URL \
+ENV NEXT_PUBLIC_KOR_TRAVEL_MAP_ADMIN_API=$NEXT_PUBLIC_KOR_TRAVEL_MAP_ADMIN_API \
+    NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL=$NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL \
+    NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL=$NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL \
     NEXT_PUBLIC_VWORLD_API_KEY=$NEXT_PUBLIC_VWORLD_API_KEY \
     NEXT_TELEMETRY_DISABLED=1
 
-RUN npm -w packages/krtour-map-admin/frontend run build
+RUN npm -w packages/kor-travel-map-admin/frontend run build
 
 FROM node:22-bookworm-slim AS runner
 
@@ -58,11 +58,11 @@ WORKDIR /app
 RUN groupadd --system nodejs \
     && useradd --system --gid nodejs --home-dir /app --shell /usr/sbin/nologin nextjs
 
-COPY --from=builder --chown=nextjs:nodejs /app/packages/krtour-map-admin/frontend/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/packages/krtour-map-admin/frontend/.next/static ./packages/krtour-map-admin/frontend/.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/packages/kor-travel-map-admin/frontend/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/packages/kor-travel-map-admin/frontend/.next/static ./packages/kor-travel-map-admin/frontend/.next/static
 
 USER nextjs
 
 EXPOSE 12305
 
-CMD ["node", "packages/krtour-map-admin/frontend/server.js"]
+CMD ["node", "packages/kor-travel-map-admin/frontend/server.js"]

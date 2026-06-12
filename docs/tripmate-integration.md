@@ -1,15 +1,15 @@
-# tripmate-integration.md — TripMate와 krtour-map OpenAPI 연동
+# tripmate-integration.md — TripMate와 kor-travel-map OpenAPI 연동
 
 > **ADR-045 supersede 안내 (2026-06-01)**:
-> 본 문서의 예전 본문에는 TripMate가 `python-krtour-map`을 직접 import하고 같은
-> process에서 `AsyncKrtourMapClient`를 호출하는 패턴이 남아 있다. 그 운영 모델은
+> 본 문서의 예전 본문에는 TripMate가 `kor-travel-map`을 직접 import하고 같은
+> process에서 `AsyncKorTravelMapClient`를 호출하는 패턴이 남아 있다. 그 운영 모델은
 > ADR-045로 supersede됐다. 현재 기준은 다음이다.
 >
-> - krtour-map은 Docker에서 실행되는 독립 프로그램이다.
-> - krtour-map은 독립 PostgreSQL/PostGIS DB와 독립 Dagster를 가진다.
-> - TripMate는 krtour-map DB에 직접 접근하지 않는다.
-> - TripMate는 `python-krtour-map`을 운영 코드에서 직접 import하지 않는다.
-> - TripMate는 krtour-map OpenAPI client로 feature 조회와 batch 조회를 호출한다.
+> - kor-travel-map은 Docker에서 실행되는 독립 프로그램이다.
+> - kor-travel-map은 독립 PostgreSQL/PostGIS DB와 독립 Dagster를 가진다.
+> - TripMate는 kor-travel-map DB에 직접 접근하지 않는다.
+> - TripMate는 `kor-travel-map`을 운영 코드에서 직접 import하지 않는다.
+> - TripMate는 kor-travel-map OpenAPI client로 feature 조회와 batch 조회를 호출한다.
 >   Feature update request는 `/admin/feature-update-requests*` 운영 표면으로 이동했으며,
 >   TripMate 사용자 제안 큐는 TripMate app DB가 소유한다.
 > - OpenAPI는 우선 admin UI 기준으로 작성하고, TripMate 연동 시 필요한 공개 API를
@@ -24,9 +24,9 @@ TripMate 연동의 현재 표준 흐름:
 
 ```
 TripMate API/Web
-  → generated krtour-map OpenAPI client
-  → krtour-map API (`/v1/features/in-bounds`, `/v1/features/{id}`, `/v1/features/batch`)
-  → krtour-map 독립 DB/Dagster
+  → generated kor-travel-map OpenAPI client
+  → kor-travel-map API (`/v1/features/in-bounds`, `/v1/features/{id}`, `/v1/features/batch`)
+  → kor-travel-map 독립 DB/Dagster
 ```
 
 초기 TripMate 후보 API:
@@ -93,7 +93,7 @@ Content-Type: application/json
 ```
 
 예: 여러 POI key를 기준으로 주변 캐시 갱신을 큐잉. 반경이 겹치는 feature/provider
-scope는 krtour-map이 dedup해 한 번만 업데이트한다.
+scope는 kor-travel-map이 dedup해 한 번만 업데이트한다.
 
 ```http
 POST /admin/feature-update-requests
@@ -144,21 +144,21 @@ Content-Type: application/json
 
 ## 1. TripMate 책임 경계
 
-TripMate는 krtour-map을 Python package로 import하지 않는다. 운영 연동은 생성된
+TripMate는 kor-travel-map을 Python package로 import하지 않는다. 운영 연동은 생성된
 OpenAPI client를 통해 HTTP로만 수행한다. TripMate가 보유하는 것은 사용자/여행계획/POI
-도메인과, 저장 POI를 krtour-map cache target으로 등록·삭제·조회하는 호출 코드다.
+도메인과, 저장 POI를 kor-travel-map cache target으로 등록·삭제·조회하는 호출 코드다.
 
 TripMate가 직접 소유하는 항목:
 
 - 사용자 인증/인가, 여행계획, 저장 POI, 사용자 UI.
-- krtour-map OpenAPI client 생성물과 타입 검증 계층.
+- kor-travel-map OpenAPI client 생성물과 타입 검증 계층.
 - POI 생성·수정·삭제 시 cache target write 경로 호출. 현재 구현은
   `PUT/DELETE /admin/poi-cache-targets/{external_system}/{target_key}`이며, TripMate
   직접 write를 허용할지는 `docs/tripmate-rest-api.md`의 `T-214f` 결정에 따른다.
 - 저장 POI 기준 주변 feature 조회 시 `GET /features/nearby/by-target` 호출.
 - 사용자 흐름에서 필요한 feature 상세 조회 시 `GET /features/{feature_id}` 호출.
 
-krtour-map이 직접 소유하는 항목:
+kor-travel-map이 직접 소유하는 항목:
 
 - feature 정규화, provider 호출, dedup, consistency, 주소 정본화.
 - 독립 PostgreSQL/PostGIS DB, RustFS/object store, Dagster 자산/스케줄/큐.
@@ -168,7 +168,7 @@ krtour-map이 직접 소유하는 항목:
 ## 2. TripMate 호출 규약
 
 TripMate는 좌표만으로 POI를 식별하지 않는다. 같은 위치라도 좌표 정밀도 차이와 POI 생명주기
-차이가 있으므로 항상 `external_system` + `target_key`를 함께 보낸다. krtour-map은 이 값을
+차이가 있으므로 항상 `external_system` + `target_key`를 함께 보낸다. kor-travel-map은 이 값을
 cache target의 영속 키로 사용하고, 동일 좌표·동일 유효 자리수에서는 좌표와 키가 1:1로
 매핑되도록 검증한다.
 
@@ -178,9 +178,9 @@ scope 산정에 참여하지 않으며, 기존 feature 자체는 provider 데이
 
 ## 3. 금지
 
-- TripMate 운영 코드에서 `from krtour.map import ...` 직접 import 금지.
-- TripMate가 krtour-map DB 또는 Dagster DB에 직접 접속 금지.
-- TripMate `apps/etl`에서 krtour-map provider 적재 asset을 소유 금지.
+- TripMate 운영 코드에서 `from kortravelmap import ...` 직접 import 금지.
+- TripMate가 kor-travel-map DB 또는 Dagster DB에 직접 접속 금지.
+- TripMate `apps/etl`에서 kor-travel-map provider 적재 asset을 소유 금지.
 - legacy package/path/env 이름을 위한 호환 shim 추가 금지.
 - 목록 API에서 feature 상세 JSON/raw payload를 반환 금지. 상세 JSON은
   `GET /features/{feature_id}` 계열에서만 반환한다.

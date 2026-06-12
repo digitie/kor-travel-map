@@ -14,11 +14,11 @@ import pytest
 from geoalchemy2 import WKTElement
 from sqlalchemy import text
 
-from krtour.map.infra.feature_address_repo import (
+from kortravelmap.infra.feature_address_repo import (
     apply_feature_address_override,
     get_feature_address_snapshot,
 )
-from krtour.map.infra.models import FeatureRow
+from kortravelmap.infra.models import FeatureRow
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession

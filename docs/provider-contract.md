@@ -2,7 +2,7 @@
 
 > **T-226 / ADR-054**: public 배포명과 Python import root는 `kor-travel-map` /
 > `kortravelmap`로 clean cut할 예정이다. 형제 프로젝트 표시는 `kor-travel-geo`,
-> `kor-travel-concierge` 기준으로 맞춘다. 본 문서의 `krtour.map.*` provider module 표기는
+> `kor-travel-concierge` 기준으로 맞춘다. 본 문서의 `kortravelmap.*` provider module 표기는
 > T-226c/d/e 적용 전 현재 코드 기준이다.
 
 ## 1. 핵심 원칙 (ADR-006)
@@ -46,10 +46,10 @@ facade를 만들지 않는다.
 - 사례: PR#53에서 본 lib `OPINET_PRODUCT_KEY_MAP`이 upstream `python-opinet-
   api` `codes.py` 및 OpiNet 공식 스펙과 `C004`/`K015`가 뒤바뀌어 있던 것을
   upstream 기준으로 정렬.
-- 예외: `krtour-ai-agent-youtube`는 공공 `python-*-api` 라이브러리가 아니라
-  형제 앱 `krtour-ai-agent`의 `/api/v1/features/{snapshot|changes}` REST
-  export를 pull하는 외부 app provider다. krtour-map은 client wrapper를 만들지
-  않고, export item JSON을 `providers.krtour_ai_agent.krtour_ai_agent_items_to_bundles`
+- 예외: `kor-travel-concierge-youtube`는 공공 `python-*-api` 라이브러리가 아니라
+  형제 앱 `kor-travel-concierge`의 `/api/v1/features/{snapshot|changes}` REST
+  export를 pull하는 외부 app provider다. kor-travel-map은 client wrapper를 만들지
+  않고, export item JSON을 `providers.kor_travel_concierge.kor_travel_concierge_items_to_bundles`
   순수 함수로 `FeatureBundle`화한다.
 
 ## 2. canonical provider name
@@ -58,7 +58,7 @@ facade를 만들지 않는다.
 
 ```
 python-kraddr-base
-python-kraddr-geo
+kor-travel-geo
 python-visitkorea-api
 python-mois-api
 python-opinet-api
@@ -77,7 +77,7 @@ data.go.kr-standard
 google-places-api-new
 kakao-local-api
 naver-search-api
-krtour-ai-agent-youtube
+kor-travel-concierge-youtube
 manual
 system
 ```
@@ -99,7 +99,7 @@ system
 | `mois_license_detail` | python-mois-api | on-demand detail (캐시만) |
 | `opinet_fuel_station_details` | python-opinet-api | 주유소 detail + 가격 |
 | `krex_rest_areas` | python-krex-api | 고속도로 휴게소 |
-| `youtube_place_candidates` | krtour-ai-agent-youtube | YouTube 장소 후보 export |
+| `youtube_place_candidates` | kor-travel-concierge-youtube | YouTube 장소 후보 export |
 | `krex_rest_area_prices` | python-krex-api | 휴게소 유가 시계열 |
 | `krex_rest_area_weather` | python-krex-api | 휴게소 관측 weather |
 | `krex_traffic_notices` | python-krex-api | 교통 공지 |
@@ -191,12 +191,12 @@ system
 | kakao-local-api | place | enrichment | on-demand | 전화번호 보강 |
 | naver-search-api | place | enrichment | on-demand | 전화번호 보강 |
 | google-places-api-new | place | enrichment | on-demand | 전화번호 보강 (Text Search New) |
-| python-kraddr-geo | (geocoder) | base_address, base_coordinate | on-demand | 주소·좌표 보강. `krtour.map.geocoding.KraddrGeoRestClient`가 REST v2 `POST /v2/reverse`, `POST /v2/geocode` 호출. 로컬 FastAPI 기본 `http://127.0.0.1:12201` |
+| kor-travel-geo | (geocoder) | base_address, base_coordinate | on-demand | 주소·좌표 보강. `kortravelmap.geocoding.KorTravelGeoRestClient`가 REST v2 `POST /v2/reverse`, `POST /v2/geocode` 호출. 로컬 FastAPI 기본 `http://127.0.0.1:12201` |
 | ~~python-kraddr-base~~ | — | — | — | **ADR-041 (PR#37, 2026-05-28) 흡수 완료**. `Address` DTO + `core/address.py` utility는 본 lib로 이전. `PlaceCoordinate`는 명시적 제외 (좌표는 `Coordinate` 단일). archive 후보. |
 
 ## 5. provider 모듈 표준 구조
 
-`src/krtour/map/providers/<name>.py`:
+`src/kortravelmap/providers/<name>.py`:
 
 ```python
 """<provider> 변환 모듈.
@@ -206,14 +206,14 @@ system
 """
 from __future__ import annotations
 
-from krtour.map.dto import (
+from kortravelmap.dto import (
     Feature, FeatureKind, FeatureStatus,
     PlaceDetail,  # or EventDetail / ...
     SourceRecord, SourceLink, SourceRole,
     RawDataRef, FeatureBundle,
 )
-from krtour.map.core.ids import make_feature_id, make_source_record_key, make_payload_hash
-from krtour.map.core.providers import normalize_provider_name
+from kortravelmap.core.ids import make_feature_id, make_source_record_key, make_payload_hash
+from kortravelmap.core.providers import normalize_provider_name
 
 PROVIDER: Final[str] = "python-<NAME>-api"
 DATASET_KEY: Final[str] = "<short>_<dataset>"
@@ -319,8 +319,8 @@ def <entity>_to_bundles(items: Iterable[<ProviderTypedModel>],
 ## 7. 적재 흐름
 
 ```python
-# krtour-map Dagster asset 측
-async with AsyncKrtourMapClient(engine=engine, file_store=store, providers={...}) as client:
+# kor-travel-map Dagster asset 측
+async with AsyncKorTravelMapClient(engine=engine, file_store=store, providers={...}) as client:
     # 1. provider 호출 (provider 라이브러리 직접 사용)
     items = list(visitkorea_client.search_festival(...))
     
@@ -384,7 +384,7 @@ WeatherValue로 일관 적재.
 3. Provider 경계: public client/typed model 직접 사용, wrapper 금지 재확인
 4. Dataset 매핑: natural key, FeatureKind, detail table, source_role
 5. 주소/좌표: 본 저장소 DTO (`Address`, `Coordinate`) + `core/address.py`
-   utility, `python-kraddr-geo` REST geocoding, match report
+   utility, `kor-travel-geo` REST geocoding, match report
 6. 파일: RustFS 적재 대상, FeatureFileSource 매핑
 7. DB 적재: collect/load 함수, transaction owner, prune 정책
 8. Dagster: TripMate가 정의하는 asset 이름, schedule
@@ -406,7 +406,7 @@ def test_no_provider_wrapper_classes():
         # *Wrapper, *Gateway, *Adapter, *Facade(except top facade)
         re.compile(r".*(Wrapper|Gateway|Adapter)$"),
     )
-    for path in Path("src/krtour/map/providers").rglob("*.py"):
+    for path in Path("src/kortravelmap/providers").rglob("*.py"):
         tree = ast.parse(path.read_text())
         for node in ast.walk(tree):
             if isinstance(node, ast.ClassDef):
@@ -424,7 +424,7 @@ def test_no_provider_wrapper_classes():
 | provider | pyproject 핀 | 본 lib Protocol | 활성 PR | 메모 |
 |----------|--------------|-----------------|---------|------|
 | python-kraddr-base | **제거** | — | — | ADR-041 (PR#37) 흡수 완료. archive 후보 |
-| python-kraddr-geo | REST 서비스(직접 의존 없음) | `KraddrGeoRestClient` + `ReverseGeocoder`/`AddressGeocoder` 콜러블 | PR#90/#123 | on-demand geocoder. 최신 로컬 FastAPI 포트 `12201` 기준 |
+| kor-travel-geo | REST 서비스(직접 의존 없음) | `KorTravelGeoRestClient` + `ReverseGeocoder`/`AddressGeocoder` 콜러블 | PR#90/#123 | on-demand geocoder. 최신 로컬 FastAPI 포트 `12201` 기준 |
 | python-datagokr-api | `@48e458b` | `CulturalFestivalItem` (PR#34, #374 재정렬) + `PublicSpecialStreetItem` + fileData raw 변환 | PR#34, provider PR#10 | ADR-042 1차 축제 source. `26a5be3`: 주차장 시간 필드 분수값 float(provider #6, T-212e). `1967fb6`: 주차장 요금/수치 int 필드 관용 파싱. `48e458b`: T-223b fileData 4종 + 전국지역특화거리 service/model |
 | python-kma-api | `@2592b740` | `KmaShortForecastItem` (PR#38), `KmaUltraShortNowcastItem` (PR#39), `KmaUltraShortForecastItem`/mid/alerts 등 7종 | PR#38~46, T-219b/c | ADR-010 두 축. Dagster asset 5종 완비 — 실황/초단기/단기(T-219b, `KmaClient`) + 중기(설정 주입 region, `DataGoKrClient`)/특보(record resource→notice)(T-219c). `006fdbe`: datagokr `03 NO_DATA` → 빈 결과 정규화(provider #18, T-212e 특보 빈 구간). `2592b740`: 중기예보 응답이 `tmFc` 미에코 → 해석된 요청 tmFc를 item 폴백 주입(provider #20/PR#21, T-212e). ASOS/해수욕장/APIHub 표면은 백로그 |
 | python-airkorea-api | `@22996a4` | (후속 PR) | — | PM10/PM2.5/CAI |

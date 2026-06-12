@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING
 import pytest
 from sqlalchemy import text
 
-from krtour.map.infra import feature_repo
-from krtour.map.infra.poi_cache_target_repo import (
+from kortravelmap.infra import feature_repo
+from kortravelmap.infra.poi_cache_target_repo import (
     list_active_target_coords,
     upsert_poi_cache_target,
 )

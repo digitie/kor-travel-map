@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from krtour.map.core.ids import (
+from kortravelmap.core.ids import (
     PRICE_VALUE_KEY_HASH_LENGTH,
     make_price_value_key,
 )

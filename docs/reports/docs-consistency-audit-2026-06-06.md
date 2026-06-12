@@ -9,7 +9,7 @@
 - **기준 커밋**: `origin/main` = `59a04e8`(PR#225, T-RV-23 offline upload
   idempotency)까지 merged.
 - **검증 방식**: 문서 주장(claim)을 코드 ground truth(`.env.example`,
-  `docker-compose.yml`, `alembic/versions/*`, `src/krtour/map/*`, `git log`)와
+  `docker-compose.yml`, `alembic/versions/*`, `src/kortravelmap/*`, `git log`)와
   대조. 단순 인용이 아니라 실제 값을 확인했다.
 - **감사 범위(정직성)**: entry/정책 문서(CLAUDE/AGENTS/SKILL/README),
   계획 문서(tasks/resume/journal tail/sprints), `decisions.md`(ADR-001~047 전수
@@ -89,10 +89,10 @@
     가리키게 한다 → `DA-D-01` 결정에 따름.
 
 - [ ] **T-DA-02** — `CLAUDE.md` §2 geocoding 로컬 기본 포트 `8888` stale.
-  - **위치**: `CLAUDE.md` §2 "geocoding 정본: kraddr-geo REST(v2 …), 로컬 기본
+  - **위치**: `CLAUDE.md` §2 "geocoding 정본: kor-travel-geo REST(v2 …), 로컬 기본
     `http://127.0.0.1:8888`".
-  - **근거**: `.env.example:58` `KRTOUR_MAP_KRADDR_GEO_BASE_URL=http://127.0.0.1:12201`,
-    `:32` `KRTOUR_MAP_ADMIN_KRADDR_GEO_BASE_URL=http://127.0.0.1:12201`.
+  - **근거**: `.env.example:58` `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_BASE_URL=http://127.0.0.1:12201`,
+    `:32` `KOR_TRAVEL_MAP_ADMIN_KOR_TRAVEL_GEO_BASE_URL=http://127.0.0.1:12201`.
     `tasks.md` 체크포인트 #4, `AGENTS.md`, `journal.md:1151`("기본값에서 이전
     `8888` 표기를 제거")도 모두 **12201**. CLAUDE.md만 누락된 sweep 잔재.
   - **조치**: `8888` → `http://127.0.0.1:12201`.
@@ -104,7 +104,7 @@
     본문 존재. `AGENTS.md:51-52`("001~047 전부 … 다음 후보 번호는 ADR-048"),
     `tasks.md:829`("001~047 accepted. 다음 후보 번호 = ADR-048")와도 어긋남.
   - **조치**: CLAUDE.md를 "001~047 accepted / 다음 후보 = ADR-048"로 정정하고
-    ADR-047(고정 포트)·ADR-046(shim 금지+kraddr-geo v2 통일) 한 줄 요약 추가.
+    ADR-047(고정 포트)·ADR-046(shim 금지+kor-travel-geo v2 통일) 한 줄 요약 추가.
 
 ---
 
@@ -133,7 +133,7 @@
     `:118` ("총 **141건** = sentinel 1 + …"); `docs/debug-ui-package.md:446`
     ("전체 **141건**은 docs/category.md §4"); `docs/decisions.md:1019` (ADR-030
     근거 "Tier 1~4 PlaceCategoryCode 카탈로그 (**141건**)").
-  - **근거**: 코드 권위값 = **144**. `python -c "from krtour.map.category import
+  - **근거**: 코드 권위값 = **144**. `python -c "from kortravelmap.category import
     PLACE_CATEGORY_DEFINITIONS, PlaceCategoryCode; print(len(PLACE_CATEGORY_DEFINITIONS),
     len(list(PlaceCategoryCode)))"` → `144 144`. `journal.md:5044-5049`도 "144건 =
     141(kraddr-base) + ADR-027 3건". `decisions.md:1559`(ADR-027)는 이미 "144건".
@@ -217,13 +217,13 @@
 - alembic 마이그레이션은 `0001`~`0016`까지 실제 존재(0016 = offline upload
   idempotency). 문서가 인용한 0007/0008/0009/0011/0012 등과 일치.
 - `.env.example` 포트(API 12301 / web 12305 / Dagster 12302 / Postgres 5432 /
-  kraddr-geo 12201 / RustFS 12101·12105)는 ADR-047 및 `AGENTS.md` 식별자 표와 일치.
+  kor-travel-geo 12201 / RustFS 12101·12105)는 ADR-047 및 `AGENTS.md` 식별자 표와 일치.
 
 ---
 
 ## 8. 외부 노출 API 일관성/완결성 점검 (2026-06-06 추가, 사용자 요청)
 
-기준: 생성 산출물 `packages/krtour-map-admin/openapi.json`(admin 전체, **35 path**)
+기준: 생성 산출물 `packages/kor-travel-map-admin/openapi.json`(admin 전체, **35 path**)
 + `openapi.user.json`(TripMate/user subset, **7 path**)을 정본으로,
 `docs/openapi-admin-contract.md` + `docs/tripmate-rest-api.md`와 대조했다.
 
@@ -233,7 +233,7 @@
   - **근거**: `openapi-admin-contract.md §4.1`(125~152)이 `GET /admin/issues`,
     `GET /admin/issues/{issue_key}`, `PATCH /admin/issues/{issue_key}`(`resolve`/
     `ignore`/`reopen`/`retry_geocode`/`retry_reverse_geocode`/
-    `apply_kraddr_geo_address`/`manual_override`)를 **"필수 엔드포인트"**로 명세하지만,
+    `apply_kor_travel_geo_address`/`manual_override`)를 **"필수 엔드포인트"**로 명세하지만,
     `openapi.json` 35 path에 `/admin/issues*`가 **없다**(라우터 파일도 없음). 읽기 측
     `GET /ops/consistency/issues`만 존재.
   - **영향**: ADR-046의 핵심인 **주소/좌표 정합성 이슈를 운영자가 admin UI에서 수동

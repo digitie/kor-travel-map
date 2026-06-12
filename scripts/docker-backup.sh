@@ -6,12 +6,12 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck disable=SC1091
 source "$ROOT_DIR/scripts/load-env.sh"
 
-KRTOUR_MAP_POSTGRES_DB="${KRTOUR_MAP_POSTGRES_DB:-krtour_map}"
-KRTOUR_MAP_POSTGRES_USER="${KRTOUR_MAP_POSTGRES_USER:-krtour_map}"
-KRTOUR_MAP_DAGSTER_POSTGRES_DB="${KRTOUR_MAP_DAGSTER_POSTGRES_DB:-krtour_map_dagster}"
-KRTOUR_MAP_BACKUP_ROOT="${KRTOUR_MAP_BACKUP_ROOT:-$ROOT_DIR/data/backups}"
-KRTOUR_MAP_BACKUP_ID="${KRTOUR_MAP_BACKUP_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
-KRTOUR_MAP_BACKUP_ALLOW_RUNNING="${KRTOUR_MAP_BACKUP_ALLOW_RUNNING:-0}"
+KOR_TRAVEL_MAP_POSTGRES_DB="${KOR_TRAVEL_MAP_POSTGRES_DB:-kor_travel_map}"
+KOR_TRAVEL_MAP_POSTGRES_USER="${KOR_TRAVEL_MAP_POSTGRES_USER:-kor_travel_map}"
+KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB="${KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB:-kor_travel_map_dagster}"
+KOR_TRAVEL_MAP_BACKUP_ROOT="${KOR_TRAVEL_MAP_BACKUP_ROOT:-$ROOT_DIR/data/backups}"
+KOR_TRAVEL_MAP_BACKUP_ID="${KOR_TRAVEL_MAP_BACKUP_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
+KOR_TRAVEL_MAP_BACKUP_ALLOW_RUNNING="${KOR_TRAVEL_MAP_BACKUP_ALLOW_RUNNING:-0}"
 
 validate_identifier() {
   local name="$1"
@@ -55,7 +55,7 @@ select_python() {
 }
 
 with_maintenance_lock() {
-  if [[ "${KRTOUR_MAP_MAINTENANCE_LOCK_HELD:-0}" == "1" || "${KRTOUR_MAP_MAINTENANCE_LOCK_DISABLED:-0}" == "1" ]]; then
+  if [[ "${KOR_TRAVEL_MAP_MAINTENANCE_LOCK_HELD:-0}" == "1" || "${KOR_TRAVEL_MAP_MAINTENANCE_LOCK_DISABLED:-0}" == "1" ]]; then
     return 0
   fi
   local python_bin
@@ -65,12 +65,12 @@ with_maintenance_lock() {
     -- "$ROOT_DIR/scripts/docker-backup.sh" "$@"
 }
 
-validate_identifier KRTOUR_MAP_POSTGRES_DB "$KRTOUR_MAP_POSTGRES_DB"
-validate_identifier KRTOUR_MAP_POSTGRES_USER "$KRTOUR_MAP_POSTGRES_USER"
-validate_identifier KRTOUR_MAP_DAGSTER_POSTGRES_DB "$KRTOUR_MAP_DAGSTER_POSTGRES_DB"
-validate_path_component KRTOUR_MAP_BACKUP_ID "$KRTOUR_MAP_BACKUP_ID"
-validate_path_component KRTOUR_MAP_OBJECT_STORE_BUCKET "$KRTOUR_MAP_OBJECT_STORE_BUCKET"
-validate_path_component KRTOUR_MAP_OFFLINE_UPLOAD_BUCKET "$KRTOUR_MAP_OFFLINE_UPLOAD_BUCKET"
+validate_identifier KOR_TRAVEL_MAP_POSTGRES_DB "$KOR_TRAVEL_MAP_POSTGRES_DB"
+validate_identifier KOR_TRAVEL_MAP_POSTGRES_USER "$KOR_TRAVEL_MAP_POSTGRES_USER"
+validate_identifier KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB "$KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB"
+validate_path_component KOR_TRAVEL_MAP_BACKUP_ID "$KOR_TRAVEL_MAP_BACKUP_ID"
+validate_path_component KOR_TRAVEL_MAP_OBJECT_STORE_BUCKET "$KOR_TRAVEL_MAP_OBJECT_STORE_BUCKET"
+validate_path_component KOR_TRAVEL_MAP_OFFLINE_UPLOAD_BUCKET "$KOR_TRAVEL_MAP_OFFLINE_UPLOAD_BUCKET"
 
 require_command docker
 require_command sha256sum
@@ -79,7 +79,7 @@ with_maintenance_lock "$@"
 compose=(docker compose)
 writer_services=(api frontend dagster dagster-daemon rustfs)
 
-if [[ "$KRTOUR_MAP_BACKUP_ALLOW_RUNNING" != "1" ]]; then
+if [[ "$KOR_TRAVEL_MAP_BACKUP_ALLOW_RUNNING" != "1" ]]; then
   running_services=()
   for service in "${writer_services[@]}"; do
     container_id="$("${compose[@]}" ps -q "$service" 2>/dev/null || true)"
@@ -90,12 +90,12 @@ if [[ "$KRTOUR_MAP_BACKUP_ALLOW_RUNNING" != "1" ]]; then
 
   if (( ${#running_services[@]} > 0 )); then
     echo "writer services are running: ${running_services[*]}" >&2
-    echo "stop API/Dagster/RustFS writers first, or set KRTOUR_MAP_BACKUP_ALLOW_RUNNING=1 for a best-effort snapshot." >&2
+    echo "stop API/Dagster/RustFS writers first, or set KOR_TRAVEL_MAP_BACKUP_ALLOW_RUNNING=1 for a best-effort snapshot." >&2
     exit 1
   fi
 fi
 
-backup_dir="$KRTOUR_MAP_BACKUP_ROOT/$KRTOUR_MAP_BACKUP_ID"
+backup_dir="$KOR_TRAVEL_MAP_BACKUP_ROOT/$KOR_TRAVEL_MAP_BACKUP_ID"
 if [[ -e "$backup_dir" ]]; then
   echo "backup directory already exists: $backup_dir" >&2
   exit 1
@@ -104,8 +104,8 @@ fi
 mkdir -p "$backup_dir/postgres" "$backup_dir/rustfs" "$backup_dir/meta"
 
 created_at_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-app_dump="postgres/$KRTOUR_MAP_POSTGRES_DB.dump"
-dagster_dump="postgres/$KRTOUR_MAP_DAGSTER_POSTGRES_DB.dump"
+app_dump="postgres/$KOR_TRAVEL_MAP_POSTGRES_DB.dump"
+dagster_dump="postgres/$KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB.dump"
 rustfs_archive="rustfs/rustfs-data.tar.gz"
 
 dump_db() {
@@ -115,7 +115,7 @@ dump_db() {
 
   echo "dumping PostgreSQL database: $database_name"
   "${compose[@]}" exec -T postgres pg_dump \
-    -U "$KRTOUR_MAP_POSTGRES_USER" \
+    -U "$KOR_TRAVEL_MAP_POSTGRES_USER" \
     -d "$database_name" \
     --format=custom \
     --no-owner \
@@ -124,8 +124,8 @@ dump_db() {
   mv "$output_path.tmp" "$output_path"
 }
 
-dump_db "$KRTOUR_MAP_POSTGRES_DB" "$app_dump"
-dump_db "$KRTOUR_MAP_DAGSTER_POSTGRES_DB" "$dagster_dump"
+dump_db "$KOR_TRAVEL_MAP_POSTGRES_DB" "$app_dump"
+dump_db "$KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB" "$dagster_dump"
 
 echo "archiving RustFS Docker volume"
 "${compose[@]}" run --rm --no-deps --entrypoint sh \
@@ -136,7 +136,7 @@ echo "archiving RustFS Docker volume"
 cat > "$backup_dir/meta/manifest.json" <<EOF
 {
   "schema_version": 1,
-  "backup_id": "$KRTOUR_MAP_BACKUP_ID",
+  "backup_id": "$KOR_TRAVEL_MAP_BACKUP_ID",
   "created_at_utc": "$created_at_utc",
   "mode": "docker-compose-cold-backup",
   "components": {
@@ -145,12 +145,12 @@ cat > "$backup_dir/meta/manifest.json" <<EOF
     "rustfs": "$rustfs_archive"
   },
   "databases": {
-    "app": "$KRTOUR_MAP_POSTGRES_DB",
-    "dagster": "$KRTOUR_MAP_DAGSTER_POSTGRES_DB"
+    "app": "$KOR_TRAVEL_MAP_POSTGRES_DB",
+    "dagster": "$KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB"
   },
   "object_storage": {
-    "feature_bucket": "$KRTOUR_MAP_OBJECT_STORE_BUCKET",
-    "offline_upload_bucket": "$KRTOUR_MAP_OFFLINE_UPLOAD_BUCKET",
+    "feature_bucket": "$KOR_TRAVEL_MAP_OBJECT_STORE_BUCKET",
+    "offline_upload_bucket": "$KOR_TRAVEL_MAP_OFFLINE_UPLOAD_BUCKET",
     "volume_service": "rustfs-perms:/data"
   }
 }

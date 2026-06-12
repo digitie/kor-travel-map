@@ -12,9 +12,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from krtour.map.infra.jobs_repo import enqueue_import_job, start_import_job
-from krtour.map.infra.status_repo import gather_status_counts
-from krtour.map.mois import load_mois_license_features_bulk
+from kortravelmap.infra.jobs_repo import enqueue_import_job, start_import_job
+from kortravelmap.infra.status_repo import gather_status_counts
+from kortravelmap.mois import load_mois_license_features_bulk
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession

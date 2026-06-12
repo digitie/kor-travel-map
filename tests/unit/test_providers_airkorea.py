@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from krtour.map.dto import (
+from kortravelmap.dto import (
     Address,
     Coordinate,
     FeatureBundle,
@@ -20,13 +20,13 @@ from krtour.map.dto import (
     SourceRole,
     WeatherDomain,
 )
-from krtour.map.providers.airkorea import (
+from kortravelmap.providers.airkorea import (
     AIR_QUALITY_MARKER_COLOR,
     AIR_QUALITY_STATION_CATEGORY,
     AIRKOREA_NORMALIZATION_VERSION,
     air_quality_to_weather_values,
 )
-from krtour.map.providers.airkorea import (
+from kortravelmap.providers.airkorea import (
     air_quality_stations_to_bundles as _stations_async,
 )
 

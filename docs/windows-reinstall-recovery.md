@@ -1,6 +1,6 @@
 # windows-reinstall-recovery.md — Windows 재설치 / WSL 초기화 / 새 PC 인수
 
-`python-kraddr-geo`의 동명 문서 패턴을 본 저장소에 맞춰 수정한 버전이다. Windows
+`kor-travel-geo`의 동명 문서 패턴을 본 저장소에 맞춰 수정한 버전이다. Windows
 재설치, WSL distro export/import, 새 PC로 환경 이전, Codex/Claude 새 세션이
 인수받는 시나리오를 다룬다.
 
@@ -21,7 +21,7 @@
   - 국가유산청 GIS SHP/SHX/DBF
   - 산림청 SHP
   - 표준데이터 캐시
-  - kraddr-geo의 도로명주소 전자지도 PDF/ZIP
+  - kor-travel-geo의 도로명주소 전자지도 PDF/ZIP
 - `.env` 파일 (권한 600, 절대 git X)
 - systemd `EnvironmentFile` (운영 노드)
 - provider API 키:
@@ -31,7 +31,7 @@
   - `OPINET_API_KEY`
   - `DATAGOKR_API_KEY` (+ `DATA_GO_KR_SERVICE_KEY`, `PUBLIC_DATA_SERVICE_KEY`, `SERVICE_KEY`)
   - `KAKAO_LOCAL_REST_API_KEY`, `NAVER_SEARCH_CLIENT_*`, `GOOGLE_PLACES_API_KEY`
-- 객체 저장소 자격 (`KRTOUR_MAP_OBJECT_STORE_*`)
+- 객체 저장소 자격 (`KOR_TRAVEL_MAP_OBJECT_STORE_*`)
 - Docker volume dump (`pgdata`, `miniodata`) — 의미 있는 상태일 때만:
   ```bash
   docker run --rm -v krtour-pgdata:/data -v $PWD/backup:/backup alpine \
@@ -85,7 +85,7 @@
 ## 5. 위험한 적재 스크립트 — `PLAN_ONLY=1` 패턴
 
 운영 데이터 적재 스크립트는 처음부터 `PLAN_ONLY=1` preflight 모드를 지원한다.
-(kraddr-geo `scripts/fullload_test.sh` 패턴 미러)
+(kor-travel-geo `scripts/fullload_test.sh` 패턴 미러)
 
 ```bash
 #!/usr/bin/env bash
@@ -95,12 +95,12 @@ set -euo pipefail
 PLAN_ONLY="${PLAN_ONLY:-0}"
 
 echo "[1/5] preflight: 환경변수 확인"
-test -n "${KRTOUR_MAP_PG_DSN:-}" || { echo "missing KRTOUR_MAP_PG_DSN"; exit 1; }
+test -n "${KOR_TRAVEL_MAP_PG_DSN:-}" || { echo "missing KOR_TRAVEL_MAP_PG_DSN"; exit 1; }
 test -n "${KMA_API_KEY:-}" || { echo "missing KMA_API_KEY"; exit 1; }
 # ...
 
 echo "[2/5] preflight: DB 접근 확인"
-psql "${KRTOUR_MAP_PG_DSN}" -c '\l' >/dev/null
+psql "${KOR_TRAVEL_MAP_PG_DSN}" -c '\l' >/dev/null
 
 echo "[3/5] preflight: 디스크 공간 확인"
 df -h /var/lib/postgresql/data
@@ -111,10 +111,10 @@ if [ "$PLAN_ONLY" = "1" ]; then
 fi
 
 echo "[4/5] 적재 실행"
-python -m krtour.map.cli import enqueue --kind visitkorea_festival_full_scan
+python -m kortravelmap.cli import enqueue --kind visitkorea_festival_full_scan
 
 echo "[5/5] 검증"
-python -m krtour.map.cli healthz
+python -m kortravelmap.cli healthz
 ```
 
 새 세션이 인수받았을 때는 항상 `PLAN_ONLY=1` 먼저 실행해서 환경 점검.
@@ -161,7 +161,7 @@ JOIN feature.features f USING (feature_id)
 WHERE f.kind='notice' AND d.valid_end_time < now() - interval '1 year';
 ```
 
-count가 0이 아니면 purge job이 멈춰 있을 가능성 — krtour-map Dagster asset 점검.
+count가 0이 아니면 purge job이 멈춰 있을 가능성 — kor-travel-map Dagster asset 점검.
 
 ## 9. 새 PC로 이전 체크리스트
 

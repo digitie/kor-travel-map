@@ -26,8 +26,8 @@
 ### 2.1 디렉토리 scaffolding
 
 ```
-src/krtour/map/                  # PEP 420 implicit namespace (ADR-022)
-├── __init__.py                  # 공개 API export — AsyncKrtourMapClient 등
+src/kortravelmap/                  # PEP 420 implicit namespace (ADR-022)
+├── __init__.py                  # 공개 API export — AsyncKorTravelMapClient 등
 ├── py.typed                     # PEP 561
 ├── category/                    # ADR-023 — kraddr-base로부터 코드 이전
 │   ├── __init__.py
@@ -47,11 +47,11 @@ src/krtour/map/                  # PEP 420 implicit namespace (ADR-022)
 │   └── ...
 ├── infra/                       # SQL / file_store / sync_state
 ├── providers/                   # provider 변환 (ADR-006: client wrapper 금지)
-├── client/                      # AsyncKrtourMapClient
-└── settings.py                  # KrtourMapSettings (pydantic-settings)
+├── client/                      # AsyncKorTravelMapClient
+└── settings.py                  # KorTravelMapSettings (pydantic-settings)
 ```
 
-`packages/krtour-map-admin/` 도 동일 시기 scaffolding (디버그 UI backend
+`packages/kor-travel-map-admin/` 도 동일 시기 scaffolding (디버그 UI backend
 첫 라우터는 Sprint 2부터).
 
 ### 2.2 의존 계층 강제 (ADR-002)
@@ -59,13 +59,13 @@ src/krtour/map/                  # PEP 420 implicit namespace (ADR-022)
 `pyproject.toml`의 `[[tool.importlinter.contracts]]` "layered architecture"가
 이미 박혀 있음:
 ```
-krtour.map.cli
-  → krtour.map.client
-  → krtour.map.providers
-  → krtour.map.infra
-  → krtour.map.core
-  → krtour.map.dto
-  → krtour.map.category
+kortravelmap.cli
+  → kortravelmap.client
+  → kortravelmap.providers
+  → kortravelmap.infra
+  → kortravelmap.core
+  → kortravelmap.dto
+  → kortravelmap.category
 ```
 
 Sprint 1 PR에서 `lint-imports` CI green 확인.
@@ -73,7 +73,7 @@ Sprint 1 PR에서 `lint-imports` CI green 확인.
 ### 2.3 ADR-023 카테고리 코드 이전
 
 `python-kraddr-base/src/kraddr/base/categories.py` (~2,072줄, 141 enum)을
-`src/krtour/map/category/`로 이전. ADR-027 적용으로 144건.
+`src/kortravelmap/category/`로 이전. ADR-027 적용으로 144건.
 
 - `PLACE_CATEGORY_DEFINITIONS` tuple (144 PlaceCategory)
 - `PlaceCategoryCode` Literal (`'00000000' | '01000000' | ...`)
@@ -87,15 +87,15 @@ Sprint 1 PR에서 `lint-imports` CI green 확인.
 
 ### 2.4 NOTICE_TYPES + AreaDetail (ADR-027 코드 적용)
 
-- `src/krtour/map/dto/notice.py` — `NOTICE_TYPES` tuple 14건 (`access_restriction`,
+- `src/kortravelmap/dto/notice.py` — `NOTICE_TYPES` tuple 14건 (`access_restriction`,
   `fire_alert` 포함) + `normalize_notice_type` validator + alias 매핑.
-- `src/krtour/map/dto/area.py` — `AreaDetail.area_kind` Literal에 `hazard_zone`
+- `src/kortravelmap/dto/area.py` — `AreaDetail.area_kind` Literal에 `hazard_zone`
   포함.
 
 ### 2.5 ADR-030 narrow 캐시 예외 코드
 
 ```python
-# src/krtour/map/category/api.py
+# src/kortravelmap/category/api.py
 from functools import cache
 
 @cache
@@ -105,7 +105,7 @@ def get_category(code: PlaceCategoryCode) -> PlaceCategory:
 ```
 
 ```python
-# src/krtour/map/infra/crs.py
+# src/kortravelmap/infra/crs.py
 from functools import cache
 from pyproj import Transformer
 
@@ -133,7 +133,7 @@ def transformer_4326_to_5179() -> Transformer:
 
 - `.github/workflows/ci.yml` — unit / integration / fixture_replay 분리 jobs.
 - `.github/workflows/lint.yml` — ruff format + mypy --strict + lint-imports.
-- `.github/workflows/openapi.yml` — packages/krtour-map-admin/scripts/export_openapi.py
+- `.github/workflows/openapi.yml` — packages/kor-travel-map-admin/scripts/export_openapi.py
   `--check` (디버그 UI 첫 라우터 등장 시점부터 실효성, Sprint 1 시점에는
   spec이 비어 있어도 명령 자체는 작동해야 함).
 
@@ -141,7 +141,7 @@ def transformer_4326_to_5179() -> Transformer:
 
 | 항목 | 상태 (진입 시) | DoD (Sprint 1 종료 시) |
 |------|---------------|---------------------|
-| ADR-023 (category 이전) | accepted (코드 미적용) | `src/krtour/map/category/` 코드 + 테스트 통과 |
+| ADR-023 (category 이전) | accepted (코드 미적용) | `src/kortravelmap/category/` 코드 + 테스트 통과 |
 | ADR-027 (forest 카테고리 확장) | proposed (PR#9) | accepted + `PLACE_CATEGORY_DEFINITIONS` 144건 |
 | ADR-030 (캐시 금지) | proposed (PR#8) | accepted + `lint-imports` 계약 green |
 | ADR-031 (OpenAPI export) | proposed (PR#8) | accepted + 스크립트는 placeholder 동작 (Sprint 2부터 실효) |

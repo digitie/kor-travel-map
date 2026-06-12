@@ -46,8 +46,8 @@ def test_docker_compose_uses_persistent_dagster_storage_and_daemon() -> None:
     assert "dagster dev" not in _command_text(dagster["command"])
     assert "dagster-daemon run" in _command_text(daemon["command"])
 
-    assert dagster["environment"]["KRTOUR_MAP_DAGSTER_PG_URL"]
-    assert daemon["environment"]["KRTOUR_MAP_DAGSTER_PG_URL"]
+    assert dagster["environment"]["KOR_TRAVEL_MAP_DAGSTER_PG_URL"]
+    assert daemon["environment"]["KOR_TRAVEL_MAP_DAGSTER_PG_URL"]
     assert "dagster-db-init" in dagster["depends_on"]
     assert "dagster-db-init" in daemon["depends_on"]
 
@@ -64,7 +64,7 @@ def test_docker_compose_has_runtime_healthchecks_and_readiness_order() -> None:
     assert "debug/health" not in _command_text(api["healthcheck"]["test"])
     assert "node -e" in _command_text(frontend["healthcheck"]["test"])
     assert "12305" in _command_text(frontend["healthcheck"]["test"])
-    assert "KRTOUR_MAP_DAGSTER_PORT" in _command_text(dagster["healthcheck"]["test"])
+    assert "KOR_TRAVEL_MAP_DAGSTER_PORT" in _command_text(dagster["healthcheck"]["test"])
 
     assert frontend["depends_on"]["api"]["condition"] == "service_healthy"
 
@@ -72,14 +72,14 @@ def test_docker_compose_has_runtime_healthchecks_and_readiness_order() -> None:
 @pytest.mark.unit
 def test_docker_compose_publishes_host_ports_on_localhost_by_default() -> None:
     services = _compose()["services"]
-    bind_prefix = "${KRTOUR_MAP_DOCKER_BIND_HOST:-127.0.0.1}:"
+    bind_prefix = "${KOR_TRAVEL_MAP_DOCKER_BIND_HOST:-127.0.0.1}:"
 
     exposed_services = ["postgres", "rustfs", "api", "frontend", "dagster"]
     for service_name in exposed_services:
         for port_mapping in services[service_name]["ports"]:
             assert port_mapping.startswith(bind_prefix), (service_name, port_mapping)
 
-    assert services["api"]["environment"]["KRTOUR_MAP_ADMIN_HOST"] == "0.0.0.0"
+    assert services["api"]["environment"]["KOR_TRAVEL_MAP_ADMIN_HOST"] == "0.0.0.0"
 
 
 @pytest.mark.unit
@@ -88,7 +88,7 @@ def test_dagster_image_config_points_storage_to_postgres() -> None:
 
     assert config["telemetry"] == {"enabled": False}
     assert config["storage"]["postgres"]["postgres_url"] == {
-        "env": "KRTOUR_MAP_DAGSTER_PG_URL"
+        "env": "KOR_TRAVEL_MAP_DAGSTER_PG_URL"
     }
     assert "run_storage" not in config
     assert "event_log_storage" not in config
@@ -104,7 +104,7 @@ def test_local_admin_stack_uses_same_dagster_postgres_config_and_daemon() -> Non
     assert "dagster-webserver" in script
     assert "dagster-daemon" in script
     assert "dagster dev" not in script
-    assert 'KRTOUR_MAP_DAGSTER_PG_URL="$KRTOUR_MAP_DAGSTER_PG_URL"' in script
+    assert 'KOR_TRAVEL_MAP_DAGSTER_PG_URL="$KOR_TRAVEL_MAP_DAGSTER_PG_URL"' in script
     assert "start_bg dagster-daemon env" in script
     assert "ensure_bg_alive dagster-daemon" in script
 
@@ -112,7 +112,7 @@ def test_local_admin_stack_uses_same_dagster_postgres_config_and_daemon() -> Non
 @pytest.mark.unit
 def test_dagster_package_installs_postgres_storage_plugin() -> None:
     pyproject = tomllib.loads(
-        (ROOT / "packages" / "krtour-map-dagster" / "pyproject.toml").read_text(
+        (ROOT / "packages" / "kor-travel-map-dagster" / "pyproject.toml").read_text(
             encoding="utf-8"
         )
     )
@@ -148,11 +148,11 @@ def test_runtime_docker_images_are_multistage_and_non_root() -> None:
 def test_frontend_docker_image_uses_next_standalone_server() -> None:
     dockerfile = _dockerfile("frontend.Dockerfile")
     next_config = (
-        ROOT / "packages" / "krtour-map-admin" / "frontend" / "next.config.ts"
+        ROOT / "packages" / "kor-travel-map-admin" / "frontend" / "next.config.ts"
     ).read_text(encoding="utf-8")
 
     assert 'output: "standalone"' in next_config
     assert "outputFileTracingRoot: workspaceRoot" in next_config
     assert ".next/standalone" in dockerfile
-    assert 'CMD ["node", "packages/krtour-map-admin/frontend/server.js"]' in dockerfile
+    assert 'CMD ["node", "packages/kor-travel-map-admin/frontend/server.js"]' in dockerfile
     assert "next start" not in dockerfile

@@ -14,8 +14,8 @@ from typing import TYPE_CHECKING
 import pytest
 from sqlalchemy import text
 
-from krtour.map.infra import feature_repo
-from krtour.map.infra.feature_repo import (  # noqa: PLC2701 - EXPLAIN 대상 raw SQL
+from kortravelmap.infra import feature_repo
+from kortravelmap.infra.feature_repo import (  # noqa: PLC2701 - EXPLAIN 대상 raw SQL
     _NEARBY_COORD_DISTANCE_SQL,
 )
 

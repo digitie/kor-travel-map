@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from pydantic import ValidationError
 
-from krtour.map.dto import (
+from kortravelmap.dto import (
     Address,
     Coordinate,
     Feature,

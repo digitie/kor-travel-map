@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from krtour.map.core.providers import (
+from kortravelmap.core.providers import (
     CANONICAL_PROVIDER_NAMES,
     PROVIDER_ALIASES,
     is_known_provider,

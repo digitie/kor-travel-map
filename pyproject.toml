@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "python-krtour-map"
+name = "kor-travel-map"
 version = "0.2.0-dev"
 description = "TripMate map feature aggregation and CRUD contracts (v2 design stage)."
 readme = "README.md"
@@ -37,9 +37,9 @@ dependencies = [
   "boto3>=1.34",  # ADR-015 S3 호환 객체 저장소(RustFS/MinIO/R2)
 ]
 
-# CLI entry-point (ADR-022 — 명령 이름 `krtour-map`, ADR-039 mutex).
+# CLI entry-point (ADR-054 — 명령 이름 `ktmctl`, ADR-039 mutex).
 [project.scripts]
-krtour-map = "krtour.map.cli.main:main"
+ktmctl = "kortravelmap.cli.main:main"
 
 [project.optional-dependencies]
 dev = [
@@ -59,7 +59,7 @@ dev = [
   "httpx>=0.27",
 ]
 # 디버그 REST API/UI는 별도 패키지로 분리 (ADR-020):
-#   `packages/krtour-map-admin/`. FastAPI/Uvicorn 의존성은 거기 있다.
+#   `packages/kor-travel-map-admin/`. FastAPI/Uvicorn 의존성은 거기 있다.
 geo = [
   "geopandas>=1.0",
   "gdal==3.8.4",  # Python binding은 시스템 libgdal ABI와 patch 버전까지 맞춤
@@ -74,10 +74,10 @@ providers = [
   #    본 lib에 의존성 없음. ─────────────────────────────────────────────────────
   #
   # ── 주소/좌표 보강 (on-demand) ─────────────────────────────────────────
-  # "python-kraddr-geo @ git+https://github.com/digitie/python-kraddr-geo.git@<sha>",
+  # "kor-travel-geo @ git+https://github.com/digitie/kor-travel-geo.git@<sha>",
   #
   # ── Sprint 2 §2.1 — datagokr 표준데이터 (축제 1차, ADR-042) ────────────
-  # `krtour.map.providers.standard_data.CulturalFestivalItem` Protocol (PR#34) 정합.
+  # `kortravelmap.providers.standard_data.CulturalFestivalItem` Protocol (PR#34) 정합.
   # 26a5be3: 주차장 basicTime/addUnitTime 분수값(float) 허용 (provider #6/PR#7,
   # T-212e live 실측 addUnitTime='0.5').
   # 1967fb6: 주차장 요금/수치 int 필드 관용 파싱 — 자유 표기('200+400')는 None,
@@ -87,7 +87,7 @@ providers = [
   "python-datagokr-api @ git+https://github.com/digitie/python-datagokr-api.git@48e458b1f06656a94474f9b08e87cefc3c9c9526",
   #
   # ── Sprint 2 §2.2 — 날씨 (ADR-010) ────────────────────────────────────
-  # `krtour.map.providers.kma.{KmaShortForecastItem, KmaUltraShortNowcastItem}`
+  # `kortravelmap.providers.kma.{KmaShortForecastItem, KmaUltraShortNowcastItem}`
   # Protocol (PR#38/39) 정합. T-219b: Dagster asset이 KmaClient/grid/time_utils
   # 를 lazy import — runtime 의존 활성화. 006fdbe: datagokr result code 03
   # (NO_DATA)을 예외 대신 빈 결과로 정규화 (provider #18/PR#19 — T-212e 특보
@@ -116,7 +116,7 @@ providers = [
   # python-knps-api: keyless file dataset client (ADR-028 + amendment 2026-05-25).
   # PR#4 (codex/keyless-file-download-dtos) merged → ApiEndpoint/Page 삭제,
   # KNPS_SERVICE_KEY 사용 안 함. sha 5e88fb4.
-  # `krtour.map.providers.knps.KnpsPointRecord` Protocol (Point/place 5 dataset
+  # `kortravelmap.providers.knps.KnpsPointRecord` Protocol (Point/place 5 dataset
   # 구현됨). SHP(area)/route는 후속. 다른 provider처럼 본 lib 본 의존 X (Protocol).
   # 16e3954: trails vertex 행 → 코스 단위 LINESTRING 조립(provider #9/PR#10,
   # T-212e 실측 — knps_trails 적재 0건(#407) 해소, 910,110 vertex → 625 코스).
@@ -146,13 +146,12 @@ package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
-# PEP 420 implicit namespace `krtour` + 메인 패키지 `krtour.map` (ADR-022).
-# src/krtour/__init__.py은 생성 금지 (ADR-022 §결과/부정 + SKILL.md DO NOT #21).
-include = ["krtour.map*"]
+# T-226 clean cut: top-level package `kortravelmap`.
+include = ["kortravelmap*"]
 namespaces = true
 
 [tool.setuptools.package-data]
-"krtour.map" = ["py.typed"]
+"kortravelmap" = ["py.typed"]
 
 # =============================================================================
 # Lint / Type / Test
@@ -170,13 +169,10 @@ python_version = "3.11"
 strict = true
 warn_unused_ignores = true
 plugins = ["pydantic.mypy"]
-# ADR-022 — krtour는 PEP 420 implicit namespace이므로 명시적으로 활성화.
-# pip install -e . 후에도 mypy는 namespace package를 자동 인식 못함.
-# PR#35 (2026-05-27) — debug-ui 패키지가 같은 `krtour` namespace를 공유하므로
-# mypy_path에 세 src 트리 모두 등록.
-namespace_packages = true
+# T-226 — kortravelmap은 top-level package다.
+# mypy_path에 main/admin/dagster src 트리를 모두 등록.
 explicit_package_bases = true
-mypy_path = "src:packages/krtour-map-admin/src:packages/krtour-map-dagster/src"
+mypy_path = "src:packages/kor-travel-map-admin/src:packages/kor-travel-map-dagster/src"
 
 # shapely는 type stub를 제공하지 않음 (pyproj와 달리 py.typed 없음).
 # core/geometry.py가 WKT 파싱·centroid에 사용 — import-untyped만 무시.
@@ -186,7 +182,12 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = [".", "src"]
+pythonpath = [
+  ".",
+  "src",
+  "packages/kor-travel-map-admin/src",
+  "packages/kor-travel-map-dagster/src",
+]
 asyncio_mode = "auto"
 # session-scope async fixture (pg_engine)와 function-scope async test가 동일
 # event loop을 공유해야 함 — pytest-asyncio 0.23+ 권장 설정. 미설정 시 testcontainers
@@ -200,7 +201,7 @@ markers = [
   "e2e: 디버그 API + integration DB",
   "slow: 느린 테스트 (CI nightly only)",
   "fixture_replay: replay fixture 회귀",
-  "live: 외부 라이브 서비스 호출(예: kraddr-geo). 도달 불가 시 자동 skip.",
+  "live: 외부 라이브 서비스 호출(예: kor-travel-geo). 도달 불가 시 자동 skip.",
 ]
 filterwarnings = [
   "error",
@@ -208,7 +209,7 @@ filterwarnings = [
 ]
 
 [tool.coverage.run]
-source = ["src/krtour/map"]
+source = ["src/kortravelmap"]
 branch = true
 
 [tool.coverage.report]
@@ -233,7 +234,7 @@ fail_under = 80  # ADR-032 Sprint 4 bar (75→80 상향, 2026-06-01 Sprint 4b �
 # =============================================================================
 
 [tool.importlinter]
-root_package = "krtour.map"
+root_package = "kortravelmap"
 # forbidden contracts에 외부 패키지가 포함됨 (fastapi/uvicorn/cachetools/kafka).
 include_external_packages = true
 
@@ -241,25 +242,25 @@ include_external_packages = true
 name = "layered architecture"
 type = "layers"
 # 의존 방향: category → dto → core → infra → providers → geocoding → client → cli.
-# krtour.map.cli는 Sprint 4 §2.8(ADR-039 CLI mutex)에서 추가 — 최상위 layer.
+# kortravelmap.cli는 Sprint 4 §2.8(ADR-039 CLI mutex)에서 추가 — 최상위 layer.
 layers = [
-  "krtour.map.cli",
-  "krtour.map.client",
-  "krtour.map.providers",
-  "krtour.map.geocoding",
-  "krtour.map.infra",
-  "krtour.map.core",
-  "krtour.map.dto",
-  "krtour.map.category",
+  "kortravelmap.cli",
+  "kortravelmap.client",
+  "kortravelmap.providers",
+  "kortravelmap.geocoding",
+  "kortravelmap.infra",
+  "kortravelmap.core",
+  "kortravelmap.dto",
+  "kortravelmap.category",
 ]
 
-# 메인 패키지(krtour.map)는 FastAPI/Uvicorn 의존을 가져선 안 된다 (ADR-020).
-# 디버그 REST는 packages/krtour-map-admin/(import: `krtour.map_admin`)에 있다.
+# 메인 패키지(kortravelmap)는 FastAPI/Uvicorn 의존을 가져선 안 된다 (ADR-020).
+# 디버그 REST는 packages/kor-travel-map-admin/(import: `kortravelmap.admin`)에 있다.
 [[tool.importlinter.contracts]]
 name = "main package must not import fastapi/uvicorn"
 type = "forbidden"
 source_modules = [
-  "krtour.map",
+  "kortravelmap",
 ]
 forbidden_modules = [
   "fastapi",
@@ -269,12 +270,12 @@ forbidden_modules = [
 
 # ADR-030: 라이브러리 in-memory 캐시 금지. functools.cache 한정 narrow 예외만 허용.
 # 외부 캐시 라이브러리 의존 금지 — invalidation 책임 호출자(TripMate)에 위임.
-# 예외: PlaceCategoryCode 카탈로그 (krtour.map.category), pyproj.Transformer singleton.
+# 예외: PlaceCategoryCode 카탈로그 (kortravelmap.category), pyproj.Transformer singleton.
 [[tool.importlinter.contracts]]
 name = "main package must not depend on cache libraries"
 type = "forbidden"
 source_modules = [
-  "krtour.map",
+  "kortravelmap",
 ]
 forbidden_modules = [
   "cachetools",
@@ -289,7 +290,7 @@ forbidden_modules = [
 name = "main package must not depend on kafka/streaming libraries"
 type = "forbidden"
 source_modules = [
-  "krtour.map",
+  "kortravelmap",
 ]
 forbidden_modules = [
   "kafka",

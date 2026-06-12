@@ -3,7 +3,7 @@
 본 문서는 국가유산청(`python-krheritage-api`) 데이터를 `place`/`area`/`event`
 feature로 적재하는 ETL이다.
 
-> **구현 현황 (2026-05-29)**: `krtour.map.providers.krheritage` 변환 함수 구현
+> **구현 현황 (2026-05-29)**: `kortravelmap.providers.krheritage` 변환 함수 구현
 > 완료 — `heritage_items_to_bundles`(place/area, async + reverse_geocoder) /
 > `heritage_events_to_bundles`(event). structural Protocol 입력
 > (`KrHeritageItem`/`KrHeritageEvent`). area는 GIS WKT가 있으면 `Feature.geom` +
@@ -22,7 +22,7 @@ feature로 적재하는 ETL이다.
 | Feature.kind | `place`, `area`, `event` |
 | source_entity_type | `heritage`, `heritage_event` |
 | 상세 테이블 | `feature_place_details`, `feature_area_details`, `feature_event_details`, `feature_files` |
-| 코드 entrypoint | `krtour.map.providers.krheritage`, `krtour.map.heritage` |
+| 코드 entrypoint | `kortravelmap.providers.krheritage`, `kortravelmap.heritage` |
 | 갱신 주기 (place/area) | 주 1회 |
 | 갱신 주기 (event) | 1일 1회 |
 
@@ -192,7 +192,7 @@ camelCase API key는 provider 호출 직전에 snake_case로 변환.
 ## 10. DB 적재
 
 ```python
-from krtour.map.heritage import (
+from kortravelmap.heritage import (
     collect_krheritage_heritage_features,
     load_krheritage_heritage_result,
     collect_krheritage_events,
@@ -219,7 +219,7 @@ await async_session.commit()
 | 항목 | place/area | event |
 |------|-----------|-------|
 | asset 이름 | `feature_place_krheritage_heritage` + `feature_area_krheritage_gis_spca` | `feature_event_krheritage_events` |
-| JOB_SPEC | `krtour.map.providers.krheritage.HERITAGE_JOB_SPEC` | `EVENT_JOB_SPEC` |
+| JOB_SPEC | `kortravelmap.providers.krheritage.HERITAGE_JOB_SPEC` | `EVENT_JOB_SPEC` |
 | suggested cron | `0 2 * * 1` (주 1회 월요일) | `0 3 * * *` (일 1회) |
 | group | `features_place` + `features_area` | `features_event` |
 | ConcurrencyConfig | `krheritage_api: max_concurrent=1` | 동일 |

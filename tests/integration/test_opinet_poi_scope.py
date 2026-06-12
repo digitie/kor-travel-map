@@ -16,16 +16,16 @@ from typing import TYPE_CHECKING
 
 import pytest
 from geoalchemy2 import WKTElement
-from krtour.map_dagster.provider_fetchers import _opinet_poi_target_bboxes
+from kortravelmap.dagster.provider_fetchers import _opinet_poi_target_bboxes
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from krtour.map.infra.models import PoiCacheTargetRow
-from krtour.map.providers.opinet import (
+from kortravelmap.infra.models import PoiCacheTargetRow
+from kortravelmap.providers.opinet import (
     OPINET_PROVIDER_NAME,
     OPINET_STATION_DATASET_KEY,
 )
-from krtour.map.settings import KrtourMapSettings
+from kortravelmap.settings import KorTravelMapSettings
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
@@ -61,7 +61,7 @@ async def test_opinet_poi_target_bboxes_active_targets_any_external_system(
     migrated_engine: AsyncEngine,
 ) -> None:
     dsn = migrated_engine.url.render_as_string(hide_password=False)
-    settings = KrtourMapSettings(pg_dsn=dsn)
+    settings = KorTravelMapSettings(pg_dsn=dsn)
     try:
         async with AsyncSession(migrated_engine) as session, session.begin():
             # 실제 등록 target은 external_system='tripmate' 등 외부 호출자다 — 포함돼야 함.

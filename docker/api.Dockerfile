@@ -12,10 +12,10 @@ RUN apt-get update \
 COPY pyproject.toml README.md alembic.ini ./
 COPY alembic ./alembic
 COPY src ./src
-COPY packages/krtour-map-admin ./packages/krtour-map-admin
+COPY packages/kor-travel-map-admin ./packages/kor-travel-map-admin
 
 RUN python -m pip install --no-cache-dir --upgrade pip \
-    && python -m pip install --no-cache-dir --prefix=/install . ./packages/krtour-map-admin
+    && python -m pip install --no-cache-dir --prefix=/install . ./packages/kor-travel-map-admin
 
 FROM python:3.12-slim AS runtime
 

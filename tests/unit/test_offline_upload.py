@@ -12,13 +12,13 @@ from typing import Any
 
 import pytest
 
-import krtour.map.offline_upload as offline_upload_mod
-from krtour.map.core.ids import (
+import kortravelmap.offline_upload as offline_upload_mod
+from kortravelmap.core.ids import (
     make_feature_id,
     make_payload_hash,
     make_source_record_key,
 )
-from krtour.map.dto import (
+from kortravelmap.dto import (
     Coordinate,
     Feature,
     FeatureBundle,
@@ -28,10 +28,10 @@ from krtour.map.dto import (
     SourceRecord,
     SourceRole,
 )
-from krtour.map.infra.feature_repo import FeatureLoadResult
-from krtour.map.infra.jobs_repo import ImportJob
-from krtour.map.infra.offline_upload_repo import OfflineUpload
-from krtour.map.offline_upload import (
+from kortravelmap.infra.feature_repo import FeatureLoadResult
+from kortravelmap.infra.jobs_repo import ImportJob
+from kortravelmap.infra.offline_upload_repo import OfflineUpload
+from kortravelmap.offline_upload import (
     parse_offline_feature_bundles,
     preview_offline_tabular_upload,
     run_offline_upload_load_job,

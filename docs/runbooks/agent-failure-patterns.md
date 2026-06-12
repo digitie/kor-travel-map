@@ -40,9 +40,9 @@
 
 - **증상**: 라우터/DTO 추가 후 CI `openapi-drift` red.
 - **회피/복구**:
-  `python packages/krtour-map-admin/scripts/export_openapi.py --profile all`로
+  `python packages/kor-travel-map-admin/scripts/export_openapi.py --profile all`로
   `openapi.json`/`openapi.user.json`을 재생성 →
-  `python packages/krtour-map-admin/scripts/export_openapi.py --profile all --check`로
+  `python packages/kor-travel-map-admin/scripts/export_openapi.py --profile all --check`로
   EXIT=0 확인 → **재생성본을 NTFS로 복사**해 커밋. WSL에서 재생성했으면 그 파일을
   NTFS로 cp 해야 커밋에 들어간다.
 
@@ -62,8 +62,8 @@
 
 ### B2 — WSL 미러가 main보다 뒤처짐
 
-- **증상**: WSL `~/dev/python-krtour-map` HEAD가 머지된 main보다 옛 커밋.
-- **복구**: `cd ~/dev/python-krtour-map && git fetch origin && git reset --hard
+- **증상**: WSL `~/dev/kor-travel-map` HEAD가 머지된 main보다 옛 커밋.
+- **복구**: `cd ~/dev/kor-travel-map && git fetch origin && git reset --hard
   origin/main`. WSL은 실행 샌드박스라 hard reset 안전(원본은 NTFS).
 
 ### B3 — 무관 파일이 커밋에 섞임
@@ -82,15 +82,15 @@
   있다.
 - **회피**: continue류 명령은 처음부터 editor를 명령 단위로 우회한다.
   ```
-  git.exe -C F:/dev/python-krtour-map-codex -c core.editor=true rebase --continue
-  git.exe -C F:/dev/python-krtour-map-codex -c core.editor=true merge --continue
+  git.exe -C F:/dev/kor-travel-map-codex -c core.editor=true rebase --continue
+  git.exe -C F:/dev/kor-travel-map-codex -c core.editor=true merge --continue
   ```
 - **복구**: 이미 멈췄으면 해당 `git.exe ... rebase --continue` 프로세스를 종료한 뒤
   위 명령으로 재실행한다.
   ```
   ps -ef | rg "git.exe .*rebase --continue|git.exe .*merge --continue"
   kill <pid>
-  git.exe -C F:/dev/python-krtour-map-codex -c core.editor=true rebase --continue
+  git.exe -C F:/dev/kor-travel-map-codex -c core.editor=true rebase --continue
   ```
 - **원칙**: AI agent는 rebase/merge continue에서 항상 `-c core.editor=true`를 붙인다.
   커밋 메시지를 바꿀 필요가 없으면 `commit --amend --no-edit`,
@@ -221,8 +221,8 @@
   export NVM_DIR="$HOME/.nvm"
   . "$NVM_DIR/nvm.sh"
   nvm use 20.20.2
-  npm install -w packages/krtour-map-admin/frontend --include=optional
-  npm -w packages/krtour-map-admin/frontend run build
+  npm install -w packages/kor-travel-map-admin/frontend --include=optional
+  npm -w packages/kor-travel-map-admin/frontend run build
   ```
   그래도 native package가 계속 꼬이면 ignored artifact인 `node_modules/`를 WSL에서
   지우고 WSL npm으로 다시 설치한다. Windows npm으로 frontend 서버를 실행하지 않는다.
@@ -234,7 +234,7 @@
 - **회피**: `0.0.0.0`이 필요하면 script에 인자를 덧붙여 중복 hostname을 만들지 말고,
   WSL Node 활성화 후 Next.js를 명시적으로 실행한다.
   ```bash
-  cd packages/krtour-map-admin/frontend
+  cd packages/kor-travel-map-admin/frontend
   npx next dev --port 12305 --hostname 0.0.0.0
   ```
   production 확인은 다음처럼 한다.
@@ -250,15 +250,15 @@
 - **회피**: Windows PATH를 섞지 말고 WSL 최소 PATH를 명시하거나, nvm을 source하는
   `bash -lc`를 사용한다.
   ```bash
-  REPO="/mnt/f/dev/python-krtour-map-codex"  # 자기 에이전트 worktree 경로로 교체
+  REPO="/mnt/f/dev/kor-travel-map-codex"  # 자기 에이전트 worktree 경로로 교체
   export REPO
   setsid -f bash -lc '
-    cd "$REPO/packages/krtour-map-admin/frontend"
+    cd "$REPO/packages/kor-travel-map-admin/frontend"
     export NVM_DIR="$HOME/.nvm"
     . "$NVM_DIR/nvm.sh"
     nvm use 20.20.2 >/dev/null
     exec npx next dev --port 12305 --hostname 0.0.0.0
-  ' > "$REPO/.codex_tmp/krtour-map-admin-frontend.log" 2>&1
+  ' > "$REPO/.codex_tmp/kor-travel-map-admin-frontend.log" 2>&1
   ```
 
 ### F5 — workspace binary 위치 오판
@@ -268,7 +268,7 @@
   패키지 내부 `node_modules/.bin/next`가 없을 수 있다.
 - **회피**: frontend 디렉토리에서 `npx next ...`를 쓰거나, 루트 binary를 쓴다.
   ```bash
-  cd packages/krtour-map-admin/frontend
+  cd packages/kor-travel-map-admin/frontend
   npx next dev --port 12305 --hostname 0.0.0.0
   # 또는
   "$(git rev-parse --show-toplevel)/node_modules/.bin/next" dev --port 12305 --hostname 0.0.0.0
@@ -282,7 +282,7 @@
   Windows/WSL Node 실행이 섞였다.
 - **복구**: 반복 재시도하지 말고 dev artifact를 먼저 지운다.
   ```bash
-  rm -rf packages/krtour-map-admin/frontend/.next
+  rm -rf packages/kor-travel-map-admin/frontend/.next
   ```
   그 다음 WSL Node 확인(F1) → Linux optional dependency 확인(F2) → 서버 기동(F3).
 
@@ -316,7 +316,7 @@
   띄우려 한다.
 - **정본**: 서버 2개는 WSL, Playwright Chromium만 Windows.
   - WSL: backend `:12301`, frontend `:12305`.
-  - Windows PowerShell: `cd packages\krtour-map-admin\frontend; npm run e2e`.
+  - Windows PowerShell: `cd packages\kor-travel-map-admin\frontend; npm run e2e`.
   `playwright.config.ts`에는 `webServer`가 없으므로, Windows e2e 전 WSL 서버가 이미
   떠 있어야 한다.
 

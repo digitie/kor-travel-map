@@ -1,7 +1,7 @@
 # standard-data-feature-etl.md — data.go.kr 표준데이터 5종 ETL
 
 본 문서는 공공데이터포털 표준데이터 5종 전용 ETL이다. 별도 provider 라이브러리
-없이 본 저장소 내부의 bounded asyncio client (`krtour.map.standard_data`)로
+없이 본 저장소 내부의 bounded asyncio client (`kortravelmap.standard_data`)로
 처리한다. **범용 data.go.kr gateway로 확장 X**.
 
 ## 1. 문서 정보
@@ -9,7 +9,7 @@
 | 항목 | 값 |
 |------|----|
 | provider | `data.go.kr-standard` (canonical) |
-| 코드 entrypoint | `krtour.map.standard_data` |
+| 코드 entrypoint | `kortravelmap.standard_data` |
 | 코드 구조 | `catalog.py` / `client.py` / `etl.py` / `exceptions.py` |
 | 갱신 주기 | dataset별 (월 / 반기 / 연 / 주) |
 
@@ -28,7 +28,7 @@
 ## 3. 모듈 구조
 
 ```
-src/krtour/map/standard_data/
+src/kortravelmap/standard_data/
   __init__.py
   catalog.py        — dataset id, endpoint URL, feature kind, 갱신 주기
   client.py         — StandardDataClient (async), fetch_page, iter_pages, debug_dataset

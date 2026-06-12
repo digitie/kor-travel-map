@@ -20,7 +20,7 @@
 | source_entity_type | `cultural_festival` | `festival` |
 | source_role | `primary` | `enrichment` |
 | 상세 테이블 | `feature_event_details` | (별도 row 없음 — enrichment 갱신만) |
-| 코드 entrypoint | `krtour.map.providers.standard_data.cultural_festivals_to_bundles` | `krtour.map.providers.visitkorea.festival_to_enrichment_links` |
+| 코드 entrypoint | `kortravelmap.providers.standard_data.cultural_festivals_to_bundles` | `kortravelmap.providers.visitkorea.festival_to_enrichment_links` |
 | 갱신 주기 | 1일 1회 (표준데이터 announce 주기) | 1주 1회 (enrichment 충분) |
 | 기본 page size | 1000 | 1000 |
 
@@ -28,9 +28,9 @@
 
 - `python-visitkorea-api`: TourAPI REST 호출, typed model (`SearchFestivalItem`),
   pagination (`iter_pages`).
-- `python-krtour-map`: typed model → `Feature(kind=event)` + `EventDetail` +
+- `kor-travel-map`: typed model → `Feature(kind=event)` + `EventDetail` +
   `SourceRecord` + `SourceLink` 변환, 이미지 → RustFS, DB 적재.
-- krtour-map Dagster: asset wiring, schedule, retry, 알림.
+- kor-travel-map Dagster: asset wiring, schedule, retry, 알림.
 
 ## 3. Provider 경계
 
@@ -82,7 +82,7 @@ Protocol 필드명은 provider 실모델 `PublicCulturalFestival`(`python-datago
 
 - 좌표: `item.mapx` (lon), `item.mapy` (lat) → `Coordinate(lon=..., lat=...)`. 없으면
   None (event는 좌표 nullable 허용).
-- 주소: `item.addr1`, `item.addr2`, `item.zipcode` → `krtour.map.dto.Address`.
+- 주소: `item.addr1`, `item.addr2`, `item.zipcode` → `kortravelmap.dto.Address`.
 - **`item.area_code` / `item.sigungu_code` / `item.l_dong_regn_cd` /
   `item.l_dong_signgu_cd`는 TourAPI 자체 코드 — 법정동코드로 저장 X**.
   raw/payload에만. 좌표 reverse geocoding으로 법정동코드 확정.
@@ -119,7 +119,7 @@ def festival_to_file_sources(item, *, feature_id, source_record_key):
 
 ```python
 from datetime import datetime, timezone, timedelta
-from krtour.map.providers.standard_data import cultural_festivals_to_bundles
+from kortravelmap.providers.standard_data import cultural_festivals_to_bundles
 
 KST = timezone(timedelta(hours=9))
 
@@ -153,15 +153,15 @@ async def collect_datagokr_cultural_festivals(
     return bundles
 
 
-# 호출 예시 (krtour-map Dagster asset 측):
+# 호출 예시 (kor-travel-map Dagster asset 측):
 # fetched = datetime.now(tz=KST)
 # bundles = await collect_datagokr_cultural_festivals(
-#     datagokr_client, fetched_at=fetched, reverse_geocoder=kraddr_geo,
+#     datagokr_client, fetched_at=fetched, reverse_geocoder=kor_travel_geo,
 # )
 # await krtour_client.load_feature_bundles(bundles)
 ```
 
-`cultural_festivals_to_bundles`의 시그니처/Protocol은 `src/krtour/map/providers/
+`cultural_festivals_to_bundles`의 시그니처/Protocol은 `src/kortravelmap/providers/
 standard_data.py`. fixture/test는 `tests/unit/test_providers_standard_data.py`
 (PR#34, 14 case).
 
@@ -172,7 +172,7 @@ standard_data.py`. fixture/test는 `tests/unit/test_providers_standard_data.py`
 # Record 본체는 생성하지 않는다. festival_to_enrichment_links가 datagokr로
 # 적재된 feature_id와 visitkorea contentId를 source_links(role='enrichment')로
 # 잇는다. (PR#51 구현 완료)
-from krtour.map.providers.visitkorea import festival_to_enrichment_links
+from kortravelmap.providers.visitkorea import festival_to_enrichment_links
 
 # 매칭(datagokr festival ↔ visitkorea)은 이름/지역 fuzzy(ADR-016)이므로
 # FestivalMatcher plug-in으로 주입 — match() -> None이면 해당 item 생략.
@@ -184,13 +184,13 @@ from krtour.map.providers.visitkorea import festival_to_enrichment_links
 ```
 
 시그니처/Protocol(`VisitKoreaFestivalItem` / `FestivalMatcher` / `FestivalMatch`
-/ `FestivalEnrichment`)은 `src/krtour/map/providers/visitkorea.py`. 테스트는
+/ `FestivalEnrichment`)은 `src/kortravelmap/providers/visitkorea.py`. 테스트는
 `tests/unit/test_providers_visitkorea.py` (PR#51, 8 case).
 
 ### 7.2 load
 
 ```python
-from krtour.map.events import VisitKoreaFestivalLoadResources, load_visitkorea_festival_result
+from kortravelmap.events import VisitKoreaFestivalLoadResources, load_visitkorea_festival_result
 
 resources = VisitKoreaFestivalLoadResources(
     client=visitkorea_client,
@@ -217,7 +217,7 @@ commit/rollback은 caller.
 | 항목 | 값 |
 |------|----|
 | asset 이름 (TripMate) | `feature_event_visitkorea_festivals` |
-| JOB_SPEC | `krtour.map.providers.visitkorea.JOB_SPEC` |
+| JOB_SPEC | `kortravelmap.providers.visitkorea.JOB_SPEC` |
 | suggested cron | `0 3 * * *` (매일 03:00 KST) |
 | group | `features_event` |
 | ConcurrencyConfig | `visitkorea_api: max_concurrent=1` |

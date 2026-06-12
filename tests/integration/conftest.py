@@ -80,7 +80,7 @@ async def pg_engine(pg_container: Any) -> AsyncIterator[AsyncEngine]:
     """
     from sqlalchemy import event, text
 
-    from krtour.map.infra.db import make_async_engine
+    from kortravelmap.infra.db import make_async_engine
 
     raw_dsn = pg_container.get_connection_url()
     engine = make_async_engine(raw_dsn)
@@ -174,7 +174,7 @@ async def migrated_engine(pg_container: Any) -> AsyncIterator[AsyncEngine]:
     from sqlalchemy import event
 
     from alembic import command
-    from krtour.map.infra.db import make_async_engine, normalize_async_dsn
+    from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
 
     raw_dsn = pg_container.get_connection_url()  # type: ignore[attr-defined]
     async_dsn = normalize_async_dsn(raw_dsn)

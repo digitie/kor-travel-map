@@ -1,4 +1,4 @@
-"""``krtour.map.category`` 단위 테스트 (PR#18 - ADR-023 이전 + ADR-027 적용).
+"""``kortravelmap.category`` 단위 테스트 (PR#18 - ADR-023 이전 + ADR-027 적용).
 
 검증 항목:
 - 총 144건 (원본 141 + ADR-027 3건)
@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from krtour.map.category import (
+from kortravelmap.category import (
     PLACE_CATEGORY_BY_CODE,
     PLACE_CATEGORY_DEFINITIONS,
     PLACE_CATEGORY_MAPBOX_MAKI_ICON_VALUES,

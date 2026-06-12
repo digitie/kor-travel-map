@@ -11,7 +11,7 @@
 | Feature.kind | `place` |
 | source_entity_type | `beach` |
 | 상세 테이블 | `feature_place_details` |
-| 코드 entrypoint | `krtour.map.providers.khoa`, `krtour.map.beaches` |
+| 코드 entrypoint | `kortravelmap.providers.khoa`, `kortravelmap.beaches` |
 | 갱신 주기 | 1일 1회 |
 | data.go.kr | `15058519` |
 | endpoint | `http://apis.data.go.kr/1192000/service/OceansBeachInfoService1/getOceansBeachInfo1` |
@@ -19,9 +19,9 @@
 ## 2. 범위 / 책임
 
 - `python-khoa-api`: REST 호출, typed model (`OceanBeachInfo`), pagination.
-- `python-krtour-map`: typed model → `Feature(kind=place)` + `PlaceDetail`,
+- `kor-travel-map`: typed model → `Feature(kind=place)` + `PlaceDetail`,
   이미지 → RustFS.
-- krtour-map Dagster: schedule.
+- kor-travel-map Dagster: schedule.
 
 ## 3. dataset 매핑
 
@@ -76,7 +76,7 @@ def khoa_beach_to_file_sources(item, *, feature_id, source_record_key):
 ## 7. DB 적재
 
 ```python
-from krtour.map.beaches import (
+from kortravelmap.beaches import (
     collect_khoa_oceans_beach_info,
     load_khoa_oceans_beach_info_result,
     collect_and_load_khoa_oceans_beach_info,
@@ -108,7 +108,7 @@ MOIS 인허가에 같은 위치 / 명칭 해수욕장이 있는 경우:
 | 항목 | 값 |
 |------|----|
 | asset 이름 | `feature_place_khoa_beaches` |
-| JOB_SPEC | `krtour.map.providers.khoa.JOB_SPEC` (beach) |
+| JOB_SPEC | `kortravelmap.providers.khoa.JOB_SPEC` (beach) |
 | suggested cron | `0 2 10 * *` (매월 10일 02:00 — 해수욕장 신규/변경 드뭄) |
 | group | `features_place` |
 | ConcurrencyConfig | `khoa_api: max_concurrent=1` |

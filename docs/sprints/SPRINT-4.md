@@ -17,7 +17,7 @@
       asset)는 Phase 2(Sprint 5)와 묶어 도입** — Phase 1은 본 lib 내 관측만.
 - [x] dedup_review_queue 첫 운영 (PR#87/#88/#89 — `find_dedup_candidates`(knps
       사찰 ↔ krheritage temple) → `ops.dedup_review_queue` upsert,
-      `AsyncKrtourMapClient.sync_dedup_candidates`로 transaction 오케스트레이션).
+      `AsyncKorTravelMapClient.sync_dedup_candidates`로 transaction 오케스트레이션).
       룰 안정성은 실 PostGIS integration 5+3건 + unit 6건 검증.
 - [x] Coverage bar 75% pass (실측 92.66%, `pyproject.toml` `fail_under=75`).
 - [x] Sprint 4 분할 여부 (4a/4b) 결정 — **분할(4a/4b) 채택** (§3 노트).
@@ -49,7 +49,7 @@
 - 디버그 UI에서 사용자 명시 트리거 (캐시만, 적재 X).
 - Sprint 4 시점에 라우터 `/debug/mois-license/{license_id}` 추가.
 
-**module**: `src/krtour/map/providers/mois.py` (`__init__.py`로 namespace
+**module**: `src/kortravelmap/providers/mois.py` (`__init__.py`로 namespace
 package), `_steps.py` (4단계), `_slugs.py` (195 슬러그 + PROMOTED 42 분류),
 `_address.py` (admin_address parsing).
 
@@ -98,21 +98,21 @@ package), `_steps.py` (4단계), `_slugs.py` (195 슬러그 + PROMOTED 42 분류
 
 ### 2.8 CLI mutex 첫 도입 (ADR-039 accepted 2026-05-27)
 
-Sprint 4 진입과 함께 `src/krtour/map/cli/` 폴더 신설 + 첫 CLI 명령부터
+Sprint 4 진입과 함께 `src/kortravelmap/cli/` 폴더 신설 + 첫 CLI 명령부터
 PostgreSQL advisory lock 기반 mutex 박음:
 
-- `src/krtour/map/cli/mutex.py` — `async with mutex_lock(session, key)` async
+- `src/kortravelmap/cli/mutex.py` — `async with mutex_lock(session, key)` async
   context manager. `pg_try_advisory_lock(hash(key))` + `pg_advisory_unlock`.
 - mutex 적용 대상 (Sprint 4 시점):
-  - `krtour-map import <provider> <dataset>` — 같은 provider+dataset_key 중복
+  - `ktmctl import <provider> <dataset>` — 같은 provider+dataset_key 중복
     실행 차단. lock key: `import:{provider}:{dataset_key}`.
-  - `krtour-map dedup-merge <review_id>` — manual merge 중복 실행 차단. lock
+  - `ktmctl dedup-merge <review_id>` — manual merge 중복 실행 차단. lock
     key: `dedup-merge:{review_id}`. (구현: 후보쌍을 유일 식별하는 `review_id`로
     구체화 — 한 feature가 여러 pending 쌍에 속할 수 있어 feature_id는 모호. ADR-016
     master 자동 선정 + `ops.feature_merge_history`. 2026-06-01 완료.)
   - `alembic upgrade head` — Alembic 다중 워커 중복 실행 차단. lock key:
     `alembic-upgrade`.
-- read-only (예: `krtour-map status`, `--dry-run`)는 mutex 없이.
+- read-only (예: `ktmctl status`, `--dry-run`)는 mutex 없이.
 - ADR-039 lock 잔존 fallback: `lifespan`/`atexit`로 unlock + `pg_stat_activity`
   helper로 lock holder 확인.
 
@@ -132,9 +132,9 @@ Sprint 4 진입 prep PR로 `python-kraddr-base` 전수 survey + 흡수 계획:
 
 - `docs/backup-restore.md` 신설 — pg_dump --format=custom 옵션 + RustFS
   snapshot 절차 + hot-swap 흐름.
-- `src/krtour/map/infra/backup.py` — `dump_postgres` / `dump_rustfs` /
+- `src/kortravelmap/infra/backup.py` — `dump_postgres` / `dump_rustfs` /
   `restore_to_staging` / `swap_dsn`.
-- `packages/krtour-map-admin/src/.../routers/admin_backups.py` —
+- `packages/kor-travel-map-admin/src/.../routers/admin_backups.py` —
   ADR-035/040 admin 라우터.
 - mutex 적용: `backup` / `restore:{backup_id}` (ADR-039).
 - 1차는 **cold restore** (downtime 허용), hot-swap은 Sprint 5.
@@ -194,6 +194,6 @@ Sprint 4 진입 prep PR로 `python-kraddr-base` 전수 survey + 흡수 계획:
 - [x] dedup_review_queue 운영 안정 + F4 WARN baseline 결정 (provisional 1000,
       `DEDUP_PENDING_WARN_THRESHOLD`; dedup-merge + 운영 FP 통계 + F4 — PR#133/#138/#139)
 - [x] Coverage bar 80% pass (실측 94.12%, `pyproject.toml` `fail_under=80` — PR#141)
-- [x] Place phone enrichment 백그라운드 시작 (`krtour.map.enrichment` — PR#140)
+- [x] Place phone enrichment 백그라운드 시작 (`kortravelmap.enrichment` — PR#140)
 - [x] `docs/journal.md` Sprint 4 종료 회고 entry (PR#141 coverage 80% entry)
 - [x] `docs/sprints/SPRINT-5.md` 진입 준비 (+ ADR-045 독립 프로그램화 반영 필요)

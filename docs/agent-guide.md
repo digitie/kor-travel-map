@@ -38,15 +38,15 @@ worktree.md`). 새 세션 진입 후 컨텍스트 확보 직전에 자기 worktr
 
 ```bash
 # 어떤 AI 에이전트인지에 따라:
-git.exe -C F:/dev/python-krtour-map-codex status       # ChatGPT Codex
-git.exe -C F:/dev/python-krtour-map-claude status      # Claude Code
-git.exe -C F:/dev/python-krtour-map-antigravity status # Google Antigravity 2.0
+git.exe -C F:/dev/kor-travel-map-codex status       # ChatGPT Codex
+git.exe -C F:/dev/kor-travel-map-claude status      # Claude Code
+git.exe -C F:/dev/kor-travel-map-antigravity status # Google Antigravity 2.0
 ```
 
 worktree가 아직 없으면 `docs/codegraph-worktree.md` §3 "최초 setup" 참조.
 codegraph 인덱스는 `codegraph sync`로 증분 동기(있다면) / `codegraph init -i`
-(최초). 사용자가 직접 작업할 때는 메인 worktree(`F:\dev\python-krtour-map\`)를
-쓰고 `krtour-map-*`에는 들어가지 않는다.
+(최초). 사용자가 직접 작업할 때는 메인 worktree(`F:\dev\kor-travel-map\`)를
+쓰고 `kor-travel-map-*`에는 들어가지 않는다.
 
 ## 2. 결정·기록 5종 (필수 유지)
 
@@ -218,7 +218,7 @@ main에 직접 push 금지. 모든 변경은 feature branch + PR.
 ### 7.5.1 시작
 
 ```bash
-cd ~/dev/python-krtour-map
+cd ~/dev/kor-travel-map
 git checkout main
 git pull origin main
 git checkout -b feat/<topic>      # 또는 fix/, chore/, docs/, refactor/, adr/
@@ -226,7 +226,7 @@ git checkout -b feat/<topic>      # 또는 fix/, chore/, docs/, refactor/, adr/
 
 ### 7.5.2 작업
 
-- 짧은 commit + 명확한 메시지. 첫 줄 70자 이내. 형식 권장 (kraddr-geo 패턴 미러):
+- 짧은 commit + 명확한 메시지. 첫 줄 70자 이내. 형식 권장 (kor-travel-geo 패턴 미러):
   ```
   <scope>: <verb> <object> (#T-NNN 또는 ADR-NNN 또는 issue)
 
@@ -243,7 +243,7 @@ git checkout -b feat/<topic>      # 또는 fix/, chore/, docs/, refactor/, adr/
 
 ### 7.5.3 PR 작성
 
-표준 PR 본문 (kraddr-geo `docs/agent-guide.md` 패턴 미러):
+표준 PR 본문 (kor-travel-geo `docs/agent-guide.md` 패턴 미러):
 
 ```bash
 git push -u origin feat/<topic>
@@ -341,7 +341,7 @@ GitHub branch protection (운영자 수동 설정):
 - 브랜치 전환, 커밋, push 같은 순수 Git 명령은 Windows NTFS worktree에서
   Windows Git(`git.exe`)로 수행해도 된다.
 - 파일 조회·수정·테스트·lint·build·Docker·Python/Node/npm·`gh`/GitHub CLI는 WSL에서
-  `/mnt/f/dev/python-krtour-map-<agent>`로 이동해 실행한다.
+  `/mnt/f/dev/kor-travel-map-<agent>`로 이동해 실행한다.
 - Playwright e2e만 Windows 호스트에서 실행한다. 서버는 WSL/Docker 기준이다.
 - `data/`는 NTFS에 보관하고 git에는 넣지 않는다.
 - WSL ext4 mirror는 대량 I/O 성능·격리 필요 시의 선택 경로다. Git source of truth는

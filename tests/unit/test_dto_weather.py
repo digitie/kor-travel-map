@@ -7,7 +7,7 @@ from decimal import Decimal
 
 import pytest
 
-from krtour.map.dto import (
+from kortravelmap.dto import (
     ForecastStyle,
     TimelineBucket,
     WeatherDomain,

@@ -8,9 +8,9 @@ from typing import Any
 
 import pytest
 
-from krtour.map.category import PlaceCategoryCode, is_known_category_code
-from krtour.map.dto import Address, Coordinate, FeatureKind
-from krtour.map.providers.mcst import (
+from kortravelmap.category import PlaceCategoryCode, is_known_category_code
+from kortravelmap.dto import Address, Coordinate, FeatureKind
+from kortravelmap.providers.mcst import (
     MCST_EXCLUDED_FILE_DATASETS,
     MCST_FILE_DATASETS,
     MCST_MARKER_COLOR,

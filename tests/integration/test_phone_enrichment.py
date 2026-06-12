@@ -14,13 +14,13 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from krtour.map.enrichment import (
+from kortravelmap.enrichment import (
     apply_place_phone_enrichment,
     find_place_phone_candidates,
 )
-from krtour.map.infra.feature_repo import get_feature_row
-from krtour.map.infra.models import FeatureRow, SourceLinkRow, SourceRecordRow
-from krtour.map.providers.mois import DATASET_KEY_BULK, PROVIDER_NAME
+from kortravelmap.infra.feature_repo import get_feature_row
+from kortravelmap.infra.models import FeatureRow, SourceLinkRow, SourceRecordRow
+from kortravelmap.providers.mois import DATASET_KEY_BULK, PROVIDER_NAME
 
 if TYPE_CHECKING:
     pass

@@ -20,8 +20,8 @@ from typing import Any
 
 import pytest
 
-from krtour.map.dto import Address, Coordinate, FeatureKind, SourceRole
-from krtour.map.providers.krheritage import (
+from kortravelmap.dto import Address, Coordinate, FeatureKind, SourceRole
+from kortravelmap.providers.krheritage import (
     DATASET_KEY_EVENT,
     DATASET_KEY_HERITAGE,
     HERITAGE_MARKER_COLOR,

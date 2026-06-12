@@ -1,4 +1,4 @@
-// Vite library mode config for @krtour/map-marker-react (ADR-029).
+// Vite library mode config for @kor-travel-map/map-marker-react (ADR-029).
 // 코드 작성 단계 진입 시 본 skeleton을 기반으로 src/ 구현.
 
 import { defineConfig } from "vite";
@@ -8,7 +8,7 @@ export default defineConfig({
   build: {
     lib: {
       entry: resolve(__dirname, "src/index.ts"),
-      name: "KrtourMapMarkerReact",
+      name: "KorTravelMapMarkerReact",
       formats: ["es", "cjs"],
       fileName: (format) => `index.${format}.js`,
     },

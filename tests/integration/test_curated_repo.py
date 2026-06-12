@@ -8,9 +8,9 @@ from typing import TYPE_CHECKING
 import pytest
 from sqlalchemy import text
 
-from krtour.map.dto import Address, Coordinate
-from krtour.map.infra import curated_repo, feature_repo
-from krtour.map.providers.datagokr_file_data import file_data_rows_to_bundles
+from kortravelmap.dto import Address, Coordinate
+from kortravelmap.infra import curated_repo, feature_repo
+from kortravelmap.providers.datagokr_file_data import file_data_rows_to_bundles
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession

@@ -1,4 +1,4 @@
-"""``test_client_orchestration`` — ``AsyncKrtourMapClient`` 적재/dedup (#122).
+"""``test_client_orchestration`` — ``AsyncKorTravelMapClient`` 적재/dedup (#122).
 
 client가 transaction을 소유해 commit하는 경로를 실 PostGIS(migrated_engine,
 alembic head)에서 검증한다:
@@ -24,18 +24,18 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from krtour.map.client import AsyncKrtourMapClient
-from krtour.map.dto.coordinate import Coordinate
-from krtour.map.infra.feature_update_repo import (
+from kortravelmap.client import AsyncKorTravelMapClient
+from kortravelmap.dto.coordinate import Coordinate
+from kortravelmap.infra.feature_update_repo import (
     FeatureUpdateRequest,
     FeatureUpdateRequestPreview,
 )
-from krtour.map.infra.models import FeatureRow
-from krtour.map.providers.airkorea import (
+from kortravelmap.infra.models import FeatureRow
+from kortravelmap.providers.airkorea import (
     air_quality_stations_to_bundles,
     air_quality_to_weather_values,
 )
-from krtour.map.providers.standard_data import cultural_festivals_to_bundles
+from kortravelmap.providers.standard_data import cultural_festivals_to_bundles
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
@@ -133,9 +133,9 @@ def _stub(feature_id: str, name: str = "불국사") -> _Stub:
 @pytest.fixture
 async def map_client(
     migrated_engine: AsyncEngine,
-) -> AsyncIterator[AsyncKrtourMapClient]:
+) -> AsyncIterator[AsyncKorTravelMapClient]:
     """client + teardown TRUNCATE (client는 commit하므로 명시 격리)."""
-    client = AsyncKrtourMapClient(migrated_engine)
+    client = AsyncKorTravelMapClient(migrated_engine)
     try:
         yield client
     finally:
@@ -151,7 +151,7 @@ async def _seed_temples(engine: AsyncEngine, *feature_ids: str) -> None:
 
 
 async def test_load_feature_bundles_commits_and_reads(
-    map_client: AsyncKrtourMapClient,
+    map_client: AsyncKorTravelMapClient,
 ) -> None:
     bundles = await cultural_festivals_to_bundles(
         [_FEST],  # type: ignore[list-item]
@@ -177,7 +177,7 @@ async def test_load_feature_bundles_commits_and_reads(
 
 
 async def test_sync_dedup_candidates_persists(
-    map_client: AsyncKrtourMapClient, migrated_engine: AsyncEngine
+    map_client: AsyncKorTravelMapClient, migrated_engine: AsyncEngine
 ) -> None:
     await _seed_temples(migrated_engine, "cli-knps-1", "cli-krh-1")
 
@@ -198,7 +198,7 @@ async def test_sync_dedup_candidates_persists(
 
 
 async def test_sync_dedup_excludes_auto_merge_when_disabled(
-    map_client: AsyncKrtourMapClient, migrated_engine: AsyncEngine
+    map_client: AsyncKorTravelMapClient, migrated_engine: AsyncEngine
 ) -> None:
     await _seed_temples(migrated_engine, "cli-a", "cli-b")
 
@@ -212,7 +212,7 @@ async def test_sync_dedup_excludes_auto_merge_when_disabled(
 
 
 async def test_feature_update_request_client_lifecycle(
-    map_client: AsyncKrtourMapClient,
+    map_client: AsyncKorTravelMapClient,
 ) -> None:
     preview = await map_client.enqueue_feature_update_request(
         scope={"type": "feature_ids", "feature_ids": []},
@@ -305,7 +305,7 @@ class _VkItem:
     modified_time: str | None = "20260301120000"
 
 
-async def _seed_primary_festival(map_client: AsyncKrtourMapClient) -> None:
+async def _seed_primary_festival(map_client: AsyncKorTravelMapClient) -> None:
     """datagokr 1차 축제(event) feature를 commit 적재 (matcher 후보 대상)."""
     bundles = await cultural_festivals_to_bundles(
         [_FEST], fetched_at=datetime(2026, 3, 1, 9, 0, tzinfo=_KST)
@@ -314,7 +314,7 @@ async def _seed_primary_festival(map_client: AsyncKrtourMapClient) -> None:
 
 
 async def test_refresh_festival_enrichment_reviews_classifies(
-    map_client: AsyncKrtourMapClient,
+    map_client: AsyncKorTravelMapClient,
 ) -> None:
     await _seed_primary_festival(map_client)
     fetched = datetime(2026, 5, 28, 10, 0, tzinfo=_KST)
@@ -346,7 +346,7 @@ async def test_refresh_festival_enrichment_reviews_classifies(
 
 
 async def test_resolve_enrichment_review_reject_keeps_no_link(
-    map_client: AsyncKrtourMapClient, migrated_engine: AsyncEngine
+    map_client: AsyncKorTravelMapClient, migrated_engine: AsyncEngine
 ) -> None:
     await _seed_primary_festival(map_client)
     fetched = datetime(2026, 5, 28, 10, 0, tzinfo=_KST)
@@ -413,7 +413,7 @@ class _AirMeasurement:
 
 
 async def test_load_air_quality_commits_station_and_values(
-    map_client: AsyncKrtourMapClient, migrated_engine: AsyncEngine
+    map_client: AsyncKorTravelMapClient, migrated_engine: AsyncEngine
 ) -> None:
     fetched = datetime(2026, 6, 8, 9, 0, tzinfo=_KST)
     station = _AirStation(

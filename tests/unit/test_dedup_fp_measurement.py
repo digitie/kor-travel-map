@@ -20,13 +20,13 @@ from decimal import Decimal
 
 import pytest
 
-from krtour.map.core.scoring import (
+from kortravelmap.core.scoring import (
     THRESHOLD_AUTO,
     THRESHOLD_MANUAL,
     classify_decision,
     score_pair,
 )
-from krtour.map.dto.coordinate import Coordinate
+from kortravelmap.dto.coordinate import Coordinate
 
 
 def _c(lon: str, lat: str) -> Coordinate:

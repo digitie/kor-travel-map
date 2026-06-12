@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 from dagster import AssetExecutionContext, build_asset_context
-from krtour.map_dagster.assets import (
+from kortravelmap.dagster.assets import (
     run_feature_event_datagokr_cultural_festivals,
     run_feature_event_krheritage_events,
     run_feature_geometry_knps_records,
@@ -22,12 +22,12 @@ from krtour.map_dagster.assets import (
     run_feature_place_opinet_stations,
     run_feature_weather_airkorea_air_quality,
 )
-from krtour.map_dagster.etl import DagsterFeatureLoadResult
+from kortravelmap.dagster.etl import DagsterFeatureLoadResult
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from krtour.map.client import AsyncKrtourMapClient
-from krtour.map.dto import Address, Coordinate
+from kortravelmap.client import AsyncKorTravelMapClient
+from kortravelmap.dto import Address, Coordinate
 
 pytestmark = pytest.mark.integration
 
@@ -234,8 +234,8 @@ class _ReverseGeocoder:
 @pytest.fixture
 async def map_client(
     migrated_engine: Any,
-) -> AsyncIterator[AsyncKrtourMapClient]:
-    client = AsyncKrtourMapClient(migrated_engine)
+) -> AsyncIterator[AsyncKorTravelMapClient]:
+    client = AsyncKorTravelMapClient(migrated_engine)
     try:
         yield client
     finally:
@@ -244,7 +244,7 @@ async def map_client(
 
 
 async def test_dagster_assets_validate_coordinates_and_load_to_postgis(
-    map_client: AsyncKrtourMapClient,
+    map_client: AsyncKorTravelMapClient,
     migrated_engine: Any,
 ) -> None:
     results = [
@@ -433,12 +433,12 @@ async def test_dagster_assets_validate_coordinates_and_load_to_postgis(
 
 async def _run_asset(
     runner: Callable[[AssetExecutionContext], Awaitable[DagsterFeatureLoadResult]],
-    client: AsyncKrtourMapClient,
+    client: AsyncKorTravelMapClient,
     **resources: object,
 ) -> DagsterFeatureLoadResult:
     context = build_asset_context(
         resources={
-            "krtour_map_client": client,
+            "kor_travel_map_client": client,
             "reverse_geocoder": _ReverseGeocoder(),
             "fetched_at": _FETCHED,
             **resources,
@@ -477,7 +477,7 @@ class _AirMeasurement:
 
 
 async def test_airkorea_asset_distinct_features_for_same_station_name(
-    map_client: AsyncKrtourMapClient,
+    map_client: AsyncKorTravelMapClient,
     migrated_engine: Any,
 ) -> None:
     """동명 측정소(서울/대구 ``중구``)가 asset join에서 별개 feature로 분리(#301)."""
@@ -491,7 +491,7 @@ async def test_airkorea_asset_distinct_features_for_same_station_name(
     ]
     context = build_asset_context(
         resources={
-            "krtour_map_client": map_client,
+            "kor_travel_map_client": map_client,
             "reverse_geocoder": _ReverseGeocoder(),
             "fetched_at": _FETCHED,
             "airkorea_stations": stations,

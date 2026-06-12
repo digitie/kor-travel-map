@@ -1,9 +1,9 @@
 # 외부(공유) 객체 저장소 모드 오버레이 (#372, ADR-052 amendment).
 #
-# RustFS 인프라를 tripmate-manager 공유 인스턴스(S3 :12101/console :12105)로 쓸 때
+# RustFS 인프라를 kor-travel-docker-manager 공유 인스턴스(S3 :12101/console :12105)로 쓸 때
 # 자체 rustfs 계열 서비스 의존을 제거한다. 적용:
 #
-#   KRTOUR_MAP_OBJECT_STORE_EXTERNAL=true bash scripts/docker-up.sh
+#   KOR_TRAVEL_MAP_OBJECT_STORE_EXTERNAL=true bash scripts/docker-up.sh
 #   # 또는 직접:
 #   docker compose -f docker-compose.yml -f docker-compose.external-object-store.yml up -d ...
 #

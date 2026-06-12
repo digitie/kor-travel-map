@@ -22,8 +22,8 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession
 
-from krtour.map.infra.admin_feature_repo import list_enrichment_reviews
-from krtour.map.infra.enrichment_review_repo import (
+from kortravelmap.infra.admin_feature_repo import list_enrichment_reviews
+from kortravelmap.infra.enrichment_review_repo import (
     EnrichmentQueueResult,
     EnrichmentReviewInput,
     decide_enrichment_review,
@@ -31,8 +31,8 @@ from krtour.map.infra.enrichment_review_repo import (
     enqueue_review_candidates,
     pending_enrichment_reviews,
 )
-from krtour.map.infra.models import FeatureRow
-from krtour.map.providers.visitkorea import (
+from kortravelmap.infra.models import FeatureRow
+from kortravelmap.providers.visitkorea import (
     FestivalCandidate,
     FestivalReviewCandidate,
     ScoringFestivalMatcher,

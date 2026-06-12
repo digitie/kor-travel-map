@@ -9,9 +9,9 @@ from typing import TYPE_CHECKING
 import pytest
 from sqlalchemy import text
 
-from krtour.map.infra import feature_repo, scope_repo
-from krtour.map.infra.poi_cache_target_repo import upsert_poi_cache_target
-from krtour.map.providers.standard_data import cultural_festivals_to_bundles
+from kortravelmap.infra import feature_repo, scope_repo
+from kortravelmap.infra.poi_cache_target_repo import upsert_poi_cache_target
+from kortravelmap.providers.standard_data import cultural_festivals_to_bundles
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession

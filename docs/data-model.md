@@ -1,6 +1,6 @@
 # data-model.md — PostgreSQL + PostGIS 스키마 reference
 
-이 문서는 `python-krtour-map` v2의 데이터 모델 reference다. 모든 컬럼/인덱스/
+이 문서는 `kor-travel-map` v2의 데이터 모델 reference다. 모든 컬럼/인덱스/
 CHECK constraint가 여기에 박혀 있고, Alembic migration 작성 시 본 문서를 기준으로
 한다. 인덱스 설계 근거는 `docs/performance.md`와 ADR을 참고한다.
 
@@ -46,7 +46,7 @@ CREATE TABLE feature.features (
     ) STORED,
   geom                         geometry(Geometry, 4326), -- route LINESTRING / area MULTIPOLYGON
 
-  -- 주소 (krtour.map.dto.Address 직렬화)
+  -- 주소 (kortravelmap.dto.Address 직렬화)
   address                      JSONB NOT NULL DEFAULT '{}'::jsonb,
   legal_dong_code              CHAR(10),
   road_name_code               TEXT,
@@ -246,7 +246,7 @@ cache를 추가했다.
 
 `rejected`/`archived` row는 provider 재적재나 source rule 재적용으로 되살리지 않는다.
 TripMate는 REST snapshot을 읽어 `app.curated_trip_plans` /
-`app.curated_plan_pois`로 복사하며, krtour-map DB에 직접 접근하지 않는다.
+`app.curated_plan_pois`로 복사하며, kor-travel-map DB에 직접 접근하지 않는다.
 
 ## 2. `provider_sync.source_records`
 
@@ -788,7 +788,7 @@ CREATE INDEX idx_overrides_prevent_reactivation
 ### 9.4 `ops.feature_merge_history`
 
 구현됨 — **alembic 0007** + `infra/models.py::FeatureMergeHistoryRow` +
-`infra/merge_repo.py`(`apply_feature_merge`/`merge_from_review`). `krtour-map
+`infra/merge_repo.py`(`apply_feature_merge`/`merge_from_review`). `kor-travel-map
 dedup-merge`가 `dedup_review_queue` 후보 1쌍을 master/loser로 확정(ADR-016
 `core.scoring.select_master`)해 병합할 때 1행 INSERT. loser의 `source_links`는
 master로 재지정되고 loser feature는 soft-delete(`status='deleted'`)된다.
@@ -849,12 +849,12 @@ CREATE INDEX idx_violations_detected_brin ON ops.data_integrity_violations USING
 
 | violation_type | 발생 조건 | payload 필수 필드 |
 |----------------|-----------|-------------------|
-| `provider_address_mismatch` | provider 주소와 좌표 기준 kraddr-geo reverse 주소가 다른 장소로 판단됨 | `provider_address`, `kraddr_geo_address`, `coord`, `match_level`, `distance_m`, `source_record_key` |
-| `provider_address_partial_match` | 시군구/읍면동은 맞지만 상세 주소가 불완전하거나 다름 | `provider_address`, `kraddr_geo_address`, `match_level`, `notes` |
+| `provider_address_mismatch` | provider 주소와 좌표 기준 kor-travel-geo reverse 주소가 다른 장소로 판단됨 | `provider_address`, `kor_travel_geo_address`, `coord`, `match_level`, `distance_m`, `source_record_key` |
+| `provider_address_partial_match` | 시군구/읍면동은 맞지만 상세 주소가 불완전하거나 다름 | `provider_address`, `kor_travel_geo_address`, `match_level`, `notes` |
 | `geocode_failed` | provider 주소 문자열로 `POST /v2/geocode` 후보를 얻지 못함 | `provider_address`, `provider_fields`, `error` |
 | `reverse_geocode_failed` | 좌표로 `POST /v2/reverse` 주소를 얻지 못함 | `coord`, `error` |
-| `missing_address` | provider 주소도 kraddr-geo 주소도 없음 | `provider_fields`, `coord` |
-| `missing_bjd_code` | kraddr-geo 결과에 10자리 법정동코드가 없음 | `kraddr_geo_address`, `coord` |
+| `missing_address` | provider 주소도 kor-travel-geo 주소도 없음 | `provider_fields`, `coord` |
+| `missing_bjd_code` | kor-travel-geo 결과에 10자리 법정동코드가 없음 | `kor_travel_geo_address`, `coord` |
 
 admin UI가 수동 수정하면 `status='resolved'`, `resolved_at`, `payload.resolution`
 (`field_path`, `old_value`, `new_value`, `operator`, `reason`)을 기록한다. 실제 보정값은

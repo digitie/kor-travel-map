@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from krtour.map.infra.advisory_lock import advisory_lock, try_advisory_lock
+from kortravelmap.infra.advisory_lock import advisory_lock, try_advisory_lock
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
@@ -64,7 +64,7 @@ async def test_blocking_lock_releases_on_exit(pg_engine: AsyncEngine) -> None:
 async def test_same_session_reentrant_via_int_key(pg_engine: AsyncEngine) -> None:
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from krtour.map.infra.advisory_lock import advisory_lock_key
+    from kortravelmap.infra.advisory_lock import advisory_lock_key
 
     lock_id = advisory_lock_key(_KEY)
     # int 키도 동일 동작 (해싱 생략).

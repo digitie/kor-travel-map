@@ -5,7 +5,7 @@ SPRINT-4 §2.8 lock key 포맷을 검증한다 (advisory lock 동작은 integrat
 
 from __future__ import annotations
 
-from krtour.map.cli import (
+from kortravelmap.cli import (
     alembic_upgrade_lock_key,
     dedup_merge_lock_key,
     import_lock_key,

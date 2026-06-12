@@ -13,19 +13,19 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from sqlalchemy import text
 
-from krtour.map.infra import (
+from kortravelmap.infra import (
     admin_feature_repo,
     consistency,
     dedup_refresh_repo,
     ops_repo,
 )
-from krtour.map.infra.admin_feature_repo import (  # noqa: PLC2701 - EXPLAIN 대상
+from kortravelmap.infra.admin_feature_repo import (  # noqa: PLC2701 - EXPLAIN 대상
     _DEDUP_REVIEW_SQL,
     _ENRICHMENT_REVIEW_SCALAR_STATUS_PROVIDER_SQL,
     _ENRICHMENT_REVIEW_STATUS_PROVIDER_SQL,
     _ENRICHMENT_REVIEW_STATUS_SQL,
 )
-from krtour.map.infra.feature_repo import (  # noqa: PLC2701 - EXPLAIN 대상
+from kortravelmap.infra.feature_repo import (  # noqa: PLC2701 - EXPLAIN 대상
     _CLUSTER_BBOX_SQL_BY_UNIT,
     _FEATURE_SEARCH_BY_SCORE_SQL,
     _FEATURES_IN_BBOX_SQL,
@@ -764,7 +764,7 @@ async def test_t212d_dedup_refresh_and_consistency_checks_are_index_compatible(
             SELECT
                 'perf:f:' || lpad(g::text, 6, '0'),
                 'rustfs',
-                'krtour-map',
+                'kor-travel-map',
                 'provider/live-like/' || g::text || '.jpg'
             FROM generate_series(1, 200) AS g
             """

@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from krtour.map.infra.sync_state_repo import (
+from kortravelmap.infra.sync_state_repo import (
     get_sync_state,
     record_sync_failure,
     record_sync_success,

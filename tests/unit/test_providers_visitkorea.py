@@ -18,8 +18,8 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from pydantic import ValidationError
 
-from krtour.map.dto import SourceRole
-from krtour.map.providers.visitkorea import (
+from kortravelmap.dto import SourceRole
+from kortravelmap.providers.visitkorea import (
     DATASET_KEY_FESTIVAL_EVENTS,
     VISITKOREA_PROVIDER_NAME,
     FestivalEnrichment,

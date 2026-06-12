@@ -1,13 +1,13 @@
 """Alembic env.py — async-compatible, SecretStr DSN injection (ADR-007).
 
-DSN은 `KrtourMapSettings.pg_dsn` (`KRTOUR_MAP_PG_DSN` env var)에서 읽는다.
+DSN은 `KorTravelMapSettings.pg_dsn` (`KOR_TRAVEL_MAP_PG_DSN` env var)에서 읽는다.
 asyncpg driver로 정규화 후 `AsyncEngine`을 만들어 마이그레이션 실행.
 
 ``infra/models.py``의 ``metadata``를 ``target_metadata``로 사용 — autogenerate
 지원 (현 PR#28부터). search_path는 ``public, x_extension`` (ADR-008).
 
 사용:
-    KRTOUR_MAP_PG_DSN=postgresql://... alembic upgrade head
+    KOR_TRAVEL_MAP_PG_DSN=postgresql://... alembic upgrade head
 """
 
 from __future__ import annotations
@@ -21,8 +21,8 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
-from krtour.map.infra.db import normalize_async_dsn
-from krtour.map.infra.models import metadata
+from kortravelmap.infra.db import normalize_async_dsn
+from kortravelmap.infra.models import metadata
 
 if TYPE_CHECKING:
     pass
@@ -37,13 +37,13 @@ if config.config_file_name is not None:
 # DSN 결정 우선순위:
 #   1. 호출자가 ``Config.set_main_option('sqlalchemy.url', ...)``로 주입한 값
 #      (예: 테스트 ``alembic.command.upgrade`` 직접 호출 시)
-#   2. ``KRTOUR_MAP_PG_DSN`` env var (`KrtourMapSettings.pg_dsn`)
+#   2. ``KOR_TRAVEL_MAP_PG_DSN`` env var (`KorTravelMapSettings.pg_dsn`)
 # alembic.ini의 ``placeholder`` URL은 환경 미설정 fallback이며 항상 override.
 _existing_url = config.get_main_option("sqlalchemy.url")
 if not _existing_url or "placeholder" in _existing_url:
-    from krtour.map.settings import KrtourMapSettings  # lazy import
+    from kortravelmap.settings import KorTravelMapSettings  # lazy import
 
-    _settings = KrtourMapSettings()
+    _settings = KorTravelMapSettings()
     _existing_url = normalize_async_dsn(_settings.pg_dsn.get_secret_value())
     config.set_main_option("sqlalchemy.url", _existing_url)
 else:

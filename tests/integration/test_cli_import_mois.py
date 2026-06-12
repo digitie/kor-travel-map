@@ -1,4 +1,4 @@
-"""``test_cli_import_mois`` — ``krtour-map import mois`` round-trip (Sprint 4a).
+"""``test_cli_import_mois`` — ``ktmctl import mois`` round-trip (Sprint 4a).
 
 NDJSON snapshot 파일 → CLI ``import`` 명령(자체 engine, ``--dsn`` 주입) →
 ``run_mois_license_bulk_job`` → 실 PostGIS 적재를 검증한다. CLI는 commit하므로
@@ -16,11 +16,11 @@ import pytest
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from krtour.map.cli import import_lock_key
-from krtour.map.cli.main import build_parser
-from krtour.map.infra.advisory_lock import advisory_lock
-from krtour.map.infra.models import FeatureRow
-from krtour.map.providers.mois import DATASET_KEY_BULK, PROVIDER_NAME
+from kortravelmap.cli import import_lock_key
+from kortravelmap.cli.main import build_parser
+from kortravelmap.infra.advisory_lock import advisory_lock
+from kortravelmap.infra.models import FeatureRow
+from kortravelmap.providers.mois import DATASET_KEY_BULK, PROVIDER_NAME
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -56,7 +56,7 @@ async def container_dsn(
     ``migrated_engine``을 의존해 테이블(alembic head)을 보장하고, CLI가 만드는
     독립 engine이 붙을 DSN을 돌려준다. CLI는 commit하므로 teardown에서 정리한다.
     """
-    from krtour.map.infra.db import normalize_async_dsn
+    from kortravelmap.infra.db import normalize_async_dsn
 
     dsn = normalize_async_dsn(pg_container.get_connection_url())  # type: ignore[attr-defined]
     yield dsn
@@ -128,8 +128,8 @@ async def test_cli_import_mois_incremental_advances_cursor(
     assert rc == 0
     assert await _feature_count(migrated_engine) == 2
     # cursor가 history dataset에 영속화됨.
-    from krtour.map.infra.sync_state_repo import get_sync_state
-    from krtour.map.providers.mois import DATASET_KEY_HISTORY
+    from kortravelmap.infra.sync_state_repo import get_sync_state
+    from kortravelmap.providers.mois import DATASET_KEY_HISTORY
 
     async with AsyncSession(migrated_engine) as session:
         state = await get_sync_state(
@@ -194,8 +194,8 @@ async def test_cli_import_mois_closed_inactivates(
     assert await _active_feature_count(migrated_engine) == 1
 
     # closed dataset cursor 영속.
-    from krtour.map.infra.sync_state_repo import get_sync_state
-    from krtour.map.providers.mois import DATASET_KEY_CLOSED
+    from kortravelmap.infra.sync_state_repo import get_sync_state
+    from kortravelmap.providers.mois import DATASET_KEY_CLOSED
 
     async with AsyncSession(migrated_engine) as session:
         state = await get_sync_state(

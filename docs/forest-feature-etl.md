@@ -19,7 +19,7 @@
 | provider | `python-krforest-api` |
 | dataset_key | `forest_recreation_forests`, `forest_arboretums`, `forest_trails`, `forest_mountain_weather` |
 | Feature.kind | `place`, `area`, `route` / `WeatherValue` |
-| 코드 entrypoint | `krtour.map.providers.krforest`, `krtour.map.forest` |
+| 코드 entrypoint | `kortravelmap.providers.krforest`, `kortravelmap.forest` |
 | 갱신 주기 | provider별 (place/area/route 월~분기, 산악기상 시간 단위) |
 
 ## 2. dataset 매핑
@@ -78,7 +78,7 @@ async def mountain_weather_to_values(items, *, feature_id_by_obs_id, fetched_at)
 ## 6. DB 적재
 
 ```python
-from krtour.map.forest import (
+from kortravelmap.forest import (
     collect_krforest_recreation_features,
     collect_krforest_arboretum_features,
     collect_krforest_trail_features,
@@ -165,7 +165,7 @@ ConcurrencyConfig: `krforest_api: max_concurrent=1`.
 데이터를 통합 적재한다. **외부 provider 라이브러리는 이미 scaffold 단계까지
 완료**되었고 (`digitie/python-knps-api`, `6e36990 Initial KNPS API client
 scaffold`), 본 라이브러리에서는 ADR-027 (proposed, PR#9) + **ADR-028
-(proposed, 본 PR#12)** 로 통합 계약을 박는다. 실제 적재 코드 (`krtour.map.
+(proposed, 본 PR#12)** 로 통합 계약을 박는다. 실제 적재 코드 (`kortravelmap.
 providers.knps`)는 Sprint 2 진입 후.
 
 ### 11.1 provider 분리 결정 — 옵션 B 채택 (구현 완료)
@@ -183,7 +183,7 @@ providers.knps`)는 Sprint 2 진입 후.
 | GitHub | `digitie/python-knps-api` (`06da125f` 시점 = PR#4 `codex/keyless-file-download-dtos` merged 2026-05-25) |
 | canonical provider name | `python-knps-api` |
 | import | `from knps import KnpsClient, FileDataset, FileArtifact, ...` (knps-api PR#4 표면 — `ApiEndpoint`/`Page`/`raw_endpoint` 삭제됨, ADR-028 amendment §H) |
-| 본 라이브러리 변환 | `krtour.map.providers.knps` (Sprint 3 작성, ADR-034 7단계) |
+| 본 라이브러리 변환 | `kortravelmap.providers.knps` (Sprint 3 작성, ADR-034 7단계) |
 | dataset_key prefix | `knps_*` |
 | 인증 | **없음 (keyless)** — ADR-028 amendment + knps-api PR#4. `KNPS_SERVICE_KEY` / `DATA_GO_KR_SERVICE_KEY` 사용 안 함 |
 | Python | `>=3.11` |
@@ -475,7 +475,7 @@ README + 본 저장소 NOTICE에 출처 표기 의무.
 
 1. **완료**: 옵션 B 채택 + `python-knps-api` 저장소 신설 + ADR-027/028 accepted.
 2. **완료**: PR#25에서 knps-api PR#3+#4 keyless/file-only 계약 동기.
-3. **Sprint 3 구현**: `krtour.map.providers.knps` 모듈 신설, raw bytes 기반
+3. **Sprint 3 구현**: `kortravelmap.providers.knps` 모듈 신설, raw bytes 기반
    SHP/CSV parsing, `FeatureBundle` 변환, fixture 회귀 테스트.
 4. **후속 ADR**: `access_restriction`/`fire_alert` notice source 결정
    (산림청/소방청/scrape). KNPS는 notice source 아님.

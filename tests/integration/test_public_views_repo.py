@@ -8,9 +8,9 @@ from typing import Any
 
 import pytest
 
-from krtour.map.infra import feature_repo, public_views_repo
-from krtour.map.providers.khoa import beaches_to_bundles
-from krtour.map.providers.standard_data import cultural_festivals_to_bundles
+from kortravelmap.infra import feature_repo, public_views_repo
+from kortravelmap.providers.khoa import beaches_to_bundles
+from kortravelmap.providers.standard_data import cultural_festivals_to_bundles
 
 pytestmark = pytest.mark.integration
 

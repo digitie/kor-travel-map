@@ -8,9 +8,9 @@ from typing import TYPE_CHECKING
 import pytest
 from sqlalchemy import text
 
-from krtour.map.infra.batch_dag import run_batch_dag_consistency_gate
-from krtour.map.infra.jobs_repo import finish_import_job, start_import_job
-from krtour.map.infra.models import SourceRecordRow
+from kortravelmap.infra.batch_dag import run_batch_dag_consistency_gate
+from kortravelmap.infra.jobs_repo import finish_import_job, start_import_job
+from kortravelmap.infra.models import SourceRecordRow
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession

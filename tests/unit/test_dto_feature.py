@@ -7,8 +7,8 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
-from krtour.map.core import kst_now
-from krtour.map.dto import (
+from kortravelmap.core import kst_now
+from kortravelmap.dto import (
     AreaDetail,
     Coordinate,
     EventDetail,

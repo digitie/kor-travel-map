@@ -15,13 +15,13 @@ from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from krtour.map.infra.merge_repo import (
+from kortravelmap.infra.merge_repo import (
     MergeConflictError,
     MergeNotFoundError,
     apply_feature_merge,
     merge_from_review,
 )
-from krtour.map.infra.models import (
+from kortravelmap.infra.models import (
     DedupReviewQueueRow,
     FeatureRow,
     SourceLinkRow,

@@ -11,7 +11,7 @@
 | dataset_key | `krex_traffic_notices`, `kma_weather_alerts`, `forest_safety_notices`, `khoa_coastal_notices` |
 | Feature.kind | `notice` |
 | 상세 테이블 | `feature_notice_details` |
-| 코드 entrypoint | `krtour.map.providers.{krex,kma,krforest,khoa}`, `krtour.map.notices` |
+| 코드 entrypoint | `kortravelmap.providers.{krex,kma,krforest,khoa}`, `kortravelmap.notices` |
 
 ## 2. 4 dataset 갱신 주기
 
@@ -187,7 +187,7 @@ async def coastal_notice_to_bundle(item, *, fetched_at) -> FeatureBundle:
     ...
 
 # notices.py
-from krtour.map.dto.etl import EtlJobSpec
+from kortravelmap.dto.etl import EtlJobSpec
 
 def notice_job_specs() -> list[EtlJobSpec]:
     return [

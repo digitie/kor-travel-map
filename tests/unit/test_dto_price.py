@@ -7,7 +7,7 @@ from decimal import Decimal
 
 import pytest
 
-from krtour.map.dto import PriceDomain, PriceValue
+from kortravelmap.dto import PriceDomain, PriceValue
 
 KST = timezone(timedelta(hours=9))
 

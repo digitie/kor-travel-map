@@ -14,9 +14,9 @@
 
 이 문서는 T-211b admin UI 최신화 구현 전에 필요한 선행 정리다. 기준 문서는
 `docs/debug-ui-admin-workflows.md`, `docs/openapi-admin-contract.md`,
-`packages/krtour-map-admin/frontend/README.md`이고, 실제 구현 기준은
-`packages/krtour-map-admin/src/krtour/map_admin/routers/*`와
-`packages/krtour-map-admin/frontend/src/api/*`다.
+`packages/kor-travel-map-admin/frontend/README.md`이고, 실제 구현 기준은
+`packages/kor-travel-map-admin/src/kortravelmap/admin/routers/*`와
+`packages/kor-travel-map-admin/frontend/src/api/*`다.
 
 T-211a의 완료 기준은 다음 두 가지다.
 

@@ -1,12 +1,12 @@
-# krtour-map REST API 엔드포인트 검토 (2026-06-08)
+# kor-travel-map REST API 엔드포인트 검토 (2026-06-08)
 
-> 목적: krtour-map가 노출하는 REST 엔드포인트를 **정합성·일관성·누락·중복·versioning**과
+> 목적: kor-travel-map가 노출하는 REST 엔드포인트를 **정합성·일관성·누락·중복·versioning**과
 > 일반 REST best practice 기준으로 점검한다. TripMate 소비 측을 확인해 필요 기능 충족 여부도
 > 본다. **본 문서는 검토 결과만 기록한다(코드 수정 없음).**
 >
-> 점검 대상 = `packages/krtour-map-admin/openapi.json`(admin/full, **55 paths**) +
+> 점검 대상 = `packages/kor-travel-map-admin/openapi.json`(admin/full, **55 paths**) +
 > `openapi.user.json`(user/TripMate, **13 paths**). 두 spec 모두 `info.version = 0.2.0-dev`.
-> 소비 측 = `tripmate/apps/api/app/etl_bridge/krtour_map.py`(`KrtourMapClient` Protocol).
+> 소비 측 = `tripmate/apps/api/app/etl_bridge/kor_travel_map.py`(`KorTravelMapClient` Protocol).
 
 > **후속 결정(2026-06-08)**: 본 리포트는 당시 spec 기준으로
 > `/tripmate/feature-update-requests*`를 TripMate 외부 계약으로 분류했지만, 이후 사용자
@@ -32,9 +32,9 @@
 
 ## 2. TripMate 소비 surface 확인 (필요 기능)
 
-`KrtourMapClient` Protocol(7개 메서드) ↔ user-profile 엔드포인트 매핑:
+`KorTravelMapClient` Protocol(7개 메서드) ↔ user-profile 엔드포인트 매핑:
 
-| TripMate 클라이언트 메서드 | krtour-map 엔드포인트 | 충족 |
+| TripMate 클라이언트 메서드 | kor-travel-map 엔드포인트 | 충족 |
 |---|---|---|
 | `features_in_bounds(bbox,kinds,zoom,limit)` | `GET /features/in-bounds` | ✅ |
 | `features_nearby(lng,lat,radius_m,kinds,limit)` | `GET /features/nearby` | ✅ |
@@ -45,7 +45,7 @@
 | `request_feature(user_id,kind,title,coord,note)` | `POST /tripmate/feature-update-requests` | ✅(스키마 정합 확인 필요, §4-C2) |
 
 **결론: 기능 누락 없음.** user profile 13개 경로가 TripMate가 호출하는 모든 메서드를 덮는다.
-다만 `etl_bridge/krtour_map.py`는 **라이브러리 import 모델(ADR-003/005)** 기준 Protocol이고, ADR-045
+다만 `etl_bridge/kor_travel_map.py`는 **라이브러리 import 모델(ADR-003/005)** 기준 Protocol이고, ADR-045
 (HTTP/OpenAPI 연동)로 이행하면 HTTP 클라이언트로 교체돼야 한다. 그 시점에 §4-C2(스키마 정합)와
 §4-A(versioning)가 실제 영향이 된다.
 
@@ -66,7 +66,7 @@
 - ADR-045상 **TripMate가 HTTP로 cross-service 소비**하는 계약인데, breaking change 시 버전 분리
   수단이 없어 소비자가 조용히 깨질 수 있다.
 - **대조**: 소비자 TripMate는 자기 API를 `/api/v1/...`로 **버저닝**한다(`apps/api/app/api/v1/`).
-  제공자(krtour-map)가 버저닝을 안 하는 비대칭.
+  제공자(kor-travel-map)가 버저닝을 안 하는 비대칭.
 - 권고: 외부 노출면(user profile + `/tripmate/*` + `/features/*`)에 최소 `/v1` URL prefix 또는
   명시적 backward-compat 정책 + deprecation 헤더 전략 도입. 내부 `/admin`·`/ops`·`/debug`는 면제 가능.
 
@@ -218,5 +218,5 @@ POST               /tripmate/features/batch   (admin profile에도 노출)
 
 ---
 
-*작성: Claude (2026-06-08). 본 검토는 OpenAPI 두 profile + TripMate `etl_bridge/krtour_map.py` 기준.
+*작성: Claude (2026-06-08). 본 검토는 OpenAPI 두 profile + TripMate `etl_bridge/kor_travel_map.py` 기준.
 실제 인증/게이트웨이 구현은 인프라 레벨에 있을 수 있으나 본 검토는 **OpenAPI 계약 표면**을 기준으로 한다.*

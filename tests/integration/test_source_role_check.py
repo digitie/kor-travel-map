@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 import pytest
 from sqlalchemy import text
 
-from krtour.map.dto._enums import SourceRole
+from kortravelmap.dto._enums import SourceRole
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession

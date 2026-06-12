@@ -16,8 +16,8 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from sqlalchemy import text
 
-from krtour.map.infra.advisory_lock import advisory_lock
-from krtour.map.infra.feature_update_repo import (
+from kortravelmap.infra.advisory_lock import advisory_lock
+from kortravelmap.infra.feature_update_repo import (
     FEATURE_UPDATE_JOB_KIND,
     FEATURE_UPDATE_QUEUE_ADVISORY_KEY,
     FeatureUpdateLockBusy,

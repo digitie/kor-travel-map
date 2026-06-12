@@ -11,26 +11,26 @@
 
 | 과거 kraddr-base 개념 | 현재 정본 |
 |----------------------|-----------|
-| `kraddr.base.Address` | `krtour.map.dto.Address` |
-| `kraddr.base.PlaceCoordinate` | `krtour.map.dto.Coordinate` |
-| `kraddr.base.categories` | `krtour.map.category` |
-| `normalize_bjd_code`, `extract_sigungu_code` 등 주소 utility | `krtour.map.core.address` |
-| provider 좌표계 변환 | provider 라이브러리가 WGS84로 제공하거나 `krtour.map.infra.crs`/전용 변환 helper 사용 |
+| `kraddr.base.Address` | `kortravelmap.dto.Address` |
+| `kraddr.base.PlaceCoordinate` | `kortravelmap.dto.Coordinate` |
+| `kraddr.base.categories` | `kortravelmap.category` |
+| `normalize_bjd_code`, `extract_sigungu_code` 등 주소 utility | `kortravelmap.core.address` |
+| provider 좌표계 변환 | provider 라이브러리가 WGS84로 제공하거나 `kortravelmap.infra.crs`/전용 변환 helper 사용 |
 
 ## 신규 코드 규칙
 
 - `from kraddr.base import ...` 신규 import 금지.
 - 좌표 DTO는 항상 `Coordinate(lon=..., lat=...)` 의미로 다룬다. 외부 API와
   PostGIS 입력 순서는 `(lon, lat)`다.
-- 주소는 `krtour.map.dto.Address`에 저장하고, 행정코드 정규화는
-  `krtour.map.core.address`를 사용한다.
-- category/maki/icon 매핑은 `krtour.map.category`와
-  `@krtour/map-marker-react`를 사용한다.
+- 주소는 `kortravelmap.dto.Address`에 저장하고, 행정코드 정규화는
+  `kortravelmap.core.address`를 사용한다.
+- category/maki/icon 매핑은 `kortravelmap.category`와
+  `@kor-travel-map/map-marker-react`를 사용한다.
 - 과거 TripMate 직접 import 예시는 ADR-045/ADR-046 이후 폐기됐다. TripMate는
-  OpenAPI로 krtour-map을 호출한다.
+  OpenAPI로 kor-travel-map을 호출한다.
 
 ## 관련 문서
 
 - `docs/decisions.md` ADR-041 — kraddr-base 코드 흡수와 `PlaceCoordinate` 제외.
-- `docs/address-geocoding.md` — kraddr-geo REST v2와 `Address`/`Coordinate` 보강.
+- `docs/address-geocoding.md` — kor-travel-geo REST v2와 `Address`/`Coordinate` 보강.
 - `docs/category.md` — category 모듈 이전 결과.

@@ -9,9 +9,9 @@ from typing import Any
 
 import pytest
 
-from krtour.map.category import PlaceCategoryCode, is_known_category_code
-from krtour.map.dto import Address, Coordinate, FeatureKind, SourceRole
-from krtour.map.providers.datagokr_file_data import (
+from kortravelmap.category import PlaceCategoryCode, is_known_category_code
+from kortravelmap.dto import Address, Coordinate, FeatureKind, SourceRole
+from kortravelmap.providers.datagokr_file_data import (
     DATAGOKR_FILEDATA_DATASETS,
     DATAGOKR_FILEDATA_FOOD_MARKER_COLOR,
     DATAGOKR_FILEDATA_PROVIDER_NAME,

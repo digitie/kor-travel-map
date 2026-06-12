@@ -10,13 +10,13 @@ from typing import Any
 
 import pytest
 
-from krtour.map.dto import Address, Coordinate, FeatureBundle, FeatureKind, SourceRole
-from krtour.map.providers.krairport import (
+from kortravelmap.dto import Address, Coordinate, FeatureBundle, FeatureKind, SourceRole
+from kortravelmap.providers.krairport import (
     AIRPORT_CATEGORY,
     AIRPORT_MARKER_COLOR,
     DATASET_KEY_AIRPORTS,
 )
-from krtour.map.providers.krairport import (
+from kortravelmap.providers.krairport import (
     airports_to_bundles as _airports_async,
 )
 

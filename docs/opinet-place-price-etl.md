@@ -12,7 +12,7 @@
 | Feature.kind | `place` + `PricePoint` + `PriceValue` |
 | source_entity_type | `fuel_station` |
 | 상세 테이블 | `feature_place_details`, `price_points`, `price_values` |
-| 코드 entrypoint | `krtour.map.providers.opinet`, `krtour.map.opinet` |
+| 코드 entrypoint | `kortravelmap.providers.opinet`, `kortravelmap.opinet` |
 | category | **`06020000`** `TRANSPORT_FUEL` (`docs/category.md` §4) — Tier path: 교통 > 주유소 |
 | place_kind | `fuel_station` |
 | marker_icon | `fuel` (maki) |
@@ -24,14 +24,14 @@
 
 - `python-opinet-api`: OpiNet REST 호출, typed model (`StationDetail`,
   `StationPrice`), pagination, KATEC (EPSG:5181) 좌표 처리.
-- `python-krtour-map`: typed model → `Feature(kind=place)` + `PlaceDetail` +
+- `kor-travel-map`: typed model → `Feature(kind=place)` + `PlaceDetail` +
   `PricePoint` + `PriceValue`, DB 적재.
-- krtour-map Dagster: schedule, OpiNet 분당 60회 쿼터 보호 (max_concurrent=1).
+- kor-travel-map Dagster: schedule, OpiNet 분당 60회 쿼터 보호 (max_concurrent=1).
 
 ## 3. 변환 계약
 
 ```python
-from krtour.map.providers.opinet import station_detail_to_bundle
+from kortravelmap.providers.opinet import station_detail_to_bundle
 
 bundle: OpinetStationFeatureBundle = station_detail_to_bundle(
     detail,                          # python-opinet-api StationDetail
@@ -48,7 +48,7 @@ bundle: OpinetStationFeatureBundle = station_detail_to_bundle(
 
 - 좌표: OpiNet 응답은 KATEC (EPSG:5181). `python-opinet-api`가 WGS84 변환 결과를
   제공하고, 본 라이브러리는 `Coordinate(lon=..., lat=...)`로 저장한다.
-- 주소: `address_road` (도로명) + `address_jibun` (지번) → `krtour.map.dto.Address`.
+- 주소: `address_road` (도로명) + `address_jibun` (지번) → `kortravelmap.dto.Address`.
 - **OpiNet `sigun_code`는 OpiNet 자체 코드** — 법정동코드 X. raw/payload만.
 - reverse geocoder **필수** — 정확한 `legal_dong_code` 확정.
 
@@ -105,7 +105,7 @@ OpiNet 시설 정보:
 ### 8.1 단일 station
 
 ```python
-from krtour.map.opinet import load_opinet_station_detail
+from kortravelmap.opinet import load_opinet_station_detail
 
 async def update_one_station(client, async_session, station_no, reverse_geocoder):
     detail = await client.aget_station_detail(station_no)
@@ -155,7 +155,7 @@ bulk 적재가 30k 파라미터 초과 가능 → `psycopg.copy_*` 사용 (ADR-0
 |------|----|
 | place asset 이름 | `feature_place_opinet_stations` |
 | price asset 이름 | `price_opinet_fuel` |
-| JOB_SPEC | `krtour.map.providers.opinet.PLACE_JOB_SPEC` / `PRICE_JOB_SPEC` |
+| JOB_SPEC | `kortravelmap.providers.opinet.PLACE_JOB_SPEC` / `PRICE_JOB_SPEC` |
 | suggested cron (place) | `0 3 1 * *` (매월 1일 03:00 KST) |
 | suggested cron (price) | `0 6,14,22 * * *` (일 3회) |
 | group | `features_place` / `features_price` |

@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from krtour.map.infra.feature_repo import FeatureLoadResult
-from krtour.map.mois import _batched
+from kortravelmap.infra.feature_repo import FeatureLoadResult
+from kortravelmap.mois import _batched
 
 
 @dataclass(frozen=True)

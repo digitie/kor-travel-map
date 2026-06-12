@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from krtour.map.infra.prewarm import (
+from kortravelmap.infra.prewarm import (
     DEFAULT_HOT_RELATIONS,
     prewarm_extension_available,
     prewarm_relations,

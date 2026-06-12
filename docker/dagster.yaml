@@ -4,4 +4,4 @@ telemetry:
 storage:
   postgres:
     postgres_url:
-      env: KRTOUR_MAP_DAGSTER_PG_URL
+      env: KOR_TRAVEL_MAP_DAGSTER_PG_URL

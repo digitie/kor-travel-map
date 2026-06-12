@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING
 import pytest
 from sqlalchemy import text
 
-from krtour.map.dto.weather import WeatherValue
-from krtour.map.infra import weather_repo
+from kortravelmap.dto.weather import WeatherValue
+from kortravelmap.infra import weather_repo
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
