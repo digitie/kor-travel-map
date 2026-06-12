@@ -175,7 +175,7 @@ GET /v1/public/festivals/{feature_id}
   값 projection은 후속 marine/weather 확정 후 채운다.
 - 축제 월별 뷰는 `EventDetail.starts_on`/`ends_on` 기간 겹침으로 집계한다.
 
-### 2.4.2 `/v1/curated-features*` — 테마형 큐레이션 후보 (문서 계약, 아직 OpenAPI 미포함)
+### 2.4.2 `/v1/curated-features*` — 테마형 큐레이션 후보 (T-223c-1 구현)
 
 세계음식점, 독립서점, 카페가 있는 서점, 도서관, 무장애 관광지 같은 테마형 source는
 [`docs/curated-features.md`](curated-features.md)의 `feature.curated_*` overlay 계약을
@@ -183,7 +183,8 @@ GET /v1/public/festivals/{feature_id}
 `app.curated_plan_pois`로 1:1 복사한다. TripMate의 `/notice-plans`는 호환 API alias일
 뿐 신규 정본명이 아니다.
 
-제안 엔드포인트:
+T-223c-1부터 다음 read 표면은 `openapi.user.json` 사용자 profile과
+`@krtour/map-user-client` 타입에 포함한다.
 
 ```
 GET /v1/curated-themes
@@ -193,8 +194,8 @@ GET /v1/curated-features/{curated_feature_id}
 GET /v1/curated-features/{curated_feature_id}/tripmate-copy
 ```
 
-구현 시 사용자 profile에 추가하고 `openapi.user.json` 및 `@krtour/map-user-client` 타입을
-재생성한다. write/admin 표면은 `/v1/admin/curated-*`로 둔다.
+write/admin 표면은 `/v1/admin/curated-*`로 둔다. T-223c-1은 DB/API foundation과
+rule apply endpoint까지 제공하며, Dagster 자동 실행과 Admin UI는 T-223c-2/c-3 후속이다.
 
 ### 2.5 `/v1/admin/*` — 운영자 (인프라 SSO + kill-switch)
 ```
@@ -337,10 +338,10 @@ POST /v1/debug/etl/{provider}/{dataset}/preview
 - **Batch 응답 키**: `items`는 list array 전용으로 고정하고, batch id-keyed map은 `found`로
   둔다(TripMate 3차 리뷰 반영).
 - **codegen(T-210e)**: `/v1` 안정 commit에서 진행.
-- **TripMate T-130 공개 뷰**: 해수욕장/축제 공개 뷰 후보 사양을
-  `docs/public-views-api.md`에 추가했다. 구현 전까지 `openapi.user.json`에는 포함하지 않는다.
-- **curated_features**: 테마형 큐레이션 후보 사양을
-  `docs/curated-features.md`에 추가했다. 구현 전까지 `openapi.user.json`에는 포함하지 않는다.
+- **TripMate T-130 공개 뷰**: 해수욕장/축제 공개 뷰는
+  `docs/public-views-api.md`와 `openapi.user.json`을 따른다(T-222b).
+- **curated_features**: 테마형 큐레이션 후보는
+  `docs/curated-features.md`와 `openapi.user.json`을 따른다(T-223c-1 read 표면).
 
 ---
 

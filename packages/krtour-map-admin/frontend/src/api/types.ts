@@ -68,6 +68,198 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/curated-features": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Admin Curated Features Route */
+        get: operations["list_admin_curated_features_route_v1_admin_curated_features_get"];
+        put?: never;
+        /** Create Admin Curated Feature Route */
+        post: operations["create_admin_curated_feature_route_v1_admin_curated_features_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/curated-features/{curated_feature_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Admin Curated Feature Route */
+        delete: operations["delete_admin_curated_feature_route_v1_admin_curated_features__curated_feature_id__delete"];
+        options?: never;
+        head?: never;
+        /** Patch Admin Curated Feature Route */
+        patch: operations["patch_admin_curated_feature_route_v1_admin_curated_features__curated_feature_id__patch"];
+        trace?: never;
+    };
+    "/v1/admin/curated-features/{curated_feature_id}/select": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Select Admin Curated Feature Route */
+        post: operations["select_admin_curated_feature_route_v1_admin_curated_features__curated_feature_id__select_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/curated-features/{curated_feature_id}/unselect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Unselect Admin Curated Feature Route */
+        post: operations["unselect_admin_curated_feature_route_v1_admin_curated_features__curated_feature_id__unselect_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/curated-source-rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Admin Curated Source Rules Route */
+        get: operations["list_admin_curated_source_rules_route_v1_admin_curated_source_rules_get"];
+        put?: never;
+        /** Create Admin Curated Source Rule Route */
+        post: operations["create_admin_curated_source_rule_route_v1_admin_curated_source_rules_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/curated-source-rules/{rule_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Patch Admin Curated Source Rule Route */
+        patch: operations["patch_admin_curated_source_rule_route_v1_admin_curated_source_rules__rule_id__patch"];
+        trace?: never;
+    };
+    "/v1/admin/curated-source-rules/{rule_id}/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Apply Admin Curated Source Rule Route */
+        post: operations["apply_admin_curated_source_rule_route_v1_admin_curated_source_rules__rule_id__apply_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/curated-sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Admin Curated Sources Route */
+        get: operations["list_admin_curated_sources_route_v1_admin_curated_sources_get"];
+        put?: never;
+        /** Create Admin Curated Source Route */
+        post: operations["create_admin_curated_source_route_v1_admin_curated_sources_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/curated-sources/{source_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Patch Admin Curated Source Route */
+        patch: operations["patch_admin_curated_source_route_v1_admin_curated_sources__source_id__patch"];
+        trace?: never;
+    };
+    "/v1/admin/curated-themes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Admin Curated Themes Route */
+        get: operations["list_admin_curated_themes_route_v1_admin_curated_themes_get"];
+        put?: never;
+        /** Create Admin Curated Theme Route */
+        post: operations["create_admin_curated_theme_route_v1_admin_curated_themes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/curated-themes/{theme_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Patch Admin Curated Theme Route */
+        patch: operations["patch_admin_curated_theme_route_v1_admin_curated_themes__theme_id__patch"];
+        trace?: never;
+    };
     "/v1/admin/dedup-reviews": {
         parameters: {
             query?: never;
@@ -590,6 +782,91 @@ export interface paths {
         };
         /** PlaceCategory 정적 카탈로그(144건, 선택적 DB 분포) */
         get: operations["list_categories_v1_categories_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/curated-features": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Curated Features Route */
+        get: operations["list_curated_features_route_v1_curated_features_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/curated-features/{curated_feature_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Curated Feature Route */
+        get: operations["get_curated_feature_route_v1_curated_features__curated_feature_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/curated-features/{curated_feature_id}/tripmate-copy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Curated Tripmate Copy Route */
+        get: operations["get_curated_tripmate_copy_route_v1_curated_features__curated_feature_id__tripmate_copy_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/curated-sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Curated Sources Route */
+        get: operations["list_curated_sources_route_v1_curated_sources_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/curated-themes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Curated Themes Route */
+        get: operations["list_curated_themes_route_v1_curated_themes_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2556,6 +2833,553 @@ export interface components {
             lat: number;
             /** Lon */
             lon: number;
+        };
+        /** CuratedFeatureCreateRequest */
+        CuratedFeatureCreateRequest: {
+            /**
+             * Curation Status
+             * @default candidate
+             * @enum {string}
+             */
+            curation_status: "candidate" | "curated" | "rejected" | "archived";
+            /** Display Summary */
+            display_summary?: string | null;
+            /** Display Title */
+            display_title?: string | null;
+            /** Feature Id */
+            feature_id: string;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Rank Score
+             * @default 0
+             */
+            rank_score: number;
+            /** Rejected By */
+            rejected_by?: string | null;
+            /** Rejection Reason */
+            rejection_reason?: string | null;
+            /** Selected By */
+            selected_by?: string | null;
+            /**
+             * Selection Origin
+             * @default admin
+             * @enum {string}
+             */
+            selection_origin: "source_rule" | "admin" | "external_api";
+            /** Source Id */
+            source_id: string;
+            /** Source Record Key */
+            source_record_key?: string | null;
+            /** Theme Id */
+            theme_id: string;
+            /**
+             * Tripmate Copy Policy
+             * @default manual_review
+             * @enum {string}
+             */
+            tripmate_copy_policy: "copy_allowed" | "copy_blocked" | "manual_review";
+            /**
+             * Tripmate Relation
+             * @default nearby_option
+             * @enum {string}
+             */
+            tripmate_relation: "primary_stop" | "food_stop" | "cafe_stop" | "bookstore_stop" | "nearby_option" | "accessibility_support" | "pet_support" | "family_support" | "theme_area_anchor";
+        };
+        /** CuratedFeaturePatchRequest */
+        CuratedFeaturePatchRequest: {
+            /** Curation Status */
+            curation_status?: ("candidate" | "curated" | "rejected" | "archived") | null;
+            /** Display Summary */
+            display_summary?: string | null;
+            /** Display Title */
+            display_title?: string | null;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            } | null;
+            /** Rank Score */
+            rank_score?: number | null;
+            /** Source Record Key */
+            source_record_key?: string | null;
+            /** Tripmate Copy Policy */
+            tripmate_copy_policy?: ("copy_allowed" | "copy_blocked" | "manual_review") | null;
+            /** Tripmate Relation */
+            tripmate_relation?: ("primary_stop" | "food_stop" | "cafe_stop" | "bookstore_stop" | "nearby_option" | "accessibility_support" | "pet_support" | "family_support" | "theme_area_anchor") | null;
+        };
+        /** CuratedFeatureResponse */
+        CuratedFeatureResponse: {
+            data: components["schemas"]["CuratedFeatureView"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** CuratedFeatureStatusRequest */
+        CuratedFeatureStatusRequest: {
+            /** Actor */
+            actor?: string | null;
+            /** Reason */
+            reason?: string | null;
+        };
+        /**
+         * CuratedFeatureView
+         * @description curated feature overlay view.
+         */
+        CuratedFeatureView: {
+            /** Address */
+            address: {
+                [key: string]: unknown;
+            };
+            /** Archived At */
+            archived_at?: string | null;
+            /** Copy Version */
+            copy_version: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Curated Feature Id */
+            curated_feature_id: string;
+            /** Curation Status */
+            curation_status: string;
+            /** Dataset Key */
+            dataset_key: string;
+            /** Detail */
+            detail: {
+                [key: string]: unknown;
+            };
+            /** Display Summary */
+            display_summary?: string | null;
+            /** Display Title */
+            display_title?: string | null;
+            /** Feature Category */
+            feature_category: string;
+            /** Feature Id */
+            feature_id: string;
+            /** Feature Kind */
+            feature_kind: string;
+            /** Feature Name */
+            feature_name: string;
+            /** Lat */
+            lat?: number | null;
+            /** Legal Dong Code */
+            legal_dong_code?: string | null;
+            /** Lon */
+            lon?: number | null;
+            /** Metadata */
+            metadata: {
+                [key: string]: unknown;
+            };
+            /** Provider */
+            provider: string;
+            /** Rank Score */
+            rank_score: number;
+            /** Rejected At */
+            rejected_at?: string | null;
+            /** Rejected By */
+            rejected_by?: string | null;
+            /** Rejection Reason */
+            rejection_reason?: string | null;
+            /** Selected At */
+            selected_at?: string | null;
+            /** Selected By */
+            selected_by?: string | null;
+            /** Selection Origin */
+            selection_origin: string;
+            /** Sido Code */
+            sido_code?: string | null;
+            /** Sigungu Code */
+            sigungu_code?: string | null;
+            /** Source Id */
+            source_id: string;
+            /** Source Name */
+            source_name: string;
+            /** Source Record Key */
+            source_record_key?: string | null;
+            /** Source Url */
+            source_url?: string | null;
+            /** Theme Group */
+            theme_group: string;
+            /** Theme Id */
+            theme_id: string;
+            /** Theme Name */
+            theme_name: string;
+            /** Theme Slug */
+            theme_slug: string;
+            /** Tripmate Copy Policy */
+            tripmate_copy_policy: string;
+            /** Tripmate Relation */
+            tripmate_relation: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** CuratedFeaturesData */
+        CuratedFeaturesData: {
+            /** Items */
+            items: components["schemas"]["CuratedFeatureView"][];
+        };
+        /** CuratedFeaturesResponse */
+        CuratedFeaturesResponse: {
+            data: components["schemas"]["CuratedFeaturesData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** CuratedSourceCreateRequest */
+        CuratedSourceCreateRequest: {
+            /** Dataset Key */
+            dataset_key: string;
+            /** Freshness Note */
+            freshness_note?: string | null;
+            /** Last Checked At */
+            last_checked_at?: string | null;
+            /** Last Source Modified At */
+            last_source_modified_at?: string | null;
+            /** License */
+            license?: string | null;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            };
+            /** Next Expected At */
+            next_expected_at?: string | null;
+            /** Provider */
+            provider: string;
+            /**
+             * Provider Status
+             * @default implemented
+             * @enum {string}
+             */
+            provider_status: "implemented" | "provider_needed" | "manual_only" | "deprecated";
+            /** Row Count */
+            row_count?: number | null;
+            /**
+             * Source Kind
+             * @enum {string}
+             */
+            source_kind: "openapi" | "filedata" | "standard" | "internal" | "manual";
+            /** Source Name */
+            source_name: string;
+            /** Source Url */
+            source_url?: string | null;
+            /**
+             * Update Cycle
+             * @default unknown
+             * @enum {string}
+             */
+            update_cycle: "realtime" | "daily" | "weekly" | "monthly" | "annual" | "one_time" | "unknown";
+        };
+        /** CuratedSourcePatchRequest */
+        CuratedSourcePatchRequest: {
+            /** Freshness Note */
+            freshness_note?: string | null;
+            /** Last Checked At */
+            last_checked_at?: string | null;
+            /** Last Source Modified At */
+            last_source_modified_at?: string | null;
+            /** License */
+            license?: string | null;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            } | null;
+            /** Next Expected At */
+            next_expected_at?: string | null;
+            /** Provider Status */
+            provider_status?: ("implemented" | "provider_needed" | "manual_only" | "deprecated") | null;
+            /** Row Count */
+            row_count?: number | null;
+            /** Source Kind */
+            source_kind?: ("openapi" | "filedata" | "standard" | "internal" | "manual") | null;
+            /** Source Name */
+            source_name?: string | null;
+            /** Source Url */
+            source_url?: string | null;
+            /** Update Cycle */
+            update_cycle?: ("realtime" | "daily" | "weekly" | "monthly" | "annual" | "one_time" | "unknown") | null;
+        };
+        /** CuratedSourceResponse */
+        CuratedSourceResponse: {
+            data: components["schemas"]["CuratedSourceView"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** CuratedSourceRuleCreateRequest */
+        CuratedSourceRuleCreateRequest: {
+            /** Category */
+            category?: string | null;
+            /** Dataset Key */
+            dataset_key: string;
+            /**
+             * Default Action
+             * @default candidate
+             * @enum {string}
+             */
+            default_action: "candidate" | "curated" | "ignore";
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            };
+            /** Place Kind */
+            place_kind?: string | null;
+            /**
+             * Priority
+             * @default 0
+             */
+            priority: number;
+            /** Region Scope */
+            region_scope?: {
+                [key: string]: unknown;
+            };
+            /** Source Id */
+            source_id: string;
+            /** Theme Id */
+            theme_id: string;
+        };
+        /** CuratedSourceRulePatchRequest */
+        CuratedSourceRulePatchRequest: {
+            /** Category */
+            category?: string | null;
+            /** Dataset Key */
+            dataset_key?: string | null;
+            /** Default Action */
+            default_action?: ("candidate" | "curated" | "ignore") | null;
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            } | null;
+            /** Place Kind */
+            place_kind?: string | null;
+            /** Priority */
+            priority?: number | null;
+            /** Region Scope */
+            region_scope?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /** CuratedSourceRuleResponse */
+        CuratedSourceRuleResponse: {
+            data: components["schemas"]["CuratedSourceRuleView"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * CuratedSourceRuleView
+         * @description curated source rule view.
+         */
+        CuratedSourceRuleView: {
+            /** Category */
+            category?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Dataset Key */
+            dataset_key: string;
+            /** Default Action */
+            default_action: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Metadata */
+            metadata: {
+                [key: string]: unknown;
+            };
+            /** Place Kind */
+            place_kind?: string | null;
+            /** Priority */
+            priority: number;
+            /** Provider */
+            provider: string;
+            /** Region Scope */
+            region_scope: {
+                [key: string]: unknown;
+            };
+            /** Rule Id */
+            rule_id: string;
+            /** Source Id */
+            source_id: string;
+            /** Theme Id */
+            theme_id: string;
+            /** Theme Slug */
+            theme_slug: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** CuratedSourceRulesData */
+        CuratedSourceRulesData: {
+            /** Items */
+            items: components["schemas"]["CuratedSourceRuleView"][];
+        };
+        /** CuratedSourceRulesResponse */
+        CuratedSourceRulesResponse: {
+            data: components["schemas"]["CuratedSourceRulesData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * CuratedSourceView
+         * @description curated source metadata view.
+         */
+        CuratedSourceView: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Dataset Key */
+            dataset_key: string;
+            /** Freshness Note */
+            freshness_note?: string | null;
+            /** Last Checked At */
+            last_checked_at?: string | null;
+            /** Last Source Modified At */
+            last_source_modified_at?: string | null;
+            /** License */
+            license?: string | null;
+            /** Metadata */
+            metadata: {
+                [key: string]: unknown;
+            };
+            /** Next Expected At */
+            next_expected_at?: string | null;
+            /** Provider */
+            provider: string;
+            /** Provider Status */
+            provider_status: string;
+            /** Row Count */
+            row_count?: number | null;
+            /** Source Id */
+            source_id: string;
+            /** Source Kind */
+            source_kind: string;
+            /** Source Name */
+            source_name: string;
+            /** Source Url */
+            source_url?: string | null;
+            /** Update Cycle */
+            update_cycle: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** CuratedSourcesData */
+        CuratedSourcesData: {
+            /** Items */
+            items: components["schemas"]["CuratedSourceView"][];
+        };
+        /** CuratedSourcesResponse */
+        CuratedSourcesResponse: {
+            data: components["schemas"]["CuratedSourcesData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** CuratedThemeCreateRequest */
+        CuratedThemeCreateRequest: {
+            /**
+             * Default Curated
+             * @default false
+             */
+            default_curated: boolean;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Theme Description
+             * @default
+             */
+            theme_description: string;
+            /** Theme Group */
+            theme_group: string;
+            /** Theme Name */
+            theme_name: string;
+            /** Theme Slug */
+            theme_slug: string;
+            /**
+             * Visibility
+             * @default admin_only
+             * @enum {string}
+             */
+            visibility: "admin_only" | "public" | "tripmate";
+        };
+        /** CuratedThemePatchRequest */
+        CuratedThemePatchRequest: {
+            /** Default Curated */
+            default_curated?: boolean | null;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            } | null;
+            /** Theme Description */
+            theme_description?: string | null;
+            /** Theme Group */
+            theme_group?: string | null;
+            /** Theme Name */
+            theme_name?: string | null;
+            /** Theme Slug */
+            theme_slug?: string | null;
+            /** Visibility */
+            visibility?: ("admin_only" | "public" | "tripmate") | null;
+        };
+        /** CuratedThemeResponse */
+        CuratedThemeResponse: {
+            data: components["schemas"]["CuratedThemeView"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * CuratedThemeView
+         * @description curated theme view.
+         */
+        CuratedThemeView: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Default Curated */
+            default_curated: boolean;
+            /** Metadata */
+            metadata: {
+                [key: string]: unknown;
+            };
+            /** Theme Description */
+            theme_description: string;
+            /** Theme Group */
+            theme_group: string;
+            /** Theme Id */
+            theme_id: string;
+            /** Theme Name */
+            theme_name: string;
+            /** Theme Slug */
+            theme_slug: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Visibility */
+            visibility: string;
+        };
+        /** CuratedThemesData */
+        CuratedThemesData: {
+            /** Items */
+            items: components["schemas"]["CuratedThemeView"][];
+        };
+        /** CuratedThemesResponse */
+        CuratedThemesResponse: {
+            data: components["schemas"]["CuratedThemesData"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * DagsterAssetGroup
@@ -5083,6 +5907,18 @@ export interface components {
             /** Rustfs Volume */
             rustfs_volume: string;
         };
+        /** RuleApplyData */
+        RuleApplyData: {
+            /** Inserted Or Updated */
+            inserted_or_updated: number;
+            /** Rule Id */
+            rule_id: string;
+        };
+        /** RuleApplyResponse */
+        RuleApplyResponse: {
+            data: components["schemas"]["RuleApplyData"];
+            meta: components["schemas"]["Meta"];
+        };
         /**
          * SigunguByRadiusScope
          * @description kraddr-geo가 계산한 반경 교차 시군구 기준 갱신 scope.
@@ -5163,6 +5999,66 @@ export interface components {
         SystemLogsResponse: {
             data: components["schemas"]["SystemLogsListData"];
             meta: components["schemas"]["Meta"];
+        };
+        /**
+         * TripmateCopyItemView
+         * @description TripMate curated_plan_pois copy item.
+         */
+        TripmateCopyItemView: {
+            /** Curated Feature Item Id */
+            curated_feature_item_id: string;
+            /** Day Index */
+            day_index?: number | null;
+            /** Feature Id */
+            feature_id: string;
+            /** Feature Snapshot */
+            feature_snapshot: {
+                [key: string]: unknown;
+            };
+            /** Memo */
+            memo?: string | null;
+            /** Relation */
+            relation: string;
+            /** Sort Order */
+            sort_order: number;
+            /** Source Record Key */
+            source_record_key?: string | null;
+        };
+        /** TripmateCopySnapshotResponse */
+        TripmateCopySnapshotResponse: {
+            data: components["schemas"]["TripmateCopySnapshotView"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * TripmateCopySnapshotView
+         * @description TripMate import snapshot.
+         */
+        TripmateCopySnapshotView: {
+            /** Curated Feature Id */
+            curated_feature_id: string;
+            /** Etag */
+            etag: string;
+            /** Items */
+            items: components["schemas"]["TripmateCopyItemView"][];
+            /** Plan */
+            plan: {
+                [key: string]: unknown;
+            };
+            /** Source */
+            source: {
+                [key: string]: unknown;
+            };
+            /** Theme */
+            theme: {
+                [key: string]: unknown;
+            };
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Version */
+            version: number;
         };
         /** ValidationError */
         ValidationError: {
@@ -5359,6 +6255,553 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BackupDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_admin_curated_features_route_v1_admin_curated_features_get: {
+        parameters: {
+            query?: {
+                theme_id?: string | null;
+                theme_slug?: string | null;
+                source_id?: string | null;
+                provider?: string | null;
+                dataset_key?: string | null;
+                curation_status?: ("candidate" | "curated" | "rejected" | "archived") | null;
+                include_archived?: boolean;
+                page_size?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CuratedFeaturesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_admin_curated_feature_route_v1_admin_curated_features_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CuratedFeatureCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CuratedFeatureResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_admin_curated_feature_route_v1_admin_curated_features__curated_feature_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                curated_feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CuratedFeatureResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_admin_curated_feature_route_v1_admin_curated_features__curated_feature_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                curated_feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CuratedFeaturePatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CuratedFeatureResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    select_admin_curated_feature_route_v1_admin_curated_features__curated_feature_id__select_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                curated_feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CuratedFeatureStatusRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CuratedFeatureResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unselect_admin_curated_feature_route_v1_admin_curated_features__curated_feature_id__unselect_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                curated_feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CuratedFeatureStatusRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CuratedFeatureResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_admin_curated_source_rules_route_v1_admin_curated_source_rules_get: {
+        parameters: {
+            query?: {
+                theme_id?: string | null;
+                theme_slug?: string | null;
+                source_id?: string | null;
+                provider?: string | null;
+                dataset_key?: string | null;
+                enabled?: boolean | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CuratedSourceRulesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_admin_curated_source_rule_route_v1_admin_curated_source_rules_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CuratedSourceRuleCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CuratedSourceRuleResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_admin_curated_source_rule_route_v1_admin_curated_source_rules__rule_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CuratedSourceRulePatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CuratedSourceRuleResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    apply_admin_curated_source_rule_route_v1_admin_curated_source_rules__rule_id__apply_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuleApplyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_admin_curated_sources_route_v1_admin_curated_sources_get: {
+        parameters: {
+            query?: {
+                provider?: string | null;
+                dataset_key?: string | null;
+                provider_status?: ("implemented" | "provider_needed" | "manual_only" | "deprecated") | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CuratedSourcesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_admin_curated_source_route_v1_admin_curated_sources_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CuratedSourceCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CuratedSourceResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_admin_curated_source_route_v1_admin_curated_sources__source_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CuratedSourcePatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CuratedSourceResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_admin_curated_themes_route_v1_admin_curated_themes_get: {
+        parameters: {
+            query?: {
+                visibility?: ("admin_only" | "public" | "tripmate") | null;
+                theme_group?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CuratedThemesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_admin_curated_theme_route_v1_admin_curated_themes_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CuratedThemeCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CuratedThemeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_admin_curated_theme_route_v1_admin_curated_themes__theme_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                theme_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CuratedThemePatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CuratedThemeResponse"];
                 };
             };
             /** @description Validation Error */
@@ -6983,6 +8426,181 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CategoriesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_curated_features_route_v1_curated_features_get: {
+        parameters: {
+            query?: {
+                theme_id?: string | null;
+                theme_slug?: string | null;
+                source_id?: string | null;
+                provider?: string | null;
+                dataset_key?: string | null;
+                curation_status?: ("candidate" | "curated" | "rejected" | "archived") | null;
+                region_code?: string | null;
+                sido_code?: string | null;
+                sigungu_code?: string | null;
+                min_lon?: number | null;
+                min_lat?: number | null;
+                max_lon?: number | null;
+                max_lat?: number | null;
+                q?: string | null;
+                page_size?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CuratedFeaturesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_curated_feature_route_v1_curated_features__curated_feature_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                curated_feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CuratedFeatureResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_curated_tripmate_copy_route_v1_curated_features__curated_feature_id__tripmate_copy_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                curated_feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TripmateCopySnapshotResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_curated_sources_route_v1_curated_sources_get: {
+        parameters: {
+            query?: {
+                provider?: string | null;
+                dataset_key?: string | null;
+                provider_status?: ("implemented" | "provider_needed" | "manual_only" | "deprecated") | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CuratedSourcesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_curated_themes_route_v1_curated_themes_get: {
+        parameters: {
+            query?: {
+                visibility?: ("admin_only" | "public" | "tripmate") | null;
+                theme_group?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CuratedThemesResponse"];
                 };
             };
             /** @description Validation Error */

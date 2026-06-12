@@ -68,9 +68,9 @@
 | 계약 | 정본(공급자 repo) | 소비측 view |
 |---|---|---|
 | krtour-map 전 표면 REST | `docs/rest-api.md` + 기계 정본 `packages/krtour-map-admin/openapi{,.user}.json` | TripMate `docs/integrations/krtour-map-rest-api.md` / 본 repo `docs/tripmate-rest-api.md`(TripMate 소비 매핑) |
-| TripMate T-130 공개 해수욕장/축제 뷰 | 본 repo `docs/public-views-api.md`(제안 사양, 아직 OpenAPI 미포함) | TripMate `docs/api/public.md` / `docs/krtour-map-requirements.md` §6 |
-| curated features → TripMate curated trip plans | 본 repo [`docs/curated-features.md`](curated-features.md)(문서 계약, 아직 OpenAPI 미포함) | TripMate `docs/krtour-map-requirements.md`의 curated trip plan import 절 / TripMate `docs/api/notice-plans.md`의 호환 alias 설명 |
-| krtour-ai-agent feature export | krtour-ai-agent `docs/feature-export-api.md`(로컬 체크아웃은 현재 `F:\dev\tripmate-agent`) | 본 repo: ADR-053 + `providers/krtour_ai_agent.py` docstring |
+| TripMate T-130 공개 해수욕장/축제 뷰 | 본 repo `docs/public-views-api.md` + `openapi.user.json`(T-222b 구현) | TripMate `docs/api/public.md` / `docs/krtour-map-requirements.md` §6 |
+| curated features → TripMate curated trip plans | 본 repo [`docs/curated-features.md`](curated-features.md) + `openapi.user.json`(T-223c-1 read 구현) | TripMate `docs/krtour-map-requirements.md`의 curated trip plan import 절 / TripMate `docs/api/notice-plans.md`의 호환 alias 설명 |
+| krtour-ai-agent feature export | krtour-ai-agent `docs/feature-export-api.md`(로컬 경로는 `F:\dev\tripmate-agent`, 프로젝트명은 `krtour-ai-agent`) | 본 repo: ADR-053 + `providers/krtour_ai_agent.py` docstring |
 | TripMate 사용자 제안 연동(합의 5건) | 본 repo `docs/tripmate-rest-api.md` §7 (ADR-051) | TripMate `docs/integrations/krtour-map-rest-api.md` §7 |
 | YouTube 후보 detail 소비(TM-08) | 본 repo `docs/tripmate-rest-api.md` §9 (T-217f) | TripMate UX 기획 |
 | geocoding | kraddr-geo REST v2 (`POST /v2/{reverse,geocode}`) | ADR-046 |

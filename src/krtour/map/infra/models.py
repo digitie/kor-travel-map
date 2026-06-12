@@ -38,6 +38,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Computed,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -62,6 +63,10 @@ __all__ = [
     "FeatureVersionRow",
     "SourceRecordRow",
     "SourceLinkRow",
+    "CuratedThemeRow",
+    "CuratedSourceRow",
+    "CuratedSourceRuleRow",
+    "CuratedFeatureRow",
     "ProviderSyncStateRow",
     "FeatureConsistencyReportRow",
     "DedupReviewQueueRow",
@@ -442,6 +447,332 @@ class SourceLinkRow(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()"),
     )
+
+
+# =============================================================================
+# feature.curated_*  (docs/curated-features.md, T-223c-1)
+# =============================================================================
+
+
+class CuratedThemeRow(Base):
+    """``feature.curated_themes`` row mapping — 테마 metadata."""
+
+    __tablename__ = "curated_themes"
+    __table_args__ = (
+        CheckConstraint(
+            "visibility IN ('admin_only','public','tripmate')",
+            name="ck_curated_themes_visibility",
+        ),
+        Index(
+            "idx_curated_themes_group_visibility",
+            "theme_group",
+            "visibility",
+            "theme_slug",
+        ),
+        {"schema": "feature"},
+    )
+
+    theme_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=text("x_extension.gen_random_uuid()"),
+    )
+    theme_slug: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    theme_name: Mapped[str] = mapped_column(Text, nullable=False)
+    theme_description: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''"),
+    )
+    theme_group: Mapped[str] = mapped_column(Text, nullable=False)
+    default_curated: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false"),
+    )
+    visibility: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'admin_only'"),
+    )
+    metadata_: Mapped[dict[str, Any]] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
+
+
+class CuratedSourceRow(Base):
+    """``feature.curated_sources`` row mapping — provider source metadata."""
+
+    __tablename__ = "curated_sources"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider",
+            "dataset_key",
+            name="uq_curated_sources_provider_dataset",
+        ),
+        CheckConstraint(
+            "source_kind IN ('openapi','filedata','standard','internal','manual')",
+            name="ck_curated_sources_source_kind",
+        ),
+        CheckConstraint(
+            "update_cycle IN ("
+            "'realtime','daily','weekly','monthly','annual','one_time','unknown'"
+            ")",
+            name="ck_curated_sources_update_cycle",
+        ),
+        CheckConstraint(
+            "provider_status IN ("
+            "'implemented','provider_needed','manual_only','deprecated'"
+            ")",
+            name="ck_curated_sources_provider_status",
+        ),
+        CheckConstraint(
+            "row_count IS NULL OR row_count >= 0",
+            name="ck_curated_sources_row_count",
+        ),
+        Index("idx_curated_sources_provider", "provider", "dataset_key"),
+        Index(
+            "idx_curated_sources_status",
+            "provider_status",
+            text("updated_at DESC"),
+            text("source_id DESC"),
+        ),
+        {"schema": "feature"},
+    )
+
+    source_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=text("x_extension.gen_random_uuid()"),
+    )
+    provider: Mapped[str] = mapped_column(Text, nullable=False)
+    dataset_key: Mapped[str] = mapped_column(Text, nullable=False)
+    source_name: Mapped[str] = mapped_column(Text, nullable=False)
+    source_url: Mapped[str | None] = mapped_column(Text)
+    source_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    license: Mapped[str | None] = mapped_column(Text)
+    update_cycle: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'unknown'"),
+    )
+    last_source_modified_at: Mapped[Any | None] = mapped_column(Date)
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    next_expected_at: Mapped[Any | None] = mapped_column(Date)
+    row_count: Mapped[int | None] = mapped_column(Integer)
+    freshness_note: Mapped[str | None] = mapped_column(Text)
+    provider_status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'implemented'"),
+    )
+    metadata_: Mapped[dict[str, Any]] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
+
+
+class CuratedSourceRuleRow(Base):
+    """``feature.curated_source_rules`` row mapping — source 후보화 rule."""
+
+    __tablename__ = "curated_source_rules"
+    __table_args__ = (
+        CheckConstraint(
+            "default_action IN ('candidate','curated','ignore')",
+            name="ck_curated_source_rules_action",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(region_scope) = 'object'",
+            name="ck_curated_source_rules_region_scope",
+        ),
+        Index(
+            "idx_curated_source_rules_enabled",
+            "enabled",
+            "source_id",
+            text("priority DESC"),
+        ),
+        Index(
+            "idx_curated_source_rules_theme",
+            "theme_id",
+            "enabled",
+            text("priority DESC"),
+        ),
+        {"schema": "feature"},
+    )
+
+    rule_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=text("x_extension.gen_random_uuid()"),
+    )
+    theme_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("feature.curated_themes.theme_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    source_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("feature.curated_sources.source_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    dataset_key: Mapped[str] = mapped_column(Text, nullable=False)
+    place_kind: Mapped[str | None] = mapped_column(Text)
+    category: Mapped[str | None] = mapped_column(Text)
+    region_scope: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb"),
+    )
+    default_action: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'candidate'"),
+    )
+    priority: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0"),
+    )
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true"),
+    )
+    metadata_: Mapped[dict[str, Any]] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
+
+
+class CuratedFeatureRow(Base):
+    """``feature.curated_features`` row mapping — feature overlay 본체."""
+
+    __tablename__ = "curated_features"
+    __table_args__ = (
+        CheckConstraint(
+            "curation_status IN ('candidate','curated','rejected','archived')",
+            name="ck_curated_features_status",
+        ),
+        CheckConstraint(
+            "selection_origin IN ('source_rule','admin','external_api')",
+            name="ck_curated_features_selection_origin",
+        ),
+        CheckConstraint(
+            "tripmate_relation IN ("
+            "'primary_stop','food_stop','cafe_stop','bookstore_stop',"
+            "'nearby_option','accessibility_support','pet_support',"
+            "'family_support','theme_area_anchor'"
+            ")",
+            name="ck_curated_features_tripmate_relation",
+        ),
+        CheckConstraint(
+            "tripmate_copy_policy IN ("
+            "'copy_allowed','copy_blocked','manual_review'"
+            ")",
+            name="ck_curated_features_copy_policy",
+        ),
+        CheckConstraint("copy_version >= 1", name="ck_curated_features_copy_version"),
+        CheckConstraint(
+            "jsonb_typeof(metadata) = 'object'",
+            name="ck_curated_features_metadata",
+        ),
+        Index(
+            "uq_curated_features_theme_feature_active",
+            "theme_id",
+            "feature_id",
+            unique=True,
+            postgresql_where=text("archived_at IS NULL"),
+        ),
+        Index(
+            "idx_curated_features_status_keyset",
+            "curation_status",
+            text("updated_at DESC"),
+            text("curated_feature_id DESC"),
+        ),
+        Index(
+            "idx_curated_features_theme_status_score",
+            "theme_id",
+            "curation_status",
+            text("rank_score DESC"),
+            text("curated_feature_id DESC"),
+        ),
+        Index("idx_curated_features_source_status", "source_id", "curation_status"),
+        Index("idx_curated_features_feature", "feature_id"),
+        {"schema": "feature"},
+    )
+
+    curated_feature_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=text("x_extension.gen_random_uuid()"),
+    )
+    theme_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("feature.curated_themes.theme_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    feature_id: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey("feature.features.feature_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    source_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("feature.curated_sources.source_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    source_record_key: Mapped[str | None] = mapped_column(
+        Text,
+        ForeignKey(
+            "provider_sync.source_records.source_record_key",
+            ondelete="SET NULL",
+        ),
+    )
+    curation_status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'candidate'"),
+    )
+    selection_origin: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'source_rule'"),
+    )
+    selected_by: Mapped[str | None] = mapped_column(Text)
+    selected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    rejected_by: Mapped[str | None] = mapped_column(Text)
+    rejected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    rejection_reason: Mapped[str | None] = mapped_column(Text)
+    rank_score: Mapped[Any] = mapped_column(
+        Numeric(10, 4), nullable=False, server_default=text("0"),
+    )
+    display_title: Mapped[str | None] = mapped_column(Text)
+    display_summary: Mapped[str | None] = mapped_column(Text)
+    tripmate_relation: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'nearby_option'"),
+    )
+    tripmate_copy_policy: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'manual_review'"),
+    )
+    copy_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("1"),
+    )
+    metadata_: Mapped[dict[str, Any]] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 # =============================================================================

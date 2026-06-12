@@ -42,10 +42,12 @@ from krtour.map_admin.response import bind_request_id, reset_request_id
 from krtour.map_admin.response import request_id as response_request_id
 from krtour.map_admin.routers import (
     admin_backups_router,
+    admin_curated_router,
     admin_features_router,
     admin_issues_router,
     admin_restore_router,
     categories_router,
+    curated_router,
     dagster_router,
     dedup_review_router,
     enrichment_review_router,
@@ -346,6 +348,7 @@ def create_app(settings: AdminSettings | None = None) -> FastAPI:
         # 통과(하위호환). 나머지 ``/v1/features`` read는 공용이라 앱 토큰을 강제하지 않는다.
         application.include_router(features_router, prefix="/v1")
         application.include_router(public_views_router, prefix="/v1")
+        application.include_router(curated_router, prefix="/v1")
         application.include_router(categories_router, prefix="/v1")
         application.include_router(providers_router, prefix="/v1")
         # Step D on-demand 상세는 DB(적재된 raw_data) 필요 → features와 동일 gate.
@@ -361,6 +364,7 @@ def create_app(settings: AdminSettings | None = None) -> FastAPI:
             dependencies=[Depends(require_admin_destructive_enabled)],
         )
         application.include_router(admin_features_router, prefix="/v1")
+        application.include_router(admin_curated_router, prefix="/v1")
         application.include_router(admin_issues_router, prefix="/v1")
         application.include_router(dedup_review_router, prefix="/v1")
         application.include_router(enrichment_review_router, prefix="/v1")

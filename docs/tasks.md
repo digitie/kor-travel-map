@@ -26,9 +26,15 @@
           중고서점 CSV(provider PR#11), `python-datagokr-api` 서울 책방·무슬림 친화
           음식점·안산 세계맛집·제주 향토음식점 fileData + 전국지역특화거리 표준데이터
           서비스(provider PR#10)를 반영하고, krtour-map 변환 함수와 단위 테스트를 추가했다.
-    - [ ] T-223c — krtour-map DB/API/Dagster/Admin UI 구현:
-          `feature.curated_*`, `/v1/curated-features*`, `/v1/admin/curated-*`,
-          Dagster `curated_features` group, admin 선택/해제 UI.
+    - [x] T-223c-1 — krtour-map DB/API/OpenAPI foundation 구현(2026-06-12,
+          Codex): `feature.curated_*` 4개 테이블 + seed source/rule,
+          `/v1/curated-*` read, `/v1/admin/curated-*` backend write,
+          source rule apply, TripMate copy snapshot, OpenAPI/user-client 타입.
+    - [ ] T-223c-2 — Dagster `curated_features` group 구현:
+          `curated_source_metadata`, `curated_feature_candidates`,
+          `curated_feature_status_sweep`, copy snapshot materialize/cache.
+    - [ ] T-223c-3 — Admin UI 구현: curated 후보 목록, select/unselect,
+          source rule 편집/apply, TripMate copy preview.
     - [ ] T-223d — TripMate 연동(외부 repo): krtour REST 호출로
           `app.curated_trip_plans` / `app.curated_plan_pois` 복사, source version/etag 저장.
   - [ ] T-225 — **T-212e closure 재검증**. T-224/T-221/T-222/T-223 이후 main 기준으로
