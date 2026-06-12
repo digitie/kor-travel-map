@@ -2,6 +2,15 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-12 (claude) — T-212e: mcst 좌표도 격리 (#400 패턴, T-220 후속)
+
+`feature_place_mcst_culture` live 적재가 73분 진행 후 `lat=42.6406462,
+lon=131.679`(한국 경계 밖 — 세계음식점류 해외/오타 좌표 실존)의 `Coordinate`
+검증 ValueError로 실패. COORDINATES 파서의 bbox(lat≤43)가 DTO 허용범위
+(lat≤39.5)보다 관대해 통과시킨 갭 — `_coord_or_none`을 try/except
+ValidationError → None 격리로 보강(DTO가 정본, #400 standard_data와 동일
+패턴). 번들 레벨 단위 테스트 추가.
+
 ## 2026-06-12 (claude) — T-212e: pg_trgm `%` 연산자도 스키마 qualify (#410 후속)
 
 #410(공간 연산자) 머지·api 재배포 후 P99 재측정에서 `/features/search`가

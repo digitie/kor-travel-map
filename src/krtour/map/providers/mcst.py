@@ -47,6 +47,8 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Final, Literal
 
+from pydantic import ValidationError
+
 from krtour.map.category import (
     PlaceCategoryCode,
     mapbox_maki_icon_or_none,
@@ -459,10 +461,21 @@ _DIALECT_EXTRACTORS: Final[dict[McstDialect, Callable[[Mapping[str, Any]], _Extr
 
 
 def _coord_or_none(lonlat: tuple[float, float] | None) -> Coordinate | None:
+    """좌표 쌍 → ``Coordinate``. 검증 실패면 좌표 미상(None) 격리.
+
+    MCST CSV live에는 한국 경계 밖 좌표가 실존한다(T-212e 실측 —
+    `lat=42.6406462, lon=131.679` row가 `Coordinate` 검증 ValueError로 dataset
+    전체를 차단). #400(standard_data)과 동일 격리 패턴 — 좌표만 버리고 row는
+    주소 단서로 적재(원본 raw_data 보존).
+    """
+
     if lonlat is None:
         return None
     lon, lat = lonlat
-    return Coordinate(lon=Decimal(str(lon)), lat=Decimal(str(lat)))
+    try:
+        return Coordinate(lon=Decimal(str(lon)), lat=Decimal(str(lat)))
+    except ValidationError:
+        return None
 
 
 async def _resolve_address(
