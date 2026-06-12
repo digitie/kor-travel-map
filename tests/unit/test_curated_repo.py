@@ -371,6 +371,63 @@ async def test_curated_repo_write_paths_with_fake_session() -> None:
 
 
 @pytest.mark.asyncio
+async def test_curated_repo_dagster_batch_paths_with_fake_session() -> None:
+    session = _FakeSession(
+        [
+            {
+                "sources_checked": 2,
+                "sources_with_records": 1,
+                "source_records_total": 7,
+            }
+        ],
+        [
+            _rule_row(),
+            _rule_row(rule_id="66666666-6666-6666-6666-666666666666"),
+        ],
+        [{"affected_count": 3}],
+        [{"affected_count": 4}],
+        [{"archived_count": 1}],
+        [_feature_row()],
+        [{"curated_feature_id": _CURATED_ID}],
+    )
+
+    refreshed = await curated_repo.refresh_curated_source_metadata(
+        session,
+        provider="python-datagokr-api",
+    )
+    assert refreshed.as_metadata() == {
+        "sources_checked": 2,
+        "sources_with_records": 1,
+        "source_records_total": 7,
+    }
+    assert session.calls[0][1]["provider"] == "python-datagokr-api"
+
+    candidates = await curated_repo.apply_enabled_curated_source_rules(
+        session,
+        limit=50,
+    )
+    assert candidates.rules_applied == 2
+    assert candidates.inserted_or_updated == 7
+    assert session.calls[1][1]["enabled"] is True
+    assert session.calls[2][1]["rule_id"] == _RULE_ID
+
+    swept = await curated_repo.sweep_curated_feature_status(session)
+    assert swept.archived == 1
+
+    materialized = await curated_repo.materialize_curated_tripmate_copy_snapshots(
+        session,
+        theme_slug="bookstores",
+        limit=1,
+    )
+    assert materialized.curated_features_total == 1
+    assert materialized.snapshots_materialized == 1
+    snapshot_params = session.calls[-1][1]
+    assert snapshot_params["copy_version"] == 2
+    assert snapshot_params["etag"].startswith("sha256:")
+    assert '"curated_feature_id"' in snapshot_params["snapshot_json"]
+
+
+@pytest.mark.asyncio
 async def test_curated_repo_validation_and_empty_paths() -> None:
     with pytest.raises(ValueError, match="visibility"):
         await curated_repo.list_curated_themes(_FakeSession(), visibility="private")

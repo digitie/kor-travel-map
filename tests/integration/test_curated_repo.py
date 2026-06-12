@@ -111,6 +111,37 @@ async def test_seed_rule_apply_creates_candidate_and_tripmate_snapshot(
     assert snapshot.plan["title"] == "통합테스트 헌책방"
     assert snapshot.items[0].feature_snapshot["name"] == "통합테스트 헌책방"
 
+    refreshed = await curated_repo.refresh_curated_source_metadata(
+        migrated_session,
+        provider="python-datagokr-api",
+        dataset_key="datagokr_seoul_bookstores",
+    )
+    assert refreshed.sources_checked == 1
+    assert refreshed.sources_with_records == 1
+    assert refreshed.source_records_total >= 1
+
+    materialized = await curated_repo.materialize_curated_tripmate_copy_snapshots(
+        migrated_session,
+        theme_slug="bookstores",
+    )
+    assert materialized.curated_features_total >= 1
+    assert materialized.snapshots_materialized >= 1
+    cached = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT copy_version, etag, snapshot
+                FROM feature.curated_tripmate_copy_snapshots
+                WHERE curated_feature_id = CAST(:curated_feature_id AS uuid)
+                """
+            ),
+            {"curated_feature_id": selected.curated_feature_id},
+        )
+    ).mappings().one()
+    assert cached["copy_version"] == selected.copy_version
+    assert cached["etag"] == snapshot.etag
+    assert cached["snapshot"]["plan"]["title"] == "통합테스트 헌책방"
+
 
 async def test_curated_uuid_defaults_are_schema_qualified(
     migrated_session: AsyncSession,
@@ -245,3 +276,44 @@ async def test_rejected_curated_feature_is_not_revived_by_rule_apply(
     assert [item.curated_feature_id for item in rejected_page.items] == [
         rejected.curated_feature_id
     ]
+
+
+async def test_curated_status_sweep_archives_inactive_feature(
+    migrated_session: AsyncSession,
+) -> None:
+    feature_id = await _load_seoul_bookstore(migrated_session)
+    [theme] = await curated_repo.list_curated_themes(
+        migrated_session,
+        theme_group="books",
+        limit=1,
+    )
+    [source] = await curated_repo.list_curated_sources(
+        migrated_session,
+        provider="python-datagokr-api",
+        dataset_key="datagokr_seoul_bookstores",
+        limit=1,
+    )
+    created = await curated_repo.create_curated_feature(
+        migrated_session,
+        theme_id=theme.theme_id,
+        feature_id=feature_id,
+        source_id=source.source_id,
+        curation_status="curated",
+        selected_by="pytest",
+    )
+
+    await migrated_session.execute(
+        text("UPDATE feature.features SET status = 'inactive' WHERE feature_id = :id"),
+        {"id": feature_id},
+    )
+    swept = await curated_repo.sweep_curated_feature_status(migrated_session)
+    archived = await curated_repo.get_curated_feature(
+        migrated_session,
+        curated_feature_id=created.curated_feature_id,
+        include_archived=True,
+    )
+
+    assert swept.archived == 1
+    assert archived is not None
+    assert archived.curation_status == "archived"
+    assert archived.archived_at is not None

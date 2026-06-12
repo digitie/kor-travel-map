@@ -30,9 +30,11 @@
           Codex): `feature.curated_*` 4개 테이블 + seed source/rule,
           `/v1/curated-*` read, `/v1/admin/curated-*` backend write,
           source rule apply, TripMate copy snapshot, OpenAPI/user-client 타입.
-    - [ ] T-223c-2 — Dagster `curated_features` group 구현:
+    - [x] T-223c-2 — Dagster `curated_features` group 구현(2026-06-12,
+          Codex):
           `curated_source_metadata`, `curated_feature_candidates`,
-          `curated_feature_status_sweep`, copy snapshot materialize/cache.
+          `curated_feature_status_sweep`, `curated_tripmate_copy_snapshots`
+          asset과 copy snapshot cache table을 추가했다.
     - [ ] T-223c-3 — Admin UI 구현: curated 후보 목록, select/unselect,
           source rule 편집/apply, TripMate copy preview.
     - [ ] T-223d — TripMate 연동(외부 repo): krtour REST 호출로

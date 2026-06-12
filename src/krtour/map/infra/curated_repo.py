@@ -27,10 +27,15 @@ __all__ = [
     "CuratedSource",
     "CuratedSourceRule",
     "CuratedTheme",
+    "CuratedFeatureCandidatesResult",
+    "CuratedFeatureStatusSweepResult",
+    "CuratedSourceMetadataRefreshResult",
     "CuratedTripmateCopyItem",
     "CuratedTripmateCopySnapshot",
+    "CuratedTripmateSnapshotMaterializeResult",
     "RuleApplyResult",
     "archive_curated_feature",
+    "apply_enabled_curated_source_rules",
     "apply_curated_source_rule",
     "create_curated_feature",
     "create_curated_source",
@@ -42,7 +47,10 @@ __all__ = [
     "list_curated_source_rules",
     "list_curated_sources",
     "list_curated_themes",
+    "materialize_curated_tripmate_copy_snapshots",
+    "refresh_curated_source_metadata",
     "set_curated_feature_status",
+    "sweep_curated_feature_status",
     "update_curated_feature",
     "update_curated_source",
     "update_curated_source_rule",
@@ -239,6 +247,64 @@ class RuleApplyResult:
 
     rule_id: str
     inserted_or_updated: int
+
+
+@dataclass(frozen=True)
+class CuratedSourceMetadataRefreshResult:
+    """curated source metadata refresh 결과."""
+
+    sources_checked: int
+    sources_with_records: int
+    source_records_total: int
+
+    def as_metadata(self) -> dict[str, object]:
+        """Dagster metadata로 바로 기록할 수 있는 summary."""
+        return {
+            "sources_checked": self.sources_checked,
+            "sources_with_records": self.sources_with_records,
+            "source_records_total": self.source_records_total,
+        }
+
+
+@dataclass(frozen=True)
+class CuratedFeatureCandidatesResult:
+    """enabled curated source rule 적용 결과."""
+
+    rules_applied: int
+    inserted_or_updated: int
+
+    def as_metadata(self) -> dict[str, object]:
+        """Dagster metadata로 바로 기록할 수 있는 summary."""
+        return {
+            "rules_applied": self.rules_applied,
+            "inserted_or_updated": self.inserted_or_updated,
+        }
+
+
+@dataclass(frozen=True)
+class CuratedFeatureStatusSweepResult:
+    """underlying feature 상태 변화에 따른 curated overlay archive 결과."""
+
+    archived: int
+
+    def as_metadata(self) -> dict[str, object]:
+        """Dagster metadata로 바로 기록할 수 있는 summary."""
+        return {"archived": self.archived}
+
+
+@dataclass(frozen=True)
+class CuratedTripmateSnapshotMaterializeResult:
+    """TripMate copy snapshot cache materialize 결과."""
+
+    curated_features_total: int
+    snapshots_materialized: int
+
+    def as_metadata(self) -> dict[str, object]:
+        """Dagster metadata로 바로 기록할 수 있는 summary."""
+        return {
+            "curated_features_total": self.curated_features_total,
+            "snapshots_materialized": self.snapshots_materialized,
+        }
 
 
 _THEME_COLUMNS: Final[str] = (
@@ -543,6 +609,92 @@ upserted AS (
     RETURNING curated_feature_id
 )
 SELECT count(*)::int AS affected_count FROM upserted
+"""
+
+_REFRESH_SOURCE_METADATA_SQL: Final[str] = """
+WITH source_scope AS (
+    SELECT source_id, provider, dataset_key
+    FROM feature.curated_sources
+    WHERE (CAST(:provider AS text) IS NULL OR provider = CAST(:provider AS text))
+      AND (
+        CAST(:dataset_key AS text) IS NULL
+        OR dataset_key = CAST(:dataset_key AS text)
+      )
+),
+counted AS (
+    SELECT
+        s.source_id,
+        count(sr.source_record_key)::int AS record_count,
+        max(sr.imported_at) AS last_imported_at
+    FROM source_scope AS s
+    LEFT JOIN provider_sync.source_records AS sr
+      ON sr.provider = s.provider
+     AND sr.dataset_key = s.dataset_key
+    GROUP BY s.source_id
+),
+updated AS (
+    UPDATE feature.curated_sources AS s
+    SET
+        last_checked_at = now(),
+        row_count = CASE
+            WHEN c.record_count > 0 THEN c.record_count
+            ELSE s.row_count
+        END,
+        metadata = s.metadata || jsonb_build_object(
+            'source_record_count', c.record_count,
+            'last_record_imported_at', c.last_imported_at
+        ),
+        updated_at = now()
+    FROM counted AS c
+    WHERE s.source_id = c.source_id
+    RETURNING c.record_count
+)
+SELECT
+    count(*)::int AS sources_checked,
+    count(*) FILTER (WHERE record_count > 0)::int AS sources_with_records,
+    COALESCE(sum(record_count), 0)::int AS source_records_total
+FROM updated
+"""
+
+_SWEEP_CURATED_STATUS_SQL: Final[str] = """
+WITH archived AS (
+    UPDATE feature.curated_features AS cf
+    SET
+        curation_status = 'archived',
+        archived_at = COALESCE(cf.archived_at, now()),
+        updated_at = now(),
+        copy_version = cf.copy_version + 1,
+        metadata = cf.metadata || jsonb_build_object(
+            'status_sweep', 'underlying_feature_inactive_or_deleted'
+        )
+    FROM feature.features AS f
+    WHERE cf.feature_id = f.feature_id
+      AND cf.archived_at IS NULL
+      AND cf.curation_status IN ('candidate','curated')
+      AND (f.deleted_at IS NOT NULL OR f.status <> 'active')
+    RETURNING cf.curated_feature_id
+)
+SELECT count(*)::int AS archived_count FROM archived
+"""
+
+_UPSERT_TRIPMATE_COPY_SNAPSHOT_SQL: Final[str] = """
+INSERT INTO feature.curated_tripmate_copy_snapshots (
+    curated_feature_id, copy_version, etag, snapshot, materialized_at, updated_at
+) VALUES (
+    CAST(:curated_feature_id AS uuid), :copy_version, :etag,
+    CAST(:snapshot_json AS jsonb), now(), :updated_at
+)
+ON CONFLICT (curated_feature_id)
+DO UPDATE SET
+    copy_version = EXCLUDED.copy_version,
+    etag = EXCLUDED.etag,
+    snapshot = EXCLUDED.snapshot,
+    materialized_at = now(),
+    updated_at = EXCLUDED.updated_at
+WHERE feature.curated_tripmate_copy_snapshots.copy_version IS DISTINCT FROM
+      EXCLUDED.copy_version
+   OR feature.curated_tripmate_copy_snapshots.etag IS DISTINCT FROM EXCLUDED.etag
+RETURNING curated_feature_id::text AS curated_feature_id
 """
 
 
@@ -855,6 +1007,33 @@ def _tripmate_snapshot(feature: CuratedFeature) -> CuratedTripmateCopySnapshot:
         source=source,
         items=(item,),
     )
+
+
+def _tripmate_snapshot_payload(
+    snapshot: CuratedTripmateCopySnapshot,
+) -> dict[str, Any]:
+    return {
+        "curated_feature_id": snapshot.curated_feature_id,
+        "version": snapshot.version,
+        "etag": snapshot.etag,
+        "updated_at": snapshot.updated_at.isoformat(),
+        "theme": snapshot.theme,
+        "plan": snapshot.plan,
+        "source": snapshot.source,
+        "items": [
+            {
+                "curated_feature_item_id": item.curated_feature_item_id,
+                "feature_id": item.feature_id,
+                "relation": item.relation,
+                "sort_order": item.sort_order,
+                "day_index": item.day_index,
+                "memo": item.memo,
+                "feature_snapshot": item.feature_snapshot,
+                "source_record_key": item.source_record_key,
+            }
+            for item in snapshot.items
+        ],
+    }
 
 
 def _destination_name(feature: CuratedFeature) -> str | None:
@@ -1273,6 +1452,114 @@ async def apply_curated_source_rule(
     return RuleApplyResult(
         rule_id=rule_id,
         inserted_or_updated=int(row["affected_count"]),
+    )
+
+
+async def refresh_curated_source_metadata(
+    session: AsyncSession,
+    *,
+    provider: str | None = None,
+    dataset_key: str | None = None,
+) -> CuratedSourceMetadataRefreshResult:
+    """source_records 기준으로 curated source metadata를 갱신한다."""
+
+    row = (
+        await session.execute(
+            text(_REFRESH_SOURCE_METADATA_SQL),
+            {"provider": provider, "dataset_key": dataset_key},
+        )
+    ).mappings().one()
+    return CuratedSourceMetadataRefreshResult(
+        sources_checked=int(row["sources_checked"]),
+        sources_with_records=int(row["sources_with_records"]),
+        source_records_total=int(row["source_records_total"]),
+    )
+
+
+async def apply_enabled_curated_source_rules(
+    session: AsyncSession,
+    *,
+    limit: int = 500,
+) -> CuratedFeatureCandidatesResult:
+    """enabled curated source rule을 현재 feature/source link에 적용한다."""
+
+    rules = await list_curated_source_rules(
+        session,
+        enabled=True,
+        limit=limit,
+    )
+    total = 0
+    for rule in rules:
+        result = await apply_curated_source_rule(session, rule_id=rule.rule_id)
+        total += result.inserted_or_updated
+    return CuratedFeatureCandidatesResult(
+        rules_applied=len(rules),
+        inserted_or_updated=total,
+    )
+
+
+async def sweep_curated_feature_status(
+    session: AsyncSession,
+) -> CuratedFeatureStatusSweepResult:
+    """inactive/deleted feature가 가리키는 curated overlay를 archive한다."""
+
+    row = (
+        await session.execute(text(_SWEEP_CURATED_STATUS_SQL))
+    ).mappings().one()
+    return CuratedFeatureStatusSweepResult(archived=int(row["archived_count"]))
+
+
+async def materialize_curated_tripmate_copy_snapshots(
+    session: AsyncSession,
+    *,
+    theme_slug: str | None = None,
+    limit: int = 500,
+) -> CuratedTripmateSnapshotMaterializeResult:
+    """curated feature의 TripMate copy snapshot을 cache table에 materialize한다."""
+
+    safe_limit = _safe_limit(limit)
+    cursor: str | None = None
+    features_seen = 0
+    snapshots_materialized = 0
+    while features_seen < safe_limit:
+        page_size = min(_MAX_PAGE_SIZE, safe_limit - features_seen)
+        page = await list_curated_features(
+            session,
+            theme_slug=theme_slug,
+            curation_status="curated",
+            page_size=page_size,
+            cursor=cursor,
+        )
+        if not page.items:
+            break
+        for feature in page.items:
+            snapshot = _tripmate_snapshot(feature)
+            row = (
+                await session.execute(
+                    text(_UPSERT_TRIPMATE_COPY_SNAPSHOT_SQL),
+                    {
+                        "curated_feature_id": snapshot.curated_feature_id,
+                        "copy_version": snapshot.version,
+                        "etag": snapshot.etag,
+                        "snapshot_json": json.dumps(
+                            _tripmate_snapshot_payload(snapshot),
+                            ensure_ascii=False,
+                            sort_keys=True,
+                            default=str,
+                        ),
+                        "updated_at": snapshot.updated_at,
+                    },
+                )
+            ).mappings().first()
+            if row is not None:
+                snapshots_materialized += 1
+        features_seen += len(page.items)
+        if page.next_cursor is None:
+            break
+        cursor = page.next_cursor
+    return CuratedTripmateSnapshotMaterializeResult(
+        curated_features_total=features_seen,
+        snapshots_materialized=snapshots_materialized,
     )
 
 
