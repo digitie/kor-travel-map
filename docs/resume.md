@@ -5,10 +5,10 @@
 사용자 추가 결정에 따라 T-226 목표값을 다시 정렬했다.
 
 - CLI 목표명은 `ktmctl`로 둔다.
-- PostgreSQL 기본 DB 이름은 `kortravelmap`, Dagster metadata DB 이름은
-  `kortravelmap_dagster`로 둔다.
-- RustFS bucket/volume 등 사용자 가시 이름은 `kortravelmap*` 계열로 둔다
-  (예: offline upload bucket `kortravelmap-uploads`).
+- PostgreSQL 기본 DB 이름은 `kor_travel_map`, Dagster metadata DB 이름은
+  `kor_travel_map_dagster`로 둔다.
+- RustFS bucket/prefix 등 사용자 가시 이름은 `kor-travel-map` 계열로 둔다
+  (예: offline upload bucket `kor-travel-map-uploads`).
 - 형제 프로젝트의 GitHub repo/project 표시명은 `kor-travel-geo`,
   `kor-travel-concierge` 기준으로 맞춘다.
 - public distribution `kor-travel-map`, Python import root `kortravelmap`, 권장 import

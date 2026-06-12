@@ -128,10 +128,10 @@ T-226d는 runtime identity를 바꾼다.
 
 - `KRTOUR_MAP_*` → `KOR_TRAVEL_MAP_*`
 - `KRTOUR_MAP_ADMIN_*` → `KOR_TRAVEL_MAP_ADMIN_*`
-- 기본 DB 이름 `krtour_map` → `kortravelmap`
-- 기본 Dagster metadata DB 이름 `krtour_map_dagster` → `kortravelmap_dagster`
-- RustFS bucket/volume 표시명 `krtour-map*`, `krtour-uploads` →
-  `kortravelmap*`, `kortravelmap-uploads`
+- 기본 DB 이름 `krtour_map` → `kor_travel_map`
+- 기본 Dagster metadata DB 이름 `krtour_map_dagster` → `kor_travel_map_dagster`
+- RustFS bucket/prefix 표시명 `krtour-map`, `krtour-uploads` →
+  `kor-travel-map`, `kor-travel-map-uploads`
 - Docker image/service/container 표시명 `krtour-map*` → `kor-travel-map*`
 - advisory lock namespace, 로그/metric service label, compose profile 이름 중 사용자 가시
   identity를 새 이름으로 전환

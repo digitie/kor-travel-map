@@ -7,9 +7,9 @@
 T-226 목표 runtime identity를 사용자 추가 결정에 맞춰 갱신했다.
 
 - CLI 목표명을 `ktmctl`로 바꿨다.
-- PostgreSQL 기본 DB 이름을 `kortravelmap`, Dagster metadata DB 이름을
-  `kortravelmap_dagster`로 바꿨다.
-- RustFS bucket/volume 등 사용자 가시 이름은 `kortravelmap*` 계열로 맞추기로 했다.
+- PostgreSQL 기본 DB 이름을 `kor_travel_map`, Dagster metadata DB 이름을
+  `kor_travel_map_dagster`로 바꿨다.
+- RustFS bucket/prefix 등 사용자 가시 이름은 `kor-travel-map` 계열로 맞추기로 했다.
 - 형제 프로젝트 표시명은 `kor-travel-geo`, `kor-travel-concierge` 기준으로 맞췄다.
 - ADR-054, package identity guide, T-226b 실행계획, tasks/resume을 같은 기준으로
   정렬했다.
