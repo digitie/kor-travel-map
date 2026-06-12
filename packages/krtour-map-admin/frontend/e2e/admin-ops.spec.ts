@@ -25,6 +25,14 @@ type BackupRecord = components["schemas"]["BackupRecord"];
 type ProviderSyncStateSummary =
   components["schemas"]["ProviderSyncStateSummary"];
 
+// frontend(page) origin 포트 — RSC prefetch 등 page-origin 요청을 API mock에서
+// 통과시키는 기준. playwright.config.ts의 baseURL과 같은 env로 도출한다
+// (12305 하드코딩이면 비표준 base(E2E_BASE_URL override — T-212e socat 프록시
+// :19012 등)에서 RSC prefetch가 unhandled-route 가드에 걸린다).
+const FRONTEND_PORT = new URL(
+  process.env.E2E_BASE_URL ?? "http://127.0.0.1:12305",
+).port;
+
 const MOCK_NOW = "2026-06-08T00:00:00.000Z";
 const MOCK_REVIEWED_AT = "2026-06-08T00:10:00.000Z";
 const OFFLINE_UPLOAD_ID = "11111111-1111-4111-8111-111111111111";
@@ -627,7 +635,7 @@ async function mockFeatureChangeMutations(
       return;
     }
     const url = new URL(request.url());
-    if (url.port === "12305") {
+    if (url.port === FRONTEND_PORT) {
       await route.continue();
       return;
     }
