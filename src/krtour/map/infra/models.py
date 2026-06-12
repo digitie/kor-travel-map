@@ -67,6 +67,7 @@ __all__ = [
     "DedupReviewQueueRow",
     "EnrichmentReviewQueueRow",
     "ImportJobRow",
+    "ImportJobEventRow",
     "OfflineUploadRow",
     "FeatureOverrideRow",
     "FeatureChangeRequestRow",
@@ -911,6 +912,67 @@ class ImportJobRow(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
+
+
+# =============================================================================
+# ops.import_job_events  (T-221b)
+# =============================================================================
+
+
+class ImportJobEventRow(Base):
+    """``ops.import_job_events`` row mapping — import job 단계별 event timeline."""
+
+    __tablename__ = "import_job_events"
+    __table_args__ = (
+        CheckConstraint(
+            "level IN ('debug','info','warning','error','critical')",
+            name="ck_import_job_events_level",
+        ),
+        Index(
+            "idx_import_job_events_job_time",
+            "job_id",
+            text("occurred_at DESC"),
+            text("event_id DESC"),
+        ),
+        Index(
+            "idx_import_job_events_provider_time",
+            "provider",
+            text("occurred_at DESC"),
+            text("event_id DESC"),
+            postgresql_where=text("provider IS NOT NULL"),
+        ),
+        Index(
+            "idx_import_job_events_level_time",
+            "level",
+            text("occurred_at DESC"),
+            text("event_id DESC"),
+        ),
+        {"schema": "ops"},
+    )
+
+    event_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=text("x_extension.gen_random_uuid()"),
+    )
+    job_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("ops.import_jobs.job_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    provider: Mapped[str | None] = mapped_column(Text)
+    dataset_key: Mapped[str | None] = mapped_column(Text)
+    feature_id: Mapped[str | None] = mapped_column(Text)
+    stage: Mapped[str | None] = mapped_column(Text)
+    level: Mapped[str] = mapped_column(Text, nullable=False)
+    code: Mapped[str | None] = mapped_column(Text)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb"),
+    )
+    occurred_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()"),
     )
 

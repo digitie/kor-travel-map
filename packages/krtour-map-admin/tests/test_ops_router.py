@@ -12,6 +12,8 @@ from krtour.map.infra.ops_repo import (
     OpsConsistencyReport,
     OpsConsistencyReportPage,
     OpsImportJob,
+    OpsImportJobEvent,
+    OpsImportJobEventPage,
     OpsImportJobPage,
     OpsIntegrityIssue,
     OpsIntegrityIssueCounts,
@@ -24,8 +26,17 @@ from krtour.map_admin.db import get_session
 from krtour.map_admin.settings import AdminSettings
 
 
+class _FakeBegin:
+    async def __aenter__(self) -> None:
+        return None
+
+    async def __aexit__(self, *_exc: object) -> None:
+        return None
+
+
 class _FakeSession:
-    pass
+    def begin(self) -> _FakeBegin:
+        return _FakeBegin()
 
 
 @pytest.fixture
@@ -44,15 +55,20 @@ def client(session: _FakeSession) -> TestClient:
     return TestClient(app)
 
 
-def _job(job_id: str = "11111111-1111-1111-1111-111111111111") -> OpsImportJob:
+def _job(
+    job_id: str = "11111111-1111-1111-1111-111111111111",
+    *,
+    status: str = "running",
+    payload: dict[str, Any] | None = None,
+) -> OpsImportJob:
     now = datetime(2026, 6, 3, tzinfo=UTC)
     return OpsImportJob(
         job_id=job_id,
         kind="feature_update_request",
         load_batch_id="33333333-3333-3333-3333-333333333333",
         parent_job_id="44444444-4444-4444-4444-444444444444",
-        payload={"request_id": "req-1"},
-        status="running",
+        payload=payload or {"request_id": "req-1"},
+        status=status,
         progress=40,
         current_stage="loading",
         source_checksum=None,
@@ -61,6 +77,25 @@ def _job(job_id: str = "11111111-1111-1111-1111-111111111111") -> OpsImportJob:
         started_at=now,
         finished_at=None,
         heartbeat_at=now,
+    )
+
+
+def _event(
+    event_id: str = "55555555-5555-5555-5555-555555555555",
+) -> OpsImportJobEvent:
+    now = datetime(2026, 6, 3, tzinfo=UTC)
+    return OpsImportJobEvent(
+        event_id=event_id,
+        job_id="11111111-1111-1111-1111-111111111111",
+        provider="python-mois-api",
+        dataset_key="mois_license_features_bulk",
+        feature_id=None,
+        stage="loading",
+        level="error",
+        code="provider.timeout",
+        message="provider timeout",
+        payload={"attempt": 2},
+        occurred_at=now,
     )
 
 
@@ -113,6 +148,8 @@ def test_ops_routes_mounted_in_openapi(client: TestClient) -> None:
     assert "/v1/ops/metrics" in spec["paths"]
     assert "/v1/ops/import-jobs" in spec["paths"]
     assert "/v1/ops/import-jobs/{job_id}" in spec["paths"]
+    assert "/v1/ops/import-jobs/{job_id}/events" in spec["paths"]
+    assert "/v1/ops/import-jobs/{job_id}/cancel" in spec["paths"]
     assert "/v1/ops/consistency/reports" in spec["paths"]
     assert "/v1/ops/consistency/issues" in spec["paths"]
     assert "OpsMetricsResponse" in spec["components"]["schemas"]
@@ -199,6 +236,11 @@ def test_import_jobs_list_passes_filters(
     assert body["data"]["items"][0]["load_batch_id"] == _job().load_batch_id
     assert body["data"]["items"][0]["parent_job_id"] == _job().parent_job_id
     assert body["data"]["items"][0]["status"] == "running"
+    assert body["data"]["items"][0]["links"][0]["rel"] == "self"
+    assert any(
+        link["rel"] == "feature_update_request"
+        for link in body["data"]["items"][0]["links"]
+    )
     assert body["meta"]["page"] == {
         "page_size": 25,
         "next_cursor": "cursor-2",
@@ -221,6 +263,88 @@ def test_import_job_detail_404(
     response = client.get("/v1/ops/import-jobs/missing")
 
     assert response.status_code == 404
+
+
+@pytest.mark.unit
+def test_import_job_events_list_passes_filters(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import ops as router_mod
+
+    async def _get(_session: Any, job_id: str) -> OpsImportJob:
+        assert job_id == _job().job_id
+        return _job()
+
+    async def _events(_session: Any, job_id: str, **kwargs: Any) -> OpsImportJobEventPage:
+        assert job_id == _job().job_id
+        assert kwargs == {"level": "error", "limit": 10, "cursor": "cursor-1"}
+        return OpsImportJobEventPage(items=(_event(),), next_cursor="cursor-2")
+
+    monkeypatch.setattr(router_mod, "get_ops_import_job", _get)
+    monkeypatch.setattr(router_mod, "list_ops_import_job_events", _events)
+
+    response = client.get(
+        f"/v1/ops/import-jobs/{_job().job_id}/events?"
+        "level=error&page_size=10&cursor=cursor-1"
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data"]["items"][0]["event_id"] == _event().event_id
+    assert body["data"]["items"][0]["payload"] == {"attempt": 2}
+    assert body["meta"]["page"]["next_cursor"] == "cursor-2"
+
+
+@pytest.mark.unit
+def test_import_job_cancel_running(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import ops as router_mod
+
+    seen_gets: list[str] = []
+
+    async def _get(_session: Any, job_id: str) -> OpsImportJob:
+        seen_gets.append(job_id)
+        return _job(status="cancelled") if len(seen_gets) > 1 else _job()
+
+    async def _cancel(_session: Any, job_id: str, **kwargs: Any) -> object:
+        assert job_id == _job().job_id
+        assert kwargs == {
+            "error_message": "wrong scope",
+            "operator": "local-admin",
+            "reason": "wrong scope",
+        }
+        return object()
+
+    monkeypatch.setattr(router_mod, "get_ops_import_job", _get)
+    monkeypatch.setattr(router_mod, "cancel_import_job", _cancel)
+
+    response = client.post(
+        f"/v1/ops/import-jobs/{_job().job_id}/cancel",
+        json={"operator": "local-admin", "reason": "wrong scope"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["status"] == "cancelled"
+
+
+@pytest.mark.unit
+def test_import_job_cancel_terminal_conflict(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from krtour.map_admin.routers import ops as router_mod
+
+    async def _get(_session: Any, _job_id: str) -> OpsImportJob:
+        return _job(status="done")
+
+    monkeypatch.setattr(router_mod, "get_ops_import_job", _get)
+
+    response = client.post(f"/v1/ops/import-jobs/{_job().job_id}/cancel")
+
+    assert response.status_code == 409
 
 
 @pytest.mark.unit

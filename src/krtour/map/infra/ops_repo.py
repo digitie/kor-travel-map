@@ -21,6 +21,8 @@ if TYPE_CHECKING:
 
 __all__ = [
     "OpsImportJob",
+    "OpsImportJobEvent",
+    "OpsImportJobEventPage",
     "OpsImportJobPage",
     "OpsConsistencyReport",
     "OpsConsistencyReportPage",
@@ -28,6 +30,7 @@ __all__ = [
     "OpsIntegrityIssuePage",
     "OpsIntegrityIssueCounts",
     "get_ops_import_job",
+    "list_ops_import_job_events",
     "list_ops_import_jobs",
     "get_latest_consistency_report",
     "list_ops_consistency_reports",
@@ -63,6 +66,31 @@ class OpsImportJobPage:
     """Keyset cursor 기반 import job 목록."""
 
     items: tuple[OpsImportJob, ...]
+    next_cursor: str | None
+
+
+@dataclass(frozen=True)
+class OpsImportJobEvent:
+    """``ops.import_job_events`` 운영 event row."""
+
+    event_id: str
+    job_id: str
+    provider: str | None
+    dataset_key: str | None
+    feature_id: str | None
+    stage: str | None
+    level: str
+    code: str | None
+    message: str
+    payload: dict[str, Any]
+    occurred_at: datetime
+
+
+@dataclass(frozen=True)
+class OpsImportJobEventPage:
+    """Keyset cursor 기반 import job event 목록."""
+
+    items: tuple[OpsImportJobEvent, ...]
     next_cursor: str | None
 
 
@@ -206,6 +234,27 @@ FROM ops.import_jobs
 WHERE job_id = CAST(:job_id AS uuid)
 """
 
+_IMPORT_JOB_EVENT_COLUMNS: Final[str] = (
+    "event_id, job_id, provider, dataset_key, feature_id, stage, level, code, "
+    "message, payload, occurred_at"
+)
+
+_LIST_IMPORT_JOB_EVENTS_SQL: Final[str] = f"""
+SELECT {_IMPORT_JOB_EVENT_COLUMNS}
+FROM ops.import_job_events
+WHERE job_id = CAST(:job_id AS uuid)
+  AND (CAST(:level AS text) IS NULL OR level = CAST(:level AS text))
+  AND (
+    CAST(:cursor_occurred_at AS timestamptz) IS NULL
+    OR (occurred_at, event_id) < (
+        CAST(:cursor_occurred_at AS timestamptz),
+        CAST(:cursor_event_id AS uuid)
+    )
+  )
+ORDER BY occurred_at DESC, event_id DESC
+LIMIT :limit
+"""
+
 _CONSISTENCY_COLUMNS: Final[str] = (
     "report_id, batch_id, started_at, finished_at, severity_max, cases, summary"
 )
@@ -337,6 +386,22 @@ def _row_to_import_job(row: Any) -> OpsImportJob:
     )
 
 
+def _row_to_import_job_event(row: Any) -> OpsImportJobEvent:
+    return OpsImportJobEvent(
+        event_id=str(row.event_id),
+        job_id=str(row.job_id),
+        provider=row.provider,
+        dataset_key=row.dataset_key,
+        feature_id=row.feature_id,
+        stage=row.stage,
+        level=str(row.level),
+        code=row.code,
+        message=str(row.message),
+        payload=_json_dict(row.payload),
+        occurred_at=row.occurred_at,
+    )
+
+
 def _row_to_consistency(row: Any) -> OpsConsistencyReport:
     return OpsConsistencyReport(
         report_id=str(row.report_id),
@@ -411,6 +476,44 @@ async def get_ops_import_job(
         await session.execute(text(_GET_IMPORT_JOB_SQL), {"job_id": job_id})
     ).one_or_none()
     return _row_to_import_job(row) if row is not None else None
+
+
+async def list_ops_import_job_events(
+    session: AsyncSession,
+    job_id: str,
+    *,
+    level: str | None = None,
+    limit: int = 50,
+    cursor: str | None = None,
+) -> OpsImportJobEventPage:
+    """``ops.import_job_events``를 ``occurred_at DESC, event_id DESC``로 조회한다."""
+    page_size = _limit(limit)
+    cursor_occurred_at, cursor_event_id = _decode_cursor(
+        cursor, kind="import_job_events"
+    )
+    rows = (
+        await session.execute(
+            text(_LIST_IMPORT_JOB_EVENTS_SQL),
+            {
+                "job_id": job_id,
+                "level": level,
+                "cursor_occurred_at": cursor_occurred_at,
+                "cursor_event_id": cursor_event_id,
+                "limit": page_size + 1,
+            },
+        )
+    ).all()
+    items = tuple(_row_to_import_job_event(row) for row in rows[:page_size])
+    next_cursor = (
+        _encode_cursor(
+            "import_job_events",
+            at=items[-1].occurred_at,
+            key=items[-1].event_id,
+        )
+        if len(rows) > page_size and items
+        else None
+    )
+    return OpsImportJobEventPage(items=items, next_cursor=next_cursor)
 
 
 async def list_ops_consistency_reports(

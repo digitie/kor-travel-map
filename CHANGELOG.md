@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### Import job 상세/event/cancel (T-221b, 2026-06-12)
+
+- **ADDED**: `ops.import_job_events` 테이블과
+  `GET /v1/ops/import-jobs/{job_id}/events` event timeline API.
+- **ADDED**: `POST /v1/ops/import-jobs/{job_id}/cancel` — queued/running job을
+  best-effort `cancelled` 상태로 전이하고 cancel event를 기록한다.
+- **ADDED**: admin frontend `/ops/import-jobs/[jobId]` 상세 화면. job payload,
+  관련 링크(parent/batch/request/upload/Dagster), event timeline, cancel action을
+  한 화면에서 확인한다.
+
 ### Admin feature 수동 작성 흐름 (T-221a, 2026-06-12)
 
 - **ADDED**: admin frontend `/admin/features/new` — 지도 좌표 선택, kraddr-geo

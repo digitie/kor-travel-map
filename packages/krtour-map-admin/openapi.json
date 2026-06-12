@@ -7147,6 +7147,200 @@
         "title": "OpsHealthDeepResponse",
         "type": "object"
       },
+      "OpsImportJobCancelRequest": {
+        "additionalProperties": false,
+        "description": "``POST /ops/import-jobs/{job_id}/cancel`` 요청.",
+        "properties": {
+          "operator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operator"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "title": "OpsImportJobCancelRequest",
+        "type": "object"
+      },
+      "OpsImportJobEventRecord": {
+        "additionalProperties": false,
+        "description": "``ops.import_job_events`` HTTP 표현.",
+        "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "dataset_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset Key"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "string"
+          },
+          "feature_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feature Id"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "level": {
+            "title": "Level",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage"
+          }
+        },
+        "required": [
+          "event_id",
+          "job_id",
+          "level",
+          "message",
+          "payload",
+          "occurred_at"
+        ],
+        "title": "OpsImportJobEventRecord",
+        "type": "object"
+      },
+      "OpsImportJobEventsData": {
+        "additionalProperties": false,
+        "description": "import job event 목록 data.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OpsImportJobEventRecord"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "OpsImportJobEventsData",
+        "type": "object"
+      },
+      "OpsImportJobEventsListResponse": {
+        "additionalProperties": false,
+        "description": "``GET /ops/import-jobs/{job_id}/events`` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/OpsImportJobEventsData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "OpsImportJobEventsListResponse",
+        "type": "object"
+      },
+      "OpsImportJobLink": {
+        "additionalProperties": false,
+        "description": "import job 상세 화면/연계 API가 쓰는 관련 링크.",
+        "properties": {
+          "href": {
+            "title": "Href",
+            "type": "string"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "rel": {
+            "title": "Rel",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rel",
+          "href"
+        ],
+        "title": "OpsImportJobLink",
+        "type": "object"
+      },
       "OpsImportJobRecord": {
         "additionalProperties": false,
         "description": "``ops.import_jobs`` HTTP 표현.",
@@ -7209,6 +7403,13 @@
           "kind": {
             "title": "Kind",
             "type": "string"
+          },
+          "links": {
+            "items": {
+              "$ref": "#/components/schemas/OpsImportJobLink"
+            },
+            "title": "Links",
+            "type": "array"
           },
           "load_batch_id": {
             "anyOf": [
@@ -14182,6 +14383,166 @@
           }
         },
         "summary": "Get Import Job",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
+    "/v1/ops/import-jobs/{job_id}/cancel": {
+      "post": {
+        "description": "queued/running import job을 best-effort로 ``cancelled`` 전이한다.",
+        "operationId": "cancel_import_job_route_v1_ops_import_jobs__job_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/OpsImportJobCancelRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpsImportJobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "job_id 없음"
+          },
+          "409": {
+            "description": "이미 terminal 상태라 취소 불가"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Import Job Route",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
+    "/v1/ops/import-jobs/{job_id}/events": {
+      "get": {
+        "description": "``ops.import_job_events`` 작업 event timeline.",
+        "operationId": "list_import_job_events_v1_ops_import_jobs__job_id__events_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "level",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "debug",
+                    "info",
+                    "warning",
+                    "error",
+                    "critical"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Level"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpsImportJobEventsListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Import Job Events",
         "tags": [
           "ops"
         ]

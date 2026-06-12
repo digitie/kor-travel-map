@@ -13,11 +13,13 @@ import pytest
 from krtour.map.infra.ops_repo import (
     OpsConsistencyReport,
     OpsImportJob,
+    OpsImportJobEvent,
     OpsIntegrityIssue,
     get_latest_consistency_report,
     get_ops_import_job,
     get_ops_integrity_issue_counts,
     list_ops_consistency_reports,
+    list_ops_import_job_events,
     list_ops_import_jobs,
     list_ops_integrity_issues,
 )
@@ -75,6 +77,22 @@ def _report_row(report_id: str, *, at: datetime) -> SimpleNamespace:
         severity_max="WARN",
         cases='[{"code":"F4","count":3}]',
         summary='{"total_violations":3}',
+    )
+
+
+def _event_row(event_id: str, *, at: datetime) -> SimpleNamespace:
+    return SimpleNamespace(
+        event_id=event_id,
+        job_id="11111111-1111-1111-1111-111111111111",
+        provider="python-mois-api",
+        dataset_key="mois_license_features_bulk",
+        feature_id=None,
+        stage="loading",
+        level="error",
+        code="provider.timeout",
+        message="provider timeout",
+        payload='{"attempt":2}',
+        occurred_at=at,
     )
 
 
@@ -168,6 +186,44 @@ async def test_invalid_cursor_rejected(cursor: str) -> None:
     with pytest.raises(ValueError, match="invalid import_jobs cursor"):
         await list_ops_import_jobs(db, cursor=cursor)
     assert session.params == []
+
+
+@pytest.mark.unit
+async def test_import_job_events_list_and_cursor() -> None:
+    at = datetime(2026, 6, 3, tzinfo=UTC)
+    session = _Session(
+        _Result(
+            [
+                _event_row("11111111-1111-1111-1111-111111111111", at=at),
+                _event_row("22222222-2222-2222-2222-222222222222", at=at),
+            ]
+        ),
+        _Result([_event_row("11111111-1111-1111-1111-111111111111", at=at)]),
+    )
+    db = cast(Any, session)
+
+    page = await list_ops_import_job_events(
+        db,
+        "11111111-1111-1111-1111-111111111111",
+        level="error",
+        limit=1,
+    )
+    assert isinstance(page.items[0], OpsImportJobEvent)
+    assert page.items[0].payload == {"attempt": 2}
+    assert page.next_cursor is not None
+
+    page2 = await list_ops_import_job_events(
+        db,
+        "11111111-1111-1111-1111-111111111111",
+        limit=1,
+        cursor=page.next_cursor,
+    )
+    assert session.params[0]["level"] == "error"
+    assert session.params[1]["cursor_occurred_at"] == at
+    assert session.params[1]["cursor_event_id"] == (
+        "11111111-1111-1111-1111-111111111111"
+    )
+    assert len(page2.items) == 1
 
 
 @pytest.mark.unit

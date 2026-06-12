@@ -638,7 +638,38 @@ CREATE INDEX idx_import_jobs_parent_created
 root import job에 `load_batch_id`를 만들고, provider별 child job과
 `consistency_check` job이 같은 `load_batch_id`와 root `parent_job_id`를 공유한다.
 
-### 9.1.1 `ops.offline_uploads` (ADR-045 D-14 / T-208g)
+### 9.1.1 `ops.import_job_events` (T-221b)
+
+```sql
+CREATE TABLE ops.import_job_events (
+  event_id    UUID PRIMARY KEY DEFAULT x_extension.gen_random_uuid(),
+  job_id      UUID NOT NULL REFERENCES ops.import_jobs(job_id) ON DELETE CASCADE,
+  provider    TEXT,
+  dataset_key TEXT,
+  feature_id  TEXT,
+  stage       TEXT,
+  level       TEXT NOT NULL, -- debug, info, warning, error, critical
+  code        TEXT,
+  message     TEXT NOT NULL,
+  payload     JSONB NOT NULL DEFAULT '{}'::jsonb,
+  occurred_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT ck_import_job_events_level
+    CHECK (level IN ('debug','info','warning','error','critical'))
+);
+
+CREATE INDEX idx_import_job_events_job_time
+  ON ops.import_job_events (job_id, occurred_at DESC, event_id DESC);
+CREATE INDEX idx_import_job_events_provider_time
+  ON ops.import_job_events (provider, occurred_at DESC, event_id DESC)
+  WHERE provider IS NOT NULL;
+CREATE INDEX idx_import_job_events_level_time
+  ON ops.import_job_events (level, occurred_at DESC, event_id DESC);
+```
+
+`ops.import_job_events`는 `ops.import_jobs` lifecycle과 provider/Dagster/offline upload
+작업 단계 event를 저장한다. REST 조회 정렬은 `(occurred_at DESC, event_id DESC)`다.
+
+### 9.1.2 `ops.offline_uploads` (ADR-045 D-14 / T-208g)
 
 ```sql
 CREATE TABLE ops.offline_uploads (

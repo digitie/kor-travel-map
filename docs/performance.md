@@ -675,6 +675,11 @@ PostGIS/testcontainers baseline으로 고정했다. 로컬 live DB 확인 결과
   - `idx_import_jobs_created_keyset(created_at DESC, job_id DESC)`
   - `idx_import_jobs_status(status, created_at, queue_sequence)` — claim FIFO tie-breaker
   - `idx_import_jobs_kind_status(kind, status, created_at DESC, job_id DESC)`
+- `ops.import_job_events`
+  - `idx_import_job_events_job_time(job_id, occurred_at DESC, event_id DESC)`
+  - `idx_import_job_events_provider_time(provider, occurred_at DESC, event_id DESC)`
+    partial `provider IS NOT NULL`
+  - `idx_import_job_events_level_time(level, occurred_at DESC, event_id DESC)`
 - `ops.feature_consistency_reports`
   - `idx_reports_started(started_at DESC, report_id DESC)`
   - `idx_reports_severity_started(severity_max, started_at DESC, report_id DESC)`

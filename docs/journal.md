@@ -2,6 +2,23 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-12 (codex) — T-221b import job 상세/event/cancel
+
+T-221 admin UI 연결성 보강의 두 번째 조각으로 import job 상세 흐름을 추가했다.
+
+- **DB/API**: `ops.import_job_events` migration/ORM/repo를 추가하고, job lifecycle
+  생성/claim/heartbeat/finish/cancel에서 구조화 event를 기록한다.
+  `GET /v1/ops/import-jobs/{job_id}/events`는 keyset cursor로 timeline을 반환한다.
+- **Cancel**: `POST /v1/ops/import-jobs/{job_id}/cancel`을 추가했다. queued/running
+  job만 best-effort로 `cancelled` 전이하고, terminal job은 `409`로 막는다.
+- **Frontend**: `/ops/import-jobs/[jobId]` route를 추가했다. job 상태/시각/payload,
+  parent/batch/request/upload/Dagster 관련 링크, event timeline, cancel form을 한 화면에
+  연결했다. 목록의 job id는 상세 route로 이동한다.
+- **Contract**: admin OpenAPI와 frontend generated type을 갱신했다. user OpenAPI 표면은
+  변하지 않는다.
+- **검증**: ops repo/router 단위 테스트 19 passed, jobs/ops repo 통합 테스트 17 passed,
+  Python ruff targeted, frontend type-check/ESLint, admin OpenAPI check 통과.
+
 ## 2026-06-12 (codex) — T-221a-2 수동 feature 작성 흐름
 
 T-221a feature 상세/수동 작성 흐름을 닫았다.

@@ -947,6 +947,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/ops/import-jobs/{job_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Import Job Route
+         * @description queued/running import job을 best-effort로 ``cancelled`` 전이한다.
+         */
+        post: operations["cancel_import_job_route_v1_ops_import_jobs__job_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ops/import-jobs/{job_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Import Job Events
+         * @description ``ops.import_job_events`` 작업 event timeline.
+         */
+        get: operations["list_import_job_events_v1_ops_import_jobs__job_id__events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/ops/metrics": {
         parameters: {
             query?: never;
@@ -3659,6 +3699,77 @@ export interface components {
             meta: components["schemas"]["Meta"];
         };
         /**
+         * OpsImportJobCancelRequest
+         * @description ``POST /ops/import-jobs/{job_id}/cancel`` 요청.
+         */
+        OpsImportJobCancelRequest: {
+            /** Operator */
+            operator?: string | null;
+            /** Reason */
+            reason?: string | null;
+        };
+        /**
+         * OpsImportJobEventRecord
+         * @description ``ops.import_job_events`` HTTP 표현.
+         */
+        OpsImportJobEventRecord: {
+            /** Code */
+            code?: string | null;
+            /** Dataset Key */
+            dataset_key?: string | null;
+            /** Event Id */
+            event_id: string;
+            /** Feature Id */
+            feature_id?: string | null;
+            /** Job Id */
+            job_id: string;
+            /** Level */
+            level: string;
+            /** Message */
+            message: string;
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at: string;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+            /** Provider */
+            provider?: string | null;
+            /** Stage */
+            stage?: string | null;
+        };
+        /**
+         * OpsImportJobEventsData
+         * @description import job event 목록 data.
+         */
+        OpsImportJobEventsData: {
+            /** Items */
+            items: components["schemas"]["OpsImportJobEventRecord"][];
+        };
+        /**
+         * OpsImportJobEventsListResponse
+         * @description ``GET /ops/import-jobs/{job_id}/events`` 응답.
+         */
+        OpsImportJobEventsListResponse: {
+            data: components["schemas"]["OpsImportJobEventsData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * OpsImportJobLink
+         * @description import job 상세 화면/연계 API가 쓰는 관련 링크.
+         */
+        OpsImportJobLink: {
+            /** Href */
+            href: string;
+            /** Label */
+            label?: string | null;
+            /** Rel */
+            rel: string;
+        };
+        /**
          * OpsImportJobRecord
          * @description ``ops.import_jobs`` HTTP 표현.
          */
@@ -3680,6 +3791,8 @@ export interface components {
             job_id: string;
             /** Kind */
             kind: string;
+            /** Links */
+            links?: components["schemas"]["OpsImportJobLink"][];
             /** Load Batch Id */
             load_batch_id?: string | null;
             /** Parent Job Id */
@@ -6806,6 +6919,90 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OpsImportJobResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_import_job_route_v1_ops_import_jobs__job_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["OpsImportJobCancelRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpsImportJobResponse"];
+                };
+            };
+            /** @description job_id 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 이미 terminal 상태라 취소 불가 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_import_job_events_v1_ops_import_jobs__job_id__events_get: {
+        parameters: {
+            query?: {
+                level?: ("debug" | "info" | "warning" | "error" | "critical") | null;
+                page_size?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpsImportJobEventsListResponse"];
                 };
             };
             /** @description Validation Error */
