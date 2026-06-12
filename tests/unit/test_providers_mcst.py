@@ -242,6 +242,23 @@ async def test_invalid_coordinates_fall_back_to_address_clue() -> None:
     assert bundle.source_record.raw_address is not None
 
 
+async def test_out_of_korea_coordinate_isolated_to_address_clue() -> None:
+    """파서 bbox는 통과하지만 ``Coordinate`` DTO 허용범위(lat≤39.5) 밖인 좌표 격리.
+
+    T-212e live 실측: `42.6406462, 131.6788...`(블라디보스토크 인근) row가
+    `Coordinate` ValueError로 dataset 전체를 차단했다 — 좌표만 버리고 row는
+    주소 단서로 적재한다(#400 standard_data와 동일 패턴).
+    """
+
+    [bundle] = await file_rows_to_bundles(
+        [_world_restaurant_row(COORDINATES="42.6406462, 131.6788931")],
+        slug="world_restaurants_csv",
+        fetched_at=_NOW,
+    )
+    assert bundle.feature.coord is None  # 좌표 격리
+    assert bundle.source_record.raw_address is not None  # 주소 단서 보존
+
+
 # -- CNTC_RESRCE 방언 ---------------------------------------------------------
 
 
