@@ -2,6 +2,18 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-13 (codex) — T-226 runtime 이름 추가 재결정 반영
+
+T-226 목표 runtime identity를 사용자 추가 결정에 맞춰 갱신했다.
+
+- CLI 목표명을 `ktmctl`로 바꿨다.
+- PostgreSQL 기본 DB 이름을 `kortravelmap`, Dagster metadata DB 이름을
+  `kortravelmap_dagster`로 바꿨다.
+- RustFS bucket/volume 등 사용자 가시 이름은 `kortravelmap*` 계열로 맞추기로 했다.
+- 형제 프로젝트 표시명은 `kor-travel-geo`, `kor-travel-concierge` 기준으로 맞췄다.
+- ADR-054, package identity guide, T-226b 실행계획, tasks/resume을 같은 기준으로
+  정렬했다.
+
 ## 2026-06-13 (codex) — T-226 import root 재결정 반영
 
 T-226 목표 Python import root와 권장 alias를 사용자 재결정에 맞춰 갱신했다.

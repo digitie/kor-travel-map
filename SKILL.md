@@ -42,7 +42,7 @@ krtour-map DB에 직접 접근하지 않고 `python-krtour-map`을 운영 코드
 
 ### 개발 환경 (PC, WSL)
 
-형제 라이브러리 (`python-kraddr-geo` / `python-kraddr-base` / `python-knps-api`
+형제 라이브러리 (`kor-travel-geo`(구 `python-kraddr-geo`) / `python-kraddr-base` / `python-knps-api`
 등)와 **동일 정책**. 자세히는 `AGENTS.md` §"개발 환경 정책 (PC, WSL)" +
 `docs/dev-environment.md`.
 

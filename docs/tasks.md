@@ -18,12 +18,16 @@
   - [ ] T-226 — **배포명/임포트명 재정의: `kor-travel-map` / `kortravelmap`**.
         사용자 결정(2026-06-12, 2026-06-13 재조정): 검색성과 직관성을 위해 배포명은
         `kor-travel-map`, Python import root는 `kortravelmap`으로 바꾸고, 권장 사용
-        예시는 `import kortravelmap as ktm`로 둔다. 구현은 대규모 package identity
-        clean cut이므로 별도 PR에서 진행한다.
+        예시는 `import kortravelmap as ktm`로 둔다. CLI는 `ktmctl`, PostgreSQL 기본
+        DB와 RustFS 사용자 가시 이름은 `kortravelmap*` 계열로 둔다. 구현은 대규모
+        package identity clean cut이므로 별도 PR에서 진행한다. 형제 프로젝트 표시는
+        `python-kraddr-geo` → `kor-travel-geo`,
+        `tripmate-agent`/`krtour-ai-agent` → `kor-travel-concierge` 기준으로 맞춘다.
     - [x] T-226a — ADR/문서 정본 작성(완료: 2026-06-12, Codex):
           ADR-054와 `docs/package-identity-rename.md`를 추가해 target identity
           (`kor-travel-map`, `kortravelmap`, `import kortravelmap as ktm`, `KOR_TRAVEL_MAP_*`,
-          `kor_travel_map`)와 clean cut/no-shim 원칙을 확정했다.
+          `kortravelmap`, `ktmctl`, `kor-travel-geo`, `kor-travel-concierge`)와
+          clean cut/no-shim 원칙을 확정했다.
     - [x] T-226b — 코드/package clean cut 실행계획(완료: 2026-06-12, Codex):
           `docs/reports/t-226b-package-clean-cut-plan-2026-06-12.md`에서
           `kortravelmap`, `kortravelmap.admin`, `kortravelmap.dagster` 최종 layout,
@@ -36,9 +40,9 @@
           `packages/kor-travel-map-dagster/src/kortravelmap/dagster`, import-linter,
           mypy/coverage/package metadata, console script, OpenAPI export 경로를 갱신한다.
     - [ ] T-226d — runtime/deployment identity 전파:
-          `KRTOUR_MAP_*` → `KOR_TRAVEL_MAP_*`, DB 기본값 `kor_travel_map`,
-          Dagster metadata DB `kor_travel_map_dagster`, Docker/image/service 표시명,
-          advisory lock/log/metric service label을 clean cut한다.
+          `KRTOUR_MAP_*` → `KOR_TRAVEL_MAP_*`, DB 기본값 `kortravelmap`,
+          Dagster metadata DB `kortravelmap_dagster`, RustFS bucket/volume 표시명,
+          Docker/image/service 표시명, advisory lock/log/metric service label을 clean cut한다.
     - [ ] T-226e — 소비자 문서/client/migration guide:
           README/AGENTS/SKILL/architecture/provider-contract/integration-map 식별자 표,
           generated client/TripMate 문서, examples/snippets,

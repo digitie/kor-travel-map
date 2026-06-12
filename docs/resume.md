@@ -1,5 +1,22 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-13 Codex 작업 메모 — T-226 runtime 이름 추가 재결정
+
+사용자 추가 결정에 따라 T-226 목표값을 다시 정렬했다.
+
+- CLI 목표명은 `ktmctl`로 둔다.
+- PostgreSQL 기본 DB 이름은 `kortravelmap`, Dagster metadata DB 이름은
+  `kortravelmap_dagster`로 둔다.
+- RustFS bucket/volume 등 사용자 가시 이름은 `kortravelmap*` 계열로 둔다
+  (예: offline upload bucket `kortravelmap-uploads`).
+- 형제 프로젝트의 GitHub repo/project 표시명은 `kor-travel-geo`,
+  `kor-travel-concierge` 기준으로 맞춘다.
+- public distribution `kor-travel-map`, Python import root `kortravelmap`, 권장 import
+  `import kortravelmap as ktm`, env prefix `KOR_TRAVEL_MAP_*`는 유지한다.
+
+**다음 한 작업**: **T-225** — T-212e closure 재검증. T-226c/d는 위 목표값 기준으로
+package/runtime identity clean cut을 이어간다.
+
 ## 2026-06-13 Codex 작업 메모 — T-226 import root 재결정 반영
 
 사용자 재결정에 따라 T-226 목표 Python import root를 `kortravelmap`으로, 권장 import
@@ -9,8 +26,7 @@
   `src/kortravelmap`, `kortravelmap.admin`, `kortravelmap.dagster`로 정렬했다.
 - README/AGENTS/SKILL/CLAUDE/backend-package/architecture/provider-contract/
   integration-map/tasks/journal의 T-226 note와 작업 설명도 같은 기준으로 맞췄다.
-- public distribution `kor-travel-map`, CLI `kor-travel-map`, env prefix
-  `KOR_TRAVEL_MAP_*`, DB 기본값 `kor_travel_map`은 그대로 유지한다.
+- public distribution `kor-travel-map`, env prefix `KOR_TRAVEL_MAP_*`은 그대로 유지한다.
 
 **다음 한 작업**: **T-225** — T-212e closure 재검증(최신 표면 포함 여부,
 live row 수/P99, 리포트 링크 재대조). T-226c Python import/package layout clean cut은
@@ -60,7 +76,7 @@ T-226a로 package identity rename 정본을 문서화했다.
   `kortravelmap`, 권장 예시는 `import kortravelmap as ktm`다.
 - `docs/package-identity-rename.md`를 추가해 현재값(`python-krtour-map`, `krtour.map`,
   `KRTOUR_MAP_*`, `krtour_map`)과 목표값(`kor-travel-map`, `kortravelmap`,
-  `KOR_TRAVEL_MAP_*`, `kor_travel_map`)을 분리했다.
+  `KOR_TRAVEL_MAP_*`, `kortravelmap`)을 분리했다.
 - README/AGENTS/CLAUDE/backend-package/architecture/provider-contract/integration-map에는
   "현재 표기는 T-226 후속 clean cut 전 코드 기준, 목표 identity는 ADR-054"라는 note를 추가했다.
 - clean cut/no-shim 원칙을 확정했다. 구 `krtour.map`/`KRTOUR_MAP_*` compatibility shim은
