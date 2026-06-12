@@ -2,6 +2,16 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-12 (claude) — T-212e: visitkorea modified_time datetime 재정렬 (ADR-044)
+
+T-212e live full reload Phase 2에서 `feature_event_visitkorea_enrichment`가
+`SourceRecord.source_version` ValidationError(str 기대, provider 실모델
+`TourItem.modified_time`은 `datetime`)로 실패(run `cff6a853`). Protocol을
+`datetime | str | None`로 재정렬하고 `_modified_time_str`로 원시 TourAPI 표기
+(`YYYYMMDDHHMMSS`)에 맞춰 문자열화 — `source_version`/`raw_data` 모두 적용
+(raw_data JSON 직렬화 안전 확보). 단위 테스트 fake를 datetime으로 바꿔
+정규화 검증 추가.
+
 ## 2026-06-12 (codex) — T-221~T-223 순서 재정렬 + T-224/T-225 등록
 
 사용자 지시에 따라 `docs/tasks.md`/`docs/tasks-done.md`를 먼저 정리했다.

@@ -48,7 +48,7 @@ class _Item:
     event_end_date: str | None
     tel: str | None
     homepage: str | None
-    modified_time: str | None
+    modified_time: datetime | str | None
 
 
 @dataclass(frozen=True)
@@ -86,7 +86,10 @@ _ITEM1 = _Item(
     event_end_date="20260412",
     tel="02-2670-3114",
     homepage='<a href="http://spring.example.kr">바로가기</a>',
-    modified_time="20260301120000",
+    # provider 실모델(TourItem.modified_time)은 datetime으로 파싱해 보존한다
+    # (ADR-044 재정렬 — T-212e live 실측). 변환이 원시 TourAPI 표기로
+    # 문자열화하는지 본 fake로 검증한다.
+    modified_time=datetime(2026, 3, 1, 12, 0, 0, tzinfo=timezone(timedelta(hours=9))),
 )
 _ITEM2 = _Item(
     content_id="2747930",
@@ -162,6 +165,10 @@ def test_enrichment_source_record_no_feature() -> None:
     assert sr.raw_data["first_image"] == "http://tong.visitkorea.or.kr/img1.jpg"
     assert sr.raw_data["overview"] == "여의도 일대 봄꽃 축제 상세 설명."
     assert sr.raw_data["content_id"] == "2747929"
+    # datetime modified_time은 원시 TourAPI 표기(YYYYMMDDHHMMSS) 문자열로
+    # 정규화돼 source_version/raw_data 모두에 들어간다 (JSON 직렬화 안전).
+    assert sr.source_version == "20260301120000"
+    assert sr.raw_data["modified_time"] == "20260301120000"
 
 
 @pytest.mark.unit
