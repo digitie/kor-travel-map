@@ -45,6 +45,8 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Final, Protocol, runtime_checkable
 
+from pydantic import ValidationError
+
 from krtour.map.category import (
     PlaceCategoryCode,
     mapbox_maki_icon_or_none,
@@ -235,6 +237,25 @@ class CulturalFestivalItem(Protocol):
 # -- 단일 변환 ------------------------------------------------------------
 
 
+def _coordinate_or_none(
+    longitude: float | None, latitude: float | None
+) -> Coordinate | None:
+    """좌표 쌍 → ``Coordinate``. 결측이거나 검증 실패면 좌표 미상(None) 격리.
+
+    표준데이터 live에는 한국 경계 밖 오타 좌표가 실존한다(T-212e 실측 —
+    주차장 row `lat=26.128492`, run `bc740f74`). 좌표 한 쌍의 오타가 dataset
+    전체 적재를 차단하지 않도록 #386(축제 날짜 역전)과 같은 격리 패턴을
+    적용한다 — 좌표만 버리고 row는 주소 단서로 적재(원본은 raw_data 보존).
+    """
+
+    if longitude is None or latitude is None:
+        return None
+    try:
+        return Coordinate(lon=Decimal(str(longitude)), lat=Decimal(str(latitude)))
+    except ValidationError:
+        return None
+
+
 async def _item_to_bundle(
     item: CulturalFestivalItem,
     *,
@@ -257,14 +278,8 @@ async def _item_to_bundle(
     if not name:
         return None
 
-    # 1) Coordinate (한 쪽이라도 None이면 좌표 미상).
-    coord: Coordinate | None
-    if item.latitude is not None and item.longitude is not None:
-        coord = Coordinate(
-            lon=Decimal(str(item.longitude)), lat=Decimal(str(item.latitude))
-        )
-    else:
-        coord = None
+    # 1) Coordinate (결측/검증 실패면 좌표 미상 — `_coordinate_or_none`).
+    coord = _coordinate_or_none(item.longitude, item.latitude)
 
     road_text = normalize_korean_text(item.rdnmadr)
     legal_text = normalize_korean_text(item.lnmadr)
@@ -580,11 +595,7 @@ async def _museum_to_bundle(
 ) -> FeatureBundle:
     """박물관/미술관 1 row → place ``FeatureBundle``."""
     name = item.fclty_nm or ""
-    coord: Coordinate | None
-    if item.latitude is not None and item.longitude is not None:
-        coord = Coordinate(lon=Decimal(str(item.longitude)), lat=Decimal(str(item.latitude)))
-    else:
-        coord = None
+    coord = _coordinate_or_none(item.longitude, item.latitude)
 
     road_text = normalize_korean_text(item.rdnmadr)
     legal_text = normalize_korean_text(item.lnmadr)
@@ -761,11 +772,7 @@ async def _standard_place_to_bundle(
     address_resolver: AddressResolver | None,
 ) -> FeatureBundle:
     """data.go.kr 표준데이터 place 1건 → ``FeatureBundle`` 공용 조립(관광지/주차장)."""
-    coord: Coordinate | None
-    if latitude is not None and longitude is not None:
-        coord = Coordinate(lon=Decimal(str(longitude)), lat=Decimal(str(latitude)))
-    else:
-        coord = None
+    coord = _coordinate_or_none(longitude, latitude)
 
     geo: Address | None = None
     if coord is not None and reverse_geocoder is not None:

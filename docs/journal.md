@@ -2,6 +2,15 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-12 (claude) — T-212e: 표준데이터 한국 경계 밖 좌표 격리 (#386 패턴)
+
+핀 범프(#393) 후 주차장 재실행이 **다른 불량 row 클래스**로 재실패(run
+`bc740f74`): live 값 `lat=26.128492`(한국 lat 허용범위 [33.0, 39.5] 밖 오타)가
+`Coordinate` 검증 ValueError로 dataset 전체를 차단. `standard_data`의 좌표 조립
+3개소(축제/박물관/공용 place 조립기)를 `_coordinate_or_none` helper로 교체 —
+검증 실패 좌표는 None 격리(row는 주소 단서로 적재, 원본 raw_data 보존).
+단위 테스트: 경계 밖 row 격리 + 정상 row 비영향.
+
 ## 2026-06-12 (codex) — T-221e ops logs + debug 재판정
 
 T-221 admin UI 연결성 보강의 마지막 조각으로 `/ops/logs`와 import job event stream을
