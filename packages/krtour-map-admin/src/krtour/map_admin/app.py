@@ -58,6 +58,7 @@ from krtour.map_admin.routers import (
     ops_logs_router,
     ops_router,
     poi_cache_targets_router,
+    provider_refresh_policies_router,
     providers_router,
     public_status_router,
 )
@@ -363,6 +364,7 @@ def create_app(settings: AdminSettings | None = None) -> FastAPI:
         application.include_router(enrichment_review_router, prefix="/v1")
         application.include_router(feature_update_requests_router, prefix="/v1")
         application.include_router(poi_cache_targets_router, prefix="/v1")
+        application.include_router(provider_refresh_policies_router, prefix="/v1")
         application.include_router(offline_uploads_router, prefix="/v1")
 
     if ops_routes_enabled:

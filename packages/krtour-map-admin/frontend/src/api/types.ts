@@ -497,6 +497,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/provider-refresh-policies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Provider Refresh Policy Route
+         * @description provider/dataset refresh policy 목록.
+         */
+        get: operations["list_provider_refresh_policy_route_v1_admin_provider_refresh_policies_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/provider-refresh-policies/{provider}/{dataset_key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Provider Refresh Policy Route
+         * @description provider/dataset refresh policy 단건.
+         */
+        get: operations["get_provider_refresh_policy_route_v1_admin_provider_refresh_policies__provider___dataset_key__get"];
+        /**
+         * Upsert Provider Refresh Policy Route
+         * @description provider/dataset refresh policy를 full upsert한다.
+         */
+        put: operations["upsert_provider_refresh_policy_route_v1_admin_provider_refresh_policies__provider___dataset_key__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/restore/{backup_id}": {
         parameters: {
             query?: never;
@@ -999,6 +1043,49 @@ export interface paths {
          * @description 운영 홈/대시보드가 쓰는 DB 기반 summary metric.
          */
         get: operations["get_ops_metrics_v1_ops_metrics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ops/providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * provider 운영 상세 목록
+         * @description 전 provider×dataset의 sync state와 refresh policy를 함께 조회한다.
+         *
+         *     ``/v1/providers``는 사용자/서비스 표면이라 cursor를 계속 숨긴다. 이 endpoint는
+         *     admin UI 내부 운영 화면이 쓰는 확장 표면이다.
+         */
+        get: operations["list_ops_providers_v1_ops_providers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ops/providers/{provider}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * provider 운영 상세
+         * @description provider의 dataset별 sync state, refresh policy, 최근 update request.
+         */
+        get: operations["get_ops_provider_v1_ops_providers__provider__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3952,6 +4039,146 @@ export interface components {
             meta: components["schemas"]["Meta"];
         };
         /**
+         * OpsProviderDatasetDetail
+         * @description provider dataset 상세 추적 단위.
+         */
+        OpsProviderDatasetDetail: {
+            /** Dataset Key */
+            dataset_key: string;
+            /** Links */
+            links: components["schemas"]["OpsProviderLink"][];
+            /** Provider */
+            provider: string;
+            /** Recent Update Requests */
+            recent_update_requests: components["schemas"]["OpsProviderUpdateRequestSummary"][];
+            refresh_policy?: components["schemas"]["ProviderRefreshPolicyRecord"] | null;
+            /** Sync States */
+            sync_states: components["schemas"]["OpsProviderSyncStateDetail"][];
+        };
+        /**
+         * OpsProviderDatasetSummary
+         * @description ``GET /ops/providers`` 목록의 1행.
+         */
+        OpsProviderDatasetSummary: {
+            /** Consecutive Failures */
+            consecutive_failures: number;
+            /** Dataset Key */
+            dataset_key: string;
+            /** Last Failure At */
+            last_failure_at: string | null;
+            /** Last Success At */
+            last_success_at: string | null;
+            /** Links */
+            links: components["schemas"]["OpsProviderLink"][];
+            /** Next Run After */
+            next_run_after: string | null;
+            /** Provider */
+            provider: string;
+            refresh_policy?: components["schemas"]["ProviderRefreshPolicyRecord"] | null;
+            /** Status */
+            status: string;
+            /** Sync Scope */
+            sync_scope: string;
+        };
+        /**
+         * OpsProviderDetailData
+         * @description provider 상세 data.
+         */
+        OpsProviderDetailData: {
+            /** Datasets */
+            datasets: components["schemas"]["OpsProviderDatasetDetail"][];
+            /** Provider */
+            provider: string;
+        };
+        /**
+         * OpsProviderDetailResponse
+         * @description ``GET /ops/providers/{provider}`` 응답.
+         */
+        OpsProviderDetailResponse: {
+            data: components["schemas"]["OpsProviderDetailData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * OpsProviderLink
+         * @description provider ops 상세 화면이 쓰는 관련 API 링크.
+         */
+        OpsProviderLink: {
+            /** Href */
+            href: string;
+            /** Label */
+            label?: string | null;
+            /** Rel */
+            rel: string;
+        };
+        /**
+         * OpsProviderSyncStateDetail
+         * @description ops provider 상세에서만 노출하는 sync state 상세.
+         */
+        OpsProviderSyncStateDetail: {
+            /** Consecutive Failures */
+            consecutive_failures: number;
+            /** Cursor */
+            cursor: {
+                [key: string]: unknown;
+            };
+            /** Last Failure At */
+            last_failure_at: string | null;
+            /** Last Success At */
+            last_success_at: string | null;
+            /** Next Run After */
+            next_run_after: string | null;
+            /** Status */
+            status: string;
+            /** Sync Scope */
+            sync_scope: string;
+        };
+        /**
+         * OpsProviderUpdateRequestSummary
+         * @description provider/dataset과 연결된 feature update request 요약.
+         */
+        OpsProviderUpdateRequestSummary: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Dagster Run Id */
+            dagster_run_id?: string | null;
+            /** Dry Run */
+            dry_run: boolean;
+            /** Job Id */
+            job_id?: string | null;
+            /** Request Id */
+            request_id: string;
+            /** Run Mode */
+            run_mode: string;
+            /** Status */
+            status: string;
+            /** Status Url */
+            status_url: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * OpsProvidersData
+         * @description provider ops 목록 data.
+         */
+        OpsProvidersData: {
+            /** Items */
+            items: components["schemas"]["OpsProviderDatasetSummary"][];
+        };
+        /**
+         * OpsProvidersResponse
+         * @description ``GET /ops/providers`` 응답.
+         */
+        OpsProvidersResponse: {
+            data: components["schemas"]["OpsProvidersData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
          * PageMeta
          * @description Cursor pagination metadata.
          *
@@ -4201,6 +4428,128 @@ export interface components {
         ProviderLastSyncResponse: {
             data: components["schemas"]["ProviderLastSyncData"];
             meta: components["schemas"]["Meta"];
+        };
+        /**
+         * ProviderRefreshPolicyListData
+         * @description provider refresh policy 목록 data.
+         */
+        ProviderRefreshPolicyListData: {
+            /** Items */
+            items: components["schemas"]["ProviderRefreshPolicyRecord"][];
+        };
+        /**
+         * ProviderRefreshPolicyListResponse
+         * @description ``GET /admin/provider-refresh-policies`` 응답.
+         */
+        ProviderRefreshPolicyListResponse: {
+            data: components["schemas"]["ProviderRefreshPolicyListData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * ProviderRefreshPolicyRecord
+         * @description ``ops.provider_refresh_policies`` HTTP 표현.
+         */
+        ProviderRefreshPolicyRecord: {
+            /** Burst Size */
+            burst_size?: number | null;
+            /** Config Source */
+            config_source: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Dataset Key */
+            dataset_key: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Max Concurrent */
+            max_concurrent: number;
+            /** Max Requests Per Day */
+            max_requests_per_day?: number | null;
+            /** Max Requests Per Hour */
+            max_requests_per_hour?: number | null;
+            /** Max Requests Per Minute */
+            max_requests_per_minute?: number | null;
+            /** Min Interval Seconds */
+            min_interval_seconds?: number | null;
+            /** Optimal Interval Seconds */
+            optimal_interval_seconds?: number | null;
+            /** Provider */
+            provider: string;
+            /** Rate Limit Source */
+            rate_limit_source: {
+                [key: string]: unknown;
+            };
+            /** Source Kind */
+            source_kind: string;
+            /** System Interval Seconds */
+            system_interval_seconds?: number | null;
+            /** Targeted Policy */
+            targeted_policy: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * ProviderRefreshPolicyResponse
+         * @description provider refresh policy 단건 응답.
+         */
+        ProviderRefreshPolicyResponse: {
+            data: components["schemas"]["ProviderRefreshPolicyRecord"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * ProviderRefreshPolicyUpsertRequest
+         * @description provider/dataset refresh policy full upsert 요청.
+         */
+        ProviderRefreshPolicyUpsertRequest: {
+            /** Burst Size */
+            burst_size?: number | null;
+            /**
+             * Config Source
+             * @default db
+             */
+            config_source: string;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Max Concurrent
+             * @default 1
+             */
+            max_concurrent: number;
+            /** Max Requests Per Day */
+            max_requests_per_day?: number | null;
+            /** Max Requests Per Hour */
+            max_requests_per_hour?: number | null;
+            /** Max Requests Per Minute */
+            max_requests_per_minute?: number | null;
+            /** Min Interval Seconds */
+            min_interval_seconds?: number | null;
+            /** Optimal Interval Seconds */
+            optimal_interval_seconds?: number | null;
+            /** Rate Limit Source */
+            rate_limit_source?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Source Kind
+             * @enum {string}
+             */
+            source_kind: "openapi" | "filedata" | "manual" | "system";
+            /** System Interval Seconds */
+            system_interval_seconds?: number | null;
+            /**
+             * Targeted Policy
+             * @default follow_system
+             * @enum {string}
+             */
+            targeted_policy: "follow_system" | "allow_targeted" | "disabled";
         };
         /**
          * ProviderSyncStateSummary
@@ -6061,6 +6410,114 @@ export interface operations {
             };
         };
     };
+    list_provider_refresh_policy_route_v1_admin_provider_refresh_policies_get: {
+        parameters: {
+            query?: {
+                provider?: string | null;
+                enabled?: boolean | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderRefreshPolicyListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_provider_refresh_policy_route_v1_admin_provider_refresh_policies__provider___dataset_key__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+                dataset_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderRefreshPolicyResponse"];
+                };
+            };
+            /** @description provider refresh policy 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upsert_provider_refresh_policy_route_v1_admin_provider_refresh_policies__provider___dataset_key__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+                dataset_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProviderRefreshPolicyUpsertRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderRefreshPolicyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     restore_backup_v1_admin_restore__backup_id__post: {
         parameters: {
             query?: never;
@@ -7032,6 +7489,64 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OpsMetricsResponse"];
+                };
+            };
+        };
+    };
+    list_ops_providers_v1_ops_providers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpsProvidersResponse"];
+                };
+            };
+        };
+    };
+    get_ops_provider_v1_ops_providers__provider__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpsProviderDetailResponse"];
+                };
+            };
+            /** @description provider sync/policy row 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

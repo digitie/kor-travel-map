@@ -1,6 +1,7 @@
 "use client";
 
 import { PlayIcon, RefreshCwIcon, XIcon } from "lucide-react";
+import Link from "next/link";
 import { useRef, useState } from "react";
 
 import {
@@ -277,7 +278,16 @@ export function FeatureUpdateRequestsClient() {
                 {(requests.data?.data.items ?? []).map((request) => (
                   <TableRow key={request.request_id ?? JSON.stringify(request.scope)}>
                     <TableCell className="font-mono text-xs">
-                      {shortId(request.request_id)}
+                      {request.request_id ? (
+                        <Link
+                          className="underline underline-offset-2"
+                          href={`/admin/feature-update-requests/${request.request_id}`}
+                        >
+                          {shortId(request.request_id)}
+                        </Link>
+                      ) : (
+                        shortId(request.request_id)
+                      )}
                     </TableCell>
                     <TableCell>{request.scope_type}</TableCell>
                     <TableCell>

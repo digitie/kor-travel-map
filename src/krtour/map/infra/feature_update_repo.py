@@ -385,12 +385,20 @@ FROM ops.feature_update_requests
 WHERE (CAST(:status AS text) IS NULL OR status = CAST(:status AS text))
   AND (CAST(:scope_type AS text) IS NULL OR scope_type = CAST(:scope_type AS text))
   AND (
-    CAST(:provider_filter AS jsonb) IS NULL
+    CAST(:provider AS text) IS NULL
     OR providers @> CAST(:provider_filter AS jsonb)
+    OR (
+      scope_type = 'provider_dataset'
+      AND scope->>'provider' = CAST(:provider AS text)
+    )
   )
   AND (
-    CAST(:dataset_key_filter AS jsonb) IS NULL
+    CAST(:dataset_key AS text) IS NULL
     OR dataset_keys @> CAST(:dataset_key_filter AS jsonb)
+    OR (
+      scope_type = 'provider_dataset'
+      AND scope->>'dataset_key' = CAST(:dataset_key AS text)
+    )
   )
   AND (
     CAST(:created_from AS timestamptz) IS NULL
@@ -697,7 +705,9 @@ async def list_update_requests(
             {
                 "status": status,
                 "scope_type": scope_type,
+                "provider": provider,
                 "provider_filter": _json_param([provider]) if provider else None,
+                "dataset_key": dataset_key,
                 "dataset_key_filter": (
                     _json_param([dataset_key]) if dataset_key else None
                 ),

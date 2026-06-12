@@ -2,6 +2,24 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-12 (codex) — T-221d provider 상세/refresh policy
+
+T-221 admin UI 연결성 보강의 네 번째 조각으로 provider 운영 상세와 refresh policy 편집을
+연결했다.
+
+- **Backend**: `GET /v1/ops/providers`, `GET /v1/ops/providers/{provider}`를 추가했다.
+  `/v1/providers` 사용자 표면은 cursor를 계속 숨기고, ops 상세 표면에서만 sync cursor,
+  refresh policy, 최근 `provider_dataset` update request를 묶어 제공한다.
+- **Policy API**: `GET/PUT /v1/admin/provider-refresh-policies*`를 추가했다. interval은
+  `min_interval_seconds`와 선언된 request/min/hour/day floor보다 짧게 설정할 수 없다.
+- **Request linkage**: `feature_update_requests` 목록 필터가 `scope.type='provider_dataset'`
+  내부 provider/dataset도 찾도록 보정했다.
+- **Frontend**: `/ops/providers`에서 dataset row 선택, sync cursor/detail, 최근 request
+  상세 이동, `provider_dataset` request 생성, refresh policy 편집을 제공한다.
+  `/admin/feature-update-requests/[request_id]` 상세 route도 추가했다.
+- **검증**: provider/policy/update request router 단위 테스트 27 passed, Python
+  ruff/mypy targeted, frontend type-check/ESLint 통과.
+
 ## 2026-06-12 (codex) — T-221c admin live signal channel
 
 T-221 admin UI 연결성 보강의 세 번째 조각으로 admin 실시간 signal 채널을 추가했다.

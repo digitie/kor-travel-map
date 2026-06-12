@@ -29,9 +29,10 @@
           링크 포함(2026-06-12 Codex).
     - [x] T-221c — admin 실시간 전송. `WS /v1/ops/live` 다중화 topic과
           job/request/upload/run별 WebSocket signal channel 구현(2026-06-12 Codex).
-    - [ ] T-221d — provider 상세/refresh policy 보강. `/ops/providers` 행 상세 추적,
+    - [x] T-221d — provider 상세/refresh policy 보강. `/ops/providers` 행 상세 추적,
           provider_dataset update request 상세 링크, `provider_refresh_policies` 편집 UI.
-          중복 `/admin/providers/{provider}/datasets/{dataset_key}/runs`는 만들지 않는다.
+          중복 `/admin/providers/{provider}/datasets/{dataset_key}/runs`는 만들지 않는다
+          (2026-06-12 Codex).
     - [ ] T-221e — `/ops/logs`와 job event 연계, `/debug/explain`/`/debug/fixtures`
           필요성 재판정.
   - [ ] T-222 — **TripMate T-130 공개 해수욕장/축제 뷰 API**. 정본 후보:

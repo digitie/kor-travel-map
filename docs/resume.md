@@ -1,5 +1,28 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-12 Codex 작업 메모 — T-221d provider 상세/refresh policy
+
+T-221d로 provider 운영 상세와 refresh policy 편집 흐름을 연결했다.
+
+- `GET /v1/ops/providers`, `GET /v1/ops/providers/{provider}`를 추가했다. 기존
+  `/v1/providers` 사용자 표면은 cursor를 계속 숨기고, ops 상세 표면에서만
+  sync cursor, refresh policy, 최근 `provider_dataset` update request를 묶어 보여준다.
+- `GET/PUT /v1/admin/provider-refresh-policies*`를 추가했다. policy upsert는
+  `system_interval_seconds`/`optimal_interval_seconds`가 `min_interval_seconds`와
+  선언된 rate limit floor를 넘지 않도록 검증한다.
+- `feature_update_requests` 목록 필터가 `providers`/`dataset_keys` 배열뿐 아니라
+  `scope.type='provider_dataset'`의 `scope.provider`/`scope.dataset_key`도 찾도록 보정했다.
+- admin frontend `/ops/providers`는 dataset row 선택, sync cursor/detail,
+  최근 update request 상세 링크, `provider_dataset` request 생성, refresh policy 편집을
+  한 화면에서 처리한다. `/admin/feature-update-requests/[request_id]` 상세 route도
+  추가했다.
+
+검증: provider/policy/update request router 단위 테스트 27 passed, Python ruff/mypy
+targeted, frontend type-check/ESLint 통과.
+
+**다음 한 작업**: **T-221e** — `/ops/logs`와 job event 연계, `/debug/explain`/
+`/debug/fixtures` 필요성 재판정. 이후 T-222 공개 해수욕장/축제 뷰 API로 진행한다.
+
 ## 2026-06-12 Codex 작업 메모 — T-221c admin live signal channel
 
 T-221c로 admin 실시간 signal 채널을 추가했다.

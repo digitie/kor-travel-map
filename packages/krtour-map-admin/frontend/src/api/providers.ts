@@ -1,5 +1,5 @@
 /**
- * `/v1/providers` provider 데이터 신선도 hooks (T-217g, D-07).
+ * `/v1/ops/providers*` provider 운영 상세 hooks.
  */
 
 import { useQuery } from "@tanstack/react-query";
@@ -13,15 +13,37 @@ export type ProviderSyncStateSummary =
   ProviderSchemas["ProviderSyncStateSummary"];
 export type ProvidersFreshnessResponse =
   ProviderSchemas["ProvidersFreshnessResponse"];
+export type OpsProviderDatasetSummary =
+  ProviderSchemas["OpsProviderDatasetSummary"];
+export type OpsProviderDatasetDetail =
+  ProviderSchemas["OpsProviderDatasetDetail"];
+export type OpsProviderDetailResponse =
+  ProviderSchemas["OpsProviderDetailResponse"];
+export type OpsProvidersResponse = ProviderSchemas["OpsProvidersResponse"];
 
-function fetchProvidersFreshness(): Promise<ProvidersFreshnessResponse> {
-  return getJson<ProvidersFreshnessResponse>("/v1/providers");
+function fetchOpsProviders(): Promise<OpsProvidersResponse> {
+  return getJson<OpsProvidersResponse>("/v1/ops/providers");
 }
 
-export function useProvidersFreshness() {
-  return useQuery<ProvidersFreshnessResponse, Error>({
-    queryKey: ["providers", "freshness"],
-    queryFn: fetchProvidersFreshness,
-    staleTime: 30_000,
+function fetchOpsProvider(provider: string): Promise<OpsProviderDetailResponse> {
+  return getJson<OpsProviderDetailResponse>(
+    `/v1/ops/providers/${encodeURIComponent(provider)}`,
+  );
+}
+
+export function useOpsProviders() {
+  return useQuery<OpsProvidersResponse, Error>({
+    queryKey: ["ops-providers"],
+    queryFn: fetchOpsProviders,
+    staleTime: 15_000,
+  });
+}
+
+export function useOpsProvider(provider: string | null) {
+  return useQuery<OpsProviderDetailResponse, Error>({
+    queryKey: ["ops-provider", provider],
+    queryFn: () => fetchOpsProvider(provider as string),
+    enabled: Boolean(provider),
+    staleTime: 10_000,
   });
 }
