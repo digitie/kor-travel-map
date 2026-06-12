@@ -10,12 +10,17 @@ from sqlalchemy import text
 
 from krtour.map.infra.consistency import run_consistency_checks
 from krtour.map.infra.integrity_violation_repo import create_data_integrity_violation
-from krtour.map.infra.jobs_repo import enqueue_import_job, start_import_job
+from krtour.map.infra.jobs_repo import (
+    enqueue_import_job,
+    record_import_job_event,
+    start_import_job,
+)
 from krtour.map.infra.ops_repo import (
     get_latest_consistency_report,
     get_ops_import_job,
     get_ops_integrity_issue_counts,
     list_ops_consistency_reports,
+    list_ops_import_job_events,
     list_ops_import_jobs,
     list_ops_integrity_issues,
 )
@@ -107,6 +112,71 @@ async def test_ops_import_jobs_list_detail_and_cursor(
     assert loaded.payload == {"request_id": "new"}
     assert loaded.started_at is not None
     assert loaded.heartbeat_at is not None
+
+    first_event = await record_import_job_event(
+        migrated_session,
+        new_job.job_id,
+        level="error",
+        code="provider.timeout",
+        message="provider timeout",
+        payload={"attempt": 1},
+        stage="fetching",
+    )
+    second_event = await record_import_job_event(
+        migrated_session,
+        new_job.job_id,
+        level="error",
+        code="provider.timeout",
+        message="provider timeout retry",
+        payload={"attempt": 2},
+        stage="fetching",
+    )
+    assert first_event is not None
+    assert second_event is not None
+    await migrated_session.execute(
+        text(
+            """
+            UPDATE ops.import_job_events
+            SET occurred_at = :occurred_at
+            WHERE event_id = :event_id
+            """
+        ),
+        {
+            "event_id": first_event.event_id,
+            "occurred_at": datetime(2026, 6, 3, 12, 0, tzinfo=_KST),
+        },
+    )
+    await migrated_session.execute(
+        text(
+            """
+            UPDATE ops.import_job_events
+            SET occurred_at = :occurred_at
+            WHERE event_id = :event_id
+            """
+        ),
+        {
+            "event_id": second_event.event_id,
+            "occurred_at": datetime(2026, 6, 3, 13, 0, tzinfo=_KST),
+        },
+    )
+
+    event_page1 = await list_ops_import_job_events(
+        migrated_session,
+        new_job.job_id,
+        level="error",
+        limit=1,
+    )
+    assert [item.event_id for item in event_page1.items] == [second_event.event_id]
+    assert event_page1.next_cursor is not None
+
+    event_page2 = await list_ops_import_job_events(
+        migrated_session,
+        new_job.job_id,
+        level="error",
+        limit=1,
+        cursor=event_page1.next_cursor,
+    )
+    assert [item.event_id for item in event_page2.items] == [first_event.event_id]
 
 
 async def test_ops_consistency_reports_latest_and_list(

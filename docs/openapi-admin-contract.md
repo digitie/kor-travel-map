@@ -655,11 +655,40 @@ Query:
 
 각 item은 `job_id`, `kind`, `load_batch_id`, `parent_job_id`, `payload`, `status`,
 `progress`, `current_stage`, `source_checksum`, `error_message`, timestamp 4종,
-`status_url`을 포함한다.
+`status_url`, `links`를 포함한다. `links`는 `self`, `events`, `cancel`(active 상태만),
+`parent_job`, `load_batch`, `feature_update_request`, `offline_upload`, `dagster_run`
+같은 관련 API/운영 링크를 best-effort로 제공한다.
 
 ### `GET /ops/import-jobs/{job_id}`
 
 `ops.import_jobs` 단건을 반환한다. 없으면 `404`.
+
+### `GET /ops/import-jobs/{job_id}/events`
+
+`ops.import_job_events` event timeline을 `occurred_at DESC, event_id DESC` keyset
+cursor로 반환한다. job이 없으면 `404`.
+
+Query:
+
+- `level`: `debug` / `info` / `warning` / `error` / `critical`
+- `page_size` (`1..200`, 기본 `50`)
+- `cursor`
+
+각 item은 `event_id`, `job_id`, `provider`, `dataset_key`, `feature_id`, `stage`,
+`level`, `code`, `message`, `payload`, `occurred_at`을 포함한다.
+
+### `POST /ops/import-jobs/{job_id}/cancel`
+
+queued/running job을 best-effort로 `cancelled` 전이한다. 이미 `done` / `failed` /
+`cancelled`인 job은 `409`, 없는 job은 `404`를 반환한다. 실행 중인 외부 프로세스를
+강제 종료하지 못할 수 있으므로 cancel event payload에는 `best_effort=true`가 남는다.
+
+요청 body(선택):
+
+- `operator`
+- `reason`
+
+응답은 갱신된 `OpsImportJobRecord` envelope다.
 
 ### `GET /ops/consistency/reports`
 

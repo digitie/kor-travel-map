@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Final
 
 from sqlalchemy import text
@@ -45,16 +45,19 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ImportJob",
+    "ImportJobEvent",
     "IMPORT_QUEUE_ADVISORY_KEY",
     "DEFAULT_STALE_AFTER",
     "enqueue_import_job",
     "start_import_job",
     "get_import_job",
+    "record_import_job_event",
     "update_import_job_payload",
     "claim_next_import_job",
     "heartbeat_import_job",
     "attach_import_jobs_to_batch",
     "list_import_jobs_by_ids",
+    "cancel_import_job",
     "finish_import_job",
     "recover_stale_running_jobs",
 ]
@@ -66,11 +69,19 @@ IMPORT_QUEUE_ADVISORY_KEY: Final[str] = "krtour.map:import_jobs:claim"
 DEFAULT_STALE_AFTER: Final[timedelta] = timedelta(minutes=5)
 
 _FINISHED_STATES: Final[frozenset[str]] = frozenset({"done", "failed", "cancelled"})
+_EVENT_LEVELS: Final[frozenset[str]] = frozenset(
+    {"debug", "info", "warning", "error", "critical"}
+)
 
 _RETURN_COLUMNS: Final[str] = (
     "job_id, kind, load_batch_id, parent_job_id, payload, status, progress, "
     "current_stage, source_checksum, error_message, started_at, finished_at, "
     "heartbeat_at, created_at"
+)
+
+_EVENT_RETURN_COLUMNS: Final[str] = (
+    "event_id, job_id, provider, dataset_key, feature_id, stage, level, code, "
+    "message, payload, occurred_at"
 )
 
 
@@ -90,6 +101,23 @@ class ImportJob:
     parent_job_id: str | None = None
 
 
+@dataclass(frozen=True)
+class ImportJobEvent:
+    """``ops.import_job_events`` 행 표현."""
+
+    event_id: str
+    job_id: str
+    provider: str | None
+    dataset_key: str | None
+    feature_id: str | None
+    stage: str | None
+    level: str
+    code: str | None
+    message: str
+    payload: dict[str, Any]
+    occurred_at: datetime
+
+
 def _row_to_job(row: Any) -> ImportJob:
     payload = row.payload
     if isinstance(payload, str):  # asyncpg가 JSONB를 str로 돌려주는 경우
@@ -105,6 +133,25 @@ def _row_to_job(row: Any) -> ImportJob:
         current_stage=row.current_stage,
         source_checksum=row.source_checksum,
         error_message=row.error_message,
+    )
+
+
+def _row_to_event(row: Any) -> ImportJobEvent:
+    payload = row.payload
+    if isinstance(payload, str):
+        payload = json.loads(payload)
+    return ImportJobEvent(
+        event_id=str(row.event_id),
+        job_id=str(row.job_id),
+        provider=row.provider,
+        dataset_key=row.dataset_key,
+        feature_id=row.feature_id,
+        stage=row.stage,
+        level=str(row.level),
+        code=row.code,
+        message=str(row.message),
+        payload=dict(payload) if payload else {},
+        occurred_at=row.occurred_at,
     )
 
 
@@ -138,6 +185,25 @@ _GET_JOB_SQL: Final[str] = f"""
 SELECT {_RETURN_COLUMNS}
 FROM ops.import_jobs
 WHERE job_id = CAST(:job_id AS uuid)
+"""
+
+_INSERT_EVENT_SQL: Final[str] = f"""
+INSERT INTO ops.import_job_events (
+    job_id, provider, dataset_key, feature_id, stage, level, code, message, payload
+)
+SELECT
+    job_id,
+    COALESCE(CAST(:provider AS text), payload ->> 'provider'),
+    COALESCE(CAST(:dataset_key AS text), payload ->> 'dataset_key'),
+    COALESCE(CAST(:feature_id AS text), payload ->> 'feature_id'),
+    COALESCE(CAST(:stage AS text), current_stage),
+    :level,
+    CAST(:code AS text),
+    :message,
+    CAST(:event_payload AS jsonb)
+FROM ops.import_jobs
+WHERE job_id = CAST(:job_id AS uuid)
+RETURNING {_EVENT_RETURN_COLUMNS}
 """
 
 _LIST_JOBS_BY_IDS_SQL: Final[str] = f"""
@@ -203,6 +269,16 @@ WHERE job_id = :job_id AND status = 'running'
 RETURNING {_RETURN_COLUMNS}
 """
 
+_CANCEL_SQL: Final[str] = f"""
+UPDATE ops.import_jobs
+SET status = 'cancelled',
+    finished_at = now(),
+    error_message = COALESCE(:error_message, error_message, 'cancelled by admin API')
+WHERE job_id = CAST(:job_id AS uuid)
+  AND status IN ('queued', 'running')
+RETURNING {_RETURN_COLUMNS}
+"""
+
 # lifespan 복구 — heartbeat 만료(또는 :stale_seconds NULL=전부)인 running 행을
 # failed로. cutoff는 DB 시계 기준 now() - make_interval(secs)로 계산(클라이언트
 # 시계 회피). :stale_seconds가 NULL이면 모든 running 행 복구.
@@ -242,7 +318,15 @@ async def enqueue_import_job(
             "parent_job_id": parent_job_id,
         },
     )
-    return _row_to_job(result.one())
+    job = _row_to_job(result.one())
+    await record_import_job_event(
+        session,
+        job.job_id,
+        code="job.queued",
+        message="import job queued",
+        payload={"status": job.status, "progress": job.progress},
+    )
+    return job
 
 
 async def start_import_job(
@@ -271,7 +355,16 @@ async def start_import_job(
             "parent_job_id": parent_job_id,
         },
     )
-    return _row_to_job(result.one())
+    job = _row_to_job(result.one())
+    await record_import_job_event(
+        session,
+        job.job_id,
+        code="job.started",
+        message="import job started",
+        payload={"status": job.status, "progress": job.progress},
+        stage=job.current_stage,
+    )
+    return job
 
 
 async def get_import_job(session: AsyncSession, job_id: str) -> ImportJob | None:
@@ -279,6 +372,45 @@ async def get_import_job(session: AsyncSession, job_id: str) -> ImportJob | None
     result = await session.execute(text(_GET_JOB_SQL), {"job_id": job_id})
     row = result.one_or_none()
     return _row_to_job(row) if row is not None else None
+
+
+async def record_import_job_event(
+    session: AsyncSession,
+    job_id: str,
+    *,
+    level: str = "info",
+    code: str | None = None,
+    message: str,
+    payload: Mapping[str, Any] | None = None,
+    provider: str | None = None,
+    dataset_key: str | None = None,
+    feature_id: str | None = None,
+    stage: str | None = None,
+) -> ImportJobEvent | None:
+    """``ops.import_job_events``에 구조화 event 1건을 기록한다.
+
+    provider/dataset/stage를 넘기지 않으면 연결된 ``ops.import_jobs.payload``와
+    ``current_stage``에서 best-effort로 채운다. 없는 ``job_id``면 ``None``을 반환한다.
+    commit은 호출자 책임이다.
+    """
+    if level not in _EVENT_LEVELS:
+        raise ValueError(f"level must be one of {sorted(_EVENT_LEVELS)}, got {level!r}.")
+    result = await session.execute(
+        text(_INSERT_EVENT_SQL),
+        {
+            "job_id": job_id,
+            "provider": provider,
+            "dataset_key": dataset_key,
+            "feature_id": feature_id,
+            "stage": stage,
+            "level": level,
+            "code": code,
+            "message": message,
+            "event_payload": json.dumps(dict(payload) if payload else {}),
+        },
+    )
+    row = result.one_or_none()
+    return _row_to_event(row) if row is not None else None
 
 
 async def list_import_jobs_by_ids(
@@ -346,7 +478,18 @@ async def claim_next_import_job(session: AsyncSession) -> ImportJob | None:
             return None
         result = await session.execute(text(_CLAIM_JOB_SQL))
         row = result.one_or_none()
-        return _row_to_job(row) if row is not None else None
+        if row is None:
+            return None
+        job = _row_to_job(row)
+        await record_import_job_event(
+            session,
+            job.job_id,
+            code="job.claimed",
+            message="import job claimed",
+            payload={"status": job.status, "progress": job.progress},
+            stage=job.current_stage,
+        )
+        return job
 
 
 async def heartbeat_import_job(
@@ -362,7 +505,58 @@ async def heartbeat_import_job(
         {"job_id": job_id, "progress": progress, "current_stage": current_stage},
     )
     row = result.one_or_none()
-    return _row_to_job(row) if row is not None else None
+    if row is None:
+        return None
+    job = _row_to_job(row)
+    if progress is not None or current_stage is not None:
+        await record_import_job_event(
+            session,
+            job.job_id,
+            code="job.heartbeat",
+            message="import job heartbeat",
+            payload={"status": job.status, "progress": job.progress},
+            stage=job.current_stage,
+        )
+    return job
+
+
+async def cancel_import_job(
+    session: AsyncSession,
+    job_id: str,
+    *,
+    error_message: str | None = "cancelled by admin API",
+    operator: str | None = None,
+    reason: str | None = None,
+) -> ImportJob | None:
+    """queued/running import job을 ``cancelled``로 전이한다.
+
+    이미 terminal 상태인 행은 건드리지 않고 ``None``을 반환한다. 실행 중인 외부
+    프로세스를 강제 종료하지는 못하므로 event payload에 best-effort 한계를 남긴다.
+    """
+    result = await session.execute(
+        text(_CANCEL_SQL),
+        {"job_id": job_id, "error_message": error_message or reason},
+    )
+    row = result.one_or_none()
+    if row is None:
+        return None
+    job = _row_to_job(row)
+    await record_import_job_event(
+        session,
+        job.job_id,
+        code="job.cancelled",
+        level="warning",
+        message=error_message or reason or "import job cancelled",
+        payload={
+            "status": job.status,
+            "progress": job.progress,
+            "operator": operator,
+            "reason": reason,
+            "best_effort": True,
+        },
+        stage=job.current_stage,
+    )
+    return job
 
 
 async def finish_import_job(
@@ -386,7 +580,19 @@ async def finish_import_job(
         {"job_id": job_id, "status": status, "error_message": error_message},
     )
     row = result.one_or_none()
-    return _row_to_job(row) if row is not None else None
+    if row is None:
+        return None
+    job = _row_to_job(row)
+    await record_import_job_event(
+        session,
+        job.job_id,
+        code=f"job.{status}",
+        level="error" if status == "failed" else "info",
+        message=error_message or f"import job {status}",
+        payload={"status": job.status, "progress": job.progress},
+        stage=job.current_stage,
+    )
+    return job
 
 
 async def recover_stale_running_jobs(

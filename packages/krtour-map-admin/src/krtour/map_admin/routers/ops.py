@@ -8,14 +8,17 @@ from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from krtour.map.infra.jobs_repo import cancel_import_job
 from krtour.map.infra.ops_repo import (
     OpsConsistencyReport,
     OpsImportJob,
+    OpsImportJobEvent,
     OpsIntegrityIssue,
     get_latest_consistency_report,
     get_ops_import_job,
     get_ops_integrity_issue_counts,
     list_ops_consistency_reports,
+    list_ops_import_job_events,
     list_ops_import_jobs,
     list_ops_integrity_issues,
 )
@@ -25,7 +28,7 @@ from krtour.map.infra.status_repo import (
     dedup_fp_stats,
     gather_status_counts,
 )
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,6 +41,7 @@ __all__ = [
     "OpsMetricsResponse",
     "OpsImportJobRecord",
     "OpsImportJobsListResponse",
+    "OpsImportJobEventsListResponse",
     "OpsConsistencyReportsListResponse",
     "OpsIntegrityIssuesListResponse",
 ]
@@ -46,9 +50,20 @@ __all__ = [
 router = APIRouter(prefix="/ops", tags=["ops"])
 
 ImportJobState = Literal["queued", "running", "done", "failed", "cancelled"]
+ImportJobEventLevel = Literal["debug", "info", "warning", "error", "critical"]
 ConsistencySeverity = Literal["OK", "WARN", "ERROR"]
 IssueStatus = Literal["open", "acknowledged", "resolved", "ignored"]
 IssueSeverity = Literal["info", "warning", "error", "critical"]
+
+
+class OpsImportJobLink(BaseModel):
+    """import job 상세 화면/연계 API가 쓰는 관련 링크."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    rel: str
+    href: str
+    label: str | None = None
 
 
 class OpsImportJobRecord(BaseModel):
@@ -71,6 +86,25 @@ class OpsImportJobRecord(BaseModel):
     finished_at: datetime | None = None
     heartbeat_at: datetime | None = None
     status_url: str
+    links: list[OpsImportJobLink] = Field(default_factory=list)
+
+
+class OpsImportJobEventRecord(BaseModel):
+    """``ops.import_job_events`` HTTP 표현."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    event_id: str
+    job_id: str
+    provider: str | None = None
+    dataset_key: str | None = None
+    feature_id: str | None = None
+    stage: str | None = None
+    level: str
+    code: str | None = None
+    message: str
+    payload: dict[str, Any]
+    occurred_at: datetime
 
 
 class OpsImportJobsData(BaseModel):
@@ -97,6 +131,32 @@ class OpsImportJobResponse(BaseModel):
 
     data: OpsImportJobRecord
     meta: Meta
+
+
+class OpsImportJobEventsData(BaseModel):
+    """import job event 목록 data."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[OpsImportJobEventRecord]
+
+
+class OpsImportJobEventsListResponse(BaseModel):
+    """``GET /ops/import-jobs/{job_id}/events`` 응답."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: OpsImportJobEventsData
+    meta: Meta
+
+
+class OpsImportJobCancelRequest(BaseModel):
+    """``POST /ops/import-jobs/{job_id}/cancel`` 요청."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    operator: str | None = None
+    reason: str | None = None
 
 
 class OpsConsistencyReportRecord(BaseModel):
@@ -235,6 +295,97 @@ def _job(row: OpsImportJob) -> OpsImportJobRecord:
         finished_at=row.finished_at,
         heartbeat_at=row.heartbeat_at,
         status_url=f"/v1/ops/import-jobs/{row.job_id}",
+        links=_job_links(row),
+    )
+
+
+def _payload_text(row: OpsImportJob, key: str) -> str | None:
+    value = row.payload.get(key)
+    if isinstance(value, str) and value:
+        return value
+    return None
+
+
+def _job_links(row: OpsImportJob) -> list[OpsImportJobLink]:
+    links = [
+        OpsImportJobLink(
+            rel="self",
+            href=f"/v1/ops/import-jobs/{row.job_id}",
+            label="import job",
+        ),
+        OpsImportJobLink(
+            rel="events",
+            href=f"/v1/ops/import-jobs/{row.job_id}/events",
+            label="event timeline",
+        ),
+    ]
+    if row.status in {"queued", "running"}:
+        links.append(
+            OpsImportJobLink(
+                rel="cancel",
+                href=f"/v1/ops/import-jobs/{row.job_id}/cancel",
+                label="cancel import job",
+            )
+        )
+    if row.parent_job_id:
+        links.append(
+            OpsImportJobLink(
+                rel="parent_job",
+                href=f"/v1/ops/import-jobs/{row.parent_job_id}",
+                label="parent import job",
+            )
+        )
+    if row.load_batch_id:
+        links.append(
+            OpsImportJobLink(
+                rel="load_batch",
+                href=f"/v1/ops/import-jobs?load_batch_id={row.load_batch_id}",
+                label="load batch jobs",
+            )
+        )
+    request_id = _payload_text(row, "request_id")
+    if request_id:
+        links.append(
+            OpsImportJobLink(
+                rel="feature_update_request",
+                href=f"/v1/admin/feature-update-requests/{request_id}",
+                label="feature update request",
+            )
+        )
+    upload_id = _payload_text(row, "upload_id")
+    if upload_id:
+        links.append(
+            OpsImportJobLink(
+                rel="offline_upload",
+                href=f"/v1/admin/offline-uploads/{upload_id}",
+                label="offline upload",
+            )
+        )
+    dagster_run_id = _payload_text(row, "dagster_run_id") or _payload_text(row, "run_id")
+    if dagster_run_id:
+        links.append(
+            OpsImportJobLink(
+                rel="dagster_run",
+                href=f"/v1/ops/dagster/runs/{dagster_run_id}",
+                label="Dagster run",
+            )
+        )
+    return links
+
+
+def _event(row: OpsImportJobEvent) -> OpsImportJobEventRecord:
+    return OpsImportJobEventRecord(
+        event_id=row.event_id,
+        job_id=row.job_id,
+        provider=row.provider,
+        dataset_key=row.dataset_key,
+        feature_id=row.feature_id,
+        stage=row.stage,
+        level=row.level,
+        code=row.code,
+        message=row.message,
+        payload=row.payload,
+        occurred_at=row.occurred_at,
     )
 
 
@@ -489,6 +640,94 @@ async def get_import_job(
         )
     return OpsImportJobResponse(
         data=_job(row),
+        meta=make_meta(started_at=started_at),
+    )
+
+
+@router.get(
+    "/import-jobs/{job_id}/events",
+    response_model=OpsImportJobEventsListResponse,
+)
+async def list_import_job_events(
+    job_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    level: Annotated[ImportJobEventLevel | None, Query()] = None,
+    page_size: Annotated[int, Query(ge=1, le=200)] = 50,
+    cursor: Annotated[str | None, Query()] = None,
+) -> OpsImportJobEventsListResponse:
+    """``ops.import_job_events`` 작업 event timeline."""
+    started_at = perf_counter()
+    if await get_ops_import_job(session, job_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"import job not found: {job_id}",
+        )
+    try:
+        page = await list_ops_import_job_events(
+            session,
+            job_id,
+            level=level,
+            limit=page_size,
+            cursor=cursor,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return OpsImportJobEventsListResponse(
+        data=OpsImportJobEventsData(items=[_event(item) for item in page.items]),
+        meta=make_meta(
+            started_at=started_at,
+            page_size=page_size,
+            next_cursor=page.next_cursor,
+        ),
+    )
+
+
+@router.post(
+    "/import-jobs/{job_id}/cancel",
+    response_model=OpsImportJobResponse,
+    responses={
+        404: {"description": "job_id 없음"},
+        409: {"description": "이미 terminal 상태라 취소 불가"},
+    },
+)
+async def cancel_import_job_route(
+    job_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    body: OpsImportJobCancelRequest | None = None,
+) -> OpsImportJobResponse:
+    """queued/running import job을 best-effort로 ``cancelled`` 전이한다."""
+    started_at = perf_counter()
+    reason = body.reason if body is not None and body.reason else None
+    operator = body.operator if body is not None and body.operator else None
+    error_message = reason or "cancelled by admin API"
+    async with session.begin():
+        existing = await get_ops_import_job(session, job_id)
+        if existing is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"import job not found: {job_id}",
+            )
+        if existing.status not in {"queued", "running"}:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"cannot cancel import job in status: {existing.status}",
+            )
+        cancelled = await cancel_import_job(
+            session,
+            job_id,
+            error_message=error_message,
+            operator=operator,
+            reason=reason,
+        )
+        if cancelled is None:
+            refreshed = await get_ops_import_job(session, job_id)
+            detail_status = refreshed.status if refreshed is not None else existing.status
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"cannot cancel import job in status: {detail_status}",
+            )
+    return OpsImportJobResponse(
+        data=_job(await get_ops_import_job(session, job_id) or existing),
         meta=make_meta(started_at=started_at),
     )
 

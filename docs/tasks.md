@@ -24,9 +24,9 @@
       - [x] T-221a-2 — `/admin/features/new` 수동 feature 작성
             전용 흐름. 지도 좌표 선택, kraddr-geo geocode/reverse 연동, kind별 detail
             form, duplicate 후보 확인을 change-request 생성 전에 연결(2026-06-12 Codex).
-    - [ ] T-221b — `/ops/import-jobs/[job_id]` 상세 + `ops.import_job_events`
+    - [x] T-221b — `/ops/import-jobs/[job_id]` 상세 + `ops.import_job_events`
           스키마/API + cancel/event 타임라인. feature-update/offline-upload/Dagster run 상세
-          링크 포함.
+          링크 포함(2026-06-12 Codex).
     - [ ] T-221c — admin 실시간 전송. `WS /v1/ops/live` 다중화 topic과
           job/request/upload/run별 WebSocket 또는 SSE 대체 경로 설계·구현.
     - [ ] T-221d — provider 상세/refresh policy 보강. `/ops/providers` 행 상세 추적,

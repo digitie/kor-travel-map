@@ -18,11 +18,13 @@ from sqlalchemy import text
 
 from krtour.map.infra.jobs_repo import (
     attach_import_jobs_to_batch,
+    cancel_import_job,
     claim_next_import_job,
     enqueue_import_job,
     finish_import_job,
     heartbeat_import_job,
     list_import_jobs_by_ids,
+    record_import_job_event,
     recover_stale_running_jobs,
     start_import_job,
 )
@@ -42,6 +44,23 @@ async def _state(session: AsyncSession, job_id: str) -> str:
     ).scalar_one()
 
 
+async def _event_codes(session: AsyncSession, job_id: str) -> list[str | None]:
+    rows = (
+        await session.execute(
+            text(
+                """
+                SELECT code
+                FROM ops.import_job_events
+                WHERE job_id = :id
+                ORDER BY occurred_at, event_id
+                """
+            ),
+            {"id": job_id},
+        )
+    ).all()
+    return [row.code for row in rows]
+
+
 async def test_enqueue_creates_queued_job(migrated_session: AsyncSession) -> None:
     job = await enqueue_import_job(
         migrated_session,
@@ -54,6 +73,7 @@ async def test_enqueue_creates_queued_job(migrated_session: AsyncSession) -> Non
     assert job.payload == {"dataset_key": "mois_license_features_bulk"}
     assert job.progress == 0
     assert await _state(migrated_session, job.job_id) == "queued"
+    assert await _event_codes(migrated_session, job.job_id) == ["job.queued"]
 
 
 async def test_batch_columns_preserved_across_start_enqueue_and_claim(
@@ -177,6 +197,56 @@ async def test_finish_failed_records_error(migrated_session: AsyncSession) -> No
     assert failed is not None
     assert failed.status == "failed"
     assert failed.error_message == "boom"
+    assert "job.failed" in await _event_codes(migrated_session, job.job_id)
+
+
+async def test_record_import_job_event_defaults_context(
+    migrated_session: AsyncSession,
+) -> None:
+    job = await start_import_job(
+        migrated_session,
+        kind="feature_update_request",
+        payload={
+            "provider": "python-mois-api",
+            "dataset_key": "mois_license_features_bulk",
+        },
+    )
+    await heartbeat_import_job(
+        migrated_session, job.job_id, progress=12, current_stage="fetching"
+    )
+
+    event = await record_import_job_event(
+        migrated_session,
+        job.job_id,
+        level="warning",
+        code="provider.retry",
+        message="provider retry scheduled",
+        payload={"attempt": 2},
+    )
+
+    assert event is not None
+    assert event.provider == "python-mois-api"
+    assert event.dataset_key == "mois_license_features_bulk"
+    assert event.stage == "fetching"
+    assert event.payload == {"attempt": 2}
+
+
+async def test_cancel_import_job_transitions_active_job(
+    migrated_session: AsyncSession,
+) -> None:
+    job = await enqueue_import_job(migrated_session, kind="k")
+
+    cancelled = await cancel_import_job(
+        migrated_session,
+        job.job_id,
+        operator="local-admin",
+        reason="wrong scope",
+    )
+
+    assert cancelled is not None
+    assert cancelled.status == "cancelled"
+    assert await _state(migrated_session, job.job_id) == "cancelled"
+    assert "job.cancelled" in await _event_codes(migrated_session, job.job_id)
 
 
 async def test_finish_invalid_status_raises(migrated_session: AsyncSession) -> None:

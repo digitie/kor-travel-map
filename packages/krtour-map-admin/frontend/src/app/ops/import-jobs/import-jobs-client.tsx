@@ -1,6 +1,7 @@
 "use client";
 
 import { RefreshCwIcon } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 
 import { type ImportJobStatus, useImportJobs } from "@/api/importJobs";
@@ -31,11 +32,31 @@ const statuses: Array<ImportJobStatus | "all"> = [
   "cancelled",
 ];
 
-export function ImportJobsClient() {
-  const [status, setStatus] = useState<ImportJobStatus | "all">("all");
-  const [kind, setKind] = useState("");
-  const [loadBatchId, setLoadBatchId] = useState("");
-  const [parentJobId, setParentJobId] = useState("");
+type ImportJobsInitialFilters = {
+  status?: string;
+  kind?: string;
+  loadBatchId?: string;
+  parentJobId?: string;
+};
+
+const emptyInitialFilters: ImportJobsInitialFilters = {};
+
+export function ImportJobsClient({
+  initialFilters = emptyInitialFilters,
+}: {
+  initialFilters?: ImportJobsInitialFilters;
+}) {
+  const [status, setStatus] = useState<ImportJobStatus | "all">(() => {
+    const value = initialFilters.status as ImportJobStatus | undefined;
+    return value && statuses.includes(value) ? value : "all";
+  });
+  const [kind, setKind] = useState(() => initialFilters.kind ?? "");
+  const [loadBatchId, setLoadBatchId] = useState(
+    () => initialFilters.loadBatchId ?? "",
+  );
+  const [parentJobId, setParentJobId] = useState(
+    () => initialFilters.parentJobId ?? "",
+  );
   const jobs = useImportJobs({
     status: status === "all" ? undefined : status,
     kind: kind.trim() || undefined,
@@ -57,7 +78,7 @@ export function ImportJobsClient() {
           새로고침
         </Button>
       }
-      description="ops.import_jobs read-only 진행 상태입니다. cancel/events/stream은 후속 backend 계약입니다."
+      description="ops.import_jobs 진행 상태와 batch/parent 연결을 확인합니다."
       section="Ops"
       title="Import jobs"
     >
@@ -124,7 +145,12 @@ export function ImportJobsClient() {
               {(jobs.data?.data.items ?? []).map((job) => (
                 <TableRow key={job.job_id}>
                   <TableCell className="font-mono text-xs">
-                    {shortId(job.job_id)}
+                    <Link
+                      className="text-primary underline-offset-4 hover:underline"
+                      href={`/ops/import-jobs/${encodeURIComponent(job.job_id)}`}
+                    >
+                      {shortId(job.job_id)}
+                    </Link>
                   </TableCell>
                   <TableCell className="font-mono text-xs">
                     {job.load_batch_id ? shortId(job.load_batch_id) : "-"}

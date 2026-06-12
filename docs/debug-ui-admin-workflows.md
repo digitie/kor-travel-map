@@ -107,12 +107,12 @@ Frontend 작업 후에는 `react-doctor` 실행, 결과 검토, 개선 반영이
 |-------|------|----------|
 | `/` | 운영 홈. 최근 job, provider 실패, 열린 이슈, dedup pending 요약 | `/ops/metrics`, `/ops/import-jobs`, `/admin/dedup-review`, `/ops/dagster/summary` |
 | `/features` | feature 운영 목록. 지도/테이블 전환 | `/admin/features`, `/features`, `/features/{feature_id}` |
-| `/features/new` | 수동 feature 추가 | `POST /admin/features` |
-| `/features/[feature_id]` | 상세, 위치, 원천, 이슈, 조치 | `/features/{feature_id}` |
+| `/admin/features/new` | 수동 feature 추가 change request | `POST /v1/admin/features`, `/v1/features/nearby`, kraddr-geo REST v2 |
+| `/features/[feature_id]` | 상세, 위치, 원천, 이슈, 조치 | `/v1/features/{feature_id}`, `/v1/admin/features/{feature_id}`, `/v1/features/{feature_id}/weather` |
 | `/admin/providers` | provider별 상태 목록 | `/admin/providers` |
 | `/admin/providers/[provider]` | provider 상세, dataset 상태, 강제 호출 | `/admin/providers/{provider}` |
 | `/ops/import-jobs` | 적재/검증 job 목록 | `/ops/import-jobs` |
-| `/ops/import-jobs/[job_id]` | 진행률과 상태 상세. cancel/events/stream은 후속 backend 필요 | `/ops/import-jobs/{job_id}` |
+| `/ops/import-jobs/[job_id]` | 진행률과 상태 상세, event timeline, cancel, 관련 링크 | `/v1/ops/import-jobs/{job_id}`, `/v1/ops/import-jobs/{job_id}/events`, `/v1/ops/import-jobs/{job_id}/cancel` |
 | `/admin/dedup-review` | 중복 후보 검토 | `/admin/dedup-review` |
 | `/admin/issues` | 이슈 있는 feature 지도/테이블 | `/admin/issues/features` |
 | `/admin/offline-uploads` | 오프라인 파일 업로드, 검증, 적재 | `/admin/offline-uploads` |
@@ -122,12 +122,12 @@ Frontend 작업 후에는 `react-doctor` 실행, 결과 검토, 개선 반영이
 | `/admin/dagster` | Dagster 운영 요약 + tick/run 실패 드릴다운 + Dagster webserver embed. summary 성공 시 POST로 Dagster NUX seen best-effort 처리 | `/ops/dagster/summary`, `/ops/dagster/runs/{run_id}`, `/ops/dagster/nux-seen` |
 | `/ops/metrics` | feature/source/job/dedup/issue/consistency summary | `/ops/metrics` |
 | `/ops/consistency` | consistency report와 issue 큐 | `/ops/consistency/reports`, `/ops/consistency/issues` |
-| `/ops/error-logs` | provider/API/job 이벤트 로그 | 후속 `ops.import_job_events` 스키마 필요 |
+| `/ops/error-logs` | provider/API/job 이벤트 로그 | 일반 error log 화면은 후속. job event는 `/ops/import-jobs/[job_id]`에서 구현 |
 | `/debug/etl` | provider 변환 preview | 기존 `/debug/etl/*` |
 
 ### 4.2 네비게이션 그룹
 
-- **Features**: `/features`, `/features/new`, `/admin/issues`.
+- **Features**: `/features`, `/features/[feature_id]`, `/admin/features/new`, `/admin/issues`.
 - **Providers**: `/admin/providers`, provider 상세, provider 강제 실행.
 - **Jobs**: `/ops/import-jobs`, job 상세, offline upload job.
 - **Review**: `/admin/dedup-review`, missing data queue, consistency samples.
@@ -140,19 +140,14 @@ Frontend 작업 후에는 `react-doctor` 실행, 결과 검토, 개선 반영이
 `/admin/features/change-requests`, `/admin/issues`, `/admin/dedup-reviews`,
 `/admin/enrichment-reviews`, `/admin/feature-update-requests`,
 `/admin/poi-cache-targets`, `/admin/offline-uploads`, `/admin/backups`,
-`/admin/dagster`, `/ops/import-jobs`, `/ops/providers`, `/ops/consistency`,
-`/ops/logs`다.
+`/admin/dagster`, `/ops/import-jobs`, `/ops/import-jobs/[job_id]`, `/ops/providers`,
+`/ops/consistency`, `/ops/logs`다.
 
-남은 핵심은 새 목록 추가보다 **상세 추적과 실시간 event 연결**이다.
+남은 핵심은 새 목록 추가보다 **실시간 event 연결과 provider 상세 추적**이다.
 
-- `/features/[feature_id]` 1급 상세 경로: SourceLink, raw payload, files, issues,
-  overrides/history, nearby, weather를 한곳에 묶는다.
-- `/features/new` 또는 `/admin/features/new`: change-request create form을 별도 수동
-  작성 흐름으로 승격한다.
-- `/ops/import-jobs/[job_id]`: 백엔드 단건 조회는 있으나 프론트엔드 detail hook/경로가
-  없다. event 타임라인, linked request/upload/Dagster run, cancel/실시간 스트림을 붙인다.
-- `/ops/logs`: system/API log는 구현됐지만 provider/import job stage event는 없다.
-  `ops.import_job_events`와 job별 events API가 필요하다.
+- `WS /v1/ops/live` 또는 SSE 대체 경로로 job/request/upload/run 이벤트를 실시간 전송한다.
+- `/ops/logs`: system/API log는 구현됐고 job event는 import job 상세에 붙었다.
+  운영자가 provider 실패를 한 화면에서 훑는 일반 error/event log는 후속 판단 대상이다.
 - `/ops/providers`: provider freshness list는 구현됐지만 provider/dataset 상세, refresh
   policy, provider_dataset update request 상세 링크가 필요하다. 중복
   `/admin/providers/{provider}/datasets/{dataset_key}/runs`는 만들지 않는다.
@@ -790,7 +785,7 @@ Query:
 - `page_size`
 - `cursor`
 
-현재 구현은 `ops.import_jobs`의 read-only 목록이다. 기본 정렬은
+현재 구현은 `ops.import_jobs` 목록이다. 기본 정렬은
 `created_at desc, job_id desc`이고, `load_batch_id`와 `parent_job_id`로
 T-200 full-load root/child job을 좁혀볼 수 있다. provider/dataset/date/sort/order
 필터는 후속 확장이다.
@@ -808,12 +803,16 @@ T-200 full-load root/child job을 좁혀볼 수 있다. provider/dataset/date/so
     "kind": "provider_import",
     "load_batch_id": "35e8999f-...",
     "parent_job_id": "6aeff02d-...",
-    "state": "running",
+    "status": "running",
     "progress": 37,
     "current_stage": "fetching",
     "payload": {"provider": "python-mois-api", "dataset_key": "mois_license_features_bulk"},
     "source_checksum": null,
-    "status_url": "/ops/import-jobs/c2ef3a84-...",
+    "status_url": "/v1/ops/import-jobs/c2ef3a84-...",
+    "links": [
+      {"rel": "events", "href": "/v1/ops/import-jobs/c2ef3a84-.../events"},
+      {"rel": "dagster_run", "href": "/v1/ops/dagster/runs/run-1"}
+    ],
     "started_at": "2026-06-01T10:00:00+09:00",
     "heartbeat_at": "2026-06-01T10:04:11+09:00",
     "finished_at": null,
@@ -828,16 +827,17 @@ T-200 full-load root/child job을 좁혀볼 수 있다. provider/dataset/date/so
 
 - frontend가 `GET /ops/import-jobs/{job_id}`를 2초 간격으로 polling한다.
 - tab focus 시 즉시 refetch한다.
-- `state`가 terminal(`done`, `failed`, `cancelled`)이면 polling을 멈춘다.
+- `status`가 terminal(`done`, `failed`, `cancelled`)이면 polling을 멈춘다.
+- `/ops/import-jobs/[job_id]` frontend 상세 화면은 job payload, parent/batch/request/
+  upload/Dagster 관련 링크, event timeline, cancel form을 제공한다.
 
 후속 확장:
 
-- `GET /ops/import-jobs/{job_id}/events`로 단계별 로그를 페이지네이션 조회.
 - `GET /ops/import-jobs/{job_id}/stream` SSE로 progress/event streaming.
 
 ### 12.5 취소
 
-#### `POST /admin/import-jobs/{job_id}/cancel` (후속)
+#### `POST /ops/import-jobs/{job_id}/cancel`
 
 요청:
 
@@ -847,6 +847,10 @@ T-200 full-load root/child job을 좁혀볼 수 있다. provider/dataset/date/so
   "reason": "잘못된 scope로 실행"
 }
 ```
+
+queued/running job만 best-effort로 `cancelled` 전이한다. 이미 terminal 상태면 `409`를
+반환한다. 현재 구현은 DB 상태 전이와 event 기록이며, 이미 실행 중인 외부 프로세스를
+강제 종료하지 못할 수 있다.
 
 처리 규칙:
 
@@ -904,25 +908,29 @@ Query:
 
 - 현재 `ops.api_call_log`는 provider API 호출 로그만 담기 좋고, job stage별 이벤트에는
   부족하다.
-- 구현 전 `ops.import_job_events` 추가 권장:
+- T-221b에서 `ops.import_job_events`를 추가했다:
 
 ```sql
 CREATE TABLE ops.import_job_events (
   event_id UUID PRIMARY KEY DEFAULT x_extension.gen_random_uuid(),
-  job_id UUID REFERENCES ops.import_jobs(job_id) ON DELETE CASCADE,
+  job_id UUID NOT NULL REFERENCES ops.import_jobs(job_id) ON DELETE CASCADE,
   provider TEXT,
   dataset_key TEXT,
   feature_id TEXT,
   stage TEXT,
-  level TEXT NOT NULL, -- debug, info, warning, error
+  level TEXT NOT NULL, -- debug, info, warning, error, critical
   code TEXT,
   message TEXT NOT NULL,
   payload JSONB NOT NULL DEFAULT '{}'::jsonb,
   occurred_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX idx_import_job_events_job_time ON ops.import_job_events (job_id, occurred_at DESC);
-CREATE INDEX idx_import_job_events_provider_time ON ops.import_job_events (provider, occurred_at DESC);
-CREATE INDEX idx_import_job_events_level_time ON ops.import_job_events (level, occurred_at DESC);
+CREATE INDEX idx_import_job_events_job_time
+  ON ops.import_job_events (job_id, occurred_at DESC, event_id DESC);
+CREATE INDEX idx_import_job_events_provider_time
+  ON ops.import_job_events (provider, occurred_at DESC, event_id DESC)
+  WHERE provider IS NOT NULL;
+CREATE INDEX idx_import_job_events_level_time
+  ON ops.import_job_events (level, occurred_at DESC, event_id DESC);
 ```
 
 ## 14. 중복 후보 검토
