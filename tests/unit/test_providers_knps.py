@@ -77,7 +77,7 @@ class _Rec:
     """`KnpsPointRecord` Protocol 만족."""
 
     source_id: str
-    name: str
+    name: str | None
     longitude: Decimal | None
     latitude: Decimal | None
     raw: dict[str, Any]
@@ -173,6 +173,19 @@ def test_out_of_korea_coord_is_dropped() -> None:
     assert b.feature.coord is None
 
 
+def test_nameless_point_record_is_skipped() -> None:
+    # knps-api 실모델 name은 str | None — 이름 없는 행은 skip (배치는 계속).
+    recs = [
+        _Rec("K-1", None, Decimal("127.0"), Decimal("37.5"), {}),
+        _Rec("K-2", "  ", Decimal("127.0"), Decimal("37.5"), {}),
+        _Rec("K-3", "탐방로입구 화장실", Decimal("127.0"), Decimal("37.5"), {}),
+    ]
+    bundles = knps_point_records_to_bundles(
+        recs, dataset_key="knps_restrooms", fetched_at=_FETCHED
+    )
+    assert [b.feature.name for b in bundles] == ["탐방로입구 화장실"]
+
+
 def test_primary_source_and_provider_name() -> None:
     b = _one("knps_visitor_centers")
     assert b.source_link.source_role is SourceRole.PRIMARY
@@ -229,7 +242,7 @@ class _GRec:
     """`KnpsGeometryRecord` Protocol 만족."""
 
     source_id: str
-    name: str
+    name: str | None
     geom_wkt: str
     raw: dict[str, Any]
 
@@ -303,6 +316,20 @@ def test_wrong_geometry_type_is_skipped() -> None:
 
 def test_out_of_korea_geometry_is_skipped() -> None:
     assert _geo_one("knps_trails", "LINESTRING(0 0, 1 1)") == []
+
+
+def test_nameless_geometry_record_is_skipped() -> None:
+    # live trails에 이름 없는 코스 존재 (#407) — 그 행만 skip, 배치는 계속.
+    assert _geo_one("knps_trails", _LINE, name=None) == []
+    assert _geo_one("knps_trails", _LINE, name="  ") == []
+    recs = [
+        _GRec(source_id="G-1", name=None, geom_wkt=_LINE, raw={}),
+        _GRec(source_id="G-2", name="북한산 둘레길", geom_wkt=_LINE, raw={}),
+    ]
+    bundles = knps_geometry_records_to_bundles(
+        recs, dataset_key="knps_trails", fetched_at=_FETCHED
+    )
+    assert [b.feature.name for b in bundles] == ["북한산 둘레길"]
 
 
 def test_geometry_deterministic_and_primary() -> None:
