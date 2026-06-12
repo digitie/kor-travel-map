@@ -223,7 +223,7 @@ CREATE INDEX idx_feature_versions_request
 핵심 상태:
 
 - `curation_status`: `candidate` / `curated` / `rejected` / `archived`
-- `selection_origin`: `source_rule` / `admin` / `external_api` / `tripmate_agent`
+- `selection_origin`: `source_rule` / `admin` / `external_api`
 - `tripmate_relation`: `primary_stop` / `food_stop` / `cafe_stop` /
   `bookstore_stop` / `nearby_option` / `accessibility_support` / `pet_support` /
   `family_support` / `theme_area_anchor`

@@ -6,7 +6,7 @@
 
 ## 진행 중인 작업 인덱스 (열린 `[ ]` 항목)
 
-> 핵심 실행 6건(T-212e 병행, T-224, T-221, T-222, T-223, T-225) + 외부/보류 항목 별도.
+> 핵심 실행 6건(T-212e 병행, T-221, T-222, T-223, T-225, T-226) + 외부/보류 항목 별도.
 > 상세는 아래 각 섹션.
 > 완료 이력은 [`tasks-done.md`](tasks-done.md).
 
@@ -15,21 +15,6 @@
         다른 agent가 병행 진행 중이다(2026-06-12 사용자 확인). 본 agent는 T-224/T-221/
         T-222/T-223 작업 중에도 주기적으로 main/rebase 충돌을 확인하고, T-212e 결과가
         머지되면 후속 T-225 closure 재검증에 반영한다.
-  - [ ] T-224 — **`tripmate-agent` → `krtour-ai-agent` provider 경계 재정의 + 상세 구현**.
-        사용자 결정(2026-06-12): `tripmate-agent`는 `krtour-ai-agent`로 이름을 바꾸고,
-        TripMate와의 직접 관계는 끊는다. TripMate의 `curated_trip_plans` 생성에는
-        `krtour-ai-agent`가 관여하지 않으며, YouTube/AI 후보 provider 관계는
-        **krtour-map ↔ krtour-ai-agent** 사이에만 둔다. 이 작업은 T-221 진입 전 선행한다.
-    - [ ] T-224a — 문서/ADR/계약 정본 재정렬: ADR-049/050, architecture,
-          provider-contract, external-apis, integration-map, Dagster 문서의
-          `tripmate-agent-youtube`/`TripMate-agent` 표기를 `krtour-ai-agent` 기준으로
-          바꾸고 TripMate curated plan flow에서 agent를 명시적으로 제외한다.
-    - [ ] T-224b — 코드 명명 clean cut: canonical provider/env/settings/resource/asset/
-          schedule/test/docstring을 `krtour-ai-agent` 기준으로 변경한다. 기존 실데이터가
-          없거나 마이그레이션 비용이 낮으면 구 provider/env 호환 shim은 만들지 않는다.
-    - [ ] T-224c — provider 상세 구현 보강: export 계약 readback, cursor/page guard,
-          reject/tombstone inactive 경로, evidence/provenance admin 노출, live smoke fixture와
-          Dagster 검증을 `krtour-ai-agent` repo 계약 기준으로 마감한다.
   - [ ] T-221 — **admin UI/UX 시나리오 연결성 + 실시간성 보강**. 정본 점검:
         `docs/reports/admin-ui-scenario-linkage-recheck-2026-06-11.md`.
     - [ ] T-221a — `/features/[feature_id]` 1급 상세 경로 + `/features/new` 또는
@@ -73,7 +58,33 @@
         T-212e 실데이터 full reload/offline upload 결과를 한 번 더 대조한다. 다른 agent의
         T-212e 결과가 이미 충분하면 재실행 대신 최신 provider/API 표면 포함 여부,
         live row 수/P99, 실패 provider, offline upload 증거, 최종 리포트 링크를 확인한다.
+  - [ ] T-226 — **배포명/임포트명 재정의: `kor-travel-map` / `kortravel`**.
+        사용자 결정(2026-06-12): 검색성과 직관성을 위해 배포명은 `kor-travel-map`,
+        Python import root는 `kortravel`로 바꾸고, 권장 사용 예시는
+        `import kortravel as kt`로 둔다. 구현은 대규모 package identity clean cut이므로
+        별도 PR에서 진행한다.
+    - [ ] T-226a — ADR/문서 정본 작성: 현재 `python-krtour-map`,
+          `from krtour.map import ...`, `krtour-map` CLI/env/docs 표기를 어디까지
+          바꿀지 결정한다. `AGENTS.md`, `CLAUDE.md`, `README.md`, `docs/architecture.md`,
+          `docs/provider-contract.md`, `docs/backend-package.md`, `docs/integration-map.md`
+          식별자 표를 함께 정리한다.
+    - [ ] T-226b — 코드/package clean cut 계획: `src/krtour/map` → `src/kortravel`
+          이동, admin/dagster package import 전환, import-linter layer 규칙 갱신,
+          console script/entrypoint 이름 변경 여부, 구 `krtour.map` import 호환 shim을
+          둘지 여부를 ADR로 확정한다.
+    - [ ] T-226c — 배포/소비자 전파: PyPI distribution `kor-travel-map`, Docker/image/
+          GitHub repo 표시명, generated client/TripMate 문서, examples/snippets,
+          `import kortravel as kt` quickstart와 migration guide를 갱신한다.
 - **최근 완료**
+  - [x] **T-224 — `krtour-ai-agent` provider 경계 재정의 + 상세 구현. 완료
+        (2026-06-12, Codex)**: ADR-053을 추가하고, canonical provider를
+        `krtour-ai-agent-youtube`로 clean cut했다. `providers.krtour_ai_agent`,
+        `KRTOUR_MAP_KRTOUR_AI_AGENT_*`, Dagster `krtour_ai_agent_youtube_features` /
+        `feature_place_krtour_ai_agent_youtube*`, raw payload
+        `detail.payload.krtour_ai_agent` 기준으로 코드·테스트·계약 문서를 정렬했다.
+        TripMate ↛ krtour-ai-agent 직접 연동 없음, curated trip plan 생성 flow 제외,
+        구 `TRIPMATE_AGENT` env/provider alias 없음. 검증:
+        targeted pytest 87 passed/1 skipped, ruff, mypy, import-linter, diff check.
   - [x] 2026-06-11 Codex admin UI/UX 시나리오·실시간성 재점검 + TripMate T-130 사양
         보강 — 문서/코드/TripMate T-130을 대조해
         `docs/reports/admin-ui-scenario-linkage-recheck-2026-06-11.md`와
@@ -185,12 +196,13 @@ T-212b admin UI 완결성, T-212c API/error/log contract, T-212d seeded PostGIS
 Sprint 5 종료까지 남은 작업은
 `docs/reports/sprint5-final-task-breakdown-2026-06-07.md`를 정본으로 상세화했다.
 T-216 REST API 정합성 심화, TripMate-agent provider, T-212d 재측정/튜닝은 닫았다.
-T-217/T-210e도 닫혔다. 2026-06-12 사용자 재정렬 기준 T-212e는 다른 agent가
+T-217/T-210e/T-224도 닫혔다. 2026-06-12 사용자 재정렬 기준 T-212e는 다른 agent가
 병행 진행 중이며, 본 agent의 다음 순서는
-**T-224 krtour-ai-agent provider 경계/상세 구현 → T-221 admin UI linkage/realtime →
-T-222 TripMate T-130 공개 뷰 → T-223 curated_features/import → T-225 T-212e closure 재검증**이다.
+**T-221 admin UI linkage/realtime → T-222 TripMate T-130 공개 뷰 →
+T-223 curated_features/import → T-225 T-212e closure 재검증**이다.
 `krtour-ai-agent`는 TripMate와 직접 연동하지 않고, TripMate curated plan 생성 flow에도
-관여하지 않는다. T-207b는 사용자 결정에 따라 구현하지 않고, provider 강제 실행은
+관여하지 않는다. T-226 package identity rename(`kor-travel-map`/`kortravel`)은 별도
+후속 clean cut이다. T-207b는 사용자 결정에 따라 구현하지 않고, provider 강제 실행은
 feature update request `provider_dataset` scope로 유도한다.
 
 ### 현재 기준 보강 필요 체크포인트 (2026-06-03)

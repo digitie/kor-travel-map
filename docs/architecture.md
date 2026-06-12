@@ -17,11 +17,11 @@
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│ TripMate / TripMate-agent                                             │
+│ TripMate / krtour-ai-agent                                            │
 │   - TripMate: 사용자/여행계획/POI 도메인                               │
-│   - TripMate-agent: YouTube 장소 후보 REST export provider             │
-│   - krtour-map DB 직접 접근 금지                                      │
-│   - OpenAPI client 또는 provider export HTTP 호출                      │
+│   - krtour-ai-agent: YouTube 장소 후보 REST export provider            │
+│   - 두 시스템 모두 krtour-map DB 직접 접근 금지                         │
+│   - TripMate는 OpenAPI, krtour-ai-agent는 provider export HTTP          │
 └──────────────────────────────────────────────────────────────────────┘
                               │ HTTP / OpenAPI
                               ▼
@@ -57,10 +57,10 @@
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-위 provider 입력에는 공공 `python-*-api` client 외에 형제 앱 `tripmate-agent`의
-YouTube 장소 후보 REST export(`tripmate-agent-youtube`)도 포함된다. 다만
-TripMate-agent도 krtour-map DB에 직접 쓰지 않고, krtour-map Dagster가 HTTP로 pull한
-JSON을 순수 변환 함수로 `FeatureBundle`화한다(ADR-049).
+위 provider 입력에는 공공 `python-*-api` client 외에 형제 앱 `krtour-ai-agent`의
+YouTube 장소 후보 REST export(`krtour-ai-agent-youtube`)도 포함된다. 다만
+`krtour-ai-agent`도 krtour-map DB에 직접 쓰지 않고, krtour-map Dagster가 HTTP로 pull한
+JSON을 순수 변환 함수로 `FeatureBundle`화한다(ADR-053).
 
 ## 2. 의존 방향 (한 방향 강제)
 
@@ -81,7 +81,7 @@ JSON을 순수 변환 함수로 `FeatureBundle`화한다(ADR-049).
   단위 테스트는 Fake repo로 100% 가능해야 한다.
 - `providers/`는 `python-*-api`의 typed model을 받아 `dto/`의 모델로 정규화하는
   **순수 함수**의 집합이다. 새 wrapper class를 만들지 않는다 (ADR-002).
-  `tripmate-agent-youtube`는 예외적으로 형제 앱 REST export JSON을 입력으로 받지만,
+  `krtour-ai-agent-youtube`는 예외적으로 형제 앱 REST export JSON을 입력으로 받지만,
   동일하게 순수 변환 함수만 둔다.
 - `client.py`는 `providers/`와 `infra/` repository를 합쳐 외부에 노출하는
   단일 진입점 `AsyncKrtourMapClient`다.
@@ -103,9 +103,9 @@ ADR-045 이후 TripMate와 krtour-map 사이의 운영 계약은 OpenAPI다.
   않는다.
 - OpenAPI는 처음에는 admin UI 기준으로 작성하고, TripMate 연동 시 공개/사용자
   응답을 보완·확장한다.
-- TripMate-agent는 `python-krtour-map` DB에 쓰지 않고
-  `/api/v1/krtour/features/{snapshot|changes}`로 YouTube 장소 후보를 export한다.
-  krtour-map Dagster가 이를 pull해 최종 `feature_id`를 생성한다(ADR-049).
+- `krtour-ai-agent`는 TripMate와 직접 연동하지 않고, `python-krtour-map` DB에도 쓰지
+  않는다. `/api/v1/features/{snapshot|changes}`로 YouTube 장소 후보를 export하고,
+  krtour-map Dagster가 이를 pull해 최종 `feature_id`를 생성한다(ADR-053).
 
 자세한 계약은 `docs/openapi-admin-contract.md`.
 

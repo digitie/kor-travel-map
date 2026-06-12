@@ -40,7 +40,7 @@ PostgreSQL-backed instance config를 쓴다.
   metadata storage 런타임.
 - `boto3`, `botocore`: `offline_upload_store` resource가 RustFS/S3 호환 client를
   만들 때 직접 import한다.
-- `httpx`: kraddr-geo REST resource, TripMate-agent REST export fetcher, Dagster summary
+- `httpx`: kraddr-geo REST resource, krtour-ai-agent REST export fetcher, Dagster summary
   연동에서 사용한다.
 
 패키지 로컬 테스트도 루트 `pyproject.toml`에만 의존하지 않도록
@@ -84,7 +84,7 @@ provider record resource:
 - `airkorea_stations`
 - `airkorea_air_quality`
 - `visitkorea_festival_events`
-- `tripmate_agent_youtube_features`
+- `krtour_ai_agent_youtube_features`
 
 현재 기본 `defs`는 provider record key마다 guard 또는 live resource를 등록한다. code
 location과 schedule/job 정의는 로드되며, credential이 필요한 live resource는 설정이
@@ -117,7 +117,7 @@ credential이 없거나 아직 guard로 남은 resource는 운영 실행 전에
 | `airkorea_stations` | `python-airkorea-api` | `KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
 | `airkorea_air_quality` | `python-airkorea-api` | `KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
 | `visitkorea_festival_events` | `python-visitkorea-api` | `KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
-| `tripmate_agent_youtube_features` | `tripmate-agent` | `KRTOUR_MAP_TRIPMATE_AGENT_BASE_URL`, `KRTOUR_MAP_TRIPMATE_AGENT_API_KEY` | `API_KEYS` |
+| `krtour_ai_agent_youtube_features` | `krtour-ai-agent` | `KRTOUR_MAP_KRTOUR_AI_AGENT_BASE_URL`, `KRTOUR_MAP_KRTOUR_AI_AGENT_API_KEY` | `API_KEYS` |
 
 ## Feature load schedules
 
@@ -135,7 +135,7 @@ credential이 없거나 아직 guard로 남은 resource는 운영 실행 전에
 | `feature_place_mois_licenses_weekly_schedule` | `feature_place_mois_licenses_job` | `35 4 * * 1` |
 | `feature_place_knps_points_semiannual_schedule` | `feature_place_knps_points_job` | `45 3 1 1,7 *` |
 | `feature_geometry_knps_records_semiannual_schedule` | `feature_geometry_knps_records_job` | `15 4 1 1,7 *` |
-| `feature_place_tripmate_agent_youtube_daily_schedule` | `feature_place_tripmate_agent_youtube_job` | `40 3 * * *` |
+| `feature_place_krtour_ai_agent_youtube_daily_schedule` | `feature_place_krtour_ai_agent_youtube_job` | `40 3 * * *` |
 
 ## Feature update queue
 

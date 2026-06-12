@@ -2,6 +2,22 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-12 (codex) — T-224 krtour-ai-agent provider clean cut
+
+T-224를 완료했다.
+
+- `tripmate-agent` provider identity를 `krtour-ai-agent`로 clean cut하고 ADR-053을 추가.
+- canonical provider/env/module/Dagster naming을 `krtour-ai-agent-youtube`,
+  `KRTOUR_MAP_KRTOUR_AI_AGENT_*`, `providers.krtour_ai_agent`,
+  `krtour_ai_agent_youtube_features` 기준으로 정렬.
+- `detail.payload.krtour_ai_agent` 원본 보존, `detail.facility_info` confidence 노출,
+  reject/tombstone inactive helper와 cursor/page guard 테스트를 유지.
+- TripMate ↛ krtour-ai-agent 직접 연동 없음, curated trip plan 생성 flow 제외를
+  integration/curated/tripmate 소비 문서에 반영.
+- 신규 결정(`kor-travel-map`, `kortravel`, 권장 `import kortravel as kt`)은 T-226으로
+  등록. 검증: targeted pytest 87 passed/1 skipped, ruff, mypy, import-linter,
+  diff check.
+
 ## 2026-06-12 (claude) — T-212e: datagokr/krheritage/kma 핀 범프 (live 실패 3건 provider 수정 반영)
 
 T-212e live full reload 실패 3건의 provider 수정을 핀 범프로 반영.
@@ -43,6 +59,8 @@ T-212e live full reload Phase 2에서 `feature_event_visitkorea_enrichment`가
 - T-223에는 `krtour-ai-agent`가 TripMate `curated_trip_plans` 생성 flow에 관여하지
   않는다는 경계를 명시.
 - T-221 → T-222 → T-223 이후 T-225로 T-212e closure 재검증을 한 번 더 수행하도록 추가.
+- 새 배포/임포트명 결정(`kor-travel-map`, `kortravel`, 권장 `import kortravel as kt`)은
+  대형 package identity clean cut으로 보고 T-226에 별도 등록.
 
 ## 2026-06-12 (codex) — ADR-047 포트 재고정 + Docker/runtime/docs 정렬
 

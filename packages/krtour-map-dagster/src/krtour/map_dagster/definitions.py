@@ -54,7 +54,7 @@ REQUIRED_RESOURCE_KEYS: Final[tuple[str, ...]] = (
     "airkorea_stations",
     "airkorea_air_quality",
     "visitkorea_festival_events",
-    "tripmate_agent_youtube_features",
+    "krtour_ai_agent_youtube_features",
     "kma_weather_client",
     "kma_weather_extra_points",
     "kma_weather_max_grids_per_run",

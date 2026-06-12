@@ -55,7 +55,7 @@ __all__ = [
     "fetch_standard_museums",
     "fetch_standard_parking_lots",
     "fetch_standard_tourist_attractions",
-    "fetch_tripmate_agent_youtube_features",
+    "fetch_krtour_ai_agent_youtube_features",
     "fetch_visitkorea_festival_events",
 ]
 
@@ -64,43 +64,42 @@ class ProviderCredentialMissing(RuntimeError):
     """provider live fetch에 필요한 credential이 설정되지 않았을 때."""
 
 
-async def fetch_tripmate_agent_youtube_features(
+async def fetch_krtour_ai_agent_youtube_features(
     settings: KrtourMapSettings,
 ) -> AsyncIterator[Any]:
-    """TripMate-agent YouTube 장소 후보 export를 REST API로 stream한다.
+    """krtour-ai-agent YouTube 장소 후보 export를 REST API로 stream한다.
 
-    ``tripmate_agent_feature_sync_endpoint``가 ``snapshot``이면 full snapshot,
+    ``krtour_ai_agent_feature_sync_endpoint``가 ``snapshot``이면 full snapshot,
     ``changes``이면 incremental changes endpoint를 호출한다. Cursor는 opaque
     string으로 취급하며 응답의 ``next_cursor``를 다음 요청에 그대로 넘긴다.
     """
-    base_url = settings.tripmate_agent_base_url
-    secret = settings.tripmate_agent_api_key
+    base_url = settings.krtour_ai_agent_base_url
+    secret = settings.krtour_ai_agent_api_key
     if base_url is None:
         raise ProviderCredentialMissing(
-            "tripmate-agent YouTube feature live fetch에는 "
-            "KRTOUR_MAP_TRIPMATE_AGENT_BASE_URL이 필요하다."
+            "krtour-ai-agent YouTube feature live fetch에는 "
+            "KRTOUR_MAP_KRTOUR_AI_AGENT_BASE_URL이 필요하다."
         )
     if secret is None:
         raise ProviderCredentialMissing(
-            "tripmate-agent YouTube feature live fetch에는 "
-            "KRTOUR_MAP_TRIPMATE_AGENT_API_KEY (TripMate-agent API_KEYS 중 하나)가 "
+            "krtour-ai-agent YouTube feature live fetch에는 "
+            "KRTOUR_MAP_KRTOUR_AI_AGENT_API_KEY (krtour-ai-agent API_KEYS 중 하나)가 "
             "필요하다."
         )
 
-    endpoint = settings.tripmate_agent_feature_sync_endpoint
-    # ADR-050 #1 경로 중립화(T-217a) — REST path에 downstream 이름을 넣지 않는다.
-    # TripMate-agent T-066(#60)이 같은 중립 경로로 배포됨.
+    endpoint = settings.krtour_ai_agent_feature_sync_endpoint
+    # ADR-053 identity + ADR-050 #1 경로 중립화 — REST path에 downstream 이름을 넣지 않는다.
     path = f"/api/v1/features/{endpoint}"
-    cursor = settings.tripmate_agent_feature_cursor
+    cursor = settings.krtour_ai_agent_feature_cursor
     headers = {"X-API-Key": secret.get_secret_value()}
     async with httpx.AsyncClient(
         base_url=base_url.rstrip("/"),
-        timeout=settings.tripmate_agent_timeout_seconds,
+        timeout=settings.krtour_ai_agent_timeout_seconds,
         headers=headers,
     ) as client:
         while True:
             params: dict[str, str | int] = {
-                "limit": settings.tripmate_agent_feature_page_size
+                "limit": settings.krtour_ai_agent_feature_page_size
             }
             if cursor:
                 params["cursor"] = cursor
@@ -108,10 +107,10 @@ async def fetch_tripmate_agent_youtube_features(
             response.raise_for_status()
             payload = response.json()
             if not isinstance(payload, dict):
-                raise RuntimeError("TripMate-agent feature export 응답은 JSON object여야 한다.")
+                raise RuntimeError("krtour-ai-agent feature export 응답은 JSON object여야 한다.")
             items = payload.get("items")
             if not isinstance(items, list):
-                raise RuntimeError("TripMate-agent feature export 응답에 items list가 없다.")
+                raise RuntimeError("krtour-ai-agent feature export 응답에 items list가 없다.")
             for item in items:
                 yield item
 
@@ -121,11 +120,11 @@ async def fetch_tripmate_agent_youtube_features(
                 break
             if not isinstance(next_cursor, str) or not next_cursor:
                 raise RuntimeError(
-                    "TripMate-agent feature export has_more=true인데 next_cursor가 없다."
+                    "krtour-ai-agent feature export has_more=true인데 next_cursor가 없다."
                 )
             if next_cursor == cursor:
                 raise RuntimeError(
-                    "TripMate-agent feature export next_cursor가 이전 cursor와 같다."
+                    "krtour-ai-agent feature export next_cursor가 이전 cursor와 같다."
                 )
             cursor = next_cursor
 

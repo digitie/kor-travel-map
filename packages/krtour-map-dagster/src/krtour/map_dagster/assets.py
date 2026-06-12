@@ -64,6 +64,13 @@ from krtour.map.providers.krheritage import (
     heritage_events_to_bundles,
     heritage_items_to_bundles,
 )
+from krtour.map.providers.krtour_ai_agent import (
+    DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
+    KRTOUR_AI_AGENT_PROVIDER_NAME,
+    KRTOUR_AI_AGENT_SOURCE_ENTITY_TYPE,
+    krtour_ai_agent_inactive_entity_ids,
+    krtour_ai_agent_items_to_bundles,
+)
 from krtour.map.providers.mois import (
     DATASET_KEY_BULK as MOIS_BULK_DATASET_KEY,
 )
@@ -88,13 +95,6 @@ from krtour.map.providers.standard_data import (
     museums_to_bundles,
     parking_lots_to_bundles,
     tourist_attractions_to_bundles,
-)
-from krtour.map.providers.tripmate_agent import (
-    DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
-    TRIPMATE_AGENT_PROVIDER_NAME,
-    TRIPMATE_AGENT_SOURCE_ENTITY_TYPE,
-    tripmate_agent_inactive_entity_ids,
-    tripmate_agent_items_to_bundles,
 )
 
 from .etl import (
@@ -643,40 +643,40 @@ async def feature_place_krairport_airports(
     return await run_feature_place_krairport_airports(context)
 
 
-async def run_feature_place_tripmate_agent_youtube(
+async def run_feature_place_krtour_ai_agent_youtube(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
-    """TripMate-agent YouTube 장소 후보 export를 place Feature로 적재한다.
+    """krtour-ai-agent YouTube 장소 후보 export를 place Feature로 적재한다.
 
     ``operation=upsert``는 bundle 적재, ``reject``/``tombstone``은 대응 feature를
     ``status='inactive'``로 전환한다(ADR-050 #4, T-217b — MOIS Step C 동형).
     """
-    records = await _record_list(context, "tripmate_agent_youtube_features")
+    records = await _record_list(context, "krtour_ai_agent_youtube_features")
     fetched_at = await _fetched_at(context)
-    bundles = await tripmate_agent_items_to_bundles(
+    bundles = await krtour_ai_agent_items_to_bundles(
         records,
         fetched_at=fetched_at,
         reverse_geocoder=_reverse_geocoder(context),
     )
     result = await _load(
         context,
-        provider=TRIPMATE_AGENT_PROVIDER_NAME,
+        provider=KRTOUR_AI_AGENT_PROVIDER_NAME,
         dataset_key=DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
         bundles=bundles,
     )
-    inactive_ids = tripmate_agent_inactive_entity_ids(records)
+    inactive_ids = krtour_ai_agent_inactive_entity_ids(records)
     if inactive_ids:
         client = cast(
             "AsyncKrtourMapClient", _resource_object(context, "krtour_map_client")
         )
         inactivated = await client.inactivate_features_by_source(
-            provider=TRIPMATE_AGENT_PROVIDER_NAME,
+            provider=KRTOUR_AI_AGENT_PROVIDER_NAME,
             dataset_key=DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
-            source_entity_type=TRIPMATE_AGENT_SOURCE_ENTITY_TYPE,
+            source_entity_type=KRTOUR_AI_AGENT_SOURCE_ENTITY_TYPE,
             source_entity_ids=inactive_ids,
         )
         context.log.info(
-            "tripmate-agent reject/tombstone %d건 → feature %d건 inactive 전환",
+            "krtour-ai-agent reject/tombstone %d건 → feature %d건 inactive 전환",
             len(inactive_ids),
             inactivated,
         )
@@ -685,13 +685,13 @@ async def run_feature_place_tripmate_agent_youtube(
 
 @asset(
     group_name="features_place",
-    required_resource_keys=_COMMON_RESOURCE_KEYS | {"tripmate_agent_youtube_features"},
+    required_resource_keys=_COMMON_RESOURCE_KEYS | {"krtour_ai_agent_youtube_features"},
     retry_policy=FEATURE_LOAD_RETRY_POLICY,
 )
-async def feature_place_tripmate_agent_youtube(
+async def feature_place_krtour_ai_agent_youtube(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
-    return await run_feature_place_tripmate_agent_youtube(context)
+    return await run_feature_place_krtour_ai_agent_youtube(context)
 
 
 async def run_feature_event_visitkorea_enrichment(
@@ -796,7 +796,7 @@ FEATURE_LOAD_ASSETS: Final = [
     feature_place_standard_parking_lots,
     feature_place_khoa_beaches,
     feature_place_krairport_airports,
-    feature_place_tripmate_agent_youtube,
+    feature_place_krtour_ai_agent_youtube,
     feature_weather_airkorea_air_quality,
     feature_event_visitkorea_enrichment,
 ]

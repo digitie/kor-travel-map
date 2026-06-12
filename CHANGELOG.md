@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### krtour-ai-agent provider identity clean cut (ADR-053, T-224, 2026-06-12)
+
+- **CHANGED**: YouTube 장소 후보 provider를 `tripmate-agent-youtube`에서
+  `krtour-ai-agent-youtube`로 재정의했다. TripMate와 agent의 직접 관계는 제거하고,
+  provider 관계는 krtour-map ↔ krtour-ai-agent 사이에만 둔다.
+- **CHANGED**: Dagster resource/asset/schedule, settings/env 이름을
+  `krtour_ai_agent_*` / `KRTOUR_MAP_KRTOUR_AI_AGENT_*` 기준으로 바꿨다. 구
+  `KRTOUR_MAP_TRIPMATE_AGENT_*` 호환 shim은 두지 않는다.
+- **CHANGED**: Python provider module은 `krtour.map.providers.krtour_ai_agent`,
+  raw payload 보존 key는 `detail.payload.krtour_ai_agent`다.
+
 ### Local/Docker 고정 포트 재정렬 (ADR-047 amendment, 2026-06-12)
 
 - **CHANGED**: krtour-map standalone 기본 포트를 API `12301`, 관리 보조(Dagster)

@@ -1,4 +1,4 @@
-"""``test_providers_tripmate_agent`` — TripMate-agent YouTube 후보 provider 변환."""
+"""``test_providers_krtour_ai_agent`` — krtour-ai-agent YouTube 후보 provider 변환."""
 
 from __future__ import annotations
 
@@ -7,13 +7,13 @@ from decimal import Decimal
 from typing import Any
 
 from krtour.map.dto import Address, Coordinate, FeatureKind, SourceRole
-from krtour.map.providers.tripmate_agent import (
+from krtour.map.providers.krtour_ai_agent import (
     DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
-    TRIPMATE_AGENT_MARKER_COLOR,
-    TRIPMATE_AGENT_PROVIDER_NAME,
-    TRIPMATE_AGENT_YOUTUBE_CATEGORY_FALLBACK,
-    tripmate_agent_inactive_entity_ids,
-    tripmate_agent_items_to_bundles,
+    KRTOUR_AI_AGENT_MARKER_COLOR,
+    KRTOUR_AI_AGENT_PROVIDER_NAME,
+    KRTOUR_AI_AGENT_YOUTUBE_CATEGORY_FALLBACK,
+    krtour_ai_agent_inactive_entity_ids,
+    krtour_ai_agent_items_to_bundles,
 )
 
 _KST = timezone(timedelta(hours=9))
@@ -59,11 +59,11 @@ def _item(**overrides: Any) -> dict[str, Any]:
             "providers": {"vworld": {}, "kakao": {}, "naver": {}, "google": {}},
         },
         "source_record": {
-            "provider": TRIPMATE_AGENT_PROVIDER_NAME,
+            "provider": KRTOUR_AI_AGENT_PROVIDER_NAME,
             "dataset_key": DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
             "source_entity_type": "extracted_place_candidate",
             "source_entity_id": "123",
-            "raw_payload_hash": "sha256:tripmate-hash",
+            "raw_payload_hash": "sha256:krtour-ai-hash",
         },
         "updated_at": "2026-06-10T00:00:00Z",
     }
@@ -71,14 +71,14 @@ def _item(**overrides: Any) -> dict[str, Any]:
     return item
 
 
-async def test_tripmate_agent_youtube_item_to_feature_bundle() -> None:
-    [bundle] = await tripmate_agent_items_to_bundles([_item()], fetched_at=_FETCHED)
+async def test_krtour_ai_agent_youtube_item_to_feature_bundle() -> None:
+    [bundle] = await krtour_ai_agent_items_to_bundles([_item()], fetched_at=_FETCHED)
 
     feature = bundle.feature
     assert feature.kind is FeatureKind.PLACE
     assert feature.name == "월정리 해변"
     assert feature.category == "01020300"
-    assert feature.marker_color == TRIPMATE_AGENT_MARKER_COLOR
+    assert feature.marker_color == KRTOUR_AI_AGENT_MARKER_COLOR
     assert feature.feature_id.startswith("f_5011025624_p_")
     assert feature.address.road == "제주특별자치도 제주시 구좌읍 해맞이해안로"
     assert feature.coord == Coordinate(lon="126.7958", lat="33.5563")
@@ -86,25 +86,26 @@ async def test_tripmate_agent_youtube_item_to_feature_bundle() -> None:
     assert feature.detail.place_kind == "youtube_place_candidate"  # type: ignore[union-attr]
     assert feature.detail.facility_info["youtube_video_id"] == "video-1"  # type: ignore[union-attr]
     assert feature.detail.facility_info["timestamp_start"] == "00:03:12"  # type: ignore[union-attr]
-    # T-217f — TripMate 출처 배지 UX가 detail.facility_info만으로 confidence를 얻는다.
+    # T-217f/ADR-053 — 출처 배지 UX가 detail.facility_info만으로 confidence를 얻는다.
     assert feature.detail.facility_info["confidence_score"] == 86  # type: ignore[union-attr]
+    assert feature.detail.payload["krtour_ai_agent"]["youtube"]["video_id"] == "video-1"  # type: ignore[union-attr]
 
     source_record = bundle.source_record
-    assert source_record.provider == TRIPMATE_AGENT_PROVIDER_NAME
+    assert source_record.provider == KRTOUR_AI_AGENT_PROVIDER_NAME
     assert source_record.dataset_key == DATASET_KEY_YOUTUBE_PLACE_CANDIDATES
     assert source_record.source_entity_type == "extracted_place_candidate"
     assert source_record.source_entity_id == "123"
-    assert source_record.raw_payload_hash == "sha256:tripmate-hash"
+    assert source_record.raw_payload_hash == "sha256:krtour-ai-hash"
     assert source_record.raw_data["youtube"]["video_title"] == "제주 동쪽 여행"
 
     assert bundle.source_link.source_role is SourceRole.PRIMARY
-    assert bundle.source_link.match_method == "tripmate_agent_export"
+    assert bundle.source_link.match_method == "krtour_ai_agent_export"
     assert bundle.source_link.confidence == 86
     assert feature.raw_refs[0].source_entity_id == "123"
 
 
-async def test_tripmate_agent_skips_reject_and_tombstone() -> None:
-    bundles = await tripmate_agent_items_to_bundles(
+async def test_krtour_ai_agent_skips_reject_and_tombstone() -> None:
+    bundles = await krtour_ai_agent_items_to_bundles(
         [_item(operation="reject"), _item(operation="tombstone")],
         fetched_at=_FETCHED,
     )
@@ -112,7 +113,7 @@ async def test_tripmate_agent_skips_reject_and_tombstone() -> None:
     assert bundles == []
 
 
-def test_tripmate_agent_inactive_entity_ids_collects_reject_and_tombstone() -> None:
+def test_krtour_ai_agent_inactive_entity_ids_collects_reject_and_tombstone() -> None:
     """T-217b — reject/tombstone item만 entity id로 수집한다(ADR-050 #4)."""
     items = [
         _item(operation="upsert"),
@@ -128,10 +129,10 @@ def test_tripmate_agent_inactive_entity_ids_collects_reject_and_tombstone() -> N
         _item(operation="tombstone", source_record={}, candidate_id=303),
     ]
 
-    assert tripmate_agent_inactive_entity_ids(items) == {"201", "202", "303"}
+    assert krtour_ai_agent_inactive_entity_ids(items) == {"201", "202", "303"}
 
 
-def test_tripmate_agent_inactive_entity_ids_ignores_unidentifiable() -> None:
+def test_krtour_ai_agent_inactive_entity_ids_ignores_unidentifiable() -> None:
     items = [
         _item(
             operation="reject",
@@ -141,21 +142,21 @@ def test_tripmate_agent_inactive_entity_ids_ignores_unidentifiable() -> None:
         ),
     ]
 
-    assert tripmate_agent_inactive_entity_ids(items) == set()
+    assert krtour_ai_agent_inactive_entity_ids(items) == set()
 
 
-async def test_tripmate_agent_defaults_source_and_category() -> None:
+async def test_krtour_ai_agent_defaults_source_and_category() -> None:
     item = _item(source_record={}, place={**_item()["place"], "category_code_suggestion": None})
 
-    [bundle] = await tripmate_agent_items_to_bundles([item], fetched_at=_FETCHED)
+    [bundle] = await krtour_ai_agent_items_to_bundles([item], fetched_at=_FETCHED)
 
-    assert bundle.source_record.provider == TRIPMATE_AGENT_PROVIDER_NAME
+    assert bundle.source_record.provider == KRTOUR_AI_AGENT_PROVIDER_NAME
     assert bundle.source_record.dataset_key == DATASET_KEY_YOUTUBE_PLACE_CANDIDATES
     assert bundle.source_record.source_entity_id == "123"
-    assert bundle.feature.category == TRIPMATE_AGENT_YOUTUBE_CATEGORY_FALLBACK
+    assert bundle.feature.category == KRTOUR_AI_AGENT_YOUTUBE_CATEGORY_FALLBACK
 
 
-async def test_tripmate_agent_reverse_geocoder_fills_missing_bjd() -> None:
+async def test_krtour_ai_agent_reverse_geocoder_fills_missing_bjd() -> None:
     item = _item(
         place={
             **_item()["place"],
@@ -169,7 +170,7 @@ async def test_tripmate_agent_reverse_geocoder_fills_missing_bjd() -> None:
     async def _reverse(_coord: Coordinate) -> Address:
         return Address(bjd_code="5011025624", sigungu_code="50110", sido_code="50")
 
-    [bundle] = await tripmate_agent_items_to_bundles(
+    [bundle] = await krtour_ai_agent_items_to_bundles(
         [item],
         fetched_at=_FETCHED,
         reverse_geocoder=_reverse,
@@ -179,13 +180,13 @@ async def test_tripmate_agent_reverse_geocoder_fills_missing_bjd() -> None:
     assert bundle.feature.feature_id.startswith("f_5011025624_p_")
 
 
-async def test_tripmate_agent_missing_name_is_skipped() -> None:
+async def test_krtour_ai_agent_missing_name_is_skipped() -> None:
     item = _item(place={**_item()["place"], "name": ""})
 
-    assert await tripmate_agent_items_to_bundles([item], fetched_at=_FETCHED) == []
+    assert await krtour_ai_agent_items_to_bundles([item], fetched_at=_FETCHED) == []
 
 
-async def test_tripmate_agent_sparse_payload_uses_export_id_and_json_fallbacks() -> None:
+async def test_krtour_ai_agent_sparse_payload_uses_export_id_and_json_fallbacks() -> None:
     item = _item(
         candidate_id=" ",
         source_record={},
@@ -209,10 +210,10 @@ async def test_tripmate_agent_sparse_payload_uses_export_id_and_json_fallbacks()
         },
     )
 
-    [bundle] = await tripmate_agent_items_to_bundles([item], fetched_at=_FETCHED)
+    [bundle] = await krtour_ai_agent_items_to_bundles([item], fetched_at=_FETCHED)
 
     assert bundle.feature.coord is None
-    assert bundle.feature.category == TRIPMATE_AGENT_YOUTUBE_CATEGORY_FALLBACK
+    assert bundle.feature.category == KRTOUR_AI_AGENT_YOUTUBE_CATEGORY_FALLBACK
     assert bundle.feature.address.legal == "제주특별자치도 제주시 구좌읍 월정리"
     assert bundle.feature.address.road is None
     assert bundle.source_record.source_entity_id == "ytpc_123"
@@ -223,10 +224,10 @@ async def test_tripmate_agent_sparse_payload_uses_export_id_and_json_fallbacks()
     assert isinstance(bundle.source_record.raw_data["extra_list"][1], str)
 
 
-async def test_tripmate_agent_skips_non_mapping_place_and_missing_source_id() -> None:
+async def test_krtour_ai_agent_skips_non_mapping_place_and_missing_source_id() -> None:
     no_place = _item(place=None)
     no_source_id = _item(candidate_id="", export_id="", source_record={})
 
-    assert await tripmate_agent_items_to_bundles(
+    assert await krtour_ai_agent_items_to_bundles(
         [no_place, no_source_id], fetched_at=_FETCHED
     ) == []
