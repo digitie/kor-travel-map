@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-12 claude 작업 메모 — T-220 재배선 (#395, MCST CSV 파일 다운로드)
+
+`python-mcst-api` 재편(provider #6/#7/#9 — KCISA OpenAPI 폐기, CSV 파일 다운로드
+주경로)에 맞춰 krtour MCST 배선 전체를 keyless `FileDataClient` 표면으로
+재작성했다(이슈 #395). 적재 12 dataset(`mcst_<slug>` 클린 컷, 방언 4종) + 제외
+3 dataset(기사형/통계 — 사유 보존). asset은 `feature_place_mcst_culture` 1종으로
+통합(도서관 계열 제거 — 디렉토리 경로 소멸, 후속 과제). 상세는
+`docs/mcst-feature-etl.md` + `docs/journal.md` 최신 엔트리.
+
+T-212e full reload 시 MCST 12 dataset의 실 fetch/적재 검증을 새 경로 기준으로
+본다(구 `mcst_culture_records` 스키마와 다름 — CSV dict row). 다음 한 작업은
+아래 T-224 메모 기준 그대로(T-221).
+
 ## 2026-06-12 Codex 작업 메모 — T-224 krtour-ai-agent provider clean cut
 
 T-224를 완료했다. 기존 `tripmate-agent` identity는 `krtour-ai-agent`로 바뀌었고,

@@ -49,7 +49,6 @@ __all__ = [
     "fetch_krheritage_events",
     "fetch_krheritage_items",
     "fetch_mcst_culture_records",
-    "fetch_mcst_libraries",
     "fetch_mois_license_records",
     "fetch_opinet_stations",
     "fetch_standard_museums",
@@ -581,85 +580,29 @@ def fetch_krairport_airports(
 def fetch_mcst_culture_records(
     settings: KrtourMapSettings,
 ) -> Iterator[Any]:
-    """MCST KCISA 14 dataset record를 mcst public client로 stream한다 (T-220b).
+    """MCST 파일데이터 12 dataset CSV row를 mcst public client로 stream한다 (#395).
 
-    ``settings.data_go_kr_service_key``로 ``CultureOpenApiClient(service_key=...)``
-    를 열고 ``MCST_CULTURE_DATASETS``의 slug 14종을 순회하며
-    ``client.iter_items(slug, max_items=settings.mcst_max_items_per_dataset)``의
-    record(``mcst.CultureRecord``, krtour ``McstCultureItem`` Protocol 충족)를
-    ``(slug, record)`` 튜플로 lazily yield한다 — asset이 slug별로 분리
-    ``_load``한다(dataset_key 단위 sync state 유지). sync generator, finally close.
+    파일 다운로드는 **keyless** — ``FileDataClient()``가 카탈로그의 다운로드
+    페이지를 스크레이핑해 최신 CSV를 받는다(provider #6/#7, krheritage items /
+    knps file dataset과 동일하게 credential guard 없음). ``MCST_FILE_DATASETS``의
+    slug 12종을 순회하며 ``client.iter_csv(slug)``의 raw row(dict)를
+    ``(slug, row)`` 튜플로 lazily yield한다 — asset이 slug별로 분리
+    ``_load``한다(dataset_key 단위 sync state 유지). dataset당
+    ``settings.mcst_max_items_per_dataset`` 상한(이상 응답 방어). sync
+    generator, finally close.
     """
-    secret = settings.data_go_kr_service_key
-    if secret is None:
-        raise ProviderCredentialMissing(
-            "mcst culture live fetch에는 "
-            "KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY (source DATA_GO_KR_SERVICE_KEY)가 "
-            "필요하다."
-        )
-    api_key = secret.get_secret_value()
     # slug 메타표는 krtour(본 repo) — 변환과 fetch가 같은 표를 본다.
-    from krtour.map.providers.mcst import MCST_CULTURE_DATASETS
+    from krtour.map.providers.mcst import MCST_FILE_DATASETS
 
     mcst = cast(Any, importlib.import_module("mcst"))
-    client = mcst.CultureOpenApiClient(service_key=api_key)
+    client = mcst.FileDataClient()
+    max_items = settings.mcst_max_items_per_dataset
     try:
-        for slug in MCST_CULTURE_DATASETS:
-            for record in client.iter_items(
-                slug,
-                num_of_rows=100,
-                max_items=settings.mcst_max_items_per_dataset,
-            ):
-                yield (slug, record)
-    finally:
-        client.close()
-
-
-def fetch_mcst_libraries(
-    settings: KrtourMapSettings,
-) -> Iterator[Any]:
-    """MCST ODCloud 도서관 2 dataset row를 mcst public client로 stream한다 (T-220b).
-
-    ``DataGoFileApiClient(service_key=...)``로 ``MCST_LIBRARY_DATASETS``의
-    ``public_libraries``/``small_libraries``를 페이지네이션하며 raw row(dict)를
-    ``(slug, row)`` 튜플로 lazily yield한다. dataset당
-    ``settings.mcst_max_items_per_dataset`` 상한. sync generator, finally close.
-    """
-    secret = settings.data_go_kr_service_key
-    if secret is None:
-        raise ProviderCredentialMissing(
-            "mcst libraries live fetch에는 "
-            "KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY (source DATA_GO_KR_SERVICE_KEY)가 "
-            "필요하다."
-        )
-    api_key = secret.get_secret_value()
-    from krtour.map.providers.mcst import MCST_LIBRARY_DATASETS
-
-    mcst = cast(Any, importlib.import_module("mcst"))
-    client = mcst.DataGoFileApiClient(service_key=api_key)
-    per_page = 500
-    try:
-        for slug in MCST_LIBRARY_DATASETS:
-            page_no = 1
-            seen = 0
-            while True:
-                page = client.request(slug, page_no=page_no, per_page=per_page)
-                items = list(page.items)
-                if not items:
+        for slug in MCST_FILE_DATASETS:
+            for seen, row in enumerate(client.iter_csv(slug), start=1):
+                yield (slug, row)
+                if seen >= max_items:
                     break
-                for row in items:
-                    yield (slug, row)
-                    seen += 1
-                    if seen >= settings.mcst_max_items_per_dataset:
-                        break
-                if seen >= settings.mcst_max_items_per_dataset:
-                    break
-                if len(items) < per_page:
-                    break
-                total_count = page.total_count
-                if total_count is not None and seen >= total_count:
-                    break
-                page_no += 1
     finally:
         client.close()
 

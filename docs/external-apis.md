@@ -162,13 +162,16 @@ API 키 우선순위:
 
 ### 3.14 문화체육관광부 (MCST, `python-mcst-api`)
 
-1. KCISA 14 dataset(공통 `CultureRecord`)과 ODCloud 도서관 2 dataset 모두
-   **`DATA_GO_KR_SERVICE_KEY` 공유**(별도 발급 불필요 — mcst lib 실측, T-220).
-2. krtour-map env는 `KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY` 하나로 두 client
-   (`CultureOpenApiClient`/`DataGoFileApiClient`)를 연다.
-3. dataset당 1 run 상한은 `KRTOUR_MAP_MCST_MAX_ITEMS_PER_DATASET`(기본 5000).
-4. dataset 카탈로그(slug/endpoint)는 `python-mcst-api` `catalog.py`가 정본 —
-   krtour 측 메타표는 `krtour.map.providers.mcst.MCST_{CULTURE,LIBRARY}_DATASETS`.
+1. 파일데이터 CSV 12 dataset은 **키 불요**(keyless) — `FileDataClient`가
+   다운로드 페이지(culture.go.kr `filedatDtl.do` / data.go.kr `fileData.do`)를
+   스크레이핑해 최신 CSV를 받는다(provider #6/#7, T-220 재배선 #395). 구 KCISA
+   OpenAPI(`CultureOpenApiClient`)/ODCloud(`DataGoFileApiClient`) 경로는 폐기
+   — KCISA OpenAPI는 공인 DNS 미해석 + KCISA 전용 발급키 필요(provider #6).
+2. dataset당 1 run 상한은 `KRTOUR_MAP_MCST_MAX_ITEMS_PER_DATASET`(기본 50000
+   — 실측 최대 24,537행의 약 2배 여유).
+3. dataset 카탈로그(slug/다운로드 페이지)는 `python-mcst-api` `catalog.py`가
+   정본 — krtour 측 메타표는 `krtour.map.providers.mcst.MCST_FILE_DATASETS`
+   (적재 12), 제외 3종 사유는 `MCST_EXCLUDED_FILE_DATASETS`.
 
 ## 4. 호출 정책 (provider 라이브러리가 책임)
 

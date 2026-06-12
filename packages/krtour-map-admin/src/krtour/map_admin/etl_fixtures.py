@@ -50,8 +50,7 @@ from krtour.map.providers.krforest import (
     recreation_forests_to_bundles,
 )
 from krtour.map.providers.mcst import (
-    culture_records_to_bundles,
-    library_records_to_bundles,
+    file_rows_to_bundles,
 )
 from krtour.map.providers.opinet import (
     prices_to_values,
@@ -1009,60 +1008,84 @@ async def _convert_airkorea_air_quality(items: Sequence[Any]) -> list[Any]:
     return [v.model_dump(mode="json") for v in values]
 
 
-@dataclass(frozen=True)
-class _McstCulture:
-    """krtour ``McstCultureItem`` Protocol 준수 (mcst ``CultureRecord`` 정합)."""
-
-    name: str | None
-    address: str | None
-    tel: str | None
-    url: str | None
-    longitude: float | None
-    latitude: float | None
-    category: str | None
-    raw: Any = None
+# MCST 파일데이터 CSV row fixture — 방언별 대표 1개씩 (T-220 재배선, #395).
+# 컬럼/값 모양은 2026-06-12 live CSV 실측 샘플 기반.
 
 
-def _mcst_culture_fixture() -> Sequence[_McstCulture]:
-    return [
-        _McstCulture(
-            name="데모 독립서점",
-            address="서울특별시 종로구 세종대로 175",
-            tel="02-000-0000",
-            url="https://bookstore.example",
-            longitude=126.9769,
-            latitude=37.5728,
-            category="서점",
-        ),
-    ]
-
-
-async def _convert_mcst_culture(items: Sequence[Any]) -> list[Any]:
-    bundles = await culture_records_to_bundles(
-        items, slug="independent_bookstores", fetched_at=_now()
-    )
-    return [b.model_dump(mode="json") for b in bundles]
-
-
-def _mcst_libraries_fixture() -> Sequence[dict[str, Any]]:
+def _mcst_kcisa_common_fixture() -> Sequence[dict[str, Any]]:
+    """KCISA 공통 방언 A 대표(world_restaurants_csv) — N/E 접두 COORDINATES."""
     return [
         {
-            "도서관명": "데모 공공도서관",
-            "시도명": "서울특별시",
-            "시군구명": "종로구",
-            "소재지도로명주소": "서울특별시 종로구 사직로9길 15-14",
-            "위도": "37.5765",
-            "경도": "126.9685",
-            "전화번호": "02-721-0707",
-            "홈페이지주소": "https://library.example",
-            "도서관유형": "공공도서관",
+            "TITLE": "데모 세계음식점",
+            "ISSUEDDATE": "2022-11-30",
+            "CATEGORY1": "음식점/유흥시설",
+            "CATEGORY2": "남미음식",
+            "CATEGORY3": "",
+            "INFORMATION": "무료주차 불가|발렛주차 불가",
+            "TEL": "0507-0000-0000",
+            "OPERATINGTIME": "월-금 11시-21시30분",
+            "ADDRESS": "(17982)경기도 평택시 팽성읍 안정순환로222번길 92",
+            "COORDINATES": "N36.960756, E127.043367",
+            "RNUM": "1",
         },
     ]
 
 
-async def _convert_mcst_libraries(items: Sequence[Any]) -> list[Any]:
-    bundles = await library_records_to_bundles(
-        items, slug="public_libraries", fetched_at=_now()
+async def _convert_mcst_kcisa_common(items: Sequence[Any]) -> list[Any]:
+    bundles = await file_rows_to_bundles(
+        items, slug="world_restaurants_csv", fetched_at=_now()
+    )
+    return [b.model_dump(mode="json") for b in bundles]
+
+
+def _mcst_cntc_resrce_fixture() -> Sequence[dict[str, Any]]:
+    """CNTC_RESRCE 방언 대표(independent_bookstores_csv) — 평문 lat-lon."""
+    return [
+        {
+            "CNTC_RESRCE_ID": "B553457-04-012",
+            "CNTC_RESRCE_NO": "1",
+            "TITLE": "데모 독립서점",
+            "ISSUED_DATE": "2024-10-23",
+            "SUBJECT_KEYWORD": "독립서점 , 일반",
+            "DESCRIPTION": "평일개점마감시간 : 11:00~21:00",
+            "SUB_DESCRIPTION": "큐레이션 서점",
+            "ADDRESS": "(41946) 대구광역시 중구 달구벌대로447길 72-1",
+            "CONTACT_POINT": "0530000000",
+            "COORDINATES": "35.86561079 , 128.6083915",
+            "RNUM": "1",
+        },
+    ]
+
+
+async def _convert_mcst_cntc_resrce(items: Sequence[Any]) -> list[Any]:
+    bundles = await file_rows_to_bundles(
+        items, slug="independent_bookstores_csv", fetched_at=_now()
+    )
+    return [b.model_dump(mode="json") for b in bundles]
+
+
+def _mcst_split_coord_fixture() -> Sequence[dict[str, Any]]:
+    """분리좌표 방언 대표(children_bookstores_csv) — FCLTY_LA/FCLTY_LO."""
+    return [
+        {
+            "RNUM": "1",
+            "ESNTL_ID": "KCCBSPO22N000000085",
+            "FCLTY_NM": "데모 아동서점",
+            "LCLAS_NM": "아동서점",
+            "MLSFC_NM": "아동서적",
+            "ZIP_NO": "14061",
+            "FCLTY_ROAD_NM_ADDR": "경기 안양시 동안구 흥안대로 460 1층",
+            "FCLTY_LA": "37.39513617",
+            "FCLTY_LO": "126.9760656",
+            "TEL_NO": "0310000000",
+            "RSTDE_GUID_CN": "일요일휴무",
+        },
+    ]
+
+
+async def _convert_mcst_split_coord(items: Sequence[Any]) -> list[Any]:
+    bundles = await file_rows_to_bundles(
+        items, slug="children_bookstores_csv", fetched_at=_now()
     )
     return [b.model_dump(mode="json") for b in bundles]
 
@@ -1250,22 +1273,35 @@ FIXTURE_REGISTRY: Final[tuple[EtlFixtureEntry, ...]] = (
     ),
     EtlFixtureEntry(
         provider="python-mcst-api",
-        dataset="mcst_independent_bookstores",
+        dataset="mcst_world_restaurants_csv",
         variant="FeatureBundle",
         description=(
-            "KCISA 공통 CultureRecord(14 dataset 공용 변환 대표) → place Feature. "
-            "T-220c."
+            "MCST 파일데이터 KCISA 공통 방언 A(8 dataset 공용 변환 대표) → "
+            "place Feature. #395."
         ),
-        build_fixture=_mcst_culture_fixture,
-        convert=_convert_mcst_culture,
+        build_fixture=_mcst_kcisa_common_fixture,
+        convert=_convert_mcst_kcisa_common,
     ),
     EtlFixtureEntry(
         provider="python-mcst-api",
-        dataset="mcst_public_libraries",
+        dataset="mcst_independent_bookstores_csv",
         variant="FeatureBundle",
-        description="ODCloud 도서관 raw row(2 dataset 공용 변환 대표) → place Feature. T-220c.",
-        build_fixture=_mcst_libraries_fixture,
-        convert=_convert_mcst_libraries,
+        description=(
+            "MCST 파일데이터 CNTC_RESRCE 방언(서점 2 dataset 공용 변환 대표) → "
+            "place Feature. #395."
+        ),
+        build_fixture=_mcst_cntc_resrce_fixture,
+        convert=_convert_mcst_cntc_resrce,
+    ),
+    EtlFixtureEntry(
+        provider="python-mcst-api",
+        dataset="mcst_children_bookstores_csv",
+        variant="FeatureBundle",
+        description=(
+            "MCST 파일데이터 분리좌표 방언(FCLTY_LA/LO) → place Feature. #395."
+        ),
+        build_fixture=_mcst_split_coord_fixture,
+        convert=_convert_mcst_split_coord,
     ),
 )
 

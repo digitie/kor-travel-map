@@ -62,7 +62,6 @@ REQUIRED_RESOURCE_KEYS: Final[tuple[str, ...]] = (
     "kma_mid_region_features",
     "kma_weather_alert_records",
     "mcst_culture_records",
-    "mcst_library_records",
 )
 """Feature 적재 asset이 요구하는 Dagster resource key."""
 

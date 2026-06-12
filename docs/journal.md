@@ -2,6 +2,27 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-12 (claude) — T-220 재배선 #395: MCST → CSV 파일 다운로드 주경로
+
+`python-mcst-api`가 CSV 파일 다운로드 주경로로 재편됨(provider #6/#7/#9,
+`@ba471ee`)에 따라 krtour MCST 배선 전체를 keyless `FileDataClient` 표면으로
+재작성했다. KCISA OpenAPI는 공인 DNS 미해석 + 전용 발급키 필요로 폐기, ODCloud
+도서관 디렉토리도 카탈로그에서 소멸.
+
+- **메타표/변환**: `MCST_FILE_DATASETS` 12종(방언 4종 — kcisa_common 8 /
+  cntc_resrce 2 / split_coord 1 / korean_address 1) + `file_rows_to_bundles`
+  단일 변환. 신규 적재: 아동서점(01040000)·골프장(01080100 — 기존 코드).
+  제외 3종(기사형/통계)은 `MCST_EXCLUDED_FILE_DATASETS`에 사유 보존.
+- **COORDINATES 파서**: 실측 2형식("N37.5, E126.9" / "35.8 , 128.6" — 콤마
+  없는 공백 변형 포함) + 한국 bbox 검증·순서 뒤집힘 교정. dataset_key는
+  `mcst_<slug>` 클린 컷(빈 DB 재적재 중 — 하위호환 shim 없음, ADR-046 원칙).
+- **Dagster**: fetcher keyless 전환(credential guard 제거 — knps/krheritage
+  패턴), asset은 `feature_place_mcst_culture` 1종으로 통합(libraries 계열
+  제거), `mcst_max_items_per_dataset` 기본 50000으로 상향(실측 최대 24,537행).
+- 실측 근거: 2026-06-12 live 전수 CSV 다운로드 헤더/샘플
+  (WSL `~/t212e-data/mcst-csv-headers.json`). 매핑 전체는
+  `docs/mcst-feature-etl.md` 재작성본 참조.
+
 ## 2026-06-12 (codex) — T-224 krtour-ai-agent provider clean cut
 
 T-224를 완료했다.
