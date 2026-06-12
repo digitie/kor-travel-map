@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### curated_features Dagster group/cache (T-223c-2, 2026-06-12)
+
+- **ADDED**: `feature.curated_tripmate_copy_snapshots` — TripMate copy snapshot
+  materialize/cache table.
+- **ADDED**: `AsyncKrtourMapClient` curated 배치 표면 —
+  source metadata refresh, source rule bulk apply, status sweep, TripMate snapshot
+  materialize.
+- **ADDED**: Dagster `curated_features` asset group과 `curated_features_refresh`
+  job/schedule.
+
 ### curated_features DB/API foundation (T-223c-1, 2026-06-12)
 
 - **ADDED**: `feature.curated_themes`, `curated_sources`,

@@ -775,6 +775,44 @@ class CuratedFeatureRow(Base):
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class CuratedTripmateCopySnapshotRow(Base):
+    """``feature.curated_tripmate_copy_snapshots`` row mapping — copy cache."""
+
+    __tablename__ = "curated_tripmate_copy_snapshots"
+    __table_args__ = (
+        CheckConstraint(
+            "copy_version >= 1",
+            name="ck_curated_copy_snapshots_version",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(snapshot) = 'object'",
+            name="ck_curated_copy_snapshots_snapshot",
+        ),
+        Index(
+            "idx_curated_copy_snapshots_updated",
+            text("updated_at DESC"),
+            text("curated_feature_id DESC"),
+        ),
+        Index("idx_curated_copy_snapshots_etag", "etag"),
+        {"schema": "feature"},
+    )
+
+    curated_feature_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("feature.curated_features.curated_feature_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    copy_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    etag: Mapped[str] = mapped_column(Text, nullable=False)
+    snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    materialized_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
+
+
 # =============================================================================
 # provider_sync.provider_sync_state  (docs/data-model.md §4)
 # =============================================================================

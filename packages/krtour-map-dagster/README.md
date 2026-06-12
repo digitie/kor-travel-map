@@ -12,6 +12,8 @@
 - Feature 적재 asset은 provider별 KST schedule로 묶어 등록한다. 기본 status는
   로컬 개발 중 실 provider 호출을 막기 위해 `STOPPED`이며, 운영 배포에서 필요한
   schedule만 enable한다.
+- `curated_features` asset group은 provider 적재 뒤 source metadata, 후보화 rule,
+  status sweep, TripMate copy snapshot cache를 갱신한다. 기본 schedule은 `STOPPED`다.
 
 ```bash
 # Docker 운영 기본: webserver + daemon 분리
@@ -136,6 +138,23 @@ credential이 없거나 아직 guard로 남은 resource는 운영 실행 전에
 | `feature_place_knps_points_semiannual_schedule` | `feature_place_knps_points_job` | `45 3 1 1,7 *` |
 | `feature_geometry_knps_records_semiannual_schedule` | `feature_geometry_knps_records_job` | `15 4 1 1,7 *` |
 | `feature_place_krtour_ai_agent_youtube_daily_schedule` | `feature_place_krtour_ai_agent_youtube_job` | `40 3 * * *` |
+
+## Curated features
+
+- Asset group: `curated_features`
+- Asset: `curated_source_metadata`
+- Asset: `curated_feature_candidates`
+- Asset: `curated_feature_status_sweep`
+- Asset: `curated_tripmate_copy_snapshots`
+- Job: `curated_features_refresh`
+- Schedule: `curated_features_refresh_daily_schedule` (`55 4 * * *`, KST, 기본
+  `STOPPED`)
+
+이 group은 `feature.curated_sources`의 row count/last checked metadata를
+`provider_sync.source_records` 기준으로 갱신하고, enabled source rule을 적용한 뒤,
+inactive/deleted feature를 가리키는 curated row를 archive한다. 마지막 asset은
+`feature.curated_tripmate_copy_snapshots`에 REST `/tripmate-copy`와 같은 payload를
+materialize/cache한다.
 
 ## Feature update queue
 

@@ -9,6 +9,11 @@ from krtour.map.settings import KrtourMapSettings
 
 from .assets import FEATURE_LOAD_ASSETS
 from .batch_dag import BATCH_DAG_JOBS
+from .curated_features import (
+    CURATED_FEATURE_ASSETS,
+    CURATED_FEATURE_JOBS,
+    CURATED_FEATURE_SCHEDULES,
+)
 from .kma_weather import KMA_WEATHER_ASSETS
 from .maintenance import MAINTENANCE_JOBS, MAINTENANCE_SCHEDULES
 from .mcst_features import MCST_FEATURE_ASSETS
@@ -125,7 +130,12 @@ def _settings_value_resource(key: str, attr: str) -> ResourceDefinition:
 
 
 defs = Definitions(
-    assets=[*FEATURE_LOAD_ASSETS, *KMA_WEATHER_ASSETS, *MCST_FEATURE_ASSETS],
+    assets=[
+        *FEATURE_LOAD_ASSETS,
+        *KMA_WEATHER_ASSETS,
+        *MCST_FEATURE_ASSETS,
+        *CURATED_FEATURE_ASSETS,
+    ],
     jobs=cast(
         "Any",
         [
@@ -135,12 +145,14 @@ defs = Definitions(
             *MAINTENANCE_JOBS,
             *MOIS_SOURCE_SYNC_JOBS,
             *OFFLINE_UPLOAD_JOBS,
+            *CURATED_FEATURE_JOBS,
         ],
     ),
     schedules=[
         *FEATURE_LOAD_SCHEDULES,
         *MAINTENANCE_SCHEDULES,
         *MOIS_SOURCE_SYNC_SCHEDULES,
+        *CURATED_FEATURE_SCHEDULES,
     ],
     sensors=FEATURE_UPDATE_SENSORS,
     resources={

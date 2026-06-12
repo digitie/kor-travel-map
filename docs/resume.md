@@ -1,5 +1,28 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-12 Codex 작업 메모 — T-223c-2 curated Dagster group
+
+T-223c-2로 curated overlay 운영 배치를 Dagster asset group으로 연결했다.
+
+- Alembic `0026_curated_copy_snapshots`로
+  `feature.curated_tripmate_copy_snapshots` cache table을 추가했다.
+- `curated_repo`에 source metadata refresh, enabled source rule bulk apply,
+  inactive/deleted feature status sweep, TripMate copy snapshot materialize 함수를
+  추가하고 `AsyncKrtourMapClient` 표면으로 노출했다.
+- Dagster `curated_features` asset group을 추가했다:
+  `curated_source_metadata` → `curated_feature_candidates` →
+  `curated_feature_status_sweep` → `curated_tripmate_copy_snapshots`.
+  `curated_features_refresh` asset job과 `curated_features_refresh_daily_schedule`
+  (04:55 KST, 기본 `STOPPED`)도 등록했다.
+
+검증: curated repo unit, Dagster curated/definitions unit, curated repo PostGIS
+integration 통과.
+
+**다음 한 작업**: **T-223c-3** — Admin UI 구현. curated 후보 목록, select/unselect,
+source rule 편집/apply, TripMate copy preview를 admin frontend에 연결한다. 이후
+T-223d TripMate 복사 연동으로 진행한다. T-212e는 다른 agent가 병행 진행 중이며,
+결과는 T-225에서 다시 대조한다.
+
 ## 2026-06-12 Codex 작업 메모 — T-223c-1 curated DB/API foundation
 
 T-223c 첫 조각으로 krtour-map의 curated overlay DB/API 기반을 구현했다.

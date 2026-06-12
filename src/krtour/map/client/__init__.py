@@ -62,6 +62,24 @@ from krtour.map.infra.consistency import (
 from krtour.map.infra.consistency import (
     run_consistency_checks as repo_run_consistency_checks,
 )
+from krtour.map.infra.curated_repo import (
+    CuratedFeatureCandidatesResult,
+    CuratedFeatureStatusSweepResult,
+    CuratedSourceMetadataRefreshResult,
+    CuratedTripmateSnapshotMaterializeResult,
+)
+from krtour.map.infra.curated_repo import (
+    apply_enabled_curated_source_rules as repo_apply_enabled_curated_source_rules,
+)
+from krtour.map.infra.curated_repo import (
+    materialize_curated_tripmate_copy_snapshots as repo_materialize_curated_snapshots,
+)
+from krtour.map.infra.curated_repo import (
+    refresh_curated_source_metadata as repo_refresh_curated_source_metadata,
+)
+from krtour.map.infra.curated_repo import (
+    sweep_curated_feature_status as repo_sweep_curated_feature_status,
+)
 from krtour.map.infra.db import make_async_session_factory
 from krtour.map.infra.dedup_refresh_repo import (
     DedupRefreshScope,
@@ -234,6 +252,10 @@ __all__ = [
     "AirQualityLoadResult",
     "AsyncKrtourMapClient",
     "BatchDagRunResult",
+    "CuratedFeatureCandidatesResult",
+    "CuratedFeatureStatusSweepResult",
+    "CuratedSourceMetadataRefreshResult",
+    "CuratedTripmateSnapshotMaterializeResult",
     "DedupRefreshResult",
     "DedupSyncResult",
     "FestivalEnrichmentReviewRefreshResult",
@@ -1045,6 +1067,53 @@ class AsyncKrtourMapClient:
                 provider_last_success_sla_seconds=provider_last_success_sla_seconds,
                 dedup_score_regression_warn_points=dedup_score_regression_warn_points,
                 known_file_objects=known_file_objects,
+            )
+
+    async def refresh_curated_source_metadata(
+        self,
+        *,
+        provider: str | None = None,
+        dataset_key: str | None = None,
+    ) -> CuratedSourceMetadataRefreshResult:
+        """curated source metadata를 source_records 기준으로 갱신한다(T-223c-2)."""
+        async with self._session_factory() as session, session.begin():
+            return await repo_refresh_curated_source_metadata(
+                session,
+                provider=provider,
+                dataset_key=dataset_key,
+            )
+
+    async def apply_curated_source_rules(
+        self,
+        *,
+        limit: int = 500,
+    ) -> CuratedFeatureCandidatesResult:
+        """enabled source rule을 적용해 curated 후보/선정 row를 갱신한다(T-223c-2)."""
+        async with self._session_factory() as session, session.begin():
+            return await repo_apply_enabled_curated_source_rules(
+                session,
+                limit=limit,
+            )
+
+    async def sweep_curated_feature_status(
+        self,
+    ) -> CuratedFeatureStatusSweepResult:
+        """inactive/deleted feature가 가리키는 curated overlay를 archive한다(T-223c-2)."""
+        async with self._session_factory() as session, session.begin():
+            return await repo_sweep_curated_feature_status(session)
+
+    async def materialize_curated_tripmate_copy_snapshots(
+        self,
+        *,
+        theme_slug: str | None = None,
+        limit: int = 500,
+    ) -> CuratedTripmateSnapshotMaterializeResult:
+        """TripMate copy snapshot cache를 materialize한다(T-223c-2)."""
+        async with self._session_factory() as session, session.begin():
+            return await repo_materialize_curated_snapshots(
+                session,
+                theme_slug=theme_slug,
+                limit=limit,
             )
 
     async def run_batch_dag_consistency_gate(

@@ -202,12 +202,13 @@ CREATE INDEX idx_feature_versions_request
 - 사용자 요청 삭제는 version 1 `change_kind='delete'`와 `feature.features` soft delete
   marker를 함께 남긴다.
 
-### 1.2 `feature.curated_*` (테마형 overlay, T-223c-1 구현)
+### 1.2 `feature.curated_*` (테마형 overlay, T-223c-1/T-223c-2 구현)
 
 테마형 큐레이션은 `feature.features`를 복제하지 않고 overlay로 관리한다. 정본 계약은
 [`docs/curated-features.md`](curated-features.md)다. DB schema는 `feature`에 둔다.
 T-223c-1에서 Alembic `0025_curated_features`로 4개 테이블과 1차 seed metadata/rule을
-추가했다.
+추가했고, T-223c-2에서 Alembic `0026_curated_copy_snapshots`로 TripMate copy snapshot
+cache를 추가했다.
 
 테이블:
 
@@ -221,6 +222,9 @@ T-223c-1에서 Alembic `0025_curated_features`로 4개 테이블과 1차 seed me
   `candidate`/`curated`/`ignore` 기본 action으로 매핑한다.
 - `feature.curated_features` — `theme_id + feature_id` overlay 본체. 상태와
   TripMate 복사 정책을 저장한다.
+- `feature.curated_tripmate_copy_snapshots` — Dagster가 materialize한 TripMate 복사용
+  snapshot cache. `curated_feature_id` PK, `copy_version`, `etag`, `snapshot`,
+  `materialized_at`, `updated_at`을 가진다.
 
 핵심 상태:
 
@@ -237,6 +241,8 @@ T-223c-1에서 Alembic `0025_curated_features`로 4개 테이블과 1차 seed me
 - `INDEX (theme_id, curation_status, rank_score DESC)`
 - `INDEX (source_id, curation_status)`
 - `INDEX (feature_id)`
+- snapshot cache: `PRIMARY KEY (curated_feature_id)`,
+  `INDEX (updated_at DESC, curated_feature_id DESC)`, `INDEX (etag)`
 
 `rejected`/`archived` row는 provider 재적재나 source rule 재적용으로 되살리지 않는다.
 TripMate는 REST snapshot을 읽어 `app.curated_trip_plans` /

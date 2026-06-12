@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-12 (codex) — T-223c-2 curated Dagster group
+
+curated overlay 운영 배치를 Dagster `curated_features` asset group으로 연결했다.
+
+- **DB**: Alembic `0026_curated_copy_snapshots`로
+  `feature.curated_tripmate_copy_snapshots` cache table을 추가했다.
+- **Backend**: source metadata refresh, enabled source rule bulk apply, inactive/deleted
+  feature status sweep, TripMate copy snapshot materialize 함수를 `curated_repo`와
+  `AsyncKrtourMapClient`에 추가했다.
+- **Dagster**: `curated_source_metadata`, `curated_feature_candidates`,
+  `curated_feature_status_sweep`, `curated_tripmate_copy_snapshots` asset과
+  `curated_features_refresh` job/schedule을 등록했다.
+- **후속 분리**: Admin UI는 T-223c-3, TripMate 복사 연동은 T-223d로 유지한다.
+
 ## 2026-06-12 (codex) — T-223c-1 curated DB/API foundation
 
 curated feature overlay의 DB/API foundation을 구현했다.
