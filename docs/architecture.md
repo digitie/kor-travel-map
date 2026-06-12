@@ -120,7 +120,7 @@ REST/OpenAPI는 `python-krtour-map`이 아니라 **별도 Python 패키지**
 │ krtour-map API/admin (별도 패키지)                                  │
 │ packages/krtour-map-admin/src/krtour/map_admin/            │
 │                                                                  │
-│  uvicorn krtour.map_admin.app:app --host 127.0.0.1 --port 9011│
+│  uvicorn krtour.map_admin.app:app --host 127.0.0.1 --port 12301│
 │                                                                  │
 │   ├── /debug/health, /debug/version          (구현됨, PR#35)    │
 │   ├── /debug/etl/...   (provider preview)     (구현됨, PR#44~47) │

@@ -33,13 +33,13 @@
   지오코딩·후보 검수(자체 UI/MCP)   │                                             feature_id 생성·dedup·
                                     │                                             정합성·PostGIS 조회
                                     │                                                  │
-                                    │                       (OpenAPI :9011, /v1, {data,meta} envelope)
+                                    │                       (OpenAPI :12301, /v1, {data,meta} envelope)
                                     │                                                  ▼
 [TripMate] ◀──(사용자 UX: trip 계획·POI 첨부·feature_snapshot 캐시·공유·협업)── [TripMate api :9021]
 ```
 
 - **krtour-map** = feature **owner**: 정규화·`make_feature_id`·dedup/merge·정합성 게이트·
-  공간 조회. 외부 경계는 OpenAPI(:9011)뿐 (ADR-045).
+  공간 조회. 외부 경계는 OpenAPI(:12301)뿐 (ADR-045).
 - **tripmate-agent** = 후보 **provider**: YouTube → 장소 후보 추출·검수. DB에 FeatureBundle을
   직접 쓰지 않고 export API만 제공 (tripmate-agent `docs/youtube-feature-pipeline-plan.md` §2.3, krtour ADR-049).
 - **TripMate** = feature **consumer**: `trip_day_pois.feature_id TEXT` + `feature_snapshot JSONB`
@@ -73,7 +73,7 @@
 중요한 것은 TripMate 내부 감사 문서(`docs/audit/2026-06-06-doc-impl-audit.md` DEC-01,
 `docs/krtour-map-integration.md` L7~16)가 그 원인을 "krtour-map에 HTTP 표면이 없다
 (debug-ui 8087뿐)"로 기술하고 있는데, **이 전제는 2026-06-10 현재 사실이 아니다** —
-krtour-map은 :9011 `/v1` 61개 엔드포인트 + OpenAPI 기계 정본 + ServiceToken까지 완비했다.
+krtour-map은 :12301 `/v1` 61개 엔드포인트 + OpenAPI 기계 정본 + ServiceToken까지 완비했다.
 즉 TripMate의 P0 갭은 외부 블로커가 아니라 **자기 문서 노후로 인한 착시 + 배선 작업
 잔여**다. (→ TripMate DEC-01 폐기, `tripmate-side-actions` TM-04)
 
@@ -154,7 +154,7 @@ Dagster 관제, 정합성 리포트, import job, 로그)이 일관된 envelope/c
 |---|---|---|---|---|---|
 | C-1 | 🔴 | batch 응답 id-keyed map 필드명: krtour `found` vs TripMate가 `items` 파싱 → 모든 POI 상세가 **조용히 missing 처리** | krtour `routers/features.py` batch(`{found, missing}`), `docs/rest-api.md` §"목록 data={items}, map={found}" | TripMate `apps/api/app/clients/krtour_map.py:196` `data.get("items")`; `docs/integrations/krtour-map-rest-api.md:109` | **TripMate 수정** (`found`). ADR-048 명명이 정본 |
 | C-2 | 🔴 | TripMate feature 라우터가 구모델(라이브러리 직접 호출, ADR-002) stub에 배선 — 신규 HTTP client 미사용, DTO도 구 라이브러리 모양(`coord.longitude` 중첩) | krtour 응답 평면 `lon`/`lat` (`FeatureSummary`, ADR-048 #10) | TripMate `apps/api/app/api/v1/features.py:1-12` docstring "ADR-002", `:80` `dto["coord"]["longitude"]`, `etl_bridge` 항상 None | **TripMate 재배선** + 매핑 재작성 |
-| C-3 | 🔴 | TripMate 문서가 "krtour HTTP 표면 미존재(debug-ui 8087, `/tripmate/features/batch` 없음)"로 현실 차단 (DEC-01) — **노후 전제**. krtour는 :9011 `/v1` 완비 | krtour `docs/rest-api.md`(2026-06-10), `openapi.json` | TripMate `docs/krtour-map-integration.md:7-16`, `docs/audit/2026-06-06-doc-impl-audit.md` §2 | **TripMate 문서 갱신**, DEC-01 폐기 |
+| C-3 | 🔴 | TripMate 문서가 "krtour HTTP 표면 미존재(debug-ui 8087, `/tripmate/features/batch` 없음)"로 현실 차단 (DEC-01) — **노후 전제**. krtour는 :12301 `/v1` 완비 | krtour `docs/rest-api.md`(2026-06-10), `openapi.json` | TripMate `docs/krtour-map-integration.md:7-16`, `docs/audit/2026-06-06-doc-impl-audit.md` §2 | **TripMate 문서 갱신**, DEC-01 폐기 |
 | C-4 | 🔴 | tripmate-agent export 엔드포인트 `GET /api/v1/krtour/features/{snapshot\|changes}` — krtour fetcher는 구현 완료, **tripmate-agent backend 미구현(T-066 대기)** | krtour `packages/krtour-map-dagster/.../provider_fetchers.py:63-124` (X-API-Key, `{items,has_more,next_cursor}`) | tripmate-agent `backend/app/api/routes.py`에 `/krtour` 라우트 없음; 계약 스펙은 `docs/youtube-feature-pipeline-plan.md` §7 (정확히 일치) | **tripmate-agent T-066 구현** (계약 스펙·krtour fetcher 기대치 이미 정렬됨 — 순서 의존일 뿐 충돌 아님) |
 | C-5 | 🟡 | in-bounds 페이지 cap 파라미터: krtour `max_items`(≤2000) vs TripMate client가 `limit` 전송 → FastAPI가 무시, **cap 지정이 조용히 no-op** | krtour `routers/features.py:419` `max_items` | TripMate `clients/krtour_map.py` `features_in_bounds()` `params["limit"]` | **TripMate 수정** (`max_items`) |
 | C-6 | 🟡 | TripMate 통합 문서의 경로/필드 표기 노후: `/tripmate/features/batch`(제거된 namespace), batch `items` 등 | krtour `docs/tripmate-rest-api.md` §1 "`/tripmate/*` namespace 제거됨" | TripMate `docs/integrations/krtour-map-rest-api.md` | **TripMate 문서 재작성** — krtour `docs/rest-api.md`+`openapi.user.json`을 정본으로 명시 |
@@ -172,8 +172,8 @@ Dagster 관제, 정합성 리포트, import job, 로그)이 일관된 envelope/c
 > — **대기 해제**)다. ② **C-1/C-5는 TripMate가 이미 자체 식별·추적 중**(T-181 잔여 —
 > batch `found`는 TripMate 3차 검토가 제안해 krtour가 수용한 것). 결함이 아니라
 > lockstep 대기 항목이었다. ③ **C-2의 라우터 재배선도 T-172~T-176으로 추적 중**.
-> ④ 신규 발견: TripMate의 "admin base = 9012" 가정은 **실오류**(9012는 admin UI,
-> admin API는 9011 `/v1/admin/*`). ⑤ §5 R-2의 2차 보정은 ADR-051 참조(신규 API 철회,
+> ④ 신규 발견: TripMate의 "admin base = 12305" 가정은 **실오류**(12305는 admin UI,
+> admin API는 12301 `/v1/admin/*`). ⑤ §5 R-2의 2차 보정은 ADR-051 참조(신규 API 철회,
 > 기존 #317 change API 승인).
 
 **bbox/좌표 순서**(min_lon,min_lat,max_lon,max_lat 분리 4-float, lon-first)는 양측 정합 확인.

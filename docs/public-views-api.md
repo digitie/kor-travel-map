@@ -11,7 +11,7 @@
 - TripMate는 자기 `/public/*` 라우터에서 이 API를 서버측으로 호출해 비로그인
   사용자에게 재가공한다. TripMate 사용자/세션/여행계획 데이터는 포함하지 않는다.
 - 별도 인증 없는 공개 노출은 TripMate 책임이다. krtour-map의 `/v1/public/*`는
-  기존 `/v1/features/*` 조회와 같은 내부망/API `9011` 경계에 둔다.
+  기존 `/v1/features/*` 조회와 같은 내부망/API `12301` 경계에 둔다.
 - 응답 envelope, error, pagination은 `docs/rest-api.md`의 ADR-048 규약을 따른다.
 
 ## 2. 엔드포인트

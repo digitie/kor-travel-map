@@ -14,7 +14,7 @@
 > **진척의 단일 정본은 `../resume.md`("다음 한 작업") + 백로그 `../tasks.md`다.**
 > 이 표/문서에는 자주 바뀌는 PR 번호를 박지 않는다(반복 drift 회피 —
 > `../reports/docs-consistency-audit-2026-06-06.md` DA-D-01). 기준값: coverage gate
-> `fail_under=80`, geocoding 로컬 `http://127.0.0.1:9001`(v2 `POST /v2/*`), frontend
+> `fail_under=80`, geocoding 로컬 `http://127.0.0.1:12201`(v2 `POST /v2/*`), frontend
 > Next.js 16 + `maplibre-vworld-js#v0.1.3`, 운영 모델 ADR-045(Docker 독립 + 독립
 > DB/Dagster + TripMate OpenAPI, 구 모델 호환 shim 금지 ADR-046). Sprint 5 잔여 ≈
 > 정합성 Phase 2 F8/dry-run report + ADR-045 잔여(T-201b/T-209b/T-212 전체점검).

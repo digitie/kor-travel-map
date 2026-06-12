@@ -57,7 +57,7 @@
 - provider 실데이터 적재는 `.env`의 실제 서비스키와 독립 DB를 사용한다.
 - offline upload는 실제 확보 파일을 우선 사용한다. 데이터가 부족하면 실데이터와 같은
   컬럼/값 분포를 가진 증분 CSV/TSV/JSONL 샘플을 만들어 테스트한다.
-- `bjd_code`가 없는 행은 `KRTOUR_MAP_KRADDR_GEO_BASE_URL=http://127.0.0.1:9001`
+- `bjd_code`가 없는 행은 `KRTOUR_MAP_KRADDR_GEO_BASE_URL=http://127.0.0.1:12201`
   기준 kraddr-geo REST v2 geocode/reverse로 보강되는지 확인한다.
 - 마지막 task에서는 DB를 비우고 처음부터 다시 로드한 뒤 API/UI/Dagster/Playwright까지
   통과 여부를 기록한다.

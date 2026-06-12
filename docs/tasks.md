@@ -163,7 +163,7 @@
         (2026-06-11, 코드 실측 기반)**: ① review_mode 기본 `require_review` 유지
         ② idempotency_key = 결정적 feature_id(`suggestion_id` 권장) ③ 출처 태깅 =
         `operator:"tripmate-admin"`+`reason` `[suggestion:<id>]` prefix 컨벤션
-        (큐가 reason 표시 — 추가 코드 없음) ④ admin 인증 = 9011 `/v1/admin/*`,
+        (큐가 reason 표시 — 추가 코드 없음) ④ admin 인증 = 12301 `/v1/admin/*`,
         kill-switch+인프라 SSO ⑤ closure = 영구 폐업 soft `DELETE`/일시 중단
         `deactivate`. 정본 `docs/tripmate-rest-api.md` §7 + ADR-051 결과 절 보강.
   - [x] T-217d — cross-repo 연동 정본 문서. **완료(2026-06-11)**:
@@ -174,7 +174,7 @@
   - [x] T-217e — RustFS 관리 주체 확정. **완료(2026-06-11, 사용자 재정의)**:
         prefix 공유 정책 명문화 대신 **RustFS를 tripmate-manager에서 일괄 관리**하는
         것으로 갈음 — ADR-052 Amendment(인프라 소유=tripmate-manager
-        단일 PostGIS :15434 + RustFS :9003/9004, krtour-map·tripmate-agent는 사용자,
+        단일 PostGIS :5432 + RustFS :12101/12105, krtour-map·tripmate-agent는 사용자,
         버킷 분리(D-10) 후속도 tripmate-manager 운영으로 위임).
   - [x] T-217f — YouTube evidence의 feature detail 노출 형태 확정. **완료(2026-06-10)**:
         정본 형태 = `detail.facility_info`(평면 — youtube_video_id/url/title,
@@ -226,15 +226,15 @@ provider 강제 실행은 feature update request `provider_dataset` scope로 유
    `docs/poi-cache-update-targets.md` 기준.
 4. **문서 최신성 유지** — provider 주소 보강용 geocoding endpoint 정본은
    kraddr-geo REST v2 `POST /v2/reverse`, `POST /v2/geocode`, 로컬 포트는
-   `http://127.0.0.1:9001`. geocoding 전용 디버깅 화면은 kraddr-geo 프로젝트에서
+   `http://127.0.0.1:12201`. geocoding 전용 디버깅 화면은 kraddr-geo 프로젝트에서
    관리하고, krtour-map-admin에는 두지 않는다. frontend 현재 기준은 Next.js 16 +
    `maplibre-vworld-js#v0.1.3`.
-5. **고정 포트** — krtour-map 독립 프로그램 로컬/standalone 포트는 API `9011`,
-   admin UI `9012`, Dagster `9013`이다(ADR-047). 해당 포트를 점유한 프로세스는
+5. **고정 포트** — krtour-map 독립 프로그램 로컬/standalone 포트는 API `12301`,
+   admin UI `12305`, Dagster `12302`이다(ADR-047). 해당 포트를 점유한 프로세스는
    `scripts/stop-fixed-ports.sh`로 종료하고 재기동한다.
-6. **RustFS 포트** — 로컬 RustFS 표준은 S3 API `9003`, console `9004`다. 객체
-   저장소 endpoint/public URL 예시는 `9003`을 기준으로 작성하고, console 링크는
-   `9004`만 사용한다.
+6. **RustFS 포트** — 로컬 RustFS 표준은 S3 API `12101`, console `12105`다. 객체
+   저장소 endpoint/public URL 예시는 `12101`을 기준으로 작성하고, console 링크는
+   `12105`만 사용한다.
 7. **admin Dagster 운영 화면** — `/admin/dagster`는 `GET /ops/dagster/summary` 자체
    요약 UI, schedule/sensor tick history, `GET /ops/dagster/runs/{run_id}` failure
    drilldown, Dagster webserver embed를 제공한다. Dagster NUX 처리는

@@ -64,7 +64,7 @@ PostGIS에 streaming 적재(batch_size=100) → 재조회.
 ## 5. geocoder 보강 라이브 재검증 (2026-06-01 후속, ✅ 완료)
 
 §4의 "법정동코드 부재 → geocoder 보강 필수"를 **kraddr-geo REST 실연동**으로 검증.
-kraddr-geo FastAPI(`127.0.0.1:9001`, `GET /v1/address/reverse`, `structure.level4LC`
+kraddr-geo FastAPI(`127.0.0.1:12201`, `GET /v1/address/reverse`, `structure.level4LC`
 = 법정동코드 10자리) + 자체 PostGIS 주소 마스터 기동 상태.
 
 흐름: `bakeries` 영업중 + 좌표O + `legal_dong_code=None` 200건 →
@@ -81,7 +81,7 @@ kraddr-geo FastAPI(`127.0.0.1:9001`, `GET /v1/address/reverse`, `structure.level
 - 결론: §4의 설계상 예측(geocoder 주입 시 대부분 보강)이 실데이터로 **100% 확인**.
   좌표 보유 record는 geocoder 주입만으로 `'global'` bucket을 완전히 벗어남.
 - 주의: `KraddrGeoRestClient(base_path='/v1')`가 prefix를 붙이므로 httpx
-  ``base_url``은 ``http://host:9001``(``/v1`` 미포함)로 줘야 한다(중복 방지).
+  ``base_url``은 ``http://host:12201``(``/v1`` 미포함)로 줘야 한다(중복 방지).
 
 ## 6. 미검증 (후속)
 

@@ -43,8 +43,8 @@ class AdminSettings(BaseSettings):
         ),
     )
     port: int = Field(
-        default=9011,
-        description="FastAPI bind port. 기본 9011 (krtour-map 고정 API 포트).",
+        default=12301,
+        description="FastAPI bind port. 기본 12301 (krtour-map 고정 API 포트).",
     )
     log_level: str = Field(
         default="info",
@@ -99,12 +99,12 @@ class AdminSettings(BaseSettings):
     )
     cors_allow_origins: list[str] = Field(
         default=[
-            "http://localhost:9012",
-            "http://127.0.0.1:9012",
+            "http://localhost:12305",
+            "http://127.0.0.1:12305",
         ],
         description=(
-            "CORS 허용 origin 목록. frontend(Next.js dev/start, 9012)가 브라우저에서 "
-            "backend(9011)로 cross-origin fetch하므로 필요. 내부 debug 도구라 "
+            "CORS 허용 origin 목록. frontend(Next.js dev/start, 12305)가 브라우저에서 "
+            "backend(12301)로 cross-origin fetch하므로 필요. 내부 debug 도구라 "
             "기본은 localhost frontend만 (ADR-005 — 네트워크 계층이 외부 차단). "
             "env override는 JSON 배열."
         ),
@@ -131,10 +131,10 @@ class AdminSettings(BaseSettings):
         ),
     )
     dagster_url: str = Field(
-        default="http://127.0.0.1:9013",
+        default="http://127.0.0.1:12302",
         description=(
             "Dagster webserver base URL. admin UI embed와 backend GraphQL 조회에 "
-            "사용한다. Docker API 컨테이너에서는 보통 ``http://dagster:9013``."
+            "사용한다. Docker API 컨테이너에서는 보통 ``http://dagster:12302``."
         ),
     )
     dagster_graphql_url: str | None = Field(

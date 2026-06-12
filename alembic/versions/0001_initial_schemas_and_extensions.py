@@ -26,15 +26,50 @@ _SCHEMAS = ("feature", "provider_sync", "ops", "x_extension")
 _EXTENSIONS = ("postgis", "pg_trgm", "pgcrypto")
 
 
+def _drop_extension_if_current_user_can(ext_name: str, *, unless_schema: str | None = None) -> None:
+    """Drop an existing extension only when the migration user owns it.
+
+    Shared development Postgres can pre-provision PostGIS under an infra owner.
+    In that case the application role must not try to relocate/drop the
+    extension; it should reuse the already-provisioned extension instead.
+    """
+
+    schema_filter = ""
+    if unless_schema is not None:
+        schema_filter = f"AND n.nspname <> '{unless_schema}'"
+
+    op.execute(
+        f"""
+        DO $$
+        DECLARE
+            extension_owner_is_current boolean;
+        BEGIN
+            SELECT e.extowner = current_user::regrole
+              INTO extension_owner_is_current
+              FROM pg_extension e
+              JOIN pg_namespace n ON n.oid = e.extnamespace
+             WHERE e.extname = '{ext_name}'
+             {schema_filter};
+
+            IF extension_owner_is_current THEN
+                EXECUTE 'DROP EXTENSION IF EXISTS {ext_name} CASCADE';
+            END IF;
+        END
+        $$;
+        """
+    )
+
+
 def upgrade() -> None:
     # 4 schema 생성 (idempotent).
     for schema in _SCHEMAS:
         op.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
 
-    # 3 extension을 x_extension에 격리 (ADR-008). 이미 public에 박혀 있다면
-    # DROP CASCADE 후 재생성 (testcontainers postgis image 호환).
-    op.execute("DROP EXTENSION IF EXISTS postgis_topology CASCADE")
-    op.execute("DROP EXTENSION IF EXISTS postgis CASCADE")
+    # 3 extension을 x_extension에 격리 (ADR-008). testcontainers postgis image처럼
+    # migration user가 public extension을 소유하는 경우에만 DROP CASCADE 후 재생성한다.
+    # tripmate-manager 공유 Postgres처럼 infra owner가 미리 설치한 extension은 재사용한다.
+    _drop_extension_if_current_user_can("postgis_topology")
+    _drop_extension_if_current_user_can("postgis", unless_schema="x_extension")
     for ext in _EXTENSIONS:
         op.execute(
             f"CREATE EXTENSION IF NOT EXISTS {ext} WITH SCHEMA x_extension"

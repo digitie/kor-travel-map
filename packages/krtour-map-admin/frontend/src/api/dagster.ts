@@ -14,7 +14,7 @@ import type { components } from "./types";
 export const DAGSTER_UI_URL = publicUrlEnv(
   process.env.NEXT_PUBLIC_KRTOUR_MAP_DAGSTER_URL,
   "NEXT_PUBLIC_KRTOUR_MAP_DAGSTER_URL",
-  "http://127.0.0.1:9013",
+  "http://127.0.0.1:12302",
 );
 
 type DagsterSchemas = components["schemas"];

@@ -45,7 +45,7 @@ async def test_s3_object_store_write_and_read_bytes() -> None:
     store = S3ObjectStore(
         s3_client=client,
         bucket="krtour-uploads",
-        public_base_url="http://127.0.0.1:9003/krtour-uploads",
+        public_base_url="http://127.0.0.1:12101/krtour-uploads",
     )
 
     stored = await store.write_bytes(
@@ -61,7 +61,7 @@ async def test_s3_object_store_write_and_read_bytes() -> None:
     assert stored.byte_size == 13
     assert stored.checksum_sha256
     assert stored.public_url == (
-        "http://127.0.0.1:9003/krtour-uploads/offline-uploads/u1/features.jsonl"
+        "http://127.0.0.1:12101/krtour-uploads/offline-uploads/u1/features.jsonl"
     )
     assert stored.etag == '"etag-1"'
 

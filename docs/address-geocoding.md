@@ -30,7 +30,7 @@
   `geocode_response_to_address` + `KraddrGeoRestClient`(httpx.AsyncClient 주입) +
   콜러블 팩토리.
 - 설정: `KRTOUR_MAP_KRADDR_GEO_BASE_URL` — REST 서비스 base URL. 로컬 개발의
-  공식 `python-kraddr-geo` FastAPI 포트는 `http://127.0.0.1:9001`
+  공식 `python-kraddr-geo` FastAPI 포트는 `http://127.0.0.1:12201`
   (`python-kraddr-geo/docs/ports.md`). `None`이면 정/역지오코딩 보강 비활성
   (좌표만으로 적재).
 - VWorld 폴백 키: `kraddr-geo` REST 서비스 내부 설정에서만. 본 라이브러리에서

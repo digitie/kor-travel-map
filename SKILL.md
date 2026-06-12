@@ -47,16 +47,19 @@ krtour-map DB에 직접 접근하지 않고 `python-krtour-map`을 운영 코드
 `docs/dev-environment.md`.
 
 - **코드/git**: Windows NTFS (`F:\dev\python-krtour-map\`). 브랜치 전환,
-  커밋, PR 준비는 Windows Git(`git.exe`) 기준으로 수행한다.
+  커밋, push 같은 순수 Git 명령만 Windows Git(`git.exe`) 기준으로 수행한다.
+- **Git 외 실행**: 파일 조회·수정·테스트·lint·build·Docker·Python/Node/npm·
+  `gh`/GitHub CLI는 WSL에서 `/mnt/f/dev/python-krtour-map-<agent>` 경로로 실행한다.
 - **에이전트 worktree**: Codex `F:\dev\python-krtour-map-codex\`, Claude
   `F:\dev\python-krtour-map-claude\`, Antigravity
   `F:\dev\python-krtour-map-antigravity\`.
 - **데이터(`data/`)**: NTFS의 프로젝트 디렉토리 아래
   (`F:\dev\python-krtour-map\data\`). git에는 넣지 않는다.
-- **테스트**: PostGIS/testcontainers/e2e처럼 Linux 실행 환경이 필요하면 NTFS
-  소스를 WSL ext4 샌드박스(`~/dev/python-krtour-map/` 등)로 복사해서 실행한다.
-- **카피 정책**: 테스트 실행 및 배포 전 NTFS → WSL ext4로 `rsync`한다. Git
-  source of truth는 NTFS다.
+- **테스트/빌드/Docker**: 기본은 WSL에서 NTFS worktree의 `/mnt/f/...` 경로를 직접
+  사용한다. ext4 mirror는 대량 I/O 성능·격리 필요 시에만 `rsync`한다.
+- **Playwright e2e**: 서버는 WSL/Docker에서 띄우고, Playwright(chromium)는 Windows
+  호스트에서 실행한다.
+- **카피 정책**: Git source of truth는 NTFS다. WSL ext4 동기화는 선택 경로다.
 
 ### 에이전트 worktree + codegraph
 
@@ -310,8 +313,9 @@ docs/
 > 운영 모델·ADR·포트·frontend stack 같은 불변 기준값은 §1 식별자 매핑,
 > `CLAUDE.md §2`, `docs/decisions.md`를 정본으로 본다. 패키지
 > `krtour-map-debug-ui` → `krtour-map-admin` rename 완료, 구 이름/env/import 호환
-> shim 금지(ADR-046). geocoding 로컬 `:9001`, RustFS `:9003`/`:9004`, frontend
-> Next.js 16 + `maplibre-vworld-js#v0.1.3`.
+> shim 금지(ADR-046). geocoding 로컬 API `:12201`(Web UI `:12205`), RustFS
+> S3 API `:12101`/console `:12105`, frontend Next.js 16 +
+> `maplibre-vworld-js#v0.1.3`.
 
 신규 코드는 항상 PR로 (ADR-021). 각 PR은 `pytest -q` + `ruff check` +
 `mypy --strict` + `lint-imports` + `docs/journal.md` + `docs/resume.md`

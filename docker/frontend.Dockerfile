@@ -32,8 +32,8 @@ COPY --from=deps /app/packages/krtour-map-admin/frontend/package.json ./packages
 COPY packages/map-marker-react ./packages/map-marker-react
 COPY packages/krtour-map-admin/frontend ./packages/krtour-map-admin/frontend
 
-ARG NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API=http://127.0.0.1:9011
-ARG NEXT_PUBLIC_KRTOUR_MAP_DAGSTER_URL=http://127.0.0.1:9013
+ARG NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API=http://127.0.0.1:12301
+ARG NEXT_PUBLIC_KRTOUR_MAP_DAGSTER_URL=http://127.0.0.1:12302
 ARG NEXT_PUBLIC_VWORLD_API_KEY=
 ENV NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API=$NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API \
     NEXT_PUBLIC_KRTOUR_MAP_DAGSTER_URL=$NEXT_PUBLIC_KRTOUR_MAP_DAGSTER_URL \
@@ -46,7 +46,7 @@ FROM node:22-bookworm-slim AS runner
 
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
-    PORT=9012 \
+    PORT=12305 \
     HOSTNAME=0.0.0.0
 
 WORKDIR /app
@@ -59,6 +59,6 @@ COPY --from=builder --chown=nextjs:nodejs /app/packages/krtour-map-admin/fronten
 
 USER nextjs
 
-EXPOSE 9012
+EXPOSE 12305
 
 CMD ["node", "packages/krtour-map-admin/frontend/server.js"]

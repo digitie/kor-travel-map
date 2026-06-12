@@ -62,10 +62,10 @@ class KrtourMapSettings(BaseSettings):
 
     # ── 객체 저장소 (S3 호환, ADR-015) ─────────────────────────────────
     object_store_endpoint_url: str | None = Field(
-        default="http://127.0.0.1:9003",
+        default="http://127.0.0.1:12101",
         description=(
             "RustFS/MinIO/Ceph/R2 endpoint URL. 로컬 RustFS 표준 S3 API 예시는 "
-            "``http://127.0.0.1:9003``이고 console은 ``http://127.0.0.1:9004``. "
+            "``http://127.0.0.1:12101``이고 console은 ``http://127.0.0.1:12105``. "
             "``None``이면 AWS S3 기본 endpoint 사용."
         ),
     )
@@ -86,7 +86,7 @@ class KrtourMapSettings(BaseSettings):
         description="S3 호환 secret access key.",
     )
     object_store_public_base_url: str | None = Field(
-        default="http://127.0.0.1:9003/krtour-map",
+        default="http://127.0.0.1:12101/krtour-map",
         description="feature_files 공개 URL base. CDN/프록시 사용 시 해당 URL로 교체.",
     )
     object_store_prefix: str = Field(
@@ -124,7 +124,7 @@ class KrtourMapSettings(BaseSettings):
     kraddr_geo_base_url: str | None = Field(
         default=None,
         description=(
-            "kraddr-geo REST 서비스 base URL (로컬 기본 예: ``http://127.0.0.1:9001``). "
+            "kraddr-geo REST 서비스 base URL (로컬 기본 예: ``http://127.0.0.1:12201``). "
             "``None``이면 정/역지오코딩 보강 비활성 (좌표만으로 적재). 호출 측이 "
             "이 URL로 ``httpx.AsyncClient(base_url=...)``를 만들어 "
             "``KraddrGeoRestClient``에 주입한다 (python 패키지/DB 의존 없음)."
@@ -289,7 +289,7 @@ class KrtourMapSettings(BaseSettings):
     tripmate_agent_base_url: str | None = Field(
         default=None,
         description=(
-            "TripMate-agent REST API base URL. 예: ``http://127.0.0.1:9041``. "
+            "TripMate-agent REST API base URL. 예: ``http://127.0.0.1:12401``. "
             "설정 시 Dagster ``tripmate_agent_youtube_features`` resource가 "
             "``/api/v1/features/{snapshot|changes}``를 pull한다(ADR-050 경로 중립화)."
         ),

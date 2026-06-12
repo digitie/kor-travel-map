@@ -40,6 +40,6 @@ RUN chmod +x ./docker/api-entrypoint.sh \
 
 USER appuser
 
-EXPOSE 9011
+EXPOSE 12301
 
 CMD ["./docker/api-entrypoint.sh"]

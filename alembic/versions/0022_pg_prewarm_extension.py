@@ -13,8 +13,10 @@ Create Date: 2026-06-09
   `pg_prewarm.autoprewarm=on`(서버 config, docker-compose)일 때만 동작. 주기적으로 buffer
   목록을 dump하고 재기동 시 자동 reload("부팅 후 warm-up").
 
-확장 생성 자체는 저비용이라 항상 둔다. autoprewarm 활성화는 도입 조건(명시적 P99 SLO +
-shared_buffers가 hot 데이터 fit)이 충족될 때 config로 켠다(T-102, `docs/performance.md §9.5`).
+확장 생성 자체는 저비용이라 가능한 환경에는 둔다. 단 공유 Postgres에서 migration user가
+superuser가 아니면 생성하지 않고 no-op으로 통과한다. 호출 헬퍼는 확장 미설치 시 빈 결과를
+반환한다. autoprewarm 활성화는 도입 조건(명시적 P99 SLO + shared_buffers가 hot 데이터 fit)이
+충족될 때 config로 켠다(T-102, `docs/performance.md §9.5`).
 """
 
 from __future__ import annotations
@@ -30,8 +32,43 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.execute("CREATE EXTENSION IF NOT EXISTS pg_prewarm WITH SCHEMA x_extension")
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_prewarm') THEN
+                RETURN;
+            END IF;
+
+            IF EXISTS (
+                SELECT 1 FROM pg_roles WHERE rolname = current_user AND rolsuper
+            ) THEN
+                CREATE EXTENSION IF NOT EXISTS pg_prewarm WITH SCHEMA x_extension;
+            ELSE
+                RAISE NOTICE 'pg_prewarm extension skipped: current user is not superuser';
+            END IF;
+        END
+        $$;
+        """
+    )
 
 
 def downgrade() -> None:
-    op.execute("DROP EXTENSION IF EXISTS pg_prewarm")
+    op.execute(
+        """
+        DO $$
+        DECLARE
+            extension_owner_is_current boolean;
+        BEGIN
+            SELECT e.extowner = current_user::regrole
+              INTO extension_owner_is_current
+              FROM pg_extension e
+             WHERE e.extname = 'pg_prewarm';
+
+            IF extension_owner_is_current THEN
+                DROP EXTENSION IF EXISTS pg_prewarm;
+            END IF;
+        END
+        $$;
+        """
+    )

@@ -291,14 +291,14 @@ def test_parser_import_mois_options() -> None:
             "--batch-size",
             "100",
             "--geocoder-url",
-            "http://127.0.0.1:9001",
+            "http://127.0.0.1:12201",
             "--source-checksum",
             "abc123",
         ]
     )
     assert args.dataset_key == "mois_license_features_history"
     assert args.batch_size == 100
-    assert args.geocoder_url == "http://127.0.0.1:9001"
+    assert args.geocoder_url == "http://127.0.0.1:12201"
     assert args.source_checksum == "abc123"
 
 

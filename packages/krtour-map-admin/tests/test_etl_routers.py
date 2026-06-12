@@ -342,20 +342,20 @@ def test_preview_invalid_source_query_422(client: TestClient) -> None:
     assert response.status_code == 422
 
 
-# ── CORS (frontend 9012 → backend 9011 cross-origin) ────────────────
+# ── CORS (frontend 12305 → backend 12301 cross-origin) ────────────────
 
 
 @pytest.mark.unit
 def test_cors_allows_frontend_origin(client: TestClient) -> None:
-    """frontend(Next.js dev/start 9012) origin은 CORS 허용 (debug UI 동작 전제)."""
+    """frontend(Next.js dev/start 12305) origin은 CORS 허용 (debug UI 동작 전제)."""
     response = client.get(
         "/v1/debug/etl/providers",
-        headers={"Origin": "http://localhost:9012"},
+        headers={"Origin": "http://localhost:12305"},
     )
     assert response.status_code == 200
     assert (
         response.headers.get("access-control-allow-origin")
-        == "http://localhost:9012"
+        == "http://localhost:12305"
     )
 
 
@@ -365,14 +365,14 @@ def test_cors_preflight_options(client: TestClient) -> None:
     response = client.options(
         "/v1/debug/etl/python-kma-api/kma_short_forecast/preview",
         headers={
-            "Origin": "http://localhost:9012",
+            "Origin": "http://localhost:12305",
             "Access-Control-Request-Method": "POST",
         },
     )
     assert response.status_code == 200
     assert (
         response.headers.get("access-control-allow-origin")
-        == "http://localhost:9012"
+        == "http://localhost:12305"
     )
 
 

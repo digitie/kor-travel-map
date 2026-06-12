@@ -4,8 +4,9 @@
 한 PR = CI green 후 머지. 에이전트별로 다른 값(worktree, `sandbox/<agent>`)은
 [README §2 표](./README.md#2-에이전트별-분기-공유-표)를 본다.
 
-> 요지: **NTFS에서 편집, WSL에서 검증, PR로 머지.** Git source of truth는 NTFS,
-> 테스트는 WSL ext4(PostGIS/testcontainers). 둘을 rsync로 잇는다.
+> 요지: **NTFS worktree를 source of truth로 두고, 순수 Git을 제외한 작업은 WSL에서
+> `/mnt/f/...` 경로로 실행한 뒤 PR로 머지한다.** Playwright e2e만 Windows 호스트
+> 브라우저에서 실행한다.
 
 ## 1. 진입 (5분)
 
@@ -28,26 +29,24 @@ git -C <worktree> switch -c feat/<topic> main      # 또는 origin/main
   `docs/*`·`chore/*` 브랜치. (실수로 `sandbox/<agent>`에 커밋했으면
   [failure-patterns §B1](./agent-failure-patterns.md) 복구법.)
 
-## 3. 편집 (NTFS)
+## 3. 편집 (NTFS worktree, WSL 실행)
 
-- 코드/문서는 **NTFS worktree**에서 편집. provider 라이브러리(`python-*-api`)는
-  `F:\dev\` 로컬 우선 조회(ADR-044) — GitHub 404는 "미존재" 근거 아님.
+- 코드/문서는 **NTFS worktree**가 원본이다. 다만 `rg`/`sed`/`python`/`uv`/`npm`/
+  `docker`/`gh` 같은 순수 Git 외 명령은 WSL에서
+  `/mnt/f/dev/python-krtour-map-<agent>`로 이동해 실행한다. provider 라이브러리
+  (`python-*-api`)는 `/mnt/f/dev/` 로컬 우선 조회(ADR-044) — GitHub 404는
+  "미존재" 근거 아님.
 - 변경 분류별 동시 갱신 문서(agent-guide.md §2 "결정·기록 5종"):
   코드만 바꾸고 `decisions/resume/journal/tasks/SPRINT` 중 관련된 게 하나도 안 바뀌면
   그 PR은 불완전.
 
 ## 4. 검증 (WSL) — 4 게이트
 
-NTFS → WSL ext4 rsync 후 게이트 실행. 게이트는 CI와 동일:
+게이트는 WSL에서 실행한다. 기본은 NTFS worktree의 WSL 마운트 경로를 직접 쓰며,
+ext4 mirror는 성능·격리 필요 시에만 선택한다.
 
 ```bash
-# NTFS -> WSL 동기 (캐시/venv/.git 제외)
-rsync -a --delete \
-  --exclude .git --exclude .venv --exclude node_modules --exclude .codegraph \
-  --exclude __pycache__ --exclude .mypy_cache --exclude .pytest_cache --exclude .ruff_cache \
-  /mnt/f/dev/python-krtour-map-<agent>/ ~/dev/python-krtour-map/
-
-cd ~/dev/python-krtour-map
+cd /mnt/f/dev/python-krtour-map-<agent>
 .venv/bin/ruff check .                 # 1) lint/format
 .venv/bin/mypy --strict src            # 2) 타입 (필요 시 packages/.../src 도)
 .venv/bin/lint-imports                 # 3) 의존 계층 (4 contracts)
@@ -58,7 +57,7 @@ cd ~/dev/python-krtour-map
   `python packages/krtour-map-admin/scripts/export_openapi.py --profile all`
   로 admin/user spec을 재생성 후 `--profile all --check`로 EXIT=0 확인 —
   재생성본을 NTFS로 복사해 커밋.
-- **Playwright e2e**는 하이브리드: 서버(backend `:9011` + frontend `:9012`)는 WSL,
+- **Playwright e2e**는 하이브리드: 서버(backend `:12301` + frontend `:12305`)는 WSL,
   Playwright(chromium)는 **Windows 호스트**에서. `docs/dev-environment.md` §8.1.
 - 로컬 green을 맹신하지 말 것 — WSL venv가 누락된 `[dev]` extra를 가릴 수 있다
   ([failure-patterns §A1](./agent-failure-patterns.md)).

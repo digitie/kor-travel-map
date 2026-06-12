@@ -121,12 +121,12 @@ class KrtourMapSettings(BaseSettings):
     pg_max_overflow: int = 10
     pg_pool_pre_ping: bool = True
 
-    object_store_endpoint_url: str = "http://127.0.0.1:9003"
+    object_store_endpoint_url: str = "http://127.0.0.1:12101"
     object_store_bucket: str = "krtour-map"
     object_store_region: str = "us-east-1"
     object_store_access_key_id: SecretStr | None = None
     object_store_secret_access_key: SecretStr | None = None
-    object_store_public_base_url: str | None = "http://127.0.0.1:9003/krtour-map"
+    object_store_public_base_url: str | None = "http://127.0.0.1:12101/krtour-map"
 
     kraddr_geo_pg_dsn: SecretStr | None = None
 

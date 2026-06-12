@@ -5,6 +5,18 @@
 
 ## [Unreleased]
 
+### Local/Docker 고정 포트 재정렬 (ADR-047 amendment, 2026-06-12)
+
+- **CHANGED**: krtour-map standalone 기본 포트를 API `12301`, 관리 보조(Dagster)
+  `12302`, Web UI `12305`로 재고정했다.
+- **CHANGED**: Postgres host port 기본값을 표준 `5432`로 바꾸고, RustFS S3 API
+  기본값을 `12101`로 바꿨다. RustFS console host port는 `12105`를 유지한다.
+- **CHANGED**: kraddr-geo 연동 기본 URL을 API `http://127.0.0.1:12201`로 바꿨고,
+  문서에는 kraddr-geo Web UI `12205`를 함께 명시했다.
+- **CHANGED**: Docker compose, Dockerfile expose, `.env.example`, `scripts/load-env.sh`,
+  admin/frontend fallback URL, Playwright/e2e/test expectation, runbook 문서의 포트
+  기준을 새 값으로 정렬했다.
+
 ### 축제 날짜 역전 격리 + datagokr 핀 범프 (#386, T-212e, 2026-06-11)
 
 - **FIXED**: 전국문화축제 실데이터의 시작/종료 역전 row(원천 오타)가
@@ -671,7 +683,7 @@
   `KRTOUR_MAP_OFFLINE_UPLOAD_BUCKET` 설정으로 RustFS/S3 호환 bucket을 읽는다.
 - **CHANGED**: `KrtourMapSettings`와 `.env.example`의 object store field/env 이름을
   정렬했다. offline upload bucket 기본값은 `krtour-uploads`다.
-- **CHANGED**: Docker compose stack에 RustFS API `9003`, console `9004`,
+- **CHANGED**: Docker compose stack에 RustFS API `12101`, console `12105`,
   `rustfs-init` bucket 생성 경로를 추가했다.
 - **TEST**: S3 store/resource/definitions/offline upload Dagster unit test,
   `docker compose config --quiet`, 실제 Docker RustFS put/get smoke를 추가했다.
@@ -714,10 +726,10 @@
 - **CHANGED**: `/features` header에 jobs/update/target/dedup/Dagster 운영 화면으로
   이동하는 quick link를 추가했다.
 - **CHANGED**: `scripts/stop-fixed-ports.sh`가 WSL 일반 PID, WSL root listener,
-  Windows `node.exe`/`wslrelay.exe` listener를 감지해 9011/9012/9013 stale 포트를
+  Windows `node.exe`/`wslrelay.exe` listener를 감지해 12301/12305/12302 stale 포트를
   정리한다.
 - **CHANGED**: `scripts/load-env.sh`의 기본 CORS origin에 WSL IP 기반
-  `http://<WSL-IP>:9012`를 포함해, Windows localhost relay가 죽었을 때도
+  `http://<WSL-IP>:12305`를 포함해, Windows localhost relay가 죽었을 때도
   `E2E_BASE_URL` WSL IP fallback으로 브라우저 검증이 가능하게 했다.
 - **CHANGED**: `krtour.map_admin.app`이 설정된 CORS origin에 대해 응답과 preflight
   헤더를 한 번 더 보강해 WSL IP fallback 경로에서도 frontend fetch가 막히지 않게 했다.
@@ -873,7 +885,7 @@
 - **CHANGED**: `from krtour.map import AsyncKrtourMapClient` top-level import를 실제
   public export로 맞추고, TripMate 직접 import 설명을 ADR-045 OpenAPI 운영 모델
   기준으로 정정했다.
-- **DOCS**: RustFS 로컬 표준 포트를 S3 API `9003`, console `9004`로 정리했다.
+- **DOCS**: RustFS 로컬 표준 포트를 S3 API `12101`, console `12105`로 정리했다.
 
 ### 운영 — Feature update request 큐 repository (2026-06-03)
 
@@ -882,7 +894,7 @@
   지원한다.
 - **CHANGED**: 실제 실행 request 생성 시 `ops.import_jobs` row를 같은 transaction에
   만들고, claim/start/finish/cancel 상태 전이를 request와 import job에 함께 반영한다.
-- **DOCS**: kraddr-geo REST API 로컬 포트 기준을 `http://127.0.0.1:9001`로 정정했다.
+- **DOCS**: kraddr-geo REST API 로컬 포트 기준을 `http://127.0.0.1:12201`로 정정했다.
 
 ### 운영 — Feature update scope resolver (2026-06-03)
 
@@ -919,10 +931,10 @@
 - **NEW**: `docker-compose.yml`과 `docker/{api,frontend,dagster}.Dockerfile`을 추가했다.
   독립 PostGIS, API, admin UI, Dagster를 같은 compose에서 기동한다.
 - **CHANGED**: Docker API 컨테이너는 `.env`의 로컬 Dagster URL 대신
-  `KRTOUR_MAP_DOCKER_ADMIN_DAGSTER_URL` 기본값(`http://dagster:9013`)을 내부
+  `KRTOUR_MAP_DOCKER_ADMIN_DAGSTER_URL` 기본값(`http://dagster:12302`)을 내부
   `KRTOUR_MAP_ADMIN_DAGSTER_URL`로 사용한다.
-- **CHANGED**: 로컬/standalone 고정 포트를 API `9011`, admin UI `9012`, Dagster
-  `9013`으로 표준화했다.
+- **CHANGED**: 로컬/standalone 고정 포트를 API `12301`, admin UI `12305`, Dagster
+  `12302`으로 표준화했다.
 - **NEW**: `.env`의 provider service key를 `KRTOUR_MAP_ADMIN_*`/`NEXT_PUBLIC_*`
   환경변수로 매핑하는 `scripts/load-env.sh`와 포트 종료/로컬 stack/Docker 기동
   스크립트를 추가했다.

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 from io import BytesIO
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
@@ -75,7 +76,7 @@ class _FakeHttpClient:
 
 async def test_build_offline_upload_store_uses_offline_upload_bucket() -> None:
     settings = KrtourMapSettings(
-        object_store_endpoint_url="http://127.0.0.1:9003",
+        object_store_endpoint_url="http://127.0.0.1:12101",
         object_store_region="us-east-1",
         object_store_access_key_id=SecretStr("access"),
         object_store_secret_access_key=SecretStr("secret"),
@@ -121,7 +122,9 @@ def test_dispose_async_engine_uses_sync_no_close_for_sqlalchemy_engine() -> None
 
 def test_reverse_geocoder_resource_returns_none_without_base_url(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
+    monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("KRTOUR_MAP_KRADDR_GEO_BASE_URL", raising=False)
 
     resource_fn = cast(
@@ -140,7 +143,7 @@ def test_reverse_geocoder_resource_builds_and_closes_client(
 ) -> None:
     monkeypatch.setenv(
         "KRTOUR_MAP_KRADDR_GEO_BASE_URL",
-        "http://127.0.0.1:9001",
+        "http://127.0.0.1:12201",
     )
     monkeypatch.setenv("KRTOUR_MAP_KRADDR_GEO_TIMEOUT_SECONDS", "2.5")
     _FakeHttpClient.instances = []
@@ -172,7 +175,7 @@ def test_reverse_geocoder_resource_builds_and_closes_client(
     assert reverse_geocoder is sentinel
     assert len(_FakeHttpClient.instances) == 1
     http = _FakeHttpClient.instances[0]
-    assert http.base_url == "http://127.0.0.1:9001"
+    assert http.base_url == "http://127.0.0.1:12201"
     assert http.timeout == 2.5
     assert not http.closed
 
