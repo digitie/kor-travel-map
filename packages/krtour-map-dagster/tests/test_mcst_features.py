@@ -160,8 +160,8 @@ def test_fetch_mcst_culture_records_is_keyless_and_streams_slug_tuples(
 
     records = list(fetch_mcst_culture_records(settings))
 
-    # 12 slug × max_items=1.
-    assert len(records) == 12
+    # 등록 slug × max_items=1.
+    assert len(records) == len(MCST_FILE_DATASETS)
     assert {slug for slug, _row in records} == set(MCST_FILE_DATASETS)
     [client] = _FakeFileDataClient.instances
     assert client.closed is True

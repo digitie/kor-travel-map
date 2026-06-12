@@ -200,7 +200,7 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         cron_schedule="30 4 * * 2",
         provider="python-mcst-api",
         dataset_key="mcst_file_datasets",
-        description="MCST 파일데이터 CSV 12 dataset place Feature 주 1회 적재(slug별 분리 적재).",
+        description="MCST 파일데이터 CSV 등록 dataset place Feature 주 1회 적재(slug별 분리 적재).",
     ),
 )
 """현재 구현된 Feature provider asset의 기본 schedule 사양."""
