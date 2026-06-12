@@ -80,15 +80,19 @@ providers = [
   # `krtour.map.providers.standard_data.CulturalFestivalItem` Protocol (PR#34) 정합.
   # 26a5be3: 주차장 basicTime/addUnitTime 분수값(float) 허용 (provider #6/PR#7,
   # T-212e live 실측 addUnitTime='0.5').
-  "python-datagokr-api @ git+https://github.com/digitie/python-datagokr-api.git@26a5be3215fbe056499ed6e684f446528a254ef2",
+  # 1967fb6: 주차장 요금/수치 int 필드 관용 파싱 — 자유 표기('200+400')는 None,
+  # 원문은 raw 보존 (provider #8/PR#9, T-212e live 실측 addUnitCharge='200+400').
+  "python-datagokr-api @ git+https://github.com/digitie/python-datagokr-api.git@1967fb63074090e4af46bf6258f4464e31b91a93",
   #
   # ── Sprint 2 §2.2 — 날씨 (ADR-010) ────────────────────────────────────
   # `krtour.map.providers.kma.{KmaShortForecastItem, KmaUltraShortNowcastItem}`
   # Protocol (PR#38/39) 정합. T-219b: Dagster asset이 KmaClient/grid/time_utils
   # 를 lazy import — runtime 의존 활성화. 006fdbe: datagokr result code 03
   # (NO_DATA)을 예외 대신 빈 결과로 정규화 (provider #18/PR#19 — T-212e 특보
-  # rolling window 빈 구간 대응).
-  "python-kma-api @ git+https://github.com/digitie/python-kma-api.git@006fdbef49ffa062c83d9bd89e85a6a99834367f",
+  # rolling window 빈 구간 대응). 2592b740: 중기예보 응답이 tmFc를 에코하지
+  # 않아 MidForecastItem.tm_fc가 항상 None → 해석된 요청 tmFc 폴백 주입
+  # (provider #20/PR#21, T-212e mid forecast run f044b091 실측).
+  "python-kma-api @ git+https://github.com/digitie/python-kma-api.git@2592b740c1f7ab255dadcc313f1f6422deb63cc4",
   "python-airkorea-api @ git+https://github.com/digitie/python-airkorea-api.git@22996a457fa2c845101b0bbbf8167e655e8d562d",
   # khoa: snake_case live row 파싱 (khoa#5/PR#6).
   "python-khoa-api @ git+https://github.com/digitie/python-khoa-api.git@0ccb5ed90da5886a2d346b33f1019efd2719e0bc",
@@ -114,7 +118,9 @@ providers = [
   # 구현됨). SHP(area)/route는 후속. 다른 provider처럼 본 lib 본 의존 X (Protocol).
   "python-knps-api @ git+https://github.com/digitie/python-knps-api.git@5e88fb45fa3c4fe4858efedeb2be52f687e6b167",
   "python-krforest-api @ git+https://github.com/digitie/python-krforest-api.git@f9254e6bbb54f0a4f0fb7d85831f9adcdc318a3f",
-  "python-krheritage-api @ git+https://github.com/digitie/python-krheritage-api.git@7dc46c31a7a8129c9698ec0a56df562dcb014ab2",
+  # 6076b52: 목록 응답 result 레벨 복합키/좌표 병합(live detail 100% 실패 수정)
+  # + 결측 key row skip (provider #5/PR#6, T-212e live 실측).
+  "python-krheritage-api @ git+https://github.com/digitie/python-krheritage-api.git@6076b523fac9226d365136518db4d219cb6339c6",
   "python-krairport-api @ git+https://github.com/digitie/python-krairport-api.git@b8854137f26be4ae14c1693b83b425ee37c60655",
   #
   # ── Sprint 4 — MOIS 인허가 4단계 (ADR-024) ────────────────────────────
