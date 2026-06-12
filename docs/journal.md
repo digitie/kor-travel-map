@@ -2,6 +2,25 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-12 (claude) — T-212e: datagokr/krheritage/kma 핀 범프 (live 실패 3건 provider 수정 반영)
+
+T-212e live full reload 실패 3건의 provider 수정을 핀 범프로 반영.
+
+- **datagokr `@1967fb6`**(provider #8/PR#9): `feature_place_standard_parking_lots`가
+  live 값 `addUnitCharge='200+400'`(자유 표기 요금)으로 int 파싱 실패(run
+  `b5c2c5e1`) → 요금/수치 int 필드 관용 파싱(비숫자→None, 원문 raw 보존).
+- **krheritage `@6076b52`**(provider #5/PR#6): `feature_place_krheritage_items`가
+  `HeritageDetail` key 3필드 None 검증 실패 → **실원인은 목록 응답이 복합키/
+  좌표를 `result` 레벨에 두는데 item만 취해 key가 유실, live detail 100% 실패**.
+  result 레벨 leaf 병합 + 결측 key row skip + fail-loud 검증(provider 측
+  live 종단 검증 완료).
+- **kma `@2592b740`**(provider #20/PR#21): `feature_weather_kma_mid_forecast`가
+  `tm_fc='' (12자리 필요)` ValueError로 실패(run `f044b091`) — 중기예보 응답
+  row는 요청 `tmFc`를 에코하지 않는데 provider가 응답에서만 읽어 항상 None.
+  `_mid_items`가 해석된 요청 tmFc를 item 폴백으로 전달(응답값 우선).
+
+실패 asset 재실행은 dagster 이미지 리빌드 후 수행(T-212e 리포트에 기록).
+
 ## 2026-06-12 (claude) — T-212e: visitkorea modified_time datetime 재정렬 (ADR-044)
 
 T-212e live full reload Phase 2에서 `feature_event_visitkorea_enrichment`가

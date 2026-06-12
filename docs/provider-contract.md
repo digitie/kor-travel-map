@@ -420,8 +420,8 @@ def test_no_provider_wrapper_classes():
 |----------|--------------|-----------------|---------|------|
 | python-kraddr-base | **제거** | — | — | ADR-041 (PR#37) 흡수 완료. archive 후보 |
 | python-kraddr-geo | REST 서비스(직접 의존 없음) | `KraddrGeoRestClient` + `ReverseGeocoder`/`AddressGeocoder` 콜러블 | PR#90/#123 | on-demand geocoder. 최신 로컬 FastAPI 포트 `12201` 기준 |
-| python-datagokr-api | `@26a5be3` | `CulturalFestivalItem` (PR#34, #374 재정렬) | PR#34 | ADR-042 1차 축제 source. `26a5be3`: 주차장 시간 필드 분수값 float(provider #6, T-212e) |
-| python-kma-api | `@006fdbe` | `KmaShortForecastItem` (PR#38), `KmaUltraShortNowcastItem` (PR#39), `KmaUltraShortForecastItem`/mid/alerts 등 7종 | PR#38~46, T-219b/c | ADR-010 두 축. Dagster asset 5종 완비 — 실황/초단기/단기(T-219b, `KmaClient`) + 중기(설정 주입 region, `DataGoKrClient`)/특보(record resource→notice)(T-219c). `006fdbe`: datagokr `03 NO_DATA` → 빈 결과 정규화(provider #18, T-212e 특보 빈 구간). ASOS/해수욕장/APIHub 표면은 백로그 |
+| python-datagokr-api | `@1967fb6` | `CulturalFestivalItem` (PR#34, #374 재정렬) | PR#34 | ADR-042 1차 축제 source. `26a5be3`: 주차장 시간 필드 분수값 float(provider #6, T-212e). `1967fb6`: 주차장 요금/수치 int 필드 관용 파싱 — 자유 표기(`'200+400'`)는 None, 원문 raw 보존(provider #8/PR#9, T-212e) |
+| python-kma-api | `@2592b740` | `KmaShortForecastItem` (PR#38), `KmaUltraShortNowcastItem` (PR#39), `KmaUltraShortForecastItem`/mid/alerts 등 7종 | PR#38~46, T-219b/c | ADR-010 두 축. Dagster asset 5종 완비 — 실황/초단기/단기(T-219b, `KmaClient`) + 중기(설정 주입 region, `DataGoKrClient`)/특보(record resource→notice)(T-219c). `006fdbe`: datagokr `03 NO_DATA` → 빈 결과 정규화(provider #18, T-212e 특보 빈 구간). `2592b740`: 중기예보 응답이 `tmFc` 미에코 → 해석된 요청 tmFc를 item 폴백 주입(provider #20/PR#21, T-212e). ASOS/해수욕장/APIHub 표면은 백로그 |
 | python-airkorea-api | `@22996a4` | (후속 PR) | — | PM10/PM2.5/CAI |
 | python-khoa-api | `@0ccb5ed` | (후속 PR) | — | 해수욕장, 해양 공지. snake_case live row 파싱 정정(khoa#5/PR#6, #378 pin bump) |
 | python-krforest-api | `@f9254e6` | (후속 PR) | — | 산악기상 (Sprint 2) + trails (Sprint 3) 양쪽 사용 |
@@ -429,7 +429,7 @@ def test_no_provider_wrapper_classes():
 | python-krex-api | `@2504a36` | `KrexTrafficNoticeItem` 재정렬 (#378) | — | Sprint 2 §2.4 multi-kind. incident → `openapi/burstInfo/realTimeSms`(apiId 0611) repoint(krex#8/PR#9) — 좌표 일부 row 보유, 종료 시각 컬럼 없음 |
 | python-visitkorea-api | `@cebf543` | (후속 PR — enrichment) | — | ADR-042: 축제는 enrichment 2차 |
 | python-knps-api | `@5e88fb4` | (Sprint 3 PR) | PR#25 | keyless file-only, ADR-028 amendment 2026-05-25 |
-| python-krheritage-api | `@7dc46c3` | `KrHeritageItem`/`KrHeritageItemKey` — `HeritageDetail` 재정렬 (#380) | — | items+events live fetcher 배선. items는 **keyless**(khs.go.kr — transport는 apis.data.go.kr에만 serviceKey 주입). scope/상한 settings `krheritage_kind_codes`(기본 11,12,13,15,16)/`krheritage_max_items_per_run`(detail 1콜/건). event `sn` 빈 값은 `title::starts_on::place` fallback. GIS 경계(geom) 보강은 후속. media → RustFS |
+| python-krheritage-api | `@6076b52` | `KrHeritageItem`/`KrHeritageItemKey` — `HeritageDetail` 재정렬 (#380) | — | items+events live fetcher 배선. items는 **keyless**(khs.go.kr — transport는 apis.data.go.kr에만 serviceKey 주입). scope/상한 settings `krheritage_kind_codes`(기본 11,12,13,15,16)/`krheritage_max_items_per_run`(detail 1콜/건). event `sn` 빈 값은 `title::starts_on::place` fallback. `6076b52`: 목록 응답 `result` 레벨 복합키/좌표 병합(live detail 100% 실패 수정) + 결측 key row skip(provider #5/PR#6, T-212e). GIS 경계(geom) 보강은 후속. media → RustFS |
 | python-krairport-api | `@b885413` | (Sprint 3 PR) | — | 공항 운항·날씨 |
 | python-mois-api | `@bc6f742` | (Sprint 4 PR) | — | ADR-024 canonical name 정정. 4단계 lifecycle |
 | python-kasi-api | placeholder | (Sprint 4 PR) | — | KASI 영업주기 |
