@@ -59,4 +59,5 @@ jobs:
         env:
           NEXT_PUBLIC_KRTOUR_MAP_ADMIN_API: http://127.0.0.1:8087
           NEXT_PUBLIC_KRTOUR_MAP_DAGSTER_URL: http://127.0.0.1:12302
+          NEXT_PUBLIC_KRADDR_GEO_BASE_URL: http://127.0.0.1:12201
         run: npm -w packages/krtour-map-admin/frontend run build

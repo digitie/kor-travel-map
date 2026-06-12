@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### Admin feature 수동 작성 흐름 (T-221a, 2026-06-12)
+
+- **ADDED**: admin frontend `/admin/features/new` — 지도 좌표 선택, kraddr-geo
+  geocode/reverse 후보 적용, `place`/`event` detail form, nearby 중복 후보 확인,
+  `POST /v1/admin/features` change-request 생성 흐름.
+- **ADDED**: frontend `NEXT_PUBLIC_KRADDR_GEO_BASE_URL` — 수동 작성 화면에서
+  kraddr-geo REST v2를 호출하는 public base URL.
+- **FIXED**: MapLibre mount container에 inline sizing을 보강해 `/features` 지도와
+  `/admin/features/new` 지도에서 `maplibregl-map` CSS가 Tailwind absolute sizing을
+  무효화하지 않게 했다.
+
 ### Admin feature 상세 경로 1차 (T-221a, 2026-06-12)
 
 - **ADDED**: `GET /v1/admin/features/{feature_id}` — feature core snapshot,

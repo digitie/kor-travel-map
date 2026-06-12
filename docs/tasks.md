@@ -17,13 +17,13 @@
         머지되면 후속 T-225 closure 재검증에 반영한다.
   - [ ] T-221 — **admin UI/UX 시나리오 연결성 + 실시간성 보강**. 정본 점검:
         `docs/reports/admin-ui-scenario-linkage-recheck-2026-06-11.md`.
-    - [ ] T-221a — feature 상세/수동 작성 흐름.
+    - [x] T-221a — feature 상세/수동 작성 흐름.
       - [x] T-221a-1 — `/features/[feature_id]` 1급 상세 경로 + admin 상세 API
             `GET /v1/admin/features/{feature_id}` 1차. source/raw/files/issues/history/
             nearby/weather 연결(2026-06-12 Codex).
-      - [ ] T-221a-2 — `/features/new` 또는 `/admin/features/new` 수동 feature 작성
+      - [x] T-221a-2 — `/admin/features/new` 수동 feature 작성
             전용 흐름. 지도 좌표 선택, kraddr-geo geocode/reverse 연동, kind별 detail
-            form, duplicate 후보 확인을 change-request 생성 전에 연결.
+            form, duplicate 후보 확인을 change-request 생성 전에 연결(2026-06-12 Codex).
     - [ ] T-221b — `/ops/import-jobs/[job_id]` 상세 + `ops.import_job_events`
           스키마/API + cancel/event 타임라인. feature-update/offline-upload/Dagster run 상세
           링크 포함.
