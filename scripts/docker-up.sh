@@ -14,6 +14,7 @@ source "$ROOT_DIR/scripts/load-env.sh"
 # kor-travel-docker-manager 소유 PostGIS(:5432) + RustFS(:12101)를 함께 쓸 때 local
 # postgres/rustfs 계열을 모두 기동하지 않는다.
 external_infra="${KOR_TRAVEL_MAP_INFRA_EXTERNAL:-false}"
+external_db="${KOR_TRAVEL_MAP_DB_EXTERNAL:-false}"
 external_object_store="${KOR_TRAVEL_MAP_OBJECT_STORE_EXTERNAL:-false}"
 
 compose_files=(-f docker-compose.yml)
@@ -23,6 +24,10 @@ ports=("$KOR_TRAVEL_MAP_API_PORT" "$KOR_TRAVEL_MAP_ADMIN_WEB_PORT" "$KOR_TRAVEL_
 if [[ "$external_infra" == "true" ]]; then
   compose_files+=(-f docker-compose.external-infra.yml)
   services=(api frontend dagster dagster-daemon)
+elif [[ "$external_db" == "true" ]]; then
+  compose_files+=(-f docker-compose.external-db.yml)
+  services=(rustfs rustfs-init api frontend dagster dagster-daemon)
+  ports+=("$KOR_TRAVEL_MAP_RUSTFS_API_PORT" "$KOR_TRAVEL_MAP_RUSTFS_CONSOLE_PORT")
 elif [[ "$external_object_store" == "true" ]]; then
   compose_files+=(-f docker-compose.external-object-store.yml)
 else
