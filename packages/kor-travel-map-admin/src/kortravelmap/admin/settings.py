@@ -88,6 +88,22 @@ class AdminSettings(BaseSettings):
             "(opt-in, 기본 off)."
         ),
     )
+    prometheus_metrics_enabled: bool = Field(
+        default=True,
+        description=(
+            "True면 Prometheus pull scrape용 metrics endpoint와 HTTP request "
+            "duration/count/in-flight/response-size 및 DB query duration/count "
+            "계측을 활성화한다. 기본 path는 /metrics."
+        ),
+    )
+    prometheus_metrics_path: str = Field(
+        default="/metrics",
+        pattern=r"^/[A-Za-z0-9/_\-.]*$",
+        description=(
+            "Prometheus exposition endpoint path. kor-travel-docker-manager의 "
+            "Prometheus는 API 포트(기본 12301)의 이 path를 scrape한다."
+        ),
+    )
     feature_change_review_mode: str = Field(
         default="require_review",
         pattern="^(require_review|immediate)$",

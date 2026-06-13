@@ -24,7 +24,7 @@
 ## 의존성
 
 - `kor-travel-map` (같은 저장소 메인 패키지, monorepo editable install)
-- FastAPI + Uvicorn + Pydantic v2 + pydantic-settings
+- FastAPI + Uvicorn + Pydantic v2 + pydantic-settings + prometheus-client
 
 ## 설치 / 실행 (라우터 구현 이후)
 
@@ -88,6 +88,8 @@ shadcn/ui + `@kor-travel-map/map-marker-react` (ADR-029). 자세한 사양:
 | `KOR_TRAVEL_MAP_ADMIN_FEATURES_ROUTES_ENABLED` | `true` | `/features/*` 조회 라우터 활성화 |
 | `KOR_TRAVEL_MAP_ADMIN_ADMIN_ROUTES_ENABLED` | unset | `/admin/*` 운영 라우터 활성화. unset이면 features flag를 따름 |
 | `KOR_TRAVEL_MAP_ADMIN_OPS_ROUTES_ENABLED` | unset | `/ops/*`, `/ops/dagster/*` 라우터 활성화. unset이면 features flag를 따름 |
+| `KOR_TRAVEL_MAP_ADMIN_PROMETHEUS_METRICS_ENABLED` | `true` | Prometheus pull scrape용 `/metrics` endpoint와 HTTP 요청 count/duration/진행 중 요청/응답 크기, DB query count/duration 계측 활성화 |
+| `KOR_TRAVEL_MAP_ADMIN_PROMETHEUS_METRICS_PATH` | `/metrics` | Prometheus exposition path. API 포트 `12301`에서 노출되며 OpenAPI에는 포함하지 않음 |
 | `KOR_TRAVEL_MAP_ADMIN_DAGSTER_ALLOWED_HOSTS` | `["127.0.0.1","localhost","::1","dagster"]` | Dagster GraphQL 호출 host allowlist. `KOR_TRAVEL_MAP_ADMIN_DAGSTER_URL`/override host가 이 목록에 있어야 함 |
 | `KOR_TRAVEL_MAP_ADMIN_DAGSTER_REPOSITORY_NAME` | `__repository__` | offline upload load GraphQL launch selector의 repositoryName |
 | `KOR_TRAVEL_MAP_ADMIN_DAGSTER_REPOSITORY_LOCATION_NAME` | `kortravelmap.dagster.definitions` | offline upload load GraphQL launch selector의 repositoryLocationName |
@@ -139,6 +141,19 @@ shadcn/ui + `@kor-travel-map/map-marker-react` (ADR-029). 자세한 사양:
 모두 인증 없음. 런타임 `OpenAPI` 문서는 `/docs` (Swagger UI), `/openapi.json`.
 저장소 산출물은 admin 전체 `packages/kor-travel-map-admin/openapi.json`과
 TripMate/user subset `packages/kor-travel-map-admin/openapi.user.json`을 함께 관리한다.
+
+## Prometheus
+
+`GET /metrics`는 Prometheus exposition format으로 REST API 전체의 HTTP 요청 수,
+지연 시간 histogram, 진행 중 요청 수, 응답 크기 histogram, 예외 수, DB query 수와
+query 지연 시간 histogram, 프로세스/런타임 기본 메트릭을 반환한다. HTTP 메트릭은
+`method`, route template `path`, `status_code`, `surface` label을 가진다. `surface`는
+`public`(`/v1/features`, `/v1/categories`, `/v1/providers`, `/v1/public`,
+`/v1/curated-features`), `admin`, `ops`, `debug`, `system`, `other`로 구분한다.
+
+`kor-travel-docker-manager` 관측 스택 기준 포트는 Prometheus `12601`, cAdvisor Exporter
+`12602`, Grafana `12605`다. Prometheus가 `kor-travel-map` API 포트 `12301`의
+`/metrics`를 pull scrape하는 구조이며, 앱이 Prometheus로 외부 방향 연결을 만들지는 않는다.
 
 ## 라이선스
 

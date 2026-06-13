@@ -1,5 +1,24 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-13 Codex 작업 메모 — T-226 후속 Prometheus 메트릭 추가
+
+T-226 clean cut 이후 Prometheus 성능 측정 표면을 추가했다.
+
+- `kortravelmap.admin` FastAPI app이 기본 `GET /metrics`를 노출한다
+  (`KOR_TRAVEL_MAP_ADMIN_PROMETHEUS_METRICS_ENABLED`, `_PATH`로 제어).
+- HTTP 요청 total, duration histogram, 진행 중 요청 gauge, 응답 크기 histogram,
+  예외 count, DB query count/duration histogram과 프로세스/런타임 메트릭을
+  Prometheus exposition format으로 제공한다. `/metrics` 자체 scrape는 요청 메트릭에서
+  제외한다.
+- `surface=public/admin/ops/debug/system/other` label로 공개 REST(`/v1/features`,
+  `/v1/categories`, `/v1/providers`, `/v1/public`, `/v1/curated-features`)와 운영 REST를
+  분리한다.
+- 포트 기준은 `kor-travel-docker-manager` 정본을 따랐다: Prometheus `12601`,
+  cAdvisor `12602`, Grafana `12605`; map API scrape target은 `:12301/metrics`.
+
+**다음 한 작업**: T-226 PR/CI/merge 마무리. 병행 큰 트랙은 기존대로 **T-225**
+T-212e closure 재검증.
+
 ## 2026-06-13 Codex 작업 메모 — T-226 clean cut 구현 완료
 
 T-226c/d/e package/runtime/document clean cut을 구현했다.

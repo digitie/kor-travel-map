@@ -46,6 +46,14 @@
           generated client/TripMate 문서, examples/snippets,
           `import kortravelmap as ktm` quickstart와 migration guide를 갱신했다.
 - **최근 완료**
+  - [x] **T-227 — Prometheus 성능 메트릭 표면. 완료(2026-06-13, Codex)**:
+        T-226 clean cut 이후 `kortravelmap.admin` FastAPI app에 `GET /metrics`
+        Prometheus exposition endpoint를 추가했다. 공개 REST와 운영 REST를
+        `surface` label로 나누고 HTTP 요청 total/duration histogram/진행 중 요청
+        gauge/응답 크기 histogram/예외 count, DB query count/duration histogram,
+        프로세스/런타임 메트릭을 제공한다. 포트 기준은
+        `kor-travel-docker-manager` 관측 스택(Prometheus `12601`, cAdvisor `12602`,
+        Grafana `12605`, scrape target `:12301/metrics`)을 따른다.
   - [x] **T-226b — package identity clean cut 실행계획. 완료(2026-06-12, Codex)**:
         active code/config 기준 `kortravelmap` 참조
         368개 파일, `KOR_TRAVEL_MAP` 참조 86개 파일이 흔들리는 대형 rename으로 확인했다.

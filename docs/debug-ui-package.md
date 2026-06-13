@@ -149,6 +149,8 @@ class AdminSettings(BaseSettings):
     features_routes_enabled: bool = True      # /features/* 활성 (DB 필요, PR#73)
     admin_routes_enabled: bool | None = None  # /admin/* 활성. None이면 features flag 추종
     ops_routes_enabled: bool | None = None    # /ops/* + /ops/dagster/* 활성. None이면 features flag 추종
+    prometheus_metrics_enabled: bool = True   # HTTP/DB metrics pull scrape endpoint
+    prometheus_metrics_path: str = "/metrics"
     cors_allow_origins: list[str] = [         # frontend(12305) cross-origin (PR#68)
         "http://localhost:12305", "http://127.0.0.1:12305",
     ]
@@ -365,6 +367,8 @@ type drift 부채 0).
 | `KOR_TRAVEL_MAP_ADMIN_DAGSTER_ALLOWED_HOSTS` | backend Dagster GraphQL 호출 host allowlist. 기본은 `["127.0.0.1","localhost","::1","dagster"]`이며, 운영 Dagster host를 별도로 쓰면 URL과 함께 명시한다 |
 | `KOR_TRAVEL_MAP_ADMIN_DAGSTER_REPOSITORY_NAME` | offline upload load GraphQL launch selector의 repositoryName. 기본 `__repository__` |
 | `KOR_TRAVEL_MAP_ADMIN_DAGSTER_REPOSITORY_LOCATION_NAME` | offline upload load GraphQL launch selector의 repositoryLocationName. 기본 `kortravelmap.dagster.definitions` |
+| `KOR_TRAVEL_MAP_ADMIN_PROMETHEUS_METRICS_ENABLED` | Prometheus pull scrape용 `/metrics` endpoint와 HTTP 요청 count/duration/진행 중 요청/응답 크기, DB query count/duration 계측 활성화. 기본 `true` |
+| `KOR_TRAVEL_MAP_ADMIN_PROMETHEUS_METRICS_PATH` | Prometheus exposition path. 기본 `/metrics`, API 포트 `12301`에서 노출하며 OpenAPI에는 포함하지 않는다 |
 | `KOR_TRAVEL_MAP_ADMIN_BACKUP_ROOT` | backup artifact root. 기본 `data/backups` |
 | `KOR_TRAVEL_MAP_ADMIN_BACKUP_PROJECT_ROOT` | backup/restore script 상대 경로를 해석하고 command를 실행할 project root. 기본 `.` |
 | `KOR_TRAVEL_MAP_ADMIN_BACKUP_SCRIPT_PATH` / `KOR_TRAVEL_MAP_ADMIN_RESTORE_SCRIPT_PATH` | backup/restore command plan이 호출하는 script path. 기본 `scripts/docker-backup.sh`, `scripts/docker-restore.sh` |
