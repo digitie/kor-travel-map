@@ -3,6 +3,20 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## T-212e 후속 라이브 검증 (2026-06-14, `T-229`)
+
+- [x] **T-229 — T-212e 후속 라이브 검증** (arm64 buildx만 잔여).
+  T-225가 분리한 커버리지 갭을 실데이터(features 1,095,665)로 라이브 검증했다. T-212e
+  데이터가 옛 claude postgres(15433)에 잔존 + 격리 복원본 `krtour_map_restore` 존재라
+  복원 불필요했고, 운영 데이터 무손상 원칙으로 **복원본에만** 검증했다. **curated
+  오버레이 완전 검증**: `curated_features_refresh` 4-asset RUN_SUCCESS → curated_features
+  0→**86,341** 후보(테마 7종, MCST source 카운트 정합), admin API 실제 서빙, 사용자
+  표면은 미선택 후보 숨김(선택 게이트), curated-themes/sources 200, tripmate-copy는
+  선택 시 생성(0). `/metrics` 200, smoke breadth 전 표면 응답(200/정상404). AS-01/
+  API-11/12 실데이터 해소. **잔여**: arm64 multi-arch buildx는 `GITHUB_TOKEN` 부재로
+  배포 시점 후속(`T-229-buildx`, `docs/tasks.md`). codex 스택은 사용자 지시로 강제종료
+  후 external-infra 재기동. 정본 `docs/reports/t-229-curated-live-verify-2026-06-14.md`.
+
 ## T-212e closure 재검증 (2026-06-13, `T-225`)
 
 - [x] **T-225 — T-212e closure 재검증.**

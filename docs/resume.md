@@ -1,5 +1,28 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-14 claude 작업 메모 — T-229 curated 오버레이 라이브 검증 완료
+
+T-229(T-225가 분리한 라이브 검증 후속)를 종결했다. 정본 리포트
+`docs/reports/t-229-curated-live-verify-2026-06-14.md`.
+
+- **복원 불필요**: T-212e 데이터가 옛 claude postgres(15433)에 그대로 잔존
+  (features 1,095,665 / weather 92,923 / source_records 1,111,885) + 격리 복원본
+  `krtour_map_restore` 존재. 운영 데이터 무손상 원칙으로 **복원본에만** 검증 수행.
+- **(A) curated 오버레이 완전 검증** [AS-01/API-11/12 해소]: `curated_features_refresh`
+  4-asset RUN_SUCCESS → `curated_features` **0 → 86,341** 후보(테마 7종, MCST source
+  카운트와 정합). admin API가 실제 서빙(예: 원동탁구클럽/레저), 사용자 표면은 미선택
+  후보 숨김(선택 게이트 정상), curated-themes/sources 200, tripmate-copy는 선택 시
+  생성(설계대로 0). T-212e reload 때 단지 실행되지 않았을 뿐 파이프라인은 정상.
+- **(B) `/metrics` 200 검증**, **(C) smoke breadth 전 표면 응답**(200/정상404).
+- **유일 잔여: arm64 buildx** — WSL에 `GITHUB_TOKEN` 부재로 이미지 빌드 불가 →
+  토큰 있는 배포 환경의 후속(코드/데이터 결함 아님).
+- 환경: codex 스택은 사용자 지시대로 강제종료 후 external-infra로 재기동(이미지 재사용).
+  worktree 정리(메인 FF + review 잡파일 104개 제거, claude stray 빌드 산출물 제거)도 완료.
+
+**다음 한 작업**: 본 저장소 즉시 실행 가능한 큰 트랙 없음. 잔여는 **arm64 buildx
+배포 시점 검증**(GITHUB_TOKEN 필요)뿐. (운영 외 작업: GitHub repo rename
+`python-krtour-map`→`kor-travel-map` 진행 중.)
+
 ## 2026-06-13 claude 작업 메모 — T-225 T-212e closure 재검증 완료
 
 T-225를 종결했다. 정본 리포트

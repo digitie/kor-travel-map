@@ -14,11 +14,9 @@
 ## 진행 중인 작업 인덱스
 
 - **다음**
-  - `T-229` — **T-212e 후속 라이브 검증**. T-225(완료)가 분리한 커버리지 갭을 라이브
-    Docker 스택으로 검증한다: curated 오버레이(`curated_features_refresh` +
-    admin/사용자 `curated-*` + `tripmate-copy`), post-reload 신규 표면(Prometheus
-    `/metrics`, arm64 buildx), smoke breadth(features/batch·by-target, ops/providers,
-    ops 관측, governance 리뷰 큐, debug/mois-license).
+  - `T-229-buildx` — **arm64 multi-arch buildx 배포 검증** (T-229 잔여). T-229의
+    나머지(curated 오버레이·`/metrics`·smoke breadth)는 라이브 검증 완료. arm64
+    (Odroid) 이미지 build+boot smoke만 `GITHUB_TOKEN`이 있는 배포 환경에서 수행한다.
 - **외부 추적**
   - `T-019` — TripMate 측 Kakao Maps → maplibre-vworld 교체와 SPEC 문서 supersede 추적.
   - `T-210b` — TripMate 문서 supersede.
@@ -36,38 +34,25 @@ curated feature/TripMate import, `T-224` concierge provider 경계, `T-226`
 패키지/runtime identity clean cut, `T-227` Prometheus 메트릭, `T-228`
 API/admin 패키지 분리까지 닫혔다.
 
-**T-225 closure 재검증은 완료**(2026-06-13, claude — 정본
-`docs/reports/t-225-t212e-closure-recheck-2026-06-13.md`)됐고, T-212e closure는
-유효로 재확인됐다. 남은 본 저장소 잔여는 T-225가 분리한 라이브 검증 후속 **T-229**다.
-과거 상세 완료 묶음(`T-RV-*`, `T-200~T-228`, `T-212a~d`, `T-216`, `T-218` 등)은
-`tasks-done.md`에 아카이브한다.
+**T-225 closure 재검증**(2026-06-13)과 **T-229 라이브 검증**(2026-06-14 — curated
+오버레이 86,341 후보 실데이터 검증, `/metrics` 200, smoke breadth; 정본
+`docs/reports/t-229-curated-live-verify-2026-06-14.md`)이 모두 완료됐다. 본 저장소에서
+즉시 실행 가능한 큰 트랙은 없고, 유일 잔여는 **arm64 buildx 배포 검증**(`GITHUB_TOKEN`
+필요)이다. 과거 상세 완료 묶음(`T-RV-*`, `T-200~T-228`, `T-212a~d`, `T-216`, `T-218`
+등)은 `tasks-done.md`에 아카이브한다.
 
-## T-229 — T-212e 후속 라이브 검증
+## T-229-buildx — arm64 multi-arch buildx 배포 검증 (T-229 잔여)
 
-- [ ] T-229 — **T-212e 후속 라이브 검증** (T-225가 분리한 커버리지 갭)
+- [ ] T-229-buildx — **arm64(Odroid) 이미지 build+boot smoke**
 
-배경: T-225(완료, `docs/reports/t-225-t212e-closure-recheck-2026-06-13.md`)가
-T-212e closure를 유효로 재확인하면서, 라이브 검증이 미수행된 커버리지 갭을 후속으로
-분리했다. 전부 코드 결함이 아니라 **reload smoke에 미포함된 표면**이며 라이브 Docker
-스택이 있어야 검증된다.
+T-229 라이브 검증은 완료됐다(curated 오버레이 0→86,341 후보 실데이터 검증, admin API
+서빙 + 선택 게이트 동작, `/metrics` 200, smoke breadth — 정본
+`docs/reports/t-229-curated-live-verify-2026-06-14.md`). 유일 잔여는 T-108/ADR-056의
+arm64 multi-arch buildx 이미지 build+boot smoke로, private provider pin 빌드에
+`GITHUB_TOKEN`이 필요해 **토큰이 주입된 배포 환경**에서만 수행 가능하다.
 
-목표(우선순위 순):
-
-- (A) **curated 오버레이 라이브 검증**(주요). `curated_features_refresh` job을
-  materialize하고, admin `curated-*`(11개)·사용자/공개 `curated-*` read +
-  `GET /v1/curated-features/{id}/tripmate-copy`(TripMate 인계 계약, ADR-049/052)를
-  실데이터로 검증한다. [T-225: AS-01, API-11/12]
-- (B) **reload 이후 신규 표면**. Prometheus `/metrics`(기본 on) 라이브 응답,
-  T-108 arm64(Odroid) multi-arch buildx 이미지 build+boot smoke. [T-225: PMI-04/05]
-- (C) **smoke breadth 보강**. `/v1/features/batch`·`/features/nearby/by-target`,
-  `/v1/ops/providers`(+`/{provider}`), `/v1/ops/{metrics,api-call-logs,system-logs}`,
-  governance 리뷰 큐(dedup/enrichment/feature-update-requests),
-  `/v1/debug/mois-license/{id}`. [T-225: API-02/14/15/17/19]
-
-완료 조건:
-
-- (A)~(C) 각 표면이 라이브에서 검증되거나, 검증 불가 사유(예: export API 미가동
-  guard-skip)가 명시 기록된다. 짧은 결과 리포트를 `docs/reports/`에 남긴다.
+완료 조건: `scripts/docker-buildx.sh`로 linux/arm64 이미지를 빌드해 단일 platform
+부팅 smoke가 통과하거나, 불가 사유가 명시 기록된다.
 
 ## 외부 추적
 

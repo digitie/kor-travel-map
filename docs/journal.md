@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-14 (claude) — T-229 curated 오버레이 라이브 검증
+
+T-229를 종결했다. 정본 리포트 `docs/reports/t-229-curated-live-verify-2026-06-14.md`.
+
+- T-212e 데이터가 옛 claude postgres(15433)에 잔존(features 1,095,665 등) + 격리 복원본
+  `krtour_map_restore` 존재 → 복원 불필요. 운영 `krtour_map` 무손상, **복원본에만** 검증.
+- **curated 오버레이 완전 검증**: `curated_features_refresh` 4-asset RUN_SUCCESS →
+  curated_features 0→**86,341** 후보(pet-friendly 23,090 / leisure 22,241 / barrier-free
+  12,299 / world-food 9,198 / media-places 8,575 / family-culture 8,416 / bookstores
+  2,522). admin API 실제 서빙, 사용자 표면은 미선택 후보 숨김(선택 게이트), curated-
+  themes/sources 200, tripmate-copy는 선택 시 생성(0). AS-01/API-11/12 실데이터 해소.
+- `/metrics` 200, smoke breadth 전 표면 응답. arm64 buildx만 GITHUB_TOKEN 부재로
+  배포 시점 후속.
+- codex 스택은 사용자 지시로 강제종료 후 external-infra 재기동. worktree 정리도 완료.
+
 ## 2026-06-13 (claude) — T-225 T-212e closure 재검증
 
 T-225를 종결했다. 정본 리포트
