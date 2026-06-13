@@ -1,5 +1,17 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-13 Codex 작업 메모 — T-108 운영 배포 자동화
+
+pinvi의 `T-108`을 kor-travel-map 운영 범위로 이식했다.
+
+- 사용자 재지시에 따라 streaming replication은 하지 않는 것으로 ADR-056에 명시했다.
+- `scripts/docker-buildx.sh` / `npm run docker:buildx`로 N150 16GB(`linux/amd64`)와
+  Odroid M1S(`linux/arm64`)용 multi-platform Docker image build/push를 고정했다.
+- `.env.example`, `docs/deploy.md`, `docs/runbooks/docker-app.md`, `docs/tasks-done.md`,
+  `docs/journal.md`를 같은 기준으로 갱신했다.
+
+**다음 한 작업**: **T-225 — T-212e closure 재검증**.
+
 ## 2026-06-13 Codex 작업 메모 — 태스크 문서 정리
 
 태스크 문서의 역할을 다시 분리했다.

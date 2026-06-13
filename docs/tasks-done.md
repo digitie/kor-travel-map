@@ -3,6 +3,16 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 운영 배포 자동화 (2026-06-13, `T-108`)
+
+- [x] **T-108 — 운영 배포 자동화 (pinvi T-108 이식).**
+  pinvi 원문은 Odroid M1S + N150 16GB 양쪽, multi-platform Docker build,
+  streaming replication을 포함했으나, 사용자 재지시에 따라 kor-travel-map에서는
+  **streaming replication은 하지 않는다**. 본 저장소 범위는 N150 16GB(`linux/amd64`)와
+  Odroid M1S(`linux/arm64`)에 같은 image tag를 배포할 수 있는 buildx 자동화로 닫았다.
+  `scripts/docker-buildx.sh`, `npm run docker:buildx`, `.env.example`,
+  `docs/deploy.md`, `docs/runbooks/docker-app.md`, ADR-056이 정본이다.
+
 ## 태스크 문서 정리 (2026-06-13, Codex)
 
 - [x] **태스크 문서 전반 정리.**

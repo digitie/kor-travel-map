@@ -2,6 +2,18 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-13 (codex) — T-108 운영 배포 자동화 이식
+
+pinvi의 `T-108` 운영 배포 자동화 항목을 kor-travel-map 범위로 이식했다.
+
+- 사용자 재지시에 따라 streaming replication은 하지 않는 것으로 정리했다.
+- `scripts/docker-buildx.sh`와 `npm run docker:buildx`를 추가해 N150 16GB
+  (`linux/amd64`)와 Odroid M1S(`linux/arm64`) 양쪽 image manifest를 같은 tag로
+  빌드/push할 수 있게 했다.
+- `.env.example`, `docs/deploy.md`, `docs/runbooks/docker-app.md`에 buildx registry
+  build와 단일 platform smoke 경로를 문서화했다.
+- ADR-056을 추가하고, T-108 완료 이력을 `docs/tasks-done.md`에 기록했다.
+
 ## 2026-06-13 (codex) — 태스크 문서 전반 정리
 
 `docs/tasks.md`, `docs/tasks-done.md`, `docs/resume.md`의 역할을 다시 분리했다.
