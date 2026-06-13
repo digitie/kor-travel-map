@@ -79,7 +79,7 @@ def test_docker_compose_publishes_host_ports_on_localhost_by_default() -> None:
         for port_mapping in services[service_name]["ports"]:
             assert port_mapping.startswith(bind_prefix), (service_name, port_mapping)
 
-    assert services["api"]["environment"]["KOR_TRAVEL_MAP_ADMIN_HOST"] == "0.0.0.0"
+    assert services["api"]["environment"]["KOR_TRAVEL_MAP_API_HOST"] == "0.0.0.0"
 
 
 @pytest.mark.unit

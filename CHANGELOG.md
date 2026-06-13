@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### API/admin 패키지 분리 (T-228, 2026-06-13)
+
+- **BREAKING**: FastAPI/OpenAPI backend를 `kor-travel-map-api`
+  (`packages/kor-travel-map-api/`, import `kortravelmap.api`) Python 패키지로 분리했다.
+  `kor-travel-map-admin`은 Next.js admin frontend 패키지로 남는다.
+- **BREAKING**: backend 설정 prefix는 `KOR_TRAVEL_MAP_API_*`, frontend API base URL은
+  `NEXT_PUBLIC_KOR_TRAVEL_MAP_API`다. 구 `KOR_TRAVEL_MAP_ADMIN_*` API 설정과
+  `NEXT_PUBLIC_KOR_TRAVEL_MAP_ADMIN_API` 호환 shim은 없다.
+- **CHANGED**: OpenAPI 기계 정본은 `packages/kor-travel-map-api/openapi.json`과
+  `packages/kor-travel-map-api/openapi.user.json`으로 이동했다.
+
 ### Prometheus 메트릭 (T-227, 2026-06-13)
 
 - **ADDED**: `GET /metrics` — Prometheus pull scrape용 메트릭 노출 endpoint.
@@ -547,7 +558,7 @@
 
 - **FIXED**: `GET /ops/dagster/summary`가 더 이상 Dagster `setNuxSeen` mutation을
   호출하지 않는다. NUX 처리는 `POST /ops/dagster/nux-seen`으로 분리했다.
-- **SECURITY**: `KOR_TRAVEL_MAP_ADMIN_DAGSTER_ALLOWED_HOSTS` allowlist와 http/https scheme,
+- **SECURITY**: `KOR_TRAVEL_MAP_API_DAGSTER_ALLOWED_HOSTS` allowlist와 http/https scheme,
   GraphQL path 검증으로 Dagster GraphQL URL SSRF 위험을 줄였다.
 - **CHANGED**: Dagster GraphQL 호출은 FastAPI app state의 공유 `httpx.AsyncClient`를
   사용한다.
@@ -731,9 +742,9 @@
 
 ### Admin API — Route gates (2026-06-04)
 
-- **NEW**: `KOR_TRAVEL_MAP_ADMIN_ADMIN_ROUTES_ENABLED`와
-  `KOR_TRAVEL_MAP_ADMIN_OPS_ROUTES_ENABLED` 설정을 추가했다. unset이면 둘 다
-  `KOR_TRAVEL_MAP_ADMIN_FEATURES_ROUTES_ENABLED`를 따른다.
+- **NEW**: `KOR_TRAVEL_MAP_API_ADMIN_ROUTES_ENABLED`와
+  `KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED` 설정을 추가했다. unset이면 둘 다
+  `KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED`를 따른다.
 - **CHANGED**: DB 없는 부팅 검증에서 `features_routes_enabled=False`를 주면
   `/features/*`뿐 아니라 DB 의존 `/admin/*`, `/ops/*`, `/ops/dagster/*` 라우터도 함께
   mount하지 않는다. 필요하면 admin/ops flag를 명시해 별도로 다시 열 수 있다.
@@ -888,7 +899,7 @@
 - **CHANGED**: `scripts/load-env.sh`의 기본 CORS origin에 WSL IP 기반
   `http://<WSL-IP>:12305`를 포함해, Windows localhost relay가 죽었을 때도
   `E2E_BASE_URL` WSL IP fallback으로 브라우저 검증이 가능하게 했다.
-- **CHANGED**: `kortravelmap.admin.app`이 설정된 CORS origin에 대해 응답과 preflight
+- **CHANGED**: `kortravelmap.api.app`이 설정된 CORS origin에 대해 응답과 preflight
   헤더를 한 번 더 보강해 WSL IP fallback 경로에서도 frontend fetch가 막히지 않게 했다.
 - **TEST**: Playwright e2e를 새 home dashboard와 신규 admin/ops route smoke 기준으로
   갱신했다.
@@ -920,10 +931,10 @@
 
 ### 운영 — OpenAPI admin/user 이원화 (2026-06-03)
 
-- **NEW**: `packages/kor-travel-map-admin/openapi.user.json`을 추가했다. TripMate/user
+- **NEW**: `packages/kor-travel-map-api/openapi.user.json`을 추가했다. TripMate/user
   client가 사용하는 `/features/*`, `/tripmate/features/batch`,
   `/admin/feature-update-requests` 일부 method만 포함한다.
-- **CHANGED**: `packages/kor-travel-map-admin/scripts/export_openapi.py`에
+- **CHANGED**: `packages/kor-travel-map-api/scripts/export_openapi.py`에
   `--profile admin|user|all`과 `--user-output`을 추가했다. 기본 admin export는 기존
   `openapi.json` 경로/동작을 유지한다.
 - **CHANGED**: `.github/workflows/openapi.yml` drift gate가
@@ -941,7 +952,7 @@
 - **CHANGED**: `feature_repo.features_in_bbox`에 category filter를 추가하고,
   `get_feature_rows_by_ids`, `search_features`를 추가했다. 검색은 `pg_trgm`
   `%` 연산자와 transaction-local similarity threshold를 사용한다.
-- **CHANGED**: `packages/kor-travel-map-admin/openapi.json`을 T-207e endpoint 기준으로
+- **CHANGED**: `packages/kor-travel-map-api/openapi.json`을 T-207e endpoint 기준으로
   갱신했다.
 - **TEST**: `/features`/`/tripmate` 라우터 unit test, feature repo cursor/validation
   unit test, PostGIS batch/search/bbox 통합 테스트, frontend lint/type-check를
@@ -955,7 +966,7 @@
 - **NEW**: `infra.ops_repo`를 추가했다. `ops.import_jobs`,
   `ops.feature_consistency_reports`, `ops.data_integrity_violations`를 read-only
   keyset cursor로 조회하고, 열린 issue 집계를 제공한다.
-- **CHANGED**: `packages/kor-travel-map-admin/openapi.json`을 T-207d endpoint 기준으로
+- **CHANGED**: `packages/kor-travel-map-api/openapi.json`을 T-207d endpoint 기준으로
   갱신했다.
 - **TEST**: `/ops` 라우터 unit test와 PostGIS ops repository 통합 테스트를 추가했다.
 
@@ -1088,11 +1099,11 @@
 - **NEW**: `docker-compose.yml`과 `docker/{api,frontend,dagster}.Dockerfile`을 추가했다.
   독립 PostGIS, API, admin UI, Dagster를 같은 compose에서 기동한다.
 - **CHANGED**: Docker API 컨테이너는 `.env`의 로컬 Dagster URL 대신
-  `KOR_TRAVEL_MAP_DOCKER_ADMIN_DAGSTER_URL` 기본값(`http://dagster:12302`)을 내부
-  `KOR_TRAVEL_MAP_ADMIN_DAGSTER_URL`로 사용한다.
+  `KOR_TRAVEL_MAP_DOCKER_API_DAGSTER_URL` 기본값(`http://dagster:12302`)을 내부
+  `KOR_TRAVEL_MAP_API_DAGSTER_URL`로 사용한다.
 - **CHANGED**: 로컬/standalone 고정 포트를 API `12301`, admin UI `12305`, Dagster
   `12302`으로 표준화했다.
-- **NEW**: `.env`의 provider service key를 `KOR_TRAVEL_MAP_ADMIN_*`/`NEXT_PUBLIC_*`
+- **NEW**: `.env`의 provider service key를 `KOR_TRAVEL_MAP_API_*`/`NEXT_PUBLIC_*`
   환경변수로 매핑하는 `scripts/load-env.sh`와 포트 종료/로컬 stack/Docker 기동
   스크립트를 추가했다.
 
@@ -1105,7 +1116,7 @@
 - **REMOVED**: geocoding 전용 admin/debug 라우터, frontend `/geocoding` 화면,
   관련 e2e/router/live 테스트를 제거했다. geocoding 자체 디버깅은
   `kor-travel-geo` 프로젝트 책임으로 둔다.
-- **CHANGED**: `packages/kor-travel-map-admin/openapi.json`에서 `/debug/geocoding/*` 경로와
+- **CHANGED**: `packages/kor-travel-map-api/openapi.json`에서 `/debug/geocoding/*` 경로와
   `GeocodingHealthResponse` schema를 제거했다.
 - **DOCS**: React Doctor 실행/검토 기준에 맞춰 `doctor` script와
   `doctor.config.json`을 추가하고, 실제 경고를 검토해 앱 metadata, MapLibre cleanup,
@@ -1541,7 +1552,7 @@
 - `pyproject.toml` — ADR-030 `import-linter` forbidden 계약에
   `cachetools` / `async_lru` / `aiocache` / `diskcache` 추가. ADR-032
   `[tool.coverage.report] fail_under = 50` Sprint 1 bar 설정.
-- `packages/kor-travel-map-admin/scripts/export_openapi.py` — ADR-031
+- `packages/kor-travel-map-api/scripts/export_openapi.py` — ADR-031
   CLI skeleton (실행은 코드 작성 단계에서).
 - `packages/map-marker-react/` — ADR-029 skeleton (`package.json` /
   `README.md` / `.gitignore` / `vite.config.ts`).
@@ -1554,9 +1565,9 @@
 
 - **BREAKING**: ADR-022 — Python import 경로 변경.
   - `from kor_travel_map import ...` → `from kortravelmap import ...`
-  - `from kor_travel_map_admin import ...` → `from kortravelmap.admin import ...`
+  - `from kor_travel_map_admin import ...` → `from kortravelmap.api import ...`
   - `src/kor_travel_map/` → `src/kortravelmap/`
-  - `src/kor_travel_map_admin/` → `packages/kor-travel-map-admin/src/kortravelmap/admin/`
+  - `src/kor_travel_map_admin/` → `packages/kor-travel-map-api/src/kortravelmap/api/`
     (디버그 UI 패키지)
   - T-226 이후 `kortravelmap` public root를 사용한다.
   - PyPI distribution 이름(`kor-travel-map`), CLI(`ktmctl`),
@@ -1578,8 +1589,8 @@
   `kor-travel-map`에서 FastAPI/Uvicorn 의존성 제거. `[api]` extra 폐기.
   `kortravelmap.api` 모듈 없음. ADR-005의 위치 부분은 ADR-020으로 superseded
   (인증 없음 + 내부망 전용 정책은 유지).
-  - 디버그 UI 실행: `uvicorn kortravelmap.admin.app:app --host 127.0.0.1 --port 8087`
-  - 환경변수 prefix: `KOR_TRAVEL_MAP_ADMIN_*`
+  - 디버그 UI 실행: `uvicorn kortravelmap.api.app:app --host 127.0.0.1 --port 8087`
+  - 환경변수 prefix: `KOR_TRAVEL_MAP_API_*`
   - `import-linter`에 `메인 패키지는 fastapi/uvicorn/starlette import 금지`
     계약 추가.
 

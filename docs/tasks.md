@@ -15,7 +15,7 @@
         T-212e 실데이터 full reload/offline upload 결과를 한 번 더 대조한다. 다른 agent의
         T-212e 결과가 이미 충분하면 재실행 대신 최신 provider/API 표면 포함 여부,
         live row 수/P99, 실패 provider, offline upload 증거, 최종 리포트 링크를 확인한다.
-  - [ ] T-226 — **배포명/임포트명 재정의: `kor-travel-map` / `kortravelmap`**.
+  - [x] T-226 — **배포명/임포트명 재정의: `kor-travel-map` / `kortravelmap`**.
         사용자 결정(2026-06-12, 2026-06-13 재조정): 검색성과 직관성을 위해 배포명은
         `kor-travel-map`, Python import root는 `kortravelmap`으로 바꾸고, 권장 사용
         예시는 `import kortravelmap as ktm`로 둔다. CLI는 `ktmctl`, PostgreSQL 기본
@@ -31,10 +31,10 @@
           clean cut/no-shim 원칙을 확정했다.
     - [x] T-226b — 코드/package clean cut 실행계획(완료: 2026-06-12, Codex):
           `docs/reports/t-226b-package-clean-cut-plan-2026-06-12.md`에서
-          `kortravelmap`, `kortravelmap.admin`, `kortravelmap.dagster` 최종 layout,
+          `kortravelmap`, `kortravelmap.api`, `kortravelmap.dagster` 최종 layout,
           no-shim 원칙, grep/OpenAPI/type/lint gate, 후속 PR 분할 단위를 확정했다.
     - [x] T-226c — Python import/package layout clean cut:
-          `src/kortravelmap`, `packages/kor-travel-map-admin/src/kortravelmap/admin`,
+          `src/kortravelmap`, `packages/kor-travel-map-api/src/kortravelmap/api`,
           `packages/kor-travel-map-dagster/src/kortravelmap/dagster`, import-linter,
           mypy/package metadata, console script, OpenAPI export 경로를 갱신했다.
     - [x] T-226d — runtime/deployment identity 전파:
@@ -46,8 +46,15 @@
           generated client/TripMate 문서, examples/snippets,
           `import kortravelmap as ktm` quickstart와 migration guide를 갱신했다.
 - **최근 완료**
+  - [x] **T-228 — API/admin 패키지 분리. 완료(2026-06-13, Codex)**:
+        FastAPI/OpenAPI backend를 `kor-travel-map-api`
+        (`packages/kor-travel-map-api/`, import `kortravelmap.api`)로 이동하고,
+        `kor-travel-map-admin`은 Next.js admin frontend만 소유하도록 정리했다.
+        `KOR_TRAVEL_MAP_API_*`, `NEXT_PUBLIC_KOR_TRAVEL_MAP_API`,
+        `packages/kor-travel-map-api/openapi*.json` 기준으로 Docker/CI/scripts/docs를
+        갱신했다.
   - [x] **T-227 — Prometheus 성능 메트릭 표면. 완료(2026-06-13, Codex)**:
-        T-226 clean cut 이후 `kortravelmap.admin` FastAPI app에 `GET /metrics`
+        T-226 clean cut 이후 `kortravelmap.api` FastAPI app에 `GET /metrics`
         Prometheus exposition endpoint를 추가했다. 공개 REST와 운영 REST를
         `surface` label로 나누고 HTTP 요청 total/duration histogram/진행 중 요청
         gauge/응답 크기 histogram/예외 count, DB query count/duration histogram,
@@ -57,7 +64,7 @@
   - [x] **T-226b — package identity clean cut 실행계획. 완료(2026-06-12, Codex)**:
         active code/config 기준 `kortravelmap` 참조
         368개 파일, `KOR_TRAVEL_MAP` 참조 86개 파일이 흔들리는 대형 rename으로 확인했다.
-        T-226b는 실제 이동 전 최종 layout(`kortravelmap`, `kortravelmap.admin`,
+        T-226b는 실제 이동 전 최종 layout(`kortravelmap`, `kortravelmap.api`,
         `kortravelmap.dagster`), no-shim 원칙, grep/OpenAPI/type/lint gate, 후속
         T-226c/d/e 분할을 확정했다.
   - [x] **T-212e — 실데이터 전체 재적재 + offline upload 실데이터 검증 + 최종
@@ -535,7 +542,7 @@ lint-imports/pytest/coverage, frontend type-check/e2e). 실데이터 검증은 T
 - ~~**T-RV-21** Dagster router GET 부수효과/SSRF/client lifecycle.~~
   ✅ `GET /ops/dagster/summary`에서 `setNuxSeen` mutation을 제거하고
   `POST /ops/dagster/nux-seen`으로 분리했다. backend는
-  `KOR_TRAVEL_MAP_ADMIN_DAGSTER_ALLOWED_HOSTS` allowlist, http/https scheme, `/graphql`
+  `KOR_TRAVEL_MAP_API_DAGSTER_ALLOWED_HOSTS` allowlist, http/https scheme, `/graphql`
   path를 검증하고, GraphQL 호출은 app-state 공유 `httpx.AsyncClient`를 사용한다.
 - ~~**T-RV-22** offline upload object orphan 방지.~~
   ✅ `POST /admin/offline-uploads`에서 RustFS/S3 object write 후 DB metadata insert가
@@ -915,7 +922,7 @@ T-214/T-215(#317)의 `/v1` 1차 정리 위에 ADR-048 delta를 얹는다. 정본
       - [x] **system/API call log 조회 표면**(T-212c-API-04, 2026-06-07) — 마이그레이션
         `0018_ops_logs`(`ops.system_log`/`ops.api_call_log`) + `infra/log_repo.py`(record +
         keyset cursor list) + `GET /ops/system-logs`·`GET /ops/api-call-logs`(envelope). api-call
-        적재는 opt-in middleware(`KOR_TRAVEL_MAP_ADMIN_API_CALL_LOG_ENABLED`, 기본 off, best-effort).
+        적재는 opt-in middleware(`KOR_TRAVEL_MAP_API_API_CALL_LOG_ENABLED`, 기본 off, best-effort).
         log_repo 단위 + ops_logs 라우터 단위 + 미들웨어 단위 + PostGIS 통합 테스트.
       - [x] error envelope 일관성 — `app.py` 중앙 exception handler(`_error_response` +
         `_status_error_code`)가 모든 `HTTPException`/검증오류를 공통 `{error:{code,message,

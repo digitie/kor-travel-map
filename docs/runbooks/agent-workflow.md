@@ -54,7 +54,7 @@ cd /mnt/f/dev/kor-travel-map-<agent>
 ```
 
 - **debug-ui 라우터/DTO 변경 시** OpenAPI drift 게이트 추가:
-  `python packages/kor-travel-map-admin/scripts/export_openapi.py --profile all`
+  `python packages/kor-travel-map-api/scripts/export_openapi.py --profile all`
   로 admin/user spec을 재생성 후 `--profile all --check`로 EXIT=0 확인 —
   재생성본을 NTFS로 복사해 커밋.
 - **Playwright e2e**는 하이브리드: 서버(backend `:12301` + frontend `:12305`)는 WSL,

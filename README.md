@@ -14,8 +14,8 @@ SQLAlchemy 2 async + GeoAlchemy2 + GeoPandas 위에서 동작한다.
 > **기준값(잘 바뀌지 않는 사실)**: standalone 고정 포트 API `12301` / admin UI
 > `12305` / Dagster `12302`(ADR-047), RustFS S3 `12101`·console `12105`, geocoding은
 > kor-travel-geo REST v2 `POST /v2/{reverse,geocode}` 로컬 `http://127.0.0.1:12201`,
-> frontend Next.js 16 + `maplibre-vworld-js#v0.1.3`. ADR 현황: **001~054 accepted**
-> (다음 후보 055). ADR-048은 `/v1` REST clean cut + 정합성 표준, ADR-053은
+> frontend Next.js 16 + `maplibre-vworld-js#v0.1.3`. ADR 현황: **001~055 accepted**
+> (다음 후보 056). ADR-048은 `/v1` REST clean cut + 정합성 표준, ADR-053은
 > `kor-travel-concierge` YouTube provider
 > identity와 TripMate 직접 연동 제거 경계, ADR-054는
 > `kor-travel-map` / `kortravelmap` package identity clean cut. admin UI는
@@ -50,9 +50,10 @@ TripMate는 kor-travel-map DB에 직접 접근하지 않고, `kor-travel-map`을
 직접 import하지 않는다.
 
 `kor-travel-map` 메인 패키지는 kor-travel-map API/Dagster 내부 구현에서 사용하는
-async 함수 라이브러리다. REST/OpenAPI와 admin UI는 **별도 Python 패키지**
-`kor-travel-map-admin`(`packages/kor-travel-map-admin/`, ADR-020/035/045)에 둔다.
-OpenAPI는 우선 admin UI 기준으로 작성하고, TripMate 연동 시 필요한 API를 보완·확장한다.
+async 함수 라이브러리다. REST/OpenAPI backend는 **별도 Python 패키지**
+`kor-travel-map-api`(`packages/kor-travel-map-api/`, ADR-055)에 두고, admin UI는
+`kor-travel-map-admin`(`packages/kor-travel-map-admin/frontend/`)가 소유한다.
+OpenAPI는 admin/ops/debug와 TripMate/user-facing 표면을 같은 API 서버에서 관리한다.
 
 ## 책임 / 비책임 요약
 
@@ -120,11 +121,11 @@ docker compose up -d postgres
 # 스키마 적용
 alembic upgrade head
 
-# (옵션) 디버그 UI 별도 패키지 설치
-uv pip install -e packages/kor-travel-map-admin
+# (옵션) REST API 별도 패키지 설치
+uv pip install -e packages/kor-travel-map-api
 
 # (디버그) REST API 기동 — 인증 없음, localhost 전용
-uvicorn kortravelmap.admin.app:app --host 127.0.0.1 --port 12301
+uvicorn kortravelmap.api.app:app --host 127.0.0.1 --port 12301
 
 # (옵션) 디버그 UI frontend — WSL 셸에서 실행
 cd packages/kor-travel-map-admin/frontend
@@ -147,7 +148,7 @@ Windows Node/npm(`/mnt/c/Program Files/nodejs/...`)으로 frontend 서버를 띄
 | ORM/SQL | SQLAlchemy 2.x async + GeoAlchemy2 + asyncpg + psycopg[binary,pool]>=3.2 |
 | 공간 처리 | GeoPandas, Shapely 2, GDAL Python binding |
 | 모델 | Pydantic v2 |
-| HTTP (디버그 API, 별도 패키지) | FastAPI + Uvicorn — `kor-travel-map-admin`만 |
+| HTTP API (별도 패키지) | FastAPI + Uvicorn — `kor-travel-map-api`만 |
 | HTTP client | httpx + tenacity |
 | 마이그레이션 | Alembic |
 | 주소/좌표 | `python-kraddr-base`, `kor-travel-geo` |
@@ -162,7 +163,7 @@ ADR-007/008 참조).
 
 ## 디렉토리 (계획)
 
-본 저장소는 **monorepo**다. Python 패키지 2개:
+본 저장소는 **monorepo**다. Python 패키지와 frontend workspace:
 
 ```
 src/kortravelmap/                  ← 메인 패키지 (FastAPI 의존 없음)
@@ -175,16 +176,17 @@ src/kortravelmap/                  ← 메인 패키지 (FastAPI 의존 없음)
     client.py    — AsyncKorTravelMapClient (라이브러리 진입점)
     cli/         — typer CLI (옵션)
 
-packages/kor-travel-map-admin/      ← 별도 패키지 (ADR-020)
+packages/kor-travel-map-api/        ← REST API Python 패키지 (ADR-055)
   pyproject.toml
   src/kortravelmap/
-    admin/
+    api/
       __init__.py
       app.py     — FastAPI app factory + uvicorn entrypoint
       routers/   — debug/admin/ops 엔드포인트
-      deps.py    — AsyncKorTravelMapClient 주입
       settings.py
-      views/     — (옵션) 정적 UI
+
+packages/kor-travel-map-admin/
+  frontend/     — Next.js admin UI
 
 alembic/, sql/ — 스키마 마이그레이션과 DDL
 tests/
@@ -198,10 +200,8 @@ data/          — 원천/픽스처 대용량 (NTFS, .gitignore)
 
 메인 패키지 의존 방향: **category → dto → core → infra → providers → client →
 cli** 한 방향. `import-linter`가 CI에서 강제 (ADR-002, `docs/architecture.md`).
-`kortravelmap.api`는 존재하지 않는다 (ADR-020).
-
-별도 패키지 `kortravelmap.admin`는 `kortravelmap.client`만 import해서 함수
-호출한다 (ADR-020 + ADR-022, `docs/debug-ui-package.md`).
+별도 패키지 `kortravelmap.api`는 FastAPI/OpenAPI 서버이며, 메인 라이브러리에
+FastAPI/Uvicorn 의존성을 끌어오지 않는다 (ADR-020/055, `docs/debug-ui-package.md`).
 
 ## 설계 원칙
 
@@ -237,7 +237,7 @@ lint-imports
 - [`CLAUDE.md`](CLAUDE.md) — Claude(Code/Agent SDK)용 1쪽 진입 요약
 - [`CHANGELOG.md`](CHANGELOG.md) — Keep a Changelog 형식 (Unreleased + ADR-024~034)
 - [`docs/architecture.md`](docs/architecture.md) — 의존 방향, 계층, 데이터 흐름
-- [`docs/decisions.md`](docs/decisions.md) — ADR 누적 (ADR-001~049)
+- [`docs/decisions.md`](docs/decisions.md) — ADR 누적 (ADR-001~055)
 - [`docs/sprints/README.md`](docs/sprints/README.md) — Sprint 1~5 계획 + ADR-034 9단계 구현 순서
   - [`docs/sprints/SPRINT-1.md`](docs/sprints/SPRINT-1.md) — 코드 작성 단계 진입 + scaffolding (provider 없음)
   - [`docs/sprints/SPRINT-2.md`](docs/sprints/SPRINT-2.md) — MOIS-독립 4 provider (축제/날씨/유가/휴게소) + 디버그 UI 첫 라우터
@@ -246,7 +246,7 @@ lint-imports
   - [`docs/sprints/SPRINT-5.md`](docs/sprints/SPRINT-5.md) — MOIS-sibling (휴양림/박물관) + Phase 2 + 운영 진입
 - [`docs/data-model.md`](docs/data-model.md) — Postgres 테이블·인덱스 reference
 - [`docs/backend-package.md`](docs/backend-package.md) — 메인 라이브러리 사양
-- [`docs/debug-ui-package.md`](docs/debug-ui-package.md) — `kor-travel-map-admin` 별도 패키지 사양 (ADR-020)
+- [`docs/debug-ui-package.md`](docs/debug-ui-package.md) — `kor-travel-map-api` backend와 `kor-travel-map-admin` frontend 분리 사양
 - [`docs/debug-ui-admin-workflows.md`](docs/debug-ui-admin-workflows.md) — debug UI/admin 운영 콘솔 상세 구현 사양
 - [`docs/openapi-admin-contract.md`](docs/openapi-admin-contract.md) — Admin 우선 OpenAPI + Dagster feature update queue 계약
 - [`docs/regions-within-radius.md`](docs/regions-within-radius.md) — POI 반경 내/교차 행정구역 조회(kor-travel-geo REST v2) 사양

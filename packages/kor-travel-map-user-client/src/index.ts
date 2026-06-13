@@ -1,7 +1,7 @@
 /**
  * `@kor-travel-map/user-client` — kor-travel-map **user-facing** OpenAPI 타입 (T-210e).
  *
- * `packages/kor-travel-map-admin/openapi.user.json`(기계 정본, ADR-048/T-216g)에서
+ * `packages/kor-travel-map-api/openapi.user.json`(기계 정본, ADR-048/T-216g)에서
  * `openapi-typescript`로 생성한 `./types.ts`를 named alias와 함께 노출한다.
  * 런타임 코드는 없다 — HTTP client는 소비자 소유다(TripMate는 수기 httpx/fetch,
  * krtour 권고). prose 계약은 `docs/rest-api.md` + `docs/tripmate-rest-api.md`.

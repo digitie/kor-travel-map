@@ -6,7 +6,7 @@
 > **범위**: kor-travel-map **전 표면**(user/TripMate + admin + ops + debug)의 **단일 계약 정본**
 > (ADR-048 #9). `docs/tripmate-rest-api.md`는 TripMate **소비 매핑 view**로 수렴하고 계약
 > 세부는 본 문서로 위임한다(수렴 작업 T-216g).
-> **정본 우선순위**: 기계 정본 = `packages/kor-travel-map-admin/openapi.json`·`openapi.user.json`.
+> **정본 우선순위**: 기계 정본 = `packages/kor-travel-map-api/openapi.json`·`openapi.user.json`.
 > 충돌 시 **OpenAPI 우선**. 결정 = ADR-048.
 > **전환 정책(ADR-048)**: 호환성 미고려 — `/v1` clean cut, 구 경로/alias 없음.
 > **표기**: 🆕 신규 · 🔁 변경 · ⚠️ 제거 · ✅#317 = #317로 이미 구현.
@@ -228,7 +228,7 @@ GET    /v1/admin/issues   GET/PATCH /v1/admin/issues/{issue_id}                 
 ```
 - **version 0/1 모델(#317)**: provider 적재=`data_origin='provider', data_version=0`,
   사용자 요청=`'user_request', data_version=1`, `feature.feature_versions` snapshot +
-  `ops.feature_change_requests`. `KOR_TRAVEL_MAP_ADMIN_FEATURE_CHANGE_REVIEW_MODE=require_review|
+  `ops.feature_change_requests`. `KOR_TRAVEL_MAP_API_FEATURE_CHANGE_REVIEW_MODE=require_review|
   immediate`. provider 재적재는 version 1/ soft delete를 덮거나 되살리지 않는다.
 
 ### 2.6 `/v1/ops/*` — 옵저버빌리티

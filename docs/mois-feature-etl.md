@@ -593,7 +593,7 @@ ConcurrencyConfig: `mois_api: max_concurrent=1` (rate limit 보호 + bulk 적재
 - **mois `validate_address_geocoding_probe` 활용**: 본 라이브러리의 reverse
   geocoder 검증 helper.
 - **mois debug UI 연계**: `packages/mois-debug-ui/`의 `/api/places`를 본
-  라이브러리 디버그 UI (`kortravelmap.admin`)에서 iframe/링크로 연결.
+  라이브러리 디버그 UI (`kortravelmap.api`)에서 iframe/링크로 연결.
 - **source DB 분리 옵션**: source DB(`mois_*`)는 kor-travel-map 운영 경계 안에 둔다.
   TripMate 공유 DB에 두지 않는다(ADR-045/046).
 

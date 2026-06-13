@@ -11,7 +11,7 @@
 현재 구현 범위는 `T-209e` cold backup, staging restore, smoke/count 검증,
 admin router/UI, restore hot-swap env 전환 자동화다. Admin UI는 `/admin/backups`에서
 artifact 목록, backup/restore/swap command plan을 보여준다. host command 실행은 기본
-비활성(`KOR_TRAVEL_MAP_ADMIN_BACKUP_COMMAND_ENABLED=false`)이며, 운영자가 명시 opt-in할
+비활성(`KOR_TRAVEL_MAP_API_BACKUP_COMMAND_ENABLED=false`)이며, 운영자가 명시 opt-in할
 때만 API에서 스크립트를 실행한다.
 
 ## 1. 전제
@@ -199,13 +199,13 @@ Admin API는 다음 경로를 제공한다.
 - `GET /admin/backups` — `data/backups/<backup_id>` artifact + manifest 목록.
 - `GET /admin/backups/{backup_id}` — artifact 단건 상세.
 - `POST /admin/backups` — backup command plan 생성. `execute=true`는
-  `KOR_TRAVEL_MAP_ADMIN_BACKUP_COMMAND_ENABLED=true`일 때만 실행.
+  `KOR_TRAVEL_MAP_API_BACKUP_COMMAND_ENABLED=true`일 때만 실행.
 - `POST /admin/restore/{backup_id}` — staging restore command plan 생성. 기본 target은
   `kor_travel_map_restore`, `kor_travel_map_dagster_restore`,
   `kor-travel-map-rustfs-restore`.
 - `POST /admin/restore/{backup_id}/swap` — restore swap command plan 생성.
   `execute=true`, `apply=true`를 함께 쓰면 검증 후 env 전환과 compose 재기동까지 실행한다.
 
-Admin API의 command 실행은 `KOR_TRAVEL_MAP_ADMIN_BACKUP_COMMAND_ENABLED=true`와 요청별
+Admin API의 command 실행은 `KOR_TRAVEL_MAP_API_BACKUP_COMMAND_ENABLED=true`와 요청별
 `execute=true`가 모두 있어야 한다. 따라서 기본 UI/API 사용은 plan-only이며, 운영자가
 command/env를 확인한 뒤 명시적으로 실행한다.

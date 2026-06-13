@@ -6,12 +6,12 @@ TripMate `docs/kor-travel-map-requirements.md`를 현재 kor-travel-map `origin/
 feature update request 큐 구현 이전 상태가 상당 부분 남아 있다.
 
 따라서 이 리포트는 TripMate 문서의 K-1~K-14를 그대로 백로그로 복사하지 않고, 현재
-코드와 문서 정본(`docs/tripmate-rest-api.md`, `packages/kor-travel-map-admin/openapi.user.json`)
+코드와 문서 정본(`docs/tripmate-rest-api.md`, `packages/kor-travel-map-api/openapi.user.json`)
 기준으로 **이미 충족된 항목**, **부분 충족 항목**, **새 task로 남길 항목**을 나눈다.
 
 ## 현재 user OpenAPI 표면
 
-`packages/kor-travel-map-admin/openapi.user.json`의 현재 path:
+`packages/kor-travel-map-api/openapi.user.json`의 현재 path:
 
 | Path | 상태 |
 |------|------|

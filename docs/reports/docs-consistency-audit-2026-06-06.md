@@ -92,7 +92,7 @@
   - **위치**: `CLAUDE.md` §2 "geocoding 정본: kor-travel-geo REST(v2 …), 로컬 기본
     `http://127.0.0.1:8888`".
   - **근거**: `.env.example:58` `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_BASE_URL=http://127.0.0.1:12201`,
-    `:32` `KOR_TRAVEL_MAP_ADMIN_KOR_TRAVEL_GEO_BASE_URL=http://127.0.0.1:12201`.
+    `:32` `KOR_TRAVEL_MAP_API_KOR_TRAVEL_GEO_BASE_URL=http://127.0.0.1:12201`.
     `tasks.md` 체크포인트 #4, `AGENTS.md`, `journal.md:1151`("기본값에서 이전
     `8888` 표기를 제거")도 모두 **12201**. CLAUDE.md만 누락된 sweep 잔재.
   - **조치**: `8888` → `http://127.0.0.1:12201`.
@@ -223,7 +223,7 @@
 
 ## 8. 외부 노출 API 일관성/완결성 점검 (2026-06-06 추가, 사용자 요청)
 
-기준: 생성 산출물 `packages/kor-travel-map-admin/openapi.json`(admin 전체, **35 path**)
+기준: 생성 산출물 `packages/kor-travel-map-api/openapi.json`(admin 전체, **35 path**)
 + `openapi.user.json`(TripMate/user subset, **7 path**)을 정본으로,
 `docs/openapi-admin-contract.md` + `docs/tripmate-rest-api.md`와 대조했다.
 

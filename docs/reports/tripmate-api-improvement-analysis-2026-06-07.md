@@ -6,7 +6,7 @@
 
 ## 1. TripMate 노출 REST API 목록 정리
 
-현재 `packages/kor-travel-map-admin/openapi.user.json` (TripMate 전용 OpenAPI Subset) 및 관련 명세(`docs/tripmate-rest-api.md`)를 기준으로 노출되는 API 목록은 다음과 같습니다.
+현재 `packages/kor-travel-map-api/openapi.user.json` (TripMate 전용 OpenAPI Subset) 및 관련 명세(`docs/tripmate-rest-api.md`)를 기준으로 노출되는 API 목록은 다음과 같습니다.
 
 ### 공통 규약
 *   **좌표계**: WGS84 (EPSG:4326), 직렬화 순서는 항상 **`lon, lat`** (경도, 위도) 형식을 준수합니다.

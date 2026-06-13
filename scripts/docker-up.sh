@@ -18,7 +18,7 @@ external_object_store="${KOR_TRAVEL_MAP_OBJECT_STORE_EXTERNAL:-false}"
 
 compose_files=(-f docker-compose.yml)
 services=(postgres dagster-db-init api frontend dagster dagster-daemon)
-ports=("$KOR_TRAVEL_MAP_ADMIN_PORT" "$KOR_TRAVEL_MAP_ADMIN_WEB_PORT" "$KOR_TRAVEL_MAP_DAGSTER_PORT")
+ports=("$KOR_TRAVEL_MAP_API_PORT" "$KOR_TRAVEL_MAP_ADMIN_WEB_PORT" "$KOR_TRAVEL_MAP_DAGSTER_PORT")
 
 if [[ "$external_infra" == "true" ]]; then
   compose_files+=(-f docker-compose.external-infra.yml)

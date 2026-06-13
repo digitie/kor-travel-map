@@ -1,6 +1,6 @@
 # @kor-travel-map/user-client
 
-kor-travel-map **user-facing** OpenAPI(`packages/kor-travel-map-admin/openapi.user.json`,
+kor-travel-map **user-facing** OpenAPI(`packages/kor-travel-map-api/openapi.user.json`,
 ADR-048/T-216g 기계 정본)에서 `openapi-typescript`로 생성한 **TypeScript 타입
 산출물**이다 (T-210e). TripMate 등 downstream의 frontend codegen 기준점.
 

@@ -4,7 +4,7 @@ import { defineConfig, devices } from "@playwright/test";
  * Playwright e2e — kor-travel-map debug UI frontend (#117).
  *
  * 실행 모델 (사용자 지시): **debug UI는 WSL에서 기동, Playwright는 Windows에서 실행**.
- *   - WSL: backend `uvicorn kortravelmap.admin.app:app --port 12301`
+ *   - WSL: backend `uvicorn kortravelmap.api.app:app --port 12301`
  *           + frontend `npm run dev` (next dev :12305).
  *   - Windows: `npm run e2e` (본 config). 브라우저(Windows)의 localhost는 WSL2
  *           localhost-forwarding으로 WSL :12305/:12301에 도달한다.

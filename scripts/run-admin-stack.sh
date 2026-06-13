@@ -9,7 +9,7 @@ LOG_DIR="${KOR_TRAVEL_MAP_LOG_DIR:-"$ROOT_DIR/.codex_tmp/admin-stack"}"
 mkdir -p "$LOG_DIR"
 
 "$ROOT_DIR/scripts/stop-fixed-ports.sh" \
-  "$KOR_TRAVEL_MAP_ADMIN_PORT" "$KOR_TRAVEL_MAP_ADMIN_WEB_PORT" "$KOR_TRAVEL_MAP_DAGSTER_PORT"
+  "$KOR_TRAVEL_MAP_API_PORT" "$KOR_TRAVEL_MAP_ADMIN_WEB_PORT" "$KOR_TRAVEL_MAP_DAGSTER_PORT"
 
 PYTHON_BIN="${PYTHON_BIN:-"$ROOT_DIR/.venv/bin/python"}"
 if [[ ! -x "$PYTHON_BIN" ]]; then
@@ -72,7 +72,7 @@ DAGSTER_HOME_DIR="${DAGSTER_HOME:-"$ROOT_DIR/.dagster"}"
 mkdir -p "$DAGSTER_HOME_DIR"
 install -m 0644 "$ROOT_DIR/docker/dagster.yaml" "$DAGSTER_HOME_DIR/dagster.yaml"
 
-ADMIN_BIND_HOST="${KOR_TRAVEL_MAP_ADMIN_BIND_HOST:-0.0.0.0}"
+API_BIND_HOST="${KOR_TRAVEL_MAP_API_BIND_HOST:-0.0.0.0}"
 WEB_BIND_HOST="${KOR_TRAVEL_MAP_ADMIN_WEB_BIND_HOST:-0.0.0.0}"
 DAGSTER_BIND_HOST="${KOR_TRAVEL_MAP_DAGSTER_BIND_HOST:-0.0.0.0}"
 
@@ -112,16 +112,16 @@ start_bg() {
 (
   cd "$ROOT_DIR"
   start_bg api env \
-    KOR_TRAVEL_MAP_ADMIN_HOST="$ADMIN_BIND_HOST" \
-    KOR_TRAVEL_MAP_ADMIN_PORT="$KOR_TRAVEL_MAP_ADMIN_PORT" \
-    "$PYTHON_BIN" -m uvicorn kortravelmap.admin.app:app \
-    --host "$ADMIN_BIND_HOST" --port "$KOR_TRAVEL_MAP_ADMIN_PORT"
+    KOR_TRAVEL_MAP_API_HOST="$API_BIND_HOST" \
+    KOR_TRAVEL_MAP_API_PORT="$KOR_TRAVEL_MAP_API_PORT" \
+    "$PYTHON_BIN" -m uvicorn kortravelmap.api.app:app \
+    --host "$API_BIND_HOST" --port "$KOR_TRAVEL_MAP_API_PORT"
 )
 
 (
   cd "$ROOT_DIR/packages/kor-travel-map-admin/frontend"
   start_bg web env \
-    NEXT_PUBLIC_KOR_TRAVEL_MAP_ADMIN_API="$NEXT_PUBLIC_KOR_TRAVEL_MAP_ADMIN_API" \
+    NEXT_PUBLIC_KOR_TRAVEL_MAP_API="$NEXT_PUBLIC_KOR_TRAVEL_MAP_API" \
     NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL="$NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL" \
     NEXT_PUBLIC_VWORLD_API_KEY="${NEXT_PUBLIC_VWORLD_API_KEY:-}" \
     npx next dev --port "$KOR_TRAVEL_MAP_ADMIN_WEB_PORT" --hostname "$WEB_BIND_HOST"
@@ -200,11 +200,11 @@ ensure_bg_alive() {
   return 1
 }
 
-wait_url api "http://127.0.0.1:${KOR_TRAVEL_MAP_ADMIN_PORT}/health"
+wait_url api "http://127.0.0.1:${KOR_TRAVEL_MAP_API_PORT}/health"
 wait_url web "http://127.0.0.1:${KOR_TRAVEL_MAP_ADMIN_WEB_PORT}/"
 wait_url dagster "http://127.0.0.1:${KOR_TRAVEL_MAP_DAGSTER_PORT}/"
 ensure_bg_alive dagster-daemon
 
-echo "api=http://127.0.0.1:${KOR_TRAVEL_MAP_ADMIN_PORT}"
+echo "api=http://127.0.0.1:${KOR_TRAVEL_MAP_API_PORT}"
 echo "web=http://127.0.0.1:${KOR_TRAVEL_MAP_ADMIN_WEB_PORT}"
 echo "dagster=http://127.0.0.1:${KOR_TRAVEL_MAP_DAGSTER_PORT}"

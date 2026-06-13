@@ -1,0 +1,79 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kor-travel-map-api"
+version = "0.2.0-dev"
+description = "FastAPI/OpenAPI backend for kor-travel-map (intranet-only, no auth)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "GPL-3.0-or-later" }
+authors = [{ name = "digitie" }]
+keywords = ["tripmate", "kor-travel-map", "api", "openapi", "fastapi"]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Typing :: Typed",
+]
+# 본 패키지는 monorepo 동기 release. 메인 패키지와 동일 version 유지.
+# 메인 라이브러리는 같은 저장소에서 editable install:
+#   uv pip install -e .                          (메인)
+#   uv pip install -e packages/kor-travel-map-api     (REST API)
+# 외부 배포 시에는 git URL+sha 핀 사용 (예: TripMate가 Python으로 직접 의존하지 않으므로
+# 주로 자체 시점에서만 사용).
+dependencies = [
+  # 같은 저장소 내 메인 패키지에 의존. monorepo editable install.
+  # PyPI 배포 시점에는 "kor-travel-map>=0.2,<0.3" 같은 핀으로 교체.
+  "kor-travel-map",
+  "fastapi>=0.115",
+  "python-multipart>=0.0.20",
+  # starlette 1.0+ TestClient은 httpx2(httpx 2.x)를 요구 — 본 패키지는 httpx 0.x
+  # API(`httpx.AsyncClient`)에 의존하므로 0.x 라인으로 고정 (CI 회귀 방지, PR#60).
+  "starlette>=0.40,<1.0",
+  "uvicorn[standard]>=0.30",
+  "pydantic>=2.7",
+  "pydantic-settings>=2.4",
+  # ETL preview `?source=live`와 Dagster proxy에서 provider/raw API 호출용 async client.
+  # 메인 lib(`kortravelmap`)는 httpx 미사용 — API package가 직접 사용.
+  "httpx>=0.27,<1.0",
+  "prometheus-client>=0.20",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "pytest-asyncio>=0.23",
+  "httpx>=0.27,<1.0",
+]
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+# 메인 패키지의 `kortravelmap` top-level 아래 api subpackage를 배포한다.
+# 메인 distribution은 `src/kortravelmap/__init__.py`를 가진다.
+include = ["kortravelmap.api*"]
+namespaces = true
+
+[tool.setuptools.package-data]
+"kortravelmap.api" = ["py.typed"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC", "PIE", "PT", "RET", "SIM", "TID"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_ignores = true
+plugins = ["pydantic.mypy"]

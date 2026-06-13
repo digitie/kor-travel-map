@@ -36,7 +36,7 @@ jobs:
           cache: pip
           cache-dependency-path: |
             pyproject.toml
-            packages/kor-travel-map-admin/pyproject.toml
+            packages/kor-travel-map-api/pyproject.toml
             packages/kor-travel-map-dagster/pyproject.toml
 
       - name: Install package + dev/geo extras
@@ -45,12 +45,12 @@ jobs:
           # geo extra는 GDAL system dependency 필요 — Sprint 2부터 별도 GDAL setup job
           pip install -e ".[dev]"
 
-      - name: Install kor-travel-map-admin (editable, PR#35+)
+      - name: Install kor-travel-map-api (editable)
         # PR#35로 첫 FastAPI 라우터 머지 — 본 step에서 install + 후속 step에서
         # 패키지 tests 실행. 메인 라이브러리 coverage에는 포함되지 않는다 (별도
-        # tests/ 트리, debug-ui pyproject은 독립 dev deps).
+        # tests/ 트리, API package pyproject은 독립 dev deps).
         run: |
-          pip install -e packages/kor-travel-map-admin
+          pip install -e packages/kor-travel-map-api
 
       - name: Install kor-travel-map-dagster (editable)
         # ADR-045: Dagster code location은 kor-travel-map monorepo가 소유한다.
@@ -63,11 +63,11 @@ jobs:
           pytest tests/unit tests/lint -q \
             --cov=src/kortravelmap --cov-report=term-missing --cov-report=xml
 
-      - name: Run kor-travel-map-admin unit tests
-        # 본 step은 메인 lib coverage gate(ADR-032)에 영향 X — debug-ui 패키지
+      - name: Run kor-travel-map-api unit tests
+        # 본 step은 메인 lib coverage gate(ADR-032)에 영향 X — API 패키지
         # 자체 회귀 차단용. fail이면 PR 머지 차단.
         run: |
-          pytest packages/kor-travel-map-admin/tests/ -q
+          pytest packages/kor-travel-map-api/tests/ -q
 
       - name: Run kor-travel-map-dagster unit tests
         run: |
@@ -94,7 +94,7 @@ jobs:
           cache: pip
           cache-dependency-path: |
             pyproject.toml
-            packages/kor-travel-map-admin/pyproject.toml
+            packages/kor-travel-map-api/pyproject.toml
             packages/kor-travel-map-dagster/pyproject.toml
 
       - name: Install package + dev/geo extras
@@ -102,9 +102,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
-      - name: Install kor-travel-map-admin (editable)
+      - name: Install kor-travel-map-api (editable)
         run: |
-          pip install -e packages/kor-travel-map-admin
+          pip install -e packages/kor-travel-map-api
 
       - name: Install kor-travel-map-dagster (editable)
         run: |
@@ -129,14 +129,14 @@ jobs:
           cache: pip
           cache-dependency-path: |
             pyproject.toml
-            packages/kor-travel-map-admin/pyproject.toml
+            packages/kor-travel-map-api/pyproject.toml
             packages/kor-travel-map-dagster/pyproject.toml
 
       - name: Install package + dev extras
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
-          pip install -e packages/kor-travel-map-admin
+          pip install -e packages/kor-travel-map-api
           pip install -e packages/kor-travel-map-dagster
 
       - name: Run fixture replay tests

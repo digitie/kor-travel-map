@@ -26,18 +26,19 @@ jobs:
           cache: pip
           cache-dependency-path: |
             pyproject.toml
-            packages/kor-travel-map-admin/pyproject.toml
+            packages/kor-travel-map-api/pyproject.toml
             packages/kor-travel-map-dagster/pyproject.toml
 
       - name: Install package + dev extras
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
+          pip install -e packages/kor-travel-map-api
           pip install -e packages/kor-travel-map-dagster
 
       - name: ruff check (style + lint rules)
         # pyproject.toml [tool.ruff.lint] select rules.
-        run: ruff check src tests packages/kor-travel-map-dagster/src packages/kor-travel-map-dagster/tests
+        run: ruff check src tests packages/kor-travel-map-api/src packages/kor-travel-map-api/tests packages/kor-travel-map-dagster/src packages/kor-travel-map-dagster/tests
 
       - name: ruff format --check (format drift)
         # ruff format은 작성자가 명시적으로 적용한 경우만 enforce.
@@ -48,6 +49,9 @@ jobs:
       - name: mypy --strict (메인 패키지)
         # pyproject.toml [tool.mypy] strict = true + pydantic.mypy plugin.
         run: mypy --strict -p kortravelmap
+
+      - name: mypy --strict (API 패키지)
+        run: mypy --strict -p kortravelmap.api
 
       - name: mypy --strict (Dagster 패키지)
         run: mypy --strict -p kortravelmap.dagster

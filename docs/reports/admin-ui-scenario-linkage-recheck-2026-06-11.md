@@ -5,8 +5,8 @@
 사용자 지시에 따라 `docs/debug-ui-admin-workflows.md`,
 `docs/openapi-admin-contract.md`, `docs/admin-ui-modernization-gap-audit.md`,
 `docs/runbooks/admin-ui-screen-checklist.md`, `packages/kor-travel-map-admin/frontend/src/app`,
-`packages/kor-travel-map-admin/frontend/src/api`, `packages/kor-travel-map-admin/src/kortravelmap_admin/routers`,
-`packages/kor-travel-map-admin/openapi*.json`, TripMate `docs/tasks.md` T-130 및
+`packages/kor-travel-map-admin/frontend/src/api`, `packages/kor-travel-map-api/src/kortravelmap/api/routers`,
+`packages/kor-travel-map-api/openapi*.json`, TripMate `docs/tasks.md` T-130 및
 `docs/kor-travel-map-requirements.md` §6을 대조했다.
 
 현재 프론트엔드 페이지는 17개다.

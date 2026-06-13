@@ -9,8 +9,8 @@ import 경로
 -----------
 - 메인 라이브러리: ``import kortravelmap as ktm`` 또는
   ``from kortravelmap import ...``.
-- 디버그 UI: ``from kortravelmap.admin import ...`` (별도 distribution,
-  ADR-020).
+- REST API: ``from kortravelmap.api import ...`` (별도 distribution,
+  ADR-055).
 
 핵심 진입점 (Sprint 2~5에서 구현):
     >>> from kortravelmap import AsyncKorTravelMapClient
@@ -23,7 +23,8 @@ ADR 참조
 --------
 - ADR-002 — async-only API (sync 인터페이스 추가 금지)
 - ADR-045 — TripMate 연계는 OpenAPI, 메인 Python API는 kor-travel-map 내부 구현용
-- ADR-020 — 디버그 REST/UI는 별도 패키지 ``kor-travel-map-admin``
+- ADR-055 — REST API는 별도 패키지 ``kor-travel-map-api``, admin UI는
+  ``kor-travel-map-admin/frontend``
 - ADR-054 — ``kor-travel-map`` / ``kortravelmap`` package identity clean cut
 - ADR-030 — in-memory 캐시 금지 (``functools.cache`` 한정 narrow 예외)
 - ADR-034 — Provider 9단계 구현 순서
@@ -37,7 +38,7 @@ from pkgutil import extend_path
 
 from kortravelmap.client import AsyncKorTravelMapClient, DedupSyncResult, OfflineUploadLoadResult
 
-# Admin/Dagster는 별도 distribution으로 설치되므로 같은 top-level package 아래
+# API/Admin/Dagster는 별도 distribution으로 설치되므로 같은 top-level package 아래
 # 하위 패키지를 찾을 수 있게 package path를 확장한다.
 __path__ = extend_path(__path__, __name__)
 

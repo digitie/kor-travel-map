@@ -38,7 +38,7 @@ jobs:
 
       - name: openapi-typescript drift check
         # T-RV-30: admin frontend가 사용하는 generated OpenAPI 타입 산출물이
-        # packages/kor-travel-map-admin/openapi.json과 drift 나지 않게 고정한다.
+        # packages/kor-travel-map-api/openapi.json과 drift 나지 않게 고정한다.
         run: npm -w packages/kor-travel-map-admin/frontend run gen:types:check
 
       - name: user-client types drift + surface assertions (T-210e)
@@ -57,7 +57,7 @@ jobs:
         # ADR-025 — swc/turbo의 syntax + 모듈 해석을 production 경로까지 확인.
         # NEXT_PUBLIC_* 는 build-time inline이므로 임의 값으로 진행 (실 호출 없음).
         env:
-          NEXT_PUBLIC_KOR_TRAVEL_MAP_ADMIN_API: http://127.0.0.1:8087
+          NEXT_PUBLIC_KOR_TRAVEL_MAP_API: http://127.0.0.1:8087
           NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL: http://127.0.0.1:12302
           NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL: http://127.0.0.1:12201
         run: npm -w packages/kor-travel-map-admin/frontend run build
