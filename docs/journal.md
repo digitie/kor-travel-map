@@ -2,6 +2,26 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-13 (claude) — T-225 T-212e closure 재검증
+
+T-225를 종결했다. 정본 리포트
+`docs/reports/t-225-t212e-closure-recheck-2026-06-13.md`.
+
+- 라이브 재실행 없이 현재 main(`25b286b`, #434 포함) 기준 문서/코드 증거 대조로
+  닫았다. 5개 차원(asset 인벤토리·`/v1` API 표면·실패 provider 수정·리포트 무결성·
+  post-merge 영향) 교차검증 + 각 gap 반증(서브에이전트 18).
+- **T-212e closure 유효**: 실패 provider 6건 수정 전부 main 존재(pin SHA 일치),
+  리포트 무결성 정합(MCST 13종 102,121, source_records 1,111,885 vs features
+  1,095,665, #397/#407/#409 close + 보강 PR 머지), identity는 #429가 리포트까지
+  재작성해 이미 post-rename, 패키지 분리(#430)·#434 포트 재기준은 데이터 closure에
+  영향 없음.
+- 착수 가정 "구 이름 drift"는 실재하지 않음. #434 이후 리포트의 포트 참조(12301번대)는
+  새 표준(12701/12702/12705/12501)보다 한 세대 뒤지나 config/문서 drift일 뿐이다.
+- 남은 커버리지 갭(코드 결함 아님, 라이브 검증 미수행)은 후속 **T-229**로 분리:
+  curated 오버레이 라이브 검증, Prometheus `/metrics`·arm64 buildx, smoke breadth.
+  반증되어 갭 아님: ops/consistency API(e2e 실호출), backups/restore API(opt-in
+  래퍼), poi-cache/refresh-policy(T-212e 이전 기능).
+
 ## 2026-06-13 (codex) — docker-manager 포트 기준 정렬
 
 `kor-travel-docker-manager`의 로컬 포트 정책을 기준으로 kor-travel-map 실행 설정을

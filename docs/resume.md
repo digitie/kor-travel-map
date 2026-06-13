@@ -1,5 +1,28 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-13 claude 작업 메모 — T-225 T-212e closure 재검증 완료
+
+T-225를 종결했다. 정본 리포트
+`docs/reports/t-225-t212e-closure-recheck-2026-06-13.md`.
+
+- 라이브 재실행 없이 현재 main(`25b286b`, #434 포함) 기준 **문서/코드 증거 대조**로
+  닫았다(인수기준 충족). 5개 차원 교차검증 + 각 gap 반증(서브에이전트 18).
+- **T-212e closure 유효**: 실패 provider 6건 수정 전부 main에 존재(pin SHA 일치),
+  리포트 무결성 정합(MCST 13종 합계 102,121, 이슈 #397/#407/#409 close + 보강 PR
+  머지, broken link 없음), identity는 이미 post-rename(#429가 리포트까지 재작성),
+  패키지 분리(#430)·#434 포트 재기준은 reload 데이터 closure에 영향 없음.
+- 착수 가정이던 "구 이름 drift"는 실재하지 않았다(리포트가 이미 새 identity 기준).
+- 남은 것은 **라이브 검증이 미수행된 커버리지 갭**(코드 결함 아님) → 후속 **T-229**로
+  분리: (A) curated 오버레이(`curated_features_refresh` + admin/사용자 `curated-*` +
+  `tripmate-copy`) 라이브 검증, (B) reload 이후 신규 표면(Prometheus `/metrics`,
+  arm64 buildx), (C) smoke breadth(features/batch·by-target, ops/providers, ops 관측,
+  governance 리뷰 큐, debug/mois-license).
+- 반증되어 갭 아님: ops/consistency API(e2e로 실제 호출), backups/restore API(설계상
+  opt-in 래퍼 — 스크립트는 라이브 검증), poi-cache/refresh-policy(T-212e 이전 기능).
+
+**다음 한 작업**: **T-229 — T-212e 후속 라이브 검증**(curated 오버레이 +
+post-reload 신규 표면 + smoke breadth). 라이브 Docker 스택 필요.
+
 ## 2026-06-13 Codex 작업 메모 — T-108 운영 배포 자동화
 
 pinvi의 `T-108`을 kor-travel-map 운영 범위로 이식했다.

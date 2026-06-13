@@ -14,9 +14,11 @@
 ## 진행 중인 작업 인덱스
 
 - **다음**
-  - `T-225` — **T-212e closure 재검증**. T-224/T-221/T-222/T-223/T-226/T-227/T-228
-    이후 main 기준으로 T-212e 실데이터 full reload/offline upload 결과를 한 번 더
-    대조한다.
+  - `T-229` — **T-212e 후속 라이브 검증**. T-225(완료)가 분리한 커버리지 갭을 라이브
+    Docker 스택으로 검증한다: curated 오버레이(`curated_features_refresh` +
+    admin/사용자 `curated-*` + `tripmate-copy`), post-reload 신규 표면(Prometheus
+    `/metrics`, arm64 buildx), smoke breadth(features/batch·by-target, ops/providers,
+    ops 관측, governance 리뷰 큐, debug/mois-license).
 - **외부 추적**
   - `T-019` — TripMate 측 Kakao Maps → maplibre-vworld 교체와 SPEC 문서 supersede 추적.
   - `T-210b` — TripMate 문서 supersede.
@@ -34,41 +36,38 @@ curated feature/TripMate import, `T-224` concierge provider 경계, `T-226`
 패키지/runtime identity clean cut, `T-227` Prometheus 메트릭, `T-228`
 API/admin 패키지 분리까지 닫혔다.
 
-즉시 실행 가능한 본 저장소 잔여는 **T-225 closure 재검증**뿐이다. 과거 상세 완료
-묶음(`T-RV-*`, `T-200~T-228`, `T-212a~d`, `T-216`, `T-218` 등)은
+**T-225 closure 재검증은 완료**(2026-06-13, claude — 정본
+`docs/reports/t-225-t212e-closure-recheck-2026-06-13.md`)됐고, T-212e closure는
+유효로 재확인됐다. 남은 본 저장소 잔여는 T-225가 분리한 라이브 검증 후속 **T-229**다.
+과거 상세 완료 묶음(`T-RV-*`, `T-200~T-228`, `T-212a~d`, `T-216`, `T-218` 등)은
 `tasks-done.md`에 아카이브한다.
 
-## T-225 — T-212e closure 재검증
+## T-229 — T-212e 후속 라이브 검증
 
-- [ ] T-225 — **T-212e closure 재검증**
+- [ ] T-229 — **T-212e 후속 라이브 검증** (T-225가 분리한 커버리지 갭)
 
-목표:
+배경: T-225(완료, `docs/reports/t-225-t212e-closure-recheck-2026-06-13.md`)가
+T-212e closure를 유효로 재확인하면서, 라이브 검증이 미수행된 커버리지 갭을 후속으로
+분리했다. 전부 코드 결함이 아니라 **reload smoke에 미포함된 표면**이며 라이브 Docker
+스택이 있어야 검증된다.
 
-- `docs/reports/t-212e-live-full-reload-final-2026-06-12.md` 결과가 최신 main의
-  provider/API/admin 표면과 충돌하지 않는지 확인한다.
-- 다른 agent의 T-212e 결과가 충분하면 full reload를 재실행하지 않고 증거 대조로
-  닫는다.
+목표(우선순위 순):
 
-확인 항목:
-
-- live full reload row 수: 1,095,665 features, weather values 92,923.
-- consistency gate 최종 report: `99159eea`, `severity_max=OK`.
-- offline upload 실데이터 CSV/TSV/JSONL 3포맷 + DELETE lifecycle 증거.
-- Windows Playwright e2e 33/33, API smoke 17/17, backup/restore smoke.
-- 대표 read P99: search 86ms, nearby 102ms, categories 9ms, in-bounds 442ms.
-- T-221/T-222/T-223/T-224/T-226/T-227/T-228 이후 새 API/provider/admin 표면이
-  T-212e 최종 리포트의 closure 조건에서 빠지지 않았는지.
-
-산출물:
-
-- 필요 시 `docs/reports/`에 짧은 재검증 리포트 추가.
-- `docs/resume.md`와 `docs/journal.md`에 결과 반영.
-- 충분히 닫혔으면 `tasks-done.md`로 T-225 이동.
+- (A) **curated 오버레이 라이브 검증**(주요). `curated_features_refresh` job을
+  materialize하고, admin `curated-*`(11개)·사용자/공개 `curated-*` read +
+  `GET /v1/curated-features/{id}/tripmate-copy`(TripMate 인계 계약, ADR-049/052)를
+  실데이터로 검증한다. [T-225: AS-01, API-11/12]
+- (B) **reload 이후 신규 표면**. Prometheus `/metrics`(기본 on) 라이브 응답,
+  T-108 arm64(Odroid) multi-arch buildx 이미지 build+boot smoke. [T-225: PMI-04/05]
+- (C) **smoke breadth 보강**. `/v1/features/batch`·`/features/nearby/by-target`,
+  `/v1/ops/providers`(+`/{provider}`), `/v1/ops/{metrics,api-call-logs,system-logs}`,
+  governance 리뷰 큐(dedup/enrichment/feature-update-requests),
+  `/v1/debug/mois-license/{id}`. [T-225: API-02/14/15/17/19]
 
 완료 조건:
 
-- 최신 main 기준 evidence 링크와 수치가 재대조되어 drift가 없거나, 남은 drift가
-  명시적 후속 task로 분리된다.
+- (A)~(C) 각 표면이 라이브에서 검증되거나, 검증 불가 사유(예: export API 미가동
+  guard-skip)가 명시 기록된다. 짧은 결과 리포트를 `docs/reports/`에 남긴다.
 
 ## 외부 추적
 
