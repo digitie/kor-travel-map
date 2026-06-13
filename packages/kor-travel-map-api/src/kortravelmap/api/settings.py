@@ -43,8 +43,11 @@ class ApiSettings(BaseSettings):
         ),
     )
     port: int = Field(
-        default=12301,
-        description="FastAPI bind port. 기본 12301 (kor-travel-map 고정 API 포트).",
+        default=12701,
+        description=(
+            "FastAPI bind port. 기본 12701 "
+            "(kor-travel-docker-manager map API 포트)."
+        ),
     )
     log_level: str = Field(
         default="info",
@@ -101,7 +104,7 @@ class ApiSettings(BaseSettings):
         pattern=r"^/[A-Za-z0-9/_\-.]*$",
         description=(
             "Prometheus exposition endpoint path. kor-travel-docker-manager의 "
-            "Prometheus는 API 포트(기본 12301)의 이 path를 scrape한다."
+            "Prometheus는 API 포트(기본 12701)의 이 path를 scrape한다."
         ),
     )
     feature_change_review_mode: str = Field(
@@ -115,12 +118,12 @@ class ApiSettings(BaseSettings):
     )
     cors_allow_origins: list[str] = Field(
         default=[
-            "http://localhost:12305",
-            "http://127.0.0.1:12305",
+            "http://localhost:12705",
+            "http://127.0.0.1:12705",
         ],
         description=(
-            "CORS 허용 origin 목록. frontend(Next.js dev/start, 12305)가 브라우저에서 "
-            "backend(12301)로 cross-origin fetch하므로 필요. 내부 debug 도구라 "
+            "CORS 허용 origin 목록. frontend(Next.js dev/start, 12705)가 브라우저에서 "
+            "backend(12701)로 cross-origin fetch하므로 필요. 내부 debug 도구라 "
             "기본은 localhost frontend만 (ADR-005 — 네트워크 계층이 외부 차단). "
             "env override는 JSON 배열."
         ),
@@ -147,10 +150,10 @@ class ApiSettings(BaseSettings):
         ),
     )
     dagster_url: str = Field(
-        default="http://127.0.0.1:12302",
+        default="http://127.0.0.1:12702",
         description=(
             "Dagster webserver base URL. admin UI embed와 backend GraphQL 조회에 "
-            "사용한다. Docker API 컨테이너에서는 보통 ``http://dagster:12302``."
+            "사용한다. Docker API 컨테이너에서는 보통 ``http://dagster:12702``."
         ),
     )
     dagster_graphql_url: str | None = Field(

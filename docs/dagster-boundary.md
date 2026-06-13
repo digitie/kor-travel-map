@@ -516,8 +516,8 @@ docker compose up dagster dagster-daemon
 
 # 로컬 venv에서 webserver/daemon을 직접 나누어 띄울 때
 export DAGSTER_HOME=.dagster
-export KOR_TRAVEL_MAP_DAGSTER_PG_URL=postgresql://kor_travel_map:kor_travel_map@127.0.0.1:15432/kor_travel_map_dagster
-dagster-webserver -m kortravelmap.dagster.definitions -h 0.0.0.0 -p 12302
+export KOR_TRAVEL_MAP_DAGSTER_PG_URL=postgresql://kor_travel_map:kor_travel_map@127.0.0.1:5432/kor_travel_map_dagster
+dagster-webserver -m kortravelmap.dagster.definitions -h 0.0.0.0 -p 12702
 dagster-daemon run -m kortravelmap.dagster.definitions
 ```
 

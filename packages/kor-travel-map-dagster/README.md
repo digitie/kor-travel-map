@@ -20,7 +20,7 @@
 docker compose up dagster dagster-daemon
 
 # 로컬 venv 직접 실행
-dagster-webserver -m kortravelmap.dagster.definitions -h 0.0.0.0 -p 12302
+dagster-webserver -m kortravelmap.dagster.definitions -h 0.0.0.0 -p 12702
 dagster-daemon run -m kortravelmap.dagster.definitions
 ```
 

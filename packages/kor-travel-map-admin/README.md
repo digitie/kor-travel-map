@@ -12,7 +12,7 @@ npm install
 npm run dev
 ```
 
-기본 포트는 `12305`다. backend API는 기본 `http://127.0.0.1:12301`이며,
+기본 포트는 `12705`다. backend API는 기본 `http://127.0.0.1:12701`이며,
 frontend는 `NEXT_PUBLIC_KOR_TRAVEL_MAP_API`로 API base URL을 받는다.
 
 ## 타입 생성

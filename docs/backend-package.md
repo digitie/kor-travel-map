@@ -167,7 +167,7 @@ class KorTravelMapSettings(BaseSettings):
 
     # API 프로그램 기본 바인드 (패키지 쪽 KOR_TRAVEL_MAP_API_*가 우선)
     admin_host: str = "127.0.0.1"  # 외부 노출 금지 default
-    admin_port: int = 12301
+    admin_port: int = 12701
 
     # 객체 저장소 (boto3 S3 호환)
     object_store_endpoint_url: str = "http://127.0.0.1:12101"
@@ -178,7 +178,7 @@ class KorTravelMapSettings(BaseSettings):
     object_store_public_base_url: str | None = "http://127.0.0.1:12101/kor-travel-map"
 
     # 주소 보강 (kor-travel-geo REST v2)
-    kor_travel_geo_base_url: str | None = "http://127.0.0.1:12201"
+    kor_travel_geo_base_url: str | None = "http://127.0.0.1:12501"
 
     # 로그
     log_level: str = "INFO"

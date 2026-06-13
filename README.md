@@ -11,9 +11,9 @@ SQLAlchemy 2 async + GeoAlchemy2 + GeoPandas 위에서 동작한다.
 > 독립 DB/Dagster를 가지고, TripMate는 라이브러리를 직접 import하지 않고 OpenAPI
 > (HTTP)로만 연동한다.
 >
-> **기준값(잘 바뀌지 않는 사실)**: standalone 고정 포트 API `12301` / admin UI
-> `12305` / Dagster `12302`(ADR-047), RustFS S3 `12101`·console `12105`, geocoding은
-> kor-travel-geo REST v2 `POST /v2/{reverse,geocode}` 로컬 `http://127.0.0.1:12201`,
+> **기준값(잘 바뀌지 않는 사실)**: docker-manager 로컬 포트 기준 API `12701` /
+> admin UI `12705` / Dagster `12702`, RustFS S3 `12101`·console `12105`, geocoding은
+> kor-travel-geo REST v2 `POST /v2/{reverse,geocode}` 로컬 `http://127.0.0.1:12501`,
 > frontend Next.js 16 + `maplibre-vworld-js#v0.1.3`. ADR 현황: **001~056 accepted**
 > (다음 후보 057). ADR-048은 `/v1` REST clean cut + 정합성 표준, ADR-053은
 > `kor-travel-concierge` YouTube provider
@@ -127,13 +127,13 @@ alembic upgrade head
 uv pip install -e packages/kor-travel-map-api
 
 # (디버그) REST API 기동 — 인증 없음, localhost 전용
-uvicorn kortravelmap.api.app:app --host 127.0.0.1 --port 12301
+uvicorn kortravelmap.api.app:app --host 127.0.0.1 --port 12701
 
 # (옵션) 디버그 UI frontend — WSL 셸에서 실행
 cd packages/kor-travel-map-admin/frontend
 which node npm              # /home/.../.nvm/... 등 WSL 경로여야 함 (/mnt/c/... 금지)
 cp .env.example .env.local  # NEXT_PUBLIC_VWORLD_API_KEY 설정
-npm install && npm run dev   # http://127.0.0.1:12305
+npm install && npm run dev   # http://127.0.0.1:12705
 ```
 
 Frontend dev/prod 서버(`npm run dev`, `npm run start`)는 **WSL에서 실행**한다.

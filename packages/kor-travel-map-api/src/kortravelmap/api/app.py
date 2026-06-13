@@ -11,7 +11,7 @@ ADR 참조
 운영
 ----
 uvicorn 직접 호출:
-    ``uvicorn kortravelmap.api.app:app --host 127.0.0.1 --port 12301``
+    ``uvicorn kortravelmap.api.app:app --host 127.0.0.1 --port 12701``
 
 uvicorn 설정은 ``ApiSettings``(``KOR_TRAVEL_MAP_API_*`` env) 또는 호출자가
 명시. ``host=0.0.0.0`` 직접 노출 금지 — Cloudflare Tunnel/SSO 게이트웨이 뒤에
@@ -304,7 +304,7 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             request_id=request_id,
         )
 
-    # frontend(Next.js dev/start 12305)가 브라우저에서 backend(12301)로 cross-origin
+    # frontend(Next.js dev/start 12705)가 브라우저에서 backend(12701)로 cross-origin
     # fetch → CORS 필요 (ADR-005: 내부 debug 도구, origin은 localhost frontend로
     # 한정). OpenAPI spec에는 영향 없음(미들웨어, ADR-031 drift gate 무관).
     if settings.cors_allow_origins:

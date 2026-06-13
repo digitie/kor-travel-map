@@ -108,9 +108,9 @@ services:
         required: false
     environment:
       KOR_TRAVEL_MAP_API_HOST: 0.0.0.0
-      KOR_TRAVEL_MAP_API_PORT: ${KOR_TRAVEL_MAP_API_PORT:-12301}
-      KOR_TRAVEL_MAP_API_CORS_ALLOW_ORIGINS: '["http://localhost:${KOR_TRAVEL_MAP_ADMIN_WEB_PORT:-12305}","http://127.0.0.1:${KOR_TRAVEL_MAP_ADMIN_WEB_PORT:-12305}"]'
-      KOR_TRAVEL_MAP_API_DAGSTER_URL: ${KOR_TRAVEL_MAP_DOCKER_API_DAGSTER_URL:-http://dagster:${KOR_TRAVEL_MAP_DAGSTER_PORT:-12302}}
+      KOR_TRAVEL_MAP_API_PORT: ${KOR_TRAVEL_MAP_API_PORT:-12701}
+      KOR_TRAVEL_MAP_API_CORS_ALLOW_ORIGINS: '["http://localhost:${KOR_TRAVEL_MAP_ADMIN_WEB_PORT:-12705}","http://127.0.0.1:${KOR_TRAVEL_MAP_ADMIN_WEB_PORT:-12705}"]'
+      KOR_TRAVEL_MAP_API_DAGSTER_URL: ${KOR_TRAVEL_MAP_DOCKER_API_DAGSTER_URL:-http://dagster:${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}}
       KOR_TRAVEL_MAP_API_DAGSTER_ALLOWED_HOSTS: '${KOR_TRAVEL_MAP_DOCKER_API_DAGSTER_ALLOWED_HOSTS:-["dagster","127.0.0.1","localhost","::1"]}'
       KOR_TRAVEL_MAP_API_PROMETHEUS_METRICS_ENABLED: ${KOR_TRAVEL_MAP_API_PROMETHEUS_METRICS_ENABLED:-true}
       KOR_TRAVEL_MAP_API_PROMETHEUS_METRICS_PATH: ${KOR_TRAVEL_MAP_API_PROMETHEUS_METRICS_PATH:-/metrics}
@@ -136,7 +136,7 @@ services:
       KOR_TRAVEL_MAP_API_KNPS_SERVICE_KEY: ${KOR_TRAVEL_MAP_API_KNPS_SERVICE_KEY:-${KNPS_SERVICE_KEY:-${KNPS_API_KEY:-}}}
       KOR_TRAVEL_MAP_API_AIRKOREA_SERVICE_KEY: ${KOR_TRAVEL_MAP_API_AIRKOREA_SERVICE_KEY:-${AIRKOREA_SERVICE_KEY:-${AIRKOREA_API_KEY:-${DATA_GO_KR_SERVICE_KEY:-}}}}
       KOR_TRAVEL_MAP_API_KRFOREST_SERVICE_KEY: ${KOR_TRAVEL_MAP_API_KRFOREST_SERVICE_KEY:-${KRFOREST_SERVICE_KEY:-${KRFOREST_API_KEY:-${DATA_GO_KR_SERVICE_KEY:-}}}}
-    # 호스트 공유 서비스(kor-travel-geo :12201, kor-travel-docker-manager RustFS :12101) 접근 경로.
+    # 호스트 공유 서비스(kor-travel-geo :12501, kor-travel-docker-manager RustFS :12101) 접근 경로.
     # Docker Desktop과 달리 docker-ce는 host.docker.internal을 기본 제공하지 않는다 (#372).
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -146,12 +146,12 @@ services:
       rustfs-init:
         condition: service_completed_successfully
     ports:
-      - "${KOR_TRAVEL_MAP_DOCKER_BIND_HOST:-127.0.0.1}:${KOR_TRAVEL_MAP_API_PORT:-12301}:${KOR_TRAVEL_MAP_API_PORT:-12301}"
+      - "${KOR_TRAVEL_MAP_DOCKER_BIND_HOST:-127.0.0.1}:${KOR_TRAVEL_MAP_API_PORT:-12701}:${KOR_TRAVEL_MAP_API_PORT:-12701}"
     healthcheck:
       test:
         [
           "CMD-SHELL",
-          "python -c \"import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/health' % os.environ.get('KOR_TRAVEL_MAP_API_PORT', '12301'), timeout=2).read()\"",
+          "python -c \"import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/health' % os.environ.get('KOR_TRAVEL_MAP_API_PORT', '12701'), timeout=2).read()\"",
         ]
       interval: 10s
       timeout: 5s
@@ -163,25 +163,25 @@ services:
       context: .
       dockerfile: docker/frontend.Dockerfile
       args:
-        NEXT_PUBLIC_KOR_TRAVEL_MAP_API: ${NEXT_PUBLIC_KOR_TRAVEL_MAP_API:-http://127.0.0.1:${KOR_TRAVEL_MAP_API_PORT:-12301}}
-        NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL: ${NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL:-http://127.0.0.1:${KOR_TRAVEL_MAP_DAGSTER_PORT:-12302}}
-        NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL: ${NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL:-http://127.0.0.1:12201}
+        NEXT_PUBLIC_KOR_TRAVEL_MAP_API: ${NEXT_PUBLIC_KOR_TRAVEL_MAP_API:-http://127.0.0.1:${KOR_TRAVEL_MAP_API_PORT:-12701}}
+        NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL: ${NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL:-http://127.0.0.1:${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}}
+        NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL: ${NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL:-http://127.0.0.1:12501}
         NEXT_PUBLIC_VWORLD_API_KEY: ${NEXT_PUBLIC_VWORLD_API_KEY:-${KOR_TRAVEL_GEO_VWORLD_API_KEY:-${VWORLD_API_KEY:-}}}
     environment:
-      NEXT_PUBLIC_KOR_TRAVEL_MAP_API: ${NEXT_PUBLIC_KOR_TRAVEL_MAP_API:-http://127.0.0.1:${KOR_TRAVEL_MAP_API_PORT:-12301}}
-      NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL: ${NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL:-http://127.0.0.1:${KOR_TRAVEL_MAP_DAGSTER_PORT:-12302}}
-      NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL: ${NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL:-http://127.0.0.1:12201}
+      NEXT_PUBLIC_KOR_TRAVEL_MAP_API: ${NEXT_PUBLIC_KOR_TRAVEL_MAP_API:-http://127.0.0.1:${KOR_TRAVEL_MAP_API_PORT:-12701}}
+      NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL: ${NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL:-http://127.0.0.1:${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}}
+      NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL: ${NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL:-http://127.0.0.1:12501}
       NEXT_PUBLIC_VWORLD_API_KEY: ${NEXT_PUBLIC_VWORLD_API_KEY:-${KOR_TRAVEL_GEO_VWORLD_API_KEY:-${VWORLD_API_KEY:-}}}
     depends_on:
       api:
         condition: service_healthy
     ports:
-      - "${KOR_TRAVEL_MAP_DOCKER_BIND_HOST:-127.0.0.1}:${KOR_TRAVEL_MAP_ADMIN_WEB_PORT:-12305}:12305"
+      - "${KOR_TRAVEL_MAP_DOCKER_BIND_HOST:-127.0.0.1}:${KOR_TRAVEL_MAP_ADMIN_WEB_PORT:-12705}:12705"
     healthcheck:
       test:
         [
           "CMD-SHELL",
-          "node -e \"fetch('http://127.0.0.1:12305/').then((response) => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1))\"",
+          "node -e \"fetch('http://127.0.0.1:12705/').then((response) => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1))\"",
         ]
       interval: 10s
       timeout: 5s
@@ -197,7 +197,7 @@ services:
     command:
       - /bin/sh
       - -c
-      - dagster-webserver -m kortravelmap.dagster.definitions -h 0.0.0.0 -p "$${KOR_TRAVEL_MAP_DAGSTER_PORT:-12302}"
+      - dagster-webserver -m kortravelmap.dagster.definitions -h 0.0.0.0 -p "$${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}"
     env_file:
       - path: .env
         required: false
@@ -207,7 +207,7 @@ services:
       TMP: /tmp
       DAGSTER_HOME: /opt/dagster/dagster_home
       DAGSTER_DISABLE_TELEMETRY: ${DAGSTER_DISABLE_TELEMETRY:-yes}
-      KOR_TRAVEL_MAP_DAGSTER_PORT: ${KOR_TRAVEL_MAP_DAGSTER_PORT:-12302}
+      KOR_TRAVEL_MAP_DAGSTER_PORT: ${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}
       KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL:-postgresql://kor_travel_map:kor_travel_map@postgres:5432/kor_travel_map_dagster}
       KOR_TRAVEL_MAP_PG_DSN: ${KOR_TRAVEL_MAP_DOCKER_PG_DSN:-postgresql+asyncpg://kor_travel_map:kor_travel_map@postgres:5432/kor_travel_map}
       KOR_TRAVEL_MAP_OBJECT_STORE_ENDPOINT_URL: ${KOR_TRAVEL_MAP_DOCKER_OBJECT_STORE_ENDPOINT_URL:-http://rustfs:9000}
@@ -231,12 +231,12 @@ services:
       rustfs-init:
         condition: service_completed_successfully
     ports:
-      - "${KOR_TRAVEL_MAP_DOCKER_BIND_HOST:-127.0.0.1}:${KOR_TRAVEL_MAP_DAGSTER_PORT:-12302}:${KOR_TRAVEL_MAP_DAGSTER_PORT:-12302}"
+      - "${KOR_TRAVEL_MAP_DOCKER_BIND_HOST:-127.0.0.1}:${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}:${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}"
     healthcheck:
       test:
         [
           "CMD-SHELL",
-          "python -c \"import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/' % os.environ.get('KOR_TRAVEL_MAP_DAGSTER_PORT', '12302'), timeout=2).read()\"",
+          "python -c \"import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/' % os.environ.get('KOR_TRAVEL_MAP_DAGSTER_PORT', '12702'), timeout=2).read()\"",
         ]
       interval: 10s
       timeout: 5s

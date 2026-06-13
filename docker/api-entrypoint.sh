@@ -17,4 +17,4 @@ done
 
 exec python -m uvicorn kortravelmap.api.app:app \
   --host 0.0.0.0 \
-  --port "${KOR_TRAVEL_MAP_API_PORT:-12301}"
+  --port "${KOR_TRAVEL_MAP_API_PORT:-12701}"

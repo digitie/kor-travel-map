@@ -819,8 +819,8 @@ Query:
 {
   "data": {
     "status": "ok",
-    "dagster_url": "http://127.0.0.1:12302",
-    "graphql_url": "http://127.0.0.1:12302/graphql",
+    "dagster_url": "http://127.0.0.1:12702",
+    "graphql_url": "http://127.0.0.1:12702/graphql",
     "version": "1.13.7",
     "repository_count": 1,
     "job_count": 10,
@@ -892,8 +892,8 @@ Query:
 {
   "data": {
     "status": "ok",
-    "dagster_url": "http://127.0.0.1:12302",
-    "graphql_url": "http://127.0.0.1:12302/graphql",
+    "dagster_url": "http://127.0.0.1:12702",
+    "graphql_url": "http://127.0.0.1:12702/graphql",
     "checked_at": "2026-06-07T09:00:00Z",
     "run": {
       "run_id": "run-1",
@@ -933,8 +933,8 @@ embedded Dagster 화면이 로컬 첫 실행 커뮤니티 모달로 가려지지
 ```json
 {
   "status": "ok",
-  "dagster_url": "http://127.0.0.1:12302",
-  "graphql_url": "http://127.0.0.1:12302/graphql",
+  "dagster_url": "http://127.0.0.1:12702",
+  "graphql_url": "http://127.0.0.1:12702/graphql",
   "checked_at": "2026-06-05T09:00:00Z",
   "seen": true,
   "errors": []

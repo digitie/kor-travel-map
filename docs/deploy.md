@@ -10,19 +10,19 @@ Odroid M1S(ARM64) 양쪽 배포를 위한 multi-platform Docker build 절차를 
 
 | 서비스 | 기본 포트 | 역할 |
 |--------|-----------|------|
-| `api` | `12301` | `kor-travel-map-api` FastAPI, OpenAPI/public/admin/debug/ops 라우터 |
-| `frontend` | `12305` | Next.js admin UI |
-| `dagster` | `12302` | kor-travel-map-owned Dagster UI/code location |
+| `api` | `12701` | `kor-travel-map-api` FastAPI, OpenAPI/public/admin/debug/ops 라우터 |
+| `frontend` | `12705` | Next.js admin UI |
+| `dagster` | `12702` | kor-travel-map-owned Dagster UI/code location |
 | `postgres` | host `5432`, container `5432` | 독립 `kor_travel_map` PostGIS DB |
 | `rustfs` | API `12101`, console `12105` | S3 호환 객체 저장소(선택, backup 대상) |
 
-Prometheus 성능 메트릭은 별도 포트를 열지 않고 `api`의 같은 host 포트 `12301`에서
+Prometheus 성능 메트릭은 별도 포트를 열지 않고 `api`의 같은 host 포트 `12701`에서
 `GET /metrics`로 노출한다. 이 endpoint는 공개 REST(`/v1/features`·`/v1/categories`·
 `/v1/providers`·`/v1/public`), `/admin`, `/ops`, `/debug`, system route의 HTTP 요청
 수/지연 시간/응답 크기/예외와 DB query 수/지연 시간을 함께 제공한다.
-`kor-travel-docker-manager` 관측 스택은 Prometheus `12601`, cAdvisor Exporter
-`12602`, Grafana `12605`를 사용하며, Prometheus가
-`http://<kor-travel-map-api>:12301/metrics`를 pull scrape한다. 앱이 Prometheus로 능동
+`kor-travel-docker-manager` 관측 스택은 Grafana `12205`, cAdvisor Exporter
+`12301`, Prometheus `12401`을 사용하며, Prometheus가
+`http://<kor-travel-map-api>:12701/metrics`를 pull scrape한다. 앱이 Prometheus로 능동
 연결하지 않는다.
 
 `kor-travel-docker-manager`가 공유 PostGIS/RustFS를 이미 구동하는 로컬 환경에서는 kor-travel-map의
@@ -99,10 +99,9 @@ restore 기본 대상은 `kor_travel_map_restore`, `kor_travel_map_dagster_resto
 관리한다. git에는 `.env.example`만 둔다. provider key는 기존 provider repo 이름을
 그대로 둘 수 있고, `scripts/load-env.sh`/`docker-compose.yml`이 실행용
 `KOR_TRAVEL_MAP_API_*` 이름으로 매핑한다.
-PC 개발 환경에서 host `5432`는 `kor-travel-docker-manager`/`kor-travel-geo`가 소유한
-공유 PostGIS 서버 인스턴스다. kor-travel-map standalone local Postgres의 기본 publish
-포트는 `15432`이며, `KOR_TRAVEL_MAP_PG_DSN`을 명시하지 않으면
-`scripts/load-env.sh`가 `127.0.0.1:15432/kor_travel_map` DSN을 채운다.
+PC 개발 환경에서 host `5432`는 `kor-travel-docker-manager`가 소유한
+공유 PostgreSQL/PostGIS 서버 인스턴스다. `KOR_TRAVEL_MAP_PG_DSN`을 명시하지 않으면
+`scripts/load-env.sh`가 `127.0.0.1:5432/kor_travel_map` DSN을 채운다.
 공유 DB만 쓰고 RustFS는 local compose로 띄우는 Docker 기동은
 `KOR_TRAVEL_MAP_DB_EXTERNAL=true`와 `KOR_TRAVEL_MAP_EXTERNAL_POSTGRES_HOST_PORT=5432`
 기준이다. 공유 DB와 공유 RustFS를 모두 쓰면 `KOR_TRAVEL_MAP_INFRA_EXTERNAL=true`를 쓴다.

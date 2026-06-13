@@ -32,7 +32,7 @@
   `geocode_response_to_address` + `KorTravelGeoRestClient`(httpx.AsyncClient 주입) +
   콜러블 팩토리.
 - 설정: `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_BASE_URL` — REST 서비스 base URL. 로컬 개발의
-  공식 `kor-travel-geo` FastAPI 포트는 `http://127.0.0.1:12201`
+  공식 `kor-travel-geo` FastAPI 포트는 `http://127.0.0.1:12501`
   (`kor-travel-geo/docs/ports.md`). `None`이면 정/역지오코딩 보강 비활성
   (좌표만으로 적재).
 - VWorld 폴백 키: `kor-travel-geo` REST 서비스 내부 설정에서만. 본 라이브러리에서

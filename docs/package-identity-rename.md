@@ -52,7 +52,7 @@ bucket/prefix는 hyphen(`kor-travel-map`)을 사용한다.
 - Postgres schema: `feature`, `provider_sync`, `ops`
 - PostGIS extension schema: `x_extension`
 - OpenAPI versioned path prefix: `/v1`
-- standalone 고정 포트: API `12301`, admin UI `12305`, Dagster `12302`
+- docker-manager 기준 고정 포트: API `12701`, admin UI `12705`, Dagster `12702`
 - TripMate 연동 방식: OpenAPI HTTP, DB/Python import 직접 의존 없음
 
 ## 3. 이행 원칙
