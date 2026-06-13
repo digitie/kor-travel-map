@@ -3,6 +3,29 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 태스크 문서 정리 (2026-06-13, Codex)
+
+- [x] **태스크 문서 전반 정리.**
+  `docs/tasks.md`를 열린 `[ ]` task만 남기는 백로그로 축소하고,
+  `docs/resume.md`를 현재 상태 + 다음 한 작업 중심으로 다시 정리했다.
+  중복 완료 체크박스와 오래된 Sprint 2/3 미완료 표기가 현재 인수인계에 노출되지
+  않도록 완료 묶음은 이 파일에 요약 아카이브한다.
+
+## 패키지 정체성 / 메트릭 후속 (2026-06-13, `T-226`/`T-227`)
+
+- [x] **T-226 — 배포명/임포트명 재정의: `kor-travel-map` / `kortravelmap`.**
+  ADR-054와 `docs/package-identity-rename.md` 기준으로 public distribution
+  `kor-travel-map`, Python import root `kortravelmap`, 권장 예시
+  `import kortravelmap as ktm`, CLI `ktmctl`, DB `kor_travel_map`,
+  Dagster metadata DB `kor_travel_map_dagster`, RustFS bucket/prefix
+  `kor-travel-map` 계열로 clean cut했다. `T-226a` 문서 정본,
+  `T-226b` 실행계획, `T-226c/d/e` 코드·runtime·소비자 문서 전파가 모두 완료됐다.
+- [x] **T-227 — Prometheus 성능 메트릭 표면.**
+  `kortravelmap.api` FastAPI app에 `GET /metrics`를 추가했다. HTTP 요청 total/duration,
+  in-progress, response size, exception count, DB query count/duration,
+  process/runtime metrics를 Prometheus exposition format으로 제공하고
+  `surface=public/admin/ops/debug/system/other` label로 공개 REST와 운영 REST를 분리했다.
+
 ## API/admin 패키지 분리 (2026-06-13, `T-228`)
 
 - [x] **T-228 — `kor-travel-map-api` backend와 `kor-travel-map-admin` frontend 분리.**
@@ -10,6 +33,37 @@
   `kor-travel-map-admin`은 Next.js admin frontend만 소유하도록 정리했다.
   `KOR_TRAVEL_MAP_API_*`, `NEXT_PUBLIC_KOR_TRAVEL_MAP_API`,
   `packages/kor-travel-map-api/openapi*.json` 기준으로 Docker/CI/scripts/docs를 갱신했다.
+
+## Admin UI 접근성/e2e 보강 (2026-06-10, `T-218`)
+
+- [x] **T-218 — admin UI 상세 구현 점검 + a11y/e2e 완비.**
+  화면별 상세 점검과 a11y/e2e 보강을 완료했다. 정본은
+  `docs/reports/t-218-admin-ui-hardening-plan-2026-06-10.md`와
+  `docs/runbooks/admin-ui-screen-checklist.md`.
+  - [x] `T-218a` — 공통 폼 a11y wrapper와 `validateForm` util 도입.
+  - [x] `T-218b` — 좌표 scope, offline upload, issue manual override 폼에
+        visible label/error/focus 경로 적용.
+  - [x] `T-218c` — `/admin/backups` e2e 신설로 admin/ops 16/16 화면 커버 달성.
+  - [x] `T-218d` — 위험 액션 음성 경로 e2e 보강.
+  - [x] `T-218e` — `Alert` live-region 정합성 보강.
+  - [x] `T-218f` — 화면별 상세 회귀 점검 체크리스트 작성.
+
+## Sprint 5 운영 진입 완료 묶음 (2026-06-07~10)
+
+- [x] **T-200~T-204 — 운영 진입 기반.**
+  Batch DAG + 정합성 게이트, `ops.feature_consistency_reports`, pre-commit hook,
+  PR CI workflow, branch protection 가이드를 완료했다.
+- [x] **T-212a~d — ADR-045 전체점검/튜닝 선행 묶음.**
+  전체 inventory + Playwright/e2e gap matrix, admin UI 완결성, API endpoint/error/log
+  contract, DB/API/frontend 성능 튜닝과 read-heavy 재측정을 완료했다.
+- [x] **T-216a~g — REST API 정합성 심화.**
+  `/v1` clean cut, pagination 단일화, envelope payload/meta 분리,
+  parameter/error/좌표 정합성, 명명 통일, 코드/DB surrogate 명명 전파,
+  단일 정본과 버전 거버넌스를 완료했다.
+- [x] **T-RV-50~55 — T-RV-04b provider/admin 후속 프로그램.**
+  `maplibre-vworld-js` v0.1.3 정합, dedup 수동처리 UI/기본 scope,
+  visitkorea 축제 enrichment, krforest 휴양림/수목원, datagokr 박물관/미술관,
+  관광지·주차장·KHOA 해수욕장·AirKorea 대기질·공항 provider 후속을 완료했다.
 
 ## 실데이터 full reload 최종 검증 (2026-06-12, `T-212e`)
 
