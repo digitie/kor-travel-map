@@ -38,6 +38,8 @@ from kortravelmap.admin import __version__
 from kortravelmap.admin.auth import (
     require_admin_destructive_enabled,
 )
+from kortravelmap.admin.db import configure_prometheus_metrics
+from kortravelmap.admin.prometheus import PrometheusMetrics
 from kortravelmap.admin.response import bind_request_id, reset_request_id
 from kortravelmap.admin.response import request_id as response_request_id
 from kortravelmap.admin.routers import (
@@ -253,6 +255,22 @@ def create_app(settings: AdminSettings | None = None) -> FastAPI:
     )
     application.state.settings = settings
 
+    prometheus_metrics: PrometheusMetrics | None = None
+    if settings.prometheus_metrics_enabled:
+        prometheus_metrics = PrometheusMetrics(
+            service_name="kor-travel-map-admin",
+            version=__version__,
+        )
+        application.state.prometheus_metrics = prometheus_metrics
+        configure_prometheus_metrics(prometheus_metrics)
+        endpoint_metrics = prometheus_metrics
+
+        @application.get(settings.prometheus_metrics_path, include_in_schema=False)
+        async def prometheus_metrics_endpoint() -> Response:
+            return endpoint_metrics.response()
+    else:
+        configure_prometheus_metrics(None)
+
     @application.exception_handler(StarletteHTTPException)
     async def http_exception_handler(
         request: Request,
@@ -330,6 +348,18 @@ def create_app(settings: AdminSettings | None = None) -> FastAPI:
                 request_id=_request_id(request),
             )
             return response
+
+    if prometheus_metrics is not None:
+        metrics = prometheus_metrics
+
+        @application.middleware("http")
+        async def record_prometheus_metrics(
+            request: Request,
+            call_next: Callable[[Request], Awaitable[Response]],
+        ) -> Response:
+            if request.url.path == settings.prometheus_metrics_path:
+                return await call_next(request)
+            return await metrics.instrument_request(request, call_next)
 
     # public liveness/version은 의존 없는 정적 응답 — 항상 mount (T-213h).
     # `/debug/health`·`/debug/version`은 이와 중복이라 제거(T-214h/ADR-048 clean cut) —

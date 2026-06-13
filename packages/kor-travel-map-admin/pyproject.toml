@@ -42,6 +42,7 @@ dependencies = [
   # PR#47: ETL preview `?source=live`에서 provider raw API 호출용 async client.
   # 메인 lib(`kortravelmap`)는 httpx 미사용 — debug-ui가 직접 사용.
   "httpx>=0.27,<1.0",
+  "prometheus-client>=0.20",
 ]
 
 [project.optional-dependencies]

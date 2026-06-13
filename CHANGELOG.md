@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### Prometheus 메트릭 (T-227, 2026-06-13)
+
+- **ADDED**: `GET /metrics` — Prometheus pull scrape용 메트릭 노출 endpoint.
+  공개 REST(`/v1/features`·`/v1/categories`·`/v1/providers`·`/v1/public`),
+  `/admin`, `/ops`, `/debug`, system route 전반의 HTTP 요청 total, duration
+  histogram, 진행 중 요청 gauge, 응답 크기 histogram, 예외 count와 DB query
+  count/duration histogram, 프로세스/런타임 메트릭을 제공한다. 기본 scrape target은
+  API 포트 `12301`의 `/metrics`이며, 관측 스택 포트는
+  `kor-travel-docker-manager` 기준 Prometheus `12601`, cAdvisor `12602`, Grafana
+  `12605`를 따른다.
+
 ### curated_features Admin UI (T-223c-3, 2026-06-12)
 
 - **ADDED**: admin frontend `/admin/curated-features` — curated 후보 목록,

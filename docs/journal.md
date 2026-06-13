@@ -2,6 +2,24 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-13 (codex) — T-227 Prometheus 성능 메트릭 표면 추가
+
+T-226 clean cut 이후 후속으로 Prometheus pull scrape 표면을 추가했다.
+
+- `packages/kor-travel-map-admin/src/kortravelmap/admin/prometheus.py`를 추가해
+  앱별 Prometheus registry, HTTP 요청 total/duration histogram/진행 중 요청 gauge/
+  응답 크기 histogram/예외 count, DB query count/duration histogram, 프로세스/런타임
+  메트릭을 제공한다.
+- `surface=public/admin/ops/debug/system/other` label로 공개 REST와 운영 REST를
+  분리한다. 공개 REST에는 `/v1/features`, `/v1/categories`, `/v1/providers`,
+  `/v1/public`, `/v1/curated-features`를 포함한다.
+- `create_app()`이 기본 `GET /metrics`를 OpenAPI 제외 route로 노출하고,
+  `/metrics` 자체 scrape 요청은 HTTP request metric에서 제외한다.
+- 설정은 `KOR_TRAVEL_MAP_ADMIN_PROMETHEUS_METRICS_ENABLED=true`,
+  `KOR_TRAVEL_MAP_ADMIN_PROMETHEUS_METRICS_PATH=/metrics`로 제어한다.
+- 포트 기준은 `kor-travel-docker-manager` 정본을 참조했다: Prometheus `12601`,
+  cAdvisor `12602`, Grafana `12605`; map API scrape target은 `:12301/metrics`.
+
 ## 2026-06-13 (codex) — T-226 package/runtime identity clean cut 구현
 
 T-226c/d/e를 no-shim clean cut으로 구현했다.
