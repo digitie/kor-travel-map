@@ -523,7 +523,7 @@ dagster-daemon run -m kortravelmap.dagster.definitions
 
 메인 라이브러리 단독으로는 Dagster를 띄우지 않는다 (의존성 X). Dagster 실행 코드는
 kor-travel-map 독립 프로그램 패키지에 둔다. 디버그 / 적재 검증은 admin API
-(`kortravelmap.admin`) 또는 직접 Python 스크립트로도 가능하다.
+(`kortravelmap.api`) 또는 직접 Python 스크립트로도 가능하다.
 
 Docker compose는 `dagster-db-init`로 같은 Postgres container 안에
 `kor_travel_map_dagster` DB를 보장하고, `docker/dagster.yaml`의 `storage.postgres` 설정으로

@@ -35,7 +35,7 @@ pytestmark = pytest.mark.skipif(
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PYTHONPATH_ENTRIES = [
     PROJECT_ROOT / "src",
-    PROJECT_ROOT / "packages" / "kor-travel-map-admin" / "src",
+    PROJECT_ROOT / "packages" / "kor-travel-map-api" / "src",
     PROJECT_ROOT / "packages" / "kor-travel-map-dagster" / "src",
 ]
 

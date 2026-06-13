@@ -27,8 +27,8 @@
   ],
   "sideEffects": false,
   "scripts": {
-    "gen:types": "openapi-typescript ../kor-travel-map-admin/openapi.user.json -o src/types.ts",
-    "gen:types:check": "openapi-typescript ../kor-travel-map-admin/openapi.user.json -o src/types.ts --check",
+    "gen:types": "openapi-typescript ../kor-travel-map-api/openapi.user.json -o src/types.ts",
+    "gen:types:check": "openapi-typescript ../kor-travel-map-api/openapi.user.json -o src/types.ts --check",
     "type-check": "tsc --noEmit"
   },
   "devDependencies": {

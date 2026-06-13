@@ -15,6 +15,6 @@ while ! alembic upgrade head; do
   sleep "$sleep_seconds"
 done
 
-exec python -m uvicorn kortravelmap.admin.app:app \
+exec python -m uvicorn kortravelmap.api.app:app \
   --host 0.0.0.0 \
-  --port "${KOR_TRAVEL_MAP_ADMIN_PORT:-12301}"
+  --port "${KOR_TRAVEL_MAP_API_PORT:-12301}"

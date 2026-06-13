@@ -29,10 +29,10 @@ Python import root `kortravelmap`, 권장 예시 `import kortravelmap as ktm`, C
 `ktmctl`, DB `kor_travel_map`, RustFS bucket/prefix `kor-travel-map` 계열로 clean
 cut했다.
 
-**api/admin 프로그램**: `packages/kor-travel-map-admin/` — rename 완료(PR#148).
-역할은 "debug UI"를 넘어 kor-travel-map **admin/API 프로그램**이다
-(ADR-020/045). 메인 라이브러리(`kortravelmap`)는 FastAPI 의존이 없고, FastAPI는 이
-패키지가 진다.
+**api/admin 프로그램**: FastAPI/OpenAPI backend는 `packages/kor-travel-map-api/`
+(`kor-travel-map-api`, import `kortravelmap.api`)가 맡고, admin frontend는
+`packages/kor-travel-map-admin/frontend/`가 맡는다(ADR-055). 메인 라이브러리
+(`kortravelmap`)는 FastAPI 의존이 없다.
 
 ## 2. 현재 기준
 
@@ -43,7 +43,7 @@ cut했다.
 > DA-D-01). 아래는 잘 바뀌지 않는 기준값만 둔다.
 
 - v1은 `v1` 브랜치 보존, main은 orphan으로 v2 재시작(ADR-001).
-- **ADR 현황**: ADR-001~054 모두 accepted, **다음 후보 번호 = ADR-055**
+- **ADR 현황**: ADR-001~055 모두 accepted, **다음 후보 번호 = ADR-056**
   (`docs/decisions.md`). 045 = Docker 독립 프로그램 + 독립 DB/Dagster + TripMate
   OpenAPI 연동(ADR-003 운영 모델 supersede). 046 = 이행 시 구 모델 호환 shim 금지
   + 주소는 kor-travel-geo REST v2로 통일. 047 = standalone 고정 포트. 048 = REST API
@@ -53,7 +53,8 @@ cut했다.
   검수 통과만 export·철회→inactive) + TripMate 직접 연동 제거 + TripMate feature 제안 반영은 **기존
   `/v1/admin/features*` change API(#317) 승인**(신규 suggestions API 철회 — 잔여 합의
   5건만 확정) + RustFS 공유 버킷 잠정 정책 — 실행 T-217a~g. 054 =
-  `kor-travel-map` / `kortravelmap` package identity clean cut.
+  `kor-travel-map` / `kortravelmap` package identity clean cut. 055 =
+  `kor-travel-map-api` backend와 `kor-travel-map-admin` frontend 분리.
 - **고정 포트(ADR-047)**: API `12301` · admin UI `12305` · Dagster `12302` ·
   Postgres host `5432` · RustFS S3 `12101`/console `12105`.
 - **geocoding 정본**: kor-travel-geo REST v2 `POST /v2/{reverse,geocode}`, 로컬 기본

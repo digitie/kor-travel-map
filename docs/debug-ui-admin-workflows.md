@@ -502,7 +502,7 @@ status/deleted_at을 덮지 않는다.
 
 `DELETE /admin/features/{feature_id}`는 영구 삭제가 아니라 사용자 요청 soft delete다.
 대상 kind는 `place`, `event`만 허용한다. 처리 모드는
-`KOR_TRAVEL_MAP_ADMIN_FEATURE_CHANGE_REVIEW_MODE`에 따라 `require_review`면 pending,
+`KOR_TRAVEL_MAP_API_FEATURE_CHANGE_REVIEW_MODE`에 따라 `require_review`면 pending,
 `immediate`면 같은 transaction에서 applied가 된다.
 
 구현 상태(T-215a): backend 구현 완료. admin UI queue 화면과 approve/reject workflow는
@@ -1633,10 +1633,10 @@ Windows Playwright 표준 실행 모델을 따른다.
 새 라우터/DTO 추가 시:
 
 ```bash
-python packages/kor-travel-map-admin/scripts/export_openapi.py \
+python packages/kor-travel-map-api/scripts/export_openapi.py \
   --profile all
 
-python packages/kor-travel-map-admin/scripts/export_openapi.py \
+python packages/kor-travel-map-api/scripts/export_openapi.py \
   --profile all --check
 ```
 

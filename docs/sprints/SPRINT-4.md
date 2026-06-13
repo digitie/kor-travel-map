@@ -134,7 +134,7 @@ Sprint 4 진입 prep PR로 `python-kraddr-base` 전수 survey + 흡수 계획:
   snapshot 절차 + hot-swap 흐름.
 - `src/kortravelmap/infra/backup.py` — `dump_postgres` / `dump_rustfs` /
   `restore_to_staging` / `swap_dsn`.
-- `packages/kor-travel-map-admin/src/.../routers/admin_backups.py` —
+- `packages/kor-travel-map-api/src/.../routers/admin_backups.py` —
   ADR-035/040 admin 라우터.
 - mutex 적용: `backup` / `restore:{backup_id}` (ADR-039).
 - 1차는 **cold restore** (downtime 허용), hot-swap은 Sprint 5.

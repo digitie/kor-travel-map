@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from kortravelmap.admin.app import create_app
+from kortravelmap.api.app import create_app
 
 pytestmark = pytest.mark.unit
 

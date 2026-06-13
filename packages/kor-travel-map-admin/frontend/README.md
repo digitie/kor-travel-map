@@ -47,7 +47,7 @@ feature 운영, provider 적재, dedup/결측 검토, 오프라인 업로드를 
 | 변수 | 의미 |
 |------|------|
 | `NEXT_PUBLIC_VWORLD_API_KEY` | VWorld API key. **`kor-travel-geo`의 `KOR_TRAVEL_GEO_VWORLD_API_KEY`와 동일 값 공유** (ADR-025 사용자 보강 2026-05-25). 별도 발급 금지. |
-| `NEXT_PUBLIC_KOR_TRAVEL_MAP_ADMIN_API` | 백엔드 base URL (`http://127.0.0.1:12301` 기본) |
+| `NEXT_PUBLIC_KOR_TRAVEL_MAP_API` | 백엔드 base URL (`http://127.0.0.1:12301` 기본) |
 | `NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL` | Dagster UI/embed base URL (`http://127.0.0.1:12302` 기본) |
 
 > **VWorld key 공유 정책**: 본 frontend가 사용하는 VWorld key는
@@ -74,12 +74,12 @@ which node npm              # /home/.../.nvm/... 등 WSL 경로여야 함
 cp .env.example .env.local
 $EDITOR .env.local
 npm install
-npm run gen:types           # ../openapi.json -> src/api/types.ts
+npm run gen:types           # ../../kor-travel-map-api/openapi.json -> src/api/types.ts
 npm run dev                  # http://127.0.0.1:12305
 ```
 
 `src/api/types.ts`는 `openapi-typescript` 자동 생성 파일이다. 라우터/DTO 변경으로
-`../openapi.json`을 갱신했다면 `npm run gen:types`를 함께 실행하고,
+`../../kor-travel-map-api/openapi.json`을 갱신했다면 `npm run gen:types`를 함께 실행하고,
 `npm run gen:types:check`로 drift가 없는지 확인한다.
 
 `next dev`의 기본 포트는 3000이지만, TripMate `apps/web` 개발 충돌 회피를
@@ -166,7 +166,7 @@ npm run doctor
 
 ```powershell
 # 1) WSL 셸에서 서버 2개 기동 (frontend도 WSL에서 실행)
-#    backend : .venv/bin/uvicorn kortravelmap.admin.app:create_app --factory --port 12301
+#    backend : .venv/bin/uvicorn kortravelmap.api.app:create_app --factory --port 12301
 #    frontend: npm run start   # next start :12305
 
 # 2) Windows(PowerShell)에서는 Playwright만 실행
@@ -187,7 +187,7 @@ WSL IP 기반 `http://<WSL-IP>:12305`를 포함한다.
 
 ```bash
 WSL_IP="$(hostname -I | awk '{print $1}')"
-NEXT_PUBLIC_KOR_TRAVEL_MAP_ADMIN_API="http://$WSL_IP:12301" \
+NEXT_PUBLIC_KOR_TRAVEL_MAP_API="http://$WSL_IP:12301" \
 NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL="http://$WSL_IP:12302" \
   scripts/run-admin-stack.sh
 ```

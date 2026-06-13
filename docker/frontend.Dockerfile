@@ -32,13 +32,13 @@ COPY --from=deps /app/packages/kor-travel-map-admin/frontend/package.json ./pack
 COPY packages/map-marker-react ./packages/map-marker-react
 COPY packages/kor-travel-map-admin/frontend ./packages/kor-travel-map-admin/frontend
 
-ARG NEXT_PUBLIC_KOR_TRAVEL_MAP_ADMIN_API=http://127.0.0.1:12301
+ARG NEXT_PUBLIC_KOR_TRAVEL_MAP_API=http://127.0.0.1:12301
 ARG NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL=http://127.0.0.1:12302
 # T-221b 좌표 picker(/admin/features/new)가 prerender 시점에 fail-fast로 요구 —
 # 누락 시 next build 실패 (ADR-046 kor-travel-geo REST, 로컬 표준 12201).
 ARG NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL=http://127.0.0.1:12201
 ARG NEXT_PUBLIC_VWORLD_API_KEY=
-ENV NEXT_PUBLIC_KOR_TRAVEL_MAP_ADMIN_API=$NEXT_PUBLIC_KOR_TRAVEL_MAP_ADMIN_API \
+ENV NEXT_PUBLIC_KOR_TRAVEL_MAP_API=$NEXT_PUBLIC_KOR_TRAVEL_MAP_API \
     NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL=$NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL \
     NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL=$NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL \
     NEXT_PUBLIC_VWORLD_API_KEY=$NEXT_PUBLIC_VWORLD_API_KEY \

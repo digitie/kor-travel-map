@@ -4,7 +4,7 @@
 > 일반 REST best practice 기준으로 점검한다. TripMate 소비 측을 확인해 필요 기능 충족 여부도
 > 본다. **본 문서는 검토 결과만 기록한다(코드 수정 없음).**
 >
-> 점검 대상 = `packages/kor-travel-map-admin/openapi.json`(admin/full, **55 paths**) +
+> 점검 대상 = `packages/kor-travel-map-api/openapi.json`(admin/full, **55 paths**) +
 > `openapi.user.json`(user/TripMate, **13 paths**). 두 spec 모두 `info.version = 0.2.0-dev`.
 > 소비 측 = `tripmate/apps/api/app/etl_bridge/kor_travel_map.py`(`KorTravelMapClient` Protocol).
 

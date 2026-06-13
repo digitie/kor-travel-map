@@ -33,15 +33,15 @@ code location, settings/env prefix, CLI, Docker/CI, generated OpenAPI/client, Tr
 | `kortravelmap` 참조 파일 | 368개 |
 | `KOR_TRAVEL_MAP` 참조 파일 | 86개 |
 | 메인 package | `src/kortravelmap` |
-| Admin package | `packages/kor-travel-map-admin/src/kortravelmap_admin` |
+| API package | `packages/kor-travel-map-api/src/kortravelmap/api` |
 | Dagster package | `packages/kor-travel-map-dagster/src/kortravelmap_dagster` |
 | import-linter root | `kortravelmap` |
 | main console script | `kor-travel-map = "kortravelmap.cli.main:main"` |
-| admin console script | `kor-travel-map-admin = "kortravelmap.admin.cli:main"` |
+| API console script | 없음 |
 | Dagster module | `kortravelmap.dagster.definitions` |
 
 대표 settings 파일(`src/kortravelmap/settings.py`,
-`packages/kor-travel-map-admin/src/kortravelmap_admin/settings.py`)은 codegraph impact가
+`packages/kor-travel-map-api/src/kortravelmap/api/settings.py`)은 codegraph impact가
 파일 단위 1개로만 잡혔지만, 실제 위험은 문자열 기반 env prefix, 테스트 fixture,
 Docker/CI 설정, 문서 예시가 함께 바뀌는 데 있다.
 
@@ -55,17 +55,17 @@ T-226c 이후 Python import layout은 다음을 목표로 한다.
 | 권장 사용 | `import kortravelmap as ktm` |
 | DTO/core/infra/provider import | `kortravelmap.dto`, `kortravelmap.core`, `kortravelmap.infra`, `kortravelmap.providers` |
 | 메인 package path | `src/kortravelmap` |
-| Admin import | `kortravelmap.admin` |
-| Admin package path | `packages/kor-travel-map-admin/src/kortravelmap/admin` |
+| API import | `kortravelmap.api` |
+| API package path | `packages/kor-travel-map-api/src/kortravelmap/api` |
 | Dagster import | `kortravelmap.dagster` |
 | Dagster package path | `packages/kor-travel-map-dagster/src/kortravelmap/dagster` |
 | main distribution | `kor-travel-map` |
-| admin distribution | `kor-travel-map-admin` |
+| API distribution | `kor-travel-map-api` |
 | dagster distribution | `kor-travel-map-dagster` |
 | main CLI | `ktmctl` |
-| admin CLI | `ktmctl admin` |
+| API CLI | 없음 |
 
-구 `kortravelmap`, `kortravelmap.admin`, `kortravelmap.dagster`, `KOR_TRAVEL_MAP_*`,
+구 `kortravelmap`, `kortravelmap.api`, `kortravelmap.dagster`, `KOR_TRAVEL_MAP_*`,
 `kor-travel-map*` 호환 shim은 만들지 않는다. `src/krtour/__init__.py`를 만들지 않는다는
 기존 금지 규칙도 계속 유효하며, T-226c 완료 뒤에는 `src/krtour/` 자체가 없어져야 한다.
 
@@ -76,13 +76,13 @@ T-226c는 코드 import와 package metadata만 다룬다.
 1. 최신 `main`에서 새 branch를 만들고 `codegraph sync`를 실행한다.
 2. 파일 이동을 먼저 수행한다.
    - `src/kortravelmap` → `src/kortravelmap`
-   - `packages/kor-travel-map-admin/src/kortravelmap_admin` →
-     `packages/kor-travel-map-admin/src/kortravelmap/admin`
+   - `packages/kor-travel-map-api/src/kortravelmap/api` →
+     `packages/kor-travel-map-api/src/kortravelmap/api`
    - `packages/kor-travel-map-dagster/src/kortravelmap_dagster` →
      `packages/kor-travel-map-dagster/src/kortravelmap/dagster`
 3. import를 기계적으로 바꾼다.
    - `kortravelmap.` → `kortravelmap.`
-   - `kortravelmap.admin` → `kortravelmap.admin`
+   - `kortravelmap.api` → `kortravelmap.api`
    - `kortravelmap.dagster` → `kortravelmap.dagster`
 4. `pyproject.toml` 계열을 갱신한다.
    - `project.name`
@@ -115,11 +115,11 @@ T-226c 최소 검증:
 ```bash
 python -m ruff check .
 python -m mypy --strict src/kortravelmap
-python -m mypy --strict packages/kor-travel-map-admin/src
+python -m mypy --strict packages/kor-travel-map-api/src
 python -m mypy --strict packages/kor-travel-map-dagster/src
 lint-imports
 python -m pytest tests/unit -q
-python packages/kor-travel-map-admin/scripts/export_openapi.py --profile all --check
+python packages/kor-travel-map-api/scripts/export_openapi.py --profile all --check
 ```
 
 ## 5. T-226d 실행 절차
@@ -127,7 +127,7 @@ python packages/kor-travel-map-admin/scripts/export_openapi.py --profile all --c
 T-226d는 runtime identity를 바꾼다.
 
 - `KOR_TRAVEL_MAP_*` → `KOR_TRAVEL_MAP_*`
-- `KOR_TRAVEL_MAP_ADMIN_*` → `KOR_TRAVEL_MAP_ADMIN_*`
+- `KOR_TRAVEL_MAP_API_*` → `KOR_TRAVEL_MAP_API_*`
 - 기본 DB 이름 `kor_travel_map` → `kor_travel_map`
 - 기본 Dagster metadata DB 이름 `kor_travel_map_dagster` → `kor_travel_map_dagster`
 - RustFS bucket/prefix 표시명 `kor-travel-map`, `krtour-uploads` →

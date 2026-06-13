@@ -128,16 +128,16 @@ ADR-035 (2026-05-27)로 운영 범위가 "디버그 + admin + 유지보수 + 프
 운영"으로 확장. 라우터 prefix로 시각적 분리.
 
 **PR#35 (2026-05-27, merged)** — 첫 두 라우터 + openapi.json drift gate 활성:
-- `packages/kor-travel-map-admin/src/kortravelmap/admin/app.py` —
+- `packages/kor-travel-map-api/src/kortravelmap/api/app.py` —
   `create_app(settings)` FastAPI factory + 모듈-레벨 `app` instance
-- `settings.py` — `AdminSettings` (`KOR_TRAVEL_MAP_ADMIN_*` env)
+- `settings.py` — `ApiSettings` (`KOR_TRAVEL_MAP_API_*` env)
 - `routers/health.py` — `GET /debug/health` (정적 200 OK, 의존 없음)
 - `routers/version.py` — `GET /debug/version` (debug_ui + kor_travel_map version)
-- `packages/kor-travel-map-admin/openapi.json` commit (drift gate baseline)
+- `packages/kor-travel-map-api/openapi.json` commit (drift gate baseline)
 - `.github/workflows/openapi.yml` `--check` drift gate active
   (`continue-on-error: true` 제거)
-- `.github/workflows/ci.yml`에 debug-ui editable install + pytest step 추가
-- pyproject `mypy_path = "src:packages/kor-travel-map-admin/src"` (PEP 420
+- `.github/workflows/ci.yml`에 API 패키지 editable install + pytest step 추가
+- pyproject `mypy_path = "src:packages/kor-travel-map-api/src"` (PEP 420
   namespace 통합)
 
 **PR#44 (2026-05-28, merged)** — ETL preview 라우터 (`?source=fixture` 활성):
@@ -159,8 +159,8 @@ provider API key 설정:
 - `settings.py` 8 `SecretStr | None` field 추가 (kma/opinet/datagokr/
   visitkorea/krex/knps/airkorea/krforest).
 - 서비스 키 컨벤션: 각 provider repo `.env`의 키 이름 그대로 + prefix
-  `KOR_TRAVEL_MAP_ADMIN_`만 붙여 디버그 UI `.env`에 옮긴다. 예: `python-kma-
-  api/.env`의 `KMA_SERVICE_KEY=...` → 디버그 UI의 `KOR_TRAVEL_MAP_ADMIN_KMA_
+  `KOR_TRAVEL_MAP_API_`만 붙여 디버그 UI `.env`에 옮긴다. 예: `python-kma-
+  api/.env`의 `KMA_SERVICE_KEY=...` → 디버그 UI의 `KOR_TRAVEL_MAP_API_KMA_
   SERVICE_KEY=...`.
 - `.env.example` (8 key 자리 + 컨벤션 주석) 신설. `pyproject.toml`
   `httpx>=0.27` 추가.
@@ -226,7 +226,7 @@ Sprint 2 진행 중 다음 ADR들의 1차 implementation 점진 도입:
 | `src/kortravelmap/providers/standard_data.py` | 신규 | ADR-042 — `cultural_festivals_to_bundles` |
 | `src/kortravelmap/providers/visitkorea.py` | 신규 (역할 축소) | enrichment 변환 함수만 |
 | `pyproject.toml` `[providers]` extra | 변경 | `python-datagokr-api` git URL 핀 추가 |
-| `packages/kor-travel-map-admin/src/.../routers/admin_jobs.py` | 신규 (옵션) | ADR-035 |
+| `packages/kor-travel-map-api/src/.../routers/admin_jobs.py` | 신규 (옵션) | ADR-035 |
 | `packages/kor-travel-map-admin/frontend/package.json` | 변경 | `@tanstack/react-query` + `zustand` (ADR-037) |
 | `packages/map-marker-react/package.json` | 변경 | `"private": true` (ADR-043) |
 | `.github/workflows/*.yml` | 변경 (사용자 측) | branch protection 활성 (ADR-038) |

@@ -58,8 +58,8 @@ dev = [
   # 호출자 주입 — ADR-006/044). mypy --strict가 stub를 찾도록 dev에만 둔다.
   "httpx>=0.27",
 ]
-# 디버그 REST API/UI는 별도 패키지로 분리 (ADR-020):
-#   `packages/kor-travel-map-admin/`. FastAPI/Uvicorn 의존성은 거기 있다.
+# REST API는 별도 패키지로 분리 (ADR-055):
+#   `packages/kor-travel-map-api/`. FastAPI/Uvicorn 의존성은 거기 있다.
 geo = [
   "geopandas>=1.0",
   "gdal==3.8.4",  # Python binding은 시스템 libgdal ABI와 patch 버전까지 맞춤
@@ -170,9 +170,9 @@ strict = true
 warn_unused_ignores = true
 plugins = ["pydantic.mypy"]
 # T-226 — kortravelmap은 top-level package다.
-# mypy_path에 main/admin/dagster src 트리를 모두 등록.
+# mypy_path에 main/api/dagster src 트리를 모두 등록.
 explicit_package_bases = true
-mypy_path = "src:packages/kor-travel-map-admin/src:packages/kor-travel-map-dagster/src"
+mypy_path = "src:packages/kor-travel-map-api/src:packages/kor-travel-map-dagster/src"
 
 # shapely는 type stub를 제공하지 않음 (pyproj와 달리 py.typed 없음).
 # core/geometry.py가 WKT 파싱·centroid에 사용 — import-untyped만 무시.
@@ -185,7 +185,7 @@ testpaths = ["tests"]
 pythonpath = [
   ".",
   "src",
-  "packages/kor-travel-map-admin/src",
+  "packages/kor-travel-map-api/src",
   "packages/kor-travel-map-dagster/src",
 ]
 asyncio_mode = "auto"
@@ -255,12 +255,19 @@ layers = [
 ]
 
 # 메인 패키지(kortravelmap)는 FastAPI/Uvicorn 의존을 가져선 안 된다 (ADR-020).
-# 디버그 REST는 packages/kor-travel-map-admin/(import: `kortravelmap.admin`)에 있다.
+# REST API는 packages/kor-travel-map-api/(import: `kortravelmap.api`)에 있다.
 [[tool.importlinter.contracts]]
 name = "main package must not import fastapi/uvicorn"
 type = "forbidden"
 source_modules = [
-  "kortravelmap",
+  "kortravelmap.category",
+  "kortravelmap.dto",
+  "kortravelmap.core",
+  "kortravelmap.infra",
+  "kortravelmap.geocoding",
+  "kortravelmap.providers",
+  "kortravelmap.client",
+  "kortravelmap.cli",
 ]
 forbidden_modules = [
   "fastapi",
@@ -275,7 +282,14 @@ forbidden_modules = [
 name = "main package must not depend on cache libraries"
 type = "forbidden"
 source_modules = [
-  "kortravelmap",
+  "kortravelmap.category",
+  "kortravelmap.dto",
+  "kortravelmap.core",
+  "kortravelmap.infra",
+  "kortravelmap.geocoding",
+  "kortravelmap.providers",
+  "kortravelmap.client",
+  "kortravelmap.cli",
 ]
 forbidden_modules = [
   "cachetools",
@@ -290,7 +304,14 @@ forbidden_modules = [
 name = "main package must not depend on kafka/streaming libraries"
 type = "forbidden"
 source_modules = [
-  "kortravelmap",
+  "kortravelmap.category",
+  "kortravelmap.dto",
+  "kortravelmap.core",
+  "kortravelmap.infra",
+  "kortravelmap.geocoding",
+  "kortravelmap.providers",
+  "kortravelmap.client",
+  "kortravelmap.cli",
 ]
 forbidden_modules = [
   "kafka",
