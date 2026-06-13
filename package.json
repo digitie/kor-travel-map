@@ -15,6 +15,7 @@
     "docker:backup": "bash scripts/docker-backup.sh",
     "docker:restore": "bash scripts/docker-restore.sh",
     "docker:build": "bash scripts/docker-build.sh",
+    "docker:buildx": "bash scripts/docker-buildx.sh",
     "docker:up": "bash scripts/docker-up.sh",
     "ports:stop": "bash scripts/stop-fixed-ports.sh"
   },
