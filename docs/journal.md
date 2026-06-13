@@ -2,6 +2,17 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-13 (codex) — 태스크 문서 전반 정리
+
+`docs/tasks.md`, `docs/tasks-done.md`, `docs/resume.md`의 역할을 다시 분리했다.
+
+- `tasks.md`를 열린 `[ ]` task만 남기는 백로그로 축소했다.
+- 완료 묶음(`T-226`/`T-227`, `T-218`, `T-200~T-204`, `T-212a~d`, `T-216`,
+  `T-RV-50~55`)은 `tasks-done.md` 상단에 요약 아카이브했다.
+- `resume.md`를 현재 상태, T-225 다음 작업, 열린 작업 요약, 고정 기준값 중심으로
+  다시 작성했다.
+- `docs/sprints/README.md`의 Sprint 5 잔여 설명도 T-225 기준으로 갱신했다.
+
 ## 2026-06-13 (codex) — Docker 공유 DB 모드 정리
 
 사용자 확인에 따라 PC 개발 host `5432`를 공유 DB 서버 인스턴스로 고정하고,
