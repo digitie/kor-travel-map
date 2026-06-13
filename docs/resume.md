@@ -444,7 +444,9 @@ T-226은 package identity rename 전용 후속 작업이다.
 
 사용자 지시로 local/Docker 포트 기준을 새 고정값으로 정렬했다.
 
-- Postgres host port: `5432`
+- Postgres host port: `5432`는 공유 PostGIS 서버 인스턴스,
+  kor-travel-map standalone local Postgres publish 기본값은 `15432`
+- 공유 DB만 쓰고 local RustFS를 띄우는 Docker 모드는 `KOR_TRAVEL_MAP_DB_EXTERNAL=true`
 - RustFS S3 API: `12101`(console host `12105` 유지)
 - kor-travel-geo: API `12201`, Web UI `12205`
 - kor-travel-map: API `12301`, 관리 보조(Dagster) `12302`, Web UI `12305`

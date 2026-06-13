@@ -2680,6 +2680,9 @@ TripMate OpenAPI 연동으로 바뀌었다. 또한 ADR-041로 `python-kraddr-bas
 - **개정**: 2026-06-12 — Postgres host `5432`, RustFS S3 API `12101`,
   kor-travel-geo API `12201`/Web UI `12205`, kor-travel-map API `12301`, 관리 보조(Dagster)
   `12302`, Web UI `12305`로 재고정.
+- **개정**: 2026-06-13 — PC 개발 host `5432`는 공유 PostGIS 서버 인스턴스로 고정하고,
+  kor-travel-map standalone local Postgres publish 기본값은 `15432`로 분리한다.
+  공유 DB만 쓰는 Docker 기동은 `KOR_TRAVEL_MAP_DB_EXTERNAL=true`로 둔다.
 - **결정자**: 사용자
 - **관련**: ADR-020, ADR-035, ADR-045
 

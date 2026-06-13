@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### Docker 공유 DB 모드 (2026-06-13)
+
+- **ADDED**: `KOR_TRAVEL_MAP_DB_EXTERNAL=true` Docker 기동 모드. PC 개발 환경의
+  공유 PostGIS 서버 인스턴스(host `5432`)를 사용하면서 kor-travel-map local RustFS는
+  compose로 띄운다.
+- **CHANGED**: standalone local Postgres host publish 기본값을 `15432`로 분리했다.
+  host `5432`는 공유 DB 서버 인스턴스 기준이다.
+
 ### API/admin 패키지 분리 (T-228, 2026-06-13)
 
 - **BREAKING**: FastAPI/OpenAPI backend를 `kor-travel-map-api`

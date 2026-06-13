@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-13 (codex) — Docker 공유 DB 모드 정리
+
+사용자 확인에 따라 PC 개발 host `5432`를 공유 DB 서버 인스턴스로 고정하고,
+kor-travel-map Docker 기동을 다시 검증했다.
+
+- `KOR_TRAVEL_MAP_DB_EXTERNAL=true` 모드를 추가했다. local Postgres는 띄우지 않고,
+  공유 PostGIS(`host.docker.internal:5432`)와 local RustFS(`12101`/`12105`)를 함께 쓴다.
+- standalone local Postgres publish 기본값은 `15432`로 분리했다.
+- `docker-compose.external-db.yml`, `scripts/docker-up.sh`, `.env.example`,
+  Docker runbook/deploy/rest API/Dagster 문서를 갱신했다.
+- Docker stack을 새 모드로 기동하고 API/Admin UI/Dagster smoke를 통과했다.
+- Windows host Playwright e2e를 다시 실행해 **33/33 passed**를 확인했다.
+
 ## 2026-06-13 (codex) — REST API/admin 패키지 분리
 
 Prometheus 성능 메트릭 PR 머지 후 사용자 후속 결정으로 backend와 frontend 패키지를

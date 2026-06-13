@@ -1,10 +1,11 @@
-# 외부(공유) 인프라 모드 오버레이 (ADR-052 amendment).
+# 외부(공유) DB 모드 오버레이.
 #
-# kor-travel-docker-manager가 소유한 공유 PostGIS(:5432)와 RustFS(S3 :12101)를 사용할 때
-# kor-travel-map compose의 local postgres/rustfs 계열을 시작하지 않는다.
+# PC 개발 환경의 host 5432는 kor-travel-docker-manager/kor-travel-geo가 소유한
+# 공유 PostGIS 서버 인스턴스다. 이 모드는 kor-travel-map local Postgres만 띄우지 않고,
+# RustFS는 kor-travel-map compose의 local 서비스를 계속 사용한다.
 # 적용:
 #
-#   KOR_TRAVEL_MAP_INFRA_EXTERNAL=true bash scripts/docker-up.sh
+#   KOR_TRAVEL_MAP_DB_EXTERNAL=true bash scripts/docker-up.sh
 #
 # 공유 DB에는 `kor_travel_map`과 `kor_travel_map_dagster` DB가 있어야 한다. 비밀번호가
 # 기본값과 다르면 `.env`에 `KOR_TRAVEL_MAP_POSTGRES_PASSWORD` 또는 아래
@@ -16,31 +17,25 @@ services:
   dagster-db-init:
     profiles: ["local-infra"]
 
-  rustfs-perms:
-    profiles: ["local-infra"]
-
-  rustfs:
-    profiles: ["local-infra"]
-
-  rustfs-init:
-    profiles: ["local-infra"]
-
   api:
-    depends_on: !override {}
+    depends_on: !override
+      rustfs-init:
+        condition: service_completed_successfully
     environment:
       KOR_TRAVEL_MAP_PG_DSN: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_PG_DSN:-postgresql+asyncpg://${KOR_TRAVEL_MAP_POSTGRES_USER:-kor_travel_map}:${KOR_TRAVEL_MAP_POSTGRES_PASSWORD:-kor_travel_map}@host.docker.internal:${KOR_TRAVEL_MAP_EXTERNAL_POSTGRES_HOST_PORT:-5432}/${KOR_TRAVEL_MAP_POSTGRES_DB:-kor_travel_map}}
-      KOR_TRAVEL_MAP_OBJECT_STORE_ENDPOINT_URL: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_OBJECT_STORE_ENDPOINT_URL:-http://host.docker.internal:${KOR_TRAVEL_MAP_RUSTFS_API_PORT:-12101}}
 
   dagster:
-    depends_on: !override {}
+    depends_on: !override
+      rustfs-init:
+        condition: service_completed_successfully
     environment:
       KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL:-postgresql://${KOR_TRAVEL_MAP_POSTGRES_USER:-kor_travel_map}:${KOR_TRAVEL_MAP_POSTGRES_PASSWORD:-kor_travel_map}@host.docker.internal:${KOR_TRAVEL_MAP_EXTERNAL_POSTGRES_HOST_PORT:-5432}/${KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB:-kor_travel_map_dagster}}
       KOR_TRAVEL_MAP_PG_DSN: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_PG_DSN:-postgresql+asyncpg://${KOR_TRAVEL_MAP_POSTGRES_USER:-kor_travel_map}:${KOR_TRAVEL_MAP_POSTGRES_PASSWORD:-kor_travel_map}@host.docker.internal:${KOR_TRAVEL_MAP_EXTERNAL_POSTGRES_HOST_PORT:-5432}/${KOR_TRAVEL_MAP_POSTGRES_DB:-kor_travel_map}}
-      KOR_TRAVEL_MAP_OBJECT_STORE_ENDPOINT_URL: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_OBJECT_STORE_ENDPOINT_URL:-http://host.docker.internal:${KOR_TRAVEL_MAP_RUSTFS_API_PORT:-12101}}
 
   dagster-daemon:
-    depends_on: !override {}
+    depends_on: !override
+      rustfs-init:
+        condition: service_completed_successfully
     environment:
       KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL:-postgresql://${KOR_TRAVEL_MAP_POSTGRES_USER:-kor_travel_map}:${KOR_TRAVEL_MAP_POSTGRES_PASSWORD:-kor_travel_map}@host.docker.internal:${KOR_TRAVEL_MAP_EXTERNAL_POSTGRES_HOST_PORT:-5432}/${KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB:-kor_travel_map_dagster}}
       KOR_TRAVEL_MAP_PG_DSN: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_PG_DSN:-postgresql+asyncpg://${KOR_TRAVEL_MAP_POSTGRES_USER:-kor_travel_map}:${KOR_TRAVEL_MAP_POSTGRES_PASSWORD:-kor_travel_map}@host.docker.internal:${KOR_TRAVEL_MAP_EXTERNAL_POSTGRES_HOST_PORT:-5432}/${KOR_TRAVEL_MAP_POSTGRES_DB:-kor_travel_map}}
-      KOR_TRAVEL_MAP_OBJECT_STORE_ENDPOINT_URL: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_OBJECT_STORE_ENDPOINT_URL:-http://host.docker.internal:${KOR_TRAVEL_MAP_RUSTFS_API_PORT:-12101}}

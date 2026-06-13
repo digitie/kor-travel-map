@@ -1,9 +1,12 @@
 # Docker 독립 app runbook
 
 본 문서는 ADR-045/047 기준 kor-travel-map 독립 프로그램을 로컬에서 빌드·기동·스모크하는
-절차다. 고정 포트는 API `12301`, admin UI `12305`, Dagster `12302`이다. 기본
-standalone compose는 Postgres host `5432`, RustFS S3 API `12101`, console `12105`를
-쓴다. `kor-travel-docker-manager`가 공유 PostGIS/RustFS를 이미 구동 중이면
+절차다. 고정 포트는 API `12301`, admin UI `12305`, Dagster `12302`이다.
+PC 개발 환경에서 host `5432`는 `kor-travel-docker-manager`/`kor-travel-geo`가 소유한
+공유 PostGIS 서버 인스턴스다. kor-travel-map standalone compose가 자체 Postgres를
+띄울 때는 충돌을 피하려고 host `15432`를 기본 publish 포트로 쓴다. RustFS S3 API는
+`12101`, console은 `12105`다. 공유 PostGIS만 쓰고 RustFS는 local로 띄우려면
+`KOR_TRAVEL_MAP_DB_EXTERNAL=true`를 사용한다. 공유 PostGIS/RustFS를 모두 쓰면
 `KOR_TRAVEL_MAP_INFRA_EXTERNAL=true`로 local infra 서비스를 띄우지 않는다.
 
 ## 0. 실행 셸
@@ -52,16 +55,24 @@ host/browser 공개 URL은 `KOR_TRAVEL_MAP_OBJECT_STORE_PUBLIC_BASE_URL`(기본
 `KOR_TRAVEL_MAP_OFFLINE_UPLOAD_BUCKET`(기본 `krtour-uploads`)이다.
 로컬 venv stack도 Docker compose와 같은 RustFS 개발 credential 기본값
 `kor-travel-map-dev-access` / `kor-travel-map-dev-secret`을 사용한다.
-Postgres host 포트 기본값은 `KOR_TRAVEL_MAP_POSTGRES_HOST_PORT=5432`이며,
+Postgres host 포트 기본값은 `KOR_TRAVEL_MAP_POSTGRES_HOST_PORT=15432`이며,
 `scripts/load-env.sh`는 `KOR_TRAVEL_MAP_PG_DSN` 미설정 시
-`postgresql+asyncpg://kor_travel_map:kor_travel_map@127.0.0.1:5432/kor_travel_map`을 쓴다.
+`postgresql+asyncpg://kor_travel_map:kor_travel_map@127.0.0.1:15432/kor_travel_map`을 쓴다.
 Dagster metadata는 같은 Postgres container 안의 별도 DB `kor_travel_map_dagster`를 쓴다.
 `dagster-db-init` 서비스가 기동 때마다 DB 존재를 보장하고, Dagster webserver/daemon은
 `KOR_TRAVEL_MAP_DAGSTER_PG_URL`(`KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL`)을 통해
 `dagster-postgres` storage에 연결한다.
 
+공유 DB 모드는 `kor-travel-docker-manager`가 이미 `kor-travel-geo-postgres:5432`를
+띄운 상태에서 사용한다. 이때 kor-travel-map compose는 local Postgres를 띄우지 않고,
+local RustFS와 API/frontend/Dagster만 띄운다.
+
+```bash
+KOR_TRAVEL_MAP_DB_EXTERNAL=true bash scripts/docker-up.sh
+```
+
 공유 인프라 모드는 `kor-travel-docker-manager`가 이미 `kor-travel-geo-postgres:5432`와
-`tripmate-rustfs:12101`을 띄운 상태에서 사용한다. 이때 kor-travel-map compose는 API,
+`tripmate-rustfs:12101`을 모두 띄운 상태에서 사용한다. 이때 kor-travel-map compose는 API,
 frontend, Dagster webserver/daemon만 띄운다.
 
 ```bash
@@ -71,8 +82,12 @@ KOR_TRAVEL_MAP_INFRA_EXTERNAL=true bash scripts/docker-up.sh
 공유 DB 비밀번호가 기본값과 다르면 `.env`에 `KOR_TRAVEL_MAP_POSTGRES_PASSWORD`를 두거나
 컨테이너 관점 DSN을 직접 지정한다. 공유 Postgres에는 `kor_travel_map`과
 `kor_travel_map_dagster` DB가 미리 있어야 한다.
+공유 DB host 포트는 `KOR_TRAVEL_MAP_EXTERNAL_POSTGRES_HOST_PORT`로 override하며,
+기본값은 `5432`다. 이 값은 standalone local Postgres publish 포트인
+`KOR_TRAVEL_MAP_POSTGRES_HOST_PORT`와 분리되어 있다.
 
 ```bash
+KOR_TRAVEL_MAP_EXTERNAL_POSTGRES_HOST_PORT=5432
 KOR_TRAVEL_MAP_EXTERNAL_DOCKER_PG_DSN=postgresql+asyncpg://kor_travel_map:...@host.docker.internal:5432/kor_travel_map
 KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL=postgresql://kor_travel_map:...@host.docker.internal:5432/kor_travel_map_dagster
 KOR_TRAVEL_MAP_EXTERNAL_DOCKER_OBJECT_STORE_ENDPOINT_URL=http://host.docker.internal:12101
@@ -145,8 +160,10 @@ KOR_TRAVEL_MAP_INFRA_EXTERNAL=true bash scripts/docker-up.sh
 API 컨테이너는 Postgres healthcheck 이후 `alembic upgrade head`를 실행하고 uvicorn을
 띄운다. `dagster-db-init`는 `kor_travel_map_dagster` DB 존재를 보장한다. `dagster`는
 Dagster webserver, `dagster-daemon`은 schedule/sensor daemon이다. `rustfs-init`는
-`kor-travel-map`과 `krtour-uploads` bucket을 생성한다. Postgres host 포트 기본값은
-`5432`이다.
+`kor-travel-map`과 `krtour-uploads` bucket을 생성한다. standalone local Postgres의
+host publish 기본값은 `15432`다. host `5432` 공유 DB를 쓰려면
+`KOR_TRAVEL_MAP_DB_EXTERNAL=true` 또는 `KOR_TRAVEL_MAP_INFRA_EXTERNAL=true` 모드로
+local Postgres를 띄우지 않는다.
 
 Compose healthcheck 기준은 다음과 같다.
 

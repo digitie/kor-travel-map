@@ -66,8 +66,13 @@ restore 기본 대상은 `kor_travel_map_restore`, `kor_travel_map_dagster_resto
 관리한다. git에는 `.env.example`만 둔다. provider key는 기존 provider repo 이름을
 그대로 둘 수 있고, `scripts/load-env.sh`/`docker-compose.yml`이 실행용
 `KOR_TRAVEL_MAP_API_*` 이름으로 매핑한다.
-로컬 Docker/venv 기본 Postgres host 포트는 `5432`이며, `KOR_TRAVEL_MAP_PG_DSN`을
-명시하지 않으면 `scripts/load-env.sh`가 `127.0.0.1:5432/kor_travel_map` DSN을 채운다.
+PC 개발 환경에서 host `5432`는 `kor-travel-docker-manager`/`kor-travel-geo`가 소유한
+공유 PostGIS 서버 인스턴스다. kor-travel-map standalone local Postgres의 기본 publish
+포트는 `15432`이며, `KOR_TRAVEL_MAP_PG_DSN`을 명시하지 않으면
+`scripts/load-env.sh`가 `127.0.0.1:15432/kor_travel_map` DSN을 채운다.
+공유 DB만 쓰고 RustFS는 local compose로 띄우는 Docker 기동은
+`KOR_TRAVEL_MAP_DB_EXTERNAL=true`와 `KOR_TRAVEL_MAP_EXTERNAL_POSTGRES_HOST_PORT=5432`
+기준이다. 공유 DB와 공유 RustFS를 모두 쓰면 `KOR_TRAVEL_MAP_INFRA_EXTERNAL=true`를 쓴다.
 
 ## 보안 경계
 
