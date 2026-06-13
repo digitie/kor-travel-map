@@ -3,7 +3,7 @@ import { publicUrlEnv } from "./env";
 const KOR_TRAVEL_GEO_BASE_URL = publicUrlEnv(
   process.env.NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL,
   "NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL",
-  "http://127.0.0.1:12201",
+  "http://127.0.0.1:12501",
 );
 
 export interface KorTravelGeoPoint {

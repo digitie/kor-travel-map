@@ -10,7 +10,7 @@
 - TripMate는 kor-travel-map DB에 직접 접근하지 않고, `kor-travel-map`을 운영 코드에서 직접
   import하지 않는다(ADR-045).
 - `TRIPMATE_KOR_TRAVEL_MAP_API_BASE_URL`은 host root까지만 포함한다.
-  예: `http://127.0.0.1:12301`.
+  예: `http://127.0.0.1:12701`.
 - `/v1`는 base URL이 아니라 path에 둔다.
   예: `GET {base}/v1/features/search`.
 - 호환성은 고려하지 않는다. pre-1.0 단계에서는 `/v1` clean cut으로 정리하고, 구 unprefixed
@@ -149,7 +149,7 @@ TripMate 측 질의 5건(해당 repo `docs/integrations/kor-travel-map-rest-api.
 | 1 | review_mode | 기본 **`require_review`** 유지(kor-travel-map 최종 반영 권한 보존). 운영 합의 시 `KOR_TRAVEL_MAP_API_FEATURE_CHANGE_REVIEW_MODE=immediate`(전역) |
 | 2 | idempotency_key | `feature_id` 미지정 create에서 **결정적 feature_id** 생성(`make_feature_id(source_type="user_request", source_natural_key=idempotency_key)`) — 같은 key 재시도=같은 feature_id. **`idempotency_key=suggestion_id` 권장** |
 | 3 | 출처 태깅 | 전용 필드 없음 — **`operator: "tripmate-admin"` + `reason` 머리 `[suggestion:<id>]` prefix** 컨벤션. change-requests 큐가 reason을 표시하므로 출처 식별 가능(D-11 익명 — 사용자 개인정보 비전송) |
-| 4 | admin 인증 | admin API는 **12301 `/v1/admin/*`**(12305는 admin UI). 코드 게이트는 `admin_destructive_enabled` kill-switch, 호출자 인증은 인프라 계층(SSO/IP allowlist, ADR-005) |
+| 4 | admin 인증 | admin API는 **12701 `/v1/admin/*`**(12705는 admin UI). 코드 게이트는 `admin_destructive_enabled` kill-switch, 호출자 인증은 인프라 계층(SSO/IP allowlist, ADR-005) |
 | 5 | closure | 영구 폐업/사용자 삭제 = **soft `DELETE`**(`user_deleted_*`, provider 재적재 부활 차단) / 일시 중단 = `POST .../deactivate`(`status='inactive'`) |
 
 inactive/soft-deleted feature는 **batch/단건 read의 `found`에 status와 함께 반환**된다

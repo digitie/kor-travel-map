@@ -94,8 +94,9 @@ Sprint 5 운영 진입 마무리다. 핵심 구현과 운영 표면은 대부분
 - Env prefix: `KOR_TRAVEL_MAP_*`, API package prefix `KOR_TRAVEL_MAP_API_*`,
   frontend API base `NEXT_PUBLIC_KOR_TRAVEL_MAP_API`.
 - DB: `kor_travel_map`, Dagster metadata DB: `kor_travel_map_dagster`.
-- 로컬 고정 포트: API `12301`, admin UI `12305`, Dagster `12302`,
-  RustFS S3 `12101`, RustFS console `12105`.
+- 로컬 고정 포트(docker-manager 기준): API `12701`, admin UI `12705`,
+  Dagster `12702`, RustFS S3 `12101`, RustFS console `12105`,
+  kor-travel-geo API `12501`.
 - TripMate 연동: OpenAPI HTTP. 직접 import와 DB 직접 접근 없음.
 
 ## 참고 위치

@@ -39,7 +39,7 @@ uv pip install -e ".[dev,geo,providers]"
 uv pip install -e packages/kor-travel-map-api
 
 # 실행 — 인증 없음, localhost 전용
-uvicorn kortravelmap.api.app:app --host 127.0.0.1 --port 12301 --reload
+uvicorn kortravelmap.api.app:app --host 127.0.0.1 --port 12701 --reload
 ```
 
 기본 host `127.0.0.1` (외부 노출 금지 default). `0.0.0.0` 바인드 시 경고
@@ -57,7 +57,7 @@ which node npm              # /home/.../.nvm/... 등 WSL 경로여야 함 (/mnt/
 cp .env.example .env.local
 $EDITOR .env.local           # NEXT_PUBLIC_VWORLD_API_KEY 설정
 npm install
-npm run dev                  # http://127.0.0.1:12305 (next dev)
+npm run dev                  # http://127.0.0.1:12705 (next dev)
 ```
 
 `node`/`npm`이 `/mnt/c/Program Files/nodejs/...`를 가리키면 Windows Node가 섞인
@@ -69,7 +69,7 @@ shadcn/ui + `@kor-travel-map/map-marker-react` (ADR-029). 자세한 사양:
 `../../docs/debug-ui-package.md` §14.
 
 운영 배포 (옵션 3가지 — `docs/debug-ui-package.md §14.3` 참조):
-- **A. standalone (default)**: `npm run build` + `npm run start` → 12305.
+- **A. standalone (default)**: `npm run build` + `npm run start` → 12705.
 - **B. FastAPI reverse proxy**: backend `/ui/*` → Next.js. `next.config.js`
   `basePath: '/ui'` + `output: 'standalone'`.
 - **C. static export**: `next build` + `next export` → `out/` static, FastAPI
@@ -82,14 +82,14 @@ shadcn/ui + `@kor-travel-map/map-marker-react` (ADR-029). 자세한 사양:
 | 변수 | 기본값 | 설명 |
 |------|--------|------|
 | `KOR_TRAVEL_MAP_API_HOST` | `127.0.0.1` | uvicorn 바인드 host (외부 노출 금지) |
-| `KOR_TRAVEL_MAP_API_PORT` | `12301` | uvicorn 포트 |
+| `KOR_TRAVEL_MAP_API_PORT` | `12701` | uvicorn 포트 |
 | `KOR_TRAVEL_MAP_API_RELOAD` | `false` | dev 모드 hot-reload |
-| `KOR_TRAVEL_MAP_API_CORS_ALLOW_ORIGINS` | `http://localhost:12305` | Next.js dev 서버 |
+| `KOR_TRAVEL_MAP_API_CORS_ALLOW_ORIGINS` | `http://localhost:12705` | Next.js dev 서버 |
 | `KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED` | `true` | `/features/*` 조회 라우터 활성화 |
 | `KOR_TRAVEL_MAP_API_ADMIN_ROUTES_ENABLED` | unset | `/admin/*` 운영 라우터 활성화. unset이면 features flag를 따름 |
 | `KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED` | unset | `/ops/*`, `/ops/dagster/*` 라우터 활성화. unset이면 features flag를 따름 |
 | `KOR_TRAVEL_MAP_API_PROMETHEUS_METRICS_ENABLED` | `true` | Prometheus pull scrape용 `/metrics` endpoint와 HTTP 요청 count/duration/진행 중 요청/응답 크기, DB query count/duration 계측 활성화 |
-| `KOR_TRAVEL_MAP_API_PROMETHEUS_METRICS_PATH` | `/metrics` | Prometheus exposition path. API 포트 `12301`에서 노출되며 OpenAPI에는 포함하지 않음 |
+| `KOR_TRAVEL_MAP_API_PROMETHEUS_METRICS_PATH` | `/metrics` | Prometheus exposition path. API 포트 `12701`에서 노출되며 OpenAPI에는 포함하지 않음 |
 | `KOR_TRAVEL_MAP_API_DAGSTER_ALLOWED_HOSTS` | `["127.0.0.1","localhost","::1","dagster"]` | Dagster GraphQL 호출 host allowlist. `KOR_TRAVEL_MAP_API_DAGSTER_URL`/override host가 이 목록에 있어야 함 |
 | `KOR_TRAVEL_MAP_API_DAGSTER_REPOSITORY_NAME` | `__repository__` | offline upload load GraphQL launch selector의 repositoryName |
 | `KOR_TRAVEL_MAP_API_DAGSTER_REPOSITORY_LOCATION_NAME` | `kortravelmap.dagster.definitions` | offline upload load GraphQL launch selector의 repositoryLocationName |
@@ -110,9 +110,9 @@ shadcn/ui + `@kor-travel-map/map-marker-react` (ADR-029). 자세한 사양:
 | 변수 | 기본값 | 설명 |
 |------|--------|------|
 | `NEXT_PUBLIC_VWORLD_API_KEY` | (필수) | VWorld API key. `KOR_TRAVEL_GEO_VWORLD_API_KEY` 공유 (ADR-025 보강). |
-| `NEXT_PUBLIC_KOR_TRAVEL_MAP_API` | 개발 기본 `http://127.0.0.1:12301` | 백엔드 base URL. production에서는 명시 필수 |
-| `NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL` | 개발 기본 `http://127.0.0.1:12302` | Dagster UI/embed base URL. production에서는 명시 필수 |
-| `NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL` | 개발 기본 `http://127.0.0.1:12201` | 수동 feature 작성 화면의 kor-travel-geo v2 geocode/reverse base URL. production에서는 명시 필수 |
+| `NEXT_PUBLIC_KOR_TRAVEL_MAP_API` | 개발 기본 `http://127.0.0.1:12701` | 백엔드 base URL. production에서는 명시 필수 |
+| `NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL` | 개발 기본 `http://127.0.0.1:12702` | Dagster UI/embed base URL. production에서는 명시 필수 |
+| `NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL` | 개발 기본 `http://127.0.0.1:12501` | 수동 feature 작성 화면의 kor-travel-geo v2 geocode/reverse base URL. production에서는 명시 필수 |
 
 메인 라이브러리 환경변수(`KOR_TRAVEL_MAP_PG_DSN`, `KOR_TRAVEL_MAP_OBJECT_STORE_*` 등)는
 그대로 사용한다. API 패키지는 메인 라이브러리의 settings를 함께 사용한다.
@@ -151,8 +151,8 @@ query 지연 시간 histogram, 프로세스/런타임 기본 메트릭을 반환
 `public`(`/v1/features`, `/v1/categories`, `/v1/providers`, `/v1/public`,
 `/v1/curated-features`), `admin`, `ops`, `debug`, `system`, `other`로 구분한다.
 
-`kor-travel-docker-manager` 관측 스택 기준 포트는 Prometheus `12601`, cAdvisor Exporter
-`12602`, Grafana `12605`다. Prometheus가 `kor-travel-map` API 포트 `12301`의
+`kor-travel-docker-manager` 관측 스택 기준 포트는 Grafana `12205`, cAdvisor Exporter
+`12301`, Prometheus `12401`다. Prometheus가 `kor-travel-map` API 포트 `12701`의
 `/metrics`를 pull scrape하는 구조이며, 앱이 Prometheus로 외부 방향 연결을 만들지는 않는다.
 
 ## 라이선스

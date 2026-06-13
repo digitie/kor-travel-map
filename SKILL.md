@@ -311,7 +311,7 @@ distribution이며 메인 라이브러리 계층 계약 밖에 있다(ADR-055).
 > `CLAUDE.md §2`, `docs/decisions.md`를 정본으로 본다. 패키지는
 > `kor-travel-map-api` Python backend와 `kor-travel-map-admin` frontend로 분리 완료
 > (ADR-055), 구 이름/env/import 호환 shim 금지(ADR-046). geocoding 로컬 API
-> `:12201`(Web UI `:12205`), RustFS
+> `:12501`(Web UI `:12505`), RustFS
 > S3 API `:12101`/console `:12105`, frontend Next.js 16 +
 > `maplibre-vworld-js#v0.1.3`.
 

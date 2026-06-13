@@ -126,7 +126,7 @@ REST/OpenAPI는 `kor-travel-map`이 아니라 **별도 Python 패키지**
 │ kor-travel-map API (별도 Python 패키지)                                │
 │ packages/kor-travel-map-api/src/kortravelmap/api/                      │
 │                                                                  │
-│  uvicorn kortravelmap.api.app:app --host 127.0.0.1 --port 12301│
+│  uvicorn kortravelmap.api.app:app --host 127.0.0.1 --port 12701│
 │                                                                  │
 │   ├── /debug/health, /debug/version          (구현됨, PR#35)    │
 │   ├── /debug/etl/...   (provider preview)     (구현됨, PR#44~47) │

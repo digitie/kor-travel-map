@@ -44,7 +44,7 @@ emd_codes = [item.code for item in regions.emd]
 
 `KorTravelGeoRestClient.regions_within_radius(...)`는 kor-travel-geo 서비스 루트에
 `/v2/regions/within-radius`를 붙여 호출한다. 운영 기본 base URL이
-`http://127.0.0.1:12201`라면 실제 호출은 다음과 같다.
+`http://127.0.0.1:12501`라면 실제 호출은 다음과 같다.
 
 ```http
 POST /v2/regions/within-radius
@@ -107,7 +107,7 @@ kor-travel-map에서 확인해야 하는 것은 다음 둘이다.
 - admin frontend/backend는 geocoding 전용 debug route를 갖지 않는다. 해당 화면
   검증은 kor-travel-geo 프로젝트 책임이다.
 
-2026-06-02 실제 kor-travel-geo 서버(현재 로컬 API 포트 `http://127.0.0.1:12201`) + T-027 최종 적재
+2026-06-02 실제 kor-travel-geo 서버(현재 로컬 API 포트 `http://127.0.0.1:12501`) + T-027 최종 적재
 PostGIS DB(`kor-travel-geo-t027-final`, `tl_scco_ctprvn=17`, `tl_scco_sig=255`,
 `tl_scco_emd=5067`) 기준으로 같은 요청을 확인했다. 응답은 HTTP 200이었고,
 `sigungu` 6건(`11140` 중구 `contains`, `11110` 종로구 `overlaps` 등)과 `emd`

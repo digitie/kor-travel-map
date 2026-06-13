@@ -699,8 +699,8 @@
 
 ## ADR-025: 디버그 UI frontend는 `maplibre-vworld-js` 채택
 
-> **현행 기준(2026-06-06)**: frontend는 **Next.js 16**(ADR-036 amendment 2026-05-31),
-> dev 포트는 admin UI **12305**(ADR-047). 본문의 "Next.js 15"·"`next dev --port 8610`"
+> **현행 기준(2026-06-13)**: frontend는 **Next.js 16**(ADR-036 amendment 2026-05-31),
+> dev 포트는 admin UI **12705**(ADR-047). 본문의 "Next.js 15"·"`next dev --port 8610`"
 > 은 채택/2차 보강 당시 값이며 위 ADR이 정본이다.
 
 - **상태**: accepted
@@ -2673,7 +2673,7 @@ TripMate OpenAPI 연동으로 바뀌었다. 또한 ADR-041로 `python-kraddr-bas
 
 ---
 
-## ADR-047: kor-travel-map standalone 로컬 포트는 API 12301, admin UI 12305, Dagster 12302로 고정
+## ADR-047: kor-travel-map 로컬 포트는 docker-manager 기준 API 12701, admin UI 12705, Dagster 12702로 고정
 
 - **상태**: accepted
 - **날짜**: 2026-06-02
@@ -2683,6 +2683,12 @@ TripMate OpenAPI 연동으로 바뀌었다. 또한 ADR-041로 `python-kraddr-bas
 - **개정**: 2026-06-13 — PC 개발 host `5432`는 공유 PostGIS 서버 인스턴스로 고정하고,
   kor-travel-map standalone local Postgres publish 기본값은 `15432`로 분리한다.
   공유 DB만 쓰는 Docker 기동은 `KOR_TRAVEL_MAP_DB_EXTERNAL=true`로 둔다.
+- **개정**: 2026-06-13 — `kor-travel-docker-manager`가 소유한 공유 로컬 인프라와
+  관측 스택을 기준으로 kor-travel-map API/admin UI/Dagster 포트를
+  `12701`/`12705`/`12702`로 재고정한다. kor-travel-geo API/Web UI는
+  `12501`/`12505`, 공유 PostGIS host는 `5432`, RustFS S3/console은
+  `12101`/`12105`, 관측 스택은 Grafana `12205`·cAdvisor `12301`·Prometheus
+  `12401`을 따른다.
 - **결정자**: 사용자
 - **관련**: ADR-020, ADR-035, ADR-045
 
@@ -2698,14 +2704,16 @@ ADR-045 이후 kor-travel-map은 Docker 독립 프로그램 + 독립 DB/Dagster 
 
 ### 결정
 
-1. kor-travel-map standalone의 로컬/개발/compose 기본 포트는 다음으로 고정한다.
-   - API(FastAPI `kor-travel-map-api`): `12301`
-   - 추가 관리 포트(Dagster): `12302`
-   - admin UI(Next.js): `12305`
+1. kor-travel-map의 로컬/개발/compose 기본 포트는 docker-manager 포트 정책에 맞춰
+   다음으로 고정한다.
+   - API(FastAPI `kor-travel-map-api`): `12701`
+   - 추가 관리 포트(Dagster): `12702`
+   - admin UI(Next.js): `12705`
    - Postgres host: `5432`(container도 `5432`)
    - RustFS S3 API: `12101`(console은 `12105`, RustFS container 내부 console은 `9001`)
-   - kor-travel-geo API/Web UI: `12201` / `12205`
-2. `scripts/stop-fixed-ports.sh`는 기본으로 `12301`, `12305`, `12302` listener를 찾아
+   - kor-travel-geo API/Web UI: `12501` / `12505`
+   - 관측 스택(docker-manager): Grafana `12205`, cAdvisor `12301`, Prometheus `12401`
+2. `scripts/stop-fixed-ports.sh`는 기본으로 `12701`, `12705`, `12702` listener를 찾아
    종료한다. 로컬 stack과 Docker stack 기동 스크립트는 먼저 이 스크립트를 실행한다.
 3. `.env`의 기존 provider service key 이름은 `scripts/load-env.sh`와
    `docker-compose.yml`에서 `KOR_TRAVEL_MAP_API_*`/`NEXT_PUBLIC_*` 환경변수로 매핑한다.
@@ -2840,7 +2848,7 @@ bbox 인코딩 2종, `status`↔`state`, 응답 `*_key`↔`*_id`)가 #317의 고
     방침과 일치). **v1.0.0 GA에서 `/v1` 동결**, 이후 breaking = `/v2` + N-1 동시지원. OpenAPI는
     major별 분리 export.
 14. **Base URL과 path 분리(#316 추가 리뷰).** 환경변수 base URL은 host root까지만 포함하고
-    `/v1`는 path에 둔다(예: base `http://127.0.0.1:12301` + path `/v1/features/search`).
+    `/v1`는 path에 둔다(예: base `http://127.0.0.1:12701` + path `/v1/features/search`).
     base와 path 양쪽에 `/v1`를 중복 삽입하지 않는다.
 
 ### 근거
@@ -3017,8 +3025,8 @@ Accepted (2026-06-10) — `docs/reports/decisions-needed-2026-06-10.md` D-02.
   2. `idempotency_key` 멱등성 — 같은 제안 재시도 시 동일 feature_id 보장.
   3. 출처 태깅 — TripMate `suggestion_id` 추적 필드 방식.
   4. admin 인증 — TripMate admin client의 `/v1/admin/*` 호출 토큰/경로. **주의**:
-     admin API는 **12301 `/v1/admin/*`**이다 (12305는 admin UI — TripMate 문서의
-    "admin base 12305" 가정은 오류, TripMate 측 정정 대상).
+     admin API는 **12701 `/v1/admin/*`**이다 (12705는 admin UI — TripMate 문서의
+    "admin base 12705" 가정은 오류, TripMate 측 정정 대상).
   5. closure 표현 — 영구 폐업 = soft `DELETE` vs `deactivate` 권장안.
 
 ### 결과
@@ -3043,9 +3051,9 @@ Accepted (2026-06-10) — `docs/reports/decisions-needed-2026-06-10.md` D-02.
   3. **출처 태깅**: 전용 필드 없이 기존 필드 컨벤션 — `operator: "tripmate-admin"`
      고정 + `reason` 머리에 `[suggestion:<suggestion_id>]` prefix. change-requests
      큐(API/admin UI)가 reason을 표시하므로 추가 코드 없이 출처 식별 가능(D-11 익명).
-  4. **admin 인증**: admin API는 **12301 `/v1/admin/*`**(12305는 admin UI). 코드 인증은
+  4. **admin 인증**: admin API는 **12701 `/v1/admin/*`**(12705는 admin UI). 코드 인증은
      `admin_destructive_enabled` kill-switch뿐이고 호출자 인증은 인프라 계층(SSO/IP
-     allowlist, ADR-005 모델) — TripMate admin client는 관리망 경로로 12301에 도달해야
+     allowlist, ADR-005 모델) — TripMate admin client는 관리망 경로로 12701에 도달해야
      한다.
   5. **closure**: 영구 폐업/사용자 삭제 = **soft `DELETE`**(`user_deleted_*` 계열 —
      provider 재적재 부활 차단, #332) / 일시 중단·운영 비활성 =
@@ -3217,7 +3225,7 @@ T-226 clean cut의 목표 identity는 다음과 같다.
 | AI 후보/concierge 프로젝트/레포명 | `kor-travel-concierge`, `kor-travel-concierge` | `kor-travel-concierge` |
 
 Postgres schema 이름(`feature`, `provider_sync`, `ops`, `x_extension`)과 고정 포트
-(API `12301`, admin UI `12305`, Dagster `12302`)는 바꾸지 않는다. TripMate ↔
+(API `12701`, admin UI `12705`, Dagster `12702`)는 바꾸지 않는다. TripMate ↔
 kor-travel-map HTTP 계약은 서비스 identity가 바뀌어도 OpenAPI `/v1` 계약을 유지한다.
 
 ### 이행 원칙
@@ -3278,7 +3286,7 @@ admin 라우터가 아니라 REST API 전체를 대상으로 한다.
 - admin frontend는 `kor-travel-map-admin` 이름을 유지하고
   `packages/kor-travel-map-admin/frontend/`에 둔다.
 - admin frontend가 호출하는 backend base URL은 `NEXT_PUBLIC_KOR_TRAVEL_MAP_API`다.
-- 고정 포트는 ADR-047 그대로 유지한다: API `12301`, admin UI `12305`, Dagster `12302`.
+- 고정 포트는 ADR-047 그대로 유지한다: API `12701`, admin UI `12705`, Dagster `12702`.
 - OpenAPI 전체/admin spec과 user-facing subset spec의 기계 정본은 각각
   `packages/kor-travel-map-api/openapi.json`,
   `packages/kor-travel-map-api/openapi.user.json`이다.
@@ -3297,7 +3305,7 @@ admin 라우터가 아니라 REST API 전체를 대상으로 한다.
 ### 결과
 
 - `uv pip install -e packages/kor-travel-map-api`가 backend 설치 명령이다.
-- `uvicorn kortravelmap.api.app:app --host 127.0.0.1 --port 12301`가 backend 실행 명령이다.
+- `uvicorn kortravelmap.api.app:app --host 127.0.0.1 --port 12701`가 backend 실행 명령이다.
 - `npm -w packages/kor-travel-map-admin/frontend ...`가 admin UI 실행/빌드 명령이다.
 - Docker `api` service는 `packages/kor-travel-map-api`를 설치하고, `frontend` service는
   `packages/kor-travel-map-admin/frontend`만 빌드한다.

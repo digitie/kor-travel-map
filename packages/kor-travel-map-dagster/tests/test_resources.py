@@ -145,7 +145,7 @@ def test_reverse_geocoder_resource_builds_and_closes_client(
 ) -> None:
     monkeypatch.setenv(
         "KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_BASE_URL",
-        "http://127.0.0.1:12201",
+        "http://127.0.0.1:12501",
     )
     monkeypatch.setenv("KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_TIMEOUT_SECONDS", "2.5")
     _FakeHttpClient.instances = []
@@ -177,7 +177,7 @@ def test_reverse_geocoder_resource_builds_and_closes_client(
     assert reverse_geocoder is sentinel
     assert len(_FakeHttpClient.instances) == 1
     http = _FakeHttpClient.instances[0]
-    assert http.base_url == "http://127.0.0.1:12201"
+    assert http.base_url == "http://127.0.0.1:12501"
     assert http.timeout == 2.5
     assert not http.closed
 

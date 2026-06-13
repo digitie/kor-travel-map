@@ -2,6 +2,24 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-13 (codex) — docker-manager 포트 기준 정렬
+
+`kor-travel-docker-manager`의 로컬 포트 정책을 기준으로 kor-travel-map 실행 설정을
+정렬했다.
+
+- map API/Dagster/admin UI 기본 포트를 `12701`/`12702`/`12705`로 변경했다.
+- 공유 PostgreSQL host 포트는 `5432`, kor-travel-geo REST URL은 `12501`로 맞췄다.
+- RustFS `12101`/`12105`, 관측 스택 Grafana `12205`·cAdvisor `12301`·Prometheus
+  `12401` 기준을 env 예시와 주석에 반영했다.
+- docker-manager가 이미 띄운 `kor-travel-map` 컨테이너 `12701`/`12702`/`12705`
+  health를 확인했다.
+- agent entry, ADR, REST/API, Docker runbook, frontend/admin, geocoding 문서와
+  테스트 문자열 계약의 잔여 `123xx`/`12201` 표기를 새 기준으로 정리했다.
+- 검증: `ruff check .`, `mypy --strict src packages/kor-travel-map-api/src
+  packages/kor-travel-map-dagster/src`, `lint-imports`, `pytest -q`(1306 passed),
+  OpenAPI drift check, frontend lint/type-check/build, React Doctor(exit 0,
+  optional warning 11개), `docker compose config`.
+
 ## 2026-06-13 (codex) — T-108 운영 배포 자동화 이식
 
 pinvi의 `T-108` 운영 배포 자동화 항목을 kor-travel-map 범위로 이식했다.

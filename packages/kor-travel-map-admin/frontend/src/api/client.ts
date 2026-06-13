@@ -1,7 +1,7 @@
 /**
  * Backend API client (fetch wrapper).
  *
- * `NEXT_PUBLIC_KOR_TRAVEL_MAP_API` base URL을 사용해 FastAPI(12301)에
+ * `NEXT_PUBLIC_KOR_TRAVEL_MAP_API` base URL을 사용해 FastAPI(12701)에
  * 접근. API 모듈의 DTO는 가능한 한 `npm run gen:types`로 생성한
  * `src/api/types.ts`의 OpenAPI 타입에서 파생한다.
  *
@@ -14,7 +14,7 @@ import { publicUrlEnv } from "./env";
 const BASE_URL = publicUrlEnv(
   process.env.NEXT_PUBLIC_KOR_TRAVEL_MAP_API,
   "NEXT_PUBLIC_KOR_TRAVEL_MAP_API",
-  "http://127.0.0.1:12301",
+  "http://127.0.0.1:12701",
 );
 
 type ClientSchemas = components["schemas"];

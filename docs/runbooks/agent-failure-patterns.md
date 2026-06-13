@@ -191,7 +191,7 @@
 
 - **증상**: "WSL에서 실행"했는데 프로세스가 `/mnt/c/Program Files/nodejs/npm` 또는
   Windows `node.exe`로 떠 있다. `next dev`가 Ready를 찍어도 WSL `ss -ltnp`에
-  `:12305` listener가 없다.
+  `:12705` listener가 없다.
 - **원인**: 비대화 WSL 셸이 nvm을 source하지 않아 `node`는 없고 Windows `npm`만
   PATH에 남아 있다.
 - **회피**: frontend 명령 전 반드시 확인한다.
@@ -235,11 +235,11 @@
   WSL Node 활성화 후 Next.js를 명시적으로 실행한다.
   ```bash
   cd packages/kor-travel-map-admin/frontend
-  npx next dev --port 12305 --hostname 0.0.0.0
+  npx next dev --port 12705 --hostname 0.0.0.0
   ```
   production 확인은 다음처럼 한다.
   ```bash
-  npx next start --port 12305 --hostname 0.0.0.0
+  npx next start --port 12705 --hostname 0.0.0.0
   ```
 
 ### F4 — `env PATH=...$PATH`가 Windows 경로 공백에서 깨짐
@@ -257,7 +257,7 @@
     export NVM_DIR="$HOME/.nvm"
     . "$NVM_DIR/nvm.sh"
     nvm use 20.20.2 >/dev/null
-    exec npx next dev --port 12305 --hostname 0.0.0.0
+    exec npx next dev --port 12705 --hostname 0.0.0.0
   ' > "$REPO/.codex_tmp/kor-travel-map-admin-frontend.log" 2>&1
   ```
 
@@ -269,9 +269,9 @@
 - **회피**: frontend 디렉토리에서 `npx next ...`를 쓰거나, 루트 binary를 쓴다.
   ```bash
   cd packages/kor-travel-map-admin/frontend
-  npx next dev --port 12305 --hostname 0.0.0.0
+  npx next dev --port 12705 --hostname 0.0.0.0
   # 또는
-  "$(git rev-parse --show-toplevel)/node_modules/.bin/next" dev --port 12305 --hostname 0.0.0.0
+  "$(git rev-parse --show-toplevel)/node_modules/.bin/next" dev --port 12705 --hostname 0.0.0.0
   ```
 
 ### F6 — `.next/dev/lock` 권한 에러를 반복 재시도
@@ -288,12 +288,12 @@
 
 ### F7 — `pkill -f`가 자기 셸까지 죽임
 
-- **증상**: `pkill -f 'next dev --port 12305'`를 포함한 명령 자체가 종료되고 이후
+- **증상**: `pkill -f 'next dev --port 12705'`를 포함한 명령 자체가 종료되고 이후
   명령이 실행되지 않는다.
 - **원인**: `pkill -f`가 현재 shell command line까지 pattern match한다.
 - **회피/복구**: 먼저 port listener PID를 확인하고 정확한 PID만 kill한다.
   ```bash
-  ss -ltnp | rg ':(12301|12305)\b'
+  ss -ltnp | rg ':(12701|12705)\b'
   kill <pid>
   ```
   또는 log/PID 파일을 남긴 경우 그 PID만 종료한다. broad `pkill -f`는 마지막
@@ -304,9 +304,9 @@
 - **증상**: PID를 출력했지만 실제로 listener가 없거나 프로세스가 바로 종료됨.
 - **회피**: 서버 기동 보고 전 항상 세 가지를 확인한다.
   ```bash
-  ss -ltnp | rg ':(12301|12305)\b'
-  curl -fsS http://127.0.0.1:12301/debug/health
-  curl -fsS -I http://127.0.0.1:12305/ | sed -n '1,8p'
+  ss -ltnp | rg ':(12701|12705)\b'
+  curl -fsS http://127.0.0.1:12701/health
+  curl -fsS -I http://127.0.0.1:12705/ | sed -n '1,8p'
   ```
   `Ready` 로그만 믿지 않는다. 실제 listener와 HTTP 200/health 응답을 확인한다.
 
@@ -315,22 +315,22 @@
 - **증상**: WSL에서 `npm run e2e`를 돌리려 하거나, Windows에서 frontend 서버까지
   띄우려 한다.
 - **정본**: 서버 2개는 WSL, Playwright Chromium만 Windows.
-  - WSL: backend `:12301`, frontend `:12305`.
+  - WSL: backend `:12701`, frontend `:12705`.
   - Windows PowerShell: `cd packages\kor-travel-map-admin\frontend; npm run e2e`.
   `playwright.config.ts`에는 `webServer`가 없으므로, Windows e2e 전 WSL 서버가 이미
   떠 있어야 한다.
 
-### F10 — Windows stale Node가 `:12305`을 점유해 Playwright가 다른 서버를 봄
+### F10 — Windows stale Node가 `:12705`을 점유해 Playwright가 다른 서버를 봄
 
-- **증상**: WSL에서 `curl http://127.0.0.1:12305/`는 200인데, Windows Playwright나
-  Windows `curl.exe http://127.0.0.1:12305/`는 `Internal Server Error` 또는 이전
+- **증상**: WSL에서 `curl http://127.0.0.1:12705/`는 200인데, Windows Playwright나
+  Windows `curl.exe http://127.0.0.1:12705/`는 `Internal Server Error` 또는 이전
   빌드 화면을 본다. e2e가 `/`, `/etl`, `/features`에서 동시에 이상하게 실패한다.
 - **원인**: 과거에 Windows Node(`C:\Program Files\nodejs\node.exe`)로 띄운 Next.js
-  프로세스가 Windows `127.0.0.1:12305`을 직접 점유하고 있다. 이 경우 WSL
-  `0.0.0.0:12305` 서버가 떠 있어도 Windows localhost-forwarding이 붙지 못한다.
+  프로세스가 Windows `127.0.0.1:12705`을 직접 점유하고 있다. 이 경우 WSL
+  `0.0.0.0:12705` 서버가 떠 있어도 Windows localhost-forwarding이 붙지 못한다.
 - **확인**:
   ```bash
-  cmd.exe /c "netstat -ano | findstr :12305"
+  cmd.exe /c "netstat -ano | findstr :12705"
   powershell.exe -NoProfile -Command "Get-Process -Id <PID> | Select-Object Id,ProcessName,Path"
   ```
   정상 forwarding이면 `ProcessName`이 `wslrelay`다. `node`이고 path가
@@ -342,6 +342,6 @@
   ```
   이후 반드시 Windows에서 직접 확인한다.
   ```bash
-  cmd.exe /c "curl.exe -sS -D - http://127.0.0.1:12305/ -o NUL"
+  cmd.exe /c "curl.exe -sS -D - http://127.0.0.1:12705/ -o NUL"
   ```
   Windows `curl.exe`가 200을 보기 전에는 e2e를 돌리지 않는다.

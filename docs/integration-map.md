@@ -17,18 +17,18 @@
 
 | 시스템 | 역할 | 로컬 고정 포트 | 근거 |
 |---|---|---|---|
-| **kor-travel-map** | feature 정본 owner — 공공 API+후보 정규화·dedup·PostGIS 조회 (독립 Docker, ADR-045) | API **12301** · admin UI 12305 · Dagster 12302 · (standalone postgres 5432 · rustfs 12101/12105) | ADR-047 |
+| **kor-travel-map** | feature 정본 owner — 공공 API+후보 정규화·dedup·PostGIS 조회 (독립 Docker, ADR-045) | API **12701** · admin UI 12705 · Dagster 12702 · (postgres 5432 · rustfs 12101/12105) | ADR-047 |
 | **TripMate** | 사용자 여행 계획/협업/공유 서비스 — feature **consumer** | api **9021** · web 9022 | TripMate README |
 | **kor-travel-concierge** | YouTube 콘텐츠 → 장소 후보 추출/검수 — feature 후보 **provider**. 현 코드/provider 이름은 `kor-travel-concierge` 계열 | API **12401** · web 9042 | kor-travel-concierge `docs/feature-export-api.md` |
-| **kor-travel-docker-manager** | 공용 인프라 일괄 관리(docker-compose+Web UI) — 단일 PostGIS·RustFS·관측 스택 소유 | PostGIS **5432**(`kor-travel-geo-postgres`) · RustFS S3 **12101**/console 12105 · Prometheus 12601 · cAdvisor 12602 · Grafana 12605 | kor-travel-docker-manager README, ADR-052 amendment |
-| (보조) kor-travel-geo | geocoding REST v2 정본. 현 API/env 표기는 kor-travel-geo 계열 | **12201** | ADR-046 |
+| **kor-travel-docker-manager** | 공용 인프라 일괄 관리(docker-compose+Web UI) — 단일 PostGIS·RustFS·관측 스택 소유 | PostGIS **5432**(`kor-travel-geo-postgres`) · RustFS S3 **12101**/console 12105 · Grafana 12205 · cAdvisor 12301 · Prometheus 12401 | kor-travel-docker-manager README, ADR-052 amendment |
+| (보조) kor-travel-geo | geocoding REST v2 정본. 현 API/env 표기는 kor-travel-geo 계열 | **12501** | ADR-046/047 |
 
 ## 2. 연동 방향 (데이터 흐름)
 
 ```
 [공공 API provider 라이브러리들]──────────────┐
                                               ▼ (krtour Dagster live fetch)
-[kor-travel-concierge :12401] ──(REST export pull)──▶ [kor-travel-map :12301]
+[kor-travel-concierge :12401] ──(REST export pull)──▶ [kor-travel-map :12701]
    GET /api/v1/features/{snapshot|changes}        feature_id 생성·dedup·정합성
    (krtour Dagster가 주기 pull, ADR-053)                │
                                                         │ OpenAPI /v1 (HTTP)
@@ -40,7 +40,7 @@
                           [TripMate web :9022]          — 사용자 제안 승인 반영, ADR-051)
 
 [kor-travel-docker-manager] ═══ 인프라 계층(별도 데이터 흐름 없음): PostGIS(5432)·RustFS(12101) 구동/관리
-[kor-travel-docker-manager Prometheus :12601] ──(pull scrape)──▶ [kor-travel-map :12301/metrics]
+[kor-travel-docker-manager Prometheus :12401] ──(pull scrape)──▶ [kor-travel-map :12701/metrics]
 ```
 
 - TripMate ↔ kor-travel-map: **HTTP만**(라이브러리 import·공유 DB 없음, ADR-045/TripMate ADR-026).

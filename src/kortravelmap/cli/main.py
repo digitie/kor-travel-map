@@ -225,7 +225,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--geocoder-url",
         default=None,
         help=(
-            "kor-travel-geo REST base URL(예: http://127.0.0.1:12201). 주면 좌표 → "
+            "kor-travel-geo REST base URL(예: http://127.0.0.1:12501). 주면 좌표 → "
             "bjd_code 역지오코딩 보강을 켠다. 미지정 시 mois legal_dong_code만 사용."
         ),
     )

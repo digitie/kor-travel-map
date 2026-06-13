@@ -191,7 +191,7 @@ system
 | kakao-local-api | place | enrichment | on-demand | 전화번호 보강 |
 | naver-search-api | place | enrichment | on-demand | 전화번호 보강 |
 | google-places-api-new | place | enrichment | on-demand | 전화번호 보강 (Text Search New) |
-| kor-travel-geo | (geocoder) | base_address, base_coordinate | on-demand | 주소·좌표 보강. `kortravelmap.geocoding.KorTravelGeoRestClient`가 REST v2 `POST /v2/reverse`, `POST /v2/geocode` 호출. 로컬 FastAPI 기본 `http://127.0.0.1:12201` |
+| kor-travel-geo | (geocoder) | base_address, base_coordinate | on-demand | 주소·좌표 보강. `kortravelmap.geocoding.KorTravelGeoRestClient`가 REST v2 `POST /v2/reverse`, `POST /v2/geocode` 호출. 로컬 FastAPI 기본 `http://127.0.0.1:12501` |
 | ~~python-kraddr-base~~ | — | — | — | **ADR-041 (PR#37, 2026-05-28) 흡수 완료**. `Address` DTO + `core/address.py` utility는 본 lib로 이전. `PlaceCoordinate`는 명시적 제외 (좌표는 `Coordinate` 단일). archive 후보. |
 
 ## 5. provider 모듈 표준 구조
@@ -424,7 +424,7 @@ def test_no_provider_wrapper_classes():
 | provider | pyproject 핀 | 본 lib Protocol | 활성 PR | 메모 |
 |----------|--------------|-----------------|---------|------|
 | python-kraddr-base | **제거** | — | — | ADR-041 (PR#37) 흡수 완료. archive 후보 |
-| kor-travel-geo | REST 서비스(직접 의존 없음) | `KorTravelGeoRestClient` + `ReverseGeocoder`/`AddressGeocoder` 콜러블 | PR#90/#123 | on-demand geocoder. 최신 로컬 FastAPI 포트 `12201` 기준 |
+| kor-travel-geo | REST 서비스(직접 의존 없음) | `KorTravelGeoRestClient` + `ReverseGeocoder`/`AddressGeocoder` 콜러블 | PR#90/#123 | on-demand geocoder. 최신 로컬 FastAPI 포트 `12501` 기준 |
 | python-datagokr-api | `@48e458b` | `CulturalFestivalItem` (PR#34, #374 재정렬) + `PublicSpecialStreetItem` + fileData raw 변환 | PR#34, provider PR#10 | ADR-042 1차 축제 source. `26a5be3`: 주차장 시간 필드 분수값 float(provider #6, T-212e). `1967fb6`: 주차장 요금/수치 int 필드 관용 파싱. `48e458b`: T-223b fileData 4종 + 전국지역특화거리 service/model |
 | python-kma-api | `@2592b740` | `KmaShortForecastItem` (PR#38), `KmaUltraShortNowcastItem` (PR#39), `KmaUltraShortForecastItem`/mid/alerts 등 7종 | PR#38~46, T-219b/c | ADR-010 두 축. Dagster asset 5종 완비 — 실황/초단기/단기(T-219b, `KmaClient`) + 중기(설정 주입 region, `DataGoKrClient`)/특보(record resource→notice)(T-219c). `006fdbe`: datagokr `03 NO_DATA` → 빈 결과 정규화(provider #18, T-212e 특보 빈 구간). `2592b740`: 중기예보 응답이 `tmFc` 미에코 → 해석된 요청 tmFc를 item 폴백 주입(provider #20/PR#21, T-212e). ASOS/해수욕장/APIHub 표면은 백로그 |
 | python-airkorea-api | `@22996a4` | (후속 PR) | — | PM10/PM2.5/CAI |

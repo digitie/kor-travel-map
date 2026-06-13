@@ -34,10 +34,10 @@
 ## 1. 공통 규약 (전 엔드포인트)
 
 ### 1.1 Base URL · 포트 (ADR-047)
-- API `http://127.0.0.1:12301`(admin UI `12305`, Dagster `12302`; PC 개발 host
-  `5432`는 공유 PostGIS 인스턴스, standalone local Postgres publish는 `15432`;
+- API `http://127.0.0.1:12701`(admin UI `12705`, Dagster `12702`; PC 개발 host
+  `5432`는 공유 PostgreSQL/PostGIS 인스턴스;
   RustFS `12101`/`12105`). `TRIPMATE_KOR_TRAVEL_MAP_API_BASE_URL`은 host root까지만 포함하고,
-  모든 REST path가 `/v1` prefix를 명시한다(예: base `http://127.0.0.1:12301` +
+  모든 REST path가 `/v1` prefix를 명시한다(예: base `http://127.0.0.1:12701` +
   path `/v1/features/search`). base와 path 양쪽에 `/v1`를 중복 삽입하지 않는다.
 
 ### 1.2 Versioning (ADR-048 — #317 확장)

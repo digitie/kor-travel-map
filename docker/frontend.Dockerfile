@@ -32,11 +32,11 @@ COPY --from=deps /app/packages/kor-travel-map-admin/frontend/package.json ./pack
 COPY packages/map-marker-react ./packages/map-marker-react
 COPY packages/kor-travel-map-admin/frontend ./packages/kor-travel-map-admin/frontend
 
-ARG NEXT_PUBLIC_KOR_TRAVEL_MAP_API=http://127.0.0.1:12301
-ARG NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL=http://127.0.0.1:12302
+ARG NEXT_PUBLIC_KOR_TRAVEL_MAP_API=http://127.0.0.1:12701
+ARG NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL=http://127.0.0.1:12702
 # T-221b 좌표 picker(/admin/features/new)가 prerender 시점에 fail-fast로 요구 —
-# 누락 시 next build 실패 (ADR-046 kor-travel-geo REST, 로컬 표준 12201).
-ARG NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL=http://127.0.0.1:12201
+# 누락 시 next build 실패 (ADR-046 kor-travel-geo REST, docker-manager 표준 12501).
+ARG NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL=http://127.0.0.1:12501
 ARG NEXT_PUBLIC_VWORLD_API_KEY=
 ENV NEXT_PUBLIC_KOR_TRAVEL_MAP_API=$NEXT_PUBLIC_KOR_TRAVEL_MAP_API \
     NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL=$NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL \
@@ -50,7 +50,7 @@ FROM node:22-bookworm-slim AS runner
 
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
-    PORT=12305 \
+    PORT=12705 \
     HOSTNAME=0.0.0.0
 
 WORKDIR /app
@@ -63,6 +63,6 @@ COPY --from=builder --chown=nextjs:nodejs /app/packages/kor-travel-map-admin/fro
 
 USER nextjs
 
-EXPOSE 12305
+EXPOSE 12705
 
 CMD ["node", "packages/kor-travel-map-admin/frontend/server.js"]

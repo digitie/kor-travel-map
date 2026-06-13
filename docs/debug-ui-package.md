@@ -144,7 +144,7 @@ class ApiSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="KOR_TRAVEL_MAP_API_", env_file=".env")
 
     host: str = "127.0.0.1"                   # 외부 노출 금지 default (ADR-005)
-    port: int = 12301
+    port: int = 12701
     log_level: str = "info"
     debug_routes_enabled: bool = True         # /debug/* 활성
     features_routes_enabled: bool = True      # /features/* 활성 (DB 필요, PR#73)
@@ -152,8 +152,8 @@ class ApiSettings(BaseSettings):
     ops_routes_enabled: bool | None = None    # /ops/* + /ops/dagster/* 활성. None이면 features flag 추종
     prometheus_metrics_enabled: bool = True   # HTTP/DB metrics pull scrape endpoint
     prometheus_metrics_path: str = "/metrics"
-    cors_allow_origins: list[str] = [         # frontend(12305) cross-origin (PR#68)
-        "http://localhost:12305", "http://127.0.0.1:12305",
+    cors_allow_origins: list[str] = [         # frontend(12705) cross-origin
+        "http://localhost:12705", "http://127.0.0.1:12705",
     ]
     # provider API key 8종 (source=live용, PR#47) — SecretStr | None:
     #   kma_service_key / kma_apihub_key / opinet_service_key /
@@ -174,11 +174,11 @@ uv pip install -e .
 uv pip install -e packages/kor-travel-map-api
 
 # 기동 (인증 없음, localhost 전용)
-uvicorn kortravelmap.api.app:app --host 127.0.0.1 --port 12301
+uvicorn kortravelmap.api.app:app --host 127.0.0.1 --port 12701
 
 # 환경변수로 override
 KOR_TRAVEL_MAP_API_HOST=127.0.0.1 \
-KOR_TRAVEL_MAP_API_PORT=12301 \
+KOR_TRAVEL_MAP_API_PORT=12701 \
 KOR_TRAVEL_MAP_PG_DSN=postgresql+asyncpg://... \
 uvicorn kortravelmap.api.app:app
 
@@ -300,7 +300,7 @@ type drift 부채 0).
 
 - **외부 노출 금지**. host default `127.0.0.1`. `0.0.0.0` 바인드 시 경고.
 - **방화벽**: Odroid 운영 노드에서 외부 포트 차단. `ufw allow from 192.168.0.0/16
-  to any port 12301` 같은 사내망 한정 허용만.
+  to any port 12701` 같은 사내망 한정 허용만.
 - **Cloudflare Tunnel** 또는 **Tailscale**로 원격 접근 시에도 인증은 네트워크
   계층에서.
 - **로그**: structlog JSON to stdout. 메인 라이브러리와 동일 키 표준
@@ -350,7 +350,7 @@ type drift 부채 0).
 | 언어 | TypeScript |
 | 라이선스 | MIT (`next`) + ISC (`maplibre-vworld`) + BSD-3 (`maplibre-gl`) + GPL-3.0 (본 저장소) — 호환 |
 | 디렉토리 | `packages/kor-travel-map-admin/frontend/` |
-| 개발 포트 | `12305` (`next dev --port 12305`, TripMate `apps/web` dev 3000 충돌 회피) |
+| 개발 포트 | `12705` (`next dev --port 12705`, TripMate `apps/web` dev 3000 충돌 회피) |
 
 **Kakao Maps SDK 사용 안 함** (ADR-025/026). VWorld 지도가 1차 + 유일.
 
@@ -359,15 +359,15 @@ type drift 부채 0).
 | 변수 | 의미 |
 |------|------|
 | `NEXT_PUBLIC_VWORLD_API_KEY` | VWorld API key. **`KOR_TRAVEL_GEO_VWORLD_API_KEY`와 동일 값 공유** (ADR-025 사용자 보강 1차 + 2차 2026-05-25). frontend 빌드/런타임 주입. |
-| `NEXT_PUBLIC_KOR_TRAVEL_MAP_API` | 백엔드 API base URL (개발: `http://127.0.0.1:12301`) |
-| `NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL` | Dagster UI/embed base URL (개발: `http://127.0.0.1:12302`) |
-| `NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL` | 수동 feature 작성 화면의 kor-travel-geo REST v2 geocode/reverse base URL (개발: `http://127.0.0.1:12201`) |
-| `KOR_TRAVEL_MAP_API_DAGSTER_URL` | backend가 Dagster GraphQL을 조회할 때 쓰는 Dagster webserver base URL. 로컬 기본 `http://127.0.0.1:12302`, Docker API 컨테이너 기본 `http://dagster:12302` |
+| `NEXT_PUBLIC_KOR_TRAVEL_MAP_API` | 백엔드 API base URL (개발: `http://127.0.0.1:12701`) |
+| `NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL` | Dagster UI/embed base URL (개발: `http://127.0.0.1:12702`) |
+| `NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL` | 수동 feature 작성 화면의 kor-travel-geo REST v2 geocode/reverse base URL (개발: `http://127.0.0.1:12501`) |
+| `KOR_TRAVEL_MAP_API_DAGSTER_URL` | backend가 Dagster GraphQL을 조회할 때 쓰는 Dagster webserver base URL. 로컬 기본 `http://127.0.0.1:12702`, Docker API 컨테이너 기본 `http://dagster:12702` |
 | `KOR_TRAVEL_MAP_API_DAGSTER_ALLOWED_HOSTS` | backend Dagster GraphQL 호출 host allowlist. 기본은 `["127.0.0.1","localhost","::1","dagster"]`이며, 운영 Dagster host를 별도로 쓰면 URL과 함께 명시한다 |
 | `KOR_TRAVEL_MAP_API_DAGSTER_REPOSITORY_NAME` | offline upload load GraphQL launch selector의 repositoryName. 기본 `__repository__` |
 | `KOR_TRAVEL_MAP_API_DAGSTER_REPOSITORY_LOCATION_NAME` | offline upload load GraphQL launch selector의 repositoryLocationName. 기본 `kortravelmap.dagster.definitions` |
 | `KOR_TRAVEL_MAP_API_PROMETHEUS_METRICS_ENABLED` | Prometheus pull scrape용 `/metrics` endpoint와 HTTP 요청 count/duration/진행 중 요청/응답 크기, DB query count/duration 계측 활성화. 기본 `true` |
-| `KOR_TRAVEL_MAP_API_PROMETHEUS_METRICS_PATH` | Prometheus exposition path. 기본 `/metrics`, API 포트 `12301`에서 노출하며 OpenAPI에는 포함하지 않는다 |
+| `KOR_TRAVEL_MAP_API_PROMETHEUS_METRICS_PATH` | Prometheus exposition path. 기본 `/metrics`, API 포트 `12701`에서 노출하며 OpenAPI에는 포함하지 않는다 |
 | `KOR_TRAVEL_MAP_API_BACKUP_ROOT` | backup artifact root. 기본 `data/backups` |
 | `KOR_TRAVEL_MAP_API_BACKUP_PROJECT_ROOT` | backup/restore script 상대 경로를 해석하고 command를 실행할 project root. 기본 `.` |
 | `KOR_TRAVEL_MAP_API_BACKUP_SCRIPT_PATH` / `KOR_TRAVEL_MAP_API_RESTORE_SCRIPT_PATH` | backup/restore command plan이 호출하는 script path. 기본 `scripts/docker-backup.sh`, `scripts/docker-restore.sh` |
@@ -402,28 +402,28 @@ uv pip install -e ".[dev]"
 uv pip install -e packages/kor-travel-map-api
 
 # 2. backend (FastAPI) 기동
-uvicorn kortravelmap.api.app:app --host 127.0.0.1 --port 12301
+uvicorn kortravelmap.api.app:app --host 127.0.0.1 --port 12701
 
 # 3. frontend (Next.js dev) 기동
 cd packages/kor-travel-map-admin/frontend
 npm ci
 cp .env.example .env.local
 $EDITOR .env.local           # VWorld API key
-npm run dev                  # http://127.0.0.1:12305
+npm run dev                  # http://127.0.0.1:12705
 ```
 
 **운영 옵션 3가지** (운영자 결정):
 
 - **A. standalone (default 권고)**: `next build` + `next start` — frontend는
-  12305 포트, backend는 12301 포트로 동일 호스트에서 별도 프로세스. CORS
+  12705 포트, backend는 12701 포트로 동일 호스트에서 별도 프로세스. CORS
   미필요 (Next.js rewrites로 same-origin fetch).
   ```bash
   cd packages/kor-travel-map-admin/frontend
   npm run build                # .next/
-  npm run start                # next start --port 12305 --hostname 127.0.0.1
+  npm run start                # next start --port 12705 --hostname 127.0.0.1
   ```
 - **B. FastAPI reverse proxy**: backend의 `/ui/*` 경로가 Next.js로 proxy.
-  Next.js는 `basePath: '/ui'` 설정. 단일 포트 운영 (12301).
+  Next.js는 `basePath: '/ui'` 설정. 단일 포트 운영 (12701).
 - **C. static export**: `next build` + `next export` → `out/` HTML/JS.
   FastAPI가 `out/`을 static mount. SSR 미사용 (App Router의 client-only
   페이지만 가능). 본 디버그 UI는 read-mostly이라 가능하지만 server actions
@@ -511,7 +511,7 @@ npm run doctor
 
 ### 14.9 외부 노출 안전
 
-- frontend는 `127.0.0.1:12305` (Next.js dev/standalone) 또는 `127.0.0.1:12301`
+- frontend는 `127.0.0.1:12705` (Next.js dev/standalone) 또는 `127.0.0.1:12701`
   (FastAPI proxy/static mount, §14.3 옵션 B/C) 만.
 - VWorld API key는 frontend에 노출되지만 HTTP referrer 제한으로 보호.
   공유 키(`KOR_TRAVEL_GEO_VWORLD_API_KEY`)이므로 referrer 화이트리스트에 backend

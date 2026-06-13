@@ -124,7 +124,7 @@ class KorTravelMapSettings(BaseSettings):
     kor_travel_geo_base_url: str | None = Field(
         default=None,
         description=(
-            "kor-travel-geo REST 서비스 base URL (로컬 기본 예: ``http://127.0.0.1:12201``). "
+            "kor-travel-geo REST 서비스 base URL (로컬 기본 예: ``http://127.0.0.1:12501``). "
             "``None``이면 정/역지오코딩 보강 비활성 (좌표만으로 적재). 호출 측이 "
             "이 URL로 ``httpx.AsyncClient(base_url=...)``를 만들어 "
             "``KorTravelGeoRestClient``에 주입한다 (python 패키지/DB 의존 없음)."

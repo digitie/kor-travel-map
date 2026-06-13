@@ -46,7 +46,7 @@ cut했다.
 - **ADR 현황**: ADR-001~056 모두 accepted, **다음 후보 번호 = ADR-057**
   (`docs/decisions.md`). 045 = Docker 독립 프로그램 + 독립 DB/Dagster + TripMate
   OpenAPI 연동(ADR-003 운영 모델 supersede). 046 = 이행 시 구 모델 호환 shim 금지
-  + 주소는 kor-travel-geo REST v2로 통일. 047 = standalone 고정 포트. 048 = REST API
+  + 주소는 kor-travel-geo REST v2로 통일. 047 = docker-manager 로컬 포트 기준. 048 = REST API
   versioning을 admin/ops까지 확장(`/v1`, #317 위 보강) + envelope/pagination/parameter/
   response 정합성 표준 + 코드/DB 명명 전파 — 정본 `docs/rest-api.md`, 실행 T-216a~g.
   049~053 = `kor-travel-concierge` YouTube provider pull 경계 + export 계약 보강(경로 중립화·
@@ -55,10 +55,10 @@ cut했다.
   5건만 확정) + RustFS 공유 버킷 잠정 정책 — 실행 T-217a~g. 054 =
   `kor-travel-map` / `kortravelmap` package identity clean cut. 055 =
   `kor-travel-map-api` backend와 `kor-travel-map-admin` frontend 분리.
-- **고정 포트(ADR-047)**: API `12301` · admin UI `12305` · Dagster `12302` ·
+- **고정 포트(ADR-047)**: API `12701` · admin UI `12705` · Dagster `12702` ·
   Postgres host `5432` · RustFS S3 `12101`/console `12105`.
 - **geocoding 정본**: kor-travel-geo REST v2 `POST /v2/{reverse,geocode}`, 로컬 기본
-  `http://127.0.0.1:12201`(ADR-046).
+  `http://127.0.0.1:12501`(ADR-046/047).
 - **frontend 정본**: Next.js 16 + React 19 + `maplibre-vworld-js#v0.1.3`(ADR-036),
   Windows Playwright e2e.
 - **coverage gate**: ADR-032 단계 상향 일정(Sprint 4 기준 `fail_under=80`).
