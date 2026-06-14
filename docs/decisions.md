@@ -1775,7 +1775,7 @@ merged 2026-05-25):
 
 ## ADR-035: 디버그/관리 REST API는 프로덕션 환경에서도 admin/유지보수 UI로 운영
 
-- **상태**: accepted (PR#33, 2026-05-27)
+- **상태**: accepted (PR#33, 2026-05-27) — 'debug-ui' 범위 표현 일부는 ADR-045로 supersede(운영 모델 = Docker 독립 프로그램 + admin OpenAPI 연동).
 - **날짜**: 2026-05-27
 - **결정자**: 사용자
 

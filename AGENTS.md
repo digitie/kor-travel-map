@@ -408,7 +408,7 @@ credential은 각 worktree 루트의 로컬 파일 `.env.mcp-telegram`에만 저
 - [ ] `docs/resume.md`의 진척도 갱신
 - [ ] 의사결정이 있었다면 `docs/decisions.md`에 ADR 추가
 - [ ] 사용자 가시 변경이면 `CHANGELOG.md` 갱신
-- [ ] DTO/스키마 변경이면 `scripts/export_openapi.py` 재실행
+- [ ] DTO/스키마 변경이면 `packages/kor-travel-map-api/scripts/export_openapi.py` 재실행
        (디버그 API 라우터 노출 시점부터 적용)
 - [ ] CLI 명령 추가 시 mutex 필요 여부 확인 (ADR-039 — write/bulk/restore는
       advisory lock 박음)

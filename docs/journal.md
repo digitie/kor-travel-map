@@ -2,6 +2,31 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-14 (claude) — 문서 정합성 스윕 (T-DA-18~26)
+
+**작업**: 사용자 지시("문서 정합성 스윕")로 현행 정본 문서 전반을 코드/형제 repo
+ground truth와 대조. 정본 리포트 `docs/reports/docs-consistency-sweep-2026-06-14.md`
+(직전 `docs-consistency-audit-2026-06-06.md` T-DA-01~17의 연속, 번호 T-DA-18부터).
+
+- **기준**: `origin/main` `b6fda93`(#437 후). 5개 차원 병렬 감사(상태 drift / ADR
+  원장 / 포트·식별자 / 끊어진 링크 / 교차 주장) + 종합.
+- **HIGH 2**: (T-DA-18) `resume.md` 3개 정본 섹션이 완료된 T-225를 즉시/유일 잔여로
+  표기 → `T-229-buildx` 기준으로 정정(잔여 = arm64 buildx 배포 검증, `GITHUB_TOKEN`
+  필요). (T-DA-21) `integration-map.md` concierge 포트 `12401`(docker-manager
+  Prometheus와 충돌)·`9042` → 정본 `12601`/MCP `12602`/web `12605`(concierge +
+  docker-manager `.env.example` 확인).
+- **MED 3**: `sprints/README.md` Sprint5/anti-drift note T-225 stale(T-DA-19),
+  `SKILL.md:298` "ADR 001~049/050"→"001~056/057"(T-DA-20), `docker-app.md` offline
+  bucket `krtour-uploads`→`kor-travel-map-uploads`(`settings.py:97`, T-DA-22).
+- **LOW 2**: spec docx 죽은 참조 → `git mv python-krtour-map-spec.docx
+  kor-travel-map-spec.docx`(DA-D-05=A, T-DA-23); `AGENTS.md` export_openapi.py 경로를
+  `packages/kor-travel-map-api/scripts/`로(T-DA-24).
+- **INFO**: `decisions.md` ADR-035에 ADR-045 부분 supersede 역참조 한 줄 추가(역사
+  보존, T-DA-25); ADR 원장 001~056 연속·무갭/무중복 확인(T-DA-26).
+- **정상 확인(비조치)**: 포트 baseline·ADR 카운트(CLAUDE/AGENTS/README/SKILL §1)·
+  `tasks.md` 내부정합·coverage 80·frontend 핀·geocoding 12501·패키지 정체성 모두
+  정합. `journal.md`/dated reports는 역사 보존.
+
 ## 2026-06-14 (claude) — T-229 curated 오버레이 라이브 검증
 
 T-229를 종결했다. 정본 리포트 `docs/reports/t-229-curated-live-verify-2026-06-14.md`.
