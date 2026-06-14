@@ -52,7 +52,7 @@ chmod 600 .env
 `KOR_TRAVEL_MAP_DOCKER_OBJECT_STORE_ENDPOINT_URL`(기본 `http://rustfs:9000`)로 주입하고,
 host/browser 공개 URL은 `KOR_TRAVEL_MAP_OBJECT_STORE_PUBLIC_BASE_URL`(기본
 `http://127.0.0.1:12101/kor-travel-map`)을 사용한다. offline upload 원본 bucket은
-`KOR_TRAVEL_MAP_OFFLINE_UPLOAD_BUCKET`(기본 `krtour-uploads`)이다.
+`KOR_TRAVEL_MAP_OFFLINE_UPLOAD_BUCKET`(기본 `kor-travel-map-uploads`)이다.
 로컬 venv stack도 Docker compose와 같은 RustFS 개발 credential 기본값
 `kor-travel-map-dev-access` / `kor-travel-map-dev-secret`을 사용한다.
 Postgres host 포트 기본값은 `KOR_TRAVEL_MAP_POSTGRES_HOST_PORT=5432`이며,

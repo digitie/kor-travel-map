@@ -81,40 +81,40 @@ Sprint 5 운영 진입 마무리다. 핵심 구현과 운영 표면은 대부분
   curated feature/TripMate import, `T-224` concierge provider 경계 정리는 완료됐다.
 - `T-226` 패키지/runtime identity clean cut, `T-227` Prometheus 메트릭, `T-228`
   API/backend와 admin frontend 패키지 분리도 완료됐다.
-- 본 저장소에서 즉시 실행 가능한 남은 큰 트랙은 T-225 하나다. TripMate 쪽 작업은
-  외부 추적으로만 남긴다.
+- `T-225`(T-212e closure 재검증, 2026-06-13)·`T-229`(curated 오버레이 + post-reload
+  표면 라이브 검증, 2026-06-14)는 완료됐다. 본 저장소에서 즉시 실행 가능한 큰 트랙은
+  없고, 유일 잔여는 **arm64 multi-arch buildx 배포 검증**(`T-229-buildx`, `GITHUB_TOKEN`이
+  주입된 배포 환경 필요)뿐이다. TripMate 쪽 작업은 외부 추적으로만 남긴다.
 
 ## 다음 한 작업
 
-### T-225 — T-212e closure 재검증
+### T-229-buildx — arm64 multi-arch buildx 배포 검증 (T-229 잔여)
+
+T-229의 라이브 검증(curated 오버레이 0→86,341 후보, `/metrics` 200, smoke breadth)은
+완료됐다(정본 `docs/reports/t-229-curated-live-verify-2026-06-14.md`). 유일 잔여는
+T-108/ADR-056의 arm64 multi-arch buildx 이미지 build+boot smoke다.
 
 목표:
 
-- `docs/reports/t-212e-live-full-reload-final-2026-06-12.md` 결과가 최신 main 기준의
-  provider/API/admin 표면을 충분히 포괄하는지 재대조한다.
-- full reload 재실행이 필요할 만큼 큰 drift가 없으면, 기존 evidence를 확인해
-  closure 리포트로 닫는다.
+- `scripts/docker-buildx.sh`로 `linux/arm64`(Odroid M1S) 이미지를 빌드하고 단일
+  platform 부팅 smoke를 통과시킨다.
 
-확인할 증거:
+전제:
 
-- live row 수와 provider별 실패 여부.
-- P99 수치와 클러스터 MV 재판단 입력.
-- offline upload 실데이터 증거와 DELETE lifecycle.
-- API smoke, Windows Playwright e2e, backup/restore smoke.
-- T-221/T-222/T-223/T-224/T-226/T-227/T-228 이후 추가된 표면이 closure 조건에서
-  빠지지 않았는지.
+- private provider pin 빌드에 `GITHUB_TOKEN`이 필요하므로 **토큰이 주입된 배포
+  환경**에서만 수행 가능하다(코드/데이터 결함 아님).
 
 완료 시:
 
-- `docs/reports/`에 재검증 결과를 남기거나 기존 리포트가 충분하다는 근거를 기록한다.
-- `docs/tasks.md`에서 T-225를 제거하고 `docs/tasks-done.md`로 이동한다.
+- arm64 빌드+부팅 smoke 결과 또는 불가 사유를 `docs/reports/`에 기록한다.
+- `docs/tasks.md`에서 `T-229-buildx`를 제거하고 `docs/tasks-done.md`로 이동한다.
 - `docs/journal.md`에 역시간순 엔트리를 추가한다.
 
 ## 열린 작업 요약
 
 즉시:
 
-- `T-225` — T-212e closure 재검증.
+- `T-229-buildx` — arm64 multi-arch buildx 배포 검증 (T-229 잔여, `GITHUB_TOKEN` 필요).
 
 외부 추적:
 
