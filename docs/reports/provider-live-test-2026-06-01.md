@@ -56,10 +56,19 @@ required`. raw 응답 직접 확인 결과 data.go.kr `tn_pubr_public_rest_area_
   최초부터 정상(데이터만 받으면 동작).
 - **재검증(2026-06-01, upstream fix 후)**: 휴게소 60건 fetch(좌표 60/60) → 60
   bundle 변환 → PostGIS 60 적재, `coord_5179` SRID=5179 60/60, category
-  `06040101` 60/60 — **PASS**.
-- 본 lib `KrexRestAreaItem` Protocol엔 `uni_id`가 필요하나 `RestArea` 모델엔 없어
-  자연키 합성(`휴게소명::노선::방향::lon::lat`) — `::` 구분자(ADR-009, `|` 금지).
-  이 데이터셋은 `route_name`/`direction`이 비어(None) 휴게소명+좌표가 사실상 키.
+  `06040101` 60/60 — **PASS**. (caveat: feature_id는 좌표를 포함하지 않고 이
+  데이터셋은 `route_name`/`direction`이 None이라 자연키가 휴게소명으로 좁혀진다 —
+  "60 fetch = 60 distinct feature"는 동일 `bjd_code` 내 동명 휴게소가 없을 때만
+  성립(샘플 한정). 동명 충돌 시 조용히 `<60`으로 dedup.)
+- 본 lib `KrexRestAreaItem`이 매핑하는 provider `RestArea` source엔 안정
+  식별자(uni_id)도 주소 컬럼도 없어(uni_id는 가격/날씨 Protocol 전용) 자연키를
+  합성한다: `_rest_area_natural_key` = `휴게소명::노선::방향`(3-part,
+  name::route_name::direction) — `::` 구분자(ADR-009, `|` 금지). **좌표(lon/lat)는
+  자연키·feature_id에 들어가지 않는다** — `make_feature_id`는 자연키+bjd_code+kind+
+  category+source_type만 쓰고, 좌표는 source_record payload_hash에만 반영된다. 이
+  데이터셋은 `route_name`/`direction`이 None이라 사실상 **휴게소명(+bjd_code)**이
+  식별키 → 같은 이름·같은 행정구역의 서로 다른 휴게소는 좌표가 달라도 1개 Feature로
+  dedup된다(`KrexRestAreaItem` docstring의 collision tradeoff).
 
 ## 5. 어댑터 매핑 노트 (재현용)
 

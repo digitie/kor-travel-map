@@ -4946,8 +4946,10 @@ JSONB) → **마이그레이션 불필요**.
 - **재검증(WSL, testcontainers postgis 16-3.5 + alembic 0001~0006)**: 휴게소 60건
   fetch(좌표 60/60) → `rest_areas_to_bundles` 60 변환 → `load_bundles` 60 적재.
   DB features 60 / `coord_5179` SRID=5179 60/60 / category `06040101` 60/60 —
-  **PASS**. 어댑터 자연키 `휴게소명::노선::방향::lon::lat`(이 데이터셋은 노선·방향
-  None → 휴게소명+좌표가 사실상 키). 본 lib 코드 변경 없음(변환은 최초부터 정상).
+  **PASS**. 자연키 `휴게소명::노선::방향`(3-part `_rest_area_natural_key`, 좌표
+  미포함). 이 데이터셋은 노선·방향이 None이라 사실상 휴게소명(+bjd_code)이 식별키
+  — 좌표는 feature_id/dedup에 무관(source_record payload_hash에만), 동명 휴게소는
+  좌표가 달라도 dedup 충돌. 본 lib 코드 변경 없음(변환은 최초부터 정상).
 - **문서**: `docs/reports/provider-live-test-2026-06-01.md` §2/§4/§6/§7 갱신 — krex
   ❌→✅ 60, 후속 항목 완료 처리. 라이브 스크립트는 임시(`scripts/_live_krex_*`)로
   작성 후 제거(provider lib는 런타임 의존 아님, ADR-006).
