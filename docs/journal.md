@@ -2,6 +2,17 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-15 (claude) — concierge source_entity_id 계약 테스트 + 검증 완전 종결 (후속 4)
+
+검증 §5의 마지막 권장(source_entity_id 불변성 계약 테스트)을 kor-travel-concierge에 처리하고
+concierge loader 검증 전체를 닫았다.
+
+- **concierge #85**(이슈 #84, T-082): 한 후보의 upsert·reject export가 동일한
+  `source_record.source_entity_id`(`= str(candidate.id)`)를 갖는다는 불변성 회귀 테스트 추가
+  (test-only). consumer inactivate 조인 전제를 producer 측에서 고정.
+- **본 repo**: 검증 리포트 P-01/§5/결론을 ✅ concierge #85로 갱신 — **잔여 0**. concierge
+  loader 검증 종결: map #440(ADR-057)·#441(하드닝)·#442·현 PR(추적), concierge #83·#85.
+
 ## 2026-06-15 (claude) — concierge P-01 cross-repo 종결 (검증 후속 3)
 
 concierge loader 검증의 producer-side 잔여 P-01을 kor-travel-concierge repo에 직접 처리.
