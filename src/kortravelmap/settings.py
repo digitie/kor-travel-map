@@ -291,8 +291,10 @@ class KorTravelMapSettings(BaseSettings):
     kor_travel_concierge_base_url: str | None = Field(
         default=None,
         description=(
-            "kor-travel-concierge REST API base URL. 예: ``http://127.0.0.1:12401``. "
-            "설정 시 Dagster ``kor_travel_concierge_youtube_features`` resource가 "
+            "kor-travel-concierge REST API base URL. **scheme+host[:port]만** 넣는다 "
+            "(경로 segment 금지 — fetcher가 절대경로 ``/api/v1/...``로 호출하므로 base의 "
+            "경로는 httpx join에서 버려진다, C-07). 예: ``http://127.0.0.1:12601``. 설정 시 "
+            "Dagster ``kor_travel_concierge_youtube_features`` resource가 "
             "``/api/v1/features/{snapshot|changes}``를 pull한다(ADR-053/ADR-050)."
         ),
     )

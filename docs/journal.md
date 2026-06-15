@@ -2,6 +2,27 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-15 (claude) — concierge loader 하드닝 (C-04~C-08, 검증 후속 2)
+
+**작업**: concierge provider loader 검증(정본 `docs/reports/concierge-loader-verify-2026-06-15.md`)
+의 latent 하드닝 항목(전부 오늘 활성 버그 0) 해소. ADR-057(#440) 후속.
+
+- **C-04**(identity 키 일관성): upsert 경로가 provider/dataset_key/source_entity_type을
+  payload-derived로 저장하던 것을 **고정 상수로 강제** — upsert 저장 키 == inactivate 매칭
+  키 == feature_id source_type 보장(향후 alias로 인한 inactivate silent miss 차단). payload가
+  상수와 다르면 `_warn_on_identity_drift`로 경고(raw 값은 raw_data 보존).
+- **C-05**(operation 폐쇄 분류): `inactive_entity_ids`가 `!=upsert`를 전부 inactivate하던
+  것을 **{reject,tombstone}만** 비활성화로 좁히고 unknown operation은 skip+warn — 미래
+  operation 추가 시 live feature 파괴적 비활성화 방지.
+- **C-06**: 페처 anti-stall 가드 테스트 2종(`has_more`인데 next_cursor 미전진/누락 → RuntimeError).
+- **C-07**: `settings.kor_travel_concierge_base_url` 문서에 scheme+host[:port]만(경로 금지)
+  명시 + **예시 포트 stale `12401`→`12601` 정정**(DA-D-06 정본).
+- **C-08**: producer-only extra 필드(video_summary/rejection_reason/evidence.providers)
+  보존 conformance 테스트 추가.
+- **검증**: `pytest tests/unit/test_providers_kor_travel_concierge.py` 13 passed, ruff/mypy
+  clean. 페처 가드 테스트(C-06)는 dagster 의존이라 CI에서 실행.
+- **잔여**: concierge측 P-01(`limit` Query 바운드) — 그쪽 repo 후속.
+
 ## 2026-06-15 (claude) — ADR-057 concierge feature_id 안정화 (loader 검증 후속)
 
 **작업**: "concierge provider loader 검증"(5-에이전트 conformance 감사, 정본

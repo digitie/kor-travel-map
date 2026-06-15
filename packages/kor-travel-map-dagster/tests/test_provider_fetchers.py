@@ -227,6 +227,43 @@ async def test_kor_travel_concierge_youtube_fetch_raises_when_credential_missing
         await anext(generator)
 
 
+async def test_kor_travel_concierge_youtube_fetch_raises_on_non_advancing_cursor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """C-06 — has_more=true인데 next_cursor가 직전 cursor와 같으면(stall) RuntimeError."""
+    _install_fake_kor_travel_concierge_httpx(
+        monkeypatch,
+        [
+            {"items": [{"id": 1}], "next_cursor": "c2", "has_more": True},
+            {"items": [{"id": 2}], "next_cursor": "c2", "has_more": True},
+        ],
+    )
+    settings = KorTravelMapSettings(
+        kor_travel_concierge_base_url="https://kor-travel-concierge.example",
+        kor_travel_concierge_api_key=SecretStr("agent-key"),
+    )
+
+    with pytest.raises(RuntimeError, match="이전 cursor와 같다"):
+        [item async for item in fetch_kor_travel_concierge_youtube_features(settings)]
+
+
+async def test_kor_travel_concierge_youtube_fetch_raises_on_missing_next_cursor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """C-06 — has_more=true인데 next_cursor가 없으면(None/빈 문자열) RuntimeError."""
+    _install_fake_kor_travel_concierge_httpx(
+        monkeypatch,
+        [{"items": [{"id": 1}], "next_cursor": None, "has_more": True}],
+    )
+    settings = KorTravelMapSettings(
+        kor_travel_concierge_base_url="https://kor-travel-concierge.example",
+        kor_travel_concierge_api_key=SecretStr("agent-key"),
+    )
+
+    with pytest.raises(RuntimeError, match="next_cursor가 없다"):
+        [item async for item in fetch_kor_travel_concierge_youtube_features(settings)]
+
+
 class _FakeEventService:
     def __init__(self, records: list[object]) -> None:
         self._records = records
