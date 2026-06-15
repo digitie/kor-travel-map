@@ -2,6 +2,25 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-15 (claude) — DA-D-06 cross-repo 포트·계약 교차확인
+
+**작업**: 문서 정합성 스윕 #438의 후속 DA-D-06. `integration-map.md` §1 포트표 + §3/§4
+concierge·geo 계약을 공급자 측 origin/main으로 실측 교차확인(checklist §0 origin/main
+원칙). 정본 리포트 `docs/reports/cross-repo-port-audit-2026-06-15.md`.
+
+- **기준(origin/main)**: map `47df2ff`(#438 후) · concierge `9fabbcf` · docker-manager
+  `126b281`(포트 owner) · geo `0bb7855`.
+- **DA-D-06 확정**: concierge `API 12601`/`MCP 12602`/`web 12605` — concierge `.env.example`
+  **및** docker-manager `.env.example`(`KOR_TRAVEL_CONCIERGE_*`) 양측 일치. #438 정정 검증
+  (구 `12401` = docker-manager Prometheus 충돌 확정). map/geo/docker-manager 전 포트 row +
+  concierge export 계약(`/api/v1/features/{snapshot,changes}`, `X-API-Key`,
+  `{items,next_cursor,has_more}`, `docs/feature-export-api.md`) + geo `/v2/{geocode,reverse}`
+  @12501 모두 정합.
+- **cross-repo 발견(공급자 측, 본 repo 비대상)**: concierge `docs/architecture.md:21`가
+  map을 옛 `python-krtour-map`으로 표기 → concierge 후속. **TripMate**(9021/9022 +
+  batch/cursor)는 로컬 미체크아웃 → quarterly cross-repo audit로 위임.
+- 본 repo 코드/문서 수정 없음(integration-map은 #438에서 이미 정합).
+
 ## 2026-06-14 (claude) — 문서 정합성 스윕 (T-DA-18~26)
 
 **작업**: 사용자 지시("문서 정합성 스윕")로 현행 정본 문서 전반을 코드/형제 repo
