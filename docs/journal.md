@@ -2,6 +2,18 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-15 (claude) — concierge P-01 cross-repo 종결 (검증 후속 3)
+
+concierge loader 검증의 producer-side 잔여 P-01을 kor-travel-concierge repo에 직접 처리.
+
+- **이슈 + PR**: `digitie/kor-travel-concierge` 이슈 #82 생성 → PR #83 머지(T-081). `GET
+  /api/v1/features/{snapshot,changes}`의 `limit`에 `Query(ge=1, le=FEATURE_EXPORT_LIMIT_MAX)`
+  추가(범위 밖 → silent clamp 대신 422) + 회귀 테스트 2종. 그쪽 컨벤션(`codex/*` 브랜치,
+  journal/tasks 갱신) 준수. consumer(map)는 limit `[1,500]`만 보내 무영향.
+- **본 repo**: 검증 리포트 `concierge-loader-verify-2026-06-15.md`의 P-01 줄을 ✅(concierge
+  #83)로 갱신. concierge loader 검증 cross-repo 추적 종결(map #440 ADR-057 · map #441
+  하드닝 · concierge #83 P-01). 잔여 권장 1건만 남음: source_entity_id 불변성 계약 테스트.
+
 ## 2026-06-15 (claude) — concierge loader 하드닝 (C-04~C-08, 검증 후속 2)
 
 **작업**: concierge provider loader 검증(정본 `docs/reports/concierge-loader-verify-2026-06-15.md`)
