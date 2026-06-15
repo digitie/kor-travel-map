@@ -2,6 +2,31 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-15 (claude) — ADR-057 concierge feature_id 안정화 (loader 검증 후속)
+
+**작업**: "concierge provider loader 검증"(5-에이전트 conformance 감사, 정본
+`docs/reports/concierge-loader-verify-2026-06-15.md`) → 발견된 feature_id 결정성 갭
+수정. concierge export 계약은 origin/main `9fabbcf` 실측 대조.
+
+- **검증 결론**: 로더 근본 정합·정상(16개 계약 항목 OK — 경로/X-API-Key/flat 엔벌롭/
+  커서·limit/operation enum/식별 트리플/source_entity_id/confidence 0-1 스케일/필드명·
+  중첩 전부 일치, silent drop·이중스케일 없음).
+- **수정(ADR-057)**: feature_id가 늦게 바인딩되는 bjd(producer는 admin 코드 항상 None →
+  optional geocoder 의존)·category(enrich 전 None→후 8자리, payload 변경 재export)를
+  식별자에 넣어 **같은 후보가 재export마다 새 feature로 갈리던**(비멱등) 문제. concierge가
+  보장하는 안정 키 `candidate.id`(source_entity_id)에 feature_id를 고정 — `bjd_code=None`
+  + 고정 IDENTITY category + 상수 source_type. 실제 bjd/category는 Address/Feature 가변
+  속성으로 in-place 갱신. concierge **한정** 정책(타 provider는 기존 동작 유지).
+- **코드/테스트**: `providers/kor_travel_concierge.py` `_FEATURE_ID_IDENTITY_CATEGORY` +
+  `_item_to_bundle`. 회귀 테스트 2종(geocoder 유무 동일 id / category None↔8자리 동일 id)
+  + 픽스처 admin 코드 None 교정(C-03). `pytest tests/unit/test_providers_kor_travel_concierge.py`
+  10 passed.
+- **이행**: 구 파생 feature_id는 1회성 재키(구 동작이 이미 비멱등) — 다음 full snapshot
+  재import가 안정 `f_global_` feature 생성, alembic 불필요. concierge live 적재 전이면 무영향.
+- **후속(별도 PR)**: C-04 inactivate 키 일관성 / C-05 operation 폐쇄 분류 / C-06·C-08 테스트 /
+  C-07 base_url 문서 / concierge측 P-01(limit Query 바운드). 리포트 §5.
+- **문서 bookkeeping**: ADR 카운트 001~057 / 다음 058 (CLAUDE/AGENTS/SKILL/README).
+
 ## 2026-06-15 (claude) — DA-D-06 cross-repo 포트·계약 교차확인
 
 **작업**: 문서 정합성 스윕 #438의 후속 DA-D-06. `integration-map.md` §1 포트표 + §3/§4
