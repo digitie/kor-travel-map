@@ -16,6 +16,7 @@ ADR 참조: ADR-006 / ADR-009 / ADR-019 / ADR-024 / ADR-045 / ADR-050 / ADR-053 
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
@@ -81,6 +82,13 @@ category는 ``Feature.category``(가변)에 싣는다."""
 KOR_TRAVEL_CONCIERGE_MARKER_COLOR: Final[str] = "P-13"
 _DEFAULT_MARKER_ICON: Final[str] = "marker"
 
+_OPERATION_UPSERT: Final[str] = "upsert"
+_INACTIVATE_OPERATIONS: Final[frozenset[str]] = frozenset({"reject", "tombstone"})
+"""ADR-050 #4 — feature를 inactive로 전환하는 operation. 이 둘만 비활성화하고 그 외
+unknown operation은 적재도 비활성화도 하지 않는다(C-05 — live feature 파괴적 오분류 방지)."""
+
+logger = logging.getLogger(__name__)
+
 
 async def kor_travel_concierge_items_to_bundles(
     items: Iterable[KorTravelConciergeFeatureItem],
@@ -102,7 +110,7 @@ async def kor_travel_concierge_items_to_bundles(
     )
     bundles: list[FeatureBundle] = []
     for item in items:
-        if _operation(item) != "upsert":
+        if _operation(item) != _OPERATION_UPSERT:
             continue
         bundle = await _item_to_bundle(
             item,
@@ -127,16 +135,15 @@ async def _item_to_bundle(
     if not name or not source_entity_id:
         return None
 
-    provider = normalize_provider_name(
-        _text(source_record_payload, "provider") or KOR_TRAVEL_CONCIERGE_PROVIDER_NAME
-    )
-    dataset_key = (
-        _text(source_record_payload, "dataset_key")
-        or DATASET_KEY_YOUTUBE_PLACE_CANDIDATES
-    )
-    source_entity_type = (
-        _text(source_record_payload, "source_entity_type") or _SOURCE_ENTITY_TYPE
-    )
+    # ADR-053/057 (C-04) — identity triple(provider/dataset_key/source_entity_type)은 이
+    # provider에서 **고정**이다(inactive 전환도 같은 고정값으로 매칭). payload 값을 그대로
+    # 쓰면 upsert 저장 키와 inactivate 매칭 키가 갈릴 수 있으므로(silent miss), 상수로
+    # 강제해 upsert 저장 == inactivate 매칭 == feature_id source_type을 보장한다. payload가
+    # 다르면 계약 drift이므로 경고만 남긴다(raw 값은 raw_data에 보존된다).
+    _warn_on_identity_drift(source_record_payload)
+    provider = normalize_provider_name(KOR_TRAVEL_CONCIERGE_PROVIDER_NAME)
+    dataset_key = DATASET_KEY_YOUTUBE_PLACE_CANDIDATES
+    source_entity_type = _SOURCE_ENTITY_TYPE
     category = _category(place)
     coord = _coordinate(place)
 
@@ -256,7 +263,16 @@ def kor_travel_concierge_inactive_entity_ids(
     """
     entity_ids: set[str] = set()
     for item in items:
-        if _operation(item) == "upsert":
+        operation = _operation(item)
+        if operation == _OPERATION_UPSERT:
+            continue
+        if operation not in _INACTIVATE_OPERATIONS:
+            # C-05 — 알 수 없는 operation은 적재도 비활성화도 하지 않는다(live feature
+            # 파괴적 오분류 방지). 계약상 reject/tombstone만 inactivate 대상이다.
+            logger.warning(
+                "kor-travel-concierge unknown operation %r — inactivate 대상에서 제외",
+                operation,
+            )
             continue
         source_record_payload = _mapping(item.get("source_record"))
         entity_id = _source_entity_id(item, source_record_payload)
@@ -266,7 +282,28 @@ def kor_travel_concierge_inactive_entity_ids(
 
 
 def _operation(item: Mapping[str, Any]) -> str:
-    return str(item.get("operation") or "upsert").strip().lower()
+    return str(item.get("operation") or _OPERATION_UPSERT).strip().lower()
+
+
+def _warn_on_identity_drift(source_record_payload: Mapping[str, Any]) -> None:
+    """payload의 identity triple이 고정 상수와 다르면 계약 drift로 경고한다(C-04).
+
+    값 자체는 상수를 써서 키 일관성을 보장하되, concierge가 provider/dataset_key/
+    source_entity_type을 바꾸면 조용히 넘어가지 않도록 관측 가능하게 만든다.
+    """
+    for key, expected in (
+        ("provider", KOR_TRAVEL_CONCIERGE_PROVIDER_NAME),
+        ("dataset_key", DATASET_KEY_YOUTUBE_PLACE_CANDIDATES),
+        ("source_entity_type", _SOURCE_ENTITY_TYPE),
+    ):
+        actual = _text(source_record_payload, key)
+        if actual is not None and actual != expected:
+            logger.warning(
+                "kor-travel-concierge identity drift: source_record.%s=%r != 고정 상수 %r",
+                key,
+                actual,
+                expected,
+            )
 
 
 def _mapping(value: Any) -> Mapping[str, Any]:

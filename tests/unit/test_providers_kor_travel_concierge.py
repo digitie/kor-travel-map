@@ -246,3 +246,55 @@ async def test_kor_travel_concierge_skips_non_mapping_place_and_missing_source_i
     assert await kor_travel_concierge_items_to_bundles(
         [no_place, no_source_id], fetched_at=_FETCHED
     ) == []
+
+
+async def test_kor_travel_concierge_unknown_operation_is_not_loaded_or_inactivated() -> None:
+    """C-05 — 알 수 없는 operation은 적재(upsert)도 비활성화(reject/tombstone)도 안 된다."""
+    item = _item(
+        operation="noop",
+        source_record={**_item()["source_record"], "source_entity_id": "999"},
+    )
+
+    assert await kor_travel_concierge_items_to_bundles([item], fetched_at=_FETCHED) == []
+    assert kor_travel_concierge_inactive_entity_ids([item]) == set()
+
+
+async def test_kor_travel_concierge_identity_triple_is_forced_to_constants() -> None:
+    """C-04 — payload가 다른 provider/dataset/entity_type을 보내도 고정 상수로 강제해
+    upsert 저장 키 == inactivate 매칭 키를 보장한다(raw 값은 raw_data에 보존)."""
+    item = _item(
+        source_record={
+            "provider": "some-alias",
+            "dataset_key": "other_dataset",
+            "source_entity_type": "other_type",
+            "source_entity_id": "123",
+            "raw_payload_hash": "sha256:x",
+        }
+    )
+
+    [bundle] = await kor_travel_concierge_items_to_bundles([item], fetched_at=_FETCHED)
+
+    sr = bundle.source_record
+    assert sr.provider == KOR_TRAVEL_CONCIERGE_PROVIDER_NAME
+    assert sr.dataset_key == DATASET_KEY_YOUTUBE_PLACE_CANDIDATES
+    assert sr.source_entity_type == "extracted_place_candidate"
+    # raw payload(concierge가 실제 보낸 값)는 그대로 보존된다.
+    assert sr.raw_data["source_record"]["provider"] == "some-alias"
+
+
+async def test_kor_travel_concierge_preserves_producer_only_extras() -> None:
+    """C-08 — producer가 보내는 loader 미사용 필드(video_summary/rejection_reason 등)는
+    drop되지 않고 raw_data에 보존된다."""
+    item = _item(
+        rejection_reason="검수 제외",
+        youtube={**_item()["youtube"], "video_summary": "요약", "channel_summary": "채널 요약"},
+        evidence={**_item()["evidence"], "providers": {"vworld": {}}},
+    )
+
+    [bundle] = await kor_travel_concierge_items_to_bundles([item], fetched_at=_FETCHED)
+
+    assert bundle.feature.name == "월정리 해변"
+    raw = bundle.source_record.raw_data
+    assert raw["rejection_reason"] == "검수 제외"
+    assert raw["youtube"]["video_summary"] == "요약"
+    assert raw["evidence"]["providers"]["vworld"] == {}
