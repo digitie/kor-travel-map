@@ -14,8 +14,8 @@ SQLAlchemy 2 async + GeoAlchemy2 + GeoPandas 위에서 동작한다.
 > **기준값(잘 바뀌지 않는 사실)**: docker-manager 로컬 포트 기준 API `12701` /
 > admin UI `12705` / Dagster `12702`, RustFS S3 `12101`·console `12105`, geocoding은
 > kor-travel-geo REST v2 `POST /v2/{reverse,geocode}` 로컬 `http://127.0.0.1:12501`,
-> frontend Next.js 16 + `maplibre-vworld-js#v0.1.3`. ADR 현황: **001~056 accepted**
-> (다음 후보 057). ADR-048은 `/v1` REST clean cut + 정합성 표준, ADR-053은
+> frontend Next.js 16 + `maplibre-vworld-js#v0.1.3`. ADR 현황: **001~057 accepted**
+> (다음 후보 058). ADR-048은 `/v1` REST clean cut + 정합성 표준, ADR-053은
 > `kor-travel-concierge` YouTube provider
 > identity와 TripMate 직접 연동 제거 경계, ADR-054는
 > `kor-travel-map` / `kortravelmap` package identity clean cut. admin UI는
@@ -239,7 +239,7 @@ lint-imports
 - [`CLAUDE.md`](CLAUDE.md) — Claude(Code/Agent SDK)용 1쪽 진입 요약
 - [`CHANGELOG.md`](CHANGELOG.md) — Keep a Changelog 형식 (Unreleased + ADR-024~034)
 - [`docs/architecture.md`](docs/architecture.md) — 의존 방향, 계층, 데이터 흐름
-- [`docs/decisions.md`](docs/decisions.md) — ADR 누적 (ADR-001~056)
+- [`docs/decisions.md`](docs/decisions.md) — ADR 누적 (ADR-001~057)
 - [`docs/sprints/README.md`](docs/sprints/README.md) — Sprint 1~5 계획 + ADR-034 9단계 구현 순서
   - [`docs/sprints/SPRINT-1.md`](docs/sprints/SPRINT-1.md) — 코드 작성 단계 진입 + scaffolding (provider 없음)
   - [`docs/sprints/SPRINT-2.md`](docs/sprints/SPRINT-2.md) — MOIS-독립 4 provider (축제/날씨/유가/휴게소) + 디버그 UI 첫 라우터

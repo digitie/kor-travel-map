@@ -33,12 +33,14 @@ def _item(**overrides: Any) -> dict[str, Any]:
             "category_code_suggestion": "01020300",
             "longitude": 126.7958,
             "latitude": 33.5563,
+            # ADR-057/C-03 — producer(feature_export_service)는 admin 코드를 항상 None으로
+            # 보낸다(feature_id/bjd는 소비자 책임). 픽스처도 동일하게 맞춘다.
             "address": {
                 "official_address": "제주특별자치도 제주시 구좌읍 월정리",
                 "road_address": "제주특별자치도 제주시 구좌읍 해맞이해안로",
-                "legal_dong_code": "5011025624",
-                "sido_code": "50",
-                "sigungu_code": "50110",
+                "legal_dong_code": None,
+                "sido_code": None,
+                "sigungu_code": None,
             },
         },
         "youtube": {
@@ -79,7 +81,8 @@ async def test_kor_travel_concierge_youtube_item_to_feature_bundle() -> None:
     assert feature.name == "월정리 해변"
     assert feature.category == "01020300"
     assert feature.marker_color == KOR_TRAVEL_CONCIERGE_MARKER_COLOR
-    assert feature.feature_id.startswith("f_5011025624_p_")
+    # ADR-057 — feature_id는 안정 candidate.id에만 고정(bjd/category 미포함) → f_global_.
+    assert feature.feature_id.startswith("f_global_p_")
     assert feature.address.road == "제주특별자치도 제주시 구좌읍 해맞이해안로"
     assert feature.coord == Coordinate(lon="126.7958", lat="33.5563")
     assert feature.detail is not None
@@ -156,28 +159,40 @@ async def test_kor_travel_concierge_defaults_source_and_category() -> None:
     assert bundle.feature.category == KOR_TRAVEL_CONCIERGE_YOUTUBE_CATEGORY_FALLBACK
 
 
-async def test_kor_travel_concierge_reverse_geocoder_fills_missing_bjd() -> None:
-    item = _item(
-        place={
-            **_item()["place"],
-            "address": {
-                "official_address": "제주특별자치도 제주시 구좌읍 월정리",
-                "road_address": "제주특별자치도 제주시 구좌읍 해맞이해안로",
-            },
-        }
-    )
+async def test_kor_travel_concierge_reverse_geocoder_fills_address_not_feature_id() -> None:
+    """reverse geocoder는 Address.bjd_code(표시·공간 쿼리용)만 채우고 feature_id는
+    바꾸지 않는다 — ADR-057(식별자는 안정 candidate.id에 고정, C-01 회귀 방지)."""
+    item = _item()
 
     async def _reverse(_coord: Coordinate) -> Address:
         return Address(bjd_code="5011025624", sigungu_code="50110", sido_code="50")
 
-    [bundle] = await kor_travel_concierge_items_to_bundles(
-        [item],
-        fetched_at=_FETCHED,
-        reverse_geocoder=_reverse,
+    [no_geo] = await kor_travel_concierge_items_to_bundles([item], fetched_at=_FETCHED)
+    [with_geo] = await kor_travel_concierge_items_to_bundles(
+        [item], fetched_at=_FETCHED, reverse_geocoder=_reverse
     )
 
-    assert bundle.feature.address.bjd_code == "5011025624"
-    assert bundle.feature.feature_id.startswith("f_5011025624_p_")
+    # geocoder가 Address.bjd_code를 채운다 (표시·공간 쿼리용).
+    assert with_geo.feature.address.bjd_code == "5011025624"
+    assert no_geo.feature.address.bjd_code is None
+    # 그러나 feature_id는 geocoder 유무와 무관하게 동일하다 (ADR-057, C-01 회귀 방지).
+    assert with_geo.feature.feature_id == no_geo.feature.feature_id
+    assert with_geo.feature.feature_id.startswith("f_global_p_")
+
+
+async def test_kor_travel_concierge_feature_id_stable_when_category_fills_in() -> None:
+    """같은 후보(candidate.id)의 category_code_suggestion이 enrich 전 None →
+    후 8자리로 바뀌어도 feature_id는 동일하다 — ADR-057(C-02 회귀 방지)."""
+    before = _item(place={**_item()["place"], "category_code_suggestion": None})
+    after = _item(place={**_item()["place"], "category_code_suggestion": "01020300"})
+
+    [b_before] = await kor_travel_concierge_items_to_bundles([before], fetched_at=_FETCHED)
+    [b_after] = await kor_travel_concierge_items_to_bundles([after], fetched_at=_FETCHED)
+
+    # 표시 category는 바뀌지만 feature_id(identity)는 불변.
+    assert b_before.feature.category == KOR_TRAVEL_CONCIERGE_YOUTUBE_CATEGORY_FALLBACK
+    assert b_after.feature.category == "01020300"
+    assert b_before.feature.feature_id == b_after.feature.feature_id
 
 
 async def test_kor_travel_concierge_missing_name_is_skipped() -> None:
