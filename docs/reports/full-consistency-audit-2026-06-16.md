@@ -56,7 +56,7 @@ known-gap으로 문서화한다.
 
 | ID | sev | 한 줄 | status |
 |----|-----|-------|--------|
-| F-01 | HIGH | **feature_id 비멱등** — geocoder 의존 ~10 provider(knps/krheritage/mcst/krforest/datagokr_file_data/khoa/airkorea/krairport/opinet/standard_data)는 bjd가 늦게 바인딩돼 geocoder 유무로 feature_id가 global↔code 분기(ADR-057이 concierge만 해결) | 📋 backlog + ADR-057 결과/contract 주석 |
+| F-01 | HIGH | **feature_id 비멱등** — geocoder 의존 ~11 provider는 bjd가 늦게 바인딩돼 geocoder 유무로 feature_id가 global↔code 분기(ADR-057이 concierge만 해결) | ✅ ADR-058(옵션 B: geocoder 필수화, re-key 없음); 옵션 A(bjd 제거+re-key)는 후속 |
 | F-02 | MED | ADR-046 §4가 6 issue type 규정하나 `geocode_failed`/`reverse_geocode_failed`는 **producer 없음**(batch validation 미방출) | 📋 producer-status 주석 + backlog |
 | F-03 | MED | `datagokr_file_data` provider는 lib에 있으나 Dagster asset 없음(curated source로만 소비) — 의도인데 미문서화 | ✅ dagster-boundary 주석 |
 | F-04 | MED | `airkorea`/`krairport` provider 구현됐으나 전용 ETL 문서 없음(타 provider는 다 있음) | 📋 신규 ETL 문서 2종 |

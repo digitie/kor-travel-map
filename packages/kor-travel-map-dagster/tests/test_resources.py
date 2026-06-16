@@ -122,10 +122,11 @@ def test_dispose_async_engine_uses_sync_no_close_for_sqlalchemy_engine() -> None
     assert engine.async_dispose_called is False
 
 
-def test_reverse_geocoder_resource_returns_none_without_base_url(
+def test_reverse_geocoder_resource_requires_base_url(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    """ADR-058/F-01 — base URL 미설정 시 geocoder는 None이 아니라 실패한다(결정성)."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_BASE_URL", raising=False)
 
@@ -135,8 +136,7 @@ def test_reverse_geocoder_resource_returns_none_without_base_url(
     )
     resource_iter = resource_fn(build_init_resource_context())
 
-    assert next(resource_iter) is None
-    with pytest.raises(StopIteration):
+    with pytest.raises(RuntimeError, match="reverse_geocoder가 필수"):
         next(resource_iter)
 
 

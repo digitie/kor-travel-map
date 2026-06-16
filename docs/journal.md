@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-16 (claude) — F-01: geocoder 필수화로 feature_id 결정성 (ADR-058, 옵션 B)
+
+감사 backlog `T-AUDIT-0616`의 F-01 1차 해소. 사용자 결정 **B(geocoder 필수화, re-key 없음)**.
+
+- **문제**: geocoder-의존 ~11 provider(opinet/krex/knps/krheritage/khoa/krairport/airkorea/
+  standard_data/krforest/mcst/datagokr_file_data)는 bjd를 `reverse_geocoder` resource에서
+  얻는데, 이 resource가 `kor_travel_geo_base_url` 미설정 시 **조용히 None**을 yield해 같은
+  record가 run마다 `f_global_`↔`f_<bjd>_`로 갈렸다(비멱등).
+- **수정(ADR-058)**: `reverse_geocoder_resource`가 base URL 미설정 시 None 대신 **즉시 실패**
+  (RuntimeError). geocoder를 운영 필수로 강제해 결정성 보장 — **전 feature DB re-key 없이**.
+  `test_resources.py` 회귀 갱신(None 반환 → raise). ruff/mypy clean(테스트는 dagster 의존이라 CI).
+- **잔여(옵션 A 후속)**: geocoder 출력 drift(같은 좌표 다른 bjd)까지의 완전 결정성은 식별자
+  에서 bjd 제거가 필요 — 전 feature_id re-key + collision 검증 동반, `T-AUDIT-0616` 후속.
+- ADR 058 신규(다음 059), 감사 리포트 F-01 ✅, tasks.md 갱신.
+
 ## 2026-06-16 (claude) — DA-D-07: KHOA 해수욕장 category를 전용 01050100으로 정렬
 
 감사 backlog `T-AUDIT-0616`의 DA-D-07 결정·구현. 사용자 위임으로 **(B) 전용 해수욕장

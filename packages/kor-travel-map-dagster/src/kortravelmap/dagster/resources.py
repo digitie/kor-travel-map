@@ -824,15 +824,23 @@ def offline_upload_store_resource(_context: InitResourceContext) -> S3ObjectStor
 @resource(
     description=(
         "KorTravelMapSettings.kor_travel_geo_base_url 기반 kor-travel-geo reverse_geocoder. "
-        "base URL이 없으면 None."
+        "base URL이 없으면 **실패**한다(ADR-058/F-01 — geocoder 필수, feature_id 결정성)."
     ),
 )
 def reverse_geocoder_resource(_context: InitResourceContext) -> Iterator[Any]:
-    """Dagster ``reverse_geocoder`` 기본 resource."""
+    """Dagster ``reverse_geocoder`` 기본 resource.
+
+    ADR-058(F-01): geocoded ``bjd_code``가 ``make_feature_id``에 박히므로 geocoder가
+    None이면 같은 record가 run마다 ``f_global_``↔``f_<bjd>_``로 갈려 feature_id가
+    비멱등이 된다. base URL 미설정 시 조용히 None을 주지 않고 **즉시 실패**시켜
+    geocoder를 필수화한다(결정성 보장, 전 feature DB re-key 없이 — 사용자 결정 B).
+    """
     settings = KorTravelMapSettings()
     if settings.kor_travel_geo_base_url is None:
-        yield None
-        return
+        raise RuntimeError(
+            "reverse_geocoder가 필수다(ADR-058/F-01 — feature_id 결정성). "
+            "KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_BASE_URL을 설정하라."
+        )
 
     http = httpx.AsyncClient(
         base_url=settings.kor_travel_geo_base_url,

@@ -43,7 +43,7 @@ cut했다.
 > DA-D-01). 아래는 잘 바뀌지 않는 기준값만 둔다.
 
 - v1은 `v1` 브랜치 보존, main은 orphan으로 v2 재시작(ADR-001).
-- **ADR 현황**: ADR-001~057 모두 accepted, **다음 후보 번호 = ADR-058**
+- **ADR 현황**: ADR-001~058 모두 accepted, **다음 후보 번호 = ADR-059**
   (`docs/decisions.md`). 045 = Docker 독립 프로그램 + 독립 DB/Dagster + TripMate
   OpenAPI 연동(ADR-003 운영 모델 supersede). 046 = 이행 시 구 모델 호환 shim 금지
   + 주소는 kor-travel-geo REST v2로 통일. 047 = docker-manager 로컬 포트 기준. 048 = REST API
@@ -55,7 +55,8 @@ cut했다.
   5건만 확정) + RustFS 공유 버킷 잠정 정책 — 실행 T-217a~g. 054 =
   `kor-travel-map` / `kortravelmap` package identity clean cut. 055 =
   `kor-travel-map-api` backend와 `kor-travel-map-admin` frontend 분리. 057 =
-  kor-travel-concierge feature_id를 안정 `candidate.id`에 고정(bjd/category 식별자 분리).
+  kor-travel-concierge feature_id를 안정 `candidate.id`에 고정(bjd/category 식별자 분리). 058 =
+  geocoder 필수화로 geocoder-의존 provider feature_id 결정성 보장(F-01, re-key 없음).
 - **고정 포트(ADR-047)**: API `12701` · admin UI `12705` · Dagster `12702` ·
   Postgres host `5432` · RustFS S3 `12101`/console `12105`.
 - **geocoding 정본**: kor-travel-geo REST v2 `POST /v2/{reverse,geocode}`, 로컬 기본

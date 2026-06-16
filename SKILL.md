@@ -295,7 +295,7 @@ distribution이며 메인 라이브러리 계층 계약 밖에 있다(ADR-055).
 4. `docs/architecture.md` — 의존 방향, 데이터 흐름
 5. `docs/resume.md` — "다음 한 작업"
 6. `docs/journal.md` 최신 3건 — 직전 컨텍스트
-7. 관련 ADR (`docs/decisions.md` 001~057 모두 accepted; 다음 후보 058)
+7. 관련 ADR (`docs/decisions.md` 001~058 모두 accepted; 다음 후보 059)
 8. 직결 docs (provider 추가면 `docs/provider-contract.md`, 현재 sprint면
    `docs/sprints/SPRINT-N.md` 등)
 
