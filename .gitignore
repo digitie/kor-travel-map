@@ -49,7 +49,7 @@ artifacts/
 alembic/__pycache__/
 
 # Codex / Claude / agent local state
-.claude/
+.claude/settings.local.json
 .codex_tmp/
 
 # codegraph (colbymchenry/codegraph) — agent용 semantic knowledge graph 인덱스
