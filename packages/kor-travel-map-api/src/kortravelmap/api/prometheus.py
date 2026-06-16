@@ -158,6 +158,9 @@ class PrometheusMetrics:
         """Record count, in-flight gauge and latency for one HTTP request."""
         started_at = perf_counter()
         method = request.method
+        # 진입 시점(라우팅 전)에는 ``scope['route']``가 비어 있어 best-effort 매칭만 가능하다.
+        # 이 잠정 path는 요청 중 발생하는 DB 쿼리 라벨(ContextVar)에만 쓰고, HTTP 메트릭의
+        # 최종 path 라벨은 call_next 이후(라우팅 완료) ``scope['route']``로 다시 확정한다.
         labels = RequestMetricLabels(
             method=method,
             path=_route_path(request),
@@ -186,15 +189,19 @@ class PrometheusMetrics:
         finally:
             duration_seconds = max(0.0, perf_counter() - started_at)
             status = str(status_code)
+            # 라우팅 완료 후 ``scope['route']`` 기준으로 path 라벨을 확정한다. 진입 시점의
+            # 잠정값은 일부 라우트(예: /health, /v1/categories)에서 __unmatched__로 떨어질 수
+            # 있어, 매칭된 실제 라우트 템플릿으로 다시 해석한다(매칭 실패 시 __unmatched__ 유지).
+            path = _route_path(request)
             self.requests_total.labels(
                 method=labels.method,
-                path=labels.path,
+                path=path,
                 surface=labels.surface,
                 status_code=status,
             ).inc()
             self.request_duration_seconds.labels(
                 method=labels.method,
-                path=labels.path,
+                path=path,
                 surface=labels.surface,
                 status_code=status,
             ).observe(duration_seconds)
@@ -202,7 +209,7 @@ class PrometheusMetrics:
             if response_size is not None:
                 self.response_size_bytes.labels(
                     method=labels.method,
-                    path=labels.path,
+                    path=path,
                     surface=labels.surface,
                     status_code=status,
                 ).observe(response_size)
