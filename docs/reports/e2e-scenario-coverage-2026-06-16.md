@@ -172,3 +172,30 @@ fetch 5xx error / count=0 명시 단언.
 - ETL preview backend는 fixture provider **정확히 4종** 등록 → etl.spec 단언과 일치(의도).
 - `/features`가 DB 비어도 200(count=0) → 마커 미렌더는 적재 환경 별도 검증(spec 주석 명시).
 - admin-ops.spec(23 tests)은 backups/offline-uploads/poi-cache-targets/change-requests에서 **실 mutation flow**를 덮음 — 이들은 depth만 부족.
+
+## 6. spec 작성 중 발견한 컴포넌트-가정 정정 (2026-06-16, ZERO 5 spec PR)
+
+ZERO 5페이지 spec을 실제 컴포넌트 인벤토리 기준으로 작성하면서, 위 §1의 일부 가정이
+실제 구현과 달라 정정한다(spec은 실제 구현 기준으로 작성됨). 갭 우선순위 자체는 유효.
+
+- **§1.2 `/admin/features/new`**: kind는 **`place`/`event` 2종뿐**(Notice/Route/Area 서브폼
+  없음). **`provider` 필드 없음**(payload에 provider 키 자체가 없고 `manual` 강제 UI도 없음 —
+  provenance는 backend `user_request` natural key가 부여). 지오코딩은 API(:12701)가 아니라
+  **kor-travel-geo 별도 호스트(:12501)** `POST /v2/{geocode,reverse}`로 직접 호출. 생성은
+  `POST /v1/admin/features` → `AdminFeatureChangeResponse`(change request), dedup은 제출 전
+  `GET /v1/features/nearby` 표로 노출(별도 dedup API 없음). 검증은 전부 클라이언트측
+  동기 throw(필수 필드 + 한국 본토 좌표 `lon∈[124,132] lat∈[33,39.5]`).
+- **§1.5 `/features/[featureId]`**: **admin 상세 라우트** `/v1/admin/features/{id}` 사용
+  (공개 라우트 아님). **지도/AddressMatchReport/raw JSON 토글 버튼/reverse·geocode 재검증은
+  컴포넌트에 없다**(raw는 네이티브 `<details>` 4종, 재검증 UI 없음). 실제 섹션은
+  header + **Sources/Issues/Overrides/History/Files**(메인) + **Weather/Nearby/Raw**(aside).
+  루트 컨테이너 `data-testid="feature-detail-view"`, weather `data-testid="feature-weather-panel"`.
+- **detail 액션 메서드**: feature-update-request·import-job의 cancel/run-now는 모두 **POST**
+  (`/cancel`, `/run-now`) — DELETE 아님. 두 detail 페이지엔 전용 404 UI가 없고 404는 공용
+  error alert(`... 조회 실패`)로 표면화.
+- **selector 일반**: curated-features/features-new/detail 페이지는 `data-testid`가 거의 없고
+  대부분 role + aria-label + 라벨 텍스트로 접근(예외: feature-detail-view, feature-weather-panel,
+  offline-uploads). curated archive 가드는 커스텀 다이얼로그가 아니라 `window.confirm`.
+
+> 실행 검증: 위 spec들은 Windows Playwright 런(WSL backend/frontend 기동)에서 라이브
+> 검증이 필요하다(본 환경 미실행). type-check(`tsc -p e2e/tsconfig.json`)·ESLint는 통과.
