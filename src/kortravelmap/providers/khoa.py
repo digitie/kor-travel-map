@@ -4,8 +4,8 @@
 ``FeatureBundle``로 정규화한다(ADR-034 보조 dataset). provider client/model은 별도
 라이브러리가 제공(ADR-006 — 본 모듈은 변환 순수 함수).
 
-- 해수욕장 → category ``TOURISM_NATURAL_LANDSCAPE_COAST_ISLAND``(01020300), place_kind
-  ``beach``. MOIS PROMOTED 슬러그에 해수욕장이 없어 dedup 후보 없음.
+- 해수욕장 → category ``TOURISM_NATURE_BEACH``(01050100, 전용 해수욕장 코드 — DA-D-07),
+  place_kind ``beach``. MOIS PROMOTED 슬러그에 해수욕장이 없어 dedup 후보 없음.
 
 provider 모델은 road/jibun 주소 없이 ``sido_name``/``gugun_name`` 행정명 + WGS84
 ``latitude``/``longitude``만 준다. feature_id가 bjd_code에 의존하므로(ADR-009) 변환은
@@ -63,10 +63,13 @@ KHOA_PROVIDER_NAME: Final[str] = "python-khoa-api"
 
 DATASET_KEY_BEACHES: Final[str] = "khoa_beaches"
 _BEACH_ENTITY_TYPE: Final[str] = "beach"
-BEACH_CATEGORY: Final[str] = (
-    PlaceCategoryCode.TOURISM_NATURAL_LANDSCAPE_COAST_ISLAND.value
-)
-"""``Feature.category`` — 해수욕장(자연명소>해안/섬) 01020300."""
+BEACH_CATEGORY: Final[str] = PlaceCategoryCode.TOURISM_NATURE_BEACH.value
+"""``Feature.category`` — 해수욕장(자연명소 > 해수욕장) 01050100.
+
+DA-D-07(2026-06-16): 전용 해수욕장 코드 ``TOURISM_NATURE_BEACH``(01050100)로 정렬.
+이전 ``TOURISM_NATURAL_LANDSCAPE_COAST_ISLAND``(01020300, 해안/섬 일반)은 오분류였다.
+둘 다 maki ``beach``라 마커는 무변, category 값만 정밀화(feature_id에 category가 박혀
+재import 시 1회 re-key)."""
 BEACH_PLACE_KIND: Final[str] = "beach"
 BEACH_MARKER_COLOR: Final[str] = "P-07"
 _DEFAULT_BEACH_ICON: Final[str] = "beach"

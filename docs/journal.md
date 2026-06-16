@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-16 (claude) — DA-D-07: KHOA 해수욕장 category를 전용 01050100으로 정렬
+
+감사 backlog `T-AUDIT-0616`의 DA-D-07 결정·구현. 사용자 위임으로 **(B) 전용 해수욕장
+코드 `01050100 TOURISM_NATURE_BEACH` 확정**.
+
+- **근거**: 전용 해수욕장 코드 `01050100`이 카탈로그에 실존(`_definitions.py:98` "관광 >
+  자연명소 > 해수욕장")하는데 코드(`khoa.py BEACH_CATEGORY`)가 일반 `01020300`
+  (해안/섬 COAST_ISLAND)을 써 온 오분류였다. 둘 다 maki `beach`라 마커 무변.
+- **변경**: `khoa.py` `BEACH_CATEGORY` → `TOURISM_NATURE_BEACH`(01050100) + docstring;
+  테스트 2건(`test_providers_khoa.py` 주석, `test_public_views_repo.py` literal 01020300→
+  01050100); 문서 `khoa-beach-info-etl.md`·`category.md`를 01050100으로 정렬(이전 divergence
+  note 제거). 감사 리포트 §4 DA-D-07 ✅, tasks.md 해소.
+- **검증**: `pytest tests/unit/test_providers_khoa.py` 3 passed, ruff/mypy clean. 통합 테스트는 CI.
+- **주의**: category가 `feature_id`에 박혀 KHOA 적재 시 1회 re-key(F-01 결정성과 별개).
+
 ## 2026-06-16 (claude) — 코드+문서 전체 정합성 감사 (2-pass, docs-only)
 
 사용자 지시("코드·문서 전체 재독 → 충돌·기능갭 확인 후 문서 반영, e2e 촘촘 시나리오 포함,

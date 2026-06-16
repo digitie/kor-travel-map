@@ -163,7 +163,7 @@ provider는 `kma`(기상특보)·`airkorea`(대기질 측정소)·`krex`(교통 
       01.02.01.02 도립·군립공원 (..._LOCAL_PARK) [maki: park]
       01.02.01.03 산림욕장 (..._FOREST_TRAIL) [maki: park]
     01.02.02 강·호수 (..._RIVER_LAKE) [maki: water]
-    01.02.03 해안·섬 (..._COAST_ISLAND) [maki: beach]    ← KHOA 해수욕장 (코드 01020300)
+    01.02.03 해안·섬 (..._COAST_ISLAND) [maki: beach]
     01.02.04 폭포·동굴 (..._WATERFALL_CAVE) [maki: natural]
   01.03 수목원·식물원 (TOURISM_BOTANICAL) [maki: garden]
     01.03.01 수목원 (..._GARDEN) [maki: garden]
@@ -187,7 +187,7 @@ provider는 `kma`(기상특보)·`airkorea`(대기질 측정소)·`krex`(교통 
     01.04.05 도서관 (..._LIBRARY) [maki: library]
     01.04.06 지방문화원 (..._CULTURE_CENTER) [maki: town-hall]
   01.05 자연명소 (TOURISM_NATURE) [maki: natural]
-    01.05.01 해수욕장 (TOURISM_NATURE_BEACH) [maki: beach]    ← 전용 해수욕장 코드(미사용; KHOA는 01020300으로 적재, DA-D-07)
+    01.05.01 해수욕장 (TOURISM_NATURE_BEACH) [maki: beach]    ← KHOA 해수욕장 (코드 01050100, DA-D-07)
     01.05.02 공원·광장 (TOURISM_NATURE_PARK) [maki: park]
     01.05.03 전망대 (TOURISM_NATURE_OBSERVATORY) [maki: viewpoint]
   01.06 관광안내 (TOURISM_INFORMATION) [maki: information]
@@ -371,7 +371,7 @@ depth 1 = 1 + 7). Tier 1 enum 자체는 ADR-027에서 변경 없음.
 | `python-mois-api` (목욕장업) | `04020100` HOT_SPRING_SPA_SAUNA_BATHHOUSE | mois-feature-etl.md §6.1 |
 | `python-opinet-api` | `06020000` TRANSPORT_FUEL | opinet-place-price-etl.md |
 | `python-krex-api` (휴게소) | `06040101` TRANSPORT_REST_AREA_HIGHWAY_EX | krex-rest-area-feature-etl.md |
-| `python-khoa-api` (해수욕장) | `01020300` TOURISM_NATURAL_LANDSCAPE_COAST_ISLAND (코드는 01020300; 전용 해수욕장 코드 01050100이 의도였을 수 있어 category 결정 후속 — DA-D-07, full-consistency-audit-2026-06-16.md §4) | khoa-beach-info-etl.md |
+| `python-khoa-api` (해수욕장) | `01050100` TOURISM_NATURE_BEACH (전용 해수욕장 코드, DA-D-07 확정 2026-06-16) | khoa-beach-info-etl.md |
 | `python-krheritage-api` | `01070100` ~ `01070400` (사찰/궁궐/사적/한옥) | krheritage-feature-etl.md |
 | `python-krforest-api` (휴양림) | `03030000` LODGING_RECREATION_FOREST | forest-feature-etl.md |
 | `python-krforest-api` (수목원) | `01030000` TOURISM_BOTANICAL | forest-feature-etl.md |

@@ -60,7 +60,7 @@ def test_beach_feature_fields_and_derived_key() -> None:
     feature = bundle.feature
     assert feature.kind == FeatureKind.PLACE
     assert feature.name == "해운대해수욕장"
-    assert feature.category == BEACH_CATEGORY  # 01020300
+    assert feature.category == BEACH_CATEGORY  # 01050100 (DA-D-07)
     assert feature.marker_color == BEACH_MARKER_COLOR
     assert feature.coord is not None
     detail = feature.detail

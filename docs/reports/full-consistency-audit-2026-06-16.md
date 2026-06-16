@@ -26,7 +26,7 @@ known-gap으로 문서화한다.
 | C-01 | HIGH | `openapi-admin-contract.md` §3/§3.1이 **pre-ADR-048 envelope**(error{error}, meta.count) — 코드는 RFC7807 problem+json + Meta{page,cluster} | openapi-admin-contract.md | ✅ |
 | C-02 | HIGH | offline-upload bucket `krtour-uploads`→`kor-travel-map-uploads` 미전파(8 문서) | 8 docs | ✅ |
 | C-03 | HIGH | screen-checklist "17 route / e2e 전부 커버" — 실제 22 페이지, 5개 미매트릭스 | admin-ui-screen-checklist.md | ✅ |
-| C-04 | HIGH | KHOA 해수욕장 category: 코드 `01020300`(COAST_ISLAND) vs 문서 `01050100`(NATURE_BEACH) | khoa-etl/category.md | ⚖️ |
+| C-04 | HIGH | KHOA 해수욕장 category: 코드 `01020300`(COAST_ISLAND) vs 문서 `01050100`(NATURE_BEACH) | khoa-etl/category.md | ✅ DA-D-07=B(01050100) |
 | C-05 | HIGH | KHOA dataset_key 코드 `khoa_beaches` vs 문서 `khoa_oceans_beach_info`(feature_id에 baked) | provider-contract/khoa/dagster-boundary | ✅ |
 | C-06 | MED | provider-contract §6 "무조건 결정성" 주장 vs ~11 provider가 reverse-geocoded bjd를 feature_id에 embed | provider-contract.md/decisions.md | ✅(+F-01) |
 | C-07 | MED | weather/notice/air-quality anchor가 catalog 밖 `99000000` 사용 — 미문서화 | category.md/notice-etl | ✅ |
@@ -117,11 +117,13 @@ dagster-boundary §1.1에 "datagokr_file_data는 설계상 직접 asset 없음, 
 `docs/krairport-feature-etl.md` 신규(per-provider 템플릿 + 99000000 sentinel + reverse-geocoded bjd
 caveat=F-01 연계).
 
-## 4. ⚖️ 결정 필요 (사용자)
+## 4. 결정 (사용자) — ✅ 종결
 
-- **DA-D-07 (C-04)** — KHOA 해수욕장 category: (A) 코드값 `01020300`(COAST_ISLAND) 확정 →
-  문서를 코드에 정렬, (B) `01050100`(전용 해수욕장) 의도 → 코드 정렬을 backlog로(본 패스는 코드 미수정).
-  본 PR은 (A) 방향으로 문서를 코드값에 맞추되 divergence를 명기. 사용자가 (B)면 후속 코드 task 생성.
+- **DA-D-07 (C-04) — ✅ 해소(2026-06-16, 후속 PR)** — KHOA 해수욕장 category를 **(B) 전용
+  해수욕장 코드 `01050100 TOURISM_NATURE_BEACH`로 확정**(코드 정렬). `01020300`(COAST_ISLAND,
+  해안/섬 일반)은 오분류였다 — 전용 해수욕장 코드가 카탈로그에 존재(`_definitions.py:98`)하므로
+  그쪽이 정본. `khoa.py BEACH_CATEGORY` + 테스트 2건 + khoa-etl/category.md 문서를 01050100으로
+  정렬. 둘 다 maki `beach`라 마커 무변, category가 feature_id에 박혀 재import 시 1회 re-key.
 
 ## 5. e2e 시나리오 커버리지
 

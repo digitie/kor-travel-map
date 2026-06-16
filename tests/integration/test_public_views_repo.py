@@ -53,7 +53,7 @@ class _Festival:
 
 
 async def test_public_beaches_use_place_kind_not_category(migrated_session: Any) -> None:
-    """KHOA 해수욕장은 현재 category 01020300이어도 공개 view에 포함된다."""
+    """KHOA 해수욕장은 category 01050100(전용 해수욕장, DA-D-07)이어도 공개 view에 포함된다."""
 
     bundle = (
         await beaches_to_bundles(
@@ -71,7 +71,7 @@ async def test_public_beaches_use_place_kind_not_category(migrated_session: Any)
             fetched_at=_FETCHED,
         )
     )[0]
-    assert bundle.feature.category == "01020300"
+    assert bundle.feature.category == "01050100"
     assert bundle.feature.detail is not None
     assert bundle.feature.detail.place_kind == "beach"
     await feature_repo.load_bundle(migrated_session, bundle)

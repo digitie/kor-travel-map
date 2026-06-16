@@ -29,17 +29,17 @@
 |------|----|
 | natural key | `정점명::시도::구군` 조합 (ADR-009 `::`, `providers/khoa.py:149`) |
 | FeatureKind | `place` |
-| category | **`01020300`** `TOURISM_NATURAL_LANDSCAPE_COAST_ISLAND` (`providers/khoa.py:67` `BEACH_CATEGORY`) — Tier path: 관광 > 자연명소 > 해안/섬 |
+| category | **`01050100`** `TOURISM_NATURE_BEACH` (`providers/khoa.py` `BEACH_CATEGORY`, DA-D-07) — Tier path: 관광 > 자연명소 > 해수욕장 |
 | place_kind | `beach` |
 | marker_icon | `beach` |
 | marker_color | `P-07` (하늘색) |
 | `KHOA_OCEANS_BEACH_INFO_FULL_SCAN_INTERVAL_DAYS` | 1 |
 
-> **category 코드 divergence (C-04, DA-D-07 후속)**: 코드 실측은
-> `01020300 TOURISM_NATURAL_LANDSCAPE_COAST_ISLAND`(`providers/khoa.py:67`)이며 위
-> 표는 이에 정렬했다. 다만 전용 분류 `01050100 TOURISM_NATURE_BEACH`(해수욕장)가
-> 의도였을 가능성이 있다 — 어느 쪽이 정본인지는 DA-D-07에서 확정한다(여기서 코드를
-> 임의로 뒤집지 않음).
+> **category 코드 (DA-D-07 확정, 2026-06-16)**: 전용 해수욕장 코드
+> `01050100 TOURISM_NATURE_BEACH`로 정렬했다(코드 `providers/khoa.py` `BEACH_CATEGORY`).
+> 이전 `01020300 TOURISM_NATURAL_LANDSCAPE_COAST_ISLAND`(해안/섬 일반)은 오분류였다.
+> 둘 다 maki `beach`라 마커는 무변. category가 `feature_id`에 박히므로 재import 시
+> 1회 re-key된다(F-01 결정성 후속과 별개).
 
 ## 4. 필드 매핑
 
@@ -94,7 +94,7 @@ provider 변환 entrypoint은 `providers/khoa.py`의 `beaches_to_bundles`이고,
 ```python
 from kortravelmap.providers.khoa import beaches_to_bundles
 
-# OceanBeachInfo items → list[FeatureBundle] (place, category 01020300)
+# OceanBeachInfo items → list[FeatureBundle] (place, category 01050100)
 bundles = await beaches_to_bundles(
     items,
     fetched_at=fetched_at,
