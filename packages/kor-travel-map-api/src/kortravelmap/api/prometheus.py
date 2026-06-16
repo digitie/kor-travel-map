@@ -263,6 +263,12 @@ def _route_path(request: Request) -> str:
     route = request.scope.get("route")
     path = getattr(route, "path", None)
     if isinstance(path, str) and path:
+        # starlette 버전/라우팅 경로에 따라 ``route.path``가 mount prefix(root_path)를 제외한
+        # 상대 템플릿일 수 있어 같은 라우트가 ``/categories`` vs ``/v1/categories``로 갈린다.
+        # root_path를 합쳐 full 템플릿으로 정규화한다(이미 포함됐으면 그대로 둔다).
+        root_path = request.scope.get("root_path") or ""
+        if root_path and not path.startswith(root_path):
+            return f"{root_path}{path}"
         return path
     for candidate in request.app.routes:
         match, _child_scope = candidate.matches(request.scope)

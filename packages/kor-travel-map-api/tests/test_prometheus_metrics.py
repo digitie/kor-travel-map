@@ -19,21 +19,33 @@ def _metric_lines(body: str, metric: str) -> list[str]:
     return [line for line in body.splitlines() if line.startswith(prefix)]
 
 
-def _http_requests_total(body: str, **labels: str) -> float | None:
-    """``kor_travel_map_http_requests_total`` sample 값을 라벨 순서 무관하게 파싱(없으면 None).
+def _parse_sample(line: str) -> tuple[dict[str, str], float | None]:
+    """``metric{labels} value`` 한 줄을 (라벨 dict, 값)으로 파싱한다."""
+    head, _, raw_value = line.rpartition(" ")
+    _, _, label_block = head.partition("{")
+    labels: dict[str, str] = {}
+    for pair in label_block.rstrip("}").split(","):
+        key, sep, val = pair.partition("=")
+        if sep:
+            labels[key.strip()] = val.strip().strip('"')
+    try:
+        return labels, float(raw_value)
+    except ValueError:
+        return labels, None
 
-    단일 요청이면 값은 1.0이지만, pytest random-order 실행에서 prometheus counter 값이
-    누적돼 정확-값 비교가 flaky했다(라벨/기록 자체는 정상). 라벨 집합 일치 + 값 양수로
-    검증해 결정적으로 만든다. exposition 라벨 순서/포맷에 의존하지 않도록 라인 안에서
-    ``key="value"`` 조각을 부분일치로 모두 찾는 방식이다.
+
+def _find_http_request(
+    body: str, **want: str
+) -> tuple[dict[str, str], float | None] | None:
+    """``http_requests_total`` 라인 중 want 라벨을 모두 만족하는 첫 sample.
+
+    라벨 순서/포맷·값 누적에 견고하게 라인 단위로 파싱한다(정확-값 비교 대신 라벨 일치).
+    ``_total{`` 시작 라인만 골라 ``_total_created`` 파생 라인과 구분한다.
     """
     for line in _metric_lines(body, "kor_travel_map_http_requests_total"):
-        head, _, raw_value = line.rpartition(" ")
-        if all(f'{key}="{val}"' in head for key, val in labels.items()):
-            try:
-                return float(raw_value)
-            except ValueError:
-                return None
+        labels, value = _parse_sample(line)
+        if all(labels.get(key) == val for key, val in want.items()):
+            return labels, value
     return None
 
 
@@ -50,13 +62,18 @@ def test_prometheus_metrics_endpoint_records_http_request() -> None:
     assert metrics.headers["content-type"].startswith("text/plain")
     body = metrics.text
     assert "kor_travel_map_app_info" in body
-    health_total = _http_requests_total(
-        body, method="GET", path="/health", status_code="200", surface="system"
+    sample = _find_http_request(
+        body, method="GET", status_code="200", surface="system"
     )
-    assert health_total is not None, _metric_lines(
+    assert sample is not None, _metric_lines(
         body, "kor_travel_map_http_requests_total"
     )
-    assert health_total >= 1.0
+    labels, value = sample
+    assert value is not None
+    assert value >= 1.0
+    # path는 라우트가 정상 해석돼야 한다(__unmatched__ 아님). starlette 버전에 따라
+    # /v1 prefix 유무가 갈릴 수 있어 라우트 tail로 관대하게 단언한다.
+    assert labels["path"].endswith("/health")
     assert "kor_travel_map_http_request_duration_seconds_bucket" in body
     assert "kor_travel_map_http_response_size_bytes_bucket" in body
     assert 'path="/metrics"' not in body
@@ -77,13 +94,18 @@ def test_prometheus_metrics_records_public_rest_surface() -> None:
     assert response.status_code == 200
 
     body = client.get("/metrics").text
-    categories_total = _http_requests_total(
-        body, method="GET", path="/v1/categories", status_code="200", surface="public"
+    sample = _find_http_request(
+        body, method="GET", status_code="200", surface="public"
     )
-    assert categories_total is not None, _metric_lines(
+    assert sample is not None, _metric_lines(
         body, "kor_travel_map_http_requests_total"
     )
-    assert categories_total >= 1.0
+    labels, value = sample
+    assert value is not None
+    assert value >= 1.0
+    # surface=public인 요청은 /v1/categories뿐. /v1 prefix 유무는 starlette 버전에 따라
+    # 달라질 수 있어 라우트 tail로 관대하게 단언한다(__unmatched__가 아님을 보장).
+    assert labels["path"].endswith("categories")
 
 
 @pytest.mark.unit
