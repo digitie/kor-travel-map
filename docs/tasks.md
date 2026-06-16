@@ -25,8 +25,10 @@
       미설정 시 **실패**시켜 geocoder를 필수화(re-key 없이 결정성 보장). **잔여(옵션 A 후속)**:
       완전 결정성(geocoder 출력 drift까지)은 식별자에서 bjd 제거가 필요 — 전 feature DB re-key
       + provider별 natural_key 전역유일성 검증 동반, 별도 시점 결정.
-    - **F-02 (MED)**: `geocode_failed`/`reverse_geocode_failed` admin issue **producer 신설**
-      (validate_feature_bundle_address가 미방출) 또는 ADR-046 contract에서 제거 결정.
+    - **F-02 (MED)** — **✅ 해소(옵션 B)**: `reverse_geocode_failed` producer 구현 —
+      `validation.py`가 좌표-있음+bjd-없음을 `missing_bjd_code`→`reverse_geocode_failed`로
+      relabel(reverse 호출이 bjd를 못 낸 실패). `geocode_failed`(forward, 주소→좌표)는 적재에
+      forward-geocode 경로가 없어 정의만(경로 생기면 연결).
     - ~~**C-04 / DA-D-07**: KHOA 해수욕장 category~~ **✅ 해소** — 전용 `01050100 TOURISM_NATURE_BEACH`로
       코드+문서 정렬(2026-06-16, 후속 PR). `01020300`(COAST_ISLAND)은 오분류였다.
     - **e2e (HIGH)** — **✅ ZERO 5페이지 1차 spec 추가**: curated-features(라이브 smoke:

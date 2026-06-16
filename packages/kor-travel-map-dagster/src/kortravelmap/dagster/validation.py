@@ -93,11 +93,14 @@ def validate_feature_bundle_address(
     issues: list[FeatureAddressIssue] = []
 
     if feature.coord is not None and address.bjd_code is None:
+        # 좌표가 있는데 bjd가 없음 = kor-travel-geo reverse 호출이 결과를 못 냄
+        # → ADR-046 전용 코드 `reverse_geocode_failed`로 방출(F-02). 좌표-있음 케이스를
+        #   포괄적 `missing_bjd_code`가 아니라 실패 원인이 분명한 코드로 분류한다.
         issues.append(
             FeatureAddressIssue(
                 feature_id=feature.feature_id,
                 source_record_key=bundle.source_record.source_record_key,
-                code="missing_bjd_code",
+                code="reverse_geocode_failed",
                 severity="error",
                 message="좌표가 있지만 kor-travel-geo reverse 결과 법정동코드가 없음.",
                 provider_address=provider_address,

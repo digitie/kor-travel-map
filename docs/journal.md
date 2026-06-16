@@ -33,6 +33,21 @@
   (라우트 tail로 끝남 = `__unmatched__` 아님)를 단언 — /v1 prefix 같은 starlette 내부 차이에
   견고. 로컬 6/6 통과, CI 전 잡 green 후 머지.
 
+## 2026-06-16 (claude) — F-02: reverse_geocode_failed issue producer 구현 (옵션 B)
+
+감사 backlog `T-AUDIT-0616`의 F-02. 사용자 결정 **B(producer 구현/relabel)**.
+
+- **문제**: ADR-046이 `geocode_failed`/`reverse_geocode_failed`를 정의하나 producer가
+  없었다. 실은 validation.py가 **좌표-있음+bjd-없음**(= reverse-geocode가 bjd를 못 냄)을
+  포괄적 `missing_bjd_code`로 방출 중이었다.
+- **수정**: `validate_feature_bundle_address`(`validation.py`)가 그 케이스를
+  `missing_bjd_code`→**`reverse_geocode_failed`**로 relabel — 실패 원인이 분명한 전용 코드로
+  분류. `geocode_failed`(forward, 주소→좌표)는 적재 경로에 forward-geocode가 없어 미발행
+  (정의만; 경로 생기면 연결). `issue_type`은 free-form 문자열이라 enum/DB 제약·admin UI 무변경.
+- **검증**: `test_validation.py` 회귀 갱신(missing_bjd_code→reverse_geocode_failed), ruff clean
+  (dagster 테스트는 CI). 문서 producer-상태 주석 갱신(decisions ADR-046/data-model/debug-ui),
+  감사 리포트 F-02 ✅, tasks.md.
+
 ## 2026-06-16 (claude) — F-01: geocoder 필수화로 feature_id 결정성 (ADR-058, 옵션 B)
 
 감사 backlog `T-AUDIT-0616`의 F-01 1차 해소. 사용자 결정 **B(geocoder 필수화, re-key 없음)**.

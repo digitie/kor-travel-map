@@ -75,7 +75,8 @@ async def test_coordinate_without_reverse_code_is_error() -> None:
     validation = validate_feature_bundles_address(bundles)
 
     assert validation.has_errors
-    assert [issue.code for issue in validation.issues] == ["missing_bjd_code"]
+    # F-02: 좌표-있음+bjd-없음은 reverse-geocode 실패이므로 reverse_geocode_failed로 방출.
+    assert [issue.code for issue in validation.issues] == ["reverse_geocode_failed"]
 
 
 async def test_reverse_geocoded_provider_address_matches() -> None:
