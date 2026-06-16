@@ -2,11 +2,27 @@
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from fastapi.testclient import TestClient
 
 from kortravelmap.api.app import create_app
 from kortravelmap.api.settings import ApiSettings
+
+
+def _http_requests_total(body: str, label_block: str) -> float | None:
+    """``kor_travel_map_http_requests_total`` 라벨 라인의 값을 파싱(없으면 None).
+
+    단일 요청이면 값은 1.0이지만, pytest random-order 실행에서 prometheus counter 값이
+    누적돼 정확-값 비교가 flaky했다(라벨/기록 자체는 정상). 라벨 일치 + 양수 값으로 검증해
+    결정적으로 만든다. ``_total{`` 직후로 앵커해 ``_total_created`` 라인과 구분한다.
+    """
+    match = re.search(
+        r"kor_travel_map_http_requests_total" + re.escape(label_block) + r"\s+([0-9.eE+]+)",
+        body,
+    )
+    return float(match.group(1)) if match else None
 
 
 @pytest.mark.unit
@@ -22,10 +38,11 @@ def test_prometheus_metrics_endpoint_records_http_request() -> None:
     assert metrics.headers["content-type"].startswith("text/plain")
     body = metrics.text
     assert "kor_travel_map_app_info" in body
-    assert (
-        'kor_travel_map_http_requests_total{method="GET",'
-        'path="/health",status_code="200",surface="system"} 1.0'
-    ) in body
+    health_total = _http_requests_total(
+        body, '{method="GET",path="/health",status_code="200",surface="system"}'
+    )
+    assert health_total is not None
+    assert health_total >= 1.0
     assert "kor_travel_map_http_request_duration_seconds_bucket" in body
     assert "kor_travel_map_http_response_size_bytes_bucket" in body
     assert 'path="/metrics"' not in body
@@ -46,10 +63,11 @@ def test_prometheus_metrics_records_public_rest_surface() -> None:
     assert response.status_code == 200
 
     body = client.get("/metrics").text
-    assert (
-        'kor_travel_map_http_requests_total{method="GET",'
-        'path="/v1/categories",status_code="200",surface="public"} 1.0'
-    ) in body
+    categories_total = _http_requests_total(
+        body, '{method="GET",path="/v1/categories",status_code="200",surface="public"}'
+    )
+    assert categories_total is not None
+    assert categories_total >= 1.0
 
 
 @pytest.mark.unit
