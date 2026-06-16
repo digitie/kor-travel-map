@@ -31,9 +31,14 @@
       forward-geocode 경로가 없어 정의만(경로 생기면 연결).
     - ~~**C-04 / DA-D-07**: KHOA 해수욕장 category~~ **✅ 해소** — 전용 `01050100 TOURISM_NATURE_BEACH`로
       코드+문서 정렬(2026-06-16, 후속 PR). `01020300`(COAST_ISLAND)은 오분류였다.
-    - **e2e (HIGH)**: ZERO 커버 5페이지(curated-features 1192줄 콘솔·features/new·3 detail
-      페이지) + 전 페이지 mutation/error/cursor depth — `docs/reports/e2e-scenario-coverage-
-      2026-06-16.md` 우선순위 순으로 spec 추가.
+    - **e2e (HIGH)** — **✅ ZERO 5페이지 1차 spec 추가**: curated-features(라이브 smoke:
+      렌더/필터/구조), features/new(라이브 smoke + 클라 검증), 3 detail 페이지
+      (feature-update-request·import-job·feature — mocked-route, OpenAPI 타입 바인딩).
+      `tsc -p e2e/tsconfig.json`·ESLint 통과, **Windows Playwright 라이브 검증은 잔여**(본
+      환경 미실행). **잔여(depth)**: 전 페이지 mutation/error/cursor depth(§2 얇은 커버 14페이지),
+      curated 시드 후보 기반 mutation flow(select/archive/source-rule apply), features/new
+      실제 생성→422·409·지오코딩 mocked flow — `docs/reports/e2e-scenario-coverage-2026-06-16.md`
+      §3 우선순위 순.
 - **외부 추적**
   - `T-019` — TripMate 측 Kakao Maps → maplibre-vworld 교체와 SPEC 문서 supersede 추적.
   - `T-210b` — TripMate 문서 supersede.

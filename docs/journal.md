@@ -2,6 +2,37 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-16 (claude) — e2e: ZERO 커버 5페이지 1차 spec 추가 (T-AUDIT-0616)
+
+감사 backlog의 e2e 항목 1차. ZERO 커버(spec 자체 없음) 5페이지에 Playwright spec 추가.
+
+- **mocked-route(OpenAPI 타입 바인딩) 3종**: `feature-update-request-detail`·`import-job-detail`·
+  `feature-detail`. 임의 id는 빈 DB에서 404라 admin-ops.spec 패턴으로 detail GET/cancel/run-now/
+  events/nearby/weather만 가로채고(`**/v1/...**` glob), 페이지 document·RSC·WS는 통과. mock factory를
+  `components["schemas"][...]`에 바인딩해 계약 drift를 `tsc`가 잡게 함.
+- **라이브 smoke 2종**: `curated-features`(렌더/필터/구조 — 빈 DB tolerant), `features-new`
+  (렌더 + 클라이언트측 검증: 필수 필드, 한국 본토 좌표 범위 — 네트워크 무관 결정적).
+- **검증**: `npm run type-check:e2e`(tsc) + ESLint 통과. **Windows Playwright 라이브 실행은
+  잔여**(본 환경 미실행 — WSL backend/frontend 기동 필요).
+- **정정**: 실제 컴포넌트 인벤토리로 작성하며 감사 리포트 §1 가정 일부가 구현과 달라 §6 정정
+  추가(features/new는 place/event 2종·provider 필드 없음·geo는 :12501 /v2; feature 상세는 admin
+  라우트·map/AddressMatchReport/raw토글/재검증 없음; cancel/run-now는 POST).
+- **잔여(depth)**: §2 얇은 커버 14페이지 mutation/error/cursor, 시드 기반 mutation flow — tasks.md.
+
+## 2026-06-16 (claude) — fix: prometheus path 라벨 라우팅 후 확정 (#448, merged)
+
+`#447`(F-02) CI를 막던 `test_prometheus_metrics` 실패의 근본 원인 추적·해소.
+
+- **오진 정정**: "random-order counter 누적"으로 추정했으나, 순서-무관 + 진단 덤프 헬퍼로
+  바꾸자 CI 로그가 실제 라인 `path="__unmatched__"`를 드러냄 — **값 누적이 아니라 path 라벨
+  오류**였다(미들웨어가 라우팅 **전** best-effort 매칭으로 path 계산 → 일부 라우트에서 실패).
+- **수정**: HTTP 메트릭 path 라벨을 `call_next` **후** `scope['route']`(권위 소스)로 확정.
+  starlette 버전에 따라 `route.path`가 mount prefix 제외 상대값(`/categories`)일 수 있어
+  `root_path`를 합쳐 full 템플릿으로 정규화. 진짜 404는 `__unmatched__` 유지.
+- **테스트**: surface/method/status로 sample을 찾아 값(>=1.0) + path가 정상 해석됐는지
+  (라우트 tail로 끝남 = `__unmatched__` 아님)를 단언 — /v1 prefix 같은 starlette 내부 차이에
+  견고. 로컬 6/6 통과, CI 전 잡 green 후 머지.
+
 ## 2026-06-16 (claude) — F-02: reverse_geocode_failed issue producer 구현 (옵션 B)
 
 감사 backlog `T-AUDIT-0616`의 F-02. 사용자 결정 **B(producer 구현/relabel)**.
