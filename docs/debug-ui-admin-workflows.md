@@ -1001,10 +1001,10 @@ Provider 적재와 consistency check는 다음 issue type을 생성하거나 집
 | `file_validation_failed` | offline/file source 검증 실패 | 파일 수정 후 재업로드 |
 | `stale_provider_sync` | sync가 오래 멈춤 | provider 강제 실행 |
 
-> `geocode_failed`/`reverse_geocode_failed`는 아직 이 issue type을 생성하는 producer가
-> 없다(계획 항목). 현재 geocode/reverse-geocode 호출 실패 자체를 집계하는 전용 issue는
-> 없으며, 주소 검증기(validation.py)가 내는 `missing_address`/`missing_bjd_code` 정도로만
-> 간접적으로 드러난다. 전용 producer가 붙기 전까지 이 두 type은 예약 상태로 본다.
+> producer 상태(F-02 구현, 2026-06-16): `reverse_geocode_failed`는 주소 검증기
+> (validation.py)가 **좌표-있음+bjd-없음**(reverse 호출이 bjd를 못 냄) 케이스에서 발행한다.
+> `geocode_failed`(forward, 주소→좌표)는 적재 경로에 forward-geocode가 없어 아직 미발행
+> (정의만 존재) — forward-geocode 경로가 생기면 연결한다.
 
 ### 15.2 Backend API
 
