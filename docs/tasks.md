@@ -26,8 +26,8 @@
       source key + 고정 identity category, bjd는 가변 속성) 적용 provider 범위 결정 + 코드.
     - **F-02 (MED)**: `geocode_failed`/`reverse_geocode_failed` admin issue **producer 신설**
       (validate_feature_bundle_address가 미방출) 또는 ADR-046 contract에서 제거 결정.
-    - **C-04 / DA-D-07 (⚖️ 결정)**: KHOA 해수욕장 category 코드 `01020300`(COAST_ISLAND) vs
-      전용 `01050100` — 코드 정렬 여부 결정(본 패스는 문서를 코드값에 맞추고 divergence 명기).
+    - ~~**C-04 / DA-D-07**: KHOA 해수욕장 category~~ **✅ 해소** — 전용 `01050100 TOURISM_NATURE_BEACH`로
+      코드+문서 정렬(2026-06-16, 후속 PR). `01020300`(COAST_ISLAND)은 오분류였다.
     - **e2e (HIGH)**: ZERO 커버 5페이지(curated-features 1192줄 콘솔·features/new·3 detail
       페이지) + 전 페이지 mutation/error/cursor depth — `docs/reports/e2e-scenario-coverage-
       2026-06-16.md` 우선순위 순으로 spec 추가.
