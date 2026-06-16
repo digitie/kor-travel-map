@@ -856,9 +856,10 @@ CREATE INDEX idx_violations_detected_brin ON ops.data_integrity_violations USING
 | `missing_address` | provider 주소도 kor-travel-geo 주소도 없음 | `provider_fields`, `coord` |
 | `missing_bjd_code` | kor-travel-geo 결과에 10자리 법정동코드가 없음 | `kor_travel_geo_address`, `coord` |
 
-> **producer 상태**: 위 `violation_type` 계약은 스키마/REST 표면에 정의돼 있으나,
-> `geocode_failed`/`reverse_geocode_failed`를 적재하는 **배치 검증 producer는 아직
-> 구현되지 않았다**(정의만 존재). 실제 emit 경로는 후속 작업에서 연결한다.
+> **producer 상태(F-02 구현, 2026-06-16)**: `reverse_geocode_failed`는
+> `validate_feature_bundle_address`가 **좌표-있음+bjd-없음**(reverse가 bjd를 못 냄)에서
+> 발행한다. `geocode_failed`(forward, 주소→좌표)는 적재 경로에 forward-geocode가 없어
+> **미발행**(정의만 존재).
 
 admin UI가 수동 수정하면 `status='resolved'`, `resolved_at`, `payload.resolution`
 (`field_path`, `old_value`, `new_value`, `operator`, `reason`)을 기록한다. 실제 보정값은

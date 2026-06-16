@@ -2634,10 +2634,11 @@ TripMate OpenAPI 연동으로 바뀌었다. 또한 ADR-041로 `python-kraddr-bas
    - Admin UI는 `provider_address_mismatch`, `provider_address_partial_match`,
      `geocode_failed`, `reverse_geocode_failed`, `missing_address`, `missing_bjd_code`
      issue를 지도/테이블에서 보여준다.
-   - 주의: `geocode_failed`/`reverse_geocode_failed`는 **계약상 정의**돼 있으나 아직
-     batch-validation producer가 없다 — `validate_feature_bundle_address`는
-     `missing_bjd_code`/`missing_address`/`provider_address_mismatch`/
-     `provider_address_partial_match`만 발행한다(known gap F-02, `docs/tasks.md` 추적).
+   - producer 상태(F-02 구현, 2026-06-16): `reverse_geocode_failed`는
+     `validate_feature_bundle_address`가 **좌표-있음+bjd-없음**(reverse 호출이 bjd를 못 냄)
+     케이스에서 발행한다. 함께 `missing_address`/`provider_address_mismatch`/
+     `provider_address_partial_match`도 발행. `geocode_failed`(forward, 주소→좌표)는 적재
+     경로에 forward-geocode가 없어 **미발행**(정의만 존재).
    - 운영자는 admin UI에서 kor-travel-geo 재시도, 좌표 수정, 주소 수정, kor-travel-geo 주소
      채택, 수동 override, ignored/reopen 처리를 할 수 있어야 한다.
    - 수동 override는 `ops.feature_overrides`와 audit log에 기록하고 provider 재적재가
