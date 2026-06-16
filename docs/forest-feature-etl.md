@@ -17,7 +17,7 @@
 | 항목 | 값 |
 |------|----|
 | provider | `python-krforest-api` |
-| dataset_key | `forest_recreation_forests`, `forest_arboretums`, `forest_trails`, `forest_mountain_weather` |
+| dataset_key | `krforest_recreation_forests`, `krforest_arboretums`, `forest_trails`, `forest_mountain_weather` |
 | Feature.kind | `place`, `area`, `route` / `WeatherValue` |
 | 코드 entrypoint | `kortravelmap.providers.krforest`, `kortravelmap.forest` |
 | 갱신 주기 | provider별 (place/area/route 월~분기, 산악기상 시간 단위) |
@@ -26,8 +26,8 @@
 
 | dataset_key | provider client/model | feature/detail |
 |-------------|---------------------|----------------|
-| `forest_recreation_forests` | `travel.recreation_forests()` | `place`, `place_kind="recreation_forest"` |
-| `forest_arboretums` | `travel.arboretums()` | `place`, `place_kind="arboretum"` |
+| `krforest_recreation_forests` | `travel.recreation_forests()` | `place`, `place_kind="recreation_forest"` |
+| `krforest_arboretums` | `travel.arboretums()` | `place`, `place_kind="arboretum"` |
 | `forest_trails` | `travel.forest_trail_file_features()` / `dulle_trail_features()` | LineString → `route` / Polygon → `area` |
 | `forest_mountain_weather` | 산악기상 관측/예보 typed model | `WeatherValue` |
 
@@ -42,14 +42,24 @@
 
 ## 4. category (`docs/category.md` §4)
 
+> **구현 주의 (code ground truth)**: 현재 변환 코드(`providers/krforest.py`)는
+> 휴양림 전체에 **부모 코드 `03030000`** `LODGING_RECREATION_FOREST`
+> (`RECREATION_FOREST_CATEGORY`), 수목원 전체에 **부모 코드 `01030000`**
+> `TOURISM_BOTANICAL` (`ARBORETUM_CATEGORY`)를 부여한다 — provider 응답에
+> 국립/공립/사립 구분 신호가 없어 leaf 분기를 하지 않는다. 아래 표의
+> 국립/공립/사립 subtype 코드(`03030101` 등)는 **문서 전용 분류 계획**이며,
+> 코드가 실제로 emit하는 값은 부모 코드뿐이다.
+
 | 종류 | category 코드 | Tier path | marker_icon |
 |------|-------------|-----------|------------|
-| 국립 휴양림 (산림청 운영) | **`03030101`** `LODGING_RECREATION_FOREST_NATIONAL_KFS` | 숙박 > 휴양림 > 국립휴양림 > 산림청 운영 | `park` |
-| 공립 휴양림 | **`03030201`** `LODGING_RECREATION_FOREST_PUBLIC_LOCAL` | 숙박 > 휴양림 > 공립휴양림 > 지자체 운영 | `park` |
-| 사립 휴양림 | **`03030301`** `LODGING_RECREATION_FOREST_PRIVATE_OPERATOR` | 숙박 > 휴양림 > 사립휴양림 > 민간 운영 | `park` |
-| 수목원 (공립) | **`01030102`** `TOURISM_BOTANICAL_GARDEN_PUBLIC` | 관광 > 수목원·식물원 > 수목원 > 공립 | `garden` |
-| 수목원 (국립) | **`01030101`** `TOURISM_BOTANICAL_GARDEN_NATIONAL` | 동일 > 국립 | `garden` |
-| 수목원 (사립) | **`01030103`** `TOURISM_BOTANICAL_GARDEN_PRIVATE` | 동일 > 사립 | `garden` |
+| 휴양림 (전체, 코드 부여값) | **`03030000`** `LODGING_RECREATION_FOREST` | 숙박 > 휴양림 | `park` |
+| ↳ 국립 휴양림 (산림청 운영, 문서 전용 subtype) | `03030101` `LODGING_RECREATION_FOREST_NATIONAL_KFS` | 숙박 > 휴양림 > 국립휴양림 > 산림청 운영 | `park` |
+| ↳ 공립 휴양림 (문서 전용 subtype) | `03030201` `LODGING_RECREATION_FOREST_PUBLIC_LOCAL` | 숙박 > 휴양림 > 공립휴양림 > 지자체 운영 | `park` |
+| ↳ 사립 휴양림 (문서 전용 subtype) | `03030301` `LODGING_RECREATION_FOREST_PRIVATE_OPERATOR` | 숙박 > 휴양림 > 사립휴양림 > 민간 운영 | `park` |
+| 수목원 (전체, 코드 부여값) | **`01030000`** `TOURISM_BOTANICAL` | 관광 > 수목원·식물원 | `garden` |
+| ↳ 수목원 (공립, 문서 전용 subtype) | `01030102` `TOURISM_BOTANICAL_GARDEN_PUBLIC` | 관광 > 수목원·식물원 > 수목원 > 공립 | `garden` |
+| ↳ 수목원 (국립, 문서 전용 subtype) | `01030101` `TOURISM_BOTANICAL_GARDEN_NATIONAL` | 동일 > 국립 | `garden` |
+| ↳ 수목원 (사립, 문서 전용 subtype) | `01030103` `TOURISM_BOTANICAL_GARDEN_PRIVATE` | 동일 > 사립 | `garden` |
 | 숲길/산림욕장 | **`01020103`** `TOURISM_NATURAL_LANDSCAPE_MOUNTAIN_VALLEY_FOREST_TRAIL` | 관광 > 자연경관 > 산·계곡 > 산림욕장 | `park` |
 | 등산로 (route) | route는 카테고리보다 `RouteDetail.route_type=hiking_trail`로 1차 분류. 보조 category는 `01080500` `TOURISM_ACTIVITY_TREKKING` | 관광 > 액티비티 > 트레킹·둘레길 | `park` |
 | 산악기상 anchor | weather-only marker — `features.category`는 비움 또는 `01050300` `TOURISM_NATURE_OBSERVATORY` 대용. 후속 ADR에서 `WEATHER_MOUNTAIN_STATION` 신설 검토 (§11.6) | n/a | `marker` |
@@ -129,8 +139,8 @@ await upsert_weather_values(session, values)
 
 | asset | dataset_key | cron | group |
 |-------|-------------|------|-------|
-| `feature_place_krforest_recreation` | `forest_recreation_forests` | `0 2 1 * *` (월 1회) | `features_place` |
-| `feature_place_krforest_arboretums` | `forest_arboretums` | `0 2 1 * *` | `features_place` |
+| `feature_place_krforest_recreation` | `krforest_recreation_forests` | `0 2 1 * *` (월 1회) | `features_place` |
+| `feature_place_krforest_arboretums` | `krforest_arboretums` | `0 2 1 * *` | `features_place` |
 | `feature_route_krforest_trails` | `forest_trails` | `0 2 1 * *` | `features_route` |
 | `weather_krforest_mountain` | `forest_mountain_weather` | `0 * * * *` (시간) | `features_weather` |
 | `notice_krforest_safety` | `forest_safety_notices` (별도 — notice doc) | `*/30 * * * *` | `features_notice` |

@@ -6,7 +6,7 @@
 - 애플리케이션 Postgres DB: `kor_travel_map`
 - Dagster metadata Postgres DB: `kor_travel_map_dagster`
 - RustFS 객체 저장소 볼륨: feature file bucket `kor-travel-map`, offline upload bucket
-  `krtour-uploads`
+  `kor-travel-map-uploads`
 
 현재 구현 범위는 `T-209e` cold backup, staging restore, smoke/count 검증,
 admin router/UI, restore hot-swap env 전환 자동화다. Admin UI는 `/admin/backups`에서

@@ -1,6 +1,7 @@
 # admin UI 화면별 점검 체크리스트 (T-218f)
 
-`kor-travel-map-admin` frontend(Next.js, 포트 12705)의 route 전수(현재 17)를 **운영 회귀·
+`kor-travel-map-admin` frontend(Next.js, 포트 12705)의 route 전수(현재 22 — top-level 18 +
+동적 상세/생성 4)를 **운영 회귀·
 a11y·e2e 커버 관점에서 점검**하기 위한 체크리스트다. T-218(admin UI 상세 점검 + a11y/e2e 완비)의
 점검 항목을 화면 단위로 고정하고, 현재 e2e 커버 상태를 매핑한다.
 
@@ -28,29 +29,35 @@ a11y·e2e 커버 관점에서 점검**하기 위한 체크리스트다. T-218(ad
   성공 결과는 `role=status`(polite)로 안내되는가(T-218b/e).
 - **e2e**: Playwright 스펙 커버 여부(파일).
 
-## 2. 화면별 매트릭스 (17 route)
+## 2. 화면별 매트릭스 (22 route)
 
 | route | 목록/필터 | 정렬 | cursor | 빈 상태 | 에러 | kill-switch | a11y(폼) | e2e |
 |---|---|---|---|---|---|---|---|---|
 | `/` (홈 대시보드) | 메트릭/최근 job | — | — | ✓ | ✓ | — | — | `home.spec` |
 | `/features` (지도) | kind 필터 | — | — | ✓ | ✓ | — | — | `features.spec` |
+| `/features/[featureId]` (상세) | — | — | — | — | ✓ | — | — | e2e 없음 |
 | `/admin/features` | q/kind/status/has_issue | ✓ sort/order | ✓ | ✓ | ✓ | deactivate | 필터 라벨 | `admin-ops` |
+| `/admin/features/new` (생성 폼) | — | — | — | — | ✓ | create | ✓ FormField+검증(필수/좌표/JSON) | e2e 없음 |
 | `/admin/features/change-requests` | status/action/q | — | — | ✓ | ✓ | review_mode·approve/reject | ✓ `<label htmlFor>`(기존) | `admin-ops`(+음성 JSON, T-218d) |
+| `/admin/curated-features` | curation_status/enabled/provider | — | ✓ | ✓ | ✓ | select/unselect/archive·rule apply | 필터 라벨 | e2e 없음 |
 | `/admin/issues` | q/status/severity/type/provider/dataset/bbox | — | ✓ | ✓ | ✓ | manual_override | ✓ manual-override FormField(T-218b-3) | `admin-ops`(+검증/포커스) |
 | `/admin/dedup-reviews` | status/kind | — | ✓ | ✓ | ✓ | accept/reject/ignore/merge | — | `admin-ops`(smoke) |
 | `/admin/enrichment-reviews` | status/kind | — | ✓ | ✓ | ✓ | accept/reject/ignore | — | `admin-ops`(cursor) |
 | `/admin/feature-update-requests` | status | — | — | ✓ | ✓ | dry-run/run-now | ✓ FormField+검증(T-218b-1) | `admin-ops`(+검증/포커스) |
+| `/admin/feature-update-requests/[requestId]` (상세) | — | — | — | — | ✓ | cancel/run-now | — | e2e 없음 |
 | `/admin/poi-cache-targets` | external_system | — | ✓ | ✓ | ✓ | upsert/delete | ✓ FormField+검증(T-218b-1) | `admin-ops`(+검증/포커스) |
 | `/admin/offline-uploads` | status/provider/dataset | — | ✓ | ✓ | ✓ | upload→validate→load(Dagster) | ✓ FormField(T-218b-2) | `admin-ops`(mutation flow) |
 | `/admin/backups` | command_enabled 배지 | — | — | ✓ | ✓ | create/restore/swap(plan-only 기본) | label(기존) | `admin-ops`(T-218c, 렌더+액션) |
 | `/admin/dagster` | run/tick 목록 | — | — | ✓ | ✓ | nux-seen | — | `dagster.spec`(smoke) |
 | `/ops/import-jobs` | status/kind | — | ✓ | ✓ | ✓ | — | 필터 라벨 | `admin-ops`(smoke) |
+| `/ops/import-jobs/[jobId]` (상세) | — | — | — | — | ✓ | — | — | e2e 없음 |
 | `/ops/providers` (T-217g) | 요약 배지(failing/stale) | — | —(bounded) | ✓ | ✓ | — | — | `admin-ops`(렌더+실패 경고) |
 | `/ops/consistency` | status | — | — | ✓ | ✓ | — | — | `admin-ops`(smoke) |
 | `/ops/logs` | system/api tab + level/source/method/path/min_status | — | ✓ | ✓ | ✓ | — | 필터 라벨 | `admin-ops`(tab/filter) |
 | `/etl` | provider/dataset/source | — | — | ✓ | ✓ | preview only(DB write 없음) | ✓ RHF+zodResolver+Field(기존) | `etl.spec`(실 backend) |
 
-범례: ✓=확인/적용, `—`=해당 없음. e2e 열의 `admin-ops`는 `e2e/admin-ops.spec.ts`.
+범례: ✓=확인/적용, `—`=해당 없음. e2e 열의 `admin-ops`는 `e2e/admin-ops.spec.ts`,
+`e2e 없음`=페이지 단위 e2e 미커버(갭 매트릭스 `docs/reports/e2e-scenario-coverage-2026-06-16.md`).
 
 ## 3. T-218 적용 결과 요약
 
@@ -58,8 +65,13 @@ a11y·e2e 커버 관점에서 점검**하기 위한 체크리스트다. T-218(ad
   `feature-update-requests`, `offline-uploads`, `issues` manual-override — 전부 `FormField`/
   `FormSelect`/`FormTextArea`로 전환(`<label htmlFor>` + `aria-describedby` + `aria-invalid` +
   첫 에러 포커스). `change-requests`·`/etl`은 이미 a11y 완비라 비대상.
-- **e2e 커버**: admin/ops 16 route 전부 e2e 커버(직전 미커버였던 `/admin/backups`를 T-218c로
-  채움). 폼 음성 경로(JSON·필수·좌표) e2e 4폼(T-218d).
+- **e2e 커버(T-218 범위)**: T-218 시점의 admin/ops route(`/admin/backups` 포함 — 직전 미커버를
+  T-218c로 채움)는 e2e 커버. 폼 음성 경로(JSON·필수·좌표) e2e 4폼(T-218d). **단, 그 이후
+  추가된 5개 페이지** — `/admin/curated-features`, `/admin/features/new`(생성 폼),
+  동적 상세 `/features/[featureId]`·`/ops/import-jobs/[jobId]`·
+  `/admin/feature-update-requests/[requestId]` — **는 아직 페이지 단위 e2e 미커버**다(위 §2 표의
+  `e2e 없음` 행). 전체 갭 매트릭스는 `docs/reports/e2e-scenario-coverage-2026-06-16.md` 참조.
+  해당 스펙 추가는 backlog.
 - **안내(T-218e)**: `Alert`가 variant별 live-region — 에러=`role=alert`(assertive),
   성공/정보=`role=status`(polite).
 - **모달 focus trap 비해당**: 본 admin UI는 오버레이 모달/드로어가 없는 **인라인 사이드

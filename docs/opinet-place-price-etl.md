@@ -16,7 +16,7 @@
 | category | **`06020000`** `TRANSPORT_FUEL` (`docs/category.md` §4) — Tier path: 교통 > 주유소 |
 | place_kind | `fuel_station` |
 | marker_icon | `fuel` (maki) |
-| marker_color | `P-02` (주황) |
+| marker_color | `P-08` (주황) |
 | place 갱신 주기 | 월 1회 또는 OpiNet 분기 갱신 |
 | price 갱신 주기 | 일 3회 (`0 6,14,22 * * *`) |
 
@@ -39,7 +39,7 @@ bundle: OpinetStationFeatureBundle = station_detail_to_bundle(
 )
 # bundle.feature: Feature(kind=place)
 # bundle.detail:  PlaceDetail(phones, facility_info, place_kind="fuel_station")
-# bundle.price_point: PricePoint(price_category="fuel", retention_days=3650)
+# bundle.price_point: PriceValue(price_category="fuel", retention_days=3650)
 # bundle.price_values: list[PriceValue]  # 제품별
 # bundle.source_record + source_link
 ```
@@ -71,7 +71,7 @@ KST 가정 (`docs/feature-opening-hours.md` 패턴).
 ## 6. PricePoint
 
 ```python
-PricePoint(
+PriceValue(
     feature_id=feature_id,
     price_category="fuel",
     retention_days=3650,                  # 10년 (ADR-017)

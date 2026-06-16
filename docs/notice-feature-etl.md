@@ -3,12 +3,20 @@
 본 문서는 4개 provider의 짧은 수명 공지성 데이터를 `Feature(kind=notice)` +
 `NoticeDetail`로 통합 적재하는 ETL이다.
 
+> **구현 현황 (2026-06-16)**: 현재 notice Feature를 실제로 emit하는 변환부는
+> **krex(`traffic_notices_to_bundles` → `krex_traffic_notices`)** 와
+> **kma(`weather_alerts_to_notice_bundles` → `kma_weather_alerts`)** 2개뿐이다.
+> `forest_safety_notices`(krforest) · `khoa_coastal_notices`(khoa)는 **설계만
+> 된 미구현(planned)** 상태로, src/dagster에 해당 변환 함수·dataset이 아직
+> 없다. 아래 §5.3/§5.4/§6/§8의 forest·khoa 항목은 **목표 설계**이며 코드 정본이
+> 아니다.
+
 ## 1. 문서 정보
 
 | 항목 | 값 |
 |------|----|
 | provider | `python-krex-api`, `python-kma-api`, `python-krforest-api`, `python-khoa-api` |
-| dataset_key | `krex_traffic_notices`, `kma_weather_alerts`, `forest_safety_notices`, `khoa_coastal_notices` |
+| dataset_key | `krex_traffic_notices`, `kma_weather_alerts` (구현됨) · `forest_safety_notices`, `khoa_coastal_notices` (planned/미구현) |
 | Feature.kind | `notice` |
 | 상세 테이블 | `feature_notice_details` |
 | 코드 entrypoint | `kortravelmap.providers.{krex,kma,krforest,khoa}`, `kortravelmap.notices` |
@@ -19,14 +27,15 @@
 |-------------|---------|----------|------|
 | `krex_traffic_notices` | `python-krex-api` | **5분** | 사고/공사/통제 즉시 영향 |
 | `kma_weather_alerts` | `python-kma-api` | **10분** | 특보 발효/해제 짧은 시간 변경 |
-| `forest_safety_notices` | `python-krforest-api` | **30분** | 산사태/산불/탐방 위험 |
-| `khoa_coastal_notices` | `python-khoa-api` | **60분** | 바다 갈라짐/해양 위험 |
+| `forest_safety_notices` _(planned/미구현)_ | `python-krforest-api` | **30분** | 산사태/산불/탐방 위험 |
+| `khoa_coastal_notices` _(planned/미구현)_ | `python-khoa-api` | **60분** | 바다 갈라짐/해양 위험 |
 
 ## 2.5 카테고리 매핑
 
-`notice` kind는 **`Feature.category`를 비워두거나** Tier 1 `01000000`
-`TOURISM` (대분류 — 여행 영향)으로 설정. 분류는 `NoticeDetail.notice_type`이
-1차 담당 (`docs/category.md` §4의 8개 Tier 1과는 별도 축).
+`notice` kind는 **`Feature.category`를 out-of-catalog sentinel `99000000`**
+으로 설정 (ADR-023 DTO validator가 빈 값·非8자리 숫자를 금지하므로 placeholder
+필수). 분류는 `NoticeDetail.notice_type`이 1차 담당 (`docs/category.md` §4의
+8개 Tier 1과는 별도 축).
 
 marker_icon: `notice_type`별 (예: `alert` / `roadblock` / `rainwear`).
 marker_color: `notice_type`별 (`P-13` 위험 / `P-08` 기상 / `P-14` 일반).
@@ -146,7 +155,9 @@ krex#8/PR#9, #378) 기준:
 복제하거나, 단일 feature + `payload.affected_areas`로 처리. v2 1차: 후자
 (단일 feature).
 
-### 5.3 forest_safety_notices
+### 5.3 forest_safety_notices _(planned/미구현)_
+
+> krforest provider에 안전 공지 변환 함수가 아직 없다 — 아래는 목표 매핑.
 
 | provider 필드 | NoticeDetail 매핑 |
 |--------------|------------------|
@@ -158,7 +169,10 @@ krex#8/PR#9, #378) 기준:
 
 좌표: 해당 산 좌표 또는 입산통제 구역 centroid.
 
-### 5.4 khoa_coastal_notices
+### 5.4 khoa_coastal_notices _(planned/미구현)_
+
+> khoa provider는 현재 `beaches_to_bundles`(place)만 있고 coastal notice 변환
+> 함수가 없다 — 아래는 목표 매핑.
 
 | provider 필드 | NoticeDetail 매핑 |
 |--------------|------------------|
@@ -178,11 +192,11 @@ async def traffic_notice_to_bundle(item, *, fetched_at) -> FeatureBundle:
 async def weather_alert_to_bundle(item, *, fetched_at) -> FeatureBundle:
     ...
 
-# providers/krforest.py
+# providers/krforest.py  (planned/미구현 — 현재 함수 없음)
 async def safety_notice_to_bundle(item, *, fetched_at) -> FeatureBundle:
     ...
 
-# providers/khoa.py
+# providers/khoa.py  (planned/미구현 — 현재 beaches_to_bundles(place)만 존재)
 async def coastal_notice_to_bundle(item, *, fetched_at) -> FeatureBundle:
     ...
 
@@ -206,6 +220,7 @@ def notice_job_specs() -> list[EtlJobSpec]:
             interval_minutes=10, suggested_group_name="features_notice",
             ...
         ),
+        # --- 아래 2개 spec은 planned/미구현 (변환 함수·dataset 미존재) ---
         EtlJobSpec(
             provider="python-krforest-api", dataset_key="forest_safety_notices",
             source_entity_type="safety_notice",
@@ -244,8 +259,8 @@ def notice_job_specs() -> list[EtlJobSpec]:
 |-------|-------------|------|-------|
 | `notice_krex_traffic` | `krex_traffic_notices` | `*/5 * * * *` | `features_notice` |
 | `notice_kma_weather_alerts` | `kma_weather_alerts` | `*/10 * * * *` | `features_notice` |
-| `notice_krforest_safety` | `forest_safety_notices` | `*/30 * * * *` | `features_notice` |
-| `notice_khoa_coastal` | `khoa_coastal_notices` | `0 * * * *` | `features_notice` |
+| `notice_krforest_safety` _(planned)_ | `forest_safety_notices` | `*/30 * * * *` | `features_notice` |
+| `notice_khoa_coastal` _(planned)_ | `khoa_coastal_notices` | `0 * * * *` | `features_notice` |
 
 ConcurrencyConfig: provider별 `max_concurrent=1`.
 

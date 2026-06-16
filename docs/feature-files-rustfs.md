@@ -278,7 +278,7 @@ def khoa_beach_to_file_sources(item, *, feature_id, source_record_key) -> list[F
         feature_id=feature_id, source_url=item.beach_img,
         role="primary", display_order=0,
         provider="python-khoa-api",
-        dataset_key="khoa_oceans_beach_info",
+        dataset_key="khoa_beaches",
         source_record_key=source_record_key,
     )]
 ```
@@ -293,7 +293,7 @@ KOR_TRAVEL_MAP_OBJECT_STORE_ACCESS_KEY_ID=...
 KOR_TRAVEL_MAP_OBJECT_STORE_SECRET_ACCESS_KEY=...
 KOR_TRAVEL_MAP_OBJECT_STORE_PUBLIC_BASE_URL=http://127.0.0.1:12101/kor-travel-map
 KOR_TRAVEL_MAP_OBJECT_STORE_PREFIX=features
-KOR_TRAVEL_MAP_OFFLINE_UPLOAD_BUCKET=krtour-uploads
+KOR_TRAVEL_MAP_OFFLINE_UPLOAD_BUCKET=kor-travel-map-uploads
 KOR_TRAVEL_MAP_OFFLINE_UPLOAD_PREFIX=offline-uploads
 KOR_TRAVEL_MAP_OFFLINE_UPLOAD_MAX_BYTES=104857600
 KOR_TRAVEL_MAP_DOCKER_OBJECT_STORE_ENDPOINT_URL=http://rustfs:9000

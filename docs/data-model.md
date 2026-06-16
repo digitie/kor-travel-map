@@ -856,6 +856,10 @@ CREATE INDEX idx_violations_detected_brin ON ops.data_integrity_violations USING
 | `missing_address` | provider 주소도 kor-travel-geo 주소도 없음 | `provider_fields`, `coord` |
 | `missing_bjd_code` | kor-travel-geo 결과에 10자리 법정동코드가 없음 | `kor_travel_geo_address`, `coord` |
 
+> **producer 상태**: 위 `violation_type` 계약은 스키마/REST 표면에 정의돼 있으나,
+> `geocode_failed`/`reverse_geocode_failed`를 적재하는 **배치 검증 producer는 아직
+> 구현되지 않았다**(정의만 존재). 실제 emit 경로는 후속 작업에서 연결한다.
+
 admin UI가 수동 수정하면 `status='resolved'`, `resolved_at`, `payload.resolution`
 (`field_path`, `old_value`, `new_value`, `operator`, `reason`)을 기록한다. 실제 보정값은
 `feature.features` row와 `ops.feature_overrides`에 반영해 provider 재적재가 덮어쓰지
@@ -1038,11 +1042,12 @@ WHERE NOT EXISTS (SELECT 1 FROM provider_sync.source_links sl WHERE sl.source_re
 ## 11. ID 생성 규약 (다른 곳에서도 인용)
 
 ```python
-make_feature_id(*, bjd_code: str | None, kind: FeatureKind, category: str,
+make_feature_id(*, bjd_code: str | None, kind: FeatureKind | str, category: str,
                 source_type: str, source_natural_key: str,
                 content_hash: str | None = None) -> str
-# 포맷: f_{bjd_code or 'global'}_{kind.value[0]}_{sha1(input)[:16]}
-# input: f"{bjd_code or 'global'}|{kind.value}|{category}|{source_type}|{source_natural_key}|{content_hash or ''}"
+# kind는 FeatureKind(StrEnum) 멤버 또는 동등 문자열 ('place'/'event'/...) 모두 허용.
+# 포맷: f_{bjd_code or 'global'}_{kind[0]}_{sha1(input)[:16]}
+# input: f"{bjd_code or 'global'}|{kind}|{category}|{source_type}|{source_natural_key}|{content_hash or ''}"
 
 make_source_record_key(*, provider: str, dataset_key: str,
                        source_entity_type: str, source_entity_id: str,
@@ -1052,8 +1057,17 @@ make_source_record_key(*, provider: str, dataset_key: str,
 make_payload_hash(data: Any, *, length: int = 32) -> str
 # canonical_json(data) → sha256 → [:length]
 
-make_weather_value_key(value: WeatherValue) -> str
-# 포맷: wv_{sha1(value.identity()_tuple)[:20]}
+make_weather_value_key(*, feature_id: str, provider: str, weather_domain: str,
+                       forecast_style: str, metric_key: str,
+                       issued_at: datetime | None = None,
+                       valid_at: datetime | None = None,
+                       observed_at: datetime | None = None) -> str
+# 포맷: wv_{sha1(input)[:20]}. WeatherValue.identity() tuple과 동일 input.
+
+make_price_value_key(*, feature_id: str, provider: str, price_domain: str,
+                     product_key: str, observed_at: datetime) -> str
+# 포맷: pv_{sha1(input)[:20]}. PriceValue.identity() tuple과 동일 input
+# (시간 필드는 observed_at 하나 — forecast 없음).
 ```
 
 ## 12. 마이그레이션 가이드

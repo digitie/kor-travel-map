@@ -47,13 +47,16 @@ class Feature(BaseModel):
     kind: FeatureKind
     name: str = Field(min_length=1)
     coord: Coordinate | None = None      # WGS84 lon/lat — Korean bounds 검증
+    coord_precision_digits: int | None = Field(default=None, ge=3, le=8)
+                                         # coord 있으면 기본 6, coord 없으면 None
+    geom: str | None = None              # route/area WKT (EPSG:4326); Point kind는 None
     address: Address = Field(default_factory=Address)
-    category: str = Field(min_length=1)  # kortravelmap.category.PlaceCategoryCode value (ADR-023)
+    category: str                        # 8자리 숫자, ^\d{8}$ 검증 (ADR-023)
     urls: FeatureUrls = Field(default_factory=FeatureUrls)
-    marker_icon: str                     # maki id
+    marker_icon: str = Field(min_length=1)  # maki id
     marker_color: str                    # 'P-01' ~ 'P-16'
     parent_feature_id: str | None = None
-    sibling_group_id: UUID | None = None
+    sibling_group_id: str | None = None  # dedup group UUID의 string 표현
     detail: PlaceDetail | EventDetail | NoticeDetail | RouteDetail | AreaDetail | None = None
     raw_refs: list[RawDataRef] = Field(default_factory=list)
     status: FeatureStatus = FeatureStatus.ACTIVE
@@ -66,6 +69,11 @@ class Feature(BaseModel):
 
 - `coord` 좌표: longitude ∈ [124.0, 132.0], latitude ∈ [33.0, 39.5].
   벗어나면 ValidationError.
+- `coord_precision_digits`: `coord`가 None이면 None이어야 한다(아니면
+  ValidationError). `coord`가 있고 값이 None이면 model validator가 기본 6으로
+  채운다. 명시 값은 3~8 범위(`ge=3, le=8`).
+- `geom`: route/area feature의 선·면 geometry (WKT, EPSG:4326). place/event 등
+  Point feature는 `None`(좌표는 `coord`). `features.geom` 컬럼에 저장(ADR-012).
 - 모든 datetime: timezone aware (Asia/Seoul). naive datetime 입력은
   ValidationError (ADR-019).
 - `detail`: kind에 맞는 모델만 허용. dict 입력은 ValidationError (ADR-018).
@@ -76,7 +84,9 @@ class Feature(BaseModel):
   - kind=area → AreaDetail
   - kind=price/weather → None 가능 (별도 테이블에 시계열 저장)
 - `marker_color`: regex `^P-(0[1-9]|1[0-6])$`.
-- `category`: `kortravelmap.category.PlaceCategoryCode` value로 정규화 (ADR-023).
+- `category`: 8자리 숫자 regex `^\d{8}$`로 검증(ADR-023). known
+  `PlaceCategoryCode` value strict 검증은 미적용 — unknown 8자리 코드(예
+  `99000000`)도 임시 허용(transitional, fallback 룰 확정 전까지).
 
 ### 4.2 `FeatureUrls`
 
@@ -301,10 +311,17 @@ class SourceLink(BaseModel):
     created_at: datetime = Field(default_factory=kst_now)
 ```
 
-## 13. `FeatureFile`
+## 13. `FeatureFile` (persisted row) / `FeatureFileSource` (dto)
+
+`kortravelmap.dto`에 있는 파일 모델은 **`FeatureFileSource` 하나**다(업로드 전
+입력). 아래 `FeatureFile`은 객체 저장소 적재 후의 **저장 row 형상**(`feature.
+feature_files` 테이블, `docs/data-model.md` §5 정본)을 기록한 것으로, repo/SQL이
+관리하며 별도 Pydantic dto 클래스로 구현돼 있지 않다. RustFS/업로드 계약 정본은
+`docs/feature-files-rustfs.md`다.
 
 ```python
-class FeatureFile(BaseModel):
+# persisted row 형상 (feature.feature_files) — dto 클래스 아님
+class FeatureFile:
     file_id: str                         # make_feature_file_id(feature_id, bucket, object_key)
     feature_id: str
     file_type: Literal["image", "video", "audio", "document", "file"] = "image"
@@ -382,70 +399,82 @@ class WeatherValue(BaseModel):
 `timeline_bucket`은 분류 결과라 unique key에 포함 안 함. 자세한 매핑은
 `docs/weather-feature-normalization.md` (별도).
 
-## 15. `PricePoint` / `PriceValue`
+## 15. `PriceValue`
 
 ```python
-class PricePoint(BaseModel):
-    feature_id: str
-    price_category: str                  # 'fuel', 'admission', 'parking', ...
-    retention_days: int = Field(default=3650, ge=1)
-
 class PriceValue(BaseModel):
     feature_id: str
-    item_key: str                        # 'gasoline', 'diesel', 'lpg', 'adult', 'child', ...
+    provider: str                        # canonical provider name (ADR-024)
+    price_domain: PriceDomain            # provider별 가격 dataset 식별자 (enum)
+    product_key: str                     # 'gasoline', 'diesel', 'lpg', 'adult', 'child', ...
+    product_name: str | None = None      # 표준 한글 이름
+    source_product_key: str | None = None    # provider 원천 product code
+    source_product_name: str | None = None   # provider 원천 product 이름
     observed_at: datetime
-    value: Decimal
-    currency: str = Field(default="KRW", min_length=3, max_length=3)
-    payload_hash: str | None = None
-```
-
-## 16. `ProviderSyncState`
-
-```python
-class ProviderSyncState(BaseModel):
-    provider: str
-    dataset_key: str
-    sync_scope: str = "global"
-    status: str = "active"               # active, paused, error
-    cursor: dict[str, Any] | None = None
-    metadata_hash: str | None = None
-    last_observed_source_version: str | None = None
-    last_success_at: datetime | None = None
-    last_attempt_at: datetime | None = None
-    last_full_scan_at: datetime | None = None
-    next_run_after: datetime | None = None
-    last_error: str | None = None
-    last_error_at: datetime | None = None
-    extra: dict[str, Any] = Field(default_factory=dict)
-    updated_at: datetime = Field(default_factory=kst_now)
-```
-
-## 17. `ImportJob` / `ImportJobState`
-
-```python
-class ImportJobState(str, Enum):
-    QUEUED = "queued"
-    RUNNING = "running"
-    DONE = "done"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-
-class ImportJob(BaseModel):
-    job_id: UUID
-    kind: str                            # 'visitkorea_festival_full_scan', ...
-    load_batch_id: UUID | None = None    # T-200 full-load batch id
-    parent_job_id: UUID | None = None    # root import job self-FK
+    value_number: Decimal                # NUMERIC(14,4) 정합, 0 이상
+    unit: str = "KRW"                    # 'KRW', 'KRW/L', 'KRW/회' ...
+    normalization_version: str | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
-    state: ImportJobState = ImportJobState.QUEUED
-    progress: int = Field(default=0, ge=0, le=100)
-    current_stage: str | None = None
-    source_checksum: str | None = None
-    error_message: str | None = None
-    started_at: datetime | None = None
-    finished_at: datetime | None = None
-    heartbeat_at: datetime | None = None
-    created_at: datetime = Field(default_factory=kst_now)
+    collected_at: datetime = Field(default_factory=kst_now)
+    source_record_key: str | None = None
+
+    def identity(self) -> tuple:
+        return (self.feature_id, self.provider, self.price_domain.value,
+                self.product_key, self.observed_at)
 ```
+
+> `PricePoint`(price_category/retention_days)은 현재 dto에 구현되어 있지 않다.
+> price 시계열은 `PriceValue`만 dto이고, 보관 정책(retention)은 `infra/purge_repo.py`
+> 상수로 운영한다. DB의 `feature.price_points`/`feature.price_values`는
+> `docs/data-model.md` §8.2가 정본이다.
+
+## 16. `ProviderSyncStateRow` (dto 아님 — ORM row)
+
+provider sync state는 dto Pydantic 모델이 아니라 `infra/models.py`의 SQLAlchemy
+ORM row `ProviderSyncStateRow`(`provider_sync.provider_sync_state` 테이블 매핑)다.
+실제 컬럼 집합과 CHECK는 `docs/data-model.md` §4가 정본이다. 아래는 그 요약이다 —
+초기 설계에 있던 `metadata_hash`/`last_observed_source_version`/`last_attempt_at`/
+`last_full_scan_at`/`last_error`/`last_error_at`/`extra`는 구현 스키마에서 제외됐고,
+실패 추적은 `last_failure_at` + `consecutive_failures`로 대체됐다.
+
+```python
+class ProviderSyncStateRow(Base):  # infra/models.py, provider_sync.provider_sync_state
+    provider: str                  # PK
+    dataset_key: str               # PK
+    sync_scope: str                # PK (DEFAULT 없음)
+    status: str = "active"         # active, paused, disabled, failed
+    cursor: dict[str, Any]         # JSONB, default {}
+    last_success_at: datetime | None = None
+    last_failure_at: datetime | None = None
+    consecutive_failures: int = 0
+    next_run_after: datetime | None = None
+    updated_at: datetime           # DEFAULT now()
+```
+
+## 17. `ImportJob` (dto 아님 — repo dataclass)
+
+`ImportJob`은 dto Pydantic 모델이 아니라 `infra/jobs_repo.py`의 frozen dataclass
+(`ops.import_jobs` 행 표현, repo 반환용)다. 별도 `ImportJobState` enum은 없고
+`status`는 `str`다(허용 값 `queued`/`running`/`done`/`failed`/`cancelled`는
+`ops.import_jobs` CHECK으로 강제 — `docs/data-model.md` §9.1 정본).
+
+```python
+@dataclass(frozen=True)
+class ImportJob:  # infra/jobs_repo.py
+    job_id: str
+    kind: str                            # 'visitkorea_festival_full_scan', ...
+    payload: dict[str, Any]
+    status: str                          # queued / running / done / failed / cancelled
+    progress: int
+    current_stage: str | None
+    source_checksum: str | None
+    error_message: str | None
+    load_batch_id: str | None = None     # T-200 full-load batch id
+    parent_job_id: str | None = None     # root import job self-FK
+```
+
+`started_at`/`finished_at`/`heartbeat_at`/`created_at` 등 lifecycle 타임스탬프 컬럼은
+`ops.import_jobs` 테이블에 있으며 repo dataclass에는 포함되지 않는다.
 
 ## 18. `FeatureBundle` (provider → load 전달 단위)
 

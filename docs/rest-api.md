@@ -1,8 +1,10 @@
 # kor-travel-map REST API — 전 표면 카탈로그 + 정합성 표준
 
-> **상태**: 2026-06-10. PR #317(T-214/T-215)의 `/v1` 1차 정리 위에 ADR-048(admin/ops
+> **상태**: 2026-06-16. PR #317(T-214/T-215)의 `/v1` 1차 정리 위에 ADR-048(admin/ops
 > versioning 확장 + envelope/pagination/parameter/response 정합성 표준 + 코드/DB 명명 전파
-> T-216a~g)을 얹은 기준선.
+> T-216a~g)을 얹은 기준선. **T-216a~g는 구현 완료**(런타임 envelope = 공유 `Meta`,
+> `page_size`+`cursor`, RFC7807 problem+json) — 아래 본문의 "🔁 변경"·"현재→목표" 표기는
+> **이미 반영된 변경 이력**으로 읽는다(구 `limit`/CSV-bbox/`count` 형태는 더는 존재하지 않음).
 > **범위**: kor-travel-map **전 표면**(user/TripMate + admin + ops + debug)의 **단일 계약 정본**
 > (ADR-048 #9). `docs/tripmate-rest-api.md`는 TripMate **소비 매핑 view**로 수렴하고 계약
 > 세부는 본 문서로 위임한다(수렴 작업 T-216g).
@@ -35,7 +37,8 @@
 
 ### 1.1 Base URL · 포트 (ADR-047)
 - API `http://127.0.0.1:12701`(admin UI `12705`, Dagster `12702`; PC 개발 host
-  `5432`는 공유 PostgreSQL/PostGIS 인스턴스;
+  `5432`는 docker-manager가 구동하는 공유 PostgreSQL/PostGIS **인스턴스/컨테이너**이나,
+  kor-travel-map은 그 안의 **소유 독립 DATABASE `kor_travel_map`**을 쓴다(공유 DB 아님, ADR-045);
   RustFS `12101`/`12105`). `TRIPMATE_KOR_TRAVEL_MAP_API_BASE_URL`은 host root까지만 포함하고,
   모든 REST path가 `/v1` prefix를 명시한다(예: base `http://127.0.0.1:12701` +
   path `/v1/features/search`). base와 path 양쪽에 `/v1`를 중복 삽입하지 않는다.
@@ -83,14 +86,25 @@
 - `Content-Type: application/problem+json` + `X-Request-ID`. 중앙 핸들러(`app.py`
   `_error_response`)가 통일. `code`·`request_id`는 **top-level 확장 멤버**(소비자 파싱 위치
   고정), 코드 enum(§4)을 확장 `code`로 유지.
+- **알려진 한계(생성 openapi.json under-spec)**: FastAPI 중앙 예외 핸들러로 본문을 통일하는
+  구조라, **생성 `openapi.json`은 에러 응답을 `422 application/json`(기본 `HTTPValidationError`)
+  로만 선언**하고 런타임의 RFC7807 `application/problem+json`(4xx/5xx) 스키마를 자동 반영하지
+  못한다. **본 §1.5 산문 계약이 에러 본문의 정본**이며, 기계 정본(openapi.json)은 이 부분에서
+  실제보다 협소하다(향후 핸들러별 `responses=` 주석으로 보강 가능 — 미적용).
 
 ### 1.6 페이지네이션 (🔁 ADR-048, T-214e 심화)
-**실측 불일치**: page-size 파라미터 3종(`limit` features 평면/in-bounds/search ·
-`page_size` 그 외 · `run_limit`/`event_limit` dagster), 캡 3종(`le=5000`/`500`/`200`),
-`search`는 cursor인데 `limit`.
-**표준**:
-- `page_size`(정수)+opaque `cursor`(base64 keyset)로 통일. `limit`/`run_limit`/`event_limit`
-  **폐기**. 응답은 `meta.page.next_cursor`(null=마지막, §1.4). page_size+1 fetch.
+**해소된 실측 불일치(T-216 이전)**: 과거에는 page-size 파라미터 3종(`limit` features 평면/
+in-bounds/search · `page_size` 그 외 · `run_limit`/`event_limit` dagster), 캡 3종
+(`le=5000`/`500`/`200`)이 공존하고 `search`는 cursor인데 `limit`을 썼다. **T-216b/c로
+아래 표준으로 통일 완료** — cursor 페이지네이션 표면의 page-size 파라미터(`limit`/`run_limit`/
+`event_limit`)는 `page_size`로 통일됐다. **단 예외**: bounded top-N list 엔드포인트
+(`/v1/{curated-themes,curated-sources}` 등 curated read + admin curated 미러,
+`/v1/admin/provider-refresh-policies`)는 cursor가 아니라 결과 상한 cap으로서 `limit`(`le=500`,
+기본 200)을 명시적으로 유지한다(curated.py / provider_refresh_policies.py).
+**표준(현행)**:
+- cursor 페이지네이션 표면은 `page_size`(정수)+opaque `cursor`(base64 keyset)로 통일.
+  `limit`/`run_limit`/`event_limit`은 cursor 표면에서 **폐기**(bounded top-N의 `limit` cap은
+  위 예외로 유지). 응답은 `meta.page.next_cursor`(null=마지막, §1.4). page_size+1 fetch.
 - 2-티어 캡: 기본(detail/admin/ops) 50/최대 200, 지도(`nearby`·`by-target`) 100/최대 500.
 - `/v1/features` 평면: `page_size`+`cursor`(`limit le=5000` 폐기). `/v1/features/in-bounds`:
   cursor 없이 `max_items` 하드캡 5000→2000 + 결정적 `feature_id` 정렬(T-212d).
@@ -104,8 +118,8 @@
 - WGS84 lon,lat. bbox=`min_lon,min_lat,max_lon,max_lat`. 목록 좌표는 평면 `lon`/`lat`.
   datetime ISO 8601 KST-aware.
 
-### 1.9 파라미터 규약 (🔁 ADR-048)
-- **bbox 분리 float 4개로 통일**(`search`의 CSV `bbox` 제거 — clean cut).
+### 1.9 파라미터 규약 (🔁 ADR-048 — T-216f 적용 완료)
+- **bbox 분리 float 4개로 통일**(`search`의 CSV `bbox` 제거 — clean cut, 적용 완료).
 - 다중값 필터는 단수 반복(`?kind=a&kind=b`/`category`/`provider`/`status`).
 - lifecycle 상태 필드 `status`로 통일(`import-jobs`/`offline-uploads`/`feature-update-requests`
   의 `state` 개명; `severity` 별개 축). issue/violation noun은 외부 표면에서 `issue_*`.
@@ -125,7 +139,7 @@ GET /health        GET /version
 
 ### 2.2 `/v1/features/*` — 조회 (user+admin 공용)
 ```
-GET /v1/features                        # 🔁 page_size+cursor (현재 limit-only)
+GET /v1/features                        # page_size+cursor (T-216b 적용 완료; 구 limit-only 폐기)
 GET /v1/features/search                 # q|bbox, page_size+cursor, meta.page.total opt-in
 GET /v1/features/in-bounds              # clusters[](cluster_key=행정코드)/items[], max_items cap
 GET /v1/features/nearby                 # 반경, page_size+cursor, distance_m
@@ -217,6 +231,8 @@ GET/POST /v1/admin/offline-uploads  (+ {upload_id}[/preview|/validate|/validatio
 DELETE /v1/admin/offline-uploads/{upload_id}           # ✅#397 정리 lifecycle(진행중 409·객체 best-effort 삭제)
 GET    /v1/admin/poi-cache-targets
 GET/PUT/DELETE /v1/admin/poi-cache-targets/{external_system}/{target_key}  # 복합 자연키
+GET    /v1/admin/provider-refresh-policies                                 # provider×dataset 갱신정책 목록
+GET/PUT /v1/admin/provider-refresh-policies/{provider}/{dataset_key}       # 정책 단건 조회/갱신(복합 자연키)
 # T-214f 결정: POI cache target write(PUT/DELETE)는 admin/operator flow 전용.
 # TripMate 직접 write 미허용 — service-safe /v1/poi-cache-targets/* write 경로 안 둠.
 # TripMate는 등록된 target 기준 read(GET /v1/features/nearby/by-target)만 소비.
@@ -236,7 +252,20 @@ GET    /v1/admin/issues   GET/PATCH /v1/admin/issues/{issue_id}                 
 ```
 GET /v1/ops/health-deep · metrics · import-jobs[/{job_id}] · consistency/{reports,issues}
   · system-logs · api-call-logs · dagster/{summary,runs/{run_id}}   POST /v1/ops/dagster/nux-seen
+GET  /v1/ops/providers                              # 전 provider 운영 신선도 목록(/ops/providers 대시보드)
+GET  /v1/ops/providers/{provider}                   # provider 단건 신선도/dataset 상태
+GET  /v1/ops/import-job-events                       # import job 이벤트 스트림(필터: job_id/status/시각)
+GET  /v1/ops/import-jobs/{job_id}/events             # 단일 job 이벤트 타임라인
+POST /v1/ops/import-jobs/{job_id}/cancel             # job 취소(action sub-resource, kill-switch)
+WS   /v1/ops/live                                    # admin UI 실시간 invalidation 채널(WebSocket)
 ```
+- **`WS /v1/ops/live`(ops_live.py)**: admin frontend의 TanStack Query invalidation signal
+  전용 WebSocket. query `topics`(comma-separated)·client command JSON(`subscribe`/`unsubscribe`/
+  `replace`/`ping`)로 구독하고, topic별 snapshot revision 변화만 push한다(기본 topic =
+  `import_jobs`/`feature_update_requests`/`offline_uploads`/`dagster_runs`, `import_job_events:{job_id}`
+  등 prefix topic 지원). WebSocket이라 생성 `openapi.json` `paths`에는 **포함되지 않으며**
+  (REST DTO 정본은 위 `/v1/ops/*` endpoint), 본 §2.6와 `docs/openapi-admin-contract.md`
+  §`WS /ops/live`가 산문 계약 정본이다.
 
 ### 2.7 `/v1/debug/*`
 ```
@@ -307,8 +336,11 @@ POST /v1/debug/etl/{provider}/{dataset}/preview
 
 ---
 
-## 5. 현재 → 목표 매핑 (ADR-048 delta; #317 항목은 ✅)
-| 현재 | 목표 | 종류 |
+## 5. 변경 이력: 구 형태 → 현행 (ADR-048 delta; T-216a~g + #317 모두 적용 완료)
+> 아래 "구 형태" 열은 **이미 폐기된 과거 상태**다(T-216a~g·#317로 "현행" 열로 전환 완료).
+> 신규 소비자는 "현행" 열만 계약으로 본다 — 구 `limit`/CSV-bbox/`count`/`state` 형태는 더는 응답에 없다.
+
+| 구 형태(폐기) | 현행 | 종류 |
 |------|------|------|
 | `/admin/*`·`/ops/*`·`/debug/*` 비버저닝 | `/v1/…`(clean cut, alias 없음) | 🔁 ADR-048 |
 | 라우터별 `*Meta`, `data.next_cursor`/`count` | 공유 `Meta` + `meta.page{page_size,next_cursor,total}` | 🔁 envelope |

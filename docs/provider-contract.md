@@ -113,13 +113,13 @@ system
 | `datagokr_ansan_world_restaurants` | python-datagokr-api | 안산 세계맛집(다문화 세계음식점) fileData |
 | `datagokr_jeju_local_restaurants` | python-datagokr-api | 제주 향토음식점 지정 현황 fileData |
 | `standard_special_streets` | data.go.kr-standard | 전국지역특화거리표준데이터. 개별 POI보다 area/anchor source이며 현재는 `theme_area_anchor` place로 보존 |
-| `khoa_oceans_beach_info` | python-khoa-api | 해수욕장 정보 |
-| `khoa_coastal_notices` | python-khoa-api | 해양 공지 |
-| `krforest_recreation_forests` | python-krforest-api | 휴양림 |
-| `krforest_arboretums` | python-krforest-api | 수목원 |
-| `krforest_trails` | python-krforest-api | 숲길/등산로 |
-| `krforest_mountain_weather` | python-krforest-api | 산악기상 |
-| `krforest_safety_notices` | python-krforest-api | 산림 안전 공지 |
+| `khoa_beaches` | python-khoa-api | 해수욕장 정보. 이 문자열은 source_type/feature_id/source_record_key에 baked → 변경 시 기존 행 re-key 필요 (실제 코드 `khoa.py:64`) |
+| `khoa_coastal_notices` | python-khoa-api | 해양 공지 **(계획 — 미구현; notice는 krex/kma만 방출)** |
+| `krforest_recreation_forests` | python-krforest-api | 휴양림 (구현, `krforest.py:91`) |
+| `krforest_arboretums` | python-krforest-api | 수목원 (구현, `krforest.py:92`) |
+| `krforest_trails` | python-krforest-api | 숲길/등산로 **(계획 — 미구현)** |
+| `krforest_mountain_weather` | python-krforest-api | 산악기상 **(계획 — 미구현)** |
+| `krforest_safety_notices` | python-krforest-api | 산림 안전 공지 **(계획 — 미구현)** |
 | `krheritage_heritage_features` | python-krheritage-api | 국가유산 search_list |
 | `krheritage_gis_spca` | python-krheritage-api | 사적/명승 boundary |
 | `krheritage_gis_3070426` | python-krheritage-api | 천연기념물 boundary |
@@ -143,10 +143,10 @@ system
 | ~~`knps_access_restrictions`~~ | ~~python-knps-api~~ | knps-api PR#3 source 삭제 — `python-krforest-api`/scrape로 이전 (별도 ADR) |
 | ~~`knps_fire_alerts`~~ | ~~python-knps-api~~ | knps-api PR#3 source 삭제 — 소방청/산림청으로 이전 (별도 ADR) |
 | `standard_tourism_roads` | data.go.kr-standard | 관광길 표준데이터 |
-| `standard_museums` | data.go.kr-standard | 박물관·미술관 표준 |
-| `standard_parking_lots` | data.go.kr-standard | 주차장 표준 |
-| `standard_tourist_sites` | data.go.kr-standard | 관광지 표준 |
-| `standard_cultural_festivals` | data.go.kr-standard | 문화축제 표준 |
+| `datagokr_museums` | data.go.kr-standard | 박물관·미술관 표준 (data.go.kr-standard provider는 짧은 이름과 달리 `datagokr_` prefix 사용) |
+| `datagokr_parking_lots` | data.go.kr-standard | 주차장 표준 |
+| `datagokr_tourist_attractions` | data.go.kr-standard | 관광지 표준 |
+| `datagokr_cultural_festivals` | data.go.kr-standard | 문화축제 표준 |
 | `place_phone_enrichment` | kakao-local-api / naver-search-api / google-places-api-new | 전화번호 보강 |
 
 신규 추가는 ADR + `docs/<provider>-feature-etl.md`.
@@ -304,7 +304,10 @@ def <entity>_to_bundles(items: Iterable[<ProviderTypedModel>],
 
 각 provider 변환 함수는 다음을 만족해야 한다:
 
-- **결정성** — 같은 입력 → 같은 `feature_id`, `source_record_key`, `payload_hash`.
+- **결정성** — 같은 입력 → 같은 `source_record_key`, `payload_hash`는 무조건 성립한다.
+  `feature_id`의 결정성은 **조건부**다: `make_feature_id`가 `bjd_code`를 임베딩하므로,
+  source-native 법정동 코드를 가진 provider(MOIS)만 무조건 안정적이고, reverse-geocode로
+  bjd를 채우는 provider는 geocoder 가용성/출력 안정성에 의존한다 (§6.1 참조).
 - **순수성** — DB/HTTP/파일시스템 의존 없음. 시간은 인자로 받음.
 - **idempotent** — 결과 bundle을 두 번 적재해도 row 1개 (`ON CONFLICT DO
   UPDATE`).
@@ -315,6 +318,24 @@ def <entity>_to_bundles(items: Iterable[<ProviderTypedModel>],
 - **media URL** — PR#26 최소 `FeatureBundle`에는 포함하지 않는다.
   `FeatureFileSource` DTO가 구현되는 후속 PR에서 리스트로 모으고, 실제 업로드는
   `client.upload_feature_files(sources)`가 별도 단계에서 수행.
+
+### 6.1 feature_id 안정성 (조건부 결정성)
+
+`make_feature_id`는 `bjd_code`(법정동 코드)와 `category`를 feature_id에 임베딩한다.
+따라서 feature_id의 결정성은 bjd_code를 어떻게 얻느냐에 달려 있다.
+
+- **무조건 안정 (1종)**: `python-mois-api`만 source payload에 법정동 코드를
+  native로 들고 있어, geocoder 없이도 같은 입력 → 같은 feature_id가 무조건 성립한다.
+- **조건부 안정 (~10종)**: `knps`, `krheritage`, `mcst`, `krforest`,
+  `datagokr_file_data`, `khoa`, `airkorea`, `krairport`, `opinet`, `standard_data`
+  계열은 source에 bjd_code가 없어 **reverse-geocode로 bjd를 채운다**. 따라서
+  feature_id 결정성은 geocoder(kor-travel-geo REST v2)의 **가용성 + 출력 안정성**에
+  조건부다. geocoder가 응답하지 않거나 같은 좌표에 대해 다른 bjd를 돌려주면
+  같은 source 입력이라도 feature_id가 달라질 수 있다.
+- **함의**: 위 §6의 "같은 입력 → 같은 feature_id"는 MOIS에서만 무조건 참이고,
+  나머지 provider에서는 geocoder 상태를 고정한 전제에서만 성립한다. 이 패턴의
+  완화책(concierge anchoring)은 ADR-057을 참조하고, 알려진 갭은
+  `docs/reports/full-consistency-audit-2026-06-16.md` F-01에 정리돼 있다.
 
 ## 7. 적재 흐름
 
@@ -362,8 +383,8 @@ WeatherValue로 일관 적재.
 | python-kma-api | `kma_ultra_short_nowcast` | nowcast | ultra_short |
 | python-kma-api | `kma_short_forecast` | short | short |
 | python-kma-api | `kma_mid_forecast` | mid | mid |
-| python-krforest-api | `forest_mountain_weather` | observed | ultra_short |
-| python-krforest-api | `forest_fire_risk` | index | short |
+| python-krforest-api | `forest_mountain_weather` **(계획 — 미구현)** | observed | ultra_short |
+| python-krforest-api | `forest_fire_risk` **(계획 — 미구현)** | index | short |
 | python-krex-api | `rest_area_weather` | observed | ultra_short |
 | python-khoa-api | `beach_marine` | index | short |
 | python-airkorea-api | `air_quality` | observed | ultra_short |

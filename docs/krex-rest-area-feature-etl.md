@@ -9,7 +9,7 @@
 |------|----|
 | provider | `python-krex-api` |
 | dataset_key | `krex_rest_areas`, `krex_rest_area_prices`, `krex_rest_area_weather`, `krex_traffic_notices` |
-| Feature.kind | `place` (휴게소) + `PricePoint`/`PriceValue` (유가) + `WeatherValue` (기상) + `notice` (교통) |
+| Feature.kind | `place` (휴게소) + `PriceValue` (유가) + `WeatherValue` (기상) + `notice` (교통) |
 | source_entity_type | `rest_area` |
 | 상세 테이블 | `feature_place_details`, `price_*`, `feature_weather_values`, `feature_notice_details` |
 | 코드 entrypoint | `kortravelmap.providers.krex`, `kortravelmap.highways`, `kortravelmap.notices` |
@@ -20,12 +20,12 @@
 
 | 항목 | 값 |
 |------|----|
-| natural key | 휴게소 ID (provider 제공) |
+| natural key | `name::route_name::direction` normalized 합성 (안정 source ID 없음; rename/collision tradeoff) |
 | FeatureKind | `place` |
 | place_kind | `rest_area` |
 | category | **`06040101`** `TRANSPORT_REST_AREA_HIGHWAY_EX` (`docs/category.md` §4) — Tier path: 교통 > 휴게소 > 고속도로휴게소 > 한국도로공사 휴게소 |
-| marker_icon | `highway-rest-area` (maki) |
-| marker_color | `P-15` (주홍) |
+| marker_icon | `fast-food` (maki) — `06040101` 카탈로그 maki는 `highway-rest-area`지만 provider(`krex.py` `REST_AREA_MARKER_ICON`)가 `fast-food`로 고정 |
+| marker_color | `P-06` |
 | 갱신 주기 | 월 1회 |
 | `KREX_REST_AREA_FULL_SCAN_INTERVAL_DAYS` | 30 |
 
@@ -33,9 +33,9 @@
 
 | 항목 | 값 |
 |------|----|
-| 분리 모델 | `PricePoint(price_category="fuel")` + `PriceValue` |
+| 분리 모델 | `PriceValue(price_domain="krex_rest_area")` |
 | 갱신 주기 | 일 3회 (`0 6,14,22 * * *`) |
-| `KREX_PRICE_RETENTION_DAYS` | 3650 (10년) |
+| `KREX_PRICE_RETENTION_DAYS` | 3650 (10년) — retention은 infra-side 설정이며 DTO 필드 아님 |
 
 ### 2.3 휴게소 기상 (`krex_rest_area_weather`)
 
@@ -62,17 +62,17 @@ def krex_rest_area_to_bundle(item, *, fetched_at, reverse_geocoder=None):
             feature_id=make_feature_id(
                 bjd_code=None,  # reverse geocoder가 보강
                 kind=FeatureKind.PLACE,
-                category="TRANSPORT_REST_AREA",
-                source_type="rest_area",
-                source_natural_key=item.rest_area_id,
+                category="06040101",
+                source_type="python-krex-api:krex_rest_areas",
+                source_natural_key=_rest_area_natural_key(item),
             ),
             kind=FeatureKind.PLACE,
             name=item.name,
             coord=Coordinate(lon=item.lon, lat=item.lat),
             address=Address(display_address=item.address),
-            category="TRANSPORT_REST_AREA",
-            marker_icon="car",
-            marker_color="P-15",
+            category="06040101",
+            marker_icon="fast-food",
+            marker_color="P-06",
             detail=PlaceDetail(
                 feature_id=...,
                 place_kind="rest_area",
@@ -102,12 +102,12 @@ async def refresh_rest_area_prices(client, async_session):
     items = await client.aget_all_rest_area_prices()
     values = collect_krex_rest_area_prices(items, observed_at=kst_now())
     
-    # PricePoint는 휴게소 place 적재 시 한 번 생성, 여기서는 PriceValue만
+    # 유가는 PriceValue 시계열로만 적재 (별도 PricePoint 모델 없음)
     await upsert_price_values(async_session, values)
     await async_session.commit()
 ```
 
-`PriceValue.item_key`: `gasoline` / `diesel` / `lpg` / `premium_gasoline` /
+`PriceValue.product_key`: `gasoline` / `diesel` / `lpg` / `premium_gasoline` /
 `kerosene`.
 
 ## 5. 기상 적재
@@ -148,8 +148,8 @@ ConcurrencyConfig: `krex_api: max_concurrent=1`.
 
 ### 통합 테스트
 
-- 휴게소 적재 → PricePoint 동시 생성
-- 유가 적재 idempotent (`(feature_id, item_key, observed_at)` PK)
+- 휴게소 적재 → 유가 PriceValue 시계열 연계
+- 유가 적재 idempotent (`(feature_id, product_key, observed_at)` PK)
 - BRIN(observed_at) 효율
 
 ## 8. 후속

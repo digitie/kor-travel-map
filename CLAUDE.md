@@ -131,7 +131,7 @@ worktree.md` §7).
 2. **`from kor_travel_map import ...` (flat) 사용 금지** — 항상 `import kortravelmap
    as ktm` 또는 `from kortravelmap import ...` (ADR-054).
 3. provider adapter/wrapper 신규 생성 금지 (public client 직접 사용, ADR-006).
-4. 의존 방향 역행 금지 — `category → dto → core → infra → providers → client → cli`.
+4. 의존 방향 역행 금지 — `category → dto → core → infra → geocoding → providers → client → cli`.
    `kortravelmap.api` 없음 (ADR-020).
 5. 공간 쿼리 술어에서 `ST_Transform` 금지 (인덱스 무효화, ADR-012).
 
