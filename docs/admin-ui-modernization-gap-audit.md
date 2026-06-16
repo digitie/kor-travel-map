@@ -98,7 +98,7 @@ T-208h는 T-211b 이후 admin UI #9의 offline upload 선행 gap을 닫았다.
 
 - Backend: `POST/GET /admin/offline-uploads`, `GET /admin/offline-uploads/{upload_id}`,
   `POST /admin/offline-uploads/{upload_id}/load`.
-- Storage: RustFS/S3 `krtour-uploads` bucket에
+- Storage: RustFS/S3 `kor-travel-map-uploads` bucket에
   `offline-uploads/{upload_id}/{filename}` key로 JSON/JSONL 원본을 저장.
 - DB: `ops.offline_uploads` row 생성, status/provider/dataset keyset 목록, 상세 조회.
 - Dagster: API가 Dagster GraphQL `launchRun`으로 `offline_upload_load` job을 실행하고

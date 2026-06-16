@@ -72,7 +72,7 @@ kor-travel-map 독립 프로그램의 admin frontend/backend다. TripMate와는 
 |--------|------|----|
 | `/debug/...` | 개발자용 provider preview | `/debug/etl/...` |
 | `/features/...` | 지도/상세 공통 feature 조회 + service batch read | `/features`, `/features/in-bounds`, `/features/search`, `/features/{feature_id}`, `/features/nearby/by-target`, `POST /features/batch`(ServiceToken) |
-| `/admin/...` | 운영자가 데이터를 변경하거나 작업을 실행하는 기능 | `/admin/features`, `/admin/feature-update-requests`, `/admin/poi-cache-targets`, `/admin/dedup-review` |
+| `/admin/...` | 운영자가 데이터를 변경하거나 작업을 실행하는 기능 | `/admin/features`, `/admin/feature-update-requests`, `/admin/poi-cache-targets`, `/admin/dedup-reviews`, `/admin/enrichment-reviews` |
 | `/ops/...` | 관측, 로그, 지표, consistency report | `/ops/logs`, `/ops/consistency`, `/ops/metrics` |
 
 기존 구현 주의:
@@ -105,22 +105,22 @@ Frontend 작업 후에는 `react-doctor` 실행, 결과 검토, 개선 반영이
 
 | Route | 목적 | 기본 API |
 |-------|------|----------|
-| `/` | 운영 홈. 최근 job, provider 실패, 열린 이슈, dedup pending 요약 | `/ops/metrics`, `/ops/import-jobs`, `/admin/dedup-review`, `/ops/dagster/summary` |
+| `/` | 운영 홈. 최근 job, provider 실패, 열린 이슈, dedup pending 요약 | `/ops/metrics`, `/ops/import-jobs`, `/admin/dedup-reviews`, `/ops/dagster/summary` |
 | `/features` | feature 운영 목록. 지도/테이블 전환 | `/admin/features`, `/features`, `/features/{feature_id}` |
 | `/admin/features/new` | 수동 feature 추가 change request | `POST /v1/admin/features`, `/v1/features/nearby`, kor-travel-geo REST v2 |
 | `/features/[feature_id]` | 상세, 위치, 원천, 이슈, 조치 | `/v1/features/{feature_id}`, `/v1/admin/features/{feature_id}`, `/v1/features/{feature_id}/weather` |
-| `/admin/providers` | provider별 상태 목록 | `/admin/providers` |
-| `/admin/providers/[provider]` | provider 상세, dataset 상태, 강제 호출 | `/admin/providers/{provider}` |
+| `/ops/providers` | provider별 상태 목록 + provider 상세, dataset 상태, sync cursor, refresh policy 편집 (구 `/admin/providers`, `/admin/providers/[provider]`는 별도 frontend 경로로 만들지 않고 `/ops/providers`로 접었다. `/admin/providers/*` REST는 backend-only) | `/ops/providers` |
 | `/ops/import-jobs` | 적재/검증 job 목록 | `/ops/import-jobs` |
 | `/ops/import-jobs/[job_id]` | 진행률과 상태 상세, event timeline, cancel, 관련 링크 | `/v1/ops/import-jobs/{job_id}`, `/v1/ops/import-jobs/{job_id}/events`, `/v1/ops/import-jobs/{job_id}/cancel` |
-| `/admin/dedup-review` | 중복 후보 검토 | `/admin/dedup-review` |
+| `/admin/dedup-reviews` | 중복 후보 검토 | `/admin/dedup-reviews`, `/admin/dedup-reviews/{review_id}` |
+| `/admin/enrichment-reviews` | enrichment 후보 검토 | `/admin/enrichment-reviews`, `/admin/enrichment-reviews/{review_id}` |
 | `/admin/issues` | 이슈 있는 feature 지도/테이블 | `/admin/issues/features` |
 | `/admin/offline-uploads` | 오프라인 파일 업로드, 검증, 적재 | `/admin/offline-uploads` |
 | `/admin/feature-update-requests` | 좌표/반경/시군구/provider 기준 업데이트 요청 | `/admin/feature-update-requests` |
 | `/admin/poi-cache-targets` | 외부 POI/cache target 등록/삭제/정책 관리 | `/admin/poi-cache-targets` |
-| `/admin/provider-refresh-policies` | provider별 update 주기/rate limit 정책 | `/admin/provider-refresh-policies` |
+| `/ops/providers` (refresh policy 편집) | provider별 update 주기/rate limit 정책 (별도 frontend 경로로 만들지 않고 `/ops/providers`로 접었다. `/admin/provider-refresh-policies` REST는 backend-only) | `/admin/provider-refresh-policies` |
 | `/admin/dagster` | Dagster 운영 요약 + tick/run 실패 드릴다운 + Dagster webserver embed. summary 성공 시 POST로 Dagster NUX seen best-effort 처리 | `/ops/dagster/summary`, `/ops/dagster/runs/{run_id}`, `/ops/dagster/nux-seen` |
-| `/ops/metrics` | feature/source/job/dedup/issue/consistency summary | `/ops/metrics` |
+| `/` (운영 홈 summary) | feature/source/job/dedup/issue/consistency summary (별도 frontend 경로로 만들지 않고 운영 홈 `/`에서 소비한다. `/ops/metrics` REST는 backend-only) | `/ops/metrics` |
 | `/ops/consistency` | consistency report와 issue 큐 | `/ops/consistency/reports`, `/ops/consistency/issues` |
 | `/ops/logs` | system/API/job event 로그 | `/ops/system-logs`, `/ops/api-call-logs`, `/ops/import-job-events` |
 | `/debug/etl` | provider 변환 preview | 기존 `/debug/etl/*` |
@@ -128,9 +128,9 @@ Frontend 작업 후에는 `react-doctor` 실행, 결과 검토, 개선 반영이
 ### 4.2 네비게이션 그룹
 
 - **Features**: `/features`, `/features/[feature_id]`, `/admin/features/new`, `/admin/issues`.
-- **Providers**: `/admin/providers`, provider 상세, provider 강제 실행.
+- **Providers**: `/ops/providers` (provider 목록 + 상세 + 강제 실행/refresh policy 편집).
 - **Jobs**: `/ops/import-jobs`, job 상세, offline upload job.
-- **Review**: `/admin/dedup-review`, missing data queue, consistency samples.
+- **Review**: `/admin/dedup-reviews`, `/admin/enrichment-reviews`, missing data queue, consistency samples.
 - **Ops**: `/admin/dagster`, `/ops/logs`, `/ops/consistency`, `/ops/metrics`.
 - **Debug**: `/debug/etl`.
 
@@ -383,7 +383,7 @@ Query:
 
 ### 8.1 화면
 
-Route: `/features/new`
+Route: `/admin/features/new`
 
 폼 섹션:
 
@@ -890,7 +890,7 @@ CREATE INDEX idx_import_job_events_level_time
 
 ### 14.1 Backend API
 
-#### `GET /admin/dedup-review`
+#### `GET /admin/dedup-reviews`
 
 Query:
 
@@ -937,7 +937,7 @@ Query:
 }
 ```
 
-#### `PATCH /admin/dedup-review/{review_id}`
+#### `PATCH /admin/dedup-reviews/{review_id}`
 
 요청:
 
@@ -1001,6 +1001,11 @@ Provider 적재와 consistency check는 다음 issue type을 생성하거나 집
 | `file_validation_failed` | offline/file source 검증 실패 | 파일 수정 후 재업로드 |
 | `stale_provider_sync` | sync가 오래 멈춤 | provider 강제 실행 |
 
+> `geocode_failed`/`reverse_geocode_failed`는 아직 이 issue type을 생성하는 producer가
+> 없다(계획 항목). 현재 geocode/reverse-geocode 호출 실패 자체를 집계하는 전용 issue는
+> 없으며, 주소 검증기(validation.py)가 내는 `missing_address`/`missing_bjd_code` 정도로만
+> 간접적으로 드러난다. 전용 producer가 붙기 전까지 이 두 type은 예약 상태로 본다.
+
 ### 15.2 Backend API
 
 #### `GET /admin/issues/features`
@@ -1053,13 +1058,15 @@ Query:
 `action`:
 
 - `resolve`
-- `acknowledge`
 - `ignore`
 - `reopen`
 - `retry_geocode`
 - `retry_reverse_geocode`
 - `apply_kor_travel_geo_address`
 - `manual_override`
+
+> `acknowledge`는 미구현이다. status `acknowledged`로 가는 transition이 없어 action
+> 목록에서 제외한다. 필요해지면 별도 task에서 status 전이와 함께 추가한다.
 
 주소/좌표 이슈 resolution 예:
 
@@ -1195,7 +1202,7 @@ multipart upload.
   },
   "meta": {
     "duration_ms": 120,
-    "bucket": "krtour-uploads",
+    "bucket": "kor-travel-map-uploads",
     "object_key": "offline-uploads/{upload_id}/features.jsonl",
     "content_type": "application/x-ndjson"
   }
@@ -1204,7 +1211,7 @@ multipart upload.
 
 저장 위치:
 
-- 개발/운영 공통: RustFS bucket `krtour-uploads` (로컬 S3 API 포트 `12101`,
+- 개발/운영 공통: RustFS bucket `kor-travel-map-uploads` (로컬 S3 API 포트 `12101`,
   console `12105`).
 - 보존 만료 없음. 자동 cleanup/lifecycle job을 두지 않는다(D-14).
 - 단, object write 후 DB metadata row 생성이 실패한 같은 요청 안에서는 방금 쓴
@@ -1433,7 +1440,10 @@ Route: `/`
 - recent error logs
 - recent manual actions
 
-#### `GET /admin/dashboard`
+#### `GET /ops/metrics`
+
+> 구 초안의 `GET /admin/dashboard`는 별도로 만들지 않았다. 운영 홈 summary는 구현된
+> `GET /ops/metrics`로 제공한다(아래 응답 shape은 그 요약 위젯용 예시다).
 
 응답:
 
@@ -1504,7 +1514,7 @@ API module:
 - `src/api/importJobs.ts`: `/ops/import-jobs/*`.
 - `src/api/live.ts`: `WS /ops/live` signal → TanStack Query invalidation.
 - `src/api/ops.ts`: `/ops/metrics`, `/ops/consistency/*`.
-- `src/api/dedup.ts`: `/admin/dedup-review/*`.
+- `src/api/dedup.ts`: `/admin/dedup-reviews/*`.
 - `src/api/issues.ts`: `/admin/issues/*`.
 - `src/api/offlineUploads.ts`: `/admin/offline-uploads/*`.
 - `src/api/updateRequests.ts`: `/admin/feature-update-requests/*`.
@@ -1523,7 +1533,7 @@ Query key 예:
 ["provider", provider]
 ["import-jobs", filters]
 ["import-job", jobId]
-["dedup-review", filters]
+["dedup-reviews", filters]
 ["issue-features", filters]
 ["offline-upload", uploadId]
 ["feature-update-requests", filters]
@@ -1547,7 +1557,7 @@ Mutation 후 invalidation:
 | feature 비활성화/삭제 | `admin-features`, `features`, `feature-detail`, `issue-features` |
 | provider_dataset update request 생성 | `feature-update-requests`, `import-jobs`, `providers`, `dashboard` |
 | job cancel | `import-job`, `import-jobs`, `dashboard` |
-| dedup decision | `dedup-review`, `feature-detail`, `issue-features`, `admin-features` |
+| dedup decision | `dedup-reviews`, `feature-detail`, `issue-features`, `admin-features` |
 | issue resolve/ignore | `issue-features`, `feature-detail`, `dashboard` |
 | offline upload validate/load | `offline-upload`, `import-jobs`, `dashboard` |
 | feature update request 생성/취소 | `feature-update-requests`, `import-jobs`, `dashboard`, `providers` |

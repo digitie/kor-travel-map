@@ -18,9 +18,9 @@
 | dataset_key | data.go.kr id | Feature.kind | category | 권장 갱신 |
 |-------------|--------------|--------------|----------|-----------|
 | `standard_tourism_roads` | `15017321` | `route` | **`01020103`** `TOURISM_NATURAL_LANDSCAPE_MOUNTAIN_VALLEY_FOREST_TRAIL` 또는 `01080500` `TOURISM_ACTIVITY_TREKKING` (route_type별 분기) | 연 1회 full + 월 1회 metadata probe |
-| `standard_museums` | `15017323` | `place` | **`01040101`** `TOURISM_CULTURAL_FACILITY_MUSEUM_PUBLIC` 또는 `01040102` `_PRIVATE` (소속별 분기) | 연 1회 |
-| `standard_parking_lots` | `15012896` | `place` | **`06010000`** `TRANSPORT_PARKING` | 반기 1회 |
-| `standard_tourist_sites` | `15021141` | `place` (경계 source 확인 후 `area` 후보) | **`01050200`** `TOURISM_NATURE_PARK` 또는 `01000000` `TOURISM` (대분류) | 연 1회 |
+| `datagokr_museums` | `15017323` | `place` | **`01040000`** `TOURISM_CULTURAL_FACILITY` (fclty_type으로 박물관 `01040100`/미술관 `01040200` 정밀화) | 연 1회 |
+| `datagokr_parking_lots` | `15012896` | `place` | **`06010000`** `TRANSPORT_PARKING` | 반기 1회 |
+| `datagokr_tourist_attractions` | `15021141` | `place` (경계 source 확인 후 `area` 후보) | **`01000000`** `TOURISM` (대분류, 세부는 trrsrt_se로 분기) | 연 1회 |
 | `standard_cultural_festivals` | `15013104` | `event` | event는 카테고리 외 — `EventDetail.event_kind="cultural_festival"`. `features.category`는 `01000000` `TOURISM` (대분류) | 주 1회 metadata + 월 1회 changed full scan |
 
 자세한 Tier 1~4 트리는 `docs/category.md` §4.
@@ -57,18 +57,18 @@ CATALOG: dict[str, StandardDataset] = {
         suggested_interval=timedelta(days=365),
         description="표준 관광길 (무장애/등산/트레킹/관광길)",
     ),
-    "standard_museums": StandardDataset(
-        key="standard_museums", data_go_kr_id="15017323",
+    "datagokr_museums": StandardDataset(
+        key="datagokr_museums", data_go_kr_id="15017323",
         endpoint_url="...",
         feature_kind=FeatureKind.PLACE, suggested_interval=timedelta(days=365),
     ),
-    "standard_parking_lots": StandardDataset(
-        key="standard_parking_lots", data_go_kr_id="15012896",
+    "datagokr_parking_lots": StandardDataset(
+        key="datagokr_parking_lots", data_go_kr_id="15012896",
         endpoint_url="...",
         feature_kind=FeatureKind.PLACE, suggested_interval=timedelta(days=183),
     ),
-    "standard_tourist_sites": StandardDataset(
-        key="standard_tourist_sites", data_go_kr_id="15021141",
+    "datagokr_tourist_attractions": StandardDataset(
+        key="datagokr_tourist_attractions", data_go_kr_id="15021141",
         endpoint_url="...",
         feature_kind=FeatureKind.PLACE, suggested_interval=timedelta(days=365),
     ),
@@ -213,9 +213,9 @@ UNIQUE constraint).
 | asset (TripMate) | dataset_key | cron | group |
 |-----------------|-------------|------|-------|
 | `feature_route_standard_tourism_roads` | `standard_tourism_roads` | `0 2 1 1 *` (연 1회) | `features_route` |
-| `feature_place_standard_museums` | `standard_museums` | `0 2 1 1 *` (연 1회) | `features_place` |
-| `feature_place_standard_parking_lots` | `standard_parking_lots` | `0 2 1 1,7 *` (반기) | `features_place` |
-| `feature_place_standard_tourist_sites` | `standard_tourist_sites` | `0 2 1 1 *` (연 1회) | `features_place` |
+| `feature_place_datagokr_museums` | `datagokr_museums` | `0 2 1 1 *` (연 1회) | `features_place` |
+| `feature_place_datagokr_parking_lots` | `datagokr_parking_lots` | `0 2 1 1,7 *` (반기) | `features_place` |
+| `feature_place_datagokr_tourist_attractions` | `datagokr_tourist_attractions` | `0 2 1 1 *` (연 1회) | `features_place` |
 | `feature_event_standard_festivals` | `standard_cultural_festivals` | `0 2 * * 1` (주 1회) | `features_event` |
 
 ConcurrencyConfig: `datagokr_api: max_concurrent=2`.

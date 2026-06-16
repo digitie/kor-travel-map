@@ -75,25 +75,47 @@ Dagster asset으로 연결한다. provider API 호출은 resource가 record iter
 | `feature_weather_airkorea_air_quality` | `airkorea_stations`, `airkorea_air_quality` | `airkorea_air_quality` | `features_weather` |
 | `feature_event_visitkorea_enrichment` | `visitkorea_festival_events` | `visitkorea_festival_events` | `features_event` |
 | `feature_place_kor_travel_concierge_youtube` | `kor_travel_concierge_youtube_features` | `youtube_place_candidates` | `features_place` |
+| `feature_weather_kma_ultra_short_nowcast` | `kma_ultra_short_nowcast` | `kma_ultra_short_nowcast` | `features_weather` |
+| `feature_weather_kma_ultra_short_forecast` | `kma_ultra_short_forecast` | `kma_ultra_short_forecast` | `features_weather` |
+| `feature_weather_kma_short_forecast` | `kma_short_forecast` | `kma_short_forecast` | `features_weather` |
+| `feature_weather_kma_mid_forecast` | `kma_mid_forecast` | `kma_mid_forecast` | `features_weather` |
+| `feature_notice_kma_weather_alerts` | `kma_weather_alerts` | `kma_weather_alerts` | `features_notice` |
+| `feature_place_mcst_culture` | `mcst_culture_records` (파일데이터 13) | `mcst_<slug>` 13종 (`MCST_FILE_DATASETS`) | `features_place` |
+
+curated overlay asset(`curated_source_metadata` / `curated_feature_candidates` /
+`curated_feature_status_sweep` / `curated_tripmate_copy_snapshots`)은 별도 group
+`curated_features`로 묶이며, provider 원천 asset 이후 실행된다 — 카탈로그는
+`docs/curated-features.md` §7.
+
+`feature_place_krairport_airports`와 `feature_weather_airkorea_air_quality` asset은
+현재 §10 정기 schedule이 없다(on-demand 전용 — Dagster UI/API 수동 실행 또는 feature
+update request로만 적재).
+
+`kortravelmap.providers.datagokr_file_data`는 설계상 직접 feature 적재 asset이
+없다(누락 아님). 그 fileData source는 `curated_source_rules`를 통해 curated
+overlay로 들어간다(`docs/curated-features.md`).
 
 공통 resource:
 
 - `kor_travel_map_client`: `AsyncKorTravelMapClient`.
 - `reverse_geocoder`: kor-travel-geo REST v2 기반 `ReverseGeocoder`.
 - `fetched_at`: batch 기준 aware `datetime`(없으면 KST 현재 시각).
-- `strict_address`: 기본 `True`. 주소/좌표 검증 error가 있으면 적재 전 중단.
+- 주소 검증 모드: `strict`|`drop`|`off` 문자열, 기본 `strict`
+  (`KorTravelMapSettings.dagster_address_validation`, #376). `strict`는 주소/좌표
+  검증 error가 있으면 적재 전 중단한다. 구 `strict_address: bool`은 back-compat로
+  남는다(`True`→`strict`, `False`→`off`).
 
 ## 2. 표준 Job/Asset 패턴
 
 ```python
 # packages/kor-travel-map-dagster/assets/visitkorea_festivals.py (후보 위치)
-from dagster import asset, FreshnessPolicy, RetryPolicy, AssetExecutionContext
+from dagster import asset, RetryPolicy, AssetExecutionContext
 from kortravelmap import AsyncKorTravelMapClient
-from kortravelmap.dto import ProviderSyncState
+from kortravelmap.infra.sync_state_repo import SyncState  # infra dataclass, not dto
 
+# 주기성은 FreshnessPolicy가 아니라 §10 cron schedule로 잡는다(현재 freshness 미사용).
 @asset(
     group_name="features_event",
-    freshness_policy=FreshnessPolicy(maximum_lag_minutes=24 * 60),  # 일 1회
     retry_policy=RetryPolicy(max_retries=5, delay=60, backoff="exponential"),
     deps=[],  # 다른 asset 의존 없으면
 )
@@ -119,13 +141,13 @@ async def feature_event_visitkorea_festivals(
     result = await kor_travel_map_client.load_feature_bundles(bundles)
     ctx.add_output_metadata(result.as_metadata())
 
-    # 5. sync state
-    await kor_travel_map_client.upsert_sync_state(ProviderSyncState(
+    # 5. sync state — `upsert_sync_state`는 아직 미구현(후속 PR)이므로 현재는
+    #    cursor를 전진시키는 `record_sync_success`(SyncState 반환)를 쓴다.
+    await kor_travel_map_client.record_sync_success(
         provider="python-visitkorea-api",
         dataset_key="visitkorea_festival_events",
-        last_success_at=kst_now(),
         cursor={"last_pageNo": items[-1].pageNo if items else None},
-    ))
+    )
     return result
 ```
 
@@ -174,27 +196,31 @@ ctx.log.info("loaded", extra={"dataset_key": VISITKOREA_FESTIVAL_DATASET_KEY})
 
 ## 5. asset/job 명명 규약
 
-kor-travel-map Dagster의 asset/job 이름 표준:
+kor-travel-map Dagster의 asset/job 이름 **명명 가이드라인**이다. 실제 구현된 asset
+정본은 §1.1이며, 아래 표에서 `feature_<kind>_<provider>_<entity>` 형식과 group이
+실제와 다른 행(예: `weather_*`/`notice_*` 접두, `feature_route_krforest_trails`,
+`forest_safety_notices`, `khoa_coastal_notices` 등)은 아직 미구현이거나 **forward-
+looking 예시**다 — §1.1과 충돌하면 §1.1을 따른다.
 
 | asset 이름 | dataset_key | group |
 |-----------|-------------|-------|
-| `feature_event_visitkorea_festivals` | `visitkorea_festival_events` | `features_event` |
+| `feature_event_visitkorea_enrichment` | `visitkorea_festival_events` | `features_event` |
 | `feature_place_mois_licenses` | `mois_license_features_bulk` | `features_place` |
 | `feature_place_opinet_stations` | `opinet_fuel_station_details` | `features_place` |
-| `feature_place_khoa_beaches` | `khoa_oceans_beach_info` | `features_place` |
-| `feature_place_krheritage_heritage` | `krheritage_heritage_features` | `features_place` |
-| `feature_area_krheritage_gis_spca` | `krheritage_gis_spca` | `features_area` |
+| `feature_place_khoa_beaches` | `khoa_beaches` | `features_place` |
+| `feature_place_krheritage_items` | `krheritage_heritage_features` | `features_place` |
+| `feature_area_krheritage_gis_spca` (forward-looking) | `krheritage_gis_spca` | `features_area` |
 | `feature_event_krheritage_events` | `krheritage_event_list` | `features_event` |
-| `feature_place_krforest_recreation` | `krforest_recreation_forests` | `features_place` |
-| `feature_route_krforest_trails` | `krforest_trails` | `features_route` |
+| `feature_place_krforest_recreation_forests` | `krforest_recreation_forests` | `features_place` |
+| `feature_route_krforest_trails` (forward-looking) | `krforest_trails` | `features_route` |
 | `feature_place_krex_rest_areas` | `krex_rest_areas` | `features_place` |
-| `price_krex_rest_area_fuel` | `krex_rest_area_prices` | `features_price` |
-| `weather_kma_short_forecast` | `kma_short_forecast` | `features_weather` |
-| `weather_kma_ultra_short_nowcast` | `kma_ultra_short_nowcast` | `features_weather` |
-| `notice_krex_traffic` | `krex_traffic_notices` | `features_notice` |
-| `notice_kma_weather_alerts` | `kma_weather_alerts` | `features_notice` |
-| `notice_krforest_safety` | `forest_safety_notices` | `features_notice` |
-| `notice_khoa_coastal` | `khoa_coastal_notices` | `features_notice` |
+| `price_krex_rest_area_fuel` (forward-looking) | `krex_rest_area_prices` | `features_price` |
+| `feature_weather_kma_short_forecast` | `kma_short_forecast` | `features_weather` |
+| `feature_weather_kma_ultra_short_nowcast` | `kma_ultra_short_nowcast` | `features_weather` |
+| `feature_notice_krex_traffic_notices` | `krex_traffic_notices` | `features_notice` |
+| `feature_notice_kma_weather_alerts` | `kma_weather_alerts` | `features_notice` |
+| `notice_krforest_safety` (forward-looking) | `forest_safety_notices` | `features_notice` |
+| `notice_khoa_coastal` (forward-looking) | `khoa_coastal_notices` | `features_notice` |
 | `feature_dedup_review` | (운영) | `features_quality` |
 | `feature_consistency_reports` | (운영, T-201) | `features_quality` |
 
@@ -344,9 +370,11 @@ OpenAPI 계약과 queue/progress를 관리한다. 둘 다 advisory lock으로 ra
 feature update request 큐는 T-208e 이후 다음 흐름을 따른다.
 
 1. `feature_update_request_queue_sensor`가 15초 간격으로
-   `AsyncKorTravelMapClient.peek_next_update_request()`를 호출한다.
-2. Sensor는 DB 상태를 바꾸지 않고 request id를 Dagster `RunRequest` config/tag에
-   담아 `feature_update_request_worker`를 요청한다.
+   `AsyncKorTravelMapClient.peek_update_requests(limit=10)`를 호출한다.
+2. Sensor는 DB 상태를 바꾸지 않고 한 tick에 최대
+   `FEATURE_UPDATE_SENSOR_MAX_RUN_REQUESTS=10`개 request id를 Dagster `RunRequest`
+   config/tag에 담아 `feature_update_request_worker` 배치를 요청한다(15초당 최대 10
+   RunRequest).
 3. Worker op `execute_feature_update_request`가
    `AsyncKorTravelMapClient.execute_feature_update_request()`를 호출해 request/import job
    상태 전이와 provider refresh runner 실행을 한 흐름으로 처리한다.
@@ -357,7 +385,7 @@ feature update request 큐는 T-208e 이후 다음 흐름을 따른다.
 offline upload load job은 T-208h 이후 다음 흐름을 따른다.
 
 1. Admin API/UI가 원본 파일을 RustFS 등 객체 저장소에 보존하고
-   `ops.offline_uploads` row를 만든다. D-14 기준 운영 버킷은 `krtour-uploads`이며,
+   `ops.offline_uploads` row를 만든다. D-14 기준 운영 버킷은 `kor-travel-map-uploads`이며,
    원본은 만료 없이 보존한다.
 2. 운영자가 admin UI에서 load를 누르면 admin API가 Dagster GraphQL `launchRun`으로
    `offline_upload_load` job을 `upload_id` config와 함께 실행한다. Dagster UI에서
@@ -376,7 +404,7 @@ offline upload load job은 T-208h 이후 다음 흐름을 따른다.
 
 ## 10. 정기 schedule 구현 (kor-travel-map Dagster)
 
-`packages/kor-travel-map-dagster/src/kortravelmap_dagster/schedules.py`가
+`packages/kor-travel-map-dagster/src/kortravelmap/dagster/schedules.py`가
 현재 schedule이 필요한 Feature 적재 asset의 provider별 schedule을 등록한다. 모든 schedule은
 `execution_timezone="Asia/Seoul"`이고, 같은 시각에 외부 API 호출이 몰리지 않도록
 분/요일을 분산한다. 기본 status는 로컬 개발 중 실 provider 호출을 막기 위해
@@ -394,6 +422,14 @@ offline upload load job은 T-208h 이후 다음 흐름을 따른다.
 | `feature_place_knps_points_semiannual_schedule` | `feature_place_knps_points_job` | `45 3 1 1,7 *` | KNPS point 반기 1회 |
 | `feature_geometry_knps_records_semiannual_schedule` | `feature_geometry_knps_records_job` | `15 4 1 1,7 *` | KNPS geometry 반기 1회 |
 | `feature_place_kor_travel_concierge_youtube_daily_schedule` | `feature_place_kor_travel_concierge_youtube_job` | `40 3 * * *` | kor-travel-concierge YouTube 후보 일 1회 |
+| `feature_weather_kma_ultra_short_nowcast_hourly_schedule` | `feature_weather_kma_ultra_short_nowcast_job` | `45 * * * *` | KMA 초단기실황 시간당 |
+| `feature_weather_kma_ultra_short_forecast_half_hourly_schedule` | `feature_weather_kma_ultra_short_forecast_job` | `20,50 * * * *` | KMA 초단기예보 30분 |
+| `feature_weather_kma_short_forecast_3h_schedule` | `feature_weather_kma_short_forecast_job` | `20 2,5,8,11,14,17,20,23 * * *` | KMA 단기예보 발표시각 |
+| `feature_weather_kma_mid_forecast_twice_daily_schedule` | `feature_weather_kma_mid_forecast_job` | `20 6,18 * * *` | KMA 중기예보 일 2회 |
+| `feature_notice_kma_weather_alerts_daily_schedule` | `feature_notice_kma_weather_alerts_job` | `15 6 * * *` | KMA 기상특보 일 1회 |
+| `feature_place_mcst_culture_weekly_schedule` | `feature_place_mcst_culture_job` | `30 4 * * 2` | MCST 문화 파일데이터 13종 주 1회 |
+| `mois_localdata_source_sync_weekly_schedule` | `mois_localdata_source_sync` | `0 4 * * 1` | MOIS LOCALDATA source DB sync 주 1회 |
+| `curated_features_refresh_daily_schedule` | `curated_features_refresh` | `55 4 * * *` | curated overlay metadata/rule/sweep/cache refresh 일 1회 |
 | `consistency_dedup_refresh_daily_schedule` | `consistency_dedup_refresh` | `45 5 * * *` | DB 기준 dedup 후보 refresh + F1~F7 consistency report |
 
 운영 임계값은 SPEC V8 v8_0 + 실제 부하 기반으로 kor-travel-map 운영자가 조정한다.
@@ -496,7 +532,7 @@ kor-travel-map --dsn "$KOR_TRAVEL_MAP_PG_DSN" consistency-report \
 
 - 메인 라이브러리: `src/kortravelmap/infra/batch_dag.py`
 - client wrapper: `AsyncKorTravelMapClient.run_batch_dag_consistency_gate(...)`
-- Dagster: `packages/kor-travel-map-dagster/src/kortravelmap_dagster/batch_dag.py`
+- Dagster: `packages/kor-travel-map-dagster/src/kortravelmap/dagster/batch_dag.py`
 
 ## 13. 운영 알림 (kor-travel-map)
 
@@ -544,8 +580,8 @@ feature update worker 실행에는 `kor_travel_map_client`와 `feature_update_ru
 - `.providers.<name>.<entity>_to_bundles(items, fetched_at=...) -> Iterable[FeatureBundle]`
 - `.upload_feature_files(sources) -> list[FeatureFile]`
 - `.load_feature_bundles(bundles, *, prune_existing=False) -> FeatureLoadResult`
-- `.upsert_sync_state(state) -> ProviderSyncState`
-- `.get_sync_state(provider, dataset_key, sync_scope='global') -> ProviderSyncState | None`
+- `.record_sync_success(provider, dataset_key, sync_scope='default', cursor, ...) -> SyncState` (cursor 전진; `upsert_sync_state`는 후속 PR 미구현)
+- `.get_sync_state(provider, dataset_key, sync_scope='default') -> SyncState | None`
 - `.enqueue_import_job(kind, payload, load_batch_id=None, parent_job_id=None) -> ImportJob`
 - `.claim_next_import_job() -> ImportJob | None`
 - `.update_import_job(job_id, *, state, progress, current_stage, error_message) -> None`
@@ -554,7 +590,7 @@ feature update worker 실행에는 `kor_travel_map_client`와 `feature_update_ru
 
 dataclasses:
 - `FeatureBundle`, `FeatureLoadResult` (with `.as_metadata()`)
-- `ProviderSyncState`, `ImportJob`, `ImportJobState`
+- `SyncState` (infra dataclass, dto 아님), `ImportJob`
 - `EtlJobSpec` (옵션, asset 정의 참고용)
 
 ## 16. 비책임 (다시 확인)

@@ -166,7 +166,7 @@ tests/{unit,integration,e2e,fixtures}/
 docs/
 ```
 
-메인 패키지의 의존 방향: **category → dto → core → infra → providers → client → cli**
+메인 패키지의 의존 방향: **category → dto → core → infra → geocoding → providers → client → cli**
 한 방향. `import-linter`가 CI에서 강제한다. `kortravelmap.api`는 별도 API
 distribution이며 메인 라이브러리 계층 계약 밖에 있다(ADR-055).
 

@@ -135,6 +135,13 @@ class PlaceCategory:
 `PlaceCategoryTier1Code` enum이 위 8개 코드를 정의. `PLACE_CATEGORY_TIER1_NAMES`
 dict가 한국어 라벨 제공.
 
+**`99000000` sentinel 관례 (place 아님 anchor)**: 날씨 특보(kma)·교통 notice
+(krex)·대기질(airkorea)처럼 place가 아닌 anchor Feature는 카탈로그 밖 코드
+`"99000000"`을 `Feature.category` placeholder로 쓴다. 이 코드는
+`PlaceCategoryCode` enum에 없으며 `is_known_category_code("99000000")`는 False다
+(카테고리 트리에 notice/weather/air-quality 도메인이 등록될 때까지 임시). 사용
+provider는 `kma`(기상특보)·`airkorea`(대기질 측정소)·`krex`(교통 notice).
+
 ### 4.2 전체 카테고리 트리 (들여쓰기 뷰)
 
 ```
@@ -156,7 +163,7 @@ dict가 한국어 라벨 제공.
       01.02.01.02 도립·군립공원 (..._LOCAL_PARK) [maki: park]
       01.02.01.03 산림욕장 (..._FOREST_TRAIL) [maki: park]
     01.02.02 강·호수 (..._RIVER_LAKE) [maki: water]
-    01.02.03 해안·섬 (..._COAST_ISLAND) [maki: beach]
+    01.02.03 해안·섬 (..._COAST_ISLAND) [maki: beach]    ← KHOA 해수욕장 (코드 01020300)
     01.02.04 폭포·동굴 (..._WATERFALL_CAVE) [maki: natural]
   01.03 수목원·식물원 (TOURISM_BOTANICAL) [maki: garden]
     01.03.01 수목원 (..._GARDEN) [maki: garden]
@@ -180,7 +187,7 @@ dict가 한국어 라벨 제공.
     01.04.05 도서관 (..._LIBRARY) [maki: library]
     01.04.06 지방문화원 (..._CULTURE_CENTER) [maki: town-hall]
   01.05 자연명소 (TOURISM_NATURE) [maki: natural]
-    01.05.01 해수욕장 (TOURISM_NATURE_BEACH) [maki: beach]    ← KHOA 해수욕장
+    01.05.01 해수욕장 (TOURISM_NATURE_BEACH) [maki: beach]    ← 전용 해수욕장 코드(미사용; KHOA는 01020300으로 적재, DA-D-07)
     01.05.02 공원·광장 (TOURISM_NATURE_PARK) [maki: park]
     01.05.03 전망대 (TOURISM_NATURE_OBSERVATORY) [maki: viewpoint]
   01.06 관광안내 (TOURISM_INFORMATION) [maki: information]
@@ -316,15 +323,18 @@ depth 1 = 1 + 7). Tier 1 enum 자체는 ADR-027에서 변경 없음.
 
 `PLACE_CATEGORY_MAPBOX_MAKI_ICONS` (57 unique icons → 144 rows):
 
+> 본 표의 사용 코드 수는 손으로 유지하는 값이라 자동 생성 dict와 drift할 수
+> 있다. 정확한 분포는 코드(`PLACE_CATEGORY_MAPBOX_MAKI_ICONS`)를 정본으로 본다.
+
 | maki icon | 사용 코드 수 | 주 사용 카테고리 |
 |-----------|------------:|-----------------|
-| `park` | 11 | 휴양림 전체, 공원·광장, 트레킹 |
-| `lodging` | 11 | 호텔/리조트/모텔/게스트하우스 |
+| `park` | 12 | 휴양림 전체, 공원·광장, 트레킹 |
+| `lodging` | 13 | 호텔/리조트/모텔/게스트하우스 |
 | `shelter` | 3 | 대피소·산장 전체 (ADR-027, `03.08.*`) |
 | `garden` | 7 | 수목원·식물원 전체 |
 | `hot-spring` | 7 | 온천·스파 전체 |
 | `campsite` | 7 | 캠핑장 전체 |
-| `restaurant` | 6 | 한식/양식/중식/아시안/뷔페/parent |
+| `restaurant` | 7 | 한식/양식/중식/아시안/뷔페/parent |
 | `museum` | 5 | 박물관 전체 + 문화시설 부모 |
 | `cafe` | 5 | 카페 부모/커피전문점/디저트 등 |
 | `information` | 4 | 관광안내 전체 |
@@ -361,10 +371,10 @@ depth 1 = 1 + 7). Tier 1 enum 자체는 ADR-027에서 변경 없음.
 | `python-mois-api` (목욕장업) | `04020100` HOT_SPRING_SPA_SAUNA_BATHHOUSE | mois-feature-etl.md §6.1 |
 | `python-opinet-api` | `06020000` TRANSPORT_FUEL | opinet-place-price-etl.md |
 | `python-krex-api` (휴게소) | `06040101` TRANSPORT_REST_AREA_HIGHWAY_EX | krex-rest-area-feature-etl.md |
-| `python-khoa-api` (해수욕장) | `01050100` TOURISM_NATURE_BEACH | khoa-beach-info-etl.md |
+| `python-khoa-api` (해수욕장) | `01020300` TOURISM_NATURAL_LANDSCAPE_COAST_ISLAND (코드는 01020300; 전용 해수욕장 코드 01050100이 의도였을 수 있어 category 결정 후속 — DA-D-07, full-consistency-audit-2026-06-16.md §4) | khoa-beach-info-etl.md |
 | `python-krheritage-api` | `01070100` ~ `01070400` (사찰/궁궐/사적/한옥) | krheritage-feature-etl.md |
-| `python-krforest-api` (휴양림) | `03030101` LODGING_RECREATION_FOREST_NATIONAL_KFS | forest-feature-etl.md |
-| `python-krforest-api` (수목원) | `01030101` ~ `01030103` 수목원 | forest-feature-etl.md |
+| `python-krforest-api` (휴양림) | `03030000` LODGING_RECREATION_FOREST | forest-feature-etl.md |
+| `python-krforest-api` (수목원) | `01030000` TOURISM_BOTANICAL | forest-feature-etl.md |
 | `python-krforest-api` (숲길/탐방로) | `01020103` 산림욕장, `01080500` 트레킹 | forest-feature-etl.md |
 | KNPS (data.go.kr, 후속) | `01020101` 국립공원 + 보조 (안내소/위험지역/화장실 등) | forest-feature-etl.md §11 |
 | `data.go.kr-standard` (박물관) | `01040101` ~ `01040103` | standard-data-feature-etl.md |
@@ -372,6 +382,9 @@ depth 1 = 1 + 7). Tier 1 enum 자체는 ADR-027에서 변경 없음.
 | `data.go.kr-standard` (관광지) | `01000000` 트리 다양 (provider 매핑별) | standard-data-feature-etl.md |
 | `data.go.kr-standard` (관광길) | route — `RouteDetail.route_type`으로 분류, category는 보조 | standard-data-feature-etl.md |
 | 공중화장실 (후속) | `05060000` CONVENIENCE_TOILET | (별도 dataset) |
+| `python-kma-api` (기상특보) | `99000000` sentinel (place 아님 — weather anchor) | kma-weather-etl.md |
+| `python-airkorea-api` (대기질 측정소) | `99000000` sentinel (place 아님 — air-quality anchor) | airkorea-feature-etl.md |
+| `python-krex-api` (교통 notice) | `99000000` sentinel (place 아님 — notice anchor) | notice-feature-etl.md |
 
 위 매핑은 v2 1차 기준. 새 provider 추가 시 본 표 갱신 + ADR.
 

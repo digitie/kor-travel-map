@@ -17,6 +17,20 @@
   - `T-229-buildx` — **arm64 multi-arch buildx 배포 검증** (T-229 잔여). T-229의
     나머지(curated 오버레이·`/metrics`·smoke breadth)는 라이브 검증 완료. arm64
     (Odroid) 이미지 build+boot smoke만 `GITHUB_TOKEN`이 있는 배포 환경에서 수행한다.
+  - `T-AUDIT-0616` — **2026-06-16 전체 정합성 감사 후속** (정본
+    `docs/reports/full-consistency-audit-2026-06-16.md`). 문서 충돌은 본 감사 PR에서 정정
+    완료, 아래는 코드/검증 후속:
+    - **F-01 (HIGH)**: geocoder 의존 ~10 provider(knps/krheritage/mcst/krforest/
+      datagokr_file_data/khoa/airkorea/krairport/opinet/standard_data)의 **feature_id 비멱등**
+      (bjd가 늦게 바인딩 → geocoder 유무로 global↔code 분기). ADR-057 anchoring 패턴(안정
+      source key + 고정 identity category, bjd는 가변 속성) 적용 provider 범위 결정 + 코드.
+    - **F-02 (MED)**: `geocode_failed`/`reverse_geocode_failed` admin issue **producer 신설**
+      (validate_feature_bundle_address가 미방출) 또는 ADR-046 contract에서 제거 결정.
+    - **C-04 / DA-D-07 (⚖️ 결정)**: KHOA 해수욕장 category 코드 `01020300`(COAST_ISLAND) vs
+      전용 `01050100` — 코드 정렬 여부 결정(본 패스는 문서를 코드값에 맞추고 divergence 명기).
+    - **e2e (HIGH)**: ZERO 커버 5페이지(curated-features 1192줄 콘솔·features/new·3 detail
+      페이지) + 전 페이지 mutation/error/cursor depth — `docs/reports/e2e-scenario-coverage-
+      2026-06-16.md` 우선순위 순으로 spec 추가.
 - **외부 추적**
   - `T-019` — TripMate 측 Kakao Maps → maplibre-vworld 교체와 SPEC 문서 supersede 추적.
   - `T-210b` — TripMate 문서 supersede.

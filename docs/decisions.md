@@ -2634,6 +2634,10 @@ TripMate OpenAPI 연동으로 바뀌었다. 또한 ADR-041로 `python-kraddr-bas
    - Admin UI는 `provider_address_mismatch`, `provider_address_partial_match`,
      `geocode_failed`, `reverse_geocode_failed`, `missing_address`, `missing_bjd_code`
      issue를 지도/테이블에서 보여준다.
+   - 주의: `geocode_failed`/`reverse_geocode_failed`는 **계약상 정의**돼 있으나 아직
+     batch-validation producer가 없다 — `validate_feature_bundle_address`는
+     `missing_bjd_code`/`missing_address`/`provider_address_mismatch`/
+     `provider_address_partial_match`만 발행한다(known gap F-02, `docs/tasks.md` 추적).
    - 운영자는 admin UI에서 kor-travel-geo 재시도, 좌표 수정, 주소 수정, kor-travel-geo 주소
      채택, 수동 override, ignored/reopen 처리를 할 수 있어야 한다.
    - 수동 override는 `ops.feature_overrides`와 audit log에 기록하고 provider 재적재가
@@ -3402,6 +3406,11 @@ inactive 라이프사이클 경로는 `source_entity_id`로 매칭해 **면역**
   그대로 두고, 재import마다 같은 feature_id에 **in-place 갱신**된다.
 - 이 정책은 **kor-travel-concierge provider 한정**이다. 다른 provider는 bjd/category가
   안정적이라 기존 `make_feature_id`(bjd/category 포함) 동작을 유지한다.
+  - 단, "안정적"이 진짜 보장되는 경우는 **source-native legal_dong_code(MOIS) 또는
+    provider가 직접 제공하는 행정코드** 케이스에 한정된다. knps·krheritage·mcst·
+    krforest·datagokr_file_data·khoa·airkorea·krairport·opinet·standard_data처럼 bjd를
+    **reverse-geocode로 채우는** provider는 feature_id 결정성이 여전히 geocoder
+    출력/버전에 조건부다(known gap F-01, `docs/reports/full-consistency-audit-2026-06-16.md`).
 
 ### 근거
 

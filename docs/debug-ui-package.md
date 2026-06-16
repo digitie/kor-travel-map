@@ -69,19 +69,28 @@ packages/kor-travel-map-api/
 │   ├── app.py           — FastAPI app factory + uvicorn entrypoint
 │   ├── settings.py      — KOR_TRAVEL_MAP_API_* + 메인 settings 상속
 │   ├── responses.py     — 공통 응답 래핑 (data/meta/error) + 에러 코드 매핑
-│   ├── routers/
+│   ├── routers/               — (실제 모듈 발췌, exhaustive 아님; 정본은 소스 트리)
 │   │   ├── __init__.py
-│   │   ├── health.py
-│   │   ├── features.py        — GET /features/...
-│   │   ├── weather.py
-│   │   ├── sources.py
-│   │   ├── files.py
-│   │   ├── providers.py       — sync-state
-│   │   ├── import_jobs.py
+│   │   ├── features.py            — GET /features/...
+│   │   ├── curated.py             — curated feature 오버레이/후보
+│   │   ├── public_views.py        — 공개 read view
+│   │   ├── public_status.py       — 공개 status
+│   │   ├── categories.py
+│   │   ├── providers.py           — sync-state
+│   │   ├── provider_refresh_policies.py
+│   │   ├── poi_cache_targets.py
 │   │   ├── dedup_review.py
-│   │   ├── integrity.py
-│   │   ├── etl.py             — /debug/etl
-│   │   └── ops_logs.py        — /ops/system-logs, /ops/api-call-logs
+│   │   ├── enrichment_review.py
+│   │   ├── admin_features.py      — feature change API (#317)
+│   │   ├── admin_issues.py        — /admin/issues/{issue_id}
+│   │   ├── admin_backups.py
+│   │   ├── feature_update_requests.py
+│   │   ├── offline_uploads.py
+│   │   ├── mois_detail.py
+│   │   ├── etl.py                 — /debug/etl
+│   │   ├── dagster.py             — /ops/dagster/*
+│   │   ├── ops.py / ops_live.py
+│   │   └── ops_logs.py            — /ops/system-logs, /ops/api-call-logs
 │   └── static/                — Next.js static export 산출물 mount 시 (옵션 C, frontend/out/ 복사)
 ├── scripts/export_openapi.py
 ├── openapi.json

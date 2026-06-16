@@ -363,6 +363,13 @@ def test_warns_when_binding_to_all_interfaces(caplog):
     assert any("internal-only" in r.message.lower() for r in caplog.records)
 ```
 
+### 5.4 Playwright UI e2e의 한계 — render-smoke 위주
+
+admin frontend의 Windows Playwright e2e suite는 현재 **render-smoke 위주**라
+"33/33 passing" 같은 통과 수치가 곧 **UI-level 커버리지**를 뜻하지는 않는다.
+curated-features, `features/new`, 그리고 3개 상세 페이지는 아직 시나리오로
+커버되지 않는다 (상세는 `docs/reports/e2e-scenario-coverage-2026-06-16.md`).
+
 ## 6. fixture replay (`tests/fixtures/`)
 
 ### 6.1 구조

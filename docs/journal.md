@@ -2,6 +2,27 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-16 (claude) — 코드+문서 전체 정합성 감사 (2-pass, docs-only)
+
+사용자 지시("코드·문서 전체 재독 → 충돌·기능갭 확인 후 문서 반영, e2e 촘촘 시나리오 포함,
+누락 방지 위해 재독 검증"). **docs-only**(코드 무변경). 정본 리포트
+`docs/reports/full-consistency-audit-2026-06-16.md` + `docs/reports/e2e-scenario-coverage-2026-06-16.md`.
+
+- **방법**: Round 1 — 6차원 병렬 감사(core/api/dagster/e2e/adr/frontend) 코드 ground-truth
+  대조 → 충돌 28(C-01~28) + 기능갭 4(F-01~04) + 22페이지 e2e 매트릭스. Round 2 — 재독
+  adversarial 검증 + completeness critic(누락 색출). 14-에이전트로 문서 정정 적용(markdown 전용).
+- **정정(본 PR)**: openapi-admin-contract.md를 ADR-048 envelope(RFC7807 problem+json +
+  Meta{page,cluster})로 현행화(유일 stale 아웃라이어), `krtour-uploads`→`kor-travel-map-uploads`
+  8문서 전파, screen-checklist 17→22 route, provider-contract/feature-model/data-model/
+  architecture/dagster-boundary/category/rest-api/debug-ui-* 등 코드↔문서 충돌 26건 정정.
+  geocoding을 의존 체인에 삽입(C-12), AGENTS.md 다음 ADR 058 정정(C-16). airkorea/krairport
+  ETL 문서 신규 작성(F-04).
+- **기능 갭(backlog `T-AUDIT-0616`)**: F-01 geocoder 의존 ~10 provider feature_id 비멱등
+  (ADR-057이 concierge만 해결) / F-02 geocode_failed·reverse_geocode_failed issue producer 부재 /
+  C-04(DA-D-07) KHOA category 결정.
+- **e2e**: 34 테스트 중 23이 admin-ops에 집중, 5페이지 ZERO 커버 + 대부분 render-smoke만 —
+  촘촘 시나리오 매트릭스를 정본 문서로 작성, spec 추가는 backlog.
+
 ## 2026-06-15 (claude) — concierge source_entity_id 계약 테스트 + 검증 완전 종결 (후속 4)
 
 검증 §5의 마지막 권장(source_entity_id 불변성 계약 테스트)을 kor-travel-concierge에 처리하고

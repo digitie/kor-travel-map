@@ -7,7 +7,7 @@
 | 항목 | 값 |
 |------|----|
 | provider | `python-khoa-api` |
-| dataset_key | `khoa_oceans_beach_info` |
+| dataset_key | `khoa_beaches` (`providers/khoa.py:64` `DATASET_KEY_BEACHES`) — feature_id / source_record_key에 박힘 |
 | Feature.kind | `place` |
 | source_entity_type | `beach` |
 | 상세 테이블 | `feature_place_details` |
@@ -27,13 +27,19 @@
 
 | 항목 | 값 |
 |------|----|
-| natural key | `시도\|구군\|정점명` 조합 |
+| natural key | `정점명::시도::구군` 조합 (ADR-009 `::`, `providers/khoa.py:149`) |
 | FeatureKind | `place` |
-| category | **`01050100`** `TOURISM_NATURE_BEACH` (`docs/category.md` §4) — Tier path: 관광 > 자연명소 > 해수욕장 |
+| category | **`01020300`** `TOURISM_NATURAL_LANDSCAPE_COAST_ISLAND` (`providers/khoa.py:67` `BEACH_CATEGORY`) — Tier path: 관광 > 자연명소 > 해안/섬 |
 | place_kind | `beach` |
-| marker_icon | `swimming` |
+| marker_icon | `beach` |
 | marker_color | `P-07` (하늘색) |
 | `KHOA_OCEANS_BEACH_INFO_FULL_SCAN_INTERVAL_DAYS` | 1 |
+
+> **category 코드 divergence (C-04, DA-D-07 후속)**: 코드 실측은
+> `01020300 TOURISM_NATURAL_LANDSCAPE_COAST_ISLAND`(`providers/khoa.py:67`)이며 위
+> 표는 이에 정렬했다. 다만 전용 분류 `01050100 TOURISM_NATURE_BEACH`(해수욕장)가
+> 의도였을 가능성이 있다 — 어느 쪽이 정본인지는 DA-D-07에서 확정한다(여기서 코드를
+> 임의로 뒤집지 않음).
 
 ## 4. 필드 매핑
 
@@ -58,6 +64,12 @@
 - 주소: 기본 `Address(display_address=f"{sidoNm} {gugunNm}")` — 시도/구군 한글만.
 - reverse geocoder 권장 — 정확한 `legal_dong_code` + `road_name_code` 보강.
 
+> **feature_id 안정성 caveat (F-01)**: KHOA 원본은 source-native 행정코드를 주지
+> 않아 `bjd_code`가 reverse-geocode로 산출된다. feature_id가 이 `bjd_code`를
+> 포함하므로 결과적으로 **geocoder 의존적**이다 — geocoder 버전/응답이 바뀌면 동일
+> 정점의 feature_id가 흔들릴 수 있다. 상세는
+> `full-consistency-audit-2026-06-16.md` F-01 참조.
+
 ## 6. 파일 (RustFS)
 
 ```python
@@ -68,27 +80,44 @@ def khoa_beach_to_file_sources(item, *, feature_id, source_record_key):
         feature_id=feature_id, source_url=item.beach_img,
         role="primary", display_order=0, file_type="image",
         provider="python-khoa-api",
-        dataset_key="khoa_oceans_beach_info",
+        dataset_key="khoa_beaches",          # providers/khoa.py:64 DATASET_KEY_BEACHES
         source_record_key=source_record_key,
     )]
 ```
 
 ## 7. DB 적재
 
-```python
-from kortravelmap.beaches import (
-    collect_khoa_oceans_beach_info,
-    load_khoa_oceans_beach_info_result,
-    collect_and_load_khoa_oceans_beach_info,
-)
+provider 변환 entrypoint은 `providers/khoa.py`의 `beaches_to_bundles`이고,
+적재 orchestration은 Dagster asset `feature_place_khoa_beaches`
+(`run_feature_place_khoa_beaches`)가 맡는다.
 
-async def run_khoa_beach_full_scan(client, async_session, rustfs_store, reverse_geocoder):
-    result = await collect_and_load_khoa_oceans_beach_info(
-        async_session, client,
-        rustfs_store=rustfs_store, reverse_geocoder=reverse_geocoder,
+```python
+from kortravelmap.providers.khoa import beaches_to_bundles
+
+# OceanBeachInfo items → list[FeatureBundle] (place, category 01020300)
+bundles = await beaches_to_bundles(
+    items,
+    fetched_at=fetched_at,
+    reverse_geocoder=reverse_geocoder,
+)
+```
+
+Dagster 측 적재(`packages/kor-travel-map-dagster/.../assets.py`):
+
+```python
+async def run_feature_place_khoa_beaches(context):
+    records = await _record_list(context, "khoa_beaches")
+    bundles = await beaches_to_bundles(
+        records,
+        fetched_at=await _fetched_at(context),
+        reverse_geocoder=_reverse_geocoder(context),
     )
-    await async_session.commit()
-    return result
+    return await _load(
+        context,
+        provider=KHOA_PROVIDER_NAME,
+        dataset_key=DATASET_KEY_BEACHES,
+        bundles=bundles,
+    )
 ```
 
 전국 시도 (`SIDO_NM` 17종)를 순회하며 각 시도별 page 끝까지. 페이지당
