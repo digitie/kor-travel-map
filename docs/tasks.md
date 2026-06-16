@@ -20,10 +20,11 @@
   - `T-AUDIT-0616` — **2026-06-16 전체 정합성 감사 후속** (정본
     `docs/reports/full-consistency-audit-2026-06-16.md`). 문서 충돌은 본 감사 PR에서 정정
     완료, 아래는 코드/검증 후속:
-    - **F-01 (HIGH)**: geocoder 의존 ~10 provider(knps/krheritage/mcst/krforest/
-      datagokr_file_data/khoa/airkorea/krairport/opinet/standard_data)의 **feature_id 비멱등**
-      (bjd가 늦게 바인딩 → geocoder 유무로 global↔code 분기). ADR-057 anchoring 패턴(안정
-      source key + 고정 identity category, bjd는 가변 속성) 적용 provider 범위 결정 + 코드.
+    - **F-01 (HIGH)** — **✅ 1차 해소(ADR-058, 옵션 B)**: geocoder 의존 ~11 provider feature_id
+      비멱등(bjd 늦은 바인딩 → geocoder 유무로 분기). `reverse_geocoder_resource`를 base URL
+      미설정 시 **실패**시켜 geocoder를 필수화(re-key 없이 결정성 보장). **잔여(옵션 A 후속)**:
+      완전 결정성(geocoder 출력 drift까지)은 식별자에서 bjd 제거가 필요 — 전 feature DB re-key
+      + provider별 natural_key 전역유일성 검증 동반, 별도 시점 결정.
     - **F-02 (MED)**: `geocode_failed`/`reverse_geocode_failed` admin issue **producer 신설**
       (validate_feature_bundle_address가 미방출) 또는 ADR-046 contract에서 제거 결정.
     - ~~**C-04 / DA-D-07**: KHOA 해수욕장 category~~ **✅ 해소** — 전용 `01050100 TOURISM_NATURE_BEACH`로
