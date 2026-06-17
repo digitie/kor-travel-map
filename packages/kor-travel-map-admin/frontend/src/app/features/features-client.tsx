@@ -18,6 +18,8 @@ import {
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { type ColumnDef, type SortingState } from "@tanstack/react-table";
+
 import {
   FEATURE_KINDS,
   useFeatureDetail,
@@ -37,15 +39,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { DataTable } from "@/components/ui/data-table";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { buildVWorldStyle, isVWorldApiKeyConfigured } from "@/lib/vworld-style";
@@ -257,12 +252,50 @@ export function FeaturesClient() {
     }
   }, [featuresQuery.data, setSelectedFeatureId]);
 
-  const sortedFeatures = useMemo(
-    () =>
-      (featuresQuery.data?.data.items ?? []).toSorted((a, b) =>
-        a.name.localeCompare(b.name, "ko"),
-      ),
-    [featuresQuery.data],
+  const featureItems = featuresQuery.data?.data.items ?? [];
+  const [tableSorting, setTableSorting] = useState<SortingState>([
+    { id: "name", desc: false },
+  ]);
+  const featureColumns = useMemo<ColumnDef<FeatureSummary, unknown>[]>(
+    () => [
+      {
+        accessorKey: "name",
+        header: "name",
+        sortingFn: (rowA, rowB) =>
+          rowA.original.name.localeCompare(rowB.original.name, "ko"),
+        cell: ({ row }) => (
+          <Link
+            className="font-medium text-primary underline-offset-4 hover:underline"
+            href={featureDetailHref(row.original.feature_id)}
+            onClick={(event) => event.stopPropagation()}
+          >
+            {row.original.name}
+          </Link>
+        ),
+      },
+      {
+        accessorKey: "kind",
+        header: "kind",
+        cell: ({ row }) => <Badge variant="outline">{row.original.kind}</Badge>,
+      },
+      { accessorKey: "status", header: "status" },
+      {
+        id: "coord",
+        header: "coord",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const feature = row.original;
+          return (
+            <span className="font-mono text-xs text-muted-foreground">
+              {typeof feature.lon === "number" && typeof feature.lat === "number"
+                ? `${feature.lon.toFixed(5)}, ${feature.lat.toFixed(5)}`
+                : "없음"}
+            </span>
+          );
+        },
+      },
+    ],
+    [],
   );
 
   const status = useMemo(() => {
@@ -417,57 +450,22 @@ export function FeaturesClient() {
                 현재 bbox와 kind 필터에 해당하는 feature를 이름순으로 표시합니다.
               </CardDescription>
             </CardHeader>
-            <CardContent className="overflow-auto">
-              {featuresQuery.isLoading ? <Skeleton className="h-72 w-full" /> : null}
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>name</TableHead>
-                    <TableHead>kind</TableHead>
-                    <TableHead>status</TableHead>
-                    <TableHead>coord</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {sortedFeatures.map((feature) => (
-                    <TableRow
-                      className="cursor-pointer"
-                      key={feature.feature_id}
-                      onClick={() => setSelectedFeatureId(feature.feature_id)}
-                    >
-                      <TableCell className="font-medium">
-                        <Link
-                          className="text-primary underline-offset-4 hover:underline"
-                          href={featureDetailHref(feature.feature_id)}
-                          onClick={(event) => event.stopPropagation()}
-                        >
-                          {feature.name}
-                        </Link>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{feature.kind}</Badge>
-                      </TableCell>
-                      <TableCell>{feature.status}</TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">
-                        {typeof feature.lon === "number" &&
-                        typeof feature.lat === "number"
-                          ? `${feature.lon.toFixed(5)}, ${feature.lat.toFixed(5)}`
-                          : "없음"}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                  {sortedFeatures.length === 0 && !featuresQuery.isLoading ? (
-                    <TableRow>
-                      <TableCell
-                        className="h-28 text-center text-muted-foreground"
-                        colSpan={4}
-                      >
-                        표시할 feature가 없습니다.
-                      </TableCell>
-                    </TableRow>
-                  ) : null}
-                </TableBody>
-              </Table>
+            <CardContent className="min-h-0">
+              <DataTable
+                columns={featureColumns}
+                data={featureItems}
+                getRowId={(feature) => feature.feature_id}
+                isLoading={featuresQuery.isLoading}
+                emptyMessage="표시할 feature가 없습니다."
+                onRowClick={(feature) => setSelectedFeatureId(feature.feature_id)}
+                isRowActive={(feature) => feature.feature_id === selectedFeatureId}
+                sorting={tableSorting}
+                onSortingChange={setTableSorting}
+                virtualized
+                estimateRowSize={41}
+                containerClassName="h-[calc(100vh-19rem)]"
+                ariaLabel="이름순 feature"
+              />
             </CardContent>
           </Card>
         </TabsContent>
