@@ -3502,7 +3502,7 @@ PostgreSQL skill 세트), `.codex/agents`는 상위 카탈로그에서 벤더링
 
 ### 결정
 
-1. **언어 예외**: `.claude/`·`.agents/`·`.codex/` 아래 벤더링된 agent/skill 원문은
+1. **언어 예외**: `.claude/`·`.agents/`·`.codex/`·`.opencode/` 아래 벤더링된 agent/skill 원문은
    한국어 규칙의 예외로 영어 원문을 유지한다(상위 동기화 충실성). 단 본 저장소 관례에
    맞춘 **적응**은 허용한다.
 2. **context-discovery 적응**: `context-manager` agent 의존을 본 저장소 실제 절차
