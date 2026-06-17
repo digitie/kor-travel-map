@@ -6,7 +6,7 @@ ADR-048/T-216g 기계 정본)에서 `openapi-typescript`로 생성한 **TypeScri
 
 - **런타임 코드 없음** — HTTP client는 소비자 소유(PinVi 백엔드는 수기 httpx,
   frontend는 본 타입+fetch). prose 계약: `docs/architecture/rest-api.md` ·
-  `docs/architecture/tripmate-rest-api.md`.
+  `docs/architecture/pinvi-rest-api.md`.
 - **npm 게시 안 함**(ADR-043 관행) — 산출물(`src/types.ts`)을 커밋하고 CI drift
   gate(`gen:types:check`)로 spec과 고정한다.
 - T-222b부터 `BeachPublicView`/`FestivalPublicView`와 `/v1/public/*` 공개 해수욕장·

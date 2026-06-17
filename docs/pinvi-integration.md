@@ -1,4 +1,4 @@
-# tripmate-integration.md — PinVi와 kor-travel-map OpenAPI 연동
+# pinvi-integration.md — PinVi와 kor-travel-map OpenAPI 연동
 
 > **ADR-045 supersede 안내 (2026-06-01)**:
 > 본 문서의 예전 본문에는 PinVi가 `kor-travel-map`을 직접 import하고 같은
@@ -45,7 +45,7 @@ PinVi API/Web
 `docs/tasks.md` `T-213a~h`를 따른다. 특히 일반 좌표 기준 `/features/nearby`,
 provider last-sync, public `/health`/`/version`, weather card, category catalog는
 현재 user OpenAPI에 포함되어 있으며, 목표 안정 계약은
-`docs/architecture/tripmate-rest-api.md`의 `/v1` 경로 정리를 따른다.
+`docs/architecture/pinvi-rest-api.md`의 `/v1` 경로 정리를 따른다.
 
 예: 특정 좌표 중심 반경 5km 안 feature 업데이트 요청.
 
@@ -154,7 +154,7 @@ PinVi가 직접 소유하는 항목:
 - kor-travel-map OpenAPI client 생성물과 타입 검증 계층.
 - POI 생성·수정·삭제 시 cache target write 경로 호출. 현재 구현은
   `PUT/DELETE /admin/poi-cache-targets/{external_system}/{target_key}`이며, PinVi
-  직접 write를 허용할지는 `docs/architecture/tripmate-rest-api.md`의 `T-214f` 결정에 따른다.
+  직접 write를 허용할지는 `docs/architecture/pinvi-rest-api.md`의 `T-214f` 결정에 따른다.
 - 저장 POI 기준 주변 feature 조회 시 `GET /features/nearby/by-target` 호출.
 - 사용자 흐름에서 필요한 feature 상세 조회 시 `GET /features/{feature_id}` 호출.
 

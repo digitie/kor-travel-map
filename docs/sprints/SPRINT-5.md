@@ -25,7 +25,7 @@
 > OpenAPI + 독립 Dagster + PinVi REST 연계. **세분 실행 계획은
 > `docs/adr045-standalone-plan.md`**(T-205~T-210), 의사결정 결과는
 > `docs/adr045-open-decisions.md`(D-1~D-16 전부 결정 완료), PinVi REST 계약은
-> `docs/architecture/tripmate-rest-api.md`. 아래 §2.1+ provider 적재는 ADR-045 Dagster asset
+> `docs/architecture/pinvi-rest-api.md`. 아래 §2.1+ provider 적재는 ADR-045 Dagster asset
 > (kor-travel-map 소유)로 운영 전환된다(T-208c).
 
 ### 2.1 Provider ⑧ — 휴양림/수목원 (`python-krforest-api`)
