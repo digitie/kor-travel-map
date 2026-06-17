@@ -2,13 +2,13 @@
 enabled = true
 command = "codegraph"
 args = ["serve", "--mcp", "--no-watch"]
-cwd = "/mnt/f/dev/python-krtour-map-codex"
+cwd = "/mnt/f/dev/kor-travel-map-codex"
 
 [mcp_servers.mcp-telegram]
 enabled = true
 command = "C:\\Python314\\python.exe"
 args = ["scripts\\mcp_telegram_start.py"]
-cwd = "F:\\dev\\python-krtour-map-codex"
+cwd = "F:\\dev\\kor-travel-map-codex"
 
 [mcp_servers.playwright]
 command = "npx"
@@ -18,3 +18,7 @@ env = { PLAYWRIGHT_HEADLESS = "true" }
 [mcp_servers.sequential-thinking]
 command = "npx"
 args = ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+
+[mcp_servers.filesystem]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "F:\\dev\\kor-travel-map-codex"]

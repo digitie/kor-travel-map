@@ -47,7 +47,7 @@
 명령어, URL, 라이브러리·제공자 원문, 환경변수처럼 그대로 보존해야 하는 값만 영어를
 유지한다. 신규 문서와 기존 문서 모두 동일 규칙을 우선한다.
 
-**예외(ADR-059)**: `.claude/`, `.agents/`, `.codex/` 아래의 벤더링된 상위(upstream)
+**예외(ADR-059)**: `.claude/`, `.agents/`, `.codex/`, `.opencode/` 아래의 벤더링된 상위(upstream)
 agent/skill 원문은 본 규칙의 예외다 — 원문 동기화 충실성을 위해 영어 원문을 유지하되,
 본 저장소 관례(context 발견은 entry 문서 + codegraph이며 `context-manager` agent는
 존재하지 않는다)에 맞게 적응한다. 근거·범위는 `.claude/agents/README.md` 참조.

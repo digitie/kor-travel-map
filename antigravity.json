@@ -25,14 +25,22 @@
         "serve",
         "--mcp"
       ],
-      "cwd": "F:\\dev\\python-krtour-map-antigravity"
+      "cwd": "F:\\dev\\kor-travel-map-antigravity"
     },
     "mcp-telegram": {
       "command": "C:\\Python314\\python.exe",
       "args": [
         "scripts\\mcp_telegram_start.py"
       ],
-      "cwd": "F:\\dev\\python-krtour-map-antigravity"
+      "cwd": "F:\\dev\\kor-travel-map-antigravity"
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "F:\\dev\\kor-travel-map-antigravity"
+      ]
     }
   }
 }
