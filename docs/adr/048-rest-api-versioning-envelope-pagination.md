@@ -4,15 +4,13 @@
 - **날짜**: 2026-06-09
 - **결정자**: 사용자
 - **관련**: ADR-005(인증=인프라), ADR-035(namespace), ADR-044(provider 충실),
-  ADR-045(TripMate OpenAPI 연동), ADR-046(무-shim),
-  `docs/architecture/tripmate-rest-api.md`(#317, 외부 `/v1` 정본), `docs/architecture/rest-api.md`(전 표면 보강),
-  `docs/reports/api-endpoint-review-2026-06-08.md`(검토 근거), T-214/T-215(#317)
+  ADR-045(외부 경계는 OpenAPI), ADR-046(무-shim),
+  `docs/architecture/rest-api.md`(전 표면 정본), `docs/reports/api-endpoint-review-2026-06-08.md`(검토 근거), T-214/T-215(#317)
 
 ### 컨텍스트
 
-PR #317(T-214/T-215)이 REST API `/v1` 정리의 1차를 이미 끝냈다 — `docs/architecture/tripmate-rest-api.md`를
-외부 `/v1` 목표 계약으로 재작성, `/tripmate/feature-update-requests*` alias 제거(admin
-단일화), place/event **단건 feature 추가·수정·삭제 admin API**(K-15 해소) + version 0(provider)/
+PR #317(T-214/T-215)이 REST API `/v1` 정리의 1차를 이미 끝냈다 — 외부 `/v1` 목표 계약 재작성,
+구 alias 제거(admin 단일화), place/event **단건 feature 추가·수정·삭제 admin API**(K-15 해소) + version 0(provider)/
 1(user) 분리(`feature.feature_versions`/`ops.feature_change_requests`/
 `KOR_TRAVEL_MAP_API_FEATURE_CHANGE_REVIEW_MODE`). 보안 스킴(P1-B)은 #314로 이미 해소.
 
@@ -28,8 +26,8 @@ bbox 인코딩 2종, `status`↔`state`, 응답 `*_key`↔`*_id`)가 #317의 고
 1. **versioning을 전 표면으로 확장.** #317 T-214b/§2.1의 "`/admin`·`/ops`·`/debug` 비버저닝"을
    **supersede**하여 `/v1/admin/*`·`/v1/ops/*`·`/v1/debug/*`도 `/v1` 아래 둔다(사용자 지시).
    liveness `/health`·`/version`만 비버저닝 유지. 외부 표면(`/v1/features`(batch 포함)·
-   `/v1/categories`·`/v1/providers`)은 #317 T-214b/d가 진행 중인 그대로. **`/tripmate/*`
-   namespace는 제거**(kor-travel-map은 TripMate 전용이 아니다; batch → `/v1/features/batch`).
+   `/v1/categories`·`/v1/providers`)은 #317 T-214b/d가 진행 중인 그대로. **소비자 전용
+   namespace는 제거**(kor-travel-map은 범용 표면이다; batch → `/v1/features/batch`).
 2. **envelope 공유 모델 — payload와 메타 완전 분리.** 라우터별 `*Meta` 중복을 공유
    `Meta`로 통합한다. `data`는 **payload만**(단건=객체, 목록=`{items:[...]}`, in-bounds=
    `{clusters,items}`, batch=`{found:{feature_id:Feature},missing:[...]}`). **`items`는 list array
@@ -75,13 +73,11 @@ bbox 인코딩 2종, `status`↔`state`, 응답 `*_key`↔`*_id`)가 #317의 고
    `reject`/`load`/`validate`/`swap`), 순수 필드 수정은 `PATCH {id}`, 생성은 `POST {collection}`,
    조회는 `GET`. 이 규약을 계약에 명시해 신규 action도 같은 형태로 확장한다.
 9. **정본 관계 — 단일 전 표면 정본으로 수렴.** drift 회피를 위해 **`docs/architecture/rest-api.md`를 전
-   표면(외부+admin/ops) 계약 단일 정본**으로 두고, `docs/architecture/tripmate-rest-api.md`는 TripMate
-   **소비 매핑 view**로 축소(계약 세부는 rest-api.md로 위임). 기계 정본 =
+   표면(외부+admin/ops) 계약 단일 정본**으로 둔다. 기계 정본 =
    `openapi.json`/`openapi.user.json`. 충돌 시 OpenAPI 우선. (수렴은 T-216g.)
-10. **좌표 필드명 cross-repo 정렬 = `lon`/`lat`(#316 재리뷰 B).** TripMate 정본(DEC-07)은
-    `longitude`/`latitude`지만, krtour는 `lon`/`lat`로 이미 일관하고 대용량 지도 feature
-    payload에 terse가 바이트·파싱에 유리하다. **krtour 정본 = `lon`/`lat` 유지**, TripMate가
-    DEC-07을 `lon`/`lat`로 하향 정렬해 **경계 매핑 0**으로 만든다.
+10. **좌표 필드명 정본 = `lon`/`lat`(#316 재리뷰 B).** krtour는 `lon`/`lat`로 이미 일관하고
+    대용량 지도 feature payload에 terse가 바이트·파싱에 유리하다. **krtour 정본 = `lon`/`lat`
+    유지**(외부 read 응답 포함). 외부 경계(OpenAPI)에 이 표기를 명문화해 소비자가 그대로 추종한다.
 11. **`feature_id` 값 불변식(#316 재리뷰 D — 안정성 최우선).** 외부 `feature_id` **값**은
     provider 재적재·사용자 편집(#317 v0/v1)·버전 승급·soft delete에도 **절대 바뀌지 않는다**.
     정체성이 바뀌는 사건(bjd 변경 등)은 **id 변경이 아니라 새 feature + link**로 모델링한다.
@@ -117,30 +113,27 @@ bbox 인코딩 2종, `status`↔`state`, 응답 `*_key`↔`*_id`)가 #317의 고
 - 내부 식별자 물리 개명은 테이블별 migration + 큰 mechanical churn(`review_id` 291·
   `issue_id` 118건)을 동반 — codegraph impact 후 단계화.
 - **무-호환 clean cut**: envelope 재배치(`data.next_cursor`→`meta.page`)·파라미터/필드 개명·
-  좌표명 정렬(`lon`/`lat`)·구 경로 제거가 소비자(TripMate)를 한 번에 깬다. pre-prod 단계라
-  의도적으로 수용 — 안정 spec commit에서 소비자가 lockstep으로 추종한다(T-181).
+  좌표명 정렬(`lon`/`lat`)·구 경로 제거가 외부 소비자를 한 번에 깬다. pre-prod 단계라
+  의도적으로 수용 — 안정 spec commit이 외부 경계(OpenAPI)의 추종 기준이다.
 
 ### 전환 정책 — 무-호환 clean cut (#316 2차 리뷰, 사용자 지시)
 
 사용자 지시 = **호환성은 고려하지 않는다. 늦기 전에 일관성·확장성·안정성으로 한 번에
-정리한다.** TripMate는 pre-production 소비자이므로 최신 spec을 따라오면 된다.
+정리한다.** pre-production 단계이므로 외부 경계(OpenAPI)의 최신 spec이 추종 기준이다.
 
 - **dual-support/deprecation 창 없음**: 구 unprefixed 경로·호환 alias를 유지하지 않고 `/v1`로
   **즉시 단일 전환**한다(이중 코드경로 제거 = 안정성). `/debug/health`·`/debug/version`은
   deprecate가 아니라 **제거**(→ `/health`·`/version`·`/v1/ops/health-deep`로 수렴).
 - **개명도 즉시 전면 적용(의미 기준)**: 명명 규칙을 외부 read 포함 한 번에 적용(#6·#7).
   단 `cluster_key`(행정코드 자연키)는 규칙상 `*_key`가 맞아 **유지**(동결이 아니라 본질).
-  `longitude`/`latitude`↔`lon`/`lat` cross-repo 정렬도 이 컷에서 처리(#10).
-- **기계 정본 + codegen pin**: `openapi.json`/`openapi.user.json`을 기계 정본으로 유지하고,
-  `/v1` 안정 commit에서 소비자(T-210e codegen + 계약 테스트)가 그 spec에 핀한다. 이게
-  유일한 "안전판"이며, 별도 호환 창은 두지 않는다.
+  좌표명 `lon`/`lat` 정렬도 이 컷에서 처리(#10).
+- **기계 정본**: `openapi.json`/`openapi.user.json`을 기계 정본으로 유지한다. `/v1` 안정
+  commit이 외부 경계의 핀 기준이며, 별도 호환 창은 두지 않는다.
 - **에러 `code` 고정**: problem+json top-level 확장 `code`/`request_id` + enum(#5).
 - **Base URL은 host root**: `/v1`는 path에만 둔다(#14).
 
 ### 후속
 
 - 실행은 `docs/tasks.md` **Phase 6.8 / T-216a~g**로 분해(#317의 T-214/T-215와 별도 번호).
-  `docs/architecture/tripmate-rest-api.md` §2.1의 "admin/ops 비버저닝" 문구는 본 ADR로 갱신했다.
 - **반영 순서**: 외부+admin `/v1` clean cut(T-216a/b) → 명명·코드/DB 전파(T-216e/f) →
-  정본 수렴(T-216g). API shape `/v1` 안정 commit에서 T-210e(codegen) 진행. 소비자(TripMate)는
-  안정 spec commit 기준으로 base/에러파싱/파라미터/필드명을 일괄 갱신한다.
+  정본 수렴(T-216g). 외부 경계(OpenAPI)의 `/v1` 안정 commit이 외부 소비자 추종 기준이다.

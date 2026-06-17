@@ -9,7 +9,7 @@ Accepted (2026-06-13) — T-226 package identity 정리 이후 추가 사용자 
 ADR-020/035/045 이후 `kor-travel-map-admin`은 FastAPI REST backend와 Next.js admin UI를
 한 디렉토리/패키지 이름 아래 함께 담고 있었다. 그러나 `/v1/features`,
 `/v1/categories`, `/v1/providers`, `/v1/public`, `/v1/curated-*`처럼 admin이 아닌
-TripMate/user-facing REST 표면도 같은 backend가 제공한다. Prometheus 성능 계측도
+user-facing(공개) REST 표면도 같은 backend가 제공한다. Prometheus 성능 계측도
 admin 라우터가 아니라 REST API 전체를 대상으로 한다.
 
 `kor-travel-map-admin`이라는 Python distribution 이름은 backend 책임을 admin UI로

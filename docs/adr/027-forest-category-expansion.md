@@ -82,7 +82,7 @@
     UI에서 maki icon dispatch는 fallback `viewpoint` 또는 `observation-tower`
     매핑으로 처리.
   - **`NATURE_ECOLOGY` PlaceCategory 신설**: 연기 (v2 1차 범위 밖). 식생/
-    서식지 학술 데이터는 TripMate 사용자 노출 가치 낮음. 향후 분석 도구에서
+    서식지 학술 데이터는 사용자 노출 가치 낮음. 향후 분석 도구에서
     KNPS 원본 dataset 직접 사용 권고.
 
 - **근거**:

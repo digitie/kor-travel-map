@@ -1,7 +1,7 @@
 # ADR-031: 디버그 패키지 OpenAPI export 정책 (첫 라우터부터 활성화)
 
 - **상태**: accepted (T-014 Sprint 1 진입 시 전환, 2026-05-25)
-- **Amendment (2026-06-02, ADR-045 D-3)**: ADR-045로 API가 admin과 TripMate(사용자)
+- **Amendment (2026-06-02, ADR-045 D-3)**: ADR-045로 API가 admin과 사용자(공개)
   양쪽에 서비스되므로 OpenAPI를 **이원화**한다 — admin schema(`/admin`·`/ops`·
   `/debug`·`/features` admin 뷰)와 사용자 schema(`/features` 공개 뷰, `tripmate-rest-
   api.md`)를 **별도 export + 별도 drift gate**(CI 2개). versioning은 **SemVer**

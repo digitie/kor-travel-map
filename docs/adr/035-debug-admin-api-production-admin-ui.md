@@ -11,7 +11,7 @@ ADR-005/ADR-020에서 `kor-travel-map-admin` 패키지는 "디버그 + 내부망
 
 - 운영자가 적재 jobs / dedup queue / consistency reports / RustFS 사용량 등을
   **실시간으로 보고 손볼** UI가 필요.
-- TripMate 본 앱에 admin 화면을 별도로 만들 만큼 트래픽이 없음 — `kor-travel-map-
+- 외부 소비 앱에 admin 화면을 별도로 만들 만큼 트래픽이 없음 — `kor-travel-map-
   debug-ui` 패키지를 그대로 admin UI로 활용하는 게 자연.
 - 단, 인증 키는 본 패키지 코드 안에 박지 않는다 (ADR-005 원칙 유지). 네트워크
   계층(Cloudflare Tunnel + SSO 게이트웨이 / IP allowlist)에서 보호.

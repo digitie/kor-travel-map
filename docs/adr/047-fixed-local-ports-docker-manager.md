@@ -1,19 +1,16 @@
-# ADR-047: kor-travel-map 로컬 포트는 docker-manager 기준 API 12701, admin UI 12705, Dagster 12702로 고정
+# ADR-047: kor-travel-map 로컬 포트를 API 12701, admin UI 12705, Dagster 12702로 고정
 
 - **상태**: accepted
 - **날짜**: 2026-06-02
-- **개정**: 2026-06-12 — Postgres host `5432`, RustFS S3 API `12101`,
-  kor-travel-geo API `12201`/Web UI `12205`, kor-travel-map API `12301`, 관리 보조(Dagster)
-  `12302`, Web UI `12305`로 재고정.
+- **개정**: 2026-06-12 — Postgres host `5432`, kor-travel-geo API `12201`/Web UI
+  `12205`, kor-travel-map API `12301`, 관리 보조(Dagster) `12302`, Web UI `12305`로
+  재고정.
 - **개정**: 2026-06-13 — PC 개발 host `5432`는 공유 PostGIS 서버 인스턴스로 고정하고,
   kor-travel-map standalone local Postgres publish 기본값은 `15432`로 분리한다.
   공유 DB만 쓰는 Docker 기동은 `KOR_TRAVEL_MAP_DB_EXTERNAL=true`로 둔다.
-- **개정**: 2026-06-13 — `kor-travel-docker-manager`가 소유한 공유 로컬 인프라와
-  관측 스택을 기준으로 kor-travel-map API/admin UI/Dagster 포트를
-  `12701`/`12705`/`12702`로 재고정한다. kor-travel-geo API/Web UI는
-  `12501`/`12505`, 공유 PostGIS host는 `5432`, RustFS S3/console은
-  `12101`/`12105`, 관측 스택은 Grafana `12205`·cAdvisor `12301`·Prometheus
-  `12401`을 따른다.
+- **개정**: 2026-06-13 — kor-travel-map API/admin UI/Dagster 포트를
+  `12701`/`12705`/`12702`로 재고정하고, 의존 대상 kor-travel-geo API/Web UI는
+  `12501`/`12505`, 공유 PostGIS host는 `5432`를 참조한다.
 - **결정자**: 사용자
 - **관련**: ADR-020, ADR-035, ADR-045
 
@@ -29,15 +26,12 @@ ADR-045 이후 kor-travel-map은 Docker 독립 프로그램 + 독립 DB/Dagster 
 
 ### 결정
 
-1. kor-travel-map의 로컬/개발/compose 기본 포트는 docker-manager 포트 정책에 맞춰
-   다음으로 고정한다.
+1. kor-travel-map의 로컬/개발/compose 기본 포트는 다음으로 고정한다.
    - API(FastAPI `kor-travel-map-api`): `12701`
    - 추가 관리 포트(Dagster): `12702`
    - admin UI(Next.js): `12705`
-   - Postgres host: `5432`(container도 `5432`)
-   - RustFS S3 API: `12101`(console은 `12105`, RustFS container 내부 console은 `9001`)
-   - kor-travel-geo API/Web UI: `12501` / `12505`
-   - 관측 스택(docker-manager): Grafana `12205`, cAdvisor `12301`, Prometheus `12401`
+   - Postgres host: `5432`(container도 `5432`, standalone publish 기본값 `15432`)
+   - 의존 대상 kor-travel-geo API/Web UI(지오코딩 REST): `12501` / `12505`
 2. `scripts/stop-fixed-ports.sh`는 기본으로 `12701`, `12705`, `12702` listener를 찾아
    종료한다. 로컬 stack과 Docker stack 기동 스크립트는 먼저 이 스크립트를 실행한다.
 3. `.env`의 기존 provider service key 이름은 `scripts/load-env.sh`와
@@ -49,7 +43,7 @@ ADR-045 이후 kor-travel-map은 Docker 독립 프로그램 + 독립 DB/Dagster 
 
 ### 근거
 
-- 포트를 고정해야 TripMate OpenAPI 연동, Windows Playwright, WSL 서버, Docker compose
+- 포트를 고정해야 외부 OpenAPI 경계, Windows Playwright, WSL 서버, Docker compose
   검증이 같은 주소를 바라본다.
 - 점유 프로세스를 명시 종료한 뒤 기동해야 stale Next.js/uvicorn/Dagster 프로세스가
   검증 결과를 오염시키지 않는다.

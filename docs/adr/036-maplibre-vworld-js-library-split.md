@@ -1,4 +1,4 @@
-# ADR-036: `maplibre-vworld-js` 라이브러리 분리 + v0.1.0 — 공통 기능은 상류, TripMate 전용만 본 저장소
+# ADR-036: `maplibre-vworld-js` 라이브러리 분리 + v0.1.0 — 공통 frontend 기능을 상류 의존 라이브러리로 분리
 
 > **현행 핀(2026-06-11 기준)**: `maplibre-vworld-js#v0.1.3` + Next.js 16. 본 ADR
 > 제목/초기 본문의 `v0.1.0`은 채택 당시 값이며, v0.1.2 + Next.js 16 정합은
@@ -11,16 +11,13 @@
 
 ### 컨텍스트
 
-ADR-025/ADR-026에서 디버그 UI frontend + TripMate 사용자 UI 모두 `maplibre-
-vworld` 통일. 현재 `packages/kor-travel-map-admin/frontend/`에 vworld basemap +
-maki marker + 카테고리 토글 + bounds 검색 등 공통 기능이 빠르게 자란다. 이중
-중복 위험:
-
-- TripMate apps/web도 같은 vworld basemap 코드를 재구현해야 함.
-- 공통 기능 버그 수정이 두 코드베이스를 동시에 손봐야 함.
-
-별도 라이브러리 `maplibre-vworld-js`(또는 `maplibre-vworld`)로 빼서 한쪽에서
-유지보수 + 두 UI에서 import.
+ADR-025/ADR-026에서 admin/debug UI frontend가 `maplibre-vworld` 통일. 현재
+`packages/kor-travel-map-admin/frontend/`에 vworld basemap + maki marker +
+카테고리 토글 + bounds 검색 등 공통 기능이 빠르게 자란다. 이 공통 코드는 본
+저장소 frontend에 한정되지 않고 vworld basemap을 쓰는 다른 frontend에서도
+재사용 가능한 cross-cutting 자산이라, 본 저장소 안에 묶어두면 별도 유지보수가
+이중화될 위험이 있다. 별도 라이브러리 `maplibre-vworld-js`(또는 `maplibre-
+vworld`)로 빼서 한쪽에서 유지보수 + import한다.
 
 ### 결정
 
@@ -28,9 +25,8 @@ maki marker + 카테고리 토글 + bounds 검색 등 공통 기능이 빠르게
   legend / bounds 검색 helper / tile cache)는 **`maplibre-vworld-js` 별도
   라이브러리**로 분리. 본 저장소 외부에 둔다 (사용자가 `digitie/maplibre-
   vworld-js` 신규 GitHub repo 신설 예정).
-- **TripMate 전용 기능**(adminUI 시각화 / debug fixture replay / map overlay
-  on top of TripMate route plan 등)은 본 저장소(`packages/kor-travel-map-debug-
-  ui/frontend/` + 향후 `packages/tripmate-map-extensions/`)에 둔다.
+- 본 저장소 frontend는 이 라이브러리를 **상류 의존**으로 import하고, 본 저장소
+  고유의 admin/debug 시각화만 본 저장소에 둔다.
 - 목표 release: **`maplibre-vworld-js@0.1.0`** — vworld basemap + maki marker
   + 카테고리 legend 3종 안정화.
 
@@ -41,7 +37,7 @@ maki marker + 카테고리 토글 + bounds 검색 등 공통 기능이 빠르게
 
 ### 결과 (긍정)
 
-- TripMate apps/web이 본 저장소 디버그 UI와 vworld basemap 코드를 공유.
+- 본 저장소 frontend가 vworld basemap 공통 코드를 의존 라이브러리로 공유.
 - 라이브러리 단위로 semver 관리 + 회귀 테스트.
 
 ### 결과 (부정)

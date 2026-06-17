@@ -12,24 +12,24 @@ marker-react`)로 추출 + npm registry 게시까지 계획. 사용자가 검토
 
 ### 결정
 
-- `packages/map-marker-react/` 코드 자체는 **유지** — 디버그 UI + TripMate
-  apps/web이 같은 카테고리/maki 매핑을 공유하는 단일 source.
+- `packages/map-marker-react/` 코드 자체는 **유지** — 디버그 UI가 카테고리/maki
+  매핑을 공유하는 단일 source.
 - **npm registry 게시 안 함** — `package.json`에 `"private": true` 박음.
-- TripMate apps/web 등 외부 사용처는 git URL + commit sha 또는 yarn/pnpm
-  workspace로 import (모노레포 내부 share).
+- 사용처는 git URL + commit sha 또는 yarn/pnpm workspace로 import (모노레포 내부
+  share). registry install 의존 없음.
 - `@kor-travel-map/map-marker-react` scope 이름은 유지(이전 등록 X). 향후 다시
   registry 게시 필요해지면 새 ADR로 unfreeze.
 
 ### 근거
 
 - npm registry 게시는 namespace 점유 / 버전 관리 / 보안 책임이 따른다.
-- 본 라이브러리 + TripMate 둘만이 사용처라 git share로 충분.
+- 현재 사용처가 모노레포 내부로 한정되어 git share로 충분.
 - 사용자 결정 — registry 외부 노출 보류는 보안/유지보수 비용 절약.
 
 ### 결과 (긍정)
 
 - npm 계정/2FA/access token 관리 회피.
-- 라이브러리 코드 변경이 즉시 디버그 UI/TripMate에 반영 (git URL refresh).
+- 라이브러리 코드 변경이 즉시 디버그 UI에 반영 (git URL refresh).
 
 ### 결과 (부정)
 
@@ -41,5 +41,5 @@ marker-react`)로 추출 + npm registry 게시까지 계획. 사용자가 검토
 - `packages/map-marker-react/package.json`에 `"private": true` 박음.
 - ADR-029 status `superseded by ADR-043` 표기 (본 PR 동시).
 - `docs/journal.md`에 결정 reverse note.
-- `pyproject.toml`/TripMate `package.json` 등에서 `@kor-travel-map/map-marker-react`
-  의존성은 git URL 형식 유지(npm install registry 의존 X).
+- `pyproject.toml` 등에서 `@kor-travel-map/map-marker-react` 의존성은 git URL
+  형식 유지(npm install registry 의존 X).

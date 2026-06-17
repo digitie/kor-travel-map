@@ -57,17 +57,15 @@
     따라 Next.js stack 통일 — 1차의 Vite 가설보다 정확.)
 - **결과 (긍정)**:
   - 한국 운영 환경(VWorld, 행정구역, 도로명주소)에 정합.
-  - kor-travel-geo-ui 및 TripMate `apps/web`와 같은 frontend stack (Next.js +
-    React + TS, 2차 보강) → 형제 라이브러리 + 상위 app 운영 일관성.
+  - kor-travel-geo-ui와 같은 frontend stack (Next.js + React + TS, 2차 보강) →
+    형제 dependency(`kor-travel-geo`)와 운영 일관성.
   - Kakao 호출 한도 / JS key 발급 부담 없음.
   - 대용량 feature 렌더링 성능 우수.
   - maki icon이 본 라이브러리 category 체계와 자동 정합.
 - **결과 (부정)**:
   - VWorld API key 필요 — `kor-travel-geo` ADR-019의
     `KOR_TRAVEL_GEO_VWORLD_API_KEY` **공유** (별도 발급 X, 사용자 결정 2026-05-25).
-  - 디버그 UI 운영자는 React/Next.js/TypeScript 기본 지식 필요 (운영자는 한
-    명 이상이라 학습 부담 있음 — 단 TripMate `apps/web` 운영 학습이 그대로
-    이전됨).
+  - 디버그 UI 운영자는 React/Next.js/TypeScript 기본 지식 필요.
 - **사용자 보강 (2026-05-25, 1차)**:
   1. **VWorld API key 공유 정책 확정**: 디버그 UI는 `kor-travel-geo`의
      `KOR_TRAVEL_GEO_VWORLD_API_KEY`를 **공유 사용**. 별도 발급 / 별도 환경변수
@@ -83,12 +81,11 @@
      "stability 모니터링 필요" 항목은 **해소됨**.
 - **사용자 보강 (2026-05-25, 2차) — 빌드 도구 정정 Vite → Next.js**:
   3. **디버그 UI frontend = Next.js (App Router)**. 1차 결정의 "React + Vite"
-     는 잠정 가설이었고, **kor-travel-geo-ui** 및 **TripMate `apps/web`**(ADR-026)
-     이 모두 Next.js이므로 **단일 stack 통일**을 위해 Next.js로 정정.
+     는 잠정 가설이었고, dependency인 **kor-travel-geo-ui**가 Next.js이므로
+     **단일 stack 통일**을 위해 Next.js로 정정.
      - 빌드: `next build` → `.next/`. 운영 옵션 3가지 (standalone /
        FastAPI reverse proxy / static export — `debug-ui-package.md §14.3`).
-     - 개발: `next dev --port 8610 --hostname 127.0.0.1` (포트 8610은 TripMate
-       `apps/web` dev (3000) 충돌 회피).
+     - 개발: `next dev --port 8610 --hostname 127.0.0.1`.
      - Env 규약: `NEXT_PUBLIC_*` 만 브라우저 노출. `VITE_*` 미사용. 1차 결정의
        `VITE_VWORLD_API_KEY` / `VITE_KOR_TRAVEL_MAP_API_API`는 각각
        `NEXT_PUBLIC_VWORLD_API_KEY` / `NEXT_PUBLIC_KOR_TRAVEL_MAP_API`
@@ -96,8 +93,7 @@
      - 본 패키지 `@kor-travel-map/map-marker-react` (ADR-029)는 React 19 라이브러리로
        framework-agnostic. Next.js의 `transpilePackages`로 monorepo workspace
        에서 직접 import.
-     - **근거**: (1) kor-travel-geo-ui와 동일 stack — 학습 비용 0. (2) TripMate
-       `apps/web`와 동일 stack — 운영자가 두 UI 사이 학습 부담 0. (3) App
+     - **근거**: (1) kor-travel-geo-ui와 동일 stack — 학습 비용 0. (2) App
        Router의 server actions / streaming SSR은 본 디버그 UI는 read-mostly
        이라 미필요하지만, 향후 server-side admin 기능 (SQL EXPLAIN bulk,
        fixture management 등) 확장 시 유용.
@@ -113,5 +109,4 @@
   - VWorld API key 발급 절차는 `docs/external-apis.md` 갱신 (공유 정책 +
     Next.js env 명기).
   - `docs/etl/forest-feature-etl.md` §11.6의 "ADR-025 후보" 카테고리 확장은 번호
-    충돌 회피로 **ADR-027 후보**로 변경 (ADR-026은 TripMate UI 통일 ADR이
-    선점).
+    충돌 회피로 **ADR-027 후보**로 변경 (ADR-026은 선점됨).

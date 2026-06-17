@@ -72,7 +72,7 @@
     baseline 확보.
 
 - **결과 (부정)**:
-  - 사용자/TripMate 입장에서 "박물관/미술관"이 가장 흔한 카테고리인데 마지막
+  - 사용자 입장에서 "박물관/미술관"이 가장 흔한 카테고리인데 마지막
     Sprint까지 미적재 → demo/PoC에 미흡. 완화: Sprint 2 끝에 `data.go.kr-
     standard` 박물관만 *임시 sample* 1~2건 manual fixture로 디버그 UI에
     시연 가능하게.

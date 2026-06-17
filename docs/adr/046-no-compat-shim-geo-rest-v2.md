@@ -1,4 +1,4 @@
-# ADR-046: ADR-045 이행은 호환 shim 없이 정본 방향으로 전환하고 주소는 kor-travel-geo REST v2로 통일
+# ADR-046: 정본 방향 전환은 호환 shim 없이 하고 주소는 kor-travel-geo REST v2로 통일
 
 - **상태**: accepted
 - **날짜**: 2026-06-02
@@ -8,13 +8,12 @@
 ### 컨텍스트
 
 ADR-045로 kor-travel-map 운영 모델이 Docker 독립 프로그램 + 독립 DB/Dagster +
-TripMate OpenAPI 연동으로 바뀌었다. 또한 ADR-041로 `python-kraddr-base` 의존을
+외부 경계 OpenAPI로 바뀌었다. 또한 ADR-041로 `python-kraddr-base` 의존을
 제거하고 좌표는 `Coordinate`, 주소는 `Address`로 본 저장소가 소유한다. 문서와
 일부 예시에는 여전히 다음 구 모델 표현이 남아 있었다.
 
 - `kor-travel-map-admin`, `map_debug_ui`, `KOR_TRAVEL_MAP_DEBUG_UI_*` 같은 구 패키지명/env.
-- TripMate가 `kor-travel-map`을 직접 import하거나 같은 DB를 공유하는 흐름.
-- TripMate-owned Dagster asset이 provider 적재를 직접 수행하는 흐름.
+- 외부 소비자가 `kor-travel-map`을 직접 import하거나 같은 DB를 공유하는 흐름.
 - provider 주소 문자열이나 자체 행정코드를 그대로 `features.address`/행정코드로
   저장하는 흐름.
 - kor-travel-geo v1 `/v1/address/*` 또는 `PlaceCoordinate`/`kraddr.base.Address` 예시.
@@ -29,8 +28,7 @@ TripMate OpenAPI 연동으로 바뀌었다. 또한 ADR-041로 `python-kraddr-bas
    - 구 패키지 경로 `packages/kor-travel-map-admin/`, Python namespace
      `kortravelmap_debug_ui`, env prefix `KOR_TRAVEL_MAP_DEBUG_UI_*` 호환 shim을 만들지
      않는다.
-   - TripMate 직접 import, 공유 DB, TripMate-owned Dagster 경로를 유지하기 위한
-     adapter도 만들지 않는다.
+   - 외부 소비자 직접 import, 공유 DB를 유지하기 위한 adapter도 만들지 않는다.
    - 문서와 코드의 정본은 `kor-travel-map-admin`, `kortravelmap.api`,
      `KOR_TRAVEL_MAP_API_*`, OpenAPI, 독립 DB/Dagster다.
 
@@ -92,8 +90,7 @@ TripMate OpenAPI 연동으로 바뀌었다. 또한 ADR-041로 `python-kraddr-bas
 
 ### 후속
 
-- 실행 문서의 `/v1/address/*`, `PlaceCoordinate`, `kraddr.base.Address`,
-  TripMate-owned Dagster 표현을 정리한다.
+- 실행 문서의 `/v1/address/*`, `PlaceCoordinate`, `kraddr.base.Address` 표현을 정리한다.
 - `docs/architecture/address-geocoding.md`에 주소 정본 정책과 `AddressMatchReport`/admin issue
   흐름을 명시한다.
 - `docs/debug-ui-admin-workflows.md`와 `docs/architecture/openapi-admin-contract.md`에 주소 검토

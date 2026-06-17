@@ -54,7 +54,7 @@ provider 라이브러리에 있다.**
 - provider 스펙 조사가 정확·신속. 디버그 live loader wiring 시 로컬 client를
   근거로 faithful하게 매핑.
 - 데이터 정합성 버그의 책임 소재가 명확 — provider 라이브러리에서 고치면 본
-  lib + TripMate 전체가 일관.
+  lib 전체가 일관.
 
 ### 결과 (부정)
 

@@ -8,7 +8,7 @@
   `mapbox_maki_icon_for_category` 등 ~2,072 줄)를 의존성으로 import해 사용했다.
   사용자가 본 category 코드/문서를 `kor-travel-map`으로 이전하라고 지시.
   근거:
-  - category 데이터(141 enum + maki icon 매핑)는 TripMate 지도 도메인에 직접
+  - category 데이터(141 enum + maki icon 매핑)는 지도 도메인에 직접
     종속 — `kor-travel-map`이 1차 소비자.
   - 다른 라이브러리(`kor-travel-geo` 등)는 category에 의존하지 않음 — 분리
     시 영향 없음.

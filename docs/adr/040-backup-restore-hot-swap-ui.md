@@ -41,7 +41,7 @@
 ### 근거
 
 - PostgreSQL `pg_dump --format=custom` + RustFS snapshot이 industry-standard.
-- hot-swap은 비용이 비싸지만 운영 downtime 0 — 본 라이브러리는 TripMate에
+- hot-swap은 비용이 비싸지만 운영 downtime 0 — 본 라이브러리는 외부 소비자에
   실시간 의존하므로 downtime cost가 크다.
 
 ### 결과 (긍정)
