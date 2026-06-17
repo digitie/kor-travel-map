@@ -1,8 +1,9 @@
 "use client";
 
+import { type ColumnDef } from "@tanstack/react-table";
 import { PlayIcon, RefreshCwIcon, XIcon } from "lucide-react";
 import Link from "next/link";
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import {
   type FeatureUpdateStatus,
@@ -16,18 +17,10 @@ import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DataTable } from "@/components/ui/data-table";
 import { FormField, FormSelect } from "@/components/ui/form-field";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { formatDateTime, shortId } from "@/lib/format";
 import {
   combine,
@@ -75,6 +68,119 @@ export function FeatureUpdateRequestsClient() {
   const createRequest = useCreateFeatureUpdateRequestMutation();
   const cancelRequest = useCancelFeatureUpdateRequestMutation();
   const runNow = useRunFeatureUpdateRequestNowMutation();
+
+  const items = requests.data?.data.items ?? [];
+  type RequestRow = NonNullable<typeof requests.data>["data"]["items"][number];
+  const columns = useMemo<ColumnDef<RequestRow, unknown>[]>(
+    () => [
+      {
+        id: "request",
+        header: "request",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const id = row.original.request_id;
+          return (
+            <span className="font-mono text-xs">
+              {id ? (
+                <Link
+                  className="underline underline-offset-2"
+                  href={`/admin/feature-update-requests/${id}`}
+                >
+                  {shortId(id)}
+                </Link>
+              ) : (
+                shortId(id)
+              )}
+            </span>
+          );
+        },
+      },
+      { accessorKey: "scope_type", header: "scope" },
+      {
+        accessorKey: "status",
+        header: "status",
+        cell: ({ row }) => <StatusBadge status={row.original.status} />,
+      },
+      { accessorKey: "run_mode", header: "mode" },
+      {
+        id: "providers",
+        header: "providers",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <span className="block max-w-56 truncate">
+            {row.original.providers.join(", ") || "-"}
+          </span>
+        ),
+      },
+      {
+        id: "job",
+        header: "job",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <span className="font-mono text-xs">{shortId(row.original.job_id)}</span>
+        ),
+      },
+      {
+        accessorKey: "created_at",
+        header: "created",
+        cell: ({ row }) => (
+          <span className="text-muted-foreground">
+            {formatDateTime(row.original.created_at)}
+          </span>
+        ),
+      },
+      {
+        id: "actions",
+        header: "actions",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const request = row.original;
+          if (!request.request_id) {
+            return <span className="text-sm text-muted-foreground">dry-run</span>;
+          }
+          const requestId = request.request_id;
+          return (
+            <div className="flex flex-wrap gap-1">
+              {["queued", "running"].includes(request.status) ? (
+                <Button
+                  disabled={cancelRequest.isPending}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                  onClick={() =>
+                    cancelRequest.mutate({
+                      requestId,
+                      body: { error_message: "cancelled from admin ui" },
+                    })
+                  }
+                >
+                  <XIcon data-icon="inline-start" />
+                  cancel
+                </Button>
+              ) : null}
+              {request.status !== "running" ? (
+                <Button
+                  disabled={runNow.isPending}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                  onClick={() =>
+                    runNow.mutate({
+                      requestId,
+                      body: { reason: "run-now from admin ui" },
+                    })
+                  }
+                >
+                  run-now
+                </Button>
+              ) : null}
+            </div>
+          );
+        },
+      },
+    ],
+    [cancelRequest, runNow],
+  );
 
   const submit = () => {
     const values = {
@@ -267,96 +373,14 @@ export function FeatureUpdateRequestsClient() {
               {requests.data?.data.items.length ?? 0} rows
             </Badge>
           </div>
-          {requests.isLoading ? <Skeleton className="h-96" /> : null}
-          <div className="overflow-auto rounded-lg border bg-background">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>request</TableHead>
-                  <TableHead>scope</TableHead>
-                  <TableHead>status</TableHead>
-                  <TableHead>mode</TableHead>
-                  <TableHead>providers</TableHead>
-                  <TableHead>job</TableHead>
-                  <TableHead>created</TableHead>
-                  <TableHead>actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(requests.data?.data.items ?? []).map((request) => (
-                  <TableRow key={request.request_id ?? JSON.stringify(request.scope)}>
-                    <TableCell className="font-mono text-xs">
-                      {request.request_id ? (
-                        <Link
-                          className="underline underline-offset-2"
-                          href={`/admin/feature-update-requests/${request.request_id}`}
-                        >
-                          {shortId(request.request_id)}
-                        </Link>
-                      ) : (
-                        shortId(request.request_id)
-                      )}
-                    </TableCell>
-                    <TableCell>{request.scope_type}</TableCell>
-                    <TableCell>
-                      <StatusBadge status={request.status} />
-                    </TableCell>
-                    <TableCell>{request.run_mode}</TableCell>
-                    <TableCell className="max-w-56 truncate">
-                      {request.providers.join(", ") || "-"}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">
-                      {shortId(request.job_id)}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {formatDateTime(request.created_at)}
-                    </TableCell>
-                    <TableCell>
-                      {request.request_id ? (
-                        <div className="flex flex-wrap gap-1">
-                          {["queued", "running"].includes(request.status) ? (
-                            <Button
-                              disabled={cancelRequest.isPending}
-                              size="sm"
-                              type="button"
-                              variant="outline"
-                              onClick={() =>
-                                cancelRequest.mutate({
-                                  requestId: request.request_id as string,
-                                  body: { error_message: "cancelled from admin ui" },
-                                })
-                              }
-                            >
-                              <XIcon data-icon="inline-start" />
-                              cancel
-                            </Button>
-                          ) : null}
-                          {request.status !== "running" ? (
-                            <Button
-                              disabled={runNow.isPending}
-                              size="sm"
-                              type="button"
-                              variant="ghost"
-                              onClick={() =>
-                                runNow.mutate({
-                                  requestId: request.request_id as string,
-                                  body: { reason: "run-now from admin ui" },
-                                })
-                              }
-                            >
-                              run-now
-                            </Button>
-                          ) : null}
-                        </div>
-                      ) : (
-                        <span className="text-sm text-muted-foreground">dry-run</span>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+          <DataTable
+            columns={columns}
+            data={items}
+            getRowId={(row) => row.request_id ?? JSON.stringify(row.scope)}
+            isLoading={requests.isLoading}
+            emptyMessage="요청이 없습니다."
+            containerClassName="rounded-lg border bg-background"
+          />
         </div>
       </div>
     </AdminShell>

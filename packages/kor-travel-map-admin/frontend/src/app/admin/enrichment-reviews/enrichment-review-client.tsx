@@ -1,7 +1,8 @@
 "use client";
 
+import { type ColumnDef } from "@tanstack/react-table";
 import { CheckIcon, RefreshCwIcon, XIcon } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import {
   type EnrichmentDecision,
@@ -13,17 +14,9 @@ import { AdminShell } from "@/components/admin-shell";
 import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { DataTable } from "@/components/ui/data-table";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { formatDateTime, shortId } from "@/lib/format";
 
 const statuses: Array<EnrichmentStatus | "all"> = [
@@ -72,6 +65,116 @@ export function EnrichmentReviewClient() {
     });
   };
 
+  const items = reviews.data?.data.items ?? [];
+  type ReviewRow = NonNullable<typeof reviews.data>["data"]["items"][number];
+  const columns = useMemo<ColumnDef<ReviewRow, unknown>[]>(
+    () => [
+      {
+        id: "review",
+        header: "review",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <span className="font-mono text-xs">
+            {shortId(row.original.review_id)}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "name_score",
+        header: "score",
+        cell: ({ row }) => (
+          <span className="font-mono">{row.original.name_score.toFixed(1)}</span>
+        ),
+      },
+      {
+        id: "target",
+        header: "1차 (datagokr)",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <>
+            <div className="font-medium">{row.original.target_name}</div>
+            <div className="text-xs text-muted-foreground">
+              {row.original.target_category ?? "-"} ·{" "}
+              {shortId(row.original.target_feature_id)}
+            </div>
+          </>
+        ),
+      },
+      {
+        id: "source",
+        header: "2차 (visitkorea)",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <>
+            <div className="font-medium">{row.original.source_name}</div>
+            <div className="text-xs text-muted-foreground">
+              {row.original.source_provider} · {row.original.source_entity_id}
+            </div>
+          </>
+        ),
+      },
+      {
+        accessorKey: "status",
+        header: "status",
+        cell: ({ row }) => <StatusBadge status={row.original.status} />,
+      },
+      {
+        accessorKey: "created_at",
+        header: "created",
+        cell: ({ row }) => (
+          <span className="text-muted-foreground">
+            {formatDateTime(row.original.created_at)}
+          </span>
+        ),
+      },
+      {
+        id: "actions",
+        header: "actions",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const item = row.original;
+          return item.status === "pending" ? (
+            <div className="flex flex-wrap gap-1">
+              <Button
+                disabled={decision.isPending}
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={() => decide(item.review_id, "accepted")}
+              >
+                <CheckIcon data-icon="inline-start" />
+                accept
+              </Button>
+              <Button
+                disabled={decision.isPending}
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={() => decide(item.review_id, "rejected")}
+              >
+                <XIcon data-icon="inline-start" />
+                reject
+              </Button>
+              <Button
+                disabled={decision.isPending}
+                size="sm"
+                type="button"
+                variant="ghost"
+                onClick={() => decide(item.review_id, "ignored")}
+              >
+                ignore
+              </Button>
+            </div>
+          ) : (
+            <span className="text-sm text-muted-foreground">완료</span>
+          );
+        },
+      },
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [decision.isPending],
+  );
+
   return (
     <AdminShell
       actions={
@@ -113,101 +216,14 @@ export function EnrichmentReviewClient() {
           ))}
         </NativeSelect>
 
-        {reviews.isLoading ? <Skeleton className="h-96" /> : null}
-        <div className="overflow-auto rounded-lg border bg-background">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>review</TableHead>
-                <TableHead>score</TableHead>
-                <TableHead>1차 (datagokr)</TableHead>
-                <TableHead>2차 (visitkorea)</TableHead>
-                <TableHead>status</TableHead>
-                <TableHead>created</TableHead>
-                <TableHead>actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(reviews.data?.data.items ?? []).map((item) => (
-                <TableRow key={item.review_id}>
-                  <TableCell className="font-mono text-xs">
-                    {shortId(item.review_id)}
-                  </TableCell>
-                  <TableCell className="font-mono">
-                    {item.name_score.toFixed(1)}
-                  </TableCell>
-                  <TableCell>
-                    <div className="font-medium">{item.target_name}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {item.target_category ?? "-"} ·{" "}
-                      {shortId(item.target_feature_id)}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="font-medium">{item.source_name}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {item.source_provider} · {item.source_entity_id}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <StatusBadge status={item.status} />
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {formatDateTime(item.created_at)}
-                  </TableCell>
-                  <TableCell>
-                    {item.status === "pending" ? (
-                      <div className="flex flex-wrap gap-1">
-                        <Button
-                          disabled={decision.isPending}
-                          size="sm"
-                          type="button"
-                          variant="outline"
-                          onClick={() => decide(item.review_id, "accepted")}
-                        >
-                          <CheckIcon data-icon="inline-start" />
-                          accept
-                        </Button>
-                        <Button
-                          disabled={decision.isPending}
-                          size="sm"
-                          type="button"
-                          variant="outline"
-                          onClick={() => decide(item.review_id, "rejected")}
-                        >
-                          <XIcon data-icon="inline-start" />
-                          reject
-                        </Button>
-                        <Button
-                          disabled={decision.isPending}
-                          size="sm"
-                          type="button"
-                          variant="ghost"
-                          onClick={() => decide(item.review_id, "ignored")}
-                        >
-                          ignore
-                        </Button>
-                      </div>
-                    ) : (
-                      <span className="text-sm text-muted-foreground">완료</span>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-              {!reviews.isLoading &&
-              (reviews.data?.data.items.length ?? 0) === 0 ? (
-                <TableRow>
-                  <TableCell
-                    className="h-32 text-center text-muted-foreground"
-                    colSpan={7}
-                  >
-                    enrichment review가 없습니다.
-                  </TableCell>
-                </TableRow>
-              ) : null}
-            </TableBody>
-          </Table>
-        </div>
+        <DataTable
+          columns={columns}
+          data={items}
+          getRowId={(row) => row.review_id}
+          isLoading={reviews.isLoading}
+          emptyMessage="enrichment review가 없습니다."
+          containerClassName="overflow-auto rounded-lg border bg-background"
+        />
 
         <div className="flex items-center justify-between gap-2">
           <span className="text-sm text-muted-foreground">

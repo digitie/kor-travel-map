@@ -9,6 +9,11 @@ import {
   SearchIcon,
   XCircleIcon,
 } from "lucide-react";
+import {
+  type ColumnDef,
+  type OnChangeFn,
+  type SortingState,
+} from "@tanstack/react-table";
 import Link from "next/link";
 import { useDeferredValue, useMemo, useState } from "react";
 
@@ -29,18 +34,11 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
+import { DataTable } from "@/components/ui/data-table";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { formatCount, formatDateTime, shortId } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -207,6 +205,175 @@ export function AdminFeaturesClient() {
       },
     });
   };
+
+  // 서버 정렬(keyset cursor)이므로 sort/order state를 react-table SortingState로
+  // 양방향 미러링한다. 기존 sort NativeSelect + asc/desc Button과 동일 state를 공유한다.
+  const sorting = useMemo<SortingState>(
+    () => [{ id: sort, desc: order === "desc" }],
+    [sort, order],
+  );
+  const handleSortingChange: OnChangeFn<SortingState> = (updater) => {
+    const next = typeof updater === "function" ? updater(sorting) : updater;
+    const first = next[0];
+    if (!first) return;
+    setSort(first.id as AdminFeatureSort);
+    setOrder(first.desc ? "desc" : "asc");
+    resetCursor();
+  };
+
+  const columns = useMemo<ColumnDef<AdminFeatureRecord, unknown>[]>(
+    () => [
+      {
+        id: "name",
+        header: "feature",
+        cell: ({ row }) => {
+          const feature = row.original;
+          return (
+            <>
+              <div className="font-medium">{feature.name}</div>
+              <div className="break-all font-mono text-xs text-muted-foreground">
+                {shortId(feature.feature_id, 18)}
+              </div>
+            </>
+          );
+        },
+      },
+      {
+        id: "kind_status",
+        header: "kind/status",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const feature = row.original;
+          return (
+            <>
+              <div className="flex flex-wrap gap-1">
+                <Badge variant="outline">{feature.kind}</Badge>
+                <StatusBadge status={feature.status} />
+              </div>
+              <div className="mt-1 font-mono text-xs text-muted-foreground">
+                {feature.category}
+              </div>
+            </>
+          );
+        },
+      },
+      {
+        id: "provider",
+        header: "provider",
+        cell: ({ row }) => {
+          const feature = row.original;
+          return (
+            <>
+              <div>{feature.primary_provider ?? "-"}</div>
+              <div className="text-xs text-muted-foreground">
+                {feature.primary_dataset_key ?? "-"}
+              </div>
+            </>
+          );
+        },
+      },
+      {
+        id: "issue_count",
+        header: "issues",
+        cell: ({ row }) => {
+          const feature = row.original;
+          return (
+            <>
+              <Badge
+                variant={feature.issue_count > 0 ? "destructive" : "outline"}
+              >
+                {feature.issue_count}
+              </Badge>
+              {feature.issues.slice(0, 2).map((issue) => (
+                <div
+                  className="mt-1 max-w-48 truncate text-xs text-muted-foreground"
+                  key={issue.issue_id ?? issue.message}
+                >
+                  {issue.violation_type ?? "issue"} · {issue.message ?? "-"}
+                </div>
+              ))}
+            </>
+          );
+        },
+      },
+      {
+        id: "coord_address",
+        header: "coord/address",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const feature = row.original;
+          return (
+            <>
+              <div className="font-mono text-xs">{coordLabel(feature)}</div>
+              <div className="mt-1 max-w-64 truncate text-xs text-muted-foreground">
+                {feature.address_label || "-"}
+              </div>
+            </>
+          );
+        },
+      },
+      {
+        id: "updated_at",
+        header: "updated",
+        cell: ({ row }) => (
+          <span className="text-muted-foreground">
+            {formatDateTime(row.original.updated_at)}
+          </span>
+        ),
+      },
+      {
+        id: "actions",
+        header: "actions",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const feature = row.original;
+          return (
+            <div className="flex flex-wrap gap-1">
+              <Button
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setSelectedFeatureId(feature.feature_id);
+                }}
+              >
+                <EyeIcon data-icon="inline-start" />
+                detail
+              </Button>
+              <Link
+                className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
+                href={featureDetailHref(feature.feature_id)}
+                onClick={(event) => event.stopPropagation()}
+              >
+                <ExternalLinkIcon data-icon="inline-start" />
+                open
+              </Link>
+              <Button
+                disabled={
+                  deactivate.isPending ||
+                  feature.status === "inactive" ||
+                  feature.status === "deleted"
+                }
+                size="sm"
+                type="button"
+                variant="ghost"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  deactivateFeature(feature);
+                }}
+              >
+                <XCircleIcon data-icon="inline-start" />
+                deactivate
+              </Button>
+            </div>
+          );
+        },
+      },
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [deactivate.isPending],
+  );
 
   return (
     <AdminShell
@@ -393,136 +560,21 @@ export function AdminFeaturesClient() {
                 </Button>
               </div>
             </div>
-            {features.isLoading ? <Skeleton className="m-4 h-96" /> : null}
-            <div className="overflow-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>feature</TableHead>
-                    <TableHead>kind/status</TableHead>
-                    <TableHead>provider</TableHead>
-                    <TableHead>issues</TableHead>
-                    <TableHead>coord/address</TableHead>
-                    <TableHead>updated</TableHead>
-                    <TableHead>actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {items.map((feature) => (
-                    <TableRow
-                      className="cursor-pointer"
-                      key={feature.feature_id}
-                      data-state={
-                        selectedFeatureId === feature.feature_id ? "selected" : undefined
-                      }
-                      onClick={() => setSelectedFeatureId(feature.feature_id)}
-                    >
-                      <TableCell>
-                        <div className="font-medium">{feature.name}</div>
-                        <div className="break-all font-mono text-xs text-muted-foreground">
-                          {shortId(feature.feature_id, 18)}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap gap-1">
-                          <Badge variant="outline">{feature.kind}</Badge>
-                          <StatusBadge status={feature.status} />
-                        </div>
-                        <div className="mt-1 font-mono text-xs text-muted-foreground">
-                          {feature.category}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div>{feature.primary_provider ?? "-"}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {feature.primary_dataset_key ?? "-"}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge
-                          variant={
-                            feature.issue_count > 0 ? "destructive" : "outline"
-                          }
-                        >
-                          {feature.issue_count}
-                        </Badge>
-                        {feature.issues.slice(0, 2).map((issue) => (
-                          <div
-                            className="mt-1 max-w-48 truncate text-xs text-muted-foreground"
-                            key={issue.issue_id ?? issue.message}
-                          >
-                            {issue.violation_type ?? "issue"} ·{" "}
-                            {issue.message ?? "-"}
-                          </div>
-                        ))}
-                      </TableCell>
-                      <TableCell>
-                        <div className="font-mono text-xs">{coordLabel(feature)}</div>
-                        <div className="mt-1 max-w-64 truncate text-xs text-muted-foreground">
-                          {feature.address_label || "-"}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {formatDateTime(feature.updated_at)}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap gap-1">
-                          <Button
-                            size="sm"
-                            type="button"
-                            variant="outline"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              setSelectedFeatureId(feature.feature_id);
-                            }}
-                          >
-                            <EyeIcon data-icon="inline-start" />
-                            detail
-                          </Button>
-                          <Link
-                            className={cn(
-                              buttonVariants({ variant: "ghost", size: "sm" }),
-                            )}
-                            href={featureDetailHref(feature.feature_id)}
-                            onClick={(event) => event.stopPropagation()}
-                          >
-                            <ExternalLinkIcon data-icon="inline-start" />
-                            open
-                          </Link>
-                          <Button
-                            disabled={
-                              deactivate.isPending ||
-                              feature.status === "inactive" ||
-                              feature.status === "deleted"
-                            }
-                            size="sm"
-                            type="button"
-                            variant="ghost"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              deactivateFeature(feature);
-                            }}
-                          >
-                            <XCircleIcon data-icon="inline-start" />
-                            deactivate
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                  {!features.isLoading && items.length === 0 ? (
-                    <TableRow>
-                      <TableCell
-                        className="h-32 text-center text-muted-foreground"
-                        colSpan={7}
-                      >
-                        feature가 없습니다.
-                      </TableCell>
-                    </TableRow>
-                  ) : null}
-                </TableBody>
-              </Table>
-            </div>
+            <DataTable
+              columns={columns}
+              data={items}
+              getRowId={(feature) => feature.feature_id}
+              isLoading={features.isLoading}
+              emptyMessage="feature가 없습니다."
+              sorting={sorting}
+              onSortingChange={handleSortingChange}
+              manualSorting
+              onRowClick={(feature) => setSelectedFeatureId(feature.feature_id)}
+              isRowActive={(feature) =>
+                selectedFeatureId === feature.feature_id
+              }
+              containerClassName="overflow-auto"
+            />
           </div>
 
           <FeatureDetailInspector featureId={selectedFeatureId} />

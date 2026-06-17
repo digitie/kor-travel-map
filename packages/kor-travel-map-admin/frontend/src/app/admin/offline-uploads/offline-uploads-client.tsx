@@ -1,5 +1,6 @@
 "use client";
 
+import { type ColumnDef } from "@tanstack/react-table";
 import {
   CheckCircle2Icon,
   Columns3Icon,
@@ -29,19 +30,12 @@ import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DataTable } from "@/components/ui/data-table";
 import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { formatDateTime, shortId } from "@/lib/format";
 
 const statuses: Array<OfflineUploadStatus | "all"> = [
@@ -228,13 +222,42 @@ function MappingInput({
   );
 }
 
+type PreviewRow = Record<string, string>;
+
 function PreviewTable({
   headers,
   rows,
 }: {
   headers: string[];
-  rows: Array<Record<string, string>>;
+  rows: Array<PreviewRow>;
 }) {
+  // 컬럼이 동적(파싱된 header 배열)이므로 headers로부터 ColumnDef를 생성한다.
+  // preview는 정렬/선택 불필요 — enableSorting 전부 false. 기존 header/cell의
+  // font-mono/truncate/title 스타일은 렌더러로 그대로 옮긴다.
+  const columns = useMemo<ColumnDef<PreviewRow, unknown>[]>(
+    () =>
+      headers.map((header) => ({
+        id: header,
+        accessorFn: (row) => row[header] ?? "",
+        enableSorting: false,
+        header: () => (
+          <span className="whitespace-nowrap font-mono text-xs">{header}</span>
+        ),
+        cell: ({ row }) => {
+          const value = row.original[header] ?? "";
+          return (
+            <span
+              className="block max-w-56 truncate whitespace-nowrap text-xs"
+              title={value}
+            >
+              {value}
+            </span>
+          );
+        },
+      })),
+    [headers],
+  );
+
   if (headers.length === 0) {
     return (
       <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
@@ -244,36 +267,62 @@ function PreviewTable({
   }
 
   return (
-    <div className="max-h-80 overflow-auto rounded-md border">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            {headers.map((header) => (
-              <TableHead className="whitespace-nowrap font-mono text-xs" key={header}>
-                {header}
-              </TableHead>
-            ))}
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {rows.map((row) => (
-            <TableRow key={headers.map((header) => row[header] ?? "").join("\u0001")}>
-              {headers.map((header) => (
-                <TableCell
-                  className="max-w-56 truncate whitespace-nowrap text-xs"
-                  key={header}
-                  title={row[header] ?? ""}
-                >
-                  {row[header] ?? ""}
-                </TableCell>
-              ))}
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
+    <DataTable
+      columns={columns}
+      data={rows}
+      getRowId={(row) =>
+        headers.map((header) => row[header] ?? "").join("")
+      }
+      emptyMessage="preview 행이 없습니다."
+      containerClassName="max-h-80 overflow-auto rounded-md border"
+    />
   );
 }
+
+type ValidationIssueRow = {
+  severity: string;
+  row_number?: number | null;
+  column?: string | null;
+  code: string;
+  message: string;
+};
+
+const validationIssueColumns: ColumnDef<ValidationIssueRow, unknown>[] = [
+  {
+    accessorKey: "severity",
+    header: "severity",
+    cell: ({ row }) => <StatusBadge status={row.original.severity} />,
+  },
+  {
+    accessorKey: "row_number",
+    header: "row",
+    cell: ({ row }) => (
+      <span className="font-mono text-xs">{row.original.row_number ?? "-"}</span>
+    ),
+  },
+  {
+    accessorKey: "column",
+    header: "column",
+    cell: ({ row }) => (
+      <span className="font-mono text-xs">{row.original.column ?? "-"}</span>
+    ),
+  },
+  {
+    accessorKey: "code",
+    header: "code",
+    cell: ({ row }) => (
+      <span className="font-mono text-xs">{row.original.code}</span>
+    ),
+  },
+  {
+    accessorKey: "message",
+    header: "message",
+    enableSorting: false,
+    cell: ({ row }) => (
+      <span className="block max-w-xl">{row.original.message}</span>
+    ),
+  },
+];
 
 function ValidationPanel({
   selected,
@@ -424,46 +473,15 @@ function ValidationPanel({
             </Badge>
             <Badge variant="outline">{issues.length} issues</Badge>
           </div>
-          <div className="max-h-72 overflow-auto rounded-md border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>severity</TableHead>
-                  <TableHead>row</TableHead>
-                  <TableHead>column</TableHead>
-                  <TableHead>code</TableHead>
-                  <TableHead>message</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {issues.map((issue, index) => (
-                  <TableRow key={`${issue.code}-${issue.row_number ?? index}`}>
-                    <TableCell>
-                      <StatusBadge status={issue.severity} />
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">
-                      {issue.row_number ?? "-"}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">
-                      {issue.column ?? "-"}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">{issue.code}</TableCell>
-                    <TableCell className="max-w-xl">{issue.message}</TableCell>
-                  </TableRow>
-                ))}
-                {issues.length === 0 ? (
-                  <TableRow>
-                    <TableCell
-                      className="h-20 text-center text-muted-foreground"
-                      colSpan={5}
-                    >
-                      validation issue가 없습니다.
-                    </TableCell>
-                  </TableRow>
-                ) : null}
-              </TableBody>
-            </Table>
-          </div>
+          <DataTable
+            columns={validationIssueColumns}
+            data={issues}
+            getRowId={(issue, index) =>
+              `${issue.code}-${issue.row_number ?? index}`
+            }
+            emptyMessage="validation issue가 없습니다."
+            containerClassName="max-h-72 overflow-auto rounded-md border"
+          />
         </div>
       ) : null}
     </div>
@@ -502,6 +520,138 @@ export function OfflineUploadsClient() {
     selectedUpload.data?.data ??
     uploads.data?.data.items.find((item) => item.upload_id === selectedUploadId) ??
     null;
+
+  const uploadItems = uploads.data?.data.items ?? [];
+
+  // 셀 내부 mutation pending(.isPending)에 의존하는 disabled를 반영하기 위해
+  // launchLoad/deleteUpload pending과 selectedUploadId를 deps로 메모이즈한다.
+  const uploadColumns = useMemo<ColumnDef<OfflineUploadRecord, unknown>[]>(
+    () => [
+      {
+        id: "upload",
+        header: "upload",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <span className="font-mono text-xs">
+            {shortId(row.original.upload_id)}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "status",
+        header: "status",
+        cell: ({ row }) => <StatusBadge status={row.original.status} />,
+      },
+      {
+        id: "format",
+        header: "format",
+        accessorFn: (row) => uploadFormat(row),
+        cell: ({ row }) => (
+          <Badge variant="outline">{uploadFormat(row.original) || "-"}</Badge>
+        ),
+      },
+      {
+        id: "provider/dataset",
+        header: "provider/dataset",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <>
+            <div className="max-w-64 truncate">{row.original.provider}</div>
+            <div className="max-w-64 truncate text-xs text-muted-foreground">
+              {row.original.dataset_key}/{row.original.sync_scope}
+            </div>
+          </>
+        ),
+      },
+      {
+        id: "file",
+        header: "file",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <div className="flex max-w-72 items-center gap-2 truncate">
+            <FileUpIcon className="size-4 shrink-0 text-muted-foreground" />
+            <span className="truncate">{row.original.original_filename}</span>
+          </div>
+        ),
+      },
+      {
+        accessorKey: "byte_size",
+        header: "size",
+        cell: ({ row }) => formatBytes(row.original.byte_size),
+      },
+      {
+        accessorKey: "updated_at",
+        header: "updated",
+        cell: ({ row }) => (
+          <span className="text-muted-foreground">
+            {formatDateTime(row.original.updated_at)}
+          </span>
+        ),
+      },
+      {
+        id: "actions",
+        header: "actions",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const upload = row.original;
+          const loadEnabled = canLoad(upload);
+          return (
+            <div className="flex items-center gap-1">
+              <Button
+                data-testid="offline-upload-load"
+                disabled={launchLoad.isPending || !loadEnabled}
+                size="sm"
+                title={
+                  loadEnabled
+                    ? "load"
+                    : "CSV/TSV는 validation 완료 후 load 가능"
+                }
+                type="button"
+                variant={loadEnabled ? "outline" : "ghost"}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setSelectedUploadId(upload.upload_id);
+                  launchLoad.mutate(upload.upload_id);
+                }}
+              >
+                <PlayIcon data-icon="inline-start" />
+                load
+              </Button>
+              <Button
+                data-testid="offline-upload-delete"
+                disabled={
+                  deleteUpload.isPending ||
+                  inProgressStates.has(upload.status)
+                }
+                size="sm"
+                title={
+                  inProgressStates.has(upload.status)
+                    ? "validation/load 진행 중에는 삭제 불가"
+                    : "업로드 row + 저장 객체 삭제"
+                }
+                type="button"
+                variant="ghost"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  deleteUpload.mutate(upload.upload_id, {
+                    onSuccess: () => {
+                      if (selectedUploadId === upload.upload_id) {
+                        setSelectedUploadId(null);
+                      }
+                    },
+                  });
+                }}
+              >
+                <Trash2Icon data-icon="inline-start" />
+                삭제
+              </Button>
+            </div>
+          );
+        },
+      },
+    ],
+    [launchLoad, deleteUpload, selectedUploadId],
+  );
 
   const submitUpload = () => {
     if (file === null) {
@@ -691,124 +841,16 @@ export function OfflineUploadsClient() {
             </Badge>
           </div>
 
-          {uploads.isLoading ? <Skeleton className="h-96" /> : null}
-          <div className="overflow-auto rounded-lg border bg-background">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>upload</TableHead>
-                  <TableHead>status</TableHead>
-                  <TableHead>format</TableHead>
-                  <TableHead>provider/dataset</TableHead>
-                  <TableHead>file</TableHead>
-                  <TableHead>size</TableHead>
-                  <TableHead>updated</TableHead>
-                  <TableHead>actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(uploads.data?.data.items ?? []).map((upload) => {
-                  const loadEnabled = canLoad(upload);
-                  return (
-                    <TableRow
-                      className="cursor-pointer"
-                      data-testid="offline-upload-row"
-                      key={upload.upload_id}
-                      onClick={() => setSelectedUploadId(upload.upload_id)}
-                    >
-                      <TableCell className="font-mono text-xs">
-                        {shortId(upload.upload_id)}
-                      </TableCell>
-                      <TableCell>
-                        <StatusBadge status={upload.status} />
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{uploadFormat(upload) || "-"}</Badge>
-                      </TableCell>
-                      <TableCell>
-                        <div className="max-w-64 truncate">{upload.provider}</div>
-                        <div className="max-w-64 truncate text-xs text-muted-foreground">
-                          {upload.dataset_key}/{upload.sync_scope}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex max-w-72 items-center gap-2 truncate">
-                          <FileUpIcon className="size-4 shrink-0 text-muted-foreground" />
-                          <span className="truncate">{upload.original_filename}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell>{formatBytes(upload.byte_size)}</TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {formatDateTime(upload.updated_at)}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-1">
-                          <Button
-                            data-testid="offline-upload-load"
-                            disabled={launchLoad.isPending || !loadEnabled}
-                            size="sm"
-                            title={
-                              loadEnabled
-                                ? "load"
-                                : "CSV/TSV는 validation 완료 후 load 가능"
-                            }
-                            type="button"
-                            variant={loadEnabled ? "outline" : "ghost"}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              setSelectedUploadId(upload.upload_id);
-                              launchLoad.mutate(upload.upload_id);
-                            }}
-                          >
-                            <PlayIcon data-icon="inline-start" />
-                            load
-                          </Button>
-                          <Button
-                            data-testid="offline-upload-delete"
-                            disabled={
-                              deleteUpload.isPending ||
-                              inProgressStates.has(upload.status)
-                            }
-                            size="sm"
-                            title={
-                              inProgressStates.has(upload.status)
-                                ? "validation/load 진행 중에는 삭제 불가"
-                                : "업로드 row + 저장 객체 삭제"
-                            }
-                            type="button"
-                            variant="ghost"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              deleteUpload.mutate(upload.upload_id, {
-                                onSuccess: () => {
-                                  if (selectedUploadId === upload.upload_id) {
-                                    setSelectedUploadId(null);
-                                  }
-                                },
-                              });
-                            }}
-                          >
-                            <Trash2Icon data-icon="inline-start" />
-                            삭제
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-                {!uploads.isLoading && (uploads.data?.data.items.length ?? 0) === 0 ? (
-                  <TableRow>
-                    <TableCell
-                      className="h-32 text-center text-muted-foreground"
-                      colSpan={8}
-                    >
-                      offline upload가 없습니다.
-                    </TableCell>
-                  </TableRow>
-                ) : null}
-              </TableBody>
-            </Table>
-          </div>
+          <DataTable
+            columns={uploadColumns}
+            data={uploadItems}
+            getRowId={(row) => row.upload_id}
+            isLoading={uploads.isLoading}
+            emptyMessage="offline upload가 없습니다."
+            onRowClick={(upload) => setSelectedUploadId(upload.upload_id)}
+            isRowActive={(upload) => upload.upload_id === selectedUploadId}
+            containerClassName="overflow-auto rounded-lg border bg-background"
+          />
         </div>
       </div>
     </AdminShell>

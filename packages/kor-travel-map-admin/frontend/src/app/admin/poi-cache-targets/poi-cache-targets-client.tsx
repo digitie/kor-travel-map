@@ -1,12 +1,13 @@
 "use client";
 
+import { type ColumnDef } from "@tanstack/react-table";
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
   RefreshCwIcon,
   Trash2Icon,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import {
   type PoiCacheTargetRecord,
@@ -19,17 +20,9 @@ import { AdminShell } from "@/components/admin-shell";
 import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { DataTable } from "@/components/ui/data-table";
 import { FormField, FormSelect } from "@/components/ui/form-field";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { formatDateTime, shortId } from "@/lib/format";
 import {
   combine,
@@ -74,6 +67,122 @@ export function PoiCacheTargetsClient() {
           page_size: 100,
         }
       : null,
+  );
+
+  const targetItems = targets.data?.data.items ?? [];
+  const nearbyItems = nearby.data?.data.items ?? [];
+  type TargetRow = NonNullable<
+    typeof targets.data
+  >["data"]["items"][number];
+  type NearbyRow = NonNullable<typeof nearby.data>["data"]["items"][number];
+
+  const targetColumns = useMemo<ColumnDef<TargetRow, unknown>[]>(
+    () => [
+      {
+        id: "target",
+        header: "target",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const target = row.original;
+          return (
+            <>
+              <div className="font-medium">
+                {target.name ?? target.target_key}
+              </div>
+              <div className="font-mono text-xs text-muted-foreground">
+                {target.external_system}/{shortId(target.target_key, 18)}
+              </div>
+            </>
+          );
+        },
+      },
+      {
+        id: "coord",
+        header: "coord",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <span className="font-mono text-xs">
+            {row.original.coord.lon.toFixed(5)},{" "}
+            {row.original.coord.lat.toFixed(5)}
+          </span>
+        ),
+      },
+      { accessorKey: "scope_mode", header: "scope" },
+      {
+        accessorKey: "update_enabled",
+        header: "enabled",
+        cell: ({ row }) => (
+          <StatusBadge
+            status={row.original.update_enabled ? "active" : "disabled"}
+          />
+        ),
+      },
+      { accessorKey: "refresh_policy", header: "refresh" },
+      {
+        accessorKey: "updated_at",
+        header: "updated",
+        cell: ({ row }) => (
+          <span className="text-muted-foreground">
+            {formatDateTime(row.original.updated_at)}
+          </span>
+        ),
+      },
+      {
+        id: "actions",
+        header: "actions",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const target = row.original;
+          return (
+            <Button
+              size="sm"
+              type="button"
+              variant="ghost"
+              onClick={(event) => {
+                event.stopPropagation();
+                remove.mutate({
+                  externalSystem: target.external_system,
+                  targetKey: target.target_key,
+                });
+              }}
+            >
+              <Trash2Icon data-icon="inline-start" />
+              삭제
+            </Button>
+          );
+        },
+      },
+    ],
+    [remove],
+  );
+
+  const nearbyColumns = useMemo<ColumnDef<NearbyRow, unknown>[]>(
+    () => [
+      {
+        id: "feature",
+        header: "feature",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <>
+            <div className="font-medium">{row.original.name}</div>
+            <div className="font-mono text-xs text-muted-foreground">
+              {shortId(row.original.feature_id)}
+            </div>
+          </>
+        ),
+      },
+      { accessorKey: "kind", header: "kind" },
+      {
+        accessorKey: "distance_m",
+        header: "distance",
+        cell: ({ row }) => (
+          <span className="font-mono">
+            {row.original.distance_m.toFixed(1)}m
+          </span>
+        ),
+      },
+    ],
+    [],
   );
 
   const submit = () => {
@@ -282,70 +391,18 @@ export function PoiCacheTargetsClient() {
                 </Button>
               </div>
             </div>
-            {targets.isLoading ? <Skeleton className="m-4 h-96" /> : null}
-            <div className="overflow-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>target</TableHead>
-                    <TableHead>coord</TableHead>
-                    <TableHead>scope</TableHead>
-                    <TableHead>enabled</TableHead>
-                    <TableHead>refresh</TableHead>
-                    <TableHead>updated</TableHead>
-                    <TableHead>actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {(targets.data?.data.items ?? []).map((target) => (
-                    <TableRow
-                      className="cursor-pointer"
-                      key={target.target_id}
-                      onClick={() => setSelectedTarget(target)}
-                    >
-                      <TableCell>
-                        <div className="font-medium">
-                          {target.name ?? target.target_key}
-                        </div>
-                        <div className="font-mono text-xs text-muted-foreground">
-                          {target.external_system}/{shortId(target.target_key, 18)}
-                        </div>
-                      </TableCell>
-                      <TableCell className="font-mono text-xs">
-                        {target.coord.lon.toFixed(5)}, {target.coord.lat.toFixed(5)}
-                      </TableCell>
-                      <TableCell>{target.scope_mode}</TableCell>
-                      <TableCell>
-                        <StatusBadge
-                          status={target.update_enabled ? "active" : "disabled"}
-                        />
-                      </TableCell>
-                      <TableCell>{target.refresh_policy}</TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {formatDateTime(target.updated_at)}
-                      </TableCell>
-                      <TableCell>
-                        <Button
-                          size="sm"
-                          type="button"
-                          variant="ghost"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            remove.mutate({
-                              externalSystem: target.external_system,
-                              targetKey: target.target_key,
-                            });
-                          }}
-                        >
-                          <Trash2Icon data-icon="inline-start" />
-                          삭제
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+            <DataTable
+              columns={targetColumns}
+              data={targetItems}
+              getRowId={(row) => row.target_id}
+              isLoading={targets.isLoading}
+              emptyMessage="데이터가 없습니다."
+              onRowClick={(target) => setSelectedTarget(target)}
+              isRowActive={(target) =>
+                target.target_id === selectedTarget?.target_id
+              }
+              containerClassName="overflow-auto"
+            />
           </div>
 
           <div className="rounded-lg border bg-background">
@@ -357,40 +414,20 @@ export function PoiCacheTargetsClient() {
                   : "target을 선택하세요"}
               </div>
             </div>
-            {nearby.isLoading ? <Skeleton className="m-4 h-72" /> : null}
             {nearby.isError ? (
               <Alert className="m-4" variant="destructive">
                 <AlertTitle>주변 feature 조회 실패</AlertTitle>
                 <AlertDescription>{nearby.error.message}</AlertDescription>
               </Alert>
             ) : null}
-            <div className="max-h-[34rem] overflow-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>feature</TableHead>
-                    <TableHead>kind</TableHead>
-                    <TableHead>distance</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {(nearby.data?.data.items ?? []).map((feature) => (
-                    <TableRow key={feature.feature_id}>
-                      <TableCell>
-                        <div className="font-medium">{feature.name}</div>
-                        <div className="font-mono text-xs text-muted-foreground">
-                          {shortId(feature.feature_id)}
-                        </div>
-                      </TableCell>
-                      <TableCell>{feature.kind}</TableCell>
-                      <TableCell className="font-mono">
-                        {feature.distance_m.toFixed(1)}m
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+            <DataTable
+              columns={nearbyColumns}
+              data={nearbyItems}
+              getRowId={(row) => row.feature_id}
+              isLoading={nearby.isLoading}
+              emptyMessage="데이터가 없습니다."
+              containerClassName="max-h-[34rem] overflow-auto"
+            />
           </div>
         </div>
       </div>

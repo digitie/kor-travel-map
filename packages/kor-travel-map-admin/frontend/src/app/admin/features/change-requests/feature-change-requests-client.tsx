@@ -1,5 +1,6 @@
 "use client";
 
+import { type ColumnDef } from "@tanstack/react-table";
 import {
   CheckIcon,
   ClipboardListIcon,
@@ -32,18 +33,10 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
+import { DataTable } from "@/components/ui/data-table";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { formatCount, formatDateTime, shortId } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -376,6 +369,148 @@ export function FeatureChangeRequestsClient() {
       { onSuccess: (data) => setSelectedRequest(data.data.request) },
     );
   };
+
+  const columns = useMemo<ColumnDef<AdminFeatureChangeRecord, unknown>[]>(
+    () => [
+      {
+        id: "request",
+        header: "request",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const request = row.original;
+          return (
+            <>
+              <div className="font-mono text-xs">
+                {shortId(request.request_id, 18)}
+              </div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                {request.requested_by ?? "-"}
+              </div>
+            </>
+          );
+        },
+      },
+      {
+        id: "action_status",
+        header: "action/status",
+        accessorFn: (request) => request.status,
+        cell: ({ row }) => {
+          const request = row.original;
+          return (
+            <div className="flex flex-wrap gap-1">
+              <Badge variant="outline">{request.action}</Badge>
+              <StatusBadge status={request.status} />
+            </div>
+          );
+        },
+      },
+      {
+        id: "feature",
+        header: "feature",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const request = row.original;
+          return (
+            <div className="max-w-64">
+              <div className="break-all font-mono text-xs">
+                {shortId(request.feature_id, 28)}
+              </div>
+              {typeof request.payload.name === "string" ? (
+                <div className="mt-1 truncate text-sm">
+                  {request.payload.name}
+                </div>
+              ) : null}
+            </div>
+          );
+        },
+      },
+      {
+        id: "review",
+        header: "review",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const request = row.original;
+          return (
+            <>
+              <div>{request.review_mode}</div>
+              <div className="text-xs text-muted-foreground">
+                {request.reviewed_by ?? "-"}
+              </div>
+            </>
+          );
+        },
+      },
+      {
+        id: "reason",
+        header: "reason",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <span className="block max-w-56 truncate">
+            {row.original.reason ?? "-"}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "created_at",
+        header: "created",
+        cell: ({ row }) => (
+          <span className="text-muted-foreground">
+            {formatDateTime(row.original.created_at)}
+          </span>
+        ),
+      },
+      {
+        id: "actions",
+        header: "actions",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const request = row.original;
+          if (request.status === "pending") {
+            return (
+              <div className="flex flex-wrap gap-1">
+                <Button
+                  disabled={anyMutationPending}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    approve(request);
+                  }}
+                >
+                  <CheckIcon data-icon="inline-start" />
+                  approve
+                </Button>
+                <Button
+                  disabled={anyMutationPending}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    reject(request);
+                  }}
+                >
+                  <XIcon data-icon="inline-start" />
+                  reject
+                </Button>
+              </div>
+            );
+          }
+          if (request.action === "delete") {
+            return (
+              <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                <Trash2Icon className="size-3.5" />
+                완료
+              </div>
+            );
+          }
+          return <span className="text-sm text-muted-foreground">완료</span>;
+        },
+      },
+    ],
+    [anyMutationPending, approve, reject],
+  );
 
   return (
     <AdminShell
@@ -800,122 +935,18 @@ export function FeatureChangeRequestsClient() {
         </section>
 
         <section className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_30rem]">
-          <div className="min-w-0 overflow-auto rounded-lg border bg-background">
-            {changes.isLoading ? <Skeleton className="m-4 h-96" /> : null}
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>request</TableHead>
-                  <TableHead>action/status</TableHead>
-                  <TableHead>feature</TableHead>
-                  <TableHead>review</TableHead>
-                  <TableHead>reason</TableHead>
-                  <TableHead>created</TableHead>
-                  <TableHead>actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {items.map((request) => (
-                  <TableRow
-                    className="cursor-pointer"
-                    data-state={
-                      selectedRequest?.request_id === request.request_id
-                        ? "selected"
-                        : undefined
-                    }
-                    key={request.request_id}
-                    onClick={() => setSelectedRequest(request)}
-                  >
-                    <TableCell>
-                      <div className="font-mono text-xs">
-                        {shortId(request.request_id, 18)}
-                      </div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        {request.requested_by ?? "-"}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap gap-1">
-                        <Badge variant="outline">{request.action}</Badge>
-                        <StatusBadge status={request.status} />
-                      </div>
-                    </TableCell>
-                    <TableCell className="max-w-64">
-                      <div className="break-all font-mono text-xs">
-                        {shortId(request.feature_id, 28)}
-                      </div>
-                      {typeof request.payload.name === "string" ? (
-                        <div className="mt-1 truncate text-sm">
-                          {request.payload.name}
-                        </div>
-                      ) : null}
-                    </TableCell>
-                    <TableCell>
-                      <div>{request.review_mode}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {request.reviewed_by ?? "-"}
-                      </div>
-                    </TableCell>
-                    <TableCell className="max-w-56 truncate">
-                      {request.reason ?? "-"}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {formatDateTime(request.created_at)}
-                    </TableCell>
-                    <TableCell>
-                      {request.status === "pending" ? (
-                        <div className="flex flex-wrap gap-1">
-                          <Button
-                            disabled={anyMutationPending}
-                            size="sm"
-                            type="button"
-                            variant="outline"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              approve(request);
-                            }}
-                          >
-                            <CheckIcon data-icon="inline-start" />
-                            approve
-                          </Button>
-                          <Button
-                            disabled={anyMutationPending}
-                            size="sm"
-                            type="button"
-                            variant="ghost"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              reject(request);
-                            }}
-                          >
-                            <XIcon data-icon="inline-start" />
-                            reject
-                          </Button>
-                        </div>
-                      ) : request.action === "delete" ? (
-                        <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                          <Trash2Icon className="size-3.5" />
-                          완료
-                        </div>
-                      ) : (
-                        <span className="text-sm text-muted-foreground">완료</span>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {!changes.isLoading && items.length === 0 ? (
-                  <TableRow>
-                    <TableCell
-                      className="h-32 text-center text-muted-foreground"
-                      colSpan={7}
-                    >
-                      feature change request가 없습니다.
-                    </TableCell>
-                  </TableRow>
-                ) : null}
-              </TableBody>
-            </Table>
-          </div>
+          <DataTable
+            columns={columns}
+            data={items}
+            getRowId={(row) => row.request_id}
+            isLoading={changes.isLoading}
+            emptyMessage="feature change request가 없습니다."
+            containerClassName="min-w-0 overflow-auto rounded-lg border bg-background"
+            onRowClick={(row) => setSelectedRequest(row)}
+            isRowActive={(row) =>
+              selectedRequest?.request_id === row.request_id
+            }
+          />
 
           <ChangeRequestDetail request={selectedRequest} />
         </section>

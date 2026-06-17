@@ -1,5 +1,6 @@
 "use client";
 
+import { type ColumnDef } from "@tanstack/react-table";
 import {
   AlertTriangleIcon,
   DatabaseIcon,
@@ -11,7 +12,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 
 import {
   useAdminFeatureDetail,
@@ -23,16 +24,18 @@ import { FeatureWeatherPanel } from "@/components/feature-weather-panel";
 import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { DataTable } from "@/components/ui/data-table";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { formatDateTime, shortId } from "@/lib/format";
+
+type SourceRow = AdminFeatureDetailData["sources"][number];
+type IssueRow = AdminFeatureDetailData["issues"][number];
+type OverrideRow = AdminFeatureDetailData["overrides"][number];
+type FileRow = AdminFeatureDetailData["files"][number];
+type VersionRow = AdminFeatureDetailData["versions"][number];
+type ChangeRequestRow = AdminFeatureDetailData["change_requests"][number];
+
+const EMPTY_MESSAGE = "데이터가 없습니다.";
 
 function featureHref(featureId: string): string {
   return `/features/${encodeURIComponent(featureId)}`;
@@ -85,236 +88,376 @@ function Section({
   );
 }
 
-function EmptyRow({ colSpan }: { colSpan: number }) {
-  return (
-    <TableRow>
-      <TableCell className="h-20 text-center text-muted-foreground" colSpan={colSpan}>
-        데이터가 없습니다.
-      </TableCell>
-    </TableRow>
-  );
-}
-
 function SourcesTable({ data }: { data: AdminFeatureDetailData }) {
+  const columns = useMemo<ColumnDef<SourceRow, unknown>[]>(
+    () => [
+      {
+        id: "provider",
+        header: "provider",
+        cell: ({ row }) => {
+          const source = row.original;
+          return (
+            <>
+              <div className="font-medium">{source.provider}</div>
+              <div className="font-mono text-xs text-muted-foreground">
+                {source.dataset_key}
+              </div>
+            </>
+          );
+        },
+      },
+      {
+        id: "role",
+        header: "role",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const source = row.original;
+          return (
+            <>
+              <div className="flex flex-wrap gap-1">
+                <Badge variant="outline">{source.source_role}</Badge>
+                {source.is_primary_source ? (
+                  <Badge variant="secondary">primary</Badge>
+                ) : null}
+              </div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                {source.match_method} · {source.confidence}
+              </div>
+            </>
+          );
+        },
+      },
+      {
+        id: "entity",
+        header: "entity",
+        cell: ({ row }) => {
+          const source = row.original;
+          return (
+            <>
+              <div>{source.source_entity_type}</div>
+              <div className="break-all font-mono text-xs text-muted-foreground">
+                {source.source_entity_id}
+              </div>
+            </>
+          );
+        },
+      },
+      {
+        id: "raw",
+        header: "raw",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const source = row.original;
+          return (
+            <details>
+              <summary className="cursor-pointer font-mono text-xs">
+                {shortId(source.source_record_key, 18)}
+              </summary>
+              <div className="mt-2 min-w-72">
+                <JsonBlock value={source.raw_data} />
+              </div>
+            </details>
+          );
+        },
+      },
+      {
+        id: "imported",
+        header: "imported",
+        cell: ({ row }) => (
+          <span className="text-muted-foreground">
+            {formatDateTime(row.original.imported_at)}
+          </span>
+        ),
+      },
+    ],
+    [],
+  );
+
   return (
     <Section count={data.sources.length} icon={DatabaseIcon} title="Sources">
-      <div className="overflow-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>provider</TableHead>
-              <TableHead>role</TableHead>
-              <TableHead>entity</TableHead>
-              <TableHead>raw</TableHead>
-              <TableHead>imported</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {data.sources.map((source) => (
-              <TableRow key={source.source_record_key}>
-                <TableCell>
-                  <div className="font-medium">{source.provider}</div>
-                  <div className="font-mono text-xs text-muted-foreground">
-                    {source.dataset_key}
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <div className="flex flex-wrap gap-1">
-                    <Badge variant="outline">{source.source_role}</Badge>
-                    {source.is_primary_source ? (
-                      <Badge variant="secondary">primary</Badge>
-                    ) : null}
-                  </div>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    {source.match_method} · {source.confidence}
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <div>{source.source_entity_type}</div>
-                  <div className="break-all font-mono text-xs text-muted-foreground">
-                    {source.source_entity_id}
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <details>
-                    <summary className="cursor-pointer font-mono text-xs">
-                      {shortId(source.source_record_key, 18)}
-                    </summary>
-                    <div className="mt-2 min-w-72">
-                      <JsonBlock value={source.raw_data} />
-                    </div>
-                  </details>
-                </TableCell>
-                <TableCell className="text-muted-foreground">
-                  {formatDateTime(source.imported_at)}
-                </TableCell>
-              </TableRow>
-            ))}
-            {data.sources.length === 0 ? <EmptyRow colSpan={5} /> : null}
-          </TableBody>
-        </Table>
-      </div>
+      <DataTable
+        columns={columns}
+        data={data.sources}
+        getRowId={(row) => row.source_record_key}
+        emptyMessage={EMPTY_MESSAGE}
+        containerClassName="overflow-auto"
+      />
     </Section>
   );
 }
 
 function IssuesTable({ data }: { data: AdminFeatureDetailData }) {
+  const columns = useMemo<ColumnDef<IssueRow, unknown>[]>(
+    () => [
+      {
+        id: "status",
+        header: "status",
+        cell: ({ row }) => <StatusBadge status={row.original.status} />,
+      },
+      {
+        id: "severity",
+        header: "severity",
+        cell: ({ row }) => <StatusBadge status={row.original.severity} />,
+      },
+      {
+        accessorKey: "violation_type",
+        header: "type",
+        cell: ({ row }) => (
+          <span className="font-mono text-xs">{row.original.violation_type}</span>
+        ),
+      },
+      {
+        id: "message",
+        header: "message",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const issue = row.original;
+          return (
+            <div className="max-w-md">
+              <div className="truncate">{issue.message}</div>
+              {Object.keys(issue.payload).length > 0 ? (
+                <details className="mt-1">
+                  <summary className="cursor-pointer text-xs text-muted-foreground">
+                    payload
+                  </summary>
+                  <JsonBlock value={issue.payload} />
+                </details>
+              ) : null}
+            </div>
+          );
+        },
+      },
+      {
+        id: "detected",
+        header: "detected",
+        cell: ({ row }) => (
+          <span className="text-muted-foreground">
+            {formatDateTime(row.original.detected_at)}
+          </span>
+        ),
+      },
+    ],
+    [],
+  );
+
   return (
     <Section count={data.issues.length} icon={AlertTriangleIcon} title="Issues">
-      <div className="overflow-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>status</TableHead>
-              <TableHead>severity</TableHead>
-              <TableHead>type</TableHead>
-              <TableHead>message</TableHead>
-              <TableHead>detected</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {data.issues.map((issue) => (
-              <TableRow key={issue.issue_id}>
-                <TableCell>
-                  <StatusBadge status={issue.status} />
-                </TableCell>
-                <TableCell>
-                  <StatusBadge status={issue.severity} />
-                </TableCell>
-                <TableCell className="font-mono text-xs">
-                  {issue.violation_type}
-                </TableCell>
-                <TableCell className="max-w-md">
-                  <div className="truncate">{issue.message}</div>
-                  {Object.keys(issue.payload).length > 0 ? (
-                    <details className="mt-1">
-                      <summary className="cursor-pointer text-xs text-muted-foreground">
-                        payload
-                      </summary>
-                      <JsonBlock value={issue.payload} />
-                    </details>
-                  ) : null}
-                </TableCell>
-                <TableCell className="text-muted-foreground">
-                  {formatDateTime(issue.detected_at)}
-                </TableCell>
-              </TableRow>
-            ))}
-            {data.issues.length === 0 ? <EmptyRow colSpan={5} /> : null}
-          </TableBody>
-        </Table>
-      </div>
+      <DataTable
+        columns={columns}
+        data={data.issues}
+        getRowId={(row) => row.issue_id}
+        emptyMessage={EMPTY_MESSAGE}
+        containerClassName="overflow-auto"
+      />
     </Section>
   );
 }
 
 function OverridesTable({ data }: { data: AdminFeatureDetailData }) {
+  const columns = useMemo<ColumnDef<OverrideRow, unknown>[]>(
+    () => [
+      {
+        id: "status",
+        header: "status",
+        cell: ({ row }) => <StatusBadge status={row.original.status} />,
+      },
+      {
+        accessorKey: "field_path",
+        header: "field",
+        cell: ({ row }) => (
+          <span className="font-mono text-xs">{row.original.field_path}</span>
+        ),
+      },
+      {
+        id: "value",
+        header: "value",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const override = row.original;
+          return (
+            <details>
+              <summary className="cursor-pointer text-xs text-muted-foreground">
+                override
+              </summary>
+              <div className="mt-2 min-w-72">
+                <JsonBlock
+                  value={{
+                    source: override.source_value,
+                    override: override.override_value,
+                  }}
+                />
+              </div>
+            </details>
+          );
+        },
+      },
+      {
+        id: "reason",
+        header: "reason",
+        enableSorting: false,
+        cell: ({ row }) => <>{row.original.reason ?? "-"}</>,
+      },
+      {
+        id: "created",
+        header: "created",
+        cell: ({ row }) => (
+          <span className="text-muted-foreground">
+            {formatDateTime(row.original.created_at)}
+          </span>
+        ),
+      },
+    ],
+    [],
+  );
+
   return (
     <Section count={data.overrides.length} icon={GitBranchIcon} title="Overrides">
-      <div className="overflow-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>status</TableHead>
-              <TableHead>field</TableHead>
-              <TableHead>value</TableHead>
-              <TableHead>reason</TableHead>
-              <TableHead>created</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {data.overrides.map((override) => (
-              <TableRow key={override.override_id}>
-                <TableCell>
-                  <StatusBadge status={override.status} />
-                </TableCell>
-                <TableCell className="font-mono text-xs">
-                  {override.field_path}
-                </TableCell>
-                <TableCell>
-                  <details>
-                    <summary className="cursor-pointer text-xs text-muted-foreground">
-                      override
-                    </summary>
-                    <div className="mt-2 min-w-72">
-                      <JsonBlock
-                        value={{
-                          source: override.source_value,
-                          override: override.override_value,
-                        }}
-                      />
-                    </div>
-                  </details>
-                </TableCell>
-                <TableCell>{override.reason ?? "-"}</TableCell>
-                <TableCell className="text-muted-foreground">
-                  {formatDateTime(override.created_at)}
-                </TableCell>
-              </TableRow>
-            ))}
-            {data.overrides.length === 0 ? <EmptyRow colSpan={5} /> : null}
-          </TableBody>
-        </Table>
-      </div>
+      <DataTable
+        columns={columns}
+        data={data.overrides}
+        getRowId={(row) => row.override_id}
+        emptyMessage={EMPTY_MESSAGE}
+        containerClassName="overflow-auto"
+      />
     </Section>
   );
 }
 
 function FilesTable({ data }: { data: AdminFeatureDetailData }) {
+  const columns = useMemo<ColumnDef<FileRow, unknown>[]>(
+    () => [
+      {
+        id: "role",
+        header: "role",
+        cell: ({ row }) => {
+          const file = row.original;
+          return (
+            <>
+              <Badge variant="outline">{file.role}</Badge>
+              <div className="mt-1 text-xs text-muted-foreground">
+                {file.file_type}
+              </div>
+            </>
+          );
+        },
+      },
+      {
+        id: "object",
+        header: "object",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const file = row.original;
+          return (
+            <>
+              <div className="break-all font-mono text-xs">{file.object_key}</div>
+              {file.public_url ? (
+                <Link
+                  className="mt-1 inline-flex text-xs text-primary underline-offset-4 hover:underline"
+                  href={file.public_url}
+                  rel="noreferrer"
+                  target="_blank"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  public_url
+                </Link>
+              ) : null}
+            </>
+          );
+        },
+      },
+      {
+        id: "provider",
+        header: "provider",
+        cell: ({ row }) => {
+          const file = row.original;
+          return (
+            <>
+              <div>{file.provider ?? "-"}</div>
+              <div className="font-mono text-xs text-muted-foreground">
+                {file.dataset_key ?? "-"}
+              </div>
+            </>
+          );
+        },
+      },
+      {
+        accessorKey: "byte_size",
+        header: "size",
+        cell: ({ row }) => (
+          <span className="font-mono text-xs">{row.original.byte_size ?? "-"}</span>
+        ),
+      },
+    ],
+    [],
+  );
+
   return (
     <Section count={data.files.length} icon={FileTextIcon} title="Files">
-      <div className="overflow-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>role</TableHead>
-              <TableHead>object</TableHead>
-              <TableHead>provider</TableHead>
-              <TableHead>size</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {data.files.map((file) => (
-              <TableRow key={file.file_id}>
-                <TableCell>
-                  <Badge variant="outline">{file.role}</Badge>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    {file.file_type}
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <div className="break-all font-mono text-xs">{file.object_key}</div>
-                  {file.public_url ? (
-                    <Link
-                      className="mt-1 inline-flex text-xs text-primary underline-offset-4 hover:underline"
-                      href={file.public_url}
-                      rel="noreferrer"
-                      target="_blank"
-                    >
-                      public_url
-                    </Link>
-                  ) : null}
-                </TableCell>
-                <TableCell>
-                  <div>{file.provider ?? "-"}</div>
-                  <div className="font-mono text-xs text-muted-foreground">
-                    {file.dataset_key ?? "-"}
-                  </div>
-                </TableCell>
-                <TableCell className="font-mono text-xs">
-                  {file.byte_size ?? "-"}
-                </TableCell>
-              </TableRow>
-            ))}
-            {data.files.length === 0 ? <EmptyRow colSpan={4} /> : null}
-          </TableBody>
-        </Table>
-      </div>
+      <DataTable
+        columns={columns}
+        data={data.files}
+        getRowId={(row) => row.file_id}
+        emptyMessage={EMPTY_MESSAGE}
+        containerClassName="overflow-auto"
+      />
     </Section>
   );
 }
 
 function HistoryPanel({ data }: { data: AdminFeatureDetailData }) {
+  const versionColumns = useMemo<ColumnDef<VersionRow, unknown>[]>(
+    () => [
+      {
+        accessorKey: "version",
+        header: "version",
+        cell: ({ row }) => <span className="font-mono">{row.original.version}</span>,
+      },
+      { accessorKey: "origin", header: "origin" },
+      { accessorKey: "change_kind", header: "change" },
+      {
+        id: "created",
+        header: "created",
+        cell: ({ row }) => (
+          <span className="text-muted-foreground">
+            {formatDateTime(row.original.created_at)}
+          </span>
+        ),
+      },
+    ],
+    [],
+  );
+
+  const changeColumns = useMemo<ColumnDef<ChangeRequestRow, unknown>[]>(
+    () => [
+      {
+        id: "request",
+        header: "request",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <span className="font-mono text-xs">
+            {shortId(row.original.request_id, 12)}
+          </span>
+        ),
+      },
+      { accessorKey: "action", header: "action" },
+      {
+        id: "status",
+        header: "status",
+        cell: ({ row }) => <StatusBadge status={row.original.status} />,
+      },
+      {
+        id: "created",
+        header: "created",
+        cell: ({ row }) => (
+          <span className="text-muted-foreground">
+            {formatDateTime(row.original.created_at)}
+          </span>
+        ),
+      },
+    ],
+    [],
+  );
+
   return (
     <Section
       count={data.versions.length + data.change_requests.length}
@@ -322,60 +465,20 @@ function HistoryPanel({ data }: { data: AdminFeatureDetailData }) {
       title="History"
     >
       <div className="grid gap-4 xl:grid-cols-2">
-        <div className="overflow-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>version</TableHead>
-                <TableHead>origin</TableHead>
-                <TableHead>change</TableHead>
-                <TableHead>created</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data.versions.map((version) => (
-                <TableRow key={`${version.feature_id}:${version.version}`}>
-                  <TableCell className="font-mono">{version.version}</TableCell>
-                  <TableCell>{version.origin}</TableCell>
-                  <TableCell>{version.change_kind}</TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {formatDateTime(version.created_at)}
-                  </TableCell>
-                </TableRow>
-              ))}
-              {data.versions.length === 0 ? <EmptyRow colSpan={4} /> : null}
-            </TableBody>
-          </Table>
-        </div>
-        <div className="overflow-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>request</TableHead>
-                <TableHead>action</TableHead>
-                <TableHead>status</TableHead>
-                <TableHead>created</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data.change_requests.map((request) => (
-                <TableRow key={request.request_id}>
-                  <TableCell className="font-mono text-xs">
-                    {shortId(request.request_id, 12)}
-                  </TableCell>
-                  <TableCell>{request.action}</TableCell>
-                  <TableCell>
-                    <StatusBadge status={request.status} />
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {formatDateTime(request.created_at)}
-                  </TableCell>
-                </TableRow>
-              ))}
-              {data.change_requests.length === 0 ? <EmptyRow colSpan={4} /> : null}
-            </TableBody>
-          </Table>
-        </div>
+        <DataTable
+          columns={versionColumns}
+          data={data.versions}
+          getRowId={(row) => `${row.feature_id}:${row.version}`}
+          emptyMessage={EMPTY_MESSAGE}
+          containerClassName="overflow-auto"
+        />
+        <DataTable
+          columns={changeColumns}
+          data={data.change_requests}
+          getRowId={(row) => row.request_id}
+          emptyMessage={EMPTY_MESSAGE}
+          containerClassName="overflow-auto"
+        />
       </div>
     </Section>
   );
@@ -405,6 +508,47 @@ function NearbyPanel({
     .filter((item: NearbyFeatureSummary) => item.feature_id !== featureId)
     .slice(0, 10);
 
+  const columns = useMemo<ColumnDef<NearbyFeatureSummary, unknown>[]>(
+    () => [
+      {
+        id: "feature",
+        header: "feature",
+        cell: ({ row }) => {
+          const item = row.original;
+          return (
+            <>
+              <Link
+                className="font-medium text-primary underline-offset-4 hover:underline"
+                href={featureHref(item.feature_id)}
+                onClick={(event) => event.stopPropagation()}
+              >
+                {item.name}
+              </Link>
+              <div className="font-mono text-xs text-muted-foreground">
+                {shortId(item.feature_id, 16)}
+              </div>
+            </>
+          );
+        },
+      },
+      {
+        id: "kind",
+        header: "kind",
+        cell: ({ row }) => <Badge variant="outline">{row.original.kind}</Badge>,
+      },
+      {
+        accessorKey: "distance_m",
+        header: "distance",
+        cell: ({ row }) => (
+          <span className="font-mono text-xs">
+            {distanceLabel(row.original.distance_m)}
+          </span>
+        ),
+      },
+    ],
+    [],
+  );
+
   return (
     <Section count={items.length} icon={MapPinIcon} title="Nearby">
       {nearby.isLoading ? <Skeleton className="h-36 w-full" /> : null}
@@ -418,40 +562,13 @@ function NearbyPanel({
         <div className="text-sm text-muted-foreground">좌표가 없습니다.</div>
       ) : null}
       {items.length > 0 ? (
-        <div className="overflow-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>feature</TableHead>
-                <TableHead>kind</TableHead>
-                <TableHead>distance</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {items.map((item) => (
-                <TableRow key={item.feature_id}>
-                  <TableCell>
-                    <Link
-                      className="font-medium text-primary underline-offset-4 hover:underline"
-                      href={featureHref(item.feature_id)}
-                    >
-                      {item.name}
-                    </Link>
-                    <div className="font-mono text-xs text-muted-foreground">
-                      {shortId(item.feature_id, 16)}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="outline">{item.kind}</Badge>
-                  </TableCell>
-                  <TableCell className="font-mono text-xs">
-                    {distanceLabel(item.distance_m)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+        <DataTable
+          columns={columns}
+          data={items}
+          getRowId={(row) => row.feature_id}
+          emptyMessage={EMPTY_MESSAGE}
+          containerClassName="overflow-auto"
+        />
       ) : null}
       {hasCoord && !nearby.isLoading && !nearby.isError && items.length === 0 ? (
         <div className="text-sm text-muted-foreground">주변 feature가 없습니다.</div>

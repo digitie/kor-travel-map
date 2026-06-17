@@ -1,6 +1,11 @@
 "use client";
 
 import {
+  type ColumnDef,
+  type Row,
+  type RowSelectionState,
+} from "@tanstack/react-table";
+import {
   AlertTriangleIcon,
   ArchiveIcon,
   CheckIcon,
@@ -44,18 +49,11 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
+import { DataTable } from "@/components/ui/data-table";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { formatCount, formatDateTime, shortId } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -260,9 +258,51 @@ function FeatureEditor({ feature }: { feature: CuratedFeature | null }) {
   );
 }
 
+type TripmateCopyItem = NonNullable<
+  ReturnType<typeof useTripmateCopySnapshot>["data"]
+>["data"]["items"][number];
+
 function TripmateCopyPreview({ feature }: { feature: CuratedFeature | null }) {
   const snapshot = useTripmateCopySnapshot(feature?.curated_feature_id ?? null);
   const data = snapshot.data?.data;
+
+  const itemColumns = useMemo<ColumnDef<TripmateCopyItem, unknown>[]>(
+    () => [
+      {
+        accessorKey: "sort_order",
+        header: "order",
+        cell: ({ row }) => row.original.sort_order,
+      },
+      {
+        accessorKey: "relation",
+        header: "relation",
+        cell: ({ row }) => (
+          <Badge variant="outline">{row.original.relation}</Badge>
+        ),
+      },
+      {
+        accessorKey: "feature_id",
+        header: "feature",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <span className="block max-w-[12rem] whitespace-normal break-all font-mono text-xs">
+            {row.original.feature_id}
+          </span>
+        ),
+      },
+      {
+        id: "memo",
+        header: "memo",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <span className="block max-w-[12rem] whitespace-normal">
+            {row.original.memo ?? "-"}
+          </span>
+        ),
+      },
+    ],
+    [],
+  );
 
   return (
     <section className="rounded-lg border bg-background">
@@ -299,32 +339,12 @@ function TripmateCopyPreview({ feature }: { feature: CuratedFeature | null }) {
             <dt className="text-muted-foreground">items</dt>
             <dd>{formatCount(data.items.length)}</dd>
           </dl>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>order</TableHead>
-                <TableHead>relation</TableHead>
-                <TableHead>feature</TableHead>
-                <TableHead>memo</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data.items.map((item) => (
-                <TableRow key={item.curated_feature_item_id}>
-                  <TableCell>{item.sort_order}</TableCell>
-                  <TableCell>
-                    <Badge variant="outline">{item.relation}</Badge>
-                  </TableCell>
-                  <TableCell className="max-w-[12rem] whitespace-normal break-all font-mono text-xs">
-                    {item.feature_id}
-                  </TableCell>
-                  <TableCell className="max-w-[12rem] whitespace-normal">
-                    {item.memo ?? "-"}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <DataTable
+            columns={itemColumns}
+            data={data.items}
+            getRowId={(item) => item.curated_feature_item_id}
+            emptyMessage="copy item이 없습니다."
+          />
           <details>
             <summary className="cursor-pointer text-sm font-medium">plan</summary>
             <JsonBlock value={data.plan} />
@@ -550,6 +570,7 @@ export function CuratedFeaturesClient() {
     useState<string | null>(null);
   const [selectedRuleId, setSelectedRuleId] = useState<string | null>(null);
   const [ruleEnabled, setRuleEnabled] = useState<EnabledFilter>("all");
+  const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
 
   const themes = useAdminCuratedThemes({ limit: 200 });
   const sources = useAdminCuratedSources({ limit: 500 });
@@ -691,6 +712,236 @@ export function CuratedFeaturesClient() {
       },
     });
   };
+
+  const featureColumns = useMemo<ColumnDef<CuratedFeature, unknown>[]>(
+    () => [
+      {
+        accessorKey: "curation_status",
+        header: "status",
+        cell: ({ row }) => (
+          <Badge variant={featureStatusVariant(row.original.curation_status)}>
+            {row.original.curation_status}
+          </Badge>
+        ),
+      },
+      {
+        accessorKey: "feature_name",
+        header: "feature",
+        cell: ({ row }) => {
+          const feature = row.original;
+          return (
+            <div className="max-w-[20rem] whitespace-normal">
+              <div className="font-medium">
+                {feature.display_title ?? feature.feature_name}
+              </div>
+              <div className="break-all font-mono text-xs text-muted-foreground">
+                {shortId(feature.feature_id, 18)}
+              </div>
+              <div className="mt-1 flex flex-wrap gap-1">
+                <Badge variant="outline">{feature.feature_kind}</Badge>
+                <Badge variant="outline">{feature.feature_category}</Badge>
+                <Badge variant="ghost">{coordLabel(feature)}</Badge>
+              </div>
+            </div>
+          );
+        },
+      },
+      {
+        accessorKey: "source_name",
+        header: "source",
+        cell: ({ row }) => {
+          const feature = row.original;
+          return (
+            <div className="max-w-[16rem] whitespace-normal">
+              <div>{feature.source_name}</div>
+              <div className="break-all font-mono text-xs text-muted-foreground">
+                {feature.provider}:{feature.dataset_key}
+              </div>
+            </div>
+          );
+        },
+      },
+      {
+        accessorKey: "theme_name",
+        header: "theme",
+        cell: ({ row }) => {
+          const feature = row.original;
+          return (
+            <>
+              <div>{feature.theme_name}</div>
+              <div className="text-xs text-muted-foreground">
+                {feature.theme_group}
+              </div>
+            </>
+          );
+        },
+      },
+      {
+        id: "copy",
+        header: "copy",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const feature = row.original;
+          return (
+            <div className="flex flex-col gap-1">
+              <Badge variant={copyPolicyVariant(feature.tripmate_copy_policy)}>
+                {feature.tripmate_copy_policy}
+              </Badge>
+              <Badge variant="outline">{feature.tripmate_relation}</Badge>
+            </div>
+          );
+        },
+      },
+      {
+        accessorKey: "updated_at",
+        header: "updated",
+        cell: ({ row }) => formatDateTime(row.original.updated_at),
+      },
+      {
+        id: "actions",
+        header: "actions",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const feature = row.original;
+          return (
+            <div className="flex w-44 justify-end gap-1 text-right">
+              <Link
+                aria-label="feature detail"
+                className={cn(
+                  buttonVariants({
+                    variant: "ghost",
+                    size: "icon-sm",
+                  }),
+                )}
+                href={featureHref(feature.feature_id)}
+                onClick={(event) => event.stopPropagation()}
+              >
+                <ExternalLinkIcon />
+              </Link>
+              <Button
+                aria-label="preview"
+                size="icon-sm"
+                type="button"
+                variant="ghost"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setSelectedCuratedFeatureId(feature.curated_feature_id);
+                }}
+              >
+                <EyeIcon />
+              </Button>
+              {feature.curation_status === "curated" ? (
+                <Button
+                  aria-label="unselect"
+                  disabled={anyFeatureMutationPending}
+                  size="icon-sm"
+                  type="button"
+                  variant="outline"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    unselectCurated(feature);
+                  }}
+                >
+                  <RotateCcwIcon />
+                </Button>
+              ) : (
+                <Button
+                  aria-label="select"
+                  disabled={anyFeatureMutationPending}
+                  size="icon-sm"
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    selectCurated(feature);
+                  }}
+                >
+                  <CheckIcon />
+                </Button>
+              )}
+              <Button
+                aria-label="archive"
+                disabled={anyFeatureMutationPending}
+                size="icon-sm"
+                type="button"
+                variant="destructive"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  archiveCurated(feature);
+                }}
+              >
+                <ArchiveIcon />
+              </Button>
+            </div>
+          );
+        },
+      },
+    ],
+    // handlers (selectCurated/unselectCurated/archiveCurated) are stable closures;
+    // re-memo only when mutation pending state used inside action cells changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [anyFeatureMutationPending],
+  );
+
+  const ruleColumns = useMemo<ColumnDef<CuratedSourceRule, unknown>[]>(
+    () => [
+      {
+        accessorKey: "enabled",
+        header: "enabled",
+        cell: ({ row }) => (
+          <Badge variant={row.original.enabled ? "default" : "outline"}>
+            {row.original.enabled ? "enabled" : "disabled"}
+          </Badge>
+        ),
+      },
+      {
+        accessorKey: "theme_slug",
+        header: "theme",
+        cell: ({ row }) => (
+          <>
+            <div>{row.original.theme_slug}</div>
+            <div className="text-xs text-muted-foreground">
+              {shortId(row.original.theme_id, 10)}
+            </div>
+          </>
+        ),
+      },
+      {
+        id: "source",
+        header: "source",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const rule = row.original;
+          const source = sourceById.get(rule.source_id);
+          return (
+            <div className="max-w-[18rem] whitespace-normal">
+              <div>{source?.source_name ?? rule.source_id}</div>
+              <div className="break-all font-mono text-xs text-muted-foreground">
+                {rule.provider}:{rule.dataset_key}
+              </div>
+            </div>
+          );
+        },
+      },
+      {
+        accessorKey: "default_action",
+        header: "action",
+        cell: ({ row }) => (
+          <Badge variant="outline">{row.original.default_action}</Badge>
+        ),
+      },
+      {
+        accessorKey: "priority",
+        header: "priority",
+        cell: ({ row }) => row.original.priority,
+      },
+      {
+        accessorKey: "updated_at",
+        header: "updated",
+        cell: ({ row }) => formatDateTime(row.original.updated_at),
+      },
+    ],
+    [sourceById],
+  );
 
   return (
     <AdminShell
@@ -876,164 +1127,68 @@ export function CuratedFeaturesClient() {
                 </Button>
               </div>
             </div>
-            {features.isLoading ? <Skeleton className="m-4 h-80" /> : null}
-            {!features.isLoading && filteredItems.length === 0 ? (
-              <div className="p-8 text-center text-sm text-muted-foreground">
-                조건에 맞는 curated 후보가 없습니다.
-              </div>
-            ) : null}
-            {filteredItems.length > 0 ? (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>status</TableHead>
-                    <TableHead>feature</TableHead>
-                    <TableHead>source</TableHead>
-                    <TableHead>theme</TableHead>
-                    <TableHead>copy</TableHead>
-                    <TableHead>updated</TableHead>
-                    <TableHead className="w-44 text-right">actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredItems.map((feature) => {
-                    const selected =
-                      feature.curated_feature_id ===
-                      selectedFeature?.curated_feature_id;
-                    return (
-                      <TableRow
-                        className="cursor-pointer"
-                        data-state={selected ? "selected" : undefined}
-                        key={feature.curated_feature_id}
-                        onClick={() =>
-                          setSelectedCuratedFeatureId(
-                            feature.curated_feature_id,
-                          )
-                        }
-                      >
-                        <TableCell>
-                          <Badge variant={featureStatusVariant(feature.curation_status)}>
-                            {feature.curation_status}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="max-w-[20rem] whitespace-normal">
-                          <div className="font-medium">
-                            {feature.display_title ?? feature.feature_name}
-                          </div>
-                          <div className="break-all font-mono text-xs text-muted-foreground">
-                            {shortId(feature.feature_id, 18)}
-                          </div>
-                          <div className="mt-1 flex flex-wrap gap-1">
-                            <Badge variant="outline">{feature.feature_kind}</Badge>
-                            <Badge variant="outline">{feature.feature_category}</Badge>
-                            <Badge variant="ghost">{coordLabel(feature)}</Badge>
-                          </div>
-                        </TableCell>
-                        <TableCell className="max-w-[16rem] whitespace-normal">
-                          <div>{feature.source_name}</div>
-                          <div className="break-all font-mono text-xs text-muted-foreground">
-                            {feature.provider}:{feature.dataset_key}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div>{feature.theme_name}</div>
-                          <div className="text-xs text-muted-foreground">
-                            {feature.theme_group}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex flex-col gap-1">
-                            <Badge
-                              variant={copyPolicyVariant(
-                                feature.tripmate_copy_policy,
-                              )}
-                            >
-                              {feature.tripmate_copy_policy}
-                            </Badge>
-                            <Badge variant="outline">
-                              {feature.tripmate_relation}
-                            </Badge>
-                          </div>
-                        </TableCell>
-                        <TableCell>{formatDateTime(feature.updated_at)}</TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-1">
-                            <Link
-                              aria-label="feature detail"
-                              className={cn(
-                                buttonVariants({
-                                  variant: "ghost",
-                                  size: "icon-sm",
-                                }),
-                              )}
-                              href={featureHref(feature.feature_id)}
-                              onClick={(event) => event.stopPropagation()}
-                            >
-                              <ExternalLinkIcon />
-                            </Link>
-                            <Button
-                              aria-label="preview"
-                              size="icon-sm"
-                              type="button"
-                              variant="ghost"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                setSelectedCuratedFeatureId(
-                                  feature.curated_feature_id,
-                                );
-                              }}
-                            >
-                              <EyeIcon />
-                            </Button>
-                            {feature.curation_status === "curated" ? (
-                              <Button
-                                aria-label="unselect"
-                                disabled={anyFeatureMutationPending}
-                                size="icon-sm"
-                                type="button"
-                                variant="outline"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  unselectCurated(feature);
-                                }}
-                              >
-                                <RotateCcwIcon />
-                              </Button>
-                            ) : (
-                              <Button
-                                aria-label="select"
-                                disabled={anyFeatureMutationPending}
-                                size="icon-sm"
-                                type="button"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  selectCurated(feature);
-                                }}
-                              >
-                                <CheckIcon />
-                              </Button>
-                            )}
-                            <Button
-                              aria-label="archive"
-                              disabled={anyFeatureMutationPending}
-                              size="icon-sm"
-                              type="button"
-                              variant="destructive"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                archiveCurated(feature);
-                              }}
-                            >
-                              <ArchiveIcon />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            ) : null}
+            <DataTable
+              columns={featureColumns}
+              data={filteredItems}
+              getRowId={(feature) => feature.curated_feature_id}
+              isLoading={features.isLoading}
+              emptyMessage="조건에 맞는 curated 후보가 없습니다."
+              enableRowSelection
+              rowSelection={rowSelection}
+              onRowSelectionChange={setRowSelection}
+              renderBulkActions={(rows: Row<CuratedFeature>[]) => (
+                <>
+                  <Button
+                    disabled={selectFeature.isPending}
+                    size="sm"
+                    type="button"
+                    onClick={() => {
+                      for (const row of rows) {
+                        selectFeature.mutate({
+                          curatedFeatureId: row.original.curated_feature_id,
+                          body: {
+                            actor: "admin-ui",
+                            reason: "admin curated selection",
+                          },
+                        });
+                      }
+                      setRowSelection({});
+                    }}
+                  >
+                    <CheckIcon data-icon="inline-start" />
+                    선택 채택
+                  </Button>
+                  <Button
+                    disabled={archiveFeature.isPending}
+                    size="sm"
+                    type="button"
+                    variant="destructive"
+                    onClick={() => {
+                      for (const row of rows) {
+                        archiveFeature.mutate({
+                          curatedFeatureId: row.original.curated_feature_id,
+                          body: {
+                            actor: "admin-ui",
+                            reason: "admin curated archive",
+                          },
+                        });
+                      }
+                      setRowSelection({});
+                    }}
+                  >
+                    <ArchiveIcon data-icon="inline-start" />
+                    선택 보관
+                  </Button>
+                </>
+              )}
+              onRowClick={(feature) =>
+                setSelectedCuratedFeatureId(feature.curated_feature_id)
+              }
+              isRowActive={(feature) =>
+                feature.curated_feature_id ===
+                selectedFeature?.curated_feature_id
+              }
+            />
           </section>
 
           <div className="flex flex-col gap-4">
@@ -1120,63 +1275,15 @@ export function CuratedFeaturesClient() {
           </div>
           <div className="grid gap-4 p-4 xl:grid-cols-[minmax(0,1fr)_32rem]">
             <div className="rounded-lg border">
-              {rules.isLoading ? <Skeleton className="m-4 h-64" /> : null}
-              {!rules.isLoading && ruleItems.length === 0 ? (
-                <div className="p-8 text-center text-sm text-muted-foreground">
-                  조건에 맞는 source rule이 없습니다.
-                </div>
-              ) : null}
-              {ruleItems.length > 0 ? (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>enabled</TableHead>
-                      <TableHead>theme</TableHead>
-                      <TableHead>source</TableHead>
-                      <TableHead>action</TableHead>
-                      <TableHead>priority</TableHead>
-                      <TableHead>updated</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {ruleItems.map((rule) => {
-                      const source = sourceById.get(rule.source_id);
-                      const selected = rule.rule_id === selectedRule?.rule_id;
-                      return (
-                        <TableRow
-                          className="cursor-pointer"
-                          data-state={selected ? "selected" : undefined}
-                          key={rule.rule_id}
-                          onClick={() => setSelectedRuleId(rule.rule_id)}
-                        >
-                          <TableCell>
-                            <Badge variant={rule.enabled ? "default" : "outline"}>
-                              {rule.enabled ? "enabled" : "disabled"}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <div>{rule.theme_slug}</div>
-                            <div className="text-xs text-muted-foreground">
-                              {shortId(rule.theme_id, 10)}
-                            </div>
-                          </TableCell>
-                          <TableCell className="max-w-[18rem] whitespace-normal">
-                            <div>{source?.source_name ?? rule.source_id}</div>
-                            <div className="break-all font-mono text-xs text-muted-foreground">
-                              {rule.provider}:{rule.dataset_key}
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="outline">{rule.default_action}</Badge>
-                          </TableCell>
-                          <TableCell>{rule.priority}</TableCell>
-                          <TableCell>{formatDateTime(rule.updated_at)}</TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              ) : null}
+              <DataTable
+                columns={ruleColumns}
+                data={ruleItems}
+                getRowId={(rule) => rule.rule_id}
+                isLoading={rules.isLoading}
+                emptyMessage="조건에 맞는 source rule이 없습니다."
+                onRowClick={(rule) => setSelectedRuleId(rule.rule_id)}
+                isRowActive={(rule) => rule.rule_id === selectedRule?.rule_id}
+              />
             </div>
             <RuleEditor
               key={selectedRule?.rule_id ?? "empty-rule"}

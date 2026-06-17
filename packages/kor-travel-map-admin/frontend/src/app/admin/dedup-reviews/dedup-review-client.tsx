@@ -1,11 +1,17 @@
 "use client";
 
+import {
+  type ColumnDef,
+  type Row,
+  type RowSelectionState,
+} from "@tanstack/react-table";
 import { CheckIcon, MergeIcon, RefreshCwIcon, XIcon } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import {
   type DedupDecision,
   type DedupFeatureRecord,
+  type DedupReviewRecord,
   type DedupStatus,
   useDedupDecisionMutation,
   useDedupReviews,
@@ -14,17 +20,9 @@ import { AdminShell } from "@/components/admin-shell";
 import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { DataTable } from "@/components/ui/data-table";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { formatDateTime, shortId } from "@/lib/format";
 
 const statuses: Array<DedupStatus | "all"> = [
@@ -48,6 +46,7 @@ function hasCoord(feature: DedupFeatureRecord): boolean {
 export function DedupReviewClient() {
   const [status, setStatus] = useState<DedupStatus | "all">("pending");
   const [mergeKey, setMergeKey] = useState<string | null>(null);
+  const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
   const reviews = useDedupReviews({
     status: status === "all" ? undefined : [status],
     page_size: 100,
@@ -85,6 +84,188 @@ export function DedupReviewClient() {
       { onSettled: () => setMergeKey(null) },
     );
   };
+
+  const items = reviews.data?.data.items ?? [];
+  const columns = useMemo<ColumnDef<DedupReviewRecord, unknown>[]>(
+    () => [
+      {
+        id: "review",
+        header: "review",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <span className="font-mono text-xs">
+            {shortId(row.original.review_id)}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "total_score",
+        header: "score",
+        cell: ({ row }) => (
+          <span className="font-mono">{row.original.total_score.toFixed(1)}</span>
+        ),
+      },
+      {
+        id: "feature_a",
+        header: "feature A",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <>
+            <div className="font-medium">{row.original.feature_a.name}</div>
+            <div className="text-xs text-muted-foreground">
+              {row.original.feature_a.provider ?? "-"} ·{" "}
+              {row.original.feature_a.category}
+            </div>
+          </>
+        ),
+      },
+      {
+        id: "feature_b",
+        header: "feature B",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <>
+            <div className="font-medium">{row.original.feature_b.name}</div>
+            <div className="text-xs text-muted-foreground">
+              {row.original.feature_b.provider ?? "-"} ·{" "}
+              {row.original.feature_b.category}
+            </div>
+          </>
+        ),
+      },
+      {
+        accessorKey: "distance_m",
+        header: "distance",
+        cell: ({ row }) => (
+          <span className="font-mono">
+            {typeof row.original.distance_m === "number"
+              ? `${row.original.distance_m.toFixed(1)}m`
+              : "-"}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "status",
+        header: "status",
+        cell: ({ row }) => <StatusBadge status={row.original.status} />,
+      },
+      {
+        accessorKey: "created_at",
+        header: "created",
+        cell: ({ row }) => (
+          <span className="text-muted-foreground">
+            {formatDateTime(row.original.created_at)}
+          </span>
+        ),
+      },
+      {
+        id: "actions",
+        header: "actions",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const item = row.original;
+          return item.status === "pending" ? (
+            mergeKey === item.review_id ? (
+              <div className="flex flex-col gap-1">
+                <span className="text-xs text-muted-foreground">
+                  master 선택 (병합 시 나머지는 master로 흡수)
+                </span>
+                <div className="flex flex-wrap gap-1">
+                  <Button
+                    disabled={decision.isPending}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                    onClick={() =>
+                      merge(item.review_id, item.feature_a.feature_id)
+                    }
+                  >
+                    A: {item.feature_a.name}
+                    {hasCoord(item.feature_a) ? " · 좌표✓" : ""}
+                  </Button>
+                  <Button
+                    disabled={decision.isPending}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                    onClick={() =>
+                      merge(item.review_id, item.feature_b.feature_id)
+                    }
+                  >
+                    B: {item.feature_b.name}
+                    {hasCoord(item.feature_b) ? " · 좌표✓" : ""}
+                  </Button>
+                  <Button
+                    disabled={decision.isPending}
+                    size="sm"
+                    type="button"
+                    variant="secondary"
+                    onClick={() => merge(item.review_id)}
+                  >
+                    자동 선정
+                  </Button>
+                  <Button
+                    disabled={decision.isPending}
+                    size="sm"
+                    type="button"
+                    variant="ghost"
+                    onClick={() => setMergeKey(null)}
+                  >
+                    취소
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-1">
+                <Button
+                  disabled={decision.isPending}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                  onClick={() => decide(item.review_id, "accepted")}
+                >
+                  <CheckIcon data-icon="inline-start" />
+                  accept
+                </Button>
+                <Button
+                  disabled={decision.isPending}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                  onClick={() => decide(item.review_id, "rejected")}
+                >
+                  <XIcon data-icon="inline-start" />
+                  reject
+                </Button>
+                <Button
+                  disabled={decision.isPending}
+                  size="sm"
+                  type="button"
+                  variant="default"
+                  onClick={() => setMergeKey(item.review_id)}
+                >
+                  <MergeIcon data-icon="inline-start" />
+                  merge
+                </Button>
+                <Button
+                  disabled={decision.isPending}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                  onClick={() => decide(item.review_id, "ignored")}
+                >
+                  ignore
+                </Button>
+              </div>
+            )
+          ) : (
+            <span className="text-sm text-muted-foreground">완료</span>
+          );
+        },
+      },
+    ],
+    [decision.isPending, mergeKey],
+  );
 
   return (
     <AdminShell
@@ -125,167 +306,47 @@ export function DedupReviewClient() {
           ))}
         </NativeSelect>
 
-        {reviews.isLoading ? <Skeleton className="h-96" /> : null}
-        <div className="overflow-auto rounded-lg border bg-background">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>review</TableHead>
-                <TableHead>score</TableHead>
-                <TableHead>feature A</TableHead>
-                <TableHead>feature B</TableHead>
-                <TableHead>distance</TableHead>
-                <TableHead>status</TableHead>
-                <TableHead>created</TableHead>
-                <TableHead>actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(reviews.data?.data.items ?? []).map((item) => (
-                <TableRow key={item.review_id}>
-                  <TableCell className="font-mono text-xs">
-                    {shortId(item.review_id)}
-                  </TableCell>
-                  <TableCell className="font-mono">
-                    {item.total_score.toFixed(1)}
-                  </TableCell>
-                  <TableCell>
-                    <div className="font-medium">{item.feature_a.name}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {item.feature_a.provider ?? "-"} · {item.feature_a.category}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="font-medium">{item.feature_b.name}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {item.feature_b.provider ?? "-"} · {item.feature_b.category}
-                    </div>
-                  </TableCell>
-                  <TableCell className="font-mono">
-                    {typeof item.distance_m === "number"
-                      ? `${item.distance_m.toFixed(1)}m`
-                      : "-"}
-                  </TableCell>
-                  <TableCell>
-                    <StatusBadge status={item.status} />
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {formatDateTime(item.created_at)}
-                  </TableCell>
-                  <TableCell>
-                    {item.status === "pending" ? (
-                      mergeKey === item.review_id ? (
-                        <div className="flex flex-col gap-1">
-                          <span className="text-xs text-muted-foreground">
-                            master 선택 (병합 시 나머지는 master로 흡수)
-                          </span>
-                          <div className="flex flex-wrap gap-1">
-                            <Button
-                              disabled={decision.isPending}
-                              size="sm"
-                              type="button"
-                              variant="outline"
-                              onClick={() =>
-                                merge(item.review_id, item.feature_a.feature_id)
-                              }
-                            >
-                              A: {item.feature_a.name}
-                              {hasCoord(item.feature_a) ? " · 좌표✓" : ""}
-                            </Button>
-                            <Button
-                              disabled={decision.isPending}
-                              size="sm"
-                              type="button"
-                              variant="outline"
-                              onClick={() =>
-                                merge(item.review_id, item.feature_b.feature_id)
-                              }
-                            >
-                              B: {item.feature_b.name}
-                              {hasCoord(item.feature_b) ? " · 좌표✓" : ""}
-                            </Button>
-                            <Button
-                              disabled={decision.isPending}
-                              size="sm"
-                              type="button"
-                              variant="secondary"
-                              onClick={() => merge(item.review_id)}
-                            >
-                              자동 선정
-                            </Button>
-                            <Button
-                              disabled={decision.isPending}
-                              size="sm"
-                              type="button"
-                              variant="ghost"
-                              onClick={() => setMergeKey(null)}
-                            >
-                              취소
-                            </Button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="flex flex-wrap gap-1">
-                          <Button
-                            disabled={decision.isPending}
-                            size="sm"
-                            type="button"
-                            variant="outline"
-                            onClick={() => decide(item.review_id, "accepted")}
-                          >
-                            <CheckIcon data-icon="inline-start" />
-                            accept
-                          </Button>
-                          <Button
-                            disabled={decision.isPending}
-                            size="sm"
-                            type="button"
-                            variant="outline"
-                            onClick={() => decide(item.review_id, "rejected")}
-                          >
-                            <XIcon data-icon="inline-start" />
-                            reject
-                          </Button>
-                          <Button
-                            disabled={decision.isPending}
-                            size="sm"
-                            type="button"
-                            variant="default"
-                            onClick={() => setMergeKey(item.review_id)}
-                          >
-                            <MergeIcon data-icon="inline-start" />
-                            merge
-                          </Button>
-                          <Button
-                            disabled={decision.isPending}
-                            size="sm"
-                            type="button"
-                            variant="ghost"
-                            onClick={() => decide(item.review_id, "ignored")}
-                          >
-                            ignore
-                          </Button>
-                        </div>
-                      )
-                    ) : (
-                      <span className="text-sm text-muted-foreground">완료</span>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-              {!reviews.isLoading && (reviews.data?.data.items.length ?? 0) === 0 ? (
-                <TableRow>
-                  <TableCell
-                    className="h-32 text-center text-muted-foreground"
-                    colSpan={8}
-                  >
-                    dedup review가 없습니다.
-                  </TableCell>
-                </TableRow>
-              ) : null}
-            </TableBody>
-          </Table>
-        </div>
+        <DataTable
+          columns={columns}
+          data={items}
+          getRowId={(row) => row.review_id}
+          isLoading={reviews.isLoading}
+          emptyMessage="dedup review가 없습니다."
+          containerClassName="overflow-auto rounded-lg border bg-background"
+          enableRowSelection
+          rowSelection={rowSelection}
+          onRowSelectionChange={setRowSelection}
+          renderBulkActions={(rows: Row<DedupReviewRecord>[]) => {
+            const decideBulk = (value: DedupDecision) => {
+              rows.forEach((row) => decide(row.original.review_id, value));
+              setRowSelection({});
+            };
+            return (
+              <div className="flex flex-wrap gap-1">
+                <Button
+                  disabled={decision.isPending}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                  onClick={() => decideBulk("accepted")}
+                >
+                  <CheckIcon data-icon="inline-start" />
+                  선택 accept
+                </Button>
+                <Button
+                  disabled={decision.isPending}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                  onClick={() => decideBulk("rejected")}
+                >
+                  <XIcon data-icon="inline-start" />
+                  선택 reject
+                </Button>
+              </div>
+            );
+          }}
+        />
       </div>
     </AdminShell>
   );

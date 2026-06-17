@@ -1,8 +1,9 @@
 "use client";
 
+import { type ColumnDef } from "@tanstack/react-table";
 import { RefreshCwIcon } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { type ImportJobStatus, useImportJobs } from "@/api/importJobs";
 import { useOpsLiveInvalidation } from "@/api/live";
@@ -11,18 +12,10 @@ import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DataTable } from "@/components/ui/data-table";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { formatDateTime, shortId } from "@/lib/format";
 
 const statuses: Array<ImportJobStatus | "all"> = [
@@ -74,6 +67,101 @@ export function ImportJobsClient({
       "dagster_runs",
     ],
   });
+
+  const items = jobs.data?.data.items ?? [];
+  type ImportJobRow = NonNullable<typeof jobs.data>["data"]["items"][number];
+  const columns = useMemo<ColumnDef<ImportJobRow, unknown>[]>(
+    () => [
+      {
+        id: "job",
+        header: "job",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <span className="font-mono text-xs">
+            <Link
+              className="text-primary underline-offset-4 hover:underline"
+              href={`/ops/import-jobs/${encodeURIComponent(row.original.job_id)}`}
+              onClick={(event) => event.stopPropagation()}
+            >
+              {shortId(row.original.job_id)}
+            </Link>
+          </span>
+        ),
+      },
+      {
+        id: "batch",
+        header: "batch",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <span className="font-mono text-xs">
+            {row.original.load_batch_id
+              ? shortId(row.original.load_batch_id)
+              : "-"}
+          </span>
+        ),
+      },
+      {
+        id: "parent",
+        header: "parent",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <span className="font-mono text-xs">
+            {row.original.parent_job_id
+              ? shortId(row.original.parent_job_id)
+              : "-"}
+          </span>
+        ),
+      },
+      { accessorKey: "kind", header: "kind" },
+      {
+        accessorKey: "status",
+        header: "status",
+        cell: ({ row }) => <StatusBadge status={row.original.status} />,
+      },
+      {
+        accessorKey: "progress",
+        header: "progress",
+        cell: ({ row }) => (
+          <span className="font-mono">{row.original.progress}%</span>
+        ),
+      },
+      {
+        id: "stage",
+        header: "stage",
+        enableSorting: false,
+        cell: ({ row }) => row.original.current_stage ?? "-",
+      },
+      {
+        accessorKey: "created_at",
+        header: "created",
+        cell: ({ row }) => (
+          <span className="text-muted-foreground">
+            {formatDateTime(row.original.created_at)}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "finished_at",
+        header: "finished",
+        cell: ({ row }) => (
+          <span className="text-muted-foreground">
+            {formatDateTime(row.original.finished_at)}
+          </span>
+        ),
+      },
+      {
+        id: "error",
+        header: "error",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <span className="block max-w-80 truncate text-destructive">
+            {row.original.error_message ?? ""}
+          </span>
+        ),
+      },
+    ],
+    [],
+  );
 
   return (
     <AdminShell
@@ -139,70 +227,14 @@ export function ImportJobsClient({
           />
         </div>
 
-        {jobs.isLoading ? <Skeleton className="h-96" /> : null}
-        <div className="overflow-auto rounded-lg border bg-background">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>job</TableHead>
-                <TableHead>batch</TableHead>
-                <TableHead>parent</TableHead>
-                <TableHead>kind</TableHead>
-                <TableHead>status</TableHead>
-                <TableHead>progress</TableHead>
-                <TableHead>stage</TableHead>
-                <TableHead>created</TableHead>
-                <TableHead>finished</TableHead>
-                <TableHead>error</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(jobs.data?.data.items ?? []).map((job) => (
-                <TableRow key={job.job_id}>
-                  <TableCell className="font-mono text-xs">
-                    <Link
-                      className="text-primary underline-offset-4 hover:underline"
-                      href={`/ops/import-jobs/${encodeURIComponent(job.job_id)}`}
-                    >
-                      {shortId(job.job_id)}
-                    </Link>
-                  </TableCell>
-                  <TableCell className="font-mono text-xs">
-                    {job.load_batch_id ? shortId(job.load_batch_id) : "-"}
-                  </TableCell>
-                  <TableCell className="font-mono text-xs">
-                    {job.parent_job_id ? shortId(job.parent_job_id) : "-"}
-                  </TableCell>
-                  <TableCell>{job.kind}</TableCell>
-                  <TableCell>
-                    <StatusBadge status={job.status} />
-                  </TableCell>
-                  <TableCell className="font-mono">{job.progress}%</TableCell>
-                  <TableCell>{job.current_stage ?? "-"}</TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {formatDateTime(job.created_at)}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {formatDateTime(job.finished_at)}
-                  </TableCell>
-                  <TableCell className="max-w-80 truncate text-destructive">
-                    {job.error_message ?? ""}
-                  </TableCell>
-                </TableRow>
-              ))}
-              {!jobs.isLoading && (jobs.data?.data.items.length ?? 0) === 0 ? (
-                <TableRow>
-                  <TableCell
-                    className="h-32 text-center text-muted-foreground"
-                    colSpan={10}
-                  >
-                    import job이 없습니다.
-                  </TableCell>
-                </TableRow>
-              ) : null}
-            </TableBody>
-          </Table>
-        </div>
+        <DataTable
+          columns={columns}
+          data={items}
+          getRowId={(row) => row.job_id}
+          isLoading={jobs.isLoading}
+          emptyMessage="import job이 없습니다."
+          containerClassName="overflow-auto rounded-lg border bg-background"
+        />
       </div>
     </AdminShell>
   );

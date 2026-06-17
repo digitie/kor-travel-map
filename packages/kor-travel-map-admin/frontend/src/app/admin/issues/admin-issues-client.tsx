@@ -1,5 +1,6 @@
 "use client";
 
+import { type ColumnDef } from "@tanstack/react-table";
 import {
   AlertTriangleIcon,
   CheckIcon,
@@ -29,19 +30,12 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
+import { DataTable } from "@/components/ui/data-table";
 import { FormField, FormTextArea } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { formatCount, formatDateTime, shortId } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -436,6 +430,132 @@ export function AdminIssuesClient() {
     });
   };
 
+  const columns = useMemo<ColumnDef<AdminIssueRecord, unknown>[]>(
+    () => [
+      {
+        id: "issue",
+        header: "issue",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const issue = row.original;
+          return (
+            <>
+              <div className="font-mono text-xs">
+                {shortId(issue.issue_id)}
+              </div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                {issue.violation_type}
+              </div>
+            </>
+          );
+        },
+      },
+      {
+        accessorKey: "severity",
+        header: "severity",
+        enableSorting: true,
+        cell: ({ row }) => <StatusBadge status={row.original.severity} />,
+      },
+      {
+        accessorKey: "status",
+        header: "status",
+        enableSorting: true,
+        cell: ({ row }) => <StatusBadge status={row.original.status} />,
+      },
+      {
+        id: "provider",
+        header: "provider",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const issue = row.original;
+          return (
+            <>
+              <div>{issue.provider ?? "-"}</div>
+              <div className="text-xs text-muted-foreground">
+                {issue.dataset_key ?? "-"}
+              </div>
+            </>
+          );
+        },
+      },
+      {
+        id: "message",
+        header: "message",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const issue = row.original;
+          return (
+            <div className="max-w-96">
+              <div className="line-clamp-2">{issue.message}</div>
+              <div className="mt-1 break-all font-mono text-xs text-muted-foreground">
+                {issue.source_record_key ?? "-"}
+              </div>
+            </div>
+          );
+        },
+      },
+      {
+        id: "feature",
+        header: "feature",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <span className="font-mono text-xs">
+            {linkedFeatureLabel(row.original)}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "detected_at",
+        header: "detected",
+        enableSorting: true,
+        cell: ({ row }) => (
+          <span className="text-muted-foreground">
+            {formatDateTime(row.original.detected_at)}
+          </span>
+        ),
+      },
+      {
+        id: "actions",
+        header: "actions",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const issue = row.original;
+          return (
+            <div className="flex flex-wrap gap-1">
+              <Button
+                disabled={action.isPending}
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  quickAction(issue.issue_id, "resolve");
+                }}
+              >
+                <CheckIcon data-icon="inline-start" />
+                resolve
+              </Button>
+              <Button
+                disabled={action.isPending}
+                size="sm"
+                type="button"
+                variant="ghost"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  quickAction(issue.issue_id, "ignore");
+                }}
+              >
+                ignore
+              </Button>
+            </div>
+          );
+        },
+      },
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [action.isPending],
+  );
+
   return (
     <AdminShell
       actions={
@@ -616,109 +736,16 @@ export function AdminIssuesClient() {
                 </Button>
               </div>
             </div>
-            {issues.isLoading ? <Skeleton className="m-4 h-96" /> : null}
-            <div className="overflow-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>issue</TableHead>
-                    <TableHead>severity</TableHead>
-                    <TableHead>status</TableHead>
-                    <TableHead>provider</TableHead>
-                    <TableHead>message</TableHead>
-                    <TableHead>feature</TableHead>
-                    <TableHead>detected</TableHead>
-                    <TableHead>actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {items.map((issue) => (
-                    <TableRow
-                      className="cursor-pointer"
-                      key={issue.issue_id}
-                      data-state={
-                        selectedIssueId === issue.issue_id
-                          ? "selected"
-                          : undefined
-                      }
-                      onClick={() => setSelectedIssueId(issue.issue_id)}
-                    >
-                      <TableCell>
-                        <div className="font-mono text-xs">
-                          {shortId(issue.issue_id)}
-                        </div>
-                        <div className="mt-1 text-xs text-muted-foreground">
-                          {issue.violation_type}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <StatusBadge status={issue.severity} />
-                      </TableCell>
-                      <TableCell>
-                        <StatusBadge status={issue.status} />
-                      </TableCell>
-                      <TableCell>
-                        <div>{issue.provider ?? "-"}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {issue.dataset_key ?? "-"}
-                        </div>
-                      </TableCell>
-                      <TableCell className="max-w-96">
-                        <div className="line-clamp-2">{issue.message}</div>
-                        <div className="mt-1 break-all font-mono text-xs text-muted-foreground">
-                          {issue.source_record_key ?? "-"}
-                        </div>
-                      </TableCell>
-                      <TableCell className="font-mono text-xs">
-                        {linkedFeatureLabel(issue)}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {formatDateTime(issue.detected_at)}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap gap-1">
-                          <Button
-                            disabled={action.isPending}
-                            size="sm"
-                            type="button"
-                            variant="outline"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              quickAction(issue.issue_id, "resolve");
-                            }}
-                          >
-                            <CheckIcon data-icon="inline-start" />
-                            resolve
-                          </Button>
-                          <Button
-                            disabled={action.isPending}
-                            size="sm"
-                            type="button"
-                            variant="ghost"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              quickAction(issue.issue_id, "ignore");
-                            }}
-                          >
-                            ignore
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                  {!issues.isLoading && items.length === 0 ? (
-                    <TableRow>
-                      <TableCell
-                        className="h-32 text-center text-muted-foreground"
-                        colSpan={8}
-                      >
-                        issue가 없습니다.
-                      </TableCell>
-                    </TableRow>
-                  ) : null}
-                </TableBody>
-              </Table>
-            </div>
+            <DataTable
+              columns={columns}
+              data={items}
+              getRowId={(row) => row.issue_id}
+              isLoading={issues.isLoading}
+              emptyMessage="issue가 없습니다."
+              onRowClick={(issue) => setSelectedIssueId(issue.issue_id)}
+              isRowActive={(issue) => selectedIssueId === issue.issue_id}
+              containerClassName="overflow-auto"
+            />
           </div>
 
           <IssueDetailPanel issueId={selectedIssueId} />

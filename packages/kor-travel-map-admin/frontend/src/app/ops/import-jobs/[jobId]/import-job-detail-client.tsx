@@ -1,5 +1,6 @@
 "use client";
 
+import { type ColumnDef } from "@tanstack/react-table";
 import {
   ArrowLeftIcon,
   BanIcon,
@@ -31,18 +32,11 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { DataTable } from "@/components/ui/data-table";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { formatDateTime, shortId } from "@/lib/format";
 import { buttonVariants } from "@/components/ui/button-variants";
@@ -201,6 +195,56 @@ export function ImportJobDetailClient({ jobId }: { jobId: string }) {
     jobData?.status && !terminalStatuses.has(jobData.status),
   );
   const eventItems = events.data?.data.items ?? [];
+  type EventRow = NonNullable<typeof events.data>["data"]["items"][number];
+  const eventColumns = useMemo<ColumnDef<EventRow, unknown>[]>(
+    () => [
+      {
+        accessorKey: "occurred_at",
+        header: "time",
+        cell: ({ row }) => (
+          <span className="text-muted-foreground">
+            {formatDateTime(row.original.occurred_at)}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "level",
+        header: "level",
+        cell: ({ row }) => <StatusBadge status={row.original.level} />,
+      },
+      {
+        accessorKey: "stage",
+        header: "stage",
+        cell: ({ row }) => <>{row.original.stage ?? "-"}</>,
+      },
+      {
+        accessorKey: "code",
+        header: "code",
+        cell: ({ row }) => (
+          <span className="font-mono text-xs">{row.original.code ?? "-"}</span>
+        ),
+      },
+      {
+        accessorKey: "message",
+        header: "message",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <span className="min-w-80">{row.original.message}</span>
+        ),
+      },
+      {
+        id: "payload",
+        header: "payload",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <pre className="max-h-28 min-w-72 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 font-mono text-xs">
+            {jsonBlock(row.original.payload)}
+          </pre>
+        ),
+      },
+    ],
+    [],
+  );
   const visibleLinks = useMemo(
     () => (jobData?.links ?? []).filter((link) => link.rel !== "self"),
     [jobData?.links],
@@ -324,54 +368,14 @@ export function ImportJobDetailClient({ jobId }: { jobId: string }) {
                       event
                     </Button>
                   </div>
-                  <div className="overflow-auto rounded-lg border">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="w-44">time</TableHead>
-                          <TableHead className="w-24">level</TableHead>
-                          <TableHead className="w-40">stage</TableHead>
-                          <TableHead className="w-44">code</TableHead>
-                          <TableHead>message</TableHead>
-                          <TableHead className="w-80">payload</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {eventItems.map((item) => (
-                          <TableRow key={item.event_id}>
-                            <TableCell className="text-muted-foreground">
-                              {formatDateTime(item.occurred_at)}
-                            </TableCell>
-                            <TableCell>
-                              <StatusBadge status={item.level} />
-                            </TableCell>
-                            <TableCell>{item.stage ?? "-"}</TableCell>
-                            <TableCell className="font-mono text-xs">
-                              {item.code ?? "-"}
-                            </TableCell>
-                            <TableCell className="min-w-80">
-                              {item.message}
-                            </TableCell>
-                            <TableCell>
-                              <pre className="max-h-28 min-w-72 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 font-mono text-xs">
-                                {jsonBlock(item.payload)}
-                              </pre>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                        {!events.isLoading && eventItems.length === 0 ? (
-                          <TableRow>
-                            <TableCell
-                              className="h-24 text-center text-muted-foreground"
-                              colSpan={6}
-                            >
-                              event가 없습니다.
-                            </TableCell>
-                          </TableRow>
-                        ) : null}
-                      </TableBody>
-                    </Table>
-                  </div>
+                  <DataTable
+                    columns={eventColumns}
+                    data={eventItems}
+                    getRowId={(row) => row.event_id}
+                    isLoading={events.isLoading}
+                    emptyMessage="event가 없습니다."
+                    containerClassName="overflow-auto rounded-lg border"
+                  />
                 </CardContent>
               </Card>
 

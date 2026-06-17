@@ -1,5 +1,6 @@
 "use client";
 
+import { type ColumnDef } from "@tanstack/react-table";
 import {
   ActivityIcon,
   AlertTriangleIcon,
@@ -12,6 +13,7 @@ import {
   WorkflowIcon,
 } from "lucide-react";
 import Link from "next/link";
+import { useMemo } from "react";
 
 import { DAGSTER_UI_URL, useDagsterSummary } from "@/api/dagster";
 import { useDedupReviews } from "@/api/dedup";
@@ -32,15 +34,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { DataTable } from "@/components/ui/data-table";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { formatCount, formatDateTime, shortId } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -80,6 +75,55 @@ export function HomePageClient() {
   const dedup = useDedupReviews({ status: ["pending"], page_size: 6 });
   const dagster = useDagsterSummary(8);
   const dagsterData = dagster.data?.data;
+
+  const importJobItems = importJobs.data?.data.items ?? [];
+  type ImportJobRow = NonNullable<
+    typeof importJobs.data
+  >["data"]["items"][number];
+  const importJobColumns = useMemo<ColumnDef<ImportJobRow, unknown>[]>(
+    () => [
+      {
+        accessorKey: "job_id",
+        header: "job",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <span className="font-mono text-xs">{shortId(row.original.job_id)}</span>
+        ),
+      },
+      { accessorKey: "kind", header: "kind", enableSorting: true },
+      {
+        accessorKey: "status",
+        header: "status",
+        enableSorting: true,
+        cell: ({ row }) => <StatusBadge status={row.original.status} />,
+      },
+      {
+        accessorKey: "progress",
+        header: "progress",
+        enableSorting: true,
+        cell: ({ row }) => (
+          <span className="font-mono">{row.original.progress}%</span>
+        ),
+      },
+      {
+        id: "updated",
+        header: "updated",
+        enableSorting: true,
+        accessorFn: (row) =>
+          row.finished_at ?? row.heartbeat_at ?? row.started_at,
+        cell: ({ row }) => (
+          <span className="text-muted-foreground">
+            {formatDateTime(
+              row.original.finished_at ??
+                row.original.heartbeat_at ??
+                row.original.started_at,
+            )}
+          </span>
+        ),
+      },
+    ],
+    [],
+  );
 
   const refreshAll = () => {
     void health.refetch();
@@ -187,53 +231,18 @@ export function HomePageClient() {
               </CardAction>
             </CardHeader>
             <CardContent className="overflow-auto">
-              {importJobs.isLoading ? <Skeleton className="h-64" /> : null}
               {importJobs.isError ? (
                 <p className="text-sm text-destructive">
                   {importJobs.error.message}
                 </p>
               ) : null}
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>job</TableHead>
-                    <TableHead>kind</TableHead>
-                    <TableHead>status</TableHead>
-                    <TableHead>progress</TableHead>
-                    <TableHead>updated</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {(importJobs.data?.data.items ?? []).map((job) => (
-                    <TableRow key={job.job_id}>
-                      <TableCell className="font-mono text-xs">
-                        {shortId(job.job_id)}
-                      </TableCell>
-                      <TableCell>{job.kind}</TableCell>
-                      <TableCell>
-                        <StatusBadge status={job.status} />
-                      </TableCell>
-                      <TableCell className="font-mono">{job.progress}%</TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {formatDateTime(
-                          job.finished_at ?? job.heartbeat_at ?? job.started_at,
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                  {!importJobs.isLoading &&
-                  (importJobs.data?.data.items.length ?? 0) === 0 ? (
-                    <TableRow>
-                      <TableCell
-                        className="h-24 text-center text-muted-foreground"
-                        colSpan={5}
-                      >
-                        import job이 없습니다.
-                      </TableCell>
-                    </TableRow>
-                  ) : null}
-                </TableBody>
-              </Table>
+              <DataTable
+                columns={importJobColumns}
+                data={importJobItems}
+                getRowId={(row) => row.job_id}
+                isLoading={importJobs.isLoading}
+                emptyMessage="import job이 없습니다."
+              />
             </CardContent>
           </Card>
 

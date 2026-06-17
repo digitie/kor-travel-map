@@ -1,7 +1,8 @@
 "use client";
 
+import { type ColumnDef } from "@tanstack/react-table";
 import { RefreshCwIcon } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import {
   type IntegrityIssueStatus,
@@ -14,17 +15,9 @@ import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DataTable } from "@/components/ui/data-table";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { formatCount, formatDateTime, shortId } from "@/lib/format";
 
 const issueStatuses: Array<IntegrityIssueStatus | "all"> = [
@@ -50,6 +43,93 @@ export function ConsistencyClient() {
     void reports.refetch();
     void issues.refetch();
   };
+
+  const reportItems = reports.data?.data.items ?? [];
+  type ReportRow = NonNullable<typeof reports.data>["data"]["items"][number];
+  const reportColumns = useMemo<ColumnDef<ReportRow, unknown>[]>(
+    () => [
+      {
+        id: "report",
+        header: "report",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <span className="font-mono text-xs">
+            {shortId(row.original.report_id)}
+          </span>
+        ),
+      },
+      {
+        id: "batch",
+        header: "batch",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <span className="font-mono text-xs">
+            {shortId(row.original.batch_id)}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "severity_max",
+        header: "severity",
+        cell: ({ row }) => <StatusBadge status={row.original.severity_max} />,
+      },
+      {
+        accessorKey: "finished_at",
+        header: "finished",
+        cell: ({ row }) => (
+          <span className="text-muted-foreground">
+            {formatDateTime(row.original.finished_at)}
+          </span>
+        ),
+      },
+    ],
+    [],
+  );
+
+  const issueItems = issues.data?.data.items ?? [];
+  type IssueRow = NonNullable<typeof issues.data>["data"]["items"][number];
+  const issueColumns = useMemo<ColumnDef<IssueRow, unknown>[]>(
+    () => [
+      {
+        id: "issue",
+        header: "issue",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <span className="font-mono text-xs">
+            {shortId(row.original.issue_id)}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "severity",
+        header: "severity",
+        cell: ({ row }) => <StatusBadge status={row.original.severity} />,
+      },
+      {
+        accessorKey: "provider",
+        header: "provider",
+        cell: ({ row }) => row.original.provider ?? "-",
+      },
+      {
+        accessorKey: "message",
+        header: "message",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <span className="block max-w-96 truncate">{row.original.message}</span>
+        ),
+      },
+      {
+        accessorKey: "detected_at",
+        header: "detected",
+        cell: ({ row }) => (
+          <span className="text-muted-foreground">
+            {formatDateTime(row.original.detected_at)}
+          </span>
+        ),
+      },
+    ],
+    [],
+  );
 
   return (
     <AdminShell
@@ -109,37 +189,14 @@ export function ConsistencyClient() {
                 {reports.data?.data.items.length ?? 0}
               </Badge>
             </div>
-            {reports.isLoading ? <Skeleton className="m-4 h-72" /> : null}
-            <div className="overflow-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>report</TableHead>
-                    <TableHead>batch</TableHead>
-                    <TableHead>severity</TableHead>
-                    <TableHead>finished</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {(reports.data?.data.items ?? []).map((report) => (
-                    <TableRow key={report.report_id}>
-                      <TableCell className="font-mono text-xs">
-                        {shortId(report.report_id)}
-                      </TableCell>
-                      <TableCell className="font-mono text-xs">
-                        {shortId(report.batch_id)}
-                      </TableCell>
-                      <TableCell>
-                        <StatusBadge status={report.severity_max} />
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {formatDateTime(report.finished_at)}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+            <DataTable
+              columns={reportColumns}
+              data={reportItems}
+              getRowId={(row) => row.report_id}
+              isLoading={reports.isLoading}
+              emptyMessage="데이터가 없습니다."
+              containerClassName="overflow-auto"
+            />
           </div>
 
           <div className="rounded-lg border bg-background">
@@ -164,39 +221,14 @@ export function ConsistencyClient() {
                 ))}
               </NativeSelect>
             </div>
-            {issues.isLoading ? <Skeleton className="m-4 h-72" /> : null}
-            <div className="overflow-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>issue</TableHead>
-                    <TableHead>severity</TableHead>
-                    <TableHead>provider</TableHead>
-                    <TableHead>message</TableHead>
-                    <TableHead>detected</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {(issues.data?.data.items ?? []).map((issue) => (
-                    <TableRow key={issue.issue_id}>
-                      <TableCell className="font-mono text-xs">
-                        {shortId(issue.issue_id)}
-                      </TableCell>
-                      <TableCell>
-                        <StatusBadge status={issue.severity} />
-                      </TableCell>
-                      <TableCell>{issue.provider ?? "-"}</TableCell>
-                      <TableCell className="max-w-96 truncate">
-                        {issue.message}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {formatDateTime(issue.detected_at)}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+            <DataTable
+              columns={issueColumns}
+              data={issueItems}
+              getRowId={(row) => row.issue_id}
+              isLoading={issues.isLoading}
+              emptyMessage="데이터가 없습니다."
+              containerClassName="overflow-auto"
+            />
           </div>
         </section>
       </div>
