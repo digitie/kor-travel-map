@@ -94,17 +94,17 @@ export function AdminShell({
     .toSorted((a, b) => b.href.length - a.href.length)[0]?.href;
 
   return (
-    <main className="min-h-screen bg-muted/30 text-foreground">
-      <div className="grid min-h-screen lg:grid-cols-[16rem_1fr]">
-        <aside className="border-b bg-background/95 lg:border-r lg:border-b-0">
-          <div className="flex h-full flex-col gap-4 p-4">
-            <Link className="flex items-center gap-2" href="/">
-              <span className="flex size-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
+    <main className="min-h-screen bg-surface-page text-text-primary">
+      <div className="grid min-h-screen min-w-0 lg:grid-cols-[17rem_1fr]">
+        <aside className="min-w-0 border-b border-surface-muted bg-card shadow-[var(--shadow-card)] lg:border-r lg:border-b-0">
+          <div className="flex h-full min-w-0 flex-col gap-5 p-5">
+            <Link className="flex items-center gap-2 text-text-primary" href="/">
+              <span className="flex size-10 items-center justify-center rounded-xl bg-brand-tint text-brand">
                 <MapIcon className="size-4" />
               </span>
-              <span className="font-semibold">kor-travel-map</span>
+              <span className="text-[14px] font-bold">kor-travel-map</span>
             </Link>
-            <nav className="flex gap-1 overflow-x-auto lg:flex-col lg:overflow-visible">
+            <nav className="flex max-w-full gap-1 overflow-x-auto lg:max-h-[calc(100vh-6rem)] lg:flex-col lg:overflow-y-auto lg:pr-1">
               {navItems.map((item) => {
                 const Icon = item.icon;
                 const active = item.href === activeHref;
@@ -129,18 +129,18 @@ export function AdminShell({
           </div>
         </aside>
         <div className="min-w-0">
-          <header className="border-b bg-background">
-            <div className="flex flex-col gap-3 px-5 py-4 xl:flex-row xl:items-start xl:justify-between">
+          <header className="px-6 pt-6">
+            <div className="flex flex-col gap-4 rounded-2xl bg-card p-6 shadow-[var(--shadow-card)] ring-1 ring-border/70 xl:flex-row xl:items-start xl:justify-between">
               <div className="flex min-w-0 flex-col gap-1">
                 <div className="flex flex-wrap items-center gap-2">
                   {section ? <Badge variant="secondary">{section}</Badge> : null}
-                  <span className="break-all font-mono text-xs text-muted-foreground">
+                  <span className="break-all font-mono text-[12px] text-text-tertiary">
                     {pathname}
                   </span>
                 </div>
-                <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
+                <h1 className="text-[24px] leading-snug font-bold">{title}</h1>
                 {description ? (
-                  <p className="max-w-4xl text-sm text-muted-foreground">
+                  <p className="max-w-4xl text-[13px] leading-normal text-text-secondary">
                     {description}
                   </p>
                 ) : null}
@@ -150,7 +150,7 @@ export function AdminShell({
               ) : null}
             </div>
           </header>
-          <div className="p-5">{children}</div>
+          <div className="px-6 py-6">{children}</div>
         </div>
       </div>
     </main>

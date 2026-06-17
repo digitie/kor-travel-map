@@ -1,5 +1,25 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-18 Codex 작업 메모 — admin frontend StyleSeed 디자인 규칙 적용
+
+사용자 요청에 따라 `https://styleseed-demo.vercel.app/llms.txt` 및 연결된
+`llms-full.txt`의 StyleSeed 규칙을 admin frontend 공통 디자인 표면에 반영했다.
+
+- **적용 범위**: `globals.css` design token, `AdminShell`, 홈 KPI/상태 카드,
+  공용 `Card`/`Button`/`Badge`/`StatusBadge`/`Table`/`DataTable`/form primitive.
+- **핵심 변경**: 단일 brand accent + grayscale surface, 카드 기반 정보 표면,
+  낮은 shadow, 명시적 type scale, 숫자+단위 2:1 표시, KPI secondary element 변형,
+  모바일 grid overflow 방지.
+- **검증**: frontend type-check 통과, ESLint 0 errors(기존 warnings 6), public env
+  주입 `next build` 통과, `12705` production 서버 HTTP 200 및 Playwright screenshot
+  1280×720/390×844 확인.
+- **문서화**: [`docs/architecture/admin-frontend-design-rules.md`](architecture/admin-frontend-design-rules.md)에
+  StyleSeed 기반 로컬 admin frontend 규칙을 정리했다.
+- **환경 메모**: WSL `/usr/local/bin/node`가 bus error를 내 Windows Node로 검증을
+  대체했다. 현재 `http://127.0.0.1:12705/`에 production frontend 서버가 떠 있다.
+
+**다음 한 작업**: **T-229-buildx — arm64 multi-arch buildx 배포 검증** (`GITHUB_TOKEN` 필요).
+
 ## 2026-06-17 Codex 작업 메모 — maplibre-vworld-react 지도 e2e 종결
 
 `T-MAP-VWORLD-03`(#467)을 종결했다. PR #469 merge 후 main 기준으로 WSL dev server +

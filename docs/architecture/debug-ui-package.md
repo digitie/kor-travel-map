@@ -14,6 +14,9 @@ DB/Dagster, PinVi OpenAPI 연동) + ADR-055(API/admin 패키지 분리).
 [`docs/debug-ui-admin-workflows.md`](../debug-ui-admin-workflows.md)를 기준으로 한다.
 본 문서는 패키지 경계와 라우터 정책의 정본이고, 구현자가 실제 admin 기능을 추가할
 때는 해당 문서의 화면/엔드포인트/검증 기준을 함께 따른다.
+Admin frontend 디자인 규칙은
+[`docs/architecture/admin-frontend-design-rules.md`](admin-frontend-design-rules.md)를
+따른다.
 Admin 우선 OpenAPI와 Dagster feature update queue 계약은
 [`docs/architecture/openapi-admin-contract.md`](openapi-admin-contract.md)를 기준으로 한다.
 외부 POI key 기반 주변 feature 캐시 갱신은
