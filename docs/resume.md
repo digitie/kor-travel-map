@@ -1,5 +1,20 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-17 Codex 작업 메모 — maplibre-vworld-react 지도 e2e 종결
+
+`T-MAP-VWORLD-03`(#467)을 종결했다. PR #469 merge 후 main 기준으로 WSL dev server +
+Windows Playwright 흐름에서 지도 e2e를 다시 실행했고, `features-map-interactions.spec.ts`
+**5 passed / 0 failed**를 확인했다.
+
+- **검증 환경**: WSL `0.0.0.0:12706`, Windows `E2E_BASE_URL=http://172.26.51.35:12706`,
+  `NEXT_ALLOWED_DEV_ORIGINS=172.26.51.35`.
+- **검증 범위**: map/table 탭, bbox fetch, kind 필터 refetch, table 선택→지도 상세 패널,
+  error/empty 상태.
+- **후속 수정**: 최종 e2e에서 추가 수정할 회귀는 없었다. 정본 리포트는
+  `docs/reports/maplibre-vworld-react-e2e-2026-06-17.md`.
+
+**다음 한 작업**: **T-229-buildx — arm64 multi-arch buildx 배포 검증** (`GITHUB_TOKEN` 필요).
+
 ## 2026-06-17 Codex 작업 메모 — admin features 지도 VWorldMapView 전환
 
 `T-MAP-VWORLD-02`(#466)를 구현했다. `features-client.tsx`에서 직접
@@ -176,8 +191,6 @@ T-108/ADR-056의 arm64 multi-arch buildx 이미지 build+boot smoke다.
 ## 열린 작업 요약
 
 즉시:
-
-- `T-MAP-VWORLD-03` — 지도 e2e 라이브 검증 및 후속 수정.
 
 - `T-229-buildx` — arm64 multi-arch buildx 배포 검증 (T-229 잔여, `GITHUB_TOKEN` 필요).
 
