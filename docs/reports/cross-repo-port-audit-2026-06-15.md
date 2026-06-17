@@ -50,7 +50,7 @@ cross-repo **정본 지도**이므로 공급자 측 값을 [`runbooks/cross-repo
 ## 4. Cross-repo 발견 (공급자 repo 측 — 본 repo 비대상)
 
 - ⚠️ **concierge `docs/architecture.md:21`** (origin/main `9fabbcf`)가 kor-travel-map을
-  옛 이름 **`python-krtour-map`**으로 표기. 본 repo 수정 대상 아님 — **concierge 측
+  옛 이름으로 표기. 본 repo 수정 대상 아님 — **concierge 측
   후속**(naming 현행화 → kor-travel-map/kortravelmap)으로 분계한다. integration-map은
   이미 전환기 명칭 note(§머리말 L12-14)를 보유해 본 repo 영향 없음.
 - 체크리스트 §2(전제 신선도) 관점에서 concierge가 kor-travel-map을 "주기 pull"하는

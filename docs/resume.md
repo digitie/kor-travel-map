@@ -51,8 +51,8 @@ T-229(T-225가 분리한 라이브 검증 후속)를 종결했다. 정본 리포
   worktree 정리(메인 FF + review 잡파일 104개 제거, claude stray 빌드 산출물 제거)도 완료.
 
 **다음 한 작업**: 본 저장소 즉시 실행 가능한 큰 트랙 없음. 잔여는 **arm64 buildx
-배포 시점 검증**(GITHUB_TOKEN 필요)뿐. (운영 외 작업: GitHub repo rename
-`python-krtour-map`→`kor-travel-map` 진행 중.)
+배포 시점 검증**(GITHUB_TOKEN 필요)뿐. (운영 외 작업: GitHub repo가
+`kor-travel-map`으로 rename됨.)
 
 ## 2026-06-13 claude 작업 메모 — T-225 T-212e closure 재검증 완료
 

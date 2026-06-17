@@ -376,7 +376,7 @@ concierge·geo 계약을 공급자 측 origin/main으로 실측 교차확인(che
   `{items,next_cursor,has_more}`, `docs/feature-export-api.md`) + geo `/v2/{geocode,reverse}`
   @12501 모두 정합.
 - **cross-repo 발견(공급자 측, 본 repo 비대상)**: concierge `docs/architecture.md:21`가
-  map을 옛 `python-krtour-map`으로 표기 → concierge 후속. **TripMate**(9021/9022 +
+  map을 옛 이름으로 표기 → concierge 후속. **TripMate**(9021/9022 +
   batch/cursor)는 로컬 미체크아웃 → quarterly cross-repo audit로 위임.
 - 본 repo 코드/문서 수정 없음(integration-map은 #438에서 이미 정합).
 
@@ -396,7 +396,7 @@ ground truth와 대조. 정본 리포트 `docs/reports/docs-consistency-sweep-20
 - **MED 3**: `sprints/README.md` Sprint5/anti-drift note T-225 stale(T-DA-19),
   `SKILL.md:298` "ADR 001~049/050"→"001~056/057"(T-DA-20), `docker-app.md` offline
   bucket `krtour-uploads`→`kor-travel-map-uploads`(`settings.py:97`, T-DA-22).
-- **LOW 2**: spec docx 죽은 참조 → `git mv python-krtour-map-spec.docx
+- **LOW 2**: spec docx 죽은 참조 → `git mv kor-travel-map-spec.docx
   kor-travel-map-spec.docx`(DA-D-05=A, T-DA-23); `AGENTS.md` export_openapi.py 경로를
   `packages/kor-travel-map-api/scripts/`로(T-DA-24).
 - **INFO**: `decisions.md` ADR-035에 ADR-045 부분 supersede 역참조 한 줄 추가(역사
