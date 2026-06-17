@@ -2,6 +2,28 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-17 (claude) — admin UI 전 테이블 TanStack DataTable 이행 (PR #454)
+
+admin UI(`packages/kor-travel-map-admin/frontend`)의 모든 테이블(20파일/~22테이블)을 공용
+headless `DataTable`(@tanstack/react-table v8 + @tanstack/react-virtual v3)로 교체.
+정본 계획·세분화 e2e 플랜: `docs/reports/admin-tanstack-table-migration-2026-06-17.md`.
+
+- **공용 DataTable**(`src/components/ui/data-table.tsx`): 기본은 semantic shadcn Table primitive로
+  flexRender(role=table/columnheader/row/cell + 헤더 텍스트 verbatim), opt-in `virtualized`
+  (display:grid+sticky thead+absolute rows+useVirtualizer+명시 ARIA aria-rowcount/rowindex),
+  정렬 헤더(aria-sort, 접근성 이름 보존), 내장 loading/empty/error, onRowClick+isRowActive,
+  opt-in 행 선택 + bulk 툴바. 데이터 연산 기본 server-side(manual*).
+- **범위 결정(사용자)**: react-table 전체 통일, react-virtual은 `features` 지도 목록(무한)에만.
+  primitive 직접 사용처는 `data-table.tsx` 하나만 남음.
+- **UX 개선**: 클릭 정렬 헤더 전역 · admin-features 서버정렬 dropdown 유지+헤더 동기 ·
+  다중선택+bulk(dedup accept/reject, curated 채택/보관).
+- **검증**: tsc/ESLint 0 errors · vitest 20/20(DataTable 컴포넌트 5 신규) · next build 전 21페이지 ·
+  route-mocked Playwright 16/16(Windows) · CI 8/8 green.
+- **e2e 호환성**: backend-의존 spec(admin-ops/curated/features-new/features/home/dagster/etl)은
+  role/name(regex) 기반 셀렉터 + 헤더 텍스트 보존 덕에 **마이그레이션과 호환**(7-spec 정적 audit +
+  positional/count 패턴 grep 재확인, 무변경). 라이브 실행만 backend 환경(Python venv+Postgres)에 위임.
+- 잔여: arm64 buildx(GITHUB_TOKEN) · admin 테이블 backend-의존 e2e 라이브 실행 · bulk 정책 가드(선택).
+
 ## 2026-06-17 (claude) — Claude Code PR 리뷰 취합(#452) 후속 일괄 반영
 
 issue #452(2026-06-17 Claude Code PR #437~#450 전문 리뷰 취합)의 잔여 조치를 일괄 반영.

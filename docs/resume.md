@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-17 claude 작업 메모 — admin UI TanStack 테이블 이행 + #452 후속 종결
+
+- **PR #453 머지**: issue #452(Claude Code PR #437~#450 리뷰 취합)의 잔여 조치 일괄 반영 — KHOA
+  re-key cleanup 마이그레이션(alembic 0027)·Prometheus path label·geocoder blast radius 문서/테스트·
+  REST/의존체인/ServiceToken 정합·ADR-059(벤더링 agent/skill 예외) 등. CI green.
+- **PR #454 머지**: admin UI 전 테이블(20파일/~22테이블)을 공용 `DataTable`(@tanstack/react-table v8
+  + react-virtual v3)로 이행. 정렬 헤더(aria-sort)·다중선택/bulk(dedup·curated)·`features` 가상화.
+  정본 `docs/reports/admin-tanstack-table-migration-2026-06-17.md`. tsc/ESLint/vitest(20)/next build/
+  route-mocked Playwright(16)/CI 전부 green. backend-의존 e2e는 role/name 셀렉터라 호환(audit+grep 무변경).
+
+**다음 한 작업**: 즉시 실행 가능한 큰 트랙 없음. 잔여는 (1) **arm64 buildx 배포 검증**(`GITHUB_TOKEN`
+필요), (2) **admin UI 테이블 backend-의존 e2e 라이브 실행**(Python venv+Postgres — admin-ops/curated/
+features-new), (3) bulk 동작 정책 가드(완료 review 재결정·archive confirm, 선택)뿐.
+
 ## 2026-06-14 claude 작업 메모 — T-229 curated 오버레이 라이브 검증 완료
 
 T-229(T-225가 분리한 라이브 검증 후속)를 종결했다. 정본 리포트
