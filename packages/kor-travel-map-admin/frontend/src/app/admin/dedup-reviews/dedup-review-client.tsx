@@ -1,6 +1,10 @@
 "use client";
 
-import { type ColumnDef } from "@tanstack/react-table";
+import {
+  type ColumnDef,
+  type Row,
+  type RowSelectionState,
+} from "@tanstack/react-table";
 import { CheckIcon, MergeIcon, RefreshCwIcon, XIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
@@ -42,6 +46,7 @@ function hasCoord(feature: DedupFeatureRecord): boolean {
 export function DedupReviewClient() {
   const [status, setStatus] = useState<DedupStatus | "all">("pending");
   const [mergeKey, setMergeKey] = useState<string | null>(null);
+  const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
   const reviews = useDedupReviews({
     status: status === "all" ? undefined : [status],
     page_size: 100,
@@ -308,6 +313,39 @@ export function DedupReviewClient() {
           isLoading={reviews.isLoading}
           emptyMessage="dedup review가 없습니다."
           containerClassName="overflow-auto rounded-lg border bg-background"
+          enableRowSelection
+          rowSelection={rowSelection}
+          onRowSelectionChange={setRowSelection}
+          renderBulkActions={(rows: Row<DedupReviewRecord>[]) => {
+            const decideBulk = (value: DedupDecision) => {
+              rows.forEach((row) => decide(row.original.review_id, value));
+              setRowSelection({});
+            };
+            return (
+              <div className="flex flex-wrap gap-1">
+                <Button
+                  disabled={decision.isPending}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                  onClick={() => decideBulk("accepted")}
+                >
+                  <CheckIcon data-icon="inline-start" />
+                  선택 accept
+                </Button>
+                <Button
+                  disabled={decision.isPending}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                  onClick={() => decideBulk("rejected")}
+                >
+                  <XIcon data-icon="inline-start" />
+                  선택 reject
+                </Button>
+              </div>
+            );
+          }}
         />
       </div>
     </AdminShell>

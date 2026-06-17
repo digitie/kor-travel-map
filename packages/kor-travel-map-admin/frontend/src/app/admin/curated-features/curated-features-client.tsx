@@ -1,6 +1,10 @@
 "use client";
 
-import { type ColumnDef } from "@tanstack/react-table";
+import {
+  type ColumnDef,
+  type Row,
+  type RowSelectionState,
+} from "@tanstack/react-table";
 import {
   AlertTriangleIcon,
   ArchiveIcon,
@@ -566,6 +570,7 @@ export function CuratedFeaturesClient() {
     useState<string | null>(null);
   const [selectedRuleId, setSelectedRuleId] = useState<string | null>(null);
   const [ruleEnabled, setRuleEnabled] = useState<EnabledFilter>("all");
+  const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
 
   const themes = useAdminCuratedThemes({ limit: 200 });
   const sources = useAdminCuratedSources({ limit: 500 });
@@ -1128,6 +1133,54 @@ export function CuratedFeaturesClient() {
               getRowId={(feature) => feature.curated_feature_id}
               isLoading={features.isLoading}
               emptyMessage="조건에 맞는 curated 후보가 없습니다."
+              enableRowSelection
+              rowSelection={rowSelection}
+              onRowSelectionChange={setRowSelection}
+              renderBulkActions={(rows: Row<CuratedFeature>[]) => (
+                <>
+                  <Button
+                    disabled={selectFeature.isPending}
+                    size="sm"
+                    type="button"
+                    onClick={() => {
+                      for (const row of rows) {
+                        selectFeature.mutate({
+                          curatedFeatureId: row.original.curated_feature_id,
+                          body: {
+                            actor: "admin-ui",
+                            reason: "admin curated selection",
+                          },
+                        });
+                      }
+                      setRowSelection({});
+                    }}
+                  >
+                    <CheckIcon data-icon="inline-start" />
+                    선택 채택
+                  </Button>
+                  <Button
+                    disabled={archiveFeature.isPending}
+                    size="sm"
+                    type="button"
+                    variant="destructive"
+                    onClick={() => {
+                      for (const row of rows) {
+                        archiveFeature.mutate({
+                          curatedFeatureId: row.original.curated_feature_id,
+                          body: {
+                            actor: "admin-ui",
+                            reason: "admin curated archive",
+                          },
+                        });
+                      }
+                      setRowSelection({});
+                    }}
+                  >
+                    <ArchiveIcon data-icon="inline-start" />
+                    선택 보관
+                  </Button>
+                </>
+              )}
               onRowClick={(feature) =>
                 setSelectedCuratedFeatureId(feature.curated_feature_id)
               }
