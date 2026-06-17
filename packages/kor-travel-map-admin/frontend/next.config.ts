@@ -2,6 +2,10 @@ import type { NextConfig } from "next";
 import path from "node:path";
 
 const workspaceRoot = path.resolve(process.cwd(), "../../..");
+const extraAllowedDevOrigins =
+  process.env.NEXT_ALLOWED_DEV_ORIGINS?.split(",")
+    .map((origin) => origin.trim())
+    .filter((origin) => origin.length > 0) ?? [];
 
 /**
  * Next.js config for kor-travel-map-admin-frontend.
@@ -17,7 +21,7 @@ const workspaceRoot = path.resolve(process.cwd(), "../../..");
  */
 const config: NextConfig = {
   reactStrictMode: true,
-  allowedDevOrigins: ["127.0.0.1", "localhost"],
+  allowedDevOrigins: ["127.0.0.1", "localhost", ...extraAllowedDevOrigins],
 
   // Next.js 16 production build uses Turbopack by default. In this npm
   // workspace, set the repo root explicitly so Turbopack can resolve the

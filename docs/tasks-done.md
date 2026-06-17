@@ -3,6 +3,20 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## maplibre-vworld-react 지도 전환 (2026-06-17, `T-MAP-VWORLD`)
+
+- [x] **T-MAP-VWORLD-01 — 계획 및 Task 생성** (#465, PR #468).
+  `digitie/maplibre-vworld-react` `a7cb0f8` 기준으로 admin `features` 지도 전환 범위를
+  정했다. 전체 외부 모노레포 vendoring 없이 필요한 `VWorldMapView`/React marker 모델만
+  admin UI 내부에 얇게 이식하는 방향이다. 정본 계획은
+  `docs/reports/maplibre-vworld-react-migration-plan-2026-06-17.md`.
+- [x] **T-MAP-VWORLD-02 — admin features 지도를 VWorldMapView 기반으로 전환** (#466).
+  직접 `maplibre-gl` 인스턴스와 marker 배열을 관리하던 `features-client.tsx`를
+  `VWorldMapView`/`VWorldMarker` 컴포넌트 모델로 전환했다. bbox 동기화, kind 필터
+  refetch, marker/table 선택 상세 패널, VWorld key 미설정 fallback을 유지했다.
+  Windows localhost forwarding이 실패하는 e2e 환경을 위해 `NEXT_ALLOWED_DEV_ORIGINS`
+  기반 dev origin 추가 허용도 넣었다.
+
 ## T-212e 후속 라이브 검증 (2026-06-14, `T-229`)
 
 - [x] **T-229 — T-212e 후속 라이브 검증** (arm64 buildx만 잔여).

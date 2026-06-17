@@ -1,8 +1,7 @@
 "use client";
 
-import { createMarkerElement } from "@kor-travel-map/map-marker-react";
 import "maplibre-vworld/style.css";
-import maplibregl, { LngLatBounds } from "maplibre-gl";
+import type { LngLatBounds, Map as MapLibreMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
   GitCompareArrowsIcon,
@@ -16,7 +15,7 @@ import {
   XIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import { type ColumnDef, type SortingState } from "@tanstack/react-table";
 
@@ -42,8 +41,9 @@ import {
 import { DataTable } from "@/components/ui/data-table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { VWorldMapView, VWorldMarker } from "@/components/vworld-map-view";
 import { cn } from "@/lib/utils";
-import { buildVWorldStyle, isVWorldApiKeyConfigured } from "@/lib/vworld-style";
+import { isVWorldApiKeyConfigured } from "@/lib/vworld-style";
 import { useMapStore, type FeatureViewMode } from "@/state/map";
 
 const VWORLD_KEY = process.env.NEXT_PUBLIC_VWORLD_API_KEY;
@@ -166,10 +166,6 @@ function FeatureDetailPanel({
 }
 
 export function FeaturesClient() {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const mapRef = useRef<maplibregl.Map | null>(null);
-  const markerLayerRef = useRef<maplibregl.Marker[]>([]);
-
   const viewport = useMapStore((state) => state.viewport);
   const setViewport = useMapStore((state) => state.setViewport);
   const featureViewMode = useMapStore((state) => state.featureViewMode);
@@ -194,18 +190,8 @@ export function FeaturesClient() {
     { enabled: bbox !== null },
   );
 
-  useEffect(() => {
-    if (containerRef.current === null) return;
-    const map = new maplibregl.Map({
-      container: containerRef.current,
-      style: buildVWorldStyle(VWORLD_KEY),
-      center: [viewport.lon, viewport.lat],
-      zoom: viewport.zoom,
-      attributionControl: { compact: true },
-    });
-    mapRef.current = map;
-
-    const updateBbox = () => {
+  const updateViewportFromMap = useCallback(
+    (map: MapLibreMap) => {
       const center = map.getCenter();
       setViewport({
         lon: center.lng,
@@ -213,44 +199,9 @@ export function FeaturesClient() {
         zoom: map.getZoom(),
       });
       setBbox(boundsToBbox(map.getBounds()));
-    };
-    map.on("load", updateBbox);
-    map.on("moveend", updateBbox);
-
-    return () => {
-      map.off("load", updateBbox);
-      map.off("moveend", updateBbox);
-      for (const marker of markerLayerRef.current) marker.remove();
-      markerLayerRef.current = [];
-      map.remove();
-      mapRef.current = null;
-    };
-    // maplibre 인스턴스는 mount 1회만 생성하고 viewport는 store에 동기화한다.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    if (mapRef.current === null) return;
-    const data: FeatureSummary[] = featuresQuery.data?.data.items ?? [];
-    for (const marker of markerLayerRef.current) marker.remove();
-    markerLayerRef.current = [];
-    for (const feature of data) {
-      if (typeof feature.lon !== "number" || typeof feature.lat !== "number") {
-        continue;
-      }
-      const element = createMarkerElement({
-        markerIcon: feature.marker_icon,
-        markerColor: feature.marker_color,
-        size: 24,
-        title: `${feature.name} (${feature.kind})`,
-        onClick: () => setSelectedFeatureId(feature.feature_id),
-      });
-      const marker = new maplibregl.Marker({ element })
-        .setLngLat([feature.lon, feature.lat])
-        .addTo(mapRef.current);
-      markerLayerRef.current.push(marker);
-    }
-  }, [featuresQuery.data, setSelectedFeatureId]);
+    },
+    [setViewport],
+  );
 
   const featureItems = featuresQuery.data?.data.items ?? [];
   const [tableSorting, setTableSorting] = useState<SortingState>([
@@ -423,16 +374,39 @@ export function FeaturesClient() {
         <TabsContent className="min-h-0" value="map">
           <Card className="relative h-[calc(100vh-12.5rem)] overflow-hidden p-0">
             <div
-              ref={containerRef}
               className="absolute inset-0 h-full w-full"
-              data-testid="map-canvas-container"
               style={{
                 height: "100%",
                 inset: 0,
                 position: "absolute",
                 width: "100%",
               }}
-            />
+            >
+              <VWorldMapView
+                apiKey={VWORLD_KEY}
+                center={[viewport.lon, viewport.lat]}
+                className="absolute inset-0 h-full w-full"
+                testId="map-canvas-container"
+                zoom={viewport.zoom}
+                onLoad={updateViewportFromMap}
+                onMoveEnd={updateViewportFromMap}
+              >
+                {featureItems.map((feature) =>
+                  typeof feature.lon === "number" &&
+                  typeof feature.lat === "number" ? (
+                    <VWorldMarker
+                      key={feature.feature_id}
+                      lngLat={[feature.lon, feature.lat]}
+                      markerColor={feature.marker_color}
+                      markerIcon={feature.marker_icon}
+                      selected={feature.feature_id === selectedFeatureId}
+                      title={`${feature.name} (${feature.kind})`}
+                      onClick={() => setSelectedFeatureId(feature.feature_id)}
+                    />
+                  ) : null,
+                )}
+              </VWorldMapView>
+            </div>
             {selectedFeatureId ? (
               <FeatureDetailPanel
                 featureId={selectedFeatureId}
