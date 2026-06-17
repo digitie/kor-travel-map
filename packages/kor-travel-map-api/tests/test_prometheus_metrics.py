@@ -9,18 +9,6 @@ from kortravelmap.api.app import create_app
 from kortravelmap.api.settings import ApiSettings
 
 
-def _canonical_path(path: str) -> str:
-    """path 라벨에서 starlette ``root_path`` 마운트 prefix를 제거해 정규 템플릿으로 맞춘다.
-
-    TestClient는 보통 ``root_path``를 안 붙이지만, 환경에 따라 prefix가 붙을 수 있어
-    테스트를 느슨하게 풀지 않고 정규화한다(ADR-048 /v1 clean cut 기준 템플릿 비교).
-    """
-    for prefix in ("/v1/categories", "/health"):
-        if path != prefix and path.endswith(prefix):
-            return prefix
-    return path
-
-
 def _metric_lines(body: str, metric: str) -> list[str]:
     """Exposition 본문에서 ``metric{`` 으로 시작하는 sample 라인만 추린다.
 
@@ -96,7 +84,7 @@ def test_prometheus_metrics_endpoint_records_http_request() -> None:
     assert value >= 1.0
     # path는 정규 라우트 템플릿이어야 한다(__unmatched__ 아님). ``/health``는 public_status_router가
     # prefix 없이 마운트되므로 정확히 ``/health``로 기록돼야 한다(ADR-048 /v1 clean cut).
-    assert _canonical_path(labels["path"]) == "/health"
+    assert labels["path"] == "/health"
     assert "kor_travel_map_http_request_duration_seconds_bucket" in body
     assert "kor_travel_map_http_response_size_bytes_bucket" in body
     assert 'path="/metrics"' not in body
@@ -126,9 +114,10 @@ def test_prometheus_metrics_records_public_rest_surface() -> None:
     labels, value = sample
     assert value is not None
     assert value >= 1.0
-    # surface=public인 요청은 /v1/categories뿐. ADR-048 /v1 clean cut에 따라 정규 템플릿
-    # ``/v1/categories``로 정확히 기록돼야 한다(__unmatched__ 아님).
-    assert _canonical_path(labels["path"]) == "/v1/categories"
+    # surface=public인 요청은 /v1/categories뿐. path 라벨은 매칭된 라우트 템플릿
+    # ``/categories``로 정확히 기록돼야 한다(__unmatched__ 아님). /v1 prefix는
+    # include_router로 적용돼 scope route 템플릿에는 나타나지 않는다(성공 메트릭과 동일).
+    assert labels["path"] == "/categories"
 
 
 @pytest.mark.unit
