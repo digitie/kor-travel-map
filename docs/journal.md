@@ -2,6 +2,27 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-17 (claude) — admin UI 테이블 backend-의존 e2e 라이브 실행 + offline-uploads testid 회귀 수정
+
+#454 TanStack DataTable 이행의 backend-의존 Playwright e2e를 **라이브 Docker 스택**에 대해 실행
+(이전엔 static audit만). codex 스택 api(:12701)·dagster(:12702) healthy 유지, claude worktree에서
+migrated frontend 이미지 재빌드 후 `--network host` 컨테이너로 :12705 서빙, playwright
+컨테이너(`mcr.microsoft.com/playwright:v1.60.0-noble`, host network)로 전 spec 실행.
+
+- **결과: 55 passed / 2 failed**(최초 54/3 → 회귀 1건 수정 후 55/2).
+- **회귀 수정(이행이 유발)**: offline-uploads 삭제 흐름 spec(`admin-ops.spec.ts` #397)이 쓰는
+  `getByTestId("offline-upload-row")`가 DataTable 이행 때 사라짐(구 `<TableRow data-testid>`).
+  → 공용 `DataTable`에 opt-in `rowTestId?: (row) => string | undefined` prop 추가(비가상 경로
+  `<tr data-testid>`), `offline-uploads-client`가 `rowTestId={() => "offline-upload-row"}` 배선.
+  vitest 7/7(신규 rowTestId 1)·tsc/ESLint 0·해당 spec green 재확인.
+- **잔여 2건 = 이행 무관 #449 spec 부채**(회귀 아님, 경험적 확정): `features-new.spec.ts` 18/61의
+  `getByLabel("name", { exact: true })`가 0건 매치. 원인 — 공용 `FormField`(`form-field-input.tsx`,
+  #454 미변경·`f288b33`가 마지막 수정)는 `required` 필드 라벨을 `name`+`<span aria-hidden> *</span>`로
+  렌더하는데, Chromium accname이 aria-hidden 별표를 **포함**해 접근성 이름이 `"name *"`가 됨
+  (`getByLabel("name *",{exact:true})`=1로 확정). `kind`(FormSelect·non-required)는 별표 없어 통과.
+  #449 spec은 라이브 미실행 상태로 머지돼 latent했음(파일 헤더가 live 검증 보류 명시). → 후속 분리.
+- 환경 메모: WSL↔Windows localhost forwarding off → e2e는 WSL 내부(컨테이너 host network)에서만 실행.
+
 ## 2026-06-17 (claude) — admin UI 전 테이블 TanStack DataTable 이행 (PR #454)
 
 admin UI(`packages/kor-travel-map-admin/frontend`)의 모든 테이블(20파일/~22테이블)을 공용

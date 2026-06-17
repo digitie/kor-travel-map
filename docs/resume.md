@@ -10,9 +10,17 @@
   정본 `docs/reports/admin-tanstack-table-migration-2026-06-17.md`. tsc/ESLint/vitest(20)/next build/
   route-mocked Playwright(16)/CI 전부 green. backend-의존 e2e는 role/name 셀렉터라 호환(audit+grep 무변경).
 
-**다음 한 작업**: 즉시 실행 가능한 큰 트랙 없음. 잔여는 (1) **arm64 buildx 배포 검증**(`GITHUB_TOKEN`
-필요), (2) **admin UI 테이블 backend-의존 e2e 라이브 실행**(Python venv+Postgres — admin-ops/curated/
-features-new), (3) bulk 동작 정책 가드(완료 review 재결정·archive confirm, 선택)뿐.
+- **admin UI 테이블 backend-의존 e2e 라이브 실행 완료**(2026-06-17): 라이브 Docker 스택(codex
+  api :12701/dagster :12702 + 재빌드한 migrated frontend :12705 + playwright host-network 컨테이너)에서
+  전 spec 실행 → **55 passed / 2 failed**. 이행이 유발한 회귀 1건(offline-uploads `offline-upload-row`
+  testid 소실)은 공용 `DataTable`에 opt-in `rowTestId` 추가로 수정(fix/offline-uploads-row-testid).
+
+**다음 한 작업**: **features-new.spec.ts 2건 적색 해소(#449 spec 부채, 이행 무관)** — `required`
+`FormField` 라벨이 `name`+`<span aria-hidden> *</span>`라 Chromium accname이 별표를 포함→접근성
+이름 `"name *"`→`getByLabel("name",{exact:true})` 0건. 선택지: (a) 공용 `FormField`에서 별표를
+접근성 이름에서 제외(CSS `::after` 또는 input `aria-label` — a11y 개선·전역 getByLabel 정상화) vs
+(b) spec을 `getByLabel(/^name/)` 등으로 정합. 그 외 잔여: arm64 buildx 배포 검증(`GITHUB_TOKEN`),
+bulk 동작 정책 가드(선택).
 
 ## 2026-06-14 claude 작업 메모 — T-229 curated 오버레이 라이브 검증 완료
 
