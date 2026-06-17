@@ -10,10 +10,6 @@
   - [ ] `T-229-buildx` — **arm64 multi-arch buildx 배포 검증** (T-229 잔여). T-229의
     나머지(curated 오버레이·`/metrics`·smoke breadth)는 라이브 검증 완료. arm64
     (Odroid) 이미지 build+boot smoke만 `GITHUB_TOKEN`이 있는 배포 환경에서 수행한다.
-  - [ ] `T-ADMIN-TANSTACK` — **admin UI TanStack 테이블 이행 후속** (이행 자체는 PR #454 종결, 정본
-    `docs/reports/admin-tanstack-table-migration-2026-06-17.md`). 잔여: (a) backend-의존 e2e 라이브
-    실행(admin-ops/curated/features-new — Python venv+Postgres 환경; 정적 audit+grep상 무변경 호환),
-    (b) bulk 동작 정책 가드(완료 review 재결정 차단·bulk archive confirm — 선택).
   - [ ] `T-AUDIT-0616` — **2026-06-16 전체 정합성 감사 후속** (정본
     `docs/reports/full-consistency-audit-2026-06-16.md`). 문서 충돌은 본 감사 PR에서 정정
     완료, 아래는 코드/검증 후속:
@@ -32,14 +28,12 @@
         재import 시 구 `01020300` KHOA feature가 신 `01050100`과 중복 active로 남는다. alembic
         `0027_khoa_recategorize_cleanup`(신 sibling 존재 시에만 구 feature inactive, 멱등)
         + 회귀 테스트(unit re-key 불변, integration sweep 가드)로 해소.
-    - **e2e (HIGH)** — **✅ ZERO 5페이지 1차 spec 추가**: curated-features(라이브 smoke:
-      렌더/필터/구조), features/new(라이브 smoke + 클라 검증), 3 detail 페이지
-      (feature-update-request·import-job·feature — mocked-route, OpenAPI 타입 바인딩).
-      `tsc -p e2e/tsconfig.json`·ESLint 통과, **Windows Playwright 라이브 검증은 잔여**(본
-      환경 미실행). **잔여(depth)**: 전 페이지 mutation/error/cursor depth(§2 얇은 커버 14페이지),
-      curated 시드 후보 기반 mutation flow(select/archive/source-rule apply), features/new
-      실제 생성→422·409·지오코딩 mocked flow — `docs/reports/e2e-scenario-coverage-2026-06-16.md`
-      §3 우선순위 순.
+    - **e2e (HIGH)** — **✅ 해소(라이브 검증 완료)**: ZERO 5페이지 1차 spec + depth 확장
+      Wave 1~3(route-mock 6페이지 +32 시나리오)까지 라이브 frontend :12705에서 전수 실행 green —
+      전체 스위트 **209 passed**(2026-06-17, `docs/journal.md`). backend-의존 e2e(admin-ops/
+      curated/features-new)도 라이브 Docker 스택에서 **57 passed / 0 failed**로 검증됐다.
+    - **잔여 = F-01 옵션 A 1건뿐**: 전 feature DB re-key + provider별 natural_key 전역유일성
+      검증을 동반하는 big-bang으로, **별도 시점 결정**(deferred). 나머지 감사 항목은 모두 ✅.
   - [ ] `T-452-openapi-problem-json` — **OpenAPI 에러 본문 RFC7807 정합**(#452/#444 잔여). 현재
     `openapi(.user).json`에 `application/problem+json` 응답 스키마가 없고(`docs/architecture/rest-api.md`
     §1.5가 산문으로 에러 계약 정본을 유지하는 의도적 한계), 4xx/5xx 응답이 generated client

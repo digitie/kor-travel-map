@@ -1,5 +1,20 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-18 claude 작업 메모 — T-ADMIN-TANSTACK 종결 + item-4(라이브 e2e) 결정
+
+- **T-ADMIN-TANSTACK 종결**: (a) backend-의존 e2e는 2026-06-17 라이브 스택에서 이미 57/0
+  통과로 검증됨 — 사용자 결정(이미 검증됨 → 재실행 생략)에 따라 재기동 없이 닫음. (b) bulk 정책
+  가드(완료 review 재결정 차단 · curated bulk archive confirm)는 main에 이미 구현됨 확인.
+- **item-4 라이브 Docker 결정**: 신규 스택 기본 포트(pg 5432 · rustfs 12101)가 공유 인프라
+  (kor-travel-geo-postgres 등)와 충돌하고, repo `.env`가 구 `KRTOUR_MAP_*` prefix(현 코드는
+  `KOR_TRAVEL_MAP_*` — 미스매치)라 기존 `python-krtour-map-claude` 스택은 stale/unhealthy다.
+  e2e는 이미 라이브 검증(57/0 · 209 passed)됐으므로 공유 인프라 무중단을 위해 재실행하지 않는다.
+- **T-AUDIT-0616**: e2e(HIGH)는 라이브 검증 완료로 ✅, 잔여는 F-01 옵션 A(전 feature re-key)
+  deferred 1건.
+
+**다음 한 작업**: `T-452-openapi-problem-json`(OpenAPI 에러 본문 RFC7807 problem+json 보강) —
+이 저장소 유일 즉시 실행 트랙.
+
 ## 2026-06-18 claude 작업 메모 — 외부/보류 task won't-do 종결
 
 사용자 지시로 백로그의 외부 추적 4건과 보류 1건을 진행하지 않음(won't-do)으로 종결했다.
@@ -227,17 +242,21 @@ T-108/ADR-056의 arm64 multi-arch buildx 이미지 build+boot smoke다.
 
 즉시(in-repo):
 
-- `T-229-buildx` — arm64 multi-arch buildx 배포 검증 (T-229 잔여, `GITHUB_TOKEN` 필요).
 - `T-452-openapi-problem-json` — OpenAPI 에러 본문 RFC7807 problem+json 보강.
-- `T-ADMIN-TANSTACK` — admin 테이블 이행 잔여(backend-의존 e2e 라이브 · bulk 정책 가드).
-- `T-AUDIT-0616` — 정합성 감사 후속(e2e depth · F-01 옵션 A).
 
-보류:
+배포환경 잔여:
+
+- `T-229-buildx` — arm64 multi-arch buildx 배포 검증 (`GITHUB_TOKEN` 필요).
+
+보류 / deferred:
 
 - `T-101` — Materialized View 도입 검토.
+- `T-AUDIT-0616` — 잔여 = F-01 옵션 A(전 feature DB re-key, big-bang) 1건뿐, 별도 시점 결정.
 
-won't-do (2026-06-18 종결): `T-019` · `T-210b`~`d`(PinVi 외부) · `T-103`(streaming ETL).
-상세는 `docs/tasks-done.md`.
+종결 (2026-06-18):
+
+- won't-do: `T-019` · `T-210b`~`d`(PinVi 외부) · `T-103`(streaming ETL).
+- `T-ADMIN-TANSTACK`: (a) 라이브 e2e 57/0 검증 · (b) bulk 가드 main 구현 — 상세 `docs/tasks-done.md`.
 
 ## 고정 기준값
 

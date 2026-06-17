@@ -3,6 +3,20 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## admin TanStack 테이블 이행 후속 종결 (2026-06-18, `T-ADMIN-TANSTACK`)
+
+- [x] **T-ADMIN-TANSTACK — admin UI TanStack 테이블 이행 후속 종결.**
+  이행 본체는 PR #454(정본 `docs/reports/admin-tanstack-table-migration-2026-06-17.md`). 잔여
+  2건이 모두 해소되어 종결한다.
+  - **(a) backend-의존 e2e 라이브 실행 ✅**: 라이브 Docker 스택(api :12701 / dagster :12702 /
+    migrated frontend :12705)에서 전 spec 실행 → PR #458/#459 후 **57 passed / 0 failed**
+    (2026-06-17, `docs/resume.md`). admin-ops/curated/features-new 포함 backend-의존 표면 무회귀
+    확인. (사용자 결정: 이미 검증됨 → 재실행 생략.)
+  - **(b) bulk 동작 정책 가드 ✅**: main에 이미 구현됨 — dedup bulk는
+    `enableRowSelection` pending-only + `decideBulk` 방어적 필터로 **완료 review 재결정 차단**,
+    curated bulk archive는 `window.confirm("선택한 N건을 보관할까요?")` **일괄 confirm**.
+    enrichment는 단일 행 pending-only(bulk 표면 없음 — 가드 불필요).
+
 ## 외부/보류 task won't-do 종결 (2026-06-18)
 
 사용자 지시로 아래 task를 **진행하지 않음(won't-do)** 으로 종결했다. 산출물 없이 백로그에서만
