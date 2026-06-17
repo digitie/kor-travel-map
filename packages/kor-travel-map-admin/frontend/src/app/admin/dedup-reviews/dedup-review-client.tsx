@@ -313,12 +313,16 @@ export function DedupReviewClient() {
           isLoading={reviews.isLoading}
           emptyMessage="dedup review가 없습니다."
           containerClassName="overflow-auto rounded-lg border bg-background"
-          enableRowSelection
+          enableRowSelection={(row) => row.original.status === "pending"}
           rowSelection={rowSelection}
           onRowSelectionChange={setRowSelection}
           renderBulkActions={(rows: Row<DedupReviewRecord>[]) => {
+            // pending review만 일괄 결정한다(완료된 review 재결정 방지 — 선택 자체도
+            // enableRowSelection predicate로 막지만 방어적으로 한 번 더 거른다).
             const decideBulk = (value: DedupDecision) => {
-              rows.forEach((row) => decide(row.original.review_id, value));
+              rows
+                .filter((row) => row.original.status === "pending")
+                .forEach((row) => decide(row.original.review_id, value));
               setRowSelection({});
             };
             return (

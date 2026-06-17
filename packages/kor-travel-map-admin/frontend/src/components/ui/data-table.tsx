@@ -58,8 +58,9 @@ export interface DataTableProps<TData> {
   onSortingChange?: OnChangeFn<SortingState>
   /** true면 getSortedRowModel을 켜지 않음(서버 정렬). 기본 false(클라 정렬). */
   manualSorting?: boolean
-  /** 행 선택(opt-in) — 체크박스 컬럼 + 선택 상태. */
-  enableRowSelection?: boolean
+  /** 행 선택(opt-in) — 체크박스 컬럼 + 선택 상태. 함수를 주면 행별 선택 가능 여부
+   *  (react-table getCanSelect) — 선택 불가 행은 체크박스 disabled + select-all 제외. */
+  enableRowSelection?: boolean | ((row: Row<TData>) => boolean)
   rowSelection?: RowSelectionState
   onRowSelectionChange?: OnChangeFn<RowSelectionState>
   /** 선택된 행이 있을 때 테이블 위에 표시할 bulk action 바. */

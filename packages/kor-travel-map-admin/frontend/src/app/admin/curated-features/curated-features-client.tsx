@@ -1164,6 +1164,11 @@ export function CuratedFeaturesClient() {
                     type="button"
                     variant="destructive"
                     onClick={() => {
+                      // bulk 보관은 되돌리기 부담이 있어 일괄 confirm 1회(단일 행
+                      // archive의 per-row confirm 대체).
+                      if (!window.confirm(`선택한 ${rows.length}건을 보관할까요?`)) {
+                        return;
+                      }
                       for (const row of rows) {
                         archiveFeature.mutate({
                           curatedFeatureId: row.original.curated_feature_id,

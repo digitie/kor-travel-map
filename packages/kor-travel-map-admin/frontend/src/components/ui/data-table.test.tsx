@@ -93,4 +93,25 @@ describe("DataTable", () => {
     expect(screen.getByRole("alert")).toBeTruthy();
     expect(screen.getByText("불러오기 실패함")).toBeTruthy();
   });
+
+  it("getCanSelect predicate disables non-selectable row checkboxes", () => {
+    render(
+      <DataTable
+        columns={columns}
+        data={data}
+        getRowId={getRowId}
+        enableRowSelection={(row) => row.original.score > 3}
+      />,
+    );
+    // data: 베타(score 2)는 선택 불가, 알파(score 5)는 선택 가능 → 행 체크박스 2개 중 1개 disabled.
+    const rowCheckboxes = screen.getAllByLabelText("행 선택");
+    expect(rowCheckboxes).toHaveLength(2);
+    const disabled = rowCheckboxes.filter(
+      (cb) =>
+        cb.hasAttribute("disabled") ||
+        cb.getAttribute("aria-disabled") === "true" ||
+        cb.hasAttribute("data-disabled"),
+    );
+    expect(disabled).toHaveLength(1);
+  });
 });
