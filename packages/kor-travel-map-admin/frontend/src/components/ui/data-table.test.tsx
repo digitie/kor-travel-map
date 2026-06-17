@@ -94,6 +94,18 @@ describe("DataTable", () => {
     expect(screen.getByText("불러오기 실패함")).toBeTruthy();
   });
 
+  it("rowTestId renders a per-row data-testid on each row", () => {
+    render(
+      <DataTable
+        columns={columns}
+        data={data}
+        getRowId={getRowId}
+        rowTestId={() => "sample-row"}
+      />,
+    );
+    expect(screen.getAllByTestId("sample-row")).toHaveLength(2);
+  });
+
   it("getCanSelect predicate disables non-selectable row checkboxes", () => {
     render(
       <DataTable

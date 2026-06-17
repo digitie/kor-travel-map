@@ -849,6 +849,7 @@ export function OfflineUploadsClient() {
             emptyMessage="offline upload가 없습니다."
             onRowClick={(upload) => setSelectedUploadId(upload.upload_id)}
             isRowActive={(upload) => upload.upload_id === selectedUploadId}
+            rowTestId={() => "offline-upload-row"}
             containerClassName="overflow-auto rounded-lg border bg-background"
           />
         </div>
