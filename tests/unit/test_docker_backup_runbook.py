@@ -136,7 +136,7 @@ def test_backup_restore_runbook_documents_three_part_bundle_and_restore_boundary
     assert "rustfs/rustfs-data.tar.gz" in runbook
     assert "meta/manifest.json" in runbook
     assert "meta/SHA256SUMS" in runbook
-    assert "TripMate" in runbook
+    assert "PinVi" in runbook
     assert "npm run docker:restore" in runbook
     assert "kor_travel_map_restore" in runbook
     assert "kor_travel_map_dagster_restore" in runbook
