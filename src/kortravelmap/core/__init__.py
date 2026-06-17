@@ -102,7 +102,7 @@ __all__ = [
     # types (PR#19, ADR-019)
     "KST",
     "kst_now",
-    # exceptions (PR#20, docs/backend-package.md §5)
+    # exceptions (PR#20, docs/architecture/backend-package.md §5)
     "KorTravelMapError",
     "ValidationError",
     "FeatureNotFoundError",

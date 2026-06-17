@@ -28,7 +28,7 @@
 `python-mcst-api` provider는 파일데이터 CSV 13개 dataset을 `Feature`로 정규화한다
 (T-220 재배선 #395 — slug가 `*_csv`형으로 바뀌었고 도서관·다국어 안내·소공연장·
 회의 시설·추천 여행지는 provider 재편으로 적재 대상에서 빠졌다. 제외 사유는
-`docs/mcst-feature-etl.md` §3). 이 중 세계음식점, 독립서점, 카페가 있는 서점,
+`docs/etl/mcst-feature-etl.md` §3). 이 중 세계음식점, 독립서점, 카페가 있는 서점,
 아동서점 계열은 첫 curated 후보로 쓸 수 있다. 나머지 MCST 테마 source도 admin
 기본 규칙으로 후보화할 수 있다.
 

@@ -6,9 +6,9 @@
 > `/features` bbox 조회와 frontend 지도 화면이 구현되어 있다.
 > Sprint 4부터는 ADR-035에 따라 provider 적재, dedup 검토, 이슈 처리, 오프라인
 > 업로드를 포함한 admin 운영 콘솔로 확장한다. 패키지 경계는
-> `docs/debug-ui-package.md`, 상세 구현 사양은
+> `docs/architecture/debug-ui-package.md`, 상세 구현 사양은
 > `docs/debug-ui-admin-workflows.md`, OpenAPI/Dagster update queue 계약은
-> `docs/openapi-admin-contract.md`를 기준으로 한다.
+> `docs/architecture/openapi-admin-contract.md`를 기준으로 한다.
 
 ## 정체성
 
@@ -66,9 +66,9 @@ npm run dev                  # http://127.0.0.1:12705 (next dev)
 VWorld 지도 (Kakao Maps SDK 미사용). Next.js App Router + `maplibre-gl` +
 `maplibre-vworld` + TanStack Query + Zustand + `zod` + React Hook Form +
 shadcn/ui + `@kor-travel-map/map-marker-react` (ADR-029). 자세한 사양:
-`../../docs/debug-ui-package.md` §14.
+`../../docs/architecture/debug-ui-package.md` §14.
 
-운영 배포 (옵션 3가지 — `docs/debug-ui-package.md §14.3` 참조):
+운영 배포 (옵션 3가지 — `docs/architecture/debug-ui-package.md §14.3` 참조):
 - **A. standalone (default)**: `npm run build` + `npm run start` → 12705.
 - **B. FastAPI reverse proxy**: backend `/ui/*` → Next.js. `next.config.js`
   `basePath: '/ui'` + `output: 'standalone'`.
@@ -119,7 +119,7 @@ shadcn/ui + `@kor-travel-map/map-marker-react` (ADR-029). 자세한 사양:
 
 ## 엔드포인트 (계획)
 
-자세한 패키지 사양은 `../../docs/debug-ui-package.md`, admin 운영 콘솔 구현 사양은
+자세한 패키지 사양은 `../../docs/architecture/debug-ui-package.md`, admin 운영 콘솔 구현 사양은
 `../../docs/debug-ui-admin-workflows.md`. 요약:
 
 - `/health`, `/version`

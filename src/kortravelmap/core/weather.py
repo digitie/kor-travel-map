@@ -1,6 +1,6 @@
 """``kortravelmap.core.weather`` — 날씨 시계열 pure 헬퍼.
 
-`docs/weather-feature-normalization.md §6` 의 `build_weather_card` 패턴 중
+`docs/etl/weather-feature-normalization.md §6` 의 `build_weather_card` 패턴 중
 **DB 없이 동작하는 pure 함수만** 본 모듈에 둔다. async `build_weather_card
 (client, feature_id)` (DB fetch가 필요한)은 `infra/feature_repo.py` 진입 후
 `client.py`에서 합성.

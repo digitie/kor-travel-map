@@ -11,7 +11,7 @@ provider 변환 함수의 출력 = load 함수의 입력. 하나의 raw payload 
 ``AsyncKorTravelMapClient.load_feature_bundles(bundles)``가 본 DTO 리스트를 받아
 DB upsert + 객체 저장소 업로드 + source_link 생성을 한 transaction에서 수행.
 
-``docs/feature-model.md §18``.
+``docs/architecture/feature-model.md §18``.
 
 ADR 참조
 --------
@@ -46,7 +46,7 @@ class FeatureBundle(BaseModel):
     truth).
 
     ``file_sources``는 미디어(이미지 등) 파일 참조 — provider 응답의 미디어 URL을
-    ``FeatureFileSource``(docs/feature-files-rustfs.md §2.2)로 담는다. load 시
+    ``FeatureFileSource``(docs/architecture/feature-files-rustfs.md §2.2)로 담는다. load 시
     객체 저장소(rustfs/s3) 업로드 대상. WeatherValue/PriceValue는 별도 bundle
     (Sprint 2 weather/price provider 변환).
 
@@ -71,7 +71,7 @@ class FeatureBundle(BaseModel):
         default_factory=list,
         description=(
             "미디어 파일 참조 (이미지/영상 등). provider 응답 URL → load 시 "
-            "객체 저장소 업로드 (docs/feature-files-rustfs.md). 기본 빈 list."
+            "객체 저장소 업로드 (docs/architecture/feature-files-rustfs.md). 기본 빈 list."
         ),
     )
 

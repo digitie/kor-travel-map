@@ -5,7 +5,7 @@ ADR-031 — Export/Drift gate 정책:
     - 본 패키지의 첫 FastAPI 라우터 등장 PR부터 즉시 활성화.
     - `openapi.json`을 저장소에 커밋 + DTO/라우터 변경 PR마다 갱신 강제.
     - CI: `--check` 옵션으로 git working tree와 비교 → drift 시 fail.
-    - 사양은 docs/debug-ui-package.md §8 + docs/decisions.md ADR-031.
+    - 사양은 docs/architecture/debug-ui-package.md §8 + docs/adr/README.md ADR-031.
 
 본 skeleton은 코드 작성 단계 진입 전 placeholder. 실제 `app` import는
 kortravelmap.api.app 모듈이 생성된 시점부터 동작한다 (Sprint 1).

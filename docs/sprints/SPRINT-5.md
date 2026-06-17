@@ -25,7 +25,7 @@
 > OpenAPI + 독립 Dagster + TripMate REST 연계. **세분 실행 계획은
 > `docs/adr045-standalone-plan.md`**(T-205~T-210), 의사결정 결과는
 > `docs/adr045-open-decisions.md`(D-1~D-16 전부 결정 완료), TripMate REST 계약은
-> `docs/tripmate-rest-api.md`. 아래 §2.1+ provider 적재는 ADR-045 Dagster asset
+> `docs/architecture/tripmate-rest-api.md`. 아래 §2.1+ provider 적재는 ADR-045 Dagster asset
 > (kor-travel-map 소유)로 운영 전환된다(T-208c).
 
 ### 2.1 Provider ⑧ — 휴양림/수목원 (`python-krforest-api`)
@@ -81,7 +81,7 @@
   삭제 feature 연결을 WARN으로 보고한다. dry-run report는
   `ktmctl consistency-report` CLI와
   `docs/reports/t-201b-phase2-dry-run-report-2026-06-06.md`로 산출한다.
-- **Dagster 게이트 적용** (`docs/dagster-boundary.md §12`):
+- **Dagster 게이트 적용** (`docs/architecture/dagster-boundary.md §12`):
   - root → child 적재 → `consistency_check` 실행
   - `severity_max != ERROR` 시 `mv_refresh strategy='swap'`
   - ERROR 시 알림 + swap 차단
@@ -132,14 +132,14 @@
 
 ### 2.8 T-101 MV 시범 도입 (선택)
 
-- `docs/performance.md §9.3` 사양 — read >> write 정성 확정(2026-06-10), P99는 T-212e
+- `docs/architecture/performance.md §9.3` 사양 — read >> write 정성 확정(2026-06-10), P99는 T-212e
 - **클러스터 rollup MV `mv_feature_cluster_counts`** 1건만 시범 → 1주 운영 + EXPLAIN diff
   (구 예시 `mv_features_place_with_detail`은 ADR-018 단일 JSONB detail로 폐기)
 - 결과에 따라 ADR 신설 가능성 (MV 카탈로그 + 클러스터 exact-viewport vs region-total 결정)
 
 ### 2.9 T-102 pg_prewarm 운영 검토 (선택)
 
-- `docs/performance.md §9.5` 사양 — P99 SLO 측정 후 도입 검토
+- `docs/architecture/performance.md §9.5` 사양 — P99 SLO 측정 후 도입 검토
 - 운영 환경 결정 사항
 
 ### 2.10 KNPS `visitor_statistics` timeseries 처리 (연기 dataset)
@@ -153,7 +153,7 @@
   - 신규 provider 추가 절차 표준 (체크리스트)
   - `@kor-travel-map/map-marker-react` npm 게시 자동화 (release / version sync)
   - `core.feature_consistency_reports` Phase 2 알림 sink
-    (Slack/Telegram/Sentry)
+    (Slack/Sentry)
   - Sprint 2 SHP/GeoJSON parsing 위치 결정 정식화
   - MV 도입 결정 (T-101)
   - pg_prewarm 도입 결정 (T-102)

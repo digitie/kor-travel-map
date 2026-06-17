@@ -10,7 +10,7 @@
 HeritageDetail``(#380, ADR-044 재정렬 — 복합키는 ``key`` 중첩, 명칭은
 ``name_ko``, 지정일은 ``designated_at`` 문자열)을 **필드명 그대로** 만족한다.
 
-kind 판정 (``docs/krheritage-feature-etl.md §4``)
+kind 판정 (``docs/etl/krheritage-feature-etl.md §4``)
 ------------------------------------------------
 ``key.ccba_kdcd``(종목코드) 기준: 국보/보물/등록/무형/천연기념물 → ``place``,
 사적/명승 → ``area``.
@@ -100,7 +100,7 @@ HERITAGE_MARKER_COLOR: Final[str] = "P-07"
 
 _EVENT_MARKER_ICON: Final[str] = "star"
 
-# category 코드 → maki override (docs/krheritage-feature-etl.md §4-pre).
+# category 코드 → maki override (docs/etl/krheritage-feature-etl.md §4-pre).
 _HERITAGE_MAKI: Final[dict[str, str]] = {
     "01070100": "religious-buddhist",  # 전통사찰
     "01070200": "castle",  # 궁궐·왕릉
@@ -284,7 +284,7 @@ class KrHeritageEvent(Protocol):
 
 
 def classify_heritage_kind(item: KrHeritageItem) -> FeatureKind:
-    """``key.ccba_kdcd`` → FeatureKind (docs/krheritage-feature-etl.md §4).
+    """``key.ccba_kdcd`` → FeatureKind (docs/etl/krheritage-feature-etl.md §4).
 
     천연기념물(15)은 GIS 경계 보강이 배선될 때까지 항상 ``place`` —
     provider ``HeritageDetail``에 경계 WKT가 없다 (#380, 모듈 docstring).
@@ -296,7 +296,7 @@ def classify_heritage_kind(item: KrHeritageItem) -> FeatureKind:
 
 
 def resolve_heritage_category(item: KrHeritageItem) -> str:
-    """유산 유형 → category 코드 (docs/krheritage-feature-etl.md §4-pre).
+    """유산 유형 → category 코드 (docs/etl/krheritage-feature-etl.md §4-pre).
 
     명칭(``name_ko``)/유형 텍스트(``category``=ccmaName)의 키워드를 우선 보고,
     없으면 종목코드로 fallback.
@@ -414,7 +414,7 @@ def _image_file_sources(
     """대표 이미지 URL → ``[FeatureFileSource]`` (없으면 빈 list).
 
     국가유산 미디어(이미지)를 load 시 객체 저장소 업로드 대상으로 담는다
-    (docs/feature-files-rustfs.md). 단일 대표 이미지 → role='primary'.
+    (docs/architecture/feature-files-rustfs.md). 단일 대표 이미지 → role='primary'.
     """
     url = (image_url or "").strip()
     if not url:

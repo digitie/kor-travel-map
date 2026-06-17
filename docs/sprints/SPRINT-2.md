@@ -76,7 +76,7 @@
   - `src/kortravelmap/providers/krforest_weather.py` (후속 PR)
   - `src/kortravelmap/providers/khoa_weather.py` (후속 PR)
 - **fixture**: 3건/provider × 4 provider = 12건 (PR#38은 KMA 8 case 진입)
-- **WeatherValue 표 검증**: `docs/weather-feature-normalization.md` §5 timeline
+- **WeatherValue 표 검증**: `docs/etl/weather-feature-normalization.md` §5 timeline
   bucket (nowcast / short / mid). PR#38로 `WeatherValue` DTO + 3 enum
   (`WeatherDomain`/`ForecastStyle`/`TimelineBucket`) + `make_weather_value_key`
   진입.

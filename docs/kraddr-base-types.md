@@ -31,6 +31,6 @@
 
 ## 관련 문서
 
-- `docs/decisions.md` ADR-041 — kraddr-base 코드 흡수와 `PlaceCoordinate` 제외.
-- `docs/address-geocoding.md` — kor-travel-geo REST v2와 `Address`/`Coordinate` 보강.
-- `docs/category.md` — category 모듈 이전 결과.
+- `docs/adr/README.md` ADR-041 — kraddr-base 코드 흡수와 `PlaceCoordinate` 제외.
+- `docs/architecture/address-geocoding.md` — kor-travel-geo REST v2와 `Address`/`Coordinate` 보강.
+- `docs/architecture/category.md` — category 모듈 이전 결과.

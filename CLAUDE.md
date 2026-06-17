@@ -1,7 +1,7 @@
 # CLAUDE.md — 1쪽 진입 요약
 
 이 파일은 Claude(Claude Code, Claude Agent SDK)가 가장 먼저 읽어야 할 1쪽 요약이다.
-정식 정책·결정은 `AGENTS.md`, `SKILL.md`, `docs/decisions.md`가 갖는다.
+정식 정책·결정은 `AGENTS.md`, `SKILL.md`, `docs/adr/README.md`가 갖는다.
 
 > **OpenAI Codex / Google Antigravity** 등 `AGENTS.md` 컨벤션을 따르는 AI agent는
 > `AGENTS.md`를 entry로 사용한다. 본 라이브러리는 CLAUDE.md + AGENTS.md 두
@@ -13,26 +13,11 @@
 `kor-travel-map`은 한국 공공 API (`python-*-api`) 결과를
 `Feature`(place/event/notice/price/weather/route/area) 계약으로 정규화하고
 PostgreSQL + PostGIS에 저장·조회·병합하는 한국 여행 지도 데이터 시스템이다.
+Python core(`import kortravelmap as ktm`)는 정규화·적재 엔진이고, 외부 경계는
+OpenAPI다 — `api`/`dagster`가 이 core를 내부에서 import하고 TripMate는 HTTP로만 호출한다.
 
-**운영 모델 (ADR-045, 2026-06-01 — ADR-003 supersede)**: kor-travel-map은 TripMate와
-**별개로 Docker에서 실행되는 독립 프로그램**이다 — 논리 서비스 `api`(FastAPI/
-OpenAPI) · `frontend`(Next.js admin UI) · `dagster`(feature 업데이트 orchestration)
-· `postgres`(kor-travel-map 소유 독립 PostGIS DB, 기본 `kor_travel_map`) · 선택 `rustfs`.
-**TripMate는 라이브러리를 직접 import하지 않고 kor-travel-map OpenAPI를 HTTP로 호출**
-한다(공유 DB 없음). 함수 직접 호출 모델은 ADR-045로 폐기됐다.
-
-**Python core**: `import kortravelmap as ktm` 또는 `from kortravelmap import ...`
-(ADR-054). 이 라이브러리는 위 `api`/`dagster`가 **내부에서** import하는 핵심
-정규화·적재 엔진이다(외부 경계는 OpenAPI). PyPI distribution은 현재
-`kor-travel-map`이다. T-226/ADR-054에서 배포명 `kor-travel-map`,
-Python import root `kortravelmap`, 권장 예시 `import kortravelmap as ktm`, CLI
-`ktmctl`, DB `kor_travel_map`, RustFS bucket/prefix `kor-travel-map` 계열로 clean
-cut했다.
-
-**api/admin 프로그램**: FastAPI/OpenAPI backend는 `packages/kor-travel-map-api/`
-(`kor-travel-map-api`, import `kortravelmap.api`)가 맡고, admin frontend는
-`packages/kor-travel-map-admin/frontend/`가 맡는다(ADR-055). 메인 라이브러리
-(`kortravelmap`)는 FastAPI 의존이 없다.
+운영 모델·서비스 구성·역할은 `AGENTS.md` §역할, 배포명·import root·CLI·DB·버킷 등
+identity table은 `AGENTS.md` §식별자가 정본이다.
 
 ## 2. 현재 기준
 
@@ -42,22 +27,8 @@ cut했다.
 > 박지 않는다(반복 drift 회피 — `docs/reports/docs-consistency-audit-2026-06-06.md`
 > DA-D-01). 아래는 잘 바뀌지 않는 기준값만 둔다.
 
-- v1은 `v1` 브랜치 보존, main은 orphan으로 v2 재시작(ADR-001).
-- **ADR 현황**: ADR-001~059 모두 accepted, **다음 후보 번호 = ADR-060**
-  (`docs/decisions.md`). 045 = Docker 독립 프로그램 + 독립 DB/Dagster + TripMate
-  OpenAPI 연동(ADR-003 운영 모델 supersede). 046 = 이행 시 구 모델 호환 shim 금지
-  + 주소는 kor-travel-geo REST v2로 통일. 047 = docker-manager 로컬 포트 기준. 048 = REST API
-  versioning을 admin/ops까지 확장(`/v1`, #317 위 보강) + envelope/pagination/parameter/
-  response 정합성 표준 + 코드/DB 명명 전파 — 정본 `docs/rest-api.md`, 실행 T-216a~g.
-  049~053 = `kor-travel-concierge` YouTube provider pull 경계 + export 계약 보강(경로 중립화·
-  검수 통과만 export·철회→inactive) + TripMate 직접 연동 제거 + TripMate feature 제안 반영은 **기존
-  `/v1/admin/features*` change API(#317) 승인**(신규 suggestions API 철회 — 잔여 합의
-  5건만 확정) + RustFS 공유 버킷 잠정 정책 — 실행 T-217a~g. 054 =
-  `kor-travel-map` / `kortravelmap` package identity clean cut. 055 =
-  `kor-travel-map-api` backend와 `kor-travel-map-admin` frontend 분리. 057 =
-  kor-travel-concierge feature_id를 안정 `candidate.id`에 고정(bjd/category 식별자 분리). 058 =
-  geocoder 필수화로 geocoder-의존 provider feature_id 결정성 보장(F-01, re-key 없음).
-  059 = 벤더링 agent/skill 원문의 언어·context-discovery 예외 정책(#452 #450).
+- v1은 `v1` 브랜치 보존, main은 orphan으로 v2 재시작(ADR-001); v1 스펙은 루트 `kor-travel-map-spec.docx`.
+- ADR 현황·작성 규약은 `docs/adr/README.md`(다음 후보 ADR-060). 고정 기준값만 아래 둔다.
 - **고정 포트(ADR-047)**: API `12701` · admin UI `12705` · Dagster `12702` ·
   Postgres host `5432` · RustFS S3 `12101`/console `12105`.
 - **geocoding 정본**: kor-travel-geo REST v2 `POST /v2/{reverse,geocode}`, 로컬 기본
@@ -70,61 +41,28 @@ cut했다.
   MOIS-독립 먼저, dedup 룰 검증 후 MOIS bulk, 마지막에 MOIS-sibling.
 - Sprint 1~5 plan은 `docs/sprints/` 참조.
 
-v1 산출물 요약: 저장소 루트 `kor-travel-map-spec.docx` (약 80쪽).
-
 ## 3. 진입 순서
 
 1. `AGENTS.md` — 지시 우선순위, DO NOT 룰
 2. `SKILL.md` — 도메인 어휘, 자주 묻는 작업
 3. `docs/sprints/README.md` — Sprint 1~5 계획 + ADR-034 9단계 순서
-4. `docs/architecture.md` — 의존 방향
+4. `docs/architecture/architecture.md` — 의존 방향
 5. `docs/resume.md` — 다음 한 작업
 6. `docs/journal.md` 최신 3건
-7. 관련 ADR (`docs/decisions.md`)
+7. 관련 ADR (`docs/adr/README.md`)
 8. cross-repo 연동(TripMate/kor-travel-concierge/kor-travel-docker-manager) 작업 시
    `docs/integration-map.md` — 포트·연동 방향·인증·계약 정본 위치 1장 정본
 
-## 4. 의존 스택 (v2 확정)
+## 4. 스택·환경 (정본 포인터)
 
-`kor-travel-geo`와 동일 스택. PostgreSQL 16 + PostGIS 3.5 + pg_trgm + pgcrypto /
-SQLAlchemy 2 async + GeoAlchemy2 + asyncpg + psycopg[binary,pool]>=3.2 / GeoPandas
-+ Shapely 2 + GDAL / Pydantic v2 / FastAPI + Uvicorn / httpx + tenacity / Alembic.
-
-**관련 라이브러리 로컬 우선 조회 (ADR-044)**: 모든 형제 `python-*-api` provider
-라이브러리(`python-kma-api`/`python-opinet-api`/`python-krex-api`/`python-
-datagokr-api`/`python-visitkorea-api`/`python-knps-api`/`python-krheritage-api`/
-`python-mois-api`/`python-airkorea-api`/`python-krforest-api`/`python-khoa-api`
-…)와 `maplibre-vworld-js`는 **`F:\dev\` (WSL `~/dev/`) 아래 로컬 체크아웃**되어
-있다. provider client·model·스펙을 볼 때는 **로컬을 먼저** `Glob`/`Read`로
-조회하고, GitHub 원격 fetch는 로컬에 없을 때만 fallback (GitHub 404/private는
-"미존재" 근거 아님). **데이터 정합성(코드/필드/단위 의미)의 1차 책임은 각
-provider 라이브러리** — 본 lib는 신뢰·미러하고, 불일치 시 그 라이브러리 기준
-으로 정렬(+필요 시 upstream PR).
-
-**개발 환경**: PC 개발의 Git 원본은 **Windows NTFS**
-(`F:\dev\kor-travel-map\`)다. 브랜치 전환, 커밋, push 같은 순수 Git 명령만
-Windows Git(`git.exe`)으로 수행한다. 파일 조회·수정·테스트·lint·build·Docker·
-Python/Node/npm·`gh`/GitHub CLI는 WSL에서 `/mnt/f/dev/kor-travel-map-<agent>`로
-실행한다. Playwright e2e만 Windows 호스트에서 실행한다. 자세히는 `README.md`
-§"개발 환경 (PC, WSL)" + `AGENTS.md` + `docs/dev-environment.md`.
-
-**Claude Code 전용 worktree**: `F:\dev\kor-travel-map-claude\`(메인 repo의 형제).
-작업마다 worktree 안에서 브랜치만 새로 (`git switch -c feat/<topic> main`).
-worktree마다 [codegraph](https://github.com/colbymchenry/codegraph) 인덱스
-1개를 두고(`codegraph init -i` 최초 1회), 이후엔 `codegraph sync`로 증분
-동기. `.codegraph/`는 `.gitignore`. 자세히는 `docs/codegraph-worktree.md` +
-`AGENTS.md` §"에이전트 worktree + codegraph". ChatGPT Codex는
-`F:\dev\kor-travel-map-codex\`, Google Antigravity 2.0은
-`F:\dev\kor-travel-map-antigravity\` worktree를 쓴다.
-
-**codegraph MCP 등록**: `~/.claude.json` (Windows: `C:\Users\<user>\.claude
-.json`)의 `mcpServers`에 `codegraph: { type: stdio, command: codegraph,
-args: ["serve", "--mcp"] }` 블록을 추가하거나 `codegraph install --yes`로
-자동 등록. 이후 Claude Code 세션은 `codegraph_explore` MCP 도구를 자동
-인식한다. **컴포넌트(특히 `Feature` DTO / `make_feature_id` / provider
-변환 함수) 수정 전에 반드시 `codegraph_explore` 또는 CLI `codegraph
-impact`/`callers`/`callees`로 영향도를 먼저 평가**한다 (`docs/codegraph-
-worktree.md` §7).
+- **의존 스택**(PostgreSQL+PostGIS / SQLAlchemy 2 async / Pydantic v2 / FastAPI …):
+  `docs/architecture/architecture.md`(의존 방향) + `README.md` 의존 표.
+- **provider 로컬 우선 조회 (ADR-044)**: 형제 `python-*-api`·`maplibre-vworld-js`는
+  `F:\dev\`(WSL `~/dev/`) 로컬 체크아웃을 `Glob`/`Read`로 **먼저** 조회, GitHub fetch는
+  로컬에 없을 때만 fallback. 데이터 정합성 1차 책임은 각 provider 라이브러리.
+- **개발 환경**(Windows Git 원본 + WSL 실행 + Windows Playwright e2e): `docs/dev-environment.md`.
+- **worktree + codegraph + MCP 등록**(`Feature` DTO / `make_feature_id` / provider 변환
+  수정 전 `codegraph_explore`로 영향도 선평가): `docs/codegraph-worktree.md`.
 
 ## 5. 절대 금지 (가장 중요한 5개)
 

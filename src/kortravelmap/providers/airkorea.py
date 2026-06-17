@@ -210,7 +210,7 @@ class _Pollutant:
         self.metric_name = metric_name
 
 
-# 오염물질 매핑 — `docs/weather-feature-normalization.md §2`(PM10/PM2_5/CAI 등).
+# 오염물질 매핑 — `docs/etl/weather-feature-normalization.md §2`(PM10/PM2_5/CAI 등).
 AIRKOREA_POLLUTANTS: Final[tuple[_Pollutant, ...]] = (
     _Pollutant(
         value_attr="pm10_value", grade_attr="pm10_grade",

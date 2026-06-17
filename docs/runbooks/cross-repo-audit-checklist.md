@@ -42,8 +42,8 @@ admin base 12705 오인)의 재발 방지가 목적. 연동 지도 정본은
 
 ## 3. 결정 전파
 
-- [ ] 최근 분기의 ADR/결정(krtour `docs/decisions.md`, TripMate
-      `docs/decisions*.md`, agent `docs/decisions.md`)이 상대 repo 문서·코드에
+- [ ] 최근 분기의 ADR/결정(krtour `docs/adr/README.md`, TripMate
+      `docs/decisions*.md`, agent `docs/adr/README.md`)이 상대 repo 문서·코드에
       반영됐는지 — 특히 계약을 바꾸는 결정(envelope/경로/필드명).
 - [ ] `docs/integration-map.md` §1~4 표를 실측값으로 갱신(시스템/포트/정본 위치
       변동 반영).

@@ -237,7 +237,7 @@ PID를 종료한 뒤 WSL frontend를 다시 띄운다. 정상은 `wslrelay`다.
 | `/debug/explain` | 없음 | T-221e 재판정으로 제외. EXPLAIN은 통합 테스트 gate와 운영 DB read-only runbook에서 수행 |
 | `/debug/fixtures` | 없음 | T-221e 재판정으로 제외. fixture 저장/replay는 파일 기반 helper와 `/debug/etl` preview로 분리 |
 
-패키지 경계: `../../../docs/debug-ui-package.md` §14. Admin 상세 구현 사양:
+패키지 경계: `../../../docs/architecture/debug-ui-package.md` §14. Admin 상세 구현 사양:
 `../../../docs/debug-ui-admin-workflows.md`.
 
 ## 카테고리 → maki icon 매핑
@@ -245,7 +245,7 @@ PID를 종료한 뒤 WSL frontend를 다시 띄운다. 정상은 `wslrelay`다.
 `@kor-travel-map/map-marker-react`의 `categoryMaki` 사용 (ADR-029). 본 frontend는
 **중복 정의 금지** — drift gate가 Python ↔ TypeScript 1:1을 검증한다.
 
-자세히는 `../../../docs/category.md` §4 + `../../map-marker-react/README.md`.
+자세히는 `../../../docs/architecture/category.md` §4 + `../../map-marker-react/README.md`.
 
 ## 라이선스
 

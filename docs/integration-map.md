@@ -72,12 +72,12 @@
 
 | 계약 | 정본(공급자 repo) | 소비측 view |
 |---|---|---|
-| kor-travel-map 전 표면 REST | `docs/rest-api.md` + 기계 정본 `packages/kor-travel-map-api/openapi{,.user}.json` | TripMate `docs/integrations/kor-travel-map-rest-api.md` / 본 repo `docs/tripmate-rest-api.md`(TripMate 소비 매핑) |
-| TripMate T-130 공개 해수욕장/축제 뷰 | 본 repo `docs/public-views-api.md` + `openapi.user.json`(T-222b 구현) | TripMate `docs/api/public.md` / `docs/kor-travel-map-requirements.md` §6 |
+| kor-travel-map 전 표면 REST | `docs/architecture/rest-api.md` + 기계 정본 `packages/kor-travel-map-api/openapi{,.user}.json` | TripMate `docs/integrations/kor-travel-map-rest-api.md` / 본 repo `docs/architecture/tripmate-rest-api.md`(TripMate 소비 매핑) |
+| TripMate T-130 공개 해수욕장/축제 뷰 | 본 repo `docs/architecture/public-views-api.md` + `openapi.user.json`(T-222b 구현) | TripMate `docs/api/public.md` / `docs/kor-travel-map-requirements.md` §6 |
 | curated features → TripMate curated trip plans | 본 repo [`docs/curated-features.md`](curated-features.md) + `openapi.user.json`(T-223c-1 read 구현) | TripMate `docs/kor-travel-map-requirements.md`의 curated trip plan import 절 / TripMate `docs/api/notice-plans.md`의 호환 alias 설명 |
 | kor-travel-concierge feature export | kor-travel-concierge `docs/feature-export-api.md`(로컬 경로는 `F:\dev\kor-travel-concierge`, 프로젝트명은 `kor-travel-concierge`) | 본 repo: ADR-053 + `providers/kor_travel_concierge.py` docstring |
-| TripMate 사용자 제안 연동(합의 5건) | 본 repo `docs/tripmate-rest-api.md` §7 (ADR-051) | TripMate `docs/integrations/kor-travel-map-rest-api.md` §7 |
-| YouTube 후보 detail 소비(TM-08) | 본 repo `docs/tripmate-rest-api.md` §9 (T-217f) | TripMate UX 기획 |
+| TripMate 사용자 제안 연동(합의 5건) | 본 repo `docs/architecture/tripmate-rest-api.md` §7 (ADR-051) | TripMate `docs/integrations/kor-travel-map-rest-api.md` §7 |
+| YouTube 후보 detail 소비(TM-08) | 본 repo `docs/architecture/tripmate-rest-api.md` §9 (T-217f) | TripMate UX 기획 |
 | geocoding | kor-travel-geo REST v2 (`POST /v2/{reverse,geocode}`) | ADR-046 |
 | 인프라(PostGIS·RustFS) 구동/포트 | **kor-travel-docker-manager** `docker-compose.yml`+README (ADR-052 amendment) | 각 repo는 사용자 — 포트 값은 ADR-047과 정합 |
 

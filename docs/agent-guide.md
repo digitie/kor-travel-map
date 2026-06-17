@@ -10,11 +10,11 @@
 1. `README.md` — 정체성, 빠른 시작, 문서 지도
 2. `SKILL.md` — DO NOT 룰, 도메인 어휘
 3. `docs/sprints/README.md` — Sprint 1~5 + ADR-034 9단계 순서
-4. `docs/architecture.md` 목차 — 의존 방향, 데이터 흐름
+4. `docs/architecture/architecture.md` 목차 — 의존 방향, 데이터 흐름
 5. `docs/resume.md` — "다음 한 작업"
 6. `docs/journal.md` 최신 3건 — 직전 컨텍스트
-7. 관련 ADR (`docs/decisions.md` — ADR-001~059 전부 accepted, 다음 후보 060)
-8. 직결 docs (provider 추가면 `docs/provider-contract.md`, 현재 sprint면
+7. 관련 ADR (`docs/adr/README.md` — ADR-001~059 전부 accepted, 다음 후보 060)
+8. 직결 docs (provider 추가면 `docs/architecture/provider-contract.md`, 현재 sprint면
    `docs/sprints/SPRINT-N.md` 등)
 9. **운영 runbook** (`docs/runbooks/`) — 에이전트 공용. 실제 작업 시작 전
    [agent-workflow.md](runbooks/agent-workflow.md)(표준 1-PR 흐름)와
@@ -52,7 +52,7 @@ codegraph 인덱스는 `codegraph sync`로 증분 동기(있다면) / `codegraph
 
 | 파일 | 역할 | 갱신 시점 |
 |------|------|----------|
-| `docs/decisions.md` | ADR 누적 | 결정이 발생할 때마다 |
+| `docs/adr/README.md` | ADR 누적 | 결정이 발생할 때마다 |
 | `docs/resume.md` | 진척도 + "다음 한 작업" | 작업 마무리마다 |
 | `docs/journal.md` | 작업 로그 (역시간순 append) | 작업 끝낼 때마다 |
 | `docs/tasks.md` | 백로그 — **진행/예정(`[ ]`)** + 상단 "진행 중인 작업 인덱스" | 작업 추가/시작 시 |
@@ -106,8 +106,8 @@ PR은 불완전하다.
 ## 2026-05-25 14:30 (claude)
 **작업**: ADR-020 추가 (캐시 전략 결정)
 **변경 파일**:
-- docs/decisions.md (ADR-020 추가)
-- docs/performance.md §9 갱신
+- docs/adr/README.md (ADR-020 추가)
+- docs/architecture/performance.md §9 갱신
 - docs/resume.md 진척도 갱신
 **결정**: 라이브러리 in-memory 캐시 도입하지 않음, 호출자 책임
 **발견**: TripMate는 Redis를 이미 가지고 있어 외부 캐시는 자연스럽다
@@ -144,29 +144,13 @@ ADR-045 독립 프로그램화(Docker compose + admin-first OpenAPI + 독립 Dag
 
 ## 6. tasks.md 형식
 
-```markdown
-# tasks.md — 백로그
-
-## 진행 중
-- [ ] T-001 — docs/feature-model.md 작성 (담당: claude, 시작: 2026-05-25)
-
-## 다음 (우선순위 순)
-- [ ] T-002 — docs/provider-contract.md
-- [ ] T-003 — docs/external-apis.md
-- [ ] T-004 — pyproject.toml provider 의존성 git URL 핀 (코드 단계)
-
-## 완료
-- [x] T-000 — git v1 보존 + main orphan 재시작 (완료: 2026-05-24)
-
-## 보류
-- [ ] T-100 — 디버그 UI Next.js 패키지 분리 (v3 후보)
-```
+task 문서(`tasks.md`/`tasks-done.md`) 작성·유지 규약은 [`docs/tasks-rule.md`](tasks-rule.md)가 정본.
 
 ## 7. 변경 분류별 체크리스트
 
 ### 7.1 ADR 추가만
 
-- [ ] `docs/decisions.md`에 추가
+- [ ] `docs/adr/README.md`에 추가
 - [ ] `docs/journal.md` 엔트리
 - [ ] `docs/resume.md` "다음 한 작업" 갱신
 
@@ -184,10 +168,10 @@ ADR-045 독립 프로그램화(Docker compose + admin-first OpenAPI + 독립 Dag
 - [ ] `dto/` 모듈 + Pydantic validator
 - [ ] `tests/unit/test_dto_*.py` validator branch 100%
 - [ ] 관련 통합 테스트
-- [ ] `docs/data-model.md` 갱신 (DDL과 동기)
+- [ ] `docs/architecture/data-model.md` 갱신 (DDL과 동기)
 - [ ] DB schema 변경 시 Alembic migration
 - [ ] ADR (어느 정도 큰 변경이면)
-- [ ] `docs/decisions.md` + journal + resume
+- [ ] `docs/adr/README.md` + journal + resume
 - [ ] OpenAPI export 재실행
 
 ### 7.4 raw SQL 추가/변경
@@ -195,7 +179,7 @@ ADR-045 독립 프로그램화(Docker compose + admin-first OpenAPI + 독립 Dag
 - [ ] `infra/*_repo.py`의 `_SQL` 상수에 추가
 - [ ] `tests/integration/`에 EXPLAIN 검증 테스트 1개 이상
 - [ ] 인덱스 무효화 회피 확인
-- [ ] `docs/performance.md` 패턴/안티패턴 갱신 (필요 시)
+- [ ] `docs/architecture/performance.md` 패턴/안티패턴 갱신 (필요 시)
 - [ ] journal + resume
 
 ### 7.5 provider 추가
@@ -205,7 +189,7 @@ ADR-045 독립 프로그램화(Docker compose + admin-first OpenAPI + 독립 Dag
 - [ ] `tests/unit/test_providers_<name>.py`
 - [ ] `tests/integration/test_load_<name>.py`
 - [ ] `docs/<name>-feature-etl.md` (provider별 ETL 문서 — 표준 10섹션)
-- [ ] `docs/provider-contract.md`의 provider 카탈로그 추가
+- [ ] `docs/architecture/provider-contract.md`의 provider 카탈로그 추가
 - [ ] `docs/external-apis.md`에 API 키 발급/호출 정책
 - [ ] ADR (필요 시 — 새 dataset_key, 새 source_role 등)
 - [ ] `pyproject.toml`의 provider extra에 git URL+sha 핀
@@ -237,7 +221,7 @@ git checkout -b feat/<topic>      # 또는 fix/, chore/, docs/, refactor/, adr/
   - `<scope>`: `dto` / `core` / `infra` / `providers/<name>` / `client` / `cli` /
     `docs` / `chore` / `category` / `debug-ui`
   - `<verb>`: `add` / `fix` / `refactor` / `move` / `remove` / `tighten` / `rename` / `document`
-- 작업 단위로 `docs/journal.md`, `docs/resume.md`, (필요 시) `docs/decisions.md`,
+- 작업 단위로 `docs/journal.md`, `docs/resume.md`, (필요 시) `docs/adr/README.md`,
   `CHANGELOG.md` 갱신.
 - 단위 테스트 + lint + mypy + lint-imports 통과 확인 (코드 작성 단계).
 
@@ -269,7 +253,7 @@ gh pr create --title "<scope>: <imperative summary (≤70자)>" --body "$(cat <<
 ## 문서 (Docs)
 - [ ] docs/journal.md 엔트리
 - [ ] docs/resume.md 진척도 갱신
-- [ ] ADR 추가 시 docs/decisions.md
+- [ ] ADR 추가 시 docs/adr/README.md
 - [ ] 사용자 가시 변경 시 CHANGELOG.md
 - [ ] DTO/스키마 변경 시 docs/{data-model,feature-model}.md
 - [ ] provider 추가 시 docs/<provider>-feature-etl.md
@@ -328,7 +312,7 @@ GitHub branch protection (운영자 수동 설정):
 
 기본 작업 절차:
 1. 사용자 의도 명확화 (어떤 모듈/계층/메서드인지)
-2. ADR이 필요한지 확인 (`docs/decisions.md` 001~049 모두 accepted, 신규는
+2. ADR이 필요한지 확인 (`docs/adr/README.md` 001~049 모두 accepted, 신규는
    050+)
 3. 테스트 우선 작성 (`docs/test-strategy.md` §12 우선순위)
 4. 구현 (`pytest -q`/`ruff check`/`mypy --strict`/`lint-imports` 통과)

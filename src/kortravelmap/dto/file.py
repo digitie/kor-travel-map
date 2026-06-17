@@ -1,6 +1,6 @@
 """``FeatureFileSource`` — provider가 만든 미디어 파일 참조 (업로드 전 입력).
 
-`docs/feature-files-rustfs.md §2.2`. provider 변환 함수가 응답의 미디어 URL을
+`docs/architecture/feature-files-rustfs.md §2.2`. provider 변환 함수가 응답의 미디어 URL을
 이 DTO로 만들어 ``FeatureBundle.file_sources``에 담는다. 아직 다운로드/업로드
 전이라 ``source_url``(provider 원본 URL)만 갖고, 실제 객체 저장소(rustfs/s3)
 적재 후 ``FeatureFile``(저장 DTO, §2.1)로 승격된다.

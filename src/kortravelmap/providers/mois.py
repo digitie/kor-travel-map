@@ -9,7 +9,7 @@
   **structural Protocol**(``MoisLicensePlaceRecord``)만 입력으로 받아 place
   ``FeatureBundle``로 변환한다. 적재(DB write)·dedup·CLI mutex는 후속 PR.
 - 195 업종 중 **PROMOTED 42종**만 feature로 승격, EXCLUDED 및 미매핑 슬러그는
-  변환하지 않고 skip (영업중 row만). ``docs/mois-feature-etl.md`` §4/§6/§8 사양.
+  변환하지 않고 skip (영업중 row만). ``docs/etl/mois-feature-etl.md`` §4/§6/§8 사양.
 
 설계 — ADR-006 (provider wrapper 금지) 정신 동일
 ------------------------------------------------
@@ -114,7 +114,7 @@ MOIS_DEFAULT_MARKER_ICON: Final[str] = "marker"
 _NATURAL_KEY_SEP: Final[str] = "::"
 
 
-# -- 슬러그 분류 (docs/mois-feature-etl.md §4) -------------------------------
+# -- 슬러그 분류 (docs/etl/mois-feature-etl.md §4) -------------------------------
 
 PROMOTED_SERVICE_SLUGS: Final[frozenset[str]] = frozenset(
     {

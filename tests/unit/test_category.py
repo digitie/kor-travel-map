@@ -42,7 +42,7 @@ def test_total_definitions_count() -> None:
 
 @pytest.mark.unit
 def test_depth_distribution() -> None:
-    """depth별 통계 (`docs/category.md §4.3`)."""
+    """depth별 통계 (`docs/architecture/category.md §4.3`)."""
     depth_counts: dict[int, int] = {}
     for category in PLACE_CATEGORY_DEFINITIONS:
         depth_counts[category.depth] = depth_counts.get(category.depth, 0) + 1

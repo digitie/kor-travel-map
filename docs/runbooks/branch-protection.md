@@ -12,7 +12,7 @@
 - 단일 운영자가 self-merge해야 하는 경우에도 PR 페이지에서 diff/check를 한 번 더
   확인한다. GitHub required approval은 작성자 본인의 approval을 세지 않을 수 있으므로,
   실제 1인 운영이 필요하면 repository admin bypass를 명시적으로 허용하고 이 결정을
-  `docs/decisions.md`나 운영 메모에 남긴다.
+  `docs/adr/README.md`나 운영 메모에 남긴다.
 
 ## 2. 설정 위치
 

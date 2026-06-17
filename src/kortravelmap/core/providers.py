@@ -4,7 +4,7 @@
 공식 명칭 (`python-*-api` 또는 `data.go.kr-standard` 등). provider raw에서
 받는 이름을 본 카탈로그의 canonical name으로 정규화한다 (alias 매핑).
 
-``docs/provider-contract.md §2`` + ADR-024 (canonical name) + ADR-028 (knps).
+``docs/architecture/provider-contract.md §2`` + ADR-024 (canonical name) + ADR-028 (knps).
 
 ADR 참조
 --------
@@ -53,7 +53,7 @@ CANONICAL_PROVIDER_NAMES: Final[tuple[str, ...]] = (
 """본 라이브러리가 알고 있는 provider canonical name.
 
 신규 provider 추가 시 본 tuple에 추가 + `PROVIDER_ALIASES`에 alias 매핑 +
-ADR 작성 (`docs/decisions.md`).
+ADR 작성 (`docs/adr/README.md`).
 """
 
 
@@ -137,7 +137,7 @@ def normalize_provider_name(value: str) -> str:
     raise ValueError(
         f"알 수 없는 provider name: {value!r}. "
         "`CANONICAL_PROVIDER_NAMES` 또는 `PROVIDER_ALIASES`에 추가 필요. "
-        "신규 provider는 ADR 작성 + 본 모듈 + `docs/provider-contract.md` 동기."
+        "신규 provider는 ADR 작성 + 본 모듈 + `docs/architecture/provider-contract.md` 동기."
     )
 
 

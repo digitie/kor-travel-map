@@ -26,13 +26,6 @@
         "--mcp"
       ],
       "cwd": "F:\\dev\\python-krtour-map-claude"
-    },
-    "mcp-telegram": {
-      "command": "C:\\Python314\\python.exe",
-      "args": [
-        "scripts\\mcp_telegram_start.py"
-      ],
-      "cwd": "F:\\dev\\python-krtour-map-claude"
     }
   }
 }

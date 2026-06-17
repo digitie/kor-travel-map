@@ -26,7 +26,7 @@
 
 ### 2.1 Provider ⑦ — MOIS 인허가 (`python-mois-api`) — 4단계 lifecycle
 
-`docs/mois-feature-etl.md` 사양 그대로 구현.
+`docs/etl/mois-feature-etl.md` 사양 그대로 구현.
 
 **Step A — Bulk full snapshot** (`mois_license_features_bulk`):
 - 195 슬러그 중 PROMOTED 42종만 feature로 승격, 나머지는 raw + `EXCLUDED`

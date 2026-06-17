@@ -48,7 +48,7 @@ def test_forward_and_inverse_are_distinct_instances() -> None:
 
 
 def test_epsg_constants_match_postgis() -> None:
-    """EPSG 상수가 docs/data-model.md SRID와 일치한다."""
+    """EPSG 상수가 docs/architecture/data-model.md SRID와 일치한다."""
     assert EPSG_WGS84 == 4326
     assert EPSG_UTM_K == 5179
 

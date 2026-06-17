@@ -143,7 +143,7 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         dataset_key="youtube_place_candidates",
         description="kor-travel-concierge YouTube 장소 후보 place Feature 일 1회 적재.",
     ),
-    # KMA weather 3종 (T-219b) — 발표 스케줄 + 가용 지연(docs/kma-weather-etl.md §6)
+    # KMA weather 3종 (T-219b) — 발표 스케줄 + 가용 지연(docs/etl/kma-weather-etl.md §6)
     # 에 맞춘 cron. 같은 base 재실행은 provider_sync_state cursor가 skip한다.
     FeatureLoadScheduleSpec(
         asset=feature_weather_kma_ultra_short_nowcast,

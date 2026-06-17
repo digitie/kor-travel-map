@@ -13,7 +13,7 @@ __all__ = ["EventDetail"]
 
 
 class EventDetail(BaseModel):
-    """Feature.kind='event'의 detail (docs/feature-model.md §6)."""
+    """Feature.kind='event'의 detail (docs/architecture/feature-model.md §6)."""
 
     model_config = ConfigDict(extra="forbid")
 

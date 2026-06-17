@@ -1,7 +1,8 @@
 """``kortravelmap.core.exceptions`` — 라이브러리 공개 예외 계층.
 
-``docs/backend-package.md §5`` + ``docs/debug-ui-package.md §6.4 HTTP 매핑``의
-원천. 모든 예외는 ``KorTravelMapError``를 상속한다.
+``docs/architecture/backend-package.md §5`` +
+``docs/architecture/debug-ui-package.md §6.4 HTTP 매핑``의 원천.
+모든 예외는 ``KorTravelMapError``를 상속한다.
 
 호출자(TripMate / debug-ui)는 본 모듈의 예외만 catch해야 한다. 내부 SQLAlchemy /
 asyncpg / httpx 예외가 새는 일이 없도록 ``infra/``/``providers/``/``client/``
@@ -12,7 +13,7 @@ ADR 참조
 - ADR-001 — 의존 방향 ``core``는 dto만 import (본 모듈은 stdlib만 사용)
 - ADR-002 — async-only API (예외 자체는 sync 객체)
 
-HTTP 매핑 (``docs/debug-ui-package.md §6.4``)
+HTTP 매핑 (``docs/architecture/debug-ui-package.md §6.4``)
 ---------------------------------------------
 | 예외 | HTTP | error code |
 |------|------|-----------|
@@ -45,7 +46,7 @@ class KorTravelMapError(Exception):
     호출자는 ``except KorTravelMapError:``로 라이브러리 발 예외 전체를 catch할 수
     있다. 내부 의존(SQLAlchemy / asyncpg / httpx / pyproj)의 raw 예외는
     ``infra``/``providers``/``client`` 레이어에서 본 베이스 또는 적절한 서브클래스로
-    wrap해야 한다 (raw 예외 누설 금지, ``docs/backend-package.md §5``).
+    wrap해야 한다 (raw 예외 누설 금지, ``docs/architecture/backend-package.md §5``).
     """
 
 
@@ -114,7 +115,7 @@ class FileStoreError(KorTravelMapError):
     """object store(RustFS / S3 호환) 접근 실패.
 
     ``upload_feature_files()``의 multipart upload 실패, signed URL 생성 실패,
-    bucket 존재하지 않음 등을 wrap한다 (``docs/feature-files-rustfs.md`` 참조).
+    bucket 존재하지 않음 등을 wrap한다 (``docs/architecture/feature-files-rustfs.md`` 참조).
 
     HTTP 502 매핑.
     """

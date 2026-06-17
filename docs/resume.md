@@ -1,5 +1,13 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-17 claude 작업 메모 — 문서 구조 정리 (PR 대기)
+
+문서 트리 재배치 + entry 슬림(단일 PR, 코드 동작 무변경): ADR `docs/decisions.md`→`docs/adr/NNN-*.md`(53)
++ 색인, 개발규칙 6건은 SKILL §4로 이전; ETL 17개→`docs/etl/`; architecture/계약/패키징 19개→
+`docs/architecture/`; CLAUDE/AGENTS/README/SKILL 중복 제거·단일정본 포인터화·v1 1줄; tasks 작성규약을
+`docs/tasks-rule.md`로 분리; Telegram MCP(설정 5 + 런처 + 문서) 제거. 내부 링크/py_compile/JSON 검증 통과.
+정본 색인은 [`docs/adr/README.md`](adr/README.md). **다음 한 작업은 아래 T-229-buildx로 변동 없음.**
+
 ## 2026-06-17 claude 작업 메모 — admin UI TanStack 테이블 이행 + #452 후속 종결
 
 - **PR #453 머지**: issue #452(Claude Code PR #437~#450 리뷰 취합)의 잔여 조치 일괄 반영 — KHOA
@@ -174,5 +182,5 @@ T-108/ADR-056의 arm64 multi-arch buildx 이미지 build+boot smoke다.
 - 완료/아카이브: `docs/tasks-done.md`.
 - 작업 일지: `docs/journal.md`.
 - Sprint 계획: `docs/sprints/`.
-- REST 단일 정본: `docs/rest-api.md`.
+- REST 단일 정본: `docs/architecture/rest-api.md`.
 - Cross-repo 정본: `docs/integration-map.md`.

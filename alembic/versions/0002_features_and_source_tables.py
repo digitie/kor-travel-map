@@ -4,7 +4,7 @@ Revision ID: 0002_features_source
 Revises: 0001_initial
 Create Date: 2026-05-26 00:00:00.000000
 
-Sprint 2 첫 provider 적재 직전 필수 테이블. `docs/data-model.md §1~§4`
+Sprint 2 첫 provider 적재 직전 필수 테이블. `docs/architecture/data-model.md §1~§4`
 DDL을 SQLAlchemy migration으로 옮긴 것.
 
 후속 migration에서 추가될 테이블 (each in its own PR):
@@ -110,7 +110,7 @@ def upgrade() -> None:
         ),
         schema="feature",
     )
-    # 인덱스 (docs/data-model.md §1 + docs/performance.md).
+    # 인덱스 (docs/architecture/data-model.md §1 + docs/architecture/performance.md).
     op.execute(
         "CREATE INDEX idx_features_coord_gist ON feature.features "
         "USING GIST (coord) WHERE deleted_at IS NULL"

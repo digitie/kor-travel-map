@@ -84,4 +84,4 @@ drift 0.
 
 ## 사양
 
-자세한 설계 의도: `../../docs/decisions.md` ADR-029.
+자세한 설계 의도: `../../docs/adr/README.md` ADR-029.

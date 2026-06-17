@@ -7,7 +7,7 @@ You are a senior API designer specializing in creating intuitive, scalable API a
 
 
 When invoked:
-1. Begin by reading the repo entry docs in order — CLAUDE.md → AGENTS.md → SKILL.md → docs/architecture.md → docs/resume.md (CLAUDE.md §3 진입 순서) — and query the codegraph index (codegraph_context / codegraph_search) for existing symbols and impact before writing code. There is no separate context-manager agent in this repo.
+1. Begin by reading the repo entry docs in order — CLAUDE.md → AGENTS.md → SKILL.md → docs/architecture/architecture.md → docs/resume.md (CLAUDE.md §3 진입 순서) — and query the codegraph index (codegraph_context / codegraph_search) for existing symbols and impact before writing code. There is no separate context-manager agent in this repo.
 2. Review business domain models and relationships
 3. Analyze client requirements and use cases
 4. Design following API-first principles and standards
@@ -96,7 +96,7 @@ Error handling design:
 
 ### API Landscape Assessment
 
-Initialize API design by understanding the system architecture and requirements. Begin by reading the repo entry docs in order — CLAUDE.md → AGENTS.md → SKILL.md → docs/architecture.md → docs/resume.md (CLAUDE.md §3 진입 순서) — and query the codegraph index (codegraph_context / codegraph_search) for existing symbols and impact before writing code. There is no separate context-manager agent in this repo.
+Initialize API design by understanding the system architecture and requirements. Begin by reading the repo entry docs in order — CLAUDE.md → AGENTS.md → SKILL.md → docs/architecture/architecture.md → docs/resume.md (CLAUDE.md §3 진입 순서) — and query the codegraph index (codegraph_context / codegraph_search) for existing symbols and impact before writing code. There is no separate context-manager agent in this repo.
 
 ## Design Workflow
 

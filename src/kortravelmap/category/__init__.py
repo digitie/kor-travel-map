@@ -14,7 +14,7 @@ ADR 참조
 - ADR-030 — narrow ``functools.cache`` 예외 (``get_category``는 immutable
   카탈로그라 모듈 레벨 ``@cache`` 허용)
 
-자세히는 ``docs/category.md``.
+자세히는 ``docs/architecture/category.md``.
 
 사용 예시:
     >>> from kortravelmap.category import (

@@ -16,7 +16,7 @@ Create Date: 2026-06-09
 확장 생성 자체는 저비용이라 가능한 환경에는 둔다. 단 공유 Postgres에서 migration user가
 superuser가 아니면 생성하지 않고 no-op으로 통과한다. 호출 헬퍼는 확장 미설치 시 빈 결과를
 반환한다. autoprewarm 활성화는 도입 조건(명시적 P99 SLO + shared_buffers가 hot 데이터 fit)이
-충족될 때 config로 켠다(T-102, `docs/performance.md §9.5`).
+충족될 때 config로 켠다(T-102, `docs/architecture/performance.md §9.5`).
 """
 
 from __future__ import annotations

@@ -22,7 +22,7 @@
 
 ### 2.1 Provider ⑤ — 국립공원/트래킹
 
-**`python-knps-api` 14 dataset 적재** (`docs/knps-feature-etl.md` 사양):
+**`python-knps-api` 14 dataset 적재** (`docs/etl/knps-feature-etl.md` 사양):
 - API 3 (visitor_statistics / access_restrictions / fire_alerts):
   - `visitor_statistics` — timeseries (별도 처리, v2 1차 범위 시점에 따라 또는
     Sprint 5로 연기)

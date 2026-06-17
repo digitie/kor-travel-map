@@ -157,7 +157,7 @@ __all__ = [
     # price (PR#42, ADR-013/014)
     "PriceDomain",
     "PriceValue",
-    # file sources (미디어, docs/feature-files-rustfs.md §2.2)
+    # file sources (미디어, docs/architecture/feature-files-rustfs.md §2.2)
     "FeatureFileSource",
     "FileRole",
     "FileType",

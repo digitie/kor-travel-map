@@ -104,7 +104,7 @@ data.go.kr 직접 다운로드 URL (atchFileId + fileDetailSn + insertDataPrcus)
 3. 사용 dataset: 공원경계(SHP)/탐방로/탐방안내소/위험지역/기상관측시설/화장실/
    문화자원/야영장/대피소/시설도로/특별보호구역 (공간 데이터 11건) +
    기초/탐방객 통계 (timeseries 2건, feature 본문 X) + 메타 카탈로그 1건.
-   자세히는 `docs/knps-feature-etl.md` (ADR-028 amendment §H).
+   자세히는 `docs/etl/knps-feature-etl.md` (ADR-028 amendment §H).
 4. 호출 한도 — `KnpsClient(max_rps=5.0)` 기본 (data.go.kr 정책 보수치).
    `KnpsClient(max_rps=10.0)` 등으로 조정 가능.
 5. (이전) `knps_access_restrictions`/`knps_fire_alerts` notice API는 knps-api

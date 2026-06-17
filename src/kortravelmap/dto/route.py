@@ -107,7 +107,7 @@ def normalize_route_type(value: str) -> str:
 
 
 class RouteDetail(BaseModel):
-    """Feature.kind='route'의 detail (docs/feature-model.md §8)."""
+    """Feature.kind='route'의 detail (docs/architecture/feature-model.md §8)."""
 
     model_config = ConfigDict(extra="forbid")
 

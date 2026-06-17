@@ -6,13 +6,13 @@ ADR-045(kor-travel-map = Docker 독립 프로그램 + 독립 DB/Dagster + TripMa
 
 > **정본 분담** — 본 문서는 *무엇을 어떤 순서로 만들지*(task 분해)와 *무엇이 빠졌나*
 > (gap)·*무엇을 결정해야 하나*(decision)를 모은다. 상세 *계약*은 이미 있는 문서가 정본:
-> - admin OpenAPI/스키마/큐 테이블/Docker 서비스: `docs/openapi-admin-contract.md`
+> - admin OpenAPI/스키마/큐 테이블/Docker 서비스: `docs/architecture/openapi-admin-contract.md`
 > - admin UI 워크플로/엔드포인트 상세: `docs/debug-ui-admin-workflows.md`
 > - 외부 POI 캐시 갱신 타깃: `docs/poi-cache-update-targets.md`
-> - Dagster 책임 경계: `docs/dagster-boundary.md`
-> - TripMate 연계 REST 세부(params/returns): `docs/tripmate-rest-api.md`
+> - Dagster 책임 경계: `docs/architecture/dagster-boundary.md`
+> - TripMate 연계 REST 세부(params/returns): `docs/architecture/tripmate-rest-api.md`
 > - 의사결정 결과: `docs/adr045-open-decisions.md` (D-1~D-16 전부 결정 완료)
-> - 데이터 모델: `docs/data-model.md` / `docs/postgres-schema.md`
+> - 데이터 모델: `docs/architecture/data-model.md` / `docs/architecture/postgres-schema.md`
 
 ## 0. 현황 요약 (2026-06-01)
 
@@ -88,7 +88,7 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
 - **T-206a-geo** ✅ (형제 repo `kor-travel-geo`) — `POST /v2/regions/
   within-radius` 엔드포인트와 optional PostGIS 실데이터 테스트 경로를
   `kor-travel-geo` main 기준으로 재검증 완료. 요청/응답/구현 정본은
-  `docs/regions-within-radius.md` (요약은 `adr045-open-decisions.md` D-11).
+  `docs/architecture/regions-within-radius.md` (요약은 `adr045-open-decisions.md` D-11).
   `tl_scco_sig`(+ctprvn/emd) PostGIS 교차. 반환 `code`(sig_cd)는 kor-travel-map
   `sigungu_code`와 동일 체계(D-11 확인) — 매핑 불필요. 2026-06-03 기준 local
   API `12501` smoke에서 `sigungu` `11650`(서초구) contains 응답을 확인했다.
@@ -220,13 +220,13 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
 
 ## 6. Phase 6 — TripMate 연계 + 문서 정리
 
-- **T-210a** `docs/tripmate-rest-api.md` 확정 — TripMate가 호출하는 사용자/서비스
+- **T-210a** `docs/architecture/tripmate-rest-api.md` 확정 — TripMate가 호출하는 사용자/서비스
   API params/returns 구체화(본 PR에서 1차 작성, 구현 시 OpenAPI와 동기).
 - **T-210b** TripMate 측 문서 정리(별도 repo `F:\dev\tripmate`) — 직접 import/공유
   DB/TripMate-owned Dagster 기술 문서를 ADR-045 OpenAPI 모델로 supersede. 대상
-  목록: `docs/kor-travel-map-integration.md`(전면), `docs/architecture.md`, `docs/
+  목록: `docs/kor-travel-map-integration.md`(전면), `docs/architecture/architecture.md`, `docs/
   runbooks/etl.md`, `docs/architecture/dagster-etl-bridge.md`, `docs/api/features.md`,
-  TripMate `docs/decisions.md` ADR-002/003 banner. (TripMate repo PR로 분리.)
+  TripMate `docs/adr/README.md` ADR-002/003 banner. (TripMate repo PR로 분리.)
 - **T-210c** TripMate→kor-travel-map **이관**: TripMate `apps/etl`의 Dagster 자산/
   resource/schedule(현재 skeleton)을 kor-travel-map `packages/kor-travel-map-dagster`로
   이관(T-208). offline upload load·consistency/dedup job도 kor-travel-map 소유로.

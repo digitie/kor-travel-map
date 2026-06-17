@@ -10,7 +10,7 @@
 - ``load_mois_license_features_bulk`` — 소량 batch UPSERT (단위 테스트 / admin
   trigger 용). ``license_records_to_bundles``(async) → ``infra.load_bundles``.
 - snapshot ``delete_not_in`` / advisory lock(ADR-011) / mois source DB iterator
-  (``collect_and_load_*``)는 **후속 PR** (docs/mois-feature-etl.md §9). 본 모듈은
+  (``collect_and_load_*``)는 **후속 PR** (docs/etl/mois-feature-etl.md §9). 본 모듈은
   in-memory record iterable만 받는다 (mois 라이브러리 런타임 import 안 함).
 
 ADR 참조

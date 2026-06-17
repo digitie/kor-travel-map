@@ -3,7 +3,7 @@
 provider 측 응답을 raw 형태로 보존하고 (`SourceRecord`), 어떤 Feature가 어떤
 source에서 왔는지 (1:N 매핑) 추적한다 (`SourceLink`).
 
-``docs/feature-model.md §11-§12`` + ``docs/data-model.md §2-§3``.
+``docs/architecture/feature-model.md §11-§12`` + ``docs/architecture/data-model.md §2-§3``.
 
 ADR 참조
 --------
@@ -33,7 +33,7 @@ class SourceRecord(BaseModel):
     raw_payload_hash)``. 같은 entity_id라도 payload 변경 시 새 row (이력 보존).
     PK는 ``source_record_key`` (``make_source_record_key(...)``).
 
-    ``docs/feature-model.md §11`` + ``docs/data-model.md §2``.
+    ``docs/architecture/feature-model.md §11`` + ``docs/architecture/data-model.md §2``.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -119,7 +119,7 @@ class SourceLink(BaseModel):
     kakao_local 전화번호 보강). 한 SourceRecord는 한 Feature에 1차 매핑되는 것이
     원칙 (``is_primary_source=True``는 한 SourceRecord당 최대 1건).
 
-    ``docs/feature-model.md §12`` + ``docs/data-model.md §3``.
+    ``docs/architecture/feature-model.md §12`` + ``docs/architecture/data-model.md §3``.
     """
 
     model_config = ConfigDict(extra="forbid")

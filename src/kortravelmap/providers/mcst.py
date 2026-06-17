@@ -265,7 +265,7 @@ MCST_EXCLUDED_FILE_DATASETS: Final[dict[str, str]] = {
         "provider 재편으로 소멸 — 도서관 디렉토리 재적재는 후속 과제."
     ),
 }
-"""적재 제외 3 dataset과 사유 (#395 — 문서 `docs/mcst-feature-etl.md` §3)."""
+"""적재 제외 3 dataset과 사유 (#395 — 문서 `docs/etl/mcst-feature-etl.md` §3)."""
 
 
 # ── COORDINATES 파서 ─────────────────────────────────────────────────────
