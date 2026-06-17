@@ -24,6 +24,8 @@
     "@hookform/resolvers": "^5.4.0",
     "@kor-travel-map/map-marker-react": "*",
     "@tanstack/react-query": "^5.100.14",
+    "@tanstack/react-table": "^8.21.3",
+    "@tanstack/react-virtual": "^3.14.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.17.0",
