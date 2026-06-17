@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-18 claude 작업 메모 — 외부/보류 task won't-do 종결
+
+사용자 지시로 백로그의 외부 추적 4건과 보류 1건을 진행하지 않음(won't-do)으로 종결했다.
+
+- **종결(won't-do)**: `T-019`, `T-210b`, `T-210c`, `T-210d`(전부 PinVi repo 외부),
+  `T-103`(streaming ETL — 초 단위 latency 요구 provider 증거 없음). `docs/tasks.md` 외부
+  추적 섹션 제거 + 보류에서 T-103 제거, `docs/tasks-done.md` 상단 아카이브.
+- **유지**: `T-229-buildx`(arm64 buildx, `GITHUB_TOKEN` 배포환경), `T-101`(MV 보류),
+  열린 in-repo task `T-452-openapi-problem-json`·`T-ADMIN-TANSTACK`·`T-AUDIT-0616`.
+
+**다음 한 작업**: 이 저장소 즉시 실행 트랙은 `T-452-openapi-problem-json`(OpenAPI problem+json
+보강)과 `T-ADMIN-TANSTACK` 잔여(backend-의존 e2e 라이브·bulk 정책 가드). `T-229-buildx`는
+배포환경 잔여로 변동 없음.
+
 ## 2026-06-18 Codex 작업 메모 — admin frontend StyleSeed 디자인 규칙 적용
 
 사용자 요청에 따라 `https://styleseed-demo.vercel.app/llms.txt` 및 연결된
@@ -182,7 +196,8 @@ Sprint 5 운영 진입 마무리다. 핵심 구현과 운영 표면은 대부분
 - `T-225`(T-212e closure 재검증, 2026-06-13)·`T-229`(curated 오버레이 + post-reload
   표면 라이브 검증, 2026-06-14)는 완료됐다. 본 저장소에서 즉시 실행 가능한 큰 트랙은
   없고, 유일 잔여는 **arm64 multi-arch buildx 배포 검증**(`T-229-buildx`, `GITHUB_TOKEN`이
-  주입된 배포 환경 필요)뿐이다. PinVi 쪽 작업은 외부 추적으로만 남긴다.
+  주입된 배포 환경 필요)뿐이다. PinVi 쪽 작업(`T-019`/`T-210b`~`d`)과 streaming ETL(`T-103`)은
+won't-do로 종결했다(`docs/tasks-done.md`).
 
 ## 다음 한 작업
 
@@ -210,21 +225,19 @@ T-108/ADR-056의 arm64 multi-arch buildx 이미지 build+boot smoke다.
 
 ## 열린 작업 요약
 
-즉시:
+즉시(in-repo):
 
 - `T-229-buildx` — arm64 multi-arch buildx 배포 검증 (T-229 잔여, `GITHUB_TOKEN` 필요).
-
-외부 추적:
-
-- `T-019` — PinVi Kakao Maps → maplibre-vworld 교체와 SPEC supersede.
-- `T-210b` — PinVi 문서 supersede.
-- `T-210c` — PinVi `apps/etl` 레거시 Dagster 이관/삭제.
-- `T-210d` — PinVi httpx OpenAPI client 신규.
+- `T-452-openapi-problem-json` — OpenAPI 에러 본문 RFC7807 problem+json 보강.
+- `T-ADMIN-TANSTACK` — admin 테이블 이행 잔여(backend-의존 e2e 라이브 · bulk 정책 가드).
+- `T-AUDIT-0616` — 정합성 감사 후속(e2e depth · F-01 옵션 A).
 
 보류:
 
 - `T-101` — Materialized View 도입 검토.
-- `T-103` — streaming ETL 대응.
+
+won't-do (2026-06-18 종결): `T-019` · `T-210b`~`d`(PinVi 외부) · `T-103`(streaming ETL).
+상세는 `docs/tasks-done.md`.
 
 ## 고정 기준값
 
