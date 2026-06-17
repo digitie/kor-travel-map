@@ -16,6 +16,11 @@
   refetch, marker/table 선택 상세 패널, VWorld key 미설정 fallback을 유지했다.
   Windows localhost forwarding이 실패하는 e2e 환경을 위해 `NEXT_ALLOWED_DEV_ORIGINS`
   기반 dev origin 추가 허용도 넣었다.
+- [x] **T-MAP-VWORLD-03 — 지도 e2e 라이브 검증 및 후속 수정** (#467).
+  PR #469 merge 후 main 기준으로 Windows Playwright 지도 e2e를 재실행했다.
+  `features-map-interactions.spec.ts`는 **5 passed / 0 failed**였고 추가 수정할
+  회귀는 없었다. 정본 리포트는
+  `docs/reports/maplibre-vworld-react-e2e-2026-06-17.md`.
 
 ## T-212e 후속 라이브 검증 (2026-06-14, `T-229`)
 

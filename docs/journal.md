@@ -2,6 +2,18 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-17 (Codex) — maplibre-vworld-react 지도 e2e 종결
+
+`T-MAP-VWORLD-03`(#467)을 종결했다.
+
+- **main 기준 재검증**: PR #469 merge 후 `origin/main` 기준으로 WSL dev server +
+  Windows Playwright 지도 e2e를 다시 실행했다.
+- **결과**: `features-map-interactions.spec.ts` **5 passed / 0 failed**.
+- **범위**: map/table 탭, bbox fetch, kind 필터 refetch, table 선택→지도 상세 패널,
+  error/empty 상태.
+- **후속 수정**: 최종 e2e에서 추가 수정할 회귀는 없었다.
+- **정본 리포트**: [`docs/reports/maplibre-vworld-react-e2e-2026-06-17.md`](reports/maplibre-vworld-react-e2e-2026-06-17.md).
+
 ## 2026-06-17 (Codex) — admin features 지도 VWorldMapView 전환
 
 `T-MAP-VWORLD-02`(#466)를 구현했다.

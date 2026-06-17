@@ -7,8 +7,6 @@
 ## 진행 중인 작업 인덱스
 
 - **다음**
-  - [ ] `T-MAP-VWORLD-03` — **지도 e2e 라이브 검증 및 후속 수정** (#467). 지도 전환 후
-    WSL 서버 + Windows Playwright 흐름으로 지도 e2e를 실행하고 실패를 후속 PR로 수정한다.
   - [ ] `T-229-buildx` — **arm64 multi-arch buildx 배포 검증** (T-229 잔여). T-229의
     나머지(curated 오버레이·`/metrics`·smoke breadth)는 라이브 검증 완료. arm64
     (Odroid) 이미지 build+boot smoke만 `GITHUB_TOKEN`이 있는 배포 환경에서 수행한다.
@@ -60,17 +58,6 @@
 
 진척·"다음 한 작업"의 정본은 [`docs/resume.md`](resume.md). 과거 완료 묶음(`T-RV-*`,
 `T-200`~`T-228`, `T-212a`~`d`, `T-216`, `T-218` 등)은 [`docs/tasks-done.md`](tasks-done.md).
-
-## T-MAP-VWORLD-03 — 지도 e2e 라이브 검증 및 후속 수정
-
-- [ ] T-MAP-VWORLD-03 — **지도 e2e 라이브 검증 및 후속 수정** (#467)
-
-지도 전환 PR이 main에 반영된 뒤 WSL 서버 + Windows Playwright 흐름으로 지도 관련 e2e를
-실행한다. canvas/container 렌더링, bbox 조회, kind 필터 refetch, marker 또는 table 선택을
-통한 상세 패널 노출을 확인하고, 실패가 있으면 후속 수정 PR로 반영한다.
-
-완료 조건: `features-map-interactions.spec.ts` 또는 동등한 지도 e2e 결과를 기록하고, 발견한
-회귀 수정이 main에 반영된다.
 
 ## T-229-buildx — arm64 multi-arch buildx 배포 검증 (T-229 잔여)
 
