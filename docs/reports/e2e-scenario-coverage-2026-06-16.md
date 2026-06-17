@@ -1,5 +1,14 @@
 # E2E 시나리오 커버리지 — 촘촘 매트릭스 (2026-06-16, claude)
 
+> **종결 갱신 (2026-06-17)**: 아래 갭(§1~§4)을 **3-wave 종합 확장**으로 해소했다.
+> route-mock 기반 신규 spec **21파일 / +152 시나리오** 추가 — Wave 1(HIGH 5, PR #460),
+> Wave 2(MED 10, PR #461), Wave 3(LOW 6). 전체 Playwright 스위트 **33→209** 통과(라이브
+> frontend :12705 + mock 백엔드로 전수 검증). 모든 신규 spec은 mock body를
+> `components["schemas"]`에 바인딩(계약 drift를 tsc가 검출). 확장 중 backups 실행 옵션의
+> stale-closure 실버그(행 Restore/Swap이 항상 execute:false 전송)도 발견·수정했다. 아래
+> 매트릭스는 **확장 착수 시점(2026-06-16)의 갭 기록**으로 보존한다. CI에는 Playwright job이
+> 없어(거짓 green 방지) 검증은 WSL 라이브 실행으로 수행한다 — 이 단서는 `test-strategy.md`에도 둔다.
+
 전체 코드+문서 감사(`full-consistency-audit-2026-06-16.md`)의 **e2e 시나리오 부분 정본**.
 admin frontend Playwright e2e의 페이지/플로별 **커버된 시나리오 vs 빠진 시나리오**를
 촘촘하게 정리한다. 본 문서는 **커버리지 갭의 정본 기록**이며, 실제 spec 추가는 backlog

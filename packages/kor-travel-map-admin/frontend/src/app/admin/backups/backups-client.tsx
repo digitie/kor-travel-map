@@ -234,9 +234,12 @@ export function BackupsClient() {
         },
       },
     ],
-    // submitRestore/submitSwap are stable closures over mutations defined above.
+    // 행의 Restore/Swap 버튼 onClick은 submitRestore/submitSwap을 통해 execute/recreate/
+    // apply 체크박스 state를 읽는다. 이 state들이 바뀔 때 컬럼을 재생성하지 않으면 onClick이
+    // 최초 렌더의 stale closure를 잡아 항상 execute:false를 보낸다(실행 옵션 무효 버그).
+    // 해당 state들을 deps에 넣어 토글 시 onClick이 최신 값을 읽도록 한다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
+    [executeRestore, recreateRestore, executeSwap, applySwap],
   );
 
   const submitBackup = () => {

@@ -2,6 +2,27 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-17 (claude) — admin e2e 커버리지 종합 확장 Wave 3(LOW 6페이지) + 실버그 1건 수정 + 종결
+
+3-wave 종합 확장 마무리. LOW 우선순위 6페이지에 route-mock depth-spec 6종(+32 시나리오) 추가.
+라이브 frontend :12705 + mock 백엔드로 전수 실행 green 확인. **전체 스위트 57→209** 통과.
+
+- **신규 스펙(32 시나리오)**: `poi-cache-targets-edge`(cursor·empty·error·on_conflict=move·scope_mode
+  upsert), `offline-uploads-edge`(validation_failed·413·JSON/JSONL/TSV·폴링·CP949), `backups-exec`
+  (execute 분기·plan-only·restore confirm·empty·error), `dagster-interactions`(tick 실패 드릴다운·
+  run-id 선택·unavailable 배너·embed fallback), `consistency-drilldown`(report/issue 드릴다운·
+  severity), `logs-streams`(import_job_events 탭·cursor·filter·deeplink·error).
+- **실버그 발견·수정(backups-client.tsx)**: backup 행의 Restore/Swap 버튼 onClick이 `useMemo([])`
+  컬럼 정의 안에 박혀 execute/recreate/apply 체크박스 state를 **stale closure**로 잡아 항상
+  `execute:false`를 전송하던 버그(실행 옵션이 행 버튼에 무효). deps에 해당 state를 넣어 토글 시
+  컬럼을 재생성하도록 수정. (backup 버튼은 memo 밖이라 정상 → e2e가 정확히 회귀 포인트를 잡음.)
+- **검증 루프(라이브)**: 1차 27/32 → 회귀 5건 수정(4 agent 병렬) → 2차 28/32 → 잔여 4건(backups
+  실버그·dagster shortRunId truncation·offline 2건 brittle scope) 수정 → **32/32**. 전체 스위트
+  208/209(폴링 spec 1건 부하 flaky, 단독 9/9) → 폴링 타임아웃 8s→15s 안정화 → **209/209**.
+- **3-wave 합계**: 신규 spec 21파일 / +152 시나리오(W1 52·W2 68·W3 32). 22개 admin 페이지의
+  mutation/error/empty/pagination/filter/WS/deeplink 표면을 route-mock으로 덮었다. 정본 갭 기록
+  `docs/reports/e2e-scenario-coverage-2026-06-16.md`에 종결 배너 추가.
+
 ## 2026-06-17 (claude) — admin e2e 커버리지 종합 확장 Wave 2(MED 10페이지 depth-spec)
 
 Wave 1에 이어 MED 우선순위 10페이지에 route-mock depth-spec 10종(+68 시나리오) 추가. 라이브

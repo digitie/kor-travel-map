@@ -394,7 +394,9 @@ test.describe("/admin/feature-update-requests/[requestId] actions", () => {
     await expect(page.getByRole("button", { name: "run-now" })).toBeHidden();
 
     // 2s 폴링이 done을 반환 → terminal → cancel 사라지고 run-now 노출.
-    await expect(cancel).toBeHidden({ timeout: 8_000 });
+    // 전체 스위트 병렬 부하에서도 안정적이도록 타임아웃 여유를 둔다(2s 폴링 간격 +
+    // 5s staleTime + 렌더; 단일 실행 ~3s, 부하 시 8s 근접해 flaky했음).
+    await expect(cancel).toBeHidden({ timeout: 15_000 });
     await expect(page.getByRole("button", { name: "run-now" })).toBeVisible();
     // 폴링이 최소 1회 추가 fetch.
     await expect.poll(() => calls.detail).toBeGreaterThanOrEqual(2);
