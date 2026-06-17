@@ -17,6 +17,10 @@
   - `T-229-buildx` — **arm64 multi-arch buildx 배포 검증** (T-229 잔여). T-229의
     나머지(curated 오버레이·`/metrics`·smoke breadth)는 라이브 검증 완료. arm64
     (Odroid) 이미지 build+boot smoke만 `GITHUB_TOKEN`이 있는 배포 환경에서 수행한다.
+  - `T-ADMIN-TANSTACK` — **admin UI TanStack 테이블 이행 후속** (이행 자체는 PR #454 종결, 정본
+    `docs/reports/admin-tanstack-table-migration-2026-06-17.md`). 잔여: (a) backend-의존 e2e 라이브
+    실행(admin-ops/curated/features-new — Python venv+Postgres 환경; 정적 audit+grep상 무변경 호환),
+    (b) bulk 동작 정책 가드(완료 review 재결정 차단·bulk archive confirm — 선택).
   - `T-AUDIT-0616` — **2026-06-16 전체 정합성 감사 후속** (정본
     `docs/reports/full-consistency-audit-2026-06-16.md`). 문서 충돌은 본 감사 PR에서 정정
     완료, 아래는 코드/검증 후속:
