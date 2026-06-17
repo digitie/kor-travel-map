@@ -1,5 +1,20 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-17 Codex 작업 메모 — maplibre-vworld-react 지도 전환 계획 수립
+
+사용자 요청에 따라 admin UI 지도를
+[`digitie/maplibre-vworld-react`](https://github.com/digitie/maplibre-vworld-react) 기반으로
+전환하는 작업을 시작했다. 참조 repo는 2026-06-17 기준 `a7cb0f8`를 확인했고,
+정본 계획은 `docs/reports/maplibre-vworld-react-migration-plan-2026-06-17.md`다.
+
+- **GitHub Task 생성**: #465(`T-MAP-VWORLD-01` 계획), #466(`T-MAP-VWORLD-02` 지도 전환),
+  #467(`T-MAP-VWORLD-03` e2e/후속 수정).
+- **범위 결정**: 전체 외부 모노레포 vendoring이 아니라 admin `features` 지도에 필요한
+  `VWorldMapView`/React marker 모델을 얇게 이식한다. 기존 bbox 동기화, kind 필터,
+  선택 상세 패널, VWorld key 미설정 fallback은 유지한다.
+
+**다음 한 작업**: **T-MAP-VWORLD-02 — admin features 지도를 VWorldMapView 기반으로 전환**.
+
 ## 2026-06-17 claude 작업 메모 — 문서 구조 정리 (PR 대기)
 
 문서 트리 재배치 + entry 슬림(단일 PR, 코드 동작 무변경): ADR `docs/decisions.md`→`docs/adr/NNN-*.md`(53)
@@ -144,6 +159,9 @@ T-108/ADR-056의 arm64 multi-arch buildx 이미지 build+boot smoke다.
 ## 열린 작업 요약
 
 즉시:
+
+- `T-MAP-VWORLD-02` — admin features 지도를 VWorldMapView 기반으로 전환.
+- `T-MAP-VWORLD-03` — 지도 e2e 라이브 검증 및 후속 수정.
 
 - `T-229-buildx` — arm64 multi-arch buildx 배포 검증 (T-229 잔여, `GITHUB_TOKEN` 필요).
 
