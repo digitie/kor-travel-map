@@ -53,7 +53,8 @@ PostgreSQL-backed instance config를 쓴다.
 공통 resource:
 
 - `kor_travel_map_client`: `AsyncKorTravelMapClient`.
-- `reverse_geocoder`: kor-travel-geo REST v2 기반 reverse geocoder.
+- `reverse_geocoder`: kor-travel-geo REST v2 기반 reverse geocoder. **필수**(ADR-058) —
+  `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_BASE_URL` 미설정 시 resource init에서 실패한다.
 - `feature_update_runner`: `ProviderDatasetRefreshRunner`. worker job이 provider/dataset
   refresh를 실행할 때 호출한다.
 - `offline_upload_store`: `OfflineUploadObjectStore`. `offline_upload_load` job이

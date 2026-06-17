@@ -78,7 +78,9 @@ source_type)하고, 실제 bjd/category는 Address/Feature 가변 속성으로 i
   422 계약)~~ **완료 — concierge #83 머지**(이슈 #82, T-081: 두 endpoint `limit` 422 바운드 +
   회귀 테스트 2종). ~~`source_record.source_entity_id`가 한 후보의 upsert·reject/tombstone
   export에서 byte 동일하다는 계약 테스트(map inactivate 조인 전제)~~ **완료 — concierge #85
-  머지**(이슈 #84, T-082: upsert↔reject 회귀 테스트).
+  머지**(이슈 #84, T-082: upsert↔reject 회귀 테스트). map 측 **tombstone** 경로 불변성은
+  공유 `_source_entity_id` helper에 의존하던 것을 #452/#443에서 upsert/reject/tombstone
+  동일 id 회귀 테스트로 명시 고정했다.
 
 **종결**: concierge loader 검증의 모든 발견(C-01~C-08, P-01, source_entity_id 계약)이 해소됐다 —
-map #440(ADR-057)·#441(하드닝)·#442/현 PR(추적), concierge #83·#85. 잔여 0.
+map #440(ADR-057)·#441(하드닝)·#442/#443(추적+tombstone 회귀), concierge #83·#85. 잔여 0.

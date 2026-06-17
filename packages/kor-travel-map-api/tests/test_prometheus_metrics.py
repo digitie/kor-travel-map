@@ -9,6 +9,18 @@ from kortravelmap.api.app import create_app
 from kortravelmap.api.settings import ApiSettings
 
 
+def _canonical_path(path: str) -> str:
+    """path 라벨에서 starlette ``root_path`` 마운트 prefix를 제거해 정규 템플릿으로 맞춘다.
+
+    TestClient는 보통 ``root_path``를 안 붙이지만, 환경에 따라 prefix가 붙을 수 있어
+    테스트를 느슨하게 풀지 않고 정규화한다(ADR-048 /v1 clean cut 기준 템플릿 비교).
+    """
+    for prefix in ("/v1/categories", "/health"):
+        if path != prefix and path.endswith(prefix):
+            return prefix
+    return path
+
+
 def _metric_lines(body: str, metric: str) -> list[str]:
     """Exposition 본문에서 ``metric{`` 으로 시작하는 sample 라인만 추린다.
 
@@ -49,6 +61,17 @@ def _find_http_request(
     return None
 
 
+def _find_request_exception(
+    body: str, **want: str
+) -> tuple[dict[str, str], float | None] | None:
+    """``http_request_exceptions_total`` 라인 중 want 라벨을 모두 만족하는 첫 sample."""
+    for line in _metric_lines(body, "kor_travel_map_http_request_exceptions_total"):
+        labels, value = _parse_sample(line)
+        if all(labels.get(key) == val for key, val in want.items()):
+            return labels, value
+    return None
+
+
 @pytest.mark.unit
 def test_prometheus_metrics_endpoint_records_http_request() -> None:
     app = create_app(ApiSettings(features_routes_enabled=False))
@@ -71,9 +94,9 @@ def test_prometheus_metrics_endpoint_records_http_request() -> None:
     labels, value = sample
     assert value is not None
     assert value >= 1.0
-    # path는 라우트가 정상 해석돼야 한다(__unmatched__ 아님). starlette 버전에 따라
-    # /v1 prefix 유무가 갈릴 수 있어 라우트 tail로 관대하게 단언한다.
-    assert labels["path"].endswith("/health")
+    # path는 정규 라우트 템플릿이어야 한다(__unmatched__ 아님). ``/health``는 public_status_router가
+    # prefix 없이 마운트되므로 정확히 ``/health``로 기록돼야 한다(ADR-048 /v1 clean cut).
+    assert _canonical_path(labels["path"]) == "/health"
     assert "kor_travel_map_http_request_duration_seconds_bucket" in body
     assert "kor_travel_map_http_response_size_bytes_bucket" in body
     assert 'path="/metrics"' not in body
@@ -103,9 +126,9 @@ def test_prometheus_metrics_records_public_rest_surface() -> None:
     labels, value = sample
     assert value is not None
     assert value >= 1.0
-    # surface=public인 요청은 /v1/categories뿐. /v1 prefix 유무는 starlette 버전에 따라
-    # 달라질 수 있어 라우트 tail로 관대하게 단언한다(__unmatched__가 아님을 보장).
-    assert labels["path"].endswith("categories")
+    # surface=public인 요청은 /v1/categories뿐. ADR-048 /v1 clean cut에 따라 정규 템플릿
+    # ``/v1/categories``로 정확히 기록돼야 한다(__unmatched__ 아님).
+    assert _canonical_path(labels["path"]) == "/v1/categories"
 
 
 @pytest.mark.unit
@@ -121,6 +144,37 @@ def test_prometheus_metrics_uses_unmatched_label_for_404() -> None:
         'kor_travel_map_http_requests_total{method="GET",'
         'path="__unmatched__",status_code="404",surface="other"} 1.0'
     ) in body
+
+
+@pytest.mark.unit
+def test_prometheus_metrics_exception_uses_routed_path_label() -> None:
+    """라우팅된 /v1/... 엔드포인트에서 예외가 나면 정규 템플릿 path로 집계해야 한다(#448).
+
+    예외 카운터는 진입 시점의 잠정 path(best-effort, __unmatched__ 가능)가 아니라,
+    예외 전파 시점에 채워진 ``scope['route']`` 기준 템플릿 path를 라벨로 써야 한다.
+    """
+    app = create_app(ApiSettings(features_routes_enabled=False))
+
+    @app.get("/v1/boom/{item_id}")
+    async def boom_endpoint(item_id: str) -> dict[str, str]:
+        raise RuntimeError("boom")
+
+    client = TestClient(app, raise_server_exceptions=False)
+    response = client.get("/v1/boom/42")
+    assert response.status_code == 500
+
+    body = client.get("/metrics").text
+    sample = _find_request_exception(
+        body, method="GET", exception_type="RuntimeError"
+    )
+    assert sample is not None, _metric_lines(
+        body, "kor_travel_map_http_request_exceptions_total"
+    )
+    labels, value = sample
+    assert value is not None
+    assert value >= 1.0
+    # 정규 라우트 템플릿이어야 한다(__unmatched__ 아님). path param은 ``{item_id}``로 보존된다.
+    assert labels["path"] == "/v1/boom/{item_id}"
 
 
 @pytest.mark.unit

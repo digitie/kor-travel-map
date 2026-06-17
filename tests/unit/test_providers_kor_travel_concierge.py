@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
+
+import pytest
 
 from kortravelmap.dto import Address, Coordinate, FeatureKind, SourceRole
 from kortravelmap.providers.kor_travel_concierge import (
@@ -148,6 +151,26 @@ def test_kor_travel_concierge_inactive_entity_ids_ignores_unidentifiable() -> No
     assert kor_travel_concierge_inactive_entity_ids(items) == set()
 
 
+async def test_kor_travel_concierge_source_entity_id_immutable_across_operations() -> None:
+    """#452/#443 — 같은 candidate는 upsert/reject/tombstone에서 동일 source_entity_id를
+    내야 inactivate 조인(upsert 저장 키 == inactivate 매칭 키)이 성립한다(ADR-050 #4).
+
+    concierge #85가 upsert<->reject만 회귀로 고정했고 tombstone 경로는 코드 추론
+    (공유 ``_source_entity_id`` helper)에만 의존했다 — 본 테스트가 tombstone까지 명시
+    고정한다."""
+    [bundle] = await kor_travel_concierge_items_to_bundles(
+        [_item(operation="upsert")], fetched_at=_FETCHED
+    )
+    upsert_id = bundle.source_record.source_entity_id
+
+    assert kor_travel_concierge_inactive_entity_ids([_item(operation="tombstone")]) == {
+        upsert_id
+    }
+    assert kor_travel_concierge_inactive_entity_ids([_item(operation="reject")]) == {
+        upsert_id
+    }
+
+
 async def test_kor_travel_concierge_defaults_source_and_category() -> None:
     item = _item(source_record={}, place={**_item()["place"], "category_code_suggestion": None})
 
@@ -248,20 +271,33 @@ async def test_kor_travel_concierge_skips_non_mapping_place_and_missing_source_i
     ) == []
 
 
-async def test_kor_travel_concierge_unknown_operation_is_not_loaded_or_inactivated() -> None:
-    """C-05 — 알 수 없는 operation은 적재(upsert)도 비활성화(reject/tombstone)도 안 된다."""
+async def test_kor_travel_concierge_unknown_operation_is_not_loaded_or_inactivated(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """C-05 — 알 수 없는 operation은 적재(upsert)도 비활성화(reject/tombstone)도 안 된다.
+    제외 시 WARNING 1건을 남기는 관측 계약도 고정한다(#452/#441)."""
     item = _item(
         operation="noop",
         source_record={**_item()["source_record"], "source_entity_id": "999"},
     )
 
     assert await kor_travel_concierge_items_to_bundles([item], fetched_at=_FETCHED) == []
-    assert kor_travel_concierge_inactive_entity_ids([item]) == set()
+    with caplog.at_level(
+        logging.WARNING, logger="kortravelmap.providers.kor_travel_concierge"
+    ):
+        assert kor_travel_concierge_inactive_entity_ids([item]) == set()
+    assert any(
+        "unknown operation" in r.getMessage() and r.levelno == logging.WARNING
+        for r in caplog.records
+    )
 
 
-async def test_kor_travel_concierge_identity_triple_is_forced_to_constants() -> None:
+async def test_kor_travel_concierge_identity_triple_is_forced_to_constants(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """C-04 — payload가 다른 provider/dataset/entity_type을 보내도 고정 상수로 강제해
-    upsert 저장 키 == inactivate 매칭 키를 보장한다(raw 값은 raw_data에 보존)."""
+    upsert 저장 키 == inactivate 매칭 키를 보장한다(raw 값은 raw_data에 보존). 강제 시
+    identity drift WARNING을 남기는 관측 계약도 고정한다(#452/#441)."""
     item = _item(
         source_record={
             "provider": "some-alias",
@@ -272,7 +308,15 @@ async def test_kor_travel_concierge_identity_triple_is_forced_to_constants() -> 
         }
     )
 
-    [bundle] = await kor_travel_concierge_items_to_bundles([item], fetched_at=_FETCHED)
+    with caplog.at_level(
+        logging.WARNING, logger="kortravelmap.providers.kor_travel_concierge"
+    ):
+        [bundle] = await kor_travel_concierge_items_to_bundles([item], fetched_at=_FETCHED)
+
+    assert any(
+        "identity drift" in r.getMessage() and r.levelno == logging.WARNING
+        for r in caplog.records
+    )
 
     sr = bundle.source_record
     assert sr.provider == KOR_TRAVEL_CONCIERGE_PROVIDER_NAME

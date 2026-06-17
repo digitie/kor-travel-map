@@ -15,12 +15,13 @@ cross-repo **정본 지도**이므로 공급자 측 값을 [`runbooks/cross-repo
 
 ## 1. 결론
 
-**DA-D-06 = 확정.** `integration-map.md` §1 포트표 + §3/§4 concierge·geo 계약이 전부
-공급자 origin/main과 정합한다. #438의 concierge `12601`/`12602`/`12605` 정정이
+**DA-D-06 = 확정.** `integration-map.md` §1 포트표의 kor-travel-map·concierge·docker-manager·(보조)geo
+항목 + §3/§4 concierge·geo 계약이 공급자 origin/main과 정합한다(§1 TripMate 9021/9022 행은
+본 audit 범위 외 — §5 참조). #438의 concierge `12601`/`12602`/`12605` 정정이
 **양측 정본으로 검증**됐다(구 `12401`은 docker-manager Prometheus 포트로 충돌 확정).
 **본 repo 추가 수정 없음.**
 
-## 2. 포트 교차 확인 — integration-map §1 ↔ 공급자 origin/main 실측
+## 2. 포트 교차 확인 — integration-map §1 ↔ 공급자 origin/main 실측 (TripMate 제외, §5)
 
 | 시스템 | integration-map §1 표기 | 공급자 origin/main 실측 | 출처 | 판정 |
 |---|---|---|---|---|

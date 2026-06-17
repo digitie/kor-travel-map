@@ -84,6 +84,29 @@ def test_beach_source_link_primary_and_provider() -> None:
 
 
 @pytest.mark.unit
+def test_beach_recategorize_changes_feature_id() -> None:
+    """DA-D-07 KHOA 해수욕장 category ``01020300``→``01050100`` 변경은 feature_id를
+    re-key한다(``category``가 ``make_feature_id`` 해시 입력). 따라서 재import 후
+    구 ``01020300`` feature는 alembic 0027 cleanup으로 정리해야 중복이 없다(issue
+    #452/#445 회귀 가드)."""
+    from kortravelmap.core.ids import make_feature_id
+
+    def _beach_id(category: str) -> str:
+        return make_feature_id(
+            bjd_code="2635010300",
+            kind="place",
+            category=category,
+            source_type="khoa_beach",
+            source_natural_key="해운대해수욕장::부산광역시::해운대구",
+        )
+
+    assert BEACH_CATEGORY == "01050100"
+    assert _beach_id("01020300") != _beach_id(BEACH_CATEGORY), (
+        "category가 feature_id 해시 입력이 아니면 re-key 가정이 깨진다"
+    )
+
+
+@pytest.mark.unit
 def test_beach_reverse_geocoder_fills_bjd() -> None:
     async def _rg(coord: Coordinate) -> Address | None:
         return Address(bjd_code="2635010300", sigungu_code="26350", sido_code="26")

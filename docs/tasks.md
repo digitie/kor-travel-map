@@ -31,6 +31,10 @@
       forward-geocode 경로가 없어 정의만(경로 생기면 연결).
     - ~~**C-04 / DA-D-07**: KHOA 해수욕장 category~~ **✅ 해소** — 전용 `01050100 TOURISM_NATURE_BEACH`로
       코드+문서 정렬(2026-06-16, 후속 PR). `01020300`(COAST_ISLAND)은 오분류였다.
+      - ~~**re-key 중복 정리(#452/#445)**~~ **✅ 해소** — category가 feature_id 해시 입력이라
+        재import 시 구 `01020300` KHOA feature가 신 `01050100`과 중복 active로 남는다. alembic
+        `0027_khoa_recategorize_cleanup`(신 sibling 존재 시에만 구 feature inactive, 멱등)
+        + 회귀 테스트(unit re-key 불변, integration sweep 가드)로 해소.
     - **e2e (HIGH)** — **✅ ZERO 5페이지 1차 spec 추가**: curated-features(라이브 smoke:
       렌더/필터/구조), features/new(라이브 smoke + 클라 검증), 3 detail 페이지
       (feature-update-request·import-job·feature — mocked-route, OpenAPI 타입 바인딩).
@@ -39,7 +43,12 @@
       curated 시드 후보 기반 mutation flow(select/archive/source-rule apply), features/new
       실제 생성→422·409·지오코딩 mocked flow — `docs/reports/e2e-scenario-coverage-2026-06-16.md`
       §3 우선순위 순.
-- **외부 추적**
+  - `T-452-openapi-problem-json` — **OpenAPI 에러 본문 RFC7807 정합**(#452/#444 잔여). 현재
+    `openapi(.user).json`에 `application/problem+json` 응답 스키마가 없고(`docs/rest-api.md`
+    §1.5가 산문으로 에러 계약 정본을 유지하는 의도적 한계), 4xx/5xx 응답이 generated client
+    관점에서 under-spec다. 핸들러별 `responses=`로 problem+json 스키마를 선언하고
+    `export_openapi.py --profile all`로 재생성 + `--check`로 검증한다. 산문 정본(§1.5)은
+    유지하되 기계 계약을 보강하는 방향.
   - `T-019` — TripMate 측 Kakao Maps → maplibre-vworld 교체와 SPEC 문서 supersede 추적.
   - `T-210b` — TripMate 문서 supersede.
   - `T-210c` — TripMate `apps/etl` 레거시 Dagster 이관/삭제.
