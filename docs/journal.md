@@ -2,6 +2,26 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-17 (claude) — required 필드 접근성 이름 정정(asterisk 누수) — features-new e2e 적색 해소
+
+직전 라이브 e2e의 잔여 2건(`features-new.spec.ts` `getByLabel("name", { exact: true })` 0건)을
+해소. 근본 원인은 이행이 아닌 공용 폼 컴포넌트의 접근성 이름 결함이었다.
+
+- **근본 원인(경험적 확정)**: `FormField`/`FormSelect`/`FormTextArea`는 `required` 라벨에 장식용
+  별표 `<span aria-hidden="true"> *</span>`를 붙인다. 그런데 Chromium accname은 `<label>` 텍스트를
+  모을 때 **aria-hidden 별표까지 포함**해 컨트롤 접근성 이름이 `"name *"`가 된다(라이브 probe로
+  `getByLabel("name",exact)=0`·`getByLabel("name *",exact)=1` 확정). 스크린리더도 'star'를 낭독.
+- **수정**: 별표를 `<label>` 형제로 빼는 대신(공용 `Field` CSS가 `*:w-full`/`*:data-[slot=field-label]`로
+  FieldLabel을 **직속 자식**으로 겨냥 → 레이아웃 회귀 위험), 더 안전·확실한 명시 `aria-label`로 컨트롤
+  접근성 이름을 별표 없는 라벨로 고정. 공용 헬퍼 `requiredFieldAriaLabel(label, required)`
+  (`form-field-shared.ts`) — `required && typeof label === "string"`일 때만 라벨 문자열 반환,
+  ReactNode면 undefined(기존 동작), 호출부 spread보다 먼저 둬 caller aria-label 우선. 3개 wrapper에 배선.
+- **시각·spec 영향 0**: 별표는 화면에 그대로(`name<span aria-hidden> *</span>`), 접근성 이름만 `"name"`.
+  e2e 전수 grep상 별표(`* `)에 의존하는 spec 없음 → 회귀 0, required 필드 `getByLabel(exact)` 전역 정상화.
+- **검증**: vitest 신규 5(required→clean aria-label·non-required→무·caller override·select/textarea)·
+  tsc/ESLint 0. 라이브 probe `getByLabel("name",exact)` 0→**1**, `"name *"` 1→**0**(별표 시각 유지).
+  재빌드 frontend + 라이브 backend 전 spec 재실행 → **57 passed / 0 failed**.
+
 ## 2026-06-17 (claude) — admin UI 테이블 backend-의존 e2e 라이브 실행 + offline-uploads testid 회귀 수정
 
 #454 TanStack DataTable 이행의 backend-의존 Playwright e2e를 **라이브 Docker 스택**에 대해 실행
