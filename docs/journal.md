@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-17 (Codex) — maplibre-vworld-react 지도 전환 계획 및 Task 생성
+
+admin UI 지도를 `digitie/maplibre-vworld-react` 기반 모델로 전환하기 위한 작업 계획을 세웠다.
+
+- **참조 확인**: `digitie/maplibre-vworld-react` `a7cb0f8` 기준으로 `VWorldMapView`,
+  React `Marker`, `vworld-map-core` style builder 경계를 확인했다.
+- **Task 생성**: GitHub #465(`T-MAP-VWORLD-01` 계획), #466(`T-MAP-VWORLD-02` 지도 전환),
+  #467(`T-MAP-VWORLD-03` e2e/후속 수정).
+- **범위 결정**: 외부 모노레포 전체 vendoring 없이 admin `features` 지도에 필요한
+  `VWorldMapView`/React marker 계층을 얇게 이식한다. 기존 bbox 동기화, kind 필터,
+  선택 상세 패널, VWorld key 미설정 fallback은 유지한다.
+- **정본 계획**: [`docs/reports/maplibre-vworld-react-migration-plan-2026-06-17.md`](reports/maplibre-vworld-react-migration-plan-2026-06-17.md).
+
 ## 2026-06-17 (claude) — 문서 구조 정리 (ADR/ETL/architecture 디렉토리화 + entry 문서 슬림 + tasks 3분할 + Telegram MCP 제거)
 
 문서 트리를 용도별로 재배치하고 entry 문서의 군더더기/중복을 제거했다(단일 PR).
