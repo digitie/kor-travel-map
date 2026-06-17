@@ -1081,3 +1081,57 @@ make_price_value_key(*, feature_id: str, provider: str, price_domain: str,
 - 인덱스 추가는 `CREATE INDEX CONCURRENTLY`로 (운영 중 lock 없음).
 - 인덱스 삭제는 `DROP INDEX CONCURRENTLY IF EXISTS`.
 - 컬럼 타입 변경은 `USING` cast + downtime 또는 새 컬럼 + 백필 + swap.
+
+## 이관된 결정 (구 ADR)
+
+ADR에서 빼고 본 문서로 이관한 provider/ETL·도메인·알고리즘·운영 결정이다. 각 항목은
+출처 추적을 위해 `(구 ADR-NNN)`을 남긴다.
+
+### Record linkage 가중치·임계값 (구 ADR-016)
+
+같은 장소가 여러 provider에서 다른 이름/좌표로 올라올 때, 자동 병합과 수동 검토
+큐(`ops.dedup_review_queue` §9.2)를 가르는 알고리즘 파라미터다. `core/scoring.py`에
+박혀 있고, 운영 데이터로 재조정이 필요하면 그때 다시 합의한다(도메인 지식 기반 추정값).
+
+- **Blocking**: `ST_DWithin(coord::geography, 100)` + 같은 `bjd_code` + 같은 `kind`인
+  쌍만 후보로 본다.
+- **Scoring**: `0.45 * name_sim + 0.35 * spatial_sim + 0.20 * category_sim`.
+  name_sim은 `normalize_kr_place_name` 후 Jaro-Winkler 유사도, spatial_sim은
+  `exp(-haversine_m / 50.0)`, category_sim은 category tag set Jaccard.
+- **임계값**: `THRESHOLD_AUTO=0.85`(자동 병합), `THRESHOLD_MANUAL=0.65`(이 이상 ~ AUTO
+  미만은 `ops.dedup_review_queue` 수동 검토). 점수는 DB에 0~100 스케일로 저장한다.
+- **마스터 선정**(`core.scoring.select_master`): (1) 좌표 정밀도 → (2) `updated_at`
+  최신 → (3) `source_type` 우선순위(행안부 > TourAPI > 사용자 등록) → 동률은 `feature_id`
+  사전순. 병합 이력은 `ops.feature_merge_history`(§9.4)에 1행으로 남긴다.
+
+### 보관 정책 per-kind (구 ADR-017)
+
+데이터별 보관 기간 차이가 커서 일률 정책은 DB 비대를 부른다. kind별로 다르게 두고
+purge는 Dagster asset에 위임한다(purge SQL 표준 예시는 §10, `infra/purge_repo.py` 상수).
+
+| 데이터 | 보관 기간 |
+|--------|-----------|
+| `place` | 무기한 (폐업 시 `status='inactive'`) |
+| `route` / `area` | 무기한 |
+| `event` | 종료일(`ends_on`) +20년 |
+| `notice` | 종료일 또는 발표일 +1년 |
+| `price_values` | 카테고리별 기본값 (`feature.price_points.retention_days`, §8.2) |
+| `weather_values` | 계획 기준일 +30일, 참조 trip 0건 시 즉시 삭제 |
+| `source_records` | 대응 feature 보존 기간 이상, orphan만 별도 purge |
+
+### feature 정합성 리포트 단계적 도입 (구 ADR-033)
+
+`ops.feature_consistency_reports`(§9.7) 스키마와 Phase 1(F1~F3) 구현은 §9.7에 정본이
+있다. 단계 분할의 핵심 근거만 남긴다.
+
+- **Phase 1 (구현됨, 관측 모드)** — 스키마 + cheap·critical 3건(F1 orphan source /
+  F2 detail 누락 / F3 CRS drift). Dagster 게이트 미적용 — 검증만 하고 `mv_refresh` swap을
+  차단하지 않는다(상세는 §9.7).
+- **Phase 2 (Sprint 5 운영 진입 직전)** — 비용 큰 나머지 케이스 + Dagster 게이트:
+  F4(`dedup_review_queue` 미해소 N건 초과, WARN), F5(provider `last_success` SLA 초과,
+  WARN), F6(`opening_hours` start>end 모순, ERROR), F7(cross-provider dedup score
+  baseline 대비 회귀, WARN), F8(RustFS file_object orphan, WARN). 게이트는 root → child
+  적재 → `consistency_check` → `severity_max != ERROR`일 때만 swap 허용, ERROR면 알림 +
+  swap 차단(`docs/architecture/dagster-boundary.md §12`). 스키마는 Phase 1에서 이미
+  박혀 있어 Phase 2 추가는 케이스 행 추가뿐이다. 게이트를 켜는 PR은 dry-run report
+  첨부 후 점진 enable한다(첫 batch가 F4~F8로 일제히 fail할 수 있음).

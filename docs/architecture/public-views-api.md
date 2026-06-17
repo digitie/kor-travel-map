@@ -193,7 +193,6 @@
    marine 표면 또는 weather metric 확장은 후속 결정으로 둔다.
 4. 축제 상세 content/주최/주관/후원/reference_date는 `source_records.raw_data`의
    primary source payload를 함께 읽어 projection한다.
-5. `docs/architecture/pinvi-rest-api.md`는 이 표면을 PinVi T-130 차단 해소 조건으로 유지한다.
 
 ## 5. 테스트 기준
 

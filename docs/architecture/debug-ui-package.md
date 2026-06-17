@@ -542,3 +542,49 @@ ADR-045의 **독립 OpenAPI/admin 프로그램 표면** 제공이다. 메인 라
 2026-05-25), PinVi 사용자 UI 측 지도 stack도 동일하게 통일된다 (ADR-026).
 `maplibre-vworld-js` 자체에서 문제가 발생하면 wrapper 도입(ADR-006 위배) 대신
 upstream 저장소(`digitie/maplibre-vworld-js`)에 직접 PR로 적극 수정한다.
+
+## 16. 이관된 결정 (구 ADR)
+
+아래는 프로그램 핵심 구조 결정이 아니라 frontend stack/지도 라이브러리/도메인
+선택 결정이라 ADR에서 빼고 본 문서로 이관한 항목이다. 추적성을 위해
+`(구 ADR-NNN)`을 남긴다.
+
+- **디버그/admin frontend = `maplibre-vworld` (VWorld 지도)** — Kakao Maps SDK
+  대신 MapLibre GL JS + `maplibre-vworld` + `zod`를 채택했다. 국토교통부 공식
+  VWorld 지도로 한국 행정구역·도로명주소 레이어와 정합하고, WebGL로 10만+ feature
+  (MOIS 인허가·국가유산·주유소 등)를 60fps 렌더링하며, 선언형 React/TypeScript라
+  openapi-typescript로 backend REST 타입과 동기 가능하다는 게 근거다. 빌드는
+  Next.js (App Router)로 통일해 형제 `kor-travel-geo-ui`와 학습 비용을 없앴다.
+  (구 ADR-025에서 결정 — 본문 §14.1 기술 스택 참조.)
+
+- **본 레포 지도 UI stack 단일화 + category→maki 단일 매핑** — debug/admin 지도
+  UI를 `maplibre-vworld` 하나로 통일해 지도 stack 이중 학습/디버깅·maki 매핑 산재·
+  좌표 변환 부담을 제거했다. `kortravelmap.category` Tier 1~4 → maki icon 매핑은
+  1회만 정의(공통 마커 모듈로 추출)하고, VWorld API key는 `KOR_TRAVEL_GEO_VWORLD_API_KEY`를
+  공유한다. (구 ADR-026에서 결정 — 본문 §14.2 key 공유 정책, §14.5 카테고리→maki
+  매핑 참조.)
+
+- **공통 마커/카테고리 매핑을 `@kor-travel-map/map-marker-react`로 추출** —
+  `MakiMarker` 컴포넌트·`categoryMaki`/`noticeMaki` dispatch·`markerColor`
+  팔레트(P-01~P-16)·TypeScript 타입을 모노레포 내부 패키지로 분리했다.
+  `kortravelmap.category`/notice_type 정책 변경이 같은 PR에서 동기 반영돼 매핑
+  drift를 막고, 마커 코드를 단일 source로 유지하기 위해서다. 라이선스는 본
+  라이브러리(GPL-3.0)와 분리된 MIT(UI 유틸이므로 GPL 보호 무관). (구 ADR-029에서
+  결정 — 본문 §14.4/§14.5, ADR-043으로 게시 보류 supersede.)
+
+- **공통 frontend 기능을 `maplibre-vworld-js` 별도 라이브러리로 분리** — vworld
+  basemap 설정·maki marker render·카테고리 legend·bounds 검색 helper·tile cache
+  같은 cross-cutting 자산을 본 저장소 밖 상류 라이브러리(`digitie/maplibre-vworld-js`)로
+  빼서 단일 유지보수한다. 형제 라이브러리(`kor-travel-geo`/`python-knps-api`)와
+  동일 분리 패턴이고, 분리 시점이 빠를수록 책임 분리 비용이 작다는 게 근거다.
+  현행 핀은 `github:digitie/maplibre-vworld-js#v0.1.3` + Next.js 16, peer는
+  `maplibre-gl ^5.24.0`/`zod ^4.4.3`/React 19다. (구 ADR-036에서 결정 — 본문 §14.1
+  라이브러리 핀 참조.)
+
+- **`@kor-travel-map/map-marker-react` npm registry 게시 보류** — 패키지 코드
+  자체는 단일 source로 유지하되 `package.json`에 `"private": true`를 박아 npm
+  registry에 게시하지 않고, 모노레포 내부 share(git URL/commit sha 또는 npm
+  workspace)로만 import한다. 현재 사용처가 모노레포 내부로 한정돼 git share로
+  충분하고, registry 게시는 namespace 점유·버전 관리·보안 책임이 따르기 때문이다.
+  향후 registry 게시가 필요해지면 새 결정으로 unfreeze한다. (구 ADR-043에서 결정 —
+  본문 §14.1 "npm 미게시, git URL+tag 핀" 참조.)

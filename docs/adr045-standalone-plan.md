@@ -10,7 +10,7 @@ ADR-045(kor-travel-map = Docker 독립 프로그램 + 독립 DB/Dagster + PinVi 
 > - admin UI 워크플로/엔드포인트 상세: `docs/debug-ui-admin-workflows.md`
 > - 외부 POI 캐시 갱신 타깃: `docs/poi-cache-update-targets.md`
 > - Dagster 책임 경계: `docs/architecture/dagster-boundary.md`
-> - PinVi 연계 REST 세부(params/returns): `docs/architecture/pinvi-rest-api.md`
+> - PinVi 연계 REST 세부(params/returns): `docs/architecture/rest-api.md`
 > - 의사결정 결과: `docs/adr045-open-decisions.md` (D-1~D-16 전부 결정 완료)
 > - 데이터 모델: `docs/architecture/data-model.md` / `docs/architecture/postgres-schema.md`
 
@@ -28,7 +28,7 @@ update-requests` CRUD + cancel/run-now, 6 scope, provider runs, POI cache),
    health/version/etl/features/mois-detail만).
 4. **Dagster 프로그램 자체가 없음** (PinVi에서 복사·구체화 필요).
 5. **docker-compose.yml / 배포 매니페스트 없음**.
-6. PinVi 연계 REST의 **params/returns 미확정** → `pinvi-rest-api.md`로 분리.
+6. PinVi 연계 REST의 **params/returns 미확정** → `rest-api.md`로 분리.
 7. **ADR-045 의사결정 D-1~D-16 전부 확정** → `adr045-open-decisions.md`.
 
 **재사용 가능한 기존 자산 (재발명 금지)**: `infra/feature_repo.features_in_bbox`,
@@ -220,7 +220,7 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
 
 ## 6. Phase 6 — PinVi 연계 + 문서 정리
 
-- **T-210a** `docs/architecture/pinvi-rest-api.md` 확정 — PinVi가 호출하는 사용자/서비스
+- **T-210a** `docs/architecture/rest-api.md` 확정 — PinVi가 호출하는 사용자/서비스
   API params/returns 구체화(본 PR에서 1차 작성, 구현 시 OpenAPI와 동기).
 - **T-210b** PinVi 측 문서 정리(별도 repo `F:\dev\tripmate`) — 직접 import/공유
   DB/PinVi-owned Dagster 기술 문서를 ADR-045 OpenAPI 모델로 supersede. 대상

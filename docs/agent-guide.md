@@ -357,3 +357,40 @@ PR 핸드오프 표준 포맷은 `docs/windows-reinstall-recovery.md` 참고.
 
 이 가이드는 살아 있는 문서다. 작업하면서 빠진 룰이 발견되면 ADR과 함께 추가
 하거나 `agent-guide.md`를 직접 수정한다.
+
+## 13. 이관된 결정 (구 ADR)
+
+아래는 프로그램 핵심 구조가 아니라 에이전트 process/convention 결정이라 ADR에서
+이 가이드로 이관한 항목이다.
+
+### 13.1 관련 라이브러리 로컬 우선 조회 (구 ADR-044)
+
+형제 `python-*-api` provider 라이브러리(`python-kma-api`/`python-opinet-api`/
+`python-krex-api`/`python-datagokr-api`/`python-visitkorea-api`/`python-knps-api`
+등)와 `maplibre-vworld-js`는 같은 머신의 `F:\dev\`(WSL `~/dev/`) 아래 로컬에
+체크아웃돼 있으므로, client·model·codes·스펙을 확인할 때는 **로컬 체크아웃을 1차
+source**로 `Glob`/`Read` 조회하고 GitHub 원격 fetch는 로컬에 없을 때만 fallback
+한다(GitHub 404/private는 "미존재" 근거가 아님 — PR#53에서 `python-datagokr-api`를
+404로 오판해 wiring을 잘못 보류한 사고가 계기). 데이터 정합성(코드 매핑·필드 의미·
+단위·분류값)의 1차 책임은 각 provider 라이브러리에 있으므로 본 lib는 그 정의를
+신뢰·미러하고, 불일치 발견 시 provider 라이브러리(+공식 API 스펙) 기준으로 정렬
+하며 필요하면 그 라이브러리에 직접 PR한다(독자 재정의 금지 — drift 회피).
+
+### 13.2 GitHub Actions CI/CD를 머지 게이트로 사용 (구 ADR-038)
+
+2026-05-26 "CI 쓰지마" 지시(로컬 검증 후 머지 직행)는 PR#33에서 reverse됐다.
+운영 단계 진입 + 다중 에이전트 PR 증가로 "내 PC에서 됨" 함정(환경 차이, Python
+3.11/3.12/3.13 matrix 누락)을 막기 위해 GitHub Actions(`ci.yml` unit+integration
+matrix, `lint.yml` ruff+mypy+import-linter, `openapi.yml` drift gate)를 PR/main
+push 머지 게이트로 재활성화한다. 로컬 검증은 PR 푸시 전 1차 확인용으로 유지하고
+CI는 matrix를 포함한 2차 차단선이다(branch protection 설정은 §7.5.6 참조).
+
+### 13.3 벤더링된 agent/skill 설정의 언어·context-discovery 예외 (구 ADR-059)
+
+`.claude/`·`.agents/`·`.codex/`·`.opencode/` 아래 상위 카탈로그에서 벤더링한
+agent/skill 원문은 `AGENTS.md` 한국어 문서 언어 정책의 예외로 **영어 원문을
+유지**한다(상위 동기화 충실성·재동기 비용 회피). 단 본 저장소 관례에 맞춘 적응은
+허용하며, 특히 존재하지 않는 `context-manager` agent 의존은 빈 stub을 만들지 않고
+본 저장소 실제 context-discovery 절차(`CLAUDE.md`→`AGENTS.md`→`SKILL.md`→
+`docs/architecture/architecture.md`→`docs/resume.md` + codegraph 질의)로 치환한다.
+범위·근거는 `.claude/agents/README.md`와 `AGENTS.md` 문서 언어 정책 단락에 명시한다.

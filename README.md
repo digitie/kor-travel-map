@@ -213,8 +213,7 @@ FastAPI/Uvicorn 의존성을 끌어오지 않는다 (ADR-020/055, `docs/architec
 - [`docs/architecture/regions-within-radius.md`](docs/architecture/regions-within-radius.md) — POI 반경 내/교차 행정구역 조회(kor-travel-geo REST v2) 사양
 - [`docs/adr045-standalone-plan.md`](docs/adr045-standalone-plan.md) — **ADR-045 독립 프로그램화 실행 계획**(T-205~T-210, AI agent 실행용)
 - [`docs/adr045-open-decisions.md`](docs/adr045-open-decisions.md) — ADR-045 의사결정 결과(D-1~D-16, 전부 결정 완료)
-- [`docs/architecture/pinvi-rest-api.md`](docs/architecture/pinvi-rest-api.md) — PinVi 연계 REST API params/returns 계약
-- [`docs/architecture/public-views-api.md`](docs/architecture/public-views-api.md) — PinVi T-130 공개 해수욕장/축제 뷰 후보 사양
+- [`docs/architecture/public-views-api.md`](docs/architecture/public-views-api.md) — 공개 해수욕장/축제 뷰 API 사양
 - [`docs/poi-cache-update-targets.md`](docs/poi-cache-update-targets.md) — 외부 POI key 기반 주변 feature 캐시 갱신 타깃
 - [`docs/architecture/category.md`](docs/architecture/category.md) — `kortravelmap.category` 모듈 사양 (kraddr-base에서 이전, ADR-023)
 - [`docs/architecture/postgres-schema.md`](docs/architecture/postgres-schema.md) — PostgreSQL 스키마 reference 카탈로그 (data-model의 빠른 참조)
@@ -226,7 +225,6 @@ FastAPI/Uvicorn 의존성을 끌어오지 않는다 (ADR-020/055, `docs/architec
 - [`docs/architecture/dagster-boundary.md`](docs/architecture/dagster-boundary.md) — Dagster 책임 경계
 - [`docs/debug-fixture-workflow.md`](docs/debug-fixture-workflow.md) — fixture 저장/replay
 - [`docs/architecture/feature-db-initialization.md`](docs/architecture/feature-db-initialization.md) — DB 부트스트랩
-- [`docs/pinvi-integration.md`](docs/pinvi-integration.md) — PinVi ↔ kor-travel-map OpenAPI 연동
 - [`docs/etl/event-feature-etl.md`](docs/etl/event-feature-etl.md) — VisitKorea 축제 ETL
 - [`docs/etl/mois-feature-etl.md`](docs/etl/mois-feature-etl.md) — `python-mois-api` 활용 feature 적재 full lifecycle (Step A/B/C/D)
 - [`docs/etl/mois-license-feature-etl.md`](docs/etl/mois-license-feature-etl.md) — MOIS 인허가 → place 승격 (Step B 좁은 가이드)

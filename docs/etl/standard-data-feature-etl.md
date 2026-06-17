@@ -254,3 +254,23 @@ curl -X POST http://127.0.0.1:12701/debug/standard-data \
   — 5종 bounded.
 - 무료 표준데이터 ↔ 유료 dataset 분리 검토 (data.go.kr 비용 정책 확인).
 - 표준데이터별 `source_entity_id` 안정성 검증 (provider 변경 시 deprecation).
+
+## 14. 이관된 결정 (구 ADR)
+
+- **표준데이터 2종을 place/event 1차 source로 채택** (구 ADR-042): 전국관광지정보
+  표준데이터(place)와 전국문화축제표준데이터(event)를 1차 source로 쓴다. 표준
+  데이터는 행안부/공공데이터포털이 안정 운영하여 갱신 주기가 명시되고 schema
+  변경이 announce되며, visitkorea TourAPI 대비 좌표 nullable·축제 데이터 정합성
+  문제가 적다. (5종 dataset·dataset_key·갱신주기는 §2에 정본.)
+- **축제 1차 source 전환 + visitkorea enrichment 강등** (구 ADR-042): 축제의
+  1차 source를 visitkorea festival → `standard_cultural_festivals`로 바꾸고,
+  visitkorea는 image/상세 description/contentId 매핑을 채우는 enrichment
+  (`source_role='enrichment'`)로 활용한다. "여러 source가 같은 entity를 채운다"는
+  본 라이브러리의 1차 use case에서 표준데이터 primary + visitkorea enrichment가
+  정석 패턴이기 때문이다.
+- **참고 — 이후 변경된 항목**: ADR-042는 provider 경계를 별도
+  `python-datagokr-api` 라이브러리에 두기로 했으나, 현재는 별도 provider 라이브러리
+  없이 본 저장소 내부의 bounded asyncio client(`kortravelmap.standard_data`)로
+  처리한다(§1·§3). ADR-042의 임시 dataset_key(`datagokr_tourism_points` /
+  `datagokr_cultural_festivals`)는 현 §2 명명(`datagokr_tourist_attractions` /
+  `standard_cultural_festivals`)으로 대체됐다.

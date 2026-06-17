@@ -319,3 +319,26 @@ ADR).
   정책 선행 필요.
 - 사진/VR 원본 호스팅: 본 라이브러리 RustFS에 복사하지 않고 `source_links`
   URL만 보존 — 저작권 + 트래픽 비용 절감.
+
+## 10. 이관된 결정 (구 ADR)
+
+provider 등록·ETL 계약 성격의 결정이라 ADR에서 본 문서로 이관했다. 본문에
+이미 반영돼 있으며 추적용 요약만 남긴다.
+
+- **`python-knps-api` provider 등록 (구 ADR-028)**: 1기관 1라이브러리 컨벤션에
+  따라 KNPS(환경부)를 별도 provider `python-knps-api`(`digitie/python-knps-api`)로
+  등록하고, 사용자가 scaffold한 public client/catalog를 wrapper 없이 그대로
+  채택한다(ADR-006). 본 lib는 변환 모듈 `kortravelmap.providers.knps`만 작성하며,
+  명명·maki·카테고리 정합 이슈는 upstream PR로 적극 수정한다(양방향 PR, ADR-025
+  패턴). dataset_key prefix `knps_*`, 라이선스 GPL-3.0-or-later. 세부는 §1~6 참조.
+- **keyless + file-only 전환 (구 ADR-028 Amendment 2026-05-25)**: knps-api PR#3/#4로
+  data.go.kr OpenAPI 표면이 전부 제거돼 카탈로그 14건이 모두 file dataset이 됐고
+  인증 env(`KNPS_SERVICE_KEY`/`DATA_GO_KR_SERVICE_KEY`)도 사라졌다 — 본 lib는
+  keyless 직접 다운로드 URL을 쓰며 auth wiring 부담이 0이다(§1·§2). notice 도메인
+  (`access_restriction`/`fire_alert`)은 KNPS에서 source가 사라져 산림청/소방청 등
+  다른 provider로 대체한다(§3.5·후속 ADR).
+- **SHP/CSV 파싱 책임 = knps-api (구 ADR-028 Amendment I 2026-05-29 / ADR-044)**:
+  raw 파일(SHP ZIP / CSV) → typed record(좌표·geometry **WKT 4326**) 파싱은 데이터
+  정합성 1차 책임인 provider(knps-api `[geo]` extra)가 맡고, 본 lib `providers/knps`는
+  `KnpsPointRecord`/`KnpsGeometryRecord` Protocol로 소비만 한다 — `pyshp`/SHP
+  디코딩을 본 lib 의존으로 두지 않는다. 세부는 §5 참조.

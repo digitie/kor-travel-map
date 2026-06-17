@@ -508,3 +508,34 @@ ADR-023 결정으로 본 저장소에 이전. 변경 이력은 git log 참조.
   카테고리만 책임).
 
 위 확장은 ADR + PR로 진행.
+
+## 12. 이관된 결정 (구 ADR)
+
+### forest 카테고리 확장 — 대피소 PlaceCategory 신설 (구 ADR-027)
+
+KNPS(data.go.kr) 통합에서 도출된 분류 확장 후보 중 **대피소·산장**만 신규
+PlaceCategory로 채택했다 — `03 LODGING` 하위에 Tier 2 `03.08
+LODGING_MOUNTAIN_SHELTER`(maki `shelter`) + Tier 3 `03.08.01 KNPS` / `03.08.02
+KFS` 3행 추가(휴양림 `03.03`과 의미 분리: 휴양림은 휴양 목적, 대피소는
+안전/일시 휴식). 근거: 대피소는 명확한 시설(place)이라 PlaceCategory가
+자연스럽고, Tier 2 한 행 추가는 Tier 1 enum/maki/전 ETL 매핑에 영향이 없다.
+(상세 행·통계·maki 매핑은 §4.2 / §4.3 / §4.4에 이미 반영됨 — `← ADR-027 신설`
+표기.)
+
+**거부·연기된 PlaceCategory 후보** (카테고리 정책으로 남기는 추적):
+
+- `SAFETY_*` PlaceCategory 신설 — **거부**. 위험지역(낙석/급류/멧돼지 등)은
+  시설이 아닌 지역이라 `kind=area` + `AreaDetail.area_kind='hazard_zone'`
+  (구 ADR-027, feature-model 소관)로 표현하는 것이 정확하다. 새 Tier 1
+  (`08 SAFETY`)은 모든 ETL/UI 매핑을 흔드는 광범위 변경이라 회피했다.
+- `WEATHER_MOUNTAIN_STATION` PlaceCategory 신설 — **거부**. `kind=weather`
+  feature 자체가 분류 역할을 하고 meta `station_type='mountain'`으로 충분하다.
+  디버그 UI maki는 `viewpoint`/`observation-tower` fallback으로 처리.
+- `NATURE_ECOLOGY` PlaceCategory 신설 — **연기** (v2 1차 범위 밖). 식생/서식지
+  학술 데이터는 사용자 노출 가치가 낮아 향후 분석 도구에서 KNPS 원본 dataset
+  직접 사용을 권고.
+
+> 같은 구 ADR-027에서 함께 결정된 **`hazard_zone` area_kind**(feature-model.md
+> §9 소관)와 **generic `access_restriction`/`fire_alert` notice_type**
+> (notice-feature-etl.md §3 소관, `forest_` prefix 없이 해변/도로/도시 도메인
+> 재사용)은 각 topic 문서가 정본이며 본 카테고리 문서 범위 밖이다.
