@@ -1084,6 +1084,7 @@ Admin frontend 표준:
   Form, DropdownMenu 등 UI primitive.
 - `maplibre-vworld-js`: VWorld 지도.
 - `@kor-travel-map/map-marker-react`: category/maki marker.
+- 디자인 규칙: [`admin-frontend-design-rules.md`](admin-frontend-design-rules.md).
 
 규칙:
 

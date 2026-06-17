@@ -2,6 +2,26 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-18 (Codex) — admin frontend StyleSeed 디자인 규칙 적용
+
+`https://styleseed-demo.vercel.app/llms.txt`와 `llms-full.txt`의 제품 UI 규칙을
+admin frontend 공통 surface에 적용했다.
+
+- **디자인 토큰**: 단일 brand accent, 5단계 text/surface token, 낮은 card shadow,
+  상태색 success/warning/info/destructive를 `globals.css`에 추가했다.
+- **공용 primitive 정리**: `Card`, `Button`, `Badge`, `StatusBadge`, `Table`,
+  `Alert`, `Input`, `NativeSelect`, `Textarea`, `Skeleton`을 token 기반 스타일,
+  카드형 정보 표면, 명확한 focus ring, 40px 입력 높이 기준으로 맞췄다.
+- **운영 홈 리듬 조정**: KPI loading 상태까지 카드 안에 넣고, KPI 숫자+단위 비율,
+  progress/status 보조 요소, Backend/Dagster 상태 묶음을 적용했다.
+- **반응형 검증**: Windows Node로 frontend type-check, ESLint(기존 warnings 6),
+  env 주입 production build 통과. `12705` production 서버에서 Playwright
+  screenshot(1280×720, 390×844)으로 overflow/겹침 없음 확인. WSL Node는 작업 중
+  `/usr/local/bin/node` bus error가 발생해 검증 실행 경로에서 제외했다.
+- **문서화**: admin frontend 로컬 디자인 규칙을
+  [`docs/architecture/admin-frontend-design-rules.md`](architecture/admin-frontend-design-rules.md)에
+  정리하고, package/API 계약 문서에서 링크했다.
+
 ## 2026-06-17 (Codex) — maplibre-vworld-react 지도 e2e 종결
 
 `T-MAP-VWORLD-03`(#467)을 종결했다.

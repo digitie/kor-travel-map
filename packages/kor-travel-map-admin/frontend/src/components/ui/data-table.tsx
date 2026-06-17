@@ -99,7 +99,7 @@ export function DataTableColumnHeader({
     <Button
       variant="ghost"
       size="sm"
-      className="-ml-2 h-7 px-2 data-[state=open]:bg-accent"
+      className="-ml-2 h-8 px-2 data-[state=open]:bg-brand-tint"
       onClick={onToggle}
     >
       {title}
@@ -202,8 +202,8 @@ export function DataTable<TData>({
 
   const bulkBar =
     enableRowSelection && renderBulkActions && selectedRows.length > 0 ? (
-      <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-2 py-1.5 text-sm">
-        <span className="text-muted-foreground">{selectedRows.length}개 선택됨</span>
+      <div className="flex items-center gap-2 rounded-xl border border-surface-muted bg-surface-subtle px-3 py-2 text-[13px]">
+        <span className="text-text-secondary">{selectedRows.length}개 선택됨</span>
         {renderBulkActions(selectedRows)}
       </div>
     ) : null
@@ -244,7 +244,7 @@ export function DataTable<TData>({
                 <TableRow>
                   <TableCell
                     colSpan={colCount}
-                    className="h-32 text-center text-muted-foreground"
+                    className="h-32 text-center text-text-tertiary"
                   >
                     {emptyMessage}
                   </TableCell>
@@ -355,7 +355,10 @@ function VirtualizedTable<TData>({
   return (
     <div
       ref={containerRef}
-      className={cn("relative overflow-auto rounded-md border", containerClassName)}
+      className={cn(
+        "relative overflow-auto rounded-xl border border-surface-muted",
+        containerClassName,
+      )}
     >
       <table
         role="table"
@@ -365,7 +368,7 @@ function VirtualizedTable<TData>({
       >
         <thead
           role="rowgroup"
-          className="sticky top-0 z-10 grid bg-background [&_tr]:border-b"
+          className="sticky top-0 z-10 grid bg-surface-subtle [&_tr]:border-b"
         >
           {table.getHeaderGroups().map((headerGroup) => (
             <tr role="row" key={headerGroup.id} className="flex w-full border-b">
@@ -378,7 +381,7 @@ function VirtualizedTable<TData>({
                     key={header.id}
                     aria-sort={canSort ? ariaSort(sorted) : undefined}
                     style={{ width: header.getSize() }}
-                    className="flex h-10 items-center px-2 text-left align-middle font-medium text-foreground"
+                    className="flex h-10 items-center px-3 text-left align-middle text-[12px] font-bold tracking-[0.05em] text-text-secondary uppercase"
                   >
                     {header.isPlaceholder
                       ? null
@@ -426,7 +429,7 @@ function VirtualizedTable<TData>({
                     row.getIsSelected() || isRowActive?.(row.original) ? "selected" : undefined
                   }
                   className={cn(
-                    "absolute flex w-full border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted",
+                    "absolute flex w-full border-b border-surface-muted transition-colors hover:bg-surface-subtle data-[state=selected]:bg-brand-tint",
                     onRowClick && "cursor-pointer",
                   )}
                   style={{ transform: `translateY(${virtualRow.start}px)` }}
@@ -437,7 +440,7 @@ function VirtualizedTable<TData>({
                       role="cell"
                       key={cell.id}
                       style={{ width: cell.column.getSize() }}
-                      className="flex items-center p-2 align-middle"
+                      className="flex items-center px-3 py-2.5 align-middle text-text-primary"
                     >
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </td>

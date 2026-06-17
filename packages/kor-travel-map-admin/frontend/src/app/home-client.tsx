@@ -13,7 +13,7 @@ import {
   WorkflowIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { useMemo } from "react";
+import { type ReactNode, useMemo } from "react";
 
 import { DAGSTER_UI_URL, useDagsterSummary } from "@/api/dagster";
 import { useDedupReviews } from "@/api/dedup";
@@ -42,25 +42,80 @@ import { cn } from "@/lib/utils";
 function MetricCard({
   title,
   value,
+  unit,
   description,
   icon: Icon,
+  children,
 }: {
   title: string;
   value: string;
+  unit: string;
   description: string;
   icon: typeof ActivityIcon;
+  children?: ReactNode;
 }) {
   return (
-    <Card size="sm">
+    <Card className="min-h-40">
       <CardHeader>
-        <CardTitle className="text-sm text-muted-foreground">{title}</CardTitle>
+        <CardTitle className="text-[12px] font-bold tracking-[0.05em] text-text-secondary uppercase">
+          {title}
+        </CardTitle>
         <CardAction>
-          <Icon className="text-muted-foreground" />
+          <span className="flex size-10 items-center justify-center rounded-xl bg-brand-tint text-brand">
+            <Icon className="size-5" />
+          </span>
         </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-1">
-        <div className="text-2xl font-semibold tracking-tight">{value}</div>
-        <p className="text-xs text-muted-foreground">{description}</p>
+        <div className="flex items-end gap-1 text-text-primary">
+          <span className="text-[36px] leading-none font-bold">{value}</span>
+          <span className="pb-0.5 text-[18px] leading-none font-bold">{unit}</span>
+        </div>
+        {children ?? (
+          <p className="text-[13px] leading-normal text-text-tertiary">
+            {description}
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function StatusLine({
+  tone,
+  children,
+}: {
+  tone: "success" | "warning" | "destructive" | "muted";
+  children: ReactNode;
+}) {
+  return (
+    <p
+      className={cn(
+        "flex items-center gap-1.5 text-[13px] font-bold",
+        tone === "success" && "text-success",
+        tone === "warning" && "text-warning",
+        tone === "destructive" && "text-destructive",
+        tone === "muted" && "text-text-tertiary",
+      )}
+    >
+      <span className="size-1.5 rounded-full bg-current" aria-hidden="true" />
+      {children}
+    </p>
+  );
+}
+
+function MetricCardSkeleton() {
+  return (
+    <Card className="min-h-40">
+      <CardHeader>
+        <Skeleton className="h-4 w-24" />
+        <CardAction>
+          <Skeleton className="size-10 rounded-xl" />
+        </CardAction>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <Skeleton className="h-9 w-28" />
+        <Skeleton className="h-3 w-full" />
       </CardContent>
     </Card>
   );
@@ -77,6 +132,21 @@ export function HomePageClient() {
   const dagsterData = dagster.data?.data;
 
   const importJobItems = importJobs.data?.data.items ?? [];
+  const totalFeatures = metricsData?.features_total ?? 0;
+  const activeFeatures = metricsData?.features_active ?? 0;
+  const activeFeatureRatio =
+    totalFeatures > 0 ? Math.min(100, (activeFeatures / totalFeatures) * 100) : 0;
+  const importJobTotal = Object.values(
+    metricsData?.import_jobs_by_status ?? {},
+  ).reduce((sum, count) => sum + count, 0);
+  const runningImportJobs =
+    (metricsData?.import_jobs_by_status?.running ?? 0) +
+    (metricsData?.import_jobs_by_status?.queued ?? 0);
+  const dedupQueueTotal = Object.values(
+    metricsData?.dedup_queue_by_status ?? {},
+  ).reduce((sum, count) => sum + count, 0);
+  const pendingDedupCount = metricsData?.dedup_fp_stats.pending ?? 0;
+  const openIssueCount = metricsData?.data_integrity_issues.open_total ?? 0;
   type ImportJobRow = NonNullable<
     typeof importJobs.data
   >["data"]["items"][number];
@@ -157,7 +227,7 @@ export function HomePageClient() {
       section="Overview"
       title="운영 홈"
     >
-      <div className="flex flex-col gap-5">
+      <div className="space-y-6">
         {(health.isError || metrics.isError || dagster.isError) && (
           <Alert variant="destructive">
             <AlertTriangleIcon data-icon="inline-start" />
@@ -171,10 +241,10 @@ export function HomePageClient() {
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {metrics.isLoading ? (
             <>
-              <Skeleton className="h-28" />
-              <Skeleton className="h-28" />
-              <Skeleton className="h-28" />
-              <Skeleton className="h-28" />
+              <MetricCardSkeleton />
+              <MetricCardSkeleton />
+              <MetricCardSkeleton />
+              <MetricCardSkeleton />
             </>
           ) : (
             <>
@@ -182,41 +252,62 @@ export function HomePageClient() {
                 description={`${formatCount(metricsData?.features_active)} active / ${formatCount(metricsData?.features_inactive)} inactive`}
                 icon={MapIcon}
                 title="Features"
-                value={formatCount(metricsData?.features_total)}
-              />
+                unit="개"
+                value={formatCount(totalFeatures)}
+              >
+                <div className="space-y-2">
+                  <div className="h-2 rounded-full bg-surface-muted">
+                    <div
+                      className="h-full rounded-full bg-brand"
+                      style={{ width: `${activeFeatureRatio}%` }}
+                    />
+                  </div>
+                  <p className="text-[13px] leading-normal text-text-tertiary">
+                    {formatCount(activeFeatures)} active /{" "}
+                    {formatCount(metricsData?.features_inactive)} inactive
+                  </p>
+                </div>
+              </MetricCard>
               <MetricCard
                 description="queued, running, done, failed"
                 icon={ListChecksIcon}
                 title="Import jobs"
-                value={formatCount(
-                  Object.values(metricsData?.import_jobs_by_status ?? {}).reduce(
-                    (sum, count) => sum + count,
-                    0,
-                  ),
-                )}
-              />
+                unit="건"
+                value={formatCount(importJobTotal)}
+              >
+                <StatusLine tone={runningImportJobs > 0 ? "warning" : "success"}>
+                  {runningImportJobs > 0
+                    ? `${formatCount(runningImportJobs)} queued/running`
+                    : "대기 중인 작업 없음"}
+                </StatusLine>
+              </MetricCard>
               <MetricCard
                 description={`${formatCount(metricsData?.dedup_fp_stats.pending)} pending reviews`}
                 icon={GitCompareArrowsIcon}
                 title="Dedup queue"
-                value={formatCount(
-                  Object.values(metricsData?.dedup_queue_by_status ?? {}).reduce(
-                    (sum, count) => sum + count,
-                    0,
-                  ),
-                )}
-              />
+                unit="건"
+                value={formatCount(dedupQueueTotal)}
+              >
+                <p className="text-[13px] leading-normal text-text-tertiary">
+                  pending review {formatCount(pendingDedupCount)}건
+                </p>
+              </MetricCard>
               <MetricCard
                 description="open data integrity issues"
                 icon={AlertTriangleIcon}
                 title="Issues"
-                value={formatCount(metricsData?.data_integrity_issues.open_total)}
-              />
+                unit="건"
+                value={formatCount(openIssueCount)}
+              >
+                <StatusLine tone={openIssueCount > 0 ? "destructive" : "success"}>
+                  {openIssueCount > 0 ? "조치 필요" : "열린 이슈 없음"}
+                </StatusLine>
+              </MetricCard>
             </>
           )}
         </section>
 
-        <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
+        <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
           <Card>
             <CardHeader>
               <CardTitle>최근 import jobs</CardTitle>
@@ -230,7 +321,7 @@ export function HomePageClient() {
                 </Link>
               </CardAction>
             </CardHeader>
-            <CardContent className="overflow-auto">
+            <CardContent>
               {importJobs.isError ? (
                 <p className="text-sm text-destructive">
                   {importJobs.error.message}
@@ -246,59 +337,63 @@ export function HomePageClient() {
             </CardContent>
           </Card>
 
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-6">
             <Card>
               <CardHeader>
-                <CardTitle>Backend</CardTitle>
-                <CardDescription>health / version</CardDescription>
+                <CardTitle>서비스 상태</CardTitle>
+                <CardDescription>Backend / Dagster readiness</CardDescription>
                 <CardAction>
-                  <DatabaseIcon className="text-muted-foreground" />
+                  <DatabaseIcon className="text-icon-default" />
                 </CardAction>
               </CardHeader>
-              <CardContent className="flex flex-col gap-3">
-                <div className="flex flex-wrap gap-2">
-                  <StatusBadge
-                    status={health.data?.data?.status ?? (health.isError ? "error" : "loading")}
-                  />
-                  {version.data ? (
-                    <Badge variant="outline">admin {version.data.data.version}</Badge>
-                  ) : null}
-                  {version.data ? (
-                    <Badge variant="outline">map {version.data.data.kor_travel_map_version}</Badge>
-                  ) : null}
+              <CardContent className="space-y-4">
+                <div className="rounded-xl bg-surface-subtle p-4">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <span className="text-[12px] font-bold tracking-[0.05em] text-text-secondary uppercase">
+                      Backend
+                    </span>
+                    <StatusBadge
+                      status={health.data?.data?.status ?? (health.isError ? "error" : "loading")}
+                    />
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {version.data ? (
+                      <Badge variant="outline">admin {version.data.data.version}</Badge>
+                    ) : null}
+                    {version.data ? (
+                      <Badge variant="outline">
+                        map {version.data.data.kor_travel_map_version}
+                      </Badge>
+                    ) : null}
+                  </div>
                 </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Dagster</CardTitle>
-                <CardDescription>summary + embed</CardDescription>
-                <CardAction>
-                  <WorkflowIcon className="text-muted-foreground" />
-                </CardAction>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-3">
-                <div className="flex flex-wrap gap-2">
-                  <StatusBadge
-                    status={
-                      dagsterData?.status ?? (dagster.isError ? "error" : "loading")
-                    }
-                  />
-                  <Badge variant="outline">
-                    {formatCount(dagsterData?.asset_count)} assets
-                  </Badge>
-                  <Badge variant="outline">
-                    {formatCount(dagsterData?.schedule_count)} schedules
-                  </Badge>
+                <div className="rounded-xl bg-surface-subtle p-4">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <span className="text-[12px] font-bold tracking-[0.05em] text-text-secondary uppercase">
+                      Dagster
+                    </span>
+                    <StatusBadge
+                      status={
+                        dagsterData?.status ?? (dagster.isError ? "error" : "loading")
+                      }
+                    />
+                  </div>
+                  <div className="mb-3 flex flex-wrap gap-2">
+                    <Badge variant="outline">
+                      {formatCount(dagsterData?.asset_count)} assets
+                    </Badge>
+                    <Badge variant="outline">
+                      {formatCount(dagsterData?.schedule_count)} schedules
+                    </Badge>
+                  </div>
+                  <Link
+                    className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+                    href="/admin/dagster"
+                  >
+                    <WorkflowIcon data-icon="inline-start" />
+                    Dagster 관리
+                  </Link>
                 </div>
-                <Link
-                  className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
-                  href="/admin/dagster"
-                >
-                  <WorkflowIcon data-icon="inline-start" />
-                  Dagster 관리
-                </Link>
               </CardContent>
             </Card>
 
@@ -310,20 +405,20 @@ export function HomePageClient() {
               <CardContent className="flex flex-col gap-2">
                 {(dedup.data?.data.items ?? []).slice(0, 4).map((item) => (
                   <Link
-                    className="rounded-md border px-3 py-2 text-sm hover:bg-muted"
+                    className="rounded-xl bg-surface-subtle px-4 py-3 text-[14px] text-text-primary transition-colors hover:bg-brand-tint"
                     href="/admin/dedup-reviews"
                     key={item.review_id}
                   >
                     <div className="font-medium">
                       {item.feature_a.name} / {item.feature_b.name}
                     </div>
-                    <div className="text-xs text-muted-foreground">
+                    <div className="text-[13px] text-text-tertiary">
                       score {item.total_score.toFixed(1)} · {shortId(item.review_id)}
                     </div>
                   </Link>
                 ))}
                 {!dedup.isLoading && (dedup.data?.data.items.length ?? 0) === 0 ? (
-                  <p className="text-sm text-muted-foreground">
+                  <p className="text-[13px] text-text-tertiary">
                     pending dedup review가 없습니다.
                   </p>
                 ) : null}

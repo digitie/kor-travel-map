@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### Admin frontend 디자인 정리 (2026-06-18)
+
+- **CHANGED**: admin frontend 공통 디자인 토큰과 primitive를 StyleSeed 규칙에 맞춰
+  정리했다. 단일 brand accent, 카드 기반 정보 표면, 낮은 shadow, 명시적 type
+  scale, 상태 badge dot+text 패턴을 적용했다.
+- **CHANGED**: 운영 홈 KPI/상태 카드의 loading 상태, 숫자+단위 표시, 모바일
+  overflow 처리를 개선했다.
+- **ADDED**: `docs/architecture/admin-frontend-design-rules.md`에 admin frontend
+  디자인 핵심 규칙을 문서화했다.
+
 ### Docker 공유 DB 모드 (2026-06-13)
 
 - **ADDED**: `KOR_TRAVEL_MAP_DB_EXTERNAL=true` Docker 기동 모드. PC 개발 환경의
