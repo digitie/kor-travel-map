@@ -60,7 +60,7 @@ if TYPE_CHECKING:
     import httpx
 
 __all__ = [
-    # 비동기 콜러블 계약 (docs/address-geocoding.md §2)
+    # 비동기 콜러블 계약 (docs/architecture/address-geocoding.md §2)
     "AddressGeocoder",
     "AddressResolver",
     "ReverseGeocoder",
@@ -94,7 +94,7 @@ __all__ = [
 
 # -- 비동기 콜러블 계약 --------------------------------------------------------
 #
-# docs/address-geocoding.md §2. provider 적재 파이프라인이 받는 enrichment
+# docs/architecture/address-geocoding.md §2. provider 적재 파이프라인이 받는 enrichment
 # resource — async-only (ADR-002). standard_data.ReverseGeocoder(동기 Protocol)와
 # 구분된다 (그쪽은 sync lookup table용).
 

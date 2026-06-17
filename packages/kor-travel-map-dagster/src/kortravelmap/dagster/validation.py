@@ -82,7 +82,7 @@ def validate_feature_bundle_address(
 ) -> FeatureAddressValidation:
     """FeatureBundle 1건의 좌표/주소 보강 상태를 검증한다.
 
-    정책은 ``docs/address-geocoding.md``의 ADR-046 주소 정본 규칙을 따른다.
+    정책은 ``docs/architecture/address-geocoding.md``의 ADR-046 주소 정본 규칙을 따른다.
     좌표가 있는 feature는 kor-travel-geo reverse 결과로 ``bjd_code``가 있어야 한다.
     provider 주소 문자열이 있으면 reverse 결과의 시군구명과 같은 행정권인지
     보수적으로 확인한다.

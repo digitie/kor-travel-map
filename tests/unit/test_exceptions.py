@@ -1,6 +1,7 @@
 """``test_exceptions`` — ``kortravelmap.core.exceptions`` 계층 검증.
 
-``docs/backend-package.md §5`` + ``docs/debug-ui-package.md §6.4`` 명세 준수.
+``docs/architecture/backend-package.md §5`` +
+``docs/architecture/debug-ui-package.md §6.4`` 명세 준수.
 """
 
 from __future__ import annotations
@@ -40,7 +41,7 @@ def test_all_subclasses_inherit_from_base(exc_cls: type[KorTravelMapError]) -> N
     """모든 도메인 예외는 ``KorTravelMapError``를 상속해야 한다.
 
     호출자가 ``except KorTravelMapError:`` 한 줄로 라이브러리 발 예외를 모두
-    catch할 수 있어야 한다 (``docs/backend-package.md §5``).
+    catch할 수 있어야 한다 (``docs/architecture/backend-package.md §5``).
     """
     assert issubclass(exc_cls, KorTravelMapError)
 

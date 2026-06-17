@@ -2,7 +2,7 @@
 
 route(LINESTRING/MULTILINESTRING)·area(POLYGON/MULTIPOLYGON) feature는 Point
 ``coord`` 외에 면/선 geometry를 ``Feature.geom``(WKT, EPSG:4326)에 보관한다
-(``docs/feature-model.md`` §RouteDetail/§AreaDetail, ``features.geom`` 컬럼).
+(``docs/architecture/feature-model.md`` §RouteDetail/§AreaDetail, ``features.geom`` 컬럼).
 
 본 모듈은 **순수 함수** (ADR-002 core 계층 — DB/HTTP 의존 없음). shapely로 WKT를
 파싱·검증하고, centroid를 ``Coordinate``로 돌려준다. provider 변환 함수

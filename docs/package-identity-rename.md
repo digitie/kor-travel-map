@@ -53,7 +53,7 @@ bucket/prefix는 hyphen(`kor-travel-map`)을 사용한다.
 - PostGIS extension schema: `x_extension`
 - OpenAPI versioned path prefix: `/v1`
 - docker-manager 기준 고정 포트: API `12701`, admin UI `12705`, Dagster `12702`
-- TripMate 연동 방식: OpenAPI HTTP, DB/Python import 직접 의존 없음
+- PinVi 연동 방식: OpenAPI HTTP, DB/Python import 직접 의존 없음
 
 ## 3. 이행 원칙
 
@@ -83,5 +83,5 @@ bucket/prefix는 hyphen(`kor-travel-map`)을 사용한다.
   - DB 기본값, RustFS bucket/prefix 이름, Docker/image/service 표시명 갱신
 - T-226e: 소비자 문서/client/migration guide
   - README/AGENTS/SKILL/architecture/provider-contract/integration-map 식별자 표 전환
-  - TripMate 문서와 generated client 참조 갱신
+  - PinVi 문서와 generated client 참조 갱신
   - `import kortravelmap as ktm` quickstart + migration guide 작성

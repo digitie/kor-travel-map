@@ -17,7 +17,7 @@ feature 운영, provider 적재, dedup/결측 검토, 오프라인 업로드를 
 ## 기술 스택 (ADR-025, Next.js 기반 — 2026-05-25 사용자 보강)
 
 - **Next.js 16** (App Router) + **React 19** + **TypeScript** —
-  `kor-travel-geo-ui` / TripMate `apps/web`와 동일 stack
+  `kor-travel-geo-ui` / PinVi `apps/web`와 동일 stack
 - **maplibre-vworld** v0.1.3 (`github:digitie/maplibre-vworld-js#v0.1.3`) —
   VWorld 지도 React 컴포넌트 (ADR-036). **npm 미게시** — git URL + release
   tag로 핀 (ADR-043 형제 라이브러리 패턴). 공개 API: `VWorldMap`(apiKey/
@@ -37,7 +37,7 @@ feature 운영, provider 적재, dedup/결측 검토, 오프라인 업로드를 
   카테고리-maki 매핑
 - Kakao Maps SDK 미사용 (ADR-025/026)
 
-> Vite 채택은 잠정 가설이었고, kor-travel-geo-ui 및 TripMate `apps/web`와의
+> Vite 채택은 잠정 가설이었고, kor-travel-geo-ui 및 PinVi `apps/web`와의
 > 일관성을 위해 **Next.js**로 정정 (ADR-025 §사용자 보강 2026-05-25).
 
 ## 환경변수
@@ -54,7 +54,7 @@ feature 운영, provider 적재, dedup/결측 검토, 오프라인 업로드를 
 > `kor-travel-geo` ADR-019의 `KOR_TRAVEL_GEO_VWORLD_API_KEY`와 동일하다.
 > 별도 발급 / 별도 운영하지 않는다. 운영 시 backend `.env`에서 동일 키를
 > 읽어 빌드/런타임에 frontend의 `NEXT_PUBLIC_VWORLD_API_KEY`로 주입한다
-> (CI/CD 또는 운영 셸 스크립트 책임). **TripMate 사용자 UI** (ADR-026)도
+> (CI/CD 또는 운영 셸 스크립트 책임). **PinVi 사용자 UI** (ADR-026)도
 > 동일 키를 공유한다.
 >
 > Next.js env 규약상 `NEXT_PUBLIC_*` 만 브라우저로 노출된다. 다른 키
@@ -82,7 +82,7 @@ npm run dev                  # http://127.0.0.1:12705
 `../../kor-travel-map-api/openapi.json`을 갱신했다면 `npm run gen:types`를 함께 실행하고,
 `npm run gen:types:check`로 drift가 없는지 확인한다.
 
-`next dev`의 기본 포트는 3000이지만, TripMate `apps/web` 개발 충돌 회피를
+`next dev`의 기본 포트는 3000이지만, PinVi `apps/web` 개발 충돌 회피를
 위해 `--port 12705`을 강제한다 (`package.json` scripts).
 
 ### WSL 실행 실패 방지 체크리스트
@@ -217,7 +217,7 @@ PID를 종료한 뒤 WSL frontend를 다시 띄운다. 정상은 `wslrelay`다.
 | `/features` | `/v1/features`, `/v1/features/{id}` | 구현됨. 지도/테이블/상세 panel + 운영 quick link |
 | `/admin/features` | `/v1/admin/features`, `/v1/admin/features/{id}/deactivate`, `/v1/features/{id}`, `/v1/features/{id}/weather` | 구현됨. 운영자용 table 목록, 상세/weather panel, 단건 비활성화 |
 | `/admin/features/change-requests` | `/v1/admin/features`, `/v1/admin/features/change-requests*` | 구현됨. feature add/update/delete 요청 생성, 검토 큐, approve/reject |
-| `/admin/curated-features` | `/v1/admin/curated-features*`, `/v1/admin/curated-source-rules*`, `/v1/admin/curated-sources`, `/v1/admin/curated-themes`, `/v1/curated-features/{id}/tripmate-copy` | 구현됨. curated 후보 목록, select/unselect/archive, source rule 편집/apply, TripMate copy preview |
+| `/admin/curated-features` | `/v1/admin/curated-features*`, `/v1/admin/curated-source-rules*`, `/v1/admin/curated-sources`, `/v1/admin/curated-themes`, `/v1/curated-features/{id}/tripmate-copy` | 구현됨. curated 후보 목록, select/unselect/archive, source rule 편집/apply, PinVi copy preview |
 | `/admin/issues` | `/v1/admin/issues`, `/v1/admin/issues/{issue_id}` | 구현됨. 이슈 목록/상세, resolve/ignore/reopen/retry/apply/manual override |
 | `/ops/import-jobs` | `/v1/ops/import-jobs`, `WS /v1/ops/live` | 구현됨. 작업 큐 상태, status/kind/batch/parent filter, live invalidate |
 | `/ops/import-jobs/[job_id]` | `/v1/ops/import-jobs/{job_id}`, `/v1/ops/import-jobs/{job_id}/events`, `/v1/ops/import-jobs/{job_id}/cancel`, `WS /v1/ops/live` | 구현됨. 상세/payload/event timeline/cancel/관련 링크/live invalidate |
@@ -237,7 +237,7 @@ PID를 종료한 뒤 WSL frontend를 다시 띄운다. 정상은 `wslrelay`다.
 | `/debug/explain` | 없음 | T-221e 재판정으로 제외. EXPLAIN은 통합 테스트 gate와 운영 DB read-only runbook에서 수행 |
 | `/debug/fixtures` | 없음 | T-221e 재판정으로 제외. fixture 저장/replay는 파일 기반 helper와 `/debug/etl` preview로 분리 |
 
-패키지 경계: `../../../docs/debug-ui-package.md` §14. Admin 상세 구현 사양:
+패키지 경계: `../../../docs/architecture/debug-ui-package.md` §14. Admin 상세 구현 사양:
 `../../../docs/debug-ui-admin-workflows.md`.
 
 ## 카테고리 → maki icon 매핑
@@ -245,7 +245,7 @@ PID를 종료한 뒤 WSL frontend를 다시 띄운다. 정상은 `wslrelay`다.
 `@kor-travel-map/map-marker-react`의 `categoryMaki` 사용 (ADR-029). 본 frontend는
 **중복 정의 금지** — drift gate가 Python ↔ TypeScript 1:1을 검증한다.
 
-자세히는 `../../../docs/category.md` §4 + `../../map-marker-react/README.md`.
+자세히는 `../../../docs/architecture/category.md` §4 + `../../map-marker-react/README.md`.
 
 ## 라이선스
 
@@ -255,8 +255,8 @@ GPL-3.0-or-later (메인 패키지와 동일). 외부 의존성: `next` (MIT),
 
 ## 비책임
 
-- TripMate 사용자 가시 지도 UI (ADR-026으로 동일하게 Next.js + maplibre-vworld
-  채택, SPEC V8 v8_3 supersede) — 본 frontend는 디버그 전용 (TripMate
+- PinVi 사용자 가시 지도 UI (ADR-026으로 동일하게 Next.js + maplibre-vworld
+  채택, SPEC V8 v8_3 supersede) — 본 frontend는 디버그 전용 (PinVi
   `apps/web`과 별도 코드베이스, 공통 마커는 `@kor-travel-map/map-marker-react` npm
   패키지로 공유)
 - 인증 / 세션 / 권한 (ADR-005 + ADR-020: 내부망 전용, no auth)

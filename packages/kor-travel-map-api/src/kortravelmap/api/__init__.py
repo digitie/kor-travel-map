@@ -13,7 +13,8 @@
 인증/접근 제어는 네트워크 계층(Cloudflare Tunnel / SSO / IP allowlist)에 둔다.
 패키지 자체에 인증 로직 침투 금지 (ADR-005 + ADR-035).
 
-자세한 사양은 ``docs/debug-ui-package.md``와 ``docs/openapi-admin-contract.md``.
+자세한 사양은 ``docs/architecture/debug-ui-package.md`` +
+``docs/architecture/openapi-admin-contract.md``.
 """
 
 from __future__ import annotations

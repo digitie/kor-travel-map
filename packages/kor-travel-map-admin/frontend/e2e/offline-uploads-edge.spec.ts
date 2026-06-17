@@ -38,7 +38,7 @@ const CHECKSUM =
 // ---------------------------------------------------------------------------
 
 function makePageMeta(overrides: Partial<PageMeta> = {}): PageMeta {
-  // docs/rest-api.md §3.3 — next_cursor는 항상 존재하고 null=exhausted.
+  // docs/architecture/rest-api.md §3.3 — next_cursor는 항상 존재하고 null=exhausted.
   return { page_size: 100, next_cursor: null, total: null, ...overrides };
 }
 

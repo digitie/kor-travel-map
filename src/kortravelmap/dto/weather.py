@@ -1,6 +1,6 @@
 """``WeatherValue`` — provider별 날씨 raw 측정/예보 값 (ADR-010).
 
-`docs/weather-feature-normalization.md §4` 명세.
+`docs/etl/weather-feature-normalization.md §4` 명세.
 
 `forecast_style`(원천값 성격) + `timeline_bucket`(KMA식 조회 축) 두 축이
 직교. `timeline_bucket`은 분류 결과라 unique key 제외 — `identity()` 메서드
@@ -72,7 +72,7 @@ class WeatherValue(BaseModel):
     # ── 2) ADR-010 두 축 + metric ─────────────────────────────────────────
 
     weather_domain: WeatherDomain = Field(
-        description="provider별 dataset 식별자 (`docs/weather-feature-normalization.md §3`).",
+        description="provider별 dataset 식별자 (`docs/etl/weather-feature-normalization.md §3`).",
     )
     forecast_style: ForecastStyle = Field(
         description="원천값 성격 — nowcast/ultra_short/short/mid/observed/index/advisory.",
@@ -90,7 +90,7 @@ class WeatherValue(BaseModel):
         description=(
             "표준 metric_key (T1H/TMP/REH/WSD/VEC/RN1/PTY/SKY/POP/PCP/SNO/WAV/"
             "TMN/TMX/FIRE_RISK/PM10/PM2_5/CAI/WATER_TEMP 등). "
-            "`docs/weather-feature-normalization.md §2` 표."
+            "`docs/etl/weather-feature-normalization.md §2` 표."
         ),
     )
 

@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 __all__ = ["Coordinate"]
 
 # 한국 본토 + 제주 + 부속 도서 (대마도 제외).
-# `docs/feature-model.md §4.1 검증 룰` + v1 spec 정합.
+# `docs/architecture/feature-model.md §4.1 검증 룰` + v1 spec 정합.
 _KOREA_LON_MIN: float = 124.0
 _KOREA_LON_MAX: float = 132.0
 _KOREA_LAT_MIN: float = 33.0

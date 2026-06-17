@@ -29,7 +29,7 @@ ADR 참조
 - ADR-030 — in-memory 캐시 금지 (``functools.cache`` 한정 narrow 예외)
 - ADR-034 — Provider 9단계 구현 순서
 
-자세히는 ``docs/architecture.md``, ``docs/decisions.md``.
+자세히는 ``docs/architecture/architecture.md``, ``docs/adr/README.md``.
 """
 
 from __future__ import annotations

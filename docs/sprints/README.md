@@ -16,10 +16,10 @@
 > `../reports/docs-consistency-audit-2026-06-06.md` DA-D-01). 기준값: coverage gate
 > `fail_under=80`, geocoding 로컬 `http://127.0.0.1:12501`(v2 `POST /v2/*`), frontend
 > Next.js 16 + `maplibre-vworld-js#v0.1.3`, 운영 모델 ADR-045(Docker 독립 + 독립
-> DB/Dagster + TripMate OpenAPI, 구 모델 호환 shim 금지 ADR-046). Sprint 5의 본
+> DB/Dagster + PinVi OpenAPI, 구 모델 호환 shim 금지 ADR-046). Sprint 5의 본
 > 저장소 잔여는 `T-229-buildx`(arm64 multi-arch buildx 배포 검증, `GITHUB_TOKEN`
 > 필요)뿐이다 — `T-225`/`T-229` closure는 완료됐다(상세는 `../resume.md`/`../tasks.md`).
-> TripMate 쪽 후속과 `T-101`/`T-103`은 외부 추적 또는 보류 항목으로 별도 관리한다.
+> PinVi 쪽 후속과 `T-101`/`T-103`은 외부 추적 또는 보류 항목으로 별도 관리한다.
 
 ## 9단계 구현 순서 (ADR-034)
 

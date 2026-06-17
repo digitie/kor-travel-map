@@ -14,7 +14,7 @@
 | ``mid_forecast_to_weather_values`` (후속) | `kma_mid_forecast` | mid |
 | ``weather_alerts_to_notice_bundles`` (후속) | `kma_weather_alert` | advisory |
 
-`docs/weather-feature-normalization.md` 사양 + ADR-010 두 축 분리.
+`docs/etl/weather-feature-normalization.md` 사양 + ADR-010 두 축 분리.
 
 설계 메모
 --------
@@ -94,7 +94,7 @@ KMA_PROVIDER_NAME: Final[str] = "python-kma-api"
 
 
 # -- weather dataset_key (T-219b) ----------------------------------------
-# `docs/kma-weather-etl.md` §2 표 + `docs/provider-contract.md` §3 정합.
+# `docs/etl/kma-weather-etl.md` §2 표 + `docs/architecture/provider-contract.md` §3 정합.
 
 KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY: Final[str] = "kma_ultra_short_nowcast"
 """provider_sync dataset_key — 초단기실황 (``getUltraSrtNcst``)."""
@@ -134,7 +134,7 @@ KMA_ALERT_LEVEL_SEVERITY: Final[dict[str, int]] = {
 }
 
 
-# 표준 metric_key → unit (`docs/weather-feature-normalization.md §2` 표 정합).
+# 표준 metric_key → unit (`docs/etl/weather-feature-normalization.md §2` 표 정합).
 KMA_METRIC_UNITS: Final[dict[str, str]] = {
     "T1H": "deg_c",  # 초단기실황 기온
     "TMP": "deg_c",  # 예보 기온

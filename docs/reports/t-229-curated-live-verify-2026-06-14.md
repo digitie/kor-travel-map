@@ -10,7 +10,7 @@
 - 사용자 지시로 표준 포트(12701/12702/12705)를 점유하던 **codex 스택을 강제 종료**한 뒤,
   검증 종료 후 external-infra 모드로 **재기동**했다(기존 이미지 재사용, rebuild 없음).
 - **복원 불필요**: T-212e가 적재했던 데이터가 옛 claude postgres
-  (`python-krtour-map-claude-postgres-1`, host 15433)에 그대로 잔존 —
+  (`kor-travel-map-claude-postgres-1`, host 15433)에 그대로 잔존 —
   `feature.features` **1,095,665** / `feature_weather_values` **92,923** /
   `provider_sync.source_records` **1,111,885**, 동일 규모의 격리 복원본
   `krtour_map_restore`(T-212e §5.3 staging)도 존재.

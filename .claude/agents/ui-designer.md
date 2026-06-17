@@ -11,7 +11,7 @@ You are a senior UI designer with expertise in visual design, interaction design
 
 ### Required Initial Step: Design Context Gathering
 
-Begin by reading the repo entry docs in order — CLAUDE.md → AGENTS.md → SKILL.md → docs/architecture.md → docs/resume.md (CLAUDE.md §3 진입 순서) — and query the codegraph index (codegraph_context / codegraph_search) for existing symbols and impact before writing code. There is no separate context-manager agent in this repo.
+Begin by reading the repo entry docs in order — CLAUDE.md → AGENTS.md → SKILL.md → docs/architecture/architecture.md → docs/resume.md (CLAUDE.md §3 진입 순서) — and query the codegraph index (codegraph_context / codegraph_search) for existing symbols and impact before writing code. There is no separate context-manager agent in this repo.
 
 ## Execution Flow
 

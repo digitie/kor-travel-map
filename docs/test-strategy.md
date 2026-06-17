@@ -5,7 +5,7 @@
 커버리지 목표 + EXPLAIN 검증 + property-based testing + fixture replay로
 구현한다.
 
-## 1. 4단계 테스트 구조 (ADR-014)
+## 1. 4단계 테스트 구조 (구 ADR-014)
 
 ```
 tests/
@@ -55,8 +55,8 @@ def test_visitkorea_festival_fixture_replay(fixture_path): ...
 | **전체** | **80%+ branch** | CI 강제 |
 
 `pyproject.toml`의 `[tool.coverage.run]`에 source = `src/kortravelmap`, `branch =
-true`. 단계적 상향 schedule은 **ADR-032** (accepted, T-014 코드 작성 단계
-진입 시 전환):
+true`. 단계적 상향 schedule은 아래 표 (구 ADR-032, T-014 코드 작성 단계 진입 시
+전환):
 
 | Sprint | 전체 (branch) | `core/` | `providers/` | `infra/client/api/` |
 |--------|---------------|---------|--------------|---------------------|
@@ -557,3 +557,23 @@ PR에서는 unit + integration + fixture_replay만 강제. slow는 nightly.
 5. **client.py** 단위 (Fake repo)
 6. **api/** e2e
 7. **부하/카오스** nightly
+
+## 13. 이관된 결정 (구 ADR)
+
+provider/ETL·process·테스트 운영 결정이라 ADR에서 분리해 본 문서로 이관한다.
+추적성만 남기고 본문 중복은 두지 않는다.
+
+- **4단계 테스트 구조 + 계층별 coverage 목표** (구 ADR-014): `tests/`를
+  unit(DB 없음, Fake repo, hypothesis) / integration(testcontainers PostGIS
+  `postgis/postgis:16-3.5-alpine`, raw SQL EXPLAIN 인덱스 검증) /
+  e2e(httpx.AsyncClient) / fixtures(provider 호출 녹화·재생) 4단계로 분리하고
+  `core/ 90%·infra/ 80%·providers/ 70%·전체 80%`를 목표로 두며, 모든 provider
+  변환 함수는 정상/엣지/실패 ≥3 fixture를 강제한다. kor-travel-geo 테스트 분리
+  패턴 + "촘촘하고 다양하고 꼼꼼하게" 요청이 근거 (§1·§2에서 결정).
+
+- **Coverage 단계적 상향 일정 (Sprint 1→5)** (구 ADR-032): 최종 coverage 목표를
+  한 번에 강제하지 않고 Sprint별 `fail_under`를 점진 상향(전체 50→65→75→80%)해
+  매 PR마다의 협상 비용을 0으로 만들고, 단계 상향 PR은 항상 gap 해소 PR과
+  묶어 red main을 막는다. `dto/`만 line이 적고 validator branch가 곧
+  비즈니스 룰이라 Sprint 2부터 100% branch를 항상 강제한다 (§2 Sprint별 표에서
+  결정).

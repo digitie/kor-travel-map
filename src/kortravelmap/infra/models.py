@@ -112,7 +112,7 @@ metadata: MetaData = Base.metadata
 
 
 # =============================================================================
-# feature.features  (docs/data-model.md §1)
+# feature.features  (docs/architecture/data-model.md §1)
 # =============================================================================
 
 
@@ -325,7 +325,7 @@ class FeatureVersionRow(Base):
 
 
 # =============================================================================
-# provider_sync.source_records  (docs/data-model.md §2)
+# provider_sync.source_records  (docs/architecture/data-model.md §2)
 # =============================================================================
 
 
@@ -387,7 +387,7 @@ class SourceRecordRow(Base):
 
 
 # =============================================================================
-# provider_sync.source_links  (docs/data-model.md §3)
+# provider_sync.source_links  (docs/architecture/data-model.md §3)
 # =============================================================================
 
 
@@ -814,7 +814,7 @@ class CuratedTripmateCopySnapshotRow(Base):
 
 
 # =============================================================================
-# provider_sync.provider_sync_state  (docs/data-model.md §4)
+# provider_sync.provider_sync_state  (docs/architecture/data-model.md §4)
 # =============================================================================
 
 
@@ -907,7 +907,7 @@ class FeatureConsistencyReportRow(Base):
 
 
 # =============================================================================
-# ops.dedup_review_queue  (ADR-016 / docs/data-model.md §9.2)
+# ops.dedup_review_queue  (ADR-016 / docs/architecture/data-model.md §9.2)
 # =============================================================================
 
 

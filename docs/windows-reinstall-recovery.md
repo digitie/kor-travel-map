@@ -64,7 +64,7 @@
 
 - **브랜치**: `feature/T-005-features-repo`
 - **마지막 커밋**: `08205ab` (Preserve v1 work)
-- **현재 상태**: ADR-009 ~ ADR-013 추가, docs/data-model.md 작성 완료.
+- **현재 상태**: ADR-009 ~ ADR-013 추가, docs/architecture/data-model.md 작성 완료.
   코드 작성 단계 진입 전 마지막 도큐먼트 검토 중.
 - **검증**:
   - `git diff --check`
@@ -77,8 +77,8 @@
   - 운영 DB에 직접 ALTER 금지 — Alembic migration 필수
   - data/ 디렉토리에 새 파일 commit 금지
 - **참고 문서**:
-  - `docs/data-model.md` §11 ID 생성 규약
-  - `docs/decisions.md` ADR-009 ~ ADR-013
+  - `docs/architecture/data-model.md` §11 ID 생성 규약
+  - `docs/adr/README.md` ADR-009 ~ ADR-013
   - `docs/test-strategy.md` §4 통합 테스트
 ```
 

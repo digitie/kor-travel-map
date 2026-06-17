@@ -26,7 +26,7 @@ TripMate category code는 ``AABBCCDD`` 형식이다.
 없는 단계는 ``00``으로 채운다. 예를 들어 ``01050100``은
 ``관광 > 자연명소 > 해수욕장``이며 Tier 4 값은 없다.
 
-자세한 사양은 ``docs/category.md`` + ``docs/decisions.md`` ADR-023 / ADR-027.
+자세한 사양은 ``docs/architecture/category.md`` + ``docs/adr/README.md`` ADR-023 / ADR-027.
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ PLACE_CATEGORY_SOURCE: Final = (
     "python-kraddr-base/src/kraddr/base/categories.py (ADR-023 이전) + "
     "ADR-027 LODGING_MOUNTAIN_SHELTER 3건 추가"
 )
-PLACE_CATEGORY_SCHEMA_DOC: Final = "docs/category.md"
+PLACE_CATEGORY_SCHEMA_DOC: Final = "docs/architecture/category.md"
 PLACE_CATEGORY_SYNCED_ON: Final = "2026-05-25"  # ADR-023 + ADR-027 적용 시점
 
 

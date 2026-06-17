@@ -19,7 +19,7 @@ import type { components } from "../src/api/types";
  * (`components["schemas"][...]`)에 바인딩한 typed factory로만 만든다 — 백엔드 DTO가
  * 바뀌면 e2e tsconfig type-check가 깨져 mock-실계약 drift를 컴파일 타임에 잡는다.
  *
- * 에러 응답 본문(500)은 components 스키마가 아니다(`docs/rest-api.md` §1.5: 런타임은
+ * 에러 응답 본문(500)은 components 스키마가 아니다(`docs/architecture/rest-api.md` §1.5: 런타임은
  * RFC7807 problem+json이지만 생성 openapi는 422만 선언). 따라서 literal `{ detail }`을
  * 쓰고, UI가 표면화하는 `client.ts` ApiClientError 메시지의 안정 substring('HTTP 500')과
  * Alert 제목만 단언한다(전체 한국어 메시지를 하드코딩하지 않음).
@@ -210,7 +210,7 @@ test.describe("/admin/poi-cache-targets (edge/depth)", () => {
     await expect(page.getByRole("row", { name: /Page1 target/ })).toHaveCount(0);
     await expect(page.getByText("page 2 ·")).toBeVisible();
 
-    // 두 번째 GET이 keyset cursor='cursor-page-2'를 실었는지(docs/rest-api.md §1.6
+    // 두 번째 GET이 keyset cursor='cursor-page-2'를 실었는지(docs/architecture/rest-api.md §1.6
     // page_size+cursor) — 캡처한 cursor 배열을 poll.
     await expect
       .poll(() => seenCursors.includes("cursor-page-2"))

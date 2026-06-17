@@ -79,11 +79,6 @@ gh pr create --base main --head feat/<topic> --title ... --body ...
   Vim이 열려 멈출 수 있다. 항상 명령 단위 editor 우회 옵션을 붙인다:
   `git.exe -C <worktree> -c core.editor=true rebase --continue`
   ([failure-patterns §B4](./agent-failure-patterns.md)).
-- PR 생성 직후 `mcp-telegram` MCP로 Telegram에 **짧은 작업 요약 + PR 링크**를
-  보낸다. CI 실패 수정처럼 같은 PR을 갱신한 경우에는 새로 완료된 단위 작업과
-  같은 PR 링크를 다시 보낸다. PR이 없는 로컬 셋업/조사 작업이면 "PR 없음"과
-  적용 위치를 명시한다. credential은 각 worktree의 로컬 `.env.mcp-telegram`에만
-  둔다(`docs/codegraph-worktree.md` §6.5).
 
 ## 6. CI green → 머지
 

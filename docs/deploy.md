@@ -80,7 +80,7 @@ hot-swap restore 훈련으로 검증하고, 공유 RustFS는 `kor-travel-docker-
 
 ## 백업
 
-백업 대상은 TripMate와 분리된 `kor_travel_map` app DB, `kor_travel_map_dagster` Dagster
+백업 대상은 PinVi와 분리된 `kor_travel_map` app DB, `kor_travel_map_dagster` Dagster
 metadata DB, RustFS volume의 3종 묶음이다. cold backup은 write path를 멈춘 뒤 실행한다.
 
 ```bash
@@ -116,6 +116,32 @@ Docker compose의 host publish는 기본 `KOR_TRAVEL_MAP_DOCKER_BIND_HOST=127.0.
 localhost에만 열린다. API, Dagster, RustFS console처럼 코드 인증이 없는 운영 surface를
 외부 interface에 열어야 하는 배포는 위 네트워크 보호가 먼저 완료된 뒤
 `KOR_TRAVEL_MAP_DOCKER_BIND_HOST=0.0.0.0`을 명시한다.
+
+## 이관된 결정 (구 ADR)
+
+- 로컬/개발/compose 기본 포트는 API `12701` · Dagster `12702` · admin UI `12705` ·
+  Postgres host `5432`(container도 `5432`, standalone publish 기본값 `15432`) ·
+  의존 대상 kor-travel-geo `12501`/`12505`로 고정한다 — 외부 OpenAPI 경계, Windows
+  Playwright, WSL 서버, Docker compose가 같은 주소를 바라보게 하기 위함이다(구 ADR-047,
+  위 §서비스에서 결정). 추가로 `scripts/stop-fixed-ports.sh`가 기동 전 `12701`/`12705`/
+  `12702` listener를 종료해 stale Next.js/uvicorn/Dagster 프로세스가 검증을 오염시키지
+  않게 한다(`npm run ports:stop`) (구 ADR-047).
+- `.env`의 provider service key 이름은 그대로 두고, `scripts/load-env.sh`와
+  `docker-compose.yml`이 실행용 `KOR_TRAVEL_MAP_API_*`/`NEXT_PUBLIC_*` 이름으로 한 번
+  매핑한다(평문 키는 git 미커밋) — provider repo별 키 이름이 이미 다르므로 표준 env
+  이름으로 매핑하면 운영 실수가 준다(구 ADR-047, 위 §환경변수에서 결정).
+- Docker image는 `linux/amd64`(N150 16GB)와 `linux/arm64`(Odroid M1S)를 같은 tag로
+  buildx 빌드하고, DB HA(streaming replication·자동 failover·VIP/DNS 전환·RustFS 다중
+  노드 복제)는 범위 밖으로 두며 운영 DB 복구성은 cold backup/restore와 hot-swap restore
+  훈련으로 확인한다 — 같은 manifest여야 두 노드 배포 절차가 갈라지지 않고, DB HA는 운영
+  토폴로지 확정 후 별도로 다루는 편이 낫기 때문이다(구 ADR-056, 위 §T-108에서 결정).
+- admin UI(`kor-travel-map-admin`)는 디버그 전용을 넘어 프로덕션 admin/유지보수 운영
+  surface로 확장하되, 인증 로직은 코드에 넣지 않고 네트워크 계층(Cloudflare Tunnel/SSO/
+  IP allowlist + bind host 기본 `127.0.0.1`)에서만 보호한다 — 별도 admin 앱을 만들면
+  인증·DB·디버깅이 중복되고, 인증을 코드에서 떼면 인프라 보안 정책이 바뀌어도 코드를
+  고칠 필요가 없기 때문이다(구 ADR-035, 위 §보안 경계에서 결정). 프로덕션에서 노출되는
+  라우터는 prefix를 `/admin/...`·`/ops/...`(운영)와 `/debug/...`(디버그)로 분리하고,
+  운영 라우터는 읽기 우선 + 쓰기는 explicit confirmation을 요구한다(구 ADR-035).
 
 ## 아직 남은 운영 확장
 

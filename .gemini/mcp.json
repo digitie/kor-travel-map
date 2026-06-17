@@ -27,13 +27,6 @@
       ],
       "cwd": "F:\\dev\\kor-travel-map-antigravity"
     },
-    "mcp-telegram": {
-      "command": "C:\\Python314\\python.exe",
-      "args": [
-        "scripts\\mcp_telegram_start.py"
-      ],
-      "cwd": "F:\\dev\\kor-travel-map-antigravity"
-    },
     "filesystem": {
       "command": "npx",
       "args": [

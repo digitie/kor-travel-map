@@ -1,4 +1,5 @@
-"""영업시간 DTO (``docs/feature-opening-hours.md`` + ``docs/feature-model.md §10``).
+"""영업시간 DTO (``docs/architecture/feature-opening-hours.md`` +
+``docs/architecture/feature-model.md §10``).
 
 Google Places 호환 형태:
 - ``day`` 0=Sunday ~ 6=Saturday

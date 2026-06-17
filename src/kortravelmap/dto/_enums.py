@@ -22,7 +22,7 @@ __all__ = [
 
 
 class FeatureKind(StrEnum):
-    """Feature 종류 7종 (``docs/feature-model.md §1``)."""
+    """Feature 종류 7종 (``docs/architecture/feature-model.md §1``)."""
 
     PLACE = "place"
     EVENT = "event"
@@ -34,7 +34,7 @@ class FeatureKind(StrEnum):
 
 
 class FeatureStatus(StrEnum):
-    """Feature 상태 (``docs/feature-model.md §2``)."""
+    """Feature 상태 (``docs/architecture/feature-model.md §2``)."""
 
     DRAFT = "draft"
     ACTIVE = "active"
@@ -45,7 +45,7 @@ class FeatureStatus(StrEnum):
 
 
 class SourceRole(StrEnum):
-    """SourceRecord/SourceLink role (``docs/feature-model.md §3``)."""
+    """SourceRecord/SourceLink role (``docs/architecture/feature-model.md §3``)."""
 
     PRIMARY = "primary"
     BASE_ADDRESS = "base_address"
@@ -60,7 +60,7 @@ class SourceRole(StrEnum):
 class WeatherDomain(StrEnum):
     """``WeatherValue.weather_domain`` — provider별 dataset 식별자.
 
-    ``docs/weather-feature-normalization.md §3`` provider별 1차 매핑 표 참조.
+    ``docs/etl/weather-feature-normalization.md §3`` provider별 1차 매핑 표 참조.
     표에 없는 신규 dataset은 새 enum 값 + ADR + 본 문서 갱신.
     """
 
@@ -126,7 +126,7 @@ class TimelineBucket(StrEnum):
 class PriceDomain(StrEnum):
     """``PriceValue.price_domain`` — provider별 가격 dataset 식별자.
 
-    신규 dataset은 새 enum 값 + ADR + ``docs/data-model.md`` 갱신.
+    신규 dataset은 새 enum 값 + ADR + ``docs/architecture/data-model.md`` 갱신.
     """
 
     # 유가 (`python-opinet-api`)

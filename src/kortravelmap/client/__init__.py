@@ -1391,7 +1391,7 @@ class AsyncKorTravelMapClient:
         """활성(미삭제 + update_enabled) POI cache target ``(lon, lat)`` 목록 (read).
 
         KMA weather 적재 대상 격자 산출용 — 외부 시스템이 등록한 관심 지점이
-        1차 weather 대상이다(`docs/kma-weather-etl.md` §3 옵션 B).
+        1차 weather 대상이다(`docs/etl/kma-weather-etl.md` §3 옵션 B).
         """
         async with self._session_factory() as session:
             return await repo_list_active_target_coords(session)

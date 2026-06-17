@@ -2,6 +2,34 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-17 (claude) — 문서 구조 정리 (ADR/ETL/architecture 디렉토리화 + entry 문서 슬림 + tasks 3분할 + Telegram MCP 제거)
+
+문서 트리를 용도별로 재배치하고 entry 문서의 군더더기/중복을 제거했다(단일 PR).
+
+- **ADR 디렉토리화**: `docs/decisions.md`(3,526줄, 59 ADR)를 파일당 1개 `docs/adr/NNN-<slug>.md`(53개)
+  + 색인 `docs/adr/README.md`로 분리. 순수 개발 규칙(금지·프로세스)이던 6건(ADR-006/012/019/021/030/039)은
+  ADR 파일을 만들지 않고 [`SKILL.md` §4](../SKILL.md)로 이전(원 맥락은 git history 보존). superseded 3건
+  (003/029/049)은 기록 유지. `decisions.md`는 adr/로 가는 redirect stub. `docs/decisions.md` 경로 참조
+  40건을 `docs/adr/README.md`로 재배선.
+- **ETL 디렉토리화**: `*-etl.md` 15 + normalization 2(weather-feature-normalization·place-phone-enrichment)를
+  `docs/etl/`로 이동, 문서·소스 docstring 경로참조 106건 갱신.
+- **architecture 디렉토리화**: 핵심 설계 + 계약/패키징 19개(architecture·data-model·postgres-schema·
+  feature-model·dagster-boundary·provider-contract·performance·category·rest-api·openapi-admin-contract·
+  backend-package·debug-ui-package·public-views-api·tripmate-rest-api·regions-within-radius·feature-files-rustfs·
+  feature-opening-hours·feature-db-initialization·address-geocoding)를 `docs/architecture/`로 이동, 경로참조
+  320건 갱신 + 이동 파일 내부 상대링크 8건 `../` 보정.
+- **entry 문서 슬림**(중복은 단일 정본으로 포인터화): CLAUDE 147→85, AGENTS 503→194, README 306→264,
+  SKILL 323→173줄. 단일 정본 = 식별자 table→AGENTS, 개발환경→dev-environment, codegraph/worktree→
+  codegraph-worktree, 26 DO-NOT 룰→SKILL §4(룰 27 codegraph 영향평가 추가), 진입순서→CLAUDE §3,
+  체크리스트→AGENTS. ADR 대량 나열 삭제, v1 언급은 파일당 1줄로 축약.
+- **tasks 3분할**: 작성·유지 규약을 새 [`docs/tasks-rule.md`](tasks-rule.md)로 분리, `tasks.md`는 백로그만
+  (인덱스 `[ ]` 일관화·상태 스냅샷 제거), `tasks-done.md` 유지. `agent-guide.md §6`는 tasks-rule 포인터로.
+- **Telegram MCP 제거**: 5개 MCP 설정(opencode/antigravity/.gemini/claude.json·.codex/config.toml)에서
+  `mcp-telegram` 항목 + 런처 `scripts/mcp_telegram_start.py` 삭제, 관련 문서 섹션(codegraph-worktree §6.5·
+  agent-workflow PR-알림) 제거, 일반 alert-sink 예시에서 Telegram 표기 제거.
+- **검증**: 내부 md 링크 213개 0 broken(file:// 1건 false-positive 제외), live 파일 stale 경로참조 0,
+  touched .py 47개 py_compile OK, 5개 MCP JSON 파싱 OK.
+
 ## 2026-06-17 (claude) — admin e2e 커버리지 종합 확장 Wave 3(LOW 6페이지) + 실버그 1건 수정 + 종결
 
 3-wave 종합 확장 마무리. LOW 우선순위 6페이지에 route-mock depth-spec 6종(+32 시나리오) 추가.
@@ -348,7 +376,7 @@ concierge·geo 계약을 공급자 측 origin/main으로 실측 교차확인(che
   `{items,next_cursor,has_more}`, `docs/feature-export-api.md`) + geo `/v2/{geocode,reverse}`
   @12501 모두 정합.
 - **cross-repo 발견(공급자 측, 본 repo 비대상)**: concierge `docs/architecture.md:21`가
-  map을 옛 `python-krtour-map`으로 표기 → concierge 후속. **TripMate**(9021/9022 +
+  map을 옛 이름으로 표기 → concierge 후속. **TripMate**(9021/9022 +
   batch/cursor)는 로컬 미체크아웃 → quarterly cross-repo audit로 위임.
 - 본 repo 코드/문서 수정 없음(integration-map은 #438에서 이미 정합).
 
@@ -368,7 +396,7 @@ ground truth와 대조. 정본 리포트 `docs/reports/docs-consistency-sweep-20
 - **MED 3**: `sprints/README.md` Sprint5/anti-drift note T-225 stale(T-DA-19),
   `SKILL.md:298` "ADR 001~049/050"→"001~056/057"(T-DA-20), `docker-app.md` offline
   bucket `krtour-uploads`→`kor-travel-map-uploads`(`settings.py:97`, T-DA-22).
-- **LOW 2**: spec docx 죽은 참조 → `git mv python-krtour-map-spec.docx
+- **LOW 2**: spec docx 죽은 참조 → `git mv kor-travel-map-spec.docx
   kor-travel-map-spec.docx`(DA-D-05=A, T-DA-23); `AGENTS.md` export_openapi.py 경로를
   `packages/kor-travel-map-api/scripts/`로(T-DA-24).
 - **INFO**: `decisions.md` ADR-035에 ADR-045 부분 supersede 역참조 한 줄 추가(역사

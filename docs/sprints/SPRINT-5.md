@@ -2,7 +2,7 @@
 
 > **상태**: 🟢 진행 중 (최종 운영 진입 task 상세화, 2026-06-07). **ADR-045 독립
 > 프로그램화**(Docker compose + admin-first OpenAPI + 독립 Dagster)는 핵심 기반 구현을
-> 대부분 마쳤고, 남은 범위는 T-RV-04b-opinet, T-212b/d/e, T-210 TripMate 연계 정리,
+> 대부분 마쳤고, 남은 범위는 T-RV-04b-opinet, T-212b/d/e, T-210 PinVi 연계 정리,
 > Sprint 5 closure다.
 >
 > **목적**: ADR-034 9단계의 ⑧⑨ — 휴양림/수목원 (`python-krforest-api`) +
@@ -22,10 +22,10 @@
 ## 2. 산출물
 
 > **ADR-045 독립 프로그램화 트랙(Sprint 5 핵심)**: Docker compose + admin-first
-> OpenAPI + 독립 Dagster + TripMate REST 연계. **세분 실행 계획은
+> OpenAPI + 독립 Dagster + PinVi REST 연계. **세분 실행 계획은
 > `docs/adr045-standalone-plan.md`**(T-205~T-210), 의사결정 결과는
-> `docs/adr045-open-decisions.md`(D-1~D-16 전부 결정 완료), TripMate REST 계약은
-> `docs/tripmate-rest-api.md`. 아래 §2.1+ provider 적재는 ADR-045 Dagster asset
+> `docs/adr045-open-decisions.md`(D-1~D-16 전부 결정 완료), PinVi REST 계약은
+> `docs/architecture/rest-api.md`. 아래 §2.1+ provider 적재는 ADR-045 Dagster asset
 > (kor-travel-map 소유)로 운영 전환된다(T-208c).
 
 ### 2.1 Provider ⑧ — 휴양림/수목원 (`python-krforest-api`)
@@ -81,7 +81,7 @@
   삭제 feature 연결을 WARN으로 보고한다. dry-run report는
   `ktmctl consistency-report` CLI와
   `docs/reports/t-201b-phase2-dry-run-report-2026-06-06.md`로 산출한다.
-- **Dagster 게이트 적용** (`docs/dagster-boundary.md §12`):
+- **Dagster 게이트 적용** (`docs/architecture/dagster-boundary.md §12`):
   - root → child 적재 → `consistency_check` 실행
   - `severity_max != ERROR` 시 `mv_refresh strategy='swap'`
   - ERROR 시 알림 + swap 차단
@@ -99,7 +99,7 @@
   OK/WARN 뒤 `mv_refresh` 단계는 `skipped:no_materialized_views`로 명시 기록한다.
 - phase별 중단/재개 UI/API(`PLAN_ONLY=1` preflight 포함)는 T-212 admin 전체점검에서
   운영 UX와 함께 보강한다.
-- kor-travel-map Dagster asset 작성. TripMate는 OpenAPI로 update request를 생성하고,
+- kor-travel-map Dagster asset 작성. PinVi는 OpenAPI로 update request를 생성하고,
   provider 적재 asset/worker는 kor-travel-map이 소유한다(ADR-045/046).
 
 ### 2.5 T-202 — pre-commit hook 정착
@@ -132,20 +132,20 @@
 
 ### 2.8 T-101 MV 시범 도입 (선택)
 
-- `docs/performance.md §9.3` 사양 — read >> write 정성 확정(2026-06-10), P99는 T-212e
+- `docs/architecture/performance.md §9.3` 사양 — read >> write 정성 확정(2026-06-10), P99는 T-212e
 - **클러스터 rollup MV `mv_feature_cluster_counts`** 1건만 시범 → 1주 운영 + EXPLAIN diff
   (구 예시 `mv_features_place_with_detail`은 ADR-018 단일 JSONB detail로 폐기)
 - 결과에 따라 ADR 신설 가능성 (MV 카탈로그 + 클러스터 exact-viewport vs region-total 결정)
 
 ### 2.9 T-102 pg_prewarm 운영 검토 (선택)
 
-- `docs/performance.md §9.5` 사양 — P99 SLO 측정 후 도입 검토
+- `docs/architecture/performance.md §9.5` 사양 — P99 SLO 측정 후 도입 검토
 - 운영 환경 결정 사항
 
 ### 2.10 KNPS `visitor_statistics` timeseries 처리 (연기 dataset)
 
 - Sprint 3에서 미루기로 한 경우 Sprint 5에 timeseries 테이블 설계 + 적재
-- 본 라이브러리 범위 외라면 raw 보존만 → TripMate 분석 도구로 위임
+- 본 라이브러리 범위 외라면 raw 보존만 → PinVi 분석 도구로 위임
 
 ### 2.11 후속 ADR 검토
 
@@ -153,7 +153,7 @@
   - 신규 provider 추가 절차 표준 (체크리스트)
   - `@kor-travel-map/map-marker-react` npm 게시 자동화 (release / version sync)
   - `core.feature_consistency_reports` Phase 2 알림 sink
-    (Slack/Telegram/Sentry)
+    (Slack/Sentry)
   - Sprint 2 SHP/GeoJSON parsing 위치 결정 정식화
   - MV 도입 결정 (T-101)
   - pg_prewarm 도입 결정 (T-102)
@@ -171,7 +171,7 @@
 
 ## 4. 운영 진입 게이트 (DoD of Sprint 5)
 
-운영 진입 = TripMate가 본 라이브러리를 production에서 사용. 다음 모두
+운영 진입 = PinVi가 본 라이브러리를 production에서 사용. 다음 모두
 충족:
 
 - [ ] 14+ provider 모두 적재 안정 (실 fixture 통합 테스트 green)
@@ -179,7 +179,7 @@
 - [ ] T-201b~T-204 모두 완료 (T-200은 완료)
 - [ ] Coverage bar 80% 유지 (회귀 0)
 - [ ] dedup_review_queue 운영 안정 (운영자 검토 routine)
-- [ ] `ops.api_call_log` Grafana 패널 가동 (TripMate 측)
+- [ ] `ops.api_call_log` Grafana 패널 가동 (PinVi 측)
 - [ ] 디버그 UI 모든 라우터 + frontend 페이지 동작
 - [ ] AGENTS.md / SKILL.md / CLAUDE.md / 모든 ADR이 운영 단계 사용자
       대상으로 갱신
@@ -204,7 +204,7 @@
 4. **T-212e-live-full-reload-final-verification** — provider full reload, offline upload,
    kor-travel-geo 보강, consistency gate, API smoke, Playwright, backup/restore smoke를 한
    리포트로 묶는다.
-5. **T-210-tripmate-integration-cleanup** — TripMate 문서/ETL skeleton/backend client/
+5. **T-210-tripmate-integration-cleanup** — PinVi 문서/ETL skeleton/backend client/
    frontend generated type을 ADR-045 OpenAPI 모델로 정리한다.
 6. **Sprint 5 closure** — 본 §4 체크리스트를 실제 결과 기준으로 `[x]` 갱신하고,
    `journal`/`resume`/agent entry 문서를 운영 단계로 전환한다.
@@ -213,7 +213,7 @@
 
 - streaming ETL (T-103) — v2 1차 범위 밖
 - 신규 provider (ADR-035+ 검토 후)
-- TripMate `apps/web` 측 작업 (T-019, 본 저장소 외)
+- PinVi `apps/web` 측 작업 (T-019, 본 저장소 외)
 
 ## 6. 위험 / 차단 사유
 
@@ -222,11 +222,11 @@
   조정 PR (필요 시 ADR-035로 supersede).
 - **Phase 2 Dagster 게이트 첫 운영**: 첫 batch가 F4~F8 위반으로 일제히
   fail 가능 → dry-run report 후 점진 enable.
-- **T-200 Dagster batch DAG**: 본 라이브러리는 helper만 — TripMate 측
+- **T-200 Dagster batch DAG**: 본 라이브러리는 helper만 — PinVi 측
   Dagster asset 작성 작업이 본 Sprint 외 일정 추가 risk.
 - **운영 진입 일정**: Sprint 5 = v2 1차 최종 sprint. 5개 sprint가 모두
   안정 종료해야 운영 진입. 일정 risk 크면 운영 진입을 PoC 단계로 분할
-  (예: TripMate beta).
+  (예: PinVi beta).
 
 ## 7. 종료 조건 = 운영 진입
 

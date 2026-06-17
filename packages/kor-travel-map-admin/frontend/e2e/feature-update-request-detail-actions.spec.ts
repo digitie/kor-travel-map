@@ -97,7 +97,7 @@ type MockOptions = {
   transitionAfterDetailCalls?: number;
   /** cancel/run-now POST가 반환할 HTTP status(>=400이면 mutation 실패 분기). */
   mutationStatus?: number;
-  /** mutation 실패 시 반환할 problem+json body(docs/rest-api.md §error). */
+  /** mutation 실패 시 반환할 problem+json body(docs/architecture/rest-api.md §error). */
   mutationError?: {
     status: number;
     detail: string;

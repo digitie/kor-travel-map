@@ -43,7 +43,7 @@ __all__ = [
 ]
 
 
-# ── 표준 notice_type 상수 (docs/notice-feature-etl.md §3) ────────────────
+# ── 표준 notice_type 상수 (docs/etl/notice-feature-etl.md §3) ────────────────
 
 NOTICE_TYPE_TRAFFIC: Final[str] = "traffic"
 NOTICE_TYPE_TRAFFIC_ACCIDENT: Final[str] = "traffic_accident"
@@ -95,7 +95,7 @@ _ALIAS_MAP: Final[dict[str, str]] = {
     "폭염": NOTICE_TYPE_HEAT_WAVE,
     "폭염주의보": NOTICE_TYPE_HEAT_WAVE,
     # KMA 기상특보 13종 중 전용 canonical이 없는 종류 → generic weather_alert.
-    # (payload/title에 원문 특보명 보존. docs/notice-feature-etl.md §3 / ADR-027.)
+    # (payload/title에 원문 특보명 보존. docs/etl/notice-feature-etl.md §3 / ADR-027.)
     "강풍": NOTICE_TYPE_WEATHER_ALERT,
     "풍랑": NOTICE_TYPE_WEATHER_ALERT,
     "태풍": NOTICE_TYPE_WEATHER_ALERT,
@@ -158,7 +158,7 @@ def normalize_notice_type(value: str) -> str:
     raise ValueError(
         f"unknown notice_type: {value!r}. "
         f"NOTICE_TYPES 중 하나이거나 한/영 alias여야 함 "
-        f"(docs/notice-feature-etl.md §3, ADR-027 generic 명명)."
+        f"(docs/etl/notice-feature-etl.md §3, ADR-027 generic 명명)."
     )
 
 
@@ -166,7 +166,7 @@ def normalize_notice_type(value: str) -> str:
 
 
 class NoticeDetail(BaseModel):
-    """Feature.kind='notice'의 detail (docs/feature-model.md §7).
+    """Feature.kind='notice'의 detail (docs/architecture/feature-model.md §7).
 
     ``notice_type``은 ``normalize_notice_type``으로 자동 정규화 (validator).
     severity 0~5 (0=정보 / 5=즉시 대응).

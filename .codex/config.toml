@@ -4,12 +4,6 @@ command = "codegraph"
 args = ["serve", "--mcp", "--no-watch"]
 cwd = "/mnt/f/dev/kor-travel-map-codex"
 
-[mcp_servers.mcp-telegram]
-enabled = true
-command = "C:\\Python314\\python.exe"
-args = ["scripts\\mcp_telegram_start.py"]
-cwd = "F:\\dev\\kor-travel-map-codex"
-
 [mcp_servers.playwright]
 command = "npx"
 args = ["-y", "@modelcontextprotocol/server-playwright"]

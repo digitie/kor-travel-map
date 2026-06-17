@@ -5,7 +5,7 @@ Revises: 0003_consistency_reports
 Create Date: 2026-05-29
 
 마이그레이션 0002의 ``ck_source_links_role`` CHECK가 DTO ``SourceRole`` enum
-(= ``docs/feature-model.md §3`` 정본)과 불일치했다:
+(= ``docs/architecture/feature-model.md §3`` 정본)과 불일치했다:
 
 - **0002 CHECK (오류)**: primary / enrichment / **geocoded** / **phone** / media /
   weather_context / **observation** / **external_link**
@@ -20,7 +20,7 @@ Create Date: 2026-05-29
 기존 행 영향: 현재까지 적재 코드는 ``primary`` / ``enrichment``만 emit하므로
 (둘 다 양쪽 CHECK에 공통) 기존 데이터는 새 CHECK를 위반하지 않는다.
 
-ADR 참조: ADR-018(DTO 계약) / ``docs/feature-model.md §3``.
+ADR 참조: ADR-018(DTO 계약) / ``docs/architecture/feature-model.md §3``.
 """
 
 from __future__ import annotations

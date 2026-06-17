@@ -26,11 +26,11 @@
   `kortravelmap.core.address`를 사용한다.
 - category/maki/icon 매핑은 `kortravelmap.category`와
   `@kor-travel-map/map-marker-react`를 사용한다.
-- 과거 TripMate 직접 import 예시는 ADR-045/ADR-046 이후 폐기됐다. TripMate는
+- 과거 PinVi 직접 import 예시는 ADR-045/ADR-046 이후 폐기됐다. PinVi는
   OpenAPI로 kor-travel-map을 호출한다.
 
 ## 관련 문서
 
-- `docs/decisions.md` ADR-041 — kraddr-base 코드 흡수와 `PlaceCoordinate` 제외.
-- `docs/address-geocoding.md` — kor-travel-geo REST v2와 `Address`/`Coordinate` 보강.
-- `docs/category.md` — category 모듈 이전 결과.
+- `docs/adr/README.md` ADR-041 — kraddr-base 코드 흡수와 `PlaceCoordinate` 제외.
+- `docs/architecture/address-geocoding.md` — kor-travel-geo REST v2와 `Address`/`Coordinate` 보강.
+- `docs/architecture/category.md` — category 모듈 이전 결과.

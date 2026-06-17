@@ -1,5 +1,13 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-17 claude 작업 메모 — 문서 구조 정리 (PR 대기)
+
+문서 트리 재배치 + entry 슬림(단일 PR, 코드 동작 무변경): ADR `docs/decisions.md`→`docs/adr/NNN-*.md`(53)
++ 색인, 개발규칙 6건은 SKILL §4로 이전; ETL 17개→`docs/etl/`; architecture/계약/패키징 19개→
+`docs/architecture/`; CLAUDE/AGENTS/README/SKILL 중복 제거·단일정본 포인터화·v1 1줄; tasks 작성규약을
+`docs/tasks-rule.md`로 분리; Telegram MCP(설정 5 + 런처 + 문서) 제거. 내부 링크/py_compile/JSON 검증 통과.
+정본 색인은 [`docs/adr/README.md`](adr/README.md). **다음 한 작업은 아래 T-229-buildx로 변동 없음.**
+
 ## 2026-06-17 claude 작업 메모 — admin UI TanStack 테이블 이행 + #452 후속 종결
 
 - **PR #453 머지**: issue #452(Claude Code PR #437~#450 리뷰 취합)의 잔여 조치 일괄 반영 — KHOA
@@ -43,8 +51,8 @@ T-229(T-225가 분리한 라이브 검증 후속)를 종결했다. 정본 리포
   worktree 정리(메인 FF + review 잡파일 104개 제거, claude stray 빌드 산출물 제거)도 완료.
 
 **다음 한 작업**: 본 저장소 즉시 실행 가능한 큰 트랙 없음. 잔여는 **arm64 buildx
-배포 시점 검증**(GITHUB_TOKEN 필요)뿐. (운영 외 작업: GitHub repo rename
-`python-krtour-map`→`kor-travel-map` 진행 중.)
+배포 시점 검증**(GITHUB_TOKEN 필요)뿐. (운영 외 작업: GitHub repo가
+`kor-travel-map`으로 rename됨.)
 
 ## 2026-06-13 claude 작업 메모 — T-225 T-212e closure 재검증 완료
 
@@ -101,13 +109,13 @@ Sprint 5 운영 진입 마무리다. 핵심 구현과 운영 표면은 대부분
   consistency report `99159eea` OK, offline upload 3포맷 + DELETE lifecycle, Windows
   Playwright 33/33, API smoke 17/17, backup/restore smoke.
 - `T-221` admin UI/UX 연결성, `T-222` 공개 해수욕장/축제 뷰 API, `T-223`
-  curated feature/TripMate import, `T-224` concierge provider 경계 정리는 완료됐다.
+  curated feature/PinVi import, `T-224` concierge provider 경계 정리는 완료됐다.
 - `T-226` 패키지/runtime identity clean cut, `T-227` Prometheus 메트릭, `T-228`
   API/backend와 admin frontend 패키지 분리도 완료됐다.
 - `T-225`(T-212e closure 재검증, 2026-06-13)·`T-229`(curated 오버레이 + post-reload
   표면 라이브 검증, 2026-06-14)는 완료됐다. 본 저장소에서 즉시 실행 가능한 큰 트랙은
   없고, 유일 잔여는 **arm64 multi-arch buildx 배포 검증**(`T-229-buildx`, `GITHUB_TOKEN`이
-  주입된 배포 환경 필요)뿐이다. TripMate 쪽 작업은 외부 추적으로만 남긴다.
+  주입된 배포 환경 필요)뿐이다. PinVi 쪽 작업은 외부 추적으로만 남긴다.
 
 ## 다음 한 작업
 
@@ -141,10 +149,10 @@ T-108/ADR-056의 arm64 multi-arch buildx 이미지 build+boot smoke다.
 
 외부 추적:
 
-- `T-019` — TripMate Kakao Maps → maplibre-vworld 교체와 SPEC supersede.
-- `T-210b` — TripMate 문서 supersede.
-- `T-210c` — TripMate `apps/etl` 레거시 Dagster 이관/삭제.
-- `T-210d` — TripMate httpx OpenAPI client 신규.
+- `T-019` — PinVi Kakao Maps → maplibre-vworld 교체와 SPEC supersede.
+- `T-210b` — PinVi 문서 supersede.
+- `T-210c` — PinVi `apps/etl` 레거시 Dagster 이관/삭제.
+- `T-210d` — PinVi httpx OpenAPI client 신규.
 
 보류:
 
@@ -166,7 +174,7 @@ T-108/ADR-056의 arm64 multi-arch buildx 이미지 build+boot smoke다.
 - 로컬 고정 포트(docker-manager 기준): API `12701`, admin UI `12705`,
   Dagster `12702`, RustFS S3 `12101`, RustFS console `12105`,
   kor-travel-geo API `12501`.
-- TripMate 연동: OpenAPI HTTP. 직접 import와 DB 직접 접근 없음.
+- PinVi 연동: OpenAPI HTTP. 직접 import와 DB 직접 접근 없음.
 
 ## 참고 위치
 
@@ -174,5 +182,5 @@ T-108/ADR-056의 arm64 multi-arch buildx 이미지 build+boot smoke다.
 - 완료/아카이브: `docs/tasks-done.md`.
 - 작업 일지: `docs/journal.md`.
 - Sprint 계획: `docs/sprints/`.
-- REST 단일 정본: `docs/rest-api.md`.
+- REST 단일 정본: `docs/architecture/rest-api.md`.
 - Cross-repo 정본: `docs/integration-map.md`.

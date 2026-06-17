@@ -133,10 +133,10 @@ festival은 sub-category 없이 ``EventDetail.event_kind='festival'``에서 분�
 """
 
 FESTIVAL_MARKER_ICON: Final[str] = "star"
-"""Maki icon name. ``docs/event-feature-etl.md §4`` 표 참조."""
+"""Maki icon name. ``docs/etl/event-feature-etl.md §4`` 표 참조."""
 
 FESTIVAL_MARKER_COLOR: Final[str] = "P-11"
-"""축제 marker color palette (자홍 계열). ``docs/event-feature-etl.md §4`` 표."""
+"""축제 marker color palette (자홍 계열). ``docs/etl/event-feature-etl.md §4`` 표."""
 
 STANDARD_DATA_PROVIDER_NAME: Final[str] = _PROVIDER_NAME
 """``data.go.kr-standard`` canonical provider name 공개 alias(asset/fetcher 참조용)."""
@@ -176,7 +176,7 @@ class CulturalFestivalItem(Protocol):
     본 dataset에는 안정 관리번호 컬럼이 없다 — 자연키는 ``name::address``
     파생 (ADR-009 ``::``, ``_museum_to_bundle`` fallback과 동일 패턴).
 
-    원천 한국어 컬럼 → 본 Protocol 필드 매핑은 ``docs/event-feature-etl.md
+    원천 한국어 컬럼 → 본 Protocol 필드 매핑은 ``docs/etl/event-feature-etl.md
     §4`` 표 참조.
 
     Notes

@@ -9,7 +9,7 @@
 `docs/reports/kma-mcst-provider-plan-2026-06-11.md` §2.3).
 
 같은 base 중복 호출 회피는 ``provider_sync_state`` cursor(``base_datetime``)로
-한다(`docs/kma-weather-etl.md` §6). KMA 호출 실패 시 cursor를 전진시키지 않고
+한다(`docs/etl/kma-weather-etl.md` §6). KMA 호출 실패 시 cursor를 전진시키지 않고
 ``record_sync_failure``만 남긴다(신선도 대시보드 T-217g 신호).
 
 provider client는 ADR-006대로 wrapper 없이 직접 사용한다. ``KmaClient``의

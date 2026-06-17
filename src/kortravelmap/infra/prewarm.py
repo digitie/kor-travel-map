@@ -10,7 +10,7 @@ autoprewarm background worker(서버 `shared_preload_libraries='pg_prewarm'` con
 - **opt-in / best-effort**: 확장이 없으면(`pg_prewarm` 미설치) no-op으로 `{}`를 돌려준다.
   존재하지 않는 relation은 `to_regclass`로 미리 걸러 조용히 건너뛴다(이름 drift에 견고).
 - T-102는 도입 조건(명시적 P99 SLO + shared_buffers가 hot 데이터 fit)이 충족될 때 켠다
-  (`docs/performance.md §9.5`). 본 헬퍼는 그 조건에서 부팅 훅/CLI/Dagster가 호출한다.
+  (`docs/architecture/performance.md §9.5`). 본 헬퍼는 그 조건에서 부팅 훅/CLI/Dagster가 호출한다.
 """
 
 from __future__ import annotations

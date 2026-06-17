@@ -34,7 +34,7 @@ async function fulfillJson(route: Route, body: unknown, status = 200) {
 }
 
 function listMeta(pageSize: number, requestId: string): Meta {
-  // docs/rest-api.md §1.4/§3.3 — cursor 목록의 next_cursor는 항상 존재, null=소진.
+  // docs/architecture/rest-api.md §1.4/§3.3 — cursor 목록의 next_cursor는 항상 존재, null=소진.
   const page: PageMeta = { next_cursor: null, page_size: pageSize, total: null };
   return { duration_ms: 1, page, request_id: requestId };
 }

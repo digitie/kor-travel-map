@@ -27,7 +27,7 @@
 | T-DA-20 | MED | `SKILL.md:298` 진입 순서 "ADR 001~049 / 다음 050" (7건 stale, 같은 파일 §1 표와 모순) | `decisions.md` 최상위 = ADR-056 / 다음 057 | ✅ 적용 |
 | T-DA-21 | HIGH | `integration-map.md` concierge "API 12401 · web 9042" — **12401은 docker-manager Prometheus** (host 포트 1개를 2시스템에 배정) | concierge = API 12601 / MCP 12602 / web 12605 | ✅ 적용 |
 | T-DA-22 | MED | `runbooks/docker-app.md:55` offline upload bucket 기본 "`krtour-uploads`" (같은 파일 L189와 모순) | `settings.py:97` 기본 `kor-travel-map-uploads` | ✅ 적용 |
-| T-DA-23 | LOW | spec docx 죽은 참조 — CLAUDE/README/SKILL이 `kor-travel-map-spec.docx` 인용하나 추적 파일은 구명 | 추적 = `python-krtour-map-spec.docx` (ADR-054 clean-cut에서 파일만 누락) | ✅ rename (DA-D-05=A) |
+| T-DA-23 | LOW | spec docx 죽은 참조 — CLAUDE/README/SKILL이 `kor-travel-map-spec.docx` 인용하나 추적 파일은 구명 | 추적 = `kor-travel-map-spec.docx` (ADR-054 clean-cut에서 파일만 누락) | ✅ rename (DA-D-05=A) |
 | T-DA-24 | LOW | `AGENTS.md:411` 체크리스트 `scripts/export_openapi.py` 경로 stale | ADR-055 분리 후 `packages/kor-travel-map-api/scripts/export_openapi.py` | ✅ 적용 |
 | T-DA-25 | INFO | `decisions.md` ADR-035 본문에 ADR-045 부분 supersede **역참조 없음** (003/029는 있음) | 상태줄에 한 줄 교차참조 추가 | ✅ 적용 |
 | T-DA-26 | INFO | ADR 원장 무결성 스캔 — 001~056 연속, 갭/중복 없음 (028/029 물리 순서만 어긋남, 갭 아님) | 조치 불필요(혼동 방지 기록) | — |
@@ -79,9 +79,9 @@
 ## 4. LOW (역사 보존 원칙과 충돌 없는 선)
 
 - [x] **T-DA-23** — spec docx 죽은 참조. CLAUDE.md:70 / README.md:30 / SKILL.md:320이
-  `kor-travel-map-spec.docx`를 인용하나 `git ls-files '*.docx'` = `python-krtour-map-spec.docx`
+  `kor-travel-map-spec.docx`를 인용하나 `git ls-files '*.docx'` = `kor-travel-map-spec.docx`
   단 하나(인용명 0매치). ADR-054가 `kor-travel-map`을 정체성으로 박았으므로 파일
-  rename이 intent-정합. **DA-D-05 = (A) rename 채택** → `git mv python-krtour-map-spec.docx
+  rename이 intent-정합. **DA-D-05 = (A) rename 채택** → `git mv kor-travel-map-spec.docx
   kor-travel-map-spec.docx`(3개 참조 일괄 해소, git 이력 보존).
 - [x] **T-DA-24** — `AGENTS.md:411` `scripts/export_openapi.py` 경로 stale. ADR-055 API
   패키지 분리 후 실제 위치 = `packages/kor-travel-map-api/scripts/export_openapi.py`
@@ -139,7 +139,7 @@
 
 ## 7. 의사결정 (DA-D)
 
-- **DA-D-05 (확정, 2026-06-14) = (A) 파일 rename** — `python-krtour-map-spec.docx` →
+- **DA-D-05 (확정, 2026-06-14) = (A) 파일 rename** — `kor-travel-map-spec.docx` →
   `kor-travel-map-spec.docx`(T-DA-23). 3개 entry 문서가 이미 쓰는 canonical 이름 +
   ADR-054 정체성에 맞춤. 본 PR 반영.
 - **DA-D-06 (참고) — concierge 포트 발행 전 maintainer 교차확인 권장(T-DA-21).**

@@ -1,7 +1,7 @@
 # debug-ui-admin-workflows.md - 디버그 UI + Admin 운영 콘솔 구현 사양
 
 본 문서는 `kor-travel-map-admin`를 **디버그 UI이자 admin/운영 콘솔**로 구현하기
-위한 상세 사양이다. `docs/debug-ui-package.md`는 패키지 경계와 라우터 정책의
+위한 상세 사양이다. `docs/architecture/debug-ui-package.md`는 패키지 경계와 라우터 정책의
 기준이고, 본 문서는 실제 화면, API, 진행 상태, 검토 흐름을 AI agent가 바로
 구현할 수 있도록 풀어 쓴 작업 지시서다.
 
@@ -21,12 +21,12 @@
 - ADR-035: debug UI를 프로덕션 admin/유지보수 UI로도 운영.
 - ADR-037: frontend 서버 상태는 TanStack Query, 클라이언트 상태는 Zustand.
 - ADR-039: write/bulk/restore 계열 명령은 PostgreSQL advisory lock.
-- ADR-045: Docker 독립 프로그램, 독립 DB/Dagster, TripMate OpenAPI 연동.
+- ADR-045: Docker 독립 프로그램, 독립 DB/Dagster, PinVi OpenAPI 연동.
 
 ## 1. 목표
 
 `kor-travel-map-admin`는 ADR-045 이후 단순 보조 UI가 아니라 Docker에서 실행되는
-kor-travel-map 독립 프로그램의 admin frontend/backend다. TripMate와는 OpenAPI로
+kor-travel-map 독립 프로그램의 admin frontend/backend다. PinVi와는 OpenAPI로
 통신하고, 자체 PostgreSQL/PostGIS DB와 자체 Dagster를 가진다.
 
 `kor-travel-map-admin`는 다음 업무를 한 화면 체계에서 처리한다.
@@ -54,7 +54,7 @@ kor-travel-map 독립 프로그램의 admin frontend/backend다. TripMate와는 
 
 - 인증, 세션, 권한을 애플리케이션 코드에 넣지 않는다. 접근 제어는 Cloudflare
   Tunnel, SSO gateway, IP allowlist, SSH tunnel 등 네트워크 계층 책임이다.
-- TripMate 사용자용 지도 UI를 만들지 않는다. 본 UI는 개발자/운영자 전용이다.
+- PinVi 사용자용 지도 UI를 만들지 않는다. 본 UI는 개발자/운영자 전용이다.
 - 메인 패키지 `kortravelmap`에 FastAPI, Uvicorn, React, Next.js 의존을 추가하지
   않는다.
 - provider wrapper, adapter, gateway를 만들지 않는다. `python-*-api` public client와
@@ -99,7 +99,7 @@ Frontend 표준 stack:
 - `@kor-travel-map/map-marker-react`: category/maki marker.
 
 Frontend 작업 후에는 `react-doctor` 실행, 결과 검토, 개선 반영이 필수다. 자세한
-명령과 완료 기준은 `docs/openapi-admin-contract.md` §10.
+명령과 완료 기준은 `docs/architecture/openapi-admin-contract.md` §10.
 
 ### 4.1 주요 페이지
 
@@ -1100,7 +1100,7 @@ D-8의 `prevent_provider_reactivation`/override 정책을 따른다.
 
 - 현재 구현된 `ops.feature_consistency_reports`는 batch 집계 테이블이다.
 - "이슈 1건 = 1행" 운영 큐가 필요하면 `ops.data_integrity_violations`를 실제
-  마이그레이션으로 도입해야 한다. `docs/data-model.md §9.5`가 계획 스키마다.
+  마이그레이션으로 도입해야 한다. `docs/architecture/data-model.md §9.5`가 계획 스키마다.
 
 ### 15.3 UI
 

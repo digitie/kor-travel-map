@@ -400,7 +400,7 @@ uv pip show gdal                # Python GDAL
 
 운영 환경(Odroid M1S, ARM64)에 대한 상세 임계값은 SPEC V8 v8_0이 정한다.
 `AGENTS.md` §17의 표가 발췌본. 라이브러리는 운영 환경 결정을 직접 내리지 않고,
-TripMate가 주입한 settings(`KOR_TRAVEL_MAP_*`)에 따라 동작한다.
+PinVi가 주입한 settings(`KOR_TRAVEL_MAP_*`)에 따라 동작한다.
 
 ## 12. 작업 흐름 요약
 

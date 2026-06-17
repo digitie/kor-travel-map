@@ -385,7 +385,7 @@ async def test_provider_name_constant() -> None:
     assert bundle.source_record.provider == PROVIDER_NAME
 
 
-# -- file_sources (미디어, docs/feature-files-rustfs.md §2.2) ------------------
+# -- file_sources (미디어, docs/architecture/feature-files-rustfs.md §2.2) ------------------
 
 
 async def test_heritage_image_url_becomes_file_source() -> None:

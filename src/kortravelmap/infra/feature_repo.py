@@ -861,7 +861,7 @@ RETURNING f.feature_id
 
 @dataclass(frozen=True)
 class FeatureLoadResult:
-    """``load_bundles`` 적재 결과 카운트 (docs/backend-package.md §1.3).
+    """``load_bundles`` 적재 결과 카운트 (docs/architecture/backend-package.md §1.3).
 
     - ``features_inserted`` / ``features_updated`` — feature upsert 신규/갱신.
     - ``source_records_inserted`` — 신규 source_record (재적재 시 0).
@@ -1339,7 +1339,7 @@ async def list_active_place_coords(
 ) -> list[tuple[str, float, float]]:
     """active place feature의 ``(feature_id, lon, lat)`` 전량 (T-219a).
 
-    KMA weather 격자→feature 매핑(옵션 B — `docs/kma-weather-etl.md` §3)용.
+    KMA weather 격자→feature 매핑(옵션 B — `docs/etl/kma-weather-etl.md` §3)용.
     호출자(Dagster asset)가 좌표를 KMA 격자로 변환해 대상 격자와 일치하는
     feature에 weather 값을 적재한다. 좌표 3컬럼만 조회하므로 수만 행에도 가볍고,
     정렬은 결정적(feature_id).

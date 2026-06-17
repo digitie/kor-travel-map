@@ -137,7 +137,7 @@ class KnpsPointRecord(Protocol):
 class KnpsPlaceDatasetSpec:
     """KNPS place(Point) dataset 1건의 변환 사양 (category/place_kind/marker).
 
-    ``docs/knps-feature-etl.md §2.1/§4`` 검증표 그대로. cultural_resources는
+    ``docs/etl/knps-feature-etl.md §2.1/§4`` 검증표 그대로. cultural_resources는
     category가 row subtype에 따라 갈리므로 ``category=None`` + 동적 resolver.
     """
 
@@ -161,7 +161,7 @@ class KnpsPlaceDatasetSpec:
 
 
 # 검증된 Point/place dataset 5건 (knps.file_datasets() geometry_type='Point',
-# feature_kind='place'). docs/knps-feature-etl.md §4 표 기준.
+# feature_kind='place'). docs/etl/knps-feature-etl.md §4 표 기준.
 KNPS_PLACE_DATASETS: Final[dict[str, KnpsPlaceDatasetSpec]] = {
     "knps_visitor_centers": KnpsPlaceDatasetSpec(
         "knps_visitor_centers",
@@ -205,7 +205,7 @@ _SOURCE_ENTITY_TYPE: Final[str] = "knps_facility"
 def resolve_cultural_resource_category(raw: dict[str, Any]) -> tuple[str, str]:
     """cultural_resources row의 ``RESOURCE_TYPE``에 따라 (category, place_kind).
 
-    ``docs/knps-feature-etl.md §2.3`` 분기표. 키 이름은 대소문자/한영 변형을 폭넓게
+    ``docs/etl/knps-feature-etl.md §2.3`` 분기표. 키 이름은 대소문자/한영 변형을 폭넓게
     탐색하고, 못 찾으면 일반 유산 코드로 fallback.
     """
     # RESOURCE_TYPE 후보 키 (knps CSV 컬럼 변형 대비).
@@ -379,7 +379,7 @@ async def knps_point_records_to_bundles(
         raise KeyError(
             f"KNPS Point/place dataset 아님: {dataset_key!r}. "
             f"지원: {sorted(KNPS_PLACE_DATASETS)}. SHP(area)/route는 후속 PR "
-            "(docs/knps-feature-etl.md §5)."
+            "(docs/etl/knps-feature-etl.md §5)."
         ) from exc
 
     geocoder = (
@@ -439,7 +439,7 @@ class KnpsGeometryDatasetSpec:
 
     route는 ``RouteDetail.route_type``, area는 ``AreaDetail.area_kind``로 분기.
     category는 탐방로/시설도로(route)·국립공원 경계(area)는 실제 관광 category를
-    갖고(upstream ``docs/knps-feature-etl.md §4``), 위험지역/보호지역은 category가
+    갖고(upstream ``docs/etl/knps-feature-etl.md §4``), 위험지역/보호지역은 category가
     없어 ``category=None`` → sentinel ``00000000``. marker_icon은 spec에 명시
     (upstream §4 표: route/공원 ``park``, 위험/보호 ``barrier``).
     """

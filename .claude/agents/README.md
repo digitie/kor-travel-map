@@ -15,7 +15,7 @@ context-manager 의존 단계(필수 첫 단계, `requesting_agent`/`get_*_conte
 탐색 절차로 교체했다:
 
 - entry 문서를 순서대로 읽는다 — CLAUDE.md → AGENTS.md → SKILL.md →
-  docs/architecture.md → docs/resume.md (CLAUDE.md §3 진입 순서).
+  docs/architecture/architecture.md → docs/resume.md (CLAUDE.md §3 진입 순서).
 - 코드 작성 전 codegraph 인덱스(`codegraph_context` / `codegraph_search`)로 기존
   심볼과 영향도를 조회한다.
 

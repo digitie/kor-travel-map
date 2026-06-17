@@ -1,7 +1,7 @@
 # 백업/복구 runbook
 
 본 문서는 ADR-040과 ADR-045 D-5 기준 `kor-travel-map` standalone Docker app의
-백업/복구 절차다. 백업 단위는 TripMate와 분리된 **3종 묶음**이다.
+백업/복구 절차다. 백업 단위는 PinVi와 분리된 **3종 묶음**이다.
 
 - 애플리케이션 Postgres DB: `kor_travel_map`
 - Dagster metadata Postgres DB: `kor_travel_map_dagster`
@@ -161,7 +161,7 @@ bash scripts/docker-restore-verify.sh
 
 추가 API smoke는 staging DB/volume을 사용하는 env 파일이나 별도 compose project에서
 API를 띄운 뒤 `docs/runbooks/docker-app.md` §6 절차를 수행한다. 운영 stack의 DSN/volume을
-staging 대상으로 바꾸기 전까지 TripMate는 영향받지 않는다.
+staging 대상으로 바꾸기 전까지 PinVi는 영향받지 않는다.
 
 ## 7. restore hot-swap env 전환
 
@@ -209,3 +209,13 @@ Admin API는 다음 경로를 제공한다.
 Admin API의 command 실행은 `KOR_TRAVEL_MAP_API_BACKUP_COMMAND_ENABLED=true`와 요청별
 `execute=true`가 모두 있어야 한다. 따라서 기본 UI/API 사용은 plan-only이며, 운영자가
 command/env를 확인한 뒤 명시적으로 실행한다.
+
+## 이관된 결정 (구 ADR)
+
+- 백업 단위(Postgres `feature`/`provider_sync`/`ops` schema + RustFS bucket), 1차 NTFS
+  `data/backups/<timestamp>/` + 2차 외부(S3/R2) multi-target, staging hot-swap(staging 복원 →
+  smoke/count 검증 → connection pool DSN 교체) restore 패턴, 그리고 admin 라우터
+  `GET/POST /admin/backups` · `POST /admin/restore/{id}` · `.../swap`은 모두
+  본 runbook §2~§8에 정본화돼 있다 (구 ADR-040에서 결정). 근거: `pg_dump --format=custom`
+  + RustFS snapshot이 industry-standard이고, 외부 소비자가 실시간 의존하므로 downtime cost가
+  커 hot-swap으로 무중단 전환을 택했다(초기엔 cold restore 허용, dual DB 비용은 단계적 도입으로 완화).

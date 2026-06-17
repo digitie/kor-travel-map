@@ -76,7 +76,7 @@
   - `src/kortravelmap/providers/krforest_weather.py` (후속 PR)
   - `src/kortravelmap/providers/khoa_weather.py` (후속 PR)
 - **fixture**: 3건/provider × 4 provider = 12건 (PR#38은 KMA 8 case 진입)
-- **WeatherValue 표 검증**: `docs/weather-feature-normalization.md` §5 timeline
+- **WeatherValue 표 검증**: `docs/etl/weather-feature-normalization.md` §5 timeline
   bucket (nowcast / short / mid). PR#38로 `WeatherValue` DTO + 3 enum
   (`WeatherDomain`/`ForecastStyle`/`TimelineBucket`) + `make_weather_value_key`
   진입.
@@ -262,7 +262,7 @@ Sprint 2 진행 중 다음 ADR들의 1차 implementation 점진 도입:
 ## 6. 위험 / 차단 사유
 
 - **provider rate limit**: KMA / OpiNet은 분당 한도 있음. `ConcurrencyConfig`
-  TripMate 측, 본 라이브러리는 page 단위 sleep만 ETL doc에 명기.
+  PinVi 측, 본 라이브러리는 page 단위 sleep만 ETL doc에 명기.
 - **좌표 nullable**: visitkorea festival은 좌표 없는 경우 다수. 좌표 없는
   feature는 적재하되 `coord_5179`는 NULL → `features_in_bounds` 쿼리에서
   자연히 제외.
