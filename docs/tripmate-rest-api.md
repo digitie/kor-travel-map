@@ -222,9 +222,9 @@ T-222b(2026-06-12)부터 이 표면은 `openapi.user.json`과
 
 소비 시 주의:
 
-- 해수욕장은 `detail.place_kind="beach"`를 1차 판별 기준으로 쓴다. 문서의
-  예전 `01050100` category 값은 판별 기준이 아니다. 현재 KHOA provider category
-  `01020300`은 보조 정보로 유지한다.
+- 해수욕장은 `detail.place_kind="beach"`를 1차 판별 기준으로 쓴다. KHOA provider
+  category는 DA-D-07로 `01050100`(`TOURISM_NATURE_BEACH`)로 정렬됐다(구 `01020300`은
+  오분류). 판별은 category 단일값에 의존하지 않는다.
 - KHOA 수질/index/latest weather는 현재 null/빈 배열이며, weather metric 확장 또는
   별도 marine 표면 확정 뒤 값 projection을 채운다.
 - 축제 monthly 뷰는 `EventDetail.starts_on`/`ends_on` 기간 겹침 집계가 필요하다.

@@ -236,7 +236,7 @@ async def beaches_to_bundles(
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None = None,
 ) -> list[FeatureBundle]:
-    """해양수산부 해수욕장정보 items → ``list[FeatureBundle]`` (place, category 01020300).
+    """해양수산부 해수욕장정보 items → ``list[FeatureBundle]`` (place, category 01050100).
 
     provider 모델에 도로명 주소가 없어 좌표 reverse만으로 bjd를 보강한다. 안정 식별자가
     없어 ``name::sido::gugun`` 파생키(ADR-009 ``::``)를 쓴다.

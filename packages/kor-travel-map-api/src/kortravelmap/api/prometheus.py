@@ -179,9 +179,12 @@ class PrometheusMetrics:
             status_code = response.status_code
             return response
         except Exception as exc:
+            # 엔드포인트 예외가 전파될 시점에는 ``scope['route']``가 채워져 있어, 진입 시점의
+            # 잠정 path(best-effort) 대신 매칭된 라우트 템플릿으로 다시 확정한다(finally의
+            # 성공 메트릭과 동일한 path 해석). 잠정값을 쓰면 __unmatched__로 떨어질 수 있다.
             self.request_exceptions_total.labels(
                 method=labels.method,
-                path=labels.path,
+                path=_route_path(request),
                 surface=labels.surface,
                 exception_type=type(exc).__name__,
             ).inc()

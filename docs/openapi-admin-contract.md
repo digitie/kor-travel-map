@@ -72,11 +72,14 @@ Dagster DB에는 Dagster가 자체 schema를 관리한다.
 - admin 전체 scope는 admin UI가 쓰는 `/features`, `/admin`, `/ops`, `/debug` API다.
 - user subset은 TripMate가 호출하는 사용자/서비스 read API(`/features/*`,
   `/categories`, `/providers/*`, `/health`, `/version`)와 batch read API만 포함한다.
-  목표 안정 계약은 `/v1/*` prefix를 사용하며, 현재 unversioned 경로는 구현 호환
-  상태다. admin write/read 경로(`/admin/*`)는 admin 전체 spec에만 남긴다.
-- `POST/GET /tripmate/feature-update-requests*`는 2026-06-08 사용자 결정으로
-  admin 영역 이동 대상이다. 정본 경로는 `/admin/feature-update-requests*`이며,
-  TripMate/user subset에서는 제거한다.
+  전 표면이 `/v1/*` prefix 하에 있다 — ADR-048 무-호환 clean cut(구 unprefixed
+  경로/alias 없음). liveness용 `/health`·`/version`만 비버저닝으로 유지한다(정본:
+  `docs/rest-api.md` §1, ADR-048 #1). **본 문서의 경로 표기(`/features`, `/admin/*`,
+  `/ops/*`, `/debug/*` 등)는 가독성을 위해 `/v1` prefix를 생략한 약기이며 실제 경로는
+  모두 `/v1/...`이다.** admin write/read 경로(`/admin/*`)는 admin 전체 spec에만 남긴다.
+- `/tripmate/*` 경로는 이미 제거됐다. feature update request의 정본 경로는
+  `/admin/feature-update-requests*`이며(본 문서 §6 등 하단 설명과 일치),
+  TripMate/user subset에는 존재하지 않는다.
 - 모든 응답은 debug/admin backend의 HTTP 응답 셰입을 쓴다.
 
 성공:

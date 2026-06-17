@@ -2,6 +2,38 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-17 (claude) — Claude Code PR 리뷰 취합(#452) 후속 일괄 반영
+
+issue #452(2026-06-17 Claude Code PR #437~#450 전문 리뷰 취합)의 잔여 조치를 일괄 반영.
+14개 항목을 전문 에이전트 14개로 현 트리 대조 후, 유효 항목만 disjoint 파일군으로 나눠 적용.
+
+- **#437 (none)**: KREX rest-area 자연키 stale 문구는 이미 37e33b0에서 정정됨 — 무변경.
+- **#445 (HIGH, code)**: KHOA 해수욕장 `01020300`→`01050100` re-key 후 구 feature 중복.
+  alembic `0027_khoa_recategorize_cleanup`(신 sibling 존재 시에만 구 feature inactive, KHOA-
+  해수욕장 primary 한정, `user_request` 제외, 멱등) + 회귀 테스트(unit re-key 불변,
+  integration sweep 가드) + `khoa.py` docstring 정정.
+- **#444 (docs)**: `openapi-admin-contract.md` unversioned-호환/`/tripmate/*` 문구를 ADR-048
+  clean cut에 정렬; 의존 체인 `category→dto→core→infra→geocoding→providers→client→cli`로
+  통일(pyproject 주석·SKILL.md·AGENTS.md·architecture.md); `ServiceToken` opt-in 예외
+  (ADR-005 D-1)를 AGENTS.md/README에 명시. problem+json OpenAPI 보강은 `T-452-openapi-problem-json`
+  으로 백로그.
+- **#446 (docs+test)**: geocoder 필수화(ADR-058) Dagster blast radius를 `dagster-boundary.md`/
+  dagster README에 문서화 + asset membership 정적 테스트.
+- **#447 (docs)**: `missing_bjd_code`→`reverse_geocode_failed` relabel 후 `debug-ui-admin-
+  workflows.md` §8.2/§16.3 예시 정정(카탈로그 표는 유지).
+- **#448 (code+test)**: Prometheus exception metric을 post-routing canonical `/v1/...` path
+  label로 교정 + path-label 테스트 강화 + exception-counter 테스트 추가.
+- **#450 (ADR+docs)**: `.claude/agents/*`의 비존재 `context-manager` 의존을 본 저장소 절차
+  (entry 문서+codegraph)로 치환 + vendored README; ADR-059(벤더링 agent/skill 언어·
+  context-discovery 예외) 신설 + AGENTS.md 언어 정책 예외 단락.
+- **#440/#441/#442/#443/#439 (docs/test)**: agent-guide ADR 번호(049→058) 정정; concierge
+  unknown-operation/identity-drift WARNING `caplog` 테스트; journal P-01 종결 문구 범위 한정;
+  source_entity_id upsert/reject/tombstone 동일 id 회귀 테스트 + 리포트 정정; cross-repo
+  port-audit §1 결론을 TripMate 제외로 scope.
+- **#449 (env 잔여)**: e2e 5페이지 Windows Playwright 라이브 실행은 여전히 잔여(본 환경 미실행).
+- **검증**: 본 환경에 프로젝트 venv 없음 — `pytest`/`ruff`/`mypy --strict`/`lint-imports`는 CI에서
+  게이트. 변경은 다중 에이전트 adversarial 리뷰로 자체 검수.
+
 ## 2026-06-16 (claude) — e2e: ZERO 커버 5페이지 1차 spec 추가 (T-AUDIT-0616)
 
 감사 backlog의 e2e 항목 1차. ZERO 커버(spec 자체 없음) 5페이지에 Playwright spec 추가.
@@ -119,8 +151,9 @@ concierge loader 검증의 producer-side 잔여 P-01을 kor-travel-concierge rep
   추가(범위 밖 → silent clamp 대신 422) + 회귀 테스트 2종. 그쪽 컨벤션(`codex/*` 브랜치,
   journal/tasks 갱신) 준수. consumer(map)는 limit `[1,500]`만 보내 무영향.
 - **본 repo**: 검증 리포트 `concierge-loader-verify-2026-06-15.md`의 P-01 줄을 ✅(concierge
-  #83)로 갱신. concierge loader 검증 cross-repo 추적 종결(map #440 ADR-057 · map #441
-  하드닝 · concierge #83 P-01). 잔여 권장 1건만 남음: source_entity_id 불변성 계약 테스트.
+  #83)로 갱신. **P-01** cross-repo 추적 종결(concierge #83). loader 검증 전체 cross-repo
+  추적은 아직 열림 — 잔여 권장 1건(source_entity_id 불변성 계약 테스트)이 남아 있고, 전체
+  종결은 후속(검증 후속 4 / concierge #85)에서 확정한다.
 
 ## 2026-06-15 (claude) — concierge loader 하드닝 (C-04~C-08, 검증 후속 2)
 

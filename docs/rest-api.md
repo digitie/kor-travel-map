@@ -184,8 +184,8 @@ GET /v1/public/festivals/{feature_id}
 핵심 결정 전제:
 
 - 해수욕장 판별은 category 단일값이 아니라 `detail.place_kind='beach'`를 1차로 쓴다.
-  현재 KHOA provider category `01020300`은 보조 정보로 유지하고, 예전 문서값
-  `01050100`은 공개 view 판별 기준에서 제외한다.
+  KHOA provider category는 DA-D-07로 `01050100`(`TOURISM_NATURE_BEACH`)로 정렬됐다
+  (구 `01020300`은 오분류, 구 feature는 alembic 0027로 정리).
 - 수질/KHOA index/latest weather 필드는 schema에 nullable/빈 배열로 열어 두되,
   값 projection은 후속 marine/weather 확정 후 채운다.
 - 축제 월별 뷰는 `EventDetail.starts_on`/`ends_on` 기간 겹침으로 집계한다.

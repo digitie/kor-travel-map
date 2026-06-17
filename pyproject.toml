@@ -241,7 +241,7 @@ include_external_packages = true
 [[tool.importlinter.contracts]]
 name = "layered architecture"
 type = "layers"
-# 의존 방향: category → dto → core → infra → providers → geocoding → client → cli.
+# 의존 방향: category → dto → core → infra → geocoding → providers → client → cli.
 # kortravelmap.cli는 Sprint 4 §2.8(ADR-039 CLI mutex)에서 추가 — 최상위 layer.
 layers = [
   "kortravelmap.cli",

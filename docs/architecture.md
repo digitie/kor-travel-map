@@ -95,7 +95,7 @@ JSON을 순수 변환 함수로 `FeatureBundle`화한다(ADR-053).
   (패키지가 아님 — `src/kortravelmap/geocoding.py`). kor-travel-geo REST v2를 호출하는
   reverse/forward geocoding helper로, import-linter layer 계약에서 **providers 아래**
   (providers가 geocoding을 import) layer로 강제된다. (참고: `pyproject.toml`의 layer
-  배열이 정본이고, 주석 한 줄은 순서가 거꾸로다 — 코드 후속.)
+  배열이 정본이며, 동일 파일의 주석도 같은 순서를 따른다.)
 - `client.py`는 `providers/`와 `infra/` repository를 합쳐 외부에 노출하는
   단일 진입점 `AsyncKorTravelMapClient`다.
 - `kortravelmap.api`는 별도 패키지로, HTTP projection에 필요한 메인 패키지

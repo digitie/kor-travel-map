@@ -145,9 +145,10 @@
 
 1. `kind='place'`
 2. `detail.place_kind='beach'`
-3. category는 현재 코드/문서 drift가 있어 1차 판별로 쓰지 않는다. T-222b 구현
-   기준으로 KHOA provider category는 코드 정본 `01020300`(자연명소>해안/섬)을 유지하고,
-   문서의 예전 `01050100`은 공개 view 판별 기준에서 제외한다.
+3. category는 1차 판별로 쓰지 않는다(`detail.place_kind='beach'`가 정본 판별). KHOA
+   provider category는 DA-D-07(2026-06-16)로 전용 `01050100`(자연명소>해수욕장,
+   `TOURISM_NATURE_BEACH`)로 정렬됐다 — 예전 `01020300`(해안/섬 일반)은 오분류였고
+   구 feature는 alembic 0027로 정리한다.
 
 ### 3.2 `FestivalPublicView`
 
@@ -182,8 +183,9 @@
 
 ## 4. 구현 결정과 후속
 
-1. 해수욕장 category drift는 `detail.place_kind='beach'` 1차 판별로 닫았다. KHOA
-   provider category `01020300`은 유지하고, `01050100` 문서값은 판별 기준에서 제외한다.
+1. 해수욕장 판별은 `detail.place_kind='beach'`를 1차로 쓴다. KHOA provider category는
+   DA-D-07로 `01050100`(`TOURISM_NATURE_BEACH`)로 정렬됐고(구 `01020300`은 오분류, 0027
+   cleanup), 어느 경우든 공개 view 판별은 category 단일값에 의존하지 않는다.
 2. KHOA 해수욕장 폭/길이/재질은 공개 schema에 nullable 필드로 열어 두고,
    현재는 `facility_info` 또는 primary raw payload에 값이 있으면 projection한다.
    provider 모델 보강은 후속 task로 분리한다.

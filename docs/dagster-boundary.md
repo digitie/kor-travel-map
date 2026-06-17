@@ -99,6 +99,18 @@ overlay로 들어간다(`docs/curated-features.md`).
 
 - `kor_travel_map_client`: `AsyncKorTravelMapClient`.
 - `reverse_geocoder`: kor-travel-geo REST v2 기반 `ReverseGeocoder`.
+  - ADR-058/F-01로 `reverse_geocoder`는 **필수**다 — base resource는
+    `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_BASE_URL` 미설정 시 `RuntimeError`를 낸다(조용히
+    None을 주지 않는다 — feature_id 결정성 보장).
+  - blast radius = `_COMMON_RESOURCE_KEYS`를 `required_resource_keys`로 갖는 모든
+    feature-load asset(위 §1.1 provider asset들 + `feature_notice_kma_weather_alerts`
+    + `feature_place_mcst_culture`)이 base URL 미설정 시 resource init에서 함께
+    실패한다(asset 본문 진입 전 차단).
+  - 예외(영향 없음) = 4개 KMA 예보 asset(`feature_weather_kma_ultra_short_nowcast`
+    / `feature_weather_kma_ultra_short_forecast` / `feature_weather_kma_short_forecast`
+    / `feature_weather_kma_mid_forecast`)은 `_KMA_WEATHER_RESOURCE_KEYS`/
+    `_KMA_MID_RESOURCE_KEYS`를 쓰며 `reverse_geocoder`를 포함하지 않는다. curated_*
+    / maintenance / offline_upload / sensors / batch_dag도 이 key를 쓰지 않는다.
 - `fetched_at`: batch 기준 aware `datetime`(없으면 KST 현재 시각).
 - 주소 검증 모드: `strict`|`drop`|`off` 문자열, 기본 `strict`
   (`KorTravelMapSettings.dagster_address_validation`, #376). `strict`는 주소/좌표
