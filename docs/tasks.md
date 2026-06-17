@@ -7,10 +7,6 @@
 ## 진행 중인 작업 인덱스
 
 - **다음**
-  - [ ] `T-MAP-VWORLD-02` — **admin features 지도를 VWorldMapView 기반으로 전환** (#466).
-    `digitie/maplibre-vworld-react`의 `VWorldMapView`/React marker 모델을 admin `features`
-    지도에 얇게 이식한다. 정본 계획은
-    `docs/reports/maplibre-vworld-react-migration-plan-2026-06-17.md`.
   - [ ] `T-MAP-VWORLD-03` — **지도 e2e 라이브 검증 및 후속 수정** (#467). 지도 전환 후
     WSL 서버 + Windows Playwright 흐름으로 지도 e2e를 실행하고 실패를 후속 PR로 수정한다.
   - [ ] `T-229-buildx` — **arm64 multi-arch buildx 배포 검증** (T-229 잔여). T-229의
@@ -64,19 +60,6 @@
 
 진척·"다음 한 작업"의 정본은 [`docs/resume.md`](resume.md). 과거 완료 묶음(`T-RV-*`,
 `T-200`~`T-228`, `T-212a`~`d`, `T-216`, `T-218` 등)은 [`docs/tasks-done.md`](tasks-done.md).
-
-## T-MAP-VWORLD-02 — admin features 지도를 VWorldMapView 기반으로 전환
-
-- [ ] T-MAP-VWORLD-02 — **admin features 지도를 VWorldMapView 기반으로 전환** (#466)
-
-`digitie/maplibre-vworld-react`의 `VWorldMapView`/React marker 모델을 기준으로 admin
-`features` 지도의 직접 `maplibre-gl` 초기화와 marker 배열 수동 관리를 내부 React
-컴포넌트 계층으로 전환한다. bbox 동기화, kind 필터 refetch, marker 선택, 상세 패널,
-table/map 상태 공유, VWorld key 미설정 fallback은 유지한다.
-
-완료 조건: frontend type-check/lint/vitest와 route-mocked 지도 e2e가 통과하고,
-정본 계획 [`docs/reports/maplibre-vworld-react-migration-plan-2026-06-17.md`](reports/maplibre-vworld-react-migration-plan-2026-06-17.md)
-의 전환 범위를 충족한다.
 
 ## T-MAP-VWORLD-03 — 지도 e2e 라이브 검증 및 후속 수정
 

@@ -1,5 +1,22 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-17 Codex 작업 메모 — admin features 지도 VWorldMapView 전환
+
+`T-MAP-VWORLD-02`(#466)를 구현했다. `features-client.tsx`에서 직접
+`new maplibregl.Map()`과 marker 배열을 소유하던 코드를 제거하고,
+`src/components/vworld-map-view.tsx`의 `VWorldMapView`/`VWorldMarker` 컴포넌트로
+전환했다.
+
+- **유지한 동작**: bbox 동기화, kind 필터 refetch, marker/table 선택 상세 패널,
+  VWorld key 미설정 fallback, table/map 상태 공유.
+- **e2e 환경 보강**: Windows localhost forwarding이 붙지 않는 경우 WSL IP로 dev 서버에
+  접근할 수 있도록 `NEXT_ALLOWED_DEV_ORIGINS`를 `next.config.ts`에 반영했다.
+- **검증**: frontend type-check 통과, ESLint 0 errors(기존 warnings 6), vitest
+  27 passed, `NEXT_PUBLIC_*` env 주입 build 통과, Windows Playwright 지도 e2e
+  `features-map-interactions.spec.ts` 5 passed.
+
+**다음 한 작업**: **T-MAP-VWORLD-03 — 지도 e2e 라이브 검증 및 후속 수정**.
+
 ## 2026-06-17 Codex 작업 메모 — maplibre-vworld-react 지도 전환 계획 수립
 
 사용자 요청에 따라 admin UI 지도를
@@ -160,7 +177,6 @@ T-108/ADR-056의 arm64 multi-arch buildx 이미지 build+boot smoke다.
 
 즉시:
 
-- `T-MAP-VWORLD-02` — admin features 지도를 VWorldMapView 기반으로 전환.
 - `T-MAP-VWORLD-03` — 지도 e2e 라이브 검증 및 후속 수정.
 
 - `T-229-buildx` — arm64 multi-arch buildx 배포 검증 (T-229 잔여, `GITHUB_TOKEN` 필요).

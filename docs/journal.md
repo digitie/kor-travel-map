@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-17 (Codex) — admin features 지도 VWorldMapView 전환
+
+`T-MAP-VWORLD-02`(#466)를 구현했다.
+
+- **지도 lifecycle 전환**: `features-client.tsx`의 직접 `maplibre-gl` 생성/해제와
+  marker 배열 수동 관리 코드를 제거하고, 새 `VWorldMapView`/`VWorldMarker`
+  컴포넌트로 분리했다.
+- **동작 유지**: bbox 동기화, kind 필터 refetch, marker/table 선택 상세 패널,
+  VWorld key 미설정 fallback, table/map 상태 공유를 유지했다.
+- **dev e2e 보강**: Windows localhost forwarding이 붙지 않는 환경에서 WSL IP로
+  Playwright를 실행할 수 있도록 `NEXT_ALLOWED_DEV_ORIGINS`를 지원했다.
+- **검증**: type-check 통과, ESLint 0 errors(기존 warnings 6), vitest 27 passed,
+  env 주입 production build 통과, Windows Playwright
+  `features-map-interactions.spec.ts` 5 passed.
+
 ## 2026-06-17 (Codex) — maplibre-vworld-react 지도 전환 계획 및 Task 생성
 
 admin UI 지도를 `digitie/maplibre-vworld-react` 기반 모델로 전환하기 위한 작업 계획을 세웠다.
