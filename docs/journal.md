@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-18 (claude) — T-ADMIN-TANSTACK 종결 + item-4 라이브 e2e 결정 (백로그 정리)
+
+admin TanStack 테이블 이행 후속을 종결하고, 라이브 e2e 재실행 여부를 사용자 결정으로 닫았다.
+
+- **(a) backend-의존 e2e**: 2026-06-17 라이브 Docker 스택에서 이미 57 passed/0 failed로 검증됨
+  (`docs/resume.md`). 사용자 결정(이미 검증됨 → 재실행 생략)에 따라 스택 재기동 없이 종결.
+- **(b) bulk 정책 가드**: main에 이미 구현 확인 — dedup bulk `enableRowSelection` pending-only +
+  `decideBulk` 방어 필터(완료 review 재결정 차단), curated bulk archive `window.confirm` 일괄 확인,
+  enrichment 단일 행 pending-only(bulk 없음).
+- **환경 메모(item-4)**: 신규 Docker 스택 기본 포트(pg 5432·rustfs 12101)가 공유 인프라
+  (kor-travel-geo-postgres 등)와 충돌하고, repo `.env`가 구 `KRTOUR_MAP_*` prefix라 기존
+  `python-krtour-map-claude` 스택은 stale/unhealthy. 공유 인프라 무중단을 위해 재실행하지 않음.
+- **T-AUDIT-0616**: e2e(HIGH)는 라이브 검증 완료로 ✅, 잔여는 F-01 옵션 A(전 feature re-key,
+  big-bang) deferred 1건으로 축소. `T-452-openapi-problem-json`가 이 저장소 유일 즉시 실행 트랙.
+
 ## 2026-06-18 (claude) — 외부/보류 task won't-do 종결 (백로그 정리)
 
 사용자 지시로 외부 추적 4건과 보류 1건을 진행하지 않음(won't-do)으로 종결했다(문서만 변경).
