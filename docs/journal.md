@@ -2,6 +2,17 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-18 (claude) — 외부/보류 task won't-do 종결 (백로그 정리)
+
+사용자 지시로 외부 추적 4건과 보류 1건을 진행하지 않음(won't-do)으로 종결했다(문서만 변경).
+
+- **종결**: `T-019`(PinVi Kakao→vworld 추적), `T-210b`/`T-210c`/`T-210d`(PinVi 문서 supersede ·
+  레거시 Dagster 이관 · httpx client — 전부 PinVi repo 외부), `T-103`(streaming ETL Kafka/Redpanda).
+- **정리**: `docs/tasks.md` 외부 추적 섹션 제거 + 보류에서 T-103 제거,
+  `docs/tasks-done.md` 상단 won't-do 아카이브, `docs/resume.md` 열린 작업 요약·현재 상태 갱신.
+- **유지**: `T-229-buildx`(배포환경 잔여), `T-101`(MV 보류), 열린 in-repo
+  `T-452`·`T-ADMIN-TANSTACK`·`T-AUDIT-0616`.
+
 ## 2026-06-18 (Codex) — admin frontend StyleSeed 디자인 규칙 적용
 
 `https://styleseed-demo.vercel.app/llms.txt`와 `llms-full.txt`의 제품 UI 규칙을

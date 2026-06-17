@@ -3,6 +3,21 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 외부/보류 task won't-do 종결 (2026-06-18)
+
+사용자 지시로 아래 task를 **진행하지 않음(won't-do)** 으로 종결했다. 산출물 없이 백로그에서만
+정리한다(`docs/tasks.md` 외부 추적 섹션 제거 + 보류에서 T-103 제거).
+
+- [x] **T-019 — PinVi Kakao Maps → maplibre-vworld 교체 / SPEC supersede 추적** (won't-do, PinVi repo 외부).
+  본 저장소 책임은 ADR-026/043 reference와 `@kor-travel-map/map-marker-react` 계약 유지로 한정한다.
+- [x] **T-210b — PinVi 문서 supersede** (won't-do, PinVi repo 외부).
+- [x] **T-210c — PinVi `apps/etl` 레거시 Dagster 이관/삭제** (won't-do, PinVi repo 외부).
+- [x] **T-210d — PinVi httpx OpenAPI client 신규** (won't-do, PinVi repo 외부).
+  PinVi-side 정렬 작업으로 본 저장소는 OpenAPI 계약(정본 `docs/integration-map.md`)만 책임진다.
+- [x] **T-103 — streaming ETL(Kafka/Redpanda) 대응** (won't-do).
+  `docs/architecture/performance.md §9.4` 기준 — 초 단위 latency를 실제로 요구하는 provider 증거가
+  없어 도입하지 않는다. 필요 신호가 생기면 신규 task로 재개한다.
+
 ## maplibre-vworld-react 지도 전환 (2026-06-17, `T-MAP-VWORLD`)
 
 - [x] **T-MAP-VWORLD-01 — 계획 및 Task 생성** (#465, PR #468).
