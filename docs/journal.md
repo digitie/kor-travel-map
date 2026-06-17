@@ -2,6 +2,30 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-17 (claude) — admin e2e 커버리지 종합 확장 Wave 2(MED 10페이지 depth-spec)
+
+Wave 1에 이어 MED 우선순위 10페이지에 route-mock depth-spec 10종(+68 시나리오) 추가. 라이브
+frontend :12705 + mock 백엔드로 전수 실행 green 확인 후 머지.
+
+- **신규 스펙(68 시나리오)**: `features-list`(q search·sort dropdown/order·cursor·empty·500 alert·
+  deactivate·deeplink·has_issue), `change-requests-lifecycle`(reject·409/422 alert·empty·q filter),
+  `issues-actions`(resolve/ignore/reopen/retry_geocode/retry_reverse/apply_geo·map·severity·cursor·
+  error), `dedup-reviews-actions`(accept/reject/ignore/merge·compare·master 선택·ADR-039 mutex·cursor),
+  `enrichment-reviews-actions`(accept/reject/ignore·cursor·compare), `feature-update-requests-list`
+  (submit·dry-run/run-now·cursor·empty·error·deeplink), `import-jobs-list`(cursor 미사용·filter param·
+  empty·error·deeplink), `providers-refresh-policy`(PUT refresh-policy·links·detail nav·empty·error),
+  `home-nav`(전 nav 링크·metric error/empty·loading), `features-map-interactions`(map↔table toggle·
+  ?view sync·error·count=0; WebGL marker-click은 비결정적이라 제외).
+- **워크플로**: 페이지별 grounded recon(admin-ops smoke+컴포넌트+훅+OpenAPI types) → author. 20 agent.
+- **검증 루프(라이브)**: 1차 59/68 → 회귀 9건 수정(5 agent 병렬) → 2차 66/68 → 잔여 2건 직접 수정 →
+  **68/68**, 전체 스위트 **177/177**(기존 57 + Wave1 52 + Wave2 68).
+- **주요 수정(원인)**: dedup 결정 후 행이 기본 `pending` 필터에 걸러져 '완료' 미표시 → status를
+  `all`로 전환; change-requests/issues는 row 내 substring 충돌(`pending`×4·`info`×2) → `exact:true`;
+  features 목록은 전 컬럼이 display column(manualSorting)이라 헤더가 정렬 불가 → 정렬을
+  NativeSelect+asc/desc 버튼으로 검증; has_issue 'all' 재선택과 import-jobs 필터 해제는 staleTime
+  캐시 적중(동일 키 → 새 GET 없음)이라 네트워크 단언 대신 UI/불변식(cursor 미적재)으로 전환.
+- 후속: Wave 3(LOW ~6) + coverage 리포트 갱신.
+
 ## 2026-06-17 (claude) — admin e2e 커버리지 종합 확장 Wave 1(HIGH 5페이지 depth-spec)
 
 `e2e-scenario-coverage-2026-06-16.md`가 기록한 갭(대부분 render-smoke만, mutation/error/empty/
