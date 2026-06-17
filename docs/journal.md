@@ -2,6 +2,30 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-17 (claude) — admin e2e 커버리지 종합 확장 Wave 1(HIGH 5페이지 depth-spec)
+
+`e2e-scenario-coverage-2026-06-16.md`가 기록한 갭(대부분 render-smoke만, mutation/error/empty/
+pagination/filter/WS/deeplink 누락)을 3-wave로 종합 확장하는 작업의 Wave 1. HIGH 5페이지(핵심
+mutation/depth)에 route-mock 기반 신규 depth-spec 5종을 추가했다. CI에 Playwright job이 없어
+(거짓 green 방지) **라이브 frontend :12705 + mock 백엔드**로 전수 실행해 green 확인 후 머지.
+
+- **신규 스펙(52 시나리오)**: `curated-features-mutations`(17: select/unselect optimistic·patch·
+  null trim·copy-policy·archive+window.confirm·rule patch/apply·tripmate-copy preview/empty·cursor·
+  page_size·empty·500 alert·deeplink·bulk select/archive), `features-new-submit`(8: 생성→change
+  response·nearby·422/409·forward/reverse geocode(:12501)·geo 5xx), `feature-update-request-detail-
+  actions`(9: cancel/run-now POST body·201·terminal gating·409 alert·refetch·폴링 running→done),
+  `import-job-detail-actions`(8: cancel POST·event timeline·level filter·terminal polling-stop·
+  relation link 분기), `feature-detail-sections`(9: Sources/Issues/Overrides/Files/History 표·Nearby
+  km/m·Weather depth/stale·error isolation·no-coord·Raw <details>·deeplink).
+- **워크플로**: 페이지별 grounded recon(기존 스펙+컴포넌트+훅+OpenAPI types) → author(자급 route-mock,
+  mock body는 `components["schemas"]` 바인딩으로 계약 drift를 tsc가 검출). 10 agent.
+- **검증 루프(라이브)**: 1차 44/52 → 회귀 8건 수정 → 52/52, 전체 스위트 **109/109**(기존 57+신규 52).
+  주요 수정: strict-mode 스코프(per-section columnheader·snapshot 테이블·alert title filter·Links
+  카드), base-ui Checkbox(role=checkbox span)는 click/Space로도 aria-checked가 안 켜져
+  bulk 검증을 toolbar(N개 선택됨)+요청수로 전환, success Alert는 role=status(=default variant),
+  cursor "처음"은 staleTime 캐시로 재요청 없음→UI 단언, row-ready 가드로 select-all 레이스 제거.
+- 후속: Wave 2(MED ~10) · Wave 3(LOW ~6) + coverage 리포트 갱신.
+
 ## 2026-06-17 (claude) — required 필드 접근성 이름 정정(asterisk 누수) — features-new e2e 적색 해소
 
 직전 라이브 e2e의 잔여 2건(`features-new.spec.ts` `getByLabel("name", { exact: true })` 0건)을
