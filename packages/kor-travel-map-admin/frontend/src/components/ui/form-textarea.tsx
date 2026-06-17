@@ -8,7 +8,12 @@ import {
   FieldError,
   FieldLabel,
 } from "@/components/ui/field";
-import { describedBy, type FieldShellProps, useFieldIds } from "@/components/ui/form-field-shared";
+import {
+  describedBy,
+  type FieldShellProps,
+  requiredFieldAriaLabel,
+  useFieldIds,
+} from "@/components/ui/form-field-shared";
 import { Textarea } from "@/components/ui/textarea";
 
 type FormTextAreaProps = Omit<
@@ -43,6 +48,7 @@ function FormTextArea({
           error ? errorId : undefined,
         )}
         aria-invalid={error ? true : undefined}
+        aria-label={requiredFieldAriaLabel(label, required)}
         aria-required={required || undefined}
         id={fieldId}
         ref={ref}

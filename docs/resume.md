@@ -12,15 +12,16 @@
 
 - **admin UI 테이블 backend-의존 e2e 라이브 실행 완료**(2026-06-17): 라이브 Docker 스택(codex
   api :12701/dagster :12702 + 재빌드한 migrated frontend :12705 + playwright host-network 컨테이너)에서
-  전 spec 실행 → **55 passed / 2 failed**. 이행이 유발한 회귀 1건(offline-uploads `offline-upload-row`
-  testid 소실)은 공용 `DataTable`에 opt-in `rowTestId` 추가로 수정(fix/offline-uploads-row-testid).
+  전 spec 실행 → 최초 54/3 → **PR #458**(offline-uploads `offline-upload-row` testid 복원, 이행 회귀)
+  후 55/2 → **PR #459**(required 필드 접근성 이름 정정, 아래) 후 **57 passed / 0 failed**.
+- **PR #459(required 필드 접근성 이름)**: `FormField`/`FormSelect`/`FormTextArea`의 `required` 별표
+  `<span aria-hidden> *</span>`가 Chromium accname에 누수돼 접근성 이름이 `"name *"`가 되던 문제를
+  공용 헬퍼 `requiredFieldAriaLabel`로 명시 `aria-label` 부여해 정정(별표 시각 유지·spec 회귀 0·
+  전역 `getByLabel(exact)` 정상화). features-new.spec 2건 green.
 
-**다음 한 작업**: **features-new.spec.ts 2건 적색 해소(#449 spec 부채, 이행 무관)** — `required`
-`FormField` 라벨이 `name`+`<span aria-hidden> *</span>`라 Chromium accname이 별표를 포함→접근성
-이름 `"name *"`→`getByLabel("name",{exact:true})` 0건. 선택지: (a) 공용 `FormField`에서 별표를
-접근성 이름에서 제외(CSS `::after` 또는 input `aria-label` — a11y 개선·전역 getByLabel 정상화) vs
-(b) spec을 `getByLabel(/^name/)` 등으로 정합. 그 외 잔여: arm64 buildx 배포 검증(`GITHUB_TOKEN`),
-bulk 동작 정책 가드(선택).
+**다음 한 작업**: 즉시 실행 가능한 큰 트랙 없음(admin UI 테이블 이행 + 라이브 e2e 전부 green). 잔여는
+(1) **arm64 buildx 배포 검증**(`GITHUB_TOKEN` 필요), (2) bulk 동작 정책 가드(완료 review 재결정·
+archive confirm, 선택)뿐.
 
 ## 2026-06-14 claude 작업 메모 — T-229 curated 오버레이 라이브 검증 완료
 
