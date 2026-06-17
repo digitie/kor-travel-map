@@ -1,6 +1,7 @@
 "use client";
 
 import { createMarkerElement } from "@kor-travel-map/map-marker-react";
+import { type ColumnDef } from "@tanstack/react-table";
 import "maplibre-vworld/style.css";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -47,16 +48,8 @@ import { buttonVariants } from "@/components/ui/button-variants";
 import { FormField } from "@/components/ui/form-field-input";
 import { FormSelect } from "@/components/ui/form-select";
 import { FormTextArea } from "@/components/ui/form-textarea";
+import { DataTable } from "@/components/ui/data-table";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { formatDateTime, shortId } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { buildVWorldStyle, isVWorldApiKeyConfigured } from "@/lib/vworld-style";
@@ -349,6 +342,49 @@ export function FeatureCreateClient() {
       : null,
   );
   const duplicateItems = nearby.data?.data.items ?? [];
+  type DuplicateRow = NonNullable<typeof nearby.data>["data"]["items"][number];
+  const duplicateColumns = useMemo<ColumnDef<DuplicateRow, unknown>[]>(
+    () => [
+      {
+        id: "feature",
+        header: "feature",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const item = row.original;
+          return (
+            <>
+              <Link
+                className="font-medium text-primary underline-offset-4 hover:underline"
+                href={featureDetailHref(item.feature_id)}
+                onClick={(event) => event.stopPropagation()}
+              >
+                {item.name}
+              </Link>
+              <div className="mt-1 flex flex-wrap gap-1">
+                <Badge variant="outline">{item.kind}</Badge>
+                <Badge variant="outline">{item.category}</Badge>
+              </div>
+            </>
+          );
+        },
+      },
+      {
+        accessorKey: "distance_m",
+        header: "distance",
+        cell: ({ row }) => (
+          <span className="font-mono text-xs">
+            {row.original.distance_m.toFixed(1)}m
+          </span>
+        ),
+      },
+      {
+        accessorKey: "status",
+        header: "status",
+        cell: ({ row }) => <StatusBadge status={row.original.status} />,
+      },
+    ],
+    [],
+  );
 
   const updateForm = <K extends FeatureCreateField>(
     key: K,
@@ -733,57 +769,21 @@ export function FeatureCreateClient() {
                   updateForm("duplicateRadiusM", event.target.value)
                 }
               />
-              {nearby.isLoading ? <Skeleton className="mt-4 h-32" /> : null}
               {nearby.isError ? (
                 <Alert className="mt-4" variant="destructive">
                   <AlertTitle>중복 후보 조회 실패</AlertTitle>
                   <AlertDescription>{nearby.error.message}</AlertDescription>
                 </Alert>
               ) : null}
-              <div className="mt-4 overflow-auto rounded-md border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>feature</TableHead>
-                      <TableHead>distance</TableHead>
-                      <TableHead>status</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {duplicateItems.map((item) => (
-                      <TableRow key={item.feature_id}>
-                        <TableCell>
-                          <Link
-                            className="font-medium text-primary underline-offset-4 hover:underline"
-                            href={featureDetailHref(item.feature_id)}
-                          >
-                            {item.name}
-                          </Link>
-                          <div className="mt-1 flex flex-wrap gap-1">
-                            <Badge variant="outline">{item.kind}</Badge>
-                            <Badge variant="outline">{item.category}</Badge>
-                          </div>
-                        </TableCell>
-                        <TableCell className="font-mono text-xs">
-                          {item.distance_m.toFixed(1)}m
-                        </TableCell>
-                        <TableCell>
-                          <StatusBadge status={item.status} />
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {!nearby.isLoading && duplicateItems.length === 0 ? (
-                      <TableRow>
-                        <TableCell
-                          className="h-24 text-center text-muted-foreground"
-                          colSpan={3}
-                        >
-                          후보 없음
-                        </TableCell>
-                      </TableRow>
-                    ) : null}
-                  </TableBody>
-                </Table>
+              <div className="mt-4">
+                <DataTable
+                  columns={duplicateColumns}
+                  data={duplicateItems}
+                  getRowId={(row) => row.feature_id}
+                  isLoading={nearby.isLoading}
+                  emptyMessage="후보 없음"
+                  containerClassName="overflow-auto rounded-md border"
+                />
               </div>
             </section>
           </div>
