@@ -41,14 +41,6 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 
 const terminalStatus = new Set(["SUCCESS", "FAILURE", "CANCELED"]);
@@ -456,61 +448,74 @@ function RunsTable({
 }
 
 function RunEventsTable({ events }: { events: DagsterRunEvent[] }) {
-  if (events.length === 0) {
-    return (
-      <div className="rounded-md border border-dashed p-5 text-sm text-muted-foreground">
-        표시할 Dagster event가 없습니다.
-      </div>
-    );
-  }
+  const columns = useMemo<ColumnDef<DagsterRunEvent, unknown>[]>(
+    () => [
+      {
+        id: "time",
+        header: "time",
+        accessorFn: (event) => event.timestamp ?? "",
+        cell: ({ row }) => (
+          <span className="whitespace-nowrap text-muted-foreground">
+            {formatEventTimestamp(row.original.timestamp)}
+          </span>
+        ),
+      },
+      {
+        id: "event",
+        header: "event",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const event = row.original;
+          return (
+            <div className="flex flex-col gap-1">
+              <Badge variant={event.level === "ERROR" ? "destructive" : "outline"}>
+                {event.dagster_event_type ?? event.event_type}
+              </Badge>
+              {event.level ? (
+                <span className="text-xs text-muted-foreground">
+                  {event.level}
+                </span>
+              ) : null}
+            </div>
+          );
+        },
+      },
+      {
+        id: "step",
+        header: "step",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <span className="font-mono text-xs">{row.original.step_id ?? "-"}</span>
+        ),
+      },
+      {
+        id: "message",
+        header: "message",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const errorText = graphqlErrorText(row.original.error);
+          return (
+            <div className="max-w-[34rem] whitespace-normal break-words text-sm">
+              {errorText ? (
+                <span className="text-destructive">{errorText}</span>
+              ) : (
+                (row.original.message ?? "-")
+              )}
+            </div>
+          );
+        },
+      },
+    ],
+    [],
+  );
 
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>time</TableHead>
-          <TableHead>event</TableHead>
-          <TableHead>step</TableHead>
-          <TableHead>message</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {events.map((event, index) => {
-          const errorText = graphqlErrorText(event.error);
-          return (
-            <TableRow key={`${event.event_type}:${event.timestamp ?? index}`}>
-              <TableCell className="whitespace-nowrap text-muted-foreground">
-                {formatEventTimestamp(event.timestamp)}
-              </TableCell>
-              <TableCell>
-                <div className="flex flex-col gap-1">
-                  <Badge variant={event.level === "ERROR" ? "destructive" : "outline"}>
-                    {event.dagster_event_type ?? event.event_type}
-                  </Badge>
-                  {event.level ? (
-                    <span className="text-xs text-muted-foreground">
-                      {event.level}
-                    </span>
-                  ) : null}
-                </div>
-              </TableCell>
-              <TableCell className="font-mono text-xs">
-                {event.step_id ?? "-"}
-              </TableCell>
-              <TableCell>
-                <div className="max-w-[34rem] whitespace-normal break-words text-sm">
-                  {errorText ? (
-                    <span className="text-destructive">{errorText}</span>
-                  ) : (
-                    (event.message ?? "-")
-                  )}
-                </div>
-              </TableCell>
-            </TableRow>
-          );
-        })}
-      </TableBody>
-    </Table>
+    <DataTable
+      columns={columns}
+      data={events}
+      getRowId={(event, index) => `${event.event_type}:${event.timestamp ?? index}`}
+      emptyMessage="표시할 Dagster event가 없습니다."
+    />
   );
 }
 

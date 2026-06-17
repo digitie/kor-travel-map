@@ -33,14 +33,6 @@ import { DataTable } from "@/components/ui/data-table";
 import { FormField, FormSelect, FormTextArea } from "@/components/ui/form-field";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { formatCount, formatDateTime, shortId } from "@/lib/format";
 
 const STALE_AFTER_HOURS = 48;
@@ -391,6 +383,111 @@ function PolicyEditor({
   );
 }
 
+type SyncStateRow = OpsProviderDatasetDetail["sync_states"][number];
+type RecentRequestRow =
+  OpsProviderDatasetDetail["recent_update_requests"][number];
+
+const syncStateColumns: ColumnDef<SyncStateRow, unknown>[] = [
+  {
+    accessorKey: "sync_scope",
+    header: "scope",
+    enableSorting: false,
+    cell: ({ row }) => row.original.sync_scope,
+  },
+  {
+    accessorKey: "status",
+    header: "status",
+    enableSorting: true,
+    cell: ({ row }) => <StatusBadge status={row.original.status} />,
+  },
+  {
+    accessorKey: "last_success_at",
+    header: "last success",
+    enableSorting: true,
+    cell: ({ row }) => (
+      <span className="text-muted-foreground">
+        {formatDateTime(row.original.last_success_at)}
+      </span>
+    ),
+  },
+  {
+    accessorKey: "next_run_after",
+    header: "next run",
+    enableSorting: true,
+    cell: ({ row }) => (
+      <span className="text-muted-foreground">
+        {formatDateTime(row.original.next_run_after)}
+      </span>
+    ),
+  },
+  {
+    accessorKey: "consecutive_failures",
+    header: "failures",
+    enableSorting: false,
+    cell: ({ row }) => formatCount(row.original.consecutive_failures),
+  },
+];
+
+const recentRequestColumns: ColumnDef<RecentRequestRow, unknown>[] = [
+  {
+    id: "request",
+    header: "request",
+    enableSorting: false,
+    cell: ({ row }) => (
+      <span className="font-mono text-xs">{shortId(row.original.request_id)}</span>
+    ),
+  },
+  {
+    accessorKey: "status",
+    header: "status",
+    enableSorting: true,
+    cell: ({ row }) => <StatusBadge status={row.original.status} />,
+  },
+  {
+    id: "job",
+    header: "job",
+    enableSorting: false,
+    cell: ({ row }) => (
+      <span className="font-mono text-xs">
+        {row.original.job_id ? (
+          <Link
+            className="underline underline-offset-2"
+            href={`/ops/import-jobs/${row.original.job_id}`}
+          >
+            {shortId(row.original.job_id)}
+          </Link>
+        ) : (
+          "-"
+        )}
+      </span>
+    ),
+  },
+  {
+    accessorKey: "created_at",
+    header: "created",
+    enableSorting: true,
+    cell: ({ row }) => (
+      <span className="text-muted-foreground">
+        {formatDateTime(row.original.created_at)}
+      </span>
+    ),
+  },
+  {
+    id: "link",
+    header: "link",
+    enableSorting: false,
+    cell: ({ row }) => (
+      <Link
+        className={buttonVariants({ size: "sm", variant: "ghost" })}
+        href={`/admin/feature-update-requests/${row.original.request_id}`}
+      >
+        <ExternalLinkIcon data-icon="inline-start" />
+        상세
+      </Link>
+    ),
+  },
+];
+
 function DatasetDetailPanel({
   selection,
   detail,
@@ -462,46 +559,13 @@ function DatasetDetailPanel({
         ) : null}
       </div>
 
-      <div className="overflow-auto rounded-lg border bg-background">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>scope</TableHead>
-              <TableHead>status</TableHead>
-              <TableHead>last success</TableHead>
-              <TableHead>next run</TableHead>
-              <TableHead>failures</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {(detail?.sync_states ?? []).map((state) => (
-              <TableRow key={state.sync_scope}>
-                <TableCell>{state.sync_scope}</TableCell>
-                <TableCell>
-                  <StatusBadge status={state.status} />
-                </TableCell>
-                <TableCell className="text-muted-foreground">
-                  {formatDateTime(state.last_success_at)}
-                </TableCell>
-                <TableCell className="text-muted-foreground">
-                  {formatDateTime(state.next_run_after)}
-                </TableCell>
-                <TableCell>{formatCount(state.consecutive_failures)}</TableCell>
-              </TableRow>
-            ))}
-            {(detail?.sync_states.length ?? 0) === 0 ? (
-              <TableRow>
-                <TableCell
-                  className="h-20 text-center text-muted-foreground"
-                  colSpan={5}
-                >
-                  sync state 없음
-                </TableCell>
-              </TableRow>
-            ) : null}
-          </TableBody>
-        </Table>
-      </div>
+      <DataTable
+        columns={syncStateColumns}
+        data={detail?.sync_states ?? []}
+        getRowId={(state) => state.sync_scope}
+        emptyMessage="sync state 없음"
+        containerClassName="overflow-auto rounded-lg border bg-background"
+      />
 
       <div className="rounded-lg border bg-background p-4">
         <div className="mb-2 font-medium">Cursor</div>
@@ -510,65 +574,13 @@ function DatasetDetailPanel({
         </pre>
       </div>
 
-      <div className="overflow-auto rounded-lg border bg-background">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>request</TableHead>
-              <TableHead>status</TableHead>
-              <TableHead>job</TableHead>
-              <TableHead>created</TableHead>
-              <TableHead>link</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {(detail?.recent_update_requests ?? []).map((request) => (
-              <TableRow key={request.request_id}>
-                <TableCell className="font-mono text-xs">
-                  {shortId(request.request_id)}
-                </TableCell>
-                <TableCell>
-                  <StatusBadge status={request.status} />
-                </TableCell>
-                <TableCell className="font-mono text-xs">
-                  {request.job_id ? (
-                    <Link
-                      className="underline underline-offset-2"
-                      href={`/ops/import-jobs/${request.job_id}`}
-                    >
-                      {shortId(request.job_id)}
-                    </Link>
-                  ) : (
-                    "-"
-                  )}
-                </TableCell>
-                <TableCell className="text-muted-foreground">
-                  {formatDateTime(request.created_at)}
-                </TableCell>
-                <TableCell>
-                  <Link
-                    className={buttonVariants({ size: "sm", variant: "ghost" })}
-                    href={`/admin/feature-update-requests/${request.request_id}`}
-                  >
-                    <ExternalLinkIcon data-icon="inline-start" />
-                    상세
-                  </Link>
-                </TableCell>
-              </TableRow>
-            ))}
-            {(detail?.recent_update_requests.length ?? 0) === 0 ? (
-              <TableRow>
-                <TableCell
-                  className="h-20 text-center text-muted-foreground"
-                  colSpan={5}
-                >
-                  provider_dataset request 없음
-                </TableCell>
-              </TableRow>
-            ) : null}
-          </TableBody>
-        </Table>
-      </div>
+      <DataTable
+        columns={recentRequestColumns}
+        data={detail?.recent_update_requests ?? []}
+        getRowId={(request) => request.request_id}
+        emptyMessage="provider_dataset request 없음"
+        containerClassName="overflow-auto rounded-lg border bg-background"
+      />
     </div>
   );
 }
