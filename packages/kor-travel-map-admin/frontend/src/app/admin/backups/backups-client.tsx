@@ -1,5 +1,6 @@
 "use client";
 
+import { type ColumnDef } from "@tanstack/react-table";
 import {
   ArchiveIcon,
   DatabaseIcon,
@@ -29,16 +30,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { DataTable } from "@/components/ui/data-table";
 import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { formatCount, formatDateTime, shortId } from "@/lib/format";
 
 const byteFormatter = new Intl.NumberFormat("ko-KR");
@@ -174,6 +167,78 @@ export function BackupsClient() {
     void backups.refetch();
   };
 
+  type BackupRow = NonNullable<typeof backups.data>["data"]["items"][number];
+  const columns = useMemo<ColumnDef<BackupRow, unknown>[]>(
+    () => [
+      {
+        accessorKey: "backup_id",
+        header: "backup",
+        cell: ({ row }) => (
+          <span className="font-mono text-xs">
+            {shortId(row.original.backup_id, 20)}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "created_at_utc",
+        header: "created",
+        enableSorting: true,
+        cell: ({ row }) => formatDateTime(row.original.created_at_utc),
+      },
+      {
+        accessorKey: "manifest_status",
+        header: "status",
+        enableSorting: true,
+        cell: ({ row }) => <StatusBadge status={row.original.manifest_status} />,
+      },
+      {
+        accessorKey: "byte_size",
+        header: "size",
+        enableSorting: true,
+        cell: ({ row }) => formatBytes(row.original.byte_size),
+      },
+      {
+        id: "action",
+        header: "action",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const backup = row.original;
+          return (
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  submitRestore(backup);
+                }}
+              >
+                <RotateCcwIcon data-icon="inline-start" />
+                Restore
+              </Button>
+              <Button
+                size="sm"
+                type="button"
+                variant="ghost"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  submitSwap(backup);
+                }}
+              >
+                <PlayIcon data-icon="inline-start" />
+                Swap
+              </Button>
+            </div>
+          );
+        },
+      },
+    ],
+    // submitRestore/submitSwap are stable closures over mutations defined above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
   const submitBackup = () => {
     createBackup.mutate(
       {
@@ -284,64 +349,15 @@ export function BackupsClient() {
               </div>
             </CardHeader>
             <CardContent className="overflow-auto">
-              {backups.isLoading ? <Skeleton className="h-64" /> : null}
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>backup</TableHead>
-                    <TableHead>created</TableHead>
-                    <TableHead>status</TableHead>
-                    <TableHead>size</TableHead>
-                    <TableHead>action</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {items.map((backup) => (
-                    <TableRow
-                      className="cursor-pointer"
-                      key={backup.backup_id}
-                      onClick={() => setSelectedId(backup.backup_id)}
-                    >
-                      <TableCell className="font-mono text-xs">
-                        {shortId(backup.backup_id, 20)}
-                      </TableCell>
-                      <TableCell>{formatDateTime(backup.created_at_utc)}</TableCell>
-                      <TableCell>
-                        <StatusBadge status={backup.manifest_status} />
-                      </TableCell>
-                      <TableCell>{formatBytes(backup.byte_size)}</TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            size="sm"
-                            type="button"
-                            variant="outline"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              submitRestore(backup);
-                            }}
-                          >
-                            <RotateCcwIcon data-icon="inline-start" />
-                            Restore
-                          </Button>
-                          <Button
-                            size="sm"
-                            type="button"
-                            variant="ghost"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              submitSwap(backup);
-                            }}
-                          >
-                            <PlayIcon data-icon="inline-start" />
-                            Swap
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+              <DataTable
+                columns={columns}
+                data={items}
+                getRowId={(row) => row.backup_id}
+                isLoading={backups.isLoading}
+                emptyMessage="백업이 없습니다."
+                onRowClick={(row) => setSelectedId(row.backup_id)}
+                isRowActive={(row) => selected?.backup_id === row.backup_id}
+              />
             </CardContent>
           </Card>
 

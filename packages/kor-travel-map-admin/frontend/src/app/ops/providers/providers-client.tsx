@@ -1,5 +1,6 @@
 "use client";
 
+import { type ColumnDef } from "@tanstack/react-table";
 import {
   ExternalLinkIcon,
   PanelRightOpenIcon,
@@ -28,6 +29,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Button } from "@/components/ui/button";
+import { DataTable } from "@/components/ui/data-table";
 import { FormField, FormSelect, FormTextArea } from "@/components/ui/form-field";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -98,16 +100,6 @@ function isStale(item: OpsProviderDatasetSummary): boolean {
   }
   const ageMs = Date.now() - new Date(item.last_success_at).getTime();
   return ageMs > STALE_AFTER_HOURS * 60 * 60 * 1000;
-}
-
-function rowTone(item: OpsProviderDatasetSummary): string | undefined {
-  if (item.consecutive_failures > 0) {
-    return "bg-destructive/5";
-  }
-  if (isStale(item)) {
-    return "bg-muted/60";
-  }
-  return undefined;
 }
 
 function numberText(value: number | null | undefined): string {
@@ -614,6 +606,111 @@ export function ProvidersFreshnessClient() {
     };
   }, [items]);
 
+  type ProviderRow = NonNullable<typeof providers.data>["data"]["items"][number];
+  const columns = useMemo<ColumnDef<ProviderRow, unknown>[]>(
+    () => [
+      {
+        id: "detail",
+        header: "detail",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const item = row.original;
+          const active = activeSelection
+            ? sameDataset(item, activeSelection)
+            : false;
+          return (
+            <Button
+              aria-pressed={active}
+              size="icon"
+              type="button"
+              variant={active ? "secondary" : "ghost"}
+              onClick={(event) => {
+                event.stopPropagation();
+                setSelection(selectionFromItem(item));
+              }}
+            >
+              <PanelRightOpenIcon />
+            </Button>
+          );
+        },
+      },
+      {
+        accessorKey: "provider",
+        header: "provider",
+        enableSorting: true,
+        cell: ({ row }) => (
+          <span className="font-medium">{row.original.provider}</span>
+        ),
+      },
+      {
+        accessorKey: "dataset_key",
+        header: "dataset",
+        enableSorting: true,
+        cell: ({ row }) => (
+          <span className="font-mono text-xs">{row.original.dataset_key}</span>
+        ),
+      },
+      {
+        accessorKey: "sync_scope",
+        header: "scope",
+        enableSorting: true,
+        cell: ({ row }) => row.original.sync_scope,
+      },
+      {
+        accessorKey: "status",
+        header: "status",
+        enableSorting: true,
+        cell: ({ row }) => <StatusBadge status={row.original.status} />,
+      },
+      {
+        id: "policy",
+        header: "policy",
+        accessorFn: (item) => item.refresh_policy?.targeted_policy ?? "",
+        enableSorting: true,
+        cell: ({ row }) =>
+          row.original.refresh_policy ? (
+            <Badge variant="outline">
+              {row.original.refresh_policy.targeted_policy}
+            </Badge>
+          ) : (
+            <span className="text-muted-foreground">-</span>
+          ),
+      },
+      {
+        accessorKey: "last_success_at",
+        header: "last success",
+        enableSorting: true,
+        cell: ({ row }) => (
+          <span className="text-muted-foreground">
+            {formatDateTime(row.original.last_success_at)}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "next_run_after",
+        header: "next run",
+        enableSorting: true,
+        cell: ({ row }) => (
+          <span className="text-muted-foreground">
+            {formatDateTime(row.original.next_run_after)}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "consecutive_failures",
+        header: "failures",
+        enableSorting: true,
+        cell: ({ row }) =>
+          row.original.consecutive_failures > 0 ? (
+            <Badge variant="destructive">{row.original.consecutive_failures}</Badge>
+          ) : (
+            <span className="text-muted-foreground">0</span>
+          ),
+      },
+    ],
+    [activeSelection],
+  );
+
   return (
     <AdminShell
       actions={
@@ -673,88 +770,18 @@ export function ProvidersFreshnessClient() {
         ) : null}
 
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(28rem,0.85fr)]">
-          <div className="overflow-auto rounded-lg border bg-background">
-            {providers.isLoading ? <Skeleton className="m-4 h-96" /> : null}
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>detail</TableHead>
-                  <TableHead>provider</TableHead>
-                  <TableHead>dataset</TableHead>
-                  <TableHead>scope</TableHead>
-                  <TableHead>status</TableHead>
-                  <TableHead>policy</TableHead>
-                  <TableHead>last success</TableHead>
-                  <TableHead>next run</TableHead>
-                  <TableHead>failures</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {items.map((item) => {
-                  const active = activeSelection
-                    ? sameDataset(item, activeSelection)
-                    : false;
-                  return (
-                    <TableRow className={rowTone(item)} key={itemKey(item)}>
-                      <TableCell>
-                        <Button
-                          aria-pressed={active}
-                          size="icon"
-                          type="button"
-                          variant={active ? "secondary" : "ghost"}
-                          onClick={() => setSelection(selectionFromItem(item))}
-                        >
-                          <PanelRightOpenIcon />
-                        </Button>
-                      </TableCell>
-                      <TableCell className="font-medium">{item.provider}</TableCell>
-                      <TableCell className="font-mono text-xs">
-                        {item.dataset_key}
-                      </TableCell>
-                      <TableCell>{item.sync_scope}</TableCell>
-                      <TableCell>
-                        <StatusBadge status={item.status} />
-                      </TableCell>
-                      <TableCell>
-                        {item.refresh_policy ? (
-                          <Badge variant="outline">
-                            {item.refresh_policy.targeted_policy}
-                          </Badge>
-                        ) : (
-                          <span className="text-muted-foreground">-</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {formatDateTime(item.last_success_at)}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {formatDateTime(item.next_run_after)}
-                      </TableCell>
-                      <TableCell>
-                        {item.consecutive_failures > 0 ? (
-                          <Badge variant="destructive">
-                            {item.consecutive_failures}
-                          </Badge>
-                        ) : (
-                          <span className="text-muted-foreground">0</span>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-                {!providers.isLoading && items.length === 0 ? (
-                  <TableRow>
-                    <TableCell
-                      className="h-32 text-center text-muted-foreground"
-                      colSpan={9}
-                    >
-                      provider ops row가 없습니다.
-                    </TableCell>
-                  </TableRow>
-                ) : null}
-              </TableBody>
-            </Table>
-          </div>
+          <DataTable
+            columns={columns}
+            data={items}
+            getRowId={(row) => itemKey(row)}
+            isLoading={providers.isLoading}
+            emptyMessage="provider ops row가 없습니다."
+            onRowClick={(row) => setSelection(selectionFromItem(row))}
+            isRowActive={(row) =>
+              activeSelection ? sameDataset(row, activeSelection) : false
+            }
+            containerClassName="overflow-auto rounded-lg border bg-background"
+          />
 
           <div className="flex min-w-0 flex-col gap-4">
             {activeSelection ? (

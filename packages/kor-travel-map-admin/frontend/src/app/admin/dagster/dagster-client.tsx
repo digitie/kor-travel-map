@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+
+import { type ColumnDef } from "@tanstack/react-table";
 
 import {
   ActivityIcon,
@@ -29,6 +31,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
+import { DataTable } from "@/components/ui/data-table";
 import {
   Card,
   CardAction,
@@ -362,76 +365,93 @@ function RunsTable({
   selectedRunId: string | null;
   onSelectRun: (runId: string) => void;
 }) {
-  if (runs.length === 0) {
-    return (
-      <div className="rounded-md border border-dashed p-5 text-sm text-muted-foreground">
-        최근 Dagster run이 없습니다.
-      </div>
-    );
-  }
-
-  return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>run</TableHead>
-          <TableHead>job</TableHead>
-          <TableHead>status</TableHead>
-          <TableHead>updated</TableHead>
-          <TableHead className="w-10">
-            <span className="sr-only">Dagster link</span>
-          </TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {runs.map((run) => {
+  const columns = useMemo<ColumnDef<DagsterRunSummary, unknown>[]>(
+    () => [
+      {
+        id: "run",
+        header: "run",
+        enableSorting: false,
+        cell: ({ row }) => {
+          const run = row.original;
           const selected = run.run_id === selectedRunId;
           return (
-            <TableRow
-              className={cn("cursor-pointer", selected ? "bg-muted/70" : "")}
-              data-state={selected ? "selected" : undefined}
-              key={run.run_id}
-              onClick={() => onSelectRun(run.run_id)}
-            >
-              <TableCell className="font-mono text-xs">
-                <Button
-                  className="font-mono"
-                  size="xs"
-                  type="button"
-                  variant={selected ? "secondary" : "ghost"}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onSelectRun(run.run_id);
-                  }}
-                >
-                  {shortRunId(run.run_id)}
-                </Button>
-              </TableCell>
-              <TableCell>{run.job_name ?? "-"}</TableCell>
-              <TableCell>
-                <Badge variant={statusVariant(run.status)}>{run.status}</Badge>
-              </TableCell>
-              <TableCell className="text-muted-foreground">
-                {formatEpoch(run.update_time ?? run.end_time ?? run.start_time)}
-              </TableCell>
-              <TableCell>
-                <a
-                  className={cn(buttonVariants({ variant: "ghost", size: "icon-xs" }))}
-                  href={dagsterRunUrl(run.run_id)}
-                  rel="noreferrer"
-                  target="_blank"
-                  title="Dagster run 열기"
-                  onClick={(event) => event.stopPropagation()}
-                >
-                  <ExternalLinkIcon />
-                  <span className="sr-only">Dagster run 열기</span>
-                </a>
-              </TableCell>
-            </TableRow>
+            <span className="font-mono text-xs">
+              <Button
+                className="font-mono"
+                size="xs"
+                type="button"
+                variant={selected ? "secondary" : "ghost"}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onSelectRun(run.run_id);
+                }}
+              >
+                {shortRunId(run.run_id)}
+              </Button>
+            </span>
           );
-        })}
-      </TableBody>
-    </Table>
+        },
+      },
+      {
+        id: "job",
+        header: "job",
+        accessorFn: (run) => run.job_name ?? "-",
+        cell: ({ row }) => row.original.job_name ?? "-",
+      },
+      {
+        accessorKey: "status",
+        header: "status",
+        cell: ({ row }) => (
+          <Badge variant={statusVariant(row.original.status)}>
+            {row.original.status}
+          </Badge>
+        ),
+      },
+      {
+        id: "updated",
+        header: "updated",
+        accessorFn: (run) =>
+          run.update_time ?? run.end_time ?? run.start_time ?? 0,
+        cell: ({ row }) => {
+          const run = row.original;
+          return (
+            <span className="text-muted-foreground">
+              {formatEpoch(run.update_time ?? run.end_time ?? run.start_time)}
+            </span>
+          );
+        },
+      },
+      {
+        id: "link",
+        header: () => <span className="sr-only">Dagster link</span>,
+        enableSorting: false,
+        cell: ({ row }) => (
+          <a
+            className={cn(buttonVariants({ variant: "ghost", size: "icon-xs" }))}
+            href={dagsterRunUrl(row.original.run_id)}
+            rel="noreferrer"
+            target="_blank"
+            title="Dagster run 열기"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <ExternalLinkIcon />
+            <span className="sr-only">Dagster run 열기</span>
+          </a>
+        ),
+      },
+    ],
+    [onSelectRun, selectedRunId],
+  );
+
+  return (
+    <DataTable
+      columns={columns}
+      data={runs}
+      getRowId={(run) => run.run_id}
+      emptyMessage="최근 Dagster run이 없습니다."
+      onRowClick={(run) => onSelectRun(run.run_id)}
+      isRowActive={(run) => run.run_id === selectedRunId}
+    />
   );
 }
 
