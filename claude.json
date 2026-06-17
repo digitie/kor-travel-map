@@ -25,7 +25,7 @@
         "serve",
         "--mcp"
       ],
-      "cwd": "F:\\dev\\python-krtour-map-claude"
+      "cwd": "F:\\dev\\kor-travel-map-claude"
     }
   }
 }
