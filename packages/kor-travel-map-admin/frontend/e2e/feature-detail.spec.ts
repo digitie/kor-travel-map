@@ -144,9 +144,10 @@ test.describe("/features/[featureId]", () => {
     ).toBeVisible();
     // 헤더 dl 라벨.
     await expect(page.getByText("coord", { exact: true })).toBeVisible();
-    // 메인 섹션 타이틀.
+    // 메인 섹션 타이틀(detail view scope — 헤더 nav의 동명 링크 'Issues'와 구분).
+    const detailView = page.getByTestId("feature-detail-view");
     for (const section of ["Sources", "Issues", "Overrides", "History", "Files"]) {
-      await expect(page.getByText(section, { exact: true })).toBeVisible();
+      await expect(detailView.getByText(section, { exact: true })).toBeVisible();
     }
     // Raw <details> disclosure.
     await expect(page.getByText("raw_refs", { exact: true })).toBeVisible();
