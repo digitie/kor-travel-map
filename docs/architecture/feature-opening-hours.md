@@ -262,7 +262,7 @@ weekday_text = [
 ]
 ```
 
-provider가 제공하면 그대로. 없으면 `periods`에서 자동 생성 (TripMate frontend
+provider가 제공하면 그대로. 없으면 `periods`에서 자동 생성 (PinVi frontend
 또는 본 라이브러리 helper).
 
 ## 10. 시간대

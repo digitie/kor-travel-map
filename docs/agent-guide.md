@@ -110,7 +110,7 @@ PR은 불완전하다.
 - docs/architecture/performance.md §9 갱신
 - docs/resume.md 진척도 갱신
 **결정**: 라이브러리 in-memory 캐시 도입하지 않음, 호출자 책임
-**발견**: TripMate는 Redis를 이미 가지고 있어 외부 캐시는 자연스럽다
+**발견**: PinVi는 Redis를 이미 가지고 있어 외부 캐시는 자연스럽다
 **다음**: 코드 작성 단계 진입 전 ADR-020 사용자 확인 받기
 ```
 
@@ -241,7 +241,7 @@ gh pr create --title "<scope>: <imperative summary (≤70자)>" --body "$(cat <<
 
 ## 영향 (Impact)
 - BREAKING 여부 (DTO 시그니처, DB schema, OpenAPI)
-- TripMate / 디버그 UI / provider 어느 쪽에 변경 필요한지
+- PinVi / 디버그 UI / provider 어느 쪽에 변경 필요한지
 
 ## 검증 (Verification)
 - [ ] pytest tests/unit -q

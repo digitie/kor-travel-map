@@ -26,7 +26,7 @@
   `kortravelmap.core.address`를 사용한다.
 - category/maki/icon 매핑은 `kortravelmap.category`와
   `@kor-travel-map/map-marker-react`를 사용한다.
-- 과거 TripMate 직접 import 예시는 ADR-045/ADR-046 이후 폐기됐다. TripMate는
+- 과거 PinVi 직접 import 예시는 ADR-045/ADR-046 이후 폐기됐다. PinVi는
   OpenAPI로 kor-travel-map을 호출한다.
 
 ## 관련 문서

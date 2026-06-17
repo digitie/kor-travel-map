@@ -155,6 +155,6 @@ ConcurrencyConfig: `krex_api: max_concurrent=1`.
 ## 8. 후속
 
 - 영업 시간 구조화 (`business_hours` 자유 텍스트 → `FeatureOpeningHours`).
-- 휴게소 음식점 → POI 도메인 연계 (TripMate 책임).
+- 휴게소 음식점 → POI 도메인 연계 (PinVi 책임).
 - 휴게소 주차 가능 대수 → `facility_info` 추가.
 - 교통 공지는 `docs/etl/notice-feature-etl.md`.

@@ -21,7 +21,7 @@ Search Local / Google Places Text Search(New)로 보강하는 ETL이다.
 | 항목 | 값 |
 |------|----|
 | 소유 | `kor-travel-map` |
-| 실행 소유 | TripMate (Dagster) 또는 admin trigger |
+| 실행 소유 | PinVi (Dagster) 또는 admin trigger |
 | 기준 코드 | `kortravelmap.places`, `kortravelmap.load_feature_rows` |
 | Feature.kind | `place` (보강 only — 새 feature 생성 X) |
 | 상세 테이블 | `feature_place_details` |
@@ -344,5 +344,5 @@ def _calc_confidence(feature: Feature, candidate: PlaceSearchCandidate) -> int:
 ✗ DB payload: API key 평문 저장 금지
 ✗ 로그: API key 평문 출력 금지 (SecretStr로 보호)
 ✗ git commit: .env 절대 commit X
-✓ vault / systemd EnvironmentFile / TripMate secret manager 사용
+✓ vault / systemd EnvironmentFile / PinVi secret manager 사용
 ```

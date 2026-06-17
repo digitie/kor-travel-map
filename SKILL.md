@@ -10,7 +10,7 @@
 (`python-*-api`)의 결과를 단일 `Feature` 계약으로 정규화하고 독립 PostgreSQL +
 PostGIS DB에 저장한다.
 
-ADR-045 이후 TripMate ↔ kor-travel-map은 **OpenAPI 기반 HTTP**로 연결된다. TripMate는
+ADR-045 이후 PinVi ↔ kor-travel-map은 **OpenAPI 기반 HTTP**로 연결된다. PinVi는
 kor-travel-map DB에 직접 접근하지 않고 `kor-travel-map`을 운영 코드에서 직접 import하지
 않는다. REST/OpenAPI backend는 **별도 Python 패키지** `kor-travel-map-api`
 (`packages/kor-travel-map-api/`, ADR-055), admin UI는
@@ -104,8 +104,8 @@ worktree 배치·`codegraph init/sync`·MCP 등록·수정 전 영향도 평가 
     만들지 말 것.
 21. **`src/krtour/` namespace 부활 금지** — T-226 이후 `kortravelmap`이 유일한
     import root다. `src/kortravelmap/__init__.py`는 public root로 유지한다.
-22. **TripMate 도메인 모델을 본 라이브러리에 정의 금지** — 사용자/여행계획/POI는
-    TripMate.
+22. **PinVi 도메인 모델을 본 라이브러리에 정의 금지** — 사용자/여행계획/POI는
+    PinVi.
 23. **GitHub Actions CI green 통과 전 머지 금지** — ADR-038 (2026-05-27
     재활성화). `.github/workflows/{ci,lint,openapi}.yml` 모두 통과 + 1 review.
     "쓰지마"였던 2026-05-26 시기 패턴은 폐기.

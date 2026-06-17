@@ -40,7 +40,7 @@
 | `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_BASE_URL` | kor-travel-concierge-youtube | 형제 앱 kor-travel-concierge | base URL, 예: `http://127.0.0.1:12401` |
 | `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_API_KEY` | kor-travel-concierge-youtube | kor-travel-concierge `API_KEYS` 중 하나 | `X-API-Key` 헤더로 전송 |
 | `KOR_TRAVEL_GEO_*` | kor-travel-geo | (로컬 DB 위주, vworld 폴백 키는 kor-travel-geo가 관리) | 본 라이브러리는 kor-travel-geo client만 사용 |
-| `KOR_TRAVEL_GEO_VWORLD_API_KEY` | kor-travel-geo (reverse geocoding), 디버그 UI frontend (maplibre-vworld), TripMate 사용자 UI (ADR-026) | VWorld (vworld.kr) | **공유 키**. 별도 발급 X. ADR-025 + ADR-026 |
+| `KOR_TRAVEL_GEO_VWORLD_API_KEY` | kor-travel-geo (reverse geocoding), 디버그 UI frontend (maplibre-vworld), PinVi 사용자 UI (ADR-026) | VWorld (vworld.kr) | **공유 키**. 별도 발급 X. ADR-025 + ADR-026 |
 
 ## 3. provider별 발급 절차 (요약)
 
@@ -197,7 +197,7 @@ REST export는 ADR-053 예외로, kor-travel-map Dagster fetcher가 같은 timeo
 
 본 라이브러리에서 강제 가능한 추가 제어:
 
-- `Dagster ConcurrencyConfig` (TripMate 측)으로 same API resource pool
+- `Dagster ConcurrencyConfig` (PinVi 측)으로 same API resource pool
   `max_concurrent=1` (SPEC V8 K-2).
 - bulk 적재 시 page 단위 sleep (provider 라이브러리에서).
 - `ProviderSyncState.next_run_after`로 다음 호출 시각 박음 — Dagster scheduler가
@@ -229,13 +229,13 @@ provider API spec이 변경되면:
 - **Google Places API (New)**: 호출당 비용. Place phone enrichment는 candidate
   3개 미만으로 제한 (`PLACE_PHONE_MAX_CANDIDATES=3`).
 - **VWorld API** (`maplibre-vworld-js` 의 raster/vector tile): 본 라이브러리
-  디버그 UI frontend **및 TripMate 사용자 UI** (ADR-026)가 사용. 키는
+  디버그 UI frontend **및 PinVi 사용자 UI** (ADR-026)가 사용. 키는
   `kor-travel-geo` ADR-019의 `KOR_TRAVEL_GEO_VWORLD_API_KEY`를 **공유 사용**
   (ADR-025 사용자 보강 2026-05-25). 별도 발급 금지. frontend는 **Next.js**
   (ADR-025 2차 보강) 규약상 `NEXT_PUBLIC_VWORLD_API_KEY`로 노출 — 값은
-  동일 출처. HTTP referrer 제한 권장 (backend 호스트 + TripMate frontend
+  동일 출처. HTTP referrer 제한 권장 (backend 호스트 + PinVi frontend
   호스트).
-- **Kakao Maps JS SDK**: **미사용** (ADR-026 — TripMate 사용자 UI도
+- **Kakao Maps JS SDK**: **미사용** (ADR-026 — PinVi 사용자 UI도
   maplibre-vworld로 통일, SPEC V8 v8_3 supersede). 본 항목은 reference로
   유지하되 비용/한도 모니터링 대상이 아니다.
 - **OpiNet**: 분당 한도 — token bucket으로 보호.
@@ -257,7 +257,7 @@ GROUP BY provider
 ORDER BY calls DESC;
 ```
 
-Grafana 패널에 노출 (TripMate 측). 5xx 비율 임계 초과 시 알림.
+Grafana 패널에 노출 (PinVi 측). 5xx 비율 임계 초과 시 알림.
 
 ## 10. 호출 안 함 (테스트 기본)
 

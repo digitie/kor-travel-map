@@ -1,6 +1,6 @@
 # adr045-standalone-plan.md — 독립 프로그램화 실행 계획 (AI agent 실행용)
 
-ADR-045(kor-travel-map = Docker 독립 프로그램 + 독립 DB/Dagster + TripMate OpenAPI)를
+ADR-045(kor-travel-map = Docker 독립 프로그램 + 독립 DB/Dagster + PinVi OpenAPI)를
 **실제 코드/배포로 구현**하기 위한 세분 실행 계획. 새 AI agent가 이 문서 하나로
 순서·범위·차단요소를 파악하고 바로 task 단위로 진행할 수 있게 한다.
 
@@ -10,7 +10,7 @@ ADR-045(kor-travel-map = Docker 독립 프로그램 + 독립 DB/Dagster + TripMa
 > - admin UI 워크플로/엔드포인트 상세: `docs/debug-ui-admin-workflows.md`
 > - 외부 POI 캐시 갱신 타깃: `docs/poi-cache-update-targets.md`
 > - Dagster 책임 경계: `docs/architecture/dagster-boundary.md`
-> - TripMate 연계 REST 세부(params/returns): `docs/architecture/tripmate-rest-api.md`
+> - PinVi 연계 REST 세부(params/returns): `docs/architecture/tripmate-rest-api.md`
 > - 의사결정 결과: `docs/adr045-open-decisions.md` (D-1~D-16 전부 결정 완료)
 > - 데이터 모델: `docs/architecture/data-model.md` / `docs/architecture/postgres-schema.md`
 
@@ -26,9 +26,9 @@ update-requests` CRUD + cancel/run-now, 6 scope, provider runs, POI cache),
 2. scope resolver(5~6종) + dry_run count + request→job 브리지 **로직 없음**.
 3. FastAPI admin/ops/features 라우터 **대부분 미구현**(현재 admin package는
    health/version/etl/features/mois-detail만).
-4. **Dagster 프로그램 자체가 없음** (TripMate에서 복사·구체화 필요).
+4. **Dagster 프로그램 자체가 없음** (PinVi에서 복사·구체화 필요).
 5. **docker-compose.yml / 배포 매니페스트 없음**.
-6. TripMate 연계 REST의 **params/returns 미확정** → `tripmate-rest-api.md`로 분리.
+6. PinVi 연계 REST의 **params/returns 미확정** → `tripmate-rest-api.md`로 분리.
 7. **ADR-045 의사결정 D-1~D-16 전부 확정** → `adr045-open-decisions.md`.
 
 **재사용 가능한 기존 자산 (재발명 금지)**: `infra/feature_repo.features_in_bbox`,
@@ -147,9 +147,9 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
   (ADR-031 amendment, D-3). `scripts/export_openapi.py --profile all`이
   `openapi.json`과 `openapi.user.json`을 함께 생성/검증한다.
 
-## 4. Phase 4 — Dagster (TripMate에서 복사 → 구체화)
+## 4. Phase 4 — Dagster (PinVi에서 복사 → 구체화)
 
-> 정본 경계: `dagster-boundary.md`(kor-travel-map-owned로 갱신됨). 복사 원본: TripMate
+> 정본 경계: `dagster-boundary.md`(kor-travel-map-owned로 갱신됨). 복사 원본: PinVi
 > `F:\dev\tripmate\apps\etl\` (현재 skeleton — definitions/resources sketch). 상세
 > 구조·resources·assets·schedules·sensors·queue 브리지는 §본 절 + agent 리서치.
 
@@ -214,28 +214,28 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
 - **T-209c** Dockerfile 3종(api/frontend/dagster) 또는 멀티스테이지. GDAL/PostGIS
   client lib 포함(WSL libgdal 3.8.4 정합).
 - **T-209d** `docs/runbooks/`에 `docker-app.md`(standalone 기동/스모크) +
-  `deploy.md` 추가(TripMate runbooks 컨벤션 참고).
+  `deploy.md` 추가(PinVi runbooks 컨벤션 참고).
 - **T-209e** backup/restore를 **독립 kor_travel_map + kor_travel_map_dagster + RustFS**
   대상으로 구체화(ADR-040 amendment, D-5 RustFS 배치). `infra/backup.py` + admin 라우터.
 
-## 6. Phase 6 — TripMate 연계 + 문서 정리
+## 6. Phase 6 — PinVi 연계 + 문서 정리
 
-- **T-210a** `docs/architecture/tripmate-rest-api.md` 확정 — TripMate가 호출하는 사용자/서비스
+- **T-210a** `docs/architecture/tripmate-rest-api.md` 확정 — PinVi가 호출하는 사용자/서비스
   API params/returns 구체화(본 PR에서 1차 작성, 구현 시 OpenAPI와 동기).
-- **T-210b** TripMate 측 문서 정리(별도 repo `F:\dev\tripmate`) — 직접 import/공유
-  DB/TripMate-owned Dagster 기술 문서를 ADR-045 OpenAPI 모델로 supersede. 대상
+- **T-210b** PinVi 측 문서 정리(별도 repo `F:\dev\tripmate`) — 직접 import/공유
+  DB/PinVi-owned Dagster 기술 문서를 ADR-045 OpenAPI 모델로 supersede. 대상
   목록: `docs/kor-travel-map-integration.md`(전면), `docs/architecture/architecture.md`, `docs/
   runbooks/etl.md`, `docs/architecture/dagster-etl-bridge.md`, `docs/api/features.md`,
-  TripMate `docs/adr/README.md` ADR-002/003 banner. (TripMate repo PR로 분리.)
-- **T-210c** TripMate→kor-travel-map **이관**: TripMate `apps/etl`의 Dagster 자산/
+  PinVi `docs/adr/README.md` ADR-002/003 banner. (PinVi repo PR로 분리.)
+- **T-210c** PinVi→kor-travel-map **이관**: PinVi `apps/etl`의 Dagster 자산/
   resource/schedule(현재 skeleton)을 kor-travel-map `packages/kor-travel-map-dagster`로
   이관(T-208). offline upload load·consistency/dedup job도 kor-travel-map 소유로.
-- **T-210d** TripMate **backend(Python)** 신규: 수기 `httpx` wrapper
+- **T-210d** PinVi **backend(Python)** 신규: 수기 `httpx` wrapper
   `integrations/kor_travel_map_client.py`(kor-travel-map의 `KorTravelGeoRestClient` 방식, 직접
-  import 제거) + `docs/api/kor-travel-map-openapi-integration.md`. (TripMate repo, D-4.)
-- **T-210e** TripMate **frontend(TS)**: kor-travel-map `openapi.json` →
+  import 제거) + `docs/api/kor-travel-map-openapi-integration.md`. (PinVi repo, D-4.)
+- **T-210e** PinVi **frontend(TS)**: kor-travel-map `openapi.json` →
   `openapi-typescript` codegen(`types/api.gen.ts`) + 수동 Zod mirror + CI diff 게이트
-  (kor-travel-geo `gen-types.mjs` 패턴, D-4). (TripMate repo.)
+  (kor-travel-geo `gen-types.mjs` 패턴, D-4). (PinVi repo.)
 
 ---
 
@@ -246,14 +246,14 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
 
 | 위치 | 충돌/갭 | 조치 |
 |------|---------|------|
-| SPRINT-5 §2.4 (T-200) | 구 Dagster 소유권 문구가 ADR-045와 충돌 | kor-travel-map Dagster asset, TripMate는 OpenAPI queue 제어만(ADR-045 §5)으로 정리 완료 |
+| SPRINT-5 §2.4 (T-200) | 구 Dagster 소유권 문구가 ADR-045와 충돌 | kor-travel-map Dagster asset, PinVi는 OpenAPI queue 제어만(ADR-045 §5)으로 정리 완료 |
 | SPRINT-5 §2.5~2.11 | "debug-ui" 용어 = admin/ops UI로 확장 모호 | `/debug`(개발) vs `/admin`·`/ops`(운영) prefix 분리 명시 |
 | SPRINT-4 §2.9 (backup) | 백업 대상 DB 소유 불명 | 독립 `kor_travel_map`+`kor_travel_map_dagster`+RustFS 대상(ADR-040 amendment) |
 | tasks.md | T-205~T-210 (Docker/OpenAPI ver/Dagster/admin routes/React Doctor) **없음** | 본 계획의 T-205~210 backlog 등록(완료, tasks.md) |
-| ADR-003 §후속 | `AsyncKorTravelMapClient` "테스트용 public" 표현 모호 | "kor-travel-map 내부(api/dagster)+테스트 전용, TripMate import 금지" 명확화 |
+| ADR-003 §후속 | `AsyncKorTravelMapClient` "테스트용 public" 표현 모호 | "kor-travel-map 내부(api/dagster)+테스트 전용, PinVi import 금지" 명확화 |
 | ADR-011 §결과(부정) | "Dagster 큐 중복 가능 — ADR-016에서 분리"(오참조) | "import_jobs가 1차 큐, Dagster sensor가 폴링"(ADR-045 §5) |
 | ADR-031 | 단일 OpenAPI 가정 | admin schema + 사용자 schema 이원 drift gate(amendment, D-3) |
-| ADR-034 | provider 적재 주체(TripMate vs kor-travel-map Dagster) 경계 미표기 | Sprint 2~4=CLI/client, Sprint 5+=kor-travel-map Dagster queue (amendment) |
+| ADR-034 | provider 적재 주체(PinVi vs kor-travel-map Dagster) 경계 미표기 | Sprint 2~4=CLI/client, Sprint 5+=kor-travel-map Dagster queue (amendment) |
 | ADR-040 | 단일 공유 DB 백업 가정 | 독립 DB 묶음 백업(amendment, D-5) |
 | ADR-005 | "코드에 인증 없음"은 유지하나 운영 인증 pass-through 필요 | network/infra 계층 인증 가정 amendment(D-1 auth) |
 
@@ -277,9 +277,9 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
 14. **T-201b** — F5~F8 gate와 실제 운영 MV 카탈로그/refresh 정책.
 15. **Phase 4.5 T-211a/b** — admin UI 최신화 gap audit/API 계약 보강/구현 — 완료된
    부분은 유지하고, T-212 전체점검에서 운영 완결성 기준으로 재평가.
-16. **Phase 4 T-208 잔여** — provider resources/ops polish, TripMate 이관과 병행.
+16. **Phase 4 T-208 잔여** — provider resources/ops polish, PinVi 이관과 병행.
 17. **Phase 5 T-209a/b** (docker-compose + 기동) — 라우터/Dagster 동작 후 통합.
-17. **Phase 6** TripMate 정리/이관 — Dagster 이관 시점 동기.
+17. **Phase 6** PinVi 정리/이관 — Dagster 이관 시점 동기.
 18. OpenAPI client gen은 운영 안정 후.
 
 각 task는 1-PR 단위(`docs/runbooks/agent-workflow.md`), 4 게이트 + 해당 시 alembic/

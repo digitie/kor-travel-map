@@ -261,7 +261,7 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 ## 7. 보관 정책 (ADR-017) → purge SQL
 
 ```sql
--- weather_values: +30일 (참조 trip 0건은 TripMate trip_pois 조인으로 별도 검증)
+-- weather_values: +30일 (참조 trip 0건은 PinVi trip_pois 조인으로 별도 검증)
 DELETE FROM feature.feature_weather_values WHERE valid_at < now() - interval '30 days';
 
 -- notice: 종료일/발표일 +1년
@@ -378,7 +378,7 @@ slow query log:
 log_min_duration_statement = 1000  -- 1초 이상
 ```
 
-Grafana Loki에서 LogQL로 추적 (TripMate 측 wiring).
+Grafana Loki에서 LogQL로 추적 (PinVi 측 wiring).
 
 ## 11. 백업 / 복구
 
@@ -388,7 +388,7 @@ pg_dump --format=custom --no-owner --no-privileges \
         --schema=feature --schema=provider_sync --schema=ops \
         kor_travel_map > /backup/kor_travel_map_$(date +%F).dump
 
-# PITR: wal-g + BackBlaze B2 (TripMate 측 운영)
+# PITR: wal-g + BackBlaze B2 (PinVi 측 운영)
 ```
 
 복구:

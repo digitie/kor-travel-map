@@ -210,7 +210,7 @@ UNIQUE constraint).
 
 ## 10. Dagster
 
-| asset (TripMate) | dataset_key | cron | group |
+| asset (PinVi) | dataset_key | cron | group |
 |-----------------|-------------|------|-------|
 | `feature_route_standard_tourism_roads` | `standard_tourism_roads` | `0 2 1 1 *` (연 1회) | `features_route` |
 | `feature_place_datagokr_museums` | `datagokr_museums` | `0 2 1 1 *` (연 1회) | `features_place` |

@@ -1,7 +1,7 @@
 # feature-db-initialization.md — feature DB 부트스트랩
 
 본 문서는 kor-travel-map 독립 프로그램(ADR-045)이 PostgreSQL + PostGIS 위의 feature
-DB를 부트스트랩하고 내부 라이브러리 client를 초기화하는 절차다. TripMate 공유 DB를
+DB를 부트스트랩하고 내부 라이브러리 client를 초기화하는 절차다. PinVi 공유 DB를
 사용하지 않는다.
 
 ## 1. 부트스트랩 순서
@@ -33,7 +33,7 @@ docker run -d --name krtour-postgis \
 
 DSN: `postgresql+asyncpg://kor_travel_map:changeme@localhost:5432/kor_travel_map`.
 
-운영 환경에서도 DB는 kor-travel-map이 소유한다. TripMate는 OpenAPI로만 접근하며
+운영 환경에서도 DB는 kor-travel-map이 소유한다. PinVi는 OpenAPI로만 접근하며
 PostgreSQL에 직접 연결하지 않는다 (ADR-045).
 
 ## 3. Schema 부트스트랩

@@ -9,7 +9,7 @@
 
 ## 1. 목적
 
-지도 marker용 카테고리 분류 + Mapbox Maki icon 매핑을 제공한다. TripMate 지도의
+지도 marker용 카테고리 분류 + Mapbox Maki icon 매핑을 제공한다. PinVi 지도의
 모든 marker는 이 카테고리 체계로 분류되고, frontend는 `marker_icon` (maki id) +
 `marker_color` (`P-01` ~ `P-16`, v2 frontend 팔레트) 조합으로 렌더링한다.
 
@@ -502,9 +502,9 @@ ADR-023 결정으로 본 저장소에 이전. 변경 이력은 git log 참조.
 
 ## 11. 향후 확장 후보
 
-- 카테고리 → 지역/계절 가중치 매핑 (TripMate 추천 시스템에서 사용 시).
+- 카테고리 → 지역/계절 가중치 매핑 (PinVi 추천 시스템에서 사용 시).
 - 다국어 라벨 (현재 한국어만 — i18n 도입 시 ko/en 분리).
-- 사용자 정의 카테고리 (TripMate POI 도메인에 둘 가능성 있어 본 저장소는 표준
+- 사용자 정의 카테고리 (PinVi POI 도메인에 둘 가능성 있어 본 저장소는 표준
   카테고리만 책임).
 
 위 확장은 ADR + PR로 진행.

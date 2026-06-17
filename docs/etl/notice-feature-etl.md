@@ -297,4 +297,4 @@ WHERE d.feature_id=f.feature_id AND f.kind='notice'
 - KMA 영향예보, 폭염주의보 추가 등급 검토.
 - 산림 안전 공지 GIS (위치/영역) 보강.
 - KHOA marine 지수 → notice 자동 생성 (특정 threshold 초과 시).
-- 알림 자동 전송 (TripMate trip POI가 영향 지역과 겹치면 사용자에게 push).
+- 알림 자동 전송 (PinVi trip POI가 영향 지역과 겹치면 사용자에게 push).

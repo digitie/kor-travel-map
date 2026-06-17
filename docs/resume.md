@@ -109,13 +109,13 @@ Sprint 5 운영 진입 마무리다. 핵심 구현과 운영 표면은 대부분
   consistency report `99159eea` OK, offline upload 3포맷 + DELETE lifecycle, Windows
   Playwright 33/33, API smoke 17/17, backup/restore smoke.
 - `T-221` admin UI/UX 연결성, `T-222` 공개 해수욕장/축제 뷰 API, `T-223`
-  curated feature/TripMate import, `T-224` concierge provider 경계 정리는 완료됐다.
+  curated feature/PinVi import, `T-224` concierge provider 경계 정리는 완료됐다.
 - `T-226` 패키지/runtime identity clean cut, `T-227` Prometheus 메트릭, `T-228`
   API/backend와 admin frontend 패키지 분리도 완료됐다.
 - `T-225`(T-212e closure 재검증, 2026-06-13)·`T-229`(curated 오버레이 + post-reload
   표면 라이브 검증, 2026-06-14)는 완료됐다. 본 저장소에서 즉시 실행 가능한 큰 트랙은
   없고, 유일 잔여는 **arm64 multi-arch buildx 배포 검증**(`T-229-buildx`, `GITHUB_TOKEN`이
-  주입된 배포 환경 필요)뿐이다. TripMate 쪽 작업은 외부 추적으로만 남긴다.
+  주입된 배포 환경 필요)뿐이다. PinVi 쪽 작업은 외부 추적으로만 남긴다.
 
 ## 다음 한 작업
 
@@ -149,10 +149,10 @@ T-108/ADR-056의 arm64 multi-arch buildx 이미지 build+boot smoke다.
 
 외부 추적:
 
-- `T-019` — TripMate Kakao Maps → maplibre-vworld 교체와 SPEC supersede.
-- `T-210b` — TripMate 문서 supersede.
-- `T-210c` — TripMate `apps/etl` 레거시 Dagster 이관/삭제.
-- `T-210d` — TripMate httpx OpenAPI client 신규.
+- `T-019` — PinVi Kakao Maps → maplibre-vworld 교체와 SPEC supersede.
+- `T-210b` — PinVi 문서 supersede.
+- `T-210c` — PinVi `apps/etl` 레거시 Dagster 이관/삭제.
+- `T-210d` — PinVi httpx OpenAPI client 신규.
 
 보류:
 
@@ -174,7 +174,7 @@ T-108/ADR-056의 arm64 multi-arch buildx 이미지 build+boot smoke다.
 - 로컬 고정 포트(docker-manager 기준): API `12701`, admin UI `12705`,
   Dagster `12702`, RustFS S3 `12101`, RustFS console `12105`,
   kor-travel-geo API `12501`.
-- TripMate 연동: OpenAPI HTTP. 직접 import와 DB 직접 접근 없음.
+- PinVi 연동: OpenAPI HTTP. 직접 import와 DB 직접 접근 없음.
 
 ## 참고 위치
 

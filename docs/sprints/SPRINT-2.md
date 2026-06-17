@@ -262,7 +262,7 @@ Sprint 2 진행 중 다음 ADR들의 1차 implementation 점진 도입:
 ## 6. 위험 / 차단 사유
 
 - **provider rate limit**: KMA / OpiNet은 분당 한도 있음. `ConcurrencyConfig`
-  TripMate 측, 본 라이브러리는 page 단위 sleep만 ETL doc에 명기.
+  PinVi 측, 본 라이브러리는 page 단위 sleep만 ETL doc에 명기.
 - **좌표 nullable**: visitkorea festival은 좌표 없는 경우 다수. 좌표 없는
   feature는 적재하되 `coord_5179`는 NULL → `features_in_bounds` 쿼리에서
   자연히 제외.

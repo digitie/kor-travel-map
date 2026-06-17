@@ -29,7 +29,7 @@
 ### 1.3 부족한 endpoint/model
 
 provider 라이브러리에 부족한 endpoint, typed model, raw payload 보존이 발견되면
-**해당 `python-*-api` 저장소에서 먼저 고친다**. 본 라이브러리/TripMate에 임시
+**해당 `python-*-api` 저장소에서 먼저 고친다**. 본 라이브러리/PinVi에 임시
 facade를 만들지 않는다.
 
 ### 1.4 로컬 우선 조회 + 데이터 정합성 책임 (ADR-044)
@@ -185,7 +185,7 @@ system
 | python-krforest-api | place, route, area, weather, notice | primary | 일/시간 | 휴양림/숲길/산악기상/안전공지 |
 | python-knps-api | place, route, area, weather | primary | 월/분기/연 (파일 데이터) | keyless file-only. 국립공원 경계·탐방로·선형시설·시설·위험지역·특별보호구역·문화자원·대피소 (`docs/etl/knps-feature-etl.md`, ADR-028 amendment) |
 | python-krheritage-api | place, area, event | primary | 주 (place/area), 일 (event) | media → RustFS |
-| python-kasi-api | (calendar) | (system) | 주 1회 | 공휴일/달력 (TripMate utility) |
+| python-kasi-api | (calendar) | (system) | 주 1회 | 공휴일/달력 (PinVi utility) |
 | python-datagokr-api (data.go.kr-standard/fileData) | event, place, route | primary | 표준데이터별 / fileData별 | 표준데이터 6종 + curated fileData 4종. 본 lib에서 직접 사용 (ADR-042/T-223b) — 위 첫 행 참조 |
 | python-mcst-api | place | primary | 주 (파일데이터 CSV) | keyless 파일 다운로드(#395). 세계음식점/서점류/레저·캠핑/미디어 촬영지/골프장 등 13 dataset — MOIS dedup pair는 실데이터 확인 후 (`docs/etl/mcst-feature-etl.md` §7) |
 | kakao-local-api | place | enrichment | on-demand | 전화번호 보강 |
@@ -401,14 +401,14 @@ WeatherValue로 일관 적재.
 
 1. 문서 정보: provider, dataset_key, FeatureKind, source_entity_type, 갱신 주기,
    entrypoint
-2. 범위: 책임 분리 (provider 라이브러리 vs 본 라이브러리 vs TripMate)
+2. 범위: 책임 분리 (provider 라이브러리 vs 본 라이브러리 vs PinVi)
 3. Provider 경계: public client/typed model 직접 사용, wrapper 금지 재확인
 4. Dataset 매핑: natural key, FeatureKind, detail table, source_role
 5. 주소/좌표: 본 저장소 DTO (`Address`, `Coordinate`) + `core/address.py`
    utility, `kor-travel-geo` REST geocoding, match report
 6. 파일: RustFS 적재 대상, FeatureFileSource 매핑
 7. DB 적재: collect/load 함수, transaction owner, prune 정책
-8. Dagster: TripMate가 정의하는 asset 이름, schedule
+8. Dagster: PinVi가 정의하는 asset 이름, schedule
 9. 검증: unit/integration/fixture 케이스
 10. 후속: provider 라이브러리에서 먼저 할 일
 

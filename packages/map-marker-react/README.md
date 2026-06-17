@@ -1,6 +1,6 @@
 # @kor-travel-map/map-marker-react
 
-`kor-travel-map` 디버그 UI와 TripMate 사용자 UI에서 공통으로 쓰는 마커/
+`kor-travel-map` 디버그 UI와 PinVi 사용자 UI에서 공통으로 쓰는 마커/
 카테고리-maki 매핑/색상 팔레트 React 컴포넌트 라이브러리 (ADR-029).
 
 > **현재 상태 (Sprint 1 skeleton)**: 본 패키지는 ADR-029 결정에 따른 npm
@@ -10,7 +10,7 @@
 
 ## 라이선스
 
-**MIT** — TripMate(proprietary)와 본 라이브러리(`kor-travel-map`, GPL-3.0)
+**MIT** — PinVi(proprietary)와 본 라이브러리(`kor-travel-map`, GPL-3.0)
 양쪽에서 import 가능하도록 의도적 분리 (ADR-029 §결정).
 
 본 패키지는 *UI 유틸*이지 비즈니스 로직이 아니다 — MIT로 분리해도 본 라이브
@@ -40,7 +40,7 @@
 
 ```typescript
 // debug UI (packages/kor-travel-map-admin/frontend/src/pages/FeatureMap.tsx)
-// 또는 TripMate apps/web/components/FeatureMap.tsx
+// 또는 PinVi apps/web/components/FeatureMap.tsx
 import { MakiMarker, categoryMakiIcon } from "@kor-travel-map/map-marker-react";
 
 <VWorldMap>
@@ -79,7 +79,7 @@ drift 0.
 
 - 디버그 UI frontend(`packages/kor-travel-map-admin/frontend/`)는
   `"@kor-travel-map/map-marker-react": "workspace:*"`로 참조.
-- TripMate `apps/web`은 현 단계에서 git URL 또는 monorepo/workspace 배포본을
+- PinVi `apps/web`은 현 단계에서 git URL 또는 monorepo/workspace 배포본을
   import한다. npm registry 게시는 ADR-043에 따라 보류한다.
 
 ## 사양

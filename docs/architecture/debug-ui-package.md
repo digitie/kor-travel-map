@@ -8,7 +8,7 @@
 `kor-travel-map-api`와 admin frontend 패키지 `kor-travel-map-admin`의 사양
 reference다. 결정 근거는 `docs/adr/README.md`의 ADR-005(인증 없음, 내부망 전용) +
 ADR-020(메인 패키지에서 FastAPI 분리) + ADR-045(Docker 독립 프로그램, 독립
-DB/Dagster, TripMate OpenAPI 연동) + ADR-055(API/admin 패키지 분리).
+DB/Dagster, PinVi OpenAPI 연동) + ADR-055(API/admin 패키지 분리).
 
 운영 콘솔 화면/워크플로/세부 API는 별도 구현 사양
 [`docs/debug-ui-admin-workflows.md`](../debug-ui-admin-workflows.md)를 기준으로 한다.
@@ -30,7 +30,7 @@ Admin 우선 OpenAPI와 Dagster feature update queue 계약은
 | 별도 `pyproject.toml` | 예 |
 | 의존성 | `kor-travel-map`, FastAPI, Uvicorn, Pydantic v2, pydantic-settings |
 | 인증 | **없음** (ADR-005, 내부망 전제) |
-| TripMate 의존 | **없음** — ADR-045 이후 TripMate는 OpenAPI client로만 연동 |
+| PinVi 의존 | **없음** — ADR-045 이후 PinVi는 OpenAPI client로만 연동 |
 | 운영 형태 | Docker 독립 프로그램의 API backend + admin frontend |
 | DB | 독립 PostgreSQL/PostGIS (`kor_travel_map`) |
 | Dagster | kor-travel-map 독립 Dagster가 provider sync/feature update queue 실행 |
@@ -321,11 +321,11 @@ type drift 부채 0).
 
 본 패키지는 다음을 하지 않는다:
 
-- 사용자 가시 UI (사용자 대상 지도/POI 보기 등 — TripMate)
+- 사용자 가시 UI (사용자 대상 지도/POI 보기 등 — PinVi)
 - 인증/세션/권한 (네트워크 계층 책임)
 - SQL write/DDL
 - 백업/복구/DR 직접 실행은 ADR-040의 별도 admin 기능으로만 다룬다
-- TripMate 사용자/여행계획/POI 도메인 화면
+- PinVi 사용자/여행계획/POI 도메인 화면
 
 ## 12. 향후 확장 (보류)
 
@@ -339,7 +339,7 @@ type drift 부채 0).
 - ADR-045 이후 기본 배포 단위는 Docker Compose 또는 동등한 container orchestration이다.
 - 본 패키지를 PyPI에 별도 배포하지 않을 가능성이 높다. 운영 이미지는 monorepo checkout
   또는 build context에서 만든다.
-- TripMate 운영 노드에 editable install하는 모델은 더 이상 표준이 아니다. TripMate는
+- PinVi 운영 노드에 editable install하는 모델은 더 이상 표준이 아니다. PinVi는
   kor-travel-map OpenAPI endpoint와 generated client만 사용한다.
 - PyPI 배포가 필요해지면 메인 라이브러리와 동일 version으로 lockstep release하되,
   OpenAPI version과 Docker image tag도 함께 맞춘다.
@@ -350,7 +350,7 @@ type drift 부채 0).
 
 | 항목 | 값 |
 |------|----|
-| Framework | **Next.js 16 (App Router)** — `kor-travel-geo-ui` / TripMate `apps/web`와 동일 stack (ADR-025 2차 보강 2026-05-25, 2026-05-31 최신화) |
+| Framework | **Next.js 16 (App Router)** — `kor-travel-geo-ui` / PinVi `apps/web`와 동일 stack (ADR-025 2차 보강 2026-05-25, 2026-05-31 최신화) |
 | 라이브러리 | `maplibre-vworld` **v0.1.3** (`github:digitie/maplibre-vworld-js#v0.1.3` — npm 미게시, git URL+tag 핀, ADR-043 패턴) |
 | 의존 | `maplibre-gl` ^5.24.0 (BSD-3), `zod` ^4.4.3 (좌표 검증, v0.1.3 peer), React 19, `@tanstack/react-query` |
 | 공통 마커 | `@kor-travel-map/map-marker-react` (workspace, ADR-029) |
@@ -359,7 +359,7 @@ type drift 부채 0).
 | 언어 | TypeScript |
 | 라이선스 | MIT (`next`) + ISC (`maplibre-vworld`) + BSD-3 (`maplibre-gl`) + GPL-3.0 (본 저장소) — 호환 |
 | 디렉토리 | `packages/kor-travel-map-admin/frontend/` |
-| 개발 포트 | `12705` (`next dev --port 12705`, TripMate `apps/web` dev 3000 충돌 회피) |
+| 개발 포트 | `12705` (`next dev --port 12705`, PinVi `apps/web` dev 3000 충돌 회피) |
 
 **Kakao Maps SDK 사용 안 함** (ADR-025/026). VWorld 지도가 1차 + 유일.
 
@@ -394,8 +394,8 @@ type drift 부채 0).
 별도 발급 / 별도 환경변수 / 디버그 UI 전용 키 금지. 운영 시 backend가 `.env`
 또는 vault에서 `KOR_TRAVEL_GEO_VWORLD_API_KEY`를 읽어, frontend 빌드 시 Next.js
 규약상 `NEXT_PUBLIC_VWORLD_API_KEY`로 동일 값을 주입한다 (CI/CD 또는 운영 셸
-스크립트 책임). **TripMate 사용자 UI** (ADR-026)도 동일 키를 공유한다. HTTP
-referrer 제한은 backend 호스트(`127.0.0.1` + 내부망 호스트) + TripMate frontend
+스크립트 책임). **PinVi 사용자 UI** (ADR-026)도 동일 키를 공유한다. HTTP
+referrer 제한은 backend 호스트(`127.0.0.1` + 내부망 호스트) + PinVi frontend
 호스트로 통일.
 
 Next.js env 규약: `NEXT_PUBLIC_*` 만 브라우저로 노출. server-only 키는
@@ -524,7 +524,7 @@ npm run doctor
   (FastAPI proxy/static mount, §14.3 옵션 B/C) 만.
 - VWorld API key는 frontend에 노출되지만 HTTP referrer 제한으로 보호.
   공유 키(`KOR_TRAVEL_GEO_VWORLD_API_KEY`)이므로 referrer 화이트리스트에 backend
-  호스트 + TripMate frontend 호스트(ADR-026) 모두 포함.
+  호스트 + PinVi frontend 호스트(ADR-026) 모두 포함.
 - 운영자 외부 접근은 SSH 터널 / Cloudflare Tunnel (ADR-005).
 
 ## 15. 핵심 메시지
@@ -539,6 +539,6 @@ ADR-045의 **독립 OpenAPI/admin 프로그램 표면** 제공이다. 메인 라
 패키지의 FastAPI import를 차단한다. 지도 frontend는 ADR-025로 `maplibre-vworld-js`
 가 박혔다 (VWorld 지도, Kakao Maps SDK 미사용). VWorld API key는
 `KOR_TRAVEL_GEO_VWORLD_API_KEY` 공유 정책으로 일원화되며 (ADR-025 사용자 보강
-2026-05-25), TripMate 사용자 UI 측 지도 stack도 동일하게 통일된다 (ADR-026).
+2026-05-25), PinVi 사용자 UI 측 지도 stack도 동일하게 통일된다 (ADR-026).
 `maplibre-vworld-js` 자체에서 문제가 발생하면 wrapper 도입(ADR-006 위배) 대신
 upstream 저장소(`digitie/maplibre-vworld-js`)에 직접 PR로 적극 수정한다.

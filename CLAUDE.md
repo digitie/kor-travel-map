@@ -14,7 +14,7 @@
 `Feature`(place/event/notice/price/weather/route/area) 계약으로 정규화하고
 PostgreSQL + PostGIS에 저장·조회·병합하는 한국 여행 지도 데이터 시스템이다.
 Python core(`import kortravelmap as ktm`)는 정규화·적재 엔진이고, 외부 경계는
-OpenAPI다 — `api`/`dagster`가 이 core를 내부에서 import하고 TripMate는 HTTP로만 호출한다.
+OpenAPI다 — `api`/`dagster`가 이 core를 내부에서 import하고 PinVi는 HTTP로만 호출한다.
 
 운영 모델·서비스 구성·역할은 `AGENTS.md` §역할, 배포명·import root·CLI·DB·버킷 등
 identity table은 `AGENTS.md` §식별자가 정본이다.
@@ -50,7 +50,7 @@ identity table은 `AGENTS.md` §식별자가 정본이다.
 5. `docs/resume.md` — 다음 한 작업
 6. `docs/journal.md` 최신 3건
 7. 관련 ADR (`docs/adr/README.md`)
-8. cross-repo 연동(TripMate/kor-travel-concierge/kor-travel-docker-manager) 작업 시
+8. cross-repo 연동(PinVi/kor-travel-concierge/kor-travel-docker-manager) 작업 시
    `docs/integration-map.md` — 포트·연동 방향·인증·계약 정본 위치 1장 정본
 
 ## 4. 스택·환경 (정본 포인터)

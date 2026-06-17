@@ -4,9 +4,9 @@
 Codex / Google Antigravity 가 **같은 파일을 공유**한다 — 내용은 에이전트 중립이며,
 에이전트별로 다른 부분(worktree 경로, `sandbox/<agent>` 브랜치)은 표로 분기한다.
 
-> TripMate 본체(`F:\dev\tripmate`)의 `docs/runbooks/` 컨벤션(인덱스 + 공통 정책 +
+> PinVi 본체(`F:\dev\tripmate`)의 `docs/runbooks/` 컨벤션(인덱스 + 공통 정책 +
 > 에이전트별 worktree)을 본 라이브러리에 맞춰 옮긴 것이다. ADR-045 이후
-> TripMate ↔ kor-travel-map은 **OpenAPI 기반 HTTP** 관계다. 운영 절차는 공유하되
+> PinVi ↔ kor-travel-map은 **OpenAPI 기반 HTTP** 관계다. 운영 절차는 공유하되
 > 식별자·포트는 본 lib 기준으로 적는다.
 
 ## 1. 인덱스

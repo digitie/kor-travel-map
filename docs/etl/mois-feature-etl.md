@@ -90,7 +90,7 @@ async def mois_source_db_full(ctx, mois_async_session):
 source DB의 영업중 row 중 **승격 슬러그**만 feature로.
 
 ```python
-# TripMate apps/etl/assets/feature_place_mois_licenses.py
+# PinVi apps/etl/assets/feature_place_mois_licenses.py
 from mois.db import iter_open_place_records
 from kortravelmap import AsyncKorTravelMapClient
 
@@ -180,7 +180,7 @@ async def feature_place_mois_licenses_incremental(
 write 없음**. 캐시만 (TTL 15분 권장).
 
 ```python
-# TripMate apps/api/app/routers/admin.py
+# PinVi apps/api/app/routers/admin.py
 @router.get("/admin/mois/places/{mng_no}")
 async def get_mois_place_detail(
     mng_no: str,
@@ -522,7 +522,7 @@ bulk insert가 30k 파라미터 초과 가능 → `psycopg.copy_*` 자동 분기
 
 ## 10. Dagster
 
-| asset (TripMate) | dataset_key | step | suggested cron | deps |
+| asset (PinVi) | dataset_key | step | suggested cron | deps |
 |------------------|-------------|------|---------------|------|
 | `mois_source_db_full` | (Step A, mois-api 자체 책임) | A | `0 2 * * 1` (주 1회 월) | — |
 | `mois_source_db_incremental` | (Step A 옵션) | A | `0 3 * * *` (일 1회) | mois_source_db_full |
@@ -595,7 +595,7 @@ ConcurrencyConfig: `mois_api: max_concurrent=1` (rate limit 보호 + bulk 적재
 - **mois debug UI 연계**: `packages/mois-debug-ui/`의 `/api/places`를 본
   라이브러리 디버그 UI (`kortravelmap.api`)에서 iframe/링크로 연결.
 - **source DB 분리 옵션**: source DB(`mois_*`)는 kor-travel-map 운영 경계 안에 둔다.
-  TripMate 공유 DB에 두지 않는다(ADR-045/046).
+  PinVi 공유 DB에 두지 않는다(ADR-045/046).
 
 ## 15. 환경변수
 

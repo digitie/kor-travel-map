@@ -1,7 +1,7 @@
 # weather-feature-normalization.md — weather 정규화
 
 본 문서는 여러 provider의 날씨/대기/지수 데이터를 KMA 시간축 기준 단일
-`WeatherValue` + `feature_weather_values` table로 정규화하는 규약이다. TripMate는
+`WeatherValue` + `feature_weather_values` table로 정규화하는 규약이다. PinVi는
 별도 weather DB를 만들지 않고 이 계약을 그대로 사용한다.
 
 ## 1. 두 축의 분리 (ADR-010)
@@ -360,7 +360,7 @@ bulk insert는 ADR-013 (`psycopg.copy_*` 안전 마진 30k).
 
 ## 10. 보관 정책 (ADR-017)
 
-- `weather_values`: +30일 (참조 trip 0건은 즉시 삭제 — TripMate trip_pois join
+- `weather_values`: +30일 (참조 trip 0건은 즉시 삭제 — PinVi trip_pois join
   으로 별도 검증).
 - purge SQL: `docs/architecture/data-model.md` §7 또는 `docs/architecture/postgres-schema.md` §7.
 

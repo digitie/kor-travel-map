@@ -207,7 +207,7 @@ CREATE INDEX idx_feature_versions_request
 테마형 큐레이션은 `feature.features`를 복제하지 않고 overlay로 관리한다. 정본 계약은
 [`docs/curated-features.md`](../curated-features.md)다. DB schema는 `feature`에 둔다.
 T-223c-1에서 Alembic `0025_curated_features`로 4개 테이블과 1차 seed metadata/rule을
-추가했고, T-223c-2에서 Alembic `0026_curated_copy_snapshots`로 TripMate copy snapshot
+추가했고, T-223c-2에서 Alembic `0026_curated_copy_snapshots`로 PinVi copy snapshot
 cache를 추가했다.
 
 테이블:
@@ -221,8 +221,8 @@ cache를 추가했다.
 - `feature.curated_source_rules` — provider/dataset/category/place_kind 조건을
   `candidate`/`curated`/`ignore` 기본 action으로 매핑한다.
 - `feature.curated_features` — `theme_id + feature_id` overlay 본체. 상태와
-  TripMate 복사 정책을 저장한다.
-- `feature.curated_tripmate_copy_snapshots` — Dagster가 materialize한 TripMate 복사용
+  PinVi 복사 정책을 저장한다.
+- `feature.curated_tripmate_copy_snapshots` — Dagster가 materialize한 PinVi 복사용
   snapshot cache. `curated_feature_id` PK, `copy_version`, `etag`, `snapshot`,
   `materialized_at`, `updated_at`을 가진다.
 
@@ -245,7 +245,7 @@ cache를 추가했다.
   `INDEX (updated_at DESC, curated_feature_id DESC)`, `INDEX (etag)`
 
 `rejected`/`archived` row는 provider 재적재나 source rule 재적용으로 되살리지 않는다.
-TripMate는 REST snapshot을 읽어 `app.curated_trip_plans` /
+PinVi는 REST snapshot을 읽어 `app.curated_trip_plans` /
 `app.curated_plan_pois`로 복사하며, kor-travel-map DB에 직접 접근하지 않는다.
 
 ## 2. `provider_sync.source_records`
@@ -1018,7 +1018,7 @@ Dagster resource/provider runner가 수행한다.
 ## 10. 보관 정책 (ADR-017) → purge 작업
 
 ```sql
--- weather_values: +30일 + 참조 trip 0건 (참조 검사는 TripMate trip_pois 조인)
+-- weather_values: +30일 + 참조 trip 0건 (참조 검사는 PinVi trip_pois 조인)
 DELETE FROM feature.feature_weather_values WHERE valid_at < now() - interval '30 days';
 
 -- notice: 종료일 또는 발표일 +1년 (kind='notice' AND valid_end_time < now() - 1y)

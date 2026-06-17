@@ -80,7 +80,7 @@ hot-swap restore 훈련으로 검증하고, 공유 RustFS는 `kor-travel-docker-
 
 ## 백업
 
-백업 대상은 TripMate와 분리된 `kor_travel_map` app DB, `kor_travel_map_dagster` Dagster
+백업 대상은 PinVi와 분리된 `kor_travel_map` app DB, `kor_travel_map_dagster` Dagster
 metadata DB, RustFS volume의 3종 묶음이다. cold backup은 write path를 멈춘 뒤 실행한다.
 
 ```bash

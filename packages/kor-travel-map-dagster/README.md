@@ -13,7 +13,7 @@
   로컬 개발 중 실 provider 호출을 막기 위해 `STOPPED`이며, 운영 배포에서 필요한
   schedule만 enable한다.
 - `curated_features` asset group은 provider 적재 뒤 source metadata, 후보화 rule,
-  status sweep, TripMate copy snapshot cache를 갱신한다. 기본 schedule은 `STOPPED`다.
+  status sweep, PinVi copy snapshot cache를 갱신한다. 기본 schedule은 `STOPPED`다.
 
 ```bash
 # Docker 운영 기본: webserver + daemon 분리

@@ -15,9 +15,9 @@
 - **패키지명**: `kor-travel-map-api` (PyPI distribution) / `kortravelmap.api` (Python import)
 - **위치**: `kor-travel-map` 저장소 내 `packages/kor-travel-map-api/`
   (monorepo)
-- **목적**: TripMate/user-facing REST + debug/admin/ops REST API
+- **목적**: PinVi/user-facing REST + debug/admin/ops REST API
 - **인증**: 없음. 내부망 / localhost / WSL / 사내망 전제 (ADR-005)
-- **TripMate 의존**: 없음. ADR-045 이후 TripMate는 OpenAPI client로만 연동.
+- **PinVi 의존**: 없음. ADR-045 이후 PinVi는 OpenAPI client로만 연동.
 - **운영 형태**: Docker에서 실행되는 kor-travel-map 독립 프로그램의 API 서버.
 - **DB/Dagster**: 독립 PostgreSQL/PostGIS DB와 독립 Dagster를 사용.
 
@@ -140,7 +140,7 @@ shadcn/ui + `@kor-travel-map/map-marker-react` (ADR-029). 자세한 사양:
 
 모두 인증 없음. 런타임 `OpenAPI` 문서는 `/docs` (Swagger UI), `/openapi.json`.
 저장소 산출물은 admin 전체 `packages/kor-travel-map-api/openapi.json`과
-TripMate/user subset `packages/kor-travel-map-api/openapi.user.json`을 함께 관리한다.
+PinVi/user subset `packages/kor-travel-map-api/openapi.user.json`을 함께 관리한다.
 
 ## Prometheus
 

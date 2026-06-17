@@ -216,7 +216,7 @@ commit/rollback은 caller.
 
 | 항목 | 값 |
 |------|----|
-| asset 이름 (TripMate) | `feature_event_visitkorea_festivals` |
+| asset 이름 (PinVi) | `feature_event_visitkorea_festivals` |
 | JOB_SPEC | `kortravelmap.providers.visitkorea.JOB_SPEC` |
 | suggested cron | `0 3 * * *` (매일 03:00 KST) |
 | group | `features_event` |

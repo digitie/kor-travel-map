@@ -1,6 +1,6 @@
 # cross-repo 정합성 audit 체크리스트 (분기 1회, T-217d)
 
-TripMate 생태계 4-repo(kor-travel-map · TripMate · kor-travel-concierge ·
+PinVi 생태계 4-repo(kor-travel-map · PinVi · kor-travel-concierge ·
 kor-travel-docker-manager)의 계약/문서 drift를 분기 1회 점검한다. 2026-06-10 검토에서
 드러난 사고 패턴("krtour HTTP 미존재" stale 전제, batch `items` vs `found`,
 admin base 12705 오인)의 재발 방지가 목적. 연동 지도 정본은
@@ -16,7 +16,7 @@ admin base 12705 오인)의 재발 방지가 목적. 연동 지도 정본은
 
 ## 1. 계약 — 코드↔코드 대조
 
-- [ ] **TripMate client ↔ krtour OpenAPI**: `apps/api/app/clients/kor_travel_map.py`의
+- [ ] **PinVi client ↔ krtour OpenAPI**: `apps/api/app/clients/kor_travel_map.py`의
       경로/파라미터/응답 파싱을 `openapi.user.json`과 대조 — 특히 batch `found`,
       in-bounds `max_items`, `meta.page.next_cursor`, problem+json `code`.
 - [ ] **krtour fetcher ↔ kor-travel-concierge export**: `provider_fetchers.py`의
@@ -25,7 +25,7 @@ admin base 12705 오인)의 재발 방지가 목적. 연동 지도 정본은
       le)을 agent `routes.py`+`feature_export_service.py`와 대조. item 스키마
       (place/youtube/evidence/source_record + operation enum)와 상수 3종
       (provider/dataset_key/source_entity_type) 문자열 일치 확인.
-- [ ] **포트/베이스**: TripMate env 기본값이 admin **API=12701**(12705는 UI)을
+- [ ] **포트/베이스**: PinVi env 기본값이 admin **API=12701**(12705는 UI)을
       가리키는지, agent/manager 포트가 integration-map §1과 일치하는지.
 - [ ] **인증 헤더**: `X-Kor-Travel-Map-Service-Token`(krtour batch) / `X-API-Key`(agent) /
       kill-switch(admin) 사용처가 integration-map §3과 일치하는지.
@@ -38,11 +38,11 @@ admin base 12705 오인)의 재발 방지가 목적. 연동 지도 정본은
 - [ ] "상대 repo에 X가 없다/대기 중" 류 전제 문장을 전수 찾아 origin/main으로 재검증
       (DEC-01류 — 가장 흔한 drift).
 - [ ] 외부 추적 task의 짝: 한 repo가 "외부"로 둔 task가 상대 repo 백로그에
-      존재하는지 (krtour T-210b~e ↔ TripMate, krtour T-217a ↔ agent T-066 패턴).
+      존재하는지 (krtour T-210b~e ↔ PinVi, krtour T-217a ↔ agent T-066 패턴).
 
 ## 3. 결정 전파
 
-- [ ] 최근 분기의 ADR/결정(krtour `docs/adr/README.md`, TripMate
+- [ ] 최근 분기의 ADR/결정(krtour `docs/adr/README.md`, PinVi
       `docs/decisions*.md`, agent `docs/adr/README.md`)이 상대 repo 문서·코드에
       반영됐는지 — 특히 계약을 바꾸는 결정(envelope/경로/필드명).
 - [ ] `docs/integration-map.md` §1~4 표를 실측값으로 갱신(시스템/포트/정본 위치
