@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-18 claude 작업 메모 — PR #476 리뷰 + admin e2e 라이브 검증
+
+- **#476 리뷰**: LOW 1건(`frontend.yml` stale 주석 — 제거된 maplibre-vworld git dep 참조) 정정,
+  코드 결함 없음.
+- **admin e2e 라이브**: Windows dev server :12706 + Playwright chromium으로 route-mock 전 spec
+  **197 passed / 0 failed**. WSL은 win32-only `@next/swc` node_modules라 `next dev` 불가 → Windows 실행.
+  backend-의존 4 spec(curated-features·features-new·dagster·etl)은 제외(Docker 미기동, 기결정).
+- **라이브가 잡은 #471 잠복 회귀 정정**: `home.spec.ts`(Backend/Dagster heading → `서비스 상태` +
+  service-backend/dagster testid), `features-list.spec.ts`(`bg-primary` → `bg-brand`). #477 home-nav
+  수정도 라이브 green 확인.
+
+**다음 한 작업**: in-repo 즉시 실행 트랙 없음(잔여 `T-229-buildx` 배포환경 · `T-101` 보류 ·
+`T-AUDIT-0616` F-01 옵션 A deferred).
+
 ## 2026-06-18 Codex 작업 메모 — T-MAP-VWORLD-04 dependency 제거 완료
 
 사용자 요청으로 GitHub Task #475(`T-MAP-VWORLD-04`)를 만들고,

@@ -2,6 +2,22 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-18 (claude) — PR #476 사후 리뷰 + admin e2e 라이브 검증 (197 passed)
+
+Codex PR #476(maplibre-vworld-js dep 제거)을 다차원 적대적 리뷰하고, admin e2e를 라이브 실행해
+#471 재구성으로 잠복해 있던 spec 회귀를 정정했다.
+
+- **#476 리뷰**: 확정 결함 1건(LOW) — `frontend.yml`의 stale 주석이 제거된 `maplibre-vworld#v0.1.0`
+  git dep를 계속 참조 → 주석 정정. 코드 결함 없음.
+- **라이브 e2e**(Windows dev server :12706 + Windows Playwright chromium): route-mock 전 spec
+  **197 passed / 0 failed**. WSL은 win32-only `@next/swc` node_modules라 `next dev` 불가 → Windows에서
+  실행. backend-의존 4 spec(curated-features·features-new·dagster·etl)은 제외(Docker 스택 미기동, 기결정).
+- **라이브가 잡은 #471 잠복 회귀 2건**(정적 리뷰·typecheck는 통과했으나 실행 시 실패):
+  `home.spec.ts`의 Backend/Dagster `heading` 단언(이제 `<span>`) → `서비스 상태` heading +
+  `service-backend`/`service-dagster` testid로 정정; `features-list.spec.ts`의 `bg-primary` 단언
+  (default 버튼이 `bg-brand`로 변경됨) → `bg-brand`로 정정.
+- **#477 home-nav 수정 라이브 검증 완료**: 이전 PR에서 typecheck만 했던 home-nav 정정이 라이브 green.
+
 ## 2026-06-18 (Codex) — T-MAP-VWORLD-04 maplibre-vworld-js dependency 제거
 
 사용자 지시에 따라 GitHub Task #475(`T-MAP-VWORLD-04`)를 만들고,

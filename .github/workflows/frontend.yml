@@ -33,7 +33,8 @@ jobs:
 
       - name: npm install (workspace 루트 — map-marker-react + frontend)
         # 루트 package.json의 npm workspaces 로 두 패키지 한 번에 설치.
-        # github git dep `maplibre-vworld#v0.1.0` 포함 (PR#92 검증).
+        # admin frontend는 maplibre-gl + in-repo VWorld 스타일 빌더 사용 — 외부 git
+        # dep 없음 (maplibre-vworld git dep는 #476에서 제거).
         run: npm install --no-audit --no-fund
 
       - name: openapi-typescript drift check
