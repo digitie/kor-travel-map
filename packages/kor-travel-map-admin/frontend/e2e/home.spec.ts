@@ -38,14 +38,16 @@ test.describe("home page (/)", () => {
       "Import jobs",
       "Dedup queue",
       "Issues",
-      "Backend",
-      "Dagster",
+      "서비스 상태",
       "Dedup pending",
     ]) {
       await expect(
         page.getByRole("heading", { name: heading, exact: true }),
       ).toBeVisible();
     }
+    // Backend/Dagster는 '서비스 상태' 카드 내부 패널(span label) — testid로 스코프.
+    await expect(page.getByTestId("service-backend")).toBeVisible();
+    await expect(page.getByTestId("service-dagster")).toBeVisible();
     await expect(
       page.getByRole("heading", { name: "최근 import jobs" }),
     ).toBeVisible();

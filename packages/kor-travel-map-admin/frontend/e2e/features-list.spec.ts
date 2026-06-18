@@ -259,9 +259,9 @@ test.describe("admin/features list depth", () => {
     const ascButton = page.getByRole("button", { name: "asc" });
     const descButton = page.getByRole("button", { name: "desc" });
 
-    // 기본 상태: sort=name, order=asc. asc 버튼이 default variant(bg-primary).
+    // 기본 상태: sort=name, order=asc. asc 버튼이 default variant(bg-brand).
     await expect(sortSelect).toHaveValue("name");
-    await expect(ascButton).toHaveClass(/bg-primary/);
+    await expect(ascButton).toHaveClass(/bg-brand/);
     await expect
       .poll(() => mocks.lastSearch()?.get("sort"))
       .toBe("name");
@@ -279,7 +279,7 @@ test.describe("admin/features list depth", () => {
 
     // desc 버튼 클릭 → setOrder("desc") + resetCursor(). sort(updated_at) 보존.
     await descButton.click();
-    await expect(descButton).toHaveClass(/bg-primary/);
+    await expect(descButton).toHaveClass(/bg-brand/);
     await expect
       .poll(() => mocks.lastSearch()?.get("order"))
       .toBe("desc");
