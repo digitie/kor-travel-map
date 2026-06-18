@@ -74,8 +74,10 @@
   --text-tertiary: #858d87;
   --text-disabled: #b5bdb7;
   --icon-default: #7c857f;
-  --success: #5f8f6f;
-  --warning: #b7791f;
+  /* WCAG AA(4.5:1) — 상태색을 텍스트(badge/status line, bg-<tone>/10 tint 포함)로 쓸 때
+     light surface(card/page/subtle)에서 본문 대비 통과하도록 darken (#469/#471 리뷰). */
+  --success: #33683f;
+  --warning: #8a5a12;
   --info: #3b82f6;
   --shadow-card: 0 1px 3px rgb(60 63 61 / 0.04);
   --shadow-card-hover: 0 2px 4px rgb(60 63 61 / 0.08);
@@ -93,7 +95,7 @@
   --muted-foreground: var(--text-secondary);
   --accent: var(--brand-tint);
   --accent-foreground: var(--brand);
-  --destructive: #c85a54;
+  --destructive: #b3322c;
   --border: var(--surface-muted);
   --input: #d7ded8;
   --ring: var(--brand);

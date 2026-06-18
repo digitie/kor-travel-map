@@ -43,16 +43,14 @@ function MetricCard({
   title,
   value,
   unit,
-  description,
   icon: Icon,
   children,
 }: {
   title: string;
   value: string;
   unit: string;
-  description: string;
   icon: typeof ActivityIcon;
-  children?: ReactNode;
+  children: ReactNode;
 }) {
   return (
     <Card className="min-h-40">
@@ -71,11 +69,7 @@ function MetricCard({
           <span className="text-[36px] leading-none font-bold">{value}</span>
           <span className="pb-0.5 text-[18px] leading-none font-bold">{unit}</span>
         </div>
-        {children ?? (
-          <p className="text-[13px] leading-normal text-text-tertiary">
-            {description}
-          </p>
-        )}
+        {children}
       </CardContent>
     </Card>
   );
@@ -95,7 +89,7 @@ function StatusLine({
         tone === "success" && "text-success",
         tone === "warning" && "text-warning",
         tone === "destructive" && "text-destructive",
-        tone === "muted" && "text-text-tertiary",
+        tone === "muted" && "text-text-secondary",
       )}
     >
       <span className="size-1.5 rounded-full bg-current" aria-hidden="true" />
@@ -106,7 +100,7 @@ function StatusLine({
 
 function MetricCardSkeleton() {
   return (
-    <Card className="min-h-40">
+    <Card className="min-h-40" data-testid="metric-skeleton">
       <CardHeader>
         <Skeleton className="h-4 w-24" />
         <CardAction>
@@ -249,7 +243,6 @@ export function HomePageClient() {
           ) : (
             <>
               <MetricCard
-                description={`${formatCount(metricsData?.features_active)} active / ${formatCount(metricsData?.features_inactive)} inactive`}
                 icon={MapIcon}
                 title="Features"
                 unit="개"
@@ -262,14 +255,13 @@ export function HomePageClient() {
                       style={{ width: `${activeFeatureRatio}%` }}
                     />
                   </div>
-                  <p className="text-[13px] leading-normal text-text-tertiary">
+                  <p className="text-[13px] leading-normal text-text-secondary">
                     {formatCount(activeFeatures)} active /{" "}
                     {formatCount(metricsData?.features_inactive)} inactive
                   </p>
                 </div>
               </MetricCard>
               <MetricCard
-                description="queued, running, done, failed"
                 icon={ListChecksIcon}
                 title="Import jobs"
                 unit="건"
@@ -282,18 +274,16 @@ export function HomePageClient() {
                 </StatusLine>
               </MetricCard>
               <MetricCard
-                description={`${formatCount(metricsData?.dedup_fp_stats.pending)} pending reviews`}
                 icon={GitCompareArrowsIcon}
                 title="Dedup queue"
                 unit="건"
                 value={formatCount(dedupQueueTotal)}
               >
-                <p className="text-[13px] leading-normal text-text-tertiary">
+                <p className="text-[13px] leading-normal text-text-secondary">
                   pending review {formatCount(pendingDedupCount)}건
                 </p>
               </MetricCard>
               <MetricCard
-                description="open data integrity issues"
                 icon={AlertTriangleIcon}
                 title="Issues"
                 unit="건"
@@ -347,7 +337,10 @@ export function HomePageClient() {
                 </CardAction>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="rounded-xl bg-surface-subtle p-4">
+                <div
+                  className="rounded-xl bg-surface-subtle p-4"
+                  data-testid="service-backend"
+                >
                   <div className="mb-3 flex items-center justify-between gap-3">
                     <span className="text-[12px] font-bold tracking-[0.05em] text-text-secondary uppercase">
                       Backend
@@ -367,7 +360,10 @@ export function HomePageClient() {
                     ) : null}
                   </div>
                 </div>
-                <div className="rounded-xl bg-surface-subtle p-4">
+                <div
+                  className="rounded-xl bg-surface-subtle p-4"
+                  data-testid="service-dagster"
+                >
                   <div className="mb-3 flex items-center justify-between gap-3">
                     <span className="text-[12px] font-bold tracking-[0.05em] text-text-secondary uppercase">
                       Dagster
@@ -412,13 +408,13 @@ export function HomePageClient() {
                     <div className="font-medium">
                       {item.feature_a.name} / {item.feature_b.name}
                     </div>
-                    <div className="text-[13px] text-text-tertiary">
+                    <div className="text-[13px] text-text-secondary">
                       score {item.total_score.toFixed(1)} · {shortId(item.review_id)}
                     </div>
                   </Link>
                 ))}
                 {!dedup.isLoading && (dedup.data?.data.items.length ?? 0) === 0 ? (
-                  <p className="text-[13px] text-text-tertiary">
+                  <p className="text-[13px] text-text-secondary">
                     pending dedup review가 없습니다.
                   </p>
                 ) : null}

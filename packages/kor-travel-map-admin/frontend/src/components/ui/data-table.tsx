@@ -244,7 +244,7 @@ export function DataTable<TData>({
                 <TableRow>
                   <TableCell
                     colSpan={colCount}
-                    className="h-32 text-center text-text-tertiary"
+                    className="h-32 text-center text-text-secondary"
                   >
                     {emptyMessage}
                   </TableCell>

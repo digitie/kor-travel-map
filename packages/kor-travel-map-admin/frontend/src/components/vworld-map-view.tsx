@@ -231,13 +231,18 @@ export function VWorldMarker({
 }: VWorldMarkerProps) {
   const map = useContext(VWorldMapContext);
   const markerRef = useRef<MapLibreMarker | null>(null);
+  const elementRef = useRef<ReturnType<typeof createMarkerElement> | null>(null);
   const onClickRef = useRef(onClick);
   const clickable = onClick !== undefined;
+  const [lng, lat] = lngLat;
 
   useLayoutEffect(() => {
     onClickRef.current = onClick;
   });
 
+  // 마커 DOM은 map 또는 시각 속성(icon/color/size/title)이 바뀔 때만 재생성한다.
+  // lngLat(매 렌더 새 배열)·selected는 deps에서 빼고 아래 효과로 갱신해, 패닝/줌/선택마다
+  // 전체 마커가 teardown+recreate되던 churn(#469 리뷰)을 막는다.
   useEffect(() => {
     if (map === null) return;
 
@@ -252,21 +257,39 @@ export function VWorldMarker({
       element.setAttribute("aria-label", title ?? "Feature marker");
       element.setAttribute("role", "button");
     }
-    if (selected) {
-      element.style.outline = "3px solid hsl(var(--primary))";
-      element.style.outlineOffset = "2px";
-    }
+    elementRef.current = element;
 
     const marker = new maplibregl.Marker({ element })
-      .setLngLat(lngLat)
+      .setLngLat([lng, lat])
       .addTo(map);
     markerRef.current = marker;
 
     return () => {
       marker.remove();
       markerRef.current = null;
+      elementRef.current = null;
     };
-  }, [clickable, map, lngLat, markerIcon, markerColor, selected, size, title]);
+    // lng/lat·selected는 별도 효과로 갱신하므로 deps에서 의도적으로 제외한다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clickable, map, markerIcon, markerColor, size, title]);
+
+  // 위치 이동은 마커 재생성 없이 setLngLat로만 반영.
+  useEffect(() => {
+    markerRef.current?.setLngLat([lng, lat]);
+  }, [lng, lat]);
+
+  // 선택 상태는 기존 element에 outline만 토글(전체 재생성 없이).
+  useEffect(() => {
+    const element = elementRef.current;
+    if (element === null) return;
+    if (selected) {
+      element.style.outline = "3px solid hsl(var(--primary))";
+      element.style.outlineOffset = "2px";
+    } else {
+      element.style.outline = "";
+      element.style.outlineOffset = "";
+    }
+  }, [selected]);
 
   return null;
 }

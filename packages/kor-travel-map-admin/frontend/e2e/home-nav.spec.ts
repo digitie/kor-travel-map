@@ -392,7 +392,7 @@ test.describe("home page (/) — nav + metric/status depth", () => {
     });
     await expect(dedupQueueCard.getByText("9", { exact: true })).toBeVisible();
     await expect(
-      dedupQueueCard.getByText("6 pending reviews"),
+      dedupQueueCard.getByText("pending review 6건"),
     ).toBeVisible();
 
     // Issues MetricCard: data_integrity_issues.open_total = 7.
@@ -417,17 +417,13 @@ test.describe("home page (/) — nav + metric/status depth", () => {
     await expect(jobRow.getByText("import-job-0", { exact: false })).toBeVisible();
 
     // ── Backend status 카드 (Backend Card로 scope — Dagster StatusBadge 충돌 회피) ──
-    const backendCard = cards.filter({
-      has: page.getByRole("heading", { name: "Backend", exact: true }),
-    });
+    const backendCard = page.getByTestId("service-backend");
     await expect(backendCard.getByText("ok", { exact: true })).toBeVisible();
     await expect(backendCard.getByText("admin 1.2.3")).toBeVisible();
     await expect(backendCard.getByText("map 2.0.0")).toBeVisible();
 
     // ── Dagster status 카드 ──
-    const dagsterCard = cards.filter({
-      has: page.getByRole("heading", { name: "Dagster", exact: true }),
-    });
+    const dagsterCard = page.getByTestId("service-dagster");
     await expect(dagsterCard.getByText("2 assets")).toBeVisible();
     await expect(dagsterCard.getByText("1 schedules")).toBeVisible();
     await expect(
@@ -488,18 +484,14 @@ test.describe("home page (/) — nav + metric/status depth", () => {
     await expect(featuresCard.getByText("0", { exact: true })).toBeVisible();
 
     // Backend StatusBadge "error" (health.isError) — Backend Card로 scope.
-    const backendCard = cards.filter({
-      has: page.getByRole("heading", { name: "Backend", exact: true }),
-    });
+    const backendCard = page.getByTestId("service-backend");
     await expect(backendCard.getByText("error", { exact: true })).toBeVisible();
     // version 200 → admin/map 배지는 여전히 렌더.
     await expect(backendCard.getByText("admin 1.2.3")).toBeVisible();
     await expect(backendCard.getByText("map 2.0.0")).toBeVisible();
 
     // Dagster StatusBadge "error".
-    const dagsterCard = cards.filter({
-      has: page.getByRole("heading", { name: "Dagster", exact: true }),
-    });
+    const dagsterCard = page.getByTestId("service-dagster");
     await expect(dagsterCard.getByText("error", { exact: true })).toBeVisible();
 
     // 최근 import jobs: error.message <p>(text-destructive) + 빈 테이블 emptyMessage.
@@ -538,10 +530,10 @@ test.describe("home page (/) — nav + metric/status depth", () => {
 
     await page.goto("/");
 
-    // metrics section: isLoading 동안 정확히 4개 <Skeleton className="h-28">.
+    // metrics section: isLoading 동안 정확히 4개 MetricCardSkeleton.
     // import-jobs 테이블은 위에서 즉시 resolve(빈 목록)되므로 DataTable skeleton과
-    // 충돌하지 않지만, h-28 className으로 metrics skeleton만 한정한다.
-    const metricSkeletons = page.locator('[data-slot="skeleton"].h-28');
+    // 충돌하지 않지만, data-testid="metric-skeleton"으로 metrics skeleton만 한정한다.
+    const metricSkeletons = page.getByTestId("metric-skeleton");
     await expect(metricSkeletons).toHaveCount(4);
     // gate 동안 Features metric heading은 아직 없다.
     await expect(
