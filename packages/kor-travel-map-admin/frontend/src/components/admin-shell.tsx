@@ -134,7 +134,7 @@ export function AdminShell({
               <div className="flex min-w-0 flex-col gap-1">
                 <div className="flex flex-wrap items-center gap-2">
                   {section ? <Badge variant="secondary">{section}</Badge> : null}
-                  <span className="break-all font-mono text-[12px] text-text-tertiary">
+                  <span className="break-all font-mono text-[12px] text-text-secondary">
                     {pathname}
                   </span>
                 </div>
