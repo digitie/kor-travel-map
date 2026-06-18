@@ -8,6 +8,17 @@
         "@modelcontextprotocol/server-filesystem",
         "F:\\dev\\kor-travel-map-claude"
       ]
+    },
+    "codegraph": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@colbymchenry/codegraph",
+        "serve",
+        "--mcp"
+      ],
+      "cwd": "F:\\dev\\kor-travel-map-claude"
     }
   }
 }

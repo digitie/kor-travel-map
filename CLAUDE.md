@@ -33,7 +33,9 @@ identity table은 `AGENTS.md` §식별자가 정본이다.
   Postgres host `5432` · RustFS S3 `12101`/console `12105`.
 - **geocoding 정본**: kor-travel-geo REST v2 `POST /v2/{reverse,geocode}`, 로컬 기본
   `http://127.0.0.1:12501`(ADR-046/047).
-- **frontend 정본**: Next.js 16 + React 19 + `maplibre-vworld-js#v0.1.3`(ADR-036),
+- **frontend 정본**: Next.js 16 + React 19 + `maplibre-gl` + in-repo VWorld style
+  builder(`src/lib/vworld-style.ts`). maplibre-vworld-js dep는 #476(T-MAP-VWORLD-04)에서
+  제거됨 — ADR-036(v0.1.3 핀)은 무효, 정본은 `docs/architecture/debug-ui-package.md`.
   Windows Playwright e2e.
 - **coverage gate**: ADR-032 단계 상향 일정(Sprint 4 기준 `fail_under=80`).
 - **provider 9단계 구현 순서**(ADR-034): 축제 → 날씨 → 유가 → 휴게소 →
@@ -57,12 +59,13 @@ identity table은 `AGENTS.md` §식별자가 정본이다.
 
 - **의존 스택**(PostgreSQL+PostGIS / SQLAlchemy 2 async / Pydantic v2 / FastAPI …):
   `docs/architecture/architecture.md`(의존 방향) + `README.md` 의존 표.
-- **provider 로컬 우선 조회 (ADR-044)**: 형제 `python-*-api`·`maplibre-vworld-js`는
+- **provider 로컬 우선 조회 (ADR-044)**: 형제 `python-*-api`는
   `F:\dev\`(WSL `~/dev/`) 로컬 체크아웃을 `Glob`/`Read`로 **먼저** 조회, GitHub fetch는
   로컬에 없을 때만 fallback. 데이터 정합성 1차 책임은 각 provider 라이브러리.
 - **개발 환경**(Windows Git 원본 + WSL 실행 + Windows Playwright e2e): `docs/dev-environment.md`.
 - **worktree + codegraph + MCP 등록**(`Feature` DTO / `make_feature_id` / provider 변환
-  수정 전 `codegraph_explore`로 영향도 선평가): `docs/codegraph-worktree.md`.
+  수정 전 `codegraph_explore`로 영향도 선평가): `docs/codegraph-worktree.md`. Claude Code용
+  MCP 서버는 `.mcp.json`에 등록(`codegraph`/`filesystem`).
 
 ## 5. 절대 금지 (가장 중요한 5개)
 
