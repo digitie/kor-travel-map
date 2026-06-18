@@ -2,6 +2,26 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-18 (Codex) — T-MAP-VWORLD-04 maplibre-vworld-js dependency 제거
+
+사용자 지시에 따라 GitHub Task #475(`T-MAP-VWORLD-04`)를 만들고,
+`digitie/maplibre-vworld-react` `a7cb0f8` 기반으로 admin web 지도 경계를 정리했다.
+
+- **dependency 제거**: admin frontend와 `@kor-travel-map/map-marker-react`에서
+  `maplibre-vworld`(`digitie/maplibre-vworld-js`) dependency/peer/devDependency,
+  `maplibre-vworld/style.css` import, Vite external/global 선언을 제거했다.
+  `package-lock.json`에서도 `maplibre-vworld`와 전용 transitive를 제거했다.
+- **maplibre-vworld-react 경계 반영**: `src/lib/vworld-style.ts`를
+  `vworld-map-core`식 map type/tile URL/maxZoom/redaction 단일 source로 정리하고,
+  `VWorldMapView`에 maxZoom clamp, redacted error logging, stable marker click callback을
+  보강했다. VWorld key 미설정 fallback에서도 bbox/e2e가 계속 동작하는 기존 admin 계약은 유지했다.
+- **검증**: admin type-check, marker typecheck/build, admin vitest **27 passed**,
+  ESLint **0 errors / 기존 warnings 6**, Next build 통과. WSL dev server
+  `0.0.0.0:12706` + Windows Playwright `E2E_BASE_URL=http://172.26.51.35:12706`에서
+  `features-map-interactions.spec.ts` **5 passed / 0 failed**.
+- **정본 리포트**:
+  [`docs/reports/maplibre-vworld-js-dependency-removal-2026-06-18.md`](reports/maplibre-vworld-js-dependency-removal-2026-06-18.md).
+
 ## 2026-06-18 (claude) — T-452 OpenAPI problem+json 기계 계약 보강
 
 생성 OpenAPI(`openapi.json`/`openapi.user.json`)가 모든 4xx/5xx·`default` 응답을 RFC7807

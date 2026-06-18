@@ -185,7 +185,7 @@ ALTER DATABASE kor_travel_map SET search_path = public, x_extension;
 
 ## 7. provider 라이브러리 로컬 개발 + 로컬 우선 조회 (ADR-044)
 
-모든 형제 `python-*-api` provider 라이브러리 + `maplibre-vworld-js`는 본 repo의
+모든 형제 `python-*-api` provider 라이브러리 + `maplibre-vworld-react`는 본 repo의
 **형제로 `~/dev/` (NTFS: `F:\dev\`) 아래 로컬 체크아웃**되어 있다:
 
 ```
@@ -201,7 +201,7 @@ ALTER DATABASE kor_travel_map SET search_path = public, x_extension;
 ├── python-mois-api/            # 행정안전부 인허가
 ├── python-airkorea-api/ python-krforest-api/ python-khoa-api/ …
 ├── kor-travel-geo/  python-kraddr-base/   # 주소/지오코딩
-└── maplibre-vworld-js/         # frontend VWorld 지도
+└── maplibre-vworld-react/      # frontend VWorld 지도 모델
 ```
 
 **조회 룰 (ADR-044)**: provider client·model·codes·스펙 확인은 **로컬을 먼저**

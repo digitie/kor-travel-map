@@ -1,6 +1,5 @@
 "use client";
 
-import "maplibre-vworld/style.css";
 import type { LngLatBounds, Map as MapLibreMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import {

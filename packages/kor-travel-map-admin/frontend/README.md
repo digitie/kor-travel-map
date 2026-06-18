@@ -1,7 +1,7 @@
 # kor-travel-map-admin-frontend
 
 `kor-travel-map` 디버그 UI의 **Next.js** 프론트엔드. **ADR-025**에 따라
-`maplibre-vworld-js` (VWorld 지도) 기반. ADR-035에 따라 debug 화면뿐 아니라
+MapLibre GL + VWorld tile style 기반. ADR-035에 따라 debug 화면뿐 아니라
 feature 운영, provider 적재, dedup/결측 검토, 오프라인 업로드를 다루는 admin
 운영 콘솔로 확장한다. 상세 화면/워크플로/API 기준은
 `../../../docs/debug-ui-admin-workflows.md`.
@@ -18,13 +18,12 @@ feature 운영, provider 적재, dedup/결측 검토, 오프라인 업로드를 
 
 - **Next.js 16** (App Router) + **React 19** + **TypeScript** —
   `kor-travel-geo-ui` / PinVi `apps/web`와 동일 stack
-- **maplibre-vworld** v0.1.3 (`github:digitie/maplibre-vworld-js#v0.1.3`) —
-  VWorld 지도 React 컴포넌트 (ADR-036). **npm 미게시** — git URL + release
-  tag로 핀 (ADR-043 형제 라이브러리 패턴). 공개 API: `VWorldMap`(apiKey/
-  center/zoom) + `MapStore`/`useMap*` hook + `MakiMarker`/`PlaceMarker`/
-  `PriceMarker`/`WeatherMarker` 등 마커 13종 + `ClusterLayer`/`RouteLine`.
-- **maplibre-gl** ^5.24.0 — WebGL 지도 엔진 (maplibre-vworld v0.1.3 peer)
-- **zod** ^4.4.3 — 좌표 검증 (maplibre-vworld v0.1.3 peer — schemas 모듈)
+- **maplibre-gl** ^5.24.0 — WebGL 지도 엔진.
+- **VWorld style builder** — `src/lib/vworld-style.ts`가 VWorld WMTS tile URL과
+  MapLibre style을 직접 만든다. `features` 지도는 `maplibre-vworld-react`
+  참조 모델의 `VWorldMapView`/React marker 구조를 admin 내부 컴포넌트로 얇게
+  이식한다.
+- **zod** ^4.4.3 — form/API 입력 검증.
 - **React Hook Form** — 수동 feature 추가, provider 실행, offline upload,
   feature update request form 상태
 - **shadcn/ui** — admin UI primitive(Button/Input/Select/Dialog/Sheet/Tabs/Table/
@@ -250,12 +249,12 @@ PID를 종료한 뒤 WSL frontend를 다시 띄운다. 정상은 `wslrelay`다.
 ## 라이선스
 
 GPL-3.0-or-later (메인 패키지와 동일). 외부 의존성: `next` (MIT),
-`maplibre-vworld` (ISC), `maplibre-gl` (BSD-3), `zod` (MIT), React/TanStack
+`maplibre-gl` (BSD-3), `zod` (MIT), React/TanStack
 (MIT) — 모두 호환.
 
 ## 비책임
 
-- PinVi 사용자 가시 지도 UI (ADR-026으로 동일하게 Next.js + maplibre-vworld
+- PinVi 사용자 가시 지도 UI (ADR-026으로 동일하게 VWorld/MapLibre 계열 지도
   채택, SPEC V8 v8_3 supersede) — 본 frontend는 디버그 전용 (PinVi
   `apps/web`과 별도 코드베이스, 공통 마커는 `@kor-travel-map/map-marker-react` npm
   패키지로 공유)

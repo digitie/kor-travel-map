@@ -95,7 +95,7 @@ Frontend 표준 stack:
   같은 form 상태.
 - shadcn/ui: Button, Input, Select, Dialog, Sheet, Tabs, Table, Badge, Toast,
   Form, DropdownMenu 등 공통 UI primitive.
-- `maplibre-vworld-js`: VWorld 지도.
+- MapLibre GL + VWorld style builder: VWorld 지도.
 - `@kor-travel-map/map-marker-react`: category/maki marker.
 
 Frontend 작업 후에는 `react-doctor` 실행, 결과 검토, 개선 반영이 필수다. 자세한
@@ -545,7 +545,7 @@ Route: `/features/[feature_id]`
 1. Header
    - name, feature_id, kind, category, status, primary provider, updated_at.
 2. 위치
-   - `maplibre-vworld-js` 지도.
+   - MapLibre GL + VWorld 지도.
    - 선택 feature marker.
    - 주변 feature marker.
    - 좌표 없음이면 "좌표 없음" 상태와 주소/geocode action.
@@ -1467,7 +1467,8 @@ Route: `/`
 
 ## 18. MapLibre VWorld 사용 규칙
 
-- 지도는 `maplibre-vworld-js`를 사용한다. Kakao Maps SDK를 추가하지 않는다.
+- 지도는 `maplibre-vworld-react`의 web/core 모델을 따른 MapLibre GL + VWorld 구현을
+  사용한다. Kakao Maps SDK를 추가하지 않는다.
 - 좌표 입력/출력은 외부 인터페이스에서 항상 `(lon, lat)` 순서다.
 - marker는 가능하면 `@kor-travel-map/map-marker-react`의 category/maki 매핑을 재사용한다.
 - 지도 중심과 zoom은 Zustand store에 둔다.

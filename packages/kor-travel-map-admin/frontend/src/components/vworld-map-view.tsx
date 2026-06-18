@@ -18,6 +18,8 @@ import {
 
 import {
   buildVWorldStyle,
+  getVWorldMaxZoom,
+  redactVWorldUrl,
   type VWorldLayerType,
 } from "@/lib/vworld-style";
 
@@ -28,12 +30,17 @@ interface VWorldMapViewProps {
   center: [number, number];
   zoom: number;
   layerType?: VWorldLayerType;
+  maxZoom?: number;
+  minZoom?: number;
+  navigation?: boolean;
+  scale?: boolean;
   className?: string;
   style?: CSSProperties;
   testId?: string;
   children?: ReactNode;
   onLoad?: (map: MapLibreMap) => void;
   onMoveEnd?: (map: MapLibreMap) => void;
+  onError?: (event: maplibregl.ErrorEvent) => void;
 }
 
 export function VWorldMapView({
@@ -41,24 +48,31 @@ export function VWorldMapView({
   center,
   zoom,
   layerType = "Base",
+  maxZoom = 22,
+  minZoom = 6,
+  navigation = false,
+  scale = false,
   className,
   style,
   testId,
   children,
   onLoad,
   onMoveEnd,
+  onError,
 }: VWorldMapViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const appliedStyleRef = useRef({ apiKey, layerType });
   const onLoadRef = useRef(onLoad);
   const onMoveEndRef = useRef(onMoveEnd);
+  const onErrorRef = useRef(onError);
   const [map, setMap] = useState<MapLibreMap | null>(null);
   const [loaded, setLoaded] = useState(false);
 
   useLayoutEffect(() => {
     onLoadRef.current = onLoad;
     onMoveEndRef.current = onMoveEnd;
+    onErrorRef.current = onError;
   });
 
   useEffect(() => {
@@ -69,6 +83,8 @@ export function VWorldMapView({
       style: buildVWorldStyle(apiKey, layerType),
       center,
       zoom,
+      minZoom,
+      maxZoom: Math.min(maxZoom, getVWorldMaxZoom(layerType)),
       attributionControl: { compact: true },
     });
     mapRef.current = nextMap;
@@ -89,10 +105,25 @@ export function VWorldMapView({
     const handleMoveEnd = () => {
       onMoveEndRef.current?.(nextMap);
     };
+    const handleError = (event: maplibregl.ErrorEvent) => {
+      if (onErrorRef.current) {
+        onErrorRef.current(event);
+        return;
+      }
+      const error = event.error as { message?: string; url?: string } | undefined;
+      const url =
+        error?.url ?? (event as { url?: string | undefined }).url;
+      console.warn(
+        "[VWorldMapView]",
+        error?.message ?? "unknown map error",
+        redactVWorldUrl(url) ?? "",
+      );
+    };
 
     nextMap.on("load", handleLoad);
     nextMap.on("idle", handleLoad);
     nextMap.on("moveend", handleMoveEnd);
+    nextMap.on("error", handleError);
     loadFrame = requestAnimationFrame(() => {
       notifyLoad();
     });
@@ -112,6 +143,23 @@ export function VWorldMapView({
       resizeObserver.observe(containerRef.current);
     }
 
+    const controls: Array<maplibregl.IControl> = [];
+    if (navigation) {
+      const control = new maplibregl.NavigationControl({
+        showCompass: false,
+      });
+      nextMap.addControl(control, "top-right");
+      controls.push(control);
+    }
+    if (scale) {
+      const control = new maplibregl.ScaleControl({
+        maxWidth: 150,
+        unit: "metric",
+      });
+      nextMap.addControl(control, "bottom-right");
+      controls.push(control);
+    }
+
     return () => {
       if (loadFrame !== 0) cancelAnimationFrame(loadFrame);
       if (resizeFrame !== 0) cancelAnimationFrame(resizeFrame);
@@ -119,6 +167,14 @@ export function VWorldMapView({
       nextMap.off("load", handleLoad);
       nextMap.off("idle", handleLoad);
       nextMap.off("moveend", handleMoveEnd);
+      nextMap.off("error", handleError);
+      for (const control of controls) {
+        try {
+          nextMap.removeControl(control);
+        } catch {
+          // MapLibre may already be tearing down the control while removing the map.
+        }
+      }
       nextMap.remove();
       mapRef.current = null;
       setLoaded(false);
@@ -175,6 +231,12 @@ export function VWorldMarker({
 }: VWorldMarkerProps) {
   const map = useContext(VWorldMapContext);
   const markerRef = useRef<MapLibreMarker | null>(null);
+  const onClickRef = useRef(onClick);
+  const clickable = onClick !== undefined;
+
+  useLayoutEffect(() => {
+    onClickRef.current = onClick;
+  });
 
   useEffect(() => {
     if (map === null) return;
@@ -184,9 +246,9 @@ export function VWorldMarker({
       markerColor,
       size,
       title,
-      onClick: onClick ? () => onClick() : undefined,
+      onClick: clickable ? () => onClickRef.current?.() : undefined,
     });
-    if (onClick) {
+    if (clickable) {
       element.setAttribute("aria-label", title ?? "Feature marker");
       element.setAttribute("role", "button");
     }
@@ -204,7 +266,7 @@ export function VWorldMarker({
       marker.remove();
       markerRef.current = null;
     };
-  }, [map, lngLat, markerIcon, markerColor, onClick, selected, size, title]);
+  }, [clickable, map, lngLat, markerIcon, markerColor, selected, size, title]);
 
   return null;
 }

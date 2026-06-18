@@ -1,5 +1,23 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-18 Codex 작업 메모 — T-MAP-VWORLD-04 dependency 제거 완료
+
+사용자 요청으로 GitHub Task #475(`T-MAP-VWORLD-04`)를 만들고,
+`digitie/maplibre-vworld-react` `a7cb0f8` 기반 admin web 지도 정리를 완료했다.
+
+- **제거**: admin frontend와 `@kor-travel-map/map-marker-react`에서
+  `maplibre-vworld`(`digitie/maplibre-vworld-js`) dependency/peer/devDependency,
+  `maplibre-vworld/style.css` import, Vite external/global 선언 제거. lockfile에서도
+  `maplibre-vworld`와 전용 transitive 제거.
+- **보강**: `vworld-style.ts`를 `vworld-map-core`식 tile URL/style/maxZoom/redaction
+  경계로 정리하고, `VWorldMapView`에 maxZoom clamp, redacted error logging, stable marker
+  click callback을 반영. VWorld key 미설정 fallback 계약은 유지.
+- **검증**: admin type-check, marker typecheck/build, admin vitest 27 passed,
+  ESLint 0 errors(기존 warnings 6), Next build, Windows Playwright 지도 e2e
+  `features-map-interactions.spec.ts` 5 passed.
+
+**다음 한 작업**: **T-229-buildx — arm64 multi-arch buildx 배포 검증** (`GITHUB_TOKEN` 필요).
+
 ## 2026-06-18 claude 작업 메모 — T-452 OpenAPI problem+json 보강 완료
 
 `T-452-openapi-problem-json`을 종결했다. 생성 OpenAPI가 에러 응답을 problem+json으로 선언한다.
