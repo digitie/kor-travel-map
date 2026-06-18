@@ -1,5 +1,22 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-18 claude 작업 메모 — T-452 OpenAPI problem+json 보강 완료
+
+`T-452-openapi-problem-json`을 종결했다. 생성 OpenAPI가 에러 응답을 problem+json으로 선언한다.
+
+- **구현**: `create_app`의 custom `app.openapi()`가 모든 operation의 4xx/5xx·`default` 응답을
+  RFC7807 `application/problem+json`(`ProblemDetail`/`ProblemDetailError`)으로 선언. FastAPI 자동
+  422도 problem+json으로 대체, orphan(`HTTPValidationError`) 제거. 핸들러별 `responses=` 대신
+  중앙 핸들러(`_error_response`)와 대칭인 중앙 주입 방식.
+- **산출물**: `openapi.json`/`openapi.user.json` 재생성 + admin/user-client `gen:types`. e2e mock 1건
+  (`change-requests-lifecycle.spec.ts`)을 `ProblemDetail`로 재바인딩.
+- **검증(Python 3.13 컨테이너)**: ruff·`mypy --strict -p kortravelmap.api`·api pytest 전수 green,
+  `export_openapi.py --check` drift gate OK, admin/user-client `gen:types:check`·type-check OK.
+  로컬 venv 부재라 throwaway `python:3.13` Docker로 CI 동등 환경 재현.
+
+**다음 한 작업**: 이 저장소 즉시 실행 가능한 in-repo 트랙 없음. 잔여는 `T-229-buildx`
+(배포환경 `GITHUB_TOKEN`)·`T-101`(MV 보류)·`T-AUDIT-0616` F-01 옵션 A(deferred)뿐.
+
 ## 2026-06-18 claude 작업 메모 — T-ADMIN-TANSTACK 종결 + item-4(라이브 e2e) 결정
 
 - **T-ADMIN-TANSTACK 종결**: (a) backend-의존 e2e는 2026-06-17 라이브 스택에서 이미 57/0
@@ -240,9 +257,7 @@ T-108/ADR-056의 arm64 multi-arch buildx 이미지 build+boot smoke다.
 
 ## 열린 작업 요약
 
-즉시(in-repo):
-
-- `T-452-openapi-problem-json` — OpenAPI 에러 본문 RFC7807 problem+json 보강.
+즉시(in-repo): 없음 (`T-452` 종결).
 
 배포환경 잔여:
 
@@ -256,7 +271,8 @@ T-108/ADR-056의 arm64 multi-arch buildx 이미지 build+boot smoke다.
 종결 (2026-06-18):
 
 - won't-do: `T-019` · `T-210b`~`d`(PinVi 외부) · `T-103`(streaming ETL).
-- `T-ADMIN-TANSTACK`: (a) 라이브 e2e 57/0 검증 · (b) bulk 가드 main 구현 — 상세 `docs/tasks-done.md`.
+- `T-ADMIN-TANSTACK`: (a) 라이브 e2e 57/0 검증 · (b) bulk 가드 main 구현.
+- `T-452-openapi-problem-json`: OpenAPI 4xx/5xx problem+json 선언 — 상세 `docs/tasks-done.md`.
 
 ## 고정 기준값
 

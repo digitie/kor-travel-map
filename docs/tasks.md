@@ -34,12 +34,6 @@
       curated/features-new)도 라이브 Docker 스택에서 **57 passed / 0 failed**로 검증됐다.
     - **잔여 = F-01 옵션 A 1건뿐**: 전 feature DB re-key + provider별 natural_key 전역유일성
       검증을 동반하는 big-bang으로, **별도 시점 결정**(deferred). 나머지 감사 항목은 모두 ✅.
-  - [ ] `T-452-openapi-problem-json` — **OpenAPI 에러 본문 RFC7807 정합**(#452/#444 잔여). 현재
-    `openapi(.user).json`에 `application/problem+json` 응답 스키마가 없고(`docs/architecture/rest-api.md`
-    §1.5가 산문으로 에러 계약 정본을 유지하는 의도적 한계), 4xx/5xx 응답이 generated client
-    관점에서 under-spec다. 핸들러별 `responses=`로 problem+json 스키마를 선언하고
-    `export_openapi.py --profile all`로 재생성 + `--check`로 검증한다. 산문 정본(§1.5)은
-    유지하되 기계 계약을 보강하는 방향.
 - **보류**
   - [ ] `T-101` — Materialized View 도입 검토.
 

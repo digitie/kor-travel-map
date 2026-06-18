@@ -15,7 +15,7 @@ type AdminFeatureChangeResponse =
 type AdminFeatureReviewActionRequest =
   components["schemas"]["AdminFeatureReviewActionRequest"];
 type AdminFeatureReviewMode = AdminFeatureChangeRecord["review_mode"];
-type HTTPValidationError = components["schemas"]["HTTPValidationError"];
+type ProblemDetail = components["schemas"]["ProblemDetail"];
 
 const MOCK_NOW = "2026-06-08T00:00:00.000Z";
 const MOCK_REVIEWED_AT = "2026-06-08T00:10:00.000Z";
@@ -68,15 +68,16 @@ function featureChangeResponse(
   };
 }
 
-function httpValidationError(): HTTPValidationError {
+function validationProblem(): ProblemDetail {
+  // RFC7807 problem+json — 중앙 핸들러가 422를 이 형식으로 반환한다(T-452).
   return {
-    detail: [
-      {
-        loc: ["body", "name"],
-        msg: "field required",
-        type: "value_error.missing",
-      },
-    ],
+    type: "https://kor-travel-map/errors/validation-error",
+    title: "요청 값이 올바르지 않습니다.",
+    status: 422,
+    detail: "요청 값이 올바르지 않습니다.",
+    code: "VALIDATION_ERROR",
+    request_id: "e2e-validation-error",
+    errors: [{ field: "name", message: "field required" }],
   };
 }
 
@@ -359,8 +360,8 @@ test.describe("admin feature change-requests lifecycle", () => {
         postCount += 1;
         await route.fulfill({
           status: 422,
-          contentType: "application/json",
-          body: JSON.stringify(httpValidationError()),
+          contentType: "application/problem+json",
+          body: JSON.stringify(validationProblem()),
         });
         return;
       }

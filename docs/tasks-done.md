@@ -3,6 +3,19 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## OpenAPI 에러 본문 RFC7807 problem+json 기계 계약 보강 (2026-06-18, `T-452`)
+
+- [x] **T-452-openapi-problem-json — OpenAPI 4xx/5xx problem+json 선언.**
+  생성 `openapi.json`/`openapi.user.json`이 에러 응답을 `422 application/json`
+  (`HTTPValidationError`)로만 선언하던 under-spec(#452/#444 잔여)을 해소했다. `create_app`의
+  custom `app.openapi()`가 모든 operation의 4xx/5xx·`default` 응답을 `application/problem+json`
+  (`ProblemDetail`/`ProblemDetailError`, `code`·`request_id` 확장 멤버 포함)으로 선언하고, FastAPI
+  자동 422도 problem+json으로 대체하며 orphan 검증 schema를 제거한다. 핸들러별 `responses=`
+  대신 중앙 핸들러(`_error_response`)와 대칭인 중앙 openapi 주입을 택했다. 산출물 재생성
+  (`export_openapi.py --profile all`) + frontend/user-client `gen:types` 동반, `--check` drift
+  gate·`gen:types:check`로 고정. 정본 `docs/architecture/rest-api.md §1.5`,
+  회귀 테스트 `test_export_openapi.py::test_openapi_declares_rfc7807_problem_json_error_responses`.
+
 ## admin TanStack 테이블 이행 후속 종결 (2026-06-18, `T-ADMIN-TANSTACK`)
 
 - [x] **T-ADMIN-TANSTACK — admin UI TanStack 테이블 이행 후속 종결.**

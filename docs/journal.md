@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-18 (claude) — T-452 OpenAPI problem+json 기계 계약 보강
+
+생성 OpenAPI(`openapi.json`/`openapi.user.json`)가 모든 4xx/5xx·`default` 응답을 RFC7807
+`application/problem+json`으로 선언하도록 보강했다(under-spec #452/#444 잔여 해소).
+
+- **구현**: `kortravelmap.api.response`에 `ProblemDetail`/`ProblemDetailError` 모델 추가,
+  `create_app`의 custom `app.openapi()`가 각 operation 응답에 problem+json(`ProblemDetail` ref)을
+  주입. FastAPI 자동 `422 HTTPValidationError`는 problem+json으로 대체, orphan 검증 schema 제거.
+  핸들러별 `responses=` 대신 중앙 핸들러(`_error_response`) 대칭의 중앙 주입 방식 채택.
+- **산출물 재생성**: `export_openapi.py --profile all`로 2개 spec + admin/user-client `gen:types`.
+  e2e mock 1건(`change-requests-lifecycle.spec.ts`)을 `HTTPValidationError`→`ProblemDetail` 재바인딩.
+- **검증**: 로컬 venv 부재라 throwaway `python:3.13` Docker(CI 동등)로 ruff·`mypy --strict`·
+  api pytest 전수 green + `export_openapi.py --check` drift gate OK. Node로 `gen:types:check`·
+  admin/user-client type-check OK. 정본 `docs/architecture/rest-api.md §1.5`.
+
 ## 2026-06-18 (claude) — T-ADMIN-TANSTACK 종결 + item-4 라이브 e2e 결정 (백로그 정리)
 
 admin TanStack 테이블 이행 후속을 종결하고, 라이브 e2e 재실행 여부를 사용자 결정으로 닫았다.
