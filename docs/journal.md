@@ -2,6 +2,18 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-18 (Codex) — README 진입 문서 정리
+
+사용자 요청으로 루트 README를 현재 운영 모델 기준의 짧은 진입 문서로 정리했다.
+
+- **구조 정리**: 소개, 현재 운영 모델, 책임 범위, 빠른 시작, 저장소 구조, 핵심 개발 규칙,
+  검증, 문서 길찾기 순서로 재배열했다.
+- **중복 축소**: 긴 provider/ETL/문서 목록은 `docs/etl/`, `docs/architecture/`,
+  `docs/runbooks/`, `docs/adr/README.md` 같은 정본 문서로 넘겼다.
+- **현재화**: `Docker 독립 프로그램 + 독립 DB/Dagster + OpenAPI`, 별도 API/admin package,
+  Windows Git + WSL 실행 정책을 README 첫 진입 흐름에 맞게 재서술했다.
+- **검증**: Markdown 문서 변경만이라 링크/맞춤법 중심으로 확인했다.
+
 ## 2026-06-18 (claude) — PR #476 사후 리뷰 + admin e2e 라이브 검증 (197 passed)
 
 Codex PR #476(maplibre-vworld-js dep 제거)을 다차원 적대적 리뷰하고, admin e2e를 라이브 실행해

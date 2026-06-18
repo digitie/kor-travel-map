@@ -1,5 +1,15 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-18 Codex 작업 메모 — README 진입 문서 정리 PR 대기
+
+사용자 요청으로 루트 README를 현재 운영 모델 기준의 짧은 진입 문서로 정리했다.
+
+- **정리 범위**: 소개/운영 모델/책임 범위/빠른 시작/저장소 구조/핵심 규칙/검증/문서 길찾기.
+- **중복 제거**: 긴 provider·ETL·문서 세부 목록은 `docs/etl/`, `docs/architecture/`,
+  `docs/runbooks/`, `docs/adr/README.md` 등 정본 문서로 포인터화했다.
+- **다음 한 작업**: 기존과 동일하게 **T-229-buildx — arm64 multi-arch buildx 배포 검증**
+  (`GITHUB_TOKEN` 필요).
+
 ## 2026-06-18 claude 작업 메모 — PR #476 리뷰 + admin e2e 라이브 검증
 
 - **#476 리뷰**: LOW 1건(`frontend.yml` stale 주석 — 제거된 maplibre-vworld git dep 참조) 정정,
