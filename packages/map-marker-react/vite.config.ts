@@ -14,13 +14,12 @@ export default defineConfig({
     },
     rollupOptions: {
       // peer deps은 번들 제외 — 호스트(debug UI / TripMate)가 제공
-      external: ["react", "react-dom", "maplibre-gl", "maplibre-vworld"],
+      external: ["react", "react-dom", "maplibre-gl"],
       output: {
         globals: {
           react: "React",
           "react-dom": "ReactDOM",
           "maplibre-gl": "maplibregl",
-          "maplibre-vworld": "MaplibreVworld",
         },
       },
     },

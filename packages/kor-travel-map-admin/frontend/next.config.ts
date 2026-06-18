@@ -11,7 +11,7 @@ const extraAllowedDevOrigins =
  * Next.js config for kor-travel-map-admin-frontend.
  *
  * ADR 참조:
- * - ADR-025: Next.js + maplibre-vworld
+ * - ADR-025: Next.js + MapLibre GL + VWorld 지도
  * - ADR-029 → ADR-043: @kor-travel-map/map-marker-react는 workspace 내부 share (private:true).
  * - ADR-035: 운영 시 Cloudflare Tunnel/SSO 뒤에 둠 (코드에 인증 X).
  *

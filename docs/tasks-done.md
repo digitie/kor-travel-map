@@ -3,6 +3,20 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## maplibre-vworld-js dependency 제거 (2026-06-18, `T-MAP-VWORLD-04`)
+
+- [x] **T-MAP-VWORLD-04 — `maplibre-vworld-js` dependency 제거** (#475).
+  `digitie/maplibre-vworld-react` `a7cb0f8` 기준으로 admin web 지도 경계를
+  `vworld-map-core`/`vworld-map-web` 모델에 맞췄다. admin frontend와
+  `@kor-travel-map/map-marker-react`에서 `maplibre-vworld` package dependency,
+  `maplibre-vworld/style.css` import, Vite external/global 선언을 제거하고,
+  `package-lock.json`에서 `maplibre-vworld` 및 전용 transitive를 제거했다.
+  `VWorldMapView`는 maxZoom clamp, redacted error logging, stable marker click
+  callback을 보강했다. 검증: admin type-check, marker typecheck/build,
+  admin vitest 27 passed, ESLint 0 errors(기존 warnings 6), Next build, Windows
+  Playwright 지도 e2e 5 passed. 정본 리포트:
+  `docs/reports/maplibre-vworld-js-dependency-removal-2026-06-18.md`.
+
 ## OpenAPI 에러 본문 RFC7807 problem+json 기계 계약 보강 (2026-06-18, `T-452`)
 
 - [x] **T-452-openapi-problem-json — OpenAPI 4xx/5xx problem+json 선언.**

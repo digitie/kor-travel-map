@@ -2,7 +2,6 @@
 
 import { createMarkerElement } from "@kor-travel-map/map-marker-react";
 import { type ColumnDef } from "@tanstack/react-table";
-import "maplibre-vworld/style.css";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import {

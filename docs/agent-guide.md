@@ -367,7 +367,7 @@ PR 핸드오프 표준 포맷은 `docs/windows-reinstall-recovery.md` 참고.
 
 형제 `python-*-api` provider 라이브러리(`python-kma-api`/`python-opinet-api`/
 `python-krex-api`/`python-datagokr-api`/`python-visitkorea-api`/`python-knps-api`
-등)와 `maplibre-vworld-js`는 같은 머신의 `F:\dev\`(WSL `~/dev/`) 아래 로컬에
+등)와 `maplibre-vworld-react`는 같은 머신의 `F:\dev\`(WSL `~/dev/`) 아래 로컬에
 체크아웃돼 있으므로, client·model·codes·스펙을 확인할 때는 **로컬 체크아웃을 1차
 source**로 `Glob`/`Read` 조회하고 GitHub 원격 fetch는 로컬에 없을 때만 fallback
 한다(GitHub 404/private는 "미존재" 근거가 아님 — PR#53에서 `python-datagokr-api`를

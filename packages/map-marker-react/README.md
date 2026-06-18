@@ -24,7 +24,7 @@
 | 위치 | `packages/map-marker-react/` (`kor-travel-map` monorepo) |
 | import | `import { MakiMarker, categoryMakiIcon } from "@kor-travel-map/map-marker-react"` |
 | 라이선스 | MIT |
-| peer deps | `react@^19.2`, `maplibre-gl@^5.24`, `maplibre-vworld@0.1.3` (설치는 `github:digitie/maplibre-vworld-js#v0.1.3`, npm 미게시), `zod@^4.4` |
+| peer deps | `react@^19.2`, `maplibre-gl@^5.24`, `zod@^4.4` |
 
 ## 포함 항목 (계획)
 
@@ -43,7 +43,7 @@
 // 또는 PinVi apps/web/components/FeatureMap.tsx
 import { MakiMarker, categoryMakiIcon } from "@kor-travel-map/map-marker-react";
 
-<VWorldMap>
+<VWorldMapView>
   {features.map(f => (
     <MakiMarker
       key={f.feature_id}
@@ -52,7 +52,7 @@ import { MakiMarker, categoryMakiIcon } from "@kor-travel-map/map-marker-react";
       color={f.marker_color}
     />
   ))}
-</VWorldMap>
+</VWorldMapView>
 ```
 
 ## drift gate (코드 작성 단계)
