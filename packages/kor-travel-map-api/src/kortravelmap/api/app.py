@@ -24,6 +24,7 @@ import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from time import perf_counter
+from typing import Any
 
 import httpx
 from fastapi import Depends, FastAPI, Request
@@ -40,7 +41,7 @@ from kortravelmap.api.auth import (
 )
 from kortravelmap.api.db import configure_prometheus_metrics
 from kortravelmap.api.prometheus import PrometheusMetrics
-from kortravelmap.api.response import bind_request_id, reset_request_id
+from kortravelmap.api.response import ProblemDetail, bind_request_id, reset_request_id
 from kortravelmap.api.response import request_id as response_request_id
 from kortravelmap.api.routers import (
     admin_backups_router,
@@ -87,6 +88,84 @@ _ERROR_CODE_BY_STATUS: dict[int, str] = {
     502: "BAD_GATEWAY",
     503: "SERVICE_UNAVAILABLE",
 }
+
+# RFC7807 problem+json 응답을 OpenAPI에 주입할 때 쓰는 메서드 집합 (T-452).
+_OPENAPI_HTTP_METHODS: frozenset[str] = frozenset(
+    {"get", "put", "post", "delete", "options", "head", "patch", "trace"}
+)
+
+_PROBLEM_DEFAULT_DESCRIPTION = (
+    "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 "
+    "핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 "
+    "(docs/architecture/rest-api.md §1.5)."
+)
+
+
+def _build_problem_components() -> dict[str, Any]:
+    """``ProblemDetail``/``ProblemDetailError`` schema를 components용으로 평탄화한다.
+
+    pydantic ``model_json_schema``는 nested model을 ``$defs``에 둔다. components
+    참조(`#/components/schemas/...`)로 끌어올리기 위해 ``$defs``를 풀어 합친다.
+    """
+    schema: dict[str, Any] = ProblemDetail.model_json_schema(
+        ref_template="#/components/schemas/{model}"
+    )
+    defs = schema.pop("$defs", {})
+    components: dict[str, Any] = dict(defs) if isinstance(defs, dict) else {}
+    components["ProblemDetail"] = schema
+    return components
+
+
+_PROBLEM_COMPONENTS: dict[str, Any] = _build_problem_components()
+
+
+def _problem_content() -> dict[str, Any]:
+    return {
+        "application/problem+json": {
+            "schema": {"$ref": "#/components/schemas/ProblemDetail"},
+        }
+    }
+
+
+def _augment_problem_responses(schema: dict[str, Any]) -> None:
+    """생성된 OpenAPI에 RFC7807 problem+json 에러 응답을 주입한다 (T-452).
+
+    중앙 핸들러가 모든 오류를 problem+json으로 통일하므로, 각 operation의 4xx/5xx와
+    ``default`` 응답 본문을 ``ProblemDetail``로 선언한다. FastAPI 자동 422
+    (``HTTPValidationError``)도 problem+json으로 대체하고, orphan이 되는 검증 schema는
+    제거한다. 기존 응답의 ``description``은 보존한다.
+    """
+    components: dict[str, Any] = schema.setdefault("components", {}).setdefault(
+        "schemas", {}
+    )
+    components.update(_PROBLEM_COMPONENTS)
+
+    paths = schema.get("paths", {})
+    if isinstance(paths, dict):
+        for path_item in paths.values():
+            if not isinstance(path_item, dict):
+                continue
+            for method, operation in path_item.items():
+                if method not in _OPENAPI_HTTP_METHODS or not isinstance(operation, dict):
+                    continue
+                responses: dict[str, Any] = operation.setdefault("responses", {})
+                for code, response in list(responses.items()):
+                    if not isinstance(response, dict):
+                        continue
+                    if code == "default" or (code.isdigit() and int(code) >= 400):
+                        response.setdefault("description", _PROBLEM_DEFAULT_DESCRIPTION)
+                        response["content"] = _problem_content()
+                responses.setdefault(
+                    "default",
+                    {
+                        "description": _PROBLEM_DEFAULT_DESCRIPTION,
+                        "content": _problem_content(),
+                    },
+                )
+
+    # 모든 422가 problem+json으로 대체되어 FastAPI 검증 schema는 orphan이 된다.
+    for orphan in ("HTTPValidationError", "ValidationError"):
+        components.pop(orphan, None)
 
 
 def _request_id(request: Request) -> str:
@@ -408,6 +487,21 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         application.include_router(ops_live_router, prefix="/v1")
         application.include_router(ops_logs_router, prefix="/v1")
         application.include_router(dagster_router, prefix="/v1")
+
+    # ADR-031/T-452 — 생성 openapi에 RFC7807 problem+json 에러 응답을 주입한다.
+    # 중앙 예외 핸들러가 모든 4xx/5xx를 problem+json으로 통일하는 구조를 기계 계약에
+    # 반영한다(`export_openapi.py`가 이 `openapi()`를 호출).
+    _default_openapi = application.openapi
+
+    def _custom_openapi() -> dict[str, Any]:
+        if application.openapi_schema is not None:
+            return application.openapi_schema
+        schema = _default_openapi()
+        _augment_problem_responses(schema)
+        application.openapi_schema = schema
+        return schema
+
+    application.openapi = _custom_openapi  # type: ignore[method-assign]
 
     return application
 

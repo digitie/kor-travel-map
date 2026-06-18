@@ -13,6 +13,8 @@ __all__ = [
     "ClusterMeta",
     "Meta",
     "PageMeta",
+    "ProblemDetail",
+    "ProblemDetailError",
     "bind_request_id",
     "duration_ms",
     "make_meta",
@@ -57,6 +59,45 @@ class Meta(BaseModel):
     request_id: str = Field(default="", description="X-Request-ID와 같은 요청 ID.")
     page: PageMeta | None = None
     cluster: ClusterMeta | None = None
+
+
+class ProblemDetailError(BaseModel):
+    """RFC7807 problem 본문 ``errors`` 항목 (필드 단위 오류).
+
+    §1.5 산문 계약은 ``{field, message}``를 정의하지만, 검증 실패(422)는 pydantic
+    원본 오류(``loc``/``msg``/``type`` 등)를 그대로 싣는다. 두 형태를 모두 허용하도록
+    추가 키를 열어 둔다(``extra='allow'``).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    field: str | None = Field(default=None, description="오류가 발생한 입력 필드.")
+    message: str | None = Field(default=None, description="사람이 읽는 오류 메시지.")
+
+
+class ProblemDetail(BaseModel):
+    """RFC7807 ``application/problem+json`` 에러 본문 (중앙 핸들러 정본, §1.5).
+
+    중앙 예외 핸들러(`app._error_response`)가 모든 4xx/5xx를 이 형식으로 통일한다.
+    ``code``·``request_id``는 소비자 파싱 위치 고정용 top-level 확장 멤버다.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    type: str = Field(
+        description="오류 유형 URI. 예: https://kor-travel-map/errors/not-found",
+    )
+    title: str = Field(description="사람이 읽는 짧은 요약(= detail).")
+    status: int = Field(description="HTTP 상태 코드.")
+    detail: str = Field(description="이 발생 건에 대한 사람이 읽는 설명.")
+    code: str = Field(description="기계 판독용 오류 코드(§4 enum 확장). 예: NOT_FOUND.")
+    request_id: str = Field(
+        description="요청 상관추적 ID(`X-Request-ID`/`meta.request_id`와 동일).",
+    )
+    errors: list[ProblemDetailError] = Field(
+        default_factory=list,
+        description="필드 단위 검증 오류 목록(검증 실패 시 비어 있지 않다).",
+    )
 
 
 def request_id(request: Request) -> str:

@@ -85,11 +85,14 @@
 - `Content-Type: application/problem+json` + `X-Request-ID`. 중앙 핸들러(`app.py`
   `_error_response`)가 통일. `code`·`request_id`는 **top-level 확장 멤버**(소비자 파싱 위치
   고정), 코드 enum(§4)을 확장 `code`로 유지.
-- **알려진 한계(생성 openapi.json under-spec)**: FastAPI 중앙 예외 핸들러로 본문을 통일하는
-  구조라, **생성 `openapi.json`은 에러 응답을 `422 application/json`(기본 `HTTPValidationError`)
-  로만 선언**하고 런타임의 RFC7807 `application/problem+json`(4xx/5xx) 스키마를 자동 반영하지
-  못한다. **본 §1.5 산문 계약이 에러 본문의 정본**이며, 기계 정본(openapi.json)은 이 부분에서
-  실제보다 협소하다(향후 핸들러별 `responses=` 주석으로 보강 가능 — 미적용).
+- **기계 계약 반영(T-452, ✅ 적용)**: `create_app`의 custom `app.openapi()`가 모든 operation의
+  4xx/5xx와 `default` 응답을 RFC7807 `application/problem+json`(`ProblemDetail` schema)으로
+  선언한다. FastAPI 자동 `422 application/json`(`HTTPValidationError`)도 problem+json으로
+  대체하고, orphan이 된 검증 schema는 제거한다. **본 §1.5 산문 계약과 generated `openapi.json`의
+  `ProblemDetail`이 함께 정본**이며, 기계 계약도 `code`·`request_id` 확장 멤버와 `errors[]`
+  (`ProblemDetailError`)를 포함한다. `ProblemDetail`은 `extra=allow`라 핸들러가 싣는 추가 키
+  (`details` 등)와 검증 오류 원형(`loc`/`msg`)을 모두 허용한다. 산출물은
+  `export_openapi.py --check` drift gate(ADR-031)로 고정한다.
 
 ### 1.6 페이지네이션 (🔁 ADR-048, T-214e 심화)
 **해소된 실측 불일치(T-216 이전)**: 과거에는 page-size 파라미터 3종(`limit` features 평면/

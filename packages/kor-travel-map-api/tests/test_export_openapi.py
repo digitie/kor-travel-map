@@ -122,3 +122,35 @@ def test_user_operations_are_present_in_full_openapi() -> None:
         assert methods <= {
             key for key in path_item if key in module.HTTP_METHODS
         }
+
+
+@pytest.mark.unit
+def test_openapi_declares_rfc7807_problem_json_error_responses() -> None:
+    """T-452 — 모든 operation의 4xx/5xx·default 오류는 problem+json ProblemDetail."""
+    module = _load_script_module()
+    spec = create_app(ApiSettings()).openapi()
+    schemas = spec["components"]["schemas"]
+
+    assert "ProblemDetail" in schemas
+    assert "ProblemDetailError" in schemas
+    # FastAPI 자동 검증 schema는 problem+json으로 대체되어 orphan 제거된다.
+    assert "HTTPValidationError" not in schemas
+    assert "ValidationError" not in schemas
+
+    problem_ref = {"$ref": "#/components/schemas/ProblemDetail"}
+    error_responses_seen = 0
+    for path_item in spec["paths"].values():
+        for method, operation in path_item.items():
+            if method not in module.HTTP_METHODS:
+                continue
+            responses = operation["responses"]
+            default_schema = responses["default"]["content"][
+                "application/problem+json"
+            ]["schema"]
+            assert default_schema == problem_ref
+            for code, response in responses.items():
+                if code.isdigit() and int(code) >= 400:
+                    schema = response["content"]["application/problem+json"]["schema"]
+                    assert schema == problem_ref
+                    error_responses_seen += 1
+    assert error_responses_seen > 0
