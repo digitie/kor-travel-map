@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### Admin frontend 오류 화면 복구 (2026-06-20)
+
+- **FIXED**: Next App Router segment/global error boundary(`app/error.tsx`,
+  `app/global-error.tsx`)를 추가해, 브라우저가 Next 기본 영어 오류 화면
+  (`This page couldn’t load`)으로 떨어지던 방어 공백을 보강했다. 앱 자체 한국어 복구
+  패널(다시 시도/이전 화면/오류 정보)을 보여 주고, chunk/RSC/network 계열 런타임 오류는
+  같은 pathname에서 1회만 hard reload로 복구를 시도한다. (kor-travel-geo #391/T-278 동일 반영.)
+
 ### Admin frontend 디자인 정리 (2026-06-18)
 
 - **CHANGED**: admin frontend 공통 디자인 토큰과 primitive를 StyleSeed 규칙에 맞춰
