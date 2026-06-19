@@ -2,6 +2,25 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-20 (claude) — admin UI Next 기본 오류 화면 복구 보강 (geo #391 동일 반영)
+
+사용자 요청으로 kor-travel-geo PR #391(이슈 #390/T-278)을 admin frontend에 동일 반영했다.
+(#390은 PR이 아니라 이슈 — #391이 fix.)
+
+- **포팅(핵심)**: Next App Router `src/app/error.tsx`·`src/app/global-error.tsx` + 복구 패널
+  `src/components/app-error-panel.tsx` + 헬퍼 `src/lib/error-recovery.ts`. Next 기본 영어 오류
+  화면 대신 한국어 복구 패널(다시 시도/이전 화면/오류 정보)을 보여 주고, chunk/RSC/network
+  계열 오류는 sessionStorage flag로 같은 pathname당 1회 hard reload. unit test
+  `src/lib/error-recovery.test.ts`(3) 동반.
+- **스택 적응**: geo는 raw CSS 클래스, 본 repo는 Tailwind/shadcn이라 패널을 디자인 토큰
+  (`bg-card`/`text-text-*`/`rounded-2xl`/`Button`)으로 재구성. reload prefix는
+  `kortravelmap.admin.error-reload`, goBack fallback은 `/`(admin 홈).
+- **미반영(geo-specific)**: geo의 `PerfValidationSummary` `next/link`→`DocumentNavLink`
+  (_rsc 회피) 변경은 본 repo에 `DocumentNavLink`/해당 컴포넌트 analog가 없어 제외(SPA 내비
+  광범위 전환은 별도 결정). 핵심 오류 boundary는 전부 반영.
+- **검증**: admin type-check(tsc+e2e tsconfig)·ESLint(0 errors)·next build·vitest 30 passed
+  (기존 27+신규 3).
+
 ## 2026-06-20 (claude) — dev 스크립트 개선: 포트 가드 + 127.0.0.1 + Docker host 네트워크 기본
 
 dev/prod 분리를 명확히 하고(별도 지시 없으면 dev), dev 기동 스크립트를 개선했다.
