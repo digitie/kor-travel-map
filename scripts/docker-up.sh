@@ -35,7 +35,18 @@ else
   ports+=("$KOR_TRAVEL_MAP_RUSTFS_API_PORT" "$KOR_TRAVEL_MAP_RUSTFS_CONSOLE_PORT")
 fi
 
-"$ROOT_DIR/scripts/stop-fixed-ports.sh" "${ports[@]}"
+# dev 기본 네트워크 = Docker host 모드. 서비스 간 주소를 127.0.0.1:<12xxx>로 고정하고
+# ports 매핑을 제거한다(docker-compose.host.yml). 마지막 override로 적용해 mode override
+# 위에 얹는다. 브리지로 되돌리려면 KOR_TRAVEL_MAP_DOCKER_NETWORK=bridge.
+docker_network="${KOR_TRAVEL_MAP_DOCKER_NETWORK:-host}"
+if [[ "$docker_network" == "host" ]]; then
+  compose_files+=(-f docker-compose.host.yml)
+fi
+
+# dev(기본) 기동. 고정 포트가 이미 사용 중이면 새 포트로 열지 않고 강제종료 여부를
+# 묻는다. 강제종료하지 않으면 preflight가 exit 1 → set -e로 기동 중지(기존 서비스/prod 보존).
+# 프롬프트 없이 강제종료하려면 KOR_TRAVEL_MAP_FORCE_KILL_PORTS=1.
+"$ROOT_DIR/scripts/preflight-ports.sh" "${ports[@]}"
 
 cd "$ROOT_DIR"
 docker compose "${compose_files[@]}" up -d --build "${services[@]}"

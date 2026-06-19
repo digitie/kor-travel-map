@@ -1,20 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# 고정 dev 포트(API 12701 · admin UI 12705 · Dagster 12702 · RustFS 12101/12105)의
+# listener를 **강제종료**한다. 명시적 정리 명령(`npm run ports:stop`)이며, 직접 실행할
+# 때만 kill한다. `scripts/preflight-ports.sh`는 이 파일을 source해 탐지 함수만 재사용하고,
+# 강제종료 여부는 사용자에게 묻는다(이미 떠 있는 서비스/prod 보존).
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=load-env.sh
 source "$ROOT_DIR/scripts/load-env.sh"
-
-ports=("$@")
-if [[ "${#ports[@]}" -eq 0 ]]; then
-  ports=(
-    "$KOR_TRAVEL_MAP_API_PORT"
-    "$KOR_TRAVEL_MAP_ADMIN_WEB_PORT"
-    "$KOR_TRAVEL_MAP_DAGSTER_PORT"
-    "$KOR_TRAVEL_MAP_RUSTFS_API_PORT"
-    "$KOR_TRAVEL_MAP_RUSTFS_CONSOLE_PORT"
-  )
-fi
 
 find_pids_for_port() {
   local port="$1"
@@ -70,6 +64,17 @@ find_wsl_root_pids_for_port() {
     | sort -u
 }
 
+# 포트에 listener(호스트 프로세스 · Docker publish · WSL root · Windows)가 하나라도
+# 있으면 0(true). 강제종료하지 않는 순수 탐지용 — preflight-ports.sh가 쓴다.
+port_has_listener() {
+  local port="$1"
+  [[ -n "$(find_pids_for_port "$port")" ]] && return 0
+  [[ -n "$(find_docker_containers_for_port "$port")" ]] && return 0
+  [[ -n "$(find_wsl_root_pids_for_port "$port")" ]] && return 0
+  [[ -n "$(find_windows_pids_for_port "$port")" ]] && return 0
+  return 1
+}
+
 stop_wsl_root_pids() {
   if [[ "${#}" -eq 0 ]]; then
     return 0
@@ -87,50 +92,70 @@ stop_wsl_root_pids() {
     >/dev/null 2>&1 || true
 }
 
-for port in "${ports[@]}"; do
-  mapfile -t pids < <(find_pids_for_port "$port")
-  if [[ "${#pids[@]}" -eq 0 ]]; then
-    echo "port $port: no listener"
-  else
-    echo "port $port: stopping ${pids[*]}"
-    for pid in "${pids[@]}"; do
-      kill "$pid" 2>/dev/null || true
-    done
-    sleep 0.5
-    for pid in "${pids[@]}"; do
-      if kill -0 "$pid" 2>/dev/null; then
-        kill -9 "$pid" 2>/dev/null || true
+# 고정 포트 listener를 실제로 강제종료한다(직접 실행/`ports:stop` 전용).
+stop_fixed_ports() {
+  local ports=("$@")
+  local port
+  for port in "${ports[@]}"; do
+    mapfile -t pids < <(find_pids_for_port "$port")
+    if [[ "${#pids[@]}" -eq 0 ]]; then
+      echo "port $port: no listener"
+    else
+      echo "port $port: stopping ${pids[*]}"
+      for pid in "${pids[@]}"; do
+        kill "$pid" 2>/dev/null || true
+      done
+      sleep 0.5
+      for pid in "${pids[@]}"; do
+        if kill -0 "$pid" 2>/dev/null; then
+          kill -9 "$pid" 2>/dev/null || true
+        fi
+      done
+    fi
+
+    mapfile -t docker_containers < <(find_docker_containers_for_port "$port")
+    if [[ "${#docker_containers[@]}" -gt 0 ]]; then
+      echo "port $port: stopping Docker containers ${docker_containers[*]}"
+      docker stop "${docker_containers[@]}" >/dev/null 2>&1 || true
+    fi
+
+    mapfile -t root_pids < <(find_wsl_root_pids_for_port "$port")
+    if [[ "${#root_pids[@]}" -gt 0 ]]; then
+      echo "port $port: stopping WSL root listeners ${root_pids[*]}"
+      stop_wsl_root_pids "${root_pids[@]}"
+      sleep 0.5
+      mapfile -t remaining_root_pids < <(find_wsl_root_pids_for_port "$port")
+      if [[ "${#remaining_root_pids[@]}" -gt 0 ]]; then
+        echo "port $port: WSL root listeners still present ${remaining_root_pids[*]}" >&2
       fi
-    done
-  fi
-
-  mapfile -t docker_containers < <(find_docker_containers_for_port "$port")
-  if [[ "${#docker_containers[@]}" -gt 0 ]]; then
-    echo "port $port: stopping Docker containers ${docker_containers[*]}"
-    docker stop "${docker_containers[@]}" >/dev/null 2>&1 || true
-  fi
-
-  mapfile -t root_pids < <(find_wsl_root_pids_for_port "$port")
-  if [[ "${#root_pids[@]}" -gt 0 ]]; then
-    echo "port $port: stopping WSL root listeners ${root_pids[*]}"
-    stop_wsl_root_pids "${root_pids[@]}"
-    sleep 0.5
-    mapfile -t remaining_root_pids < <(find_wsl_root_pids_for_port "$port")
-    if [[ "${#remaining_root_pids[@]}" -gt 0 ]]; then
-      echo "port $port: WSL root listeners still present ${remaining_root_pids[*]}" >&2
     fi
-  fi
 
-  mapfile -t win_pids < <(find_windows_pids_for_port "$port")
-  if [[ "${#win_pids[@]}" -gt 0 ]]; then
-    echo "port $port: stopping Windows listeners ${win_pids[*]}"
-    for pid in "${win_pids[@]}"; do
-      taskkill.exe /PID "$pid" /F >/dev/null 2>&1 || true
-    done
-    sleep 0.5
-    mapfile -t remaining_win_pids < <(find_windows_pids_for_port "$port")
-    if [[ "${#remaining_win_pids[@]}" -gt 0 ]]; then
-      echo "port $port: Windows listeners still present ${remaining_win_pids[*]}" >&2
+    mapfile -t win_pids < <(find_windows_pids_for_port "$port")
+    if [[ "${#win_pids[@]}" -gt 0 ]]; then
+      echo "port $port: stopping Windows listeners ${win_pids[*]}"
+      for pid in "${win_pids[@]}"; do
+        taskkill.exe /PID "$pid" /F >/dev/null 2>&1 || true
+      done
+      sleep 0.5
+      mapfile -t remaining_win_pids < <(find_windows_pids_for_port "$port")
+      if [[ "${#remaining_win_pids[@]}" -gt 0 ]]; then
+        echo "port $port: Windows listeners still present ${remaining_win_pids[*]}" >&2
+      fi
     fi
+  done
+}
+
+# 직접 실행될 때만 강제종료한다. source되면 함수만 제공한다.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  ports=("$@")
+  if [[ "${#ports[@]}" -eq 0 ]]; then
+    ports=(
+      "$KOR_TRAVEL_MAP_API_PORT"
+      "$KOR_TRAVEL_MAP_ADMIN_WEB_PORT"
+      "$KOR_TRAVEL_MAP_DAGSTER_PORT"
+      "$KOR_TRAVEL_MAP_RUSTFS_API_PORT"
+      "$KOR_TRAVEL_MAP_RUSTFS_CONSOLE_PORT"
+    )
   fi
-done
+  stop_fixed_ports "${ports[@]}"
+fi
