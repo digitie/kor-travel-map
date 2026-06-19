@@ -38,8 +38,8 @@
 | ADR-022 | `krtour` implicit namespace + Python import path `kortravelmap` | [022-krtour-namespace-import-path-kortravelmap.md](022-krtour-namespace-import-path-kortravelmap.md) |
 | ADR-023 | kraddr-base category 모듈을 kortravelmap.category로 이전 | → 이관 [architecture/architecture.md](../architecture/architecture.md) |
 | ADR-024 | canonical provider name python-mois-api로 정정 | → 이관 [architecture/architecture.md](../architecture/architecture.md) |
-| ADR-025 | 디버그 UI frontend는 maplibre-vworld-js 채택 | → 이관 [architecture/debug-ui-package.md](../architecture/debug-ui-package.md) |
-| ADR-026 | 본 레포 debug/admin UI를 maplibre-vworld로 통일 + category→maki 단일 매핑 | → 이관 [architecture/debug-ui-package.md](../architecture/debug-ui-package.md) |
+| ADR-025 | 디버그 UI frontend는 MapLibre GL + VWorld 채택 (현행: `maplibre-vworld-react` 모델 내부 포팅, `maplibre-vworld-js` dependency 제거) | → 이관 [architecture/debug-ui-package.md](../architecture/debug-ui-package.md) |
+| ADR-026 | 본 레포 debug/admin UI를 MapLibre/VWorld로 통일 + category→maki 단일 매핑 | → 이관 [architecture/debug-ui-package.md](../architecture/debug-ui-package.md) |
 | ADR-027 | forest 카테고리 확장 (대피소 PlaceCategory, hazard_zone area, 일반화된 notice_type) | → 이관 [architecture/category.md](../architecture/category.md) |
 | ADR-028 | python-knps-api provider 라이브러리 등록 (+ keyless/file-only amendment + SHP/CSV 파싱 책임=knps-api) | → 이관 [etl/knps-feature-etl.md](../etl/knps-feature-etl.md) |
 | ADR-029 | 공통 maki marker/category 매핑 npm 패키지 추출 (@kor-travel-map/map-marker-react) | → 이관 [architecture/debug-ui-package.md](../architecture/debug-ui-package.md) |
@@ -49,7 +49,7 @@
 | ADR-033 | feature_consistency_reports 단계적 도입 (F1~F3 → F4~F8 + Dagster 게이트) | → 이관 [architecture/data-model.md](../architecture/data-model.md) |
 | ADR-034 | provider 9단계 구현 순서 — MOIS 마지막 군 | → 이관 [architecture/architecture.md](../architecture/architecture.md) |
 | ADR-035 | 디버그/관리 REST API를 프로덕션에서도 admin/유지보수 UI로 운영 (코드 외부 인증, /admin·/ops·/debug prefix 분리) | → 이관 [deploy.md](../deploy.md) |
-| ADR-036 | maplibre-vworld-js 라이브러리 분리 + 버전 핀(v0.1.3, Next.js 16) | → 이관 [architecture/debug-ui-package.md](../architecture/debug-ui-package.md) |
+| ADR-036 | maplibre-vworld-js 라이브러리 분리 결정은 T-MAP-VWORLD-04로 superseded; 현행은 `maplibre-vworld-react` 모델 내부 포팅 | → 이관 [architecture/debug-ui-package.md](../architecture/debug-ui-package.md) |
 | ADR-037 | 디버그/관리 UI frontend state 관리 — TanStack Query + Zustand | [037-admin-ui-frontend-state-tanstack-query-zustand.md](037-admin-ui-frontend-state-tanstack-query-zustand.md) |
 | ADR-038 | GitHub Actions CI/CD 재활성화 — 머지 게이트 다시 켬 | → 이관 [agent-guide.md](../agent-guide.md) |
 | ADR-039 | CLI 중복 실행 mutex | → 개발 규칙 ([SKILL.md §4](../../SKILL.md)) |

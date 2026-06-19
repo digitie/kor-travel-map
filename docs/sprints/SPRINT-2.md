@@ -180,8 +180,10 @@ provider API key 설정:
 - ETL preview live mode 확장 — 나머지 8 dataset (datagokr/opinet 2/krex 4/
   kma_weather_alerts) live loader 등록.
 - **frontend** (PR#36, 2026-05-27 merged — skeleton 진입):
-  - Next.js 15 App Router + React 19 + maplibre-vworld (ADR-025) +
-    **TanStack Query + Zustand (ADR-037)**
+  - 당시 기준: Next.js 15 App Router + React 19 + MapLibre/VWorld (ADR-025) +
+    **TanStack Query + Zustand (ADR-037)**.
+    현행 기준은 `docs/sprints/README.md`와 `docs/architecture/debug-ui-package.md`의
+    Next.js 16 + TanStack Query/Table/Virtual + `maplibre-vworld-react` 모델 내부 포팅이다.
   - `src/api/{client,queries}.ts` — `useHealth` / `useVersion` hook 첫 통합
   - `src/state/map.ts` — Zustand map viewport store (lon/lat/zoom + 카테고리
     filter + 선택된 feature)
@@ -211,7 +213,9 @@ Sprint 2 진행 중 다음 ADR들의 1차 implementation 점진 도입:
 
 - **ADR-035** 운영 라우터 prefix 분리 (`/debug`/`/admin`/`/ops`) — §2.5 참조.
 - **ADR-036** `maplibre-vworld-js` 라이브러리 분리 — frontend 본격 시작 시점
-  검토, Sprint 3 후반 PR로 v0.1.0 release.
+  검토, Sprint 3 후반 PR로 v0.1.0 release. 현행 admin frontend에서는
+  T-MAP-VWORLD-04 이후 해당 dependency를 제거하고 `maplibre-vworld-react` 모델을
+  내부 포팅한다.
 - **ADR-037** Frontend TanStack Query + Zustand — §2.5 frontend 옵션과 함께.
 - **ADR-038** GitHub Actions CI/CD 재활성화 — Sprint 2 진입 직후 즉시
   branch protection rules 설정 (사용자 측 GitHub Settings).

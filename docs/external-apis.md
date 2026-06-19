@@ -40,7 +40,7 @@
 | `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_BASE_URL` | kor-travel-concierge-youtube | 형제 앱 kor-travel-concierge | base URL, 예: `http://127.0.0.1:12401` |
 | `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_API_KEY` | kor-travel-concierge-youtube | kor-travel-concierge `API_KEYS` 중 하나 | `X-API-Key` 헤더로 전송 |
 | `KOR_TRAVEL_GEO_*` | kor-travel-geo | (로컬 DB 위주, vworld 폴백 키는 kor-travel-geo가 관리) | 본 라이브러리는 kor-travel-geo client만 사용 |
-| `KOR_TRAVEL_GEO_VWORLD_API_KEY` | kor-travel-geo (reverse geocoding), 디버그 UI frontend (maplibre-vworld), PinVi 사용자 UI (ADR-026) | VWorld (vworld.kr) | **공유 키**. 별도 발급 X. ADR-025 + ADR-026 |
+| `KOR_TRAVEL_GEO_VWORLD_API_KEY` | kor-travel-geo (reverse geocoding), 디버그/admin UI frontend (MapLibre/VWorld), PinVi 사용자 UI (ADR-026) | VWorld (vworld.kr) | **공유 키**. 별도 발급 X. ADR-025 + ADR-026 |
 
 ## 3. provider별 발급 절차 (요약)
 
