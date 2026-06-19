@@ -1080,9 +1080,12 @@ Admin frontend 표준:
 - Zustand: map viewport, view mode, filter draft, selected feature 같은 UI 상태.
 - Zod: API response parsing, form schema, 좌표/bbox 검증.
 - React Hook Form: form 상태와 validation 연결.
+- TanStack React Table + React Virtual: 운영 목록/검토 화면의 정렬, 선택, row model,
+  큰 목록 가상화. 공용 `DataTable`이 기본 표면이다.
 - shadcn/ui: Button, Input, Select, Dialog, Sheet, Tabs, Table, Badge, Toast,
-  Form, DropdownMenu 등 UI primitive.
-- MapLibre GL + VWorld style builder: VWorld 지도.
+  Form, DropdownMenu 등 UI primitive. `Table` primitive는 DataTable의 표시 계층으로만 쓴다.
+- MapLibre GL + VWorld style builder: VWorld 지도. `maplibre-vworld` 패키지 dependency는
+  두지 않고 `maplibre-vworld-react` web/core 모델을 내부 포팅한다.
 - `@kor-travel-map/map-marker-react`: category/maki marker.
 - 디자인 규칙: [`admin-frontend-design-rules.md`](admin-frontend-design-rules.md).
 

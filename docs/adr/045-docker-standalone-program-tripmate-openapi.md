@@ -82,10 +82,13 @@
 
 7. **Frontend stack**
    - admin frontend는 Next.js, React, TypeScript, TanStack Query, Zustand, Zod,
-     React Hook Form, shadcn/ui, maplibre-vworld-js, `@kor-travel-map/map-marker-react`를
-     표준 stack으로 쓴다.
+     React Hook Form, TanStack React Table, TanStack React Virtual, shadcn/ui,
+     MapLibre GL + VWorld style builder, `@kor-travel-map/map-marker-react`를 표준 stack으로
+     쓴다.
    - 서버 상태는 TanStack Query, 클라이언트 UI 상태는 Zustand, form 검증은
      React Hook Form + Zod resolver, 공통 UI primitive는 shadcn/ui를 사용한다.
+   - admin 지도는 `maplibre-vworld-js`/`maplibre-vworld` npm dependency를 두지 않고,
+     `maplibre-vworld-react`의 web/core 모델을 내부 포팅한 MapLibre/VWorld 구현을 쓴다.
    - frontend 작업 후에는 React Doctor를 실행하고 결과를 검토·개선해야 한다.
 
 ### 근거

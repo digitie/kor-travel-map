@@ -330,10 +330,12 @@ type drift 부채 0).
 - 백업/복구/DR 직접 실행은 ADR-040의 별도 admin 기능으로만 다룬다
 - PinVi 사용자/여행계획/POI 도메인 화면
 
-## 12. 향후 확장 (보류)
+## 12. 확장/보류 항목
 
-- **별도 frontend (Next.js)**: 본 디렉토리에서 운영하거나 별도 패키지
-  (`kor-travel-map-admin-frontend`?) 분리. v2 1차 범위 외 (T-100).
+- **frontend 확장**: 현행 admin frontend는
+  `packages/kor-travel-map-admin/frontend/`의 별도 Next.js 패키지다. 새 화면과
+  공통 UI는 본 문서 §14의 stack과
+  [`admin-frontend-design-rules.md`](admin-frontend-design-rules.md)를 따른다.
 - **WebSocket 실시간 디버그**: 큰 적재 job 진행률 streaming.
 - **EXPLAIN ANALYZE 결과 timeline 시각화**: pg_stat_statements 연동.
 
@@ -355,10 +357,11 @@ type drift 부채 0).
 |------|----|
 | Framework | **Next.js 16 (App Router)** — `kor-travel-geo-ui` / PinVi `apps/web`와 동일 stack (ADR-025 2차 보강 2026-05-25, 2026-05-31 최신화) |
 | 지도 모델 | `digitie/maplibre-vworld-react`의 `vworld-map-core`/`vworld-map-web` 경계 기반. 외부 모노레포 전체를 dependency로 설치하지 않고 admin에 필요한 `VWorldMapView`/style builder만 내부 포팅(T-MAP-VWORLD-04). |
-| 의존 | `maplibre-gl` ^5.24.0 (BSD-3), `zod` ^4.4.3, React 19, `@tanstack/react-query` |
+| 의존 | `maplibre-gl` ^5.24.0 (BSD-3), React 19, `@tanstack/react-query`, `@tanstack/react-table` v8, `@tanstack/react-virtual` v3, `zod` ^4.4.3 |
 | 공통 마커 | `@kor-travel-map/map-marker-react` (workspace, ADR-029) |
 | Form | React Hook Form + Zod resolver |
-| UI primitive | shadcn/ui |
+| Data table | 공용 `DataTable` 기반. TanStack React Table이 정렬/선택/row model을 맡고, TanStack React Virtual이 큰 목록 가상화를 맡는다. shadcn `Table` primitive는 의미론적/시각적 렌더링에만 쓴다. |
+| UI primitive | shadcn/ui / Base UI |
 | 언어 | TypeScript |
 | 라이선스 | MIT (`next`) + BSD-3 (`maplibre-gl`) + MIT (`zod`) + GPL-3.0 (본 저장소) — 호환 |
 | 디렉토리 | `packages/kor-travel-map-admin/frontend/` |
@@ -591,4 +594,4 @@ upstream 저장소(`digitie/maplibre-vworld-react`) 기준으로 정렬한다.
   workspace)로만 import한다. 현재 사용처가 모노레포 내부로 한정돼 git share로
   충분하고, registry 게시는 namespace 점유·버전 관리·보안 책임이 따르기 때문이다.
   향후 registry 게시가 필요해지면 새 결정으로 unfreeze한다. (구 ADR-043에서 결정 —
-  본문 §14.1 "npm 미게시, git URL+tag 핀" 참조.)
+  본문 §14.1 "공통 마커" 참조.)

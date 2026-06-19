@@ -1,5 +1,32 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-19 Codex 작업 메모 — admin frontend stack 문서 정합성 정리
+
+사용자 요청으로 architecture 계열 문서의 frontend stack 표현을 현재 구현 기준으로
+정리했다.
+
+- **지도**: admin frontend는 `maplibre-vworld-js`/`maplibre-vworld` dependency를 쓰지 않고,
+  `maplibre-vworld-react` web/core 모델을 내부 포팅한 MapLibre GL + VWorld 구현을 쓴다고
+  정정했다.
+- **테이블**: 운영 목록/검토 화면은 공용 `DataTable`
+  (`@tanstack/react-table` v8 + `@tanstack/react-virtual` v3) 기반이며,
+  shadcn `Table`은 표시 primitive라고 명시했다.
+- **정리 대상**: `architecture.md`, `debug-ui-package.md`, OpenAPI/frontend workflow 문서,
+  ADR index/ADR-045, Sprint 문서, VWorld key 문서.
+
+**다음 한 작업**: 기존과 동일하게 **T-229-buildx — arm64 multi-arch buildx 배포 검증**
+(`GITHUB_TOKEN` 필요).
+
+## 2026-06-18 Codex 작업 메모 — README 진입 문서 정리 PR 대기
+
+사용자 요청으로 루트 README를 현재 운영 모델 기준의 짧은 진입 문서로 정리했다.
+
+- **정리 범위**: 소개/운영 모델/책임 범위/빠른 시작/저장소 구조/핵심 규칙/검증/문서 길찾기.
+- **중복 제거**: 긴 provider·ETL·문서 세부 목록은 `docs/etl/`, `docs/architecture/`,
+  `docs/runbooks/`, `docs/adr/README.md` 등 정본 문서로 포인터화했다.
+- **다음 한 작업**: 기존과 동일하게 **T-229-buildx — arm64 multi-arch buildx 배포 검증**
+  (`GITHUB_TOKEN` 필요).
+
 ## 2026-06-18 claude 작업 메모 — PR #476 리뷰 + admin e2e 라이브 검증
 
 - **#476 리뷰**: LOW 1건(`frontend.yml` stale 주석 — 제거된 maplibre-vworld git dep 참조) 정정,

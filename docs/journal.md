@@ -2,6 +2,34 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-19 (Codex) — admin frontend stack 문서 정합성 정리
+
+사용자 요청으로 architecture 계열 문서의 admin frontend stack 표기를 현재 구현에 맞췄다.
+
+- **지도 stack 정정**: `maplibre-vworld-js`/`maplibre-vworld` dependency를 쓰지 않고,
+  `maplibre-vworld-react` web/core 모델을 admin 내부에 포팅한 MapLibre GL + VWorld 구현을
+  쓰는 것으로 정본 문서를 정리했다.
+- **테이블 stack 반영**: 운영 목록/검토 화면은 공용 `DataTable`
+  (`@tanstack/react-table` v8 + `@tanstack/react-virtual` v3) 기반이고,
+  shadcn `Table`은 표시 primitive라는 역할 구분을 `architecture.md`,
+  `debug-ui-package.md`, OpenAPI/frontend workflow 문서에 반영했다.
+- **중복/충돌 축소**: 과거 "별도 frontend 보류" 문구와 ADR/Sprint 문서의 오래된
+  frontend 기준값을 현재 상태로 정정했다. 과거 journal/report 본문은 이력 보존 대상이라
+  전면 수정하지 않았다.
+- **검증**: Markdown 문서 변경만이라 관련 키워드 검색으로 잔여 구식 표기 범위를 확인했다.
+
+## 2026-06-18 (Codex) — README 진입 문서 정리
+
+사용자 요청으로 루트 README를 현재 운영 모델 기준의 짧은 진입 문서로 정리했다.
+
+- **구조 정리**: 소개, 현재 운영 모델, 책임 범위, 빠른 시작, 저장소 구조, 핵심 개발 규칙,
+  검증, 문서 길찾기 순서로 재배열했다.
+- **중복 축소**: 긴 provider/ETL/문서 목록은 `docs/etl/`, `docs/architecture/`,
+  `docs/runbooks/`, `docs/adr/README.md` 같은 정본 문서로 넘겼다.
+- **현재화**: `Docker 독립 프로그램 + 독립 DB/Dagster + OpenAPI`, 별도 API/admin package,
+  Windows Git + WSL 실행 정책을 README 첫 진입 흐름에 맞게 재서술했다.
+- **검증**: Markdown 문서 변경만이라 링크/맞춤법 중심으로 확인했다.
+
 ## 2026-06-18 (claude) — PR #476 사후 리뷰 + admin e2e 라이브 검증 (197 passed)
 
 Codex PR #476(maplibre-vworld-js dep 제거)을 다차원 적대적 리뷰하고, admin e2e를 라이브 실행해
