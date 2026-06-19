@@ -2,6 +2,25 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-20 (claude) — 프로덕션 reverse-proxy 도메인 env 반영
+
+사용자 prod 도메인(map/map-api/map-dagster + s3-api/s3 .digitie.mywire.org)을 외부 노출
+없이(gitignored) 반영하고, compose를 그에 맞게 보강했다.
+
+- **compose 보강(코드)**: `docker-compose.yml` api service의 `KOR_TRAVEL_MAP_API_CORS_ALLOW_ORIGINS`가
+  localhost로 **하드코딩**돼 있어 prod frontend origin이 CORS 거부되던 것을, `DAGSTER_ALLOWED_HOSTS`와
+  같은 `'${VAR:-localhost default}'` 패턴으로 바꿔 env override를 허용했다. NEXT_PUBLIC_* build args,
+  Dagster URL/allowed-hosts, `OBJECT_STORE_PUBLIC_BASE_URL`은 이미 env 파라미터화돼 있어 무변경.
+- **실 도메인(gitignored)**: `.env.prod`(=.env.* → gitignore)에 4개 값만 둔다 —
+  `NEXT_PUBLIC_KOR_TRAVEL_MAP_API`=map-api, `NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL`=map-dagster,
+  `KOR_TRAVEL_MAP_API_CORS_ALLOW_ORIGINS`=["https://map…"], `OBJECT_STORE_PUBLIC_BASE_URL`=s3-api/bucket.
+  dev `.env`(provider 키 보유)는 건드리지 않았다(운영 노드는 이 파일을 `.env`로 복사/병합).
+- **문서(committed, placeholder만)**: `.env.example`에 prod reverse-proxy 도메인 변수 블록(예시 도메인),
+  `docs/deploy.md`에 "프로덕션 도메인(reverse proxy)" 섹션(도메인→서비스 매핑·재빌드/CORS/내부망 주의).
+- **검증**: `docker compose config -q`(default·`--env-file .env.prod`) 둘 다 VALID; prod 렌더에서
+  CORS=`["https://map.digitie.mywire.org"]`(JSON), NEXT_PUBLIC=prod, API→Dagster=내부 `dagster:12702`,
+  object public=s3-api/bucket 확인. API→RustFS 내부 통신은 `http://rustfs:9000` 유지(외부 노출 X).
+
 ## 2026-06-19 (Codex) — admin frontend stack 문서 정합성 정리
 
 사용자 요청으로 architecture 계열 문서의 admin frontend stack 표기를 현재 구현에 맞췄다.

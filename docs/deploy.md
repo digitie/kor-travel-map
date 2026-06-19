@@ -106,6 +106,38 @@ PC 개발 환경에서 host `5432`는 `kor-travel-docker-manager`가 소유한
 `KOR_TRAVEL_MAP_DB_EXTERNAL=true`와 `KOR_TRAVEL_MAP_EXTERNAL_POSTGRES_HOST_PORT=5432`
 기준이다. 공유 DB와 공유 RustFS를 모두 쓰면 `KOR_TRAVEL_MAP_INFRA_EXTERNAL=true`를 쓴다.
 
+## 프로덕션 도메인 (reverse proxy)
+
+외부 노출은 reverse proxy(Caddy/nginx/Cloudflare Tunnel 등)가 TLS 종단과 라우팅을
+담당한다(§보안 경계). 앱 자체는 도메인을 모르고, 아래 env로만 "브라우저가 어떤 주소로
+각 서비스에 닿는지"를 안다. **실 도메인은 git에 올리지 않고 운영 노드의 gitignored
+`.env`(또는 `.env.prod`)에만 둔다.** `.env.example`에 변수 목록과 예시(placeholder)가 있다.
+
+| reverse proxy 도메인(예시) | 대상 서비스 | host 포트 |
+|---|---|---|
+| `<map-host>` | `frontend` (admin UI) | `12705` |
+| `<map-api-host>` | `api` (FastAPI) | `12701` |
+| `<map-dagster-host>` | `dagster` (Dagster UI) | `12702` |
+| `<s3-api-host>` | `rustfs` S3 API | `12101` |
+| `<s3-console-host>` | `rustfs` console | `12105` |
+
+운영 노드 `.env`에 채우는 값:
+
+- `NEXT_PUBLIC_KOR_TRAVEL_MAP_API` / `NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL` —
+  프론트(브라우저)가 호출할 API/Dagster 주소. **Next.js build-time inline**이라 도메인을
+  바꾸면 frontend 이미지를 **재빌드**한다(`npm run docker:build`).
+- `KOR_TRAVEL_MAP_API_CORS_ALLOW_ORIGINS` — 프론트 origin(예: `["https://<map-host>"]`)을
+  허용해야 브라우저 cross-origin fetch가 통과한다. `docker-compose.yml`은 이 env가 있으면
+  그대로 쓰고, 없으면 localhost(`:12705`)로 fallback한다.
+- `KOR_TRAVEL_MAP_OBJECT_STORE_PUBLIC_BASE_URL` — feature 파일/업로드 이미지의 **브라우저
+  노출 주소**(`https://<s3-api-host>/<bucket>`). API 컨테이너→RustFS 내부 통신은 docker
+  네트워크(`http://rustfs:9000`)를 그대로 쓰므로 외부에 노출되는 것은 이 public URL뿐이다.
+
+API→Dagster GraphQL 호출은 docker 내부망(`http://dagster:12702`,
+`KOR_TRAVEL_MAP_DOCKER_API_DAGSTER_URL`)을 쓰므로 public 도메인을 추가하지 않는다.
+kor-travel-geo(주소/좌표)는 도메인이 정해지면
+`NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL`/`KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_BASE_URL`로 채운다.
+
 ## 보안 경계
 
 `kor-travel-map-admin`은 ADR-005에 따라 코드 레벨 인증을 넣지 않는다. 외부 노출이
