@@ -120,6 +120,8 @@ PC 개발 환경에서 host `5432`는 `kor-travel-docker-manager`가 소유한
 | `<map-dagster-host>` | `dagster` (Dagster UI) | `12702` |
 | `<s3-api-host>` | `rustfs` S3 API | `12101` |
 | `<s3-console-host>` | `rustfs` console | `12105` |
+| `<geo-api-host>` | `kor-travel-geo` REST API | `12501` |
+| `<geo-console-host>` | `kor-travel-geo` Web UI | `12505` |
 
 운영 노드 `.env`에 채우는 값:
 
@@ -135,8 +137,14 @@ PC 개발 환경에서 host `5432`는 `kor-travel-docker-manager`가 소유한
 
 API→Dagster GraphQL 호출은 docker 내부망(`http://dagster:12702`,
 `KOR_TRAVEL_MAP_DOCKER_API_DAGSTER_URL`)을 쓰므로 public 도메인을 추가하지 않는다.
-kor-travel-geo(주소/좌표)는 도메인이 정해지면
-`NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL`/`KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_BASE_URL`로 채운다.
+
+- `NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL` — 프론트(브라우저)가 호출할 kor-travel-geo
+  REST API 주소(주소→좌표 lookup 등). **build-time inline**이라 변경 시 재빌드.
+- `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_BASE_URL` — 백엔드(API/Dagster)의 server-side 정/역
+  지오코딩 보강 주소. **비우면 geocoding이 꺼져 좌표만 적재**한다. geo가 같은 docker
+  호스트에 있으면 `http://host.docker.internal:12501`이 프록시 왕복을 피해 더 효율적이다.
+  geo console(`<geo-console-host>`, `:12505`)은 운영 콘솔 reverse-proxy 라우트일 뿐
+  앱 env가 아니다.
 
 ## 보안 경계
 

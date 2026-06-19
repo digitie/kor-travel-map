@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-20 (claude) — kor-travel-geo 프로덕션 도메인 env 반영
+
+map/s3 도메인(직전)에 이어 kor-travel-geo 도메인(geo-api/geo .digitie.mywire.org)을 반영했다.
+
+- **필요한 것만 배선**: 프론트(브라우저)는 `korTravelGeo.ts`가 직접 fetch하므로
+  `NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL`=geo-api(public). 백엔드(API admin_issues/feature_update_requests/
+  offline_uploads + Dagster ETL)는 `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_BASE_URL`(main settings)로 server-side
+  지오코딩 — 비우면 좌표만 적재. 둘 다 gitignored `.env.prod`에 실 도메인으로 채웠다.
+- **compose 무변경**: `NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL`은 이미 build-arg/env(line 168/173),
+  백엔드 var는 api/dagster/dagster-daemon의 `env_file: [.env]`로 주입돼 추가 배선 불필요.
+- **문서(committed, placeholder)**: `.env.example` prod 블록 + `docs/deploy.md` 도메인 표에 geo-api/
+  geo-console 행과 env 노트 추가. geo console(:12505)은 프록시 라우트일 뿐 앱 env 아님 명시.
+- **검증**: `docker compose --env-file .env.prod config -q` VALID, geo 렌더=geo-api 도메인 확인.
+  `.env.prod`는 gitignored(커밋 안 됨).
+
 ## 2026-06-20 (claude) — 프로덕션 reverse-proxy 도메인 env 반영
 
 사용자 prod 도메인(map/map-api/map-dagster + s3-api/s3 .digitie.mywire.org)을 외부 노출
