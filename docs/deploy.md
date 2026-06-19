@@ -44,6 +44,12 @@ npm run docker:up
 ```
 
 스모크는 `docs/runbooks/docker-app.md` §6을 따른다.
+
+> **dev vs prod**: 위 `npm run docker:*`는 **이 저장소에서 직접 띄우는 dev/standalone
+> 경로**다(기본 Docker host 네트워크 + `127.0.0.1`의 12xxx 고정 포트 + 포트 가드 —
+> `docs/dev-environment.md` §0). **prod는 `kor-travel-docker-manager`로 기동하고 공식
+> 도메인(reverse proxy, 아래 §프로덕션 도메인)을 적용한다.** 별도 지시가 없으면 dev를
+> 의미한다. host 모드를 끄려면 `KOR_TRAVEL_MAP_DOCKER_NETWORK=bridge`.
 frontend 이미지는 루트 `package-lock.json`과 `npm ci`로 재현 가능한 workspace
 의존성 설치를 사용한다.
 

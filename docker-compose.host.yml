@@ -1,0 +1,90 @@
+# dev 기본 네트워크 = Docker host 모드 (docker-up.sh가 기본 적용).
+#
+# host 모드에서는 컨테이너가 호스트 네트워크 네임스페이스를 공유한다:
+#   - 컨테이너의 127.0.0.1 == 호스트 loopback. 서비스 간/공유 인프라(kor-travel-geo,
+#     kor-travel-docker-manager의 PostGIS/RustFS) 접근을 전부 127.0.0.1:<12xxx>로 고정한다.
+#   - docker 임베디드 DNS(서비스명 `postgres`/`dagster`/`rustfs`)가 없으므로 내부 주소를
+#     127.0.0.1로 바꾼다.
+#   - `ports:` 매핑은 host 모드와 호환되지 않으므로 제거(!reset)한다. 컨테이너가 호스트
+#     포트에 직접 바인드한다(API 12701 · admin UI 12705 · Dagster 12702 · RustFS 12101/12105 ·
+#     Postgres 5432). dev는 이 12xxx 고정 포트 + 127.0.0.1을 쓴다.
+#
+# 브리지 네트워크로 되돌리려면: `KOR_TRAVEL_MAP_DOCKER_NETWORK=bridge npm run docker:up`.
+# prod는 본 override를 쓰지 않고 kor-travel-docker-manager + 공식 도메인(reverse proxy)로 띄운다.
+
+services:
+  postgres:
+    network_mode: host
+    ports: !reset null
+
+  dagster-db-init:
+    network_mode: host
+    # base와 동일하되 `-h postgres` → `-h 127.0.0.1` (host 모드 = DNS 없음).
+    command:
+      - |
+        set -eu
+        if ! echo "$$KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB" | grep -Eq '^[A-Za-z_][A-Za-z0-9_]*$$'; then
+          echo "invalid KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB=$$KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB" >&2
+          exit 1
+        fi
+        if psql -h 127.0.0.1 -U "$$KOR_TRAVEL_MAP_POSTGRES_USER" -d "$$KOR_TRAVEL_MAP_POSTGRES_DB" -tAc "SELECT 1 FROM pg_database WHERE datname = '$$KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB'" | grep -q 1; then
+          echo "Dagster metadata DB exists: $$KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB"
+        else
+          createdb -h 127.0.0.1 -U "$$KOR_TRAVEL_MAP_POSTGRES_USER" "$$KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB"
+          echo "Dagster metadata DB created: $$KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB"
+        fi
+
+  rustfs-perms:
+    network_mode: host
+
+  rustfs:
+    network_mode: host
+    ports: !reset null
+    # host 모드에선 포트 매핑이 없으므로 RustFS가 호스트의 12101/12105에 직접 바인드한다.
+    environment:
+      RUSTFS_ADDRESS: ":${KOR_TRAVEL_MAP_RUSTFS_API_PORT:-12101}"
+      RUSTFS_ACCESS_KEY: ${KOR_TRAVEL_MAP_OBJECT_STORE_ACCESS_KEY_ID:-kor-travel-map-dev-access}
+      RUSTFS_SECRET_KEY: ${KOR_TRAVEL_MAP_OBJECT_STORE_SECRET_ACCESS_KEY:-kor-travel-map-dev-secret}
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_CONSOLE_ADDRESS: "0.0.0.0:${KOR_TRAVEL_MAP_RUSTFS_CONSOLE_PORT:-12105}"
+
+  rustfs-init:
+    network_mode: host
+    # base와 동일하되 alias endpoint `http://rustfs:9000` → `http://127.0.0.1:12101`.
+    command:
+      - |
+        until mc alias set rustfs "http://127.0.0.1:$${KOR_TRAVEL_MAP_RUSTFS_API_PORT:-12101}" "$$KOR_TRAVEL_MAP_OBJECT_STORE_ACCESS_KEY_ID" "$$KOR_TRAVEL_MAP_OBJECT_STORE_SECRET_ACCESS_KEY"; do
+          sleep 2
+        done
+        mc mb --ignore-existing "rustfs/$$KOR_TRAVEL_MAP_OBJECT_STORE_BUCKET"
+        mc mb --ignore-existing "rustfs/$$KOR_TRAVEL_MAP_OFFLINE_UPLOAD_BUCKET"
+    environment:
+      KOR_TRAVEL_MAP_RUSTFS_API_PORT: ${KOR_TRAVEL_MAP_RUSTFS_API_PORT:-12101}
+
+  api:
+    network_mode: host
+    ports: !reset null
+    environment:
+      # host 모드: 서비스 간/공유 인프라 주소를 127.0.0.1:<12xxx>로.
+      KOR_TRAVEL_MAP_API_DAGSTER_URL: ${KOR_TRAVEL_MAP_DOCKER_API_DAGSTER_URL:-http://127.0.0.1:${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}}
+      KOR_TRAVEL_MAP_PG_DSN: ${KOR_TRAVEL_MAP_DOCKER_PG_DSN:-postgresql+asyncpg://kor_travel_map:kor_travel_map@127.0.0.1:5432/kor_travel_map}
+      KOR_TRAVEL_MAP_OBJECT_STORE_ENDPOINT_URL: ${KOR_TRAVEL_MAP_DOCKER_OBJECT_STORE_ENDPOINT_URL:-http://127.0.0.1:${KOR_TRAVEL_MAP_RUSTFS_API_PORT:-12101}}
+
+  frontend:
+    network_mode: host
+    ports: !reset null
+
+  dagster:
+    network_mode: host
+    ports: !reset null
+    environment:
+      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL:-postgresql://kor_travel_map:kor_travel_map@127.0.0.1:5432/kor_travel_map_dagster}
+      KOR_TRAVEL_MAP_PG_DSN: ${KOR_TRAVEL_MAP_DOCKER_PG_DSN:-postgresql+asyncpg://kor_travel_map:kor_travel_map@127.0.0.1:5432/kor_travel_map}
+      KOR_TRAVEL_MAP_OBJECT_STORE_ENDPOINT_URL: ${KOR_TRAVEL_MAP_DOCKER_OBJECT_STORE_ENDPOINT_URL:-http://127.0.0.1:${KOR_TRAVEL_MAP_RUSTFS_API_PORT:-12101}}
+
+  dagster-daemon:
+    network_mode: host
+    environment:
+      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL:-postgresql://kor_travel_map:kor_travel_map@127.0.0.1:5432/kor_travel_map_dagster}
+      KOR_TRAVEL_MAP_PG_DSN: ${KOR_TRAVEL_MAP_DOCKER_PG_DSN:-postgresql+asyncpg://kor_travel_map:kor_travel_map@127.0.0.1:5432/kor_travel_map}
+      KOR_TRAVEL_MAP_OBJECT_STORE_ENDPOINT_URL: ${KOR_TRAVEL_MAP_DOCKER_OBJECT_STORE_ENDPOINT_URL:-http://127.0.0.1:${KOR_TRAVEL_MAP_RUSTFS_API_PORT:-12101}}

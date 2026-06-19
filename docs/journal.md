@@ -2,6 +2,28 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-20 (claude) — dev 스크립트 개선: 포트 가드 + 127.0.0.1 + Docker host 네트워크 기본
+
+dev/prod 분리를 명확히 하고(별도 지시 없으면 dev), dev 기동 스크립트를 개선했다.
+
+- **포트 가드(`scripts/preflight-ports.sh` 신규)**: 고정 포트가 이미 사용 중이면 새 포트로
+  열지 않고, prod 유무와 관계없이 **강제종료 여부를 묻고**, 거절(또는 비대화형 기본)하면
+  **기동 중지**(기존 서비스/prod 보존). `KOR_TRAVEL_MAP_FORCE_KILL_PORTS=1`로 프롬프트 없이
+  강제종료. `stop-fixed-ports.sh`는 sourceable로 리팩터(탐지 함수 재사용, `port_has_listener`
+  추가) — 직접 실행/`ports:stop`만 강제종료. `run-admin-stack.sh`·`docker-up.sh`가 preflight 호출.
+  WSL 실측: free→exit0, occupied+비대화형→detect+abort(미kill), FORCE=1→kill 확인.
+- **내부 주소 127.0.0.1**: `run-admin-stack.sh` bind host 기본 0.0.0.0→**127.0.0.1**. e2e는
+  `KOR_TRAVEL_MAP_*_BIND_HOST=0.0.0.0` opt-in.
+- **Docker host 네트워크 dev 기본(`docker-compose.host.yml` 신규)**: `docker:up`이 host
+  override를 기본 적용 — `network_mode: host`, `ports: !reset null`(host 모드 비호환), 서비스 간/
+  공유 인프라 주소를 `127.0.0.1:<12xxx>`로 통일(PG_DSN/DAGSTER_PG_URL/DAGSTER_URL/OBJECT_STORE
+  ·rustfs `:12101/12105`·init 컨테이너 `-h 127.0.0.1`/alias). `KOR_TRAVEL_MAP_DOCKER_NETWORK=bridge`로
+  opt-out. `docker compose config`: host(9×host, 0 published ports, URL=127.0.0.1)·bridge(6 ports) 둘 다 VALID.
+- **문서**: `docs/dev-environment.md` §0(dev vs prod 표·고정 포트·host 네트워크·포트 가드),
+  `docs/deploy.md`(dev=standalone/host, prod=docker-manager+도메인 pointer), `ports:preflight` npm script.
+- **미검증(라이브)**: host 네트워크 실제 bring-up은 12xxx 포트 점유+빌드가 필요해 정적
+  `config` 검증까지만 했다(사용자 no-kill 지시 준수). 라이브 기동 검증은 사용자 동의 후.
+
 ## 2026-06-20 (claude) — kor-travel-geo 프로덕션 도메인 env 반영
 
 map/s3 도메인(직전)에 이어 kor-travel-geo 도메인(geo-api/geo .digitie.mywire.org)을 반영했다.

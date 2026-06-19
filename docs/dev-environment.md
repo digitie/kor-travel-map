@@ -9,6 +9,48 @@ WSL)", `README.md` §"개발 환경 (PC, WSL)")을 전제로 한다. Playwright 
 Windows 호스트 브라우저에서 실행한다. 형제 라이브러리
 (`kor-travel-geo`/`python-kraddr-base`/`python-knps-api` 등)와 동일.
 
+## 0. dev vs prod 구분 (기본 = dev)
+
+**별도 지시가 없으면 dev 환경을 의미한다.** dev와 prod는 주소·포트·네트워크·기동 방식이
+다르다.
+
+| | dev (기본, 여기서 실행) | prod |
+|---|---|---|
+| 기동 | 여기서 직접 실행(`npm run admin:stack`) 또는 `npm run docker:up` | `kor-travel-docker-manager`로 Docker 기동 |
+| 주소 | **내부 `127.0.0.1`** | 공식 도메인(reverse proxy) — `docs/deploy.md` §프로덕션 도메인 |
+| 포트 | **`12xxx` 고정 포트** (API `12701` · admin UI `12705` · Dagster `12702` · RustFS `12101`/`12105` · geo `12501`/`12505`) | reverse proxy 도메인 뒤 동일 host 포트 |
+| Docker 네트워크 | **host 모드 기본** (`docker-compose.host.yml`) | docker-manager 정책 |
+| 도메인 env | 사용 안 함(127.0.0.1) | gitignored `.env`/`.env.prod` (외부 노출 금지) |
+
+### 고정 포트 + 내부 주소
+
+dev는 `127.0.0.1`의 12xxx 고정 포트만 쓴다. 호스트 프로세스 stack(`run-admin-stack.sh`)의
+bind host 기본도 `127.0.0.1`이다. Windows Playwright e2e처럼 WSL 밖에서 접근해야 할 때만
+`KOR_TRAVEL_MAP_API_BIND_HOST=0.0.0.0`(및 `_ADMIN_WEB_BIND_HOST`/`_DAGSTER_BIND_HOST`)로
+명시 opt-in한다.
+
+### Docker host 네트워크 (dev 기본)
+
+`npm run docker:up`은 `docker-compose.host.yml`을 기본 적용해 컨테이너를 **host 네트워크
+모드**로 띄운다. 컨테이너의 `127.0.0.1`이 호스트 loopback이라 서비스 간/공유 인프라
+(kor-travel-geo, kor-travel-docker-manager의 PostGIS/RustFS) 접근이 모두
+`127.0.0.1:<12xxx>`로 통일되고, 포트 매핑이 필요 없다. 브리지 네트워크로 되돌리려면:
+
+```bash
+KOR_TRAVEL_MAP_DOCKER_NETWORK=bridge npm run docker:up
+```
+
+### 이미 떠 있는 경우 — 포트 가드 (강제종료 안 물어보고 새 포트로 열지 않음)
+
+`run-admin-stack.sh`/`docker-up.sh`는 기동 전 고정 포트를 점검한다(`scripts/preflight-ports.sh`).
+**이미 사용 중이면 새 포트로 열지 않고**, prod 유무와 관계없이 **강제종료할지 사용자에게
+묻는다**. 강제종료하지 않으면 **기동을 중지**한다(기존 서비스/prod 보존).
+
+- 대화형(TTY): `[y/N]` 프롬프트. 기본 `N`(중지).
+- 비대화형(CI/스크립트): 기본 **중지**. 강제종료하려면 `KOR_TRAVEL_MAP_FORCE_KILL_PORTS=1`.
+- 명시적으로 고정 포트를 정리하려면 `npm run ports:stop`(강제종료) — `npm run ports:preflight`는
+  점검+프롬프트만 한다.
+
 ## 1. 권장 호스트
 
 - Windows 11 + WSL2 Ubuntu 24.04
@@ -78,7 +120,7 @@ rsync -a --delete \
 ### 2.3 `scripts/*.sh` 실행 셸
 
 루트 `package.json`의 운영 스크립트(`docker:build`, `docker:up`, `docker:backup`,
-`admin:stack`, `ports:stop`)는 모두 `bash scripts/*.sh`를 호출한다. 이 파일들은
+`admin:stack`, `ports:preflight`, `ports:stop`)는 모두 `bash scripts/*.sh`를 호출한다. 이 파일들은
 `#!/usr/bin/env bash`, `source`, Bash array, `BASH_SOURCE`를 전제로 하므로
 Windows PowerShell에서 `.sh` 파일을 직접 실행하지 않는다.
 

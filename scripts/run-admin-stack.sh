@@ -8,7 +8,9 @@ source "$ROOT_DIR/scripts/load-env.sh"
 LOG_DIR="${KOR_TRAVEL_MAP_LOG_DIR:-"$ROOT_DIR/.codex_tmp/admin-stack"}"
 mkdir -p "$LOG_DIR"
 
-"$ROOT_DIR/scripts/stop-fixed-ports.sh" \
+# 고정 포트가 이미 사용 중이면 새 포트로 열지 않고, 강제종료 여부를 묻는다.
+# 강제종료하지 않으면 preflight가 exit 1 → set -e로 기동 중지(기존 서비스 보존).
+"$ROOT_DIR/scripts/preflight-ports.sh" \
   "$KOR_TRAVEL_MAP_API_PORT" "$KOR_TRAVEL_MAP_ADMIN_WEB_PORT" "$KOR_TRAVEL_MAP_DAGSTER_PORT"
 
 PYTHON_BIN="${PYTHON_BIN:-"$ROOT_DIR/.venv/bin/python"}"
@@ -72,9 +74,12 @@ DAGSTER_HOME_DIR="${DAGSTER_HOME:-"$ROOT_DIR/.dagster"}"
 mkdir -p "$DAGSTER_HOME_DIR"
 install -m 0644 "$ROOT_DIR/docker/dagster.yaml" "$DAGSTER_HOME_DIR/dagster.yaml"
 
-API_BIND_HOST="${KOR_TRAVEL_MAP_API_BIND_HOST:-0.0.0.0}"
-WEB_BIND_HOST="${KOR_TRAVEL_MAP_ADMIN_WEB_BIND_HOST:-0.0.0.0}"
-DAGSTER_BIND_HOST="${KOR_TRAVEL_MAP_DAGSTER_BIND_HOST:-0.0.0.0}"
+# dev 기본은 내부 주소(127.0.0.1) 바인드다. Windows Playwright e2e처럼 WSL 밖에서
+# 접근해야 하는 경우에만 KOR_TRAVEL_MAP_*_BIND_HOST=0.0.0.0으로 명시 opt-in한다
+# (docs/dev-environment.md §dev/prod 구분).
+API_BIND_HOST="${KOR_TRAVEL_MAP_API_BIND_HOST:-127.0.0.1}"
+WEB_BIND_HOST="${KOR_TRAVEL_MAP_ADMIN_WEB_BIND_HOST:-127.0.0.1}"
+DAGSTER_BIND_HOST="${KOR_TRAVEL_MAP_DAGSTER_BIND_HOST:-127.0.0.1}"
 
 stop_logged_pid() {
   local name="$1"
