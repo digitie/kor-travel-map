@@ -467,7 +467,7 @@ def geocode_response_to_coordinate(
 
     ``status != "OK"`` 이거나 좌표 있는 candidate가 없으면 ``None``.
     ``confidence``가 ``min_confidence`` 미만인 candidate는 제외하고, 남은 것 중
-    confidence 최댓값 candidate의 ``point.x/y``를 lon/lat으로.
+    confidence 최댓값 candidate의 ``point.x/y`` 또는 ``point.lon/lat``을 lon/lat으로.
     """
     if response.status != _STATUS_OK or not response.candidates:
         return None
@@ -608,7 +608,14 @@ class _RestGeocodeV2Response:
 def _parse_point(data: dict[str, Any] | None) -> _RestPoint | None:
     if not data:
         return None
-    return _RestPoint(x=float(data["x"]), y=float(data["y"]))
+    lon_raw = data.get("x", data.get("lon"))
+    lat_raw = data.get("y", data.get("lat"))
+    if lon_raw is None or lat_raw is None:
+        return None
+    try:
+        return _RestPoint(x=float(lon_raw), y=float(lat_raw))
+    except (TypeError, ValueError):
+        return None
 
 
 def _parse_address_v2(data: dict[str, Any] | None) -> _RestAddressV2 | None:
