@@ -2,6 +2,32 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-20 (Codex) — Claude PR #481~#484 리뷰 후속 수정
+
+사용자 요청으로 2026-06-19 00:00 KST 이후 Claude Code가 올린 merged/closed PR #481~#484를
+사후 리뷰하고, 확인된 compose/env/geocoding 결함 3건과 full-run 검증 중 드러난 logging
+격리 결함 1건을 통합 후속 브랜치에서 수정했다.
+
+- **리뷰 코멘트 작성**: closed PR #481, #482, #483에 각각 PR 대화 코멘트로 재현 가능한 결함을
+  남겼다. #484는 추가 코드 수정이 필요한 결함을 찾지 못했다.
+- **CORS fallback 복원(#481)**: `docker-compose.yml`의
+  `KOR_TRAVEL_MAP_API_CORS_ALLOW_ORIGINS` 기본값이 `12705`로 고정돼 직접 compose 실행과
+  `KOR_TRAVEL_MAP_ADMIN_WEB_PORT` 커스텀 포트에서 어긋나던 문제를, admin web port 변수를
+  다시 참조하도록 고쳤다.
+- **kor-travel-geo point alias 수용(#482)**: live `kor-travel-geo` v2 응답이
+  `point: {lon, lat}`를 반환해 기존 `{x, y}` 전용 파서가 `KeyError`를 내던 문제를 고쳤다.
+  `point.x/y`와 `point.lon/lat`를 모두 받아 geocode/reverse 경로가 깨지지 않게 했다.
+- **host network env 정정(#483)**: `docker-compose.host.yml`이 `scripts/load-env.sh`의
+  bridge용 `KOR_TRAVEL_MAP_DOCKER_*` 기본값(`dagster`/`rustfs`)을 물어 host 모드에서도
+  내부 주소가 잘못 렌더되던 문제를 정정했다. host override는 `127.0.0.1:<12xxx>`를 기본으로
+  쓰고, 사용자가 명시한 external DB/object-store override와 external Postgres host port를 보존한다.
+- **Alembic logging 격리**: integration migration 후 `fileConfig` 기본값이 기존
+  `kortravelmap.*` logger를 disable해 뒤따르는 `caplog` 테스트가 warning을 잡지 못하던 full-run
+  순서 의존 실패를 `disable_existing_loggers=False`로 고쳤다.
+- **검증**: `docker compose config` 렌더로 커스텀 admin port CORS(`12706`), host network
+  `API_DAGSTER_URL`/PG/ObjectStore `127.0.0.1`, external Postgres `15433`, 명시 external DSN/object
+  override 보존을 확인했다. geocoding 단위 테스트에 `point.lon/lat` 케이스를 추가했다.
+
 ## 2026-06-20 (claude) — admin UI Next 기본 오류 화면 복구 보강 (geo #391 동일 반영)
 
 사용자 요청으로 kor-travel-geo PR #391(이슈 #390/T-278)을 admin frontend에 동일 반영했다.

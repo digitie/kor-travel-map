@@ -32,7 +32,7 @@ config = context.config
 
 # Logging setup.
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # DSN 결정 우선순위:
 #   1. 호출자가 ``Config.set_main_option('sqlalchemy.url', ...)``로 주입한 값

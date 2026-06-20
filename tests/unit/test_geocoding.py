@@ -535,6 +535,41 @@ def test_rest_reverse_geocoder_hits_endpoint() -> None:
     assert body["include_zipcode"] is True
 
 
+def test_rest_reverse_geocoder_accepts_lon_lat_point_aliases() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v2/reverse"
+        return httpx.Response(
+            200,
+            json={
+                "status": "OK",
+                "candidates": [
+                    {
+                        "confidence": 0.9,
+                        "match_kind": "parcel",
+                        "address": {
+                            "full": "서울특별시 중구 세종대로 110",
+                            "parcel_address": "서울특별시 중구 태평로1가 31",
+                            "legal_dong_code": "1114010300",
+                        },
+                        "point": {"lon": 126.9777, "lat": 37.5662},
+                        "region": {"sig_cd": "11140", "bjd_cd": "1114010300"},
+                    }
+                ],
+            },
+        )
+
+    async def _run() -> None:
+        async with _mock_client(handler) as http:
+            reverse = kor_travel_geo_reverse_geocoder(KorTravelGeoRestClient(http))
+            addr = await reverse(
+                Coordinate(lon=Decimal("126.9777"), lat=Decimal("37.5662"))
+            )
+            assert addr is not None
+            assert addr.bjd_code == "1114010300"
+
+    asyncio.run(_run())
+
+
 def test_rest_address_geocoder_hits_endpoint() -> None:
     seen: list[dict[str, Any]] = []
 
@@ -573,6 +608,32 @@ def test_rest_address_geocoder_hits_endpoint() -> None:
     assert body["road_address"] == "서울특별시 영등포구 여의공원로 120"
     assert "jibun_address" not in body
     assert body["fallback"] == "none"
+
+
+def test_rest_address_geocoder_accepts_lon_lat_point_aliases() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v2/geocode"
+        return httpx.Response(
+            200,
+            json={
+                "status": "OK",
+                "candidates": [
+                    {
+                        "confidence": 0.9,
+                        "match_kind": "road",
+                        "point": {"lon": 127.1, "lat": 37.4},
+                    }
+                ],
+            },
+        )
+
+    async def _run() -> None:
+        async with _mock_client(handler) as http:
+            geocode = kor_travel_geo_address_geocoder(KorTravelGeoRestClient(http))
+            coord = await geocode(Address(road="서울특별시 영등포구 여의공원로 120"))
+            assert coord == Coordinate(lon=Decimal("127.1"), lat=Decimal("37.4"))
+
+    asyncio.run(_run())
 
 
 def test_rest_address_geocoder_uses_parcel_when_no_road() -> None:
