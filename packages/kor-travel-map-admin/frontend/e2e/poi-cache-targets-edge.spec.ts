@@ -120,6 +120,8 @@ async function routeListAndUpsert(
     }
     const url = new URL(request.url());
     if (
+      url.pathname.startsWith("/_next/") ||
+      url.pathname === "/favicon.ico" ||
       url.pathname === "/admin/poi-cache-targets" ||
       url.searchParams.has("_rsc")
     ) {

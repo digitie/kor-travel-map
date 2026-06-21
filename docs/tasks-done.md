@@ -3,6 +3,16 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## UI live e2e 재실행 (2026-06-21, `T-UI-E2E-LIVE-20260621`)
+
+- [x] **T-UI-E2E-LIVE-20260621 — UI live e2e 재실행 + 하네스 안정화.**
+  live stack 기준 전체 Playwright e2e를 재실행했다. 1차는 629 passed / 1 failed였고,
+  실패는 `home-density-matrix.spec.ts`의 공통 `gotoHome()`이 full `load` 이벤트를 기다리다
+  live static asset 지연에 걸린 하네스 문제였다. `waitUntil: "domcontentloaded"`로 조정 후
+  `npm run type-check:e2e`, 실패 케이스 단독 재현, 리베이스 후 현재 브랜치 별도 live stack에서
+  전체 live UI e2e **631 passed**로 닫았다.
+  정본 `docs/reports/ui-live-e2e-rerun-2026-06-21.md`.
+
 ## maplibre-vworld-js dependency 제거 (2026-06-18, `T-MAP-VWORLD-04`)
 
 - [x] **T-MAP-VWORLD-04 — `maplibre-vworld-js` dependency 제거** (#475).

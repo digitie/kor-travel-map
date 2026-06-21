@@ -2,6 +2,77 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-21 (codex) — UI live e2e 재실행 + 하네스 안정화
+
+정본 보고서:
+[`docs/reports/ui-live-e2e-rerun-2026-06-21.md`](reports/ui-live-e2e-rerun-2026-06-21.md).
+
+- live stack(`api :12701`, `admin/user UI :12705`, `dagster :12702`) 기준 전체 Playwright e2e
+  630개를 실행했다.
+- 1차는 629 passed / 1 failed. 실패는 `home-density-matrix.spec.ts`의 공통 `gotoHome()`이
+  full `load` 이벤트를 기다리다 live static asset 지연에 걸린 하네스 문제였다.
+- `T-UI-E2E-LIVE-20260621` 작업으로 `gotoHome()`을 `waitUntil: "domcontentloaded"`로
+  조정했다.
+- 재검증: `npm run type-check:e2e` passed, 실패 케이스 단독 1 passed,
+  리베이스 후 현재 브랜치 별도 live stack(`api :12711`, `admin/user UI :12715`,
+  `dagster :12712`)에서 전체 live UI e2e **631 passed**.
+
+## 2026-06-21 (codex) — UI e2e 테스트 3배 확장
+
+정본 보고서:
+[`docs/reports/ui-e2e-density-expansion-2026-06-21.md`](reports/ui-e2e-density-expansion-2026-06-21.md).
+
+- 기존 209개 Playwright e2e를 631개로 확장했다(3.02배).
+- 신규 `home-density-matrix.spec.ts`에서 공용 shell/nav 18개 항목, 390/768/1440 viewport,
+  홈 metric count 포맷, import job/dedup summary, Backend/Dagster 상태, endpoint 실패/복구,
+  새로고침 refetch를 matrix로 촘촘히 검증한다.
+- 검증: `npm run type-check:e2e` passed, 신규 spec 단독 422 passed,
+  전체 `npx playwright test --workers=1 --reporter=dot` **631 passed**.
+
+## 2026-06-21 (codex) — 사용자/admin UI live e2e dev/prod green
+
+정본 보고서:
+[`docs/reports/ui-live-e2e-dev-prod-copy-2026-06-21.md`](reports/ui-live-e2e-dev-prod-copy-2026-06-21.md).
+
+- dev stack(`api :12701`, `dagster :12702`, `admin/user UI :12705`)를 WSL에서 기동하고,
+  Playwright는 Windows 호스트에서 실행했다.
+- Next 16 Turbopack dev panic과 Playwright 산출물 watcher 간섭을 제거했다:
+  `run-admin-stack.sh`는 e2e용 web을 `next dev --webpack`으로 기동하고, Playwright
+  artifact/report는 OS temp로 이동한다.
+- 깨진 Dagster console-script shebang은 현재 venv Python entrypoint fallback으로 보강했다.
+- e2e 하네스 보강: route-mock catch-all의 `/_next/` 정적 자산 passthrough, `home-nav`
+  direct deep-link 검증, feature-update-request 폴링 mock race gate.
+- **dev live 검증**: unmocked live spec 6개/19 tests passed, 전체 admin e2e
+  **209 passed**, `npm run type-check:e2e`, `bash -n scripts/run-admin-stack.sh`,
+  `git diff --check` 모두 통과.
+- **prod 복사/검증**: 검증된 파일과 `.env` 계열 설정을 `F:\dev\kor-travel-map`으로 복사했다.
+  기존 `.env`는 `.backup-20260621-115048`로 백업했고, 최종 재복사 전
+  `.backup-20260621-122939`도 추가로 남겼다. prod stack을 새 `.env` 기준으로 재기동한 뒤
+  전체 admin e2e **209 passed**를 다시 확인했다.
+
+## 2026-06-21 (codex) — concierge/geo prod API 계약 재점검 + live smoke
+
+`kor-travel-concierge`와 `kor-travel-geo` 로컬 repo를 `origin/main` 기준으로 다시 읽고
+`kor-travel-map` 소비 계약을 대조했다. 정본 보고서:
+[`docs/reports/prod-api-live-contract-check-2026-06-21.md`](reports/prod-api-live-contract-check-2026-06-21.md).
+
+- **concierge**: `origin/main` `bec63ad2ab39` 기준 `GET /api/v1/features/{snapshot,changes}`,
+  `X-API-Key`, envelope 없는 `{items,next_cursor,has_more}`, `limit<=500`,
+  provider/dataset/source identity가 현재 Dagster fetcher와 provider 변환 계약에 맞음을 확인했다.
+  prod env(`APP_ENV=production`, `API_AUTH_ENABLED=true`)에서 `snapshot?limit=1` /
+  `changes?limit=1` 모두 200, 첫 item upsert/provider/dataset 정합, fetcher 첫 item read,
+  live item → `FeatureBundle` 변환 성공(`f_global_p_`).
+- **geo**: `origin/main` `8b7efbe20e92` 기준 v2 `CandidateV2.point={lon,lat}`
+  정본을 확인했다. 기존 `kortravelmap.geocoding` REST 파서가 pre-ADR-062 `x/y`만
+  읽던 drift를 수정해 `lon/lat` 우선, `x/y` fallback으로 정렬했다. public method
+  시그니처는 유지했다.
+- **live smoke**: geo `geocode` OK(좌표 파싱/`point_lonlat=true`), address_geocoder 좌표
+  반환, reverse `bjd=1114010300`, regions-within-radius 시군구 6건. concierge는 read-only
+  export와 loader 변환만 실행했고 DB write/Dagster materialize는 하지 않았다.
+- **검증**: `tests/unit/test_geocoding.py` 58 passed, 관련 ruff passed,
+  `test_providers_kor_travel_concierge.py` + Dagster `test_provider_fetchers.py`
+  71 passed / 1 skipped(`mois.db` optional).
+
 ## 2026-06-20 (Codex) — Claude PR #481~#484 리뷰 후속 수정
 
 사용자 요청으로 2026-06-19 00:00 KST 이후 Claude Code가 올린 merged/closed PR #481~#484를

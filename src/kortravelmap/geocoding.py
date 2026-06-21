@@ -11,15 +11,16 @@ v2 (provider-neutral) 전환
 이전 구현은 kor-travel-geo ``GET /v1/address/{reverse,geocode}``(JUSO 호환,
 ``structure.level4LC`` 파싱)를 호출했으나, 현재 정본은 **``POST /v2/*``**
 (``CandidateV2.address.legal_dong_code`` 등 **structured field 직접 제공** +
-``confidence``/``distance_m``/``match_kind``)다. v2는 vworld level 파싱 없이
+``CandidateV2.point = {lon, lat}`` + ``confidence``/``distance_m``/
+``match_kind``)다. v2는 vworld level 파싱 없이
 법정동코드를 바로 받으므로 본 모듈은 v2로 전환한다 (kor-travel-geo
-``src/kraddr/geo/dto/v2.py`` 정합).
+``src/kortravelgeo/dto/v2.py`` 정합).
 
 설계 — ADR-006(provider wrapper 금지) 정신 동일
 ------------------------------------------------
 - ``kor-travel-geo`` / ``httpx``를 **런타임 import 하지 않는다**. REST 응답
   (``ReverseV2Response``/``GeocodeV2Response``/``CandidateV2``/``AddressV2``/
-  ``RegionV2``/``Point``)의 **structural Protocol**만 정의하고, 호출 측이 주입한
+  ``RegionV2``/``PointV2``)의 **structural Protocol**만 정의하고, 호출 측이 주입한
   ``httpx.AsyncClient``로 HTTP를 친다 (ADR-044 — 정합성 1차 책임은 kor-travel-geo).
 - 변환 함수(``reverse_response_to_address``/``geocode_response_to_coordinate``/
   ``geocode_response_to_address``)는
@@ -170,12 +171,12 @@ def cached_address_resolver(resolver: AddressResolver) -> AddressResolver:
 
 @runtime_checkable
 class KraddrPoint(Protocol):
-    """kor-travel-geo ``Point`` — ``x=lon`` / ``y=lat`` (WGS84)."""
+    """kor-travel-geo ``PointV2`` — ``lon`` / ``lat`` (WGS84)."""
 
     @property
-    def x(self) -> float: ...
+    def lon(self) -> float: ...
     @property
-    def y(self) -> float: ...
+    def lat(self) -> float: ...
 
 
 @runtime_checkable
@@ -467,7 +468,8 @@ def geocode_response_to_coordinate(
 
     ``status != "OK"`` 이거나 좌표 있는 candidate가 없으면 ``None``.
     ``confidence``가 ``min_confidence`` 미만인 candidate는 제외하고, 남은 것 중
-    confidence 최댓값 candidate의 ``point.x/y`` 또는 ``point.lon/lat``을 lon/lat으로.
+    confidence 최댓값 candidate의 ``point.lon/lat``을 좌표로 옮긴다. 이전
+    pre-ADR-062 응답(``point.x/y``)은 REST 파서에서만 호환 fallback으로 받는다.
     """
     if response.status != _STATUS_OK or not response.candidates:
         return None
@@ -483,7 +485,7 @@ def geocode_response_to_coordinate(
     if point is None:  # pragma: no cover — usable 필터로 보장
         return None
     try:
-        return Coordinate(lon=Decimal(str(point.x)), lat=Decimal(str(point.y)))
+        return Coordinate(lon=Decimal(str(point.lon)), lat=Decimal(str(point.lat)))
     except (InvalidOperation, ValueError):
         return None
 
@@ -556,8 +558,8 @@ def geocode_response_to_address(
 
 @dataclass(frozen=True)
 class _RestPoint:
-    x: float
-    y: float
+    lon: float
+    lat: float
 
 
 @dataclass(frozen=True)
@@ -608,12 +610,12 @@ class _RestGeocodeV2Response:
 def _parse_point(data: dict[str, Any] | None) -> _RestPoint | None:
     if not data:
         return None
-    lon_raw = data.get("x", data.get("lon"))
-    lat_raw = data.get("y", data.get("lat"))
+    lon_raw = data.get("lon", data.get("x"))
+    lat_raw = data.get("lat", data.get("y"))
     if lon_raw is None or lat_raw is None:
         return None
     try:
-        return _RestPoint(x=float(lon_raw), y=float(lat_raw))
+        return _RestPoint(lon=float(lon_raw), lat=float(lat_raw))
     except (TypeError, ValueError):
         return None
 
@@ -795,7 +797,11 @@ class KorTravelGeoRestClient:
         include_zipcode: bool = True,
         radius_m: int | None = None,
     ) -> _RestReverseV2Response:
-        """``POST /v2/reverse`` — 좌표(x=lon, y=lat) 역지오코딩."""
+        """``POST /v2/reverse`` — 좌표(x=lon, y=lat) 역지오코딩.
+
+        메서드 인자는 기존 caller 호환을 위해 ``x``/``y`` 이름을 유지하지만, wire
+        body는 kor-travel-geo v2 정본인 ``lon``/``lat``로 전송한다.
+        """
         body: dict[str, Any] = {
             "lon": x,
             "lat": y,

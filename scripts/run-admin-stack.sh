@@ -18,14 +18,51 @@ if [[ ! -x "$PYTHON_BIN" ]]; then
   PYTHON_BIN="$(command -v python3 || command -v python)"
 fi
 
-DAGSTER_WEBSERVER_BIN="${DAGSTER_WEBSERVER_BIN:-"$ROOT_DIR/.venv/bin/dagster-webserver"}"
-if [[ ! -x "$DAGSTER_WEBSERVER_BIN" ]]; then
-  DAGSTER_WEBSERVER_BIN="$(command -v dagster-webserver)"
+console_script_usable() {
+  local bin="$1"
+  if [[ ! -x "$bin" ]]; then
+    return 1
+  fi
+
+  local first_line=""
+  IFS= read -r first_line <"$bin" || true
+  if [[ "$first_line" != '#!'* || "$first_line" == '#!/usr/bin/env '* ]]; then
+    return 0
+  fi
+
+  local interpreter="${first_line#\#!}"
+  interpreter="${interpreter%% *}"
+  [[ -x "$interpreter" ]]
+}
+
+dagster_webserver_bin="${DAGSTER_WEBSERVER_BIN:-"$ROOT_DIR/.venv/bin/dagster-webserver"}"
+if console_script_usable "$dagster_webserver_bin"; then
+  DAGSTER_WEBSERVER_CMD=("$dagster_webserver_bin")
+else
+  dagster_webserver_bin="$(command -v dagster-webserver || true)"
+  if [[ -n "$dagster_webserver_bin" ]] && console_script_usable "$dagster_webserver_bin"; then
+    DAGSTER_WEBSERVER_CMD=("$dagster_webserver_bin")
+  else
+    DAGSTER_WEBSERVER_CMD=(
+      "$PYTHON_BIN" -c
+      "from dagster_webserver.cli import main; raise SystemExit(main())"
+    )
+  fi
 fi
 
-DAGSTER_DAEMON_BIN="${DAGSTER_DAEMON_BIN:-"$ROOT_DIR/.venv/bin/dagster-daemon"}"
-if [[ ! -x "$DAGSTER_DAEMON_BIN" ]]; then
-  DAGSTER_DAEMON_BIN="$(command -v dagster-daemon)"
+dagster_daemon_bin="${DAGSTER_DAEMON_BIN:-"$ROOT_DIR/.venv/bin/dagster-daemon"}"
+if console_script_usable "$dagster_daemon_bin"; then
+  DAGSTER_DAEMON_CMD=("$dagster_daemon_bin")
+else
+  dagster_daemon_bin="$(command -v dagster-daemon || true)"
+  if [[ -n "$dagster_daemon_bin" ]] && console_script_usable "$dagster_daemon_bin"; then
+    DAGSTER_DAEMON_CMD=("$dagster_daemon_bin")
+  else
+    DAGSTER_DAEMON_CMD=(
+      "$PYTHON_BIN" -c
+      "from dagster._daemon.cli import main; raise SystemExit(main())"
+    )
+  fi
 fi
 
 echo "alembic upgrade head"
@@ -80,6 +117,13 @@ install -m 0644 "$ROOT_DIR/docker/dagster.yaml" "$DAGSTER_HOME_DIR/dagster.yaml"
 API_BIND_HOST="${KOR_TRAVEL_MAP_API_BIND_HOST:-127.0.0.1}"
 WEB_BIND_HOST="${KOR_TRAVEL_MAP_ADMIN_WEB_BIND_HOST:-127.0.0.1}"
 DAGSTER_BIND_HOST="${KOR_TRAVEL_MAP_DAGSTER_BIND_HOST:-127.0.0.1}"
+NEXT_DEV_ARGS=(dev)
+if (
+  cd "$ROOT_DIR/packages/kor-travel-map-admin/frontend"
+  npx next dev --help 2>/dev/null | grep -q -- "--webpack"
+); then
+  NEXT_DEV_ARGS+=(--webpack)
+fi
 
 stop_logged_pid() {
   local name="$1"
@@ -130,7 +174,7 @@ start_bg() {
     NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL="$NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL" \
     NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL="$NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL" \
     NEXT_PUBLIC_VWORLD_API_KEY="${NEXT_PUBLIC_VWORLD_API_KEY:-}" \
-    npx next dev --port "$KOR_TRAVEL_MAP_ADMIN_WEB_PORT" --hostname "$WEB_BIND_HOST"
+    npx next "${NEXT_DEV_ARGS[@]}" --port "$KOR_TRAVEL_MAP_ADMIN_WEB_PORT" --hostname "$WEB_BIND_HOST"
 )
 
 (
@@ -140,7 +184,7 @@ start_bg() {
     DAGSTER_HOME="$DAGSTER_HOME_DIR" \
     DAGSTER_DISABLE_TELEMETRY="$DAGSTER_DISABLE_TELEMETRY" \
     KOR_TRAVEL_MAP_DAGSTER_PG_URL="$KOR_TRAVEL_MAP_DAGSTER_PG_URL" \
-    "$DAGSTER_WEBSERVER_BIN" -m kortravelmap.dagster.definitions \
+    "${DAGSTER_WEBSERVER_CMD[@]}" -m kortravelmap.dagster.definitions \
     -h "$DAGSTER_BIND_HOST" -p "$KOR_TRAVEL_MAP_DAGSTER_PORT"
 )
 
@@ -151,7 +195,7 @@ start_bg() {
     DAGSTER_HOME="$DAGSTER_HOME_DIR" \
     DAGSTER_DISABLE_TELEMETRY="$DAGSTER_DISABLE_TELEMETRY" \
     KOR_TRAVEL_MAP_DAGSTER_PG_URL="$KOR_TRAVEL_MAP_DAGSTER_PG_URL" \
-    "$DAGSTER_DAEMON_BIN" run -m kortravelmap.dagster.definitions
+    "${DAGSTER_DAEMON_CMD[@]}" run -m kortravelmap.dagster.definitions
 )
 
 wait_url() {
