@@ -95,6 +95,7 @@ type MockOptions = {
    */
   transitionStatus?: string;
   transitionAfterDetailCalls?: number;
+  shouldTransition?: () => boolean;
   /** cancel/run-now POST가 반환할 HTTP status(>=400이면 mutation 실패 분기). */
   mutationStatus?: number;
   /** mutation 실패 시 반환할 problem+json body(docs/architecture/rest-api.md §error). */
@@ -201,6 +202,7 @@ async function mockUpdateRequest(
         if (
           options.transitionStatus &&
           options.transitionAfterDetailCalls !== undefined &&
+          (options.shouldTransition?.() ?? true) &&
           calls.detail > options.transitionAfterDetailCalls
         ) {
           status = options.transitionStatus;
@@ -381,10 +383,12 @@ test.describe("/admin/feature-update-requests/[requestId] actions", () => {
     // WS 실시간 invalidation의 deterministic 대체. refetchInterval(2s)이
     // status∈{queued,running}일 때 폴링하므로, 첫 GET=running 이후 다음 폴링에서
     // done을 반환하면 cancel 버튼이 사라진다(=재조회가 실제로 발생했다는 증거).
+    let allowTransition = false;
     const calls = await mockUpdateRequest(page, {
       initialStatus: "running",
       transitionStatus: "done",
       transitionAfterDetailCalls: 1,
+      shouldTransition: () => allowTransition,
     });
     await page.goto(`/admin/feature-update-requests/${REQUEST_ID}`);
 
@@ -392,6 +396,8 @@ test.describe("/admin/feature-update-requests/[requestId] actions", () => {
     // running → canCancel=true, canRunNow=false.
     await expect(cancel).toBeVisible();
     await expect(page.getByRole("button", { name: "run-now" })).toBeHidden();
+
+    allowTransition = true;
 
     // 2s 폴링이 done을 반환 → terminal → cancel 사라지고 run-now 노출.
     // 전체 스위트 병렬 부하에서도 안정적이도록 타임아웃 여유를 둔다(2s 폴링 간격 +

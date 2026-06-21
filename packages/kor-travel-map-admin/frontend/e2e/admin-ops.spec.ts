@@ -196,6 +196,10 @@ async function fulfillJson(route: Route, body: unknown, status = 200) {
   });
 }
 
+function isFrontendAsset(url: URL): boolean {
+  return url.pathname.startsWith("/_next/") || url.pathname === "/favicon.ico";
+}
+
 async function mockOfflineUploadMutations(page: Page) {
   let upload = makeOfflineUpload();
   let uploads: OfflineUploadRecord[] = [];
@@ -208,7 +212,11 @@ async function mockOfflineUploadMutations(page: Page) {
       return;
     }
     const url = new URL(request.url());
-    if (url.pathname === "/admin/offline-uploads" || url.searchParams.has("_rsc")) {
+    if (
+      isFrontendAsset(url) ||
+      url.pathname === "/admin/offline-uploads" ||
+      url.searchParams.has("_rsc")
+    ) {
       await route.continue();
       return;
     }
@@ -400,7 +408,11 @@ async function mockPoiCacheTargetMutations(page: Page) {
       return;
     }
     const url = new URL(request.url());
-    if (url.pathname === "/admin/poi-cache-targets" || url.searchParams.has("_rsc")) {
+    if (
+      isFrontendAsset(url) ||
+      url.pathname === "/admin/poi-cache-targets" ||
+      url.searchParams.has("_rsc")
+    ) {
       await route.continue();
       return;
     }

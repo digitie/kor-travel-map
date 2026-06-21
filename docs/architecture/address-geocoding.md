@@ -140,7 +140,9 @@ async with httpx.AsyncClient(base_url=settings.kor_travel_geo_base_url) as http:
 ### 3.1 v2 REST 응답 → `Address` 매핑 (reverse)
 
 v2 `ReverseV2Response.candidates[]`는 structured field를 직접 제공한다 — vworld
-level 파싱이 없다 (kraddr.geo.dto.v2 정본). `distance_m` 최소 candidate가 대표.
+level 파싱이 없다 (`kor-travel-geo` `dto.v2` 정본). `distance_m` 최소 candidate가
+대표다. 후보 좌표는 ADR-062 이후 `point.lon`/`point.lat`(`PointV2`)가 정본이며,
+구 `point.x`/`point.y`는 REST 파서 호환 fallback으로만 받는다.
 
 | v2 필드 | `Address` 필드 |
 |---------|----------------|

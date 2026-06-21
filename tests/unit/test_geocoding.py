@@ -2,7 +2,7 @@
 
 kor-travel-geo를 import하지 않고:
 - 순수 변환 함수(``reverse_response_to_address``/``geocode_response_to_coordinate``)는
-  REST v2 응답 shape(``CandidateV2``/``AddressV2``/``RegionV2``/``Point``)를 만족하는
+  REST v2 응답 shape(``CandidateV2``/``AddressV2``/``RegionV2``/``PointV2``)를 만족하는
   fake dataclass로 검증.
 - ``KorTravelGeoRestClient`` + 콜러블 팩토리는 ``httpx.MockTransport``로 실 HTTP 경로
   (``POST /v2/*`` JSON body + 응답 파싱 + 변환)를 서버 없이 검증.
@@ -41,8 +41,8 @@ pytestmark = pytest.mark.unit
 
 @dataclass(frozen=True)
 class _Point:
-    x: float
-    y: float
+    lon: float
+    lat: float
 
 
 @dataclass(frozen=True)
@@ -384,7 +384,7 @@ def test_geocode_point_to_coordinate() -> None:
             _CandV2(
                 confidence=0.9,
                 match_kind="road",
-                point=_Point(x=127.05, y=37.55),
+                point=_Point(lon=127.05, lat=37.55),
             ),
         ),
     )
@@ -505,7 +505,7 @@ def test_rest_reverse_geocoder_hits_endpoint() -> None:
                             "postal_code": "07237",
                             "legal_dong_code": "1156010100",
                         },
-                        "point": {"x": 126.924, "y": 37.526},
+                        "point": {"lon": 126.924, "lat": 37.526},
                         "distance_m": 5.0,
                         "region": {"sig_cd": "11560", "bjd_cd": "1156010100"},
                     }
@@ -585,7 +585,7 @@ def test_rest_address_geocoder_hits_endpoint() -> None:
                     {
                         "confidence": 0.9,
                         "match_kind": "road",
-                        "point": {"x": 127.1, "y": 37.4},
+                        "point": {"lon": 127.1, "lat": 37.4},
                     }
                 ],
             },
@@ -613,6 +613,7 @@ def test_rest_address_geocoder_hits_endpoint() -> None:
 def test_rest_address_geocoder_accepts_lon_lat_point_aliases() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/v2/geocode"
+
         return httpx.Response(
             200,
             json={
@@ -636,6 +637,35 @@ def test_rest_address_geocoder_accepts_lon_lat_point_aliases() -> None:
     asyncio.run(_run())
 
 
+def test_rest_address_geocoder_accepts_legacy_xy_point() -> None:
+    """pre-ADR-062 ``point.x/y`` 응답도 REST 파서 fallback으로 계속 읽는다."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "status": "OK",
+                "candidates": [
+                    {
+                        "confidence": 0.9,
+                        "match_kind": "road",
+                        "point": {"x": 127.1, "y": 37.4},
+                    }
+                ],
+            },
+        )
+
+    async def _run() -> None:
+        async with _mock_client(handler) as http:
+            geocode = kor_travel_geo_address_geocoder(KorTravelGeoRestClient(http))
+            coord = await geocode(Address(road="서울특별시 영등포구 여의공원로 120"))
+            assert coord is not None
+            assert coord.lon == Decimal("127.1")
+            assert coord.lat == Decimal("37.4")
+
+    asyncio.run(_run())
+
+
 def test_rest_address_geocoder_uses_parcel_when_no_road() -> None:
     seen: list[dict[str, Any]] = []
 
@@ -649,7 +679,7 @@ def test_rest_address_geocoder_uses_parcel_when_no_road() -> None:
                     {
                         "confidence": 0.9,
                         "match_kind": "parcel",
-                        "point": {"x": 127.0, "y": 37.0},
+                        "point": {"lon": 127.0, "lat": 37.0},
                     }
                 ],
             },
@@ -810,7 +840,7 @@ def test_rest_client_geocode_type_selects_body_key(type_: str, key: str) -> None
             200,
             json={
                 "status": "OK",
-                "candidates": [{"confidence": 1.0, "point": {"x": 1, "y": 1}}],
+                "candidates": [{"confidence": 1.0, "point": {"lon": 1, "lat": 1}}],
             },
         )
 
@@ -834,7 +864,7 @@ def test_rest_client_geocode_fallback_passes_through(fallback: str) -> None:
             200,
             json={
                 "status": "OK",
-                "candidates": [{"confidence": 1.0, "point": {"x": 1, "y": 1}}],
+                "candidates": [{"confidence": 1.0, "point": {"lon": 1, "lat": 1}}],
             },
         )
 
@@ -1258,7 +1288,7 @@ def test_kor_travel_geo_address_geocoder_min_confidence_via_wrapper() -> None:
                     {
                         "confidence": 0.3,
                         "match_kind": "road",
-                        "point": {"x": 127.0, "y": 37.0},
+                        "point": {"lon": 127.0, "lat": 37.0},
                     }
                 ],
             },
@@ -1287,7 +1317,7 @@ def test_kor_travel_geo_address_geocoder_fallback_passed() -> None:
             200,
             json={
                 "status": "OK",
-                "candidates": [{"confidence": 1.0, "point": {"x": 1, "y": 1}}],
+                "candidates": [{"confidence": 1.0, "point": {"lon": 1, "lat": 1}}],
             },
         )
 

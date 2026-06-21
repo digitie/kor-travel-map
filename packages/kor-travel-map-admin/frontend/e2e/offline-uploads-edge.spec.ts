@@ -223,7 +223,10 @@ function isPassthrough(route: Route): boolean {
   }
   const url = new URL(request.url());
   return (
-    url.pathname === "/admin/offline-uploads" || url.searchParams.has("_rsc")
+    url.pathname.startsWith("/_next/") ||
+    url.pathname === "/favicon.ico" ||
+    url.pathname === "/admin/offline-uploads" ||
+    url.searchParams.has("_rsc")
   );
 }
 
