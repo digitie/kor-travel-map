@@ -73,6 +73,7 @@ function invalidateCurated(queryClient: ReturnType<typeof useQueryClient>) {
 
 async function fetchAdminCuratedFeatures(
   params: AdminCuratedFeaturesParams,
+  signal?: AbortSignal,
 ): Promise<CuratedFeaturesResponse> {
   return getJson<CuratedFeaturesResponse>(
     pathWithQuery("/v1/admin/curated-features", {
@@ -86,19 +87,21 @@ async function fetchAdminCuratedFeatures(
       page_size: params.page_size,
       cursor: params.cursor,
     }),
+    { signal },
   );
 }
 
 export function useAdminCuratedFeatures(params: AdminCuratedFeaturesParams) {
   return useQuery<CuratedFeaturesResponse, Error>({
     queryKey: ["curated-features", params] as const,
-    queryFn: () => fetchAdminCuratedFeatures(params),
+    queryFn: ({ signal }) => fetchAdminCuratedFeatures(params, signal),
     staleTime: 30_000,
   });
 }
 
 async function fetchAdminCuratedSources(
   params: AdminCuratedSourcesParams,
+  signal?: AbortSignal,
 ): Promise<CuratedSourcesResponse> {
   return getJson<CuratedSourcesResponse>(
     pathWithQuery("/v1/admin/curated-sources", {
@@ -107,6 +110,7 @@ async function fetchAdminCuratedSources(
       provider_status: params.provider_status,
       limit: params.limit,
     }),
+    { signal },
   );
 }
 
@@ -115,13 +119,14 @@ export function useAdminCuratedSources(
 ) {
   return useQuery<CuratedSourcesResponse, Error>({
     queryKey: ["curated-sources", params] as const,
-    queryFn: () => fetchAdminCuratedSources(params),
+    queryFn: ({ signal }) => fetchAdminCuratedSources(params, signal),
     staleTime: 60_000,
   });
 }
 
 async function fetchAdminCuratedSourceRules(
   params: AdminCuratedSourceRulesParams,
+  signal?: AbortSignal,
 ): Promise<CuratedSourceRulesResponse> {
   return getJson<CuratedSourceRulesResponse>(
     pathWithQuery("/v1/admin/curated-source-rules", {
@@ -133,6 +138,7 @@ async function fetchAdminCuratedSourceRules(
       enabled: params.enabled,
       limit: params.limit,
     }),
+    { signal },
   );
 }
 
@@ -141,13 +147,14 @@ export function useAdminCuratedSourceRules(
 ) {
   return useQuery<CuratedSourceRulesResponse, Error>({
     queryKey: ["curated-source-rules", params] as const,
-    queryFn: () => fetchAdminCuratedSourceRules(params),
+    queryFn: ({ signal }) => fetchAdminCuratedSourceRules(params, signal),
     staleTime: 30_000,
   });
 }
 
 async function fetchAdminCuratedThemes(
   params: AdminCuratedThemesParams,
+  signal?: AbortSignal,
 ): Promise<CuratedThemesResponse> {
   return getJson<CuratedThemesResponse>(
     pathWithQuery("/v1/admin/curated-themes", {
@@ -155,6 +162,7 @@ async function fetchAdminCuratedThemes(
       theme_group: params.theme_group,
       limit: params.limit,
     }),
+    { signal },
   );
 }
 
@@ -163,23 +171,26 @@ export function useAdminCuratedThemes(
 ) {
   return useQuery<CuratedThemesResponse, Error>({
     queryKey: ["curated-themes", params] as const,
-    queryFn: () => fetchAdminCuratedThemes(params),
+    queryFn: ({ signal }) => fetchAdminCuratedThemes(params, signal),
     staleTime: 60_000,
   });
 }
 
 async function fetchTripmateCopySnapshot(
   curatedFeatureId: string,
+  signal?: AbortSignal,
 ): Promise<TripmateCopySnapshotResponse> {
   return getJson<TripmateCopySnapshotResponse>(
     `/v1/curated-features/${encodeURIComponent(curatedFeatureId)}/tripmate-copy`,
+    { signal },
   );
 }
 
 export function useTripmateCopySnapshot(curatedFeatureId: string | null) {
   return useQuery<TripmateCopySnapshotResponse, Error>({
     queryKey: ["curated-feature-copy", curatedFeatureId] as const,
-    queryFn: () => fetchTripmateCopySnapshot(curatedFeatureId as string),
+    queryFn: ({ signal }) =>
+      fetchTripmateCopySnapshot(curatedFeatureId as string, signal),
     enabled: curatedFeatureId !== null && curatedFeatureId.length > 0,
     staleTime: 30_000,
   });

@@ -85,6 +85,7 @@ export interface NearbyByTargetParams {
 
 function fetchPoiCacheTargets(
   params: PoiCacheTargetListParams = {},
+  signal?: AbortSignal,
 ): Promise<PoiCacheTargetListResponse> {
   return getJson<PoiCacheTargetListResponse>(
     pathWithQuery("/v1/admin/poi-cache-targets", {
@@ -94,6 +95,7 @@ function fetchPoiCacheTargets(
       page_size: params.page_size,
       cursor: params.cursor,
     }),
+    { signal },
   );
 }
 
@@ -123,6 +125,7 @@ function deletePoiCacheTarget(
 
 function fetchNearbyFeaturesByTarget(
   params: NearbyByTargetParams,
+  signal?: AbortSignal,
 ): Promise<FeaturesNearbyByTargetResponse> {
   return getJson<FeaturesNearbyByTargetResponse>(
     pathWithQuery("/v1/features/nearby/by-target", {
@@ -137,13 +140,14 @@ function fetchNearbyFeaturesByTarget(
       cursor: params.cursor,
       sort: params.sort,
     }),
+    { signal },
   );
 }
 
 export function usePoiCacheTargets(params: PoiCacheTargetListParams = {}) {
   return useQuery<PoiCacheTargetListResponse, Error>({
     queryKey: ["poi-cache-targets", params],
-    queryFn: () => fetchPoiCacheTargets(params),
+    queryFn: ({ signal }) => fetchPoiCacheTargets(params, signal),
     staleTime: 30_000,
   });
 }
@@ -151,7 +155,8 @@ export function usePoiCacheTargets(params: PoiCacheTargetListParams = {}) {
 export function useNearbyFeaturesByTarget(params: NearbyByTargetParams | null) {
   return useQuery<FeaturesNearbyByTargetResponse, Error>({
     queryKey: ["nearby-features-by-target", params],
-    queryFn: () => fetchNearbyFeaturesByTarget(params as NearbyByTargetParams),
+    queryFn: ({ signal }) =>
+      fetchNearbyFeaturesByTarget(params as NearbyByTargetParams, signal),
     enabled:
       params !== null &&
       params.external_system.length > 0 &&

@@ -32,6 +32,7 @@ export type AdminIssueListParams = Omit<AdminIssuesListQuery, "cursor"> & {
 
 function fetchAdminIssues(
   params: AdminIssueListParams = {},
+  signal?: AbortSignal,
 ): Promise<AdminIssueListResponse> {
   return getJson<AdminIssueListResponse>(
     pathWithQuery("/v1/admin/issues", {
@@ -49,14 +50,17 @@ function fetchAdminIssues(
       page_size: params.page_size,
       cursor: params.cursor,
     }),
+    { signal },
   );
 }
 
 function fetchAdminIssueDetail(
   issueId: string,
+  signal?: AbortSignal,
 ): Promise<AdminIssueDetailResponse> {
   return getJson<AdminIssueDetailResponse>(
     `/v1/admin/issues/${encodeURIComponent(issueId)}`,
+    { signal },
   );
 }
 
@@ -73,7 +77,7 @@ function patchAdminIssue(
 export function useAdminIssues(params: AdminIssueListParams = {}) {
   return useQuery<AdminIssueListResponse, Error>({
     queryKey: ["admin-issues", params],
-    queryFn: () => fetchAdminIssues(params),
+    queryFn: ({ signal }) => fetchAdminIssues(params, signal),
     staleTime: 15_000,
   });
 }
@@ -81,7 +85,7 @@ export function useAdminIssues(params: AdminIssueListParams = {}) {
 export function useAdminIssueDetail(issueId: string | null) {
   return useQuery<AdminIssueDetailResponse, Error>({
     queryKey: ["admin-issue", issueId] as const,
-    queryFn: () => fetchAdminIssueDetail(issueId as string),
+    queryFn: ({ signal }) => fetchAdminIssueDetail(issueId as string, signal),
     enabled: issueId !== null && issueId.length > 0,
     staleTime: 15_000,
   });

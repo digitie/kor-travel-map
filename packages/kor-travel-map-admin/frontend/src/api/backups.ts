@@ -16,8 +16,8 @@ export type BackupRunRequest = BackupSchemas["BackupRunRequest"];
 export type RestoreRunRequest = BackupSchemas["RestoreRunRequest"];
 export type RestoreSwapRequest = BackupSchemas["RestoreSwapRequest"];
 
-function fetchBackups(): Promise<BackupListResponse> {
-  return getJson<BackupListResponse>("/v1/admin/backups");
+function fetchBackups(signal?: AbortSignal): Promise<BackupListResponse> {
+  return getJson<BackupListResponse>("/v1/admin/backups", { signal });
 }
 
 function createBackup(body: BackupRunRequest): Promise<BackupOperationResponse> {
@@ -53,7 +53,7 @@ function planRestoreSwap({
 export function useBackups() {
   return useQuery<BackupListResponse, Error>({
     queryKey: ["admin", "backups"],
-    queryFn: fetchBackups,
+    queryFn: ({ signal }) => fetchBackups(signal),
     staleTime: 10_000,
   });
 }

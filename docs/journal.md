@@ -2,6 +2,25 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-22 (claude) — admin fetch abort signal 전파 (concierge #111 동일 계열)
+
+kor-travel-concierge PR #111(BFF 프록시가 `request.signal`을 upstream으로 전달 안 해 abort된
+요청이 백엔드에서 계속 → undici 커넥션 누수)과 **동일 계열 패턴**이 admin frontend에 있는지
+점검하고 수정했다.
+
+- **진단**: admin은 BFF 프록시가 아니라 **브라우저 직접 호출**(CORS)이라 정확히 같진 않지만,
+  같은 계열의 결함이 있었다 — `src/api/client.ts`(getJson/postJson/…)와 모든 read fetcher가
+  react-query queryFn의 `AbortSignal`을 받지/전달하지 않아 **query 취소가 무력화**됐다.
+  필터·지도 bbox(매 pan/zoom refetch)·목록 churn으로 취소돼도 in-flight fetch가 계속 → host당
+  브라우저 커넥션(~6) 포화 → "처음 빼고 느림/무응답" 위험.
+- **수정**: `client.ts`에 optional `signal` 추가(getJson/postJson/putJson/patchJson/deleteJson/
+  postFormData/fetchHealth/fetchVersion, 하위호환). 15개 api 파일의 모든 `useQuery` queryFn을
+  `({ signal }) => fetchX(args, signal)`로, 각 read fetcher에 `signal?: AbortSignal` 추가해
+  `getJson(path, { signal })`로 전달. mutation 경로는 react-query 자동취소 대상이 아니라 무변경
+  (korTravelGeo/live/providerRefreshPolicies는 query 없음 → 무변경).
+- **검증**: type-check(0)·ESLint(0 errors)·next build·vitest 33 passed(기존 30 + 신규
+  client signal-forwarding 3). multi-agent 워크플로(18 agents)로 파일별 병렬 수정 후 전역 검증.
+
 ## 2026-06-21 (codex) — UI live e2e 재실행 + 하네스 안정화
 
 정본 보고서:

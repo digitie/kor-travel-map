@@ -88,12 +88,13 @@ export type ImportJobEventsListParams = Omit<
   cursor?: string;
 };
 
-function fetchOpsMetrics(): Promise<OpsMetricsResponse> {
-  return getJson<OpsMetricsResponse>("/v1/ops/metrics");
+function fetchOpsMetrics(signal?: AbortSignal): Promise<OpsMetricsResponse> {
+  return getJson<OpsMetricsResponse>("/v1/ops/metrics", { signal });
 }
 
 function fetchConsistencyReports(
   params: ConsistencyReportsListParams = {},
+  signal?: AbortSignal,
 ): Promise<OpsConsistencyReportsListResponse> {
   return getJson<OpsConsistencyReportsListResponse>(
     pathWithQuery("/v1/ops/consistency/reports", {
@@ -101,11 +102,13 @@ function fetchConsistencyReports(
       page_size: params.page_size,
       cursor: params.cursor,
     }),
+    { signal },
   );
 }
 
 function fetchIntegrityIssues(
   params: IntegrityIssuesListParams = {},
+  signal?: AbortSignal,
 ): Promise<OpsIntegrityIssuesListResponse> {
   return getJson<OpsIntegrityIssuesListResponse>(
     pathWithQuery("/v1/ops/consistency/issues", {
@@ -118,11 +121,13 @@ function fetchIntegrityIssues(
       page_size: params.page_size,
       cursor: params.cursor,
     }),
+    { signal },
   );
 }
 
 function fetchSystemLogs(
   params: SystemLogsListParams = {},
+  signal?: AbortSignal,
 ): Promise<SystemLogsResponse> {
   return getJson<SystemLogsResponse>(
     pathWithQuery("/v1/ops/system-logs", {
@@ -132,11 +137,13 @@ function fetchSystemLogs(
       page_size: params.page_size,
       cursor: params.cursor,
     }),
+    { signal },
   );
 }
 
 function fetchApiCallLogs(
   params: ApiCallLogsListParams = {},
+  signal?: AbortSignal,
 ): Promise<ApiCallLogsResponse> {
   return getJson<ApiCallLogsResponse>(
     pathWithQuery("/v1/ops/api-call-logs", {
@@ -146,11 +153,13 @@ function fetchApiCallLogs(
       page_size: params.page_size,
       cursor: params.cursor,
     }),
+    { signal },
   );
 }
 
 function fetchImportJobEvents(
   params: ImportJobEventsListParams = {},
+  signal?: AbortSignal,
 ): Promise<OpsImportJobEventsListResponse> {
   return getJson<OpsImportJobEventsListResponse>(
     pathWithQuery("/v1/ops/import-job-events", {
@@ -161,13 +170,14 @@ function fetchImportJobEvents(
       page_size: params.page_size,
       cursor: params.cursor,
     }),
+    { signal },
   );
 }
 
 export function useOpsMetrics() {
   return useQuery<OpsMetricsResponse, Error>({
     queryKey: ["ops", "metrics"],
-    queryFn: fetchOpsMetrics,
+    queryFn: ({ signal }) => fetchOpsMetrics(signal),
     refetchInterval: 10_000,
     staleTime: 8_000,
   });
@@ -178,7 +188,7 @@ export function useConsistencyReports(
 ) {
   return useQuery<OpsConsistencyReportsListResponse, Error>({
     queryKey: ["ops", "consistency", "reports", params],
-    queryFn: () => fetchConsistencyReports(params),
+    queryFn: ({ signal }) => fetchConsistencyReports(params, signal),
     staleTime: 30_000,
   });
 }
@@ -186,7 +196,7 @@ export function useConsistencyReports(
 export function useIntegrityIssues(params: IntegrityIssuesListParams = {}) {
   return useQuery<OpsIntegrityIssuesListResponse, Error>({
     queryKey: ["ops", "consistency", "issues", params],
-    queryFn: () => fetchIntegrityIssues(params),
+    queryFn: ({ signal }) => fetchIntegrityIssues(params, signal),
     staleTime: 15_000,
   });
 }
@@ -194,7 +204,7 @@ export function useIntegrityIssues(params: IntegrityIssuesListParams = {}) {
 export function useSystemLogs(params: SystemLogsListParams = {}) {
   return useQuery<SystemLogsResponse, Error>({
     queryKey: ["ops", "system-logs", params],
-    queryFn: () => fetchSystemLogs(params),
+    queryFn: ({ signal }) => fetchSystemLogs(params, signal),
     staleTime: 15_000,
   });
 }
@@ -202,7 +212,7 @@ export function useSystemLogs(params: SystemLogsListParams = {}) {
 export function useApiCallLogs(params: ApiCallLogsListParams = {}) {
   return useQuery<ApiCallLogsResponse, Error>({
     queryKey: ["ops", "api-call-logs", params],
-    queryFn: () => fetchApiCallLogs(params),
+    queryFn: ({ signal }) => fetchApiCallLogs(params, signal),
     staleTime: 15_000,
   });
 }
@@ -210,7 +220,7 @@ export function useApiCallLogs(params: ApiCallLogsListParams = {}) {
 export function useImportJobEvents(params: ImportJobEventsListParams = {}) {
   return useQuery<OpsImportJobEventsListResponse, Error>({
     queryKey: ["import-job-events", params],
-    queryFn: () => fetchImportJobEvents(params),
+    queryFn: ({ signal }) => fetchImportJobEvents(params, signal),
     refetchInterval: 10_000,
     staleTime: 5_000,
   });

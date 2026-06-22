@@ -21,20 +21,26 @@ export type OpsProviderDetailResponse =
   ProviderSchemas["OpsProviderDetailResponse"];
 export type OpsProvidersResponse = ProviderSchemas["OpsProvidersResponse"];
 
-function fetchOpsProviders(): Promise<OpsProvidersResponse> {
-  return getJson<OpsProvidersResponse>("/v1/ops/providers");
+function fetchOpsProviders(
+  signal?: AbortSignal,
+): Promise<OpsProvidersResponse> {
+  return getJson<OpsProvidersResponse>("/v1/ops/providers", { signal });
 }
 
-function fetchOpsProvider(provider: string): Promise<OpsProviderDetailResponse> {
+function fetchOpsProvider(
+  provider: string,
+  signal?: AbortSignal,
+): Promise<OpsProviderDetailResponse> {
   return getJson<OpsProviderDetailResponse>(
     `/v1/ops/providers/${encodeURIComponent(provider)}`,
+    { signal },
   );
 }
 
 export function useOpsProviders() {
   return useQuery<OpsProvidersResponse, Error>({
     queryKey: ["ops-providers"],
-    queryFn: fetchOpsProviders,
+    queryFn: ({ signal }) => fetchOpsProviders(signal),
     staleTime: 15_000,
   });
 }
@@ -42,7 +48,7 @@ export function useOpsProviders() {
 export function useOpsProvider(provider: string | null) {
   return useQuery<OpsProviderDetailResponse, Error>({
     queryKey: ["ops-provider", provider],
-    queryFn: () => fetchOpsProvider(provider as string),
+    queryFn: ({ signal }) => fetchOpsProvider(provider as string, signal),
     enabled: Boolean(provider),
     staleTime: 10_000,
   });

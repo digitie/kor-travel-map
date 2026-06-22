@@ -62,6 +62,7 @@ export type OfflineUploadDeleteResponse =
 
 function fetchOfflineUploads(
   params: OfflineUploadListParams = {},
+  signal?: AbortSignal,
 ): Promise<OfflineUploadListResponse> {
   return getJson<OfflineUploadListResponse>(
     pathWithQuery("/v1/admin/offline-uploads", {
@@ -71,33 +72,40 @@ function fetchOfflineUploads(
       page_size: params.page_size,
       cursor: params.cursor,
     }),
+    { signal },
   );
 }
 
 function fetchOfflineUpload(
   uploadId: string,
+  signal?: AbortSignal,
 ): Promise<OfflineUploadDetailResponse> {
   return getJson<OfflineUploadDetailResponse>(
     `/v1/admin/offline-uploads/${encodeURIComponent(uploadId)}`,
+    { signal },
   );
 }
 
 function fetchOfflineUploadPreview(
   uploadId: string,
   sampleSize: number,
+  signal?: AbortSignal,
 ): Promise<OfflineUploadPreviewResponse> {
   return getJson<OfflineUploadPreviewResponse>(
     pathWithQuery(`/v1/admin/offline-uploads/${encodeURIComponent(uploadId)}/preview`, {
       sample_size: sampleSize,
     }),
+    { signal },
   );
 }
 
 function fetchOfflineUploadValidation(
   uploadId: string,
+  signal?: AbortSignal,
 ): Promise<OfflineUploadValidationResponse> {
   return getJson<OfflineUploadValidationResponse>(
     `/v1/admin/offline-uploads/${encodeURIComponent(uploadId)}/validation`,
+    { signal },
   );
 }
 
@@ -148,7 +156,7 @@ function deleteOfflineUpload(
 export function useOfflineUploads(params: OfflineUploadListParams = {}) {
   return useQuery<OfflineUploadListResponse, Error>({
     queryKey: ["offline-uploads", params],
-    queryFn: () => fetchOfflineUploads(params),
+    queryFn: ({ signal }) => fetchOfflineUploads(params, signal),
     refetchInterval: (query) => {
       const hasActiveUpload = query.state.data?.data.items.some((item) =>
         ["validating", "loading"].includes(item.status),
@@ -162,7 +170,7 @@ export function useOfflineUploads(params: OfflineUploadListParams = {}) {
 export function useOfflineUpload(uploadId: string | null) {
   return useQuery<OfflineUploadDetailResponse, Error>({
     queryKey: ["offline-upload", uploadId],
-    queryFn: () => fetchOfflineUpload(uploadId as string),
+    queryFn: ({ signal }) => fetchOfflineUpload(uploadId as string, signal),
     enabled: uploadId !== null && uploadId.length > 0,
     refetchInterval: (query) => {
       const status = query.state.data?.data.status;
@@ -179,7 +187,8 @@ export function useOfflineUploadPreview(
 ) {
   return useQuery<OfflineUploadPreviewResponse, Error>({
     queryKey: ["offline-upload-preview", uploadId, sampleSize],
-    queryFn: () => fetchOfflineUploadPreview(uploadId as string, sampleSize),
+    queryFn: ({ signal }) =>
+      fetchOfflineUploadPreview(uploadId as string, sampleSize, signal),
     enabled: enabled && uploadId !== null && uploadId.length > 0,
     staleTime: 10_000,
   });
@@ -188,7 +197,8 @@ export function useOfflineUploadPreview(
 export function useOfflineUploadValidation(uploadId: string | null, enabled = true) {
   return useQuery<OfflineUploadValidationResponse, Error>({
     queryKey: ["offline-upload-validation", uploadId],
-    queryFn: () => fetchOfflineUploadValidation(uploadId as string),
+    queryFn: ({ signal }) =>
+      fetchOfflineUploadValidation(uploadId as string, signal),
     enabled: enabled && uploadId !== null && uploadId.length > 0,
     staleTime: 2_000,
   });

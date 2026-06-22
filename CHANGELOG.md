@@ -5,6 +5,15 @@
 
 ## [Unreleased]
 
+### Admin frontend 요청 취소 전파 (2026-06-22)
+
+- **FIXED**: admin frontend의 API 클라이언트(`src/api/client.ts`)와 모든 read query
+  fetcher가 react-query의 `AbortSignal`을 `fetch`로 전달하지 않아, 필터/지도 bbox/목록
+  churn으로 query가 취소돼도 in-flight 브라우저 fetch가 계속되던 문제를 수정했다. host당
+  커넥션(브라우저 ~6) 포화로 인한 "처음 빼고 느림/무응답" 위험을 제거한다. mutation 경로는
+  자동 취소 대상이 아니라 무변경. (kor-travel-concierge #111과 동일 계열 — 본 repo는 BFF
+  프록시가 아니라 브라우저 직접 호출 경로.)
+
 ### Admin frontend 오류 화면 복구 (2026-06-20)
 
 - **FIXED**: Next App Router segment/global error boundary(`app/error.tsx`,

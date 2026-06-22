@@ -57,6 +57,7 @@ export type FeatureUpdateRequestRunNowRequest =
 
 function fetchFeatureUpdateRequests(
   params: FeatureUpdateRequestListParams = {},
+  signal?: AbortSignal,
 ): Promise<FeatureUpdateRequestListResponse> {
   return getJson<FeatureUpdateRequestListResponse>(
     pathWithQuery("/v1/admin/feature-update-requests", {
@@ -69,14 +70,17 @@ function fetchFeatureUpdateRequests(
       page_size: params.page_size,
       cursor: params.cursor,
     }),
+    { signal },
   );
 }
 
 function fetchFeatureUpdateRequest(
   requestId: string,
+  signal?: AbortSignal,
 ): Promise<FeatureUpdateRequestDetailResponse> {
   return getJson<FeatureUpdateRequestDetailResponse>(
     `/v1/admin/feature-update-requests/${encodeURIComponent(requestId)}`,
+    { signal },
   );
 }
 
@@ -114,7 +118,7 @@ export function useFeatureUpdateRequests(
 ) {
   return useQuery<FeatureUpdateRequestListResponse, Error>({
     queryKey: ["feature-update-requests", params],
-    queryFn: () => fetchFeatureUpdateRequests(params),
+    queryFn: ({ signal }) => fetchFeatureUpdateRequests(params, signal),
     refetchInterval: (query) => {
       const hasActiveRequest = query.state.data?.data.items.some((item) =>
         ["queued", "running"].includes(item.status),
@@ -128,7 +132,8 @@ export function useFeatureUpdateRequests(
 export function useFeatureUpdateRequest(requestId: string | null) {
   return useQuery<FeatureUpdateRequestDetailResponse, Error>({
     queryKey: ["feature-update-request", requestId],
-    queryFn: () => fetchFeatureUpdateRequest(requestId as string),
+    queryFn: ({ signal }) =>
+      fetchFeatureUpdateRequest(requestId as string, signal),
     enabled: Boolean(requestId),
     refetchInterval: (query) => {
       const status = query.state.data?.data.status;

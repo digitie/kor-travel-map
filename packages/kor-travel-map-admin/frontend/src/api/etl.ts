@@ -21,7 +21,8 @@ export type EtlPreviewResponse = EtlSchemas["EtlPreviewResponse"];
 export function useProviders() {
   return useQuery<ProvidersResponse, Error>({
     queryKey: ["debug", "etl", "providers"],
-    queryFn: () => getJson<ProvidersResponse>("/v1/debug/etl/providers"),
+    queryFn: ({ signal }) =>
+      getJson<ProvidersResponse>("/v1/debug/etl/providers", { signal }),
     staleTime: 60_000,
   });
 }

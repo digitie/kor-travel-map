@@ -47,6 +47,7 @@ export type DedupReviewDecisionResponse =
 
 function fetchDedupReviews(
   params: DedupReviewListParams = {},
+  signal?: AbortSignal,
 ): Promise<DedupReviewListResponse> {
   return getJson<DedupReviewListResponse>(
     pathWithQuery("/v1/admin/dedup-reviews", {
@@ -61,6 +62,7 @@ function fetchDedupReviews(
       page_size: params.page_size,
       cursor: params.cursor,
     }),
+    { signal },
   );
 }
 
@@ -77,7 +79,7 @@ function decideDedupReview(
 export function useDedupReviews(params: DedupReviewListParams = {}) {
   return useQuery<DedupReviewListResponse, Error>({
     queryKey: ["dedup-reviews", params],
-    queryFn: () => fetchDedupReviews(params),
+    queryFn: ({ signal }) => fetchDedupReviews(params, signal),
     staleTime: 15_000,
   });
 }

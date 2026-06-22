@@ -61,12 +61,23 @@ export function pathWithQuery(path: string, params: QueryParams): string {
   return query.length > 0 ? `${path}?${query}` : path;
 }
 
+/**
+ * 요청 옵션. `signal`은 react-query queryFn context의 `AbortSignal`을 받아 fetch에
+ * 전달한다 — 후보 전환·필터 churn·언마운트로 query가 취소되면 in-flight 브라우저
+ * fetch도 함께 중단해 host당 커넥션(브라우저 ~6) 포화로 인한 지연/무응답을 막는다
+ * (kor-travel-concierge #111과 동일 계열).
+ */
+export interface RequestOptions {
+  signal?: AbortSignal;
+}
+
 async function requestJson<T>(
   path: string,
   options: {
     method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
     body?: unknown;
     cache?: RequestCache;
+    signal?: AbortSignal;
   } = {},
 ): Promise<T> {
   const method = options.method ?? "GET";
@@ -80,6 +91,7 @@ async function requestJson<T>(
     // ADR-005: 내부망 전용 — credentials 미포함.
     credentials: "omit",
     cache: options.cache ?? "no-store",
+    signal: options.signal,
     ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
   });
   if (!response.ok) {
@@ -93,23 +105,29 @@ async function requestJson<T>(
   return (await response.json()) as T;
 }
 
-export function getJson<T>(path: string): Promise<T> {
-  return requestJson<T>(path);
+export function getJson<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  return requestJson<T>(path, { signal: options.signal });
 }
 
-export function postJson<T>(path: string, body?: unknown): Promise<T> {
-  return requestJson<T>(path, { method: "POST", body });
+export function postJson<T>(
+  path: string,
+  body?: unknown,
+  options: RequestOptions = {},
+): Promise<T> {
+  return requestJson<T>(path, { method: "POST", body, signal: options.signal });
 }
 
 export async function postFormData<T>(
   path: string,
   body: FormData,
+  options: RequestOptions = {},
 ): Promise<T> {
   const response = await fetch(`${BASE_URL}${path}`, {
     method: "POST",
     headers: { Accept: "application/json" },
     credentials: "omit",
     cache: "no-store",
+    signal: options.signal,
     body,
   });
   if (!response.ok) {
@@ -123,26 +141,38 @@ export async function postFormData<T>(
   return (await response.json()) as T;
 }
 
-export function putJson<T>(path: string, body?: unknown): Promise<T> {
-  return requestJson<T>(path, { method: "PUT", body });
+export function putJson<T>(
+  path: string,
+  body?: unknown,
+  options: RequestOptions = {},
+): Promise<T> {
+  return requestJson<T>(path, { method: "PUT", body, signal: options.signal });
 }
 
-export function patchJson<T>(path: string, body?: unknown): Promise<T> {
-  return requestJson<T>(path, { method: "PATCH", body });
+export function patchJson<T>(
+  path: string,
+  body?: unknown,
+  options: RequestOptions = {},
+): Promise<T> {
+  return requestJson<T>(path, { method: "PATCH", body, signal: options.signal });
 }
 
-export function deleteJson<T>(path: string, body?: unknown): Promise<T> {
-  return requestJson<T>(path, { method: "DELETE", body });
+export function deleteJson<T>(
+  path: string,
+  body?: unknown,
+  options: RequestOptions = {},
+): Promise<T> {
+  return requestJson<T>(path, { method: "DELETE", body, signal: options.signal });
 }
 
 /** `GET /health` — backend liveness probe. */
-export function fetchHealth(): Promise<HealthResponse> {
-  return getJson<HealthResponse>("/health");
+export function fetchHealth(options: RequestOptions = {}): Promise<HealthResponse> {
+  return getJson<HealthResponse>("/health", options);
 }
 
 /** `GET /version` — backend + lib version 정보. */
-export function fetchVersion(): Promise<VersionResponse> {
-  return getJson<VersionResponse>("/version");
+export function fetchVersion(options: RequestOptions = {}): Promise<VersionResponse> {
+  return getJson<VersionResponse>("/version", options);
 }
 
 export { ApiClientError, BASE_URL };
