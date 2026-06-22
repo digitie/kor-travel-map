@@ -877,11 +877,17 @@ test.describe("home refresh dense matrix", () => {
     });
   }
 
+  // 헤더 Dagster 링크는 NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL(빌드타임 인라인)을 가리킨다.
+  // dev 빌드=localhost:12702, prod 빌드=설정된 도메인. 같은 spec이 어떤 배포에도 통과하도록
+  // E2E_DAGSTER_URL로 기대값을 명시 override할 수 있게 한다(미설정 시 dev localhost).
+  const expectedDagsterHref: string | RegExp =
+    process.env.E2E_DAGSTER_URL ?? /^http:\/\/127\.0\.0\.1:127(?:02|12)$/;
+
   for (const item of [
     {
       name: "header Dagster link",
       label: "Dagster",
-      href: /^http:\/\/127\.0\.0\.1:127(?:02|12)$/,
+      href: expectedDagsterHref,
       scope: "header",
     },
     {

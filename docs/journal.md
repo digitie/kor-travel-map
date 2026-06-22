@@ -2,6 +2,25 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-22 (claude) — kor-travel-map prod 첫 배포 + e2e/dagster 배포 follow-ups
+
+prod 호스트(192.168.1.14/N150)에 kor-travel-map을 **처음 배포**했다(이전엔 컨테이너/소스
+없음, geo·concierge만 가동). docker-manager 기반.
+
+- **배포(api+ui)**: dev clean main(#487) rsync provision, docker-manager 컴포즈 #29(env
+  rename + prod 도메인) 적용, dev provider/VWorld 키 12종 prod `.env` 병합, api 기동 시
+  `alembic upgrade head` 자동 적용(0027). 공개 도메인 `map.digitie.mywire.org`(200)/
+  `map-api`(health ok, categories 실데이터). geo/concierge 무중단.
+- **live e2e**(prod URL): home 실백엔드 스모크 3/3, route-mock 스위트 618/619. 유일 1건은
+  spec이 dev Dagster URL을 하드코딩한 것 — prod 빌드가 `map-dagster.digitie.mywire.org`를
+  올바르게 인라인한 결과(결함 아님, #29 검증).
+- **follow-up (a)**: `home-density-matrix.spec.ts` 헤더 Dagster 링크 href를 `E2E_DAGSTER_URL`
+  override 가능하게 해 dev/prod 양쪽 통과(미설정 시 dev localhost 정규식 유지).
+- **follow-up (dagster, 토큰 없이)**: `docker/dagster.Dockerfile`을 token 없으면 `[providers]`
+  없이 빌드하도록 보강(graceful degradation — webserver/daemon·asset graph 정상, live ETL fetch만
+  런타임 비활성; provider import는 모두 lazy라 미설치로도 definitions import 가능). 토큰 주입 시
+  `.[providers]` full ETL. (dev·prod 모두 GITHUB_TOKEN 부재.)
+
 ## 2026-06-22 (claude) — admin fetch abort signal 전파 (concierge #111 동일 계열)
 
 kor-travel-concierge PR #111(BFF 프록시가 `request.signal`을 upstream으로 전달 안 해 abort된
