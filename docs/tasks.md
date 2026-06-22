@@ -49,8 +49,9 @@
 T-229 라이브 검증은 완료됐다(curated 오버레이 0→86,341 후보 실데이터 검증, admin API
 서빙 + 선택 게이트 동작, `/metrics` 200, smoke breadth — 정본
 `docs/reports/t-229-curated-live-verify-2026-06-14.md`). 유일 잔여는 T-108/ADR-056의
-arm64 multi-arch buildx 이미지 build+boot smoke로, private provider pin 빌드에
-`GITHUB_TOKEN`이 필요해 **토큰이 주입된 배포 환경**에서만 수행 가능하다.
+arm64 multi-arch buildx 이미지 build+boot smoke다. provider repo(`python-*-api`)가
+2026-06-22부로 전부 public 전환되어 `GITHUB_TOKEN` 없이도 `.[providers]`를 빌드할 수
+있으므로, arm64 빌더(QEMU/네이티브)가 있는 환경이면 어디서든 수행 가능하다.
 
 완료 조건: `scripts/docker-buildx.sh`로 linux/arm64 이미지를 빌드해 단일 platform
 부팅 smoke가 통과하거나, 불가 사유가 명시 기록된다.

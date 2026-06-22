@@ -162,8 +162,10 @@ KOR_TRAVEL_MAP_IMAGE_TAG="$(git rev-parse --short=12 HEAD)" npm run docker:build
 - `ghcr.io/digitie/kor-travel-map-admin:<tag>`
 - `ghcr.io/digitie/kor-travel-map-dagster:<tag>`
 
-private provider pin을 fetch해야 하는 Dagster build는 `GITHUB_TOKEN`을 BuildKit secret으로
-받는다. 토큰은 build arg나 image layer에 남기지 않는다.
+provider repo(`python-*-api` 13종)는 2026-06-22부로 전부 public이라 Dagster build는
+`GITHUB_TOKEN` 없이 `.[providers]` full ETL 이미지를 빌드한다. 토큰은 선택사항이며
+(미인증 rate-limit 회피 / provider가 다시 private 될 때 대비), 주어지면 BuildKit
+secret으로만 받고 build arg나 image layer에 남기지 않는다.
 
 단일 platform smoke만 하려면 다음처럼 `docker` output을 사용한다.
 
