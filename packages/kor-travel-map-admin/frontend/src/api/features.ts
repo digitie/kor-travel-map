@@ -26,6 +26,7 @@ export interface FeaturesInBboxParams {
 
 async function fetchFeaturesInBbox(
   params: FeaturesInBboxParams,
+  signal?: AbortSignal,
 ): Promise<FeaturesInBboxResponse> {
   return getJson<FeaturesInBboxResponse>(
     pathWithQuery("/v1/features", {
@@ -36,6 +37,7 @@ async function fetchFeaturesInBbox(
       limit: params.limit,
       kind: params.kinds,
     }),
+    { signal },
   );
 }
 
@@ -59,7 +61,7 @@ export function useFeaturesInBbox(
   ] as const;
   return useQuery({
     queryKey: key,
-    queryFn: () => fetchFeaturesInBbox(params),
+    queryFn: ({ signal }) => fetchFeaturesInBbox(params, signal),
     enabled: options?.enabled ?? true,
     staleTime: 30_000,
   });
@@ -90,9 +92,13 @@ export type FeaturesNearbyParams = Omit<
   status?: string[];
 };
 
-async function fetchFeatureDetail(featureId: string): Promise<FeatureDetail> {
+async function fetchFeatureDetail(
+  featureId: string,
+  signal?: AbortSignal,
+): Promise<FeatureDetail> {
   const body = await getJson<FeatureDetailEnvelopeResponse>(
     `/v1/features/${encodeURIComponent(featureId)}`,
+    { signal },
   );
   return body.data;
 }
@@ -101,7 +107,7 @@ async function fetchFeatureDetail(featureId: string): Promise<FeatureDetail> {
 export function useFeatureDetail(featureId: string | null) {
   return useQuery({
     queryKey: ["feature", featureId] as const,
-    queryFn: () => fetchFeatureDetail(featureId as string),
+    queryFn: ({ signal }) => fetchFeatureDetail(featureId as string, signal),
     enabled: featureId !== null && featureId.length > 0,
     staleTime: 60_000,
   });
@@ -110,11 +116,13 @@ export function useFeatureDetail(featureId: string | null) {
 async function fetchFeatureWeather(
   featureId: string,
   params: { asof?: string | Date | null } = {},
+  signal?: AbortSignal,
 ): Promise<FeatureWeatherResponse> {
   return getJson<FeatureWeatherResponse>(
     pathWithQuery(`/v1/features/${encodeURIComponent(featureId)}/weather`, {
       asof: params.asof,
     }),
+    { signal },
   );
 }
 
@@ -124,7 +132,8 @@ export function useFeatureWeather(
 ) {
   return useQuery<FeatureWeatherResponse, Error>({
     queryKey: ["feature", featureId, "weather", params.asof ?? null] as const,
-    queryFn: () => fetchFeatureWeather(featureId as string, params),
+    queryFn: ({ signal }) =>
+      fetchFeatureWeather(featureId as string, params, signal),
     enabled: featureId !== null && featureId.length > 0,
     staleTime: 60_000,
   });
@@ -132,6 +141,7 @@ export function useFeatureWeather(
 
 async function fetchNearbyFeatures(
   params: FeaturesNearbyParams,
+  signal?: AbortSignal,
 ): Promise<FeaturesNearbyResponse> {
   return getJson<FeaturesNearbyResponse>(
     pathWithQuery("/v1/features/nearby", {
@@ -146,6 +156,7 @@ async function fetchNearbyFeatures(
       cursor: params.cursor,
       sort: params.sort,
     }),
+    { signal },
   );
 }
 
@@ -155,7 +166,8 @@ export function useNearbyFeatures(
 ) {
   return useQuery<FeaturesNearbyResponse, Error>({
     queryKey: ["features-nearby", params] as const,
-    queryFn: () => fetchNearbyFeatures(params as FeaturesNearbyParams),
+    queryFn: ({ signal }) =>
+      fetchNearbyFeatures(params as FeaturesNearbyParams, signal),
     enabled:
       (options?.enabled ?? true) &&
       params !== null &&
@@ -247,16 +259,19 @@ export type AdminFeatureChangeListParams = Omit<
 
 function fetchAdminFeatureDetail(
   featureId: string,
+  signal?: AbortSignal,
 ): Promise<AdminFeatureDetailResponse> {
   return getJson<AdminFeatureDetailResponse>(
     `/v1/admin/features/${encodeURIComponent(featureId)}`,
+    { signal },
   );
 }
 
 export function useAdminFeatureDetail(featureId: string | null) {
   return useQuery<AdminFeatureDetailResponse, Error>({
     queryKey: ["admin-feature-detail", featureId] as const,
-    queryFn: () => fetchAdminFeatureDetail(featureId as string),
+    queryFn: ({ signal }) =>
+      fetchAdminFeatureDetail(featureId as string, signal),
     enabled: featureId !== null && featureId.length > 0,
     staleTime: 30_000,
   });
@@ -264,6 +279,7 @@ export function useAdminFeatureDetail(featureId: string | null) {
 
 function fetchAdminFeatures(
   params: AdminFeaturesListParams = {},
+  signal?: AbortSignal,
 ): Promise<AdminFeaturesListResponse> {
   return getJson<AdminFeaturesListResponse>(
     pathWithQuery("/v1/admin/features", {
@@ -283,6 +299,7 @@ function fetchAdminFeatures(
       sort: params.sort,
       order: params.order,
     }),
+    { signal },
   );
 }
 
@@ -298,6 +315,7 @@ function deactivateAdminFeature(
 
 function fetchAdminFeatureChangeRequests(
   params: AdminFeatureChangeListParams = {},
+  signal?: AbortSignal,
 ): Promise<AdminFeatureChangeListResponse> {
   return getJson<AdminFeatureChangeListResponse>(
     pathWithQuery("/v1/admin/features/change-requests", {
@@ -306,6 +324,7 @@ function fetchAdminFeatureChangeRequests(
       q: params.q,
       page_size: params.page_size,
     }),
+    { signal },
   );
 }
 
@@ -358,7 +377,7 @@ function rejectAdminFeatureChangeRequest(
 export function useAdminFeatures(params: AdminFeaturesListParams = {}) {
   return useQuery<AdminFeaturesListResponse, Error>({
     queryKey: ["admin-features", params],
-    queryFn: () => fetchAdminFeatures(params),
+    queryFn: ({ signal }) => fetchAdminFeatures(params, signal),
     staleTime: 30_000,
   });
 }
@@ -389,7 +408,7 @@ export function useAdminFeatureChangeRequests(
 ) {
   return useQuery<AdminFeatureChangeListResponse, Error>({
     queryKey: ["admin-feature-changes", params],
-    queryFn: () => fetchAdminFeatureChangeRequests(params),
+    queryFn: ({ signal }) => fetchAdminFeatureChangeRequests(params, signal),
     staleTime: 15_000,
   });
 }

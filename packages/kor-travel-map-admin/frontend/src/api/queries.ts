@@ -35,7 +35,7 @@ export function useHealth(
 ) {
   return useQuery<HealthResponse, Error, HealthResponse, HealthQueryKey>({
     queryKey: queryKeys.health(),
-    queryFn: fetchHealth,
+    queryFn: ({ signal }) => fetchHealth({ signal }),
     refetchInterval: 5000,
     staleTime: 4000,
     ...options,
@@ -51,7 +51,7 @@ export function useVersion(
 ) {
   return useQuery<VersionResponse, Error, VersionResponse, VersionQueryKey>({
     queryKey: queryKeys.version(),
-    queryFn: fetchVersion,
+    queryFn: ({ signal }) => fetchVersion({ signal }),
     staleTime: 60_000,
     ...options,
   });

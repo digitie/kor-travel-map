@@ -38,6 +38,7 @@ export type EnrichmentReviewDecisionResponse =
 
 function fetchEnrichmentReviews(
   params: EnrichmentReviewListParams = {},
+  signal?: AbortSignal,
 ): Promise<EnrichmentReviewListResponse> {
   return getJson<EnrichmentReviewListResponse>(
     pathWithQuery("/v1/admin/enrichment-reviews", {
@@ -49,6 +50,7 @@ function fetchEnrichmentReviews(
       page_size: params.page_size,
       cursor: params.cursor,
     }),
+    { signal },
   );
 }
 
@@ -65,7 +67,7 @@ function decideEnrichmentReview(
 export function useEnrichmentReviews(params: EnrichmentReviewListParams = {}) {
   return useQuery<EnrichmentReviewListResponse, Error>({
     queryKey: ["enrichment-reviews", params],
-    queryFn: () => fetchEnrichmentReviews(params),
+    queryFn: ({ signal }) => fetchEnrichmentReviews(params, signal),
     staleTime: 15_000,
   });
 }

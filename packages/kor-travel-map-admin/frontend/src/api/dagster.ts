@@ -33,9 +33,13 @@ export type DagsterRunDetailResponse =
 export type DagsterSummaryResponse = DagsterSchemas["DagsterSummaryResponse"];
 export type DagsterNuxSeenResponse = DagsterSchemas["DagsterNuxSeenResponse"];
 
-function fetchDagsterSummary(runLimit = 10): Promise<DagsterSummaryResponse> {
+function fetchDagsterSummary(
+  runLimit = 10,
+  signal?: AbortSignal,
+): Promise<DagsterSummaryResponse> {
   return getJson<DagsterSummaryResponse>(
     pathWithQuery("/v1/ops/dagster/summary", { run_limit: runLimit }),
+    { signal },
   );
 }
 
@@ -47,12 +51,14 @@ function fetchDagsterRunDetail(
   runId: string,
   eventLimit = 50,
   after: string | null = null,
+  signal?: AbortSignal,
 ): Promise<DagsterRunDetailResponse> {
   return getJson<DagsterRunDetailResponse>(
     pathWithQuery(`/v1/ops/dagster/runs/${encodeURIComponent(runId)}`, {
       event_limit: eventLimit,
       after: after ?? undefined,
     }),
+    { signal },
   );
 }
 
@@ -62,7 +68,7 @@ const _TERMINAL_RUN_STATUS = new Set(["SUCCESS", "FAILURE", "CANCELED"]);
 export function useDagsterSummary(runLimit = 10) {
   return useQuery<DagsterSummaryResponse, Error>({
     queryKey: ["ops", "dagster", "summary", runLimit],
-    queryFn: () => fetchDagsterSummary(runLimit),
+    queryFn: ({ signal }) => fetchDagsterSummary(runLimit, signal),
     refetchInterval: 10_000,
     staleTime: 8_000,
   });
@@ -81,7 +87,8 @@ export function useDagsterRunDetail(
 ) {
   return useQuery<DagsterRunDetailResponse, Error>({
     queryKey: ["ops", "dagster", "runs", runId, eventLimit, after],
-    queryFn: () => fetchDagsterRunDetail(runId ?? "", eventLimit, after),
+    queryFn: ({ signal }) =>
+      fetchDagsterRunDetail(runId ?? "", eventLimit, after, signal),
     enabled: Boolean(runId),
     refetchInterval: (query) => {
       if (!runId) return false;

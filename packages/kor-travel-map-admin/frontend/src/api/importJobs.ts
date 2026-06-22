@@ -46,6 +46,7 @@ export type ImportJobEventsParams = Omit<ImportJobEventsQuery, "cursor"> & {
 
 function fetchImportJobs(
   params: ImportJobsListParams = {},
+  signal?: AbortSignal,
 ): Promise<OpsImportJobsListResponse> {
   return getJson<OpsImportJobsListResponse>(
     pathWithQuery("/v1/ops/import-jobs", {
@@ -56,18 +57,24 @@ function fetchImportJobs(
       page_size: params.page_size,
       cursor: params.cursor,
     }),
+    { signal },
   );
 }
 
-function fetchImportJob(jobId: string): Promise<OpsImportJobResponse> {
+function fetchImportJob(
+  jobId: string,
+  signal?: AbortSignal,
+): Promise<OpsImportJobResponse> {
   return getJson<OpsImportJobResponse>(
     `/v1/ops/import-jobs/${encodeURIComponent(jobId)}`,
+    { signal },
   );
 }
 
 function fetchImportJobEvents(
   jobId: string,
   params: ImportJobEventsParams = {},
+  signal?: AbortSignal,
 ): Promise<OpsImportJobEventsListResponse> {
   return getJson<OpsImportJobEventsListResponse>(
     pathWithQuery(
@@ -78,6 +85,7 @@ function fetchImportJobEvents(
         cursor: params.cursor,
       },
     ),
+    { signal },
   );
 }
 
@@ -97,7 +105,7 @@ function cancelImportJob({
 export function useImportJobs(params: ImportJobsListParams = {}) {
   return useQuery<OpsImportJobsListResponse, Error>({
     queryKey: ["import-jobs", params],
-    queryFn: () => fetchImportJobs(params),
+    queryFn: ({ signal }) => fetchImportJobs(params, signal),
     refetchInterval: (query) => {
       const hasRunningJob = query.state.data?.data.items.some((item) =>
         ["queued", "running"].includes(item.status),
@@ -111,7 +119,7 @@ export function useImportJobs(params: ImportJobsListParams = {}) {
 export function useImportJob(jobId: string) {
   return useQuery<OpsImportJobResponse, Error>({
     queryKey: ["import-job", jobId],
-    queryFn: () => fetchImportJob(jobId),
+    queryFn: ({ signal }) => fetchImportJob(jobId, signal),
     refetchInterval: (query) => {
       const status = query.state.data?.data.status;
       return status && ["queued", "running"].includes(status) ? 2_000 : false;
@@ -126,7 +134,7 @@ export function useImportJobEvents(
 ) {
   return useQuery<OpsImportJobEventsListResponse, Error>({
     queryKey: ["import-job-events", jobId, params],
-    queryFn: () => fetchImportJobEvents(jobId, params),
+    queryFn: ({ signal }) => fetchImportJobEvents(jobId, params, signal),
     refetchInterval: 5_000,
     staleTime: 5_000,
   });
