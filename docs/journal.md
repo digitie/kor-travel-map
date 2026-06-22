@@ -2,6 +2,27 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-22 (claude) — provider repo 전부 public → dagster build 토큰 불필요(full ETL 항상)
+
+provider repo 13종 중 마지막 private였던 `python-datagokr-api`가 **public으로 전환**됐다
+(사용자 조치). `gh repo view` × 13 + `git ls-remote`(datagokr) 익명 성공으로 재확인.
+
+- **사실 정정**: 직전 배포 서사의 "13종 private"는 부정확했다 — 실제 private는
+  `python-datagokr-api` **1개뿐**이었고(나머지 12 public), 그 1개를 쓰는 fetcher는
+  `provider_fetchers.py`의 표준데이터 4종(`fetch_datagokr_cultural_festivals`,
+  `fetch_standard_museums`, `fetch_standard_tourist_attractions`,
+  `fetch_standard_parking_lots`)뿐. all-or-nothing `[providers]` extra 탓에 그 1개 때문에
+  public 12개까지 통째로 빠져 토큰 없는 prod의 live ETL이 0이었다.
+- **변경**: `docker/dagster.Dockerfile`을 "토큰 있을 때만 `.[providers]`" → **토큰 유무와
+  무관하게 항상 `.[providers]`**로 변경(전부 public이라 익명 clone 가능). BuildKit secret
+  `github_token`은 선택사항으로 남김(미인증 rate-limit 회피 / 재-private 대비). 빌드
+  플럼빙(`scripts/docker-buildx.sh`/`load-env.sh`/compose)은 이미 토큰을 optional로
+  다뤄 무변경.
+- **문서 정정**: `docs/runbooks/docker-app.md`·`docs/tasks.md`(T-229-buildx)·
+  `docs/resume.md` — "private pin 빌드에 GITHUB_TOKEN 필요/토큰 주입 배포 환경에서만 가능"
+  서술을 "전부 public → 토큰 없이 빌드 가능"으로 갱신.
+- **prod 재배포**: 토큰 없이 dagster 이미지를 `.[providers]`로 재빌드·재기동(아래 결과).
+
 ## 2026-06-22 (claude) — kor-travel-map prod 첫 배포 + e2e/dagster 배포 follow-ups
 
 prod 호스트(192.168.1.14/N150)에 kor-travel-map을 **처음 배포**했다(이전엔 컨테이너/소스

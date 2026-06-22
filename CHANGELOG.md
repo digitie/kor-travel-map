@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### Dagster 이미지: provider repo 전부 public → 토큰 없이 full ETL (2026-06-22)
+
+- **CHANGED**: `docker/dagster.Dockerfile`이 `GITHUB_TOKEN` 유무와 무관하게 항상
+  `.[providers]`(provider 13종 포함 full ETL)를 설치하도록 바꿨다. 마지막 private였던
+  `python-datagokr-api`가 public으로 전환돼 provider repo가 전부 public이 되었으므로 익명
+  clone으로 빌드된다. 직전의 "토큰 없으면 `[providers]` 스킵(live ETL 비활성)"
+  graceful-degradation은 제거했다. BuildKit secret `github_token`은 선택사항으로 유지한다
+  (미인증 rate-limit 회피 / provider 재-private 대비). 빌드/배포 환경에 토큰 없이도 dagster가
+  실데이터 fetch를 수행할 수 있다.
+
 ### Admin frontend 요청 취소 전파 (2026-06-22)
 
 - **FIXED**: admin frontend의 API 클라이언트(`src/api/client.ts`)와 모든 read query

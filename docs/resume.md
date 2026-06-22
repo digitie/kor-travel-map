@@ -400,8 +400,8 @@ T-108/ADR-056의 arm64 multi-arch buildx 이미지 build+boot smoke다.
 
 전제:
 
-- private provider pin 빌드에 `GITHUB_TOKEN`이 필요하므로 **토큰이 주입된 배포
-  환경**에서만 수행 가능하다(코드/데이터 결함 아님).
+- provider repo(`python-*-api`)가 2026-06-22부로 전부 public 전환되어 `GITHUB_TOKEN`
+  없이도 `.[providers]`를 빌드할 수 있다. arm64 빌더(QEMU/네이티브)만 있으면 수행 가능하다.
 
 완료 시:
 
