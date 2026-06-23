@@ -73,6 +73,24 @@ services:
   frontend:
     network_mode: host
     ports: !reset null
+    # host 모드: ports 매핑이 없으므로 Next.js standalone 서버가 호스트 포트에 직접
+    # 바인드한다. frontend.Dockerfile은 PORT=12705를 hardcode하므로, 여기서 PORT를
+    # 명시하지 않으면 KOR_TRAVEL_MAP_ADMIN_WEB_PORT를 바꿔도 12705로만 떠 무시된다(#507).
+    environment:
+      PORT: ${KOR_TRAVEL_MAP_ADMIN_WEB_PORT:-12705}
+      HOSTNAME: 0.0.0.0
+    # base healthcheck는 12705로 고정 probe하므로 host 모드에서 실제 listen 포트와
+    # 어긋날 수 있다. 런타임 포트로 다시 probe한다.
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"fetch('http://127.0.0.1:'+(process.env.PORT||'12705')+'/').then((response) => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1))\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
 
   dagster:
     network_mode: host

@@ -14,8 +14,31 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # 탐지 함수(find_*_for_port / port_has_listener / stop_fixed_ports)를 재사용한다.
 # stop-fixed-ports.sh는 source되면 강제종료 main을 실행하지 않는다(BASH_SOURCE 가드).
+# (stop-fixed-ports.sh가 load-env.sh를 source하므로 포트 env가 채워진다.)
 # shellcheck source=stop-fixed-ports.sh
 source "$ROOT_DIR/scripts/stop-fixed-ports.sh"
+
+normalize_bool() {
+  case "${1,,}" in
+    1 | y | yes | true) echo 1 ;;
+    0 | n | no | false) echo 0 ;;
+    *) echo "" ;;
+  esac
+}
+
+# no-arg 기본 가드 포트. API/admin/Dagster는 항상 포함하고, RustFS(API/console)는
+# 로컬 compose로 띄울 때만 포함한다(stop-fixed-ports.sh의 5포트 기본과 정렬, #507).
+#
+# RustFS를 kor-travel-docker-manager 공유 인스턴스로 쓰는 모드
+# (KOR_TRAVEL_MAP_OBJECT_STORE_EXTERNAL=true 또는 KOR_TRAVEL_MAP_INFRA_EXTERNAL=true)에서는
+# 로컬에서 RustFS를 띄우지 않으므로 12101/12105를 가드/강제종료 대상에서 제외한다
+# (공유 인스턴스를 죽이면 안 된다).
+#
+# 5432(Postgres) 정책: host 모드의 5432는 kor-travel-docker-manager가 소유한 **공유**
+# PostGIS다. 의도적으로 preflight 가드/강제종료 대상에서 제외한다(공유 DB 보존).
+# 5432에 비공유 충돌 listener가 있으면 자동으로 죽이지 않고 사용자가 직접 해결한다.
+object_store_external="$(normalize_bool "${KOR_TRAVEL_MAP_OBJECT_STORE_EXTERNAL:-}")"
+infra_external="$(normalize_bool "${KOR_TRAVEL_MAP_INFRA_EXTERNAL:-}")"
 
 ports=("$@")
 if [[ "${#ports[@]}" -eq 0 ]]; then
@@ -24,6 +47,14 @@ if [[ "${#ports[@]}" -eq 0 ]]; then
     "$KOR_TRAVEL_MAP_ADMIN_WEB_PORT"
     "$KOR_TRAVEL_MAP_DAGSTER_PORT"
   )
+  if [[ "$object_store_external" != "1" && "$infra_external" != "1" ]]; then
+    ports+=(
+      "$KOR_TRAVEL_MAP_RUSTFS_API_PORT"
+      "$KOR_TRAVEL_MAP_RUSTFS_CONSOLE_PORT"
+    )
+  else
+    echo "preflight: 공유 RustFS 모드 — 12101/12105 가드 생략 (OBJECT_STORE_EXTERNAL/INFRA_EXTERNAL)." >&2
+  fi
 fi
 
 occupied=()
@@ -47,14 +78,6 @@ for port in "${occupied[@]}"; do
   [[ -n "${containers// /}" ]] && detail+="docker=${containers%% } "
   echo "  - port $port: ${detail:-사용 중}" >&2
 done
-
-normalize_bool() {
-  case "${1,,}" in
-    1 | y | yes | true) echo 1 ;;
-    0 | n | no | false) echo 0 ;;
-    *) echo "" ;;
-  esac
-}
 
 force="$(normalize_bool "${KOR_TRAVEL_MAP_FORCE_KILL_PORTS:-}")"
 if [[ -z "$force" ]]; then
