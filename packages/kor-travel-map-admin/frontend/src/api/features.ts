@@ -21,7 +21,7 @@ export interface FeaturesInBboxParams {
   max_lon: number;
   max_lat: number;
   kinds?: string[];
-  limit?: number;
+  page_size?: number;
 }
 
 async function fetchFeaturesInBbox(
@@ -34,7 +34,7 @@ async function fetchFeaturesInBbox(
       min_lat: params.min_lat,
       max_lon: params.max_lon,
       max_lat: params.max_lat,
-      limit: params.limit,
+      page_size: params.page_size,
       kind: params.kinds,
     }),
     { signal },
@@ -57,7 +57,7 @@ export function useFeaturesInBbox(
     q4(params.max_lon),
     q4(params.max_lat),
     params.kinds?.join(",") ?? "",
-    params.limit ?? 1000,
+    params.page_size ?? 500,
   ] as const;
   return useQuery({
     queryKey: key,
