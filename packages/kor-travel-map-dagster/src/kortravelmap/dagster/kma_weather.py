@@ -409,11 +409,15 @@ async def _run_kma_weather_asset(
             grids_fetched += 1
             if not rows:
                 continue
-            grid_values: list[WeatherValue] = []
-            for feature_id in feature_ids:
-                grid_values.extend(to_values(rows, feature_id))
+            # 복제 제거: 격자 응답을 그 격자의 place feature 전체에 복제하지 않고
+            # 대표 feature 1개(anchor)에만 1회 적재한다. 나머지 feature의 weather는
+            # build_weather_card가 반경 내 가장 가까운 기온(KMA) anchor를 조회·병합해
+            # 서빙한다(weather_repo nearest-temp). 이로써 격자×feature 팬아웃(약 30M행)이
+            # 사라진다(격자당 1세트만 적재).
+            anchor = feature_ids[0]
+            grid_values: list[WeatherValue] = list(to_values(rows, anchor))
             values_loaded += await kor_travel_map_client.load_weather_values(grid_values)
-            matched_features.update(feature_ids)
+            matched_features.add(anchor)
     except Exception:
         await kor_travel_map_client.record_sync_failure(
             provider=KMA_PROVIDER_NAME, dataset_key=dataset_key
@@ -748,21 +752,20 @@ async def run_feature_weather_kma_mid_forecast(
                 )
             )
             regions_fetched += 1
+            # 복제 제거(메인 격자 루프와 동일 원칙): region 응답을 대표 feature
+            # 1개(anchor)에만 적재. 나머지는 read 시 nearest-temp로 서빙.
             region_values: list[WeatherValue] = []
-            for feature_id in spec.feature_ids:
+            anchor = spec.feature_ids[0] if spec.feature_ids else None
+            if anchor is not None:
                 region_values.extend(
-                    mid_land_forecast_to_weather_values(
-                        land_rows, feature_id=feature_id
-                    )
+                    mid_land_forecast_to_weather_values(land_rows, feature_id=anchor)
                 )
                 region_values.extend(
-                    mid_temperature_to_weather_values(
-                        temp_rows, feature_id=feature_id
-                    )
+                    mid_temperature_to_weather_values(temp_rows, feature_id=anchor)
                 )
-            if region_values:
+            if region_values and anchor is not None:
                 values_loaded += await kor_travel_map_client.load_weather_values(region_values)
-                matched_features.update(spec.feature_ids)
+                matched_features.add(anchor)
     except Exception:
         await kor_travel_map_client.record_sync_failure(
             provider=KMA_PROVIDER_NAME, dataset_key=KMA_MID_FORECAST_DATASET_KEY
