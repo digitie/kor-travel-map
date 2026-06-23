@@ -1,6 +1,7 @@
 import { expect, type Page, type Route, test } from "@playwright/test";
 
 import type { components } from "../src/api/types";
+import { installInertOpsLiveWebSocket } from "./ws-isolation";
 
 // 손으로 쓴 record shape 대신 **생성된 OpenAPI 스키마**에 바인딩한다(#308 리뷰).
 // 백엔드 DTO가 바뀌면 mock factory가 타입 불일치로 컴파일 실패 → mock-실계약 drift 감지.
@@ -76,12 +77,17 @@ function jobEventsResponse(
 }
 
 /**
- * 연결 불가한 실 WebSocket(ws://127.0.0.1:12701/v1/ops/live) 소음을 제거한다.
- * live 배지(connecting/reconnecting/unavailable) 상태는 절대 단언하지 않는다 —
- * WS 타이밍은 테스트 신호가 아니다(recon risks).
+ * ops-live WebSocket(`ws(s)://<BASE_URL host>/v1/ops/live`)을 inert로 만든다(#503).
+ *
+ * 기존엔 `page.route("**​/v1/ops/live**", abort)`로 REST 스타일 차단을 시도했으나, WS는
+ * 페이지 origin(12705)이 아닌 BASE_URL(12701)로 cross-origin upgrade되어 glob 매칭이
+ * 호스트 런 환경에 의존적이었다. 대신 origin-agnostic한 `addInitScript` no-op 스텁으로
+ * `window.WebSocket`을 갈아끼워 라이브 백엔드 snapshot/update가 추가 mock GET 버스트를
+ * 유발하지 않게 한다. live 배지(connecting/reconnecting/unavailable) 상태는 절대
+ * 단언하지 않는다 — WS 타이밍은 테스트 신호가 아니다(recon risks).
  */
 async function abortLiveSocket(page: Page) {
-  await page.route("**/v1/ops/live**", (route) => route.abort());
+  await installInertOpsLiveWebSocket(page);
 }
 
 test.describe("admin/ops logs streams (Job events depth)", () => {

@@ -1,6 +1,7 @@
 import { expect, type Page, type Route, test } from "@playwright/test";
 
 import type { components } from "../src/api/types";
+import { installInertOpsLiveWebSocket } from "./ws-isolation";
 
 /**
  * `/admin/feature-update-requests/[requestId]` 상세 — 액션/에러/실시간 depth spec
@@ -21,13 +22,14 @@ import type { components } from "../src/api/types";
  * 통과시킨다. mock body는 모두 생성된 OpenAPI 타입에 바인딩해 계약 drift를 컴파일에서
  * 잡는다.
  *
- * WS 실시간 invalidation 직접 검증을 넣지 않은 이유: `useOpsLiveInvalidation`은
- * BASE_URL(`http://127.0.0.1:12701`)로 cross-origin WS를 연다(`live.ts` 35-46). 페이지는
- * 12705에서 서빙되므로 `page.routeWebSocket`로 mock하려면 cross-origin glob이 필요하고,
- * Windows 호스트 런에서만 실증 가능해 본 recon 시점엔 미검증이다. 대신
+ * WS 격리(#503): `useOpsLiveInvalidation`은 BASE_URL(`http://127.0.0.1:12701`)로
+ * cross-origin WS를 연다(`live.ts`). 페이지는 12705에서 서빙되므로 `page.routeWebSocket`
+ * cross-origin glob은 Windows 호스트 런에서만 실증 가능했다. 대신 `beforeEach`에서
+ * `installInertOpsLiveWebSocket(page)`(`e2e/ws-isolation.ts`, origin-agnostic
+ * addInitScript no-op 스텁)로 WS를 deterministic하게 inert로 만든다 — 라이브 백엔드
+ * snapshot/update가 mock GET 버스트를 유발하지 않으므로 status 전환은 오롯이
  * `useFeatureUpdateRequest`의 refetchInterval(`updateRequests.ts` 133-136 — status∈
- * {queued,running}일 때 2s 폴링)로 status 전환을 deterministic하게 검증한다. WS mock이
- * Windows 런에서 안정 동작함이 확인되면 routeWebSocket 시나리오로 승격 가능.
+ * {queued,running}일 때 2s 폴링) 경로로만 검증된다.
  *
  * NOTE: Playwright는 Windows 호스트에서만 실행된다(`playwright.config.ts`).
  */
@@ -224,6 +226,12 @@ async function mockUpdateRequest(
 }
 
 test.describe("/admin/feature-update-requests/[requestId] actions", () => {
+  // #503: 모든 시나리오에서 ops-live WS를 inert로 만들어 라이브 백엔드 snapshot/update가
+  // mock GET 버스트를 유발하지 않게 한다(타이밍 단언 결정성 확보). page.goto 전에 적용.
+  test.beforeEach(async ({ page }) => {
+    await installInertOpsLiveWebSocket(page);
+  });
+
   test("cancel 액션 → POST /cancel body(error_message) + 호출 1회 + re-fetch", async ({
     page,
   }) => {
@@ -380,7 +388,8 @@ test.describe("/admin/feature-update-requests/[requestId] actions", () => {
   test("폴링 re-fetch — running→done 전환이 자동 재조회로 반영", async ({
     page,
   }) => {
-    // WS 실시간 invalidation의 deterministic 대체. refetchInterval(2s)이
+    // WS는 beforeEach에서 inert(#503)라 status 전환은 refetchInterval 경로만으로
+    // 검증된다(라이브 invalidation 잡음 없음). refetchInterval(2s)이
     // status∈{queued,running}일 때 폴링하므로, 첫 GET=running 이후 다음 폴링에서
     // done을 반환하면 cancel 버튼이 사라진다(=재조회가 실제로 발생했다는 증거).
     let allowTransition = false;

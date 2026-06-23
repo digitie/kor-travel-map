@@ -1,6 +1,7 @@
 import { expect, type Page, type Route, test } from "@playwright/test";
 
 import type { components } from "../src/api/types";
+import { installInertOpsLiveWebSocket } from "./ws-isolation";
 
 /**
  * `/ops/import-jobs/[jobId]` 상세 — 깊이(mutation/filter/relation) 보강 spec.
@@ -12,7 +13,9 @@ import type { components } from "../src/api/types";
  * rel별 분기, (7) link empty state — 7개 시나리오를 추가한다(중복 없음).
  *
  * 임의 jobId는 빈 DB에서 404이므로 mocked-route로 상세 GET / events GET /
- * cancel POST만 가로챈다(`**​/v1/ops/import-jobs/**`). RSC/document/WS는 통과시킨다.
+ * cancel POST만 가로챈다(`**​/v1/ops/import-jobs/**`). RSC/document는 통과시키고,
+ * ops-live WS는 `beforeEach`의 `installInertOpsLiveWebSocket`(#503)로 inert로 만들어
+ * 라이브 백엔드 invalidation이 폴링-중단 같은 타이밍 단언을 흔들지 않게 한다.
  * 모든 mock body는 생성 OpenAPI 타입(`components["schemas"][...]`)에 바인딩해
  * 계약 drift를 tsc가 잡게 한다.
  *
@@ -164,6 +167,12 @@ async function mockImportJob(
 }
 
 test.describe("/ops/import-jobs/[jobId] — actions/depth", () => {
+  // #503: ops-live WS를 inert로 만들어 라이브 백엔드 snapshot/update가 추가 mock GET을
+  // 유발하지 않게 한다(특히 terminal 폴링-중단 단언의 결정성). page.goto 전에 적용.
+  test.beforeEach(async ({ page }) => {
+    await installInertOpsLiveWebSocket(page);
+  });
+
   test("cancel 폼 — running에서 reason 전송 + POST body 검증 + 성공 Alert", async ({
     page,
   }) => {
@@ -338,7 +347,9 @@ test.describe("/ops/import-jobs/[jobId] — actions/depth", () => {
     await expect.poll(() => calls.detail).toBeGreaterThanOrEqual(1);
 
     // 안정 윈도우 동안 detail이 추가 폴링되지 않음을 확인(refetchInterval=false).
-    // RISK: 시간 기반이라 flaky 가능 — running 대조군 없이 detail 카운트만 본다.
+    // WS는 beforeEach에서 inert(#503)라 라이브 invalidation이 detail GET을 추가로
+    // 유발하지 않는다 → 이 카운트 단언이 결정적이다(이전엔 라이브 WS가 잡음원이었음).
+    // RISK: 여전히 시간 기반이라 보수적으로 — running 대조군 없이 detail 카운트만 본다.
     const baseline = calls.detail;
     await expect
       .poll(() => calls.detail, { intervals: [500, 500, 500, 500], timeout: 4_000 })

@@ -37,6 +37,19 @@ const LIVE_BASE_URL = publicUrlEnv(
   "http://127.0.0.1:12701",
 );
 
+/**
+ * ops-live WebSocket 전역 kill-switch (#503).
+ *
+ * `NEXT_PUBLIC_DISABLE_OPS_LIVE === "1"`이면 `useOpsLiveInvalidation`은 항상
+ * `enabled=false`로 동작해 WS를 절대 열지 않는다. **기본값은 ENABLED**(미설정·"0"
+ * 모두 라이브 켜짐)라 prod 실시간 invalidation은 영향받지 않는다. 이 플래그는
+ * mocked e2e 빌드처럼 라이브 백엔드 없이 화면을 띄울 때만 켠다 — 단,
+ * mocked e2e의 1차 방어선은 `addInitScript` WS no-op 스텁(`e2e/ws-isolation.ts`)이고
+ * 이 플래그는 빌드 타임 보조 수단이다.
+ */
+const OPS_LIVE_DISABLED =
+  process.env.NEXT_PUBLIC_DISABLE_OPS_LIVE === "1";
+
 function buildOpsLiveUrl(
   topics: readonly OpsLiveTopic[],
   pollIntervalMs = 2_000,
@@ -144,6 +157,8 @@ export function useOpsLiveInvalidation({
   pollIntervalMs?: number;
 }) {
   const queryClient = useQueryClient();
+  // 전역 kill-switch가 켜져 있으면 어떤 caller가 enabled=true를 넘겨도 비활성.
+  const effectiveEnabled = enabled && !OPS_LIVE_DISABLED;
   const topicKey = Array.from(new Set(topics)).sort().join(",");
   const stableTopics = useMemo(
     () =>
@@ -156,7 +171,7 @@ export function useOpsLiveInvalidation({
   const [lastError, setLastError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!enabled || stableTopics.length === 0) {
+    if (!effectiveEnabled || stableTopics.length === 0) {
       return undefined;
     }
     if (typeof window === "undefined" || !("WebSocket" in window)) {
@@ -240,12 +255,12 @@ export function useOpsLiveInvalidation({
       }
       socket?.close(1000);
     };
-  }, [enabled, pollIntervalMs, queryClient, stableTopics]);
+  }, [effectiveEnabled, pollIntervalMs, queryClient, stableTopics]);
 
   const browserSupportsWebSocket =
     typeof window === "undefined" || "WebSocket" in window;
   const effectiveState: OpsLiveConnectionState =
-    !enabled || stableTopics.length === 0
+    !effectiveEnabled || stableTopics.length === 0
       ? "disabled"
       : browserSupportsWebSocket
         ? state

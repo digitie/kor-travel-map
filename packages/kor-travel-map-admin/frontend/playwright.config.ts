@@ -18,6 +18,14 @@ const artifactRoot =
  * 서버는 외부(WSL)에서 떠 있다고 가정하므로 `webServer`를 두지 않는다.
  * baseURL은 `E2E_BASE_URL` env로 override 가능 (기본 http://127.0.0.1:12705 —
  * backend CORS allow-origin과 일치).
+ *
+ * MOCKED ↔ LIVE 경계 (#503): 본 config(`e2e/**`, `npm run e2e` = `e2e:mocked`)는
+ * **mock suite**다. 모든 REST는 `page.route`로 가로채고, 라이브 백엔드에 의존해서는
+ * 안 된다. 특히 ops-live WebSocket(`useOpsLiveInvalidation` → `/v1/ops/live`)은
+ * 라이브 화면을 mount하는 spec에서 `e2e/ws-isolation.ts`의 `installInertOpsLiveWebSocket`
+ * (`addInitScript` no-op 스텁)로 inert로 만들어, 라이브 백엔드 snapshot/update가
+ * 타이밍 민감 단언을 흔들지 않게 한다. 실데이터 대상 라이브 시나리오는 `npm run e2e:live`
+ * (`playwright.live.config.ts`).
  */
 export default defineConfig({
   testDir: "./e2e",

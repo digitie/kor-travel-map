@@ -1,6 +1,7 @@
 import { expect, type Page, type Route, test } from "@playwright/test";
 
 import type { components } from "../src/api/types";
+import { installInertOpsLiveWebSocket } from "./ws-isolation";
 
 /**
  * `/ops/import-jobs` 목록 — route-mocked depth spec
@@ -10,8 +11,11 @@ import type { components } from "../src/api/types";
  * `/v1/ops/import-jobs`(trailing segment 없음)다. 따라서 detail spec의
  * `**​/v1/ops/import-jobs/**`(trailing slash) glob은 목록을 잡지 못한다 — 여기서는
  * `**​/v1/ops/import-jobs**`로 가로채고 url.pathname === "/v1/ops/import-jobs"
- * 분기로만 목록 GET을 처리한다. 페이지 document·RSC(_rsc)·WS·기타 경로는
+ * 분기로만 목록 GET을 처리한다. 페이지 document·RSC(_rsc)·기타 경로는
  * route.continue() (admin-ops.spec.ts mockOfflineUploadMutations passthrough idiom).
+ * ops-live WS(`/v1/ops/live`)는 이 glob에 잡히지 않으므로 `beforeEach`의
+ * `installInertOpsLiveWebSocket`(#503)로 inert로 만들어, 라이브 백엔드 snapshot/update가
+ * 추가 목록 GET을 유발해 "정확히 1회"류 단언을 흔들지 않게 한다.
  *
  * 모든 mock body는 생성 OpenAPI 타입(components["schemas"][...])에 바인딩 →
  * 백엔드 DTO drift 시 컴파일 실패.
@@ -139,6 +143,12 @@ async function mockImportJobsList(
 }
 
 test.describe("/ops/import-jobs list", () => {
+  // #503: ops-live WS를 inert로 만들어 라이브 백엔드 invalidation이 추가 목록 GET을
+  // 유발하지 않게 한다(query-params/행수 단언 결정성). page.goto 전에 적용.
+  test.beforeEach(async ({ page }) => {
+    await installInertOpsLiveWebSocket(page);
+  });
+
   test("cursor 무시 — page_size=100, next_cursor 후속 요청(cursor) 없음", async ({
     page,
   }) => {
