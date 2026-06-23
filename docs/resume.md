@@ -37,7 +37,7 @@
   좌표 정밀도 제한을 적용해 대형 route 응답 크기를 줄였다. admin frontend는 viewport를
   WebMercator tile bbox로 나눠 tile별 react-query 캐시를 쓰도록 바꿨고, tile별
   `page_size` 자동 조정으로 낮은 축척 응답 총량을 제한한다.
-- **완료(prod)**: N150 production 서버(`digitie-at-n150`, `192.168.1.14`)의 기존 map
+- **완료(prod)**: N150 production 서버(`<prod-host-alias>`, `<prod-host-ip>`)의 기존 map
   컨테이너를 내리고 `~/kor-travel-map` rsync + docker-manager compose 재빌드/재기동으로
   직접 반영했다.
 - **검증**: API 단위 테스트 `13 passed`, 신규 PostGIS geometry 통합 테스트 `1 passed`,
@@ -235,8 +235,9 @@ arm64 multi-arch buildx 검증)이다.
   통과로 검증됨 — 사용자 결정(이미 검증됨 → 재실행 생략)에 따라 재기동 없이 닫음. (b) bulk 정책
   가드(완료 review 재결정 차단 · curated bulk archive confirm)는 main에 이미 구현됨 확인.
 - **item-4 라이브 Docker 결정**: 신규 스택 기본 포트(pg 5432 · rustfs 12101)가 공유 인프라
-  (kor-travel-geo-postgres 등)와 충돌하고, repo `.env`가 구 `KRTOUR_MAP_*` prefix(현 코드는
-  `KOR_TRAVEL_MAP_*` — 미스매치)라 기존 `python-krtour-map-claude` 스택은 stale/unhealthy다.
+  (kor-travel-geo-postgres 등)와 충돌하고, 로컬(Claude worktree) ignored `.env`가 구
+  `KRTOUR_MAP_*` prefix(현 코드는 `KOR_TRAVEL_MAP_*` — 미스매치)라 기존
+  `python-krtour-map-claude` 스택은 stale/unhealthy다.
   e2e는 이미 라이브 검증(57/0 · 209 passed)됐으므로 공유 인프라 무중단을 위해 재실행하지 않는다.
 - **T-AUDIT-0616**: e2e(HIGH)는 라이브 검증 완료로 ✅, 잔여는 F-01 옵션 A(전 feature re-key)
   deferred 1건.

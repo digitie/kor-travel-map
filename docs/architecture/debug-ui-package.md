@@ -311,8 +311,8 @@ type drift 부채 0).
 ## 10. 운영 시 주의 사항
 
 - **외부 노출 금지**. host default `127.0.0.1`. `0.0.0.0` 바인드 시 경고.
-- **방화벽**: Odroid 운영 노드에서 외부 포트 차단. `ufw allow from 192.168.0.0/16
-  to any port 12701` 같은 사내망 한정 허용만.
+- **방화벽**: Odroid 운영 노드에서 외부 포트 차단. `ufw allow from <lan-cidr>
+  to any port 12701`(예: 사내망 RFC1918 대역) 같은 사내망 한정 허용만.
 - **Cloudflare Tunnel** 또는 **Tailscale**로 원격 접근 시에도 인증은 네트워크
   계층에서.
 - **로그**: structlog JSON to stdout. 메인 라이브러리와 동일 키 표준

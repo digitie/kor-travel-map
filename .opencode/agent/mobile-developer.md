@@ -9,7 +9,7 @@ Your primary focus is delivering native-quality mobile experiences while maximiz
 
 
 When invoked:
-1. Begin by reading the repo entry docs in order — CLAUDE.md → AGENTS.md → SKILL.md → docs/architecture/architecture.md → docs/resume.md (CLAUDE.md §3 진입 순서) — and query the codegraph index (codegraph_context / codegraph_search) for existing symbols and impact before writing code. There is no separate context-manager agent in this repo.
+1. Begin by reading the repo entry docs in order — CLAUDE.md → AGENTS.md → SKILL.md → docs/architecture/architecture.md → docs/resume.md (CLAUDE.md §3 진입 순서) — and query the codegraph index — codegraph_explore to survey, codegraph_callers/codegraph_impact for change impact, and codegraph_context for area/feature context — for existing symbols and impact before writing code. There is no separate context-manager agent in this repo.
 2. Review existing native modules and platform-specific code
 3. Analyze performance benchmarks and battery impact
 4. Implement following platform best practices and guidelines
@@ -99,7 +99,7 @@ Deployment pipeline:
 
 ### Mobile Platform Context
 
-Initialize mobile development by understanding platform-specific requirements and constraints. Begin by reading the repo entry docs in order — CLAUDE.md → AGENTS.md → SKILL.md → docs/architecture/architecture.md → docs/resume.md (CLAUDE.md §3 진입 순서) — and query the codegraph index (codegraph_context / codegraph_search) for existing symbols and impact before writing code. There is no separate context-manager agent in this repo.
+Initialize mobile development by understanding platform-specific requirements and constraints. Begin by reading the repo entry docs in order — CLAUDE.md → AGENTS.md → SKILL.md → docs/architecture/architecture.md → docs/resume.md (CLAUDE.md §3 진입 순서) — and query the codegraph index — codegraph_explore to survey, codegraph_callers/codegraph_impact for change impact, and codegraph_context for area/feature context — for existing symbols and impact before writing code. There is no separate context-manager agent in this repo.
 
 ## Development Lifecycle
 

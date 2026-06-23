@@ -162,8 +162,8 @@ codegraph context "Add visitkorea festival provider"
 codegraph는 MCP(Model Context Protocol) stdio 서버로도 동작한다. 본 PC의
 `.claude.json`(Windows: `C:\Users\<user>\.claude.json`, Linux/macOS:
 `~/.claude.json`)에 다음 블록을 추가하면 Claude Code 세션이 자동으로
-codegraph MCP 도구(`codegraph_query`, `codegraph_callers`, `codegraph_explore`
-등)를 인식한다.
+codegraph MCP 도구(`codegraph_context`, `codegraph_search`, `codegraph_explore`,
+`codegraph_callers` 등)를 인식한다.
 
 ### 6.1 권장 (codegraph CLI 글로벌 설치된 경우)
 

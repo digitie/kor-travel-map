@@ -16,8 +16,9 @@ context-manager 의존 단계(필수 첫 단계, `requesting_agent`/`get_*_conte
 
 - entry 문서를 순서대로 읽는다 — CLAUDE.md → AGENTS.md → SKILL.md →
   docs/architecture/architecture.md → docs/resume.md (CLAUDE.md §3 진입 순서).
-- 코드 작성 전 codegraph 인덱스(`codegraph_context` / `codegraph_search`)로 기존
-  심볼과 영향도를 조회한다.
+- 코드 작성 전 codegraph 인덱스로 기존 심볼과 영향도를 조회한다 —
+  `codegraph_explore`(survey) + `codegraph_callers`/`codegraph_impact`(영향도),
+  area/feature 맥락은 `codegraph_context`.
 
 본문(frontmatter, tool 목록, 나머지 workflow)은 upstream 원본 그대로 두고, 위
 context-discovery 부분만 본 저장소 기준으로 맞췄다.
