@@ -177,6 +177,88 @@ def test_list_features_maps_bbox_rows(
 
 
 @pytest.mark.unit
+def test_list_features_include_geometry_maps_route_area_rows(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kortravelmap.api.db import get_session
+    from kortravelmap.api.routers import features as features_mod
+
+    rows = [
+        {
+            "feature_id": "route1",
+            "kind": "route",
+            "name": "탐방로",
+            "category": "02000000",
+            "lon": 127.0,
+            "lat": 37.5,
+            "marker_icon": "park",
+            "marker_color": "P-06",
+            "status": "active",
+            "geometry": {
+                "type": "LineString",
+                "coordinates": [[127.0, 37.5], [127.1, 37.6]],
+            },
+            "area_square_meters": None,
+        },
+        {
+            "feature_id": "area1",
+            "kind": "area",
+            "name": "국립공원",
+            "category": "03000000",
+            "lon": 127.2,
+            "lat": 37.7,
+            "marker_icon": "park",
+            "marker_color": "P-06",
+            "status": "active",
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [
+                    [
+                        [127.0, 37.5],
+                        [127.2, 37.5],
+                        [127.2, 37.7],
+                        [127.0, 37.7],
+                        [127.0, 37.5],
+                    ]
+                ],
+            },
+            "area_square_meters": 12345.6,
+        },
+    ]
+
+    async def _bbox(_session: Any, **_kw: Any) -> list[dict[str, Any]]:
+        assert _kw["include_geometry"] is True
+        return rows
+
+    monkeypatch.setattr(features_mod.feature_repo, "features_in_bbox", _bbox)
+
+    async def _fake_session() -> AsyncIterator[Any]:
+        yield object()
+
+    client.app.dependency_overrides[get_session] = _fake_session
+    try:
+        r = client.get(
+            "/v1/features",
+            params={
+                "min_lon": 126,
+                "min_lat": 37,
+                "max_lon": 128,
+                "max_lat": 38,
+                "include_geometry": "true",
+            },
+        )
+        assert r.status_code == 200
+        body = r.json()
+        route, area = body["data"]["items"]
+        assert route["geometry"]["type"] == "LineString"
+        assert route["area_square_meters"] is None
+        assert area["geometry"]["type"] == "Polygon"
+        assert area["area_square_meters"] == 12345.6
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+@pytest.mark.unit
 def test_list_public_features_in_bounds_uses_envelope(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

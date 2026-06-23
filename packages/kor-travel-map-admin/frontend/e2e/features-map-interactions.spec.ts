@@ -125,6 +125,8 @@ async function mockFeatureRoutes(page: Page, options: FeaturesRouteOptions = {})
     weather: 0,
     /** list 쿼리마다 url.searchParams.getAll("kind") 기록 — 마지막 요청 shape 검증용. */
     listKinds: [] as string[][],
+    /** route/area geometry 요청 여부 기록. */
+    listIncludeGeometry: [] as string[],
   };
 
   await page.route("**/v1/features**", async (route) => {
@@ -150,6 +152,9 @@ async function mockFeatureRoutes(page: Page, options: FeaturesRouteOptions = {})
     if (url.pathname === "/v1/features") {
       requests.list += 1;
       requests.listKinds.push(url.searchParams.getAll("kind"));
+      requests.listIncludeGeometry.push(
+        url.searchParams.get("include_geometry") ?? "",
+      );
       if (options.listStatus && options.listStatus >= 400) {
         await route.fulfill({
           body: options.listErrorBody ?? "internal error",
@@ -212,6 +217,54 @@ test.describe("/features map interactions", () => {
     await expect(mapTab).toHaveAttribute("aria-selected", "true");
     await expect(tableTab).toHaveAttribute("aria-selected", "false");
     await expect(page.getByTestId("map-canvas-container")).toBeAttached();
+  });
+
+  test("route/area geometry — 선·면과 이름 라벨을 지도에 표시", async ({
+    page,
+  }) => {
+    const requests = await mockFeatureRoutes(page, {
+      items: [
+        makeFeatureSummary({
+          feature_id: "mock-route-1",
+          kind: "route",
+          name: "Seoul Trail",
+          geometry: {
+            type: "LineString",
+            coordinates: [
+              [126.97, 37.56],
+              [126.99, 37.58],
+            ],
+          },
+          marker_color: "P-06",
+        }),
+        makeFeatureSummary({
+          area_square_meters: 1_234_567,
+          feature_id: "mock-area-1",
+          kind: "area",
+          name: "Mock Park Area",
+          geometry: {
+            type: "Polygon",
+            coordinates: [
+              [
+                [126.96, 37.55],
+                [127.0, 37.55],
+                [127.0, 37.59],
+                [126.96, 37.59],
+                [126.96, 37.55],
+              ],
+            ],
+          },
+          marker_color: "P-12",
+        }),
+      ],
+    });
+
+    await page.goto("/features");
+
+    await expect.poll(() => requests.list).toBeGreaterThanOrEqual(1);
+    expect(requests.listIncludeGeometry[0]).toBe("true");
+    await expect(page.getByText("Seoul Trail")).toBeVisible();
+    await expect(page.getByText("Mock Park Area - 1.2 km2")).toBeVisible();
   });
 
   test("table row 선택 → 지도 탭 상세 패널(marker-click 대체 경로)", async ({

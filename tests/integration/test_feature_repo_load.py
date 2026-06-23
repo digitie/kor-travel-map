@@ -230,6 +230,66 @@ async def test_features_in_bbox_finds_loaded_feature(
     assert bundle.feature.feature_id not in {r["feature_id"] for r in rows_far}
 
 
+async def test_features_in_bbox_include_geometry_returns_route_area_shape(
+    migrated_session: AsyncSession,
+) -> None:
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO feature.features (
+                feature_id, kind, name, category,
+                coord, coord_precision_digits, geom,
+                marker_icon, marker_color, status
+            )
+            VALUES
+            (
+                'f_route_bbox_geometry', 'route', '탐방로', '02000000',
+                x_extension.ST_SetSRID(x_extension.ST_MakePoint(127.05, 37.55), 4326),
+                6,
+                x_extension.ST_SetSRID(
+                    x_extension.ST_GeomFromText(
+                        'LINESTRING(127.0 37.5,127.1 37.6)'
+                    ),
+                    4326
+                ),
+                'park', 'P-06', 'active'
+            ),
+            (
+                'f_area_bbox_geometry', 'area', '국립공원', '03000000',
+                x_extension.ST_SetSRID(x_extension.ST_MakePoint(127.05, 37.55), 4326),
+                6,
+                x_extension.ST_SetSRID(
+                    x_extension.ST_GeomFromText(
+                        'POLYGON((127.0 37.5,127.1 37.5,127.1 37.6,127.0 37.6,127.0 37.5))'
+                    ),
+                    4326
+                ),
+                'park', 'P-06', 'active'
+            )
+            """
+        )
+    )
+    await migrated_session.flush()
+
+    rows = await feature_repo.features_in_bbox(
+        migrated_session,
+        min_lon=126.9,
+        min_lat=37.4,
+        max_lon=127.2,
+        max_lat=37.7,
+        include_geometry=True,
+    )
+    by_id = {row["feature_id"]: row for row in rows}
+
+    route = by_id["f_route_bbox_geometry"]
+    assert route["geometry"]["type"] == "LineString"
+    assert route["area_square_meters"] is None
+
+    area = by_id["f_area_bbox_geometry"]
+    assert area["geometry"]["type"] == "Polygon"
+    assert float(area["area_square_meters"]) > 0
+
+
 async def test_features_in_bbox_returns_stable_feature_id_subset(
     migrated_session: AsyncSession,
 ) -> None:

@@ -1368,6 +1368,18 @@
         "additionalProperties": false,
         "description": "지도/목록용 경량 feature 표현 (bbox 조회 결과 1건).",
         "properties": {
+          "area_square_meters": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "include_geometry=true이고 kind=area일 때 면적(m²).",
+            "title": "Area Square Meters"
+          },
           "category": {
             "title": "Category",
             "type": "string"
@@ -1375,6 +1387,19 @@
           "feature_id": {
             "title": "Feature Id",
             "type": "string"
+          },
+          "geometry": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "include_geometry=true일 때 route/area용 GeoJSON geometry.",
+            "title": "Geometry"
           },
           "kind": {
             "title": "Kind",
@@ -3892,6 +3917,18 @@
               "minimum": 1,
               "title": "Max Items",
               "type": "integer"
+            }
+          },
+          {
+            "description": "route/area 지도 표시용 GeoJSON geometry 포함 여부.",
+            "in": "query",
+            "name": "include_geometry",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "route/area 지도 표시용 GeoJSON geometry 포함 여부.",
+              "title": "Include Geometry",
+              "type": "boolean"
             }
           }
         ],

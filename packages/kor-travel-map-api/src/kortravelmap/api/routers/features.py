@@ -72,6 +72,14 @@ class FeatureSummary(BaseModel):
     marker_icon: str | None = None
     marker_color: str | None = None
     status: str
+    geometry: dict[str, Any] | None = Field(
+        default=None,
+        description="include_geometry=true일 때 route/area용 GeoJSON geometry.",
+    )
+    area_square_meters: float | None = Field(
+        default=None,
+        description="include_geometry=true이고 kind=area일 때 면적(m²).",
+    )
 
 
 class FeaturesInBboxData(BaseModel):
@@ -354,6 +362,10 @@ async def list_features_in_bbox(
     ] = None,
     page_size: Annotated[int, Query(ge=1, le=500, description="페이지 크기.")] = 100,
     cursor: Annotated[str | None, Query()] = None,
+    include_geometry: Annotated[
+        bool,
+        Query(description="route/area 지도 표시용 GeoJSON geometry 포함 여부."),
+    ] = False,
 ) -> FeaturesInBboxResponse:
     started_at = perf_counter()
     if min_lon > max_lon or min_lat > max_lat:
@@ -373,6 +385,7 @@ async def list_features_in_bbox(
             categories=category,
             limit=page_size + 1,
             cursor=cursor,
+            include_geometry=include_geometry,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -417,6 +430,10 @@ async def list_public_features_in_bounds(
         Query(description="행정구역 rollup 단위. 미지정 시 zoom으로 유도."),
     ] = None,
     max_items: Annotated[int, Query(ge=1, le=2000)] = 1000,
+    include_geometry: Annotated[
+        bool,
+        Query(description="route/area 지도 표시용 GeoJSON geometry 포함 여부."),
+    ] = False,
 ) -> FeaturesInBoundsResponse:
     started_at = perf_counter()
     if min_lon > max_lon or min_lat > max_lat:
@@ -458,6 +475,7 @@ async def list_public_features_in_bounds(
         kinds=kind,
         categories=category,
         limit=max_items,
+        include_geometry=include_geometry,
     )
     items = [FeatureSummary(**row) for row in rows]
     return FeaturesInBoundsResponse(
