@@ -324,11 +324,11 @@ async def test_nowcast_asset_loads_values_per_feature_and_advances_cursor(
     assert result.base_datetime == "202606110500"
     assert result.grids_total == 1
     assert result.grids_fetched == 1
-    assert result.features_total == 2
-    # 2 카테고리 × 2 feature.
-    assert result.values_loaded == 4
+    assert result.features_total == 1
+    # 복제 제거: 2 카테고리 × 격자 anchor 1개(격자의 첫 place feature).
+    assert result.values_loaded == 2
     assert forecast.calls == [("now", 126, 37)]
-    assert {value.feature_id for value in kor_travel_map_client.loaded_values} == {"f1", "f2"}
+    assert {value.feature_id for value in kor_travel_map_client.loaded_values} == {"f1"}
     sample = kor_travel_map_client.loaded_values[0]
     assert sample.provider == "python-kma-api"
     assert sample.weather_domain == WeatherDomain.KMA_ULTRA_SHORT_NOWCAST
@@ -652,9 +652,9 @@ async def test_mid_forecast_asset_loads_values_per_region_feature(
     assert result.base_datetime == "202606110600"
     assert result.regions_total == 1
     assert result.regions_fetched == 1
-    assert result.features_total == 2
-    # land(SKY+POP ×2 시점) 4 + temp(TMN/TMX) 2 = 6 per feature × 2 features.
-    assert result.values_loaded == 12
+    assert result.features_total == 1
+    # 복제 제거: land(SKY+POP ×2 시점) 4 + temp(TMN/TMX) 2 = 6, region anchor 1개.
+    assert result.values_loaded == 6
     assert datagokr.calls == [("land", "11B00000"), ("ta", "11B10101")]
     assert kor_travel_map_client.success_calls == [
         {
