@@ -40,7 +40,10 @@ import {
 import { DataTable } from "@/components/ui/data-table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { VWorldMapView, VWorldMarker } from "@/components/vworld-map-view";
+import {
+  VWorldFeatureClusters,
+  VWorldMapView,
+} from "@/components/vworld-map-view";
 import { cn } from "@/lib/utils";
 import { isVWorldApiKeyConfigured } from "@/lib/vworld-style";
 import { useMapStore, type FeatureViewMode } from "@/state/map";
@@ -393,20 +396,10 @@ export function FeaturesClient() {
                 onLoad={updateViewportFromMap}
                 onMoveEnd={updateViewportFromMap}
               >
-                {featureItems.map((feature) =>
-                  typeof feature.lon === "number" &&
-                  typeof feature.lat === "number" ? (
-                    <VWorldMarker
-                      key={feature.feature_id}
-                      lngLat={[feature.lon, feature.lat]}
-                      markerColor={feature.marker_color}
-                      markerIcon={feature.marker_icon}
-                      selected={feature.feature_id === selectedFeatureId}
-                      title={`${feature.name} (${feature.kind})`}
-                      onClick={() => setSelectedFeatureId(feature.feature_id)}
-                    />
-                  ) : null,
-                )}
+                <VWorldFeatureClusters
+                  features={featureItems}
+                  onSelectFeature={setSelectedFeatureId}
+                />
               </VWorldMapView>
             </div>
             {selectedFeatureId ? (
