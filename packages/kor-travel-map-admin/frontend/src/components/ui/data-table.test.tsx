@@ -46,7 +46,16 @@ describe("DataTable", () => {
   });
 
   it("sortable header toggles aria-sort and reorders rows (client sort)", () => {
-    render(<DataTable columns={columns} data={data} getRowId={getRowId} />);
+    // manualSorting 기본이 true(서버 정렬)로 뒤집혔으므로(#502), client 정렬을 실제로
+    // 검증하려면 완전 client 목록처럼 명시적으로 끈다.
+    render(
+      <DataTable
+        columns={columns}
+        data={data}
+        getRowId={getRowId}
+        manualSorting={false}
+      />,
+    );
 
     const nameHeader = screen.getByRole("columnheader", { name: "name" });
     expect(nameHeader.getAttribute("aria-sort")).toBe("none");

@@ -374,6 +374,7 @@ export function ImportJobDetailClient({ jobId }: { jobId: string }) {
                     getRowId={(row) => row.event_id}
                     isLoading={events.isLoading}
                     emptyMessage="event가 없습니다."
+                    manualSorting={false}
                     containerClassName="overflow-auto rounded-lg border"
                   />
                 </CardContent>

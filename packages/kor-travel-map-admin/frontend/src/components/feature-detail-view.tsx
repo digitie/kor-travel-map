@@ -180,6 +180,7 @@ function SourcesTable({ data }: { data: AdminFeatureDetailData }) {
         data={data.sources}
         getRowId={(row) => row.source_record_key}
         emptyMessage={EMPTY_MESSAGE}
+        manualSorting={false}
         containerClassName="overflow-auto"
       />
     </Section>
@@ -247,6 +248,7 @@ function IssuesTable({ data }: { data: AdminFeatureDetailData }) {
         data={data.issues}
         getRowId={(row) => row.issue_id}
         emptyMessage={EMPTY_MESSAGE}
+        manualSorting={false}
         containerClassName="overflow-auto"
       />
     </Section>
@@ -317,6 +319,7 @@ function OverridesTable({ data }: { data: AdminFeatureDetailData }) {
         data={data.overrides}
         getRowId={(row) => row.override_id}
         emptyMessage={EMPTY_MESSAGE}
+        manualSorting={false}
         containerClassName="overflow-auto"
       />
     </Section>
@@ -398,6 +401,7 @@ function FilesTable({ data }: { data: AdminFeatureDetailData }) {
         data={data.files}
         getRowId={(row) => row.file_id}
         emptyMessage={EMPTY_MESSAGE}
+        manualSorting={false}
         containerClassName="overflow-auto"
       />
     </Section>
@@ -470,6 +474,7 @@ function HistoryPanel({ data }: { data: AdminFeatureDetailData }) {
           data={data.versions}
           getRowId={(row) => `${row.feature_id}:${row.version}`}
           emptyMessage={EMPTY_MESSAGE}
+          manualSorting={false}
           containerClassName="overflow-auto"
         />
         <DataTable
@@ -477,6 +482,7 @@ function HistoryPanel({ data }: { data: AdminFeatureDetailData }) {
           data={data.change_requests}
           getRowId={(row) => row.request_id}
           emptyMessage={EMPTY_MESSAGE}
+          manualSorting={false}
           containerClassName="overflow-auto"
         />
       </div>
@@ -567,6 +573,7 @@ function NearbyPanel({
           data={items}
           getRowId={(row) => row.feature_id}
           emptyMessage={EMPTY_MESSAGE}
+          manualSorting={false}
           containerClassName="overflow-auto"
         />
       ) : null}

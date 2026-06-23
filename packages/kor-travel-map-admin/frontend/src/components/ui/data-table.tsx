@@ -6,9 +6,10 @@
 // Playwright 셀렉터를 보존하고, 대용량/무한 목록만 `virtualized`로 @tanstack/react-virtual
 // 윈도잉을 켠다(이때는 display:grid라 native table role이 죽으므로 명시 ARIA를 붙인다).
 //
-// 데이터 연산은 기본 server-side(manual*): 페이지의 react-query가 이미 cursor 페이징/
-// 필터/정렬을 수행하므로 DataTable은 data만 받아 렌더한다. 완전 client 목록은
-// manualSorting={false}로 getSortedRowModel을 켤 수 있다.
+// 데이터 연산은 기본 server-side(manualSorting 기본 true): 페이지의 react-query가 이미
+// cursor 페이징/필터/정렬을 수행하므로 DataTable은 data만 받아 렌더한다(서버 정렬이
+// 일반적 케이스라 #502에서 기본을 manual로 뒤집었다). 전체 데이터셋을 한 번에 보유하는
+// 완전 client 목록만 manualSorting={false}로 getSortedRowModel을 켠다.
 
 import * as React from "react"
 import {
@@ -56,7 +57,10 @@ export interface DataTableProps<TData> {
   /** 정렬: 제어(서버) 모드면 sorting+onSortingChange 전달 + manualSorting. */
   sorting?: SortingState
   onSortingChange?: OnChangeFn<SortingState>
-  /** true면 getSortedRowModel을 켜지 않음(서버 정렬). 기본 false(클라 정렬). */
+  /** true면 getSortedRowModel을 켜지 않음(서버 정렬). 기본 true(서버 정렬).
+   *  완전 client 목록(전체 데이터셋을 한 번에 보유)만 manualSorting={false}로
+   *  getSortedRowModel을 켠다. cursor/page_size 목록은 서버가 정렬을 소유하므로
+   *  기본값(true)을 그대로 두고, 서버가 정렬하지 않는 accessor는 enableSorting:false로. */
   manualSorting?: boolean
   /** 행 선택(opt-in) — 체크박스 컬럼 + 선택 상태. 함수를 주면 행별 선택 가능 여부
    *  (react-table getCanSelect) — 선택 불가 행은 체크박스 disabled + select-all 제외. */
@@ -149,7 +153,7 @@ export function DataTable<TData>({
   emptyMessage = "데이터가 없습니다.",
   sorting,
   onSortingChange,
-  manualSorting = false,
+  manualSorting = true,
   enableRowSelection = false,
   rowSelection,
   onRowSelectionChange,
@@ -352,6 +356,10 @@ function VirtualizedTable<TData>({
         : undefined,
   })
 
+  // ARIA rowcount/rowindex는 header row까지 포함해야 스크린리더가 전체 개수와 각 행의
+  // 절대 위치를 정확히 읽는다(WAI-ARIA grid). header group(보통 1) + data rows.
+  const headerRowCount = table.getHeaderGroups().length
+
   return (
     <div
       ref={containerRef}
@@ -363,15 +371,20 @@ function VirtualizedTable<TData>({
       <table
         role="table"
         aria-label={ariaLabel}
-        aria-rowcount={rows.length}
+        aria-rowcount={rows.length + headerRowCount}
         className="grid w-full caption-bottom text-sm"
       >
         <thead
           role="rowgroup"
           className="sticky top-0 z-10 grid bg-surface-subtle [&_tr]:border-b"
         >
-          {table.getHeaderGroups().map((headerGroup) => (
-            <tr role="row" key={headerGroup.id} className="flex w-full border-b">
+          {table.getHeaderGroups().map((headerGroup, headerGroupIndex) => (
+            <tr
+              role="row"
+              key={headerGroup.id}
+              aria-rowindex={headerGroupIndex + 1}
+              className="flex w-full border-b"
+            >
               {headerGroup.headers.map((header) => {
                 const sorted = header.column.getIsSorted()
                 const canSort = header.column.getCanSort()
@@ -423,7 +436,7 @@ function VirtualizedTable<TData>({
                   role="row"
                   key={row.id}
                   data-index={virtualRow.index}
-                  aria-rowindex={virtualRow.index + 1}
+                  aria-rowindex={virtualRow.index + headerRowCount + 1}
                   ref={(node) => virtualizer.measureElement(node)}
                   data-state={
                     row.getIsSelected() || isRowActive?.(row.original) ? "selected" : undefined

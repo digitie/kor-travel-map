@@ -15,6 +15,23 @@ type FeatureSchemas = components["schemas"];
 export type FeatureSummary = FeatureSchemas["FeatureSummary"];
 export type FeaturesInBboxResponse = FeatureSchemas["FeaturesInBboxResponse"];
 
+/**
+ * tiled fetch가 merged 응답에 덧붙이는 비계약 메타. 생성된 OpenAPI 타입(`Meta`)에는
+ * 없는 클라이언트 전용 필드라 별도 타입으로 합성한다(types.ts는 codegen 산출물이라
+ * 손대지 않는다). `partial`은 일부 tile이 perTilePageSize까지 채워졌거나(잘림 의심)
+ * next_cursor가 있어 dropped feature가 있을 수 있음을, `failedTiles`는
+ * allSettled에서 reject된 tile 수를 알린다(전부 실패 시에만 throw).
+ */
+export interface TiledFeaturesMetaExtras {
+  partial?: boolean;
+  failedTiles?: number;
+  totalTiles?: number;
+}
+
+export type TiledFeaturesResponse = Omit<FeaturesInBboxResponse, "meta"> & {
+  meta: FeaturesInBboxResponse["meta"] & TiledFeaturesMetaExtras;
+};
+
 export interface FeaturesInBboxParams {
   min_lon: number;
   min_lat: number;
@@ -141,9 +158,9 @@ async function fetchFeaturesInBbox(
 async function fetchFeaturesInTiles(
   queryClient: ReturnType<typeof useQueryClient>,
   params: FeaturesInBboxParams,
+  tiles: FeatureTile[],
   signal?: AbortSignal,
-): Promise<FeaturesInBboxResponse> {
-  const tiles = buildFeatureTiles(params);
+): Promise<TiledFeaturesResponse> {
   if (tiles.length === 0) {
     return fetchFeaturesInBbox(params, signal);
   }
@@ -154,41 +171,91 @@ async function fetchFeaturesInTiles(
     Math.max(50, Math.ceil(requestedPageSize / tiles.length)),
   );
 
-  const responses = await Promise.all(
-    tiles.map((tile) => {
-      const tileParams = {
-        ...params,
-        max_lat: tile.max_lat,
-        max_lon: tile.max_lon,
-        min_lat: tile.min_lat,
-        min_lon: tile.min_lon,
-        page_size: perTilePageSize,
-      };
-      return queryClient.fetchQuery({
-        queryKey: [
-          "features",
-          "tile",
-          tile.z,
-          tile.x,
-          tile.y,
-          params.kinds?.join(",") ?? "",
-          params.includeGeometry ? "geometry" : "summary",
-          perTilePageSize,
-        ],
-        queryFn: () => fetchFeaturesInBbox(tileParams, signal),
-        staleTime: 60_000,
-      });
-    }),
+  // 바깥 viewport AbortSignal을 tile fetch에 그대로 넘기면 한 tile의 react-query
+  // 취소(예: staleTime 만료 refetch dedupe)가 viewport 전체를 죽일 수 있다. 대신
+  // tile별 child controller를 두고, viewport가 abort되면 모두 abort한다 — 그러면
+  // allSettled가 reject를 모아 부분 성공을 유지할 수 있다.
+  const controllers: AbortController[] = [];
+  const onOuterAbort = () => {
+    for (const controller of controllers) controller.abort();
+  };
+
+  // tiles.map은 동기 실행이라, 아래 listener 등록 시점에 controllers가 모두 채워져 있다.
+  const tilePromises = tiles.map((tile) => {
+    const controller = new AbortController();
+    controllers.push(controller);
+    const tileParams = {
+      ...params,
+      max_lat: tile.max_lat,
+      max_lon: tile.max_lon,
+      min_lat: tile.min_lat,
+      min_lon: tile.min_lon,
+      page_size: perTilePageSize,
+    };
+    return queryClient.fetchQuery({
+      queryKey: [
+        "features",
+        "tile",
+        tile.z,
+        tile.x,
+        tile.y,
+        params.kinds?.join(",") ?? "",
+        params.includeGeometry ? "geometry" : "summary",
+        perTilePageSize,
+      ],
+      queryFn: () => fetchFeaturesInBbox(tileParams, controller.signal),
+      // 바깥 useQuery staleTime(30s)과 맞춘다 — 같은 viewport 키 캐시 수명과 tile
+      // 캐시 수명이 어긋나면 한쪽만 만료돼 불필요한 부분 refetch가 난다.
+      staleTime: 30_000,
+    });
+  });
+
+  // viewport가 await 중 abort되면 in-flight tile fetch를 실제로 취소하도록 listener를
+  // await *전에* 등록한다(#519 리뷰 S1: 이전엔 await 뒤라 child controller가 dead code였고
+  // 단일 bbox 호출 대비 취소 회귀였다).
+  if (signal) {
+    if (signal.aborted) onOuterAbort();
+    else signal.addEventListener("abort", onOuterAbort, { once: true });
+  }
+
+  const settled = await Promise.allSettled(tilePromises);
+  if (signal) signal.removeEventListener("abort", onOuterAbort);
+
+  const fulfilled = settled.filter(
+    (result): result is PromiseFulfilledResult<FeaturesInBboxResponse> =>
+      result.status === "fulfilled",
   );
+  const failedTiles = settled.length - fulfilled.length;
+
+  // 전부 실패면 의미 있는 빈 결과 대신 에러를 던져 호출부(react-query)가 isError로
+  // 표면화하게 한다. 일부라도 성공하면 fulfilled tile만 병합해 결과를 유지한다.
+  if (fulfilled.length === 0) {
+    const firstRejected = settled.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    throw firstRejected?.reason instanceof Error
+      ? firstRejected.reason
+      : new Error("모든 tile feature 조회에 실패했습니다.");
+  }
 
   const items = new Map<string, FeatureSummary>();
-  for (const response of responses) {
+  let truncated = false;
+  for (const { value: response } of fulfilled) {
     for (const item of response.data.items) {
       items.set(item.feature_id, item);
     }
+    // tile이 정확히 perTilePageSize만큼 돌려줬거나 next_cursor가 있으면 그 tile은
+    // 잘렸을(=일부 feature 누락) 가능성이 있다.
+    if (
+      response.data.items.length >= perTilePageSize ||
+      (response.meta.page?.next_cursor ?? null) !== null
+    ) {
+      truncated = true;
+    }
   }
 
-  const first = responses[0];
+  const partial = truncated || failedTiles > 0;
+  const first = fulfilled[0]?.value;
   return {
     data: { items: Array.from(items.values()) },
     meta: {
@@ -199,6 +266,9 @@ async function fetchFeaturesInTiles(
         request_id: "features-tiled",
       }),
       request_id: `features-tiled:${tiles.map((tile) => tile.key).join(",")}`,
+      partial,
+      failedTiles,
+      totalTiles: tiles.length,
     },
   };
 }
@@ -215,6 +285,8 @@ export function useFeaturesInBbox(
   const queryParams = {
     ...params,
   };
+  // tile 분할은 한 번만 계산해 queryKey와 fetch에 함께 쓴다(이전엔 hook과 fetcher가
+  // 각각 buildFeatureTiles를 호출해 동일 계산을 두 번 했다).
   const tiles = buildFeatureTiles(queryParams);
   const key = [
     "features",
@@ -224,9 +296,10 @@ export function useFeaturesInBbox(
     params.includeGeometry ? "geometry" : "summary",
     params.page_size ?? 500,
   ] as const;
-  return useQuery({
+  return useQuery<TiledFeaturesResponse, Error>({
     queryKey: key,
-    queryFn: ({ signal }) => fetchFeaturesInTiles(queryClient, queryParams, signal),
+    queryFn: ({ signal }) =>
+      fetchFeaturesInTiles(queryClient, queryParams, tiles, signal),
     enabled: options?.enabled ?? true,
     staleTime: 30_000,
   });

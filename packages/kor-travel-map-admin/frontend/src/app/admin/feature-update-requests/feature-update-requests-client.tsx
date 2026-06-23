@@ -379,6 +379,7 @@ export function FeatureUpdateRequestsClient() {
             getRowId={(row) => row.request_id ?? JSON.stringify(row.scope)}
             isLoading={requests.isLoading}
             emptyMessage="요청이 없습니다."
+            manualSorting={false}
             containerClassName="rounded-lg border bg-background"
           />
         </div>

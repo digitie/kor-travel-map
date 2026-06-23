@@ -453,13 +453,15 @@ export function AdminIssuesClient() {
       {
         accessorKey: "severity",
         header: "severity",
-        enableSorting: true,
+        // keyset cursor 목록 — 서버가 정렬을 소유하고 severity accessor로 정렬하지 않으므로
+        // client 정렬은 현재 페이지만 재배열해 오해를 준다(#502). 정렬 비활성화.
+        enableSorting: false,
         cell: ({ row }) => <StatusBadge status={row.original.severity} />,
       },
       {
         accessorKey: "status",
         header: "status",
-        enableSorting: true,
+        enableSorting: false,
         cell: ({ row }) => <StatusBadge status={row.original.status} />,
       },
       {
@@ -507,7 +509,8 @@ export function AdminIssuesClient() {
       {
         accessorKey: "detected_at",
         header: "detected",
-        enableSorting: true,
+        // keyset cursor 목록 — 서버 정렬을 신뢰(현재 페이지만 client 정렬하지 않음, #502).
+        enableSorting: false,
         cell: ({ row }) => (
           <span className="text-muted-foreground">
             {formatDateTime(row.original.detected_at)}

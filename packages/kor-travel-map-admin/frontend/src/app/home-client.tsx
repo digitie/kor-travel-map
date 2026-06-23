@@ -323,6 +323,7 @@ export function HomePageClient() {
                 getRowId={(row) => row.job_id}
                 isLoading={importJobs.isLoading}
                 emptyMessage="import job이 없습니다."
+                manualSorting={false}
               />
             </CardContent>
           </Card>

@@ -265,6 +265,43 @@ test.describe("/features map interactions", () => {
     expect(requests.listIncludeGeometry[0]).toBe("true");
     await expect(page.getByText("Seoul Trail")).toBeVisible();
     await expect(page.getByText("Mock Park Area - 1.2 km2")).toBeVisible();
+
+    // 라벨 텍스트만이 아니라 실제 GL 렌더 상태를 단언한다(#502 M5): geometry source가
+    // route+area 2개 feature를 보유하고, route-line/area-fill 레이어가 존재하는지
+    // map 인스턴스(컨테이너 DOM에 매달린 e2e 훅)로 확인한다.
+    const GEOMETRY_SOURCE_ID = "kor-feature-geometries";
+    const ROUTE_LINE_LAYER_ID = `${GEOMETRY_SOURCE_ID}-route-line`;
+    const AREA_FILL_LAYER_ID = `${GEOMETRY_SOURCE_ID}-area-fill`;
+
+    const evalArgs = {
+      sourceId: GEOMETRY_SOURCE_ID,
+      routeLayerId: ROUTE_LINE_LAYER_ID,
+      areaLayerId: AREA_FILL_LAYER_ID,
+    };
+
+    await expect
+      .poll(async () =>
+        page.evaluate(({ sourceId, routeLayerId, areaLayerId }) => {
+          const container = document.querySelector(
+            '[data-testid="map-canvas-container"]',
+          ) as (HTMLElement & { _maplibreMap?: import("maplibre-gl").Map }) | null;
+          const map = container?._maplibreMap;
+          if (!map) return null;
+          const sourceFeatures = map.querySourceFeatures(sourceId);
+          return {
+            hasRouteLayer: Boolean(map.getLayer(routeLayerId)),
+            hasAreaLayer: Boolean(map.getLayer(areaLayerId)),
+            sourceLoaded: Boolean(map.getSource(sourceId)),
+            featureCount: sourceFeatures.length,
+          };
+        }, evalArgs),
+      )
+      .toEqual({
+        hasRouteLayer: true,
+        hasAreaLayer: true,
+        sourceLoaded: true,
+        featureCount: 2,
+      });
   });
 
   test("table row 선택 → 지도 탭 상세 패널(marker-click 대체 경로)", async ({

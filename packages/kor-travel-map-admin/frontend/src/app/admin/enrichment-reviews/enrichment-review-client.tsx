@@ -82,6 +82,8 @@ export function EnrichmentReviewClient() {
       {
         accessorKey: "name_score",
         header: "score",
+        // keyset cursor 목록(next_cursor) — 서버 정렬 유지, client 정렬 끔(#502).
+        enableSorting: false,
         cell: ({ row }) => (
           <span className="font-mono">{row.original.name_score.toFixed(1)}</span>
         ),
@@ -116,11 +118,13 @@ export function EnrichmentReviewClient() {
       {
         accessorKey: "status",
         header: "status",
+        enableSorting: false,
         cell: ({ row }) => <StatusBadge status={row.original.status} />,
       },
       {
         accessorKey: "created_at",
         header: "created",
+        enableSorting: false,
         cell: ({ row }) => (
           <span className="text-muted-foreground">
             {formatDateTime(row.original.created_at)}

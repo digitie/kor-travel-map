@@ -443,6 +443,7 @@ function RunsTable({
       emptyMessage="최근 Dagster run이 없습니다."
       onRowClick={(run) => onSelectRun(run.run_id)}
       isRowActive={(run) => run.run_id === selectedRunId}
+      manualSorting={false}
     />
   );
 }
@@ -453,6 +454,8 @@ function RunEventsTable({ events }: { events: DagsterRunEvent[] }) {
       {
         id: "time",
         header: "time",
+        // event log는 cursor 페이지네이션(event_has_more) — 서버 순서 유지, client 정렬 끔(#502).
+        enableSorting: false,
         accessorFn: (event) => event.timestamp ?? "",
         cell: ({ row }) => (
           <span className="whitespace-nowrap text-muted-foreground">
