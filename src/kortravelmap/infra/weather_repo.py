@@ -112,6 +112,38 @@ ORDER BY
     COALESCE(valid_at, observed_at, issued_at) DESC NULLS LAST
 """
 
+# KMA weather는 격자(≈5km) 단위라 적재된 격자에 속한 place feature에만 붙는다.
+# 그 외 feature는 자기 weather_value가 없으므로, 반경 내 weather 보유한 가장 가까운
+# feature(=가장 가까운 격자)의 값으로 폴백한다("위치에 맞춘" 지역 날씨). coord_5179
+# (m, STORED generated)로 KNN(ADR-012: ST_Transform 술어 금지, PostGIS는 x_extension
+# 스키마 qualify — #410/#411).
+_NEAREST_WEATHER_RADIUS_M: Final[float] = 50_000.0
+
+_NEAREST_WEATHER_SQL: Final[str] = """
+WITH target AS (
+    SELECT coord_5179
+    FROM feature.features
+    WHERE feature_id = :feature_id
+      AND deleted_at IS NULL
+      AND coord_5179 IS NOT NULL
+),
+weather_features AS (
+    SELECT DISTINCT feature_id FROM feature.feature_weather_values
+)
+SELECT f.feature_id
+FROM target AS t
+JOIN weather_features AS wf ON TRUE
+JOIN feature.features AS f
+  ON f.feature_id = wf.feature_id
+ AND f.deleted_at IS NULL
+ AND f.coord_5179 IS NOT NULL
+ AND x_extension.ST_DWithin(
+       f.coord_5179, t.coord_5179, CAST(:radius_m AS double precision)
+     )
+ORDER BY f.coord_5179 OPERATOR(x_extension.<->) t.coord_5179
+LIMIT 1
+"""
+
 
 def _enum_value(value: Any) -> str:
     return str(getattr(value, "value", value))
@@ -193,6 +225,22 @@ async def build_weather_card(
             text(_CARD_SQL), {"feature_id": feature_id, "asof": asof}
         )
     ).mappings().all()
+    if not rows:
+        # feature 자체 weather가 없으면 반경 내 가장 가까운 weather 보유 지점(=가장
+        # 가까운 격자)의 값으로 폴백한다. card.feature_id는 요청 feature_id 유지.
+        nearest_id = (
+            await session.execute(
+                text(_NEAREST_WEATHER_SQL),
+                {"feature_id": feature_id, "radius_m": _NEAREST_WEATHER_RADIUS_M},
+            )
+        ).scalar_one_or_none()
+        if nearest_id is not None and str(nearest_id) != feature_id:
+            rows = (
+                await session.execute(
+                    text(_CARD_SQL),
+                    {"feature_id": str(nearest_id), "asof": asof},
+                )
+            ).mappings().all()
     metrics = [
         WeatherMetric(
             forecast_style=str(row["forecast_style"]),
