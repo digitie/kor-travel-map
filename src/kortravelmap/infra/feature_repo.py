@@ -296,6 +296,14 @@ WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
 # primary source 1건의 on-demand 상세 — source_record raw_data(원본 provider payload)
 # + 연결 feature core. Step D(on-demand detail) 등 단건 조회용. ``source_entity_id``로
 # 매칭(provider/dataset/entity_type 한정). primary link 1개만(LIMIT 1).
+#
+# 정합성(issue #509 Problem B): 같은 안정 식별자에 inactive+deleted_at 구 feature와
+# active 신 feature가 둘 다 primary link로 남을 수 있다(re-key 정리 직전/직후). 따라서:
+#   - ``f.deleted_at IS NULL`` — soft-delete된 구 feature 제외.
+#   - 결정적 ``ORDER BY`` (active 우선 → imported_at 최신 → feature_id) 후 LIMIT 1 —
+#     동률 시에도 deterministic하게 active 신 feature를 반환(admin_feature_repo.py /
+#     curated_repo.py의 동일 패턴 미러). caller(mois_detail)는 active-only 기대
+#     (test_mois_loader가 status='active' 단언).
 _GET_PRIMARY_SOURCE_DETAIL_SQL: Final[str] = """
 SELECT
     f.feature_id, f.kind, f.name, f.category, f.status,
@@ -315,6 +323,8 @@ WHERE sr.provider = :provider
   AND sr.source_entity_type = :source_entity_type
   AND sr.source_entity_id = :source_entity_id
   AND sl.is_primary_source
+  AND f.deleted_at IS NULL
+ORDER BY (f.status = 'active') DESC, sr.imported_at DESC NULLS LAST, f.feature_id
 LIMIT 1
 """
 
