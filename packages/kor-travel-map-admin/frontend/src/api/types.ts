@@ -4035,10 +4035,22 @@ export interface components {
          * @description 지도/목록용 경량 feature 표현 (bbox 조회 결과 1건).
          */
         FeatureSummary: {
+            /**
+             * Area Square Meters
+             * @description include_geometry=true이고 kind=area일 때 면적(m²).
+             */
+            area_square_meters?: number | null;
             /** Category */
             category: string;
             /** Feature Id */
             feature_id: string;
+            /**
+             * Geometry
+             * @description include_geometry=true일 때 route/area용 GeoJSON geometry.
+             */
+            geometry?: {
+                [key: string]: unknown;
+            } | null;
             /** Kind */
             kind: string;
             /**
@@ -9615,6 +9627,8 @@ export interface operations {
                 /** @description 페이지 크기. */
                 page_size?: number;
                 cursor?: string | null;
+                /** @description route/area 지도 표시용 GeoJSON geometry 포함 여부. */
+                include_geometry?: boolean;
             };
             header?: never;
             path?: never;
@@ -9712,6 +9726,8 @@ export interface operations {
                 /** @description 행정구역 rollup 단위. 미지정 시 zoom으로 유도. */
                 cluster_unit?: ("sido" | "sigungu" | "eupmyeondong") | null;
                 max_items?: number;
+                /** @description route/area 지도 표시용 GeoJSON geometry 포함 여부. */
+                include_geometry?: boolean;
             };
             header?: never;
             path?: never;

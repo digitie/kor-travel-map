@@ -190,7 +190,9 @@ export function FeaturesClient() {
       kinds: kindFilter.length > 0 ? kindFilter : undefined,
       // 서버 in-bounds 파라미터는 `page_size`(최대 500). 과거엔 `limit`을 보내
       // 서버가 무시 → 항상 기본 100건만 표시됐다(110만 중 100개, 필터 체감 약함).
+      includeGeometry: true,
       page_size: 500,
+      zoom: viewport.zoom,
     },
     { enabled: bbox !== null },
   );

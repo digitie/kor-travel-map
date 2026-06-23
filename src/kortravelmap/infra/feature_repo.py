@@ -321,23 +321,68 @@ LIMIT 1
 # bbox 조회 — ADR-012: 입력 bbox는 4326, GIST(coord) 인덱스 사용. deleted_at 제외.
 # kinds 필터는 NULL이면 전체 (asyncpg ARRAY 바인딩). 경량 표현(좌표 + 표시 메타).
 _FEATURES_IN_BBOX_SQL: Final[str] = """
-WITH spatial_candidates AS MATERIALIZED (
-    SELECT
-        feature_id, kind, name, category, coord,
-        marker_icon, marker_color, status
-    FROM feature.features
-    WHERE deleted_at IS NULL
-      AND coord IS NOT NULL
-      AND coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
-            CAST(:min_lon AS double precision), CAST(:min_lat AS double precision),
-            CAST(:max_lon AS double precision), CAST(:max_lat AS double precision), 4326)
-)
 SELECT
     feature_id, kind, name, category,
     x_extension.ST_X(coord) AS lon, x_extension.ST_Y(coord) AS lat,
     marker_icon, marker_color, status
-FROM spatial_candidates
-WHERE (CAST(:kinds AS text[]) IS NULL OR kind = ANY(CAST(:kinds AS text[])))
+FROM feature.features
+WHERE deleted_at IS NULL
+  AND coord IS NOT NULL
+  AND coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
+        CAST(:min_lon AS double precision), CAST(:min_lat AS double precision),
+        CAST(:max_lon AS double precision), CAST(:max_lat AS double precision), 4326)
+  AND (CAST(:kinds AS text[]) IS NULL OR kind = ANY(CAST(:kinds AS text[])))
+  AND (
+    CAST(:categories AS text[]) IS NULL
+    OR category = ANY(CAST(:categories AS text[]))
+  )
+  AND (
+    CAST(:cursor_feature_id AS text) IS NULL
+    OR feature_id > CAST(:cursor_feature_id AS text)
+  )
+ORDER BY feature_id ASC
+LIMIT :limit
+"""
+
+_FEATURES_IN_BBOX_WITH_GEOMETRY_SQL: Final[str] = """
+SELECT
+    feature_id, kind, name, category,
+    x_extension.ST_X(coord) AS lon,
+    x_extension.ST_Y(coord) AS lat,
+    marker_icon, marker_color, status,
+    CASE
+      WHEN kind = 'route' AND geom IS NOT NULL
+      THEN CAST(x_extension.ST_AsGeoJSON(x_extension.ST_Simplify(geom, 0.0001), 6) AS jsonb)
+      WHEN kind = 'area' AND geom IS NOT NULL
+      THEN CAST(
+        x_extension.ST_AsGeoJSON(x_extension.ST_SimplifyPreserveTopology(geom, 0.0001), 6)
+        AS jsonb
+      )
+      ELSE NULL
+    END AS geometry,
+    CASE
+      WHEN kind = 'area' AND geom IS NOT NULL
+      THEN x_extension.ST_Area(CAST(geom AS x_extension.geography))
+      ELSE NULL
+    END AS area_square_meters
+FROM feature.features
+WHERE deleted_at IS NULL
+  AND (
+    (
+      coord IS NOT NULL
+      AND coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
+            CAST(:min_lon AS double precision), CAST(:min_lat AS double precision),
+            CAST(:max_lon AS double precision), CAST(:max_lat AS double precision), 4326)
+    )
+    OR (
+      kind IN ('route', 'area')
+      AND geom IS NOT NULL
+      AND geom OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
+            CAST(:min_lon AS double precision), CAST(:min_lat AS double precision),
+            CAST(:max_lon AS double precision), CAST(:max_lat AS double precision), 4326)
+    )
+  )
+  AND (CAST(:kinds AS text[]) IS NULL OR kind = ANY(CAST(:kinds AS text[])))
   AND (
     CAST(:categories AS text[]) IS NULL
     OR category = ANY(CAST(:categories AS text[]))
@@ -1478,16 +1523,23 @@ async def features_in_bbox(
     categories: Sequence[str] | None = None,
     limit: int = 1000,
     cursor: str | None = None,
+    include_geometry: bool = False,
 ) -> list[dict[str, Any]]:
     """bbox 안의 feature 경량 표현 list (지도/목록용). 좌표는 ``lon``/``lat`` (4326).
 
     ADR-012 — 입력 bbox는 4326, ``coord``의 GIST 인덱스(``idx_features_coord_gist``)를
     사용하는 ``&&`` 연산. ``deleted_at IS NULL`` + ``coord IS NOT NULL``만. ``kinds``가
     ``None``이면 전체 kind. DTO 매핑은 상위(client) 책임 — 본 repo는 raw row만.
+    ``include_geometry``가 true이면 route/area용 ``geom``도 bbox 후보에 포함해
+    지도 표시용 GeoJSON/면적을 반환한다.
     """
     rows = (
         await session.execute(
-            text(_FEATURES_IN_BBOX_SQL),
+            text(
+                _FEATURES_IN_BBOX_WITH_GEOMETRY_SQL
+                if include_geometry
+                else _FEATURES_IN_BBOX_SQL
+            ),
             {
                 "min_lon": min_lon,
                 "min_lat": min_lat,

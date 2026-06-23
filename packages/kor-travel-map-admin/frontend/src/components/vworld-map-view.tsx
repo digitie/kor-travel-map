@@ -1,6 +1,9 @@
 "use client";
 
-import { createMarkerElement } from "@kor-travel-map/map-marker-react";
+import {
+  createMarkerElement,
+  resolveMarkerColor,
+} from "@kor-travel-map/map-marker-react";
 import maplibregl, {
   type Map as MapLibreMap,
   type Marker as MapLibreMarker,
@@ -27,6 +30,10 @@ import {
 const VWorldMapContext = createContext<MapLibreMap | null>(null);
 
 const CLUSTER_SOURCE_ID = "kor-feature-clusters";
+const GEOMETRY_SOURCE_ID = "kor-feature-geometries";
+const AREA_FILL_LAYER_ID = `${GEOMETRY_SOURCE_ID}-area-fill`;
+const AREA_OUTLINE_LAYER_ID = `${GEOMETRY_SOURCE_ID}-area-outline`;
+const ROUTE_LINE_LAYER_ID = `${GEOMETRY_SOURCE_ID}-route-line`;
 
 interface VWorldMapViewProps {
   apiKey: string | undefined;
@@ -325,10 +332,142 @@ export interface ClusterFeatureInput {
   feature_id: string;
   name: string;
   kind: string;
+  category?: string | null;
   lon: number | null;
   lat: number | null;
   marker_icon?: string | null;
   marker_color?: string | null;
+  geometry?: unknown;
+  area_square_meters?: number | null;
+}
+
+type GeometryFeatureKind = "route" | "area";
+type FeatureMapGeometry =
+  | GeoJSON.LineString
+  | GeoJSON.MultiLineString
+  | GeoJSON.Polygon
+  | GeoJSON.MultiPolygon;
+type FeatureGeometryProperties = {
+  feature_id: string;
+  name: string;
+  kind: GeometryFeatureKind;
+  category: string;
+  color: string;
+  marker_color: string | null;
+  label: string;
+  label_lon: number | null;
+  label_lat: number | null;
+  area_square_meters: number | null;
+};
+type FeatureGeometryFeature = GeoJSON.Feature<
+  FeatureMapGeometry,
+  FeatureGeometryProperties
+>;
+
+function isFeatureMapGeometry(value: unknown): value is FeatureMapGeometry {
+  if (typeof value !== "object" || value === null) return false;
+  const type = (value as { type?: unknown }).type;
+  return (
+    type === "LineString" ||
+    type === "MultiLineString" ||
+    type === "Polygon" ||
+    type === "MultiPolygon"
+  );
+}
+
+function hasRenderableGeometry(feature: ClusterFeatureInput): boolean {
+  return (
+    (feature.kind === "route" || feature.kind === "area") &&
+    isFeatureMapGeometry(feature.geometry)
+  );
+}
+
+function markerIconForFeature(feature: ClusterFeatureInput): string | null {
+  if (feature.kind === "weather") return null;
+  return feature.marker_icon ?? null;
+}
+
+function areaLabel(areaSquareMeters: number | null | undefined): string | null {
+  if (typeof areaSquareMeters !== "number" || !Number.isFinite(areaSquareMeters)) {
+    return null;
+  }
+  if (areaSquareMeters >= 1_000_000) {
+    return `${(areaSquareMeters / 1_000_000).toLocaleString("ko-KR", {
+      maximumFractionDigits: 1,
+    })} km2`;
+  }
+  return `${Math.round(areaSquareMeters).toLocaleString("ko-KR")} m2`;
+}
+
+function geometryLabel(feature: ClusterFeatureInput): string {
+  if (feature.kind !== "area") return feature.name;
+  const area = areaLabel(feature.area_square_meters);
+  return area ? `${feature.name} - ${area}` : feature.name;
+}
+
+function geometryFeature(
+  feature: ClusterFeatureInput,
+): FeatureGeometryFeature | null {
+  if (
+    (feature.kind !== "route" && feature.kind !== "area") ||
+    !isFeatureMapGeometry(feature.geometry)
+  ) {
+    return null;
+  }
+  const markerColor = feature.marker_color ?? null;
+  return {
+    type: "Feature",
+    geometry: feature.geometry,
+    properties: {
+      feature_id: feature.feature_id,
+      name: feature.name,
+      kind: feature.kind,
+      category: feature.category ?? "",
+      color: resolveMarkerColor(markerColor),
+      marker_color: markerColor,
+      label: geometryLabel(feature),
+      label_lon: feature.lon,
+      label_lat: feature.lat,
+      area_square_meters: feature.area_square_meters ?? null,
+    },
+  };
+}
+
+function createGeometryLabelElement(
+  feature: FeatureGeometryFeature,
+  onSelectFeature: ((featureId: string) => void) | undefined,
+): HTMLDivElement {
+  const element = document.createElement("div");
+  const color = feature.properties.color;
+  element.textContent = feature.properties.label;
+  element.title = `${feature.properties.name} (${feature.properties.kind})`;
+  element.style.maxWidth = "13rem";
+  element.style.padding = "3px 7px";
+  element.style.borderRadius = "6px";
+  element.style.background = "rgba(255,255,255,0.92)";
+  element.style.border = `1px solid ${color}`;
+  element.style.boxShadow = "0 1px 4px rgba(0,0,0,0.22)";
+  element.style.color = "#111827";
+  element.style.fontSize = "11px";
+  element.style.fontWeight = "600";
+  element.style.lineHeight = "1.2";
+  element.style.whiteSpace = "normal";
+  element.style.textAlign = "center";
+  element.style.pointerEvents = onSelectFeature ? "auto" : "none";
+  element.style.cursor = onSelectFeature ? "pointer" : "default";
+  element.style.userSelect = "none";
+  if (onSelectFeature) {
+    element.setAttribute("role", "button");
+    element.setAttribute("aria-label", element.title);
+    element.addEventListener("click", (event) => {
+      event.stopPropagation();
+      onSelectFeature(feature.properties.feature_id);
+    });
+  } else {
+    element.setAttribute("role", "img");
+    element.setAttribute("aria-label", element.title);
+  }
+  return element;
 }
 
 /**
@@ -359,7 +498,9 @@ export function VWorldFeatureClusters({
     () => ({
       type: "FeatureCollection",
       features: features.flatMap((f) =>
-        typeof f.lon === "number" && typeof f.lat === "number"
+        typeof f.lon === "number" &&
+        typeof f.lat === "number" &&
+        !hasRenderableGeometry(f)
           ? [
               {
                 type: "Feature" as const,
@@ -371,13 +512,26 @@ export function VWorldFeatureClusters({
                   feature_id: f.feature_id,
                   name: f.name,
                   kind: f.kind,
-                  marker_icon: f.marker_icon ?? null,
+                  category: f.category ?? null,
+                  marker_icon: markerIconForFeature(f),
                   marker_color: f.marker_color ?? null,
                 },
               },
             ]
           : [],
       ),
+    }),
+    [features],
+  );
+  const geometryData = useMemo<
+    GeoJSON.FeatureCollection<FeatureMapGeometry, FeatureGeometryProperties>
+  >(
+    () => ({
+      type: "FeatureCollection",
+      features: features.flatMap((feature) => {
+        const item = geometryFeature(feature);
+        return item ? [item] : [];
+      }),
     }),
     [features],
   );
@@ -390,6 +544,158 @@ export function VWorldFeatureClusters({
       | undefined;
     source?.setData(data);
   }, [map, data]);
+
+  useEffect(() => {
+    if (map === null) return;
+    const source = map.getSource(GEOMETRY_SOURCE_ID) as
+      | maplibregl.GeoJSONSource
+      | undefined;
+    source?.setData(geometryData);
+  }, [map, geometryData]);
+
+  useEffect(() => {
+    if (map === null) return;
+
+    const ensureGeometryLayers = () => {
+      if (!map.getSource(GEOMETRY_SOURCE_ID)) {
+        map.addSource(GEOMETRY_SOURCE_ID, {
+          type: "geojson",
+          data: geometryData,
+        });
+      }
+      if (!map.getLayer(AREA_FILL_LAYER_ID)) {
+        map.addLayer({
+          id: AREA_FILL_LAYER_ID,
+          type: "fill",
+          source: GEOMETRY_SOURCE_ID,
+          filter: ["==", ["get", "kind"], "area"],
+          paint: {
+            "fill-color": ["get", "color"],
+            "fill-opacity": 0.22,
+          },
+        });
+      }
+      if (!map.getLayer(AREA_OUTLINE_LAYER_ID)) {
+        map.addLayer({
+          id: AREA_OUTLINE_LAYER_ID,
+          type: "line",
+          source: GEOMETRY_SOURCE_ID,
+          filter: ["==", ["get", "kind"], "area"],
+          paint: {
+            "line-color": ["get", "color"],
+            "line-opacity": 0.9,
+            "line-width": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              8,
+              1.2,
+              14,
+              2.8,
+            ],
+          },
+        });
+      }
+      if (!map.getLayer(ROUTE_LINE_LAYER_ID)) {
+        map.addLayer({
+          id: ROUTE_LINE_LAYER_ID,
+          type: "line",
+          source: GEOMETRY_SOURCE_ID,
+          filter: ["==", ["get", "kind"], "route"],
+          layout: {
+            "line-cap": "round",
+            "line-join": "round",
+          },
+          paint: {
+            "line-color": ["get", "color"],
+            "line-opacity": 0.92,
+            "line-width": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              8,
+              2,
+              14,
+              4.5,
+            ],
+          },
+        });
+      }
+    };
+
+    const handleGeometryClick = (event: maplibregl.MapLayerMouseEvent) => {
+      const featureId = event.features?.[0]?.properties?.feature_id;
+      if (typeof featureId === "string") {
+        onSelectRef.current?.(featureId);
+      }
+    };
+    const handleMouseEnter = () => {
+      map.getCanvas().style.cursor = "pointer";
+    };
+    const handleMouseLeave = () => {
+      map.getCanvas().style.cursor = "";
+    };
+    const handleStyleData = () => {
+      ensureGeometryLayers();
+    };
+
+    ensureGeometryLayers();
+    for (const layerId of [
+      AREA_FILL_LAYER_ID,
+      AREA_OUTLINE_LAYER_ID,
+      ROUTE_LINE_LAYER_ID,
+    ]) {
+      map.on("click", layerId, handleGeometryClick);
+      map.on("mouseenter", layerId, handleMouseEnter);
+      map.on("mouseleave", layerId, handleMouseLeave);
+    }
+    map.on("styledata", handleStyleData);
+
+    return () => {
+      map.off("styledata", handleStyleData);
+      for (const layerId of [
+        AREA_FILL_LAYER_ID,
+        AREA_OUTLINE_LAYER_ID,
+        ROUTE_LINE_LAYER_ID,
+      ]) {
+        map.off("click", layerId, handleGeometryClick);
+        map.off("mouseenter", layerId, handleMouseEnter);
+        map.off("mouseleave", layerId, handleMouseLeave);
+      }
+      try {
+        if (map.getLayer(ROUTE_LINE_LAYER_ID)) map.removeLayer(ROUTE_LINE_LAYER_ID);
+        if (map.getLayer(AREA_OUTLINE_LAYER_ID)) {
+          map.removeLayer(AREA_OUTLINE_LAYER_ID);
+        }
+        if (map.getLayer(AREA_FILL_LAYER_ID)) map.removeLayer(AREA_FILL_LAYER_ID);
+        if (map.getSource(GEOMETRY_SOURCE_ID)) map.removeSource(GEOMETRY_SOURCE_ID);
+      } catch {
+        // 지도가 teardown 중일 수 있다.
+      }
+    };
+    // geometryData 변경은 위 setData effect로 반영한다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map]);
+
+  useEffect(() => {
+    if (map === null) return;
+    const markers: MapLibreMarker[] = [];
+    for (const feature of geometryData.features) {
+      const lon = feature.properties.label_lon;
+      const lat = feature.properties.label_lat;
+      if (typeof lon !== "number" || typeof lat !== "number") continue;
+      const marker = new maplibregl.Marker({
+        anchor: "center",
+        element: createGeometryLabelElement(feature, onSelectRef.current),
+      })
+        .setLngLat([lon, lat])
+        .addTo(map);
+      markers.push(marker);
+    }
+    return () => {
+      for (const marker of markers) marker.remove();
+    };
+  }, [map, geometryData]);
 
   // source/layer + 마커 풀 생애주기 (map 1회).
   useEffect(() => {
@@ -505,12 +811,19 @@ export function VWorldFeatureClusters({
     };
 
     ensureSource();
-    map.on("render", scheduleUpdate);
+    map.on("moveend", scheduleUpdate);
+    map.on("zoomend", scheduleUpdate);
+    map.on("sourcedata", scheduleUpdate);
+    map.on("idle", scheduleUpdate);
     map.on("styledata", handleStyleData);
+    scheduleUpdate();
 
     return () => {
       if (raf !== 0) cancelAnimationFrame(raf);
-      map.off("render", scheduleUpdate);
+      map.off("moveend", scheduleUpdate);
+      map.off("zoomend", scheduleUpdate);
+      map.off("sourcedata", scheduleUpdate);
+      map.off("idle", scheduleUpdate);
       map.off("styledata", handleStyleData);
       for (const marker of markers.values()) marker.remove();
       markers.clear();

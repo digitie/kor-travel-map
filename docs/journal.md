@@ -2,6 +2,34 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-23 (codex) — Admin 지도 route/area 렌더링 + prod 직접 반영
+
+사용자 요청으로 admin Feature 지도에 feature 종류/카테고리 기반 마커와 route/area 전용
+지도 표현을 추가했고, N150 production 서버에 직접 반영했다.
+
+- **지도 렌더링**: point feature는 기존 `marker_icon`/`marker_color` 기반 maki 마커를 유지하되,
+  `weather` feature는 날씨 아이콘 대신 소스/종류 구분용 단순 색상 마커로 표시한다.
+- **route/area**: `/v1/features?include_geometry=true`가 route/area용 GeoJSON `geometry`와
+  area `area_square_meters`를 선택적으로 반환한다. admin 지도는 route를 선+이름 라벨,
+  area를 면 채움/외곽선+이름·면적 라벨로 그린다.
+- **성능 보강**: 클러스터 DOM 마커 갱신을 MapLibre 매 `render` frame에서 수행하던 구조를
+  `moveend`/`zoomend`/`sourcedata`/`idle` 중심으로 줄였고, 낮은 줌에서는 bbox 캐시/요청
+  범위를 더 거칠게 양자화해 큰 범위 지도 이동 시 refetch churn을 줄였다. 또한 bbox SQL의
+  `MATERIALIZED` CTE를 제거해 낮은 축척에서 100만 건 후보를 전부 만들고 정렬하던 경로를
+  `ORDER BY feature_id LIMIT` 조기 종료 경로로 바꿨다. route/area 지도용 GeoJSON은
+  원본 geometry 대신 화면 표시용 단순화 geometry로 반환해 대형 route 응답 크기를 줄였다.
+  이후 admin frontend bbox fetch를 WebMercator tile 단위 요청으로 나눠 tile별
+  react-query 캐시를 적용했고, tile 수가 많을 때는 tile별 `page_size`를 자동 조정해
+  응답 총량이 과도하게 커지지 않게 했다.
+- **검증**: API 단위 테스트 `13 passed`, 신규 PostGIS geometry 통합 테스트 `1 passed`,
+  admin frontend `type-check` 통과, ESLint 0 errors(기존 warnings 8), 수정 Python 파일 ruff 통과.
+  WSL Playwright는 Chromium binary 미설치로 실행 자체가 실패했다.
+- **prod 반영**: N150(`digitie-at-n150`, `192.168.1.14`)의 기존
+  `kor-travel-map-{api,ui,dagster,dagster-daemon}` 컨테이너를 내린 뒤
+  `~/kor-travel-map`에 rsync 반영하고 docker-manager compose로 재빌드/재기동했다. prod
+  `feature.features`는 `ANALYZE` 후 약 109만 건이며, 기존 큰 bbox plan은 약 2.4초였고
+  SQL 패치 후 동등 plan은 약 3ms 수준으로 개선됐다.
+
 ## 2026-06-23 (claude) — KMA 날씨 복제 제거 마이그레이션 완료 + krex 휴게소 관측 기상 weather source 추가
 
 #496(KMA 격자 anchor 저장)에 이어 **prod DB의 기존 복제 데이터를 마이그레이션으로 정리**하고,

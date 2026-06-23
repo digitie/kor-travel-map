@@ -21,7 +21,103 @@ export interface FeaturesInBboxParams {
   max_lon: number;
   max_lat: number;
   kinds?: string[];
+  includeGeometry?: boolean;
   page_size?: number;
+  zoom?: number;
+}
+
+interface FeatureTile {
+  key: string;
+  min_lon: number;
+  min_lat: number;
+  max_lon: number;
+  max_lat: number;
+  x: number;
+  y: number;
+  z: number;
+}
+
+const MAX_FEATURE_TILES = 24;
+const MIN_FEATURE_TILE_ZOOM = 5;
+const MAX_FEATURE_TILE_ZOOM = 12;
+const MERCATOR_LAT_LIMIT = 85.05112878;
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function lonToTileX(lon: number, zoom: number): number {
+  const n = 2 ** zoom;
+  return clampNumber(Math.floor(((lon + 180) / 360) * n), 0, n - 1);
+}
+
+function latToTileY(lat: number, zoom: number): number {
+  const clampedLat = clampNumber(lat, -MERCATOR_LAT_LIMIT, MERCATOR_LAT_LIMIT);
+  const latRad = (clampedLat * Math.PI) / 180;
+  const n = 2 ** zoom;
+  return clampNumber(
+    Math.floor(
+      ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) *
+        n,
+    ),
+    0,
+    n - 1,
+  );
+}
+
+function tileXToLon(x: number, zoom: number): number {
+  return (x / 2 ** zoom) * 360 - 180;
+}
+
+function tileYToLat(y: number, zoom: number): number {
+  const n = Math.PI - (2 * Math.PI * y) / 2 ** zoom;
+  return (180 / Math.PI) * Math.atan(Math.sinh(n));
+}
+
+function buildFeatureTiles(params: FeaturesInBboxParams): FeatureTile[] {
+  const desiredZoom = clampNumber(
+    Math.floor(typeof params.zoom === "number" ? params.zoom : 8),
+    MIN_FEATURE_TILE_ZOOM,
+    MAX_FEATURE_TILE_ZOOM,
+  );
+  const minLon = Math.min(params.min_lon, params.max_lon);
+  const maxLon = Math.max(params.min_lon, params.max_lon);
+  const minLat = Math.min(params.min_lat, params.max_lat);
+  const maxLat = Math.max(params.min_lat, params.max_lat);
+
+  for (
+    let tileZoom = desiredZoom;
+    tileZoom >= MIN_FEATURE_TILE_ZOOM;
+    tileZoom -= 1
+  ) {
+    const minX = lonToTileX(minLon, tileZoom);
+    const maxX = lonToTileX(maxLon, tileZoom);
+    const minY = latToTileY(maxLat, tileZoom);
+    const maxY = latToTileY(minLat, tileZoom);
+    const count = (maxX - minX + 1) * (maxY - minY + 1);
+    if (count > MAX_FEATURE_TILES && tileZoom > MIN_FEATURE_TILE_ZOOM) {
+      continue;
+    }
+
+    const tiles: FeatureTile[] = [];
+    for (let x = minX; x <= maxX; x += 1) {
+      for (let y = minY; y <= maxY; y += 1) {
+        tiles.push({
+          key: `${tileZoom}/${x}/${y}`,
+          max_lat: tileYToLat(y, tileZoom),
+          max_lon: tileXToLon(x + 1, tileZoom),
+          min_lat: tileYToLat(y + 1, tileZoom),
+          min_lon: tileXToLon(x, tileZoom),
+          x,
+          y,
+          z: tileZoom,
+        });
+      }
+    }
+    return tiles;
+  }
+
+  return [];
 }
 
 async function fetchFeaturesInBbox(
@@ -36,32 +132,101 @@ async function fetchFeaturesInBbox(
       max_lat: params.max_lat,
       page_size: params.page_size,
       kind: params.kinds,
+      include_geometry: params.includeGeometry,
     }),
     { signal },
   );
 }
 
+async function fetchFeaturesInTiles(
+  queryClient: ReturnType<typeof useQueryClient>,
+  params: FeaturesInBboxParams,
+  signal?: AbortSignal,
+): Promise<FeaturesInBboxResponse> {
+  const tiles = buildFeatureTiles(params);
+  if (tiles.length === 0) {
+    return fetchFeaturesInBbox(params, signal);
+  }
+
+  const requestedPageSize = params.page_size ?? 500;
+  const perTilePageSize = Math.min(
+    requestedPageSize,
+    Math.max(50, Math.ceil(requestedPageSize / tiles.length)),
+  );
+
+  const responses = await Promise.all(
+    tiles.map((tile) => {
+      const tileParams = {
+        ...params,
+        max_lat: tile.max_lat,
+        max_lon: tile.max_lon,
+        min_lat: tile.min_lat,
+        min_lon: tile.min_lon,
+        page_size: perTilePageSize,
+      };
+      return queryClient.fetchQuery({
+        queryKey: [
+          "features",
+          "tile",
+          tile.z,
+          tile.x,
+          tile.y,
+          params.kinds?.join(",") ?? "",
+          params.includeGeometry ? "geometry" : "summary",
+          perTilePageSize,
+        ],
+        queryFn: () => fetchFeaturesInBbox(tileParams, signal),
+        staleTime: 60_000,
+      });
+    }),
+  );
+
+  const items = new Map<string, FeatureSummary>();
+  for (const response of responses) {
+    for (const item of response.data.items) {
+      items.set(item.feature_id, item);
+    }
+  }
+
+  const first = responses[0];
+  return {
+    data: { items: Array.from(items.values()) },
+    meta: {
+      ...(first?.meta ?? {
+        cluster: null,
+        duration_ms: 0,
+        page: null,
+        request_id: "features-tiled",
+      }),
+      request_id: `features-tiled:${tiles.map((tile) => tile.key).join(",")}`,
+    },
+  };
+}
+
 /**
- * react-query hook — bbox 변화에 따라 자동 refetch. 좌표는 소수 4자리로 양자화해
- * (~11m) 미세 viewport 변동에 의한 과도한 호출을 방지.
+ * react-query hook — bbox를 WebMercator tile bbox들로 나눠 fetch한다. 각 tile은
+ * 별도 queryKey로 캐시되어 작은 pan/zoom 이동에서 이미 받은 tile을 재사용한다.
  */
 export function useFeaturesInBbox(
   params: FeaturesInBboxParams,
   options?: { enabled?: boolean },
 ) {
-  const q4 = (n: number) => Number(n.toFixed(4));
+  const queryClient = useQueryClient();
+  const queryParams = {
+    ...params,
+  };
+  const tiles = buildFeatureTiles(queryParams);
   const key = [
     "features",
-    q4(params.min_lon),
-    q4(params.min_lat),
-    q4(params.max_lon),
-    q4(params.max_lat),
+    "viewport",
+    tiles.map((tile) => tile.key).join("|"),
     params.kinds?.join(",") ?? "",
+    params.includeGeometry ? "geometry" : "summary",
     params.page_size ?? 500,
   ] as const;
   return useQuery({
     queryKey: key,
-    queryFn: ({ signal }) => fetchFeaturesInBbox(params, signal),
+    queryFn: ({ signal }) => fetchFeaturesInTiles(queryClient, queryParams, signal),
     enabled: options?.enabled ?? true,
     staleTime: 30_000,
   });

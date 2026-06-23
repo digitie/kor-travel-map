@@ -1,5 +1,26 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-23 (codex) — Admin 지도 route/area 렌더링 + N150 prod 반영
+
+- **완료(코드)**: admin Feature 지도에 `marker_icon`/`marker_color` 기반 maki 마커를 적용하고,
+  `weather` feature는 날씨 아이콘 대신 단순 색상 마커로 표시한다. `route`는 GeoJSON 선+이름
+  라벨, `area`는 면+외곽선+이름·면적 라벨로 표시한다.
+- **완료(API/DB)**: `/v1/features`와 `/v1/features/in-bounds`에 선택적
+  `include_geometry`를 추가해 route/area `geometry`, area `area_square_meters`를 반환한다.
+  낮은 축척 bbox SQL에서 `MATERIALIZED` CTE를 제거해 prod 109만 건 기준 큰 bbox plan을
+  약 2.4초에서 약 3ms 수준으로 낮췄다. route/area 지도용 GeoJSON은 표시용 단순화와
+  좌표 정밀도 제한을 적용해 대형 route 응답 크기를 줄였다. admin frontend는 viewport를
+  WebMercator tile bbox로 나눠 tile별 react-query 캐시를 쓰도록 바꿨고, tile별
+  `page_size` 자동 조정으로 낮은 축척 응답 총량을 제한한다.
+- **완료(prod)**: N150 production 서버(`digitie-at-n150`, `192.168.1.14`)의 기존 map
+  컨테이너를 내리고 `~/kor-travel-map` rsync + docker-manager compose 재빌드/재기동으로
+  직접 반영했다.
+- **검증**: API 단위 테스트 `13 passed`, 신규 PostGIS geometry 통합 테스트 `1 passed`,
+  admin `type-check`, ESLint 0 errors(기존 warnings 8), 수정 Python ruff 통과. WSL
+  Playwright는 Chromium binary 미설치로 실행 불가.
+- **다음 한 작업**: PR 생성/머지 흐름으로 정식 main 반영 후, 필요하면 서버 측 vector tile/MVT
+  엔드포인트까지 확장할지 결정한다.
+
 ## 2026-06-23 (claude) — KMA 날씨 복제 제거 마이그레이션 + krex 휴게소 관측 기상 weather source
 
 - **완료**: prod DB의 KMA 복제 날씨(30.3M행/15GB)를 batched DELETE + VACUUM FULL로 제거 →

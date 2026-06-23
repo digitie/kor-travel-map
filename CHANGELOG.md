@@ -5,6 +5,23 @@
 
 ## [Unreleased]
 
+### Admin 지도 route/area 표시 + 지도 성능 보강 (2026-06-23)
+
+- **ADDED**: admin Feature 지도에서 point feature는 `marker_icon`/`marker_color` 기반
+  maki 마커로 표시하고, `weather` feature는 날씨 아이콘 대신 단순 색상 마커로 표시한다.
+- **ADDED**: `route` feature는 GeoJSON 선 + 이름 라벨, `area` feature는 면 채움/외곽선 +
+  이름·면적 라벨로 표시한다. 이를 위해 `/v1/features`에 선택적 `include_geometry`
+  파라미터와 route/area 지도용 `geometry`, `area_square_meters` 응답 필드를 추가했다.
+- **CHANGED**: 지도 클러스터 DOM 마커 갱신을 매 render frame 대신 `moveend`/`zoomend`/
+  `sourcedata` 중심으로 줄이고, 낮은 줌에서는 bbox 요청 범위를 더 거칠게 양자화해
+  큰 범위 지도 이동 시 불필요한 refetch를 줄였다.
+- **CHANGED**: bbox 조회 SQL이 낮은 축척에서 후보 전체를 `MATERIALIZED` CTE로 만든 뒤
+  정렬하던 병목을 제거하고, `ORDER BY feature_id LIMIT` 조기 종료가 가능하도록 바꿨다.
+- **CHANGED**: admin 지도 표시용 route/area GeoJSON은 원본 geometry를 그대로 보내지 않고
+  화면 표시용으로 단순화하고 좌표 정밀도를 제한해 큰 route 응답 크기를 줄였다.
+- **CHANGED**: admin 지도 bbox fetch를 WebMercator tile 단위 요청으로 나누고 tile별
+  react-query 캐시를 적용해 pan/zoom 시 이미 받은 공간 데이터를 재사용한다.
+
 ### krex 고속도로 휴게소 관측 기상을 weather source로 추가 (2026-06-23)
 
 - **ADDED**: 고속도로 휴게소 관측 기상(`restWeatherList`, EX)을 weather-kind Feature로
