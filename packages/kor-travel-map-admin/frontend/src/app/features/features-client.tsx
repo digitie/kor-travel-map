@@ -185,6 +185,9 @@ export function FeaturesClient() {
     {
       ...(bbox ?? { min_lon: 0, min_lat: 0, max_lon: 0, max_lat: 0 }),
       kinds: kindFilter.length > 0 ? kindFilter : undefined,
+      // 서버 in-bounds 파라미터는 `page_size`(최대 500). 과거엔 `limit`을 보내
+      // 서버가 무시 → 항상 기본 100건만 표시됐다(110만 중 100개, 필터 체감 약함).
+      page_size: 500,
     },
     { enabled: bbox !== null },
   );
