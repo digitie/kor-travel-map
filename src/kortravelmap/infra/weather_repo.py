@@ -144,6 +144,36 @@ ORDER BY f.coord_5179 OPERATOR(x_extension.<->) t.coord_5179
 LIMIT 1
 """
 
+# 기온/단기예보(KMA)는 airkorea 대기질 측정소보다 성기게 적재돼, 단순 "가장 가까운
+# weather"는 더 가까운 대기질 지점만 잡고 기온은 못 잡는 경우가 많다. 기온(T1H/TMP)을
+# 가진 가장 가까운 지점을 따로 찾아 병합한다(반경 동일).
+_NEAREST_TEMP_SQL: Final[str] = """
+WITH target AS (
+    SELECT coord_5179
+    FROM feature.features
+    WHERE feature_id = :feature_id
+      AND deleted_at IS NULL
+      AND coord_5179 IS NOT NULL
+),
+temp_features AS (
+    SELECT DISTINCT feature_id
+    FROM feature.feature_weather_values
+    WHERE metric_key IN ('T1H', 'TMP')
+)
+SELECT f.feature_id
+FROM target AS t
+JOIN temp_features AS wf ON TRUE
+JOIN feature.features AS f
+  ON f.feature_id = wf.feature_id
+ AND f.deleted_at IS NULL
+ AND f.coord_5179 IS NOT NULL
+ AND x_extension.ST_DWithin(
+       f.coord_5179, t.coord_5179, CAST(:radius_m AS double precision)
+     )
+ORDER BY f.coord_5179 OPERATOR(x_extension.<->) t.coord_5179
+LIMIT 1
+"""
+
 
 def _enum_value(value: Any) -> str:
     return str(getattr(value, "value", value))
@@ -220,27 +250,49 @@ async def build_weather_card(
     (``DISTINCT ON``). ``is_stale``은 최신 시각이 ``asof``(또는 now) 기준
     ``freshness_seconds``를 넘으면 True. source trace는 ``source_styles``로 노출.
     """
-    rows = (
-        await session.execute(
-            text(_CARD_SQL), {"feature_id": feature_id, "asof": asof}
-        )
-    ).mappings().all()
-    if not rows:
-        # feature 자체 weather가 없으면 반경 내 가장 가까운 weather 보유 지점(=가장
-        # 가까운 격자)의 값으로 폴백한다. card.feature_id는 요청 feature_id 유지.
-        nearest_id = (
+    rows = list(
+        (
             await session.execute(
-                text(_NEAREST_WEATHER_SQL),
-                {"feature_id": feature_id, "radius_m": _NEAREST_WEATHER_RADIUS_M},
+                text(_CARD_SQL), {"feature_id": feature_id, "asof": asof}
             )
+        )
+        .mappings()
+        .all()
+    )
+    params = {"feature_id": feature_id, "radius_m": _NEAREST_WEATHER_RADIUS_M}
+    # 기온(T1H/TMP)이 없으면 반경 내 가장 가까운 기온(KMA) 지점의 forecast 값을 병합
+    # 한다(자체 대기질 등 기존 metric은 유지). card.feature_id는 요청 feature_id 유지.
+    if not any(r["metric_key"] in ("T1H", "TMP") for r in rows):
+        temp_id = (
+            await session.execute(text(_NEAREST_TEMP_SQL), params)
         ).scalar_one_or_none()
-        if nearest_id is not None and str(nearest_id) != feature_id:
-            rows = (
+        if temp_id is not None and str(temp_id) != feature_id:
+            extra = (
                 await session.execute(
-                    text(_CARD_SQL),
-                    {"feature_id": str(nearest_id), "asof": asof},
+                    text(_CARD_SQL), {"feature_id": str(temp_id), "asof": asof}
                 )
             ).mappings().all()
+            seen = {(r["forecast_style"], r["metric_key"]) for r in rows}
+            for row in extra:
+                key = (row["forecast_style"], row["metric_key"])
+                if key not in seen:
+                    rows.append(row)
+                    seen.add(key)
+    # 근처에 기온도 없으면(완전 미적재 지역) 가장 가까운 임의 weather로 폴백(빈 카드 회피).
+    if not rows:
+        any_id = (
+            await session.execute(text(_NEAREST_WEATHER_SQL), params)
+        ).scalar_one_or_none()
+        if any_id is not None and str(any_id) != feature_id:
+            rows = list(
+                (
+                    await session.execute(
+                        text(_CARD_SQL), {"feature_id": str(any_id), "asof": asof}
+                    )
+                )
+                .mappings()
+                .all()
+            )
     metrics = [
         WeatherMetric(
             forecast_style=str(row["forecast_style"]),
