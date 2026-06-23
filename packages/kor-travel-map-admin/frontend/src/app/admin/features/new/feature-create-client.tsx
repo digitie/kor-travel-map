@@ -781,6 +781,7 @@ export function FeatureCreateClient() {
                   getRowId={(row) => row.feature_id}
                   isLoading={nearby.isLoading}
                   emptyMessage="후보 없음"
+                  manualSorting={false}
                   containerClassName="overflow-auto rounded-md border"
                 />
               </div>

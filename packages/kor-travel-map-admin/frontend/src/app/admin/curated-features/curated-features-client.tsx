@@ -344,6 +344,7 @@ function TripmateCopyPreview({ feature }: { feature: CuratedFeature | null }) {
             data={data.items}
             getRowId={(item) => item.curated_feature_item_id}
             emptyMessage="copy item이 없습니다."
+            manualSorting={false}
           />
           <details>
             <summary className="cursor-pointer text-sm font-medium">plan</summary>
@@ -714,10 +715,13 @@ export function CuratedFeaturesClient() {
   };
 
   const featureColumns = useMemo<ColumnDef<CuratedFeature, unknown>[]>(
+    // curated 후보는 keyset cursor 목록(next_cursor) + client text 필터 — 서버가 정렬을
+    // 소유하므로 컬럼 정렬을 끈다(#502: client 정렬은 현재 페이지만 재배열해 오해를 줌).
     () => [
       {
         accessorKey: "curation_status",
         header: "status",
+        enableSorting: false,
         cell: ({ row }) => (
           <Badge variant={featureStatusVariant(row.original.curation_status)}>
             {row.original.curation_status}
@@ -727,6 +731,7 @@ export function CuratedFeaturesClient() {
       {
         accessorKey: "feature_name",
         header: "feature",
+        enableSorting: false,
         cell: ({ row }) => {
           const feature = row.original;
           return (
@@ -749,6 +754,7 @@ export function CuratedFeaturesClient() {
       {
         accessorKey: "source_name",
         header: "source",
+        enableSorting: false,
         cell: ({ row }) => {
           const feature = row.original;
           return (
@@ -764,6 +770,7 @@ export function CuratedFeaturesClient() {
       {
         accessorKey: "theme_name",
         header: "theme",
+        enableSorting: false,
         cell: ({ row }) => {
           const feature = row.original;
           return (
@@ -795,6 +802,7 @@ export function CuratedFeaturesClient() {
       {
         accessorKey: "updated_at",
         header: "updated",
+        enableSorting: false,
         cell: ({ row }) => formatDateTime(row.original.updated_at),
       },
       {
@@ -1288,6 +1296,7 @@ export function CuratedFeaturesClient() {
                 emptyMessage="조건에 맞는 source rule이 없습니다."
                 onRowClick={(rule) => setSelectedRuleId(rule.rule_id)}
                 isRowActive={(rule) => rule.rule_id === selectedRule?.rule_id}
+                manualSorting={false}
               />
             </div>
             <RuleEditor

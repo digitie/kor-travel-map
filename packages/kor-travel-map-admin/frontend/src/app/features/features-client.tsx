@@ -263,6 +263,12 @@ export function FeaturesClient() {
     return `${featuresQuery.data?.data.items.length ?? 0}건 표시`;
   }, [bbox, featuresQuery]);
 
+  // tiled fetch가 일부 tile 잘림/실패를 보고하면(부분 결과) 조용히 누락되지 않도록
+  // 작은 affordance를 띄운다(#502 M2).
+  const partialMeta = featuresQuery.data?.meta.partial
+    ? featuresQuery.data.meta
+    : null;
+
   return (
     <main className="flex h-screen flex-col bg-muted/30">
       <header className="flex flex-col gap-3 border-b bg-background px-6 py-4 md:flex-row md:items-center md:justify-between">
@@ -272,6 +278,19 @@ export function FeaturesClient() {
             <Badge variant={featuresQuery.isError ? "destructive" : "outline"}>
               {status}
             </Badge>
+            {partialMeta ? (
+              <Badge
+                data-testid="features-partial-indicator"
+                title={
+                  partialMeta.failedTiles
+                    ? `${partialMeta.totalTiles ?? "?"}개 tile 중 ${partialMeta.failedTiles}개 실패 — 결과가 일부만 표시됩니다.`
+                    : "일부 tile이 page 한도까지 채워져 feature가 누락되었을 수 있습니다. 더 확대해 좁은 영역을 보세요."
+                }
+                variant="destructive"
+              >
+                부분 결과
+              </Badge>
+            ) : null}
           </div>
           <h1 className="text-xl font-semibold tracking-tight">Feature 지도</h1>
         </div>
@@ -400,6 +419,7 @@ export function FeaturesClient() {
               >
                 <VWorldFeatureClusters
                   features={featureItems}
+                  selectedFeatureId={selectedFeatureId}
                   onSelectFeature={setSelectedFeatureId}
                 />
               </VWorldMapView>
@@ -432,6 +452,7 @@ export function FeaturesClient() {
                 isRowActive={(feature) => feature.feature_id === selectedFeatureId}
                 sorting={tableSorting}
                 onSortingChange={setTableSorting}
+                manualSorting={false}
                 virtualized
                 estimateRowSize={41}
                 containerClassName="h-[calc(100vh-19rem)]"

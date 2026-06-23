@@ -360,6 +360,7 @@ export function BackupsClient() {
                 emptyMessage="백업이 없습니다."
                 onRowClick={(row) => setSelectedId(row.backup_id)}
                 isRowActive={(row) => selected?.backup_id === row.backup_id}
+                manualSorting={false}
               />
             </CardContent>
           </Card>

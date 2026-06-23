@@ -101,6 +101,14 @@ export function VWorldMapView({
     appliedStyleRef.current = { apiKey, layerType };
     setMap(nextMap);
 
+    // e2e 훅: 컨테이너 DOM 노드에 map 인스턴스를 매달아 Playwright가
+    // page.evaluate로 getLayer/querySourceFeatures 같은 GL 렌더 상태를 단언할 수
+    // 있게 한다(전역 오염 없이 testId로 스코프됨). teardown 시 해제.
+    const containerNode = containerRef.current as
+      | (HTMLDivElement & { _maplibreMap?: MapLibreMap })
+      | null;
+    if (containerNode) containerNode._maplibreMap = nextMap;
+
     let didNotifyLoad = false;
     let loadFrame = 0;
     const notifyLoad = () => {
@@ -185,6 +193,7 @@ export function VWorldMapView({
           // MapLibre may already be tearing down the control while removing the map.
         }
       }
+      if (containerNode) delete containerNode._maplibreMap;
       nextMap.remove();
       mapRef.current = null;
       setLoaded(false);
@@ -302,6 +311,17 @@ export function VWorldMarker({
   }, [selected]);
 
   return null;
+}
+
+/** 선택 강조: 기존 element에 outline만 토글(마커 재생성 없이). VWorldMarker와 동일 룩. */
+function setSelectedOutline(element: HTMLElement, selected: boolean): void {
+  if (selected) {
+    element.style.outline = "3px solid hsl(var(--primary))";
+    element.style.outlineOffset = "2px";
+  } else {
+    element.style.outline = "";
+    element.style.outlineOffset = "";
+  }
 }
 
 function createClusterElement(pointCount: number, label: string): HTMLDivElement {
@@ -480,18 +500,26 @@ function createGeometryLabelElement(
 export function VWorldFeatureClusters({
   features,
   onSelectFeature,
+  selectedFeatureId = null,
   clusterRadius = 60,
   clusterMaxZoom = 14,
 }: {
   features: ReadonlyArray<ClusterFeatureInput>;
   onSelectFeature?: (featureId: string) => void;
+  selectedFeatureId?: string | null;
   clusterRadius?: number;
   clusterMaxZoom?: number;
 }) {
   const map = useContext(VWorldMapContext);
   const onSelectRef = useRef(onSelectFeature);
+  const selectedFeatureIdRef = useRef<string | null>(selectedFeatureId);
+  // 현재 화면에 떠 있는 point/label 마커 element를 feature_id로 추적해, selection 변경
+  // 시 마커 풀을 건드리지 않고 outline만 토글한다(#500 (c)).
+  const pointElementsRef = useRef(new Map<string, HTMLElement>());
+  const labelElementsRef = useRef(new Map<string, HTMLElement>());
   useLayoutEffect(() => {
     onSelectRef.current = onSelectFeature;
+    selectedFeatureIdRef.current = selectedFeatureId;
   });
 
   const data = useMemo<GeoJSON.FeatureCollection<GeoJSON.Point>>(
@@ -512,7 +540,6 @@ export function VWorldFeatureClusters({
                   feature_id: f.feature_id,
                   name: f.name,
                   kind: f.kind,
-                  category: f.category ?? null,
                   marker_icon: markerIconForFeature(f),
                   marker_color: f.marker_color ?? null,
                 },
@@ -677,25 +704,58 @@ export function VWorldFeatureClusters({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map]);
 
+  // geometry LABEL 마커를 feature_id로 풀링한다(#500 (d)). geometryData가 바뀌어도
+  // 전체 teardown/recreate 대신 setLngLat로 위치만 갱신하고, 사라진 feature만 remove한다.
+  const labelMarkersRef = useRef(new Map<string, MapLibreMarker>());
   useEffect(() => {
     if (map === null) return;
-    const markers: MapLibreMarker[] = [];
+    const pool = labelMarkersRef.current;
+    const elements = labelElementsRef.current;
+    const next = new Set<string>();
+
     for (const feature of geometryData.features) {
       const lon = feature.properties.label_lon;
       const lat = feature.properties.label_lat;
       if (typeof lon !== "number" || typeof lat !== "number") continue;
-      const marker = new maplibregl.Marker({
-        anchor: "center",
-        element: createGeometryLabelElement(feature, onSelectRef.current),
-      })
-        .setLngLat([lon, lat])
-        .addTo(map);
-      markers.push(marker);
+      const id = feature.properties.feature_id;
+      next.add(id);
+      let marker = pool.get(id);
+      if (marker === undefined) {
+        const element = createGeometryLabelElement(feature, onSelectRef.current);
+        marker = new maplibregl.Marker({ anchor: "center", element })
+          .setLngLat([lon, lat])
+          .addTo(map);
+        pool.set(id, marker);
+        elements.set(id, element);
+      } else {
+        marker.setLngLat([lon, lat]);
+      }
+      setSelectedOutline(
+        elements.get(id) ?? (marker.getElement() as HTMLElement),
+        selectedFeatureIdRef.current === id,
+      );
     }
-    return () => {
-      for (const marker of markers) marker.remove();
-    };
+
+    for (const [id, marker] of pool) {
+      if (!next.has(id)) {
+        marker.remove();
+        pool.delete(id);
+        elements.delete(id);
+      }
+    }
   }, [map, geometryData]);
+
+  // map teardown 시 label 마커 풀 정리.
+  useEffect(() => {
+    if (map === null) return;
+    const pool = labelMarkersRef.current;
+    const elements = labelElementsRef.current;
+    return () => {
+      for (const marker of pool.values()) marker.remove();
+      pool.clear();
+      elements.clear();
+    };
+  }, [map]);
 
   // source/layer + 마커 풀 생애주기 (map 1회).
   useEffect(() => {
@@ -735,6 +795,9 @@ export function VWorldFeatureClusters({
       if (!map.getSource(SRC) || !map.isStyleLoaded()) return;
       const next = new Set<string>();
       const seen = new Set<string>();
+      const pointElements = pointElementsRef.current;
+      const selectedId = selectedFeatureIdRef.current;
+      pointElements.clear();
       const rendered = map.querySourceFeatures(SRC);
       for (const feat of rendered) {
         if (feat.geometry.type !== "Point") continue;
@@ -744,18 +807,28 @@ export function VWorldFeatureClusters({
           const id = `cluster-${String(props.cluster_id)}`;
           if (seen.has(id)) continue;
           seen.add(id);
+          const count = Number(props.point_count) || 0;
+          const label = String(props.point_count_abbreviated ?? count);
+          const clusterId = props.cluster_id as number;
           let marker = markers.get(id);
           if (marker === undefined) {
-            const count = Number(props.point_count) || 0;
-            const label = String(props.point_count_abbreviated ?? count);
             const element = createClusterElement(count, label);
-            const clusterId = props.cluster_id as number;
+            element.dataset.clusterId = String(clusterId);
+            // 클릭 핸들러는 element.dataset에서 *현재* clusterId/coords를 읽어
+            // 캐시 HIT 재사용 시 stale closure로 옛 클러스터를 확대하지 않게 한다.
+            element.dataset.lon = String(coords[0]);
+            element.dataset.lat = String(coords[1]);
             element.addEventListener("click", () => {
               const source = map.getSource(SRC) as maplibregl.GeoJSONSource;
+              const currentClusterId = Number(element.dataset.clusterId);
+              const currentCoords: [number, number] = [
+                Number(element.dataset.lon),
+                Number(element.dataset.lat),
+              ];
               void source
-                .getClusterExpansionZoom(clusterId)
+                .getClusterExpansionZoom(currentClusterId)
                 .then((zoom) => {
-                  map.easeTo({ center: coords, zoom });
+                  map.easeTo({ center: currentCoords, zoom });
                 })
                 .catch(() => {
                   /* 클러스터가 사라졌으면 무시 */
@@ -763,6 +836,19 @@ export function VWorldFeatureClusters({
             });
             marker = new maplibregl.Marker({ element }).setLngLat(coords);
             markers.set(id, marker);
+          } else {
+            // 캐시 HIT — 풀 마커를 *실제로* 갱신한다(#500 (a)): 위치 + count/label +
+            // dataset(클릭 핸들러가 읽는 현재 id/coords).
+            marker.setLngLat(coords);
+            const element = marker.getElement();
+            element.dataset.clusterId = String(clusterId);
+            element.dataset.lon = String(coords[0]);
+            element.dataset.lat = String(coords[1]);
+            if (element.textContent !== label) element.textContent = label;
+            const ariaLabel = `feature 클러스터 ${count}건`;
+            if (element.getAttribute("aria-label") !== ariaLabel) {
+              element.setAttribute("aria-label", ariaLabel);
+            }
           }
           next.add(id);
           if (!onScreen.has(id)) marker.addTo(map);
@@ -771,29 +857,42 @@ export function VWorldFeatureClusters({
           const id = `pt-${featureId}`;
           if (seen.has(id)) continue;
           seen.add(id);
+          const title = `${String(props.name)} (${String(props.kind)})`;
           let marker = markers.get(id);
           if (marker === undefined) {
             const element = createMarkerElement({
               markerIcon: (props.marker_icon as string | null) ?? undefined,
               markerColor: (props.marker_color as string | null) ?? undefined,
               size: 24,
-              title: `${String(props.name)} (${String(props.kind)})`,
+              title,
               onClick: () => onSelectRef.current?.(featureId),
             });
             element.setAttribute("role", "button");
-            element.setAttribute(
-              "aria-label",
-              `${String(props.name)} (${String(props.kind)})`,
-            );
+            element.setAttribute("aria-label", title);
             marker = new maplibregl.Marker({ element }).setLngLat(coords);
             markers.set(id, marker);
+          } else {
+            // 캐시 HIT — 위치 갱신 + name/kind 변경 시 title/aria refresh(#500 (a)).
+            marker.setLngLat(coords);
+            const element = marker.getElement();
+            if (element.getAttribute("aria-label") !== title) {
+              element.title = title;
+              element.setAttribute("aria-label", title);
+            }
           }
+          // selection outline은 마커 풀을 건드리지 않고 element에만 토글(#500 (c)).
+          const element = marker.getElement();
+          pointElements.set(featureId, element);
+          setSelectedOutline(element, selectedId === featureId);
           next.add(id);
           if (!onScreen.has(id)) marker.addTo(map);
         }
       }
       for (const id of onScreen) {
-        if (!next.has(id)) markers.get(id)?.remove();
+        if (!next.has(id)) {
+          markers.get(id)?.remove();
+          markers.delete(id);
+        }
       }
       onScreen = next;
     };
@@ -827,6 +926,7 @@ export function VWorldFeatureClusters({
       map.off("styledata", handleStyleData);
       for (const marker of markers.values()) marker.remove();
       markers.clear();
+      pointElementsRef.current.clear();
       onScreen = new Set();
       try {
         if (map.getLayer(`${SRC}-clusters`)) map.removeLayer(`${SRC}-clusters`);
@@ -839,6 +939,17 @@ export function VWorldFeatureClusters({
     // features 변경은 위 setData effect로 반영하므로 deps는 map 생애만.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map]);
+
+  // 선택 변경 시 마커 풀/레이어를 건드리지 않고, 현재 떠 있는 point/label element의
+  // outline만 다시 칠한다(#500 (c)). render마다 가벼우므로 deps에 selectedFeatureId만 둔다.
+  useEffect(() => {
+    for (const [featureId, element] of pointElementsRef.current) {
+      setSelectedOutline(element, selectedFeatureId === featureId);
+    }
+    for (const [featureId, element] of labelElementsRef.current) {
+      setSelectedOutline(element, selectedFeatureId === featureId);
+    }
+  }, [selectedFeatureId]);
 
   return null;
 }

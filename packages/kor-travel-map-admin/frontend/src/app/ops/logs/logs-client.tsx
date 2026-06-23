@@ -131,11 +131,15 @@ export function LogsClient() {
   type ApiLogRow = (typeof apiItems)[number];
   type JobEventRow = (typeof eventItems)[number];
 
+  // 세 로그 테이블은 모두 keyset cursor 목록(next_cursor 페이징) — 서버가 정렬을 소유하므로
+  // 모든 accessor 컬럼의 client 정렬을 끈다(#502: manual 기본에서 client 정렬은 현재 페이지만
+  // 재배열해 오해를 줌).
   const systemColumns = useMemo<ColumnDef<SystemLogRow, unknown>[]>(
     () => [
       {
         accessorKey: "created_at",
         header: "created",
+        enableSorting: false,
         cell: ({ row }) => (
           <span className="text-muted-foreground">
             {formatDateTime(row.original.created_at)}
@@ -145,10 +149,11 @@ export function LogsClient() {
       {
         accessorKey: "level",
         header: "level",
+        enableSorting: false,
         cell: ({ row }) => <StatusBadge status={row.original.level} />,
       },
-      { accessorKey: "source", header: "source" },
-      { accessorKey: "event", header: "event" },
+      { accessorKey: "source", header: "source", enableSorting: false },
+      { accessorKey: "event", header: "event", enableSorting: false },
       {
         id: "message",
         header: "message",
@@ -178,6 +183,7 @@ export function LogsClient() {
       {
         accessorKey: "created_at",
         header: "created",
+        enableSorting: false,
         cell: ({ row }) => (
           <span className="text-muted-foreground">
             {formatDateTime(row.original.created_at)}
@@ -187,11 +193,13 @@ export function LogsClient() {
       {
         accessorKey: "method",
         header: "method",
+        enableSorting: false,
         cell: ({ row }) => <Badge variant="outline">{row.original.method}</Badge>,
       },
       {
         accessorKey: "status_code",
         header: "status",
+        enableSorting: false,
         cell: ({ row }) => (
           <StatusBadge status={String(row.original.status_code)} />
         ),
@@ -199,6 +207,7 @@ export function LogsClient() {
       {
         accessorKey: "duration_ms",
         header: "duration",
+        enableSorting: false,
         cell: ({ row }) => (
           <span className="font-mono">{row.original.duration_ms}ms</span>
         ),
@@ -226,6 +235,7 @@ export function LogsClient() {
       {
         accessorKey: "error_code",
         header: "error",
+        enableSorting: false,
         cell: ({ row }) => row.original.error_code ?? "-",
       },
     ],
@@ -237,6 +247,7 @@ export function LogsClient() {
       {
         accessorKey: "occurred_at",
         header: "occurred",
+        enableSorting: false,
         cell: ({ row }) => (
           <span className="text-muted-foreground">
             {formatDateTime(row.original.occurred_at)}
@@ -246,21 +257,25 @@ export function LogsClient() {
       {
         accessorKey: "level",
         header: "level",
+        enableSorting: false,
         cell: ({ row }) => <StatusBadge status={row.original.level} />,
       },
       {
         accessorKey: "provider",
         header: "provider",
+        enableSorting: false,
         cell: ({ row }) => row.original.provider ?? "-",
       },
       {
         accessorKey: "dataset_key",
         header: "dataset",
+        enableSorting: false,
         cell: ({ row }) => row.original.dataset_key ?? "-",
       },
       {
         accessorKey: "stage",
         header: "stage",
+        enableSorting: false,
         cell: ({ row }) => row.original.stage ?? "-",
       },
       {
@@ -294,6 +309,7 @@ export function LogsClient() {
       {
         accessorKey: "code",
         header: "code",
+        enableSorting: false,
         cell: ({ row }) => row.original.code ?? "-",
       },
     ],

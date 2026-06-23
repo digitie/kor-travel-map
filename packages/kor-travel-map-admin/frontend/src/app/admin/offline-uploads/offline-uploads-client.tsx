@@ -480,6 +480,7 @@ function ValidationPanel({
               `${issue.code}-${issue.row_number ?? index}`
             }
             emptyMessage="validation issue가 없습니다."
+            manualSorting={false}
             containerClassName="max-h-72 overflow-auto rounded-md border"
           />
         </div>
@@ -850,6 +851,7 @@ export function OfflineUploadsClient() {
             onRowClick={(upload) => setSelectedUploadId(upload.upload_id)}
             isRowActive={(upload) => upload.upload_id === selectedUploadId}
             rowTestId={() => "offline-upload-row"}
+            manualSorting={false}
             containerClassName="overflow-auto rounded-lg border bg-background"
           />
         </div>

@@ -233,6 +233,7 @@ export function ImportJobsClient({
           getRowId={(row) => row.job_id}
           isLoading={jobs.isLoading}
           emptyMessage="import job이 없습니다."
+          manualSorting={false}
           containerClassName="overflow-auto rounded-lg border bg-background"
         />
       </div>

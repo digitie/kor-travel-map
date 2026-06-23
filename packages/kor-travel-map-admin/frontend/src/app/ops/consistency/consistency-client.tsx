@@ -195,6 +195,7 @@ export function ConsistencyClient() {
               getRowId={(row) => row.report_id}
               isLoading={reports.isLoading}
               emptyMessage="데이터가 없습니다."
+              manualSorting={false}
               containerClassName="overflow-auto"
             />
           </div>
@@ -227,6 +228,7 @@ export function ConsistencyClient() {
               getRowId={(row) => row.issue_id}
               isLoading={issues.isLoading}
               emptyMessage="데이터가 없습니다."
+              manualSorting={false}
               containerClassName="overflow-auto"
             />
           </div>

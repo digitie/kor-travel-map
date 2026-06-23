@@ -156,6 +156,7 @@ export function FeatureWeatherPanel({
               }
               isLoading={weather.isLoading}
               emptyMessage="weather metric이 없습니다."
+              manualSorting={false}
             />
           </div>
         </div>

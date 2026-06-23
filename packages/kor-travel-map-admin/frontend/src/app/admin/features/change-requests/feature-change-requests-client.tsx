@@ -941,6 +941,7 @@ export function FeatureChangeRequestsClient() {
             getRowId={(row) => row.request_id}
             isLoading={changes.isLoading}
             emptyMessage="feature change request가 없습니다."
+            manualSorting={false}
             containerClassName="min-w-0 overflow-auto rounded-lg border bg-background"
             onRowClick={(row) => setSelectedRequest(row)}
             isRowActive={(row) =>

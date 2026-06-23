@@ -312,6 +312,7 @@ export function DedupReviewClient() {
           getRowId={(row) => row.review_id}
           isLoading={reviews.isLoading}
           emptyMessage="dedup review가 없습니다."
+          manualSorting={false}
           containerClassName="overflow-auto rounded-lg border bg-background"
           enableRowSelection={(row) => row.original.status === "pending"}
           rowSelection={rowSelection}

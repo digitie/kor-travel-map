@@ -107,20 +107,24 @@ export function PoiCacheTargetsClient() {
           </span>
         ),
       },
-      { accessorKey: "scope_mode", header: "scope" },
+      // keyset cursor 목록(next_cursor 페이징) — 서버가 정렬을 소유하므로 컬럼 정렬을
+      // 끈다(#502: manual 기본에서 client 정렬은 현재 페이지만 재배열해 오해를 줌).
+      { accessorKey: "scope_mode", header: "scope", enableSorting: false },
       {
         accessorKey: "update_enabled",
         header: "enabled",
+        enableSorting: false,
         cell: ({ row }) => (
           <StatusBadge
             status={row.original.update_enabled ? "active" : "disabled"}
           />
         ),
       },
-      { accessorKey: "refresh_policy", header: "refresh" },
+      { accessorKey: "refresh_policy", header: "refresh", enableSorting: false },
       {
         accessorKey: "updated_at",
         header: "updated",
+        enableSorting: false,
         cell: ({ row }) => (
           <span className="text-muted-foreground">
             {formatDateTime(row.original.updated_at)}
@@ -171,10 +175,12 @@ export function PoiCacheTargetsClient() {
           </>
         ),
       },
-      { accessorKey: "kind", header: "kind" },
+      // nearby는 서버가 거리순(또는 지정 sort)으로 반환 — client 재정렬을 끈다(#502).
+      { accessorKey: "kind", header: "kind", enableSorting: false },
       {
         accessorKey: "distance_m",
         header: "distance",
+        enableSorting: false,
         cell: ({ row }) => (
           <span className="font-mono">
             {row.original.distance_m.toFixed(1)}m

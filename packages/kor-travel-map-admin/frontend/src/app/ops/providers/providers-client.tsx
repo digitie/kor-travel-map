@@ -564,6 +564,7 @@ function DatasetDetailPanel({
         data={detail?.sync_states ?? []}
         getRowId={(state) => state.sync_scope}
         emptyMessage="sync state 없음"
+        manualSorting={false}
         containerClassName="overflow-auto rounded-lg border bg-background"
       />
 
@@ -579,6 +580,7 @@ function DatasetDetailPanel({
         data={detail?.recent_update_requests ?? []}
         getRowId={(request) => request.request_id}
         emptyMessage="provider_dataset request 없음"
+        manualSorting={false}
         containerClassName="overflow-auto rounded-lg border bg-background"
       />
     </div>
@@ -792,6 +794,7 @@ export function ProvidersFreshnessClient() {
             isRowActive={(row) =>
               activeSelection ? sameDataset(row, activeSelection) : false
             }
+            manualSorting={false}
             containerClassName="overflow-auto rounded-lg border bg-background"
           />
 
