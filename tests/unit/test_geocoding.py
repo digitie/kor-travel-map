@@ -769,6 +769,38 @@ def test_rest_client_custom_base_path() -> None:
     assert seen == ["/api/v2/reverse"]
 
 
+def test_rest_client_api_key_is_sent_as_vworld_compatible_query() -> None:
+    seen: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.url.path, request.url.params.get("key", "")))
+        if request.url.path.endswith("/regions/within-radius"):
+            return httpx.Response(
+                200,
+                json={
+                    "center": {"lon": 126.978, "lat": 37.5665},
+                    "radius_km": 3.0,
+                    "sigungu": [],
+                    "emd": [],
+                },
+            )
+        return httpx.Response(200, json={"status": "OK", "candidates": []})
+
+    async def _run() -> None:
+        async with _mock_client(handler) as http:
+            client = KorTravelGeoRestClient(http, api_key=" geo-key ")
+            await client.reverse(127.0, 37.0)
+            await client.geocode("서울특별시 중구 세종대로 110")
+            await client.regions_within_radius(lon=126.978, lat=37.5665)
+
+    asyncio.run(_run())
+    assert seen == [
+        ("/v2/reverse", "geo-key"),
+        ("/v2/geocode", "geo-key"),
+        ("/v2/regions/within-radius", "geo-key"),
+    ]
+
+
 def test_rest_client_reverse_radius_m_none_omits_key() -> None:
     """radius_m=None (기본) → JSON body에서 키 자체 누락 — upstream 기본값 따름."""
     seen: list[dict[str, Any]] = []

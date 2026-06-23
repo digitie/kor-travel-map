@@ -1,21 +1,13 @@
 /**
  * Backend API client (fetch wrapper).
  *
- * `NEXT_PUBLIC_KOR_TRAVEL_MAP_API` base URL을 사용해 FastAPI(12701)에
- * 접근. API 모듈의 DTO는 가능한 한 `npm run gen:types`로 생성한
+ * Next.js `/api/proxy` BFF를 통해 FastAPI(12701)에 접근한다. API 모듈의 DTO는 가능한 한 `npm run gen:types`로 생성한
  * `src/api/types.ts`의 OpenAPI 타입에서 파생한다.
- *
- * 인증/세션 헤더 없음 (ADR-005 + ADR-035 — 네트워크 계층 책임).
  */
 
 import type { components } from "./types";
-import { publicUrlEnv } from "./env";
 
-const BASE_URL = publicUrlEnv(
-  process.env.NEXT_PUBLIC_KOR_TRAVEL_MAP_API,
-  "NEXT_PUBLIC_KOR_TRAVEL_MAP_API",
-  "http://127.0.0.1:12701",
-);
+const BASE_URL = "/api/proxy";
 
 type ClientSchemas = components["schemas"];
 
@@ -88,13 +80,13 @@ async function requestJson<T>(
       Accept: "application/json",
       ...(options.body !== undefined ? { "Content-Type": "application/json" } : {}),
     },
-    // ADR-005: 내부망 전용 — credentials 미포함.
-    credentials: "omit",
+    credentials: "same-origin",
     cache: options.cache ?? "no-store",
     signal: options.signal,
     ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
   });
   if (!response.ok) {
+    redirectToLoginOnAuthRequired(response.status);
     const detail = await response.text().catch(() => "");
     throw new ApiClientError(
       `${method} ${path} 실패 (HTTP ${response.status})${detail ? ` ${detail}` : ""}`,
@@ -125,12 +117,13 @@ export async function postFormData<T>(
   const response = await fetch(`${BASE_URL}${path}`, {
     method: "POST",
     headers: { Accept: "application/json" },
-    credentials: "omit",
+    credentials: "same-origin",
     cache: "no-store",
     signal: options.signal,
     body,
   });
   if (!response.ok) {
+    redirectToLoginOnAuthRequired(response.status);
     const detail = await response.text().catch(() => "");
     throw new ApiClientError(
       `POST ${path} 실패 (HTTP ${response.status})${detail ? ` ${detail}` : ""}`,
@@ -173,6 +166,17 @@ export function fetchHealth(options: RequestOptions = {}): Promise<HealthRespons
 /** `GET /version` — backend + lib version 정보. */
 export function fetchVersion(options: RequestOptions = {}): Promise<VersionResponse> {
   return getJson<VersionResponse>("/version", options);
+}
+
+function redirectToLoginOnAuthRequired(status: number): void {
+  if (status !== 401 || typeof window === "undefined") {
+    return;
+  }
+  const current = `${window.location.pathname}${window.location.search}`;
+  if (window.location.pathname === "/login") {
+    return;
+  }
+  window.location.assign(`/login?next=${encodeURIComponent(current)}`);
 }
 
 export { ApiClientError, BASE_URL };

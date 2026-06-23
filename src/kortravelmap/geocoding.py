@@ -783,10 +783,20 @@ class KorTravelGeoRestClient:
     """
 
     def __init__(
-        self, http_client: httpx.AsyncClient, *, base_path: str = "/v2"
+        self,
+        http_client: httpx.AsyncClient,
+        *,
+        base_path: str = "/v2",
+        api_key: str | None = None,
     ) -> None:
         self._http = http_client
         self._base = base_path.rstrip("/")
+        self._api_key = api_key.strip() if api_key is not None else None
+
+    def _query_params(self) -> dict[str, str] | None:
+        if not self._api_key:
+            return None
+        return {"key": self._api_key}
 
     async def reverse(
         self,
@@ -810,7 +820,11 @@ class KorTravelGeoRestClient:
         }
         if radius_m is not None:
             body["radius_m"] = radius_m
-        resp = await self._http.post(f"{self._base}/reverse", json=body)
+        resp = await self._http.post(
+            f"{self._base}/reverse",
+            json=body,
+            params=self._query_params(),
+        )
         resp.raise_for_status()
         return _parse_reverse_response(resp.json())
 
@@ -831,7 +845,11 @@ class KorTravelGeoRestClient:
             body["road_address"] = address
         else:
             body["jibun_address"] = address
-        resp = await self._http.post(f"{self._base}/geocode", json=body)
+        resp = await self._http.post(
+            f"{self._base}/geocode",
+            json=body,
+            params=self._query_params(),
+        )
         resp.raise_for_status()
         return _parse_geocode_response(resp.json())
 
@@ -850,7 +868,11 @@ class KorTravelGeoRestClient:
             "radius_km": radius_km,
             "levels": list(levels),
         }
-        resp = await self._http.post(f"{self._base}/regions/within-radius", json=body)
+        resp = await self._http.post(
+            f"{self._base}/regions/within-radius",
+            json=body,
+            params=self._query_params(),
+        )
         resp.raise_for_status()
         return _parse_regions_within_radius_response(resp.json())
 

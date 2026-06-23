@@ -4,11 +4,31 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${KOR_TRAVEL_MAP_ENV_FILE:-"$ROOT_DIR/.env"}"
 
+load_env_file() {
+  local line key value first last
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    [[ -z "$line" || "${line:0:1}" == "#" ]] && continue
+    if [[ "$line" == export\ * ]]; then
+      line="${line#export }"
+    fi
+    [[ "$line" == *=* ]] || continue
+    key="${line%%=*}"
+    value="${line#*=}"
+    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    if [[ ${#value} -ge 2 ]]; then
+      first="${value:0:1}"
+      last="${value: -1}"
+      if [[ "$first$last" == '""' || "$first$last" == "''" ]]; then
+        value="${value:1:${#value}-2}"
+      fi
+    fi
+    export "$key=$value"
+  done <"$1"
+}
+
 if [[ -f "$ENV_FILE" ]]; then
-  set -a
-  # shellcheck disable=SC1090
-  source "$ENV_FILE"
-  set +a
+  load_env_file "$ENV_FILE"
 fi
 
 export KOR_TRAVEL_MAP_API_HOST="${KOR_TRAVEL_MAP_API_HOST:-127.0.0.1}"
@@ -126,4 +146,10 @@ export_first KOR_TRAVEL_MAP_API_AIRKOREA_SERVICE_KEY \
 export_first KOR_TRAVEL_MAP_API_KRFOREST_SERVICE_KEY \
   KRFOREST_SERVICE_KEY KRFOREST_API_KEY DATA_GO_KR_SERVICE_KEY
 export_first NEXT_PUBLIC_VWORLD_API_KEY \
+  KOR_TRAVEL_GEO_VWORLD_API_KEY VWORLD_API_KEY
+export_first KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY \
+  NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY NEXT_PUBLIC_VWORLD_API_KEY \
+  KOR_TRAVEL_GEO_VWORLD_API_KEY VWORLD_API_KEY
+export_first NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY \
+  KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY NEXT_PUBLIC_VWORLD_API_KEY \
   KOR_TRAVEL_GEO_VWORLD_API_KEY VWORLD_API_KEY

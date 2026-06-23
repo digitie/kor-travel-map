@@ -244,11 +244,15 @@ def _kor_travel_geo_base_url() -> str:
     return base_url
 
 
+def _kor_travel_geo_api_key() -> str | None:
+    return KorTravelMapSettings().kor_travel_geo_api_key_value
+
+
 async def _forward_geocode(address: str) -> dict[str, Any] | None:
     """주소 문자열 → kor-travel-geo 정지오코딩 candidate dict. 결과 없으면 ``None``."""
     base_url = _kor_travel_geo_base_url()
     async with httpx.AsyncClient(base_url=base_url) as http:
-        client = KorTravelGeoRestClient(http)
+        client = KorTravelGeoRestClient(http, api_key=_kor_travel_geo_api_key())
         response = await client.geocode(address)
     coordinate = geocode_response_to_coordinate(response)
     addr = geocode_response_to_address(response)
@@ -275,7 +279,7 @@ async def _reverse_geocode(lon: float, lat: float) -> dict[str, Any] | None:
     """좌표 → kor-travel-geo 역지오코딩 candidate dict. 결과 없으면 ``None``."""
     base_url = _kor_travel_geo_base_url()
     async with httpx.AsyncClient(base_url=base_url) as http:
-        client = KorTravelGeoRestClient(http)
+        client = KorTravelGeoRestClient(http, api_key=_kor_travel_geo_api_key())
         response = await client.reverse(x=lon, y=lat)
     addr = reverse_response_to_address(response)
     if addr is None:

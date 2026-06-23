@@ -42,7 +42,7 @@ require_command() {
 
 database_exists() {
   local database_name="$1"
-  docker compose exec -T postgres psql \
+  docker compose --env-file /dev/null exec -T postgres psql \
     -U "$POSTGRES_USER" \
     -d postgres \
     -tAc "SELECT 1 FROM pg_database WHERE datname = '${database_name}'" |
@@ -60,7 +60,7 @@ require_database() {
 query_scalar() {
   local database_name="$1"
   local sql="$2"
-  docker compose exec -T postgres psql \
+  docker compose --env-file /dev/null exec -T postgres psql \
     -U "$POSTGRES_USER" \
     -d "$database_name" \
     -tAc "$sql" |

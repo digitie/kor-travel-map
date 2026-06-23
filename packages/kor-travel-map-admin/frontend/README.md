@@ -48,6 +48,7 @@ feature 운영, provider 적재, dedup/결측 검토, 오프라인 업로드를 
 | `NEXT_PUBLIC_VWORLD_API_KEY` | VWorld API key. **`kor-travel-geo`의 `KOR_TRAVEL_GEO_VWORLD_API_KEY`와 동일 값 공유** (ADR-025 사용자 보강 2026-05-25). 별도 발급 금지. |
 | `NEXT_PUBLIC_KOR_TRAVEL_MAP_API` | 백엔드 base URL (`http://127.0.0.1:12701` 기본) |
 | `NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL` | Dagster UI/embed base URL (`http://127.0.0.1:12702` 기본) |
+| `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY` | kor-travel-geo v2 `key` query 값. 현재 `NEXT_PUBLIC_VWORLD_API_KEY`와 동일 값 |
 
 > **VWorld key 공유 정책**: 본 frontend가 사용하는 VWorld key는
 > `kor-travel-geo` ADR-019의 `KOR_TRAVEL_GEO_VWORLD_API_KEY`와 동일하다.

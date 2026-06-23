@@ -156,7 +156,7 @@ if [[ "$KOR_TRAVEL_MAP_RESTORE_SKIP_CHECKSUM" != "1" ]]; then
   )
 fi
 
-compose=(docker compose)
+compose=(docker compose --env-file /dev/null)
 
 database_exists() {
   local database_name="$1"

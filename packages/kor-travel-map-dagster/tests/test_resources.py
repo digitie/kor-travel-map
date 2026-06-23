@@ -148,10 +148,16 @@ def test_reverse_geocoder_resource_builds_and_closes_client(
         "http://127.0.0.1:12501",
     )
     monkeypatch.setenv("KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_TIMEOUT_SECONDS", "2.5")
+    monkeypatch.setenv("KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY", "geo-key")
     _FakeHttpClient.instances = []
     sentinel = object()
 
-    def _fake_client(client: _FakeHttpClient) -> tuple[str, _FakeHttpClient]:
+    def _fake_client(
+        client: _FakeHttpClient,
+        *,
+        api_key: str | None = None,
+    ) -> tuple[str, _FakeHttpClient]:
+        assert api_key == "geo-key"
         return ("kraddr", client)
 
     def _fake_reverse(

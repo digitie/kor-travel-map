@@ -11,6 +11,7 @@ prefix 분리 (ADR-035):
 
 from __future__ import annotations
 
+from kortravelmap.api.routers.admin_auth import router as admin_auth_router
 from kortravelmap.api.routers.admin_backups import (
     restore_router as admin_restore_router,
 )
@@ -50,6 +51,7 @@ from kortravelmap.api.routers.public_views import router as public_views_router
 __all__ = [
     "etl_router",
     "admin_backups_router",
+    "admin_auth_router",
     "admin_restore_router",
     "admin_features_router",
     "admin_curated_router",

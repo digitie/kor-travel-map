@@ -1,6 +1,6 @@
 # ADR — Architecture Decision Records
 
-`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-060.**
+`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-061.**
 
 - ADR은 **프로그램 핵심 구조**(의존 계층·데이터/식별 모델·패키지/서비스 구조·REST 계약·
   운영 모델) 결정만 둔다. provider/ETL·도메인 taxonomy·알고리즘·process·운영 결정은 해당 topic
@@ -73,6 +73,7 @@
 | ADR-057 | kor-travel-concierge feature_id를 안정 candidate.id에 고정 (bjd/category 식별자 분리) | → 이관 [etl/feature-id-determinism.md](../etl/feature-id-determinism.md) |
 | ADR-058 | geocoder-의존 provider feature_id 결정성을 geocoder 필수화(F-01, re-key 없음)로 보장 | → 이관 [etl/feature-id-determinism.md](../etl/feature-id-determinism.md) |
 | ADR-059 | 벤더링된 agent/skill 설정의 언어·context-discovery 예외 정책 | → 이관 [agent-guide.md](../agent-guide.md) |
+| ADR-060 | Admin 로그인, frontend proxy, public API key | [060-admin-login-frontend-proxy-public-api-keys.md](060-admin-login-frontend-proxy-public-api-keys.md) |
 
 ## 새 ADR 작성 규약
 

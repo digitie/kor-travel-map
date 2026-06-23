@@ -113,6 +113,7 @@ shadcn/ui + `@kor-travel-map/map-marker-react` (ADR-029). 자세한 사양:
 | `NEXT_PUBLIC_KOR_TRAVEL_MAP_API` | 개발 기본 `http://127.0.0.1:12701` | 백엔드 base URL. production에서는 명시 필수 |
 | `NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL` | 개발 기본 `http://127.0.0.1:12702` | Dagster UI/embed base URL. production에서는 명시 필수 |
 | `NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL` | 개발 기본 `http://127.0.0.1:12501` | 수동 feature 작성 화면의 kor-travel-geo v2 geocode/reverse base URL. production에서는 명시 필수 |
+| `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY` | `NEXT_PUBLIC_VWORLD_API_KEY`와 동일 값 | kor-travel-geo v2 `key` query 값. production에서는 명시 필수 |
 
 메인 라이브러리 환경변수(`KOR_TRAVEL_MAP_PG_DSN`, `KOR_TRAVEL_MAP_OBJECT_STORE_*` 등)는
 그대로 사용한다. API 패키지는 메인 라이브러리의 settings를 함께 사용한다.

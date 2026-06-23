@@ -36,6 +36,7 @@ from kortravelmap.geocoding import (
     kor_travel_geo_reverse_geocoder,
 )
 from kortravelmap.providers.standard_data import cultural_festivals_to_bundles
+from kortravelmap.settings import KorTravelMapSettings
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -153,7 +154,11 @@ async def _enrich_and_load(
 ) -> list[object]:
     """축제 items → kor-travel-geo로 bjd 보강 → client.load_feature_bundles → bundles 반환."""
     async with httpx.AsyncClient(base_url=base_url, timeout=10.0) as http:
-        kraddr = KorTravelGeoRestClient(http)
+        settings = KorTravelMapSettings()
+        kraddr = KorTravelGeoRestClient(
+            http,
+            api_key=settings.kor_travel_geo_api_key_value,
+        )
         reverse = cached_reverse_geocoder(
             kor_travel_geo_reverse_geocoder(kraddr, max_distance_m=500)
         )

@@ -396,7 +396,11 @@ async def _geocoders_for(
     )
 
     async with httpx.AsyncClient(base_url=base_url, timeout=10.0) as http:
-        client = KorTravelGeoRestClient(http)
+        settings = KorTravelMapSettings()
+        client = KorTravelGeoRestClient(
+            http,
+            api_key=settings.kor_travel_geo_api_key_value,
+        )
         yield (
             kor_travel_geo_reverse_geocoder(client),
             kor_travel_geo_address_resolver(client, fallback="api"),

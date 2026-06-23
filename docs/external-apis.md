@@ -39,8 +39,9 @@
 | `GOOGLE_PLACES_API_KEY` | google-places-api-new | Google Cloud Console (Places API New) | field mask 필수 |
 | `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_BASE_URL` | kor-travel-concierge-youtube | 형제 앱 kor-travel-concierge | base URL, 예: `http://127.0.0.1:12401` |
 | `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_API_KEY` | kor-travel-concierge-youtube | kor-travel-concierge `API_KEYS` 중 하나 | `X-API-Key` 헤더로 전송 |
-| `KOR_TRAVEL_GEO_*` | kor-travel-geo | (로컬 DB 위주, vworld 폴백 키는 kor-travel-geo가 관리) | 본 라이브러리는 kor-travel-geo client만 사용 |
+| `KOR_TRAVEL_GEO_*` | kor-travel-geo | (로컬 DB 위주, vworld 폴백 키는 kor-travel-geo가 관리) | geo 서비스 자체 설정. 본 라이브러리는 HTTP client만 사용 |
 | `KOR_TRAVEL_GEO_VWORLD_API_KEY` | kor-travel-geo (reverse geocoding), 디버그/admin UI frontend (MapLibre/VWorld), PinVi 사용자 UI (ADR-026) | VWorld (vworld.kr) | **공유 키**. 별도 발급 X. ADR-025 + ADR-026 |
+| `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY` / `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY` | kor-travel-map API/Dagster/CLI 및 admin frontend의 kor-travel-geo v2 호출 | kor-travel-geo public REST v2 | `KOR_TRAVEL_GEO_VWORLD_API_KEY`와 동일 값을 넣는다. geo v2는 VWorld 호환 `key` query를 요구한다. |
 
 ## 3. provider별 발급 절차 (요약)
 
@@ -233,8 +234,10 @@ provider API spec이 변경되면:
   `kor-travel-geo` ADR-019의 `KOR_TRAVEL_GEO_VWORLD_API_KEY`를 **공유 사용**
   (ADR-025 사용자 보강 2026-05-25). 별도 발급 금지. frontend는 **Next.js**
   (ADR-025 2차 보강) 규약상 `NEXT_PUBLIC_VWORLD_API_KEY`로 노출 — 값은
-  동일 출처. HTTP referrer 제한 권장 (backend 호스트 + PinVi frontend
-  호스트).
+  동일 출처. `kor-travel-geo` public REST v2 호출에는 같은 값을
+  `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY`와 `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY`에
+  넣어 `key` query로 전달한다. HTTP referrer 제한 권장 (backend 호스트 +
+  PinVi frontend 호스트).
 - **Kakao Maps JS SDK**: **미사용** (ADR-026 — PinVi 사용자 UI도
   VWorld/MapLibre 계열로 통일, SPEC V8 v8_3 supersede). 본 항목은 reference로
   유지하되 비용/한도 모니터링 대상이 아니다.

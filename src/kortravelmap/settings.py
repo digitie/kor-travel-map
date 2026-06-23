@@ -136,6 +136,22 @@ class KorTravelMapSettings(BaseSettings):
         le=30.0,
         description="kor-travel-geo REST 호출 timeout seconds.",
     )
+    kor_travel_geo_api_key: SecretStr | None = Field(
+        default=None,
+        description=(
+            "kor-travel-geo REST v2 public API key. geo PR#399 이후 외부/비신뢰 "
+            "호출에는 VWorld 호환 ``key`` query가 필요하다. 현재 운영은 "
+            "VWorld API key와 동일 값을 넣는다."
+        ),
+    )
+
+    @property
+    def kor_travel_geo_api_key_value(self) -> str | None:
+        """kor-travel-geo REST client에 넘길 query key 원문 값."""
+        if self.kor_travel_geo_api_key is None:
+            return None
+        value = self.kor_travel_geo_api_key.get_secret_value().strip()
+        return value or None
 
     # ── Provider API credentials (Dagster resource wiring, ADR-044/045) ──
     data_go_kr_service_key: SecretStr | None = Field(

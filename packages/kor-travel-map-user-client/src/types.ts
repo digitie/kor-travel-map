@@ -1564,6 +1564,8 @@ export interface operations {
                 include_counts?: boolean;
                 /** @description counts를 status='active' feature만으로 집계 */
                 active_only?: boolean;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
             };
             header?: never;
             path?: never;
@@ -1822,7 +1824,10 @@ export interface operations {
     };
     get_features_batch_v1_features_batch_post: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1883,6 +1888,8 @@ export interface operations {
                 max_items?: number;
                 /** @description route/area 지도 표시용 GeoJSON geometry 포함 여부. */
                 include_geometry?: boolean;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
             };
             header?: never;
             path?: never;
@@ -1939,6 +1946,8 @@ export interface operations {
                 page_size?: number;
                 cursor?: string | null;
                 sort?: "distance" | "name" | "last_updated_at";
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
             };
             header?: never;
             path?: never;
@@ -1995,6 +2004,8 @@ export interface operations {
                 page_size?: number;
                 cursor?: string | null;
                 sort?: "distance" | "name" | "last_updated_at";
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
             };
             header?: never;
             path?: never;
@@ -2061,6 +2072,8 @@ export interface operations {
                 page_size?: number;
                 cursor?: string | null;
                 include_total?: boolean;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
             };
             header?: never;
             path?: never;
@@ -2099,7 +2112,10 @@ export interface operations {
     };
     get_feature_v1_features__feature_id__get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
+            };
             header?: never;
             path: {
                 feature_id: string;
@@ -2151,6 +2167,8 @@ export interface operations {
             query?: {
                 /** @description 이 시점 이하 weather만(미래 예보 제외). */
                 asof?: string | null;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
             };
             header?: never;
             path: {
@@ -2191,7 +2209,10 @@ export interface operations {
     };
     list_providers_freshness_v1_providers_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2205,6 +2226,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProvidersFreshnessResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
             /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
@@ -2225,6 +2255,8 @@ export interface operations {
                 dataset_key?: string | null;
                 /** @description sync_scope 필터 */
                 sync_scope?: string | null;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
             };
             header?: never;
             path: {
@@ -2282,6 +2314,8 @@ export interface operations {
                 cursor?: string | null;
                 include_quality?: boolean;
                 include_forecast?: boolean;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
             };
             header?: never;
             path?: never;
@@ -2328,6 +2362,8 @@ export interface operations {
                 sido_code?: string | null;
                 sigungu_code?: string | null;
                 max_items?: number;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
             };
             header?: never;
             path?: never;
@@ -2369,6 +2405,8 @@ export interface operations {
             query?: {
                 include_quality?: boolean;
                 include_forecast?: boolean;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
             };
             header?: never;
             path: {
@@ -2417,6 +2455,8 @@ export interface operations {
                 max_lon?: number | null;
                 max_lat?: number | null;
                 max_items?: number;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
             };
             header?: never;
             path?: never;
@@ -2463,6 +2503,8 @@ export interface operations {
                 page_size?: number;
                 cursor?: string | null;
                 include_months?: boolean;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
             };
             header?: never;
             path?: never;
@@ -2501,7 +2543,10 @@ export interface operations {
     };
     get_public_festival_v1_public_festivals__feature_id__get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
+            };
             header?: never;
             path: {
                 feature_id: string;

@@ -16,6 +16,8 @@ import {
   RefreshCwIcon,
   RadarIcon,
   RouteIcon,
+  LogOutIcon,
+  SettingsIcon,
   SparklesIcon,
   WorkflowIcon,
 } from "lucide-react";
@@ -65,6 +67,7 @@ const navItems = [
   },
   { href: "/admin/backups", label: "Backups", icon: ArchiveIcon },
   { href: "/admin/dagster", label: "Dagster", icon: WorkflowIcon },
+  { href: "/admin/settings", label: "Settings", icon: SettingsIcon },
   { href: "/etl", label: "ETL preview", icon: DatabaseIcon },
 ] as const;
 
@@ -126,6 +129,7 @@ export function AdminShell({
                 );
               })}
             </nav>
+            <ButtonLogout />
           </div>
         </aside>
         <div className="min-w-0">
@@ -155,4 +159,28 @@ export function AdminShell({
       </div>
     </main>
   );
+}
+
+function ButtonLogout() {
+  return (
+    <button
+      className={cn(
+        buttonVariants({ variant: "ghost", size: "sm" }),
+        "mt-auto justify-start text-text-secondary",
+      )}
+      type="button"
+      onClick={() => void logout()}
+    >
+      <LogOutIcon data-icon="inline-start" />
+      로그아웃
+    </button>
+  );
+}
+
+async function logout() {
+  try {
+    await fetch("/api/auth/logout", { method: "POST" });
+  } finally {
+    window.location.assign("/login");
+  }
 }

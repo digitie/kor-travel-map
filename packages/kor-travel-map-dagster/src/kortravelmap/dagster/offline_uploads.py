@@ -51,7 +51,10 @@ async def load_offline_upload_op(context: OpExecutionContext) -> dict[str, objec
             base_url=settings.kor_travel_geo_base_url,
             timeout=10.0,
         ) as http:
-            kraddr = KorTravelGeoRestClient(http)
+            kraddr = KorTravelGeoRestClient(
+                http,
+                api_key=settings.kor_travel_geo_api_key_value,
+            )
             result = await client.run_offline_upload_load_job(
                 upload_id,
                 store=store,

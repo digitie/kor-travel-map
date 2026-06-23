@@ -377,6 +377,7 @@ type drift 부채 0).
 | `NEXT_PUBLIC_KOR_TRAVEL_MAP_API` | 백엔드 API base URL (개발: `http://127.0.0.1:12701`) |
 | `NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL` | Dagster UI/embed base URL (개발: `http://127.0.0.1:12702`) |
 | `NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL` | 수동 feature 작성 화면의 kor-travel-geo REST v2 geocode/reverse base URL (개발: `http://127.0.0.1:12501`) |
+| `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY` | 수동 feature 작성 화면의 kor-travel-geo REST v2 호출용 `key` query 값. 현재 `NEXT_PUBLIC_VWORLD_API_KEY`와 동일 값 |
 | `KOR_TRAVEL_MAP_API_DAGSTER_URL` | backend가 Dagster GraphQL을 조회할 때 쓰는 Dagster webserver base URL. 로컬 기본 `http://127.0.0.1:12702`, Docker API 컨테이너 기본 `http://dagster:12702` |
 | `KOR_TRAVEL_MAP_API_DAGSTER_ALLOWED_HOSTS` | backend Dagster GraphQL 호출 host allowlist. 기본은 `["127.0.0.1","localhost","::1","dagster"]`이며, 운영 Dagster host를 별도로 쓰면 URL과 함께 명시한다 |
 | `KOR_TRAVEL_MAP_API_DAGSTER_REPOSITORY_NAME` | offline upload load GraphQL launch selector의 repositoryName. 기본 `__repository__` |
@@ -530,7 +531,8 @@ npm run doctor
   (FastAPI proxy/static mount, §14.3 옵션 B/C) 만.
 - VWorld API key는 frontend에 노출되지만 HTTP referrer 제한으로 보호.
   공유 키(`KOR_TRAVEL_GEO_VWORLD_API_KEY`)이므로 referrer 화이트리스트에 backend
-  호스트 + PinVi frontend 호스트(ADR-026) 모두 포함.
+  호스트 + PinVi frontend 호스트(ADR-026) 모두 포함. 같은 키를
+  `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY`로도 주입해 kor-travel-geo v2 `key` query에 쓴다.
 - 운영자 외부 접근은 SSH 터널 / Cloudflare Tunnel (ADR-005).
 
 ## 15. 핵심 메시지
