@@ -2,6 +2,54 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-23 (codex) — Admin 로그인 + public API key 관리
+
+사용자 요청으로 `kor-travel-geo` PR#399의 로그인/API key UX를 `kor-travel-map` admin UI에
+맞춰 반영했다.
+
+- **로그인/세션**: Next.js admin frontend에 `/login` 화면을 추가했고, `admin` 단일 계정을
+  gitignored `.env`의 PBKDF2-SHA256 password hash(`ad.min` 원문 미저장)와 server-only session
+  secret으로 검증한다. 세션은 HttpOnly/SameSite=Strict cookie + user-agent fingerprint +
+  logout revocation으로 관리한다.
+- **프록시 경계**: 기존 브라우저→FastAPI 직접 호출을 `/api/proxy` BFF로 전환했다. BFF는 세션
+  확인 후 `X-Kor-Travel-Map-Actor`와 proxy secret을 주입하고, FastAPI admin router는 secret이
+  설정된 환경에서 trusted proxy CIDR + secret + actor를 확인한다.
+- **감사 기록**: `ops.admin_auth_events` migration/repo/router를 추가해 로그인 성공/실패/거부와
+  로그아웃을 저장하고 `/admin/settings`에서 최근 100건을 볼 수 있게 했다.
+- **Public API key**: `ops.public_api_keys`에 key hash/hint만 저장하고, UI에서 VWorld 호환 32자
+  key를 랜덤 생성/폐기한다. 원문 key는 생성 직후 한 번만 보여주며, active hash는 TTL cache +
+  생성/폐기 시 cache invalidation으로 검증 경로 DB 부하를 줄인다.
+- **kor-travel-geo v2**: frontend와 backend geocoding 호출에 `key` query를 붙일 수 있게 했고,
+  현재 `.env`에는 VWorld API key와 동일 값을 쓰도록 설정했다. CLI/API/Dagster/live test의
+  `KorTravelGeoRestClient` 생성 경로도 `KorTravelMapSettings.kor_travel_geo_api_key_value`를
+  주입하도록 맞췄다. `scripts/load-env.sh`와 Docker compose/buildx/dev stack도
+  `KOR_TRAVEL_GEO_VWORLD_API_KEY`/`VWORLD_API_KEY`를
+  `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY`와 `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY`로
+  같은 값 매핑한다.
+- **Docker env hardening**: admin password hash처럼 `$`가 포함된 값을 깨뜨리지 않도록
+  `load-env.sh`가 `.env`를 shell `source`하지 않고 raw `KEY=VALUE`로 읽게 했다. compose
+  `env_file`에는 `format: raw`를 지정하고 scripts의 compose 호출은 `--env-file /dev/null`로
+  기본 `.env` interpolation을 우회한다.
+- **PR#399 리뷰 반영**: X-Forwarded-For/X-Real-IP는 명시 opt-in 전에는 rate-limit/audit에
+  쓰지 않게 했고, username 불일치 시에도 PBKDF2 검증을 수행한다. proxy-secret deny
+  테스트, 401 로그인 리다이렉트, 로그인 실패 a11y, clipboard fallback, invalid UUID revoke
+  404화도 반영했다. Alembic revision id는 `alembic_version.version_num varchar(32)`에 맞게
+  32자 이하로 줄였다.
+- **검증**: `pytest -q` 1326 passed, `ruff check .` passed,
+  `python -m mypy --strict src packages/kor-travel-map-api/src packages/kor-travel-map-dagster/src`
+  142 files passed, import-linter 4 contracts kept, admin frontend `npm run test` 37 passed,
+  `npm run type-check` passed, `npm run lint` 0 errors / 기존 warnings 6, OpenAPI/type drift
+  check passed, user-client typegen/type-check passed, `docker compose --env-file /dev/null config
+  --quiet` passed, shell script `bash -n` passed.
+- **prod smoke**: N150 production 서버(`192.168.1.14`)에 rsync + docker-manager compose
+  rebuild/restart로 반영했다. `rustfs` 재생성 중 bind mount 권한이 `root:root`라 실패한 문제는
+  컨테이너 UID/GID `10001:10001`로 소유권을 맞추고 `rustfs`만 force recreate해 복구했다.
+  이후 `rustfs`, geo API, map API/UI, Dagster가 healthy 상태임을 확인했다. geo v2
+  `POST /v2/reverse`는 key 없이 `400`, VWorld와 같은 key로 `200`을 반환했고, map API
+  `/v1/categories`는 key 없이 `401`, public key로 `200`을 반환했다. map API 컨테이너 내부
+  `KorTravelGeoRestClient(api_key=...)` reverse 호출도 `status=OK`, 후보 11건, 주소/법정동 코드
+  포함으로 성공했다.
+
 ## 2026-06-23 (codex) — Admin 지도 route/area 렌더링 + prod 직접 반영
 
 사용자 요청으로 admin Feature 지도에 feature 종류/카테고리 기반 마커와 route/area 전용

@@ -38,12 +38,15 @@ from starlette.responses import JSONResponse, Response
 from kortravelmap.api import __version__
 from kortravelmap.api.auth import (
     require_admin_destructive_enabled,
+    require_admin_frontend,
+    require_public_api_key,
 )
 from kortravelmap.api.db import configure_prometheus_metrics
 from kortravelmap.api.prometheus import PrometheusMetrics
 from kortravelmap.api.response import ProblemDetail, bind_request_id, reset_request_id
 from kortravelmap.api.response import request_id as response_request_id
 from kortravelmap.api.routers import (
+    admin_auth_router,
     admin_backups_router,
     admin_curated_router,
     admin_features_router,
@@ -455,32 +458,98 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         # ``POST /v1/features/batch``는 순수 service-to-service read라 route-level에서
         # service token으로 게이트한다(ADR-045 D-1; features.py). token 미설정이면
         # 통과(하위호환). 나머지 ``/v1/features`` read는 공용이라 앱 토큰을 강제하지 않는다.
-        application.include_router(features_router, prefix="/v1")
-        application.include_router(public_views_router, prefix="/v1")
+        public_dependencies = [Depends(require_public_api_key)]
+        application.include_router(
+            features_router,
+            prefix="/v1",
+            dependencies=public_dependencies,
+        )
+        application.include_router(
+            public_views_router,
+            prefix="/v1",
+            dependencies=public_dependencies,
+        )
         application.include_router(curated_router, prefix="/v1")
-        application.include_router(categories_router, prefix="/v1")
-        application.include_router(providers_router, prefix="/v1")
+        application.include_router(
+            categories_router,
+            prefix="/v1",
+            dependencies=public_dependencies,
+        )
+        application.include_router(
+            providers_router,
+            prefix="/v1",
+            dependencies=public_dependencies,
+        )
         # Step D on-demand 상세는 DB(적재된 raw_data) 필요 → features와 동일 gate.
         if settings.debug_routes_enabled:
             application.include_router(mois_detail_router, prefix="/v1")
 
     if admin_routes_enabled:
-        application.include_router(admin_backups_router, prefix="/v1")
+        admin_dependencies = [Depends(require_admin_frontend)]
+        application.include_router(
+            admin_auth_router,
+            prefix="/v1",
+            dependencies=admin_dependencies,
+        )
+        application.include_router(
+            admin_backups_router,
+            prefix="/v1",
+            dependencies=admin_dependencies,
+        )
         # restore/swap은 전부 파괴적 → kill-switch 게이트(admin_destructive_enabled).
         application.include_router(
             admin_restore_router,
             prefix="/v1",
-            dependencies=[Depends(require_admin_destructive_enabled)],
+            dependencies=[
+                Depends(require_admin_frontend),
+                Depends(require_admin_destructive_enabled),
+            ],
         )
-        application.include_router(admin_features_router, prefix="/v1")
-        application.include_router(admin_curated_router, prefix="/v1")
-        application.include_router(admin_issues_router, prefix="/v1")
-        application.include_router(dedup_review_router, prefix="/v1")
-        application.include_router(enrichment_review_router, prefix="/v1")
-        application.include_router(feature_update_requests_router, prefix="/v1")
-        application.include_router(poi_cache_targets_router, prefix="/v1")
-        application.include_router(provider_refresh_policies_router, prefix="/v1")
-        application.include_router(offline_uploads_router, prefix="/v1")
+        application.include_router(
+            admin_features_router,
+            prefix="/v1",
+            dependencies=admin_dependencies,
+        )
+        application.include_router(
+            admin_curated_router,
+            prefix="/v1",
+            dependencies=admin_dependencies,
+        )
+        application.include_router(
+            admin_issues_router,
+            prefix="/v1",
+            dependencies=admin_dependencies,
+        )
+        application.include_router(
+            dedup_review_router,
+            prefix="/v1",
+            dependencies=admin_dependencies,
+        )
+        application.include_router(
+            enrichment_review_router,
+            prefix="/v1",
+            dependencies=admin_dependencies,
+        )
+        application.include_router(
+            feature_update_requests_router,
+            prefix="/v1",
+            dependencies=admin_dependencies,
+        )
+        application.include_router(
+            poi_cache_targets_router,
+            prefix="/v1",
+            dependencies=admin_dependencies,
+        )
+        application.include_router(
+            provider_refresh_policies_router,
+            prefix="/v1",
+            dependencies=admin_dependencies,
+        )
+        application.include_router(
+            offline_uploads_router,
+            prefix="/v1",
+            dependencies=admin_dependencies,
+        )
 
     if ops_routes_enabled:
         application.include_router(ops_router, prefix="/v1")

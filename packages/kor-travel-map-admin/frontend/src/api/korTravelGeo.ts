@@ -5,6 +5,10 @@ const KOR_TRAVEL_GEO_BASE_URL = publicUrlEnv(
   "NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL",
   "http://127.0.0.1:12501",
 );
+const KOR_TRAVEL_GEO_API_KEY =
+  process.env.NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY?.trim() ||
+  process.env.NEXT_PUBLIC_VWORLD_API_KEY?.trim() ||
+  "";
 
 export interface KorTravelGeoPoint {
   x?: number | null;
@@ -65,7 +69,11 @@ async function postKorTravelGeo<T>(
   path: "/v2/geocode" | "/v2/reverse",
   body: Record<string, unknown>,
 ): Promise<T> {
-  const response = await fetch(`${KOR_TRAVEL_GEO_BASE_URL}${path}`, {
+  const url = new URL(path, KOR_TRAVEL_GEO_BASE_URL);
+  if (KOR_TRAVEL_GEO_API_KEY) {
+    url.searchParams.set("key", KOR_TRAVEL_GEO_API_KEY);
+  }
+  const response = await fetch(url, {
     method: "POST",
     headers: {
       Accept: "application/json",

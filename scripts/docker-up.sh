@@ -49,5 +49,6 @@ fi
 "$ROOT_DIR/scripts/preflight-ports.sh" "${ports[@]}"
 
 cd "$ROOT_DIR"
-docker compose "${compose_files[@]}" up -d --build "${services[@]}"
-docker compose "${compose_files[@]}" ps
+compose=(docker compose --env-file /dev/null)
+"${compose[@]}" "${compose_files[@]}" up -d --build "${services[@]}"
+"${compose[@]}" "${compose_files[@]}" ps

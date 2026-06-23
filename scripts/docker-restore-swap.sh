@@ -89,10 +89,7 @@ ENV
 mv "$TMP_ENV_FILE" "$RESTORE_SWAP_ENV_FILE"
 
 if [[ "$RESTORE_SWAP_APPLY" == "1" ]]; then
-  COMPOSE_COMMAND=(docker compose)
-  if [[ -f "$ROOT_DIR/.env" ]]; then
-    COMPOSE_COMMAND+=(--env-file "$ROOT_DIR/.env")
-  fi
+  COMPOSE_COMMAND=(docker compose --env-file /dev/null)
   COMPOSE_COMMAND+=(--env-file "$RESTORE_SWAP_ENV_FILE")
   "${COMPOSE_COMMAND[@]}" up -d rustfs-perms rustfs rustfs-init api frontend dagster dagster-daemon
 else
@@ -104,6 +101,7 @@ Restore swap env file generated:
   rustfs_volume=${RESTORE_RUSTFS_VOLUME}
 
 Apply manually with:
-  docker compose --env-file .env --env-file ${RESTORE_SWAP_ENV_FILE} up -d rustfs-perms rustfs rustfs-init api frontend dagster dagster-daemon
+  source scripts/load-env.sh
+  docker compose --env-file /dev/null --env-file ${RESTORE_SWAP_ENV_FILE} up -d rustfs-perms rustfs rustfs-init api frontend dagster dagster-daemon
 SUMMARY
 fi

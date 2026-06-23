@@ -140,6 +140,48 @@ class ApiSettings(BaseSettings):
             "operator는 proxy SSO). env ``KOR_TRAVEL_MAP_API_SERVICE_TOKEN``."
         ),
     )
+    admin_proxy_secret: SecretStr | None = Field(
+        default=None,
+        description=(
+            "Next.js admin frontend proxy가 FastAPI admin API 호출 시 넣는 server-only "
+            "secret. 설정되면 ``/v1/admin/*`` 요청은 허용된 peer CIDR + "
+            "``X-Kor-Travel-Map-Admin-Proxy-Secret`` + "
+            "``X-Kor-Travel-Map-Actor``가 모두 맞아야 통과한다. 미설정이면 기존 "
+            "로컬/테스트 하위호환으로 admin gate를 강제하지 않는다."
+        ),
+    )
+    admin_trusted_proxy_cidrs: list[str] = Field(
+        default=["127.0.0.1/32", "::1/128"],
+        description=(
+            "admin frontend proxy로 신뢰할 FastAPI peer CIDR 목록. 현재 PC 단일 운용은 "
+            "localhost만 허용한다. Docker/리버스 프록시 배포 시 프록시 CIDR을 명시한다."
+        ),
+    )
+    public_api_key_required: bool = Field(
+        default=False,
+        description=(
+            "True면 public REST surface(`/v1/features`, `/v1/public`, `/v1/categories`, "
+            "`/v1/providers`)에 VWorld 호환 `key` query 검증을 적용한다. trusted admin "
+            "frontend proxy 또는 service-token 요청은 우회한다."
+        ),
+    )
+    public_api_key_cache_ttl_s: int = Field(
+        default=30,
+        ge=0,
+        le=3600,
+        description=(
+            "active public API key hash를 process-local 메모리에 보관하는 TTL초. "
+            "생성/폐기 시 즉시 무효화하고, public hot path는 TTL 동안 DB 조회를 생략한다."
+        ),
+    )
+    vworld_api_key: SecretStr | None = Field(
+        default=None,
+        description=(
+            "VWorld 지도 key. public_api_keys 테이블이 비어 있을 때 초기 전환 편의를 위해 "
+            "같은 값을 public API key fallback으로 인정한다. 운영에서는 UI에서 생성한 "
+            "key를 DB에 저장해 사용한다."
+        ),
+    )
     admin_destructive_enabled: bool = Field(
         default=True,
         description=(

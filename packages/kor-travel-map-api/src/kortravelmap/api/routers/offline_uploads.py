@@ -1057,7 +1057,10 @@ async def validate_offline_upload_request(
                 base_url=settings.kor_travel_geo_base_url,
                 timeout=settings.kor_travel_geo_timeout_seconds,
             ) as http:
-                kraddr = KorTravelGeoRestClient(http)
+                kraddr = KorTravelGeoRestClient(
+                    http,
+                    api_key=settings.kor_travel_geo_api_key_value,
+                )
                 async with session.begin():
                     row = await get_offline_upload(session, upload_id)
                     if row is None:

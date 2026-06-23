@@ -3,7 +3,7 @@
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 
-import { BASE_URL } from "./client";
+import { publicUrlEnv } from "./env";
 
 export type OpsLiveConnectionState =
   | "disabled"
@@ -31,12 +31,17 @@ type OpsLiveMessage = {
 };
 
 const reconnectDelaysMs = [1_000, 2_000, 5_000, 10_000, 30_000];
+const LIVE_BASE_URL = publicUrlEnv(
+  process.env.NEXT_PUBLIC_KOR_TRAVEL_MAP_API,
+  "NEXT_PUBLIC_KOR_TRAVEL_MAP_API",
+  "http://127.0.0.1:12701",
+);
 
 function buildOpsLiveUrl(
   topics: readonly OpsLiveTopic[],
   pollIntervalMs = 2_000,
 ): string {
-  const url = new URL(BASE_URL);
+  const url = new URL(LIVE_BASE_URL);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   const basePath = url.pathname.replace(/\/+$/, "");
   url.pathname = `${basePath}/v1/ops/live`;

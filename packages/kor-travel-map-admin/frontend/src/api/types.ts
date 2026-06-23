@@ -24,6 +24,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/auth-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Admin Auth Events
+         * @description 최근 로그인/로그아웃 감사 이벤트 목록.
+         */
+        get: operations["get_admin_auth_events_v1_admin_auth_events_get"];
+        put?: never;
+        /**
+         * Create Admin Auth Event
+         * @description Next.js login/logout API가 기록하는 admin 인증 감사 이벤트.
+         */
+        post: operations["create_admin_auth_event_v1_admin_auth_events_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/backups": {
         parameters: {
             query?: never;
@@ -735,6 +759,50 @@ export interface paths {
          */
         put: operations["upsert_provider_refresh_policy_route_v1_admin_provider_refresh_policies__provider___dataset_key__put"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/public-api-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Public Api Keys
+         * @description 저장된 public API key 목록. 원문 key는 반환하지 않는다.
+         */
+        get: operations["get_public_api_keys_v1_admin_public_api_keys_get"];
+        put?: never;
+        /**
+         * Post Public Api Key
+         * @description 새 public API key를 생성한다. key 원문은 이 응답에서만 노출한다.
+         */
+        post: operations["post_public_api_key_v1_admin_public_api_keys_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/public-api-keys/{public_api_key_id}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Revoke Public Api Key
+         * @description active public API key를 폐기한다.
+         */
+        post: operations["post_revoke_public_api_key_v1_admin_public_api_keys__public_api_key_id__revoke_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1603,6 +1671,92 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AdminAuthEventCreateRequest
+         * @description Next.js login/logout API가 남기는 감사 이벤트.
+         */
+        AdminAuthEventCreateRequest: {
+            /** Actor */
+            actor?: string | null;
+            /** Attempted Username */
+            attempted_username?: string | null;
+            /** Client Ip */
+            client_ip?: string | null;
+            /**
+             * Event Type
+             * @enum {string}
+             */
+            event_type: "login" | "logout";
+            /** Next Path */
+            next_path?: string | null;
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "succeeded" | "failed" | "denied";
+            /** Reason */
+            reason?: string | null;
+            /** Request Id */
+            request_id?: string | null;
+            /** User Agent */
+            user_agent?: string | null;
+        };
+        /** AdminAuthEventData */
+        AdminAuthEventData: {
+            item: components["schemas"]["AdminAuthEventRecord"];
+        };
+        /** AdminAuthEventListData */
+        AdminAuthEventListData: {
+            /** Items */
+            items: components["schemas"]["AdminAuthEventRecord"][];
+        };
+        /** AdminAuthEventListResponse */
+        AdminAuthEventListResponse: {
+            data: components["schemas"]["AdminAuthEventListData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * AdminAuthEventRecord
+         * @description ``ops.admin_auth_events`` HTTP 표현.
+         */
+        AdminAuthEventRecord: {
+            /** Actor */
+            actor?: string | null;
+            /** Attempted Username */
+            attempted_username?: string | null;
+            /** Auth Event Id */
+            auth_event_id: string;
+            /** Client Ip */
+            client_ip?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Event Type
+             * @enum {string}
+             */
+            event_type: "login" | "logout";
+            /** Next Path */
+            next_path?: string | null;
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "succeeded" | "failed" | "denied";
+            /** Reason */
+            reason?: string | null;
+            /** Request Id */
+            request_id?: string | null;
+            /** User Agent */
+            user_agent?: string | null;
+        };
+        /** AdminAuthEventResponse */
+        AdminAuthEventResponse: {
+            data: components["schemas"]["AdminAuthEventData"];
+            meta: components["schemas"]["Meta"];
+        };
         /**
          * AdminFeatureChangeData
          * @description 단건 feature change response data.
@@ -5786,6 +5940,68 @@ export interface components {
             data: components["schemas"]["ProvidersData"];
             meta: components["schemas"]["Meta"];
         };
+        /** PublicApiKeyCreateData */
+        PublicApiKeyCreateData: {
+            item: components["schemas"]["PublicApiKeyRecord"];
+            /**
+             * Key
+             * @description 생성 직후 한 번만 반환되는 VWorld 형식 public API key
+             */
+            key: string;
+        };
+        /** PublicApiKeyCreateRequest */
+        PublicApiKeyCreateRequest: {
+            /** Label */
+            label?: string | null;
+        };
+        /** PublicApiKeyCreateResponse */
+        PublicApiKeyCreateResponse: {
+            data: components["schemas"]["PublicApiKeyCreateData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** PublicApiKeyListData */
+        PublicApiKeyListData: {
+            /** Items */
+            items: components["schemas"]["PublicApiKeyRecord"][];
+        };
+        /** PublicApiKeyListResponse */
+        PublicApiKeyListResponse: {
+            data: components["schemas"]["PublicApiKeyListData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * PublicApiKeyRecord
+         * @description 저장된 public API key 메타데이터. 원문 key는 포함하지 않는다.
+         */
+        PublicApiKeyRecord: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By */
+            created_by?: string | null;
+            /** Key Hint */
+            key_hint: string;
+            /** Label */
+            label?: string | null;
+            /** Public Api Key Id */
+            public_api_key_id: string;
+            /** Revoked At */
+            revoked_at?: string | null;
+            /** Revoked By */
+            revoked_by?: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "active" | "revoked";
+        };
+        /** PublicApiKeyResponse */
+        PublicApiKeyResponse: {
+            data: components["schemas"]["PublicApiKeyRecord"];
+            meta: components["schemas"]["Meta"];
+        };
         /**
          * PublicBeachDetailResponse
          * @description ``GET /public/beaches/{feature_id}`` 응답.
@@ -6273,6 +6489,90 @@ export interface operations {
             };
         };
     };
+    get_admin_auth_events_v1_admin_auth_events_get: {
+        parameters: {
+            query?: {
+                event_type?: ("login" | "logout") | null;
+                outcome?: ("succeeded" | "failed" | "denied") | null;
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminAuthEventListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    create_admin_auth_event_v1_admin_auth_events_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminAuthEventCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminAuthEventResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
     list_backups_v1_admin_backups_get: {
         parameters: {
             query?: never;
@@ -6289,6 +6589,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BackupListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
             /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
@@ -9061,6 +9370,128 @@ export interface operations {
             };
         };
     };
+    get_public_api_keys_v1_admin_public_api_keys_get: {
+        parameters: {
+            query?: {
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicApiKeyListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    post_public_api_key_v1_admin_public_api_keys_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PublicApiKeyCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicApiKeyCreateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    post_revoke_public_api_key_v1_admin_public_api_keys__public_api_key_id__revoke_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                public_api_key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicApiKeyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
     restore_backup_v1_admin_restore__backup_id__post: {
         parameters: {
             query?: never;
@@ -9156,6 +9587,8 @@ export interface operations {
                 include_counts?: boolean;
                 /** @description counts를 status='active' feature만으로 집계 */
                 active_only?: boolean;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
             };
             header?: never;
             path?: never;
@@ -9629,6 +10062,8 @@ export interface operations {
                 cursor?: string | null;
                 /** @description route/area 지도 표시용 GeoJSON geometry 포함 여부. */
                 include_geometry?: boolean;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
             };
             header?: never;
             path?: never;
@@ -9667,7 +10102,10 @@ export interface operations {
     };
     get_features_batch_v1_features_batch_post: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -9728,6 +10166,8 @@ export interface operations {
                 max_items?: number;
                 /** @description route/area 지도 표시용 GeoJSON geometry 포함 여부. */
                 include_geometry?: boolean;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
             };
             header?: never;
             path?: never;
@@ -9784,6 +10224,8 @@ export interface operations {
                 page_size?: number;
                 cursor?: string | null;
                 sort?: "distance" | "name" | "last_updated_at";
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
             };
             header?: never;
             path?: never;
@@ -9840,6 +10282,8 @@ export interface operations {
                 page_size?: number;
                 cursor?: string | null;
                 sort?: "distance" | "name" | "last_updated_at";
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
             };
             header?: never;
             path?: never;
@@ -9906,6 +10350,8 @@ export interface operations {
                 page_size?: number;
                 cursor?: string | null;
                 include_total?: boolean;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
             };
             header?: never;
             path?: never;
@@ -9944,7 +10390,10 @@ export interface operations {
     };
     get_feature_v1_features__feature_id__get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
+            };
             header?: never;
             path: {
                 feature_id: string;
@@ -9996,6 +10445,8 @@ export interface operations {
             query?: {
                 /** @description 이 시점 이하 weather만(미래 예보 제외). */
                 asof?: string | null;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
             };
             header?: never;
             path: {
@@ -10576,7 +11027,10 @@ export interface operations {
     };
     list_ops_providers_v1_ops_providers_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10592,6 +11046,15 @@ export interface operations {
                     "application/json": components["schemas"]["OpsProvidersResponse"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
             default: {
                 headers: {
@@ -10605,7 +11068,10 @@ export interface operations {
     };
     get_ops_provider_v1_ops_providers__provider__get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
+            };
             header?: never;
             path: {
                 provider: string;
@@ -10698,7 +11164,10 @@ export interface operations {
     };
     list_providers_freshness_v1_providers_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10712,6 +11181,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProvidersFreshnessResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
             /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
@@ -10732,6 +11210,8 @@ export interface operations {
                 dataset_key?: string | null;
                 /** @description sync_scope 필터 */
                 sync_scope?: string | null;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
             };
             header?: never;
             path: {
@@ -10789,6 +11269,8 @@ export interface operations {
                 cursor?: string | null;
                 include_quality?: boolean;
                 include_forecast?: boolean;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
             };
             header?: never;
             path?: never;
@@ -10835,6 +11317,8 @@ export interface operations {
                 sido_code?: string | null;
                 sigungu_code?: string | null;
                 max_items?: number;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
             };
             header?: never;
             path?: never;
@@ -10876,6 +11360,8 @@ export interface operations {
             query?: {
                 include_quality?: boolean;
                 include_forecast?: boolean;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
             };
             header?: never;
             path: {
@@ -10924,6 +11410,8 @@ export interface operations {
                 max_lon?: number | null;
                 max_lat?: number | null;
                 max_items?: number;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
             };
             header?: never;
             path?: never;
@@ -10970,6 +11458,8 @@ export interface operations {
                 page_size?: number;
                 cursor?: string | null;
                 include_months?: boolean;
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
             };
             header?: never;
             path?: never;
@@ -11008,7 +11498,10 @@ export interface operations {
     };
     get_public_festival_v1_public_festivals__feature_id__get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
+                key?: string | null;
+            };
             header?: never;
             path: {
                 feature_id: string;

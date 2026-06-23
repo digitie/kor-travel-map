@@ -1,5 +1,30 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-23 (codex) — Admin 로그인 + public API key 관리
+
+- **완료(코드)**: Next.js admin frontend에 `/login`, HttpOnly 세션, logout, `/api/proxy`
+  BFF를 추가했다. 기존 REST client는 `/api/proxy`를 기본 base로 사용한다.
+- **완료(API/DB)**: `ops.admin_auth_events`, `ops.public_api_keys` migration과 repo/router를
+  추가했다. FastAPI admin router는 proxy secret 설정 시 trusted frontend proxy header를 요구하고,
+  public REST surface는 `key` query 검증을 지원한다.
+- **완료(env)**: gitignored `.env`에 `admin/ad.min`의 PBKDF2-SHA256 hash, session secret,
+  admin proxy secret을 저장했다. 예시 env에는 placeholder만 추가했다. `kor-travel-geo` v2 key는
+  현재 VWorld key와 동일하게 쓰도록 설정했다. Docker/env scripts도 VWorld key를
+  `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY` / `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY`로 같은 값
+  매핑하고, `$` 포함 secret을 보존하도록 raw dotenv 로딩으로 보강했다.
+- **완료(PR#399 리뷰 반영)**: XFF/X-Real-IP 기본 불신, username mismatch PBKDF2 수행,
+  proxy-secret deny 테스트, 401 로그인 리다이렉트, 로그인 실패 a11y, clipboard fallback,
+  invalid UUID revoke 404화, Alembic revision id 32자 제한 대응을 반영했다.
+- **검증**: `pytest -q` 1326 passed, `ruff check .` passed, `mypy --strict` 142 files passed,
+  import-linter 4 contracts kept, admin frontend `npm run test` 37 passed, `npm run type-check`
+  passed, `npm run lint` 0 errors / 기존 warnings 6, OpenAPI/type drift check passed,
+  user-client typegen/type-check passed, compose config + shell syntax check passed.
+- **prod smoke**: N150 production 서버에 반영했고, geo v2 `POST /v2/reverse`는 key 없이 `400`,
+  VWorld와 같은 key로 `200`을 반환했다. map API `/v1/categories`도 key 없이 `401`, public key로
+  `200`을 반환했다. map API 컨테이너 내부 `KorTravelGeoRestClient(api_key=...)` reverse 호출은
+  `status=OK`, 후보 11건, 주소/법정동 코드 포함으로 성공했다.
+- **다음 한 작업**: PR 생성 후 CI green 확인과 머지를 완료한다.
+
 ## 2026-06-23 (codex) — Admin 지도 route/area 렌더링 + N150 prod 반영
 
 - **완료(코드)**: admin Feature 지도에 `marker_icon`/`marker_color` 기반 maki 마커를 적용하고,

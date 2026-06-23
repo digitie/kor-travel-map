@@ -76,7 +76,7 @@ require_command docker
 require_command sha256sum
 with_maintenance_lock "$@"
 
-compose=(docker compose)
+compose=(docker compose --env-file /dev/null)
 writer_services=(api frontend dagster dagster-daemon rustfs)
 
 if [[ "$KOR_TRAVEL_MAP_BACKUP_ALLOW_RUNNING" != "1" ]]; then

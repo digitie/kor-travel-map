@@ -397,7 +397,10 @@ async def _sigungu_resolver_for_scope(
         base_url=base_url,
         timeout=settings.kor_travel_geo_timeout_seconds,
     ) as http:
-        client = KorTravelGeoRestClient(http)
+        client = KorTravelGeoRestClient(
+            http,
+            api_key=settings.kor_travel_geo_api_key_value,
+        )
 
         async def _resolver(
             *,

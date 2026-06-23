@@ -871,7 +871,10 @@ def reverse_geocoder_resource(_context: InitResourceContext) -> Iterator[Any]:
     )
     try:
         yield kor_travel_geo_reverse_geocoder(
-            KorTravelGeoRestClient(http),
+            KorTravelGeoRestClient(
+                http,
+                api_key=settings.kor_travel_geo_api_key_value,
+            ),
             region_fallback_radius_km=0.1,
         )
     finally:

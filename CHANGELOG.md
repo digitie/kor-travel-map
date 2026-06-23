@@ -5,6 +5,23 @@
 
 ## [Unreleased]
 
+### Admin 로그인 + public API key 관리 (2026-06-23)
+
+- **ADDED**: admin frontend에 `admin` 단일 계정 로그인 화면을 추가했다. 비밀번호 원문은 저장하지
+  않고 gitignored `.env`의 PBKDF2-SHA256 hash와 server-only session secret으로 검증한다.
+- **ADDED**: Next.js `/api/proxy` BFF를 통해 FastAPI admin API를 호출하도록 바꾸고,
+  FastAPI admin router는 proxy secret이 설정된 환경에서 지정된 frontend proxy header만 신뢰한다.
+- **ADDED**: 로그인 시도/로그아웃 기록을 `ops.admin_auth_events`에 저장하고
+  `/admin/settings`에서 조회할 수 있게 했다.
+- **ADDED**: `/admin/settings`에서 VWorld 호환 32자 public API key를 랜덤 생성/폐기한다.
+  DB에는 key hash와 hint만 저장하고, active hash는 TTL cache 후 생성/폐기 시 무효화한다.
+- **CHANGED**: public REST surface는 `key` query 검증을 지원하며, trusted admin proxy와
+  service-token 요청은 검증을 우회한다. `kor-travel-geo` v2 호출도 `key` query를 붙이며 현재
+  운용값은 VWorld API key와 동일하게 둔다.
+- **FIXED**: 로그인 rate-limit/audit에서 client-controlled proxy header를 기본적으로 신뢰하지
+  않게 하고, 세션 만료 401은 `/login`으로 되돌린다. API key 폐기 요청의 잘못된 UUID는 500 대신
+  not found로 처리한다.
+
 ### Admin 지도 route/area 표시 + 지도 성능 보강 (2026-06-23)
 
 - **ADDED**: admin Feature 지도에서 point feature는 `marker_icon`/`marker_color` 기반
