@@ -42,7 +42,10 @@ from kortravelmap.providers.krairport import (
 from kortravelmap.providers.krex import (
     KREX_PROVIDER_NAME,
     REST_AREA_DATASET_KEY,
+    REST_AREA_WEATHER_DATASET_KEY,
     TRAFFIC_NOTICES_DATASET_KEY,
+    rest_area_weather_records_to_bundles,
+    rest_area_weather_records_to_values,
     rest_areas_to_bundles,
     traffic_notices_to_bundles,
 )
@@ -780,6 +783,57 @@ async def feature_weather_airkorea_air_quality(
     return await run_feature_weather_airkorea_air_quality(context)
 
 
+async def run_feature_weather_krex_rest_areas(
+    context: AssetExecutionContext,
+) -> AirQualityLoadResult:
+    """고속도로 휴게소 관측 기상을 weather feature로, 지표를 WeatherValue로 적재한다.
+
+    ``krex_rest_area_weather`` record stream(``RestAreaWeather`` wide row)을 읽어
+    (1) 휴게소를 weather-kind ``FeatureBundle``로 변환·매핑(unit_code→feature_id),
+    (2) 지표(기온/습도/풍속/강수)를 metric별 ``WeatherValue``로 melt, (3)
+    ``client.load_air_quality``(weather feature + value 한 transaction 적재 — 도메인
+    무관)로 적재한다. airkorea 대기질 패턴과 동일(ADR-010 — 관측값은 place 아님).
+    de-rep(#496): 휴게소당 1 feature, 복제 없음 — ``temperature→T1H``라 KMA 기온
+    빈틈(고속도로 농촌 구간)을 nearest-temp로 메운다.
+    """
+    records = await _record_list(context, "krex_rest_area_weather")
+    fetched_at = await _fetched_at(context)
+    bundles = await rest_area_weather_records_to_bundles(
+        records,
+        fetched_at=fetched_at,
+        reverse_geocoder=_reverse_geocoder(context),
+    )
+    station_feature_ids = {
+        bundle.source_record.source_entity_id: bundle.feature.feature_id
+        for bundle in bundles
+    }
+    values = rest_area_weather_records_to_values(
+        records, station_feature_ids=station_feature_ids
+    )
+    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
+    result = await client.load_air_quality(bundles, values)
+    _add_output_metadata(
+        context,
+        {
+            "provider": KREX_PROVIDER_NAME,
+            "dataset_key": REST_AREA_WEATHER_DATASET_KEY,
+            **result.as_metadata(),
+        },
+    )
+    return result
+
+
+@asset(
+    group_name="features_weather",
+    required_resource_keys=_COMMON_RESOURCE_KEYS | {"krex_rest_area_weather"},
+    retry_policy=FEATURE_LOAD_RETRY_POLICY,
+)
+async def feature_weather_krex_rest_areas(
+    context: AssetExecutionContext,
+) -> AirQualityLoadResult:
+    return await run_feature_weather_krex_rest_areas(context)
+
+
 FEATURE_LOAD_ASSETS: Final = [
     feature_event_datagokr_cultural_festivals,
     feature_place_opinet_stations,
@@ -799,6 +853,7 @@ FEATURE_LOAD_ASSETS: Final = [
     feature_place_krairport_airports,
     feature_place_kor_travel_concierge_youtube,
     feature_weather_airkorea_air_quality,
+    feature_weather_krex_rest_areas,
     feature_event_visitkorea_enrichment,
 ]
 """현재 구현 완료된 Feature provider 적재 asset 목록."""

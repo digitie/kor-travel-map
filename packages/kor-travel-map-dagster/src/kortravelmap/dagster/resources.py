@@ -37,6 +37,7 @@ from .provider_fetchers import (
     fetch_knps_point_records,
     fetch_kor_travel_concierge_youtube_features,
     fetch_krairport_airports,
+    fetch_krex_rest_area_weather,
     fetch_krex_rest_areas,
     fetch_krex_traffic_notices,
     fetch_krforest_arboretums,
@@ -116,6 +117,14 @@ PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
         dataset_key="krex_rest_areas",
         setting_names=("krex_go_api_key", "data_go_kr_service_key"),
         source_env_names=("KEX_GO_API_KEY", "DATA_GO_KR_SERVICE_KEY"),
+    ),
+    ProviderRecordResourceSpec(
+        resource_key="krex_rest_area_weather",
+        provider_package="python-krex-api",
+        dataset_key="krex_rest_area_weather",
+        setting_names=("krex_ex_api_key",),
+        source_env_names=("KEX_GO_API_KEY",),
+        note="restWeatherList(EX)는 전국 휴게소 관측 기상을 1시간 snapshot으로 반환.",
     ),
     ProviderRecordResourceSpec(
         resource_key="krex_traffic_notices",
@@ -404,6 +413,20 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["krex_rest_areas"] = (
     build_provider_record_live_resource(
         _KREX_REST_AREAS_SPEC,
         fetch_krex_rest_areas,
+    )
+)
+
+_KREX_REST_AREA_WEATHER_SPEC: ProviderRecordResourceSpec = next(
+    spec
+    for spec in PROVIDER_RECORD_RESOURCE_SPECS
+    if spec.resource_key == "krex_rest_area_weather"
+)
+"""krex 휴게소 관측 기상 spec 참조 (live resource override용)."""
+
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["krex_rest_area_weather"] = (
+    build_provider_record_live_resource(
+        _KREX_REST_AREA_WEATHER_SPEC,
+        fetch_krex_rest_area_weather,
     )
 )
 

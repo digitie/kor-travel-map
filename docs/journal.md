@@ -2,6 +2,36 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-23 (claude) — KMA 날씨 복제 제거 마이그레이션 완료 + krex 휴게소 관측 기상 weather source 추가
+
+#496(KMA 격자 anchor 저장)에 이어 **prod DB의 기존 복제 데이터를 마이그레이션으로 정리**하고,
+**krex 고속도로 휴게소 관측 기상을 새 weather source로 추가**했다(사용자 요청 "마이그레이션
+끝나면 krex도 날씨 feature에 추가").
+
+- **마이그레이션(prod)**: `feature.feature_weather_values`에서 `provider='python-kma-api'`
+  복제 행(231k features × 49-50 격자 좌표 = **30.3M 행 / 15GB**)을 batched DELETE(500k/batch,
+  COMMIT per batch로 WAL 제어) + `VACUUM (FULL, ANALYZE)`로 제거했다. 결과: 테이블
+  15GB→1.98MB, **디스크 8G→24G 회수**(N150 7G-free 압박 해소). 이후 60격자/anchor 설정으로
+  KMA 3개 asset 재적재 → `feature_weather_values = 66,766`행(airkorea 4,474 + KMA anchor ~62k,
+  복제 0). 대량 DELETE+VACUUM FULL은 classifier가 막아 사용자 승인("진행") 후 실행.
+- **krex weather 추가**: airkorea 대기질 패턴 미러. 휴게소를 `unit_code` 안정키 + 행 내
+  좌표로 self-contained **weather-kind Feature**로 만들고(place 휴게소와 fuzzy 매칭 안 함,
+  ADR-010), 기온/습도/풍속/강수를 metric별 `WeatherValue`로 melt. **`temperature → T1H`**라
+  `build_weather_card` nearest-temp(`T1H/TMP` 조회)가 휴게소를 **기온 anchor**로 발견 — KMA
+  격자가 못 덮는 고속도로 농촌 구간(태안·울진·정선 등 10 gap sigungu)을 ~400개 휴게소
+  관측값으로 보강한다. de-rep과 동일하게 휴게소당 1 feature(복제 없음).
+  - 변경 파일: `providers/krex.py`(Protocol `KrexRestAreaWeatherRecord` + 변환 2종 + melt
+    테이블 `_REST_AREA_WEATHER_METRICS` T1H/REH/WSD/RN1), `providers/__init__.py`(re-export),
+    dagster `provider_fetchers.py`(`fetch_krex_rest_area_weather`, EX key `restarea.latest_weather`),
+    `resources.py`(live resource spec/def), `definitions.py`(resource key),
+    `assets.py`(`feature_weather_krex_rest_areas` + `run_*`), `schedules.py`(매시 schedule),
+    테스트(`test_providers_krex.py` 5건 + `test_definitions.py` 등록).
+  - EX key(`KEX_GO_API_KEY`)는 traffic_notices가 이미 쓰던 것 재사용 — **신규 env 불필요**.
+  - 기존 `rest_area_weather_to_values`/`KrexRestAreaWeatherItem`(이미 melt된 1 metric/행,
+    etl_live fixture용)는 그대로 유지 — 신규 record 경로는 wide row를 직접 melt.
+  - CI-parity(Docker python:3.13): ruff check / mypy×3(core·api·dagster) / lint-imports /
+    pytest(krex 5 신규 + dagster 169) 통과. `ruff format --check`는 CI에서 `if:false`(미게이트).
+
 ## 2026-06-22 (claude) — provider repo 전부 public → dagster build 토큰 불필요(full ETL 항상)
 
 provider repo 13종 중 마지막 private였던 `python-datagokr-api`가 **public으로 전환**됐다
