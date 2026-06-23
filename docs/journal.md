@@ -55,15 +55,15 @@ provider repo 13종 중 마지막 private였던 `python-datagokr-api`가 **publi
 
 ## 2026-06-22 (claude) — kor-travel-map prod 첫 배포 + e2e/dagster 배포 follow-ups
 
-prod 호스트(192.168.1.14/N150)에 kor-travel-map을 **처음 배포**했다(이전엔 컨테이너/소스
+prod 호스트(<prod-host>/N150)에 kor-travel-map을 **처음 배포**했다(이전엔 컨테이너/소스
 없음, geo·concierge만 가동). docker-manager 기반.
 
 - **배포(api+ui)**: dev clean main(#487) rsync provision, docker-manager 컴포즈 #29(env
   rename + prod 도메인) 적용, dev provider/VWorld 키 12종 prod `.env` 병합, api 기동 시
-  `alembic upgrade head` 자동 적용(0027). 공개 도메인 `map.digitie.mywire.org`(200)/
+  `alembic upgrade head` 자동 적용(0027). 공개 도메인 `<map-host>`(200)/
   `map-api`(health ok, categories 실데이터). geo/concierge 무중단.
 - **live e2e**(prod URL): home 실백엔드 스모크 3/3, route-mock 스위트 618/619. 유일 1건은
-  spec이 dev Dagster URL을 하드코딩한 것 — prod 빌드가 `map-dagster.digitie.mywire.org`를
+  spec이 dev Dagster URL을 하드코딩한 것 — prod 빌드가 `<map-dagster-host>`를
   올바르게 인라인한 결과(결함 아님, #29 검증).
 - **follow-up (a)**: `home-density-matrix.spec.ts` 헤더 Dagster 링크 href를 `E2E_DAGSTER_URL`
   override 가능하게 해 dev/prod 양쪽 통과(미설정 시 dev localhost 정규식 유지).
@@ -231,7 +231,7 @@ dev/prod 분리를 명확히 하고(별도 지시 없으면 dev), dev 기동 스
 
 ## 2026-06-20 (claude) — kor-travel-geo 프로덕션 도메인 env 반영
 
-map/s3 도메인(직전)에 이어 kor-travel-geo 도메인(geo-api/geo .digitie.mywire.org)을 반영했다.
+map/s3 도메인(직전)에 이어 kor-travel-geo 도메인(<geo-api-host>/<geo-console-host>)을 반영했다.
 
 - **필요한 것만 배선**: 프론트(브라우저)는 `korTravelGeo.ts`가 직접 fetch하므로
   `NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL`=geo-api(public). 백엔드(API admin_issues/feature_update_requests/
@@ -246,7 +246,7 @@ map/s3 도메인(직전)에 이어 kor-travel-geo 도메인(geo-api/geo .digitie
 
 ## 2026-06-20 (claude) — 프로덕션 reverse-proxy 도메인 env 반영
 
-사용자 prod 도메인(map/map-api/map-dagster + s3-api/s3 .digitie.mywire.org)을 외부 노출
+사용자 prod 도메인(<map-host>/<map-api-host>/<map-dagster-host> + <s3-api-host>/<s3-console-host>)을 외부 노출
 없이(gitignored) 반영하고, compose를 그에 맞게 보강했다.
 
 - **compose 보강(코드)**: `docker-compose.yml` api service의 `KOR_TRAVEL_MAP_API_CORS_ALLOW_ORIGINS`가
@@ -260,7 +260,7 @@ map/s3 도메인(직전)에 이어 kor-travel-geo 도메인(geo-api/geo .digitie
 - **문서(committed, placeholder만)**: `.env.example`에 prod reverse-proxy 도메인 변수 블록(예시 도메인),
   `docs/deploy.md`에 "프로덕션 도메인(reverse proxy)" 섹션(도메인→서비스 매핑·재빌드/CORS/내부망 주의).
 - **검증**: `docker compose config -q`(default·`--env-file .env.prod`) 둘 다 VALID; prod 렌더에서
-  CORS=`["https://map.digitie.mywire.org"]`(JSON), NEXT_PUBLIC=prod, API→Dagster=내부 `dagster:12702`,
+  CORS=`["https://<map-host>"]`(JSON), NEXT_PUBLIC=prod, API→Dagster=내부 `dagster:12702`,
   object public=s3-api/bucket 확인. API→RustFS 내부 통신은 `http://rustfs:9000` 유지(외부 노출 X).
 
 ## 2026-06-19 (Codex) — admin frontend stack 문서 정합성 정리
