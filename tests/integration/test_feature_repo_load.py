@@ -290,6 +290,76 @@ async def test_features_in_bbox_include_geometry_returns_route_area_shape(
     assert float(area["area_square_meters"]) > 0
 
 
+async def test_features_in_bbox_include_geometry_matches_geom_only_branch(
+    migrated_session: AsyncSession,
+) -> None:
+    """geom-only OR 분기(coord NULL 또는 coord 밖 + geom이 bbox 교차) 검증.
+
+    ``_FEATURES_IN_BBOX_WITH_GEOMETRY_SQL``의 두 번째 OR 항(``kind IN
+    ('route','area') AND geom && envelope``)은 coord가 bbox 안에 있으면 첫 항으로
+    이미 매칭돼 단독으로 검증되지 않는다. 여기서는 ① coord=NULL(좌표 미상),
+    ② coord가 bbox **밖** 두 케이스 모두 geom만으로 반환되는지 확인한다.
+    ``ck_features_coord_precision`` 충족 위해 coord=NULL 행은
+    coord_precision_digits=NULL로 둔다.
+    """
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO feature.features (
+                feature_id, kind, name, category,
+                coord, coord_precision_digits, geom,
+                marker_icon, marker_color, status
+            )
+            VALUES
+            (
+                'f_route_geom_only_null_coord', 'route', '좌표미상 탐방로', '02000000',
+                NULL, NULL,
+                x_extension.ST_SetSRID(
+                    x_extension.ST_GeomFromText(
+                        'LINESTRING(127.0 37.5,127.1 37.6)'
+                    ),
+                    4326
+                ),
+                'park', 'P-06', 'active'
+            ),
+            (
+                'f_route_geom_only_coord_outside', 'route', '밖 좌표 탐방로', '02000000',
+                x_extension.ST_SetSRID(x_extension.ST_MakePoint(129.5, 35.1), 4326),
+                6,
+                x_extension.ST_SetSRID(
+                    x_extension.ST_GeomFromText(
+                        'LINESTRING(127.0 37.5,127.1 37.6)'
+                    ),
+                    4326
+                ),
+                'park', 'P-06', 'active'
+            )
+            """
+        )
+    )
+    await migrated_session.flush()
+
+    rows = await feature_repo.features_in_bbox(
+        migrated_session,
+        min_lon=126.9,
+        min_lat=37.4,
+        max_lon=127.2,
+        max_lat=37.7,
+        include_geometry=True,
+    )
+    by_id = {row["feature_id"]: row for row in rows}
+
+    # coord=NULL이지만 geom이 bbox를 교차 → geom-only 분기로 반환.
+    null_coord = by_id["f_route_geom_only_null_coord"]
+    assert null_coord["geometry"]["type"] == "LineString"
+    assert null_coord["lon"] is None
+    assert null_coord["lat"] is None
+
+    # coord는 bbox 밖(129.5, 35.1)이지만 geom은 bbox 교차 → geom-only 분기로 반환.
+    coord_outside = by_id["f_route_geom_only_coord_outside"]
+    assert coord_outside["geometry"]["type"] == "LineString"
+
+
 async def test_features_in_bbox_returns_stable_feature_id_subset(
     migrated_session: AsyncSession,
 ) -> None:

@@ -259,6 +259,98 @@ def test_list_features_include_geometry_maps_route_area_rows(
 
 
 @pytest.mark.unit
+def test_list_features_default_omits_geometry(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """include_geometry 미지정 시 repo는 include_geometry=False로 호출되고
+    응답의 geometry/area_square_meters는 None이다 (PR #512 follow-up)."""
+    from kortravelmap.api.db import get_session
+    from kortravelmap.api.routers import features as features_mod
+
+    rows = [
+        {
+            "feature_id": "f1", "kind": "place", "name": "장소", "category": "01010100",
+            "lon": 126.97, "lat": 37.56, "marker_icon": "star", "marker_color": "P-03",
+            "status": "active",
+        }
+    ]
+
+    async def _bbox(_session: Any, **_kw: Any) -> list[dict[str, Any]]:
+        assert _kw["include_geometry"] is False
+        return rows
+
+    monkeypatch.setattr(features_mod.feature_repo, "features_in_bbox", _bbox)
+
+    async def _fake_session() -> AsyncIterator[Any]:
+        yield object()
+
+    client.app.dependency_overrides[get_session] = _fake_session
+    try:
+        r = client.get("/v1/features", params={
+            "min_lon": 126, "min_lat": 37, "max_lon": 127, "max_lat": 38,
+        })
+        assert r.status_code == 200
+        item = r.json()["data"]["items"][0]
+        assert item["geometry"] is None
+        assert item["area_square_meters"] is None
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+@pytest.mark.unit
+def test_list_public_features_in_bounds_include_geometry(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``GET /features/in-bounds`` 의 include_geometry=true는 repo로 전달되고
+    route/area geometry가 매핑된다 (PR #512 follow-up)."""
+    from kortravelmap.api.db import get_session
+    from kortravelmap.api.routers import features as features_mod
+
+    rows = [
+        {
+            "feature_id": "route1",
+            "kind": "route",
+            "name": "탐방로",
+            "category": "02000000",
+            "lon": 127.0,
+            "lat": 37.5,
+            "marker_icon": "park",
+            "marker_color": "P-06",
+            "status": "active",
+            "geometry": {
+                "type": "LineString",
+                "coordinates": [[127.0, 37.5], [127.1, 37.6]],
+            },
+            "area_square_meters": None,
+        }
+    ]
+
+    async def _bbox(_session: Any, **_kw: Any) -> list[dict[str, Any]]:
+        assert _kw["include_geometry"] is True
+        return rows
+
+    monkeypatch.setattr(features_mod.feature_repo, "features_in_bbox", _bbox)
+
+    async def _fake_session() -> AsyncIterator[Any]:
+        yield object()
+
+    client.app.dependency_overrides[get_session] = _fake_session
+    try:
+        r = client.get("/v1/features/in-bounds", params={
+            "min_lon": 126, "min_lat": 37, "max_lon": 128, "max_lat": 38,
+            "include_geometry": "true",
+        })
+        assert r.status_code == 200
+        body = r.json()
+        assert body["meta"]["cluster"] is None
+        route = body["data"]["items"][0]
+        assert route["geometry"]["type"] == "LineString"
+        assert route["area_square_meters"] is None
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+@pytest.mark.unit
 def test_list_public_features_in_bounds_uses_envelope(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

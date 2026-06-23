@@ -20232,13 +20232,13 @@
             }
           },
           {
-            "description": "route/area 지도 표시용 GeoJSON geometry 포함 여부.",
+            "description": "route/area 지도 표시용 GeoJSON geometry 포함 여부. 개별 feature 응답(non-clustered)에만 적용되며, cluster_unit이 해석되면(zoom으로 유도 포함) 클러스터 응답에는 무시된다.",
             "in": "query",
             "name": "include_geometry",
             "required": false,
             "schema": {
               "default": false,
-              "description": "route/area 지도 표시용 GeoJSON geometry 포함 여부.",
+              "description": "route/area 지도 표시용 GeoJSON geometry 포함 여부. 개별 feature 응답(non-clustered)에만 적용되며, cluster_unit이 해석되면(zoom으로 유도 포함) 클러스터 응답에는 무시된다.",
               "title": "Include Geometry",
               "type": "boolean"
             }
