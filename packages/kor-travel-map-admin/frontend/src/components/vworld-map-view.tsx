@@ -763,6 +763,9 @@ export function VWorldFeatureClusters({
     const SRC = CLUSTER_SOURCE_ID;
     const markers = new Map<string, MapLibreMarker>();
     let onScreen = new Set<string>();
+    // ref.current를 effect 시작 시 한 번 캡처해 cleanup에서도 같은 Map을 쓴다
+    // (react-hooks/exhaustive-deps: cleanup에서 ref.current 직접 읽기 경고 회피).
+    const pointElements = pointElementsRef.current;
     let raf = 0;
 
     const ensureSource = () => {
@@ -795,7 +798,6 @@ export function VWorldFeatureClusters({
       if (!map.getSource(SRC) || !map.isStyleLoaded()) return;
       const next = new Set<string>();
       const seen = new Set<string>();
-      const pointElements = pointElementsRef.current;
       const selectedId = selectedFeatureIdRef.current;
       pointElements.clear();
       const rendered = map.querySourceFeatures(SRC);
@@ -926,7 +928,7 @@ export function VWorldFeatureClusters({
       map.off("styledata", handleStyleData);
       for (const marker of markers.values()) marker.remove();
       markers.clear();
-      pointElementsRef.current.clear();
+      pointElements.clear();
       onScreen = new Set();
       try {
         if (map.getLayer(`${SRC}-clusters`)) map.removeLayer(`${SRC}-clusters`);

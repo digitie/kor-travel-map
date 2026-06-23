@@ -175,46 +175,51 @@ async function fetchFeaturesInTiles(
   // 취소(예: staleTime 만료 refetch dedupe)가 viewport 전체를 죽일 수 있다. 대신
   // tile별 child controller를 두고, viewport가 abort되면 모두 abort한다 — 그러면
   // allSettled가 reject를 모아 부분 성공을 유지할 수 있다.
+  const controllers: AbortController[] = [];
   const onOuterAbort = () => {
     for (const controller of controllers) controller.abort();
   };
-  const controllers: AbortController[] = [];
 
-  const settled = await Promise.allSettled(
-    tiles.map((tile) => {
-      const controller = new AbortController();
-      controllers.push(controller);
-      const tileParams = {
-        ...params,
-        max_lat: tile.max_lat,
-        max_lon: tile.max_lon,
-        min_lat: tile.min_lat,
-        min_lon: tile.min_lon,
-        page_size: perTilePageSize,
-      };
-      return queryClient.fetchQuery({
-        queryKey: [
-          "features",
-          "tile",
-          tile.z,
-          tile.x,
-          tile.y,
-          params.kinds?.join(",") ?? "",
-          params.includeGeometry ? "geometry" : "summary",
-          perTilePageSize,
-        ],
-        queryFn: () => fetchFeaturesInBbox(tileParams, controller.signal),
-        // 바깥 useQuery staleTime(30s)과 맞춘다 — 같은 viewport 키 캐시 수명과 tile
-        // 캐시 수명이 어긋나면 한쪽만 만료돼 불필요한 부분 refetch가 난다.
-        staleTime: 30_000,
-      });
-    }),
-  );
+  // tiles.map은 동기 실행이라, 아래 listener 등록 시점에 controllers가 모두 채워져 있다.
+  const tilePromises = tiles.map((tile) => {
+    const controller = new AbortController();
+    controllers.push(controller);
+    const tileParams = {
+      ...params,
+      max_lat: tile.max_lat,
+      max_lon: tile.max_lon,
+      min_lat: tile.min_lat,
+      min_lon: tile.min_lon,
+      page_size: perTilePageSize,
+    };
+    return queryClient.fetchQuery({
+      queryKey: [
+        "features",
+        "tile",
+        tile.z,
+        tile.x,
+        tile.y,
+        params.kinds?.join(",") ?? "",
+        params.includeGeometry ? "geometry" : "summary",
+        perTilePageSize,
+      ],
+      queryFn: () => fetchFeaturesInBbox(tileParams, controller.signal),
+      // 바깥 useQuery staleTime(30s)과 맞춘다 — 같은 viewport 키 캐시 수명과 tile
+      // 캐시 수명이 어긋나면 한쪽만 만료돼 불필요한 부분 refetch가 난다.
+      staleTime: 30_000,
+    });
+  });
 
+  // viewport가 await 중 abort되면 in-flight tile fetch를 실제로 취소하도록 listener를
+  // await *전에* 등록한다(#519 리뷰 S1: 이전엔 await 뒤라 child controller가 dead code였고
+  // 단일 bbox 호출 대비 취소 회귀였다).
   if (signal) {
     if (signal.aborted) onOuterAbort();
     else signal.addEventListener("abort", onOuterAbort, { once: true });
   }
+
+  const settled = await Promise.allSettled(tilePromises);
+  if (signal) signal.removeEventListener("abort", onOuterAbort);
 
   const fulfilled = settled.filter(
     (result): result is PromiseFulfilledResult<FeaturesInBboxResponse> =>
