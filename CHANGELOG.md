@@ -5,6 +5,20 @@
 
 ## [Unreleased]
 
+### krex 고속도로 휴게소 관측 기상을 weather source로 추가 (2026-06-23)
+
+- **ADDED**: 고속도로 휴게소 관측 기상(`restWeatherList`, EX)을 weather-kind Feature로
+  적재하는 provider 변환부(`rest_area_weather_records_to_bundles` /
+  `rest_area_weather_records_to_values`, `KrexRestAreaWeatherRecord` Protocol) +
+  Dagster fetcher(`fetch_krex_rest_area_weather`) + asset(`feature_weather_krex_rest_areas`,
+  매시 schedule)를 추가했다. airkorea 대기질 패턴과 동일하게 휴게소를 `unit_code` 안정키 +
+  행 내 좌표로 self-contained weather feature로 만들고(place 휴게소와 fuzzy 매칭 안 함,
+  ADR-010 — 관측값은 place 아님), 기온/습도/풍속/강수를 metric별 `WeatherValue`로 melt한다.
+  `temperature → T1H` 매핑이라 `build_weather_card`의 nearest-temp(`metric_key IN
+  ('T1H','TMP')`)가 휴게소를 기온 anchor로 조회 — KMA 격자 기온 빈틈(고속도로 농촌 구간)을
+  휴게소 관측값으로 메운다. de-rep(#496)과 동일하게 휴게소당 1 feature(복제 없음).
+  EX key(`KEX_GO_API_KEY`)는 traffic_notices가 이미 쓰던 것을 재사용(신규 env 불필요).
+
 ### Dagster 이미지: provider repo 전부 public → 토큰 없이 full ETL (2026-06-22)
 
 - **CHANGED**: `docker/dagster.Dockerfile`이 `GITHUB_TOKEN` 유무와 무관하게 항상

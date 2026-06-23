@@ -42,6 +42,7 @@ __all__ = [
     "fetch_knps_geometry_records",
     "fetch_knps_point_records",
     "fetch_krairport_airports",
+    "fetch_krex_rest_area_weather",
     "fetch_krex_rest_areas",
     "fetch_krex_traffic_notices",
     "fetch_krforest_arboretums",
@@ -390,6 +391,43 @@ def fetch_krex_traffic_notices(
             if total_count is not None and seen >= total_count:
                 break
             page_no += 1
+    finally:
+        client.close()
+
+
+def fetch_krex_rest_area_weather(
+    settings: KorTravelMapSettings,
+) -> Iterator[Any]:
+    """고속도로 휴게소 관측 기상(rest_area_weather) record를 krex public client로 stream한다.
+
+    ``settings.krex_ex_api_key``(source ``KEX_GO_API_KEY``)에서 EX OpenAPI key를
+    읽어 ``KrexClient(ex_api_key=...)``를 열고 ``client.restarea.latest_weather()``
+    (``/openapi/restinfo/restWeatherList``, EX endpoint)의 record(``krex.models.
+    RestAreaWeather``, ``KrexRestAreaWeatherRecord`` Protocol 충족 — unit_code +
+    좌표 + 기온/습도/풍속/강수 wide row)를 lazily yield한다. traffic_notices와 동일
+    EX endpoint이므로 go key가 아닌 **ex key**를 쓴다.
+
+    ``latest_weather``는 전국 휴게소 1시간 snapshot을 한 Page로 돌려준다(restWeatherList
+    는 휴게소 필터 없음) — 가장 최근 데이터가 있는 시각을 lookback으로 찾는다.
+    페이지네이션 불필요. generator 소비 종료(또는 close)시 ``finally``에서
+    ``client.close()``.
+    """
+    secret = settings.krex_ex_api_key
+    if secret is None:
+        raise ProviderCredentialMissing(
+            "krex rest_area_weather live fetch에는 "
+            "KOR_TRAVEL_MAP_KREX_EX_API_KEY (source KEX_GO_API_KEY)가 필요하다."
+        )
+    api_key = secret.get_secret_value()
+
+    # provider public client는 ADR-044 로컬 체크아웃이며 hard dependency가
+    # 아니므로(부재 가능), 호출 시점에 ``importlib`` + ``cast(Any, ...)``로 resolve.
+    krex = cast(Any, importlib.import_module("krex"))
+
+    client = krex.KrexClient(ex_api_key=api_key)
+    try:
+        page = client.restarea.latest_weather()
+        yield from page.items
     finally:
         client.close()
 

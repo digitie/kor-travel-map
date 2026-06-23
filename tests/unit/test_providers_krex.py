@@ -24,10 +24,15 @@ from kortravelmap.providers.krex import (
     REST_AREA_CATEGORY,
     REST_AREA_DATASET_KEY,
     REST_AREA_MARKER_ICON,
+    REST_AREA_WEATHER_DATASET_KEY,
     TRAFFIC_NOTICE_CATEGORY,
     TRAFFIC_NOTICES_DATASET_KEY,
     rest_area_prices_to_values,
+    rest_area_weather_records_to_values,
     rest_area_weather_to_values,
+)
+from kortravelmap.providers.krex import (
+    rest_area_weather_records_to_bundles as _rest_area_weather_records_to_bundles_async,
 )
 from kortravelmap.providers.krex import (
     rest_areas_to_bundles as _rest_areas_to_bundles_async,
@@ -342,6 +347,156 @@ def test_weather_count_per_metric() -> None:
     )
     assert len(values) == 2
     assert {v.metric_key for v in values} == {"T1H", "REH"}
+
+
+# ── rest_area_weather records → weather Feature + WeatherValue ─────
+
+
+@dataclass(frozen=True)
+class _WeatherRecord:
+    """`KrexRestAreaWeatherRecord` Protocol 준수 (provider ``RestAreaWeather`` 정합)."""
+
+    unit_code: str
+    unit_name: str
+    route_name: str | None
+    direction_code: str | None
+    lat: float | None
+    lon: float | None
+    observed_at: datetime
+    temperature: float | None
+    humidity: float | None
+    wind_speed: float | None
+    rainfall: float | None
+
+
+def rest_area_weather_records_to_bundles(
+    records: Iterable[Any], **kwargs: Any
+) -> list[FeatureBundle]:
+    """sync 테스트 ergonomics — 실제 async 변환을 asyncio.run으로 구동."""
+    return asyncio.run(_rest_area_weather_records_to_bundles_async(records, **kwargs))
+
+
+_WR_SEOSAN = _WeatherRecord(
+    unit_code="EX-1001",
+    unit_name="서산휴게소",
+    route_name="서해안고속도로",
+    direction_code="E",
+    lat=36.7800,
+    lon=126.6500,
+    observed_at=_NOW,
+    temperature=22.5,
+    humidity=60.0,
+    wind_speed=3.2,
+    rainfall=None,  # 결측 → metric 행 생성 안 함.
+)
+_WR_GANGNEUNG = _WeatherRecord(
+    unit_code="EX-2002",
+    unit_name="강릉휴게소",
+    route_name="영동고속도로",
+    direction_code="W",
+    lat=37.7510,
+    lon=128.8760,
+    observed_at=_NOW,
+    temperature=-99.0,  # sentinel → drop.
+    humidity=80.0,
+    wind_speed=1.1,
+    rainfall=2.5,
+)
+
+
+@pytest.mark.unit
+def test_weather_records_bundle_is_weather_kind() -> None:
+    [bundle] = rest_area_weather_records_to_bundles([_WR_SEOSAN], fetched_at=_NOW)
+    assert bundle.feature.kind is FeatureKind.WEATHER
+    assert bundle.feature.detail is None  # weather kind는 detail 불가(ADR-018).
+    assert bundle.feature.category == REST_AREA_CATEGORY
+    assert bundle.feature.coord is not None
+    # 안정키 = unit_code (파생 불필요).
+    assert bundle.source_record.source_entity_id == "EX-1001"
+    assert bundle.source_record.dataset_key == REST_AREA_WEATHER_DATASET_KEY
+
+
+@pytest.mark.unit
+def test_weather_records_dedup_by_unit_code() -> None:
+    """같은 unit_code 중복 행 → 1 bundle. 좌표/unit_code 부재 행은 skip."""
+    dup = _WeatherRecord(
+        unit_code="EX-1001",  # _WR_SEOSAN과 동일 → dedup.
+        unit_name="서산휴게소",
+        route_name="서해안고속도로",
+        direction_code="E",
+        lat=36.7800,
+        lon=126.6500,
+        observed_at=_NOW,
+        temperature=23.0,
+        humidity=None,
+        wind_speed=None,
+        rainfall=None,
+    )
+    no_coord = _WeatherRecord(
+        unit_code="EX-9999",
+        unit_name="좌표없음휴게소",
+        route_name=None,
+        direction_code=None,
+        lat=None,
+        lon=None,
+        observed_at=_NOW,
+        temperature=10.0,
+        humidity=None,
+        wind_speed=None,
+        rainfall=None,
+    )
+    bundles = rest_area_weather_records_to_bundles(
+        [_WR_SEOSAN, dup, no_coord, _WR_GANGNEUNG], fetched_at=_NOW
+    )
+    ids = [b.source_record.source_entity_id for b in bundles]
+    assert ids == ["EX-1001", "EX-2002"]  # dup 병합 + 무좌표 skip.
+
+
+@pytest.mark.unit
+def test_weather_records_values_melt_and_metadata() -> None:
+    """wide → metric별 melt. 결측(rainfall=None)/sentinel(-99) drop, observed/ULTRA_SHORT."""
+    bundles = rest_area_weather_records_to_bundles(
+        [_WR_SEOSAN, _WR_GANGNEUNG], fetched_at=_NOW
+    )
+    feature_ids = {
+        b.source_record.source_entity_id: b.feature.feature_id for b in bundles
+    }
+    values = rest_area_weather_records_to_values(
+        [_WR_SEOSAN, _WR_GANGNEUNG], station_feature_ids=feature_ids
+    )
+    by_feature: dict[str, set[str]] = {}
+    for v in values:
+        by_feature.setdefault(v.feature_id, set()).add(v.metric_key)
+        assert v.weather_domain is WeatherDomain.REST_AREA_WEATHER
+        assert v.forecast_style is ForecastStyle.OBSERVED
+        assert v.timeline_bucket is TimelineBucket.ULTRA_SHORT
+        assert v.observed_at == _NOW
+    # 서산: temperature/humidity/wind_speed (rainfall 결측 drop) → T1H/REH/WSD.
+    assert by_feature[feature_ids["EX-1001"]] == {"T1H", "REH", "WSD"}
+    # 강릉: temperature=-99 sentinel drop → REH/WSD/RN1 (T1H 없음).
+    assert by_feature[feature_ids["EX-2002"]] == {"REH", "WSD", "RN1"}
+
+
+@pytest.mark.unit
+def test_weather_records_temperature_maps_to_t1h() -> None:
+    """기온 → metric_key=T1H (build_weather_card nearest-temp 'T1H/TMP' 조회 대상)."""
+    bundles = rest_area_weather_records_to_bundles([_WR_SEOSAN], fetched_at=_NOW)
+    fid = bundles[0].feature.feature_id
+    values = rest_area_weather_records_to_values(
+        [_WR_SEOSAN], station_feature_ids={"EX-1001": fid}
+    )
+    [t1h] = [v for v in values if v.metric_key == "T1H"]
+    assert t1h.value_number == Decimal("22.5")
+    assert t1h.source_metric_key == "temperature"
+
+
+@pytest.mark.unit
+def test_weather_records_skip_unmapped_unit_code() -> None:
+    """station_feature_ids에 없는 unit_code 행은 값 생성 안 함."""
+    values = rest_area_weather_records_to_values(
+        [_WR_SEOSAN], station_feature_ids={}
+    )
+    assert values == []
 
 
 # ── traffic_notices → notice FeatureBundle ─────────────────────────

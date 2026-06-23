@@ -18,6 +18,7 @@ from .assets import (
     feature_place_krheritage_items,
     feature_place_mois_licenses,
     feature_place_opinet_stations,
+    feature_weather_krex_rest_areas,
 )
 from .kma_weather import (
     feature_notice_kma_weather_alerts,
@@ -88,6 +89,15 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         provider="krex",
         dataset_key="krex_traffic_notices",
         description="고속도로 교통공지 notice Feature 15분 간격 적재.",
+    ),
+    FeatureLoadScheduleSpec(
+        asset=feature_weather_krex_rest_areas,
+        job_name="feature_weather_krex_rest_areas_job",
+        schedule_name="feature_weather_krex_rest_areas_hourly_schedule",
+        cron_schedule="35 * * * *",
+        provider="krex",
+        dataset_key="krex_rest_area_weather",
+        description="고속도로 휴게소 관측 기상 weather Feature 매시 적재(기온→T1H, KMA 빈틈 보강).",
     ),
     FeatureLoadScheduleSpec(
         asset=feature_place_krheritage_items,
