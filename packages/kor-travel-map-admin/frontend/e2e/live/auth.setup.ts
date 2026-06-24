@@ -37,5 +37,14 @@ setup("authenticate admin (live)", async ({ page }) => {
   });
   await expect(page).toHaveURL((url) => !url.pathname.startsWith("/login"));
 
-  await page.context().storageState({ path: STORAGE_STATE });
+  // SameSite=Strict 세션 쿠키는 storageState의 최초 top-level 내비게이션(same-site referrer
+  // 없음)에서 Chromium이 보류해 /login으로 리다이렉트된다. 테스트 브라우저 jar에서만 Lax로
+  // 완화해 인증 상태가 유지되게 한다(실제 prod 쿠키 정책은 불변 — 저장 파일의 sameSite만 조정).
+  const state = await page.context().storageState();
+  for (const cookie of state.cookies) {
+    if (cookie.sameSite === "Strict") {
+      cookie.sameSite = "Lax";
+    }
+  }
+  fs.writeFileSync(STORAGE_STATE, JSON.stringify(state, null, 2));
 });
