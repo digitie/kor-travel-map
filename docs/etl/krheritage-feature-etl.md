@@ -6,9 +6,10 @@ feature로 적재하는 ETL이다.
 > **구현 현황 (2026-05-29)**: `kortravelmap.providers.krheritage` 변환 함수 구현
 > 완료 — `heritage_items_to_bundles`(place/area, async + reverse_geocoder) /
 > `heritage_events_to_bundles`(event). structural Protocol 입력
-> (`KrHeritageItem`/`KrHeritageEvent`). area는 GIS WKT가 있으면 `Feature.geom` +
-> centroid. **미구현(후속)**: §7 미디어 file_sources(`FeatureFileSource` DTO 대기) /
-> §10 collect·load 오케스트레이션 / GIS 면적(`area_square_meters`) 보강 /
+> (`KrHeritageItem`/`KrHeritageEvent`). `area`는 GIS `Polygon`/`MultiPolygon`
+> 경계가 있을 때만 만들고, 경계 없는 사적·명승은 좌표 기반 `place`로 적재한다.
+> GIS 경계가 있으면 `Feature.geom`, centroid, `area_square_meters`를 함께 채운다.
+> **미구현(후속)**: §10 collect·load 오케스트레이션 / GIS 경계 fetch 배선 /
 > §2.5 knps 사찰↔temple dedup.
 
 ## 1. 문서 정보
@@ -62,7 +63,7 @@ marker_color: `P-07` (자홍 / 보라 계열).
 | 유산 유형 | FeatureKind | 비고 |
 |----------|-------------|------|
 | 국보 / 보물 / 등록문화유산 | `place` | 대부분 단일 건물/객체 |
-| 사적 / 사적 및 명승 / 명승 | `area` | GIS geometry 있으면 |
+| 사적 / 사적 및 명승 / 명승 | `place` 또는 `area` | GIS 경계 없으면 좌표 기반 `place`, Polygon/MultiPolygon 경계가 있으면 `area` |
 | 매장유산 | `area` | 발굴지 구역 |
 | 천연기념물 | `place` (경계 없음) / `area` (서식지/보호구역 GIS 있음) | 케이스별 |
 | 무형유산 — 전수교육관/공연장 | `place` | 시설 |
@@ -73,12 +74,8 @@ marker_color: `P-07` (자홍 / 보라 계열).
 def _classify_heritage_kind(item) -> FeatureKind:
     if item.ccba_kdcd in ("11", "12"):       # 국보/보물
         return FeatureKind.PLACE
-    if item.ccba_kdcd in ("13",):            # 사적
-        return FeatureKind.AREA
-    if item.ccba_kdcd in ("16",):            # 명승
-        return FeatureKind.AREA
-    if item.ccba_kdcd in ("15",):            # 천연기념물
-        return FeatureKind.AREA if item.has_boundary() else FeatureKind.PLACE
+    if item.ccba_kdcd in ("13", "15", "16"): # 사적/천연기념물/명승
+        return FeatureKind.AREA if item.has_polygon_boundary() else FeatureKind.PLACE
     if item.ccba_kdcd in ("17", "18"):       # 등록문화유산/시도 등
         return FeatureKind.PLACE
     if item.ccba_kdcd in ("31",):            # 무형

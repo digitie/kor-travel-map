@@ -3,7 +3,8 @@
 테스트 범위 (#380 — provider ``HeritageDetail`` 실모델 재정렬):
 - ``key.ccba_kdcd`` → place/area kind 판정 (`classify_heritage_kind`) 분기.
 - 유형 키워드(``name_ko``/``category``) → category 매핑.
-- area(사적/명승)는 GIS 경계 미배선 — 원천 좌표만, boundary 없음.
+- area는 GIS Polygon/MultiPolygon 경계가 있을 때만 생성. 경계 없는 사적/명승은
+  좌표 기반 place.
 - ``designated_at``(YYYYMMDD str) 방어적 파싱.
 - 명칭 빈 row skip (#374 패턴), 소재지 ``location_text``→``region+sigungu`` fallback.
 - event → EventDetail(heritage_event) + sn 빈 값 fallback 자연키 / skip.
@@ -64,6 +65,8 @@ class _Item:
     designated_at: str | None = None
     manager: str | None = None
     image_url: str | None = None
+    geom_wkt: str | None = None
+    boundary_source: str | None = None
 
 
 def _item(
@@ -101,8 +104,8 @@ class _Event:
     [
         ("11", FeatureKind.PLACE),  # 국보
         ("12", FeatureKind.PLACE),  # 보물
-        ("13", FeatureKind.AREA),  # 사적
-        ("16", FeatureKind.AREA),  # 명승
+        ("13", FeatureKind.PLACE),  # 사적 — 경계 없으면 point place
+        ("16", FeatureKind.PLACE),  # 명승 — 경계 없으면 point place
         ("15", FeatureKind.PLACE),  # 천연기념물 — GIS 경계 미배선, place (#380)
         ("17", FeatureKind.PLACE),  # 등록문화유산
         ("31", FeatureKind.PLACE),  # 무형
@@ -223,10 +226,10 @@ async def test_designated_at_defensive_parsing(
     assert bundle.source_record.raw_data["designated_at"] == designated_at
 
 
-# -- area 변환 (GIS 경계 미배선 — 좌표만) ---------------------------------------
+# -- area 변환 ---------------------------------------------------------------
 
 
-async def test_area_bundle_without_geometry() -> None:
+async def test_historic_site_without_geometry_is_place() -> None:
     item = _item(
         kdcd="13",
         asno="0003",
@@ -239,15 +242,42 @@ async def test_area_bundle_without_geometry() -> None:
     )
     [bundle] = await heritage_items_to_bundles([item], fetched_at=_FETCHED)
     feat = bundle.feature
-    assert feat.kind is FeatureKind.AREA
+    assert feat.kind is FeatureKind.PLACE
     assert feat.category == "01070300"
-    # provider HeritageDetail에는 경계 WKT가 없다 — GIS 보강은 후속 (#380).
+    # 좌표만 있는 사적/명승은 area가 아니라 place로 보존한다.
     assert feat.geom is None
-    assert feat.coord is not None  # 원천 좌표
+    assert feat.coord is not None
+    assert feat.detail.place_kind == "heritage_site"
+    assert feat.detail.payload["manager"] == "수원시"
+
+
+async def test_area_bundle_with_polygon_geometry() -> None:
+    item = _item(
+        kdcd="13",
+        asno="0003",
+        ctcd="31",
+        name_ko="수원 화성",
+        category="사적",
+        longitude=127.01,
+        latitude=37.28,
+        manager="수원시",
+        boundary_source="gis_spca",
+        geom_wkt=(
+            "POLYGON((127.00 37.27, 127.02 37.27, 127.02 37.29, "
+            "127.00 37.29, 127.00 37.27))"
+        ),
+    )
+    [bundle] = await heritage_items_to_bundles([item], fetched_at=_FETCHED)
+    feat = bundle.feature
+    assert feat.kind is FeatureKind.AREA
+    assert feat.geom is not None
+    assert feat.coord is not None
     assert feat.detail.area_kind == "heritage_area"
-    assert feat.detail.boundary_source is None
-    assert feat.detail.area_square_meters is None
+    assert feat.detail.boundary_source == "gis_spca"
+    assert feat.detail.area_square_meters is not None
+    assert float(feat.detail.area_square_meters) > 0
     assert feat.detail.administrative_office == "수원시"
+    assert bundle.source_record.raw_data["geom_wkt"].startswith("POLYGON")
 
 
 async def test_item_without_coord_has_none() -> None:

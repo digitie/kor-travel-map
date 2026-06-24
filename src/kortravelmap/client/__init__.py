@@ -112,6 +112,7 @@ from kortravelmap.infra.feature_repo import (
     get_feature_row,
     get_feature_rows_by_ids,
     inactivate_features_by_source_entity_ids,
+    inactivate_geometryless_area_features_by_source,
     load_bundles,
     load_source_record_links,
 )
@@ -410,6 +411,27 @@ class AsyncKorTravelMapClient:
                 dataset_key=dataset_key,
                 source_entity_type=source_entity_type,
                 source_entity_ids=source_entity_ids,
+            )
+
+    async def inactivate_geometryless_area_features_by_source(
+        self,
+        *,
+        provider: str,
+        dataset_key: str,
+        source_entity_type: str,
+    ) -> int:
+        """경계 geometry 없이 적재된 provider ``area`` feature를 inactive로 전환.
+
+        기존 변환 정책 보정용 메서드다. ``provider``/``dataset_key``/
+        ``source_entity_type``으로 primary source를 한정하고, 실제 feature 조건은
+        ``kind='area' AND geom IS NULL``로 제한한다. 한 transaction.
+        """
+        async with self._session_factory() as session, session.begin():
+            return await inactivate_geometryless_area_features_by_source(
+                session,
+                provider=provider,
+                dataset_key=dataset_key,
+                source_entity_type=source_entity_type,
             )
 
     async def load_enrichment_links(

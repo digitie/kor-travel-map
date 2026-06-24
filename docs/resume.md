@@ -1,5 +1,24 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-24 (codex) — krheritage area 보정 + concierge 적재/N150 live 검증
+
+- **완료(코드)**: `krheritage` provider는 Polygon/MultiPolygon 경계 geometry가 있을 때만
+  `area` feature를 만들고, 좌표만 있는 유산은 `place`로 적재한다. 실제 면 geometry가 있을 때만
+  centroid 좌표, 면적, `AreaDetail`을 기록한다.
+- **완료(DB 정리 경로)**: 특정 provider source에서 생성된 active geometryless `area` feature를
+  inactive 처리하는 repository/client 메서드를 추가했고, `krheritage_heritage_features` asset 적재
+  후 자동 정리하도록 연결했다.
+- **완료(provider 점검)**: 현재 `area` 생성 provider는 `knps`와 `krheritage`뿐이다. `knps`는 기존부터
+  polygon geometry gate가 있고, `krforest`는 현재 point place dataset만 적재한다.
+- **완료(N150)**: 수정 파일을 N150 `~/kor-travel-map`에 반영하고 map API/Dagster를 재빌드/재기동했다.
+  `kor-travel-concierge-youtube/youtube_place_candidates` snapshot 79건을 active `place`로 적재했다.
+  기존 `krheritage` active geometryless `area` 1,178건은 inactive 처리했고, 최종 active
+  geometryless `area`는 0건이다.
+- **검증**: 로컬 targeted unit/integration pytest, 수정 파일 ruff, 수정 Python strict mypy 통과.
+  N150 API live e2e 통과. N150 UI live e2e는 admin 로그인 세션으로 features list/map smoke 4건과
+  실제 concierge feature detail smoke 통과.
+- **다음 한 작업**: PR 생성 후 CI green 확인과 머지를 완료한다.
+
 ## 2026-06-23 (codex) — Admin 로그인 + public API key 관리
 
 - **완료(코드)**: Next.js admin frontend에 `/login`, HttpOnly 세션, logout, `/api/proxy`

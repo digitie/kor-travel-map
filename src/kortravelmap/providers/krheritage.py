@@ -12,13 +12,10 @@ HeritageDetail``(#380, ADR-044 재정렬 — 복합키는 ``key`` 중첩, 명칭
 
 kind 판정 (``docs/etl/krheritage-feature-etl.md §4``)
 ------------------------------------------------
-``key.ccba_kdcd``(종목코드) 기준: 국보/보물/등록/무형/천연기념물 → ``place``,
-사적/명승 → ``area``.
-
-geometry(GIS 경계) 보강은 후속 — provider ``HeritageDetail``에는 경계 WKT
-필드가 없고 GIS service(`gis_spca`/`gis_3070426`)는 아직 배선되지 않았다
-(#380). 따라서 현재 area도 좌표(centroid 아님, 원천 좌표)만 가지며
-천연기념물(15)은 경계 유무 분기 없이 ``place``다.
+``Feature.kind='area'``는 실제 Polygon/MultiPolygon 경계 geometry가 있을 때만 만든다.
+provider ``HeritageDetail``에는 경계 필드가 없으므로 현재 사적/명승도 좌표만 있으면
+``place``로 적재한다. 향후 GIS 보강(``geom_wkt``/GeoJSON ``geometry``)이 함께 들어오면
+그때 ``area``로 승격하고 ``Feature.geom`` + ``AreaDetail.area_square_meters``를 채운다.
 
 feature_id는 bjd_code 의존(ADR-009)이라 변환 함수는 async이고 reverse_geocoder 또는
 address_resolver가 주입되면 feature_id 계산 전에 await해 ``Address``(bjd_code)를
@@ -29,21 +26,28 @@ ADR 참조
 - ADR-002 — 순수 async 변환 함수
 - ADR-006 — provider 직접 사용 (wrapper class 금지), 구조 Protocol 입력
 - ADR-009 — ``make_feature_id`` 결정적 생성 (bjd_code 의존)
-- ADR-012 — ``Coordinate``는 WGS84; area 대표 좌표 = 원천 좌표
-  (GIS 경계 보강 후 centroid로 교체 예정, #380)
+- ADR-012 — ``Coordinate``는 WGS84; area 대표 좌표 = geometry centroid
 - ADR-034 — provider 구현 순서 (krheritage는 8단계)
 - ADR-044 — 데이터 정합성·GIS 파싱 1차 책임은 provider 라이브러리
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Final, Protocol, runtime_checkable
 
+from shapely.geometry import shape as shapely_shape
+
 from kortravelmap.category import get_category, is_known_category_code
 from kortravelmap.core.address import normalize_korean_text, normalize_phone_number
+from kortravelmap.core.geometry import (
+    AREA_GEOMETRY_TYPES,
+    GeometryError,
+    geometry_area_square_meters,
+    normalize_geometry,
+)
 from kortravelmap.core.ids import (
     make_feature_id,
     make_payload_hash,
@@ -283,16 +287,89 @@ class KrHeritageEvent(Protocol):
 # -- 분류 helper --------------------------------------------------------------
 
 
+def _text_attr(item: object, *names: str) -> str | None:
+    """optional provider 확장 필드에서 비어 있지 않은 문자열을 읽는다."""
+    for name in names:
+        value = getattr(item, name, None)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _geometry_mapping_from(value: object) -> Mapping[str, Any] | None:
+    """GeoJSON geometry mapping 또는 provider ``GeoGeometry`` 객체를 mapping으로 정규화."""
+    if isinstance(value, Mapping):
+        return value
+    geom_type = getattr(value, "type", None)
+    coordinates = getattr(value, "coordinates", None)
+    if isinstance(geom_type, str) and coordinates is not None:
+        return {"type": geom_type, "coordinates": coordinates}
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        dumped = model_dump()
+        if isinstance(dumped, Mapping):
+            return dumped
+    return None
+
+
+def _geojson_area_wkt(value: object) -> str | None:
+    """GeoJSON Polygon/MultiPolygon geometry → WKT. 비면/비면적은 ``None``."""
+    geometry = _geometry_mapping_from(value)
+    if geometry is None:
+        return None
+    geom_type = geometry.get("type")
+    if geom_type not in AREA_GEOMETRY_TYPES:
+        return None
+    try:
+        wkt = shapely_shape(dict(geometry)).wkt
+    except (TypeError, ValueError, AttributeError):
+        return None
+    return str(wkt)
+
+
+def _area_geometry_wkt(item: KrHeritageItem) -> str | None:
+    """provider가 보강해 준 경계 geometry를 WKT로 읽는다.
+
+    현행 ``HeritageDetail``에는 경계 필드가 없지만, GIS 보강 record가 함께 들어오면
+    ``geom_wkt``/``geometry_wkt``/GeoJSON ``geometry`` 중 하나로 전달될 수 있다.
+    """
+    wkt = _text_attr(item, "geom_wkt", "geometry_wkt", "wkt")
+    if wkt is not None:
+        return wkt
+    geometry = getattr(item, "geometry", None)
+    if geometry is not None:
+        return _geojson_area_wkt(geometry)
+    geojson = getattr(item, "geojson", None)
+    if geojson is not None:
+        return _geojson_area_wkt(geojson)
+    return None
+
+
+def _normalized_area_geometry(item: KrHeritageItem) -> tuple[str, Coordinate, Decimal] | None:
+    """Polygon/MultiPolygon 경계를 검증하고 (WKT, centroid, 면적)을 반환한다."""
+    raw_wkt = _area_geometry_wkt(item)
+    if raw_wkt is None:
+        return None
+    try:
+        geom_wkt, centroid = normalize_geometry(
+            raw_wkt, allowed_types=AREA_GEOMETRY_TYPES
+        )
+    except GeometryError:
+        return None
+    return geom_wkt, centroid, geometry_area_square_meters(geom_wkt)
+
+
 def classify_heritage_kind(item: KrHeritageItem) -> FeatureKind:
     """``key.ccba_kdcd`` → FeatureKind (docs/etl/krheritage-feature-etl.md §4).
 
-    천연기념물(15)은 GIS 경계 보강이 배선될 때까지 항상 ``place`` —
-    provider ``HeritageDetail``에 경계 WKT가 없다 (#380, 모듈 docstring).
+    사적/명승/천연기념물이어도 Polygon/MultiPolygon 경계가 없으면 ``place``다.
+    좌표만 있는 record를 ``area``로 만들면 지도/API에서 면 feature가 point로
+    노출되기 때문이다.
     """
     kdcd = (item.key.ccba_kdcd or "").strip()
-    if kdcd in ("13", "16"):  # 사적 / 명승
+    if kdcd in ("13", "15", "16") and _normalized_area_geometry(item) is not None:
         return FeatureKind.AREA
-    return FeatureKind.PLACE  # 국보/보물/등록/무형/천연기념물/기타
+    return FeatureKind.PLACE  # 국보/보물/등록/무형/경계 없는 사적·명승·천연기념물
 
 
 def resolve_heritage_category(item: KrHeritageItem) -> str:
@@ -446,7 +523,13 @@ async def _heritage_item_to_bundle(
     if not name:
         return None
 
-    kind = classify_heritage_kind(item)
+    area_geometry = _normalized_area_geometry(item)
+    kdcd = (item.key.ccba_kdcd or "").strip()
+    kind = (
+        FeatureKind.AREA
+        if kdcd in ("13", "15", "16") and area_geometry is not None
+        else FeatureKind.PLACE
+    )
     category = resolve_heritage_category(item)
     natural_key = _natural_key(item)
     location_text = _heritage_location_text(item)
@@ -467,9 +550,17 @@ async def _heritage_item_to_bundle(
         "manager": item.manager,
         "image_url": item.image_url,
     }
+    raw_boundary_wkt = _area_geometry_wkt(item)
+    if raw_boundary_wkt is not None:
+        raw_data["geom_wkt"] = raw_boundary_wkt
 
-    # geometry(GIS 경계) 보강은 후속 — 현재 area도 원천 좌표만 (모듈 docstring).
-    coord = _coord_from(item.longitude, item.latitude)
+    coord: Coordinate | None
+    if area_geometry is not None and kind is FeatureKind.AREA:
+        geom_wkt, coord, area_square_meters = area_geometry
+    else:
+        geom_wkt = None
+        area_square_meters = None
+        coord = _coord_from(item.longitude, item.latitude)
 
     # bjd_code는 feature_id 전에 채워야 함 (ADR-009).
     geo: Address | None = None
@@ -506,12 +597,12 @@ async def _heritage_item_to_bundle(
     }
     detail: PlaceDetail | AreaDetail
     if kind is FeatureKind.AREA:
-        # GIS 경계 미배선 — boundary/면적은 후속 보강 (모듈 docstring).
         detail = AreaDetail(
             feature_id=feature_id,
             area_kind=_area_kind(item),
-            boundary_source=None,
-            area_square_meters=None,
+            boundary_source=_text_attr(item, "boundary_source", "geometry_source")
+            or "krheritage_gis",
+            area_square_meters=area_square_meters,
             administrative_office=normalize_korean_text(item.manager),
             payload=detail_payload,
         )
@@ -531,6 +622,7 @@ async def _heritage_item_to_bundle(
         category=category,
         marker_icon=_maki_for(category),
         marker_color=HERITAGE_MARKER_COLOR,
+        geom=geom_wkt,
         detail=detail,
     )
     source_record = SourceRecord(

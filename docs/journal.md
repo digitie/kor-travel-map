@@ -2,6 +2,35 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-24 (codex) — krheritage area 보정 + concierge 적재/N150 live 검증
+
+사용자 요청으로 산림청 SHP와 provider area feature를 점검하고, `krheritage`의 면적 없는
+`area` 분류를 수정한 뒤 N150 production 서버에 반영했다.
+
+- **area 분류 보정**: `python-krheritage-api` 유산 feature는 Polygon/MultiPolygon 경계 geometry가
+  있을 때만 `area`로 만들고, 기존처럼 좌표만 있는 사적/명승은 `place`로 적재하게 했다.
+  적재 시 area geometry의 centroid를 대표 좌표로 쓰고 면적(`area_square_meters`)과
+  `AreaDetail`도 실제 면 geometry가 있을 때만 기록한다.
+- **기존 오염 데이터 정리**: `provider_sync.source_links`/`source_records` 기준으로 특정 provider
+  source에서 생성된 active geometryless `area` feature를 inactive 처리하는 repository/client
+  경로를 추가했고, `krheritage_heritage_features` Dagster asset 적재 후 자동으로 정리하게 했다.
+- **다른 provider 점검**: 현재 코드상 `area` 생성 provider는 `knps`와 `krheritage`뿐이다. `knps`는
+  이미 Polygon/MultiPolygon geometry 검증 후에만 `area`를 생성한다. `krforest`는 현재
+  휴양림/수목원 point place만 제공하며, 로컬 `python-krforest-api`의 관련 SHP도 수목원 point
+  dataset으로 확인했다.
+- **concierge provider 적재**: N150에서 `kor-travel-concierge` snapshot을 map DB에 적재해
+  `kor-travel-concierge-youtube/youtube_place_candidates` active `place` 79건을 생성했다.
+- **N150 반영**: `~/kor-travel-map`에 수정 파일을 rsync하고 docker-manager compose로
+  `kor-travel-map-api`, `kor-travel-map-dagster`, `kor-travel-map-dagster-daemon`을 재빌드/재기동했다.
+  disk full 상태는 Docker build cache/unused image prune으로 해소했고, 최종 map API/UI/Dagster와
+  concierge/geo API가 healthy임을 확인했다.
+- **N150 데이터 검증**: 배포 후 `krheritage_heritage_features`의 active geometryless `area` 1,178건을
+  inactive 처리했다. 최종 `feature.features` 기준 active geometryless `area`는 0건이다.
+- **검증**: 로컬 unit/integration targeted pytest 48+4건, 수정 파일 ruff, 수정 Python strict mypy를
+  통과했다. N150 API live e2e는 health/version/public features/search/providers/admin list/detail과
+  active area 0건을 확인해 통과했다. N150 UI live e2e는 실제 로그인 세션으로 admin features list/map
+  smoke 4건과 실제 concierge feature detail smoke를 통과했다.
+
 ## 2026-06-23 (codex) — Admin 로그인 + public API key 관리
 
 사용자 요청으로 `kor-travel-geo` PR#399의 로그인/API key UX를 `kor-travel-map` admin UI에
