@@ -2,6 +2,8 @@ import { defineConfig, devices } from "@playwright/test";
 import os from "node:os";
 import path from "node:path";
 
+import { STORAGE_STATE } from "./e2e/live/_auth-state";
+
 const artifactRoot =
   process.env.PLAYWRIGHT_ARTIFACT_ROOT ??
   path.join(os.tmpdir(), "kor-travel-map-playwright", "admin-frontend-live");
@@ -58,9 +60,12 @@ function isLocalHost(hostname: string): boolean {
  *
  * worker 수는 `E2E_LIVE_WORKERS`(기본 4)로 조정한다. 비-로컬(prod 등) 대상은 실수
  * 방지를 위해 `E2E_LIVE_ALLOW_PROD=1` 명시 opt-in이 필요하다(아래 가드 참고):
- *   E2E_LIVE_ALLOW_PROD=1 E2E_LIVE_WORKERS=4 \
+ *   E2E_LIVE_ALLOW_PROD=1 E2E_LIVE_WORKERS=4 E2E_ADMIN_PASSWORD=<admin-pw> \
  *     E2E_BASE_URL=https://map.<domain> E2E_DAGSTER_URL=https://map-dagster.<domain> \
  *     npm run e2e:live -- --retries=1
+ *
+ * #520 인증 게이트: `E2E_ADMIN_PASSWORD`(+ 선택 `E2E_ADMIN_USERNAME`, 기본 admin)를 주면
+ * auth.setup이 로그인 세션을 만들어 모든 spec이 인증 상태로 돈다(미설정 시 인증 미적용 대상으로 간주).
  *
  * CI에서는 돌리지 않는다(라이브 배포 + 실데이터 필요 — admin e2e는 CI job 없음).
  */
@@ -90,5 +95,14 @@ export default defineConfig({
     trace: "on-first-retry",
     screenshot: "only-on-failure",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    // #520 인증 게이트 대응: chromium 전에 로그인 세션을 1회 만들어 STORAGE_STATE에 저장.
+    { name: "setup", testMatch: /auth\.setup\.ts/ },
+    {
+      name: "chromium",
+      testIgnore: /auth\.setup\.ts/,
+      use: { ...devices["Desktop Chrome"], storageState: STORAGE_STATE },
+      dependencies: ["setup"],
+    },
+  ],
 });
