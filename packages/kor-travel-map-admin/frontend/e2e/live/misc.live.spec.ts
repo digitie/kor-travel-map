@@ -117,10 +117,11 @@ test.describe("misc live — home (/)", () => {
     await expect(page.getByRole("navigation")).toBeVisible(TIMEOUT);
   });
 
-  test("home nav 링크 정확히 18개", async ({ page }) => {
+  test("home nav 링크 정확히 19개", async ({ page }) => {
     await page.goto("/");
     const navigation = page.getByRole("navigation");
-    await expect(navigation.getByRole("link")).toHaveCount(18, TIMEOUT);
+    // #520 admin 로그인/설정 도입으로 nav 링크가 18 → 19개로 늘었다.
+    await expect(navigation.getByRole("link")).toHaveCount(19, TIMEOUT);
   });
 
   test("home 새로고침 버튼 visible", async ({ page }) => {
