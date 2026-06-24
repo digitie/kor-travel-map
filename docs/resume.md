@@ -6,7 +6,7 @@
   marker를 cluster source에 포함한다. 줌 14 이상에서만 area polygon/label geometry를 요청·표시하며,
   query 전환 중 이전 데이터를 유지해 지도 flicker를 줄인다.
 - **완료(성능)**: area/route 중심 필터에서는 tile별 `page_size` 분할을 끄고, area-only 지도 조회가
-  전체 bbox를 과도하게 잘라 false partial을 만들지 않도록 보정했다.
+  전체 bbox를 과도하게 잘라 false partial을 만들지 않도록 tile zoom을 한 단계 더 잘게 보정했다.
 - **완료(KNPS)**: `knps_protected_areas`는 raw 한글 후보(`ORIG_NAME` 등)를 우선하고,
   CP949로 잘못 decode된 recoverable UTF-8 문자열은 한글명으로 복구한다. 원문 byte가 이미 손상된
   값이나 repair 실패 후 CJK mojibake가 남는 값은 영어 fallback을 유지한다.

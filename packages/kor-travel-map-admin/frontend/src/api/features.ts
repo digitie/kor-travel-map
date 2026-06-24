@@ -65,6 +65,14 @@ const MAX_FEATURE_TILE_ZOOM = 12;
 const MERCATOR_LAT_LIMIT = 85.05112878;
 const GEOMETRY_LIGHT_KINDS = new Set(["area", "route"]);
 
+function isGeometryLightOnly(kinds: readonly string[] | undefined): boolean {
+  return (
+    kinds !== undefined &&
+    kinds.length > 0 &&
+    kinds.every((kind) => GEOMETRY_LIGHT_KINDS.has(kind))
+  );
+}
+
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
@@ -98,8 +106,12 @@ function tileYToLat(y: number, zoom: number): number {
 }
 
 function buildFeatureTiles(params: FeaturesInBboxParams): FeatureTile[] {
+  const rawZoom = typeof params.zoom === "number" ? params.zoom : 8;
+  // area/route 단독 필터는 summary payload가 작지만 특정 tile에 500건이 몰려
+  // false partial이 뜨기 쉽다. 한 단계 더 잘게 나눠 누락/재시도 체감을 줄인다.
+  const tileZoomBias = isGeometryLightOnly(params.kinds) ? 1 : 0;
   const desiredZoom = clampNumber(
-    Math.floor(typeof params.zoom === "number" ? params.zoom : 8),
+    Math.floor(rawZoom) + tileZoomBias,
     MIN_FEATURE_TILE_ZOOM,
     MAX_FEATURE_TILE_ZOOM,
   );
@@ -172,9 +184,7 @@ async function fetchFeaturesInTiles(
   }
 
   const requestedPageSize = params.page_size ?? 500;
-  const kinds = params.kinds ?? [];
-  const geometryLightOnly =
-    kinds.length > 0 && kinds.every((kind) => GEOMETRY_LIGHT_KINDS.has(kind));
+  const geometryLightOnly = isGeometryLightOnly(params.kinds);
   const perTilePageSize = geometryLightOnly
     ? requestedPageSize
     : Math.min(
