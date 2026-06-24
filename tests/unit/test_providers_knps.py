@@ -341,6 +341,16 @@ def test_protected_area_ignores_lossy_mojibake_korean_name() -> None:
     assert b.feature.name == "Jeonbuk Jeongeup Shinseongdong"
 
 
+def test_protected_area_ignores_unrecoverable_cjk_mojibake_name() -> None:
+    b = _geo_one(
+        "knps_protected_areas",
+        _POLY,
+        name="Cheokchi",
+        raw={"ORIG_NAME": "泥숈튂", "NAME": "Cheokchi", "MNUM": "PROTECTED-1"},
+    )[0]
+    assert b.feature.name == "Cheokchi"
+
+
 def test_hazard_and_protected_area_kinds() -> None:
     # 위험/보호지역은 관광 category 없음 → sentinel + barrier (upstream §3/§4)
     hazard = _geo_one("knps_hazard_zones", _POLY)[0]

@@ -14,7 +14,8 @@
 - **CHANGED**: area/route 중심 tile 조회는 tile 수로 `page_size`를 나누지 않아 area 단독 필터의
   false partial 표시와 누락 가능성을 줄인다.
 - **FIXED**: KNPS `knps_protected_areas` source의 한글 raw 이름 후보를 우선 사용하고,
-  recoverable CP949/UTF-8 mojibake는 한글명으로 복구한다.
+  recoverable CP949/UTF-8 mojibake는 한글명으로 복구하되, 복구 실패한 CJK mojibake는 영어
+  fallback을 유지한다.
 
 ### Admin 로그인 + public API key 관리 (2026-06-23)
 
