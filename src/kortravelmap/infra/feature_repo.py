@@ -61,6 +61,7 @@ __all__ = [
     "load_bundles",
     "soft_delete_features_not_in_snapshot",
     "inactivate_features_by_source_entity_ids",
+    "inactivate_geometryless_area_features_by_source",
     "get_feature_row",
     "get_feature_rows_by_ids",
     "list_active_place_coords",
@@ -914,6 +915,30 @@ RETURNING f.feature_id
 """
 
 
+# 과거 보정 — kind='area'인데 경계 geometry가 없는 provider feature만 inactive 전환.
+# 새 place row와 같은 source_entity_id를 공유할 수 있으므로 entity-id 기반 폐업 메서드를
+# 재사용하지 않고 feature kind/geom 조건을 직접 건다.
+_INACTIVATE_GEOMETRYLESS_AREA_BY_SOURCE_SQL: Final[str] = """
+UPDATE feature.features AS f
+SET status = 'inactive', deleted_at = now(), updated_at = now()
+WHERE f.deleted_at IS NULL
+  AND f.kind = 'area'
+  AND f.geom IS NULL
+  AND COALESCE(f.data_origin, 'provider') <> 'user_request'
+  AND f.feature_id IN (
+    SELECT sl.feature_id
+    FROM provider_sync.source_links AS sl
+    JOIN provider_sync.source_records AS sr
+      ON sr.source_record_key = sl.source_record_key
+    WHERE sl.is_primary_source
+      AND sr.provider = :provider
+      AND sr.dataset_key = :dataset_key
+      AND sr.source_entity_type = :source_entity_type
+  )
+RETURNING f.feature_id
+"""
+
+
 @dataclass(frozen=True)
 class FeatureLoadResult:
     """``load_bundles`` 적재 결과 카운트 (docs/architecture/backend-package.md §1.3).
@@ -1306,6 +1331,31 @@ async def inactivate_features_by_source_entity_ids(
             "dataset_key": dataset_key,
             "source_entity_type": source_entity_type,
             "keys": sorted(source_entity_ids),
+        },
+    )
+    return len(result.fetchall())
+
+
+async def inactivate_geometryless_area_features_by_source(
+    session: AsyncSession,
+    *,
+    provider: str,
+    dataset_key: str,
+    source_entity_type: str,
+) -> int:
+    """provider source에 연결된 ``area`` 중 경계 geometry가 없는 feature를 비활성화.
+
+    기존에 좌표만 있는 record를 ``Feature.kind='area'``로 적재했던 provider를
+    재정렬할 때 쓰는 one-way 보정이다. 같은 source entity가 새 ``place`` feature로
+    재적재될 수 있으므로 source_entity_id 집합 기반 전환은 쓰지 않는다.
+    commit은 호출자 책임.
+    """
+    result = await session.execute(
+        text(_INACTIVATE_GEOMETRYLESS_AREA_BY_SOURCE_SQL),
+        {
+            "provider": provider,
+            "dataset_key": dataset_key,
+            "source_entity_type": source_entity_type,
         },
     )
     return len(result.fetchall())

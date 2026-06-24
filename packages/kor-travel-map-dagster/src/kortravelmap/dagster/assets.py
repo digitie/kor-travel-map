@@ -264,12 +264,26 @@ async def run_feature_place_krheritage_items(
         fetched_at=fetched_at,
         reverse_geocoder=_reverse_geocoder(context),
     )
-    return await _load(
+    result = await _load(
         context,
         provider=KRHERITAGE_PROVIDER_NAME,
         dataset_key=KRHERITAGE_DATASET_KEY,
         bundles=bundles,
     )
+    client = cast(
+        "AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client")
+    )
+    inactivated = await client.inactivate_geometryless_area_features_by_source(
+        provider=KRHERITAGE_PROVIDER_NAME,
+        dataset_key=KRHERITAGE_DATASET_KEY,
+        source_entity_type="heritage",
+    )
+    if inactivated:
+        context.log.info(
+            "krheritage geometry 없는 area feature %d건 inactive 전환",
+            inactivated,
+        )
+    return result
 
 
 @asset(

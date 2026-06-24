@@ -467,6 +467,65 @@ async def test_get_feature_rows_by_ids_and_search_features(
     assert first.feature.feature_id in {item.feature_id for item in bbox_only.items}
 
 
+async def test_inactivate_geometryless_area_features_by_source(
+    migrated_session: AsyncSession,
+) -> None:
+    geometryless = await _bundle("AREA-NO-GEOM")
+    with_geom = await _bundle("AREA-WITH-GEOM")
+    place = await _bundle("AREA-PLACE")
+    await feature_repo.load_bundles(migrated_session, [geometryless, with_geom, place])
+    await migrated_session.flush()
+
+    await migrated_session.execute(
+        text(
+            """
+            UPDATE feature.features
+            SET kind = 'area', geom = NULL
+            WHERE feature_id = :fid
+            """
+        ),
+        {"fid": geometryless.feature.feature_id},
+    )
+    await migrated_session.execute(
+        text(
+            """
+            UPDATE feature.features
+            SET kind = 'area',
+                geom = x_extension.ST_SetSRID(
+                    x_extension.ST_GeomFromText(
+                        'POLYGON((126.9 37.5, 126.91 37.5, 126.91 37.51, 126.9 37.51, 126.9 37.5))'
+                    ),
+                    4326
+                )
+            WHERE feature_id = :fid
+            """
+        ),
+        {"fid": with_geom.feature.feature_id},
+    )
+    await migrated_session.flush()
+
+    inactivated = await feature_repo.inactivate_geometryless_area_features_by_source(
+        migrated_session,
+        provider=geometryless.source_record.provider,
+        dataset_key=geometryless.source_record.dataset_key,
+        source_entity_type=geometryless.source_record.source_entity_type,
+    )
+    assert inactivated == 1
+
+    rows = await feature_repo.get_feature_rows_by_ids(
+        migrated_session,
+        [
+            geometryless.feature.feature_id,
+            with_geom.feature.feature_id,
+            place.feature.feature_id,
+        ],
+    )
+    assert rows[geometryless.feature.feature_id]["status"] == "inactive"
+    assert rows[geometryless.feature.feature_id]["deleted_at"] is not None
+    assert rows[with_geom.feature.feature_id]["status"] == "active"
+    assert rows[place.feature.feature_id]["status"] == "active"
+
+
 async def test_area_feature_geom_persists(migrated_session: AsyncSession) -> None:
     """route/area Feature.geom(WKT)이 features.geom으로 적재되는지 (ADR-012)."""
     from kortravelmap.providers.knps import knps_geometry_records_to_bundles

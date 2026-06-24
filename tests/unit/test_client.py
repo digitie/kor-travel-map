@@ -131,6 +131,36 @@ async def test_inactivate_features_by_source_delegates_to_repo(
     assert recorded["source_entity_ids"] == {"201", "202"}
 
 
+async def test_inactivate_geometryless_area_features_by_source_delegates_to_repo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """geometry 없는 area 보정을 infra 메서드로 위임한다."""
+    import kortravelmap.client as client_mod
+
+    recorded: dict[str, object] = {}
+
+    async def _fake(session: object, **kwargs: object) -> int:
+        recorded.update(kwargs)
+        return 3
+
+    monkeypatch.setattr(
+        client_mod, "inactivate_geometryless_area_features_by_source", _fake
+    )
+    client = _read_client(monkeypatch)
+    monkeypatch.setattr(client, "_session_factory", _FakeTxSessionCM)
+    out = await client.inactivate_geometryless_area_features_by_source(
+        provider="python-krheritage-api",
+        dataset_key="krheritage_heritage_features",
+        source_entity_type="heritage",
+    )
+    assert out == 3
+    assert recorded == {
+        "provider": "python-krheritage-api",
+        "dataset_key": "krheritage_heritage_features",
+        "source_entity_type": "heritage",
+    }
+
+
 async def test_get_features_delegates_to_repo(monkeypatch: pytest.MonkeyPatch) -> None:
     import kortravelmap.client as client_mod
 
