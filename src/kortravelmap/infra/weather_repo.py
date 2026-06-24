@@ -21,6 +21,7 @@ from kortravelmap.core.ids import make_weather_value_key
 from kortravelmap.dto._time import kst_now
 
 if TYPE_CHECKING:
+    from sqlalchemy import RowMapping
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from kortravelmap.dto.weather import WeatherValue
@@ -52,6 +53,8 @@ class WeatherMetric:
     issued_at: datetime | None
     valid_at: datetime | None
     observed_at: datetime | None
+    provider: str | None = None
+    weather_domain: str | None = None
 
 
 @dataclass(frozen=True)
@@ -100,7 +103,8 @@ _CARD_SQL: Final[str] = """
 SELECT DISTINCT ON (forecast_style, metric_key)
     forecast_style, metric_key, metric_name, timeline_bucket,
     value_number, value_text, unit, severity,
-    issued_at, valid_at, observed_at
+    issued_at, valid_at, observed_at,
+    provider, weather_domain
 FROM feature.feature_weather_values
 WHERE feature_id = :feature_id
   AND (
@@ -119,60 +123,71 @@ ORDER BY
 # 스키마 qualify — #410/#411).
 _NEAREST_WEATHER_RADIUS_M: Final[float] = 50_000.0
 
-_NEAREST_WEATHER_SQL: Final[str] = """
+# KMA-forecast tier 술어 — 단기/초단기/중기 예보를 만드는 격자 anchor.
+# `python-kma-api`의 nowcast/ultra_short/short/mid가 SKY/POP/TMN/TMX(+TMP/T1H)를
+# 모두 싣는다. (#498) 휴게소 관측(observed)·airkorea 대기질을 제외해야 단순 "가장
+# 가까운 weather"가 더 가까운 관측만 잡고 예보를 못 잡는 문제를 막는다.
+_KMA_FORECAST_PREDICATE: Final[str] = (
+    "w.provider = 'python-kma-api' "
+    "AND w.forecast_style IN ('nowcast', 'ultra_short', 'short', 'mid')"
+)
+
+# observed-temp tier 술어 — 관측 기온 anchor (KREX 휴게소 등 forecast_style=observed).
+# (#497) 휴게소는 관측 기온을 T1H로 적재한다. 관측 기온은 예보 anchor를 그림자로
+# 가리지 않고 별도 row로 **증강**된다(병합 키에 forecast_style 포함).
+_OBSERVED_TEMP_PREDICATE: Final[str] = (
+    "w.forecast_style = 'observed' AND w.metric_key IN ('T1H', 'TMP')"
+)
+
+
+def _nearest_anchor_sql(exists_predicate: str) -> str:
+    """반경 내 가장 가까운(KNN) anchor feature 1건을 찾는 SQL.
+
+    #499: 과거 구현은 ``SELECT DISTINCT feature_id FROM feature_weather_values``
+    CTE(≈30M row full scan)를 **공간 좁히기 전에** 먼저 만들었다. 이를 GiST 후보
+    우선(target coord_5179 → ``ST_DWithin`` 반경 술어 → ``<->`` KNN 정렬)으로
+    재작성하고, weather 보유 여부는 ``EXISTS`` 상관 서브쿼리로 확인한다. 결정적
+    tie-break으로 ``f.feature_id``를 정렬 말미에 둔다(같은 좌표 다수 시 안정).
+    ADR-012: STORED ``coord_5179`` 대상, ``x_extension`` qualify, ST_Transform 금지.
+    """
+    return f"""
 WITH target AS (
     SELECT coord_5179
     FROM feature.features
     WHERE feature_id = :feature_id
       AND deleted_at IS NULL
       AND coord_5179 IS NOT NULL
-),
-weather_features AS (
-    SELECT DISTINCT feature_id FROM feature.feature_weather_values
 )
 SELECT f.feature_id
-FROM target AS t
-JOIN weather_features AS wf ON TRUE
-JOIN feature.features AS f
-  ON f.feature_id = wf.feature_id
- AND f.deleted_at IS NULL
- AND f.coord_5179 IS NOT NULL
- AND x_extension.ST_DWithin(
-       f.coord_5179, t.coord_5179, CAST(:radius_m AS double precision)
-     )
-ORDER BY f.coord_5179 OPERATOR(x_extension.<->) t.coord_5179
+FROM feature.features AS f, target AS t
+WHERE f.deleted_at IS NULL
+  AND f.coord_5179 IS NOT NULL
+  AND x_extension.ST_DWithin(
+        f.coord_5179, t.coord_5179, CAST(:radius_m AS double precision)
+      )
+  AND EXISTS (
+        SELECT 1
+        FROM feature.feature_weather_values AS w
+        WHERE w.feature_id = f.feature_id
+          {exists_predicate}
+      )
+ORDER BY f.coord_5179 OPERATOR(x_extension.<->) t.coord_5179, f.feature_id
 LIMIT 1
 """
 
-# 기온/단기예보(KMA)는 airkorea 대기질 측정소보다 성기게 적재돼, 단순 "가장 가까운
-# weather"는 더 가까운 대기질 지점만 잡고 기온은 못 잡는 경우가 많다. 기온(T1H/TMP)을
-# 가진 가장 가까운 지점을 따로 찾아 병합한다(반경 동일).
-_NEAREST_TEMP_SQL: Final[str] = """
-WITH target AS (
-    SELECT coord_5179
-    FROM feature.features
-    WHERE feature_id = :feature_id
-      AND deleted_at IS NULL
-      AND coord_5179 IS NOT NULL
-),
-temp_features AS (
-    SELECT DISTINCT feature_id
-    FROM feature.feature_weather_values
-    WHERE metric_key IN ('T1H', 'TMP')
+
+# 반경 내 가장 가까운 weather 보유 feature (종류 무관) — 완전 미적재 지역 폴백.
+_NEAREST_WEATHER_SQL: Final[str] = _nearest_anchor_sql("")
+
+# 반경 내 가장 가까운 KMA-forecast anchor — SKY/POP/TMN/TMX(+TMP/T1H) 보유.
+_NEAREST_KMA_FORECAST_SQL: Final[str] = _nearest_anchor_sql(
+    f"AND {_KMA_FORECAST_PREDICATE}"
 )
-SELECT f.feature_id
-FROM target AS t
-JOIN temp_features AS wf ON TRUE
-JOIN feature.features AS f
-  ON f.feature_id = wf.feature_id
- AND f.deleted_at IS NULL
- AND f.coord_5179 IS NOT NULL
- AND x_extension.ST_DWithin(
-       f.coord_5179, t.coord_5179, CAST(:radius_m AS double precision)
-     )
-ORDER BY f.coord_5179 OPERATOR(x_extension.<->) t.coord_5179
-LIMIT 1
-"""
+
+# 반경 내 가장 가까운 관측 기온 anchor — observed T1H/TMP 보유(휴게소 등).
+_NEAREST_OBSERVED_TEMP_SQL: Final[str] = _nearest_anchor_sql(
+    f"AND {_OBSERVED_TEMP_PREDICATE}"
+)
 
 
 def _enum_value(value: Any) -> str:
@@ -249,6 +264,20 @@ async def build_weather_card(
     metric_key)에서 ``COALESCE(valid_at, observed_at, issued_at)`` 최신 1건을 고른다
     (``DISTINCT ON``). ``is_stale``은 최신 시각이 ``asof``(또는 now) 기준
     ``freshness_seconds``를 넘으면 True. source trace는 ``source_styles``로 노출.
+
+    폴백 병합 (#498) — 자기 weather row가 기온을 못 채우는 농촌/비격자 feature는
+    SOURCE TIER별로 반경 내 가장 가까운 anchor를 합친다:
+
+    1. feature 자체 row.
+    2. KMA-forecast tier — 반경 내 가장 가까운 KMA 예보 anchor의 SKY/POP/TMN/TMX
+       (+TMP/T1H). (forecast_style, metric_key) 키로 자기 row를 가리지 않는 것만 추가
+       → KMA anchor가 반경 안이면 SKY/POP/TMN/TMX가 **항상** 붙는다.
+    3. observed tier — 반경 내 가장 가까운 관측 기온 anchor(휴게소 등, #497). 관측
+       T1H는 (forecast_style, metric_key)가 KMA 예보 기온과 달라 **증강**으로 추가되며
+       KMA 단기/중기 기온을 그림자로 가리지 않는다. KMA anchor가 반경에 없을 때만
+       관측이 유일한 기온 source가 된다.
+
+    card.feature_id는 요청 feature_id를 유지한다.
     """
     rows = list(
         (
@@ -260,39 +289,40 @@ async def build_weather_card(
         .all()
     )
     params = {"feature_id": feature_id, "radius_m": _NEAREST_WEATHER_RADIUS_M}
-    # 기온(T1H/TMP)이 없으면 반경 내 가장 가까운 기온(KMA) 지점의 forecast 값을 병합
-    # 한다(자체 대기질 등 기존 metric은 유지). card.feature_id는 요청 feature_id 유지.
-    if not any(r["metric_key"] in ("T1H", "TMP") for r in rows):
-        temp_id = (
-            await session.execute(text(_NEAREST_TEMP_SQL), params)
+
+    async def _anchor_rows(sql: str) -> list[RowMapping]:
+        anchor_id = (
+            await session.execute(text(sql), params)
         ).scalar_one_or_none()
-        if temp_id is not None and str(temp_id) != feature_id:
-            extra = (
+        if anchor_id is None or str(anchor_id) == feature_id:
+            return []
+        return list(
+            (
                 await session.execute(
-                    text(_CARD_SQL), {"feature_id": str(temp_id), "asof": asof}
+                    text(_CARD_SQL), {"feature_id": str(anchor_id), "asof": asof}
                 )
-            ).mappings().all()
-            seen = {(r["forecast_style"], r["metric_key"]) for r in rows}
-            for row in extra:
-                key = (row["forecast_style"], row["metric_key"])
-                if key not in seen:
-                    rows.append(row)
-                    seen.add(key)
-    # 근처에 기온도 없으면(완전 미적재 지역) 가장 가까운 임의 weather로 폴백(빈 카드 회피).
-    if not rows:
-        any_id = (
-            await session.execute(text(_NEAREST_WEATHER_SQL), params)
-        ).scalar_one_or_none()
-        if any_id is not None and str(any_id) != feature_id:
-            rows = list(
-                (
-                    await session.execute(
-                        text(_CARD_SQL), {"feature_id": str(any_id), "asof": asof}
-                    )
-                )
-                .mappings()
-                .all()
             )
+            .mappings()
+            .all()
+        )
+
+    def _merge(extra: list[RowMapping]) -> None:
+        """(forecast_style, metric_key) 키로 아직 없는 row만 추가 — 기존 row 보존."""
+        seen = {(r["forecast_style"], r["metric_key"]) for r in rows}
+        for row in extra:
+            key = (row["forecast_style"], row["metric_key"])
+            if key not in seen:
+                rows.append(row)
+                seen.add(key)
+
+    # 자기 row에 기온(T1H/TMP)이 없으면 tier 폴백. KMA 예보 tier를 먼저 병합해
+    # SKY/POP/TMN/TMX를 우선 확보하고, 그 다음 관측 기온 tier로 증강한다.
+    if not any(r["metric_key"] in ("T1H", "TMP") for r in rows):
+        _merge(await _anchor_rows(_NEAREST_KMA_FORECAST_SQL))
+        _merge(await _anchor_rows(_NEAREST_OBSERVED_TEMP_SQL))
+    # 어느 tier도 반경에 없으면(완전 미적재 지역) 가장 가까운 임의 weather로 폴백(빈 카드 회피).
+    if not rows:
+        _merge(await _anchor_rows(_NEAREST_WEATHER_SQL))
     metrics = [
         WeatherMetric(
             forecast_style=str(row["forecast_style"]),
@@ -306,6 +336,8 @@ async def build_weather_card(
             issued_at=row["issued_at"],
             valid_at=row["valid_at"],
             observed_at=row["observed_at"],
+            provider=row["provider"],
+            weather_domain=row["weather_domain"],
         )
         for row in rows
     ]
