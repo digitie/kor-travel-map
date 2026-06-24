@@ -97,7 +97,13 @@ export default defineConfig({
   },
   projects: [
     // #520 인증 게이트 대응: chromium 전에 로그인 세션을 1회 만들어 STORAGE_STATE에 저장.
-    { name: "setup", testMatch: /auth\.setup\.ts/ },
+    // 세션은 user-agent fingerprint에 묶이므로, 셋업도 chromium과 동일 디바이스(=동일 UA)로
+    // 로그인해야 chromium 테스트에서 세션이 유효하다.
+    {
+      name: "setup",
+      testMatch: /auth\.setup\.ts/,
+      use: { ...devices["Desktop Chrome"] },
+    },
     {
       name: "chromium",
       testIgnore: /auth\.setup\.ts/,
