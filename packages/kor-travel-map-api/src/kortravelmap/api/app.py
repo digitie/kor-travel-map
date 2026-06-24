@@ -386,6 +386,34 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             request_id=request_id,
         )
 
+    @application.exception_handler(Exception)
+    async def unhandled_exception_handler(
+        request: Request,
+        exc: Exception,
+    ) -> JSONResponse:
+        """처리되지 않은 예외를 RFC7807 problem+json 500으로 통일한다 (#510).
+
+        starlette 기본 핸들러는 generic 예외를 ``text/plain`` 500
+        ``Internal Server Error``로 흘려, OpenAPI가 선언한 ``application/problem+json``
+        계약(모든 5xx)을 깬다. 본 핸들러가 이를 막는다. stack은 ``exc_info``로
+        **로깅만** 하고(삼키지 않음), 응답 본문에는 예외 detail/stack을 노출하지
+        않는다 — 내부 정보 누출 방지.
+        """
+        request_id = _request_id(request)
+        _logger.error(
+            "처리되지 않은 예외 (request_id=%s): %s",
+            request_id,
+            request.url.path,
+            exc_info=exc,
+        )
+        return _error_response(
+            status_code=500,
+            code="INTERNAL_ERROR",
+            message="서버 내부 오류가 발생했습니다.",
+            details={},
+            request_id=request_id,
+        )
+
     # frontend(Next.js dev/start 12705)가 브라우저에서 backend(12701)로 cross-origin
     # fetch → CORS 필요 (ADR-005: 내부 debug 도구, origin은 localhost frontend로
     # 한정). OpenAPI spec에는 영향 없음(미들웨어, ADR-031 drift gate 무관).

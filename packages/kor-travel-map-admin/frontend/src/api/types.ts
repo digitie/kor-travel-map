@@ -10164,7 +10164,7 @@ export interface operations {
                 /** @description 행정구역 rollup 단위. 미지정 시 zoom으로 유도. */
                 cluster_unit?: ("sido" | "sigungu" | "eupmyeondong") | null;
                 max_items?: number;
-                /** @description route/area 지도 표시용 GeoJSON geometry 포함 여부. */
+                /** @description route/area 지도 표시용 GeoJSON geometry 포함 여부. 개별 feature 응답(non-clustered)에만 적용되며, cluster_unit이 해석되면(zoom으로 유도 포함) 클러스터 응답에는 무시된다. */
                 include_geometry?: boolean;
                 /** @description 외부/비신뢰 클라이언트용 VWorld 호환 공개 API 키. trusted admin proxy 또는 service token 요청은 검증을 우회한다. */
                 key?: string | null;

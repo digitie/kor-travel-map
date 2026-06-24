@@ -432,7 +432,13 @@ async def list_public_features_in_bounds(
     max_items: Annotated[int, Query(ge=1, le=2000)] = 1000,
     include_geometry: Annotated[
         bool,
-        Query(description="route/area 지도 표시용 GeoJSON geometry 포함 여부."),
+        Query(
+            description=(
+                "route/area 지도 표시용 GeoJSON geometry 포함 여부. 개별 feature "
+                "응답(non-clustered)에만 적용되며, cluster_unit이 해석되면(zoom으로 "
+                "유도 포함) 클러스터 응답에는 무시된다."
+            )
+        ),
     ] = False,
 ) -> FeaturesInBoundsResponse:
     started_at = perf_counter()
