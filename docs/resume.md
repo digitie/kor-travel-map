@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-25 (codex) — Admin 로그인 submit 보강 + N150 area live smoke
+
+- **완료(코드)**: 로그인 form submit이 React state 대신 현재 `FormData` 값을 읽어 username/password를
+  전송한다. 자동입력/테스트 입력 경로에서 DOM value와 React state가 어긋나도 빈 password가
+  전송되지 않도록 input `name` 속성과 회귀 테스트를 추가했다.
+- **완료(N150)**: 수정 frontend를 N150 production에 반영하고 `kor-travel-map-ui`를 재빌드·재기동했다.
+  UI/API 컨테이너 모두 healthy 상태다.
+- **완료(live e2e)**: 공식 live Playwright 인증 setup + `/features` 지도 smoke 통과. 추가 계측 smoke에서
+  로그인 POST 200, 낮은 줌 area `include_geometry=false`/cluster 25개/partial 없음, 높은 줌
+  `보성` area `include_geometry=true`/geometry source 및 area layer 렌더를 확인했다.
+- **검증**: `npm run test -- src/components/login-form.test.tsx`, `npm run type-check`, 대상 ESLint,
+  `git diff --check`, N150 Next production build 통과.
+- **다음 한 작업**: PR 생성 후 CI green 확인과 머지를 완료한다.
+
 ## 2026-06-24 (codex) — Admin area 클러스터링 + KNPS protected area 한글명 보정
 
 - **완료(코드)**: 낮은 줌의 admin feature 지도에서는 `area` geometry를 요청하지 않고 centroid

@@ -15,13 +15,21 @@ export function LoginForm({ nextPath }: { nextPath: string }) {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    const form = event.currentTarget as HTMLFormElement;
+    const formData = new FormData(form);
+    const submittedUsername = String(formData.get("username") ?? "");
+    const submittedPassword = String(formData.get("password") ?? "");
     setBusy(true);
     setError(null);
     try {
       const response = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ username, password, next: nextPath }),
+        body: JSON.stringify({
+          username: submittedUsername,
+          password: submittedPassword,
+          next: nextPath,
+        }),
       });
       if (response.status === 503) {
         setError("로그인 환경변수가 설정되지 않았습니다.");
@@ -69,6 +77,7 @@ export function LoginForm({ nextPath }: { nextPath: string }) {
               autoComplete="username"
               disabled={busy}
               id="admin-username"
+              name="username"
               value={username}
               onChange={(event) => setUsername(event.target.value)}
             />
@@ -83,6 +92,7 @@ export function LoginForm({ nextPath }: { nextPath: string }) {
               autoComplete="current-password"
               disabled={busy}
               id="admin-password"
+              name="password"
               type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
