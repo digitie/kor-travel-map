@@ -2,6 +2,27 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-24 (codex) — KNPS area 이름 복구 + N150 feature 화면 확인
+
+N150 feature 화면에서 `area`가 보이지 않는다는 사용자 제보를 재점검했다.
+
+- **원인 보강**: `python-knps-api` geometry dataset 중 `knps_park_boundaries`와
+  `knps_protected_areas`는 실제 Polygon/MultiPolygon geometry가 있지만, provider normalized
+  `name`이 비어 있고 raw 속성(`NPK_NM`, `NAME` 등)에만 이름이 있어 기존 변환기가 skip했다.
+- **코드 수정**: KNPS geometry 변환에서 park boundary/protected area는 `record.name`이 비어도
+  raw 이름 컬럼으로 이름을 복구한다. route/trail처럼 이름이 없는 record는 기존처럼 skip한다.
+- **N150 데이터 확인**: 운영 DB에는 KNPS `area` active 1,539건
+  (`knps_park_boundaries` 23건, `knps_protected_areas` 1,516건)이 적재되어 있고,
+  `krheritage`의 geometry 없는 1,178건은 inactive 상태다.
+- **N150 반영**: `src/kortravelmap/providers/knps.py`를 N150 `~/kor-travel-map`에 rsync하고
+  docker-manager compose로 `kor-travel-map-api`, `kor-travel-map-dagster`,
+  `kor-travel-map-dagster-daemon`을 재빌드/재기동했다. API/Dagster 컨테이너 내부 wheel에
+  `_geometry_record_name` 반영을 확인했다.
+- **N150 UI live 확인**: 운영 로그인 후 `/features`에서 `area` 필터를 켜면
+  `203건 표시`, maplibre marker 203개, 테이블 `AREA active` 행이 표시된다.
+- **검증**: `tests/unit/test_providers_knps.py` 45건 통과, `ruff check .` 통과,
+  `python -m mypy --strict src/kortravelmap` 통과, import-linter 4계약 통과.
+
 ## 2026-06-24 (codex) — krheritage area 보정 + concierge 적재/N150 live 검증
 
 사용자 요청으로 산림청 SHP와 provider area feature를 점검하고, `krheritage`의 면적 없는

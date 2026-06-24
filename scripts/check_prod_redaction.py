@@ -71,7 +71,10 @@ def main(argv: list[str]) -> int:
     if not hits:
         return 0
 
-    print("prod endpoint details leaked into committed docs (#508 redaction guard):", file=sys.stderr)
+    print(
+        "prod endpoint details leaked into committed docs (#508 redaction guard):",
+        file=sys.stderr,
+    )
     for hit in hits:
         print(hit, file=sys.stderr)
     print(

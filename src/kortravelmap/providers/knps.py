@@ -30,7 +30,7 @@ ADR 참조
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -533,6 +533,37 @@ KNPS_GEOMETRY_DATASETS: Final[dict[str, KnpsGeometryDatasetSpec]] = {
 KNPS_GEOMETRY_DATASET_KEYS: Final[frozenset[str]] = frozenset(KNPS_GEOMETRY_DATASETS)
 
 
+def _raw_text(raw: Mapping[str, Any], *keys: str) -> str | None:
+    """raw dict에서 첫 번째 비어 있지 않은 문자열 값을 꺼낸다."""
+    for key in keys:
+        value = raw.get(key)
+        if value is None:
+            continue
+        text = normalize_korean_text(str(value))
+        if text is not None:
+            return text
+    return None
+
+
+def _geometry_record_name(
+    record: KnpsGeometryRecord, spec: KnpsGeometryDatasetSpec
+) -> str | None:
+    """KNPS geometry 이름을 provider normalized field 또는 raw column에서 결정한다."""
+    normalized_name = normalize_korean_text(record.name)
+    if normalized_name is not None:
+        return normalized_name
+
+    raw = record.raw
+    if spec.dataset_key == "knps_park_boundaries":
+        park_name = _raw_text(raw, "NPK_NM", "국립공원명", "PARK_NM", "name", "NAME")
+        if park_name is None:
+            return None
+        return park_name if "국립공원" in park_name else f"{park_name} 국립공원"
+    if spec.dataset_key == "knps_protected_areas":
+        return _raw_text(raw, "NAME", "ORIG_NAME", "DESIG_ENG", "DESIG")
+    return None
+
+
 def _geometry_detail(
     spec: KnpsGeometryDatasetSpec, feature_id: str, raw: dict[str, Any]
 ) -> RouteDetail | AreaDetail:
@@ -562,10 +593,10 @@ async def _geometry_record_to_bundle(
 ) -> FeatureBundle | None:
     """KNPS geometry record 1건 → route/area ``FeatureBundle``.
 
-    이름 없는 record/geometry 파싱 실패/경계 밖 centroid는 ``None`` 반환
-    (호출자가 skip/집계).
+    route는 이름 없는 record를 건너뛰고, area dataset은 raw 속성에서 이름을
+    복구한다. geometry 파싱 실패/경계 밖 centroid는 ``None`` 반환(호출자가 skip/집계).
     """
-    normalized_name = normalize_korean_text(record.name)
+    normalized_name = _geometry_record_name(record, spec)
     if normalized_name is None:  # None/빈/공백-only 이름 모두 skip
         return None
 
@@ -619,7 +650,7 @@ async def _geometry_record_to_bundle(
         source_entity_type=_SOURCE_ENTITY_TYPE,
         source_entity_id=record.source_id,
         raw_payload_hash=payload_hash,
-        raw_name=record.name,
+        raw_name=record.name or normalized_name,
         raw_data=raw_data,
         fetched_at=fetched_at,
         source_record_key=source_record_key,

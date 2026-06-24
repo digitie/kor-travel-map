@@ -292,6 +292,30 @@ def test_park_boundary_area_mapping() -> None:
     assert b.feature.geom.startswith("POLYGON")
 
 
+def test_park_boundary_area_name_falls_back_to_raw_park_name() -> None:
+    b = _geo_one(
+        "knps_park_boundaries",
+        _POLY,
+        name=None,
+        raw={"NPK_NM": "가야산", "NO": "PARK-1"},
+    )[0]
+    assert b.feature.kind is FeatureKind.AREA
+    assert b.feature.name == "가야산 국립공원"
+    assert b.source_record.raw_name == "가야산 국립공원"
+
+
+def test_protected_area_name_falls_back_to_raw_name() -> None:
+    b = _geo_one(
+        "knps_protected_areas",
+        _POLY,
+        name=None,
+        raw={"NAME": "Jeju Island", "MNUM": "PROTECTED-1"},
+    )[0]
+    assert b.feature.kind is FeatureKind.AREA
+    assert b.feature.name == "Jeju Island"
+    assert b.source_record.raw_name == "Jeju Island"
+
+
 def test_hazard_and_protected_area_kinds() -> None:
     # 위험/보호지역은 관광 category 없음 → sentinel + barrier (upstream §3/§4)
     hazard = _geo_one("knps_hazard_zones", _POLY)[0]
