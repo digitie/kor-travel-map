@@ -316,6 +316,31 @@ def test_protected_area_name_falls_back_to_raw_name() -> None:
     assert b.source_record.raw_name == "Jeju Island"
 
 
+def test_protected_area_prefers_recoverable_raw_korean_name() -> None:
+    b = _geo_one(
+        "knps_protected_areas",
+        _POLY,
+        name="Bongpyeong",
+        raw={"ORIG_NAME": "遊됲룊", "NAME": "Bongpyeong", "MNUM": "PROTECTED-1"},
+    )[0]
+    assert b.feature.name == "봉평"
+    assert b.source_record.raw_name == "봉평"
+
+
+def test_protected_area_ignores_lossy_mojibake_korean_name() -> None:
+    b = _geo_one(
+        "knps_protected_areas",
+        _POLY,
+        name="Jeonbuk Jeongeup Shinseongdong",
+        raw={
+            "ORIG_NAME": "�쟾遺� �젙�쓭�떆 �떊�젙�룞",
+            "NAME": "Jeonbuk Jeongeup Shinseongdong",
+            "MNUM": "PROTECTED-1",
+        },
+    )[0]
+    assert b.feature.name == "Jeonbuk Jeongeup Shinseongdong"
+
+
 def test_hazard_and_protected_area_kinds() -> None:
     # 위험/보호지역은 관광 category 없음 → sentinel + barrier (upstream §3/§4)
     hazard = _geo_one("knps_hazard_zones", _POLY)[0]

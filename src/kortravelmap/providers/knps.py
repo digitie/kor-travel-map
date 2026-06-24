@@ -545,15 +545,63 @@ def _raw_text(raw: Mapping[str, Any], *keys: str) -> str | None:
     return None
 
 
+def _has_hangul(text: str) -> bool:
+    return any("\uac00" <= char <= "\ud7a3" for char in text)
+
+
+def _repair_utf8_decoded_as_cp949(text: str) -> str | None:
+    """UTF-8 bytes를 CP949로 잘못 읽은 KNPS DBF 문자열을 복구한다."""
+    if "\ufffd" in text:
+        return None
+    try:
+        repaired = text.encode("cp949").decode("utf-8")
+    except UnicodeError:
+        return None
+    normalized = normalize_korean_text(repaired)
+    if normalized is None or "\ufffd" in normalized or not _has_hangul(normalized):
+        return None
+    return normalized
+
+
+def _raw_hangul_text(raw: Mapping[str, Any], *keys: str) -> str | None:
+    """raw dict에서 표시 가능한 한글 문자열 또는 복구 가능한 mojibake를 찾는다."""
+    for key in keys:
+        value = raw.get(key)
+        if value is None:
+            continue
+        text = normalize_korean_text(str(value))
+        if text is None:
+            continue
+        repaired = _repair_utf8_decoded_as_cp949(text)
+        if repaired is not None:
+            return repaired
+        if "\ufffd" not in text and _has_hangul(text):
+            return text
+    return None
+
+
 def _geometry_record_name(
     record: KnpsGeometryRecord, spec: KnpsGeometryDatasetSpec
 ) -> str | None:
     """KNPS geometry 이름을 provider normalized field 또는 raw column에서 결정한다."""
+    raw = record.raw
+    if spec.dataset_key == "knps_protected_areas":
+        korean_name = _raw_hangul_text(
+            raw,
+            "ORIG_NAME",
+            "KOR_NM",
+            "NAME_KOR",
+            "국문명",
+            "명칭",
+            "이름",
+        )
+        if korean_name is not None:
+            return korean_name
+
     normalized_name = normalize_korean_text(record.name)
     if normalized_name is not None:
         return normalized_name
 
-    raw = record.raw
     if spec.dataset_key == "knps_park_boundaries":
         park_name = _raw_text(raw, "NPK_NM", "국립공원명", "PARK_NM", "name", "NAME")
         if park_name is None:
@@ -650,7 +698,7 @@ async def _geometry_record_to_bundle(
         source_entity_type=_SOURCE_ENTITY_TYPE,
         source_entity_id=record.source_id,
         raw_payload_hash=payload_hash,
-        raw_name=record.name or normalized_name,
+        raw_name=normalized_name,
         raw_data=raw_data,
         fetched_at=fetched_at,
         source_record_key=source_record_key,

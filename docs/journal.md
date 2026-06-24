@@ -2,6 +2,27 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-24 (codex) — Admin area 클러스터링 + KNPS protected area 한글명 보정
+
+N150 feature 화면에서 `area` 로딩이 느리고 플리커가 심하다는 제보와, KNPS area 이름이 영어로
+표시된다는 제보를 함께 처리했다.
+
+- **성능 원인**: `/features` 지도 조회가 낮은 줌에서도 `area` geometry를 항상 포함했고,
+  `area`는 point cluster source에서 제외되어 polygon/label만 직접 갱신했다. 전국 범위에서
+  대형 polygon payload와 geometry layer 갱신이 겹쳐 느린 로딩과 flicker가 발생했다.
+- **지도 동작 변경**: 낮은 줌에서는 `area`를 centroid marker로 cluster에 포함하고,
+  `area` polygon/label geometry는 줌 14 이상에서만 요청·표시한다. 선택 feature의 geometry는
+  기존처럼 표시할 수 있게 남겼고, query 전환 중에는 이전 데이터를 유지해 빈 지도 flicker를 줄였다.
+- **tile 조회 보정**: area/route 같은 geometry-light 필터는 tile 개수로 `page_size`를 나누지 않게 해
+  area 단독 필터의 false partial 표시와 불필요한 재조회 가능성을 줄였다.
+- **KNPS 이름 보정**: `knps_protected_areas`는 raw 속성의 `ORIG_NAME` 등에서 한글 후보를 먼저
+  사용한다. UTF-8 문자열이 CP949로 잘못 decode된 recoverable 값은 한글로 복구하고,
+  이미 `�`가 섞여 원문 byte가 손실된 값은 영어 이름을 유지한다.
+- **검증**: `tests/unit/test_providers_knps.py`, frontend type-check/build, 수정 frontend ESLint,
+  `ruff check .`, `python -m mypy --strict src/kortravelmap`, import-linter, `git diff --check`를
+  통과했다. 로컬 mocked Playwright는 기존 dev server/env 상태 때문에 신규 기대값 검증이
+  안정적으로 끝나지 않아 N150 배포 후 live smoke로 보완한다.
+
 ## 2026-06-24 (codex) — KNPS area 이름 복구 + N150 feature 화면 확인
 
 N150 feature 화면에서 `area`가 보이지 않는다는 사용자 제보를 재점검했다.

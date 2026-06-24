@@ -55,6 +55,15 @@ function makeFeaturesInBboxResponse(
   return { data: { items }, meta: makeMeta() };
 }
 
+async function setMapZoom(page: Page, zoom: number) {
+  await page.evaluate((nextZoom) => {
+    const container = document.querySelector(
+      '[data-testid="map-canvas-container"]',
+    ) as (HTMLElement & { _maplibreMap?: import("maplibre-gl").Map }) | null;
+    container?._maplibreMap?.jumpTo({ zoom: nextZoom });
+  }, zoom);
+}
+
 function makeFeatureDetail(
   overrides: Partial<FeatureDetailResponse> = {},
 ): FeatureDetailResponse {
@@ -148,8 +157,11 @@ async function mockFeatureRoutes(page: Page, options: FeaturesRouteOptions = {})
       return;
     }
 
-    // list: `/v1/features` (정확히)
-    if (url.pathname === "/v1/features") {
+    // list: `/v1/features` 또는 BFF `/api/proxy/v1/features` (정확히)
+    if (
+      url.pathname === "/v1/features" ||
+      url.pathname === "/api/proxy/v1/features"
+    ) {
       requests.list += 1;
       requests.listKinds.push(url.searchParams.getAll("kind"));
       requests.listIncludeGeometry.push(
@@ -168,7 +180,10 @@ async function mockFeatureRoutes(page: Page, options: FeaturesRouteOptions = {})
     }
 
     // detail: `/v1/features/{id}`
-    if (url.pathname.startsWith("/v1/features/")) {
+    if (
+      url.pathname.startsWith("/v1/features/") ||
+      url.pathname.startsWith("/api/proxy/v1/features/")
+    ) {
       requests.detail += 1;
       await fulfillJson(route, makeFeatureDetailEnvelope());
       return;
@@ -260,9 +275,12 @@ test.describe("/features map interactions", () => {
     });
 
     await page.goto("/features");
-
+    await expect(page.getByTestId("map-canvas-container")).toBeVisible();
     await expect.poll(() => requests.list).toBeGreaterThanOrEqual(1);
-    expect(requests.listIncludeGeometry[0]).toBe("true");
+    expect(requests.listIncludeGeometry[0]).toBe("false");
+
+    await setMapZoom(page, 14);
+    await expect.poll(() => requests.listIncludeGeometry).toContain("true");
     await expect(page.getByText("Seoul Trail")).toBeVisible();
     await expect(page.getByText("Mock Park Area - 1.2 km2")).toBeVisible();
 
@@ -302,6 +320,45 @@ test.describe("/features map interactions", () => {
         sourceLoaded: true,
         featureCount: 2,
       });
+  });
+
+  test("area geometry — 낮은 줌에서는 centroid marker를 cluster로 표시", async ({
+    page,
+  }) => {
+    const requests = await mockFeatureRoutes(page, {
+      items: Array.from({ length: 4 }, (_, index) =>
+        makeFeatureSummary({
+          area_square_meters: 1_234_567 + index,
+          feature_id: `mock-area-${index + 1}`,
+          kind: "area",
+          lat: 37.5665 + index * 0.001,
+          lon: 126.978 + index * 0.001,
+          name: `Mock Park Area ${index + 1}`,
+          geometry: {
+            type: "Polygon",
+            coordinates: [
+              [
+                [126.96 + index * 0.001, 37.55],
+                [127.0 + index * 0.001, 37.55],
+                [127.0 + index * 0.001, 37.59],
+                [126.96 + index * 0.001, 37.59],
+                [126.96 + index * 0.001, 37.55],
+              ],
+            ],
+          },
+          marker_color: "P-12",
+        }),
+      ),
+    });
+
+    await page.goto("/features");
+
+    await expect.poll(() => requests.list).toBeGreaterThanOrEqual(1);
+    expect(requests.listIncludeGeometry[0]).toBe("false");
+    await expect(
+      page.getByRole("button", { name: /feature 클러스터 4건/ }),
+    ).toBeVisible();
+    await expect(page.getByText("Mock Park Area 1 - 1.2 km2")).toBeHidden();
   });
 
   test("table row 선택 → 지도 탭 상세 패널(marker-click 대체 경로)", async ({
