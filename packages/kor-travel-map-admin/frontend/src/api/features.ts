@@ -5,7 +5,12 @@
  * 좌표는 WGS84 (ADR-012). `kind`는 반복 파라미터로 다중 필터.
  */
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 
 import { deleteJson, getJson, patchJson, pathWithQuery, postJson } from "./client";
 import type { components, paths } from "./types";
@@ -58,6 +63,7 @@ const MAX_FEATURE_TILES = 24;
 const MIN_FEATURE_TILE_ZOOM = 5;
 const MAX_FEATURE_TILE_ZOOM = 12;
 const MERCATOR_LAT_LIMIT = 85.05112878;
+const GEOMETRY_LIGHT_KINDS = new Set(["area", "route"]);
 
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -166,10 +172,15 @@ async function fetchFeaturesInTiles(
   }
 
   const requestedPageSize = params.page_size ?? 500;
-  const perTilePageSize = Math.min(
-    requestedPageSize,
-    Math.max(50, Math.ceil(requestedPageSize / tiles.length)),
-  );
+  const kinds = params.kinds ?? [];
+  const geometryLightOnly =
+    kinds.length > 0 && kinds.every((kind) => GEOMETRY_LIGHT_KINDS.has(kind));
+  const perTilePageSize = geometryLightOnly
+    ? requestedPageSize
+    : Math.min(
+        requestedPageSize,
+        Math.max(50, Math.ceil(requestedPageSize / tiles.length)),
+      );
 
   // 바깥 viewport AbortSignal을 tile fetch에 그대로 넘기면 한 tile의 react-query
   // 취소(예: staleTime 만료 refetch dedupe)가 viewport 전체를 죽일 수 있다. 대신
@@ -301,6 +312,7 @@ export function useFeaturesInBbox(
     queryFn: ({ signal }) =>
       fetchFeaturesInTiles(queryClient, queryParams, tiles, signal),
     enabled: options?.enabled ?? true,
+    placeholderData: keepPreviousData,
     staleTime: 30_000,
   });
 }

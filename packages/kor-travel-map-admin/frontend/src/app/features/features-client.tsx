@@ -49,6 +49,7 @@ import { isVWorldApiKeyConfigured } from "@/lib/vworld-style";
 import { useMapStore, type FeatureViewMode } from "@/state/map";
 
 const VWORLD_KEY = process.env.NEXT_PUBLIC_VWORLD_API_KEY;
+const AREA_GEOMETRY_MIN_ZOOM = 14;
 
 interface Bbox {
   min_lon: number;
@@ -183,6 +184,9 @@ export function FeaturesClient() {
     () => Array.from(activeFeatureKinds) as FeatureKind[],
     [activeFeatureKinds],
   );
+  const includeFeatureGeometry =
+    kindFilter.includes("route") || viewport.zoom >= AREA_GEOMETRY_MIN_ZOOM;
+  const showAreaGeometry = viewport.zoom >= AREA_GEOMETRY_MIN_ZOOM;
 
   const featuresQuery = useFeaturesInBbox(
     {
@@ -190,7 +194,7 @@ export function FeaturesClient() {
       kinds: kindFilter.length > 0 ? kindFilter : undefined,
       // 서버 in-bounds 파라미터는 `page_size`(최대 500). 과거엔 `limit`을 보내
       // 서버가 무시 → 항상 기본 100건만 표시됐다(110만 중 100개, 필터 체감 약함).
-      includeGeometry: true,
+      includeGeometry: includeFeatureGeometry,
       page_size: 500,
       zoom: viewport.zoom,
     },
@@ -260,7 +264,8 @@ export function FeaturesClient() {
     if (!bbox) return "지도 로딩 중";
     if (featuresQuery.isLoading) return "feature 로딩 중";
     if (featuresQuery.isError) return "feature 호출 실패";
-    return `${featuresQuery.data?.data.items.length ?? 0}건 표시`;
+    const count = featuresQuery.data?.data.items.length ?? 0;
+    return featuresQuery.isFetching ? `${count}건 표시 · 갱신 중` : `${count}건 표시`;
   }, [bbox, featuresQuery]);
 
   // tiled fetch가 일부 tile 잘림/실패를 보고하면(부분 결과) 조용히 누락되지 않도록
@@ -420,6 +425,7 @@ export function FeaturesClient() {
                 <VWorldFeatureClusters
                   features={featureItems}
                   selectedFeatureId={selectedFeatureId}
+                  showAreaGeometry={showAreaGeometry}
                   onSelectFeature={setSelectedFeatureId}
                 />
               </VWorldMapView>

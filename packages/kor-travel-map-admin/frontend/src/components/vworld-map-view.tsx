@@ -402,6 +402,10 @@ function hasRenderableGeometry(feature: ClusterFeatureInput): boolean {
   );
 }
 
+function shouldClusterAsPoint(feature: ClusterFeatureInput): boolean {
+  return feature.kind !== "route";
+}
+
 function markerIconForFeature(feature: ClusterFeatureInput): string | null {
   if (feature.kind === "weather") return null;
   return feature.marker_icon ?? null;
@@ -427,10 +431,18 @@ function geometryLabel(feature: ClusterFeatureInput): string {
 
 function geometryFeature(
   feature: ClusterFeatureInput,
+  options: { selectedFeatureId: string | null; showAreaGeometry: boolean },
 ): FeatureGeometryFeature | null {
   if (
     (feature.kind !== "route" && feature.kind !== "area") ||
     !isFeatureMapGeometry(feature.geometry)
+  ) {
+    return null;
+  }
+  if (
+    feature.kind === "area" &&
+    !options.showAreaGeometry &&
+    options.selectedFeatureId !== feature.feature_id
   ) {
     return null;
   }
@@ -501,12 +513,14 @@ export function VWorldFeatureClusters({
   features,
   onSelectFeature,
   selectedFeatureId = null,
+  showAreaGeometry = true,
   clusterRadius = 60,
   clusterMaxZoom = 14,
 }: {
   features: ReadonlyArray<ClusterFeatureInput>;
   onSelectFeature?: (featureId: string) => void;
   selectedFeatureId?: string | null;
+  showAreaGeometry?: boolean;
   clusterRadius?: number;
   clusterMaxZoom?: number;
 }) {
@@ -528,7 +542,7 @@ export function VWorldFeatureClusters({
       features: features.flatMap((f) =>
         typeof f.lon === "number" &&
         typeof f.lat === "number" &&
-        !hasRenderableGeometry(f)
+        (!hasRenderableGeometry(f) || shouldClusterAsPoint(f))
           ? [
               {
                 type: "Feature" as const,
@@ -556,11 +570,14 @@ export function VWorldFeatureClusters({
     () => ({
       type: "FeatureCollection",
       features: features.flatMap((feature) => {
-        const item = geometryFeature(feature);
+        const item = geometryFeature(feature, {
+          selectedFeatureId,
+          showAreaGeometry,
+        });
         return item ? [item] : [];
       }),
     }),
-    [features],
+    [features, selectedFeatureId, showAreaGeometry],
   );
 
   // source data 갱신 (features prop 변경 시).

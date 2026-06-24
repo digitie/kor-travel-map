@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### Admin 지도 area 클러스터링 + KNPS area 한글명 보정 (2026-06-24)
+
+- **ADDED**: admin Feature 지도에서 `area` feature도 낮은 줌에서는 centroid marker 기반 cluster에
+  포함한다.
+- **CHANGED**: `area` polygon/label geometry는 줌 14 이상에서만 요청·표시해 낮은 줌의 대형
+  geometry payload와 flicker를 줄인다. 지도 조회 query 전환 중에는 이전 결과를 유지한다.
+- **CHANGED**: area/route 중심 tile 조회는 tile 수로 `page_size`를 나누지 않아 area 단독 필터의
+  false partial 표시와 누락 가능성을 줄인다.
+- **FIXED**: KNPS `knps_protected_areas` source의 한글 raw 이름 후보를 우선 사용하고,
+  recoverable CP949/UTF-8 mojibake는 한글명으로 복구한다.
+
 ### Admin 로그인 + public API key 관리 (2026-06-23)
 
 - **ADDED**: admin frontend에 `admin` 단일 계정 로그인 화면을 추가했다. 비밀번호 원문은 저장하지
