@@ -2,6 +2,28 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-25 (codex) — Admin 로그인 submit 보강 + N150 area live 재검증
+
+N150 production 화면 재검증 중 로그인 form에 값이 보이는데 `/api/auth/login` payload의
+password가 빈 문자열로 전송되는 케이스를 확인했다. React state와 실제 DOM form value가
+자동입력/테스트 입력 타이밍에서 어긋날 수 있어 submit 시점의 `FormData`를 정본으로 읽도록
+보강했다.
+
+- **코드 수정**: `LoginForm` submit은 `event.currentTarget`에서 `FormData`를 읽어 username/password를
+  전송한다. input에는 `name="username"`/`name="password"`를 명시했다.
+- **회귀 테스트**: password input의 DOM value만 바꾼 뒤 submit해도 fetch payload에 현재 form 값이
+  들어가는 jsdom 테스트를 추가했다.
+- **N150 반영**: 수정 frontend 파일과 changelog를 N150 `~/kor-travel-map`에 rsync하고
+  `kor-travel-map-ui`를 재빌드·재기동했다. Next production build 내 TypeScript가 통과했고,
+  UI/API 컨테이너 모두 healthy 상태를 확인했다.
+- **N150 live e2e**: 공식 live Playwright `auth.setup.ts` + `/features` 지도 smoke 2건 통과.
+  추가 계측 smoke에서 로그인 POST 200, 낮은 줌 area 요청 `include_geometry=false`, 응답 72건,
+  지도 cluster 25개, partial 표시 없음, console error 0건을 확인했다. 같은 세션에서 한글 area
+  표본 `보성`으로 확대 시 `include_geometry=true`, geometry 포함 8건, geometry source feature 4건,
+  area fill/outline layer 2개 렌더를 확인했다.
+- **로컬 검증**: `npm run test -- src/components/login-form.test.tsx`, `npm run type-check`,
+  대상 ESLint, `git diff --check` 통과.
+
 ## 2026-06-24 (codex) — Admin area 클러스터링 + KNPS protected area 한글명 보정
 
 N150 feature 화면에서 `area` 로딩이 느리고 플리커가 심하다는 제보와, KNPS area 이름이 영어로

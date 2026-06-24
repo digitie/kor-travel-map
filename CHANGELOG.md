@@ -5,6 +5,11 @@
 
 ## [Unreleased]
 
+### Admin 로그인 form submit 안정화 (2026-06-25)
+
+- **FIXED**: 로그인 form submit이 React state 대신 현재 form value를 읽어 브라우저 자동완성이나
+  테스트 자동입력에서 DOM 값과 React state가 어긋나도 빈 password가 전송되지 않게 했다.
+
 ### Admin 지도 area 클러스터링 + KNPS area 한글명 보정 (2026-06-24)
 
 - **ADDED**: admin Feature 지도에서 `area` feature도 낮은 줌에서는 centroid marker 기반 cluster에
