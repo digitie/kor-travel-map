@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-24 (codex) — KNPS area 이름 복구 + N150 feature 화면 확인
+
+- **완료(운영 확인)**: N150 `/features`에서 로그인 후 `area` 필터를 켜면 `203건 표시`,
+  maplibre marker 203개, 테이블 `AREA active` 행이 표시된다. 운영 DB 기준 active `area`는
+  KNPS 1,539건이고, geometry 없는 `krheritage` area 1,178건은 inactive 상태다.
+- **완료(코드)**: KNPS `knps_park_boundaries`/`knps_protected_areas`는 provider normalized
+  `name`이 비어도 raw 속성(`NPK_NM`, `NAME` 등)에서 이름을 복구해 area bundle을 만든다.
+  이름 없는 trail/route record는 기존처럼 skip한다.
+- **완료(N150)**: 수정 provider 파일을 N150에 반영하고 map API/Dagster/daemon을
+  재빌드·재기동했다. 배포 후 API/Dagster 이미지의 반영과 `/features` area UI smoke를 확인했다.
+- **검증**: `tests/unit/test_providers_knps.py` 45건 통과, `ruff check .` 통과,
+  `python -m mypy --strict src/kortravelmap` 통과, import-linter 4계약 통과.
+- **다음 한 작업**: PR 생성 후 CI green 확인과 머지를 완료한다.
+
 ## 2026-06-24 (codex) — krheritage area 보정 + concierge 적재/N150 live 검증
 
 - **완료(코드)**: `krheritage` provider는 Polygon/MultiPolygon 경계 geometry가 있을 때만
