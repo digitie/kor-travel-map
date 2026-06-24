@@ -41,7 +41,7 @@
   `npm run type-check` passed, `npm run lint` 0 errors / 기존 warnings 6, OpenAPI/type drift
   check passed, user-client typegen/type-check passed, `docker compose --env-file /dev/null config
   --quiet` passed, shell script `bash -n` passed.
-- **prod smoke**: N150 production 서버(`192.168.1.14`)에 rsync + docker-manager compose
+- **prod smoke**: N150 production 서버(`<prod-host-ip>`)에 rsync + docker-manager compose
   rebuild/restart로 반영했다. `rustfs` 재생성 중 bind mount 권한이 `root:root`라 실패한 문제는
   컨테이너 UID/GID `10001:10001`로 소유권을 맞추고 `rustfs`만 force recreate해 복구했다.
   이후 `rustfs`, geo API, map API/UI, Dagster가 healthy 상태임을 확인했다. geo v2
@@ -72,7 +72,7 @@
 - **검증**: API 단위 테스트 `13 passed`, 신규 PostGIS geometry 통합 테스트 `1 passed`,
   admin frontend `type-check` 통과, ESLint 0 errors(기존 warnings 8), 수정 Python 파일 ruff 통과.
   WSL Playwright는 Chromium binary 미설치로 실행 자체가 실패했다.
-- **prod 반영**: N150(`digitie-at-n150`, `192.168.1.14`)의 기존
+- **prod 반영**: N150(`<prod-host-alias>`, `<prod-host-ip>`)의 기존
   `kor-travel-map-{api,ui,dagster,dagster-daemon}` 컨테이너를 내린 뒤
   `~/kor-travel-map`에 rsync 반영하고 docker-manager compose로 재빌드/재기동했다. prod
   `feature.features`는 `ANALYZE` 후 약 109만 건이며, 기존 큰 bbox plan은 약 2.4초였고
