@@ -387,3 +387,112 @@ test.describe("/features live — deep link + viewport cross", () => {
     }
   }
 });
+
+/**
+ * 실제 지도 RENDER 검증 (#501).
+ *
+ * 위의 `expectFeaturesPageReady`는 heading + map-canvas-container "attached"만 본다 —
+ * 컨테이너가 0×0이거나 캔버스가 빈(blank) 상태여도 통과한다. 본 describe는 지도가
+ * 실제로 그려졌음을 확인하는 별도 시나리오를 더한다:
+ *  - 컨테이너 visible + boundingBox width/height > 0
+ *  - maplibre 캔버스가 blank가 아님(스크린샷 색 분산 휴리스틱, 관대한 임계치)
+ *  - 적어도 1개의 `.maplibregl-marker`(feature 점 또는 클러스터)가 존재
+ *  - 클러스터 클릭이 zoom을 증가시킴(getClusterExpansionZoom → easeTo → onMoveEnd가
+ *    Zustand viewport 갱신 → DOM의 "z N.N" 텍스트 증가)
+ *
+ * 라이브 렌더 + 타일 fetch는 본질적으로 타이밍 의존이라 flaky를 제한하려 retries=1,
+ * 넉넉한 timeout, 관대한 분산 임계치를 쓴다. WS는 read-only 화면이라 별도 격리 불필요.
+ */
+const CANVAS_SELECTOR = ".maplibregl-canvas";
+const MARKER_SELECTOR = ".maplibregl-marker";
+const CLUSTER_SELECTOR = '.maplibregl-marker[aria-label^="feature 클러스터"]';
+
+/** "center … · z 6.5" 텍스트에서 z 숫자를 읽는다(DOM이 viewport.zoom을 렌더). */
+async function readZoom(
+  page: import("@playwright/test").Page,
+): Promise<number | null> {
+  const text = await page.getByText(/center .*· z\s/).first().textContent();
+  const match = text?.match(/z\s*([\d.]+)/);
+  return match ? Number(match[1]) : null;
+}
+
+/**
+ * 캔버스 스크린샷이 단색(blank)이 아님을 본다. PNG 바이트 분포가 거의 단일 값이면
+ * blank로 간주. 라이브 타일/마커 색이 섞이므로 충분한 분산이 있어야 정상.
+ * 임계치는 관대하게 — 8종 이상의 서로 다른 바이트 값이면 non-blank로 판정한다.
+ */
+function looksNonBlank(png: Buffer): boolean {
+  const distinct = new Set<number>();
+  // PNG 헤더(첫 ~100B) 이후를 듬성듬성 샘플링(성능). 데이터가 한 값에 몰리면 blank.
+  for (let i = 128; i < png.length; i += 97) {
+    distinct.add(png[i]);
+    if (distinct.size >= 8) return true;
+  }
+  return distinct.size >= 8;
+}
+
+test.describe("/features live — map render verification", () => {
+  // 라이브 렌더는 타이밍 의존 → flaky 제한용 retries=1.
+  test.describe.configure({ retries: 1 });
+
+  test("컨테이너 visible + boundingBox > 0 + 비-blank 캔버스", async ({
+    page,
+  }) => {
+    await page.goto(ROUTE);
+    await expectFeaturesPageReady(page);
+
+    const container = page.getByTestId("map-canvas-container");
+    await expect(container).toBeVisible({ timeout: 20000 });
+
+    const box = await container.boundingBox();
+    expect(box, "map-canvas-container는 측정 가능한 boundingBox를 가져야 함").not.toBeNull();
+    expect(box!.width).toBeGreaterThan(0);
+    expect(box!.height).toBeGreaterThan(0);
+
+    // maplibre 캔버스가 부착되고 크기가 잡힐 때까지 대기.
+    const canvas = page.locator(CANVAS_SELECTOR).first();
+    await expect(canvas).toBeVisible({ timeout: 20000 });
+    const canvasBox = await canvas.boundingBox();
+    expect(canvasBox!.width).toBeGreaterThan(0);
+    expect(canvasBox!.height).toBeGreaterThan(0);
+
+    // 타일/마커가 칠해질 시간을 준 뒤 스크린샷(blank 방지). 분산이 충분해야 한다.
+    const shot = await canvas.screenshot({ timeout: 20000 });
+    expect(
+      looksNonBlank(shot),
+      "캔버스 스크린샷이 단색(blank)이면 안 됨 — 타일/마커가 렌더돼야 함",
+    ).toBe(true);
+  });
+
+  test("적어도 1개의 maplibre 마커(점/클러스터)가 렌더됨", async ({ page }) => {
+    await page.goto(ROUTE);
+    await expectFeaturesPageReady(page);
+
+    // 라이브 데이터(~1.09M)면 기본 뷰(전국 근처)에 클러스터/점 마커가 나타난다.
+    await expect(page.locator(MARKER_SELECTOR).first()).toBeVisible({
+      timeout: 30000,
+    });
+    expect(await page.locator(MARKER_SELECTOR).count()).toBeGreaterThan(0);
+  });
+
+  test("클러스터 클릭 → zoom 증가(z 텍스트 상승)", async ({ page }) => {
+    await page.goto(ROUTE);
+    await expectFeaturesPageReady(page);
+
+    // 클러스터가 나타날 때까지 대기(점만 보이는 고배율 초기 뷰면 클러스터가 없을 수 있어
+    // 명시적으로 클러스터 마커를 기다린다).
+    const cluster = page.locator(CLUSTER_SELECTOR).first();
+    await expect(cluster).toBeVisible({ timeout: 30000 });
+
+    const zoomBefore = await readZoom(page);
+    expect(zoomBefore, "초기 zoom(z 텍스트)을 읽을 수 있어야 함").not.toBeNull();
+
+    await cluster.click();
+
+    // getClusterExpansionZoom → easeTo → onMoveEnd → Zustand viewport 갱신 → DOM z 상승.
+    // easeTo 애니메이션 + moveend 디바운스 여유로 넉넉한 timeout.
+    await expect
+      .poll(async () => (await readZoom(page)) ?? -1, { timeout: 20000 })
+      .toBeGreaterThan(zoomBefore!);
+  });
+});
