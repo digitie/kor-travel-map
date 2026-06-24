@@ -182,10 +182,14 @@ services:
     ports:
       - "${KOR_TRAVEL_MAP_DOCKER_BIND_HOST:-127.0.0.1}:${KOR_TRAVEL_MAP_ADMIN_WEB_PORT:-12705}:12705"
     healthcheck:
+      # bridge 모드 컨테이너는 내부적으로 PORT(미설정 시 Dockerfile 기본 12705)에 listen한다.
+      # 런타임 process.env.PORT를 읽어 probe하면 PORT override(host overlay 포함)에도
+      # 안전하다 (#507). process.env.PORT는 컨테이너 런타임에서 평가되므로 compose의
+      # ${...} 변수치환과 무관하다.
       test:
         [
           "CMD-SHELL",
-          "node -e \"fetch('http://127.0.0.1:12705/').then((response) => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1))\"",
+          "node -e \"fetch('http://127.0.0.1:'+(process.env.PORT||'12705')+'/').then((response) => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1))\"",
         ]
       interval: 10s
       timeout: 5s
