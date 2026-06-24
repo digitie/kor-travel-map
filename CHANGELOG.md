@@ -12,7 +12,7 @@
 - **CHANGED**: `area` polygon/label geometry는 줌 14 이상에서만 요청·표시해 낮은 줌의 대형
   geometry payload와 flicker를 줄인다. 지도 조회 query 전환 중에는 이전 결과를 유지한다.
 - **CHANGED**: area/route 중심 tile 조회는 tile 수로 `page_size`를 나누지 않아 area 단독 필터의
-  false partial 표시와 누락 가능성을 줄인다.
+  false partial 표시와 누락 가능성을 줄이고, 해당 필터에서는 tile zoom을 한 단계 더 잘게 잡는다.
 - **FIXED**: KNPS `knps_protected_areas` source의 한글 raw 이름 후보를 우선 사용하고,
   recoverable CP949/UTF-8 mojibake는 한글명으로 복구하되, 복구 실패한 CJK mojibake는 영어
   fallback을 유지한다.
