@@ -46,6 +46,7 @@ export interface FeaturesInBboxParams {
   includeGeometry?: boolean;
   page_size?: number;
   zoom?: number;
+  cursor?: string;
 }
 
 interface FeatureTile {
@@ -60,6 +61,7 @@ interface FeatureTile {
 }
 
 const MAX_FEATURE_TILES = 24;
+const MAX_GEOMETRY_LIGHT_TILE_PAGES = 10;
 const MIN_FEATURE_TILE_ZOOM = 5;
 const MAX_FEATURE_TILE_ZOOM = 12;
 const MERCATOR_LAT_LIMIT = 85.05112878;
@@ -168,9 +170,48 @@ async function fetchFeaturesInBbox(
       page_size: params.page_size,
       kind: params.kinds,
       include_geometry: params.includeGeometry,
+      cursor: params.cursor,
     }),
     { signal },
   );
+}
+
+async function fetchFeaturesInBboxPages(
+  params: FeaturesInBboxParams,
+  signal?: AbortSignal,
+): Promise<FeaturesInBboxResponse> {
+  const items = new Map<string, FeatureSummary>();
+  let cursor: string | null = null;
+  let response: FeaturesInBboxResponse | null = null;
+
+  for (let page = 0; page < MAX_GEOMETRY_LIGHT_TILE_PAGES; page += 1) {
+    response = await fetchFeaturesInBbox(
+      { ...params, cursor: cursor ?? undefined },
+      signal,
+    );
+    for (const item of response.data.items) {
+      items.set(item.feature_id, item);
+    }
+    cursor = response.meta.page?.next_cursor ?? null;
+    if (cursor === null) break;
+  }
+
+  if (response === null) {
+    return fetchFeaturesInBbox(params, signal);
+  }
+
+  return {
+    data: { items: Array.from(items.values()) },
+    meta: {
+      ...response.meta,
+      page: response.meta.page
+        ? {
+            ...response.meta.page,
+            next_cursor: cursor,
+          }
+        : response.meta.page,
+    },
+  };
 }
 
 async function fetchFeaturesInTiles(
@@ -224,7 +265,10 @@ async function fetchFeaturesInTiles(
         params.includeGeometry ? "geometry" : "summary",
         perTilePageSize,
       ],
-      queryFn: () => fetchFeaturesInBbox(tileParams, controller.signal),
+      queryFn: () =>
+        geometryLightOnly
+          ? fetchFeaturesInBboxPages(tileParams, controller.signal)
+          : fetchFeaturesInBbox(tileParams, controller.signal),
       // 바깥 useQuery staleTime(30s)과 맞춘다 — 같은 viewport 키 캐시 수명과 tile
       // 캐시 수명이 어긋나면 한쪽만 만료돼 불필요한 부분 refetch가 난다.
       staleTime: 30_000,
@@ -265,12 +309,9 @@ async function fetchFeaturesInTiles(
     for (const item of response.data.items) {
       items.set(item.feature_id, item);
     }
-    // tile이 정확히 perTilePageSize만큼 돌려줬거나 next_cursor가 있으면 그 tile은
-    // 잘렸을(=일부 feature 누락) 가능성이 있다.
-    if (
-      response.data.items.length >= perTilePageSize ||
-      (response.meta.page?.next_cursor ?? null) !== null
-    ) {
+    // next_cursor가 남아 있으면 그 tile은 잘렸을(=일부 feature 누락) 가능성이 있다.
+    // geometry-light 필터는 fetchFeaturesInBboxPages가 cursor를 이어 받아 완주한다.
+    if ((response.meta.page?.next_cursor ?? null) !== null) {
       truncated = true;
     }
   }
