@@ -9,7 +9,7 @@
   전체 bbox를 과도하게 잘라 false partial을 만들지 않도록 보정했다.
 - **완료(KNPS)**: `knps_protected_areas`는 raw 한글 후보(`ORIG_NAME` 등)를 우선하고,
   CP949로 잘못 decode된 recoverable UTF-8 문자열은 한글명으로 복구한다. 원문 byte가 이미 손상된
-  값은 영어 fallback을 유지한다.
+  값이나 repair 실패 후 CJK mojibake가 남는 값은 영어 fallback을 유지한다.
 - **검증**: KNPS unit test, frontend type-check/build, 수정 frontend ESLint, `ruff check .`,
   `python -m mypy --strict src/kortravelmap`, import-linter, `git diff --check` 통과.
 - **다음 한 작업**: PR 생성 후 CI green/머지, N150 prod 배포, 운영 area live smoke를 완료한다.

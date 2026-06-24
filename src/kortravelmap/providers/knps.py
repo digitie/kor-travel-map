@@ -549,6 +549,10 @@ def _has_hangul(text: str) -> bool:
     return any("\uac00" <= char <= "\ud7a3" for char in text)
 
 
+def _has_cjk_ideograph(text: str) -> bool:
+    return any("\u4e00" <= char <= "\u9fff" for char in text)
+
+
 def _repair_utf8_decoded_as_cp949(text: str) -> str | None:
     """UTF-8 bytes를 CP949로 잘못 읽은 KNPS DBF 문자열을 복구한다."""
     if "\ufffd" in text:
@@ -575,7 +579,11 @@ def _raw_hangul_text(raw: Mapping[str, Any], *keys: str) -> str | None:
         repaired = _repair_utf8_decoded_as_cp949(text)
         if repaired is not None:
             return repaired
-        if "\ufffd" not in text and _has_hangul(text):
+        if (
+            "\ufffd" not in text
+            and not _has_cjk_ideograph(text)
+            and _has_hangul(text)
+        ):
             return text
     return None
 
