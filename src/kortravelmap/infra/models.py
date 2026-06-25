@@ -460,7 +460,7 @@ class CuratedThemeRow(Base):
     __tablename__ = "curated_themes"
     __table_args__ = (
         CheckConstraint(
-            "visibility IN ('admin_only','public','tripmate')",
+            "visibility IN ('admin_only','public','pinvi')",
             name="ck_curated_themes_visibility",
         ),
         Index(
@@ -665,15 +665,15 @@ class CuratedFeatureRow(Base):
             name="ck_curated_features_selection_origin",
         ),
         CheckConstraint(
-            "tripmate_relation IN ("
+            "pinvi_relation IN ("
             "'primary_stop','food_stop','cafe_stop','bookstore_stop',"
             "'nearby_option','accessibility_support','pet_support',"
             "'family_support','theme_area_anchor'"
             ")",
-            name="ck_curated_features_tripmate_relation",
+            name="ck_curated_features_pinvi_relation",
         ),
         CheckConstraint(
-            "tripmate_copy_policy IN ("
+            "pinvi_copy_policy IN ("
             "'copy_allowed','copy_blocked','manual_review'"
             ")",
             name="ck_curated_features_copy_policy",
@@ -751,10 +751,10 @@ class CuratedFeatureRow(Base):
     )
     display_title: Mapped[str | None] = mapped_column(Text)
     display_summary: Mapped[str | None] = mapped_column(Text)
-    tripmate_relation: Mapped[str] = mapped_column(
+    pinvi_relation: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("'nearby_option'"),
     )
-    tripmate_copy_policy: Mapped[str] = mapped_column(
+    pinvi_copy_policy: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("'manual_review'"),
     )
     copy_version: Mapped[int] = mapped_column(
@@ -775,10 +775,10 @@ class CuratedFeatureRow(Base):
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
-class CuratedTripmateCopySnapshotRow(Base):
-    """``feature.curated_tripmate_copy_snapshots`` row mapping — copy cache."""
+class CuratedPinviCopySnapshotRow(Base):
+    """``feature.curated_pinvi_copy_snapshots`` row mapping — copy cache."""
 
-    __tablename__ = "curated_tripmate_copy_snapshots"
+    __tablename__ = "curated_pinvi_copy_snapshots"
     __table_args__ = (
         CheckConstraint(
             "copy_version >= 1",

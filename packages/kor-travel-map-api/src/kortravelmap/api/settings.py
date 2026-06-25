@@ -132,7 +132,7 @@ class ApiSettings(BaseSettings):
         default=None,
         description=(
             "외부 서비스 토큰(ADR-045 D-1 defense-in-depth, ADR-005 amendment). 설정되면 "
-            "외부 surface(``/features`` · ``/tripmate`` · ``/categories`` · "
+            "외부 surface(``/features`` · ``/curated-*`` · ``/categories`` · "
             "``/providers``)는 ``X-Kor-Travel-Map-Service-Token`` 헤더가 이 값과 일치(상수시간 "
             "비교)해야 한다. **미설정(None)이면 강제하지 않음**(intranet/dev 기본, 하위호환 — "
             "운영 인증의 1차 책임은 여전히 infra 계층의 reverse proxy/Cloudflare). "

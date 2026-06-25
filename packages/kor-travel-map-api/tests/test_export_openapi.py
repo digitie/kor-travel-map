@@ -78,7 +78,7 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
         "/v1/curated-sources",
         "/v1/curated-features",
         "/v1/curated-features/{curated_feature_id}",
-        "/v1/curated-features/{curated_feature_id}/tripmate-copy",
+        "/v1/curated-features/{curated_feature_id}/pinvi-copy",
     }
     assert not any(path.startswith("/admin") for path in user["paths"])
     assert not any(path.startswith("/ops") for path in user["paths"])
@@ -89,7 +89,7 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
     assert "BeachPublicView" in schemas
     assert "FestivalPublicView" in schemas
     assert "CuratedFeatureView" in schemas
-    assert "TripmateCopySnapshotView" in schemas
+    assert "PinviCopySnapshotView" in schemas
     assert "OpsMetricsResponse" not in schemas
     assert "AdminFeatureListResponse" not in schemas
     assert _refs(user["paths"]) <= set(schemas)

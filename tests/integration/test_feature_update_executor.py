@@ -150,7 +150,7 @@ async def test_execute_next_request_runs_provider_and_syncs_target_links(
     )
     target = await upsert_poi_cache_target(
         migrated_session,
-        external_system="tripmate",
+        external_system="pinvi",
         target_key="poi-exec",
         lon=126.9780,
         lat=37.5665,
@@ -160,7 +160,7 @@ async def test_execute_next_request_runs_provider_and_syncs_target_links(
         migrated_session,
         scope={
             "type": "cache_target_keys",
-            "external_system": "tripmate",
+            "external_system": "pinvi",
             "target_keys": ["poi-exec"],
         },
         priority=90,
@@ -225,7 +225,7 @@ async def test_execute_next_request_runs_provider_and_syncs_target_links(
 
     refreshed_target = await get_poi_cache_target_by_key(
         migrated_session,
-        external_system="tripmate",
+        external_system="pinvi",
         target_key="poi-exec",
     )
     assert refreshed_target is not None
@@ -253,7 +253,7 @@ async def test_execute_next_request_applies_follow_system_policy_skip(
     )
     target = await upsert_poi_cache_target(
         migrated_session,
-        external_system="tripmate",
+        external_system="pinvi",
         target_key="poi-skip",
         lon=126.9780,
         lat=37.5665,
@@ -263,7 +263,7 @@ async def test_execute_next_request_applies_follow_system_policy_skip(
         migrated_session,
         scope={
             "type": "cache_target_keys",
-            "external_system": "tripmate",
+            "external_system": "pinvi",
             "target_keys": ["poi-skip"],
         },
     )
@@ -291,7 +291,7 @@ async def test_execute_next_request_applies_follow_system_policy_skip(
     ] == "follow_system_skipped"
     refreshed_target = await get_poi_cache_target_by_key(
         migrated_session,
-        external_system="tripmate",
+        external_system="pinvi",
         target_key="poi-skip",
     )
     assert refreshed_target is not None
@@ -317,7 +317,7 @@ async def test_failed_runner_rolls_back_refresh_writes(
     )
     target = await upsert_poi_cache_target(
         migrated_session,
-        external_system="tripmate",
+        external_system="pinvi",
         target_key="poi-rollback",
         lon=126.9780,
         lat=37.5665,
@@ -327,7 +327,7 @@ async def test_failed_runner_rolls_back_refresh_writes(
         migrated_session,
         scope={
             "type": "cache_target_keys",
-            "external_system": "tripmate",
+            "external_system": "pinvi",
             "target_keys": ["poi-rollback"],
         },
     )
@@ -371,7 +371,7 @@ async def test_failed_runner_rolls_back_refresh_writes(
 
     failed_target = await get_poi_cache_target_by_key(
         migrated_session,
-        external_system="tripmate",
+        external_system="pinvi",
         target_key="poi-rollback",
     )
     assert failed_target is not None

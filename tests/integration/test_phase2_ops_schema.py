@@ -104,7 +104,7 @@ async def test_poi_cache_target_generated_coord_and_active_key(
                     coord_key, radius_km
                 )
                 VALUES (
-                    'tripmate', 'poi-1', 126.978, 37.5665,
+                    'pinvi', 'poi-1', 126.978, 37.5665,
                     x_extension.ST_SetSRID(
                         x_extension.ST_MakePoint(126.978, 37.5665),
                         4326
@@ -133,7 +133,7 @@ async def test_poi_cache_target_generated_coord_and_active_key(
                     coord_key, radius_km
                 )
                 VALUES (
-                    'tripmate', 'poi-1', 126.979, 37.5666,
+                    'pinvi', 'poi-1', 126.979, 37.5666,
                     x_extension.ST_SetSRID(
                         x_extension.ST_MakePoint(126.979, 37.5666),
                         4326
@@ -173,7 +173,7 @@ async def test_poi_cache_target_generated_coord_and_active_key(
                 coord_key, radius_km
             )
             VALUES (
-                'tripmate', 'bad-coord', 140.0, 37.5665,
+                'pinvi', 'bad-coord', 140.0, 37.5665,
                 x_extension.ST_SetSRID(x_extension.ST_MakePoint(140.0, 37.5665), 4326),
                 '140.000000:37.566500:p6', 5.0
             )

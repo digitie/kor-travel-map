@@ -1,7 +1,7 @@
 """``/providers`` — provider 데이터 신선도 (T-213g 단건 + T-217g 목록).
 
 ``provider_sync.provider_sync_state``를 기준으로 provider의 마지막 적재 성공/실패
-시각을 제공한다. 단건(``GET /providers/{provider}/last-sync``)은 TripMate 상세 카드
+시각을 제공한다. 단건(``GET /providers/{provider}/last-sync``)은 PinVi 상세 카드
 "n시간 전 갱신" 표시용, 목록(``GET /providers``)은 전 provider×dataset 신선도/최근
 실패를 한눈에 보는 운영 대시보드용(D-07/T-217g). 내부 cursor(provider 증분 상태)는
 **응답에 노출하지 않는다**(운영 내부 값). 단건은 ``dataset_key``/``sync_scope``

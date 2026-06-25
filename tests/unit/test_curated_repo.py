@@ -58,7 +58,7 @@ def _theme_row(**overrides: Any) -> dict[str, Any]:
         "theme_description": "책방 후보",
         "theme_group": "books",
         "default_curated": False,
-        "visibility": "tripmate",
+        "visibility": "pinvi",
         "metadata": {"icon": "book-open"},
         "created_at": _NOW,
         "updated_at": _NOW,
@@ -105,7 +105,7 @@ def _rule_row(**overrides: Any) -> dict[str, Any]:
         "default_action": "candidate",
         "priority": 70,
         "enabled": True,
-        "metadata": {"tripmate_relation": "bookstore_stop"},
+        "metadata": {"pinvi_relation": "bookstore_stop"},
         "created_at": _NOW,
         "updated_at": _NOW,
     }
@@ -147,8 +147,8 @@ def _feature_row(**overrides: Any) -> dict[str, Any]:
         "rank_score": Decimal("70.0"),
         "display_title": None,
         "display_summary": "책방 요약",
-        "tripmate_relation": "bookstore_stop",
-        "tripmate_copy_policy": "copy_allowed",
+        "pinvi_relation": "bookstore_stop",
+        "pinvi_copy_policy": "copy_allowed",
         "copy_version": 2,
         "metadata": {"summary": "metadata 요약"},
         "created_at": _NOW,
@@ -179,7 +179,7 @@ async def test_curated_repo_read_paths_with_fake_session() -> None:
 
     [theme] = await curated_repo.list_curated_themes(
         session,
-        visibility="tripmate",
+        visibility="pinvi",
         theme_group="books",
         limit=999,
     )
@@ -224,7 +224,7 @@ async def test_curated_repo_read_paths_with_fake_session() -> None:
     assert feature is not None
     assert feature.lon == 127.007754
 
-    snapshot = await curated_repo.get_curated_tripmate_copy_snapshot(
+    snapshot = await curated_repo.get_curated_pinvi_copy_snapshot(
         session,
         curated_feature_id=_CURATED_ID,
     )
@@ -269,8 +269,8 @@ async def test_curated_repo_write_paths_with_fake_session() -> None:
         source_id=_SOURCE_ID,
         curation_status="curated",
         selected_by="pytest",
-        tripmate_relation="bookstore_stop",
-        tripmate_copy_policy="copy_allowed",
+        pinvi_relation="bookstore_stop",
+        pinvi_copy_policy="copy_allowed",
         metadata={"manual": True},
     )
     assert created.curated_feature_id == _CURATED_ID
@@ -289,7 +289,7 @@ async def test_curated_repo_write_paths_with_fake_session() -> None:
         updates={
             "display_summary": "patched",
             "metadata": {"patched": True},
-            "tripmate_relation": "bookstore_stop",
+            "pinvi_relation": "bookstore_stop",
         },
     )
     assert patched is not None
@@ -322,7 +322,7 @@ async def test_curated_repo_write_paths_with_fake_session() -> None:
         theme_slug="bookstores",
         theme_name="책방 여행",
         theme_group="books",
-        visibility="tripmate",
+        visibility="pinvi",
     )
     assert theme.theme_slug == "bookstores"
 
@@ -357,7 +357,7 @@ async def test_curated_repo_write_paths_with_fake_session() -> None:
         source_id=_SOURCE_ID,
         dataset_key="datagokr_seoul_bookstores",
         region_scope={"sido_code": "11"},
-        metadata={"tripmate_relation": "bookstore_stop"},
+        metadata={"pinvi_relation": "bookstore_stop"},
     )
     assert rule.rule_id == _RULE_ID
 
@@ -414,7 +414,7 @@ async def test_curated_repo_dagster_batch_paths_with_fake_session() -> None:
     swept = await curated_repo.sweep_curated_feature_status(session)
     assert swept.archived == 1
 
-    materialized = await curated_repo.materialize_curated_tripmate_copy_snapshots(
+    materialized = await curated_repo.materialize_curated_pinvi_copy_snapshots(
         session,
         theme_slug="bookstores",
         limit=1,
@@ -425,6 +425,35 @@ async def test_curated_repo_dagster_batch_paths_with_fake_session() -> None:
     assert snapshot_params["copy_version"] == 2
     assert snapshot_params["etag"].startswith("sha256:")
     assert '"curated_feature_id"' in snapshot_params["snapshot_json"]
+
+
+@pytest.mark.asyncio
+async def test_curated_pinvi_snapshot_uses_concierge_source_title() -> None:
+    session = _FakeSession(
+        [
+            _feature_row(
+                provider="kor-travel-concierge-youtube",
+                dataset_key="youtube_place_candidates",
+                source_name="kor-travel-concierge YouTube 장소 후보",
+                display_title=None,
+                detail={
+                    "place_kind": "youtube_place_candidate",
+                    "facility_info": {
+                        "youtube_channel_title": "여행 채널",
+                        "youtube_playlist_title": "제주 플레이리스트",
+                    },
+                },
+            )
+        ]
+    )
+
+    snapshot = await curated_repo.get_curated_pinvi_copy_snapshot(
+        session,
+        curated_feature_id=_CURATED_ID,
+    )
+
+    assert snapshot is not None
+    assert snapshot.plan["title"] == "제주 플레이리스트"
 
 
 @pytest.mark.asyncio
@@ -461,11 +490,11 @@ async def test_curated_repo_validation_and_empty_paths() -> None:
             curated_feature_id=_CURATED_ID,
             updates={"bad": True},
         )
-    with pytest.raises(ValueError, match="tripmate_copy_policy"):
+    with pytest.raises(ValueError, match="pinvi_copy_policy"):
         await curated_repo.update_curated_feature(
             _FakeSession(),
             curated_feature_id=_CURATED_ID,
-            updates={"tripmate_copy_policy": "bad"},
+            updates={"pinvi_copy_policy": "bad"},
         )
     with pytest.raises(ValueError, match="curation_status"):
         await curated_repo.set_curated_feature_status(
@@ -483,7 +512,7 @@ async def test_curated_repo_validation_and_empty_paths() -> None:
         is None
     )
     assert (
-        await curated_repo.get_curated_tripmate_copy_snapshot(
+        await curated_repo.get_curated_pinvi_copy_snapshot(
             missing_session,
             curated_feature_id=_CURATED_ID,
         )

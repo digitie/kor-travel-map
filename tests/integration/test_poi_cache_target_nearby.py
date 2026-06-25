@@ -111,7 +111,7 @@ async def test_features_nearby_target_filters_and_sorts_by_distance(
 ) -> None:
     target = await upsert_poi_cache_target(
         migrated_session,
-        external_system="tripmate",
+        external_system="pinvi",
         target_key="nearby-1",
         lon=126.978,
         lat=37.5665,
@@ -178,7 +178,7 @@ async def test_features_nearby_target_cursor_pages_distance_order(
 ) -> None:
     target = await upsert_poi_cache_target(
         migrated_session,
-        external_system="tripmate",
+        external_system="pinvi",
         target_key="nearby-cursor",
         lon=126.978,
         lat=37.5665,
@@ -224,7 +224,7 @@ async def test_features_nearby_target_name_sort_and_invalid_cursor(
 ) -> None:
     target = await upsert_poi_cache_target(
         migrated_session,
-        external_system="tripmate",
+        external_system="pinvi",
         target_key="nearby-name",
         lon=126.978,
         lat=37.5665,

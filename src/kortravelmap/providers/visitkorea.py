@@ -166,7 +166,7 @@ class FestivalMatcher(Protocol):
     """visitkorea item → 1차 festival ``FestivalMatch`` resolver (plug-in).
 
     ``standard_data.ReverseGeocoder``와 동일한 plug-in 패턴. 구현체는 호출자
-    (TripMate Dagster asset)가 ``core/scoring.py``로 적재된 festival과 비교해
+    (PinVi Dagster asset)가 ``core/scoring.py``로 적재된 festival과 비교해
     제공. 매칭 실패 시 ``None`` → 해당 visitkorea item은 enrichment 생략.
     """
 

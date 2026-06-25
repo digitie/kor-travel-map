@@ -405,7 +405,7 @@ async def test_resolve_cache_target_keys_uses_active_targets(
     )
     target = await upsert_poi_cache_target(
         migrated_session,
-        external_system="tripmate",
+        external_system="pinvi",
         target_key="poi-1",
         lon=126.9780,
         lat=37.5665,
@@ -413,7 +413,7 @@ async def test_resolve_cache_target_keys_uses_active_targets(
     )
     await upsert_poi_cache_target(
         migrated_session,
-        external_system="tripmate",
+        external_system="pinvi",
         target_key="poi-disabled",
         lon=126.9780,
         lat=37.5665,
@@ -423,7 +423,7 @@ async def test_resolve_cache_target_keys_uses_active_targets(
 
     result = await scope_repo.resolve_cache_target_keys(
         migrated_session,
-        external_system="tripmate",
+        external_system="pinvi",
         target_keys=["poi-1", "missing", "poi-disabled"],
     )
 

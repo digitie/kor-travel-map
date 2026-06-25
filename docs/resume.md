@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-25 (codex) — Concierge curated source + PinVi rename
+
+- **완료(map 코드)**: concierge YouTube 장소 후보 provider/dataset을 `media-places` curated source rule로
+  seed하고, rule apply가 기본 `curated` 상태와 source title 기반 `display_title`을 만들도록 보강했다.
+- **완료(DB/API rename)**: curated copy 계약을 `pinvi_relation`/`pinvi_copy_policy`,
+  `feature.curated_pinvi_copy_snapshots`, `/pinvi-copy`로 전환했다. 기존 `tripmate` route/key는 전환용
+  hidden 호환 경로로만 유지한다. POI cache target metadata도 `pinvi_poi_id`로 rename한다.
+- **완료(concierge 연동)**: concierge export payload에 source target type/value/search query와
+  `youtube.source_title`을 추가해 채널명·플레이리스트명·보정 검색어명을 map이 title로 쓸 수 있게 했다.
+- **검증 진행**: map targeted unit/API/Dagster/integration, OpenAPI drift, frontend/user type-check,
+  ruff, strict mypy, import-linter 통과. concierge targeted backend 26건 통과.
+- **다음 한 작업**: 전체/확장 게이트 후 양쪽 PR 생성, CI green 확인, 머지, N150 배포와 live smoke를 완료한다.
+
 ## 2026-06-25 (codex) — KNPS protected area 한글명 보정 + N150 재적재
 
 - **완료(번역)**: N150 active `area` 중 KNPS `knps_protected_areas` 영어/로마자 source name을 모아

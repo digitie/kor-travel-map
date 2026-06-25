@@ -80,7 +80,7 @@ def test_scope_helper_conversions_cover_json_rows_and_dedup() -> None:
     target = scope_repo._row_to_cache_target(
         _row(
             target_id="target-1",
-            external_system="tripmate",
+            external_system="pinvi",
             target_key="poi-1",
             lon="127.0",
             lat="37.0",
@@ -156,7 +156,7 @@ def test_cache_target_match_helpers_preserve_first_feature_order() -> None:
 def test_effective_scope_mode_validates_mode() -> None:
     target = CacheTargetScopeTarget(
         target_id="target-1",
-        external_system="tripmate",
+        external_system="pinvi",
         target_key="poi-1",
         lon=127.0,
         lat=37.0,
@@ -185,10 +185,10 @@ async def test_empty_or_invalid_public_resolvers_skip_db() -> None:
         )
     with pytest.raises(ValueError, match="radius_km must be greater than 0"):
         await resolve_cache_target_keys(
-            object(), external_system="tripmate", target_keys=["poi-1"], radius_km=0
+            object(), external_system="pinvi", target_keys=["poi-1"], radius_km=0
         )
     empty_cache = await resolve_cache_target_keys(
-        object(), external_system="tripmate", target_keys=[]
+        object(), external_system="pinvi", target_keys=[]
     )
     assert empty_cache.matched_scope()["target_count"] == 0
 
@@ -383,7 +383,7 @@ async def test_count_features_matching_scope_dispatches_to_resolvers(
         },
         {
             "type": "cache_target_keys",
-            "external_system": "tripmate",
+            "external_system": "pinvi",
             "target_keys": ["poi-1", 2],
             "radius_km": "4",
             "scope_mode": "sigungu_by_radius",

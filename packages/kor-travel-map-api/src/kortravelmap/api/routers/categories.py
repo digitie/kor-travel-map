@@ -1,6 +1,6 @@
 """``GET /categories`` — PlaceCategory 정적 카탈로그(144건) HTTP 표면 (T-213f).
 
-``kortravelmap.category`` 카탈로그(ADR-023/027)를 TripMate/admin frontend가 런타임에
+``kortravelmap.category`` 카탈로그(ADR-023/027)를 PinVi/admin frontend가 런타임에
 받을 수 있게 노출한다. 정적 카탈로그는 immutable이라 모듈 로드 시 1회 구성한다
 (ADR-030 narrow 예외). ``include_counts=true``면 현재 DB 적재 분포(category code별
 feature 수)를 합쳐 "활성 category" 판단에 쓸 수 있다.

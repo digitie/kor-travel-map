@@ -30,9 +30,9 @@ __all__ = [
     "CuratedFeatureCandidatesResult",
     "CuratedFeatureStatusSweepResult",
     "CuratedSourceMetadataRefreshResult",
-    "CuratedTripmateCopyItem",
-    "CuratedTripmateCopySnapshot",
-    "CuratedTripmateSnapshotMaterializeResult",
+    "CuratedPinviCopyItem",
+    "CuratedPinviCopySnapshot",
+    "CuratedPinviSnapshotMaterializeResult",
     "RuleApplyResult",
     "archive_curated_feature",
     "apply_enabled_curated_source_rules",
@@ -42,12 +42,12 @@ __all__ = [
     "create_curated_source_rule",
     "create_curated_theme",
     "get_curated_feature",
-    "get_curated_tripmate_copy_snapshot",
+    "get_curated_pinvi_copy_snapshot",
     "list_curated_features",
     "list_curated_source_rules",
     "list_curated_sources",
     "list_curated_themes",
-    "materialize_curated_tripmate_copy_snapshots",
+    "materialize_curated_pinvi_copy_snapshots",
     "refresh_curated_source_metadata",
     "set_curated_feature_status",
     "sweep_curated_feature_status",
@@ -65,7 +65,7 @@ _CURATION_STATUSES: Final[frozenset[str]] = frozenset(
 _SELECTION_ORIGINS: Final[frozenset[str]] = frozenset(
     {"source_rule", "admin", "external_api"}
 )
-_TRIPMATE_RELATIONS: Final[frozenset[str]] = frozenset(
+_PINVI_RELATIONS: Final[frozenset[str]] = frozenset(
     {
         "primary_stop",
         "food_stop",
@@ -82,7 +82,7 @@ _COPY_POLICIES: Final[frozenset[str]] = frozenset(
     {"copy_allowed", "copy_blocked", "manual_review"}
 )
 _THEME_VISIBILITIES: Final[frozenset[str]] = frozenset(
-    {"admin_only", "public", "tripmate"}
+    {"admin_only", "public", "pinvi"}
 )
 _SOURCE_KINDS: Final[frozenset[str]] = frozenset(
     {"openapi", "filedata", "standard", "internal", "manual"}
@@ -98,6 +98,8 @@ _RULE_ACTIONS: Final[frozenset[str]] = frozenset(
 )
 _MAX_PAGE_SIZE: Final[int] = 200
 _MAX_LIST_LIMIT: Final[int] = 500
+_CONCIERGE_PROVIDER: Final[str] = "kor-travel-concierge-youtube"
+_CONCIERGE_DATASET_KEY: Final[str] = "youtube_place_candidates"
 
 
 @dataclass(frozen=True)
@@ -196,8 +198,8 @@ class CuratedFeature:
     rank_score: float
     display_title: str | None
     display_summary: str | None
-    tripmate_relation: str
-    tripmate_copy_policy: str
+    pinvi_relation: str
+    pinvi_copy_policy: str
     copy_version: int
     metadata: dict[str, Any]
     created_at: datetime
@@ -214,8 +216,8 @@ class CuratedFeaturePage:
 
 
 @dataclass(frozen=True)
-class CuratedTripmateCopyItem:
-    """TripMate ``curated_plan_pois`` 1건으로 복사될 item."""
+class CuratedPinviCopyItem:
+    """PinVi ``curated_plan_pois`` 1건으로 복사될 item."""
 
     curated_feature_item_id: str
     feature_id: str
@@ -228,8 +230,8 @@ class CuratedTripmateCopyItem:
 
 
 @dataclass(frozen=True)
-class CuratedTripmateCopySnapshot:
-    """TripMate import payload projection."""
+class CuratedPinviCopySnapshot:
+    """PinVi import payload projection."""
 
     curated_feature_id: str
     version: int
@@ -238,7 +240,7 @@ class CuratedTripmateCopySnapshot:
     theme: dict[str, Any]
     plan: dict[str, Any]
     source: dict[str, Any]
-    items: tuple[CuratedTripmateCopyItem, ...]
+    items: tuple[CuratedPinviCopyItem, ...]
 
 
 @dataclass(frozen=True)
@@ -293,8 +295,8 @@ class CuratedFeatureStatusSweepResult:
 
 
 @dataclass(frozen=True)
-class CuratedTripmateSnapshotMaterializeResult:
-    """TripMate copy snapshot cache materialize 결과."""
+class CuratedPinviSnapshotMaterializeResult:
+    """PinVi copy snapshot cache materialize 결과."""
 
     curated_features_total: int
     snapshots_materialized: int
@@ -356,8 +358,8 @@ _FEATURE_COLUMNS: Final[str] = """
     cf.rank_score,
     cf.display_title,
     cf.display_summary,
-    cf.tripmate_relation,
-    cf.tripmate_copy_policy,
+    cf.pinvi_relation,
+    cf.pinvi_copy_policy,
     cf.copy_version,
     cf.metadata,
     cf.created_at,
@@ -492,7 +494,7 @@ INSERT INTO feature.curated_features (
     theme_id, feature_id, source_id, source_record_key, curation_status,
     selection_origin, selected_by, selected_at, rejected_by, rejected_at,
     rejection_reason, rank_score, display_title, display_summary,
-    tripmate_relation, tripmate_copy_policy, metadata, updated_at
+    pinvi_relation, pinvi_copy_policy, metadata, updated_at
 ) VALUES (
     CAST(:theme_id AS uuid), :feature_id, CAST(:source_id AS uuid),
     CAST(:source_record_key AS text), :curation_status, :selection_origin,
@@ -501,8 +503,8 @@ INSERT INTO feature.curated_features (
     :rejected_by,
     CASE WHEN CAST(:rejected_now AS boolean) THEN now() ELSE NULL END,
     :rejection_reason,
-    :rank_score, :display_title, :display_summary, :tripmate_relation,
-    :tripmate_copy_policy, CAST(:metadata_json AS jsonb), now()
+    :rank_score, :display_title, :display_summary, :pinvi_relation,
+    :pinvi_copy_policy, CAST(:metadata_json AS jsonb), now()
 )
 RETURNING curated_feature_id::text
 """
@@ -526,8 +528,16 @@ WITH rule AS (
         r.region_scope,
         r.default_action,
         r.priority,
-        COALESCE(r.metadata ->> 'tripmate_relation', 'nearby_option') AS relation,
-        COALESCE(r.metadata ->> 'tripmate_copy_policy', 'manual_review') AS copy_policy
+        COALESCE(
+            r.metadata ->> 'pinvi_relation',
+            r.metadata ->> 'tripmate_relation',
+            'nearby_option'
+        ) AS relation,
+        COALESCE(
+            r.metadata ->> 'pinvi_copy_policy',
+            r.metadata ->> 'tripmate_copy_policy',
+            'manual_review'
+        ) AS copy_policy
     FROM feature.curated_source_rules AS r
     WHERE r.rule_id = CAST(:rule_id AS uuid)
       AND r.enabled
@@ -536,8 +546,8 @@ WITH rule AS (
 upserted AS (
     INSERT INTO feature.curated_features (
         theme_id, feature_id, source_id, source_record_key, curation_status,
-        selection_origin, rank_score, tripmate_relation, tripmate_copy_policy,
-        metadata, updated_at
+        selection_origin, selected_at, rank_score, display_title,
+        pinvi_relation, pinvi_copy_policy, metadata, updated_at
     )
     SELECT DISTINCT ON (f.feature_id)
         rule.theme_id,
@@ -546,7 +556,29 @@ upserted AS (
         sr.source_record_key,
         rule.default_action,
         'source_rule',
+        CASE WHEN rule.default_action = 'curated' THEN now() ELSE NULL END,
         rule.priority,
+        CASE
+            WHEN s.provider = 'kor-travel-concierge-youtube'
+             AND s.dataset_key = 'youtube_place_candidates'
+            THEN NULLIF(BTRIM(COALESCE(
+                NULLIF(f.detail #>> '{payload,kor_travel_concierge,youtube,source_title}', ''),
+                NULLIF(f.detail #>> '{payload,kor_travel_concierge,youtube,playlist_title}', ''),
+                NULLIF(f.detail #>> '{payload,kor_travel_concierge,youtube,channel_title}', ''),
+                NULLIF(
+                    f.detail #>> '{payload,kor_travel_concierge,youtube,source_search_query}',
+                    ''
+                ),
+                NULLIF(
+                    f.detail #>> '{payload,kor_travel_concierge,youtube,corrected_search_query}',
+                    ''
+                ),
+                NULLIF(f.detail #>> '{payload,kor_travel_concierge,youtube,search_query}', ''),
+                NULLIF(f.detail #>> '{facility_info,youtube_playlist_title}', ''),
+                NULLIF(f.detail #>> '{facility_info,youtube_channel_title}', '')
+            )), '')
+            ELSE NULL
+        END,
         CASE
             WHEN rule.relation IN (
                 'primary_stop','food_stop','cafe_stop','bookstore_stop',
@@ -600,8 +632,13 @@ upserted AS (
         source_id = EXCLUDED.source_id,
         source_record_key = EXCLUDED.source_record_key,
         rank_score = GREATEST(feature.curated_features.rank_score, EXCLUDED.rank_score),
-        tripmate_relation = EXCLUDED.tripmate_relation,
-        tripmate_copy_policy = EXCLUDED.tripmate_copy_policy,
+        display_title = CASE
+            WHEN feature.curated_features.selection_origin = 'source_rule'
+            THEN EXCLUDED.display_title
+            ELSE COALESCE(feature.curated_features.display_title, EXCLUDED.display_title)
+        END,
+        pinvi_relation = EXCLUDED.pinvi_relation,
+        pinvi_copy_policy = EXCLUDED.pinvi_copy_policy,
         metadata = feature.curated_features.metadata || EXCLUDED.metadata,
         updated_at = now(),
         copy_version = feature.curated_features.copy_version + 1
@@ -677,8 +714,8 @@ WITH archived AS (
 SELECT count(*)::int AS archived_count FROM archived
 """
 
-_UPSERT_TRIPMATE_COPY_SNAPSHOT_SQL: Final[str] = """
-INSERT INTO feature.curated_tripmate_copy_snapshots (
+_UPSERT_PINVI_COPY_SNAPSHOT_SQL: Final[str] = """
+INSERT INTO feature.curated_pinvi_copy_snapshots (
     curated_feature_id, copy_version, etag, snapshot, materialized_at, updated_at
 ) VALUES (
     CAST(:curated_feature_id AS uuid), :copy_version, :etag,
@@ -691,9 +728,9 @@ DO UPDATE SET
     snapshot = EXCLUDED.snapshot,
     materialized_at = now(),
     updated_at = EXCLUDED.updated_at
-WHERE feature.curated_tripmate_copy_snapshots.copy_version IS DISTINCT FROM
+WHERE feature.curated_pinvi_copy_snapshots.copy_version IS DISTINCT FROM
       EXCLUDED.copy_version
-   OR feature.curated_tripmate_copy_snapshots.etag IS DISTINCT FROM EXCLUDED.etag
+   OR feature.curated_pinvi_copy_snapshots.etag IS DISTINCT FROM EXCLUDED.etag
 RETURNING curated_feature_id::text AS curated_feature_id
 """
 
@@ -913,8 +950,8 @@ def _feature(row: Any) -> CuratedFeature:
         rank_score=_decimal_to_float(row["rank_score"]),
         display_title=row["display_title"],
         display_summary=row["display_summary"],
-        tripmate_relation=str(row["tripmate_relation"]),
-        tripmate_copy_policy=str(row["tripmate_copy_policy"]),
+        pinvi_relation=str(row["pinvi_relation"]),
+        pinvi_copy_policy=str(row["pinvi_copy_policy"]),
         copy_version=int(row["copy_version"]),
         metadata=_json_object(row["metadata"]),
         created_at=row["created_at"],
@@ -939,8 +976,8 @@ def _feature_snapshot(feature: CuratedFeature) -> dict[str, Any]:
     }
 
 
-def _tripmate_snapshot(feature: CuratedFeature) -> CuratedTripmateCopySnapshot:
-    title = feature.display_title or feature.feature_name
+def _pinvi_snapshot(feature: CuratedFeature) -> CuratedPinviCopySnapshot:
+    title = feature.display_title or _concierge_source_title(feature) or feature.feature_name
     summary = feature.display_summary
     if summary is None:
         summary = feature.metadata.get("summary")
@@ -953,12 +990,12 @@ def _tripmate_snapshot(feature: CuratedFeature) -> CuratedTripmateCopySnapshot:
         "region_code": feature.sigungu_code or feature.sido_code,
         "category": feature.theme_group,
         "curation_status": feature.curation_status,
-        "copy_policy": feature.tripmate_copy_policy,
+        "copy_policy": feature.pinvi_copy_policy,
     }
-    item = CuratedTripmateCopyItem(
+    item = CuratedPinviCopyItem(
         curated_feature_item_id=feature.curated_feature_id,
         feature_id=feature.feature_id,
-        relation=feature.tripmate_relation,
+        relation=feature.pinvi_relation,
         sort_order=1,
         day_index=None,
         memo=summary,
@@ -997,7 +1034,7 @@ def _tripmate_snapshot(feature: CuratedFeature) -> CuratedTripmateCopySnapshot:
     }
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
     etag = "sha256:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
-    return CuratedTripmateCopySnapshot(
+    return CuratedPinviCopySnapshot(
         curated_feature_id=feature.curated_feature_id,
         version=feature.copy_version,
         etag=etag,
@@ -1009,8 +1046,8 @@ def _tripmate_snapshot(feature: CuratedFeature) -> CuratedTripmateCopySnapshot:
     )
 
 
-def _tripmate_snapshot_payload(
-    snapshot: CuratedTripmateCopySnapshot,
+def _pinvi_snapshot_payload(
+    snapshot: CuratedPinviCopySnapshot,
 ) -> dict[str, Any]:
     return {
         "curated_feature_id": snapshot.curated_feature_id,
@@ -1044,6 +1081,37 @@ def _destination_name(feature: CuratedFeature) -> str | None:
     if feature.sigungu_code:
         return feature.sigungu_code
     return feature.sido_code
+
+
+def _nested_text(payload: dict[str, Any], *path: str) -> str | None:
+    current: Any = payload
+    for key in path:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return _text(current)
+
+
+def _concierge_source_title(feature: CuratedFeature) -> str | None:
+    if (
+        feature.provider != _CONCIERGE_PROVIDER
+        or feature.dataset_key != _CONCIERGE_DATASET_KEY
+    ):
+        return None
+    for path in (
+        ("payload", "kor_travel_concierge", "youtube", "source_title"),
+        ("payload", "kor_travel_concierge", "youtube", "playlist_title"),
+        ("payload", "kor_travel_concierge", "youtube", "channel_title"),
+        ("payload", "kor_travel_concierge", "youtube", "source_search_query"),
+        ("payload", "kor_travel_concierge", "youtube", "corrected_search_query"),
+        ("payload", "kor_travel_concierge", "youtube", "search_query"),
+        ("facility_info", "youtube_playlist_title"),
+        ("facility_info", "youtube_channel_title"),
+    ):
+        title = _nested_text(feature.detail, *path)
+        if title is not None:
+            return title
+    return None
 
 
 async def list_curated_themes(
@@ -1210,19 +1278,19 @@ async def get_curated_feature(
     return _feature(row) if row is not None else None
 
 
-async def get_curated_tripmate_copy_snapshot(
+async def get_curated_pinvi_copy_snapshot(
     session: AsyncSession,
     *,
     curated_feature_id: str,
-) -> CuratedTripmateCopySnapshot | None:
-    """TripMate import용 닫힌 snapshot을 만든다."""
+) -> CuratedPinviCopySnapshot | None:
+    """PinVi import용 닫힌 snapshot을 만든다."""
 
     feature = await get_curated_feature(
         session,
         curated_feature_id=curated_feature_id,
         include_archived=False,
     )
-    return _tripmate_snapshot(feature) if feature is not None else None
+    return _pinvi_snapshot(feature) if feature is not None else None
 
 
 def _selected_fields_for_status(
@@ -1282,16 +1350,16 @@ async def create_curated_feature(
     rank_score: float = 0.0,
     display_title: str | None = None,
     display_summary: str | None = None,
-    tripmate_relation: str = "nearby_option",
-    tripmate_copy_policy: str = "manual_review",
+    pinvi_relation: str = "nearby_option",
+    pinvi_copy_policy: str = "manual_review",
     metadata: Mapping[str, Any] | None = None,
 ) -> CuratedFeature:
     """curated feature overlay 1건을 생성한다. commit은 호출자 책임."""
 
     _validate_choice(curation_status, _CURATION_STATUSES, "curation_status")
     _validate_choice(selection_origin, _SELECTION_ORIGINS, "selection_origin")
-    _validate_choice(tripmate_relation, _TRIPMATE_RELATIONS, "tripmate_relation")
-    _validate_choice(tripmate_copy_policy, _COPY_POLICIES, "tripmate_copy_policy")
+    _validate_choice(pinvi_relation, _PINVI_RELATIONS, "pinvi_relation")
+    _validate_choice(pinvi_copy_policy, _COPY_POLICIES, "pinvi_copy_policy")
     row = (
         await session.execute(
             text(_CREATE_FEATURE_SQL),
@@ -1310,8 +1378,8 @@ async def create_curated_feature(
                 "rank_score": rank_score,
                 "display_title": display_title,
                 "display_summary": display_summary,
-                "tripmate_relation": tripmate_relation,
-                "tripmate_copy_policy": tripmate_copy_policy,
+                "pinvi_relation": pinvi_relation,
+                "pinvi_copy_policy": pinvi_copy_policy,
                 "metadata_json": _json_dumps(metadata),
             },
         )
@@ -1340,8 +1408,8 @@ async def update_curated_feature(
         "rank_score",
         "display_title",
         "display_summary",
-        "tripmate_relation",
-        "tripmate_copy_policy",
+        "pinvi_relation",
+        "pinvi_copy_policy",
         "metadata",
     }
     set_parts: list[str] = []
@@ -1351,9 +1419,9 @@ async def update_curated_feature(
             raise ValueError(f"unsupported curated_feature update field: {key}")
         if key == "curation_status":
             _validate_choice(str(value), _CURATION_STATUSES, key)
-        if key == "tripmate_relation":
-            _validate_choice(str(value), _TRIPMATE_RELATIONS, key)
-        if key == "tripmate_copy_policy":
+        if key == "pinvi_relation":
+            _validate_choice(str(value), _PINVI_RELATIONS, key)
+        if key == "pinvi_copy_policy":
             _validate_choice(str(value), _COPY_POLICIES, key)
         if key == "metadata":
             set_parts.append("metadata = CAST(:metadata_json AS jsonb)")
@@ -1509,13 +1577,13 @@ async def sweep_curated_feature_status(
     return CuratedFeatureStatusSweepResult(archived=int(row["archived_count"]))
 
 
-async def materialize_curated_tripmate_copy_snapshots(
+async def materialize_curated_pinvi_copy_snapshots(
     session: AsyncSession,
     *,
     theme_slug: str | None = None,
     limit: int = 500,
-) -> CuratedTripmateSnapshotMaterializeResult:
-    """curated feature의 TripMate copy snapshot을 cache table에 materialize한다."""
+) -> CuratedPinviSnapshotMaterializeResult:
+    """curated feature의 PinVi copy snapshot을 cache table에 materialize한다."""
 
     safe_limit = _safe_limit(limit)
     cursor: str | None = None
@@ -1533,16 +1601,16 @@ async def materialize_curated_tripmate_copy_snapshots(
         if not page.items:
             break
         for feature in page.items:
-            snapshot = _tripmate_snapshot(feature)
+            snapshot = _pinvi_snapshot(feature)
             row = (
                 await session.execute(
-                    text(_UPSERT_TRIPMATE_COPY_SNAPSHOT_SQL),
+                    text(_UPSERT_PINVI_COPY_SNAPSHOT_SQL),
                     {
                         "curated_feature_id": snapshot.curated_feature_id,
                         "copy_version": snapshot.version,
                         "etag": snapshot.etag,
                         "snapshot_json": json.dumps(
-                            _tripmate_snapshot_payload(snapshot),
+                            _pinvi_snapshot_payload(snapshot),
                             ensure_ascii=False,
                             sort_keys=True,
                             default=str,
@@ -1557,7 +1625,7 @@ async def materialize_curated_tripmate_copy_snapshots(
         if page.next_cursor is None:
             break
         cursor = page.next_cursor
-    return CuratedTripmateSnapshotMaterializeResult(
+    return CuratedPinviSnapshotMaterializeResult(
         curated_features_total=features_seen,
         snapshots_materialized=snapshots_materialized,
     )

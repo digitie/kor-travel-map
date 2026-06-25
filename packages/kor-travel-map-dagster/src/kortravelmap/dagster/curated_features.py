@@ -2,7 +2,7 @@
 
 테마형 curated overlay는 provider feature 적재 뒤 별도 배치로 갱신한다. 본 asset
 group은 ① source metadata refresh ② source rule 후보화 ③ inactive/deleted feature
-archive sweep ④ TripMate copy snapshot cache materialize 순서로 실행된다.
+archive sweep ④ PinVi copy snapshot cache materialize 순서로 실행된다.
 """
 
 # NOTE: ``from __future__ import annotations`` 금지 — Dagster가 asset 함수의
@@ -34,11 +34,11 @@ __all__ = [
     "curated_feature_status_sweep",
     "curated_features_refresh_job",
     "curated_source_metadata",
-    "curated_tripmate_copy_snapshots",
+    "curated_pinvi_copy_snapshots",
     "run_curated_feature_candidates",
     "run_curated_feature_status_sweep",
     "run_curated_source_metadata",
-    "run_curated_tripmate_copy_snapshots",
+    "run_curated_pinvi_copy_snapshots",
 ]
 
 _RESOURCE_KEYS: Final[set[str]] = {"kor_travel_map_client"}
@@ -120,12 +120,12 @@ async def curated_feature_status_sweep(
     return await run_curated_feature_status_sweep(context)
 
 
-async def run_curated_tripmate_copy_snapshots(
+async def run_curated_pinvi_copy_snapshots(
     context: AssetExecutionContext,
 ) -> dict[str, object]:
-    """TripMate copy snapshot cache를 materialize한다."""
+    """PinVi copy snapshot cache를 materialize한다."""
 
-    result = await _client(context).materialize_curated_tripmate_copy_snapshots()
+    result = await _client(context).materialize_curated_pinvi_copy_snapshots()
     metadata = result.as_metadata()
     _add_output_metadata(context, metadata)
     return metadata
@@ -137,17 +137,17 @@ async def run_curated_tripmate_copy_snapshots(
     retry_policy=MAINTENANCE_RETRY_POLICY,
     deps=[curated_feature_status_sweep],
 )
-async def curated_tripmate_copy_snapshots(
+async def curated_pinvi_copy_snapshots(
     context: AssetExecutionContext,
 ) -> dict[str, object]:
-    return await run_curated_tripmate_copy_snapshots(context)
+    return await run_curated_pinvi_copy_snapshots(context)
 
 
 CURATED_FEATURE_ASSETS: Final = [
     curated_source_metadata,
     curated_feature_candidates,
     curated_feature_status_sweep,
-    curated_tripmate_copy_snapshots,
+    curated_pinvi_copy_snapshots,
 ]
 """curated_features asset group."""
 
@@ -156,7 +156,7 @@ curated_features_refresh_job = define_asset_job(
     selection=AssetSelection.groups(_GROUP_NAME),
     tags=CURATED_FEATURE_JOB_TAGS,
     description=(
-        "curated source metadata, 후보화 rule, 상태 sweep, TripMate copy snapshot "
+        "curated source metadata, 후보화 rule, 상태 sweep, PinVi copy snapshot "
         "cache를 순서대로 갱신한다."
     ),
 )
@@ -176,7 +176,7 @@ CURATED_FEATURE_SCHEDULES: Final = [
             "kor_travel_map.schedule_scope": "system",
         },
         description=(
-            "curated_features overlay와 TripMate copy snapshot cache를 일 1회 갱신한다. "
+            "curated_features overlay와 PinVi copy snapshot cache를 일 1회 갱신한다. "
             "운영 enable 전까지 STOPPED."
         ),
     )

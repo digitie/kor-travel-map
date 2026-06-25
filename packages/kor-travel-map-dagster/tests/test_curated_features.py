@@ -11,8 +11,8 @@ from kortravelmap.dagster.curated_features import (
     CURATED_FEATURE_ASSETS,
     run_curated_feature_candidates,
     run_curated_feature_status_sweep,
+    run_curated_pinvi_copy_snapshots,
     run_curated_source_metadata,
-    run_curated_tripmate_copy_snapshots,
 )
 from kortravelmap.dagster.maintenance import MAINTENANCE_RETRY_POLICY
 
@@ -46,7 +46,7 @@ class _Client:
         self.calls.append("status_sweep")
         return _Result({"archived": 1})
 
-    async def materialize_curated_tripmate_copy_snapshots(self) -> _Result:
+    async def materialize_curated_pinvi_copy_snapshots(self) -> _Result:
         self.calls.append("copy_snapshots")
         return _Result(
             {
@@ -70,7 +70,7 @@ async def test_curated_feature_asset_runners_call_client_methods() -> None:
         "inserted_or_updated": 7,
     }
     assert await run_curated_feature_status_sweep(context) == {"archived": 1}
-    assert await run_curated_tripmate_copy_snapshots(context) == {
+    assert await run_curated_pinvi_copy_snapshots(context) == {
         "curated_features_total": 5,
         "snapshots_materialized": 4,
     }
@@ -88,7 +88,7 @@ def test_curated_feature_assets_have_retry_policy_and_group() -> None:
         "curated_source_metadata",
         "curated_feature_candidates",
         "curated_feature_status_sweep",
-        "curated_tripmate_copy_snapshots",
+        "curated_pinvi_copy_snapshots",
     }
     for asset_def in CURATED_FEATURE_ASSETS:
         assert asset_def.group_names_by_key[asset_def.key] == "curated_features"

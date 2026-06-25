@@ -140,7 +140,7 @@ async def test_poi_cache_target_upsert_move_delete_and_links(
 
     target = await upsert_poi_cache_target(
         migrated_session,
-        external_system="tripmate",
+        external_system="pinvi",
         target_key="poi-1",
         name="서울시청",
         lon=126.978,
@@ -149,7 +149,7 @@ async def test_poi_cache_target_upsert_move_delete_and_links(
         provider_overrides={
             "python-kma-api:kma_weather_alerts": {"targeted_policy": "allow_targeted"}
         },
-        metadata={"tripmate_poi_id": "poi-1"},
+        metadata={"pinvi_poi_id": "poi-1"},
     )
     assert target.coord_key == "126.978000:37.566500:p6"
     assert (
@@ -159,7 +159,7 @@ async def test_poi_cache_target_upsert_move_delete_and_links(
 
     same = await upsert_poi_cache_target(
         migrated_session,
-        external_system="tripmate",
+        external_system="pinvi",
         target_key="poi-1",
         name="서울시청",
         lon=126.978,
@@ -182,7 +182,7 @@ async def test_poi_cache_target_upsert_move_delete_and_links(
     with pytest.raises(PoiCacheTargetConflict):
         await upsert_poi_cache_target(
             migrated_session,
-            external_system="tripmate",
+            external_system="pinvi",
             target_key="poi-1",
             lon=126.99,
             lat=37.57,
@@ -191,7 +191,7 @@ async def test_poi_cache_target_upsert_move_delete_and_links(
 
     moved = await upsert_poi_cache_target(
         migrated_session,
-        external_system="tripmate",
+        external_system="pinvi",
         target_key="poi-1",
         lon=126.99,
         lat=37.57,
@@ -210,7 +210,7 @@ async def test_poi_cache_target_upsert_move_delete_and_links(
 
     deleted = await delete_poi_cache_target(
         migrated_session,
-        external_system="tripmate",
+        external_system="pinvi",
         target_key="poi-1",
     )
     assert deleted is not None
@@ -219,13 +219,13 @@ async def test_poi_cache_target_upsert_move_delete_and_links(
     assert (
         await get_poi_cache_target_by_key(
             migrated_session,
-            external_system="tripmate",
+            external_system="pinvi",
             target_key="poi-1",
         )
         is None
     )
     target_page = await list_poi_cache_targets(
-        migrated_session, external_system="tripmate", include_deleted=True
+        migrated_session, external_system="pinvi", include_deleted=True
     )
     assert target_page.items == (deleted,)
     assert target_page.next_cursor is None

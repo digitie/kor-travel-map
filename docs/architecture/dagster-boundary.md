@@ -83,7 +83,7 @@ Dagster asset으로 연결한다. provider API 호출은 resource가 record iter
 | `feature_place_mcst_culture` | `mcst_culture_records` (파일데이터 13) | `mcst_<slug>` 13종 (`MCST_FILE_DATASETS`) | `features_place` |
 
 curated overlay asset(`curated_source_metadata` / `curated_feature_candidates` /
-`curated_feature_status_sweep` / `curated_tripmate_copy_snapshots`)은 별도 group
+`curated_feature_status_sweep` / `curated_pinvi_copy_snapshots`)은 별도 group
 `curated_features`로 묶이며, provider 원천 asset 이후 실행된다 — 카탈로그는
 `docs/curated-features.md` §7.
 

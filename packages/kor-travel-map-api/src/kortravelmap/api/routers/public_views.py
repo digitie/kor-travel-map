@@ -1,6 +1,6 @@
 """``/v1/public/*`` — 공개 해수욕장/축제 view API (T-222b).
 
-TripMate 등 downstream 서비스가 그대로 소비하기 좋은 domain view를 제공한다.
+PinVi 등 downstream 서비스가 그대로 소비하기 좋은 domain view를 제공한다.
 원천 Feature 상세와 달리 provider/raw/debug 필드는 숨기고, 공개 화면에 필요한
 projection만 닫힌 schema로 노출한다.
 """

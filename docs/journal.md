@@ -2,6 +2,24 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-25 (codex) — Concierge curated source 추가 + PinVi 명칭/DB rename
+
+`kor-travel-concierge`의 YouTube 장소 후보를 curated feature 기본 source로 올리고,
+curated copy 계약의 남은 TripMate 명칭을 PinVi 기준으로 정리했다.
+
+- **concierge source rule**: `kor-travel-concierge-youtube/youtube_place_candidates`를
+  `media-places` theme의 `curated` 기본 rule로 등록했다. rule apply 시 `selected_at`을
+  채우고, `display_title`은 concierge payload의 `source_title` → playlist/channel title →
+  검색어 계열 title 순서로 결정한다.
+- **PinVi rename**: `feature.curated_features`의 `pinvi_relation`/`pinvi_copy_policy`,
+  `feature.curated_pinvi_copy_snapshots`, `/v1/curated-features/{id}/pinvi-copy`를 정식 계약으로
+  전환했다. 운영 전환을 위해 구 `/tripmate-copy` route와 `tripmate_*` metadata 입력은 hidden
+  호환 경로로만 남겼다.
+- **POI cache metadata**: `tripmate_poi_id` JSONB key를 `pinvi_poi_id`로 migration하고, API 입력은
+  옛 key를 받아 새 key로 serialize한다.
+- **검증**: curated unit/API/Dagster targeted 33건, curated integration 6건, OpenAPI drift check,
+  admin/user TypeScript type-check, ruff, strict mypy, import-linter를 통과했다.
+
 ## 2026-06-25 (codex) — KNPS protected area Gemini 한글명 보정 + N150 재적재
 
 N150 production의 active `area` provider를 다시 확인했고, 현재 `area` source는

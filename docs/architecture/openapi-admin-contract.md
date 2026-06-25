@@ -498,7 +498,7 @@ feature를 업데이트한다.
 ```json
 {
   "type": "cache_target_keys",
-  "external_system": "tripmate",
+  "external_system": "pinvi",
   "target_keys": ["poi_123", "poi_456"],
   "radius_km": 5.0,
   "scope_mode": "center_radius"
@@ -981,7 +981,7 @@ Cache target을 idempotent하게 등록/갱신한다. 같은 key가 같은 norma
 최대 64개만 허용한다. 각 값은 `targeted_policy`, interval/rate-limit 계열 숫자,
 `max_concurrent`, `note`만 받을 수 있고 unknown key는 `422`다. `metadata`는 Pydantic
 내부에서 `metadata_` 필드+alias로 다루며, 외부 JSON 필드명은 계속 `metadata`다.
-허용 metadata key는 `tripmate_poi_id`, `external_ref`, `source_url`, `labels`, `note`
+허용 metadata key는 `pinvi_poi_id`, `external_ref`, `source_url`, `labels`, `note`
 뿐이다.
 
 ### `GET /admin/poi-cache-targets`
@@ -1067,7 +1067,7 @@ profile에만 둔다.
 - `GET /v1/curated-sources`
 - `GET /v1/curated-features`
 - `GET /v1/curated-features/{curated_feature_id}`
-- `GET /v1/curated-features/{curated_feature_id}/tripmate-copy`
+- `GET /v1/curated-features/{curated_feature_id}/pinvi-copy`
 
 ## 9. Frontend stack 계약
 

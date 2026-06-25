@@ -222,7 +222,7 @@ cache를 추가했다.
   `candidate`/`curated`/`ignore` 기본 action으로 매핑한다.
 - `feature.curated_features` — `theme_id + feature_id` overlay 본체. 상태와
   PinVi 복사 정책을 저장한다.
-- `feature.curated_tripmate_copy_snapshots` — Dagster가 materialize한 PinVi 복사용
+- `feature.curated_pinvi_copy_snapshots` — Dagster가 materialize한 PinVi 복사용
   snapshot cache. `curated_feature_id` PK, `copy_version`, `etag`, `snapshot`,
   `materialized_at`, `updated_at`을 가진다.
 
@@ -230,7 +230,7 @@ cache를 추가했다.
 
 - `curation_status`: `candidate` / `curated` / `rejected` / `archived`
 - `selection_origin`: `source_rule` / `admin` / `external_api`
-- `tripmate_relation`: `primary_stop` / `food_stop` / `cafe_stop` /
+- `pinvi_relation`: `primary_stop` / `food_stop` / `cafe_stop` /
   `bookstore_stop` / `nearby_option` / `accessibility_support` / `pet_support` /
   `family_support` / `theme_area_anchor`
 

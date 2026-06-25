@@ -3,10 +3,10 @@
  *
  * `packages/kor-travel-map-api/openapi.user.json`(기계 정본, ADR-048/T-216g)에서
  * `openapi-typescript`로 생성한 `./types.ts`를 named alias와 함께 노출한다.
- * 런타임 코드는 없다 — HTTP client는 소비자 소유다(TripMate는 수기 httpx/fetch,
+ * 런타임 코드는 없다 — HTTP client는 소비자 소유다(PinVi는 수기 httpx/fetch,
  * krtour 권고). prose 계약은 `docs/architecture/rest-api.md` + `docs/architecture/rest-api.md`.
  *
- * 소비 방법(downstream, 예: TripMate frontend):
+ * 소비 방법(downstream, 예: PinVi frontend):
  * 1. **vendoring** — `src/types.ts`(+본 파일)를 복사해 pin. drift는 본 repo CI
  *    (`gen:types:check`)가 spec과 산출물을 고정하므로 commit hash 기준으로 안전.
  * 2. **자체 codegen** — 같은 `openapi.user.json`을 같은 openapi-typescript 버전으로

@@ -3,7 +3,7 @@
  *
  * maplibre의 `new maplibregl.Marker({ element })`는 임의 DOM 요소를 받으므로,
  * React 컴포넌트가 아닌 **DOM factory**가 가장 가볍고 이식성 좋다 (debug UI
- * Next.js + TripMate 어느 쪽에서도 동일하게 사용). 향후 React 컴포넌트 wrapper
+ * Next.js + PinVi 어느 쪽에서도 동일하게 사용). 향후 React 컴포넌트 wrapper
  * 가 필요해지면 본 함수를 감싼다.
  */
 

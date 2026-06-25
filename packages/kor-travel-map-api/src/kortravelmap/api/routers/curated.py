@@ -22,7 +22,7 @@ admin_router = APIRouter(prefix="/admin", tags=["admin-curated"])
 
 CurationStatus = Literal["candidate", "curated", "rejected", "archived"]
 SelectionOrigin = Literal["source_rule", "admin", "external_api"]
-TripmateRelation = Literal[
+PinviRelation = Literal[
     "primary_stop",
     "food_stop",
     "cafe_stop",
@@ -33,8 +33,8 @@ TripmateRelation = Literal[
     "family_support",
     "theme_area_anchor",
 ]
-TripmateCopyPolicy = Literal["copy_allowed", "copy_blocked", "manual_review"]
-ThemeVisibility = Literal["admin_only", "public", "tripmate"]
+PinviCopyPolicy = Literal["copy_allowed", "copy_blocked", "manual_review"]
+ThemeVisibility = Literal["admin_only", "public", "pinvi"]
 SourceKind = Literal["openapi", "filedata", "standard", "internal", "manual"]
 UpdateCycle = Literal[
     "realtime",
@@ -154,8 +154,8 @@ class CuratedFeatureView(BaseModel):
     rank_score: float
     display_title: str | None = None
     display_summary: str | None = None
-    tripmate_relation: str
-    tripmate_copy_policy: str
+    pinvi_relation: str
+    pinvi_copy_policy: str
     copy_version: int
     metadata: dict[str, Any]
     created_at: datetime
@@ -243,8 +243,8 @@ class CuratedFeatureResponse(BaseModel):
     meta: Meta
 
 
-class TripmateCopyItemView(BaseModel):
-    """TripMate curated_plan_pois copy item."""
+class PinviCopyItemView(BaseModel):
+    """PinVi curated_plan_pois copy item."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -258,8 +258,8 @@ class TripmateCopyItemView(BaseModel):
     source_record_key: str | None = None
 
 
-class TripmateCopySnapshotView(BaseModel):
-    """TripMate import snapshot."""
+class PinviCopySnapshotView(BaseModel):
+    """PinVi import snapshot."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -270,13 +270,13 @@ class TripmateCopySnapshotView(BaseModel):
     theme: dict[str, Any]
     plan: dict[str, Any]
     source: dict[str, Any]
-    items: list[TripmateCopyItemView]
+    items: list[PinviCopyItemView]
 
 
-class TripmateCopySnapshotResponse(BaseModel):
+class PinviCopySnapshotResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    data: TripmateCopySnapshotView
+    data: PinviCopySnapshotView
     meta: Meta
 
 
@@ -397,8 +397,8 @@ class CuratedFeatureCreateRequest(BaseModel):
     rank_score: float = 0.0
     display_title: str | None = None
     display_summary: str | None = None
-    tripmate_relation: TripmateRelation = "nearby_option"
-    tripmate_copy_policy: TripmateCopyPolicy = "manual_review"
+    pinvi_relation: PinviRelation = "nearby_option"
+    pinvi_copy_policy: PinviCopyPolicy = "manual_review"
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -410,8 +410,8 @@ class CuratedFeaturePatchRequest(BaseModel):
     rank_score: float | None = None
     display_title: str | None = None
     display_summary: str | None = None
-    tripmate_relation: TripmateRelation | None = None
-    tripmate_copy_policy: TripmateCopyPolicy | None = None
+    pinvi_relation: PinviRelation | None = None
+    pinvi_copy_policy: PinviCopyPolicy | None = None
     metadata: dict[str, Any] | None = None
 
 
@@ -439,9 +439,9 @@ def _feature_view(row: curated_repo.CuratedFeature) -> CuratedFeatureView:
 
 
 def _snapshot_view(
-    row: curated_repo.CuratedTripmateCopySnapshot,
-) -> TripmateCopySnapshotView:
-    return TripmateCopySnapshotView(
+    row: curated_repo.CuratedPinviCopySnapshot,
+) -> PinviCopySnapshotView:
+    return PinviCopySnapshotView(
         curated_feature_id=row.curated_feature_id,
         version=row.version,
         etag=row.etag,
@@ -449,7 +449,7 @@ def _snapshot_view(
         theme=row.theme,
         plan=row.plan,
         source=row.source,
-        items=[TripmateCopyItemView(**item.__dict__) for item in row.items],
+        items=[PinviCopyItemView(**item.__dict__) for item in row.items],
     )
 
 
@@ -584,24 +584,36 @@ async def get_curated_feature_route(
 
 
 @router.get(
-    "/curated-features/{curated_feature_id}/tripmate-copy",
-    response_model=TripmateCopySnapshotResponse,
+    "/curated-features/{curated_feature_id}/pinvi-copy",
+    response_model=PinviCopySnapshotResponse,
 )
-async def get_curated_tripmate_copy_route(
+async def get_curated_pinvi_copy_route(
     curated_feature_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> TripmateCopySnapshotResponse:
+) -> PinviCopySnapshotResponse:
     started_at = perf_counter()
-    row = await curated_repo.get_curated_tripmate_copy_snapshot(
+    row = await curated_repo.get_curated_pinvi_copy_snapshot(
         session,
         curated_feature_id=curated_feature_id,
     )
     if row is None:
         raise HTTPException(status_code=404, detail="curated feature 없음")
-    return TripmateCopySnapshotResponse(
+    return PinviCopySnapshotResponse(
         data=_snapshot_view(row),
         meta=make_meta(started_at=started_at),
     )
+
+
+@router.get(
+    "/curated-features/{curated_feature_id}/tripmate-copy",
+    response_model=PinviCopySnapshotResponse,
+    include_in_schema=False,
+)
+async def get_curated_legacy_copy_compat_route(
+    curated_feature_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> PinviCopySnapshotResponse:
+    return await get_curated_pinvi_copy_route(curated_feature_id, session)
 
 
 @admin_router.get("/curated-features", response_model=CuratedFeaturesResponse)

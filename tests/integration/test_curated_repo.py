@@ -11,6 +11,11 @@ from sqlalchemy import text
 from kortravelmap.dto import Address, Coordinate
 from kortravelmap.infra import curated_repo, feature_repo
 from kortravelmap.providers.datagokr_file_data import file_data_rows_to_bundles
+from kortravelmap.providers.kor_travel_concierge import (
+    DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
+    KOR_TRAVEL_CONCIERGE_PROVIDER_NAME,
+    kor_travel_concierge_items_to_bundles,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -53,7 +58,55 @@ async def _load_seoul_bookstore(session: AsyncSession) -> str:
     return bundle.feature.feature_id
 
 
-async def test_seed_rule_apply_creates_candidate_and_tripmate_snapshot(
+async def _load_concierge_place(session: AsyncSession) -> str:
+    [bundle] = await kor_travel_concierge_items_to_bundles(
+        [
+            {
+                "export_id": "ytpc_curated_1",
+                "candidate_id": "curated-1",
+                "operation": "upsert",
+                "place": {
+                    "name": "월정리 해변",
+                    "description": "제주 동쪽 해변",
+                    "category_label": "해변",
+                    "category_code_suggestion": "01050100",
+                    "longitude": 126.7958,
+                    "latitude": 33.5563,
+                    "address": {
+                        "official_address": "제주특별자치도 제주시 구좌읍 월정리",
+                        "road_address": "제주특별자치도 제주시 구좌읍 해맞이해안로",
+                        "legal_dong_code": None,
+                        "sido_code": None,
+                        "sigungu_code": None,
+                    },
+                },
+                "youtube": {
+                    "video_id": "video-curated-1",
+                    "video_url": "https://www.youtube.com/watch?v=video-curated-1",
+                    "video_title": "제주 동쪽 여행",
+                    "channel_id": "channel-curated-1",
+                    "channel_title": "제주 여행 채널",
+                    "playlist_id": "playlist-curated-1",
+                    "playlist_title": "제주 동쪽 코스",
+                },
+                "evidence": {"confidence_score": 0.91},
+                "source_record": {
+                    "provider": KOR_TRAVEL_CONCIERGE_PROVIDER_NAME,
+                    "dataset_key": DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
+                    "source_entity_type": "extracted_place_candidate",
+                    "source_entity_id": "curated-1",
+                    "raw_payload_hash": "sha256:curated-1",
+                },
+            }
+        ],
+        fetched_at=_FETCHED,
+    )
+    await feature_repo.load_bundle(session, bundle)
+    await session.flush()
+    return bundle.feature.feature_id
+
+
+async def test_seed_rule_apply_creates_candidate_and_pinvi_snapshot(
     migrated_session: AsyncSession,
 ) -> None:
     feature_id = await _load_seoul_bookstore(migrated_session)
@@ -81,8 +134,8 @@ async def test_seed_rule_apply_creates_candidate_and_tripmate_snapshot(
     row = next(item for item in candidates.items if item.feature_id == feature_id)
     assert row.provider == "python-datagokr-api"
     assert row.dataset_key == "datagokr_seoul_bookstores"
-    assert row.tripmate_relation == "bookstore_stop"
-    assert row.tripmate_copy_policy == "copy_allowed"
+    assert row.pinvi_relation == "bookstore_stop"
+    assert row.pinvi_copy_policy == "copy_allowed"
 
     selected = await curated_repo.set_curated_feature_status(
         migrated_session,
@@ -101,7 +154,7 @@ async def test_seed_rule_apply_creates_candidate_and_tripmate_snapshot(
         selected.curated_feature_id
     ]
 
-    snapshot = await curated_repo.get_curated_tripmate_copy_snapshot(
+    snapshot = await curated_repo.get_curated_pinvi_copy_snapshot(
         migrated_session,
         curated_feature_id=selected.curated_feature_id,
     )
@@ -120,7 +173,7 @@ async def test_seed_rule_apply_creates_candidate_and_tripmate_snapshot(
     assert refreshed.sources_with_records == 1
     assert refreshed.source_records_total >= 1
 
-    materialized = await curated_repo.materialize_curated_tripmate_copy_snapshots(
+    materialized = await curated_repo.materialize_curated_pinvi_copy_snapshots(
         migrated_session,
         theme_slug="bookstores",
     )
@@ -131,7 +184,7 @@ async def test_seed_rule_apply_creates_candidate_and_tripmate_snapshot(
             text(
                 """
                 SELECT copy_version, etag, snapshot
-                FROM feature.curated_tripmate_copy_snapshots
+                FROM feature.curated_pinvi_copy_snapshots
                 WHERE curated_feature_id = CAST(:curated_feature_id AS uuid)
                 """
             ),
@@ -141,6 +194,45 @@ async def test_seed_rule_apply_creates_candidate_and_tripmate_snapshot(
     assert cached["copy_version"] == selected.copy_version
     assert cached["etag"] == snapshot.etag
     assert cached["snapshot"]["plan"]["title"] == "통합테스트 헌책방"
+
+
+async def test_concierge_seed_rule_creates_curated_with_source_title(
+    migrated_session: AsyncSession,
+) -> None:
+    feature_id = await _load_concierge_place(migrated_session)
+
+    [rule] = await curated_repo.list_curated_source_rules(
+        migrated_session,
+        theme_slug="media-places",
+        provider=KOR_TRAVEL_CONCIERGE_PROVIDER_NAME,
+        dataset_key=DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
+    )
+    assert rule.default_action == "curated"
+
+    applied = await curated_repo.apply_curated_source_rule(
+        migrated_session,
+        rule_id=rule.rule_id,
+    )
+    assert applied.inserted_or_updated == 1
+
+    page = await curated_repo.list_curated_features(
+        migrated_session,
+        theme_slug="media-places",
+        provider=KOR_TRAVEL_CONCIERGE_PROVIDER_NAME,
+        dataset_key=DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
+    )
+    row = next(item for item in page.items if item.feature_id == feature_id)
+    assert row.curation_status == "curated"
+    assert row.display_title == "제주 동쪽 코스"
+    assert row.selected_at is not None
+
+    snapshot = await curated_repo.get_curated_pinvi_copy_snapshot(
+        migrated_session,
+        curated_feature_id=row.curated_feature_id,
+    )
+    assert snapshot is not None
+    assert snapshot.plan["title"] == "제주 동쪽 코스"
+    assert snapshot.items[0].feature_snapshot["name"] == "월정리 해변"
 
 
 async def test_curated_uuid_defaults_are_schema_qualified(
@@ -208,8 +300,8 @@ async def test_manual_create_patch_and_archive_curated_feature(
         source_id=source.source_id,
         curation_status="curated",
         selected_by="pytest",
-        tripmate_relation="bookstore_stop",
-        tripmate_copy_policy="copy_allowed",
+        pinvi_relation="bookstore_stop",
+        pinvi_copy_policy="copy_allowed",
         metadata={"manual": True},
     )
     assert created.selected_at is not None

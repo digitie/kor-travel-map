@@ -18,7 +18,7 @@
 
 | 영역 | #317(T-214/T-215) | ADR-048 보강 |
 |------|-------------------|-------------|
-| versioning | 외부(`/features`·`/tripmate`·`/categories`·`/providers`) `/v1`, **admin/ops 비버저닝** | **admin/ops/debug도 `/v1`**(사용자 지시, T-214b §2.1 supersede) |
+| versioning | 외부(`/features`·`/curated-*`·`/categories`·`/providers`) `/v1`, **admin/ops 비버저닝** | **admin/ops/debug도 `/v1`**(사용자 지시, T-214b §2.1 supersede) |
 | 인증 | `ServiceToken`(#314), 공용 read 비강제 | 유지 |
 | feature-update-request | `/tripmate/*` alias 제거 → `/admin/*` 단일 ✅ | 유지(중복 C2 해소됨) |
 | 단건 feature add/edit/delete | `/admin/features` POST/PATCH/DELETE + change-requests ✅(K-15) | 유지 |
@@ -207,7 +207,7 @@ GET /v1/curated-themes
 GET /v1/curated-sources
 GET /v1/curated-features
 GET /v1/curated-features/{curated_feature_id}
-GET /v1/curated-features/{curated_feature_id}/tripmate-copy
+GET /v1/curated-features/{curated_feature_id}/pinvi-copy
 ```
 
 write/admin 표면은 `/v1/admin/curated-*`로 둔다. T-223c-1은 DB/API foundation과
@@ -224,7 +224,7 @@ POST   /v1/admin/features/{feature_id}/deactivate      # 비활성(kill-switch)
 POST   /v1/admin/features/change-requests/{request_id}/approve   # ✅#317
 POST   /v1/admin/features/change-requests/{request_id}/reject    # ✅#317
 GET    /v1/admin/features/change-requests              # 변경요청 큐(T-215b UI 대상)
-GET/POST /v1/admin/feature-update-requests             # 재적재(admin 단일, tripmate alias 제거됨)
+GET/POST /v1/admin/feature-update-requests             # 재적재(admin 단일, legacy alias 제거됨)
 GET    /v1/admin/feature-update-requests/{request_id}
 POST   /v1/admin/feature-update-requests/{request_id}/cancel
 POST   /v1/admin/feature-update-requests/{request_id}/run-now    # kill-switch

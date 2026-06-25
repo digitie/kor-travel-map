@@ -1,6 +1,6 @@
 """``kortravelmap.client`` — ``AsyncKorTravelMapClient`` (라이브러리 진입점).
 
-kor-travel-map API/Dagster 내부 구현과 테스트가 사용하는 Python 진입점이다. TripMate
+kor-travel-map API/Dagster 내부 구현과 테스트가 사용하는 Python 진입점이다. PinVi
 운영 연동은 ADR-045 이후 OpenAPI HTTP 계약만 사용하고, 이 client를 직접 import하지
 않는다. 본 client는 SQLAlchemy 2 async ``AsyncEngine``을 주입받으며
 **transaction 경계의 소유자**다 — ``infra/*_repo.py``는 "commit은 호출자 책임"으로
@@ -27,7 +27,7 @@ engine 수명은 호출자 소유 (ADR-004 ``infra/db.py`` — ``await engine.di
 ADR 참조
 --------
 - ADR-002 — async-only (sync 인터페이스 추가 금지)
-- ADR-045 — TripMate 연계는 OpenAPI, client는 kor-travel-map 내부 API/Dagster용
+- ADR-045 — PinVi 연계는 OpenAPI, client는 kor-travel-map 내부 API/Dagster용
 - ADR-004 — ORM 매핑만, 쿼리는 raw SQL (``infra/*_repo.py``); client가 commit
 - ADR-016 — dedup 후보 ``ops.dedup_review_queue`` 적재
 - ADR-020 — 본 모듈에 FastAPI/Uvicorn import 금지 (디버그 REST는 별도 패키지)
@@ -65,14 +65,14 @@ from kortravelmap.infra.consistency import (
 from kortravelmap.infra.curated_repo import (
     CuratedFeatureCandidatesResult,
     CuratedFeatureStatusSweepResult,
+    CuratedPinviSnapshotMaterializeResult,
     CuratedSourceMetadataRefreshResult,
-    CuratedTripmateSnapshotMaterializeResult,
 )
 from kortravelmap.infra.curated_repo import (
     apply_enabled_curated_source_rules as repo_apply_enabled_curated_source_rules,
 )
 from kortravelmap.infra.curated_repo import (
-    materialize_curated_tripmate_copy_snapshots as repo_materialize_curated_snapshots,
+    materialize_curated_pinvi_copy_snapshots as repo_materialize_curated_snapshots,
 )
 from kortravelmap.infra.curated_repo import (
     refresh_curated_source_metadata as repo_refresh_curated_source_metadata,
@@ -256,7 +256,7 @@ __all__ = [
     "CuratedFeatureCandidatesResult",
     "CuratedFeatureStatusSweepResult",
     "CuratedSourceMetadataRefreshResult",
-    "CuratedTripmateSnapshotMaterializeResult",
+    "CuratedPinviSnapshotMaterializeResult",
     "DedupRefreshResult",
     "DedupSyncResult",
     "FestivalEnrichmentReviewRefreshResult",
@@ -1124,13 +1124,13 @@ class AsyncKorTravelMapClient:
         async with self._session_factory() as session, session.begin():
             return await repo_sweep_curated_feature_status(session)
 
-    async def materialize_curated_tripmate_copy_snapshots(
+    async def materialize_curated_pinvi_copy_snapshots(
         self,
         *,
         theme_slug: str | None = None,
         limit: int = 500,
-    ) -> CuratedTripmateSnapshotMaterializeResult:
-        """TripMate copy snapshot cache를 materialize한다(T-223c-2)."""
+    ) -> CuratedPinviSnapshotMaterializeResult:
+        """PinVi copy snapshot cache를 materialize한다(T-223c-2)."""
         async with self._session_factory() as session, session.begin():
             return await repo_materialize_curated_snapshots(
                 session,
@@ -1227,7 +1227,7 @@ class AsyncKorTravelMapClient:
         """여러 feature 상세 row를 한 번에 조회 (``feature_id`` → row dict).
 
         ``infra.feature_repo.get_feature_rows_by_ids`` 위임. soft-deleted feature는
-        제외되므로 입력 순서/누락은 호출자가 key 존재로 판단한다(TripMate batch 계약).
+        제외되므로 입력 순서/누락은 호출자가 key 존재로 판단한다(PinVi batch 계약).
         API/Dagster 내부 read path가 admin batch 라우터와 같은 repo를 재사용하도록
         client 표면으로 노출한다(T-213d).
         """

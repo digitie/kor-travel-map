@@ -75,15 +75,15 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/curated-features/{curated_feature_id}/tripmate-copy": {
+    "/v1/curated-features/{curated_feature_id}/pinvi-copy": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Get Curated Tripmate Copy Route */
-        get: operations["get_curated_tripmate_copy_route_v1_curated_features__curated_feature_id__tripmate_copy_get"];
+        /** Get Curated Pinvi Copy Route */
+        get: operations["get_curated_pinvi_copy_route_v1_curated_features__curated_feature_id__pinvi_copy_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -150,7 +150,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** bbox 안 feature 목록 (TripMate/public envelope) */
+        /** bbox 안 feature 목록 (PinVi/public envelope) */
         get: operations["list_public_features_in_bounds_v1_features_in_bounds_get"];
         put?: never;
         post?: never;
@@ -631,6 +631,10 @@ export interface components {
             metadata: {
                 [key: string]: unknown;
             };
+            /** Pinvi Copy Policy */
+            pinvi_copy_policy: string;
+            /** Pinvi Relation */
+            pinvi_relation: string;
             /** Provider */
             provider: string;
             /** Rank Score */
@@ -667,10 +671,6 @@ export interface components {
             theme_name: string;
             /** Theme Slug */
             theme_slug: string;
-            /** Tripmate Copy Policy */
-            tripmate_copy_policy: string;
-            /** Tripmate Relation */
-            tripmate_relation: string;
             /**
              * Updated At
              * Format: date-time
@@ -1130,6 +1130,66 @@ export interface components {
             total?: number | null;
         };
         /**
+         * PinviCopyItemView
+         * @description PinVi curated_plan_pois copy item.
+         */
+        PinviCopyItemView: {
+            /** Curated Feature Item Id */
+            curated_feature_item_id: string;
+            /** Day Index */
+            day_index?: number | null;
+            /** Feature Id */
+            feature_id: string;
+            /** Feature Snapshot */
+            feature_snapshot: {
+                [key: string]: unknown;
+            };
+            /** Memo */
+            memo?: string | null;
+            /** Relation */
+            relation: string;
+            /** Sort Order */
+            sort_order: number;
+            /** Source Record Key */
+            source_record_key?: string | null;
+        };
+        /** PinviCopySnapshotResponse */
+        PinviCopySnapshotResponse: {
+            data: components["schemas"]["PinviCopySnapshotView"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * PinviCopySnapshotView
+         * @description PinVi import snapshot.
+         */
+        PinviCopySnapshotView: {
+            /** Curated Feature Id */
+            curated_feature_id: string;
+            /** Etag */
+            etag: string;
+            /** Items */
+            items: components["schemas"]["PinviCopyItemView"][];
+            /** Plan */
+            plan: {
+                [key: string]: unknown;
+            };
+            /** Source */
+            source: {
+                [key: string]: unknown;
+            };
+            /** Theme */
+            theme: {
+                [key: string]: unknown;
+            };
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Version */
+            version: number;
+        };
+        /**
          * ProblemDetail
          * @description RFC7807 ``application/problem+json`` 에러 본문 (중앙 핸들러 정본, §1.5).
          *
@@ -1402,66 +1462,6 @@ export interface components {
             /** Sync Scope */
             sync_scope: string;
         };
-        /**
-         * TripmateCopyItemView
-         * @description TripMate curated_plan_pois copy item.
-         */
-        TripmateCopyItemView: {
-            /** Curated Feature Item Id */
-            curated_feature_item_id: string;
-            /** Day Index */
-            day_index?: number | null;
-            /** Feature Id */
-            feature_id: string;
-            /** Feature Snapshot */
-            feature_snapshot: {
-                [key: string]: unknown;
-            };
-            /** Memo */
-            memo?: string | null;
-            /** Relation */
-            relation: string;
-            /** Sort Order */
-            sort_order: number;
-            /** Source Record Key */
-            source_record_key?: string | null;
-        };
-        /** TripmateCopySnapshotResponse */
-        TripmateCopySnapshotResponse: {
-            data: components["schemas"]["TripmateCopySnapshotView"];
-            meta: components["schemas"]["Meta"];
-        };
-        /**
-         * TripmateCopySnapshotView
-         * @description TripMate import snapshot.
-         */
-        TripmateCopySnapshotView: {
-            /** Curated Feature Id */
-            curated_feature_id: string;
-            /** Etag */
-            etag: string;
-            /** Items */
-            items: components["schemas"]["TripmateCopyItemView"][];
-            /** Plan */
-            plan: {
-                [key: string]: unknown;
-            };
-            /** Source */
-            source: {
-                [key: string]: unknown;
-            };
-            /** Theme */
-            theme: {
-                [key: string]: unknown;
-            };
-            /**
-             * Updated At
-             * Format: date-time
-             */
-            updated_at: string;
-            /** Version */
-            version: number;
-        };
         /** VersionData */
         VersionData: {
             /** Commit */
@@ -1697,7 +1697,7 @@ export interface operations {
             };
         };
     };
-    get_curated_tripmate_copy_route_v1_curated_features__curated_feature_id__tripmate_copy_get: {
+    get_curated_pinvi_copy_route_v1_curated_features__curated_feature_id__pinvi_copy_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -1714,7 +1714,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TripmateCopySnapshotResponse"];
+                    "application/json": components["schemas"]["PinviCopySnapshotResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1783,7 +1783,7 @@ export interface operations {
     list_curated_themes_route_v1_curated_themes_get: {
         parameters: {
             query?: {
-                visibility?: ("admin_only" | "public" | "tripmate") | null;
+                visibility?: ("admin_only" | "public" | "pinvi") | null;
                 theme_group?: string | null;
                 limit?: number;
             };
@@ -1987,7 +1987,7 @@ export interface operations {
     list_features_nearby_by_target_v1_features_nearby_by_target_get: {
         parameters: {
             query: {
-                /** @description 외부 시스템 이름. 예: tripmate */
+                /** @description 외부 시스템 이름. 예: pinvi */
                 external_system: string;
                 /** @description 외부 POI 고유 key. */
                 target_key: string;
