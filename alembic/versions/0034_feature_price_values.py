@@ -1,12 +1,15 @@
-"""Feature price value table.
+"""feature_price_values 적재 테이블.
 
 Revision ID: 0034_feature_price_values
 Revises: 0033_pinvi_poi_cache_metadata
 Create Date: 2026-06-25
 
-``PriceValue`` DTO rows are stored as provider-specific price time series.
-The revision exists in N150 production and is kept in the main Alembic graph so
-later migrations can upgrade from that deployed state.
+``PriceValue`` DTO를 영속화하는 ``feature.feature_price_values``를 추가한다.
+PK는 결정적 ``price_value_key``(`make_price_value_key`, identity tuple)이고,
+latest/card 조회용 복합 인덱스와 시계열 ``observed_at`` BRIN 인덱스를 둔다.
+FK는 price-kind anchor ``feature``로 CASCADE, source 추적은 nullable FK로 보존한다.
+이 revision은 N150 운영 DB에 먼저 적용된 상태라 main Alembic graph에서도
+동일 revision ID를 유지한다.
 """
 
 from __future__ import annotations

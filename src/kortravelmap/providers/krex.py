@@ -9,6 +9,8 @@
 |------|-------------|--------------|-----|
 | ``rest_areas_to_bundles`` | ``krex_rest_areas`` | place | FeatureBundle |
 | ``rest_area_prices_to_values`` | ``krex_rest_area_prices`` | (시계열) | PriceValue |
+| ``rest_area_fuel_price_records_to_features_and_values`` |
+  ``krex_rest_area_prices`` | price | FeatureBundle + PriceValue |
 | ``rest_area_weather_to_values`` | ``krex_rest_area_weather`` | (시계열) | WeatherValue |
 | ``traffic_notices_to_bundles`` | ``krex_traffic_notices`` | notice | FeatureBundle |
 
@@ -101,6 +103,7 @@ from kortravelmap.geocoding import (
 __all__ = [
     # Protocols
     "KrexRestAreaItem",
+    "KrexRestAreaFuelPriceRecord",
     "KrexRestAreaPriceItem",
     "KrexRestAreaWeatherItem",
     "KrexRestAreaWeatherRecord",
@@ -108,6 +111,7 @@ __all__ = [
     # 변환 함수
     "rest_areas_to_bundles",
     "rest_area_prices_to_values",
+    "rest_area_fuel_price_records_to_features_and_values",
     "rest_area_weather_to_values",
     "rest_area_weather_records_to_bundles",
     "rest_area_weather_records_to_values",
@@ -122,6 +126,8 @@ __all__ = [
     "TRAFFIC_NOTICE_CATEGORY",
     "REST_AREA_MARKER_ICON",
     "REST_AREA_MARKER_COLOR",
+    "REST_AREA_PRICE_MARKER_ICON",
+    "REST_AREA_PRICE_MARKER_COLOR",
     "TRAFFIC_NOTICE_MARKER_ICON",
     "TRAFFIC_NOTICE_MARKER_COLOR",
 ]
@@ -138,6 +144,7 @@ REST_AREA_WEATHER_DATASET_KEY: Final[str] = "krex_rest_area_weather"
 TRAFFIC_NOTICES_DATASET_KEY: Final[str] = "krex_traffic_notices"
 
 _REST_AREA_ENTITY_TYPE: Final[str] = "rest_area"
+_REST_AREA_PRICE_ENTITY_TYPE: Final[str] = "rest_area_price"
 _TRAFFIC_NOTICE_ENTITY_TYPE: Final[str] = "traffic_notice"
 
 REST_AREA_CATEGORY: Final[str] = "06040101"
@@ -151,6 +158,8 @@ TRAFFIC_NOTICE_CATEGORY: Final[str] = "99000000"
 
 REST_AREA_MARKER_ICON: Final[str] = "fast-food"
 REST_AREA_MARKER_COLOR: Final[str] = "P-06"
+REST_AREA_PRICE_MARKER_ICON: Final[str] = "fuel"
+REST_AREA_PRICE_MARKER_COLOR: Final[str] = "P-08"
 
 TRAFFIC_NOTICE_MARKER_ICON: Final[str] = "roadblock"
 TRAFFIC_NOTICE_MARKER_COLOR: Final[str] = "P-13"
@@ -227,6 +236,25 @@ class KrexRestAreaPriceItem(Protocol):
 
     observed_at: datetime
     """관측 시각 (KST aware)."""
+
+
+@runtime_checkable
+class KrexRestAreaFuelPriceRecord(Protocol):
+    """krex ``restarea.fuel_prices`` row shape."""
+
+    service_area_code: str
+    """휴게소/주유소 안정 코드. price Feature 자연키."""
+
+    route_name: str | None
+    direction: str | None
+    oil_company: str | None
+    service_area_name: str | None
+    phone_number: str | None
+    address: str | None
+    gasoline_price: int | Decimal | None
+    diesel_price: int | Decimal | None
+    lpg_price: int | Decimal | None
+    raw: dict[str, Any]
 
 
 @runtime_checkable
@@ -676,6 +704,158 @@ def rest_area_prices_to_values(
         )
         for item in items
     ]
+
+
+_KREX_FUEL_PRODUCTS: Final[tuple[tuple[str, str, str, str], ...]] = (
+    ("gasoline", "휘발유", "gasoline_price", "gasolinePrice"),
+    ("diesel", "경유", "diesel_price", "dieselPrice"),
+    ("lpg", "LPG", "lpg_price", "lpgPrice"),
+)
+
+
+def _fuel_price_raw(record: KrexRestAreaFuelPriceRecord) -> dict[str, Any]:
+    raw = getattr(record, "raw", None)
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _fuel_price_record_to_bundle_and_values(
+    record: KrexRestAreaFuelPriceRecord,
+    *,
+    fetched_at: datetime,
+) -> tuple[FeatureBundle, list[PriceValue]] | None:
+    service_area_code = str(record.service_area_code).strip()
+    if not service_area_code:
+        return None
+
+    display_name = (
+        normalize_korean_text(record.service_area_name)
+        or record.service_area_name
+        or service_area_code
+    )
+    raw_data = {
+        "service_area_code": service_area_code,
+        "route_name": record.route_name,
+        "direction": record.direction,
+        "oil_company": record.oil_company,
+        "service_area_name": record.service_area_name,
+        "phone_number": record.phone_number,
+        "address": record.address,
+        "gasoline_price": record.gasoline_price,
+        "diesel_price": record.diesel_price,
+        "lpg_price": record.lpg_price,
+        "raw": _fuel_price_raw(record),
+    }
+    payload_hash = make_payload_hash(raw_data)
+    source_record_key = make_source_record_key(
+        provider=KREX_PROVIDER_NAME,
+        dataset_key=REST_AREA_PRICES_DATASET_KEY,
+        source_entity_type=_REST_AREA_PRICE_ENTITY_TYPE,
+        source_entity_id=service_area_code,
+        raw_payload_hash=payload_hash,
+    )
+    feature_id = make_feature_id(
+        bjd_code=None,
+        kind=FeatureKind.PRICE.value,
+        category=REST_AREA_CATEGORY,
+        source_type=f"{KREX_PROVIDER_NAME}:{REST_AREA_PRICES_DATASET_KEY}",
+        source_natural_key=service_area_code,
+    )
+
+    values: list[PriceValue] = []
+    for product_key, product_name, attr_name, source_key in _KREX_FUEL_PRODUCTS:
+        raw_price = getattr(record, attr_name)
+        if raw_price is None:
+            continue
+        value_number = _parse_numeric(raw_price)
+        if value_number is None:
+            continue
+        values.append(
+            PriceValue(
+                feature_id=feature_id,
+                provider=normalize_provider_name(KREX_PROVIDER_NAME),
+                price_domain=PriceDomain.REST_AREA_FUEL,
+                product_key=product_key,
+                product_name=product_name,
+                source_product_key=source_key,
+                source_product_name=product_name,
+                observed_at=fetched_at,
+                value_number=value_number,
+                unit="KRW/L",
+                normalization_version="krex-v1.0",
+                payload={
+                    "service_area_code": service_area_code,
+                    "service_area_name": record.service_area_name,
+                    "product_key": product_key,
+                    "product_name": product_name,
+                    "price": str(raw_price),
+                    "observed_at": fetched_at.isoformat(),
+                },
+                source_record_key=source_record_key,
+            )
+        )
+    if not values:
+        return None
+
+    road_address = normalize_korean_text(record.address)
+    feature = Feature(
+        feature_id=feature_id,
+        kind=FeatureKind.PRICE,
+        name=f"{display_name} 유가",
+        coord=None,
+        address=Address(road=road_address),
+        category=REST_AREA_CATEGORY,
+        marker_icon=REST_AREA_PRICE_MARKER_ICON,
+        marker_color=REST_AREA_PRICE_MARKER_COLOR,
+        detail=None,
+    )
+    source_record = SourceRecord(
+        provider=normalize_provider_name(KREX_PROVIDER_NAME),
+        dataset_key=REST_AREA_PRICES_DATASET_KEY,
+        source_entity_type=_REST_AREA_PRICE_ENTITY_TYPE,
+        source_entity_id=service_area_code,
+        raw_payload_hash=payload_hash,
+        raw_name=record.service_area_name,
+        raw_address=road_address,
+        raw_data=raw_data,
+        fetched_at=fetched_at,
+        source_record_key=source_record_key,
+    )
+    source_link = SourceLink(
+        feature_id=feature_id,
+        source_record_key=source_record_key,
+        source_role=SourceRole.PRIMARY,
+        match_method="natural_key",
+        confidence=100,
+        is_primary_source=True,
+    )
+    return (
+        FeatureBundle(
+            feature=feature,
+            source_record=source_record,
+            source_link=source_link,
+        ),
+        values,
+    )
+
+
+def rest_area_fuel_price_records_to_features_and_values(
+    records: Iterable[KrexRestAreaFuelPriceRecord],
+    *,
+    fetched_at: datetime,
+) -> tuple[list[FeatureBundle], list[PriceValue]]:
+    """KREX 휴게소 유가 snapshot → price Feature + ``PriceValue`` 목록."""
+    bundles: list[FeatureBundle] = []
+    values: list[PriceValue] = []
+    for record in records:
+        converted = _fuel_price_record_to_bundle_and_values(
+            record, fetched_at=fetched_at
+        )
+        if converted is None:
+            continue
+        bundle, item_values = converted
+        bundles.append(bundle)
+        values.extend(item_values)
+    return bundles, values
 
 
 # -- rest_area_weather → WeatherValue (observed) -----------------------

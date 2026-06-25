@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -20,9 +20,10 @@ from kortravelmap.dagster.assets import (
     run_feature_place_krheritage_items,
     run_feature_place_mois_licenses,
     run_feature_place_opinet_stations,
+    run_feature_price_krex_rest_areas,
+    run_feature_price_opinet_stations,
     run_feature_weather_airkorea_air_quality,
 )
-from kortravelmap.dagster.etl import DagsterFeatureLoadResult
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -77,6 +78,20 @@ class _Station:
 
 
 @dataclass(frozen=True)
+class _OilPrice:
+    product_code: str
+    price: int | None
+    trade_date: date
+    trade_time: time
+    raw: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class _StationDetail(_Station):
+    prices: tuple[_OilPrice, ...] = ()
+
+
+@dataclass(frozen=True)
 class _RestArea:
     name: str
     route_name: str | None
@@ -84,6 +99,21 @@ class _RestArea:
     lat: float | None
     lon: float | None
     phone_number: str | None
+
+
+@dataclass(frozen=True)
+class _FuelPriceRecord:
+    service_area_code: str
+    route_name: str | None
+    direction: str | None
+    oil_company: str | None
+    service_area_name: str | None
+    phone_number: str | None
+    address: str | None
+    gasoline_price: int | None
+    diesel_price: int | None
+    lpg_price: int | None
+    raw: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -287,6 +317,39 @@ async def test_dagster_assets_validate_coordinates_and_load_to_postgis(
             ],
         ),
         await _run_asset(
+            run_feature_price_opinet_stations,
+            map_client,
+            opinet_station_price_details=[
+                _StationDetail(
+                    uni_id="DAGSTER-OPINET-001",
+                    name="SK주유소 강남점",
+                    brand="SKE",
+                    address_road="서울특별시 강남구 테헤란로 100",
+                    address_jibun=None,
+                    lon=127.0376,
+                    lat=37.4979,
+                    tel="02-1234-5678",
+                    lpg_yn="Y",
+                    prices=(
+                        _OilPrice(
+                            product_code="B027",
+                            price=1820,
+                            trade_date=date(2026, 6, 2),
+                            trade_time=time(12, 0),
+                            raw={"PRODCD": "B027", "PRICE": "1820"},
+                        ),
+                        _OilPrice(
+                            product_code="D047",
+                            price=1650,
+                            trade_date=date(2026, 6, 2),
+                            trade_time=time(12, 0),
+                            raw={"PRODCD": "D047", "PRICE": "1650"},
+                        ),
+                    ),
+                )
+            ],
+        ),
+        await _run_asset(
             run_feature_place_krex_rest_areas,
             map_client,
             krex_rest_areas=[
@@ -297,6 +360,25 @@ async def test_dagster_assets_validate_coordinates_and_load_to_postgis(
                     lat=36.7800,
                     lon=126.6500,
                     phone_number="041-1234-5678",
+                )
+            ],
+        ),
+        await _run_asset(
+            run_feature_price_krex_rest_areas,
+            map_client,
+            krex_rest_area_fuel_prices=[
+                _FuelPriceRecord(
+                    service_area_code="DAGSTER-KREX-FUEL-001",
+                    route_name="서해안고속도로",
+                    direction="부산방향",
+                    oil_company="EX-OIL",
+                    service_area_name="서산휴게소",
+                    phone_number="041-1234-5678",
+                    address="충남 서산시",
+                    gasoline_price=1710,
+                    diesel_price=1599,
+                    lpg_price=1010,
+                    raw={"serviceAreaCode": "DAGSTER-KREX-FUEL-001"},
                 )
             ],
         ),
@@ -401,14 +483,27 @@ async def test_dagster_assets_validate_coordinates_and_load_to_postgis(
         ),
     ]
 
-    assert all(result.load.features_inserted == 1 for result in results)
-    assert all(not result.address_validation.has_errors for result in results)
-    feature_ids = [feature_id for result in results for feature_id in result.feature_ids]
+    feature_results = [result for result in results if hasattr(result, "feature_ids")]
+    price_results = [result for result in results if hasattr(result, "price_values")]
+
+    assert all(result.load.features_inserted == 1 for result in feature_results)
+    assert all(not result.address_validation.has_errors for result in feature_results)
+    assert all(result.features.features_inserted == 1 for result in price_results)
+    assert [result.price_values for result in price_results] == [2, 3]
+
+    feature_ids = [
+        feature_id for result in feature_results for feature_id in result.feature_ids
+    ]
     assert len(feature_ids) == 9
 
     # krex 교통 공지는 provider Incident에 좌표가 없어 coordless로 적재된다
     # (ADR-044) — 좌표/행정코드 보강 단언에서 제외하고 별도로 검증한다.
-    notice_feature_ids = set(results[3].feature_ids)
+    notice_feature_ids = {
+        feature_id
+        for result in feature_results
+        if result.dataset_key == "krex_traffic_notices"
+        for feature_id in result.feature_ids
+    }
 
     for feature_id in feature_ids:
         row = await map_client.get_feature(feature_id)
@@ -427,15 +522,23 @@ async def test_dagster_assets_validate_coordinates_and_load_to_postgis(
         source_count = await session.scalar(
             text("SELECT count(*) FROM provider_sync.source_records")
         )
-    assert feature_count == 9
-    assert source_count == 9
+        price_feature_count = await session.scalar(
+            text("SELECT count(*) FROM feature.features WHERE kind = 'price'")
+        )
+        price_value_count = await session.scalar(
+            text("SELECT count(*) FROM feature.feature_price_values")
+        )
+    assert feature_count == 11
+    assert source_count == 11
+    assert price_feature_count == 2
+    assert price_value_count == 5
 
 
 async def _run_asset(
-    runner: Callable[[AssetExecutionContext], Awaitable[DagsterFeatureLoadResult]],
+    runner: Callable[[AssetExecutionContext], Awaitable[Any]],
     client: AsyncKorTravelMapClient,
     **resources: object,
-) -> DagsterFeatureLoadResult:
+) -> Any:
     context = build_asset_context(
         resources={
             "kor_travel_map_client": client,

@@ -53,8 +53,7 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 | `feature_opening_periods` | `(feature_id, period_index)` | start_weekday (0-6), start_time (HHMM regex), duration_minutes (1~10080) |
 | `feature_special_days` | `(feature_id, special_date)` | is_closed, periods JSONB |
 | `feature_weather_values` | `weather_value_key` | UNIQUE (feature_id, provider, weather_domain, forecast_style, metric_key, issued_at, valid_at, observed_at) |
-| `price_points` | `feature_id` | price_category, retention_days (≥1) |
-| `price_values` | `(feature_id, item_key, observed_at)` | value Numeric(12,2), currency CHAR(3) |
+| `feature_price_values` | `price_value_key` | feature_id FK; provider/price_domain/product_key/observed_at/value_number/unit; UNIQUE (feature_id,provider,price_domain,product_key,observed_at) |
 
 ### 3.2 `provider_sync.*`
 
@@ -150,9 +149,10 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 | `idx_weather_provider_domain` | (provider, weather_domain, valid_at DESC NULLS LAST) | admin |
 | `idx_weather_valid_at_brin` | BRIN(valid_at) | 시계열 |
 | `idx_weather_collected_at_brin` | BRIN(collected_at) | 시계열 |
-| `idx_price_points_category` | (price_category) | |
 | `idx_price_values_observed_at_brin` | BRIN(observed_at) | 시계열 |
-| `idx_price_values_item_observed` | (item_key, observed_at DESC) | 종목별 최신 |
+| `idx_price_values_feature_product_observed` | (feature_id, price_domain, product_key, observed_at DESC) | feature별 제품 최신/추세 |
+| `idx_price_values_domain_product_observed` | (provider, price_domain, product_key, observed_at DESC) | provider/domain별 운영 검증 |
+| `idx_price_values_source_record` | (source_record_key) partial NOT NULL | raw 역추적 |
 
 ### 4.6 ops
 
@@ -207,7 +207,8 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 | `feature_opening_periods` | `ck_opening_duration` | 0 < n ≤ 10080 |
 | `source_links` | `ck_source_links_confidence` | 0-100 |
 | `source_links` | `ck_source_links_role` | SourceRole 8종 |
-| `price_points` | `ck_price_points_retention` | ≥ 1 |
+| `feature_price_values` | `ck_price_value_nonnegative` | value_number ≥ 0 |
+| `feature_price_values` | `uq_price_value_identity` | feature_id/provider/price_domain/product_key/observed_at 중복 방지 |
 | `import_jobs` | `ck_import_jobs_status` | queued/running/done/failed/cancelled |
 | `import_jobs` | `ck_import_jobs_progress` | 0-100 |
 | `dedup_review_queue` | `ck_dedup_status` | pending/accepted/rejected/merged/ignored |
@@ -242,8 +243,8 @@ CREATE EXTENSION pgcrypto          SCHEMA x_extension;
 | `feature_special_days.feature_id` → `features` | CASCADE | |
 | `feature_weather_values.feature_id` → `features` | CASCADE | |
 | `feature_weather_values.source_record_key` → `source_records` | SET NULL | |
-| `price_points.feature_id` → `features` | CASCADE | |
-| `price_values.feature_id` → `price_points` | CASCADE | |
+| `feature_price_values.feature_id` → `features` | CASCADE | price anchor 삭제 시 시계열도 삭제 |
+| `feature_price_values.source_record_key` → `source_records` | SET NULL | source 정리 후에도 가격값 유지 |
 | `source_links.feature_id` → `features` | CASCADE | |
 | `source_links.source_record_key` → `source_records` | CASCADE | |
 | `features.parent_feature_id` → `features` | SET NULL | 부모 삭제 시 고아 허용 |
@@ -274,10 +275,9 @@ DELETE FROM feature.feature_event_details d USING feature.features f
 WHERE d.feature_id=f.feature_id
   AND f.kind='event' AND d.ends_on < (now() - interval '20 years')::date;
 
--- price_values: 카테고리별 retention_days (price_points에서)
-DELETE FROM feature.price_values pv USING feature.price_points pp
-WHERE pv.feature_id=pp.feature_id
-  AND pv.observed_at < now() - (pp.retention_days * interval '1 day');
+-- feature_price_values: 초기 유가 보관 기준 10년. domain별 세분화는 purge asset에서 관리.
+DELETE FROM feature.feature_price_values pv
+WHERE pv.observed_at < now() - interval '10 years';
 
 -- orphan source_records
 DELETE FROM provider_sync.source_records sr

@@ -221,6 +221,54 @@ async def test_alembic_features_indexes_exist(
     assert not missing, f"missing indexes: {missing}"
 
 
+async def test_alembic_creates_feature_price_values_table(
+    pg_engine_with_migrations: AsyncEngine,
+) -> None:
+    """0034 revision이 ``feature.feature_price_values``와 핵심 인덱스를 생성."""
+    async with pg_engine_with_migrations.connect() as conn:
+        columns = [
+            row[0]
+            for row in (
+                await conn.execute(
+                    text(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_schema='feature' "
+                        "AND table_name='feature_price_values' "
+                        "ORDER BY ordinal_position"
+                    )
+                )
+            )
+        ]
+        indexes = {
+            row[0]
+            for row in (
+                await conn.execute(
+                    text(
+                        "SELECT indexname FROM pg_indexes "
+                        "WHERE schemaname='feature' "
+                        "AND tablename='feature_price_values'"
+                    )
+                )
+            )
+        }
+
+    for required in (
+        "price_value_key",
+        "feature_id",
+        "provider",
+        "price_domain",
+        "product_key",
+        "observed_at",
+        "value_number",
+        "source_record_key",
+    ):
+        assert required in columns
+    assert {
+        "idx_price_values_feature_product_observed",
+        "idx_price_values_observed_at_brin",
+    } <= indexes
+
+
 async def test_alembic_creates_feature_merge_history(
     pg_engine_with_migrations: AsyncEngine,
 ) -> None:

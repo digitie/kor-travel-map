@@ -11,7 +11,7 @@
 2. **공간 쿼리 술어에서 좌표 형변환 금지** — 매 행 `ST_Transform`은 GIST
    인덱스 무효화. 입력 좌표는 CTE에서 1회 변환 (ADR-012).
 3. **반경 검색은 EPSG:5179 (meter)** — `coord_5179` 컬럼에 적용 (ADR-012).
-4. **시계열은 BRIN 인덱스** — `price_values`, `weather_values`, `source_records`,
+4. **시계열은 BRIN 인덱스** — `feature_price_values`, `feature_weather_values`, `source_records`,
    `import_jobs` 등.
 5. **65,535 파라미터 한도** — `psycopg.copy_*` 우선, 안전 마진 30k (ADR-013).
 6. **`pg_trgm.similarity_threshold`은 `SET LOCAL`만** — 전역 변경 금지.
@@ -160,7 +160,7 @@ prefix가 짧으면 `idx_features_name_text_pattern_ops` 추가 고려.
 
 ### 4.1 사용 케이스
 
-- `price_values.observed_at`
+- `feature_price_values.observed_at`
 - `feature_weather_values.valid_at`, `collected_at`
 - `source_records.imported_at`, `fetched_at`
 - `import_jobs.created_at` (B-Tree)
@@ -176,8 +176,8 @@ prefix가 짧으면 `idx_features_name_text_pattern_ops` 추가 고려.
 
 ```sql
 -- 특정 주유소의 최근 가격 추세
-SELECT pv.observed_at, pv.item_key, pv.value
-FROM feature.price_values pv
+SELECT pv.observed_at, pv.product_key, pv.value_number, pv.unit
+FROM feature.feature_price_values pv
 WHERE pv.feature_id = :feature_id
   AND pv.observed_at >= now() - interval '30 days'
 ORDER BY pv.observed_at;
@@ -225,7 +225,7 @@ import psycopg
 async with await psycopg.AsyncConnection.connect(pg_dsn) as conn:
     async with conn.cursor() as cur:
         async with cur.copy(
-            "COPY feature.price_values (feature_id, item_key, observed_at, value, currency, payload_hash) FROM STDIN"
+            "COPY feature.feature_price_values (price_value_key, feature_id, provider, price_domain, product_key, observed_at, value_number, unit) FROM STDIN"
         ) as copy:
             async for row in row_iter_sorted_by_observed_at:
                 await copy.write_row(row)

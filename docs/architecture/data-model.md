@@ -575,37 +575,71 @@ CREATE INDEX idx_weather_collected_at_brin
   쿼리 (각 metric별 최신값).
 - `provider + weather_domain + valid_at DESC` — admin 검증.
 
-### 8.2 `feature.price_points` / `feature.price_values`
+### 8.2 `feature.feature_price_values`
+
+가격 시계열은 별도 `price_points` 테이블을 두지 않고, `feature.features`
+의 `kind='price'` anchor feature에 직접 연결한다. anchor feature는 지도/목록에서
+가격 데이터가 보이기 위한 표시 단위이고, 실제 제품별 값은
+`feature.feature_price_values`에 누적한다.
+
+설계 기준:
+
+- `feature_id`는 `feature.features(feature_id)`를 참조한다. price anchor가 삭제되면
+  해당 가격 시계열도 함께 삭제한다.
+- `price_value_key`는 `make_price_value_key(...)`가 계산한 결정적 PK다.
+- 논리 중복은 `(feature_id, provider, price_domain, product_key, observed_at)`로
+  한 번 더 막는다.
+- provider raw 추적은 `source_record_key` nullable FK로 보존한다. source record가
+  정리되어도 가격 시계열 자체는 유지한다.
+- OpiNet처럼 장소 좌표가 있는 provider는 `place` 주유소 feature의
+  `parent_feature_id`를 가진 price feature를 만든다. KREX 유가처럼 가격 row에
+  좌표가 없는 provider는 좌표 없는 price feature로 저장하고, 주소/이름 기반 보강은
+  후속 matching 단계에서 처리한다.
 
 ```sql
-CREATE TABLE feature.price_points (
-  feature_id       TEXT PRIMARY KEY REFERENCES feature.features(feature_id) ON DELETE CASCADE,
-  price_category   TEXT NOT NULL,                     -- 'fuel', 'admission', 'parking', ...
-  retention_days   INTEGER NOT NULL DEFAULT 3650,
-  CONSTRAINT ck_price_points_retention CHECK (retention_days >= 1)
-);
-
-CREATE INDEX idx_price_points_category ON feature.price_points (price_category);
-
-CREATE TABLE feature.price_values (
-  feature_id     TEXT NOT NULL REFERENCES feature.price_points(feature_id) ON DELETE CASCADE,
-  item_key       TEXT NOT NULL,                       -- 'gasoline', 'diesel', 'lpg', ...
-  observed_at    TIMESTAMPTZ NOT NULL,
-  value          NUMERIC(12,2) NOT NULL,
-  currency       CHAR(3) NOT NULL DEFAULT 'KRW',
-  payload_hash   TEXT,
-  payload        JSONB NOT NULL DEFAULT '{}'::jsonb,
-  PRIMARY KEY (feature_id, item_key, observed_at)
+CREATE TABLE feature.feature_price_values (
+  price_value_key       TEXT PRIMARY KEY,
+  feature_id            TEXT NOT NULL
+    REFERENCES feature.features(feature_id) ON DELETE CASCADE,
+  provider              TEXT NOT NULL,
+  price_domain          TEXT NOT NULL,
+  product_key           TEXT NOT NULL,                -- gasoline / diesel / lpg / ...
+  product_name          TEXT,
+  source_product_key    TEXT,
+  source_product_name   TEXT,
+  observed_at           TIMESTAMPTZ NOT NULL,
+  value_number          NUMERIC(14,4) NOT NULL,
+  unit                  TEXT NOT NULL DEFAULT 'KRW',  -- KRW / KRW/L / KRW/회 ...
+  normalization_version TEXT,
+  payload               JSONB NOT NULL DEFAULT '{}'::jsonb,
+  source_record_key     TEXT
+    REFERENCES provider_sync.source_records(source_record_key) ON DELETE SET NULL,
+  collected_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT ck_price_value_nonnegative CHECK (value_number >= 0),
+  CONSTRAINT uq_price_value_identity UNIQUE (
+    feature_id, provider, price_domain, product_key, observed_at
+  )
 );
 
 CREATE INDEX idx_price_values_observed_at_brin
-  ON feature.price_values USING BRIN (observed_at);
-CREATE INDEX idx_price_values_item_observed
-  ON feature.price_values (item_key, observed_at DESC);
+  ON feature.feature_price_values USING BRIN (observed_at);
+CREATE INDEX idx_price_values_feature_product_observed
+  ON feature.feature_price_values (feature_id, price_domain, product_key, observed_at DESC);
+CREATE INDEX idx_price_values_domain_product_observed
+  ON feature.feature_price_values (provider, price_domain, product_key, observed_at DESC);
+CREATE INDEX idx_price_values_source_record
+  ON feature.feature_price_values (source_record_key)
+  WHERE source_record_key IS NOT NULL;
 ```
 
-**인덱스 설계**: BRIN on `observed_at` (시계열 누적), `item_key + observed_at
-DESC` (특정 종목 최신 가격 조회).
+**인덱스 설계**:
+- `idx_price_values_observed_at_brin` — 장기 누적 시계열의 기간 조건.
+- `idx_price_values_feature_product_observed` — 특정 가격 feature의 제품별 최신/추세 조회.
+- `idx_price_values_domain_product_observed` — provider/domain/product별 운영 검증과
+  최신 snapshot 확인.
+- `idx_price_values_source_record` — provider raw 역추적.
 
 ## 9. 운영 보조 (`ops` schema)
 
@@ -1115,7 +1149,7 @@ purge는 Dagster asset에 위임한다(purge SQL 표준 예시는 §10, `infra/p
 | `route` / `area` | 무기한 |
 | `event` | 종료일(`ends_on`) +20년 |
 | `notice` | 종료일 또는 발표일 +1년 |
-| `price_values` | 카테고리별 기본값 (`feature.price_points.retention_days`, §8.2) |
+| `feature_price_values` | 가격 domain별 기본값(초기 유가 10년 권장, purge asset에서 관리) |
 | `weather_values` | 계획 기준일 +30일, 참조 trip 0건 시 즉시 삭제 |
 | `source_records` | 대응 feature 보존 기간 이상, orphan만 별도 purge |
 

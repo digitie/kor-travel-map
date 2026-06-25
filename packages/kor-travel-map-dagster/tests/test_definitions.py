@@ -27,7 +27,9 @@ def test_feature_load_asset_keys_registered() -> None:
     assert {
         "feature_event_datagokr_cultural_festivals",
         "feature_place_opinet_stations",
+        "feature_price_opinet_stations",
         "feature_place_krex_rest_areas",
+        "feature_price_krex_rest_areas",
         "feature_notice_krex_traffic_notices",
         "feature_place_krheritage_items",
         "feature_event_krheritage_events",
@@ -111,8 +113,10 @@ def test_offline_upload_load_default_resources_registered() -> None:
 _LIVE_PROVIDER_RESOURCE_KEYS = {
     "datagokr_cultural_festivals",
     "opinet_stations",
+    "opinet_station_price_details",
     "krex_rest_areas",
     "krex_rest_area_weather",
+    "krex_rest_area_fuel_prices",
     "krex_traffic_notices",
     "krheritage_items",
     "krheritage_events",

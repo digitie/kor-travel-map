@@ -43,6 +43,7 @@ __all__ = [
     "fetch_knps_point_records",
     "fetch_krairport_airports",
     "fetch_krex_rest_area_weather",
+    "fetch_krex_rest_area_fuel_prices",
     "fetch_krex_rest_areas",
     "fetch_krex_traffic_notices",
     "fetch_krforest_arboretums",
@@ -52,6 +53,7 @@ __all__ = [
     "fetch_mcst_culture_records",
     "fetch_mois_license_records",
     "fetch_opinet_stations",
+    "fetch_opinet_station_price_details",
     "fetch_standard_museums",
     "fetch_standard_parking_lots",
     "fetch_standard_tourist_attractions",
@@ -378,6 +380,43 @@ def fetch_krex_traffic_notices(
         seen = 0
         while True:
             page = client.traffic.incident(
+                num_of_rows=num_of_rows, page_no=page_no
+            )
+            items = list(page.items)
+            if not items:
+                break
+            yield from items
+            seen += len(items)
+            total_count = page.total_count
+            if len(items) < num_of_rows:
+                break
+            if total_count is not None and seen >= total_count:
+                break
+            page_no += 1
+    finally:
+        client.close()
+
+
+def fetch_krex_rest_area_fuel_prices(
+    settings: KorTravelMapSettings,
+) -> Iterator[Any]:
+    """고속도로 휴게소 유가(restarea.fuel_prices) record를 stream한다."""
+    secret = settings.krex_ex_api_key
+    if secret is None:
+        raise ProviderCredentialMissing(
+            "krex rest_area_fuel_prices live fetch에는 "
+            "KOR_TRAVEL_MAP_KREX_EX_API_KEY (source KEX_GO_API_KEY)가 필요하다."
+        )
+    api_key = secret.get_secret_value()
+
+    krex = cast(Any, importlib.import_module("krex"))
+    client = krex.KrexClient(ex_api_key=api_key)
+    num_of_rows = 1000
+    try:
+        page_no = 1
+        seen = 0
+        while True:
+            page = client.restarea.fuel_prices(
                 num_of_rows=num_of_rows, page_no=page_no
             )
             items = list(page.items)
@@ -933,6 +972,32 @@ def _opinet_poi_target_bboxes(
     ]
 
 
+def _opinet_bboxes_for_settings(
+    settings: KorTravelMapSettings,
+) -> list[tuple[float, float, float, float]]:
+    mode = settings.opinet_scope_mode
+    if mode == "disabled":
+        raise ProviderCredentialMissing(
+            "opinet 적재 비활성(opinet_scope_mode=disabled). "
+            "OPINET_SCOPE_MODE=bbox|poi_cache_target 설정이 필요하다."
+        )
+    if mode == "bbox":
+        if settings.opinet_scope_bbox is None:
+            raise ProviderCredentialMissing(
+                "opinet bbox scope에는 OPINET_SCOPE_BBOX "
+                "(min_lon,min_lat,max_lon,max_lat)가 필요하다."
+            )
+        return [_parse_opinet_bbox(settings.opinet_scope_bbox)]
+
+    bboxes = _opinet_poi_target_bboxes(settings)
+    if not bboxes:
+        raise ProviderCredentialMissing(
+            "opinet poi_cache_target scope: ops.poi_cache_targets에 "
+            "external_system='opinet' 활성 target이 없다."
+        )
+    return bboxes
+
+
 def fetch_opinet_stations(
     settings: KorTravelMapSettings,
 ) -> Iterator[Any]:
@@ -948,12 +1013,6 @@ def fetch_opinet_stations(
 
     sync generator, finally close.
     """
-    mode = settings.opinet_scope_mode
-    if mode == "disabled":
-        raise ProviderCredentialMissing(
-            "opinet 적재 비활성(opinet_scope_mode=disabled). "
-            "OPINET_SCOPE_MODE=bbox|poi_cache_target 설정이 필요하다."
-        )
     secret = settings.opinet_api_key
     if secret is None:
         raise ProviderCredentialMissing(
@@ -961,28 +1020,38 @@ def fetch_opinet_stations(
             "필요하다."
         )
 
-    bboxes: list[tuple[float, float, float, float]]
-    if mode == "bbox":
-        if settings.opinet_scope_bbox is None:
-            raise ProviderCredentialMissing(
-                "opinet bbox scope에는 OPINET_SCOPE_BBOX "
-                "(min_lon,min_lat,max_lon,max_lat)가 필요하다."
-            )
-        bboxes = [_parse_opinet_bbox(settings.opinet_scope_bbox)]
-    else:  # poi_cache_target
-        bboxes = _opinet_poi_target_bboxes(settings)
-        if not bboxes:
-            raise ProviderCredentialMissing(
-                "opinet poi_cache_target scope: ops.poi_cache_targets에 "
-                "external_system='opinet' 활성 target이 없다."
-            )
-
+    bboxes = _opinet_bboxes_for_settings(settings)
     opinet = cast(Any, importlib.import_module("opinet"))
     client = opinet.OpinetClient(api_key=secret.get_secret_value())
     try:
         yield from _enumerate_opinet_stations(
             client, bboxes, radius_m=settings.opinet_scope_radius_m
         )
+    finally:
+        close = getattr(client, "close", None)
+        if callable(close):
+            close()
+
+
+def fetch_opinet_station_price_details(
+    settings: KorTravelMapSettings,
+) -> Iterator[Any]:
+    """현재 OpiNet scope의 주유소 상세(``detailById``)를 stream한다."""
+    secret = settings.opinet_api_key
+    if secret is None:
+        raise ProviderCredentialMissing(
+            "opinet price live fetch에는 KOR_TRAVEL_MAP_OPINET_API_KEY "
+            "(source OPINET_API_KEY)가 필요하다."
+        )
+
+    bboxes = _opinet_bboxes_for_settings(settings)
+    opinet = cast(Any, importlib.import_module("opinet"))
+    client = opinet.OpinetClient(api_key=secret.get_secret_value())
+    try:
+        for station in _enumerate_opinet_stations(
+            client, bboxes, radius_m=settings.opinet_scope_radius_m
+        ):
+            yield client.get_station_detail(station.uni_id)
     finally:
         close = getattr(client, "close", None)
         if callable(close):

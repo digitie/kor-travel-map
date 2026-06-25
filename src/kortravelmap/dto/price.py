@@ -1,7 +1,8 @@
 """``PriceValue`` — provider별 가격 시계열 값.
 
 유가/식음료/통행료/입장료 등 시계열 price를 정규화. `feature.feature_price_
-values` 테이블 row와 1:1. `WeatherValue`와 동일 패턴이나 시간축 단순화
+values` 테이블 row와 1:1. `feature_id`는 가격 표시용 `kind=price` anchor
+feature를 가리킨다. `WeatherValue`와 동일 패턴이나 시간축 단순화
 (forecast 없음 — 관측만).
 
 고유성(`identity()`): (`feature_id`, `provider`, `price_domain`, `product_key`,
@@ -57,7 +58,7 @@ class PriceValue(BaseModel):
 
     feature_id: str = Field(
         min_length=1,
-        description="`make_feature_id(...)` 결과. place kind feature를 참조.",
+        description="`make_feature_id(...)` 결과. price kind anchor feature를 참조.",
     )
     provider: str = Field(
         min_length=1,

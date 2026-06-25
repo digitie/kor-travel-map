@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Final, cast
 
 from kortravelmap.geocoding import ReverseGeocoder
 from kortravelmap.infra.feature_repo import AirQualityLoadResult, EnrichmentLoadResult
+from kortravelmap.infra.price_repo import PriceFeatureLoadResult
 from kortravelmap.providers.airkorea import (
     AIRKOREA_PROVIDER_NAME,
     DATASET_KEY_AIR_QUALITY,
@@ -42,8 +43,10 @@ from kortravelmap.providers.krairport import (
 from kortravelmap.providers.krex import (
     KREX_PROVIDER_NAME,
     REST_AREA_DATASET_KEY,
+    REST_AREA_PRICES_DATASET_KEY,
     REST_AREA_WEATHER_DATASET_KEY,
     TRAFFIC_NOTICES_DATASET_KEY,
+    rest_area_fuel_price_records_to_features_and_values,
     rest_area_weather_records_to_bundles,
     rest_area_weather_records_to_values,
     rest_areas_to_bundles,
@@ -83,8 +86,10 @@ from kortravelmap.providers.mois import (
     license_records_to_bundles,
 )
 from kortravelmap.providers.opinet import (
+    OPINET_PRICE_DATASET_KEY,
     OPINET_PROVIDER_NAME,
     OPINET_STATION_DATASET_KEY,
+    station_details_to_price_features_and_values,
     stations_to_bundles,
 )
 from kortravelmap.providers.standard_data import (
@@ -193,6 +198,41 @@ async def feature_place_opinet_stations(
     return await run_feature_place_opinet_stations(context)
 
 
+async def run_feature_price_opinet_stations(
+    context: AssetExecutionContext,
+) -> PriceFeatureLoadResult:
+    """OpiNet 주유소 상세 가격을 price Feature + PriceValue로 적재한다."""
+    records = await _record_list(context, "opinet_station_price_details")
+    fetched_at = await _fetched_at(context)
+    bundles, values = await station_details_to_price_features_and_values(
+        records,
+        fetched_at=fetched_at,
+        reverse_geocoder=_reverse_geocoder(context),
+    )
+    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
+    result = await client.load_price_features(bundles, values)
+    _add_output_metadata(
+        context,
+        {
+            "provider": OPINET_PROVIDER_NAME,
+            "dataset_key": OPINET_PRICE_DATASET_KEY,
+            **result.as_metadata(),
+        },
+    )
+    return result
+
+
+@asset(
+    group_name="features_price",
+    required_resource_keys=_COMMON_RESOURCE_KEYS | {"opinet_station_price_details"},
+    retry_policy=FEATURE_LOAD_RETRY_POLICY,
+)
+async def feature_price_opinet_stations(
+    context: AssetExecutionContext,
+) -> PriceFeatureLoadResult:
+    return await run_feature_price_opinet_stations(context)
+
+
 async def run_feature_place_krex_rest_areas(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
@@ -221,6 +261,40 @@ async def feature_place_krex_rest_areas(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
     return await run_feature_place_krex_rest_areas(context)
+
+
+async def run_feature_price_krex_rest_areas(
+    context: AssetExecutionContext,
+) -> PriceFeatureLoadResult:
+    """KREX 휴게소 유가 snapshot을 price Feature + PriceValue로 적재한다."""
+    records = await _record_list(context, "krex_rest_area_fuel_prices")
+    fetched_at = await _fetched_at(context)
+    bundles, values = rest_area_fuel_price_records_to_features_and_values(
+        records,
+        fetched_at=fetched_at,
+    )
+    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
+    result = await client.load_price_features(bundles, values)
+    _add_output_metadata(
+        context,
+        {
+            "provider": KREX_PROVIDER_NAME,
+            "dataset_key": REST_AREA_PRICES_DATASET_KEY,
+            **result.as_metadata(),
+        },
+    )
+    return result
+
+
+@asset(
+    group_name="features_price",
+    required_resource_keys=_COMMON_RESOURCE_KEYS | {"krex_rest_area_fuel_prices"},
+    retry_policy=FEATURE_LOAD_RETRY_POLICY,
+)
+async def feature_price_krex_rest_areas(
+    context: AssetExecutionContext,
+) -> PriceFeatureLoadResult:
+    return await run_feature_price_krex_rest_areas(context)
 
 
 async def run_feature_notice_krex_traffic_notices(
@@ -851,7 +925,9 @@ async def feature_weather_krex_rest_areas(
 FEATURE_LOAD_ASSETS: Final = [
     feature_event_datagokr_cultural_festivals,
     feature_place_opinet_stations,
+    feature_price_opinet_stations,
     feature_place_krex_rest_areas,
+    feature_price_krex_rest_areas,
     feature_notice_krex_traffic_notices,
     feature_place_krheritage_items,
     feature_event_krheritage_events,

@@ -5,17 +5,21 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
 import pytest
 
 from kortravelmap.dto import FeatureBundle, FeatureKind, SourceRole
 from kortravelmap.providers.opinet import (
+    OPINET_PRICE_DATASET_KEY,
     OPINET_STATION_CATEGORY,
     OPINET_STATION_DATASET_KEY,
     OPINET_STATION_MARKER_COLOR,
     OPINET_STATION_MARKER_ICON,
+)
+from kortravelmap.providers.opinet import (
+    station_details_to_price_features_and_values as _price_features_async,
 )
 from kortravelmap.providers.opinet import (
     stations_to_bundles as _stations_to_bundles_async,
@@ -29,6 +33,12 @@ def stations_to_bundles(
 ) -> list[FeatureBundle]:
     """sync 테스트 ergonomics — 실제 async 변환을 asyncio.run으로 구동."""
     return asyncio.run(_stations_to_bundles_async(items, **kwargs))
+
+
+def station_details_to_price_features_and_values(
+    items: Iterable[Any], **kwargs: Any
+) -> tuple[list[FeatureBundle], list[Any]]:
+    return asyncio.run(_price_features_async(items, **kwargs))
 
 
 @dataclass(frozen=True)
@@ -49,6 +59,20 @@ class _StationItem:
     lat: float | None
     tel: str | None = None
     lpg_yn: str | bool | None = None
+
+
+@dataclass(frozen=True)
+class _OilPrice:
+    product_code: str
+    price: int | None
+    trade_date: date
+    trade_time: time
+    raw: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class _StationDetail(_StationItem):
+    prices: tuple[_OilPrice, ...] = ()
 
 
 _NOW = datetime(2026, 5, 28, 4, 0, tzinfo=KST)
@@ -235,3 +259,64 @@ def test_address_normalize_korean() -> None:
 @pytest.mark.unit
 def test_empty_iterable() -> None:
     assert stations_to_bundles([], fetched_at=_NOW) == []
+
+
+@pytest.mark.unit
+def test_station_detail_price_feature_and_values() -> None:
+    detail = _StationDetail(
+        **_S1.__dict__,
+        prices=(
+            _OilPrice(
+                product_code="B027",
+                price=1820,
+                trade_date=date(2026, 6, 25),
+                trade_time=time(10, 30),
+                raw={"PRODCD": "B027", "PRICE": "1820"},
+            ),
+            _OilPrice(
+                product_code="D047",
+                price=1650,
+                trade_date=date(2026, 6, 25),
+                trade_time=time(10, 30),
+                raw={"PRODCD": "D047", "PRICE": "1650"},
+            ),
+        ),
+    )
+
+    bundles, values = station_details_to_price_features_and_values(
+        [detail], fetched_at=_NOW
+    )
+
+    assert len(bundles) == 1
+    assert len(values) == 2
+    bundle = bundles[0]
+    assert bundle.feature.kind == FeatureKind.PRICE
+    assert bundle.feature.category == OPINET_STATION_CATEGORY
+    assert bundle.feature.name == "SK주유소 강남점 유가"
+    assert bundle.feature.parent_feature_id is not None
+    assert bundle.source_record.dataset_key == OPINET_PRICE_DATASET_KEY
+    assert [value.product_key for value in values] == ["gasoline", "diesel"]
+    assert {value.feature_id for value in values} == {bundle.feature.feature_id}
+
+
+@pytest.mark.unit
+def test_station_detail_price_skips_null_price() -> None:
+    detail = _StationDetail(
+        **_S1.__dict__,
+        prices=(
+            _OilPrice(
+                product_code="B027",
+                price=None,
+                trade_date=date(2026, 6, 25),
+                trade_time=time(10, 30),
+                raw={"PRODCD": "B027", "PRICE": None},
+            ),
+        ),
+    )
+
+    bundles, values = station_details_to_price_features_and_values(
+        [detail], fetched_at=_NOW
+    )
+
+    assert bundles == []
+    assert values == []
