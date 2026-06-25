@@ -1,5 +1,24 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-25 (codex) — KNPS 비매칭코스 제외 + N150 재검증
+
+- **완료(코드)**: KNPS `knps_trails` 변환에서 `비매칭코스`/`Nonmatching Course`를 공식 route로
+  적재하지 않도록 제외했다. 한글 raw name과 영문 raw name을 모두 확인한다.
+- **완료(회귀 테스트)**: `tests/unit/test_providers_knps.py`에 단건 skip과 배치 내 정상 route 유지
+  케이스를 추가했다.
+- **완료(N150)**: 수정 provider를 배포하고 기존 active `비매칭코스` route 1건을 soft delete했다.
+  최종 active unmatched route 0건, active route 617건을 확인했다.
+- **완료(OpiNet/env)**: 로컬 `python-opinet-api`의 키를 N150 `.env`에
+  `KOR_TRAVEL_MAP_OPINET_API_KEY`로 저장하고 bbox scope도 `KOR_TRAVEL_MAP_OPINET_SCOPE_*`로
+  저장했다. OpiNet station job 재실행 후 source record 196건, active place feature 196건을
+  확인했다.
+- **완료(N150 rename)**: 운영 DB/role/env/compose의 잔여 `krtour_map`/`KRTOUR_MAP*`을 최신
+  `kor_travel_map`/`KOR_TRAVEL_MAP*` 기준으로 정리했고 API/Dagster healthy를 확인했다.
+- **완료(live e2e)**: UI live Playwright `features-map` 118건, `features-list`/`features-detail`/
+  `providers-consistency` 753건, 나머지 live 묶음 896건을 검증했다. 남은 묶음 중 모바일 reviews
+  1건은 최초 묶음 실행에서 실패했지만 단독 재실행 2건 통과했다.
+- **다음 한 작업**: 로컬 전체 게이트 실행 후 PR 생성, CI green 확인, 머지를 완료한다.
+
 ## 2026-06-25 (codex) — Concierge curated source + PinVi rename
 
 - **완료(map 코드)**: concierge YouTube 장소 후보 provider/dataset을 `media-places` curated source rule로
