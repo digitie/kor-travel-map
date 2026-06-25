@@ -5,6 +5,15 @@
 
 ## [Unreleased]
 
+### KNPS 비매칭 탐방코스 route 제외 (2026-06-25)
+
+- **FIXED**: KNPS `knps_trails`의 `비매칭코스`/`Nonmatching Course` placeholder를
+  공식 route feature로 적재하지 않도록 제외했다.
+- **CHANGED**: N150 운영 DB에서 기존 active `비매칭코스` route 1건을 삭제 처리하고,
+  OpiNet 주유소 place feature를 재적재했다.
+- **CHANGED**: N150 운영 `kor-travel-docker-manager`의 OpiNet env key와 map DB/role명을
+  `KOR_TRAVEL_MAP_*`, `kor_travel_map`, `kor_travel_map_dagster` 기준으로 정리했다.
+
 ### Concierge curated source + PinVi 명칭 전환 (2026-06-25)
 
 - **ADDED**: `kor-travel-concierge-youtube/youtube_place_candidates`를 `media-places`

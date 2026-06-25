@@ -2,6 +2,38 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-25 (codex) — KNPS 비매칭코스 route 제외 + N150 env/DB rename
+
+N150 production의 active route에서 `비매칭코스` 1건을 확인했다. source는
+`python-knps-api/knps_trails`, `source_entity_id=15000000000`, raw `코스ID=0`,
+`탐방코스(한글)=비매칭코스`, `탐방코스(영문)=Nonmatching Course`였고, 161,179 vertex /
+약 1,295km의 거대 placeholder route로 적재되어 있었다. 이는 공식 탐방코스가 아니라 KNPS
+원천의 코스 미매칭 placeholder라 route 적재 대상에서 제외했다.
+
+- **코드 수정**: `knps_trails` 변환에서 `비매칭코스`와 `Nonmatching Course` 계열 영문명을
+  감지하면 bundle을 만들지 않도록 했다. 일반 이름 없는 route skip과 별도로, 한글 raw name과
+  영문 raw name을 모두 본다.
+- **회귀 테스트**: 단건 `비매칭코스`가 빈 결과를 반환하고, 배치에 영문 `Nonmatching Course`와
+  정상 `북한산 둘레길`이 함께 있을 때 정상 route만 남는 unit test를 추가했다.
+- **N150 삭제/배포**: 수정 provider/test 파일을 N150에 반영하고 map API/Dagster/daemon 이미지를
+  재빌드·재기동했다. 운영 DB의 active `비매칭코스` route 1건은 soft delete 처리했고,
+  active unmatched route 0건과 active route 617건을 확인했다.
+- **OpiNet 재적재**: 로컬 `python-opinet-api/.env`의 OpiNet key를 N150 운영 `.env`에
+  `KOR_TRAVEL_MAP_OPINET_API_KEY`로 저장하고, bbox scope
+  `126.15,33.19,126.98,34.21`를 `KOR_TRAVEL_MAP_OPINET_SCOPE_*`로 저장했다.
+  `feature_place_opinet_stations_job` 실행은 성공했고, `python-opinet-api /
+  opinet_fuel_station_details` source record 196건, active place feature 196건을 확인했다.
+- **N150 이름 정리**: 운영 `kor-travel-docker-manager` 활성 `.env`/compose에서 `KRTOUR_MAP*`,
+  `krtour_map`, `krtour-map`, `krtour-uploads` 잔여를 제거했다. PostGIS DB/role은
+  `krtour_map` → `kor_travel_map`, `krtour_map_dagster` → `kor_travel_map_dagster`,
+  role `krtour_map` → `kor_travel_map`으로 rename했고, API/Dagster 컨테이너가 새 DB/role을
+  바라보는 것을 확인했다.
+- **live e2e**: N150 health 200 확인. UI live Playwright는 `features-map.live` 118건
+  통과(마커 렌더 1건 retry 통과), `features-list`/`features-detail`/`providers-consistency`
+  753건 통과, 나머지 live 묶음 896건 통과 후 `reviews /admin/issues @ mobile-390` 1건이
+  실패했으나 단독 재실행 2건 통과했다. full suite 단일 실행은 20분 제한으로 timeout되어
+  spec 묶음 단위로 검증했다.
+
 ## 2026-06-25 (codex) — Concierge curated source 추가 + PinVi 명칭/DB rename
 
 `kor-travel-concierge`의 YouTube 장소 후보를 curated feature 기본 source로 올리고,

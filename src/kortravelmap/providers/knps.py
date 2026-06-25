@@ -483,6 +483,10 @@ _NATIONAL_PARK_CATEGORY: Final[str] = "01020101"
 _TRAIL_CATEGORY: Final[str] = "01020103"
 # route/national_park maki — upstream knps-feature-etl.md §4 표 ("park").
 _PARK_MAKI: Final[str] = "park"
+_UNMATCHED_TRAIL_KOREAN_NAMES: Final[frozenset[str]] = frozenset({"비매칭코스"})
+_UNMATCHED_TRAIL_ENGLISH_NAMES: Final[frozenset[str]] = frozenset(
+    {"nonmatching course", "non matching course", "unmatched course"}
+)
 
 
 KNPS_GEOMETRY_DATASETS: Final[dict[str, KnpsGeometryDatasetSpec]] = {
@@ -609,6 +613,29 @@ def _translated_protected_area_name(
     return None
 
 
+def _ascii_course_key(value: str | None) -> str | None:
+    text = normalize_korean_text(value)
+    if text is None:
+        return None
+    return " ".join(text.replace("-", " ").replace("_", " ").split()).casefold()
+
+
+def _is_unmatched_trail_course(record: KnpsGeometryRecord) -> bool:
+    """KNPS 원천의 공식 코스 미매칭 placeholder를 route 적재에서 제외한다."""
+    raw = record.raw
+    for source_name in (
+        normalize_korean_text(record.name),
+        _raw_text(raw, "탐방코스(한글)", "COURSE_NM", "course_name", "name", "NAME"),
+    ):
+        if source_name in _UNMATCHED_TRAIL_KOREAN_NAMES:
+            return True
+
+    english_name = _ascii_course_key(
+        _raw_text(raw, "탐방코스(영문)", "COURSE_ENG", "ENG_NM", "name_en")
+    )
+    return english_name in _UNMATCHED_TRAIL_ENGLISH_NAMES
+
+
 def _geometry_record_name(
     record: KnpsGeometryRecord, spec: KnpsGeometryDatasetSpec
 ) -> str | None:
@@ -676,6 +703,9 @@ async def _geometry_record_to_bundle(
     route는 이름 없는 record를 건너뛰고, area dataset은 raw 속성에서 이름을
     복구한다. geometry 파싱 실패/경계 밖 centroid는 ``None`` 반환(호출자가 skip/집계).
     """
+    if spec.dataset_key == "knps_trails" and _is_unmatched_trail_course(record):
+        return None
+
     normalized_name = _geometry_record_name(record, spec)
     if normalized_name is None:  # None/빈/공백-only 이름 모두 skip
         return None
