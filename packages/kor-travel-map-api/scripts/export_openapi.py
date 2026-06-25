@@ -15,7 +15,7 @@ Usage:
     python packages/kor-travel-map-api/scripts/export_openapi.py \\
         --output packages/kor-travel-map-api/openapi.json
 
-    # 2. user/PinVi spec 생성 + 저장
+    # 2. user spec 생성 + 저장
     python packages/kor-travel-map-api/scripts/export_openapi.py \\
         --profile user \\
         --output packages/kor-travel-map-api/openapi.user.json
@@ -59,11 +59,8 @@ USER_OPERATIONS: dict[str, frozenset[str]] = {
     "/v1/public/festivals/monthly": frozenset({"get"}),
     "/v1/public/festivals/map-markers": frozenset({"get"}),
     "/v1/public/festivals/{feature_id}": frozenset({"get"}),
-    "/v1/curated-themes": frozenset({"get"}),
-    "/v1/curated-sources": frozenset({"get"}),
     "/v1/curated-features": frozenset({"get"}),
     "/v1/curated-features/{curated_feature_id}": frozenset({"get"}),
-    "/v1/curated-features/{curated_feature_id}/pinvi-copy": frozenset({"get"}),
     "/v1/categories": frozenset({"get"}),
     "/v1/providers": frozenset({"get"}),
     "/v1/providers/{provider}/last-sync": frozenset({"get"}),
@@ -152,14 +149,14 @@ def _validate_user_operations(spec: dict[str, Any]) -> None:
 
 
 def user_openapi_spec(spec: dict[str, Any]) -> dict[str, Any]:
-    """Return PinVi/user-facing subset spec from the full admin spec."""
+    """Return user-facing subset spec from the full admin spec."""
     _validate_user_operations(spec)
     out = copy.deepcopy(spec)
     out["info"] = {
         **out.get("info", {}),
         "title": "kor-travel-map-user",
         "description": (
-            "PinVi/user-facing subset of kor-travel-map OpenAPI. "
+            "User-facing subset of kor-travel-map OpenAPI. "
             "Internal admin/debug/ops routes are intentionally excluded."
         ),
     }
@@ -245,7 +242,7 @@ def main(argv: list[str] | None = None) -> int:
         "--user-output",
         type=Path,
         default=USER_OPENAPI_PATH,
-        help="user/PinVi OpenAPI 저장/비교 대상 경로.",
+        help="user OpenAPI 저장/비교 대상 경로.",
     )
     parser.add_argument(
         "--check",

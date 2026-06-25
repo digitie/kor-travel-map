@@ -460,7 +460,7 @@ class CuratedThemeRow(Base):
     __tablename__ = "curated_themes"
     __table_args__ = (
         CheckConstraint(
-            "visibility IN ('admin_only','public','pinvi')",
+            "visibility IN ('admin_only','public')",
             name="ck_curated_themes_visibility",
         ),
         Index(
@@ -665,20 +665,23 @@ class CuratedFeatureRow(Base):
             name="ck_curated_features_selection_origin",
         ),
         CheckConstraint(
-            "pinvi_relation IN ("
+            "curation_relation IN ("
             "'primary_stop','food_stop','cafe_stop','bookstore_stop',"
             "'nearby_option','accessibility_support','pet_support',"
             "'family_support','theme_area_anchor'"
             ")",
-            name="ck_curated_features_pinvi_relation",
+            name="ck_curated_features_curation_relation",
         ),
         CheckConstraint(
-            "pinvi_copy_policy IN ("
-            "'copy_allowed','copy_blocked','manual_review'"
+            "reuse_policy IN ("
+            "'allowed','blocked','manual_review'"
             ")",
-            name="ck_curated_features_copy_policy",
+            name="ck_curated_features_reuse_policy",
         ),
-        CheckConstraint("copy_version >= 1", name="ck_curated_features_copy_version"),
+        CheckConstraint(
+            "content_version >= 1",
+            name="ck_curated_features_content_version",
+        ),
         CheckConstraint(
             "jsonb_typeof(metadata) = 'object'",
             name="ck_curated_features_metadata",
@@ -751,13 +754,13 @@ class CuratedFeatureRow(Base):
     )
     display_title: Mapped[str | None] = mapped_column(Text)
     display_summary: Mapped[str | None] = mapped_column(Text)
-    pinvi_relation: Mapped[str] = mapped_column(
+    curation_relation: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("'nearby_option'"),
     )
-    pinvi_copy_policy: Mapped[str] = mapped_column(
+    reuse_policy: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("'manual_review'"),
     )
-    copy_version: Mapped[int] = mapped_column(
+    content_version: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("1"),
     )
     metadata_: Mapped[dict[str, Any]] = mapped_column(
@@ -775,25 +778,25 @@ class CuratedFeatureRow(Base):
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
-class CuratedPinviCopySnapshotRow(Base):
-    """``feature.curated_pinvi_copy_snapshots`` row mapping — copy cache."""
+class CuratedFeatureDetailSnapshotRow(Base):
+    """``feature.curated_feature_detail_snapshots`` row mapping — detail cache."""
 
-    __tablename__ = "curated_pinvi_copy_snapshots"
+    __tablename__ = "curated_feature_detail_snapshots"
     __table_args__ = (
         CheckConstraint(
-            "copy_version >= 1",
-            name="ck_curated_copy_snapshots_version",
+            "content_version >= 1",
+            name="ck_curated_feature_detail_snapshots_version",
         ),
         CheckConstraint(
             "jsonb_typeof(snapshot) = 'object'",
-            name="ck_curated_copy_snapshots_snapshot",
+            name="ck_curated_feature_detail_snapshots_snapshot",
         ),
         Index(
-            "idx_curated_copy_snapshots_updated",
+            "idx_curated_feature_detail_snapshots_updated",
             text("updated_at DESC"),
             text("curated_feature_id DESC"),
         ),
-        Index("idx_curated_copy_snapshots_etag", "etag"),
+        Index("idx_curated_feature_detail_snapshots_etag", "etag"),
         {"schema": "feature"},
     )
 
@@ -802,7 +805,7 @@ class CuratedPinviCopySnapshotRow(Base):
         ForeignKey("feature.curated_features.curated_feature_id", ondelete="CASCADE"),
         primary_key=True,
     )
-    copy_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    content_version: Mapped[int] = mapped_column(Integer, nullable=False)
     etag: Mapped[str] = mapped_column(Text, nullable=False)
     snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     materialized_at: Mapped[datetime] = mapped_column(

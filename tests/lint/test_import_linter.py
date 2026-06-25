@@ -12,7 +12,7 @@ ADR 참조
 - ADR-020 — 메인 패키지는 FastAPI/Uvicorn 의존 금지 (디버그 UI는 별도 패키지).
 - ADR-030 — in-memory cache 라이브러리 의존 금지
   (``cachetools``/``async_lru``/``aiocache``/``diskcache``).
-- ADR-103 — Kafka/streaming consumer 의존 금지 (consumer는 PinVi
+- ADR-103 — Kafka/streaming consumer 의존 금지 (consumer는 외부 앱/ETL
   ``apps/etl`` 책임).
 """
 

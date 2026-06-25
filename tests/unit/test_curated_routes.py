@@ -14,6 +14,8 @@ def test_curated_routes_are_in_openapi() -> None:
     assert "/v1/curated-themes" in paths
     assert "/v1/curated-sources" in paths
     assert "/v1/curated-features" in paths
-    assert "/v1/curated-features/{curated_feature_id}/pinvi-copy" in paths
+    assert "/v1/curated-features/{curated_feature_id}" in paths
+    assert "/v1/curated-features/{curated_feature_id}/detail-snapshot" not in paths
+    assert "/v1/admin/curated-features/{curated_feature_id}/detail-snapshot" in paths
     assert "/v1/admin/curated-features/{curated_feature_id}/select" in paths
     assert "/v1/admin/curated-source-rules/{rule_id}/apply" in paths

@@ -375,7 +375,7 @@ async def test_review_required_add_applies_only_after_admin_approval(
         payload=payload,
         review_mode="require_review",
         reason="사용자 추가 요청",
-        requested_by="pinvi",
+        requested_by="external-app",
     )
     assert request.state == "pending"
     assert (

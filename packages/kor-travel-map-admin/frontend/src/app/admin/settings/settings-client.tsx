@@ -203,7 +203,7 @@ export function AdminSettingsClient() {
           </div>
           <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
             <Input
-              placeholder="예: pinvi-prod"
+              placeholder="예: production-service"
               value={label}
               onChange={(event) => setLabel(event.target.value)}
             />

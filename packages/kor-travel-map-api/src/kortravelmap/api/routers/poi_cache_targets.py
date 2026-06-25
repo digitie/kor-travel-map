@@ -16,7 +16,6 @@ from kortravelmap.infra.poi_cache_target_repo import (
     upsert_poi_cache_target,
 )
 from pydantic import (
-    AliasChoices,
     BaseModel,
     ConfigDict,
     Field,
@@ -108,10 +107,9 @@ class PoiCacheTargetMetadata(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    pinvi_poi_id: str | None = Field(
+    external_poi_id: str | None = Field(
         default=None,
         max_length=256,
-        validation_alias=AliasChoices("pinvi_poi_id", "tripmate_poi_id"),
     )
     external_ref: str | None = Field(default=None, max_length=256)
     source_url: str | None = Field(default=None, max_length=2048)
@@ -121,8 +119,8 @@ class PoiCacheTargetMetadata(BaseModel):
     @model_serializer
     def _serialize(self) -> dict[str, object]:
         payload: dict[str, object] = {}
-        if self.pinvi_poi_id is not None:
-            payload["pinvi_poi_id"] = self.pinvi_poi_id
+        if self.external_poi_id is not None:
+            payload["external_poi_id"] = self.external_poi_id
         if self.external_ref is not None:
             payload["external_ref"] = self.external_ref
         if self.source_url is not None:

@@ -54,7 +54,7 @@ def test_feature_load_asset_keys_registered() -> None:
         "curated_source_metadata",
         "curated_feature_candidates",
         "curated_feature_status_sweep",
-        "curated_pinvi_copy_snapshots",
+        "curated_feature_detail_snapshots",
     } <= asset_keys
 
 

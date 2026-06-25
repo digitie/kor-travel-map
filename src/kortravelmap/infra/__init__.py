@@ -150,8 +150,8 @@ from kortravelmap.infra.jobs_repo import (
 )
 from kortravelmap.infra.models import (
     Base,
+    CuratedFeatureDetailSnapshotRow,
     CuratedFeatureRow,
-    CuratedPinviCopySnapshotRow,
     CuratedSourceRow,
     CuratedSourceRuleRow,
     CuratedThemeRow,
@@ -250,7 +250,7 @@ __all__ = [
     "CuratedSourceRow",
     "CuratedSourceRuleRow",
     "CuratedThemeRow",
-    "CuratedPinviCopySnapshotRow",
+    "CuratedFeatureDetailSnapshotRow",
     "FeatureRow",
     "SourceRecordRow",
     "SourceLinkRow",

@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "kor-travel-map"
 version = "0.2.0-dev"
-description = "PinVi map feature aggregation and CRUD contracts (v2 design stage)."
+description = "Korea travel map feature aggregation and CRUD contracts (v2 design stage)."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "GPL-3.0-or-later" }
 authors = [{ name = "digitie" }]
-keywords = ["pinvi", "map", "features", "korea", "travel", "postgis"]
+keywords = ["map", "features", "korea", "travel", "postgis"]
 classifiers = [
   "Development Status :: 2 - Pre-Alpha",
   "Intended Audience :: Developers",
@@ -276,7 +276,7 @@ forbidden_modules = [
 ]
 
 # ADR-030: 라이브러리 in-memory 캐시 금지. functools.cache 한정 narrow 예외만 허용.
-# 외부 캐시 라이브러리 의존 금지 — invalidation 책임 호출자(PinVi)에 위임.
+# 외부 캐시 라이브러리 의존 금지 — invalidation 책임 호출자에 위임.
 # 예외: PlaceCategoryCode 카탈로그 (kortravelmap.category), pyproj.Transformer singleton.
 [[tool.importlinter.contracts]]
 name = "main package must not depend on cache libraries"
@@ -299,7 +299,7 @@ forbidden_modules = [
 ]
 
 # ADR-103 (T-103 보류): 본 라이브러리는 Kafka/streaming consumer 의존 금지.
-# streaming 도입 시 consumer는 PinVi apps/etl가 담당. 본 라이브러리는 함수만.
+# streaming 도입 시 consumer는 외부 앱/ETL이 담당. 본 라이브러리는 함수만.
 [[tool.importlinter.contracts]]
 name = "main package must not depend on kafka/streaming libraries"
 type = "forbidden"

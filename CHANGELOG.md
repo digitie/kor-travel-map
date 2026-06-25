@@ -5,6 +5,18 @@
 
 ## [Unreleased]
 
+### Curated API 범용 계약 정리 (2026-06-25)
+
+- **CHANGED**: public curated API는 임의 외부 사용자가 curated feature 목록과 상세를 조회하는
+  범용 계약으로 정리했다. 공개 surface는 `/v1/curated-features`,
+  `/v1/curated-features/{curated_feature_id}`만 유지한다.
+- **CHANGED**: curated 상세 재사용 관련 DB/API 명칭을 제품 전용 용어가 아닌
+  `curation_relation`/`reuse_policy`/`content_version`과
+  `feature.curated_feature_detail_snapshots`로 정리했다. 상세 snapshot preview는 admin API
+  `/v1/admin/curated-features/{curated_feature_id}/detail-snapshot`에서만 제공한다.
+- **CHANGED**: POI cache target metadata의 외부 POI 식별자는 `external_poi_id`로만 받도록
+  OpenAPI와 저장 metadata를 정리했다.
+
 ### KNPS 비매칭 탐방코스 route 제외 (2026-06-25)
 
 - **FIXED**: KNPS `knps_trails`의 `비매칭코스`/`Nonmatching Course` placeholder를
@@ -14,17 +26,14 @@
 - **CHANGED**: N150 운영 `kor-travel-docker-manager`의 OpiNet env key와 map DB/role명을
   `KOR_TRAVEL_MAP_*`, `kor_travel_map`, `kor_travel_map_dagster` 기준으로 정리했다.
 
-### Concierge curated source + PinVi 명칭 전환 (2026-06-25)
+### Concierge curated source + curated 계약 보강 (2026-06-25)
 
 - **ADDED**: `kor-travel-concierge-youtube/youtube_place_candidates`를 `media-places`
   curated source/rule에 추가했다. source rule 적용 시 기본 `curated` 상태로 선정하고,
   `display_title`은 YouTube source title → playlist title → channel title → 보정/검색어 순서로 채운다.
-- **CHANGED**: curated copy 계약의 정식 명칭을 PinVi로 전환했다. DB 컬럼은
-  `pinvi_relation`/`pinvi_copy_policy`, cache table은 `feature.curated_pinvi_copy_snapshots`,
-  endpoint는 `/v1/curated-features/{id}/pinvi-copy`가 정본이다. 구 `/tripmate-copy`는
-  배포 전환용 hidden 호환 route로만 남긴다.
-- **CHANGED**: POI cache target metadata의 정식 key를 `pinvi_poi_id`로 바꾸고, 기존
-  `tripmate_poi_id` 입력은 호환 alias로 받아 새 key로 저장한다.
+- **CHANGED**: curated 재사용 계약은 특정 제품명이 아니라
+  `curation_relation`/`reuse_policy`/`content_version`과 detail snapshot 기준으로 표현한다.
+- **CHANGED**: POI cache target metadata의 외부 POI 식별자는 `external_poi_id`로 표현한다.
 
 ### KNPS protected area 한글명 일괄 보정 (2026-06-25)
 
@@ -170,9 +179,9 @@
 ### curated_features Admin UI (T-223c-3, 2026-06-12)
 
 - **ADDED**: admin frontend `/admin/curated-features` — curated 후보 목록,
-  select/unselect/archive action, source rule 편집/apply, TripMate copy preview.
-- **ADDED**: 선택 후보의 display title/summary, rank score, TripMate copy policy,
-  TripMate relation 편집 표면.
+  select/unselect/archive action, source rule 편집/apply, detail snapshot preview.
+- **ADDED**: 선택 후보의 display title/summary, rank score, reuse policy,
+  curation relation 편집 표면.
 
 ### Offline upload 삭제 lifecycle (#397, 2026-06-12)
 
@@ -189,10 +198,10 @@
 
 ### curated_features Dagster group/cache (T-223c-2, 2026-06-12)
 
-- **ADDED**: `feature.curated_tripmate_copy_snapshots` — TripMate copy snapshot
+- **ADDED**: `feature.curated_feature_detail_snapshots` — curated detail snapshot
   materialize/cache table.
 - **ADDED**: `AsyncKorTravelMapClient` curated 배치 표면 —
-  source metadata refresh, source rule bulk apply, status sweep, TripMate snapshot
+  source metadata refresh, source rule bulk apply, status sweep, detail snapshot
   materialize.
 - **ADDED**: Dagster `curated_features` asset group과 `curated_features_refresh`
   job/schedule.
@@ -202,11 +211,11 @@
 - **ADDED**: `feature.curated_themes`, `curated_sources`,
   `curated_source_rules`, `curated_features` overlay 테이블과 1차 seed source/rule.
 - **ADDED**: `GET /v1/curated-themes`, `/v1/curated-sources`,
-  `/v1/curated-features*` 및 `/tripmate-copy` snapshot API.
+  `/v1/curated-features*` 공개 조회 API.
 - **ADDED**: `/v1/admin/curated-*` backend API — feature select/unselect/archive,
-  theme/source/rule create/patch, source rule apply.
+  theme/source/rule create/patch, source rule apply, detail snapshot preview.
 - **CHANGED**: `openapi.user.json`과 `@kor-travel-map/map-user-client` 타입에 curated read
-  표면과 TripMate copy snapshot schema를 포함했다.
+  표면을 포함했다.
 
 ### 공개 해수욕장/축제 view API (T-222b, 2026-06-12)
 
@@ -305,7 +314,7 @@
 ### kor-travel-concierge provider identity clean cut (ADR-053, T-224, 2026-06-12)
 
 - **CHANGED**: YouTube 장소 후보 provider를 `kor-travel-concierge-youtube`에서
-  `kor-travel-concierge-youtube`로 재정의했다. TripMate와 agent의 직접 관계는 제거하고,
+  `kor-travel-concierge-youtube`로 재정의했다. 외부 소비자와 agent의 직접 관계는 제거하고,
   provider 관계는 kor-travel-map ↔ kor-travel-concierge 사이에만 둔다.
 - **CHANGED**: Dagster resource/asset/schedule, settings/env 이름을
   `kor_travel_concierge_*` / `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_*` 기준으로 바꿨다. 구

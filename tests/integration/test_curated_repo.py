@@ -106,7 +106,7 @@ async def _load_concierge_place(session: AsyncSession) -> str:
     return bundle.feature.feature_id
 
 
-async def test_seed_rule_apply_creates_candidate_and_pinvi_snapshot(
+async def test_seed_rule_apply_creates_candidate_and_detail_snapshot(
     migrated_session: AsyncSession,
 ) -> None:
     feature_id = await _load_seoul_bookstore(migrated_session)
@@ -134,8 +134,8 @@ async def test_seed_rule_apply_creates_candidate_and_pinvi_snapshot(
     row = next(item for item in candidates.items if item.feature_id == feature_id)
     assert row.provider == "python-datagokr-api"
     assert row.dataset_key == "datagokr_seoul_bookstores"
-    assert row.pinvi_relation == "bookstore_stop"
-    assert row.pinvi_copy_policy == "copy_allowed"
+    assert row.curation_relation == "bookstore_stop"
+    assert row.reuse_policy == "allowed"
 
     selected = await curated_repo.set_curated_feature_status(
         migrated_session,
@@ -144,7 +144,7 @@ async def test_seed_rule_apply_creates_candidate_and_pinvi_snapshot(
         actor="pytest",
     )
     assert selected is not None
-    assert selected.copy_version == row.copy_version + 1
+    assert selected.content_version == row.content_version + 1
 
     public_page = await curated_repo.list_curated_features(
         migrated_session,
@@ -154,14 +154,14 @@ async def test_seed_rule_apply_creates_candidate_and_pinvi_snapshot(
         selected.curated_feature_id
     ]
 
-    snapshot = await curated_repo.get_curated_pinvi_copy_snapshot(
+    snapshot = await curated_repo.get_curated_feature_detail_snapshot(
         migrated_session,
         curated_feature_id=selected.curated_feature_id,
     )
     assert snapshot is not None
     assert snapshot.etag.startswith("sha256:")
     assert snapshot.theme["theme_slug"] == "bookstores"
-    assert snapshot.plan["title"] == "통합테스트 헌책방"
+    assert snapshot.content["title"] == "통합테스트 헌책방"
     assert snapshot.items[0].feature_snapshot["name"] == "통합테스트 헌책방"
 
     refreshed = await curated_repo.refresh_curated_source_metadata(
@@ -173,7 +173,7 @@ async def test_seed_rule_apply_creates_candidate_and_pinvi_snapshot(
     assert refreshed.sources_with_records == 1
     assert refreshed.source_records_total >= 1
 
-    materialized = await curated_repo.materialize_curated_pinvi_copy_snapshots(
+    materialized = await curated_repo.materialize_curated_feature_detail_snapshots(
         migrated_session,
         theme_slug="bookstores",
     )
@@ -183,17 +183,17 @@ async def test_seed_rule_apply_creates_candidate_and_pinvi_snapshot(
         await migrated_session.execute(
             text(
                 """
-                SELECT copy_version, etag, snapshot
-                FROM feature.curated_pinvi_copy_snapshots
+                SELECT content_version, etag, snapshot
+                FROM feature.curated_feature_detail_snapshots
                 WHERE curated_feature_id = CAST(:curated_feature_id AS uuid)
                 """
             ),
             {"curated_feature_id": selected.curated_feature_id},
         )
     ).mappings().one()
-    assert cached["copy_version"] == selected.copy_version
+    assert cached["content_version"] == selected.content_version
     assert cached["etag"] == snapshot.etag
-    assert cached["snapshot"]["plan"]["title"] == "통합테스트 헌책방"
+    assert cached["snapshot"]["content"]["title"] == "통합테스트 헌책방"
 
 
 async def test_concierge_seed_rule_creates_curated_with_source_title(
@@ -226,12 +226,12 @@ async def test_concierge_seed_rule_creates_curated_with_source_title(
     assert row.display_title == "제주 동쪽 코스"
     assert row.selected_at is not None
 
-    snapshot = await curated_repo.get_curated_pinvi_copy_snapshot(
+    snapshot = await curated_repo.get_curated_feature_detail_snapshot(
         migrated_session,
         curated_feature_id=row.curated_feature_id,
     )
     assert snapshot is not None
-    assert snapshot.plan["title"] == "제주 동쪽 코스"
+    assert snapshot.content["title"] == "제주 동쪽 코스"
     assert snapshot.items[0].feature_snapshot["name"] == "월정리 해변"
 
 
@@ -300,12 +300,12 @@ async def test_manual_create_patch_and_archive_curated_feature(
         source_id=source.source_id,
         curation_status="curated",
         selected_by="pytest",
-        pinvi_relation="bookstore_stop",
-        pinvi_copy_policy="copy_allowed",
+        curation_relation="bookstore_stop",
+        reuse_policy="allowed",
         metadata={"manual": True},
     )
     assert created.selected_at is not None
-    assert created.copy_version == 1
+    assert created.content_version == 1
 
     patched = await curated_repo.update_curated_feature(
         migrated_session,
@@ -314,7 +314,7 @@ async def test_manual_create_patch_and_archive_curated_feature(
     )
     assert patched is not None
     assert patched.display_summary == "수동 추천 책방"
-    assert patched.copy_version == 2
+    assert patched.content_version == 2
 
     archived = await curated_repo.archive_curated_feature(
         migrated_session,

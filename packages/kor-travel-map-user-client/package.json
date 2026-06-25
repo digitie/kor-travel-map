@@ -2,7 +2,7 @@
   "name": "@kor-travel-map/user-client",
   "version": "0.0.0-dev",
   "private": true,
-  "description": "kor-travel-map user-facing OpenAPI(openapi.user.json) generated TypeScript types — PinVi 등 downstream 소비용 (T-210e). ADR-043 관행 — npm registry 게시 X, 산출물 커밋 + drift gate로 공유.",
+  "description": "kor-travel-map user-facing OpenAPI(openapi.user.json) generated TypeScript types for downstream consumers (T-210e). ADR-043 관행 — npm registry 게시 X, 산출물 커밋 + drift gate로 공유.",
   "license": "MIT",
   "author": "digitie",
   "repository": {

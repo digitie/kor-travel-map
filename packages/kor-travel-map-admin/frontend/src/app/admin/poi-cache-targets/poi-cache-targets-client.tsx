@@ -32,7 +32,7 @@ import {
 } from "@/lib/form-validation";
 
 export function PoiCacheTargetsClient() {
-  const [externalSystem, setExternalSystem] = useState("pinvi");
+  const [externalSystem, setExternalSystem] = useState("external-app");
   const [targetKey, setTargetKey] = useState("");
   const [name, setName] = useState("");
   const [lon, setLon] = useState("126.9780");

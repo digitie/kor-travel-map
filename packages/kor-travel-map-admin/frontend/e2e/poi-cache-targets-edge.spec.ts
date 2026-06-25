@@ -35,7 +35,7 @@ const TARGET_ID_A = "44444444-4444-4444-8444-44444444aaaa";
 const TARGET_ID_B = "44444444-4444-4444-8444-44444444bbbb";
 const TARGET_ID_SIGUNGU = "44444444-4444-4444-8444-44444444cccc";
 const LIST_PATH = "/v1/admin/poi-cache-targets";
-const UPSERT_PATH = "/v1/admin/poi-cache-targets/pinvi/mock-target-1";
+const UPSERT_PATH = "/v1/admin/poi-cache-targets/external-app/mock-target-1";
 
 async function fulfillJson(route: Route, body: unknown, status = 200) {
   await route.fulfill({
@@ -54,7 +54,7 @@ function makePoiTarget(
     coord_precision_digits: 6,
     created_at: MOCK_NOW,
     deleted_at: null,
-    external_system: "pinvi",
+    external_system: "external-app",
     last_failed_at: null,
     last_refreshed_at: null,
     last_requested_at: null,
@@ -62,7 +62,7 @@ function makePoiTarget(
     metadata: {},
     name: "Mock target",
     nearby_url:
-      "/features/nearby/by-target?external_system=pinvi&target_key=mock-target-1",
+      "/features/nearby/by-target?external_system=external-app&target_key=mock-target-1",
     next_eligible_refresh_at: null,
     provider_overrides: {},
     radius_km: 5,
@@ -297,7 +297,7 @@ test.describe("/admin/poi-cache-targets (edge/depth)", () => {
               makePoiTarget({
                 name: "Mock target",
                 target_key: "mock-target-1",
-                external_system: "pinvi",
+                external_system: "external-app",
               }),
             ],
             null,
@@ -330,8 +330,8 @@ test.describe("/admin/poi-cache-targets (edge/depth)", () => {
     await expect(alert).toBeVisible();
     await expect(page.getByText("Nearby features")).toBeVisible();
 
-    // by-target 요청이 external_system=pinvi & target_key=mock-target-1을 실었는지.
-    await expect.poll(() => nearbyExternal).toBe("pinvi");
+    // by-target 요청이 external_system=external-app & target_key=mock-target-1을 실었는지.
+    await expect.poll(() => nearbyExternal).toBe("external-app");
     await expect.poll(() => nearbyTargetKey).toBe("mock-target-1");
   });
 
@@ -363,7 +363,7 @@ test.describe("/admin/poi-cache-targets (edge/depth)", () => {
       },
       onPut: async (route, url) => {
         upsertCount += 1;
-        // external_system 기본 'pinvi', target_key path-encoded.
+        // external_system 기본 'external-app', target_key path-encoded.
         expect(url.pathname).toBe(UPSERT_PATH);
         // scope_mode select가 sigungu_by_radius로 전달 + on_conflict는 하드코딩 'move'.
         expect(route.request().postDataJSON()).toMatchObject({

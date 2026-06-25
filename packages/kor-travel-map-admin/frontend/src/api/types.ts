@@ -128,6 +128,23 @@ export interface paths {
         patch: operations["patch_admin_curated_feature_route_v1_admin_curated_features__curated_feature_id__patch"];
         trace?: never;
     };
+    "/v1/admin/curated-features/{curated_feature_id}/detail-snapshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Admin Curated Feature Detail Snapshot Route */
+        get: operations["get_admin_curated_feature_detail_snapshot_route_v1_admin_curated_features__curated_feature_id__detail_snapshot_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/curated-features/{curated_feature_id}/select": {
         parameters: {
             query?: never;
@@ -900,23 +917,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/curated-features/{curated_feature_id}/pinvi-copy": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Curated Pinvi Copy Route */
-        get: operations["get_curated_pinvi_copy_route_v1_curated_features__curated_feature_id__pinvi_copy_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/curated-sources": {
         parameters: {
             query?: never;
@@ -1069,7 +1069,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** bbox 안 feature 목록 (PinVi/public envelope) */
+        /** bbox 안 feature 목록 (public envelope) */
         get: operations["list_public_features_in_bounds_v1_features_in_bounds_get"];
         put?: never;
         post?: never;
@@ -2999,6 +2999,12 @@ export interface components {
         /** CuratedFeatureCreateRequest */
         CuratedFeatureCreateRequest: {
             /**
+             * Curation Relation
+             * @default nearby_option
+             * @enum {string}
+             */
+            curation_relation: "primary_stop" | "food_stop" | "cafe_stop" | "bookstore_stop" | "nearby_option" | "accessibility_support" | "pet_support" | "family_support" | "theme_area_anchor";
+            /**
              * Curation Status
              * @default candidate
              * @enum {string}
@@ -3015,18 +3021,6 @@ export interface components {
                 [key: string]: unknown;
             };
             /**
-             * Pinvi Copy Policy
-             * @default manual_review
-             * @enum {string}
-             */
-            pinvi_copy_policy: "copy_allowed" | "copy_blocked" | "manual_review";
-            /**
-             * Pinvi Relation
-             * @default nearby_option
-             * @enum {string}
-             */
-            pinvi_relation: "primary_stop" | "food_stop" | "cafe_stop" | "bookstore_stop" | "nearby_option" | "accessibility_support" | "pet_support" | "family_support" | "theme_area_anchor";
-            /**
              * Rank Score
              * @default 0
              */
@@ -3035,6 +3029,12 @@ export interface components {
             rejected_by?: string | null;
             /** Rejection Reason */
             rejection_reason?: string | null;
+            /**
+             * Reuse Policy
+             * @default manual_review
+             * @enum {string}
+             */
+            reuse_policy: "allowed" | "blocked" | "manual_review";
             /** Selected By */
             selected_by?: string | null;
             /**
@@ -3050,8 +3050,70 @@ export interface components {
             /** Theme Id */
             theme_id: string;
         };
+        /**
+         * CuratedFeatureDetailItemView
+         * @description curated feature detail item.
+         */
+        CuratedFeatureDetailItemView: {
+            /** Curated Feature Item Id */
+            curated_feature_item_id: string;
+            /** Day Index */
+            day_index?: number | null;
+            /** Feature Id */
+            feature_id: string;
+            /** Feature Snapshot */
+            feature_snapshot: {
+                [key: string]: unknown;
+            };
+            /** Memo */
+            memo?: string | null;
+            /** Relation */
+            relation: string;
+            /** Sort Order */
+            sort_order: number;
+            /** Source Record Key */
+            source_record_key?: string | null;
+        };
+        /** CuratedFeatureDetailSnapshotResponse */
+        CuratedFeatureDetailSnapshotResponse: {
+            data: components["schemas"]["CuratedFeatureDetailSnapshotView"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * CuratedFeatureDetailSnapshotView
+         * @description curated feature detail snapshot.
+         */
+        CuratedFeatureDetailSnapshotView: {
+            /** Content */
+            content: {
+                [key: string]: unknown;
+            };
+            /** Curated Feature Id */
+            curated_feature_id: string;
+            /** Etag */
+            etag: string;
+            /** Items */
+            items: components["schemas"]["CuratedFeatureDetailItemView"][];
+            /** Source */
+            source: {
+                [key: string]: unknown;
+            };
+            /** Theme */
+            theme: {
+                [key: string]: unknown;
+            };
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Version */
+            version: number;
+        };
         /** CuratedFeaturePatchRequest */
         CuratedFeaturePatchRequest: {
+            /** Curation Relation */
+            curation_relation?: ("primary_stop" | "food_stop" | "cafe_stop" | "bookstore_stop" | "nearby_option" | "accessibility_support" | "pet_support" | "family_support" | "theme_area_anchor") | null;
             /** Curation Status */
             curation_status?: ("candidate" | "curated" | "rejected" | "archived") | null;
             /** Display Summary */
@@ -3062,12 +3124,10 @@ export interface components {
             metadata?: {
                 [key: string]: unknown;
             } | null;
-            /** Pinvi Copy Policy */
-            pinvi_copy_policy?: ("copy_allowed" | "copy_blocked" | "manual_review") | null;
-            /** Pinvi Relation */
-            pinvi_relation?: ("primary_stop" | "food_stop" | "cafe_stop" | "bookstore_stop" | "nearby_option" | "accessibility_support" | "pet_support" | "family_support" | "theme_area_anchor") | null;
             /** Rank Score */
             rank_score?: number | null;
+            /** Reuse Policy */
+            reuse_policy?: ("allowed" | "blocked" | "manual_review") | null;
             /** Source Record Key */
             source_record_key?: string | null;
         };
@@ -3094,8 +3154,8 @@ export interface components {
             };
             /** Archived At */
             archived_at?: string | null;
-            /** Copy Version */
-            copy_version: number;
+            /** Content Version */
+            content_version: number;
             /**
              * Created At
              * Format: date-time
@@ -3103,6 +3163,8 @@ export interface components {
             created_at: string;
             /** Curated Feature Id */
             curated_feature_id: string;
+            /** Curation Relation */
+            curation_relation: string;
             /** Curation Status */
             curation_status: string;
             /** Dataset Key */
@@ -3133,10 +3195,6 @@ export interface components {
             metadata: {
                 [key: string]: unknown;
             };
-            /** Pinvi Copy Policy */
-            pinvi_copy_policy: string;
-            /** Pinvi Relation */
-            pinvi_relation: string;
             /** Provider */
             provider: string;
             /** Rank Score */
@@ -3147,6 +3205,8 @@ export interface components {
             rejected_by?: string | null;
             /** Rejection Reason */
             rejection_reason?: string | null;
+            /** Reuse Policy */
+            reuse_policy: string;
             /** Selected At */
             selected_at?: string | null;
             /** Selected By */
@@ -3473,7 +3533,7 @@ export interface components {
              * @default admin_only
              * @enum {string}
              */
-            visibility: "admin_only" | "public" | "pinvi";
+            visibility: "admin_only" | "public";
         };
         /** CuratedThemePatchRequest */
         CuratedThemePatchRequest: {
@@ -3492,7 +3552,7 @@ export interface components {
             /** Theme Slug */
             theme_slug?: string | null;
             /** Visibility */
-            visibility?: ("admin_only" | "public" | "pinvi") | null;
+            visibility?: ("admin_only" | "public") | null;
         };
         /** CuratedThemeResponse */
         CuratedThemeResponse: {
@@ -5463,66 +5523,6 @@ export interface components {
             total?: number | null;
         };
         /**
-         * PinviCopyItemView
-         * @description PinVi curated_plan_pois copy item.
-         */
-        PinviCopyItemView: {
-            /** Curated Feature Item Id */
-            curated_feature_item_id: string;
-            /** Day Index */
-            day_index?: number | null;
-            /** Feature Id */
-            feature_id: string;
-            /** Feature Snapshot */
-            feature_snapshot: {
-                [key: string]: unknown;
-            };
-            /** Memo */
-            memo?: string | null;
-            /** Relation */
-            relation: string;
-            /** Sort Order */
-            sort_order: number;
-            /** Source Record Key */
-            source_record_key?: string | null;
-        };
-        /** PinviCopySnapshotResponse */
-        PinviCopySnapshotResponse: {
-            data: components["schemas"]["PinviCopySnapshotView"];
-            meta: components["schemas"]["Meta"];
-        };
-        /**
-         * PinviCopySnapshotView
-         * @description PinVi import snapshot.
-         */
-        PinviCopySnapshotView: {
-            /** Curated Feature Id */
-            curated_feature_id: string;
-            /** Etag */
-            etag: string;
-            /** Items */
-            items: components["schemas"]["PinviCopyItemView"][];
-            /** Plan */
-            plan: {
-                [key: string]: unknown;
-            };
-            /** Source */
-            source: {
-                [key: string]: unknown;
-            };
-            /** Theme */
-            theme: {
-                [key: string]: unknown;
-            };
-            /**
-             * Updated At
-             * Format: date-time
-             */
-            updated_at: string;
-            /** Version */
-            version: number;
-        };
-        /**
          * PoiCacheTargetListData
          * @description POI/cache target 목록 data.
          */
@@ -5556,14 +5556,14 @@ export interface components {
          * @description target 운영 메타데이터. 임의 key 대신 명시 필드만 받는다.
          */
         "PoiCacheTargetMetadata-Input": {
+            /** External Poi Id */
+            external_poi_id?: string | null;
             /** External Ref */
             external_ref?: string | null;
             /** Labels */
             labels?: string[];
             /** Note */
             note?: string | null;
-            /** Pinvi Poi Id */
-            pinvi_poi_id?: string | null;
             /** Source Url */
             source_url?: string | null;
         };
@@ -6867,6 +6867,46 @@ export interface operations {
             };
         };
     };
+    get_admin_curated_feature_detail_snapshot_route_v1_admin_curated_features__curated_feature_id__detail_snapshot_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                curated_feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CuratedFeatureDetailSnapshotResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
     select_admin_curated_feature_route_v1_admin_curated_features__curated_feature_id__select_post: {
         parameters: {
             query?: never;
@@ -7259,7 +7299,7 @@ export interface operations {
     list_admin_curated_themes_route_v1_admin_curated_themes_get: {
         parameters: {
             query?: {
-                visibility?: ("admin_only" | "public" | "pinvi") | null;
+                visibility?: ("admin_only" | "public") | null;
                 theme_group?: string | null;
                 limit?: number;
             };
@@ -9720,46 +9760,6 @@ export interface operations {
             };
         };
     };
-    get_curated_pinvi_copy_route_v1_curated_features__curated_feature_id__pinvi_copy_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                curated_feature_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PinviCopySnapshotResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-        };
-    };
     list_curated_sources_route_v1_curated_sources_get: {
         parameters: {
             query?: {
@@ -9806,7 +9806,7 @@ export interface operations {
     list_curated_themes_route_v1_curated_themes_get: {
         parameters: {
             query?: {
-                visibility?: ("admin_only" | "public" | "pinvi") | null;
+                visibility?: ("admin_only" | "public") | null;
                 theme_group?: string | null;
                 limit?: number;
             };
@@ -10265,7 +10265,7 @@ export interface operations {
     list_features_nearby_by_target_v1_features_nearby_by_target_get: {
         parameters: {
             query: {
-                /** @description 외부 시스템 이름. 예: pinvi */
+                /** @description 외부 시스템 이름. 예: external-app */
                 external_system: string;
                 /** @description 외부 POI 고유 key. */
                 target_key: string;

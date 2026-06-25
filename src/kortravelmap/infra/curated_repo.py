@@ -30,9 +30,9 @@ __all__ = [
     "CuratedFeatureCandidatesResult",
     "CuratedFeatureStatusSweepResult",
     "CuratedSourceMetadataRefreshResult",
-    "CuratedPinviCopyItem",
-    "CuratedPinviCopySnapshot",
-    "CuratedPinviSnapshotMaterializeResult",
+    "CuratedFeatureDetailItem",
+    "CuratedFeatureDetailSnapshot",
+    "CuratedFeatureDetailSnapshotMaterializeResult",
     "RuleApplyResult",
     "archive_curated_feature",
     "apply_enabled_curated_source_rules",
@@ -42,12 +42,12 @@ __all__ = [
     "create_curated_source_rule",
     "create_curated_theme",
     "get_curated_feature",
-    "get_curated_pinvi_copy_snapshot",
+    "get_curated_feature_detail_snapshot",
     "list_curated_features",
     "list_curated_source_rules",
     "list_curated_sources",
     "list_curated_themes",
-    "materialize_curated_pinvi_copy_snapshots",
+    "materialize_curated_feature_detail_snapshots",
     "refresh_curated_source_metadata",
     "set_curated_feature_status",
     "sweep_curated_feature_status",
@@ -65,7 +65,7 @@ _CURATION_STATUSES: Final[frozenset[str]] = frozenset(
 _SELECTION_ORIGINS: Final[frozenset[str]] = frozenset(
     {"source_rule", "admin", "external_api"}
 )
-_PINVI_RELATIONS: Final[frozenset[str]] = frozenset(
+_CURATION_RELATIONS: Final[frozenset[str]] = frozenset(
     {
         "primary_stop",
         "food_stop",
@@ -78,11 +78,11 @@ _PINVI_RELATIONS: Final[frozenset[str]] = frozenset(
         "theme_area_anchor",
     }
 )
-_COPY_POLICIES: Final[frozenset[str]] = frozenset(
-    {"copy_allowed", "copy_blocked", "manual_review"}
+_REUSE_POLICIES: Final[frozenset[str]] = frozenset(
+    {"allowed", "blocked", "manual_review"}
 )
 _THEME_VISIBILITIES: Final[frozenset[str]] = frozenset(
-    {"admin_only", "public", "pinvi"}
+    {"admin_only", "public"}
 )
 _SOURCE_KINDS: Final[frozenset[str]] = frozenset(
     {"openapi", "filedata", "standard", "internal", "manual"}
@@ -198,9 +198,9 @@ class CuratedFeature:
     rank_score: float
     display_title: str | None
     display_summary: str | None
-    pinvi_relation: str
-    pinvi_copy_policy: str
-    copy_version: int
+    curation_relation: str
+    reuse_policy: str
+    content_version: int
     metadata: dict[str, Any]
     created_at: datetime
     updated_at: datetime
@@ -216,8 +216,8 @@ class CuratedFeaturePage:
 
 
 @dataclass(frozen=True)
-class CuratedPinviCopyItem:
-    """PinVi ``curated_plan_pois`` 1건으로 복사될 item."""
+class CuratedFeatureDetailItem:
+    """curated feature detail item."""
 
     curated_feature_item_id: str
     feature_id: str
@@ -230,17 +230,17 @@ class CuratedPinviCopyItem:
 
 
 @dataclass(frozen=True)
-class CuratedPinviCopySnapshot:
-    """PinVi import payload projection."""
+class CuratedFeatureDetailSnapshot:
+    """curated feature detail payload projection."""
 
     curated_feature_id: str
     version: int
     etag: str
     updated_at: datetime
     theme: dict[str, Any]
-    plan: dict[str, Any]
+    content: dict[str, Any]
     source: dict[str, Any]
-    items: tuple[CuratedPinviCopyItem, ...]
+    items: tuple[CuratedFeatureDetailItem, ...]
 
 
 @dataclass(frozen=True)
@@ -295,8 +295,8 @@ class CuratedFeatureStatusSweepResult:
 
 
 @dataclass(frozen=True)
-class CuratedPinviSnapshotMaterializeResult:
-    """PinVi copy snapshot cache materialize 결과."""
+class CuratedFeatureDetailSnapshotMaterializeResult:
+    """curated feature detail snapshot cache materialize 결과."""
 
     curated_features_total: int
     snapshots_materialized: int
@@ -358,9 +358,9 @@ _FEATURE_COLUMNS: Final[str] = """
     cf.rank_score,
     cf.display_title,
     cf.display_summary,
-    cf.pinvi_relation,
-    cf.pinvi_copy_policy,
-    cf.copy_version,
+    cf.curation_relation,
+    cf.reuse_policy,
+    cf.content_version,
     cf.metadata,
     cf.created_at,
     cf.updated_at,
@@ -494,7 +494,7 @@ INSERT INTO feature.curated_features (
     theme_id, feature_id, source_id, source_record_key, curation_status,
     selection_origin, selected_by, selected_at, rejected_by, rejected_at,
     rejection_reason, rank_score, display_title, display_summary,
-    pinvi_relation, pinvi_copy_policy, metadata, updated_at
+    curation_relation, reuse_policy, metadata, updated_at
 ) VALUES (
     CAST(:theme_id AS uuid), :feature_id, CAST(:source_id AS uuid),
     CAST(:source_record_key AS text), :curation_status, :selection_origin,
@@ -503,8 +503,8 @@ INSERT INTO feature.curated_features (
     :rejected_by,
     CASE WHEN CAST(:rejected_now AS boolean) THEN now() ELSE NULL END,
     :rejection_reason,
-    :rank_score, :display_title, :display_summary, :pinvi_relation,
-    :pinvi_copy_policy, CAST(:metadata_json AS jsonb), now()
+    :rank_score, :display_title, :display_summary, :curation_relation,
+    :reuse_policy, CAST(:metadata_json AS jsonb), now()
 )
 RETURNING curated_feature_id::text
 """
@@ -529,15 +529,13 @@ WITH rule AS (
         r.default_action,
         r.priority,
         COALESCE(
-            r.metadata ->> 'pinvi_relation',
-            r.metadata ->> 'tripmate_relation',
+            r.metadata ->> 'curation_relation',
             'nearby_option'
         ) AS relation,
         COALESCE(
-            r.metadata ->> 'pinvi_copy_policy',
-            r.metadata ->> 'tripmate_copy_policy',
+            r.metadata ->> 'reuse_policy',
             'manual_review'
-        ) AS copy_policy
+        ) AS reuse_policy
     FROM feature.curated_source_rules AS r
     WHERE r.rule_id = CAST(:rule_id AS uuid)
       AND r.enabled
@@ -547,7 +545,7 @@ upserted AS (
     INSERT INTO feature.curated_features (
         theme_id, feature_id, source_id, source_record_key, curation_status,
         selection_origin, selected_at, rank_score, display_title,
-        pinvi_relation, pinvi_copy_policy, metadata, updated_at
+        curation_relation, reuse_policy, metadata, updated_at
     )
     SELECT DISTINCT ON (f.feature_id)
         rule.theme_id,
@@ -588,8 +586,8 @@ upserted AS (
             ELSE 'nearby_option'
         END,
         CASE
-            WHEN rule.copy_policy IN ('copy_allowed','copy_blocked','manual_review')
-            THEN rule.copy_policy
+            WHEN rule.reuse_policy IN ('allowed','blocked','manual_review')
+            THEN rule.reuse_policy
             ELSE 'manual_review'
         END,
         jsonb_build_object('rule_id', rule.rule_id::text, 'applied_by', 'source_rule'),
@@ -637,11 +635,11 @@ upserted AS (
             THEN EXCLUDED.display_title
             ELSE COALESCE(feature.curated_features.display_title, EXCLUDED.display_title)
         END,
-        pinvi_relation = EXCLUDED.pinvi_relation,
-        pinvi_copy_policy = EXCLUDED.pinvi_copy_policy,
+        curation_relation = EXCLUDED.curation_relation,
+        reuse_policy = EXCLUDED.reuse_policy,
         metadata = feature.curated_features.metadata || EXCLUDED.metadata,
         updated_at = now(),
-        copy_version = feature.curated_features.copy_version + 1
+        content_version = feature.curated_features.content_version + 1
     WHERE feature.curated_features.curation_status NOT IN ('rejected','archived')
     RETURNING curated_feature_id
 )
@@ -700,7 +698,7 @@ WITH archived AS (
         curation_status = 'archived',
         archived_at = COALESCE(cf.archived_at, now()),
         updated_at = now(),
-        copy_version = cf.copy_version + 1,
+        content_version = cf.content_version + 1,
         metadata = cf.metadata || jsonb_build_object(
             'status_sweep', 'underlying_feature_inactive_or_deleted'
         )
@@ -714,23 +712,23 @@ WITH archived AS (
 SELECT count(*)::int AS archived_count FROM archived
 """
 
-_UPSERT_PINVI_COPY_SNAPSHOT_SQL: Final[str] = """
-INSERT INTO feature.curated_pinvi_copy_snapshots (
-    curated_feature_id, copy_version, etag, snapshot, materialized_at, updated_at
+_UPSERT_FEATURE_DETAIL_SNAPSHOT_SQL: Final[str] = """
+INSERT INTO feature.curated_feature_detail_snapshots (
+    curated_feature_id, content_version, etag, snapshot, materialized_at, updated_at
 ) VALUES (
-    CAST(:curated_feature_id AS uuid), :copy_version, :etag,
+    CAST(:curated_feature_id AS uuid), :content_version, :etag,
     CAST(:snapshot_json AS jsonb), now(), :updated_at
 )
 ON CONFLICT (curated_feature_id)
 DO UPDATE SET
-    copy_version = EXCLUDED.copy_version,
+    content_version = EXCLUDED.content_version,
     etag = EXCLUDED.etag,
     snapshot = EXCLUDED.snapshot,
     materialized_at = now(),
     updated_at = EXCLUDED.updated_at
-WHERE feature.curated_pinvi_copy_snapshots.copy_version IS DISTINCT FROM
-      EXCLUDED.copy_version
-   OR feature.curated_pinvi_copy_snapshots.etag IS DISTINCT FROM EXCLUDED.etag
+WHERE feature.curated_feature_detail_snapshots.content_version IS DISTINCT FROM
+      EXCLUDED.content_version
+   OR feature.curated_feature_detail_snapshots.etag IS DISTINCT FROM EXCLUDED.etag
 RETURNING curated_feature_id::text AS curated_feature_id
 """
 
@@ -950,9 +948,9 @@ def _feature(row: Any) -> CuratedFeature:
         rank_score=_decimal_to_float(row["rank_score"]),
         display_title=row["display_title"],
         display_summary=row["display_summary"],
-        pinvi_relation=str(row["pinvi_relation"]),
-        pinvi_copy_policy=str(row["pinvi_copy_policy"]),
-        copy_version=int(row["copy_version"]),
+        curation_relation=str(row["curation_relation"]),
+        reuse_policy=str(row["reuse_policy"]),
+        content_version=int(row["content_version"]),
         metadata=_json_object(row["metadata"]),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
@@ -976,26 +974,26 @@ def _feature_snapshot(feature: CuratedFeature) -> dict[str, Any]:
     }
 
 
-def _pinvi_snapshot(feature: CuratedFeature) -> CuratedPinviCopySnapshot:
+def _feature_detail_snapshot(feature: CuratedFeature) -> CuratedFeatureDetailSnapshot:
     title = feature.display_title or _concierge_source_title(feature) or feature.feature_name
     summary = feature.display_summary
     if summary is None:
         summary = feature.metadata.get("summary")
         if not isinstance(summary, str):
             summary = None
-    plan = {
+    content = {
         "title": title,
         "summary": summary,
         "destination_name": _destination_name(feature),
         "region_code": feature.sigungu_code or feature.sido_code,
         "category": feature.theme_group,
         "curation_status": feature.curation_status,
-        "copy_policy": feature.pinvi_copy_policy,
+        "reuse_policy": feature.reuse_policy,
     }
-    item = CuratedPinviCopyItem(
+    item = CuratedFeatureDetailItem(
         curated_feature_item_id=feature.curated_feature_id,
         feature_id=feature.feature_id,
-        relation=feature.pinvi_relation,
+        relation=feature.curation_relation,
         sort_order=1,
         day_index=None,
         memo=summary,
@@ -1014,10 +1012,10 @@ def _pinvi_snapshot(feature: CuratedFeature) -> CuratedPinviCopySnapshot:
     }
     payload = {
         "curated_feature_id": feature.curated_feature_id,
-        "version": feature.copy_version,
+        "version": feature.content_version,
         "updated_at": feature.updated_at.isoformat(),
         "theme": theme,
-        "plan": plan,
+        "content": content,
         "source": source,
         "items": [
             {
@@ -1034,20 +1032,20 @@ def _pinvi_snapshot(feature: CuratedFeature) -> CuratedPinviCopySnapshot:
     }
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
     etag = "sha256:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
-    return CuratedPinviCopySnapshot(
+    return CuratedFeatureDetailSnapshot(
         curated_feature_id=feature.curated_feature_id,
-        version=feature.copy_version,
+        version=feature.content_version,
         etag=etag,
         updated_at=feature.updated_at,
         theme=theme,
-        plan=plan,
+        content=content,
         source=source,
         items=(item,),
     )
 
 
-def _pinvi_snapshot_payload(
-    snapshot: CuratedPinviCopySnapshot,
+def _feature_detail_snapshot_payload(
+    snapshot: CuratedFeatureDetailSnapshot,
 ) -> dict[str, Any]:
     return {
         "curated_feature_id": snapshot.curated_feature_id,
@@ -1055,7 +1053,7 @@ def _pinvi_snapshot_payload(
         "etag": snapshot.etag,
         "updated_at": snapshot.updated_at.isoformat(),
         "theme": snapshot.theme,
-        "plan": snapshot.plan,
+        "content": snapshot.content,
         "source": snapshot.source,
         "items": [
             {
@@ -1278,19 +1276,19 @@ async def get_curated_feature(
     return _feature(row) if row is not None else None
 
 
-async def get_curated_pinvi_copy_snapshot(
+async def get_curated_feature_detail_snapshot(
     session: AsyncSession,
     *,
     curated_feature_id: str,
-) -> CuratedPinviCopySnapshot | None:
-    """PinVi import용 닫힌 snapshot을 만든다."""
+) -> CuratedFeatureDetailSnapshot | None:
+    """curated feature detail용 닫힌 snapshot을 만든다."""
 
     feature = await get_curated_feature(
         session,
         curated_feature_id=curated_feature_id,
         include_archived=False,
     )
-    return _pinvi_snapshot(feature) if feature is not None else None
+    return _feature_detail_snapshot(feature) if feature is not None else None
 
 
 def _selected_fields_for_status(
@@ -1350,16 +1348,16 @@ async def create_curated_feature(
     rank_score: float = 0.0,
     display_title: str | None = None,
     display_summary: str | None = None,
-    pinvi_relation: str = "nearby_option",
-    pinvi_copy_policy: str = "manual_review",
+    curation_relation: str = "nearby_option",
+    reuse_policy: str = "manual_review",
     metadata: Mapping[str, Any] | None = None,
 ) -> CuratedFeature:
     """curated feature overlay 1건을 생성한다. commit은 호출자 책임."""
 
     _validate_choice(curation_status, _CURATION_STATUSES, "curation_status")
     _validate_choice(selection_origin, _SELECTION_ORIGINS, "selection_origin")
-    _validate_choice(pinvi_relation, _PINVI_RELATIONS, "pinvi_relation")
-    _validate_choice(pinvi_copy_policy, _COPY_POLICIES, "pinvi_copy_policy")
+    _validate_choice(curation_relation, _CURATION_RELATIONS, "curation_relation")
+    _validate_choice(reuse_policy, _REUSE_POLICIES, "reuse_policy")
     row = (
         await session.execute(
             text(_CREATE_FEATURE_SQL),
@@ -1378,8 +1376,8 @@ async def create_curated_feature(
                 "rank_score": rank_score,
                 "display_title": display_title,
                 "display_summary": display_summary,
-                "pinvi_relation": pinvi_relation,
-                "pinvi_copy_policy": pinvi_copy_policy,
+                "curation_relation": curation_relation,
+                "reuse_policy": reuse_policy,
                 "metadata_json": _json_dumps(metadata),
             },
         )
@@ -1408,8 +1406,8 @@ async def update_curated_feature(
         "rank_score",
         "display_title",
         "display_summary",
-        "pinvi_relation",
-        "pinvi_copy_policy",
+        "curation_relation",
+        "reuse_policy",
         "metadata",
     }
     set_parts: list[str] = []
@@ -1419,10 +1417,10 @@ async def update_curated_feature(
             raise ValueError(f"unsupported curated_feature update field: {key}")
         if key == "curation_status":
             _validate_choice(str(value), _CURATION_STATUSES, key)
-        if key == "pinvi_relation":
-            _validate_choice(str(value), _PINVI_RELATIONS, key)
-        if key == "pinvi_copy_policy":
-            _validate_choice(str(value), _COPY_POLICIES, key)
+        if key == "curation_relation":
+            _validate_choice(str(value), _CURATION_RELATIONS, key)
+        if key == "reuse_policy":
+            _validate_choice(str(value), _REUSE_POLICIES, key)
         if key == "metadata":
             set_parts.append("metadata = CAST(:metadata_json AS jsonb)")
             params["metadata_json"] = _json_dumps(value)
@@ -1435,7 +1433,7 @@ async def update_curated_feature(
             curated_feature_id=curated_feature_id,
             include_archived=True,
         )
-    set_parts.extend(["updated_at = now()", "copy_version = copy_version + 1"])
+    set_parts.extend(["updated_at = now()", "content_version = content_version + 1"])
     row = (
         await session.execute(
             text(_UPDATE_FEATURE_BASE_SQL.format(set_clause=", ".join(set_parts))),
@@ -1475,7 +1473,7 @@ async def set_curated_feature_status(
         else:
             set_parts.append(f"{key} = :{key}")
             params[key] = value
-    set_parts.extend(["updated_at = now()", "copy_version = copy_version + 1"])
+    set_parts.extend(["updated_at = now()", "content_version = content_version + 1"])
     row = (
         await session.execute(
             text(_UPDATE_FEATURE_BASE_SQL.format(set_clause=", ".join(set_parts))),
@@ -1577,13 +1575,13 @@ async def sweep_curated_feature_status(
     return CuratedFeatureStatusSweepResult(archived=int(row["archived_count"]))
 
 
-async def materialize_curated_pinvi_copy_snapshots(
+async def materialize_curated_feature_detail_snapshots(
     session: AsyncSession,
     *,
     theme_slug: str | None = None,
     limit: int = 500,
-) -> CuratedPinviSnapshotMaterializeResult:
-    """curated feature의 PinVi copy snapshot을 cache table에 materialize한다."""
+) -> CuratedFeatureDetailSnapshotMaterializeResult:
+    """curated feature detail snapshot을 cache table에 materialize한다."""
 
     safe_limit = _safe_limit(limit)
     cursor: str | None = None
@@ -1601,16 +1599,16 @@ async def materialize_curated_pinvi_copy_snapshots(
         if not page.items:
             break
         for feature in page.items:
-            snapshot = _pinvi_snapshot(feature)
+            snapshot = _feature_detail_snapshot(feature)
             row = (
                 await session.execute(
-                    text(_UPSERT_PINVI_COPY_SNAPSHOT_SQL),
+                    text(_UPSERT_FEATURE_DETAIL_SNAPSHOT_SQL),
                     {
                         "curated_feature_id": snapshot.curated_feature_id,
-                        "copy_version": snapshot.version,
+                        "content_version": snapshot.version,
                         "etag": snapshot.etag,
                         "snapshot_json": json.dumps(
-                            _pinvi_snapshot_payload(snapshot),
+                            _feature_detail_snapshot_payload(snapshot),
                             ensure_ascii=False,
                             sort_keys=True,
                             default=str,
@@ -1625,7 +1623,7 @@ async def materialize_curated_pinvi_copy_snapshots(
         if page.next_cursor is None:
             break
         cursor = page.next_cursor
-    return CuratedPinviSnapshotMaterializeResult(
+    return CuratedFeatureDetailSnapshotMaterializeResult(
         curated_features_total=features_seen,
         snapshots_materialized=snapshots_materialized,
     )

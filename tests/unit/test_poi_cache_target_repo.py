@@ -43,7 +43,7 @@ class _Session:
 def _row(target_id: str, *, at: datetime) -> dict[str, Any]:
     return {
         "target_id": target_id,
-        "external_system": "pinvi",
+        "external_system": "external-app",
         "target_key": f"poi-{target_id[:8]}",
         "name": "서울시청",
         "lon": 126.978,
@@ -55,7 +55,7 @@ def _row(target_id: str, *, at: datetime) -> dict[str, Any]:
         "update_enabled": True,
         "refresh_policy": "provider_default",
         "provider_overrides": "{}",
-        "metadata": '{"pinvi_poi_id":"poi-1"}',
+        "metadata": '{"external_poi_id":"poi-1"}',
         "last_seen_at": at,
         "last_requested_at": None,
         "last_refreshed_at": None,
@@ -85,7 +85,7 @@ async def test_list_poi_cache_targets_builds_next_cursor() -> None:
 
     page = await list_poi_cache_targets(
         db,
-        external_system="pinvi",
+        external_system="external-app",
         update_enabled=True,
         include_deleted=False,
         limit=1,

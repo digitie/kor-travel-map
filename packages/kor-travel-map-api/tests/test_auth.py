@@ -250,7 +250,7 @@ def test_destructive_admin_blocked_when_disabled() -> None:
     )
     assert (
         client.request(
-            "DELETE", "/v1/admin/poi-cache-targets/pinvi/key-1"
+            "DELETE", "/v1/admin/poi-cache-targets/external-app/key-1"
         ).status_code
         == 403
     )

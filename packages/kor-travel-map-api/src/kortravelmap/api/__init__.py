@@ -1,4 +1,4 @@
-"""``kortravelmap.api`` — PinVi `kor-travel-map` REST API 백엔드.
+"""``kortravelmap.api`` — `kor-travel-map` REST API 백엔드.
 
 본 패키지는 `kor-travel-map` 메인 라이브러리와 **별도 distribution**이지만
 같은 ``kortravelmap`` top-level package 아래 ``api`` 하위 패키지로 설치된다.

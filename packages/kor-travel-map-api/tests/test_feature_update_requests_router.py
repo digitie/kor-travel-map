@@ -104,8 +104,6 @@ def test_update_request_routes_mounted_in_openapi(client: TestClient) -> None:
     assert "/v1/admin/feature-update-requests/{request_id}" in spec["paths"]
     assert "/v1/admin/feature-update-requests/{request_id}/cancel" in spec["paths"]
     assert "/v1/admin/feature-update-requests/{request_id}/run-now" in spec["paths"]
-    assert "/tripmate/feature-update-requests" not in spec["paths"]
-    assert "/tripmate/feature-update-requests/{request_id}" not in spec["paths"]
     assert "FeatureUpdateRequestCreateRequest" in spec["components"]["schemas"]
     assert "FeatureUpdateRequestRecord" in spec["components"]["schemas"]
     request_schema = spec["components"]["schemas"][
@@ -184,12 +182,12 @@ def test_create_actual_request_uses_transaction(
 
 
 @pytest.mark.unit
-def test_legacy_update_request_alias_is_not_mounted(
+def test_unversioned_update_request_alias_is_not_mounted(
     client: TestClient,
     session: _FakeSession,
 ) -> None:
     response = client.post(
-        "/tripmate/feature-update-requests",
+        "/feature-update-requests",
         json={
             "scope": {"type": "feature_ids", "feature_ids": ["feature-1"]},
             "run_mode": "queued",
@@ -197,7 +195,7 @@ def test_legacy_update_request_alias_is_not_mounted(
     )
 
     assert response.status_code == 404
-    assert client.get("/tripmate/feature-update-requests/req-1").status_code == 404
+    assert client.get("/feature-update-requests/req-1").status_code == 404
     assert session.begin_count == 0
 
 
