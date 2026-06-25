@@ -1,5 +1,22 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-25 (codex) — KNPS protected area 한글명 보정 + N150 재적재
+
+- **완료(번역)**: N150 active `area` 중 KNPS `knps_protected_areas` 영어/로마자 source name을 모아
+  Gemini 2.5 Flash에 JSON 입력/출력으로 일괄 번역했다. `kor-travel-concierge`의
+  `GEMINI_API_KEY`/`gemini-2.5-flash`/JSON schema/retry 패턴을 참고했고, 런타임에는 Gemini를
+  호출하지 않는 정적 한글명 테이블 1,431건으로 반영했다.
+- **완료(코드)**: KNPS protected area 이름 결정 로직이 raw 한글 복구 후 번역 테이블을 사용한다.
+  라틴 문자와 손상 한글 음절이 섞인 raw `ORIG_NAME`은 정상 한글 후보로 보지 않도록 보강했다.
+- **완료(N150)**: API/Dagster/daemon 이미지를 재빌드·재기동하고 `knps_protected_areas` 1,516건을
+  재적재했다. 기존 `f_global_*` 중복은 inactive 처리했고, geocoder fallback으로 현재도 global이
+  정본인 130건은 active 유지했다.
+- **완료(검증)**: 최종 N150 active `area`는 `knps_park_boundaries` 23건,
+  `knps_protected_areas` 1,516건이며 active area 라틴 이름은 0건이다. 공식 UI live Playwright
+  2개 smoke와 커스텀 BFF/UI smoke(1,516건 전체 cursor 순회, 라틴 이름 0건, console error 0건)가
+  통과했다.
+- **다음 한 작업**: PR 생성 후 CI green 확인과 머지를 완료한다.
+
 ## 2026-06-25 (codex) — Admin 로그인 submit 보강 + N150 area live smoke
 
 - **완료(코드)**: 로그인 form submit이 React state 대신 현재 `FormData` 값을 읽어 username/password를

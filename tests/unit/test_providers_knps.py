@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -43,6 +44,9 @@ from kortravelmap.providers.knps import (
 )
 from kortravelmap.providers.knps import (
     knps_point_records_to_bundles as _point_async,
+)
+from kortravelmap.providers.knps_name_translations import (
+    KNPS_PROTECTED_AREA_KOREAN_NAMES,
 )
 
 
@@ -304,7 +308,7 @@ def test_park_boundary_area_name_falls_back_to_raw_park_name() -> None:
     assert b.source_record.raw_name == "가야산 국립공원"
 
 
-def test_protected_area_name_falls_back_to_raw_name() -> None:
+def test_protected_area_translates_raw_english_name() -> None:
     b = _geo_one(
         "knps_protected_areas",
         _POLY,
@@ -312,8 +316,8 @@ def test_protected_area_name_falls_back_to_raw_name() -> None:
         raw={"NAME": "Jeju Island", "MNUM": "PROTECTED-1"},
     )[0]
     assert b.feature.kind is FeatureKind.AREA
-    assert b.feature.name == "Jeju Island"
-    assert b.source_record.raw_name == "Jeju Island"
+    assert b.feature.name == "제주도"
+    assert b.source_record.raw_name == "제주도"
 
 
 def test_protected_area_prefers_recoverable_raw_korean_name() -> None:
@@ -338,7 +342,7 @@ def test_protected_area_ignores_lossy_mojibake_korean_name() -> None:
             "MNUM": "PROTECTED-1",
         },
     )[0]
-    assert b.feature.name == "Jeonbuk Jeongeup Shinseongdong"
+    assert b.feature.name == "전북 정읍 신성동 야생동물보호구역"
 
 
 def test_protected_area_ignores_unrecoverable_cjk_mojibake_name() -> None:
@@ -348,7 +352,29 @@ def test_protected_area_ignores_unrecoverable_cjk_mojibake_name() -> None:
         name="Cheokchi",
         raw={"ORIG_NAME": "泥숈튂", "NAME": "Cheokchi", "MNUM": "PROTECTED-1"},
     )[0]
-    assert b.feature.name == "Cheokchi"
+    assert b.feature.name == "척치 상수원보호구역"
+
+
+def test_protected_area_ignores_latin_mixed_mojibake_name() -> None:
+    b = _geo_one(
+        "knps_protected_areas",
+        _POLY,
+        name="횓le volcanique et tunnels de lave de Jeju",
+        raw={
+            "ORIG_NAME": "횓le volcanique et tunnels de lave de Jeju",
+            "NAME": "Jeju Volcanic Island and Lava Tubes",
+            "MNUM": "PROTECTED-1",
+        },
+    )[0]
+    assert b.feature.name == "제주 화산섬과 용암동굴"
+
+
+def test_protected_area_translation_table_has_no_latin_letters() -> None:
+    assert len(KNPS_PROTECTED_AREA_KOREAN_NAMES) == 1431
+    assert all(
+        re.search(r"[A-Za-z]", translated_name) is None
+        for translated_name in KNPS_PROTECTED_AREA_KOREAN_NAMES.values()
+    )
 
 
 def test_hazard_and_protected_area_kinds() -> None:

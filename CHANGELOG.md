@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### KNPS protected area 한글명 일괄 보정 (2026-06-25)
+
+- **CHANGED**: KNPS `knps_protected_areas`의 영어/로마자 source name을 Gemini 2.5 Flash
+  JSON 일괄 번역 결과 기반 한글명 테이블로 보정한다. 런타임은 AI API를 호출하지 않고
+  정적 테이블을 사용한다.
+- **FIXED**: 라틴 문자와 손상 한글 음절이 섞인 raw `ORIG_NAME`을 정상 한글명으로 오인하지
+  않도록 해, `NAME`/번역 테이블 fallback이 동작하게 했다.
+
 ### Admin 로그인 form submit 안정화 (2026-06-25)
 
 - **FIXED**: 로그인 form submit이 React state 대신 현재 form value를 읽어 브라우저 자동완성이나
