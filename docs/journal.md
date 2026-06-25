@@ -2,6 +2,33 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-25 (codex) — KNPS protected area Gemini 한글명 보정 + N150 재적재
+
+N150 production의 active `area` provider를 다시 확인했고, 현재 `area` source는
+`python-knps-api`의 `knps_park_boundaries` 23건과 `knps_protected_areas` 1,516건이다.
+`knps_protected_areas`의 영어/로마자 표기가 남은 distinct source name을 모아 Gemini 2.5 Flash에
+JSON 입력/JSON 출력으로 일괄 번역했다. 프롬프트 앞부분에는 한국 장소명 번역 지침, JSON 구조 이해,
+라틴 문자 금지, 숫자 prefix 보존 규칙을 명시했고, 요청 방식은 `kor-travel-concierge`의
+`GEMINI_API_KEY`, `gemini-2.5-flash`, `responseMimeType=application/json`, schema 지정,
+retry/backoff 패턴을 참고했다.
+
+- **코드 수정**: `knps_protected_areas`용 한글명 테이블 1,431건을 추가하고, raw 한글 후보 복구 다음
+  단계에서 provider `name`/raw `NAME`을 테이블에 매칭한다. 런타임은 Gemini를 호출하지 않는다.
+- **mojibake 보강**: 라틴 문자와 손상 한글 음절이 섞인 raw `ORIG_NAME`은 정상 한글 후보로 보지
+  않게 해 `Jeju Volcanic Island and Lava Tubes` 같은 raw `NAME` fallback이 한글명으로 매핑된다.
+- **N150 반영/재적재**: 수정 provider 파일을 N150 `~/kor-travel-map`에 rsync하고
+  `kor-travel-map-api`, `kor-travel-map-dagster`, `kor-travel-map-dagster-daemon`을 재빌드·재기동했다.
+  Dagster 컨테이너에서 `knps_protected_areas` 1,516건을 fetch→변환→적재했고, 기존 `f_global_*`
+  중복 1,386건은 inactive 처리했다. geocoder가 법정동을 못 채운 현재 정본 130건은 active로 유지했다.
+- **N150 데이터 검증**: 최종 active area는 `knps_park_boundaries` 23건,
+  `knps_protected_areas` 1,516건이며, active `area` 이름 중 라틴 문자 포함은 0건이다.
+- **live e2e**: 공식 UI live Playwright 인증+`/features` 지도 smoke, 인증+`/admin/features` 목록 smoke가
+  통과했다. 추가 커스텀 smoke에서 로그인 200, `/features` area filter ON, marker 25개, BFF
+  `/v1/admin/features` protected area 1,516건 전체 cursor 순회, 라틴 이름 0건, `제주 화산섬과
+  용암동굴` 검색 1건, console error 0건을 확인했다.
+- **로컬 검증**: KNPS unit, 전체 pytest, ruff, strict mypy, import-linter, `git diff --check`를
+  통과했다.
+
 ## 2026-06-25 (codex) — Admin 로그인 submit 보강 + N150 area live 재검증
 
 N150 production 화면 재검증 중 로그인 form에 값이 보이는데 `/api/auth/login` payload의

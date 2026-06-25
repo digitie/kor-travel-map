@@ -64,6 +64,9 @@ from kortravelmap.dto import (
     SourceRole,
 )
 from kortravelmap.geocoding import ReverseGeocoder, cached_reverse_geocoder
+from kortravelmap.providers.knps_name_translations import (
+    KNPS_PROTECTED_AREA_KOREAN_NAMES,
+)
 
 __all__ = [
     "KnpsPointRecord",
@@ -553,6 +556,10 @@ def _has_cjk_ideograph(text: str) -> bool:
     return any("\u4e00" <= char <= "\u9fff" for char in text)
 
 
+def _has_latin(text: str) -> bool:
+    return any(("A" <= char <= "Z") or ("a" <= char <= "z") for char in text)
+
+
 def _repair_utf8_decoded_as_cp949(text: str) -> str | None:
     """UTF-8 bytes를 CP949로 잘못 읽은 KNPS DBF 문자열을 복구한다."""
     if "\ufffd" in text:
@@ -581,10 +588,24 @@ def _raw_hangul_text(raw: Mapping[str, Any], *keys: str) -> str | None:
             return repaired
         if (
             "\ufffd" not in text
+            and not _has_latin(text)
             and not _has_cjk_ideograph(text)
             and _has_hangul(text)
         ):
             return text
+    return None
+
+
+def _translated_protected_area_name(
+    raw: Mapping[str, Any], normalized_name: str | None
+) -> str | None:
+    """KNPS protected area 영어 source name의 Gemini 번역명을 찾는다."""
+    for source_name in (normalize_korean_text(normalized_name), _raw_text(raw, "NAME")):
+        if source_name is None:
+            continue
+        korean_name = KNPS_PROTECTED_AREA_KOREAN_NAMES.get(source_name)
+        if korean_name is not None:
+            return korean_name
     return None
 
 
@@ -605,6 +626,9 @@ def _geometry_record_name(
         )
         if korean_name is not None:
             return korean_name
+        translated_name = _translated_protected_area_name(raw, record.name)
+        if translated_name is not None:
+            return translated_name
 
     normalized_name = normalize_korean_text(record.name)
     if normalized_name is not None:
