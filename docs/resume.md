@@ -1,5 +1,15 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-25 (codex) — Alembic curated 배포 체인 hotfix
+
+- **완료(원인 확인)**: N150 운영 DB의 `alembic_version`이 `0034_feature_price_values`인데 main
+  코드에 해당 리비전 파일이 없어 API 부팅 중 `alembic upgrade head`가 실패했다.
+- **완료(체인 수정)**: 운영 DB의 `feature.feature_price_values` 스키마와 동일한
+  `0034_feature_price_values` 리비전을 복원하고, 기존 `0034_generic_curated_contract`와
+  `0035_merge_price_and_curated` no-op merge 리비전으로 합쳤다.
+- **다음 한 작업**: hotfix PR 생성, CI green 확인, 머지 후 N150 API/Dagster/UI를 재기동하고
+  live schema/API smoke를 완료한다.
+
 ## 2026-06-25 (codex) — Curated API 범용 계약 정리
 
 - **완료(API 정책)**: public curated API는 임의 외부 사용자가 curated feature 목록/상세를 조회하는

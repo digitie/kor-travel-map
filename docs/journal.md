@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-25 (codex) — Alembic curated 배포 체인 hotfix
+
+N150 운영 DB에는 `0034_feature_price_values`가 이미 적용되어 있었지만 main의 Alembic graph에는
+해당 리비전 파일이 없어, curated 범용 계약 배포 시 API entrypoint의 `alembic upgrade head`가
+`Can't locate revision identified by '0034_feature_price_values'`로 중단됐다.
+
+- **마이그레이션 체인 복구**: 운영 DB에 존재하는 `feature.feature_price_values` DDL과 동일한
+  `0034_feature_price_values` 리비전을 main graph에 복원했다.
+- **branch merge**: 이미 main에 들어간 `0034_generic_curated_contract` 리비전 ID는 보존하고,
+  두 `0034` 리비전을 `0035_merge_price_and_curated` no-op merge 리비전으로 합쳤다.
+- **목표**: N150처럼 price value 리비전이 이미 적용된 DB와 curated 리비전을 먼저 적용한 DB가 모두
+  제품명 없는 curated API/DB 계약으로 정상 upgrade되도록 한다.
+
 ## 2026-06-25 (codex) — Curated API 범용 계약 정리
 
 kor-travel-map은 특정 소비자 제품명을 알지 않는다는 정책에 맞춰 curated feature API/DB 계약을
