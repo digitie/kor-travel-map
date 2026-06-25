@@ -8,6 +8,8 @@ Create Date: 2026-06-25
 PK는 결정적 ``price_value_key``(`make_price_value_key`, identity tuple)이고,
 latest/card 조회용 복합 인덱스와 시계열 ``observed_at`` BRIN 인덱스를 둔다.
 FK는 price-kind anchor ``feature``로 CASCADE, source 추적은 nullable FK로 보존한다.
+이 revision은 N150 운영 DB에 먼저 적용된 상태라 main Alembic graph에서도
+동일 revision ID를 유지한다.
 """
 
 from __future__ import annotations
@@ -48,9 +50,14 @@ def upgrade() -> None:
             updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
             CONSTRAINT ck_price_value_nonnegative
                 CHECK (value_number >= 0),
-            CONSTRAINT uq_price_value_identity UNIQUE (
-                feature_id, provider, price_domain, product_key, observed_at
-            )
+            CONSTRAINT uq_price_value_identity
+                UNIQUE (
+                    feature_id,
+                    provider,
+                    price_domain,
+                    product_key,
+                    observed_at
+                )
         )
         """
     )
