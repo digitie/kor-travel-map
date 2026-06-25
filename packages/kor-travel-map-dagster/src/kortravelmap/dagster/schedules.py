@@ -18,6 +18,8 @@ from .assets import (
     feature_place_krheritage_items,
     feature_place_mois_licenses,
     feature_place_opinet_stations,
+    feature_price_krex_rest_areas,
+    feature_price_opinet_stations,
     feature_weather_krex_rest_areas,
 )
 from .kma_weather import (
@@ -73,6 +75,15 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         description="OpiNet 주유소 place Feature 월 1회 적재.",
     ),
     FeatureLoadScheduleSpec(
+        asset=feature_price_opinet_stations,
+        job_name="feature_price_opinet_stations_job",
+        schedule_name="feature_price_opinet_stations_hourly_schedule",
+        cron_schedule="18 * * * *",
+        provider="opinet",
+        dataset_key="opinet_gas_station_prices",
+        description="OpiNet 주유소 price Feature + PriceValue 매시 적재(scope 기반).",
+    ),
+    FeatureLoadScheduleSpec(
         asset=feature_place_krex_rest_areas,
         job_name="feature_place_krex_rest_areas_job",
         schedule_name="feature_place_krex_rest_areas_monthly_schedule",
@@ -80,6 +91,15 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         provider="krex",
         dataset_key="krex_rest_areas",
         description="고속도로 휴게소 place Feature 월 1회 적재.",
+    ),
+    FeatureLoadScheduleSpec(
+        asset=feature_price_krex_rest_areas,
+        job_name="feature_price_krex_rest_areas_job",
+        schedule_name="feature_price_krex_rest_areas_hourly_schedule",
+        cron_schedule="28 * * * *",
+        provider="krex",
+        dataset_key="krex_rest_area_prices",
+        description="KREX 휴게소 유가 price Feature + PriceValue 매시 적재.",
     ),
     FeatureLoadScheduleSpec(
         asset=feature_notice_krex_traffic_notices,

@@ -10,7 +10,7 @@
 | `place` | 장소·시설·주차장·화장실·주유소·휴게소·해수욕장 등 |
 | `event` | 축제·공연·전시 (기간성) |
 | `notice` | 교통·기상·안전·해양 공지 (short-lived) |
-| `price` | 가격 시계열 marker (PricePoint + PriceValue) |
+| `price` | 가격 시계열 anchor marker (`feature_price_values`와 연결) |
 | `weather` | weather-only marker (place와 분리된 관측소 등) |
 | `route` | 산책로·등산로·자전거길·관광도로 (LINESTRING) |
 | `area` | 국립공원·해수욕장구역·매장유산구역 (MULTIPOLYGON) |
@@ -424,9 +424,9 @@ class PriceValue(BaseModel):
 ```
 
 > `PricePoint`(price_category/retention_days)은 현재 dto에 구현되어 있지 않다.
-> price 시계열은 `PriceValue`만 dto이고, 보관 정책(retention)은 `infra/purge_repo.py`
-> 상수로 운영한다. DB의 `feature.price_points`/`feature.price_values`는
-> `docs/architecture/data-model.md` §8.2가 정본이다.
+> price 시계열은 `PriceValue`만 dto이고, `feature_id`는 `kind=price` anchor
+> feature를 참조한다. DB 정본은 `feature.feature_price_values`
+> (`docs/architecture/data-model.md` §8.2)다.
 
 ## 16. `ProviderSyncStateRow` (dto 아님 — ORM row)
 

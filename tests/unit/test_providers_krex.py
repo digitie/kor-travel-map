@@ -24,9 +24,11 @@ from kortravelmap.providers.krex import (
     REST_AREA_CATEGORY,
     REST_AREA_DATASET_KEY,
     REST_AREA_MARKER_ICON,
+    REST_AREA_PRICES_DATASET_KEY,
     REST_AREA_WEATHER_DATASET_KEY,
     TRAFFIC_NOTICE_CATEGORY,
     TRAFFIC_NOTICES_DATASET_KEY,
+    rest_area_fuel_price_records_to_features_and_values,
     rest_area_prices_to_values,
     rest_area_weather_records_to_values,
     rest_area_weather_to_values,
@@ -248,6 +250,21 @@ _PRICE_FOOD = _Price(
 _FEATURE_ID_RA_SEOSAN = "f_global_p_ra_seosan_demo"
 
 
+@dataclass(frozen=True)
+class _FuelPriceRecord:
+    service_area_code: str
+    route_name: str | None
+    direction: str | None
+    oil_company: str | None
+    service_area_name: str | None
+    phone_number: str | None
+    address: str | None
+    gasoline_price: int | None
+    diesel_price: int | None
+    lpg_price: int | None
+    raw: dict[str, Any]
+
+
 @pytest.mark.unit
 def test_prices_fuel_kw_per_l() -> None:
     [v] = rest_area_prices_to_values(
@@ -296,6 +313,39 @@ def test_prices_non_numeric_raises() -> None:
     )
     with pytest.raises(ValueError, match="numeric이 아님"):
         rest_area_prices_to_values([bad], feature_id=_FEATURE_ID_RA_SEOSAN)
+
+
+@pytest.mark.unit
+def test_fuel_price_records_create_price_feature_and_values() -> None:
+    record = _FuelPriceRecord(
+        service_area_code="A0001",
+        route_name="경부고속도로",
+        direction="부산방향",
+        oil_company="EX-OIL",
+        service_area_name="죽전휴게소",
+        phone_number="031-000-0000",
+        address="경기 용인시 수지구",
+        gasoline_price=1710,
+        diesel_price=1599,
+        lpg_price=None,
+        raw={"serviceAreaCode": "A0001"},
+    )
+
+    bundles, values = rest_area_fuel_price_records_to_features_and_values(
+        [record], fetched_at=_NOW
+    )
+
+    assert len(bundles) == 1
+    assert len(values) == 2
+    bundle = bundles[0]
+    assert bundle.feature.kind == FeatureKind.PRICE
+    assert bundle.feature.category == REST_AREA_CATEGORY
+    assert bundle.feature.name == "죽전휴게소 유가"
+    assert bundle.feature.coord is None
+    assert bundle.feature.address.road == "경기 용인시 수지구"
+    assert bundle.source_record.dataset_key == REST_AREA_PRICES_DATASET_KEY
+    assert [value.product_key for value in values] == ["gasoline", "diesel"]
+    assert {value.feature_id for value in values} == {bundle.feature.feature_id}
 
 
 # ── rest_area_weather → WeatherValue (observed) ────────────────────

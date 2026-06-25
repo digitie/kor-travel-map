@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### 가격 시계열 테이블 + OpiNet/KREX 유가 적재 (2026-06-25)
+
+- **ADDED**: `feature.feature_price_values` 테이블과 가격값 upsert repository/client를 추가했다.
+  price feature 삭제 시 가격값은 cascade되고, provider raw 추적은 `source_record_key`로 연결된다.
+- **ADDED**: OpiNet 주유소 상세 가격과 KREX 휴게소 유가를 `kind=price` feature +
+  `PriceValue`로 적재하는 Dagster asset/job/schedule을 추가했다.
+- **CHANGED**: 가격 시계열 설계 문서를 기존 `price_points`/`price_values` 초안에서
+  `kind=price` anchor feature + `feature_price_values` 정본으로 갱신했다.
+- **FIXED**: main의 curated 계약 migration과 N150에 먼저 적용된 가격 시계열 migration이
+  같은 parent에서 갈라진 Alembic graph를 no-op merge revision으로 정리했다.
+
 ### Curated API 범용 계약 정리 (2026-06-25)
 
 - **CHANGED**: public curated API는 임의 외부 사용자가 curated feature 목록과 상세를 조회하는

@@ -13,7 +13,7 @@ PR#28 (Sprint 2 prep) scope:
 후속 PR에서 추가될 테이블:
 - detail 5종 (place/event/notice/area/route)
 - ``feature_opening_periods`` / ``feature_special_days``
-- ``feature_weather_values`` / ``price_points`` / ``price_values``
+- ``feature_weather_values`` / ``feature_price_values``
 - ``feature_files``
 - ``ops.*`` (import_jobs / dedup_review_queue / ...)
 

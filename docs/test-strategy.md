@@ -298,7 +298,7 @@ async def test_import_job_advisory_lock_blocks_concurrent(pg_engine):
 async def test_bulk_price_values_copy_handles_100k_rows(pg_engine, generate_price_rows):
     rows = list(generate_price_rows(100_000))  # 100k rows
     await bulk_copy_price_values(pg_engine, rows)
-    count = await _scalar(pg_engine, "SELECT count(*) FROM feature.price_values")
+    count = await _scalar(pg_engine, "SELECT count(*) FROM feature.feature_price_values")
     assert count == 100_000
 ```
 

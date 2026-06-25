@@ -37,6 +37,7 @@ from .provider_fetchers import (
     fetch_knps_point_records,
     fetch_kor_travel_concierge_youtube_features,
     fetch_krairport_airports,
+    fetch_krex_rest_area_fuel_prices,
     fetch_krex_rest_area_weather,
     fetch_krex_rest_areas,
     fetch_krex_traffic_notices,
@@ -46,6 +47,7 @@ from .provider_fetchers import (
     fetch_krheritage_items,
     fetch_mcst_culture_records,
     fetch_mois_license_records,
+    fetch_opinet_station_price_details,
     fetch_opinet_stations,
     fetch_standard_museums,
     fetch_standard_parking_lots,
@@ -112,6 +114,17 @@ PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
         note="OpiNet은 전체 station dump endpoint가 없어 지역/좌표 scope 정책이 필요하다.",
     ),
     ProviderRecordResourceSpec(
+        resource_key="opinet_station_price_details",
+        provider_package="python-opinet-api",
+        dataset_key="opinet_gas_station_prices",
+        setting_names=("opinet_api_key",),
+        source_env_names=("OPINET_API_KEY",),
+        note=(
+            "OpiNet 가격은 현재 station scope를 enumerate한 뒤 detailById를 N+1 호출해 "
+            "가져온다. 전국 dump endpoint는 없다."
+        ),
+    ),
+    ProviderRecordResourceSpec(
         resource_key="krex_rest_areas",
         provider_package="python-krex-api",
         dataset_key="krex_rest_areas",
@@ -125,6 +138,14 @@ PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
         setting_names=("krex_ex_api_key",),
         source_env_names=("KEX_GO_API_KEY",),
         note="restWeatherList(EX)는 전국 휴게소 관측 기상을 1시간 snapshot으로 반환.",
+    ),
+    ProviderRecordResourceSpec(
+        resource_key="krex_rest_area_fuel_prices",
+        provider_package="python-krex-api",
+        dataset_key="krex_rest_area_prices",
+        setting_names=("krex_ex_api_key",),
+        source_env_names=("KEX_GO_API_KEY",),
+        note="curStateStation(EX)은 전국 휴게소 주유 가격 snapshot을 반환.",
     ),
     ProviderRecordResourceSpec(
         resource_key="krex_traffic_notices",
@@ -402,6 +423,18 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["opinet_stations"] = (
     )
 )
 
+_OPINET_STATION_PRICE_DETAILS_SPEC: ProviderRecordResourceSpec = next(
+    spec
+    for spec in PROVIDER_RECORD_RESOURCE_SPECS
+    if spec.resource_key == "opinet_station_price_details"
+)
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["opinet_station_price_details"] = (
+    build_provider_record_live_resource(
+        _OPINET_STATION_PRICE_DETAILS_SPEC,
+        fetch_opinet_station_price_details,
+    )
+)
+
 _KREX_REST_AREAS_SPEC: ProviderRecordResourceSpec = next(
     spec
     for spec in PROVIDER_RECORD_RESOURCE_SPECS
@@ -427,6 +460,18 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["krex_rest_area_weather"] = (
     build_provider_record_live_resource(
         _KREX_REST_AREA_WEATHER_SPEC,
         fetch_krex_rest_area_weather,
+    )
+)
+
+_KREX_REST_AREA_FUEL_PRICES_SPEC: ProviderRecordResourceSpec = next(
+    spec
+    for spec in PROVIDER_RECORD_RESOURCE_SPECS
+    if spec.resource_key == "krex_rest_area_fuel_prices"
+)
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["krex_rest_area_fuel_prices"] = (
+    build_provider_record_live_resource(
+        _KREX_REST_AREA_FUEL_PRICES_SPEC,
+        fetch_krex_rest_area_fuel_prices,
     )
 )
 

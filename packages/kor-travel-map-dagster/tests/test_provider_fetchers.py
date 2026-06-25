@@ -24,6 +24,7 @@ from kortravelmap.dagster.provider_fetchers import (
     fetch_knps_point_records,
     fetch_kor_travel_concierge_youtube_features,
     fetch_krairport_airports,
+    fetch_krex_rest_area_fuel_prices,
     fetch_krex_rest_areas,
     fetch_krex_traffic_notices,
     fetch_krforest_arboretums,
@@ -31,6 +32,7 @@ from kortravelmap.dagster.provider_fetchers import (
     fetch_krheritage_events,
     fetch_krheritage_items,
     fetch_mois_license_records,
+    fetch_opinet_station_price_details,
     fetch_opinet_stations,
     fetch_standard_museums,
     fetch_standard_parking_lots,
@@ -336,6 +338,11 @@ class _FakeRestareaService:
         items = tuple(object() for _ in range(max(0, end - start)))
         return _FakePage(items=items, total_count=self.total, page_no=page_no)
 
+    def fuel_prices(
+        self, *, num_of_rows: int = 1000, page_no: int = 1, **_kwargs: Any
+    ) -> _FakePage:
+        return self.list_all(num_of_rows=num_of_rows, page_no=page_no)
+
 
 class _FakeKrexClient:
     instances: list[_FakeKrexClient] = []
@@ -413,6 +420,27 @@ def test_krex_rest_areas_fetch_closes_on_partial_consumption(
     assert first is not None
     generator.close()
 
+    assert fake.instances[0].closed is True
+
+
+def test_krex_rest_area_fuel_prices_missing_key_raises() -> None:
+    settings = KorTravelMapSettings(krex_ex_api_key=None)
+
+    generator = fetch_krex_rest_area_fuel_prices(settings)
+    with pytest.raises(ProviderCredentialMissing):
+        next(generator)
+
+
+def test_krex_rest_area_fuel_prices_fetch_paginates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _install_fake_krex(monkeypatch, total=1003)
+    settings = KorTravelMapSettings(krex_ex_api_key=SecretStr("ex-key"))
+
+    records = list(fetch_krex_rest_area_fuel_prices(settings))
+
+    assert len(records) == 1003
+    assert fake.instances[0].restarea.calls == [(1000, 1), (1000, 2)]
     assert fake.instances[0].closed is True
 
 
@@ -1182,11 +1210,13 @@ class _FakeStation:
 class _FakeOpinetClient:
     instances: list[_FakeOpinetClient] = []
     stations: list[object] = []
+    details: dict[str, object] = {}
 
     def __init__(self, *, api_key: str | None = None, **_kwargs: Any) -> None:
         self.api_key = api_key
         self.closed = False
         self.bbox_calls: list[tuple[float, float, float, float, int]] = []
+        self.detail_calls: list[str] = []
         _FakeOpinetClient.instances.append(self)
 
     def iter_stations_in_bbox(
@@ -1202,15 +1232,23 @@ class _FakeOpinetClient:
         self.bbox_calls.append((min_lon, min_lat, max_lon, max_lat, radius_m))
         yield from type(self).stations
 
+    def get_station_detail(self, uni_id: str) -> object:
+        self.detail_calls.append(uni_id)
+        return type(self).details.get(uni_id, object())
+
     def close(self) -> None:
         self.closed = True
 
 
 def _install_fake_opinet(
-    monkeypatch: pytest.MonkeyPatch, *, stations: list[object]
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    stations: list[object],
+    details: dict[str, object] | None = None,
 ) -> type[_FakeOpinetClient]:
     _FakeOpinetClient.instances = []
     _FakeOpinetClient.stations = stations
+    _FakeOpinetClient.details = details or {}
     module = ModuleType("opinet")
     module.__dict__["OpinetClient"] = _FakeOpinetClient
     monkeypatch.setitem(sys.modules, "opinet", module)
@@ -1324,6 +1362,41 @@ def test_opinet_stations_bbox_enumerates_dedups_closes(
     client = fake.instances[0]
     assert client.api_key == "certkey"
     assert client.bbox_calls == [(126.0, 37.0, 127.0, 38.0, 3000)]
+    assert client.closed is True
+
+
+def test_opinet_station_price_details_missing_key_raises() -> None:
+    settings = KorTravelMapSettings(
+        opinet_api_key=None,
+        opinet_scope_mode="bbox",
+        opinet_scope_bbox="126.0,37.0,127.0,38.0",
+    )
+    with pytest.raises(ProviderCredentialMissing, match="OPINET_API_KEY"):
+        next(fetch_opinet_station_price_details(settings))
+
+
+def test_opinet_station_price_details_fetches_detail_for_deduped_stations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    d1 = object()
+    d2 = object()
+    fake = _install_fake_opinet(
+        monkeypatch,
+        stations=[_FakeStation("A1"), _FakeStation("A2"), _FakeStation("A1")],
+        details={"A1": d1, "A2": d2},
+    )
+    settings = KorTravelMapSettings(
+        opinet_api_key=SecretStr("certkey"),
+        opinet_scope_mode="bbox",
+        opinet_scope_bbox="126.0,37.0,127.0,38.0",
+        opinet_scope_radius_m=3000,
+    )
+
+    records = list(fetch_opinet_station_price_details(settings))
+
+    assert records == [d1, d2]
+    client = fake.instances[0]
+    assert client.detail_calls == ["A1", "A2"]
     assert client.closed is True
 
 

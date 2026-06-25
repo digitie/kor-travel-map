@@ -452,7 +452,7 @@ def test_no_provider_wrapper_classes():
 | python-khoa-api | `@0ccb5ed` | (후속 PR) | — | 해수욕장, 해양 공지. snake_case live row 파싱 정정(khoa#5/PR#6, #378 pin bump) |
 | python-krforest-api | `@f9254e6` | (후속 PR) | — | 산악기상 (Sprint 2) + trails (Sprint 3) 양쪽 사용 |
 | python-opinet-api | `@bb6385c` | (후속 PR) | — | Sprint 2 §2.3 PriceValue |
-| python-krex-api | `@2504a36` | `KrexTrafficNoticeItem` 재정렬 (#378) | — | Sprint 2 §2.4 multi-kind. incident → `openapi/burstInfo/realTimeSms`(apiId 0611) repoint(krex#8/PR#9) — 좌표 일부 row 보유, 종료 시각 컬럼 없음 |
+| python-krex-api | `@cc8609c` | `KrexTrafficNoticeItem` 재정렬 (#378) | — | Sprint 2 §2.4 multi-kind. incident → `openapi/burstInfo/realTimeSms`(apiId 0611) repoint(krex#8/PR#9) — 좌표 일부 row 보유, 종료 시각 컬럼 없음. 휴게소 유가의 `X`/`-`/`N/A` 가격 sentinel은 결측값으로 파싱 |
 | python-visitkorea-api | `@cebf543` | (후속 PR — enrichment) | — | ADR-042: 축제는 enrichment 2차 |
 | python-knps-api | `@5e88fb4` | (Sprint 3 PR) | PR#25 | keyless file-only, ADR-028 amendment 2026-05-25 |
 | python-krheritage-api | `@6076b52` | `KrHeritageItem`/`KrHeritageItemKey` — `HeritageDetail` 재정렬 (#380) | — | items+events live fetcher 배선. items는 **keyless**(khs.go.kr — transport는 apis.data.go.kr에만 serviceKey 주입). scope/상한 settings `krheritage_kind_codes`(기본 11,12,13,15,16)/`krheritage_max_items_per_run`(detail 1콜/건). event `sn` 빈 값은 `title::starts_on::place` fallback. `6076b52`: 목록 응답 `result` 레벨 복합키/좌표 병합(live detail 100% 실패 수정) + 결측 key row skip(provider #5/PR#6, T-212e). GIS 경계(geom) 보강은 후속. media → RustFS |

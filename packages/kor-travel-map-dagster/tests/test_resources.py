@@ -202,6 +202,12 @@ def test_provider_record_resource_env_mapping() -> None:
     assert specs["opinet_stations"].kor_travel_map_env_names == (
         "KOR_TRAVEL_MAP_OPINET_API_KEY",
     )
+    assert specs["opinet_station_price_details"].kor_travel_map_env_names == (
+        "KOR_TRAVEL_MAP_OPINET_API_KEY",
+    )
+    assert specs["krex_rest_area_fuel_prices"].kor_travel_map_env_names == (
+        "KOR_TRAVEL_MAP_KREX_EX_API_KEY",
+    )
     assert specs["krex_traffic_notices"].kor_travel_map_env_names == (
         "KOR_TRAVEL_MAP_KREX_EX_API_KEY",
     )

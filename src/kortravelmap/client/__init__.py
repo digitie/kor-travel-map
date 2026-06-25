@@ -168,6 +168,10 @@ from kortravelmap.infra.merge_repo import MergeOutcome, merge_from_review
 from kortravelmap.infra.poi_cache_target_repo import (
     list_active_target_coords as repo_list_active_target_coords,
 )
+from kortravelmap.infra.price_repo import PriceFeatureLoadResult
+from kortravelmap.infra.price_repo import (
+    load_price_values as repo_load_price_values,
+)
 from kortravelmap.infra.status_repo import StatusCounts, gather_status_counts
 from kortravelmap.infra.sync_state_repo import (
     SyncState,
@@ -242,6 +246,7 @@ if TYPE_CHECKING:
 
     from kortravelmap.core.dedup import DedupCandidate, DedupInput
     from kortravelmap.dto import FeatureBundle
+    from kortravelmap.dto.price import PriceValue
     from kortravelmap.dto.weather import WeatherValue
     from kortravelmap.geocoding import AddressResolver, ReverseGeocoder
     from kortravelmap.infra.scope_repo import SigunguByRadiusResolver
@@ -263,6 +268,7 @@ __all__ = [
     "OfflineUploadColumnMapping",
     "OfflineUploadLoadResult",
     "OfflineUploadValidationResult",
+    "PriceFeatureLoadResult",
 ]
 
 
@@ -1434,6 +1440,26 @@ class AsyncKorTravelMapClient:
         """``WeatherValue`` 들을 ``feature_weather_values``에 멱등 upsert (write)."""
         async with self._session_factory() as session, session.begin():
             return await repo_load_weather_values(session, values)
+
+    # ─── price values (T-price) ───────────────────────────────────────────────
+
+    async def load_price_values(self, values: Iterable[PriceValue]) -> int:
+        """``PriceValue`` 들을 ``feature_price_values``에 멱등 upsert (write)."""
+        async with self._session_factory() as session, session.begin():
+            return await repo_load_price_values(session, values)
+
+    async def load_price_features(
+        self,
+        price_bundles: Iterable[FeatureBundle],
+        price_values: Iterable[PriceValue],
+    ) -> PriceFeatureLoadResult:
+        """price-kind anchor feature + 가격값을 한 transaction으로 적재한다."""
+        bundles = list(price_bundles)
+        values = list(price_values)
+        async with self._session_factory() as session, session.begin():
+            features = await load_bundles(session, bundles)
+            value_count = await repo_load_price_values(session, values)
+        return PriceFeatureLoadResult(features=features, price_values=value_count)
 
     async def load_air_quality(
         self,

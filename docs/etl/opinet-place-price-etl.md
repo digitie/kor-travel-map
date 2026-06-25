@@ -1,7 +1,7 @@
 # opinet-place-price-etl.md — OpiNet 주유소 → place + price ETL
 
-본 문서는 OpiNet의 주유소/충전소 데이터를 장소(`place`)와 가격 시계열
-(`PricePoint` + `PriceValue`)로 분리 적재하는 ETL이다.
+본 문서는 OpiNet의 주유소/충전소 데이터를 장소(`place`)와 가격 표시 anchor
+(`price`) + 가격 시계열(`PriceValue`)로 분리 적재하는 ETL이다.
 
 ## 1. 문서 정보
 
@@ -9,10 +9,10 @@
 |------|----|
 | provider | `python-opinet-api` |
 | dataset_key | `opinet_fuel_station_details` |
-| Feature.kind | `place` + `PricePoint` + `PriceValue` |
+| Feature.kind | `place` + `price` + `PriceValue` |
 | source_entity_type | `fuel_station` |
-| 상세 테이블 | `feature_place_details`, `price_points`, `price_values` |
-| 코드 entrypoint | `kortravelmap.providers.opinet`, `kortravelmap.opinet` |
+| 상세 테이블 | `feature_place_details`, `feature_price_values` |
+| 코드 entrypoint | `kortravelmap.providers.opinet` |
 | category | **`06020000`** `TRANSPORT_FUEL` (`docs/architecture/category.md` §4) — Tier path: 교통 > 주유소 |
 | place_kind | `fuel_station` |
 | marker_icon | `fuel` (maki) |
@@ -25,23 +25,21 @@
 - `python-opinet-api`: OpiNet REST 호출, typed model (`StationDetail`,
   `StationPrice`), pagination, KATEC (EPSG:5181) 좌표 처리.
 - `kor-travel-map`: typed model → `Feature(kind=place)` + `PlaceDetail` +
-  `PricePoint` + `PriceValue`, DB 적재.
+  `Feature(kind=price)` + `PriceValue`, DB 적재.
 - kor-travel-map Dagster: schedule, OpiNet 분당 60회 쿼터 보호 (max_concurrent=1).
 
 ## 3. 변환 계약
 
 ```python
-from kortravelmap.providers.opinet import station_detail_to_bundle
-
-bundle: OpinetStationFeatureBundle = station_detail_to_bundle(
-    detail,                          # python-opinet-api StationDetail
-    collected_at=kst_now(),
+from kortravelmap.providers.opinet import (
+    station_details_to_price_features_and_values,
+    stations_to_bundles,
 )
-# bundle.feature: Feature(kind=place)
-# bundle.detail:  PlaceDetail(phones, facility_info, place_kind="fuel_station")
-# bundle.price_point: PriceValue(price_category="fuel", retention_days=3650)
-# bundle.price_values: list[PriceValue]  # 제품별
-# bundle.source_record + source_link
+
+place_bundles = await stations_to_bundles(station_rows, fetched_at=fetched_at)
+price_bundles, price_values = await station_details_to_price_features_and_values(
+    station_detail_rows, fetched_at=fetched_at
+)
 ```
 
 ## 4. 주소·좌표
@@ -56,29 +54,33 @@ bundle: OpinetStationFeatureBundle = station_detail_to_bundle(
 
 ```python
 PriceValue(
-    feature_id=feature_id,
-    item_key="gasoline",                  # gasoline / diesel / lpg / premium_gasoline / kerosene
+    feature_id=price_feature_id,
+    provider="python-opinet-api",
+    price_domain="opinet_gas_station",
+    product_key="gasoline",              # gasoline / diesel / lpg / premium_gasoline / kerosene
+    product_name="휘발유",
     observed_at=trade_datetime,           # trade_date + trade_time, KST aware
-    value=Decimal("1690.00"),
-    currency="KRW",
-    payload_hash=make_payload_hash(raw),
+    value_number=Decimal("1690.00"),
+    unit="KRW/L",
+    source_record_key=source_record_key,
+    payload=raw,
 )
 ```
 
 `trade_datetime()`이 없으면 `trade_date + trade_time` 조합. timezone naive면
 KST 가정 (`docs/architecture/feature-opening-hours.md` 패턴).
 
-## 6. PricePoint
+## 6. Price anchor feature
 
-```python
-PriceValue(
-    feature_id=feature_id,
-    price_category="fuel",
-    retention_days=3650,                  # 10년 (ADR-017)
-)
-```
+가격 feature는 주유소 place feature와 분리한다. admin Feature UI의 `price`
+필터는 이 anchor feature를 조회하고, 제품별 값은 `feature.feature_price_values`
+에서 읽는다.
 
-장소(feature) 적재 시 1회 생성. 가격 적재마다 별도 생성 X.
+- `kind`: `price`
+- `category`: `06020000`
+- `name`: `{station_name} 유가`
+- `parent_feature_id`: 주유소 `place` feature id
+- `marker_icon` / `marker_color`: `fuel` / `P-08`
 
 ## 7. PlaceDetail.facility_info
 
@@ -104,29 +106,21 @@ OpiNet 시설 정보:
 
 ### 8.1 단일 station
 
-```python
-from kortravelmap.opinet import load_opinet_station_detail
-
-async def update_one_station(client, async_session, station_no, reverse_geocoder):
-    detail = await client.aget_station_detail(station_no)
-    result = await load_opinet_station_detail(
-        async_session, detail, reverse_geocoder=reverse_geocoder,
-    )
-    await async_session.commit()
-    return result
-```
+단일 station도 운영 경로와 동일하게 provider detail row를
+`station_details_to_price_features_and_values([detail], ...)`로 변환한 뒤
+`AsyncKorTravelMapClient.load_price_features(...)`에 전달한다.
 
 ### 8.2 전체 station 적재
 
 `python-opinet-api`의 `aiter_all_stations()` 사용:
 
 ```python
-async def update_all_stations(client, async_session, reverse_geocoder):
-    async for batch in _batched(client.aiter_all_stations(), size=200):
-        await load_opinet_station_details(
-            async_session, batch, reverse_geocoder=reverse_geocoder,
+async def update_all_stations(opinet_client, map_client, reverse_geocoder):
+    async for batch in _batched(opinet_client.aiter_all_stations(), size=200):
+        bundles = await stations_to_bundles(
+            batch, fetched_at=kst_now(), reverse_geocoder=reverse_geocoder
         )
-    await async_session.commit()
+        await map_client.load_feature_bundles(bundles)
 ```
 
 OpiNet 분당 60회 쿼터 — Dagster `ConcurrencyConfig(opinet_api,
@@ -134,18 +128,21 @@ max_concurrent=1)` + provider 라이브러리의 token bucket.
 
 ### 8.3 가격 시계열만 갱신 (일 3회)
 
-기존 station feature는 그대로 두고 PriceValue만 적재:
+기존 station place feature는 그대로 두고 price anchor feature와 PriceValue를 적재:
 
 ```python
-async def refresh_prices(client, async_session):
+async def refresh_prices(map_client, settings):
     """현재 모든 station의 최신 가격만 갱신."""
-    async for batch in _batched(client.aiter_all_station_prices(), size=500):
-        await load_opinet_price_values(async_session, batch)
-    await async_session.commit()
+    details = await fetch_opinet_station_price_details(settings)
+    bundles, values = await station_details_to_price_features_and_values(
+        details, fetched_at=kst_now()
+    )
+    await map_client.load_price_features(bundles, values)
 ```
 
-PriceValue는 `(feature_id, item_key, observed_at)` PK이므로 같은 시각 적재는
-no-op (ON CONFLICT DO NOTHING).
+PriceValue는 결정적 `price_value_key`와
+`(feature_id, provider, price_domain, product_key, observed_at)` unique key를
+함께 쓰므로 같은 시각 적재는 멱등 upsert다.
 
 bulk 적재가 30k 파라미터 초과 가능 → `psycopg.copy_*` 사용 (ADR-013).
 
@@ -154,8 +151,8 @@ bulk 적재가 30k 파라미터 초과 가능 → `psycopg.copy_*` 사용 (ADR-0
 | 항목 | 값 |
 |------|----|
 | place asset 이름 | `feature_place_opinet_stations` |
-| price asset 이름 | `price_opinet_fuel` |
-| JOB_SPEC | `kortravelmap.providers.opinet.PLACE_JOB_SPEC` / `PRICE_JOB_SPEC` |
+| price asset 이름 | `feature_price_opinet_stations` |
+| JOB_SPEC | Dagster asset/job 정의 |
 | suggested cron (place) | `0 3 1 * *` (매월 1일 03:00 KST) |
 | suggested cron (price) | `0 6,14,22 * * *` (일 3회) |
 | group | `features_place` / `features_price` |
@@ -167,7 +164,7 @@ bulk 적재가 30k 파라미터 초과 가능 → `psycopg.copy_*` 사용 (ADR-0
 
 - `station_detail_typical.json` — 정상 (전화/시설/가격 모두)
 - `station_detail_no_phone.json` — 전화 없음
-- `station_detail_lpg.json` — LPG 충전소 (item_key=lpg만)
+- `station_detail_lpg.json` — LPG 충전소 (`product_key=lpg`만)
 - `station_detail_self_service.json` — 셀프 주유
 - `station_price_history.json` — PriceValue 시계열 적재 회귀
 

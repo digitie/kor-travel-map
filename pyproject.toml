@@ -105,7 +105,7 @@ providers = [
   #
   # ── Sprint 2 §2.4 — krex 휴게소 (multi-kind) ──────────────────────────
   # krex: incident → openapi/burstInfo/realTimeSms 재정렬 (krex PR#9, #378).
-  "python-krex-api @ git+https://github.com/digitie/python-krex-api.git@2504a3608dec7535ec32ce983d13d5cbc1da27ae",
+  "python-krex-api @ git+https://github.com/digitie/python-krex-api.git@cc8609c3b78b0306b9ee443de65682dd940d2fc9",
   #
   # ── Sprint 2 §2.1 (enrichment 2차, ADR-042) ───────────────────────────
   # visitkorea TourAPI는 datagokr 1차 source의 enrichment (image/description/

@@ -96,15 +96,15 @@ def krex_rest_area_to_bundle(item, *, fetched_at, reverse_geocoder=None):
 ## 4. 유가 적재
 
 ```python
-from kortravelmap.highways import collect_krex_rest_area_prices
+from kortravelmap.providers.krex import rest_area_fuel_price_records_to_features_and_values
 
-async def refresh_rest_area_prices(client, async_session):
-    items = await client.aget_all_rest_area_prices()
-    values = collect_krex_rest_area_prices(items, observed_at=kst_now())
+async def refresh_rest_area_prices(client, records):
+    bundles, values = rest_area_fuel_price_records_to_features_and_values(
+        records, fetched_at=kst_now()
+    )
     
-    # 유가는 PriceValue 시계열로만 적재 (별도 PricePoint 모델 없음)
-    await upsert_price_values(async_session, values)
-    await async_session.commit()
+    # 유가는 price anchor feature와 PriceValue를 한 transaction에서 적재한다.
+    await client.load_price_features(bundles, values)
 ```
 
 `PriceValue.product_key`: `gasoline` / `diesel` / `lpg` / `premium_gasoline` /

@@ -2,6 +2,49 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-06-25 (codex) — 가격 시계열 테이블 설계 + OpiNet/KREX 유가 적재
+
+admin Feature UI의 `price` 필터가 0건인 원인을 N150 DB에서 확인했다. 기존 OpiNet 주유소는
+`place` feature 196건만 있었고 `kind='price'` feature와 가격 시계열 영속 테이블이 없었다.
+196건은 N150의 현재 `poi_cache_target` bbox scope 기준 OpiNet 주유소 수이며, OpiNet에는 전국
+일괄 dump endpoint가 없어 전국 적재는 bbox grid enumerate와 호출량 정책 검토가 별도로 필요하다.
+
+- **DB 설계**: `feature.feature_price_values` Alembic migration을 추가했다. PK는 결정적
+  `price_value_key`, 논리 unique는 `(feature_id, provider, price_domain, product_key, observed_at)`,
+  값은 `NUMERIC(14,4)` + `value_number >= 0` CHECK, source 추적은 nullable
+  `source_record_key` FK로 둔다. 최신/추세 조회용 `(feature_id, price_domain, product_key,
+  observed_at DESC)`와 provider/domain 운영 검증용 인덱스, `observed_at` BRIN을 추가했다.
+- **적재 경계**: `AsyncKorTravelMapClient.load_price_features(...)`를 추가해 price anchor
+  `FeatureBundle`과 `PriceValue`를 한 transaction에서 upsert한다.
+- **OpiNet**: station detail의 중첩 `OIL_PRICE`를 `kind=price` anchor feature +
+  제품별 `PriceValue`로 변환한다. price feature는 주유소 place feature를
+  `parent_feature_id`로 연결하고 `fuel/P-08` marker를 쓴다.
+- **KREX**: EX `curStateStation` 휴게소 유가 snapshot을 `kind=price` anchor feature +
+  gasoline/diesel/lpg `PriceValue`로 변환한다. 원천 row에 좌표가 없어 현재는 주소/이름을 보존한
+  coordless price feature로 적재하고, rest area place matching은 후속 보강 범위로 남긴다.
+  live 적재 중 provider가 `gasolinePrice='X'`를 정수로 파싱하다 실패해
+  `python-krex-api@cc8609c`로 `X`/`-`/`N/A` sentinel을 결측 처리하도록 pin을 올렸다.
+- **Dagster**: `feature_price_opinet_stations`, `feature_price_krex_rest_areas` asset과 매시
+  schedule/job을 추가했다.
+- **Alembic graph**: main의 `0034_generic_curated_contract`와 가격 작업 중 N150에 먼저 적용된
+  `0034_feature_price_values`가 같은 parent에서 갈라져, `0035_merge_curated_price` no-op merge
+  revision으로 단일 head를 만들었다. N150 운영 DB는 `0034_feature_price_values` 상태에서
+  `0034_generic_curated_contract` 적용 후 merge head로 정상 상승했다.
+- **로컬 검증**: OpiNet/KREX provider unit, Dagster resource/fetcher/definition unit,
+  Alembic + Dagster 통합 테스트, `ruff check .`, strict mypy, import-linter를 통과했다.
+- **N150 배포/적재**: API/Dagster/UI 이미지를 재빌드·재기동했고, stale migration 파일
+  `0035_merge_price_and_curated.py`를 원격 소스에서 제거했다. KREX/OpiNet price job을 새 이미지에서
+  재실행했다. 최종 active price feature는 295건(`opinet_gas_station_prices` 196건,
+  `krex_rest_area_prices` 99건), `feature.feature_price_values`는 1,132건
+  (`python-opinet-api/opinet_gas_station` 874건, `python-krex-api/rest_area_fuel` 258건)이다.
+- **N150 live smoke**: `/health` 200, public `/v1/features`는 운영 key 정책상 key 없이 401,
+  trusted admin proxy read-only 헤더로 전국 bbox `kind=price` 조회 200과 price item 5건을 확인했다.
+  UI는 `/` 307, `/login` 200, API/UI/Dagster 컨테이너 healthy를 확인했다.
+- **로그인/UI live e2e**: Windows Playwright live config로 N150 `admin` / `ad.min` 로그인 setup
+  1건 통과. 같은 인증 세션으로 `features-list.live.spec.ts`와 `features-map.live.spec.ts`의 `price`
+  grep 대상 16건을 실행해 admin feature 목록의 `kind=price` 필터, deep link, status×kind matrix,
+  `/features` 지도 kind chip 노출/토글/초기화/테이블·지도 뷰 유지가 모두 통과했다.
+
 ## 2026-06-25 (codex) — Curated API 범용 계약 정리
 
 kor-travel-map은 특정 소비자 제품명을 알지 않는다는 정책에 맞춰 curated feature API/DB 계약을

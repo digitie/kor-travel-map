@@ -1,5 +1,28 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-06-25 (codex) — 가격 시계열 테이블 설계 + OpiNet/KREX 유가 적재
+
+- **완료(로컬 설계/코드)**: `feature.feature_price_values`를 추가하고 price anchor
+  `FeatureBundle` + `PriceValue`를 한 transaction으로 적재하는 client/repository 경로를 구현했다.
+- **완료(provider)**: OpiNet station detail 중첩 가격과 KREX 휴게소 유가 snapshot을 각각
+  `kind=price` feature + 제품별 `PriceValue`로 변환한다.
+- **완료(Dagster)**: `feature_price_opinet_stations`, `feature_price_krex_rest_areas` asset/job/schedule과
+  live resource를 추가했다.
+- **완료(문서)**: `data-model.md`, `postgres-schema.md`, 성능/ETL 문서를 실제
+  `feature_price_values` 설계로 갱신했다.
+- **완료(Alembic graph)**: main의 `0034_generic_curated_contract`와 가격 `0034_feature_price_values`를
+  `0035_merge_curated_price` no-op merge revision으로 합쳤다. N150 운영 DB는 merge head로 상승 완료.
+- **완료(N150 배포/적재)**: API/Dagster/UI 재빌드·재기동 후 KREX/OpiNet price job을 재실행했다.
+  최종 active price feature 295건, `feature.feature_price_values` 1,132건
+  (`python-opinet-api/opinet_gas_station` 874건, `python-krex-api/rest_area_fuel` 258건).
+- **완료(live smoke)**: N150 `/health` 200, trusted admin proxy read-only `/v1/features`
+  `kind=price` bbox 조회 200, UI `/login` 200, API/UI/Dagster healthy 확인.
+- **완료(로그인/UI live e2e)**: Windows Playwright live config로 N150 `admin` / `ad.min` 로그인 setup
+  1건 통과. 같은 인증 세션으로 `features-list`/`features-map`의 `price` 대상 16건 통과.
+- **검증(로컬)**: provider/Dagster unit, Alembic+Dagster 통합, ruff, strict mypy,
+  import-linter, `git diff --check` 통과.
+- **다음 한 작업**: PR 생성, CI green 확인, 머지를 완료한다.
+
 ## 2026-06-25 (codex) — Curated API 범용 계약 정리
 
 - **완료(API 정책)**: public curated API는 임의 외부 사용자가 curated feature 목록/상세를 조회하는
