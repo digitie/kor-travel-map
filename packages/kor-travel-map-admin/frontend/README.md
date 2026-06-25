@@ -217,7 +217,7 @@ PID를 종료한 뒤 WSL frontend를 다시 띄운다. 정상은 `wslrelay`다.
 | `/features` | `/v1/features`, `/v1/features/{id}` | 구현됨. 지도/테이블/상세 panel + 운영 quick link |
 | `/admin/features` | `/v1/admin/features`, `/v1/admin/features/{id}/deactivate`, `/v1/features/{id}`, `/v1/features/{id}/weather` | 구현됨. 운영자용 table 목록, 상세/weather panel, 단건 비활성화 |
 | `/admin/features/change-requests` | `/v1/admin/features`, `/v1/admin/features/change-requests*` | 구현됨. feature add/update/delete 요청 생성, 검토 큐, approve/reject |
-| `/admin/curated-features` | `/v1/admin/curated-features*`, `/v1/admin/curated-source-rules*`, `/v1/admin/curated-sources`, `/v1/admin/curated-themes`, `/v1/curated-features/{id}/tripmate-copy` | 구현됨. curated 후보 목록, select/unselect/archive, source rule 편집/apply, PinVi copy preview |
+| `/admin/curated-features` | `/v1/admin/curated-features*`, `/v1/admin/curated-source-rules*`, `/v1/admin/curated-sources`, `/v1/admin/curated-themes`, `/v1/curated-features/{id}/pinvi-copy` | 구현됨. curated 후보 목록, select/unselect/archive, source rule 편집/apply, PinVi copy preview |
 | `/admin/issues` | `/v1/admin/issues`, `/v1/admin/issues/{issue_id}` | 구현됨. 이슈 목록/상세, resolve/ignore/reopen/retry/apply/manual override |
 | `/ops/import-jobs` | `/v1/ops/import-jobs`, `WS /v1/ops/live` | 구현됨. 작업 큐 상태, status/kind/batch/parent filter, live invalidate |
 | `/ops/import-jobs/[job_id]` | `/v1/ops/import-jobs/{job_id}`, `/v1/ops/import-jobs/{job_id}/events`, `/v1/ops/import-jobs/{job_id}/cancel`, `WS /v1/ops/live` | 구현됨. 상세/payload/event timeline/cancel/관련 링크/live invalidate |

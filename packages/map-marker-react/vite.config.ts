@@ -13,7 +13,7 @@ export default defineConfig({
       fileName: (format) => `index.${format}.js`,
     },
     rollupOptions: {
-      // peer deps은 번들 제외 — 호스트(debug UI / TripMate)가 제공
+      // peer deps은 번들 제외 — 호스트(debug UI / PinVi)가 제공
       external: ["react", "react-dom", "maplibre-gl"],
       output: {
         globals: {

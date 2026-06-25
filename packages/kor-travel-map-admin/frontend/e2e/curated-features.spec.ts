@@ -4,7 +4,7 @@ import { expect, test } from "@playwright/test";
  * `/admin/curated-features` (1192줄 mutation 콘솔) — ZERO 커버 페이지 spec
  * (T-AUDIT-0616, `docs/reports/e2e-scenario-coverage-2026-06-16.md` §1.1).
  *
- * 이 콘솔은 select/unselect/patch/archive/source-rule-apply/tripmate-copy 등 6개
+ * 이 콘솔은 select/unselect/patch/archive/source-rule-apply/pinvi-copy 등 6개
  * mutation을 갖지만, **mutation 흐름은 시드된 curated 후보가 필요**하다(빈 DB에선 후보 0).
  * 따라서 본 spec은 `features.spec.ts`와 같은 **라이브 smoke** 패턴으로 렌더·필터·페이지
  * 구조·필터 상호작용만 결정적으로 덮는다. 시드 후보 기반 mutation depth(select/archive/

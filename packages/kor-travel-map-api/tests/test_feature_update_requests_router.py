@@ -184,7 +184,7 @@ def test_create_actual_request_uses_transaction(
 
 
 @pytest.mark.unit
-def test_tripmate_update_request_alias_is_not_mounted(
+def test_legacy_update_request_alias_is_not_mounted(
     client: TestClient,
     session: _FakeSession,
 ) -> None:

@@ -44,7 +44,14 @@ def session() -> _FakeSession:
 
 @pytest.fixture
 def client(session: _FakeSession) -> TestClient:
-    app = create_app(ApiSettings())
+    app = create_app(
+        ApiSettings(
+            admin_proxy_secret=None,
+            service_token=None,
+            admin_destructive_enabled=True,
+            public_api_key_required=False,
+        )
+    )
 
     async def _fake_session() -> AsyncIterator[_FakeSession]:
         yield session
@@ -57,7 +64,7 @@ def _target(*, target_key: str = "poi-1") -> PoiCacheTarget:
     now = datetime(2026, 6, 3, 12, 0, tzinfo=UTC)
     return PoiCacheTarget(
         target_id="target-1",
-        external_system="tripmate",
+        external_system="pinvi",
         target_key=target_key,
         name="서울시청",
         lon=126.978,
@@ -69,7 +76,7 @@ def _target(*, target_key: str = "poi-1") -> PoiCacheTarget:
         update_enabled=True,
         refresh_policy="provider_default",
         provider_overrides={},
-        metadata={"tripmate_poi_id": target_key},
+        metadata={"pinvi_poi_id": target_key},
         last_seen_at=now,
         last_requested_at=None,
         last_refreshed_at=None,
@@ -124,7 +131,7 @@ def test_put_poi_cache_target_uses_transaction(
     from kortravelmap.api.routers import poi_cache_targets as router_mod
 
     async def _upsert(_session: Any, **kwargs: Any) -> PoiCacheTarget:
-        assert kwargs["external_system"] == "tripmate"
+        assert kwargs["external_system"] == "pinvi"
         assert kwargs["target_key"] == "poi-1"
         assert kwargs["lon"] == 126.978
         assert kwargs["on_conflict"] == "reject"
@@ -135,7 +142,7 @@ def test_put_poi_cache_target_uses_transaction(
             }
         }
         assert kwargs["metadata"] == {
-            "tripmate_poi_id": "poi-1",
+            "pinvi_poi_id": "poi-1",
             "labels": ["city"],
         }
         return _target()
@@ -143,7 +150,7 @@ def test_put_poi_cache_target_uses_transaction(
     monkeypatch.setattr(router_mod, "upsert_poi_cache_target", _upsert)
 
     response = client.put(
-        "/v1/admin/poi-cache-targets/tripmate/poi-1",
+        "/v1/admin/poi-cache-targets/pinvi/poi-1",
         json={
             "coord": {"lon": 126.978, "lat": 37.5665},
             "radius_km": 5.0,
@@ -153,13 +160,13 @@ def test_put_poi_cache_target_uses_transaction(
                     "min_interval_seconds": 300,
                 }
             },
-            "metadata": {"tripmate_poi_id": "poi-1", "labels": ["city"]},
+            "metadata": {"pinvi_poi_id": "poi-1", "labels": ["city"]},
         },
     )
 
     assert response.status_code == 200
     assert response.json()["data"]["coord_key"] == "126.978000:37.566500:p6"
-    assert response.json()["data"]["metadata"] == {"tripmate_poi_id": "poi-1"}
+    assert response.json()["data"]["metadata"] == {"pinvi_poi_id": "poi-1"}
     assert session.begin_count == 1
 
 
@@ -185,7 +192,7 @@ def test_put_poi_cache_target_rejects_unbounded_payloads_before_transaction(
     body: dict[str, Any] = {"coord": {"lon": 126.978, "lat": 37.5665}}
     body.update(payload)
 
-    response = client.put("/v1/admin/poi-cache-targets/tripmate/poi-1", json=body)
+    response = client.put("/v1/admin/poi-cache-targets/pinvi/poi-1", json=body)
 
     assert response.status_code == 422
     assert session.begin_count == 0
@@ -204,7 +211,7 @@ def test_put_poi_cache_target_conflict_returns_409(
     monkeypatch.setattr(router_mod, "upsert_poi_cache_target", _conflict)
 
     response = client.put(
-        "/v1/admin/poi-cache-targets/tripmate/poi-1",
+        "/v1/admin/poi-cache-targets/pinvi/poi-1",
         json={"coord": {"lon": 126.978, "lat": 37.5665}},
     )
 
@@ -220,7 +227,7 @@ def test_list_poi_cache_targets_passes_filters(
     from kortravelmap.api.routers import poi_cache_targets as router_mod
 
     async def _list(_session: Any, **kwargs: Any) -> PoiCacheTargetPage:
-        assert kwargs["external_system"] == "tripmate"
+        assert kwargs["external_system"] == "pinvi"
         assert kwargs["update_enabled"] is True
         assert kwargs["include_deleted"] is False
         assert kwargs["limit"] == 25
@@ -232,7 +239,7 @@ def test_list_poi_cache_targets_passes_filters(
     response = client.get(
         "/v1/admin/poi-cache-targets",
         params={
-            "external_system": "tripmate",
+            "external_system": "pinvi",
             "update_enabled": "true",
             "page_size": "25",
             "cursor": "cursor-1",
@@ -279,7 +286,7 @@ def test_get_poi_cache_target_404_when_missing(
 
     monkeypatch.setattr(router_mod, "get_poi_cache_target_by_key", _missing)
 
-    response = client.get("/v1/admin/poi-cache-targets/tripmate/missing")
+    response = client.get("/v1/admin/poi-cache-targets/pinvi/missing")
 
     assert response.status_code == 404
 
@@ -293,13 +300,13 @@ def test_delete_poi_cache_target_uses_transaction(
     from kortravelmap.api.routers import poi_cache_targets as router_mod
 
     async def _delete(_session: Any, **kwargs: Any) -> PoiCacheTarget:
-        assert kwargs["external_system"] == "tripmate"
+        assert kwargs["external_system"] == "pinvi"
         assert kwargs["target_key"] == "poi-1"
         return _target()
 
     monkeypatch.setattr(router_mod, "delete_poi_cache_target", _delete)
 
-    response = client.delete("/v1/admin/poi-cache-targets/tripmate/poi-1")
+    response = client.delete("/v1/admin/poi-cache-targets/pinvi/poi-1")
 
     assert response.status_code == 200
     assert response.json()["data"]["target_id"] == "target-1"
@@ -314,7 +321,7 @@ def test_features_nearby_by_target_passes_filters(
     from kortravelmap.api.routers import features as features_mod
 
     async def _get_target(_session: Any, **kwargs: Any) -> PoiCacheTarget:
-        assert kwargs["external_system"] == "tripmate"
+        assert kwargs["external_system"] == "pinvi"
         assert kwargs["target_key"] == "poi-1"
         return _target()
 
@@ -339,7 +346,7 @@ def test_features_nearby_by_target_passes_filters(
     response = client.get(
         "/v1/features/nearby/by-target",
         params=[
-            ("external_system", "tripmate"),
+            ("external_system", "pinvi"),
             ("target_key", "poi-1"),
             ("radius_km", "3.0"),
             ("kind", "place"),
@@ -383,7 +390,7 @@ def test_features_nearby_by_target_404_when_missing(
 
     response = client.get(
         "/v1/features/nearby/by-target",
-        params={"external_system": "tripmate", "target_key": "missing"},
+        params={"external_system": "pinvi", "target_key": "missing"},
     )
 
     assert response.status_code == 404

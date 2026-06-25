@@ -1,6 +1,6 @@
 """``kortravelmap.infra.db`` — SQLAlchemy 2 async engine + session factory.
 
-라이브러리 자체는 engine instance를 만들지 않는다. 호출자(TripMate / debug-ui /
+라이브러리 자체는 engine instance를 만들지 않는다. 호출자(PinVi / debug-ui /
 테스트)가 ``KorTravelMapSettings.pg_dsn``으로 engine을 만들고 client/repo에
 주입한다 (ADR-003 함수 라이브러리 + ADR-004 raw SQL).
 
@@ -13,7 +13,7 @@
 ADR 참조
 --------
 - ADR-002 — async-only API
-- ADR-003 — TripMate는 함수 직접 호출 (engine 주입)
+- ADR-003 — PinVi는 함수 직접 호출 (engine 주입)
 - ADR-004 — ORM 매핑만, 쿼리는 raw SQL ``text()``
 - ADR-007 — PostgreSQL 16 + SQLAlchemy 2 async + asyncpg
 - ADR-008 — extension은 ``x_extension`` schema 격리

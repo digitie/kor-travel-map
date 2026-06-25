@@ -92,7 +92,7 @@ function makePoiTarget(
     coord_precision_digits: 6,
     created_at: MOCK_NOW,
     deleted_at: null,
-    external_system: "tripmate",
+    external_system: "pinvi",
     last_failed_at: null,
     last_refreshed_at: null,
     last_requested_at: null,
@@ -100,13 +100,13 @@ function makePoiTarget(
     metadata: {},
     name: "Mock target",
     nearby_url:
-      "/features/nearby/by-target?external_system=tripmate&target_key=mock-target-1",
+      "/features/nearby/by-target?external_system=pinvi&target_key=mock-target-1",
     next_eligible_refresh_at: null,
     provider_overrides: {},
     radius_km: 5,
     refresh_policy: "provider_default",
     scope_mode: "center_radius",
-    status_url: "/v1/admin/poi-cache-targets/tripmate/mock-target-1",
+    status_url: "/v1/admin/poi-cache-targets/pinvi/mock-target-1",
     target_id: POI_TARGET_ID,
     target_key: "mock-target-1",
     update_enabled: true,
@@ -416,7 +416,7 @@ async function mockPoiCacheTargetMutations(page: Page) {
       await route.continue();
       return;
     }
-    const targetPath = "/v1/admin/poi-cache-targets/tripmate/mock-target-1";
+    const targetPath = "/v1/admin/poi-cache-targets/pinvi/mock-target-1";
 
     if (request.method() === "GET" && url.pathname === "/v1/admin/poi-cache-targets") {
       await fulfillJson(route, {
@@ -469,7 +469,7 @@ async function mockPoiCacheTargetMutations(page: Page) {
     const request = route.request();
     const url = new URL(request.url());
     requests.nearby += 1;
-    expect(url.searchParams.get("external_system")).toBe("tripmate");
+    expect(url.searchParams.get("external_system")).toBe("pinvi");
     expect(url.searchParams.get("target_key")).toBe("mock-target-1");
     await fulfillJson(route, {
       data: {
@@ -486,7 +486,7 @@ async function mockPoiCacheTargetMutations(page: Page) {
           },
         ],
         target: {
-          external_system: "tripmate",
+          external_system: "pinvi",
           lat: 37.5665,
           lon: 126.978,
           target_key: "mock-target-1",

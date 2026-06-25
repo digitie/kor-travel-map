@@ -885,7 +885,7 @@ def _center_radius_to_bbox(
 
 
 # OpiNet POI-타깃 enumeration 대상 = **모든 외부 시스템**의 활성 target.
-# ``external_system``은 provider명이 아니라 외부 호출자(예: tripmate)다(POI 모델,
+# ``external_system``은 provider명이 아니라 외부 호출자(예: pinvi)다(POI 모델,
 # docs/poi-cache-update-targets.md) — provider명으로 재해석하면 실제 등록 target을
 # 전부 놓친다. active 정의는 scope_repo.resolve_cache_target_keys와 동일:
 # deleted_at IS NULL + update_enabled + refresh_policy<>'disabled'. 추가로 해당 target이

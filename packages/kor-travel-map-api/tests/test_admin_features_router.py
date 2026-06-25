@@ -420,7 +420,7 @@ def test_create_feature_request_uses_review_required_by_default(
         assert kwargs["payload"]["coord"] == {"lon": 126.98, "lat": 37.57}
         assert kwargs["payload"]["feature_id"] == kwargs["feature_id"]
         assert kwargs["reason"] == "사용자 제보"
-        assert kwargs["requested_by"] == "tripmate-admin"
+        assert kwargs["requested_by"] == "pinvi-admin"
         return _change_request(
             feature_id=kwargs["feature_id"],
             action=kwargs["action"],
@@ -443,7 +443,7 @@ def test_create_feature_request_uses_review_required_by_default(
             "marker_icon": "map-pin",
             "marker_color": "P-01",
             "reason": "사용자 제보",
-            "operator": "tripmate-admin",
+            "operator": "pinvi-admin",
         },
     )
 

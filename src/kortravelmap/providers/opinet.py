@@ -272,7 +272,7 @@ def prices_to_values(
 
     Examples
     --------
-    호출자 측 사용 예시 (TripMate Dagster asset):
+    호출자 측 사용 예시 (PinVi Dagster asset):
 
     >>> # client = AsyncOpiNetClient(...)
     >>> # async for page in client.aiter_prices(area="11", ...):

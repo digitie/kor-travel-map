@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "GPL-3.0-or-later" }
 authors = [{ name = "digitie" }]
-keywords = ["tripmate", "kor-travel-map", "api", "openapi", "fastapi"]
+keywords = ["pinvi", "kor-travel-map", "api", "openapi", "fastapi"]
 classifiers = [
   "Development Status :: 2 - Pre-Alpha",
   "Intended Audience :: Developers",
@@ -25,7 +25,7 @@ classifiers = [
 # 메인 라이브러리는 같은 저장소에서 editable install:
 #   uv pip install -e .                          (메인)
 #   uv pip install -e packages/kor-travel-map-api     (REST API)
-# 외부 배포 시에는 git URL+sha 핀 사용 (예: TripMate가 Python으로 직접 의존하지 않으므로
+# 외부 배포 시에는 git URL+sha 핀 사용 (예: PinVi가 Python으로 직접 의존하지 않으므로
 # 주로 자체 시점에서만 사용).
 dependencies = [
   # 같은 저장소 내 메인 패키지에 의존. monorepo editable install.

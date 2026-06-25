@@ -8,10 +8,10 @@ import type { components } from "../src/api/types";
  *
  * 자매 파일 `curated-features.spec.ts`는 라이브 smoke(렌더/필터/페이지 구조)만 덮는다.
  * 본 spec은 시드 후보가 필요한 select/unselect/patch/archive/source-rule patch·apply/
- * tripmate-copy/pagination/empty/error 흐름을 **모든 backend 호출을 mock해 결정적으로** 덮는다.
+ * pinvi-copy/pagination/empty/error 흐름을 **모든 backend 호출을 mock해 결정적으로** 덮는다.
  *
  * 이 콘솔은 항상 4개 GET(curated-features/curated-sources/curated-themes/
- * curated-source-rules)을 발사하고, 첫 행이 자동 선택되면 tripmate-copy GET까지 발사한다.
+ * curated-source-rules)을 발사하고, 첫 행이 자동 선택되면 pinvi-copy GET까지 발사한다.
  * `mockCuratedConsole`가 이 5개 route를 단일 핸들러에서 method+pathname으로 분기해 mock한다
  * (admin-ops.spec.ts house 패턴). live :12701 backend 누수 없음.
  *
@@ -31,9 +31,9 @@ type CuratedSourceRuleResponse =
 type CuratedThemeView = components["schemas"]["CuratedThemeView"];
 type CuratedThemesResponse = components["schemas"]["CuratedThemesResponse"];
 type RuleApplyResponse = components["schemas"]["RuleApplyResponse"];
-type TripmateCopyItemView = components["schemas"]["TripmateCopyItemView"];
-type TripmateCopySnapshotResponse =
-  components["schemas"]["TripmateCopySnapshotResponse"];
+type PinviCopyItemView = components["schemas"]["PinviCopyItemView"];
+type PinviCopySnapshotResponse =
+  components["schemas"]["PinviCopySnapshotResponse"];
 
 const MOCK_NOW = "2026-06-08T00:00:00.000Z";
 const FEATURE_A_ID = "curated-feature-aaaa";
@@ -82,8 +82,8 @@ function makeCuratedFeature(
     theme_id: THEME_ID,
     theme_name: "고궁 산책",
     theme_slug: "palace-walk",
-    tripmate_copy_policy: "manual_review",
-    tripmate_relation: "nearby_option",
+    pinvi_copy_policy: "manual_review",
+    pinvi_relation: "nearby_option",
     updated_at: MOCK_NOW,
     ...overrides,
   };
@@ -155,9 +155,9 @@ function makeCuratedTheme(
   };
 }
 
-function makeTripmateCopyItem(
-  overrides: Partial<TripmateCopyItemView> = {},
-): TripmateCopyItemView {
+function makePinviCopyItem(
+  overrides: Partial<PinviCopyItemView> = {},
+): PinviCopyItemView {
   return {
     curated_feature_item_id: "copy-item-1",
     day_index: null,
@@ -238,8 +238,8 @@ function ruleApplyResponse(insertedOrUpdated: number): RuleApplyResponse {
 }
 
 function copySnapshotResponse(
-  items: TripmateCopyItemView[] = [makeTripmateCopyItem()],
-): TripmateCopySnapshotResponse {
+  items: PinviCopyItemView[] = [makePinviCopyItem()],
+): PinviCopySnapshotResponse {
   return {
     data: {
       curated_feature_id: FEATURE_A_ID,
@@ -251,7 +251,7 @@ function copySnapshotResponse(
       updated_at: MOCK_NOW,
       version: 3,
     },
-    meta: { duration_ms: 1, request_id: "e2e-tripmate-copy" },
+    meta: { duration_ms: 1, request_id: "e2e-pinvi-copy" },
   };
 }
 
@@ -269,7 +269,7 @@ interface ConsoleOptions {
   sources?: CuratedSourceView[];
   themes?: CuratedThemeView[];
   rules?: CuratedSourceRuleView[];
-  copyItems?: TripmateCopyItemView[];
+  copyItems?: PinviCopyItemView[];
   /** features list GET을 500으로 실패시킨다(에러 배너 검증). */
   featuresError?: boolean;
   /** cursor 분기 — 두번째 페이지 items와 next_cursor를 다르게 반환. */
@@ -315,7 +315,7 @@ async function mockCuratedConsole(
   const sources = options.sources ?? [makeCuratedSource()];
   const themes = options.themes ?? [makeCuratedTheme()];
   let rules = [...(options.rules ?? [])];
-  const copyItems = options.copyItems ?? [makeTripmateCopyItem()];
+  const copyItems = options.copyItems ?? [makePinviCopyItem()];
 
   const requests: ConsoleRequests = {
     featuresList: 0,
@@ -488,7 +488,7 @@ async function mockCuratedConsole(
     await fulfillJson(route, themesResponse(themes));
   });
 
-  await page.route("**/v1/curated-features/*/tripmate-copy**", async (route) => {
+  await page.route("**/v1/curated-features/*/pinvi-copy**", async (route) => {
     requests.copy += 1;
     await fulfillJson(route, copySnapshotResponse(copyItems));
   });
@@ -570,7 +570,7 @@ test.describe("/admin/curated-features mutations (route-mocked)", () => {
     await page.getByLabel("display summary").fill("야간 고궁 산책 추천");
     await page.getByLabel("rank score").fill("4.5");
     await page.getByLabel("copy policy").selectOption("copy_allowed");
-    await page.getByLabel("TripMate relation").selectOption("primary_stop");
+    await page.getByLabel("PinVi relation").selectOption("primary_stop");
 
     await page.getByRole("button", { name: "저장" }).click();
 
@@ -579,8 +579,8 @@ test.describe("/admin/curated-features mutations (route-mocked)", () => {
       display_title: "경복궁 야간개장",
       display_summary: "야간 고궁 산책 추천",
       rank_score: 4.5,
-      tripmate_copy_policy: "copy_allowed",
-      tripmate_relation: "primary_stop",
+      pinvi_copy_policy: "copy_allowed",
+      pinvi_relation: "primary_stop",
     });
   });
 
@@ -617,8 +617,8 @@ test.describe("/admin/curated-features mutations (route-mocked)", () => {
     await mockCuratedConsole(page, {
       features: [
         makeCuratedFeature({
-          tripmate_copy_policy: "manual_review",
-          tripmate_relation: "nearby_option",
+          pinvi_copy_policy: "manual_review",
+          pinvi_relation: "nearby_option",
         }),
       ],
     });
@@ -632,7 +632,7 @@ test.describe("/admin/curated-features mutations (route-mocked)", () => {
       await expect(copyPolicy).toHaveValue(option);
     }
 
-    const relation = page.getByLabel("TripMate relation");
+    const relation = page.getByLabel("PinVi relation");
     for (const option of [
       "primary_stop",
       "food_stop",
@@ -758,16 +758,16 @@ test.describe("/admin/curated-features mutations (route-mocked)", () => {
     await expect(page.getByText("7개 후보를 반영했습니다.")).toBeVisible();
   });
 
-  test("TripMate copy snapshot 미리보기 + item 테이블", async ({ page }) => {
+  test("PinVi copy snapshot 미리보기 + item 테이블", async ({ page }) => {
     const requests = await mockCuratedConsole(page, {
       features: [makeCuratedFeature()],
-      copyItems: [makeTripmateCopyItem()],
+      copyItems: [makePinviCopyItem()],
     });
 
     await page.goto("/admin/curated-features");
 
-    // 첫 행 자동 선택 → snapshot 쿼리 enabled → tripmate-copy GET 1회.
-    await expect(page.getByText("TripMate copy preview")).toBeVisible();
+    // 첫 행 자동 선택 → snapshot 쿼리 enabled → pinvi-copy GET 1회.
+    await expect(page.getByText("PinVi copy preview")).toBeVisible();
     await expect.poll(() => requests.copy).toBeGreaterThanOrEqual(1);
 
     // etag Badge (shortId(etag, 10)).
@@ -794,7 +794,7 @@ test.describe("/admin/curated-features mutations (route-mocked)", () => {
     });
 
     await page.goto("/admin/curated-features");
-    await expect(page.getByText("TripMate copy preview")).toBeVisible();
+    await expect(page.getByText("PinVi copy preview")).toBeVisible();
     await expect(page.getByText("copy item이 없습니다.")).toBeVisible();
   });
 
@@ -866,14 +866,14 @@ test.describe("/admin/curated-features mutations (route-mocked)", () => {
     ).toBeVisible();
     await expect(
       page.getByText(
-        "후보를 선택하면 display text와 TripMate copy 속성을 편집할 수 있습니다.",
+        "후보를 선택하면 display text와 PinVi copy 속성을 편집할 수 있습니다.",
       ),
     ).toBeVisible();
     await expect(
       page.getByText("후보를 선택하면 copy snapshot을 조회합니다."),
     ).toBeVisible();
 
-    // selectedFeature null → tripmate-copy 쿼리 disabled → GET 0회.
+    // selectedFeature null → pinvi-copy 쿼리 disabled → GET 0회.
     await expect.poll(() => requests.featuresList).toBeGreaterThanOrEqual(1);
     expect(requests.copy).toBe(0);
   });

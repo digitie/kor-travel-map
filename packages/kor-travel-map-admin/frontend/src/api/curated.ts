@@ -37,20 +37,20 @@ export type CuratedSourceRuleResponse =
 export type CuratedTheme = CuratedSchemas["CuratedThemeView"];
 export type CuratedThemesResponse = CuratedSchemas["CuratedThemesResponse"];
 export type RuleApplyResponse = CuratedSchemas["RuleApplyResponse"];
-export type TripmateCopySnapshot = CuratedSchemas["TripmateCopySnapshotView"];
-export type TripmateCopySnapshotResponse =
-  CuratedSchemas["TripmateCopySnapshotResponse"];
+export type PinviCopySnapshot = CuratedSchemas["PinviCopySnapshotView"];
+export type PinviCopySnapshotResponse =
+  CuratedSchemas["PinviCopySnapshotResponse"];
 
 export type CuratedFeatureStatus = Exclude<
   AdminCuratedFeaturesQuery["curation_status"],
   null | undefined
 >;
-export type CuratedTripmateCopyPolicy = Exclude<
-  CuratedFeaturePatchRequest["tripmate_copy_policy"],
+export type CuratedPinviCopyPolicy = Exclude<
+  CuratedFeaturePatchRequest["pinvi_copy_policy"],
   null | undefined
 >;
-export type CuratedTripmateRelation = Exclude<
-  CuratedFeaturePatchRequest["tripmate_relation"],
+export type CuratedPinviRelation = Exclude<
+  CuratedFeaturePatchRequest["pinvi_relation"],
   null | undefined
 >;
 export type CuratedRuleAction = Exclude<
@@ -176,21 +176,21 @@ export function useAdminCuratedThemes(
   });
 }
 
-async function fetchTripmateCopySnapshot(
+async function fetchPinviCopySnapshot(
   curatedFeatureId: string,
   signal?: AbortSignal,
-): Promise<TripmateCopySnapshotResponse> {
-  return getJson<TripmateCopySnapshotResponse>(
-    `/v1/curated-features/${encodeURIComponent(curatedFeatureId)}/tripmate-copy`,
+): Promise<PinviCopySnapshotResponse> {
+  return getJson<PinviCopySnapshotResponse>(
+    `/v1/curated-features/${encodeURIComponent(curatedFeatureId)}/pinvi-copy`,
     { signal },
   );
 }
 
-export function useTripmateCopySnapshot(curatedFeatureId: string | null) {
-  return useQuery<TripmateCopySnapshotResponse, Error>({
+export function usePinviCopySnapshot(curatedFeatureId: string | null) {
+  return useQuery<PinviCopySnapshotResponse, Error>({
     queryKey: ["curated-feature-copy", curatedFeatureId] as const,
     queryFn: ({ signal }) =>
-      fetchTripmateCopySnapshot(curatedFeatureId as string, signal),
+      fetchPinviCopySnapshot(curatedFeatureId as string, signal),
     enabled: curatedFeatureId !== null && curatedFeatureId.length > 0,
     staleTime: 30_000,
   });

@@ -92,7 +92,7 @@ def _policy(
 def _target() -> CacheTargetScopeTarget:
     return CacheTargetScopeTarget(
         target_id="target-1",
-        external_system="tripmate",
+        external_system="pinvi",
         target_key="poi-1",
         lon=127.0,
         lat=37.0,
@@ -244,7 +244,7 @@ async def test_build_plan_applies_filters_overrides_and_rate_limits(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     request = _request(
-        scope={"type": "cache_target_keys", "external_system": "tripmate"},
+        scope={"type": "cache_target_keys", "external_system": "pinvi"},
         providers=(
             "python-a-api",
             "python-b-api",

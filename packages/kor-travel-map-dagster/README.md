@@ -146,7 +146,7 @@ credential이 없거나 아직 guard로 남은 resource는 운영 실행 전에
 - Asset: `curated_source_metadata`
 - Asset: `curated_feature_candidates`
 - Asset: `curated_feature_status_sweep`
-- Asset: `curated_tripmate_copy_snapshots`
+- Asset: `curated_pinvi_copy_snapshots`
 - Job: `curated_features_refresh`
 - Schedule: `curated_features_refresh_daily_schedule` (`55 4 * * *`, KST, 기본
   `STOPPED`)
@@ -154,7 +154,7 @@ credential이 없거나 아직 guard로 남은 resource는 운영 실행 전에
 이 group은 `feature.curated_sources`의 row count/last checked metadata를
 `provider_sync.source_records` 기준으로 갱신하고, enabled source rule을 적용한 뒤,
 inactive/deleted feature를 가리키는 curated row를 archive한다. 마지막 asset은
-`feature.curated_tripmate_copy_snapshots`에 REST `/tripmate-copy`와 같은 payload를
+`feature.curated_pinvi_copy_snapshots`에 REST `/pinvi-copy`와 같은 payload를
 materialize/cache한다.
 
 ## Feature update queue

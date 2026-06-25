@@ -5,6 +5,18 @@
 
 ## [Unreleased]
 
+### Concierge curated source + PinVi 명칭 전환 (2026-06-25)
+
+- **ADDED**: `kor-travel-concierge-youtube/youtube_place_candidates`를 `media-places`
+  curated source/rule에 추가했다. source rule 적용 시 기본 `curated` 상태로 선정하고,
+  `display_title`은 YouTube source title → playlist title → channel title → 보정/검색어 순서로 채운다.
+- **CHANGED**: curated copy 계약의 정식 명칭을 PinVi로 전환했다. DB 컬럼은
+  `pinvi_relation`/`pinvi_copy_policy`, cache table은 `feature.curated_pinvi_copy_snapshots`,
+  endpoint는 `/v1/curated-features/{id}/pinvi-copy`가 정본이다. 구 `/tripmate-copy`는
+  배포 전환용 hidden 호환 route로만 남긴다.
+- **CHANGED**: POI cache target metadata의 정식 key를 `pinvi_poi_id`로 바꾸고, 기존
+  `tripmate_poi_id` 입력은 호환 alias로 받아 새 key로 저장한다.
+
 ### KNPS protected area 한글명 일괄 보정 (2026-06-25)
 
 - **CHANGED**: KNPS `knps_protected_areas`의 영어/로마자 source name을 Gemini 2.5 Flash

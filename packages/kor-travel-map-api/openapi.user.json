@@ -622,6 +622,14 @@
             "title": "Metadata",
             "type": "object"
           },
+          "pinvi_copy_policy": {
+            "title": "Pinvi Copy Policy",
+            "type": "string"
+          },
+          "pinvi_relation": {
+            "title": "Pinvi Relation",
+            "type": "string"
+          },
           "provider": {
             "title": "Provider",
             "type": "string"
@@ -759,14 +767,6 @@
             "title": "Theme Slug",
             "type": "string"
           },
-          "tripmate_copy_policy": {
-            "title": "Tripmate Copy Policy",
-            "type": "string"
-          },
-          "tripmate_relation": {
-            "title": "Tripmate Relation",
-            "type": "string"
-          },
           "updated_at": {
             "format": "date-time",
             "title": "Updated At",
@@ -792,8 +792,8 @@
           "curation_status",
           "selection_origin",
           "rank_score",
-          "tripmate_relation",
-          "tripmate_copy_policy",
+          "pinvi_relation",
+          "pinvi_copy_policy",
           "copy_version",
           "metadata",
           "created_at",
@@ -2053,6 +2053,149 @@
         "title": "PageMeta",
         "type": "object"
       },
+      "PinviCopyItemView": {
+        "additionalProperties": false,
+        "description": "PinVi curated_plan_pois copy item.",
+        "properties": {
+          "curated_feature_item_id": {
+            "title": "Curated Feature Item Id",
+            "type": "string"
+          },
+          "day_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Day Index"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "feature_snapshot": {
+            "additionalProperties": true,
+            "title": "Feature Snapshot",
+            "type": "object"
+          },
+          "memo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memo"
+          },
+          "relation": {
+            "title": "Relation",
+            "type": "string"
+          },
+          "sort_order": {
+            "title": "Sort Order",
+            "type": "integer"
+          },
+          "source_record_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Record Key"
+          }
+        },
+        "required": [
+          "curated_feature_item_id",
+          "feature_id",
+          "relation",
+          "sort_order",
+          "feature_snapshot"
+        ],
+        "title": "PinviCopyItemView",
+        "type": "object"
+      },
+      "PinviCopySnapshotResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PinviCopySnapshotView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "PinviCopySnapshotResponse",
+        "type": "object"
+      },
+      "PinviCopySnapshotView": {
+        "additionalProperties": false,
+        "description": "PinVi import snapshot.",
+        "properties": {
+          "curated_feature_id": {
+            "title": "Curated Feature Id",
+            "type": "string"
+          },
+          "etag": {
+            "title": "Etag",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PinviCopyItemView"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "plan": {
+            "additionalProperties": true,
+            "title": "Plan",
+            "type": "object"
+          },
+          "source": {
+            "additionalProperties": true,
+            "title": "Source",
+            "type": "object"
+          },
+          "theme": {
+            "additionalProperties": true,
+            "title": "Theme",
+            "type": "object"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "curated_feature_id",
+          "version",
+          "etag",
+          "updated_at",
+          "theme",
+          "plan",
+          "source",
+          "items"
+        ],
+        "title": "PinviCopySnapshotView",
+        "type": "object"
+      },
       "ProblemDetail": {
         "additionalProperties": true,
         "description": "RFC7807 ``application/problem+json`` 에러 본문 (중앙 핸들러 정본, §1.5).\n\n중앙 예외 핸들러(`app._error_response`)가 모든 4xx/5xx를 이 형식으로 통일한다.\n``code``·``request_id``는 소비자 파싱 위치 고정용 top-level 확장 멤버다.",
@@ -2637,149 +2780,6 @@
         "title": "SyncStateSummary",
         "type": "object"
       },
-      "TripmateCopyItemView": {
-        "additionalProperties": false,
-        "description": "TripMate curated_plan_pois copy item.",
-        "properties": {
-          "curated_feature_item_id": {
-            "title": "Curated Feature Item Id",
-            "type": "string"
-          },
-          "day_index": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Day Index"
-          },
-          "feature_id": {
-            "title": "Feature Id",
-            "type": "string"
-          },
-          "feature_snapshot": {
-            "additionalProperties": true,
-            "title": "Feature Snapshot",
-            "type": "object"
-          },
-          "memo": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Memo"
-          },
-          "relation": {
-            "title": "Relation",
-            "type": "string"
-          },
-          "sort_order": {
-            "title": "Sort Order",
-            "type": "integer"
-          },
-          "source_record_key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source Record Key"
-          }
-        },
-        "required": [
-          "curated_feature_item_id",
-          "feature_id",
-          "relation",
-          "sort_order",
-          "feature_snapshot"
-        ],
-        "title": "TripmateCopyItemView",
-        "type": "object"
-      },
-      "TripmateCopySnapshotResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/TripmateCopySnapshotView"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "title": "TripmateCopySnapshotResponse",
-        "type": "object"
-      },
-      "TripmateCopySnapshotView": {
-        "additionalProperties": false,
-        "description": "TripMate import snapshot.",
-        "properties": {
-          "curated_feature_id": {
-            "title": "Curated Feature Id",
-            "type": "string"
-          },
-          "etag": {
-            "title": "Etag",
-            "type": "string"
-          },
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/TripmateCopyItemView"
-            },
-            "title": "Items",
-            "type": "array"
-          },
-          "plan": {
-            "additionalProperties": true,
-            "title": "Plan",
-            "type": "object"
-          },
-          "source": {
-            "additionalProperties": true,
-            "title": "Source",
-            "type": "object"
-          },
-          "theme": {
-            "additionalProperties": true,
-            "title": "Theme",
-            "type": "object"
-          },
-          "updated_at": {
-            "format": "date-time",
-            "title": "Updated At",
-            "type": "string"
-          },
-          "version": {
-            "title": "Version",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "curated_feature_id",
-          "version",
-          "etag",
-          "updated_at",
-          "theme",
-          "plan",
-          "source",
-          "items"
-        ],
-        "title": "TripmateCopySnapshotView",
-        "type": "object"
-      },
       "VersionData": {
         "additionalProperties": false,
         "properties": {
@@ -3000,7 +3000,7 @@
     },
     "securitySchemes": {
       "ServiceToken": {
-        "description": "TripMate 등 외부 서비스 호출 토큰 (ADR-045 D-1).",
+        "description": "PinVi 등 외부 서비스 호출 토큰 (ADR-045 D-1).",
         "in": "header",
         "name": "X-Kor-Travel-Map-Service-Token",
         "type": "apiKey"
@@ -3008,7 +3008,7 @@
     }
   },
   "info": {
-    "description": "TripMate/user-facing subset of kor-travel-map OpenAPI. Internal admin/debug/ops routes are intentionally excluded.",
+    "description": "PinVi/user-facing subset of kor-travel-map OpenAPI. Internal admin/debug/ops routes are intentionally excluded.",
     "title": "kor-travel-map-user",
     "version": "0.2.0-dev"
   },
@@ -3487,9 +3487,9 @@
         ]
       }
     },
-    "/v1/curated-features/{curated_feature_id}/tripmate-copy": {
+    "/v1/curated-features/{curated_feature_id}/pinvi-copy": {
       "get": {
-        "operationId": "get_curated_tripmate_copy_route_v1_curated_features__curated_feature_id__tripmate_copy_get",
+        "operationId": "get_curated_pinvi_copy_route_v1_curated_features__curated_feature_id__pinvi_copy_get",
         "parameters": [
           {
             "in": "path",
@@ -3506,7 +3506,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TripmateCopySnapshotResponse"
+                  "$ref": "#/components/schemas/PinviCopySnapshotResponse"
                 }
               }
             },
@@ -3533,7 +3533,7 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
-        "summary": "Get Curated Tripmate Copy Route",
+        "summary": "Get Curated Pinvi Copy Route",
         "tags": [
           "curated"
         ]
@@ -3662,7 +3662,7 @@
                   "enum": [
                     "admin_only",
                     "public",
-                    "tripmate"
+                    "pinvi"
                   ],
                   "type": "string"
                 },
@@ -4026,7 +4026,7 @@
             "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
           }
         },
-        "summary": "bbox 안 feature 목록 (TripMate/public envelope)",
+        "summary": "bbox 안 feature 목록 (PinVi/public envelope)",
         "tags": [
           "features"
         ]
@@ -4266,12 +4266,12 @@
         "operationId": "list_features_nearby_by_target_v1_features_nearby_by_target_get",
         "parameters": [
           {
-            "description": "외부 시스템 이름. 예: tripmate",
+            "description": "외부 시스템 이름. 예: pinvi",
             "in": "query",
             "name": "external_system",
             "required": true,
             "schema": {
-              "description": "외부 시스템 이름. 예: tripmate",
+              "description": "외부 시스템 이름. 예: pinvi",
               "title": "External System",
               "type": "string"
             }

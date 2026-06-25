@@ -1,6 +1,6 @@
-"""``GET /health`` / ``GET /version`` — TripMate/public liveness + 버전 (T-213h).
+"""``GET /health`` / ``GET /version`` — PinVi/public liveness + 버전 (T-213h).
 
-TripMate/user-facing 표면. 기존 ``/debug/health``·``/debug/version``과 별개로 루트
+PinVi/user-facing 표면. 기존 ``/debug/health``·``/debug/version``과 별개로 루트
 경로에 두고 user OpenAPI subset에 포함한다. ``/health``는 **liveness**(의존 없는
 정적 200)로, DB/RustFS/Dagster deep readiness는 후속(``/ops/health-deep`` 계열)로
 분리한다 — liveness probe가 DB 장애에도 동작해야 하기 때문이다. ``/version``은

@@ -31,7 +31,7 @@ import {
   usePatchCuratedFeatureMutation,
   usePatchCuratedSourceRuleMutation,
   useSelectCuratedFeatureMutation,
-  useTripmateCopySnapshot,
+  usePinviCopySnapshot,
   useUnselectCuratedFeatureMutation,
   type AdminCuratedFeaturesParams,
   type AdminCuratedSourceRulesParams,
@@ -41,8 +41,8 @@ import {
   type CuratedSource,
   type CuratedSourceRule,
   type CuratedTheme,
-  type CuratedTripmateCopyPolicy,
-  type CuratedTripmateRelation,
+  type CuratedPinviCopyPolicy,
+  type CuratedPinviRelation,
 } from "@/api/curated";
 import { AdminShell } from "@/components/admin-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -65,12 +65,12 @@ const CURATION_STATUS_OPTIONS: CuratedFeatureStatus[] = [
   "rejected",
   "archived",
 ];
-const COPY_POLICY_OPTIONS: CuratedTripmateCopyPolicy[] = [
+const COPY_POLICY_OPTIONS: CuratedPinviCopyPolicy[] = [
   "copy_allowed",
   "copy_blocked",
   "manual_review",
 ];
-const TRIPMATE_RELATION_OPTIONS: CuratedTripmateRelation[] = [
+const PINVI_RELATION_OPTIONS: CuratedPinviRelation[] = [
   "primary_stop",
   "food_stop",
   "cafe_stop",
@@ -143,13 +143,13 @@ function FeatureEditor({ feature }: { feature: CuratedFeature | null }) {
   const [summary, setSummary] = useState(feature?.display_summary ?? "");
   const [rankScore, setRankScore] = useState(String(feature?.rank_score ?? 0));
   const [copyPolicy, setCopyPolicy] =
-    useState<CuratedTripmateCopyPolicy>(
-      (feature?.tripmate_copy_policy as CuratedTripmateCopyPolicy | undefined) ??
+    useState<CuratedPinviCopyPolicy>(
+      (feature?.pinvi_copy_policy as CuratedPinviCopyPolicy | undefined) ??
         "manual_review",
     );
   const [relation, setRelation] =
-    useState<CuratedTripmateRelation>(
-      (feature?.tripmate_relation as CuratedTripmateRelation | undefined) ??
+    useState<CuratedPinviRelation>(
+      (feature?.pinvi_relation as CuratedPinviRelation | undefined) ??
         "nearby_option",
     );
 
@@ -162,8 +162,8 @@ function FeatureEditor({ feature }: { feature: CuratedFeature | null }) {
         display_title: title.trim().length > 0 ? title.trim() : null,
         display_summary: summary.trim().length > 0 ? summary.trim() : null,
         rank_score: Number(rankScore),
-        tripmate_copy_policy: copyPolicy,
-        tripmate_relation: relation,
+        pinvi_copy_policy: copyPolicy,
+        pinvi_relation: relation,
       },
     });
   };
@@ -171,7 +171,7 @@ function FeatureEditor({ feature }: { feature: CuratedFeature | null }) {
   if (!feature) {
     return (
       <section className="rounded-lg border bg-background p-4 text-sm text-muted-foreground">
-        후보를 선택하면 display text와 TripMate copy 속성을 편집할 수 있습니다.
+        후보를 선택하면 display text와 PinVi copy 속성을 편집할 수 있습니다.
       </section>
     );
   }
@@ -214,7 +214,7 @@ function FeatureEditor({ feature }: { feature: CuratedFeature | null }) {
               className="w-full"
               value={copyPolicy}
               onChange={(event) =>
-                setCopyPolicy(event.target.value as CuratedTripmateCopyPolicy)
+                setCopyPolicy(event.target.value as CuratedPinviCopyPolicy)
               }
             >
               {COPY_POLICY_OPTIONS.map((option) => (
@@ -226,15 +226,15 @@ function FeatureEditor({ feature }: { feature: CuratedFeature | null }) {
           </label>
         </div>
         <label className="grid gap-1 text-sm">
-          <span className="text-muted-foreground">TripMate relation</span>
+          <span className="text-muted-foreground">PinVi relation</span>
           <NativeSelect
             className="w-full"
             value={relation}
             onChange={(event) =>
-              setRelation(event.target.value as CuratedTripmateRelation)
+              setRelation(event.target.value as CuratedPinviRelation)
             }
           >
-            {TRIPMATE_RELATION_OPTIONS.map((option) => (
+            {PINVI_RELATION_OPTIONS.map((option) => (
               <NativeSelectOption key={option} value={option}>
                 {option}
               </NativeSelectOption>
@@ -258,15 +258,15 @@ function FeatureEditor({ feature }: { feature: CuratedFeature | null }) {
   );
 }
 
-type TripmateCopyItem = NonNullable<
-  ReturnType<typeof useTripmateCopySnapshot>["data"]
+type PinviCopyItem = NonNullable<
+  ReturnType<typeof usePinviCopySnapshot>["data"]
 >["data"]["items"][number];
 
-function TripmateCopyPreview({ feature }: { feature: CuratedFeature | null }) {
-  const snapshot = useTripmateCopySnapshot(feature?.curated_feature_id ?? null);
+function PinviCopyPreview({ feature }: { feature: CuratedFeature | null }) {
+  const snapshot = usePinviCopySnapshot(feature?.curated_feature_id ?? null);
   const data = snapshot.data?.data;
 
-  const itemColumns = useMemo<ColumnDef<TripmateCopyItem, unknown>[]>(
+  const itemColumns = useMemo<ColumnDef<PinviCopyItem, unknown>[]>(
     () => [
       {
         accessorKey: "sort_order",
@@ -308,7 +308,7 @@ function TripmateCopyPreview({ feature }: { feature: CuratedFeature | null }) {
     <section className="rounded-lg border bg-background">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b px-4 py-3">
         <div>
-          <div className="font-medium">TripMate copy preview</div>
+          <div className="font-medium">PinVi copy preview</div>
           <div className="text-xs text-muted-foreground">
             copy snapshot과 curated_plan_pois item 미리보기
           </div>
@@ -791,10 +791,10 @@ export function CuratedFeaturesClient() {
           const feature = row.original;
           return (
             <div className="flex flex-col gap-1">
-              <Badge variant={copyPolicyVariant(feature.tripmate_copy_policy)}>
-                {feature.tripmate_copy_policy}
+              <Badge variant={copyPolicyVariant(feature.pinvi_copy_policy)}>
+                {feature.pinvi_copy_policy}
               </Badge>
-              <Badge variant="outline">{feature.tripmate_relation}</Badge>
+              <Badge variant="outline">{feature.pinvi_relation}</Badge>
             </div>
           );
         },
@@ -969,7 +969,7 @@ export function CuratedFeaturesClient() {
           새로고침
         </Button>
       }
-      description="curated overlay 후보를 검토하고 source rule을 적용하며 TripMate copy snapshot을 확인합니다."
+      description="curated overlay 후보를 검토하고 source rule을 적용하며 PinVi copy snapshot을 확인합니다."
       section="Admin"
       title="Curated features"
     >
@@ -1261,7 +1261,7 @@ export function CuratedFeaturesClient() {
               feature={selectedFeature}
               key={selectedFeature?.curated_feature_id ?? "empty-feature"}
             />
-            <TripmateCopyPreview feature={selectedFeature} />
+            <PinviCopyPreview feature={selectedFeature} />
           </div>
         </div>
 

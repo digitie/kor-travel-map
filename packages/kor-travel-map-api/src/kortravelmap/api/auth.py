@@ -59,7 +59,7 @@ _service_token_scheme = APIKeyHeader(
     name=SERVICE_TOKEN_HEADER,
     scheme_name="ServiceToken",
     auto_error=False,
-    description="TripMate 등 외부 서비스 호출 토큰 (ADR-045 D-1).",
+    description="PinVi 등 외부 서비스 호출 토큰 (ADR-045 D-1).",
 )
 
 

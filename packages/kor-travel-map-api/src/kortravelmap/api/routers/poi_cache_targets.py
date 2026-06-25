@@ -15,7 +15,14 @@ from kortravelmap.infra.poi_cache_target_repo import (
     list_poi_cache_targets,
     upsert_poi_cache_target,
 )
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_serializer
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    model_serializer,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.auth import require_admin_destructive_enabled
@@ -101,7 +108,11 @@ class PoiCacheTargetMetadata(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    tripmate_poi_id: str | None = Field(default=None, max_length=256)
+    pinvi_poi_id: str | None = Field(
+        default=None,
+        max_length=256,
+        validation_alias=AliasChoices("pinvi_poi_id", "tripmate_poi_id"),
+    )
     external_ref: str | None = Field(default=None, max_length=256)
     source_url: str | None = Field(default=None, max_length=2048)
     labels: list[MetadataLabel] = Field(default_factory=list, max_length=32)
@@ -110,8 +121,8 @@ class PoiCacheTargetMetadata(BaseModel):
     @model_serializer
     def _serialize(self) -> dict[str, object]:
         payload: dict[str, object] = {}
-        if self.tripmate_poi_id is not None:
-            payload["tripmate_poi_id"] = self.tripmate_poi_id
+        if self.pinvi_poi_id is not None:
+            payload["pinvi_poi_id"] = self.pinvi_poi_id
         if self.external_ref is not None:
             payload["external_ref"] = self.external_ref
         if self.source_url is not None:

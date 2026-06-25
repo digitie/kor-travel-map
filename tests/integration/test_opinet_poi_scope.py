@@ -4,7 +4,7 @@
 target(중심+반경)을 실제 PostGIS에서 읽어 bbox로 변환하는지 검증한다. fetcher는
 sync(psycopg)라 commit된 데이터만 본다 — async 세션으로 commit 후 조회.
 
-회귀(#304 리뷰): ``external_system``은 provider명이 아니라 외부 호출자(tripmate 등)다.
+회귀(#304 리뷰): ``external_system``은 provider명이 아니라 외부 호출자(pinvi 등)다.
 opinet으로 필터하면 실제 등록 target을 전부 놓친다. active 정의(deleted_at 없음 +
 update_enabled + refresh_policy<>'disabled')와 opinet provider_overrides 옵트아웃을 검증.
 """
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.integration
 
 _OPINET_KEY = f"{OPINET_PROVIDER_NAME}:{OPINET_STATION_DATASET_KEY}"
-_SEED_SYSTEMS = ("tripmate", "kakao")
+_SEED_SYSTEMS = ("pinvi", "kakao")
 
 
 def _poi_target(
@@ -42,7 +42,7 @@ def _poi_target(
     lat: float,
     radius_km: float,
     *,
-    external_system: str = "tripmate",
+    external_system: str = "pinvi",
 ) -> PoiCacheTargetRow:
     return PoiCacheTargetRow(
         external_system=external_system,
@@ -64,7 +64,7 @@ async def test_opinet_poi_target_bboxes_active_targets_any_external_system(
     settings = KorTravelMapSettings(pg_dsn=dsn)
     try:
         async with AsyncSession(migrated_engine) as session, session.begin():
-            # 실제 등록 target은 external_system='tripmate' 등 외부 호출자다 — 포함돼야 함.
+            # 실제 등록 target은 external_system='pinvi' 등 외부 호출자다 — 포함돼야 함.
             session.add(_poi_target("seoul", 127.0, 37.5, 5.0))
             # 다른 외부 시스템도 동일하게 OpiNet enumeration 대상.
             session.add(_poi_target("busan", 129.07, 35.18, 3.0, external_system="kakao"))
@@ -88,7 +88,7 @@ async def test_opinet_poi_target_bboxes_active_targets_any_external_system(
             session.add(optout)
 
         bboxes = sorted(_opinet_poi_target_bboxes(settings))
-        # tripmate seoul + kakao busan, 2건만.
+        # pinvi seoul + kakao busan, 2건만.
         assert len(bboxes) == 2
         seoul = next(b for b in bboxes if b[0] < 127.0 < b[2])
         assert seoul[1] < 37.5 < seoul[3]

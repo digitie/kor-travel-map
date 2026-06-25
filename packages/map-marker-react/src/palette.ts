@@ -5,7 +5,7 @@
  * 그 코드를 실제 hex color로 풀어준다. 팔레트 자체는 향후 디자인 가이드와 함께
  * 조정할 수 있는 단순 lookup table.
  *
- * 디버그 UI(maplibre marker)와 TripMate user UI에서 동일 매핑을 공유해
+ * 디버그 UI(maplibre marker)와 PinVi user UI에서 동일 매핑을 공유해
  * 카테고리별 색 일관성을 보장한다.
  */
 
